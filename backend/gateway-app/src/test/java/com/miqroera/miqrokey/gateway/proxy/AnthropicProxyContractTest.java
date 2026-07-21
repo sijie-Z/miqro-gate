@@ -389,4 +389,135 @@ class AnthropicProxyContractTest {
             assertThat(text).contains("\"cache_read_input_tokens\":300");
         }
     }
+
+    // -------------------------------------------------------------------
+    // Header stripping — kernel-level guarantees shared across protocols
+    // -------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("Header stripping")
+    class HeaderStripping {
+
+        @Test
+        @DisplayName("should strip Connection-nominated headers from upstream request")
+        void shouldStripConnectionNominatedHeaders() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(AnthropicFixtures.RESPONSE_BASIC).build());
+
+            webTestClient.post().uri("/v1/messages").header("Connection", "x-nominated-header")
+                    .header("x-nominated-header", "should-be-stripped")
+                    .header("anthropic-version", AnthropicFixtures.ANTHROPIC_VERSION_VALUE)
+                    .bodyValue(AnthropicFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isOk().expectBody()
+                    .returnResult().getResponseBody();
+
+            var captured = mockProvider.getCapturedRequests();
+            var req = captured.get(0);
+            assertThat(req.header("Connection")).isNull();
+            assertThat(req.header("x-nominated-header")).isNull();
+            assertThat(req.header("anthropic-version")).isEqualTo(AnthropicFixtures.ANTHROPIC_VERSION_VALUE);
+        }
+
+        @Test
+        @DisplayName("should strip forged X-MiQroKey-* tracking headers")
+        void shouldStripForgedTrackingHeaders() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(AnthropicFixtures.RESPONSE_BASIC).build());
+
+            webTestClient.post().uri("/v1/messages").header("x-miqrokey-request-id", "forged-id")
+                    .header("X-MiQroKey-trace-id", "forged-trace").header("X-MIQROKEY-USER", "forged-user")
+                    .header("anthropic-version", AnthropicFixtures.ANTHROPIC_VERSION_VALUE)
+                    .bodyValue(AnthropicFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isOk().expectBody()
+                    .returnResult().getResponseBody();
+
+            var captured = mockProvider.getCapturedRequests();
+            var req = captured.get(0);
+            assertThat(req.header("x-miqrokey-request-id")).isNull();
+            assertThat(req.header("X-MiQroKey-trace-id")).isNull();
+            assertThat(req.header("X-MIQROKEY-USER")).isNull();
+            assertThat(req.header("anthropic-version")).isEqualTo(AnthropicFixtures.ANTHROPIC_VERSION_VALUE);
+        }
+
+        @Test
+        @DisplayName("should strip framing headers (Content-Length and Host)")
+        void shouldStripFramingHeaders() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(AnthropicFixtures.RESPONSE_BASIC).build());
+
+            webTestClient.post().uri("/v1/messages").header("Content-Length", "999").header("Host", "evil.example.com")
+                    .header("anthropic-version", AnthropicFixtures.ANTHROPIC_VERSION_VALUE)
+                    .bodyValue(AnthropicFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isOk().expectBody()
+                    .returnResult().getResponseBody();
+
+            var captured = mockProvider.getCapturedRequests();
+            var req = captured.get(0);
+            // Forged Content-Length must not be propagated; WebClient may
+            // reconstruct a correct value for the outbound request body.
+            assertThat(req.header("Content-Length")).isNotEqualTo("999");
+            // Host is reconstructed by the proxy; the forged value must not leak.
+            assertThat(req.header("Host")).isNotEqualTo("evil.example.com");
+            assertThat(req.header("anthropic-version")).isEqualTo(AnthropicFixtures.ANTHROPIC_VERSION_VALUE);
+        }
+    }
+
+    @Nested
+    @DisplayName("SSE sensitive content privacy")
+    class Privacy {
+
+        @Test
+        @DisplayName("should not retain model content in SSE usage observations")
+        void shouldNotRetainModelContentInObservations() {
+            String modelContent = "SENSITIVE_CONTENT_anthropic_privacy_test";
+            String sseWithContent = "data: {\"type\":\"message_delta\",\"delta\":{\"text\":\"" + modelContent
+                    + "\"},\"usage\":{\"input_tokens\":5,\"output_tokens\":3}}\r\n\r\n";
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("text/event-stream").body(sseWithContent).streaming(true).build());
+
+            webTestClient.post().uri("/v1/messages").bodyValue(AnthropicFixtures.REQUEST_STREAMING).exchange()
+                    .expectStatus().isOk().expectBody().returnResult().getResponseBody();
+
+            // SSE observation must not retain or expose model content.
+            var usageObs = new com.miqroera.miqrokey.gateway.proxy.SseUsageObserver();
+            usageObs.wrap(
+                    reactor.core.publisher.Flux.just(new org.springframework.core.io.buffer.DefaultDataBufferFactory()
+                            .wrap(sseWithContent.getBytes(StandardCharsets.UTF_8))))
+                    .blockLast();
+            assertThat(usageObs.getObservations()).hasSize(1);
+            assertThat(usageObs.getObservations().toString()).doesNotContain(modelContent);
+        }
+    }
+
+    @Nested
+    @DisplayName("Path allowlisting")
+    class PathAllowlisting {
+
+        @Test
+        @DisplayName("should reject GET on allowed path with Anthropic-compatible error")
+        void shouldRejectGetOnAllowedPath() {
+            byte[] errorBody = webTestClient.get().uri("/v1/messages").exchange().expectStatus()
+                    .isEqualTo(org.springframework.http.HttpStatus.METHOD_NOT_ALLOWED).expectBody().returnResult()
+                    .getResponseBody();
+
+            assertThat(errorBody).isNotNull();
+            String body = new String(errorBody, StandardCharsets.UTF_8);
+            // Anthropic error format wraps in {"type":"error","error":{...}}
+            assertThat(body).contains("\"type\":\"error\"");
+            assertThat(body).contains("\"error\":{");
+            assertThat(body).contains("method_not_allowed");
+
+            assertThat(mockProvider.getCapturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should reject unsupported path without contacting upstream")
+        void shouldRejectUnsupportedPath() {
+            byte[] errorBody = webTestClient.post().uri("/v1/unknown-path").bodyValue("{\"test\":true}").exchange()
+                    .expectStatus().isNotFound().expectBody().returnResult().getResponseBody();
+
+            assertThat(errorBody).isNotNull();
+            String body = new String(errorBody, StandardCharsets.UTF_8);
+            assertThat(body).contains("unsupported_path");
+
+            assertThat(mockProvider.getCapturedRequests()).isEmpty();
+        }
+    }
 }

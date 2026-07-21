@@ -5,11 +5,11 @@
 ## Current State
 
 - Project phase: `PHASE_0`
-- Current executor: `Codex` (G0.2 acceptance repair after Claude Code handoff)
-- Current goal: `G0.2`
+- Current executor: `Claude Code`
+- Current goal: `G0.3`
 - Goal status: `DONE`
 - Last updated: `2026-07-21`
-- Branch: `fix/g0.2-cancellation-state-race`
+- Branch: `goal/g0.3-responses-chat-transparent-poc`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
 
 ## Completed
@@ -86,9 +86,9 @@
 
 ## Next Goal
 
-- Goal ID: `G0.3`
-- Name: Responses and Chat transparent PoC
-- Source: [`implementation-plan.md`](implementation-plan.md#g03-responses-and-chat-transparent-poc)
+- Goal ID: `G0.4`
+- Name: CC Switch manual compatibility PoC
+- Source: [`implementation-plan.md`](implementation-plan.md#g04-cc-switch-manual-compatibility-poc)
 
 ## G0.2 — Anthropic transparent proxy PoC
 
@@ -163,6 +163,69 @@
 - Acceptance repair commit: `e1b8237`
 - CI run `29803318878`: Ubuntu backend, Windows backend, frontend, and Compose config all passed.
 - CI evidence: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29803318878`
+
+## G0.3 — Responses and Chat transparent PoC
+
+### Outcome
+
+- Gateway transparently proxies `POST /v1/responses` and `POST /v1/chat/completions` in addition to the existing `POST /v1/messages`.
+- All three protocols share a single reactive proxy kernel in `ProxyController.proxyRequest()`. No forwarding, URI/query handling, header filtering, credential stripping, TTFB, streaming, bounded SSE observation, or cancellation logic is duplicated.
+- Path allowlisting: only the three POST paths reach the upstream; unsupported paths return 404 and wrong methods return 405, both without contacting the upstream provider.
+- Request/response bytes, raw query encoding/ordering, upstream headers/statuses (including 529), and SSE ordering are preserved for all three protocols.
+- Responses contract tests cover: non-streaming JSON, SSE streaming, function calls/deltas, reasoning items, usage (`input_tokens`, `output_tokens`, `total_tokens`, `reasoning_tokens`), unknown fields, UTF-8 split chunks, slow streams, errors, and client cancellation.
+- Chat contract tests cover: non-streaming JSON, SSE streaming, tools/tool call deltas, `reasoning_content`, usage (`prompt_tokens`, `completion_tokens`, `total_tokens`), finish reasons (`stop`, `length`, `tool_calls`), unknown fields, UTF-8 split chunks, slow streams, errors, `[DONE]` terminator, and client cancellation.
+- `SseUsageObserver` enhanced to extract usage from three nesting levels: root-level `usage`, `message.usage` (Anthropic), and `response.usage` (OpenAI Responses). `UsageObservation` record now captures protocol-agnostic fields.
+- All G0.2 guarantees preserved: credential/hop-by-hop/Connection-nominated/framing/forged `X-MiQroKey-*` stripping; no production `.block()`, `.blockFirst()`, or `.blockLast()`; no prompt/tool/model content in logs or observations.
+
+### Review fixes (2026-07-21)
+
+1. **SseUsageObserver**: Added `completion_tokens_details.reasoning_tokens` extraction for Chat protocol. Added `maxObservations` bound (default 10) with regression test.
+2. **ResponsesFixtures**: Added `REQUEST_FUNCTION_CALL_OUTPUT` fixture and exact-byte forwarding contract.
+3. **Fixture metadata**: Added 6 metadata YAML files for OpenAI Responses and Chat under `test-support/src/main/resources/fixtures/`.
+4. **Header stripping coverage**: Added `HeaderStripping` nested classes to all three contract tests covering Connection-nominated, forged `X-MiQroKey-*`, and framing header stripping. Added SSE sensitive-content privacy tests.
+5. **Protocol-compatible errors**: `rejectUnsupported` now returns Anthropic `{"type":"error","error":{...}}` for `/v1/messages` and OpenAI `{"error":{...}}` for `/v1/responses` and `/v1/chat/completions`. Unknown paths use a stable generic envelope.
+6. **Path allowlisting tests**: Added to all three contract tests with protocol-specific error format assertions.
+7. **Docs corrected**: Test counts and claims updated to match actual verification.
+
+### Verification
+
+- `.\mvnw.cmd clean verify --batch-mode`: **BUILD SUCCESS** — 111 tests (gateway-app, 124 across all modules), 0 failures, 0 errors
+  - `RequestLifecycleTest`: 10 tests, 0 failures
+  - `SseUsageObserverTest`: 10 tests, 0 failures (covers Anthropic, Responses, Chat usage + reasoning_tokens + observation bounding)
+  - `AnthropicProxyContractTest`: 24 contract tests (7 non-streaming + 6 streaming + 1 cancellation + 4 special + 3 header stripping + 1 privacy + 2 path allowlisting), 0 failures
+  - `ResponsesProxyContractTest`: 23 contract tests (7 non-streaming + 7 streaming + 1 cancellation + 3 special + 2 header stripping + 1 privacy + 2 path allowlisting), 0 failures
+  - `ChatProxyContractTest`: 24 contract tests (7 non-streaming + 7 streaming + 1 cancellation + 4 special + 2 header stripping + 1 privacy + 2 path allowlisting), 0 failures
+  - Other existing tests: `HeaderFiltersTest` (9), `TtfbRecorderTest` (3), `MockProviderDirectTest` (3), `GatewayNoBlockingTest` (3), Gateway smoke (4), ArchUnit (8) — all PASS
+- Spotless format check: PASS
+- Maven Enforcer: PASS
+- ArchUnit module dependency: PASS (8 rules)
+- No `.block()` in production Gateway code: confirmed by `GatewayNoBlockingTest`
+- `npm --prefix frontend ci`: PASS — 0 vulnerabilities
+- `npm --prefix frontend run lint`: PASS
+- `npm --prefix frontend run typecheck`: PASS
+- `npm --prefix frontend run test`: PASS — 1 test
+- `npm --prefix frontend run build`: PASS
+- `git diff --check`: PASS
+- `docker compose -f deploy/compose.yaml config`: ENV_BLOCKED — Docker is not installed locally; CI must provide the Compose check
+
+### Files/modules changed
+
+- `gateway-app/src/main/java/.../proxy/ProxyController.java`: Shared proxy kernel with three endpoint mappings, path allowlisting, protocol-compatible error bodies.
+- `gateway-app/src/main/java/.../proxy/SseUsageObserver.java`: Multi-protocol usage extraction (root/message/response nesting), Chat `completion_tokens_details.reasoning_tokens`, observation bound.
+- `test-support/src/main/java/.../testing/ResponsesFixtures.java`: Synthetic OpenAI Responses API fixtures (non-stream, SSE stream, function calls, function_call_output, reasoning, UTF-8, errors).
+- `test-support/src/main/java/.../testing/ChatFixtures.java`: Synthetic OpenAI Chat Completions API fixtures (non-stream, SSE stream, tool calls, reasoning_content, finish reasons, UTF-8, errors).
+- `test-support/src/main/resources/fixtures/`: 6 new metadata YAML files for OpenAI Responses and Chat fixtures.
+- `gateway-app/src/test/java/.../proxy/SseUsageObserverTest.java`: 10 tests (Chat reasoning_tokens, observation bounding, multi-protocol usage).
+- `gateway-app/src/test/java/.../proxy/AnthropicProxyContractTest.java`: 24 contract tests (header stripping, privacy, path allowlisting).
+- `gateway-app/src/test/java/.../proxy/ResponsesProxyContractTest.java`: 23 contract tests (header stripping, privacy, function_call_output, protocol-compatible errors).
+- `gateway-app/src/test/java/.../proxy/ChatProxyContractTest.java`: 24 contract tests (header stripping, privacy, protocol-compatible errors).
+- `docs/progress.md`: Updated with review fixes and corrected test counts.
+
+### Remaining risks
+
+- No real provider credential was used. All protocol behaviors are `MOCK_VERIFIED`; real-provider verification remains `WAITING_FOR_CREDENTIAL`.
+- Docker Compose validation delegated to CI (Docker unavailable on Windows dev host).
+- CC Switch end-to-end compatibility will be validated in G0.4.
 
 ## Goal Update Template
 

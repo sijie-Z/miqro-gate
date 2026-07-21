@@ -33,8 +33,8 @@ class SseUsageObserverTest {
             var buffer = new DefaultDataBufferFactory().wrap(sse.getBytes(StandardCharsets.UTF_8));
             observer.wrap(Flux.just(buffer)).blockLast();
 
-            assertThat(observer.getObservations())
-                    .containsExactly(new SseUsageObserver.UsageObservation(10L, 5L, 150L, 300L));
+            assertThat(observer.getObservations()).containsExactly(
+                    new SseUsageObserver.UsageObservation(10L, 5L, 150L, 300L, null, null, null, null));
             assertThat(observer.getObservations().toString()).doesNotContain(secretContent);
             assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
                     .noneMatch(message -> message.contains(secretContent));
@@ -55,7 +55,7 @@ class SseUsageObserverTest {
         observer.wrap(chunks).blockLast();
 
         assertThat(observer.getObservations())
-                .containsExactly(new SseUsageObserver.UsageObservation(12L, 7L, null, null));
+                .containsExactly(new SseUsageObserver.UsageObservation(12L, 7L, null, null, null, null, null, null));
     }
 
     @Test
@@ -89,5 +89,83 @@ class SseUsageObserverTest {
         byte[] forwarded = new byte[observed.readableByteCount()];
         observed.read(forwarded);
         assertThat(forwarded).isEqualTo(oversized);
+    }
+
+    @Test
+    @DisplayName("extracts Anthropic message_start usage from message.usage")
+    void extractsAnthropicMessageUsage() {
+        String sse = "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg01\",\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\r\n\r\n";
+        SseUsageObserver observer = new SseUsageObserver();
+        var buffer = new DefaultDataBufferFactory().wrap(sse.getBytes(StandardCharsets.UTF_8));
+        observer.wrap(Flux.just(buffer)).blockLast();
+
+        assertThat(observer.getObservations())
+                .containsExactly(new SseUsageObserver.UsageObservation(25L, 0L, null, null, null, null, null, null));
+    }
+
+    @Test
+    @DisplayName("extracts OpenAI Responses usage from response.usage")
+    void extractsResponsesUsage() {
+        String sse = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp01\",\"usage\":{\"input_tokens\":30,\"output_tokens\":15,\"total_tokens\":45,\"output_tokens_details\":{\"reasoning_tokens\":10}}}}\r\n\r\n";
+        SseUsageObserver observer = new SseUsageObserver();
+        var buffer = new DefaultDataBufferFactory().wrap(sse.getBytes(StandardCharsets.UTF_8));
+        observer.wrap(Flux.just(buffer)).blockLast();
+
+        assertThat(observer.getObservations())
+                .containsExactly(new SseUsageObserver.UsageObservation(30L, 15L, null, null, null, null, 45L, 10L));
+    }
+
+    @Test
+    @DisplayName("extracts OpenAI Chat usage with prompt/completion tokens")
+    void extractsChatUsage() {
+        String sse = "data: {\"id\":\"chatcmpl-01\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":8,\"total_tokens\":28}}\r\n\r\n";
+        SseUsageObserver observer = new SseUsageObserver();
+        var buffer = new DefaultDataBufferFactory().wrap(sse.getBytes(StandardCharsets.UTF_8));
+        observer.wrap(Flux.just(buffer)).blockLast();
+
+        assertThat(observer.getObservations())
+                .containsExactly(new SseUsageObserver.UsageObservation(null, null, null, null, 20L, 8L, 28L, null));
+    }
+
+    @Test
+    @DisplayName("extracts Chat reasoning tokens from completion_tokens_details")
+    void extractsChatReasoningTokens() {
+        String sse = "data: {\"id\":\"chatcmpl-02\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],"
+                + "\"usage\":{\"prompt_tokens\":30,\"completion_tokens\":80,\"total_tokens\":110,"
+                + "\"completion_tokens_details\":{\"reasoning_tokens\":60}}}\r\n\r\n";
+        SseUsageObserver observer = new SseUsageObserver();
+        var buffer = new DefaultDataBufferFactory().wrap(sse.getBytes(StandardCharsets.UTF_8));
+        observer.wrap(Flux.just(buffer)).blockLast();
+
+        assertThat(observer.getObservations())
+                .containsExactly(new SseUsageObserver.UsageObservation(null, null, null, null, 30L, 80L, 110L, 60L));
+    }
+
+    @Test
+    @DisplayName("bounds retained observations to the configured maximum")
+    void boundsObservationsToMaximum() {
+        String event = "data: {\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}\r\n\r\n";
+        SseUsageObserver observer = new SseUsageObserver(new com.fasterxml.jackson.databind.ObjectMapper(),
+                SseUsageObserver.DEFAULT_MAX_EVENT_BYTES, 3);
+        var buffer = new DefaultDataBufferFactory()
+                .wrap((event + event + event + event + event).getBytes(StandardCharsets.UTF_8));
+        observer.wrap(Flux.just(buffer)).blockLast();
+
+        // Only the first 3 observations are retained; streaming transparency preserved.
+        assertThat(observer.getObservations()).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("prefers output_tokens_details over completion_tokens_details when both present")
+    void prefersOutputTokensDetailsWhenBothPresent() {
+        String sse = "data: {\"usage\":{\"input_tokens\":10,\"output_tokens\":5,"
+                + "\"output_tokens_details\":{\"reasoning_tokens\":99},"
+                + "\"completion_tokens_details\":{\"reasoning_tokens\":1}}}\r\n\r\n";
+        SseUsageObserver observer = new SseUsageObserver();
+        var buffer = new DefaultDataBufferFactory().wrap(sse.getBytes(StandardCharsets.UTF_8));
+        observer.wrap(Flux.just(buffer)).blockLast();
+
+        assertThat(observer.getObservations()).hasSize(1);
+        assertThat(observer.getObservations().get(0).reasoningTokens()).isEqualTo(99L);
     }
 }

@@ -14,28 +14,44 @@ import java.util.List;
 /**
  * Observes bounded usage metadata from an SSE response without changing the
  * response buffers or retaining event bodies.
+ *
+ * <p>
+ * Supports Anthropic Messages, OpenAI Responses, and OpenAI Chat Completions
+ * SSE usage formats. The observer searches for a {@code "usage"} JSON object at
+ * common nesting levels and extracts numeric token fields.
+ * </p>
  */
 public final class SseUsageObserver {
 
     static final int DEFAULT_MAX_EVENT_BYTES = 256 * 1024;
 
+    /** Maximum number of usage observations retained per request. */
+    static final int DEFAULT_MAX_OBSERVATIONS = 10;
+
     private static final Logger log = LoggerFactory.getLogger(SseUsageObserver.class);
 
     private final ObjectMapper objectMapper;
     private final int maxEventBytes;
+    private final int maxObservations;
     private final ByteArrayOutputStream lineBuffer = new ByteArrayOutputStream();
     private final ByteArrayOutputStream eventData = new ByteArrayOutputStream();
     private final List<UsageObservation> observations = new ArrayList<>();
     private boolean discardingLine;
     private boolean discardingEvent;
+    private boolean observationLimitReached;
 
     public SseUsageObserver() {
         this(new ObjectMapper(), DEFAULT_MAX_EVENT_BYTES);
     }
 
     SseUsageObserver(ObjectMapper objectMapper, int maxEventBytes) {
+        this(objectMapper, maxEventBytes, DEFAULT_MAX_OBSERVATIONS);
+    }
+
+    SseUsageObserver(ObjectMapper objectMapper, int maxEventBytes, int maxObservations) {
         this.objectMapper = objectMapper;
         this.maxEventBytes = maxEventBytes;
+        this.maxObservations = maxObservations;
     }
 
     /** Passes every buffer through unchanged while observing a bounded copy. */
@@ -110,19 +126,60 @@ public final class SseUsageObserver {
         discardingEvent = false;
     }
 
+    /**
+     * Extracts usage metadata from a completed SSE event JSON object.
+     *
+     * <p>
+     * Tries the following nesting patterns in order:
+     * <ol>
+     * <li>Root-level {@code "usage"} (common to all protocols)</li>
+     * <li>{@code "message"."usage"} (Anthropic {@code message_start} events)</li>
+     * <li>{@code "response"."usage"} (OpenAI Responses {@code response.completed}
+     * events)</li>
+     * </ol>
+     * </p>
+     *
+     * <p>
+     * Reasoning tokens are extracted from {@code output_tokens_details} (OpenAI
+     * Responses) or {@code completion_tokens_details} (OpenAI Chat).
+     * </p>
+     */
     private void extractUsage(byte[] jsonBytes) {
+        if (observationLimitReached) {
+            return;
+        }
         try {
             JsonNode root = objectMapper.readTree(jsonBytes);
+
             JsonNode usage = root.get("usage");
             if (usage == null && root.has("message")) {
                 usage = root.path("message").get("usage");
             }
+            if (usage == null && root.has("response")) {
+                usage = root.path("response").get("usage");
+            }
             if (usage == null || !usage.isObject()) {
                 return;
             }
+
+            Long reasoningTokens = null;
+            if (usage.has("output_tokens_details")) {
+                reasoningTokens = longValue(usage.path("output_tokens_details"), "reasoning_tokens");
+            }
+            if (reasoningTokens == null && usage.has("completion_tokens_details")) {
+                reasoningTokens = longValue(usage.path("completion_tokens_details"), "reasoning_tokens");
+            }
+
             observations.add(new UsageObservation(longValue(usage, "input_tokens"), longValue(usage, "output_tokens"),
-                    longValue(usage, "cache_creation_input_tokens"), longValue(usage, "cache_read_input_tokens")));
+                    longValue(usage, "cache_creation_input_tokens"), longValue(usage, "cache_read_input_tokens"),
+                    longValue(usage, "prompt_tokens"), longValue(usage, "completion_tokens"),
+                    longValue(usage, "total_tokens"), reasoningTokens));
             log.debug("SSE usage metadata observed");
+
+            if (observations.size() >= maxObservations) {
+                observationLimitReached = true;
+                log.debug("SSE usage observer reached the maximum observation limit ({})", maxObservations);
+            }
         } catch (Exception ignored) {
             // Observation must never affect or expose the proxied response.
             log.debug("SSE usage metadata could not be parsed");
@@ -141,7 +198,25 @@ public final class SseUsageObserver {
         return List.copyOf(observations);
     }
 
+    /**
+     * Observed usage metadata from a single SSE event.
+     *
+     * <p>
+     * Fields that are not present in the event are {@code null}. Different
+     * protocols populate different subsets of fields:
+     * <ul>
+     * <li>Anthropic: {@code input_tokens}, {@code output_tokens},
+     * {@code cache_creation_input_tokens}, {@code cache_read_input_tokens}</li>
+     * <li>OpenAI Responses: {@code input_tokens}, {@code output_tokens},
+     * {@code reasoning_tokens} (via {@code output_tokens_details})</li>
+     * <li>OpenAI Chat: {@code prompt_tokens}, {@code completion_tokens},
+     * {@code total_tokens}, {@code reasoning_tokens} (via
+     * {@code completion_tokens_details})</li>
+     * </ul>
+     * </p>
+     */
     public record UsageObservation(Long inputTokens, Long outputTokens, Long cacheCreationInputTokens,
-            Long cacheReadInputTokens) {
+            Long cacheReadInputTokens, Long promptTokens, Long completionTokens, Long totalTokens,
+            Long reasoningTokens) {
     }
 }
