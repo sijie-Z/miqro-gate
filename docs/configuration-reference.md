@@ -57,6 +57,7 @@ Gateway 不在事件循环中执行 JDBC；usage 写入进入有界队列和专�
 |---|---:|---|
 | `MIQROKEY_GATEWAY_PORT` | `8081` | 数据面端口 |
 | `MIQROKEY_CONTROL_PORT` | `8080` | 管理面端口 |
+| `MIQROKEY_UPSTREAM_URL` | 空 | 仅 Phase 0 固定路由 PoC 使用；后续由 Virtual Key 路由快照提供 |
 | `MIQROKEY_UPSTREAM_CONNECT_TIMEOUT` | `PT5S` | 上游连接超时 |
 | `MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT` | `PT10M` | 整体上限；流式空闲另算 |
 | `MIQROKEY_UPSTREAM_STREAM_IDLE_TIMEOUT` | `PT2M` | SSE 无数据超时 |
@@ -124,4 +125,3 @@ Gateway 必须透明保留供应商自己的 Prompt Cache Header/字段，并单
 ## 10. 生产启动校验
 
 生产 profile 在以下情况拒绝启动：缺少公开 URL、DB password/master/HMAC key 文件；默认/弱密钥；Cookie 非 Secure；数据库不是受支持版本；目录签名失败；导出或备份目录不可写；上游 Base URL 使用不允许的 scheme；开启响应缓存；Flyway 校验失败。
-

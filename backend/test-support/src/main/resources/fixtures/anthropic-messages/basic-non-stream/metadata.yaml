@@ -1,0 +1,10 @@
+fixtureVersion: 1
+id: anthropic-basic-non-stream
+protocol: ANTHROPIC_MESSAGES
+streaming: false
+upstreamStatus: 200
+capabilities: [USAGE, REQUEST_ID]
+sourceCategory: DOCUMENTATION_DERIVED
+bodyClassification: SYNTHETIC
+expectedByteTransparent: true
+implementation: com.miqroera.miqrokey.testing.AnthropicFixtures

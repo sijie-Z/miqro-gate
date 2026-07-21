@@ -1,0 +1,10 @@
+fixtureVersion: 1
+id: anthropic-streaming-with-usage
+protocol: ANTHROPIC_MESSAGES
+streaming: true
+upstreamStatus: 200
+capabilities: [USAGE, REQUEST_ID, UTF8_SPLIT]
+sourceCategory: DOCUMENTATION_DERIVED
+bodyClassification: SYNTHETIC
+expectedByteTransparent: true
+implementation: com.miqroera.miqrokey.testing.AnthropicFixtures

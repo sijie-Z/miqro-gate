@@ -7,6 +7,14 @@ spring:
   main:
     web-application-type: reactive
 
+miqrokey:
+  gateway:
+    upstream:
+      url: ${MIQROKEY_UPSTREAM_URL:}
+      connect-timeout: ${MIQROKEY_UPSTREAM_CONNECT_TIMEOUT:PT5S}
+      response-timeout: ${MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT:PT10M}
+      max-proxy-buffer: ${MIQROKEY_MAX_PROXY_BUFFER_BYTES:256KB}
+
 # Actuator health and metrics (no sensitive data exposed)
 management:
   endpoints:

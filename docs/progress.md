@@ -5,12 +5,11 @@
 ## Current State
 
 - Project phase: `PHASE_0`
-- Current executor: `Codex`（项目所有者要求接管 G0.1 收口）
-- Subsequent executor: 由项目所有者在下一个 Goal 开始前决定
-- Current goal: `G0.1`
+- Current executor: `Codex` (G0.2 acceptance repair after Claude Code handoff)
+- Current goal: `G0.2`
 - Goal status: `DONE`
 - Last updated: `2026-07-21`
-- Branch: `goal/g0.1-repository-bootstrap`
+- Branch: `goal/g0.2-anthropic-transparent-proxy-poc`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
 
 ## Completed
@@ -87,9 +86,59 @@
 
 ## Next Goal
 
-- Goal ID: `G0.2`
-- Name: Anthropic transparent proxy PoC
-- Source: [`implementation-plan.md`](implementation-plan.md#g02-anthropic-transparent-proxy-poc)
+- Goal ID: `G0.3`
+- Name: Responses and Chat transparent PoC
+- Source: [`implementation-plan.md`](implementation-plan.md#g03-responses-and-chat-transparent-poc)
+
+## G0.2 — Anthropic transparent proxy PoC
+
+### Outcome
+
+- Gateway transparently proxies `POST /v1/messages` to a configurable upstream.
+- Request bodies and JSON/SSE responses are forwarded as reactive streams; the Gateway does not aggregate a complete proxy body.
+- Request/response bytes, raw query encoding/order, ordinary and non-standard upstream statuses (including `529`), tools, tool results, thinking, UTF-8 splits, and cache usage are covered by contract tests.
+- Inbound credentials, static/dynamic hop-by-hop headers, untrusted framing headers, and forged `X-MiQroKey-*` tracking headers are removed. Ordinary application headers remain transparent.
+- Client cancellation is verified end-to-end on the production-equivalent Reactor Netty stack: cancelling the downstream response closes the Mock Provider's upstream TCP connection before completion.
+- TTFB uses an injectable `Clock`; upstream connect/response timeouts and the bounded observer buffer use the documented `MIQROKEY_*` configuration.
+- SSE observation has a `256KB` default bound and retains token counters only. It never stores or logs event JSON, prompt/tool/model content, or response bodies.
+- Synthetic fixture metadata now covers the documented Anthropic non-stream, streaming usage, tool-use/tool-result, and prompt-cache cases.
+- Production Gateway code contains zero `.block()`, `.blockFirst()`, or `.blockLast()` calls (enforced by ArchUnit).
+
+### Verification
+
+- `.\mvnw.cmd clean verify --batch-mode`: **BUILD SUCCESS** — 52 tests, 0 failures, 0 errors
+- `.\mvnw.cmd verify --batch-mode --quiet` after final configuration/docs update: **BUILD SUCCESS**
+- `AnthropicProxyContractTest`: **PASS** — 18 contract tests, including exact bytes/raw query/non-standard status and upstream TCP cancellation
+- Spotless format check: PASS
+- Maven Enforcer: PASS
+- ArchUnit module dependency: PASS (8 rules + 3 blocking checks)
+- No `.block()` in production Gateway code: confirmed by `GatewayNoBlockingTest`
+- SSE privacy regression: PASS — a sentinel model-content value is absent from observations and captured logs
+- `npm --prefix frontend ci`: PASS — 0 vulnerabilities
+- `npm --prefix frontend run lint`: PASS
+- `npm --prefix frontend run typecheck`: PASS
+- `npm --prefix frontend run test`: PASS — 1 test
+- `npm --prefix frontend run build`: PASS
+- `docker compose -f deploy/compose.yaml config`: ENV_BLOCKED — Docker is not installed locally; CI must provide the Compose check
+
+### Files/modules changed
+
+- `test-support`: Reactor Netty `AnthropicMockProvider`, exact request bytes/cancellation signal, synthetic Anthropic fixtures, and fixture metadata.
+- `gateway-app/pom.xml`: Test support plus Tomcat exclusion so Gateway contracts run on the same Reactor Netty stack as production.
+- `gateway-app/src/main/java/.../proxy/`: streaming proxy, raw URI preservation, header filtering, bounded metadata-only SSE observation, configurable timeouts/buffer, and injectable-clock TTFB.
+- `gateway-app/src/test/java/.../proxy/`: 18 proxy contracts plus blocking, header, TTFB, SSE privacy/bounds, and Mock Provider tests.
+
+### Remaining risks
+
+- No real provider credential was used in G0.2. The protocol behavior is `MOCK_VERIFIED`; real-provider verification remains `WAITING_FOR_CREDENTIAL` and is not required for this PoC Goal.
+- Docker Compose validation remains delegated to CI because Docker is unavailable on the Windows development host.
+
+### CI evidence
+
+- PR: `https://github.com/lichman0405/miqro-key-gateway/pull/2`
+- Acceptance repair commit: `e1b8237`
+- CI run `29803318878`: Ubuntu backend, Windows backend, frontend, and Compose config all passed.
+- CI evidence: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29803318878`
 
 ## Goal Update Template
 

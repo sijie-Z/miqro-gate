@@ -1,0 +1,10 @@
+fixtureVersion: 1
+id: anthropic-prompt-cache
+protocol: ANTHROPIC_MESSAGES
+streaming: true
+upstreamStatus: 200
+capabilities: [USAGE, CACHE_TOKENS]
+sourceCategory: DOCUMENTATION_DERIVED
+bodyClassification: SYNTHETIC
+expectedByteTransparent: true
+implementation: com.miqroera.miqrokey.testing.AnthropicFixtures

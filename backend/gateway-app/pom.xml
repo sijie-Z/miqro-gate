@@ -52,6 +52,20 @@
             <groupId>com.miqroera.miqrokey</groupId>
             <artifactId>control-plane-app</artifactId>
             <scope>test</scope>
+            <!-- Keep Gateway contract tests on the production Reactor Netty stack. -->
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-tomcat</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Test support (Mock Provider for contract tests) -->
+        <dependency>
+            <groupId>com.miqroera.miqrokey</groupId>
+            <artifactId>test-support</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>com.tngtech.archunit</groupId>
