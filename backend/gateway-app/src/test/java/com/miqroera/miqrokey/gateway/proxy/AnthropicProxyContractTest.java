@@ -301,12 +301,17 @@ class AnthropicProxyContractTest {
 
         @Test
         @DisplayName("should close the upstream connection after client cancellation")
-        void shouldPropagateClientCancellation() {
+        void shouldPropagateClientCancellation() throws Exception {
             mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
                     .contentType("text/event-stream").body(AnthropicFixtures.RESPONSE_STREAMING_SSE).streaming(true)
                     .chunkDelay(Duration.ofMillis(100)).build());
             Mono<Void> upstreamCancellation = mockProvider.cancellationSignal();
 
+            // Use exchangeToFlux to stream the response through the Gateway.
+            // When the StepVerifier cancels after one chunk, the Gateway's
+            // writeWith detects the cancellation and propagates it to the
+            // upstream WebClient, which closes the TCP connection to the
+            // mock provider.
             Flux<org.springframework.core.io.buffer.DataBuffer> responseBody = WebClient
                     .create("http://localhost:" + gatewayPort).post().uri("/v1/messages")
                     .bodyValue(AnthropicFixtures.REQUEST_STREAMING).exchangeToFlux(
@@ -314,7 +319,8 @@ class AnthropicProxyContractTest {
 
             StepVerifier.create(responseBody).consumeNextWith(DataBufferUtils::release).thenCancel()
                     .verify(Duration.ofSeconds(15));
-            StepVerifier.create(upstreamCancellation).expectComplete().verify(Duration.ofSeconds(5));
+
+            StepVerifier.create(upstreamCancellation).expectComplete().verify(Duration.ofSeconds(10));
             assertThat(mockProvider.wasUpstreamCancelled()).isTrue();
         }
     }

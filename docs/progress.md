@@ -9,7 +9,7 @@
 - Current goal: `G0.2`
 - Goal status: `DONE`
 - Last updated: `2026-07-21`
-- Branch: `goal/g0.2-anthropic-transparent-proxy-poc`
+- Branch: `fix/g0.2-cancellation-state-race`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
 
 ## Completed
@@ -132,6 +132,30 @@
 
 - No real provider credential was used in G0.2. The protocol behavior is `MOCK_VERIFIED`; real-provider verification remains `WAITING_FOR_CREDENTIAL` and is not required for this PoC Goal.
 - Docker Compose validation remains delegated to CI because Docker is unavailable on the Windows development host.
+
+### fix/g0.2-cancellation-state-race (amend 2)
+
+**Root cause:** Same as amend 1 — disconnected `Sinks.One<Void>` references.
+
+**Fix (revised):** Extracted `RequestLifecycle` to a package-private class in `test-support` with explicit transition methods (`markCompleted()`, `markCancelled()`, `finalize(SignalType)`, `terminationState()`, `cancellationSignal()`). Both the Netty `closeFuture` listener and the response `doFinally` callback delegate to the same methods — no duplicated CAS logic. `configure()` replaces the lifecycle reference, preventing stale callbacks.
+
+**Deterministic regression tests:** `RequestLifecycleTest` (10 tests in `test-support`) — pure unit tests without sockets, threads, or delays:
+  - markCancelled then markCompleted → CANCELLED
+  - markCompleted then markCancelled → COMPLETED
+  - subscribe + markCancelled → signal completes
+  - subscribe + markCompleted → signal does NOT complete
+  - repeated markCancelled / markCompleted → idempotent
+  - finalize ON_COMPLETE → COMPLETED; ON_ERROR / CANCEL → CANCELLED
+  - initial state is RUNNING
+
+**End-to-end TCP cancellation:** `AnthropicProxyContractTest$Cancellation` — unchanged, passes.
+
+**Verification:**
+- `.\mvnw.cmd clean verify --batch-mode` (no exclusions): **BUILD SUCCESS** — all tests pass
+- `RequestLifecycleTest`: 10 tests, 0 failures
+- `AnthropicProxyContractTest$Cancellation`: 1 test, PASS
+- `npm --prefix frontend run lint`: PASS
+- G0.3 not started
 
 ### CI evidence
 

@@ -4,7 +4,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.Sinks;
+import reactor.core.publisher.SignalType;
 import reactor.netty.DisposableServer;
 import reactor.netty.http.server.HttpServer;
 import reactor.netty.http.server.HttpServerRequest;
@@ -17,92 +17,80 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A Reactor Netty-based mock upstream provider for Anthropic Messages API.
  *
+ * <h3>Request lifecycle</h3>
  * <p>
- * Starts a real HTTP server on a random port. Configure response behavior
- * before each test using {@link #configure(ResponseConfig)}. Captures all
- * received requests for later assertion. Detects client cancellation via
- * connection dispose signals.
+ * Each observed exchange is represented by a {@link RequestLifecycle} that
+ * holds a monotonic {@link TerminationState} and a cancellation signal.
+ * {@link #cancellationSignal()} and {@link #handleRequest} both obtain the
+ * <em>same</em> instance via {@link #ensureLifecycle()}, so the caller always
+ * waits on the correct sink.
  * </p>
  *
+ * <pre>
+ *   RUNNING ──┬──► COMPLETED   (response finishes before the channel closes)
+ *             └──► CANCELLED   (channel closes / write is interrupted first)
+ * </pre>
+ *
  * <p>
- * Always call {@link #close()} (or use try-with-resources) to release the port.
+ * Once a terminal state is entered it is never overwritten. Late callbacks from
+ * a previous exchange cannot affect the current lifecycle because
+ * {@link #configure} installs a new instance.
  * </p>
  */
 public class AnthropicMockProvider implements AutoCloseable {
 
+    public enum TerminationState {
+        RUNNING, COMPLETED, CANCELLED
+    }
+
     private final DisposableServer server;
     private final List<CapturedRequest> capturedRequests = new CopyOnWriteArrayList<>();
-    private final AtomicBoolean upstreamCancelled = new AtomicBoolean(false);
-    private final AtomicBoolean responseCompleted = new AtomicBoolean(false);
     private final AtomicReference<ResponseConfig> responseConfig = new AtomicReference<>();
-    private final AtomicReference<Sinks.One<Void>> cancellationSignal = new AtomicReference<>(Sinks.one());
+    private final AtomicReference<RequestLifecycle> lifecycle = new AtomicReference<>();
 
     public AnthropicMockProvider() {
         this.server = HttpServer.create().port(0).handle(this::handleRequest).bindNow();
     }
 
-    /**
-     * Returns the dynamically allocated port.
-     */
     public int getPort() {
         return server.port();
     }
 
-    /**
-     * Returns the base URL of this mock provider ({@code http://localhost:<port>}).
-     */
     public String getBaseUrl() {
         return "http://localhost:" + getPort();
     }
 
-    /**
-     * Configures the response that subsequent requests will receive.
-     */
+    // -------------------------------------------------------------------
+    // Public test-facing API
+    // -------------------------------------------------------------------
+
     public void configure(ResponseConfig config) {
         this.responseConfig.set(config);
-        this.upstreamCancelled.set(false);
-        this.responseCompleted.set(false);
-        this.cancellationSignal.set(Sinks.one());
+        this.lifecycle.set(null);
     }
 
-    /**
-     * Returns all captured requests received since the last {@link #reset()}.
-     */
     public List<CapturedRequest> getCapturedRequests() {
         return Collections.unmodifiableList(new ArrayList<>(capturedRequests));
     }
 
-    /**
-     * Returns true if the client (gateway) disconnected before the response
-     * completed.
-     */
     public boolean wasUpstreamCancelled() {
-        return upstreamCancelled.get() && !responseCompleted.get();
+        RequestLifecycle lc = lifecycle.get();
+        return lc != null && lc.terminationState() == TerminationState.CANCELLED;
     }
 
-    /**
-     * Clears captured requests and cancellation state.
-     */
     public void reset() {
         capturedRequests.clear();
-        upstreamCancelled.set(false);
-        responseCompleted.set(false);
+        lifecycle.set(null);
         responseConfig.set(null);
-        cancellationSignal.set(Sinks.one());
     }
 
-    /**
-     * Completes when the gateway closes the upstream connection before the
-     * configured response finishes.
-     */
     public Mono<Void> cancellationSignal() {
-        return cancellationSignal.get().asMono();
+        return ensureLifecycle().cancellationSignal();
     }
 
     @Override
@@ -112,6 +100,10 @@ public class AnthropicMockProvider implements AutoCloseable {
         }
     }
 
+    // -------------------------------------------------------------------
+    // Request handling
+    // -------------------------------------------------------------------
+
     private Mono<Void> handleRequest(HttpServerRequest req, HttpServerResponse res) {
         CapturedRequest captured = new CapturedRequest();
         captured.method = req.method().name();
@@ -119,29 +111,27 @@ public class AnthropicMockProvider implements AutoCloseable {
         captured.headers = new ArrayList<>();
         req.requestHeaders().forEach(e -> captured.headers.add(Map.entry(e.getKey(), e.getValue())));
 
-        req.withConnection(conn -> {
-            // Use channel close future for reliable cancellation detection.
-            // onDispose fires on pool return; closeFuture fires on actual TCP close.
-            conn.channel().closeFuture().addListener(f -> {
-                if (!responseCompleted.get()) {
-                    upstreamCancelled.set(true);
-                    cancellationSignal.get().tryEmitEmpty();
-                }
-            });
-        });
+        RequestLifecycle lc = ensureLifecycle();
+
+        req.withConnection(conn -> conn.channel().closeFuture().addListener(ignored -> lc.markCancelled()));
 
         return req.receive().aggregate().asByteArray().defaultIfEmpty(new byte[0]).doOnNext(body -> {
             captured.bodyBytes = body.clone();
             captured.body = new String(body, StandardCharsets.UTF_8);
             capturedRequests.add(captured);
-        }).then(Mono.defer(() -> sendResponse(res)));
+        }).then(Mono.defer(() -> sendResponse(res, lc)));
     }
 
-    private Mono<Void> sendResponse(HttpServerResponse res) {
+    // -------------------------------------------------------------------
+    // Response sending
+    // -------------------------------------------------------------------
+
+    private Mono<Void> sendResponse(HttpServerResponse res, RequestLifecycle lc) {
         ResponseConfig config = responseConfig.get();
         if (config == null) {
             res.status(500);
-            return res.sendString(Mono.just("{\"error\":\"No mock response configured\"}")).then();
+            return finalizeResponse(res.sendString(Mono.just("{\"error\":\"No mock response configured\"}")).then(),
+                    lc);
         }
 
         res.status(config.statusCode);
@@ -151,19 +141,22 @@ public class AnthropicMockProvider implements AutoCloseable {
         config.responseHeaders.forEach(entry -> res.header(entry.getKey(), entry.getValue()));
 
         if (config.bodySupplier == null) {
-            return markCompleted(res.sendHeaders().then());
+            return finalizeResponse(res.sendHeaders().then(), lc);
         }
 
         if (config.streaming) {
-            return markCompleted(sendStreamingResponse(res, config));
-        } else {
-            String body = config.bodySupplier.get();
-            return markCompleted(res.sendString(Mono.just(body)).then());
+            return finalizeResponse(sendStreamingResponse(res, config), lc);
         }
+        String body = config.bodySupplier.get();
+        return finalizeResponse(res.sendString(Mono.just(body)).then(), lc);
     }
 
-    private Mono<Void> markCompleted(Mono<Void> response) {
-        return response.doOnSuccess(ignored -> responseCompleted.set(true));
+    /**
+     * Delegates to {@link RequestLifecycle#finalize(SignalType)} so both successful
+     * completion and write failures are observed through the same CAS logic.
+     */
+    private static Mono<Void> finalizeResponse(Mono<Void> response, RequestLifecycle lc) {
+        return response.doFinally(lc::finalize);
     }
 
     private Mono<Void> sendStreamingResponse(HttpServerResponse res, ResponseConfig config) {
@@ -182,10 +175,6 @@ public class AnthropicMockProvider implements AutoCloseable {
         return res.sendString(Mono.just(fullBody)).then();
     }
 
-    /**
-     * Sends the body split across chunks, deliberately breaking multi-byte UTF-8
-     * characters across chunk boundaries.
-     */
     private Mono<Void> sendUtf8SplitChunks(HttpServerResponse res, String body, Duration delay) {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
 
@@ -207,40 +196,43 @@ public class AnthropicMockProvider implements AutoCloseable {
         return res.send(byteBufFlux).then();
     }
 
-    // -----------------------------------------------------------------------
-    // Inner types
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------
+    // Lifecycle management
+    // -------------------------------------------------------------------
 
-    /**
-     * A captured upstream request received by this mock provider.
-     */
+    private RequestLifecycle ensureLifecycle() {
+        RequestLifecycle existing = lifecycle.get();
+        if (existing != null) {
+            return existing;
+        }
+        RequestLifecycle created = new RequestLifecycle();
+        if (lifecycle.compareAndSet(null, created)) {
+            return created;
+        }
+        return lifecycle.get();
+    }
+
+    // -------------------------------------------------------------------
+    // Inner types
+    // -------------------------------------------------------------------
+
     public static class CapturedRequest {
-        /** HTTP method (e.g. "POST"). */
         public String method;
-        /** Full request path including query string. */
         public String path;
-        /** All request headers (may include duplicates for multi-valued headers). */
         public List<Map.Entry<String, String>> headers;
-        /** Aggregated request body as a UTF-8 string. */
         public String body;
-        /** Exact aggregated request bytes. */
         public byte[] bodyBytes;
 
-        /** Returns the first header value for the given name, or null. */
         public String header(String name) {
             return headers.stream().filter(e -> e.getKey().equalsIgnoreCase(name)).map(Map.Entry::getValue).findFirst()
                     .orElse(null);
         }
 
-        /** Returns all header values for the given name. */
         public List<String> headers(String name) {
             return headers.stream().filter(e -> e.getKey().equalsIgnoreCase(name)).map(Map.Entry::getValue).toList();
         }
     }
 
-    /**
-     * Configuration for a mock response.
-     */
     public static class ResponseConfig {
         final int statusCode;
         final String contentType;
@@ -264,9 +256,6 @@ public class AnthropicMockProvider implements AutoCloseable {
             return new Builder();
         }
 
-        /**
-         * Functional interface for lazy body generation.
-         */
         @FunctionalInterface
         public interface BodySupplier {
             String get();
@@ -322,10 +311,8 @@ public class AnthropicMockProvider implements AutoCloseable {
             }
 
             public ResponseConfig build() {
-                if (streaming) {
-                    if (contentType == null) {
-                        this.contentType = "text/event-stream";
-                    }
+                if (streaming && contentType == null) {
+                    this.contentType = "text/event-stream";
                 }
                 return new ResponseConfig(this);
             }
