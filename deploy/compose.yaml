@@ -1,0 +1,29 @@
+# MiQroKey Gateway — Local Development Stack
+# Start: docker compose -f deploy/compose.yaml up -d
+# Stop:  docker compose -f deploy/compose.yaml down
+
+services:
+  postgres:
+    # Multi-platform manifest digest reported by Docker Hub for postgres:17.6-alpine.
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    container_name: miqrokey-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-miqrokey}
+      POSTGRES_USER: ${POSTGRES_USER:-miqrokey}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    ports:
+      - "${MIQROKEY_DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-miqrokey} -d ${POSTGRES_DB:-miqrokey}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  pgdata:
+    driver: local

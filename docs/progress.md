@@ -4,14 +4,14 @@
 
 ## Current State
 
-- Project phase: `PLANNING_COMPLETE`
-- Next executor: `Claude Code + DS V4-Pro via CC Switch`
-- Specification author role: `DOCUMENTATION_HANDOFF_ONLY - no implementation assumed`
+- Project phase: `PHASE_0`
+- Current executor: `Codex`（项目所有者要求接管 G0.1 收口）
+- Subsequent executor: 由项目所有者在下一个 Goal 开始前决定
 - Current goal: `G0.1`
-- Goal status: `IN_PROGRESS`
-- Last updated: `2026-07-20`
-- Last verified commit: `N/A - git init completed, remote pending`
-- Planned remote: `https://github.com/lichman0405/miqro-key-gateway.git` (verified reachable and empty on `2026-07-17`)
+- Goal status: `DONE`
+- Last updated: `2026-07-21`
+- Branch: `goal/g0.1-repository-bootstrap`
+- Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
 
 ## Completed
 
@@ -24,29 +24,72 @@
 - Git/commit/push/PR 工作流和前端 Quiet Operations Console 视觉规范已完成。
 - Claude Code 实施身份、默认授权、Goal 输入输出和失败恢复交接契约已完成。
 - CC Switch + 第三方模型无法可靠 `/compact` 时的 disk-first checkpoint 与 fresh-session 续接策略已完成。
-- `/goal` 无人值守执行改为默认 8 回合有界批次，并显式启用项目级 auto-compact，避免 100% 不触发导致任务失控。
 - 产品与工程标识确定为 MiQroKey Gateway / MiQroKey，仓库 `miqro-key-gateway`，Java 包 `com.miqroera.miqrokey`。
 
-## Next Goal
+## G0.1 — Repair (Round 2)
 
-- Goal ID: `G0.1`
-- Name: Repository bootstrap
-- Source: [`implementation-plan.md`](implementation-plan.md#g01-repository-bootstrap)
-- Expected outcome: 可在 Windows/Linux 构建的 Maven 多模块、Vue 工程、PostgreSQL Compose 与基础 CI/质量门禁。
+### Repairs applied
+
+1. **Maven Wrapper**: Real SHA-256 checksums from Maven Central/ASF; `maven-wrapper.jar` committed to Git; checksum verification in both `mvnw` and `mvnw.cmd` (powershell `certutil` for Windows, `sha256sum` for Unix); `mvnw` executable bit set via `git update-index --chmod=+x`.
+
+2. **Configuration aligned with `configuration-reference.md`**:
+   - Gateway port: `${MIQROKEY_GATEWAY_PORT:8081}`
+   - Control Plane port: `${MIQROKEY_CONTROL_PORT:8080}`
+   - DB config: `${MIQROKEY_DB_URL}`, `${MIQROKEY_DB_USERNAME}`, `${MIQROKEY_DB_PASSWORD}` (with `_FILE` convention noted)
+   - `.env.example` updated with `MIQROKEY_` prefix
+   - `compose.yaml`: postgres pinned to `17.6-alpine`, port configurable via `${MIQROKEY_DB_PORT:-5432}`
+
+3. **ArchUnit**: `allowEmptyShould(true)` removed from cross-module rules; `control-plane-app` added as test-scope dependency in `gateway-app` so all checks verify actual classes; reactor module order adjusted (control-plane-app before gateway-app); `DataSourceAutoConfiguration` excluded in Gateway smoke test to prevent JDBC auto-config clash.
+
+4. **`.flattened-pom.xml`**: Removed from Git index (`git rm --cached`); `**/.flattened-pom.xml` already in `.gitignore`.
+
+5. **Maven plugin versions**: Locked `maven-compiler-plugin:3.13.0`, `maven-jar-plugin:3.4.2`, `maven-surefire-plugin:3.5.2`, and `spring-boot-maven-plugin` in parent POM `pluginManagement`.
+
+6. **Initial Compose image pin**: Replaced the mutable PostgreSQL major tag with `17.6-alpine`; item 9 records the final digest lock.
+
+7. **Windows Wrapper exit semantics**: `mvnw.cmd` now propagates Maven's real exit code. A deliberately invalid Maven phase returns exit code `1`; CI includes a regression check so a failed build cannot be reported as successful.
+
+8. **Management endpoint boundary**: Gateway data-plane exposure is limited to `health,info`; `metrics`/`prometheus` are not exposed on the public Gateway port. A smoke test enforces this boundary.
+
+9. **Reproducible Compose image**: PostgreSQL is pinned to the Docker Hub multi-platform manifest digest for `postgres:17.6-alpine`; CI rejects every Compose image that lacks an `@sha256:` digest.
+
+10. **Configuration regression tests**: Gateway `8081` and Control Plane `8080` defaults are asserted. Control Plane test overrides moved to `application-test.yml`, avoiding accidental replacement of the production `application.yml`.
+
+### Local verification (Windows, Java 21 Temurin 21.0.11)
+
+- `.\mvnw.cmd clean verify --batch-mode --quiet`: **BUILD SUCCESS** — clean checkout-equivalent build
+- `.\mvnw.cmd verify --batch-mode --quiet`: **BUILD SUCCESS** — 15 tests, 0 failures, 0 errors
+  - Domain contract: 1 test
+  - Control Plane smoke/configuration: 2 tests
+  - ArchUnit module dependency: 8 rules (all effective, no `allowEmptyShould`)
+  - Gateway smoke/configuration/security: 4 tests
+  - Spotless check: all modules clean
+  - Maven Enforcer: all rules passed
+- Deliberately invalid `mvnw.cmd` phase: expected exit code `1` (failure propagation verified)
+- `npm ci`: PASS (0 vulnerabilities)
+- `npm run lint`: PASS
+- `npm run typecheck`: PASS
+- `npm run test`: PASS (1 test)
+- `npm run build`: PASS
+
+### CI evidence
+
+- PR: `https://github.com/lichman0405/miqro-key-gateway/pull/1`
+- Baseline repair commit `b732f4c`: Ubuntu backend, frontend and Compose config all passed in run `29733691718`.
+- Final implementation commits: `75b6a22` and `cd100ff`.
+- Final implementation CI run `29796610144`: Ubuntu backend, Windows backend, Windows Wrapper failure propagation, frontend, Compose config and digest locking all passed.
+- CI evidence: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29796610144`
 
 ## Known Blockers
 
 - 真实供应商凭证尚未提供；不阻塞 Mock 与本地契约开发。
-- Java group/package 已确定为 `com.miqroera.miqrokey`。
-- 生产域名、TLS 证书和 Webhook 地址尚未提供；使用配置占位。
+- Docker 不在当前 Windows 环境；Compose config 与镜像 digest 门禁已由 GitHub Actions 验证通过。
 
-## Validation Snapshot
+## Next Goal
 
-- Documentation local links: PASS (`42` Markdown files checked)
-- Markdown sanity: PASS (`3270` lines; fences, conflict markers and trailing whitespace checked)
-- Backend tests: NOT_AVAILABLE
-- Frontend tests: NOT_AVAILABLE
-- Compose validation: NOT_AVAILABLE
+- Goal ID: `G0.2`
+- Name: Anthropic transparent proxy PoC
+- Source: [`implementation-plan.md`](implementation-plan.md#g02-anthropic-transparent-proxy-poc)
 
 ## Goal Update Template
 

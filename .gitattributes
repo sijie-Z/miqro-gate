@@ -1,0 +1,32 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Java / Maven
+*.java text diff=java
+*.xml text
+*.properties text eol=lf
+
+# Shell scripts
+*.sh text eol=lf
+
+# Windows batch
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Web
+*.html text
+*.css text
+*.js text
+*.ts text
+*.vue text
+*.json text
+*.yaml text
+*.yml text
+*.svg text
+
+# Binary
+*.jar binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary

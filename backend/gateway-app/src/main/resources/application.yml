@@ -1,0 +1,23 @@
+server:
+  port: ${MIQROKEY_GATEWAY_PORT:8081}
+
+spring:
+  application:
+    name: miqrokey-gateway
+  main:
+    web-application-type: reactive
+
+# Actuator health and metrics (no sensitive data exposed)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    com.miqroera.miqrokey: INFO
+    reactor.netty: WARN
