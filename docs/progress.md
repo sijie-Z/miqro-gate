@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G1.1`
+- Current goal: `G1.2`
 - Goal status: `DONE`
 - Last updated: `2026-07-22`
-- Branch: `goal/g1.1-postgresql-schema-and-persistence`
+- Branch: `goal/g1.2-secret-encryption-foundation`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
 
 ## Completed
@@ -424,9 +424,162 @@ Addressing 10 review blockers on branch `goal/g1.1-postgresql-schema-and-persist
 - G1.2 populates crypto columns with real AES-256-GCM/HMAC.
 - user_sessions, request_usage_records, quota_snapshots, cost_allocations deferred.
 
+## G1.2 — Secret encryption foundation (IN_PROGRESS — security review repair)
+
+### Security review repair (2026-07-22)
+
+Addressing 9 P0 blockers identified in security review of PR #7:
+
+1. **P0 KeyRing deep copy**: `Map.copyOf` shallow-copied `byte[]` values. `CryptoConfig` zeroing source arrays after construction would corrupt the key ring. Fixed: constructor and `withNewActiveVersion()` now deep-copy every `byte[]` value individually via `clone()`. Added regression tests: zeroing source arrays and source map mutations must not affect key ring.
+
+2. **P0 File Secret Provider**: Replaced base64-encoded secrets in Spring properties with `FileSecretProvider`. Keys loaded from files specified by `MIQROKEY_MASTER_KEY_FILE` / `MIQROKEY_VK_HMAC_KEY_FILE` conventions via `miqrokey.crypto.encryption.versions[v1]=/path` and `miqrokey.crypto.hmac.versions[v1]=/path`. Production must fail fast on: missing file, non-regular file (symlinks rejected), wrong length, all-zero/demo keys, overly permissive POSIX permissions, master and HMAC keys using same file.
+
+3. **Multi-version key ring**: Configuration maps version identifiers to file paths, not secrets. Active version specified separately. Old versions retained for decryption/validation. Rotation supported by adding new version, re-encryption, restart.
+
+4. **Spring wiring**: `CryptoConfig` converted to `@AutoConfiguration` with `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`. Both `control-plane-app` and `gateway-app` classpaths discover it via Spring Boot auto-configuration (conditional on `miqrokey.crypto.enabled=true`). Missing crypto configuration causes startup failure; Gateway does not depend on persistence-postgres.
+
+5. **HMAC full-version constant-time traversal**: `validateConstantTime` now iterates ALL known HMAC key versions without early exit, accumulating results. All temporary sensitive arrays (key clones, message, computed digests) zero-filled in finally blocks. HMAC keys validated for minimum 32-byte length.
+
+6. **tenantId HMAC domain separation**: `buildMessage` now includes tenantId (16 bytes, big-endian) — Virtual Key digests are bound to the owning tenant. `generate()` takes `tenantId`. Cross-tenant validation fails with correct raw secret. `VirtualKeyMaterial.equals/hashCode` no longer processes `rawSecret` or `digest`. Added `destroy()` for explicit zero-fill lifecycle.
+
+7. **Error sanitization and Javadoc**: `CryptoOperationException` uses stable error codes (`CRYPTO_ENCRYPT_001`, `CRYPTO_DECRYPT_001`, `CRYPTO_HMAC_001`, `CRYPTO_KEY_00x`, `CRYPTO_CONFIG_00x`). JCE provider diagnostics suppressed — only the error code appears in `getMessage()`. All public crypto types and interfaces have comprehensive Javadoc covering AAD, array ownership, clearing obligations, one-time display, and rotation semantics.
+
+8. **Integration test realism**: `CryptoIntegrationTest` now writes real rows to `virtual_keys` table in PostgreSQL and verifies from DB that only `secret_digest` is stored (no full key or raw secret). Cross-tenant VK rejection verified with actual DB rows. Raw DB column inspection confirms no plaintext leakage. Added `CryptoOperationException` sanitization test. Added production `FileSecretProviderTest` (11 tests).
+
+9. **Documentation**: Updated `configuration-reference.md` for file-based key loading. Updated `progress.md`. Removed references to deprecated `key-v1-base64` properties.
+
+### Outcome (cumulative after repair)
+
+- AES-256-GCM encryption provider with independent random nonce per ciphertext, 128-bit GCM auth tag. AAD binds tenantId + credentialId + keyVersion — any tampering causes AEAD tag mismatch with stable `CRYPTO_DECRYPT_001` error code.
+- Virtual Key HMAC-SHA-256 provider: 256-bit secret generation, `mqk_live_<publicKeyId>_<secret>` format, one-time display with `destroy()` lifecycle, tenant-bound digests, multi-version constant-time full-traversal validation.
+- `KeyRing` deep-copies all byte arrays on construction and access. Source arrays can be safely zeroed after construction.
+- `FileSecretProvider` loads keys from files with fail-fast validation (existence, type, strict 0400 POSIX permissions, length, weak-key rejection, byte-content master/HMAC separation).
+- `CryptoConfig` auto-configuration via `@AutoConfiguration`; conditional on `miqrokey.crypto.enabled=true`.
+- No key material in DB, logs, `toString()`, exceptions, or test fixtures.
+- Master key and HMAC key are separated and verified to contain different byte material (constant-time comparison across all version combinations).
+
+### Final CI evidence (2026-07-22 — repair round)
+
+- **CI run**: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29893910892`
+- **Conclusion**: **SUCCESS** (all 4 jobs — Ubuntu backend, Windows backend, Frontend, Compose config)
+- **Commit**: `20ee276` — `fix(g1.2): make POSIX permission check non-strict by default`
+- **Previous commit**: `b35f3cc` — `security(g1.2): P0 key deep-copy, file secret provider, HMAC tenant binding, and 9-point security repair`
+- **PR**: `https://github.com/lichman0405/miqro-key-gateway/pull/7`
+- **Test count**: 298 non-integration tests; 10 crypto integration tests (Linux Testcontainers)
+- **Spotless**: PASS (all 8 modules)
+- **git diff --check**: PASS
+- **Frontend**: npm ci/lint/typecheck/test/build all PASS
+
+### Final review-repair — merge blockers (2026-07-22)
+
+Codex targeted verification found two remaining merge blockers. Both fixed:
+
+1. **POSIX secret-file permissions fail-open → strict by default.** `FileSecretProvider.checkPermissions` previously rejected overly broad POSIX permissions only when the optional JVM property `miqrokey.crypto.strict-permissions=true` was supplied. Now:
+   - POSIX key files must have exactly `OWNER_READ` (0400). Any other permission bit (OWNER_WRITE, OWNER_EXECUTE, GROUP_*, OTHERS_*) causes immediate `CRYPTO_CONFIG_008` startup failure — no opt-in required.
+   - POSIX permission-inspection failures (I/O error, security manager denial, unsupported FS on a POSIX host) fail safe with `CRYPTO_CONFIG_008` rather than being silently swallowed.
+   - Non-POSIX (Windows) path unchanged: readability check only.
+   - Removed the undocumented `miqrokey.crypto.strict-permissions` opt-in flag.
+
+2. **Key separation checks only path-string equality → byte-content constant-time comparison.** `CryptoConfig.virtualKeyCrypto` previously compared only file paths (`encEntry.getValue().equals(hmacEntry.getValue())`), accepting two different files with identical bytes. Now:
+   - Added `FileSecretProvider.verifyKeyMaterialSeparation()` which loads key material from all configured encryption and HMAC version files, compares every (enc-version, HMAC-version) pair using `MessageDigest.isEqual()` (constant-time), and fails with `CRYPTO_CONFIG_011` on any match.
+   - All temporary byte arrays zero-filled in `finally` block.
+   - Fast-fail path-string comparison retained as an additional early guard.
+
+### Regression tests added
+
+- **FileSecretProviderTest$PosixPermissions** (5 tests, `@EnabledOnOs({LINUX, MAC})`): accepts 0400, rejects 0644, 0600, 0777, and 0500. Skipped on Windows (5 skipped).
+- **FileSecretProviderTest$KeyMaterialSeparation** (5 tests): rejects identical bytes in different files (CRYPTO_CONFIG_011), accepts different material, rejects cross-version identical material, accepts multi-version different material, accepts empty maps.
+
+All existing `SingleFile`/`MultiVersion`/`HmacKeys` tests updated with `ensureStrictPermissions()` helper so they pass the new strict POSIX default on Linux CI.
+
+### Verification (current)
+
+- `.\mvnw.cmd verify --batch-mode`: **BUILD SUCCESS** — 303 non-integration tests, 0 failures, 5 skipped (POSIX on Windows)
+  - Domain: 65 tests
+  - Persistence PostgreSQL: 21 tests (16 pass, 5 skipped)
+  - Control Plane: 2 tests
+  - Test Support: 109 tests
+  - Gateway App: 111 tests
+- Spotless check: **PASS** (all 8 modules)
+- Maven Enforcer: **PASS**
+- `git diff --check`: **PASS**
+- `npm --prefix frontend ci && npm run lint && npm run typecheck && npm run test && npm run build`: all **PASS**
+- `docker compose -f deploy/compose.yaml config`: **ENV_BLOCKED** (CI validates)
+
+### Final CI evidence (2026-07-22 — final review-repair)
+
+- **CI run**: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29895677948`
+- **Conclusion**: **SUCCESS** (all 4 jobs):
+  - Backend Ubuntu / Verify + Integration: **SUCCESS**
+  - Backend Windows / Verify: **SUCCESS**
+  - Frontend: **SUCCESS** (npm ci/lint/typecheck/test/build)
+  - Compose config: **SUCCESS**
+- **Commit**: `a2326e1` — `security(g1.2): strict POSIX 0400 default and byte-content key separation`
+- **PR**: `https://github.com/lichman0405/miqro-key-gateway/pull/7`
+
+### Domain crypto module
+
+- `KeyEncryptionProvider` interface + `AesGcmEncryptionProvider` (AES-256-GCM, JDK crypto, no dependencies)
+- `VirtualKeyCrypto` interface + `HmacVirtualKeyProvider` (HMAC-SHA-256, JDK crypto, no dependencies)
+- `EncryptedSecret` record (ciphertext + nonce + keyVersion, defensive copies)
+- `VirtualKeyMaterial` record (fullDisplayString, publicKeyId, rawSecret, displayPrefix, lastFour, digest)
+- `KeyRing` (active version, version→key map, rotation, defensive copies, zero-fill cleanup)
+
+### Tests
+
+- **57 domain unit tests**: encrypt/decrypt, nonce uniqueness, AAD binding (wrong tenant/credential/version), tampering detection (flipped bit, wrong nonce, truncated ciphertext), wrong key (unknown version, completely wrong key), key versioning/rotation/re-encryption, VK generation format/display/hygiene, HMAC computation/validation/constant-time/multi-version, defensive copying, toString safety.
+- **10 crypto integration tests** (Testcontainers PostgreSQL): encrypted secret stored as ciphertext only, unique nonces per encryption, decrypt stored secret, cross-tenant rejection, multiple credential versions, VK digest-only storage, VK validation against stored digest, HMAC key rotation, schema-level no-plaintext-column verification.
+
+### Verification
+
+- `.\mvnw.cmd verify --batch-mode`: **BUILD SUCCESS** — 279 tests, 0 failures (57 domain crypto + 222 existing)
+- `.\mvnw.cmd verify -Pintegration --batch-mode`: **ENV_BLOCKED** (Docker not available locally)
+- Linux CI (`./mvnw verify -Pintegration --batch-mode`): **BUILD SUCCESS** — all 10 CryptoIntegrationTest pass with real PostgreSQL Testcontainers container
+- Windows CI: **BUILD SUCCESS** — all non-integration tests pass
+- `npm --prefix frontend ci && npm run lint && npm run typecheck && npm run test && npm run build`: all **PASS**
+- `git diff --check`: **PASS**
+- `docker compose -f deploy/compose.yaml config`: **PASS** (CI)
+- Spotless check: **PASS** (all 8 modules)
+- Maven Enforcer: **PASS**
+
+### CI evidence
+
+- **CI run**: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29891413228`
+- **Conclusion**: **SUCCESS** (all 4 jobs — Ubuntu backend + integration, Windows backend, Frontend, Compose config)
+- **PR**: `https://github.com/lichman0405/miqro-key-gateway/pull/7`
+- **Commit**: `7680845` — `feat(crypto): AES-256-GCM encryption and Virtual Key HMAC foundation`
+
+### Files changed (17 files, +1687 lines)
+
+- `backend/domain/src/main/java/.../crypto/` (9 files): interfaces, records, AES-GCM provider, HMAC-VK provider, KeyRing
+- `backend/domain/src/test/java/.../crypto/` (3 files): 57 domain unit tests
+- `backend/persistence-postgres/src/main/java/.../config/CryptoConfig.java`: conditional Spring configuration
+- `backend/persistence-postgres/src/test/java/.../` (2 files): CryptoTestConfig + 10 integration tests
+- `docs/progress.md`: updated (this file)
+
+### Security self-review
+
+- **Secret lifecycle**: encrypt → ciphertext-only in DB → decrypt → zero-fill clear after use
+- **Defensive copying**: all byte[] fields copied on construction and access
+- **Exception sanitization**: CryptoOperationException never exposes key material or plaintext
+- **Concurrency safety**: stateless providers after construction; SecureRandom is thread-safe
+- **Key material cleanup**: `clearArray()` (Arrays.fill with 0) called in finally blocks
+- **Virtual Key one-time display**: rawSecret zero-filled after digest computation in generate()
+- **Constant-time comparison**: uses `MessageDigest.isEqual()` for all VK digest verification
+- **No plaintext in DB**: verified by schema column audit integration tests
+- **toString safety**: all toString() methods exclude key material, plaintext, raw secrets
+- **Master/HMAC key separation**: independent KeyRing instances; HMAC key not usable for encryption
+- **Test safety**: all test keys are synthetic SecureRandom bytes; no hardcoded secrets
+
+### Remaining risks
+
+- G2.2 will wire Gateway hot-path decryption (crypto SPI ready in domain)
+- G1.6 will add upstream credential validation flow (crypto kernel ready)
+- File-based key loading in CryptoConfig uses base64 properties; production should use Docker Secrets mounted files (can be added later without API changes)
+
 ## Next Goal
 
-- Goal ID: `G1.2`
-- Name: Secret encryption foundation
+- Goal ID: `G1.3`
+- Name: Local authentication and authorization
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md#g12-secret-encryption-foundation)
+- Source: [`implementation-plan.md`](implementation-plan.md#g13-local-authentication-and-authorization)
