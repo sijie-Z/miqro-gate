@@ -17,8 +17,8 @@ import java.util.UUID;
 public class ProjectMembershipRepositoryImpl implements ProjectMembershipRepository {
 
     private static final RowMapper<ProjectMembership> ROW_MAPPER = (rs, rowNum) -> new ProjectMembership(
-            (UUID) rs.getObject("project_id"), (UUID) rs.getObject("user_id"), (UUID) rs.getObject("created_by"),
-            rs.getTimestamp("created_at").toInstant());
+            (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("project_id"), (UUID) rs.getObject("user_id"),
+            (UUID) rs.getObject("created_by"), rs.getTimestamp("created_at").toInstant());
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -28,45 +28,43 @@ public class ProjectMembershipRepositoryImpl implements ProjectMembershipReposit
 
     @Override
     public List<ProjectMembership> findAllByProjectId(UUID projectId) {
-        var sql = "SELECT * FROM project_memberships WHERE project_id = :projectId";
-        return jdbc.query(sql, new MapSqlParameterSource("projectId", projectId), ROW_MAPPER);
+        return jdbc.query("SELECT * FROM project_memberships WHERE project_id = :projectId",
+                new MapSqlParameterSource("projectId", projectId), ROW_MAPPER);
     }
 
     @Override
     public List<ProjectMembership> findAllByUserId(UUID userId) {
-        var sql = "SELECT * FROM project_memberships WHERE user_id = :userId";
-        return jdbc.query(sql, new MapSqlParameterSource("userId", userId), ROW_MAPPER);
+        return jdbc.query("SELECT * FROM project_memberships WHERE user_id = :userId",
+                new MapSqlParameterSource("userId", userId), ROW_MAPPER);
     }
 
     @Override
     @Transactional
     public ProjectMembership insert(ProjectMembership membership) {
-        var sql = """
-                INSERT INTO project_memberships (project_id, user_id, created_by, created_at)
-                VALUES (:projectId, :userId, :createdBy, :createdAt)
-                """;
-        jdbc.update(sql, toParams(membership));
+        jdbc.update(
+                "INSERT INTO project_memberships (tenant_id, project_id, user_id, created_by, created_at) VALUES (:tenantId, :projectId, :userId, :createdBy, :createdAt)",
+                toParams(membership));
         return membership;
     }
 
     @Override
     @Transactional
     public void delete(UUID projectId, UUID userId) {
-        var sql = "DELETE FROM project_memberships WHERE project_id = :projectId AND user_id = :userId";
-        var params = new MapSqlParameterSource().addValue("projectId", projectId).addValue("userId", userId);
-        jdbc.update(sql, params);
+        jdbc.update("DELETE FROM project_memberships WHERE project_id = :projectId AND user_id = :userId",
+                new MapSqlParameterSource().addValue("projectId", projectId).addValue("userId", userId));
     }
 
     @Override
     public boolean exists(UUID projectId, UUID userId) {
-        var sql = "SELECT COUNT(*) FROM project_memberships WHERE project_id = :projectId AND user_id = :userId";
-        var params = new MapSqlParameterSource().addValue("projectId", projectId).addValue("userId", userId);
-        Integer count = jdbc.queryForObject(sql, params, Integer.class);
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM project_memberships WHERE project_id = :projectId AND user_id = :userId",
+                new MapSqlParameterSource().addValue("projectId", projectId).addValue("userId", userId), Integer.class);
         return count != null && count > 0;
     }
 
     private MapSqlParameterSource toParams(ProjectMembership m) {
-        return new MapSqlParameterSource().addValue("projectId", m.projectId()).addValue("userId", m.userId())
-                .addValue("createdBy", m.createdBy()).addValue("createdAt", Timestamp.from(m.createdAt()));
+        return new MapSqlParameterSource().addValue("tenantId", m.tenantId()).addValue("projectId", m.projectId())
+                .addValue("userId", m.userId()).addValue("createdBy", m.createdBy())
+                .addValue("createdAt", Timestamp.from(m.createdAt()));
     }
 }

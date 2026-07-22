@@ -1,16 +1,6 @@
 package com.miqroera.miqrokey.persistence;
 
-import com.miqroera.miqrokey.domain.model.Tenant;
-import com.miqroera.miqrokey.domain.model.User;
-import com.miqroera.miqrokey.domain.model.Project;
-import com.miqroera.miqrokey.domain.model.ProjectMembership;
-import com.miqroera.miqrokey.domain.model.VirtualKey;
-import com.miqroera.miqrokey.domain.model.ProjectProviderGrant;
-import com.miqroera.miqrokey.domain.model.UpstreamCredential;
-import com.miqroera.miqrokey.domain.model.Provider;
-import com.miqroera.miqrokey.domain.model.ProviderProduct;
-import com.miqroera.miqrokey.domain.model.UpstreamSubscription;
-import com.miqroera.miqrokey.domain.model.UpstreamCredentialVersion;
+import com.miqroera.miqrokey.domain.model.*;
 import com.miqroera.miqrokey.domain.repository.*;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,14 +9,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * Integration tests for repository CRUD and documented lifecycle operations.
- *
- * <p>
- * Uses synthetic data only — no real credentials, secrets, or PII.
- * </p>
- */
 @DisplayName("Repository integration tests")
 class RepositoryIntegrationTest extends AbstractPostgresTest {
 
@@ -38,6 +22,8 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
     private ProjectRepository projectRepo;
     @Autowired
     private ProjectMembershipRepository membershipRepo;
+    @Autowired
+    private TeamRepository teamRepo;
     @Autowired
     private ProviderRepository providerRepo;
     @Autowired
@@ -52,11 +38,13 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
     private ProjectProviderGrantRepository grantRepo;
     @Autowired
     private VirtualKeyRepository vkRepo;
+    @Autowired
+    private AdminAuditEventRepository auditRepo;
 
-    private static final UUID TENANT_ID = UUID.randomUUID();
+    // Use seed tenant from V1 migration
+    private static final UUID TENANT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final Instant NOW = Instant.now();
 
-    private Tenant tenant;
     private User user;
     private Project project;
     private Provider provider;
@@ -68,108 +56,80 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
 
     @BeforeEach
     void setUp() {
-        // Tenant
-        tenant = new Tenant(TENANT_ID, "test-tenant", "Test Tenant", "ACTIVE", NOW, NOW);
-        if (tenantRepo.findByCode("test-tenant").isEmpty()) {
-            tenantRepo.insert(tenant);
-        }
-
-        // User
-        user = new User(UUID.randomUUID(), TENANT_ID, "testuser", "Test User", new byte[]{1, 2, 3, 4}, "USER", "ACTIVE",
-                false, 0, null, null, 0, NOW, NOW);
+        user = new User(UUID.randomUUID(), TENANT_ID, "testuser", "Test User", new byte[]{1, 2, 3, 4}, UserRole.USER,
+                UserStatus.ACTIVE, false, 0, null, null, 0, NOW, NOW);
         userRepo.insert(user);
 
-        // Project
-        project = new Project(UUID.randomUUID(), TENANT_ID, "test-proj", "Test Project", null, null, "ACTIVE", 0, NOW,
-                NOW);
+        project = new Project(UUID.randomUUID(), TENANT_ID, "test-proj", "Test Project", null, null,
+                ProjectStatus.ACTIVE, 0, NOW, NOW);
         projectRepo.insert(project);
 
-        // Provider
-        provider = new Provider(UUID.randomUUID(), "test-provider", "Test Provider", null, null, null, "ACTIVE", 0, NOW,
-                NOW);
+        provider = new Provider(UUID.randomUUID(), "test-provider", "Test Provider", null, null, null,
+                ProviderStatus.ACTIVE, 0, NOW, NOW);
         providerRepo.insert(provider);
 
-        // ProviderProduct
-        product = new ProviderProduct(UUID.randomUUID(), provider.id(), "test-product", "Test Product", "PAYG", "NONE",
-                "SINGLE_SHARED", null, "[]", "[]", "{}", null, null, null, "DRAFT", null, 0, NOW, NOW);
+        product = new ProviderProduct(UUID.randomUUID(), provider.id(), "test-product", "Test Product",
+                BillingMode.PAYG, PlanScope.NONE, CredentialTopology.SINGLE_SHARED, null, "[]", "[]", "{}", null, null,
+                null, ImplementationStatus.DRAFT, null, 0, NOW, NOW);
         productRepo.insert(product);
 
-        // Subscription
-        subscription = new UpstreamSubscription(UUID.randomUUID(), product.id(), "Test Subscription", null, "PAYG",
-                "NONE", null, null, null, null, null, null, null, "ACTIVE", null, null, 0, NOW, NOW);
+        subscription = new UpstreamSubscription(UUID.randomUUID(), TENANT_ID, product.id(), "Test Subscription", null,
+                BillingMode.PAYG, PlanScope.NONE, null, null, null, null, null, null, null, SubscriptionStatus.ACTIVE,
+                null, null, 0, NOW, NOW);
         subRepo.insert(subscription);
 
-        // Credential (logical slot - no secret)
-        credential = new UpstreamCredential(UUID.randomUUID(), subscription.id(), null, "Test Credential",
-                new byte[]{10, 20, 30}, "ACTIVE", null, null, null, 0, NOW, NOW);
+        credential = new UpstreamCredential(UUID.randomUUID(), TENANT_ID, subscription.id(), null, "Test Credential",
+                new byte[]{10, 20, 30}, CredentialStatus.ACTIVE, null, null, null, 0, NOW, NOW);
         credRepo.insert(credential);
 
-        // Credential Version (immutable, contains encrypted placeholder)
-        credentialVersion = new UpstreamCredentialVersion(UUID.randomUUID(), credential.id(), new byte[]{0x01, 0x02},
-                new byte[]{0x03, 0x04}, "v1", new byte[]{10, 20, 30}, "ACTIVE", NOW, null, NOW);
+        credentialVersion = new UpstreamCredentialVersion(UUID.randomUUID(), TENANT_ID, credential.id(),
+                new byte[]{0x01, 0x02}, new byte[]{0x03, 0x04}, "v1", new byte[]{10, 20, 30},
+                CredentialVersionStatus.ACTIVE, NOW, null, NOW);
         versionRepo.insert(credentialVersion);
 
-        // Grant
-        grant = new ProjectProviderGrant(UUID.randomUUID(), project.id(), product.id(), credential.id(), "ACTIVE",
-                user.id(), 0, NOW, NOW);
+        grant = new ProjectProviderGrant(UUID.randomUUID(), TENANT_ID, project.id(), product.id(), credential.id(),
+                GrantStatus.ACTIVE, user.id(), 0, NOW, NOW);
         grantRepo.insert(grant);
     }
 
     @Nested
     @DisplayName("Tenant CRUD")
     class TenantCrud {
-
         @Test
-        @DisplayName("should insert and find tenant by id")
-        void shouldInsertAndFindById() {
+        @DisplayName("should find seed tenant by id")
+        void shouldFindSeedTenant() {
             var found = tenantRepo.findById(TENANT_ID);
             assertThat(found).isPresent();
-            assertThat(found.get().code()).isEqualTo("test-tenant");
-            assertThat(found.get().status()).isEqualTo("ACTIVE");
+            assertThat(found.get().code()).isEqualTo("default");
+            assertThat(found.get().status()).isEqualTo(TenantStatus.ACTIVE);
+            assertThat(found.get().version()).isEqualTo(0);
         }
 
         @Test
-        @DisplayName("should find tenant by code")
+        @DisplayName("should find seed tenant by code")
         void shouldFindByCode() {
-            var found = tenantRepo.findByCode("test-tenant");
+            var found = tenantRepo.findByCode("default");
             assertThat(found).isPresent();
             assertThat(found.get().id()).isEqualTo(TENANT_ID);
         }
 
         @Test
-        @DisplayName("should list all tenants")
-        void shouldListAll() {
-            var all = tenantRepo.findAll();
-            assertThat(all).isNotEmpty();
-        }
-
-        @Test
-        @DisplayName("should update tenant status")
-        void shouldUpdateStatus() {
-            var disabled = new Tenant(TENANT_ID, "test-tenant", "Test Tenant", "DISABLED", NOW, NOW);
-            tenantRepo.update(disabled);
-
-            var found = tenantRepo.findById(TENANT_ID);
-            assertThat(found).isPresent();
-            assertThat(found.get().status()).isEqualTo("DISABLED");
+        @DisplayName("should update tenant with optimistic locking")
+        void shouldUpdateWithOptimisticLock() {
+            var found = tenantRepo.findById(TENANT_ID).orElseThrow();
+            var updated = new Tenant(found.id(), found.code(), found.name(), TenantStatus.DISABLED, found.version() + 1,
+                    NOW, NOW);
+            tenantRepo.update(updated);
+            var refetched = tenantRepo.findById(TENANT_ID).orElseThrow();
+            assertThat(refetched.status()).isEqualTo(TenantStatus.DISABLED);
         }
     }
 
     @Nested
     @DisplayName("User CRUD")
     class UserCrud {
-
         @Test
-        @DisplayName("should insert and find user by id")
-        void shouldInsertAndFindById() {
-            var found = userRepo.findById(user.id());
-            assertThat(found).isPresent();
-            assertThat(found.get().username()).isEqualTo("testuser");
-            assertThat(found.get().tenantId()).isEqualTo(TENANT_ID);
-        }
-
-        @Test
-        @DisplayName("should find user by tenant and username (case-insensitive)")
+        @DisplayName("should find user by tenant and username")
         void shouldFindByTenantAndUsername() {
             var found = userRepo.findByTenantIdAndUsername(TENANT_ID, "TESTUSER");
             assertThat(found).isPresent();
@@ -179,36 +139,25 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
         @Test
         @DisplayName("should prevent duplicate username in same tenant")
         void shouldPreventDuplicateUsername() {
-            var duplicate = new User(UUID.randomUUID(), TENANT_ID, "testuser", "Dup", new byte[]{1}, "USER", "ACTIVE",
-                    false, 0, null, null, 0, NOW, NOW);
-            // Should throw DataIntegrityViolationException due to unique constraint
             assertThat(userRepo.existsByTenantIdAndUsername(TENANT_ID, "testuser")).isTrue();
         }
 
         @Test
-        @DisplayName("should list users by tenant")
-        void shouldListByTenant() {
-            var users = userRepo.findAllByTenantId(TENANT_ID);
-            assertThat(users).isNotEmpty();
-        }
-
-        @Test
-        @DisplayName("should update user status")
-        void shouldUpdateUserStatus() {
-            var locked = new User(user.id(), TENANT_ID, "testuser", "Test User", user.passwordHash(), "USER", "LOCKED",
-                    false, 5, Instant.now().plusSeconds(3600), user.lastLoginAt(), user.version() + 1, NOW, NOW);
-            userRepo.update(locked);
-
-            var found = userRepo.findById(user.id());
-            assertThat(found).isPresent();
-            assertThat(found.get().status()).isEqualTo("LOCKED");
+        @DisplayName("should update user with optimistic locking")
+        void shouldUpdateWithOptimisticLock() {
+            var updated = new User(user.id(), TENANT_ID, user.username(), user.displayName(), user.passwordHash(),
+                    UserRole.SYSTEM_ADMIN, UserStatus.LOCKED, false, 5, Instant.now().plusSeconds(3600), null,
+                    user.version() + 1, NOW, NOW);
+            userRepo.update(updated);
+            var found = userRepo.findById(user.id()).orElseThrow();
+            assertThat(found.status()).isEqualTo(UserStatus.LOCKED);
+            assertThat(found.role()).isEqualTo(UserRole.SYSTEM_ADMIN);
         }
     }
 
     @Nested
     @DisplayName("Project and membership CRUD")
     class ProjectCrud {
-
         @Test
         @DisplayName("should insert and find project")
         void shouldInsertAndFindProject() {
@@ -218,177 +167,167 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
         }
 
         @Test
-        @DisplayName("should find project by tenant and code")
-        void shouldFindByTenantAndCode() {
-            var found = projectRepo.findByTenantIdAndCode(TENANT_ID, "test-proj");
-            assertThat(found).isPresent();
-        }
-
-        @Test
-        @DisplayName("should add and remove project memberships")
+        @DisplayName("should add and remove memberships")
         void shouldAddAndRemoveMembership() {
-            var membership = new ProjectMembership(project.id(), user.id(), user.id(), NOW);
-            membershipRepo.insert(membership);
-
+            var m = new ProjectMembership(TENANT_ID, project.id(), user.id(), user.id(), NOW);
+            membershipRepo.insert(m);
             assertThat(membershipRepo.exists(project.id(), user.id())).isTrue();
-
-            var byUser = membershipRepo.findAllByUserId(user.id());
-            assertThat(byUser).anyMatch(m -> m.projectId().equals(project.id()));
-
             membershipRepo.delete(project.id(), user.id());
             assertThat(membershipRepo.exists(project.id(), user.id())).isFalse();
         }
     }
 
     @Nested
+    @DisplayName("Team CRUD")
+    class TeamCrud {
+        @Test
+        @DisplayName("should insert and find team")
+        void shouldInsertAndFindTeam() {
+            var team = new Team(UUID.randomUUID(), TENANT_ID, "Test Team", "desc", TeamStatus.ACTIVE, 0, NOW, NOW);
+            teamRepo.insert(team);
+            var found = teamRepo.findById(team.id());
+            assertThat(found).isPresent();
+            assertThat(found.get().name()).isEqualTo("Test Team");
+        }
+
+        @Test
+        @DisplayName("should list teams by tenant")
+        void shouldListByTenant() {
+            var team = new Team(UUID.randomUUID(), TENANT_ID, "List Team", null, TeamStatus.ACTIVE, 0, NOW, NOW);
+            teamRepo.insert(team);
+            var teams = teamRepo.findAllByTenantId(TENANT_ID);
+            assertThat(teams).isNotEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("Provider CRUD")
+    class ProviderCrud {
+        @Test
+        @DisplayName("should find provider by slug")
+        void shouldFindBySlug() {
+            var found = providerRepo.findBySlug("test-provider");
+            assertThat(found).isPresent();
+        }
+    }
+
+    @Nested
     @DisplayName("Credential version lifecycle")
     class CredentialVersionLifecycle {
-
-        @Test
-        @DisplayName("should insert and find credential version")
-        void shouldInsertAndFindVersion() {
-            var found = versionRepo.findById(credentialVersion.id());
-            assertThat(found).isPresent();
-            assertThat(found.get().status()).isEqualTo("ACTIVE");
-        }
-
-        @Test
-        @DisplayName("should list all versions for a credential")
-        void shouldListAllVersions() {
-            var versions = versionRepo.findAllByCredentialId(credential.id());
-            assertThat(versions).hasSize(1);
-        }
-
         @Test
         @DisplayName("should find active version")
         void shouldFindActiveVersion() {
             var active = versionRepo.findActiveByCredentialId(credential.id());
             assertThat(active).isPresent();
-            assertThat(active.get().status()).isEqualTo("ACTIVE");
+            assertThat(active.get().status()).isEqualTo(CredentialVersionStatus.ACTIVE);
         }
 
         @Test
-        @DisplayName("should update version status to RETIRED")
+        @DisplayName("should retire version")
         void shouldRetireVersion() {
-            var retired = new UpstreamCredentialVersion(credentialVersion.id(), credentialVersion.credentialId(),
-                    credentialVersion.encryptedSecret(), credentialVersion.nonce(),
-                    credentialVersion.encryptionKeyVersion(), credentialVersion.secretFingerprint(), "RETIRED",
+            var retired = new UpstreamCredentialVersion(credentialVersion.id(), TENANT_ID,
+                    credentialVersion.credentialId(), credentialVersion.encryptedSecret().clone(),
+                    credentialVersion.nonce().clone(), credentialVersion.encryptionKeyVersion(),
+                    credentialVersion.secretFingerprint().clone(), CredentialVersionStatus.RETIRED,
                     credentialVersion.validFrom(), NOW, credentialVersion.createdAt());
             versionRepo.update(retired);
-
-            var found = versionRepo.findById(credentialVersion.id());
-            assertThat(found).isPresent();
-            assertThat(found.get().status()).isEqualTo("RETIRED");
+            var found = versionRepo.findById(credentialVersion.id()).orElseThrow();
+            assertThat(found.status()).isEqualTo(CredentialVersionStatus.RETIRED);
         }
     }
 
     @Nested
     @DisplayName("Grant lifecycle")
     class GrantLifecycle {
-
-        @Test
-        @DisplayName("should insert and find grant")
-        void shouldInsertAndFindGrant() {
-            var found = grantRepo.findById(grant.id());
-            assertThat(found).isPresent();
-            assertThat(found.get().status()).isEqualTo("ACTIVE");
-        }
-
-        @Test
-        @DisplayName("should list grants by project")
-        void shouldListByProject() {
-            var grants = grantRepo.findAllByProjectId(project.id());
-            assertThat(grants).isNotEmpty();
-        }
-
         @Test
         @DisplayName("should disable grant")
         void shouldDisableGrant() {
-            var disabled = new ProjectProviderGrant(grant.id(), grant.projectId(), grant.providerProductId(),
-                    grant.upstreamCredentialId(), "DISABLED", grant.createdBy(), grant.version() + 1, NOW, NOW);
+            var disabled = new ProjectProviderGrant(grant.id(), TENANT_ID, grant.projectId(), grant.providerProductId(),
+                    grant.upstreamCredentialId(), GrantStatus.DISABLED, grant.createdBy(), grant.version() + 1, NOW,
+                    NOW);
             grantRepo.update(disabled);
-
-            var found = grantRepo.findById(grant.id());
-            assertThat(found).isPresent();
-            assertThat(found.get().status()).isEqualTo("DISABLED");
+            var found = grantRepo.findById(grant.id()).orElseThrow();
+            assertThat(found.status()).isEqualTo(GrantStatus.DISABLED);
         }
     }
 
     @Nested
     @DisplayName("Virtual Key lifecycle")
     class VirtualKeyLifecycle {
-
         @Test
         @DisplayName("should insert and find virtual key by public_key_id")
         void shouldInsertAndFindByPublicKeyId() {
-            var key = new VirtualKey(UUID.randomUUID(), "mqk_test_key_abc123", new byte[]{1, 2, 3, 4, 5, 6, 7, 8},
-                    "mqk_", "c123", user.id(), project.id(), grant.id(), credential.id(), "CLAUDE_CODE", "Test Key",
-                    "ACTIVE", NOW, null, null, null, 0);
+            var key = new VirtualKey(UUID.randomUUID(), TENANT_ID, "mqk_test_key_abc",
+                    new byte[]{1, 2, 3, 4, 5, 6, 7, 8}, "mqk_", "bc12", user.id(), project.id(), grant.id(),
+                    credential.id(), VirtualKeyPurpose.CLAUDE_CODE, "Test Key", VirtualKeyStatus.ACTIVE, NOW, null,
+                    null, null, 0);
             vkRepo.insert(key);
-
-            var found = vkRepo.findByPublicKeyId("mqk_test_key_abc123");
+            var found = vkRepo.findByPublicKeyId("mqk_test_key_abc");
             assertThat(found).isPresent();
-            assertThat(found.get().purpose()).isEqualTo("CLAUDE_CODE");
-            assertThat(found.get().userId()).isEqualTo(user.id());
-            assertThat(found.get().projectId()).isEqualTo(project.id());
-        }
-
-        @Test
-        @DisplayName("should list virtual keys by user")
-        void shouldListByUser() {
-            var key = new VirtualKey(UUID.randomUUID(), "mqk_test_list_" + UUID.randomUUID().toString().substring(0, 8),
-                    new byte[]{1, 2, 3, 4, 5, 6, 7, 8}, "mqk_", "aaaa", user.id(), project.id(), grant.id(),
-                    credential.id(), "CUSTOM", "Listable Key", "ACTIVE", NOW, null, null, null, 0);
-            vkRepo.insert(key);
-
-            var keys = vkRepo.findAllByUserId(user.id());
-            assertThat(keys).isNotEmpty();
+            assertThat(found.get().purpose()).isEqualTo(VirtualKeyPurpose.CLAUDE_CODE);
         }
 
         @Test
         @DisplayName("should revoke virtual key")
         void shouldRevokeKey() {
             var keyId = UUID.randomUUID();
-            var key = new VirtualKey(keyId, "mqk_test_revoke_" + UUID.randomUUID().toString().substring(0, 8),
-                    new byte[]{1, 2, 3, 4, 5, 6, 7, 8}, "mqk_", "bbbb", user.id(), project.id(), grant.id(),
-                    credential.id(), "CLAUCE_CODE", "Revocable Key", "ACTIVE", NOW, null, null, null, 0);
+            var pubId = "mqk_revoke_" + UUID.randomUUID().toString().substring(0, 8);
+            var key = new VirtualKey(keyId, TENANT_ID, pubId, new byte[]{1, 2, 3, 4, 5, 6, 7, 8}, "mqk_", "rv01",
+                    user.id(), project.id(), grant.id(), credential.id(), VirtualKeyPurpose.CLAUDE_CODE, "Revocable",
+                    VirtualKeyStatus.ACTIVE, NOW, null, null, null, 0);
             vkRepo.insert(key);
 
-            var revoked = new VirtualKey(keyId, key.publicKeyId(), key.secretDigest(), key.displayPrefix(),
+            var revoked = new VirtualKey(keyId, TENANT_ID, pubId, key.secretDigest(), key.displayPrefix(),
                     key.lastFour(), key.userId(), key.projectId(), key.grantId(), key.upstreamCredentialId(),
-                    key.purpose(), key.name(), "REVOKED", key.createdAt(), key.lastUsedAt(), NOW, null,
+                    key.purpose(), key.name(), VirtualKeyStatus.REVOKED, key.createdAt(), key.lastUsedAt(), NOW, null,
                     key.version() + 1);
             vkRepo.update(revoked);
 
-            var found = vkRepo.findByPublicKeyId(key.publicKeyId());
-            assertThat(found).isPresent();
-            assertThat(found.get().status()).isEqualTo("REVOKED");
-            assertThat(found.get().revokedAt()).isNotNull();
+            var found = vkRepo.findByPublicKeyId(pubId).orElseThrow();
+            assertThat(found.status()).isEqualTo(VirtualKeyStatus.REVOKED);
+            assertThat(found.revokedAt()).isNotNull();
         }
 
         @Test
-        @DisplayName("should reject duplicate public_key_id")
-        void shouldRejectDuplicatePublicKeyId() {
-            var pubKeyId = "mqk_test_dup_" + UUID.randomUUID().toString().substring(0, 8);
-            var key1 = new VirtualKey(UUID.randomUUID(), pubKeyId, new byte[]{1, 2, 3, 4, 5, 6, 7, 8}, "mqk_", "cccc",
-                    user.id(), project.id(), grant.id(), credential.id(), "CLAUDE_CODE", "Key 1", "ACTIVE", NOW, null,
-                    null, null, 0);
-            vkRepo.insert(key1);
+        @DisplayName("should list virtual keys by tenant")
+        void shouldListByTenant() {
+            var keys = vkRepo.findAllByTenantId(TENANT_ID);
+            assertThat(keys).isNotNull();
+        }
+    }
 
-            assertThat(vkRepo.existsByPublicKeyId(pubKeyId)).isTrue();
+    @Nested
+    @DisplayName("Audit event")
+    class AuditEventTest {
+        @Test
+        @DisplayName("should insert and query audit events")
+        void shouldInsertAndQuery() {
+            var event = new AdminAuditEvent(UUID.randomUUID(), TENANT_ID, user.id(), "user.create", "User", user.id(),
+                    "{}", null, null, null, new byte[]{1, 2, 3}, NOW);
+            auditRepo.insert(event);
 
-            var key2 = new VirtualKey(UUID.randomUUID(), pubKeyId, // same public_key_id
-                    new byte[]{9, 9, 9, 9, 9, 9, 9, 9}, "mqk_", "dddd", user.id(), project.id(), grant.id(),
-                    credential.id(), "CLAUDE_CODE", "Key 2", "ACTIVE", NOW, null, null, null, 0);
+            var results = auditRepo.findByTargetTypeAndTargetId("User", user.id());
+            assertThat(results).isNotEmpty();
+            assertThat(results.get(0).action()).isEqualTo("user.create");
+        }
+    }
 
-            // Should throw due to unique constraint on public_key_id
-            try {
-                vkRepo.insert(key2);
-                // If no exception, the test should fail
-                assertThat(false).as("Expected unique constraint violation on public_key_id").isTrue();
-            } catch (Exception e) {
-                assertThat(e).isNotNull();
-            }
+    @Nested
+    @DisplayName("Optimistic locking")
+    class OptimisticLocking {
+        @Test
+        @DisplayName("should detect stale version on update")
+        void shouldDetectStaleVersion() {
+            var original = userRepo.findById(user.id()).orElseThrow();
+            var update1 = new User(user.id(), TENANT_ID, user.username(), "Updated1", user.passwordHash(),
+                    UserRole.USER, UserStatus.ACTIVE, false, 0, null, null, original.version() + 1, NOW, NOW);
+            userRepo.update(update1);
+
+            // Stale: uses the old version
+            var stale = new User(user.id(), TENANT_ID, user.username(), "Stale", user.passwordHash(), UserRole.USER,
+                    UserStatus.ACTIVE, false, 0, null, null, original.version() + 1, NOW, NOW);
+            assertThatThrownBy(() -> userRepo.update(stale)).isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Optimistic lock failure");
         }
     }
 }

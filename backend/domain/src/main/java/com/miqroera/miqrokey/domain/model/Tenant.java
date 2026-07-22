@@ -12,7 +12,6 @@ import java.util.UUID;
  * multi-tenant migration later.
  * </p>
  */
-public record Tenant(UUID id, String code, String name, String status, Instant createdAt, Instant updatedAt) {
-    public static final String STATUS_ACTIVE = "ACTIVE";
-    public static final String STATUS_DISABLED = "DISABLED";
+public record Tenant(UUID id, String code, String name, TenantStatus status, long version, Instant createdAt,
+        Instant updatedAt) {
 }

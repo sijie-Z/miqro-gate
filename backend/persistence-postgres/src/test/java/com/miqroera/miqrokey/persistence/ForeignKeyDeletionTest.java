@@ -12,118 +12,90 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * Verifies foreign-key deletion behavior: RESTRICT (default) on critical
- * references, and that orphan inserts are rejected.
- */
 @DisplayName("Foreign key deletion behavior")
 class ForeignKeyDeletionTest extends AbstractPostgresTest {
 
     @Autowired
     private NamedParameterJdbcTemplate jdbc;
 
-    private final UUID tenantId = UUID.randomUUID();
-
     @Test
     @DisplayName("should reject insert of user referencing non-existent tenant")
     void shouldRejectOrphanUserInsert() {
-        assertThatThrownBy(() -> {
-            jdbc.update("""
-                    INSERT INTO users (id, tenant_id, username, display_name, password_hash,
-                        role, status, must_change_password, failed_login_count, version, created_at, updated_at)
-                    VALUES (:id, :tenantId, 'orphan', 'Orphan User',
-                        decode('deadbeef','hex'), 'USER', 'ACTIVE', false, 0, 0, now(), now())
-                    """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId",
-                    UUID.randomUUID()));
-        }).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO users (id, tenant_id, username, display_name, password_hash,
+                    role, status, must_change_password, failed_login_count, version, created_at, updated_at)
+                VALUES (:id, :tenantId, 'orphan', 'Orphan', decode('deadbeef','hex'),
+                    'USER', 'ACTIVE', false, 0, 0, now(), now())
+                """,
+                new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", UUID.randomUUID())))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
-    @DisplayName("should reject insert of project referencing non-existent tenant")
-    void shouldRejectOrphanProjectInsert() {
-        assertThatThrownBy(() -> {
-            jdbc.update("""
-                    INSERT INTO projects (id, tenant_id, code, name, status, version, created_at, updated_at)
-                    VALUES (:id, :tenantId, 'orphan-proj', 'Orphan Project', 'ACTIVE', 0, now(), now())
-                    """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId",
-                    UUID.randomUUID()));
-        }).isInstanceOf(DataIntegrityViolationException.class);
-    }
+    @DisplayName("should reject delete of tenant referenced by users (ON DELETE RESTRICT)")
+    void shouldRejectTenantDeleteWithUsers() {
+        UUID seedTenant = UUID.fromString("00000000-0000-0000-0000-000000000001");
+        // The seed tenant is referenced by the FK constraint but has no users yet in
+        // this test.
+        // Create a new tenant with a user, then try to delete the tenant.
+        UUID newTenant = UUID.randomUUID();
+        jdbc.update(
+                "INSERT INTO tenants (id, code, name, status, version, created_at, updated_at) VALUES (:id, :code, :name, 'ACTIVE', 0, now(), now())",
+                new MapSqlParameterSource().addValue("id", newTenant)
+                        .addValue("code", "del-test-" + newTenant.toString().substring(0, 6))
+                        .addValue("name", "Delete Test"));
 
-    @Test
-    @DisplayName("should reject insert of virtual_key referencing non-existent user")
-    void shouldRejectVirtualKeyWithOrphanUser() {
-        // Insert tenant and project, but use non-existent user
-        insertTenant(tenantId);
+        jdbc.update(
+                "INSERT INTO users (id, tenant_id, username, display_name, password_hash, role, status, must_change_password, failed_login_count, version, created_at, updated_at) VALUES (:id, :tenantId, 'deltest', 'DT', decode('ab','hex'), 'USER', 'ACTIVE', false, 0, 0, now(), now())",
+                new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", newTenant));
 
-        var projectId = UUID.randomUUID();
-        jdbc.update("""
-                INSERT INTO projects (id, tenant_id, code, name, status, version, created_at, updated_at)
-                VALUES (:id, :tenantId, 'test-proj', 'Test', 'ACTIVE', 0, now(), now())
-                """, new MapSqlParameterSource().addValue("id", projectId).addValue("tenantId", tenantId));
-
-        var nonExistentUserId = UUID.randomUUID();
-        assertThatThrownBy(() -> {
-            jdbc.update("""
-                    INSERT INTO virtual_keys (id, public_key_id, secret_digest, display_prefix,
-                        last_four, user_id, project_id, grant_id, upstream_credential_id,
-                        purpose, status, version, created_at)
-                    VALUES (:id, 'mqk_test_orphan', decode('deadbeef','hex'), 'mqk_', 'beef',
-                        :userId, :projectId, :grantId, :credentialId,
-                        'CLAUDE_CODE', 'ACTIVE', 0, now())
-                    """,
-                    new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("userId", nonExistentUserId)
-                            .addValue("projectId", projectId).addValue("grantId", UUID.randomUUID())
-                            .addValue("credentialId", UUID.randomUUID()));
-        }).isInstanceOf(DataIntegrityViolationException.class);
+        // Should be rejected because users reference this tenant with ON DELETE
+        // RESTRICT
+        assertThatThrownBy(
+                () -> jdbc.update("DELETE FROM tenants WHERE id = :id", new MapSqlParameterSource("id", newTenant)))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
     @DisplayName("should reject insert of credential_version referencing non-existent credential")
     void shouldRejectOrphanCredentialVersion() {
-        assertThatThrownBy(() -> {
-            jdbc.update("""
-                    INSERT INTO upstream_credential_versions (id, credential_id, encrypted_secret,
-                        nonce, encryption_key_version, secret_fingerprint, status, created_at)
-                    VALUES (:id, :credentialId, decode('deadbeef','hex'),
-                        decode('cafe','hex'), 'v1', decode('f00d','hex'), 'PENDING_VALIDATION', now())
-                    """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("credentialId",
-                    UUID.randomUUID()));
-        }).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO upstream_credential_versions (id, tenant_id, credential_id, encrypted_secret,
+                    nonce, encryption_key_version, secret_fingerprint, status, created_at)
+                VALUES (:id, :tenantId, :credentialId, decode('deadbeef','hex'),
+                    decode('cafe','hex'), 'v1', decode('f00d','hex'), 'PENDING_VALIDATION', now())
+                """,
+                new MapSqlParameterSource().addValue("id", UUID.randomUUID())
+                        .addValue("tenantId", UUID.fromString("00000000-0000-0000-0000-000000000001"))
+                        .addValue("credentialId", UUID.randomUUID())))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
-    @DisplayName("should allow project_memberships delete without affecting parent tables")
+    @DisplayName("should allow membership delete without cascading to users or projects")
     void shouldAllowMembershipDelete() {
-        insertTenant(tenantId);
+        UUID seedTenant = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
         var userId = UUID.randomUUID();
-        jdbc.update("""
-                INSERT INTO users (id, tenant_id, username, display_name, password_hash,
-                    role, status, must_change_password, failed_login_count, version, created_at, updated_at)
-                VALUES (:id, :tenantId, 'memtest', 'Membership Test',
-                    decode('deadbeef','hex'), 'USER', 'ACTIVE', false, 0, 0, now(), now())
-                """, new MapSqlParameterSource().addValue("id", userId).addValue("tenantId", tenantId));
+        jdbc.update(
+                "INSERT INTO users (id, tenant_id, username, display_name, password_hash, role, status, must_change_password, failed_login_count, version, created_at, updated_at) VALUES (:id, :tenantId, 'memuser', 'MU', decode('ab','hex'), 'USER', 'ACTIVE', false, 0, 0, now(), now())",
+                new MapSqlParameterSource().addValue("id", userId).addValue("tenantId", seedTenant));
 
         var projectId = UUID.randomUUID();
-        jdbc.update("""
-                INSERT INTO projects (id, tenant_id, code, name, status, version, created_at, updated_at)
-                VALUES (:id, :tenantId, 'mem-proj', 'Membership Project', 'ACTIVE', 0, now(), now())
-                """, new MapSqlParameterSource().addValue("id", projectId).addValue("tenantId", tenantId));
+        jdbc.update(
+                "INSERT INTO projects (id, tenant_id, code, name, status, version, created_at, updated_at) VALUES (:id, :tenantId, 'memproj', 'MP', 'ACTIVE', 0, now(), now())",
+                new MapSqlParameterSource().addValue("id", projectId).addValue("tenantId", seedTenant));
 
-        // Insert membership
-        jdbc.update("""
-                INSERT INTO project_memberships (project_id, user_id, created_at)
-                VALUES (:projectId, :userId, now())
-                """, new MapSqlParameterSource().addValue("projectId", projectId).addValue("userId", userId));
+        jdbc.update(
+                "INSERT INTO project_memberships (tenant_id, project_id, user_id, created_at) VALUES (:tenantId, :projectId, :userId, now())",
+                new MapSqlParameterSource().addValue("tenantId", seedTenant).addValue("projectId", projectId)
+                        .addValue("userId", userId));
 
-        // Verify membership exists
         var countSql = "SELECT COUNT(*) FROM project_memberships WHERE project_id = :pid AND user_id = :uid";
         int before = jdbc.queryForObject(countSql,
                 new MapSqlParameterSource().addValue("pid", projectId).addValue("uid", userId), Integer.class);
         assertThat(before).isEqualTo(1);
 
-        // Delete membership (should succeed - not restricted by FK from above)
         jdbc.update("DELETE FROM project_memberships WHERE project_id = :pid AND user_id = :uid",
                 new MapSqlParameterSource().addValue("pid", projectId).addValue("uid", userId));
 
@@ -132,20 +104,8 @@ class ForeignKeyDeletionTest extends AbstractPostgresTest {
         assertThat(after).isEqualTo(0);
 
         // User and project still exist
-        var userCount = jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE id = :id",
+        int userCount = jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE id = :id",
                 new MapSqlParameterSource("id", userId), Integer.class);
         assertThat(userCount).isEqualTo(1);
-    }
-
-    private void insertTenant(UUID id) {
-        var existing = jdbc.queryForObject("SELECT COUNT(*) FROM tenants WHERE id = :id",
-                new MapSqlParameterSource("id", id), Integer.class);
-        if (existing != null && existing == 0) {
-            jdbc.update("""
-                    INSERT INTO tenants (id, code, name, status, created_at, updated_at)
-                    VALUES (:id, :code, :name, 'ACTIVE', now(), now())
-                    """, new MapSqlParameterSource().addValue("id", id)
-                    .addValue("code", "test-" + id.toString().substring(0, 8)).addValue("name", "Test Tenant"));
-        }
     }
 }

@@ -3,29 +3,23 @@ package com.miqroera.miqrokey.persistence;
 import org.junit.jupiter.api.Tag;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-/**
- * Base class for Testcontainers PostgreSQL integration tests.
- *
- * <p>
- * Spins up a real PostgreSQL container per test class (shared), applies Flyway
- * V1 migration, and provides a full Spring JDBC context with all repository
- * implementations.
- * </p>
- */
 @SpringBootTest(classes = PersistenceTestApplication.class)
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
 @Tag("integration")
+@ActiveProfiles("test")
 public abstract class AbstractPostgresTest {
 
     @Container
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:17.6-alpine")
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
+            "postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94")
             .withDatabaseName("miqrokey_test").withUsername("miqrokey_test").withPassword("miqrokey_test");
 
     @DynamicPropertySource

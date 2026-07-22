@@ -20,6 +20,8 @@ public interface VirtualKeyRepository {
 
     List<VirtualKey> findAllByGrantId(UUID grantId);
 
+    List<VirtualKey> findAllByTenantId(UUID tenantId);
+
     VirtualKey insert(VirtualKey virtualKey);
 
     VirtualKey update(VirtualKey virtualKey);

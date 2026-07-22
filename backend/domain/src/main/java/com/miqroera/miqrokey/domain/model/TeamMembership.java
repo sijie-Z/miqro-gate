@@ -6,5 +6,5 @@ import java.util.UUID;
 /**
  * A membership link between a team and a user.
  */
-public record TeamMembership(UUID teamId, UUID userId, UUID createdBy, Instant createdAt) {
+public record TeamMembership(UUID tenantId, UUID teamId, UUID userId, UUID createdBy, Instant createdAt) {
 }

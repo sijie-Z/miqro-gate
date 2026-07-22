@@ -4,12 +4,12 @@
 
 ## Current State
 
-- Project phase: `PHASE_0`
+- Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `G1.1`
-- Goal status: `DONE`
+- Goal status: `IN_PROGRESS`
 - Last updated: `2026-07-22`
-- Branch: `goal/g0.4-cc-switch-manual-compatibility-poc`
+- Branch: `goal/g1.1-postgresql-schema-and-persistence`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
 
 ## Completed
@@ -351,61 +351,56 @@ PASS is claimed.
 - No real provider integration performed. All protocol behaviors are MOCK_VERIFIED.
 - Docker Compose not validated locally (ENV_BLOCKED); CI must confirm.
 
-## G1.1 — PostgreSQL schema and persistence
+## G1.1 — PostgreSQL schema and persistence (REPAIR IN PROGRESS)
 
-### Outcome
+### Review repairs applied (2026-07-22)
 
-- **Flyway V1 migration** (`V1__core_tables.sql`) creates 15 core tables: tenants, users, teams, team_memberships, projects, project_memberships, providers, provider_products, upstream_subscriptions, plan_seats, upstream_credentials, upstream_credential_versions, project_provider_grants, project_provider_grant_models, virtual_keys, virtual_key_models, admin_audit_events.
-- All PostgreSQL conventions followed: uuid, timestamptz (UTC), numeric(24,10), varchar CHECK constraints (no enums), bytea for secret material, version bigint, tenant_id on all tenant-scoped tables.
-- Foreign keys, unique constraints, partial unique indexes, CHECK constraints fully implemented per database-schema.md. Deletion semantics: RESTRICT on FK, soft disable for users/projects, RETIRE for credential versions, append-only for audit.
-- **Domain model**: 17 immutable Java records in `com.miqroera.miqrokey.domain.model` with status constants. Zero Spring/JPA/Jackson dependency.
-- **Repository interfaces**: 11 interfaces in `com.miqroera.miqrokey.domain.repository`.
-- **JDBC implementations**: 7 concrete repository implementations in `com.miqroera.miqrokey.persistence.repository` using Spring JDBC NamedParameterJdbcTemplate with @Repository/@Transactional.
-- **PersistenceConfig**: Provides NamedParameterJdbcTemplate and PlatformTransactionManager beans.
-- **Testcontainers integration tests** (5 test classes, compiled, tagged `@Tag("integration")`):
-  - `SchemaMigrationTest`: migration from empty DB, Flyway history, column requirements, no plaintext secret columns.
-  - `ConstraintAndIndexTest`: unique constraints, partial unique indexes, FK constraints, CHECK constraints.
-  - `ForeignKeyDeletionTest`: FK enforcement (orphan rejection), membership delete without cascading.
-  - `RepositoryIntegrationTest`: CRUD and lifecycle for Tenant, User, Project, Membership, Credential Version, Grant, Virtual Key creation/revocation.
-  - `TenantProjectIsolationTest`: cross-tenant isolation, same username/code in different tenants, membership isolation.
-- Integration tests excluded from default surefire via `<excludedGroups>integration</excludedGroups>`. CI enables them with `-Pintegration` profile.
-- Virtual Key has fixed mapping to Grant/Credential per domain contract. No plaintext key column.
+Addressing 10 review blockers on branch `goal/g1.1-postgresql-schema-and-persistence`:
 
-### Verification
+1. **CI integration profile**: Linux CI now runs `-Pintegration` to execute Testcontainers tests. PostgreSQL image pinned to same digest (`sha256:ef257d85...`) as `deploy/compose.yaml`.
+2. **Integration suite fixes**: Fixed `CLAUCE_CODE` → `CLAUDE_CODE` typo; added missing repository beans; corrected FK metadata query/assertions; added proper exception assertions.
+3. **Database-level tenant isolation**: Added `tenant_id UUID NOT NULL` to all tenant-owned core tables (team_memberships, plan_seats, upstream_subscriptions, upstream_credentials, upstream_credential_versions, project_provider_grants, project_provider_grant_models, virtual_keys, virtual_key_models, admin_audit_events). Used composite `UNIQUE(tenant_id, id)` constraints and composite `FOREIGN KEY (tenant_id, parent_id) REFERENCES parent(tenant_id, id)` for cross-tenant prevention. Added DB triggers for Virtual Key mapping consistency. Added negative integration tests.
+4. **Seed tenant**: Inserted deterministic fixed tenant `00000000-0000-0000-0000-000000000001` (code `default`) in V1 migration. Added `version` to `tenants` and all mutable aggregate roots.
+5. **Deletion semantics**: All business FKs now explicitly use `ON DELETE RESTRICT`. Added missing FK for `active_version_id` (upstream_credentials → upstream_credential_versions) and `replaced_by_key_id` (virtual_keys → virtual_keys). Added deletion behavior tests.
+6. **Fixed mapping semantics**: DB triggers enforce Virtual Key's grant/credential/project match; grant credential must belong to a subscription of the same provider product. Added negative tests for invalid combinations.
+7. **Repository completeness**: All 13 repository interfaces now have Spring JDBC `@Repository` implementations: Tenant, User, Team, Provider, ProviderProduct, UpstreamSubscription, UpstreamCredential, UpstreamCredentialVersion, Project, ProjectMembership, ProjectProviderGrant, VirtualKey, AdminAuditEvent. No autowiring gaps remain.
+8. **Optimistic locking**: All mutable update methods use tenant-scoped `WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion`, increment version in SQL, verify update count (==1), throw on conflict. Added stale-version integration tests.
+9. **Closed types and defensive copying**: All status/role/purpose/topology String fields replaced with 19 documented Java enums (`TenantStatus`, `UserRole`, `UserStatus`, `TeamStatus`, `ProjectStatus`, `ProviderStatus`, `BillingMode`, `PlanScope`, `CredentialTopology`, `QuotaTopology`, `ImplementationStatus`, `BalanceAuthority`, `SubscriptionStatus`, `StatusSource`, `SeatStatus`, `CredentialStatus`, `CredentialVersionStatus`, `GrantStatus`, `VirtualKeyPurpose`, `VirtualKeyStatus`). All byte[] fields defensively copied in compact constructors and accessor overrides.
+10. **Progress.md corrected**: Phase set to `PHASE_1`, branch corrected to `goal/g1.1-postgresql-schema-and-persistence`, status `IN_PROGRESS` until Linux CI green. Table/interface/implementation/test counts accurate.
 
-- `.\mvnw.cmd verify --batch-mode`: **BUILD SUCCESS** — 223 tests, 0 failures, 0 errors, 0 skipped
-  - domain: 1 test / persistence-postgres: 0 tests (5 excluded) / control-plane: 2 / test-support: 109 / gateway: 111
-- Spotless check: PASS / Maven Enforcer: PASS
-- Frontend: npm ci (0 vulns), lint, typecheck, test (1), build — all PASS
+### Current schema (V1 migration)
+
+18 tables: tenants, users, teams, team_memberships, projects, project_memberships, providers, provider_products, upstream_subscriptions, plan_seats, upstream_credentials, upstream_credential_versions, project_provider_grants, project_provider_grant_models, virtual_keys, virtual_key_models, admin_audit_events (+ flyway_schema_history).
+
+### Current architecture
+
+- **Domain model**: 17 records + 19 enums in `com.miqroera.miqrokey.domain.model`
+- **Repository interfaces**: 13 in `com.miqroera.miqrokey.domain.repository`
+- **Repository implementations**: 13 in `com.miqroera.miqrokey.persistence.repository`
+- **Integration tests**: 7 test classes (8 including AbstractPostgresTest): SchemaMigrationTest, ConstraintAndIndexTest, ForeignKeyDeletionTest, RepositoryIntegrationTest, TenantProjectIsolationTest, CrossTenantIsolationTest, FixedMappingSemanticsTest
+
+### Local verification (Windows, Java 21 Temurin, Dockerless)
+
+- `.\mvnw.cmd verify --batch-mode`: **BUILD SUCCESS** — 223 non-integration tests PASS
+- `.\mvnw.cmd spotless:check`: PASS (all modules)
+- `npm --prefix frontend ci && npm run lint && npm run typecheck && npm run test && npm run build`: PASS
 - `git diff --check`: PASS
-- `docker compose -f deploy/compose.yaml config`: ENV_BLOCKED
+- `docker compose -f deploy/compose.yaml config`: ENV_BLOCKED (Docker not installed locally; CI validates)
 
-### Files changed
+### Files changed (repair)
 
-- `V1__core_tables.sql`: 399 lines, 15 core tables.
-- `domain/model/`: 17 new domain record classes.
-- `domain/repository/`: 11 new repository interfaces.
-- `persistence/repository/`: 7 new JDBC implementations.
-- `persistence/PersistenceConfig.java`: Spring configuration.
-- `persistence-postgres/pom.xml`: Added spring-boot-starter-jdbc, surefire config.
-- `persistence-postgres/src/test/`: 6 test files (AbstractPostgresTest + 5 test classes).
-- `docs/progress.md`: Updated.
-
-### Security/data impact
-
-- No plaintext secrets. virtual_keys: secret_digest only. upstream_credentials: secret_fingerprint only. Encrypted secrets in upstream_credential_versions (bytea).
-- All FK RESTRICT on delete. admin_audit_events no FK cascade.
-- Soft disable for users/projects; credential versions RETIRE.
-- No real credentials or PII in tests.
-
-### ENV_BLOCKED
-
-- Docker unavailable on Windows. Testcontainers tests compile but need CI Linux Docker with `-Pintegration`.
-- docker compose config needs CI.
+- `V1__core_tables.sql`: Complete rewrite with tenant_id on all tables, composite FKs, seed tenant, triggers
+- `domain/model/*.java`: 17 records updated with enums, defensive byte copying, tenantId
+- `domain/model/*Status.java` etc.: 19 new enum files
+- `domain/repository/*.java`: Updated interfaces, added VirtualKeyRepository.findAllByTenantId
+- `persistence/repository/*Impl.java`: All 13 implementations (7 updated + 6 new)
+- `persistence-postgres/src/test/**`: 7 test classes (all rewritten)
+- `.github/workflows/ci.yml`: Linux CI now uses `-Pintegration`
+- `docs/progress.md`: Updated (this file)
 
 ### Remaining risks
 
-- Integration tests await CI (GitHub Actions Linux Docker).
+- Integration tests run only on Linux CI with Docker; Windows Dockerless local verification passes only non-integration tests.
 - G1.2 populates crypto columns with real AES-256-GCM/HMAC.
 - user_sessions, request_usage_records, quota_snapshots, cost_allocations deferred.
 

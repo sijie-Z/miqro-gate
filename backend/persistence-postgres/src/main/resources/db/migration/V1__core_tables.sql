@@ -8,8 +8,9 @@
 --   - Monetary values use numeric(24,10).
 --   - Enum-like fields use varchar with CHECK constraints (not PostgreSQL enums).
 --   - All mutable aggregate roots include a version bigint for optimistic locking.
---   - All tenant-scoped tables include tenant_id uuid not null.
+--   - ALL tenant-scoped tables include tenant_id uuid NOT NULL.
 --   - Secret ciphertext, nonce, and digests stored as bytea.
+--   - Foreign keys default to ON DELETE RESTRICT (no silent cascade).
 -- ============================================================================
 
 -- ============================================================================
@@ -21,18 +22,24 @@ CREATE TABLE tenants (
     name        varchar(200) NOT NULL,
     status      varchar(32) NOT NULL DEFAULT 'ACTIVE'
                 CHECK (status IN ('ACTIVE', 'DISABLED')),
+    version     bigint      NOT NULL DEFAULT 0,
     created_at  timestamptz NOT NULL DEFAULT now(),
     updated_at  timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE UNIQUE INDEX uq_tenants_code ON tenants (code);
 
+-- Seed the default tenant so foreign key constraints always have a valid target.
+-- The UUID is deterministic and documented for first-version single-tenant use.
+INSERT INTO tenants (id, code, name, status, version, created_at, updated_at)
+VALUES ('00000000-0000-0000-0000-000000000001', 'default', 'Default Tenant', 'ACTIVE', 0, now(), now());
+
 -- ============================================================================
 -- 2. Users
 -- ============================================================================
 CREATE TABLE users (
     id                  uuid         PRIMARY KEY,
-    tenant_id           uuid         NOT NULL REFERENCES tenants (id),
+    tenant_id           uuid         NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
     username            varchar(128) NOT NULL,
     display_name        varchar(200) NOT NULL,
     password_hash       bytea        NOT NULL,
@@ -56,12 +63,15 @@ CREATE UNIQUE INDEX uq_users_tenant_username
 CREATE INDEX idx_users_tenant_id ON users (tenant_id);
 CREATE INDEX idx_users_status ON users (tenant_id, status);
 
+-- Composite unique for cross-tenant FK references
+ALTER TABLE users ADD CONSTRAINT uq_users_tenant_id UNIQUE (tenant_id, id);
+
 -- ============================================================================
 -- 3. Teams and Team Memberships
 -- ============================================================================
 CREATE TABLE teams (
     id          uuid         PRIMARY KEY,
-    tenant_id   uuid         NOT NULL REFERENCES tenants (id),
+    tenant_id   uuid         NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
     name        varchar(200) NOT NULL,
     description text,
     status      varchar(32)  NOT NULL DEFAULT 'ACTIVE'
@@ -72,23 +82,30 @@ CREATE TABLE teams (
 );
 
 CREATE INDEX idx_teams_tenant_id ON teams (tenant_id);
+ALTER TABLE teams ADD CONSTRAINT uq_teams_tenant_id UNIQUE (tenant_id, id);
 
 CREATE TABLE team_memberships (
-    team_id     uuid        NOT NULL REFERENCES teams (id),
-    user_id     uuid        NOT NULL REFERENCES users (id),
+    tenant_id   uuid        NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
+    team_id     uuid        NOT NULL,
+    user_id     uuid        NOT NULL,
     created_by  uuid,
     created_at  timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (team_id, user_id)
+    PRIMARY KEY (team_id, user_id),
+    CONSTRAINT fk_team_memberships_team
+        FOREIGN KEY (tenant_id, team_id) REFERENCES teams (tenant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT fk_team_memberships_user
+        FOREIGN KEY (tenant_id, user_id) REFERENCES users (tenant_id, id) ON DELETE RESTRICT
 );
 
 CREATE INDEX idx_team_memberships_user_id ON team_memberships (user_id);
+CREATE INDEX idx_team_memberships_tenant ON team_memberships (tenant_id);
 
 -- ============================================================================
 -- 4. Projects and Project Memberships
 -- ============================================================================
 CREATE TABLE projects (
     id          uuid         PRIMARY KEY,
-    tenant_id   uuid         NOT NULL REFERENCES tenants (id),
+    tenant_id   uuid         NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
     code        varchar(64)  NOT NULL,
     name        varchar(200) NOT NULL,
     description text,
@@ -102,19 +119,26 @@ CREATE TABLE projects (
 
 CREATE UNIQUE INDEX uq_projects_tenant_code ON projects (tenant_id, code);
 CREATE INDEX idx_projects_tenant_id ON projects (tenant_id);
+ALTER TABLE projects ADD CONSTRAINT uq_projects_tenant_id UNIQUE (tenant_id, id);
 
 CREATE TABLE project_memberships (
-    project_id  uuid        NOT NULL REFERENCES projects (id),
-    user_id     uuid        NOT NULL REFERENCES users (id),
+    tenant_id   uuid        NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
+    project_id  uuid        NOT NULL,
+    user_id     uuid        NOT NULL,
     created_by  uuid,
     created_at  timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (project_id, user_id)
+    PRIMARY KEY (project_id, user_id),
+    CONSTRAINT fk_project_memberships_project
+        FOREIGN KEY (tenant_id, project_id) REFERENCES projects (tenant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT fk_project_memberships_user
+        FOREIGN KEY (tenant_id, user_id) REFERENCES users (tenant_id, id) ON DELETE RESTRICT
 );
 
 CREATE INDEX idx_project_memberships_user_id ON project_memberships (user_id);
+CREATE INDEX idx_project_memberships_tenant ON project_memberships (tenant_id);
 
 -- ============================================================================
--- 5. Providers
+-- 5. Providers (global — non-tenant-scoped catalog reference)
 -- ============================================================================
 CREATE TABLE providers (
     id                 uuid          PRIMARY KEY,
@@ -133,11 +157,11 @@ CREATE TABLE providers (
 CREATE UNIQUE INDEX uq_providers_slug ON providers (slug);
 
 -- ============================================================================
--- 6. Provider Products
+-- 6. Provider Products (global catalog — not tenant-scoped)
 -- ============================================================================
 CREATE TABLE provider_products (
     id                       uuid          PRIMARY KEY,
-    provider_id              uuid          NOT NULL REFERENCES providers (id),
+    provider_id              uuid          NOT NULL REFERENCES providers (id) ON DELETE RESTRICT,
     product_code             varchar(64)   NOT NULL,
     display_name             varchar(200)  NOT NULL,
     billing_mode             varchar(32)   NOT NULL
@@ -178,11 +202,12 @@ CREATE UNIQUE INDEX uq_provider_products_provider_code
 CREATE INDEX idx_provider_products_provider_id ON provider_products (provider_id);
 
 -- ============================================================================
--- 7. Upstream Subscriptions
+-- 7. Upstream Subscriptions (tenant-scoped)
 -- ============================================================================
 CREATE TABLE upstream_subscriptions (
     id                  uuid          PRIMARY KEY,
-    provider_product_id uuid          NOT NULL REFERENCES provider_products (id),
+    tenant_id           uuid          NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
+    provider_product_id uuid          NOT NULL REFERENCES provider_products (id) ON DELETE RESTRICT,
     name                varchar(200)  NOT NULL,
     external_account_ref varchar(256),
     billing_mode        varchar(32)   NOT NULL
@@ -212,15 +237,18 @@ CREATE TABLE upstream_subscriptions (
 
 CREATE INDEX idx_upstream_subs_product_id ON upstream_subscriptions (provider_product_id);
 CREATE INDEX idx_upstream_subs_status ON upstream_subscriptions (status);
+CREATE INDEX idx_upstream_subs_tenant_id ON upstream_subscriptions (tenant_id);
+ALTER TABLE upstream_subscriptions ADD CONSTRAINT uq_upstream_subs_tenant_id UNIQUE (tenant_id, id);
 
 -- ============================================================================
--- 8. Plan Seats
+-- 8. Plan Seats (tenant-scoped)
 -- ============================================================================
 CREATE TABLE plan_seats (
     id                      uuid         PRIMARY KEY,
-    upstream_subscription_id uuid        NOT NULL REFERENCES upstream_subscriptions (id),
+    tenant_id               uuid         NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
+    upstream_subscription_id uuid        NOT NULL,
     external_seat_ref       varchar(256),
-    assigned_user_id        uuid         REFERENCES users (id),
+    assigned_user_id        uuid,
     display_name            varchar(200),
     seat_status             varchar(32)  NOT NULL DEFAULT 'AVAILABLE'
                             CHECK (seat_status IN (
@@ -231,7 +259,12 @@ CREATE TABLE plan_seats (
     period_end              timestamptz,
     version                 bigint       NOT NULL DEFAULT 0,
     created_at              timestamptz  NOT NULL DEFAULT now(),
-    updated_at              timestamptz  NOT NULL DEFAULT now()
+    updated_at              timestamptz  NOT NULL DEFAULT now(),
+    CONSTRAINT fk_plan_seats_subscription
+        FOREIGN KEY (tenant_id, upstream_subscription_id)
+        REFERENCES upstream_subscriptions (tenant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT fk_plan_seats_user
+        FOREIGN KEY (assigned_user_id) REFERENCES users (id) ON DELETE SET NULL
 );
 
 CREATE UNIQUE INDEX uq_plan_seats_subscription_ext_ref
@@ -240,14 +273,16 @@ CREATE UNIQUE INDEX uq_plan_seats_subscription_ext_ref
 
 CREATE INDEX idx_plan_seats_subscription_id ON plan_seats (upstream_subscription_id);
 CREATE INDEX idx_plan_seats_user_id ON plan_seats (assigned_user_id);
+CREATE INDEX idx_plan_seats_tenant_id ON plan_seats (tenant_id);
 
 -- ============================================================================
--- 9. Upstream Credentials (logical slot, no plaintext secret)
+-- 9. Upstream Credentials (tenant-scoped; logical slot, no plaintext secret)
 -- ============================================================================
 CREATE TABLE upstream_credentials (
     id                  uuid         PRIMARY KEY,
-    subscription_id     uuid         NOT NULL REFERENCES upstream_subscriptions (id),
-    seat_id             uuid         REFERENCES plan_seats (id),
+    tenant_id           uuid         NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
+    subscription_id     uuid         NOT NULL,
+    seat_id             uuid         REFERENCES plan_seats (id) ON DELETE SET NULL,
     credential_name     varchar(200) NOT NULL,
     secret_fingerprint  bytea,
     status              varchar(32)  NOT NULL DEFAULT 'PENDING_VALIDATION'
@@ -259,7 +294,10 @@ CREATE TABLE upstream_credentials (
     last_validation_error text,
     version             bigint       NOT NULL DEFAULT 0,
     created_at          timestamptz  NOT NULL DEFAULT now(),
-    updated_at          timestamptz  NOT NULL DEFAULT now()
+    updated_at          timestamptz  NOT NULL DEFAULT now(),
+    CONSTRAINT fk_upstream_creds_subscription
+        FOREIGN KEY (tenant_id, subscription_id)
+        REFERENCES upstream_subscriptions (tenant_id, id) ON DELETE RESTRICT
 );
 
 -- NOTE: No encrypted_secret, nonce, or plaintext column exists on this table.
@@ -267,13 +305,18 @@ CREATE TABLE upstream_credentials (
 CREATE INDEX idx_upstream_creds_subscription_id ON upstream_credentials (subscription_id);
 CREATE INDEX idx_upstream_creds_seat_id ON upstream_credentials (seat_id);
 CREATE INDEX idx_upstream_creds_status ON upstream_credentials (status);
+CREATE INDEX idx_upstream_creds_tenant_id ON upstream_credentials (tenant_id);
+ALTER TABLE upstream_credentials ADD CONSTRAINT uq_upstream_creds_tenant_id UNIQUE (tenant_id, id);
+
+-- active_version_id FK added below after upstream_credential_versions is created
 
 -- ============================================================================
--- 10. Upstream Credential Versions (immutable, contains encrypted secret)
+-- 10. Upstream Credential Versions (tenant-scoped; immutable, contains encrypted secret)
 -- ============================================================================
 CREATE TABLE upstream_credential_versions (
     id                      uuid         PRIMARY KEY,
-    credential_id           uuid         NOT NULL REFERENCES upstream_credentials (id),
+    tenant_id               uuid         NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
+    credential_id           uuid         NOT NULL,
     encrypted_secret        bytea        NOT NULL,
     nonce                   bytea        NOT NULL,
     encryption_key_version  varchar(64)  NOT NULL,
@@ -284,31 +327,47 @@ CREATE TABLE upstream_credential_versions (
                                 'DRAINING', 'RETIRED', 'INVALID')),
     valid_from              timestamptz,
     retired_at              timestamptz,
-    created_at              timestamptz  NOT NULL DEFAULT now()
+    created_at              timestamptz  NOT NULL DEFAULT now(),
+    CONSTRAINT fk_credential_versions_credential
+        FOREIGN KEY (tenant_id, credential_id)
+        REFERENCES upstream_credentials (tenant_id, id) ON DELETE RESTRICT
 );
 
 CREATE INDEX idx_credential_versions_credential_id
     ON upstream_credential_versions (credential_id);
+CREATE INDEX idx_credential_versions_tenant_id
+    ON upstream_credential_versions (tenant_id);
 
 -- At most one ACTIVE version per credential
 CREATE UNIQUE INDEX uq_credential_versions_one_active
     ON upstream_credential_versions (credential_id, status)
     WHERE status = 'ACTIVE';
 
+-- Now add the active_version_id FK back on upstream_credentials
+ALTER TABLE upstream_credentials
+    ADD CONSTRAINT fk_upstream_creds_active_version
+        FOREIGN KEY (active_version_id) REFERENCES upstream_credential_versions (id) ON DELETE SET NULL;
+
 -- ============================================================================
--- 11. Project Provider Grants
+-- 11. Project Provider Grants (tenant-scoped)
 -- ============================================================================
 CREATE TABLE project_provider_grants (
     id                      uuid         PRIMARY KEY,
-    project_id              uuid         NOT NULL REFERENCES projects (id),
-    provider_product_id     uuid         NOT NULL REFERENCES provider_products (id),
-    upstream_credential_id  uuid         NOT NULL REFERENCES upstream_credentials (id),
+    tenant_id               uuid         NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
+    project_id              uuid         NOT NULL,
+    provider_product_id     uuid         NOT NULL REFERENCES provider_products (id) ON DELETE RESTRICT,
+    upstream_credential_id  uuid         NOT NULL,
     status                  varchar(32)  NOT NULL DEFAULT 'ACTIVE'
                             CHECK (status IN ('ACTIVE', 'DISABLED', 'EXPIRED')),
     created_by              uuid         NOT NULL,
     version                 bigint       NOT NULL DEFAULT 0,
     created_at              timestamptz  NOT NULL DEFAULT now(),
-    updated_at              timestamptz  NOT NULL DEFAULT now()
+    updated_at              timestamptz  NOT NULL DEFAULT now(),
+    CONSTRAINT fk_grants_project
+        FOREIGN KEY (tenant_id, project_id) REFERENCES projects (tenant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT fk_grants_credential
+        FOREIGN KEY (tenant_id, upstream_credential_id)
+        REFERENCES upstream_credentials (tenant_id, id) ON DELETE RESTRICT
 );
 
 CREATE UNIQUE INDEX uq_grants_project_product_credential
@@ -318,18 +377,25 @@ CREATE INDEX idx_grants_project_id ON project_provider_grants (project_id);
 CREATE INDEX idx_grants_product_id ON project_provider_grants (provider_product_id);
 CREATE INDEX idx_grants_credential_id ON project_provider_grants (upstream_credential_id);
 CREATE INDEX idx_grants_status ON project_provider_grants (status);
+CREATE INDEX idx_grants_tenant_id ON project_provider_grants (tenant_id);
+ALTER TABLE project_provider_grants ADD CONSTRAINT uq_grants_tenant_id UNIQUE (tenant_id, id);
 
 -- ============================================================================
--- 12. Project Provider Grant Models (exact, case-sensitive model IDs)
+-- 12. Project Provider Grant Models (tenant-scoped; exact, case-sensitive model IDs)
 -- ============================================================================
 CREATE TABLE project_provider_grant_models (
-    grant_id    uuid         NOT NULL REFERENCES project_provider_grants (id),
+    tenant_id   uuid         NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
+    grant_id    uuid         NOT NULL,
     model_id    varchar(128) NOT NULL,
-    PRIMARY KEY (grant_id, model_id)
+    PRIMARY KEY (grant_id, model_id),
+    CONSTRAINT fk_grant_models_grant
+        FOREIGN KEY (tenant_id, grant_id) REFERENCES project_provider_grants (tenant_id, id) ON DELETE RESTRICT
 );
 
+CREATE INDEX idx_grant_models_tenant_id ON project_provider_grant_models (tenant_id);
+
 -- ============================================================================
--- 13. Virtual Keys
+-- 13. Virtual Keys (tenant-scoped)
 --
 -- NOTE: No plaintext key column. Only public_key_id (for lookup) and
 -- secret_digest (HMAC-SHA-256 of the secret portion) are stored.
@@ -337,14 +403,15 @@ CREATE TABLE project_provider_grant_models (
 -- ============================================================================
 CREATE TABLE virtual_keys (
     id                      uuid         PRIMARY KEY,
+    tenant_id               uuid         NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
     public_key_id           varchar(64)  NOT NULL,
     secret_digest           bytea        NOT NULL,
     display_prefix          varchar(16)  NOT NULL,
     last_four               varchar(4)   NOT NULL,
-    user_id                 uuid         NOT NULL REFERENCES users (id),
-    project_id              uuid         NOT NULL REFERENCES projects (id),
-    grant_id                uuid         NOT NULL REFERENCES project_provider_grants (id),
-    upstream_credential_id  uuid         NOT NULL REFERENCES upstream_credentials (id),
+    user_id                 uuid         NOT NULL,
+    project_id              uuid         NOT NULL,
+    grant_id                uuid         NOT NULL,
+    upstream_credential_id  uuid         NOT NULL,
     purpose                 varchar(32)  NOT NULL
                             CHECK (purpose IN (
                                 'CLAUDE_CODE', 'CLAUDE_DESKTOP',
@@ -357,7 +424,18 @@ CREATE TABLE virtual_keys (
     last_used_at            timestamptz,
     revoked_at              timestamptz,
     replaced_by_key_id      uuid,
-    version                 bigint       NOT NULL DEFAULT 0
+    version                 bigint       NOT NULL DEFAULT 0,
+    CONSTRAINT fk_virtual_keys_user
+        FOREIGN KEY (tenant_id, user_id) REFERENCES users (tenant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT fk_virtual_keys_project
+        FOREIGN KEY (tenant_id, project_id) REFERENCES projects (tenant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT fk_virtual_keys_grant
+        FOREIGN KEY (tenant_id, grant_id) REFERENCES project_provider_grants (tenant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT fk_virtual_keys_credential
+        FOREIGN KEY (tenant_id, upstream_credential_id)
+        REFERENCES upstream_credentials (tenant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT fk_virtual_keys_replaced_by
+        FOREIGN KEY (replaced_by_key_id) REFERENCES virtual_keys (id) ON DELETE SET NULL
 );
 
 CREATE UNIQUE INDEX uq_virtual_keys_public_key_id ON virtual_keys (public_key_id);
@@ -366,21 +444,29 @@ CREATE INDEX idx_virtual_keys_project_id ON virtual_keys (project_id);
 CREATE INDEX idx_virtual_keys_grant_id ON virtual_keys (grant_id);
 CREATE INDEX idx_virtual_keys_credential_id ON virtual_keys (upstream_credential_id);
 CREATE INDEX idx_virtual_keys_status ON virtual_keys (status);
+CREATE INDEX idx_virtual_keys_tenant_id ON virtual_keys (tenant_id);
+ALTER TABLE virtual_keys ADD CONSTRAINT uq_virtual_keys_tenant_id UNIQUE (tenant_id, id);
 
 -- ============================================================================
--- 14. Virtual Key Models (authorization snapshot at key creation time)
+-- 14. Virtual Key Models (tenant-scoped; authorization snapshot at key creation time)
 -- ============================================================================
 CREATE TABLE virtual_key_models (
-    virtual_key_id  uuid         NOT NULL REFERENCES virtual_keys (id),
+    tenant_id       uuid         NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
+    virtual_key_id  uuid         NOT NULL,
     model_id        varchar(128) NOT NULL,
-    PRIMARY KEY (virtual_key_id, model_id)
+    PRIMARY KEY (virtual_key_id, model_id),
+    CONSTRAINT fk_virtual_key_models_key
+        FOREIGN KEY (tenant_id, virtual_key_id) REFERENCES virtual_keys (tenant_id, id) ON DELETE RESTRICT
 );
 
+CREATE INDEX idx_virtual_key_models_tenant_id ON virtual_key_models (tenant_id);
+
 -- ============================================================================
--- 15. Admin Audit Events (append-only, permanent, no FK cascade)
+-- 15. Admin Audit Events (tenant-scoped; append-only, permanent, no FK cascade)
 -- ============================================================================
 CREATE TABLE admin_audit_events (
     id                  uuid         PRIMARY KEY,
+    tenant_id           uuid         NOT NULL REFERENCES tenants (id) ON DELETE RESTRICT,
     actor_id            uuid,
     action              varchar(64)  NOT NULL,
     target_type         varchar(64),
@@ -397,3 +483,73 @@ CREATE INDEX idx_audit_events_actor_id ON admin_audit_events (actor_id);
 CREATE INDEX idx_audit_events_target ON admin_audit_events (target_type, target_id);
 CREATE INDEX idx_audit_events_action ON admin_audit_events (action);
 CREATE INDEX idx_audit_events_created_at ON admin_audit_events (created_at DESC);
+CREATE INDEX idx_audit_events_tenant_id ON admin_audit_events (tenant_id);
+
+-- ============================================================================
+-- 16. Tenant consistency triggers (reject cross-tenant relationships at DB level)
+-- ============================================================================
+
+-- virtual_keys: grant must match tenant, project, credential; credential
+-- must belong to a subscription whose provider_product matches the grant
+CREATE OR REPLACE FUNCTION check_virtual_key_tenant_consistency()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM project_provider_grants g
+        WHERE g.tenant_id = NEW.tenant_id
+          AND g.id = NEW.grant_id
+          AND g.project_id = NEW.project_id
+          AND g.upstream_credential_id = NEW.upstream_credential_id
+    ) THEN
+        RAISE EXCEPTION 'virtual_key grant_id=% does not match tenant_id=%, project_id=%, credential_id=%',
+            NEW.grant_id, NEW.tenant_id, NEW.project_id, NEW.upstream_credential_id;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM upstream_credentials c
+        JOIN upstream_subscriptions s
+            ON s.tenant_id = c.tenant_id AND s.id = c.subscription_id
+        JOIN project_provider_grants g
+            ON g.tenant_id = c.tenant_id AND g.upstream_credential_id = c.id
+        WHERE c.tenant_id = NEW.tenant_id
+          AND c.id = NEW.upstream_credential_id
+          AND g.id = NEW.grant_id
+          AND s.provider_product_id = g.provider_product_id
+    ) THEN
+        RAISE EXCEPTION 'virtual_key credential_id=% grant_id=%: credential subscription provider_product does not match grant provider_product',
+            NEW.upstream_credential_id, NEW.grant_id;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_virtual_key_tenant_consistency ON virtual_keys;
+CREATE TRIGGER trg_virtual_key_tenant_consistency
+    BEFORE INSERT OR UPDATE ON virtual_keys
+    FOR EACH ROW EXECUTE FUNCTION check_virtual_key_tenant_consistency();
+
+-- project_provider_grants: credential must belong to a subscription whose
+-- provider_product matches the grant's provider_product
+CREATE OR REPLACE FUNCTION check_grant_credential_product_consistency()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM upstream_credentials c
+        JOIN upstream_subscriptions s
+            ON s.tenant_id = c.tenant_id AND s.id = c.subscription_id
+        WHERE c.tenant_id = NEW.tenant_id
+          AND c.id = NEW.upstream_credential_id
+          AND s.provider_product_id = NEW.provider_product_id
+    ) THEN
+        RAISE EXCEPTION 'grant credential_id=%: its subscription provider_product_id does not match grant provider_product_id=%',
+            NEW.upstream_credential_id, NEW.provider_product_id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_grant_credential_product_consistency ON project_provider_grants;
+CREATE TRIGGER trg_grant_credential_product_consistency
+    BEFORE INSERT OR UPDATE ON project_provider_grants
+    FOR EACH ROW EXECUTE FUNCTION check_grant_credential_product_consistency();

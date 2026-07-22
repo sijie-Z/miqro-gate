@@ -18,6 +18,10 @@ public interface TenantRepository {
 
     Tenant insert(Tenant tenant);
 
+    /**
+     * Optimistic-locking update: WHERE id = tenant.id AND version = tenant.version
+     * - 1, increments version.
+     */
     Tenant update(Tenant tenant);
 
     boolean existsByCode(String code);

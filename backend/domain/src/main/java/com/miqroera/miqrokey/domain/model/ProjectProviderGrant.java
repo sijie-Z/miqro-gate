@@ -8,9 +8,7 @@ import java.util.UUID;
  * specific upstream credential. Administrators create these; regular users
  * cannot expand authorization beyond what is granted.
  */
-public record ProjectProviderGrant(UUID id, UUID projectId, UUID providerProductId, UUID upstreamCredentialId,
-        String status, UUID createdBy, long version, Instant createdAt, Instant updatedAt) {
-    public static final String STATUS_ACTIVE = "ACTIVE";
-    public static final String STATUS_DISABLED = "DISABLED";
-    public static final String STATUS_EXPIRED = "EXPIRED";
+public record ProjectProviderGrant(UUID id, UUID tenantId, UUID projectId, UUID providerProductId,
+        UUID upstreamCredentialId, GrantStatus status, UUID createdBy, long version, Instant createdAt,
+        Instant updatedAt) {
 }

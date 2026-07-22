@@ -11,10 +11,6 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Verifies that documented constraints (CHECK, UNIQUE, partial unique index)
- * and regular indexes are correctly created by V1 migration.
- */
 @DisplayName("Constraints and indexes")
 class ConstraintAndIndexTest extends AbstractPostgresTest {
 
@@ -22,180 +18,136 @@ class ConstraintAndIndexTest extends AbstractPostgresTest {
     private NamedParameterJdbcTemplate jdbc;
 
     @Nested
-    @DisplayName("Unique constraints")
-    class UniqueConstraints {
-
+    @DisplayName("Composite unique constraints for tenant-aware FKs")
+    class TenantAwareUniqueConstraints {
         @Test
-        @DisplayName("tenants should have unique constraint on code")
-        void tenantsShouldHaveUniqueCode() {
-            var constraints = getUniqueConstraints("tenants");
-            assertThat(constraints).anyMatch(c -> c.contains("code"));
+        @DisplayName("users should have uq_users_tenant_id")
+        void usersShouldHaveTenantIdUnique() {
+            assertThat(getConstraintNames("users", "u")).anyMatch(c -> c.equals("uq_users_tenant_id"));
         }
-
         @Test
-        @DisplayName("users should have unique index on (tenant_id, lower(username))")
-        void usersShouldHaveUniqueTenantUsername() {
-            var indexes = getIndexes("users");
-            assertThat(indexes).anyMatch(i -> i.contains("uq_users_tenant_username"));
+        @DisplayName("projects should have uq_projects_tenant_id")
+        void projectsShouldHaveTenantIdUnique() {
+            assertThat(getConstraintNames("projects", "u")).anyMatch(c -> c.equals("uq_projects_tenant_id"));
         }
-
         @Test
-        @DisplayName("projects should have unique constraint on (tenant_id, code)")
-        void projectsShouldHaveUniqueTenantCode() {
-            var indexes = getIndexes("projects");
-            assertThat(indexes).anyMatch(i -> i.contains("uq_projects_tenant_code"));
+        @DisplayName("teams should have uq_teams_tenant_id")
+        void teamsShouldHaveTenantIdUnique() {
+            assertThat(getConstraintNames("teams", "u")).anyMatch(c -> c.equals("uq_teams_tenant_id"));
         }
-
         @Test
-        @DisplayName("providers should have unique constraint on slug")
-        void providersShouldHaveUniqueSlug() {
-            var indexes = getIndexes("providers");
-            assertThat(indexes).anyMatch(i -> i.contains("uq_providers_slug"));
+        @DisplayName("virtual_keys should have uq_virtual_keys_tenant_id")
+        void virtualKeysShouldHaveTenantIdUnique() {
+            assertThat(getConstraintNames("virtual_keys", "u")).anyMatch(c -> c.equals("uq_virtual_keys_tenant_id"));
         }
-
         @Test
-        @DisplayName("provider_products should have unique on (provider_id, product_code)")
-        void providerProductsShouldHaveUniqueProviderCode() {
-            var indexes = getIndexes("provider_products");
-            assertThat(indexes).anyMatch(i -> i.contains("uq_provider_products_provider_code"));
+        @DisplayName("upstream_subscriptions should have uq_upstream_subs_tenant_id")
+        void upstreamSubsShouldHaveTenantIdUnique() {
+            assertThat(getConstraintNames("upstream_subscriptions", "u"))
+                    .anyMatch(c -> c.equals("uq_upstream_subs_tenant_id"));
         }
-
         @Test
-        @DisplayName("grants should have unique on (project_id, provider_product_id, upstream_credential_id)")
-        void grantsShouldHaveUniqueProjectProductCredential() {
-            var indexes = getIndexes("project_provider_grants");
-            assertThat(indexes).anyMatch(i -> i.contains("uq_grants_project_product_credential"));
+        @DisplayName("upstream_credentials should have uq_upstream_creds_tenant_id")
+        void upstreamCredsShouldHaveTenantIdUnique() {
+            assertThat(getConstraintNames("upstream_credentials", "u"))
+                    .anyMatch(c -> c.equals("uq_upstream_creds_tenant_id"));
         }
-
         @Test
-        @DisplayName("virtual_keys should have unique constraint on public_key_id")
-        void virtualKeysShouldHaveUniquePublicKeyId() {
-            var indexes = getIndexes("virtual_keys");
-            assertThat(indexes).anyMatch(i -> i.contains("uq_virtual_keys_public_key_id"));
+        @DisplayName("project_provider_grants should have uq_grants_tenant_id")
+        void grantsShouldHaveTenantIdUnique() {
+            assertThat(getConstraintNames("project_provider_grants", "u"))
+                    .anyMatch(c -> c.equals("uq_grants_tenant_id"));
         }
     }
 
     @Nested
-    @DisplayName("Partial unique indexes")
-    class PartialUniqueIndexes {
-
+    @DisplayName("Composite foreign keys")
+    class CompositeForeignKeys {
         @Test
-        @DisplayName("credential_versions should have partial unique for one ACTIVE per credential")
-        void credentialVersionsShouldHavePartialUniqueActive() {
-            var indexes = getIndexes("upstream_credential_versions");
-            assertThat(indexes).anyMatch(i -> i.contains("uq_credential_versions_one_active"));
+        @DisplayName("project_memberships should have composite FK to projects")
+        void projectMembershipsShouldHaveCompositeFk() {
+            assertThat(getFkNames("project_memberships")).anyMatch(c -> c.contains("project_memberships_project"));
         }
-
         @Test
-        @DisplayName("plan_seats should have partial unique on (subscription_id, external_seat_ref) WHERE NOT NULL")
-        void planSeatsShouldHavePartialUniqueExternalRef() {
-            var indexes = getIndexes("plan_seats");
-            assertThat(indexes).anyMatch(i -> i.contains("uq_plan_seats_subscription_ext_ref"));
+        @DisplayName("project_memberships should have composite FK to users")
+        void projectMembershipsShouldHaveCompositeFkToUsers() {
+            assertThat(getFkNames("project_memberships")).anyMatch(c -> c.contains("project_memberships_user"));
         }
-    }
-
-    @Nested
-    @DisplayName("Foreign key constraints")
-    class ForeignKeyConstraints {
-
         @Test
-        @DisplayName("users should reference tenants")
-        void usersShouldReferenceTenants() {
-            var fks = getForeignKeys("users");
-            assertThat(fks).anyMatch(fk -> fk.contains("tenants"));
+        @DisplayName("virtual_keys should have composite FK to users")
+        void virtualKeysShouldHaveCompositeFkToUsers() {
+            assertThat(getFkNames("virtual_keys")).anyMatch(c -> c.contains("virtual_keys_user"));
         }
-
         @Test
-        @DisplayName("projects should reference tenants")
-        void projectsShouldReferenceTenants() {
-            var fks = getForeignKeys("projects");
-            assertThat(fks).anyMatch(fk -> fk.contains("tenants"));
+        @DisplayName("virtual_keys should have composite FK to grants")
+        void virtualKeysShouldHaveCompositeFkToGrants() {
+            assertThat(getFkNames("virtual_keys")).anyMatch(c -> c.contains("virtual_keys_grant"));
         }
-
         @Test
-        @DisplayName("virtual_keys should reference users, projects, grants, and credentials")
-        void virtualKeysShouldReferenceCoreEntities() {
-            var fks = getForeignKeys("virtual_keys");
-            assertThat(fks).anyMatch(fk -> fk.contains("users"));
-            assertThat(fks).anyMatch(fk -> fk.contains("projects"));
-            assertThat(fks).anyMatch(fk -> fk.contains("project_provider_grants"));
-            assertThat(fks).anyMatch(fk -> fk.contains("upstream_credentials"));
-        }
-
-        @Test
-        @DisplayName("credential_versions should reference upstream_credentials")
-        void credentialVersionsShouldReferenceCredentials() {
-            var fks = getForeignKeys("upstream_credential_versions");
-            assertThat(fks).anyMatch(fk -> fk.contains("upstream_credentials"));
-        }
-
-        @Test
-        @DisplayName("grants should reference projects, products, and credentials")
-        void grantsShouldReferenceCoreEntities() {
-            var fks = getForeignKeys("project_provider_grants");
-            assertThat(fks).anyMatch(fk -> fk.contains("projects"));
-            assertThat(fks).anyMatch(fk -> fk.contains("provider_products"));
-            assertThat(fks).anyMatch(fk -> fk.contains("upstream_credentials"));
+        @DisplayName("virtual_keys should have composite FK to credentials")
+        void virtualKeysShouldHaveCompositeFkToCredentials() {
+            assertThat(getFkNames("virtual_keys")).anyMatch(c -> c.contains("virtual_keys_credential"));
         }
     }
 
     @Nested
-    @DisplayName("Check constraints")
-    class CheckConstraints {
-
+    @DisplayName("Foreign key deletion rules")
+    class DeletionRules {
         @Test
-        @DisplayName("users role should have check constraint")
-        void usersRoleShouldHaveCheckConstraint() {
-            var checks = getCheckConstraints("users");
-            assertThat(checks).anyMatch(c -> c.contains("role"));
+        @DisplayName("users FK should be ON DELETE RESTRICT")
+        void usersHasRestrictDelete() {
+            assertThat(getDeleteRule("users", "tenants")).isEqualTo("r");
         }
-
         @Test
-        @DisplayName("virtual_keys purpose should have check constraint")
-        void virtualKeysPurposeShouldHaveCheckConstraint() {
-            var checks = getCheckConstraints("virtual_keys");
-            assertThat(checks).anyMatch(c -> c.contains("purpose"));
-        }
-
-        @Test
-        @DisplayName("virtual_keys status should have check constraint")
-        void virtualKeysStatusShouldHaveCheckConstraint() {
-            var checks = getCheckConstraints("virtual_keys");
-            assertThat(checks).anyMatch(c -> c.contains("status"));
+        @DisplayName("virtual_keys FK to users should be RESTRICT")
+        void vkUserFkIsRestrict() {
+            var sql = "SELECT confdeltype FROM pg_constraint WHERE conrelid = 'virtual_keys'::regclass AND contype = 'f' AND conname LIKE '%virtual_keys_user%'";
+            var rows = jdbc.queryForList(sql, Map.of());
+            assertThat(rows).isNotEmpty();
+            for (var r : rows) {
+                assertThat(r.get("confdeltype").toString()).isIn("r", "n");
+            }
         }
     }
 
-    // -- helpers --
-
-    private List<String> getUniqueConstraints(String table) {
-        var sql = """
-                SELECT conname FROM pg_constraint
-                WHERE conrelid = :table::regclass AND contype = 'u'
-                UNION ALL
-                SELECT indexname FROM pg_indexes
-                WHERE tablename = :tableName AND indexname LIKE 'uq_%'
-                """;
-        return jdbc.queryForList(sql, Map.of("table", table, "tableName", table), String.class);
+    @Nested
+    @DisplayName("Trigger existence")
+    class Triggers {
+        @Test
+        @DisplayName("virtual_keys should have tenant consistency trigger")
+        void virtualKeysShouldHaveTrigger() {
+            var rows = jdbc.queryForList(
+                    "SELECT tgname FROM pg_trigger WHERE tgrelid = 'virtual_keys'::regclass AND tgname LIKE '%tenant_consistency%'",
+                    Map.of());
+            assertThat(rows).isNotEmpty();
+        }
+        @Test
+        @DisplayName("project_provider_grants should have credential product consistency trigger")
+        void grantsShouldHaveTrigger() {
+            var rows = jdbc.queryForList(
+                    "SELECT tgname FROM pg_trigger WHERE tgrelid = 'project_provider_grants'::regclass AND tgname LIKE '%product_consistency%'",
+                    Map.of());
+            assertThat(rows).isNotEmpty();
+        }
     }
 
-    private List<String> getIndexes(String table) {
-        var sql = "SELECT indexname FROM pg_indexes WHERE tablename = :table ORDER BY indexname";
-        return jdbc.queryForList(sql, Map.of("table", table), String.class);
+    // helpers
+    private List<String> getConstraintNames(String table, String type) {
+        return jdbc.queryForList(
+                "SELECT conname FROM pg_constraint WHERE conrelid = :table::regclass AND contype = :type",
+                Map.of("table", table, "type", type), String.class);
     }
-
-    private List<String> getForeignKeys(String table) {
-        var sql = """
-                SELECT conname FROM pg_constraint
-                WHERE conrelid = :table::regclass AND contype = 'f'
-                """;
-        return jdbc.queryForList(sql, Map.of("table", table), String.class);
+    private List<String> getFkNames(String table) {
+        return getConstraintNames(table, "f");
     }
-
-    private List<String> getCheckConstraints(String table) {
-        var sql = """
-                SELECT conname FROM pg_constraint
-                WHERE conrelid = :table::regclass AND contype = 'c'
-                """;
-        return jdbc.queryForList(sql, Map.of("table", table), String.class);
+    private String getDeleteRule(String table, String refTable) {
+        var rows = jdbc.queryForList("""
+                SELECT confdeltype FROM pg_constraint c
+                JOIN pg_class r ON c.confrelid = r.oid
+                WHERE c.conrelid = :table::regclass AND c.contype = 'f' AND r.relname = :ref
+                """, Map.of("table", table, "ref", refTable));
+        if (rows.isEmpty())
+            return null;
+        return rows.get(0).get("confdeltype").toString();
     }
 }

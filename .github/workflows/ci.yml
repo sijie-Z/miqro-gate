@@ -28,7 +28,7 @@ jobs:
           cache: maven
       - name: Verify (Linux)
         if: runner.os == 'Linux'
-        run: ./mvnw verify --batch-mode
+        run: ./mvnw verify -Pintegration --batch-mode
         env:
           MAVEN_PROJECTBASEDIR: ${{ github.workspace }}/backend
       - name: Verify (Windows)
