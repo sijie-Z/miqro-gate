@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G1.1`
-- Goal status: `DONE`
+- Current goal: `G1.2`
+- Goal status: `IN_PROGRESS`
 - Last updated: `2026-07-22`
 - Branch: `goal/g1.1-postgresql-schema-and-persistence`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
@@ -424,9 +424,19 @@ Addressing 10 review blockers on branch `goal/g1.1-postgresql-schema-and-persist
 - G1.2 populates crypto columns with real AES-256-GCM/HMAC.
 - user_sessions, request_usage_records, quota_snapshots, cost_allocations deferred.
 
-## Next Goal
+## G1.2 — Secret encryption foundation (IN_PROGRESS)
+
+### Status
 
 - Goal ID: `G1.2`
 - Name: Secret encryption foundation
-- Status: `NOT_STARTED`
+- Status: `IN_PROGRESS`
+- Branch: `goal/g1.2-secret-encryption-foundation`
 - Source: [`implementation-plan.md`](implementation-plan.md#g12-secret-encryption-foundation)
+
+## Next Goal
+
+- Goal ID: `G1.3`
+- Name: Local authentication and authorization
+- Status: `NOT_STARTED`
+- Source: [`implementation-plan.md`](implementation-plan.md#g13-local-authentication-and-authorization)
