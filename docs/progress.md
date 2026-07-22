@@ -7,7 +7,7 @@
 - Project phase: `PHASE_0`
 - Current executor: `Claude Code`
 - Current goal: `G1.1`
-- Goal status: `IN_PROGRESS`
+- Goal status: `DONE`
 - Last updated: `2026-07-22`
 - Branch: `goal/g0.4-cc-switch-manual-compatibility-poc`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
@@ -351,9 +351,67 @@ PASS is claimed.
 - No real provider integration performed. All protocol behaviors are MOCK_VERIFIED.
 - Docker Compose not validated locally (ENV_BLOCKED); CI must confirm.
 
+## G1.1 — PostgreSQL schema and persistence
+
+### Outcome
+
+- **Flyway V1 migration** (`V1__core_tables.sql`) creates 15 core tables: tenants, users, teams, team_memberships, projects, project_memberships, providers, provider_products, upstream_subscriptions, plan_seats, upstream_credentials, upstream_credential_versions, project_provider_grants, project_provider_grant_models, virtual_keys, virtual_key_models, admin_audit_events.
+- All PostgreSQL conventions followed: uuid, timestamptz (UTC), numeric(24,10), varchar CHECK constraints (no enums), bytea for secret material, version bigint, tenant_id on all tenant-scoped tables.
+- Foreign keys, unique constraints, partial unique indexes, CHECK constraints fully implemented per database-schema.md. Deletion semantics: RESTRICT on FK, soft disable for users/projects, RETIRE for credential versions, append-only for audit.
+- **Domain model**: 17 immutable Java records in `com.miqroera.miqrokey.domain.model` with status constants. Zero Spring/JPA/Jackson dependency.
+- **Repository interfaces**: 11 interfaces in `com.miqroera.miqrokey.domain.repository`.
+- **JDBC implementations**: 7 concrete repository implementations in `com.miqroera.miqrokey.persistence.repository` using Spring JDBC NamedParameterJdbcTemplate with @Repository/@Transactional.
+- **PersistenceConfig**: Provides NamedParameterJdbcTemplate and PlatformTransactionManager beans.
+- **Testcontainers integration tests** (5 test classes, compiled, tagged `@Tag("integration")`):
+  - `SchemaMigrationTest`: migration from empty DB, Flyway history, column requirements, no plaintext secret columns.
+  - `ConstraintAndIndexTest`: unique constraints, partial unique indexes, FK constraints, CHECK constraints.
+  - `ForeignKeyDeletionTest`: FK enforcement (orphan rejection), membership delete without cascading.
+  - `RepositoryIntegrationTest`: CRUD and lifecycle for Tenant, User, Project, Membership, Credential Version, Grant, Virtual Key creation/revocation.
+  - `TenantProjectIsolationTest`: cross-tenant isolation, same username/code in different tenants, membership isolation.
+- Integration tests excluded from default surefire via `<excludedGroups>integration</excludedGroups>`. CI enables them with `-Pintegration` profile.
+- Virtual Key has fixed mapping to Grant/Credential per domain contract. No plaintext key column.
+
+### Verification
+
+- `.\mvnw.cmd verify --batch-mode`: **BUILD SUCCESS** — 223 tests, 0 failures, 0 errors, 0 skipped
+  - domain: 1 test / persistence-postgres: 0 tests (5 excluded) / control-plane: 2 / test-support: 109 / gateway: 111
+- Spotless check: PASS / Maven Enforcer: PASS
+- Frontend: npm ci (0 vulns), lint, typecheck, test (1), build — all PASS
+- `git diff --check`: PASS
+- `docker compose -f deploy/compose.yaml config`: ENV_BLOCKED
+
+### Files changed
+
+- `V1__core_tables.sql`: 399 lines, 15 core tables.
+- `domain/model/`: 17 new domain record classes.
+- `domain/repository/`: 11 new repository interfaces.
+- `persistence/repository/`: 7 new JDBC implementations.
+- `persistence/PersistenceConfig.java`: Spring configuration.
+- `persistence-postgres/pom.xml`: Added spring-boot-starter-jdbc, surefire config.
+- `persistence-postgres/src/test/`: 6 test files (AbstractPostgresTest + 5 test classes).
+- `docs/progress.md`: Updated.
+
+### Security/data impact
+
+- No plaintext secrets. virtual_keys: secret_digest only. upstream_credentials: secret_fingerprint only. Encrypted secrets in upstream_credential_versions (bytea).
+- All FK RESTRICT on delete. admin_audit_events no FK cascade.
+- Soft disable for users/projects; credential versions RETIRE.
+- No real credentials or PII in tests.
+
+### ENV_BLOCKED
+
+- Docker unavailable on Windows. Testcontainers tests compile but need CI Linux Docker with `-Pintegration`.
+- docker compose config needs CI.
+
+### Remaining risks
+
+- Integration tests await CI (GitHub Actions Linux Docker).
+- G1.2 populates crypto columns with real AES-256-GCM/HMAC.
+- user_sessions, request_usage_records, quota_snapshots, cost_allocations deferred.
+
 ## Next Goal
 
-- Goal ID: `G1.1`
-- Name: PostgreSQL schema and persistence
+- Goal ID: `G1.2`
+- Name: Secret encryption foundation
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md#g11-postgresql-schema-and-persistence)
+- Source: [`implementation-plan.md`](implementation-plan.md#g12-secret-encryption-foundation)
