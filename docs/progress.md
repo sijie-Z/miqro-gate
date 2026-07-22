@@ -368,6 +368,12 @@ Addressing 10 review blockers on branch `goal/g1.1-postgresql-schema-and-persist
 9. **Closed types and defensive copying**: All status/role/purpose/topology String fields replaced with 19 documented Java enums (`TenantStatus`, `UserRole`, `UserStatus`, `TeamStatus`, `ProjectStatus`, `ProviderStatus`, `BillingMode`, `PlanScope`, `CredentialTopology`, `QuotaTopology`, `ImplementationStatus`, `BalanceAuthority`, `SubscriptionStatus`, `StatusSource`, `SeatStatus`, `CredentialStatus`, `CredentialVersionStatus`, `GrantStatus`, `VirtualKeyPurpose`, `VirtualKeyStatus`). All byte[] fields defensively copied in compact constructors and accessor overrides.
 10. **Progress.md corrected**: Phase set to `PHASE_1`, branch corrected to `goal/g1.1-postgresql-schema-and-persistence`, status `IN_PROGRESS` until Linux CI green. Table/interface/implementation/test counts accurate.
 
+### Repairs applied (2026-07-22 — round 2: container lifecycle + unique-constraint safety)
+
+11. **Singleton Container pattern**: Removed `@Testcontainers` and `@Container` from `AbstractPostgresTest`. The PostgreSQL container is now started once in a static initialiser and shared across all seven sub-classes, matching the official Testcontainers singleton-container pattern. Ryuk cleans up on JVM exit. `DockerImageName.asCompatibleSubstituteFor("postgres")` and the digest identical to `deploy/compose.yaml` are preserved. No `withReuse(true)`.
+
+12. **Unique-constraint safety**: `RepositoryIntegrationTest.@BeforeEach` now generates a random 8-char suffix per test-method invocation. Fixed business keys `"testuser"`, `"test-proj"`, `"test-provider"` and `"test-product"` now include the suffix, preventing unique-constraint violations when a second test method executes `@BeforeEach` within the same seed tenant. All related assertions (`shouldFindByTenantAndUsername`, `shouldPreventDuplicateUsername`, `shouldInsertAndFindProject`, `shouldFindBySlug`) reference the dynamic field value rather than a hard-coded literal. Other test classes (ConstraintAndIndexTest, CrossTenantIsolationTest, FixedMappingSemanticsTest, ForeignKeyDeletionTest, SchemaMigrationTest, TenantProjectIsolationTest) were audited — none have equivalent cross-method fixed-unique-value pollution.
+
 ### Current schema (V1 migration)
 
 18 tables: tenants, users, teams, team_memberships, projects, project_memberships, providers, provider_products, upstream_subscriptions, plan_seats, upstream_credentials, upstream_credential_versions, project_provider_grants, project_provider_grant_models, virtual_keys, virtual_key_models, admin_audit_events (+ flyway_schema_history).
@@ -379,28 +385,23 @@ Addressing 10 review blockers on branch `goal/g1.1-postgresql-schema-and-persist
 - **Repository implementations**: 13 in `com.miqroera.miqrokey.persistence.repository`
 - **Integration tests**: 7 test classes (8 including AbstractPostgresTest): SchemaMigrationTest, ConstraintAndIndexTest, ForeignKeyDeletionTest, RepositoryIntegrationTest, TenantProjectIsolationTest, CrossTenantIsolationTest, FixedMappingSemanticsTest
 
-### Local verification (Windows, Java 21 Temurin, Dockerless)
+### Local verification (Windows, Java 21 Temurin, Dockerless) — post round-2 repair
 
 - `.\mvnw.cmd verify --batch-mode`: **BUILD SUCCESS** — 223 non-integration tests PASS
 - `.\mvnw.cmd spotless:check`: PASS (all modules)
-- `npm --prefix frontend ci && npm run lint && npm run typecheck && npm run test && npm run build`: PASS
 - `git diff --check`: PASS
+- `npm --prefix frontend ci && npm run lint && npm run typecheck && npm run test && npm run build`: PASS
 - `docker compose -f deploy/compose.yaml config`: ENV_BLOCKED (Docker not installed locally; CI validates)
 
-### Files changed (repair)
+### Files changed (round 2 repair)
 
-- `V1__core_tables.sql`: Complete rewrite with tenant_id on all tables, composite FKs, seed tenant, triggers
-- `domain/model/*.java`: 17 records updated with enums, defensive byte copying, tenantId
-- `domain/model/*Status.java` etc.: 19 new enum files
-- `domain/repository/*.java`: Updated interfaces, added VirtualKeyRepository.findAllByTenantId
-- `persistence/repository/*Impl.java`: All 13 implementations (7 updated + 6 new)
-- `persistence-postgres/src/test/**`: 7 test classes (all rewritten)
-- `.github/workflows/ci.yml`: Linux CI now uses `-Pintegration`
+- `AbstractPostgresTest.java`: Singleton Container pattern (removed `@Testcontainers`/`@Container`, added static block manual start)
+- `RepositoryIntegrationTest.java`: Random suffix for unique business keys in `@BeforeEach`; dynamic assertion references
 - `docs/progress.md`: Updated (this file)
 
 ### Remaining risks
 
-- Integration tests run only on Linux CI with Docker; Windows Dockerless local verification passes only non-integration tests.
+- Integration tests run only on Linux CI with Docker; Windows Dockerless local verification passes only non-integration tests. Linux CI green required to confirm round-2 repairs.
 - G1.2 populates crypto columns with real AES-256-GCM/HMAC.
 - user_sessions, request_usage_records, quota_snapshots, cost_allocations deferred.
 

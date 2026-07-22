@@ -45,6 +45,7 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
     private static final UUID TENANT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final Instant NOW = Instant.now();
 
+    private String suffix;
     private User user;
     private Project project;
     private Provider provider;
@@ -56,19 +57,21 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
 
     @BeforeEach
     void setUp() {
-        user = new User(UUID.randomUUID(), TENANT_ID, "testuser", "Test User", new byte[]{1, 2, 3, 4}, UserRole.USER,
-                UserStatus.ACTIVE, false, 0, null, null, 0, NOW, NOW);
+        suffix = UUID.randomUUID().toString().substring(0, 8);
+
+        user = new User(UUID.randomUUID(), TENANT_ID, "testuser-" + suffix, "Test User", new byte[]{1, 2, 3, 4},
+                UserRole.USER, UserStatus.ACTIVE, false, 0, null, null, 0, NOW, NOW);
         userRepo.insert(user);
 
-        project = new Project(UUID.randomUUID(), TENANT_ID, "test-proj", "Test Project", null, null,
+        project = new Project(UUID.randomUUID(), TENANT_ID, "test-proj-" + suffix, "Test Project", null, null,
                 ProjectStatus.ACTIVE, 0, NOW, NOW);
         projectRepo.insert(project);
 
-        provider = new Provider(UUID.randomUUID(), "test-provider", "Test Provider", null, null, null,
+        provider = new Provider(UUID.randomUUID(), "test-provider-" + suffix, "Test Provider", null, null, null,
                 ProviderStatus.ACTIVE, 0, NOW, NOW);
         providerRepo.insert(provider);
 
-        product = new ProviderProduct(UUID.randomUUID(), provider.id(), "test-product", "Test Product",
+        product = new ProviderProduct(UUID.randomUUID(), provider.id(), "test-product-" + suffix, "Test Product",
                 BillingMode.PAYG, PlanScope.NONE, CredentialTopology.SINGLE_SHARED, null, "[]", "[]", "{}", null, null,
                 null, ImplementationStatus.DRAFT, null, 0, NOW, NOW);
         productRepo.insert(product);
@@ -131,7 +134,7 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
         @Test
         @DisplayName("should find user by tenant and username")
         void shouldFindByTenantAndUsername() {
-            var found = userRepo.findByTenantIdAndUsername(TENANT_ID, "TESTUSER");
+            var found = userRepo.findByTenantIdAndUsername(TENANT_ID, user.username().toUpperCase());
             assertThat(found).isPresent();
             assertThat(found.get().id()).isEqualTo(user.id());
         }
@@ -139,7 +142,7 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
         @Test
         @DisplayName("should prevent duplicate username in same tenant")
         void shouldPreventDuplicateUsername() {
-            assertThat(userRepo.existsByTenantIdAndUsername(TENANT_ID, "testuser")).isTrue();
+            assertThat(userRepo.existsByTenantIdAndUsername(TENANT_ID, user.username())).isTrue();
         }
 
         @Test
@@ -163,7 +166,7 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
         void shouldInsertAndFindProject() {
             var found = projectRepo.findById(project.id());
             assertThat(found).isPresent();
-            assertThat(found.get().code()).isEqualTo("test-proj");
+            assertThat(found.get().code()).isEqualTo(project.code());
         }
 
         @Test
@@ -206,7 +209,7 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
         @Test
         @DisplayName("should find provider by slug")
         void shouldFindBySlug() {
-            var found = providerRepo.findBySlug("test-provider");
+            var found = providerRepo.findBySlug(provider.slug());
             assertThat(found).isPresent();
         }
     }
