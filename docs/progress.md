@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_0`
 - Current executor: `Claude Code`
-- Current goal: `G0.3`
+- Current goal: `G0.4`
 - Goal status: `DONE`
-- Last updated: `2026-07-21`
-- Branch: `goal/g0.3-responses-chat-transparent-poc`
+- Last updated: `2026-07-22`
+- Branch: `goal/g0.4-cc-switch-manual-compatibility-poc`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
 
 ## Completed
@@ -86,9 +86,10 @@
 
 ## Next Goal
 
-- Goal ID: `G0.4`
-- Name: CC Switch manual compatibility PoC
-- Source: [`implementation-plan.md`](implementation-plan.md#g04-cc-switch-manual-compatibility-poc)
+- Goal ID: `G1.1`
+- Name: PostgreSQL schema and persistence
+- Status: `NOT_STARTED`
+- Source: [`implementation-plan.md`](implementation-plan.md#g11-postgresql-schema-and-persistence)
 
 ## G0.2 — Anthropic transparent proxy PoC
 
@@ -227,15 +228,132 @@
 - Docker Compose validation delegated to CI (Docker unavailable on Windows dev host).
 - CC Switch end-to-end compatibility will be validated in G0.4.
 
-## Goal Update Template
+## G0.4 — CC Switch manual compatibility PoC (repair: CompatibilityMockServer)
 
-```text
-Current goal: Gx.y
-Goal status: IN_PROGRESS | BLOCKED | DONE
-Started/finished date:
-Files/modules changed:
-Verification commands and results:
-Decisions/ADRs added:
-Remaining risks:
-Next goal:
-```
+### Repairs applied (2026-07-21)
+
+1. **GET /observations serialization**: `ObjectMapper` cannot serialize `RequestObservation.timestamp` (`Instant`) without `jackson-datatype-jsr310`. Replaced reflective serialization with explicit ordered `toDiagnosticDtos()` that converts `timestamp`→ISO-8601 String, `protocol`→enum name, exactly eight allowlisted fields. The explicit DTO mapping is a security boundary — tested with JSON-parsed exact-key-set verification.
+
+2. **`deleteMethodRecorded` test**: DELETE /observations records itself then correctly clears the store, so the snapshot is empty. Changed test to assert successful clear response (status 200, `"cleared":true`) and empty store; server clear semantics unchanged.
+
+3. **Self-referencing GET /observations**: `handleDiagnostic` now takes `store.snapshot()` before `recordObservation()` for GET /observations, so the GET does not appear in its own response.
+
+### Verification
+
+- `.\mvnw.cmd -pl test-support -am "-Dtest=CompatibilityMockServerTest,ObservationStoreTest" "-Dsurefire.failIfNoSpecifiedTests=false" test --batch-mode`: **BUILD SUCCESS** — 74 tests, 0 failures, 0 errors
+  - `CompatibilityMockServerTest`: 55 tests (all nested classes — JsonEndpoints, SseEndpoints, RawUriAndQueryMetadata, ProtocolClassification, CredentialHeaderDetection, ObservationBounding, Diagnostics, ErrorHandling, LoopbackBinding, PrivacySafety, Shutdown, StreamingDetection, HttpMethodRecording, ContentTypeRecording)
+  - `ObservationStoreTest`: 19 tests
+- Spotless check: PASS
+- `git diff --check`: clean
+
+### Slice: Launch scripts, packaging refinement, documentation (2026-07-21)
+
+1. **Launch scripts** (`scripts/cc-switch-compatibility/`):
+   - `run-mock.ps1` / `run-mock.sh`: build and run the standalone compatibility Mock classifier jar on loopback port 8082.
+   - `run-gateway.ps1` / `run-gateway.sh`: build and run gateway-app on port 8081 with `MIQROKEY_UPSTREAM_URL` pointing to `http://127.0.0.1:8082`.
+   - Observation helpers: `check-observations.ps1` / `.sh`, `clear-observations.ps1` / `.sh` for quick diagnostic inspection at the Mock port.
+   All scripts resolve repo root from script location, require Java 21, use Maven Wrapper, support non-secret `MIQROKEY_SKIP_BUILD` env/SkipBuild option, use no credential in process arguments, print health/observation URLs and Ctrl+C cleanup instructions. Foreground processes only — no PID files or orphan services.
+
+2. **Shade refinement** (`backend/test-support/pom.xml`):
+   - Excluded test-only libraries (AssertJ, JUnit Jupiter, JUnit Platform, OpenTest4J, API Guardian, Byte Buddy) from the compatibility classifier jar via `<artifactSet><excludes>`.
+   - Merged service descriptors with `ServicesResourceTransformer`.
+   - Added signature file exclusions (`.SF`, `.DSA`, `.RSA`).
+   Normal test-support artifact/dependency scopes unchanged.
+
+3. **Documentation** (`docs/cc-switch-compatibility/`):
+   - `manual-verification-guide.md`: Section 3 rewritten with actual script commands, two-terminal start order (Mock then Gateway), health check for both ports, observation helper references, and updated cleanup steps. Removed `PENDING_IMPLEMENTATION` from harness startup.
+   - `README.md`: Quick Start updated with exact script commands, observation URLs, and two-terminal order.
+   - `config-field-reference.md`: Base URL references standardized to `http://127.0.0.1:8081`.
+   - All four matrix files: Prerequisites updated with two-terminal startup, Base URLs standardized to `127.0.0.1`.
+   - CC Switch app version, GUI/client execution, real provider scenarios, and unexecuted CC Switch scenarios remain `ENV_BLOCKED` or `WAITING_FOR_CREDENTIAL`; never claim PASS.
+
+### Verification (this slice)
+
+- **Spotless check**: `.\mvnw.cmd spotless:check --batch-mode` → **BUILD SUCCESS** (all 8 modules)
+- **git diff --check**: **PASS** — no whitespace errors
+- **Shell syntax check** (`bash -n`): all 4 `.sh` scripts **PASS**
+- **PowerShell syntax check** (`[Parser]::ParseFile`): all 4 `.ps1` scripts **PASS**
+- **Package classifier jar**: `.\mvnw.cmd -pl test-support -am package -DskipTests --batch-mode` → **BUILD SUCCESS**, jar exists at `backend/test-support/target/test-support-0.1.0-SNAPSHOT-compatibility.jar` (9.7 MB)
+- **Test library exclusion**: No AssertJ, JUnit, OpenTest4J, API Guardian, or Byte Buddy classes in shaded jar → **PASS**
+- **Smoke start jar**: Started on port 18082, `GET /health` returned `{"service":"compatibility-mock","status":"UP"}`, process killed in `finally` → **PASS**
+- **Port released**: Port 18082 free after smoke test → **PASS**
+
+### Final verification — Complete suite (2026-07-22)
+
+- `.\mvnw.cmd clean verify --batch-mode --no-transfer-progress`: **BUILD SUCCESS** in 51.773s. **223 tests, 0 failures, 0 errors, 0 skips**:
+  - test-support: 109 tests (CompatibilityMockServerTest 55, ObservationStoreTest 19, RequestLifecycleTest 10, + existing contract fixtures)
+  - gateway-app: 111 tests (AnthropicProxyContractTest 24, ResponsesProxyContractTest 23, ChatProxyContractTest 24, + SseUsageObserverTest 10, GatewayNoBlockingTest 3, TtfbRecorderTest 3, HeaderFiltersTest 9, MockProviderDirectTest 3, smoke 4, ArchUnit 8)
+  - control-plane-app: 2 tests (smoke + configuration)
+  - domain: 1 test (domain contract)
+- Maven Enforcer: PASS
+- Spotless check: PASS (all 8 modules)
+- ArchUnit module dependency: PASS (8 rules)
+- No `.block()` in production Gateway code: confirmed
+- Frontend: `npm ci` PASS, 381 packages audited, 0 vulnerabilities; `npm run lint` PASS; `npm run typecheck` PASS; `npm run test` PASS (1 test); `npm run build` PASS. Vite emitted only existing warnings (no new errors).
+- Compatibility JAR manifest has expected `Main-Class`; local smoke on `127.0.0.1:18082`: health UP; Messages 200; Chat Completions 200; Responses 200; observations count 4; normalized content-type `application/json`; `forbiddenCredentialHeaderReached` false; exact process stopped in finally.
+- Bounded body/media-type repair: all 109 test-support tests PASS.
+- Launch scripts: all 4 PowerShell and 4 POSIX script syntax checks PASS.
+- `git diff --check`: PASS — no whitespace errors.
+- `docker compose -f deploy/compose.yaml config`: **ENV_BLOCKED** — Docker is not installed locally; CI must validate Compose.
+
+### Version evidence (independently verified)
+
+| Component | Version | Status |
+|---|---|---|
+| MiQroKey Gateway | `0.1.0-SNAPSHOT` | CONFIRMED |
+| CC Switch | **3.18.0** (FileVersion/ProductVersion) | **CONFIRMED** |
+| Claude Desktop | **1.24012.1** (FileVersion/ProductVersion) | **CONFIRMED** |
+| Claude Code | 2.1.216 | CONFIRMED |
+| Codex CLI | 0.144.6 | CONFIRMED |
+| Java | 21 (Temurin 21.0.11) | CONFIRMED |
+
+CC Switch configuration was **deliberately not touched** in this Goal; actual UI fields
+and client paths remain **MANUAL_REQUIRED**. Claude Desktop configuration was also
+**deliberately not touched**; client behavior is **MANUAL_REQUIRED**. No end-to-end CC Switch
+PASS is claimed.
+
+### Remaining manual gaps (out of scope for G0.4)
+
+| Gap | Status | Resolution Target |
+|---|---|---|
+| CC Switch provider GUI configuration (Anthropic Provider, Local Routing, Codex, Claude Desktop integration) | MANUAL_REQUIRED | Human tester at CC Switch GUI |
+| Claude Desktop third-party provider setup | MANUAL_REQUIRED | Human tester at Claude Desktop settings |
+| Real upstream credential injection (Gateway strips but does not inject) | `WAITING_FOR_CREDENTIAL` | G1.5 |
+| `/v1/models` endpoint | PENDING_IMPLEMENTATION | G2.3 |
+| Docker Compose validation | ENV_BLOCKED | CI (GitHub Actions) |
+| Real provider end-to-end verification | `WAITING_FOR_CREDENTIAL` | Post-G1.5 |
+
+### Files changed
+
+- `backend/pom.xml`: Added `maven-shade-plugin` version 3.6.0 to `pluginManagement`.
+- `backend/test-support/pom.xml`: Shade plugin configuration with `compatibility` classifier, test-library exclusion, `Main-Class`, `ServicesResourceTransformer`, signature exclusions.
+- `backend/test-support/src/main/java/.../testing/compatibility/`: `CompatibilityMockServerMain`, `CompatibilityMockServer`, `DiagnosticDto`, `ObservationStore`, `RequestObservation`, `UsageObservation`.
+- `backend/test-support/src/test/java/.../testing/compatibility/`: `CompatibilityMockServerTest` (55 tests, 14 nested classes), `ObservationStoreTest` (19 tests).
+- `docs/cc-switch-compatibility/`: README, manual verification guide, config field reference, version evidence, 4 scenario matrices.
+- `docs/progress.md`: Updated (this file).
+- `scripts/cc-switch-compatibility/`: `run-mock.ps1`/`.sh`, `run-gateway.ps1`/`.sh`, `check-observations.ps1`/`.sh`, `clear-observations.ps1`/`.sh`.
+
+### Security/data impact
+
+- No secrets, credentials, or PII introduced. The compatibility Mock Server is a
+  standalone diagnostic tool that records only allowlisted HTTP metadata (path, method,
+  protocol classification, credential header presence, content-type, HTTP status).
+  It never records request/response bodies, tokens, or real credentials.
+- The synthetic key `sk-miqrokey-g04-test-*` has no access to any real provider and is
+  stripped by the Gateway before forwarding.
+- No changes to production Gateway proxy, credential handling, or header filtering.
+
+### Remaining risks
+
+- CC Switch and Claude Desktop configurations are MANUAL_REQUIRED — not validated
+  by this Goal. Human testers using the provided checklists may discover CC Switch
+  behaviors not anticipated by the Mock Server.
+- No real provider integration performed. All protocol behaviors are MOCK_VERIFIED.
+- Docker Compose not validated locally (ENV_BLOCKED); CI must confirm.
+
+## Next Goal
+
+- Goal ID: `G1.1`
+- Name: PostgreSQL schema and persistence
+- Status: `NOT_STARTED`
+- Source: [`implementation-plan.md`](implementation-plan.md#g11-postgresql-schema-and-persistence)

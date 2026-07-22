@@ -40,6 +40,7 @@
         <maven-enforcer.version>3.5.0</maven-enforcer.version>
         <spotless.version>2.44.1</spotless.version>
         <flatten.version>1.6.0</flatten.version>
+        <maven-shade-plugin.version>3.6.0</maven-shade-plugin.version>
     </properties>
 
     <dependencyManagement>
@@ -132,6 +133,11 @@
                             </manifestEntries>
                         </archive>
                     </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-shade-plugin</artifactId>
+                    <version>${maven-shade-plugin.version}</version>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
