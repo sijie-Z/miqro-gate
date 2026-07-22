@@ -376,7 +376,7 @@ Addressing 10 review blockers on branch `goal/g1.1-postgresql-schema-and-persist
 
 ### Current schema (V1 migration)
 
-18 tables: tenants, users, teams, team_memberships, projects, project_memberships, providers, provider_products, upstream_subscriptions, plan_seats, upstream_credentials, upstream_credential_versions, project_provider_grants, project_provider_grant_models, virtual_keys, virtual_key_models, admin_audit_events (+ flyway_schema_history).
+17 application tables created by V1: tenants, users, teams, team_memberships, projects, project_memberships, providers, provider_products, upstream_subscriptions, plan_seats, upstream_credentials, upstream_credential_versions, project_provider_grants, project_provider_grant_models, virtual_keys, virtual_key_models, admin_audit_events. After migration, Flyway auto-creates flyway_schema_history → 18 physical tables.
 
 ### Current architecture
 
@@ -413,7 +413,7 @@ Addressing 10 review blockers on branch `goal/g1.1-postgresql-schema-and-persist
 
 ### Outcome
 
-- PostgreSQL V1 schema (18 tables) created and verified via Flyway migration + Testcontainers.
+- PostgreSQL V1 schema (17 application tables + flyway_schema_history = 18 physical tables after migration) created and verified via Flyway migration + Testcontainers.
 - 17 domain records + 20 enums + 13 repository interfaces + 13 JDBC implementations with optimistic locking.
 - 7 integration test classes (8 including AbstractPostgresTest) covering schema migration, constraints/indexes, FK deletion semantics, repository CRUD+versioning, tenant isolation, cross-tenant prevention, and fixed mapping triggers.
 - Database-level tenant isolation with composite FKs and UNIQUE constraints.
