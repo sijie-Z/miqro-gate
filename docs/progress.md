@@ -7,7 +7,7 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `G1.2`
-- Goal status: `IN_PROGRESS`
+- Goal status: `DONE`
 - Last updated: `2026-07-22`
 - Branch: `goal/g1.2-secret-encryption-foundation`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
@@ -453,10 +453,10 @@ Addressing 9 P0 blockers identified in security review of PR #7:
 - AES-256-GCM encryption provider with independent random nonce per ciphertext, 128-bit GCM auth tag. AAD binds tenantId + credentialId + keyVersion — any tampering causes AEAD tag mismatch with stable `CRYPTO_DECRYPT_001` error code.
 - Virtual Key HMAC-SHA-256 provider: 256-bit secret generation, `mqk_live_<publicKeyId>_<secret>` format, one-time display with `destroy()` lifecycle, tenant-bound digests, multi-version constant-time full-traversal validation.
 - `KeyRing` deep-copies all byte arrays on construction and access. Source arrays can be safely zeroed after construction.
-- `FileSecretProvider` loads keys from files with fail-fast validation (existence, type, permissions, length, weak-key rejection, master/HMAC separation).
+- `FileSecretProvider` loads keys from files with fail-fast validation (existence, type, strict 0400 POSIX permissions, length, weak-key rejection, byte-content master/HMAC separation).
 - `CryptoConfig` auto-configuration via `@AutoConfiguration`; conditional on `miqrokey.crypto.enabled=true`.
 - No key material in DB, logs, `toString()`, exceptions, or test fixtures.
-- Master key and HMAC key are separated and verified to point to different files.
+- Master key and HMAC key are separated and verified to contain different byte material (constant-time comparison across all version combinations).
 
 ### Final CI evidence (2026-07-22 — repair round)
 
@@ -505,6 +505,17 @@ All existing `SingleFile`/`MultiVersion`/`HmacKeys` tests updated with `ensureSt
 - `git diff --check`: **PASS**
 - `npm --prefix frontend ci && npm run lint && npm run typecheck && npm run test && npm run build`: all **PASS**
 - `docker compose -f deploy/compose.yaml config`: **ENV_BLOCKED** (CI validates)
+
+### Final CI evidence (2026-07-22 — final review-repair)
+
+- **CI run**: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29895677948`
+- **Conclusion**: **SUCCESS** (all 4 jobs):
+  - Backend Ubuntu / Verify + Integration: **SUCCESS**
+  - Backend Windows / Verify: **SUCCESS**
+  - Frontend: **SUCCESS** (npm ci/lint/typecheck/test/build)
+  - Compose config: **SUCCESS**
+- **Commit**: `a2326e1` — `security(g1.2): strict POSIX 0400 default and byte-content key separation`
+- **PR**: `https://github.com/lichman0405/miqro-key-gateway/pull/7`
 
 ### Domain crypto module
 
