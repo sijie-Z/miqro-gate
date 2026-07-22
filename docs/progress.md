@@ -7,7 +7,7 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `G1.1`
-- Goal status: `IN_PROGRESS`
+- Goal status: `DONE`
 - Last updated: `2026-07-22`
 - Branch: `goal/g1.1-postgresql-schema-and-persistence`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
@@ -351,7 +351,7 @@ PASS is claimed.
 - No real provider integration performed. All protocol behaviors are MOCK_VERIFIED.
 - Docker Compose not validated locally (ENV_BLOCKED); CI must confirm.
 
-## G1.1 — PostgreSQL schema and persistence (REPAIR IN PROGRESS)
+## G1.1 — PostgreSQL schema and persistence (DONE)
 
 ### Review repairs applied (2026-07-22)
 
@@ -365,7 +365,7 @@ Addressing 10 review blockers on branch `goal/g1.1-postgresql-schema-and-persist
 6. **Fixed mapping semantics**: DB triggers enforce Virtual Key's grant/credential/project match; grant credential must belong to a subscription of the same provider product. Added negative tests for invalid combinations.
 7. **Repository completeness**: All 13 repository interfaces now have Spring JDBC `@Repository` implementations: Tenant, User, Team, Provider, ProviderProduct, UpstreamSubscription, UpstreamCredential, UpstreamCredentialVersion, Project, ProjectMembership, ProjectProviderGrant, VirtualKey, AdminAuditEvent. No autowiring gaps remain.
 8. **Optimistic locking**: All mutable update methods use tenant-scoped `WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion`, increment version in SQL, verify update count (==1), throw on conflict. Added stale-version integration tests.
-9. **Closed types and defensive copying**: All status/role/purpose/topology String fields replaced with 19 documented Java enums (`TenantStatus`, `UserRole`, `UserStatus`, `TeamStatus`, `ProjectStatus`, `ProviderStatus`, `BillingMode`, `PlanScope`, `CredentialTopology`, `QuotaTopology`, `ImplementationStatus`, `BalanceAuthority`, `SubscriptionStatus`, `StatusSource`, `SeatStatus`, `CredentialStatus`, `CredentialVersionStatus`, `GrantStatus`, `VirtualKeyPurpose`, `VirtualKeyStatus`). All byte[] fields defensively copied in compact constructors and accessor overrides.
+9. **Closed types and defensive copying**: All status/role/purpose/topology String fields replaced with 20 documented Java enums (`TenantStatus`, `UserRole`, `UserStatus`, `TeamStatus`, `ProjectStatus`, `ProviderStatus`, `BillingMode`, `PlanScope`, `CredentialTopology`, `QuotaTopology`, `ImplementationStatus`, `BalanceAuthority`, `SubscriptionStatus`, `StatusSource`, `SeatStatus`, `CredentialStatus`, `CredentialVersionStatus`, `GrantStatus`, `VirtualKeyPurpose`, `VirtualKeyStatus`). All byte[] fields defensively copied in compact constructors and accessor overrides.
 10. **Progress.md corrected**: Phase set to `PHASE_1`, branch corrected to `goal/g1.1-postgresql-schema-and-persistence`, status `IN_PROGRESS` until Linux CI green. Table/interface/implementation/test counts accurate.
 
 ### Repairs applied (2026-07-22 — round 2: container lifecycle + unique-constraint safety)
@@ -380,7 +380,7 @@ Addressing 10 review blockers on branch `goal/g1.1-postgresql-schema-and-persist
 
 ### Current architecture
 
-- **Domain model**: 17 records + 19 enums in `com.miqroera.miqrokey.domain.model`
+- **Domain model**: 17 records + 20 enums in `com.miqroera.miqrokey.domain.model`
 - **Repository interfaces**: 13 in `com.miqroera.miqrokey.domain.repository`
 - **Repository implementations**: 13 in `com.miqroera.miqrokey.persistence.repository`
 - **Integration tests**: 7 test classes (8 including AbstractPostgresTest): SchemaMigrationTest, ConstraintAndIndexTest, ForeignKeyDeletionTest, RepositoryIntegrationTest, TenantProjectIsolationTest, CrossTenantIsolationTest, FixedMappingSemanticsTest
@@ -399,9 +399,28 @@ Addressing 10 review blockers on branch `goal/g1.1-postgresql-schema-and-persist
 - `RepositoryIntegrationTest.java`: Random suffix for unique business keys in `@BeforeEach`; dynamic assertion references
 - `docs/progress.md`: Updated (this file)
 
+### Final CI evidence (all green — 2026-07-22)
+
+- **CI run**: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29889176980`
+- **Conclusion**: **SUCCESS** (all 4 jobs, no failures)
+  - **Backend Ubuntu / Verify (Linux)**: SUCCESS — `./mvnw verify -Pintegration --batch-mode` with real PostgreSQL Testcontainers. All domain tests, gateway proxy contracts, ArchUnit, persistence integration tests (migration + 7 integration test classes) pass.
+  - **Backend Windows / Verify**: SUCCESS — non-integration tests pass (Dockerless Windows).
+  - **Frontend**: SUCCESS — `npm ci`, `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build`.
+  - **Compose config + digest check**: SUCCESS — Compose file valid and all images pinned to `@sha256:` digests.
+- **Final commit**: `2835747` — `fix(g1.1): singleton container pattern and unique-constraint safety`
+- **PR**: `https://github.com/lichman0405/miqro-key-gateway/pull/6`
+- **Docker/Testcontainers**: Not available on local Windows dev host; Linux CI provided the definitive integration-suite validation. All round-2 repairs confirmed by CI.
+
+### Outcome
+
+- PostgreSQL V1 schema (18 tables) created and verified via Flyway migration + Testcontainers.
+- 17 domain records + 20 enums + 13 repository interfaces + 13 JDBC implementations with optimistic locking.
+- 7 integration test classes (8 including AbstractPostgresTest) covering schema migration, constraints/indexes, FK deletion semantics, repository CRUD+versioning, tenant isolation, cross-tenant prevention, and fixed mapping triggers.
+- Database-level tenant isolation with composite FKs and UNIQUE constraints.
+- Singleton Testcontainers pattern for efficient CI resource use.
+
 ### Remaining risks
 
-- Integration tests run only on Linux CI with Docker; Windows Dockerless local verification passes only non-integration tests. Linux CI green required to confirm round-2 repairs.
 - G1.2 populates crypto columns with real AES-256-GCM/HMAC.
 - user_sessions, request_usage_records, quota_snapshots, cost_allocations deferred.
 
