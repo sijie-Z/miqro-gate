@@ -7,7 +7,7 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `G1.2`
-- Goal status: `IN_PROGRESS`
+- Goal status: `DONE`
 - Last updated: `2026-07-22`
 - Branch: `goal/g1.1-postgresql-schema-and-persistence`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
@@ -424,15 +424,76 @@ Addressing 10 review blockers on branch `goal/g1.1-postgresql-schema-and-persist
 - G1.2 populates crypto columns with real AES-256-GCM/HMAC.
 - user_sessions, request_usage_records, quota_snapshots, cost_allocations deferred.
 
-## G1.2 — Secret encryption foundation (IN_PROGRESS)
+## G1.2 — Secret encryption foundation (DONE)
 
-### Status
+### Outcome
 
-- Goal ID: `G1.2`
-- Name: Secret encryption foundation
-- Status: `IN_PROGRESS`
-- Branch: `goal/g1.2-secret-encryption-foundation`
-- Source: [`implementation-plan.md`](implementation-plan.md#g12-secret-encryption-foundation)
+- AES-256-GCM encryption provider with independent random nonce per ciphertext, 128-bit GCM auth tag. AAD binds tenantId + credentialId + keyVersion — any tampering, wrong tenant, wrong credential, or wrong key version causes AEAD tag mismatch and fails with `CryptoOperationException`.
+- Virtual Key HMAC-SHA-256 provider: 256-bit secret generation, `mqk_live_<publicKeyId>_<secret>` format, one-time display (raw secret cleared after digest computation), multi-version constant-time validation via `MessageDigest.isEqual`.
+- `KeyRing` for versioned key management: new writes use active version, old versions retained for decryption, `withNewActiveVersion()` rotation, `reEncrypt()` API.
+- `CryptoConfig` (conditional on `miqrokey.crypto.enabled=true`) for production key injection; `CryptoTestConfig` for Testcontainers integration tests with synthetic keys.
+- No key material in DB (verified by schema column audit), logs, `toString()`, exceptions, or test fixtures.
+- Master key and HMAC key are separated (different `KeyRing` instances with different key material).
+
+### Domain crypto module
+
+- `KeyEncryptionProvider` interface + `AesGcmEncryptionProvider` (AES-256-GCM, JDK crypto, no dependencies)
+- `VirtualKeyCrypto` interface + `HmacVirtualKeyProvider` (HMAC-SHA-256, JDK crypto, no dependencies)
+- `EncryptedSecret` record (ciphertext + nonce + keyVersion, defensive copies)
+- `VirtualKeyMaterial` record (fullDisplayString, publicKeyId, rawSecret, displayPrefix, lastFour, digest)
+- `KeyRing` (active version, version→key map, rotation, defensive copies, zero-fill cleanup)
+
+### Tests
+
+- **57 domain unit tests**: encrypt/decrypt, nonce uniqueness, AAD binding (wrong tenant/credential/version), tampering detection (flipped bit, wrong nonce, truncated ciphertext), wrong key (unknown version, completely wrong key), key versioning/rotation/re-encryption, VK generation format/display/hygiene, HMAC computation/validation/constant-time/multi-version, defensive copying, toString safety.
+- **10 crypto integration tests** (Testcontainers PostgreSQL): encrypted secret stored as ciphertext only, unique nonces per encryption, decrypt stored secret, cross-tenant rejection, multiple credential versions, VK digest-only storage, VK validation against stored digest, HMAC key rotation, schema-level no-plaintext-column verification.
+
+### Verification
+
+- `.\mvnw.cmd verify --batch-mode`: **BUILD SUCCESS** — 279 tests, 0 failures (57 domain crypto + 222 existing)
+- `.\mvnw.cmd verify -Pintegration --batch-mode`: **ENV_BLOCKED** (Docker not available locally)
+- Linux CI (`./mvnw verify -Pintegration --batch-mode`): **BUILD SUCCESS** — all 10 CryptoIntegrationTest pass with real PostgreSQL Testcontainers container
+- Windows CI: **BUILD SUCCESS** — all non-integration tests pass
+- `npm --prefix frontend ci && npm run lint && npm run typecheck && npm run test && npm run build`: all **PASS**
+- `git diff --check`: **PASS**
+- `docker compose -f deploy/compose.yaml config`: **PASS** (CI)
+- Spotless check: **PASS** (all 8 modules)
+- Maven Enforcer: **PASS**
+
+### CI evidence
+
+- **CI run**: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29891413228`
+- **Conclusion**: **SUCCESS** (all 4 jobs — Ubuntu backend + integration, Windows backend, Frontend, Compose config)
+- **PR**: `https://github.com/lichman0405/miqro-key-gateway/pull/7`
+- **Commit**: `7680845` — `feat(crypto): AES-256-GCM encryption and Virtual Key HMAC foundation`
+
+### Files changed (17 files, +1687 lines)
+
+- `backend/domain/src/main/java/.../crypto/` (9 files): interfaces, records, AES-GCM provider, HMAC-VK provider, KeyRing
+- `backend/domain/src/test/java/.../crypto/` (3 files): 57 domain unit tests
+- `backend/persistence-postgres/src/main/java/.../config/CryptoConfig.java`: conditional Spring configuration
+- `backend/persistence-postgres/src/test/java/.../` (2 files): CryptoTestConfig + 10 integration tests
+- `docs/progress.md`: updated (this file)
+
+### Security self-review
+
+- **Secret lifecycle**: encrypt → ciphertext-only in DB → decrypt → zero-fill clear after use
+- **Defensive copying**: all byte[] fields copied on construction and access
+- **Exception sanitization**: CryptoOperationException never exposes key material or plaintext
+- **Concurrency safety**: stateless providers after construction; SecureRandom is thread-safe
+- **Key material cleanup**: `clearArray()` (Arrays.fill with 0) called in finally blocks
+- **Virtual Key one-time display**: rawSecret zero-filled after digest computation in generate()
+- **Constant-time comparison**: uses `MessageDigest.isEqual()` for all VK digest verification
+- **No plaintext in DB**: verified by schema column audit integration tests
+- **toString safety**: all toString() methods exclude key material, plaintext, raw secrets
+- **Master/HMAC key separation**: independent KeyRing instances; HMAC key not usable for encryption
+- **Test safety**: all test keys are synthetic SecureRandom bytes; no hardcoded secrets
+
+### Remaining risks
+
+- G2.2 will wire Gateway hot-path decryption (crypto SPI ready in domain)
+- G1.6 will add upstream credential validation flow (crypto kernel ready)
+- File-based key loading in CryptoConfig uses base64 properties; production should use Docker Secrets mounted files (can be added later without API changes)
 
 ## Next Goal
 
