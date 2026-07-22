@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_0`
 - Current executor: `Claude Code`
-- Current goal: `G0.4`
-- Goal status: `DONE`
+- Current goal: `G1.1`
+- Goal status: `IN_PROGRESS`
 - Last updated: `2026-07-22`
 - Branch: `goal/g0.4-cc-switch-manual-compatibility-poc`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
