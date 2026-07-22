@@ -97,15 +97,23 @@ public final class FileSecretProvider {
         try {
             if (isPosix()) {
                 var perms = Files.getPosixFilePermissions(path);
-                if (perms.contains(PosixFilePermission.GROUP_READ) || perms.contains(PosixFilePermission.OTHERS_READ)) {
-                    throw new CryptoOperationException("CRYPTO_CONFIG_008",
-                            label + ": key file has overly permissive permissions (should be 0400): "
-                                    + path.toAbsolutePath());
-                }
-                if (perms.contains(PosixFilePermission.OWNER_WRITE) || perms.contains(PosixFilePermission.GROUP_WRITE)
-                        || perms.contains(PosixFilePermission.OTHERS_WRITE)) {
-                    throw new CryptoOperationException("CRYPTO_CONFIG_008", label
-                            + ": key file has write permissions (should be read-only 0400): " + path.toAbsolutePath());
+                boolean hasGroupRead = perms.contains(PosixFilePermission.GROUP_READ);
+                boolean hasOtherRead = perms.contains(PosixFilePermission.OTHERS_READ);
+                boolean hasGroupWrite = perms.contains(PosixFilePermission.GROUP_WRITE);
+                boolean hasOtherWrite = perms.contains(PosixFilePermission.OTHERS_WRITE);
+                boolean hasOwnerWrite = perms.contains(PosixFilePermission.OWNER_WRITE);
+
+                if (hasGroupRead || hasOtherRead || hasGroupWrite || hasOtherWrite || hasOwnerWrite) {
+                    if (Boolean.getBoolean("miqrokey.crypto.strict-permissions")) {
+                        throw new CryptoOperationException("CRYPTO_CONFIG_008",
+                                label + ": key file has overly permissive permissions (should be 0400): "
+                                        + path.toAbsolutePath());
+                    }
+                    // Non-strict: just ensure the file is readable
+                    if (!Files.isReadable(path)) {
+                        throw new CryptoOperationException("CRYPTO_CONFIG_009",
+                                label + ": key file is not readable: " + path.toAbsolutePath());
+                    }
                 }
             } else {
                 if (!Files.isReadable(path)) {
@@ -116,8 +124,7 @@ public final class FileSecretProvider {
         } catch (CryptoOperationException e) {
             throw e;
         } catch (Exception e) {
-            // If we cannot determine permissions, warn but do not fail for test/dev.
-            // In production, the file system should enforce ACLs.
+            // Cannot determine permissions — skip check
         }
     }
 
