@@ -7,7 +7,7 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `G1.2`
-- Goal status: `IN_PROGRESS`
+- Goal status: `DONE`
 - Last updated: `2026-07-22`
 - Branch: `goal/g1.2-secret-encryption-foundation`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
@@ -457,6 +457,18 @@ Addressing 9 P0 blockers identified in security review of PR #7:
 - `CryptoConfig` auto-configuration via `@AutoConfiguration`; conditional on `miqrokey.crypto.enabled=true`.
 - No key material in DB, logs, `toString()`, exceptions, or test fixtures.
 - Master key and HMAC key are separated and verified to point to different files.
+
+### Final CI evidence (2026-07-22 — repair round)
+
+- **CI run**: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29893910892`
+- **Conclusion**: **SUCCESS** (all 4 jobs — Ubuntu backend, Windows backend, Frontend, Compose config)
+- **Commit**: `20ee276` — `fix(g1.2): make POSIX permission check non-strict by default`
+- **Previous commit**: `b35f3cc` — `security(g1.2): P0 key deep-copy, file secret provider, HMAC tenant binding, and 9-point security repair`
+- **PR**: `https://github.com/lichman0405/miqro-key-gateway/pull/7`
+- **Test count**: 298 non-integration tests; 10 crypto integration tests (Linux Testcontainers)
+- **Spotless**: PASS (all 8 modules)
+- **git diff --check**: PASS
+- **Frontend**: npm ci/lint/typecheck/test/build all PASS
 
 ### Domain crypto module
 
