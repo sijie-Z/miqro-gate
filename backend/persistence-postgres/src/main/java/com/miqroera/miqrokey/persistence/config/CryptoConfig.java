@@ -78,13 +78,11 @@ public class CryptoConfig {
         }
         String activeVersion = hmac.activeVersion() != null ? hmac.activeVersion() : "v1";
 
-        KeyRing hmacKeyRing = FileSecretProvider.loadKeyRing(activeVersion, new LinkedHashMap<>(hmac.versions()), -1,
-                "HMAC key");
-
-        // Verify master and HMAC keys are different material
-        CryptoProperties propsForEnc = props; // capture for lambda
-        var enc = propsForEnc.encryption();
+        // Verify master and HMAC keys use different material
+        // (byte-content comparison across all version combinations in constant time)
+        var enc = props.encryption();
         if (enc != null && enc.versions() != null) {
+            // Fast-fail: reject identical file paths
             for (var encEntry : enc.versions().entrySet()) {
                 for (var hmacEntry : hmac.versions().entrySet()) {
                     if (encEntry.getValue().equals(hmacEntry.getValue())) {
@@ -94,7 +92,13 @@ public class CryptoConfig {
                     }
                 }
             }
+            // Deep check: load and compare byte contents in constant time
+            FileSecretProvider.verifyKeyMaterialSeparation(new LinkedHashMap<>(enc.versions()),
+                    new LinkedHashMap<>(hmac.versions()));
         }
+
+        KeyRing hmacKeyRing = FileSecretProvider.loadKeyRing(activeVersion, new LinkedHashMap<>(hmac.versions()), -1,
+                "HMAC key");
 
         return new HmacVirtualKeyProvider(hmacKeyRing);
     }

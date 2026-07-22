@@ -8,9 +8,12 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
+import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public final class FileSecretProvider {
@@ -93,38 +96,52 @@ public final class FileSecretProvider {
         return keyMaterial;
     }
 
+    /**
+     * Validates that a key file only has owner-read permissions (0400) on POSIX
+     * systems, and is at least readable on all platforms.
+     *
+     * <p>
+     * <strong>Production behavior (POSIX):</strong> Permission inspection is strict
+     * by default. If POSIX file attributes are supported, the file must have
+     * exactly {@code OWNER_READ} and no other permissions. Any other permission bit
+     * ({@code OWNER_WRITE}, {@code OWNER_EXECUTE}, {@code GROUP_*},
+     * {@code OTHERS_*}) causes immediate startup failure with
+     * {@code CRYPTO_CONFIG_008}.
+     * </p>
+     *
+     * <p>
+     * If POSIX attribute inspection itself fails (e.g. I/O error, security manager
+     * denial, unsupported file system on a POSIX host), the check fails safe:
+     * startup is refused rather than silently bypassing validation.
+     * </p>
+     *
+     * <p>
+     * <strong>Non-POSIX (Windows):</strong> Only a readability check is performed.
+     * The process owner must be able to read the key file.
+     * </p>
+     */
     static void checkPermissions(Path path, String label) {
-        try {
-            if (isPosix()) {
+        if (isPosix()) {
+            try {
                 var perms = Files.getPosixFilePermissions(path);
-                boolean hasGroupRead = perms.contains(PosixFilePermission.GROUP_READ);
-                boolean hasOtherRead = perms.contains(PosixFilePermission.OTHERS_READ);
-                boolean hasGroupWrite = perms.contains(PosixFilePermission.GROUP_WRITE);
-                boolean hasOtherWrite = perms.contains(PosixFilePermission.OTHERS_WRITE);
-                boolean hasOwnerWrite = perms.contains(PosixFilePermission.OWNER_WRITE);
-
-                if (hasGroupRead || hasOtherRead || hasGroupWrite || hasOtherWrite || hasOwnerWrite) {
-                    if (Boolean.getBoolean("miqrokey.crypto.strict-permissions")) {
-                        throw new CryptoOperationException("CRYPTO_CONFIG_008",
-                                label + ": key file has overly permissive permissions (should be 0400): "
-                                        + path.toAbsolutePath());
-                    }
-                    // Non-strict: just ensure the file is readable
-                    if (!Files.isReadable(path)) {
-                        throw new CryptoOperationException("CRYPTO_CONFIG_009",
-                                label + ": key file is not readable: " + path.toAbsolutePath());
-                    }
+                boolean hasOnlyOwnerRead = perms.size() == 1 && perms.contains(PosixFilePermission.OWNER_READ);
+                if (!hasOnlyOwnerRead) {
+                    throw new CryptoOperationException("CRYPTO_CONFIG_008", label
+                            + ": key file has overly permissive permissions (must be 0400): " + path.toAbsolutePath());
                 }
-            } else {
-                if (!Files.isReadable(path)) {
-                    throw new CryptoOperationException("CRYPTO_CONFIG_009",
-                            label + ": key file is not readable: " + path.toAbsolutePath());
-                }
+            } catch (CryptoOperationException e) {
+                throw e;
+            } catch (Exception e) {
+                // POSIX supported but inspection failed — fail safe
+                throw new CryptoOperationException("CRYPTO_CONFIG_008",
+                        label + ": failed to inspect key file permissions: " + path.toAbsolutePath(), e);
             }
-        } catch (CryptoOperationException e) {
-            throw e;
-        } catch (Exception e) {
-            // Cannot determine permissions — skip check
+        } else {
+            // Non-POSIX (Windows): just ensure the file is readable by the process
+            if (!Files.isReadable(path)) {
+                throw new CryptoOperationException("CRYPTO_CONFIG_009",
+                        label + ": key file is not readable: " + path.toAbsolutePath());
+            }
         }
     }
 
@@ -174,6 +191,86 @@ public final class FileSecretProvider {
             return java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    /**
+     * Verifies that the AES master key material and HMAC key material are distinct
+     * across all version combinations.
+     *
+     * <p>
+     * Loads key material from every configured encryption version file and every
+     * HMAC version file, then compares every (encryption-version, HMAC-version)
+     * pair in constant time using {@link MessageDigest#isEqual(byte[], byte[])}. If
+     * any pair contains identical bytes, startup fails with
+     * {@code CRYPTO_CONFIG_011}.
+     * </p>
+     *
+     * <p>
+     * All temporary byte arrays are zero-filled before this method returns, whether
+     * it succeeds or throws.
+     * </p>
+     *
+     * @param encVersionPaths
+     *            encryption version → file path map
+     * @param hmacVersionPaths
+     *            HMAC version → file path map
+     * @throws CryptoOperationException
+     *             if any encryption key material equals any HMAC key material
+     */
+    public static void verifyKeyMaterialSeparation(Map<String, String> encVersionPaths,
+            Map<String, String> hmacVersionPaths) {
+        if (encVersionPaths == null || encVersionPaths.isEmpty() || hmacVersionPaths == null
+                || hmacVersionPaths.isEmpty()) {
+            return;
+        }
+
+        List<LoadedKey> encMaterial = new ArrayList<>();
+        List<LoadedKey> hmacMaterial = new ArrayList<>();
+
+        try {
+            for (var entry : encVersionPaths.entrySet()) {
+                byte[] material = loadAndValidateFile(Path.of(entry.getValue()), 32,
+                        "AES master key [" + entry.getKey() + "]");
+                encMaterial.add(new LoadedKey(entry.getKey(), material));
+            }
+            for (var entry : hmacVersionPaths.entrySet()) {
+                byte[] material = loadAndValidateFile(Path.of(entry.getValue()), -1,
+                        "HMAC key [" + entry.getKey() + "]");
+                hmacMaterial.add(new LoadedKey(entry.getKey(), material));
+            }
+
+            for (LoadedKey enc : encMaterial) {
+                for (LoadedKey hmac : hmacMaterial) {
+                    if (enc.material.length == hmac.material.length
+                            && MessageDigest.isEqual(enc.material, hmac.material)) {
+                        throw new CryptoOperationException("CRYPTO_CONFIG_011",
+                                "Master and HMAC keys must use different material. " + "Encryption version "
+                                        + enc.version + " and HMAC version " + hmac.version
+                                        + " contain identical bytes.");
+                    }
+                }
+            }
+        } finally {
+            for (LoadedKey k : encMaterial) {
+                Arrays.fill(k.material, (byte) 0);
+            }
+            for (LoadedKey k : hmacMaterial) {
+                Arrays.fill(k.material, (byte) 0);
+            }
+        }
+    }
+
+    /**
+     * Internal holder for a loaded key during separation verification.
+     */
+    private static final class LoadedKey {
+        final String version;
+        final byte[] material;
+
+        LoadedKey(String version, byte[] material) {
+            this.version = version;
+            this.material = material;
         }
     }
 }

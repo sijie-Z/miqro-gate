@@ -7,7 +7,7 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `G1.2`
-- Goal status: `DONE`
+- Goal status: `IN_PROGRESS`
 - Last updated: `2026-07-22`
 - Branch: `goal/g1.2-secret-encryption-foundation`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
@@ -469,6 +469,42 @@ Addressing 9 P0 blockers identified in security review of PR #7:
 - **Spotless**: PASS (all 8 modules)
 - **git diff --check**: PASS
 - **Frontend**: npm ci/lint/typecheck/test/build all PASS
+
+### Final review-repair — merge blockers (2026-07-22)
+
+Codex targeted verification found two remaining merge blockers. Both fixed:
+
+1. **POSIX secret-file permissions fail-open → strict by default.** `FileSecretProvider.checkPermissions` previously rejected overly broad POSIX permissions only when the optional JVM property `miqrokey.crypto.strict-permissions=true` was supplied. Now:
+   - POSIX key files must have exactly `OWNER_READ` (0400). Any other permission bit (OWNER_WRITE, OWNER_EXECUTE, GROUP_*, OTHERS_*) causes immediate `CRYPTO_CONFIG_008` startup failure — no opt-in required.
+   - POSIX permission-inspection failures (I/O error, security manager denial, unsupported FS on a POSIX host) fail safe with `CRYPTO_CONFIG_008` rather than being silently swallowed.
+   - Non-POSIX (Windows) path unchanged: readability check only.
+   - Removed the undocumented `miqrokey.crypto.strict-permissions` opt-in flag.
+
+2. **Key separation checks only path-string equality → byte-content constant-time comparison.** `CryptoConfig.virtualKeyCrypto` previously compared only file paths (`encEntry.getValue().equals(hmacEntry.getValue())`), accepting two different files with identical bytes. Now:
+   - Added `FileSecretProvider.verifyKeyMaterialSeparation()` which loads key material from all configured encryption and HMAC version files, compares every (enc-version, HMAC-version) pair using `MessageDigest.isEqual()` (constant-time), and fails with `CRYPTO_CONFIG_011` on any match.
+   - All temporary byte arrays zero-filled in `finally` block.
+   - Fast-fail path-string comparison retained as an additional early guard.
+
+### Regression tests added
+
+- **FileSecretProviderTest$PosixPermissions** (5 tests, `@EnabledOnOs({LINUX, MAC})`): accepts 0400, rejects 0644, 0600, 0777, and 0500. Skipped on Windows (5 skipped).
+- **FileSecretProviderTest$KeyMaterialSeparation** (5 tests): rejects identical bytes in different files (CRYPTO_CONFIG_011), accepts different material, rejects cross-version identical material, accepts multi-version different material, accepts empty maps.
+
+All existing `SingleFile`/`MultiVersion`/`HmacKeys` tests updated with `ensureStrictPermissions()` helper so they pass the new strict POSIX default on Linux CI.
+
+### Verification (current)
+
+- `.\mvnw.cmd verify --batch-mode`: **BUILD SUCCESS** — 303 non-integration tests, 0 failures, 5 skipped (POSIX on Windows)
+  - Domain: 65 tests
+  - Persistence PostgreSQL: 21 tests (16 pass, 5 skipped)
+  - Control Plane: 2 tests
+  - Test Support: 109 tests
+  - Gateway App: 111 tests
+- Spotless check: **PASS** (all 8 modules)
+- Maven Enforcer: **PASS**
+- `git diff --check`: **PASS**
+- `npm --prefix frontend ci && npm run lint && npm run typecheck && npm run test && npm run build`: all **PASS**
+- `docker compose -f deploy/compose.yaml config`: **ENV_BLOCKED** (CI validates)
 
 ### Domain crypto module
 
