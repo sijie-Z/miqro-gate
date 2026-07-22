@@ -13,6 +13,28 @@ import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.util.UUID;
 
+/**
+ * AES-256-GCM implementation of {@link KeyEncryptionProvider}.
+ *
+ * <h2>Algorithm</h2> AES-256 in Galois/Counter Mode with 96-bit random nonce
+ * and 128-bit authentication tag. Every encryption produces a unique,
+ * independent nonce from {@link SecureRandom}.
+ *
+ * <h2>Additional Authenticated Data (AAD)</h2> AAD = tenantId (16 bytes) +
+ * credentialId (16 bytes) + keyVersion (UTF-8). This binds every ciphertext to
+ * a specific tenant, credential, and encryption key version. Decryption with
+ * wrong AAD triggers an AEAD tag mismatch.
+ *
+ * <h2>Key lifecycle</h2> {@link #encrypt} uses the active key version.
+ * {@link #decrypt} looks up the version stored in
+ * {@link EncryptedSecret#keyVersion()}. The {@link #reEncrypt} convenience
+ * decrypts with the original version then re-encrypts with the active version.
+ *
+ * <h2>Array ownership</h2> Callers own the plaintext they pass into
+ * {@link #encrypt} and the byte[] returned by {@link #decrypt}. The provider
+ * clears internal key clones promptly; callers must zero-fill decrypted
+ * plaintext after use.
+ */
 public final class AesGcmEncryptionProvider implements KeyEncryptionProvider {
 
     private static final String ALGORITHM = "AES";
@@ -24,6 +46,16 @@ public final class AesGcmEncryptionProvider implements KeyEncryptionProvider {
     private final KeyRing keyRing;
     private final SecureRandom secureRandom;
 
+    /**
+     * Creates a provider backed by the given key ring. Every key in the ring is
+     * validated for correct AES-256 length (32 bytes). Key clones obtained during
+     * validation are zero-filled immediately.
+     *
+     * @param keyRing
+     *            the key ring (keys are deep-copied by KeyRing)
+     * @throws CryptoOperationException
+     *             if any key has wrong length
+     */
     public AesGcmEncryptionProvider(KeyRing keyRing) {
         this(keyRing, new SecureRandom());
     }
@@ -31,9 +63,15 @@ public final class AesGcmEncryptionProvider implements KeyEncryptionProvider {
     AesGcmEncryptionProvider(KeyRing keyRing, SecureRandom secureRandom) {
         this.keyRing = keyRing;
         this.secureRandom = secureRandom;
-        for (byte[] key : keyRing.knownVersions().stream().map(keyRing::keyForVersion).toList()) {
-            if (key.length != AES_KEY_LENGTH) {
-                throw new IllegalArgumentException("AES key must be " + AES_KEY_LENGTH + " bytes, got " + key.length);
+        for (String version : keyRing.knownVersions()) {
+            byte[] key = keyRing.keyForVersion(version);
+            try {
+                if (key.length != AES_KEY_LENGTH) {
+                    throw new CryptoOperationException("CRYPTO_KEY_001",
+                            "AES key must be " + AES_KEY_LENGTH + " bytes, got " + key.length);
+                }
+            } finally {
+                SecretWiping.clearArray(key);
             }
         }
     }
@@ -50,7 +88,7 @@ public final class AesGcmEncryptionProvider implements KeyEncryptionProvider {
 
             return new EncryptedSecret(ciphertext, nonce, keyRing.activeVersion());
         } finally {
-            clearArray(key);
+            SecretWiping.clearArray(key);
         }
     }
 
@@ -58,14 +96,14 @@ public final class AesGcmEncryptionProvider implements KeyEncryptionProvider {
     public byte[] decrypt(EncryptedSecret encrypted, UUID tenantId, UUID credentialId) {
         byte[] key = keyRing.keyForVersion(encrypted.keyVersion());
         if (key == null) {
-            throw new IllegalArgumentException("Unknown encryption key version: " + encrypted.keyVersion()
-                    + ". Known versions: " + keyRing.knownVersions());
+            throw new CryptoOperationException("CRYPTO_KEY_002",
+                    "Unknown encryption key version. Known versions: " + keyRing.knownVersions().size());
         }
         try {
             byte[] aad = buildAad(tenantId, credentialId, encrypted.keyVersion());
             return aesGcmDecrypt(key, encrypted.nonce(), encrypted.ciphertext(), aad);
         } finally {
-            clearArray(key);
+            SecretWiping.clearArray(key);
         }
     }
 
@@ -75,7 +113,7 @@ public final class AesGcmEncryptionProvider implements KeyEncryptionProvider {
         try {
             return encrypt(plaintext, tenantId, credentialId);
         } finally {
-            clearArray(plaintext);
+            SecretWiping.clearArray(plaintext);
         }
     }
 
@@ -111,7 +149,7 @@ public final class AesGcmEncryptionProvider implements KeyEncryptionProvider {
             }
             return cipher.doFinal(plaintext);
         } catch (GeneralSecurityException e) {
-            throw new CryptoOperationException("AES-256-GCM encryption failed", e);
+            throw new CryptoOperationException("CRYPTO_ENCRYPT_001", "AES-256-GCM encryption failed", e);
         }
     }
 
@@ -126,16 +164,13 @@ public final class AesGcmEncryptionProvider implements KeyEncryptionProvider {
             }
             return cipher.doFinal(ciphertext);
         } catch (GeneralSecurityException e) {
-            throw new CryptoOperationException("AES-256-GCM decryption failed: " + e.getMessage(), e);
+            throw new CryptoOperationException("CRYPTO_DECRYPT_001", "AES-256-GCM decryption failed", e);
         }
     }
 
-    private static void clearArray(byte[] array) {
-        if (array != null) {
-            java.util.Arrays.fill(array, (byte) 0);
-        }
-    }
-
+    /**
+     * Does not expose key material.
+     */
     @Override
     public String toString() {
         return "AesGcmEncryptionProvider[activeVersion=" + keyRing.activeVersion() + "]";

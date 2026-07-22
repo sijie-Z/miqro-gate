@@ -37,10 +37,48 @@ Gateway 不在事件循环中执行 JDBC；usage 写入进入有界队列和专�
 
 ## 4. 密钥与会话
 
+### 4.1 Crypto 密钥配置
+
+生产环境必须通过文件注入加密密钥；禁止将密钥写入环境变量、命令行参数或 Spring 属性。
+
+```yaml
+miqrokey.crypto.enabled: true
+miqrokey.crypto.encryption.active-version: v1
+miqrokey.crypto.encryption.versions[v1]: /etc/miqrokey/keys/master-key-v1.key
+miqrokey.crypto.encryption.versions[v2]: /etc/miqrokey/keys/master-key-v2.key
+miqrokey.crypto.hmac.active-version: v1
+miqrokey.crypto.hmac.versions[v1]: /etc/miqrokey/keys/vk-hmac-v1.key
+miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
+```
+
+| Spring 属性 | 说明 |
+|---|---:|
+| `miqrokey.crypto.enabled` | 启用 crypto 自动配置；生产必为 `true` |
+| `miqrokey.crypto.encryption.active-version` | 新加密使用的活跃密钥版本 ID |
+| `miqrokey.crypto.encryption.versions[v1]` | 版本 → 密钥文件绝对路径；支持多版本用于轮换 |
+| `miqrokey.crypto.hmac.active-version` | 新 Virtual Key 摘要使用的活跃 HMAC 版本 ID |
+| `miqrokey.crypto.hmac.versions[v1]` | 版本 → HMAC 密钥文件绝对路径；支持多版本验证 |
+
+### 4.2 密钥文件要求
+
+- 必须为普通文件（拒绝符号链接、管道、目录）。
+- POSIX 环境下必须为 `0400`（仅 owner 可读）；Windows 下至少需要进程可读。
+- AES 主密钥：恰好 32 字节原始二进制或 base64 编码文本。
+- HMAC 密钥：至少 32 字节原始二进制或 base64 编码文本。
+- 拒绝全零、全相同字节（示例/弱密钥）。
+- 主密钥和 HMAC 密钥必须为不同文件，且字节内容不同。
+
+### 4.3 多版本轮换
+
+1. 添加 `encryption.versions[v2]=/path/to/new-key.key`，设置 `active-version=v2`。
+2. 重启后新加密使用 v2；旧版本 v1 保留用于解密。
+3. 后台通过 `reEncrypt()` 把旧密文重新加密到 v2。
+4. 全部迁移完成后从配置移除 v1，重启。
+
+### 4.4 会话
+
 | 配置 | 默认 | 说明 |
 |---|---:|---|
-| `MIQROKEY_MASTER_KEY_FILE` | 无 | 32-byte 随机主密钥或密钥封装材料，生产必填 |
-| `MIQROKEY_VK_HMAC_KEY_FILE` | 无 | Virtual Key HMAC 密钥，生产必填且与 master key 分离 |
 | `MIQROKEY_BOOTSTRAP_SECRET_FILE` | 无 | 仅首个管理员创建时使用，完成后移除 |
 | `MIQROKEY_SESSION_COOKIE_NAME` | `MIQROKEY_SESSION` | Secure/HttpOnly/SameSite cookie |
 | `MIQROKEY_SESSION_IDLE_TIMEOUT` | `PT30M` | 空闲失效 |

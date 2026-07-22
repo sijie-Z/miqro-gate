@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.domain.crypto;
 
+import com.miqroera.miqrokey.domain.crypto.impl.CryptoOperationException;
 import com.miqroera.miqrokey.domain.crypto.impl.HmacVirtualKeyProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -12,6 +13,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("HmacVirtualKeyProvider")
 class HmacVirtualKeyProviderTest {
@@ -42,7 +44,7 @@ class HmacVirtualKeyProviderTest {
         @Test
         @DisplayName("should generate a valid Virtual Key material")
         void shouldGenerateValidMaterial() {
-            VirtualKeyMaterial material = provider.generate();
+            VirtualKeyMaterial material = provider.generate(TENANT_ID);
 
             assertThat(material.fullDisplayString()).startsWith(PREFIX);
             assertThat(material.publicKeyId()).isNotEmpty();
@@ -55,8 +57,8 @@ class HmacVirtualKeyProviderTest {
         @Test
         @DisplayName("should generate unique keys on each call")
         void shouldGenerateUniqueKeys() {
-            VirtualKeyMaterial m1 = provider.generate();
-            VirtualKeyMaterial m2 = provider.generate();
+            VirtualKeyMaterial m1 = provider.generate(TENANT_ID);
+            VirtualKeyMaterial m2 = provider.generate(TENANT_ID);
 
             assertThat(m1.fullDisplayString()).isNotEqualTo(m2.fullDisplayString());
             assertThat(m1.publicKeyId()).isNotEqualTo(m2.publicKeyId());
@@ -65,14 +67,14 @@ class HmacVirtualKeyProviderTest {
         @Test
         @DisplayName("should generate secret of at least 256 bits")
         void shouldGenerate256BitSecret() {
-            VirtualKeyMaterial material = provider.generate();
+            VirtualKeyMaterial material = provider.generate(TENANT_ID);
             assertThat(material.rawSecret()).hasSize(32); // 256 bits
         }
 
         @Test
         @DisplayName("full display string should follow mqk_live_ format")
         void shouldFollowFormat() {
-            VirtualKeyMaterial material = provider.generate();
+            VirtualKeyMaterial material = provider.generate(TENANT_ID);
             String display = material.fullDisplayString();
 
             // Format: mqk_live_<publicKeyId>_<encodedSecret>
@@ -89,14 +91,14 @@ class HmacVirtualKeyProviderTest {
         @Test
         @DisplayName("should set displayPrefix from publicKeyId")
         void shouldSetDisplayPrefix() {
-            VirtualKeyMaterial material = provider.generate();
+            VirtualKeyMaterial material = provider.generate(TENANT_ID);
             assertThat(material.publicKeyId()).startsWith(material.displayPrefix());
         }
 
         @Test
         @DisplayName("should set lastFour from full display string")
         void shouldSetLastFour() {
-            VirtualKeyMaterial material = provider.generate();
+            VirtualKeyMaterial material = provider.generate(TENANT_ID);
             String display = material.fullDisplayString();
             assertThat(material.lastFour()).isEqualTo(display.substring(display.length() - 4));
         }
@@ -279,7 +281,7 @@ class HmacVirtualKeyProviderTest {
         @Test
         @DisplayName("VirtualKeyMaterial toString should not expose rawSecret")
         void virtualKeyMaterialToStringShouldBeSafe() {
-            VirtualKeyMaterial material = provider.generate();
+            VirtualKeyMaterial material = provider.generate(TENANT_ID);
             String str = material.toString();
             assertThat(str).doesNotContain("rawSecret").doesNotContain("secret").contains("publicKeyId=")
                     .contains("displayPrefix=").contains("lastFour=");
@@ -288,7 +290,7 @@ class HmacVirtualKeyProviderTest {
         @Test
         @DisplayName("VirtualKeyMaterial toString should not expose full display string")
         void shouldNotExposeFullDisplay() {
-            VirtualKeyMaterial material = provider.generate();
+            VirtualKeyMaterial material = provider.generate(TENANT_ID);
             String str = material.toString();
             assertThat(str).doesNotContain(material.fullDisplayString()).doesNotContain("fullDisplayString");
         }
@@ -296,7 +298,7 @@ class HmacVirtualKeyProviderTest {
         @Test
         @DisplayName("rawSecret should be defensively copied")
         void rawSecretShouldBeDefensiveCopy() {
-            VirtualKeyMaterial material = provider.generate();
+            VirtualKeyMaterial material = provider.generate(TENANT_ID);
             byte[] copy1 = material.rawSecret();
             byte[] copy2 = material.rawSecret();
 
@@ -310,11 +312,48 @@ class HmacVirtualKeyProviderTest {
             // The generate() method clears its internal copy in finally block.
             // We verify by checking the material.rawSecret() returns valid data
             // but the internal copy used for computation is cleared.
-            VirtualKeyMaterial material = provider.generate();
+            VirtualKeyMaterial material = provider.generate(TENANT_ID);
             // The publicly returned rawSecret should be valid
             assertThat(material.rawSecret()).hasSize(32);
             // Digest is present (proves HMAC was computed before clearing)
             assertThat(material.digest()).hasSize(32);
+        }
+    }
+
+    @Nested
+    @DisplayName("tenant domain separation")
+    class TenantBinding {
+
+        @Test
+        @DisplayName("digest should embed tenant ID: cross-tenant validation must fail")
+        void shouldBindToTenant() {
+            byte[] rawSecret = randomBytes(32);
+            String publicKeyId = "pk_tenant_test_1";
+            UUID tenantA = UUID.randomUUID();
+            UUID tenantB = UUID.randomUUID();
+
+            byte[] digestA = provider.computeDigest(publicKeyId, rawSecret, tenantA);
+
+            // Same secret + publicKeyId, but wrong tenant -> must fail
+            assertThat(provider.validateConstantTime(publicKeyId, rawSecret, digestA, tenantB)).isFalse();
+
+            // Correct tenant -> succeeds
+            assertThat(provider.validateConstantTime(publicKeyId, rawSecret, digestA, tenantA)).isTrue();
+        }
+
+        @Test
+        @DisplayName("generate should bind VirtualKey to tenant")
+        void generateShouldBindToTenant() {
+            UUID tenantA = UUID.randomUUID();
+            UUID tenantB = UUID.randomUUID();
+
+            VirtualKeyMaterial material = provider.generate(tenantA);
+            byte[] digest = material.digest();
+
+            assertThat(provider.validateConstantTime(material.publicKeyId(), material.rawSecret(), digest, tenantA))
+                    .isTrue();
+            assertThat(provider.validateConstantTime(material.publicKeyId(), material.rawSecret(), digest, tenantB))
+                    .isFalse();
         }
     }
 
@@ -325,7 +364,7 @@ class HmacVirtualKeyProviderTest {
         @Test
         @DisplayName("full display should contain publicKeyId and encoded secret")
         void fullDisplayShouldEncodeSecret() {
-            VirtualKeyMaterial material = provider.generate();
+            VirtualKeyMaterial material = provider.generate(TENANT_ID);
             String display = material.fullDisplayString();
 
             // Format: mqk_live_<publicKeyId>_<encodedSecret>
@@ -338,13 +377,63 @@ class HmacVirtualKeyProviderTest {
         @Test
         @DisplayName("rawSecret must NOT be recoverable from digest alone")
         void rawSecretNotRecoverableFromDigest() {
-            VirtualKeyMaterial material = provider.generate();
+            VirtualKeyMaterial material = provider.generate(TENANT_ID);
             byte[] digest = material.digest();
             byte[] rawSecret = material.rawSecret();
 
             // HMAC is one-way — digest != any simple transform of secret
             assertThat(digest).isNotEqualTo(rawSecret);
             assertThat(digest).isNotEqualTo(Arrays.copyOf(rawSecret, 32));
+        }
+    }
+
+    @Nested
+    @DisplayName("constructor validation")
+    class ConstructorValidation {
+
+        @Test
+        @DisplayName("should reject HMAC keys shorter than 32 bytes")
+        void shouldRejectShortHmacKey() {
+            byte[] shortKey = randomBytes(16);
+            var ring = new KeyRing("v1", Map.of("v1", shortKey));
+            assertThatThrownBy(() -> new HmacVirtualKeyProvider(ring)).isInstanceOf(CryptoOperationException.class)
+                    .hasMessageContaining("CRYPTO_KEY_003");
+        }
+    }
+
+    @Nested
+    @DisplayName("VirtualKeyMaterial lifecycle")
+    class MaterialLifecycle {
+
+        @Test
+        @DisplayName("destroy should zero-fill raw secret")
+        void destroyShouldZeroSecret() {
+            VirtualKeyMaterial material = provider.generate(TENANT_ID);
+            material.destroy();
+
+            byte[] cleared = material.rawSecret();
+            for (byte b : cleared) {
+                assertThat(b).isEqualTo((byte) 0);
+            }
+        }
+
+        @Test
+        @DisplayName("equals and hashCode should not process rawSecret or digest")
+        void equalsShouldNotUseSecret() {
+            VirtualKeyMaterial m1 = provider.generate(TENANT_ID);
+            VirtualKeyMaterial m2 = provider.generate(TENANT_ID);
+
+            // Different rawSecrets but both valid — they should NOT be equal
+            // because publicKeyId differs (the only real identity field used)
+            assertThat(m1).isNotEqualTo(m2);
+
+            // But a material is equal to itself
+            assertThat(m1).isEqualTo(m1);
+
+            // toString must not expose rawSecret or fullDisplayString
+            String str = m1.toString();
+            assertThat(str).doesNotContain(m1.rawSecret().toString());
+            assertThat(str).doesNotContain(m1.fullDisplayString());
         }
     }
 }

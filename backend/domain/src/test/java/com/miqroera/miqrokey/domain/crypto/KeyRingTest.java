@@ -152,5 +152,67 @@ class KeyRingTest {
             String str = ring.toString();
             assertThat(str).doesNotContain("key").contains("activeVersion=v1").contains("versionCount=1");
         }
+
+        @Test
+        @DisplayName("should deep-copy keys: zeroing source array must not affect key ring")
+        void shouldDeepCopyKeysFromSourceArray() {
+            byte[] originalKey = randomBytes(32);
+            byte[] expectedKey = originalKey.clone();
+            KeyRing ring = new KeyRing("v1", Map.of("v1", originalKey));
+
+            // Zero the source array — this simulates CryptoConfig.clearArray() after
+            // construction
+            java.util.Arrays.fill(originalKey, (byte) 0);
+
+            // KeyRing must still hold the original key material
+            byte[] retrievedKey = ring.activeKey();
+            assertThat(retrievedKey).isEqualTo(expectedKey);
+            java.util.Arrays.fill(retrievedKey, (byte) 0);
+        }
+
+        @Test
+        @DisplayName("should deep-copy keys: mutating source map values must not affect key ring")
+        void shouldDeepCopyKeysFromSourceMap() {
+            byte[] key1 = randomBytes(32);
+            byte[] key2 = randomBytes(32);
+            byte[] expectedKey1 = key1.clone();
+            byte[] expectedKey2 = key2.clone();
+
+            Map<String, byte[]> mutableMap = new java.util.HashMap<>();
+            mutableMap.put("v1", key1);
+            mutableMap.put("v2", key2);
+            KeyRing ring = new KeyRing("v1", mutableMap);
+
+            // Mutate original map's byte arrays
+            java.util.Arrays.fill(key1, (byte) 0x42);
+            java.util.Arrays.fill(key2, (byte) 0x42);
+
+            // KeyRing must still hold original keys
+            byte[] retrieved1 = ring.keyForVersion("v1");
+            byte[] retrieved2 = ring.keyForVersion("v2");
+            assertThat(retrieved1).isEqualTo(expectedKey1);
+            assertThat(retrieved2).isEqualTo(expectedKey2);
+            java.util.Arrays.fill(retrieved1, (byte) 0);
+            java.util.Arrays.fill(retrieved2, (byte) 0);
+        }
+
+        @Test
+        @DisplayName("should deep-copy new key in withNewActiveVersion")
+        void shouldDeepCopyInRotation() {
+            byte[] keyV1 = randomBytes(32);
+            KeyRing ring = new KeyRing("v1", Map.of("v1", keyV1));
+
+            byte[] newKey = randomBytes(32);
+            byte[] expectedNewKey = newKey.clone();
+            KeyRing rotated = ring.withNewActiveVersion("v2", newKey);
+
+            // Zero the source array after rotation
+            java.util.Arrays.fill(newKey, (byte) 0);
+
+            // Rotated ring must still hold the original new key
+            byte[] retrieved = rotated.keyForVersion("v2");
+            assertThat(retrieved).isEqualTo(expectedNewKey);
+            java.util.Arrays.fill(retrieved, (byte) 0);
+        }
     }
 }

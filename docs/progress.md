@@ -7,9 +7,9 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `G1.2`
-- Goal status: `DONE`
+- Goal status: `IN_PROGRESS`
 - Last updated: `2026-07-22`
-- Branch: `goal/g1.1-postgresql-schema-and-persistence`
+- Branch: `goal/g1.2-secret-encryption-foundation`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
 
 ## Completed
@@ -424,16 +424,39 @@ Addressing 10 review blockers on branch `goal/g1.1-postgresql-schema-and-persist
 - G1.2 populates crypto columns with real AES-256-GCM/HMAC.
 - user_sessions, request_usage_records, quota_snapshots, cost_allocations deferred.
 
-## G1.2 — Secret encryption foundation (DONE)
+## G1.2 — Secret encryption foundation (IN_PROGRESS — security review repair)
 
-### Outcome
+### Security review repair (2026-07-22)
 
-- AES-256-GCM encryption provider with independent random nonce per ciphertext, 128-bit GCM auth tag. AAD binds tenantId + credentialId + keyVersion — any tampering, wrong tenant, wrong credential, or wrong key version causes AEAD tag mismatch and fails with `CryptoOperationException`.
-- Virtual Key HMAC-SHA-256 provider: 256-bit secret generation, `mqk_live_<publicKeyId>_<secret>` format, one-time display (raw secret cleared after digest computation), multi-version constant-time validation via `MessageDigest.isEqual`.
-- `KeyRing` for versioned key management: new writes use active version, old versions retained for decryption, `withNewActiveVersion()` rotation, `reEncrypt()` API.
-- `CryptoConfig` (conditional on `miqrokey.crypto.enabled=true`) for production key injection; `CryptoTestConfig` for Testcontainers integration tests with synthetic keys.
-- No key material in DB (verified by schema column audit), logs, `toString()`, exceptions, or test fixtures.
-- Master key and HMAC key are separated (different `KeyRing` instances with different key material).
+Addressing 9 P0 blockers identified in security review of PR #7:
+
+1. **P0 KeyRing deep copy**: `Map.copyOf` shallow-copied `byte[]` values. `CryptoConfig` zeroing source arrays after construction would corrupt the key ring. Fixed: constructor and `withNewActiveVersion()` now deep-copy every `byte[]` value individually via `clone()`. Added regression tests: zeroing source arrays and source map mutations must not affect key ring.
+
+2. **P0 File Secret Provider**: Replaced base64-encoded secrets in Spring properties with `FileSecretProvider`. Keys loaded from files specified by `MIQROKEY_MASTER_KEY_FILE` / `MIQROKEY_VK_HMAC_KEY_FILE` conventions via `miqrokey.crypto.encryption.versions[v1]=/path` and `miqrokey.crypto.hmac.versions[v1]=/path`. Production must fail fast on: missing file, non-regular file (symlinks rejected), wrong length, all-zero/demo keys, overly permissive POSIX permissions, master and HMAC keys using same file.
+
+3. **Multi-version key ring**: Configuration maps version identifiers to file paths, not secrets. Active version specified separately. Old versions retained for decryption/validation. Rotation supported by adding new version, re-encryption, restart.
+
+4. **Spring wiring**: `CryptoConfig` converted to `@AutoConfiguration` with `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`. Both `control-plane-app` and `gateway-app` classpaths discover it via Spring Boot auto-configuration (conditional on `miqrokey.crypto.enabled=true`). Missing crypto configuration causes startup failure; Gateway does not depend on persistence-postgres.
+
+5. **HMAC full-version constant-time traversal**: `validateConstantTime` now iterates ALL known HMAC key versions without early exit, accumulating results. All temporary sensitive arrays (key clones, message, computed digests) zero-filled in finally blocks. HMAC keys validated for minimum 32-byte length.
+
+6. **tenantId HMAC domain separation**: `buildMessage` now includes tenantId (16 bytes, big-endian) — Virtual Key digests are bound to the owning tenant. `generate()` takes `tenantId`. Cross-tenant validation fails with correct raw secret. `VirtualKeyMaterial.equals/hashCode` no longer processes `rawSecret` or `digest`. Added `destroy()` for explicit zero-fill lifecycle.
+
+7. **Error sanitization and Javadoc**: `CryptoOperationException` uses stable error codes (`CRYPTO_ENCRYPT_001`, `CRYPTO_DECRYPT_001`, `CRYPTO_HMAC_001`, `CRYPTO_KEY_00x`, `CRYPTO_CONFIG_00x`). JCE provider diagnostics suppressed — only the error code appears in `getMessage()`. All public crypto types and interfaces have comprehensive Javadoc covering AAD, array ownership, clearing obligations, one-time display, and rotation semantics.
+
+8. **Integration test realism**: `CryptoIntegrationTest` now writes real rows to `virtual_keys` table in PostgreSQL and verifies from DB that only `secret_digest` is stored (no full key or raw secret). Cross-tenant VK rejection verified with actual DB rows. Raw DB column inspection confirms no plaintext leakage. Added `CryptoOperationException` sanitization test. Added production `FileSecretProviderTest` (11 tests).
+
+9. **Documentation**: Updated `configuration-reference.md` for file-based key loading. Updated `progress.md`. Removed references to deprecated `key-v1-base64` properties.
+
+### Outcome (cumulative after repair)
+
+- AES-256-GCM encryption provider with independent random nonce per ciphertext, 128-bit GCM auth tag. AAD binds tenantId + credentialId + keyVersion — any tampering causes AEAD tag mismatch with stable `CRYPTO_DECRYPT_001` error code.
+- Virtual Key HMAC-SHA-256 provider: 256-bit secret generation, `mqk_live_<publicKeyId>_<secret>` format, one-time display with `destroy()` lifecycle, tenant-bound digests, multi-version constant-time full-traversal validation.
+- `KeyRing` deep-copies all byte arrays on construction and access. Source arrays can be safely zeroed after construction.
+- `FileSecretProvider` loads keys from files with fail-fast validation (existence, type, permissions, length, weak-key rejection, master/HMAC separation).
+- `CryptoConfig` auto-configuration via `@AutoConfiguration`; conditional on `miqrokey.crypto.enabled=true`.
+- No key material in DB, logs, `toString()`, exceptions, or test fixtures.
+- Master key and HMAC key are separated and verified to point to different files.
 
 ### Domain crypto module
 

@@ -209,7 +209,7 @@ class AesGcmEncryptionProviderTest {
                     "nonexistent-v99");
 
             assertThatThrownBy(() -> provider.decrypt(wrongVersion, TENANT_ID, CREDENTIAL_ID))
-                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("nonexistent-v99");
+                    .isInstanceOf(CryptoOperationException.class).hasMessageContaining("CRYPTO_KEY_002");
         }
 
         @Test
@@ -314,8 +314,8 @@ class AesGcmEncryptionProviderTest {
         void shouldRejectWrongKeyLength() {
             byte[] shortKey = randomBytes(16); // 128-bit instead of 256-bit
             var ring = new KeyRing("v1", Map.of("v1", shortKey));
-            assertThatThrownBy(() -> new AesGcmEncryptionProvider(ring)).isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("32");
+            assertThatThrownBy(() -> new AesGcmEncryptionProvider(ring)).isInstanceOf(CryptoOperationException.class)
+                    .hasMessageContaining("CRYPTO_KEY_001");
         }
     }
 }
