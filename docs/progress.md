@@ -4,12 +4,12 @@
 
 ## Current State
 
-- Project phase: `PHASE_0`
+- Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G0.4`
+- Current goal: `G1.1`
 - Goal status: `DONE`
 - Last updated: `2026-07-22`
-- Branch: `goal/g0.4-cc-switch-manual-compatibility-poc`
+- Branch: `goal/g1.1-postgresql-schema-and-persistence`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
 
 ## Completed
@@ -351,9 +351,82 @@ PASS is claimed.
 - No real provider integration performed. All protocol behaviors are MOCK_VERIFIED.
 - Docker Compose not validated locally (ENV_BLOCKED); CI must confirm.
 
+## G1.1 — PostgreSQL schema and persistence (DONE)
+
+### Review repairs applied (2026-07-22)
+
+Addressing 10 review blockers on branch `goal/g1.1-postgresql-schema-and-persistence`:
+
+1. **CI integration profile**: Linux CI now runs `-Pintegration` to execute Testcontainers tests. PostgreSQL image pinned to same digest (`sha256:ef257d85...`) as `deploy/compose.yaml`.
+2. **Integration suite fixes**: Fixed `CLAUCE_CODE` → `CLAUDE_CODE` typo; added missing repository beans; corrected FK metadata query/assertions; added proper exception assertions.
+3. **Database-level tenant isolation**: Added `tenant_id UUID NOT NULL` to all tenant-owned core tables (team_memberships, plan_seats, upstream_subscriptions, upstream_credentials, upstream_credential_versions, project_provider_grants, project_provider_grant_models, virtual_keys, virtual_key_models, admin_audit_events). Used composite `UNIQUE(tenant_id, id)` constraints and composite `FOREIGN KEY (tenant_id, parent_id) REFERENCES parent(tenant_id, id)` for cross-tenant prevention. Added DB triggers for Virtual Key mapping consistency. Added negative integration tests.
+4. **Seed tenant**: Inserted deterministic fixed tenant `00000000-0000-0000-0000-000000000001` (code `default`) in V1 migration. Added `version` to `tenants` and all mutable aggregate roots.
+5. **Deletion semantics**: All business FKs now explicitly use `ON DELETE RESTRICT`. Added missing FK for `active_version_id` (upstream_credentials → upstream_credential_versions) and `replaced_by_key_id` (virtual_keys → virtual_keys). Added deletion behavior tests.
+6. **Fixed mapping semantics**: DB triggers enforce Virtual Key's grant/credential/project match; grant credential must belong to a subscription of the same provider product. Added negative tests for invalid combinations.
+7. **Repository completeness**: All 13 repository interfaces now have Spring JDBC `@Repository` implementations: Tenant, User, Team, Provider, ProviderProduct, UpstreamSubscription, UpstreamCredential, UpstreamCredentialVersion, Project, ProjectMembership, ProjectProviderGrant, VirtualKey, AdminAuditEvent. No autowiring gaps remain.
+8. **Optimistic locking**: All mutable update methods use tenant-scoped `WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion`, increment version in SQL, verify update count (==1), throw on conflict. Added stale-version integration tests.
+9. **Closed types and defensive copying**: All status/role/purpose/topology String fields replaced with 20 documented Java enums (`TenantStatus`, `UserRole`, `UserStatus`, `TeamStatus`, `ProjectStatus`, `ProviderStatus`, `BillingMode`, `PlanScope`, `CredentialTopology`, `QuotaTopology`, `ImplementationStatus`, `BalanceAuthority`, `SubscriptionStatus`, `StatusSource`, `SeatStatus`, `CredentialStatus`, `CredentialVersionStatus`, `GrantStatus`, `VirtualKeyPurpose`, `VirtualKeyStatus`). All byte[] fields defensively copied in compact constructors and accessor overrides.
+10. **Progress.md corrected**: Phase set to `PHASE_1`, branch corrected to `goal/g1.1-postgresql-schema-and-persistence`, status `IN_PROGRESS` until Linux CI green. Table/interface/implementation/test counts accurate.
+
+### Repairs applied (2026-07-22 — round 2: container lifecycle + unique-constraint safety)
+
+11. **Singleton Container pattern**: Removed `@Testcontainers` and `@Container` from `AbstractPostgresTest`. The PostgreSQL container is now started once in a static initialiser and shared across all seven sub-classes, matching the official Testcontainers singleton-container pattern. Ryuk cleans up on JVM exit. `DockerImageName.asCompatibleSubstituteFor("postgres")` and the digest identical to `deploy/compose.yaml` are preserved. No `withReuse(true)`.
+
+12. **Unique-constraint safety**: `RepositoryIntegrationTest.@BeforeEach` now generates a random 8-char suffix per test-method invocation. Fixed business keys `"testuser"`, `"test-proj"`, `"test-provider"` and `"test-product"` now include the suffix, preventing unique-constraint violations when a second test method executes `@BeforeEach` within the same seed tenant. All related assertions (`shouldFindByTenantAndUsername`, `shouldPreventDuplicateUsername`, `shouldInsertAndFindProject`, `shouldFindBySlug`) reference the dynamic field value rather than a hard-coded literal. Other test classes (ConstraintAndIndexTest, CrossTenantIsolationTest, FixedMappingSemanticsTest, ForeignKeyDeletionTest, SchemaMigrationTest, TenantProjectIsolationTest) were audited — none have equivalent cross-method fixed-unique-value pollution.
+
+### Current schema (V1 migration)
+
+17 application tables created by V1: tenants, users, teams, team_memberships, projects, project_memberships, providers, provider_products, upstream_subscriptions, plan_seats, upstream_credentials, upstream_credential_versions, project_provider_grants, project_provider_grant_models, virtual_keys, virtual_key_models, admin_audit_events. After migration, Flyway auto-creates flyway_schema_history → 18 physical tables.
+
+### Current architecture
+
+- **Domain model**: 17 records + 20 enums in `com.miqroera.miqrokey.domain.model`
+- **Repository interfaces**: 13 in `com.miqroera.miqrokey.domain.repository`
+- **Repository implementations**: 13 in `com.miqroera.miqrokey.persistence.repository`
+- **Integration tests**: 7 test classes (8 including AbstractPostgresTest): SchemaMigrationTest, ConstraintAndIndexTest, ForeignKeyDeletionTest, RepositoryIntegrationTest, TenantProjectIsolationTest, CrossTenantIsolationTest, FixedMappingSemanticsTest
+
+### Local verification (Windows, Java 21 Temurin, Dockerless) — post round-2 repair
+
+- `.\mvnw.cmd verify --batch-mode`: **BUILD SUCCESS** — 223 non-integration tests PASS
+- `.\mvnw.cmd spotless:check`: PASS (all modules)
+- `git diff --check`: PASS
+- `npm --prefix frontend ci && npm run lint && npm run typecheck && npm run test && npm run build`: PASS
+- `docker compose -f deploy/compose.yaml config`: ENV_BLOCKED (Docker not installed locally; CI validates)
+
+### Files changed (round 2 repair)
+
+- `AbstractPostgresTest.java`: Singleton Container pattern (removed `@Testcontainers`/`@Container`, added static block manual start)
+- `RepositoryIntegrationTest.java`: Random suffix for unique business keys in `@BeforeEach`; dynamic assertion references
+- `docs/progress.md`: Updated (this file)
+
+### Final CI evidence (all green — 2026-07-22)
+
+- **CI run**: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29889176980`
+- **Conclusion**: **SUCCESS** (all 4 jobs, no failures)
+  - **Backend Ubuntu / Verify (Linux)**: SUCCESS — `./mvnw verify -Pintegration --batch-mode` with real PostgreSQL Testcontainers. All domain tests, gateway proxy contracts, ArchUnit, persistence integration tests (migration + 7 integration test classes) pass.
+  - **Backend Windows / Verify**: SUCCESS — non-integration tests pass (Dockerless Windows).
+  - **Frontend**: SUCCESS — `npm ci`, `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build`.
+  - **Compose config + digest check**: SUCCESS — Compose file valid and all images pinned to `@sha256:` digests.
+- **Final commit**: `2835747` — `fix(g1.1): singleton container pattern and unique-constraint safety`
+- **PR**: `https://github.com/lichman0405/miqro-key-gateway/pull/6`
+- **Docker/Testcontainers**: Not available on local Windows dev host; Linux CI provided the definitive integration-suite validation. All round-2 repairs confirmed by CI.
+
+### Outcome
+
+- PostgreSQL V1 schema (17 application tables + flyway_schema_history = 18 physical tables after migration) created and verified via Flyway migration + Testcontainers.
+- 17 domain records + 20 enums + 13 repository interfaces + 13 JDBC implementations with optimistic locking.
+- 7 integration test classes (8 including AbstractPostgresTest) covering schema migration, constraints/indexes, FK deletion semantics, repository CRUD+versioning, tenant isolation, cross-tenant prevention, and fixed mapping triggers.
+- Database-level tenant isolation with composite FKs and UNIQUE constraints.
+- Singleton Testcontainers pattern for efficient CI resource use.
+
+### Remaining risks
+
+- G1.2 populates crypto columns with real AES-256-GCM/HMAC.
+- user_sessions, request_usage_records, quota_snapshots, cost_allocations deferred.
+
 ## Next Goal
 
-- Goal ID: `G1.1`
-- Name: PostgreSQL schema and persistence
+- Goal ID: `G1.2`
+- Name: Secret encryption foundation
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md#g11-postgresql-schema-and-persistence)
+- Source: [`implementation-plan.md`](implementation-plan.md#g12-secret-encryption-foundation)
