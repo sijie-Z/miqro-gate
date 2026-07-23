@@ -9,7 +9,7 @@ import java.util.UUID;
  */
 public record AdminAuditEvent(UUID id, UUID tenantId, UUID actorId, String action, String targetType, UUID targetId,
         String changeSummary, String gatewayRequestId, String adminRequestId, byte[] previousEventHash,
-        byte[] currentEventHash, Instant createdAt) {
+        byte[] currentEventHash, Instant createdAt, long chainPosition) {
 
     public AdminAuditEvent {
         if (previousEventHash != null) {

@@ -2,6 +2,10 @@ package com.miqroera.miqrokey.controlplane;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.ComponentScan;
+
+import com.miqroera.miqrokey.controlplane.config.AuthProperties;
 
 /**
  * MiQroKey Control Plane — Spring MVC management API.
@@ -13,6 +17,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * </p>
  */
 @SpringBootApplication
+@ComponentScan("com.miqroera.miqrokey")
+@EnableConfigurationProperties(AuthProperties.class)
 public class ControlPlaneApplication {
 
     public static void main(String[] args) {

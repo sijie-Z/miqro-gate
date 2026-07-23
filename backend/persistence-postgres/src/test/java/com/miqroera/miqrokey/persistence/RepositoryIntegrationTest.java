@@ -306,7 +306,7 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
         @DisplayName("should insert and query audit events")
         void shouldInsertAndQuery() {
             var event = new AdminAuditEvent(UUID.randomUUID(), TENANT_ID, user.id(), "user.create", "User", user.id(),
-                    "{}", null, null, null, new byte[]{1, 2, 3}, NOW);
+                    "{}", null, null, null, new byte[]{1, 2, 3}, NOW, 0L);
             auditRepo.insert(event);
 
             var results = auditRepo.findByTargetTypeAndTargetId("User", user.id());

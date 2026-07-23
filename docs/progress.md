@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G1.2`
+- Current goal: `G1.3`
 - Goal status: `DONE`
-- Last updated: `2026-07-22`
-- Branch: `goal/g1.2-secret-encryption-foundation`
+- Last updated: `2026-07-22 21:12 CST`
+- Branch: `goal/g1.3-local-authentication-and-authorization`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
 
 ## Completed
@@ -577,9 +577,265 @@ All existing `SingleFile`/`MultiVersion`/`HmacKeys` tests updated with `ensureSt
 - G1.6 will add upstream credential validation flow (crypto kernel ready)
 - File-based key loading in CryptoConfig uses base64 properties; production should use Docker Secrets mounted files (can be added later without API changes)
 
-## Next Goal
+## G1.3 — Local authentication and authorization (DONE)
 
-- Goal ID: `G1.3`
-- Name: Local authentication and authorization
+### Outcome
+
+- Argon2id password hashing via `spring-security-crypto` + BouncyCastle (64 MiB memory, 4 iterations).
+- Bootstrap admin creation with one-time temporary password. DB-level tenant row lock (`SELECT ... FOR UPDATE`) serializes concurrent bootstrap: exactly one admin committed even under concurrent requests with different usernames.
+- Server-side revocable sessions: random 256-bit session tokens, SHA-256 digests stored in `user_sessions` table. Raw tokens never touch the database.
+- CSRF protection via double-submit cookie pattern: CSRF secret stored as SHA-256 digest, raw token in non-HttpOnly cookie, header `X-CSRF-Token` validated on all state-changing requests. Cookie name configurable via `miqrokey.csrf-cookie-name`.
+- Strict Origin header validation via `java.net.URI` parsing (scheme/host/port exact match, no substring). Production mode: missing Origin returns `false` (handler not reached), RFC 9457 `403 ORIGIN_REJECTED` with requestId.
+- Session cookies: HttpOnly (session), non-HttpOnly (CSRF), SameSite=Strict, path=/, configurable names.
+- Progressive login failure delay: 250ms→500ms→1s→2s→3s max; lockout after configurable failures with exponential backoff. Delay occurs outside any transaction — no `Thread.sleep()` while holding DB connections.
+- Failed-login counter incremented atomically under DB row lock (`SELECT ... FOR UPDATE`) — no lost updates under concurrency. `LOGIN_FAILED` and `ACCOUNT_LOCKED` audit events committed durably.
+- Generic login failure message identical for unknown users, wrong passwords, disabled accounts, and locked accounts — no account enumeration.
+- Production mode: operator must explicitly set `miqrokey.cookie-secure=true`. `ProductionStartupValidator` fail-fast at `@PostConstruct` refuses startup if production mode is active with insecure cookies, empty allowlist, or only localhost defaults. Never auto-enables cookieSecure.
+- `RoleInterceptor` enforces `SYSTEM_ADMIN` automatically for `/api/v1/admin/**` (deny-by-default). `@RequireRole` annotation semantics preserved with admin override.
+- Security audit chain hashes ALL immutable event fields (tenantId, actorId, action, targetType, targetId, changeSummary, adminRequestId, id, createdAt) plus previous hash in deterministic canonical encoding — content tampering breaks the chain. PostgreSQL advisory lock (`pg_advisory_xact_lock`) replaces in-process ReentrantLock — serializes across JVM instances and works correctly on empty tables.
+- All filter/interceptor/controller error responses use RFC 9457 `application/problem+json` with `type`, stable `code`, `status`, and `requestId`. Response-write errors logged, not swallowed.
+- `POST /api/v1/auth/login`, `POST /api/v1/auth/bootstrap`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`, `POST /api/v1/auth/password`, `GET /api/v1/auth/csrf` endpoints per API contract.
+
+### Architecture
+
+- **Domain**: `UserSession` record, `UserSessionRepository` interface (with `lockTenantForBootstrap`, `findByIdForUpdate`), `PasswordHasher` interface, `AuditService` interface, `AdminAuditEventRepository` (with `acquireChainLock`, `findMostRecent`).
+- **Persistence**: `UserSessionRepositoryImpl`, `Argon2PasswordHasher`, `AuditServiceImpl` (full-field content hashing, DB-level serialization), V2 migration for `user_sessions` table.
+- **Control Plane**: `AuthController` (uses configured CSRF cookie name), `SessionFilter`, `CsrfInterceptor`, `OriginInterceptor`, `RoleInterceptor` (admin path deny-by-default), `AuthenticationService` (no class-level `@Transactional`), `SessionService`, `UserContext`, `AuthProperties`, `ProductionStartupValidator`, `SecurityConfig`.
+- **Security**: No Spring Security framework dependency — custom lightweight auth layer built on Servlet Filter + Spring WebMvc Interceptors + `spring-security-crypto` for Argon2id.
+
+### Tests (new)
+
+- **Authorization integration**: `AuthorizationIntegrationTest` (10 tests) — admin path access, USER denial, unauthenticated denial, RFC 9457 format, IDOR self/cross/admin-override, admin user detail.
+- **Bootstrap concurrency**: `BootstrapConcurrencyTest` — concurrent bootstrap with 2 distinct usernames, exactly one succeeds.
+- **Login failure concurrency**: `LoginFailureConcurrencyTest` (2 tests) — concurrent failures produce deterministic counter, sequential exact count.
+- **Origin production mode**: `OriginInterceptorProductionTest` (3 tests) — missing Origin rejected in production, allowed origin passes, unknown origin rejected.
+- **Audit chain integrity**: `AuditChainIntegrityTest` (3 tests) — chain survives restart, content tamper breaks chain, concurrent writers produce valid chain.
+- **Custom CSRF cookie name**: `CustomCsrfCookieNameTest` — CSRF returned from configured cookie name, default name not used.
+- **Production profile**: `AuthIntegrationTestProduction` — production profile starts with valid config.
+- **Test admin endpoint**: `AdminTestController` (test-only) — `/api/v1/admin/test`, `/api/v1/admin/users/{userId}`.
+
+### Targeted verification repair (2026-07-22)
+
+Addressing 8 verified blockers found in commit `ed71f42`:
+
+1. **OriginInterceptor missing-Origin production branch**: Returns `false` (not `true`) after `sendRejection`. Added `requestId` to RFC 9457 response. `OriginInterceptorProductionTest` proves handler is not reached.
+2. **cookieSecure/production binding**: `ProductionStartupValidator` validates cookieSecure and originAllowlist on production mode at `@PostConstruct`; fails fast rather than auto-enabling. `AuthIntegrationTestProduction` starts production-profile context.
+3. **Bootstrap DB-level serialization**: `lockTenantForBootstrap()` uses `SELECT ... FOR UPDATE` on tenant row. `BootstrapConcurrencyTest` proves exactly one admin committed under concurrency with distinct usernames.
+4. **login() transaction removed**: `login()` no longer `@Transactional`. `recordFailedLogin` uses `findByIdForUpdate()` under row lock to compute increment from fresh row. `LOGIN_FAILED` + `ACCOUNT_LOCKED` audit events recorded. `LoginFailureConcurrencyTest` proves deterministic count under concurrency.
+5. **Audit hash content coverage**: SHA-256 over canonical encoding of all immutable fields + previous hash. DB-level lock (final: `pg_advisory_xact_lock`; initial repair used `SELECT ... FOR UPDATE`) replaces `ReentrantLock`. Temporary arrays zeroed. `AuditChainIntegrityTest` proves restart, tamper detection, concurrent writers.
+6. **Authorization enforcement**: `RoleInterceptor` denies-by-default `/api/v1/admin/**` for non-SYSTEM_ADMIN. `AuthorizationIntegrationTest` proves admin access and USER denial. `AdminTestController` provides test endpoints.
+7. **CSRF cookie name**: `AuthController` uses `authProperties.getCsrfCookieName()`. `CustomCsrfCookieNameTest` proves custom name works. All filter/interceptor problem responses use RFC 9457 format with requestId.
+8. **Documentation**: Updated `api-contract.md` (bootstrap, CSRF, Origin, production, error semantics) and `configuration-reference.md` (production constraints, cookie, allowlist).
+
+### Integration fixture repair (2026-07-22)
+
+Ubuntu CI run `29917587263` exposed 3 categories of fixture defects. All fixed in commits `2d6c5de` and `0bf23d4`:
+
+1. **AuthorizationIntegrationTest (mustChangePassword)**: `bootstrapAndGetSession` returned a session with `mustChangePassword=true`, so `SessionFilter` blocked all non-`PASSWORD_CHANGE_ALLOWED` endpoints with 401. Replaced with `bootstrapAndPrepareSession` that completes the full password-change flow (bootstrap → change-password → login), returning a `PreparedSession(session, userId)` where `mustChangePassword=false` and all authorization checks are reachable. No production security relaxed.
+
+2. **AuthIntegrationTest + CustomCsrfCookieNameTest (CSRF cookies)**: `GET /api/v1/auth/csrf` reads the CSRF token from the request Cookie, but tests only sent the session cookie — controller returned empty token. `POST /api/v1/auth/logout` is state-changing and `CsrfInterceptor` requires `X-CSRF-Token` header — tests sent neither cookie nor header. Fixed by sending both session + CSRF cookies together (like a browser), extracting the new CSRF from the login response for the logout step in `fullHappyPath`. Added `DEFAULT_CSRF_NAME` constant and `extractTemporaryPassword` helper to `BootstrapHelper`. No `CsrfInterceptor` production enforcement relaxed.
+
+3. **AuditChainIntegrityTest (jsonb change_summary)**: The `change_summary` column is `jsonb` with `::jsonb` cast — plain strings (`"summary_0"`, `"one"`, etc.) cause PostgreSQL errors. JSON objects (`{"index":0}`) survive the jsonb insert but may be whitespace-normalized by PostgreSQL during round-trip, causing recomputed-hash mismatches. Fixed by using JSON number scalars (`"0"`, `"1"`, …) that round-trip through jsonb → text with identical byte representation.
+
+4. **BootstrapTransactionIntegrationTest**: Confirmed correct — assertions match the flat `BootstrapResponse` (no `tokens` field, 201 Created).
+
+### Complete test suite (verified in CI)
+
+Integration tests (PostgreSQL Testcontainers, Linux only): **100 tests, 0 failures, 0 errors, 0 skips**
+  - `AuthorizationIntegrationTest`: 10/10 PASS
+  - `AuthIntegrationTest`: 19/19 PASS
+  - `AuditChainIntegrityTest`: 3/3 PASS
+  - `BootstrapTransactionIntegrationTest`: 3/3 PASS
+  - `BootstrapConcurrencyTest`: 1/1 PASS
+  - `LoginFailureConcurrencyTest`: 2/2 PASS
+  - `OriginInterceptorProductionTest`: 3/3 PASS
+  - `CustomCsrfCookieNameTest`: 1/1 PASS
+  - `AuthIntegrationTestProduction`: 1/1 PASS
+  - `CryptoIntegrationTest`: 10/10 PASS
+  - Persistence integration tests: 45 tests PASS
+  - Control Plane smoke: 2/2 PASS
+
+### Remaining risks
+
+- Integration tests require Docker/Testcontainers — locally skipped on Windows; validated by Linux CI.
+- Bootstrap secret file must be configured for production.
+- The global audit advisory lock (`pg_advisory_xact_lock`) serializes all audit writes across JVM instances — correct for the 50-user scope but a scaling bottleneck if audit volume grows. Monitor if scale changes.
+- Real provider credentials remain `WAITING_FOR_CREDENTIAL`.
+
+### Files changed
+
+- `AuthenticationService.java` — DB-level bootstrap lock, removed class-level `@Transactional`, `recordFailedLogin` with `findByIdForUpdate`, LOGIN_FAILED/ACCOUNT_LOCKED audit
+- `SessionFilter.java` — RFC 9457 problem response format, write-error logging
+- `SessionService.java` — unchanged (cookie Secure already derived from properties)
+- `OriginInterceptor.java` — production missing-Origin returns `false`, RFC 9457 with `requestId`, proper JSON escaping
+- `RoleInterceptor.java` — admin path deny-by-default, RFC 9457 problem responses with requestId
+- `CsrfInterceptor.java` — RFC 9457 problem responses with requestId
+- `AuthController.java` — uses `authProperties.getCsrfCookieName()`, injected `AuthProperties`
+- `AuditServiceImpl.java` — full-field content hashing, REQUIRED propagation, PostgreSQL advisory lock (`pg_advisory_xact_lock`) for multi-instance serialization, public `computeEventHash`, cleared temp arrays
+- `AdminAuditEventRepository.java` / `AdminAuditEventRepositoryImpl.java` — `acquireChainLock()` + `findMostRecent()` (current path); `findMostRecentForUpdate()` deprecated
+- `UserRepository.java` / `UserRepositoryImpl.java` — `lockTenantForBootstrap()`, `findByIdForUpdate()`
+- `AuthProperties.java` — production mode, cookieSecure, originAllowlist, CSRF cookie name properties
+- `ProductionStartupValidator.java` — fail-fast at `@PostConstruct`; refuses insecure production startup; never auto-enables cookieSecure
+- `OwnershipService.java` / `ResourceOwnershipException.java` — resource ownership assertion (self-or-admin); 404 hiding on mismatch
+- `GlobalExceptionHandler.java` — maps `ResourceOwnershipException` to RFC 9457 404 response
+- `AdminTestController.java` — new (test-only): admin test endpoints for authorization testing
+- `AuthenticationServiceTest.java` — updated mocks for `findByIdForUpdate`, `lockTenantForBootstrap`
+- `AuthIntegrationTest.java` — updated `getCsrfToken` helper
+- `AuthorizationIntegrationTest.java` — new: 10 authorization tests (admin access, USER denial, IDOR self/cross/admin-override, unauthenticated)
+- `BootstrapTransactionIntegrationTest.java` — new: 3 transactional integration tests (atomic bootstrap with bounded timeout, two-writer serialization, concurrent distinct-username commits exactly one)
+- `BootstrapConcurrencyTest.java` — new: concurrent bootstrap test
+- `LoginFailureConcurrencyTest.java` — new: 2 concurrent login failure tests (deterministic counter under concurrency)
+- `ProductionStartupValidatorTest.java` — new: 12 unit tests (valid production config, cookieSecure false, empty/NPE/localhost-only allowlist, invalid URI, missing scheme/host, HTTP non-localhost, path/query/fragment/userinfo rejection)
+- `ProductionStartupValidatorContextTest.java` — new: 2 production-context startup tests (insecure cookies, localhost-only allowlist cause startup failure)
+- `OwnershipTestController.java` — new (test-only): ownership assertion endpoints for authorization integration testing
+- `AbstractPostgresTest.java` — shared Testcontainers singleton-container base for control-plane integration tests
+- `AuthIntegrationTest.BootstrapHelper` — shared bootstrap fixture (secret file creation, CSRF cookie extraction, temporary password extraction)
+- `OriginInterceptorProductionTest.java` — new: 3 production Origin tests
+- `AuditChainIntegrityTest.java` — new: 3 audit chain tests
+- `CustomCsrfCookieNameTest.java` — new: custom CSRF cookie name test
+- `AuthIntegrationTestProduction.java` — new: production profile startup test
+- `docs/api-contract.md` — updated: bootstrap, CSRF, Origin, production, error semantics
+- `docs/configuration-reference.md` — updated: production constraints, cookie, allowlist, CSRF cookie name
+- `docs/progress.md` — updated (this file)
+
+### Local verification
+
+- `.\mvnw.cmd verify --batch-mode` (non-integration): **BUILD SUCCESS** — all unit tests pass
+- Spotless check: **PASS** (all modules)
+- `git diff --check`: **PASS**
+- Integration tests (`@Tag("integration")`): skipped on Windows (no Docker); Linux CI validates
+- Frontend: `npm ci && npm run lint && npm run typecheck && npm run test && npm run build`: **PASS**
+
+### CI evidence
+
+- **Integration fixture repair CI**: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29919166968`
+- **Conclusion**: **SUCCESS** (all 4 jobs — Ubuntu integration, Windows backend, Frontend, Compose config)
+- **Commits**: `2d6c5de` (mustChangePassword + CSRF cookie + jsonb fixes), `0bf23d4` (jsonb scalar round-trip fix)
+- **PR**: `https://github.com/lichman0405/miqro-key-gateway/pull/8`
+- **Integration test suite**: 100 tests, 0 failures, 0 errors, 0 skips
+- **Non-integration tests** (Windows): BUILD SUCCESS
+- **Spotless**: PASS (all 8 modules)
+- **git diff --check**: PASS
+- **Frontend**: npm ci/lint/typecheck/test/build all PASS
+
+## G1.3 — V3 migration fix (empty-table setval bug, DONE)
+
+### Bug
+
+Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', COALESCE(MAX(chain_position), 0))`. On a fresh (empty) `admin_audit_events` table, this attempts `setval(..., 0)` which PostgreSQL rejects because the sequence's default MINVALUE is 1. The migration succeeds on CI only because existing tests never exercise the pure empty-table path.
+
+### Fix: safe DO block + OWNED BY
+
+1. **V3 migration step 7** replaced the single `SELECT setval(...)` with a DO block:
+   - Empty table: `setval('admin_audit_events_chain_seq', 1, false)` — next `nextval()` returns 1.
+   - Non-empty table: `setval('admin_audit_events_chain_seq', max_pos)` (is_called=true) — next `nextval()` is `max_pos + 1`.
+2. **V3 migration step 8 (new)**: `ALTER SEQUENCE ... OWNED BY admin_audit_events.chain_position` — dropping the column/table auto-drops the sequence.
+3. **SchemaMigrationTest** (3 new tests):
+   - `shouldSetChainSequenceTo1OnEmptyTable`: proves `nextval` returns 1 after fresh migration.
+   - `shouldAssignUniqueNonNullChainPositions`: 5 rows inserted via column DEFAULT get unique, non-null, monotonically increasing `chain_position` values.
+   - `shouldHaveSequenceOwnedByChainPosition`: verifies the `pg_depend` OWNED BY relationship.
+   - Added `@AfterEach` cleanup: DELETE from admin_audit_events (defensive across test methods).
+
+### Files changed
+
+- `backend/persistence-postgres/src/main/resources/db/migration/V3__audit_chain_position.sql` — step 7 replaced with DO block; step 8 added (OWNED BY)
+- `backend/persistence-postgres/src/test/java/.../SchemaMigrationTest.java` — 3 new V3 migration tests + @AfterEach cleanup
+- `docs/progress.md` — updated (this file)
+
+### Verification
+
+- `.\mvnw.cmd verify --batch-mode`: **BUILD SUCCESS** — 374 non-integration tests, 0 failures, 5 skipped (POSIX on Windows)
+  - Domain: 65 tests
+  - Persistence PostgreSQL: 31 tests (5 skipped — POSIX on Windows)
+  - Control Plane: 58 tests (integration skipped — no Docker)
+  - Test Support: 109 tests
+  - Gateway App: 111 tests
+- Spotless check: **PASS** (all 8 modules)
+- Maven Enforcer: **PASS**
+- `git diff --check`: **PASS**
+- Frontend: `npm ci && npm run lint && npm run typecheck && npm run test && npm run build`: all **PASS**
+- `docker compose -f deploy/compose.yaml config`: **ENV_BLOCKED** (CI validates)
+
+### CI evidence (all green)
+
+- **CI run**: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29921459893`
+- **Conclusion**: **SUCCESS** (all 4 jobs):
+  - Backend Ubuntu / Verify + Integration: **SUCCESS**
+  - Backend Windows / Verify: **SUCCESS**
+  - Frontend: **SUCCESS**
+  - Compose config: **SUCCESS**
+- **Commit**: `eacbd63` — `fix(g1.3): safe setval for empty-table V3 migration`
+- **PR**: `https://github.com/lichman0405/miqro-key-gateway/pull/8`
+
+## G1.3 — V3 upgrade test isolation and coverage fix (DONE)
+
+### Problem
+
+1. **Order-dependent test**: `SchemaMigrationTest.shouldSetChainSequenceTo1OnEmptyTable` called `nextval` on the shared singleton-database sequence and expected `1`. Test-method order is not a contract; any other test can consume the sequence first, causing a spurious failure.
+
+2. **Missing V2→V3 upgrade coverage**: No test genuinely ran Flyway through V2, inserted representative pre-V3 rows into `admin_audit_events`, then ran V3 and asserted the backfill results. The empty-table V3 path was also untested in isolation from shared global sequence state.
+
+### Fix: isolated schemas + programmatic Flyway
+
+1. **`SchemaMigrationTest.shouldSetChainSequenceTo1OnEmptyTable`** — rewritten to create a unique PostgreSQL schema, run programmatic Flyway through V2 then V3, and verify the first `nextval()` returns 1. Uses `try/finally DROP SCHEMA CASCADE` for cleanup. No dependency on shared database sequence state.
+
+2. **`V3UpgradeMigrationTest`** (new, 10 tests) — each test creates its own unique schema via programmatic Flyway configured with `defaultSchema`/`schemas`/`createSchemas`, targeting `"2"` then `"3"`. Covers:
+   - Backfill: 7 pre-V3 rows receive unique, non-null, monotonically increasing `chain_position` values.
+   - Post-V3 insert: A row inserted after V3 gets a `chain_position` greater than every backfilled row.
+   - Empty-table upgrade: First post-V3 insert receives `chain_position = 1`; `nextval` directly returns 1.
+   - NOT NULL constraint: Column is non-nullable after V3; explicit NULL insert is rejected; DEFAULT allows omission.
+   - UNIQUE constraint: Constraint exists by name and duplicate `chain_position` is rejected.
+   - OWNED BY: Sequence is bound to the column via `pg_depend` OWNED BY relationship.
+   - Column default: `column_default` references `nextval('admin_audit_events_chain_seq')`.
+   - Data preservation: Backfill does not alter existing row data (action, target_type, tenant_id, actor_id unchanged).
+
+   V1 and V2 migration files **never edited**. Schemas dropped in `@AfterEach` via `DROP SCHEMA IF EXISTS … CASCADE`. `AbstractPostgresTest` singleton container reused — no new containers started. Cleanup is best-effort (catches and ignores exceptions so test failures are not masked).
+
+3. **`is_nullable` type fix**: `information_schema.columns.is_nullable` is `varchar(3)` (`"YES"`/`"NO"`), not `boolean`. Changed query from `Boolean.class` to `String.class` in the NOT NULL constraint test.
+
+### Files changed
+
+- `backend/persistence-postgres/src/test/java/.../SchemaMigrationTest.java` — `shouldSetChainSequenceTo1OnEmptyTable` rewritten with isolated-schema Flyway; `DataSource` autowired
+- `backend/persistence-postgres/src/test/java/.../V3UpgradeMigrationTest.java` — new: 10 comprehensive isolated-schema V2→V3 upgrade tests
+- `docs/progress.md` — updated (this file)
+
+### Verification
+
+- `.\mvnw.cmd verify --batch-mode` (non-integration): **BUILD SUCCESS** — 303 non-integration tests, 0 failures, 5 skipped (POSIX on Windows)
+- Spotless check: **PASS** (all 8 modules)
+- Maven Enforcer: **PASS**
+- `git diff --check`: **PASS**
+- Integration tests (`@Tag("integration")`): skipped on Windows (no Docker); Linux CI validates
+- Frontend: `npm ci && npm run lint && npm run typecheck && npm run test && npm run build`: all **PASS**
+
+### CI evidence (all green)
+
+- **CI run**: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29922608445`
+- **Conclusion**: **SUCCESS** (all 4 jobs):
+  - Backend Ubuntu / Verify + Integration: **SUCCESS**
+  - Backend Windows / Verify: **SUCCESS**
+  - Frontend: **SUCCESS**
+  - Compose config: **SUCCESS**
+- **Commits**: `2c3404c` (10 isolated-schema upgrade tests), `3ab8b3b` (is_nullable type fix)
+- **PR**: `https://github.com/lichman0405/miqro-key-gateway/pull/8`
+
+### Integration test results (Ubuntu CI)
+
+118 tests, 0 failures, 0 errors, 0 skips:
+  - SchemaMigrationTest: existing tests + isolated empty-table test PASS
+  - V3UpgradeMigrationTest: 10 tests PASS
+  - All existing audit-chain, auth, crypto, and repository integration tests PASS
+
+### Remaining risks
+
+- Integration tests require Docker/Testcontainers — locally skipped on Windows; Linux CI validates.
+- No `.claude-*` files in commits.
+
+
+
+
+
+- Goal ID: `G1.4`
+- Name: Organization and project grants
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md#g13-local-authentication-and-authorization)
+- Source: [`implementation-plan.md`](implementation-plan.md#g14-organization-and-project-grants)

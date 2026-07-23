@@ -20,7 +20,7 @@
 
 ```json
 {
-  "type": "https://errors.example.invalid/virtual-key/not-found",
+  "type": "about:blank",
   "title": "Virtual key not found",
   "status": 404,
   "code": "VIRTUAL_KEY_NOT_FOUND",
@@ -30,19 +30,58 @@
 }
 ```
 
+所有错误响应均包含 `type`（通常为 `about:blank`）、`title`、`status`、稳定 `code` token 和唯一 `requestId`。`application/problem+json` 为所有管理 API 错误的标准 Content-Type。filter、interceptor、controller、全局 exception handler 均使用此格式。
+
 普通用户访问他人资源统一返回 `404`，避免资源枚举。错误响应、应用日志和审计记录不得出现真实 Key、Virtual Key 明文或请求正文。
+
+登录失败返回通用的 `401 UNAUTHORIZED`，无论用户不存在、密码错误、账号禁用或锁定均使用相同消息 `"Invalid username or password."`。
 
 ## 3. 身份与会话
 
+### 3.1 认证端点
+
 | 方法与路径 | 用途 | 访问者 |
 |---|---|---|
+| `POST /api/v1/auth/bootstrap` | 一次性创建首个 SYSTEM_ADMIN 管理员 | 匿名（需 bootstrap secret） |
 | `POST /api/v1/auth/login` | 用户名/密码登录，创建会话 | 匿名 |
 | `POST /api/v1/auth/logout` | 当前会话失效 | 已登录 |
 | `GET /api/v1/auth/me` | 当前用户、角色、会话到期时间 | 已登录 |
 | `POST /api/v1/auth/password` | 修改自己的密码并撤销其他会话 | 已登录 |
-| `GET /api/v1/auth/csrf` | 获取 CSRF token | 已登录 |
+| `GET /api/v1/auth/csrf` | 获取 CSRF token（从配置名称的 Cookie 读取） | 已登录 |
 
-连续登录失败触发渐进锁定；不得在登录结果中泄漏账号是否存在。首个管理员通过一次性 bootstrap secret 创建，首次登录必须改密。
+### 3.2 Bootstrap 流程
+
+首个管理员通过 `POST /api/v1/auth/bootstrap` 创建，需提供一次性 bootstrap secret（来自 `MIQROKEY_BOOTSTRAP_SECRET_FILE` 配置的文件）。bootstrap 在数据库层通过 `SELECT ... FOR UPDATE` 锁租户行序列化并发请求：即使两个请求使用不同用户名，也只有恰好一个能成功创建管理员。
+
+响应返回一次性临时密码 `temporaryPassword`（之后不可再次获取）、`shownOnce: true` 和会话 Cookie。首次登录时 `mustChangePassword` 为 `true`，强制改密。
+
+### 3.3 CSRF 保护
+
+所有 `POST/PUT/PATCH/DELETE` 写请求需要 CSRF 保护（`/api/v1/auth/login` 和 `/api/v1/auth/bootstrap` 除外）。CSRF token 通过以下机制传递：
+
+1. 登录/bootstrap 响应设置 CSRF Cookie（名称由 `miqrokey.csrf-cookie-name` 配置，默认 `MIQROKEY_CSRF`）；Cookie 为 non-HttpOnly（JavaScript 可读），SameSite=Strict。
+2. 客户端从 Cookie 读取 CSRF token，在写请求中以 `X-CSRF-Token` Header 发送。
+3. 服务端通过 SHA-256 digest 比对验证 token。
+
+`GET /api/v1/auth/csrf` 端点返回当前会话的 CSRF token 值和过期时间。
+
+### 3.4 Origin 验证
+
+生产模式（`miqrokey.production=true` 或 Spring `production` profile 激活）下，所有对 `/api/` 的状态变更请求（POST/PUT/PATCH/DELETE）必须包含有效的 `Origin` Header。Origin 通过严格的 `java.net.URI` 解析进行验证（scheme、host、port 完全匹配），不使用子字符串匹配。
+
+生产模式不允许 localhost 或开发 Origin；缺少/无效/未列入 allowlist 的 Origin 返回 `403 ORIGIN_REJECTED` 并包含 `requestId`。
+
+开发模式下，缺少 Origin 或 localhost 来源的请求被放行。
+
+### 3.5 会话 Cookie
+
+会话 Cookie 使用 `miqrokey.session-cookie-name` 配置名称（默认 `MIQROKEY_SESSION`），属性为 HttpOnly、SameSite=Strict。生产模式下自动启用 `Secure` flag（若未显式设置，启动时自动覆盖为 `true`）。clear 操作也保持相同的安全属性。
+
+### 3.6 登录安全
+
+连续登录失败触发渐进锁定：延迟从 250ms 逐步增加到最大 3s，达到 `miqrokey.login-max-failures`（默认 5）后账户锁定，锁定时长指数退避（1 min → 2 min → 4 min → ... 最大 ~17 小时）。失败计数在数据库行锁（`SELECT ... FOR UPDATE`）下原子递增，并发请求不会丢失更新。登录失败和账户锁定均持久记录审计事件 `LOGIN_FAILED` 和 `ACCOUNT_LOCKED`。
+
+密码要求至少 8 个字符、包含大小写字母和数字、最多 128 字符、拒绝常见/已泄露密码。首次登录强制修改临时密码。
 
 ## 4. 普通用户 API
 

@@ -39,9 +39,21 @@ V1 migration 可以创建首批核心表；后续 Goal 只能追加 migration。
 - status 仅 `ACTIVE|DISABLED|LOCKED`。
 - password_hash 永不返回 API。
 
-### `user_sessions`
+### `user_sessions` (V2)
 
-保存随机 session token 的摘要，不保存明文。包含 `user_id`、`token_digest`、`csrf_secret_digest`、`created_at`、`last_seen_at`、`expires_at`、`revoked_at`、安全 user-agent hash 和 IP 摘要（可选）。
+| 列 | 类型 | 约束 |
+|---|---|---|
+| id | uuid | PK |
+| tenant_id | uuid | NOT NULL FK→tenants(id) |
+| user_id | uuid | NOT NULL FK→users(tenant_id, id) |
+| token_digest | bytea | NOT NULL UNIQUE (SHA-256 of session token) |
+| csrf_digest | bytea | NOT NULL (SHA-256 of CSRF secret) |
+| created_at | timestamptz | NOT NULL |
+| last_seen_at | timestamptz | NOT NULL |
+| expires_at | timestamptz | NOT NULL |
+| revoked_at | timestamptz | NULLABLE |
+
+保存随机 session token 的 SHA-256 摘要和 CSRF secret 的 SHA-256 摘要，不保存明文 token。索引：`token_digest` (UNIQUE, 热路径查询)、`user_id`、`expires_at`（partial, 清理过期会话）、`(user_id, id)`（partial, 批量撤销）。
 
 ### `teams` / `team_memberships`
 
@@ -222,7 +234,9 @@ URL、加密签名 Secret、启停、超时、version。URL 必须通过 SSRF �
 
 ### `admin_audit_events`
 
-追加写入：actor、action、target type/id、change summary JSON、gateway/admin request ID、时间、前一事件 hash、当前 hash。禁止删除和外键 cascade。
+追加写入：actor、action、target type/id、change summary JSON、gateway/admin request ID、时间、前一事件 hash、当前 hash、chain_position (数据库单调序列)。禁止删除和外键 cascade。
+
+Head selection 使用 `ORDER BY chain_position DESC` —— 数据库单调 identity/sequence 在 INSERT 时分配，反映真实因果提交顺序。JVM 时钟和随机 UUID 不用于 head 排序。
 
 ## 8. 调度与配置
 

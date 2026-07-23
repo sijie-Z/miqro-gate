@@ -25,4 +25,16 @@ public interface UserRepository {
     boolean existsByTenantIdAndUsername(UUID tenantId, String username);
 
     int countByTenantId(UUID tenantId);
+
+    /**
+     * Lock the tenant row for serializing bootstrap. Uses SELECT ... FOR UPDATE
+     * inside a transaction to prevent concurrent bootstrap races.
+     */
+    void lockTenantForBootstrap(UUID tenantId);
+
+    /**
+     * Find a user by ID with a row-level lock (SELECT ... FOR UPDATE). Used for
+     * atomic failed-login counter increments under concurrency.
+     */
+    Optional<User> findByIdForUpdate(UUID id);
 }

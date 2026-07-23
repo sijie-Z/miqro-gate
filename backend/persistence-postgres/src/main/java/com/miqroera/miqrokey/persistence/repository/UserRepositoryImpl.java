@@ -117,6 +117,23 @@ public class UserRepositoryImpl implements UserRepository {
         return count != null ? count : 0;
     }
 
+    @Override
+    @Transactional
+    public void lockTenantForBootstrap(UUID tenantId) {
+        jdbc.queryForObject("SELECT id FROM tenants WHERE id = :id FOR UPDATE",
+                new MapSqlParameterSource("id", tenantId), UUID.class);
+    }
+
+    @Override
+    public Optional<User> findByIdForUpdate(UUID id) {
+        try {
+            return Optional.ofNullable(jdbc.queryForObject("SELECT * FROM users WHERE id = :id FOR UPDATE",
+                    new MapSqlParameterSource("id", id), ROW_MAPPER));
+        } catch (EmptyResultDataAccessException e) {
+            return Optional.empty();
+        }
+    }
+
     private MapSqlParameterSource toParams(User u) {
         return new MapSqlParameterSource().addValue("id", u.id()).addValue("tenantId", u.tenantId())
                 .addValue("username", u.username()).addValue("displayName", u.displayName())
