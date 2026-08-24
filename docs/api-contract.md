@@ -127,6 +127,149 @@
 
 服务端不允许再次读取 `secret`。遗失后只能轮换或新建。
 
+### 4.1 我的授权 `GET /api/v1/me/grants`
+
+返回当前用户可用的项目、供应商授权、模型和用途选项。普通用户只能看到自己是成员的项目；他人资源一律不出现。
+
+```json
+{
+  "projects": [
+    { "id": "0190...", "code": "CORE", "name": "Core AI", "projectTag": "core-ai" }
+  ],
+  "grants": [
+    {
+      "id": "0190...",
+      "projectId": "0190...",
+      "providerProductId": "0190...",
+      "models": ["claude-3-7-sonnet", "claude-3-5-haiku"]
+    }
+  ],
+  "purposes": ["CLAUDE_CODE", "CLAUDE_DESKTOP", "CODEX", "CUSTOM"]
+}
+```
+
+### 4.2 Key 列表与详情
+
+`GET /api/v1/me/virtual-keys` 返回 `VirtualKeyView` 数组，`GET /api/v1/me/virtual-keys/{id}` 返回单个。只包含前缀和末四位，永远不包含完整 Secret：
+
+```json
+{
+  "id": "0190...",
+  "name": "claude-code-main",
+  "purpose": "CLAUDE_CODE",
+  "status": "ACTIVE",
+  "displayPrefix": "mqk_live_abcdefghijklmnopqrstuv",
+  "lastFour": "8f2a",
+  "display": "mqk_live_…8f2a",
+  "modelIds": ["claude-3-7-sonnet"],
+  "projectId": "0190...",
+  "projectTag": "core-ai",
+  "cachePolicy": "DISABLED",
+  "baseUrl": "https://gateway.example.internal",
+  "createdAt": "2026-07-17T05:00:00Z",
+  "lastUsedAt": null,
+  "revokedAt": null
+}
+```
+
+`status` ∈ `ACTIVE | ROTATING | REVOKED | DISABLED`。`cachePolicy` 默认 `DISABLED`（显式开启才可参与响应缓存）。
+
+### 4.3 轮换与吊销
+
+`POST /api/v1/me/virtual-keys/{id}/rotate` 原子轮换：旧 Key 立即停止接受新请求，在配置宽限期（`miqrokey.virtual-key-rotate-grace`，默认 `PT0S`）内仍可路由，宽限结束后失效。响应与创建响应相同（`CreateVirtualKeyResponse`，新 Secret 仅本次出现一次）。
+
+`POST /api/v1/me/virtual-keys/{id}/revoke` 立即吊销，响应：
+
+```json
+{ "message": "Virtual key revoked" }
+```
+
+轮换/吊销只允许 `ACTIVE`（吊销额外允许 `ROTATING`）；冲突返回 `409 KEY_NOT_ROTATABLE` / `409 KEY_NOT_REVOCABLE`。操作写审计事件，审计日志不含 Secret 明文。
+
+### 4.4 用量汇总 `GET /api/v1/me/usage/summary`
+
+参数：`groupBy`（`project | virtual_key | cache_level | day`，默认 `project`）、`from`、`to`（ISO-8601，默认最近 93 天窗口；`from` 必须在 `to` 之前，窗口超过 93 天拒绝）。
+
+```json
+{
+  "groupBy": "project",
+  "groups": [
+    {
+      "groupKey": "core-ai",
+      "label": "core-ai",
+      "requests": { "upstream": 12, "coalesced": 0, "l1Hit": 0, "l2Hit": 0 },
+      "tokens": { "input": 1200, "output": 800, "cacheRead": 0, "cacheCreation": 0 },
+      "cost": {
+        "upstreamPaid": 0.0128,
+        "gatewayObserved": 0.0128,
+        "projectAllocated": 0.0128,
+        "savedByGatewayCache": 0.0
+      }
+    }
+  ],
+  "totals": { "requests": { "upstream": 12, "coalesced": 0, "l1Hit": 0, "l2Hit": 0 }, "tokens": { "input": 1200, "output": 800, "cacheRead": 0, "cacheCreation": 0 }, "cost": { "upstreamPaid": 0.0128, "gatewayObserved": 0.0128, "projectAllocated": 0.0128, "savedByGatewayCache": 0.0 } }
+}
+```
+
+- 用量明细只包含自己的 Key 产生的记录；他人的 Key 不出现也不可区分（统一 404）。
+- `upstreamPaid` 按 `price_snapshot`（每百万 token 单价，来源 `MANUAL|OFFICIAL|ESTIMATED`）计算；无价格快照的模型按 `0` 计。
+- 缓存命中产生的成本节省记入 `savedByGatewayCache`，不计入 `projectAllocated`。
+
+### 4.5 用量明细 `GET /api/v1/me/usage/records`
+
+参数：`from`、`to`（ISO-8601）、`page`（默认 1，≥1）、`size`（默认 50，1–200）。按时间倒序。
+
+```json
+{
+  "items": [
+    {
+      "occurredAt": "2026-07-17T05:00:00Z",
+      "modelId": "claude-3-7-sonnet",
+      "cacheLevel": "UPSTREAM",
+      "inputTokens": 600,
+      "outputTokens": 400,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "totalTokens": 1000,
+      "latencyMs": 1842,
+      "upstreamStatusCode": 200,
+      "providerRequestId": "msg_01...",
+      "gatewayRequestId": "req-abc123",
+      "isComplete": true,
+      "usageMissing": false,
+      "virtualKeyId": "0190..."
+    }
+  ],
+  "page": 1,
+  "size": 50,
+  "total": 12
+}
+```
+
+- `cacheLevel` ∈ `UPSTREAM | COALESCED | L1_HIT | L2_HIT`。缓存命中行没有 token 数（NULL → 0）且 `isComplete=false` 时不作为上游用量计入。
+- `usageMissing=true` 表示上游未返回 usage（如异常中断）；该行仍入账但用量为 0，便于排查。
+- `providerRequestId` 在 tenant 内唯一（幂等写，重复 flush 不双计）。
+
+### 4.6 错误码
+
+| code | HTTP | 场景 |
+|---|---|---|
+| `PROJECT_NOT_FOUND` | 404 | 项目不存在 |
+| `PROJECT_MEMBERSHIP_REQUIRED` | 403 | 当前用户不是项目成员 |
+| `PROJECT_INACTIVE` | 409 | 项目已停用 |
+| `ROUTING_TAG_MISSING` | 409 | 项目没有配置路由标签（projectTag） |
+| `GRANT_INVALID` | 400 | 授权不属于该项目或产品 |
+| `GRANT_INACTIVE` | 409 | 授权已停用 |
+| `MODEL_NOT_GRANTED` | 400 | 请求的模型超出授权范围 |
+| `KEY_NOT_FOUND` | 404 | Key 不存在或不属于当前用户 |
+| `KEY_NOT_ROTATABLE` | 409 | 仅 ACTIVE 可轮换 |
+| `KEY_NOT_REVOCABLE` | 409 | 该状态不可吊销 |
+| `PAGE_INVALID` / `SIZE_INVALID` | 400 | 分页参数越界 |
+| `TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE` | 400 | 时间窗参数错误 |
+| `GROUP_BY_INVALID` | 400 | groupBy 取值非法 |
+
+所有错误都是 RFC 9457 `application/problem+json`，含 `type`、`status`、`code`、`detail`、`requestId`。
+
 ## 5. 管理员 API
 
 管理员拥有单租户内全部管理权限：
@@ -169,6 +312,16 @@
 - `GET /v1/models` 是本系统提供的受控端点，只返回该 Virtual Key 允许的明确模型 ID。
 - Virtual Key 无效、吊销、过期或模型越权时，Gateway 不连接上游。
 - 客户断开时取消上游订阅；不得继续消耗 token。
+
+### 7.1 Virtual Key 鉴权与路由
+
+- 客户端必须且只能提供**一个**凭证 Header：`Authorization: Bearer <key>`（或裸值）、`x-api-key`、`api-key`。零个或多个凭证 Header → `401`（错误体不区分具体原因，防枚举）。
+- Key 格式 `mqk_live_<publicKeyId>_<secret>[.<projectTag>]`：点号后缀是**路由标签**（明文，仅用于把请求路由到 Key 绑定的项目），鉴权权威是数据库中的 `key_project_binding`，标签本身不决定授权。HMAC 摘要不包含标签。
+- Gateway 使用版本化只读路由快照（定时刷新，默认 30s）做校验与路由；热路径不查询数据库。吊销/轮换按快照刷新传播，宽限期由控制面配置。
+- 校验通过后 Gateway 注入该 Key 固定绑定的上游凭证（AES-256-GCM 解密，内存中用完即清零），并把请求转发到该授权对应项目的目标；请求头和体按透明代理规则原样转发。
+- 模型预校验：请求体中的模型不在 Key 授权集合内时，不连接上游，直接返回错误（Anthropic/OpenAI 协议兼容的错误体）。
+- `/v1/models` 返回该 Virtual Key 的目录、上游模型、Grant 与 Key 快照的交集；未授权模型不泄漏。
+- 用量记录：每个请求写入 `usage_event`（幂等，`provider_request_id` 在 tenant 内唯一）；usage 缺失时标记 `usage_missing=true`；正文（prompt、代码、工具、回答）永不进入持久化。
 
 Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 ID 都进入用量记录；不得覆盖供应商 request ID Header。
 

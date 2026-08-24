@@ -47,13 +47,22 @@ miqro-key-gateway/
 │   ├── gateway-app/            # WebFlux 推理数据面
 │   ├── control-plane-app/      # 管理、门户、导出、告警 API
 │   ├── persistence-postgres/   # JPA/JDBC、Flyway、分区管理
+│   ├── route-snapshot/         # 版本化只读路由快照（当前实现）
+│   ├── queue-spi/              # 有界用量写入队列 SPI（当前实现）
+│   ├── cache-spi/              # 响应缓存 SPI + NoOp 实现（当前实现）
 │   └── test-support/           # Mock Provider 与契约测试工具
 ├── frontend/                   # Vue 3 + TypeScript
 ├── deploy/                     # Docker Compose、反向代理、备份
 └── docs/
 ```
 
-建议使用 Maven 多模块。`domain` 和 `provider-spi` 不依赖 Spring，防止业务模型被框架绑定。
+建议使用 Maven 多模块。`domain`、`route-snapshot`、`queue-spi`、`cache-spi` 和 `provider-spi` 不依赖 Spring，防止业务模型被框架绑定。
+
+**当前实现的模块边界（G2.2/G2.4）**：
+
+- `route-snapshot`：版本化只读快照——Gateway 在启动和定时刷新（默认 30s）时把 Virtual Key 摘要、Key→项目绑定、Grant 模型、项目标签、上游凭证密文加载为不可变快照；热路径零数据库访问，只做内存查询 + AES-256-GCM 解密。凭证解密后内存用完即清零。
+- `queue-spi`：有界用量写入队列契约 + 内存实现（容量默认 10000）。Gateway 观察器只产生不可变事件（含幂等键 `provider_request_id`），专用调度器批量写 PostgreSQL；队列满不静默丢弃，写失败保留重试，`INSERT ... ON CONFLICT DO NOTHING` 防双计。
+- `cache-spi`：`ResponseCache` 契约 + `NoOpResponseCache`。L1（Caffeine 风格内存）与 L2（PostgreSQL `cache_entry`）实现已存在但总开关默认关闭（ADR-0008）；只缓存 `cache_policy=ENABLED` 的 Key 且满足资格条件的响应，SSE 通过 `SseReplayEngine` 按字节重放。
 
 ## 4. 运行组件
 
