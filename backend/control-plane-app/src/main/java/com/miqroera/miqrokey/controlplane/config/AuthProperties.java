@@ -53,6 +53,19 @@ public class AuthProperties {
     private List<String> originAllowlist = List.of("http://localhost:5173", "http://localhost:8080",
             "http://127.0.0.1:5173", "http://127.0.0.1:8080");
 
+    /**
+     * Public base URL of the gateway, shown to users as their Virtual Key's
+     * {@code baseUrl} (e.g. {@code https://gateway.example.internal}).
+     */
+    private String gatewayBaseUrl = "http://localhost:8081";
+
+    /**
+     * Grace period during which a rotated Virtual Key remains routable
+     * ({@code PT0S} = the old key stops working as soon as the gateway snapshot
+     * refreshes). Configure a positive duration for a rotation grace window.
+     */
+    private Duration virtualKeyRotateGrace = Duration.ZERO;
+
     public String getSessionCookieName() {
         return sessionCookieName;
     }
@@ -112,5 +125,17 @@ public class AuthProperties {
     }
     public void setOriginAllowlist(List<String> v) {
         this.originAllowlist = v;
+    }
+    public String getGatewayBaseUrl() {
+        return gatewayBaseUrl;
+    }
+    public void setGatewayBaseUrl(String v) {
+        this.gatewayBaseUrl = v;
+    }
+    public Duration getVirtualKeyRotateGrace() {
+        return virtualKeyRotateGrace;
+    }
+    public void setVirtualKeyRotateGrace(Duration v) {
+        this.virtualKeyRotateGrace = v;
     }
 }

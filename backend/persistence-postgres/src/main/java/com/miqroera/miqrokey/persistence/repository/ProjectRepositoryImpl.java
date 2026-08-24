@@ -21,8 +21,9 @@ public class ProjectRepositoryImpl implements ProjectRepository {
 
     private static final RowMapper<Project> ROW_MAPPER = (rs, rowNum) -> new Project((UUID) rs.getObject("id"),
             (UUID) rs.getObject("tenant_id"), rs.getString("code"), rs.getString("name"), rs.getString("description"),
-            rs.getString("cost_center"), ProjectStatus.valueOf(rs.getString("status")), rs.getLong("version"),
-            rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
+            rs.getString("cost_center"), ProjectStatus.valueOf(rs.getString("status")), rs.getString("project_tag"),
+            rs.getLong("version"), rs.getTimestamp("created_at").toInstant(),
+            rs.getTimestamp("updated_at").toInstant());
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -62,9 +63,9 @@ public class ProjectRepositoryImpl implements ProjectRepository {
     public Project insert(Project project) {
         jdbc.update("""
                 INSERT INTO projects (id, tenant_id, code, name, description, cost_center,
-                    status, version, created_at, updated_at)
+                    status, project_tag, version, created_at, updated_at)
                 VALUES (:id, :tenantId, :code, :name, :description, :costCenter,
-                    :status, :version, :createdAt, :updatedAt)
+                    :status, :projectTag, :version, :createdAt, :updatedAt)
                 """, toParams(project));
         return project;
     }
@@ -76,8 +77,8 @@ public class ProjectRepositoryImpl implements ProjectRepository {
         var params = toParams(project).addValue("expectedVersion", expectedVersion);
         int rows = jdbc.update("""
                 UPDATE projects SET code = :code, name = :name, description = :description,
-                    cost_center = :costCenter, status = :status, version = version + 1,
-                    updated_at = :updatedAt
+                    cost_center = :costCenter, status = :status, project_tag = :projectTag,
+                    version = version + 1, updated_at = :updatedAt
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """, params);
         if (rows != 1)
@@ -97,7 +98,8 @@ public class ProjectRepositoryImpl implements ProjectRepository {
         return new MapSqlParameterSource().addValue("id", p.id()).addValue("tenantId", p.tenantId())
                 .addValue("code", p.code()).addValue("name", p.name()).addValue("description", p.description())
                 .addValue("costCenter", p.costCenter()).addValue("status", p.status().name())
-                .addValue("version", p.version()).addValue("createdAt", Timestamp.from(p.createdAt()))
+                .addValue("projectTag", p.projectTag()).addValue("version", p.version())
+                .addValue("createdAt", Timestamp.from(p.createdAt()))
                 .addValue("updatedAt", Timestamp.from(p.updatedAt()));
     }
 }

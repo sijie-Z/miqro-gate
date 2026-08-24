@@ -12,8 +12,10 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Repository
@@ -25,7 +27,7 @@ public class VirtualKeyRepositoryImpl implements VirtualKeyRepository {
             rs.getString("display_prefix"), rs.getString("last_four"), (UUID) rs.getObject("user_id"),
             (UUID) rs.getObject("project_id"), (UUID) rs.getObject("grant_id"),
             (UUID) rs.getObject("upstream_credential_id"), VirtualKeyPurpose.valueOf(rs.getString("purpose")),
-            rs.getString("name"), VirtualKeyStatus.valueOf(rs.getString("status")),
+            rs.getString("name"), rs.getString("cache_policy"), VirtualKeyStatus.valueOf(rs.getString("status")),
             rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("last_used_at") != null ? rs.getTimestamp("last_used_at").toInstant() : null,
             rs.getTimestamp("revoked_at") != null ? rs.getTimestamp("revoked_at").toInstant() : null,
@@ -88,11 +90,11 @@ public class VirtualKeyRepositoryImpl implements VirtualKeyRepository {
         jdbc.update("""
                 INSERT INTO virtual_keys (id, tenant_id, public_key_id, secret_digest, display_prefix,
                     last_four, user_id, project_id, grant_id, upstream_credential_id,
-                    purpose, name, status, created_at, last_used_at, revoked_at,
+                    purpose, name, cache_policy, status, created_at, last_used_at, revoked_at,
                     replaced_by_key_id, version)
                 VALUES (:id, :tenantId, :publicKeyId, :secretDigest, :displayPrefix,
                     :lastFour, :userId, :projectId, :grantId, :upstreamCredentialId,
-                    :purpose, :name, :status, :createdAt, :lastUsedAt, :revokedAt,
+                    :purpose, :name, :cachePolicy, :status, :createdAt, :lastUsedAt, :revokedAt,
                     :replacedByKeyId, :version)
                 """, toParams(key));
         return key;
@@ -121,14 +123,36 @@ public class VirtualKeyRepositoryImpl implements VirtualKeyRepository {
         return count != null && count > 0;
     }
 
+    @Override
+    @Transactional
+    public void replaceKeyModels(UUID tenantId, UUID virtualKeyId, Collection<String> modelIds) {
+        jdbc.update("DELETE FROM virtual_key_models WHERE tenant_id = :tenantId AND virtual_key_id = :virtualKeyId",
+                new MapSqlParameterSource().addValue("tenantId", tenantId).addValue("virtualKeyId", virtualKeyId));
+        for (String modelId : modelIds) {
+            jdbc.update("""
+                    INSERT INTO virtual_key_models (tenant_id, virtual_key_id, model_id)
+                    VALUES (:tenantId, :virtualKeyId, :modelId)
+                    """, new MapSqlParameterSource().addValue("tenantId", tenantId)
+                    .addValue("virtualKeyId", virtualKeyId).addValue("modelId", modelId));
+        }
+    }
+
+    @Override
+    public Set<String> findModelIds(UUID virtualKeyId) {
+        List<String> models = jdbc.queryForList(
+                "SELECT model_id FROM virtual_key_models WHERE virtual_key_id = :virtualKeyId ORDER BY model_id",
+                new MapSqlParameterSource("virtualKeyId", virtualKeyId), String.class);
+        return Set.copyOf(models);
+    }
+
     private MapSqlParameterSource toParams(VirtualKey k) {
         return new MapSqlParameterSource().addValue("id", k.id()).addValue("tenantId", k.tenantId())
                 .addValue("publicKeyId", k.publicKeyId()).addValue("secretDigest", k.secretDigest())
                 .addValue("displayPrefix", k.displayPrefix()).addValue("lastFour", k.lastFour())
                 .addValue("userId", k.userId()).addValue("projectId", k.projectId()).addValue("grantId", k.grantId())
                 .addValue("upstreamCredentialId", k.upstreamCredentialId()).addValue("purpose", k.purpose().name())
-                .addValue("name", k.name()).addValue("status", k.status().name())
-                .addValue("createdAt", Timestamp.from(k.createdAt()))
+                .addValue("name", k.name()).addValue("cachePolicy", k.cachePolicy())
+                .addValue("status", k.status().name()).addValue("createdAt", Timestamp.from(k.createdAt()))
                 .addValue("lastUsedAt", k.lastUsedAt() != null ? Timestamp.from(k.lastUsedAt()) : null)
                 .addValue("revokedAt", k.revokedAt() != null ? Timestamp.from(k.revokedAt()) : null)
                 .addValue("replacedByKeyId", k.replacedByKeyId()).addValue("version", k.version());

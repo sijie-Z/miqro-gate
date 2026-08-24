@@ -61,10 +61,10 @@ class CrossTenantIsolationTest extends AbstractPostgresTest {
         userRepo.insert(userA);
         userRepo.insert(userB);
 
-        projectA = new Project(UUID.randomUUID(), tenantA, "proj-a", "Project A", null, null, ProjectStatus.ACTIVE, 0,
-                NOW, NOW);
-        projectB = new Project(UUID.randomUUID(), tenantB, "proj-b", "Project B", null, null, ProjectStatus.ACTIVE, 0,
-                NOW, NOW);
+        projectA = new Project(UUID.randomUUID(), tenantA, "proj-a", "Project A", null, null, ProjectStatus.ACTIVE,
+                null, 0, NOW, NOW);
+        projectB = new Project(UUID.randomUUID(), tenantB, "proj-b", "Project B", null, null, ProjectStatus.ACTIVE,
+                null, 0, NOW, NOW);
         projectRepo.insert(projectA);
         projectRepo.insert(projectB);
     }
@@ -142,7 +142,7 @@ class CrossTenantIsolationTest extends AbstractPostgresTest {
             vkRepo.insert(new VirtualKey(UUID.randomUUID(), tenantB,
                     "mqk_cross_" + UUID.randomUUID().toString().substring(0, 6), new byte[]{1, 2, 3, 4, 5, 6, 7, 8},
                     "mqk_", "xc01", userA.id(), projectB.id(), // cross-tenant: userA in A, projectB in B
-                    UUID.randomUUID(), UUID.randomUUID(), VirtualKeyPurpose.CLAUDE_CODE, "Cross Key",
+                    UUID.randomUUID(), UUID.randomUUID(), VirtualKeyPurpose.CLAUDE_CODE, "Cross Key", "DISABLED",
                     VirtualKeyStatus.ACTIVE, NOW, null, null, null, 0));
         }).isNotNull(); // Composite FK rejects: tenantB,userA doesn't match users(tenantB,id)
     }

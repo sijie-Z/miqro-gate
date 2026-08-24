@@ -15,6 +15,9 @@
         <module>provider-spi</module>
         <module>provider-adapters</module>
         <module>persistence-postgres</module>
+        <module>route-snapshot</module>
+        <module>cache-spi</module>
+        <module>queue-spi</module>
         <module>control-plane-app</module>
         <module>gateway-app</module>
         <module>test-support</module>
@@ -64,6 +67,11 @@
             <!-- Internal modules -->
             <dependency>
                 <groupId>com.miqroera.miqrokey</groupId>
+                <artifactId>cache-spi</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.miqroera.miqrokey</groupId>
                 <artifactId>control-plane-app</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -94,8 +102,28 @@
             </dependency>
             <dependency>
                 <groupId>com.miqroera.miqrokey</groupId>
+                <artifactId>queue-spi</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.miqroera.miqrokey</groupId>
+                <artifactId>route-snapshot</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.miqroera.miqrokey</groupId>
                 <artifactId>test-support</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+
+            <!--
+                Convergence pin: caffeine and the postgresql driver declare
+                different checker-qual versions; pick the newer one.
+            -->
+            <dependency>
+                <groupId>org.checkerframework</groupId>
+                <artifactId>checker-qual</artifactId>
+                <version>3.48.3</version>
             </dependency>
 
             <!-- External test dependencies not managed by Spring Boot BOM -->

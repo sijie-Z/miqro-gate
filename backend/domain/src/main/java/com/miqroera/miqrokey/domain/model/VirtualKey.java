@@ -13,11 +13,17 @@ import java.util.UUID;
  * secret_digest (HMAC-SHA-256) are persisted. The full key is displayed exactly
  * once at creation time.
  * </p>
+ *
+ * <p>
+ * {@code cachePolicy} is the per-key opt-in for response caching (ADR-0008):
+ * {@code "DISABLED"} (default) or {@code "ENABLED"}. The gateway only serves
+ * cached responses for keys that opted in.
+ * </p>
  */
 public record VirtualKey(UUID id, UUID tenantId, String publicKeyId, byte[] secretDigest, String displayPrefix,
         String lastFour, UUID userId, UUID projectId, UUID grantId, UUID upstreamCredentialId,
-        VirtualKeyPurpose purpose, String name, VirtualKeyStatus status, Instant createdAt, Instant lastUsedAt,
-        Instant revokedAt, UUID replacedByKeyId, long version) {
+        VirtualKeyPurpose purpose, String name, String cachePolicy, VirtualKeyStatus status, Instant createdAt,
+        Instant lastUsedAt, Instant revokedAt, UUID replacedByKeyId, long version) {
 
     public VirtualKey {
         secretDigest = secretDigest.clone();

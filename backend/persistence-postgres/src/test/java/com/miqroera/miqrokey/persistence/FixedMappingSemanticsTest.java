@@ -45,8 +45,8 @@ class FixedMappingSemanticsTest extends AbstractPostgresTest {
         var user = new User(UUID.randomUUID(), TENANT_ID, "mapuser1", "MU1", new byte[]{1}, UserRole.USER,
                 UserStatus.ACTIVE, false, 0, null, null, 0, NOW, NOW);
         userRepo.insert(user);
-        var project = new Project(UUID.randomUUID(), TENANT_ID, "map-proj1", "MP1", null, null, ProjectStatus.ACTIVE, 0,
-                NOW, NOW);
+        var project = new Project(UUID.randomUUID(), TENANT_ID, "map-proj1", "MP1", null, null, ProjectStatus.ACTIVE,
+                null, 0, NOW, NOW);
         projectRepo.insert(project);
 
         var provider = new Provider(UUID.randomUUID(), "map-prov-" + UUID.randomUUID().toString().substring(0, 6), "MP",
@@ -89,8 +89,8 @@ class FixedMappingSemanticsTest extends AbstractPostgresTest {
         var user = new User(UUID.randomUUID(), TENANT_ID, "vkuser2", "VKU2", new byte[]{1}, UserRole.USER,
                 UserStatus.ACTIVE, false, 0, null, null, 0, NOW, NOW);
         userRepo.insert(user);
-        var project = new Project(UUID.randomUUID(), TENANT_ID, "vk-proj2", "VP2", null, null, ProjectStatus.ACTIVE, 0,
-                NOW, NOW);
+        var project = new Project(UUID.randomUUID(), TENANT_ID, "vk-proj2", "VP2", null, null, ProjectStatus.ACTIVE,
+                null, 0, NOW, NOW);
         projectRepo.insert(project);
 
         var provider = new Provider(UUID.randomUUID(), "vk-prov-" + UUID.randomUUID().toString().substring(0, 6), "VP",
@@ -128,7 +128,8 @@ class FixedMappingSemanticsTest extends AbstractPostgresTest {
             vkRepo.insert(new VirtualKey(UUID.randomUUID(), TENANT_ID,
                     "mqk_badmap_" + UUID.randomUUID().toString().substring(0, 6), new byte[]{1, 2, 3, 4, 5, 6, 7, 8},
                     "mqk_", "bm01", user.id(), project.id(), grant1.id(), credB.id(), // credB != grant1.credential
-                    VirtualKeyPurpose.CLAUDE_CODE, "Bad Map", VirtualKeyStatus.ACTIVE, NOW, null, null, null, 0));
+                    VirtualKeyPurpose.CLAUDE_CODE, "Bad Map", "DISABLED", VirtualKeyStatus.ACTIVE, NOW, null, null,
+                    null, 0));
         }).isNotNull(); // DB trigger enforces grant_id matches credential_id
     }
 }

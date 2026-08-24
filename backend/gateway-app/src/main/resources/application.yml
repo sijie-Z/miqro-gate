@@ -6,14 +6,56 @@ spring:
     name: miqrokey-gateway
   main:
     web-application-type: reactive
+  # The gateway never runs Flyway migrations (the control plane owns schema
+  # evolution); flyway-core is on the classpath via persistence-postgres.
+  flyway:
+    enabled: false
 
 miqrokey:
+  crypto:
+    # Key encryption + virtual key HMAC. Required when persistence is enabled.
+    enabled: ${MIQROKEY_CRYPTO_ENABLED:true}
+    encryption:
+      active-version: ${MIQROKEY_CRYPTO_ENC_ACTIVE_VERSION:v1}
+      versions:
+        v1: ${MIQROKEY_CRYPTO_ENC_KEY_FILE:}
+    hmac:
+      active-version: ${MIQROKEY_CRYPTO_HMAC_ACTIVE_VERSION:v1}
+      versions:
+        v1: ${MIQROKEY_CRYPTO_HMAC_KEY_FILE:}
+
   gateway:
+    # Database-backed mode (route snapshot, L2 cache, usage writer).
+    persistence:
+      enabled: ${MIQROKEY_GATEWAY_PERSISTENCE_ENABLED:true}
+      url: ${MIQROKEY_GATEWAY_DB_URL:jdbc:postgresql://localhost:5432/miqrokey}
+      username: ${MIQROKEY_GATEWAY_DB_USERNAME:miqrokey}
+      password: ${MIQROKEY_GATEWAY_DB_PASSWORD:}
+      pool-size: ${MIQROKEY_GATEWAY_DB_POOL_SIZE:5}
+    route-snapshot:
+      refresh-interval: ${MIQROKEY_GATEWAY_ROUTE_REFRESH_INTERVAL:30s}
+    queue:
+      capacity: ${MIQROKEY_GATEWAY_QUEUE_CAPACITY:10000}
+      flush-threshold: ${MIQROKEY_GATEWAY_QUEUE_FLUSH_THRESHOLD:100}
+      flush-interval: ${MIQROKEY_GATEWAY_QUEUE_FLUSH_INTERVAL:5s}
+    coalescer:
+      # Request coalescing (single-flight): DISABLED by default (ADR-0008).
+      enabled: ${MIQROKEY_GATEWAY_COALESCER_ENABLED:false}
+      wait-timeout: ${MIQROKEY_GATEWAY_COALESCER_WAIT_TIMEOUT:2s}
     upstream:
-      url: ${MIQROKEY_UPSTREAM_URL:}
       connect-timeout: ${MIQROKEY_UPSTREAM_CONNECT_TIMEOUT:PT5S}
       response-timeout: ${MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT:PT10M}
       max-proxy-buffer: ${MIQROKEY_MAX_PROXY_BUFFER_BYTES:256KB}
+
+  cache:
+    # Response cache (L1 Caffeine + L2 PostgreSQL): DISABLED by default.
+    enabled: ${MIQROKEY_CACHE_ENABLED:false}
+    l1:
+      enabled: ${MIQROKEY_CACHE_L1_ENABLED:true}
+      ttl: ${MIQROKEY_CACHE_L1_TTL:300s}
+    l2:
+      enabled: ${MIQROKEY_CACHE_L2_ENABLED:true}
+      ttl: ${MIQROKEY_CACHE_L2_TTL:300s}
 
 # Actuator health and metrics (no sensitive data exposed)
 management:

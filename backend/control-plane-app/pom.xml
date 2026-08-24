@@ -55,6 +55,13 @@
             <artifactId>h2</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Test-only: verify the route snapshot loader picks up keys created
+             through the management API (tag-routing closed loop). -->
+        <dependency>
+            <groupId>com.miqroera.miqrokey</groupId>
+            <artifactId>route-snapshot</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>com.tngtech.archunit</groupId>
             <artifactId>archunit-junit5</artifactId>
