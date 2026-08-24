@@ -340,6 +340,9 @@ function formatTime(iso?: string): string {
       <el-table-column label="创建时间" width="170">
         <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
       </el-table-column>
+      <el-table-column label="最近使用" width="170">
+        <template #default="{ row }">{{ formatTime(row.lastUsedAt) }}</template>
+      </el-table-column>
       <el-table-column label="操作" width="160" fixed="right">
         <template #default="{ row }">
           <el-button

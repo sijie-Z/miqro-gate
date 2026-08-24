@@ -870,7 +870,7 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 ### Verification
 
-- `./mvnw -f backend/pom.xml verify`（质量门禁全开，含 spotless/checkstyle/pmd/jacoco）：**BUILD SUCCESS** — **454 非集成测试，0 失败 0 错误**：
+- `./mvnw -f backend/pom.xml verify`（默认门禁：Spotless + Maven Enforcer；checkstyle/pmd/jacoco 未配置）：**BUILD SUCCESS** — **454 非集成测试，0 失败 0 错误**：
   - domain 84（新增 vkey 解析、usage 统计域测试）、persistence-postgres 31、queue-spi 6、control-plane 87（VirtualKeyServiceTest 19 + UsageStatsServiceTest 10 + 既有）、test-support 109、gateway-app 138（新增 VirtualKeyAuthContractTest、SseReplayEngineTest、CacheKeyFactoryTest；三个既有契约测试扩展模型越权/凭证注入断言）
 - 集成测试（CI-only，Testcontainers）：`MeVirtualKeyApiIntegrationTest` 7 + `MeUsageApiIntegrationTest` 4，本机 Docker 不可用由 CI 验证。
 - 前端：`npm --prefix frontend run test` **16/16 PASS**（App 2 + http 6 + auth 4 + KeysView 4）、`lint` PASS、`typecheck` PASS、`build` PASS（chunk 大小警告为 Element Plus 全量引入，非错误）。

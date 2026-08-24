@@ -106,7 +106,10 @@ class MeUsageApiIntegrationTest {
                 // input 1200 * 1.00/1e6 = 0.0012; output 600 * 2.00/1e6 = 0.0012
                 .andExpect(jsonPath("$.groups[0].cost.gatewayObserved").value(0.0024))
                 .andExpect(jsonPath("$.groups[0].cost.upstreamPaid").value(0.002))
-                .andExpect(jsonPath("$.totals.requests.total").value(2));
+                // totals are the serialized record components; Requests.total() is a
+                // derived method and is NOT part of the JSON (assert components).
+                .andExpect(jsonPath("$.totals.requests.upstream").value(1))
+                .andExpect(jsonPath("$.totals.requests.coalesced").value(1));
     }
 
     @Test
@@ -114,7 +117,7 @@ class MeUsageApiIntegrationTest {
     void summaryWithNoKeys() throws Exception {
         mockMvc.perform(get("/api/v1/me/usage/summary").cookie(sessionCookie)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.groupBy").value("project")).andExpect(jsonPath("$.groups.length()").value(0))
-                .andExpect(jsonPath("$.totals.requests.total").value(0))
+                .andExpect(jsonPath("$.totals.requests.upstream").value(0))
                 .andExpect(jsonPath("$.totals.cost.upstreamPaid").value(0));
     }
 
