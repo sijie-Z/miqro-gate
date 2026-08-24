@@ -890,6 +890,7 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 ### Remaining risks
 
+- **Push 被阻塞（403）**：本机 git/gh 身份为 `sijie-Z`，对 `lichman0405/miqro-key-gateway` 无写权限。3 个 commit 已本地完成（`cdaf4f5` backend、`0ff1f29` frontend、`b143900` docs），待有权限的账号 push（git-workflow.md：不改写历史、不强推）。PR 未创建，CI 未跑。
 - 集成测试（11 个新增）只能在 Linux CI 运行；若 jsonPath 数值断言浮点比较失败需按 CI 输出调整。
 - 真实供应商凭证未提供：Gateway 凭证注入只经 Mock 上游验证，真实联调 `WAITING_FOR_CREDENTIAL`。
 - 响应缓存默认关闭（ADR-0008 决策），正式启用前需新增 ADR。
