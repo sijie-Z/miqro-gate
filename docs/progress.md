@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G2.6`（Gateway security hardening — SSRF、路径、Header、body 上限和错误脱敏）
-- Goal status: `DONE`（全部验收通过：742 tests / 0 failures / 5 skipped）
+- Current goal: `G3.1`（DeepSeek PAYG 首个完整参考适配器：OpenAI/Anthropic 透明入口、models、官方余额、价格与 usage）
+- Goal status: `DONE`（全量验证通过：779 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
 - Last updated: `2026-08-25 CST`
-- Branch: `goal/g2.6-security-hardening`
+- Branch: `goal/g3.1-deepseek-payg`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,40 @@
 
 ## Next Goal
 
-- Goal ID: `G3.1`
-- Name: DeepSeek PAYG（首个完整参考适配器：OpenAI/Anthropic 透明入口、models、官方余额、价格与 usage）
+- Goal ID: `G3.2`
+- Name: Tencent TokenHub（第二个参考适配器：团队 Plan、余额与 usage）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 3 供应商产品）
+
+## G3.1 — DeepSeek PAYG 首个完整参考适配器（DONE）
+
+### 实现
+
+- `provider-adapters`：`DeepSeekPaygAdapter`（adapterId `deepseek-payg-api`，与签名目录一致）—— OpenAI 兼容 + Anthropic Messages 双协议；`resolve` 剥离入站鉴权 Header 并把解码后的 query map 重编码为原始 query 串（Header 名统一小写）；`credentialInjection`（Bearer Authorization，strip `authorization/x-api-key/api-key`）；`validateCredential`（GET /models，2xx 有效，401/403/429/其他 → 稳定文案）；`fetchModels`（data[].id/display_name，未知字段容忍，非数组 data 视为空）；`fetchPlanStatus`（GET /user/balance，`total_balance` → PAYG total/remaining，used/period 保持 null 不冒充）；`capabilities` 声明 streaming/modelDiscovery/balance/requestId + `PROVIDER_RESPONSE` usage。
+- `DeepSeekUsageObserver`：SPI 契约的 observer（onUsage 恰好一次回调、不碰字节流）；`parse` 纯函数 —— OpenAI 兼容（prompt/completion + DeepSeek 特有 `prompt_cache_hit/miss_tokens`）与 Anthropic Messages（input/output + cache_read/creation）双形状；标准 cache 名优先于 DeepSeek 特有名；解析失败返回空 Optional 绝不影响请求。
+- `control-plane-app`：`ProviderClient` 首个实现 `HttpProviderClient`（JDK `HttpClient`，零新依赖）—— 每次交换重校验 base URL（SSRF 门控，拒绝原因不含 URL）、连接/请求超时、响应体 1MB 上限、`Redirect.NEVER`（3xx 原样返回）；`ProviderClientFactory` 单一创建点，每个凭证独立 client；`ProviderClientConfig` 编译期注册 DeepSeek 适配器（重复 adapterId 启动失败）+ 生产默认空 allowlist 校验器；`application.yml` 新增 `miqrokey.control.provider-client.*`（env `MIQROKEY_CONTROL_PROVIDER_CLIENT_*`）。
+- `gateway-app`：`SseUsageObserver.parseUsageJson` 补齐 DeepSeek 特有 cache 字段映射（hit→cacheRead、miss→cacheCreation，标准名优先）。
+- `ModelCatalogService.refreshProduct`（G2.3 接缝）端到端打通：真实适配器 + 真实 ProviderClient 对本地 mock 官方 JSON 形状 → `model_catalog` 落库（success-only 写入不变）。
+- `provider-adapters` package-info 修正：ServiceLoader → 编译期注册措辞。
+
+### 测试（本 Goal 新增 32 个）
+
+- `DeepSeekPaygAdapterTest`（13）：身份/协议、Header 剥离 + query 重编码、凭证注入契约、validateCredential 全状态映射、fetchModels 解析/未知字段/失败模式、fetchPlanStatus 余额/空列表/非 2xx、usage observer 绑定、capabilities。
+- `DeepSeekUsageObserverTest`（7）：双形状解析、标准 cache 名优先、message.usage 回退、model id、空/畸形返回空、onUsage 最新值。
+- `HttpProviderClientTest`（6）：凭证注入 + 路径拼接、query 转发、3xx 不跟随、请求超时、body 上限、SSRF 拒绝（0 上游请求）。
+- `ProviderClientConfigTest`（3）：编译期注册含 deepseek-payg-api、生产 validator 空 allowlist、factory 构建凭证作用域 client。
+- `SseUsageObserverTest`（+2）：DeepSeek cache 字段映射 + 标准名优先。
+- `ModelCatalogServiceIntegrationTest`（+1，integration）：真实适配器 + 真实 client 端到端 → PostgreSQL（含 Authorization 断言）。
+
+### 风险与边界
+
+- 适配器状态 `IMPLEMENTED`（官方文档核验），`VERIFIED` 需真实 DeepSeek 凭证联调 → `WAITING_FOR_CREDENTIAL`（不阻塞 Mock/契约工作）。
+- 管理 API 凭证校验端点（本地格式检查）未在 G3.1 接线到上游 `validateCredential`（需解密 + 网络；接缝已存在，G4.x 接线）。
+
+### 验证
+
+- Windows 全量：`./mvnw.cmd -f backend/pom.xml verify -P integration --batch-mode` → **BUILD SUCCESS**，779 tests / 0 failures / 0 errors / 5 skipped（11 模块全绿，含 Testcontainers integration；surefire XML 汇总：domain 100 / provider-spi 8 / provider-adapters 45 / persistence 118 / route-snapshot 3 / control-plane 198 / gateway 198 / test-support 109）。
+- **根因修复（关键）**：`application.yml` 初次编辑把 `miqrokey:` 块插在 `spring.main` 与 `spring.datasource` 之间，导致 `datasource:`/`flyway:` 被吞入 `miqrokey:` 命名空间 —— `spring.datasource.*`（pool 20）与 `spring.flyway.*` 全部失效，控制面集成测试共享 testcontainer（max_connections=100）被各 Spring 上下文的 Hikari 池耗尽（`FATAL: sorry, too many clients`）。已把 `miqrokey:` 块移到 `spring:` 之后恢复结构（diff 仅 9 行插入），修复后控制面模块 1:21 通过、全量 3:12 通过。教训：向 `application.yml` 顶部插入顶级块时必须检查后续键的缩进层级。
 
 ## G2.6 — Gateway security hardening（SSRF、路径、Header、body 上限和错误脱敏，DONE）
 

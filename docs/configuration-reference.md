@@ -124,6 +124,9 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_TRUSTED_PROXY_CIDRS` | 空 | 仅从这些代理接受 forwarded headers |
 | `MIQROKEY_UPSTREAM_ALLOWED_CIDRS` | 空 | SSRF 门控 allowlist（G2.6）：命中这些 CIDR 的目标豁免「非公网地址」与「明文 http」两道拒绝（`127.0.0.0/8, ::1/128` 用于本地自建模型）；空 = 仅接受 https + 公网地址；`userinfo` URL 永不豁免 |
 | `MIQROKEY_UPSTREAM_FOLLOW_REDIRECTS` | `false` | 重定向跟随硬编码禁用（G2.6：防止 30x 把已通过 SSRF 校验的目标重定向到任意地址）；当前版本不可配置 |
+| `MIQROKEY_CONTROL_PROVIDER_CLIENT_CONNECT_TIMEOUT` | `10s` | 控制面 → 供应商调用的 TCP 连接超时（G3.1，`ProviderClient`） |
+| `MIQROKEY_CONTROL_PROVIDER_CLIENT_REQUEST_TIMEOUT` | `30s` | 控制面 → 供应商单次调用整体截止（G3.1） |
+| `MIQROKEY_CONTROL_PROVIDER_CLIENT_MAX_RESPONSE_BYTES` | `1048576` | 控制面 → 供应商单次响应体上限（G3.1）；超限中止交换 |
 
 `MIQROKEY_MAX_CONCURRENT_STREAMS` 是保护实例稳定性的容量边界，不是按用户/团队配额。达到物理上限时返回明确的 `503 CAPACITY_EXHAUSTED` 并告警。
 

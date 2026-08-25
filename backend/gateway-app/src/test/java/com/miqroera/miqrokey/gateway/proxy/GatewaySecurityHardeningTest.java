@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.gateway.proxy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.crypto.VirtualKeyCrypto;
+import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
 import com.miqroera.miqrokey.route.RouteSnapshotProvider;
 import com.miqroera.miqrokey.testing.AnthropicMockProvider;
 import com.miqroera.miqrokey.testing.ChatFixtures;

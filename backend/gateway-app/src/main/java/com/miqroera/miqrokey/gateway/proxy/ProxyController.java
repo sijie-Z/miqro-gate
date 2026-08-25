@@ -12,6 +12,7 @@ import com.miqroera.miqrokey.domain.usage.RequestStartedEvent;
 import com.miqroera.miqrokey.domain.usage.RequestStatus;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
+import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
 import com.miqroera.miqrokey.gateway.vkey.AuthContext;
 import com.miqroera.miqrokey.gateway.vkey.AuthFailureException;
 import com.miqroera.miqrokey.gateway.vkey.VirtualKeyResolver;

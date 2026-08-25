@@ -1,4 +1,4 @@
-package com.miqroera.miqrokey.gateway.proxy;
+package com.miqroera.miqrokey.domain.security;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

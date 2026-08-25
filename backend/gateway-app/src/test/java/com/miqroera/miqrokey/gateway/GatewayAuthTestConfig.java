@@ -2,7 +2,7 @@ package com.miqroera.miqrokey.gateway;
 
 import com.miqroera.miqrokey.domain.crypto.VirtualKeyCrypto;
 import com.miqroera.miqrokey.gateway.proxy.CredentialInjector;
-import com.miqroera.miqrokey.gateway.proxy.UpstreamTargetValidator;
+import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
 import com.miqroera.miqrokey.route.RouteSnapshotProvider;
 import com.miqroera.miqrokey.testing.GatewayTestKeys;
 import com.miqroera.miqrokey.testing.InMemoryRouteSnapshotProvider;

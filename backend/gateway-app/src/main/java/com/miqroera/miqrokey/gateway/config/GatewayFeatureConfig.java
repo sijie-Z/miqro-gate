@@ -8,7 +8,7 @@ import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import com.miqroera.miqrokey.gateway.proxy.CredentialInjector;
 import com.miqroera.miqrokey.gateway.proxy.JdbcCredentialInjector;
 import com.miqroera.miqrokey.gateway.proxy.ProxyTargetProperties;
-import com.miqroera.miqrokey.gateway.proxy.UpstreamTargetValidator;
+import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
 import com.miqroera.miqrokey.queue.QueueConfig;
 import com.miqroera.miqrokey.route.RouteSnapshotConfig;
 import com.miqroera.miqrokey.route.RouteSnapshotProvider;
