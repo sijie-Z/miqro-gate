@@ -92,7 +92,7 @@ class VirtualKeyServiceTest {
         authProperties.setGatewayBaseUrl("https://gateway.example.internal");
         authProperties.setVirtualKeyRotateGrace(Duration.ZERO);
         service = new VirtualKeyService(keyRepository, bindingRepository, projectRepository, grantRepository,
-                membershipRepository, keyCrypto, auditService, authProperties);
+                membershipRepository, keyCrypto, auditService, authProperties, RouteRefreshPublisher.NONE);
         user = user(UserRole.USER);
         admin = user(UserRole.SYSTEM_ADMIN);
     }

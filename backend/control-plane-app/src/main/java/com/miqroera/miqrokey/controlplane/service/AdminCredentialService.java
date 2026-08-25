@@ -68,11 +68,13 @@ public class AdminCredentialService {
     private final CredentialSecretValidator secretValidator;
     private final AuditService auditService;
     private final AuthProperties authProperties;
+    private final RouteRefreshPublisher routeRefreshPublisher;
 
     public AdminCredentialService(UpstreamCredentialRepository credentialRepository,
             UpstreamCredentialVersionRepository versionRepository,
             UpstreamSubscriptionRepository subscriptionRepository, KeyEncryptionProvider keyEncryptionProvider,
-            CredentialSecretValidator secretValidator, AuditService auditService, AuthProperties authProperties) {
+            CredentialSecretValidator secretValidator, AuditService auditService, AuthProperties authProperties,
+            RouteRefreshPublisher routeRefreshPublisher) {
         this.credentialRepository = credentialRepository;
         this.versionRepository = versionRepository;
         this.subscriptionRepository = subscriptionRepository;
@@ -80,6 +82,7 @@ public class AdminCredentialService {
         this.secretValidator = secretValidator;
         this.auditService = auditService;
         this.authProperties = authProperties;
+        this.routeRefreshPublisher = routeRefreshPublisher;
     }
 
     /**
@@ -118,6 +121,7 @@ public class AdminCredentialService {
 
         auditService.record(tenantId, admin.id(), "CREDENTIAL_CREATE", "UPSTREAM_CREDENTIAL", credentialId,
                 auditSummary("name", sanitize(request.name()), "subscriptionId", subscription.id()), requestId);
+        routeRefreshPublisher.publishChanged();
         return toView(pointed);
     }
 
@@ -182,6 +186,7 @@ public class AdminCredentialService {
 
         auditService.record(tenantId, admin.id(), "CREDENTIAL_ROTATE", "UPSTREAM_CREDENTIAL", credentialId,
                 auditSummary("version", versionId), requestId);
+        routeRefreshPublisher.publishChanged();
         return toView(updated);
     }
 
@@ -212,6 +217,7 @@ public class AdminCredentialService {
 
         auditService.record(tenantId, admin.id(), "CREDENTIAL_DISABLE", "UPSTREAM_CREDENTIAL", credentialId,
                 auditSummary("status", "DISABLED"), requestId);
+        routeRefreshPublisher.publishChanged();
     }
 
     /** Lists all credentials in the caller's tenant. */

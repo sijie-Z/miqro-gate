@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.route;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,7 +30,9 @@ import java.util.UUID;
  * <li>ACTIVE label bindings joined to ACTIVE projects and ACTIVE grants
  * (DISTINCT ON virtual_key_id).</li>
  * <li>ACTIVE upstream credentials reachable from any grant, with their
- * product's base URL templates and auth scheme (jsonb).</li>
+ * product's base URL templates, auth scheme (jsonb), and the ACTIVE version's
+ * ciphertext (encrypted_secret, nonce, encryption_key_version) — decryption
+ * happens in memory on the hot path, never here.</li>
  * <li>Per-key model grants (virtual_key_models).</li>
  * </ul>
  */
@@ -100,12 +103,19 @@ public final class JdbcRouteSnapshotLoader {
 
     private Map<UUID, RouteSnapshot.CredentialRecord> loadCredentials() {
         Map<UUID, RouteSnapshot.CredentialRecord> credentials = new HashMap<>();
+        // The ACTIVE version's ciphertext is loaded at refresh time so the hot
+        // path decrypts in memory and never queries the database. The partial
+        // unique index uq_credential_versions_one_active guarantees at most one
+        // ACTIVE version per credential, so the join cannot duplicate rows.
         jdbc.query("""
                 SELECT c.id AS credential_id, c.tenant_id, pp.id AS product_id,
-                       pp.base_url_templates, pp.auth_scheme
+                       pp.base_url_templates, pp.auth_scheme,
+                       v.encrypted_secret, v.nonce, v.encryption_key_version
                 FROM upstream_credentials c
                 JOIN upstream_subscriptions s ON s.tenant_id = c.tenant_id AND s.id = c.subscription_id
                 JOIN provider_products pp ON pp.id = s.provider_product_id
+                LEFT JOIN upstream_credential_versions v
+                       ON v.tenant_id = c.tenant_id AND v.id = c.active_version_id AND v.status = 'ACTIVE'
                 WHERE c.status = 'ACTIVE'
                   AND c.id IN (SELECT g.upstream_credential_id FROM project_provider_grants g WHERE g.status = 'ACTIVE')
                 """, rs -> {
@@ -116,9 +126,15 @@ public final class JdbcRouteSnapshotLoader {
                         credentialId);
                 return;
             }
+            EncryptedSecret encryptedSecret = null;
+            byte[] ciphertext = rs.getBytes("encrypted_secret");
+            if (ciphertext != null) {
+                encryptedSecret = new EncryptedSecret(ciphertext, rs.getBytes("nonce"),
+                        rs.getString("encryption_key_version"));
+            }
             RouteSnapshot.CredentialRecord credential = new RouteSnapshot.CredentialRecord(credentialId,
                     (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("product_id"), baseUrl,
-                    rs.getString("auth_scheme"));
+                    rs.getString("auth_scheme"), encryptedSecret);
             credentials.put(credentialId, credential);
         });
         return credentials;

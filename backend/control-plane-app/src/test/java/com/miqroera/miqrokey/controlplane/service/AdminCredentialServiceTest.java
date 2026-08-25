@@ -85,7 +85,8 @@ class AdminCredentialServiceTest {
     @BeforeEach
     void setUp() {
         service = new AdminCredentialService(credentialRepository, versionRepository, subscriptionRepository,
-                keyEncryptionProvider, new FormatCredentialValidator(), auditService, authProperties);
+                keyEncryptionProvider, new FormatCredentialValidator(), auditService, authProperties,
+                RouteRefreshPublisher.NONE);
         admin = new User(UUID.randomUUID(), TENANT, "admin", "Admin", new byte[32], UserRole.SYSTEM_ADMIN,
                 UserStatus.ACTIVE, false, 0, null, null, 0L, Instant.now(), Instant.now());
     }

@@ -1,5 +1,7 @@
 package com.miqroera.miqrokey.domain.route;
 
+import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
+
 import java.time.Instant;
 import java.util.Collections;
 import java.util.Map;
@@ -14,20 +16,22 @@ import java.util.UUID;
  * Built periodically (default 30s) from the control-plane database and swapped
  * atomically. The gateway NEVER queries the database on the hot path; it only
  * reads this snapshot. Revocation, rotation, and grant changes take effect
- * within one refresh interval.
+ * within one refresh interval (or immediately when the control plane publishes
+ * a {@code pg_notify} route-refresh event).
  * </p>
  *
  * <h2>Lookup semantics</h2>
  * <ul>
  * <li>Keys are indexed by {@code publicKeyId} for O(1) lookup.</li>
  * <li>Each key has at most one ACTIVE binding; the loader resolves it.</li>
- * <li>Credentials are indexed by id and carry the upstream base URL plus the
- * product's auth scheme.</li>
+ * <li>Credentials are indexed by id and carry the upstream base URL, the
+ * product's auth scheme, and the ACTIVE version's ciphertext.</li>
  * </ul>
  *
  * <h2>Security</h2> {@code secretDigest} is copied defensively. The snapshot
- * never contains plaintext secrets — only the encrypted credential reference,
- * which is decrypted per request outside the hot path.
+ * carries ciphertext only — plaintext secrets NEVER enter the snapshot; the hot
+ * path decrypts the {@link EncryptedSecret} in memory (AES-256-GCM) per request
+ * and zero-fills the plaintext after use.
  */
 public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecord> keys,
         Map<UUID, BindingRecord> bindings, Map<UUID, CredentialRecord> credentials,
@@ -86,11 +90,33 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
 
     /**
      * Upstream routing target: base URL and auth scheme resolved from the product
-     * catalog. {@code authScheme} is the raw jsonb text of the product's
-     * {@code auth_scheme} (e.g. {"type":"bearer","header":"authorization"}).
+     * catalog, plus the ACTIVE credential version's ciphertext (loaded at refresh
+     * time so the hot path never touches the database).
+     *
+     * <p>
+     * {@code authScheme} is the raw jsonb text of the product's {@code auth_scheme}
+     * (e.g. {@code {"type":"bearer","header":"authorization"}}).
+     * {@code encryptedSecret} is null when the credential has no ACTIVE version —
+     * the gateway treats that as an unroutable credential.
+     * </p>
      */
-    public record CredentialRecord(UUID credentialId, UUID tenantId, UUID productId, String baseUrl,
-            String authScheme) {
+    public record CredentialRecord(UUID credentialId, UUID tenantId, UUID productId, String baseUrl, String authScheme,
+            EncryptedSecret encryptedSecret) {
+
+        public CredentialRecord {
+            encryptedSecret = encryptedSecret == null
+                    ? null
+                    : new EncryptedSecret(encryptedSecret.ciphertext(), encryptedSecret.nonce(),
+                            encryptedSecret.keyVersion());
+        }
+
+        @Override
+        public EncryptedSecret encryptedSecret() {
+            return encryptedSecret == null
+                    ? null
+                    : new EncryptedSecret(encryptedSecret.ciphertext(), encryptedSecret.nonce(),
+                            encryptedSecret.keyVersion());
+        }
     }
 
     /**
