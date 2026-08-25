@@ -21,9 +21,12 @@ public class ProxyConfig {
         // cleanup on cancellation. Connection pooling will be added in G2.x.
         ConnectionProvider provider = ConnectionProvider.newConnection();
 
+        // responseTimeout is reactor-netty's "first response" deadline: it
+        // covers waiting for the response headers after the request is sent,
+        // not the streaming body. G2.5 maps it to the first-byte timeout.
         HttpClient httpClient = HttpClient.create(provider)
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, Math.toIntExact(properties.connectTimeout().toMillis()))
-                .responseTimeout(properties.responseTimeout());
+                .responseTimeout(properties.firstByteTimeout());
 
         return WebClient.builder().clientConnector(new ReactorClientHttpConnector(httpClient)).build();
     }

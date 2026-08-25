@@ -39,6 +39,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SignalType;
+import reactor.util.retry.Retry;
 
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
@@ -48,6 +49,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -117,6 +119,7 @@ public class ProxyController {
     private final Clock clock;
     private final ObjectMapper objectMapper;
     private final int maxProxyBufferBytes;
+    private final ProxyTargetProperties properties;
 
     public ProxyController(VirtualKeyResolver keyResolver, CredentialInjector credentialInjector,
             GatewayResponseCache responseCache, ObjectProvider<RequestCoalescer> coalescerProvider,
@@ -134,6 +137,7 @@ public class ProxyController {
         this.webClient = proxyWebClient;
         this.clock = clock;
         this.objectMapper = objectMapper;
+        this.properties = properties;
         this.maxProxyBufferBytes = Math.toIntExact(properties.maxProxyBuffer().toBytes());
     }
 
@@ -284,6 +288,16 @@ public class ProxyController {
      * Completes with the observed {@link CachedResponse} (or a no-cache marker)
      * once the response has been fully written; usage events themselves are only
      * emitted for fully completed requests.
+     *
+     * <p>
+     * G2.5 network bounds: connection deadline (10s) and first-byte deadline (120s)
+     * live on the {@link HttpClient}; the stream-idle timeout (5min, reset per
+     * chunk) is applied per attempt on the observed body; the overall deadline
+     * ({@link ProxyTargetProperties#responseTimeout()}) wraps all attempts from the
+     * first subscription. A connection-phase failure is retried at most once, only
+     * before the first byte, never on timeouts, and always with the same
+     * credential.
+     * </p>
      */
     private Mono<CachedResponse> doForward(ServerWebExchange exchange, AuthContext ctx, byte[] body, String modelName,
             CacheKey cacheKey, String requestId, long startMillis, boolean streaming) {
@@ -298,85 +312,38 @@ public class ProxyController {
             filteredHeaders.set(cred.headerName(), cred.headerValue());
 
             // Lifecycle start: only requests that actually reach upstream open a
-            // record (auth failures and cache hits emit no lifecycle row).
+            // record (auth failures and cache hits emit no lifecycle row). The
+            // credential is resolved once before any attempt — a retry reuses
+            // the same credential (no cross-credential failover).
             String wireProtocol = wireProtocolOf(exchange);
             Instant startedAt = clock.instant();
             publishLifecycleStart(ctx, modelName, requestId, startedAt, streaming, wireProtocol);
 
-            TtfbRecorder ttfb = new TtfbRecorder(requestId, startMillis, clock);
-            SseUsageObserver usageObserver = new SseUsageObserver(objectMapper, maxProxyBufferBytes);
-            AtomicReference<Integer> httpStatus = new AtomicReference<>();
-            AtomicReference<String> providerRequestId = new AtomicReference<>();
-            AtomicReference<Throwable> upstreamError = new AtomicReference<>();
-            // Final observed usage: set on the fully-written path so the terminal
-            // lifecycle record carries the same tokens as the usage event.
-            AtomicReference<TokenBucket> observedTokens = new AtomicReference<>();
+            // Per-attempt state: each attempt (initial + at most one retry) gets
+            // a fresh recorder/observer so a failed attempt never contaminates
+            // the successful one. The terminal doFinally reads the latest.
+            AtomicReference<UpstreamAttempt> attemptRef = new AtomicReference<>();
+            AtomicInteger attempts = new AtomicInteger();
 
-            return webClient.post().uri(upstreamUri).headers(h -> h.addAll(filteredHeaders))
-                    .body(BodyInserters.fromDataBuffers(Flux.just(exchange.getResponse().bufferFactory().wrap(body))))
-                    .exchangeToMono(upstreamResponse -> {
-                        int status = upstreamResponse.statusCode().value();
-                        httpStatus.set(status);
-                        log.debug("Upstream response: requestId={}, status={}", requestId, status);
-                        clientResponse.setStatusCode(HttpStatusCode.valueOf(status));
-
-                        HttpHeaders outHeaders = HeaderFilters
-                                .filterResponseHeaders(upstreamResponse.headers().asHttpHeaders());
-                        clientResponse.getHeaders().addAll(outHeaders);
-                        clientResponse.getHeaders().set(SseReplayEngine.X_MIQROKEY_REQUEST_ID, requestId);
-                        if (cacheKey != null) {
-                            clientResponse.getHeaders().set(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+            return Mono.defer(() -> {
+                attempts.incrementAndGet();
+                UpstreamAttempt attempt = new UpstreamAttempt(requestId, startMillis, clock, objectMapper,
+                        maxProxyBufferBytes);
+                attemptRef.set(attempt);
+                return callUpstreamOnce(exchange, ctx, cred, body, upstreamUri, filteredHeaders, cacheKey, modelName,
+                        requestId, startMillis, streaming, attempt);
+            }).retryWhen(Retry.max(1).filter(error -> retryableConnectionFailure(error, attemptRef.get()))
+                    .onRetryExhaustedThrow((spec, signal) -> signal.failure())).timeout(properties.responseTimeout())
+                    .doOnError(error -> {
+                        UpstreamAttempt attempt = attemptRef.get();
+                        if (attempt != null) {
+                            attempt.upstreamError.set(error);
                         }
-                        String upstreamRequestId = pickProviderRequestId(upstreamResponse);
-                        providerRequestId.set(upstreamRequestId);
-
-                        boolean isSse = upstreamResponse.headers().contentType()
-                                .filter(type -> type.isCompatibleWith(MediaType.TEXT_EVENT_STREAM)).isPresent();
-                        BodyCollector collector = new BodyCollector(maxProxyBufferBytes);
-
-                        Flux<DataBuffer> observed = upstreamResponse.bodyToFlux(DataBuffer.class)
-                                .doOnNext(collector::append);
-                        if (isSse) {
-                            observed = usageObserver.wrap(observed);
+                    }).doFinally(signal -> {
+                        UpstreamAttempt attempt = attemptRef.get();
+                        if (attempt == null) {
+                            return;
                         }
-                        observed = ttfb.wrap(observed);
-                        observed = observed
-                                .doOnComplete(
-                                        () -> ttfb.recordCompletion(reactor.core.publisher.SignalType.ON_COMPLETE))
-                                .doOnCancel(() -> ttfb.recordCompletion(reactor.core.publisher.SignalType.CANCEL))
-                                .doOnError(error -> ttfb.recordCompletion(reactor.core.publisher.SignalType.ON_ERROR));
-
-                        return clientResponse.writeWith(observed).then(Mono.fromSupplier(() -> {
-                            // The stream was fully written to the client.
-                            TokenBucket tokens = mergeObservations(usageObserver);
-                            if (!isSse && tokens.isEmpty()) {
-                                // Non-streaming JSON: usage lives in the response
-                                // body, not SSE events. Only counts are extracted —
-                                // the body is never retained or persisted.
-                                tokens = SseUsageObserver.parseUsageJson(objectMapper, collector.bytes());
-                            }
-                            observedTokens.set(tokens);
-                            boolean successful = status >= 200 && status < 300;
-                            long latencyMs = clock.millis() - startMillis;
-                            publishUsageEvent(ctx, modelName, cacheKey, tokens, status, upstreamRequestId, requestId,
-                                    latencyMs, true, successful && tokens.isEmpty());
-
-                            CachedResponse cached = null;
-                            boolean cacheableResponse = cacheKey != null && successful && !collector.overflow()
-                                    && !collector.containsToolCall();
-                            if (cacheableResponse) {
-                                String contentType = outHeaders.getFirst(HttpHeaders.CONTENT_TYPE);
-                                cached = new CachedResponse(status, contentType, outHeaders, collector.bytes(), tokens,
-                                        true);
-                                responseCache.put(cacheKey, ctx.tenantId(), ctx.key().keyId(), ctx.projectId(),
-                                        ctx.productId(), modelName, cached);
-                            }
-                            return cached != null
-                                    ? cached
-                                    : new CachedResponse(status, null, new HttpHeaders(), new byte[0],
-                                            TokenBucket.EMPTY, false);
-                        }));
-                    }).doOnError(upstreamError::set).doFinally(signal -> {
                         // Reactor Netty can report a client disconnect as
                         // ON_COMPLETE on the server write side when every buffered
                         // byte was already flushed: the channel's terminate
@@ -386,15 +353,132 @@ public class ProxyController {
                         // closes the upstream connection. An upstream failure must
                         // not count as a client cancel, so require no error.
                         boolean clientCancelled = signal == SignalType.CANCEL
-                                || (ttfb.terminalSignal() == SignalType.CANCEL && upstreamError.get() == null);
-                        TokenBucket tokens = observedTokens.get() != null
-                                ? observedTokens.get()
-                                : mergeObservations(usageObserver);
+                                || (attempt.ttfb.terminalSignal() == SignalType.CANCEL
+                                        && attempt.upstreamError.get() == null);
+                        TokenBucket tokens = attempt.observedTokens.get() != null
+                                ? attempt.observedTokens.get()
+                                : mergeObservations(attempt.usageObserver);
                         publishLifecycleComplete(ctx, modelName, requestId, startedAt, streaming, wireProtocol, signal,
-                                httpStatus.get(), providerRequestId.get(), upstreamError.get(), ttfb, tokens,
-                                clientCancelled);
+                                attempt.httpStatus.get(), attempt.providerRequestId.get(), attempt.upstreamError.get(),
+                                attempt.ttfb, tokens, clientCancelled, attempts.get() - 1);
                     });
         });
+    }
+
+    /**
+     * One upstream attempt: credential-injected byte-exact request emission and
+     * response streaming with bounded usage/cache observation. The stream-idle
+     * timeout is applied on the observed body (reset on every chunk). Never
+     * publishes lifecycle events — the caller's doFinally owns the single terminal
+     * record. Usage events are only emitted for fully written requests.
+     */
+    private Mono<CachedResponse> callUpstreamOnce(ServerWebExchange exchange, AuthContext ctx,
+            CredentialInjector.InjectedCredential cred, byte[] body, URI upstreamUri, HttpHeaders filteredHeaders,
+            CacheKey cacheKey, String modelName, String requestId, long startMillis, boolean streaming,
+            UpstreamAttempt attempt) {
+        ServerHttpResponse clientResponse = exchange.getResponse();
+        return webClient.post().uri(upstreamUri).headers(h -> h.addAll(filteredHeaders))
+                .body(BodyInserters.fromDataBuffers(Flux.just(exchange.getResponse().bufferFactory().wrap(body))))
+                .exchangeToMono(upstreamResponse -> {
+                    int status = upstreamResponse.statusCode().value();
+                    attempt.httpStatus.set(status);
+                    log.debug("Upstream response: requestId={}, status={}", requestId, status);
+                    clientResponse.setStatusCode(HttpStatusCode.valueOf(status));
+
+                    HttpHeaders outHeaders = HeaderFilters
+                            .filterResponseHeaders(upstreamResponse.headers().asHttpHeaders());
+                    clientResponse.getHeaders().addAll(outHeaders);
+                    clientResponse.getHeaders().set(SseReplayEngine.X_MIQROKEY_REQUEST_ID, requestId);
+                    if (cacheKey != null) {
+                        clientResponse.getHeaders().set(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+                    }
+                    String upstreamRequestId = pickProviderRequestId(upstreamResponse);
+                    attempt.providerRequestId.set(upstreamRequestId);
+
+                    boolean isSse = upstreamResponse.headers().contentType()
+                            .filter(type -> type.isCompatibleWith(MediaType.TEXT_EVENT_STREAM)).isPresent();
+
+                    Flux<DataBuffer> observed = upstreamResponse.bodyToFlux(DataBuffer.class)
+                            .doOnNext(attempt.collector::append);
+                    if (isSse) {
+                        observed = attempt.usageObserver.wrap(observed);
+                    }
+                    observed = attempt.ttfb.wrap(observed);
+                    observed = observed.timeout(properties.streamIdleTimeout())
+                            .doOnComplete(() -> attempt.ttfb.recordCompletion(SignalType.ON_COMPLETE))
+                            .doOnCancel(() -> attempt.ttfb.recordCompletion(SignalType.CANCEL))
+                            .doOnError(error -> attempt.ttfb.recordCompletion(SignalType.ON_ERROR));
+
+                    return clientResponse.writeWith(observed).then(Mono.fromSupplier(() -> {
+                        // The stream was fully written to the client.
+                        TokenBucket tokens = mergeObservations(attempt.usageObserver);
+                        if (!isSse && tokens.isEmpty()) {
+                            // Non-streaming JSON: usage lives in the response
+                            // body, not SSE events. Only counts are extracted —
+                            // the body is never retained or persisted.
+                            tokens = SseUsageObserver.parseUsageJson(objectMapper, attempt.collector.bytes());
+                        }
+                        attempt.observedTokens.set(tokens);
+                        boolean successful = status >= 200 && status < 300;
+                        long latencyMs = clock.millis() - startMillis;
+                        publishUsageEvent(ctx, modelName, cacheKey, tokens, status, upstreamRequestId, requestId,
+                                latencyMs, true, successful && tokens.isEmpty());
+
+                        CachedResponse cached = null;
+                        boolean cacheableResponse = cacheKey != null && successful && !attempt.collector.overflow()
+                                && !attempt.collector.containsToolCall();
+                        if (cacheableResponse) {
+                            String contentType = outHeaders.getFirst(HttpHeaders.CONTENT_TYPE);
+                            cached = new CachedResponse(status, contentType, outHeaders, attempt.collector.bytes(),
+                                    tokens, true);
+                            responseCache.put(cacheKey, ctx.tenantId(), ctx.key().keyId(), ctx.projectId(),
+                                    ctx.productId(), modelName, cached);
+                        }
+                        return cached != null
+                                ? cached
+                                : new CachedResponse(status, null, new HttpHeaders(), new byte[0], TokenBucket.EMPTY,
+                                        false);
+                    }));
+                });
+    }
+
+    /**
+     * Per-attempt observation state. A fresh instance is created for every attempt
+     * (initial call and at most one retry) so a failed attempt never leaks
+     * observations into the successful one.
+     */
+    private static final class UpstreamAttempt {
+        final TtfbRecorder ttfb;
+        final SseUsageObserver usageObserver;
+        final BodyCollector collector;
+        final AtomicReference<Integer> httpStatus = new AtomicReference<>();
+        final AtomicReference<String> providerRequestId = new AtomicReference<>();
+        final AtomicReference<Throwable> upstreamError = new AtomicReference<>();
+        final AtomicReference<TokenBucket> observedTokens = new AtomicReference<>();
+
+        UpstreamAttempt(String requestId, long startMillis, Clock clock, ObjectMapper objectMapper,
+                int maxProxyBufferBytes) {
+            this.ttfb = new TtfbRecorder(requestId, startMillis, clock);
+            this.usageObserver = new SseUsageObserver(objectMapper, maxProxyBufferBytes);
+            this.collector = new BodyCollector(maxProxyBufferBytes);
+        }
+    }
+
+    /**
+     * G2.5 retry rule: at most one retry (Retry.max(1) in {@link #doForward}), only
+     * for a connection-phase failure — no first byte was observed and the failure
+     * is not a timeout. A streaming response that already started is never retried;
+     * timeouts follow the deadline semantics instead of retrying. The credential is
+     * resolved once for all attempts (no cross-credential failover).
+     */
+    private static boolean retryableConnectionFailure(Throwable error, UpstreamAttempt attempt) {
+        if (attempt == null || attempt.ttfb.firstByteMillisRaw() > 0) {
+            return false;
+        }
+        if (!(error instanceof WebClientRequestException)) {
+            return false;
+        }
+        return !isTimeout(error);
     }
 
     // -------------------------------------------------------------------
@@ -469,7 +553,7 @@ public class ProxyController {
      */
     private void publishLifecycleComplete(AuthContext ctx, String modelName, String requestId, Instant startedAt,
             boolean streaming, String wireProtocol, SignalType signal, Integer status, String upstreamRequestId,
-            Throwable upstreamError, TtfbRecorder ttfb, TokenBucket tokens, boolean clientCancelled) {
+            Throwable upstreamError, TtfbRecorder ttfb, TokenBucket tokens, boolean clientCancelled, int retryCount) {
         try {
             boolean firstByteSeen = ttfb.ttfbMillis() > 0;
             boolean streamCompleted = signal == SignalType.ON_COMPLETE;
@@ -482,7 +566,7 @@ public class ProxyController {
                     ctx.productId(), ctx.binding().credentialId(), wireProtocol, modelName, streaming,
                     upstreamRequestId, firstByteAt, completedAt, Duration.between(startedAt, completedAt).toMillis(),
                     ttfbMs, status, lifecycleStatus, clientCancelled, firstByteSeen && !streamCompleted, tokens,
-                    lifecycleStatus == RequestStatus.SUCCEEDED && tokens.isEmpty()));
+                    lifecycleStatus == RequestStatus.SUCCEEDED && tokens.isEmpty(), retryCount));
         } catch (RuntimeException e) {
             log.warn("Failed to publish lifecycle completion (requestId={}): {}", requestId, e.getMessage());
         }
@@ -495,22 +579,33 @@ public class ProxyController {
         if (clientCancelled) {
             return RequestStatus.CLIENT_CANCELLED;
         }
-        if (httpStatus != null) {
-            return httpStatus >= 200 && httpStatus < 300 ? RequestStatus.SUCCEEDED : RequestStatus.UPSTREAM_REJECTED;
-        }
+        // An upstream failure also wins over an already-observed status: a 200
+        // status line followed by a mid-stream failure (stream-idle timeout,
+        // overall deadline, read error) is an interrupted stream, not a
+        // success. Status-only outcomes (a fully received body) are the only
+        // SUCCEEDED/UPSTREAM_REJECTED paths.
         if (upstreamError != null) {
             if (isTimeout(upstreamError)) {
                 return firstByteSeen ? RequestStatus.STREAM_INTERRUPTED : RequestStatus.TIMEOUT_BEFORE_FIRST_BYTE;
             }
             return firstByteSeen ? RequestStatus.STREAM_INTERRUPTED : RequestStatus.UPSTREAM_UNAVAILABLE;
         }
+        if (httpStatus != null) {
+            return httpStatus >= 200 && httpStatus < 300 ? RequestStatus.SUCCEEDED : RequestStatus.UPSTREAM_REJECTED;
+        }
         return RequestStatus.UPSTREAM_UNAVAILABLE;
     }
 
-    /** True when the error chain contains a (reactor-netty or JDK) timeout. */
+    /**
+     * True when the error chain contains a timeout: reactor-netty's first-byte
+     * deadline ({@link io.netty.handler.timeout.ReadTimeoutException}), reactor's
+     * stream-idle/overall {@code Flux/Mono.timeout} (JDK
+     * {@link java.util.concurrent.TimeoutException}), or a JDK timeout.
+     */
     private static boolean isTimeout(Throwable error) {
         for (Throwable t = error; t != null; t = t.getCause()) {
-            if (t instanceof java.util.concurrent.TimeoutException) {
+            if (t instanceof java.util.concurrent.TimeoutException
+                    || t instanceof io.netty.handler.timeout.ReadTimeoutException) {
                 return true;
             }
         }

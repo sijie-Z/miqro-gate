@@ -45,7 +45,9 @@ miqrokey:
       enabled: ${MIQROKEY_GATEWAY_COALESCER_ENABLED:false}
       wait-timeout: ${MIQROKEY_GATEWAY_COALESCER_WAIT_TIMEOUT:2s}
     upstream:
-      connect-timeout: ${MIQROKEY_UPSTREAM_CONNECT_TIMEOUT:PT5S}
+      connect-timeout: ${MIQROKEY_UPSTREAM_CONNECT_TIMEOUT:PT10S}
+      first-byte-timeout: ${MIQROKEY_UPSTREAM_FIRST_BYTE_TIMEOUT:PT120S}
+      stream-idle-timeout: ${MIQROKEY_UPSTREAM_STREAM_IDLE_TIMEOUT:PT5M}
       response-timeout: ${MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT:PT10M}
       max-proxy-buffer: ${MIQROKEY_MAX_PROXY_BUFFER_BYTES:256KB}
 

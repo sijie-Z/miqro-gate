@@ -150,10 +150,10 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                     e.modelId(), e.streaming(), RequestStatus.IN_FLIGHT.name()).addValue("firstByteAt", null)
                     .addValue("completedAt", null).addValue("durationMs", null).addValue("ttfbMs", null)
                     .addValue("httpStatus", null).addValue("clientCancelled", false).addValue("partialResponse", false)
-                    .addValue("upstreamRequestId", null).addValue("inputTokens", null).addValue("outputTokens", null)
-                    .addValue("cacheCreation", null).addValue("cacheRead", null).addValue("promptTokens", null)
-                    .addValue("completionTokens", null).addValue("totalTokens", null).addValue("reasoningTokens", null)
-                    .addValue("usageMissing", false).addValue("finalizedAt", null));
+                    .addValue("upstreamRequestId", null).addValue("retryCount", 0).addValue("inputTokens", null)
+                    .addValue("outputTokens", null).addValue("cacheCreation", null).addValue("cacheRead", null)
+                    .addValue("promptTokens", null).addValue("completionTokens", null).addValue("totalTokens", null)
+                    .addValue("reasoningTokens", null).addValue("usageMissing", false).addValue("finalizedAt", null));
         }
         jdbc.batchUpdate("""
                 INSERT INTO request_usage_records (started_at, id, gateway_request_id, tenant_id, user_id,
@@ -167,7 +167,7 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                 VALUES (:startedAt, :id, :gatewayRequestId, :tenantId, :userId, :projectId, :virtualKeyId,
                     :providerId, :productId, :credentialId, :modelId, :wireProtocol, :streaming, :status,
                     :upstreamRequestId, :firstByteAt, :completedAt, :durationMs, :ttfbMs, :httpStatus,
-                    :clientCancelled, :partialResponse, 0,
+                    :clientCancelled, :partialResponse, :retryCount,
                     :inputTokens, :outputTokens, :cacheCreation, :cacheRead, :promptTokens, :completionTokens,
                     :totalTokens, :reasoningTokens, :usageMissing, :finalizedAt)
                 ON CONFLICT (started_at, gateway_request_id) DO NOTHING
@@ -192,7 +192,7 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                     .addValue("completedAt", timestampOrNull(e.completedAt())).addValue("durationMs", e.durationMs())
                     .addValue("ttfbMs", e.timeToFirstByteMs()).addValue("httpStatus", e.httpStatus())
                     .addValue("clientCancelled", e.clientCancelled()).addValue("partialResponse", e.partialResponse())
-                    .addValue("upstreamRequestId", e.upstreamRequestId())
+                    .addValue("upstreamRequestId", e.upstreamRequestId()).addValue("retryCount", e.retryCount())
                     .addValue("inputTokens", tokens != null ? tokens.inputTokens() : null)
                     .addValue("outputTokens", tokens != null ? tokens.outputTokens() : null)
                     .addValue("cacheCreation", tokens != null ? tokens.cacheCreationInputTokens() : null)
@@ -216,7 +216,7 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                 VALUES (:startedAt, :id, :gatewayRequestId, :tenantId, :userId, :projectId, :virtualKeyId,
                     :providerId, :productId, :credentialId, :modelId, :wireProtocol, :streaming, :status,
                     :upstreamRequestId, :firstByteAt, :completedAt, :durationMs, :ttfbMs, :httpStatus,
-                    :clientCancelled, :partialResponse, 0,
+                    :clientCancelled, :partialResponse, :retryCount,
                     :inputTokens, :outputTokens, :cacheCreation, :cacheRead, :promptTokens, :completionTokens,
                     :totalTokens, :reasoningTokens, :usageMissing, :finalizedAt)
                 ON CONFLICT (started_at, gateway_request_id) DO UPDATE SET

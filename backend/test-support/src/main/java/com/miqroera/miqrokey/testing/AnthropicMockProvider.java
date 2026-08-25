@@ -17,6 +17,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -52,6 +53,8 @@ public class AnthropicMockProvider implements AutoCloseable {
     private final List<CapturedRequest> capturedRequests = new CopyOnWriteArrayList<>();
     private final AtomicReference<ResponseConfig> responseConfig = new AtomicReference<>();
     private final AtomicReference<RequestLifecycle> lifecycle = new AtomicReference<>();
+    private final AtomicBoolean disconnectNext = new AtomicBoolean(false);
+    private final AtomicBoolean disconnectAll = new AtomicBoolean(false);
 
     public AnthropicMockProvider() {
         this.server = HttpServer.create().port(0).handle(this::handleRequest).bindNow();
@@ -83,10 +86,30 @@ public class AnthropicMockProvider implements AutoCloseable {
         return lc != null && lc.terminationState() == TerminationState.CANCELLED;
     }
 
+    /**
+     * Simulates a connection-phase failure for the next request only: the accepted
+     * channel is closed immediately, before any response is sent. The gateway
+     * observes an EOF before the first response byte, which is exactly the failure
+     * G2.5 retries once.
+     */
+    public void disconnectNextRequest() {
+        disconnectNext.set(true);
+    }
+
+    /**
+     * Simulates a persistent outage: every request's channel is closed immediately,
+     * until {@link #reset()}.
+     */
+    public void disconnectAllRequests() {
+        disconnectAll.set(true);
+    }
+
     public void reset() {
         capturedRequests.clear();
         lifecycle.set(null);
         responseConfig.set(null);
+        disconnectNext.set(false);
+        disconnectAll.set(false);
     }
 
     public Mono<Void> cancellationSignal() {
@@ -105,6 +128,11 @@ public class AnthropicMockProvider implements AutoCloseable {
     // -------------------------------------------------------------------
 
     private Mono<Void> handleRequest(HttpServerRequest req, HttpServerResponse res) {
+        if (disconnectAll.get() || disconnectNext.compareAndSet(true, false)) {
+            req.withConnection(conn -> conn.channel().close());
+            return Mono.never();
+        }
+
         CapturedRequest captured = new CapturedRequest();
         captured.method = req.method().name();
         captured.path = req.uri();
@@ -144,11 +172,19 @@ public class AnthropicMockProvider implements AutoCloseable {
             return finalizeResponse(res.sendHeaders().then(), lc);
         }
 
+        Mono<Void> response;
         if (config.streaming) {
-            return finalizeResponse(sendStreamingResponse(res, config), lc);
+            response = sendStreamingResponse(res, config);
+        } else {
+            String body = config.bodySupplier.get();
+            response = res.sendString(Mono.just(body)).then();
         }
-        String body = config.bodySupplier.get();
-        return finalizeResponse(res.sendString(Mono.just(body)).then(), lc);
+        if (config.responseDelay != null && !config.responseDelay.isZero()) {
+            // Simulates a slow upstream: the response headers (and body) only
+            // arrive after the delay — used to exercise the first-byte timeout.
+            response = Mono.delay(config.responseDelay).then(response);
+        }
+        return finalizeResponse(response, lc);
     }
 
     /**
@@ -166,13 +202,24 @@ public class AnthropicMockProvider implements AutoCloseable {
             return sendUtf8SplitChunks(res, fullBody, config.chunkDelay);
         }
 
-        if (config.chunkDelay != null && !config.chunkDelay.isZero()) {
-            Flux<String> lines = Flux.fromArray(fullBody.split("\n", -1)).map(line -> line + "\n")
-                    .delayElements(config.chunkDelay);
-            return res.sendString(lines).then();
+        if ((config.chunkDelay == null || config.chunkDelay.isZero()) && config.haltAfterLines == 0) {
+            // Single write of the raw body: contract tests assert the stream
+            // byte-for-byte, and a line-rebuild of a body ending in "\n" would
+            // append a phantom trailing newline.
+            return res.sendString(Mono.just(fullBody)).then();
         }
 
-        return res.sendString(Mono.just(fullBody)).then();
+        Flux<String> lines = Flux.fromArray(fullBody.split("\n", -1)).map(line -> line + "\n");
+        if (config.haltAfterLines > 0) {
+            // Sends the first N lines then stalls forever — exercises the
+            // gateway's stream-idle timeout without completing the response.
+            lines = lines.take(config.haltAfterLines).concatWith(Flux.never());
+        }
+
+        if (config.chunkDelay != null && !config.chunkDelay.isZero()) {
+            lines = lines.delayElements(config.chunkDelay);
+        }
+        return res.sendString(lines).then();
     }
 
     private Mono<Void> sendUtf8SplitChunks(HttpServerResponse res, String body, Duration delay) {
@@ -241,6 +288,8 @@ public class AnthropicMockProvider implements AutoCloseable {
         final boolean streaming;
         final Duration chunkDelay;
         final boolean utf8SplitChunks;
+        final Duration responseDelay;
+        final int haltAfterLines;
 
         private ResponseConfig(Builder builder) {
             this.statusCode = builder.statusCode;
@@ -250,6 +299,8 @@ public class AnthropicMockProvider implements AutoCloseable {
             this.streaming = builder.streaming;
             this.chunkDelay = builder.chunkDelay;
             this.utf8SplitChunks = builder.utf8SplitChunks;
+            this.responseDelay = builder.responseDelay;
+            this.haltAfterLines = builder.haltAfterLines;
         }
 
         public static Builder builder() {
@@ -269,6 +320,8 @@ public class AnthropicMockProvider implements AutoCloseable {
             boolean streaming;
             Duration chunkDelay;
             boolean utf8SplitChunks;
+            Duration responseDelay;
+            int haltAfterLines;
 
             public Builder statusCode(int statusCode) {
                 this.statusCode = statusCode;
@@ -307,6 +360,18 @@ public class AnthropicMockProvider implements AutoCloseable {
 
             public Builder utf8SplitChunks(boolean split) {
                 this.utf8SplitChunks = split;
+                return this;
+            }
+
+            /** Delays the entire response (headers included) by this duration. */
+            public Builder responseDelay(Duration delay) {
+                this.responseDelay = delay;
+                return this;
+            }
+
+            /** Streaming only: send the first N lines, then stall forever. */
+            public Builder haltAfterLines(int lines) {
+                this.haltAfterLines = lines;
                 return this;
             }
 

@@ -34,11 +34,11 @@ public record RequestCompletedEvent(UUID id, Instant startedAt, String gatewayRe
         UUID projectId, UUID virtualKeyId, UUID providerId, UUID providerProductId, UUID credentialId,
         String wireProtocol, String modelId, boolean streaming, String upstreamRequestId, Instant firstByteAt,
         Instant completedAt, Long durationMs, Long timeToFirstByteMs, Integer httpStatus, RequestStatus status,
-        boolean clientCancelled, boolean partialResponse, TokenBucket tokens, boolean usageMissing) {
+        boolean clientCancelled, boolean partialResponse, TokenBucket tokens, boolean usageMissing, int retryCount) {
 
     @Override
     public String toString() {
         return "RequestCompletedEvent[gatewayRequestId=" + gatewayRequestId + ", status=" + status + ", httpStatus="
-                + httpStatus + ", clientCancelled=" + clientCancelled + "]";
+                + httpStatus + ", clientCancelled=" + clientCancelled + ", retryCount=" + retryCount + "]";
     }
 }

@@ -14,12 +14,14 @@ import java.time.Duration;
  * </p>
  */
 @ConfigurationProperties(prefix = "miqrokey.gateway.upstream")
-public record ProxyTargetProperties(String url, Duration connectTimeout, Duration responseTimeout,
-        DataSize maxProxyBuffer) {
+public record ProxyTargetProperties(String url, Duration connectTimeout, Duration firstByteTimeout,
+        Duration streamIdleTimeout, Duration responseTimeout, DataSize maxProxyBuffer) {
 
     public ProxyTargetProperties {
         url = url == null || url.isBlank() ? null : url;
-        connectTimeout = connectTimeout == null ? Duration.ofSeconds(5) : connectTimeout;
+        connectTimeout = connectTimeout == null ? Duration.ofSeconds(10) : connectTimeout;
+        firstByteTimeout = firstByteTimeout == null ? Duration.ofSeconds(120) : firstByteTimeout;
+        streamIdleTimeout = streamIdleTimeout == null ? Duration.ofMinutes(5) : streamIdleTimeout;
         responseTimeout = responseTimeout == null ? Duration.ofMinutes(10) : responseTimeout;
         maxProxyBuffer = maxProxyBuffer == null || maxProxyBuffer.toBytes() <= 0
                 ? DataSize.ofKilobytes(256)

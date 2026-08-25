@@ -113,9 +113,10 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_GATEWAY_PORT` | `8081` | 数据面端口 |
 | `MIQROKEY_CONTROL_PORT` | `8080` | 管理面端口 |
 | `MIQROKEY_UPSTREAM_URL` | 空 | 仅 Phase 0 固定路由 PoC 使用；后续由 Virtual Key 路由快照提供 |
-| `MIQROKEY_UPSTREAM_CONNECT_TIMEOUT` | `PT5S` | 上游连接超时 |
-| `MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT` | `PT10M` | 整体上限；流式空闲另算 |
-| `MIQROKEY_UPSTREAM_STREAM_IDLE_TIMEOUT` | `PT2M` | SSE 无数据超时 |
+| `MIQROKEY_UPSTREAM_CONNECT_TIMEOUT` | `PT10S` | 建立上游连接超时 |
+| `MIQROKEY_UPSTREAM_FIRST_BYTE_TIMEOUT` | `PT120S` | 等待首个响应字节（含头）超时；超时永不重试 |
+| `MIQROKEY_UPSTREAM_STREAM_IDLE_TIMEOUT` | `PT5M` | SSE 无数据超时（每个 chunk 重置）；已出首字节后超时 → `STREAM_INTERRUPTED` |
+| `MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT` | `PT10M` | 整体硬截止（自第一次尝试起计时，不重置）；流式空闲另算 |
 | `MIQROKEY_MAX_INBOUND_HEADER_BYTES` | `32KB` | Header 上限 |
 | `MIQROKEY_MAX_CONTROL_BODY_BYTES` | `1MB` | 管理 API body 上限 |
 | `MIQROKEY_MAX_PROXY_BUFFER_BYTES` | `256KB` | 只限制必要解析缓冲，不聚合完整响应 |

@@ -171,7 +171,7 @@ class PostgresUsageEventBusTest {
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 UUID.randomUUID(), "ANTHROPIC_MESSAGES", "model-x", false, "up-1", CLOCK.instant(), CLOCK.instant(),
                 100L, 40L, 200, RequestStatus.SUCCEEDED, false, false,
-                new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), false);
+                new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), false, 0);
     }
 
     private static final class RecordingWriter implements UsageEventWriter {
