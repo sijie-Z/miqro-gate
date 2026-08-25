@@ -39,6 +39,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SignalType;
+import reactor.core.scheduler.Scheduler;
 import reactor.util.retry.Retry;
 
 import java.io.ByteArrayOutputStream;
@@ -120,12 +121,15 @@ public class ProxyController {
     private final ObjectMapper objectMapper;
     private final int maxProxyBufferBytes;
     private final ProxyTargetProperties properties;
+    private final UpstreamTargetValidator upstreamTargetValidator;
+    private final Scheduler credentialDecryptScheduler;
 
     public ProxyController(VirtualKeyResolver keyResolver, CredentialInjector credentialInjector,
             GatewayResponseCache responseCache, ObjectProvider<RequestCoalescer> coalescerProvider,
             ObjectProvider<Duration> coalescerWaitTimeoutProvider, UsageEventBus usageEventBus,
             CacheKeyFactory cacheKeyFactory, SseReplayEngine sseReplayEngine, WebClient proxyWebClient, Clock clock,
-            ObjectMapper objectMapper, ProxyTargetProperties properties) {
+            ObjectMapper objectMapper, ProxyTargetProperties properties,
+            UpstreamTargetValidator upstreamTargetValidator, Scheduler credentialDecryptScheduler) {
         this.keyResolver = keyResolver;
         this.credentialInjector = credentialInjector;
         this.responseCache = responseCache;
@@ -139,6 +143,8 @@ public class ProxyController {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.maxProxyBufferBytes = Math.toIntExact(properties.maxProxyBuffer().toBytes());
+        this.upstreamTargetValidator = upstreamTargetValidator;
+        this.credentialDecryptScheduler = credentialDecryptScheduler;
     }
 
     // -------------------------------------------------------------------
@@ -307,62 +313,82 @@ public class ProxyController {
                 return Mono.error(new AuthFailureException(HttpStatus.BAD_GATEWAY, "route_unavailable",
                         "Upstream base URL is not configured for this credential"));
             }
-            URI upstreamUri = buildUpstreamUri(exchange, cred.baseUrl());
-            HttpHeaders filteredHeaders = HeaderFilters.filterInboundHeaders(exchange.getRequest().getHeaders());
-            filteredHeaders.set(cred.headerName(), cred.headerValue());
-
-            // Lifecycle start: only requests that actually reach upstream open a
-            // record (auth failures and cache hits emit no lifecycle row). The
-            // credential is resolved once before any attempt — a retry reuses
-            // the same credential (no cross-credential failover).
-            String wireProtocol = wireProtocolOf(exchange);
-            Instant startedAt = clock.instant();
-            publishLifecycleStart(ctx, modelName, requestId, startedAt, streaming, wireProtocol);
-
-            // Per-attempt state: each attempt (initial + at most one retry) gets
-            // a fresh recorder/observer so a failed attempt never contaminates
-            // the successful one. The terminal doFinally reads the latest.
-            AtomicReference<UpstreamAttempt> attemptRef = new AtomicReference<>();
-            AtomicInteger attempts = new AtomicInteger();
-
-            return Mono.defer(() -> {
-                attempts.incrementAndGet();
-                UpstreamAttempt attempt = new UpstreamAttempt(requestId, startMillis, clock, objectMapper,
-                        maxProxyBufferBytes);
-                attemptRef.set(attempt);
-                return callUpstreamOnce(exchange, ctx, cred, body, upstreamUri, filteredHeaders, cacheKey, modelName,
-                        requestId, startMillis, streaming, attempt);
-            }).retryWhen(Retry.max(1).filter(error -> retryableConnectionFailure(error, attemptRef.get()))
-                    .onRetryExhaustedThrow((spec, signal) -> signal.failure())).timeout(properties.responseTimeout())
-                    .doOnError(error -> {
-                        UpstreamAttempt attempt = attemptRef.get();
-                        if (attempt != null) {
-                            attempt.upstreamError.set(error);
-                        }
-                    }).doFinally(signal -> {
-                        UpstreamAttempt attempt = attemptRef.get();
-                        if (attempt == null) {
-                            return;
-                        }
-                        // Reactor Netty can report a client disconnect as
-                        // ON_COMPLETE on the server write side when every buffered
-                        // byte was already flushed: the channel's terminate
-                        // completes the outbound instead of cancelling it. The
-                        // observed stream's own terminal signal is authoritative
-                        // for the client-cancel case — cancelling it is what
-                        // closes the upstream connection. An upstream failure must
-                        // not count as a client cancel, so require no error.
-                        boolean clientCancelled = signal == SignalType.CANCEL
-                                || (attempt.ttfb.terminalSignal() == SignalType.CANCEL
-                                        && attempt.upstreamError.get() == null);
-                        TokenBucket tokens = attempt.observedTokens.get() != null
-                                ? attempt.observedTokens.get()
-                                : mergeObservations(attempt.usageObserver);
-                        publishLifecycleComplete(ctx, modelName, requestId, startedAt, streaming, wireProtocol, signal,
-                                attempt.httpStatus.get(), attempt.providerRequestId.get(), attempt.upstreamError.get(),
-                                attempt.ttfb, tokens, clientCancelled, attempts.get() - 1);
-                    });
+            // G2.6 SSRF guard: the blocking DNS check must not run on the event
+            // loop, so hop to the credential-decrypt scheduler. Rejection
+            // surfaces as a generic route_unavailable; the reason never names
+            // the target.
+            return Mono.just(cred).publishOn(credentialDecryptScheduler).map(c -> {
+                UpstreamTargetValidator.Result target = upstreamTargetValidator.validate(c.baseUrl());
+                if (!target.allowed()) {
+                    log.warn("Upstream target rejected: requestId={}, reason={}", requestId, target.reason());
+                    throw new AuthFailureException(HttpStatus.BAD_GATEWAY, "route_unavailable",
+                            "Upstream target is not allowed");
+                }
+                return c;
+            }).flatMap(c -> forwardWithResolvedCredential(exchange, ctx, body, c, modelName, cacheKey, requestId,
+                    startMillis, streaming));
         });
+    }
+
+    private Mono<CachedResponse> forwardWithResolvedCredential(ServerWebExchange exchange, AuthContext ctx, byte[] body,
+            CredentialInjector.InjectedCredential cred, String modelName, CacheKey cacheKey, String requestId,
+            long startMillis, boolean streaming) {
+        ServerHttpResponse clientResponse = exchange.getResponse();
+        URI upstreamUri = buildUpstreamUri(exchange, cred.baseUrl());
+        HttpHeaders filteredHeaders = HeaderFilters.filterInboundHeaders(exchange.getRequest().getHeaders());
+        filteredHeaders.set(cred.headerName(), cred.headerValue());
+
+        // Lifecycle start: only requests that actually reach upstream open a
+        // record (auth failures and cache hits emit no lifecycle row). The
+        // credential is resolved once before any attempt — a retry reuses
+        // the same credential (no cross-credential failover).
+        String wireProtocol = wireProtocolOf(exchange);
+        Instant startedAt = clock.instant();
+        publishLifecycleStart(ctx, modelName, requestId, startedAt, streaming, wireProtocol);
+
+        // Per-attempt state: each attempt (initial + at most one retry) gets
+        // a fresh recorder/observer so a failed attempt never contaminates
+        // the successful one. The terminal doFinally reads the latest.
+        AtomicReference<UpstreamAttempt> attemptRef = new AtomicReference<>();
+        AtomicInteger attempts = new AtomicInteger();
+
+        return Mono.defer(() -> {
+            attempts.incrementAndGet();
+            UpstreamAttempt attempt = new UpstreamAttempt(requestId, startMillis, clock, objectMapper,
+                    maxProxyBufferBytes);
+            attemptRef.set(attempt);
+            return callUpstreamOnce(exchange, ctx, cred, body, upstreamUri, filteredHeaders, cacheKey, modelName,
+                    requestId, startMillis, streaming, attempt);
+        }).retryWhen(Retry.max(1).filter(error -> retryableConnectionFailure(error, attemptRef.get()))
+                .onRetryExhaustedThrow((spec, signal) -> signal.failure())).timeout(properties.responseTimeout())
+                .doOnError(error -> {
+                    UpstreamAttempt attempt = attemptRef.get();
+                    if (attempt != null) {
+                        attempt.upstreamError.set(error);
+                    }
+                }).doFinally(signal -> {
+                    UpstreamAttempt attempt = attemptRef.get();
+                    if (attempt == null) {
+                        return;
+                    }
+                    // Reactor Netty can report a client disconnect as
+                    // ON_COMPLETE on the server write side when every buffered
+                    // byte was already flushed: the channel's terminate
+                    // completes the outbound instead of cancelling it. The
+                    // observed stream's own terminal signal is authoritative
+                    // for the client-cancel case — cancelling it is what
+                    // closes the upstream connection. An upstream failure must
+                    // not count as a client cancel, so require no error.
+                    boolean clientCancelled = signal == SignalType.CANCEL
+                            || (attempt.ttfb.terminalSignal() == SignalType.CANCEL
+                                    && attempt.upstreamError.get() == null);
+                    TokenBucket tokens = attempt.observedTokens.get() != null
+                            ? attempt.observedTokens.get()
+                            : mergeObservations(attempt.usageObserver);
+                    publishLifecycleComplete(ctx, modelName, requestId, startedAt, streaming, wireProtocol, signal,
+                            attempt.httpStatus.get(), attempt.providerRequestId.get(), attempt.upstreamError.get(),
+                            attempt.ttfb, tokens, clientCancelled, attempts.get() - 1);
+                });
     }
 
     /**

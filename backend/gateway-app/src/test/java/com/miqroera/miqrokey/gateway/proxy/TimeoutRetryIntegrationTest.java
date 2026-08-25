@@ -88,6 +88,7 @@ class TimeoutRetryIntegrationTest {
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
         registry.add("miqrokey.gateway.upstream.url", mockProvider::getBaseUrl);
+        registry.add("miqrokey.gateway.upstream.allowed-cidrs", () -> "127.0.0.0/8, ::1/128");
         registry.add("miqrokey.gateway.persistence.url", POSTGRES::getJdbcUrl);
         registry.add("miqrokey.gateway.persistence.username", POSTGRES::getUsername);
         registry.add("miqrokey.gateway.persistence.password", POSTGRES::getPassword);
