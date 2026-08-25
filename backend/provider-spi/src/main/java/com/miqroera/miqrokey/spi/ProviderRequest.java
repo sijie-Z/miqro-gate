@@ -41,4 +41,14 @@ public record ProviderRequest(String method, String path, String query, Map<Stri
     public byte[] body() {
         return body.clone();
     }
+
+    /** A GET request with no query and no headers. */
+    public static ProviderRequest get(String path) {
+        return new ProviderRequest("GET", path, "", Map.of(), new byte[0]);
+    }
+
+    /** A GET request with a query string (no leading {@code ?}). */
+    public static ProviderRequest get(String path, String query) {
+        return new ProviderRequest("GET", path, query, Map.of(), new byte[0]);
+    }
 }

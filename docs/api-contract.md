@@ -331,7 +331,7 @@
 安全规则：
 
 - Secret 只接受明文输入；持久化前以 AES-256-GCM 加密（AAD 绑定 tenant + credential），数据库、响应与审计只保留 SHA-256 指纹和 `fingerprintPrefix`（前 8 字节 hex）。明文与完整指纹永不回显。
-- `validate` 是纯检查：格式非法返回 `400 CREDENTIAL_INVALID`；格式合法时按 SHA-256 指纹与当前 ACTIVE 版本比对（不解密、不暴露明文），返回 `matchesActive`。任何情况下不写数据库。
+- `validate` 是纯检查：格式非法返回 `400 CREDENTIAL_INVALID`；格式合法时按 SHA-256 指纹与当前 ACTIVE 版本比对（不解密、不暴露明文），返回 `matchesActive`。任何情况下不写数据库。供应商侧校验接缝（适配器 `validateCredential` + `ProviderClient`）已随 G3.1 落地，管理端点接线到真实供应商 API 属 G4.x（需解密 + 出网，标注 `WAITING_FOR_CREDENTIAL` 联调）。
 - 轮换是单事务原子操作：持有凭证行锁（`SELECT ... FOR UPDATE` 串行化并发生命周期变更），先把当前 ACTIVE 版本降级为 DRAINING（`retiredAt = now + miqrokey.credential-drain-grace`，默认 `PT0S`），再插入新 ACTIVE 版本——部分唯一索引 `uq_credential_versions_one_active` 保证任意时刻每个凭证至多一个 ACTIVE 版本。新 Secret 校验失败时整个操作回滚，当前版本不受影响。
 - 已降级版本在 `retiredAt` 前保持可解密：请求启动时已解密旧 Secret 的请求可完成（“旧请求可完成”）；路由快照刷新后新请求使用新版本。`PT0S` = 快照刷新后旧版本立即退役。
 - `disable` 把凭证置为 `DISABLED` 并降级当前 ACTIVE 版本；网关路由快照只加载 `status = 'ACTIVE'` 的凭证，刷新后该凭证不可路由，新请求干净失败。

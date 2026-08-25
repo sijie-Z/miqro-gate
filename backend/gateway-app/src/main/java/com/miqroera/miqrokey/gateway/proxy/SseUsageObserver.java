@@ -183,9 +183,11 @@ public final class SseUsageObserver {
      *
      * <p>
      * Reasoning tokens are extracted from {@code output_tokens_details} (OpenAI
-     * Responses) or {@code completion_tokens_details} (OpenAI Chat). Returns
-     * {@link TokenBucket#EMPTY} when no usage object is present or the body is not
-     * parseable.
+     * Responses) or {@code completion_tokens_details} (OpenAI Chat). DeepSeek's
+     * OpenAI-compatible cache fields ({@code prompt_cache_hit_tokens} /
+     * {@code prompt_cache_miss_tokens}) are mapped to cache read / cache creation
+     * when the standard names are absent. Returns {@link TokenBucket#EMPTY} when no
+     * usage object is present or the body is not parseable.
      * </p>
      */
     public static TokenBucket parseUsageJson(ObjectMapper objectMapper, byte[] jsonBytes) {
@@ -211,9 +213,20 @@ public final class SseUsageObserver {
                 reasoningTokens = longValue(usage.path("completion_tokens_details"), "reasoning_tokens");
             }
 
-            return new TokenBucket(longValue(usage, "input_tokens"), longValue(usage, "output_tokens"),
-                    longValue(usage, "cache_creation_input_tokens"), longValue(usage, "cache_read_input_tokens"),
-                    longValue(usage, "prompt_tokens"), longValue(usage, "completion_tokens"),
+            // DeepSeek-specific cache fields on the OpenAI-compatible entry:
+            // prompt_cache_hit_tokens (cache read) / prompt_cache_miss_tokens
+            // (cache creation). Prefer the standard names when present.
+            Long cacheRead = longValue(usage, "cache_read_input_tokens");
+            if (cacheRead == null) {
+                cacheRead = longValue(usage, "prompt_cache_hit_tokens");
+            }
+            Long cacheCreation = longValue(usage, "cache_creation_input_tokens");
+            if (cacheCreation == null) {
+                cacheCreation = longValue(usage, "prompt_cache_miss_tokens");
+            }
+
+            return new TokenBucket(longValue(usage, "input_tokens"), longValue(usage, "output_tokens"), cacheCreation,
+                    cacheRead, longValue(usage, "prompt_tokens"), longValue(usage, "completion_tokens"),
                     longValue(usage, "total_tokens"), reasoningTokens);
         } catch (Exception ignored) {
             // Observation must never affect or expose the proxied response.

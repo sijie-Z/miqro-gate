@@ -168,4 +168,32 @@ class SseUsageObserverTest {
         assertThat(observer.getObservations()).hasSize(1);
         assertThat(observer.getObservations().get(0).reasoningTokens()).isEqualTo(99L);
     }
+
+    @Test
+    @DisplayName("maps DeepSeek prompt_cache_hit/miss tokens to cache read/creation")
+    void mapsDeepSeekCacheFields() {
+        String sse = "data: {\"id\":\"chatcmpl-ds01\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],"
+                + "\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120,"
+                + "\"prompt_cache_hit_tokens\":80,\"prompt_cache_miss_tokens\":20}}\r\n\r\n";
+        SseUsageObserver observer = new SseUsageObserver();
+        var buffer = new DefaultDataBufferFactory().wrap(sse.getBytes(StandardCharsets.UTF_8));
+        observer.wrap(Flux.just(buffer)).blockLast();
+
+        assertThat(observer.getObservations())
+                .containsExactly(new SseUsageObserver.UsageObservation(null, null, 20L, 80L, 100L, 20L, 120L, null));
+    }
+
+    @Test
+    @DisplayName("prefers standard cache names over DeepSeek-specific ones when both present")
+    void prefersStandardCacheNamesWhenBothPresent() {
+        String sse = "data: {\"usage\":{\"input_tokens\":10,\"output_tokens\":5,"
+                + "\"cache_creation_input_tokens\":30,\"cache_read_input_tokens\":40,"
+                + "\"prompt_cache_hit_tokens\":999,\"prompt_cache_miss_tokens\":999}}\r\n\r\n";
+        SseUsageObserver observer = new SseUsageObserver();
+        var buffer = new DefaultDataBufferFactory().wrap(sse.getBytes(StandardCharsets.UTF_8));
+        observer.wrap(Flux.just(buffer)).blockLast();
+
+        assertThat(observer.getObservations())
+                .containsExactly(new SseUsageObserver.UsageObservation(10L, 5L, 30L, 40L, null, null, null, null));
+    }
 }

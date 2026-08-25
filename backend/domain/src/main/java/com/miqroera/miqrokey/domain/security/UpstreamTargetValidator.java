@@ -1,4 +1,4 @@
-package com.miqroera.miqrokey.gateway.proxy;
+package com.miqroera.miqrokey.domain.security;
 
 import java.net.InetAddress;
 import java.net.URI;

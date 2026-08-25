@@ -1,10 +1,15 @@
 package com.miqroera.miqrokey.controlplane.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.miqroera.miqrokey.adapters.deepseek.DeepSeekPaygAdapter;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
+import com.miqroera.miqrokey.controlplane.client.HttpProviderClient;
+import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
 import com.miqroera.miqrokey.spi.ModelCatalogSnapshot;
 import com.miqroera.miqrokey.spi.ModelDefinition;
 import com.miqroera.miqrokey.spi.ProviderClient;
 import com.miqroera.miqrokey.spi.ProviderProductAdapter;
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -17,12 +22,19 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import reactor.core.publisher.Mono;
 
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -115,6 +127,45 @@ class ModelCatalogServiceIntegrationTest extends AbstractControlPlaneIntegration
         modelCatalogService.refreshProduct(adapter, client);
 
         assertThat(catalogModels()).containsExactlyInAnyOrder("a1", "a2");
+    }
+
+    @Test
+    @DisplayName("end-to-end: real adapter + real ProviderClient against the official API shape (G3.1)")
+    void refreshProductEndToEndWithOfficialApiShape() throws Exception {
+        seedProduct();
+        AtomicReference<String> authorization = new AtomicReference<>();
+        AtomicInteger hits = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0);
+        server.createContext("/", exchange -> {
+            hits.incrementAndGet();
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            String body = """
+                    {"object":"list","data":[
+                      {"id":"deepseek-chat","object":"model","display_name":"DeepSeek-V3.2"},
+                      {"id":"deepseek-reasoner","object":"model","owned_by":"deepseek"}
+                    ]}
+                    """;
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        try {
+            DeepSeekPaygAdapter adapter = new DeepSeekPaygAdapter(new ObjectMapper());
+            HttpProviderClient client = new HttpProviderClient(
+                    URI.create("http://127.0.0.1:" + server.getAddress().getPort()), "Authorization", "Bearer sk-test",
+                    new UpstreamTargetValidator(List.of("127.0.0.0/8")), Duration.ofSeconds(2), Duration.ofSeconds(5),
+                    1024 * 1024);
+
+            modelCatalogService.refreshProduct(adapter, client);
+
+            assertThat(catalogModels()).containsExactlyInAnyOrder("deepseek-chat", "deepseek-reasoner");
+            assertThat(hits).hasValue(1);
+            assertThat(authorization).hasValue("Bearer sk-test");
+        } finally {
+            server.stop(0);
+        }
     }
 
     private void seedProduct() {

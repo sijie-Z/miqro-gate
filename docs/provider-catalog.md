@@ -153,6 +153,8 @@ Coding Plan 和 Token Plan 个人版均有专属 Key 与 OpenAI/Anthropic 兼容
 
 按量 API 预设，支持 OpenAI 与 Anthropic 入口、模型列表和官方余额查询。它不是 Plan，但属于客户常用的大陆官方来源，应作为基础适配器。
 
+**实现状态：`IMPLEMENTED`（G3.1）** —— 适配器 `deepseek-payg-api` 已落地：透明转发（OpenAI 兼容 `/chat/completions` 与 Anthropic Messages `/v1/messages`）、`GET /models` 模型目录、`GET /user/balance` 余额（PAYG：余额即剩余可用额度，DeepSeek 不提供已用/周期，保持 null 不冒充 0）、usage 双形状解析（OpenAI 兼容 `prompt_cache_hit/miss_tokens` ↔ Anthropic `cache_read/creation_input_tokens`）。`VERIFIED` 需要真实凭证契约测试 → `WAITING_FOR_CREDENTIAL`。
+
 资料：
 
 - [DeepSeek 查询余额](https://api-docs.deepseek.com/zh-cn/api/get-user-balance/)
