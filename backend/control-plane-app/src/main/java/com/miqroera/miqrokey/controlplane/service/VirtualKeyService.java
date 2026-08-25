@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
 /**
@@ -123,7 +124,7 @@ public class VirtualKeyService {
         }
         String cachePolicy = request.cachePolicy() == null ? CACHE_POLICY_DISABLED : request.cachePolicy();
 
-        VirtualKeyMaterial material = keyCrypto.generate(tenantId);
+        VirtualKeyMaterial material = keyCrypto.generate(tenantId, project.projectTag());
         try {
             Instant now = Instant.now();
             UUID keyId = UUID.randomUUID();
@@ -136,8 +137,8 @@ public class VirtualKeyService {
                     KeyProjectBindingStatus.ACTIVE, 0L, now, now));
             keyRepository.replaceKeyModels(tenantId, keyId, requested);
             auditService.record(tenantId, user.id(), "VIRTUAL_KEY_CREATE", "VIRTUAL_KEY", keyId,
-                    "name=" + sanitize(request.name()) + ", purpose=" + request.purpose() + ", models="
-                            + requested.size() + ", cachePolicy=" + cachePolicy,
+                    auditSummary("name", sanitize(request.name()), "purpose", request.purpose(), "models",
+                            requested.size(), "cachePolicy", cachePolicy),
                     requestId);
             return response(keyId, material, now);
         } finally {
@@ -157,8 +158,10 @@ public class VirtualKeyService {
             throw new ApiException(HttpStatus.CONFLICT, "KEY_NOT_ROTATABLE", "Only an active key can be rotated");
         }
         Set<String> models = keyRepository.findModelIds(oldKey.id());
+        // The replacement keeps the same routing label as the key it replaces.
+        String projectTag = projectRepository.findById(oldKey.projectId()).map(Project::projectTag).orElse(null);
 
-        VirtualKeyMaterial material = keyCrypto.generate(user.tenantId());
+        VirtualKeyMaterial material = keyCrypto.generate(user.tenantId(), projectTag);
         try {
             Instant now = Instant.now();
             UUID newKeyId = UUID.randomUUID();
@@ -180,10 +183,10 @@ public class VirtualKeyService {
             keyRepository.update(rotated);
 
             auditService.record(oldKey.tenantId(), user.id(), "VIRTUAL_KEY_ROTATE", "VIRTUAL_KEY", oldKey.id(),
-                    "replacedBy=" + newKeyId, requestId);
+                    auditSummary("replacedBy", newKeyId), requestId);
             auditService.record(oldKey.tenantId(), user.id(), "VIRTUAL_KEY_CREATE", "VIRTUAL_KEY", newKeyId,
-                    "name=" + sanitize(oldKey.name()) + ", purpose=" + oldKey.purpose() + ", models=" + models.size()
-                            + ", cachePolicy=" + oldKey.cachePolicy(),
+                    auditSummary("name", sanitize(oldKey.name()), "purpose", oldKey.purpose(), "models", models.size(),
+                            "cachePolicy", oldKey.cachePolicy()),
                     requestId);
             return response(newKeyId, material, now);
         } finally {
@@ -207,8 +210,8 @@ public class VirtualKeyService {
                 key.upstreamCredentialId(), key.purpose(), key.name(), key.cachePolicy(), VirtualKeyStatus.REVOKED,
                 key.createdAt(), key.lastUsedAt(), now, key.replacedByKeyId(), key.version() + 1);
         keyRepository.update(revoked);
-        auditService.record(key.tenantId(), user.id(), "VIRTUAL_KEY_REVOKE", "VIRTUAL_KEY", key.id(), "status=REVOKED",
-                requestId);
+        auditService.record(key.tenantId(), user.id(), "VIRTUAL_KEY_REVOKE", "VIRTUAL_KEY", key.id(),
+                auditSummary("status", "REVOKED"), requestId);
     }
 
     /** Lists the caller's own keys with safe metadata (no secrets). */
@@ -244,8 +247,10 @@ public class VirtualKeyService {
             projectRepository.findById(projectId).filter(p -> p.tenantId().equals(user.tenantId())).ifPresent(p -> {
                 projects.add(new MeGrantsResponse.ProjectOption(p.id(), p.code(), p.name(), p.projectTag()));
                 for (ProjectProviderGrant g : grantRepository.findAllByProjectIdAndStatus(p.id(), "ACTIVE")) {
+                    // Deterministic model list (lexicographic) — the underlying
+                    // repository returns an unordered Set.
                     grants.add(new MeGrantsResponse.GrantOption(g.id(), g.projectId(), g.providerProductId(),
-                            grantRepository.findModelIds(g.id())));
+                            new TreeSet<>(grantRepository.findModelIds(g.id()))));
                 }
             });
         }
@@ -283,5 +288,32 @@ public class VirtualKeyService {
 
     private static String sanitize(String value) {
         return value == null ? "" : value.replace('"', '\'').replace('\n', ' ').replace('\r', ' ');
+    }
+
+    /**
+     * Builds a valid JSON document for the {@code change_summary} jsonb column; the
+     * admin_audit_events insert casts the summary to jsonb, so plain-text summaries
+     * would fail with "invalid input syntax for type json".
+     */
+    private static String auditSummary(Object... kv) {
+        StringBuilder sb = new StringBuilder("{");
+        for (int i = 0; i < kv.length; i += 2) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append('"').append(kv[i]).append("\":");
+            Object v = kv[i + 1];
+            if (v instanceof Number || v instanceof Boolean) {
+                sb.append(v);
+            } else {
+                sb.append('"').append(escapeJson(String.valueOf(v))).append('"');
+            }
+        }
+        return sb.append('}').toString();
+    }
+
+    private static String escapeJson(String s) {
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t",
+                "\\t");
     }
 }

@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
+import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +21,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -76,6 +78,15 @@ class MeUsageApiIntegrationTest {
         sessionCookie = cookie(boot, "MIQROKEY_SESSION");
         csrfCookie = cookie(boot, "MIQROKEY_CSRF");
         csrfToken = csrfCookie != null ? csrfCookie.getValue() : "";
+        // Bootstrap admin is created with mustChangePassword=true; SessionFilter
+        // 401s every path outside the password-change allowlist until the temp
+        // password is rotated. Clear the gate so /me/** is reachable.
+        Map<?, ?> bootBody = objectMapper.readValue(boot.getResponse().getContentAsString(), Map.class);
+        String tempPassword = (String) bootBody.get("temporaryPassword");
+        mockMvc.perform(post("/api/v1/auth/password").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(new PasswordChangeRequest(tempPassword, "NewSecurePass1!"))))
+                .andExpect(status().isOk());
     }
 
     @AfterEach
@@ -91,7 +102,10 @@ class MeUsageApiIntegrationTest {
         fx.insertOtherUsersKey();
         fx.insertPrices();
         fx.insertUsage(keyId, "chatcmpl-own-1", 1_000L, 500L);
-        fx.insertUsage(keyId, null, 200L, 100L);
+        // A cache hit (coalesced) request: counted in requests.coalesced, its
+        // tokens still feed input/output (aggregator charges them to
+        // gatewayObserved, never upstreamPaid).
+        fx.insertUsage(keyId, null, 200L, 100L, "COALESCED");
         // Other user's usage must be invisible to the caller.
         fx.insertUsage(fx.otherKeyId, "chatcmpl-other-1", 9_000L, 9_000L);
 
@@ -282,31 +296,35 @@ class MeUsageApiIntegrationTest {
                          created_at)
                     VALUES (:id, :productId, :model, 'INPUT', 'USD', 1.00, :effective, 'MANUAL', now())
                     """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("productId", productId)
-                    .addValue("model", MODEL).addValue("effective", effective));
+                    .addValue("model", MODEL).addValue("effective", Timestamp.from(effective)));
             jdbc.update("""
                     INSERT INTO price_snapshot
                         (id, provider_product_id, model_id, token_type, currency, unit_price, effective_from, source,
                          created_at)
                     VALUES (:id, :productId, :model, 'OUTPUT', 'USD', 2.00, :effective, 'MANUAL', now())
                     """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("productId", productId)
-                    .addValue("model", MODEL).addValue("effective", effective));
+                    .addValue("model", MODEL).addValue("effective", Timestamp.from(effective)));
         }
 
         void insertUsage(UUID keyId, String providerRequestId, long input, long output) {
+            insertUsage(keyId, providerRequestId, input, output, "UPSTREAM");
+        }
+
+        void insertUsage(UUID keyId, String providerRequestId, long input, long output, String cacheLevel) {
             jdbc.update("""
                     INSERT INTO usage_event
                         (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
                          credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
                          upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at)
                     VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :productId, :credentialId, :model,
-                            'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, 'greq', :occurredAt)
+                            :cacheLevel, :input, :output, :total, 42, 200, TRUE, FALSE, 'greq', :occurredAt)
                     """,
                     new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
                             .addValue("providerRequestId", providerRequestId).addValue("keyId", keyId)
                             .addValue("projectId", projectId).addValue("productId", productId)
-                            .addValue("credentialId", credentialId).addValue("model", MODEL).addValue("input", input)
-                            .addValue("output", output).addValue("total", input + output)
-                            .addValue("occurredAt", Instant.now()));
+                            .addValue("credentialId", credentialId).addValue("model", MODEL)
+                            .addValue("cacheLevel", cacheLevel).addValue("input", input).addValue("output", output)
+                            .addValue("total", input + output).addValue("occurredAt", Timestamp.from(Instant.now())));
         }
     }
 

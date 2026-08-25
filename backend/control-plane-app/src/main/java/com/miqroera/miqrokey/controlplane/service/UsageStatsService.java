@@ -69,6 +69,7 @@ public class UsageStatsService {
      */
     public UsageSummary summary(User user, String groupBy, Instant from, Instant to) {
         UsageStatsRepository.GroupBy dimension = parseGroupBy(groupBy);
+        validateTimeRange(from, to);
         Set<UUID> keyIds = ownKeyIds(user);
         if (keyIds.isEmpty()) {
             // No keys to aggregate — return a zeroed summary without touching the
@@ -96,6 +97,7 @@ public class UsageStatsService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "SIZE_INVALID",
                     "size must be between 1 and " + MAX_PAGE_SIZE);
         }
+        validateTimeRange(from, to);
         Set<UUID> keyIds = ownKeyIds(user);
         if (keyIds.isEmpty()) {
             return new UsageRecordPage(List.of(), page, size, 0L);
@@ -122,6 +124,18 @@ public class UsageStatsService {
     }
 
     private UsageStatsRepository.UsageFilter filter(User user, Set<UUID> keyIds, Instant from, Instant to) {
+        validateTimeRange(from, to);
+        Instant toResolved = to == null ? Instant.now() : to;
+        Instant fromResolved = from == null ? toResolved.minus(MAX_WINDOW) : from;
+        return new UsageStatsRepository.UsageFilter(user.tenantId(), keyIds, fromResolved, toResolved);
+    }
+
+    /**
+     * Window validation is unconditional — it applies even when the caller owns no
+     * keys yet, so invalid ranges are rejected consistently regardless of data
+     * presence.
+     */
+    private static void validateTimeRange(Instant from, Instant to) {
         Instant toResolved = to == null ? Instant.now() : to;
         Instant fromResolved = from == null ? toResolved.minus(MAX_WINDOW) : from;
         if (!fromResolved.isBefore(toResolved)) {
@@ -131,7 +145,6 @@ public class UsageStatsService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "TIME_RANGE_TOO_WIDE",
                     "The queried window must be at most " + MAX_WINDOW.toDays() + " days");
         }
-        return new UsageStatsRepository.UsageFilter(user.tenantId(), keyIds, fromResolved, toResolved);
     }
 
     private static UsageStatsRepository.GroupBy parseGroupBy(String value) {

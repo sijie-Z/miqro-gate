@@ -110,7 +110,7 @@ class VirtualKeyServiceTest {
         when(grantRepository.findById(GRANT_ID)).thenReturn(Optional.of(grant));
         when(membershipRepository.exists(PROJECT_ID, USER_ID)).thenReturn(true);
         when(grantRepository.findModelIds(GRANT_ID)).thenReturn(Set.of("model-a", "model-b"));
-        when(keyCrypto.generate(TENANT)).thenReturn(material);
+        when(keyCrypto.generate(TENANT, TAG)).thenReturn(material);
 
         CreateVirtualKeyResponse resp = service.create(user, request("claude-code-main", List.of("model-a")), "req-1");
 
@@ -146,7 +146,7 @@ class VirtualKeyServiceTest {
                 .doesNotContain(material.displayPrefix() + "…");
 
         // Material wiped after the response is built.
-        verify(keyCrypto).generate(TENANT);
+        verify(keyCrypto).generate(TENANT, TAG);
         assertThat(material.rawSecret()).containsOnly((byte) 0);
     }
 
@@ -200,7 +200,7 @@ class VirtualKeyServiceTest {
         when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(project));
         when(grantRepository.findById(GRANT_ID)).thenReturn(Optional.of(grant));
         when(grantRepository.findModelIds(GRANT_ID)).thenReturn(Set.of("model-a"));
-        when(keyCrypto.generate(TENANT)).thenReturn(material);
+        when(keyCrypto.generate(TENANT, TAG)).thenReturn(material);
 
         CreateVirtualKeyResponse resp = service.create(admin, request("admin-key", null), "req");
 
@@ -253,7 +253,7 @@ class VirtualKeyServiceTest {
         when(membershipRepository.exists(PROJECT_ID, USER_ID)).thenReturn(true);
         when(grantRepository.findById(GRANT_ID)).thenReturn(Optional.of(activeGrant()));
         when(grantRepository.findModelIds(GRANT_ID)).thenReturn(Set.of("model-a", "model-b"));
-        when(keyCrypto.generate(TENANT)).thenReturn(material());
+        when(keyCrypto.generate(TENANT, TAG)).thenReturn(material());
 
         service.create(user, request("k", null), "req");
 
@@ -273,7 +273,8 @@ class VirtualKeyServiceTest {
         VirtualKeyMaterial newMaterial = material();
         when(keyRepository.findById(oldKey.id())).thenReturn(Optional.of(oldKey));
         when(keyRepository.findModelIds(oldKey.id())).thenReturn(Set.of("model-a"));
-        when(keyCrypto.generate(TENANT)).thenReturn(newMaterial);
+        when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(activeProject(TENANT, TAG)));
+        when(keyCrypto.generate(TENANT, TAG)).thenReturn(newMaterial);
 
         CreateVirtualKeyResponse resp = service.rotate(user, oldKey.id(), "req-2");
 

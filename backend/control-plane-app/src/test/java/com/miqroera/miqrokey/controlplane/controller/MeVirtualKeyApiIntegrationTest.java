@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
+import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import com.miqroera.miqrokey.route.JdbcRouteSnapshotLoader;
 import jakarta.servlet.http.Cookie;
@@ -86,6 +87,15 @@ class MeVirtualKeyApiIntegrationTest {
         sessionCookie = cookie(boot, "MIQROKEY_SESSION");
         csrfCookie = cookie(boot, "MIQROKEY_CSRF");
         csrfToken = csrfCookie != null ? csrfCookie.getValue() : "";
+        // Bootstrap admin is created with mustChangePassword=true; SessionFilter
+        // 401s every path outside the password-change allowlist until the temp
+        // password is rotated. Clear the gate so /me/** is reachable.
+        Map<?, ?> bootBody = objectMapper.readValue(boot.getResponse().getContentAsString(), Map.class);
+        String tempPassword = (String) bootBody.get("temporaryPassword");
+        mockMvc.perform(post("/api/v1/auth/password").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(new PasswordChangeRequest(tempPassword, "NewSecurePass1!"))))
+                .andExpect(status().isOk());
     }
 
     @AfterEach
@@ -289,7 +299,9 @@ class MeVirtualKeyApiIntegrationTest {
         mockMvc.perform(get("/api/v1/me/grants").cookie(sessionCookie)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.projects[0].projectTag").value(TAG))
                 .andExpect(jsonPath("$.projects[0].id").value(fx.projectId.toString()))
-                .andExpect(jsonPath("$.grants[0].models[0]").value(MODEL_A))
+                // Models are served in lexicographic order (deterministic API).
+                .andExpect(jsonPath("$.grants[0].models[0]").value(MODEL_B))
+                .andExpect(jsonPath("$.grants[0].models[1]").value(MODEL_A))
                 .andExpect(jsonPath("$.purposes[0]").isNotEmpty());
     }
 

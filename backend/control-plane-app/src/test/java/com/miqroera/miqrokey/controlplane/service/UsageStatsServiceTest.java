@@ -127,7 +127,7 @@ class UsageStatsServiceTest {
 
     @Test
     void summaryRejectsWindowLongerThan93Days() {
-        when(keyRepository.findAllByUserId(USER_ID)).thenReturn(List.of(key(KEY_A)));
+        // No key stubbing: window validation runs before any data access.
         Instant from = Instant.now().minus(94, ChronoUnit.DAYS);
         Instant to = Instant.now();
 
@@ -137,7 +137,6 @@ class UsageStatsServiceTest {
 
     @Test
     void summaryRejectsInvertedWindow() {
-        when(keyRepository.findAllByUserId(USER_ID)).thenReturn(List.of(key(KEY_A)));
         Instant now = Instant.now();
 
         assertThatThrownBy(() -> service.summary(user, null, now, now.minusSeconds(1))).isInstanceOfSatisfying(
