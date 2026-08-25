@@ -55,6 +55,13 @@
             <artifactId>h2</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Test-only: verify the route snapshot loader picks up keys created
+             through the management API (tag-routing closed loop). -->
+        <dependency>
+            <groupId>com.miqroera.miqrokey</groupId>
+            <artifactId>route-snapshot</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>com.tngtech.archunit</groupId>
             <artifactId>archunit-junit5</artifactId>
@@ -72,11 +79,21 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>junit-jupiter</artifactId>
+            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>postgresql</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- testcontainers 核心显式版本：Boot BOM 管理 1.20.6（import 上下文求值，
+             属性覆盖无效），核心版本必须与 junit-jupiter/postgresql 对齐 -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

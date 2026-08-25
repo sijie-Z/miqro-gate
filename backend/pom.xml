@@ -15,6 +15,9 @@
         <module>provider-spi</module>
         <module>provider-adapters</module>
         <module>persistence-postgres</module>
+        <module>route-snapshot</module>
+        <module>cache-spi</module>
+        <module>queue-spi</module>
         <module>control-plane-app</module>
         <module>gateway-app</module>
         <module>test-support</module>
@@ -31,7 +34,7 @@
 
         <!-- Test dependency versions -->
         <archunit.version>1.3.0</archunit.version>
-        <testcontainers.version>1.20.4</testcontainers.version>
+        <testcontainers.version>1.21.4</testcontainers.version>
 
         <!-- Plugin versions (locked for reproducible builds) -->
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
@@ -45,7 +48,8 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- Spring Boot BOM -->
+            <!-- Spring Boot BOM（含 testcontainers-bom 1.20.6 管理）；
+                 1.21.4 覆盖见各模块的显式版本声明 -->
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
@@ -53,15 +57,13 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <dependency>
-                <groupId>org.testcontainers</groupId>
-                <artifactId>testcontainers-bom</artifactId>
-                <version>${testcontainers.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
 
             <!-- Internal modules -->
+            <dependency>
+                <groupId>com.miqroera.miqrokey</groupId>
+                <artifactId>cache-spi</artifactId>
+                <version>${project.version}</version>
+            </dependency>
             <dependency>
                 <groupId>com.miqroera.miqrokey</groupId>
                 <artifactId>control-plane-app</artifactId>
@@ -94,8 +96,28 @@
             </dependency>
             <dependency>
                 <groupId>com.miqroera.miqrokey</groupId>
+                <artifactId>queue-spi</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.miqroera.miqrokey</groupId>
+                <artifactId>route-snapshot</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.miqroera.miqrokey</groupId>
                 <artifactId>test-support</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+
+            <!--
+                Convergence pin: caffeine and the postgresql driver declare
+                different checker-qual versions; pick the newer one.
+            -->
+            <dependency>
+                <groupId>org.checkerframework</groupId>
+                <artifactId>checker-qual</artifactId>
+                <version>3.48.3</version>
             </dependency>
 
             <!-- External test dependencies not managed by Spring Boot BOM -->

@@ -1,0 +1,167 @@
+package com.miqroera.miqrokey.route;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.miqroera.miqrokey.domain.route.RouteSnapshot;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * Loads the routing snapshot from the control-plane database.
+ *
+ * <p>
+ * Runs on the refresher's scheduled executor (or the caller's thread in tests),
+ * never on the Reactor event loop. Queries are plain, read-only, bounded
+ * SELECTs; the full result set is small (single-tenant, ≤ 50 keys).
+ * </p>
+ *
+ * <h2>Snapshot content</h2>
+ * <ul>
+ * <li>ACTIVE virtual keys (id, tenant, public key id, secret digest, cache
+ * policy, purpose).</li>
+ * <li>ACTIVE label bindings joined to ACTIVE projects and ACTIVE grants
+ * (DISTINCT ON virtual_key_id).</li>
+ * <li>ACTIVE upstream credentials reachable from any grant, with their
+ * product's base URL templates and auth scheme (jsonb).</li>
+ * <li>Per-key model grants (virtual_key_models).</li>
+ * </ul>
+ */
+public final class JdbcRouteSnapshotLoader {
+
+    private static final Logger log = LoggerFactory.getLogger(JdbcRouteSnapshotLoader.class);
+
+    private final NamedParameterJdbcTemplate jdbc;
+    private final ObjectMapper objectMapper;
+
+    public JdbcRouteSnapshotLoader(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
+        this.jdbc = jdbc;
+        this.objectMapper = objectMapper;
+    }
+
+    /**
+     * Loads a fresh snapshot. The version is taken from the caller's counter so the
+     * holder can detect regression.
+     */
+    public RouteSnapshot load(long version, Instant loadedAt) {
+        Map<String, RouteSnapshot.KeyRecord> keys = loadKeys();
+        Map<UUID, RouteSnapshot.BindingRecord> bindings = loadBindings();
+        Map<UUID, RouteSnapshot.CredentialRecord> credentials = loadCredentials();
+        Map<UUID, Set<String>> models = loadModels();
+        return new RouteSnapshot(version, loadedAt, keys, bindings, credentials, models);
+    }
+
+    private Map<String, RouteSnapshot.KeyRecord> loadKeys() {
+        Map<String, RouteSnapshot.KeyRecord> keys = new HashMap<>();
+        // ROTATING keys stay routable until their grace window expires
+        // (revoked_at), so a rotated key keeps working while the replacement
+        // propagates through the snapshot.
+        jdbc.query("""
+                SELECT id, tenant_id, public_key_id, secret_digest, cache_policy, purpose
+                FROM virtual_keys
+                WHERE status = 'ACTIVE'
+                   OR (status = 'ROTATING' AND revoked_at > now())
+                """, rs -> {
+            RouteSnapshot.KeyRecord key = new RouteSnapshot.KeyRecord((UUID) rs.getObject("id"),
+                    (UUID) rs.getObject("tenant_id"), rs.getString("public_key_id"), rs.getBytes("secret_digest"),
+                    rs.getString("cache_policy"), rs.getString("purpose"));
+            keys.put(key.publicKeyId(), key);
+        });
+        return keys;
+    }
+
+    private Map<UUID, RouteSnapshot.BindingRecord> loadBindings() {
+        Map<UUID, RouteSnapshot.BindingRecord> bindings = new HashMap<>();
+        jdbc.query("""
+                SELECT DISTINCT ON (b.virtual_key_id)
+                       b.virtual_key_id, b.project_id, p.project_tag, g.upstream_credential_id, g.provider_product_id
+                FROM key_project_binding b
+                JOIN projects p ON p.id = b.project_id AND p.tenant_id = b.tenant_id
+                JOIN project_provider_grants g ON g.project_id = b.project_id
+                                              AND g.tenant_id = b.tenant_id
+                                              AND g.status = 'ACTIVE'
+                WHERE b.status = 'ACTIVE' AND p.status = 'ACTIVE'
+                ORDER BY b.virtual_key_id, b.created_at
+                """, rs -> {
+            UUID keyId = (UUID) rs.getObject("virtual_key_id");
+            RouteSnapshot.BindingRecord binding = new RouteSnapshot.BindingRecord(keyId,
+                    (UUID) rs.getObject("project_id"), rs.getString("project_tag"),
+                    (UUID) rs.getObject("upstream_credential_id"), (UUID) rs.getObject("provider_product_id"));
+            bindings.put(keyId, binding);
+        });
+        return bindings;
+    }
+
+    private Map<UUID, RouteSnapshot.CredentialRecord> loadCredentials() {
+        Map<UUID, RouteSnapshot.CredentialRecord> credentials = new HashMap<>();
+        jdbc.query("""
+                SELECT c.id AS credential_id, c.tenant_id, pp.id AS product_id,
+                       pp.base_url_templates, pp.auth_scheme
+                FROM upstream_credentials c
+                JOIN upstream_subscriptions s ON s.tenant_id = c.tenant_id AND s.id = c.subscription_id
+                JOIN provider_products pp ON pp.id = s.provider_product_id
+                WHERE c.status = 'ACTIVE'
+                  AND c.id IN (SELECT g.upstream_credential_id FROM project_provider_grants g WHERE g.status = 'ACTIVE')
+                """, rs -> {
+            UUID credentialId = (UUID) rs.getObject("credential_id");
+            String baseUrl = firstBaseUrl(rs.getString("base_url_templates"));
+            if (baseUrl == null) {
+                log.warn("Credential {} has no usable base_url_templates entry; excluded from routing snapshot",
+                        credentialId);
+                return;
+            }
+            RouteSnapshot.CredentialRecord credential = new RouteSnapshot.CredentialRecord(credentialId,
+                    (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("product_id"), baseUrl,
+                    rs.getString("auth_scheme"));
+            credentials.put(credentialId, credential);
+        });
+        return credentials;
+    }
+
+    private Map<UUID, Set<String>> loadModels() {
+        Map<UUID, Set<String>> models = new HashMap<>();
+        jdbc.query("""
+                SELECT virtual_key_id, model_id FROM virtual_key_models
+                """, rs -> {
+            UUID keyId = (UUID) rs.getObject("virtual_key_id");
+            models.computeIfAbsent(keyId, k -> new java.util.HashSet<>()).add(rs.getString("model_id"));
+        });
+        models.replaceAll((k, v) -> Set.copyOf(v));
+        return models;
+    }
+
+    /**
+     * Extracts the first usable base URL from the product's jsonb
+     * {@code base_url_templates} array. Unknown structure returns null.
+     */
+    private String firstBaseUrl(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (node.isArray()) {
+                for (JsonNode entry : node) {
+                    String url = entry.isTextual() ? entry.asText() : entry.path("url").asText(null);
+                    if (url != null && !url.isBlank()) {
+                        return url;
+                    }
+                }
+            } else if (node.isObject()) {
+                JsonNode url = node.get("url");
+                if (url != null && url.isTextual() && !url.asText().isBlank()) {
+                    return url.asText();
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Cannot parse base_url_templates jsonb: {}", e.getMessage());
+        }
+        return null;
+    }
+}

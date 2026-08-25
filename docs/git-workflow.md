@@ -3,8 +3,10 @@
 本文是 Claude Code 和人工开发共同遵守的发布规则。目标 GitHub 远端为：
 
 ```text
-https://github.com/lichman0405/miqro-key-gateway.git
+https://github.com/sijie-Z/miqro-key-gateway.git
 ```
+
+目标远端为项目所有者 `sijie-Z` 的仓库；`lichman0405/miqro-key-gateway`（Leader 仓库）仅作上游参考，不作为 push 目标。
 
 仓库所有者已删除原拼写错误的临时仓库，并新建 `miqro-key-gateway`。截至 2026-07-17，目标 URL 已只读验证可访问且为空；G0.1 在首次 push 前仍应运行 `git ls-remote`，若届时出现未知 ref，停止并报告，不覆盖远端历史。
 
@@ -33,7 +35,7 @@ G0.1 开始时，先保存当前文档设计基线。PowerShell：
 
 ```powershell
 git init -b main
-git remote add origin https://github.com/lichman0405/miqro-key-gateway.git
+git remote add origin https://github.com/sijie-Z/miqro-key-gateway.git
 git remote -v
 git add .claude .github AGENTS.md CLAUDE.md CONTRIBUTING.md README.md docs
 git diff --cached --check
@@ -49,7 +51,7 @@ git switch -c goal/g0.1-repository-bootstrap
 
 ```powershell
 git remote get-url origin
-git remote set-url origin https://github.com/lichman0405/miqro-key-gateway.git
+git remote set-url origin https://github.com/sijie-Z/miqro-key-gateway.git
 ```
 
 首次文档基线是唯一允许 Claude Code 直接创建并推送 `main` 的情况。若远端届时已经出现 commit，停止执行首次流程，先 fetch 并报告分歧，不用 force 覆盖。

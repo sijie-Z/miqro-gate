@@ -18,7 +18,9 @@ import java.util.UUID;
  * HMAC-SHA-256 Virtual Key provider.
  *
  * <h2>Virtual Key format</h2>
- * {@code mqk_live_<base64url-publicKeyId>_<base64url-secret>}
+ * {@code mqk_live_<base64url-publicKeyId>_<base64url-secret>[.<projectTag>]} —
+ * the optional label suffix routes requests to the key's project binding; it is
+ * plaintext and never part of the HMAC message.
  *
  * <h2>Domain separation</h2> The HMAC message = publicKeyId (UTF-8) ||
  * rawSecret (32 bytes) || tenantId (16 bytes, big-endian). This binds every
@@ -78,7 +80,7 @@ public final class HmacVirtualKeyProvider implements VirtualKeyCrypto {
     }
 
     @Override
-    public VirtualKeyMaterial generate(UUID tenantId) {
+    public VirtualKeyMaterial generate(UUID tenantId, String projectTag) {
         byte[] publicKeyBytes = new byte[PUBLIC_KEY_ID_BYTES];
         secureRandom.nextBytes(publicKeyBytes);
         String publicKeyId = URL_ENCODER.encodeToString(publicKeyBytes);
@@ -87,8 +89,11 @@ public final class HmacVirtualKeyProvider implements VirtualKeyCrypto {
         secureRandom.nextBytes(rawSecret);
 
         String displayPrefix = publicKeyId.substring(0, Math.min(8, publicKeyId.length()));
-        String fullDisplayString = PREFIX + publicKeyId + "_" + URL_ENCODER.encodeToString(rawSecret);
-        String lastFour = fullDisplayString.substring(fullDisplayString.length() - 4);
+        // lastFour always comes from the label-less core so the routing tag never
+        // bleeds into the displayed key tail.
+        String core = PREFIX + publicKeyId + "_" + URL_ENCODER.encodeToString(rawSecret);
+        String fullDisplayString = projectTag == null || projectTag.isBlank() ? core : core + "." + projectTag;
+        String lastFour = core.substring(core.length() - 4);
 
         byte[] hmacKey = hmacKeyRing.activeKey();
         byte[] message = buildMessage(publicKeyId, rawSecret, tenantId);

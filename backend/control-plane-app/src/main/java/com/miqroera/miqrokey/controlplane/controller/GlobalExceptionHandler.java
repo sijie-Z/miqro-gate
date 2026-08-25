@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.security.AuthenticationException;
 import com.miqroera.miqrokey.controlplane.security.ResourceOwnershipException;
+import com.miqroera.miqrokey.controlplane.service.ApiException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,6 +50,15 @@ public class GlobalExceptionHandler {
         Map<String, Object> body = problemDetail(404, "NOT_FOUND", "Resource not found", e.getMessage(), requestId);
         // Generic message prevents resource enumeration — never log details.
         return ResponseEntity.status(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
+    }
+
+    @ExceptionHandler(ApiException.class)
+    public ResponseEntity<Map<String, Object>> handleApi(ApiException e, HttpServletRequest request) {
+        String requestId = resolveRequestId(request);
+        int status = e.getStatus().value();
+        Map<String, Object> body = problemDetail(status, e.getCode(), e.getCode().replace('_', ' ').toLowerCase(),
+                e.getMessage(), requestId);
+        return ResponseEntity.status(e.getStatus()).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

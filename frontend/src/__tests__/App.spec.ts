@@ -1,26 +1,44 @@
-import { describe, it, expect } from 'vitest';
-import { mount } from '@vue/test-utils';
-import { createRouter, createWebHistory } from 'vue-router';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import ElementPlus from 'element-plus';
 import App from '@/App.vue';
-import HomeView from '@/views/HomeView.vue';
+import router from '@/router';
+import * as api from '@/api';
 
 describe('App', () => {
-  it('renders the home view via router', async () => {
-    const router = createRouter({
-      history: createWebHistory(),
-      routes: [{ path: '/', name: 'home', component: HomeView }],
-    });
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.restoreAllMocks();
+    vi.spyOn(api, 'me').mockRejectedValue(new Error('401'));
+  });
 
-    router.push('/');
-    await router.isReady();
+  it('renders the login view when unauthenticated', async () => {
+    await router.push('/login');
+    await flushPromises();
 
     const wrapper = mount(App, {
       global: {
         plugins: [router, ElementPlus],
       },
     });
+    await flushPromises();
 
-    expect(wrapper.text()).toContain('MiQroKey Gateway');
+    expect(wrapper.text()).toContain('MiQroKey');
+    expect(wrapper.find('[data-testid="login-submit"]').exists()).toBe(true);
+  });
+
+  it('redirects unknown paths to login when unauthenticated', async () => {
+    await router.push('/app/keys');
+    await flushPromises();
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [router, ElementPlus],
+      },
+    });
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="login-submit"]').exists()).toBe(true);
   });
 });

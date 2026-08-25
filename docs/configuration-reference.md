@@ -86,7 +86,9 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_SESSION_ABSOLUTE_TIMEOUT` | `PT12H` | 绝对失效 |
 | `MIQROKEY_LOGIN_MAX_FAILURES` | `5` | 渐进锁定阈值 |
 | `MIQROKEY_LOGIN_LOCK_BASE` | `PT1M` | 首次锁定时长 |
-| `MIQROKEY_VK_ROTATION_GRACE` | `PT5M` | 默认旧 Key 宽限；管理员可立即失效 |
+| `MIQROKEY_VK_ROTATION_GRACE` | `PT5M` | 规格默认旧 Key 宽限；管理员可立即失效 |
+| `MIQROKEY_GATEWAY_BASE_URL` | `http://localhost:8081` | （当前实现）展示给用户的 Key Base URL（`miqrokey.gateway-base-url`） |
+| `MIQROKEY_VIRTUAL_KEY_ROTATE_GRACE` | `PT0S` | （当前实现）轮换宽限期（`miqrokey.virtual-key-rotate-grace`）：`PT0S` = 快照刷新后旧 Key 立即失效；控制面在此窗口内对轮换 Key 的旋转状态提示 |
 | `MIQROKEY_PRODUCTION` | `false` | 生产模式：启用严格 Origin 验证、强制 cookie Secure 标志、拒绝 localhost 来源 |
 | `MIQROKEY_ORIGIN_ALLOWLIST` | `localhost:5173,localhost:8080` | 生产模式下至少需要一个非 localhost 条目 |
 | `MIQROKEY_COOKIE_SECURE` | `false` | Cookie Secure flag；生产模式下自动启用（可手动覆盖，但强制保持 true） |
@@ -122,6 +124,31 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_UPSTREAM_FOLLOW_REDIRECTS` | `false` | 默认禁止 |
 
 `MIQROKEY_MAX_CONCURRENT_STREAMS` 是保护实例稳定性的容量边界，不是按用户/团队配额。达到物理上限时返回明确的 `503 CAPACITY_EXHAUSTED` 并告警。
+
+### 5.1 Gateway 数据库模式（当前实现）
+
+Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4 当前实现）：
+
+| 配置 | 默认 | 说明 |
+|---|---:|---|
+| `MIQROKEY_GATEWAY_PERSISTENCE_ENABLED` | `true` | 数据库模式总开关（路由快照、L2 缓存、用量写入） |
+| `MIQROKEY_GATEWAY_DB_URL` | `jdbc:postgresql://localhost:5432/miqrokey` | 数据面连接串 |
+| `MIQROKEY_GATEWAY_DB_USERNAME` | `miqrokey` | 数据面用户名 |
+| `MIQROKEY_GATEWAY_DB_PASSWORD` | 空 | 数据面密码（生产用 `_FILE` 约定或 Secret 挂载） |
+| `MIQROKEY_GATEWAY_DB_POOL_SIZE` | `5` | 数据面连接池；热路径不执行阻塞查询，快照刷新在专用调度器 |
+| `MIQROKEY_GATEWAY_ROUTE_REFRESH_INTERVAL` | `30s` | 路由快照刷新周期；吊销/轮换按此传播（宽限期配置见 4.5） |
+| `MIQROKEY_GATEWAY_QUEUE_CAPACITY` | `10000` | 用量写入有界队列容量 |
+| `MIQROKEY_GATEWAY_QUEUE_FLUSH_THRESHOLD` | `100` | 批量 flush 条数上限 |
+| `MIQROKEY_GATEWAY_QUEUE_FLUSH_INTERVAL` | `5s` | 批量 flush 周期 |
+| `MIQROKEY_GATEWAY_COALESCER_ENABLED` | `false` | 请求合并（single-flight）：默认关闭（ADR-0008） |
+| `MIQROKEY_GATEWAY_COALESCER_WAIT_TIMEOUT` | `2s` | 合并等待窗口 |
+| `MIQROKEY_CACHE_ENABLED` | `false` | 响应缓存总开关（默认关闭，见 §9） |
+| `MIQROKEY_CACHE_L1_ENABLED` | `true` | L1 内存缓存（总开关开启后生效） |
+| `MIQROKEY_CACHE_L1_TTL` | `300s` | L1 TTL |
+| `MIQROKEY_CACHE_L2_ENABLED` | `true` | L2 PostgreSQL 缓存 |
+| `MIQROKEY_CACHE_L2_TTL` | `300s` | L2 TTL |
+
+队列达到高水位必须告警；队列满不能静默丢弃——写失败保留在队列并重试，幂等键防止双计。
 
 ## 6. Usage、成本与后台任务
 
@@ -170,7 +197,13 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 
 ## 9. Cache 扩展位
 
-首版 `MIQROKEY_RESPONSE_CACHE_ENABLED` 固定为 `false`。代码可提供 `ResponseCache` SPI 和 `NoOpResponseCache`，但不得因为配置出现就实际缓存。未来启用前必须新增 ADR，解决授权域、模型参数、工具调用、流式重放、加密、删除和供应商 Prompt Cache 语义。
+**当前实现（2026-08）**：L1/L2 响应缓存 SPI 与代码已实现（`cache-spi` 模块 + Gateway `CacheEligibility`/`CacheKeyFactory`/`SseReplayEngine`），但总开关 `MIQROKEY_CACHE_ENABLED` 默认 `false`——代码存在但默认不缓存。只有同时满足以下条件才可能命中缓存：
+
+- `MIQROKEY_CACHE_ENABLED=true` 且 L1/L2 各自开关开启；
+- Virtual Key `cache_policy=ENABLED`（创建时显式开启，默认 `DISABLED`）；
+- 请求满足缓存资格（非流式或可重放 SSE、无敏感模型参数等，由 `CacheEligibility` 判定）。
+
+未来正式启用前仍须新增 ADR，解决授权域、模型参数、工具调用、流式重放、加密、删除和供应商 Prompt Cache 语义。
 
 Gateway 必须透明保留供应商自己的 Prompt Cache Header/字段，并单独统计 cache token；这与本系统响应缓存无关。
 

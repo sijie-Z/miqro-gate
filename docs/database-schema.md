@@ -101,6 +101,14 @@ V1 migration 可以创建首批核心表；后续 Goal 只能追加 migration。
 
 `provider_product_id`、`model_id`、`currency`、各 Token 单价、`unit_tokens`、`effective_from/to`、`catalog_version`。价格不可覆盖历史版本。
 
+### `model_catalog` (V7，当前实现)
+
+目录级模型注册表：`provider_product_id`、`model_id`、`display_name`、`context_window`、`max_output_tokens`、`status`（`ACTIVE|DISABLED|DEPRECATED`）、`version`。唯一 `(provider_product_id, model_id)`。V7 已建表，供未来门户目录浏览使用；当前无应用代码消费。
+
+### `model_access` (V7，当前实现)
+
+租户/项目级模型放行规则：`project_id`、`model_id`、`status`（`ACTIVE|DISABLED`）、`created_by`、`version`。唯一 `(tenant_id, project_id, model_id)`。V7 已建表，当前无应用代码消费；Virtual Key 的实际模型权限由 Grant 模型与 Key 快照求交集决定。
+
 ## 4. Subscription、席位和凭证
 
 ### `upstream_subscriptions`
@@ -170,7 +178,47 @@ V1 migration 可以创建首批核心表；后续 Goal 只能追加 migration。
 
 Key 创建时的授权快照，主键 `(virtual_key_id, model_id)`。实际可用模型仍需与当前 Grant 求交集。
 
+### `projects.project_tag` / `virtual_keys.cache_policy` (V4)
+
+- `projects.project_tag varchar(64) nullable`：路由标签，唯一 `(tenant_id, project_tag)`（部分索引，非 NULL 才唯一）。格式 `^[A-Za-z0-9_-]{1,64}$`。标签明文嵌入 Key 后缀（`mqk_live_<id>_<secret>.<projectTag>`）用于路由；鉴权权威是 `key_project_binding`。
+- `virtual_keys.cache_policy varchar(32) NOT NULL DEFAULT 'DISABLED'`，取值 `DISABLED|ENABLED`：显式开启才可能参与响应缓存（缓存子系统默认关闭，ADR-0008）。
+
+### `key_project_binding` (V4)
+
+Key → 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project_id` 分离，便于绑定状态演化而不重写 Key 行：
+
+- `virtual_key_id`、`project_id`、`status`（`ACTIVE|DISABLED`）、`version`、时间戳
+- 复合 FK 到 `virtual_keys(tenant_id, id)` 和 `projects(tenant_id, id)`（防跨租户）
+- 唯一 `(virtual_key_id, project_id)`；`project_id`、`tenant_id` 索引
+
+### `model_approval` (V4)
+
+为 Key 追加模型的审批工作流：
+
+- `virtual_key_id`、`model_id`、`requested_by`、`status`（`PENDING|APPROVED|REJECTED`）、`reviewed_by`、`review_note varchar(500)`、`version`
+- 复合 FK 到 Key 和 `users(tenant_id, id)`；`virtual_key_id`、`status`、`tenant_id` 索引
+
 ## 6. 请求与用量
+
+### `usage_event` (V6，当前实现)
+
+当前分级的追加型用量事实表（`request_usage_records` 的完整分区表为后续增量，见下）。Gateway 批量写（有界队列，默认容量 10000 / 每 5s 或 100 条 flush），`provider_request_id` 在 tenant 内唯一 → `INSERT ... ON CONFLICT DO NOTHING` 幂等，重试 flush 不双计。
+
+关键列：
+
+- `tenant_id`、`virtual_key_id`、`project_id`、`provider_product_id`、`credential_id`、`model_id`
+- `provider_request_id`、`gateway_request_id`（必填）
+- `cache_level`（`UPSTREAM|COALESCED|L1_HIT|L2_HIT`，默认 `UPSTREAM`）
+- 六类 Token 列（`input/output/cache_creation_input/cache_read/prompt/completion/total/reasoning`），**可为 NULL**：缓存命中无 usage
+- `latency_ms`、`upstream_status_code`、`cache_key bytea`
+- `is_complete boolean`、`usage_missing boolean`（上游未返回 usage 时标记，用量记 0）
+- `occurred_at`、`created_at`
+
+部分唯一索引 `(tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL`；`virtual_key_id`、`project_id`、`cache_level`、`occurred_at` 索引。正文（prompt、代码、工具、回答）永不写入。
+
+### `cache_hit_event` (V6)
+
+缓存命中计数（L1/L2 命中不写 `usage_event`，在此去重计数）：`cache_key`、`virtual_key_id`、`project_id`、`provider_product_id`、`level`（`L1_HIT|L2_HIT`）、`occurred_at`、`gateway_request_id`。唯一 `(tenant_id, cache_key, level, occurred_at)`——同一秒内同一 cache_key 只记一次。
 
 ### `request_usage_records`
 
@@ -213,6 +261,23 @@ Key 创建时的授权快照，主键 `(virtual_key_id, model_id)`。实际可�
 ### `cost_allocations`
 
 按 Subscription 周期、项目/用户对象记录固定成本、权重 Token、分摊金额、currency、algorithm_version、生成时间。唯一 `(subscription_id, period_start, period_end, target_type, target_id, algorithm_version)`。
+
+### `cache_entry` (V5，当前实现)
+
+PostgreSQL 响应缓存（L2），默认关闭（缓存子系统显式启用且 Key `cache_policy=ENABLED` 才参与）：
+
+- `cache_key bytea`（归一化请求的 SHA-256）、`virtual_key_id`、`project_id`、`provider_product_id`、`model_id`
+- `provider_request_id`、`status_code`、`content_type`、`response_headers jsonb`、`body bytea`（原始字节，SSE 按字节重放）
+- `meta_json jsonb`、`hit_count_l1`、`hit_count_l2`、`expires_at`、时间戳
+- 唯一 `(tenant_id, cache_key)`；`project_id`、`expires_at`、`tenant_id` 索引
+
+### `price_snapshot` (V5，当前实现)
+
+每百万 token 单价快照，**不租户隔离**（价格属于全局产品目录）：`provider_product_id`、`model_id`、`token_type`（`INPUT|OUTPUT|CACHE_READ|CACHE_CREATION`）、`currency`（默认 CNY）、`unit_price numeric(24,10)`、`effective_from`、`source`（`MANUAL|OFFICIAL|ESTIMATED`）、`created_by`。查询索引 `(provider_product_id, model_id, token_type, effective_from DESC)`。控制面用量汇总按此计算成本；无快照的模型成本记 0。
+
+### `budget` / `model_budget` (V7，当前实现)
+
+月度预算（仅告警，永不阻断）：`project_id`、`period_month`（`YYYY-MM`）、`amount numeric(24,10)`、`currency`、`alert_threshold_pct`、`status`（`ACTIVE|PAUSED`）、`version`。`budget` 唯一 `(tenant_id, project_id, period_month)`；`model_budget` 额外含 `model_id`，唯一 `(tenant_id, project_id, model_id, period_month)`。V7 已建表，告警消费为后续 Goal。
 
 ## 7. 告警、导出和审计
 

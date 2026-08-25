@@ -6,11 +6,11 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G1.3`
-- Goal status: `DONE`
-- Last updated: `2026-07-22 21:12 CST`
-- Branch: `goal/g1.3-local-authentication-and-authorization`
-- Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
+- Current goal: `tag-routing-usage-closed-loop`（G1.4 授权部分 + G1.5 + G2.2 + G2.3 + G2.4 + G5.1 核心闭环）
+- Goal status: `DONE`（全模块本地验证全绿，含 Testcontainers 集成测试）
+- Last updated: `2026-08-25 10:50 CST`
+- Branch: `goal/tag-routing-usage-closed-loop`
+- Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
 
@@ -82,7 +82,7 @@
 ## Known Blockers
 
 - 真实供应商凭证尚未提供；不阻塞 Mock 与本地契约开发。
-- Docker 不在当前 Windows 环境；Compose config 与镜像 digest 门禁已由 GitHub Actions 验证通过。
+- 本机 Docker Desktop 可用（`D:\programming\Docker_4.78.0`）；Compose config 本地 PASS，digest 门禁由 CI 复核。
 
 ## Next Goal
 
@@ -831,11 +831,77 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - Integration tests require Docker/Testcontainers — locally skipped on Windows; Linux CI validates.
 - No `.claude-*` files in commits.
 
+## tag-routing-usage-closed-loop（G1.4 授权 + G1.5 + G2.2 + G2.3 + G2.4 + G5.1 核心）
 
+### Outcome
 
+**端到端闭环已打通**：签发 Virtual Key（控制面）→ Gateway 用版本化只读快照校验/路由/注入真实凭证 → 转发上游 → 用量事件幂等落库 → 分级统计查询（控制面）→ 前端门户展示。
 
+**控制面（G1.4 授权 + G1.5 生命周期）**
 
-- Goal ID: `G1.4`
-- Name: Organization and project grants
-- Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md#g14-organization-and-project-grants)
+- 普通用户 `GET /api/v1/me/grants` 只返回自己作为成员的项目、授权（Grant 固定到具体 Credential）、模型（精确 ID）和用途。
+- `POST /api/v1/me/virtual-keys` 自助创建：校验链（项目存在→成员→激活→路由标签→Grant 归属/激活→模型授权），HMAC 摘要入库，明文仅创建响应出现一次，`finally material.destroy()` 清零。
+- 轮换：原子生成新版本，旧 Key 立即停止接受新请求、按 `miqrokey.virtual-key-rotate-grace`（默认 `PT0S`）宽限后失效；响应携带新 Secret（仅一次）。吊销：立即失效。所有动作写审计（不含 Secret 明文）。
+- 越权防护：他人 Key 统一 `404 KEY_NOT_FOUND`，不可区分（IDOR 守卫）。
+- 路由标签：Key 格式 `mqk_live_<publicKeyId>_<secret>[.<projectTag>]`，标签仅路由，鉴权权威是 `key_project_binding`（V4）。
+
+**Gateway 数据面（G2.2 路由快照 + G2.3 Models + G2.4 Usage）**
+
+- `route-snapshot` 模块：启动 + 定时（默认 30s）加载不可变快照（Key 摘要→绑定→Grant 模型→项目标签→AES-256-GCM 加密的上游凭证）；热路径零 DB 查询，凭证解密后内存清零。
+- Virtual Key 鉴权：恰好一个凭证 Header（`Authorization: Bearer/裸值`、`x-api-key`、`api-key`），零/多 → 401；未知 Key、吊销/轮换后按快照刷新拒绝。
+- 凭证注入：`CredentialInjector` 把固定绑定的上游凭证注入转发请求；无凭证目标 401/403。
+- `GET /v1/models`：目录、Grant、Key 快照求交集，未授权模型不泄漏；无 Key 凭据时按供应商公开目录降级。
+- 模型预校验：请求体模型越权时在连接上游前拒绝（协议兼容错误体）。
+- 用量：`SseUsageObserver` 提取 token 计数（Anthropic/Responses/Chat 三种嵌套），有界队列（默认 10000）批量写 `usage_event`，`provider_request_id` tenant 内唯一 + `ON CONFLICT DO NOTHING` 幂等；`usage_missing` 标记上游无 usage；正文永不持久化。
+- L1/L2 响应缓存 SPI（`cache-spi`）与 `CacheEligibility`/`CacheKeyFactory`/`SseReplayEngine` 已实现但**默认关闭**（ADR-0008）；只缓存 `cache_policy=ENABLED` 的 Key。
+
+**前端普通用户门户（G5.1 核心）**
+
+- Vue 3 门户：登录/登出（CSRF double-submit）、改密、Virtual Keys（创建/轮换/吊销 + 一次性 Secret 弹窗 + 显式确认关闭）、Usage（分组汇总 + 分页明细）、Profile。
+- Secret 安全：只显示前缀/末四位；明文只在创建/轮换响应出现一次；复制经 Clipboard API；不进入 URL/localStorage/埋点/DOM data attribute。
+- Quiet Operations Console 视觉（frontend-design.md §4）：无紫色/渐变/营销文案，表格优先，token 数字 tabular-nums，Key 等宽字体。
+
+### Schema（V4–V7）
+
+- V4：`virtual_keys.cache_policy`、`projects.project_tag`（唯一 + 格式约束）、`key_project_binding`（路由鉴权权威）、`model_approval`。
+- V5：`cache_entry`（L2 原始字节缓存）、`price_snapshot`（每百万 token 单价，不租户隔离）。
+- V6：`usage_event`（分级用量事实表，幂等唯一索引）、`cache_hit_event`（去重命中计数）。
+- V7：`model_catalog`、`model_access`、`budget`、`model_budget`（预留，当前无消费代码）。
+
+### Verification
+
+**全模块本地验证（2026-08-25 第二轮，含 Testcontainers 集成测试）**：`./mvnw -f backend/pom.xml verify` **BUILD SUCCESS** — surefire 汇总 **491 run / 0 failures / 5 skipped**（本机 Docker Desktop 经 `DOCKER_HOST=tcp://localhost:2375` 可用，集成测试不再 CI-only）：
+
+- domain 86（新增 vkey 解析、usage 统计域测试、路由标签后缀）、persistence-postgres 118（5 skipped，含 Testcontainers 加密/迁移集成测试）、queue-spi 6、control-plane-app 143（含 12 个 Me* 集成测试：MeVirtualKeyApi 8 + MeUsageApi 4）、gateway-app 138（VirtualKeyAuthContractTest、SseReplayEngineTest、CacheKeyFactoryTest 等）
+- 修复的 12 个集成测试失败根因：bootstrap 管理员 `mustChangePassword=true` 门禁（SessionFilter）——测试此前只断言 Cookie 存在、从未重放改密请求，Me* 测试断言从未真正执行过
+- 前端：`npm --prefix frontend run test` **16/16 PASS**、`lint` PASS、`typecheck` PASS、`build` PASS（chunk 大小警告为 Element Plus 全量引入，非错误）
+- Spotless check：全模块 PASS（apply 后干净）
+- `git diff --check`：PASS
+- `docker compose -f deploy/compose.yaml config`：**PASS**（本机 Docker）
+
+### 本轮修复的产品缺陷（12 个集成测试解封后暴露，均已修复并有测试）
+
+1. **审计摘要非法 JSON**：`VirtualKeyService` 的 `change_summary` 是纯文本，而 `admin_audit_events.change_summary` 为 jsonb（插入时 `::jsonb` 强转）→ 500 `invalid input syntax for type json`。新增 `auditSummary()`/`escapeJson()` 生成合法 JSON。
+2. **路由标签后缀未实现**：规格要求 Key 格式 `mqk_live_<publicKeyId>_<secret>[.<projectTag>]`，但 `VirtualKeyCrypto.generate` 只接收 tenantId，标签从未生成。接口签名改为 `generate(UUID tenantId, String projectTag)`；`lastFour` 恒取自无标签核心段，标签不进入展示尾部；空标签产出无标签形式。网关 `VirtualKeyParser`/`VirtualKeyResolver` 按标签路由的既有实现由此真正贯通。
+3. **时间窗口校验非无条件**：`records()`/`summary()` 在无 Key 时短路返回，`TIME_RANGE_INVALID`/`TIME_RANGE_TOO_WIDE` 不触发；api-contract 要求无条件校验。提取 `validateTimeRange()` 并在任何数据访问前调用。
+4. **Grant 模型顺序不确定**：`findModelIds` 返回无序 Set（`Set.copyOf`），`GET /me/grants` 的 models 数组顺序随机 → 依赖顺序的断言偶发失败。`grantOptions` 用 `TreeSet` 字典序输出。
+
+### Files changed
+
+- **控制面**：`MeGrantsController`、`MeVirtualKeyController`、`MeUsageController`、`VirtualKeyService`、`UsageStatsService`、`AuthProperties`（gatewayBaseUrl / virtualKeyRotateGrace）、`GlobalExceptionHandler`
+- **域**：`vkey/`（VirtualKeyParser 等）、`usage/`（统计与价格模型）、`route/`（快照契约）、`KeyProjectBinding`、`ModelApproval`、`PriceSnapshotRepository`、`UsageStatsRepository`、`crypto/`（VirtualKeyCrypto.generate 增加 projectTag 路由标签后缀）
+- **测试**：`MeVirtualKeyApiIntegrationTest`（8）、`MeUsageApiIntegrationTest`（4）、`UsageStatsServiceTest`、`VirtualKeyServiceTest`、`HmacVirtualKeyProviderTest`、`VirtualKeyParserTest`、`CryptoIntegrationTest`、`GatewayTestKeys`（改密门禁 + 新语义断言）
+- **持久化**：V4–V7 迁移 + `KeyProjectBindingRepositoryImpl`、`ModelApprovalRepositoryImpl`、`PriceSnapshotRepositoryImpl`、`UsageStatsRepositoryImpl`
+- **新模块**：`route-snapshot/`（版本化只读快照）、`queue-spi/`（有界用量队列）、`cache-spi/`（响应缓存 SPI + NoOp）
+- **Gateway**：`VirtualKeyResolver`、`AuthContext`、`JdbcCredentialInjector`、`ModelsController`、`CacheEligibility`、`CacheKeyFactory`、`SseReplayEngine`、`ErrorEnvelopes`、`GatewayDataSourceConfig`、`GatewayFeatureConfig`
+- **前端**：`api/`（fetch client + CSRF + ApiError）、`stores/auth.ts`、`router`（守卫）、`AppShell`、`LoginView`、`KeysView`、`UsageView`、`ProfileView`、`SecretRevealDialog`、`styles/tokens.css`、`types/api.ts`、4 个测试文件
+- **文档**：api-contract.md（§4.1–4.6、§7.1）、database-schema.md（V4–V7 表）、configuration-reference.md（§4.4/5.1/9）、architecture.md（§3 新模块）、progress.md
+
+### Remaining risks
+
+- **Push 已解决（2026-08-25）**：目标远端改为所有者仓库 `sijie-Z/miqro-key-gateway`（新建 private）；origin 已切换、`.git/shallow` 浅克隆状态已解除（`git fetch --unshallow upstream`，upstream = `lichman0405/miqro-key-gateway`）。`goal/tag-routing-usage-closed-loop` 已 push 成功。
+- 集成测试（12 个 Me* + 其余 Tag(integration) 类）已在本机 Docker Desktop（Testcontainers 1.21.4，`DOCKER_HOST=tcp://localhost:2375`）全部通过；Linux CI 作为交叉验证保留。
+- 真实供应商凭证未提供：Gateway 凭证注入只经 Mock 上游验证，真实联调 `WAITING_FOR_CREDENTIAL`。
+- 响应缓存默认关闭（ADR-0008 决策），正式启用前需新增 ADR。
+- `request_usage_records` 完整分区表（规格 §6）未实现，当前使用 `usage_event` 事实表；G4.x 需要时再演进。
+- 前端 chunk 1MB+ 警告：Element Plus 全量引入；可按需引入优化（非阻塞）。

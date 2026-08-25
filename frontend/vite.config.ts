@@ -14,8 +14,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // Management API lives on the Control Plane (8080); the Gateway
+      // data plane (8081) is not proxied by the dev server.
       '/api': {
-        target: 'http://localhost:8081',
+        target: 'http://localhost:8080',
         changeOrigin: true,
       },
     },

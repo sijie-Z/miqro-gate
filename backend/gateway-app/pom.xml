@@ -18,6 +18,10 @@
     <dependencies>
         <dependency>
             <groupId>com.miqroera.miqrokey</groupId>
+            <artifactId>cache-spi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.miqroera.miqrokey</groupId>
             <artifactId>domain</artifactId>
         </dependency>
         <dependency>
@@ -27,6 +31,14 @@
         <dependency>
             <groupId>com.miqroera.miqrokey</groupId>
             <artifactId>provider-spi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.miqroera.miqrokey</groupId>
+            <artifactId>queue-spi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.miqroera.miqrokey</groupId>
+            <artifactId>route-snapshot</artifactId>
         </dependency>
 
         <!-- Reactor Netty (managed by Spring Boot) -->

@@ -1,0 +1,89 @@
+/* MiQroKey Quiet Operations Console tokens (frontend-design.md §4).
+   Element Plus is overlaid on these variables; components must not scatter
+   colors or radii. Light theme only for v1. */
+
+:root {
+  /* color */
+  --miqrokey-bg-canvas: #f6f8fa;
+  --miqrokey-bg-surface: #ffffff;
+  --miqrokey-bg-subtle: #f3f4f6;
+  --miqrokey-border-default: #d0d7de;
+  --miqrokey-border-muted: #e5e7eb;
+  --miqrokey-text-primary: #1f2328;
+  --miqrokey-text-secondary: #59636e;
+  --miqrokey-text-disabled: #8c959f;
+  --miqrokey-accent: #0969da;
+  --miqrokey-accent-hover: #0757b3;
+  --miqrokey-success: #1a7f37;
+  --miqrokey-warning: #9a6700;
+  --miqrokey-danger: #cf222e;
+  --miqrokey-info: #0969da;
+
+  /* typography */
+  --miqrokey-font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+  --miqrokey-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  --miqrokey-font-size-body: 14px;
+  --miqrokey-font-size-table: 13px;
+  --miqrokey-font-size-title: 20px;
+
+  /* shape & spacing */
+  --miqrokey-radius-control: 6px;
+  --miqrokey-radius-panel: 6px;
+  --miqrokey-radius-modal: 8px;
+
+  /* layout */
+  --miqrokey-header-height: 56px;
+  --miqrokey-nav-width: 224px;
+  --miqrokey-content-max: 1440px;
+}
+
+/* ---- Element Plus theme overlay ---- */
+html {
+  --el-color-primary: var(--miqrokey-accent);
+  --el-color-primary-light-3: #4098e8;
+  --el-color-primary-light-5: #79b6ef;
+  --el-color-primary-light-7: #b3d5f6;
+  --el-color-primary-light-8: #cfe3fa;
+  --el-color-primary-light-9: #e8f1fc;
+  --el-color-primary-dark-2: var(--miqrokey-accent-hover);
+  --el-color-success: var(--miqrokey-success);
+  --el-color-warning: var(--miqrokey-warning);
+  --el-color-danger: var(--miqrokey-danger);
+  --el-color-error: var(--miqrokey-danger);
+  --el-color-info: var(--miqrokey-info);
+  --el-text-color-primary: var(--miqrokey-text-primary);
+  --el-text-color-regular: var(--miqrokey-text-primary);
+  --el-text-color-secondary: var(--miqrokey-text-secondary);
+  --el-text-color-placeholder: var(--miqrokey-text-disabled);
+  --el-border-color: var(--miqrokey-border-default);
+  --el-border-color-light: var(--miqrokey-border-muted);
+  --el-border-color-lighter: var(--miqrokey-border-muted);
+  --el-fill-color-blank: var(--miqrokey-bg-surface);
+  --el-fill-color-light: var(--miqrokey-bg-subtle);
+  --el-bg-color: var(--miqrokey-bg-surface);
+  --el-border-radius-base: var(--miqrokey-radius-control);
+  --el-font-family: var(--miqrokey-font-family);
+  --el-font-size-base: var(--miqrokey-font-size-body);
+}
+
+body {
+  margin: 0;
+  font-family: var(--miqrokey-font-family);
+  font-size: var(--miqrokey-font-size-body);
+  line-height: 20px;
+  color: var(--miqrokey-text-primary);
+  background-color: var(--miqrokey-bg-canvas);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Key, request ID, token numbers */
+.mk-mono {
+  font-family: var(--miqrokey-font-mono);
+  font-size: 12px;
+}
+
+.mk-num {
+  font-variant-numeric: tabular-nums;
+}

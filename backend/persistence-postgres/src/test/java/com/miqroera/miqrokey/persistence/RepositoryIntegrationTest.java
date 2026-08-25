@@ -64,7 +64,7 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
         userRepo.insert(user);
 
         project = new Project(UUID.randomUUID(), TENANT_ID, "test-proj-" + suffix, "Test Project", null, null,
-                ProjectStatus.ACTIVE, 0, NOW, NOW);
+                ProjectStatus.ACTIVE, null, 0, NOW, NOW);
         projectRepo.insert(project);
 
         provider = new Provider(UUID.randomUUID(), "test-provider-" + suffix, "Test Provider", null, null, null,
@@ -262,8 +262,8 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
         void shouldInsertAndFindByPublicKeyId() {
             var key = new VirtualKey(UUID.randomUUID(), TENANT_ID, "mqk_test_key_abc",
                     new byte[]{1, 2, 3, 4, 5, 6, 7, 8}, "mqk_", "bc12", user.id(), project.id(), grant.id(),
-                    credential.id(), VirtualKeyPurpose.CLAUDE_CODE, "Test Key", VirtualKeyStatus.ACTIVE, NOW, null,
-                    null, null, 0);
+                    credential.id(), VirtualKeyPurpose.CLAUDE_CODE, "Test Key", "DISABLED", VirtualKeyStatus.ACTIVE,
+                    NOW, null, null, null, 0);
             vkRepo.insert(key);
             var found = vkRepo.findByPublicKeyId("mqk_test_key_abc");
             assertThat(found).isPresent();
@@ -277,13 +277,13 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
             var pubId = "mqk_revoke_" + UUID.randomUUID().toString().substring(0, 8);
             var key = new VirtualKey(keyId, TENANT_ID, pubId, new byte[]{1, 2, 3, 4, 5, 6, 7, 8}, "mqk_", "rv01",
                     user.id(), project.id(), grant.id(), credential.id(), VirtualKeyPurpose.CLAUDE_CODE, "Revocable",
-                    VirtualKeyStatus.ACTIVE, NOW, null, null, null, 0);
+                    "DISABLED", VirtualKeyStatus.ACTIVE, NOW, null, null, null, 0);
             vkRepo.insert(key);
 
             var revoked = new VirtualKey(keyId, TENANT_ID, pubId, key.secretDigest(), key.displayPrefix(),
                     key.lastFour(), key.userId(), key.projectId(), key.grantId(), key.upstreamCredentialId(),
-                    key.purpose(), key.name(), VirtualKeyStatus.REVOKED, key.createdAt(), key.lastUsedAt(), NOW, null,
-                    key.version() + 1);
+                    key.purpose(), key.name(), key.cachePolicy(), VirtualKeyStatus.REVOKED, key.createdAt(),
+                    key.lastUsedAt(), NOW, null, key.version() + 1);
             vkRepo.update(revoked);
 
             var found = vkRepo.findByPublicKeyId(pubId).orElseThrow();

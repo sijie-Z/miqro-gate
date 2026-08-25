@@ -46,9 +46,9 @@ class TenantProjectIsolationTest extends AbstractPostgresTest {
         userRepo.insert(userB);
 
         projectA = new Project(UUID.randomUUID(), tenantA.id(), "proj-alpha", "Alpha Project", null, null,
-                ProjectStatus.ACTIVE, 0, NOW, NOW);
+                ProjectStatus.ACTIVE, null, 0, NOW, NOW);
         projectB = new Project(UUID.randomUUID(), tenantB.id(), "proj-beta", "Beta Project", null, null,
-                ProjectStatus.ACTIVE, 0, NOW, NOW);
+                ProjectStatus.ACTIVE, null, 0, NOW, NOW);
         projectRepo.insert(projectA);
         projectRepo.insert(projectB);
     }
@@ -71,7 +71,7 @@ class TenantProjectIsolationTest extends AbstractPostgresTest {
     @DisplayName("should allow same project code in different tenants")
     void shouldAllowSameCodeInDifferentTenants() {
         var sameCodeProjB = new Project(UUID.randomUUID(), tenantB.id(), "proj-alpha", "Also Alpha", null, null,
-                ProjectStatus.ACTIVE, 0, NOW, NOW);
+                ProjectStatus.ACTIVE, null, 0, NOW, NOW);
         projectRepo.insert(sameCodeProjB);
         assertThat(projectRepo.existsByTenantIdAndCode(tenantA.id(), "proj-alpha")).isTrue();
         assertThat(projectRepo.existsByTenantIdAndCode(tenantB.id(), "proj-alpha")).isTrue();

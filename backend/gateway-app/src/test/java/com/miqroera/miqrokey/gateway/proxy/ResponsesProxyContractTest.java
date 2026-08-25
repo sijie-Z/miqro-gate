@@ -1,6 +1,8 @@
 package com.miqroera.miqrokey.gateway.proxy;
 
+import com.miqroera.miqrokey.gateway.GatewayAuthTestConfig;
 import com.miqroera.miqrokey.testing.AnthropicMockProvider;
+import com.miqroera.miqrokey.testing.GatewayTestKeys;
 import com.miqroera.miqrokey.testing.ResponsesFixtures;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -11,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Import;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -32,7 +35,9 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,"
                 + "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration,"
                 + "org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration",
+        "miqrokey.gateway.persistence.enabled=false", "miqrokey.crypto.enabled=false",
         "spring.main.web-application-type=reactive", "logging.level.com.miqroera.miqrokey.gateway.proxy=DEBUG"})
+@Import(GatewayAuthTestConfig.class)
 @DisplayName("OpenAI Responses transparent proxy contract")
 class ResponsesProxyContractTest {
 
@@ -105,20 +110,24 @@ class ResponsesProxyContractTest {
         }
 
         @Test
-        @DisplayName("should strip credential headers from upstream request")
+        @DisplayName("should consume the presented key for auth and inject the real credential upstream")
         void shouldStripCredentialHeaders() {
             mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
                     .contentType("application/json").body(ResponsesFixtures.RESPONSE_BASIC).build());
 
-            webTestClient.post().uri("/v1/responses").header("Authorization", "Bearer sk-test-responses-key")
-                    .header("x-api-key", "sk-test-x-api-key").bodyValue(ResponsesFixtures.REQUEST_NON_STREAMING)
-                    .exchange().expectStatus().isOk().expectBody().returnResult().getResponseBody();
+            webTestClient.post().uri("/v1/responses").bodyValue(ResponsesFixtures.REQUEST_NON_STREAMING).exchange()
+                    .expectStatus().isOk().expectBody().returnResult().getResponseBody();
 
             var captured = mockProvider.getCapturedRequests();
             assertThat(captured).hasSize(1);
             var req = captured.get(0);
-            assertThat(req.header("Authorization")).isNull();
-            assertThat(req.header("x-api-key")).isNull();
+            // The presented virtual key never reaches the upstream; the real
+            // credential is injected into the same Authorization header instead.
+            assertThat(req.header("Authorization")).isEqualTo(GatewayAuthTestConfig.UPSTREAM_CREDENTIAL_VALUE);
+            assertThat(req.header("Authorization")).isNotEqualTo("Bearer " + GatewayTestKeys.DEFAULT_KEY.presented());
+            // The gateway injects the real upstream credential instead.
+            assertThat(req.header(GatewayAuthTestConfig.UPSTREAM_CREDENTIAL_HEADER))
+                    .isEqualTo(GatewayAuthTestConfig.UPSTREAM_CREDENTIAL_VALUE);
         }
 
         @Test
@@ -128,7 +137,9 @@ class ResponsesProxyContractTest {
                     .contentType("application/json").body(ResponsesFixtures.RESPONSE_BASIC).build());
 
             String rawTarget = "/v1/responses?path=a%2Fb&value=a+b&x=1&flag&x=2";
-            HttpClient.create().post().uri("http://localhost:" + gatewayPort + rawTarget)
+            HttpClient.create()
+                    .headers(h -> h.set("Authorization", "Bearer " + GatewayTestKeys.DEFAULT_KEY.presented())).post()
+                    .uri("http://localhost:" + gatewayPort + rawTarget)
                     .send(ByteBufFlux.fromString(Mono.just(ResponsesFixtures.REQUEST_NON_STREAMING)))
                     .responseSingle((response, body) -> body.asByteArray()).block(Duration.ofSeconds(10));
 
@@ -303,6 +314,7 @@ class ResponsesProxyContractTest {
 
             Flux<org.springframework.core.io.buffer.DataBuffer> responseBody = WebClient
                     .create("http://localhost:" + gatewayPort).post().uri("/v1/responses")
+                    .header("Authorization", "Bearer " + GatewayTestKeys.DEFAULT_KEY.presented())
                     .bodyValue(ResponsesFixtures.REQUEST_STREAMING).exchangeToFlux(
                             response -> response.bodyToFlux(org.springframework.core.io.buffer.DataBuffer.class));
 

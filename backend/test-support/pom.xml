@@ -30,6 +30,10 @@
             <groupId>com.miqroera.miqrokey</groupId>
             <artifactId>provider-spi</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.miqroera.miqrokey</groupId>
+            <artifactId>route-snapshot</artifactId>
+        </dependency>
 
         <!-- reactor-netty for mock provider (test scope in consumers) -->
         <dependency>

@@ -6,7 +6,7 @@ import java.util.Base64;
 
 /**
  * One-time Virtual Key material returned by
- * {@link VirtualKeyCrypto#generate(java.util.UUID)}.
+ * {@link VirtualKeyCrypto#generate(java.util.UUID, String)}.
  *
  * <h2>One-time display contract</h2> The {@link #fullDisplayString} and
  * {@link #rawSecret} are available only through this object. The caller MUST:

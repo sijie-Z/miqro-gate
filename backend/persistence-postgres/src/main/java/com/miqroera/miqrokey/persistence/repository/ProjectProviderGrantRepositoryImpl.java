@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.sql.Timestamp;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Repository
@@ -90,6 +91,14 @@ public class ProjectProviderGrantRepositoryImpl implements ProjectProviderGrantR
                         .addValue("credentialId", credentialId),
                 Integer.class);
         return count != null && count > 0;
+    }
+
+    @Override
+    public Set<String> findModelIds(UUID grantId) {
+        List<String> models = jdbc.queryForList(
+                "SELECT model_id FROM project_provider_grant_models WHERE grant_id = :grantId ORDER BY model_id",
+                new MapSqlParameterSource("grantId", grantId), String.class);
+        return Set.copyOf(models);
     }
 
     private MapSqlParameterSource toParams(ProjectProviderGrant g) {
