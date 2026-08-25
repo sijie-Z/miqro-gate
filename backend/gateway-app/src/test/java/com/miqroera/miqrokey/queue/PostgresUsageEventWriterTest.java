@@ -221,7 +221,7 @@ class PostgresUsageEventWriterTest {
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 "ANTHROPIC_MESSAGES", "claude-sonnet-5-20250915", false, "upstream-req-1", startedAt.plusMillis(ttfbMs),
                 startedAt.plusMillis(durationMs), durationMs, ttfbMs, httpStatus, status, false, false,
-                new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), status == RequestStatus.SUCCEEDED && false);
+                new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), status == RequestStatus.SUCCEEDED && false, 0);
     }
 
     private static UsageEvent usageEvent(UUID providerRequestId) {

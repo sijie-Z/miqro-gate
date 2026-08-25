@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G2.5`（Timeout, retry, cancellation and backpressure — 10s 连接/120s 首包/5min idle 配置、首字节前一次重试、慢客户端内存有界）
-- Goal status: `IN_PROGRESS`（实现中）
+- Current goal: `G2.6`（Gateway security hardening — SSRF、路径、Header、body 上限和错误脱敏）
+- Goal status: `NOT_STARTED`
 - Last updated: `2026-08-25 CST`
-- Branch: `goal/g2.4-usage-lifecycle`
+- Branch: `goal/g2.5-timeout-retry-cancellation`（PR 待 merge）
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,42 @@
 
 ## Next Goal
 
-- Goal ID: `G2.5`
-- Name: Timeout, retry, cancellation and backpressure（10s 连接、120s 首包、5min idle 配置；首字节前一次重试；首字节后零重试；慢客户端内存有界）
+- Goal ID: `G2.6`
+- Name: Gateway security hardening（SSRF、路径、Header、body 上限和错误脱敏）
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md)（验收：10s 连接、120s 首包、5min idle 配置；首字节前一次重试；首字节后零重试；慢客户端内存有界）
+- Source: [`implementation-plan.md`](implementation-plan.md)（验收：未签名目标、私网解析、任意路径、超大头/body、走私 Header 测试通过）
+
+## G2.5 — Timeout, retry, cancellation and backpressure（G2.5 超时/重试/取消/背压，DONE）
+
+### Outcome
+
+1. **四层网络边界**（`ProxyTargetProperties`，全部可配置）：连接 10s（`CONNECT_TIMEOUT_MILLIS`）；**首包 120s**（reactor-netty `HttpClient.responseTimeout()` = 等响应头；超时表现为连接错误，永不重试）；**流式空闲 5min**（对观测 body `Flux.timeout`，每个 chunk 重置）；**整体硬截止 10min**（`Mono.timeout` 包在重试外层，自第一次尝试计时、不随重试重置）。默认值按 G2.5 验收校准（连接 PT5S→PT10S，idle PT2M→PT5M，新增 first-byte PT120S）。
+2. **首字节前最多重试一次**：`Mono.defer` 包每次尝试 + `Retry.max(1)`，filter 仅放行连接阶段失败（`WebClientRequestException` 且非任何超时）且尚未出首字节；真实凭证只在第一次尝试前解析一次，重试复用同一凭证（不跨凭证故障切换）。reactor 3.7 默认 exhausted 策略会把原始异常包成 `RetryExhaustedException`，用 `onRetryExhaustedThrow((s, sig) -> sig.failure())` 恢复原始类型（否则 502 映射漏网，真实缺陷修复）。`retry_count` 端到端持久化（event → `request_usage_records.retry_count`，start 行 0，completion 通过 guarded upsert 更新）。
+3. **终态判定顺序修复**（真实缺陷修复）：upstreamError 判定移到 httpStatus 之前——上游 200 状态行 + 中途流失败现在正确记为 `STREAM_INTERRUPTED`（旧顺序误报 SUCCEEDED）；timeout 细分：未出首字节 → `TIMEOUT_BEFORE_FIRST_BYTE`，已出 → `STREAM_INTERRUPTED`。
+4. **慢客户端内存有界**：响应按 chunk 直通（streaming，不聚合）；256KB `maxProxyBuffer` 只限 usage/缓存收集缓冲，溢出时放弃收集（`usage_missing=true`）绝不影响转发（512KB 响应 + 慢消费者完整收包测试）。
+5. **Mock 能力扩展**（test-support）：`disconnectNextRequest`/`disconnectAllRequests`（连接阶段 EOF，模拟可重试失败）、`responseDelay`（慢首包）、`haltAfterLines`（N 行后永久停滞，idle 超时）、`chunkDelay` 流式分块。无 delay/halt 的流式路径保持单次原始写入（line-rebuild 会在 body 尾部追加幻影 `\n`，契约测试逐字节断言，真实缺陷修复）。
+
+### Verification
+
+- 全量 `./mvnw.cmd -f backend/pom.xml verify -P integration --batch-mode`（本机 Docker Desktop，Testcontainers 实跑）：**BUILD SUCCESS** —— **714 tests / 0 failures / 5 skipped**（Windows POSIX 权限跳过）
+- `TimeoutRetryIntegrationTest`（Testcontainers + AnthropicMockProvider，7）：连接失败重试一次成功（retry_count=1）；持续断连 → 502 + `UPSTREAM_UNAVAILABLE`（retry_count=1）；200 成功 retry_count=0；慢首包 → `TIMEOUT_BEFORE_FIRST_BYTE`（未重试、无首包）；idle 停滞 → `STREAM_INTERRUPTED` + partial_response + http_status=200 + client_cancelled=false；长流超整体截止 → `STREAM_INTERRUPTED`；512KB 慢客户端完整收包 + `usage_missing=true`。
+- 契约测试回归（mock 流式路径修复后）：Anthropic/Chat/Responses ProxyContractTest 71/71 全绿。
+- Spotless check 全模块 PASS；Maven Enforcer：PASS。
+
+### Files changed
+
+- **gateway-app**：`ProxyTargetProperties`（connect/first-byte/stream-idle/response/max-buffer）、`ProxyConfig`（`HttpClient.responseTimeout(firstByte)`）、`ProxyController`（重试封装、per-attempt `UpstreamAttempt` 状态隔离、终态顺序、isTimeout、retry_count 传递）、`application.yml`（4 个新环境变量）
+- **domain**：`RequestCompletedEvent`（+`retryCount`）
+- **queue-spi**：`PostgresUsageEventWriter`（retry_count 两处 SQL + params）
+- **test-support**：`AnthropicMockProvider`（disconnect/responseDelay/haltAfterLines + 流式单写路径修复）、`GatewayTestKeys`
+- **测试**：新 `TimeoutRetryIntegrationTest`（7）；`PostgresUsageEventWriterTest`/`PostgresUsageEventBusTest` 构造更新
+- **文档**：architecture.md §6（四层超时 + 重试 + 慢客户端语义）、configuration-reference.md §5（新 keys/默认值校准）
+
+### Remaining risks
+
+- 慢首包/断连场景经 mock 验证；真实供应商网络行为变体 `WAITING_FOR_CREDENTIAL`。
+- 首字节后对上游的取消传播依赖 reactor-netty 通道关闭语义（已有 `STREAM_INTERRUPTED` 断言覆盖）。
+- G2.6 将收紧未签名目标/私网解析等安全边界，本节超时实现保持兼容。
 
 ## G2.4 — Usage lifecycle and reliable writer（G2.4 请求生命周期记录 + 有界批量写入，DONE）
 

@@ -151,14 +151,15 @@ Client/CC Switch        Gateway                PostgreSQL snapshot    PostgreSQL
 
 ## 6. 超时与重试
 
-- 建立上游连接：10 秒。
-- 等待首个响应内容：120 秒。
-- 流式响应空闲超时：5 分钟。
-- 整体请求默认不设置短硬截止，管理员可配置最大值。
+- 建立上游连接：10 秒（`ChannelOption.CONNECT_TIMEOUT_MILLIS`）。
+- 等待首个响应字节：120 秒（reactor-netty `HttpClient.responseTimeout()` 语义：等待响应头；超时表现为连接错误，**永不重试**）。
+- 流式响应空闲超时：5 分钟（对观测到的 body 应用 `Flux.timeout`，每个 chunk 重置）。
+- 整体硬截止：默认 10 分钟，自第一次尝试起计时且不随重试重置（`Mono.timeout` 包住重试外层）。
 - 客户端断开时立即取消上游请求。
-- 只有在尚未向客户端返回任何内容时，连接失败或明确可重试错误最多重试一次。
-- 流式响应一旦开始，禁止重试。
+- **首字节前最多重试一次**：仅当失败是连接阶段错误（`WebClientRequestException` 且非任何超时）且尚未收到首个响应字节时才重试；真实凭证只在第一次尝试前解析一次，重试复用同一凭证。重试次数（`retry_count`）随请求生命周期记录持久化。
+- 流式响应一旦开始（首字节已出），禁止重试。
 - 禁止跨供应商或跨真实凭证故障切换。
+- **慢客户端内存有界**：响应体按 chunk 直通（streaming），`maxProxyBuffer`（256KB）只限制 usage 解析与缓存收集缓冲；超出时放弃收集（`usage_missing=true`）而绝不聚合整个响应。
 
 ## 7. 缓存策略
 
