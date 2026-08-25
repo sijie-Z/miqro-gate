@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G1.6`（上游凭证验证与无感轮换）
-- Goal status: `DONE`（本地全绿 631 tests/0 fail；PR #2 已合并）
-- Last updated: `2026-08-25 11:50 CST`
-- Branch: `main`（goal 分支已合并删除；下一 Goal 从 main 切新分支）
+- Current goal: `G2.1`（Provider SPI and signed catalog core）
+- Goal status: `DONE`（本地全绿 666 tests/0 fail/0 error；`.\mvnw.cmd -f backend/pom.xml verify` BUILD SUCCESS）
+- Last updated: `2026-08-25 12:20 CST`
+- Branch: `goal/g2.1-provider-spi-and-signed-catalog`（验证通过，待 commit/PR）
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,41 @@
 
 ## Next Goal
 
-- Goal ID: `G2.1`
-- Name: Provider SPI and signed catalog core
+- Goal ID: `G2.2`
+- Name: Gateway route snapshot and virtual key auth
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md#g21-provider-spi-and-signed-catalog-core)
+- Source: [`implementation-plan.md`](implementation-plan.md)
+
+## G2.1 — Provider SPI and signed catalog core
+
+### Outcome
+
+- **provider-spi**（`com.miqroera.miqrokey.spi`，纯 Java + reactor-core，无 Spring/Jackson）：`ProviderProductAdapter` 契约（adapterId/protocols/resolve/credentialInjection/validateCredential/fetchModels/createUsageObserver/fetchPlanStatus/capabilities）及全部值对象——`ProtocolFamily`（5 族）、`ProviderProductDefinition`（紧凑构造器强制非空/https/无 userinfo/集合不可变）、`RouteContext`/`TargetRequest`/`InboundRequest`、`CredentialMaterial`（内存明文、`destroy()` 清零、toString 只显示 REDACTED）、`CredentialInjection`（入站鉴权头剥离防 credential smuggling）、`ProviderClient`/`ProviderRequest`/`ProviderResponse`（控制面有界 HTTP，推理流量不经过）、`UsageObserver`/`UsageObservation`/`UsageContext`、`ModelCatalogSnapshot`、`PlanSnapshot`/`PlanDataSource`、`AdapterCapabilities`/`AdapterStatus`、`AdapterRegistry`。
+- **provider-adapters**（`com.miqroera.miqrokey.adapters`，无 Spring）：
+  - `catalog/`：`ProviderCatalog.loadBuiltIn()`（classpath 资源）→ `CatalogSignatureVerifier`（Ed25519，64 字节签名，JDK 原生）→ `CatalogManifestValidator`（严格 allowlist schema：拒绝未知顶层/产品字段、非 https/userinfo Base URL、未知枚举值、重复产品 id；错误全量聚合）。
+  - `registry/BuiltInAdapterRegistry`：线程安全编译期注册表，重复 `adapterId` 注册抛 `IllegalArgumentException`（启动失败）。
+  - 内置目录 `catalog/provider-catalog.json`：8 家供应商 23 个产品（腾讯 5、阿里 3、智谱 3、MiniMax 3、Kimi 2、百度 3、火山 3、DeepSeek 1），全部 `DOCUMENTED`，https Base URL 为官方文档设计值；`provider-catalog.sig`（Ed25519）与 `catalog/keys/catalog-public.pem`（公钥，`.gitignore` 加例外；私钥只在发布环境，本会话签名后即删）。
+- **目录是纯数据的强制边界**：schema 拒绝所有未知字段（含 `class`/`code` 等可执行字段）；适配器解析只按 `adapterId` 查编译期注册表——被篡改或远程目录不可能加载代码（有专项测试）。
+- ArchUnit 新增 3 条规则：provider-spi 无 Spring（既有）+ 无 Jackson、provider-adapters 无 Spring。
+
+### Verification
+
+- `.\mvnw.cmd -f backend/pom.xml verify --batch-mode`：**BUILD SUCCESS**（666 tests / 0 failures / 0 errors；新增 34 个测试：SPI 9 + adapters 25）
+- `spotless:apply` 已格式化；`spotless:check` 在 verify 内通过。
+
+### Files changed
+
+- **provider-spi**：27 个新类型（枚举 6、record 14、接口 5、UsageObserver） + POM 加 reactor-core（BOM 管理版本）
+- **provider-adapters**：`catalog/`（ProviderCatalog、CatalogManifestValidator、CatalogSignatureVerifier、CatalogKeyLoader、CatalogSignatureException、CatalogLoadException）+ `registry/BuiltInAdapterRegistry` + 3 个资源文件（catalog JSON/sig/public.pem）+ 4 个测试类（25 测试）
+- **测试**：`ProviderProductDefinitionTest`（6）、`CredentialMaterialTest`（3）、`CatalogManifestValidatorTest`（9）、`CatalogSignatureVerifierTest`（5）、`CatalogKeyLoaderTest`（3）、`ProviderCatalogTest`（5）、`BuiltInAdapterRegistryTest`（3）
+- **ArchUnit**：ModuleDependencyTest +3 条规则
+- **文档**：provider-adapter-contract.md §9（真实包结构 + 签名密钥管理）、provider-catalog.md §7.1（签名/重签流程）、architecture.md §3（两模块职责）、progress.md；`.gitignore` 公钥例外
+
+### Remaining risks
+
+- 内置目录 23 个产品全部 `DOCUMENTED`：Base URL 为官方文档设计值，真实联调（G3.x 适配器 + 真实凭证）后才能升级 `IMPLEMENTED`/`VERIFIED`。
+- 目录公钥当前为开发用密钥对（私钥已删）；生产发布需在发布环境生成新密钥对并替换公钥（`CatalogKeyLoader` 已支持文件加载入口，运行时接线在 G2.2+ 配置阶段）。
+- adapterId 尚无任何注册的正式适配器（G3.x 逐个实现并注册）；注册表机制已由测试证明。
 
 ## G1.6 — Upstream credential validation and rotation
 

@@ -89,6 +89,24 @@ class ModuleDependencyTest {
     }
 
     @Test
+    @DisplayName("provider-spi must not depend on Jackson")
+    void providerSpiMustNotDependOnJackson() {
+        ArchRule rule = noClasses().that().resideInAPackage("com.miqroera.miqrokey.spi..").should()
+                .dependOnClassesThat().resideInAPackage("com.fasterxml.jackson..").because(
+                        "provider-spi must not carry serialization concerns; catalog parsing lives in provider-adapters");
+        rule.check(allClasses);
+    }
+
+    @Test
+    @DisplayName("provider-adapters must not depend on Spring Framework")
+    void providerAdaptersMustNotDependOnSpring() {
+        ArchRule rule = noClasses().that().resideInAPackage("com.miqroera.miqrokey.adapters..").should()
+                .dependOnClassesThat().resideInAPackage("org.springframework..").because(
+                        "catalog loading and adapter registration are plain Java; Spring wiring happens in the app modules");
+        rule.check(allClasses);
+    }
+
+    @Test
     @DisplayName("gateway-app must not depend on persistence-postgres")
     void gatewayMustNotDependOnPersistence() {
         ArchRule rule = noClasses().that().resideInAPackage("com.miqroera.miqrokey.gateway..").should()

@@ -199,6 +199,28 @@ Coding Plan 和 Token Plan 个人版均有专属 Key 与 OpenAI/Anthropic 兼容
 - 供应商实时 `/v1/models` 与内置目录合并，但不能自动授权新模型给项目。
 - 每条用量事件保存价格目录版本和价格快照，防止历史成本随新价格变化。
 
+### 7.1 目录签名与密钥管理（G2.1 实现）
+
+内置目录位于 `backend/provider-adapters/src/main/resources/catalog/`：
+
+| 文件 | 内容 |
+|---|---|
+| `provider-catalog.json` | 版本化产品清单（`version: 1` + `products[]`，当前 8 家 23 个产品，全部 `DOCUMENTED`） |
+| `provider-catalog.sig` | Ed25519 签名，覆盖 `provider-catalog.json` 的精确字节（64 字节） |
+| `keys/catalog-public.pem` | 校验公钥（SubjectPublicKeyInfo PEM） |
+
+加载路径：`ProviderCatalog.loadBuiltIn()` → Ed25519 验签 → 严格 schema 校验（拒绝未知字段、非 https Base URL、未知枚举值、重复产品 id）→ 不可变定义列表。篡改目录、换钥签名或 schema 违规都会导致启动失败（`CatalogLoadException`），绝不静默降级。
+
+**重签流程**（仅发布负责人执行）：
+
+1. 修改 `provider-catalog.json` 后，用持有 Ed25519 私钥的发布环境重新签名：
+   `openssl pkeyutl -sign -inkey <private-key.pem> -rawin -in provider-catalog.json -out provider-catalog.sig`
+2. 验签确认：
+   `openssl pkeyutl -verify -pubin -inkey keys/catalog-public.pem -rawin -in provider-catalog.json -sigfile provider-catalog.sig`
+3. 私钥只存在于发布者安全环境，永不提交仓库、镜像或部署产物；公钥可随发布轮换（多版本目录预留 `CatalogKeyLoader` 的文件加载入口）。
+
+目录是纯数据：schema 拒绝所有未知字段（含 `class`/`code` 等可执行字段），适配器解析只按 `adapterId` 查编译期注册表（`BuiltInAdapterRegistry`），被篡改或远程目录不可能加载代码。Base URL 为 `DOCUMENTED` 设计值，正式确认以 G3.x 真实凭证契约测试为准。
+
 ## 8. 供应商适配器验收模板
 
 每个 ProviderProduct 必须完成：
