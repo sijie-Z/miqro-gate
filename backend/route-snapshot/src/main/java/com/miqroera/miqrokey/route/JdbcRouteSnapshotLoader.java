@@ -26,7 +26,8 @@ import java.util.UUID;
  * <h2>Snapshot content</h2>
  * <ul>
  * <li>ACTIVE virtual keys (id, tenant, public key id, secret digest, cache
- * policy, purpose).</li>
+ * policy, purpose, owning grant) — plus ROTATING keys inside their grace
+ * window.</li>
  * <li>ACTIVE label bindings joined to ACTIVE projects and ACTIVE grants
  * (DISTINCT ON virtual_key_id).</li>
  * <li>ACTIVE upstream credentials reachable from any grant, with their
@@ -34,6 +35,11 @@ import java.util.UUID;
  * ciphertext (encrypted_secret, nonce, encryption_key_version) — decryption
  * happens in memory on the hot path, never here.</li>
  * <li>Per-key model grants (virtual_key_models).</li>
+ * <li>Per-grant model grants of ACTIVE grants (project_provider_grant_models)
+ * and per-product upstream models (model_catalog, ACTIVE rows only) — the
+ * {@code /v1/models} authorization inputs.</li>
+ * <li>Product codes (provider_products.product_code) so the gateway can gate
+ * products against the signed provider catalog.</li>
  * </ul>
  */
 public final class JdbcRouteSnapshotLoader {
@@ -57,7 +63,11 @@ public final class JdbcRouteSnapshotLoader {
         Map<UUID, RouteSnapshot.BindingRecord> bindings = loadBindings();
         Map<UUID, RouteSnapshot.CredentialRecord> credentials = loadCredentials();
         Map<UUID, Set<String>> models = loadModels();
-        return new RouteSnapshot(version, loadedAt, keys, bindings, credentials, models);
+        Map<UUID, Set<String>> grantModels = loadGrantModels();
+        Map<UUID, Set<String>> upstreamModels = loadUpstreamModels();
+        Map<UUID, String> productCodes = loadProductCodes();
+        return new RouteSnapshot(version, loadedAt, keys, bindings, credentials, models, grantModels, upstreamModels,
+                productCodes);
     }
 
     private Map<String, RouteSnapshot.KeyRecord> loadKeys() {
@@ -66,14 +76,14 @@ public final class JdbcRouteSnapshotLoader {
         // (revoked_at), so a rotated key keeps working while the replacement
         // propagates through the snapshot.
         jdbc.query("""
-                SELECT id, tenant_id, public_key_id, secret_digest, cache_policy, purpose
+                SELECT id, tenant_id, public_key_id, secret_digest, cache_policy, purpose, grant_id
                 FROM virtual_keys
                 WHERE status = 'ACTIVE'
                    OR (status = 'ROTATING' AND revoked_at > now())
                 """, rs -> {
             RouteSnapshot.KeyRecord key = new RouteSnapshot.KeyRecord((UUID) rs.getObject("id"),
                     (UUID) rs.getObject("tenant_id"), rs.getString("public_key_id"), rs.getBytes("secret_digest"),
-                    rs.getString("cache_policy"), rs.getString("purpose"));
+                    rs.getString("cache_policy"), rs.getString("purpose"), (UUID) rs.getObject("grant_id"));
             keys.put(key.publicKeyId(), key);
         });
         return keys;
@@ -150,6 +160,59 @@ public final class JdbcRouteSnapshotLoader {
         });
         models.replaceAll((k, v) -> Set.copyOf(v));
         return models;
+    }
+
+    /**
+     * Per-grant model grants. Rows of revoked grants are excluded — a grant's model
+     * permissions die with it even if the junction rows linger.
+     */
+    private Map<UUID, Set<String>> loadGrantModels() {
+        Map<UUID, Set<String>> grantModels = new HashMap<>();
+        jdbc.query("""
+                SELECT gm.grant_id, gm.model_id
+                FROM project_provider_grant_models gm
+                JOIN project_provider_grants g
+                  ON g.id = gm.grant_id AND g.tenant_id = gm.tenant_id AND g.status = 'ACTIVE'
+                """, rs -> {
+            UUID grantId = (UUID) rs.getObject("grant_id");
+            grantModels.computeIfAbsent(grantId, k -> new java.util.HashSet<>()).add(rs.getString("model_id"));
+        });
+        grantModels.replaceAll((k, v) -> Set.copyOf(v));
+        return grantModels;
+    }
+
+    /**
+     * Upstream models per product ({@code model_catalog}, ACTIVE rows only). The
+     * control plane writes these rows exclusively from successful official-API
+     * fetches, so the set is the last successful catalog — a failed fetch never
+     * mutates it.
+     */
+    private Map<UUID, Set<String>> loadUpstreamModels() {
+        Map<UUID, Set<String>> upstreamModels = new HashMap<>();
+        jdbc.query("""
+                SELECT provider_product_id, model_id
+                FROM model_catalog
+                WHERE status = 'ACTIVE'
+                """, rs -> {
+            UUID productId = (UUID) rs.getObject("provider_product_id");
+            upstreamModels.computeIfAbsent(productId, k -> new java.util.HashSet<>()).add(rs.getString("model_id"));
+        });
+        upstreamModels.replaceAll((k, v) -> Set.copyOf(v));
+        return upstreamModels;
+    }
+
+    /**
+     * Product codes ({@code provider_products.product_code}) so the gateway can
+     * gate products against the signed provider catalog.
+     */
+    private Map<UUID, String> loadProductCodes() {
+        Map<UUID, String> productCodes = new HashMap<>();
+        jdbc.query("""
+                SELECT id, product_code FROM provider_products
+                """, rs -> {
+            productCodes.put((UUID) rs.getObject("id"), rs.getString("product_code"));
+        });
+        return productCodes;
     }
 
     /**

@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G2.2`（Gateway route snapshot and virtual key auth — 收尾：热路径凭证密文快照 + PostgreSQL NOTIFY 刷新事件）
-- Goal status: `DONE`（实现、测试、全量验证、文档全部完成；PR 已开）
-- Last updated: `2026-08-25 14:05 CST`
-- Branch: `goal/g2.2-route-snapshot-and-vkey-auth`
+- Current goal: `G2.4`（Usage lifecycle and reliable writer — 请求开始/完成记录、usage 解析和有界批量写入）
+- Goal status: `NOT_STARTED`
+- Last updated: `2026-08-25 CST`
+- Branch: `goal/g2.3-models-endpoint`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,10 @@
 
 ## Next Goal
 
-- Goal ID: `G2.3`
-- Name: Models endpoint（`/v1/models` 按 Virtual Key 权限返回模型 — 目录∩上游∩Grant∩Key 交集）
+- Goal ID: `G2.4`
+- Name: Usage lifecycle and reliable writer（请求开始/完成记录、usage 解析和有界批量写入）
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md)
+- Source: [`implementation-plan.md`](implementation-plan.md)（验收：数据库短暂故障不静默丢失；队列有指标/告警；usage 缺失标记明确；正文不进入持久化）
 
 ## G2.1 — Provider SPI and signed catalog core
 
@@ -1009,3 +1009,36 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - 通知丢失或控制面不可达时由 30s 定时刷新自愈（last-good 快照保留）；监听器断线有指数退避重连。
 - 单节点单 Gateway 监听者（v1 范围）；多实例时 LISTEN/NOTIFY 的重复通知/放大语义留待多节点部署目标处理（architecture.md 已注明）。
 - 真实供应商凭证未提供：凭证注入只经 Mock 上游验证，真实联调 `WAITING_FOR_CREDENTIAL`。
+
+## G2.3 — Models endpoint（`/v1/models` 目录∩上游模型∩Grant∩Key 快照四路交集，DONE）
+
+### Outcome
+
+1. **快照扩展**：`RouteSnapshot.KeyRecord` 增加 `grantId`（`virtual_keys.grant_id`）；`RouteSnapshot` 新增 `grantModelsByGrantId`（仅 ACTIVE grant 的 `project_provider_grant_models`，JOIN 过滤）、`upstreamModelsByProductId`（`model_catalog` 仅 `ACTIVE` 行）、`productCodesByProductId`（`provider_products.product_code`）三个 map 与 accessor；equals/hashCode/toString/empty() 同步。
+2. **`/v1/models` 四路交集**（`ModelsController`）：四路输入均来自 `AuthContext` 携带的**同一版本**快照——① **目录 gate**：Key 绑定产品的 `product_code` 不在签名目录（`ProviderCatalog` bean = `loadBuiltIn()`，Ed25519 校验，启动 fail-fast）→ 返回空列表（目录是外层授权边界，产品不在目录中什么都不泄漏）；② 交集 `key.models ∩ grantModels(grantId) ∩ upstreamModels(productId)`，排序输出。代理热路径的请求级模型预校验**保持 key-level**（`ctx.models()`）不变——模型目录为空时不得拒绝所有流量（api-contract §7.1 已写明两者区别）。
+3. **上游模型生产者（`ModelCatalogService`，控制面）**：**success-only writes**——`applySnapshot`（`@Transactional`：事务内 DELETE 产品全部行 + batch INSERT `ACTIVE`）提交后（AFTER_COMMIT）发布 route-refresh NOTIFY，网关即时重载；`refreshProduct(adapter, client)` 是 G3.x 适配器接缝，任何抓取失败（异常/null/超时）只记日志并保留上次成功目录（"上游失败可回退最后成功目录"）。`refreshProduct`→`applySnapshot` 经 `ObjectFactory` 自代理穿越 Spring 事务边界（直接自调用会绕过 `@Transactional`，把替换拆成两个 autocommit 语句，崩溃窗口会短暂服务空目录而非 last-good）。
+4. **已记录行为（非缺陷）**：G3.x 之前 `model_catalog` 为空 → 严格交集为空 → `/v1/models` 返回 `[]`——未授权模型不泄漏是刻意的，官方 API 抓取落地后自动恢复。
+
+### Verification
+
+- 全量 `./mvnw.cmd -f backend/pom.xml verify -P integration --batch-mode`（本机 Docker Desktop，Testcontainers 实跑）：**BUILD SUCCESS** —— **687 tests / 0 failures / 5 skipped**（Windows POSIX 权限跳过）
+  - gateway-app 144（含 `ModelsListing` 6：happy path 四路对齐、Grant 限制、上游限制、无上游模型、未知产品码、无效 Key）、control-plane-app 188（含 `ModelCatalogServiceTest` 5 + `ModelCatalogServiceIntegrationTest` 4）
+- `ModelCatalogServiceTest`（Mockito，5）：成功快照替换行并发布；空快照删旧行不批量仍发布；未知产品码跳过零交互；抓取失败保留 last-good；成功抓取委托 applySnapshot。
+- `ModelCatalogServiceIntegrationTest`（Testcontainers，4）：真实库事务替换（m1+m2→m1）；未知产品零写入；抓取失败零写入；成功抓取替换并可见。
+- `RouteSnapshotRefreshIntegrationTest`：seed `project_provider_grant_models` + `model_catalog`，NOTIFY 重载后断言 grantModels/upstreamModels/productCode 进入快照。
+- Spotless check 全模块 PASS（apply 后干净）；Maven Enforcer：PASS。
+
+### Files changed
+
+- **domain**：`RouteSnapshot.java` — KeyRecord.grantId + 3 maps + accessors
+- **route-snapshot**：`JdbcRouteSnapshotLoader` — loadKeys 选 grant_id + 3 个新有界查询（grant models、upstream models、product codes）
+- **gateway-app**：`AuthContext`/`VirtualKeyResolver`（携带快照）、`ModelsController`（四路交集 + 目录 gate）、`GatewayFeatureConfig`（`ProviderCatalog` bean）、`GatewayAuthTestConfig`（6 fixtures 挂载）、`VirtualKeyAuthContractTest$ModelsListing`（+4）、`CacheKeyFactoryTest`（AuthContext 适配）、`RouteSnapshotRefreshIntegrationTest`（seed + 断言）
+- **test-support**：`GatewayTestKeys` — KeyFixture 增加 grantId/productCode/grantModels/upstreamModels；4 个负面 fixture（Grant 限制、上游限制、无上游、未知产品）
+- **control-plane-app**：新 `service/ModelCatalogService` + `ModelCatalogServiceTest` + `ModelCatalogServiceIntegrationTest`
+- **文档**：api-contract.md §7.1（交集语义 + 空列表说明 + 预校验区别）、architecture.md §4.1（快照扩展 + success-only 生产者契约）、progress.md
+
+### Remaining risks
+
+- 适配器注册（G3.x）之前 `model_catalog` 恒空，`/v1/models` 返回空列表——严格交集是刻意的安全边界。
+- 30s 定时刷新仍为 NOTIFY 丢失兜底；单节点单监听者范围不变。
+- 真实供应商凭证未提供：`refreshProduct` 只经 Mock/契约测试，真实抓取 `WAITING_FOR_CREDENTIAL`。

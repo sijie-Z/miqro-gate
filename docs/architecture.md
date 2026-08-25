@@ -63,7 +63,7 @@ miqro-key-gateway/
 - `provider-spi`：`com.miqroera.miqrokey.spi`——`ProviderProductAdapter` 契约及其值对象（`ProtocolFamily`、`ProviderProductDefinition`、`RouteContext`/`TargetRequest`、`CredentialMaterial`/`CredentialInjection`、`ProviderClient`、`UsageObserver`/`UsageObservation`、`PlanSnapshot`、`AdapterCapabilities`、`AdapterRegistry`）。核心 Gateway 只依赖此 SPI，禁止出现 `if (vendor == ...)` 分支。
 - `provider-adapters`：`com.miqroera.miqrokey.adapters`——内置签名目录（Ed25519 校验 + 严格 schema 校验 + classpath 加载，`catalog/` 子包）与编译期适配器注册表（`registry/BuiltInAdapterRegistry`，重复 `adapterId` 启动失败）。目录是纯数据：任何未知字段（含代码类名字段）被 schema 拒绝，适配器解析只按 `adapterId` 走注册表，远程目录不可能加载代码。具体供应商适配器在 G3.x 加入 `providers/` 子包。
 
-- `route-snapshot`：版本化只读快照——Gateway 在启动、定时刷新（默认 30s，失败保留 last-good）和 `miqrokey_route_refresh` NOTIFY 事件（见 §4.1）时把 Virtual Key 摘要、Key→项目绑定、Grant 模型、项目标签、上游凭证密文（含 `EncryptedSecret` 密文与 keyVersion，永不含明文）加载为不可变快照；热路径零数据库访问，只做内存查询 + AES-256-GCM 解密。凭证解密后内存用完即清零。
+- `route-snapshot`：版本化只读快照——Gateway 在启动、定时刷新（默认 30s，失败保留 last-good）和 `miqrokey_route_refresh` NOTIFY 事件（见 §4.1）时把 Virtual Key 摘要（含 `grant_id`）、Key→项目绑定、Key 模型（`virtual_key_models`）、Grant 模型（`project_provider_grant_models`，仅 ACTIVE grant）、上游模型（`model_catalog`，仅 ACTIVE 行）、产品代码（`provider_products.product_code`）、项目标签、上游凭证密文（含 `EncryptedSecret` 密文与 keyVersion，永不含明文）加载为不可变快照；热路径零数据库访问，只做内存查询 + AES-256-GCM 解密。凭证解密后内存用完即清零。
 - `queue-spi`：有界用量写入队列契约 + 内存实现（容量默认 10000）。Gateway 观察器只产生不可变事件（含幂等键 `provider_request_id`），专用调度器批量写 PostgreSQL；队列满不静默丢弃，写失败保留重试，`INSERT ... ON CONFLICT DO NOTHING` 防双计。
 - `cache-spi`：`ResponseCache` 契约 + `NoOpResponseCache`。L1（Caffeine 风格内存）与 L2（PostgreSQL `cache_entry`）实现已存在但总开关默认关闭（ADR-0008）；只缓存 `cache_policy=ENABLED` 的 Key 且满足资格条件的响应，SSE 通过 `SseReplayEngine` 按字节重放。
 
@@ -87,6 +87,10 @@ miqro-key-gateway/
 Gateway 使用 Spring WebFlux 与 Reactor Netty，热路径禁止阻塞式数据库和网络调用。凭证与路由配置以版本化只读快照加载；变更后由控制面发布刷新事件。
 
 **刷新事件（G2.2 实现）**：控制面与 Gateway 是两个独立进程，共享同一 PostgreSQL。控制面的 Virtual Key 与凭证变更服务在事务提交后（AFTER_COMMIT，回滚绝不发布）执行 `pg_notify`；Gateway 运行一个专用连接（`DriverManager`，不在 Hikari 池内）的 `LISTEN miqrokey_route_refresh` 守护线程，收到通知立即重载快照——无需等待 30s 定时刷新。通道名 `miqrokey_route_refresh` 是双方约定契约（配置项 `miqrokey.gateway.route-snapshot.notify-channel`）。快照持有加密密文，热路径只做内存查询 + AES-256-GCM 解密，解密后内存用完即清零。通知丢失由 30s 定时刷新自愈（保留 last-good 快照）。
+
+**`/v1/models` 四路交集（G2.3 实现）**：列表端点对 Key 返回「目录 × 上游模型 × Grant × Key 快照」的交集，四路输入均来自同一版本路由快照：目录是已签名 provider catalog（classpath，Ed25519 校验；Key 绑定产品的 `product_code` 不在目录中 → 空列表）；上游模型是 `model_catalog` 的 ACTIVE 行；Grant 是 ACTIVE grant 的 `project_provider_grant_models`；Key 快照是 `virtual_key_models`。交集外的模型不出现（未授权不泄漏）。代理热路径的请求级模型预校验只按 Key 快照判断（G2.2 行为不变）。
+
+**上游模型生产者（G2.3 实现）**：`ModelCatalogService`（控制面）只把**成功**的官方 API 抓取结果写入 `model_catalog`——事务内替换该产品全部行，提交后（AFTER_COMMIT）发布 route-refresh NOTIFY；任何抓取失败都保留上次成功目录（"上游失败可回退最后成功目录"）。适配器从 G3.x 起注册（`refreshProduct(adapter, client)` 接缝已就绪）；在此之前 `model_catalog` 为空，严格交集的结果是空列表——这是刻意的行为，不是缺陷。
 
 ### 4.2 Control Plane API
 

@@ -229,7 +229,7 @@ class VirtualKeyAuthContractTest {
     class ModelsListing {
 
         @Test
-        @DisplayName("should return only the presented key's allowed models, sorted")
+        @DisplayName("should return the four-way intersection (catalog ∩ upstream ∩ grant ∩ key), sorted")
         void shouldListAllowedModels() throws Exception {
             byte[] body = webTestClient.get().uri("/v1/models").exchange().expectStatus().isOk().expectHeader()
                     .contentType("application/json").expectBody().returnResult().getResponseBody();
@@ -242,6 +242,34 @@ class VirtualKeyAuthContractTest {
         }
 
         @Test
+        @DisplayName("should exclude a model the key's grant does not authorize")
+        void shouldExcludeGrantDeniedModel() throws Exception {
+            List<String> ids = listModels(GatewayTestKeys.GRANT_LIMITED_KEY);
+            assertThat(ids).doesNotContain(GatewayTestKeys.MODEL_GRANT_DENIED);
+            assertThat(ids).hasSize(GatewayTestKeys.MODELS_ALLOWED.size() - 1);
+        }
+
+        @Test
+        @DisplayName("should exclude a model the upstream catalog has never seen")
+        void shouldExcludeUpstreamDeniedModel() throws Exception {
+            List<String> ids = listModels(GatewayTestKeys.UPSTREAM_LIMITED_KEY);
+            assertThat(ids).doesNotContain(GatewayTestKeys.MODEL_UPSTREAM_DENIED);
+            assertThat(ids).hasSize(GatewayTestKeys.MODELS_ALLOWED.size() - 1);
+        }
+
+        @Test
+        @DisplayName("should return an empty list when no upstream fetch has ever succeeded")
+        void shouldReturnEmptyWithoutUpstreamModels() throws Exception {
+            assertThat(listModels(GatewayTestKeys.NO_UPSTREAM_KEY)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should return an empty list for a product unknown to the signed catalog")
+        void shouldReturnEmptyForUnknownProduct() throws Exception {
+            assertThat(listModels(GatewayTestKeys.UNKNOWN_PRODUCT_KEY)).isEmpty();
+        }
+
+        @Test
         @DisplayName("should reject /v1/models with an invalid key")
         void shouldRejectInvalidKey() {
             byte[] body = webTestClient.get().uri("/v1/models")
@@ -249,6 +277,17 @@ class VirtualKeyAuthContractTest {
                     .expectStatus().isNotFound().expectBody().returnResult().getResponseBody();
 
             assertThat(errorType(body)).isEqualTo("virtual_key_invalid");
+        }
+
+        /**
+         * Lists the models served to the given key, overriding the default fixture
+         * header.
+         */
+        private List<String> listModels(GatewayTestKeys.KeyFixture key) throws Exception {
+            byte[] body = webTestClient.get().uri("/v1/models").header("Authorization", "Bearer " + key.presented())
+                    .exchange().expectStatus().isOk().expectHeader().contentType("application/json").expectBody()
+                    .returnResult().getResponseBody();
+            return OBJECT_MAPPER.readTree(body).path("data").findValuesAsText("id");
         }
     }
 

@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.gateway.config;
 
+import com.miqroera.miqrokey.adapters.catalog.ProviderCatalog;
 import com.miqroera.miqrokey.cache.CacheConfig;
 import com.miqroera.miqrokey.cache.GatewayResponseCache;
 import com.miqroera.miqrokey.cache.NoopCacheProvider;
@@ -48,6 +49,17 @@ public class GatewayFeatureConfig {
     @ConditionalOnMissingBean
     public RouteSnapshotProvider emptyRouteSnapshotProvider(Clock clock) {
         return () -> RouteSnapshot.empty(0, Instant.EPOCH);
+    }
+
+    /**
+     * The signed provider catalog from the classpath (Ed25519-verified at load).
+     * Loaded once at startup; a broken signature or manifest fails the app fast.
+     * Used by {@code /v1/models} to gate products: models are only served for
+     * products the signed catalog knows.
+     */
+    @Bean
+    public ProviderCatalog providerCatalog() {
+        return ProviderCatalog.loadBuiltIn();
     }
 
     /**

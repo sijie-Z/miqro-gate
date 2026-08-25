@@ -23,7 +23,7 @@ class CacheKeyFactoryTest {
 
     private AuthContext context(GatewayTestKeys.KeyFixture key) {
         return new AuthContext(key.keyRecord(GatewayTestKeys.TENANT_ID), key.bindingRecord(),
-                java.util.Set.copyOf(key.models()));
+                java.util.Set.copyOf(key.models()), GatewayTestKeys.snapshot("http://mock.example", key));
     }
 
     private final AuthContext ctx = context(GatewayTestKeys.DEFAULT_KEY);
