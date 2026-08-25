@@ -8,7 +8,7 @@
 - Current executor: `Claude Code`
 - Current goal: `tag-routing-usage-closed-loop`（G1.4 授权部分 + G1.5 + G2.2 + G2.3 + G2.4 + G5.1 核心闭环）
 - Goal status: `DONE`（本地全绿；集成测试待 CI）
-- Last updated: `2026-08-25 04:05 CST`
+- Last updated: `2026-08-25 07:55 CST`
 - Branch: `goal/tag-routing-usage-closed-loop`
 - Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
 
@@ -870,7 +870,7 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 ### Verification
 
-- `./mvnw -f backend/pom.xml verify`（默认门禁：Spotless + Maven Enforcer；checkstyle/pmd/jacoco 未配置）：**BUILD SUCCESS** — **454 非集成测试，0 失败 0 错误**：
+- `./mvnw -f backend/pom.xml verify`（默认门禁：Spotless + Maven Enforcer；checkstyle/pmd/jacoco 未配置）：**BUILD SUCCESS** — **455 非集成测试，0 失败 0 错误**（surefire txt 求和；mvn 模块汇总为 454，差值为 gateway 嵌套测试类计数口径）：
   - domain 84（新增 vkey 解析、usage 统计域测试）、persistence-postgres 31、queue-spi 6、control-plane 87（VirtualKeyServiceTest 19 + UsageStatsServiceTest 10 + 既有）、test-support 109、gateway-app 138（新增 VirtualKeyAuthContractTest、SseReplayEngineTest、CacheKeyFactoryTest；三个既有契约测试扩展模型越权/凭证注入断言）
 - 集成测试（CI-only，Testcontainers）：`MeVirtualKeyApiIntegrationTest` 7 + `MeUsageApiIntegrationTest` 4，本机 Docker 不可用由 CI 验证。
 - 前端：`npm --prefix frontend run test` **16/16 PASS**（App 2 + http 6 + auth 4 + KeysView 4）、`lint` PASS、`typecheck` PASS、`build` PASS（chunk 大小警告为 Element Plus 全量引入，非错误）。
@@ -890,7 +890,7 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 ### Remaining risks
 
-- **Push 被阻塞（403）**：本机 git/gh 身份为 `sijie-Z`，对 `lichman0405/miqro-key-gateway` 无写权限。3 个 commit 已本地完成（`cdaf4f5` backend、`0ff1f29` frontend、`b143900` docs），待有权限的账号 push（git-workflow.md：不改写历史、不强推）。PR 未创建，CI 未跑。
+- **Push 被阻塞（403）**：本机 git/gh 身份为 `sijie-Z`，对 `lichman0405/miqro-key-gateway` 无写权限。5 个 commit 已本地完成（`cdaf4f5` backend、`0ff1f29` frontend、`b143900` docs、`13d5241` push 阻塞记录、`5b64ced` 闭环修复：last-used 派生 + 集成测试断言 + 配置/文档补齐），待有权限的账号 push（git-workflow.md：不改写历史、不强推）。PR 未创建，CI 未跑。
 - 集成测试（11 个新增）只能在 Linux CI 运行；若 jsonPath 数值断言浮点比较失败需按 CI 输出调整。
 - 真实供应商凭证未提供：Gateway 凭证注入只经 Mock 上游验证，真实联调 `WAITING_FOR_CREDENTIAL`。
 - 响应缓存默认关闭（ADR-0008 决策），正式启用前需新增 ADR。
