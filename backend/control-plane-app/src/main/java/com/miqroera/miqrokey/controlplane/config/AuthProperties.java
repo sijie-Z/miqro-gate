@@ -66,6 +66,14 @@ public class AuthProperties {
      */
     private Duration virtualKeyRotateGrace = Duration.ZERO;
 
+    /**
+     * Grace period during which a rotated or disabled credential version remains
+     * decryptable ({@code PT0S} = the old version stops being the active secret as
+     * soon as the gateway snapshot refreshes). In-flight requests that already
+     * decrypted the old secret always complete regardless of this value.
+     */
+    private Duration credentialDrainGrace = Duration.ZERO;
+
     public String getSessionCookieName() {
         return sessionCookieName;
     }
@@ -137,5 +145,11 @@ public class AuthProperties {
     }
     public void setVirtualKeyRotateGrace(Duration v) {
         this.virtualKeyRotateGrace = v;
+    }
+    public Duration getCredentialDrainGrace() {
+        return credentialDrainGrace;
+    }
+    public void setCredentialDrainGrace(Duration v) {
+        this.credentialDrainGrace = v;
     }
 }

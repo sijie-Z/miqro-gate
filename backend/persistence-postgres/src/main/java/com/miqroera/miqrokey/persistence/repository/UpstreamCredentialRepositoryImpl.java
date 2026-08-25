@@ -43,9 +43,27 @@ public class UpstreamCredentialRepositoryImpl implements UpstreamCredentialRepos
     }
 
     @Override
+    @Transactional
+    public Optional<UpstreamCredential> findByIdForUpdate(UUID id) {
+        try {
+            return Optional
+                    .ofNullable(jdbc.queryForObject("SELECT * FROM upstream_credentials WHERE id = :id FOR UPDATE",
+                            new MapSqlParameterSource("id", id), ROW_MAPPER));
+        } catch (EmptyResultDataAccessException e) {
+            return Optional.empty();
+        }
+    }
+
+    @Override
     public List<UpstreamCredential> findAllBySubscriptionId(UUID subscriptionId) {
         return jdbc.query("SELECT * FROM upstream_credentials WHERE subscription_id = :subId",
                 new MapSqlParameterSource("subId", subscriptionId), ROW_MAPPER);
+    }
+
+    @Override
+    public List<UpstreamCredential> findAllByTenantId(UUID tenantId) {
+        return jdbc.query("SELECT * FROM upstream_credentials WHERE tenant_id = :tenantId ORDER BY created_at DESC",
+                new MapSqlParameterSource("tenantId", tenantId), ROW_MAPPER);
     }
 
     @Override
