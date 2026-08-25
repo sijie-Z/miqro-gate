@@ -34,7 +34,7 @@
 
         <!-- Test dependency versions -->
         <archunit.version>1.3.0</archunit.version>
-        <testcontainers.version>1.20.4</testcontainers.version>
+        <testcontainers.version>1.21.4</testcontainers.version>
 
         <!-- Plugin versions (locked for reproducible builds) -->
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
