@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.unit.DataSize;
 
 import java.time.Duration;
+import java.util.List;
 
 /**
  * Configuration for the transparent proxy's upstream target.
@@ -15,7 +16,7 @@ import java.time.Duration;
  */
 @ConfigurationProperties(prefix = "miqrokey.gateway.upstream")
 public record ProxyTargetProperties(String url, Duration connectTimeout, Duration firstByteTimeout,
-        Duration streamIdleTimeout, Duration responseTimeout, DataSize maxProxyBuffer) {
+        Duration streamIdleTimeout, Duration responseTimeout, DataSize maxProxyBuffer, List<String> allowedCidrs) {
 
     public ProxyTargetProperties {
         url = url == null || url.isBlank() ? null : url;
@@ -26,5 +27,6 @@ public record ProxyTargetProperties(String url, Duration connectTimeout, Duratio
         maxProxyBuffer = maxProxyBuffer == null || maxProxyBuffer.toBytes() <= 0
                 ? DataSize.ofKilobytes(256)
                 : maxProxyBuffer;
+        allowedCidrs = allowedCidrs == null ? List.of() : List.copyOf(allowedCidrs);
     }
 }

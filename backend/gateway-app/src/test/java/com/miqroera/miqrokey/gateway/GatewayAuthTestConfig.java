@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.gateway;
 
 import com.miqroera.miqrokey.domain.crypto.VirtualKeyCrypto;
 import com.miqroera.miqrokey.gateway.proxy.CredentialInjector;
+import com.miqroera.miqrokey.gateway.proxy.UpstreamTargetValidator;
 import com.miqroera.miqrokey.route.RouteSnapshotProvider;
 import com.miqroera.miqrokey.testing.GatewayTestKeys;
 import com.miqroera.miqrokey.testing.InMemoryRouteSnapshotProvider;
@@ -11,6 +12,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.env.Environment;
 import reactor.core.publisher.Mono;
+
+import java.util.List;
 
 /**
  * Test wiring for authenticated gateway contract tests.
@@ -63,6 +66,18 @@ public class GatewayAuthTestConfig {
         String baseUrl = requiredUpstreamUrl(environment);
         return ctx -> Mono.just(new CredentialInjector.InjectedCredential(baseUrl, UPSTREAM_CREDENTIAL_HEADER,
                 UPSTREAM_CREDENTIAL_VALUE));
+    }
+
+    /**
+     * Contract tests target the local mock over plain http, so the G2.6 SSRF guard
+     * is configured to allow loopback explicitly (the production default rejects
+     * it). {@code GatewaySecurityHardeningTest} deliberately does not import this
+     * config and exercises the strict path.
+     */
+    @Bean
+    @Primary
+    public UpstreamTargetValidator gatewayTestUpstreamTargetValidator() {
+        return new UpstreamTargetValidator(List.of("127.0.0.0/8", "::1/128"));
     }
 
     @Bean

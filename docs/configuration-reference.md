@@ -117,13 +117,13 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_UPSTREAM_FIRST_BYTE_TIMEOUT` | `PT120S` | 等待首个响应字节（含头）超时；超时永不重试 |
 | `MIQROKEY_UPSTREAM_STREAM_IDLE_TIMEOUT` | `PT5M` | SSE 无数据超时（每个 chunk 重置）；已出首字节后超时 → `STREAM_INTERRUPTED` |
 | `MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT` | `PT10M` | 整体硬截止（自第一次尝试起计时，不重置）；流式空闲另算 |
-| `MIQROKEY_MAX_INBOUND_HEADER_BYTES` | `32KB` | Header 上限 |
+| `MIQROKEY_MAX_INBOUND_HEADER_BYTES` | `32KB` | 入站 Header 上限（G2.6）；Netty 在路由前拒绝超限请求 → `431` |
 | `MIQROKEY_MAX_CONTROL_BODY_BYTES` | `1MB` | 管理 API body 上限 |
 | `MIQROKEY_MAX_PROXY_BUFFER_BYTES` | `256KB` | 只限制必要解析缓冲，不聚合完整响应 |
 | `MIQROKEY_MAX_CONCURRENT_STREAMS` | `50` | 首版容量目标；不是用户限流策略 |
 | `MIQROKEY_TRUSTED_PROXY_CIDRS` | 空 | 仅从这些代理接受 forwarded headers |
-| `MIQROKEY_UPSTREAM_ALLOWED_CIDRS` | 空 | 自定义端点的额外 allowlist |
-| `MIQROKEY_UPSTREAM_FOLLOW_REDIRECTS` | `false` | 默认禁止 |
+| `MIQROKEY_UPSTREAM_ALLOWED_CIDRS` | 空 | SSRF 门控 allowlist（G2.6）：命中这些 CIDR 的目标豁免「非公网地址」与「明文 http」两道拒绝（`127.0.0.0/8, ::1/128` 用于本地自建模型）；空 = 仅接受 https + 公网地址；`userinfo` URL 永不豁免 |
+| `MIQROKEY_UPSTREAM_FOLLOW_REDIRECTS` | `false` | 重定向跟随硬编码禁用（G2.6：防止 30x 把已通过 SSRF 校验的目标重定向到任意地址）；当前版本不可配置 |
 
 `MIQROKEY_MAX_CONCURRENT_STREAMS` 是保护实例稳定性的容量边界，不是按用户/团队配额。达到物理上限时返回明确的 `503 CAPACITY_EXHAUSTED` 并告警。
 

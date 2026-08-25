@@ -7,6 +7,8 @@ import com.miqroera.miqrokey.cache.NoopCacheProvider;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import com.miqroera.miqrokey.gateway.proxy.CredentialInjector;
 import com.miqroera.miqrokey.gateway.proxy.JdbcCredentialInjector;
+import com.miqroera.miqrokey.gateway.proxy.ProxyTargetProperties;
+import com.miqroera.miqrokey.gateway.proxy.UpstreamTargetValidator;
 import com.miqroera.miqrokey.queue.QueueConfig;
 import com.miqroera.miqrokey.route.RouteSnapshotConfig;
 import com.miqroera.miqrokey.route.RouteSnapshotProvider;
@@ -80,6 +82,19 @@ public class GatewayFeatureConfig {
     @Bean(destroyMethod = "dispose")
     public Scheduler credentialDecryptScheduler() {
         return Schedulers.newBoundedElastic(4, 100, "credential-decrypt");
+    }
+
+    /**
+     * G2.6 SSRF guard: every upstream target must be {@code https} (or
+     * allow-listed) and must resolve to public addresses only, unless the address
+     * falls inside {@code miqrokey.gateway.upstream.allowed-cidrs}
+     * ({@code MIQROKEY_UPSTREAM_ALLOWED_CIDRS}). The blocking DNS check runs on the
+     * credential-decrypt scheduler, never on the event loop.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public UpstreamTargetValidator upstreamTargetValidator(ProxyTargetProperties properties) {
+        return new UpstreamTargetValidator(properties.allowedCidrs());
     }
 
     /**

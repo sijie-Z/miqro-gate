@@ -8,6 +8,7 @@ import com.miqroera.miqrokey.testing.ChatFixtures;
 import com.miqroera.miqrokey.testing.GatewayTestKeys;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -350,6 +351,73 @@ class VirtualKeyAuthContractTest {
                     .bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isBadRequest();
 
             assertThat(mockProvider.getCapturedRequests()).hasSize(2);
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Header smuggling — forged credential/hop headers never reach upstream
+    // -------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("Header smuggling hardening")
+    class HeaderSmuggling {
+
+        @BeforeEach
+        void configureMock() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+        }
+
+        @Test
+        @DisplayName("forged credential headers are rejected before reaching upstream")
+        void stripsForgedCredentialHeaders() {
+            // A request carrying a valid virtual key plus any second credential
+            // header (x-api-key / api-key) is refused at the auth layer with
+            // 401 — forged credentials never get a chance to reach upstream.
+            webTestClient.post().uri("/v1/chat/completions").header("x-api-key", "sk-attacker")
+                    .header("api-key", "sk-attacker-2").bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange()
+                    .expectStatus().isUnauthorized();
+
+            assertThat(mockProvider.getCapturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("only the injected credential reaches upstream; the client key never leaks")
+        void injectsOnlyGatewayCredential() {
+            webTestClient.post().uri("/v1/chat/completions").bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange()
+                    .expectStatus().isOk();
+
+            assertThat(mockProvider.getCapturedRequests()).hasSize(1);
+            AnthropicMockProvider.CapturedRequest upstream = mockProvider.getCapturedRequests().get(0);
+            assertThat(upstream.headers("authorization"))
+                    .containsExactly(GatewayAuthTestConfig.UPSTREAM_CREDENTIAL_VALUE);
+            assertThat(upstream.headers("authorization"))
+                    .noneMatch(v -> v.contains(GatewayTestKeys.DEFAULT_KEY.presented()));
+        }
+
+        @Test
+        @DisplayName("Connection-nominated and X-MiQroKey-* headers are stripped")
+        void stripsHopNominatedHeaders() {
+            webTestClient.post().uri("/v1/chat/completions").header("Connection", "X-Remove-Me")
+                    .header("X-Remove-Me", "hop-value").header("X-MiQroKey-Request-Id", "forged")
+                    .bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isOk();
+
+            assertThat(mockProvider.getCapturedRequests()).hasSize(1);
+            AnthropicMockProvider.CapturedRequest upstream = mockProvider.getCapturedRequests().get(0);
+            assertThat(upstream.headers("x-remove-me")).isEmpty();
+            assertThat(upstream.headers("x-miqrokey-request-id")).isEmpty();
+            assertThat(upstream.headers("connection")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("duplicate authorization headers are rejected before reaching upstream")
+        void rejectsDuplicateAuthorization() {
+            webTestClient.post().uri("/v1/chat/completions")
+                    .header("Authorization", "Bearer " + GatewayTestKeys.DEFAULT_KEY.presented())
+                    .header("Authorization", "Bearer sk-attacker").bodyValue(ChatFixtures.REQUEST_NON_STREAMING)
+                    .exchange().expectStatus().isUnauthorized();
+
+            assertThat(mockProvider.getCapturedRequests()).isEmpty();
         }
     }
 }

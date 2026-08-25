@@ -7,9 +7,9 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `G2.6`（Gateway security hardening — SSRF、路径、Header、body 上限和错误脱敏）
-- Goal status: `NOT_STARTED`
+- Goal status: `DONE`（全部验收通过：742 tests / 0 failures / 5 skipped）
 - Last updated: `2026-08-25 CST`
-- Branch: `goal/g2.5-timeout-retry-cancellation`（PR 待 merge）
+- Branch: `goal/g2.6-security-hardening`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,42 @@
 
 ## Next Goal
 
-- Goal ID: `G2.6`
-- Name: Gateway security hardening（SSRF、路径、Header、body 上限和错误脱敏）
+- Goal ID: `G3.1`
+- Name: DeepSeek PAYG（首个完整参考适配器：OpenAI/Anthropic 透明入口、models、官方余额、价格与 usage）
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md)（验收：未签名目标、私网解析、任意路径、超大头/body、走私 Header 测试通过）
+- Source: [`implementation-plan.md`](implementation-plan.md)（Phase 3 供应商产品）
+
+## G2.6 — Gateway security hardening（SSRF、路径、Header、body 上限和错误脱敏，DONE）
+
+### 实现
+
+- `UpstreamTargetValidator`（gateway-app 新增）：SSRF 双重门控 —— `https` 硬要求（除非命中 allowlist）、`userinfo` 一律拒绝；DNS 解析后每个地址必须公网（环回/链路本地/RFC1918/CGNAT `100.64/10`/组播/any-local/IPv6 ULA `fc00::/7` 均拒）；拒绝原因仅稳定类别 token，错误体/日志/审计不出现目标 URL。阻塞 DNS 在 `credentialDecryptScheduler` 上执行，不占事件循环。
+- `ProxyController`：`doForward` 拆出 `forwardWithResolvedCredential`，插入门控（拒绝 → `502 route_unavailable`）；`DataBufferLimitException` → `413 payload_too_large`（已有 256KB 缓冲上限接线，本次补测试）。
+- 入站 Header 上限：`server.netty.max-header-size`（默认 `32KB`，Netty 路由前拒绝 → `431`）。
+- 路径白名单（已有 catch-all，本次补契约测试）：三个 POST 端点，其余 `/v1/**` → 404、错方法 → 405、`..` 字面处理、`//` 归一化后按规范路径处理，均不触达上游。
+- 配置：`MIQROKEY_UPSTREAM_ALLOWED_CIDRS`（默认空 = 全拒）、`MIQROKEY_MAX_INBOUND_HEADER_BYTES`（`32KB`）。
+
+### 测试（本 Goal 新增 29 个）
+
+- `UpstreamTargetValidatorTest`（14）：scheme/userinfo/解析地址/CIDR 匹配/allowlist 状态。
+- `GatewaySecurityHardeningTest`（12，严格路径：空 allowlist + mutable target）：SSRF 拒绝（loopback/169.254.169.254/RFC1918/userinfo → 502 route_unavailable，错误体无泄漏、0 上游请求）、路径/方法/归一化、431 超大头、413 超大 body。
+- `VirtualKeyAuthContractTest$HeaderSmuggling`（3）：伪造凭证 Header 在鉴权层 401（0 上游请求）、重复 Authorization → 401、hop-by-hop/`X-MiQroKey-*` 剥离、只有注入凭证到达上游且客户端 Key 不泄漏。
+
+### 验证
+
+- 本地 Windows：`verify -P integration` → **742 tests / 0 failures / 0 errors / 5 skipped**（G2.5 基线 714，POSIX 跳过 5）。
+- 契约测试用 `@Primary` loopback allowlist（`127.0.0.0/8, ::1/128`）；集成测试用动态属性；严格路径类不 import `GatewayAuthTestConfig`。
+
+### 文档
+
+- `security.md` §6（SSRF 双重门控、入站防护、错误脱敏）、`api-contract.md` §7.1（502/404/405/401/413/431 语义 + 走私防护）、`configuration-reference.md`（`ALLOWED_CIDRS`/`MAX_INBOUND_HEADER_BYTES` 精确语义）。
+
+### 风险与边界
+
+- 生产默认严格路径：本地自建模型须显式配置 `MIQROKEY_UPSTREAM_ALLOWED_CIDRS`。
+- 上游 `http` 仅 allowlist 放行；`FOLLOW_REDIRECTS` 保持禁用（重定向不改变已校验目标）。
+- 未接管理 API body 上限（`MIQROKEY_MAX_CONTROL_BODY_BYTES` 属控制面，G2.6 只覆盖数据面）。
+- 已知偶发 flaky（与本 Goal 无关，既有代码）：`AuditChainIntegrityTest.preLockTimestampsDoNotAffectHeadOrdering` 在完整套件下偶发 hash 不匹配（共享 Testcontainers 容器 + 8 线程并发写入），单独运行与重跑完整套件均通过（G2.5/G2.6 前两次完整验证亦通过）。归因于并发时序，待 G4.x 控制面收尾时单独排查。
 
 ## G2.5 — Timeout, retry, cancellation and backpressure（G2.5 超时/重试/取消/背压，DONE）
 

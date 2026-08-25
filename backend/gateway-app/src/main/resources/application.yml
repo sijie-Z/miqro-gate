@@ -1,5 +1,8 @@
 server:
   port: ${MIQROKEY_GATEWAY_PORT:8081}
+  netty:
+    # G2.6: reject oversized inbound headers before the handler runs.
+    max-header-size: ${MIQROKEY_MAX_INBOUND_HEADER_BYTES:32KB}
 
 spring:
   application:
@@ -50,6 +53,10 @@ miqrokey:
       stream-idle-timeout: ${MIQROKEY_UPSTREAM_STREAM_IDLE_TIMEOUT:PT5M}
       response-timeout: ${MIQROKEY_UPSTREAM_RESPONSE_TIMEOUT:PT10M}
       max-proxy-buffer: ${MIQROKEY_MAX_PROXY_BUFFER_BYTES:256KB}
+      # G2.6 SSRF guard: CIDRs whose addresses may be targeted even though they
+      # are non-public (loopback/link-local/private) or plain http. Empty =
+      # https-only, public-address-only targets.
+      allowed-cidrs: ${MIQROKEY_UPSTREAM_ALLOWED_CIDRS:}
 
   cache:
     # Response cache (L1 Caffeine + L2 PostgreSQL): DISABLED by default.
