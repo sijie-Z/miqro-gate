@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.testing;
 
+import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyRing;
 import com.miqroera.miqrokey.domain.crypto.VirtualKeyCrypto;
 import com.miqroera.miqrokey.domain.crypto.VirtualKeyMaterial;
@@ -128,7 +129,10 @@ public final class GatewayTestKeys {
         }
 
         public RouteSnapshot.CredentialRecord credentialRecord(String baseUrl) {
-            return new RouteSnapshot.CredentialRecord(credentialId, TENANT_ID, productId, baseUrl, AUTH_SCHEME);
+            // Synthetic ciphertext/nonce (the fixture injector never decrypts):
+            // the snapshot contract requires the ACTIVE version's EncryptedSecret.
+            return new RouteSnapshot.CredentialRecord(credentialId, TENANT_ID, productId, baseUrl, AUTH_SCHEME,
+                    new EncryptedSecret(new byte[]{1, 2, 3}, new byte[]{4, 5, 6}, "v1"));
         }
     }
 }

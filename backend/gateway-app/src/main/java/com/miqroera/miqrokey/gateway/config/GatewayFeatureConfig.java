@@ -71,15 +71,18 @@ public class GatewayFeatureConfig {
     }
 
     /**
-     * Production credential injector (decrypts the ACTIVE credential version).
+     * Production credential injector: resolves the credential from the route
+     * snapshot and decrypts the ACTIVE version's ciphertext in memory on the
+     * bounded scheduler. The hot path performs NO database access — ciphertext,
+     * base URL and auth scheme all come from the versioned read-only snapshot.
      * Tests override this bean with a fixed-value injector.
      */
     @Bean
     @ConditionalOnMissingBean
-    public CredentialInjector jdbcCredentialInjector(
-            ObjectProvider<com.miqroera.miqrokey.route.CredentialSecretLoader> loader,
-            Scheduler credentialDecryptScheduler, com.fasterxml.jackson.databind.ObjectMapper objectMapper,
-            RouteSnapshotProvider routeSnapshotProvider) {
-        return new JdbcCredentialInjector(loader, credentialDecryptScheduler, objectMapper, routeSnapshotProvider);
+    public CredentialInjector jdbcCredentialInjector(RouteSnapshotProvider routeSnapshotProvider,
+            ObjectProvider<com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider> keyEncryptionProvider,
+            Scheduler credentialDecryptScheduler, com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+        return new JdbcCredentialInjector(routeSnapshotProvider, keyEncryptionProvider, credentialDecryptScheduler,
+                objectMapper);
     }
 }

@@ -2,11 +2,12 @@ package com.miqroera.miqrokey.gateway.proxy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
+import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
 import com.miqroera.miqrokey.domain.crypto.impl.SecretWiping;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import com.miqroera.miqrokey.gateway.vkey.AuthContext;
 import com.miqroera.miqrokey.gateway.vkey.AuthFailureException;
-import com.miqroera.miqrokey.route.CredentialSecretLoader;
 import com.miqroera.miqrokey.route.RouteSnapshotProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,31 +20,32 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * Production {@link CredentialInjector}: resolves the route snapshot's
- * credential record and decrypts the ACTIVE credential version on a dedicated
- * bounded-elastic scheduler (blocking JDBC + AES must never run on the event
- * loop).
+ * credential record and decrypts the ACTIVE version's ciphertext — which the
+ * snapshot loader already loaded at refresh time — in memory on a dedicated
+ * bounded-elastic scheduler.
  *
  * <p>
- * The plaintext secret is zero-filled immediately after building the header
- * value. The header value itself is a {@link String} (HTTP headers cannot carry
- * mutable bytes); it lives only inside the forwarded request.
+ * The hot path performs NO database access: the ciphertext, base URL, and auth
+ * scheme all come from the versioned read-only snapshot. The plaintext secret
+ * is zero-filled immediately after building the header value.
  * </p>
  */
 public final class JdbcCredentialInjector implements CredentialInjector {
 
     private static final Logger log = LoggerFactory.getLogger(JdbcCredentialInjector.class);
 
-    private final ObjectProvider<CredentialSecretLoader> loaderProvider;
+    private final RouteSnapshotProvider routeSnapshotProvider;
+    private final ObjectProvider<KeyEncryptionProvider> keyEncryptionProvider;
     private final Scheduler scheduler;
     private final ObjectMapper objectMapper;
-    private final RouteSnapshotProvider routeSnapshotProvider;
 
-    public JdbcCredentialInjector(ObjectProvider<CredentialSecretLoader> loaderProvider, Scheduler scheduler,
-            ObjectMapper objectMapper, RouteSnapshotProvider routeSnapshotProvider) {
-        this.loaderProvider = loaderProvider;
+    public JdbcCredentialInjector(RouteSnapshotProvider routeSnapshotProvider,
+            ObjectProvider<KeyEncryptionProvider> keyEncryptionProvider, Scheduler scheduler,
+            ObjectMapper objectMapper) {
+        this.routeSnapshotProvider = routeSnapshotProvider;
+        this.keyEncryptionProvider = keyEncryptionProvider;
         this.scheduler = scheduler;
         this.objectMapper = objectMapper;
-        this.routeSnapshotProvider = routeSnapshotProvider;
     }
 
     @Override
@@ -56,17 +58,22 @@ public final class JdbcCredentialInjector implements CredentialInjector {
                 return Mono.error(new AuthFailureException(HttpStatus.BAD_GATEWAY, "route_unavailable",
                         "Upstream credential is not available"));
             }
-            CredentialSecretLoader loader = loaderProvider.getIfAvailable();
-            if (loader == null) {
+            EncryptedSecret encrypted = credential.encryptedSecret();
+            if (encrypted == null) {
+                log.warn("No ACTIVE credential version in route snapshot for credential {}",
+                        ctx.binding().credentialId());
+                return Mono.error(new AuthFailureException(HttpStatus.BAD_GATEWAY, "route_unavailable",
+                        "Upstream credential has no ACTIVE version"));
+            }
+            KeyEncryptionProvider crypto = keyEncryptionProvider.getIfAvailable();
+            if (crypto == null) {
+                // Crypto subsystem unavailable (persistence disabled): fail closed.
                 return Mono.error(new AuthFailureException(HttpStatus.BAD_GATEWAY, "route_unavailable",
                         "Credential decryption is not available"));
             }
             AuthScheme scheme = parseAuthScheme(credential.authScheme());
             return Mono.fromCallable(() -> {
-                byte[] secret = loader.loadActiveSecret(ctx.tenantId(), ctx.binding().credentialId());
-                if (secret == null) {
-                    return null;
-                }
+                byte[] secret = crypto.decrypt(encrypted, ctx.tenantId(), ctx.binding().credentialId());
                 try {
                     String value = switch (scheme.type()) {
                         case "raw" -> new String(secret, StandardCharsets.UTF_8);
@@ -76,11 +83,7 @@ public final class JdbcCredentialInjector implements CredentialInjector {
                 } finally {
                     SecretWiping.clearArray(secret);
                 }
-            }).subscribeOn(scheduler)
-                    .flatMap(value -> value != null
-                            ? Mono.just(value)
-                            : Mono.error(new AuthFailureException(HttpStatus.BAD_GATEWAY, "route_unavailable",
-                                    "Upstream credential has no ACTIVE version")));
+            }).subscribeOn(scheduler);
         });
     }
 

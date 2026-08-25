@@ -1,8 +1,8 @@
 package com.miqroera.miqrokey.gateway.config;
 
+import com.miqroera.miqrokey.route.PersistenceProperties;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -24,17 +24,8 @@ import javax.sql.DataSource;
  */
 @Configuration
 @ConditionalOnProperty(prefix = "miqrokey.gateway.persistence", name = "enabled", havingValue = "true")
-@EnableConfigurationProperties(GatewayDataSourceConfig.PersistenceProperties.class)
+@EnableConfigurationProperties(PersistenceProperties.class)
 public class GatewayDataSourceConfig {
-
-    @ConfigurationProperties(prefix = "miqrokey.gateway.persistence")
-    public record PersistenceProperties(String url, String username, String password, int poolSize) {
-
-        public PersistenceProperties {
-            url = url == null || url.isBlank() ? null : url;
-            poolSize = poolSize <= 0 ? 5 : poolSize;
-        }
-    }
 
     /**
      * The single gateway DataSource. HikariCP with a small pool: the gateway's

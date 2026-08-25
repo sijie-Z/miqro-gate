@@ -69,11 +69,12 @@ public class VirtualKeyService {
     private final VirtualKeyCrypto keyCrypto;
     private final AuditService auditService;
     private final AuthProperties authProperties;
+    private final RouteRefreshPublisher routeRefreshPublisher;
 
     public VirtualKeyService(VirtualKeyRepository keyRepository, KeyProjectBindingRepository bindingRepository,
             ProjectRepository projectRepository, ProjectProviderGrantRepository grantRepository,
             ProjectMembershipRepository membershipRepository, VirtualKeyCrypto keyCrypto, AuditService auditService,
-            AuthProperties authProperties) {
+            AuthProperties authProperties, RouteRefreshPublisher routeRefreshPublisher) {
         this.keyRepository = keyRepository;
         this.bindingRepository = bindingRepository;
         this.projectRepository = projectRepository;
@@ -82,6 +83,7 @@ public class VirtualKeyService {
         this.keyCrypto = keyCrypto;
         this.auditService = auditService;
         this.authProperties = authProperties;
+        this.routeRefreshPublisher = routeRefreshPublisher;
     }
 
     /**
@@ -140,6 +142,7 @@ public class VirtualKeyService {
                     auditSummary("name", sanitize(request.name()), "purpose", request.purpose(), "models",
                             requested.size(), "cachePolicy", cachePolicy),
                     requestId);
+            routeRefreshPublisher.publishChanged();
             return response(keyId, material, now);
         } finally {
             material.destroy();
@@ -188,6 +191,7 @@ public class VirtualKeyService {
                     auditSummary("name", sanitize(oldKey.name()), "purpose", oldKey.purpose(), "models", models.size(),
                             "cachePolicy", oldKey.cachePolicy()),
                     requestId);
+            routeRefreshPublisher.publishChanged();
             return response(newKeyId, material, now);
         } finally {
             material.destroy();
@@ -212,6 +216,7 @@ public class VirtualKeyService {
         keyRepository.update(revoked);
         auditService.record(key.tenantId(), user.id(), "VIRTUAL_KEY_REVOKE", "VIRTUAL_KEY", key.id(),
                 auditSummary("status", "REVOKED"), requestId);
+        routeRefreshPublisher.publishChanged();
     }
 
     /** Lists the caller's own keys with safe metadata (no secrets). */

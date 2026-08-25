@@ -137,7 +137,8 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 | `MIQROKEY_GATEWAY_DB_USERNAME` | `miqrokey` | 数据面用户名 |
 | `MIQROKEY_GATEWAY_DB_PASSWORD` | 空 | 数据面密码（生产用 `_FILE` 约定或 Secret 挂载） |
 | `MIQROKEY_GATEWAY_DB_POOL_SIZE` | `5` | 数据面连接池；热路径不执行阻塞查询，快照刷新在专用调度器 |
-| `MIQROKEY_GATEWAY_ROUTE_REFRESH_INTERVAL` | `30s` | 路由快照刷新周期；吊销/轮换按此传播（宽限期配置见 4.5） |
+| `MIQROKEY_GATEWAY_ROUTE_REFRESH_INTERVAL` | `30s` | 路由快照刷新周期——兜底机制；正常路径由 `pg_notify` 事件即时刷新，通知丢失时按此周期自愈（宽限期配置见 4.5） |
+| `MIQROKEY_GATEWAY_ROUTE_NOTIFY_CHANNEL` | `miqrokey_route_refresh` | PostgreSQL `LISTEN/NOTIFY` 通道名；控制面在变更事务提交后（AFTER_COMMIT）向该通道发布通知，Gateway 专用连接监听并立即重载快照 |
 | `MIQROKEY_GATEWAY_QUEUE_CAPACITY` | `10000` | 用量写入有界队列容量 |
 | `MIQROKEY_GATEWAY_QUEUE_FLUSH_THRESHOLD` | `100` | 批量 flush 条数上限 |
 | `MIQROKEY_GATEWAY_QUEUE_FLUSH_INTERVAL` | `5s` | 批量 flush 周期 |

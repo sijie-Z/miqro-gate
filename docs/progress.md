@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G2.1`（Provider SPI and signed catalog core）
-- Goal status: `DONE`（本地全绿 666 tests/0 fail/0 error；`.\mvnw.cmd -f backend/pom.xml verify` BUILD SUCCESS）
-- Last updated: `2026-08-25 12:20 CST`
-- Branch: `goal/g2.1-provider-spi-and-signed-catalog`（验证通过，待 commit/PR）
+- Current goal: `G2.2`（Gateway route snapshot and virtual key auth — 收尾：热路径凭证密文快照 + PostgreSQL NOTIFY 刷新事件）
+- Goal status: `DONE`（实现、测试、全量验证、文档全部完成；PR 已开）
+- Last updated: `2026-08-25 14:05 CST`
+- Branch: `goal/g2.2-route-snapshot-and-vkey-auth`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,8 +86,8 @@
 
 ## Next Goal
 
-- Goal ID: `G2.2`
-- Name: Gateway route snapshot and virtual key auth
+- Goal ID: `G2.3`
+- Name: Models endpoint（`/v1/models` 按 Virtual Key 权限返回模型 — 目录∩上游∩Grant∩Key 交集）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)
 
@@ -969,3 +969,43 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - 响应缓存默认关闭（ADR-0008 决策），正式启用前需新增 ADR。
 - `request_usage_records` 完整分区表（规格 §6）未实现，当前使用 `usage_event` 事实表；G4.x 需要时再演进。
 - 前端 chunk 1MB+ 警告：Element Plus 全量引入；可按需引入优化（非阻塞）。
+
+## G2.2 — Gateway route snapshot and virtual key auth（收尾：热路径凭证密文快照 + PostgreSQL NOTIFY 刷新事件，DONE）
+
+### Outcome
+
+本 Goal 只覆盖 G2.2 两个未满足的验收项（快照与 Virtual Key 鉴权主体已在 tag-routing-usage-closed-loop 完成）：
+
+1. **热路径零阻塞数据库调用**：`RouteSnapshot.CredentialRecord` 携带 ACTIVE 版本的 `EncryptedSecret`（密文 + nonce + keyVersion，防御性拷贝；快照只持密文，明文绝不进快照）。`JdbcRouteSnapshotLoader.loadCredentials()` JOIN `upstream_credential_versions`（`c.active_version_id = v.id`，部分唯一索引 `uq_credential_versions_one_active` 保证 ≤1 行）。`JdbcCredentialInjector` 改为在内存有界 `credentialDecryptScheduler` 上解密并复用既有 `SecretWiping` 清零——热路径零 JDBC。`CredentialSecretLoader` 已删除（快照重写后零引用死代码）。轮换语义保持：快照加载始终读当前 `active_version_id`，轮换后下一次刷新即路由新版本；在途请求已持有其解析的 Secret 不受影响。
+2. **刷新事件 = PostgreSQL LISTEN/NOTIFY**（控制面与 Gateway 是两个进程共享同一 PostgreSQL，进程内事件不可用）：
+   - 通道契约 `miqrokey_route_refresh`（配置项 `miqrokey.gateway.route-snapshot.notify-channel`，默认同契约名）。
+   - 控制面发布端：`RouteSnapshotRefreshNotifier` 执行 `SELECT pg_notify('miqrokey_route_refresh','')`——必须用普通 `Statement.execute`（简单查询协议）：pgjdbc 的 `executeUpdate` 对 void 返回 SELECT 会在通知已发出后抛 "Unexpected result returned"。`RouteRefreshPublisher` + `RouteRefreshPublisherAfterCommit` 用 `TransactionSynchronizationManager.registerSynchronization` 在 **AFTER_COMMIT** 发布（回滚绝不发布）；挂接 5 个变更方法：`VirtualKeyService.create/rotate/revoke`、`AdminCredentialService.rotate/disable`（无 Grant/Project 变更服务，无需挂接）。发布失败只记日志——已提交的数据变更绝不回滚，30s 定时刷新兜底。
+   - Gateway 监听端：`RouteSnapshotRefreshListener` 专用 `DriverManager` 连接（不进 Hikari 池——`LISTEN` 钉死连接为进程生命周期）、daemon 线程 `getNotifications(2000)` 轮询、失连指数退避重连（500ms→30s 封顶）、`close()` = running=false + interrupt + join(5000) 幂等停止；仅 `miqrokey.gateway.persistence.enabled=true` 时装配（`destroyMethod="close"`）。通知到达即调 `RouteSnapshotRefresher.refresh()`（版本递增并安装到 holder，保留 last-good）。定时刷新保留为兜底：丢失通知在下一刷新周期自愈。
+   - `RouteSnapshotConfig` 收敛为单一 `NamedParameterJdbcTemplate`（复用 `gatewayJdbcTemplate`），消除 QueueConfig 无限定注入的 `NoUniqueBeanDefinitionException`。
+
+### Verification
+
+- 全量 `./mvnw.cmd -f backend/pom.xml verify -P integration --batch-mode`（本机 Docker Desktop，Testcontainers 集成测试实跑）：**BUILD SUCCESS** —— **674 tests / 0 failures / 5 skipped**（POSIX 权限测试在 Windows 跳过）
+  - domain 86、provider-spi 8、provider-adapters 25、persistence-postgres 118（5 skipped）、route-snapshot 3、queue-spi 6、control-plane-app 179、test-support 109、gateway-app 140、cache-spi 0
+- 新增 9 个测试全绿：
+  - `SnapshotRefreshListenerTest`（3，Mockito fake JDBC）：通知触发 refresh；close 停止线程并关连接；失连退避重连后重新 LISTEN
+  - `RouteRefreshPublisherAfterCommitTest`（3，真实 H2 事务）：提交后发布一次；回滚不发布；无 notifier bean 安全 no-op
+  - `RouteSnapshotRefreshNotifierTest`（2，集成）：提交的 create 让 LISTEN 探针收到 NOTIFY；回滚的 create 探针零通知
+  - `RouteSnapshotRefreshIntegrationTest`（1，集成）：网关 Listener 收到 `pg_notify` 后快照版本 1→2（调度已改为 1h，证明事件即时生效），断言新 Key 与绑定进入快照
+- Spotless check：全模块 PASS（apply 后干净）；`git diff --check`：PASS；Maven Enforcer：PASS
+- `GatewayNoBlockingTest` 不变通过：监听线程是普通 daemon 线程，不进 Reactor event loop，无新增 `.block()`
+
+### Files changed
+
+- **domain**：`RouteSnapshot.java` — `CredentialRecord` + `EncryptedSecret`（类 javadoc 声明快照只持密文）
+- **route-snapshot**：`JdbcRouteSnapshotLoader`（JOIN 活动版本 + 密文映射）、新 `RouteSnapshotRefreshListener`、`RouteSnapshotConfig`（单一 JDBC 模板 + 监听器 bean）、删除 `CredentialSecretLoader`、pom +spring-boot-starter-test
+- **gateway-app**：`JdbcCredentialInjector`（内存解密 + 清零）、`GatewayFeatureConfig`/`GatewayDataSourceConfig`（监听器装配）、`application.yml`（notify-channel）、pom +testcontainers（junit-jupiter/postgresql/core）、新 `RouteSnapshotRefreshIntegrationTest`
+- **control-plane-app**：新 `support/RouteSnapshotRefreshNotifier`、新 `service/RouteRefreshPublisher` + `RouteRefreshPublisherAfterCommit`、`VirtualKeyService`/`AdminCredentialService`（AFTER_COMMIT 发布）、两个新测试类
+- **test-support**：`GatewayTestKeys` fixture（CredentialRecord 带 EncryptedSecret fixture）
+- **文档**：architecture.md §4.1（NOTIFY 通道契约 + 快照密文/热路径解密流程）、configuration-reference.md §5.1（notify-channel、refresh-interval 语义更新为兜底）、progress.md
+
+### Remaining risks
+
+- 通知丢失或控制面不可达时由 30s 定时刷新自愈（last-good 快照保留）；监听器断线有指数退避重连。
+- 单节点单 Gateway 监听者（v1 范围）；多实例时 LISTEN/NOTIFY 的重复通知/放大语义留待多节点部署目标处理（architecture.md 已注明）。
+- 真实供应商凭证未提供：凭证注入只经 Mock 上游验证，真实联调 `WAITING_FOR_CREDENTIAL`。
