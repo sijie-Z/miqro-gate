@@ -39,6 +39,7 @@ miqrokey:
       capacity: ${MIQROKEY_GATEWAY_QUEUE_CAPACITY:10000}
       flush-threshold: ${MIQROKEY_GATEWAY_QUEUE_FLUSH_THRESHOLD:100}
       flush-interval: ${MIQROKEY_GATEWAY_QUEUE_FLUSH_INTERVAL:5s}
+      writer-threads: ${MIQROKEY_GATEWAY_QUEUE_WRITER_THREADS:4}
     coalescer:
       # Request coalescing (single-flight): DISABLED by default (ADR-0008).
       enabled: ${MIQROKEY_GATEWAY_COALESCER_ENABLED:false}

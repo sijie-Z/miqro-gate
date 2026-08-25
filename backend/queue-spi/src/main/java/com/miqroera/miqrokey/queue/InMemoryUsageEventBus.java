@@ -1,6 +1,8 @@
 package com.miqroera.miqrokey.queue;
 
 import com.miqroera.miqrokey.domain.usage.CacheHitEvent;
+import com.miqroera.miqrokey.domain.usage.RequestCompletedEvent;
+import com.miqroera.miqrokey.domain.usage.RequestStartedEvent;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
 
 import java.util.ArrayList;
@@ -21,6 +23,8 @@ public final class InMemoryUsageEventBus implements UsageEventBus {
     private final BlockingQueue<Object> queue;
     private final List<UsageEvent> usageEvents = Collections.synchronizedList(new ArrayList<>());
     private final List<CacheHitEvent> hitEvents = Collections.synchronizedList(new ArrayList<>());
+    private final List<RequestStartedEvent> startedEvents = Collections.synchronizedList(new ArrayList<>());
+    private final List<RequestCompletedEvent> completedEvents = Collections.synchronizedList(new ArrayList<>());
     private final AtomicLong totalPublished = new AtomicLong();
     private final AtomicLong totalDropped = new AtomicLong();
     private final AtomicLong flushCount = new AtomicLong();
@@ -31,15 +35,25 @@ public final class InMemoryUsageEventBus implements UsageEventBus {
 
     @Override
     public void publish(UsageEvent event) {
-        if (!queue.offer(event)) {
-            totalDropped.incrementAndGet();
-        } else {
-            totalPublished.incrementAndGet();
-        }
+        offer(event);
     }
 
     @Override
     public void publish(CacheHitEvent event) {
+        offer(event);
+    }
+
+    @Override
+    public void publish(RequestStartedEvent event) {
+        offer(event);
+    }
+
+    @Override
+    public void publish(RequestCompletedEvent event) {
+        offer(event);
+    }
+
+    private void offer(Object event) {
         if (!queue.offer(event)) {
             totalDropped.incrementAndGet();
         } else {
@@ -56,6 +70,10 @@ public final class InMemoryUsageEventBus implements UsageEventBus {
                 usageEvents.add(ue);
             } else if (item instanceof CacheHitEvent he) {
                 hitEvents.add(he);
+            } else if (item instanceof RequestStartedEvent se) {
+                startedEvents.add(se);
+            } else if (item instanceof RequestCompletedEvent ce) {
+                completedEvents.add(ce);
             }
         }
         flushCount.incrementAndGet();
@@ -73,15 +91,30 @@ public final class InMemoryUsageEventBus implements UsageEventBus {
         return List.copyOf(hitEvents);
     }
 
+    /** Published lifecycle starts since the last flush (test assertions). */
+    public List<RequestStartedEvent> startedEvents() {
+        flush();
+        return List.copyOf(startedEvents);
+    }
+
+    /** Published lifecycle completions since the last flush (test assertions). */
+    public List<RequestCompletedEvent> completedEvents() {
+        flush();
+        return List.copyOf(completedEvents);
+    }
+
     public void clear() {
         usageEvents.clear();
         hitEvents.clear();
+        startedEvents.clear();
+        completedEvents.clear();
         queue.clear();
     }
 
     @Override
     public QueueMetrics metrics() {
-        return new QueueMetrics(queue.size(), totalPublished.get(), usageEvents.size() + hitEvents.size(),
+        return new QueueMetrics(queue.size(), totalPublished.get(),
+                usageEvents.size() + hitEvents.size() + startedEvents.size() + completedEvents.size(),
                 totalDropped.get(), flushCount.get(), java.time.Duration.ZERO, null);
     }
 }

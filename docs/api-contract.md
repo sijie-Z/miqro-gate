@@ -383,6 +383,7 @@
   - **Key 快照**：该 Key 的 `virtual_key_models`。
   - 在官方 API 适配器实现（G3.x）之前 `model_catalog` 为空，严格交集的结果是空列表——不泄漏未授权模型是刻意的，不是缺陷。
 - 用量记录：每个请求写入 `usage_event`（幂等，`provider_request_id` 在 tenant 内唯一）；usage 缺失时标记 `usage_missing=true`；正文（prompt、代码、工具、回答）永不进入持久化。
+- 生命周期记录（G2.4）：每个**到达上游**的请求在 `request_usage_records` 打开 `IN_FLIGHT` 行并恰好 finalize 一次——包括客户端取消、上游错误与超时（状态见 usage-accounting §2）；鉴权失败与缓存命中不打开记录。usage 从 SSE 事件或非流式 JSON 正文解析（仅计数）；SUCCEEDED 但无 usage 时 `usage_missing=true`，绝不静默记零。
 
 Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 ID 都进入用量记录；不得覆盖供应商 request ID Header。
 

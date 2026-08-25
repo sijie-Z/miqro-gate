@@ -7,6 +7,9 @@ import com.miqroera.miqrokey.cache.GatewayResponseCache;
 import com.miqroera.miqrokey.domain.cache.CacheKey;
 import com.miqroera.miqrokey.domain.usage.CacheHitEvent;
 import com.miqroera.miqrokey.domain.usage.CacheLevel;
+import com.miqroera.miqrokey.domain.usage.RequestCompletedEvent;
+import com.miqroera.miqrokey.domain.usage.RequestStartedEvent;
+import com.miqroera.miqrokey.domain.usage.RequestStatus;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
 import com.miqroera.miqrokey.gateway.vkey.AuthContext;
@@ -14,6 +17,7 @@ import com.miqroera.miqrokey.gateway.vkey.AuthFailureException;
 import com.miqroera.miqrokey.gateway.vkey.VirtualKeyResolver;
 import com.miqroera.miqrokey.queue.RequestCoalescer;
 import com.miqroera.miqrokey.queue.UsageEventBus;
+import com.miqroera.miqrokey.spi.ProtocolFamily;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -34,14 +38,17 @@ import org.springframework.web.reactive.function.client.WebClientRequestExceptio
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.SignalType;
 
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Transparent reactive proxy for Anthropic Messages, OpenAI Responses, and
@@ -62,6 +69,11 @@ import java.util.UUID;
  * <li><b>Observe</b> usage from SSE events (bounded, content never retained),
  * emit {@code UPSTREAM} usage events on completion, and store cacheable
  * responses for byte-identical replay.</li>
+ * <li><b>Record lifecycle</b>: every request that reaches upstream publishes a
+ * {@link RequestStartedEvent} (the {@code IN_FLIGHT} row) and finalizes exactly
+ * once with a {@link RequestCompletedEvent} — including client cancellation and
+ * upstream failure. Cache hits and auth failures never open a lifecycle
+ * record.</li>
  * </ol>
  *
  * <p>
@@ -194,6 +206,7 @@ public class ProxyController {
                     ? root.get("model").asText()
                     : null;
             boolean hasToolFields = root != null && (root.has("tools") || root.has("tool_choice"));
+            boolean streaming = root != null && root.has("stream") && root.get("stream").asBoolean(false);
 
             if (modelName != null && !ctx.models().contains(modelName)) {
                 return writeError(exchange, new AuthFailureException(HttpStatus.FORBIDDEN, "model_not_allowed",
@@ -214,7 +227,7 @@ public class ProxyController {
                 }
             }
 
-            return forward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis)
+            return forward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming)
                     .onErrorResume(AuthFailureException.class, e -> writeError(exchange, e))
                     .onErrorResume(WebClientRequestException.class,
                             e -> writeError(exchange, new AuthFailureException(HttpStatus.BAD_GATEWAY,
@@ -239,9 +252,10 @@ public class ProxyController {
      * leader failed falls back to its own upstream call.
      */
     private Mono<Void> forward(ServerWebExchange exchange, AuthContext ctx, byte[] body, String modelName,
-            CacheKey cacheKey, String requestId, long startMillis) {
+            CacheKey cacheKey, String requestId, long startMillis, boolean streaming) {
         RequestCoalescer coalescer = cacheKey != null ? coalescerProvider.getIfAvailable() : null;
-        Mono<CachedResponse> work = doForward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis);
+        Mono<CachedResponse> work = doForward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis,
+                streaming);
         if (coalescer == null) {
             return work.then();
         }
@@ -257,18 +271,22 @@ public class ProxyController {
         }).onErrorResume(e -> {
             log.debug("Coalescer wait failed (requestId={}); falling back to own upstream call: {}", requestId,
                     e.getMessage());
-            return doForward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis).then();
+            return doForward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming).then();
         });
     }
 
     /**
      * The full forward: credential injection, byte-exact request emission, and
-     * response streaming with bounded usage/cache observation. Completes with the
-     * observed {@link CachedResponse} (or a no-cache marker) once the response has
-     * been fully written; cancels (client disconnect) never emit usage.
+     * response streaming with bounded usage/cache observation. Publishes the
+     * request lifecycle — {@link RequestStartedEvent} just before the upstream
+     * call, then {@link RequestCompletedEvent} exactly once on any terminal signal,
+     * so a client disconnect or upstream failure finalizes the record too.
+     * Completes with the observed {@link CachedResponse} (or a no-cache marker)
+     * once the response has been fully written; usage events themselves are only
+     * emitted for fully completed requests.
      */
     private Mono<CachedResponse> doForward(ServerWebExchange exchange, AuthContext ctx, byte[] body, String modelName,
-            CacheKey cacheKey, String requestId, long startMillis) {
+            CacheKey cacheKey, String requestId, long startMillis, boolean streaming) {
         ServerHttpResponse clientResponse = exchange.getResponse();
         return credentialInjector.resolve(ctx).flatMap(cred -> {
             if (cred.baseUrl() == null || cred.baseUrl().isBlank()) {
@@ -279,13 +297,26 @@ public class ProxyController {
             HttpHeaders filteredHeaders = HeaderFilters.filterInboundHeaders(exchange.getRequest().getHeaders());
             filteredHeaders.set(cred.headerName(), cred.headerValue());
 
+            // Lifecycle start: only requests that actually reach upstream open a
+            // record (auth failures and cache hits emit no lifecycle row).
+            String wireProtocol = wireProtocolOf(exchange);
+            Instant startedAt = clock.instant();
+            publishLifecycleStart(ctx, modelName, requestId, startedAt, streaming, wireProtocol);
+
             TtfbRecorder ttfb = new TtfbRecorder(requestId, startMillis, clock);
             SseUsageObserver usageObserver = new SseUsageObserver(objectMapper, maxProxyBufferBytes);
+            AtomicReference<Integer> httpStatus = new AtomicReference<>();
+            AtomicReference<String> providerRequestId = new AtomicReference<>();
+            AtomicReference<Throwable> upstreamError = new AtomicReference<>();
+            // Final observed usage: set on the fully-written path so the terminal
+            // lifecycle record carries the same tokens as the usage event.
+            AtomicReference<TokenBucket> observedTokens = new AtomicReference<>();
 
             return webClient.post().uri(upstreamUri).headers(h -> h.addAll(filteredHeaders))
                     .body(BodyInserters.fromDataBuffers(Flux.just(exchange.getResponse().bufferFactory().wrap(body))))
                     .exchangeToMono(upstreamResponse -> {
                         int status = upstreamResponse.statusCode().value();
+                        httpStatus.set(status);
                         log.debug("Upstream response: requestId={}, status={}", requestId, status);
                         clientResponse.setStatusCode(HttpStatusCode.valueOf(status));
 
@@ -296,7 +327,8 @@ public class ProxyController {
                         if (cacheKey != null) {
                             clientResponse.getHeaders().set(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
                         }
-                        String providerRequestId = pickProviderRequestId(upstreamResponse);
+                        String upstreamRequestId = pickProviderRequestId(upstreamResponse);
+                        providerRequestId.set(upstreamRequestId);
 
                         boolean isSse = upstreamResponse.headers().contentType()
                                 .filter(type -> type.isCompatibleWith(MediaType.TEXT_EVENT_STREAM)).isPresent();
@@ -317,9 +349,16 @@ public class ProxyController {
                         return clientResponse.writeWith(observed).then(Mono.fromSupplier(() -> {
                             // The stream was fully written to the client.
                             TokenBucket tokens = mergeObservations(usageObserver);
+                            if (!isSse && tokens.isEmpty()) {
+                                // Non-streaming JSON: usage lives in the response
+                                // body, not SSE events. Only counts are extracted —
+                                // the body is never retained or persisted.
+                                tokens = SseUsageObserver.parseUsageJson(objectMapper, collector.bytes());
+                            }
+                            observedTokens.set(tokens);
                             boolean successful = status >= 200 && status < 300;
                             long latencyMs = clock.millis() - startMillis;
-                            publishUsageEvent(ctx, modelName, cacheKey, tokens, status, providerRequestId, requestId,
+                            publishUsageEvent(ctx, modelName, cacheKey, tokens, status, upstreamRequestId, requestId,
                                     latencyMs, true, successful && tokens.isEmpty());
 
                             CachedResponse cached = null;
@@ -337,6 +376,23 @@ public class ProxyController {
                                     : new CachedResponse(status, null, new HttpHeaders(), new byte[0],
                                             TokenBucket.EMPTY, false);
                         }));
+                    }).doOnError(upstreamError::set).doFinally(signal -> {
+                        // Reactor Netty can report a client disconnect as
+                        // ON_COMPLETE on the server write side when every buffered
+                        // byte was already flushed: the channel's terminate
+                        // completes the outbound instead of cancelling it. The
+                        // observed stream's own terminal signal is authoritative
+                        // for the client-cancel case — cancelling it is what
+                        // closes the upstream connection. An upstream failure must
+                        // not count as a client cancel, so require no error.
+                        boolean clientCancelled = signal == SignalType.CANCEL
+                                || (ttfb.terminalSignal() == SignalType.CANCEL && upstreamError.get() == null);
+                        TokenBucket tokens = observedTokens.get() != null
+                                ? observedTokens.get()
+                                : mergeObservations(usageObserver);
+                        publishLifecycleComplete(ctx, modelName, requestId, startedAt, streaming, wireProtocol, signal,
+                                httpStatus.get(), providerRequestId.get(), upstreamError.get(), ttfb, tokens,
+                                clientCancelled);
                     });
         });
     }
@@ -383,6 +439,92 @@ public class ProxyController {
 
     private static String hitLevelName(GatewayResponseCache.LookupLevel level) {
         return level == GatewayResponseCache.LookupLevel.L1_HIT ? "L1" : "L2";
+    }
+
+    // -------------------------------------------------------------------
+    // Request lifecycle → durable records
+    // -------------------------------------------------------------------
+
+    /**
+     * Opens the lifecycle record ({@code IN_FLIGHT}). Only called for requests that
+     * actually reach upstream. The instant is the partition key — the completion
+     * must carry the same value.
+     */
+    private void publishLifecycleStart(AuthContext ctx, String modelName, String requestId, Instant startedAt,
+            boolean streaming, String wireProtocol) {
+        try {
+            usageEventBus.publish(new RequestStartedEvent(UUID.randomUUID(), startedAt, requestId, ctx.tenantId(),
+                    ctx.key().userId(), ctx.projectId(), ctx.key().keyId(), ctx.snapshot().providerId(ctx.productId()),
+                    ctx.productId(), ctx.binding().credentialId(), wireProtocol, modelName, streaming));
+        } catch (RuntimeException e) {
+            log.warn("Failed to publish lifecycle start (requestId={}): {}", requestId, e.getMessage());
+        }
+    }
+
+    /**
+     * Finalizes the lifecycle record exactly once (the bus writer's guarded upsert
+     * only transitions {@code IN_FLIGHT} rows). Fires on every terminal signal —
+     * completion, upstream error, or client cancel. Never carries request or
+     * response content.
+     */
+    private void publishLifecycleComplete(AuthContext ctx, String modelName, String requestId, Instant startedAt,
+            boolean streaming, String wireProtocol, SignalType signal, Integer status, String upstreamRequestId,
+            Throwable upstreamError, TtfbRecorder ttfb, TokenBucket tokens, boolean clientCancelled) {
+        try {
+            boolean firstByteSeen = ttfb.ttfbMillis() > 0;
+            boolean streamCompleted = signal == SignalType.ON_COMPLETE;
+            RequestStatus lifecycleStatus = lifecycleStatus(status, clientCancelled, upstreamError, firstByteSeen);
+            Instant completedAt = clock.instant();
+            Long ttfbMs = firstByteSeen ? ttfb.ttfbMillis() : null;
+            Instant firstByteAt = firstByteSeen ? Instant.ofEpochMilli(ttfb.firstByteEpochMillis()) : null;
+            usageEventBus.publish(new RequestCompletedEvent(UUID.randomUUID(), startedAt, requestId, ctx.tenantId(),
+                    ctx.key().userId(), ctx.projectId(), ctx.key().keyId(), ctx.snapshot().providerId(ctx.productId()),
+                    ctx.productId(), ctx.binding().credentialId(), wireProtocol, modelName, streaming,
+                    upstreamRequestId, firstByteAt, completedAt, Duration.between(startedAt, completedAt).toMillis(),
+                    ttfbMs, status, lifecycleStatus, clientCancelled, firstByteSeen && !streamCompleted, tokens,
+                    lifecycleStatus == RequestStatus.SUCCEEDED && tokens.isEmpty()));
+        } catch (RuntimeException e) {
+            log.warn("Failed to publish lifecycle completion (requestId={}): {}", requestId, e.getMessage());
+        }
+    }
+
+    private static RequestStatus lifecycleStatus(Integer httpStatus, boolean clientCancelled, Throwable upstreamError,
+            boolean firstByteSeen) {
+        // A client cancel wins over a status that was already observed: the
+        // stream was cut short even if the upstream had started responding.
+        if (clientCancelled) {
+            return RequestStatus.CLIENT_CANCELLED;
+        }
+        if (httpStatus != null) {
+            return httpStatus >= 200 && httpStatus < 300 ? RequestStatus.SUCCEEDED : RequestStatus.UPSTREAM_REJECTED;
+        }
+        if (upstreamError != null) {
+            if (isTimeout(upstreamError)) {
+                return firstByteSeen ? RequestStatus.STREAM_INTERRUPTED : RequestStatus.TIMEOUT_BEFORE_FIRST_BYTE;
+            }
+            return firstByteSeen ? RequestStatus.STREAM_INTERRUPTED : RequestStatus.UPSTREAM_UNAVAILABLE;
+        }
+        return RequestStatus.UPSTREAM_UNAVAILABLE;
+    }
+
+    /** True when the error chain contains a (reactor-netty or JDK) timeout. */
+    private static boolean isTimeout(Throwable error) {
+        for (Throwable t = error; t != null; t = t.getCause()) {
+            if (t instanceof java.util.concurrent.TimeoutException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Maps the proxied path to the wire protocol family. */
+    private static String wireProtocolOf(ServerWebExchange exchange) {
+        return switch (exchange.getRequest().getURI().getPath()) {
+            case "/v1/messages" -> ProtocolFamily.ANTHROPIC_MESSAGES.name();
+            case "/v1/responses" -> ProtocolFamily.OPENAI_RESPONSES.name();
+            case "/v1/chat/completions" -> ProtocolFamily.OPENAI_CHAT_COMPLETIONS.name();
+            default -> ProtocolFamily.OPENAI_COMPATIBLE.name();
+        };
     }
 
     private TokenBucket mergeObservations(SseUsageObserver observer) {

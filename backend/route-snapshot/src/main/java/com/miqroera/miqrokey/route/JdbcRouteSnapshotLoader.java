@@ -40,6 +40,8 @@ import java.util.UUID;
  * {@code /v1/models} authorization inputs.</li>
  * <li>Product codes (provider_products.product_code) so the gateway can gate
  * products against the signed provider catalog.</li>
+ * <li>Owning provider ids (provider_products.provider_id) for request lifecycle
+ * records.</li>
  * </ul>
  */
 public final class JdbcRouteSnapshotLoader {
@@ -65,9 +67,9 @@ public final class JdbcRouteSnapshotLoader {
         Map<UUID, Set<String>> models = loadModels();
         Map<UUID, Set<String>> grantModels = loadGrantModels();
         Map<UUID, Set<String>> upstreamModels = loadUpstreamModels();
-        Map<UUID, String> productCodes = loadProductCodes();
+        ProductIds productIds = loadProductIds();
         return new RouteSnapshot(version, loadedAt, keys, bindings, credentials, models, grantModels, upstreamModels,
-                productCodes);
+                productIds.productCodes(), productIds.providerIds());
     }
 
     private Map<String, RouteSnapshot.KeyRecord> loadKeys() {
@@ -76,14 +78,15 @@ public final class JdbcRouteSnapshotLoader {
         // (revoked_at), so a rotated key keeps working while the replacement
         // propagates through the snapshot.
         jdbc.query("""
-                SELECT id, tenant_id, public_key_id, secret_digest, cache_policy, purpose, grant_id
+                SELECT id, tenant_id, user_id, public_key_id, secret_digest, cache_policy, purpose, grant_id
                 FROM virtual_keys
                 WHERE status = 'ACTIVE'
                    OR (status = 'ROTATING' AND revoked_at > now())
                 """, rs -> {
             RouteSnapshot.KeyRecord key = new RouteSnapshot.KeyRecord((UUID) rs.getObject("id"),
-                    (UUID) rs.getObject("tenant_id"), rs.getString("public_key_id"), rs.getBytes("secret_digest"),
-                    rs.getString("cache_policy"), rs.getString("purpose"), (UUID) rs.getObject("grant_id"));
+                    (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("user_id"), rs.getString("public_key_id"),
+                    rs.getBytes("secret_digest"), rs.getString("cache_policy"), rs.getString("purpose"),
+                    (UUID) rs.getObject("grant_id"));
             keys.put(key.publicKeyId(), key);
         });
         return keys;
@@ -203,16 +206,24 @@ public final class JdbcRouteSnapshotLoader {
 
     /**
      * Product codes ({@code provider_products.product_code}) so the gateway can
-     * gate products against the signed provider catalog.
+     * gate products against the signed catalog, and owning provider ids
+     * ({@code provider_products.provider_id}) so request lifecycle records keep the
+     * full identity chain without a join on the write path.
      */
-    private Map<UUID, String> loadProductCodes() {
+    private ProductIds loadProductIds() {
         Map<UUID, String> productCodes = new HashMap<>();
+        Map<UUID, UUID> providerIds = new HashMap<>();
         jdbc.query("""
-                SELECT id, product_code FROM provider_products
+                SELECT id, product_code, provider_id FROM provider_products
                 """, rs -> {
-            productCodes.put((UUID) rs.getObject("id"), rs.getString("product_code"));
+            UUID productId = (UUID) rs.getObject("id");
+            productCodes.put(productId, rs.getString("product_code"));
+            providerIds.put(productId, (UUID) rs.getObject("provider_id"));
         });
-        return productCodes;
+        return new ProductIds(productCodes, providerIds);
+    }
+
+    private record ProductIds(Map<UUID, String> productCodes, Map<UUID, UUID> providerIds) {
     }
 
     /**

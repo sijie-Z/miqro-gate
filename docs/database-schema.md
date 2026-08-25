@@ -220,39 +220,28 @@ Key → 项目绑定（标签路由的鉴权权威），与 `virtual_keys.projec
 
 缓存命中计数（L1/L2 命中不写 `usage_event`，在此去重计数）：`cache_key`、`virtual_key_id`、`project_id`、`provider_product_id`、`level`（`L1_HIT|L2_HIT`）、`occurred_at`、`gateway_request_id`。唯一 `(tenant_id, cache_key, level, occurred_at)`——同一秒内同一 cache_key 只记一次。
 
-### `request_usage_records`
+### `request_usage_records` (V8，当前实现子集)
 
-按 `started_at` 月度 range partition。记录在开始时创建为 `IN_FLIGHT`，结束后只允许一次 finalize；finalized 后业务字段不可修改。
+按 `started_at` 月度 range partition（V8 建 DEFAULT partition）。生命周期记录：到达上游的请求在开始时插入为 `IN_FLIGHT`，结束（含客户端取消、上游故障、超时）时**只允许 finalize 一次**——Guard 语义为 `ON CONFLICT (started_at, gateway_request_id) DO UPDATE ... WHERE request_status = 'IN_FLIGHT'`，retried flush 绝不重写已 finalized 记录、绝不双计；start 行丢失时 completion 事件自带完整 start 快照，独立插入终态行。
 
-关键列：
+**G2.4 已实现列**：
 
-- `id uuid`, `gateway_request_id`, `upstream_request_id`
-- `tenant_id`, `user_id`, `team_id nullable`, `project_id`
-- `virtual_key_id`, `subscription_id`, `credential_id`
-- 相关名称/指纹快照
-- `provider_id`, `provider_product_id`, `wire_protocol`, `model_id`
-- `started_at`, `first_byte_at`, `completed_at`
-- `duration_ms`, `time_to_first_byte_ms`
-- `http_status`, `request_status`, `error_category`
-- `streaming`, `client_cancelled`, `retry_count`, `partial_response`
-- 六类 Token、每类 authority、provider total
-- `provider_usage_json jsonb`（仅 usage 白名单）
-- `price_catalog_version`, `price_snapshot_json`
-- `official_estimated_cost`, `internal_estimated_cost`, `currency`
-- `plan_window_ref`, `usage_integrity`
+- `id uuid`、`gateway_request_id`、`upstream_request_id`
+- `tenant_id`（唯一 FK → `tenants`，`ON DELETE RESTRICT`）、`user_id`、`project_id`
+- `virtual_key_id`、`provider_id`、`provider_product_id`、`credential_id`
+- `model_id`、`wire_protocol`（`ANTHROPIC_MESSAGES|OPENAI_RESPONSES|OPENAI_CHAT_COMPLETIONS|OPENAI_COMPATIBLE`）
+- `started_at`、`first_byte_at`、`completed_at`、`duration_ms`、`time_to_first_byte_ms`
+- `http_status`、`request_status`（`IN_FLIGHT|SUCCEEDED|UPSTREAM_REJECTED|CLIENT_CANCELLED|UPSTREAM_UNAVAILABLE|TIMEOUT_BEFORE_FIRST_BYTE|STREAM_INTERRUPTED`）
+- `streaming`、`client_cancelled`、`partial_response`、`retry_count`
+- 六类 Token（`input/output/cache_creation_input/cache_read/prompt/completion/total/reasoning`，可为 NULL）
+- `usage_missing`（SUCCEEDED 但上游未返回 usage 时显式标记）
 - `finalized_at`
 
-主键包含分区键：`primary key (started_at, id)`；唯一 `(started_at, gateway_request_id)`。常用索引：
+主键含分区键：`primary key (started_at, id)`；幂等键唯一 `(started_at, gateway_request_id)`。常用索引：`(tenant_id, started_at desc)`、`(virtual_key_id, started_at desc)` 等。
 
-- `(tenant_id, started_at desc)`
-- `(user_id, started_at desc)`
-- `(project_id, started_at desc)`
-- `(virtual_key_id, started_at desc)`
-- `(credential_id, started_at desc)`
-- `(provider_product_id, model_id, started_at desc)`
-- 部分索引 `request_status <> 'SUCCEEDED'`
+**延后列（后续 Goal）**：`team_id`、`subscription_id`、相关名称/指纹快照、`error_category`、每类 token authority、`provider_usage_json jsonb`、`price_catalog_version`、`price_snapshot_json`、成本列、`plan_window_ref`、`usage_integrity`。
 
-正文、完整 Header 和 Secret 不得存在。
+正文、完整 Header 和 Secret 不得存在（G2.4 起写入路径不含任何正文内容）。
 
 ### `quota_snapshots`
 

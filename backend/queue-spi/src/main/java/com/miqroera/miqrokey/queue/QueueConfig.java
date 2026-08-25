@@ -11,6 +11,8 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.transaction.support.TransactionTemplate;
+import reactor.core.scheduler.Scheduler;
+import reactor.core.scheduler.Schedulers;
 
 import javax.sql.DataSource;
 import java.time.Clock;
@@ -23,7 +25,8 @@ import java.time.Duration;
  * <li>With {@code miqrokey.gateway.persistence.enabled=true}: a bounded
  * {@link PostgresUsageEventBus} drains batches into
  * {@link PostgresUsageEventWriter} (idempotent {@code ON CONFLICT DO NOTHING}
- * writes) on the scheduling thread.</li>
+ * writes) on a dedicated bounded writer executor
+ * ({@code miqrokey.gateway.queue.writer-threads}, default 4).</li>
  * <li>Otherwise (default, no DataSource): {@link InMemoryUsageEventBus} keeps
  * the gateway testable and the dev loop DB-free.</li>
  * </ul>
@@ -59,9 +62,22 @@ public class QueueConfig {
             return new PostgresUsageEventWriter(jdbc, queueTransactionTemplate);
         }
 
+        /**
+         * Dedicated bounded writer executor (CLAUDE.md: usage persistence is written in
+         * a dedicated bounded executor). Flushes run here, never on the shared
+         * scheduling thread, so a slow database cannot delay other scheduled work
+         * (route-snapshot refresh).
+         */
+        @Bean(destroyMethod = "dispose")
+        Scheduler usageWriterScheduler(QueueProperties props) {
+            return Schedulers.newBoundedElastic(props.writerThreads(), 100, "usage-writer");
+        }
+
         @Bean
-        UsageEventBus usageEventBus(UsageEventWriter usageEventWriter, QueueProperties props, Clock clock) {
-            return new PostgresUsageEventBus(props.capacity(), props.flushThreshold(), usageEventWriter, clock);
+        UsageEventBus usageEventBus(UsageEventWriter usageEventWriter, QueueProperties props, Clock clock,
+                Scheduler usageWriterScheduler) {
+            return new PostgresUsageEventBus(props.capacity(), props.flushThreshold(), usageEventWriter,
+                    usageWriterScheduler, clock);
         }
     }
 
@@ -89,7 +105,8 @@ public class QueueConfig {
 
     /** Bounded-queue tuning: {@code miqrokey.gateway.queue.*}. */
     @ConfigurationProperties(prefix = "miqrokey.gateway.queue")
-    public record QueueProperties(@DefaultValue("10000") int capacity, @DefaultValue("100") int flushThreshold) {
+    public record QueueProperties(@DefaultValue("10000") int capacity, @DefaultValue("100") int flushThreshold,
+            @DefaultValue("4") int writerThreads) {
 
         public QueueProperties {
             if (capacity <= 0) {
@@ -97,6 +114,9 @@ public class QueueConfig {
             }
             if (flushThreshold <= 0) {
                 throw new IllegalArgumentException("miqrokey.gateway.queue.flush-threshold must be > 0");
+            }
+            if (writerThreads <= 0) {
+                throw new IllegalArgumentException("miqrokey.gateway.queue.writer-threads must be > 0");
             }
         }
     }

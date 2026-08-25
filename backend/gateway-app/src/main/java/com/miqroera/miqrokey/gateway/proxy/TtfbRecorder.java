@@ -11,6 +11,7 @@ import java.time.Clock;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Records time-to-first-byte (TTFB) metadata without recording request or
@@ -37,6 +38,7 @@ public final class TtfbRecorder {
     private final AtomicLong firstByteMillis = new AtomicLong(-1);
     private final AtomicBoolean firstByteRecorded = new AtomicBoolean(false);
     private final AtomicLong completionMillis = new AtomicLong(-1);
+    private final AtomicReference<SignalType> terminalSignal = new AtomicReference<>();
 
     /**
      * Creates a new TTFB recorder for a proxied request.
@@ -76,11 +78,22 @@ public final class TtfbRecorder {
      *            the Reactor signal type (ON_COMPLETE, ON_ERROR, CANCEL)
      */
     public void recordCompletion(SignalType signalType) {
+        terminalSignal.set(signalType);
         completionMillis.set(clock.millis());
         long ttfb = firstByteMillis.get() > 0 ? firstByteMillis.get() - requestStartMillis : -1;
         long total = completionMillis.get() - requestStartMillis;
         log.debug("Request completed: requestId={}, signalType={}, ttfbMs={}, totalMs={}", requestId, signalType, ttfb,
                 total);
+    }
+
+    /**
+     * Returns the terminal signal observed on the upstream response stream
+     * (ON_COMPLETE, ON_ERROR or CANCEL), or null if the stream never terminated.
+     * This is the authoritative signal for the client-cancel case: cancelling the
+     * observed stream is what closes the upstream connection.
+     */
+    public SignalType terminalSignal() {
+        return terminalSignal.get();
     }
 
     /**
@@ -114,6 +127,14 @@ public final class TtfbRecorder {
     public long totalMillis() {
         long c = completionMillis.get();
         return c > 0 ? c - requestStartMillis : -1;
+    }
+
+    /**
+     * Returns the wall-clock epoch millis of the first observed upstream byte, or
+     * -1 if the stream never emitted.
+     */
+    public long firstByteEpochMillis() {
+        return firstByteMillis.get();
     }
 
     // package-private helpers for testing

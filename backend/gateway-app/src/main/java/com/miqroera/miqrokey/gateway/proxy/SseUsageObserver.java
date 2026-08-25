@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.gateway.proxy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.buffer.DataBuffer;
@@ -18,7 +19,9 @@ import java.util.List;
  * <p>
  * Supports Anthropic Messages, OpenAI Responses, and OpenAI Chat Completions
  * SSE usage formats. The observer searches for a {@code "usage"} JSON object at
- * common nesting levels and extracts numeric token fields.
+ * common nesting levels and extracts numeric token fields. The same extraction
+ * ({@link #parseUsageJson}) serves non-streaming JSON responses, where usage
+ * lives in the body instead of SSE events.
  * </p>
  */
 public final class SseUsageObserver {
@@ -148,6 +151,44 @@ public final class SseUsageObserver {
         if (observationLimitReached) {
             return;
         }
+        TokenBucket bucket = parseUsageJson(objectMapper, jsonBytes);
+        if (bucket.isEmpty()) {
+            return;
+        }
+        observations.add(new UsageObservation(bucket.inputTokens(), bucket.outputTokens(),
+                bucket.cacheCreationInputTokens(), bucket.cacheReadInputTokens(), bucket.promptTokens(),
+                bucket.completionTokens(), bucket.totalTokens(), bucket.reasoningTokens()));
+        log.debug("SSE usage metadata observed");
+
+        if (observations.size() >= maxObservations) {
+            observationLimitReached = true;
+            log.debug("SSE usage observer reached the maximum observation limit ({})", maxObservations);
+        }
+    }
+
+    /**
+     * Extracts usage metadata from a JSON body (an SSE event or a non-streaming
+     * response).
+     *
+     * <p>
+     * Tries the following nesting patterns in order:
+     * <ol>
+     * <li>Root-level {@code "usage"} (common to all protocols)</li>
+     * <li>{@code "message"."usage"} (Anthropic {@code message_start} events and
+     * Messages responses)</li>
+     * <li>{@code "response"."usage"} (OpenAI Responses {@code response.completed}
+     * events and Responses responses)</li>
+     * </ol>
+     * </p>
+     *
+     * <p>
+     * Reasoning tokens are extracted from {@code output_tokens_details} (OpenAI
+     * Responses) or {@code completion_tokens_details} (OpenAI Chat). Returns
+     * {@link TokenBucket#EMPTY} when no usage object is present or the body is not
+     * parseable.
+     * </p>
+     */
+    public static TokenBucket parseUsageJson(ObjectMapper objectMapper, byte[] jsonBytes) {
         try {
             JsonNode root = objectMapper.readTree(jsonBytes);
 
@@ -159,7 +200,7 @@ public final class SseUsageObserver {
                 usage = root.path("response").get("usage");
             }
             if (usage == null || !usage.isObject()) {
-                return;
+                return TokenBucket.EMPTY;
             }
 
             Long reasoningTokens = null;
@@ -170,19 +211,14 @@ public final class SseUsageObserver {
                 reasoningTokens = longValue(usage.path("completion_tokens_details"), "reasoning_tokens");
             }
 
-            observations.add(new UsageObservation(longValue(usage, "input_tokens"), longValue(usage, "output_tokens"),
+            return new TokenBucket(longValue(usage, "input_tokens"), longValue(usage, "output_tokens"),
                     longValue(usage, "cache_creation_input_tokens"), longValue(usage, "cache_read_input_tokens"),
                     longValue(usage, "prompt_tokens"), longValue(usage, "completion_tokens"),
-                    longValue(usage, "total_tokens"), reasoningTokens));
-            log.debug("SSE usage metadata observed");
-
-            if (observations.size() >= maxObservations) {
-                observationLimitReached = true;
-                log.debug("SSE usage observer reached the maximum observation limit ({})", maxObservations);
-            }
+                    longValue(usage, "total_tokens"), reasoningTokens);
         } catch (Exception ignored) {
             // Observation must never affect or expose the proxied response.
-            log.debug("SSE usage metadata could not be parsed");
+            log.debug("Usage metadata could not be parsed");
+            return TokenBucket.EMPTY;
         }
     }
 

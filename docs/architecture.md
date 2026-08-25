@@ -127,20 +127,27 @@ PostgreSQL 是唯一首版状态存储：
 ## 5. 请求时序
 
 ```text
-Client/CC Switch        Gateway          PostgreSQL snapshot       Upstream
-       |                   |                       |                    |
-       | request + VK      |                       |                    |
-       |------------------>| parse/verify VK       |                    |
-       |                   | resolve fixed route   |                    |
-       |                   | replace auth          |                    |
+Client/CC Switch        Gateway                PostgreSQL snapshot    PostgreSQL usage      Upstream
+       |                   |                         |                    |                    |
+       | request + VK      |                         |                    |                    |
+       |------------------>| parse/verify VK         |                    |                    |
+       |                   | resolve fixed route     |                    |                    |
+       |                   | replace auth            |                    |                    |
+       |                   |---- IN_FLIGHT (有界队列)------------------->|                    |
        |                   |------------------------------------------->|
-       |                   |                       |     SSE/response   |
-       |<------------------|<-------------------------------------------|
-       |                   | parse usage without content logging        |
-       |                   |---- append usage event ------------------->|
+       |                   |                         |                    |     SSE/response   |
+       |<------------------|<-------------------------------------------|--------------------|
+       |                   | parse usage without content logging        |                    |
+       |                   |---- finalize 记录 + usage event（批量）---->|                    |
 ```
 
 用量事件写入失败不能无提示丢失。首版采用本地有界缓冲加数据库批量写入；缓冲达到上限时 Gateway 应发送高优先级告警，并可切换为同步写入以保护审计完整性。
+
+**请求生命周期记录（G2.4 实现）**：每个到达上游的请求在发出前发布 `RequestStartedEvent`（`request_usage_records` 的 `IN_FLIGHT` 行），并在**任何**终态信号（完成、上游错误、超时、客户端取消）上恰好 finalize 一次（`RequestCompletedEvent`）。状态映射：上游返回状态码 → `SUCCEEDED` / `UPSTREAM_REJECTED`；客户端取消优先于已观测状态 → `CLIENT_CANCELLED`；超时未出首字节 → `TIMEOUT_BEFORE_FIRST_BYTE`（已出首字节 → `STREAM_INTERRUPTED`）；其余连接失败 → `UPSTREAM_UNAVAILABLE`。鉴权失败与缓存命中不打开记录。usage 从 SSE 事件或非流式 JSON 正文（仅提取计数，正文不保留）解析；SUCCEEDED 且无 usage 时 `usage_missing=true` 显式标记，绝不静默当作零。
+
+**批量写入（G2.4 实现）**：`queue-spi` 提供有界阻塞队列（默认容量 10000）、阈值/定时 flush（100 条或 5s）、专用有界 writer 执行器（`miqrokey.gateway.queue.writer-threads`，默认 4，`Schedulers.newBoundedElastic`）——flush 永不占用共享调度线程，数据库变慢不影响 route-snapshot 刷新节奏；in-flight 互斥防止 flush 重叠堆积。写失败把整批**按序重入队**并记 `warn`（幂等写入保证重试不双计），队列饱和 drop 时按高优先级 `warn` 计数——都不静默。指标经 Micrometer 暴露为无标签 gauge：`miqrokey.usage.queue.queued/published.total/persisted.total/dropped.total/flush.count/flush.last.duration.seconds`，供 `/actuator/prometheus` 抓取与告警。
+
+**幂等写入（G2.4 实现）**：`usage_event` 用 `ON CONFLICT (tenant_id, provider_request_id) DO NOTHING`，`cache_hit_event` 用 `(tenant_id, cache_key, level, occurred_at)`；生命周期记录 start 为 `ON CONFLICT (started_at, gateway_request_id) DO NOTHING`，completion 为带 `WHERE request_status = 'IN_FLIGHT'` 的 guarded upsert——重试 flush 绝不双计、绝不重写已 finalized 记录，start 行丢失时 completion 独立插入终态行。
 
 ## 6. 超时与重试
 
