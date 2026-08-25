@@ -129,22 +129,28 @@ Adapter/产品验证状态：
 
 ## 9. 包结构
 
+实现布局（Maven 模块，G2.1 已落地）：
+
 ```text
-provider-spi/
-provider-catalog/
-providers/
-  deepseek/
-  tencent/
-  zhipu/
-  minimax/
-  alibaba/
-  moonshot/
-  baidu/
-  volcengine/
-test-support/
+provider-spi/          com.miqroera.miqrokey.spi        SPI 契约与值对象（无 Spring、无 Jackson）
+provider-adapters/     com.miqroera.miqrokey.adapters
+  catalog/             签名目录加载：Ed25519 校验 + 严格 schema 校验 + classpath 资源
+  registry/            编译期适配器注册表（重复 adapterId 启动失败）
+  providers/           各供应商适配器实现（G3.x 加入）：
+    deepseek/
+    tencent/
+    zhipu/
+    minimax/
+    alibaba/
+    moonshot/
+    baidu/
+    volcengine/
+test-support/          Mock Provider 与契约测试工具
 ```
 
-核心 Gateway 只能依赖 `provider-spi`，不能出现 `if (vendor == ...)`。供应商模块通过 Spring 条件装配注册，重复 `adapterId` 启动失败。
+核心 Gateway 只能依赖 `provider-spi`，不能出现 `if (vendor == ...)`。供应商适配器在应用启动时通过 `AdapterRegistry.register()` 装配（编译期代码，禁止运行时发现或下载插件），重复 `adapterId` 启动失败。
+
+目录签名与密钥管理：内置目录 `provider-catalog.json` 由发布流程用 Ed25519 私钥签名（`provider-catalog.sig` 覆盖精确字节），部署侧只持有公钥（`catalog/keys/catalog-public.pem`）。私钥永不进入仓库、镜像或部署产物。目录是纯数据：schema 拒绝所有未知字段，适配器解析只按 `adapterId` 查编译期注册表，远程/被篡改目录不可能加载代码。
 
 ## 10. Adapter 验收
 

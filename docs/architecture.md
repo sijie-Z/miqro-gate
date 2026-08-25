@@ -42,8 +42,8 @@ miqro-key-gateway/
 ├── backend/
 │   ├── pom.xml
 │   ├── domain/                 # 纯领域模型和服务接口
-│   ├── provider-spi/           # 供应商、协议、余额、模型目录 SPI
-│   ├── provider-adapters/      # 各供应商实现
+│   ├── provider-spi/           # 供应商、协议、余额、模型目录 SPI（纯 Java + reactor-core，无 Spring/Jackson）
+│   ├── provider-adapters/      # 签名目录加载与校验、编译期适配器注册、各供应商实现
 │   ├── gateway-app/            # WebFlux 推理数据面
 │   ├── control-plane-app/      # 管理、门户、导出、告警 API
 │   ├── persistence-postgres/   # JPA/JDBC、Flyway、分区管理
@@ -58,7 +58,10 @@ miqro-key-gateway/
 
 建议使用 Maven 多模块。`domain`、`route-snapshot`、`queue-spi`、`cache-spi` 和 `provider-spi` 不依赖 Spring，防止业务模型被框架绑定。
 
-**当前实现的模块边界（G2.2/G2.4）**：
+**当前实现的模块边界（G2.1/G2.2/G2.4）**：
+
+- `provider-spi`：`com.miqroera.miqrokey.spi`——`ProviderProductAdapter` 契约及其值对象（`ProtocolFamily`、`ProviderProductDefinition`、`RouteContext`/`TargetRequest`、`CredentialMaterial`/`CredentialInjection`、`ProviderClient`、`UsageObserver`/`UsageObservation`、`PlanSnapshot`、`AdapterCapabilities`、`AdapterRegistry`）。核心 Gateway 只依赖此 SPI，禁止出现 `if (vendor == ...)` 分支。
+- `provider-adapters`：`com.miqroera.miqrokey.adapters`——内置签名目录（Ed25519 校验 + 严格 schema 校验 + classpath 加载，`catalog/` 子包）与编译期适配器注册表（`registry/BuiltInAdapterRegistry`，重复 `adapterId` 启动失败）。目录是纯数据：任何未知字段（含代码类名字段）被 schema 拒绝，适配器解析只按 `adapterId` 走注册表，远程目录不可能加载代码。具体供应商适配器在 G3.x 加入 `providers/` 子包。
 
 - `route-snapshot`：版本化只读快照——Gateway 在启动和定时刷新（默认 30s）时把 Virtual Key 摘要、Key→项目绑定、Grant 模型、项目标签、上游凭证密文加载为不可变快照；热路径零数据库访问，只做内存查询 + AES-256-GCM 解密。凭证解密后内存用完即清零。
 - `queue-spi`：有界用量写入队列契约 + 内存实现（容量默认 10000）。Gateway 观察器只产生不可变事件（含幂等键 `provider_request_id`），专用调度器批量写 PostgreSQL；队列满不静默丢弃，写失败保留重试，`INSERT ... ON CONFLICT DO NOTHING` 防双计。

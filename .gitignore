@@ -39,6 +39,9 @@ dist/
 *.jks
 *.keystore
 *.truststore
+# Exception: the catalog verification public key is not secret and ships with
+# the product (the private signing key never leaves the release environment).
+!backend/provider-adapters/src/main/resources/catalog/keys/catalog-public.pem
 !deploy/compose.yaml
 
 # OS

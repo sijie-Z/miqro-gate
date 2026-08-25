@@ -30,3 +30,8 @@
 *.jpg binary
 *.gif binary
 *.ico binary
+
+# Signed catalog payloads must be byte-identical on every checkout: the
+# Ed25519 signature (provider-catalog.sig) covers the exact manifest bytes,
+# so line-ending normalization would break verification on CRLF checkouts.
+backend/provider-adapters/src/main/resources/catalog/* -text
