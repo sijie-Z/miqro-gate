@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G2.4`（Usage lifecycle and reliable writer — 请求开始/完成记录、usage 解析和有界批量写入）
-- Goal status: `NOT_STARTED`
+- Current goal: `G2.5`（Timeout, retry, cancellation and backpressure — 10s 连接/120s 首包/5min idle 配置、首字节前一次重试、慢客户端内存有界）
+- Goal status: `IN_PROGRESS`（实现中）
 - Last updated: `2026-08-25 CST`
-- Branch: `goal/g2.3-models-endpoint`
+- Branch: `goal/g2.4-usage-lifecycle`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,42 @@
 
 ## Next Goal
 
-- Goal ID: `G2.4`
-- Name: Usage lifecycle and reliable writer（请求开始/完成记录、usage 解析和有界批量写入）
+- Goal ID: `G2.5`
+- Name: Timeout, retry, cancellation and backpressure（10s 连接、120s 首包、5min idle 配置；首字节前一次重试；首字节后零重试；慢客户端内存有界）
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md)（验收：数据库短暂故障不静默丢失；队列有指标/告警；usage 缺失标记明确；正文不进入持久化）
+- Source: [`implementation-plan.md`](implementation-plan.md)（验收：10s 连接、120s 首包、5min idle 配置；首字节前一次重试；首字节后零重试；慢客户端内存有界）
+
+## G2.4 — Usage lifecycle and reliable writer（G2.4 请求生命周期记录 + 有界批量写入，DONE）
+
+### Outcome
+
+1. **请求生命周期记录**（`request_usage_records`，V8 月度分区表）：每个到达上游的请求在发出前发布 `RequestStartedEvent` 打开 `IN_FLIGHT` 行（`ON CONFLICT (started_at, gateway_request_id) DO NOTHING`），在任何终态信号上**恰好 finalize 一次**——completion 为带 `WHERE request_status = 'IN_FLIGHT'` 的 guarded upsert，重试 flush 绝不双计、绝不重写已 finalized 记录；start 行丢失时 completion 事件自带完整 start 快照独立插入终态行。鉴权失败与缓存命中不打开记录。
+2. **终态映射**：`SUCCEEDED`（上游 2xx）/`UPSTREAM_REJECTED`（非 2xx）/`CLIENT_CANCELLED`（客户端断开，优先于任何已观测状态码）/`TIMEOUT_BEFORE_FIRST_BYTE`/`STREAM_INTERRUPTED`/`UPSTREAM_UNAVAILABLE`。`partial_response = 已出首字节 && 未完整完成`。SUCCEEDED 但无 usage 时 `usage_missing=true` 显式标记，绝不静默记零。
+3. **Usage 解析补齐**（真实缺陷修复）：`SseUsageObserver.parseUsageJson` 共享解析器，非流式 JSON 响应也从正文提取 token 计数（只提取计数，正文永不保留/持久化）；Anthropic SSE 与 JSON 的 `reasoning_tokens`（`output_tokens_details`/`completion_tokens_details`）均解析。
+4. **客户端取消判定修复**（真实缺陷修复）：Reactor Netty 在已 flush 全部缓冲字节时会把客户端断开报告为服务端写侧 `ON_COMPLETE`（channel 的 terminate 完成 outbound 而非取消），导致断开被记成 `SUCCEEDED`。修复：observed 流自身的终结信号（`TtfbRecorder.terminalSignal()`）是客户端取消的权威信号——取消 observed 正是关闭上游连接的动作；`clientCancelled = signal==CANCEL || (observed 终结==CANCEL && upstreamError==null)`，`upstreamError==null` 排除超时/上游故障（它们也取消 observed 但有错误记录）。全量 suite 下 3 连跑稳定（修复前 ~50% flake）。
+5. **有界批量写入**（queue-spi 实现）：有界阻塞队列（默认容量 10000）、阈值/定时 flush（100 条或 5s）、专用有界 writer 执行器（`miqrokey.gateway.queue.writer-threads` 默认 4，`Schedulers.newBoundedElastic`）；写失败把整批**按序重入队**并记 warn（幂等写入保证重试不双计），队列饱和 drop 按高优先级 warn 计数——均不静默。Micrometer 无标签 gauge：`miqrokey.usage.queue.queued/published.total/persisted.total/dropped.total/flush.count/flush.last.duration.seconds`。
+6. **幂等写入**：`usage_event` `ON CONFLICT (tenant_id, provider_request_id) DO NOTHING`，`cache_hit_event` `(tenant_id, cache_key, level, occurred_at)`，生命周期 start/completion 如上——重试 flush 绝不双计。
+
+### Verification
+
+- 全量 `./mvnw.cmd -f backend/pom.xml verify -P integration --batch-mode`（本机 Docker Desktop，Testcontainers 实跑）：**BUILD SUCCESS** —— **708 tests / 0 failures / 5 skipped**（Windows POSIX 权限跳过；gateway-app 159 全绿）
+- `UsageLifecycleIntegrationTest`（Testcontainers + AnthropicMockProvider，6）：非流式 200 → SUCCEEDED（身份链/upstream_request_id/ttfb 断言）；流式 SSE → SUCCEEDED + token 解析；200 无 usage → `usage_missing=true`；429 → UPSTREAM_REJECTED；**客户端断开 → CLIENT_CANCELLED**（mock 侧验证 lines flux 被取消）；mock 端口关闭 → UPSTREAM_UNAVAILABLE。
+- `QueueMetricsBinderTest`（3）：gauge 跟踪队列状态、饱和 drop 计数、无标签。
+- `PostgresUsageEventWriterTest`（6）：start/completion guarded upsert、start 行丢失独立插入、重试不双计。
+- Spotless check 全模块 PASS；Maven Enforcer：PASS。
+
+### Files changed
+
+- **gateway-app**：`ProxyController`（observed 终结信号判定客户端取消、非流式 usage 解析回退）、`SseUsageObserver`（静态 `parseUsageJson`）、`TtfbRecorder`（`terminalSignal()`）、新 `UsageLifecycleIntegrationTest`、新 `QueueMetricsBinderTest`、`QueueMetricsBinder`（gauge 装配）
+- **queue-spi**：`PostgresUsageEventBus`/`PostgresUsageEventWriter`（生命周期 start/completion SQL）、`RequestStartedEvent`/`RequestCompletedEvent`（V8 表映射）
+- **test-support**：`GatewayTestKeys`（provider 身份 putIfAbsent：产品 1:1 绑定）、`AnthropicMockProvider`（chunkDelay 路径保持）
+- **文档**：database-schema.md §6（V8 当前实现列/延后列）、architecture.md §5（生命周期 + 批量写入 + 幂等三块）、configuration-reference.md §5.1/§6（writer-threads、队列语义）、usage-accounting.md §2（已实现终态 + 首版不落库列表）、api-contract.md §7.1（生命周期记录语义）、progress.md
+
+### Remaining risks
+
+- 请求级上游超时（120s 首包/5min idle）与"首字节前一次重试"属于 G2.5 范围，本 Goal 未实现。
+- `provider_usage_json`、成本列、`error_category` 等延后列留待后续 Goal（database-schema.md 已列）。
+- 真实供应商凭证未提供：usage 解析只经 Anthropic Mock/契约 fixture 验证，真实响应变体 `WAITING_FOR_CREDENTIAL`。
 
 ## G2.1 — Provider SPI and signed catalog core
 

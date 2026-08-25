@@ -153,6 +153,7 @@ public final class GatewayTestKeys {
         Map<UUID, Set<String>> grantModelsMap = new LinkedHashMap<>();
         Map<UUID, Set<String>> upstreamModelsMap = new LinkedHashMap<>();
         Map<UUID, String> productCodesMap = new LinkedHashMap<>();
+        Map<UUID, UUID> providerIdsMap = new LinkedHashMap<>();
         for (KeyFixture key : keys) {
             keyMap.put(key.publicKeyId(), key.keyRecord(TENANT_ID));
             bindingMap.put(key.keyId(), key.bindingRecord());
@@ -161,9 +162,13 @@ public final class GatewayTestKeys {
             grantModelsMap.put(key.grantId(), key.grantModels());
             upstreamModelsMap.put(key.productId(), key.upstreamModels());
             productCodesMap.put(key.productId(), key.productCode());
+            // Provider identity belongs to the product, not the key: several
+            // fixture keys share PRODUCT_ID, so the first key to claim a product
+            // defines its provider (production rows are 1:1 anyway).
+            providerIdsMap.putIfAbsent(key.productId(), key.providerId());
         }
         return new RouteSnapshot(1, Instant.EPOCH, keyMap, bindingMap, credentialMap, modelsMap, grantModelsMap,
-                upstreamModelsMap, productCodesMap);
+                upstreamModelsMap, productCodesMap, providerIdsMap);
     }
 
     /**
@@ -174,7 +179,7 @@ public final class GatewayTestKeys {
      */
     public record KeyFixture(String presented, String publicKeyId, byte[] rawSecret, byte[] digest, UUID keyId,
             String projectTag, UUID projectId, UUID productId, UUID credentialId, Set<String> models, UUID grantId,
-            String productCode, Set<String> grantModels, Set<String> upstreamModels) {
+            String productCode, Set<String> grantModels, Set<String> upstreamModels, UUID userId, UUID providerId) {
 
         /**
          * Happy-path fixture: all authorization layers allow {@code models}.
@@ -191,14 +196,16 @@ public final class GatewayTestKeys {
                 String presented = material.fullDisplayString();
                 return new KeyFixture(presented, material.publicKeyId(), material.rawSecret(), material.digest(),
                         UUID.randomUUID(), projectTag, projectId, productId, credentialId, Set.copyOf(models),
-                        UUID.randomUUID(), productCode, Set.copyOf(grantModels), Set.copyOf(upstreamModels));
+                        UUID.randomUUID(), productCode, Set.copyOf(grantModels), Set.copyOf(upstreamModels),
+                        UUID.randomUUID(), UUID.randomUUID());
             } finally {
                 material.destroy();
             }
         }
 
         public RouteSnapshot.KeyRecord keyRecord(UUID tenantId) {
-            return new RouteSnapshot.KeyRecord(keyId, tenantId, publicKeyId, digest, "ENABLED", "chat", grantId);
+            return new RouteSnapshot.KeyRecord(keyId, tenantId, userId, publicKeyId, digest, "ENABLED", "chat",
+                    grantId);
         }
 
         public RouteSnapshot.BindingRecord bindingRecord() {

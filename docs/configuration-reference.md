@@ -142,6 +142,7 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 | `MIQROKEY_GATEWAY_QUEUE_CAPACITY` | `10000` | 用量写入有界队列容量 |
 | `MIQROKEY_GATEWAY_QUEUE_FLUSH_THRESHOLD` | `100` | 批量 flush 条数上限 |
 | `MIQROKEY_GATEWAY_QUEUE_FLUSH_INTERVAL` | `5s` | 批量 flush 周期 |
+| `MIQROKEY_GATEWAY_QUEUE_WRITER_THREADS` | `4` | 专用有界 writer 执行器线程数（G2.4） |
 | `MIQROKEY_GATEWAY_COALESCER_ENABLED` | `false` | 请求合并（single-flight）：默认关闭（ADR-0008） |
 | `MIQROKEY_GATEWAY_COALESCER_WAIT_TIMEOUT` | `2s` | 合并等待窗口 |
 | `MIQROKEY_CACHE_ENABLED` | `false` | 响应缓存总开关（默认关闭，见 §9） |
@@ -156,10 +157,6 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 
 | 配置 | 默认 | 说明 |
 |---|---:|---|
-| `MIQROKEY_USAGE_QUEUE_CAPACITY` | `10000` | 有界内存队列 |
-| `MIQROKEY_USAGE_WRITER_THREADS` | `4` | JDBC 专用写入线程 |
-| `MIQROKEY_USAGE_BATCH_SIZE` | `100` | 批量写入上限 |
-| `MIQROKEY_USAGE_FLUSH_INTERVAL` | `PT1S` | 刷新周期 |
 | `MIQROKEY_USAGE_RETENTION_MODE` | `MANUAL_ONLY` | 首版永久保留直到人工删除 |
 | `MIQROKEY_PLAN_SYNC_INTERVAL` | `PT15M` | 余额/周期同步 |
 | `MIQROKEY_MODEL_SYNC_INTERVAL` | `PT6H` | 模型目录同步 |
@@ -167,7 +164,7 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 | `MIQROKEY_EXPORT_MAX_RANGE` | `P366D` | 单次导出最大时间窗 |
 | `MIQROKEY_EXPORT_LINK_TTL` | `PT1H` | 下载链接到期 |
 
-队列达到高水位必须告警；队列满时不能静默丢弃。实现按照架构文档选择短暂背压/失败和补偿记录，行为必须有集成测试。
+队列达到高水位必须告警；队列满不能静默丢弃。G2.4 实现语义：写失败把整批**按序重入队**并记 `warn`（幂等写入保证重试不双计），饱和 drop 按高优先级 `warn` 计数——均不静默；`miqrokey.usage.queue.*` 无标签 gauge（深度/发布/持久化/drop/flush）供告警。
 
 ## 7. Webhook 与告警
 

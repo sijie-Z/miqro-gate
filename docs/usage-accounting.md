@@ -9,17 +9,21 @@
 
 ## 2. 请求状态
 
-建议状态：
+**G2.4 已实现**（`request_usage_records.request_status`，生命周期记录终态）：
 
-- `SUCCEEDED`
-- `UPSTREAM_REJECTED`
-- `UPSTREAM_UNAVAILABLE`
-- `CLIENT_CANCELLED`
-- `TIMEOUT_BEFORE_FIRST_BYTE`
-- `STREAM_INTERRUPTED`
-- `AUTH_REJECTED`
-- `MODEL_NOT_ALLOWED`
-- `USAGE_PARSE_FAILED`
+- `SUCCEEDED`（上游 2xx，已写完）
+- `UPSTREAM_REJECTED`（上游非 2xx）
+- `UPSTREAM_UNAVAILABLE`（连接失败/不可达，未出首字节）
+- `CLIENT_CANCELLED`（客户端断开，优先于任何已观测状态码）
+- `TIMEOUT_BEFORE_FIRST_BYTE`（超时且未出首字节）
+- `STREAM_INTERRUPTED`（超时或上游错误且已出首字节）
+
+记录在请求到达上游时以 `IN_FLIGHT` 打开，终态只 finalize 一次（guarded upsert）。
+
+**建议但首版刻意不落库**：
+
+- `AUTH_REJECTED` / `MODEL_NOT_ALLOWED`——鉴权与模型预校验失败不打开生命周期记录（不达上游无计费语义），由访问日志与安全事件覆盖。
+- `USAGE_PARSE_FAILED`——由 `usage_missing=true` 显式标记取代（SUCCEEDED 但上游未返回 usage），比独立状态更利于统计。
 
 鉴权失败请求也记录安全事件，但不生成可计费 UsageEvent，除非请求已经到达上游。
 

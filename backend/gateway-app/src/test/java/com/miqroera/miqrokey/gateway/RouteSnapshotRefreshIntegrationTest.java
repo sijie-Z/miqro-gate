@@ -93,26 +93,30 @@ class RouteSnapshotRefreshIntegrationTest {
         // listener, which reloads the snapshot. Plain Statement.execute (simple
         // query protocol), matching the control-plane notifier: the pgjdbc
         // executeUpdate path throws "Unexpected result returned" on pg_notify.
-        UUID productId = seedKey();
+        Seeded seeded = seedKey();
         jdbc.getJdbcTemplate().execute("SELECT pg_notify('" + CHANNEL + "', '')");
 
         await(() -> holder.current().version() >= 2);
         RouteSnapshot snapshot = holder.current();
         assertThat(snapshot.keys()).containsKey("mqk_test_public_key_id");
+        RouteSnapshot.KeyRecord key = snapshot.keys().get("mqk_test_public_key_id");
+        assertThat(key.userId()).isEqualTo(USER_ID);
         RouteSnapshot.BindingRecord binding = snapshot.bindings().get(KEY_ID);
         assertThat(binding).isNotNull();
         assertThat(binding.projectTag()).isEqualTo("notify-proj");
         // The /v1/models authorization layers arrive with the snapshot too:
-        // grant models, upstream models (model_catalog, ACTIVE rows), product code.
+        // grant models, upstream models (model_catalog, ACTIVE rows), product code,
+        // and the provider identity chain.
         assertThat(snapshot.grantModels(GRANT_ID)).containsExactly("grant-model-a");
-        assertThat(snapshot.upstreamModels(productId)).containsExactly("upstream-model-a");
-        assertThat(snapshot.productCode(productId)).isEqualTo("deepseek-payg-api");
+        assertThat(snapshot.upstreamModels(seeded.productId())).containsExactly("upstream-model-a");
+        assertThat(snapshot.productCode(seeded.productId())).isEqualTo("deepseek-payg-api");
+        assertThat(snapshot.providerId(seeded.productId())).isEqualTo(seeded.providerId());
     }
 
     private static final UUID GRANT_ID = UUID.fromString("dddddddd-0000-0000-0000-000000000001");
 
-    /** Seeds the full FK chain; returns the seeded product id. */
-    private UUID seedKey() {
+    /** Seeds the full FK chain; returns the seeded provider and product ids. */
+    private Seeded seedKey() {
         UUID providerId = UUID.randomUUID();
         UUID productId = UUID.randomUUID();
         UUID subscriptionId = UUID.randomUUID();
@@ -178,7 +182,10 @@ class RouteSnapshotRefreshIntegrationTest {
                 INSERT INTO model_catalog (id, provider_product_id, model_id, display_name, status, version)
                 VALUES (:modelId, :productId, 'upstream-model-a', 'Upstream Model A', 'ACTIVE', 0)
                 """, p.addValue("modelId", UUID.randomUUID()));
-        return productId;
+        return new Seeded(providerId, productId);
+    }
+
+    private record Seeded(UUID providerId, UUID productId) {
     }
 
     /** Polls a condition with a deadline; fails the test on timeout. */

@@ -1,6 +1,8 @@
 package com.miqroera.miqrokey.queue;
 
 import com.miqroera.miqrokey.domain.usage.CacheHitEvent;
+import com.miqroera.miqrokey.domain.usage.RequestCompletedEvent;
+import com.miqroera.miqrokey.domain.usage.RequestStartedEvent;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
 
 import java.time.Duration;
@@ -18,6 +20,17 @@ public interface UsageEventBus {
 
     /** Publishes a cache hit fact. Never blocks the caller. */
     void publish(CacheHitEvent event);
+
+    /**
+     * Publishes a request lifecycle start ({@code IN_FLIGHT} row). Never blocks the
+     * caller.
+     */
+    void publish(RequestStartedEvent event);
+
+    /**
+     * Publishes a request lifecycle completion (finalizes the record exactly once).
+     */
+    void publish(RequestCompletedEvent event);
 
     /** Immediately drains the queue (shutdown, tests, admin flush). */
     void flush();

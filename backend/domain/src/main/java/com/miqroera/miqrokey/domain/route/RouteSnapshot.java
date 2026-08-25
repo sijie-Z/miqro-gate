@@ -43,7 +43,8 @@ import java.util.UUID;
 public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecord> keys,
         Map<UUID, BindingRecord> bindings, Map<UUID, CredentialRecord> credentials,
         Map<UUID, Set<String>> modelsByKeyId, Map<UUID, Set<String>> grantModelsByGrantId,
-        Map<UUID, Set<String>> upstreamModelsByProductId, Map<UUID, String> productCodesByProductId) {
+        Map<UUID, Set<String>> upstreamModelsByProductId, Map<UUID, String> productCodesByProductId,
+        Map<UUID, UUID> providerIdsByProductId) {
 
     public RouteSnapshot {
         keys = Map.copyOf(keys);
@@ -53,6 +54,7 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         grantModelsByGrantId = immutableSets(grantModelsByGrantId);
         upstreamModelsByProductId = immutableSets(upstreamModelsByProductId);
         productCodesByProductId = Map.copyOf(productCodesByProductId);
+        providerIdsByProductId = Map.copyOf(providerIdsByProductId);
     }
 
     private static Map<UUID, Set<String>> immutableSets(Map<UUID, Set<String>> map) {
@@ -62,7 +64,7 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
 
     public static RouteSnapshot empty(long version, Instant loadedAt) {
         return new RouteSnapshot(version, loadedAt, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
-                Map.of());
+                Map.of(), Map.of());
     }
 
     public KeyRecord key(String publicKeyId) {
@@ -106,12 +108,23 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
     }
 
     /**
+     * The product's owning provider ({@code provider_products.provider_id}); null
+     * when unknown. Used by request lifecycle records to keep the full identity
+     * chain (tenant → user → key → product → provider → credential) without a
+     * database join on the write path.
+     */
+    public UUID providerId(UUID productId) {
+        return providerIdsByProductId.get(productId);
+    }
+
+    /**
      * A routing-relevant virtual key. Never holds secret material. {@code grantId}
      * is the key's owning grant ({@code virtual_keys.grant_id}, NOT NULL) and
-     * selects its {@link #grantModels(UUID)} set.
+     * selects its {@link #grantModels(UUID)} set; {@code userId} is the key's owner
+     * ({@code virtual_keys.user_id}).
      */
-    public record KeyRecord(UUID keyId, UUID tenantId, String publicKeyId, byte[] secretDigest, String cachePolicy,
-            String purpose, UUID grantId) {
+    public record KeyRecord(UUID keyId, UUID tenantId, UUID userId, String publicKeyId, byte[] secretDigest,
+            String cachePolicy, String purpose, UUID grantId) {
 
         public KeyRecord {
             secretDigest = secretDigest.clone();
@@ -172,7 +185,7 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
                 + modelsByKeyId.values().stream().mapToInt(Set::size).sum() + ", grantModels="
                 + grantModelsByGrantId.values().stream().mapToInt(Set::size).sum() + ", upstreamModels="
                 + upstreamModelsByProductId.values().stream().mapToInt(Set::size).sum() + ", products="
-                + productCodesByProductId.size() + "]";
+                + productCodesByProductId.size() + ", providers=" + providerIdsByProductId.size() + "]";
     }
 
     // Explicit equals/hashCode that include arrays by content, without leaking
@@ -187,12 +200,13 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
                 && bindings.equals(that.bindings) && credentials.equals(that.credentials)
                 && modelsByKeyId.equals(that.modelsByKeyId) && grantModelsByGrantId.equals(that.grantModelsByGrantId)
                 && upstreamModelsByProductId.equals(that.upstreamModelsByProductId)
-                && productCodesByProductId.equals(that.productCodesByProductId);
+                && productCodesByProductId.equals(that.productCodesByProductId)
+                && providerIdsByProductId.equals(that.providerIdsByProductId);
     }
 
     @Override
     public int hashCode() {
         return java.util.Objects.hash(version, loadedAt, keys, bindings, credentials, modelsByKeyId,
-                grantModelsByGrantId, upstreamModelsByProductId, productCodesByProductId);
+                grantModelsByGrantId, upstreamModelsByProductId, productCodesByProductId, providerIdsByProductId);
     }
 }
