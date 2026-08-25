@@ -6,9 +6,9 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `tag-routing-usage-closed-loop`（G1.4 授权部分 + G1.5 + G2.2 + G2.3 + G2.4 + G5.1 核心闭环）
-- Goal status: `DONE`（本地全绿 + Linux/Windows CI 交叉验证全绿；PR #1 已合并）
-- Last updated: `2026-08-25 11:14 CST`
+- Current goal: `G1.6`（上游凭证验证与无感轮换）
+- Goal status: `DONE`（本地全绿 631 tests/0 fail；PR #2 已合并）
+- Last updated: `2026-08-25 11:50 CST`
 - Branch: `main`（goal 分支已合并删除；下一 Goal 从 main 切新分支）
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
@@ -86,10 +86,41 @@
 
 ## Next Goal
 
-- Goal ID: `G1.1`
-- Name: PostgreSQL schema and persistence
+- Goal ID: `G2.1`
+- Name: Provider SPI and signed catalog core
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md#g11-postgresql-schema-and-persistence)
+- Source: [`implementation-plan.md`](implementation-plan.md#g21-provider-spi-and-signed-catalog-core)
+
+## G1.6 — Upstream credential validation and rotation
+
+### Outcome
+
+- 管理 API `/api/v1/admin/credentials`：创建、测试（validate）、轮换、禁用、列表、详情（api-contract §5.1）。
+- Secret 只接受明文输入：AES-256-GCM 加密（AAD 绑定 tenant + credential）后落库；响应/审计只含掩码元数据与 `fingerprintPrefix`（SHA-256 前 8 字节 hex），明文与完整指纹永不回显。
+- 验证零副作用：`validate` 与所有轮换/创建前的校验失败均不写数据库（400 `CREDENTIAL_INVALID`），旧版本绝不被覆盖。
+- 轮换单事务原子：`SELECT ... FOR UPDATE` 行锁串行化并发变更；旧 ACTIVE → DRAINING（`retiredAt = now + miqrokey.credential-drain-grace`，默认 `PT0S`）后才插入新 ACTIVE，满足部分唯一索引 `uq_credential_versions_one_active`；已降级版本在宽限内仍可解密（“旧请求可完成”），快照刷新后新请求用新版本。
+- `disable` 置 DISABLED 并降级 ACTIVE 版本；网关快照只加载 ACTIVE 凭证，刷新后该凭证不可路由。
+- 新增 domain SPI `CredentialSecretValidator`（默认 `FormatCredentialValidator`：8..512 字符、无控制字符），为 G3.x 提供商校验适配器留扩展点。
+- 审计事件 `CREDENTIAL_CREATE/ROTATE/DISABLE` 只记变更摘要，集成测试断言不含明文子串。
+- 文档：api-contract.md §5.1、configuration-reference.md（`MIQROKEY_CREDENTIAL_DRAIN_GRACE`）。
+
+### Verification
+
+- `.\mvnw.cmd verify --batch-mode`（含 `-Pintegration`，DOCKER_HOST=tcp://localhost:2375）：**BUILD SUCCESS** —— 631 tests, 0 failures, 0 errors, 5 skipped（既有）
+- 新增 31 测试全绿：`AdminCredentialApiIntegrationTest`（13，含 AES-GCM 解密回环、FK 循环三步创建、PT0S 宽限语义、明文永不出现在响应/审计）、`AdminCredentialServiceTest`（14，含 InOrder 验证降级先于插入）、`FormatCredentialValidatorTest`（4）
+- Spotless/Enforcer/ArchUnit：PASS（verify 内置）
+- 前端不受影响（无前端改动）。
+
+### Files/modules changed
+
+- **domain**：`credential/CredentialSecretValidator`（SPI）、`crypto/CredentialFingerprint`、`UpstreamCredentialRepository`（+`findByIdForUpdate`、`findAllByTenantId`）
+- **persistence-postgres**：`UpstreamCredentialRepositoryImpl`（+2 查询，`FOR UPDATE` 行锁）
+- **control-plane-app**：`AdminCredentialService`、`AdminCredentialController`、`FormatCredentialValidator`、7 个 DTO、`AuthProperties`（+`credentialDrainGrace`）
+- **文档**：api-contract.md §5.1、configuration-reference.md
+
+### Remaining risks
+
+- 真实凭证校验仍为本地格式校验（无提供商往返）；G3.x 供应商适配器接入同一 SPI 后标记 `WAITING_FOR_CREDENTIAL` 验收。
 
 ## G0.2 — Anthropic transparent proxy PoC
 

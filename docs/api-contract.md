@@ -291,6 +291,62 @@
 
 真实凭证写接口只接受明文输入，响应只返回掩码、指纹、版本和验证状态。凭证测试不得自动把未保存值写入数据库。
 
+### 5.1 上游凭证
+
+管理员录入真实供应商凭证并管理其生命周期（G1.6）。真实凭证属于供应商产品订阅，不绑定用户；只有 SYSTEM_ADMIN 可操作。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/credentials` | 租户内全部凭证（掩码视图） |
+| `GET /api/v1/admin/credentials/{id}` | 凭证元数据 + 完整版本历史（新版本在前） |
+| `POST /api/v1/admin/credentials` | 创建：`{ "name", "subscriptionId", "secret" }`，返回 `201` 掩码视图 |
+| `POST /api/v1/admin/credentials/{id}/validate` | 测试候选 Secret；不写入数据库 |
+| `POST /api/v1/admin/credentials/{id}/rotate` | 原子轮换：新 Secret 成为 ACTIVE，旧版本进入 DRAINING |
+| `POST /api/v1/admin/credentials/{id}/disable` | 立即禁用；凭证从路由快照消失 |
+
+创建/轮换响应（掩码视图；`secret` 明文永不出现）：
+
+```json
+{
+  "id": "0190...",
+  "name": "anthropic-main",
+  "subscriptionId": "0190...",
+  "status": "ACTIVE",
+  "activeVersionId": "0190...",
+  "fingerprintPrefix": "a1b2c3d4e5f6a7b8",
+  "lastValidatedAt": null,
+  "lastValidationError": null,
+  "version": 1,
+  "createdAt": "2026-07-17T05:00:00Z",
+  "updatedAt": "2026-07-17T05:00:00Z"
+}
+```
+
+验证响应：
+
+```json
+{ "matchesActive": true, "message": null }
+```
+
+安全规则：
+
+- Secret 只接受明文输入；持久化前以 AES-256-GCM 加密（AAD 绑定 tenant + credential），数据库、响应与审计只保留 SHA-256 指纹和 `fingerprintPrefix`（前 8 字节 hex）。明文与完整指纹永不回显。
+- `validate` 是纯检查：格式非法返回 `400 CREDENTIAL_INVALID`；格式合法时按 SHA-256 指纹与当前 ACTIVE 版本比对（不解密、不暴露明文），返回 `matchesActive`。任何情况下不写数据库。
+- 轮换是单事务原子操作：持有凭证行锁（`SELECT ... FOR UPDATE` 串行化并发生命周期变更），先把当前 ACTIVE 版本降级为 DRAINING（`retiredAt = now + miqrokey.credential-drain-grace`，默认 `PT0S`），再插入新 ACTIVE 版本——部分唯一索引 `uq_credential_versions_one_active` 保证任意时刻每个凭证至多一个 ACTIVE 版本。新 Secret 校验失败时整个操作回滚，当前版本不受影响。
+- 已降级版本在 `retiredAt` 前保持可解密：请求启动时已解密旧 Secret 的请求可完成（“旧请求可完成”）；路由快照刷新后新请求使用新版本。`PT0S` = 快照刷新后旧版本立即退役。
+- `disable` 把凭证置为 `DISABLED` 并降级当前 ACTIVE 版本；网关路由快照只加载 `status = 'ACTIVE'` 的凭证，刷新后该凭证不可路由，新请求干净失败。
+- 审计事件 `CREDENTIAL_CREATE` / `CREDENTIAL_ROTATE` / `CREDENTIAL_DISABLE` 只记变更摘要，永不包含明文或完整指纹。
+
+错误码：
+
+| code | HTTP | 场景 |
+|---|---|---|
+| `SUBSCRIPTION_NOT_FOUND` | 404 | 订阅不存在或不属于本租户 |
+| `CREDENTIAL_NOT_FOUND` | 404 | 凭证不存在或不属于本租户（统一 404，防枚举） |
+| `CREDENTIAL_INVALID` | 400 | Secret 格式非法（过短/过长/含控制字符） |
+| `CREDENTIAL_NOT_ROTATABLE` | 409 | 仅 ACTIVE 可轮换 |
+| `CREDENTIAL_NOT_DISABLEABLE` | 409 | 已 DISABLED/INVALID 的凭证不可再禁用 |
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：
