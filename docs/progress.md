@@ -7,8 +7,8 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `tag-routing-usage-closed-loop`（G1.4 授权部分 + G1.5 + G2.2 + G2.3 + G2.4 + G5.1 核心闭环）
-- Goal status: `DONE`（本地全绿；集成测试待 CI）
-- Last updated: `2026-08-25 07:55 CST`
+- Goal status: `DONE`（全模块本地验证全绿，含 Testcontainers 集成测试）
+- Last updated: `2026-08-25 10:50 CST`
 - Branch: `goal/tag-routing-usage-closed-loop`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
@@ -870,18 +870,27 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 ### Verification
 
-- `./mvnw -f backend/pom.xml verify`（默认门禁：Spotless + Maven Enforcer；checkstyle/pmd/jacoco 未配置）：**BUILD SUCCESS** — **455 非集成测试，0 失败 0 错误**（surefire txt 求和；mvn 模块汇总为 454，差值为 gateway 嵌套测试类计数口径）：
-  - domain 84（新增 vkey 解析、usage 统计域测试）、persistence-postgres 31、queue-spi 6、control-plane 87（VirtualKeyServiceTest 19 + UsageStatsServiceTest 10 + 既有）、test-support 109、gateway-app 138（新增 VirtualKeyAuthContractTest、SseReplayEngineTest、CacheKeyFactoryTest；三个既有契约测试扩展模型越权/凭证注入断言）
-- 集成测试（CI-only，Testcontainers）：`MeVirtualKeyApiIntegrationTest` 7 + `MeUsageApiIntegrationTest` 4，本机 Docker 不可用由 CI 验证。
-- 前端：`npm --prefix frontend run test` **16/16 PASS**（App 2 + http 6 + auth 4 + KeysView 4）、`lint` PASS、`typecheck` PASS、`build` PASS（chunk 大小警告为 Element Plus 全量引入，非错误）。
-- Spotless check：PASS（apply 后全模块干净）
+**全模块本地验证（2026-08-25 第二轮，含 Testcontainers 集成测试）**：`./mvnw -f backend/pom.xml verify` **BUILD SUCCESS** — surefire 汇总 **491 run / 0 failures / 5 skipped**（本机 Docker Desktop 经 `DOCKER_HOST=tcp://localhost:2375` 可用，集成测试不再 CI-only）：
+
+- domain 86（新增 vkey 解析、usage 统计域测试、路由标签后缀）、persistence-postgres 118（5 skipped，含 Testcontainers 加密/迁移集成测试）、queue-spi 6、control-plane-app 143（含 12 个 Me* 集成测试：MeVirtualKeyApi 8 + MeUsageApi 4）、gateway-app 138（VirtualKeyAuthContractTest、SseReplayEngineTest、CacheKeyFactoryTest 等）
+- 修复的 12 个集成测试失败根因：bootstrap 管理员 `mustChangePassword=true` 门禁（SessionFilter）——测试此前只断言 Cookie 存在、从未重放改密请求，Me* 测试断言从未真正执行过
+- 前端：`npm --prefix frontend run test` **16/16 PASS**、`lint` PASS、`typecheck` PASS、`build` PASS（chunk 大小警告为 Element Plus 全量引入，非错误）
+- Spotless check：全模块 PASS（apply 后干净）
 - `git diff --check`：PASS
-- `docker compose -f deploy/compose.yaml config`：**ENV_BLOCKED**（CI 验证）
+- `docker compose -f deploy/compose.yaml config`：**PASS**（本机 Docker）
+
+### 本轮修复的产品缺陷（12 个集成测试解封后暴露，均已修复并有测试）
+
+1. **审计摘要非法 JSON**：`VirtualKeyService` 的 `change_summary` 是纯文本，而 `admin_audit_events.change_summary` 为 jsonb（插入时 `::jsonb` 强转）→ 500 `invalid input syntax for type json`。新增 `auditSummary()`/`escapeJson()` 生成合法 JSON。
+2. **路由标签后缀未实现**：规格要求 Key 格式 `mqk_live_<publicKeyId>_<secret>[.<projectTag>]`，但 `VirtualKeyCrypto.generate` 只接收 tenantId，标签从未生成。接口签名改为 `generate(UUID tenantId, String projectTag)`；`lastFour` 恒取自无标签核心段，标签不进入展示尾部；空标签产出无标签形式。网关 `VirtualKeyParser`/`VirtualKeyResolver` 按标签路由的既有实现由此真正贯通。
+3. **时间窗口校验非无条件**：`records()`/`summary()` 在无 Key 时短路返回，`TIME_RANGE_INVALID`/`TIME_RANGE_TOO_WIDE` 不触发；api-contract 要求无条件校验。提取 `validateTimeRange()` 并在任何数据访问前调用。
+4. **Grant 模型顺序不确定**：`findModelIds` 返回无序 Set（`Set.copyOf`），`GET /me/grants` 的 models 数组顺序随机 → 依赖顺序的断言偶发失败。`grantOptions` 用 `TreeSet` 字典序输出。
 
 ### Files changed
 
 - **控制面**：`MeGrantsController`、`MeVirtualKeyController`、`MeUsageController`、`VirtualKeyService`、`UsageStatsService`、`AuthProperties`（gatewayBaseUrl / virtualKeyRotateGrace）、`GlobalExceptionHandler`
-- **域**：`vkey/`（VirtualKeyParser 等）、`usage/`（统计与价格模型）、`route/`（快照契约）、`KeyProjectBinding`、`ModelApproval`、`PriceSnapshotRepository`、`UsageStatsRepository`
+- **域**：`vkey/`（VirtualKeyParser 等）、`usage/`（统计与价格模型）、`route/`（快照契约）、`KeyProjectBinding`、`ModelApproval`、`PriceSnapshotRepository`、`UsageStatsRepository`、`crypto/`（VirtualKeyCrypto.generate 增加 projectTag 路由标签后缀）
+- **测试**：`MeVirtualKeyApiIntegrationTest`（8）、`MeUsageApiIntegrationTest`（4）、`UsageStatsServiceTest`、`VirtualKeyServiceTest`、`HmacVirtualKeyProviderTest`、`VirtualKeyParserTest`、`CryptoIntegrationTest`、`GatewayTestKeys`（改密门禁 + 新语义断言）
 - **持久化**：V4–V7 迁移 + `KeyProjectBindingRepositoryImpl`、`ModelApprovalRepositoryImpl`、`PriceSnapshotRepositoryImpl`、`UsageStatsRepositoryImpl`
 - **新模块**：`route-snapshot/`（版本化只读快照）、`queue-spi/`（有界用量队列）、`cache-spi/`（响应缓存 SPI + NoOp）
 - **Gateway**：`VirtualKeyResolver`、`AuthContext`、`JdbcCredentialInjector`、`ModelsController`、`CacheEligibility`、`CacheKeyFactory`、`SseReplayEngine`、`ErrorEnvelopes`、`GatewayDataSourceConfig`、`GatewayFeatureConfig`
@@ -891,7 +900,7 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 ### Remaining risks
 
 - **Push 已解决（2026-08-25）**：目标远端改为所有者仓库 `sijie-Z/miqro-key-gateway`（新建 private）；origin 已切换、`.git/shallow` 浅克隆状态已解除（`git fetch --unshallow upstream`，upstream = `lichman0405/miqro-key-gateway`）。`goal/tag-routing-usage-closed-loop` 已 push 成功。
-- 集成测试（11 个新增）只能在 Linux CI 运行；若 jsonPath 数值断言浮点比较失败需按 CI 输出调整。
+- 集成测试（12 个 Me* + 其余 Tag(integration) 类）已在本机 Docker Desktop（Testcontainers 1.21.4，`DOCKER_HOST=tcp://localhost:2375`）全部通过；Linux CI 作为交叉验证保留。
 - 真实供应商凭证未提供：Gateway 凭证注入只经 Mock 上游验证，真实联调 `WAITING_FOR_CREDENTIAL`。
 - 响应缓存默认关闭（ADR-0008 决策），正式启用前需新增 ADR。
 - `request_usage_records` 完整分区表（规格 §6）未实现，当前使用 `usage_event` 事实表；G4.x 需要时再演进。
