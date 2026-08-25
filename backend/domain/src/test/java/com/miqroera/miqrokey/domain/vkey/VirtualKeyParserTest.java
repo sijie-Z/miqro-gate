@@ -27,7 +27,7 @@ class VirtualKeyParserTest {
 
     /** A real generated key plus its tag, kept for the round-trip tests. */
     private String presented(String tag) {
-        VirtualKeyMaterial material = crypto.generate(TENANT_ID);
+        VirtualKeyMaterial material = crypto.generate(TENANT_ID, null);
         try {
             return material.fullDisplayString() + "." + tag;
         } finally {
@@ -42,7 +42,7 @@ class VirtualKeyParserTest {
         @Test
         @DisplayName("should parse a generated key with a simple tag")
         void shouldParseGeneratedKey() {
-            VirtualKeyMaterial material = crypto.generate(TENANT_ID);
+            VirtualKeyMaterial material = crypto.generate(TENANT_ID, null);
             String full = material.fullDisplayString() + ".demo-proj";
             try {
                 VirtualKeyParseResult result = VirtualKeyParser.parse(full);
@@ -82,7 +82,7 @@ class VirtualKeyParserTest {
         void shouldRejectPadding() {
             // The generator emits unpadded base64url; a padded variant of a
             // VALID core must be rejected (non-canonical encoding).
-            VirtualKeyMaterial material = crypto.generate(TENANT_ID);
+            VirtualKeyMaterial material = crypto.generate(TENANT_ID, null);
             try {
                 String unpadded = material.fullDisplayString();
                 String paddedPkId = Base64.getUrlEncoder()

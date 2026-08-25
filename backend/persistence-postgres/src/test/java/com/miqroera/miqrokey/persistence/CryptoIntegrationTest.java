@@ -192,7 +192,7 @@ class CryptoIntegrationTest extends AbstractPostgresTest {
         @Test
         @DisplayName("should write virtual_keys row with only digest, no raw secret in DB")
         void shouldStoreOnlyDigestInVirtualKeysTable() {
-            VirtualKeyMaterial material = vkProvider.generate(TENANT_ID);
+            VirtualKeyMaterial material = vkProvider.generate(TENANT_ID, null);
 
             // Insert a real virtual_keys row
             VirtualKey vk = new VirtualKey(UUID.randomUUID(), TENANT_ID, material.publicKeyId(), material.digest(),
@@ -227,7 +227,7 @@ class CryptoIntegrationTest extends AbstractPostgresTest {
         @Test
         @DisplayName("should validate Virtual Key against digest stored in PostgreSQL")
         void shouldValidateAgainstStoredDigest() {
-            VirtualKeyMaterial material = vkProvider.generate(TENANT_ID);
+            VirtualKeyMaterial material = vkProvider.generate(TENANT_ID, null);
 
             // Store in real DB
             VirtualKey vk = new VirtualKey(UUID.randomUUID(), TENANT_ID, material.publicKeyId(), material.digest(),
@@ -257,7 +257,7 @@ class CryptoIntegrationTest extends AbstractPostgresTest {
         @Test
         @DisplayName("should reject cross-tenant Virtual Key validation")
         void shouldRejectCrossTenantVirtualKey() {
-            VirtualKeyMaterial material = vkProvider.generate(TENANT_ID);
+            VirtualKeyMaterial material = vkProvider.generate(TENANT_ID, null);
 
             VirtualKey vk = new VirtualKey(UUID.randomUUID(), TENANT_ID, material.publicKeyId(), material.digest(),
                     material.displayPrefix(), material.lastFour(), user.id(), project.id(), grant.id(), credentialId,
@@ -283,7 +283,7 @@ class CryptoIntegrationTest extends AbstractPostgresTest {
         @Test
         @DisplayName("should handle HMAC key rotation with DB-stored digests")
         void shouldHandleHmacKeyRotationInDb() {
-            VirtualKeyMaterial material = vkProvider.generate(TENANT_ID);
+            VirtualKeyMaterial material = vkProvider.generate(TENANT_ID, null);
 
             // Store digest in DB
             VirtualKey vk = new VirtualKey(UUID.randomUUID(), TENANT_ID, material.publicKeyId(), material.digest(),
@@ -336,7 +336,7 @@ class CryptoIntegrationTest extends AbstractPostgresTest {
         @Test
         @DisplayName("should verify stored virtual_keys row has digest-only, no raw key")
         void shouldVerifyActualRowOnlyHasDigest() {
-            VirtualKeyMaterial material = vkProvider.generate(TENANT_ID);
+            VirtualKeyMaterial material = vkProvider.generate(TENANT_ID, null);
 
             VirtualKey vk = new VirtualKey(UUID.randomUUID(), TENANT_ID, material.publicKeyId(), material.digest(),
                     material.displayPrefix(), material.lastFour(), user.id(), project.id(), grant.id(), credentialId,

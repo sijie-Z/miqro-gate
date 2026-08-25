@@ -109,9 +109,9 @@ public final class GatewayTestKeys {
 
         private static KeyFixture create(String projectTag, UUID projectId, UUID productId, UUID credentialId,
                 Set<String> models) {
-            VirtualKeyMaterial material = CRYPTO.generate(TENANT_ID);
+            VirtualKeyMaterial material = CRYPTO.generate(TENANT_ID, projectTag);
             try {
-                String presented = material.fullDisplayString() + "." + projectTag;
+                String presented = material.fullDisplayString();
                 return new KeyFixture(presented, material.publicKeyId(), material.rawSecret(), material.digest(),
                         UUID.randomUUID(), projectTag, projectId, productId, credentialId, models);
             } finally {

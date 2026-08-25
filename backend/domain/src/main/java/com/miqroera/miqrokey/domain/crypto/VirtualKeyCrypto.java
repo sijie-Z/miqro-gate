@@ -39,11 +39,21 @@ public interface VirtualKeyCrypto {
      * returning.
      * </p>
      *
+     * <p>
+     * The optional {@code projectTag} is appended as the routing label suffix
+     * ({@code mqk_live_<publicKeyId>_<secret>.<projectTag>}). The label is
+     * plaintext and routes only; it is NOT included in the HMAC digest, and
+     * {@code key_project_binding} remains the authorization authority. A blank tag
+     * produces the label-less form.
+     * </p>
+     *
      * @param tenantId
      *            the tenant that owns this key
+     * @param projectTag
+     *            routing label suffix, or null/blank for no label
      * @return complete material for one-time display
      */
-    VirtualKeyMaterial generate(UUID tenantId);
+    VirtualKeyMaterial generate(UUID tenantId, String projectTag);
 
     /**
      * Validates a presented Virtual Key against a stored digest using constant-time
