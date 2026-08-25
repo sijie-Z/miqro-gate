@@ -189,6 +189,14 @@ class RouteSnapshotRefreshIntegrationTest {
                 RANDOM.nextBytes(key);
                 Path file = Files.createTempFile(name, ".key");
                 Files.writeString(file, java.util.Base64.getEncoder().encodeToString(key));
+                // Production FileSecretProvider requires exactly 0400 on POSIX;
+                // createTempFile defaults to 0600. No-op on non-POSIX (Windows).
+                try {
+                    Files.setPosixFilePermissions(file,
+                            java.nio.file.attribute.PosixFilePermissions.fromString("r--------"));
+                } catch (UnsupportedOperationException ignored) {
+                    // Non-POSIX filesystem: permission check is skipped anyway.
+                }
                 return file;
             } catch (IOException e) {
                 throw new ExceptionInInitializerError(e);
