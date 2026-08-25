@@ -10,7 +10,7 @@
 - Goal status: `DONE`（本地全绿；集成测试待 CI）
 - Last updated: `2026-08-25 07:55 CST`
 - Branch: `goal/tag-routing-usage-closed-loop`
-- Remote: `https://github.com/lichman0405/miqro-key-gateway.git`
+- Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
 
@@ -82,7 +82,7 @@
 ## Known Blockers
 
 - 真实供应商凭证尚未提供；不阻塞 Mock 与本地契约开发。
-- Docker 不在当前 Windows 环境；Compose config 与镜像 digest 门禁已由 GitHub Actions 验证通过。
+- 本机 Docker Desktop 可用（`D:\programming\Docker_4.78.0`）；Compose config 本地 PASS，digest 门禁由 CI 复核。
 
 ## Next Goal
 
@@ -890,7 +890,7 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 ### Remaining risks
 
-- **Push 被阻塞（403）**：本机 git/gh 身份为 `sijie-Z`，对 `lichman0405/miqro-key-gateway` 无写权限。5 个 commit 已本地完成（`cdaf4f5` backend、`0ff1f29` frontend、`b143900` docs、`13d5241` push 阻塞记录、`5b64ced` 闭环修复：last-used 派生 + 集成测试断言 + 配置/文档补齐），待有权限的账号 push（git-workflow.md：不改写历史、不强推）。PR 未创建，CI 未跑。
+- **Push 已解决（2026-08-25）**：目标远端改为所有者仓库 `sijie-Z/miqro-key-gateway`（新建 private）；origin 已切换、`.git/shallow` 浅克隆状态已解除（`git fetch --unshallow upstream`，upstream = `lichman0405/miqro-key-gateway`）。`goal/tag-routing-usage-closed-loop` 已 push 成功。
 - 集成测试（11 个新增）只能在 Linux CI 运行；若 jsonPath 数值断言浮点比较失败需按 CI 输出调整。
 - 真实供应商凭证未提供：Gateway 凭证注入只经 Mock 上游验证，真实联调 `WAITING_FOR_CREDENTIAL`。
 - 响应缓存默认关闭（ADR-0008 决策），正式启用前需新增 ADR。
