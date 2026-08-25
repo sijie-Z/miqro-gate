@@ -89,7 +89,7 @@ public class VirtualKeyResolver {
                 return invalid();
             }
             Set<String> models = snapshot.models(key.keyId());
-            return new AuthContext(key, binding, models);
+            return new AuthContext(key, binding, models, snapshot);
         } finally {
             SecretWiping.clearArray(parsed.rawSecret());
         }

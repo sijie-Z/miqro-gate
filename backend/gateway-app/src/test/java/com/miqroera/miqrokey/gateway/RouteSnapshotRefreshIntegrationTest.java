@@ -93,7 +93,7 @@ class RouteSnapshotRefreshIntegrationTest {
         // listener, which reloads the snapshot. Plain Statement.execute (simple
         // query protocol), matching the control-plane notifier: the pgjdbc
         // executeUpdate path throws "Unexpected result returned" on pg_notify.
-        seedKey();
+        UUID productId = seedKey();
         jdbc.getJdbcTemplate().execute("SELECT pg_notify('" + CHANNEL + "', '')");
 
         await(() -> holder.current().version() >= 2);
@@ -102,14 +102,22 @@ class RouteSnapshotRefreshIntegrationTest {
         RouteSnapshot.BindingRecord binding = snapshot.bindings().get(KEY_ID);
         assertThat(binding).isNotNull();
         assertThat(binding.projectTag()).isEqualTo("notify-proj");
+        // The /v1/models authorization layers arrive with the snapshot too:
+        // grant models, upstream models (model_catalog, ACTIVE rows), product code.
+        assertThat(snapshot.grantModels(GRANT_ID)).containsExactly("grant-model-a");
+        assertThat(snapshot.upstreamModels(productId)).containsExactly("upstream-model-a");
+        assertThat(snapshot.productCode(productId)).isEqualTo("deepseek-payg-api");
     }
 
-    private void seedKey() {
+    private static final UUID GRANT_ID = UUID.fromString("dddddddd-0000-0000-0000-000000000001");
+
+    /** Seeds the full FK chain; returns the seeded product id. */
+    private UUID seedKey() {
         UUID providerId = UUID.randomUUID();
         UUID productId = UUID.randomUUID();
         UUID subscriptionId = UUID.randomUUID();
         UUID credentialId = UUID.randomUUID();
-        UUID grantId = UUID.randomUUID();
+        UUID grantId = GRANT_ID;
         MapSqlParameterSource p = new MapSqlParameterSource();
         p.addValue("tenantId", TENANT_ID).addValue("providerId", providerId).addValue("productId", productId)
                 .addValue("subscriptionId", subscriptionId).addValue("credentialId", credentialId)
@@ -123,7 +131,7 @@ class RouteSnapshotRefreshIntegrationTest {
                 INSERT INTO provider_products
                     (id, provider_id, product_code, display_name, billing_mode, credential_topology,
                      supported_wire_protocols, base_url_templates, auth_scheme, implementation_status, version)
-                VALUES (:productId, :providerId, 'notify-product', 'Notify Product', 'PAYG', 'SINGLE_SHARED',
+                VALUES (:productId, :providerId, 'deepseek-payg-api', 'Notify Product', 'PAYG', 'SINGLE_SHARED',
                         '["messages"]', '[{"url":"https://api.test.example"}]', '{"type":"bearer"}', 'VERIFIED', 0)
                 """, p);
         jdbc.update("""
@@ -160,6 +168,17 @@ class RouteSnapshotRefreshIntegrationTest {
                 INSERT INTO key_project_binding (id, tenant_id, virtual_key_id, project_id, status, version)
                 VALUES (:bindingId, :tenantId, :keyId, :projectId, 'ACTIVE', 0)
                 """, p.addValue("bindingId", UUID.randomUUID()));
+        // /v1/models authorization layers: one grant model and one ACTIVE
+        // upstream model, so the reloaded snapshot carries them.
+        jdbc.update("""
+                INSERT INTO project_provider_grant_models (tenant_id, grant_id, model_id)
+                VALUES (:tenantId, :grantId, 'grant-model-a')
+                """, p);
+        jdbc.update("""
+                INSERT INTO model_catalog (id, provider_product_id, model_id, display_name, status, version)
+                VALUES (:modelId, :productId, 'upstream-model-a', 'Upstream Model A', 'ACTIVE', 0)
+                """, p.addValue("modelId", UUID.randomUUID()));
+        return productId;
     }
 
     /** Polls a condition with a deadline; fails the test on timeout. */

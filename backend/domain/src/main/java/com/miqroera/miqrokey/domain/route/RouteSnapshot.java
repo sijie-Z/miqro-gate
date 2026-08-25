@@ -26,6 +26,13 @@ import java.util.UUID;
  * <li>Each key has at most one ACTIVE binding; the loader resolves it.</li>
  * <li>Credentials are indexed by id and carry the upstream base URL, the
  * product's auth scheme, and the ACTIVE version's ciphertext.</li>
+ * <li>Model authorization data for {@code /v1/models}: per-key
+ * ({@code virtual_key_models}), per-grant
+ * ({@code project_provider_grant_models} of ACTIVE grants) and per-product
+ * upstream ({@code model_catalog}, ACTIVE rows only — written exclusively from
+ * successful official-API fetches, so a failed fetch keeps the last successful
+ * catalog). Product codes let the gateway gate products against the signed
+ * provider catalog.</li>
  * </ul>
  *
  * <h2>Security</h2> {@code secretDigest} is copied defensively. The snapshot
@@ -35,18 +42,27 @@ import java.util.UUID;
  */
 public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecord> keys,
         Map<UUID, BindingRecord> bindings, Map<UUID, CredentialRecord> credentials,
-        Map<UUID, Set<String>> modelsByKeyId) {
+        Map<UUID, Set<String>> modelsByKeyId, Map<UUID, Set<String>> grantModelsByGrantId,
+        Map<UUID, Set<String>> upstreamModelsByProductId, Map<UUID, String> productCodesByProductId) {
 
     public RouteSnapshot {
         keys = Map.copyOf(keys);
         bindings = Map.copyOf(bindings);
         credentials = Map.copyOf(credentials);
-        modelsByKeyId = modelsByKeyId.entrySet().stream().collect(java.util.stream.Collectors
-                .toUnmodifiableMap(Map.Entry::getKey, e -> Collections.unmodifiableSet(Set.copyOf(e.getValue()))));
+        modelsByKeyId = immutableSets(modelsByKeyId);
+        grantModelsByGrantId = immutableSets(grantModelsByGrantId);
+        upstreamModelsByProductId = immutableSets(upstreamModelsByProductId);
+        productCodesByProductId = Map.copyOf(productCodesByProductId);
+    }
+
+    private static Map<UUID, Set<String>> immutableSets(Map<UUID, Set<String>> map) {
+        return map.entrySet().stream().collect(java.util.stream.Collectors.toUnmodifiableMap(Map.Entry::getKey,
+                e -> Collections.unmodifiableSet(Set.copyOf(e.getValue()))));
     }
 
     public static RouteSnapshot empty(long version, Instant loadedAt) {
-        return new RouteSnapshot(version, loadedAt, Map.of(), Map.of(), Map.of(), Map.of());
+        return new RouteSnapshot(version, loadedAt, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
+                Map.of());
     }
 
     public KeyRecord key(String publicKeyId) {
@@ -66,10 +82,36 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
     }
 
     /**
-     * A routing-relevant virtual key. Never holds secret material.
+     * Models granted to an ACTIVE grant ({@code project_provider_grant_models}).
+     */
+    public Set<String> grantModels(UUID grantId) {
+        return grantModelsByGrantId.getOrDefault(grantId, Set.of());
+    }
+
+    /**
+     * Upstream models of a product ({@code model_catalog}, ACTIVE rows only). Empty
+     * until an official-API fetch has succeeded — never partially populated by a
+     * failed fetch.
+     */
+    public Set<String> upstreamModels(UUID productId) {
+        return upstreamModelsByProductId.getOrDefault(productId, Set.of());
+    }
+
+    /**
+     * The product's code ({@code provider_products.product_code}); null when
+     * unknown.
+     */
+    public String productCode(UUID productId) {
+        return productCodesByProductId.get(productId);
+    }
+
+    /**
+     * A routing-relevant virtual key. Never holds secret material. {@code grantId}
+     * is the key's owning grant ({@code virtual_keys.grant_id}, NOT NULL) and
+     * selects its {@link #grantModels(UUID)} set.
      */
     public record KeyRecord(UUID keyId, UUID tenantId, String publicKeyId, byte[] secretDigest, String cachePolicy,
-            String purpose) {
+            String purpose, UUID grantId) {
 
         public KeyRecord {
             secretDigest = secretDigest.clone();
@@ -127,7 +169,10 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
     public String toString() {
         return "RouteSnapshot[version=" + version + ", loadedAt=" + loadedAt + ", keys=" + keys.size() + ", bindings="
                 + bindings.size() + ", credentials=" + credentials.size() + ", models="
-                + modelsByKeyId.values().stream().mapToInt(Set::size).sum() + "]";
+                + modelsByKeyId.values().stream().mapToInt(Set::size).sum() + ", grantModels="
+                + grantModelsByGrantId.values().stream().mapToInt(Set::size).sum() + ", upstreamModels="
+                + upstreamModelsByProductId.values().stream().mapToInt(Set::size).sum() + ", products="
+                + productCodesByProductId.size() + "]";
     }
 
     // Explicit equals/hashCode that include arrays by content, without leaking
@@ -140,11 +185,14 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
             return false;
         return version == that.version && loadedAt.equals(that.loadedAt) && keys.equals(that.keys)
                 && bindings.equals(that.bindings) && credentials.equals(that.credentials)
-                && modelsByKeyId.equals(that.modelsByKeyId);
+                && modelsByKeyId.equals(that.modelsByKeyId) && grantModelsByGrantId.equals(that.grantModelsByGrantId)
+                && upstreamModelsByProductId.equals(that.upstreamModelsByProductId)
+                && productCodesByProductId.equals(that.productCodesByProductId);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(version, loadedAt, keys, bindings, credentials, modelsByKeyId);
+        return java.util.Objects.hash(version, loadedAt, keys, bindings, credentials, modelsByKeyId,
+                grantModelsByGrantId, upstreamModelsByProductId, productCodesByProductId);
     }
 }

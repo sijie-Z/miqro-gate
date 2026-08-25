@@ -2,6 +2,8 @@ package com.miqroera.miqrokey.gateway.proxy;
 
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.miqroera.miqrokey.adapters.catalog.ProviderCatalog;
+import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import com.miqroera.miqrokey.gateway.vkey.AuthContext;
 import com.miqroera.miqrokey.gateway.vkey.AuthFailureException;
 import com.miqroera.miqrokey.gateway.vkey.VirtualKeyResolver;
@@ -14,22 +16,40 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * {@code GET /v1/models} — returns the models the presented virtual key is
- * allowed to use, in OpenAI-compatible list format. The allowed set comes from
- * the route snapshot ({@code virtual_key_models} grants), so a key only ever
- * sees its own permissions.
+ * allowed to use, in OpenAI-compatible list format.
+ *
+ * <p>
+ * The allowed set is the four-way intersection of the route snapshot's
+ * authorization inputs (api-contract §7.1): the signed provider catalog (the
+ * product must exist there or nothing is served), the upstream models
+ * ({@code model_catalog}, written only from successful official-API fetches),
+ * the ACTIVE grant's models ({@code project_provider_grant_models}), and the
+ * key's own models ({@code virtual_key_models}). A model missing from any layer
+ * is not authorized and never leaks.
+ * </p>
+ *
+ * <p>
+ * Note: the proxy hot path pre-validates models against the KEY's models only
+ * (unchanged); this endpoint applies the full intersection.
+ * </p>
  */
 @RestController
 public class ModelsController {
 
     private final VirtualKeyResolver keyResolver;
     private final ObjectMapper objectMapper;
+    private final ProviderCatalog providerCatalog;
 
-    public ModelsController(VirtualKeyResolver keyResolver, ObjectMapper objectMapper) {
+    public ModelsController(VirtualKeyResolver keyResolver, ObjectMapper objectMapper,
+            ProviderCatalog providerCatalog) {
         this.keyResolver = keyResolver;
         this.objectMapper = objectMapper;
+        this.providerCatalog = providerCatalog;
     }
 
     @GetMapping("/v1/models")
@@ -50,7 +70,7 @@ public class ModelsController {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("object", "list");
         ArrayNode data = root.putArray("data");
-        for (String model : ctx.models().stream().sorted().toList()) {
+        for (String model : allowedModels(ctx)) {
             ObjectNode entry = data.addObject();
             entry.put("id", model);
             entry.put("object", "model");
@@ -58,6 +78,23 @@ public class ModelsController {
             entry.put("owned_by", "miqrokey");
         }
         return root.toString();
+    }
+
+    /**
+     * The four-way intersection. All inputs come from the snapshot the key was
+     * resolved against, so a key never sees models that outlive its own grant.
+     */
+    private Set<String> allowedModels(AuthContext ctx) {
+        RouteSnapshot snapshot = ctx.snapshot();
+        String productCode = snapshot.productCode(ctx.productId());
+        if (productCode == null || providerCatalog.findById(productCode).isEmpty()) {
+            // Product unknown to the signed catalog: nothing is authorized.
+            return Set.of();
+        }
+        Set<String> allowed = new TreeSet<>(ctx.models());
+        allowed.retainAll(snapshot.grantModels(ctx.key().grantId()));
+        allowed.retainAll(snapshot.upstreamModels(ctx.productId()));
+        return allowed;
     }
 
     private Mono<Void> writeError(ServerWebExchange exchange, AuthFailureException e) {

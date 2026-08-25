@@ -52,7 +52,9 @@ public class GatewayAuthTestConfig {
     @Primary
     public RouteSnapshotProvider gatewayTestRouteSnapshotProvider(Environment environment) {
         return new InMemoryRouteSnapshotProvider(GatewayTestKeys.snapshot(requiredUpstreamUrl(environment),
-                GatewayTestKeys.DEFAULT_KEY, GatewayTestKeys.OTHER_KEY));
+                GatewayTestKeys.DEFAULT_KEY, GatewayTestKeys.OTHER_KEY, GatewayTestKeys.GRANT_LIMITED_KEY,
+                GatewayTestKeys.UPSTREAM_LIMITED_KEY, GatewayTestKeys.NO_UPSTREAM_KEY,
+                GatewayTestKeys.UNKNOWN_PRODUCT_KEY));
     }
 
     @Bean
