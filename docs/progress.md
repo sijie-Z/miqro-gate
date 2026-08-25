@@ -7,9 +7,9 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `tag-routing-usage-closed-loop`（G1.4 授权部分 + G1.5 + G2.2 + G2.3 + G2.4 + G5.1 核心闭环）
-- Goal status: `DONE`（全模块本地验证全绿，含 Testcontainers 集成测试）
-- Last updated: `2026-08-25 10:50 CST`
-- Branch: `goal/tag-routing-usage-closed-loop`
+- Goal status: `DONE`（本地全绿 + Linux/Windows CI 交叉验证全绿；PR #1 已合并）
+- Last updated: `2026-08-25 11:14 CST`
+- Branch: `main`（goal 分支已合并删除；下一 Goal 从 main 切新分支）
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -899,6 +899,8 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 ### Remaining risks
 
+- **PR #1 已合并（2026-08-25）**：squash-merge commit `8b6be8c`（feat(gateway): virtual key routing, credential injection and usage closed loop (#1)）；`goal/tag-routing-usage-closed-loop` 远端分支已删除；仓库默认分支已改为 `main`。PR CI（backend Linux `-Pintegration` + Windows、frontend、compose）4/4 全绿。
+- **main 分支保护暂缓（2026-08-25）**：GitHub 分支保护规则需要 Pro/Team 计划，当前免费个人账号无法启用（API 返回 403）；建议公司建 org 后启用（要求 PR + status checks + conversation resolution，禁 force push/删除）。
 - **Push 已解决（2026-08-25）**：目标远端改为所有者仓库 `sijie-Z/miqro-key-gateway`（新建 private）；origin 已切换、`.git/shallow` 浅克隆状态已解除（`git fetch --unshallow upstream`，upstream = `lichman0405/miqro-key-gateway`）。`goal/tag-routing-usage-closed-loop` 已 push 成功。
 - 集成测试（12 个 Me* + 其余 Tag(integration) 类）已在本机 Docker Desktop（Testcontainers 1.21.4，`DOCKER_HOST=tcp://localhost:2375`）全部通过；Linux CI 作为交叉验证保留。
 - 真实供应商凭证未提供：Gateway 凭证注入只经 Mock 上游验证，真实联调 `WAITING_FOR_CREDENTIAL`。
