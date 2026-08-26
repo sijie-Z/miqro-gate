@@ -309,6 +309,22 @@
 
 错误码：`USER_NOT_FOUND`/`TEAM_NOT_FOUND`/`PROJECT_NOT_FOUND`/`GRANT_NOT_FOUND`（404）、`USERNAME_TAKEN`/`PROJECT_CODE_TAKEN`/`GRANT_EXISTS`（409）、`USERNAME_INVALID`（400）、`ADMIN_NOT_DISABLEABLE`（409）。所有写操作写审计事件（`USER_CREATE`/`USER_STATUS`/`USER_PASSWORD_RESET`/`USER_SESSIONS_REVOKED`/`TEAM_*`/`PROJECT_*`/`GRANT_*`）。
 
+### 5.0b 供应商产品与 Plan（G5.3）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/provider-products` | 产品实例列表（供应商名、productCode、协议、Base URL host、实现状态、余额权威级别） |
+| `GET /api/v1/admin/provider-products/{id}` | 产品详情 |
+| `GET /api/v1/admin/provider-products/providers` | 供应商列表 |
+| `GET /api/v1/admin/subscriptions` / `/{id}` | 订阅列表/详情（含产品名） |
+| `POST /api/v1/admin/subscriptions` | 创建（`providerProductId`/`name`/`billingMode`/`planScope`/价格/配额） |
+| `PATCH /api/v1/admin/subscriptions/{id}` | 更新（价格/币种/配额/状态） |
+| `GET /api/v1/admin/subscriptions/{id}/seats` | 席位列表（含分配用户） |
+| `POST /api/v1/admin/subscriptions/{id}/seats` | 创建席位（`externalSeatRef`/`displayName`/`assignedUserId`） |
+| `PATCH /api/v1/admin/subscriptions/{id}/seats/{seatId}` | 分配/释放/禁用席位 |
+
+错误码：`PRODUCT_NOT_FOUND`（404）、`SUBSCRIPTION_NOT_FOUND`（404）、`SEAT_NOT_FOUND`（404）。写操作审计 `SUBSCRIPTION_CREATE/UPDATE`、`SEAT_CREATE/UPDATE`。成员 Key（席位凭证）继续由 `/api/v1/admin/credentials` 管理（`seat_id` 关联）。
+
 ### 5.1 上游凭证
 
 管理员录入真实供应商凭证并管理其生命周期（G1.6）。真实凭证属于供应商产品订阅，不绑定用户；只有 SYSTEM_ADMIN 可操作。
