@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { ApiError } from '@/api/http';
+import PageHeader from '@/components/PageHeader.vue';
 import { useAuthStore } from '@/stores/auth';
 
 const auth = useAuthStore();
@@ -52,15 +53,10 @@ async function submit() {
 
 <template>
   <div class="profile-page">
-    <div class="page-header">
-      <div>
-        <h2 class="page-title">{{ isForced ? '设置新密码' : 'Profile' }}</h2>
-        <p v-if="isForced" class="page-desc forced-hint">
-          首次登录必须修改临时密码后才能使用门户。
-        </p>
-        <p v-else class="page-desc">账号信息与安全设置。</p>
-      </div>
-    </div>
+    <PageHeader
+      :title="isForced ? '设置新密码' : 'Profile'"
+      :description="isForced ? '首次登录必须修改临时密码后才能使用门户。' : '账号信息与安全设置。'"
+    />
 
     <el-alert
       v-if="isForced"

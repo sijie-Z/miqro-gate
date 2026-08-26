@@ -69,6 +69,13 @@ async function mockApi(page: Page, admin = false) {
       body: JSON.stringify({ groups: [], totals: {} }),
     }),
   );
+  await page.route('**/api/v1/me/grants', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ projects: [], grants: [], purposes: [] }),
+    }),
+  );
 }
 
 for (const viewport of VIEWPORTS) {
@@ -108,6 +115,23 @@ for (const viewport of VIEWPORTS) {
     });
   });
 }
+
+test('key actions: rotate and revoke flows render from the kebab menu', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/keys');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('keys-table')).toBeVisible();
+
+  // The kebab menu exposes rotate and revoke (danger grouped with divider).
+  await page.getByTestId('key-actions').first().click();
+  await expect(page.getByTestId('key-rotate').first()).toBeVisible();
+  await expect(page.getByTestId('key-revoke').first()).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // Status label uses the compact mk-status styling (dot + short label).
+  await expect(page.locator('.mk-status--success').first()).toHaveText('Active');
+});
 
 test('forbidden aesthetics are absent from the rendered shell', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });

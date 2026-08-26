@@ -13,6 +13,11 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Warm the entry transforms so the first page load never races Vite's
+    // cold-start module graph (Playwright sees "预加载桥接不可用" otherwise).
+    warmup: {
+      clientFiles: ['./src/main.ts', './src/App.vue', './src/styles/tokens.css', './src/styles/global.css'],
+    },
     proxy: {
       // Management API lives on the Control Plane (8080); the Gateway
       // data plane (8081) is not proxied by the dev server.
