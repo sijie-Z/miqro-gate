@@ -407,6 +407,32 @@
 - 价格取分配时刻最新快照（逐事件价格快照为延后列）；`currency` 取订阅币种（缺省 USD）。
 - 错误码：`SUBSCRIPTION_NOT_FOUND`（404）、`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400，窗口 ≤ 93 天）。
 
+### 5.5 原始记录导出（G4.4）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/admin/exports?format=CSV\|JSONL&from&to` | 创建导出任务，返回 `202` + 任务（异步执行） |
+| `GET /api/v1/admin/exports/{id}` | 任务状态（不含产物字节） |
+| `GET /api/v1/admin/exports/{id}/download` | 下载 gzip 产物（`Content-Type: application/gzip`、`X-MiQroKey-SHA256` 校验头） |
+| `GET /api/v1/admin/exports?limit` | 最近任务列表 |
+
+- 窗口 ≤ 93 天；产物只含计数与元数据列（见 database-schema `export_tasks`），绝不包含 prompt、代码、Secret 或 Virtual Key 明文。
+- 产物保存 24 小时后 `EXPIRED`，下载返回 `410 EXPORT_EXPIRED`；未完成/不存在 → `404 EXPORT_NOT_FOUND`。
+- 错误码：`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400）。
+
+### 5.6 用量删除（G4.4）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/usage-deletions/preview?from&to` | 干跑计数 |
+| `POST /api/v1/admin/usage-deletions?from&to` | 创建删除请求；一次性确认 token 只在本次响应出现 |
+| `POST /api/v1/admin/usage-deletions/{id}/confirm` | 携带 token 确认并执行永久删除 |
+| `GET /api/v1/admin/usage-deletions?limit` | 最近请求列表（永不返回 token） |
+
+- 删除是物理且永久的（无软删除）；执行后写 `USAGE_DELETE` 审计事件，审计链本身永不删除。
+- token 仅存 SHA-256 哈希；错误 token → `403 DELETION_TOKEN_INVALID`；确认窗口 1 小时 → `410 DELETION_EXPIRED`；重复确认 → `409 DELETION_NOT_CONFIRMABLE`。
+- 窗口 ≤ 93 天；`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400）。
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

@@ -247,6 +247,14 @@ Key → 项目绑定（标签路由的鉴权权威），与 `virtual_keys.projec
 
 追加式历史表：`subscription_id`、`seat_id nullable`、`credential_id nullable`、`window_type`（`PERIOD|ROLLING_5H|WEEKLY|MONTHLY|UNKNOWN`）、总/已用/剩余（`numeric(24,10)`）、`unit`（`POINTS|TOKENS|REQUESTS|CURRENCY|UNKNOWN`）、`shared_pool`、`source`（`OFFICIAL_API|LOCAL_ESTIMATE|UNAVAILABLE`，对应 provider-adapter-contract §6 权威级别）、`provider_status_json`（脱敏预留，绝不存 Secret）、`synced_at`、`error_message`。读取按 `(tenant_id, subscription_id, synced_at DESC)` 与 `(tenant_id, credential_id, synced_at DESC)` 索引；最新视图用 `DISTINCT ON (seat_id, credential_id)` 每作用域取最新一行。写入路径：`QuotaSnapshotService.refresh`（管理端触发）——按 ACTIVE 凭证逐个经适配器 `fetchPlanStatus`（解密 → 凭证作用域 `ProviderClient` → OFFICIAL_API/UNAVAILABLE 行），订阅带 `quota_total` + `period_start` 时另写 LOCAL_ESTIMATE 行（本地 usage 输入+输出 token 相对周期起点估算）。
 
+### `export_tasks` (V11，G4.4 实现)
+
+异步导出任务：`format`（`CSV|JSONL`）、窗口、`status`（`PENDING|RUNNING|SUCCEEDED|FAILED|EXPIRED`）、`sha256`（gzip 产物哈希）、`row_count`/`byte_count`、`file_bytes`（gzip 产物本体，24h 过期）、`error_message`（脱敏）。产物只含计数与元数据列（时间/模型/缓存层级/token/延迟/状态码/request ID/Key/项目/产品/凭证 ID），绝不包含 prompt、代码、Secret 或 Virtual Key 明文。
+
+### `usage_deletions` (V11，G4.4 实现)
+
+双确认删除请求：窗口、`preview_count`、`confirm_token_hash`（一次性确认 token 的 SHA-256，明文只在创建响应出现一次）、`status`（`PENDING_CONFIRMATION|CONFIRMED|EXECUTED|EXPIRED`）、`deleted_count`、`expires_at`（确认窗口 1h）。执行时物理删除 `usage_event` 窗口行并写 `USAGE_DELETE` 审计事件（审计链本身永不删除）。
+
 ### `cost_allocations` (V10，G4.3 实现)
 
 按 Subscription 周期、项目对象记录：`fixed_cost`（Plan 订阅价按窗口/订阅周期天数比例折算）、`usage_cost`（本地 usage × 最新价格快照，每百万 token 单价）、`weight_tokens`（权重 Token = 输入+输出）、`allocated_amount`（= usage + fixed 份额）、`currency`、`algorithm_version`（当前 `1`；唯一键含版本，重跑同版本幂等覆盖、新算法另起历史行）、`generated_at`。唯一 `(subscription_id, period_start, period_end, target_type, target_id, algorithm_version)`。写入路径：`CostAllocationService.allocate`（管理端触发）——固定成本按 Token 权重在项目间分摊（无用量不产出行）；PAYG 订阅无固定成本。价格取分配时刻最新快照（usage 行上的逐事件价格快照为延后列，见 §6 延后列清单）。
