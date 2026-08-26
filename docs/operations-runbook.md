@@ -91,3 +91,29 @@ Master key 丢失无法从数据库恢复真实凭证；使用受保护备份恢
 
 保留 request ID、时间、账号、Virtual Key ID、凭证版本、产品、模型、状态、token/费用、来源 IP（按客户策略）和审计事件。不得为了排错临时开启 prompt、代码或 response body 日志。需要协议样本时使用合成请求或经批准的完全脱敏 capture。
 
+
+## 备份与恢复（G6.2）
+
+脚本位于 `deploy/backup/`：
+
+| 脚本 | 用途 |
+|---|---|
+| `miqrokey-backup.sh` | pg_dump(custom) → gzip → AES-256-CBC(PBKDF2 200k) → `<BACKUP_PATH>/miqrokey-<UTC 时间戳>.sql.gz.enc` + SHA-256 manifest；保留上限 `DAILY_KEEP + WEEKLY_KEEP`（默认 7+4），超出删最旧；成功/失败经 Webhook（可选 HMAC-SHA256 签名 `X-MiQroKey-Signature: sha256=...`）通知 |
+| `miqrokey-verify.sh <file>` | 校验 manifest + 解密干跑（`pg_restore --list`），不触碰任何库 |
+| `miqrokey-restore.sh <file> [target-db]` | 校验 manifest → 解密 → `pg_restore --exit-on-error`；恢复前目标库必须存在 |
+| `test-restore.sh` | 真实恢复演练：双 Postgres 容器 → 播种 1000 行 → 真备份 → 校验 → 恢复 → 行数一致断言（已验证 PASS） |
+| `test-retention-webhook.sh` | 保留上限与 Webhook 签名通知测试（已验证 PASS） |
+
+### 每日备份（cron）
+
+```bash
+# 02:00 每日；密钥文件 32 字节 base64、权限 0400，与在线主密钥分离存储
+0 2 * * * /opt/miqrokey/deploy/backup/miqrokey-backup.sh >> /var/log/miqrokey-backup.log 2>&1
+```
+
+环境变量：`MIQROKEY_BACKUP_PATH`、`MIQROKEY_BACKUP_DAILY_KEEP`、`MIQROKEY_BACKUP_WEEKLY_KEEP`、`MIQROKEY_BACKUP_KEY_FILE`（必需）、`MIQROKEY_BACKUP_WEBHOOK_URL`/`_SECRET`（可选）。退出码：0=成功，1=转储/加密失败，2=保留失败，3=备份成功但通知失败。
+
+### 恢复演练要求
+
+- 每季度至少一次 `test-restore.sh` 或对最新备份执行 `verify + restore` 到隔离实例。
+- 备份加密密钥离线/分离保管；`restore` 与 `verify` 均强校验 SHA-256 manifest。
