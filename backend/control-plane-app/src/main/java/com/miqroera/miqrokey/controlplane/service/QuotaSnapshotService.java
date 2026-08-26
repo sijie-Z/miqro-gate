@@ -37,6 +37,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -109,6 +110,25 @@ public class QuotaSnapshotService {
         this.refreshTotal = Counter.builder("miqrokey_control_quota_refresh_total")
                 .description("Quota snapshot refreshes by result").tag("result", "unknown").register(meterRegistry);
     }
+
+    /**
+     * Periodic refresh: every subscription gets its snapshots refreshed on a fixed
+     * delay. Failures are logged per subscription, never aborting the cycle.
+     */
+    @Scheduled(fixedDelayString = "${miqrokey.quota.refresh-interval-ms:900000}")
+    public void refreshAllScheduled() {
+        for (UpstreamSubscription subscription : subscriptionRepository.findAllByTenantId(SEED_TENANT_ID)) {
+            try {
+                refresh(SEED_TENANT_ID, subscription.id());
+            } catch (Exception e) {
+                LOG.warn("Scheduled quota refresh failed for subscription {}", subscription.id(), e);
+            }
+        }
+    }
+
+    /** Seed tenant of the single-tenant deployment. */
+    private static final java.util.UUID SEED_TENANT_ID = java.util.UUID
+            .fromString("00000000-0000-0000-0000-000000000001");
 
     /**
      * Refreshes quota snapshots for one subscription: per-credential official fetch
