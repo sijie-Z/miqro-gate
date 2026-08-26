@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.config;
 
+import com.miqroera.miqrokey.adapters.baidu.BaiduQianfanAdapter;
 import com.miqroera.miqrokey.adapters.deepseek.DeepSeekPaygAdapter;
 import com.miqroera.miqrokey.adapters.minimax.MiniMaxAdapter;
 import com.miqroera.miqrokey.adapters.moonshot.MoonshotKimiAdapter;
@@ -47,6 +48,9 @@ public class ProviderClientConfig {
         registry.register(MiniMaxAdapter.paygApi(objectMapper));
         registry.register(MoonshotKimiAdapter.kimiCodeMember(objectMapper));
         registry.register(MoonshotKimiAdapter.paygApi(objectMapper));
+        registry.register(BaiduQianfanAdapter.codingPlan(objectMapper));
+        registry.register(BaiduQianfanAdapter.tokenPlanPersonal(objectMapper));
+        registry.register(BaiduQianfanAdapter.paygApi(objectMapper));
         return registry;
     }
 

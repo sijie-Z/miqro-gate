@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G3.5`（Kimi / Moonshot：Kimi Code 会员 Key + 按量 API；官方余额查询 API）
-- Goal status: `DONE`（全量验证通过：863 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
+- Current goal: `G3.6`（百度千帆：Coding Plan、Token Plan 个人版、按量 API；专属 Key）
+- Goal status: `DONE`（全量验证通过：879 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g3.5-kimi-moonshot`
+- Branch: `goal/g3.6-baidu-qianfan`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,40 @@
 
 ## Next Goal
 
-- Goal ID: `G3.6`
-- Name: 百度千帆（千帆 Coding Plan、Token Plan 个人版、按量 API）
+- Goal ID: `G3.7`
+- Name: 火山引擎方舟（Coding Plan、Agent Plan、按量 API）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 3 供应商产品）
+
+## G3.6 — 百度千帆（Coding Plan + Token Plan 个人版 + 按量 API，DONE）
+
+### 官方事实核验（2026-08-26，cloud.baidu.com）
+
+- Coding Plan：OpenAI base `https://qianfan.baidubce.com/v2/coding`、Anthropic base `https://qianfan.baidubce.com/anthropic/coding`；专属 Key 仅限专属接口（错误码 `coding_plan_api_key_not_allowed`/`coding_plan_api_key_required`）；按请求次数配额（Lite ~1200/5h，Pro ~6000/5h）；模型 `kimi-k2.5`/`deepseek-v3.2`/`glm-5`/`minimax-m2.5`/`ernie-4.5-turbo-20260402`/`deepseek-v4-flash`/`glm-5.1` 或 `qianfan-code-latest`。
+- Token Plan 个人版：OpenAI base `https://qianfan.baidubce.com/v2/tokenplan/personal`、Anthropic base `https://qianfan.baidubce.com/anthropic/tokenplan/personal`；专属 Key；月度 token 池（Mini 1000万/Lite 4200万/Pro 2.3亿/Max 7亿，模型共享）；错误码 `token_quota_exceeded`。
+- 按量 API：千帆 MaaS v2（base `https://qianfan.baidubce.com/v2`）。
+- **三个产品均无确认的官方余额/用量 API**（控制台配额页可见）→ `fetchPlanStatus` 返回 `UNAVAILABLE`。
+
+### 实现
+
+- `provider-adapters`：`BaiduQianfanAdapter`（3 个静态工厂，adapterId 与签名目录逐一匹配）+ `BaiduQianfanUsageObserver`；OpenAI base 不以版本段结尾（`/coding`、`/tokenplan/personal`、`/v2`）→ 一律剥离 `/v1`；Anthropic `/v1/messages` 保留；`fetchPlanStatus` → `UNAVAILABLE`（0 HTTP）。
+- `control-plane-app`：`ProviderClientConfig` 注册 3 个千帆适配器（现共 17 个适配器：DeepSeek 1 + Tencent 5 + Zhipu 3 + MiniMax 3 + Moonshot 2 + Baidu 3）。
+
+### 测试（本 Goal 新增 16 个）
+
+- `BaiduQianfanAdapterTest`（12）：3 个产品 adapterId/协议与签名目录一致；凭证剥离 + query 重编码；官方端点映射（Coding Plan / Token Plan 个人版 OpenAI+Anthropic、按量）；空 query；凭证探活 `/models`；401/403/429/5xx 映射；fetchModels 解析/失败模式；fetchPlanStatus `UNAVAILABLE` 且 0 HTTP（三产品）；capabilities 差异；observer 绑定。
+- `BaiduQianfanUsageObserverTest`（4）：OpenAI 形状 + 根 model id、Anthropic 形状、空/畸形容忍、observer 最新值。
+- `ProviderClientConfigTest`（更新）：注册列表含 17 个适配器。
+
+### 风险与边界
+
+- 适配器状态 `IMPLEMENTED`（官方文档核验），`VERIFIED` 需真实千帆凭证联调 → `WAITING_FOR_CREDENTIAL`。
+- Token Plan 企业版（团队管理）官方存在但签名目录未收录，首版不建模团队产品（provider-catalog §3.6 已注明）。
+- 官方公告 "Token Plan 个人版上线及 Coding Plan 停售"：Coding Plan 可能在停售迁移中，模型/配额规则变化以控制台为准。
+
+### 验证
+
+- 模块验证：`verify -pl provider-adapters,control-plane-app -am` → BUILD SUCCESS；全量 `verify -P integration` → **BUILD SUCCESS**（见 Current State 计数）。
 
 ## G3.5 — Kimi / Moonshot（Kimi Code 会员 Key + 按量 API，DONE）
 

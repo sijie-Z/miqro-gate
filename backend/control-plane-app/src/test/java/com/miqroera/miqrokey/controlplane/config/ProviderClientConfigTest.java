@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.controlplane.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.miqroera.miqrokey.adapters.baidu.BaiduQianfanAdapter;
 import com.miqroera.miqrokey.adapters.deepseek.DeepSeekPaygAdapter;
 import com.miqroera.miqrokey.adapters.minimax.MiniMaxAdapter;
 import com.miqroera.miqrokey.adapters.moonshot.MoonshotKimiAdapter;
@@ -17,7 +18,7 @@ import java.net.URI;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@DisplayName("ProviderClientConfig (G3.1-G3.5)")
+@DisplayName("ProviderClientConfig (G3.1-G3.6)")
 class ProviderClientConfigTest {
 
     private final ProviderClientConfig config = new ProviderClientConfig();
@@ -27,11 +28,12 @@ class ProviderClientConfigTest {
     void registryContainsAllImplementedAdapters() {
         BuiltInAdapterRegistry registry = config.adapterRegistry(new ObjectMapper());
 
-        assertThat(registry.adapterIds()).containsExactly("deepseek-payg-api", "minimax-payg-api",
-                "minimax-token-plan-personal", "minimax-token-plan-team", "moonshot-kimi-code-member",
-                "moonshot-payg-api", "tencent-coding-plan", "tencent-payg-api", "tencent-token-plan-enterprise-lite",
-                "tencent-token-plan-enterprise-pro", "tencent-token-plan-personal", "zhipu-coding-plan-personal",
-                "zhipu-coding-plan-team", "zhipu-payg-api");
+        assertThat(registry.adapterIds()).containsExactly("baidu-coding-plan", "baidu-payg-api",
+                "baidu-token-plan-personal", "deepseek-payg-api", "minimax-payg-api", "minimax-token-plan-personal",
+                "minimax-token-plan-team", "moonshot-kimi-code-member", "moonshot-payg-api", "tencent-coding-plan",
+                "tencent-payg-api", "tencent-token-plan-enterprise-lite", "tencent-token-plan-enterprise-pro",
+                "tencent-token-plan-personal", "zhipu-coding-plan-personal", "zhipu-coding-plan-team",
+                "zhipu-payg-api");
         assertThat(registry.findById(DeepSeekPaygAdapter.ADAPTER_ID)).isPresent().get()
                 .isInstanceOf(DeepSeekPaygAdapter.class);
         assertThat(registry.findById("tencent-coding-plan")).isPresent().get()
@@ -39,6 +41,7 @@ class ProviderClientConfigTest {
         assertThat(registry.findById("zhipu-coding-plan-team")).isPresent().get().isInstanceOf(ZhipuGlmAdapter.class);
         assertThat(registry.findById("minimax-token-plan-team")).isPresent().get().isInstanceOf(MiniMaxAdapter.class);
         assertThat(registry.findById("moonshot-payg-api")).isPresent().get().isInstanceOf(MoonshotKimiAdapter.class);
+        assertThat(registry.findById("baidu-coding-plan")).isPresent().get().isInstanceOf(BaiduQianfanAdapter.class);
     }
 
     @Test
