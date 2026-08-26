@@ -32,9 +32,20 @@ public interface UsageStatsRepository {
 
     /**
      * Scope of an aggregation or record listing. {@code virtualKeyIds} must be the
-     * caller's own key set (enforced by the service layer).
+     * caller's own key set (enforced by the service layer) and {@code null} for
+     * admin-scoped queries. All other dimensions are optional filters (G4.1):
+     * {@code userId} / {@code projectId} / {@code credentialId} /
+     * {@code subscriptionId} / {@code providerProductId} / {@code modelId}. The
+     * filter always carries {@code tenantId}; there is deliberately no tenant-less
+     * query shape.
      */
-    record UsageFilter(UUID tenantId, Set<UUID> virtualKeyIds, Instant from, Instant to) {
+    record UsageFilter(UUID tenantId, Set<UUID> virtualKeyIds, UUID userId, UUID projectId, UUID credentialId,
+            UUID subscriptionId, UUID providerProductId, String modelId, Instant from, Instant to) {
+
+        /** Self-service shape: caller-scoped key set, no extra dimensions. */
+        public UsageFilter(UUID tenantId, Set<UUID> virtualKeyIds, Instant from, Instant to) {
+            this(tenantId, virtualKeyIds, null, null, null, null, null, null, from, to);
+        }
     }
 
     /**

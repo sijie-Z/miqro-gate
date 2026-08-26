@@ -84,9 +84,98 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
         };
     }
 
+    /**
+     * Builds the dynamic WHERE clause and parameters for the optional G4.1
+     * dimensions. {@code alias} is the filterable base table alias ({@code ue} for
+     * {@code usage_event}, {@code h} for {@code cache_hit_event}); the
+     * user/subscription dimensions join through {@code virtual_keys} ({@code vk})
+     * and {@code credentials} ({@code cr}).
+     */
+    private static final class WhereBuilder {
+
+        private final UsageFilter filter;
+        private final List<String> conditions = new ArrayList<>();
+        private final MapSqlParameterSource params = new MapSqlParameterSource();
+        private final StringBuilder joins = new StringBuilder();
+
+        WhereBuilder(UsageFilter filter, String alias) {
+            this.filter = filter;
+            conditions.add(alias + ".tenant_id = :tenantId");
+            params.addValue("tenantId", filter.tenantId());
+            if (filter.virtualKeyIds() != null) {
+                conditions.add(alias + ".virtual_key_id IN (:virtualKeyIds)");
+                params.addValue("virtualKeyIds", filter.virtualKeyIds());
+            }
+            if (filter.projectId() != null) {
+                conditions.add(alias + ".project_id = :projectId");
+                params.addValue("projectId", filter.projectId());
+            }
+            if (filter.userId() != null) {
+                joins.append(" JOIN virtual_keys vkf ON vkf.id = ").append(alias)
+                        .append(".virtual_key_id AND vkf.tenant_id = ").append(alias).append(".tenant_id");
+                conditions.add("vkf.user_id = :userId");
+                params.addValue("userId", filter.userId());
+            }
+            if (filter.subscriptionId() != null) {
+                joins.append(" JOIN credentials crf ON crf.id = vkf.credential_id AND crf.tenant_id = vkf.tenant_id");
+                conditions.add("crf.subscription_id = :subscriptionId");
+                params.addValue("subscriptionId", filter.subscriptionId());
+            }
+            conditions.add(alias + ".occurred_at >= :from AND " + alias + ".occurred_at < :to");
+            params.addValue("from", Timestamp.from(filter.from()));
+            params.addValue("to", Timestamp.from(filter.to()));
+        }
+
+        /** Extra filterable columns that only exist on {@code usage_event}. */
+        WhereBuilder usageEventColumns() {
+            if (filter.credentialId() != null) {
+                conditions.add("ue.credential_id = :credentialId");
+                params.addValue("credentialId", filter.credentialId());
+            }
+            if (filter.providerProductId() != null) {
+                conditions.add("ue.provider_product_id = :providerProductId");
+                params.addValue("providerProductId", filter.providerProductId());
+            }
+            if (filter.modelId() != null) {
+                conditions.add("ue.model_id = :modelId");
+                params.addValue("modelId", filter.modelId());
+            }
+            return this;
+        }
+
+        /**
+         * Cache-hit filterable columns live on the joined {@code cache_entry}
+         * ({@code e}).
+         */
+        WhereBuilder cacheHitColumns() {
+            if (filter.providerProductId() != null) {
+                conditions.add("e.provider_product_id = :providerProductId");
+                params.addValue("providerProductId", filter.providerProductId());
+            }
+            if (filter.modelId() != null) {
+                conditions.add("e.model_id = :modelId");
+                params.addValue("modelId", filter.modelId());
+            }
+            return this;
+        }
+
+        String where() {
+            return " WHERE " + String.join(" AND ", conditions);
+        }
+
+        String joins() {
+            return joins.toString();
+        }
+
+        MapSqlParameterSource params() {
+            return params;
+        }
+    }
+
     @Override
     public List<UsageStatsAggregator.UsageAggRow> aggregateUsage(GroupBy groupBy, UsageFilter filter) {
         GroupSpec spec = spec(groupBy);
+        WhereBuilder wb = new WhereBuilder(filter, "ue").usageEventColumns();
         String sql = """
                 SELECT %s, ue.provider_product_id AS product_id, ue.model_id, ue.cache_level AS cache_level,
                        COUNT(*) AS requests,
@@ -95,12 +184,11 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                        COALESCE(SUM(ue.cache_read_input_tokens), 0) AS cache_read_tokens,
                        COALESCE(SUM(ue.cache_creation_input_tokens), 0) AS cache_creation_tokens
                 FROM usage_event ue
+                %s%s
                 %s
-                WHERE ue.tenant_id = :tenantId AND ue.virtual_key_id IN (:virtualKeyIds)
-                  AND ue.occurred_at >= :from AND ue.occurred_at < :to
                 GROUP BY %s, ue.provider_product_id, ue.model_id, ue.cache_level
-                """.formatted(spec.select(), spec.join(), spec.groupBy());
-        MapSqlParameterSource params = baseParams(filter);
+                """.formatted(spec.select(), spec.join(), wb.joins(), wb.where(), spec.groupBy());
+        MapSqlParameterSource params = wb.params();
         List<UsageStatsAggregator.UsageAggRow> rows = new ArrayList<>();
         jdbc.query(sql, params, rs -> {
             String groupKey = rs.getString("group_key");
@@ -120,18 +208,18 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
     @Override
     public List<UsageStatsAggregator.HitAggRow> aggregateHits(GroupBy groupBy, UsageFilter filter) {
         GroupSpec spec = hitsSpec(groupBy);
+        WhereBuilder wb = new WhereBuilder(filter, "h").cacheHitColumns();
         String sql = """
                 SELECT %s, e.provider_product_id AS product_id, e.model_id, e.cache_key, e.meta_json,
                        SUM(CASE WHEN h.level = 'L1_HIT' THEN 1 ELSE 0 END) AS l1,
                        SUM(CASE WHEN h.level = 'L2_HIT' THEN 1 ELSE 0 END) AS l2
                 FROM cache_hit_event h
                 JOIN cache_entry e ON e.tenant_id = h.tenant_id AND e.cache_key = h.cache_key
+                %s%s
                 %s
-                WHERE h.tenant_id = :tenantId AND h.virtual_key_id IN (:virtualKeyIds)
-                  AND h.occurred_at >= :from AND h.occurred_at < :to
                 GROUP BY %s, e.provider_product_id, e.model_id, e.cache_key, e.meta_json
-                """.formatted(spec.select(), spec.join(), spec.groupBy());
-        MapSqlParameterSource params = baseParams(filter);
+                """.formatted(spec.select(), spec.join(), wb.joins(), wb.where(), spec.groupBy());
+        MapSqlParameterSource params = wb.params();
 
         // Fold per-cache-key rows into per (group, product, model) rows.
         Map<String, HitAccumulator> acc = new LinkedHashMap<>();
@@ -169,11 +257,11 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
 
     @Override
     public long countRecords(UsageFilter filter) {
+        WhereBuilder wb = new WhereBuilder(filter, "ue").usageEventColumns();
         Long count = jdbc.queryForObject("""
-                SELECT COUNT(*) FROM usage_event
-                WHERE tenant_id = :tenantId AND virtual_key_id IN (:virtualKeyIds)
-                  AND occurred_at >= :from AND occurred_at < :to
-                """, baseParams(filter), Long.class);
+                SELECT COUNT(*) FROM usage_event ue%s
+                %s
+                """.formatted(wb.joins(), wb.where()), wb.params(), Long.class);
         return count != null ? count : 0;
     }
 
@@ -193,20 +281,14 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
 
     @Override
     public List<UsageEvent> findRecords(UsageFilter filter, long offset, int limit) {
-        MapSqlParameterSource params = baseParams(filter).addValue("offset", offset).addValue("limit", limit);
+        WhereBuilder wb = new WhereBuilder(filter, "ue").usageEventColumns();
+        MapSqlParameterSource params = wb.params().addValue("offset", offset).addValue("limit", limit);
         return jdbc.query("""
-                SELECT * FROM usage_event
-                WHERE tenant_id = :tenantId AND virtual_key_id IN (:virtualKeyIds)
-                  AND occurred_at >= :from AND occurred_at < :to
-                ORDER BY occurred_at DESC
+                SELECT ue.* FROM usage_event ue%s
+                %s
+                ORDER BY ue.occurred_at DESC
                 LIMIT :limit OFFSET :offset
-                """, params, EVENT_ROW_MAPPER);
-    }
-
-    private MapSqlParameterSource baseParams(UsageFilter filter) {
-        return new MapSqlParameterSource().addValue("tenantId", filter.tenantId())
-                .addValue("virtualKeyIds", filter.virtualKeyIds()).addValue("from", Timestamp.from(filter.from()))
-                .addValue("to", Timestamp.from(filter.to()));
+                """.formatted(wb.joins(), wb.where()), params, EVENT_ROW_MAPPER);
     }
 
     private TokenBucket parseUsage(String metaJson) {

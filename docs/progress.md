@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G3.8`（阿里云百炼 Model Studio：Coding Plan、Token Plan 团队版、按量 API）
-- Goal status: `DONE`（全量验证通过：911 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
+- Current goal: `G4.1`（Usage 查询与管理/管理员仪表盘 API：时间/用户/项目/Key/凭证/Plan/供应商/模型筛选 + 权限隔离）
+- Goal status: `DONE`（全量验证通过：926 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g3.8-aliyun-bailian`
+- Branch: `goal/g4.1-usage-query-api`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,11 +86,35 @@
 
 ## Next Goal
 
-- Goal ID: `G3.9`（运行序号；implementation-plan Phase 3 最后一个 P0 缺口）
-- Name: G3.x 收尾 —— 真实凭证契约测试联调（`VERIFIED`）与模型目录定时刷新接线（ModelCatalogService.refreshProduct → 调度）
+- Goal ID: `G4.2`
+- Name: Quota snapshots and team plan views（官方 API/本地估算/不可用三种来源；团队共享池、席位、成员 Key、独占额度）
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md)（Phase 3 供应商产品）+ [`provider-catalog.md`](provider-catalog.md) §7.1
-- 注：P1 候选（硅基流动等）不在签名目录中，需发布负责人重签目录后才能注册；8 家 P0 供应商的适配器已全部 IMPLEMENTED（23 个目录产品全数覆盖）。
+- Source: [`implementation-plan.md`](implementation-plan.md)（Phase 4 统计、Plan 和告警）
+
+## G4.1 — Usage 查询与管理/管理员仪表盘 API（DONE）
+
+### 实现
+
+- `domain`：`UsageStatsRepository.UsageFilter` 扩展可选维度 `userId` / `projectId` / `credentialId` / `subscriptionId`（Plan）/ `providerProductId`（供应商）/ `modelId`；保留 4 参数便捷构造（自服务调用方不变）；`virtualKeyIds` 为 `null` 即管理端全租户形状，无租户缺省查询。
+- `persistence-postgres`：`UsageStatsRepositoryImpl` 引入 `WhereBuilder` 动态 WHERE——四个查询（aggregateUsage/aggregateHits/countRecords/findRecords）共用；user 过滤经 `virtual_keys vkf` join、subscription 过滤经 `vkf → credentials crf` join（别名避免与分组 join 冲突）；cache-hit 路径的 provider_product/model 过滤经既有 `cache_entry` join。
+- `control-plane-app`：
+  - `AdminUsageStatsService`（新）：全租户 summary/records，聚合与成本复用 `UsageStatsAggregator`；窗口/分组/分页校验与自服务路径共享（`UsageStatsService.parseGroupBy/validateTimeRange` 提升为包内 static）。
+  - `AdminUsageController`（新）：`GET /api/v1/admin/usage/summary` + `GET /api/v1/admin/usage/records`，全部可选过滤参数；访问控制由 `RoleInterceptor` deny-by-default（仅 SYSTEM_ADMIN）自动生效。
+- `api-contract.md` §5.2：新增全局用量查询契约（参数、过滤语义、租户隔离、错误码）。
+
+### 测试（本 Goal 新增 15 个）
+
+- `AdminUsageStatsServiceTest`（9，单元/Mockito）：全维度过滤透传、无过滤仅租户作用域 + 默认 93 天窗口、成本计算、GROUP_BY_INVALID/TIME_RANGE_TOO_WIDE/TIME_RANGE_INVALID/PAGE_INVALID/SIZE_INVALID。
+- `AdminUsageApiIntegrationTest`（6，Testcontainers + MockMvc + 真实 Argon2 登录）：管理端汇总见全租户（对照个人端）、userId 过滤、modelId/virtualKeyId 过滤、records 过滤 + 分页、普通用户 403 / 匿名 401、参数校验（含非法 UUID → 400 PARAM_INVALID）。
+
+### 风险与边界
+
+- 供应商产品过滤按 `provider_product_id`（实例级），vendor 级聚合需多产品组合查询（G4.2 仪表盘视图可补充）。
+- 个人端行为不变（既有测试全绿）：用户只能看到自己 Key 的用量；管理端"见全租户"是刻意的权限差异。
+
+### 验证
+
+- 模块：`verify -pl control-plane-app -am` → BUILD SUCCESS；全量 `verify -P integration` → **BUILD SUCCESS**，**926 tests / 0 failures / 0 errors / 5 skipped**（911 + 15 新增；含 GlobalExceptionHandler 类型不匹配修复与集成测试全绿）。
 
 ## G3.8 — 阿里云百炼 Model Studio（Coding Plan + Token Plan 团队版 + 按量 API，DONE）
 

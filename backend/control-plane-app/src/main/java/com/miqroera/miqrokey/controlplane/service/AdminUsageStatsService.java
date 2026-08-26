@@ -2,10 +2,8 @@ package com.miqroera.miqrokey.controlplane.service;
 
 import com.miqroera.miqrokey.controlplane.dto.UsageRecordPage;
 import com.miqroera.miqrokey.domain.model.User;
-import com.miqroera.miqrokey.domain.model.VirtualKey;
 import com.miqroera.miqrokey.domain.repository.PriceSnapshotRepository;
 import com.miqroera.miqrokey.domain.repository.UsageStatsRepository;
-import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
 import com.miqroera.miqrokey.domain.usage.PriceSnapshot;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
@@ -17,10 +15,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,56 +24,48 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Self-service usage statistics for one user (api-contract §4): aggregated
- * summary with cost, and paged raw records. Everything is scoped to the
- * caller's own Virtual Keys — usage that flows through keys the user does not
- * own is invisible, as if it did not exist.
+ * Admin-wide usage statistics (api-contract §5 {@code /api/v1/admin/usage/**},
+ * G4.1): the same aggregation and record views as the self-service endpoints,
+ * but over the whole tenant with optional filters on time, user, project,
+ * Virtual Key, credential, subscription (Plan), provider product (vendor) and
+ * model. Access is SYSTEM_ADMIN-only via the deny-by-default
+ * {@code /api/v1/admin/**} interceptor.
  *
  * <p>
  * Records never carry prompt, code, or model content: only counts and metadata.
  * </p>
  */
 @Service
-public class UsageStatsService {
+public class AdminUsageStatsService {
 
-    /** Longest window a single query may cover (records and summary alike). */
-    static final Duration MAX_WINDOW = Duration.ofDays(93);
     private static final int MAX_PAGE_SIZE = 200;
-    private static final int DEFAULT_PAGE_SIZE = 50;
 
-    private final VirtualKeyRepository keyRepository;
     private final UsageStatsRepository usageStatsRepository;
     private final PriceSnapshotRepository priceSnapshotRepository;
 
-    public UsageStatsService(VirtualKeyRepository keyRepository, UsageStatsRepository usageStatsRepository,
+    public AdminUsageStatsService(UsageStatsRepository usageStatsRepository,
             PriceSnapshotRepository priceSnapshotRepository) {
-        this.keyRepository = keyRepository;
         this.usageStatsRepository = usageStatsRepository;
         this.priceSnapshotRepository = priceSnapshotRepository;
     }
 
     /**
-     * Aggregated usage and cost for the caller's own keys.
+     * Aggregated usage and cost over the whole tenant.
      *
      * @param groupBy
-     *            dimension name from {@link UsageStatsRepository.GroupBy}
+     *            dimension from {@link UsageStatsRepository.GroupBy}
      *            (case-insensitive)
      * @param from
      *            inclusive start, null defaults to {@code to - 93 days}
      * @param to
      *            exclusive end, null defaults to now
      */
-    public UsageSummary summary(User user, String groupBy, Instant from, Instant to) {
-        UsageStatsRepository.GroupBy dimension = parseGroupBy(groupBy);
-        validateTimeRange(from, to);
-        Set<UUID> keyIds = ownKeyIds(user);
-        if (keyIds.isEmpty()) {
-            // No keys to aggregate — return a zeroed summary without touching the
-            // usage tables.
-            return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), List.of(), List.of(),
-                    new LinkedHashMap<>());
-        }
-        UsageStatsRepository.UsageFilter filter = filter(user, keyIds, from, to);
+    public UsageSummary summary(User admin, String groupBy, Instant from, Instant to, UUID userId, UUID projectId,
+            UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId, String modelId) {
+        UsageStatsRepository.GroupBy dimension = UsageStatsService.parseGroupBy(groupBy);
+        UsageStatsService.validateTimeRange(from, to);
+        UsageStatsRepository.UsageFilter filter = adminFilter(admin, from, to, userId, projectId, virtualKeyId,
+                credentialId, subscriptionId, providerProductId, modelId);
 
         Map<String, BigDecimal> prices = new LinkedHashMap<>();
         for (PriceSnapshot p : priceSnapshotRepository.findAllLatestAt(Instant.now())) {
@@ -88,8 +76,10 @@ public class UsageStatsService {
         return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows, prices);
     }
 
-    /** Paged raw usage records for the caller's own keys, newest first. */
-    public UsageRecordPage records(User user, Instant from, Instant to, long page, int size) {
+    /** Paged raw usage records over the whole tenant, newest first. */
+    public UsageRecordPage records(User admin, Instant from, Instant to, long page, int size, UUID userId,
+            UUID projectId, UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId,
+            String modelId) {
         if (page < 1) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "PAGE_INVALID", "page must be >= 1");
         }
@@ -97,12 +87,9 @@ public class UsageStatsService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "SIZE_INVALID",
                     "size must be between 1 and " + MAX_PAGE_SIZE);
         }
-        validateTimeRange(from, to);
-        Set<UUID> keyIds = ownKeyIds(user);
-        if (keyIds.isEmpty()) {
-            return new UsageRecordPage(List.of(), page, size, 0L);
-        }
-        UsageStatsRepository.UsageFilter filter = filter(user, keyIds, from, to);
+        UsageStatsService.validateTimeRange(from, to);
+        UsageStatsRepository.UsageFilter filter = adminFilter(admin, from, to, userId, projectId, virtualKeyId,
+                credentialId, subscriptionId, providerProductId, modelId);
 
         long total = usageStatsRepository.countRecords(filter);
         List<UsageEvent> events = usageStatsRepository.findRecords(filter, (page - 1) * size, size);
@@ -115,48 +102,20 @@ public class UsageStatsService {
 
     // -------------------------------------------------------------------
 
-    private Set<UUID> ownKeyIds(User user) {
-        Set<UUID> ids = new HashSet<>();
-        for (VirtualKey key : keyRepository.findAllByUserId(user.id())) {
-            ids.add(key.id());
-        }
-        return ids;
-    }
-
-    private UsageStatsRepository.UsageFilter filter(User user, Set<UUID> keyIds, Instant from, Instant to) {
-        validateTimeRange(from, to);
-        Instant toResolved = to == null ? Instant.now() : to;
-        Instant fromResolved = from == null ? toResolved.minus(MAX_WINDOW) : from;
-        return new UsageStatsRepository.UsageFilter(user.tenantId(), keyIds, fromResolved, toResolved);
-    }
-
     /**
-     * Window validation is unconditional — it applies even when the caller owns no
-     * keys yet, so invalid ranges are rejected consistently regardless of data
-     * presence. Shared with the admin usage queries (G4.1).
+     * Admin scope: no key-set restriction (key set is {@code null}); every
+     * dimension is an optional filter. Tenant scoping still comes from the
+     * authenticated admin — there is no cross-tenant query shape.
      */
-    static void validateTimeRange(Instant from, Instant to) {
+    private static UsageStatsRepository.UsageFilter adminFilter(User admin, Instant from, Instant to, UUID userId,
+            UUID projectId, UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId,
+            String modelId) {
+        UsageStatsService.validateTimeRange(from, to);
         Instant toResolved = to == null ? Instant.now() : to;
-        Instant fromResolved = from == null ? toResolved.minus(MAX_WINDOW) : from;
-        if (!fromResolved.isBefore(toResolved)) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "TIME_RANGE_INVALID", "from must be before to");
-        }
-        if (Duration.between(fromResolved, toResolved).compareTo(MAX_WINDOW) > 0) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "TIME_RANGE_TOO_WIDE",
-                    "The queried window must be at most " + MAX_WINDOW.toDays() + " days");
-        }
-    }
-
-    static UsageStatsRepository.GroupBy parseGroupBy(String value) {
-        if (value == null || value.isBlank()) {
-            return UsageStatsRepository.GroupBy.PROJECT;
-        }
-        try {
-            return UsageStatsRepository.GroupBy.valueOf(value.trim().toUpperCase());
-        } catch (IllegalArgumentException e) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "GROUP_BY_INVALID",
-                    "groupBy must be one of PROJECT, VIRTUAL_KEY, CACHE_LEVEL, DAY");
-        }
+        Instant fromResolved = from == null ? toResolved.minus(UsageStatsService.MAX_WINDOW) : from;
+        return new UsageStatsRepository.UsageFilter(admin.tenantId(),
+                virtualKeyId != null ? Set.of(virtualKeyId) : null, userId, projectId, credentialId, subscriptionId,
+                providerProductId, modelId != null && !modelId.isBlank() ? modelId : null, fromResolved, toResolved);
     }
 
     private static UsageRecordPage.UsageRecordView view(UsageEvent e) {

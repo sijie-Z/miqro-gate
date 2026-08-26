@@ -347,6 +347,29 @@
 | `CREDENTIAL_NOT_ROTATABLE` | 409 | 仅 ACTIVE 可轮换 |
 | `CREDENTIAL_NOT_DISABLEABLE` | 409 | 已 DISABLED/INVALID 的凭证不可再禁用 |
 
+### 5.2 全局用量查询（G4.1）
+
+管理员全局汇总与明细，返回形状与个人端（§4.4/§4.5）一致，但作用域为整个租户，并支持可选维度过滤：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/usage/summary` | 全租户聚合汇总 + 成本 |
+| `GET /api/v1/admin/usage/records` | 全租户分页明细，时间倒序 |
+
+`summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day`，默认 `project`）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。
+
+`records` 参数：`from`、`to`、`page`（默认 1）、`size`（默认 50，1–200）及与 `summary` 相同的可选过滤。
+
+过滤语义：
+
+- 过滤维度全部可选、可组合；`virtualKeyId` 等价于把 key 集合收窄到单个 Key。
+- 无过滤 = 整个租户；租户隔离由已认证管理员身份决定，不存在跨租户查询形状。
+- 管理员可见所有用户/Key 的用量（与个人端严格自见形成对照，是刻意行为）。
+- 访问控制：`/api/v1/admin/**` 由拦截器 deny-by-default，仅 `SYSTEM_ADMIN` 可访问；普通用户与匿名请求分别得到 `403` / `401`。
+- 明细永不包含 prompt、代码或模型正文。
+
+错误码沿用个人端：`PAGE_INVALID` / `SIZE_INVALID` / `TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE` / `GROUP_BY_INVALID`；非法 UUID 过滤参数返回 `400 PARAM_INVALID`（类型不匹配统一处理，不视为内部错误）。
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

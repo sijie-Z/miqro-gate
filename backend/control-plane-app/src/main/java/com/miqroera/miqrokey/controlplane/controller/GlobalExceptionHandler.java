@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -76,6 +77,25 @@ public class GlobalExceptionHandler {
         body.put("detail", "One or more fields are invalid.");
         body.put("requestId", requestId);
         body.put("fieldErrors", fieldErrors);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
+    }
+
+    /**
+     * Unconvertible query parameters (e.g. {@code userId=not-a-uuid}) become
+     * {@code 400 PARAM_INVALID} (G4.1 contract: invalid filter values are rejected,
+     * never treated as internal errors).
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Map<String, Object>> handleTypeMismatch(MethodArgumentTypeMismatchException e,
+            HttpServletRequest request) {
+        String requestId = resolveRequestId(request);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("type", "about:blank");
+        body.put("title", "Invalid parameter");
+        body.put("status", 400);
+        body.put("code", "PARAM_INVALID");
+        body.put("detail", "Parameter '" + e.getName() + "' has an invalid value.");
+        body.put("requestId", requestId);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
     }
 
