@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G4.1`（Usage 查询与管理/管理员仪表盘 API：时间/用户/项目/Key/凭证/Plan/供应商/模型筛选 + 权限隔离）
-- Goal status: `DONE`（全量验证通过：926 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
+- Current goal: `G4.2`（Quota snapshots and team plan views：官方 API/本地估算/不可用三种来源；团队共享池、席位、成员 Key、独占额度）
+- Goal status: `DONE`（全量验证通过：936 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g4.1-usage-query-api`
+- Branch: `goal/g4.2-quota-snapshots`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,36 @@
 
 ## Next Goal
 
-- Goal ID: `G4.2`
-- Name: Quota snapshots and team plan views（官方 API/本地估算/不可用三种来源；团队共享池、席位、成员 Key、独占额度）
+- Goal ID: `G4.3`
+- Name: Pricing snapshots and cost allocation（PAYG 估算、Plan 固定成本、按 Token 权重的项目摊销和算法版本）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 4 统计、Plan 和告警）
+
+## G4.2 — Quota snapshots and team plan views（DONE）
+
+### 实现
+
+- `V9__quota_snapshots.sql`：追加式历史表（subscription/seat/credential 三作用域、窗口类型、总/已用/剩余、单位、共享池、`source` 权威级别、脱敏错误）；`(tenant_id, subscription_id, synced_at DESC)` + `(tenant_id, credential_id, synced_at DESC)` 索引。
+- `domain`：`QuotaSnapshot` + `QuotaWindow/QuotaUnit/QuotaSource` 枚举 + `QuotaSnapshotRepository`（insert、每作用域最新 `DISTINCT ON`、历史）。
+- `control-plane`：`QuotaSnapshotService` —— 管理端触发刷新：订阅 → 产品 → 适配器（registry by productCode）→ 每个 ACTIVE 凭证解密 Secret（AES-GCM，用后 `SecretWiping.clearArray` 清零）→ 凭证作用域 `ProviderClient`（factory）→ `fetchPlanStatus` → OFFICIAL_API/UNAVAILABLE 行；订阅带 `quota_total`+`period_start` 时另写 LOCAL_ESTIMATE 行（本地 usage 输入+输出 token）；错误 → UNAVAILABLE + 脱敏 errorMessage（不含 URL/Secret/正文）。
+- `AdminQuotaController`：`GET/POST /api/v1/admin/subscriptions/{id}/quota[/refresh]`（SYSTEM_ADMIN only，deny-by-default 拦截器）。
+- `ProviderClientProperties` 新增 `allowed-cidrs`（`MIQROKEY_CONTROL_PROVIDER_CLIENT_ALLOWED_CIDRS`，默认空 = 仅公网 https；与网关同名变量对齐），`ProviderClientConfig.controlPlaneTargetValidator` 接线。
+
+### 测试（本 Goal 新增 10 个）
+
+- `QuotaSnapshotServiceTest`（6，单元）：每凭证官方拉取 + Secret 清零验证、适配器 UNAVAILABLE、无凭证 UNAVAILABLE + 配额估算、解密失败 → UNAVAILABLE 不抛、latest 租户作用域、跨租户统一 404。
+- `QuotaSnapshotApiIntegrationTest`（3，Testcontainers + loopback mock DeepSeek 余额 API + 真实适配器/真实 HttpProviderClient/真实加密凭证）：刷新写 OFFICIAL_API + LOCAL_ESTIMATE 行且 mock 恰好调用一次、GET 视图一致、空订阅刷新后 UNAVAILABLE 行、未知订阅 404、匿名 401。
+- `ProviderClientConfigTest`（+1）：配置 allowlist 后 validator 放行私网（默认拒绝不变）。
+
+### 风险与边界
+
+- 独占额度（Tencent 企业控制台配置）无官方 API 可查：以每凭证快照表达每 Key 视图，独占配置本身不落库（控制台事实，`WAITING_FOR_CREDENTIAL` 联调确认）。
+- LOCAL_ESTIMATE 只覆盖经 Gateway 的流量（契约 §6 第 3 级语义）；`sharedPool` 来自适配器 PlanSnapshot。
+- 定时刷新未接线（管理端手动触发；计划任务与告警属 G4.5 前后）。
+
+### 验证
+
+- 全量 `verify -P integration` → **BUILD SUCCESS**，**936 tests / 0 failures / 0 errors / 5 skipped**（926 + 10 新增）。
 
 ## G4.1 — Usage 查询与管理/管理员仪表盘 API（DONE）
 

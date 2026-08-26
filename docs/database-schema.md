@@ -243,9 +243,9 @@ Key → 项目绑定（标签路由的鉴权权威），与 `virtual_keys.projec
 
 正文、完整 Header 和 Secret 不得存在（G2.4 起写入路径不含任何正文内容）。
 
-### `quota_snapshots`
+### `quota_snapshots` (V9，G4.2 实现)
 
-`subscription_id`、`seat_id nullable`、`credential_id nullable`、窗口类型/时间、总/已用/剩余、单位、来源、`provider_status_json` 脱敏、同步时间和错误。
+追加式历史表：`subscription_id`、`seat_id nullable`、`credential_id nullable`、`window_type`（`PERIOD|ROLLING_5H|WEEKLY|MONTHLY|UNKNOWN`）、总/已用/剩余（`numeric(24,10)`）、`unit`（`POINTS|TOKENS|REQUESTS|CURRENCY|UNKNOWN`）、`shared_pool`、`source`（`OFFICIAL_API|LOCAL_ESTIMATE|UNAVAILABLE`，对应 provider-adapter-contract §6 权威级别）、`provider_status_json`（脱敏预留，绝不存 Secret）、`synced_at`、`error_message`。读取按 `(tenant_id, subscription_id, synced_at DESC)` 与 `(tenant_id, credential_id, synced_at DESC)` 索引；最新视图用 `DISTINCT ON (seat_id, credential_id)` 每作用域取最新一行。写入路径：`QuotaSnapshotService.refresh`（管理端触发）——按 ACTIVE 凭证逐个经适配器 `fetchPlanStatus`（解密 → 凭证作用域 `ProviderClient` → OFFICIAL_API/UNAVAILABLE 行），订阅带 `quota_total` + `period_start` 时另写 LOCAL_ESTIMATE 行（本地 usage 输入+输出 token 相对周期起点估算）。
 
 ### `cost_allocations`
 

@@ -16,8 +16,6 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.util.List;
-
 /**
  * Compile-time adapter registration and the bounded {@code ProviderClient}
  * surface for control-plane provider calls (G3.1/G3.2).
@@ -63,9 +61,10 @@ public class ProviderClientConfig {
     }
 
     @Bean
-    public UpstreamTargetValidator controlPlaneTargetValidator() {
-        // Production default: https-only, public addresses only.
-        return new UpstreamTargetValidator(List.of());
+    public UpstreamTargetValidator controlPlaneTargetValidator(ProviderClientProperties properties) {
+        // Production default: https-only, public addresses only; admins may
+        // allowlist local/intranet provider gateways via allowed-cidrs.
+        return new UpstreamTargetValidator(properties.getAllowedCidrs());
     }
 
     /**
