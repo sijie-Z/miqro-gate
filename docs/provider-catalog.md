@@ -155,6 +155,20 @@
 
 Kimi Code 同时提供 OpenAI 与 Anthropic 兼容入口；按量平台提供余额查询 API。公开资料暂未确认一个与智谱/MiniMax 类似的正式团队 Plan，因此首版不能把 Kimi 个人会员伪装为团队产品。企业协作先使用按量 API 账户能力，团队 Plan 等官方资料确认后再增加。
 
+**实现状态：`IMPLEMENTED`（G3.5）** —— 适配器 `moonshot-kimi-code-member`、`moonshot-payg-api` 已落地。官方端点（2026-08-26 核验 kimi.com / platform.kimi.com）与路径归一化：
+
+| 产品 | OpenAI Base URL | Anthropic Base URL | 模型列表路径 | `/v1` 前缀剥离 |
+|---|---|---|---|---|
+| Kimi Code 会员 Key | `https://api.kimi.com/coding/v1` | `https://api.kimi.com/coding/`（完整 `.../coding/v1/messages`，`/v1/messages` 保留） | `/models` | 是（仅 OpenAI） |
+| Moonshot/Kimi 按量 API | `https://api.moonshot.cn/v1` | — | `/models` | 是 |
+
+- 鉴权：`Authorization: Bearer <api-key>`；Kimi Code Key 在控制台创建（最多 5 个、仅创建时显示一次）；按量 Key 国内站（platform.kimi.com）与国际站（platform.kimi.ai）完全独立，混用返回 401。
+- Kimi Code 模型：`k3`/`k3-256k`/`kimi-for-coding`/`kimi-for-coding-highspeed`；每 5 小时约 300–1200 次请求（按档位）、最大并发 30。Kimi Code 是会员订阅权益（个人会员，非团队产品）→ `capabilities.plan=true`、`teamPlan=false`、余额 `UNAVAILABLE`（无余额 API）。
+- **Moonshot 按量余额（G3.x 首个 `OFFICIAL_API`）**：`GET https://api.moonshot.cn/v1/users/me/balance` → `data.available_balance`（现金+代金券，人民币元；≤ 0 时推理被拒）→ PAYG `total`/`remaining`；已用/周期保持 null 不冒充。
+- 目录 baseUrlTemplate 为 `https://api.kimi.com/code/v1` / `https://api.moonshot.cn/v1`（DOCUMENTED 设计值）；Kimi Code 官方当前端点为 `.../coding/v1`，录入产品实例时以官方端点为准。
+
+`VERIFIED` 需要真实凭证契约测试 → `WAITING_FOR_CREDENTIAL`。
+
 资料：
 
 - [Kimi Code API 接入与 Base URL](https://www.kimi.com/code/docs/)
