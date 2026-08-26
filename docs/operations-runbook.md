@@ -117,3 +117,12 @@ Master key 丢失无法从数据库恢复真实凭证；使用受保护备份恢
 
 - 每季度至少一次 `test-restore.sh` 或对最新备份执行 `verify + restore` 到隔离实例。
 - 备份加密密钥离线/分离保管；`restore` 与 `verify` 均强校验 SHA-256 manifest。
+
+## 性能与浸泡（G6.4）
+
+| 工具 | 用途 |
+|---|---|
+| `backend/gateway-app` `SoakIntegrationTest`（`@Tag("soak")`） | 真实 gateway + mock 上游 + PostgreSQL 的 30 秒并发流浸泡：断言 0 上游错误、全部请求落库（队列 drop 会表现为缺行）；CI 全量套件内运行 |
+| `deploy/loadtest/soak.sh` | 生产类环境的长时间浸泡：对运行中的 stack 并发流式请求，报告吞吐/延迟分位/错误率 + usage 队列 drop 计数（须为 0） |
+
+浸泡验收基线（首版）：并发 20 流持续 30 分钟无错误、usage 队列 drop 恒为 0、p99 延迟 ≤ 2× 基线。指标经 `monitoring` profile 的 `/actuator/prometheus` 观察。

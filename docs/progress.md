@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G6.3`（Security and supply-chain gate：SBOM、许可证、依赖/镜像/Secret 扫描、目录签名、审计完整性）
+- Current goal: `G6.4`（Performance and soak：性能基线与浸泡）
 - Goal status: `DONE`
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g6.3-security-gate`
+- Branch: `goal/g6.4-performance-soak`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,23 @@
 
 ## Next Goal
 
-- Goal ID: `G6.4`
-- Name: Performance and soak（性能基线与浸泡）
+- Goal ID: `G6.5`
+- Name: 发布就绪收尾（CHANGELOG、发布清单执行、最终全量验证）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 6 交付）
+
+## G6.4 — Performance and soak（DONE）
+
+### 交付
+
+- `SoakIntegrationTest`（gateway-app，`@Tag("soak")`）：真实 gateway + mock 上游 + PostgreSQL 的 30 秒并发流浸泡——断言 0 上游错误、`request_usage_records` 全部落库（usage 队列 drop 会表现为缺行）；随 CI 全量套件运行。
+- `deploy/loadtest/soak.sh`：生产类环境长时间浸泡（并发流 + 吞吐/延迟分位/错误率统计 + usage 队列 drop 检查），经 monitoring profile 指标观察。
+- operations-runbook 新增性能/浸泡章节与首版验收基线（并发 20 流 30 分钟 0 错误、队列 drop 恒 0、p99 ≤ 2× 基线）。
+
+### 验证
+
+- 本机 Docker 代理故障（127.0.0.1:7897 不可达）无法拉取新镜像 digest → soak 测试本地无法执行；**CI 全量套件（ubuntu/windows）为权威验证**。
+- soak.sh 语法与组件在 Git Bash 验证通过。
 
 ## G6.3 — Security and supply-chain gate（DONE）
 
