@@ -247,6 +247,14 @@ Key → 项目绑定（标签路由的鉴权权威），与 `virtual_keys.projec
 
 追加式历史表：`subscription_id`、`seat_id nullable`、`credential_id nullable`、`window_type`（`PERIOD|ROLLING_5H|WEEKLY|MONTHLY|UNKNOWN`）、总/已用/剩余（`numeric(24,10)`）、`unit`（`POINTS|TOKENS|REQUESTS|CURRENCY|UNKNOWN`）、`shared_pool`、`source`（`OFFICIAL_API|LOCAL_ESTIMATE|UNAVAILABLE`，对应 provider-adapter-contract §6 权威级别）、`provider_status_json`（脱敏预留，绝不存 Secret）、`synced_at`、`error_message`。读取按 `(tenant_id, subscription_id, synced_at DESC)` 与 `(tenant_id, credential_id, synced_at DESC)` 索引；最新视图用 `DISTINCT ON (seat_id, credential_id)` 每作用域取最新一行。写入路径：`QuotaSnapshotService.refresh`（管理端触发）——按 ACTIVE 凭证逐个经适配器 `fetchPlanStatus`（解密 → 凭证作用域 `ProviderClient` → OFFICIAL_API/UNAVAILABLE 行），订阅带 `quota_total` + `period_start` 时另写 LOCAL_ESTIMATE 行（本地 usage 输入+输出 token 相对周期起点估算）。
 
+### `webhook_endpoints` (V12，G4.5 实现)
+
+URL（创建时经控制面 SSRF 门控：默认仅公网 https，`MIQROKEY_CONTROL_PROVIDER_CLIENT_ALLOWED_CIDRS` 可扩展）、HMAC 签名 Secret（AES-GCM 加密，AAD 绑定 tenant + endpoint）、启停、超时、version。Secret 明文永不返回。
+
+### `alert_rules` / `alert_events` / `webhook_delivery_attempts` (V12，G4.5 实现)
+
+规则：`type`（`USAGE_MISSING_RATE|UPSTREAM_ERROR_RATE|BALANCE_UNAVAILABLE|USAGE_SURGE`）、`threshold`、`dedupe_minutes`、`enabled`、可选 `webhook_endpoint_id`（null = 仅记录事件）。事件：`dedupe_key`（type + 小时桶）唯一约束 `(tenant_id, rule_id, dedupe_key)` 实现去重；`value` 为指标实际值；`payload_json` 脱敏。投递表：事件 × 端点 × 尝试次数唯一；`next_retry_at` 指数退避（2^attempt × 1min，最多 3 次）、`http_status`、脱敏错误。评估调度：`@Scheduled` 固定延迟（`miqrokey.alerts.evaluation-interval-ms` 默认 5min）；指标基于滚动 1 小时、租户级（单租户部署语义）。
+
 ### `export_tasks` (V11，G4.4 实现)
 
 异步导出任务：`format`（`CSV|JSONL`）、窗口、`status`（`PENDING|RUNNING|SUCCEEDED|FAILED|EXPIRED`）、`sha256`（gzip 产物哈希）、`row_count`/`byte_count`、`file_bytes`（gzip 产物本体，24h 过期）、`error_message`（脱敏）。产物只含计数与元数据列（时间/模型/缓存层级/token/延迟/状态码/request ID/Key/项目/产品/凭证 ID），绝不包含 prompt、代码、Secret 或 Virtual Key 明文。

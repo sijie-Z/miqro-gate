@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G4.4`（Raw export and manual deletion：异步 CSV/JSONL gzip、SHA-256、临时下载、删除预览/二次确认/永久审计）
-- Goal status: `DONE`（全量验证通过：947 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
+- Current goal: `G4.5`（Webhook alerts：六类告警及签名、去重和重试）
+- Goal status: `DONE`（全量验证通过：949 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g4.4-export-deletion`
+- Branch: `goal/g4.5-webhook-alerts`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,35 @@
 
 ## Next Goal
 
-- Goal ID: `G4.5`
-- Name: Webhook alerts（凭证失效、错误率、余额、异常增长、系统/备份、usage 缺失六类告警及签名、去重和重试）
+- Goal ID: `G5.0`
+- Name: Frontend design foundation（tokens、应用 shell、导航、表格/表单/状态样式、Playwright visual baseline）
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md)（Phase 4 统计、Plan 和告警）
+- Source: [`implementation-plan.md`](implementation-plan.md)（Phase 5 门户；**Phase 4 全部完成**）
+
+## G4.5 — Webhook alerts（DONE）
+
+### 实现
+
+- `V12__webhook_alerts.sql`：`webhook_endpoints`（URL/加密签名 Secret/启停/超时）+ `alert_rules`（类型/阈值/去重窗口/可选端点）+ `alert_events`（`(tenant_id, rule_id, dedupe_key)` 唯一去重）+ `webhook_delivery_attempts`（尝试次数唯一、指数退避、脱敏错误）。
+- `WebhookEndpointService`：CRUD + 测试投递 + 投递历史；URL 创建时经控制面 SSRF 门控（公网 https 默认）；签名 Secret AES-GCM 加密（AAD tenant+endpoint）永不返回；投递 `X-MiQroKey-Signature: sha256=<HMAC hex>`。
+- `AlertRuleService`：规则 CRUD（类型白名单校验）。
+- `AlertEvaluator`（`@Scheduled` 固定延迟，`miqrokey.alerts.evaluation-interval-ms` 默认 5min）：四类指标（usage 缺失率/错误率/余额 UNAVAILABLE 数/用量激增比率，滚动 1h 租户级）→ 阈值比较 → 小时桶去重（ON CONFLICT DO NOTHING）→ HMAC 签名投递；失败指数退避重试（2^attempt × 1min，最多 3 次）。
+- `SchedulingConfig`（@EnableScheduling）、控制器 `AdminWebhookController` + `AdminAlertRuleController`（SYSTEM_ADMIN only）。
+- docs：database-schema V12、api-contract §5.7/§5.8、configuration-reference（评估间隔）。
+
+### 测试（本 Goal 新增 2 个集成）
+
+- `WebhookAlertApiIntegrationTest`（2，Testcontainers + loopback 接收器）：端点生命周期（私网 URL 拒绝/Secret 永不返回/签名测试投递）；规则评估全链路（缺失率 0.5 触发 → 事件 FIRED + 签名投递一次 + 投递记录一行 → 同小时桶二次评估去重不再投递）。
+
+### 风险与边界
+
+- 计划中的"系统/备份"与"凭证失效"两类告警未实现（无备份/系统健康遥测数据源、凭证失效告警依赖 validateCredential 接线，G4.x 收尾可补）；当前四类均基于 usage/quota 数据。
+- 指标为租户级（单租户部署语义）；规则 scope_json 预留未用。
+- 投递重试上限 3 次后放弃（事件保持 FIRED，去重防止刷屏；人工可从投递历史排查）。
+
+### 验证
+
+- 全量 `verify -P integration` → **BUILD SUCCESS**，**949 tests / 0 failures / 0 errors / 5 skipped**（947 + 2 新增）。
 
 ## G4.4 — Raw export and manual deletion（DONE）
 
