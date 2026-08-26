@@ -19,7 +19,7 @@
 | Parameter | Value |
 |---|---|
 | Gateway Base URL | `http://127.0.0.1:8081` |
-| Synthetic Key | `sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000` |
+| Synthetic Key | `sk-miqrokey-…REDACTED000000` |
 | CC Switch Mode | Claude Desktop integration (GUI field name ENV_BLOCKED) |
 | CC Switch Provider Type | Depends on mode — see below |
 | Upstream | Real Anthropic API or compatible endpoint |

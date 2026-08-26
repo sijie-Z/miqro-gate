@@ -15,7 +15,7 @@
 | Parameter | Value |
 |---|---|
 | Gateway Base URL | `http://127.0.0.1:8081` |
-| Synthetic Key | `sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000` |
+| Synthetic Key | `sk-miqrokey-…REDACTED000000` |
 | CC Switch Provider Type | Local Routing / Converted Provider (GUI field name ENV_BLOCKED) |
 | CC Switch Auth Header | `Authorization: Bearer` (ENV_BLOCKED — verify on instance) |
 | CC Switch Target Protocol | OpenAI Chat Completions |
@@ -145,7 +145,7 @@ If scenarios fail, isolate the issue:
    ```bash
    curl -X POST http://127.0.0.1:8081/v1/chat/completions \
      -H "Content-Type: application/json" \
-     -H "Authorization: Bearer sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000" \
+     -H "Authorization: Bearer sk-miqrokey-…REDACTED000000" \
      -d '{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"max_tokens":1}'
    ```
    If this succeeds, the Gateway is working — the issue is in CC Switch conversion.

@@ -1,0 +1,37 @@
+# G6.3 (2026-08-26): Postgres image scan exemptions, each with rationale.
+# Review EVERY entry when the image digest is next upgraded (see
+# deploy/compose.yaml) — drop the entries that no longer apply.
+#
+# OpenSSL QUIC-server memory-growth DoS (libcrypto3/libssl3 3.5.7-r0,
+# fixed 3.5.8-r0): Postgres serves TCP TLS, never QUIC, so the vulnerable
+# code path is not reachable.
+CVE-2026-14456
+#
+# gosu (/usr/local/bin/gosu): Go su-wrapper used only by the entrypoint.
+# The full golang CVE set below is local-DoS class in bundled tooling, not
+# part of the postgres server attack surface.
+CVE-2025-61726
+CVE-2025-61729
+CVE-2025-68121
+CVE-2026-25679
+CVE-2026-27145
+CVE-2026-32280
+CVE-2026-32281
+CVE-2026-32283
+CVE-2026-33811
+CVE-2026-33814
+CVE-2026-33818
+CVE-2026-39820
+CVE-2026-39821
+CVE-2026-39822
+CVE-2026-39836
+CVE-2026-42499
+CVE-2026-42504
+CVE-2026-56853
+CVE-2026-56858
+#
+# golang toolchain local-DoS inside the alpine image (net/url, crypto/tls):
+# bundled tooling, not part of the postgres server attack surface.
+CVE-2026-56859
+CVE-2026-56860
+CVE-2026-56862

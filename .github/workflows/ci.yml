@@ -87,3 +87,16 @@ jobs:
               *) echo "Image is not pinned by digest: $image" >&2; exit 1 ;;
             esac
           done < <(docker compose -f deploy/compose.yaml config --images)
+
+  security:
+    name: Security gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Secret scan
+        run: bash deploy/security/check-secrets.sh
+      - name: License gate + SBOM (CycloneDX)
+        run: bash deploy/security/check-sbom.sh
+      - name: Trivy scan of the pinned Postgres image
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock             -v "${{ github.workspace }}/deploy/security/.trivyignore:/root/.trivyignore:ro"             aquasec/trivy:0.58.2 image --severity HIGH,CRITICAL            --ignorefile /root/.trivyignore             --ignore-unfixed --exit-code 1 --no-progress             postgres:17.6-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73

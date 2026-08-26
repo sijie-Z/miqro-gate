@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G6.2`（Backup and restore：每日/每周保留策略、校验、Webhook、恢复命令和真实恢复测试）
+- Current goal: `G6.3`（Security and supply-chain gate：SBOM、许可证、依赖/镜像/Secret 扫描、目录签名、审计完整性）
 - Goal status: `DONE`
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g6.2-backup-restore`
+- Branch: `goal/g6.3-security-gate`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,25 @@
 
 ## Next Goal
 
-- Goal ID: `G6.3`
-- Name: Security and supply-chain gate（SBOM、许可证、依赖/镜像/Secret 扫描、目录签名、审计完整性）
+- Goal ID: `G6.4`
+- Name: Performance and soak（性能基线与浸泡）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 6 交付）
+
+## G6.3 — Security and supply-chain gate（DONE）
+
+### 交付
+
+- `deploy/security/check-secrets.sh`：`git grep` 高信号凭证模式门禁；**实际抓到并修复**：cc-switch 兼容文档 7 文件 23 处完整格式示例 Key → 打码 `sk-miqrokey-…REDACTED`。
+- `deploy/security/check-sbom.sh`：CycloneDX 聚合 BOM（gateway + control-plane 运行时依赖，107 组件）+ copyleft 许可证门禁（GPL/LGPL/AGPL/SSPL/EPL/MPL/CC-BY-NC/SA 拒绝）。
+- CI `security` job：secret 扫描 + SBOM/许可证 + Trivy 镜像扫描（postgres digest 固定镜像，HIGH/CRITICAL 未修复失败）。
+- 目录签名（G2.1）与审计哈希链（G2.3）在 security.md 供应链章节归档。
+
+### 验证
+
+- `bash deploy/security/check-secrets.sh` → **secret scan ok**
+- `bash deploy/security/check-sbom.sh` → **license gate ok (107 components)**
+- **镜像升级（Trivy 实际发现驱动）**：postgres 17.6-alpine 旧 digest（2025-04）含 22 个 HIGH/CRITICAL（golang 工具链）；升级至 2026-08-16 最新 digest（10 处引用：compose + 8 个测试类 + backup 演练 + CI）；`.trivyignore` 仅豁免 3 个已知工具链 CVE 并注明升级后复查。
 
 ## G6.2 — Backup and restore（DONE）
 

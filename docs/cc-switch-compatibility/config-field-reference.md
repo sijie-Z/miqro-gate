@@ -98,7 +98,7 @@ Exact names are ENV_BLOCKED.
 | Provider Name / Name | Display name in CC Switch | `MiQroKey Gateway` or protocol-specific name |
 | Provider Type / Type | Dropdown of supported provider types | See section 4.2 |
 | Base URL / API Endpoint / URL | Where CC Switch sends requests | `http://127.0.0.1:8081` (or production URL) |
-| API Key / Key / Token | The credential CC Switch sends | `sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000` |
+| API Key / Key / Token | The credential CC Switch sends | `sk-miqrokey-…REDACTED000000` |
 | API Key Header / Auth Type | How CC Switch sends the key | Depends on provider type — see section 4.2 |
 | Models / Model List | Models to expose to the client | Enter models your upstream supports |
 
@@ -208,7 +208,7 @@ All headers not listed above are forwarded unchanged, including:
 CC Switch Provider:
   Type: Anthropic
   Base URL: http://127.0.0.1:8081
-  API Key: sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000
+  API Key: sk-miqrokey-…REDACTED000000
   Auth: x-api-key (if CC Switch asks)
 
 Claude Code:
@@ -226,7 +226,7 @@ Expected flow:
 CC Switch Local Routing:
   Type: routing/conversion provider type (ENV_BLOCKED)
   Base URL: http://127.0.0.1:8081
-  API Key: sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000
+  API Key: sk-miqrokey-…REDACTED000000
   Auth: Authorization: Bearer
 
 Claude Code:
