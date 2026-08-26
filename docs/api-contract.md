@@ -370,6 +370,25 @@
 
 错误码沿用个人端：`PAGE_INVALID` / `SIZE_INVALID` / `TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE` / `GROUP_BY_INVALID`；非法 UUID 过滤参数返回 `400 PARAM_INVALID`（类型不匹配统一处理，不视为内部错误）。
 
+### 5.3 配额快照（G4.2）
+
+订阅的 Plan/额度状态快照（追加式历史，读取取每作用域最新）：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/subscriptions/{subscriptionId}/quota` | 最新快照（按订阅/席位/凭证作用域各一行） |
+| `POST /api/v1/admin/subscriptions/{subscriptionId}/quota/refresh` | 管理端触发刷新：按 ACTIVE 凭证经适配器 `fetchPlanStatus`（官方 API）或本地估算，返回刷新后视图 |
+
+快照字段：`subscriptionId`、`seatId`、`credentialId`、`windowType`（`PERIOD|ROLLING_5H|WEEKLY|MONTHLY|UNKNOWN`）、`total`/`used`/`remaining`、`unit`（`POINTS|TOKENS|REQUESTS|CURRENCY|UNKNOWN`）、`sharedPool`、`source`（`OFFICIAL_API|LOCAL_ESTIMATE|UNAVAILABLE`，对应权威级别，页面必须按此标注）、`syncedAt`、`errorMessage`。
+
+语义：
+
+- `OFFICIAL_API`：适配器官方余额接口返回（当前 DeepSeek / Moonshot 按量）。
+- `LOCAL_ESTIMATE`：订阅配置了 `quota_total` + `period_start` 时，用本地 usage（输入+输出 token）相对周期起点估算；与官方值严格区分。
+- `UNAVAILABLE`：无官方 API 或刷新失败；`errorMessage` 为脱敏提示（不含 URL/Secret/正文）。
+- 刷新为同步管理操作；每次刷新追加新行，历史保留。解密后的 Secret 只存在于调用内（凭证作用域 `ProviderClient`），用后清零。
+- 错误码：`SUBSCRIPTION_NOT_FOUND`（404，统一防枚举）。
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

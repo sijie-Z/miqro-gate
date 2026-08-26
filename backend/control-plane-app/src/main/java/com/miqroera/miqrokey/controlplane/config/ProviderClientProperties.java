@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
+import java.util.List;
 
 /**
  * Bounds for the control plane's {@code ProviderClient} implementation
@@ -20,6 +21,14 @@ public class ProviderClientProperties {
 
     /** Cap on a single provider response body (credential/model/plan calls). */
     private int maxResponseBytes = 1024 * 1024;
+
+    /**
+     * Additional CIDRs the control-plane SSRF gate may reach besides public
+     * addresses (G4.2: quota refreshes against locally hosted or intranet provider
+     * gateways). Default empty = public https only. Mirrors the gateway's
+     * {@code MIQROKEY_UPSTREAM_ALLOWED_CIDRS}.
+     */
+    private List<String> allowedCidrs = List.of();
 
     public Duration getConnectTimeout() {
         return connectTimeout;
@@ -43,5 +52,13 @@ public class ProviderClientProperties {
 
     public void setMaxResponseBytes(int maxResponseBytes) {
         this.maxResponseBytes = maxResponseBytes;
+    }
+
+    public List<String> getAllowedCidrs() {
+        return allowedCidrs;
+    }
+
+    public void setAllowedCidrs(List<String> allowedCidrs) {
+        this.allowedCidrs = allowedCidrs != null ? allowedCidrs : List.of();
     }
 }

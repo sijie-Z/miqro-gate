@@ -127,6 +127,7 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_CONNECT_TIMEOUT` | `10s` | 控制面 → 供应商调用的 TCP 连接超时（G3.1，`ProviderClient`） |
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_REQUEST_TIMEOUT` | `30s` | 控制面 → 供应商单次调用整体截止（G3.1） |
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_MAX_RESPONSE_BYTES` | `1048576` | 控制面 → 供应商单次响应体上限（G3.1）；超限中止交换 |
+| `MIQROKEY_CONTROL_PROVIDER_CLIENT_ALLOWED_CIDRS` | 空 | 控制面 → 供应商调用的 SSRF 门控 allowlist（G4.2）：命中这些 CIDR 的目标豁免「非公网地址」与「明文 http」两道拒绝（配额刷新对接本地/内网供应商网关时配置，如 `127.0.0.0/8`）；空 = 仅接受 https + 公网地址 |
 
 `MIQROKEY_MAX_CONCURRENT_STREAMS` 是保护实例稳定性的容量边界，不是按用户/团队配额。达到物理上限时返回明确的 `503 CAPACITY_EXHAUSTED` 并告警。
 

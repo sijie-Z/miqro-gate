@@ -17,6 +17,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -54,16 +55,26 @@ class ProviderClientConfigTest {
     @Test
     @DisplayName("production default validator allows no private targets")
     void productionValidatorAllowsNothingPrivate() {
-        UpstreamTargetValidator validator = config.controlPlaneTargetValidator();
+        UpstreamTargetValidator validator = config.controlPlaneTargetValidator(new ProviderClientProperties());
 
         assertThat(validator.allowsPrivateTargets()).isFalse();
     }
 
     @Test
+    @DisplayName("the configured allowlist extends the validator for local provider gateways")
+    void configuredAllowlistExtendsValidator() {
+        ProviderClientProperties properties = new ProviderClientProperties();
+        properties.setAllowedCidrs(List.of("127.0.0.0/8"));
+        UpstreamTargetValidator validator = config.controlPlaneTargetValidator(properties);
+
+        assertThat(validator.allowsPrivateTargets()).isTrue();
+    }
+
+    @Test
     @DisplayName("the factory builds credential-scoped HttpProviderClient instances")
     void factoryBuildsCredentialScopedClients() {
-        ProviderClientFactory factory = config.providerClientFactory(config.controlPlaneTargetValidator(),
-                new ProviderClientProperties());
+        ProviderClientFactory factory = config.providerClientFactory(
+                config.controlPlaneTargetValidator(new ProviderClientProperties()), new ProviderClientProperties());
 
         assertThat(factory.create(URI.create("https://api.deepseek.com"), "Authorization", "Bearer sk-a"))
                 .isInstanceOf(HttpProviderClient.class);
