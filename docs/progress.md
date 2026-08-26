@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G6.4`（Performance and soak：性能基线与浸泡）
-- Goal status: `DONE`
+- Current goal: `G6.5`（Release candidate and customer handoff：release-checklist 执行、CHANGELOG、版本交付物）
+- Goal status: `DONE`（候选版本产出；真实凭证与客户侧验收仍待）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g6.4-performance-soak`
+- Branch: `goal/g6.5-release-ready`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
