@@ -9,8 +9,15 @@ cd "$ROOT"
 export JAVA_HOME="${JAVA_HOME:-/d/programming/jdk-21.0.12.1+1}"
 export PATH="$JAVA_HOME/bin:$PATH"
 
+# Windows Git Bash needs the JDK on PATH; CI runners already have java.
+if ! command -v java >/dev/null 2>&1 && [ -n "${JAVA_HOME:-}" ]; then
+  export PATH="$JAVA_HOME/bin:$PATH"
+fi
+if [ -f mvnw ] && [ -x mvnw ]; then MVNW=./mvnw
+elif [ -f mvnw.cmd ]; then MVNW=./mvnw.cmd
+else MVNW=mvn; fi
 BOM="$ROOT/backend/target/bom.json"
-./mvnw.cmd -f backend/pom.xml -q org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeAggregateBom \
+"$MVNW" -f backend/pom.xml -q org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeAggregateBom \
   -Dcyclonedx.outputDirectory=target/sbom -Dcyclonedx.outputName=bom \
   --batch-mode >/dev/null 2>&1 || { echo "SBOM generation failed" >&2; exit 1; }
 
