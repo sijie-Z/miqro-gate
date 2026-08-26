@@ -15,11 +15,8 @@ export default defineConfig({
   retries: 1,
   reporter: 'list',
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://localhost:4173',
     trace: 'off',
-    // Force the full Chromium build (new headless): the headless shell breaks
-    // Vite's module preload bridge ("预加载桥接不可用").
-    channel: 'chromium',
   },
   projects: [
     {
@@ -27,10 +24,12 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
+  // Serve the production build (vite preview): no dev-server module graph to
+  // race, so the "预加载桥接不可用" cold-start problem is structurally gone.
   webServer: {
-    command: 'npm run dev -- --port 5173 --strictPort',
-    url: 'http://localhost:5173',
+    command: 'npm run build-only && npm run preview -- --port 4173 --strictPort',
+    url: 'http://localhost:4173',
     reuseExistingServer: true,
-    timeout: 60_000,
+    timeout: 120_000,
   },
 });
