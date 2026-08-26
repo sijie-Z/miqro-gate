@@ -194,8 +194,9 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 | `MIQROKEY_BACKUP_WEEKLY_KEEP` | `4` | 每周备份数量 |
 | `MIQROKEY_BACKUP_PATH` | `/var/backups/miqrokey` | 应映射到独立存储 |
 | `MIQROKEY_BACKUP_KEY_FILE` | 无 | 备份加密密钥，必须与在线 master key 分离 |
-| `MIQROKEY_METRICS_ENABLED` | `true` | Prometheus 指标 |
+| `MIQROKEY_METRICS_ENABLED` | `false` | Prometheus 指标（G6.1）：`monitoring` profile 激活时暴露 `/actuator/prometheus`；默认关闭（G0.1 安全边界） |
 | `MIQROKEY_METRICS_PATH` | `/actuator/prometheus` | 仅管理网络暴露 |
+| `SPRING_PROFILES_ACTIVE` | 空 | 附加 `monitoring`（Prometheus 抓取端点）与 `json`（Logstash JSON 日志，G6.1） |
 | `MIQROKEY_LOG_LEVEL` | `INFO` | 生产禁止默认 DEBUG |
 
 指标标签不得使用用户 ID、完整模型输入、Key、request body 或供应商错误正文等高基数/敏感值。

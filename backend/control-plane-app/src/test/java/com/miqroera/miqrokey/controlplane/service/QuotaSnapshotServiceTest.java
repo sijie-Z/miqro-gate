@@ -102,7 +102,8 @@ class QuotaSnapshotServiceTest {
     void setUp() {
         service = new QuotaSnapshotService(subscriptionRepository, productRepository, credentialRepository,
                 versionRepository, snapshotRepository, adapterRegistry, clientFactory, keyEncryptionProvider, jdbc,
-                new com.fasterxml.jackson.databind.ObjectMapper());
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
         lenient().when(snapshotRepository.insert(any())).thenAnswer(inv -> {
             stored.add(inv.getArgument(0));
             return inv.getArgument(0);
