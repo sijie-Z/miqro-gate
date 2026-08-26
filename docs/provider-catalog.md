@@ -185,6 +185,22 @@ Kimi Code 同时提供 OpenAI 与 Anthropic 兼容入口；按量平台提供余
 
 Coding Plan 和 Token Plan 个人版均有专属 Key 与 OpenAI/Anthropic 兼容 Base URL。公开资料中的团队形态需要进一步真实账号验证，首版先按个人 Plan 和企业按量产品实现。
 
+**实现状态：`IMPLEMENTED`（G3.6）** —— 适配器 `baidu-coding-plan`、`baidu-token-plan-personal`、`baidu-payg-api` 已落地。官方端点（2026-08-26 核验 cloud.baidu.com）与路径归一化：
+
+| 产品 | OpenAI Base URL | Anthropic Base URL | 模型列表路径 | `/v1` 前缀剥离 |
+|---|---|---|---|---|
+| Coding Plan | `https://qianfan.baidubce.com/v2/coding` | `https://qianfan.baidubce.com/anthropic/coding` | `/models` | 是 |
+| Token Plan 个人版 | `https://qianfan.baidubce.com/v2/tokenplan/personal` | `https://qianfan.baidubce.com/anthropic/tokenplan/personal` | `/models` | 是 |
+| 千帆按量 API | `https://qianfan.baidubce.com/v2` | — | `/models` | 是 |
+
+- 鉴权：`Authorization: Bearer <api-key>`；Coding Plan 与 Token Plan 个人版均为**专属 Key**（错用返回 `coding_plan_api_key_not_allowed`/`coding_plan_api_key_required`/`token_quota_exceeded`）。
+- Coding Plan：按请求次数计配额（Lite ~1200/5h，Pro ~6000/5h）；模型 `kimi-k2.5`/`deepseek-v3.2`/`glm-5`/`minimax-m2.5`/`ernie-4.5-turbo-20260402`/`deepseek-v4-flash`/`glm-5.1` 或 `qianfan-code-latest`。
+- Token Plan 个人版：月度 token 池（Mini 1000万 / Lite 4200万 / Pro 2.3亿 / Max 7亿，模型共享池），每账号限购一个。
+- `fetchPlanStatus` 按契约 §6 返回 `UNAVAILABLE`（两个 Plan 文档与按量平台均无确认的官方余额/用量 API，控制台配额页可见）。
+- 团队形态（Token Plan 企业版）官方存在但签名目录未收录，首版不建模团队产品。
+
+`VERIFIED` 需要真实凭证契约测试 → `WAITING_FOR_CREDENTIAL`。
+
 资料：
 
 - [千帆 Coding Plan](https://cloud.baidu.com/doc/qianfan/s/imlg0beiu)
