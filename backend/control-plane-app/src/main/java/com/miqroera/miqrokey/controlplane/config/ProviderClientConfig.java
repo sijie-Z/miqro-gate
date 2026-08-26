@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.config;
 
+import com.miqroera.miqrokey.adapters.aliyun.AliyunBailianAdapter;
 import com.miqroera.miqrokey.adapters.baidu.BaiduQianfanAdapter;
 import com.miqroera.miqrokey.adapters.deepseek.DeepSeekPaygAdapter;
 import com.miqroera.miqrokey.adapters.minimax.MiniMaxAdapter;
@@ -55,6 +56,9 @@ public class ProviderClientConfig {
         registry.register(VolcengineArkAdapter.codingPlan(objectMapper));
         registry.register(VolcengineArkAdapter.agentPlan(objectMapper));
         registry.register(VolcengineArkAdapter.paygApi(objectMapper));
+        registry.register(AliyunBailianAdapter.codingPlan(objectMapper));
+        registry.register(AliyunBailianAdapter.tokenPlanTeam(objectMapper));
+        registry.register(AliyunBailianAdapter.paygApi(objectMapper));
         return registry;
     }
 
