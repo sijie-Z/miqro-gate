@@ -39,19 +39,25 @@ class GatewayMonitoringProfileTest {
     static {
         POSTGRES.start();
         try {
-            ENC_KEY_FILE = Files.createTempFile("enc-key", ".key");
-            Files.writeString(ENC_KEY_FILE, keyMaterial());
-            HMAC_KEY_FILE = Files.createTempFile("hmac-key", ".key");
-            Files.writeString(HMAC_KEY_FILE, keyMaterial());
+            ENC_KEY_FILE = keyFile("enc-key");
+            HMAC_KEY_FILE = keyFile("hmac-key");
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
-    static String keyMaterial() {
-        byte[] bytes = new byte[32];
-        new java.security.SecureRandom().nextBytes(bytes);
-        return java.util.Base64.getEncoder().encodeToString(bytes);
+    static Path keyFile(String name) throws Exception {
+        byte[] key = new byte[32];
+        new java.security.SecureRandom().nextBytes(key);
+        Path file = Files.createTempFile(name, ".key");
+        Files.writeString(file, java.util.Base64.getEncoder().encodeToString(key));
+        try {
+            // Linux CI enforces 0400 on key material; no-op on Windows.
+            Files.setPosixFilePermissions(file, java.nio.file.attribute.PosixFilePermissions.fromString("r--------"));
+        } catch (UnsupportedOperationException ignored) {
+            // non-POSIX filesystem
+        }
+        return file;
     }
 
     @DynamicPropertySource
