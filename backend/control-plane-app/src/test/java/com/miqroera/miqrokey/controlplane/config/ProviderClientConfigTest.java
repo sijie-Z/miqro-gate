@@ -7,6 +7,7 @@ import com.miqroera.miqrokey.adapters.minimax.MiniMaxAdapter;
 import com.miqroera.miqrokey.adapters.moonshot.MoonshotKimiAdapter;
 import com.miqroera.miqrokey.adapters.registry.BuiltInAdapterRegistry;
 import com.miqroera.miqrokey.adapters.tencent.TencentTokenHubAdapter;
+import com.miqroera.miqrokey.adapters.volcengine.VolcengineArkAdapter;
 import com.miqroera.miqrokey.adapters.zhipu.ZhipuGlmAdapter;
 import com.miqroera.miqrokey.controlplane.client.HttpProviderClient;
 import com.miqroera.miqrokey.controlplane.client.ProviderClientFactory;
@@ -18,7 +19,7 @@ import java.net.URI;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@DisplayName("ProviderClientConfig (G3.1-G3.6)")
+@DisplayName("ProviderClientConfig (G3.1-G3.7)")
 class ProviderClientConfigTest {
 
     private final ProviderClientConfig config = new ProviderClientConfig();
@@ -32,8 +33,8 @@ class ProviderClientConfigTest {
                 "baidu-token-plan-personal", "deepseek-payg-api", "minimax-payg-api", "minimax-token-plan-personal",
                 "minimax-token-plan-team", "moonshot-kimi-code-member", "moonshot-payg-api", "tencent-coding-plan",
                 "tencent-payg-api", "tencent-token-plan-enterprise-lite", "tencent-token-plan-enterprise-pro",
-                "tencent-token-plan-personal", "zhipu-coding-plan-personal", "zhipu-coding-plan-team",
-                "zhipu-payg-api");
+                "tencent-token-plan-personal", "volcengine-agent-plan", "volcengine-coding-plan", "volcengine-payg-api",
+                "zhipu-coding-plan-personal", "zhipu-coding-plan-team", "zhipu-payg-api");
         assertThat(registry.findById(DeepSeekPaygAdapter.ADAPTER_ID)).isPresent().get()
                 .isInstanceOf(DeepSeekPaygAdapter.class);
         assertThat(registry.findById("tencent-coding-plan")).isPresent().get()
@@ -42,6 +43,8 @@ class ProviderClientConfigTest {
         assertThat(registry.findById("minimax-token-plan-team")).isPresent().get().isInstanceOf(MiniMaxAdapter.class);
         assertThat(registry.findById("moonshot-payg-api")).isPresent().get().isInstanceOf(MoonshotKimiAdapter.class);
         assertThat(registry.findById("baidu-coding-plan")).isPresent().get().isInstanceOf(BaiduQianfanAdapter.class);
+        assertThat(registry.findById("volcengine-agent-plan")).isPresent().get()
+                .isInstanceOf(VolcengineArkAdapter.class);
     }
 
     @Test
