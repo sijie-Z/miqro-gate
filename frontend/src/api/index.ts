@@ -5,6 +5,12 @@
 import { del, get, patch, post } from './http';
 import type {
   AdminUser,
+  AlertRule,
+  AuditEventView,
+  ExportTask,
+  UsageDeletionRequest,
+  WebhookDelivery,
+  WebhookEndpointView,
   CredentialSummary,
   CreateVirtualKeyRequest,
   CreateVirtualKeyResponse,
@@ -238,4 +244,159 @@ export function updateSeat(
   body: { assignedUserId?: string; status?: string; displayName?: string },
 ): Promise<SeatView> {
   return patch<SeatView>(`/api/v1/admin/subscriptions/${subscriptionId}/seats/${seatId}`, body);
+}
+
+// ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----
+
+export function adminUsageSummary(query: {
+  groupBy?: string;
+  from?: string;
+  to?: string;
+  userId?: string;
+  projectId?: string;
+  virtualKeyId?: string;
+  credentialId?: string;
+  subscriptionId?: string;
+  providerProductId?: string;
+  modelId?: string;
+}): Promise<UsageSummary> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value) params.set(key, value);
+  }
+  return get<UsageSummary>(`/api/v1/admin/usage/summary?${params.toString()}`);
+}
+
+export function adminUsageRecords(query: {
+  from?: string;
+  to?: string;
+  page?: number;
+  size?: number;
+  userId?: string;
+  projectId?: string;
+  modelId?: string;
+}): Promise<UsageRecordPage> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  }
+  return get<UsageRecordPage>(`/api/v1/admin/usage/records?${params.toString()}`);
+}
+
+export function createExport(
+  format: 'CSV' | 'JSONL',
+  from: string,
+  to: string,
+): Promise<ExportTask> {
+  return post<ExportTask>(
+    `/api/v1/admin/exports?format=${format}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+  );
+}
+
+export function exportStatus(id: string): Promise<ExportTask> {
+  return get<ExportTask>(`/api/v1/admin/exports/${id}`);
+}
+
+export function exportRecent(): Promise<ExportTask[]> {
+  return get<ExportTask[]>('/api/v1/admin/exports?limit=20');
+}
+
+export function deletionPreview(from: string, to: string): Promise<{ count: number }> {
+  return get<{ count: number }>(
+    `/api/v1/admin/usage-deletions/preview?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+  );
+}
+
+export function createDeletion(
+  from: string,
+  to: string,
+): Promise<{
+  id: string;
+  previewCount: number;
+  confirmToken: string;
+  expiresAt: string;
+}> {
+  return post<{ id: string; previewCount: number; confirmToken: string; expiresAt: string }>(
+    `/api/v1/admin/usage-deletions?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+  );
+}
+
+export function confirmDeletion(id: string, confirmToken: string): Promise<UsageDeletionRequest> {
+  return post<UsageDeletionRequest>(`/api/v1/admin/usage-deletions/${id}/confirm`, {
+    confirmToken,
+  });
+}
+
+export function deletionRecent(): Promise<UsageDeletionRequest[]> {
+  return get<UsageDeletionRequest[]>('/api/v1/admin/usage-deletions?limit=20');
+}
+
+export function listWebhooks(): Promise<WebhookEndpointView[]> {
+  return get<WebhookEndpointView[]>('/api/v1/admin/webhooks');
+}
+
+export function createWebhook(body: {
+  name: string;
+  url: string;
+  secret: string;
+  timeoutMs?: number;
+}): Promise<WebhookEndpointView> {
+  return post<WebhookEndpointView>('/api/v1/admin/webhooks', body);
+}
+
+export function updateWebhook(
+  id: string,
+  body: { name?: string; enabled?: boolean; timeoutMs?: number },
+): Promise<WebhookEndpointView> {
+  return patch<WebhookEndpointView>(`/api/v1/admin/webhooks/${id}`, body);
+}
+
+export function deleteWebhook(id: string): Promise<void> {
+  return del<void>(`/api/v1/admin/webhooks/${id}`);
+}
+
+export function testWebhook(id: string): Promise<{ httpStatus?: number; errorMessage?: string }> {
+  return post<{ httpStatus?: number; errorMessage?: string }>(`/api/v1/admin/webhooks/${id}/test`);
+}
+
+export function webhookDeliveries(id: string): Promise<WebhookDelivery[]> {
+  return get<WebhookDelivery[]>(`/api/v1/admin/webhooks/${id}/deliveries?limit=20`);
+}
+
+export function listAlertRules(): Promise<AlertRule[]> {
+  return get<AlertRule[]>('/api/v1/admin/alert-rules');
+}
+
+export function createAlertRule(body: {
+  name: string;
+  type: string;
+  threshold: number;
+  dedupeMinutes?: number;
+  webhookEndpointId?: string;
+}): Promise<AlertRule> {
+  return post<AlertRule>('/api/v1/admin/alert-rules', body);
+}
+
+export function updateAlertRule(
+  id: string,
+  body: {
+    name?: string;
+    threshold?: number;
+    dedupeMinutes?: number;
+    enabled?: boolean;
+    webhookEndpointId?: string;
+  },
+): Promise<AlertRule> {
+  return patch<AlertRule>(`/api/v1/admin/alert-rules/${id}`, body);
+}
+
+export function deleteAlertRule(id: string): Promise<void> {
+  return del<void>(`/api/v1/admin/alert-rules/${id}`);
+}
+
+export function auditEvents(query: { size?: number; action?: string }): Promise<AuditEventView[]> {
+  const params = new URLSearchParams();
+  if (query.size) params.set('size', String(query.size));
+  if (query.action) params.set('action', query.action);
+  return get<AuditEventView[]>(`/api/v1/admin/audit-events?${params.toString()}`);
 }

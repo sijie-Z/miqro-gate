@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G5.3`（Admin provider and Plan portal：产品预设、Subscription、Seat、Credential、验证、轮换、余额来源）
-- Goal status: `DONE`（后端 API + 前端页面）
+- Current goal: `G5.4`（Admin usage, export and alerts portal：统计、原始流水、导出、删除、Webhook、审计）
+- Goal status: `DONE`
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g5.3-admin-provider-frontend`
+- Branch: `goal/g5.4-admin-usage-frontend`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,31 @@
 
 ## Next Goal
 
-- Goal ID: `G5.4`
-- Name: Admin usage, export and alerts portal（统计、原始流水、导出、删除、Webhook、审计）
+- Goal ID: `G5.5`
+- Name: UI security and accessibility（权限路由、敏感信息防缓存、键盘操作、错误状态、中文文案和基础可访问性）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 5 门户）
+
+## G5.4 — Admin usage, export and alerts portal（DONE）
+
+### 后端（PR #51，8d715b9）
+
+- `GET /api/v1/admin/audit-events`：审计链逆序列表（action 过滤 + chain_position 游标分页）；链哈希永不序列化
+
+### 前端（本交付）
+
+- `AdminUsageView`：全租户统计（筛选条 → 汇总行 → 明细表模式）
+- `AdminExportsView`：创建导出（CSV/JSONL + 窗口）+ 轮询状态 + 下载
+- `AdminDeletionsView`：预览计数 → 创建请求（token 一次性返回）→ 二次确认 Dialog 完成永久删除
+- `AdminWebhooksView`：端点 CRUD + 签名测试投递 + 投递记录 drawer
+- `AdminAlertRulesView`：规则 CRUD（类型/阈值/去重窗口/端点选择）
+- `AdminAuditView`：审计链表格（位置/action/摘要，action 过滤）
+- API 层：20+ 个管理函数与类型；路由/导航补齐（管理组 10 项）
+
+### 验证
+
+- 前端 lint/typecheck/21 vitest/build 全 PASS；Playwright 12/12
+- 后端全量 `verify -P integration`：955 tests / 0 failures / 0 errors / 5 skipped
 
 ## G5.3 — Admin provider and Plan portal（DONE，后端 + 前端）
 

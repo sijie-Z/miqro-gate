@@ -256,3 +256,74 @@ export interface SeatView {
   seatStatus: string;
   createdAt: string;
 }
+
+// ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----
+
+export interface ExportTask {
+  id: string;
+  format: 'CSV' | 'JSONL';
+  periodFrom: string;
+  periodTo: string;
+  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'EXPIRED';
+  sha256?: string;
+  rowCount?: number;
+  byteCount?: number;
+  errorMessage?: string;
+  createdAt: string;
+  finishedAt?: string;
+  expiresAt?: string;
+}
+
+export interface UsageDeletionRequest {
+  id: string;
+  periodFrom: string;
+  periodTo: string;
+  previewCount: number;
+  status: 'PENDING_CONFIRMATION' | 'CONFIRMED' | 'EXECUTED' | 'EXPIRED';
+  deletedCount?: number;
+  executedAt?: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface WebhookEndpointView {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  timeoutMs: number;
+  createdAt: string;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  eventId: string;
+  endpointId: string;
+  attempt: number;
+  httpStatus?: number;
+  nextRetryAt?: string;
+  errorMessage?: string;
+  createdAt: string;
+}
+
+export interface AlertRule {
+  id: string;
+  name: string;
+  type: 'USAGE_MISSING_RATE' | 'UPSTREAM_ERROR_RATE' | 'BALANCE_UNAVAILABLE' | 'USAGE_SURGE';
+  threshold: number;
+  dedupeMinutes: number;
+  enabled: boolean;
+  webhookEndpointId?: string;
+  createdAt: string;
+}
+
+export interface AuditEventView {
+  id: string;
+  actorId?: string;
+  action: string;
+  targetType?: string;
+  targetId?: string;
+  changeSummary?: string;
+  createdAt: string;
+  chainPosition: number;
+}

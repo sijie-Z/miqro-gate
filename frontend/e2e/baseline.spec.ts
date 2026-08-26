@@ -213,7 +213,10 @@ test('admin providers page baseline at 1440x900', async ({ page }) => {
   await page.waitForLoadState('networkidle');
   await expect(page.getByTestId('products-table')).toBeVisible();
   await expect(page.getByTestId('products-table')).toContainText('api.deepseek.com');
-  await page.screenshot({ path: 'test-results/baseline/admin-providers-1440x900.png', fullPage: true });
+  await page.screenshot({
+    path: 'test-results/baseline/admin-providers-1440x900.png',
+    fullPage: true,
+  });
 });
 
 test('key actions: rotate and revoke flows render from the kebab menu', async ({ page }) => {
