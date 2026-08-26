@@ -300,6 +300,12 @@ public class QuotaSnapshotService {
     }
 
     private static String sanitize(String message) {
-        return truncate(message);
+        String truncated = truncate(message);
+        if (truncated == null) {
+            return null;
+        }
+        // Never persist upstream hosts/URLs even inside error hints
+        // (adapter/client exceptions often embed the target URI).
+        return truncated.replaceAll("https?://[^\s,;]+", "[url]");
     }
 }

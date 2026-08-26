@@ -14,7 +14,11 @@ final class ErrorEnvelopes {
     }
 
     static String body(AuthFailureException e, String path) {
-        String message = e.getMessage().replace("\\", "\\\\").replace("\"", "\\\"");
+        // The message may embed client-supplied model names: escape quotes,
+        // backslashes and control characters so the envelope stays valid JSON
+        // (G6 audit fix).
+        String message = e.getMessage().replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\n")
+                .replace("\r", "\r").replace("\t", "\t");
         boolean isAnthropic = "/v1/messages".equals(path);
         return isAnthropic
                 ? "{\"type\":\"error\",\"error\":{\"type\":\"" + e.code() + "\",\"message\":\"" + message + "\"}}"

@@ -9,7 +9,6 @@ import reactor.core.publisher.Mono;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -94,24 +93,31 @@ public final class HttpProviderClient implements ProviderClient {
             throw new IllegalStateException("Upstream target is not allowed for this provider client");
         }
         String path = request.path();
-        if (path.startsWith("/") && baseUrl.getPath().endsWith("/") && path.length() > 1) {
+        StringBuilder sb = new StringBuilder(baseUrl.toString());
+        if (sb.charAt(sb.length() - 1) == '/' && path.startsWith("/") && path.length() > 1) {
             path = path.substring(1);
         }
-        try {
-            return new URI(baseUrl.getScheme(), baseUrl.getRawAuthority(), baseUrl.getRawPath() + path,
-                    request.query().isBlank() ? null : request.query(), null);
-        } catch (URISyntaxException e) {
-            throw new IllegalStateException("Invalid provider request path", e);
+        sb.append(path);
+        if (!request.query().isBlank()) {
+            sb.append('?').append(request.query());
         }
+        // Raw splice: the caller's path/query are already encoded (ProviderRequest
+        // contract). URI.create keeps the percent-escapes untouched, unlike the
+        // multi-arg constructor which re-encodes them.
+        return URI.create(sb.toString());
     }
 
     private Mono<ProviderResponse> readBounded(HttpResponse<InputStream> response) {
+        long deadline = System.nanoTime() + requestTimeout.toNanos();
         try (InputStream in = response.body()) {
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
             byte[] buf = new byte[8192];
             int total = 0;
             int read;
             while ((read = in.read(buf)) != -1) {
+                if (System.nanoTime() > deadline) {
+                    throw new IllegalStateException("Provider response body read timed out");
+                }
                 total += read;
                 if (total > maxResponseBytes) {
                     throw new IllegalStateException("Provider response exceeds the control-plane body limit");

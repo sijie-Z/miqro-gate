@@ -216,7 +216,7 @@ public final class GatewayTestKeys {
             // Synthetic ciphertext/nonce (the fixture injector never decrypts):
             // the snapshot contract requires the ACTIVE version's EncryptedSecret.
             return new RouteSnapshot.CredentialRecord(credentialId, TENANT_ID, productId, baseUrl, AUTH_SCHEME,
-                    new EncryptedSecret(new byte[]{1, 2, 3}, new byte[]{4, 5, 6}, "v1"));
+                    new EncryptedSecret(new byte[]{1, 2, 3}, new byte[]{4, 5, 6}, "v1"), java.util.Map.of());
         }
     }
 }

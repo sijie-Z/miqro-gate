@@ -28,13 +28,13 @@ public final class TransparentResolve {
     public static Map<String, String> headers(InboundRequest request, Set<String> stripInboundHeaders) {
         Map<String, String> headers = new LinkedHashMap<>();
         for (Map.Entry<String, List<String>> entry : request.headers().entrySet()) {
-            if (stripInboundHeaders.contains(entry.getKey().toLowerCase())) {
+            if (stripInboundHeaders.contains(entry.getKey().toLowerCase(java.util.Locale.ROOT))) {
                 continue;
             }
             List<String> values = entry.getValue();
             if (!values.isEmpty()) {
                 // TargetRequest contract: header names are lowercase.
-                headers.put(entry.getKey().toLowerCase(), values.get(0));
+                headers.put(entry.getKey().toLowerCase(java.util.Locale.ROOT), values.get(0));
             }
         }
         return headers;

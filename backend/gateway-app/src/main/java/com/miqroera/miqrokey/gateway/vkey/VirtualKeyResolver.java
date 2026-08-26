@@ -83,7 +83,7 @@ public class VirtualKeyResolver {
             if (binding == null) {
                 return invalid();
             }
-            if (!binding.projectTag().equals(parsed.projectTag())) {
+            if (binding.projectTag() == null || !binding.projectTag().equals(parsed.projectTag())) {
                 // The presented label does not match the binding's tag: the key
                 // is valid but not routable under this label.
                 return invalid();

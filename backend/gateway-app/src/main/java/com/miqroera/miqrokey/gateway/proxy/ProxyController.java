@@ -14,11 +14,19 @@ import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
 import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
 import com.miqroera.miqrokey.gateway.vkey.AuthContext;
+import com.miqroera.miqrokey.domain.route.RouteSnapshot;
+import com.miqroera.miqrokey.adapters.catalog.ProviderCatalog;
+import com.miqroera.miqrokey.adapters.registry.BuiltInAdapterRegistry;
+import com.miqroera.miqrokey.spi.InboundRequest;
+import com.miqroera.miqrokey.spi.ProtocolFamily;
+import com.miqroera.miqrokey.spi.ProviderProductAdapter;
+import com.miqroera.miqrokey.spi.RouteContext;
+import com.miqroera.miqrokey.spi.TargetRequest;
+
 import com.miqroera.miqrokey.gateway.vkey.AuthFailureException;
 import com.miqroera.miqrokey.gateway.vkey.VirtualKeyResolver;
 import com.miqroera.miqrokey.queue.RequestCoalescer;
 import com.miqroera.miqrokey.queue.UsageEventBus;
-import com.miqroera.miqrokey.spi.ProtocolFamily;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -124,13 +132,16 @@ public class ProxyController {
     private final ProxyTargetProperties properties;
     private final UpstreamTargetValidator upstreamTargetValidator;
     private final Scheduler credentialDecryptScheduler;
+    private final BuiltInAdapterRegistry adapterRegistry;
+    private final ProviderCatalog providerCatalog;
 
     public ProxyController(VirtualKeyResolver keyResolver, CredentialInjector credentialInjector,
             GatewayResponseCache responseCache, ObjectProvider<RequestCoalescer> coalescerProvider,
             ObjectProvider<Duration> coalescerWaitTimeoutProvider, UsageEventBus usageEventBus,
             CacheKeyFactory cacheKeyFactory, SseReplayEngine sseReplayEngine, WebClient proxyWebClient, Clock clock,
             ObjectMapper objectMapper, ProxyTargetProperties properties,
-            UpstreamTargetValidator upstreamTargetValidator, Scheduler credentialDecryptScheduler) {
+            UpstreamTargetValidator upstreamTargetValidator, Scheduler credentialDecryptScheduler,
+            BuiltInAdapterRegistry adapterRegistry, ProviderCatalog providerCatalog) {
         this.keyResolver = keyResolver;
         this.credentialInjector = credentialInjector;
         this.responseCache = responseCache;
@@ -146,6 +157,8 @@ public class ProxyController {
         this.maxProxyBufferBytes = Math.toIntExact(properties.maxProxyBuffer().toBytes());
         this.upstreamTargetValidator = upstreamTargetValidator;
         this.credentialDecryptScheduler = credentialDecryptScheduler;
+        this.adapterRegistry = adapterRegistry;
+        this.providerCatalog = providerCatalog;
     }
 
     // -------------------------------------------------------------------
@@ -219,7 +232,15 @@ public class ProxyController {
             boolean hasToolFields = root != null && (root.has("tools") || root.has("tool_choice"));
             boolean streaming = root != null && root.has("stream") && root.get("stream").asBoolean(false);
 
-            if (modelName != null && !ctx.models().contains(modelName)) {
+            java.util.Set<String> allowed = ctx.models();
+            java.util.Set<String> grantModels = ctx.snapshot().grantModels(ctx.key().grantId());
+            if (grantModels != null) {
+                // Grant is the authorization authority: shrinking the grant's
+                // model scope must revoke the model for every existing key of
+                // the project (same semantics as /v1/models).
+                allowed = allowed.stream().filter(grantModels::contains).collect(java.util.stream.Collectors.toSet());
+            }
+            if (modelName != null && !allowed.contains(modelName)) {
                 return writeError(exchange, new AuthFailureException(HttpStatus.FORBIDDEN, "model_not_allowed",
                         "Model '" + modelName + "' is not allowed for this virtual key"));
             }
@@ -695,6 +716,68 @@ public class ProxyController {
         byte[] bytes = ErrorEnvelopes.body(e, exchange.getRequest().getURI().getPath())
                 .getBytes(StandardCharsets.UTF_8);
         return response.writeWith(Mono.just(response.bufferFactory().wrap(bytes)));
+    }
+
+    /**
+     * Resolves the upstream target through the product's adapter (G3.x relay
+     * wiring): the adapter applies the per-protocol base URL and the documented
+     * path normalization ({@code /v1} stripping on /v3- or /v4-suffixed bases,
+     * Anthropic paths kept verbatim). Products without a registered adapter keep
+     * the legacy verbatim splice.
+     */
+    private ResolvedTarget resolveTarget(ServerWebExchange exchange, AuthContext ctx,
+            CredentialInjector.InjectedCredential cred, String wireProtocol) {
+        String productCode = ctx.snapshot().productCode(ctx.binding().productId());
+        if (productCode != null && providerCatalog.findById(productCode).isPresent()) {
+            ProviderProductAdapter adapter = adapterRegistry.findById(productCode).orElse(null);
+            if (adapter != null) {
+                ProtocolFamily family = ProtocolFamily.valueOf(wireProtocol);
+                RouteSnapshot.CredentialRecord credential = ctx.snapshot().credential(ctx.binding().credentialId());
+                URI baseUrl = credential != null ? credential.baseUrl(family.name()) : null;
+                if (baseUrl != null) {
+                    var request = exchange.getRequest();
+                    RouteContext route = new RouteContext(ctx.key().tenantId(), ctx.binding().productId(),
+                            ctx.binding().projectId(), family, baseUrl);
+                    InboundRequest inbound = new InboundRequest(request.getMethod().name(), request.getURI().getPath(),
+                            decodeQuery(request.getURI().getRawQuery()), request.getHeaders());
+                    TargetRequest target = adapter.resolve(route, inbound);
+                    StringBuilder sb = new StringBuilder(target.origin().toString());
+                    sb.append(target.path());
+                    if (target.query() != null && !target.query().isEmpty()) {
+                        sb.append('?').append(target.query());
+                    }
+                    return new ResolvedTarget(URI.create(sb.toString()), target.headers());
+                }
+            }
+        }
+        return new ResolvedTarget(buildUpstreamUri(exchange, cred.baseUrl()), null);
+    }
+
+    /**
+     * Parses a raw query string into the decoded multi-map InboundRequest expects.
+     */
+    private static java.util.Map<String, java.util.List<String>> decodeQuery(String rawQuery) {
+        java.util.Map<String, java.util.List<String>> query = new java.util.LinkedHashMap<>();
+        if (rawQuery == null || rawQuery.isEmpty()) {
+            return query;
+        }
+        for (String pair : rawQuery.split("&")) {
+            int eq = pair.indexOf('=');
+            String key = eq >= 0 ? pair.substring(0, eq) : pair;
+            String value = eq >= 0 ? pair.substring(eq + 1) : null;
+            query.computeIfAbsent(
+                    org.springframework.web.util.UriUtils.decode(key, java.nio.charset.StandardCharsets.UTF_8),
+                    k -> new java.util.ArrayList<>())
+                    .add(value == null
+                            ? null
+                            : org.springframework.web.util.UriUtils.decode(value,
+                                    java.nio.charset.StandardCharsets.UTF_8));
+        }
+        return query;
+    }
+
+    /** Adapter-resolved target: the upstream URI plus the final header set. */
+    record ResolvedTarget(URI uri, java.util.Map<String, String> headers) {
     }
 
     private URI buildUpstreamUri(ServerWebExchange exchange, String baseUrl) {

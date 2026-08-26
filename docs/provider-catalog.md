@@ -44,6 +44,8 @@
 
 团队建模：`MULTI_KEY_SHARED_POOL + DEDICATED_PLUS_SHARED/KEY_CAPPED`。
 
+**注意**：签名目录中腾讯 5 个条目的 `baseUrlTemplate` 均为 `https://api.hunyuan.cloud.tencent.com`（混元域名，DOCUMENTED 设计值）——与官方 TokenHub/LKEAP 端点不同，录入产品实例时**必须按下表官方端点覆盖 base URL**（否则 validateCredential/fetchModels 打到错误域名）。
+
 **实现状态：`IMPLEMENTED`（G3.2）** —— 适配器 `tencent-coding-plan`、`tencent-token-plan-personal`、`tencent-token-plan-enterprise-pro`、`tencent-token-plan-enterprise-lite`、`tencent-payg-api` 已落地。实际端点（管理员按地域/站点配置 Base URL）与路径归一化：
 
 | 产品 | OpenAI Base URL | Anthropic Base URL | 模型列表路径 | `/v1` 前缀剥离 |
