@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G3.2`（Tencent TokenHub 适配器：Coding Plan、Token Plan 个人版、企业专业/轻享、TokenHub 按量 API；Plan 专属 Base URL、多 Key 共享池建模）
-- Goal status: `DONE`（全量验证通过：810 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
+- Current goal: `G3.3`（智谱 GLM：个人/团队 Coding Plan、按量 API；Seat 与成员专属 Key 建模）
+- Goal status: `DONE`（全量验证通过：842 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g3.2-tencent-tokenhub`
+- Branch: `goal/g3.3-zhipu-glm`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,43 @@
 
 ## Next Goal
 
-- Goal ID: `G3.3`
-- Name: 智谱 GLM（团队 Plan `PER_SEAT_KEY` 建模）
+- Goal ID: `G3.4`
+- Name: MiniMax（个人/团队 Token Plan、按量 API；每 Team/成员 Subscription Key、席位与共享 Credits）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 3 供应商产品）
+
+## G3.3 — 智谱 GLM（个人/团队 Coding Plan + 按量 API，DONE）
+
+### 官方事实核验（2026-08-26，docs.bigmodel.cn）
+
+- **Coding Plan OpenAI base**：`https://open.bigmodel.cn/api/coding/paas/v4`（Coding Plan 专属，与按量 API 的 `/api/paas/v4` 不同）；**Anthropic base**：`https://open.bigmodel.cn/api/anthropic`（完整路径 `.../api/anthropic/v1/messages`）。
+- 鉴权：OpenAI 入口 `Authorization: Bearer <API_KEY>`（官方 API 文档）；Anthropic 兼容入口官方示例用 `x-api-key`（Anthropic SDK 默认头）—— 适配器按平台惯例注入 Bearer，兼容性列为 `WAITING_FOR_CREDENTIAL` 风险。
+- 套餐：积分池（Lite 2000/5h、10k/周；Pro 12k/5h、60k/周；Max 28k/5h、140k/周），按抵扣系数扣减，非高峰 50% 抵扣；Coding Plan 支持 GLM-5.3 / GLM-5-Turbo / GLM-4.7。
+- 团队版：席位制（2 席起购），每席位独立限额（标准版 15k/5h、66k/周；高级版 35k/5h、155k/周）→ `PER_SEAT_KEY`，额度按席位单独限制而非团队共享池；团队 Key 与平台其他 API Key 不通用。
+- **docs 索引（llms.txt）无任何余额/用量查询 API 与模型列表 API** → `fetchPlanStatus` 返回 `UNAVAILABLE`（契约 §6 权威级别）；`/models` 探活为 OpenAI 兼容惯例端点，待真实凭证核验。
+
+### 实现
+
+- `provider-adapters`：`ZhipuGlmAdapter`（3 个静态工厂，adapterId 与签名目录逐一匹配）+ `ZhipuGlmUsageObserver`；路径归一化沿用 `/v4`-suffixed base 剥离 `/v1` 的规则；`fetchPlanStatus` → `UNAVAILABLE`（不发起 HTTP）；团队版 `capabilities.teamPlan=true` 而 `sharedPool=false`（席位独立限额）。
+- `TokenUsageParser`（G3.2 共享解析器）：新增 `prompt_tokens_details.cached_tokens` → cacheRead 回退（智谱官方 usage 形状，也是 OpenAI 标准缓存形状）；对 DeepSeek/Tencent 行为不变（它们不产该字段）。
+- `control-plane-app`：`ProviderClientConfig` 注册 3 个智谱适配器（现共 9 个适配器：DeepSeek 1 + Tencent 5 + Zhipu 3）。
+
+### 测试（本 Goal 新增 18 个）
+
+- `ZhipuGlmAdapterTest`（13）：3 个产品 adapterId/协议与签名目录一致；凭证剥离 + query 重编码；`/v1` 前缀剥离；Anthropic 路径保留；官方端点映射（PAYG `/api/paas/v4`、Coding Plan `/api/coding/paas/v4`、Anthropic `/api/anthropic`）；凭证探活 `/models`；401/403/429/5xx 映射；fetchModels 解析/失败模式；fetchPlanStatus `UNAVAILABLE` 且 0 HTTP；capabilities 三产品差异；observer 绑定。
+- `ZhipuGlmUsageObserverTest`（5）：OpenAI 兼容形状、**智谱文档形状 `prompt_tokens_details.cached_tokens`**、Anthropic 形状、空/畸形容忍、observer 最新值。
+- `ProviderClientConfigTest`（更新）：注册列表含 9 个适配器。
+
+### 风险与边界
+
+- 适配器状态 `IMPLEMENTED`（官方文档核验），`VERIFIED` 需真实智谱凭证联调 → `WAITING_FOR_CREDENTIAL`。
+- `/models` 端点官方文档未收录：真实凭证联调若确认不存在，validateCredential 改用最小推理探针并同步文档。
+- Anthropic 兼容入口官方示例用 `x-api-key`：Bearer 兼容性待真实凭证核验。
+- 上一会话遗留问题本会话修复：`ProviderClientConfig` 只有 import 未注册；usage 测试只覆盖 DeepSeek 形状未覆盖智谱文档形状；javadoc 声称无法核验官方文档（本会话实际核验成功并更新事实表）。
+
+### 验证
+
+- Windows 全量：`./mvnw.cmd -f backend/pom.xml verify -P integration --batch-mode` → **BUILD SUCCESS**（见 Current State 计数）。
 
 ## G3.2 — Tencent TokenHub（第二个参考适配器：团队 Plan、余额与 usage，DONE）
 

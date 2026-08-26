@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.config;
 import com.miqroera.miqrokey.adapters.deepseek.DeepSeekPaygAdapter;
 import com.miqroera.miqrokey.adapters.registry.BuiltInAdapterRegistry;
 import com.miqroera.miqrokey.adapters.tencent.TencentTokenHubAdapter;
+import com.miqroera.miqrokey.adapters.zhipu.ZhipuGlmAdapter;
 import com.miqroera.miqrokey.controlplane.client.ProviderClientFactory;
 import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,6 +37,9 @@ public class ProviderClientConfig {
         registry.register(TencentTokenHubAdapter.enterprisePro(objectMapper));
         registry.register(TencentTokenHubAdapter.enterpriseLite(objectMapper));
         registry.register(TencentTokenHubAdapter.paygApi(objectMapper));
+        registry.register(ZhipuGlmAdapter.codingPlanPersonal(objectMapper));
+        registry.register(ZhipuGlmAdapter.codingPlanTeam(objectMapper));
+        registry.register(ZhipuGlmAdapter.paygApi(objectMapper));
         return registry;
     }
 
