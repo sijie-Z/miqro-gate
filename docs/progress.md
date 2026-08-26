@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G3.4`（MiniMax：个人/团队 Token Plan、按量 API；每成员 Subscription Key、席位与共享 Credits）
-- Goal status: `DONE`（全量验证通过：845 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
+- Current goal: `G3.5`（Kimi / Moonshot：Kimi Code 会员 Key + 按量 API；官方余额查询 API）
+- Goal status: `DONE`（全量验证通过：863 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g3.4-minimax`
+- Branch: `goal/g3.5-kimi-moonshot`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,39 @@
 
 ## Next Goal
 
-- Goal ID: `G3.5`
-- Name: Kimi / Moonshot（Kimi Code 会员 Key + 按量 API；官方余额查询 API）
+- Goal ID: `G3.6`
+- Name: 百度千帆（千帆 Coding Plan、Token Plan 个人版、按量 API）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 3 供应商产品）
+
+## G3.5 — Kimi / Moonshot（Kimi Code 会员 Key + 按量 API，DONE）
+
+### 官方事实核验（2026-08-26，kimi.com / platform.kimi.com）
+
+- Kimi Code：OpenAI base `https://api.kimi.com/coding/v1`（完整 `.../coding/v1/chat/completions`）；Anthropic base `https://api.kimi.com/coding/`（完整 `.../coding/v1/messages`，`/v1/messages` 必须保留）；Key 控制台创建（最多 5 个、仅创建时显示一次）；模型 `k3`/`k3-256k`/`kimi-for-coding`/`kimi-for-coding-highspeed`；每 5 小时约 300–1200 次请求（按档位）、最大并发 30；**会员订阅制 → 无余额 API**。
+- Moonshot 按量：base `https://api.moonshot.cn/v1`；**官方余额 API** `GET /users/me/balance` → `data.available_balance`（现金+代金券，人民币；≤ 0 推理被拒）、`voucher_balance`、`cash_balance`；国内站与国际站 Key 独立（混用 401）。
+- 按量产品为 **G3.x 系列第一个 `OFFICIAL_API` 余额来源**（G3.1 DeepSeek 之后第二个；G3.2–G3.4 三家均为 UNAVAILABLE）。
+
+### 实现
+
+- `provider-adapters`：`MoonshotKimiAdapter`（2 个静态工厂，adapterId 与签名目录逐一匹配）+ `MoonshotKimiUsageObserver`；`ProductConfig.balancePath`（null → UNAVAILABLE 且 0 HTTP；非 null → OFFICIAL_API 余额拉取）；Kimi Code Anthropic base 保留 `/v1/messages`；`capabilities.balance` 按产品区分（PAYG=true / 会员=false）。
+- `control-plane-app`：`ProviderClientConfig` 注册 2 个 Moonshot 适配器（现共 14 个适配器：DeepSeek 1 + Tencent 5 + Zhipu 3 + MiniMax 3 + Moonshot 2）。
+
+### 测试（本 Goal 新增 18 个）
+
+- `MoonshotKimiAdapterTest`（14）：2 个产品 adapterId/协议与签名目录一致；凭证剥离 + query 重编码；官方端点映射（Kimi Code OpenAI/Anthropic、Moonshot）；空 query；凭证探活 `/models`；401/403/429/5xx 映射；fetchModels 解析/失败模式；**fetchPlanStatus 官方余额解析（`available_balance` → PAYG total/remaining，OFFICIAL_API）**、余额失败模式（非 2xx/不可解析）、会员产品 UNAVAILABLE 且 0 HTTP；capabilities 差异；observer 绑定。
+- `MoonshotKimiUsageObserverTest`（4）：OpenAI 形状 + 根 model id、Anthropic 形状、空/畸形容忍、observer 最新值。
+- `ProviderClientConfigTest`（更新）：注册列表含 14 个适配器。
+
+### 风险与边界
+
+- 适配器状态 `IMPLEMENTED`（官方文档核验），`VERIFIED` 需真实 Moonshot/Kimi 凭证联调 → `WAITING_FOR_CREDENTIAL`。
+- 目录 baseUrlTemplate（`api.kimi.com/code/v1`）与官方当前端点（`api.kimi.com/coding/v1`）不一致：录入产品实例时以官方端点为准（provider-catalog §3.5 已注明）。
+- Kimi Code 无正式团队 Plan：首版按个人会员建模，不伪装团队产品（provider-catalog §3.5 已注明）。
+
+### 验证
+
+- 模块验证：`verify -pl provider-adapters,control-plane-app -am` → BUILD SUCCESS；全量 `verify -P integration` → **BUILD SUCCESS**（见 Current State 计数）。
 
 ## G3.4 — MiniMax（个人/团队 Token Plan + 按量 API，DONE）
 
