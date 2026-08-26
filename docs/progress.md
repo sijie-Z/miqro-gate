@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G3.7`（火山引擎方舟：Coding Plan、Agent Plan、按量 API）
-- Goal status: `DONE`（全量验证通过：895 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
+- Current goal: `G3.8`（阿里云百炼 Model Studio：Coding Plan、Token Plan 团队版、按量 API）
+- Goal status: `DONE`（全量验证通过：911 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g3.7-volcengine-ark`
+- Branch: `goal/g3.8-aliyun-bailian`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,41 @@
 
 ## Next Goal
 
-- Goal ID: `G3.8`
-- Name: P1 候选供应商适配（硅基流动 SiliconFlow 等）
+- Goal ID: `G3.9`（运行序号；implementation-plan Phase 3 最后一个 P0 缺口）
+- Name: G3.x 收尾 —— 真实凭证契约测试联调（`VERIFIED`）与模型目录定时刷新接线（ModelCatalogService.refreshProduct → 调度）
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md)（Phase 3 供应商产品）
+- Source: [`implementation-plan.md`](implementation-plan.md)（Phase 3 供应商产品）+ [`provider-catalog.md`](provider-catalog.md) §7.1
+- 注：P1 候选（硅基流动等）不在签名目录中，需发布负责人重签目录后才能注册；8 家 P0 供应商的适配器已全部 IMPLEMENTED（23 个目录产品全数覆盖）。
+
+## G3.8 — 阿里云百炼 Model Studio（Coding Plan + Token Plan 团队版 + 按量 API，DONE）
+
+### 官方事实核验（2026-08-26，help.aliyun.com）
+
+- Coding Plan：OpenAI base `https://coding.dashscope.aliyuncs.com/v1`、Anthropic base `.../apps/anthropic`；专属 Key `sk-sp-xxxxx`（与按量 `sk-xxxxx` 不互通，错用按量计费）；Pro ¥200/月、~6000 请求/5h、45k/周、90k/月；模型 `qwen3.7-plus`/`qwen3.6-plus`/`kimi-k2.5`/`glm-5`/`MiniMax-M2.5`/`qwen3-coder-plus` 等。
+- Token Plan 团队版：OpenAI base `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`、Anthropic `.../apps/anthropic`；团队专属 Key（管理员在组织成员列表管理）；仅文本生成类模型。
+- 按量 API：百炼兼容模式 base `https://dashscope.aliyuncs.com/compatible-mode/v1`。
+- 三个产品均无确认的官方余额/用量 API → `fetchPlanStatus` 返回 `UNAVAILABLE`。
+
+### 实现
+
+- `provider-adapters`：`AliyunBailianAdapter`（3 个静态工厂，adapterId 与签名目录逐一匹配）+ `AliyunBailianUsageObserver`；OpenAI base 以 `/v1` 结尾 → 剥离 `/v1`；Anthropic `/v1/messages` 保留；团队版 `PER_MEMBER_SUBSCRIPTION_KEY` 建模（`teamPlan=true`、`sharedPool=true`，成员 Key 拓扑待真实账号验证）；`fetchPlanStatus` → `UNAVAILABLE`（0 HTTP）。
+- `control-plane-app`：`ProviderClientConfig` 注册 3 个百炼适配器（**现共 23 个适配器 = 签名目录 23 个产品全数覆盖**：Aliyun 3 + Baidu 3 + DeepSeek 1 + MiniMax 3 + Moonshot 2 + Tencent 5 + Volcengine 3 + Zhipu 3）。
+
+### 测试（本 Goal 新增 16 个）
+
+- `AliyunBailianAdapterTest`（12）：3 个产品 adapterId/协议与签名目录一致；凭证剥离 + query 重编码；官方端点映射（Coding/团队版 OpenAI+Anthropic、按量）；空 query；凭证探活 `/models`；401/403/429/5xx 映射；fetchModels 解析/失败模式；fetchPlanStatus `UNAVAILABLE` 且 0 HTTP（三产品）；capabilities 差异；observer 绑定。
+- `AliyunBailianUsageObserverTest`（4）：OpenAI 形状 + 根 model id、Anthropic 形状、空/畸形容忍、observer 最新值。
+- `ProviderClientConfigTest`（更新）：注册列表含 23 个适配器。
+
+### 风险与边界
+
+- 适配器状态 `IMPLEMENTED`（官方文档核验），`VERIFIED` 需真实百炼凭证联调 → `WAITING_FOR_CREDENTIAL`。
+- 团队版成员 Key 拓扑、共享池语义须真实账号验证后才能标记 VERIFIED（provider-catalog §3.2 已注明）。
+- 目录 23 个产品已全数有适配器覆盖（P0 完成）；P1 候选不在目录中，需重签目录。
+
+### 验证
+
+- 模块验证：`verify -pl provider-adapters,control-plane-app -am` → BUILD SUCCESS；全量 `verify -P integration` → **BUILD SUCCESS**（见 Current State 计数）。
 
 ## G3.7 — 火山引擎方舟（Coding Plan + Agent Plan + 按量 API，DONE）
 

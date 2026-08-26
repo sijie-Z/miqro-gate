@@ -74,6 +74,21 @@
 
 团队建模初始采用 `PER_MEMBER_SUBSCRIPTION_KEY`，但必须通过真实账号验证成员 Key、共享池和用量接口后才能标记 VERIFIED。
 
+**实现状态：`IMPLEMENTED`（G3.8，运行序号；implementation-plan 原始 G3.5）** —— 适配器 `aliyun-coding-plan`、`aliyun-token-plan-team`、`aliyun-payg-api` 已落地。官方端点（2026-08-26 核验 help.aliyun.com）与路径归一化：
+
+| 产品 | OpenAI Base URL | Anthropic Base URL | 模型列表路径 | `/v1` 前缀剥离 |
+|---|---|---|---|---|
+| Coding Plan | `https://coding.dashscope.aliyuncs.com/v1` | `https://coding.dashscope.aliyuncs.com/apps/anthropic` | `/models` | 是 |
+| Token Plan 团队版 | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic` | `/models` | 是 |
+| 百炼按量 API | `https://dashscope.aliyuncs.com/compatible-mode/v1` | — | `/models` | 是 |
+
+- 鉴权：`Authorization: Bearer <api-key>`；Coding Plan 专属 Key 形如 `sk-sp-xxxxx`（与按量 `sk-xxxxx` 不互通，错用会按量计费）；团队版专属 Key 由管理员在组织成员列表管理。
+- Coding Plan：Pro 每月 ¥200、~6000 请求/5h、45k/周、90k/月；模型 `qwen3.7-plus`/`qwen3.6-plus`/`kimi-k2.5`/`glm-5`/`MiniMax-M2.5`/`qwen3.5-plus`/`qwen3-max-2026-01-23`/`qwen3-coder-next`/`qwen3-coder-plus`/`glm-4.7`。
+- Token Plan 团队版：团队专属 Key，仅文本生成类模型；团队共享额度 → `teamPlan=true`、`sharedPool=true`（成员 Key 拓扑与共享池语义须真实账号验证）。
+- `fetchPlanStatus` 按契约 §6 返回 `UNAVAILABLE`（三个产品均无确认的官方余额/用量 API，控制台可见）。
+
+`VERIFIED` 需要真实凭证契约测试 → `WAITING_FOR_CREDENTIAL`。
+
 资料：
 
 - [Coding Plan 概述](https://help.aliyun.com/zh/model-studio/coding-plan)
