@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.adapters.deepseek.DeepSeekPaygAdapter;
 import com.miqroera.miqrokey.adapters.registry.BuiltInAdapterRegistry;
+import com.miqroera.miqrokey.adapters.tencent.TencentTokenHubAdapter;
 import com.miqroera.miqrokey.controlplane.client.HttpProviderClient;
 import com.miqroera.miqrokey.controlplane.client.ProviderClientFactory;
 import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
@@ -13,19 +14,23 @@ import java.net.URI;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@DisplayName("ProviderClientConfig (G3.1)")
+@DisplayName("ProviderClientConfig (G3.1/G3.2)")
 class ProviderClientConfigTest {
 
     private final ProviderClientConfig config = new ProviderClientConfig();
 
     @Test
-    @DisplayName("registers the DeepSeek PAYG adapter at compile time")
-    void registryContainsDeepSeekAdapter() {
+    @DisplayName("registers DeepSeek and all Tencent TokenHub adapters at compile time")
+    void registryContainsAllImplementedAdapters() {
         BuiltInAdapterRegistry registry = config.adapterRegistry(new ObjectMapper());
 
-        assertThat(registry.adapterIds()).containsExactly(DeepSeekPaygAdapter.ADAPTER_ID);
+        assertThat(registry.adapterIds()).containsExactly("deepseek-payg-api", "tencent-coding-plan",
+                "tencent-payg-api", "tencent-token-plan-enterprise-lite", "tencent-token-plan-enterprise-pro",
+                "tencent-token-plan-personal");
         assertThat(registry.findById(DeepSeekPaygAdapter.ADAPTER_ID)).isPresent().get()
                 .isInstanceOf(DeepSeekPaygAdapter.class);
+        assertThat(registry.findById("tencent-coding-plan")).isPresent().get()
+                .isInstanceOf(TencentTokenHubAdapter.class);
     }
 
     @Test

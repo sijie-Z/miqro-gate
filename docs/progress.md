@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G3.1`（DeepSeek PAYG 首个完整参考适配器：OpenAI/Anthropic 透明入口、models、官方余额、价格与 usage）
-- Goal status: `DONE`（全量验证通过：779 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
-- Last updated: `2026-08-25 CST`
-- Branch: `goal/g3.1-deepseek-payg`
+- Current goal: `G3.2`（Tencent TokenHub 适配器：Coding Plan、Token Plan 个人版、企业专业/轻享、TokenHub 按量 API；Plan 专属 Base URL、多 Key 共享池建模）
+- Goal status: `DONE`（全量验证通过：810 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
+- Last updated: `2026-08-26 CST`
+- Branch: `goal/g3.2-tencent-tokenhub`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,48 @@
 
 ## Next Goal
 
-- Goal ID: `G3.2`
-- Name: Tencent TokenHub（第二个参考适配器：团队 Plan、余额与 usage）
+- Goal ID: `G3.3`
+- Name: 智谱 GLM（团队 Plan `PER_SEAT_KEY` 建模）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 3 供应商产品）
+
+## G3.2 — Tencent TokenHub（第二个参考适配器：团队 Plan、余额与 usage，DONE）
+
+### 实现
+
+- `provider-adapters`：
+  - 共享 `TokenUsageParser`（G3.2 抽取）：OpenAI 兼容（prompt/completion + `prompt_cache_hit/miss_tokens`）与 Anthropic Messages（input/output + `cache_read/creation_input_tokens`）双形状；解析时优先从响应根/`message.model` 取 model id（修复 OpenAI 真实形状中 `model` 与 `usage` 为兄弟节点的场景），`usage.model` 次之；标准 cache 名优先于 OpenAI 兼容 cache 名；解析失败返回空 Optional 绝不影响请求。
+  - 共享 `TransparentResolve`：入站凭证 Header 剥离 + query map 重编码为原始 query 串（Header 名小写），供 OpenAI/Anthropic 兼容适配器复用。
+  - `TencentTokenHubAdapter`：1 个参数化类 + 5 个静态工厂，adapterId 与签名目录逐一匹配（`tencent-coding-plan`、`tencent-token-plan-personal`、`tencent-token-plan-enterprise-pro`、`tencent-token-plan-enterprise-lite`、`tencent-payg-api`）。
+  - 产品专属 Base URL 路径归一化：`/v3`-suffixed plan base（Coding/Token Plan 个人版/企业版）对 `OPENAI_COMPATIBLE` 请求剥离 `/v1` 前缀（`/v1/chat/completions` → `/chat/completions`）；Anthropic Messages 路径与 TokenHub PAYG root base 保持原样。
+  - `validateCredential`：按产品归一化后的模型列表路径探活（PAYG `/v1/models`，Plan 产品 `/models`）；401/403 → credential rejected，429 → rate limited，其余 HTTP 状态稳定文案。
+  - `fetchModels`：解析 TokenHub 文档形状 `data[].id` + `name`，兼容 `display_name` 变体；未知字段容忍；非数组 data 视为空。
+  - `fetchPlanStatus`：2026-08-25 核验腾讯云 5 个产品均无公开余额/用量 API（仅控制台），按 `provider-adapter-contract.md` §6 权威级别返回 `UNAVAILABLE`，不发起 HTTP 调用，不以本地估算冒充官方值。
+  - `capabilities`：streaming/modelDiscovery/usage=`PROVIDER_RESPONSE`；balance=false（无官方余额 API）；PAYG `plan=false/teamPlan=false`，个人 Plan `plan=true/teamPlan=false`，企业 Plan `plan=true/teamPlan=true` + `PlanSnapshot.sharedPool=true`（多 Key 共享积分/Token 池建模）。
+  - `TencentUsageObserver`：observer 绑定 context + 最新值存储；复用 `TokenUsageParser`。
+- `control-plane-app`：`ProviderClientConfig` 编译期注册 5 个 Tencent TokenHub 适配器 + DeepSeek（重复 adapterId 启动失败）。
+- `deepseek`：
+  - `DeepSeekPaygAdapter.resolve` 与 `DeepSeekUsageObserver` 改复用 `TransparentResolve`/`TokenUsageParser`，行为不变、既有测试保持通过。
+  - 顺带修复 usage 解析在 OpenAI 真实形状中未从响应根取 `model` 的 latent 缺陷（G3.1 只覆盖 `usage.model` 与无 model 两种情况；G3.2 新增根级 `model` 回退）。
+
+### 测试（本 Goal 新增 31 个）
+
+- `TencentTokenHubAdapterTest`（15）：5 个产品 adapterId/协议与签名目录一致；resolve 剥离凭证/保留其他 Header/query 重编码；OpenAI `/v1` 前缀在 plan base 剥离、PAYG 保留；Anthropic Messages 路径保留；凭证探活路径按产品归一化；401/403/429/5xx 状态映射；fetchModels 解析 `name`/`display_name`/未知字段/失败模式；fetchPlanStatus 对所有产品返回 `UNAVAILABLE` 且不发起 HTTP；5 个产品 capabilities 差异；usage observer 绑定。
+- `TencentUsageObserverTest`（5）：OpenAI 兼容 cache 字段、Anthropic cache 字段、根 usage 优先于 message.usage、空/畸形返回空、observer 最新值。
+- `TokenUsageParser` 通过 DeepSeek 与 Tencent 两套测试覆盖。
+- `ProviderClientConfigTest`（更新）：断言编译期注册包含 DeepSeek + 5 个 Tencent 适配器。
+
+### 风险与边界
+
+- 适配器状态 `IMPLEMENTED`（官方文档 2026-08-25 核验），`VERIFIED` 需真实 Tencent 凭证联调 → `WAITING_FOR_CREDENTIAL`（不阻塞 Mock/契约工作）。
+- 签名目录当前为 5 个 Tencent 产品声明的协议族：Coding Plan 含 `ANTHROPIC_MESSAGES`，其余 4 个产品只声明 `[OPENAI_COMPATIBLE, VENDOR_NATIVE]`。官方文档显示 Token Plan 个人版/企业版/TokenHub 按量也提供 Anthropic 兼容入口，但签名 JSON 不可改；Anthropic 入口使用需在目录下一版签名时由发布负责人补 `ANTHROPIC_MESSAGES`。
+- 企业版“独占额度/总上限/TPM/模型限制”均为控制台配置，官方无 API 可查；系统通过 `sharedPool=true` 表达多 Key 共享池，`fetchPlanStatus` 显式 `UNAVAILABLE`，不伪造额度明细。
+
+### 验证
+
+- Windows 全量：`./mvnw.cmd -f backend/pom.xml verify -P integration --batch-mode` → **BUILD SUCCESS**，**810 tests / 0 failures / 0 errors / 5 skipped**（11 模块全绿，含 Testcontainers integration）。
+- 前端：`npm ci`、`npm run lint`、`npm run typecheck`、`npm run test`（16 passed）、`npm run build` 全 PASS。
+- Compose：`docker compose -f deploy/compose.yaml config` PASS。
 
 ## G3.1 — DeepSeek PAYG 首个完整参考适配器（DONE）
 
