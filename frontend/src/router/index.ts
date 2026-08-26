@@ -38,6 +38,30 @@ const router = createRouter({
           meta: { title: 'Profile' },
         },
         {
+          path: 'users',
+          name: 'users',
+          component: () => import('@/views/AdminUsersView.vue'),
+          meta: { title: 'Users' },
+        },
+        {
+          path: 'teams',
+          name: 'teams',
+          component: () => import('@/views/AdminTeamsView.vue'),
+          meta: { title: 'Teams' },
+        },
+        {
+          path: 'projects',
+          name: 'projects',
+          component: () => import('@/views/AdminProjectsView.vue'),
+          meta: { title: 'Projects' },
+        },
+        {
+          path: 'grants',
+          name: 'grants',
+          component: () => import('@/views/AdminGrantsView.vue'),
+          meta: { title: 'Grants' },
+        },
+        {
           path: 'providers',
           name: 'providers',
           component: () => import('@/views/PlaceholderView.vue'),

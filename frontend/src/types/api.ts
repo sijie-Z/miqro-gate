@@ -146,3 +146,66 @@ export interface UsageRecordPage {
   size: number;
   total: number;
 }
+
+// ---- admin organization (G5.2) ----
+
+export type UserStatusValue = 'ACTIVE' | 'DISABLED' | 'LOCKED';
+export type TeamStatusValue = 'ACTIVE' | 'DISABLED';
+export type ProjectStatusValue = 'ACTIVE' | 'DISABLED';
+export type GrantStatusValue = 'ACTIVE' | 'DISABLED' | 'EXPIRED';
+
+export interface AdminUser {
+  id: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  status: UserStatusValue;
+  mustChangePassword: boolean;
+  lastLoginAt?: string;
+  createdAt: string;
+}
+
+export interface UserCreatedResponse {
+  user: AdminUser;
+  temporaryPassword: string;
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  description?: string;
+  status: TeamStatusValue;
+  createdAt: string;
+}
+
+export interface Project {
+  id: string;
+  code: string;
+  name: string;
+  status: ProjectStatusValue;
+  projectTag?: string;
+  createdAt: string;
+}
+
+export interface MemberView {
+  userId: string;
+  username: string;
+  displayName?: string;
+  createdAt: string;
+}
+
+export interface Grant {
+  id: string;
+  projectId: string;
+  providerProductId: string;
+  upstreamCredentialId: string;
+  status: GrantStatusValue;
+  createdAt: string;
+}
+
+export interface CredentialSummary {
+  id: string;
+  name: string;
+  subscriptionId: string;
+  status: string;
+}

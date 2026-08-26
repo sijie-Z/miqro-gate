@@ -21,6 +21,12 @@ const ADMIN_USER = {
   mustChangePassword: false,
 };
 
+const ADMIN_USERS = [
+  { id: '0190-0000-0000-0010', username: 'root', displayName: 'Root Admin', role: 'SYSTEM_ADMIN', status: 'ACTIVE', mustChangePassword: false, createdAt: '2026-07-01T00:00:00Z' },
+  { id: '0190-0000-0000-0011', username: 'alice', displayName: 'Alice', role: 'USER', status: 'ACTIVE', mustChangePassword: true, createdAt: '2026-08-01T00:00:00Z' },
+  { id: '0190-0000-0000-0012', username: 'bob', displayName: 'Bob', role: 'USER', status: 'DISABLED', mustChangePassword: false, createdAt: '2026-08-10T00:00:00Z' },
+];
+
 const KEYS = [
   {
     id: '0190-0000-0000-0002',
@@ -76,6 +82,9 @@ async function mockApi(page: Page, admin = false) {
       body: JSON.stringify({ projects: [], grants: [], purposes: [] }),
     }),
   );
+  await page.route('**/api/v1/admin/users', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ADMIN_USERS) }),
+  );
 }
 
 for (const viewport of VIEWPORTS) {
@@ -115,6 +124,17 @@ for (const viewport of VIEWPORTS) {
     });
   });
 }
+
+test('admin users page baseline at 1440x900', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/users');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('users-table')).toBeVisible();
+  await expect(page.getByTestId('users-table')).toContainText('alice');
+  await expect(page.locator('.mk-status--success').first()).toHaveText('Active');
+  await page.screenshot({ path: 'test-results/baseline/admin-users-1440x900.png', fullPage: true });
+});
 
 test('key actions: rotate and revoke flows render from the kebab menu', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
