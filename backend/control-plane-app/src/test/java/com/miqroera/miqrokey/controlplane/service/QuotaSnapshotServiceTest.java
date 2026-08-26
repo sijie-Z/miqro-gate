@@ -323,15 +323,14 @@ class QuotaSnapshotServiceTest {
         // Stub: one subscription whose refresh throws inside the cycle; the
         // scheduler must log and continue (no exception escapes).
         java.util.UUID bad = java.util.UUID.randomUUID();
-        org.mockito.Mockito.when(subscriptionRepository.findAllByTenantId(any())).thenReturn(List.of(
-                new com.miqroera.miqrokey.domain.model.UpstreamSubscription(bad,
-                        java.util.UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                        java.util.UUID.randomUUID(), "bad", null,
-                        com.miqroera.miqrokey.domain.model.BillingMode.FIXED_SUBSCRIPTION,
+        org.mockito.Mockito.when(subscriptionRepository.findAllByTenantId(any()))
+                .thenReturn(List.of(new com.miqroera.miqrokey.domain.model.UpstreamSubscription(bad,
+                        java.util.UUID.fromString("00000000-0000-0000-0000-000000000001"), java.util.UUID.randomUUID(),
+                        "bad", null, com.miqroera.miqrokey.domain.model.BillingMode.FIXED_SUBSCRIPTION,
                         com.miqroera.miqrokey.domain.model.PlanScope.NONE, null, null, null, null, null, null, null,
                         com.miqroera.miqrokey.domain.model.SubscriptionStatus.ACTIVE, null,
-                        com.miqroera.miqrokey.domain.model.StatusSource.MANUAL_UNKNOWN, 0,
-                        java.time.Instant.now(), java.time.Instant.now())));
+                        com.miqroera.miqrokey.domain.model.StatusSource.MANUAL_UNKNOWN, 0, java.time.Instant.now(),
+                        java.time.Instant.now())));
         when(subscriptionRepository.findById(bad)).thenThrow(new IllegalStateException("boom"));
 
         service.refreshAllScheduled();

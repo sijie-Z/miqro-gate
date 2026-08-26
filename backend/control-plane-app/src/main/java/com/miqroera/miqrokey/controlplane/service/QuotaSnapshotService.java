@@ -112,9 +112,8 @@ public class QuotaSnapshotService {
     }
 
     /**
-     * Periodic refresh: every subscription gets its snapshots refreshed on a
-     * fixed delay. Failures are logged per subscription, never aborting the
-     * cycle.
+     * Periodic refresh: every subscription gets its snapshots refreshed on a fixed
+     * delay. Failures are logged per subscription, never aborting the cycle.
      */
     @Scheduled(fixedDelayString = "${miqrokey.quota.refresh-interval-ms:900000}")
     public void refreshAllScheduled() {
@@ -128,8 +127,8 @@ public class QuotaSnapshotService {
     }
 
     /** Seed tenant of the single-tenant deployment. */
-    private static final java.util.UUID SEED_TENANT_ID = java.util.UUID.fromString(
-            "00000000-0000-0000-0000-000000000001");
+    private static final java.util.UUID SEED_TENANT_ID = java.util.UUID
+            .fromString("00000000-0000-0000-0000-000000000001");
 
     /**
      * Refreshes quota snapshots for one subscription: per-credential official fetch
