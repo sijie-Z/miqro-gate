@@ -402,7 +402,7 @@
 
 - 模块：`verify -pl control-plane-app -am` → BUILD SUCCESS；全量 `verify -P integration` → **BUILD SUCCESS**，**926 tests / 0 failures / 0 errors / 5 skipped**（911 + 15 新增；含 GlobalExceptionHandler 类型不匹配修复与集成测试全绿）。
 
-## G3.8 — 阿里云百炼 Model Studio（Coding Plan + Token Plan 团队版 + 按量 API，DONE）
+## G3.5 — 阿里云百炼 Model Studio（Coding Plan + Token Plan 团队版 + 按量 API，DONE）
 
 ### 官方事实核验（2026-08-26，help.aliyun.com）
 
@@ -432,7 +432,7 @@
 
 - 模块验证：`verify -pl provider-adapters,control-plane-app -am` → BUILD SUCCESS；全量 `verify -P integration` → **BUILD SUCCESS**（见 Current State 计数）。
 
-## G3.7 — 火山引擎方舟（Coding Plan + Agent Plan + 按量 API，DONE）
+## G3.8 — 火山引擎方舟（Coding Plan + Agent Plan + 按量 API，DONE）
 
 ### 官方事实核验（2026-08-26，volcengine.com）
 
@@ -462,7 +462,7 @@
 
 - 模块验证：`verify -pl provider-adapters,control-plane-app -am` → BUILD SUCCESS；全量 `verify -P integration` → **BUILD SUCCESS**（见 Current State 计数）。
 
-## G3.6 — 百度千帆（Coding Plan + Token Plan 个人版 + 按量 API，DONE）
+## G3.7 — 百度千帆（Coding Plan + Token Plan 个人版 + 按量 API，DONE）
 
 ### 官方事实核验（2026-08-26，cloud.baidu.com）
 
@@ -492,7 +492,7 @@
 
 - 模块验证：`verify -pl provider-adapters,control-plane-app -am` → BUILD SUCCESS；全量 `verify -P integration` → **BUILD SUCCESS**（见 Current State 计数）。
 
-## G3.5 — Kimi / Moonshot（Kimi Code 会员 Key + 按量 API，DONE）
+## G3.6 — Kimi / Moonshot（Kimi Code 会员 Key + 按量 API，DONE）
 
 ### 官方事实核验（2026-08-26，kimi.com / platform.kimi.com）
 
