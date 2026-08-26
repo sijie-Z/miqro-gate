@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G4.2`（Quota snapshots and team plan views：官方 API/本地估算/不可用三种来源；团队共享池、席位、成员 Key、独占额度）
-- Goal status: `DONE`（全量验证通过：936 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
+- Current goal: `G4.3`（Pricing snapshots and cost allocation：PAYG 估算、Plan 固定成本、按 Token 权重的项目摊销和算法版本）
+- Goal status: `DONE`（全量验证通过：944 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g4.2-quota-snapshots`
+- Branch: `goal/g4.3-cost-allocation`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,34 @@
 
 ## Next Goal
 
-- Goal ID: `G4.3`
-- Name: Pricing snapshots and cost allocation（PAYG 估算、Plan 固定成本、按 Token 权重的项目摊销和算法版本）
+- Goal ID: `G4.4`
+- Name: Raw export and manual deletion（异步 CSV/JSONL gzip、SHA-256、临时下载、删除预览/二次确认/永久审计）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 4 统计、Plan 和告警）
+
+## G4.3 — Pricing snapshots and cost allocation（DONE）
+
+### 实现
+
+- `V10__cost_allocations.sql`：按订阅周期/项目对象的成本分摊表；唯一键 `(subscription_id, period_start, period_end, target_type, target_id, algorithm_version)` 使重跑幂等、算法升级另起版本。
+- `domain`：`CostAllocation` + `CostAllocationTargetType` + `CostAllocationRepository`（幂等 upsert、按周期查询）。
+- `control-plane`：`CostAllocationService` —— 管理端触发分摊：本地 usage（按订阅凭证归属，输入+输出 token，按产品/模型计价）→ 每百万 token × 最新价格快照 = usageCost；非 PAYG 订阅价按窗口/周期天数比例折算 fixedCost，按项目 Token 权重分摊；`allocatedAmount = usageCost + fixedShare`；无用量不产出行。
+- `AdminCostAllocationController`：`GET/POST /api/v1/admin/subscriptions/{id}/cost-allocation[/allocate]?from&to`（SYSTEM_ADMIN only）。
+
+### 测试（本 Goal 新增 8 个）
+
+- `CostAllocationServiceTest`（5，单元）：按模型计价 + Token 权重固定分摊（75/25 与 0.002/0.0005 断言）、无用量空结果、窗口短于订阅周期的价格折算（50%）、跨租户 404、周期校验。
+- `CostAllocationApiIntegrationTest`（3，Testcontainers）：真实 Postgres 全链路分摊（两个项目、固定成本 100 → 75/25、usageCost 0.002）、无用量空结果、404/401/周期校验。
+
+### 风险与边界
+
+- 价格取分配时刻最新快照；逐事件价格快照为 usage_event 延后列（database-schema §6），价格变更后重跑同版本会覆盖历史——文档已注明。
+- 分摊只覆盖经 Gateway 且归属该订阅凭证的流量；固定成本按窗口天数折算（非精确到小时）。
+- 用户维度（target_type=USER）预留，当前只产出 PROJECT 行。
+
+### 验证
+
+- 全量 `verify -P integration` → **BUILD SUCCESS**，**944 tests / 0 failures / 0 errors / 5 skipped**（936 + 8 新增）。
 
 ## G4.2 — Quota snapshots and team plan views（DONE）
 

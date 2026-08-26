@@ -389,6 +389,24 @@
 - 刷新为同步管理操作；每次刷新追加新行，历史保留。解密后的 Secret 只存在于调用内（凭证作用域 `ProviderClient`），用后清零。
 - 错误码：`SUBSCRIPTION_NOT_FOUND`（404，统一防枚举）。
 
+### 5.4 成本分摊（G4.3）
+
+按订阅周期把用量成本与 Plan 固定成本分摊到项目：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/subscriptions/{subscriptionId}/cost-allocation?from&to` | 已持久化的分摊行（不重算） |
+| `POST /api/v1/admin/subscriptions/{subscriptionId}/cost-allocation/allocate?from&to` | 计算并持久化分摊，返回行 |
+
+行字段：`targetType`（当前 `PROJECT`）、`targetId`、`fixedCost`（订阅价按窗口/周期天数比例折算）、`usageCost`（本地 usage × 最新价格快照，每百万 token 单价）、`weightTokens`、`allocatedAmount`、`currency`、`algorithmVersion`（当前 `1`）、`generatedAt`。
+
+语义：
+
+- 固定成本仅 Plan 订阅（非 PAYG）有值，按各项目 Token 权重分摊；无用量时不产出任何行。
+- 重复分配同一周期 = 幂等覆盖（唯一键含算法版本）；算法升级另起版本历史。
+- 价格取分配时刻最新快照（逐事件价格快照为延后列）；`currency` 取订阅币种（缺省 USD）。
+- 错误码：`SUBSCRIPTION_NOT_FOUND`（404）、`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400，窗口 ≤ 93 天）。
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：
