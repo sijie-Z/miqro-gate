@@ -100,6 +100,7 @@ async function handleLogout() {
         v-if="mobile"
         link
         class="menu-toggle"
+        aria-label="打开导航"
         data-testid="nav-toggle"
         @click="drawerOpen = true"
       >
@@ -108,7 +109,7 @@ async function handleLogout() {
       <div class="brand">MiQroKey</div>
       <div class="spacer" />
       <el-dropdown trigger="click">
-        <span class="user-menu" data-testid="user-menu">
+        <span class="user-menu" role="button" aria-haspopup="menu" data-testid="user-menu">
           {{ auth.user?.displayName ?? auth.user?.username }}
           <el-icon><SwitchButton /></el-icon>
         </span>
