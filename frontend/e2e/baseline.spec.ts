@@ -219,6 +219,32 @@ test('admin providers page baseline at 1440x900', async ({ page }) => {
   });
 });
 
+test('regular users are redirected away from admin routes (G5.5)', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, false); // 401 on /auth/me -> redirected to login
+  await page.goto('/app/users');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('login-submit')).toBeVisible();
+});
+
+test('a visible focus ring exists for keyboard navigation (G5.5)', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/keys');
+  await page.waitForLoadState('networkidle');
+  const outline = await page.evaluate(() => {
+    const sheet = [...document.styleSheets].flatMap((s) => {
+      try {
+        return [...s.cssRules];
+      } catch {
+        return [];
+      }
+    });
+    return sheet.some((r) => /:focus-visible/.test(r.selectorText ?? ''));
+  });
+  expect(outline).toBe(true);
+});
+
 test('key actions: rotate and revoke flows render from the kebab menu', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockApi(page, true);

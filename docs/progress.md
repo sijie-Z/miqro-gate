@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G5.4`（Admin usage, export and alerts portal：统计、原始流水、导出、删除、Webhook、审计）
+- Current goal: `G5.5`（UI security and accessibility：权限路由、敏感信息防缓存、键盘操作、错误状态、中文文案和基础可访问性）
 - Goal status: `DONE`
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g5.4-admin-usage-frontend`
+- Branch: `goal/g5.5-ui-security-a11y`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,27 @@
 
 ## Next Goal
 
-- Goal ID: `G5.5`
-- Name: UI security and accessibility（权限路由、敏感信息防缓存、键盘操作、错误状态、中文文案和基础可访问性）
+- Goal ID: `G6.1`
+- Name: Observability and optional monitoring profile（Prometheus 指标、JSON 日志、Grafana Dashboard、健康检查和高基数保护）
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md)（Phase 5 门户）
+- Source: [`implementation-plan.md`](implementation-plan.md)（Phase 6 交付；**Phase 5 全部完成**）
+
+## G5.5 — UI security and accessibility（DONE）
+
+### 实现
+
+- **权限路由**：所有管理路由 `meta.requiresAdmin`；router guard 对非 SYSTEM_ADMIN 重定向到 `/app/keys`（不渲染 403 页）。
+- **敏感信息防缓存**：`index.html` 加 `Cache-Control: no-store` meta，敏感视图不进 bfcache。
+- **键盘操作**：全局 `:focus-visible` 焦点环（accent 2px）；导航项/页脚链接适配。
+- **可访问性**：移动端导航按钮 `aria-label`、用户菜单 `role="button"` + `aria-haspopup`。
+- **错误状态**：既有（错误 alert 带 requestId + 表单就近错误）。
+- 中文文案与业务名词：既有页面已按 spec 使用明确业务名词。
+
+### 测试（e2e +2）
+
+- 普通用户访问管理路由 → 重定向到登录（mock 401 场景）。
+- 渲染页存在 `:focus-visible` 焦点环规则。
+- Playwright **14/14 通过**；lint/typecheck/21 vitest/build 全 PASS。
 
 ## G5.4 — Admin usage, export and alerts portal（DONE）
 

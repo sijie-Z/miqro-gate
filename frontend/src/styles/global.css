@@ -138,3 +138,14 @@ td.mk-col-num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* Keyboard accessibility (G5.5): a visible focus ring everywhere. */
+:focus-visible {
+  outline: 2px solid var(--miqrokey-accent);
+  outline-offset: 1px;
+}
+
+.nav-item:focus-visible,
+.mk-shell-footer a:focus-visible {
+  outline-offset: -2px;
+}

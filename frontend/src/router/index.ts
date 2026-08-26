@@ -1,6 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 
+function adminMeta(title: string) {
+  return { title, requiresAdmin: true };
+}
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -29,7 +33,7 @@ const router = createRouter({
           path: 'usage',
           name: 'usage',
           component: () => import('@/views/UsageView.vue'),
-          meta: { title: 'Usage' },
+          meta: adminMeta('Usage'),
         },
         {
           path: 'profile',
@@ -41,79 +45,79 @@ const router = createRouter({
           path: 'users',
           name: 'users',
           component: () => import('@/views/AdminUsersView.vue'),
-          meta: { title: 'Users' },
+          meta: adminMeta('Users'),
         },
         {
           path: 'teams',
           name: 'teams',
           component: () => import('@/views/AdminTeamsView.vue'),
-          meta: { title: 'Teams' },
+          meta: adminMeta('Teams'),
         },
         {
           path: 'projects',
           name: 'projects',
           component: () => import('@/views/AdminProjectsView.vue'),
-          meta: { title: 'Projects' },
+          meta: adminMeta('Projects'),
         },
         {
           path: 'grants',
           name: 'grants',
           component: () => import('@/views/AdminGrantsView.vue'),
-          meta: { title: 'Grants' },
+          meta: adminMeta('Grants'),
         },
         {
           path: 'providers',
           name: 'providers',
           component: () => import('@/views/AdminProvidersView.vue'),
-          meta: { title: 'Providers' },
+          meta: adminMeta('Providers'),
         },
         {
           path: 'plans',
           name: 'plans',
           component: () => import('@/views/AdminPlansView.vue'),
-          meta: { title: 'Plans' },
+          meta: adminMeta('Plans'),
         },
         {
           path: 'usage',
           name: 'admin-usage',
           component: () => import('@/views/AdminUsageView.vue'),
-          meta: { title: 'Usage' },
+          meta: adminMeta('Usage'),
         },
         {
           path: 'exports',
           name: 'exports',
           component: () => import('@/views/AdminExportsView.vue'),
-          meta: { title: 'Exports' },
+          meta: adminMeta('Exports'),
         },
         {
           path: 'deletions',
           name: 'deletions',
           component: () => import('@/views/AdminDeletionsView.vue'),
-          meta: { title: 'Usage Deletions' },
+          meta: adminMeta('Usage Deletions'),
         },
         {
           path: 'webhooks',
           name: 'webhooks',
           component: () => import('@/views/AdminWebhooksView.vue'),
-          meta: { title: 'Webhooks' },
+          meta: adminMeta('Webhooks'),
         },
         {
           path: 'alert-rules',
           name: 'alert-rules',
           component: () => import('@/views/AdminAlertRulesView.vue'),
-          meta: { title: 'Alert Rules' },
+          meta: adminMeta('Alert Rules'),
         },
         {
           path: 'audit',
           name: 'audit',
           component: () => import('@/views/AdminAuditView.vue'),
-          meta: { title: 'Audit' },
+          meta: adminMeta('Audit'),
         },
         {
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/PlaceholderView.vue'),
-          meta: { title: 'Settings' },
+          meta: adminMeta('Settings'),
         },
       ],
     },
@@ -148,6 +152,12 @@ router.beforeEach(async (to) => {
   // Password must be changed before anything else.
   if (auth.mustChangePassword && to.name !== 'profile') {
     return { name: 'profile' };
+  }
+
+  // Admin routes are SYSTEM_ADMIN-only; regular users are redirected to the
+  // keys page (never to the admin route, which would render a 403 page).
+  if (to.meta.requiresAdmin && auth.user?.role !== 'SYSTEM_ADMIN') {
+    return { name: 'keys' };
   }
 
   return true;
