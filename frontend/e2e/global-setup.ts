@@ -9,7 +9,9 @@ export default async function globalSetup(): Promise<void> {
   const browser = await chromium.launch({ channel: 'chromium' });
   try {
     const page = await browser.newPage();
-    await page.goto('http://localhost:5173/login', { waitUntil: 'networkidle' }).catch(() => undefined);
+    await page
+      .goto('http://localhost:5173/login', { waitUntil: 'networkidle' })
+      .catch(() => undefined);
   } finally {
     await browser.close();
   }

@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G5.2`（Admin organization portal：账号、团队、项目、成员、Grant 和模型授权）
+- Current goal: `G5.3`（Admin provider and Plan portal：产品预设、Subscription、Seat、Credential、验证、轮换、余额来源）
 - Goal status: `DONE`（后端 API + 前端页面）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g5.2-admin-org-frontend`
+- Branch: `goal/g5.3-admin-provider-frontend`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,29 @@
 
 ## Next Goal
 
-- Goal ID: `G5.3`
-- Name: Admin provider and Plan portal（产品预设、Subscription、Seat、Credential、验证、轮换、余额来源）
+- Goal ID: `G5.4`
+- Name: Admin usage, export and alerts portal（统计、原始流水、导出、删除、Webhook、审计）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 5 门户）
+
+## G5.3 — Admin provider and Plan portal（DONE，后端 + 前端）
+
+### 后端（PR #49，e42308d）
+
+- `AdminProviderService` + `AdminProviderProductController` + `AdminSubscriptionController`：产品实例列表（供应商/协议/Base URL host/实现状态/余额权威级别）、订阅 CRUD、席位创建/分配/释放
+- 审计事件（SUBSCRIPTION_*/SEAT_*，走 AuditService 哈希链）；SYSTEM_ADMIN-only；api-contract §5.0b；2 个 Testcontainers 集成测试
+
+### 前端（本交付）
+
+- `AdminProvidersView`：产品表格（供应商/产品/productCode/协议/Base URL host/实现状态 mk-status/余额来源标签）
+- `AdminPlansView`：订阅表格（产品/计费/Plan 形态/价格/状态）+ 创建表单（产品/计费/Plan 形态/价格/配额）+ 席位 drawer（分配/释放）
+- 路由替换 providers/plans 占位；e2e providers baseline 截图
+- **e2e 基础设施根治**：webServer 改用 `vite preview`（生产构建）——不再有 dev 模块图竞态，"预加载桥接不可用"问题结构性消除；审美检查改为生产 bundle 下只审计自有设计规则（`:root`/`.mk-*`/`--miqrokey*`）
+
+### 验证
+
+- 后端全量 `verify -P integration`：955 tests / 0 failures / 0 errors / 5 skipped
+- 前端 lint/typecheck/21 vitest/build 全 PASS；Playwright 12/12（10 张 baseline 截图）
 
 ## G5.2 — Admin organization portal（DONE，后端 + 前端）
 

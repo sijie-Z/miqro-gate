@@ -12,8 +12,12 @@ import type {
   LoginResponse,
   MeGrantsResponse,
   MemberView,
+  Provider,
+  ProviderProductView,
+  SeatView,
   Project,
   Team,
+  SubscriptionView,
   UsageGroupBy,
   UsageRecordPage,
   UsageSummary,
@@ -188,4 +192,50 @@ export function disableGrant(grantId: string): Promise<void> {
 
 export function listCredentials(): Promise<CredentialSummary[]> {
   return get<CredentialSummary[]>('/api/v1/admin/credentials');
+}
+
+// ---- admin provider/Plan (G5.3) ----
+
+export function listProviderProducts(): Promise<ProviderProductView[]> {
+  return get<ProviderProductView[]>('/api/v1/admin/provider-products');
+}
+
+export function listProviders(): Promise<Provider[]> {
+  return get<Provider[]>('/api/v1/admin/provider-products/providers');
+}
+
+export function listSubscriptions(): Promise<SubscriptionView[]> {
+  return get<SubscriptionView[]>('/api/v1/admin/subscriptions');
+}
+
+export function createSubscription(body: {
+  providerProductId: string;
+  name: string;
+  billingMode: string;
+  planScope: string;
+  subscriptionPrice?: number;
+  currency?: string;
+  quotaTotal?: number;
+  quotaUnit?: string;
+}): Promise<SubscriptionView> {
+  return post<SubscriptionView>('/api/v1/admin/subscriptions', body);
+}
+
+export function listSeats(subscriptionId: string): Promise<SeatView[]> {
+  return get<SeatView[]>(`/api/v1/admin/subscriptions/${subscriptionId}/seats`);
+}
+
+export function createSeat(
+  subscriptionId: string,
+  body: { externalSeatRef?: string; displayName?: string; assignedUserId?: string },
+): Promise<SeatView> {
+  return post<SeatView>(`/api/v1/admin/subscriptions/${subscriptionId}/seats`, body);
+}
+
+export function updateSeat(
+  subscriptionId: string,
+  seatId: string,
+  body: { assignedUserId?: string; status?: string; displayName?: string },
+): Promise<SeatView> {
+  return patch<SeatView>(`/api/v1/admin/subscriptions/${subscriptionId}/seats/${seatId}`, body);
 }

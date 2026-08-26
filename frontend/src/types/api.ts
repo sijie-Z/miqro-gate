@@ -209,3 +209,50 @@ export interface CredentialSummary {
   subscriptionId: string;
   status: string;
 }
+
+export interface ProviderProductView {
+  id: string;
+  providerSlug: string;
+  providerName: string;
+  productCode: string;
+  displayName: string;
+  billingMode: string;
+  protocols: string;
+  baseUrlHost: string;
+  implementationStatus: string;
+  balanceAuthority: string;
+}
+
+export interface Provider {
+  id: string;
+  slug: string;
+  displayName: string;
+  status: string;
+}
+
+export interface SubscriptionView {
+  id: string;
+  providerProductId: string;
+  productName: string;
+  name: string;
+  billingMode: string;
+  planScope: string;
+  subscriptionPrice?: number;
+  currency?: string;
+  quotaTotal?: number;
+  quotaUnit?: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface SeatView {
+  id: string;
+  subscriptionId: string;
+  externalSeatRef?: string;
+  assignedUserId?: string;
+  username?: string;
+  userDisplay?: string;
+  displayName?: string;
+  seatStatus: string;
+  createdAt: string;
+}

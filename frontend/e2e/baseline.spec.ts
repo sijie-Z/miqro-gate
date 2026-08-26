@@ -22,9 +22,33 @@ const ADMIN_USER = {
 };
 
 const ADMIN_USERS = [
-  { id: '0190-0000-0000-0010', username: 'root', displayName: 'Root Admin', role: 'SYSTEM_ADMIN', status: 'ACTIVE', mustChangePassword: false, createdAt: '2026-07-01T00:00:00Z' },
-  { id: '0190-0000-0000-0011', username: 'alice', displayName: 'Alice', role: 'USER', status: 'ACTIVE', mustChangePassword: true, createdAt: '2026-08-01T00:00:00Z' },
-  { id: '0190-0000-0000-0012', username: 'bob', displayName: 'Bob', role: 'USER', status: 'DISABLED', mustChangePassword: false, createdAt: '2026-08-10T00:00:00Z' },
+  {
+    id: '0190-0000-0000-0010',
+    username: 'root',
+    displayName: 'Root Admin',
+    role: 'SYSTEM_ADMIN',
+    status: 'ACTIVE',
+    mustChangePassword: false,
+    createdAt: '2026-07-01T00:00:00Z',
+  },
+  {
+    id: '0190-0000-0000-0011',
+    username: 'alice',
+    displayName: 'Alice',
+    role: 'USER',
+    status: 'ACTIVE',
+    mustChangePassword: true,
+    createdAt: '2026-08-01T00:00:00Z',
+  },
+  {
+    id: '0190-0000-0000-0012',
+    username: 'bob',
+    displayName: 'Bob',
+    role: 'USER',
+    status: 'DISABLED',
+    mustChangePassword: false,
+    createdAt: '2026-08-10T00:00:00Z',
+  },
 ];
 
 const KEYS = [
@@ -83,7 +107,53 @@ async function mockApi(page: Page, admin = false) {
     }),
   );
   await page.route('**/api/v1/admin/users', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ADMIN_USERS) }),
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(ADMIN_USERS),
+    }),
+  );
+  await page.route('**/api/v1/admin/provider-products', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0020',
+          providerSlug: 'deepseek',
+          providerName: 'DeepSeek',
+          productCode: 'deepseek-payg-api',
+          displayName: 'DeepSeek PAYG',
+          billingMode: 'PAYG',
+          protocols: '["messages"]',
+          baseUrlHost: 'api.deepseek.com',
+          implementationStatus: 'VERIFIED',
+          balanceAuthority: 'OFFICIAL_API',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/subscriptions', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0021',
+          providerProductId: '0190-0000-0000-0020',
+          productName: 'DeepSeek PAYG',
+          name: 'Main',
+          billingMode: 'PAYG',
+          planScope: 'PERSONAL',
+          subscriptionPrice: null,
+          currency: 'USD',
+          quotaTotal: null,
+          quotaUnit: null,
+          status: 'ACTIVE',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+      ]),
+    }),
   );
 }
 
@@ -136,6 +206,16 @@ test('admin users page baseline at 1440x900', async ({ page }) => {
   await page.screenshot({ path: 'test-results/baseline/admin-users-1440x900.png', fullPage: true });
 });
 
+test('admin providers page baseline at 1440x900', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/providers');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('products-table')).toBeVisible();
+  await expect(page.getByTestId('products-table')).toContainText('api.deepseek.com');
+  await page.screenshot({ path: 'test-results/baseline/admin-providers-1440x900.png', fullPage: true });
+});
+
 test('key actions: rotate and revoke flows render from the kebab menu', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockApi(page, true);
@@ -160,20 +240,22 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
   await page.waitForLoadState('networkidle');
 
   const violations = await page.evaluate(() => {
-    // Audit only the application's own stylesheets (same-origin links);
-    // vendor and browser-extension sheets are not part of the design tokens
+    // In the production bundle all CSS is one same-origin file, so the audit
+    // scopes to the application's own design rules: :root (tokens) and
+    // .mk-* selectors. Element Plus vendor rules are not part of the tokens
     // the spec governs.
     const sheet = [...document.styleSheets].flatMap((s) => {
       try {
-        if (!s.href || !s.href.startsWith(window.location.origin)) {
-          return [];
-        }
         return [...s.cssRules];
       } catch {
         return [];
       }
     });
-    const text = sheet.map((r) => r.cssText).join('\n');
+    const own = sheet.filter((r) => {
+      const selector = (r as CSSStyleRule).selectorText ?? '';
+      return selector === ':root' || selector.includes('.mk-') || selector.includes('--miqrokey');
+    });
+    const text = own.map((r) => r.cssText).join('\n');
     return {
       gradients: /linear-gradient|radial-gradient|conic-gradient/.test(text),
       purple: /#7c3aed|#8b5cf6|#a855f7|#6d28d9|#9333ea|purple/i.test(text),

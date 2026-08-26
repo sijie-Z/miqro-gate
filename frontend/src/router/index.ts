@@ -64,13 +64,13 @@ const router = createRouter({
         {
           path: 'providers',
           name: 'providers',
-          component: () => import('@/views/PlaceholderView.vue'),
+          component: () => import('@/views/AdminProvidersView.vue'),
           meta: { title: 'Providers' },
         },
         {
           path: 'plans',
           name: 'plans',
-          component: () => import('@/views/PlaceholderView.vue'),
+          component: () => import('@/views/AdminPlansView.vue'),
           meta: { title: 'Plans' },
         },
         {
