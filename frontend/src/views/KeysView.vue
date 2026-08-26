@@ -40,12 +40,26 @@ const statusLabel: Record<string, string> = {
   DISABLED: 'Disabled',
 };
 
-const statusType: Record<string, 'success' | 'warning' | 'info' | 'danger'> = {
-  ACTIVE: 'success',
-  ROTATING: 'warning',
-  REVOKED: 'info',
-  DISABLED: 'danger',
-};
+function statusClass(status: string): string {
+  switch (status) {
+    case 'ACTIVE':
+      return 'mk-status--success';
+    case 'ROTATING':
+      return 'mk-status--warning';
+    case 'REVOKED':
+      return 'mk-status--neutral';
+    default:
+      return 'mk-status--danger';
+  }
+}
+
+async function handleCommand(command: string, row: VirtualKeyView) {
+  if (command === 'rotate') {
+    await rotateKey(row);
+  } else if (command === 'revoke') {
+    await revokeKey(row);
+  }
+}
 
 const projectsForGrant = computed(() => {
   const list = grants.value?.projects ?? [];
@@ -329,11 +343,11 @@ function formatTime(iso?: string): string {
           <div class="mk-mono model-list">{{ row.modelIds.join(', ') }}</div>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="110">
+      <el-table-column label="状态" width="120">
         <template #default="{ row }">
-          <el-tag :type="statusType[row.status] ?? 'info'" size="small">{{
+          <span class="mk-status" :class="statusClass(row.status)">{{
             statusLabel[row.status] ?? row.status
-          }}</el-tag>
+          }}</span>
         </template>
       </el-table-column>
       <el-table-column label="创建时间" width="170">
@@ -342,26 +356,30 @@ function formatTime(iso?: string): string {
       <el-table-column label="最近使用" width="170">
         <template #default="{ row }">{{ formatTime(row.lastUsedAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="160" fixed="right">
+      <el-table-column label="操作" width="90" fixed="right">
         <template #default="{ row }">
-          <el-button
-            link
-            type="primary"
-            :disabled="row.status !== 'ACTIVE'"
-            data-testid="key-rotate"
-            @click="rotateKey(row)"
-          >
-            轮换
-          </el-button>
-          <el-button
-            link
-            type="danger"
-            :disabled="row.status !== 'ACTIVE' && row.status !== 'ROTATING'"
-            data-testid="key-revoke"
-            @click="revokeKey(row)"
-          >
-            吊销
-          </el-button>
+          <el-dropdown trigger="click" @command="(cmd: string) => handleCommand(cmd, row)">
+            <el-button link data-testid="key-actions">操作</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item
+                  command="rotate"
+                  :disabled="row.status !== 'ACTIVE'"
+                  data-testid="key-rotate"
+                >
+                  轮换
+                </el-dropdown-item>
+                <el-dropdown-item
+                  divided
+                  command="revoke"
+                  :disabled="row.status !== 'ACTIVE' && row.status !== 'ROTATING'"
+                  data-testid="key-revoke"
+                >
+                  吊销
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </template>
       </el-table-column>
       <template #empty>

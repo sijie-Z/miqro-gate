@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
+import PageHeader from '@/components/PageHeader.vue';
 import { ApiError } from '@/api/http';
 import type { UsageGroupBy, UsageSummary, UsageRecordPage } from '@/types/api';
 
@@ -91,12 +92,7 @@ function formatTime(iso: string): string {
 
 <template>
   <div class="usage-page">
-    <div class="page-header">
-      <div>
-        <h2 class="page-title">Usage</h2>
-        <p class="page-desc">仅统计你名下 Virtual Key 产生的用量。</p>
-      </div>
-    </div>
+    <PageHeader title="Usage" description="仅统计你名下 Virtual Key 产生的用量。" />
 
     <!-- Summary -->
     <section class="summary-panel">

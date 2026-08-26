@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G5.0`（Frontend design foundation：tokens、应用 shell、导航、表格/表单/状态样式、Playwright visual baseline）
+- Current goal: `G5.1`（User portal：登录、首次改密、个人首页、Key 创建一次性展示、列表、轮换、吊销、个人用量）
 - Goal status: `DONE`
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g5.0-frontend-foundation`
+- Branch: `goal/g5.1-login-profile-keys`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,29 @@
 
 ## Next Goal
 
-- Goal ID: `G5.1`
-- Name: 登录、Profile 与虚拟 Key 管理页（基于 G5.0 foundation）
+- Goal ID: `G5.2`
+- Name: Admin organization portal（账号、团队、项目、成员、Grant 和模型授权）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 5 门户）
+
+## G5.1 — User portal（DONE）
+
+### 实现（基于 G5.0 foundation 收尾）
+
+- `KeysView`：状态列从 `el-tag` 改为 `mk-status` 紧凑标签（圆点 + 短文案 + 颜色语义，spec §3/§7）；操作列改为 kebab dropdown（轮换 + 分隔线 + 吊销危险分组，spec §6 行操作模式）。
+- `UsageView` / `ProfileView`：统一改用 `PageHeader` 组件（标题/说明/主动作同一区域）。
+- `vite.config.ts`：`server.warmup.clientFiles` 预转换入口，根治 Playwright 冷启动预加载桥竞态（替代 retries 兜底）。
+- E2E 扩展：新增「Key 操作」测试（kebab menu 渲染轮换/吊销、状态标签文案）；补 `/me/grants` mock；baseline 截图刷新（8 张）。
+
+### 测试
+
+- 前端：lint / typecheck / 21 vitest / build 全 PASS。
+- E2E：**10/10 通过**（登录/认证 shell × 4 viewport + Key 操作 + 渲染页审美扫描）。
+
+### 风险与边界
+
+- 登录、首次改密、创建一次性 Secret、轮换、吊销、个人用量在 G5.0 前已实现并通过既有测试；本 Goal 完成视觉与交互规范收尾。
+- 视觉 review 仍待人工（spec §9）。
 
 ## G5.0 — Frontend design foundation（DONE）
 
