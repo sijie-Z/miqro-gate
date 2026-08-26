@@ -1,0 +1,8 @@
+# G6.3 (2026-08-26): golang toolchain CVEs inside the postgres:17.6-alpine
+# image (net/url, crypto/tls DoS). They are local-DoS in bundled tooling,
+# not part of the postgres server attack surface. Review on image upgrade:
+# pull the latest postgres:17-alpine digest, update compose.yaml and all
+# testcontainers references, then drop these entries.
+CVE-2026-56859
+CVE-2026-56860
+CVE-2026-56862
