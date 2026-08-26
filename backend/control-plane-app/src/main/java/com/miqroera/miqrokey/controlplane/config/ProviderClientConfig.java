@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.controlplane.config;
 
 import com.miqroera.miqrokey.adapters.deepseek.DeepSeekPaygAdapter;
+import com.miqroera.miqrokey.adapters.minimax.MiniMaxAdapter;
 import com.miqroera.miqrokey.adapters.registry.BuiltInAdapterRegistry;
 import com.miqroera.miqrokey.adapters.tencent.TencentTokenHubAdapter;
 import com.miqroera.miqrokey.adapters.zhipu.ZhipuGlmAdapter;
@@ -40,6 +41,9 @@ public class ProviderClientConfig {
         registry.register(ZhipuGlmAdapter.codingPlanPersonal(objectMapper));
         registry.register(ZhipuGlmAdapter.codingPlanTeam(objectMapper));
         registry.register(ZhipuGlmAdapter.paygApi(objectMapper));
+        registry.register(MiniMaxAdapter.tokenPlanPersonal(objectMapper));
+        registry.register(MiniMaxAdapter.tokenPlanTeam(objectMapper));
+        registry.register(MiniMaxAdapter.paygApi(objectMapper));
         return registry;
     }
 

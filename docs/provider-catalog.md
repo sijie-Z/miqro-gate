@@ -124,10 +124,27 @@
 
 团队建模：`PER_MEMBER_SUBSCRIPTION_KEY`，额度可以是席位订阅与共享 Credits 的混合模式。
 
+**实现状态：`IMPLEMENTED`（G3.4）** —— 适配器 `minimax-token-plan-personal`、`minimax-token-plan-team`、`minimax-payg-api` 已落地。官方端点（2026-08-26 核验 platform.minimax.io）与路径归一化：
+
+| 产品 | OpenAI Base URL | 模型列表路径 | `/v1` 前缀剥离 |
+|---|---|---|---|
+| 全部 3 个产品 | `https://api.minimax.io/v1` | `/models`（完整 `https://api.minimax.io/v1/models`） | 是 |
+
+- 鉴权：`Authorization: Bearer <api-key>`；Token Plan 专属 Key 形如 `sk-cp-…`（与按量 Key 不互通）；入站凭证 Header 一律剥离。
+- `fetchModels` 解析官方 list-models 形状 `data[].id/object/created/owned_by`（无 display name 字段，兼容 `name` 变体）。
+- `fetchPlanStatus` 按契约 §6 返回 `UNAVAILABLE`（docs 索引无任何 Token Plan 余额/用量查询 API，额度与钱包仅控制台可见）。
+- 团队版：席位 1:1 分配给成员（可转授、不重置用量），未分配席位的成员可经自己的 Subscription Key 消费共享 Credits 池 → `capabilities.teamPlan=true`、`PlanSnapshot.sharedPool=true`。
+- Anthropic 兼容入口 `https://api.minimax.io/anthropic` 官方存在，但签名目录当前只声明 `OPENAI_COMPATIBLE`（JSON 不可改），待目录下一版签名补声明。
+
+`VERIFIED` 需要真实凭证契约测试 → `WAITING_FOR_CREDENTIAL`。
+
 资料：
 
 - [Token Plan Overview](https://platform.minimax.io/docs/token-plan/intro)
 - [MiniMax Pricing Overview](https://platform.minimax.io/docs/pricing/overview)
+- [工具接入（Base URL 与 Key）](https://platform.minimax.io/docs/token-plan/other-tools)
+- [OpenAI 兼容模型列表](https://platform.minimax.io/docs/api-reference/models/openai/list-models)
+- [团队版定价（席位与共享 Credits）](https://platform.minimax.io/docs/guides/pricing-token-plan-team)
 
 ### 3.5 Kimi / Moonshot
 
