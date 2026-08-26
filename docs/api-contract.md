@@ -433,6 +433,30 @@
 - token 仅存 SHA-256 哈希；错误 token → `403 DELETION_TOKEN_INVALID`；确认窗口 1 小时 → `410 DELETION_EXPIRED`；重复确认 → `409 DELETION_NOT_CONFIRMABLE`。
 - 窗口 ≤ 93 天；`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400）。
 
+### 5.7 Webhook 端点（G4.5）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/admin/webhooks` | 创建（`name`/`url`/`secret`/`timeoutMs`）；URL 经 SSRF 门控，Secret 加密存储且永不返回 |
+| `GET /api/v1/admin/webhooks` / `/{id}` | 列表/详情（无 Secret） |
+| `PATCH /api/v1/admin/webhooks/{id}` | 更新（name/enabled/timeoutMs） |
+| `DELETE /api/v1/admin/webhooks/{id}` | 删除 |
+| `POST /api/v1/admin/webhooks/{id}/test` | 发送 HMAC 签名测试载荷，返回上游 HTTP 状态或脱敏错误 |
+| `GET /api/v1/admin/webhooks/{id}/deliveries` | 投递历史 |
+
+投递签名：`X-MiQroKey-Signature: sha256=<HMAC-SHA256(secret, payload) hex>`，payload 为事件 JSON（eventId/ruleId/type/value/occurredAt）。错误码：`WEBHOOK_URL_REJECTED`（400，SSRF 门控）、`WEBHOOK_NOT_FOUND`（404）。
+
+### 5.8 告警规则（G4.5）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/admin/alert-rules` | 创建（`name`/`type`/`threshold`/`dedupeMinutes`/`webhookEndpointId`） |
+| `GET /api/v1/admin/alert-rules` / `/{id}` | 列表/详情 |
+| `PATCH /api/v1/admin/alert-rules/{id}` | 更新（含 enabled） |
+| `DELETE /api/v1/admin/alert-rules/{id}` | 删除 |
+
+规则类型：`USAGE_MISSING_RATE`（1h 内 usage_missing 占比）、`UPSTREAM_ERROR_RATE`（1h 内非 2xx 占比）、`BALANCE_UNAVAILABLE`（1h 内 UNAVAILABLE 配额快照数）、`USAGE_SURGE`（当前 1h 事件数 / 前一 1h 比率）。评估周期 `miqrokey.alerts.evaluation-interval-ms`（默认 5min）；命中阈值后按（规则 × 小时桶）去重，仅首个事件触发投递；投递失败指数退避重试最多 3 次。错误码：`ALERT_RULE_NOT_FOUND`（404）、`ALERT_TYPE_INVALID`（400）。
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：
