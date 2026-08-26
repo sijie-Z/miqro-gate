@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G6.1`（Observability：Prometheus 指标、JSON 日志、Grafana Dashboard、健康检查和高基数保护）
+- Current goal: `G6.2`（Backup and restore：每日/每周保留策略、校验、Webhook、恢复命令和真实恢复测试）
 - Goal status: `DONE`
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g6.1-observability`
+- Branch: `goal/g6.2-backup-restore`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,26 @@
 
 ## Next Goal
 
-- Goal ID: `G6.2`
-- Name: Backup and restore（每日/每周保留策略、校验、Webhook、恢复命令和真实恢复测试）
+- Goal ID: `G6.3`
+- Name: Security and supply-chain gate（SBOM、许可证、依赖/镜像/Secret 扫描、目录签名、审计完整性）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 6 交付）
+
+## G6.2 — Backup and restore（DONE）
+
+### 交付（`deploy/backup/`）
+
+- `miqrokey-backup.sh`：pg_dump(custom) → gzip → AES-256-CBC（PBKDF2 200k + 随机盐）→ 加密文件 + SHA-256 manifest；保留上限 `DAILY_KEEP + WEEKLY_KEEP` 超出删最旧；Webhook 通知（可选 HMAC-SHA256 签名）；退出码 0/1/2/3 语义。
+- `miqrokey-verify.sh`：manifest 强校验 + 解密干跑（不触碰任何库）。
+- `miqrokey-restore.sh`：manifest 校验 → 解密 → `pg_restore --exit-on-error`。
+- `test-restore.sh`：**真实恢复演练**（双 Postgres 17.6 容器：播种 1000 行 → 真备份 → 校验 → 恢复 → 行数一致断言）——本地 PASS。
+- `test-retention-webhook.sh`：保留上限（10 假文件 → cap 后 3）+ Webhook 签名投递测试——本地 PASS。
+- operations-runbook 新增备份/恢复操作手册（cron 示例、密钥分离、季度演练要求）。
+
+### 验证
+
+- 真实演练：`bash deploy/backup/test-restore.sh` → **restore drill PASS: 1000 rows intact**
+- `bash deploy/backup/test-retention-webhook.sh` → retention PASS + webhook PASS
 
 ## G6.1 — Observability and optional monitoring profile（DONE）
 
