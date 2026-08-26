@@ -37,6 +37,36 @@ const router = createRouter({
           component: () => import('@/views/ProfileView.vue'),
           meta: { title: 'Profile' },
         },
+        {
+          path: 'providers',
+          name: 'providers',
+          component: () => import('@/views/PlaceholderView.vue'),
+          meta: { title: 'Providers' },
+        },
+        {
+          path: 'plans',
+          name: 'plans',
+          component: () => import('@/views/PlaceholderView.vue'),
+          meta: { title: 'Plans' },
+        },
+        {
+          path: 'credentials',
+          name: 'credentials',
+          component: () => import('@/views/PlaceholderView.vue'),
+          meta: { title: 'Credentials' },
+        },
+        {
+          path: 'audit',
+          name: 'audit',
+          component: () => import('@/views/PlaceholderView.vue'),
+          meta: { title: 'Audit' },
+        },
+        {
+          path: 'settings',
+          name: 'settings',
+          component: () => import('@/views/PlaceholderView.vue'),
+          meta: { title: 'Settings' },
+        },
       ],
     },
     {

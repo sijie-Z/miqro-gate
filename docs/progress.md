@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G4.5`（Webhook alerts：六类告警及签名、去重和重试）
-- Goal status: `DONE`（全量验证通过：949 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
+- Current goal: `G5.0`（Frontend design foundation：tokens、应用 shell、导航、表格/表单/状态样式、Playwright visual baseline）
+- Goal status: `DONE`
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g4.5-webhook-alerts`
+- Branch: `goal/g5.0-frontend-foundation`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,33 @@
 
 ## Next Goal
 
-- Goal ID: `G5.0`
-- Name: Frontend design foundation（tokens、应用 shell、导航、表格/表单/状态样式、Playwright visual baseline）
+- Goal ID: `G5.1`
+- Name: 登录、Profile 与虚拟 Key 管理页（基于 G5.0 foundation）
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md)（Phase 5 门户；**Phase 4 全部完成**）
+- Source: [`implementation-plan.md`](implementation-plan.md)（Phase 5 门户）
+
+## G5.0 — Frontend design foundation（DONE）
+
+### 实现
+
+- `tokens.css` 扩展：spacing（8/12/16/24/32）、控件高度（32/36px）、表格行高（40/36px）、内容最大宽（1440/760px 表单）、折叠导航宽（56px）。
+- `global.css`（新）：页面骨架样式 —— `mk-page-header`（标题/说明/主动作同一区域）、`mk-filter-bar`（筛选条）、`mk-summary-row`（汇总行）、`mk-panel`（边框分区、无阴影）、`mk-status`（短状态标签，颜色+圆点不单靠颜色）、`mk-danger-zone`（页面底部危险区）、`mk-shell-footer`、数字列右对齐 helper。
+- `AppShell` v2：响应式三态（≥1280 全宽导航 / 768–1279 图标折叠 / <768 drawer，resize 监听）；导航分组（常规 + 管理，管理员可见，`@element-plus/icons-vue` 线性图标）；用户菜单（角色 + 退出）；footer（版本/catalog/同步）。
+- `PageHeader.vue` 组件；`KeysView` 改用 PageHeader；`PlaceholderView` + 5 个占位路由（providers/plans/credentials/audit/settings）。
+- Element Plus 覆盖：表格水平分隔 + sticky header + 行 hover；阴影只用于 popper/dropdown/dialog。
+- **Playwright visual baseline**（新，`test:e2e`）：4 个必需 viewport（1440×900/1280×800/768×1024/390×844）的登录页 + 认证 shell 截图（API 全 mock，无需后端），提交至 `e2e/baseline-screenshots/`；渲染页审美扫描（同源样式表无渐变/无紫色 tokens）。配置 `channel: 'chromium'` 规避 headless shell 的 vite 预加载桥问题，`retries: 1` 吸收冷启动竞态。
+- **审美审计测试**（vitest，5 个断言）：扫描 `src/styles/*.css` —— 无任何渐变、无紫色 tokens、常规容器 radius ≤ 8px（状态 pill 为例外）、无巨型 pill、阴影仅限 popper/dropdown/dialog。
+
+### 测试
+
+- 前端：lint / typecheck / 21 个 vitest（含 5 个审美审计）/ build 全 PASS。
+- E2E：**9/9 Playwright baseline 通过**（8 张截图 + 1 个渲染页审美扫描）。
+
+### 风险与边界
+
+- 视觉 review 需人工进行（spec §9：不能只凭 E2E 功能通过视为设计完成）；截图已提交可 diff。
+- 管理端页面为占位路由（后续 Goal 逐个实现）；导航与权限边界已就绪。
+- `test:e2e` 需先 `npx playwright install chromium`（完整版，headless shell 与 vite 预加载桥不兼容）。
 
 ## G4.5 — Webhook alerts（DONE）
 
