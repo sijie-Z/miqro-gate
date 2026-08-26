@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.adapters.deepseek;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.miqroera.miqrokey.adapters.common.TransparentResolve;
 import com.miqroera.miqrokey.spi.AdapterCapabilities;
 import com.miqroera.miqrokey.spi.CredentialCheck;
 import com.miqroera.miqrokey.spi.CredentialInjection;
@@ -25,13 +26,9 @@ import com.miqroera.miqrokey.spi.UsageSource;
 import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -86,48 +83,11 @@ public final class DeepSeekPaygAdapter implements ProviderProductAdapter {
 
     @Override
     public TargetRequest resolve(RouteContext route, InboundRequest request) {
-        Map<String, String> headers = new LinkedHashMap<>();
-        for (Map.Entry<String, List<String>> entry : request.headers().entrySet()) {
-            if (credentialInjection(null).stripInboundHeaders().contains(entry.getKey().toLowerCase())) {
-                continue; // the gateway injects the real credential; never forward client keys
-            }
-            List<String> values = entry.getValue();
-            if (!values.isEmpty()) {
-                // TargetRequest contract: header names are lowercase.
-                headers.put(entry.getKey().toLowerCase(), values.get(0));
-            }
-        }
-        return new TargetRequest(request.method(), route.baseUrl(), request.path(), queryString(request.query()),
-                headers);
-    }
-
-    /**
-     * Re-encodes the inbound decoded query parameters into a raw query string
-     * (TargetRequest contract: raw, without leading {@code ?}). Keys and values
-     * were decoded with UTF-8 percent-decoding; the round-trip uses UTF-8 form
-     * encoding with spaces as {@code %20}.
-     */
-    private static String queryString(Map<String, List<String>> query) {
-        if (query.isEmpty()) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder();
-        for (Map.Entry<String, List<String>> entry : query.entrySet()) {
-            for (String value : entry.getValue()) {
-                if (sb.length() > 0) {
-                    sb.append('&');
-                }
-                sb.append(encode(entry.getKey()));
-                if (value != null) {
-                    sb.append('=').append(encode(value));
-                }
-            }
-        }
-        return sb.toString();
-    }
-
-    private static String encode(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+        // Header sanitization and query re-encoding are shared across adapters
+        // (G3.2); the DeepSeek root base keeps every path verbatim.
+        return new TargetRequest(request.method(), route.baseUrl(), request.path(),
+                TransparentResolve.queryString(request.query()),
+                TransparentResolve.headers(request, credentialInjection(null).stripInboundHeaders()));
     }
 
     @Override

@@ -44,6 +44,17 @@
 
 团队建模：`MULTI_KEY_SHARED_POOL + DEDICATED_PLUS_SHARED/KEY_CAPPED`。
 
+**实现状态：`IMPLEMENTED`（G3.2）** —— 适配器 `tencent-coding-plan`、`tencent-token-plan-personal`、`tencent-token-plan-enterprise-pro`、`tencent-token-plan-enterprise-lite`、`tencent-payg-api` 已落地。实际端点（管理员按地域/站点配置 Base URL）与路径归一化：
+
+| 产品 | OpenAI Base URL | Anthropic Base URL | 模型列表路径 | `/v1` 前缀剥离 |
+|---|---|---|---|---|
+| Coding Plan | `https://api.lkeap.cloud.tencent.com/coding/v3` | `https://api.lkeap.cloud.tencent.com/coding/anthropic` | `/models` | 是 |
+| Token Plan 个人版 | `https://api.lkeap.cloud.tencent.com/plan/v3` | `https://api.lkeap.cloud.tencent.com/plan/anthropic` | `/models` | 是 |
+| 企业专业/轻享 | `https://tokenhub.tencentmaas.com/plan/v3` | `https://tokenhub.tencentmaas.com/plan/anthropic` | `/models` | 是 |
+| TokenHub 按量 API | `https://tokenhub.tencentmaas.com` | `https://tokenhub.tencentmaas.com` | `/v1/models` | 否 |
+
+鉴权：`Authorization: Bearer <api-key>`；入站凭证 Header 一律剥离。`fetchModels` 解析文档形状 `data[].id` + `name`（同时兼容 `display_name`）。`fetchPlanStatus` 按契约 §6 返回 `UNAVAILABLE`（2026-08-25 核验：所有 Tencent 产品均无公开余额/用量 API，仅控制台可见），绝不以本地估算冒充官方值。企业产品 `capabilities.teamPlan=true`、`PlanSnapshot.sharedPool=true`（多 Key 共享池建模）。`VERIFIED` 需要真实凭证契约测试 → `WAITING_FOR_CREDENTIAL`。
+
 资料：
 
 - [Coding Plan 概述](https://cloud.tencent.com/document/product/1823/130092)
