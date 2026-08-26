@@ -79,6 +79,23 @@
 - Final implementation CI run `29796610144`: Ubuntu backend, Windows backend, Windows Wrapper failure propagation, frontend, Compose config and digest locking all passed.
 - CI evidence: `https://github.com/lichman0405/miqro-key-gateway/actions/runs/29796610144`
 
+## 发布后审计（2026-08-27，双 Agent 代码审查）
+
+### 已修复（PR #68/#69/#70）
+
+- **中转核心接线**：适配器 `resolve()` 接入网关热路径（协议专属 base + 路径归一化，`base_url_templates` 支持按协议条目）；`loadBindings` 限定 Key 自身 grant（消除跨授权路由）；`AdapterRegistryFactory` 统一双端注册。
+- 安全：登录延迟时序枚举（未知用户下限）、错误包络控制字符转义、grant 模型热路径交集（模型回收生效）、quota 错误剥离 URL、createGrant 租户过滤+产品校验、projectTag 校验、null tag 404。
+- 可靠性：HttpProviderClient `%` 二次编码、body 读取 deadline、subscriptionId 过滤 SQL 500。
+- 未接线项补全：quota 快照定时刷新（15 分钟默认）。
+- 文档：G3.5–G3.8 编号对齐 plan；腾讯目录 baseUrlTemplate 差异标注。
+
+### 已知残余风险（记录，待处理）
+
+- **SSRF DNS 重绑定 TOCTOU**（UpstreamTargetValidator 校验解析与连接解析分离）：管理员配置源 + 供应商域名为可信方，残余竞态风险低；修复方向为解析后固定 IP 建连（与 Host/SNI 配合），列入下一迭代。
+- **G5.5 视觉 review**：spec §9 人工视觉审查未执行（自动化 baseline 已覆盖布局/色彩，语义审查待人工）。
+- 真实供应商凭证契约测试全部 `WAITING_FOR_CREDENTIAL`；腾讯/智谱等 Anthropic 入口 Bearer 兼容性待真实核验。
+- 已知 flaky：`AuditChainIntegrityTest.preLockTimestampsDoNotAffectHeadOrdering`、`InProcessRequestCoalescerTest.shouldShareWithWaiters`（G4.x 排查清单）。
+
 ## Known Blockers
 
 - 真实供应商凭证尚未提供；不阻塞 Mock 与本地契约开发。
