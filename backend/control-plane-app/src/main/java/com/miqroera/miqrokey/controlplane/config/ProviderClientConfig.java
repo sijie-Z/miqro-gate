@@ -6,6 +6,7 @@ import com.miqroera.miqrokey.adapters.minimax.MiniMaxAdapter;
 import com.miqroera.miqrokey.adapters.moonshot.MoonshotKimiAdapter;
 import com.miqroera.miqrokey.adapters.registry.BuiltInAdapterRegistry;
 import com.miqroera.miqrokey.adapters.tencent.TencentTokenHubAdapter;
+import com.miqroera.miqrokey.adapters.volcengine.VolcengineArkAdapter;
 import com.miqroera.miqrokey.adapters.zhipu.ZhipuGlmAdapter;
 import com.miqroera.miqrokey.controlplane.client.ProviderClientFactory;
 import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
@@ -51,6 +52,9 @@ public class ProviderClientConfig {
         registry.register(BaiduQianfanAdapter.codingPlan(objectMapper));
         registry.register(BaiduQianfanAdapter.tokenPlanPersonal(objectMapper));
         registry.register(BaiduQianfanAdapter.paygApi(objectMapper));
+        registry.register(VolcengineArkAdapter.codingPlan(objectMapper));
+        registry.register(VolcengineArkAdapter.agentPlan(objectMapper));
+        registry.register(VolcengineArkAdapter.paygApi(objectMapper));
         return registry;
     }
 

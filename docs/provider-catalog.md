@@ -216,6 +216,21 @@ Coding Plan 和 Token Plan 个人版均有专属 Key 与 OpenAI/Anthropic 兼容
 
 公开资料确认 Coding Plan 提供 Anthropic 与 OpenAI 兼容入口，Agent Plan 具有共享套餐额度和周期状态。余额/周期是否存在稳定官方 API、团队凭证拓扑如何表达，必须在实现前用真实账号确认；未确认前状态为 DOCUMENTED/DEGRADED。
 
+**实现状态：`IMPLEMENTED`（G3.7）** —— 适配器 `volcengine-coding-plan`、`volcengine-agent-plan`、`volcengine-payg-api` 已落地。官方端点（2026-08-26 核验）与路径归一化：
+
+| 产品 | OpenAI Base URL | Anthropic Base URL | 模型列表路径 | `/v1` 前缀剥离 |
+|---|---|---|---|---|
+| Coding Plan | `https://ark.cn-beijing.volces.com/api/coding/v3` | `https://ark.cn-beijing.volces.com/api/coding` | `/models` | 是 |
+| Agent Plan | `https://ark.cn-beijing.volces.com/api/plan/v3` | `https://ark.cn-beijing.volces.com/api/plan` | `/models` | 是 |
+| 方舟按量 API | `https://ark.cn-beijing.volces.com/api/v3` | — | `/models` | 是 |
+
+- 鉴权：`Authorization: Bearer <api-key>`（控制台「API Key 管理」创建）；Coding/Agent Plan Key 仅限官方支持的 AI 编程工具使用（违规调用可能停用订阅），额度按 5h/周/月周期刷新。
+- Coding Plan 模型：Doubao-Seed-Code / GLM-4.7 / DeepSeek-V3.2 / Kimi-K2.5，或 `ark-code-latest`（Auto 模式）；Agent Plan 覆盖超全模态模型（DeepSeek-V4 系列、GLM-5.1、ArkClaw）。
+- `fetchPlanStatus` 按契约 §6 返回 `UNAVAILABLE`（官方资料无余额/用量查询 API，控制台可见）。
+- **Agent Plan 端点注意**：活动页为 JS 渲染无法直接核验，`/api/plan` 端点经 cc-switch 社区预设（PR #4826）确认，待真实凭证核验；目录 baseUrlTemplate 为 `https://ark.cn-beijing.volces.com/api/v3`（DOCUMENTED 设计值）。
+
+`VERIFIED` 需要真实凭证契约测试 → `WAITING_FOR_CREDENTIAL`。
+
 资料：
 
 - [方舟 Agent Plan](https://www.volcengine.com/activity/agentplan)

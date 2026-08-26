@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G3.6`（百度千帆：Coding Plan、Token Plan 个人版、按量 API；专属 Key）
-- Goal status: `DONE`（全量验证通过：879 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
+- Current goal: `G3.7`（火山引擎方舟：Coding Plan、Agent Plan、按量 API）
+- Goal status: `DONE`（全量验证通过：895 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g3.6-baidu-qianfan`
+- Branch: `goal/g3.7-volcengine-ark`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,40 @@
 
 ## Next Goal
 
-- Goal ID: `G3.7`
-- Name: 火山引擎方舟（Coding Plan、Agent Plan、按量 API）
+- Goal ID: `G3.8`
+- Name: P1 候选供应商适配（硅基流动 SiliconFlow 等）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 3 供应商产品）
+
+## G3.7 — 火山引擎方舟（Coding Plan + Agent Plan + 按量 API，DONE）
+
+### 官方事实核验（2026-08-26，volcengine.com）
+
+- Coding Plan：Anthropic base `https://ark.cn-beijing.volces.com/api/coding`、OpenAI base `.../api/coding/v3`；模型 Doubao-Seed-Code / GLM-4.7 / DeepSeek-V3.2 / Kimi-K2.5 或 `ark-code-latest`（Auto）；额度 5h/周/月刷新；Key 仅限官方支持的 AI 编程工具使用。
+- Agent Plan：专属端点 `.../api/plan`、`.../api/plan/v3`（活动页 JS 渲染无法直接核验，经 cc-switch 社区预设 PR #4826 确认，待真实凭证核验）；覆盖超全模态模型（DeepSeek-V4 系列、GLM-5.1、ArkClaw）。
+- 按量 API：方舟在线推理 base `https://ark.cn-beijing.volces.com/api/v3`（不消耗套餐额度）。
+- 三个产品均无确认的官方余额/用量 API → `fetchPlanStatus` 返回 `UNAVAILABLE`。
+
+### 实现
+
+- `provider-adapters`：`VolcengineArkAdapter`（3 个静态工厂，adapterId 与签名目录逐一匹配）+ `VolcengineArkUsageObserver`；OpenAI base 以 `/v3` 结尾 → 剥离 `/v1`；Anthropic `/v1/messages` 保留；`fetchPlanStatus` → `UNAVAILABLE`（0 HTTP）。
+- `control-plane-app`：`ProviderClientConfig` 注册 3 个方舟适配器（现共 20 个适配器：DeepSeek 1 + Tencent 5 + Zhipu 3 + MiniMax 3 + Moonshot 2 + Baidu 3 + Volcengine 3）。
+
+### 测试（本 Goal 新增 16 个）
+
+- `VolcengineArkAdapterTest`（12）：3 个产品 adapterId/协议与签名目录一致；凭证剥离 + query 重编码；官方端点映射（Coding/Agent Plan Anthropic+OpenAI、按量）；空 query；凭证探活 `/models`；401/403/429/5xx 映射；fetchModels 解析/失败模式；fetchPlanStatus `UNAVAILABLE` 且 0 HTTP（三产品）；capabilities 差异；observer 绑定。
+- `VolcengineArkUsageObserverTest`（4）：OpenAI 形状 + 根 model id、Anthropic 形状、空/畸形容忍、observer 最新值。
+- `ProviderClientConfigTest`（更新）：注册列表含 20 个适配器。
+
+### 风险与边界
+
+- 适配器状态 `IMPLEMENTED`（官方文档核验），`VERIFIED` 需真实方舟凭证联调 → `WAITING_FOR_CREDENTIAL`。
+- Agent Plan 端点未经官方页面直接核验（社区预设确认），真实凭证联调时优先验证。
+- 已知偶发 flaky（G3.6 CI 发现，与本 Goal 无关）：`InProcessRequestCoalescerTest.shouldShareWithWaiters` 在 Windows CI 偶发 `inFlight()` 断言竞态（leader 完成与 inFlight 递减之间的时序；本地与重跑均通过）。与既有 `AuditChainIntegrityTest.preLockTimestampsDoNotAffectHeadOrdering` 一并列入 G4.x 排查清单。
+
+### 验证
+
+- 模块验证：`verify -pl provider-adapters,control-plane-app -am` → BUILD SUCCESS；全量 `verify -P integration` → **BUILD SUCCESS**（见 Current State 计数）。
 
 ## G3.6 — 百度千帆（Coding Plan + Token Plan 个人版 + 按量 API，DONE）
 
