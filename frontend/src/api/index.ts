@@ -2,16 +2,25 @@
  * /api/v1/auth and /api/v1/me endpoint clients (api-contract.md §3–§4).
  */
 
-import { get, post } from './http';
+import { del, get, patch, post } from './http';
 import type {
+  AdminUser,
+  CredentialSummary,
   CreateVirtualKeyRequest,
   CreateVirtualKeyResponse,
+  Grant,
   LoginResponse,
   MeGrantsResponse,
+  MemberView,
+  Project,
+  Team,
   UsageGroupBy,
   UsageRecordPage,
   UsageSummary,
+  UserCreatedResponse,
   UserResponse,
+  UserRole,
+  UserStatusValue,
   VirtualKeyView,
 } from '@/types/api';
 
@@ -80,4 +89,103 @@ export function usageRecords(
     page: options.page,
     size: options.size,
   });
+}
+
+// ---- admin organization (G5.2) ----
+
+export function listUsers(): Promise<AdminUser[]> {
+  return get<AdminUser[]>('/api/v1/admin/users');
+}
+
+export function createUser(body: {
+  username: string;
+  displayName?: string;
+  role?: UserRole;
+}): Promise<UserCreatedResponse> {
+  return post<UserCreatedResponse>('/api/v1/admin/users', body);
+}
+
+export function updateUserStatus(id: string, status: UserStatusValue): Promise<AdminUser> {
+  return patch<AdminUser>(`/api/v1/admin/users/${id}`, { status });
+}
+
+export function resetUserPassword(id: string): Promise<UserCreatedResponse> {
+  return post<UserCreatedResponse>(`/api/v1/admin/users/${id}/reset-password`);
+}
+
+export function revokeUserSessions(id: string): Promise<void> {
+  return post<void>(`/api/v1/admin/users/${id}/revoke-sessions`);
+}
+
+export function listTeams(): Promise<Team[]> {
+  return get<Team[]>('/api/v1/admin/teams');
+}
+
+export function createTeam(body: { name: string; description?: string }): Promise<Team> {
+  return post<Team>('/api/v1/admin/teams', body);
+}
+
+export function listTeamMembers(teamId: string): Promise<MemberView[]> {
+  return get<MemberView[]>(`/api/v1/admin/teams/${teamId}/members`);
+}
+
+export function addTeamMember(teamId: string, userId: string): Promise<void> {
+  return post<void>(`/api/v1/admin/teams/${teamId}/members`, { userId });
+}
+
+export function removeTeamMember(teamId: string, userId: string): Promise<void> {
+  return del<void>(`/api/v1/admin/teams/${teamId}/members/${userId}`);
+}
+
+export function listProjects(): Promise<Project[]> {
+  return get<Project[]>('/api/v1/admin/projects');
+}
+
+export function createProject(body: {
+  code: string;
+  name: string;
+  projectTag?: string;
+}): Promise<Project> {
+  return post<Project>('/api/v1/admin/projects', body);
+}
+
+export function listProjectMembers(projectId: string): Promise<MemberView[]> {
+  return get<MemberView[]>(`/api/v1/admin/projects/${projectId}/members`);
+}
+
+export function addProjectMember(projectId: string, userId: string): Promise<void> {
+  return post<void>(`/api/v1/admin/projects/${projectId}/members`, { userId });
+}
+
+export function removeProjectMember(projectId: string, userId: string): Promise<void> {
+  return del<void>(`/api/v1/admin/projects/${projectId}/members/${userId}`);
+}
+
+export function listGrants(): Promise<Grant[]> {
+  return get<Grant[]>('/api/v1/admin/grants');
+}
+
+export function createGrant(body: {
+  projectId: string;
+  providerProductId: string;
+  credentialId: string;
+  models: string[];
+}): Promise<Grant> {
+  return post<Grant>('/api/v1/admin/grants', body);
+}
+
+export function grantModels(grantId: string): Promise<string[]> {
+  return get<string[]>(`/api/v1/admin/grants/${grantId}/models`);
+}
+
+export function updateGrantModels(grantId: string, models: string[]): Promise<Grant> {
+  return post<Grant>(`/api/v1/admin/grants/${grantId}/models`, { models });
+}
+
+export function disableGrant(grantId: string): Promise<void> {
+  return del<void>(`/api/v1/admin/grants/${grantId}`);
+}
+
+export function listCredentials(): Promise<CredentialSummary[]> {
+  return get<CredentialSummary[]>('/api/v1/admin/credentials');
 }

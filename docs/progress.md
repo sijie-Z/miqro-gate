@@ -7,9 +7,9 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `G5.2`（Admin organization portal：账号、团队、项目、成员、Grant 和模型授权）
-- Goal status: `DONE`（后端 API 部分；前端页面为下一交付）
+- Goal status: `DONE`（后端 API + 前端页面）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g5.2-admin-org-portal`
+- Branch: `goal/g5.2-admin-org-frontend`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,32 @@
 
 ## Next Goal
 
-- Goal ID: `G5.2`
-- Name: Admin organization portal（账号、团队、项目、成员、Grant 和模型授权）
+- Goal ID: `G5.3`
+- Name: Admin provider and Plan portal（产品预设、Subscription、Seat、Credential、验证、轮换、余额来源）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 5 门户）
+
+## G5.2 — Admin organization portal（DONE，后端 + 前端）
+
+### 后端（PR #46，d9cfcd5）
+
+- `AdminOrgService` + 4 控制器：users（创建/禁用/重置密码/撤销会话）、teams+members、projects+members、grants+模型范围
+- 临时密码一次性返回（不落明文）；**Jackson mixin 全局排除 `User.passwordHash`**（修复 login/me 响应泄漏空 hash 的既有缺陷）
+- 全操作审计事件；SYSTEM_ADMIN-only；api-contract §5.0；4 个 Testcontainers 集成测试
+
+### 前端（本交付）
+
+- `AdminUsersView`：用户表格（mk-status 状态）+ 创建表单（角色选择）+ 一次性临时密码 Modal（白底等宽 + 明确不可恢复提示）+ kebab 操作（禁用/重置密码/撤销会话）
+- `AdminTeamsView` / `AdminProjectsView`：表格 + 创建表单 + 成员 drawer（移除需确认）
+- `AdminGrantsView`：Grant 表格 + 创建（项目/凭证选择 + 模型文本域）+ 模型范围 drawer（整体替换）+ 禁用
+- `api` 层：`patch`/`del` HTTP 动词 + 10 个管理 API 函数 + 类型
+- 路由：users/teams/projects/grants 替换占位页；导航分组（管理）直连
+- e2e：admin users baseline 截图 + 浏览器预热 globalSetup（**根治 vite 冷启动预加载桥竞态**）；11/11 通过
+
+### 验证
+
+- 后端全量 `verify -P integration`：953 tests / 0 failures / 0 errors / 5 skipped
+- 前端 lint/typecheck/21 vitest/build 全 PASS；Playwright 11/11（9 张 baseline 截图）
 
 ## G5.1 — User portal（DONE）
 
