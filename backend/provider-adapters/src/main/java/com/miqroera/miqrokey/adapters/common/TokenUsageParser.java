@@ -16,7 +16,8 @@ import java.util.Optional;
  * <li>OpenAI-compatible (root {@code usage}): {@code prompt_tokens} /
  * {@code completion_tokens}, plus the cache fields
  * {@code prompt_cache_hit_tokens} (read) / {@code prompt_cache_miss_tokens}
- * (write).</li>
+ * (write) and the OpenAI-standard/Zhipu GLM
+ * {@code prompt_tokens_details.cached_tokens} (read) (G3.3).</li>
  * <li>Anthropic Messages (root or {@code message.usage}): {@code input_tokens}
  * / {@code output_tokens} / {@code cache_creation_input_tokens} /
  * {@code cache_read_input_tokens}.</li>
@@ -67,6 +68,12 @@ public final class TokenUsageParser {
         }
         if (cacheCreation == null) {
             cacheCreation = longValue(usage, "prompt_cache_miss_tokens");
+        }
+        // OpenAI-standard and Zhipu GLM shape: cache read is reported as
+        // prompt_tokens_details.cached_tokens (G3.3 official docs).
+        if (cacheRead == null) {
+            JsonNode details = usage.path("prompt_tokens_details");
+            cacheRead = longValue(details, "cached_tokens");
         }
         if (input == null && output == null && prompt == null && completion == null && cacheRead == null
                 && cacheCreation == null) {

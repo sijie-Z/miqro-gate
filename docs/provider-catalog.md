@@ -92,11 +92,25 @@
 
 团队建模：`PER_SEAT_KEY`。
 
+**实现状态：`IMPLEMENTED`（G3.3）** —— 适配器 `zhipu-coding-plan-personal`、`zhipu-coding-plan-team`、`zhipu-payg-api` 已落地。官方端点（2026-08-26 核验 docs.bigmodel.cn）与路径归一化：
+
+| 产品 | OpenAI Base URL | Anthropic Base URL | 模型列表路径 | `/v1` 前缀剥离 |
+|---|---|---|---|---|
+| Coding Plan 个人版/团队版 | `https://open.bigmodel.cn/api/coding/paas/v4` | `https://open.bigmodel.cn/api/anthropic` | `/models` | 是 |
+| GLM 开放平台按量 API | `https://open.bigmodel.cn/api/paas/v4` | `https://open.bigmodel.cn/api/anthropic` | `/models` | 是 |
+
+鉴权：`Authorization: Bearer <api-key>`；入站凭证 Header 一律剥离。usage 解析支持智谱文档形状 `prompt_tokens_details.cached_tokens`（缓存命中 → cacheRead，G3.3 加入共享 `TokenUsageParser`）。`fetchPlanStatus` 按契约 §6 返回 `UNAVAILABLE`（docs 索引无任何余额/用量查询 API，额度仅控制台可见）；团队版按席位独立限额（标准版 15k/5h、66k/周；高级版 35k/5h、155k/周），非共享池 → `PlanSnapshot.sharedPool=false`、`capabilities.teamPlan=true`。`VERIFIED` 需要真实凭证契约测试 → `WAITING_FOR_CREDENTIAL`。
+
 资料：
 
+- [Coding Plan 快速开始（Base URL 与 Key）](https://docs.bigmodel.cn/cn/coding-plan/quick-start)
 - [Coding Plan 套餐概览](https://docs.bigmodel.cn/cn/coding-plan/overview)
 - [团队版权益](https://docs.bigmodel.cn/cn/coding-plan/team)
+- [对话补全 API（usage 形状）](https://docs.bigmodel.cn/api-reference/模型-api/对话补全)
+- [Claude API 兼容（Anthropic 入口）](https://docs.bigmodel.cn/cn/guide/develop/claude/introduction)
 - [团队成员获取专属 Key](https://docs.bigmodel.cn/cn/coding-plan/extension/coding-tool-helper)
+
+**风险说明**：智谱官方文档未收录模型列表 API，`validateCredential`/`fetchModels` 的 `GET /models` 为 OpenAI 兼容惯例端点，真实凭证联调核验后若确认不存在需改用最小推理探针；Anthropic 兼容入口官方文档以 `x-api-key` 头为例（Anthropic SDK 默认），本适配器按平台惯例注入 `Authorization: Bearer`，兼容性待真实凭证核验。
 
 ### 3.4 MiniMax
 
