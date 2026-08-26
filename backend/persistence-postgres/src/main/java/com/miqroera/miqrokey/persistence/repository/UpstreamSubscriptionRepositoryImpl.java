@@ -61,6 +61,12 @@ public class UpstreamSubscriptionRepositoryImpl implements UpstreamSubscriptionR
     }
 
     @Override
+    public List<UpstreamSubscription> findAllByTenantId(UUID tenantId) {
+        return jdbc.query("SELECT * FROM upstream_subscriptions WHERE tenant_id = :tenantId ORDER BY created_at",
+                new MapSqlParameterSource("tenantId", tenantId), ROW_MAPPER);
+    }
+
+    @Override
     @Transactional
     public UpstreamSubscription insert(UpstreamSubscription sub) {
         jdbc.update(

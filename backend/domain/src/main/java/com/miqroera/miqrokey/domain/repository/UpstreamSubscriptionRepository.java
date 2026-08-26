@@ -14,6 +14,8 @@ public interface UpstreamSubscriptionRepository {
 
     List<UpstreamSubscription> findAllByProviderProductId(UUID providerProductId);
 
+    List<UpstreamSubscription> findAllByTenantId(UUID tenantId);
+
     UpstreamSubscription insert(UpstreamSubscription subscription);
 
     UpstreamSubscription update(UpstreamSubscription subscription);

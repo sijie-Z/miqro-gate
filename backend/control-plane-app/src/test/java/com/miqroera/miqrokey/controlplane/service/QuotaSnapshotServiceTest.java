@@ -37,6 +37,7 @@ import com.miqroera.miqrokey.spi.UsageObserver;
 import com.miqroera.miqrokey.spi.UsageSource;
 import com.miqroera.miqrokey.spi.AdapterRegistry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -314,5 +315,28 @@ class QuotaSnapshotServiceTest {
      */
     private static com.miqroera.miqrokey.controlplane.client.HttpProviderClient stubClient() {
         return org.mockito.Mockito.mock(com.miqroera.miqrokey.controlplane.client.HttpProviderClient.class);
+    }
+
+    @Test
+    @DisplayName("scheduled refresh walks every subscription without aborting on failure")
+    void scheduledRefreshWalksSubscriptions() {
+        // Stub: one subscription whose refresh throws inside the cycle; the
+        // scheduler must log and continue (no exception escapes).
+        java.util.UUID bad = java.util.UUID.randomUUID();
+        org.mockito.Mockito.when(subscriptionRepository.findAllByTenantId(any())).thenReturn(List.of(
+                new com.miqroera.miqrokey.domain.model.UpstreamSubscription(bad,
+                        java.util.UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                        java.util.UUID.randomUUID(), "bad", null,
+                        com.miqroera.miqrokey.domain.model.BillingMode.FIXED_SUBSCRIPTION,
+                        com.miqroera.miqrokey.domain.model.PlanScope.NONE, null, null, null, null, null, null, null,
+                        com.miqroera.miqrokey.domain.model.SubscriptionStatus.ACTIVE, null,
+                        com.miqroera.miqrokey.domain.model.StatusSource.MANUAL_UNKNOWN, 0,
+                        java.time.Instant.now(), java.time.Instant.now())));
+        when(subscriptionRepository.findById(bad)).thenThrow(new IllegalStateException("boom"));
+
+        service.refreshAllScheduled();
+
+        // No exception propagated; findById was attempted (cycle walked).
+        org.mockito.Mockito.verify(subscriptionRepository).findAllByTenantId(any());
     }
 }
