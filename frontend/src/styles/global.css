@@ -1,0 +1,140 @@
+/* Quiet Operations Console page composition (frontend-design.md §5/§6).
+   Page header region, filter bar, table status labels, dangerous zone. */
+
+/* Page header: title + description + primary action in one region. */
+.mk-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--miqrokey-space-4);
+  margin-bottom: var(--miqrokey-space-4);
+}
+
+.mk-page-title {
+  margin: 0;
+  font-size: var(--miqrokey-font-size-title);
+  font-weight: 600;
+  line-height: 28px;
+  color: var(--miqrokey-text-primary);
+}
+
+.mk-page-description {
+  margin: 4px 0 0;
+  font-size: var(--miqrokey-font-size-body);
+  color: var(--miqrokey-text-secondary);
+}
+
+.mk-page-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--miqrokey-space-2);
+  flex-shrink: 0;
+}
+
+/* Filter bar above tables: 筛选条 → 汇总行 → 明细表 (spec §6). */
+.mk-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--miqrokey-space-2);
+  padding: var(--miqrokey-space-3);
+  margin-bottom: var(--miqrokey-space-2);
+  background: var(--miqrokey-bg-surface);
+  border: 1px solid var(--miqrokey-border-default);
+  border-radius: var(--miqrokey-radius-panel);
+}
+
+.mk-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--miqrokey-space-6);
+  padding: var(--miqrokey-space-2) var(--miqrokey-space-3);
+  margin-bottom: var(--miqrokey-space-2);
+  font-size: var(--miqrokey-font-size-table);
+  color: var(--miqrokey-text-secondary);
+}
+
+.mk-summary-row .mk-num {
+  color: var(--miqrokey-text-primary);
+  font-weight: 600;
+}
+
+/* Sectioned panel: 1px border + spacing, no shadow (spec §4). */
+.mk-panel {
+  background: var(--miqrokey-bg-surface);
+  border: 1px solid var(--miqrokey-border-default);
+  border-radius: var(--miqrokey-radius-panel);
+}
+
+/* Short status label only — never a huge pill (spec §3). */
+.mk-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.mk-status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.mk-status--success {
+  color: var(--miqrokey-success);
+  background: #dcfce7;
+}
+
+.mk-status--warning {
+  color: var(--miqrokey-warning);
+  background: #fef3c7;
+}
+
+.mk-status--danger {
+  color: var(--miqrokey-danger);
+  background: #fee2e2;
+}
+
+.mk-status--neutral {
+  color: var(--miqrokey-text-secondary);
+  background: var(--miqrokey-bg-subtle);
+}
+
+/* Dangerous zone at page bottom (spec §6 Settings). */
+.mk-danger-zone {
+  margin-top: var(--miqrokey-space-8);
+  padding: var(--miqrokey-space-4);
+  border: 1px solid var(--miqrokey-danger);
+  border-radius: var(--miqrokey-radius-panel);
+}
+
+.mk-danger-zone-title {
+  margin: 0 0 4px;
+  font-size: var(--miqrokey-font-size-body);
+  font-weight: 600;
+  color: var(--miqrokey-danger);
+}
+
+/* Shell footer with version / catalog version / last sync (spec §5). */
+.mk-shell-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--miqrokey-space-6);
+  padding: var(--miqrokey-space-3) var(--miqrokey-space-8);
+  border-top: 1px solid var(--miqrokey-border-muted);
+  font-size: 12px;
+  color: var(--miqrokey-text-disabled);
+}
+
+/* Number columns in tables: right-aligned tabular figures. */
+th.mk-col-num,
+td.mk-col-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

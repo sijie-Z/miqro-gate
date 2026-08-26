@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
+import PageHeader from '@/components/PageHeader.vue';
 import SecretRevealDialog from '@/components/SecretRevealDialog.vue';
 import type {
   CreateVirtualKeyResponse,
@@ -199,15 +200,13 @@ function formatTime(iso?: string): string {
 
 <template>
   <div class="keys-page">
-    <div class="page-header">
-      <div>
-        <h2 class="page-title">Virtual Keys</h2>
-        <p class="page-desc">通过 CC Switch 使用这些 Key 访问授权模型。</p>
-      </div>
-      <el-button type="primary" data-testid="create-key-open" @click="creating = !creating">
-        {{ creating ? '收起表单' : '创建 Virtual Key' }}
-      </el-button>
-    </div>
+    <PageHeader title="Virtual Keys" description="通过 CC Switch 使用这些 Key 访问授权模型。">
+      <template #actions>
+        <el-button type="primary" data-testid="create-key-open" @click="creating = !creating">
+          {{ creating ? '收起表单' : '创建 Virtual Key' }}
+        </el-button>
+      </template>
+    </PageHeader>
 
     <el-alert
       v-if="loadError"
