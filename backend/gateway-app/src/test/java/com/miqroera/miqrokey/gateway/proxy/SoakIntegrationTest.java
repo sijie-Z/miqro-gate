@@ -141,11 +141,17 @@ class SoakIntegrationTest {
         }).count();
         assertThat(errors).as("all concurrent streams must succeed").isZero();
 
-        // Usage rows for the window: request_usage_records must have rows and
-        // none may be missing usage.
-        Integer rows = jdbc.queryForObject("""
-                SELECT count(*) FROM request_usage_records WHERE tenant_id = :tenantId
-                """, new MapSqlParameterSource("tenantId", GatewayTestKeys.TENANT_ID), Integer.class);
+        // Usage rows for the window: request_usage_records must have rows. The
+        // writer flushes asynchronously (threshold/interval), so poll briefly.
+        int rows = 0;
+        for (int attempt = 0; attempt < 20 && rows == 0; attempt++) {
+            rows = jdbc.queryForObject("""
+                    SELECT count(*) FROM request_usage_records WHERE tenant_id = :tenantId
+                    """, new MapSqlParameterSource("tenantId", GatewayTestKeys.TENANT_ID), Integer.class);
+            if (rows == 0) {
+                Thread.sleep(500);
+            }
+        }
         assertThat(rows).as("soak requests must be persisted").isGreaterThan(0);
 
         mockProvider.reset();
