@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G3.3`（智谱 GLM：个人/团队 Coding Plan、按量 API；Seat 与成员专属 Key 建模）
-- Goal status: `DONE`（全量验证通过：842 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
+- Current goal: `G3.4`（MiniMax：个人/团队 Token Plan、按量 API；每成员 Subscription Key、席位与共享 Credits）
+- Goal status: `DONE`（全量验证通过：845 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g3.3-zhipu-glm`
+- Branch: `goal/g3.4-minimax`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,41 @@
 
 ## Next Goal
 
-- Goal ID: `G3.4`
-- Name: MiniMax（个人/团队 Token Plan、按量 API；每 Team/成员 Subscription Key、席位与共享 Credits）
+- Goal ID: `G3.5`
+- Name: Kimi / Moonshot（Kimi Code 会员 Key + 按量 API；官方余额查询 API）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 3 供应商产品）
+
+## G3.4 — MiniMax（个人/团队 Token Plan + 按量 API，DONE）
+
+### 官方事实核验（2026-08-26，platform.minimax.io）
+
+- OpenAI 兼容 base：`https://api.minimax.io/v1`（签名目录 baseUrlTemplate 为 `https://api.minimax.chat/v1`，属 DOCUMENTED 设计值，管理员按官方端点配置）；Anthropic 兼容 base：`https://api.minimax.io/anthropic`（官方存在，但目录只声明 `OPENAI_COMPATIBLE`，待下一版签名）。
+- 模型列表 API 官方存在：`GET https://api.minimax.io/v1/models`，`Authorization: Bearer <API_KEY>`，响应 `data[].id/object/created/owned_by`（无 display name）。
+- Token Plan 专属 Key 形如 `sk-cp-…`，与按量 API Key 不互通；当前模型 `MiniMax-M3`。
+- 团队版：席位 1:1 分配给成员（可转授、不重置用量）；未分配席位的成员在开启权限后可经自己的 Subscription Key 消费共享 Credits 池 → `PER_MEMBER_SUBSCRIPTION_KEY` + 共享 Credits，`sharedPool=true`。
+- **docs 索引（llms.txt）无任何 Token Plan 余额/用量查询 API**（额度与钱包余额仅控制台可见）→ `fetchPlanStatus` 返回 `UNAVAILABLE`。
+
+### 实现
+
+- `provider-adapters`：`MiniMaxAdapter`（3 个静态工厂，adapterId 与签名目录逐一匹配）+ `MiniMaxUsageObserver`；base 以 `/v1` 结尾 → 剥离 OpenAI SDK `/v1` 前缀（`/v1/chat/completions` → `/chat/completions`）；`fetchModels` 解析官方 list-models 形状（无 display name → `ModelDefinition(id)`，兼容 `name` 变体）；`fetchPlanStatus` → `UNAVAILABLE`（0 HTTP）；团队版 `teamPlan=true` + `sharedPool=true`。
+- `control-plane-app`：`ProviderClientConfig` 注册 3 个 MiniMax 适配器（现共 12 个适配器：DeepSeek 1 + Tencent 5 + Zhipu 3 + MiniMax 3）。
+
+### 测试（本 Goal 新增 17 个）
+
+- `MiniMaxAdapterTest`（13）：3 个产品 adapterId/协议与签名目录一致；凭证剥离 + query 重编码；`/v1` 前缀剥离；空 query；凭证探活 `/models`；401/403/429/5xx 映射；fetchModels 官方形状/`name` 变体/失败模式；fetchPlanStatus `UNAVAILABLE` 且 0 HTTP；capabilities 三产品差异；observer 绑定。
+- `MiniMaxUsageObserverTest`（4）：OpenAI 形状 + 根 model id、`cached_tokens` 形状、空/畸形容忍、observer 最新值。
+- `ProviderClientConfigTest`（更新）：注册列表含 12 个适配器。
+
+### 风险与边界
+
+- 适配器状态 `IMPLEMENTED`（官方文档核验），`VERIFIED` 需真实 MiniMax 凭证联调 → `WAITING_FOR_CREDENTIAL`。
+- Anthropic 兼容入口与 VENDOR_NATIVE 能力待目录下一版签名补声明（JSON 不可改）。
+- 签名目录 baseUrlTemplate（`api.minimax.chat`）与官方当前端点（`api.minimax.io`）不一致：录入产品实例时以官方端点为准（已在 provider-catalog §3.4 注明）。
+
+### 验证
+
+- 模块验证：`verify -pl provider-adapters,control-plane-app -am` → BUILD SUCCESS；全量 `verify -P integration` → **BUILD SUCCESS**（见 Current State 计数）。
 
 ## G3.3 — 智谱 GLM（个人/团队 Coding Plan + 按量 API，DONE）
 
