@@ -10,6 +10,8 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 import java.time.Instant;
 import java.util.HashMap;
+import java.net.URI;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -99,7 +101,13 @@ public final class JdbcRouteSnapshotLoader {
                        b.virtual_key_id, b.project_id, p.project_tag, g.upstream_credential_id, g.provider_product_id
                 FROM key_project_binding b
                 JOIN projects p ON p.id = b.project_id AND p.tenant_id = b.tenant_id
-                JOIN project_provider_grants g ON g.project_id = b.project_id
+                -- The binding's grant is authoritative: a project may hold
+                -- several ACTIVE grants (different products/credentials), and
+                -- the key must route only to the grant it was authorized for,
+                -- never to a sibling grant of the same project.
+                JOIN virtual_keys vk ON vk.id = b.virtual_key_id AND vk.tenant_id = b.tenant_id
+                JOIN project_provider_grants g ON g.id = vk.grant_id
+                                              AND g.project_id = b.project_id
                                               AND g.tenant_id = b.tenant_id
                                               AND g.status = 'ACTIVE'
                 WHERE b.status = 'ACTIVE' AND p.status = 'ACTIVE'
@@ -133,8 +141,8 @@ public final class JdbcRouteSnapshotLoader {
                   AND c.id IN (SELECT g.upstream_credential_id FROM project_provider_grants g WHERE g.status = 'ACTIVE')
                 """, rs -> {
             UUID credentialId = (UUID) rs.getObject("credential_id");
-            String baseUrl = firstBaseUrl(rs.getString("base_url_templates"));
-            if (baseUrl == null) {
+            BaseUrlSet baseUrls = parseBaseUrls(rs.getString("base_url_templates"));
+            if (baseUrls.single() == null && baseUrls.byProtocolUris().isEmpty()) {
                 log.warn("Credential {} has no usable base_url_templates entry; excluded from routing snapshot",
                         credentialId);
                 return;
@@ -146,8 +154,8 @@ public final class JdbcRouteSnapshotLoader {
                         rs.getString("encryption_key_version"));
             }
             RouteSnapshot.CredentialRecord credential = new RouteSnapshot.CredentialRecord(credentialId,
-                    (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("product_id"), baseUrl,
-                    rs.getString("auth_scheme"), encryptedSecret);
+                    (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("product_id"), baseUrls.single(),
+                    rs.getString("auth_scheme"), encryptedSecret, baseUrls.byProtocolUris());
             credentials.put(credentialId, credential);
         });
         return credentials;
@@ -230,28 +238,64 @@ public final class JdbcRouteSnapshotLoader {
      * Extracts the first usable base URL from the product's jsonb
      * {@code base_url_templates} array. Unknown structure returns null.
      */
-    private String firstBaseUrl(String json) {
+    /**
+     * Parses {@code base_url_templates}: entries may carry an optional
+     * {@code protocols} array (per-protocol bases, G3.x relay wiring) or no
+     * protocol (single/base fallback). Unknown structure yields an empty set.
+     */
+    private BaseUrlSet parseBaseUrls(String json) {
         if (json == null || json.isBlank()) {
-            return null;
+            return BaseUrlSet.EMPTY;
         }
         try {
             JsonNode node = objectMapper.readTree(json);
+            String single = null;
+            Map<String, String> byProtocol = new LinkedHashMap<>();
             if (node.isArray()) {
                 for (JsonNode entry : node) {
-                    String url = entry.isTextual() ? entry.asText() : entry.path("url").asText(null);
-                    if (url != null && !url.isBlank()) {
-                        return url;
+                    if (entry.isTextual()) {
+                        if (single == null) {
+                            single = entry.asText();
+                        }
+                        continue;
+                    }
+                    String url = entry.path("url").asText(null);
+                    if (url == null || url.isBlank()) {
+                        continue;
+                    }
+                    JsonNode protocols = entry.path("protocols");
+                    if (protocols.isArray() && !protocols.isEmpty()) {
+                        for (JsonNode protocol : protocols) {
+                            byProtocol.putIfAbsent(protocol.asText(), url);
+                        }
+                    } else if (single == null) {
+                        single = url;
                     }
                 }
             } else if (node.isObject()) {
-                JsonNode url = node.get("url");
-                if (url != null && url.isTextual() && !url.asText().isBlank()) {
-                    return url.asText();
+                String url = node.path("url").asText(null);
+                if (url != null && !url.isBlank()) {
+                    single = url;
                 }
+            } else if (node.isTextual() && !node.asText().isBlank()) {
+                single = node.asText();
             }
+            return new BaseUrlSet(single, byProtocol);
         } catch (Exception e) {
             log.warn("Cannot parse base_url_templates jsonb: {}", e.getMessage());
+            return BaseUrlSet.EMPTY;
         }
-        return null;
+    }
+
+    /** Parsed base URL set: a single fallback plus per-protocol entries. */
+    record BaseUrlSet(String single, Map<String, String> byProtocol) {
+
+        static final BaseUrlSet EMPTY = new BaseUrlSet(null, Map.of());
+
+        Map<String, URI> byProtocolUris() {
+            Map<String, URI> result = new LinkedHashMap<>();
+            byProtocol.forEach((protocol, url) -> result.put(protocol, URI.create(url)));
+            return result;
+        }
     }
 }

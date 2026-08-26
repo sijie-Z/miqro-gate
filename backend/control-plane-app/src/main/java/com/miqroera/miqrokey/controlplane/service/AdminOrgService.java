@@ -13,6 +13,7 @@ import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.model.UserStatus;
 import com.miqroera.miqrokey.domain.repository.ProjectMembershipRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectProviderGrantRepository;
+import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
 import com.miqroera.miqrokey.domain.repository.TeamRepository;
 import com.miqroera.miqrokey.domain.repository.UpstreamCredentialRepository;
@@ -48,6 +49,7 @@ public class AdminOrgService {
     private final ProjectRepository projectRepository;
     private final ProjectMembershipRepository projectMembershipRepository;
     private final ProjectProviderGrantRepository grantRepository;
+    private final ProviderProductRepository productRepository;
     private final UpstreamCredentialRepository credentialRepository;
     private final PasswordHasher passwordHasher;
     private final SessionService sessionService;
@@ -57,13 +59,14 @@ public class AdminOrgService {
     public AdminOrgService(UserRepository userRepository, TeamRepository teamRepository,
             ProjectRepository projectRepository, ProjectMembershipRepository projectMembershipRepository,
             ProjectProviderGrantRepository grantRepository, UpstreamCredentialRepository credentialRepository,
-            PasswordHasher passwordHasher, SessionService sessionService, AuditService auditService,
-            NamedParameterJdbcTemplate jdbc) {
+            ProviderProductRepository productRepository, PasswordHasher passwordHasher, SessionService sessionService,
+            AuditService auditService, NamedParameterJdbcTemplate jdbc) {
         this.userRepository = userRepository;
         this.teamRepository = teamRepository;
         this.projectRepository = projectRepository;
         this.projectMembershipRepository = projectMembershipRepository;
         this.grantRepository = grantRepository;
+        this.productRepository = productRepository;
         this.credentialRepository = credentialRepository;
         this.passwordHasher = passwordHasher;
         this.sessionService = sessionService;
@@ -216,6 +219,7 @@ public class AdminOrgService {
 
     @Transactional
     public Project createProject(UUID tenantId, UUID adminId, String code, String name, String projectTag) {
+        requireValidProjectTag(projectTag);
         if (code == null || code.isBlank() || projectRepository.existsByTenantIdAndCode(tenantId, code)) {
             throw new ApiException(HttpStatus.CONFLICT, "PROJECT_CODE_TAKEN",
                     "project code is required and must be unique");
@@ -230,6 +234,7 @@ public class AdminOrgService {
 
     public Project updateProject(UUID tenantId, UUID adminId, UUID projectId, String name, String projectTag,
             ProjectStatus status) {
+        requireValidProjectTag(projectTag);
         Project project = requireProject(tenantId, projectId);
         Project updated = new Project(project.id(), project.tenantId(), project.code(),
                 name != null ? name : project.name(), project.description(), project.costCenter(),
@@ -286,8 +291,13 @@ public class AdminOrgService {
     public ProjectProviderGrant createGrant(UUID tenantId, UUID adminId, UUID projectId, UUID providerProductId,
             UUID credentialId, List<String> models) {
         requireProject(tenantId, projectId);
-        credentialRepository.findById(credentialId).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND,
-                "CREDENTIAL_NOT_FOUND", "Credential not found or not visible"));
+        credentialRepository.findById(credentialId).filter(c -> c.tenantId().equals(tenantId))
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "CREDENTIAL_NOT_FOUND",
+                        "Credential not found or not visible"));
+        if (providerProductId != null) {
+            productRepository.findById(providerProductId).orElseThrow(
+                    () -> new ApiException(HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND", "Provider product not found"));
+        }
         if (grantRepository.existsByProjectIdAndProductIdAndCredentialId(projectId, providerProductId, credentialId)) {
             throw new ApiException(HttpStatus.CONFLICT, "GRANT_EXISTS",
                     "a grant for this project/product/credential already exists");
@@ -345,6 +355,18 @@ public class AdminOrgService {
                             .addValue("model", model.trim()));
                 }
             }
+        }
+    }
+
+    /**
+     * The tag becomes the Virtual Key's dot-suffix (VirtualKeyParser): it must
+     * match the same pattern, otherwise the generated keys are unparseable and
+     * permanently dead.
+     */
+    private void requireValidProjectTag(String projectTag) {
+        if (projectTag != null && !java.util.regex.Pattern.matches("^[A-Za-z0-9_-]{1,64}$", projectTag)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "PROJECT_TAG_INVALID",
+                    "projectTag must match [A-Za-z0-9_-]{1,64}");
         }
     }
 

@@ -138,7 +138,10 @@ public class AuthenticationService {
         }
 
         // Estimate fail count for progressive delay (NOT used for persistence).
-        int estimatedFailCount = (user != null) ? user.failedLoginCount() + 1 : 1;
+        // Unknown usernames must observe a delay too, otherwise the timing
+        // difference lets attackers enumerate existing accounts: start them
+        // at the same floor as a first failed attempt on a known account.
+        int estimatedFailCount = (user != null) ? user.failedLoginCount() + 1 : 2;
 
         // Progressive delay BEFORE any write transaction — never sleep holding a DB
         // connection.

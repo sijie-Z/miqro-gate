@@ -110,11 +110,15 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 conditions.add(alias + ".project_id = :projectId");
                 params.addValue("projectId", filter.projectId());
             }
-            if (filter.userId() != null) {
+            if (filter.userId() != null || filter.subscriptionId() != null) {
+                // vkf is referenced by the subscription branch too; join once
+                // for either filter (audit fix).
                 joins.append(" JOIN virtual_keys vkf ON vkf.id = ").append(alias)
                         .append(".virtual_key_id AND vkf.tenant_id = ").append(alias).append(".tenant_id");
-                conditions.add("vkf.user_id = :userId");
-                params.addValue("userId", filter.userId());
+                if (filter.userId() != null) {
+                    conditions.add("vkf.user_id = :userId");
+                    params.addValue("userId", filter.userId());
+                }
             }
             if (filter.subscriptionId() != null) {
                 joins.append(" JOIN credentials crf ON crf.id = vkf.credential_id AND crf.tenant_id = vkf.tenant_id");

@@ -4,6 +4,7 @@ import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 
 import java.time.Instant;
 import java.util.Collections;
+import java.net.URI;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -156,13 +157,28 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
      * </p>
      */
     public record CredentialRecord(UUID credentialId, UUID tenantId, UUID productId, String baseUrl, String authScheme,
-            EncryptedSecret encryptedSecret) {
+            EncryptedSecret encryptedSecret, Map<String, URI> baseUrlsByProtocol) {
 
         public CredentialRecord {
             encryptedSecret = encryptedSecret == null
                     ? null
                     : new EncryptedSecret(encryptedSecret.ciphertext(), encryptedSecret.nonce(),
                             encryptedSecret.keyVersion());
+            baseUrlsByProtocol = baseUrlsByProtocol == null ? Map.of() : Map.copyOf(baseUrlsByProtocol);
+        }
+
+        /**
+         * Per-protocol base URL for the route's negotiated protocol family (protocol
+         * family names, e.g. OPENAI_COMPATIBLE); falls back to the single
+         * {@code baseUrl} when the product has no protocol-specific templates (G3.x
+         * relay wiring).
+         */
+        public URI baseUrl(String family) {
+            URI byProtocol = baseUrlsByProtocol.get(family);
+            if (byProtocol != null) {
+                return byProtocol;
+            }
+            return baseUrl != null ? URI.create(baseUrl) : null;
         }
 
         @Override
