@@ -104,6 +104,7 @@
 
 - `bash deploy/security/check-secrets.sh` → **secret scan ok**
 - `bash deploy/security/check-sbom.sh` → **license gate ok (107 components)**
+- **镜像升级（Trivy 实际发现驱动）**：postgres 17.6-alpine 旧 digest（2025-04）含 22 个 HIGH/CRITICAL（golang 工具链）；升级至 2026-08-16 最新 digest（10 处引用：compose + 8 个测试类 + backup 演练 + CI）；`.trivyignore` 仅豁免 3 个已知工具链 CVE 并注明升级后复查。
 
 ## G6.2 — Backup and restore（DONE）
 
