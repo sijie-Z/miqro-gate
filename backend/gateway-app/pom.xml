@@ -40,6 +40,10 @@
             <groupId>com.miqroera.miqrokey</groupId>
             <artifactId>route-snapshot</artifactId>
         </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
 
         <!-- Reactor Netty (managed by Spring Boot) -->
         <dependency>
@@ -57,6 +61,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>8.1</version>
+            <scope>runtime</scope>
         </dependency>
 
         <!-- ArchUnit cross-module verification — needs control-plane classes on test classpath -->

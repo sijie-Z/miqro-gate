@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G5.5`（UI security and accessibility：权限路由、敏感信息防缓存、键盘操作、错误状态、中文文案和基础可访问性）
+- Current goal: `G6.1`（Observability：Prometheus 指标、JSON 日志、Grafana Dashboard、健康检查和高基数保护）
 - Goal status: `DONE`
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g5.5-ui-security-a11y`
+- Branch: `goal/g6.1-observability`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,32 @@
 
 ## Next Goal
 
-- Goal ID: `G6.1`
-- Name: Observability and optional monitoring profile（Prometheus 指标、JSON 日志、Grafana Dashboard、健康检查和高基数保护）
+- Goal ID: `G6.2`
+- Name: Backup and restore（每日/每周保留策略、校验、Webhook、恢复命令和真实恢复测试）
 - Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md)（Phase 6 交付；**Phase 5 全部完成**）
+- Source: [`implementation-plan.md`](implementation-plan.md)（Phase 6 交付）
+
+## G6.1 — Observability and optional monitoring profile（DONE）
+
+### 实现
+
+- **Prometheus 指标**：`monitoring` profile 激活时暴露 `/actuator/prometheus`（`management.prometheus.metrics.export.enabled: true` 显式开启 —— Boot 3.4 起默认不导出，这是本 Goal 最大的坑：endpoint 注册失败曾表现为 404/500，根因是 PrometheusMeterRegistry bean 未创建）。
+  - gateway：`GatewayMetricsFilter` —— `miqrokey_gateway_requests_total`（status_class 2xx/3xx/4xx/5xx 五档低基数 counter）
+  - control-plane：`QuotaSnapshotService` 注入 MeterRegistry —— `miqrokey_control_provider_calls_total` + `miqrokey_control_quota_refresh_total`
+  - 依赖 `micrometer-registry-prometheus`（compile scope，代码引用需要）
+- **JSON 日志**：`json` profile + `logback-spring.xml`（LogstashEncoder；`SPRING_PROFILES_ACTIVE=monitoring,json`）
+- **Grafana Dashboard**：`deploy/grafana/miqrokey-dashboard.json`（4 面板：请求速率/状态分布、provider 调用、JVM 堆、usage 队列）
+- **健康检查**：既有 `/actuator/health`（when-authorized）；高基数保护：configuration-reference §8 指标标签禁令（用户/Key/模型/正文绝不入标签）
+- **默认安全边界不变**：无 monitoring profile 时端点关闭（GatewayApplicationSmokeTest 断言维持）
+
+### 测试（本 Goal 新增 3 个）
+
+- `GatewayMonitoringProfileTest`（2）：真实 HTTP 抓取 200 + 自定义 counter 存在；请求计数 4xx counter 递增（micrometer 1.14 指标名无 `_total` 后缀）
+- `ControlPlaneMonitoringProfileTest`（1）：真实端口抓取 200 + provider-call counter（MockMvc 不挂载 management 端点，必须真实 HTTP）
+
+### 验证
+
+- 全量 `verify -P integration`：**958 tests / 0 failures / 0 errors / 5 skipped**
 
 ## G5.5 — UI security and accessibility（DONE）
 
