@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G4.3`（Pricing snapshots and cost allocation：PAYG 估算、Plan 固定成本、按 Token 权重的项目摊销和算法版本）
-- Goal status: `DONE`（全量验证通过：944 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
+- Current goal: `G4.4`（Raw export and manual deletion：异步 CSV/JSONL gzip、SHA-256、临时下载、删除预览/二次确认/永久审计）
+- Goal status: `DONE`（全量验证通过：947 tests / 0 failures / 0 errors / 5 skipped，Windows POSIX）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g4.3-cost-allocation`
+- Branch: `goal/g4.4-export-deletion`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
@@ -86,10 +86,34 @@
 
 ## Next Goal
 
-- Goal ID: `G4.4`
-- Name: Raw export and manual deletion（异步 CSV/JSONL gzip、SHA-256、临时下载、删除预览/二次确认/永久审计）
+- Goal ID: `G4.5`
+- Name: Webhook alerts（凭证失效、错误率、余额、异常增长、系统/备份、usage 缺失六类告警及签名、去重和重试）
 - Status: `NOT_STARTED`
 - Source: [`implementation-plan.md`](implementation-plan.md)（Phase 4 统计、Plan 和告警）
+
+## G4.4 — Raw export and manual deletion（DONE）
+
+### 实现
+
+- `V11__export_and_deletion.sql`：`export_tasks`（异步导出任务：格式/窗口/状态/SHA-256/行数/字节数/gzip 产物/24h 过期/脱敏错误）+ `usage_deletions`（双确认删除：预览计数/token 哈希/状态/删除数/1h 确认窗口）。
+- `ExportTaskService`：创建即 `202`（PENDING），有界 daemon 线程池（2 线程）渲染窗口为 CSV/JSONL（仅计数与元数据列）→ gzip → SHA-256 落库；下载服务产物直至过期。
+- `UsageDeletionService`：干跑预览 → 创建请求（一次性 token 仅 SHA-256 入库，明文仅本次返回）→ 确认（常量时间比对、窗口/状态校验）→ 物理删除 + `USAGE_DELETE` 审计事件。
+- 控制器：`AdminExportController`（create/status/download/recent）、`AdminUsageDeletionController`（preview/create/confirm/recent），均 SYSTEM_ADMIN only。
+- api-contract §5.5/§5.6、database-schema（export_tasks/usage_deletions）更新。
+
+### 测试（本 Goal 新增 3 个集成）
+
+- `ExportDeletionApiIntegrationTest`（3，Testcontainers）：导出全链路（202 → 轮询 SUCCEEDED → 下载 gunzip 校验两行 + 元数据列 + 无 Secret 字样 + SHA-256 头一致）；删除全链路（预览 2 → 错误 token 403 → 正确 token 执行 → 行清零 + 审计存在 → 重复确认 409）；匿名 401。
+
+### 风险与边界
+
+- 导出产物存 DB（bytea）：93 天窗口 × 元数据行的体积可控；超大窗口的未来方案为对象存储（文档未承诺）。
+- 删除物理执行、无软删除；`usage_deletions` 请求本身与审计链保留（永久审计）。
+- 定时清理 EXPIRED 导出/过期删除请求未接线（管理面可见即可；垃圾回收属运维目标）。
+
+### 验证
+
+- 全量 `verify -P integration` → **BUILD SUCCESS**，**947 tests / 0 failures / 0 errors / 5 skipped**（944 + 3 新增）。本轮另见 domain 模块 `HmacVirtualKeyProviderTest.shouldFollowFormat` 一次性 flaky（随机数据边界），单独重跑通过，列入已知 flaky 清单。
 
 ## G4.3 — Pricing snapshots and cost allocation（DONE）
 
