@@ -291,6 +291,24 @@
 
 真实凭证写接口只接受明文输入，响应只返回掩码、指纹、版本和验证状态。凭证测试不得自动把未保存值写入数据库。
 
+### 5.0 组织（G5.2）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/users` | 用户列表（**永不返回 passwordHash**，Jackson mixin 全局排除） |
+| `POST /api/v1/admin/users` | 创建用户（`username`/`displayName`/`role`）；返回一次性临时密码（仅本次出现） |
+| `PATCH /api/v1/admin/users/{id}` | 更新状态（`status`：ACTIVE/DISABLED；禁用即撤销全部会话；SYSTEM_ADMIN 不可禁用 → 409 `ADMIN_NOT_DISABLEABLE`） |
+| `POST /api/v1/admin/users/{id}/reset-password` | 重置密码 + 撤销全部会话；返回新临时密码（仅本次） |
+| `POST /api/v1/admin/users/{id}/revoke-sessions` | 撤销该用户全部会话 |
+| `GET/POST /api/v1/admin/teams`、`PATCH /{id}` | 团队列表/创建/更新 |
+| `GET/POST /api/v1/admin/teams/{id}/members`、`DELETE /members/{userId}` | 团队成员管理 |
+| `GET/POST /api/v1/admin/projects`、`PATCH /{id}` | 项目列表/创建（`code` 唯一，冲突 → 409 `PROJECT_CODE_TAKEN`）/更新 |
+| `GET/POST /api/v1/admin/projects/{id}/members`、`DELETE /members/{userId}` | 项目成员管理 |
+| `GET/POST /api/v1/admin/grants` | Grant 列表/创建（`projectId`×`providerProductId`×`credentialId` + `models[]`；重复 → 409 `GRANT_EXISTS`） |
+| `GET/POST /api/v1/admin/grants/{id}/models`、`DELETE /{id}` | 模型范围查询/替换；禁用 Grant |
+
+错误码：`USER_NOT_FOUND`/`TEAM_NOT_FOUND`/`PROJECT_NOT_FOUND`/`GRANT_NOT_FOUND`（404）、`USERNAME_TAKEN`/`PROJECT_CODE_TAKEN`/`GRANT_EXISTS`（409）、`USERNAME_INVALID`（400）、`ADMIN_NOT_DISABLEABLE`（409）。所有写操作写审计事件（`USER_CREATE`/`USER_STATUS`/`USER_PASSWORD_RESET`/`USER_SESSIONS_REVOKED`/`TEAM_*`/`PROJECT_*`/`GRANT_*`）。
+
 ### 5.1 上游凭证
 
 管理员录入真实供应商凭证并管理其生命周期（G1.6）。真实凭证属于供应商产品订阅，不绑定用户；只有 SYSTEM_ADMIN 可操作。

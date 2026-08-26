@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G5.1`（User portal：登录、首次改密、个人首页、Key 创建一次性展示、列表、轮换、吊销、个人用量）
-- Goal status: `DONE`
+- Current goal: `G5.2`（Admin organization portal：账号、团队、项目、成员、Grant 和模型授权）
+- Goal status: `DONE`（后端 API 部分；前端页面为下一交付）
 - Last updated: `2026-08-26 CST`
-- Branch: `goal/g5.1-login-profile-keys`
+- Branch: `goal/g5.2-admin-org-portal`
 - Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
 
 ## Completed
