@@ -110,3 +110,15 @@
 
 管理员审计永久保存，包含：登录安全事件、账号、授权、凭证、目录、Virtual Key、告警、导出、删除、加密密钥轮换和部署配置变更。审计事件使用追加写入模式，并定期生成链式哈希或批次校验值用于检测篡改。
 
+
+## 供应链与发布门禁（G6.3）
+
+| 门禁 | 位置 | 说明 |
+|---|---|---|
+| Secret 扫描 | `deploy/security/check-secrets.sh` | `git grep` 高信号凭证模式（sk-/Bearer/AKIA/xox/ghp_）；放行构建产物、测试夹具与 compose 占位符；**文档示例 Key 一律打码**（G6.3 已清理 23 处） |
+| 许可证门禁 + SBOM | `deploy/security/check-sbom.sh` | CycloneDX 聚合 BOM（gateway + control-plane 运行时依赖）；拒绝 GPL/LGPL/AGPL/SSPL/EPL/MPL/CC-BY-NC/SA |
+| 镜像扫描 | CI `security` job | Trivy 扫 compose 固定 digest 镜像（postgres 17.6-alpine），HIGH/CRITICAL 未修复即失败 |
+| 目录签名 | 既有（G2.1） | provider-catalog.json Ed25519 签名 + 启动强校验，篡改即启动失败 |
+| 审计完整性 | 既有（G2.3） | admin_audit_events 哈希链（previous/current_event_hash + chain_position），链断裂测试覆盖 |
+
+CI：`security` job 在每次 push/PR 运行全部门禁；compose job 继续强制 digest 固定。

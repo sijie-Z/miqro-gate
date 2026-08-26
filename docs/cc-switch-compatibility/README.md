@@ -52,7 +52,7 @@ During G0.4 compatibility testing, the Gateway does not validate keys.
 Use this synthetic key for CC Switch Provider configuration:
 
 ```
-sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000
+sk-miqrokey-…REDACTED000000
 ```
 
 The Gateway strips all credential headers (authorization, x-api-key, api-key)

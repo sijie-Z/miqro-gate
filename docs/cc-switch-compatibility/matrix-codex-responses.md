@@ -16,7 +16,7 @@
 | Parameter | Value |
 |---|---|
 | Gateway Base URL | `http://127.0.0.1:8081` |
-| Synthetic Key | `sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000` |
+| Synthetic Key | `sk-miqrokey-…REDACTED000000` |
 | Codex Provider Config | See [config-field-reference.md](config-field-reference.md) section 4.3 |
 | Upstream | OpenAI Responses-compatible endpoint (real or mock) |
 | Gateway Mode | Transparent — does not modify OpenAI Responses protocol |
@@ -129,7 +129,7 @@
    ```powershell
    # Example (exact env var names ENV_BLOCKED):
    $env:OPENAI_BASE_URL = "http://127.0.0.1:8081/v1"
-   $env:OPENAI_API_KEY = "sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000"
+   $env:OPENAI_API_KEY = "sk-miqrokey-…REDACTED000000"
    ```
 
 4. Run scenarios 1–20 in order.

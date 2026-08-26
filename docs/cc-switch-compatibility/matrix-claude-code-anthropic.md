@@ -10,7 +10,7 @@
 | Parameter | Value |
 |---|---|
 | Gateway Base URL | `http://127.0.0.1:8081` |
-| Synthetic Key | `sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000` |
+| Synthetic Key | `sk-miqrokey-…REDACTED000000` |
 | CC Switch Provider Type | Anthropic (GUI field name ENV_BLOCKED) |
 | CC Switch Auth Header | `x-api-key` (ENV_BLOCKED — verify on instance) |
 | Upstream | Real Anthropic API or compatible endpoint |

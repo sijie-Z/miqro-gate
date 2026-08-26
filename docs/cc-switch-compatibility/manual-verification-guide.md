@@ -174,7 +174,7 @@ Create a new Provider in CC Switch:
 | Provider Type | Anthropic (or Custom/Generic for Anthropic) | CC Switch field name ENV_BLOCKED |
 | Name | `MiQroKey Gateway (Anthropic)` | Descriptive name for identification |
 | Base URL | `http://localhost:8081` | The Gateway's public entry point; trailing slash behavior may vary by CC Switch version |
-| API Key | `sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000` | Synthetic test key for G0.4 PoC |
+| API Key | `sk-miqrokey-…REDACTED000000` | Synthetic test key for G0.4 PoC |
 | API Key Header | depends on CC Switch version | May be `x-api-key` or `Authorization: Bearer`; test both |
 | Models | depends on CC Switch version | List the models you intend to test (the Gateway's `/v1/models` is not yet implemented — coming in G2.3) |
 
@@ -192,7 +192,7 @@ Create a Provider that CC Switch uses for Local Routing (protocol conversion):
 |---|---|---|
 | Provider Type | depends on CC Switch version | The type that triggers CC Switch to convert Anthropic → OpenAI Chat before forwarding |
 | Base URL | `http://localhost:8081` | Same Gateway entry point |
-| API Key | `sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000` | Same synthetic test key |
+| API Key | `sk-miqrokey-…REDACTED000000` | Same synthetic test key |
 | API Key Header | `Authorization: Bearer` | OpenAI convention |
 | Protocol | OpenAI Chat Completions | CC Switch converts then sends to `POST /v1/chat/completions` |
 
@@ -210,7 +210,7 @@ If CC Switch supports Codex provider configuration:
 |---|---|---|
 | Provider Type | depends on CC Switch version | Codex-specific or generic OpenAI Responses |
 | Base URL | `http://localhost:8081` | Same Gateway entry point |
-| API Key | `sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000` | Same synthetic test key |
+| API Key | `sk-miqrokey-…REDACTED000000` | Same synthetic test key |
 | API Key Header | `Authorization: Bearer` | OpenAI convention |
 | Protocol | OpenAI Responses | Codex sends to `POST /v1/responses` |
 
@@ -220,7 +220,7 @@ configuration. In that case, configure Codex to point directly at the Gateway:
 | Field | Value |
 |---|---|
 | Base URL / API Endpoint | `http://localhost:8081/v1` |
-| API Key | `sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000` |
+| API Key | `sk-miqrokey-…REDACTED000000` |
 
 ### 4.4 Claude Desktop Provider
 
@@ -230,7 +230,7 @@ If a tester has access to Claude Desktop on Windows/macOS:
 |---|---|---|
 | Provider Type | depends on CC Switch version | The Claude Desktop provider type in CC Switch |
 | Base URL | `http://localhost:8081` | Same Gateway entry point |
-| API Key | `sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000` | Same synthetic test key |
+| API Key | `sk-miqrokey-…REDACTED000000` | Same synthetic test key |
 | Model Mapping | depends on CC Switch version | Map Claude model roles to actual provider models |
 
 **MANUAL_REQUIRED:** Claude Desktop 1.24012.1 is installed (version CONFIRMED)
@@ -245,7 +245,7 @@ any key and strips all credential headers before forwarding to the upstream.
 Use this key for all CC Switch Provider configurations:
 
 ```
-sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000
+sk-miqrokey-…REDACTED000000
 ```
 
 This key:
@@ -279,7 +279,7 @@ $body = @'
 $response = Invoke-WebRequest -Uri http://127.0.0.1:8081/v1/messages `
   -Method POST `
   -ContentType "application/json" `
-  -Headers @{ "x-api-key" = "sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000" } `
+  -Headers @{ "x-api-key" = "sk-miqrokey-…REDACTED000000" } `
   -Body $body
 $response.StatusCode
 ```
@@ -289,7 +289,7 @@ $response.StatusCode
 curl -s -w "\nHTTP %{http_code}\n" \
   -X POST http://127.0.0.1:8081/v1/messages \
   -H "Content-Type: application/json" \
-  -H "x-api-key: sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000" \
+  -H "x-api-key: sk-miqrokey-…REDACTED000000" \
   -d '{"model":"claude-sonnet-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
@@ -303,7 +303,7 @@ shows a recorded request with `"protocol":"ANTHROPIC_MESSAGES"` and
 curl -s -w "\nHTTP %{http_code}\n" \
   -X POST http://127.0.0.1:8081/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000" \
+  -H "Authorization: Bearer sk-miqrokey-…REDACTED000000" \
   -d '{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"max_tokens":1}'
 ```
 
@@ -316,7 +316,7 @@ Expected: HTTP 200 with OpenAI Chat JSON. Mock observations show
 curl -s -w "\nHTTP %{http_code}\n" \
   -X POST http://127.0.0.1:8081/v1/responses \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-miqrokey-g04-test-0000000000000000000000000000000000000000000000" \
+  -H "Authorization: Bearer sk-miqrokey-…REDACTED000000" \
   -d '{"model":"gpt-4o","input":"hi","max_output_tokens":1}'
 ```
 
