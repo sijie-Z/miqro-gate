@@ -4,15 +4,18 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessageBox } from 'element-plus';
 import { useAuthStore } from '@/stores/auth';
 import {
+  Bell,
   DataAnalysis,
+  Delete,
+  Download,
   Key,
   Lock,
   Odometer,
-  Setting,
   SwitchButton,
   User,
   UserFilled,
   Wallet,
+  Warning,
 } from '@element-plus/icons-vue';
 
 const route = useRoute();
@@ -34,11 +37,16 @@ const regularNav: NavItem[] = [
 ];
 
 const adminNav: NavItem[] = [
+  { name: 'admin-usage', label: 'Usage', icon: DataAnalysis },
   { name: 'providers', label: 'Providers', icon: Wallet },
   { name: 'plans', label: 'Plans', icon: Odometer },
   { name: 'credentials', label: 'Credentials', icon: Lock },
+  { name: 'grants', label: 'Grants', icon: Key },
+  { name: 'exports', label: 'Exports', icon: Download },
+  { name: 'deletions', label: 'Deletions', icon: Delete },
+  { name: 'webhooks', label: 'Webhooks', icon: Bell },
+  { name: 'alert-rules', label: 'Alert Rules', icon: Warning },
   { name: 'audit', label: 'Audit', icon: UserFilled },
-  { name: 'settings', label: 'Settings', icon: Setting },
 ];
 
 const navGroups = computed(() => {
