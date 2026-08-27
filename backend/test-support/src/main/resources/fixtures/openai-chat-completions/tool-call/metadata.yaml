@@ -1,0 +1,10 @@
+fixtureVersion: 1
+id: openai-chat-tool-call
+protocol: OPENAI_CHAT_COMPLETIONS
+streaming: true
+upstreamStatus: 200
+capabilities: [TOOLS, TOOL_CALL_DELTA, USAGE]
+sourceCategory: DOCUMENTATION_DERIVED
+bodyClassification: SYNTHETIC
+expectedByteTransparent: true
+implementation: com.miqroera.miqrokey.testing.ChatFixtures

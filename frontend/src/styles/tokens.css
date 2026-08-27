@@ -1,0 +1,158 @@
+/* MiQroKey 额度账本 tokens（frontend-design.md §4，2026-08-27 重设计）。
+   参考腾讯云 TokenHub 控制台的浅色密集操作台：白色卡片、细边框、蓝色主色、
+   表格密度优先。Element Plus 覆盖在本文件之上；组件不得散落颜色与圆角。
+   无渐变 —— 平面色块是签名元素（额度分段条）的载体。 */
+
+:root {
+  /* color — Tencent-console-inspired ledger palette */
+  --miqrokey-bg-canvas: #f2f4f8;
+  --miqrokey-bg-surface: #ffffff;
+  --miqrokey-bg-subtle: #f7f8fa;
+  --miqrokey-border-default: #e5e7eb;
+  --miqrokey-border-muted: #eef0f3;
+  --miqrokey-border-strong: #d4d8df;
+  --miqrokey-text-primary: #1f2329;
+  --miqrokey-text-secondary: #646a73;
+  --miqrokey-text-disabled: #8a9099;
+  --miqrokey-accent: #0066ff;
+  --miqrokey-accent-hover: #0052cc;
+  --miqrokey-accent-soft: #eaf2ff;
+  --miqrokey-success: #00b96b;
+  --miqrokey-success-soft: #e6f9f0;
+  --miqrokey-warning: #ff9a2e;
+  --miqrokey-warning-soft: #fff4e5;
+  --miqrokey-danger: #e5484d;
+  --miqrokey-danger-soft: #feecec;
+  --miqrokey-info: #0066ff;
+
+  /* typography */
+  --miqrokey-font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+  --miqrokey-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  --miqrokey-font-size-body: 13px;
+  --miqrokey-font-size-table: 12px;
+  --miqrokey-font-size-title: 18px;
+  --miqrokey-font-size-hero: 24px;
+
+  /* shape & spacing */
+  --miqrokey-radius-control: 4px;
+  --miqrokey-radius-panel: 6px;
+  --miqrokey-radius-modal: 8px;
+  --miqrokey-space-1: 4px;
+  --miqrokey-space-2: 8px;
+  --miqrokey-space-3: 12px;
+  --miqrokey-space-4: 16px;
+  --miqrokey-space-6: 24px;
+  --miqrokey-space-8: 32px;
+  --miqrokey-control-height: 32px;
+  --miqrokey-control-height-lg: 36px;
+  --miqrokey-table-row-height: 44px;
+  --miqrokey-table-row-height-compact: 38px;
+
+  /* brand chip palette (frontend-design.md §4.1): the only gradients in the
+     system, used exclusively for provider/product identity chips. */
+  --miqrokey-chip-tencent-a: #0066ff;
+  --miqrokey-chip-tencent-b: #00b3ff;
+  --miqrokey-chip-deepseek-a: #4d6bfe;
+  --miqrokey-chip-deepseek-b: #8b5cf6;
+  --miqrokey-chip-zhipu-a: #2b5cff;
+  --miqrokey-chip-zhipu-b: #5ec2ff;
+  --miqrokey-chip-minimax-a: #ff4d4f;
+  --miqrokey-chip-minimax-b: #ff9a2e;
+  --miqrokey-chip-moonshot-a: #1f2329;
+  --miqrokey-chip-moonshot-b: #57606a;
+  --miqrokey-chip-baidu-a: #2932e1;
+  --miqrokey-chip-baidu-b: #4ba2ff;
+  --miqrokey-chip-volc-a: #1664ff;
+  --miqrokey-chip-volc-b: #3ddc84;
+  --miqrokey-chip-aliyun-a: #ff6a00;
+  --miqrokey-chip-aliyun-b: #ffc53d;
+
+  /* card elevation (Tencent console: hairline shadow on white cards) */
+  --miqrokey-shadow-card: 0 1px 2px rgb(31 35 40 / 4%);
+
+  /* layout */
+  --miqrokey-header-height: 56px;
+  --miqrokey-nav-width: 232px;
+  --miqrokey-nav-width-collapsed: 56px;
+  --miqrokey-content-max: 1600px;
+  --miqrokey-content-form-max: 760px;
+}
+
+/* ---- TDesign theme overlay (Tencent's own design system) ---- */
+:root,
+:root[theme-mode='light'] {
+  --td-brand-color: var(--miqrokey-accent);
+  --td-brand-color-hover: var(--miqrokey-accent-hover);
+  --td-brand-color-focus: #3385ff;
+  --td-brand-color-active: #004bb8;
+  --td-brand-color-disabled: #b3d4ff;
+  --td-brand-color-light: var(--miqrokey-accent-soft);
+  --td-success-color: var(--miqrokey-success);
+  --td-warning-color: var(--miqrokey-warning);
+  --td-error-color: var(--miqrokey-danger);
+  --td-text-color-primary: var(--miqrokey-text-primary);
+  --td-text-color-secondary: var(--miqrokey-text-secondary);
+  --td-text-color-placeholder: var(--miqrokey-text-disabled);
+  --td-bg-color-page: var(--miqrokey-bg-canvas);
+  --td-bg-color-container: var(--miqrokey-bg-surface);
+  --td-bg-color-container-hover: var(--miqrokey-bg-subtle);
+  --td-bg-color-secondarycontainer: var(--miqrokey-bg-subtle);
+  --td-border-level-1-color: var(--miqrokey-border-default);
+  --td-border-level-2-color: var(--miqrokey-border-muted);
+  --td-component-border: var(--miqrokey-border-default);
+  --td-component-stroke: var(--miqrokey-border-default);
+  --td-radius-small: 3px;
+  --td-radius-default: var(--miqrokey-radius-control);
+  --td-radius-medium: var(--miqrokey-radius-panel);
+  --td-radius-large: var(--miqrokey-radius-modal);
+  --td-font-family: var(--miqrokey-font-family);
+  --td-font-size-body-small: 12px;
+  --td-font-size-body-medium: var(--miqrokey-font-size-body);
+  --td-font-size-title-medium: 16px;
+  --td-shadow-1: 0 1px 4px rgb(31 35 40 / 6%);
+  --td-shadow-2: 0 2px 8px rgb(31 35 40 / 8%);
+}
+
+body {
+  margin: 0;
+  font-family: var(--miqrokey-font-family);
+  font-size: var(--miqrokey-font-size-body);
+  line-height: 20px;
+  color: var(--miqrokey-text-primary);
+  background-color: var(--miqrokey-bg-canvas);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Key, request ID, token numbers */
+.mk-mono {
+  font-family: var(--miqrokey-font-mono);
+  font-size: 12px;
+}
+
+.mk-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Element Plus table overlay (frontend-design.md §7) ----
+   Horizontal separators + sticky header, no heavy outer borders; numeric
+   columns right-aligned via the .mk-num helper. */
+.el-table {
+  --el-table-border-color: var(--miqrokey-border-muted);
+  --el-table-header-bg-color: var(--miqrokey-bg-subtle);
+  --el-table-header-text-color: var(--miqrokey-text-secondary);
+  --el-table-row-hover-bg-color: var(--miqrokey-bg-subtle);
+  font-size: var(--miqrokey-font-size-table);
+}
+
+.el-table th.el-table__cell {
+  font-weight: 600;
+}
+
+/* Dropdown/popover/modal shadows only — never cards. */
+.el-popper,
+.el-dropdown__popper,
+.el-dialog {
+  box-shadow: 0 4px 12px rgb(31 35 40 / 12%);
+}

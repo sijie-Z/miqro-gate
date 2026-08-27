@@ -1,0 +1,23 @@
+# Optional monitoring profile (G6.1): exposes Prometheus metrics.
+# Activation: SPRING_PROFILES_ACTIVE=monitoring (or MIQROKEY_METRICS_ENABLED
+# wiring in production). The endpoint is management-network only — never
+# publish the gateway data port to the public internet with this on.
+spring:
+  application:
+    name: miqrokey-gateway
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  metrics:
+    tags:
+      application: miqrokey-gateway
+
+logging:
+  config: classpath:logback-spring.xml

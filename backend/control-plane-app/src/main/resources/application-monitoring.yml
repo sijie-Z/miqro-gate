@@ -1,0 +1,21 @@
+# Optional monitoring profile (G6.1): exposes Prometheus metrics and JSON
+# logs for the control plane. Management-network only.
+spring:
+  application:
+    name: miqrokey-control-plane
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: [health, info, prometheus]
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  metrics:
+    tags:
+      application: miqrokey-control-plane
+
+logging:
+  config: classpath:logback-spring.xml

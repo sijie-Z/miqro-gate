@@ -1,0 +1,445 @@
+/* Quiet Operations Console page composition (frontend-design.md §5/§6).
+   Page header region, filter bar, table status labels, dangerous zone. */
+
+/* Page header: title + description + primary action in one region. */
+.mk-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--miqrokey-space-4);
+  margin-bottom: var(--miqrokey-space-4);
+}
+
+.mk-page-title {
+  margin: 0;
+  font-size: var(--miqrokey-font-size-title);
+  font-weight: 600;
+  line-height: 28px;
+  color: var(--miqrokey-text-primary);
+}
+
+.mk-page-description {
+  margin: 4px 0 0;
+  font-size: var(--miqrokey-font-size-body);
+  color: var(--miqrokey-text-secondary);
+}
+
+.mk-page-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--miqrokey-space-2);
+  flex-shrink: 0;
+}
+
+/* Filter bar above tables: 筛选条 → 汇总行 → 明细表 (spec §6). */
+.mk-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--miqrokey-space-2);
+  padding: var(--miqrokey-space-3);
+  margin-bottom: var(--miqrokey-space-2);
+  background: var(--miqrokey-bg-surface);
+  border: 1px solid var(--miqrokey-border-default);
+  border-radius: var(--miqrokey-radius-panel);
+}
+
+.mk-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--miqrokey-space-6);
+  padding: var(--miqrokey-space-2) var(--miqrokey-space-3);
+  margin-bottom: var(--miqrokey-space-2);
+  font-size: var(--miqrokey-font-size-table);
+  color: var(--miqrokey-text-secondary);
+}
+
+.mk-summary-row .mk-num {
+  color: var(--miqrokey-text-primary);
+  font-weight: 600;
+}
+
+/* Sectioned panel: 1px border + spacing, no shadow (spec §4). */
+.mk-panel {
+  background: var(--miqrokey-bg-surface);
+  border: 1px solid var(--miqrokey-border-default);
+  border-radius: var(--miqrokey-radius-panel);
+}
+
+/* Short status label only — never a huge pill (spec §3). */
+.mk-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.mk-status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.mk-status--success {
+  color: var(--miqrokey-success);
+  background: var(--miqrokey-success-soft);
+}
+
+.mk-status--warning {
+  color: var(--miqrokey-warning);
+  background: var(--miqrokey-warning-soft);
+}
+
+.mk-status--danger {
+  color: var(--miqrokey-danger);
+  background: var(--miqrokey-danger-soft);
+}
+
+.mk-status--neutral {
+  color: var(--miqrokey-text-secondary);
+  background: var(--miqrokey-bg-subtle);
+}
+
+/* Dangerous zone at page bottom (spec §6 Settings). */
+.mk-danger-zone {
+  margin-top: var(--miqrokey-space-8);
+  padding: var(--miqrokey-space-4);
+  border: 1px solid var(--miqrokey-danger);
+  border-radius: var(--miqrokey-radius-panel);
+}
+
+.mk-danger-zone-title {
+  margin: 0 0 4px;
+  font-size: var(--miqrokey-font-size-body);
+  font-weight: 600;
+  color: var(--miqrokey-danger);
+}
+
+/* Shell footer with version / catalog version / last sync (spec §5). */
+.mk-shell-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--miqrokey-space-6);
+  padding: var(--miqrokey-space-3) var(--miqrokey-space-8);
+  border-top: 1px solid var(--miqrokey-border-muted);
+  font-size: 12px;
+  color: var(--miqrokey-text-disabled);
+}
+
+/* Number columns in tables: right-aligned tabular figures. */
+th.mk-col-num,
+td.mk-col-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Keyboard accessibility (G5.5): a visible focus ring everywhere. */
+:focus-visible {
+  outline: 2px solid var(--miqrokey-accent);
+  outline-offset: 1px;
+}
+
+.nav-item:focus-visible,
+.mk-shell-footer a:focus-visible {
+  outline-offset: -2px;
+}
+
+/* ---- 额度账本 composition layer (2026-08-27 redesign) ---- */
+
+/* White card with a header row: label + optional action slot. */
+.mk-card {
+  background: var(--miqrokey-bg-surface);
+  border: 1px solid var(--miqrokey-border-default);
+  border-radius: var(--miqrokey-radius-panel);
+  box-shadow: var(--miqrokey-shadow-card);
+}
+
+.mk-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--miqrokey-space-3);
+  padding: var(--miqrokey-space-3) var(--miqrokey-space-4);
+  border-bottom: 1px solid var(--miqrokey-border-muted);
+  border-left: 3px solid var(--miqrokey-accent);
+  border-radius: var(--miqrokey-radius-panel) var(--miqrokey-radius-panel) 0 0;
+}
+
+.mk-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--miqrokey-text-primary);
+}
+
+.mk-card-body {
+  padding: var(--miqrokey-space-4);
+}
+
+/* Stat strip: 4-up metric cards, number-first (the ledger's voice). */
+.mk-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--miqrokey-space-3);
+  margin-bottom: var(--miqrokey-space-4);
+}
+
+.mk-stat-card {
+  padding: var(--miqrokey-space-4);
+  background: var(--miqrokey-bg-surface);
+  border: 1px solid var(--miqrokey-border-default);
+  border-radius: var(--miqrokey-radius-panel);
+}
+
+.mk-stat-label {
+  display: block;
+  font-size: 12px;
+  color: var(--miqrokey-text-secondary);
+  margin-bottom: var(--miqrokey-space-1);
+}
+
+.mk-stat-value {
+  display: block;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 32px;
+  color: var(--miqrokey-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-stat-hint {
+  display: block;
+  margin-top: var(--miqrokey-space-1);
+  font-size: 12px;
+  color: var(--miqrokey-text-disabled);
+}
+
+/* Signature: segmented quota band (5h / week / month rolling windows).
+   Three rounded segments; the filled proportion encodes the quota truth. */
+.mk-quota-band {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+
+.mk-quota-segment {
+  flex: 1;
+  min-width: 0;
+}
+
+.mk-quota-segment-label {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--miqrokey-text-secondary);
+}
+
+.mk-quota-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--miqrokey-bg-subtle);
+  border: 1px solid var(--miqrokey-border-default);
+  overflow: hidden;
+}
+
+.mk-quota-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--miqrokey-accent);
+}
+
+.mk-quota-fill--warning {
+  background: var(--miqrokey-warning);
+}
+
+.mk-quota-fill--danger {
+  background: var(--miqrokey-danger);
+}
+
+/* CSS-only horizontal bar chart for usage groups. */
+.mk-bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--miqrokey-space-2);
+}
+
+.mk-bar-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 90px;
+  align-items: center;
+  gap: var(--miqrokey-space-3);
+  font-size: 12px;
+}
+
+.mk-bar-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--miqrokey-text-secondary);
+}
+
+.mk-bar-track {
+  height: 14px;
+  background: var(--miqrokey-bg-subtle);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.mk-bar-fill {
+  height: 100%;
+  background: var(--miqrokey-accent);
+  border-radius: 3px;
+}
+
+.mk-bar-value {
+  text-align: right;
+  color: var(--miqrokey-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Section heading inside cards (label + description in one line). */
+.mk-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--miqrokey-space-2);
+  margin: var(--miqrokey-space-6) 0 var(--miqrokey-space-3);
+}
+
+.mk-section-title h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.mk-section-title span {
+  font-size: 12px;
+  color: var(--miqrokey-text-disabled);
+}
+
+/* Empty state with a call to action, never a mood. */
+.mk-empty-hint {
+  padding: var(--miqrokey-space-6);
+  text-align: center;
+  color: var(--miqrokey-text-secondary);
+  font-size: 13px;
+}
+
+/* ---- Brand identity layer (frontend-design.md §4.1) ---- */
+
+/* Gradient icon chip for a provider/product — the only gradients allowed. */
+.mk-brand-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  flex-shrink: 0;
+}
+
+.mk-brand-chip--sm {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-size: 10px;
+}
+
+.mk-chip-tencent { background: linear-gradient(135deg, var(--miqrokey-chip-tencent-a), var(--miqrokey-chip-tencent-b)); }
+.mk-chip-deepseek { background: linear-gradient(135deg, var(--miqrokey-chip-deepseek-a), var(--miqrokey-chip-deepseek-b)); }
+.mk-chip-zhipu { background: linear-gradient(135deg, var(--miqrokey-chip-zhipu-a), var(--miqrokey-chip-zhipu-b)); }
+.mk-chip-minimax { background: linear-gradient(135deg, var(--miqrokey-chip-minimax-a), var(--miqrokey-chip-minimax-b)); }
+.mk-chip-moonshot { background: linear-gradient(135deg, var(--miqrokey-chip-moonshot-a), var(--miqrokey-chip-moonshot-b)); }
+.mk-chip-baidu { background: linear-gradient(135deg, var(--miqrokey-chip-baidu-a), var(--miqrokey-chip-baidu-b)); }
+.mk-chip-volcengine { background: linear-gradient(135deg, var(--miqrokey-chip-volc-a), var(--miqrokey-chip-volc-b)); }
+.mk-chip-aliyun { background: linear-gradient(135deg, var(--miqrokey-chip-aliyun-a), var(--miqrokey-chip-aliyun-b)); }
+
+/* Stat card with icon chip (Tencent console metric card). */
+.mk-stat-card {
+  display: flex;
+  align-items: center;
+  gap: var(--miqrokey-space-3);
+  padding: var(--miqrokey-space-4);
+  background: var(--miqrokey-bg-surface);
+  border: 1px solid var(--miqrokey-border-default);
+  border-radius: var(--miqrokey-radius-panel);
+  box-shadow: var(--miqrokey-shadow-card);
+}
+
+.mk-stat-card .mk-brand-chip {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.mk-stat-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Round avatar for the user menu. */
+.mk-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--miqrokey-accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* Cost-share donut (conic gradient, the second permitted gradient). */
+.mk-donut {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.mk-donut::after {
+  content: '';
+  position: absolute;
+  inset: 18px;
+  border-radius: 50%;
+  background: var(--miqrokey-bg-surface);
+}
+
+.mk-donut-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--miqrokey-space-2) var(--miqrokey-space-4);
+  font-size: 12px;
+  color: var(--miqrokey-text-secondary);
+}
+
+.mk-donut-legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+/* Provider row: chip + name + code in tables. */
+.mk-provider-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--miqrokey-space-2);
+}

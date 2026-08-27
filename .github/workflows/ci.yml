@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Java 21 / ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: temurin
+          cache: maven
+      - name: Verify (Linux)
+        if: runner.os == 'Linux'
+        run: ./mvnw verify -Pintegration --batch-mode
+        env:
+          MAVEN_PROJECTBASEDIR: ${{ github.workspace }}/backend
+      - name: Verify (Windows)
+        if: runner.os == 'Windows'
+        run: .\mvnw.cmd verify --batch-mode
+      - name: Verify Windows wrapper propagates failures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          & .\mvnw.cmd definitely-not-a-maven-phase *> $null
+          $wrapperExitCode = $LASTEXITCODE
+          if ($wrapperExitCode -eq 0) {
+            throw 'mvnw.cmd swallowed a Maven failure exit code'
+          }
+          exit 0
+
+  frontend:
+    name: Frontend (Node.js)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm run test
+      - name: Build
+        run: npm run build
+
+  compose:
+    name: Compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose file
+        run: docker compose -f deploy/compose.yaml config --quiet
+      - name: Require digest-pinned images
+        shell: bash
+        run: |
+          while IFS= read -r image; do
+            case "$image" in
+              *@sha256:*) ;;
+              *) echo "Image is not pinned by digest: $image" >&2; exit 1 ;;
+            esac
+          done < <(docker compose -f deploy/compose.yaml config --images)
+
+  security:
+    name: Security gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Secret scan
+        run: bash deploy/security/check-secrets.sh
+      - name: License gate + SBOM (CycloneDX)
+        run: bash deploy/security/check-sbom.sh
+      - name: Trivy scan of the pinned Postgres image
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock             -v "${{ github.workspace }}/deploy/security/.trivyignore:/root/.trivyignore:ro"             aquasec/trivy:0.58.2 image --severity HIGH,CRITICAL            --ignorefile /root/.trivyignore             --ignore-unfixed --exit-code 1 --no-progress             postgres:17.6-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73

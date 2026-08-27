@@ -1,0 +1,10 @@
+fixtureVersion: 1
+id: anthropic-tool-use-and-result
+protocol: ANTHROPIC_MESSAGES
+streaming: true
+upstreamStatus: 200
+capabilities: [TOOLS, TOOL_RESULT, USAGE]
+sourceCategory: DOCUMENTATION_DERIVED
+bodyClassification: SYNTHETIC
+expectedByteTransparent: true
+implementation: com.miqroera.miqrokey.testing.AnthropicFixtures

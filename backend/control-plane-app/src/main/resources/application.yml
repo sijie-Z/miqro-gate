@@ -1,0 +1,41 @@
+server:
+  port: ${MIQROKEY_CONTROL_PORT:8080}
+
+spring:
+  application:
+    name: miqrokey-control-plane
+  main:
+    web-application-type: servlet
+  datasource:
+    url: ${MIQROKEY_DB_URL:jdbc:postgresql://localhost:5432/miqrokey}
+    username: ${MIQROKEY_DB_USERNAME:miqrokey}
+    password: ${MIQROKEY_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${MIQROKEY_DB_POOL_MAX_SIZE:20}
+      minimum-idle: 2
+  flyway:
+    enabled: ${MIQROKEY_DB_FLYWAY_ENABLED:true}
+    locations: classpath:db/migration
+
+miqrokey:
+  control:
+    provider-client:
+      # Bounds for control-plane provider calls (G3.1): connect timeout,
+      # overall request deadline, single-response body cap.
+      connect-timeout: ${MIQROKEY_CONTROL_PROVIDER_CLIENT_CONNECT_TIMEOUT:10s}
+      request-timeout: ${MIQROKEY_CONTROL_PROVIDER_CLIENT_REQUEST_TIMEOUT:30s}
+      max-response-bytes: ${MIQROKEY_CONTROL_PROVIDER_CLIENT_MAX_RESPONSE_BYTES:1048576}
+
+# Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    com.miqroera.miqrokey: ${MIQROKEY_LOG_LEVEL:INFO}

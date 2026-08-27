@@ -1,0 +1,73 @@
+# Java / Maven
+target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+hs_err_pid*
+replay_pid*
+
+# Node / Frontend
+node_modules/
+dist/
+.vite/
+*.local
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+.springBeans
+
+# Environment / Secrets
+.env
+.env.local
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.truststore
+# Exception: the catalog verification public key is not secret and ships with
+# the product (the private signing key never leaves the release environment).
+!backend/provider-adapters/src/main/resources/catalog/keys/catalog-public.pem
+!deploy/compose.yaml
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build artifacts
+*.log
+.gradle/
+build/
+
+# Test output
+surefire-reports/
+failsafe-reports/
+test-output/
+
+# Docker volumes
+deploy/data/
+
+# Maven flatten plugin artifacts
+**/.flattened-pom.xml
+
+# Session / checkpoints
+.claude/transcripts/
+
+# Local UI review screenshots (session artifacts)
+frontend/*-final.png
+frontend/*-fresh.png

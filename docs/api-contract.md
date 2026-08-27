@@ -1,0 +1,543 @@
+# API 契约
+
+本文定义 Control Plane 管理接口和 Gateway 推理入口的稳定边界。实现后以生成的 OpenAPI 为机器可读事实，但 OpenAPI 不得改变本文的业务语义。
+
+## 1. 通用约定
+
+- 管理 API 前缀：`/api/v1`；推理 API 保持上游原生路径，例如 `/v1/messages`。
+- 管理 API 使用门户会话 Cookie；Gateway 使用 `Authorization: Bearer <virtual-key>` 或上游协议要求的等价 Header。
+- JSON 字段使用 `camelCase`，数据库字段使用 `snake_case`，时间为 UTC RFC 3339。
+- 资源 ID 使用不可枚举的 UUIDv7；金额以最小货币单位或 `decimal string + currency` 表示，不使用浮点数。
+- 列表默认按 `createdAt DESC, id DESC`，使用不透明 cursor，禁止 offset 深分页。
+- 写请求支持 `Idempotency-Key`；重复键和不同请求体返回 `409 IDEMPOTENCY_CONFLICT`。
+- 可更新资源返回 `version`，更新时提交 `If-Match`；版本冲突返回 `412 VERSION_CONFLICT`。
+- 管理写接口校验 `Origin` 和 CSRF token。推理入口不使用浏览器 Cookie，不做 CSRF。
+- `/api/v1/**` 不接受供应商 API Key 或 Virtual Key 作为门户身份。
+
+## 2. 错误格式
+
+采用 RFC 9457 Problem Details：
+
+```json
+{
+  "type": "about:blank",
+  "title": "Virtual key not found",
+  "status": 404,
+  "code": "VIRTUAL_KEY_NOT_FOUND",
+  "detail": "The requested virtual key does not exist or is not visible.",
+  "requestId": "0190...",
+  "fieldErrors": [{"field": "name", "code": "REQUIRED"}]
+}
+```
+
+所有错误响应均包含 `type`（通常为 `about:blank`）、`title`、`status`、稳定 `code` token 和唯一 `requestId`。`application/problem+json` 为所有管理 API 错误的标准 Content-Type。filter、interceptor、controller、全局 exception handler 均使用此格式。
+
+普通用户访问他人资源统一返回 `404`，避免资源枚举。错误响应、应用日志和审计记录不得出现真实 Key、Virtual Key 明文或请求正文。
+
+登录失败返回通用的 `401 UNAUTHORIZED`，无论用户不存在、密码错误、账号禁用或锁定均使用相同消息 `"Invalid username or password."`。
+
+## 3. 身份与会话
+
+### 3.1 认证端点
+
+| 方法与路径 | 用途 | 访问者 |
+|---|---|---|
+| `POST /api/v1/auth/bootstrap` | 一次性创建首个 SYSTEM_ADMIN 管理员 | 匿名（需 bootstrap secret） |
+| `POST /api/v1/auth/login` | 用户名/密码登录，创建会话 | 匿名 |
+| `POST /api/v1/auth/logout` | 当前会话失效 | 已登录 |
+| `GET /api/v1/auth/me` | 当前用户、角色、会话到期时间 | 已登录 |
+| `POST /api/v1/auth/password` | 修改自己的密码并撤销其他会话 | 已登录 |
+| `GET /api/v1/auth/csrf` | 获取 CSRF token（从配置名称的 Cookie 读取） | 已登录 |
+
+### 3.2 Bootstrap 流程
+
+首个管理员通过 `POST /api/v1/auth/bootstrap` 创建，需提供一次性 bootstrap secret（来自 `MIQROKEY_BOOTSTRAP_SECRET_FILE` 配置的文件）。bootstrap 在数据库层通过 `SELECT ... FOR UPDATE` 锁租户行序列化并发请求：即使两个请求使用不同用户名，也只有恰好一个能成功创建管理员。
+
+响应返回一次性临时密码 `temporaryPassword`（之后不可再次获取）、`shownOnce: true` 和会话 Cookie。首次登录时 `mustChangePassword` 为 `true`，强制改密。
+
+### 3.3 CSRF 保护
+
+所有 `POST/PUT/PATCH/DELETE` 写请求需要 CSRF 保护（`/api/v1/auth/login` 和 `/api/v1/auth/bootstrap` 除外）。CSRF token 通过以下机制传递：
+
+1. 登录/bootstrap 响应设置 CSRF Cookie（名称由 `miqrokey.csrf-cookie-name` 配置，默认 `MIQROKEY_CSRF`）；Cookie 为 non-HttpOnly（JavaScript 可读），SameSite=Strict。
+2. 客户端从 Cookie 读取 CSRF token，在写请求中以 `X-CSRF-Token` Header 发送。
+3. 服务端通过 SHA-256 digest 比对验证 token。
+
+`GET /api/v1/auth/csrf` 端点返回当前会话的 CSRF token 值和过期时间。
+
+### 3.4 Origin 验证
+
+生产模式（`miqrokey.production=true` 或 Spring `production` profile 激活）下，所有对 `/api/` 的状态变更请求（POST/PUT/PATCH/DELETE）必须包含有效的 `Origin` Header。Origin 通过严格的 `java.net.URI` 解析进行验证（scheme、host、port 完全匹配），不使用子字符串匹配。
+
+生产模式不允许 localhost 或开发 Origin；缺少/无效/未列入 allowlist 的 Origin 返回 `403 ORIGIN_REJECTED` 并包含 `requestId`。
+
+开发模式下，缺少 Origin 或 localhost 来源的请求被放行。
+
+### 3.5 会话 Cookie
+
+会话 Cookie 使用 `miqrokey.session-cookie-name` 配置名称（默认 `MIQROKEY_SESSION`），属性为 HttpOnly、SameSite=Strict。生产模式下自动启用 `Secure` flag（若未显式设置，启动时自动覆盖为 `true`）。clear 操作也保持相同的安全属性。
+
+### 3.6 登录安全
+
+连续登录失败触发渐进锁定：延迟从 250ms 逐步增加到最大 3s，达到 `miqrokey.login-max-failures`（默认 5）后账户锁定，锁定时长指数退避（1 min → 2 min → 4 min → ... 最大 ~17 小时）。失败计数在数据库行锁（`SELECT ... FOR UPDATE`）下原子递增，并发请求不会丢失更新。登录失败和账户锁定均持久记录审计事件 `LOGIN_FAILED` 和 `ACCOUNT_LOCKED`。
+
+密码要求至少 8 个字符、包含大小写字母和数字、最多 128 字符、拒绝常见/已泄露密码。首次登录强制修改临时密码。
+
+## 4. 普通用户 API
+
+普通用户只能看到自己创建的 Virtual Key，以及这些 Key 产生的用量。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/me/grants` | 可选项目、产品、凭证授权、模型和用途 |
+| `GET /api/v1/me/virtual-keys` | 自己的 Key 列表；只返回前缀和末四位 |
+| `POST /api/v1/me/virtual-keys` | 自助创建 Key；明文只在本次响应出现 |
+| `GET /api/v1/me/virtual-keys/{id}` | 自己的 Key 元数据和 Base URL |
+| `POST /api/v1/me/virtual-keys/{id}/rotate` | 原子轮换；旧 Key 按配置宽限后失效 |
+| `POST /api/v1/me/virtual-keys/{id}/revoke` | 立即吊销 |
+| `GET /api/v1/me/usage/summary` | 自己的聚合用量和成本 |
+| `GET /api/v1/me/usage/records` | 自己的明细，受分页和最大时间窗限制 |
+
+创建请求：
+
+```json
+{
+  "name": "claude-code-main",
+  "projectId": "0190...",
+  "providerProductId": "0190...",
+  "credentialGrantId": "0190...",
+  "purpose": "CLAUDE_CODE",
+  "allowedModels": ["provider-model-id"]
+}
+```
+
+创建响应：
+
+```json
+{
+  "id": "0190...",
+  "secret": "mqk_live_once_only",
+  "baseUrl": "https://gateway.example.internal",
+  "display": "mqk_live_...8f2a",
+  "shownOnce": true,
+  "createdAt": "2026-07-17T05:00:00Z",
+  "version": 1
+}
+```
+
+服务端不允许再次读取 `secret`。遗失后只能轮换或新建。
+
+### 4.1 我的授权 `GET /api/v1/me/grants`
+
+返回当前用户可用的项目、供应商授权、模型和用途选项。普通用户只能看到自己是成员的项目；他人资源一律不出现。
+
+```json
+{
+  "projects": [
+    { "id": "0190...", "code": "CORE", "name": "Core AI", "projectTag": "core-ai" }
+  ],
+  "grants": [
+    {
+      "id": "0190...",
+      "projectId": "0190...",
+      "providerProductId": "0190...",
+      "models": ["claude-3-7-sonnet", "claude-3-5-haiku"]
+    }
+  ],
+  "purposes": ["CLAUDE_CODE", "CLAUDE_DESKTOP", "CODEX", "CUSTOM"]
+}
+```
+
+### 4.2 Key 列表与详情
+
+`GET /api/v1/me/virtual-keys` 返回 `VirtualKeyView` 数组，`GET /api/v1/me/virtual-keys/{id}` 返回单个。只包含前缀和末四位，永远不包含完整 Secret：
+
+```json
+{
+  "id": "0190...",
+  "name": "claude-code-main",
+  "purpose": "CLAUDE_CODE",
+  "status": "ACTIVE",
+  "displayPrefix": "mqk_live_abcdefghijklmnopqrstuv",
+  "lastFour": "8f2a",
+  "display": "mqk_live_…8f2a",
+  "modelIds": ["claude-3-7-sonnet"],
+  "projectId": "0190...",
+  "projectTag": "core-ai",
+  "cachePolicy": "DISABLED",
+  "baseUrl": "https://gateway.example.internal",
+  "createdAt": "2026-07-17T05:00:00Z",
+  "lastUsedAt": null,
+  "revokedAt": null
+}
+```
+
+`status` ∈ `ACTIVE | ROTATING | REVOKED | DISABLED`。`cachePolicy` 默认 `DISABLED`（显式开启才可参与响应缓存）。
+
+### 4.3 轮换与吊销
+
+`POST /api/v1/me/virtual-keys/{id}/rotate` 原子轮换：旧 Key 立即停止接受新请求，在配置宽限期（`miqrokey.virtual-key-rotate-grace`，默认 `PT0S`）内仍可路由，宽限结束后失效。响应与创建响应相同（`CreateVirtualKeyResponse`，新 Secret 仅本次出现一次）。
+
+`POST /api/v1/me/virtual-keys/{id}/revoke` 立即吊销，响应：
+
+```json
+{ "message": "Virtual key revoked" }
+```
+
+轮换/吊销只允许 `ACTIVE`（吊销额外允许 `ROTATING`）；冲突返回 `409 KEY_NOT_ROTATABLE` / `409 KEY_NOT_REVOCABLE`。操作写审计事件，审计日志不含 Secret 明文。
+
+### 4.4 用量汇总 `GET /api/v1/me/usage/summary`
+
+参数：`groupBy`（`project | virtual_key | cache_level | day`，默认 `project`）、`from`、`to`（ISO-8601，默认最近 93 天窗口；`from` 必须在 `to` 之前，窗口超过 93 天拒绝）。
+
+```json
+{
+  "groupBy": "project",
+  "groups": [
+    {
+      "groupKey": "core-ai",
+      "label": "core-ai",
+      "requests": { "upstream": 12, "coalesced": 0, "l1Hit": 0, "l2Hit": 0 },
+      "tokens": { "input": 1200, "output": 800, "cacheRead": 0, "cacheCreation": 0 },
+      "cost": {
+        "upstreamPaid": 0.0128,
+        "gatewayObserved": 0.0128,
+        "projectAllocated": 0.0128,
+        "savedByGatewayCache": 0.0
+      }
+    }
+  ],
+  "totals": { "requests": { "upstream": 12, "coalesced": 0, "l1Hit": 0, "l2Hit": 0 }, "tokens": { "input": 1200, "output": 800, "cacheRead": 0, "cacheCreation": 0 }, "cost": { "upstreamPaid": 0.0128, "gatewayObserved": 0.0128, "projectAllocated": 0.0128, "savedByGatewayCache": 0.0 } }
+}
+```
+
+- 用量明细只包含自己的 Key 产生的记录；他人的 Key 不出现也不可区分（统一 404）。
+- `upstreamPaid` 按 `price_snapshot`（每百万 token 单价，来源 `MANUAL|OFFICIAL|ESTIMATED`）计算；无价格快照的模型按 `0` 计。
+- 缓存命中产生的成本节省记入 `savedByGatewayCache`，不计入 `projectAllocated`。
+
+### 4.5 用量明细 `GET /api/v1/me/usage/records`
+
+参数：`from`、`to`（ISO-8601）、`page`（默认 1，≥1）、`size`（默认 50，1–200）。按时间倒序。
+
+```json
+{
+  "items": [
+    {
+      "occurredAt": "2026-07-17T05:00:00Z",
+      "modelId": "claude-3-7-sonnet",
+      "cacheLevel": "UPSTREAM",
+      "inputTokens": 600,
+      "outputTokens": 400,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "totalTokens": 1000,
+      "latencyMs": 1842,
+      "upstreamStatusCode": 200,
+      "providerRequestId": "msg_01...",
+      "gatewayRequestId": "req-abc123",
+      "isComplete": true,
+      "usageMissing": false,
+      "virtualKeyId": "0190..."
+    }
+  ],
+  "page": 1,
+  "size": 50,
+  "total": 12
+}
+```
+
+- `cacheLevel` ∈ `UPSTREAM | COALESCED | L1_HIT | L2_HIT`。缓存命中行没有 token 数（NULL → 0）且 `isComplete=false` 时不作为上游用量计入。
+- `usageMissing=true` 表示上游未返回 usage（如异常中断）；该行仍入账但用量为 0，便于排查。
+- `providerRequestId` 在 tenant 内唯一（幂等写，重复 flush 不双计）。
+
+### 4.6 错误码
+
+| code | HTTP | 场景 |
+|---|---|---|
+| `PROJECT_NOT_FOUND` | 404 | 项目不存在 |
+| `PROJECT_MEMBERSHIP_REQUIRED` | 403 | 当前用户不是项目成员 |
+| `PROJECT_INACTIVE` | 409 | 项目已停用 |
+| `ROUTING_TAG_MISSING` | 409 | 项目没有配置路由标签（projectTag） |
+| `GRANT_INVALID` | 400 | 授权不属于该项目或产品 |
+| `GRANT_INACTIVE` | 409 | 授权已停用 |
+| `MODEL_NOT_GRANTED` | 400 | 请求的模型超出授权范围 |
+| `KEY_NOT_FOUND` | 404 | Key 不存在或不属于当前用户 |
+| `KEY_NOT_ROTATABLE` | 409 | 仅 ACTIVE 可轮换 |
+| `KEY_NOT_REVOCABLE` | 409 | 该状态不可吊销 |
+| `PAGE_INVALID` / `SIZE_INVALID` | 400 | 分页参数越界 |
+| `TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE` | 400 | 时间窗参数错误 |
+| `GROUP_BY_INVALID` | 400 | groupBy 取值非法 |
+
+所有错误都是 RFC 9457 `application/problem+json`，含 `type`、`status`、`code`、`detail`、`requestId`。
+
+## 5. 管理员 API
+
+管理员拥有单租户内全部管理权限：
+
+- `/api/v1/admin/users`：用户创建、禁用、密码重置、会话撤销。
+- `/api/v1/admin/teams`、`/projects`：组织与项目。
+- `/api/v1/admin/provider-products`：供应商产品实例、Base URL、协议族、目录版本。
+- `/api/v1/admin/subscriptions`：PAYG、个人 Plan、团队 Plan、企业 Plan。
+- `/api/v1/admin/subscriptions/{id}/members`：席位、成员 Key 或共享池成员关系。
+- `/api/v1/admin/credentials`：创建、测试、轮换、禁用真实凭证。
+- `/api/v1/admin/grants`：向用户授予项目、产品、凭证和模型范围。
+- `/api/v1/admin/virtual-keys`：全局查询、吊销；仍不返回明文。
+- `/api/v1/admin/usage/**`：全局汇总、差异视图、解析失败队列。
+- `/api/v1/admin/exports`：创建和下载原始记录导出任务。
+- `/api/v1/admin/reconciliation/**`：导入官方账单并生成匹配结果。
+- `/api/v1/admin/webhooks`：目标、签名 Secret、测试和投递记录。
+- `/api/v1/admin/audit-events`：不可修改的管理审计事件。
+- `/api/v1/admin/usage-deletions`：双确认后人工删除用量范围。
+
+真实凭证写接口只接受明文输入，响应只返回掩码、指纹、版本和验证状态。凭证测试不得自动把未保存值写入数据库。
+
+### 5.0 组织（G5.2）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/users` | 用户列表（**永不返回 passwordHash**，Jackson mixin 全局排除） |
+| `POST /api/v1/admin/users` | 创建用户（`username`/`displayName`/`role`）；返回一次性临时密码（仅本次出现） |
+| `PATCH /api/v1/admin/users/{id}` | 更新状态（`status`：ACTIVE/DISABLED；禁用即撤销全部会话；SYSTEM_ADMIN 不可禁用 → 409 `ADMIN_NOT_DISABLEABLE`） |
+| `POST /api/v1/admin/users/{id}/reset-password` | 重置密码 + 撤销全部会话；返回新临时密码（仅本次） |
+| `POST /api/v1/admin/users/{id}/revoke-sessions` | 撤销该用户全部会话 |
+| `GET/POST /api/v1/admin/teams`、`PATCH /{id}` | 团队列表/创建/更新 |
+| `GET/POST /api/v1/admin/teams/{id}/members`、`DELETE /members/{userId}` | 团队成员管理 |
+| `GET/POST /api/v1/admin/projects`、`PATCH /{id}` | 项目列表/创建（`code` 唯一，冲突 → 409 `PROJECT_CODE_TAKEN`）/更新 |
+| `GET/POST /api/v1/admin/projects/{id}/members`、`DELETE /members/{userId}` | 项目成员管理 |
+| `GET/POST /api/v1/admin/grants` | Grant 列表/创建（`projectId`×`providerProductId`×`credentialId` + `models[]`；重复 → 409 `GRANT_EXISTS`） |
+| `GET/POST /api/v1/admin/grants/{id}/models`、`DELETE /{id}` | 模型范围查询/替换；禁用 Grant |
+
+错误码：`USER_NOT_FOUND`/`TEAM_NOT_FOUND`/`PROJECT_NOT_FOUND`/`GRANT_NOT_FOUND`（404）、`USERNAME_TAKEN`/`PROJECT_CODE_TAKEN`/`GRANT_EXISTS`（409）、`USERNAME_INVALID`（400）、`ADMIN_NOT_DISABLEABLE`（409）。所有写操作写审计事件（`USER_CREATE`/`USER_STATUS`/`USER_PASSWORD_RESET`/`USER_SESSIONS_REVOKED`/`TEAM_*`/`PROJECT_*`/`GRANT_*`）。
+
+### 5.0b 供应商产品与 Plan（G5.3）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/provider-products` | 产品实例列表（供应商名、productCode、协议、Base URL host、实现状态、余额权威级别） |
+| `GET /api/v1/admin/provider-products/{id}` | 产品详情 |
+| `GET /api/v1/admin/provider-products/providers` | 供应商列表 |
+| `GET /api/v1/admin/subscriptions` / `/{id}` | 订阅列表/详情（含产品名） |
+| `POST /api/v1/admin/subscriptions` | 创建（`providerProductId`/`name`/`billingMode`/`planScope`/价格/配额） |
+| `PATCH /api/v1/admin/subscriptions/{id}` | 更新（价格/币种/配额/状态） |
+| `GET /api/v1/admin/subscriptions/{id}/seats` | 席位列表（含分配用户） |
+| `POST /api/v1/admin/subscriptions/{id}/seats` | 创建席位（`externalSeatRef`/`displayName`/`assignedUserId`） |
+| `PATCH /api/v1/admin/subscriptions/{id}/seats/{seatId}` | 分配/释放/禁用席位 |
+
+错误码：`PRODUCT_NOT_FOUND`（404）、`SUBSCRIPTION_NOT_FOUND`（404）、`SEAT_NOT_FOUND`（404）。写操作审计 `SUBSCRIPTION_CREATE/UPDATE`、`SEAT_CREATE/UPDATE`。成员 Key（席位凭证）继续由 `/api/v1/admin/credentials` 管理（`seat_id` 关联）。
+
+### 5.1 上游凭证
+
+管理员录入真实供应商凭证并管理其生命周期（G1.6）。真实凭证属于供应商产品订阅，不绑定用户；只有 SYSTEM_ADMIN 可操作。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/credentials` | 租户内全部凭证（掩码视图） |
+| `GET /api/v1/admin/credentials/{id}` | 凭证元数据 + 完整版本历史（新版本在前） |
+| `POST /api/v1/admin/credentials` | 创建：`{ "name", "subscriptionId", "secret" }`，返回 `201` 掩码视图 |
+| `POST /api/v1/admin/credentials/{id}/validate` | 测试候选 Secret；不写入数据库 |
+| `POST /api/v1/admin/credentials/{id}/rotate` | 原子轮换：新 Secret 成为 ACTIVE，旧版本进入 DRAINING |
+| `POST /api/v1/admin/credentials/{id}/disable` | 立即禁用；凭证从路由快照消失 |
+
+创建/轮换响应（掩码视图；`secret` 明文永不出现）：
+
+```json
+{
+  "id": "0190...",
+  "name": "anthropic-main",
+  "subscriptionId": "0190...",
+  "status": "ACTIVE",
+  "activeVersionId": "0190...",
+  "fingerprintPrefix": "a1b2c3d4e5f6a7b8",
+  "lastValidatedAt": null,
+  "lastValidationError": null,
+  "version": 1,
+  "createdAt": "2026-07-17T05:00:00Z",
+  "updatedAt": "2026-07-17T05:00:00Z"
+}
+```
+
+验证响应：
+
+```json
+{ "matchesActive": true, "message": null }
+```
+
+安全规则：
+
+- Secret 只接受明文输入；持久化前以 AES-256-GCM 加密（AAD 绑定 tenant + credential），数据库、响应与审计只保留 SHA-256 指纹和 `fingerprintPrefix`（前 8 字节 hex）。明文与完整指纹永不回显。
+- `validate` 是纯检查：格式非法返回 `400 CREDENTIAL_INVALID`；格式合法时按 SHA-256 指纹与当前 ACTIVE 版本比对（不解密、不暴露明文），返回 `matchesActive`。任何情况下不写数据库。供应商侧校验接缝（适配器 `validateCredential` + `ProviderClient`）已随 G3.1 落地，管理端点接线到真实供应商 API 属 G4.x（需解密 + 出网，标注 `WAITING_FOR_CREDENTIAL` 联调）。
+- 轮换是单事务原子操作：持有凭证行锁（`SELECT ... FOR UPDATE` 串行化并发生命周期变更），先把当前 ACTIVE 版本降级为 DRAINING（`retiredAt = now + miqrokey.credential-drain-grace`，默认 `PT0S`），再插入新 ACTIVE 版本——部分唯一索引 `uq_credential_versions_one_active` 保证任意时刻每个凭证至多一个 ACTIVE 版本。新 Secret 校验失败时整个操作回滚，当前版本不受影响。
+- 已降级版本在 `retiredAt` 前保持可解密：请求启动时已解密旧 Secret 的请求可完成（“旧请求可完成”）；路由快照刷新后新请求使用新版本。`PT0S` = 快照刷新后旧版本立即退役。
+- `disable` 把凭证置为 `DISABLED` 并降级当前 ACTIVE 版本；网关路由快照只加载 `status = 'ACTIVE'` 的凭证，刷新后该凭证不可路由，新请求干净失败。
+- 审计事件 `CREDENTIAL_CREATE` / `CREDENTIAL_ROTATE` / `CREDENTIAL_DISABLE` 只记变更摘要，永不包含明文或完整指纹。
+
+错误码：
+
+| code | HTTP | 场景 |
+|---|---|---|
+| `SUBSCRIPTION_NOT_FOUND` | 404 | 订阅不存在或不属于本租户 |
+| `CREDENTIAL_NOT_FOUND` | 404 | 凭证不存在或不属于本租户（统一 404，防枚举） |
+| `CREDENTIAL_INVALID` | 400 | Secret 格式非法（过短/过长/含控制字符） |
+| `CREDENTIAL_NOT_ROTATABLE` | 409 | 仅 ACTIVE 可轮换 |
+| `CREDENTIAL_NOT_DISABLEABLE` | 409 | 已 DISABLED/INVALID 的凭证不可再禁用 |
+
+### 5.2 全局用量查询（G4.1）
+
+管理员全局汇总与明细，返回形状与个人端（§4.4/§4.5）一致，但作用域为整个租户，并支持可选维度过滤：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/usage/summary` | 全租户聚合汇总 + 成本 |
+| `GET /api/v1/admin/usage/records` | 全租户分页明细，时间倒序 |
+
+`summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day`，默认 `project`）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。
+
+`records` 参数：`from`、`to`、`page`（默认 1）、`size`（默认 50，1–200）及与 `summary` 相同的可选过滤。
+
+过滤语义：
+
+- 过滤维度全部可选、可组合；`virtualKeyId` 等价于把 key 集合收窄到单个 Key。
+- 无过滤 = 整个租户；租户隔离由已认证管理员身份决定，不存在跨租户查询形状。
+- 管理员可见所有用户/Key 的用量（与个人端严格自见形成对照，是刻意行为）。
+- 访问控制：`/api/v1/admin/**` 由拦截器 deny-by-default，仅 `SYSTEM_ADMIN` 可访问；普通用户与匿名请求分别得到 `403` / `401`。
+- 明细永不包含 prompt、代码或模型正文。
+
+错误码沿用个人端：`PAGE_INVALID` / `SIZE_INVALID` / `TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE` / `GROUP_BY_INVALID`；非法 UUID 过滤参数返回 `400 PARAM_INVALID`（类型不匹配统一处理，不视为内部错误）。
+
+### 5.3 配额快照（G4.2）
+
+订阅的 Plan/额度状态快照（追加式历史，读取取每作用域最新）：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/subscriptions/{subscriptionId}/quota` | 最新快照（按订阅/席位/凭证作用域各一行） |
+| `POST /api/v1/admin/subscriptions/{subscriptionId}/quota/refresh` | 管理端触发刷新：按 ACTIVE 凭证经适配器 `fetchPlanStatus`（官方 API）或本地估算，返回刷新后视图 |
+
+快照字段：`subscriptionId`、`seatId`、`credentialId`、`windowType`（`PERIOD|ROLLING_5H|WEEKLY|MONTHLY|UNKNOWN`）、`total`/`used`/`remaining`、`unit`（`POINTS|TOKENS|REQUESTS|CURRENCY|UNKNOWN`）、`sharedPool`、`source`（`OFFICIAL_API|LOCAL_ESTIMATE|UNAVAILABLE`，对应权威级别，页面必须按此标注）、`syncedAt`、`errorMessage`。
+
+语义：
+
+- `OFFICIAL_API`：适配器官方余额接口返回（当前 DeepSeek / Moonshot 按量）。
+- `LOCAL_ESTIMATE`：订阅配置了 `quota_total` + `period_start` 时，用本地 usage（输入+输出 token）相对周期起点估算；与官方值严格区分。
+- `UNAVAILABLE`：无官方 API 或刷新失败；`errorMessage` 为脱敏提示（不含 URL/Secret/正文）。
+- 刷新为同步管理操作；每次刷新追加新行，历史保留。解密后的 Secret 只存在于调用内（凭证作用域 `ProviderClient`），用后清零。
+- 错误码：`SUBSCRIPTION_NOT_FOUND`（404，统一防枚举）。
+
+### 5.4 成本分摊（G4.3）
+
+按订阅周期把用量成本与 Plan 固定成本分摊到项目：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/subscriptions/{subscriptionId}/cost-allocation?from&to` | 已持久化的分摊行（不重算） |
+| `POST /api/v1/admin/subscriptions/{subscriptionId}/cost-allocation/allocate?from&to` | 计算并持久化分摊，返回行 |
+
+行字段：`targetType`（当前 `PROJECT`）、`targetId`、`fixedCost`（订阅价按窗口/周期天数比例折算）、`usageCost`（本地 usage × 最新价格快照，每百万 token 单价）、`weightTokens`、`allocatedAmount`、`currency`、`algorithmVersion`（当前 `1`）、`generatedAt`。
+
+语义：
+
+- 固定成本仅 Plan 订阅（非 PAYG）有值，按各项目 Token 权重分摊；无用量时不产出任何行。
+- 重复分配同一周期 = 幂等覆盖（唯一键含算法版本）；算法升级另起版本历史。
+- 价格取分配时刻最新快照（逐事件价格快照为延后列）；`currency` 取订阅币种（缺省 USD）。
+- 错误码：`SUBSCRIPTION_NOT_FOUND`（404）、`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400，窗口 ≤ 93 天）。
+
+### 5.5 原始记录导出（G4.4）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/admin/exports?format=CSV\|JSONL&from&to` | 创建导出任务，返回 `202` + 任务（异步执行） |
+| `GET /api/v1/admin/exports/{id}` | 任务状态（不含产物字节） |
+| `GET /api/v1/admin/exports/{id}/download` | 下载 gzip 产物（`Content-Type: application/gzip`、`X-MiQroKey-SHA256` 校验头） |
+| `GET /api/v1/admin/exports?limit` | 最近任务列表 |
+
+- 窗口 ≤ 93 天；产物只含计数与元数据列（见 database-schema `export_tasks`），绝不包含 prompt、代码、Secret 或 Virtual Key 明文。
+- 产物保存 24 小时后 `EXPIRED`，下载返回 `410 EXPORT_EXPIRED`；未完成/不存在 → `404 EXPORT_NOT_FOUND`。
+- 错误码：`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400）。
+
+### 5.6 用量删除（G4.4）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/usage-deletions/preview?from&to` | 干跑计数 |
+| `POST /api/v1/admin/usage-deletions?from&to` | 创建删除请求；一次性确认 token 只在本次响应出现 |
+| `POST /api/v1/admin/usage-deletions/{id}/confirm` | 携带 token 确认并执行永久删除 |
+| `GET /api/v1/admin/usage-deletions?limit` | 最近请求列表（永不返回 token） |
+
+- 删除是物理且永久的（无软删除）；执行后写 `USAGE_DELETE` 审计事件，审计链本身永不删除。
+- token 仅存 SHA-256 哈希；错误 token → `403 DELETION_TOKEN_INVALID`；确认窗口 1 小时 → `410 DELETION_EXPIRED`；重复确认 → `409 DELETION_NOT_CONFIRMABLE`。
+- 窗口 ≤ 93 天；`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400）。
+
+### 5.7 Webhook 端点（G4.5）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/admin/webhooks` | 创建（`name`/`url`/`secret`/`timeoutMs`）；URL 经 SSRF 门控，Secret 加密存储且永不返回 |
+| `GET /api/v1/admin/webhooks` / `/{id}` | 列表/详情（无 Secret） |
+| `PATCH /api/v1/admin/webhooks/{id}` | 更新（name/enabled/timeoutMs） |
+| `DELETE /api/v1/admin/webhooks/{id}` | 删除 |
+| `POST /api/v1/admin/webhooks/{id}/test` | 发送 HMAC 签名测试载荷，返回上游 HTTP 状态或脱敏错误 |
+| `GET /api/v1/admin/webhooks/{id}/deliveries` | 投递历史 |
+
+投递签名：`X-MiQroKey-Signature: sha256=<HMAC-SHA256(secret, payload) hex>`，payload 为事件 JSON（eventId/ruleId/type/value/occurredAt）。错误码：`WEBHOOK_URL_REJECTED`（400，SSRF 门控）、`WEBHOOK_NOT_FOUND`（404）。
+
+### 5.8 告警规则（G4.5）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/admin/alert-rules` | 创建（`name`/`type`/`threshold`/`dedupeMinutes`/`webhookEndpointId`） |
+| `GET /api/v1/admin/alert-rules` / `/{id}` | 列表/详情 |
+| `PATCH /api/v1/admin/alert-rules/{id}` | 更新（含 enabled） |
+| `DELETE /api/v1/admin/alert-rules/{id}` | 删除 |
+
+规则类型：`USAGE_MISSING_RATE`（1h 内 usage_missing 占比）、`UPSTREAM_ERROR_RATE`（1h 内非 2xx 占比）、`BALANCE_UNAVAILABLE`（1h 内 UNAVAILABLE 配额快照数）、`USAGE_SURGE`（当前 1h 事件数 / 前一 1h 比率）。评估周期 `miqrokey.alerts.evaluation-interval-ms`（默认 5min）；命中阈值后按（规则 × 小时桶）去重，仅首个事件触发投递；投递失败指数退避重试最多 3 次。错误码：`ALERT_RULE_NOT_FOUND`（404）、`ALERT_TYPE_INVALID`（400）。
+
+## 6. 导出与对账任务
+
+导出和账单对账均为异步任务：
+
+1. `POST` 创建任务，返回 `202` 和任务 ID。
+2. `GET /{id}` 查询 `PENDING/RUNNING/SUCCEEDED/FAILED/EXPIRED`。
+3. 成功后下载只在短期签名 URL 或已鉴权流式接口提供。
+4. 导出包含 schema/version manifest、查询范围、时区、生成时间和文件 SHA-256。
+5. CSV/JSONL 均不得包含提示词、回答正文、真实凭证明文或 Virtual Key 明文。
+
+官方账单明细优先按供应商 request ID 匹配；其次按模型、时间窗、token 和金额组合匹配。结果必须区分 `MATCHED`、`PARTIAL`、`UNMATCHED_LOCAL`、`UNMATCHED_PROVIDER`。
+
+## 7. Gateway 推理入口
+
+- Gateway 接受产品已声明的任意上游路径和方法，不把所有请求强制转换为 OpenAI 或 Anthropic 格式。
+- 首版重点验证 Anthropic Messages、OpenAI Responses、OpenAI Chat Completions，包括 SSE 流。
+- 除鉴权 Header、目标 Host 和明确配置的安全 Header 外，请求体、查询串、未知 Header 和响应体按字节/流透明传递。
+- 供应商返回的 HTTP 状态、错误体和 SSE 事件顺序保持不变；本系统错误使用本系统 Problem Details。
+- `GET /v1/models` 是本系统提供的受控端点，只返回该 Virtual Key 允许的明确模型 ID。
+- Virtual Key 无效、吊销、过期或模型越权时，Gateway 不连接上游。
+- 客户断开时取消上游订阅；不得继续消耗 token。
+
+### 7.1 Virtual Key 鉴权与路由
+
+- 客户端必须且只能提供**一个**凭证 Header：`Authorization: Bearer <key>`（或裸值）、`x-api-key`、`api-key`。零个或多个凭证 Header → `401`（错误体不区分具体原因，防枚举）。
+- Key 格式 `mqk_live_<publicKeyId>_<secret>[.<projectTag>]`：点号后缀是**路由标签**（明文，仅用于把请求路由到 Key 绑定的项目），鉴权权威是数据库中的 `key_project_binding`，标签本身不决定授权。HMAC 摘要不包含标签。
+- Gateway 使用版本化只读路由快照（定时刷新，默认 30s）做校验与路由；热路径不查询数据库。吊销/轮换按快照刷新传播，宽限期由控制面配置。
+- 校验通过后 Gateway 注入该 Key 固定绑定的上游凭证（AES-256-GCM 解密，内存中用完即清零），并把请求转发到该授权对应项目的目标；请求头和体按透明代理规则原样转发。
+- 模型预校验：请求体中的模型不在 Key 授权集合内时，不连接上游，直接返回错误（Anthropic/OpenAI 协议兼容的错误体）。代理热路径的预校验只按 **Key 快照**（`virtual_key_models`）判断，与 `GET /v1/models` 的四路交集是两回事——模型目录为空时代理不会拒绝所有流量。
+- `/v1/models` 返回该 Virtual Key 的目录、上游模型、Grant 与 Key 快照的交集；未授权模型不泄漏。四路输入均来自同一版本的路由快照：
+  - **目录**：已签名 provider catalog（classpath，Ed25519 校验）。Key 绑定产品的 `product_code` 不在目录中 → 返回空列表（目录是外层授权边界）。
+  - **上游模型**：`model_catalog` 中该产品 ACTIVE 行。该表只由**成功的**官方 API 抓取写入（`ModelCatalogService` 成功才写、失败保留上次成功目录），因此该集合就是“最后成功目录”。
+  - **Grant**：该 Key 所属 ACTIVE grant 的 `project_provider_grant_models`。
+  - **Key 快照**：该 Key 的 `virtual_key_models`。
+  - 在官方 API 适配器实现（G3.x）之前 `model_catalog` 为空，严格交集的结果是空列表——不泄漏未授权模型是刻意的，不是缺陷。
+- 用量记录：每个请求写入 `usage_event`（幂等，`provider_request_id` 在 tenant 内唯一）；usage 缺失时标记 `usage_missing=true`；正文（prompt、代码、工具、回答）永不进入持久化。
+- 生命周期记录（G2.4）：每个**到达上游**的请求在 `request_usage_records` 打开 `IN_FLIGHT` 行并恰好 finalize 一次——包括客户端取消、上游错误与超时（状态见 usage-accounting §2）；鉴权失败与缓存命中不打开记录。usage 从 SSE 事件或非流式 JSON 正文解析（仅计数）；SUCCEEDED 但无 usage 时 `usage_missing=true`，绝不静默记零。
+- 上游目标门控（G2.6 SSRF）：仅转发路由快照提供的 Base URL；`https` 是硬要求（除非目标命中 `MIQROKEY_UPSTREAM_ALLOWED_CIDRS`），URL 携带 `userinfo` 一律拒绝，DNS 解析后的每个地址必须是公网地址（环回、链路本地、RFC1918、CGNAT `100.64/10`、组播、any-local、IPv6 ULA `fc00::/7` 均拒绝，除非命中 allowlist）。被拒绝时返回 `502 route_unavailable`，错误体、日志与审计**不包含目标 URL 或主机名**（`UpstreamTargetValidator` 的拒绝原因只有稳定类别 token）。
+- 路径白名单：数据面只暴露 `POST /v1/messages`、`POST /v1/responses`、`POST /v1/chat/completions`。正确方法之外的请求 → `405 method_not_allowed`；其他 `/v1/**` 路径 → `404 unsupported_path`；两者都不连接上游。嵌入式 `..` 段按字面处理（`/v1/**` 之外不匹配）；`//` 由服务器归一化为规范路径后按正常请求处理，不构成走私。
+- 输入上限：入站 Header 超过 `MIQROKEY_MAX_INBOUND_HEADER_BYTES`（默认 `32KB`）由 Netty 在路由前拒绝 → `431`；请求体超过 `MIQROKEY_MAX_PROXY_BUFFER_BYTES`（默认 `256KB`）→ `413 payload_too_large`。超限请求不连接上游。
+- Header 走私：凭证 Header（`Authorization`/`x-api-key`/`api-key`）出现多个 → `401`，任何凭证都不会转发；`Connection` 提名的 hop-by-hop Header 与 `X-MiQroKey-*` 内部 Header 在转发前剥离；上游只携带 Gateway 注入的真实凭证，客户端 Virtual Key 永不泄漏到上游。
+
+Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 ID 都进入用量记录；不得覆盖供应商 request ID Header。
+
+## 8. OpenAPI 与兼容性
+
+- Control Plane 必须生成 OpenAPI 3.1，并在 CI 检查未提交的破坏性变更。
+- 前端 TypeScript client 从 OpenAPI 生成，禁止复制维护 DTO。
+- 同一 major 版本只允许新增可选字段和新端点；删除、改名、改变含义必须进入下一 major。
+- 推理入口不进入管理 API 的 DTO 生成流程，以透明代理契约和 fixtures 验证。
