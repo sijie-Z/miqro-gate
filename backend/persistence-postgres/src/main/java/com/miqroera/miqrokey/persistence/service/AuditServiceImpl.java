@@ -81,6 +81,13 @@ public class AuditServiceImpl implements AuditService {
         Instant now = Instant.now();
         UUID id = UUID.randomUUID();
 
+        // Normalise changeSummary to the exact jsonb text form PostgreSQL will
+        // persist (jsonb reorders object keys and strips insignificant
+        // whitespace). Hashing the caller's raw string would make the stored
+        // hash irreproducible from the persisted row, breaking tamper-evidence
+        // verification for non-scalar summaries.
+        String normalizedSummary = repository.normalizeChangeSummary(changeSummary);
+
         // Acquire PostgreSQL transaction-scoped advisory lock to serialise chain-link
         // construction across concurrent writers and JVM instances. The lock is
         // released when the current transaction commits.
@@ -98,11 +105,11 @@ public class AuditServiceImpl implements AuditService {
                                                                                                            // genesis
 
         // Compute hash over all security-relevant immutable event fields
-        byte[] currentHash = computeEventHash(id, tenantId, actorId, action, targetType, targetId, changeSummary,
+        byte[] currentHash = computeEventHash(id, tenantId, actorId, action, targetType, targetId, normalizedSummary,
                 requestId, now, previousHash);
 
-        AdminAuditEvent event = new AdminAuditEvent(id, tenantId, actorId, action, targetType, targetId, changeSummary,
-                null, requestId, previousHash, currentHash, now, 0L);
+        AdminAuditEvent event = new AdminAuditEvent(id, tenantId, actorId, action, targetType, targetId,
+                normalizedSummary, null, requestId, previousHash, currentHash, now, 0L);
         // chainPosition == 0 is a placeholder — the database assigns the real
         // value via DEFAULT nextval('admin_audit_events_chain_seq') on INSERT.
         repository.insert(event);

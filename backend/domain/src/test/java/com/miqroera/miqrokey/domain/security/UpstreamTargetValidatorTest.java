@@ -3,6 +3,8 @@ package com.miqroera.miqrokey.domain.security;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -143,5 +145,36 @@ class UpstreamTargetValidatorTest {
     void exposesAllowlistState() {
         assertThat(STRICT.allowsPrivateTargets()).isFalse();
         assertThat(new UpstreamTargetValidator(List.of("127.0.0.0/8")).allowsPrivateTargets()).isTrue();
+    }
+
+    // -------------------------------------------------------------------
+    // Connection pinning (DNS-rebinding TOCTOU defense)
+    // -------------------------------------------------------------------
+
+    @Test
+    @DisplayName("validateAndResolve returns the validated addresses for connection pinning")
+    void validateAndResolveReturnsAddresses() {
+        UpstreamTargetValidator.Resolved resolved = STRICT.validateAndResolve("https://1.1.1.1");
+        assertThat(resolved.allowed()).isTrue();
+        assertThat(resolved.reason()).isNull();
+        assertThat(resolved.addresses()).isNotEmpty();
+        assertThat(resolved.addresses()[0].getHostAddress()).isEqualTo("1.1.1.1");
+
+        UpstreamTargetValidator.Resolved denied = STRICT.validateAndResolve("https://127.0.0.1");
+        assertThat(denied.allowed()).isFalse();
+        assertThat(denied.reason()).isEqualTo("non-public-address");
+        assertThat(denied.addresses()).isNull();
+    }
+
+    @Test
+    @DisplayName("resolveValidated returns validated addresses and rejects non-public hosts without leaking the hostname")
+    void resolveValidatedForPinning() throws Exception {
+        UpstreamTargetValidator permissive = new UpstreamTargetValidator(List.of("127.0.0.0/8"));
+        assertThat(permissive.resolveValidated("127.0.0.1")).containsExactly(InetAddress.getByName("127.0.0.1"));
+
+        assertThatThrownBy(() -> STRICT.resolveValidated("127.0.0.1"))
+                .isInstanceOf(UnknownHostException.class).hasMessageNotContaining("127.0.0.1");
+        assertThatThrownBy(() -> STRICT.resolveValidated("169.254.169.254"))
+                .isInstanceOf(UnknownHostException.class).hasMessageNotContaining("169.254");
     }
 }

@@ -73,10 +73,14 @@ class ProviderClientConfigTest {
     @Test
     @DisplayName("the factory builds credential-scoped HttpProviderClient instances")
     void factoryBuildsCredentialScopedClients() {
-        ProviderClientFactory factory = config.providerClientFactory(
-                config.controlPlaneTargetValidator(new ProviderClientProperties()), new ProviderClientProperties());
+        // Loopback target with a loopback allowlist: construction validates
+        // and resolves the base URL, so the test must not depend on DNS.
+        ProviderClientProperties properties = new ProviderClientProperties();
+        properties.setAllowedCidrs(List.of("127.0.0.0/8"));
+        ProviderClientFactory factory = config.providerClientFactory(config.controlPlaneTargetValidator(properties),
+                properties);
 
-        assertThat(factory.create(URI.create("https://api.deepseek.com"), "Authorization", "Bearer sk-a"))
+        assertThat(factory.create(URI.create("http://127.0.0.1"), "Authorization", "Bearer sk-a"))
                 .isInstanceOf(HttpProviderClient.class);
     }
 }

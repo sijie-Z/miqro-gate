@@ -20,7 +20,12 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.containers.PostgreSQLContainer;
 
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -53,6 +58,16 @@ import static org.assertj.core.api.Assertions.assertThat;
  * detection, and a targeted regression proving that JVM clock skew and pre-lock
  * request timestamps cannot alter head ordering.
  * </p>
+ *
+ * <p>
+ * The chain is global and every verification reads the <strong>whole</strong>
+ * {@code admin_audit_events} table, so this class runs against a dedicated
+ * database on the shared container (see {@link #AUDIT_CHAIN_DB_NAME}). Other
+ * integration test classes on the same container delete or insert audit rows
+ * from the public schema; sharing it would let their {@code @BeforeEach}
+ * deletes or service-driven inserts interleave with this test's concurrent
+ * write phase and break chain links nondeterministically.
+ * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -60,14 +75,47 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("Audit chain integrity tests (real service + advisory lock + chain_position)")
 class AuditChainIntegrityTest {
 
+    private static final UUID SEED_TENANT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    private static final byte[] GENESIS_HASH = new byte[32];
+
+    /** Dedicated database on the shared container — isolates the global chain
+     * from other integration test classes that delete or insert audit rows. */
+    private static final String AUDIT_CHAIN_DB_NAME = "miqrokey_audit_chain_test";
+
     static {
         // Ensure the shared container is initialised before Spring context
-        AbstractControlPlaneIntegrationTest.POSTGRES.getJdbcUrl();
+        PostgreSQLContainer<?> postgres = AbstractControlPlaneIntegrationTest.POSTGRES;
+        postgres.getJdbcUrl();
+
+        // Create the dedicated database once per JVM. CREATE DATABASE cannot run
+        // inside a transaction, so it is issued on a plain auto-commit connection.
+        try (Connection admin = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(),
+                postgres.getPassword());
+                Statement statement = admin.createStatement()) {
+            statement.execute("CREATE DATABASE " + AUDIT_CHAIN_DB_NAME);
+        } catch (SQLException e) {
+            if (!e.getMessage().contains("already exists")) {
+                throw new IllegalStateException(
+                        "Failed to create dedicated audit-chain test database " + AUDIT_CHAIN_DB_NAME, e);
+            }
+        }
     }
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
-        AbstractControlPlaneIntegrationTest.configureProperties(registry);
+        // Register everything explicitly (instead of delegating to
+        // AbstractControlPlaneIntegrationTest) so the datasource points at the
+        // dedicated database while still sharing the container itself.
+        PostgreSQLContainer<?> postgres = AbstractControlPlaneIntegrationTest.POSTGRES;
+        registry.add("spring.datasource.url",
+                () -> "jdbc:postgresql://" + postgres.getHost() + ":" + postgres.getFirstMappedPort() + "/"
+                        + AUDIT_CHAIN_DB_NAME);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
+        registry.add("spring.flyway.enabled", () -> "true");
+        registry.add("spring.flyway.locations", () -> "classpath:db/migration");
+        registry.add("spring.flyway.clean-disabled", () -> "true");
     }
 
     @Autowired
@@ -80,9 +128,6 @@ class AuditChainIntegrityTest {
     NamedParameterJdbcTemplate jdbc;
     @Autowired
     PlatformTransactionManager transactionManager;
-
-    private static final UUID SEED_TENANT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
-    private static final byte[] GENESIS_HASH = new byte[32];
 
     @BeforeEach
     void clearAudit() {
@@ -350,6 +395,29 @@ class AuditChainIntegrityTest {
                 "TAMPERED_ACTION", event.targetType(), event.targetId(), event.changeSummary(), event.adminRequestId(),
                 event.createdAt(), event.previousEventHash());
         assertThat(originalHash).as("tampered action should produce different hash").isNotEqualTo(tamperedActionHash);
+    }
+
+    // -----------------------------------------------------------------------
+    // 3b. Regression: object change summaries survive jsonb normalisation
+    //
+    // change_summary is a jsonb column: PostgreSQL reorders object keys and
+    // strips insignificant whitespace. The stored hash must therefore be
+    // computed over the normalised text form, otherwise recomputing the hash
+    // from the persisted row flags every object-summary event as tampered.
+    // -----------------------------------------------------------------------
+
+    @Test
+    @DisplayName("regression: object change summaries verify against the normalised jsonb form")
+    void objectChangeSummaryVerifiesAgainstNormalisedJsonb() {
+        UUID actorId = UUID.randomUUID();
+
+        // Key order "b,a,c" and compact spacing differ from jsonb's canonical
+        // form, so an unnormalised hash would never match the stored row.
+        auditService.record(SEED_TENANT_ID, actorId, "JSON_SUMMARY", "TYPE", UUID.randomUUID(),
+                "{\"b\":2,\"a\":\"x y\",\"c\":[1,2]}", "req-json");
+
+        // Full chain verification recomputes every hash from the persisted row.
+        verifyFullChain(1);
     }
 
     // -----------------------------------------------------------------------

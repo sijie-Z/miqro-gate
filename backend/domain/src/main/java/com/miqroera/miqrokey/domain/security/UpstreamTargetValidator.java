@@ -33,6 +33,15 @@ import java.util.Locale;
  * </p>
  *
  * <p>
+ * Validate-then-connect is inherently racy against DNS rebinding: the resolver
+ * answers are validated here but the connection resolves the hostname again.
+ * Callers that open connections must therefore use
+ * {@link #validateAndResolve(String)} (or {@link #resolveValidated(String)},
+ * which re-checks at connect time) and pin the connection to a returned
+ * address — never re-resolve the hostname.
+ * </p>
+ *
+ * <p>
  * Failure reasons never include the target URL or hostname — the error surfaces
  * to the client as a generic {@code route_unavailable} 502.
  * </p>
@@ -80,41 +89,85 @@ public final class UpstreamTargetValidator {
     }
 
     /**
+     * Outcome of a target check with the resolved addresses. When
+     * {@link #allowed()} is true, {@link #addresses()} carries every address the
+     * host resolved to (all validated); callers that open a connection must pin
+     * it to one of these addresses — never re-resolve the hostname — so a
+     * rebinding DNS answer between validation and connection cannot move the
+     * traffic (SSRF TOCTOU defense).
+     */
+    public record Resolved(boolean allowed, String reason, InetAddress[] addresses) {
+        static Resolved allow(InetAddress[] addresses) {
+            return new Resolved(true, null, addresses);
+        }
+
+        static Resolved deny(String reason) {
+            return new Resolved(false, reason, null);
+        }
+    }
+
+    /**
      * Validates an upstream base URL. Blocking (DNS); never call on the event loop.
      */
     public Result validate(String baseUrl) {
+        Resolved resolved = validateAndResolve(baseUrl);
+        return resolved.allowed() ? Result.allow() : Result.deny(resolved.reason());
+    }
+
+    /**
+     * Like {@link #validate(String)} but also returns the validated addresses for
+     * connection pinning. Blocking (DNS); never call on the event loop.
+     */
+    public Resolved validateAndResolve(String baseUrl) {
         URI uri;
         try {
             uri = new URI(baseUrl);
         } catch (URISyntaxException e) {
-            return Result.deny("invalid-url");
+            return Resolved.deny("invalid-url");
         }
         if (uri.getUserInfo() != null) {
-            return Result.deny("userinfo-forbidden");
+            return Resolved.deny("userinfo-forbidden");
         }
         String scheme = uri.getScheme();
         String host = uri.getHost();
         if (scheme == null || host == null || host.isBlank()) {
-            return Result.deny("invalid-url");
+            return Resolved.deny("invalid-url");
         }
 
         boolean hostAllowed = cidrsContainHost(host);
         if (!"https".equalsIgnoreCase(scheme) && !hostAllowed) {
-            return Result.deny("non-https");
+            return Resolved.deny("non-https");
         }
 
         InetAddress[] addresses;
         try {
             addresses = InetAddress.getAllByName(host);
         } catch (UnknownHostException e) {
-            return Result.deny("unresolvable");
+            return Resolved.deny("unresolvable");
         }
         for (InetAddress address : addresses) {
             if (!isPublic(address) && !cidrsContainAddress(address)) {
-                return Result.deny("non-public-address");
+                return Resolved.deny("non-public-address");
             }
         }
-        return Result.allow();
+        return Resolved.allow(addresses);
+    }
+
+    /**
+     * Resolves a hostname and returns the validated addresses for connection
+     * pinning (the connect-time half of the SSRF TOCTOU defense): every resolved
+     * address must be public or allow-listed, otherwise
+     * {@link UnknownHostException} is thrown. The exception message never
+     * contains the hostname. Blocking (DNS); never call on the event loop.
+     */
+    public InetAddress[] resolveValidated(String host) throws UnknownHostException {
+        InetAddress[] addresses = InetAddress.getAllByName(host);
+        for (InetAddress address : addresses) {
+            if (!isPublic(address) && !cidrsContainAddress(address)) {
+                throw new UnknownHostException("upstream host rejected by the SSRF gate");
+            }
+        }
+        return addresses;
     }
 
     /**
