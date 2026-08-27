@@ -57,21 +57,21 @@ onMounted(load);
     <PageHeader title="Usage" description="全租户用量：筛选条 → 汇总行 → 明细表。" />
 
     <div class="mk-filter-bar">
-      <el-select v-model="groupBy" data-testid="usage-group-by" @change="load">
-        <el-option label="项目" value="project" />
-        <el-option label="Virtual Key" value="virtual_key" />
-        <el-option label="缓存层级" value="cache_level" />
-        <el-option label="日" value="day" />
-      </el-select>
-      <el-input v-model="projectId" placeholder="项目 ID（可选）" class="filter-input" />
-      <el-input v-model="modelId" placeholder="模型 ID（可选）" class="filter-input" />
-      <el-button type="primary" @click="load">查询</el-button>
+      <t-select v-model="groupBy" data-testid="usage-group-by" @change="load">
+        <t-option label="项目" value="project" />
+        <t-option label="Virtual Key" value="virtual_key" />
+        <t-option label="缓存层级" value="cache_level" />
+        <t-option label="日" value="day" />
+      </t-select>
+      <t-input v-model="projectId" placeholder="项目 ID（可选）" class="filter-input" />
+      <t-input v-model="modelId" placeholder="模型 ID（可选）" class="filter-input" />
+      <t-button theme="primary" @click="load">查询</t-button>
     </div>
 
-    <el-alert v-if="summaryError" type="error" :closable="false" class="block-alert">
+    <t-alert v-if="summaryError" theme="error" :close-btn="false" class="block-alert">
       {{ summaryError
       }}<span v-if="summaryRequestId" class="mk-mono">requestId: {{ summaryRequestId }}</span>
-    </el-alert>
+    </t-alert>
 
     <div v-if="summary && !summaryLoading" class="mk-summary-row" data-testid="usage-summary">
       <span
@@ -88,61 +88,60 @@ onMounted(load);
       >
     </div>
 
-    <el-table
-      v-loading="recordsLoading"
-      :data="records?.items ?? []"
-      data-testid="usage-records-table"
-    >
-      <el-table-column label="时间" width="170">
-        <template #default="{ row }">{{ formatTime(row.occurredAt) }}</template>
-      </el-table-column>
-      <el-table-column prop="modelId" label="模型" min-width="160" />
-      <el-table-column label="输入" width="110" align="right">
-        <template #default="{ row }"
+    <t-loading :loading="recordsLoading" size="small" show-overlay>
+      <t-table
+        :data="records?.items ?? []"
+        data-testid="usage-records-table"
+        row-key="id"
+        size="small"
+        :columns="[
+          { colKey: 'occurredAt', title: '时间', width: 170 },
+          { colKey: 'modelId', title: '模型', minWidth: 160 },
+          { colKey: 'inputTokens', title: '输入', width: 110, align: 'right' },
+          { colKey: 'outputTokens', title: '输出', width: 110, align: 'right' },
+          { colKey: 'cacheLevel', title: '缓存层级', width: 110 },
+          { colKey: 'upstreamStatusCode', title: '状态码', width: 90, align: 'right' },
+          { colKey: 'usageMissing', title: 'Usage', width: 90 },
+          { colKey: 'gatewayRequestId', title: 'Request ID', minWidth: 200 },
+        ]"
+      >
+        <template #occurredAt="{ row }">{{ formatTime(row.occurredAt) }}</template>
+        <template #inputTokens="{ row }"
           ><span class="mk-num">{{ row.inputTokens ?? 0 }}</span></template
         >
-      </el-table-column>
-      <el-table-column label="输出" width="110" align="right">
-        <template #default="{ row }"
+        <template #outputTokens="{ row }"
           ><span class="mk-num">{{ row.outputTokens ?? 0 }}</span></template
         >
-      </el-table-column>
-      <el-table-column prop="cacheLevel" label="缓存层级" width="110" />
-      <el-table-column label="状态码" width="90" align="right">
-        <template #default="{ row }"
+        <template #upstreamStatusCode="{ row }"
           ><span class="mk-num">{{ row.upstreamStatusCode ?? '—' }}</span></template
         >
-      </el-table-column>
-      <el-table-column label="Usage" width="90">
-        <template #default="{ row }">
+        <template #usageMissing="{ row }">
           <span v-if="row.usageMissing" class="mk-status mk-status--warning">missing</span>
           <span v-else class="mk-status mk-status--success">ok</span>
         </template>
-      </el-table-column>
-      <el-table-column label="Request ID" min-width="200">
-        <template #default="{ row }"
+        <template #gatewayRequestId="{ row }"
           ><span class="mk-mono">{{ row.gatewayRequestId }}</span></template
         >
-      </el-table-column>
-    </el-table>
+      </t-table>
+    </t-loading>
 
     <div class="pager">
-      <el-button
+      <t-button
         :disabled="page <= 1"
         @click="
           page--;
           load();
         "
-        >上一页</el-button
+        >上一页</t-button
       >
       <span class="mk-num">第 {{ page }} 页 / 共 {{ records?.total ?? 0 }} 条</span>
-      <el-button
+      <t-button
         :disabled="(records?.items ?? []).length < pageSize"
         @click="
           page++;
           load();
         "
-        >下一页</el-button
+        >下一页</t-button
       >
     </div>
   </div>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { ElMessage } from 'element-plus';
+import { MessagePlugin } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -55,7 +55,7 @@ async function createDeletion() {
     confirmToken.value = request.confirmToken;
     confirmDialog.value = true;
   } catch (error) {
-    ElMessage.error(error instanceof ApiError ? error.message : '创建失败，请稍后重试。');
+    MessagePlugin.error(error instanceof ApiError ? error.message : '创建失败，请稍后重试。');
   }
 }
 
@@ -63,11 +63,11 @@ async function confirmDeletion() {
   try {
     const result = await api.confirmDeletion(pendingDeletionId.value, confirmToken.value);
     confirmDialog.value = false;
-    ElMessage.success(`已删除 ${result.deletedCount ?? 0} 条用量记录（永久）。`);
+    MessagePlugin.success(`已删除 ${result.deletedCount ?? 0} 条用量记录（永久）。`);
     await load();
   } catch (error) {
     if (error instanceof ApiError) {
-      ElMessage.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+      MessagePlugin.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
     }
   }
 }
@@ -86,19 +86,19 @@ onMounted(load);
       description="按时间窗永久删除用量记录；需一次性确认 token，删除不可撤销。"
     />
 
-    <el-alert v-if="loadError" type="error" :closable="false" class="block-alert">
+    <t-alert v-if="loadError" theme="error" :close-btn="false" class="block-alert">
       {{ loadError
       }}<span v-if="loadRequestId" class="mk-mono">requestId: {{ loadRequestId }}</span>
-    </el-alert>
+    </t-alert>
 
     <div class="mk-filter-bar" data-testid="deletion-filter-bar">
-      <el-input v-model="from" class="filter-input" data-testid="deletion-from" />
-      <el-input v-model="to" class="filter-input" data-testid="deletion-to" />
-      <el-button :loading="previewing" data-testid="deletion-preview" @click="preview"
-        >预览计数</el-button
+      <t-input v-model="from" class="filter-input" data-testid="deletion-from" />
+      <t-input v-model="to" class="filter-input" data-testid="deletion-to" />
+      <t-button :loading="previewing" data-testid="deletion-preview" @click="preview"
+        >预览计数</t-button
       >
-      <el-button type="danger" data-testid="deletion-create" @click="createDeletion"
-        >创建删除请求</el-button
+      <t-button theme="danger" data-testid="deletion-create" @click="createDeletion"
+        >创建删除请求</t-button
       >
     </div>
     <p v-if="previewCount !== null" class="preview-note" data-testid="deletion-preview-count">
@@ -106,21 +106,29 @@ onMounted(load);
     </p>
     <p v-if="previewError" class="preview-note preview-error">{{ previewError }}</p>
 
-    <el-table v-loading="loading" :data="deletions" data-testid="deletions-table">
-      <el-table-column label="窗口" min-width="200">
-        <template #default="{ row }">
+    <t-loading :loading="loading" size="small" show-overlay>
+      <t-table
+        :data="deletions"
+        data-testid="deletions-table"
+        row-key="id"
+        size="small"
+        :columns="[
+          { colKey: 'period', title: '窗口', minWidth: 200 },
+          { colKey: 'previewCount', title: '预览计数', width: 100, align: 'right' },
+          { colKey: 'status', title: '状态', width: 170 },
+          { colKey: 'deletedCount', title: '已删除', width: 100, align: 'right' },
+          { colKey: 'createdAt', title: '创建时间', width: 170 },
+        ]"
+      >
+        <template #period="{ row }">
           <span class="mk-mono"
             >{{ row.periodFrom.slice(0, 10) }} → {{ row.periodTo.slice(0, 10) }}</span
           >
         </template>
-      </el-table-column>
-      <el-table-column prop="previewCount" label="预览计数" width="100" align="right">
-        <template #default="{ row }"
+        <template #previewCount="{ row }"
           ><span class="mk-num">{{ row.previewCount }}</span></template
         >
-      </el-table-column>
-      <el-table-column label="状态" width="170">
-        <template #default="{ row }">
+        <template #status="{ row }">
           <span
             class="mk-status"
             :class="
@@ -134,20 +142,16 @@ onMounted(load);
             {{ row.status }}
           </span>
         </template>
-      </el-table-column>
-      <el-table-column label="已删除" width="100" align="right">
-        <template #default="{ row }"
+        <template #deletedCount="{ row }"
           ><span class="mk-num">{{ row.deletedCount ?? '—' }}</span></template
         >
-      </el-table-column>
-      <el-table-column label="创建时间" width="170">
-        <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
-      </el-table-column>
-    </el-table>
+        <template #createdAt="{ row }">{{ formatTime(row.createdAt) }}</template>
+      </t-table>
+    </t-loading>
 
-    <el-dialog
-      v-model="confirmDialog"
-      title="确认删除（二次确认）"
+    <t-dialog
+      v-model:visible="confirmDialog"
+      header="确认删除（二次确认）"
       width="460px"
       data-testid="deletion-confirm-dialog"
     >
@@ -155,19 +159,14 @@ onMounted(load);
         删除请求已创建。请粘贴创建时返回的<strong>一次性确认 token</strong>
         完成删除。删除是永久且不可撤销的。
       </p>
-      <el-input
-        v-model="confirmToken"
-        type="textarea"
-        :rows="2"
-        data-testid="deletion-confirm-token"
-      />
+      <t-textarea v-model="confirmToken" data-testid="deletion-confirm-token" />
       <template #footer>
-        <el-button @click="confirmDialog = false">取消</el-button>
-        <el-button type="danger" data-testid="deletion-confirm-submit" @click="confirmDeletion"
-          >确认删除</el-button
+        <t-button @click="confirmDialog = false">取消</t-button>
+        <t-button theme="danger" data-testid="deletion-confirm-submit" @click="confirmDeletion"
+          >确认删除</t-button
         >
       </template>
-    </el-dialog>
+    </t-dialog>
   </div>
 </template>
 

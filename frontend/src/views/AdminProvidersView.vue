@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import type { PrimaryTableCol } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -9,6 +10,15 @@ const products = ref<ProviderProductView[]>([]);
 const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
+
+const tableColumns: PrimaryTableCol[] = [
+  { colKey: 'provider', title: '供应商', width: 200 },
+  { colKey: 'product', title: '产品', minWidth: 200 },
+  { colKey: 'protocols', title: '协议', width: 200 },
+  { colKey: 'baseUrl', title: 'Base URL', minWidth: 200 },
+  { colKey: 'implementationStatus', title: '实现状态', width: 120 },
+  { colKey: 'balanceAuthority', title: '余额来源', width: 110 },
+];
 
 async function load() {
   loading.value = true;
@@ -87,14 +97,20 @@ onMounted(load);
       description="供应商产品实例：协议、Plan 形态、验证状态与余额来源。"
     />
 
-    <el-alert v-if="loadError" type="error" :closable="false" class="block-alert">
+    <t-alert v-if="loadError" theme="error" :close-btn="false" class="block-alert">
       {{ loadError
       }}<span v-if="loadRequestId" class="mk-mono">requestId: {{ loadRequestId }}</span>
-    </el-alert>
+    </t-alert>
 
-    <el-table v-loading="loading" :data="products" data-testid="products-table">
-      <el-table-column label="供应商" width="200">
-        <template #default="{ row }">
+    <t-loading :loading="loading" size="small" show-overlay>
+      <t-table
+        :data="products"
+        :columns="tableColumns"
+        row-key="id"
+        size="small"
+        data-testid="products-table"
+      >
+        <template #provider="{ row }">
           <div class="mk-provider-cell">
             <span
               class="mk-brand-chip mk-brand-chip--sm"
@@ -106,36 +122,26 @@ onMounted(load);
             <span>{{ row.providerName }}</span>
           </div>
         </template>
-      </el-table-column>
-      <el-table-column label="产品" min-width="200">
-        <template #default="{ row }">
+        <template #product="{ row }">
           <div class="product-name">{{ row.displayName }}</div>
           <div class="mk-mono product-code">{{ row.productCode }}</div>
         </template>
-      </el-table-column>
-      <el-table-column label="协议" width="200">
-        <template #default="{ row }">
+        <template #protocols="{ row }">
           <span class="mk-mono">{{ row.protocols }}</span>
         </template>
-      </el-table-column>
-      <el-table-column label="Base URL" min-width="200">
-        <template #default="{ row }">
+        <template #baseUrl="{ row }">
           <span class="mk-mono">{{ row.baseUrlHost || '—' }}</span>
         </template>
-      </el-table-column>
-      <el-table-column label="实现状态" width="120">
-        <template #default="{ row }">
+        <template #implementationStatus="{ row }">
           <span class="mk-status" :class="implClass(row.implementationStatus)">{{
             row.implementationStatus
           }}</span>
         </template>
-      </el-table-column>
-      <el-table-column label="余额来源" width="110">
-        <template #default="{ row }">
+        <template #balanceAuthority="{ row }">
           <span class="mk-status mk-status--neutral">{{ balanceLabel(row.balanceAuthority) }}</span>
         </template>
-      </el-table-column>
-    </el-table>
+      </t-table>
+    </t-loading>
   </div>
 </template>
 

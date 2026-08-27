@@ -167,19 +167,19 @@ onMounted(load);
           内部凭证治理控制台 · 单租户部署 · {{ new Date().getFullYear() }} 年
         </p>
       </div>
-      <el-button
-        type="primary"
+      <t-button
+        theme="primary"
         data-testid="overview-create-key"
         @click="$router.push({ name: 'keys' })"
       >
         创建 Virtual Key
-      </el-button>
+      </t-button>
     </div>
 
-    <el-alert v-if="loadError" type="error" :closable="false" class="block-alert">
+    <t-alert v-if="loadError" type="error" :closable="false" class="block-alert">
       {{ loadError
       }}<span v-if="loadRequestId" class="mk-mono">requestId: {{ loadRequestId }}</span>
-    </el-alert>
+    </t-alert>
 
     <div v-loading="loading">
       <div class="mk-stat-grid" data-testid="overview-stats">
@@ -197,8 +197,8 @@ onMounted(load);
         <section class="mk-card" data-testid="overview-usage">
           <div class="mk-card-header">
             <h3 class="mk-card-title">用量分布（按项目）</h3>
-            <el-button link type="primary" @click="$router.push({ name: 'usage' })"
-              >查看明细</el-button
+            <t-button variant="text" theme="primary" @click="$router.push({ name: 'usage' })"
+              >查看明细</t-button
             >
           </div>
           <div class="mk-card-body">
@@ -238,8 +238,8 @@ onMounted(load);
         <section class="mk-card" data-testid="overview-keys">
           <div class="mk-card-header">
             <h3 class="mk-card-title">最近创建的 Key</h3>
-            <el-button link type="primary" @click="$router.push({ name: 'keys' })"
-              >全部 Key</el-button
+            <t-button variant="text" theme="primary" @click="$router.push({ name: 'keys' })"
+              >全部 Key</t-button
             >
           </div>
           <div class="mk-card-body">
@@ -264,11 +264,11 @@ onMounted(load);
               </div>
             </div>
             <div v-else class="mk-empty-hint">
-              还没有 Virtual Key。<el-button
-                link
-                type="primary"
+              还没有 Virtual Key。<t-button
+                variant="text"
+                theme="primary"
                 @click="$router.push({ name: 'keys' })"
-                >创建一个</el-button
+                >创建一个</t-button
               >
             </div>
           </div>
@@ -311,8 +311,8 @@ onMounted(load);
           </div>
           <div v-else class="mk-empty-hint">
             还没有订阅。到
-            <el-button link type="primary" @click="$router.push({ name: 'plans' })"
-              >Plans</el-button
+            <t-button variant="text" theme="primary" @click="$router.push({ name: 'plans' })"
+              >Plans</t-button
             >
             录入套餐后，这里会显示每套方案的滚动额度。
           </div>

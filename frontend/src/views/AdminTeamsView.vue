@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { ElMessageBox } from 'element-plus';
+import { DialogPlugin } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -21,6 +21,18 @@ const memberDrawer = ref(false);
 const memberTeam = ref<Team | null>(null);
 const memberUsers = ref<MemberView[]>([]);
 const memberLoading = ref(false);
+
+const columns = [
+  { colKey: 'name', title: '名称', minWidth: 180 },
+  { colKey: 'description', title: '描述', minWidth: 240 },
+  { colKey: 'status', title: '状态', width: 110 },
+  { colKey: 'actions', title: '操作', width: 100, fixed: 'right' as const },
+];
+
+const memberColumns = [
+  { colKey: 'username', title: '用户名', minWidth: 120 },
+  { colKey: 'actions', title: '', width: 80 },
+];
 
 async function load() {
   loading.value = true;
@@ -77,15 +89,13 @@ async function refreshMembers() {
 async function removeMember(user: MemberView) {
   if (!memberTeam.value) return;
   try {
-    await ElMessageBox.confirm(
-      `将「${user.username}」移出团队「${memberTeam.value.name}」。`,
-      '移除成员',
-      {
-        confirmButtonText: '移除',
-        cancelButtonText: '取消',
-        type: 'warning',
-      },
-    );
+    await DialogPlugin.confirm({
+      header: '移除成员',
+      body: `将「${user.username}」移出团队「${memberTeam.value.name}」。`,
+      confirmBtn: '移除',
+      cancelBtn: '取消',
+      theme: 'warning',
+    });
   } catch {
     return;
   }
@@ -100,45 +110,42 @@ onMounted(load);
   <div class="teams-page">
     <PageHeader title="Teams" description="组织团队与成员归属。">
       <template #actions>
-        <el-button type="primary" data-testid="team-create-open" @click="creating = !creating">
+        <t-button theme="primary" data-testid="team-create-open" @click="creating = !creating">
           {{ creating ? '收起表单' : '创建团队' }}
-        </el-button>
+        </t-button>
       </template>
     </PageHeader>
 
-    <el-alert v-if="loadError" type="error" :closable="false" class="block-alert">
+    <t-alert v-if="loadError" theme="error" :close-btn="false" class="block-alert">
       {{ loadError
       }}<span v-if="loadRequestId" class="mk-mono">requestId: {{ loadRequestId }}</span>
-    </el-alert>
+    </t-alert>
 
     <section v-if="creating" class="create-panel" data-testid="team-create-form">
       <h3 class="panel-title">创建团队</h3>
-      <el-form label-position="top" class="create-form">
-        <el-form-item label="名称" required>
-          <el-input v-model="createName" data-testid="team-create-name" />
-        </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="createDescription" type="textarea" :rows="2" />
-        </el-form-item>
+      <t-form label-align="top" class="create-form">
+        <t-form-item label="名称" required>
+          <t-input v-model="createName" data-testid="team-create-name" />
+        </t-form-item>
+        <t-form-item label="描述">
+          <t-textarea v-model="createDescription" :autosize="{ minRows: 2 }" />
+        </t-form-item>
         <p v-if="formError" class="form-error">{{ formError }}</p>
-        <el-button
-          type="primary"
+        <t-button
+          theme="primary"
           :loading="submitting"
           data-testid="team-create-submit"
           @click="createTeam"
         >
           创建团队
-        </el-button>
-      </el-form>
+        </t-button>
+      </t-form>
     </section>
 
-    <el-table v-loading="loading" :data="teams" data-testid="teams-table">
-      <el-table-column prop="name" label="名称" min-width="180" />
-      <el-table-column prop="description" label="描述" min-width="240">
-        <template #default="{ row }">{{ row.description ?? '—' }}</template>
-      </el-table-column>
-      <el-table-column label="状态" width="110">
-        <template #default="{ row }">
+    <t-loading :loading="loading" size="small" show-overlay>
+      <t-table row-key="id" size="small" :data="teams" :columns="columns" data-testid="teams-table">
+        <template #description="{ row }">{{ row.description ?? '—' }}</template>
+        <template #status="{ row }">
           <span
             class="mk-status"
             :class="row.status === 'ACTIVE' ? 'mk-status--success' : 'mk-status--danger'"
@@ -146,32 +153,43 @@ onMounted(load);
             {{ row.status }}
           </span>
         </template>
-      </el-table-column>
-      <el-table-column label="操作" width="100" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" data-testid="team-members-open" @click="openMembers(row)"
-            >成员</el-button
+        <template #actions="{ row }">
+          <t-button
+            variant="text"
+            theme="primary"
+            data-testid="team-members-open"
+            @click="openMembers(row)"
+            >成员</t-button
           >
         </template>
-      </el-table-column>
-    </el-table>
+      </t-table>
+    </t-loading>
 
-    <el-drawer v-model="memberDrawer" :title="`团队成员：${memberTeam?.name ?? ''}`" size="420px">
-      <el-table v-loading="memberLoading" :data="memberUsers" data-testid="team-members-table">
-        <el-table-column prop="username" label="用户名" min-width="120" />
-        <el-table-column label="" width="80">
-          <template #default="{ row }">
-            <el-button
-              link
-              type="danger"
+    <t-drawer
+      v-model:visible="memberDrawer"
+      :header="`团队成员：${memberTeam?.name ?? ''}`"
+      size="420px"
+    >
+      <t-loading :loading="memberLoading" size="small" show-overlay>
+        <t-table
+          row-key="id"
+          size="small"
+          :data="memberUsers"
+          :columns="memberColumns"
+          data-testid="team-members-table"
+        >
+          <template #actions="{ row }">
+            <t-button
+              variant="text"
+              theme="danger"
               data-testid="team-member-remove"
               @click="removeMember(row)"
-              >移除</el-button
+              >移除</t-button
             >
           </template>
-        </el-table-column>
-      </el-table>
-    </el-drawer>
+        </t-table>
+      </t-loading>
+    </t-drawer>
   </div>
 </template>
 

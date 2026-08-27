@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import ElementPlus from 'element-plus';
+import { defineComponent, h } from 'vue';
+import TDesign from 'tdesign-vue-next';
 import KeysView from '@/views/KeysView.vue';
 import SecretRevealDialog from '@/components/SecretRevealDialog.vue';
 import * as api from '@/api';
@@ -16,6 +17,30 @@ vi.mock('@/api', () => ({
 }));
 
 const mockApi = vi.mocked(api);
+
+/**
+ * TDesign's TPopup teleports its panel into document.body behind a popper
+ * state machine (setTimeout show/hide, rAF-deferred mount, readonly-guarded
+ * visibility callbacks) whose timing is not deterministic in jsdom — the
+ * option list sometimes never mounts. The stub renders trigger and panel
+ * inline instead. Popup positioning is TDesign's own tested territory; the
+ * app logic under test here is the form flow (project → grant → models →
+ * submit), which keeps its full user-like option clicks.
+ */
+const PopupStub = defineComponent({
+  name: 'TPopup',
+  inheritAttrs: false,
+  setup(_, { slots, expose }) {
+    expose({
+      update: () => {},
+      getOverlay: () => null,
+      getOverlayState: () => ({ hover: false }),
+      getPopper: () => null,
+      close: () => {},
+    });
+    return () => h('div', { class: 't-popup-stub' }, [slots.default?.(), slots.content?.()]);
+  },
+});
 
 const key = (overrides: Partial<VirtualKeyView> = {}): VirtualKeyView => ({
   id: '0190-0001',
@@ -60,22 +85,21 @@ const created: CreateVirtualKeyResponse = {
 function mountView() {
   return mount(KeysView, {
     global: {
-      plugins: [ElementPlus, createPinia()],
+      plugins: [TDesign, createPinia()],
+      stubs: { TPopup: PopupStub },
     },
   });
 }
 
 /**
- * Element Plus 2.9 selects the option on `click` (mousedown only prevents
- * focus stealing). Closed poppers may remain in document.body and stay
- * "visible" in jsdom, so options are matched by their label text instead of
- * visibility/position.
+ * With the popup stubbed inline, options render directly inside the
+ * wrapper; match by label text and click like a user.
  */
-function pickOptionByText(text: string): void {
-  const items = Array.from(document.querySelectorAll<HTMLElement>('.el-select-dropdown__item'));
-  const target = items.find((el) => el.textContent?.includes(text));
+function pickOptionByText(wrapper: ReturnType<typeof mountView>, text: string): void {
+  const items = wrapper.findAll('.t-select-option');
+  const target = items.find((el) => el.text().includes(text));
   expect(target, `option containing "${text}" should exist`).toBeTruthy();
-  target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  target.trigger('click');
 }
 
 describe('KeysView', () => {
@@ -84,7 +108,7 @@ describe('KeysView', () => {
     // resetAllMocks clears implementations too — a previous test's
     // mockResolvedValue must not leak into the next test.
     vi.resetAllMocks();
-    // Closed el-select poppers stay teleported in <body>; drop leftovers so
+    // Closed t-select poppers stay teleported in <body>; drop leftovers so
     // option lookups only see the current test's dropdown.
     document.body.innerHTML = '';
     // jsdom has no clipboard
@@ -123,16 +147,12 @@ describe('KeysView', () => {
     await flushPromises();
 
     await wrapper.find('[data-testid="create-key-open"]').trigger('click');
-    await wrapper.find('[data-testid="create-name"]').setValue('claude-code-main');
-    await wrapper.find('[data-testid="create-project"] .el-select__wrapper').trigger('click');
-    await flushPromises();
-    pickOptionByText('Core AI'); // project p1
+    await wrapper.find('[data-testid="create-name"] input').setValue('claude-code-main');
+    pickOptionByText(wrapper, 'Core AI'); // project p1
     await flushPromises();
 
     // Grant selection defaults models to the full grant set.
-    await wrapper.find('[data-testid="create-grant"] .el-select__wrapper').trigger('click');
-    await flushPromises();
-    pickOptionByText('0190-product'); // grant g1
+    pickOptionByText(wrapper, '0190-product'); // grant g1
     await flushPromises();
 
     const submitBtn = wrapper.find('[data-testid="create-submit"]');
@@ -153,7 +173,7 @@ describe('KeysView', () => {
     const closeButton = wrapper.find('[data-testid="secret-close"]');
     expect(closeButton.attributes('disabled')).toBeDefined();
 
-    // el-checkbox toggles on the native input change; jsdom label clicks do
+    // t-checkbox toggles on the native input change; jsdom label clicks do
     // not forward to the input.
     const ackInput = wrapper.find('[data-testid="secret-ack"] input');
     await ackInput.setValue(true);
@@ -161,7 +181,7 @@ describe('KeysView', () => {
     expect(closeButton.attributes('disabled')).toBeUndefined();
 
     await closeButton.trigger('click');
-    // el-dialog keeps its DOM after closing (destroy-on-close=false); the
+    // t-dialog keeps its DOM after closing (destroy-on-close=false); the
     // visible signal is the modelValue prop.
     await flushPromises();
     expect(wrapper.findComponent(SecretRevealDialog).props('modelValue')).toBe(false);
@@ -186,14 +206,10 @@ describe('KeysView', () => {
     await flushPromises();
 
     await wrapper.find('[data-testid="create-key-open"]').trigger('click');
-    await wrapper.find('[data-testid="create-name"]').setValue('bad-key');
-    await wrapper.find('[data-testid="create-project"] .el-select__wrapper').trigger('click');
+    await wrapper.find('[data-testid="create-name"] input').setValue('bad-key');
+    pickOptionByText(wrapper, 'Core AI');
     await flushPromises();
-    pickOptionByText('Core AI');
-    await flushPromises();
-    await wrapper.find('[data-testid="create-grant"] .el-select__wrapper').trigger('click');
-    await flushPromises();
-    pickOptionByText('0190-product');
+    pickOptionByText(wrapper, '0190-product');
     await flushPromises();
 
     await wrapper.find('[data-testid="create-submit"]').trigger('click');

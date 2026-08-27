@@ -79,7 +79,7 @@ async function submit() {
     <div class="login-panel">
       <h2 class="login-title">登录</h2>
       <p class="login-subtitle">使用门户账号登录。首次登录需修改临时密码。</p>
-      <el-alert
+      <t-alert
         v-if="errorMessage"
         :title="errorMessage"
         type="error"
@@ -90,13 +90,13 @@ async function submit() {
         <span v-if="errorRequestId" class="error-request-id mk-mono"
           >requestId: {{ errorRequestId }}</span
         >
-      </el-alert>
-      <el-form label-position="top" @submit.prevent="submit">
-        <el-form-item label="用户名">
-          <el-input v-model="username" autocomplete="username" data-testid="login-username" />
-        </el-form-item>
-        <el-form-item label="密码">
-          <el-input
+      </t-alert>
+      <t-form label-align="top" @submit.prevent="submit">
+        <t-form-item label="用户名">
+          <t-input v-model="username" autocomplete="username" data-testid="login-username" />
+        </t-form-item>
+        <t-form-item label="密码">
+          <t-input
             v-model="password"
             type="password"
             show-password
@@ -104,17 +104,17 @@ async function submit() {
             data-testid="login-password"
             @keyup.enter="submit"
           />
-        </el-form-item>
-        <el-button
-          type="primary"
+        </t-form-item>
+        <t-button
+          theme="primary"
           native-type="submit"
           :loading="loading"
           class="login-submit"
           data-testid="login-submit"
         >
           登录
-        </el-button>
-      </el-form>
+        </t-button>
+      </t-form>
     </div>
   </div>
 </template>

@@ -19,7 +19,7 @@
 - Maven Wrapper 与多模块：`domain`、`provider-spi`、`provider-adapters`、`persistence-postgres`、`gateway-app`、`control-plane-app`、`test-support`。
 - `com.miqroera.miqrokey` 基础包。
 - Java 21 toolchain、Spring Boot BOM、Maven Enforcer、Spotless。
-- Vue 3 + TypeScript + Vite + Vue Router + Pinia + Element Plus，使用 npm lockfile。
+- Vue 3 + TypeScript + Vite + Vue Router + Pinia + TDesign（tdesign-vue-next），使用 npm lockfile。
 - PostgreSQL Docker Compose 和最小健康检查。
 - `.editorconfig`、`.gitignore`、`.env.example`，不包含 Secret。
 - 后端/前端最小 smoke test。

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -52,6 +52,17 @@ function statusClass(status: string): string {
       return 'mk-status--danger';
   }
 }
+
+const keyColumns = [
+  { colKey: 'name', title: '名称', minWidth: 180 },
+  { colKey: 'projectTag', title: '项目', width: 140 },
+  { colKey: 'purpose', title: '用途', width: 140 },
+  { colKey: 'modelIds', title: '允许模型', minWidth: 200 },
+  { colKey: 'status', title: '状态', width: 120 },
+  { colKey: 'createdAt', title: '创建时间', width: 170 },
+  { colKey: 'lastUsedAt', title: '最近使用', width: 170 },
+  { colKey: 'actions', title: '操作', width: 90, fixed: 'right' },
+];
 
 async function handleCommand(command: string, row: VirtualKeyView) {
   if (command === 'rotate') {
@@ -168,7 +179,7 @@ async function createKey() {
     reveal.value = true;
     resetForm();
     await load();
-    ElMessage.success('Virtual Key 已创建');
+    MessagePlugin.success('Virtual Key 已创建');
   } catch (error) {
     if (error instanceof ApiError) {
       formError.value = error.message;
@@ -183,11 +194,13 @@ async function createKey() {
 
 async function rotateKey(key: VirtualKeyView) {
   try {
-    await ElMessageBox.confirm(
-      `轮换后旧 Key 进入宽限期并在宽限结束后失效，新 Key 仅在本次弹窗显示一次。`,
-      `轮换 Virtual Key「${key.name}」`,
-      { confirmButtonText: '轮换', cancelButtonText: '取消', type: 'warning' },
-    );
+    await DialogPlugin.confirm({
+      header: `轮换 Virtual Key「${key.name}」`,
+      body: '轮换后旧 Key 进入宽限期并在宽限结束后失效，新 Key 仅在本次弹窗显示一次。',
+      confirmBtn: '轮换',
+      cancelBtn: '取消',
+      theme: 'warning',
+    });
   } catch {
     return; // cancelled
   }
@@ -198,28 +211,30 @@ async function rotateKey(key: VirtualKeyView) {
     await load();
   } catch (error) {
     if (error instanceof ApiError) {
-      ElMessage.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+      MessagePlugin.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
     }
   }
 }
 
 async function revokeKey(key: VirtualKeyView) {
   try {
-    await ElMessageBox.confirm(
-      `吊销后该 Key 立即失效，使用它的客户端将无法继续请求。此操作不可撤销。`,
-      `吊销 Virtual Key「${key.name}」`,
-      { confirmButtonText: '吊销', cancelButtonText: '取消', type: 'warning' },
-    );
+    await DialogPlugin.confirm({
+      header: `吊销 Virtual Key「${key.name}」`,
+      body: '吊销后该 Key 立即失效，使用它的客户端将无法继续请求。此操作不可撤销。',
+      confirmBtn: '吊销',
+      cancelBtn: '取消',
+      theme: 'warning',
+    });
   } catch {
     return; // cancelled
   }
   try {
     await api.revokeVirtualKey(key.id);
-    ElMessage.success('Virtual Key 已吊销');
+    MessagePlugin.success('Virtual Key 已吊销');
     await load();
   } catch (error) {
     if (error instanceof ApiError) {
-      ElMessage.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+      MessagePlugin.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
     }
   }
 }
@@ -236,16 +251,16 @@ function formatTime(iso?: string): string {
   <div class="keys-page">
     <PageHeader title="Virtual Keys" description="通过 CC Switch 使用这些 Key 访问授权模型。">
       <template #actions>
-        <el-button type="primary" data-testid="create-key-open" @click="creating = !creating">
+        <t-button theme="primary" data-testid="create-key-open" @click="creating = !creating">
           {{ creating ? '收起表单' : '创建 Virtual Key' }}
-        </el-button>
+        </t-button>
       </template>
     </PageHeader>
 
-    <el-alert
+    <t-alert
       v-if="loadError"
-      type="error"
-      :closable="false"
+      theme="error"
+      :close-btn="false"
       class="block-alert"
       data-testid="keys-load-error"
     >
@@ -253,75 +268,75 @@ function formatTime(iso?: string): string {
         {{ loadError }}
         <span v-if="loadRequestId" class="mk-mono">requestId: {{ loadRequestId }}</span>
       </template>
-    </el-alert>
+    </t-alert>
 
     <!-- Create form (single page form; dependent fields expand step by step) -->
     <section v-if="creating" class="create-panel" data-testid="create-form">
       <h3 class="panel-title">创建 Virtual Key</h3>
-      <el-form label-position="top" class="create-form">
-        <el-form-item label="名称" required>
-          <el-input
+      <t-form label-align="top" class="create-form">
+        <t-form-item label="名称" required-mark>
+          <t-input
             v-model="createName"
             placeholder="例如 claude-code-main"
             data-testid="create-name"
           />
-        </el-form-item>
+        </t-form-item>
 
-        <el-form-item label="项目" required>
-          <el-select
+        <t-form-item label="项目" required-mark>
+          <t-select
             v-model="createProjectId"
             placeholder="选择项目"
             class="full-width"
             data-testid="create-project"
             @change="onProjectChange"
           >
-            <el-option
+            <t-option
               v-for="project in projectsForGrant"
               :key="project.id"
               :value="project.id"
               :label="`${project.name}（${project.projectTag}）`"
             />
-          </el-select>
-        </el-form-item>
+          </t-select>
+        </t-form-item>
 
-        <el-form-item v-if="createProjectId" label="供应商产品 / 授权" required>
-          <el-select
+        <t-form-item v-if="createProjectId" label="供应商产品 / 授权" required-mark>
+          <t-select
             v-model="createGrantId"
             placeholder="选择已授权的供应商产品"
             class="full-width"
             data-testid="create-grant"
             @change="onGrantChange"
           >
-            <el-option
+            <t-option
               v-for="grant in grantOptions"
               :key="grant.id"
               :value="grant.id"
               :label="`${grant.providerProductId}（${grant.models.length} 个模型）`"
             />
-          </el-select>
-        </el-form-item>
+          </t-select>
+        </t-form-item>
 
-        <el-form-item v-if="createGrantId" label="用途" required>
-          <el-select v-model="createPurpose" class="full-width" data-testid="create-purpose">
-            <el-option value="CLAUDE_CODE" label="Claude Code" />
-            <el-option value="CLAUDE_DESKTOP" label="Claude Desktop" />
-            <el-option value="CODEX" label="Codex" />
-            <el-option value="CUSTOM" label="自定义" />
-          </el-select>
-        </el-form-item>
+        <t-form-item v-if="createGrantId" label="用途" required-mark>
+          <t-select v-model="createPurpose" class="full-width" data-testid="create-purpose">
+            <t-option value="CLAUDE_CODE" label="Claude Code" />
+            <t-option value="CLAUDE_DESKTOP" label="Claude Desktop" />
+            <t-option value="CODEX" label="Codex" />
+            <t-option value="CUSTOM" label="自定义" />
+          </t-select>
+        </t-form-item>
 
-        <el-form-item v-if="createGrantId" label="允许模型" required>
-          <el-checkbox-group v-model="createModels" data-testid="create-models">
-            <el-checkbox v-for="model in modelOptions" :key="model" :value="model">
+        <t-form-item v-if="createGrantId" label="允许模型" required-mark>
+          <t-checkbox-group v-model="createModels" data-testid="create-models">
+            <t-checkbox v-for="model in modelOptions" :key="model" :value="model">
               <span class="mk-mono">{{ model }}</span>
-            </el-checkbox>
-          </el-checkbox-group>
-        </el-form-item>
+            </t-checkbox>
+          </t-checkbox-group>
+        </t-form-item>
 
-        <el-alert
+        <t-alert
           v-if="formError"
-          type="error"
-          :closable="false"
+          theme="error"
+          :close-btn="false"
           class="form-error"
           data-testid="create-error"
         >
@@ -329,21 +344,22 @@ function formatTime(iso?: string): string {
             {{ formError }}
             <span v-if="formRequestId" class="mk-mono">requestId: {{ formRequestId }}</span>
           </template>
-        </el-alert>
+        </t-alert>
 
         <div class="form-actions">
-          <el-button
-            type="primary"
+          <t-button
+            theme="primary"
+            type="button"
             :disabled="!canCreate"
             :loading="submitting"
             data-testid="create-submit"
             @click="createKey"
           >
             创建 Virtual Key
-          </el-button>
-          <el-button @click="creating = false">取消</el-button>
+          </t-button>
+          <t-button type="button" @click="creating = false">取消</t-button>
         </div>
-      </el-form>
+      </t-form>
     </section>
 
     <!-- Stat strip + filter bar (ledger density) -->
@@ -371,7 +387,7 @@ function formatTime(iso?: string): string {
     </div>
 
     <div class="mk-filter-bar" data-testid="keys-filter-bar">
-      <el-input
+      <t-input
         v-model="keyFilter"
         placeholder="按名称 / 项目标签 / Key 前缀过滤"
         clearable
@@ -382,68 +398,60 @@ function formatTime(iso?: string): string {
     </div>
 
     <!-- Key table -->
-    <el-table v-loading="loading" :data="filteredKeys" class="keys-table" data-testid="keys-table">
-      <el-table-column label="名称" min-width="180">
-        <template #default="{ row }">
+    <t-loading :loading="loading" size="small" show-overlay>
+      <t-table
+        row-key="id"
+        size="small"
+        :columns="keyColumns"
+        :data="filteredKeys"
+        class="keys-table"
+        data-testid="keys-table"
+      >
+        <template #name="{ row }">
           <div class="key-name">{{ row.name }}</div>
           <div class="mk-mono key-mask">{{ row.display }}</div>
         </template>
-      </el-table-column>
-      <el-table-column prop="projectTag" label="项目" width="140" />
-      <el-table-column label="用途" width="140">
-        <template #default="{ row }">{{ row.purpose }}</template>
-      </el-table-column>
-      <el-table-column label="允许模型" min-width="200">
-        <template #default="{ row }">
+        <template #purpose="{ row }">{{ row.purpose }}</template>
+        <template #modelIds="{ row }">
           <div class="mk-mono model-list">{{ row.modelIds.join(', ') }}</div>
         </template>
-      </el-table-column>
-      <el-table-column label="状态" width="120">
-        <template #default="{ row }">
+        <template #status="{ row }">
           <span class="mk-status" :class="statusClass(row.status)">{{
             statusLabel[row.status] ?? row.status
           }}</span>
         </template>
-      </el-table-column>
-      <el-table-column label="创建时间" width="170">
-        <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
-      </el-table-column>
-      <el-table-column label="最近使用" width="170">
-        <template #default="{ row }">{{ formatTime(row.lastUsedAt) }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="90" fixed="right">
-        <template #default="{ row }">
-          <el-dropdown trigger="click" @command="(cmd: string) => handleCommand(cmd, row)">
-            <el-button link data-testid="key-actions">操作</el-button>
+        <template #createdAt="{ row }">{{ formatTime(row.createdAt) }}</template>
+        <template #lastUsedAt="{ row }">{{ formatTime(row.lastUsedAt) }}</template>
+        <template #actions="{ row }">
+          <t-dropdown trigger="click">
+            <t-button variant="text" data-testid="key-actions">操作</t-button>
             <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item
-                  command="rotate"
+              <t-dropdown-menu>
+                <t-dropdown-item
                   :disabled="row.status !== 'ACTIVE'"
-                  data-testid="key-rotate"
+                  @click="handleCommand('rotate', row)"
                 >
-                  轮换
-                </el-dropdown-item>
-                <el-dropdown-item
-                  divided
-                  command="revoke"
+                  <span data-testid="key-rotate">轮换</span>
+                </t-dropdown-item>
+                <t-dropdown-item
+                  divider
                   :disabled="row.status !== 'ACTIVE' && row.status !== 'ROTATING'"
-                  data-testid="key-revoke"
+                  @click="handleCommand('revoke', row)"
                 >
-                  吊销
-                </el-dropdown-item>
-              </el-dropdown-menu>
+                  <span data-testid="key-revoke">吊销</span>
+                </t-dropdown-item>
+              </t-dropdown-menu>
             </template>
-          </el-dropdown>
+          </t-dropdown>
         </template>
-      </el-table-column>
-      <template #empty>
-        <div class="table-empty">
-          <p>还没有 Virtual Key。</p>
-          <p class="hint">点击右上角「创建 Virtual Key」开始使用。</p>
-        </div>
-      </template>
-    </el-table>
+        <template #empty>
+          <div class="table-empty">
+            <p>还没有 Virtual Key。</p>
+            <p class="hint">点击右上角「创建 Virtual Key」开始使用。</p>
+          </div>
+        </template>
+      </t-table>
+    </t-loading>
 
     <SecretRevealDialog
       v-if="revealData"

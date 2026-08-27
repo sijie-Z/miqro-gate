@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
+import { MessagePlugin } from 'tdesign-vue-next';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
 import { useAuthStore } from '@/stores/auth';
@@ -34,7 +34,7 @@ async function submit() {
   try {
     await auth.changePassword(currentPassword.value, newPassword.value);
     successMessage.value = '密码已修改。';
-    ElMessage.success('密码已修改');
+    MessagePlugin.success('密码已修改');
     if (isForced.value) {
       router.push('/app/keys');
     }
@@ -58,15 +58,15 @@ async function submit() {
       :description="isForced ? '首次登录必须修改临时密码后才能使用门户。' : '账号信息与安全设置。'"
     />
 
-    <el-alert
+    <t-alert
       v-if="isForced"
-      type="warning"
-      :closable="false"
+      theme="warning"
+      :close-btn="false"
       class="forced-alert"
       data-testid="forced-password"
     >
       账号使用临时密码，请在修改密码后继续。
-    </el-alert>
+    </t-alert>
 
     <section class="account-panel">
       <h3 class="panel-title">账号</h3>
@@ -90,40 +90,42 @@ async function submit() {
 
     <section class="password-panel">
       <h3 class="panel-title">修改密码</h3>
-      <el-form label-position="top" class="password-form" @submit.prevent="submit">
-        <el-form-item label="当前密码" required>
-          <el-input
+      <t-form
+        label-align="top"
+        :prevent-submit-default="true"
+        class="password-form"
+        @submit="submit"
+      >
+        <t-form-item label="当前密码" required-mark>
+          <t-input
             v-model="currentPassword"
             type="password"
             autocomplete="current-password"
-            show-password
             data-testid="current-password"
           />
-        </el-form-item>
-        <el-form-item label="新密码" required>
-          <el-input
+        </t-form-item>
+        <t-form-item label="新密码" required-mark>
+          <t-input
             v-model="newPassword"
             type="password"
             autocomplete="new-password"
-            show-password
             data-testid="new-password"
           />
           <div class="field-hint">至少 8 个字符，包含大小写字母和数字。</div>
-        </el-form-item>
-        <el-form-item label="确认新密码" required>
-          <el-input
+        </t-form-item>
+        <t-form-item label="确认新密码" required-mark>
+          <t-input
             v-model="confirmPassword"
             type="password"
             autocomplete="new-password"
-            show-password
             data-testid="confirm-password"
           />
-        </el-form-item>
+        </t-form-item>
 
-        <el-alert
+        <t-alert
           v-if="errorMessage"
-          type="error"
-          :closable="false"
+          theme="error"
+          :close-btn="false"
           class="form-error"
           data-testid="password-error"
         >
@@ -131,17 +133,12 @@ async function submit() {
             {{ errorMessage }}
             <span v-if="errorRequestId" class="mk-mono">requestId: {{ errorRequestId }}</span>
           </template>
-        </el-alert>
+        </t-alert>
 
-        <el-button
-          type="primary"
-          native-type="submit"
-          :loading="submitting"
-          data-testid="password-submit"
-        >
+        <t-button type="submit" theme="primary" :loading="submitting" data-testid="password-submit">
           修改密码
-        </el-button>
-      </el-form>
+        </t-button>
+      </t-form>
     </section>
   </div>
 </template>

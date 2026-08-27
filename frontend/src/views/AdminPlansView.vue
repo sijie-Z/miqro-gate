@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next';
+import type { PrimaryTableCol } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -11,6 +12,28 @@ const products = ref<ProviderProductView[]>([]);
 const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
+
+const subscriptionColumns: PrimaryTableCol[] = [
+  { colKey: 'productName', title: '产品', minWidth: 180 },
+  { colKey: 'name', title: '名称', minWidth: 160 },
+  { colKey: 'billingMode', title: '计费模式', width: 150 },
+  { colKey: 'planScope', title: 'Plan 形态', width: 110 },
+  { colKey: 'price', title: '价格', width: 110, align: 'right' },
+  {
+    colKey: 'quota',
+    title: '滚动额度',
+    minWidth: 240,
+    attrs: { 'data-testid': 'plans-quota-band' },
+  },
+  { colKey: 'status', title: '状态', width: 100 },
+  { colKey: 'actions', title: '操作', width: 90, fixed: 'right' },
+];
+
+const seatColumns: PrimaryTableCol[] = [
+  { colKey: 'user', title: '用户', minWidth: 120 },
+  { colKey: 'seatStatus', title: '状态', width: 100 },
+  { colKey: 'release', title: '', width: 80 },
+];
 
 const creating = ref(false);
 const form = ref({
@@ -105,7 +128,7 @@ async function refreshSeats() {
 
 async function addSeat() {
   if (!seatSubscription.value || !seatAssignUser.value.trim()) {
-    ElMessage.warning('请输入用户名（成员 Key 请到 Credentials 页关联）。');
+    MessagePlugin.warning('请输入用户名（成员 Key 请到 Credentials 页关联）。');
     return;
   }
   try {
@@ -118,7 +141,7 @@ async function addSeat() {
     await refreshSeats();
   } catch (error) {
     if (error instanceof ApiError) {
-      ElMessage.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+      MessagePlugin.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
     }
   }
 }
@@ -126,15 +149,13 @@ async function addSeat() {
 async function releaseSeat(seat: SeatView) {
   if (!seatSubscription.value) return;
   try {
-    await ElMessageBox.confirm(
-      '释放后该席位不再关联用户，成员 Key 保持有效但不再消耗席位额度。',
-      '释放席位',
-      {
-        confirmButtonText: '释放',
-        cancelButtonText: '取消',
-        type: 'warning',
-      },
-    );
+    await DialogPlugin.confirm({
+      header: '释放席位',
+      body: '释放后该席位不再关联用户，成员 Key 保持有效但不再消耗席位额度。',
+      confirmBtn: '释放',
+      cancelBtn: '取消',
+      theme: 'warning',
+    });
   } catch {
     return;
   }
@@ -172,101 +193,100 @@ onMounted(load);
   <div class="plans-page">
     <PageHeader title="Plans" description="PAYG / 个人 / 团队 / 企业订阅与席位分配。">
       <template #actions>
-        <el-button
-          type="primary"
+        <t-button
+          theme="primary"
           data-testid="subscription-create-open"
           @click="creating = !creating"
         >
           {{ creating ? '收起表单' : '创建订阅' }}
-        </el-button>
+        </t-button>
       </template>
     </PageHeader>
 
-    <el-alert v-if="loadError" type="error" :closable="false" class="block-alert">
+    <t-alert v-if="loadError" theme="error" :close-btn="false" class="block-alert">
       {{ loadError
       }}<span v-if="loadRequestId" class="mk-mono">requestId: {{ loadRequestId }}</span>
-    </el-alert>
+    </t-alert>
 
     <section v-if="creating" class="create-panel" data-testid="subscription-create-form">
       <h3 class="panel-title">创建订阅</h3>
-      <el-form label-position="top" class="create-form">
-        <el-form-item label="供应商产品" required>
-          <el-select v-model="form.providerProductId" data-testid="subscription-create-product">
-            <el-option
+      <t-form label-align="top" class="create-form">
+        <t-form-item label="供应商产品" required>
+          <t-select v-model="form.providerProductId" data-testid="subscription-create-product">
+            <t-option
               v-for="p in products"
               :key="p.id"
               :label="`${p.providerName} · ${p.displayName}`"
               :value="p.id"
             />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="名称" required>
-          <el-input v-model="form.name" data-testid="subscription-create-name" />
-        </el-form-item>
-        <el-form-item label="计费模式">
-          <el-select v-model="form.billingMode">
-            <el-option label="FIXED_SUBSCRIPTION" value="FIXED_SUBSCRIPTION" />
-            <el-option label="PAYG" value="PAYG" />
-            <el-option label="TOKEN_PACKAGE" value="TOKEN_PACKAGE" />
-            <el-option label="CREDIT_POOL" value="CREDIT_POOL" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="Plan 形态">
-          <el-select v-model="form.planScope">
-            <el-option label="个人 Plan" value="PERSONAL" />
-            <el-option label="团队 Plan" value="TEAM" />
-            <el-option label="企业 Plan" value="ENTERPRISE" />
-            <el-option label="无" value="NONE" />
-          </el-select>
-        </el-form-item>
+          </t-select>
+        </t-form-item>
+        <t-form-item label="名称" required>
+          <t-input v-model="form.name" data-testid="subscription-create-name" />
+        </t-form-item>
+        <t-form-item label="计费模式">
+          <t-select v-model="form.billingMode">
+            <t-option label="FIXED_SUBSCRIPTION" value="FIXED_SUBSCRIPTION" />
+            <t-option label="PAYG" value="PAYG" />
+            <t-option label="TOKEN_PACKAGE" value="TOKEN_PACKAGE" />
+            <t-option label="CREDIT_POOL" value="CREDIT_POOL" />
+          </t-select>
+        </t-form-item>
+        <t-form-item label="Plan 形态">
+          <t-select v-model="form.planScope">
+            <t-option label="个人 Plan" value="PERSONAL" />
+            <t-option label="团队 Plan" value="TEAM" />
+            <t-option label="企业 Plan" value="ENTERPRISE" />
+            <t-option label="无" value="NONE" />
+          </t-select>
+        </t-form-item>
         <div class="form-row">
-          <el-form-item label="订阅价格">
-            <el-input v-model="form.subscriptionPrice" type="number" />
-          </el-form-item>
-          <el-form-item label="币种">
-            <el-input v-model="form.currency" maxlength="3" />
-          </el-form-item>
+          <t-form-item label="订阅价格">
+            <t-input v-model="form.subscriptionPrice" type="number" />
+          </t-form-item>
+          <t-form-item label="币种">
+            <t-input v-model="form.currency" maxlength="3" />
+          </t-form-item>
         </div>
         <div class="form-row">
-          <el-form-item label="配额总量">
-            <el-input v-model="form.quotaTotal" type="number" />
-          </el-form-item>
-          <el-form-item label="配额单位">
-            <el-select v-model="form.quotaUnit">
-              <el-option label="POINTS" value="POINTS" />
-              <el-option label="TOKENS" value="TOKENS" />
-              <el-option label="REQUESTS" value="REQUESTS" />
-            </el-select>
-          </el-form-item>
+          <t-form-item label="配额总量">
+            <t-input v-model="form.quotaTotal" type="number" />
+          </t-form-item>
+          <t-form-item label="配额单位">
+            <t-select v-model="form.quotaUnit">
+              <t-option label="POINTS" value="POINTS" />
+              <t-option label="TOKENS" value="TOKENS" />
+              <t-option label="REQUESTS" value="REQUESTS" />
+            </t-select>
+          </t-form-item>
         </div>
         <p v-if="formError" class="form-error">{{ formError }}</p>
-        <el-button
-          type="primary"
+        <t-button
+          theme="primary"
           :loading="submitting"
           data-testid="subscription-create-submit"
           @click="createSubscription"
         >
           创建订阅
-        </el-button>
-      </el-form>
+        </t-button>
+      </t-form>
     </section>
 
-    <el-table v-loading="loading" :data="subscriptions" data-testid="subscriptions-table">
-      <el-table-column prop="productName" label="产品" min-width="180" />
-      <el-table-column prop="name" label="名称" min-width="160" />
-      <el-table-column prop="billingMode" label="计费模式" width="150" />
-      <el-table-column label="Plan 形态" width="110">
-        <template #default="{ row }">{{ planLabel(row.planScope) }}</template>
-      </el-table-column>
-      <el-table-column label="价格" width="110" align="right">
-        <template #default="{ row }">
+    <t-loading :loading="loading" size="small" show-overlay>
+      <t-table
+        :data="subscriptions"
+        :columns="subscriptionColumns"
+        row-key="id"
+        size="small"
+        data-testid="subscriptions-table"
+      >
+        <template #planScope="{ row }">{{ planLabel(row.planScope) }}</template>
+        <template #price="{ row }">
           <span class="mk-num">{{
             row.subscriptionPrice != null ? `${row.subscriptionPrice} ${row.currency ?? ''}` : '—'
           }}</span>
         </template>
-      </el-table-column>
-      <el-table-column label="滚动额度" min-width="240" data-testid="plans-quota-band">
-        <template #default="{ row }">
+        <template #quota="{ row }">
           <div v-if="row.quotaTotal" class="mk-quota-band">
             <div v-for="seg in quotaSegments()" :key="seg.label" class="mk-quota-segment">
               <div class="mk-quota-segment-label">
@@ -290,9 +310,7 @@ onMounted(load);
           </div>
           <span v-else class="mk-stat-hint">未配置配额</span>
         </template>
-      </el-table-column>
-      <el-table-column label="状态" width="100">
-        <template #default="{ row }">
+        <template #status="{ row }">
           <span
             class="mk-status"
             :class="row.status === 'ACTIVE' ? 'mk-status--success' : 'mk-status--danger'"
@@ -300,38 +318,44 @@ onMounted(load);
             {{ row.status }}
           </span>
         </template>
-      </el-table-column>
-      <el-table-column label="操作" width="90" fixed="right">
-        <template #default="{ row }">
-          <el-button
-            link
-            type="primary"
+        <template #actions="{ row }">
+          <t-button
+            variant="text"
+            theme="primary"
             data-testid="subscription-seats-open"
             @click="openSeats(row)"
           >
             席位
-          </el-button>
+          </t-button>
         </template>
-      </el-table-column>
-    </el-table>
+      </t-table>
+    </t-loading>
 
-    <el-drawer v-model="seatDrawer" :title="`席位：${seatSubscription?.name ?? ''}`" size="480px">
+    <t-drawer
+      v-model:visible="seatDrawer"
+      :title="`席位：${seatSubscription?.name ?? ''}`"
+      size="480px"
+    >
       <p class="hint">
         团队/企业 Plan 按席位分配；每个成员的用量走其专属 Key（Credentials 页管理）。
       </p>
       <div class="seat-create">
-        <el-input v-model="seatAssignUser" placeholder="用户 ID" data-testid="seat-assign-user" />
-        <el-input v-model="seatDisplay" placeholder="显示名（可选）" />
-        <el-button type="primary" data-testid="seat-create" @click="addSeat">分配席位</el-button>
+        <t-input v-model="seatAssignUser" placeholder="用户 ID" data-testid="seat-assign-user" />
+        <t-input v-model="seatDisplay" placeholder="显示名（可选）" />
+        <t-button theme="primary" data-testid="seat-create" @click="addSeat">分配席位</t-button>
       </div>
-      <el-table v-loading="seatLoading" :data="seats" data-testid="seats-table">
-        <el-table-column label="用户" min-width="120">
-          <template #default="{ row }">
+      <t-loading :loading="seatLoading" size="small" show-overlay>
+        <t-table
+          :data="seats"
+          :columns="seatColumns"
+          row-key="id"
+          size="small"
+          data-testid="seats-table"
+        >
+          <template #user="{ row }">
             {{ row.username ?? row.displayName ?? row.assignedUserId?.slice(0, 8) ?? '—' }}
           </template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
+          <template #seatStatus="{ row }">
             <span
               class="mk-status"
               :class="row.seatStatus === 'ASSIGNED' ? 'mk-status--success' : 'mk-status--neutral'"
@@ -339,22 +363,20 @@ onMounted(load);
               {{ row.seatStatus }}
             </span>
           </template>
-        </el-table-column>
-        <el-table-column label="" width="80">
-          <template #default="{ row }">
-            <el-button
+          <template #release="{ row }">
+            <t-button
               v-if="row.seatStatus === 'ASSIGNED'"
-              link
-              type="danger"
+              variant="text"
+              theme="danger"
               data-testid="seat-release"
               @click="releaseSeat(row)"
             >
               释放
-            </el-button>
+            </t-button>
           </template>
-        </el-table-column>
-      </el-table>
-    </el-drawer>
+        </t-table>
+      </t-loading>
+    </t-drawer>
   </div>
 </template>
 
@@ -387,7 +409,7 @@ onMounted(load);
   gap: 12px;
 }
 
-.form-row .el-form-item {
+.form-row .t-form__item {
   flex: 1;
 }
 

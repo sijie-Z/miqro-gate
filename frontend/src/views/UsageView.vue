@@ -16,6 +16,27 @@ const recordsError = ref('');
 const page = ref(1);
 const pageSize = ref(20);
 
+const summaryColumns = [
+  { colKey: 'group', title: '分组', minWidth: 160 },
+  { colKey: 'requests', title: '请求', width: 100, align: 'right' },
+  { colKey: 'inputTokens', title: '输入 tokens', width: 130, align: 'right' },
+  { colKey: 'outputTokens', title: '输出 tokens', width: 130, align: 'right' },
+  { colKey: 'cacheRead', title: 'Cache 读', width: 120, align: 'right' },
+  { colKey: 'upstreamCost', title: '上游成本', width: 130, align: 'right' },
+  { colKey: 'gatewayCost', title: '网关观测成本', width: 140, align: 'right' },
+];
+
+const recordsColumns = [
+  { colKey: 'occurredAt', title: '时间', width: 170 },
+  { colKey: 'modelId', title: '模型', minWidth: 180 },
+  { colKey: 'cacheLevel', title: '级别', width: 110 },
+  { colKey: 'input', title: '输入', width: 100, align: 'right' },
+  { colKey: 'output', title: '输出', width: 100, align: 'right' },
+  { colKey: 'latency', title: '延迟', width: 90, align: 'right' },
+  { colKey: 'upstreamStatus', title: '上游状态', width: 100, align: 'right' },
+  { colKey: 'providerRequestId', title: '供应商请求 ID', minWidth: 200 },
+];
+
 const usageBars = computed(() => {
   const ranked = (summary.value?.groups ?? [])
     .map((g) => ({
@@ -110,64 +131,54 @@ function formatTime(iso: string): string {
     <section class="summary-panel">
       <div class="summary-toolbar">
         <span class="toolbar-label">按维度分组</span>
-        <el-select
+        <t-select
           :model-value="groupBy"
           class="group-select"
           data-testid="summary-groupby"
-          @change="changeGroupBy"
+          @change="(value: unknown) => changeGroupBy(value as UsageGroupBy)"
         >
-          <el-option value="project" label="项目" />
-          <el-option value="virtual_key" label="Virtual Key" />
-          <el-option value="cache_level" label="缓存级别" />
-          <el-option value="day" label="日期" />
-        </el-select>
+          <t-option value="project" label="项目" />
+          <t-option value="virtual_key" label="Virtual Key" />
+          <t-option value="cache_level" label="缓存级别" />
+          <t-option value="day" label="日期" />
+        </t-select>
       </div>
 
-      <el-alert v-if="summaryError" type="error" :closable="false" class="block-alert" />
+      <t-alert v-if="summaryError" theme="error" :close-btn="false" class="block-alert" />
 
-      <el-table
-        v-loading="summaryLoading"
-        :data="summary?.groups ?? []"
-        class="summary-table"
-        data-testid="summary-table"
-      >
-        <el-table-column label="分组" min-width="160">
-          <template #default="{ row }">{{ row.label || row.groupKey }}</template>
-        </el-table-column>
-        <el-table-column label="请求" width="100" align="right">
-          <template #default="{ row }">{{
+      <t-loading :loading="summaryLoading" size="small" show-overlay>
+        <t-table
+          row-key="id"
+          size="small"
+          :columns="summaryColumns"
+          :data="summary?.groups ?? []"
+          class="summary-table"
+          data-testid="summary-table"
+        >
+          <template #group="{ row }">{{ row.label || row.groupKey }}</template>
+          <template #requests="{ row }">{{
             row.requests.upstream + row.requests.coalesced + row.requests.l1Hit + row.requests.l2Hit
           }}</template>
-        </el-table-column>
-        <el-table-column label="输入 tokens" width="130" align="right">
-          <template #default="{ row }">
+          <template #inputTokens="{ row }">
             <span class="mk-num">{{ formatNumber(row.tokens.input) }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="输出 tokens" width="130" align="right">
-          <template #default="{ row }">
+          <template #outputTokens="{ row }">
             <span class="mk-num">{{ formatNumber(row.tokens.output) }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="Cache 读" width="120" align="right">
-          <template #default="{ row }">
+          <template #cacheRead="{ row }">
             <span class="mk-num">{{ formatNumber(row.tokens.cacheRead) }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="上游成本" width="130" align="right">
-          <template #default="{ row }">
+          <template #upstreamCost="{ row }">
             <span class="mk-num">{{ formatCost(row.cost.upstreamPaid) }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="网关观测成本" width="140" align="right">
-          <template #default="{ row }">
+          <template #gatewayCost="{ row }">
             <span class="mk-num">{{ formatCost(row.cost.gatewayObserved) }}</span>
           </template>
-        </el-table-column>
-        <template #empty>
-          <div class="table-empty">当前时间范围内没有用量记录。</div>
-        </template>
-      </el-table>
+          <template #empty>
+            <div class="table-empty">当前时间范围内没有用量记录。</div>
+          </template>
+        </t-table>
+      </t-loading>
 
       <div v-if="summary" class="totals-row" data-testid="summary-totals">
         <span class="totals-label">合计</span>
@@ -206,66 +217,53 @@ function formatTime(iso: string): string {
       </section>
 
       <h3 class="panel-title">最近记录</h3>
-      <el-alert v-if="recordsError" type="error" :closable="false" class="block-alert" />
+      <t-alert v-if="recordsError" theme="error" :close-btn="false" class="block-alert" />
 
-      <el-table
-        v-loading="recordsLoading"
-        :data="records?.items ?? []"
-        class="records-table"
-        data-testid="records-table"
-      >
-        <el-table-column label="时间" width="170">
-          <template #default="{ row }">{{ formatTime(row.occurredAt) }}</template>
-        </el-table-column>
-        <el-table-column label="模型" min-width="180">
-          <template #default="{ row }">
+      <t-loading :loading="recordsLoading" size="small" show-overlay>
+        <t-table
+          row-key="id"
+          size="small"
+          :columns="recordsColumns"
+          :data="records?.items ?? []"
+          class="records-table"
+          data-testid="records-table"
+        >
+          <template #occurredAt="{ row }">{{ formatTime(row.occurredAt) }}</template>
+          <template #modelId="{ row }">
             <span class="mk-mono">{{ row.modelId }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="级别" width="110">
-          <template #default="{ row }">
-            <el-tag size="small" type="info">{{
+          <template #cacheLevel="{ row }">
+            <t-tag size="small" variant="light">{{
               cacheLevelLabel[row.cacheLevel] ?? row.cacheLevel
-            }}</el-tag>
+            }}</t-tag>
           </template>
-        </el-table-column>
-        <el-table-column label="输入" width="100" align="right">
-          <template #default="{ row }">
+          <template #input="{ row }">
             <span class="mk-num">{{ formatNumber(row.inputTokens) }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="输出" width="100" align="right">
-          <template #default="{ row }">
+          <template #output="{ row }">
             <span class="mk-num">{{ formatNumber(row.outputTokens) }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="延迟" width="90" align="right">
-          <template #default="{ row }">
+          <template #latency="{ row }">
             <span class="mk-num">{{
               row.latencyMs === null || row.latencyMs === undefined ? '—' : `${row.latencyMs}ms`
             }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="上游状态" width="100" align="right">
-          <template #default="{ row }">{{ row.upstreamStatusCode ?? '—' }}</template>
-        </el-table-column>
-        <el-table-column label="供应商请求 ID" min-width="200">
-          <template #default="{ row }">
+          <template #upstreamStatus="{ row }">{{ row.upstreamStatusCode ?? '—' }}</template>
+          <template #providerRequestId="{ row }">
             <span class="mk-mono">{{ row.providerRequestId || '—' }}</span>
           </template>
-        </el-table-column>
-        <template #empty>
-          <div class="table-empty">没有用量记录。</div>
-        </template>
-      </el-table>
+          <template #empty>
+            <div class="table-empty">没有用量记录。</div>
+          </template>
+        </t-table>
+      </t-loading>
 
       <div v-if="records && records.total > 0" class="pagination-row">
         <span class="mk-num total-text">共 {{ records.total }} 条</span>
-        <el-pagination
-          layout="prev, pager, next"
+        <t-pagination
+          v-model:current="page"
+          v-model:page-size="pageSize"
           :total="records.total"
-          :page-size="pageSize"
-          :current-page="page"
           @current-change="changePage"
         />
       </div>

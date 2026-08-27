@@ -1,23 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMessageBox } from 'element-plus';
+import { DialogPlugin } from 'tdesign-vue-next';
 import { useAuthStore } from '@/stores/auth';
-import {
-  Bell,
-  DataAnalysis,
-  Delete,
-  Download,
-  HomeFilled,
-  Key,
-  Lock,
-  Odometer,
-  SwitchButton,
-  User,
-  UserFilled,
-  Wallet,
-  Warning,
-} from '@element-plus/icons-vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -28,36 +13,36 @@ const isAdmin = computed(() => auth.user?.role === 'SYSTEM_ADMIN');
 interface NavItem {
   name: string;
   label: string;
-  icon: unknown;
+  icon: string;
 }
 
 const regularNav: NavItem[] = [
-  { name: 'overview', label: '总览', icon: HomeFilled },
-  { name: 'keys', label: 'Virtual Keys', icon: Key },
-  { name: 'usage', label: 'Usage', icon: DataAnalysis },
-  { name: 'profile', label: 'Profile', icon: User },
+  { name: 'overview', label: '总览', icon: 'dashboard' },
+  { name: 'keys', label: 'Virtual Keys', icon: 'lock-on' },
+  { name: 'usage', label: 'Usage', icon: 'chart-bar' },
+  { name: 'profile', label: 'Profile', icon: 'user' },
 ];
 
 const orgNav: NavItem[] = [
-  { name: 'users', label: 'Users', icon: User },
-  { name: 'teams', label: 'Teams', icon: UserFilled },
-  { name: 'projects', label: 'Projects', icon: Wallet },
-  { name: 'grants', label: 'Grants', icon: Key },
+  { name: 'users', label: 'Users', icon: 'user' },
+  { name: 'teams', label: 'Teams', icon: 'usergroup' },
+  { name: 'projects', label: 'Projects', icon: 'folder-open' },
+  { name: 'grants', label: 'Grants', icon: 'lock-on' },
 ];
 
 const providerNav: NavItem[] = [
-  { name: 'providers', label: 'Providers', icon: Wallet },
-  { name: 'plans', label: 'Plans', icon: Odometer },
-  { name: 'credentials', label: 'Credentials', icon: Lock },
+  { name: 'providers', label: 'Providers', icon: 'shop' },
+  { name: 'plans', label: 'Plans', icon: 'layers' },
+  { name: 'credentials', label: 'Credentials', icon: 'secured' },
 ];
 
 const opsNav: NavItem[] = [
-  { name: 'admin-usage', label: 'Usage', icon: DataAnalysis },
-  { name: 'exports', label: 'Exports', icon: Download },
-  { name: 'deletions', label: 'Deletions', icon: Delete },
-  { name: 'webhooks', label: 'Webhooks', icon: Bell },
-  { name: 'alert-rules', label: 'Alert Rules', icon: Warning },
-  { name: 'audit', label: 'Audit', icon: UserFilled },
+  { name: 'admin-usage', label: 'Usage', icon: 'chart-bar' },
+  { name: 'exports', label: 'Exports', icon: 'download' },
+  { name: 'deletions', label: 'Deletions', icon: 'delete' },
+  { name: 'webhooks', label: 'Webhooks', icon: 'notification' },
+  { name: 'alert-rules', label: 'Alert Rules', icon: 'error-circle' },
+  { name: 'audit', label: 'Audit', icon: 'file-paste' },
 ];
 
 const navGroups = computed(() => {
@@ -95,10 +80,12 @@ function navigate(name: string) {
 
 async function handleLogout() {
   try {
-    await ElMessageBox.confirm('退出后需要重新登录。', '退出登录', {
-      confirmButtonText: '退出',
-      cancelButtonText: '取消',
-      type: 'warning',
+    await DialogPlugin.confirm({
+      header: '退出登录',
+      body: '退出后需要重新登录。',
+      confirmBtn: '退出',
+      cancelBtn: '取消',
+      theme: 'warning',
     });
   } catch {
     return; // cancelled
@@ -111,39 +98,39 @@ async function handleLogout() {
 <template>
   <div class="shell">
     <header class="shell-header">
-      <el-button
+      <t-button
         v-if="mobile"
-        link
+        variant="text"
         class="menu-toggle"
         aria-label="打开导航"
         data-testid="nav-toggle"
         @click="drawerOpen = true"
       >
         ☰
-      </el-button>
+      </t-button>
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">MK</span>
         <span class="brand-name">MiQroKey</span>
         <span class="version-badge">v0.1</span>
       </div>
       <div class="spacer" />
-      <el-dropdown trigger="click">
+      <t-dropdown trigger="click" :min-column-width="160">
         <span class="user-menu" role="button" aria-haspopup="menu" data-testid="user-menu">
           <span class="mk-avatar">{{
             (auth.user?.displayName ?? auth.user?.username ?? '?').slice(0, 1).toUpperCase()
           }}</span>
           {{ auth.user?.displayName ?? auth.user?.username }}
-          <el-icon><SwitchButton /></el-icon>
+          <t-icon name="poweroff" />
         </span>
         <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item disabled>{{ auth.user?.role }}</el-dropdown-item>
-            <el-dropdown-item divided data-testid="logout" @click="handleLogout"
-              >退出登录</el-dropdown-item
+          <t-dropdown-menu>
+            <t-dropdown-item disabled>{{ auth.user?.role }}</t-dropdown-item>
+            <t-dropdown-item divider data-testid="logout" @click="handleLogout"
+              >退出登录</t-dropdown-item
             >
-          </el-dropdown-menu>
+          </t-dropdown-menu>
         </template>
-      </el-dropdown>
+      </t-dropdown>
     </header>
     <div class="shell-body">
       <nav v-if="!mobile" class="shell-nav" :class="{ collapsed }" data-testid="shell-nav">
@@ -157,12 +144,12 @@ async function handleLogout() {
             :class="{ active: activeItem === item.name }"
             :title="collapsed ? item.label : undefined"
           >
-            <el-icon class="nav-icon"><component :is="item.icon" /></el-icon>
+            <t-icon class="nav-icon" :name="item.icon" />
             <span v-if="!collapsed" class="nav-label">{{ item.label }}</span>
           </router-link>
         </template>
       </nav>
-      <el-drawer v-else v-model="drawerOpen" direction="ltr" size="260px" :with-header="false">
+      <t-drawer v-else v-model:visible="drawerOpen" placement="left" size="260px" :header="false">
         <nav class="shell-nav shell-nav--drawer" data-testid="shell-nav-drawer">
           <template v-for="group in navGroups" :key="group.title ?? 'regular'">
             <div v-if="group.title" class="nav-group-title">{{ group.title }}</div>
@@ -173,12 +160,12 @@ async function handleLogout() {
               :class="{ active: activeItem === item.name }"
               @click="navigate(item.name)"
             >
-              <el-icon class="nav-icon"><component :is="item.icon" /></el-icon>
+              <t-icon class="nav-icon" :name="item.icon" />
               <span class="nav-label">{{ item.label }}</span>
             </a>
           </template>
         </nav>
-      </el-drawer>
+      </t-drawer>
       <main class="shell-content">
         <RouterView />
       </main>

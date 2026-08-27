@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { ElMessage } from 'element-plus';
+import { MessagePlugin } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -36,7 +36,7 @@ async function createExport() {
   formError.value = '';
   try {
     const task = await api.createExport(format.value, from.value, to.value);
-    ElMessage.success(`导出任务已创建（${task.id.slice(0, 8)}…）`);
+    MessagePlugin.success(`导出任务已创建（${task.id.slice(0, 8)}…）`);
     await load();
     poll(task.id);
   } catch (error) {
@@ -88,83 +88,87 @@ onMounted(load);
   <div class="exports-page">
     <PageHeader title="Exports" description="原始用量记录导出（CSV/JSONL gzip，仅计数与元数据）。">
       <template #actions>
-        <el-button type="primary" data-testid="export-create-open" @click="creating = !creating">
+        <t-button theme="primary" data-testid="export-create-open" @click="creating = !creating">
           {{ creating ? '收起表单' : '创建导出' }}
-        </el-button>
+        </t-button>
       </template>
     </PageHeader>
 
-    <el-alert v-if="loadError" type="error" :closable="false" class="block-alert">
+    <t-alert v-if="loadError" theme="error" :close-btn="false" class="block-alert">
       {{ loadError
       }}<span v-if="loadRequestId" class="mk-mono">requestId: {{ loadRequestId }}</span>
-    </el-alert>
+    </t-alert>
 
     <section v-if="creating" class="create-panel" data-testid="export-create-form">
       <h3 class="panel-title">创建导出</h3>
-      <el-form label-position="top" class="create-form">
-        <el-form-item label="格式">
-          <el-select v-model="format">
-            <el-option label="CSV" value="CSV" />
-            <el-option label="JSONL" value="JSONL" />
-          </el-select>
-        </el-form-item>
+      <t-form label-align="top" class="create-form">
+        <t-form-item label="格式">
+          <t-select v-model="format">
+            <t-option label="CSV" value="CSV" />
+            <t-option label="JSONL" value="JSONL" />
+          </t-select>
+        </t-form-item>
         <div class="form-row">
-          <el-form-item label="从">
-            <el-input v-model="from" data-testid="export-from" />
-          </el-form-item>
-          <el-form-item label="到">
-            <el-input v-model="to" data-testid="export-to" />
-          </el-form-item>
+          <t-form-item label="从">
+            <t-input v-model="from" data-testid="export-from" />
+          </t-form-item>
+          <t-form-item label="到">
+            <t-input v-model="to" data-testid="export-to" />
+          </t-form-item>
         </div>
         <p v-if="formError" class="form-error">{{ formError }}</p>
-        <el-button
-          type="primary"
+        <t-button
+          theme="primary"
           :loading="creating"
           data-testid="export-create-submit"
           @click="createExport"
         >
           创建导出
-        </el-button>
-      </el-form>
+        </t-button>
+      </t-form>
     </section>
 
-    <el-table v-loading="loading" :data="tasks" data-testid="exports-table">
-      <el-table-column prop="format" label="格式" width="90" />
-      <el-table-column label="窗口" min-width="220">
-        <template #default="{ row }">
+    <t-loading :loading="loading" size="small" show-overlay>
+      <t-table
+        :data="tasks"
+        data-testid="exports-table"
+        row-key="id"
+        size="small"
+        :columns="[
+          { colKey: 'format', title: '格式', width: 90 },
+          { colKey: 'period', title: '窗口', minWidth: 220 },
+          { colKey: 'status', title: '状态', width: 110 },
+          { colKey: 'rowCount', title: '行数', width: 90, align: 'right' },
+          { colKey: 'createdAt', title: '创建时间', width: 170 },
+          { colKey: 'actions', title: '操作', width: 100, fixed: 'right' },
+        ]"
+      >
+        <template #period="{ row }">
           <span class="mk-mono"
             >{{ row.periodFrom.slice(0, 10) }} → {{ row.periodTo.slice(0, 10) }}</span
           >
         </template>
-      </el-table-column>
-      <el-table-column label="状态" width="110">
-        <template #default="{ row }">
+        <template #status="{ row }">
           <span class="mk-status" :class="statusClass(row.status)">{{ row.status }}</span>
         </template>
-      </el-table-column>
-      <el-table-column prop="rowCount" label="行数" width="90" align="right">
-        <template #default="{ row }"
+        <template #rowCount="{ row }"
           ><span class="mk-num">{{ row.rowCount ?? '—' }}</span></template
         >
-      </el-table-column>
-      <el-table-column label="创建时间" width="170">
-        <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="100" fixed="right">
-        <template #default="{ row }">
-          <el-button
+        <template #createdAt="{ row }">{{ formatTime(row.createdAt) }}</template>
+        <template #actions="{ row }">
+          <t-button
             v-if="row.status === 'SUCCEEDED'"
-            link
-            type="primary"
+            variant="text"
+            theme="primary"
             data-testid="export-download"
             @click="download(row)"
           >
             下载
-          </el-button>
+          </t-button>
           <span v-else>—</span>
         </template>
-      </el-table-column>
-    </el-table>
+      </t-table>
+    </t-loading>
   </div>
 </template>
 
@@ -197,7 +201,7 @@ onMounted(load);
   gap: 12px;
 }
 
-.form-row .el-form-item {
+.form-row .t-form__item {
   flex: 1;
 }
 

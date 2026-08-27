@@ -95,7 +95,7 @@ Control Plane 使用 Spring MVC + Spring JDBC。理由见 ADR-0006。
 - TypeScript strict，不使用无解释的 `any`。
 - Vue Router 管路由；Pinia 只保存会话和跨页面 UI 状态，不缓存服务端事实。
 - API client 和类型由 OpenAPI 生成；手写 wrapper 只处理 CSRF、错误和分页。
-- Element Plus 作为基础组件库，不直接修改其源码。
+- TDesign（tdesign-vue-next）作为基础组件库，不直接修改其源码。
 - 组件按 feature 组织，页面不直接拼接 API URL。
 - 完整 Virtual Key 只存在创建/轮换结果组件内；离开页面后从 store 和内存引用清除。
 - 敏感页设置禁止浏览器缓存；复制动作有明确成功/失败反馈。

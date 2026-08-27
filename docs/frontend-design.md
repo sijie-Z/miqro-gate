@@ -21,18 +21,19 @@
 
 - 信息架构参考 GitHub Settings 的左侧导航、稳定页面标题和边框分区。
 - 数据密度参考成熟的财务/云控制台：表格优先、数字对齐、来源和更新时间明确。
-- 组件实现使用 Element Plus，但覆盖其默认主题，形成项目自己的 tokens。
+- 组件实现使用 **TDesign（腾讯开源设计系统，TokenHub 控制台同源）**，通过项目 tokens 覆盖主题，形成自己的视觉语言。
 - 不逐像素照抄任何产品，不复制品牌资产；借鉴经过验证的布局习惯。
 
-GitHub Primer 强调让页面干净、平静、减少注意力摩擦，并使用用户熟悉的布局心智模型；Element Plus 也明确把一致性、反馈、效率和可控性作为设计原则。这两者适合本项目，而不是营销型 SaaS 首页。
+GitHub Primer 强调让页面干净、平静、减少注意力摩擦，并使用用户熟悉的布局心智模型；TDesign 也明确把一致性、反馈、效率和可控性作为设计原则。这两者适合本项目，而不是营销型 SaaS 首页。
+
+> **2026-08-27 组件库迁移**：Element Plus 全量替换为 `tdesign-vue-next@1.20.x` + `tdesign-icons-vue-next`（15 个视图 + 3 个组件 + 测试/e2e 全量迁移，vitest 21/21、Playwright 15/15）。迁移理由：腾讯控制台质感直接来自组件层（按钮/表格/表单/弹窗同源），而不是项目自拼 CSS。
 
 参考资料：
 
 - [GitHub Primer Layout](https://primer.style/product/getting-started/foundations/layout/)
 - [GitHub Primer Product UI](https://primer.style/product/)
-- [Element Plus Design](https://element-plus.org/en-US/guide/design)
-- [Element Plus Navigation](https://element-plus.org/en-US/guide/nav)
-- [Element Plus Table](https://element-plus.org/en-US/component/table)
+- [TDesign Design](https://tdesign.tencent.com/design/values)
+- [TDesign Vue Next](https://tdesign.tencent.com/vue-next/overview)
 
 ## 2. 比较过的三个方向
 
@@ -160,15 +161,17 @@ Key、request ID、token 数字和代码使用系统等宽字体栈。正文 14p
 
 普通设置用分段表单；危险区域放在页面底部，用红色标题或边框但不整块鲜红。确认文本必须包含资源名称和影响范围。
 
-## 7. Element Plus 使用约束
+## 7. TDesign 使用约束
 
-- 通过 CSS variables 统一覆盖主题，不在各页面散落颜色和 radius。
-- `el-table` 默认不使用厚重全边框；用横向分隔和 sticky header，数字列右对齐。
-- Tag 只表示状态/协议/Plan 类型，长度短，避免每个单元格都是 Tag。
-- Dialog 只用于短决策和 Secret；长表单用独立 route 或 drawer。
-- Message/Notification 不承载唯一错误信息；表单错误保持在字段附近。
-- Dropdown 中危险动作以 divider 分组并使用 danger color。
-- 图标统一使用 Element Plus Icons 或一套许可明确的线性图标，不混用 emoji。
+- 通过项目 CSS variables（`--miqrokey-*`）与组件级覆盖统一主题，不在各页面散落颜色和 radius。
+- `t-table` 使用 size=small 高密度形态；横向分隔 + sticky header，数字列右对齐。
+- `t-tag` 只表示状态/协议/Plan 类型，长度短，避免每个单元格都是 Tag。
+- `t-dialog`/`DialogPlugin` 只用于短决策和 Secret；长表单用独立 route 或 drawer。
+- `MessagePlugin` 不承载唯一错误信息；表单错误保持在字段附近。
+- `t-dropdown` 中危险动作以 divider 分组并使用 danger 主题。
+- 图标统一使用 `tdesign-icons-vue-next` 线性图标，不混用 emoji。
+- `t-alert` 使用 `close-btn` 属性（`close` 已弃用）。
+- 组件库全量引入（1 个 chunk ~1.4MB）；拆包/按需引入列为非阻塞优化项。
 
 ## 8. 文案语气
 

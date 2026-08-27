@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next';
+import type { PrimaryTableCol } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -10,6 +11,20 @@ const webhooks = ref<WebhookEndpointView[]>([]);
 const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
+
+const webhookColumns: PrimaryTableCol[] = [
+  { colKey: 'name', title: '名称', minWidth: 150 },
+  { colKey: 'url', title: 'URL', minWidth: 240 },
+  { colKey: 'status', title: '状态', width: 100 },
+  { colKey: 'actions', title: '操作', width: 200, fixed: 'right' },
+];
+
+const deliveryColumns: PrimaryTableCol[] = [
+  { colKey: 'attempt', title: '次', width: 60 },
+  { colKey: 'httpStatus', title: 'HTTP', width: 90, align: 'right' },
+  { colKey: 'nextRetry', title: '下次重试', width: 170 },
+  { colKey: 'errorMessage', title: '错误', minWidth: 140 },
+];
 
 const creating = ref(false);
 const form = ref({ name: '', url: '', secret: '', timeoutMs: 5000 });
@@ -61,28 +76,26 @@ async function test(endpoint: WebhookEndpointView) {
   try {
     const result = await api.testWebhook(endpoint.id);
     if (result.httpStatus) {
-      ElMessage.success(`测试投递成功（HTTP ${result.httpStatus}）`);
+      MessagePlugin.success(`测试投递成功（HTTP ${result.httpStatus}）`);
     } else {
-      ElMessage.error(`测试投递失败：${result.errorMessage ?? '未知错误'}`);
+      MessagePlugin.error(`测试投递失败：${result.errorMessage ?? '未知错误'}`);
     }
   } catch (error) {
     if (error instanceof ApiError) {
-      ElMessage.error(error.message);
+      MessagePlugin.error(error.message);
     }
   }
 }
 
 async function remove(endpoint: WebhookEndpointView) {
   try {
-    await ElMessageBox.confirm(
-      `删除 Webhook「${endpoint.name}」后告警将不再投递到该端点。`,
-      '删除 Webhook',
-      {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-      },
-    );
+    await DialogPlugin.confirm({
+      header: '删除 Webhook',
+      body: `删除 Webhook「${endpoint.name}」后告警将不再投递到该端点。`,
+      confirmBtn: '删除',
+      cancelBtn: '取消',
+      theme: 'warning',
+    });
   } catch {
     return;
   }
@@ -111,58 +124,56 @@ onMounted(load);
   <div class="webhooks-page">
     <PageHeader title="Webhooks" description="告警投递端点：HMAC-SHA256 签名，失败指数退避重试。" />
 
-    <el-alert v-if="loadError" type="error" :closable="false" class="block-alert">
+    <t-alert v-if="loadError" theme="error" :close-btn="false" class="block-alert">
       {{ loadError
       }}<span v-if="loadRequestId" class="mk-mono">requestId: {{ loadRequestId }}</span>
-    </el-alert>
+    </t-alert>
 
     <div class="mk-filter-bar">
-      <el-button type="primary" data-testid="webhook-create-open" @click="creating = !creating">
+      <t-button theme="primary" data-testid="webhook-create-open" @click="creating = !creating">
         {{ creating ? '收起表单' : '创建 Webhook' }}
-      </el-button>
+      </t-button>
     </div>
 
     <section v-if="creating" class="create-panel" data-testid="webhook-create-form">
       <h3 class="panel-title">创建 Webhook</h3>
-      <el-form label-position="top" class="create-form">
-        <el-form-item label="名称" required>
-          <el-input v-model="form.name" data-testid="webhook-create-name" />
-        </el-form-item>
-        <el-form-item label="URL" required>
-          <el-input v-model="form.url" placeholder="https://…" data-testid="webhook-create-url" />
-        </el-form-item>
-        <el-form-item label="签名 Secret" required>
-          <el-input
-            v-model="form.secret"
-            type="password"
-            show-password
-            data-testid="webhook-create-secret"
-          />
-        </el-form-item>
-        <el-form-item label="超时（ms）">
-          <el-input v-model.number="form.timeoutMs" type="number" />
-        </el-form-item>
+      <t-form label-align="top" class="create-form">
+        <t-form-item label="名称" required>
+          <t-input v-model="form.name" data-testid="webhook-create-name" />
+        </t-form-item>
+        <t-form-item label="URL" required>
+          <t-input v-model="form.url" placeholder="https://…" data-testid="webhook-create-url" />
+        </t-form-item>
+        <t-form-item label="签名 Secret" required>
+          <t-input v-model="form.secret" type="password" data-testid="webhook-create-secret" />
+        </t-form-item>
+        <t-form-item label="超时（ms）">
+          <t-input v-model.number="form.timeoutMs" type="number" />
+        </t-form-item>
         <p v-if="formError" class="form-error">{{ formError }}</p>
-        <el-button
-          type="primary"
+        <t-button
+          theme="primary"
           :loading="submitting"
           data-testid="webhook-create-submit"
           @click="createWebhook"
         >
           创建 Webhook
-        </el-button>
-      </el-form>
+        </t-button>
+      </t-form>
     </section>
 
-    <el-table v-loading="loading" :data="webhooks" data-testid="webhooks-table">
-      <el-table-column prop="name" label="名称" min-width="150" />
-      <el-table-column label="URL" min-width="240">
-        <template #default="{ row }"
+    <t-loading :loading="loading" size="small" show-overlay>
+      <t-table
+        :data="webhooks"
+        :columns="webhookColumns"
+        row-key="id"
+        size="small"
+        data-testid="webhooks-table"
+      >
+        <template #url="{ row }"
           ><span class="mk-mono">{{ row.url }}</span></template
         >
-      </el-table-column>
-      <el-table-column label="状态" width="100">
-        <template #default="{ row }">
+        <template #status="{ row }">
           <span
             class="mk-status"
             :class="row.enabled ? 'mk-status--success' : 'mk-status--neutral'"
@@ -170,46 +181,47 @@ onMounted(load);
             {{ row.enabled ? 'Enabled' : 'Disabled' }}
           </span>
         </template>
-      </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" data-testid="webhook-test" @click="test(row)"
-            >测试</el-button
+        <template #actions="{ row }">
+          <t-button variant="text" theme="primary" data-testid="webhook-test" @click="test(row)"
+            >测试</t-button
           >
-          <el-button
-            link
-            type="primary"
+          <t-button
+            variant="text"
+            theme="primary"
             data-testid="webhook-deliveries"
             @click="openDeliveries(row)"
           >
             投递
-          </el-button>
-          <el-button link @click="toggle(row)">{{ row.enabled ? '停用' : '启用' }}</el-button>
-          <el-button link type="danger" data-testid="webhook-delete" @click="remove(row)"
-            >删除</el-button
+          </t-button>
+          <t-button variant="text" @click="toggle(row)">{{
+            row.enabled ? '停用' : '启用'
+          }}</t-button>
+          <t-button variant="text" theme="danger" data-testid="webhook-delete" @click="remove(row)"
+            >删除</t-button
           >
         </template>
-      </el-table-column>
-    </el-table>
+      </t-table>
+    </t-loading>
 
-    <el-drawer v-model="deliveriesDrawer" title="投递记录" size="520px">
-      <el-table v-loading="deliveriesLoading" :data="deliveries" data-testid="deliveries-table">
-        <el-table-column prop="attempt" label="次" width="60" />
-        <el-table-column label="HTTP" width="90" align="right">
-          <template #default="{ row }"
+    <t-drawer v-model:visible="deliveriesDrawer" title="投递记录" size="520px">
+      <t-loading :loading="deliveriesLoading" size="small" show-overlay>
+        <t-table
+          :data="deliveries"
+          :columns="deliveryColumns"
+          row-key="id"
+          size="small"
+          data-testid="deliveries-table"
+        >
+          <template #httpStatus="{ row }"
             ><span class="mk-num">{{ row.httpStatus ?? '—' }}</span></template
           >
-        </el-table-column>
-        <el-table-column label="下次重试" width="170">
-          <template #default="{ row }">{{
+          <template #nextRetry="{ row }">{{
             row.nextRetryAt ? formatTime(row.nextRetryAt) : '—'
           }}</template>
-        </el-table-column>
-        <el-table-column prop="errorMessage" label="错误" min-width="140">
-          <template #default="{ row }">{{ row.errorMessage ?? '—' }}</template>
-        </el-table-column>
-      </el-table>
-    </el-drawer>
+          <template #errorMessage="{ row }">{{ row.errorMessage ?? '—' }}</template>
+        </t-table>
+      </t-loading>
+    </t-drawer>
   </div>
 </template>
 

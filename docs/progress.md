@@ -6,11 +6,11 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G6.5`（Release candidate and customer handoff：release-checklist 执行、CHANGELOG、版本交付物）
-- Goal status: `DONE`（候选版本产出；真实凭证与客户侧验收仍待）
-- Last updated: `2026-08-26 CST`
-- Branch: `goal/g6.5-release-ready`
-- Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`
+- Current goal: `G5.5+`（界面重设计收尾：TDesign 组件库迁移，Element Plus → tdesign-vue-next）
+- Goal status: `DONE`（vitest 21/21、Playwright 15/15、lint/typecheck/build 全 PASS）
+- Last updated: `2026-08-27 CST`
+- Branch: `feat/tdesign-migration`
+- Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`（已公开 PUBLIC + MIT License；Leader 将直接提 Issues）
 
 ## Completed
 
@@ -110,6 +110,19 @@
 - KeysView 统计条 + 过滤栏；UsageView 条形图；AppShell 三组管理导航 + 版本徽标；登录页双栏品牌区。
 - e2e：Overview baseline 新增，15/15 通过；baseline 截图全量刷新（11 张）。
 - vitest 21/21、lint/typecheck/build 全 PASS；frontend-design.md 方向修订已记录。
+
+## 界面重设计 · TDesign 组件库迁移（2026-08-27，DONE）
+
+- **动机**：用户对照腾讯云 TokenHub 截图要求"腾讯的质感"——从组件层解决，Element Plus 全量替换为腾讯开源设计系统 TDesign（`tdesign-vue-next@1.20.6` + `tdesign-icons-vue-next@0.4.10`），与 TokenHub 控制台同源。
+- **范围**：15 个视图 + 3 个组件（AppShell/PageHeader/SecretRevealDialog）+ main.ts/package.json 全量迁移；`el-*` 标签与 Element Plus import 零残留，`element-plus`、`@element-plus/icons-vue` 已从依赖移除。
+- **迁移要点**：`el-table→t-table`（size=small 高密度）、`el-dialog→t-dialog`、`el-message→MessagePlugin`、`el-dropdown→t-dropdown`、`t-alert` 弃用 `close` 改用 `close-btn`（18 处）。
+- **t-dropdown-item 不透传 attrs**：`data-testid` 移到 item 插槽内 span（KeysView kebab 菜单），e2e 定位恢复正常。
+- **测试环境修复（本次迁移的关键坑）**：
+  - jsdom 缺 `ResizeObserver`/`IntersectionObserver`/`matchMedia` → 新增 `src/__tests__/setup.ts`（vitest setupFiles），否则 TDesign Popup 挂载钩子抛错、触发器事件永不绑定。
+  - TDesign Popup 的 popper 状态机（setTimeout 显隐 + rAF 延迟挂载 + readonly 守卫）在 jsdom 下时序不确定，选项列表偶发不渲染 → KeysView.spec 用 TPopup 内联 stub（触发器 + 面板直接渲染），保留用户式选项点击；弹层定位属 TDesign 自身职责，非应用逻辑。
+- **验证**：vitest **21/21**、Playwright **15/15**（production build + 4 viewport baseline）、lint/typecheck/build 全 PASS。
+- **文档**：frontend-design.md §1/§7、coding-standards.md、implementation-plan.md、ui-specification.md 已同步为 TDesign；视觉方向（浅色密集操作台 + 额度分段条）不变。
+- **风险**：组件库全量引入，主 chunk ~1.4MB（与 Element Plus 时期相同量级）；按需引入/手动分块列为非阻塞优化。视觉 review 仍待人工（spec §9）。
 
 ## Known Blockers
 

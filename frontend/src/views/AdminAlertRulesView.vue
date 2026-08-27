@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { ElMessageBox } from 'element-plus';
+import { DialogPlugin } from 'tdesign-vue-next';
+import type { PrimaryTableCol } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -11,6 +12,15 @@ const webhooks = ref<WebhookEndpointView[]>([]);
 const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
+
+const ruleColumns: PrimaryTableCol[] = [
+  { colKey: 'name', title: '名称', minWidth: 160 },
+  { colKey: 'type', title: '类型', width: 140 },
+  { colKey: 'threshold', title: '阈值', width: 110, align: 'right' },
+  { colKey: 'dedupeMinutes', title: '去重（分）', width: 110, align: 'right' },
+  { colKey: 'status', title: '状态', width: 100 },
+  { colKey: 'actions', title: '操作', width: 140, fixed: 'right' },
+];
 
 const creating = ref(false);
 const form = ref({
@@ -76,10 +86,12 @@ async function toggle(rule: AlertRule) {
 
 async function remove(rule: AlertRule) {
   try {
-    await ElMessageBox.confirm(`删除告警规则「${rule.name}」。`, '删除规则', {
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-      type: 'warning',
+    await DialogPlugin.confirm({
+      header: '删除规则',
+      body: `删除告警规则「${rule.name}」。`,
+      confirmBtn: '删除',
+      cancelBtn: '取消',
+      theme: 'warning',
     });
   } catch {
     return;
@@ -113,78 +125,77 @@ onMounted(load);
       description="指标阈值告警：命中后按小时去重，经 Webhook 签名投递。"
     />
 
-    <el-alert v-if="loadError" type="error" :closable="false" class="block-alert">
+    <t-alert v-if="loadError" theme="error" :close-btn="false" class="block-alert">
       {{ loadError
       }}<span v-if="loadRequestId" class="mk-mono">requestId: {{ loadRequestId }}</span>
-    </el-alert>
+    </t-alert>
 
     <div class="mk-filter-bar">
-      <el-button type="primary" data-testid="rule-create-open" @click="creating = !creating">
+      <t-button theme="primary" data-testid="rule-create-open" @click="creating = !creating">
         {{ creating ? '收起表单' : '创建规则' }}
-      </el-button>
+      </t-button>
     </div>
 
     <section v-if="creating" class="create-panel" data-testid="rule-create-form">
       <h3 class="panel-title">创建告警规则</h3>
-      <el-form label-position="top" class="create-form">
-        <el-form-item label="名称" required>
-          <el-input v-model="form.name" data-testid="rule-create-name" />
-        </el-form-item>
-        <el-form-item label="类型">
-          <el-select v-model="form.type">
-            <el-option label="usage 缺失率" value="USAGE_MISSING_RATE" />
-            <el-option label="上游错误率" value="UPSTREAM_ERROR_RATE" />
-            <el-option label="余额不可用" value="BALANCE_UNAVAILABLE" />
-            <el-option label="用量激增" value="USAGE_SURGE" />
-          </el-select>
-        </el-form-item>
+      <t-form label-align="top" class="create-form">
+        <t-form-item label="名称" required>
+          <t-input v-model="form.name" data-testid="rule-create-name" />
+        </t-form-item>
+        <t-form-item label="类型">
+          <t-select v-model="form.type">
+            <t-option label="usage 缺失率" value="USAGE_MISSING_RATE" />
+            <t-option label="上游错误率" value="UPSTREAM_ERROR_RATE" />
+            <t-option label="余额不可用" value="BALANCE_UNAVAILABLE" />
+            <t-option label="用量激增" value="USAGE_SURGE" />
+          </t-select>
+        </t-form-item>
         <div class="form-row">
-          <el-form-item label="阈值">
-            <el-input
+          <t-form-item label="阈值">
+            <t-input
               v-model.number="form.threshold"
               type="number"
               step="0.05"
               data-testid="rule-create-threshold"
             />
-          </el-form-item>
-          <el-form-item label="去重窗口（分钟）">
-            <el-input v-model.number="form.dedupeMinutes" type="number" />
-          </el-form-item>
+          </t-form-item>
+          <t-form-item label="去重窗口（分钟）">
+            <t-input v-model.number="form.dedupeMinutes" type="number" />
+          </t-form-item>
         </div>
-        <el-form-item label="Webhook 端点">
-          <el-select v-model="form.webhookEndpointId" clearable placeholder="不选则仅记录事件">
-            <el-option v-for="w in webhooks" :key="w.id" :label="w.name" :value="w.id" />
-          </el-select>
-        </el-form-item>
+        <t-form-item label="Webhook 端点">
+          <t-select v-model="form.webhookEndpointId" clearable placeholder="不选则仅记录事件">
+            <t-option v-for="w in webhooks" :key="w.id" :label="w.name" :value="w.id" />
+          </t-select>
+        </t-form-item>
         <p v-if="formError" class="form-error">{{ formError }}</p>
-        <el-button
-          type="primary"
+        <t-button
+          theme="primary"
           :loading="submitting"
           data-testid="rule-create-submit"
           @click="createRule"
         >
           创建规则
-        </el-button>
-      </el-form>
+        </t-button>
+      </t-form>
     </section>
 
-    <el-table v-loading="loading" :data="rules" data-testid="rules-table">
-      <el-table-column prop="name" label="名称" min-width="160" />
-      <el-table-column label="类型" width="140">
-        <template #default="{ row }">{{ typeLabel(row.type) }}</template>
-      </el-table-column>
-      <el-table-column label="阈值" width="110" align="right">
-        <template #default="{ row }"
+    <t-loading :loading="loading" size="small" show-overlay>
+      <t-table
+        :data="rules"
+        :columns="ruleColumns"
+        row-key="id"
+        size="small"
+        data-testid="rules-table"
+      >
+        <template #type="{ row }">{{ typeLabel(row.type) }}</template>
+        <template #threshold="{ row }"
           ><span class="mk-num">{{ row.threshold }}</span></template
         >
-      </el-table-column>
-      <el-table-column label="去重（分）" width="110" align="right">
-        <template #default="{ row }"
+        <template #dedupeMinutes="{ row }"
           ><span class="mk-num">{{ row.dedupeMinutes }}</span></template
         >
-      </el-table-column>
-      <el-table-column label="状态" width="100">
-        <template #default="{ row }">
+        <template #status="{ row }">
           <span
             class="mk-status"
             :class="row.enabled ? 'mk-status--success' : 'mk-status--neutral'"
@@ -192,16 +203,16 @@ onMounted(load);
             {{ row.enabled ? 'Enabled' : 'Disabled' }}
           </span>
         </template>
-      </el-table-column>
-      <el-table-column label="操作" width="140" fixed="right">
-        <template #default="{ row }">
-          <el-button link @click="toggle(row)">{{ row.enabled ? '停用' : '启用' }}</el-button>
-          <el-button link type="danger" data-testid="rule-delete" @click="remove(row)"
-            >删除</el-button
+        <template #actions="{ row }">
+          <t-button variant="text" @click="toggle(row)">{{
+            row.enabled ? '停用' : '启用'
+          }}</t-button>
+          <t-button variant="text" theme="danger" data-testid="rule-delete" @click="remove(row)"
+            >删除</t-button
           >
         </template>
-      </el-table-column>
-    </el-table>
+      </t-table>
+    </t-loading>
   </div>
 </template>
 
@@ -234,7 +245,7 @@ onMounted(load);
   gap: 12px;
 }
 
-.form-row .el-form-item {
+.form-row .t-form__item {
   flex: 1;
 }
 

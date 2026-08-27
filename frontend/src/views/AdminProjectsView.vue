@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { ElMessageBox } from 'element-plus';
+import { DialogPlugin } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -22,6 +22,19 @@ const memberDrawer = ref(false);
 const memberProject = ref<Project | null>(null);
 const memberUsers = ref<MemberView[]>([]);
 const memberLoading = ref(false);
+
+const columns = [
+  { colKey: 'code', title: '代码', width: 120 },
+  { colKey: 'name', title: '名称', minWidth: 180 },
+  { colKey: 'projectTag', title: '路由标签', width: 140 },
+  { colKey: 'status', title: '状态', width: 110 },
+  { colKey: 'actions', title: '操作', width: 100, fixed: 'right' as const },
+];
+
+const memberColumns = [
+  { colKey: 'username', title: '用户名', minWidth: 120 },
+  { colKey: 'actions', title: '', width: 80 },
+];
 
 async function load() {
   loading.value = true;
@@ -75,15 +88,13 @@ async function openMembers(project: Project) {
 async function removeMember(user: MemberView) {
   if (!memberProject.value) return;
   try {
-    await ElMessageBox.confirm(
-      `将「${user.username}」移出项目「${memberProject.value.name}」。`,
-      '移除成员',
-      {
-        confirmButtonText: '移除',
-        cancelButtonText: '取消',
-        type: 'warning',
-      },
-    );
+    await DialogPlugin.confirm({
+      header: '移除成员',
+      body: `将「${user.username}」移出项目「${memberProject.value.name}」。`,
+      confirmBtn: '移除',
+      cancelBtn: '取消',
+      theme: 'warning',
+    });
   } catch {
     return;
   }
@@ -98,53 +109,51 @@ onMounted(load);
   <div class="projects-page">
     <PageHeader title="Projects" description="用量归属与路由标签的载体。">
       <template #actions>
-        <el-button type="primary" data-testid="project-create-open" @click="creating = !creating">
+        <t-button theme="primary" data-testid="project-create-open" @click="creating = !creating">
           {{ creating ? '收起表单' : '创建项目' }}
-        </el-button>
+        </t-button>
       </template>
     </PageHeader>
 
-    <el-alert v-if="loadError" type="error" :closable="false" class="block-alert">
+    <t-alert v-if="loadError" theme="error" :close-btn="false" class="block-alert">
       {{ loadError
       }}<span v-if="loadRequestId" class="mk-mono">requestId: {{ loadRequestId }}</span>
-    </el-alert>
+    </t-alert>
 
     <section v-if="creating" class="create-panel" data-testid="project-create-form">
       <h3 class="panel-title">创建项目</h3>
-      <el-form label-position="top" class="create-form">
-        <el-form-item label="项目代码" required>
-          <el-input
-            v-model="createCode"
-            placeholder="例如 CORE"
-            data-testid="project-create-code"
-          />
-        </el-form-item>
-        <el-form-item label="名称" required>
-          <el-input v-model="createName" data-testid="project-create-name" />
-        </el-form-item>
-        <el-form-item label="路由标签">
-          <el-input v-model="createTag" placeholder="例如 core-ai（Virtual Key 点号后缀）" />
-        </el-form-item>
+      <t-form label-align="top" class="create-form">
+        <t-form-item label="项目代码" required>
+          <t-input v-model="createCode" placeholder="例如 CORE" data-testid="project-create-code" />
+        </t-form-item>
+        <t-form-item label="名称" required>
+          <t-input v-model="createName" data-testid="project-create-name" />
+        </t-form-item>
+        <t-form-item label="路由标签">
+          <t-input v-model="createTag" placeholder="例如 core-ai（Virtual Key 点号后缀）" />
+        </t-form-item>
         <p v-if="formError" class="form-error">{{ formError }}</p>
-        <el-button
-          type="primary"
+        <t-button
+          theme="primary"
           :loading="submitting"
           data-testid="project-create-submit"
           @click="createProject"
         >
           创建项目
-        </el-button>
-      </el-form>
+        </t-button>
+      </t-form>
     </section>
 
-    <el-table v-loading="loading" :data="projects" data-testid="projects-table">
-      <el-table-column prop="code" label="代码" width="120" />
-      <el-table-column prop="name" label="名称" min-width="180" />
-      <el-table-column prop="projectTag" label="路由标签" width="140">
-        <template #default="{ row }">{{ row.projectTag ?? '—' }}</template>
-      </el-table-column>
-      <el-table-column label="状态" width="110">
-        <template #default="{ row }">
+    <t-loading :loading="loading" size="small" show-overlay>
+      <t-table
+        row-key="id"
+        size="small"
+        :data="projects"
+        :columns="columns"
+        data-testid="projects-table"
+      >
+        <template #projectTag="{ row }">{{ row.projectTag ?? '—' }}</template>
+        <template #status="{ row }">
           <span
             class="mk-status"
             :class="row.status === 'ACTIVE' ? 'mk-status--success' : 'mk-status--danger'"
@@ -152,41 +161,44 @@ onMounted(load);
             {{ row.status }}
           </span>
         </template>
-      </el-table-column>
-      <el-table-column label="操作" width="100" fixed="right">
-        <template #default="{ row }">
-          <el-button
-            link
-            type="primary"
+        <template #actions="{ row }">
+          <t-button
+            variant="text"
+            theme="primary"
             data-testid="project-members-open"
             @click="openMembers(row)"
-            >成员</el-button
+            >成员</t-button
           >
         </template>
-      </el-table-column>
-    </el-table>
+      </t-table>
+    </t-loading>
 
-    <el-drawer
-      v-model="memberDrawer"
-      :title="`项目成员：${memberProject?.name ?? ''}`"
+    <t-drawer
+      v-model:visible="memberDrawer"
+      :header="`项目成员：${memberProject?.name ?? ''}`"
       size="420px"
     >
-      <el-table v-loading="memberLoading" :data="memberUsers" data-testid="project-members-table">
-        <el-table-column prop="username" label="用户名" min-width="120" />
-        <el-table-column label="" width="80">
-          <template #default="{ row }">
-            <el-button
-              link
-              type="danger"
+      <t-loading :loading="memberLoading" size="small" show-overlay>
+        <t-table
+          row-key="id"
+          size="small"
+          :data="memberUsers"
+          :columns="memberColumns"
+          data-testid="project-members-table"
+        >
+          <template #actions="{ row }">
+            <t-button
+              variant="text"
+              theme="danger"
               data-testid="project-member-remove"
               @click="removeMember(row)"
             >
               移除
-            </el-button>
+            </t-button>
           </template>
-        </el-table-column>
-      </el-table>
-    </el-drawer>
+        </t-table>
+      </t-loading>
+    </t-drawer>
   </div>
 </template>
 

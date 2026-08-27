@@ -209,6 +209,9 @@ for (const viewport of VIEWPORTS) {
       await page.getByTestId('nav-toggle').click();
       await expect(page.getByTestId('shell-nav-drawer')).toBeVisible();
       await page.keyboard.press('Escape');
+      // Wait out the close animation so the baseline never captures a
+      // half-closed drawer (TDesign animates ~300ms).
+      await expect(page.getByTestId('shell-nav-drawer')).not.toBeVisible();
     }
     await page.screenshot({
       path: `test-results/baseline/shell-${viewport.name}.png`,

@@ -1,6 +1,6 @@
 # 门户 UI 规格
 
-首版使用 Vue 3、TypeScript、Vite、Element Plus。门户面向约 50 个内部账号，优先保证准确、可审计和易运维。视觉语言、tokens、布局密度和禁用风格以 [`frontend-design.md`](frontend-design.md) 为准。
+首版使用 Vue 3、TypeScript、Vite、TDesign（tdesign-vue-next）。门户面向约 50 个内部账号，优先保证准确、可审计和易运维。视觉语言、tokens、布局密度和禁用风格以 [`frontend-design.md`](frontend-design.md) 为准。
 
 ## 1. 路由和权限
 

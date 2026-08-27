@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
-import { ElMessage } from 'element-plus';
+import { MessagePlugin } from 'tdesign-vue-next';
 
 interface Props {
   modelValue: boolean;
@@ -29,7 +29,7 @@ watch(
 
 async function copy(text: string) {
   await navigator.clipboard.writeText(text);
-  ElMessage.success('已复制');
+  MessagePlugin.success('已复制');
 }
 
 function close() {
@@ -38,13 +38,13 @@ function close() {
 </script>
 
 <template>
-  <el-dialog
-    :model-value="modelValue"
-    :close-on-click-modal="false"
-    :close-on-press-escape="false"
+  <t-dialog
+    :visible="modelValue"
+    :close-on-overlay-click="false"
+    :close-on-esc-keydown="false"
     :show-close="false"
     width="520px"
-    title="Virtual Key 已创建"
+    header="Virtual Key 已创建"
     class="secret-dialog"
     @close="close"
   >
@@ -57,25 +57,25 @@ function close() {
       <div class="secret-label">Base URL</div>
       <div class="secret-row">
         <code class="mk-mono secret-value" data-testid="secret-base-url">{{ baseUrl }}</code>
-        <el-button size="small" @click="copy(baseUrl)">复制</el-button>
+        <t-button size="small" @click="copy(baseUrl)">复制</t-button>
       </div>
       <div class="secret-label">Virtual Key</div>
       <div class="secret-row">
         <code class="mk-mono secret-value" data-testid="secret-value">{{ secret }}</code>
-        <el-button size="small" @click="copy(secret)">复制</el-button>
+        <t-button size="small" @click="copy(secret)">复制</t-button>
       </div>
     </div>
 
-    <el-checkbox v-model="acknowledged" class="ack" data-testid="secret-ack">
+    <t-checkbox v-model="acknowledged" class="ack" data-testid="secret-ack">
       我已保存 Virtual Key
-    </el-checkbox>
+    </t-checkbox>
 
     <template #footer>
-      <el-button type="primary" :disabled="!acknowledged" data-testid="secret-close" @click="close">
+      <t-button theme="primary" :disabled="!acknowledged" data-testid="secret-close" @click="close">
         关闭
-      </el-button>
+      </t-button>
     </template>
-  </el-dialog>
+  </t-dialog>
 </template>
 
 <style scoped>

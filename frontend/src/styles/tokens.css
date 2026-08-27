@@ -79,33 +79,39 @@
   --miqrokey-content-form-max: 760px;
 }
 
-/* ---- Element Plus theme overlay ---- */
-html {
-  --el-color-primary: var(--miqrokey-accent);
-  --el-color-primary-light-3: #4090ff;
-  --el-color-primary-light-5: #79b3ff;
-  --el-color-primary-light-7: #b3d4ff;
-  --el-color-primary-light-8: #cfe2ff;
-  --el-color-primary-light-9: #eaf2ff;
-  --el-color-primary-dark-2: var(--miqrokey-accent-hover);
-  --el-color-success: var(--miqrokey-success);
-  --el-color-warning: var(--miqrokey-warning);
-  --el-color-danger: var(--miqrokey-danger);
-  --el-color-error: var(--miqrokey-danger);
-  --el-color-info: var(--miqrokey-info);
-  --el-text-color-primary: var(--miqrokey-text-primary);
-  --el-text-color-regular: var(--miqrokey-text-primary);
-  --el-text-color-secondary: var(--miqrokey-text-secondary);
-  --el-text-color-placeholder: var(--miqrokey-text-disabled);
-  --el-border-color: var(--miqrokey-border-default);
-  --el-border-color-light: var(--miqrokey-border-muted);
-  --el-border-color-lighter: var(--miqrokey-border-muted);
-  --el-fill-color-blank: var(--miqrokey-bg-surface);
-  --el-fill-color-light: var(--miqrokey-bg-subtle);
-  --el-bg-color: var(--miqrokey-bg-surface);
-  --el-border-radius-base: var(--miqrokey-radius-control);
-  --el-font-family: var(--miqrokey-font-family);
-  --el-font-size-base: var(--miqrokey-font-size-body);
+/* ---- TDesign theme overlay (Tencent's own design system) ---- */
+:root,
+:root[theme-mode='light'] {
+  --td-brand-color: var(--miqrokey-accent);
+  --td-brand-color-hover: var(--miqrokey-accent-hover);
+  --td-brand-color-focus: #3385ff;
+  --td-brand-color-active: #004bb8;
+  --td-brand-color-disabled: #b3d4ff;
+  --td-brand-color-light: var(--miqrokey-accent-soft);
+  --td-success-color: var(--miqrokey-success);
+  --td-warning-color: var(--miqrokey-warning);
+  --td-error-color: var(--miqrokey-danger);
+  --td-text-color-primary: var(--miqrokey-text-primary);
+  --td-text-color-secondary: var(--miqrokey-text-secondary);
+  --td-text-color-placeholder: var(--miqrokey-text-disabled);
+  --td-bg-color-page: var(--miqrokey-bg-canvas);
+  --td-bg-color-container: var(--miqrokey-bg-surface);
+  --td-bg-color-container-hover: var(--miqrokey-bg-subtle);
+  --td-bg-color-secondarycontainer: var(--miqrokey-bg-subtle);
+  --td-border-level-1-color: var(--miqrokey-border-default);
+  --td-border-level-2-color: var(--miqrokey-border-muted);
+  --td-component-border: var(--miqrokey-border-default);
+  --td-component-stroke: var(--miqrokey-border-default);
+  --td-radius-small: 3px;
+  --td-radius-default: var(--miqrokey-radius-control);
+  --td-radius-medium: var(--miqrokey-radius-panel);
+  --td-radius-large: var(--miqrokey-radius-modal);
+  --td-font-family: var(--miqrokey-font-family);
+  --td-font-size-body-small: 12px;
+  --td-font-size-body-medium: var(--miqrokey-font-size-body);
+  --td-font-size-title-medium: 16px;
+  --td-shadow-1: 0 1px 4px rgb(31 35 40 / 6%);
+  --td-shadow-2: 0 2px 8px rgb(31 35 40 / 8%);
 }
 
 body {

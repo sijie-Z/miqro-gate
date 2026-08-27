@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -23,6 +23,14 @@ const submitting = ref(false);
 const reveal = ref(false);
 const revealUser = ref('');
 const revealPassword = ref('');
+
+const columns = [
+  { colKey: 'username', title: '用户名', minWidth: 160 },
+  { colKey: 'role', title: '角色', width: 140 },
+  { colKey: 'status', title: '状态', width: 120 },
+  { colKey: 'lastLoginAt', title: '最近登录', width: 170 },
+  { colKey: 'actions', title: '操作', width: 90, fixed: 'right' as const },
+];
 
 async function load() {
   loading.value = true;
@@ -74,13 +82,15 @@ async function createUser() {
 async function toggleStatus(user: AdminUser) {
   const disabling = user.status === 'ACTIVE';
   try {
-    await ElMessageBox.confirm(
-      disabling
+    await DialogPlugin.confirm({
+      header: disabling ? '禁用用户' : '启用用户',
+      body: disabling
         ? `禁用后「${user.username}」立即无法登录，现有会话全部失效。`
         : `重新启用「${user.username}」的登录。`,
-      disabling ? '禁用用户' : '启用用户',
-      { confirmButtonText: disabling ? '禁用' : '启用', cancelButtonText: '取消', type: 'warning' },
-    );
+      confirmBtn: disabling ? '禁用' : '启用',
+      cancelBtn: '取消',
+      theme: 'warning',
+    });
   } catch {
     return;
   }
@@ -89,18 +99,20 @@ async function toggleStatus(user: AdminUser) {
     await load();
   } catch (error) {
     if (error instanceof ApiError) {
-      ElMessage.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+      MessagePlugin.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
     }
   }
 }
 
 async function resetPassword(user: AdminUser) {
   try {
-    await ElMessageBox.confirm(
-      `将重置「${user.username}」的密码并撤销其全部会话，新密码仅显示一次。`,
-      '重置密码',
-      { confirmButtonText: '重置', cancelButtonText: '取消', type: 'warning' },
-    );
+    await DialogPlugin.confirm({
+      header: '重置密码',
+      body: `将重置「${user.username}」的密码并撤销其全部会话，新密码仅显示一次。`,
+      confirmBtn: '重置',
+      cancelBtn: '取消',
+      theme: 'warning',
+    });
   } catch {
     return;
   }
@@ -112,7 +124,7 @@ async function resetPassword(user: AdminUser) {
     await load();
   } catch (error) {
     if (error instanceof ApiError) {
-      ElMessage.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+      MessagePlugin.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
     }
   }
 }
@@ -129,20 +141,22 @@ async function handleCommand(command: string, user: AdminUser) {
 
 async function revokeSessions(user: AdminUser) {
   try {
-    await ElMessageBox.confirm(`撤销「${user.username}」的全部登录会话。`, '撤销会话', {
-      confirmButtonText: '撤销',
-      cancelButtonText: '取消',
-      type: 'warning',
+    await DialogPlugin.confirm({
+      header: '撤销会话',
+      body: `撤销「${user.username}」的全部登录会话。`,
+      confirmBtn: '撤销',
+      cancelBtn: '取消',
+      theme: 'warning',
     });
   } catch {
     return;
   }
   try {
     await api.revokeUserSessions(user.id);
-    ElMessage.success('会话已撤销');
+    MessagePlugin.success('会话已撤销');
   } catch (error) {
     if (error instanceof ApiError) {
-      ElMessage.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+      MessagePlugin.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
     }
   }
 }
@@ -171,111 +185,120 @@ onMounted(load);
   <div class="users-page">
     <PageHeader title="Users" description="管理门户账号与登录权限。">
       <template #actions>
-        <el-button type="primary" data-testid="user-create-open" @click="creating = !creating">
+        <t-button theme="primary" data-testid="user-create-open" @click="creating = !creating">
           {{ creating ? '收起表单' : '创建用户' }}
-        </el-button>
+        </t-button>
       </template>
     </PageHeader>
 
-    <el-alert
+    <t-alert
       v-if="loadError"
-      type="error"
-      :closable="false"
+      theme="error"
+      :close-btn="false"
       class="block-alert"
       data-testid="users-load-error"
     >
       {{ loadError
       }}<span v-if="loadRequestId" class="mk-mono">requestId: {{ loadRequestId }}</span>
-    </el-alert>
+    </t-alert>
 
     <section v-if="creating" class="create-panel" data-testid="user-create-form">
       <h3 class="panel-title">创建用户</h3>
-      <el-form label-position="top" class="create-form">
-        <el-form-item label="用户名" required>
-          <el-input
+      <t-form label-align="top" class="create-form">
+        <t-form-item label="用户名" required>
+          <t-input
             v-model="createUsername"
             placeholder="例如 alice"
             data-testid="user-create-username"
           />
-        </el-form-item>
-        <el-form-item label="显示名">
-          <el-input
+        </t-form-item>
+        <t-form-item label="显示名">
+          <t-input
             v-model="createDisplayName"
             placeholder="例如 Alice"
             data-testid="user-create-display"
           />
-        </el-form-item>
-        <el-form-item label="角色">
-          <el-select v-model="createRole" data-testid="user-create-role">
-            <el-option label="USER" value="USER" />
-            <el-option label="SYSTEM_ADMIN" value="SYSTEM_ADMIN" />
-          </el-select>
-        </el-form-item>
+        </t-form-item>
+        <t-form-item label="角色">
+          <t-select v-model="createRole" data-testid="user-create-role">
+            <t-option label="USER" value="USER" />
+            <t-option label="SYSTEM_ADMIN" value="SYSTEM_ADMIN" />
+          </t-select>
+        </t-form-item>
         <p v-if="formError" class="form-error mk-num">
           {{ formError
           }}<span v-if="formRequestId" class="mk-mono"> requestId: {{ formRequestId }}</span>
         </p>
         <div class="form-actions">
-          <el-button
-            type="primary"
+          <t-button
+            theme="primary"
             :loading="submitting"
             data-testid="user-create-submit"
             @click="createUser"
           >
             创建用户
-          </el-button>
-          <el-button @click="creating = false">取消</el-button>
+          </t-button>
+          <t-button @click="creating = false">取消</t-button>
         </div>
-      </el-form>
+      </t-form>
     </section>
 
-    <el-table v-loading="loading" :data="users" class="users-table" data-testid="users-table">
-      <el-table-column label="用户名" min-width="160">
-        <template #default="{ row }">
+    <t-loading :loading="loading" size="small" show-overlay>
+      <t-table
+        row-key="id"
+        size="small"
+        :data="users"
+        :columns="columns"
+        class="users-table"
+        data-testid="users-table"
+      >
+        <template #username="{ row }">
           <div class="user-name">{{ row.username }}</div>
           <div class="user-display">{{ row.displayName }}</div>
         </template>
-      </el-table-column>
-      <el-table-column prop="role" label="角色" width="140" />
-      <el-table-column label="状态" width="120">
-        <template #default="{ row }">
+        <template #status="{ row }">
           <span class="mk-status" :class="statusClass(row.status)">{{
             statusLabel[row.status] ?? row.status
           }}</span>
         </template>
-      </el-table-column>
-      <el-table-column label="最近登录" width="170">
-        <template #default="{ row }">
+        <template #lastLoginAt="{ row }">
           {{ row.lastLoginAt ? new Date(row.lastLoginAt).toLocaleString() : '—' }}
         </template>
-      </el-table-column>
-      <el-table-column label="操作" width="90" fixed="right">
-        <template #default="{ row }">
-          <el-dropdown trigger="click" @command="(cmd: string) => handleCommand(cmd, row)">
-            <el-button link data-testid="user-actions">操作</el-button>
+        <template #actions="{ row }">
+          <t-dropdown trigger="click">
+            <t-button variant="text" data-testid="user-actions">操作</t-button>
             <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="status" data-testid="user-toggle-status">
+              <t-dropdown-menu>
+                <t-dropdown-item
+                  data-testid="user-toggle-status"
+                  @click="handleCommand('status', row)"
+                >
                   {{ row.status === 'ACTIVE' ? '禁用' : '启用' }}
-                </el-dropdown-item>
-                <el-dropdown-item command="reset" data-testid="user-reset-password"
-                  >重置密码</el-dropdown-item
+                </t-dropdown-item>
+                <t-dropdown-item
+                  data-testid="user-reset-password"
+                  @click="handleCommand('reset', row)"
                 >
-                <el-dropdown-item command="revoke" data-testid="user-revoke-sessions"
-                  >撤销会话</el-dropdown-item
+                  重置密码
+                </t-dropdown-item>
+                <t-dropdown-item
+                  data-testid="user-revoke-sessions"
+                  @click="handleCommand('revoke', row)"
                 >
-              </el-dropdown-menu>
+                  撤销会话
+                </t-dropdown-item>
+              </t-dropdown-menu>
             </template>
-          </el-dropdown>
+          </t-dropdown>
         </template>
-      </el-table-column>
-    </el-table>
+      </t-table>
+    </t-loading>
 
-    <el-dialog
-      v-model="reveal"
-      title="一次性临时密码"
+    <t-dialog
+      v-model:visible="reveal"
+      header="一次性临时密码"
       width="480px"
-      :close-on-click-modal="false"
+      :close-on-overlay-click="false"
       data-testid="temp-password-dialog"
     >
       <p>
@@ -285,9 +308,9 @@ onMounted(load);
       </p>
       <div class="temp-password-box mk-mono" data-testid="temp-password">{{ revealPassword }}</div>
       <template #footer>
-        <el-button type="primary" @click="reveal = false">我已保存</el-button>
+        <t-button theme="primary" @click="reveal = false">我已保存</t-button>
       </template>
-    </el-dialog>
+    </t-dialog>
   </div>
 </template>
 

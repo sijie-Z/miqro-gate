@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -24,6 +24,13 @@ const modelsDrawer = ref(false);
 const modelsGrant = ref<Grant | null>(null);
 const modelsText = ref('');
 const modelsSaving = ref(false);
+
+const columns = [
+  { colKey: 'projectId', title: '项目', minWidth: 200 },
+  { colKey: 'providerProductId', title: '供应商产品', minWidth: 200 },
+  { colKey: 'status', title: '状态', width: 110 },
+  { colKey: 'actions', title: '操作', width: 150, fixed: 'right' as const },
+];
 
 async function load() {
   loading.value = true;
@@ -92,11 +99,11 @@ async function saveModels() {
   modelsSaving.value = true;
   try {
     await api.updateGrantModels(modelsGrant.value.id, parseModels(modelsText.value));
-    ElMessage.success('模型范围已更新');
+    MessagePlugin.success('模型范围已更新');
     modelsDrawer.value = false;
   } catch (error) {
     if (error instanceof ApiError) {
-      ElMessage.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+      MessagePlugin.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
     }
   } finally {
     modelsSaving.value = false;
@@ -105,11 +112,13 @@ async function saveModels() {
 
 async function disable(grant: Grant) {
   try {
-    await ElMessageBox.confirm(
-      `禁用后该 Grant 不再授权任何 Virtual Key，关联 Key 将无法通过此授权路由。`,
-      '禁用 Grant',
-      { confirmButtonText: '禁用', cancelButtonText: '取消', type: 'warning' },
-    );
+    await DialogPlugin.confirm({
+      header: '禁用 Grant',
+      body: `禁用后该 Grant 不再授权任何 Virtual Key，关联 Key 将无法通过此授权路由。`,
+      confirmBtn: '禁用',
+      cancelBtn: '取消',
+      theme: 'warning',
+    });
   } catch {
     return;
   }
@@ -130,115 +139,122 @@ onMounted(async () => {
   <div class="grants-page">
     <PageHeader title="Grants" description="项目 × 供应商产品 × 凭证的授权组合与模型范围。">
       <template #actions>
-        <el-button type="primary" data-testid="grant-create-open" @click="creating = !creating">
+        <t-button theme="primary" data-testid="grant-create-open" @click="creating = !creating">
           {{ creating ? '收起表单' : '创建 Grant' }}
-        </el-button>
+        </t-button>
       </template>
     </PageHeader>
 
-    <el-alert v-if="loadError" type="error" :closable="false" class="block-alert">
+    <t-alert v-if="loadError" theme="error" :close-btn="false" class="block-alert">
       {{ loadError
       }}<span v-if="loadRequestId" class="mk-mono">requestId: {{ loadRequestId }}</span>
-    </el-alert>
+    </t-alert>
 
     <section v-if="creating" class="create-panel" data-testid="grant-create-form">
       <h3 class="panel-title">创建 Grant</h3>
-      <el-form label-position="top" class="create-form">
-        <el-form-item label="项目" required>
-          <el-select
+      <t-form label-align="top" class="create-form">
+        <t-form-item label="项目" required>
+          <t-select
             v-model="form.projectId"
             placeholder="选择项目"
             data-testid="grant-create-project"
           >
-            <el-option
+            <t-option
               v-for="p in projects"
               :key="p.id"
               :label="`${p.code} · ${p.name}`"
               :value="p.id"
             />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="凭证" required>
-          <el-select
+          </t-select>
+        </t-form-item>
+        <t-form-item label="凭证" required>
+          <t-select
             v-model="form.credentialId"
             placeholder="选择上游凭证"
             data-testid="grant-create-credential"
           >
-            <el-option v-for="c in credentials" :key="c.id" :label="c.name" :value="c.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="模型范围（每行一个）">
-          <el-input
+            <t-option v-for="c in credentials" :key="c.id" :label="c.name" :value="c.id" />
+          </t-select>
+        </t-form-item>
+        <t-form-item label="模型范围（每行一个）">
+          <t-textarea
             v-model="form.models"
-            type="textarea"
-            :rows="3"
+            :autosize="{ minRows: 3 }"
             placeholder="例如 claude-3-7-sonnet"
           />
-        </el-form-item>
+        </t-form-item>
         <p v-if="formError" class="form-error">{{ formError }}</p>
-        <el-button
-          type="primary"
+        <t-button
+          theme="primary"
           :loading="submitting"
           data-testid="grant-create-submit"
           @click="createGrant"
         >
           创建 Grant
-        </el-button>
-      </el-form>
+        </t-button>
+      </t-form>
     </section>
 
-    <el-table v-loading="loading" :data="grants" data-testid="grants-table">
-      <el-table-column prop="projectId" label="项目" min-width="200">
-        <template #default="{ row }">
+    <t-loading :loading="loading" size="small" show-overlay>
+      <t-table
+        row-key="id"
+        size="small"
+        :data="grants"
+        :columns="columns"
+        data-testid="grants-table"
+      >
+        <template #projectId="{ row }">
           <span class="mk-mono">{{ row.projectId.slice(0, 8) }}…</span>
         </template>
-      </el-table-column>
-      <el-table-column prop="providerProductId" label="供应商产品" min-width="200">
-        <template #default="{ row }">
+        <template #providerProductId="{ row }">
           <span class="mk-mono">{{ row.providerProductId.slice(0, 8) }}…</span>
         </template>
-      </el-table-column>
-      <el-table-column label="状态" width="110">
-        <template #default="{ row }">
+        <template #status="{ row }">
           <span class="mk-status" :class="statusClass(row.status)">{{ row.status }}</span>
         </template>
-      </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" data-testid="grant-models-open" @click="openModels(row)"
-            >模型</el-button
+        <template #actions="{ row }">
+          <t-button
+            variant="text"
+            theme="primary"
+            data-testid="grant-models-open"
+            @click="openModels(row)"
+            >模型</t-button
           >
-          <el-button
+          <t-button
             v-if="row.status === 'ACTIVE'"
-            link
-            type="danger"
+            variant="text"
+            theme="danger"
             data-testid="grant-disable"
             @click="disable(row)"
           >
             禁用
-          </el-button>
+          </t-button>
         </template>
-      </el-table-column>
-    </el-table>
+      </t-table>
+    </t-loading>
 
-    <el-drawer
-      v-model="modelsDrawer"
-      :title="`模型范围：${modelsGrant?.id.slice(0, 8) ?? ''}…`"
+    <t-drawer
+      v-model:visible="modelsDrawer"
+      :header="`模型范围：${modelsGrant?.id.slice(0, 8) ?? ''}…`"
       size="420px"
     >
       <p class="hint">每行一个模型 ID；保存会整体替换当前范围。</p>
-      <el-input v-model="modelsText" type="textarea" :rows="10" data-testid="grant-models-input" />
+      <t-textarea
+        v-model="modelsText"
+        :autosize="{ minRows: 10 }"
+        data-testid="grant-models-input"
+      />
       <template #footer>
-        <el-button
-          type="primary"
+        <t-button
+          theme="primary"
           :loading="modelsSaving"
           data-testid="grant-models-save"
           @click="saveModels"
         >
           保存
-        </el-button>
+        </t-button>
       </template>
-    </el-drawer>
+    </t-drawer>
   </div>
 </template>
 
