@@ -78,8 +78,10 @@ class AuditChainIntegrityTest {
     private static final UUID SEED_TENANT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final byte[] GENESIS_HASH = new byte[32];
 
-    /** Dedicated database on the shared container — isolates the global chain
-     * from other integration test classes that delete or insert audit rows. */
+    /**
+     * Dedicated database on the shared container — isolates the global chain from
+     * other integration test classes that delete or insert audit rows.
+     */
     private static final String AUDIT_CHAIN_DB_NAME = "miqrokey_audit_chain_test";
 
     static {
@@ -90,8 +92,7 @@ class AuditChainIntegrityTest {
         // Create the dedicated database once per JVM. CREATE DATABASE cannot run
         // inside a transaction, so it is issued on a plain auto-commit connection.
         try (Connection admin = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(),
-                postgres.getPassword());
-                Statement statement = admin.createStatement()) {
+                postgres.getPassword()); Statement statement = admin.createStatement()) {
             statement.execute("CREATE DATABASE " + AUDIT_CHAIN_DB_NAME);
         } catch (SQLException e) {
             if (!e.getMessage().contains("already exists")) {
@@ -107,9 +108,8 @@ class AuditChainIntegrityTest {
         // AbstractControlPlaneIntegrationTest) so the datasource points at the
         // dedicated database while still sharing the container itself.
         PostgreSQLContainer<?> postgres = AbstractControlPlaneIntegrationTest.POSTGRES;
-        registry.add("spring.datasource.url",
-                () -> "jdbc:postgresql://" + postgres.getHost() + ":" + postgres.getFirstMappedPort() + "/"
-                        + AUDIT_CHAIN_DB_NAME);
+        registry.add("spring.datasource.url", () -> "jdbc:postgresql://" + postgres.getHost() + ":"
+                + postgres.getFirstMappedPort() + "/" + AUDIT_CHAIN_DB_NAME);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");

@@ -184,12 +184,11 @@ public class WebhookEndpointService {
                 // though the connection goes to the pinned IP literal.
                 clientBuilder.sslParameters(sslParameters);
             }
-            var request = java.net.http.HttpRequest.newBuilder(pinned)
-                    .header("Content-Type", "application/json").header("X-MiQroKey-Signature", "sha256=" + signature)
+            var request = java.net.http.HttpRequest.newBuilder(pinned).header("Content-Type", "application/json")
+                    .header("X-MiQroKey-Signature", "sha256=" + signature)
                     .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(payload))
                     .timeout(java.time.Duration.ofMillis(endpoint.timeoutMs())).build();
-            var response = clientBuilder.build()
-                    .send(request, java.net.http.HttpResponse.BodyHandlers.discarding());
+            var response = clientBuilder.build().send(request, java.net.http.HttpResponse.BodyHandlers.discarding());
             return response.statusCode();
         } finally {
             java.util.Arrays.fill(secret, (byte) 0);

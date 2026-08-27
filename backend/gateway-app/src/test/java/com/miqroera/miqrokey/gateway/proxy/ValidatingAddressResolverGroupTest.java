@@ -19,9 +19,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * Connect-time SSRF gate for the proxy WebClient (DNS-rebinding TOCTOU
  * defense): resolutions go through the validator and the connection is pinned
- * to the validated address with the original port. Unresolved address
- * fixtures keep the tests off the network (IP literals parse locally;
- * {@code localhost} resolves through the hosts file).
+ * to the validated address with the original port. Unresolved address fixtures
+ * keep the tests off the network (IP literals parse locally; {@code localhost}
+ * resolves through the hosts file).
  */
 @DisplayName("ValidatingAddressResolverGroup")
 class ValidatingAddressResolverGroupTest {

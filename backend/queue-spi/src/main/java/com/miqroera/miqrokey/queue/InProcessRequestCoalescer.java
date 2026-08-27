@@ -45,8 +45,7 @@ public final class InProcessRequestCoalescer implements RequestCoalescer {
         // doFinally remains as the safety net for termination without a value
         // (empty, error, cancellation). The conditional remove is idempotent and
         // never removes a newer flight that has taken over the same key.
-        Mono<CachedResponse> tracked = leaderWork
-                .doOnNext(response -> flights.remove(key, holder[0]))
+        Mono<CachedResponse> tracked = leaderWork.doOnNext(response -> flights.remove(key, holder[0]))
                 .doFinally(signal -> flights.remove(key, holder[0]));
         Mono<CachedResponse> shared = tracked.cache();
         Flight flight = new Flight(true, shared);

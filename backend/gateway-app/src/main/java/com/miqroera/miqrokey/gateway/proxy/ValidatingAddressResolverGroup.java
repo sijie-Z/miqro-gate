@@ -20,20 +20,20 @@ import java.util.List;
  * The pre-connect {@link UpstreamTargetValidator} check in
  * {@code ProxyController} resolves the upstream hostname and discards the
  * result; without this group the HTTP client would resolve it again when
- * connecting, so a rebinding DNS answer could move the traffic to a
- * non-public address after the check passed. This group instead validates the
- * hostname at connect time and returns the validated address — the connection
- * is pinned to it, and only that address is ever dialed.
+ * connecting, so a rebinding DNS answer could move the traffic to a non-public
+ * address after the check passed. This group instead validates the hostname at
+ * connect time and returns the validated address — the connection is pinned to
+ * it, and only that address is ever dialed.
  * </p>
  *
  * <p>
- * The blocking DNS lookup and validation run on the bounded scheduler (never
- * on the Reactor event loop); the netty promise is completed from there, and
- * netty schedules the actual connect back onto the event loop. A hostname
- * whose addresses fail the gate fails the connection, which surfaces as the
- * same generic {@code upstream_unavailable} 502 — the reason never names the
- * target. SNI and the {@code Host} header keep the original hostname (the
- * resolver only changes the dialed address).
+ * The blocking DNS lookup and validation run on the bounded scheduler (never on
+ * the Reactor event loop); the netty promise is completed from there, and netty
+ * schedules the actual connect back onto the event loop. A hostname whose
+ * addresses fail the gate fails the connection, which surfaces as the same
+ * generic {@code upstream_unavailable} 502 — the reason never names the target.
+ * SNI and the {@code Host} header keep the original hostname (the resolver only
+ * changes the dialed address).
  * </p>
  */
 public final class ValidatingAddressResolverGroup extends AddressResolverGroup<InetSocketAddress> {

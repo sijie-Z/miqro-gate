@@ -158,9 +158,8 @@ class HttpProviderClientTest {
         // localhost resolves to a loopback family on every platform; both are
         // allowlisted so whichever address comes first is accepted.
         HttpProviderClient client = new HttpProviderClient(URI.create("http://localhost:" + port + "/api"),
-                "Authorization", "Bearer sk-test",
-                new UpstreamTargetValidator(List.of("127.0.0.0/8", "::1/128")), Duration.ofSeconds(2),
-                Duration.ofSeconds(5), 1024);
+                "Authorization", "Bearer sk-test", new UpstreamTargetValidator(List.of("127.0.0.0/8", "::1/128")),
+                Duration.ofSeconds(2), Duration.ofSeconds(5), 1024);
 
         assertThat(client.pinnedBaseUri().getHost()).isNotEqualTo("localhost");
         assertThat(InetAddress.getByName(client.pinnedBaseUri().getHost()).isLoopbackAddress()).isTrue();

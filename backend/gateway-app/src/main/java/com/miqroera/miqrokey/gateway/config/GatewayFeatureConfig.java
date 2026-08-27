@@ -76,10 +76,10 @@ public class GatewayFeatureConfig {
     }
 
     /**
-     * Bounded scheduler for blocking work off the event loop: credential
-     * decryption (JDBC + AES) and the connect-time DNS validation of
-     * {@code ValidatingAddressResolverGroup}. Never runs on the event loop;
-     * see GatewayNoBlockingTest.
+     * Bounded scheduler for blocking work off the event loop: credential decryption
+     * (JDBC + AES) and the connect-time DNS validation of
+     * {@code ValidatingAddressResolverGroup}. Never runs on the event loop; see
+     * GatewayNoBlockingTest.
      */
     @Bean(destroyMethod = "dispose")
     public Scheduler credentialDecryptScheduler() {

@@ -172,9 +172,9 @@ class UpstreamTargetValidatorTest {
         UpstreamTargetValidator permissive = new UpstreamTargetValidator(List.of("127.0.0.0/8"));
         assertThat(permissive.resolveValidated("127.0.0.1")).containsExactly(InetAddress.getByName("127.0.0.1"));
 
-        assertThatThrownBy(() -> STRICT.resolveValidated("127.0.0.1"))
-                .isInstanceOf(UnknownHostException.class).hasMessageNotContaining("127.0.0.1");
-        assertThatThrownBy(() -> STRICT.resolveValidated("169.254.169.254"))
-                .isInstanceOf(UnknownHostException.class).hasMessageNotContaining("169.254");
+        assertThatThrownBy(() -> STRICT.resolveValidated("127.0.0.1")).isInstanceOf(UnknownHostException.class)
+                .hasMessageNotContaining("127.0.0.1");
+        assertThatThrownBy(() -> STRICT.resolveValidated("169.254.169.254")).isInstanceOf(UnknownHostException.class)
+                .hasMessageNotContaining("169.254");
     }
 }

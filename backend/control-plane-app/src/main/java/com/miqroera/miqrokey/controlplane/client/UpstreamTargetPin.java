@@ -64,12 +64,12 @@ public final class UpstreamTargetPin {
     }
 
     /**
-     * Client-level {@link SSLParameters} for a pinned {@code https} URI:
-     * endpoint identification stays {@code HTTPS} and, when the original host
-     * is a hostname (not an IP literal), the SNI server name is set to it so
-     * the certificate check and virtual-host routing keep using the hostname
-     * even though the connection goes to the pinned IP. Returns {@code null}
-     * for plain-http URIs (no TLS layer).
+     * Client-level {@link SSLParameters} for a pinned {@code https} URI: endpoint
+     * identification stays {@code HTTPS} and, when the original host is a hostname
+     * (not an IP literal), the SNI server name is set to it so the certificate
+     * check and virtual-host routing keep using the hostname even though the
+     * connection goes to the pinned IP. Returns {@code null} for plain-http URIs
+     * (no TLS layer).
      */
     public static SSLParameters sslParametersFor(URI uri) {
         if (!"https".equalsIgnoreCase(uri.getScheme())) {
@@ -87,8 +87,8 @@ public final class UpstreamTargetPin {
     /**
      * True for IPv4/IPv6 literal text ({@code URI.getHost()} never carries
      * brackets). Hostnames never contain {@code ':'}; a purely numeric host is
-     * treated as a literal (single-label numeric hostnames are not supported
-     * as pinned SNI targets).
+     * treated as a literal (single-label numeric hostnames are not supported as
+     * pinned SNI targets).
      */
     static boolean isIpLiteral(String host) {
         if (host.indexOf(':') >= 0) {

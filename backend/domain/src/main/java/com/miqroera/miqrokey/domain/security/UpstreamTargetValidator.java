@@ -37,8 +37,8 @@ import java.util.Locale;
  * answers are validated here but the connection resolves the hostname again.
  * Callers that open connections must therefore use
  * {@link #validateAndResolve(String)} (or {@link #resolveValidated(String)},
- * which re-checks at connect time) and pin the connection to a returned
- * address — never re-resolve the hostname.
+ * which re-checks at connect time) and pin the connection to a returned address
+ * — never re-resolve the hostname.
  * </p>
  *
  * <p>
@@ -91,10 +91,10 @@ public final class UpstreamTargetValidator {
     /**
      * Outcome of a target check with the resolved addresses. When
      * {@link #allowed()} is true, {@link #addresses()} carries every address the
-     * host resolved to (all validated); callers that open a connection must pin
-     * it to one of these addresses — never re-resolve the hostname — so a
-     * rebinding DNS answer between validation and connection cannot move the
-     * traffic (SSRF TOCTOU defense).
+     * host resolved to (all validated); callers that open a connection must pin it
+     * to one of these addresses — never re-resolve the hostname — so a rebinding
+     * DNS answer between validation and connection cannot move the traffic (SSRF
+     * TOCTOU defense).
      */
     public record Resolved(boolean allowed, String reason, InetAddress[] addresses) {
         static Resolved allow(InetAddress[] addresses) {
@@ -157,8 +157,8 @@ public final class UpstreamTargetValidator {
      * Resolves a hostname and returns the validated addresses for connection
      * pinning (the connect-time half of the SSRF TOCTOU defense): every resolved
      * address must be public or allow-listed, otherwise
-     * {@link UnknownHostException} is thrown. The exception message never
-     * contains the hostname. Blocking (DNS); never call on the event loop.
+     * {@link UnknownHostException} is thrown. The exception message never contains
+     * the hostname. Blocking (DNS); never call on the event loop.
      */
     public InetAddress[] resolveValidated(String host) throws UnknownHostException {
         InetAddress[] addresses = InetAddress.getAllByName(host);

@@ -28,14 +28,14 @@ import javax.net.ssl.SSLParameters;
  * Enforces centrally, in one place:
  * <ul>
  * <li><b>SSRF gate</b> — the bound base URL is validated at construction and
- * re-validated on every exchange by the shared
- * {@link UpstreamTargetValidator} (https-only, public addresses, empty
- * allowlist = production default); a rejected target surfaces as a generic
- * runtime error that never names the URL.</li>
+ * re-validated on every exchange by the shared {@link UpstreamTargetValidator}
+ * (https-only, public addresses, empty allowlist = production default); a
+ * rejected target surfaces as a generic runtime error that never names the
+ * URL.</li>
  * <li><b>DNS-rebinding pinning</b> — the base URL is fixed for the lifetime of
  * this client, so it is resolved exactly once at construction and every
- * exchange connects to the validated IP literal ({@link UpstreamTargetPin}).
- * A rebinding DNS answer between validation and connection cannot move the
+ * exchange connects to the validated IP literal ({@link UpstreamTargetPin}). A
+ * rebinding DNS answer between validation and connection cannot move the
  * traffic; for {@code https} targets SNI and certificate identity stay on the
  * original hostname.</li>
  * <li><b>Timeouts</b> — connect and overall request deadlines.</li>
