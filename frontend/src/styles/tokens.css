@@ -49,6 +49,28 @@
   --miqrokey-table-row-height: 44px;
   --miqrokey-table-row-height-compact: 38px;
 
+  /* brand chip palette (frontend-design.md §4.1): the only gradients in the
+     system, used exclusively for provider/product identity chips. */
+  --miqrokey-chip-tencent-a: #0066ff;
+  --miqrokey-chip-tencent-b: #00b3ff;
+  --miqrokey-chip-deepseek-a: #4d6bfe;
+  --miqrokey-chip-deepseek-b: #8b5cf6;
+  --miqrokey-chip-zhipu-a: #2b5cff;
+  --miqrokey-chip-zhipu-b: #5ec2ff;
+  --miqrokey-chip-minimax-a: #ff4d4f;
+  --miqrokey-chip-minimax-b: #ff9a2e;
+  --miqrokey-chip-moonshot-a: #1f2329;
+  --miqrokey-chip-moonshot-b: #57606a;
+  --miqrokey-chip-baidu-a: #2932e1;
+  --miqrokey-chip-baidu-b: #4ba2ff;
+  --miqrokey-chip-volc-a: #1664ff;
+  --miqrokey-chip-volc-b: #3ddc84;
+  --miqrokey-chip-aliyun-a: #ff6a00;
+  --miqrokey-chip-aliyun-b: #ffc53d;
+
+  /* card elevation (Tencent console: hairline shadow on white cards) */
+  --miqrokey-shadow-card: 0 1px 2px rgb(31 35 40 / 4%);
+
   /* layout */
   --miqrokey-header-height: 56px;
   --miqrokey-nav-width: 232px;

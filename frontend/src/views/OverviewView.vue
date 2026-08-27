@@ -23,10 +23,34 @@ const statCards = computed(() => {
   const totalRequests = usageGroups.value.reduce((sum, g) => sum + (g.requests?.upstream ?? 0), 0);
   const totalCost = usageGroups.value.reduce((sum, g) => sum + (g.cost?.upstreamPaid ?? 0), 0);
   return [
-    { label: 'Virtual Key', value: String(keys.value.length), hint: `${active} 个 ACTIVE` },
-    { label: '本月请求', value: formatCount(totalRequests), hint: '经网关的请求数' },
-    { label: '本月 Tokens', value: formatCount(totalTokens), hint: '输入 + 输出' },
-    { label: '本月成本', value: `¥${totalCost.toFixed(2)}`, hint: '按价格快照估算' },
+    {
+      label: 'Virtual Key',
+      value: String(keys.value.length),
+      hint: `${active} 个 ACTIVE`,
+      icon: 'K',
+      chip: 'mk-chip-tencent',
+    },
+    {
+      label: '本月请求',
+      value: formatCount(totalRequests),
+      hint: '经网关的请求数',
+      icon: '⇄',
+      chip: 'mk-chip-zhipu',
+    },
+    {
+      label: '本月 Tokens',
+      value: formatCount(totalTokens),
+      hint: '输入 + 输出',
+      icon: 'T',
+      chip: 'mk-chip-deepseek',
+    },
+    {
+      label: '本月成本',
+      value: `¥${totalCost.toFixed(2)}`,
+      hint: '按价格快照估算',
+      icon: '¥',
+      chip: 'mk-chip-aliyun',
+    },
   ];
 });
 
@@ -43,6 +67,35 @@ const topUsageBars = computed(() => {
 });
 
 const recentKeys = computed(() => keys.value.slice(0, 5));
+
+const DONUT_COLORS = [
+  '#0066ff',
+  '#00b3ff',
+  '#4d6bfe',
+  '#ff9a2e',
+  '#00b96b',
+  '#8b5cf6',
+  '#e5484d',
+  '#57606a',
+];
+
+const costDonut = computed(() => {
+  const groups = usageGroups.value
+    .map((g) => ({ label: g.label, value: g.cost?.upstreamPaid ?? 0 }))
+    .filter((g) => g.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+  const total = groups.reduce((sum, g) => sum + g.value, 0);
+  if (!total) return { groups: [], background: '' };
+  let acc = 0;
+  const stops = groups.map((g, i) => {
+    const from = (acc / total) * 360;
+    acc += g.value;
+    const to = (acc / total) * 360;
+    return `${DONUT_COLORS[i % DONUT_COLORS.length]} ${from}deg ${to}deg`;
+  });
+  return { groups, background: `conic-gradient(${stops.join(', ')})` };
+});
 
 const isAdmin = computed(() => auth.user?.role === 'SYSTEM_ADMIN');
 
@@ -131,9 +184,12 @@ onMounted(load);
     <div v-loading="loading">
       <div class="mk-stat-grid" data-testid="overview-stats">
         <div v-for="card in statCards" :key="card.label" class="mk-stat-card">
-          <span class="mk-stat-label">{{ card.label }}</span>
-          <span class="mk-stat-value mk-num">{{ card.value }}</span>
-          <span class="mk-stat-hint">{{ card.hint }}</span>
+          <span class="mk-brand-chip" :class="card.chip" aria-hidden="true">{{ card.icon }}</span>
+          <div class="mk-stat-body">
+            <span class="mk-stat-label">{{ card.label }}</span>
+            <span class="mk-stat-value mk-num">{{ card.value }}</span>
+            <span class="mk-stat-hint">{{ card.hint }}</span>
+          </div>
         </div>
       </div>
 
@@ -146,7 +202,28 @@ onMounted(load);
             >
           </div>
           <div class="mk-card-body">
-            <div v-if="topUsageBars.length" class="mk-bar-chart">
+            <div v-if="costDonut.groups.length" class="usage-split">
+              <div
+                class="mk-donut"
+                :style="{ background: costDonut.background }"
+                data-testid="cost-donut"
+              />
+              <div class="mk-donut-legend">
+                <span v-for="g in costDonut.groups" :key="g.label">
+                  <span
+                    class="mk-donut-legend-dot"
+                    :style="{
+                      background: DONUT_COLORS[costDonut.groups.indexOf(g) % DONUT_COLORS.length],
+                    }"
+                  />
+                  {{ g.label }} · ¥{{ g.value.toFixed(2) }}
+                </span>
+              </div>
+            </div>
+            <div v-else class="mk-empty-hint">
+              还没有用量记录。创建 Key 并开始调用后，这里会出现成本分布。
+            </div>
+            <div v-if="topUsageBars.length" class="mk-bar-chart usage-bars">
               <div v-for="bar in topUsageBars" :key="bar.label" class="mk-bar-row">
                 <span class="mk-bar-label" :title="bar.label">{{ bar.label }}</span>
                 <div class="mk-bar-track">
@@ -154,9 +231,6 @@ onMounted(load);
                 </div>
                 <span class="mk-bar-value mk-num">{{ formatCount(bar.value) }}</span>
               </div>
-            </div>
-            <div v-else class="mk-empty-hint">
-              还没有用量记录。创建 Key 并开始调用后，这里会出现分布图。
             </div>
           </div>
         </section>
@@ -272,6 +346,18 @@ onMounted(load);
   .overview-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.usage-split {
+  display: flex;
+  align-items: center;
+  gap: var(--miqrokey-space-6);
+  margin-bottom: var(--miqrokey-space-4);
+}
+
+.usage-bars {
+  border-top: 1px solid var(--miqrokey-border-muted);
+  padding-top: var(--miqrokey-space-3);
 }
 
 .overview-key-list {

@@ -157,6 +157,7 @@ td.mk-col-num {
   background: var(--miqrokey-bg-surface);
   border: 1px solid var(--miqrokey-border-default);
   border-radius: var(--miqrokey-radius-panel);
+  box-shadow: var(--miqrokey-shadow-card);
 }
 
 .mk-card-header {
@@ -166,6 +167,8 @@ td.mk-col-num {
   gap: var(--miqrokey-space-3);
   padding: var(--miqrokey-space-3) var(--miqrokey-space-4);
   border-bottom: 1px solid var(--miqrokey-border-muted);
+  border-left: 3px solid var(--miqrokey-accent);
+  border-radius: var(--miqrokey-radius-panel) var(--miqrokey-radius-panel) 0 0;
 }
 
 .mk-card-title {
@@ -326,4 +329,117 @@ td.mk-col-num {
   text-align: center;
   color: var(--miqrokey-text-secondary);
   font-size: 13px;
+}
+
+/* ---- Brand identity layer (frontend-design.md §4.1) ---- */
+
+/* Gradient icon chip for a provider/product — the only gradients allowed. */
+.mk-brand-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  flex-shrink: 0;
+}
+
+.mk-brand-chip--sm {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-size: 10px;
+}
+
+.mk-chip-tencent { background: linear-gradient(135deg, var(--miqrokey-chip-tencent-a), var(--miqrokey-chip-tencent-b)); }
+.mk-chip-deepseek { background: linear-gradient(135deg, var(--miqrokey-chip-deepseek-a), var(--miqrokey-chip-deepseek-b)); }
+.mk-chip-zhipu { background: linear-gradient(135deg, var(--miqrokey-chip-zhipu-a), var(--miqrokey-chip-zhipu-b)); }
+.mk-chip-minimax { background: linear-gradient(135deg, var(--miqrokey-chip-minimax-a), var(--miqrokey-chip-minimax-b)); }
+.mk-chip-moonshot { background: linear-gradient(135deg, var(--miqrokey-chip-moonshot-a), var(--miqrokey-chip-moonshot-b)); }
+.mk-chip-baidu { background: linear-gradient(135deg, var(--miqrokey-chip-baidu-a), var(--miqrokey-chip-baidu-b)); }
+.mk-chip-volcengine { background: linear-gradient(135deg, var(--miqrokey-chip-volc-a), var(--miqrokey-chip-volc-b)); }
+.mk-chip-aliyun { background: linear-gradient(135deg, var(--miqrokey-chip-aliyun-a), var(--miqrokey-chip-aliyun-b)); }
+
+/* Stat card with icon chip (Tencent console metric card). */
+.mk-stat-card {
+  display: flex;
+  align-items: center;
+  gap: var(--miqrokey-space-3);
+  padding: var(--miqrokey-space-4);
+  background: var(--miqrokey-bg-surface);
+  border: 1px solid var(--miqrokey-border-default);
+  border-radius: var(--miqrokey-radius-panel);
+  box-shadow: var(--miqrokey-shadow-card);
+}
+
+.mk-stat-card .mk-brand-chip {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.mk-stat-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Round avatar for the user menu. */
+.mk-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--miqrokey-accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* Cost-share donut (conic gradient, the second permitted gradient). */
+.mk-donut {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.mk-donut::after {
+  content: '';
+  position: absolute;
+  inset: 18px;
+  border-radius: 50%;
+  background: var(--miqrokey-bg-surface);
+}
+
+.mk-donut-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--miqrokey-space-2) var(--miqrokey-space-4);
+  font-size: 12px;
+  color: var(--miqrokey-text-secondary);
+}
+
+.mk-donut-legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+/* Provider row: chip + name + code in tables. */
+.mk-provider-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--miqrokey-space-2);
 }
