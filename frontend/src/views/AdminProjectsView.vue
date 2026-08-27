@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { DialogPlugin } from 'tdesign-vue-next';
+import { confirmDialog } from '@/utils/confirm';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -88,7 +88,7 @@ async function openMembers(project: Project) {
 async function removeMember(user: MemberView) {
   if (!memberProject.value) return;
   try {
-    await DialogPlugin.confirm({
+    await confirmDialog({
       header: '移除成员',
       body: `将「${user.username}」移出项目「${memberProject.value.name}」。`,
       confirmBtn: '移除',

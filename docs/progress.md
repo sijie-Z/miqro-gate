@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G5.5+`（界面重设计收尾：TDesign 组件库迁移，Element Plus → tdesign-vue-next）
-- Goal status: `DONE`（vitest 21/21、Playwright 15/15、lint/typecheck/build 全 PASS）
+- Current goal: `G7.1`（上游凭证管理门户：对照腾讯云 AI 网关「模型密钥」能力补齐管理页）
+- Goal status: `IN_PROGRESS`（实现完成，验证中）
 - Last updated: `2026-08-27 CST`
-- Branch: `feat/tdesign-migration`
+- Branch: `goal/g7.1-credential-portal`
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
 
 ## Completed
@@ -101,6 +101,15 @@
 - #68 文档编号对齐；#69 中转接线（适配器热路径）+ 审计 14 项修复；#70 定时额度刷新
 - #71 审计记录归档；#72 **界面重设计（额度账本）**；#73 **SSRF DNS 固定 + coalescer 清理时序 + 审计链 jsonb 规范化**（3 个并行 Agent 完成，本地 978 tests 全绿，CI 双平台全绿）
 - 残余风险（记录于上）：SSRF 固定后的 Host 头为 IP 字面量（JDK 客户端限制，CDN/SNI 路由不受影响）、HttpProviderClient 生命周期内固定构造时 IP、真实凭证契约测试全部 WAITING_FOR_CREDENTIAL
+
+## G7.1 — 上游凭证管理门户（对照腾讯云 AI 网关文档能力补齐）
+
+- **来源**：用户指示学习腾讯云 AI 网关文档（product/1826）。文档六步接入流程的第一步「模型密钥管理」对应本项目的上游凭证——后端 API 早在 G1.6 就绪（api-contract §5.1），但前端页面缺失、导航「Credentials」指向不存在的路由（死链）。
+- **交付**：`AdminCredentialsView`（列表=名称/指纹前缀/供应商产品/状态/最近验证/版本；创建表单=名称+订阅选择+Secret 可见性切换；测试 Secret 弹窗=纯校验不落库，matchesActive 结果；轮换弹窗=新 Secret 原子生效+宽限期说明；禁用=确认后执行；版本历史抽屉=状态/密钥版本/指纹/生效退役时间）+ credentials 路由接线 + api 层 5 个函数与 4 个新类型。
+- **迁移审查追加发现（HIGH，全站修复）**：TDesign `DialogPlugin.confirm` 返回 dialog 节点而非 Promise——所有 `await DialogPlugin.confirm(...)` 的确认流程**立即放行**，轮换/吊销/禁用/登出等危险操作在用户确认前就已执行。新增 `src/utils/confirm.ts`（`confirmDialog`：确认 resolve/取消与关闭 reject，destroyOnClose），11 个文件 13 处调用点全部替换；e2e 新增回归测试「dangerous actions wait for the confirmation dialog」（确认前 0 次 rotate 调用）。
+- **验证**：vitest 31/31（新增 AdminCredentialsView 10 个）、Playwright 18/18（新增凭证页 baseline + 确认门禁回归）、lint/typecheck/build 全 PASS。
+- **对照腾讯文档的能力映射（学习结论）**：模型密钥→上游凭证（本 Goal 补齐）；模型服务→Provider 产品实例（AdminProvidersView 已有）；模型 API/路由策略→与「Virtual Key 固定 1:1 绑定、不负载均衡」决策冲突，需 ADR 后另行决策；消费者/消费者组授权→用户+项目+Grants（已有）；限流（QPM/Token）→与「不限流」决策冲突；MCP/协议转换→CC Switch 职责。
+- **风险**：validate 仍为本地指纹比对，上游真实校验接线（G4.x）`WAITING_FOR_CREDENTIAL`；e2e 基线截图新增 admin-credentials（12 张）。
 
 ## 界面重设计（2026-08-27，额度账本方向）
 

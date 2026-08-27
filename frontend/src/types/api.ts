@@ -203,11 +203,38 @@ export interface Grant {
   createdAt: string;
 }
 
-export interface CredentialSummary {
+export interface CredentialView {
   id: string;
   name: string;
   subscriptionId: string;
   status: string;
+  activeVersionId: string;
+  fingerprintPrefix: string;
+  lastValidatedAt: string | null;
+  lastValidationError: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CredentialVersionView {
+  id: string;
+  status: string;
+  encryptionKeyVersion: string;
+  fingerprintPrefix: string;
+  validFrom: string;
+  retiredAt: string | null;
+  createdAt: string;
+}
+
+export interface CredentialDetailView {
+  credential: CredentialView;
+  versions: CredentialVersionView[];
+}
+
+export interface ValidateCredentialResponse {
+  matchesActive: boolean;
+  message: string | null;
 }
 
 export interface ProviderProductView {

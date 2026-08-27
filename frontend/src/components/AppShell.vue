@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { DialogPlugin } from 'tdesign-vue-next';
+import { confirmDialog } from '@/utils/confirm';
 import { useAuthStore } from '@/stores/auth';
 
 const route = useRoute();
@@ -80,7 +80,7 @@ function navigate(name: string) {
 
 async function handleLogout() {
   try {
-    await DialogPlugin.confirm({
+    await confirmDialog({
       header: '退出登录',
       body: '退出后需要重新登录。',
       confirmBtn: '退出',

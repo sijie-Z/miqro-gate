@@ -84,6 +84,12 @@ const router = createRouter({
           meta: adminMeta('Plans'),
         },
         {
+          path: 'credentials',
+          name: 'credentials',
+          component: () => import('@/views/AdminCredentialsView.vue'),
+          meta: adminMeta('Credentials'),
+        },
+        {
           path: 'usage',
           name: 'admin-usage',
           component: () => import('@/views/AdminUsageView.vue'),

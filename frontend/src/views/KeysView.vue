@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next';
+import { MessagePlugin } from 'tdesign-vue-next';
+import { confirmDialog } from '@/utils/confirm';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -194,7 +195,7 @@ async function createKey() {
 
 async function rotateKey(key: VirtualKeyView) {
   try {
-    await DialogPlugin.confirm({
+    await confirmDialog({
       header: `轮换 Virtual Key「${key.name}」`,
       body: '轮换后旧 Key 进入宽限期并在宽限结束后失效，新 Key 仅在本次弹窗显示一次。',
       confirmBtn: '轮换',
@@ -218,7 +219,7 @@ async function rotateKey(key: VirtualKeyView) {
 
 async function revokeKey(key: VirtualKeyView) {
   try {
-    await DialogPlugin.confirm({
+    await confirmDialog({
       header: `吊销 Virtual Key「${key.name}」`,
       body: '吊销后该 Key 立即失效，使用它的客户端将无法继续请求。此操作不可撤销。',
       confirmBtn: '吊销',

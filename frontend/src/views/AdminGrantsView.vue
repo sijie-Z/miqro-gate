@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next';
+import { MessagePlugin } from 'tdesign-vue-next';
+import { confirmDialog } from '@/utils/confirm';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -112,7 +113,7 @@ async function saveModels() {
 
 async function disable(grant: Grant) {
   try {
-    await DialogPlugin.confirm({
+    await confirmDialog({
       header: '禁用 Grant',
       body: `禁用后该 Grant 不再授权任何 Virtual Key，关联 Key 将无法通过此授权路由。`,
       confirmBtn: '禁用',

@@ -128,6 +128,30 @@ async function mockApi(page: Page, admin = false) {
       ]),
     }),
   );
+  await page.route('**/api/v1/admin/credentials/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/v1/admin/credentials', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0030',
+          name: 'anthropic-main',
+          subscriptionId: '0190-0000-0000-0021',
+          status: 'ACTIVE',
+          activeVersionId: '0190-0000-0000-0031',
+          fingerprintPrefix: 'a1b2c3d4e5f6a7b8',
+          lastValidatedAt: '2026-08-26T00:00:00Z',
+          lastValidationError: null,
+          version: 2,
+          createdAt: '2026-08-01T00:00:00Z',
+          updatedAt: '2026-08-20T00:00:00Z',
+        },
+      ]),
+    }),
+  );
   await page.route('**/api/v1/admin/users', (route) =>
     route.fulfill({
       status: 200,
@@ -328,6 +352,53 @@ test('key actions: rotate and revoke flows render from the kebab menu', async ({
 
   // Status label uses the compact mk-status styling (dot + short label).
   await expect(page.locator('.mk-status--success').first()).toHaveText('Active');
+});
+
+test('admin credentials page baseline at 1440x900', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/credentials');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('credentials-table')).toBeVisible();
+  await expect(page.getByTestId('credentials-table')).toContainText('anthropic-main');
+  await page.screenshot({
+    path: 'test-results/baseline/admin-credentials-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('dangerous actions wait for the confirmation dialog', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  let rotateCalls = 0;
+  await page.route('**/api/v1/me/virtual-keys/*/rotate', (route) => {
+    rotateCalls += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: '0190-0000-0000-0002',
+        secret: 'mqk_live_rotated',
+        baseUrl: 'https://gateway.test.internal',
+        display: 'mqk_live_…rot9',
+        shownOnce: true,
+        createdAt: '2026-08-26T00:00:00Z',
+        version: 2,
+      }),
+    });
+  });
+  await page.goto('/app/keys');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('keys-table')).toBeVisible();
+
+  await page.getByTestId('key-actions').first().click();
+  await page.getByTestId('key-rotate').first().click();
+  // The confirm dialog must gate the action: nothing rotates before 确认.
+  await expect(page.locator('.t-dialog__confirm').first()).toBeVisible();
+  expect(rotateCalls).toBe(0);
+
+  await page.locator('.t-dialog__confirm').first().click();
+  await expect.poll(() => rotateCalls).toBe(1);
 });
 
 test('forbidden aesthetics are absent from the rendered shell', async ({ page }) => {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next';
+import { MessagePlugin } from 'tdesign-vue-next';
+import { confirmDialog } from '@/utils/confirm';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -82,7 +83,7 @@ async function createUser() {
 async function toggleStatus(user: AdminUser) {
   const disabling = user.status === 'ACTIVE';
   try {
-    await DialogPlugin.confirm({
+    await confirmDialog({
       header: disabling ? '禁用用户' : '启用用户',
       body: disabling
         ? `禁用后「${user.username}」立即无法登录，现有会话全部失效。`
@@ -106,7 +107,7 @@ async function toggleStatus(user: AdminUser) {
 
 async function resetPassword(user: AdminUser) {
   try {
-    await DialogPlugin.confirm({
+    await confirmDialog({
       header: '重置密码',
       body: `将重置「${user.username}」的密码并撤销其全部会话，新密码仅显示一次。`,
       confirmBtn: '重置',
@@ -141,7 +142,7 @@ async function handleCommand(command: string, user: AdminUser) {
 
 async function revokeSessions(user: AdminUser) {
   try {
-    await DialogPlugin.confirm({
+    await confirmDialog({
       header: '撤销会话',
       body: `撤销「${user.username}」的全部登录会话。`,
       confirmBtn: '撤销',
