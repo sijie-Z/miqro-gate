@@ -8,6 +8,7 @@ import {
   DataAnalysis,
   Delete,
   Download,
+  HomeFilled,
   Key,
   Lock,
   Odometer,
@@ -31,17 +32,27 @@ interface NavItem {
 }
 
 const regularNav: NavItem[] = [
-  { name: 'usage', label: 'Usage', icon: DataAnalysis },
+  { name: 'overview', label: '总览', icon: HomeFilled },
   { name: 'keys', label: 'Virtual Keys', icon: Key },
+  { name: 'usage', label: 'Usage', icon: DataAnalysis },
   { name: 'profile', label: 'Profile', icon: User },
 ];
 
-const adminNav: NavItem[] = [
-  { name: 'admin-usage', label: 'Usage', icon: DataAnalysis },
+const orgNav: NavItem[] = [
+  { name: 'users', label: 'Users', icon: User },
+  { name: 'teams', label: 'Teams', icon: UserFilled },
+  { name: 'projects', label: 'Projects', icon: Wallet },
+  { name: 'grants', label: 'Grants', icon: Key },
+];
+
+const providerNav: NavItem[] = [
   { name: 'providers', label: 'Providers', icon: Wallet },
   { name: 'plans', label: 'Plans', icon: Odometer },
   { name: 'credentials', label: 'Credentials', icon: Lock },
-  { name: 'grants', label: 'Grants', icon: Key },
+];
+
+const opsNav: NavItem[] = [
+  { name: 'admin-usage', label: 'Usage', icon: DataAnalysis },
   { name: 'exports', label: 'Exports', icon: Download },
   { name: 'deletions', label: 'Deletions', icon: Delete },
   { name: 'webhooks', label: 'Webhooks', icon: Bell },
@@ -52,7 +63,11 @@ const adminNav: NavItem[] = [
 const navGroups = computed(() => {
   const groups: { title?: string; items: NavItem[] }[] = [{ items: regularNav }];
   if (isAdmin.value) {
-    groups.push({ title: '管理', items: adminNav });
+    groups.push(
+      { title: '组织', items: orgNav },
+      { title: '供应商', items: providerNav },
+      { title: '数据与告警', items: opsNav },
+    );
   }
   return groups;
 });
@@ -106,7 +121,10 @@ async function handleLogout() {
       >
         ☰
       </el-button>
-      <div class="brand">MiQroKey</div>
+      <div class="brand">
+        MiQroKey
+        <span class="version-badge">v0.1</span>
+      </div>
       <div class="spacer" />
       <el-dropdown trigger="click">
         <span class="user-menu" role="button" aria-haspopup="menu" data-testid="user-menu">
@@ -188,9 +206,21 @@ async function handleLogout() {
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: var(--miqrokey-space-2);
   font-size: 16px;
   font-weight: 600;
   color: var(--miqrokey-text-primary);
+}
+
+.version-badge {
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--miqrokey-accent);
+  background: var(--miqrokey-accent-soft);
+  border-radius: var(--miqrokey-radius-control);
 }
 
 .spacer {
@@ -279,9 +309,9 @@ async function handleLogout() {
 }
 
 .nav-item.active {
-  background: var(--miqrokey-bg-subtle);
+  background: var(--miqrokey-accent-soft);
   border-left-color: var(--miqrokey-accent);
-  color: var(--miqrokey-text-primary);
+  color: var(--miqrokey-accent);
   font-weight: 500;
 }
 

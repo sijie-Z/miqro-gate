@@ -21,7 +21,13 @@ const router = createRouter({
       children: [
         {
           path: '',
-          redirect: '/app/keys',
+          redirect: '/app/overview',
+        },
+        {
+          path: 'overview',
+          name: 'overview',
+          component: () => import('@/views/OverviewView.vue'),
+          meta: { title: '总览' },
         },
         {
           path: 'keys',
@@ -123,11 +129,11 @@ const router = createRouter({
     },
     {
       path: '/',
-      redirect: '/app/keys',
+      redirect: '/app/overview',
     },
     {
       path: '/:pathMatch(.*)*',
-      redirect: '/app/keys',
+      redirect: '/app/overview',
     },
   ],
 });

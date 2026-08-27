@@ -1,34 +1,41 @@
-/* MiQroKey Quiet Operations Console tokens (frontend-design.md §4).
-   Element Plus is overlaid on these variables; components must not scatter
-   colors or radii. Light theme only for v1. */
+/* MiQroKey 额度账本 tokens（frontend-design.md §4，2026-08-27 重设计）。
+   参考腾讯云 TokenHub 控制台的浅色密集操作台：白色卡片、细边框、蓝色主色、
+   表格密度优先。Element Plus 覆盖在本文件之上；组件不得散落颜色与圆角。
+   无渐变 —— 平面色块是签名元素（额度分段条）的载体。 */
 
 :root {
-  /* color */
-  --miqrokey-bg-canvas: #f6f8fa;
+  /* color — Tencent-console-inspired ledger palette */
+  --miqrokey-bg-canvas: #f2f4f8;
   --miqrokey-bg-surface: #ffffff;
-  --miqrokey-bg-subtle: #f3f4f6;
-  --miqrokey-border-default: #d0d7de;
-  --miqrokey-border-muted: #e5e7eb;
-  --miqrokey-text-primary: #1f2328;
-  --miqrokey-text-secondary: #59636e;
-  --miqrokey-text-disabled: #8c959f;
-  --miqrokey-accent: #0969da;
-  --miqrokey-accent-hover: #0757b3;
-  --miqrokey-success: #1a7f37;
-  --miqrokey-warning: #9a6700;
-  --miqrokey-danger: #cf222e;
-  --miqrokey-info: #0969da;
+  --miqrokey-bg-subtle: #f7f8fa;
+  --miqrokey-border-default: #e5e7eb;
+  --miqrokey-border-muted: #eef0f3;
+  --miqrokey-border-strong: #d4d8df;
+  --miqrokey-text-primary: #1f2329;
+  --miqrokey-text-secondary: #646a73;
+  --miqrokey-text-disabled: #8a9099;
+  --miqrokey-accent: #0066ff;
+  --miqrokey-accent-hover: #0052cc;
+  --miqrokey-accent-soft: #eaf2ff;
+  --miqrokey-success: #00b96b;
+  --miqrokey-success-soft: #e6f9f0;
+  --miqrokey-warning: #ff9a2e;
+  --miqrokey-warning-soft: #fff4e5;
+  --miqrokey-danger: #e5484d;
+  --miqrokey-danger-soft: #feecec;
+  --miqrokey-info: #0066ff;
 
   /* typography */
   --miqrokey-font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
   --miqrokey-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
-  --miqrokey-font-size-body: 14px;
-  --miqrokey-font-size-table: 13px;
-  --miqrokey-font-size-title: 20px;
+  --miqrokey-font-size-body: 13px;
+  --miqrokey-font-size-table: 12px;
+  --miqrokey-font-size-title: 18px;
+  --miqrokey-font-size-hero: 24px;
 
   /* shape & spacing */
-  --miqrokey-radius-control: 6px;
+  --miqrokey-radius-control: 4px;
   --miqrokey-radius-panel: 6px;
   --miqrokey-radius-modal: 8px;
   --miqrokey-space-1: 4px;
@@ -39,25 +46,25 @@
   --miqrokey-space-8: 32px;
   --miqrokey-control-height: 32px;
   --miqrokey-control-height-lg: 36px;
-  --miqrokey-table-row-height: 40px;
-  --miqrokey-table-row-height-compact: 36px;
+  --miqrokey-table-row-height: 44px;
+  --miqrokey-table-row-height-compact: 38px;
 
   /* layout */
   --miqrokey-header-height: 56px;
-  --miqrokey-nav-width: 224px;
+  --miqrokey-nav-width: 232px;
   --miqrokey-nav-width-collapsed: 56px;
-  --miqrokey-content-max: 1440px;
+  --miqrokey-content-max: 1600px;
   --miqrokey-content-form-max: 760px;
 }
 
 /* ---- Element Plus theme overlay ---- */
 html {
   --el-color-primary: var(--miqrokey-accent);
-  --el-color-primary-light-3: #4098e8;
-  --el-color-primary-light-5: #79b6ef;
-  --el-color-primary-light-7: #b3d5f6;
-  --el-color-primary-light-8: #cfe3fa;
-  --el-color-primary-light-9: #e8f1fc;
+  --el-color-primary-light-3: #4090ff;
+  --el-color-primary-light-5: #79b3ff;
+  --el-color-primary-light-7: #b3d4ff;
+  --el-color-primary-light-8: #cfe2ff;
+  --el-color-primary-light-9: #eaf2ff;
   --el-color-primary-dark-2: var(--miqrokey-accent-hover);
   --el-color-success: var(--miqrokey-success);
   --el-color-warning: var(--miqrokey-warning);

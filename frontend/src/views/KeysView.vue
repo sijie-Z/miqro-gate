@@ -79,6 +79,26 @@ const selectedProject = computed(() =>
   (grants.value?.projects ?? []).find((p) => p.id === createProjectId.value),
 );
 
+const keyFilter = ref('');
+
+const filteredKeys = computed(() => {
+  const q = keyFilter.value.trim().toLowerCase();
+  if (!q) return keys.value;
+  return keys.value.filter(
+    (k) =>
+      k.name.toLowerCase().includes(q) ||
+      k.projectTag.toLowerCase().includes(q) ||
+      k.display.toLowerCase().includes(q),
+  );
+});
+
+const keyStats = computed(() => ({
+  total: keys.value.length,
+  active: keys.value.filter((k) => k.status === 'ACTIVE').length,
+  rotating: keys.value.filter((k) => k.status === 'ROTATING').length,
+  revoked: keys.value.filter((k) => k.status === 'REVOKED').length,
+}));
+
 const canCreate = computed(
   () =>
     createName.value.trim().length > 0 &&
@@ -326,8 +346,43 @@ function formatTime(iso?: string): string {
       </el-form>
     </section>
 
+    <!-- Stat strip + filter bar (ledger density) -->
+    <div v-if="keys.length" class="mk-stat-grid" data-testid="keys-stats">
+      <div class="mk-stat-card">
+        <span class="mk-stat-label">全部 Key</span>
+        <span class="mk-stat-value mk-num">{{ keyStats.total }}</span>
+        <span class="mk-stat-hint">你名下的 Virtual Key</span>
+      </div>
+      <div class="mk-stat-card">
+        <span class="mk-stat-label">ACTIVE</span>
+        <span class="mk-stat-value mk-num">{{ keyStats.active }}</span>
+        <span class="mk-stat-hint">可正常路由</span>
+      </div>
+      <div class="mk-stat-card">
+        <span class="mk-stat-label">ROTATING</span>
+        <span class="mk-stat-value mk-num">{{ keyStats.rotating }}</span>
+        <span class="mk-stat-hint">宽限期内</span>
+      </div>
+      <div class="mk-stat-card">
+        <span class="mk-stat-label">REVOKED</span>
+        <span class="mk-stat-value mk-num">{{ keyStats.revoked }}</span>
+        <span class="mk-stat-hint">已吊销</span>
+      </div>
+    </div>
+
+    <div class="mk-filter-bar" data-testid="keys-filter-bar">
+      <el-input
+        v-model="keyFilter"
+        placeholder="按名称 / 项目标签 / Key 前缀过滤"
+        clearable
+        data-testid="keys-filter"
+        style="width: 320px"
+      />
+      <span class="mk-stat-hint">共 {{ filteredKeys.length }} 条</span>
+    </div>
+
     <!-- Key table -->
-    <el-table v-loading="loading" :data="keys" class="keys-table" data-testid="keys-table">
+    <el-table v-loading="loading" :data="filteredKeys" class="keys-table" data-testid="keys-table">
       <el-table-column label="名称" min-width="180">
         <template #default="{ row }">
           <div class="key-name">{{ row.name }}</div>

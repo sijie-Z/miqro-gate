@@ -88,17 +88,17 @@
 
 .mk-status--success {
   color: var(--miqrokey-success);
-  background: #dcfce7;
+  background: var(--miqrokey-success-soft);
 }
 
 .mk-status--warning {
   color: var(--miqrokey-warning);
-  background: #fef3c7;
+  background: var(--miqrokey-warning-soft);
 }
 
 .mk-status--danger {
   color: var(--miqrokey-danger);
-  background: #fee2e2;
+  background: var(--miqrokey-danger-soft);
 }
 
 .mk-status--neutral {
@@ -148,4 +148,182 @@ td.mk-col-num {
 .nav-item:focus-visible,
 .mk-shell-footer a:focus-visible {
   outline-offset: -2px;
+}
+
+/* ---- 额度账本 composition layer (2026-08-27 redesign) ---- */
+
+/* White card with a header row: label + optional action slot. */
+.mk-card {
+  background: var(--miqrokey-bg-surface);
+  border: 1px solid var(--miqrokey-border-default);
+  border-radius: var(--miqrokey-radius-panel);
+}
+
+.mk-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--miqrokey-space-3);
+  padding: var(--miqrokey-space-3) var(--miqrokey-space-4);
+  border-bottom: 1px solid var(--miqrokey-border-muted);
+}
+
+.mk-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--miqrokey-text-primary);
+}
+
+.mk-card-body {
+  padding: var(--miqrokey-space-4);
+}
+
+/* Stat strip: 4-up metric cards, number-first (the ledger's voice). */
+.mk-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--miqrokey-space-3);
+  margin-bottom: var(--miqrokey-space-4);
+}
+
+.mk-stat-card {
+  padding: var(--miqrokey-space-4);
+  background: var(--miqrokey-bg-surface);
+  border: 1px solid var(--miqrokey-border-default);
+  border-radius: var(--miqrokey-radius-panel);
+}
+
+.mk-stat-label {
+  display: block;
+  font-size: 12px;
+  color: var(--miqrokey-text-secondary);
+  margin-bottom: var(--miqrokey-space-1);
+}
+
+.mk-stat-value {
+  display: block;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 32px;
+  color: var(--miqrokey-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-stat-hint {
+  display: block;
+  margin-top: var(--miqrokey-space-1);
+  font-size: 12px;
+  color: var(--miqrokey-text-disabled);
+}
+
+/* Signature: segmented quota band (5h / week / month rolling windows).
+   Three rounded segments; the filled proportion encodes the quota truth. */
+.mk-quota-band {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+
+.mk-quota-segment {
+  flex: 1;
+  min-width: 0;
+}
+
+.mk-quota-segment-label {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--miqrokey-text-secondary);
+}
+
+.mk-quota-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--miqrokey-bg-subtle);
+  border: 1px solid var(--miqrokey-border-default);
+  overflow: hidden;
+}
+
+.mk-quota-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--miqrokey-accent);
+}
+
+.mk-quota-fill--warning {
+  background: var(--miqrokey-warning);
+}
+
+.mk-quota-fill--danger {
+  background: var(--miqrokey-danger);
+}
+
+/* CSS-only horizontal bar chart for usage groups. */
+.mk-bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--miqrokey-space-2);
+}
+
+.mk-bar-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 90px;
+  align-items: center;
+  gap: var(--miqrokey-space-3);
+  font-size: 12px;
+}
+
+.mk-bar-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--miqrokey-text-secondary);
+}
+
+.mk-bar-track {
+  height: 14px;
+  background: var(--miqrokey-bg-subtle);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.mk-bar-fill {
+  height: 100%;
+  background: var(--miqrokey-accent);
+  border-radius: 3px;
+}
+
+.mk-bar-value {
+  text-align: right;
+  color: var(--miqrokey-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Section heading inside cards (label + description in one line). */
+.mk-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--miqrokey-space-2);
+  margin: var(--miqrokey-space-6) 0 var(--miqrokey-space-3);
+}
+
+.mk-section-title h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.mk-section-title span {
+  font-size: 12px;
+  color: var(--miqrokey-text-disabled);
+}
+
+/* Empty state with a call to action, never a mood. */
+.mk-empty-hint {
+  padding: var(--miqrokey-space-6);
+  text-align: center;
+  color: var(--miqrokey-text-secondary);
+  font-size: 13px;
 }
