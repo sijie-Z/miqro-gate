@@ -5,13 +5,13 @@
 ## 1. 范围与状态
 
 - [ ] `docs/progress.md` 与代码、测试、提交一致，目标 Goal 均为 `DONE`。
-- [ ] 所有 in-scope 需求有实现或明确延期；没有静默扩展为智能路由/协议转换。
+- [x] 所有 in-scope 需求有实现或明确延期；没有静默扩展为智能路由/协议转换。
 - [x] Accepted ADR、API、数据库、Adapter、配置和 UI 文档已同步。
 - [x] 发布版本、提交 SHA、构建时间和目录版本可追踪。
 
 ## 2. 构建与测试硬门禁
 
-- [ ] Windows 和 Linux 使用 wrapper 全新构建成功。
+- [x] Windows 和 Linux 使用 wrapper 全新构建成功。
 - [x] 后端 unit/integration/architecture/security tests 全部通过。
 - [x] 前端 lint、typecheck、unit、E2E 和生产构建通过。
 - [x] Anthropic Messages、OpenAI Responses、Chat Completions 的普通/SSE fixtures 通过。

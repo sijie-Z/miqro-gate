@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import PageHeader from '@/components/PageHeader.vue';
 import { ApiError } from '@/api/http';
@@ -15,6 +15,18 @@ const recordsLoading = ref(true);
 const recordsError = ref('');
 const page = ref(1);
 const pageSize = ref(20);
+
+const usageBars = computed(() => {
+  const ranked = (summary.value?.groups ?? [])
+    .map((g) => ({
+      label: g.label,
+      value: (g.tokens?.input ?? 0) + (g.tokens?.output ?? 0),
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+  const max = Math.max(...ranked.map((r) => r.value), 1);
+  return ranked.map((r) => ({ ...r, width: `${Math.max(4, (r.value / max) * 100)}%` }));
+});
 
 const cacheLevelLabel: Record<string, string> = {
   UPSTREAM: 'upstream',
@@ -175,6 +187,24 @@ function formatTime(iso: string): string {
 
     <!-- Records -->
     <section class="records-panel">
+      <section v-if="usageBars.length" class="mk-card chart-card" data-testid="usage-chart">
+        <div class="mk-card-header">
+          <h3 class="mk-card-title">用量分布</h3>
+          <span class="mk-stat-hint">按 Tokens（输入 + 输出）Top 8</span>
+        </div>
+        <div class="mk-card-body">
+          <div class="mk-bar-chart">
+            <div v-for="bar in usageBars" :key="bar.label" class="mk-bar-row">
+              <span class="mk-bar-label" :title="bar.label">{{ bar.label }}</span>
+              <div class="mk-bar-track">
+                <div class="mk-bar-fill" :style="{ width: bar.width }" />
+              </div>
+              <span class="mk-bar-value mk-num">{{ bar.value }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <h3 class="panel-title">最近记录</h3>
       <el-alert v-if="recordsError" type="error" :closable="false" class="block-alert" />
 

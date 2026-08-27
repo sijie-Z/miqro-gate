@@ -46,6 +46,20 @@ public interface AdminAuditEventRepository {
     void acquireChainLock();
 
     /**
+     * Returns the exact {@code jsonb} text representation PostgreSQL will persist
+     * for {@code changeSummary}, or {@code null} for a {@code null} input.
+     *
+     * <p>
+     * The {@code change_summary} column is {@code jsonb}: PostgreSQL reorders
+     * object keys and strips insignificant whitespace. Hashing the caller's raw
+     * string would make {@code currentEventHash} irreproducible from the stored
+     * row, breaking the tamper-evidence guarantee. Callers must hash and persist
+     * the normalised form returned here.
+     * </p>
+     */
+    String normalizeChangeSummary(String changeSummary);
+
+    /**
      * @deprecated Use {@link #acquireChainLock()} + {@link #findMostRecent()}
      *             inside the same transaction instead. FOR UPDATE on the most
      *             recent row is insufficient when the table is empty.

@@ -53,6 +53,18 @@ public class AdminAuditEventRepositoryImpl implements AdminAuditEventRepository 
     static final long CHAIN_LOCK_KEY = 1234567890123456789L;
 
     @Override
+    public String normalizeChangeSummary(String changeSummary) {
+        if (changeSummary == null) {
+            return null;
+        }
+        // Round-trip through PostgreSQL's own jsonb parser: the returned text is
+        // exactly what the change_summary::jsonb column will contain, so the hash
+        // computed over it is reproducible from the persisted row.
+        return jdbc.queryForObject("SELECT (:value)::jsonb::text", new MapSqlParameterSource("value", changeSummary),
+                String.class);
+    }
+
+    @Override
     @Transactional
     public void acquireChainLock() {
         jdbc.getJdbcTemplate().query("SELECT pg_advisory_xact_lock(?)", rs -> {

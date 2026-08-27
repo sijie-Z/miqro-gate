@@ -28,7 +28,7 @@ async function submit() {
     if (auth.mustChangePassword) {
       router.push('/app/profile');
     } else {
-      router.push(redirect ?? '/app/keys');
+      router.push(redirect ?? '/app/overview');
     }
   } catch (error) {
     if (error instanceof ApiError) {
@@ -45,44 +45,66 @@ async function submit() {
 
 <template>
   <div class="login-page">
+    <aside class="login-intro">
+      <div class="intro-brand">MiQroKey</div>
+      <h1 class="intro-headline">凭证与额度的账本，<br />安静地坐在中间。</h1>
+      <p class="intro-copy">
+        MiQroKey 是内部 AI 编码流量的凭证治理网关：一个 Virtual Key
+        绑定一个项目、一个供应商产品、一份额度。不跨供应商、不负载均衡、不留 prompt。
+      </p>
+      <div class="intro-quota">
+        <div class="mk-quota-band">
+          <div class="mk-quota-segment">
+            <div class="mk-quota-segment-label">
+              <span>5 小时</span><span class="mk-num">34%</span>
+            </div>
+            <div class="mk-quota-track"><div class="mk-quota-fill" style="width: 34%" /></div>
+          </div>
+          <div class="mk-quota-segment">
+            <div class="mk-quota-segment-label">
+              <span>本周</span><span class="mk-num">27%</span>
+            </div>
+            <div class="mk-quota-track"><div class="mk-quota-fill" style="width: 27%" /></div>
+          </div>
+          <div class="mk-quota-segment">
+            <div class="mk-quota-segment-label">
+              <span>本月</span><span class="mk-num">20%</span>
+            </div>
+            <div class="mk-quota-track"><div class="mk-quota-fill" style="width: 20%" /></div>
+          </div>
+        </div>
+        <p class="intro-quota-note">滚动额度窗口 —— 每家供应商的套餐都按这个节拍运转。</p>
+      </div>
+    </aside>
     <div class="login-panel">
-      <h1 class="login-title">MiQroKey</h1>
-      <p class="login-subtitle">Virtual Key 管理门户</p>
+      <h2 class="login-title">登录</h2>
+      <p class="login-subtitle">使用门户账号登录。首次登录需修改临时密码。</p>
+      <el-alert
+        v-if="errorMessage"
+        :title="errorMessage"
+        type="error"
+        :closable="false"
+        class="login-error"
+        data-testid="login-error"
+      >
+        <span v-if="errorRequestId" class="error-request-id mk-mono"
+          >requestId: {{ errorRequestId }}</span
+        >
+      </el-alert>
       <el-form label-position="top" @submit.prevent="submit">
         <el-form-item label="用户名">
-          <el-input
-            v-model="username"
-            name="username"
-            autocomplete="username"
-            data-testid="username"
-            @keyup.enter="submit"
-          />
+          <el-input v-model="username" autocomplete="username" data-testid="login-username" />
         </el-form-item>
         <el-form-item label="密码">
           <el-input
             v-model="password"
             type="password"
-            name="password"
-            autocomplete="current-password"
             show-password
-            data-testid="password"
+            autocomplete="current-password"
+            data-testid="login-password"
             @keyup.enter="submit"
           />
         </el-form-item>
-        <el-alert
-          v-if="errorMessage"
-          type="error"
-          :closable="false"
-          class="login-error"
-          data-testid="login-error"
-        >
-          <template #default>
-            {{ errorMessage }}
-            <span v-if="errorRequestId" class="mk-mono error-request-id"
-              >requestId: {{ errorRequestId }}</span
-            >
-          </template>
-        </el-alert>
         <el-button
           type="primary"
           native-type="submit"
@@ -100,14 +122,64 @@ async function submit() {
 <style scoped>
 .login-page {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
   min-height: 100vh;
   background: var(--miqrokey-bg-canvas);
 }
 
+.login-intro {
+  flex: 1;
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  padding: var(--miqrokey-space-8);
+  background: var(--miqrokey-bg-surface);
+  border-right: 1px solid var(--miqrokey-border-default);
+}
+
+@media (min-width: 900px) {
+  .login-intro {
+    display: flex;
+  }
+}
+
+.intro-brand {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--miqrokey-accent);
+  margin-bottom: var(--miqrokey-space-6);
+}
+
+.intro-headline {
+  margin: 0 0 var(--miqrokey-space-4);
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--miqrokey-text-primary);
+}
+
+.intro-copy {
+  max-width: 440px;
+  margin: 0 0 var(--miqrokey-space-8);
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--miqrokey-text-secondary);
+}
+
+.intro-quota {
+  max-width: 440px;
+}
+
+.intro-quota-note {
+  margin: var(--miqrokey-space-3) 0 0;
+  font-size: 12px;
+  color: var(--miqrokey-text-disabled);
+}
+
 .login-panel {
   width: 360px;
+  margin: auto;
   padding: 32px;
   background: var(--miqrokey-bg-surface);
   border: 1px solid var(--miqrokey-border-default);

@@ -106,6 +106,28 @@ async function mockApi(page: Page, admin = false) {
       body: JSON.stringify({ projects: [], grants: [], purposes: [] }),
     }),
   );
+  await page.route('**/api/v1/admin/subscriptions', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0021',
+          providerProductId: '0190-0000-0000-0020',
+          productName: 'DeepSeek PAYG',
+          name: 'Main',
+          billingMode: 'PAYG',
+          planScope: 'PERSONAL',
+          subscriptionPrice: null,
+          currency: 'USD',
+          quotaTotal: 1000000,
+          quotaUnit: 'TOKENS',
+          status: 'ACTIVE',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
   await page.route('**/api/v1/admin/users', (route) =>
     route.fulfill({
       status: 200,
@@ -194,6 +216,17 @@ for (const viewport of VIEWPORTS) {
     });
   });
 }
+
+test('overview page baseline at 1440x900', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/overview');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('overview-stats')).toBeVisible();
+  await expect(page.getByTestId('overview-stats')).toContainText('Virtual Key');
+  await expect(page.getByTestId('overview-usage')).toBeVisible();
+  await page.screenshot({ path: 'test-results/baseline/overview-1440x900.png', fullPage: true });
+});
 
 test('admin users page baseline at 1440x900', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });

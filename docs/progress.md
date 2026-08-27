@@ -96,6 +96,15 @@
 - 真实供应商凭证契约测试全部 `WAITING_FOR_CREDENTIAL`；腾讯/智谱等 Anthropic 入口 Bearer 兼容性待真实核验。
 - 已知 flaky：`AuditChainIntegrityTest.preLockTimestampsDoNotAffectHeadOrdering`、`InProcessRequestCoalescerTest.shouldShareWithWaiters`（G4.x 排查清单）。
 
+## 界面重设计（2026-08-27，额度账本方向）
+
+- 用户反馈界面过空，参考腾讯云 TokenHub 控制台 → 浅色密集操作台（tokens.css 全新调色：canvas #F2F4F8、主色 #0066FF、表格 12px/44px 密度）。
+- 签名元素：`mk-quota-band` 滚动额度分段条（5 小时/周/月三窗口）——登录页品牌区、首页额度账本、Plans 页滚动额度列。
+- 新增 OverviewView（登录后首页）：4 统计卡（Key 数/本月请求/Tokens/成本）、用量分布条形图（CSS-only）、最近 Key、管理员额度账本。
+- KeysView 统计条 + 过滤栏；UsageView 条形图；AppShell 三组管理导航 + 版本徽标；登录页双栏品牌区。
+- e2e：Overview baseline 新增，15/15 通过；baseline 截图全量刷新（11 张）。
+- vitest 21/21、lint/typecheck/build 全 PASS；frontend-design.md 方向修订已记录。
+
 ## Known Blockers
 
 - 真实供应商凭证尚未提供；不阻塞 Mock 与本地契约开发。

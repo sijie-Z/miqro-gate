@@ -142,6 +142,16 @@ async function releaseSeat(seat: SeatView) {
   await refreshSeats();
 }
 
+function quotaSegments(): { label: string; ratio: number }[] {
+  // Demo fill ratios: official usage API pending (WAITING_FOR_CREDENTIAL).
+  const base = 34;
+  return [
+    { label: '5 小时', ratio: base },
+    { label: '本周', ratio: Math.round(base * 0.8) },
+    { label: '本月', ratio: Math.round(base * 0.6) },
+  ];
+}
+
 function planLabel(scope: string): string {
   switch (scope) {
     case 'PERSONAL':
@@ -253,6 +263,32 @@ onMounted(load);
           <span class="mk-num">{{
             row.subscriptionPrice != null ? `${row.subscriptionPrice} ${row.currency ?? ''}` : '—'
           }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="滚动额度" min-width="240" data-testid="plans-quota-band">
+        <template #default="{ row }">
+          <div v-if="row.quotaTotal" class="mk-quota-band">
+            <div v-for="seg in quotaSegments()" :key="seg.label" class="mk-quota-segment">
+              <div class="mk-quota-segment-label">
+                <span>{{ seg.label }}</span
+                ><span class="mk-num">{{ seg.ratio }}%</span>
+              </div>
+              <div class="mk-quota-track">
+                <div
+                  class="mk-quota-fill"
+                  :class="
+                    seg.ratio >= 80
+                      ? 'mk-quota-fill--danger'
+                      : seg.ratio >= 60
+                        ? 'mk-quota-fill--warning'
+                        : ''
+                  "
+                  :style="{ width: seg.ratio + '%' }"
+                />
+              </div>
+            </div>
+          </div>
+          <span v-else class="mk-stat-hint">未配置配额</span>
         </template>
       </el-table-column>
       <el-table-column label="状态" width="100">

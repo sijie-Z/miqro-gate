@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.service;
 
+import com.miqroera.miqrokey.controlplane.client.UpstreamTargetPin;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
 import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import javax.net.ssl.SSLParameters;
 
 /**
  * Webhook endpoint management (G4.5, {@code webhook_endpoints} V12): the URL is
@@ -160,14 +162,33 @@ public class WebhookEndpointService {
     int postSigned(WebhookEndpoint endpoint, byte[] payload) throws Exception {
         byte[] secret = secretFor(endpoint);
         try {
+            // Re-validate at delivery time and pin the connection to the
+            // validated address (DNS-rebinding TOCTOU defense): a rebinding
+            // answer between endpoint creation and delivery must not move the
+            // traffic. The validator parses the URL, so a malformed entry is
+            // rejected with a generic message that never names the URL — it
+            // lands in delivery-attempt error messages and the test-result
+            // envelope.
+            UpstreamTargetValidator.Resolved target = targetValidator.validateAndResolve(endpoint.url());
+            if (!target.allowed()) {
+                throw new IllegalStateException("Webhook URL is rejected by the SSRF gate");
+            }
+            URI url = URI.create(endpoint.url());
+            URI pinned = UpstreamTargetPin.pin(url, target.addresses()[0]);
+            SSLParameters sslParameters = UpstreamTargetPin.sslParametersFor(url);
             String signature = signature(secret, payload);
-            var request = java.net.http.HttpRequest.newBuilder(URI.create(endpoint.url()))
-                    .header("Content-Type", "application/json").header("X-MiQroKey-Signature", "sha256=" + signature)
+            java.net.http.HttpClient.Builder clientBuilder = java.net.http.HttpClient.newBuilder()
+                    .followRedirects(java.net.http.HttpClient.Redirect.NEVER);
+            if (sslParameters != null) {
+                // Keep SNI + certificate identity on the original hostname even
+                // though the connection goes to the pinned IP literal.
+                clientBuilder.sslParameters(sslParameters);
+            }
+            var request = java.net.http.HttpRequest.newBuilder(pinned).header("Content-Type", "application/json")
+                    .header("X-MiQroKey-Signature", "sha256=" + signature)
                     .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(payload))
                     .timeout(java.time.Duration.ofMillis(endpoint.timeoutMs())).build();
-            var response = java.net.http.HttpClient.newBuilder()
-                    .followRedirects(java.net.http.HttpClient.Redirect.NEVER).build()
-                    .send(request, java.net.http.HttpResponse.BodyHandlers.discarding());
+            var response = clientBuilder.build().send(request, java.net.http.HttpResponse.BodyHandlers.discarding());
             return response.statusCode();
         } finally {
             java.util.Arrays.fill(secret, (byte) 0);

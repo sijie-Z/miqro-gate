@@ -141,17 +141,47 @@ class HttpProviderClientTest {
     }
 
     @Test
-    @DisplayName("rejects non-allow-listed targets before any request is sent")
+    @DisplayName("rejects non-allow-listed targets at construction before any request is sent")
     void rejectsTargetOutsideAllowlist() {
         int before = requestCount.get();
         // Production default: empty allowlist — even loopback http is denied.
-        HttpProviderClient client = new HttpProviderClient(URI.create("http://127.0.0.1:" + port + "/api"),
+        assertThatThrownBy(() -> new HttpProviderClient(URI.create("http://127.0.0.1:" + port + "/api"),
                 "Authorization", "Bearer sk-test", new UpstreamTargetValidator(List.of()), Duration.ofSeconds(2),
-                Duration.ofSeconds(5), 1024);
-
-        assertThatThrownBy(() -> client.exchange(ProviderRequest.get("/models")).block())
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("Upstream target is not allowed");
+                Duration.ofSeconds(5), 1024)).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Upstream target is not allowed");
         assertThat(requestCount.get()).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("pins the connection to the validated address resolved at construction")
+    void pinsConnectionToValidatedAddress() throws Exception {
+        // localhost resolves to a loopback family on every platform; both are
+        // allowlisted so whichever address comes first is accepted.
+        HttpProviderClient client = new HttpProviderClient(URI.create("http://localhost:" + port + "/api"),
+                "Authorization", "Bearer sk-test", new UpstreamTargetValidator(List.of("127.0.0.0/8", "::1/128")),
+                Duration.ofSeconds(2), Duration.ofSeconds(5), 1024);
+
+        assertThat(client.pinnedBaseUri().getHost()).isNotEqualTo("localhost");
+        assertThat(InetAddress.getByName(client.pinnedBaseUri().getHost()).isLoopbackAddress()).isTrue();
+        assertThat(client.pinnedBaseUri().getPort()).isEqualTo(port);
+        assertThat(client.pinnedBaseUri().getPath()).isEqualTo("/api");
+        // Plain http: no TLS layer, no SNI parameters.
+        assertThat(client.sslParameters()).isNull();
+    }
+
+    @Test
+    @DisplayName("https clients keep endpoint identification active on the pinned IP literal")
+    void keepsEndpointIdentificationForHttps() {
+        HttpProviderClient client = new HttpProviderClient(URI.create("https://127.0.0.1:" + port + "/api"),
+                "Authorization", "Bearer sk-test", new UpstreamTargetValidator(List.of("127.0.0.0/8")),
+                Duration.ofSeconds(2), Duration.ofSeconds(5), 1024);
+
+        // An IP-literal host has no SNI name; certificate identity must still
+        // be checked against the literal (HTTPS algorithm).
+        assertThat(client.sslParameters()).isNotNull();
+        assertThat(client.sslParameters().getEndpointIdentificationAlgorithm()).isEqualTo("HTTPS");
+        assertThat(client.sslParameters().getServerNames()).isNullOrEmpty();
+        assertThat(client.pinnedBaseUri().getHost()).isEqualTo("127.0.0.1");
     }
 
     private HttpProviderClient client() {
