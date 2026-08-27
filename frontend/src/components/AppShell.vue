@@ -34,6 +34,7 @@ const providerNav: NavItem[] = [
   { name: 'providers', label: 'Providers', icon: 'shop' },
   { name: 'plans', label: 'Plans', icon: 'layers' },
   { name: 'credentials', label: 'Credentials', icon: 'secured' },
+  { name: 'prices', label: '定价', icon: 'money' },
 ];
 
 const opsNav: NavItem[] = [

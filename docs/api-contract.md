@@ -491,6 +491,24 @@
 
 规则类型：`USAGE_MISSING_RATE`（1h 内 usage_missing 占比）、`UPSTREAM_ERROR_RATE`（1h 内非 2xx 占比）、`BALANCE_UNAVAILABLE`（1h 内 UNAVAILABLE 配额快照数）、`USAGE_SURGE`（当前 1h 事件数 / 前一 1h 比率）。评估周期 `miqrokey.alerts.evaluation-interval-ms`（默认 5min）；命中阈值后按（规则 × 小时桶）去重，仅首个事件触发投递；投递失败指数退避重试最多 3 次。错误码：`ALERT_RULE_NOT_FOUND`（404）、`ALERT_TYPE_INVALID`（400）。
 
+### 5.9 模型单价（G7.2）
+
+按（供应商产品、模型、Token 类型）三元组维护每百万 Token 单价，驱动成本计算。单价是不可变快照：修改即追加新快照，历史成本不重算（与官方控制台「修改不追溯」语义一致）。价格是全局目录数据，不租户隔离；端点仍 SYSTEM_ADMIN-only。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/prices` | 每个三元组的最新生效单价列表 |
+| `POST /api/v1/admin/prices` | 追加单价快照：`{ "providerProductId", "modelId", "tokenType", "currency", "unitPrice", "source" }`，返回 `201` |
+
+快照字段：`id`、`providerProductId`、`modelId`、`tokenType`（`INPUT`/`OUTPUT`/`CACHE_READ`/`CACHE_CREATION`）、`currency`、`unitPrice`（BigDecimal，每 1M Tokens）、`effectiveFrom`、`source`（`MANUAL`/`OFFICIAL`）、`createdBy`、`createdAt`。
+
+错误码：
+
+| code | HTTP | 场景 |
+|---|---|---|
+| `PRODUCT_NOT_FOUND` | 404 | 供应商产品不存在 |
+| `PARAM_INVALID` | 400 | tokenType 非法或参数校验失败 |
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

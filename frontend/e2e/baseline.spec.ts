@@ -152,6 +152,38 @@ async function mockApi(page: Page, admin = false) {
       ]),
     }),
   );
+  await page.route('**/api/v1/admin/prices', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0000-000000000040',
+          providerProductId: '0190-0000-0000-0020',
+          modelId: 'deepseek-chat',
+          tokenType: 'INPUT',
+          currency: 'CNY',
+          unitPrice: '2.0000',
+          effectiveFrom: '2026-08-26T00:00:00Z',
+          source: 'MANUAL',
+          createdBy: '0190-0000-0000-0001',
+          createdAt: '2026-08-26T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0000-000000000041',
+          providerProductId: '0190-0000-0000-0020',
+          modelId: 'deepseek-chat',
+          tokenType: 'OUTPUT',
+          currency: 'CNY',
+          unitPrice: '16.0000',
+          effectiveFrom: '2026-08-26T00:00:00Z',
+          source: 'MANUAL',
+          createdBy: '0190-0000-0000-0001',
+          createdAt: '2026-08-26T00:00:00Z',
+        },
+      ]),
+    }),
+  );
   await page.route('**/api/v1/admin/users', (route) =>
     route.fulfill({
       status: 200,
@@ -363,6 +395,19 @@ test('admin credentials page baseline at 1440x900', async ({ page }) => {
   await expect(page.getByTestId('credentials-table')).toContainText('anthropic-main');
   await page.screenshot({
     path: 'test-results/baseline/admin-credentials-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('admin prices page baseline at 1440x900', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/prices');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('prices-table')).toBeVisible();
+  await expect(page.getByTestId('prices-table')).toContainText('deepseek-chat');
+  await page.screenshot({
+    path: 'test-results/baseline/admin-prices-1440x900.png',
     fullPage: true,
   });
 });

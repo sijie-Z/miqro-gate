@@ -203,6 +203,19 @@ export interface Grant {
   createdAt: string;
 }
 
+export interface PriceSnapshotView {
+  id: string;
+  providerProductId: string;
+  modelId: string;
+  tokenType: string;
+  currency: string;
+  unitPrice: string;
+  effectiveFrom: string;
+  source: string;
+  createdBy: string;
+  createdAt: string;
+}
+
 export interface CredentialView {
   id: string;
   name: string;

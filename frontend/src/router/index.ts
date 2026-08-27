@@ -84,6 +84,12 @@ const router = createRouter({
           meta: adminMeta('Plans'),
         },
         {
+          path: 'prices',
+          name: 'prices',
+          component: () => import('@/views/AdminPricesView.vue'),
+          meta: adminMeta('定价'),
+        },
+        {
           path: 'credentials',
           name: 'credentials',
           component: () => import('@/views/AdminCredentialsView.vue'),

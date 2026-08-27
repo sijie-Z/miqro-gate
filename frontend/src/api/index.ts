@@ -12,6 +12,7 @@ import type {
   WebhookDelivery,
   WebhookEndpointView,
   CredentialDetailView,
+  PriceSnapshotView,
   CredentialView,
   ValidateCredentialResponse,
   CreateVirtualKeyRequest,
@@ -227,6 +228,21 @@ export function rotateCredential(id: string, body: { secret: string }): Promise<
 
 export function disableCredential(id: string): Promise<{ message: string }> {
   return post<{ message: string }>(`/api/v1/admin/credentials/${id}/disable`);
+}
+
+export function listPrices(): Promise<PriceSnapshotView[]> {
+  return get<PriceSnapshotView[]>('/api/v1/admin/prices');
+}
+
+export function createPrice(body: {
+  providerProductId: string;
+  modelId: string;
+  tokenType: string;
+  currency: string;
+  unitPrice: string;
+  source: string;
+}): Promise<PriceSnapshotView> {
+  return post<PriceSnapshotView>('/api/v1/admin/prices', body);
 }
 
 // ---- admin provider/Plan (G5.3) ----
