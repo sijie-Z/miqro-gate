@@ -122,12 +122,16 @@ async function handleLogout() {
         ☰
       </el-button>
       <div class="brand">
-        MiQroKey
+        <span class="brand-mark" aria-hidden="true">MK</span>
+        <span class="brand-name">MiQroKey</span>
         <span class="version-badge">v0.1</span>
       </div>
       <div class="spacer" />
       <el-dropdown trigger="click">
         <span class="user-menu" role="button" aria-haspopup="menu" data-testid="user-menu">
+          <span class="mk-avatar">{{
+            (auth.user?.displayName ?? auth.user?.username ?? '?').slice(0, 1).toUpperCase()
+          }}</span>
           {{ auth.user?.displayName ?? auth.user?.username }}
           <el-icon><SwitchButton /></el-icon>
         </span>
@@ -212,6 +216,28 @@ async function handleLogout() {
   font-size: 16px;
   font-weight: 600;
   color: var(--miqrokey-text-primary);
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: linear-gradient(
+    135deg,
+    var(--miqrokey-chip-tencent-a),
+    var(--miqrokey-chip-tencent-b)
+  );
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.brand-name {
+  font-size: 15px;
 }
 
 .version-badge {

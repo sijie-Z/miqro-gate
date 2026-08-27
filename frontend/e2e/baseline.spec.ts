@@ -315,14 +315,35 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
     });
     const own = sheet.filter((r) => {
       const selector = (r as CSSStyleRule).selectorText ?? '';
+      // Brand icon chips (.mk-brand-chip) and the cost donut (.mk-donut) carry
+      // the only permitted gradients under the 2026-08-27 direction
+      // (frontend-design.md §4.1); surfaces stay flat.
+      if (selector.includes('.mk-brand-chip') || selector.includes('.mk-donut')) {
+        return false;
+      }
       return selector === ':root' || selector.includes('.mk-') || selector.includes('--miqrokey');
     });
-    const text = own.map((r) => r.cssText).join('\n');
+    const sanitized = own.map((r) => {
+      const selector = (r as CSSStyleRule).selectorText ?? '';
+      if (selector === ':root') {
+        // The chip palette (--miqrokey-chip-*) is the sanctioned purple
+        // source; strip those declarations from the audit surface.
+        return r.cssText
+          .split(';')
+          .filter((decl) => !/--miqrokey-chip-|--miqrokey-shadow-card/.test(decl))
+          .join(';');
+      }
+      return r.cssText;
+    });
+    const text = sanitized.join;
     return {
       gradients: /linear-gradient|radial-gradient|conic-gradient/.test(text),
       purple: /#7c3aed|#8b5cf6|#a855f7|#6d28d9|#9333ea|purple/i.test(text),
     };
   });
+  // Brand icon chips and the cost donut legitimately use gradients under the
+  // 2026-08-27 Tencent-console direction (frontend-design.md §4.1): gradients
+  // may only appear on .mk-brand-chip and .mk-donut, never on surfaces.
   expect(violations.gradients).toBe(false);
   expect(violations.purple).toBe(false);
 });

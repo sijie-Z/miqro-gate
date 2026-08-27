@@ -24,6 +24,33 @@ async function load() {
   }
 }
 
+function chipLetter(name: string): string {
+  return (name ?? '?').slice(0, 1).toUpperCase();
+}
+
+function chipClass(slug: string): string {
+  switch (slug) {
+    case 'tencent':
+      return 'mk-chip-tencent';
+    case 'deepseek':
+      return 'mk-chip-deepseek';
+    case 'zhipu':
+      return 'mk-chip-zhipu';
+    case 'minimax':
+      return 'mk-chip-minimax';
+    case 'moonshot':
+      return 'mk-chip-moonshot';
+    case 'baidu':
+      return 'mk-chip-baidu';
+    case 'volcengine':
+      return 'mk-chip-volcengine';
+    case 'aliyun':
+      return 'mk-chip-aliyun';
+    default:
+      return 'mk-chip-tencent';
+  }
+}
+
 function implClass(status: string): string {
   switch (status) {
     case 'VERIFIED':
@@ -66,8 +93,19 @@ onMounted(load);
     </el-alert>
 
     <el-table v-loading="loading" :data="products" data-testid="products-table">
-      <el-table-column label="供应商" width="140">
-        <template #default="{ row }">{{ row.providerName }}</template>
+      <el-table-column label="供应商" width="200">
+        <template #default="{ row }">
+          <div class="mk-provider-cell">
+            <span
+              class="mk-brand-chip mk-brand-chip--sm"
+              :class="chipClass(row.providerSlug)"
+              aria-hidden="true"
+            >
+              {{ chipLetter(row.providerName) }}
+            </span>
+            <span>{{ row.providerName }}</span>
+          </div>
+        </template>
       </el-table-column>
       <el-table-column label="产品" min-width="200">
         <template #default="{ row }">
