@@ -10,7 +10,7 @@
 - Goal status: `DONE`（vitest 21/21、Playwright 15/15、lint/typecheck/build 全 PASS）
 - Last updated: `2026-08-27 CST`
 - Branch: `feat/tdesign-migration`
-- Remote: `https://github.com/sijie-Z/miqro-key-gateway.git`（已公开 PUBLIC + MIT License；Leader 将直接提 Issues）
+- Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
 
 ## Completed
 
