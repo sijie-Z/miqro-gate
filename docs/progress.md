@@ -96,6 +96,12 @@
 - 真实供应商凭证契约测试全部 `WAITING_FOR_CREDENTIAL`；腾讯/智谱等 Anthropic 入口 Bearer 兼容性待真实核验。
 - 已知 flaky：`AuditChainIntegrityTest.preLockTimestampsDoNotAffectHeadOrdering`、`InProcessRequestCoalescerTest.shouldShareWithWaiters`（G4.x 排查清单）。
 
+## 发布后修复批次（2026-08-27，已合并 #68-#73）
+
+- #68 文档编号对齐；#69 中转接线（适配器热路径）+ 审计 14 项修复；#70 定时额度刷新
+- #71 审计记录归档；#72 **界面重设计（额度账本）**；#73 **SSRF DNS 固定 + coalescer 清理时序 + 审计链 jsonb 规范化**（3 个并行 Agent 完成，本地 978 tests 全绿，CI 双平台全绿）
+- 残余风险（记录于上）：SSRF 固定后的 Host 头为 IP 字面量（JDK 客户端限制，CDN/SNI 路由不受影响）、HttpProviderClient 生命周期内固定构造时 IP、真实凭证契约测试全部 WAITING_FOR_CREDENTIAL
+
 ## 界面重设计（2026-08-27，额度账本方向）
 
 - 用户反馈界面过空，参考腾讯云 TokenHub 控制台 → 浅色密集操作台（tokens.css 全新调色：canvas #F2F4F8、主色 #0066FF、表格 12px/44px 密度）。
