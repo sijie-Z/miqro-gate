@@ -111,6 +111,15 @@
 - **对照腾讯文档的能力映射（学习结论）**：模型密钥→上游凭证（本 Goal 补齐）；模型服务→Provider 产品实例（AdminProvidersView 已有）；模型 API/路由策略→与「Virtual Key 固定 1:1 绑定、不负载均衡」决策冲突，需 ADR 后另行决策；消费者/消费者组授权→用户+项目+Grants（已有）；限流（QPM/Token）→与「不限流」决策冲突；MCP/协议转换→CC Switch 职责。
 - **风险**：validate 仍为本地指纹比对，上游真实校验接线（G4.x）`WAITING_FOR_CREDENTIAL`；e2e 基线截图新增 admin-credentials（12 张）。
 
+## CI/机器人规范化（2026-08-27，向大项目看齐）
+
+- **CI 拆分**（原单一大 job → 6 个并行 job）：`backend-unit`（ubuntu+windows 单元测试，无 Docker，~2min）、`backend-integration`（Linux Testcontainers 全量）、`frontend`（lint/typecheck/vitest/build）、`frontend-e2e`（Playwright，**此前 e2e 从未进 CI，本次补上**）、`compose`、`security`。
+- **CodeRabbit**：`.coderabbit.yaml`（zh-CN、assertive、auto-review 覆盖 main/goal/feat/fix 分支）。
+- **Dependabot**：`.github/dependabot.yml`（npm/maven/github-actions 每周一自动更新 PR）。
+- **OSSF Scorecard**：`.github/workflows/scorecard.yml`（周度 + PR 增量 code scanning）。**首跑发现 9 个告警（1 high + 8 medium）并已修复**：stale.yml `contents: write` 权限过大 → 收紧为 issues/pull-requests write；6 个 GitHub Action 全部按 commit SHA 固定（checkout v4.4.0 / setup-java v4.9.1 / setup-node v4.4.0 / scorecard-action v2.4.0 / codeql-upload-sarif v3.37.9 / stale v9.1.0）。修复后 Scorecard check 全绿。
+- **Stale bot**：`.github/workflows/stale.yml`（issue 60 天/PR 30 天标记，+14 天关闭，dependencies/draft 豁免）。
+- **待办**：`aquasec/trivy:0.58.2` 测试镜像未固定 digest（网络受限未拉到，按相同标准补）；CodeRabbit 首次 review 待确认（OSS 仓库手动 review 要求已配置，下一 PR 生效）。
+
 ## G7.2 — 模型单价配置（对照腾讯云 AI 网关「成本管理」文档）
 
 - **来源**：用户提供 11 篇腾讯云 AI 网关文档逐一学习（新建/升级/详情/规格/删除/模型管理/缓存策略/降级策略/MCP 管理/MCP 上下线与健康检查/模型单价配置）。能力映射：密钥→G7.1；**模型单价→本 Goal**；新建/升级/规格/删除=云基础设施（单客户私有化不适用）；缓存策略=ADR-0008 默认关闭；降级策略/智能路由/限流=与锁定决策冲突（ADR 候选）；MCP 协议转换=CC Switch 职责。
