@@ -158,6 +158,11 @@
 - **文档**：frontend-design.md §1/§7、coding-standards.md、implementation-plan.md、ui-specification.md 已同步为 TDesign；视觉方向（浅色密集操作台 + 额度分段条）不变。
 - **风险**：组件库全量引入，主 chunk ~1.4MB（与 Element Plus 时期相同量级）；按需引入/手动分块列为非阻塞优化。视觉 review 仍待人工（spec §9）。
 
+## 待办需求（2026-08-28 leader 指示，细节待补充，暂不实施）
+
+1. **Kafka 引入**：leader 明确 Kafka 技术一定会用到。当前事件管道为 PostgreSQL NOTIFY + 有界内存队列；引入场景未定（用量事件流/跨服务集成/多实例）。落地前需 ADR。
+2. **报备合规 → 外部平台用户对接**：因报备原因存在外部测试平台，通过 user_id（电话或账号体系）对接；要求外部平台组测用户在网关侧有对应账号（用户同步）。落地前需 ADR（当前用户体系为本地 Argon2id，无外部身份源）。
+
 ## Known Blockers
 
 - 真实供应商凭证尚未提供；不阻塞 Mock 与本地契约开发。
