@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.controlplane.service;
 
 import com.miqroera.miqrokey.controlplane.dto.PriceSnapshotView;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import com.miqroera.miqrokey.domain.repository.PriceSnapshotRepository;
 import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
 import com.miqroera.miqrokey.domain.usage.PriceSnapshot;
@@ -25,10 +26,13 @@ public class AdminPriceService {
 
     private final PriceSnapshotRepository priceRepository;
     private final ProviderProductRepository productRepository;
+    private final AuditService auditService;
 
-    public AdminPriceService(PriceSnapshotRepository priceRepository, ProviderProductRepository productRepository) {
+    public AdminPriceService(PriceSnapshotRepository priceRepository, ProviderProductRepository productRepository,
+            AuditService auditService) {
         this.priceRepository = priceRepository;
         this.productRepository = productRepository;
+        this.auditService = auditService;
     }
 
     public List<PriceSnapshotView> listLatest() {
@@ -36,7 +40,7 @@ public class AdminPriceService {
     }
 
     @Transactional
-    public PriceSnapshotView create(UUID productId, String modelId, String tokenType, String currency,
+    public PriceSnapshotView create(UUID tenantId, UUID productId, String modelId, String tokenType, String currency,
             BigDecimal unitPrice, String source, UUID createdBy) {
         if (productRepository.findById(productId).isEmpty()) {
             throw new ApiException(HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND", "供应商产品不存在。");
@@ -49,6 +53,9 @@ public class AdminPriceService {
         }
         var snapshot = priceRepository.insert(new PriceSnapshot(UUID.randomUUID(), productId, modelId, type, currency,
                 unitPrice, Instant.now(), source, createdBy, Instant.now()));
+        auditService.record(tenantId, createdBy, "PRICE_CREATE", "PRICE_SNAPSHOT", snapshot.id(),
+                "{\"product\":\"" + productId + "\",\"model\":\"" + modelId + "\",\"tokenType\":\"" + type + "\"}",
+                null);
         return toView(snapshot);
     }
 

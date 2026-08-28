@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { MessagePlugin } from 'tdesign-vue-next';
+import { BrowseIcon, BrowseOffIcon } from 'tdesign-icons-vue-next';
 import { confirmDialog } from '@/utils/confirm';
 import type { PrimaryTableCol } from 'tdesign-vue-next';
 import * as api from '@/api';
@@ -153,8 +154,7 @@ onMounted(load);
             data-testid="webhook-create-secret"
           >
             <template #suffix-icon>
-              <t-icon
-                :name="showSecret ? 'browse-off' : 'browse'"
+              <component :is="showSecret ? BrowseOffIcon : BrowseIcon"
                 aria-label="切换 Secret 可见性"
                 role="button"
                 @click="showSecret = !showSecret"

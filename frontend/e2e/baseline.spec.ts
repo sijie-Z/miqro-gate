@@ -257,6 +257,19 @@ for (const viewport of VIEWPORTS) {
     await expect(page.getByTestId('page-title')).toBeVisible();
     await expect(page.getByText('MiQroGate').first()).toBeVisible();
 
+    // Local SVG icons (never the CDN iconfont: private deployments are
+    // offline). Each nav item must render an inline <svg>.
+    const navIconCount = await page.locator('.shell-nav svg').count();
+    expect(navIconCount).toBeGreaterThan(4);
+    // Every t-icon- classed element must be an <svg> — an <i>/<span>
+    // with that class would mean the CDN iconfont leaked back in.
+    const nonSvgIconClass = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('.shell-nav [class*="t-icon"]')).filter(
+        (el) => el.tagName !== 'svg' && el.tagName !== 'path',
+      ).length,
+    );
+    expect(nonSvgIconClass).toBe(0);
+
     if (viewport.width >= 768) {
       await expect(page.getByTestId('shell-nav')).toBeVisible();
     } else {
@@ -498,3 +511,4 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
   expect(violations.gradients).toBe(false);
   expect(violations.purple).toBe(false);
 });
+

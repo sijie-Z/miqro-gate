@@ -1,0 +1,19 @@
+language: zh-CN
+early_access: false
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+      - goal/*
+      - feat/*
+      - fix/*
+chat:
+  auto_reply: true

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { MessagePlugin } from 'tdesign-vue-next';
+import { BrowseIcon, BrowseOffIcon } from 'tdesign-icons-vue-next';
 import { confirmDialog } from '@/utils/confirm';
 import type { PrimaryTableCol } from 'tdesign-vue-next';
 import * as api from '@/api';
@@ -382,8 +383,7 @@ async function load() {
             data-testid="credential-create-secret"
           >
             <template #suffix-icon>
-              <t-icon
-                :name="showCreateSecret ? 'browse-off' : 'browse'"
+              <component :is="showCreateSecret ? BrowseOffIcon : BrowseIcon"
                 aria-label="切换 Secret 可见性"
                 role="button"
                 @click="showCreateSecret = !showCreateSecret"
@@ -504,12 +504,11 @@ async function load() {
           data-testid="credential-validate-secret"
         >
           <template #suffix-icon>
-            <t-icon
-              :name="showCandidateSecret ? 'browse-off' : 'browse'"
-              aria-label="切换 Secret 可见性"
-              role="button"
-              @click="showCandidateSecret = !showCandidateSecret"
-            />
+            <component :is="showCandidateSecret ? BrowseOffIcon : BrowseIcon"
+                aria-label="切换 Secret 可见性"
+                role="button"
+                @click="showCandidateSecret = !showCandidateSecret"
+              />
           </template>
         </t-input>
         <t-alert
@@ -561,12 +560,11 @@ async function load() {
           data-testid="credential-rotate-secret"
         >
           <template #suffix-icon>
-            <t-icon
-              :name="showRotateSecret ? 'browse-off' : 'browse'"
-              aria-label="切换 Secret 可见性"
-              role="button"
-              @click="showRotateSecret = !showRotateSecret"
-            />
+            <component :is="showRotateSecret ? BrowseOffIcon : BrowseIcon"
+                aria-label="切换 Secret 可见性"
+                role="button"
+                @click="showRotateSecret = !showRotateSecret"
+              />
           </template>
         </t-input>
         <t-alert

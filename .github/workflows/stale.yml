@@ -1,0 +1,31 @@
+# Stale bot — auto-mark inactive issues/PRs and close the truly idle ones.
+name: Stale
+on:
+  schedule:
+    - cron: "17 3 * * *" # daily ~11:17 CST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          stale-issue-message: "此 Issue 已 60 天无活动，将被标记为过期；若仍在进行请回复或更新标签。"
+          stale-pr-message: "此 PR 已 30 天无活动，将被标记为过期；若仍在进行请回复或更新标签。"
+          close-issue-message: "此 Issue 因长期无活动已自动关闭。"
+          close-pr-message: "此 PR 因长期无活动已自动关闭。"
+          days-before-issue-stale: 60
+          days-before-pr-stale: 30
+          days-before-issue-close: 14
+          days-before-pr-close: 14
+          stale-issue-label: "stale"
+          stale-pr-label: "stale"
+          exempt-issue-labels: "pinned,security,bug,enhancement"
+          exempt-pr-labels: "dependencies,draft"
+          operations-per-run: 100

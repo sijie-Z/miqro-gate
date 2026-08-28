@@ -45,8 +45,9 @@ public class AdminPriceController {
     @PostMapping
     public ResponseEntity<PriceSnapshotView> create(@Valid @RequestBody CreateRequest body) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(priceService.create(body.providerProductId(), body.modelId(), body.tokenType(), body.currency(),
-                        body.unitPrice(), body.source(), userContext.getUser().id()));
+                .body(priceService.create(userContext.getUser().tenantId(), body.providerProductId(), body.modelId(),
+                        body.tokenType(), body.currency(), body.unitPrice(), body.source(),
+                        userContext.getUser().id()));
     }
 
     public record CreateRequest(@NotNull UUID providerProductId, @NotBlank @Size(max = 200) String modelId,
