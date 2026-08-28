@@ -6,7 +6,7 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G7.2`（模型单价配置：对照腾讯云 AI 网关「成本管理-模型单价」能力，补齐定价管理 API + 门户）
+- Current goal: `G7.3`（成本报表页：按项目/按天成本分摊视图 + CSV 导出，纯前端复用 adminUsageSummary）
 - Goal status: `IN_PROGRESS`（实现完成，验证中）
 - Last updated: `2026-08-27 CST`
 - Branch: `goal/g7.2-price-catalog`
@@ -110,6 +110,14 @@
 - **验证**：vitest 31/31（新增 AdminCredentialsView 10 个）、Playwright 18/18（新增凭证页 baseline + 确认门禁回归）、lint/typecheck/build 全 PASS。
 - **对照腾讯文档的能力映射（学习结论）**：模型密钥→上游凭证（本 Goal 补齐）；模型服务→Provider 产品实例（AdminProvidersView 已有）；模型 API/路由策略→与「Virtual Key 固定 1:1 绑定、不负载均衡」决策冲突，需 ADR 后另行决策；消费者/消费者组授权→用户+项目+Grants（已有）；限流（QPM/Token）→与「不限流」决策冲突；MCP/协议转换→CC Switch 职责。
 - **风险**：validate 仍为本地指纹比对，上游真实校验接线（G4.x）`WAITING_FOR_CREDENTIAL`；e2e 基线截图新增 admin-credentials（12 张）。
+
+## G7.3 — 成本报表页（成本账本闭环，零后端改动）
+
+- 对应腾讯 AI 网关「成本管理」报表能力；G7.2 补了单价录入、G4.3 有成本分摊后端，本 Goal 把分摊结果可视化。
+- `AdminCostView`（数据与告警组「成本报表」）：按项目/按天双视图切换、近 7/30/93 天窗口、4 统计卡（分摊总成本/上游已付/请求/Tokens）、项目成本占比条形、**导出 CSV**（前端生成，BOM 防乱码）。
+- 复用既有 `GET /api/v1/admin/usage/summary?groupBy=project|day`（G4.1），后端零改动。
+- **验证**：vitest 39/39（新增 4 个）、Playwright 20/20（新增成本页 baseline，14 张）、lint/typecheck/build 全 PASS。
+- **隐私**：报表只展示分摊金额与 token 数等元数据，无任何正文。
 
 ## CI/机器人规范化（2026-08-27，向大项目看齐）
 

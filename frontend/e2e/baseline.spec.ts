@@ -184,6 +184,53 @@ async function mockApi(page: Page, admin = false) {
       ]),
     }),
   );
+  await page.route('**/api/v1/admin/usage/summary?*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        groupBy: 'project',
+        groups: [
+          {
+            groupKey: 'core-ai',
+            label: 'core-ai',
+            requests: { upstream: 120, coalesced: 0, l1Hit: 0, l2Hit: 0 },
+            tokens: { input: 240000, output: 120000, cacheRead: 0, cacheCreation: 0 },
+            cost: {
+              upstreamPaid: '0.8400',
+              gatewayObserved: '0.8400',
+              projectAllocated: '0.8400',
+              savedByGatewayCache: '0.0000',
+            },
+          },
+          {
+            groupKey: 'tools',
+            label: 'tools',
+            requests: { upstream: 60, coalesced: 0, l1Hit: 0, l2Hit: 0 },
+            tokens: { input: 60000, output: 30000, cacheRead: 0, cacheCreation: 0 },
+            cost: {
+              upstreamPaid: '0.2100',
+              gatewayObserved: '0.2100',
+              projectAllocated: '0.2100',
+              savedByGatewayCache: '0.0000',
+            },
+          },
+        ],
+        totals: {
+          groupKey: 'total',
+          label: '合计',
+          requests: { upstream: 180, coalesced: 0, l1Hit: 0, l2Hit: 0 },
+          tokens: { input: 300000, output: 150000, cacheRead: 0, cacheCreation: 0 },
+          cost: {
+            upstreamPaid: '1.0500',
+            gatewayObserved: '1.0500',
+            projectAllocated: '1.0500',
+            savedByGatewayCache: '0.0000',
+          },
+        },
+      }),
+    }),
+  );
   await page.route('**/api/v1/admin/users', (route) =>
     route.fulfill({
       status: 200,
@@ -263,10 +310,11 @@ for (const viewport of VIEWPORTS) {
     expect(navIconCount).toBeGreaterThan(4);
     // Every t-icon- classed element must be an <svg> — an <i>/<span>
     // with that class would mean the CDN iconfont leaked back in.
-    const nonSvgIconClass = await page.evaluate(() =>
-      Array.from(document.querySelectorAll('.shell-nav [class*="t-icon"]')).filter(
-        (el) => el.tagName !== 'svg' && el.tagName !== 'path',
-      ).length,
+    const nonSvgIconClass = await page.evaluate(
+      () =>
+        Array.from(document.querySelectorAll('.shell-nav [class*="t-icon"]')).filter(
+          (el) => el.tagName !== 'svg' && el.tagName !== 'path',
+        ).length,
     );
     expect(nonSvgIconClass).toBe(0);
 
@@ -459,6 +507,19 @@ test('dangerous actions wait for the confirmation dialog', async ({ page }) => {
   await expect.poll(() => rotateCalls).toBe(1);
 });
 
+test('admin cost report page baseline at 1440x900', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/cost');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('cost-project-table')).toBeVisible();
+  await expect(page.getByTestId('cost-project-table')).toContainText('core-ai');
+  await page.screenshot({
+    path: 'test-results/baseline/admin-cost-1440x900.png',
+    fullPage: true,
+  });
+});
+
 test('forbidden aesthetics are absent from the rendered shell', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockApi(page, true);
@@ -511,4 +572,3 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
   expect(violations.gradients).toBe(false);
   expect(violations.purple).toBe(false);
 });
-

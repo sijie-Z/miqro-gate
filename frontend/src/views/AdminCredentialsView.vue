@@ -383,7 +383,8 @@ async function load() {
             data-testid="credential-create-secret"
           >
             <template #suffix-icon>
-              <component :is="showCreateSecret ? BrowseOffIcon : BrowseIcon"
+              <component
+                :is="showCreateSecret ? BrowseOffIcon : BrowseIcon"
                 aria-label="切换 Secret 可见性"
                 role="button"
                 @click="showCreateSecret = !showCreateSecret"
@@ -504,11 +505,12 @@ async function load() {
           data-testid="credential-validate-secret"
         >
           <template #suffix-icon>
-            <component :is="showCandidateSecret ? BrowseOffIcon : BrowseIcon"
-                aria-label="切换 Secret 可见性"
-                role="button"
-                @click="showCandidateSecret = !showCandidateSecret"
-              />
+            <component
+              :is="showCandidateSecret ? BrowseOffIcon : BrowseIcon"
+              aria-label="切换 Secret 可见性"
+              role="button"
+              @click="showCandidateSecret = !showCandidateSecret"
+            />
           </template>
         </t-input>
         <t-alert
@@ -560,11 +562,12 @@ async function load() {
           data-testid="credential-rotate-secret"
         >
           <template #suffix-icon>
-            <component :is="showRotateSecret ? BrowseOffIcon : BrowseIcon"
-                aria-label="切换 Secret 可见性"
-                role="button"
-                @click="showRotateSecret = !showRotateSecret"
-              />
+            <component
+              :is="showRotateSecret ? BrowseOffIcon : BrowseIcon"
+              aria-label="切换 Secret 可见性"
+              role="button"
+              @click="showRotateSecret = !showRotateSecret"
+            />
           </template>
         </t-input>
         <t-alert

@@ -154,7 +154,8 @@ onMounted(load);
             data-testid="webhook-create-secret"
           >
             <template #suffix-icon>
-              <component :is="showSecret ? BrowseOffIcon : BrowseIcon"
+              <component
+                :is="showSecret ? BrowseOffIcon : BrowseIcon"
                 aria-label="切换 Secret 可见性"
                 role="button"
                 @click="showSecret = !showSecret"
