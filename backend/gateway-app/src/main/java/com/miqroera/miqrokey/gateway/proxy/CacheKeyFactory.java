@@ -24,16 +24,16 @@ import java.util.Set;
  * Key = SHA-256 of
  * {@code tenantId|projectId|virtualKeyId|productId|model|purpose|scope} where
  * {@code scope} is the <em>semantic scope</em> of the conversation: the system
- * prompt plus the <b>last user message</b> (aligned with Tencent's
- * "latest user message" and Higress's GJSON content extraction — see
+ * prompt plus the <b>last user message</b> (aligned with Tencent's "latest user
+ * message" and Higress's GJSON content extraction — see
  * docs/ai-gateway-comparison.md). Earlier conversation turns do not change the
  * key, so a repeated question inside different histories still hits the cache.
  * </p>
  *
  * <p>
  * When the body is not a recognized chat shape (no extractable user message),
- * the scope falls back to the full normalized body — the previous behavior —
- * so non-chat payloads stay safe.
+ * the scope falls back to the full normalized body — the previous behavior — so
+ * non-chat payloads stay safe.
  * </p>
  *
  * <p>
@@ -57,9 +57,8 @@ public final class CacheKeyFactory {
     }
 
     /**
-     * Computes the cache key. Chat-shaped bodies use the semantic scope
-     * (system + last user message); anything else falls back to the full
-     * normalized body.
+     * Computes the cache key. Chat-shaped bodies use the semantic scope (system +
+     * last user message); anything else falls back to the full normalized body.
      */
     public CacheKey compute(AuthContext ctx, String modelName, byte[] body) {
         String scope = semanticScope(body);
@@ -73,9 +72,9 @@ public final class CacheKeyFactory {
     /**
      * Extracts the semantic scope of a chat request: {@code "<system>|<last
      * user message>"}. Handles OpenAI chat, Anthropic messages, and OpenAI
-     * Responses ({@code input}) shapes, including array-form content parts.
-     * Returns the empty string when no user message is extractable, which
-     * makes the caller fall back to the full-body key.
+     * Responses ({@code input}) shapes, including array-form content parts. Returns
+     * the empty string when no user message is extractable, which makes the caller
+     * fall back to the full-body key.
      */
     public String semanticScope(byte[] body) {
         if (body == null || body.length == 0) {
@@ -120,8 +119,8 @@ public final class CacheKeyFactory {
     }
 
     /**
-     * Extracts plain text from a message content node: a string, or an array
-     * of content parts ({@code {"type":"text","text":...}}), or plain strings.
+     * Extracts plain text from a message content node: a string, or an array of
+     * content parts ({@code {"type":"text","text":...}}), or plain strings.
      */
     private static String textContent(JsonNode content) {
         if (content == null || content.isNull()) {
