@@ -43,7 +43,7 @@
         <maven-enforcer.version>3.5.0</maven-enforcer.version>
         <spotless.version>2.44.1</spotless.version>
         <flatten.version>1.6.0</flatten.version>
-        <maven-shade-plugin.version>3.6.0</maven-shade-plugin.version>
+        <maven-shade-plugin.version>3.6.2</maven-shade-plugin.version>
     </properties>
 
     <dependencyManagement>
