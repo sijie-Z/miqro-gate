@@ -181,7 +181,13 @@ function formatTime(iso: string): string {
 
 <template>
   <div class="usage-page">
-    <PageHeader title="Usage" description="仅统计你名下 Virtual Key 产生的用量。" />
+    <PageHeader title="Usage" description="仅统计你名下 Virtual Key 产生的用量。">
+      <template #actions>
+        <t-button variant="outline" data-testid="usage-export" @click="exportRecords">
+          导出 CSV
+        </t-button>
+      </template>
+    </PageHeader>
 
     <!-- Summary -->
     <section class="summary-panel">
