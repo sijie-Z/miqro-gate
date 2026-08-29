@@ -1,0 +1,9 @@
+# OSSF Scorecard project configuration.
+# codeql.yml requires `security-events: write` to upload SARIF results —
+# the official CodeQL workflow template ships this permission, and
+# removing it would break code scanning. The Scorecard token-permissions
+# check flags it, so it is ignored for that workflow only.
+checks:
+  token-permissions:
+    ignore:
+      - .github/workflows/codeql.yml
