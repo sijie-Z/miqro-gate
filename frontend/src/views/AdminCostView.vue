@@ -34,6 +34,13 @@ const totalTokens = computed(
     (projectSummary.value?.totals.tokens.output ?? 0),
 );
 
+const cacheSaved = computed(() => projectSummary.value?.totals.cost.savedByGatewayCache ?? '0');
+const cacheHits = computed(
+  () =>
+    (projectSummary.value?.totals.requests.l1Hit ?? 0) +
+    (projectSummary.value?.totals.requests.l2Hit ?? 0),
+);
+
 function fromIso(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - days);
@@ -195,6 +202,11 @@ onMounted(load);
         <span class="mk-stat-label">Tokens</span>
         <span class="mk-stat-value mk-num">{{ formatCount(totalTokens) }}</span>
         <span class="mk-stat-hint">输入 + 输出</span>
+      </div>
+      <div class="mk-stat-card">
+        <span class="mk-stat-label">缓存节省</span>
+        <span class="mk-stat-value mk-num">{{ formatCost(cacheSaved) }}</span>
+        <span class="mk-stat-hint">命中 {{ formatCount(cacheHits) }} 次 · 未调用上游</span>
       </div>
     </div>
 

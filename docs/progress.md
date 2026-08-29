@@ -6,7 +6,7 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G7.3`（成本报表页：按项目/按天成本分摊视图 + CSV 导出，纯前端复用 adminUsageSummary）
+- Current goal: `G7.4`（响应缓存启用：对齐腾讯 L1 精确缓存方案，ADR-0009）
 - Goal status: `IN_PROGRESS`（实现完成，验证中）
 - Last updated: `2026-08-27 CST`
 - Branch: `goal/g7.2-price-catalog`
@@ -157,6 +157,15 @@
 - **验证**：vitest **21/21**、Playwright **15/15**（production build + 4 viewport baseline）、lint/typecheck/build 全 PASS。
 - **文档**：frontend-design.md §1/§7、coding-standards.md、implementation-plan.md、ui-specification.md 已同步为 TDesign；视觉方向（浅色密集操作台 + 额度分段条）不变。
 - **风险**：组件库全量引入，主 chunk ~1.4MB（与 Element Plus 时期相同量级）；按需引入/手动分块列为非阻塞优化。视觉 review 仍待人工（spec §9）。
+
+## G7.4 — 响应缓存启用（ADR-0009，对齐腾讯 L1 精确缓存方案）
+
+- **决策**：ADR-0009 放行缓存，替换 ADR-0003「v1 不做缓存」。结构对齐腾讯「缓存策略」文档，本土化差异：**存储用 PostgreSQL `cache_entry` 表 + Caffeine 内存（不引 Redis/向量库，ADR-0005）**；L2 语义缓存不启用（依赖向量库，接口预留）。
+- **启用条件（比腾讯更严的双 opt-in）**：`MIQROKEY_CACHE_ENABLED=true`（默认 false，生产零行为变化）+ Key `cachePolicy=ENABLED` + 客户端头 `X-MiQroKey-Cacheable: 1` + 无工具字段 + 非空 body。工具调用永不缓存。
+- **本次交付**：ADR-0009；KeysView 创建表单「缓存策略」选项（默认关闭）+ 列表缓存列；成本报表页「缓存节省」统计卡（`savedByGatewayCache` + l1/l2 命中计数）；configuration-reference §9 重写。
+- **既有资产**（零后端改动）：cache-spi 全实现（Caffeine/Postgres/Noop Provider）、`cache_entry` 表（V5）、CacheEligibility/CacheKeyFactory/SseReplayEngine、端到端测试（VirtualKeyAuthContractTest：字节一致命中/无 opt-in 不缓存/错误不缓存）。
+- **验证**：vitest 40/40（新增缓存策略选项与列表断言 + 成本页缓存卡）、Playwright 20/20、lint/typecheck/build 全 PASS。
+- **风险**：Coding Agent 流量缓存收益存疑（ADR-0003 记录：上下文多变易过期）——缓存键策略对齐腾讯「最新用户消息」列为后续优化项；语义缓存维持禁用。
 
 ## 待办需求（2026-08-28 leader 指示，细节待补充，暂不实施）
 

@@ -49,6 +49,7 @@ export interface CreateVirtualKeyRequest {
   credentialGrantId: string;
   purpose: VirtualKeyPurpose;
   allowedModels?: string[];
+  cachePolicy?: 'DISABLED' | 'ENABLED';
 }
 
 export interface CreateVirtualKeyResponse {

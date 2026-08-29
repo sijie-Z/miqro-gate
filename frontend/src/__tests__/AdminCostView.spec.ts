@@ -105,6 +105,9 @@ describe('AdminCostView', () => {
     expect(wrapper.text()).toContain('¥0.4000');
     expect(wrapper.text()).toContain('core-ai');
     expect(wrapper.text()).toContain('75%'); // 0.3/0.4 share for core-ai
+    // Cache savings card (L1/L2 hit counters + saved cost).
+    expect(wrapper.text()).toContain('缓存节省');
+    expect(wrapper.text()).toContain('¥0.0000');
   });
 
   it('switches to the day table', async () => {
