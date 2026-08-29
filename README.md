@@ -59,6 +59,7 @@ MiQroEra 面向企业内部 AI 编程场景的凭证虚拟化与用量治理系�
 - [开发路线图](docs/roadmap.md)
 - [发布与交付清单](docs/release-checklist.md)
 - [架构决策记录](docs/decisions/README.md)
+- [与腾讯 / 阿里云 AI 网关对比](docs/ai-gateway-comparison.md)
 
 ## 当前状态
 
