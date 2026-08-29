@@ -30,7 +30,7 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
         <!-- Framework versions managed by Spring Boot BOM -->
-        <spring-boot.version>3.4.5</spring-boot.version>
+        <spring-boot.version>4.1.1</spring-boot.version>
 
         <!-- Test dependency versions -->
         <archunit.version>1.3.0</archunit.version>
