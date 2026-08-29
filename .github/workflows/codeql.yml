@@ -1,0 +1,52 @@
+# CodeQL — static analysis (SAST) on push and PRs.
+name: CodeQL
+
+on:
+  push:
+    branches: [main, develop, goal/*, feat/*, fix/*]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: "31 4 * * 2" # weekly, Tuesday ~12:31 CST
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  security-events: write
+  contents: read
+  actions: read
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [java-kotlin, javascript-typescript]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@a45bef097606dca6eac8285c279babedd70e6dfd # v3.37.9
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Set up JDK 21 (Java analysis)
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          java-version: 21
+          distribution: temurin
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@a45bef097606dca6eac8285c279babedd70e6dfd # v3.37.9
+
+      - name: Perform analysis
+        uses: github/codeql-action/analyze@a45bef097606dca6eac8285c279babedd70e6dfd # v3.37.9
+        with:
+          category: "/language:${{ matrix.language }}"
