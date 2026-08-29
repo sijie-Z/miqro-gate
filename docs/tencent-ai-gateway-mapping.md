@@ -1,4 +1,4 @@
-# 腾讯云 AI 网关文档吸收记录
+# 腾讯云 / 阿里云 AI 网关文档吸收记录
 
 > 学习来源：https://cloud.tencent.com/document/product/1826 （AI 网关产品文档）
 > 目的：逐篇吸收腾讯云 AI 网关的产品能力，映射到 MiQroGate 的领域模型，能落地的落地、冲突的走 ADR。此文件随吸收进度持续更新。
@@ -28,10 +28,45 @@
 | 19 | 服务来源 (134861) | Nacos/PolarisMesh/私有 DNS 批量接入 | 单客户私有化，无注册中心 | 不适用 |
 | 20 | 智能路由概述 (134805) | 模型名称/权重/意图识别/参数/标签/延迟优先 6 种路由 | 「不跨供应商、不负载均衡」 | 冲突 |
 
+
+## 阿里云 AI 网关（Higress 内核）吸收记录（2026-08-29）
+
+入口：阿里云 API 网关产品下的「AI 网关」（基于开源 Higress，CNCF Sandbox，Istio+Envoy 内核），支持 20+ 供应商、MCP、Agent、AI 安全、AI 插件（Wasm）、AI 可观测。
+
+### 阿里云 AI 缓存插件（ai-cache）要点
+
+- **存储**：Redis 必填（serviceName/port/认证），可选向量库（dashvector + embedding）做语义缓存。
+- **缓存键**：**GJSON PATH 从请求体提取** —— 默认 `messages.@reverse.0.content`（最后一条消息），支持按 `role=="user"` 过滤、拼接多条 user 消息。与腾讯「最新用户消息」键策略异曲同工。
+- **缓存值**：**提取 content 字段 + 响应模板重组**（非流式 `choices.0.message.content` / 流式 `choices.0.delta.content`，returnResponseTemplate 拼回），不是原样字节重放。
+- **TTL 默认 0（永不过期）**；`x-higress-skip-ai-cache: on` 显式跳过（与我们的 opt-in 反向）。
+- **隔离**：cacheKeyPrefix 按环境/租户/应用；语义模式 cacheKeyStrategy（lastQuestion/allQuestions/disabled）+ 相似度阈值。
+- 执行阶段：认证阶段，优先级 10。
+
+### 三方对比（腾讯 / 阿里云 / MiQroGate）
+
+| 维度 | 腾讯 TSE | 阿里云 Higress | MiQroGate |
+|---|---|---|---|
+| 内核 | 自研 TSE | 开源 Higress（Istio+Envoy） | 自研 WebFlux 透明代理 |
+| L1 存储 | Redis | **Redis（必填）** | Caffeine 内存 + PostgreSQL（不引 Redis，ADR-0005） |
+| 缓存键 | 最新用户消息/历史对话 | **GJSON 提取消息 content** | 归一化请求 SHA-256（**优化项：升级为提取最后一条 user 消息**） |
+| 缓存值 | 原样响应 | **提取 content + 模板重组** | **原样字节重放**（SSE，更忠实） |
+| TTL | 60–604800s 默认 3600 | **默认 0（永不过期）** | 默认 300s |
+| 跳过机制 | API 级开关 | 显式跳过头（默认缓存） | **双重 opt-in**（默认不缓存，Key+头） |
+| 语义缓存 | 向量库 VDB | dashvector + embedding | 不启用 |
+| 命中统计 | 成本管理页 | Tokens 观测 + 命中率 | 成本报表页节省卡 |
+| 内容安全 | 数据脱敏 | 内容审核插件 + Token 限流 | 不碰正文（设计决策） |
+| 主打场景 | TokenHub 控制台 | **Claude Code 迁移（Anthropic 停服中国）** | CC Switch 集成（同场景） |
+
+### 对我们项目的启示
+
+1. **两家缓存键都用「消息内容提取」**（腾讯最新用户消息 / Higress GJSON content）——印证 progress.md 记录的优化项：把我们的全请求 hash 键升级为「提取最后一条 user 消息做键」，多轮对话命中率可显著提升（ADR-0009 后续优化）。
+2. Higress 默认 TTL=0 不采纳（我们默认 300s）；「提取-重组」不采纳（字节重放更忠实，工具/多模态不坏）。
+3. 阿里云主打 Claude Code 迁移场景 = 我们的 CC Switch 集成场景，市场方向一致。
+
 ## 能力全景结论
 
-- **已落地**：模型密钥（G7.1 上游凭证门户）、模型单价（G7.2 定价目录）。
+- **已落地**：模型密钥（G7.1 上游凭证门户）、模型单价（G7.2 定价目录）、L1 响应缓存（G7.4，ADR-0009，腾讯 L1 方案本土化）、成本报表（G7.3）。
 - **已有对应**：模型服务（Provider 产品实例/AdminProvidersView）、消费者与授权（用户/项目/Grants）、调用方式（Base URL + Bearer，创建 Key 即下发）、可观测性（用量/成本/告警/监控 profile）、细粒度权限（Virtual Key 模型级授权）。
 - **设计上天然满足**：数据脱敏（不保存正文）、日志安全（无正文日志）。
-- **冲突（需 ADR 才可做）**：智能路由 6 策略、降级/Fallback、限流（QPM/Token）、缓存启用、参数改写、MCP/协议转换。
+- **冲突（需 ADR 才可做）**：智能路由 6 策略、降级/Fallback、限流（QPM/Token）、参数改写、MCP/协议转换、语义缓存（向量库依赖）。
 - **不适用（基础设施）**：新建/升级/删除/规格（VPC/节点/LB/回收站）、证书/域名、服务来源（注册中心）。
