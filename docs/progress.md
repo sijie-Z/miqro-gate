@@ -6,7 +6,7 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G7.4`（响应缓存启用：对齐腾讯 L1 精确缓存方案，ADR-0009）
+- Current goal: `G7.4`（响应缓存启用：对齐腾讯 L1 精确缓存方案，ADR-0009）—— 已合并 main
 - Goal status: `IN_PROGRESS`（实现完成，验证中）
 - Last updated: `2026-08-27 CST`
 - Branch: `goal/g7.2-price-catalog`
@@ -118,6 +118,12 @@
 - 复用既有 `GET /api/v1/admin/usage/summary?groupBy=project|day`（G4.1），后端零改动。
 - **验证**：vitest 39/39（新增 4 个）、Playwright 20/20（新增成本页 baseline，14 张）、lint/typecheck/build 全 PASS。
 - **隐私**：报表只展示分摊金额与 token 数等元数据，无任何正文。
+
+## 主线合并（2026-08-29）
+
+- **PR #77 以 merge commit 合并到 main**（43cbcdd）：G7.1 凭证门户、G7.2 定价目录、G7.3 成本报表、G7.4 响应缓存（ADR-0009）、TDesign 迁移与修复、CI 拆分与机器人、基础设施（Issue 模板/SECURITY.md/CodeQL/npm audit）全部进入主线。
+- **develop 分支**领先 main 4 个 commit（缓存键升级、bundle 拆分/用量导出/部署信息页、CI 路径过滤、基础设施补全），待后续 PR 合回。
+- 合并方式选择 merge commit（非 squash）：develop 从该分支拉出，merge commit 保持历史同源，后续合并无重放冲突。
 
 ## CI/机器人规范化（2026-08-27，向大项目看齐）
 
