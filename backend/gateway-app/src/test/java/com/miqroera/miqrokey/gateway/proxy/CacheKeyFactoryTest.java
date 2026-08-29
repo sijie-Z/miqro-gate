@@ -115,4 +115,75 @@ class CacheKeyFactoryTest {
             assertThat(key.hex()).doesNotContain("gpt-4o-mini");
         }
     }
+
+    @Nested
+    @DisplayName("Semantic scope (system + last user message)")
+    class SemanticScope {
+
+        @Test
+        @DisplayName("same last user message hits across different histories (OpenAI chat)")
+        void chatHistoryIrrelevant() {
+            byte[] shortHist = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] longHist = json(
+                    "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"first\"},"
+                            + "{\"role\":\"assistant\",\"content\":\"first reply\"},"
+                            + "{\"role\":\"user\",\"content\":\"hi\"}]}");
+            assertThat(factory.compute(ctx, "gpt-4o-mini", shortHist))
+                    .isEqualTo(factory.compute(ctx, "gpt-4o-mini", longHist));
+        }
+
+        @Test
+        @DisplayName("same for Anthropic messages shape")
+        void anthropicShape() {
+            byte[] a = json("{\"model\":\"claude-3-7-sonnet\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] b = json("{\"model\":\"claude-3-7-sonnet\",\"messages\":[{\"role\":\"assistant\",\"content\":\"x\"},"
+                    + "{\"role\":\"user\",\"content\":\"hi\"}]}");
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", a))
+                    .isEqualTo(factory.compute(ctx, "claude-3-7-sonnet", b));
+        }
+
+        @Test
+        @DisplayName("same for OpenAI Responses input shape including plain strings")
+        void responsesShape() {
+            byte[] a = json("{\"model\":\"gpt-5.2\",\"input\":[\"hi\"]}");
+            byte[] b = json("{\"model\":\"gpt-5.2\",\"input\":[{\"role\":\"user\",\"content\":\"first\"},"
+                    + "{\"role\":\"assistant\",\"content\":\"reply\"},\"hi\"]}");
+            assertThat(factory.compute(ctx, "gpt-5.2", a)).isEqualTo(factory.compute(ctx, "gpt-5.2", b));
+        }
+
+        @Test
+        @DisplayName("system prompt is part of the scope: different system misses")
+        void systemMatters() {
+            byte[] a = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"system\",\"content\":\"be terse\"},"
+                    + "{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] b = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"system\",\"content\":\"be verbose\"},"
+                    + "{\"role\":\"user\",\"content\":\"hi\"}]}");
+            assertThat(factory.compute(ctx, "gpt-4o-mini", a)).isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", b));
+        }
+
+        @Test
+        @DisplayName("array content parts are flattened into the scope")
+        void arrayContentParts() {
+            byte[] a = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":["
+                    + "{\"type\":\"text\",\"text\":\"hi\"},{\"type\":\"text\",\"text\":\" there\"}]}]}");
+            byte[] b = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi there\"}]}");
+            assertThat(factory.compute(ctx, "gpt-4o-mini", a)).isEqualTo(factory.compute(ctx, "gpt-4o-mini", b));
+        }
+
+        @Test
+        @DisplayName("no extractable user message falls back to the full body")
+        void fallbackWithoutUserMessage() {
+            byte[] a = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"assistant\",\"content\":\"only\"}]}");
+            byte[] b = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"assistant\",\"content\":\"other\"}]}");
+            assertThat(factory.compute(ctx, "gpt-4o-mini", a)).isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", b));
+        }
+
+        @Test
+        @DisplayName("different last user message still misses")
+        void differentQuestionMisses() {
+            byte[] a = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] b = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"bye\"}]}");
+            assertThat(factory.compute(ctx, "gpt-4o-mini", a)).isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", b));
+        }
+    }
 }
