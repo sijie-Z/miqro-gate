@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { DialogPlugin } from 'tdesign-vue-next';
+import { confirmDialog } from '@/utils/confirm';
 import type { PrimaryTableCol } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
@@ -86,7 +86,7 @@ async function toggle(rule: AlertRule) {
 
 async function remove(rule: AlertRule) {
   try {
-    await DialogPlugin.confirm({
+    await confirmDialog({
       header: '删除规则',
       body: `删除告警规则「${rule.name}」。`,
       confirmBtn: '删除',

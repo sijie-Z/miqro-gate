@@ -1,0 +1,43 @@
+# OSSF Scorecard — supply-chain security posture, weekly + on PRs touching
+# workflow/security files. Publishes results to the Security dashboard.
+name: Scorecard supply-chain security
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 4 * * 1" # weekly, Monday ~12:23 CST
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/**"
+      - "deploy/security/**"
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # upload SARIF
+      id-token: write # needed for publish-results
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@62b2cac7ed8198b15735ed49ab1e5cf35480ba46 # v2.4.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@a45bef097606dca6eac8285c279babedd70e6dfd # v3.37.9
+        with:
+          sarif_file: results.sarif

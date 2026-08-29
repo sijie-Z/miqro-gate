@@ -1,7 +1,25 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { DialogPlugin } from 'tdesign-vue-next';
+import {
+  ChartBarIcon,
+  DashboardIcon,
+  DeleteIcon,
+  DownloadIcon,
+  ErrorCircleIcon,
+  FilePasteIcon,
+  FolderOpenIcon,
+  LayersIcon,
+  LockOnIcon,
+  MoneyIcon,
+  NotificationIcon,
+  PoweroffIcon,
+  SecuredIcon,
+  ShopIcon,
+  UserIcon,
+  UsergroupCircleIcon,
+} from 'tdesign-icons-vue-next';
+import { confirmDialog } from '@/utils/confirm';
 import { useAuthStore } from '@/stores/auth';
 
 const route = useRoute();
@@ -13,36 +31,38 @@ const isAdmin = computed(() => auth.user?.role === 'SYSTEM_ADMIN');
 interface NavItem {
   name: string;
   label: string;
-  icon: string;
+  icon: Component;
 }
 
 const regularNav: NavItem[] = [
-  { name: 'overview', label: '总览', icon: 'dashboard' },
-  { name: 'keys', label: 'Virtual Keys', icon: 'lock-on' },
-  { name: 'usage', label: 'Usage', icon: 'chart-bar' },
-  { name: 'profile', label: 'Profile', icon: 'user' },
+  { name: 'overview', label: '总览', icon: DashboardIcon },
+  { name: 'keys', label: 'Virtual Keys', icon: LockOnIcon },
+  { name: 'usage', label: 'Usage', icon: ChartBarIcon },
+  { name: 'profile', label: 'Profile', icon: UserIcon },
 ];
 
 const orgNav: NavItem[] = [
-  { name: 'users', label: 'Users', icon: 'user' },
-  { name: 'teams', label: 'Teams', icon: 'usergroup' },
-  { name: 'projects', label: 'Projects', icon: 'folder-open' },
-  { name: 'grants', label: 'Grants', icon: 'lock-on' },
+  { name: 'users', label: 'Users', icon: UserIcon },
+  { name: 'teams', label: 'Teams', icon: UsergroupCircleIcon },
+  { name: 'projects', label: 'Projects', icon: FolderOpenIcon },
+  { name: 'grants', label: 'Grants', icon: LockOnIcon },
 ];
 
 const providerNav: NavItem[] = [
-  { name: 'providers', label: 'Providers', icon: 'shop' },
-  { name: 'plans', label: 'Plans', icon: 'layers' },
-  { name: 'credentials', label: 'Credentials', icon: 'secured' },
+  { name: 'providers', label: 'Providers', icon: ShopIcon },
+  { name: 'plans', label: 'Plans', icon: LayersIcon },
+  { name: 'credentials', label: 'Credentials', icon: SecuredIcon },
+  { name: 'prices', label: '定价', icon: MoneyIcon },
 ];
 
 const opsNav: NavItem[] = [
-  { name: 'admin-usage', label: 'Usage', icon: 'chart-bar' },
-  { name: 'exports', label: 'Exports', icon: 'download' },
-  { name: 'deletions', label: 'Deletions', icon: 'delete' },
-  { name: 'webhooks', label: 'Webhooks', icon: 'notification' },
-  { name: 'alert-rules', label: 'Alert Rules', icon: 'error-circle' },
-  { name: 'audit', label: 'Audit', icon: 'file-paste' },
+  { name: 'admin-usage', label: 'Usage', icon: ChartBarIcon },
+  { name: 'cost', label: '成本报表', icon: MoneyIcon },
+  { name: 'exports', label: 'Exports', icon: DownloadIcon },
+  { name: 'deletions', label: 'Deletions', icon: DeleteIcon },
+  { name: 'webhooks', label: 'Webhooks', icon: NotificationIcon },
+  { name: 'alert-rules', label: 'Alert Rules', icon: ErrorCircleIcon },
+  { name: 'audit', label: 'Audit', icon: FilePasteIcon },
 ];
 
 const navGroups = computed(() => {
@@ -80,7 +100,7 @@ function navigate(name: string) {
 
 async function handleLogout() {
   try {
-    await DialogPlugin.confirm({
+    await confirmDialog({
       header: '退出登录',
       body: '退出后需要重新登录。',
       confirmBtn: '退出',
@@ -120,7 +140,7 @@ async function handleLogout() {
             (auth.user?.displayName ?? auth.user?.username ?? '?').slice(0, 1).toUpperCase()
           }}</span>
           {{ auth.user?.displayName ?? auth.user?.username }}
-          <t-icon name="poweroff" />
+          <PoweroffIcon />
         </span>
         <template #dropdown>
           <t-dropdown-menu>
@@ -144,7 +164,7 @@ async function handleLogout() {
             :class="{ active: activeItem === item.name }"
             :title="collapsed ? item.label : undefined"
           >
-            <t-icon class="nav-icon" :name="item.icon" />
+            <component :is="item.icon" class="nav-icon" />
             <span v-if="!collapsed" class="nav-label">{{ item.label }}</span>
           </router-link>
         </template>
@@ -167,7 +187,7 @@ async function handleLogout() {
               :class="{ active: activeItem === item.name }"
               @click="navigate(item.name)"
             >
-              <t-icon class="nav-icon" :name="item.icon" />
+              <component :is="item.icon" class="nav-icon" />
               <span class="nav-label">{{ item.label }}</span>
             </a>
           </template>

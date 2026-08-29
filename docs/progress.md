@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G5.5+`（界面重设计收尾：TDesign 组件库迁移，Element Plus → tdesign-vue-next）
-- Goal status: `DONE`（vitest 21/21、Playwright 15/15、lint/typecheck/build 全 PASS）
+- Current goal: `G7.4`（响应缓存启用：对齐腾讯 L1 精确缓存方案，ADR-0009）
+- Goal status: `IN_PROGRESS`（实现完成，验证中）
 - Last updated: `2026-08-27 CST`
-- Branch: `feat/tdesign-migration`
+- Branch: `goal/g7.2-price-catalog`
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
 
 ## Completed
@@ -102,6 +102,40 @@
 - #71 审计记录归档；#72 **界面重设计（额度账本）**；#73 **SSRF DNS 固定 + coalescer 清理时序 + 审计链 jsonb 规范化**（3 个并行 Agent 完成，本地 978 tests 全绿，CI 双平台全绿）
 - 残余风险（记录于上）：SSRF 固定后的 Host 头为 IP 字面量（JDK 客户端限制，CDN/SNI 路由不受影响）、HttpProviderClient 生命周期内固定构造时 IP、真实凭证契约测试全部 WAITING_FOR_CREDENTIAL
 
+## G7.1 — 上游凭证管理门户（对照腾讯云 AI 网关文档能力补齐，DONE）
+
+- **来源**：用户指示学习腾讯云 AI 网关文档（product/1826）。文档六步接入流程的第一步「模型密钥管理」对应本项目的上游凭证——后端 API 早在 G1.6 就绪（api-contract §5.1），但前端页面缺失、导航「Credentials」指向不存在的路由（死链）。
+- **交付**：`AdminCredentialsView`（列表=名称/指纹前缀/供应商产品/状态/最近验证/版本；创建表单=名称+订阅选择+Secret 可见性切换；测试 Secret 弹窗=纯校验不落库，matchesActive 结果；轮换弹窗=新 Secret 原子生效+宽限期说明；禁用=确认后执行；版本历史抽屉=状态/密钥版本/指纹/生效退役时间）+ credentials 路由接线 + api 层 5 个函数与 4 个新类型。
+- **迁移审查追加发现（HIGH，全站修复）**：TDesign `DialogPlugin.confirm` 返回 dialog 节点而非 Promise——所有 `await DialogPlugin.confirm(...)` 的确认流程**立即放行**，轮换/吊销/禁用/登出等危险操作在用户确认前就已执行。新增 `src/utils/confirm.ts`（`confirmDialog`：确认 resolve/取消与关闭 reject，destroyOnClose），11 个文件 13 处调用点全部替换；e2e 新增回归测试「dangerous actions wait for the confirmation dialog」（确认前 0 次 rotate 调用）。
+- **验证**：vitest 31/31（新增 AdminCredentialsView 10 个）、Playwright 18/18（新增凭证页 baseline + 确认门禁回归）、lint/typecheck/build 全 PASS。
+- **对照腾讯文档的能力映射（学习结论）**：模型密钥→上游凭证（本 Goal 补齐）；模型服务→Provider 产品实例（AdminProvidersView 已有）；模型 API/路由策略→与「Virtual Key 固定 1:1 绑定、不负载均衡」决策冲突，需 ADR 后另行决策；消费者/消费者组授权→用户+项目+Grants（已有）；限流（QPM/Token）→与「不限流」决策冲突；MCP/协议转换→CC Switch 职责。
+- **风险**：validate 仍为本地指纹比对，上游真实校验接线（G4.x）`WAITING_FOR_CREDENTIAL`；e2e 基线截图新增 admin-credentials（12 张）。
+
+## G7.3 — 成本报表页（成本账本闭环，零后端改动）
+
+- 对应腾讯 AI 网关「成本管理」报表能力；G7.2 补了单价录入、G4.3 有成本分摊后端，本 Goal 把分摊结果可视化。
+- `AdminCostView`（数据与告警组「成本报表」）：按项目/按天双视图切换、近 7/30/93 天窗口、4 统计卡（分摊总成本/上游已付/请求/Tokens）、项目成本占比条形、**导出 CSV**（前端生成，BOM 防乱码）。
+- 复用既有 `GET /api/v1/admin/usage/summary?groupBy=project|day`（G4.1），后端零改动。
+- **验证**：vitest 39/39（新增 4 个）、Playwright 20/20（新增成本页 baseline，14 张）、lint/typecheck/build 全 PASS。
+- **隐私**：报表只展示分摊金额与 token 数等元数据，无任何正文。
+
+## CI/机器人规范化（2026-08-27，向大项目看齐）
+
+- **CI 拆分**（原单一大 job → 6 个并行 job）：`backend-unit`（ubuntu+windows 单元测试，无 Docker，~2min）、`backend-integration`（Linux Testcontainers 全量）、`frontend`（lint/typecheck/vitest/build）、`frontend-e2e`（Playwright，**此前 e2e 从未进 CI，本次补上**）、`compose`、`security`。
+- **CodeRabbit**：`.coderabbit.yaml`（zh-CN、assertive、auto-review 覆盖 main/goal/feat/fix 分支）。
+- **Dependabot**：`.github/dependabot.yml`（npm/maven/github-actions 每周一自动更新 PR）。
+- **OSSF Scorecard**：`.github/workflows/scorecard.yml`（周度 + PR 增量 code scanning）。**首跑发现 9 个告警（1 high + 8 medium）并已修复**：stale.yml `contents: write` 权限过大 → 收紧为 issues/pull-requests write；6 个 GitHub Action 全部按 commit SHA 固定（checkout v4.4.0 / setup-java v4.9.1 / setup-node v4.4.0 / scorecard-action v2.4.0 / codeql-upload-sarif v3.37.9 / stale v9.1.0）。修复后 Scorecard check 全绿。
+- **Stale bot**：`.github/workflows/stale.yml`（issue 60 天/PR 30 天标记，+14 天关闭，dependencies/draft 豁免）。
+- **待办**：`aquasec/trivy:0.58.2` 测试镜像未固定 digest（网络受限未拉到，按相同标准补）；CodeRabbit 首次 review 待确认（OSS 仓库手动 review 要求已配置，下一 PR 生效）。
+
+## G7.2 — 模型单价配置（对照腾讯云 AI 网关「成本管理」文档）
+
+- **来源**：用户提供 11 篇腾讯云 AI 网关文档逐一学习（新建/升级/详情/规格/删除/模型管理/缓存策略/降级策略/MCP 管理/MCP 上下线与健康检查/模型单价配置）。能力映射：密钥→G7.1；**模型单价→本 Goal**；新建/升级/规格/删除=云基础设施（单客户私有化不适用）；缓存策略=ADR-0008 默认关闭；降级策略/智能路由/限流=与锁定决策冲突（ADR 候选）；MCP 协议转换=CC Switch 职责。
+- **交付**：`AdminPriceService` + `AdminPriceController`（GET/POST `/api/v1/admin/prices`，SYSTEM_ADMIN-only）+ `PriceSnapshotView` DTO；前端 `AdminPricesView`（单价列表=产品/模型/类型/单价/生效时间/来源；新增快照表单=产品下拉/模型/Token 类型/货币/单价/来源）+ 路由/导航（供应商组「定价」）+ api 层与类型。
+- **语义**：单价是不可变快照，修改即追加（与官方「修改不追溯」一致）；成本聚合器按请求时刻的最新快照计价（既有 findLatestAt 逻辑，本 Goal 只补管理面）。
+- **验证**：后端 `AdminPriceServiceTest`（4）+ `AdminPriceApiIntegrationTest`（5，Testcontainers：401/创建列表/新快照取代旧快照/404/400）全绿；前端 vitest 35/35（新增 AdminPricesView 4 个）、Playwright 19/19（新增定价页 baseline）；lint/typecheck/build 全 PASS。全量后端 verify 见验证记录。
+- **风险**：官方价格自动同步（腾讯文档的 24h 周期同步）未实现——`source=OFFICIAL` 仅为人工标记，自动同步依赖供应商官方价格源，另行规划。
+
 ## 界面重设计（2026-08-27，额度账本方向）
 
 - 用户反馈界面过空，参考腾讯云 TokenHub 控制台 → 浅色密集操作台（tokens.css 全新调色：canvas #F2F4F8、主色 #0066FF、表格 12px/44px 密度）。
@@ -123,6 +157,20 @@
 - **验证**：vitest **21/21**、Playwright **15/15**（production build + 4 viewport baseline）、lint/typecheck/build 全 PASS。
 - **文档**：frontend-design.md §1/§7、coding-standards.md、implementation-plan.md、ui-specification.md 已同步为 TDesign；视觉方向（浅色密集操作台 + 额度分段条）不变。
 - **风险**：组件库全量引入，主 chunk ~1.4MB（与 Element Plus 时期相同量级）；按需引入/手动分块列为非阻塞优化。视觉 review 仍待人工（spec §9）。
+
+## G7.4 — 响应缓存启用（ADR-0009，对齐腾讯 L1 精确缓存方案）
+
+- **决策**：ADR-0009 放行缓存，替换 ADR-0003「v1 不做缓存」。结构对齐腾讯「缓存策略」文档，本土化差异：**存储用 PostgreSQL `cache_entry` 表 + Caffeine 内存（不引 Redis/向量库，ADR-0005）**；L2 语义缓存不启用（依赖向量库，接口预留）。
+- **启用条件（比腾讯更严的双 opt-in）**：`MIQROKEY_CACHE_ENABLED=true`（默认 false，生产零行为变化）+ Key `cachePolicy=ENABLED` + 客户端头 `X-MiQroKey-Cacheable: 1` + 无工具字段 + 非空 body。工具调用永不缓存。
+- **本次交付**：ADR-0009；KeysView 创建表单「缓存策略」选项（默认关闭）+ 列表缓存列；成本报表页「缓存节省」统计卡（`savedByGatewayCache` + l1/l2 命中计数）；configuration-reference §9 重写。
+- **既有资产**（零后端改动）：cache-spi 全实现（Caffeine/Postgres/Noop Provider）、`cache_entry` 表（V5）、CacheEligibility/CacheKeyFactory/SseReplayEngine、端到端测试（VirtualKeyAuthContractTest：字节一致命中/无 opt-in 不缓存/错误不缓存）。
+- **验证**：vitest 40/40（新增缓存策略选项与列表断言 + 成本页缓存卡）、Playwright 20/20、lint/typecheck/build 全 PASS。
+- **风险**：Coding Agent 流量缓存收益存疑（ADR-0003 记录：上下文多变易过期）——缓存键策略对齐腾讯「最新用户消息」列为后续优化项；语义缓存维持禁用。
+
+## 待办需求（2026-08-28 leader 指示，细节待补充，暂不实施）
+
+1. **Kafka 引入**：leader 明确 Kafka 技术一定会用到。当前事件管道为 PostgreSQL NOTIFY + 有界内存队列；引入场景未定（用量事件流/跨服务集成/多实例）。落地前需 ADR。
+2. **报备合规 → 外部平台用户对接**：因报备原因存在外部测试平台，通过 user_id（电话或账号体系）对接；要求外部平台组测用户在网关侧有对应账号（用户同步）。落地前需 ADR（当前用户体系为本地 Argon2id，无外部身份源）。
 
 ## Known Blockers
 

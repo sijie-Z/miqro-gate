@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next';
+import { MessagePlugin } from 'tdesign-vue-next';
+import { BrowseIcon, BrowseOffIcon } from 'tdesign-icons-vue-next';
+import { confirmDialog } from '@/utils/confirm';
 import type { PrimaryTableCol } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
@@ -90,7 +92,7 @@ async function test(endpoint: WebhookEndpointView) {
 
 async function remove(endpoint: WebhookEndpointView) {
   try {
-    await DialogPlugin.confirm({
+    await confirmDialog({
       header: '删除 Webhook',
       body: `删除 Webhook「${endpoint.name}」后告警将不再投递到该端点。`,
       confirmBtn: '删除',
@@ -152,8 +154,8 @@ onMounted(load);
             data-testid="webhook-create-secret"
           >
             <template #suffix-icon>
-              <t-icon
-                :name="showSecret ? 'browse-off' : 'browse'"
+              <component
+                :is="showSecret ? BrowseOffIcon : BrowseIcon"
                 aria-label="切换 Secret 可见性"
                 role="button"
                 @click="showSecret = !showSecret"

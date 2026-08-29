@@ -11,7 +11,10 @@ import type {
   UsageDeletionRequest,
   WebhookDelivery,
   WebhookEndpointView,
-  CredentialSummary,
+  CredentialDetailView,
+  PriceSnapshotView,
+  CredentialView,
+  ValidateCredentialResponse,
   CreateVirtualKeyRequest,
   CreateVirtualKeyResponse,
   Grant,
@@ -196,8 +199,50 @@ export function disableGrant(grantId: string): Promise<void> {
   return del<void>(`/api/v1/admin/grants/${grantId}`);
 }
 
-export function listCredentials(): Promise<CredentialSummary[]> {
-  return get<CredentialSummary[]>('/api/v1/admin/credentials');
+export function listCredentials(): Promise<CredentialView[]> {
+  return get<CredentialView[]>('/api/v1/admin/credentials');
+}
+
+export function getCredential(id: string): Promise<CredentialDetailView> {
+  return get<CredentialDetailView>(`/api/v1/admin/credentials/${id}`);
+}
+
+export function createCredential(body: {
+  name: string;
+  subscriptionId: string;
+  secret: string;
+}): Promise<CredentialView> {
+  return post<CredentialView>('/api/v1/admin/credentials', body);
+}
+
+export function validateCredential(
+  id: string,
+  body: { secret: string },
+): Promise<ValidateCredentialResponse> {
+  return post<ValidateCredentialResponse>(`/api/v1/admin/credentials/${id}/validate`, body);
+}
+
+export function rotateCredential(id: string, body: { secret: string }): Promise<CredentialView> {
+  return post<CredentialView>(`/api/v1/admin/credentials/${id}/rotate`, body);
+}
+
+export function disableCredential(id: string): Promise<{ message: string }> {
+  return post<{ message: string }>(`/api/v1/admin/credentials/${id}/disable`);
+}
+
+export function listPrices(): Promise<PriceSnapshotView[]> {
+  return get<PriceSnapshotView[]>('/api/v1/admin/prices');
+}
+
+export function createPrice(body: {
+  providerProductId: string;
+  modelId: string;
+  tokenType: string;
+  currency: string;
+  unitPrice: string;
+  source: string;
+}): Promise<PriceSnapshotView> {
+  return post<PriceSnapshotView>('/api/v1/admin/prices', body);
 }
 
 // ---- admin provider/Plan (G5.3) ----

@@ -166,6 +166,7 @@ describe('KeysView', () => {
       credentialGrantId: 'g1',
       purpose: 'CLAUDE_CODE',
       allowedModels: ['claude-3-7-sonnet', 'claude-3-5-haiku'],
+      cachePolicy: 'DISABLED', // opt-in cache: default off
     });
 
     // Secret dialog: plaintext visible, close disabled until acknowledged.
@@ -186,6 +187,33 @@ describe('KeysView', () => {
     await flushPromises();
     expect(wrapper.findComponent(SecretRevealDialog).props('modelValue')).toBe(false);
     expect(wrapper.findComponent(SecretRevealDialog).props('secret')).toBe(created.secret);
+  });
+
+  it('renders the cache policy option and lists the key policy', async () => {
+    mockApi.listVirtualKeys.mockResolvedValue([
+      key({ cachePolicy: 'ENABLED' }),
+      key({ id: '0190-0009', name: 'no-cache', cachePolicy: 'DISABLED' }),
+    ]);
+    mockApi.myGrants.mockResolvedValue(grants);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Table shows the policy per key.
+    expect(wrapper.text()).toContain('开启');
+    expect(wrapper.text()).toContain('关闭');
+
+    // Create form exposes the opt-in radio group once the grant is
+    // chosen (the option depends on the selected grant).
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await wrapper.find('[data-testid="create-name"] input').setValue('cache-test');
+    pickOptionByText(wrapper, 'Core AI');
+    await flushPromises();
+    pickOptionByText(wrapper, '0190-product');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="create-cache-policy"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('关闭（默认）');
+    expect(wrapper.text()).toContain('开启');
   });
 
   it('surfaces backend errors with requestId in the create form', async () => {

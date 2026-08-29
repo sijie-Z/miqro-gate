@@ -201,15 +201,16 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 
 指标标签不得使用用户 ID、完整模型输入、Key、request body 或供应商错误正文等高基数/敏感值。
 
-## 9. Cache 扩展位
+## 9. Cache（ADR-0009 已启用）
 
-**当前实现（2026-08）**：L1/L2 响应缓存 SPI 与代码已实现（`cache-spi` 模块 + Gateway `CacheEligibility`/`CacheKeyFactory`/`SseReplayEngine`），但总开关 `MIQROKEY_CACHE_ENABLED` 默认 `false`——代码存在但默认不缓存。只有同时满足以下条件才可能命中缓存：
+**实现（2026-08-29，ADR-0009 放行）**：L1 内存（Caffeine）+ L2 PostgreSQL（`cache_entry` 表）双级缓存。总开关 `MIQROKEY_CACHE_ENABLED` 默认 `false`（生产默认零行为变化）。只有同时满足以下条件才可能命中缓存：
 
 - `MIQROKEY_CACHE_ENABLED=true` 且 L1/L2 各自开关开启；
-- Virtual Key `cache_policy=ENABLED`（创建时显式开启，默认 `DISABLED`）；
-- 请求满足缓存资格（非流式或可重放 SSE、无敏感模型参数等，由 `CacheEligibility` 判定）。
+- Virtual Key `cache_policy=ENABLED`（创建时显式开启，默认 `DISABLED`；前端 KeysView 可选择）；
+- 客户端显式声明 `X-MiQroKey-Cacheable: 1`；
+- 请求满足缓存资格（无工具字段、非空 body，由 `CacheEligibility` 判定；工具调用永不缓存）。
 
-未来正式启用前仍须新增 ADR，解决授权域、模型参数、工具调用、流式重放、加密、删除和供应商 Prompt Cache 语义。
+缓存响应按字节重放（SSE 支持）；命中计数与节省成本在成本报表页展示（`savedByGatewayCache`）。缓存内容不解读、不进日志与审计。语义缓存（L2 向量）不启用。
 
 Gateway 必须透明保留供应商自己的 Prompt Cache Header/字段，并单独统计 cache token；这与本系统响应缓存无关。
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { BrowseIcon, BrowseOffIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
 
@@ -106,8 +107,8 @@ async function submit() {
             data-testid="login-password"
           >
             <template #suffix-icon>
-              <t-icon
-                :name="showPassword ? 'browse-off' : 'browse'"
+              <component
+                :is="showPassword ? BrowseOffIcon : BrowseIcon"
                 aria-label="切换密码可见性"
                 role="button"
                 @click="showPassword = !showPassword"

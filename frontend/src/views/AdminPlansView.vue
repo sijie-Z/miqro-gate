@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next';
+import { MessagePlugin } from 'tdesign-vue-next';
+import { confirmDialog } from '@/utils/confirm';
 import type { PrimaryTableCol } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
@@ -149,7 +150,7 @@ async function addSeat() {
 async function releaseSeat(seat: SeatView) {
   if (!seatSubscription.value) return;
   try {
-    await DialogPlugin.confirm({
+    await confirmDialog({
       header: '释放席位',
       body: '释放后该席位不再关联用户，成员 Key 保持有效但不再消耗席位额度。',
       confirmBtn: '释放',

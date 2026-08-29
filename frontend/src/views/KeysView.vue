@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next';
+import { MessagePlugin } from 'tdesign-vue-next';
+import { confirmDialog } from '@/utils/confirm';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
@@ -26,6 +27,7 @@ const createProjectId = ref('');
 const createGrantId = ref('');
 const createPurpose = ref<VirtualKeyPurpose>('CLAUDE_CODE');
 const createModels = ref<string[]>([]);
+const createCachePolicy = ref<'DISABLED' | 'ENABLED'>('DISABLED');
 const formError = ref('');
 const formRequestId = ref('');
 
@@ -59,6 +61,7 @@ const keyColumns = [
   { colKey: 'purpose', title: '用途', width: 140 },
   { colKey: 'modelIds', title: '允许模型', minWidth: 200 },
   { colKey: 'status', title: '状态', width: 120 },
+  { colKey: 'cachePolicy', title: '缓存', width: 90 },
   { colKey: 'createdAt', title: '创建时间', width: 170 },
   { colKey: 'lastUsedAt', title: '最近使用', width: 170 },
   { colKey: 'actions', title: '操作', width: 90, fixed: 'right' },
@@ -155,6 +158,7 @@ function resetForm() {
   createGrantId.value = '';
   createPurpose.value = 'CLAUDE_CODE';
   createModels.value = [];
+  createCachePolicy.value = 'DISABLED';
   formError.value = '';
   formRequestId.value = '';
 }
@@ -174,6 +178,7 @@ async function createKey() {
       credentialGrantId: createGrantId.value,
       purpose: createPurpose.value,
       allowedModels: createModels.value,
+      cachePolicy: createCachePolicy.value,
     });
     revealData.value = response;
     reveal.value = true;
@@ -194,7 +199,7 @@ async function createKey() {
 
 async function rotateKey(key: VirtualKeyView) {
   try {
-    await DialogPlugin.confirm({
+    await confirmDialog({
       header: `轮换 Virtual Key「${key.name}」`,
       body: '轮换后旧 Key 进入宽限期并在宽限结束后失效，新 Key 仅在本次弹窗显示一次。',
       confirmBtn: '轮换',
@@ -218,7 +223,7 @@ async function rotateKey(key: VirtualKeyView) {
 
 async function revokeKey(key: VirtualKeyView) {
   try {
-    await DialogPlugin.confirm({
+    await confirmDialog({
       header: `吊销 Virtual Key「${key.name}」`,
       body: '吊销后该 Key 立即失效，使用它的客户端将无法继续请求。此操作不可撤销。',
       confirmBtn: '吊销',
@@ -325,6 +330,17 @@ function formatTime(iso?: string): string {
           </t-select>
         </t-form-item>
 
+        <t-form-item v-if="createGrantId" label="缓存策略">
+          <t-radio-group v-model="createCachePolicy" data-testid="create-cache-policy">
+            <t-radio-button value="DISABLED">关闭（默认）</t-radio-button>
+            <t-radio-button value="ENABLED">开启</t-radio-button>
+          </t-radio-group>
+          <p class="field-hint">
+            开启后网关会缓存该 Key 的响应（需客户端声明 X-MiQroKey-Cacheable:
+            1；工具调用永不缓存）。
+          </p>
+        </t-form-item>
+
         <t-form-item v-if="createGrantId" label="允许模型" required-mark>
           <t-checkbox-group v-model="createModels" data-testid="create-models">
             <t-checkbox v-for="model in modelOptions" :key="model" :value="model">
@@ -414,6 +430,14 @@ function formatTime(iso?: string): string {
         <template #purpose="{ row }">{{ row.purpose }}</template>
         <template #modelIds="{ row }">
           <div class="mk-mono model-list">{{ row.modelIds.join(', ') }}</div>
+        </template>
+        <template #cachePolicy="{ row }">
+          <span
+            class="mk-status"
+            :class="row.cachePolicy === 'ENABLED' ? 'mk-status--success' : 'mk-status--neutral'"
+          >
+            {{ row.cachePolicy === 'ENABLED' ? '开启' : '关闭' }}
+          </span>
         </template>
         <template #status="{ row }">
           <span class="mk-status" :class="statusClass(row.status)">{{
@@ -509,6 +533,12 @@ function formatTime(iso?: string): string {
 
 .full-width {
   width: 100%;
+}
+
+.field-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--miqrokey-text-secondary);
 }
 
 .form-error {

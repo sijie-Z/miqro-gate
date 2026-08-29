@@ -128,6 +128,109 @@ async function mockApi(page: Page, admin = false) {
       ]),
     }),
   );
+  await page.route('**/api/v1/admin/credentials/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/v1/admin/credentials', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0030',
+          name: 'anthropic-main',
+          subscriptionId: '0190-0000-0000-0021',
+          status: 'ACTIVE',
+          activeVersionId: '0190-0000-0000-0031',
+          fingerprintPrefix: 'a1b2c3d4e5f6a7b8',
+          lastValidatedAt: '2026-08-26T00:00:00Z',
+          lastValidationError: null,
+          version: 2,
+          createdAt: '2026-08-01T00:00:00Z',
+          updatedAt: '2026-08-20T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/prices', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0000-000000000040',
+          providerProductId: '0190-0000-0000-0020',
+          modelId: 'deepseek-chat',
+          tokenType: 'INPUT',
+          currency: 'CNY',
+          unitPrice: '2.0000',
+          effectiveFrom: '2026-08-26T00:00:00Z',
+          source: 'MANUAL',
+          createdBy: '0190-0000-0000-0001',
+          createdAt: '2026-08-26T00:00:00Z',
+        },
+        {
+          id: '0190-0000-0000-0000-000000000041',
+          providerProductId: '0190-0000-0000-0020',
+          modelId: 'deepseek-chat',
+          tokenType: 'OUTPUT',
+          currency: 'CNY',
+          unitPrice: '16.0000',
+          effectiveFrom: '2026-08-26T00:00:00Z',
+          source: 'MANUAL',
+          createdBy: '0190-0000-0000-0001',
+          createdAt: '2026-08-26T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/usage/summary?*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        groupBy: 'project',
+        groups: [
+          {
+            groupKey: 'core-ai',
+            label: 'core-ai',
+            requests: { upstream: 120, coalesced: 0, l1Hit: 0, l2Hit: 0 },
+            tokens: { input: 240000, output: 120000, cacheRead: 0, cacheCreation: 0 },
+            cost: {
+              upstreamPaid: '0.8400',
+              gatewayObserved: '0.8400',
+              projectAllocated: '0.8400',
+              savedByGatewayCache: '0.0000',
+            },
+          },
+          {
+            groupKey: 'tools',
+            label: 'tools',
+            requests: { upstream: 60, coalesced: 0, l1Hit: 0, l2Hit: 0 },
+            tokens: { input: 60000, output: 30000, cacheRead: 0, cacheCreation: 0 },
+            cost: {
+              upstreamPaid: '0.2100',
+              gatewayObserved: '0.2100',
+              projectAllocated: '0.2100',
+              savedByGatewayCache: '0.0000',
+            },
+          },
+        ],
+        totals: {
+          groupKey: 'total',
+          label: '合计',
+          requests: { upstream: 180, coalesced: 0, l1Hit: 0, l2Hit: 0 },
+          tokens: { input: 300000, output: 150000, cacheRead: 0, cacheCreation: 0 },
+          cost: {
+            upstreamPaid: '1.0500',
+            gatewayObserved: '1.0500',
+            projectAllocated: '1.0500',
+            savedByGatewayCache: '0.0000',
+          },
+        },
+      }),
+    }),
+  );
   await page.route('**/api/v1/admin/users', (route) =>
     route.fulfill({
       status: 200,
@@ -200,6 +303,20 @@ for (const viewport of VIEWPORTS) {
     // The shell is fully rendered: header, nav, page title.
     await expect(page.getByTestId('page-title')).toBeVisible();
     await expect(page.getByText('MiQroGate').first()).toBeVisible();
+
+    // Local SVG icons (never the CDN iconfont: private deployments are
+    // offline). Each nav item must render an inline <svg>.
+    const navIconCount = await page.locator('.shell-nav svg').count();
+    expect(navIconCount).toBeGreaterThan(4);
+    // Every t-icon- classed element must be an <svg> — an <i>/<span>
+    // with that class would mean the CDN iconfont leaked back in.
+    const nonSvgIconClass = await page.evaluate(
+      () =>
+        Array.from(document.querySelectorAll('.shell-nav [class*="t-icon"]')).filter(
+          (el) => el.tagName !== 'svg' && el.tagName !== 'path',
+        ).length,
+    );
+    expect(nonSvgIconClass).toBe(0);
 
     if (viewport.width >= 768) {
       await expect(page.getByTestId('shell-nav')).toBeVisible();
@@ -328,6 +445,79 @@ test('key actions: rotate and revoke flows render from the kebab menu', async ({
 
   // Status label uses the compact mk-status styling (dot + short label).
   await expect(page.locator('.mk-status--success').first()).toHaveText('Active');
+});
+
+test('admin credentials page baseline at 1440x900', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/credentials');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('credentials-table')).toBeVisible();
+  await expect(page.getByTestId('credentials-table')).toContainText('anthropic-main');
+  await page.screenshot({
+    path: 'test-results/baseline/admin-credentials-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('admin prices page baseline at 1440x900', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/prices');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('prices-table')).toBeVisible();
+  await expect(page.getByTestId('prices-table')).toContainText('deepseek-chat');
+  await page.screenshot({
+    path: 'test-results/baseline/admin-prices-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('dangerous actions wait for the confirmation dialog', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  let rotateCalls = 0;
+  await page.route('**/api/v1/me/virtual-keys/*/rotate', (route) => {
+    rotateCalls += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: '0190-0000-0000-0002',
+        secret: 'mqk_live_rotated',
+        baseUrl: 'https://gateway.test.internal',
+        display: 'mqk_live_…rot9',
+        shownOnce: true,
+        createdAt: '2026-08-26T00:00:00Z',
+        version: 2,
+      }),
+    });
+  });
+  await page.goto('/app/keys');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('keys-table')).toBeVisible();
+
+  await page.getByTestId('key-actions').first().click();
+  await page.getByTestId('key-rotate').first().click();
+  // The confirm dialog must gate the action: nothing rotates before 确认.
+  await expect(page.locator('.t-dialog__confirm').first()).toBeVisible();
+  expect(rotateCalls).toBe(0);
+
+  await page.locator('.t-dialog__confirm').first().click();
+  await expect.poll(() => rotateCalls).toBe(1);
+});
+
+test('admin cost report page baseline at 1440x900', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/cost');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('cost-project-table')).toBeVisible();
+  await expect(page.getByTestId('cost-project-table')).toContainText('core-ai');
+  await page.screenshot({
+    path: 'test-results/baseline/admin-cost-1440x900.png',
+    fullPage: true,
+  });
 });
 
 test('forbidden aesthetics are absent from the rendered shell', async ({ page }) => {
