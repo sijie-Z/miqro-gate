@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { MessagePlugin } from 'tdesign-vue-next';
 import * as api from '@/api';
 import PageHeader from '@/components/PageHeader.vue';
 import { ApiError } from '@/api/http';
@@ -96,6 +97,60 @@ async function loadRecords() {
 function changeGroupBy(value: UsageGroupBy) {
   groupBy.value = value;
   void loadSummary();
+}
+
+/** Exports every record of the current filter (all pages) as CSV. */
+async function exportRecords() {
+  const size = 200; // records API upper bound
+  const all: UsageRecordPage['items'] = [];
+  let pageNo = 1;
+  try {
+    for (;;) {
+      const batch = await api.usageRecords({ page: pageNo, size });
+      all.push(...batch.items);
+      if (pageNo * size >= batch.total) {
+        break;
+      }
+      pageNo += 1;
+    }
+  } catch (error) {
+    MessagePlugin.error(error instanceof ApiError ? error.message : '导出失败，请稍后重试。');
+    return;
+  }
+  if (!all.length) {
+    MessagePlugin.warning('当前筛选下没有可导出的记录');
+    return;
+  }
+  const header = [
+    '时间',
+    '模型',
+    '级别',
+    '输入 tokens',
+    '输出 tokens',
+    '延迟(ms)',
+    '上游状态',
+    '供应商请求 ID',
+  ];
+  const rows = all.map((r) => [
+    r.occurredAt,
+    r.modelId ?? '',
+    cacheLevelLabel[r.cacheLevel] ?? r.cacheLevel,
+    String(r.inputTokens ?? ''),
+    String(r.outputTokens ?? ''),
+    String(r.latencyMs ?? ''),
+    String(r.upstreamStatusCode ?? ''),
+    r.providerRequestId ?? '',
+  ]);
+  const csv = [header, ...rows]
+    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `usage-records-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function changePage(pageInfo: { current: number; pageSize: number }): void {

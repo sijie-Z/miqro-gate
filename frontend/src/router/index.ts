@@ -140,7 +140,7 @@ const router = createRouter({
         {
           path: 'settings',
           name: 'settings',
-          component: () => import('@/views/PlaceholderView.vue'),
+          component: () => import('@/views/AdminDeployInfoView.vue'),
           meta: adminMeta('Settings'),
         },
       ],

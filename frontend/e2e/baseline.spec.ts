@@ -520,6 +520,20 @@ test('admin cost report page baseline at 1440x900', async ({ page }) => {
   });
 });
 
+test('deploy info page baseline at 1440x900', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/settings');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('deploy-info')).toBeVisible();
+  await expect(page.getByTestId('deploy-info')).toContainText('MiQroGate');
+  await expect(page.getByTestId('deploy-info')).toContainText('8080');
+  await page.screenshot({
+    path: 'test-results/baseline/admin-deploy-1440x900.png',
+    fullPage: true,
+  });
+});
+
 test('forbidden aesthetics are absent from the rendered shell', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockApi(page, true);
