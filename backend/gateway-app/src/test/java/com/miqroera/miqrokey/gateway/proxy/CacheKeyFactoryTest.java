@@ -123,11 +123,11 @@ class CacheKeyFactoryTest {
         @Test
         @DisplayName("same last user message hits across different histories (OpenAI chat)")
         void chatHistoryIrrelevant() {
-            byte[] shortHist = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
-            byte[] longHist = json(
-                    "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"first\"},"
-                            + "{\"role\":\"assistant\",\"content\":\"first reply\"},"
-                            + "{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] shortHist = json(
+                    "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] longHist = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"first\"},"
+                    + "{\"role\":\"assistant\",\"content\":\"first reply\"},"
+                    + "{\"role\":\"user\",\"content\":\"hi\"}]}");
             assertThat(factory.compute(ctx, "gpt-4o-mini", shortHist))
                     .isEqualTo(factory.compute(ctx, "gpt-4o-mini", longHist));
         }
@@ -174,7 +174,8 @@ class CacheKeyFactoryTest {
         @DisplayName("no extractable user message falls back to the full body")
         void fallbackWithoutUserMessage() {
             byte[] a = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"assistant\",\"content\":\"only\"}]}");
-            byte[] b = json("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"assistant\",\"content\":\"other\"}]}");
+            byte[] b = json(
+                    "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"assistant\",\"content\":\"other\"}]}");
             assertThat(factory.compute(ctx, "gpt-4o-mini", a)).isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", b));
         }
 
