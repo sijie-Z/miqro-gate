@@ -136,10 +136,13 @@ async function load() {
   loading.value = true;
   loadError.value = '';
   try {
-    const [keyList, summary] = await Promise.all([
-      api.listVirtualKeys(),
-      api.usageSummary({ groupBy: 'project' }),
-    ]);
+    // Admin home shows the tenant-wide usage; regular users see their own.
+    // usageSummary takes positional args, adminUsageSummary takes an object —
+    // passing an object to usageSummary broke groupBy parsing on the backend.
+    const summaryPromise = isAdmin.value
+      ? api.adminUsageSummary({ groupBy: 'project' })
+      : api.usageSummary('project');
+    const [keyList, summary] = await Promise.all([api.listVirtualKeys(), summaryPromise]);
     keys.value = keyList;
     usageGroups.value = summary.groups ?? [];
     if (isAdmin.value) {
