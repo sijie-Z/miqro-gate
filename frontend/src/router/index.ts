@@ -102,7 +102,7 @@ const router = createRouter({
           meta: adminMeta('成本报表'),
         },
         {
-          path: 'usage',
+          path: 'admin-usage',
           name: 'admin-usage',
           component: () => import('@/views/AdminUsageView.vue'),
           meta: adminMeta('Usage'),
@@ -140,7 +140,7 @@ const router = createRouter({
         {
           path: 'settings',
           name: 'settings',
-          component: () => import('@/views/PlaceholderView.vue'),
+          component: () => import('@/views/AdminDeployInfoView.vue'),
           meta: adminMeta('Settings'),
         },
       ],

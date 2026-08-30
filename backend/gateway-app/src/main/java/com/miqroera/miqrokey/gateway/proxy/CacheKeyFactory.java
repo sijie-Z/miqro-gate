@@ -22,15 +22,23 @@ import java.util.Set;
  *
  * <p>
  * Key = SHA-256 of
- * {@code tenantId|projectId|virtualKeyId|productId|model|purpose|normalizedBody}.
- * Normalization strips client-only fields that do not influence the model
- * output, sorts object keys recursively, and strips whitespace — so
- * semantically identical requests produce identical keys.
+ * {@code tenantId|projectId|virtualKeyId|productId|model|purpose|scope} where
+ * {@code scope} is the <em>semantic scope</em> of the conversation: the system
+ * prompt plus the <b>last user message</b> (aligned with Tencent's "latest user
+ * message" and Higress's GJSON content extraction — see
+ * docs/ai-gateway-comparison.md). Earlier conversation turns do not change the
+ * key, so a repeated question inside different histories still hits the cache.
+ * </p>
+ *
+ * <p>
+ * When the body is not a recognized chat shape (no extractable user message),
+ * the scope falls back to the full normalized body — the previous behavior — so
+ * non-chat payloads stay safe.
  * </p>
  *
  * <p>
  * The gateway NEVER re-emits the normalized JSON upstream: the raw request
- * bytes are forwarded untouched. Normalization exists only for key derivation.
+ * bytes are forwarded untouched. Extraction exists only for key derivation.
  * </p>
  */
 @Component
@@ -49,15 +57,90 @@ public final class CacheKeyFactory {
     }
 
     /**
-     * Computes the cache key. Non-JSON bodies fall back to a raw digest of the body
-     * bytes (still bounded and deterministic).
+     * Computes the cache key. Chat-shaped bodies use the semantic scope (system +
+     * last user message); anything else falls back to the full normalized body.
      */
     public CacheKey compute(AuthContext ctx, String modelName, byte[] body) {
-        String normalized = normalize(body);
+        String scope = semanticScope(body);
+        String normalized = scope.isEmpty() ? normalize(body) : scope;
         String canonical = ctx.tenantId() + "|" + ctx.projectId() + "|" + ctx.key().keyId() + "|" + ctx.productId()
                 + "|" + (modelName == null ? "" : modelName) + "|"
                 + (ctx.key().purpose() == null ? "" : ctx.key().purpose()) + "|" + normalized;
         return CacheKey.from(sha256(canonical.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    /**
+     * Extracts the semantic scope of a chat request: {@code "<system>|<last
+     * user message>"}. Handles OpenAI chat, Anthropic messages, and OpenAI
+     * Responses ({@code input}) shapes, including array-form content parts. Returns
+     * the empty string when no user message is extractable, which makes the caller
+     * fall back to the full-body key.
+     */
+    public String semanticScope(byte[] body) {
+        if (body == null || body.length == 0) {
+            return "";
+        }
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            if (root == null || !root.isObject()) {
+                return "";
+            }
+            JsonNode messages = root.has("messages") ? root.get("messages") : root.get("input");
+            if (messages == null || !messages.isArray()) {
+                return "";
+            }
+            String system = "";
+            String lastUser = "";
+            for (JsonNode msg : messages) {
+                // OpenAI Responses allows plain strings in the input array;
+                // treat them as user turns.
+                if (msg.isTextual()) {
+                    String text = msg.asText();
+                    if (!text.isEmpty()) {
+                        lastUser = text;
+                    }
+                    continue;
+                }
+                String role = msg.path("role").asText("");
+                String content = textContent(msg.get("content"));
+                if ("system".equals(role) && system.isEmpty() && !content.isEmpty()) {
+                    system = content;
+                } else if ("user".equals(role) && !content.isEmpty()) {
+                    lastUser = content;
+                }
+            }
+            if (lastUser.isEmpty()) {
+                return "";
+            }
+            return system + "|" + lastUser;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * Extracts plain text from a message content node: a string, or an array of
+     * content parts ({@code {"type":"text","text":...}}), or plain strings.
+     */
+    private static String textContent(JsonNode content) {
+        if (content == null || content.isNull()) {
+            return "";
+        }
+        if (content.isTextual()) {
+            return content.asText();
+        }
+        if (content.isArray()) {
+            StringBuilder sb = new StringBuilder();
+            for (JsonNode part : content) {
+                if (part.isTextual()) {
+                    sb.append(part.asText());
+                } else if ("text".equals(part.path("type").asText(""))) {
+                    sb.append(part.path("text").asText(""));
+                }
+            }
+            return sb.toString();
+        }
+        return "";
     }
 
     /**

@@ -23,6 +23,8 @@
 | `product-requirements.md` | 用户、范围、业务规则、非目标 | 产品需求变化 |
 | `architecture.md` | 组件、依赖方向、运行时数据流 | 架构变化 |
 | `decisions/*.md` | 已接受架构决策 | 关键决策新增/替换 |
+| `ai-gateway-comparison.md` | 与腾讯/阿里 AI 网关的定位与能力对比 | 三家能力变化 |
+| `tencent-ai-gateway-mapping.md` | 腾讯/阿里文档吸收记录与能力映射 | 吸收新文档 |
 | `domain-model.md` | 领域概念和关系 | 领域语义变化 |
 | `database-schema.md` | 物理表、约束、索引和迁移 | 数据库变化 |
 | `api-contract.md` | 管理 API 与推理入口契约 | API 变化 |

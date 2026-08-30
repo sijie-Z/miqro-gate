@@ -2,6 +2,18 @@
 
 MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；版本号语义化（MAJOR.MINOR.PATCH）。
 
+## [Unreleased] — 2026-08-29（界面与成本账本增强）
+
+### G7.x — 对照腾讯云 / 阿里云 AI 网关能力
+
+- **G7.1 上游凭证门户**：凭证列表（掩码+指纹）、创建（Secret 可见性切换）、测试 Secret（纯校验）、轮换、禁用、版本历史抽屉；修复 Credentials 导航死链。
+- **G7.2 模型单价目录**：`/api/v1/admin/prices`（追加式快照、修改不追溯）；前端定价页（产品/模型/类型/单价/来源）。
+- **G7.3 成本报表页**：按项目/按天成本分摊视图、7/30/93 天窗口、缓存节省卡、CSV 导出。
+- **G7.4 响应缓存**（ADR-0009，对齐腾讯 L1 方案）：Caffeine L1 + PostgreSQL L2（不引 Redis）、双重 opt-in（Key cachePolicy + X-MiQroKey-Cacheable）、工具调用永不缓存；缓存键升级为 system + 最后一条 user 消息（对齐腾讯/阿里键策略）。
+- 前端：Element Plus → TDesign 全量迁移（含 CDN 图标改本地 SVG）；bundle 拆分（入口 1.46MB → 15KB）；UsageView 导出 CSV；部署信息页。
+- 修复（自测发现）：登录提交链路失效、t-drawer 标题/默认 footer、DialogPlugin.confirm 非 Promise（危险操作确认前即执行，全站修复）、jsdom 缺 ResizeObserver 等。
+- 工程：CI 拆分 6+ job + 路径过滤 + CodeQL + npm audit；CodeRabbit / Dependabot / OSSF Scorecard / Stale；Issue 模板 / SECURITY.md / 标签体系；GitHub 公开 + MIT。
+
 ## [0.1.0] — 2026-08-26（首个候选版本，未标记 VERIFIED）
 
 ### Phase 0 — 工程基线（G0.1–G0.4）

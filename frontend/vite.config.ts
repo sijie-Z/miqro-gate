@@ -6,6 +6,22 @@ import vue from '@vitejs/plugin-vue';
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [vue()],
+  build: {
+    // tdesign-vue-next is a large library; it is its own cacheable chunk,
+    // so the warning threshold targets the entry bundle only.
+    chunkSizeWarningLimit: 1300,
+    rollupOptions: {
+      output: {
+        // Split the framework and component libraries so the entry chunk
+        // stays small and the browser can cache vendor code independently.
+        manualChunks: {
+          vue: ['vue', 'vue-router', 'pinia'],
+          tdesign: ['tdesign-vue-next'],
+          'tdesign-icons': ['tdesign-icons-vue-next'],
+        },
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

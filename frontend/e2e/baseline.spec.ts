@@ -231,6 +231,163 @@ async function mockApi(page: Page, admin = false) {
       }),
     }),
   );
+  await page.route('**/api/v1/admin/teams', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0101',
+          name: 'Platform',
+          description: '平台组',
+          status: 'ACTIVE',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/projects', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0102',
+          code: 'P1',
+          name: 'Core AI',
+          status: 'ACTIVE',
+          projectTag: 'core-ai',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/grants', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0103',
+          projectId: '0190-0000-0000-0102',
+          providerProductId: '0190-0000-0000-0020',
+          upstreamCredentialId: '0190-0000-0000-0030',
+          status: 'ACTIVE',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/webhooks', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0104',
+          name: 'ops-alerts',
+          url: 'https://alerts.internal/hook',
+          enabled: true,
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/alert-rules', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0105',
+          name: 'usage-missing',
+          type: 'USAGE_MISSING_RATE',
+          threshold: 0.5,
+          dedupeMinutes: 60,
+          webhookEndpointId: null,
+          enabled: true,
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/audit-events?*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0106',
+          position: 1,
+          action: 'LOGIN_SUCCESS',
+          targetType: 'USER',
+          summary: '{"username":"root"}',
+          actorId: '0190-0000-0000-0001',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/exports?*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0107',
+          format: 'CSV',
+          periodFrom: '2026-08-01T00:00:00Z',
+          periodTo: '2026-08-31T00:00:00Z',
+          status: 'SUCCEEDED',
+          rowCount: 100,
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/usage/records?*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        items: [
+          {
+            occurredAt: '2026-08-26T00:00:00Z',
+            modelId: 'deepseek-chat',
+            cacheLevel: 'UPSTREAM',
+            inputTokens: 100,
+            outputTokens: 50,
+            latencyMs: 1200,
+            upstreamStatusCode: 200,
+            providerRequestId: 'req-1',
+            gatewayRequestId: 'gw-1',
+            isComplete: true,
+            usageMissing: false,
+            virtualKeyId: '0190-0000-0000-0002',
+          },
+        ],
+        page: 1,
+        size: 20,
+        total: 1,
+      }),
+    }),
+  );
+  await page.route('**/api/v1/admin/usage-deletions?*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0108',
+          periodFrom: '2026-08-01T00:00:00Z',
+          periodTo: '2026-08-31T00:00:00Z',
+          previewCount: 1000,
+          status: 'PENDING_CONFIRMATION',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
   await page.route('**/api/v1/admin/users', (route) =>
     route.fulfill({
       status: 200,
@@ -519,6 +676,48 @@ test('admin cost report page baseline at 1440x900', async ({ page }) => {
     fullPage: true,
   });
 });
+
+test('deploy info page baseline at 1440x900', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/settings');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('deploy-info')).toBeVisible();
+  await expect(page.getByTestId('deploy-info')).toContainText('MiQroGate');
+  await expect(page.getByTestId('deploy-info')).toContainText('8080');
+  await page.screenshot({
+    path: 'test-results/baseline/admin-deploy-1440x900.png',
+    fullPage: true,
+  });
+});
+
+const ADMIN_PAGES = [
+  { path: '/app/teams', testid: 'teams-table', expect: 'Platform' },
+  { path: '/app/projects', testid: 'projects-table', expect: 'Core AI' },
+  { path: '/app/grants', testid: 'grants-table', expect: 'ACTIVE' },
+  { path: '/app/plans', testid: 'subscriptions-table', expect: 'DeepSeek PAYG' },
+  { path: '/app/webhooks', testid: 'webhooks-table', expect: 'ops-alerts' },
+  { path: '/app/alert-rules', testid: 'rules-table', expect: 'usage-missing' },
+  { path: '/app/audit', testid: 'audit-table', expect: 'LOGIN_SUCCESS' },
+  { path: '/app/exports', testid: 'exports-table', expect: 'CSV' },
+  { path: '/app/deletions', testid: 'deletions-table', expect: 'PENDING_CONFIRMATION' },
+  { path: '/app/admin-usage', testid: 'usage-records-table', expect: 'deepseek-chat' },
+];
+
+for (const pageCfg of ADMIN_PAGES) {
+  test(`admin page baseline: ${pageCfg.path}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockApi(page, true);
+    await page.goto(pageCfg.path);
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByTestId(pageCfg.testid)).toBeVisible();
+    await expect(page.getByTestId(pageCfg.testid)).toContainText(pageCfg.expect);
+    await page.screenshot({
+      path: `test-results/baseline/${pageCfg.path.replace(/\//g, '-').replace(/^-/, '')}-1440x900.png`,
+      fullPage: true,
+    });
+  });
+}
 
 test('forbidden aesthetics are absent from the rendered shell', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });

@@ -275,6 +275,10 @@ describe('AdminCredentialsView', () => {
     expect(confirmButton, 'confirm dialog should render').toBeTruthy();
     (confirmButton as HTMLElement).click();
     await flushPromises();
+    // Let the dialog's destroyOnClose timer finish inside the test
+    // environment — otherwise TDesign's ripple hooks fire after
+    // teardown and vitest reports an unhandled rejection.
+    await new Promise((r) => setTimeout(r, 400));
 
     expect(mockApi.disableCredential).toHaveBeenCalledWith('0190-cred-1');
   });
@@ -295,6 +299,8 @@ describe('AdminCredentialsView', () => {
     expect(cancelButton, 'confirm dialog should render').toBeTruthy();
     (cancelButton as HTMLElement).click();
     await flushPromises();
+    // Same teardown race as the confirm test: wait out the destroy timer.
+    await new Promise((r) => setTimeout(r, 400));
 
     expect(mockApi.disableCredential).not.toHaveBeenCalled();
   });
