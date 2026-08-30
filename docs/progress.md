@@ -173,6 +173,21 @@
 - **验证**：vitest 40/40（新增缓存策略选项与列表断言 + 成本页缓存卡）、Playwright 20/20、lint/typecheck/build 全 PASS。
 - **风险**：Coding Agent 流量缓存收益存疑（ADR-0003 记录：上下文多变易过期）——缓存键策略对齐腾讯「最新用户消息」列为后续优化项；语义缓存维持禁用。
 
+## 真实供应商联调（2026-08-30，DeepSeek 官方 Key 全链路）
+
+- **验证环境**：本地 Docker PostgreSQL + control-plane(8080) + gateway(8081)，真实 DeepSeek 官方 API Key。
+- **全链路结果（全部通过）**：
+  - bootstrap → 改密 → 登录 → 订阅 → 凭证（真实 Key 加密存储 + 指纹）→ 项目 → Grant → Virtual Key
+  - **真实推理**：`POST /v1/chat/completions`（OpenAI 兼容）→ DeepSeek 真实返回 `MQROK-DRILL-OK`（model deepseek-v4-flash）
+  - **用量落库**：1 请求 / input 16 / output 8 / **cacheCreation 16**（cache miss 正确解析）
+  - **成本计算**：按单价精确 ¥0.000128 = 16×2/1M + 8×8/1M + 16×2/1M ✓
+- **发现并修复（生产级 bug）**：**SessionFilter order** —— `Ordered.HIGHEST_PRECEDENCE` 跑在 Spring Boot RequestContextFilter(-105) 之前，真实容器上所有带 session 的请求 500（ScopeNotActiveException）；MockMvc 绑定请求上下文掩盖了它。已修复（order=-100）+ 新增 `AuthenticatedRequestIntegrationTest`（真实 HTTP 端口 + 真实 session cookie 回归）。
+- **发现的缺口（待处理）**：
+  - **NOTIFY 即时刷新未生效**：手动 `pg_notify` 后 3s 推理仍 404（Unknown virtual key），30s 定时刷新兜底正常（35s 后成功）——listener 收到通知到 refresh 的路径待查（RouteSnapshotRefreshListener）。
+  - **providers/provider_products 无初始化与管理入口**：表为空且无创建 API（前端产品下拉永远空）；联调用 SQL 手工插入（fixture 模式）。需补管理 API 或启动 seed。
+  - 联调脚本与本地环境位于 `miqro-local/`（不入库）；DeepSeek Key 已暴露于会话，**建议轮换**。
+- **价值**：真实链路验证了凭证加密/指纹、Virtual Key 鉴权、透明代理转发、用量解析（含 cache 字段）、成本计算全部与真实供应商行为一致；mock 到真实的差距仅剩 NOTIFY 刷新与产品实例管理两处。
+
 ## 待办需求（2026-08-28 leader 指示，细节待补充，暂不实施）
 
 1. **Kafka 引入**：leader 明确 Kafka 技术一定会用到。当前事件管道为 PostgreSQL NOTIFY + 有界内存队列；引入场景未定（用量事件流/跨服务集成/多实例）。落地前需 ADR。
