@@ -183,8 +183,8 @@
   - **成本计算**：按单价精确 ¥0.000128 = 16×2/1M + 8×8/1M + 16×2/1M ✓
 - **发现并修复（生产级 bug）**：**SessionFilter order** —— `Ordered.HIGHEST_PRECEDENCE` 跑在 Spring Boot RequestContextFilter(-105) 之前，真实容器上所有带 session 的请求 500（ScopeNotActiveException）；MockMvc 绑定请求上下文掩盖了它。已修复（order=-100）+ 新增 `AuthenticatedRequestIntegrationTest`（真实 HTTP 端口 + 真实 session cookie 回归）。
 - **发现的缺口（待处理）**：
-  - **NOTIFY 即时刷新未生效**：手动 `pg_notify` 后 3s 推理仍 404（Unknown virtual key），30s 定时刷新兜底正常（35s 后成功）——listener 收到通知到 refresh 的路径待查（RouteSnapshotRefreshListener）。
-  - **providers/provider_products 无初始化与管理入口**：表为空且无创建 API（前端产品下拉永远空）；联调用 SQL 手工插入（fixture 模式）。需补管理 API 或启动 seed。
+  - **NOTIFY 即时刷新（已确认为正常）**：干净环境下手动 `pg_notify` 后 ~4s 推理成功 —— 之前的 404 是测试环境干扰（残留 gateway 进程），非代码缺陷。
+  - **providers/provider_products 无初始化（已修复）**：新增 `CatalogSeedService`（启动时从签名目录幂等 seed 8 供应商 + 23 产品，URL 只来自签名目录），`CatalogSeedIntegrationTest` 回归；本地真实环境验证生效。
   - 联调脚本与本地环境位于 `miqro-local/`（不入库）；DeepSeek Key 已暴露于会话，**建议轮换**。
 - **价值**：真实链路验证了凭证加密/指纹、Virtual Key 鉴权、透明代理转发、用量解析（含 cache 字段）、成本计算全部与真实供应商行为一致；mock 到真实的差距仅剩 NOTIFY 刷新与产品实例管理两处。
 
