@@ -12,7 +12,6 @@ import jakarta.annotation.PostConstruct;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.Ordered;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -53,7 +52,13 @@ public class SecurityConfig implements WebMvcConfigurer {
         FilterRegistrationBean<SessionFilter> registration = new FilterRegistrationBean<>();
         registration.setFilter(sessionFilter);
         registration.addUrlPatterns("/api/*");
-        registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
+        // Run AFTER Spring Boot's RequestContextFilter (order -105), which
+        // binds the request to the current thread: the SessionFilter writes
+        // the request-scoped UserContext, and with HIGHEST_PRECEDENCE it ran
+        // before the request scope existed — every authenticated request
+        // 500'd with ScopeNotActiveException on a real servlet container
+        // (MockMvc never exposed this).
+        registration.setOrder(-100);
         return registration;
     }
 
