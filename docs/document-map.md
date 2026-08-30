@@ -25,6 +25,7 @@
 | `decisions/*.md` | 已接受架构决策 | 关键决策新增/替换 |
 | `ai-gateway-comparison.md` | 与腾讯/阿里 AI 网关的定位与能力对比 | 三家能力变化 |
 | `tencent-ai-gateway-mapping.md` | 腾讯/阿里文档吸收记录与能力映射 | 吸收新文档 |
+| `live-integration-guide.md` | 真实供应商联调环境搭建、流程与踩坑记录 | 新供应商联调/环境变化 |
 | `domain-model.md` | 领域概念和关系 | 领域语义变化 |
 | `database-schema.md` | 物理表、约束、索引和迁移 | 数据库变化 |
 | `api-contract.md` | 管理 API 与推理入口契约 | API 变化 |
