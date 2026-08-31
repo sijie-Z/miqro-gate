@@ -71,3 +71,6 @@ deploy/data/
 # Local UI review screenshots (session artifacts)
 frontend/*-final.png
 frontend/*-fresh.png
+
+# Local editor launch configs
+.claude/launch.json

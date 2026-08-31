@@ -42,10 +42,10 @@ public class CatalogSeedService implements ApplicationRunner {
             int providers = 0;
             int productsSeeded = 0;
             for (ProviderProductDefinition product : products) {
-                UUID providerId = providerId(product.vendor());
-                if (upsertProvider(providerId, product.vendor())) {
+                if (upsertProvider(product.vendor())) {
                     providers++;
                 }
+                UUID providerId = actualProviderId(product.vendor());
                 if (upsertProduct(providerId, product)) {
                     productsSeeded++;
                 }
@@ -58,12 +58,23 @@ public class CatalogSeedService implements ApplicationRunner {
         }
     }
 
-    private boolean upsertProvider(UUID id, String slug) {
+    private boolean upsertProvider(String slug) {
         return jdbc.update("""
                 INSERT INTO providers (id, slug, display_name, status, version, created_at, updated_at)
                 VALUES (:id, :slug, :slug, 'ACTIVE', 0, now(), now())
                 ON CONFLICT (slug) DO NOTHING
-                """, new MapSqlParameterSource("id", id).addValue("slug", slug)) == 1;
+                """, new MapSqlParameterSource("id", providerId(slug)).addValue("slug", slug)) == 1;
+    }
+
+    /**
+     * Resolves the row id for a provider slug: the seeded deterministic id
+     * normally, or a pre-existing row's id (e.g. from earlier manual setup)
+     * so product inserts never violate the FK.
+     */
+    private UUID actualProviderId(String slug) {
+        String id = jdbc.queryForObject("SELECT id::text FROM providers WHERE slug = :slug",
+                new MapSqlParameterSource("slug", slug), String.class);
+        return id != null ? UUID.fromString(id) : providerId(slug);
     }
 
     private boolean upsertProduct(UUID providerId, ProviderProductDefinition product) {
