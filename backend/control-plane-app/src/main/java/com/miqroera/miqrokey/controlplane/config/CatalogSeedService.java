@@ -17,11 +17,11 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Seeds {@code providers} / {@code provider_products} from the signed
- * provider catalog at startup. The catalog is the only trusted source for
- * upstream URLs (CLAUDE.md: all upstream URLs come from compiled adapters or
- * the signed catalog), so products are never hand-entered — the tables are a
- * read-mostly mirror. Idempotent: existing product codes are left untouched.
+ * Seeds {@code providers} / {@code provider_products} from the signed provider
+ * catalog at startup. The catalog is the only trusted source for upstream URLs
+ * (CLAUDE.md: all upstream URLs come from compiled adapters or the signed
+ * catalog), so products are never hand-entered — the tables are a read-mostly
+ * mirror. Idempotent: existing product codes are left untouched.
  */
 @Component
 public class CatalogSeedService implements ApplicationRunner {
@@ -29,13 +29,21 @@ public class CatalogSeedService implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(CatalogSeedService.class);
 
     private final NamedParameterJdbcTemplate jdbc;
+    private final javax.sql.DataSource dataSource;
 
-    public CatalogSeedService(NamedParameterJdbcTemplate jdbc) {
+    public CatalogSeedService(NamedParameterJdbcTemplate jdbc, javax.sql.DataSource dataSource) {
         this.jdbc = jdbc;
+        this.dataSource = dataSource;
     }
 
     @Override
     public void run(ApplicationArguments args) {
+        if (isH2()) {
+            // H2 test environments have no Flyway schema; the catalog seed
+            // targets PostgreSQL deployments only.
+            log.debug("Catalog seed skipped (H2 test database)");
+            return;
+        }
         try {
             ProviderCatalog catalog = ProviderCatalog.loadBuiltIn();
             List<ProviderProductDefinition> products = catalog.definitions();
@@ -68,8 +76,8 @@ public class CatalogSeedService implements ApplicationRunner {
 
     /**
      * Resolves the row id for a provider slug: the seeded deterministic id
-     * normally, or a pre-existing row's id (e.g. from earlier manual setup)
-     * so product inserts never violate the FK.
+     * normally, or a pre-existing row's id (e.g. from earlier manual setup) so
+     * product inserts never violate the FK.
      */
     private UUID actualProviderId(String slug) {
         String id = jdbc.queryForObject("SELECT id::text FROM providers WHERE slug = :slug",
@@ -92,14 +100,21 @@ public class CatalogSeedService implements ApplicationRunner {
                         :protocols::jsonb, :baseUrlTemplates::jsonb, :authScheme::jsonb,
                         :modelCatalogStrategy, 'DOCUMENTED', 'UNAVAILABLE', 0, now(), now())
                 ON CONFLICT (provider_id, product_code) DO NOTHING
-                """, new MapSqlParameterSource("id", UUID.nameUUIDFromBytes(("product:" + code).getBytes(StandardCharsets.UTF_8)))
-                .addValue("providerId", providerId)
-                .addValue("code", code)
-                .addValue("displayName", product.displayName())
-                .addValue("protocols", protocols)
-                .addValue("baseUrlTemplates", baseUrlTemplates)
-                .addValue("authScheme", "{\"type\":\"bearer\"}")
-                .addValue("modelCatalogStrategy", product.modelCatalogMode().name())) == 1;
+                """,
+                new MapSqlParameterSource("id",
+                        UUID.nameUUIDFromBytes(("product:" + code).getBytes(StandardCharsets.UTF_8)))
+                        .addValue("providerId", providerId).addValue("code", code)
+                        .addValue("displayName", product.displayName()).addValue("protocols", protocols)
+                        .addValue("baseUrlTemplates", baseUrlTemplates).addValue("authScheme", "{\"type\":\"bearer\"}")
+                        .addValue("modelCatalogStrategy", product.modelCatalogMode().name())) == 1;
+    }
+
+    private boolean isH2() {
+        try {
+            return dataSource.getConnection().getMetaData().getDatabaseProductName().toLowerCase().contains("h2");
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private static UUID providerId(String slug) {

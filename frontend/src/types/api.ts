@@ -249,6 +249,9 @@ export interface CredentialDetailView {
 export interface ValidateCredentialResponse {
   matchesActive: boolean;
   message: string | null;
+  providerStatus: 'VALID' | 'REJECTED' | 'UNREACHABLE' | 'NOT_CHECKED';
+  providerMessage: string | null;
+  checkedAt: string | null;
 }
 
 export interface ProviderProductView {

@@ -8,6 +8,7 @@ import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.model.UserStatus;
 import com.miqroera.miqrokey.domain.model.VirtualKeyPurpose;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -63,6 +64,11 @@ class RouteSnapshotRefreshNotifierTest {
     NamedParameterJdbcTemplate jdbc;
 
     private final Fixture fx = new Fixture();
+
+    @BeforeEach
+    void setUp() {
+        fx.reset();
+    }
 
     @AfterEach
     void tearDown() {
@@ -192,8 +198,8 @@ class RouteSnapshotRefreshNotifierTest {
         void reset() {
             for (String table : List.of("virtual_key_models", "key_project_binding", "virtual_keys",
                     "project_provider_grant_models", "project_provider_grants", "upstream_credential_versions",
-                    "upstream_credentials", "upstream_subscriptions", "projects", "provider_products", "providers",
-                    "admin_audit_events", "user_sessions", "users")) {
+                    "upstream_credentials", "upstream_subscriptions", "projects", "model_catalog", "provider_products",
+                    "providers", "admin_audit_events", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {

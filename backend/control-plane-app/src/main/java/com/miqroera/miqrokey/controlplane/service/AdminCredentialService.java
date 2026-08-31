@@ -1,5 +1,7 @@
 package com.miqroera.miqrokey.controlplane.service;
 
+import com.miqroera.miqrokey.spi.AdapterRegistry;
+import com.miqroera.miqrokey.controlplane.client.ProviderClientFactory;
 import com.miqroera.miqrokey.controlplane.config.AuthProperties;
 import com.miqroera.miqrokey.controlplane.dto.AdminCredentialCreateRequest;
 import com.miqroera.miqrokey.controlplane.dto.CredentialDetailView;
@@ -9,6 +11,8 @@ import com.miqroera.miqrokey.controlplane.dto.RotateCredentialRequest;
 import com.miqroera.miqrokey.controlplane.dto.ValidateCredentialRequest;
 import com.miqroera.miqrokey.controlplane.dto.ValidateCredentialResponse;
 import com.miqroera.miqrokey.domain.credential.CredentialSecretValidator;
+import com.miqroera.miqrokey.domain.model.ProviderProduct;
+import com.miqroera.miqrokey.domain.model.UpstreamSubscription;
 import com.miqroera.miqrokey.domain.crypto.CredentialFingerprint;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
@@ -19,6 +23,8 @@ import com.miqroera.miqrokey.domain.model.UpstreamCredentialVersion;
 import com.miqroera.miqrokey.domain.model.UpstreamSubscription;
 import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.repository.UpstreamCredentialRepository;
+import com.miqroera.miqrokey.domain.model.UpstreamCredential;
+import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
 import com.miqroera.miqrokey.domain.repository.UpstreamCredentialVersionRepository;
 import com.miqroera.miqrokey.domain.repository.UpstreamSubscriptionRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
@@ -28,6 +34,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -70,11 +78,16 @@ public class AdminCredentialService {
     private final AuthProperties authProperties;
     private final RouteRefreshPublisher routeRefreshPublisher;
 
+    private final AdapterRegistry adapterRegistry;
+    private final ProviderClientFactory clientFactory;
+    private final ProviderProductRepository productRepository;
+
     public AdminCredentialService(UpstreamCredentialRepository credentialRepository,
             UpstreamCredentialVersionRepository versionRepository,
             UpstreamSubscriptionRepository subscriptionRepository, KeyEncryptionProvider keyEncryptionProvider,
             CredentialSecretValidator secretValidator, AuditService auditService, AuthProperties authProperties,
-            RouteRefreshPublisher routeRefreshPublisher) {
+            RouteRefreshPublisher routeRefreshPublisher, AdapterRegistry adapterRegistry,
+            ProviderClientFactory clientFactory, ProviderProductRepository productRepository) {
         this.credentialRepository = credentialRepository;
         this.versionRepository = versionRepository;
         this.subscriptionRepository = subscriptionRepository;
@@ -83,6 +96,9 @@ public class AdminCredentialService {
         this.auditService = auditService;
         this.authProperties = authProperties;
         this.routeRefreshPublisher = routeRefreshPublisher;
+        this.adapterRegistry = adapterRegistry;
+        this.clientFactory = clientFactory;
+        this.productRepository = productRepository;
     }
 
     /**
@@ -141,10 +157,69 @@ public class AdminCredentialService {
         byte[] fingerprint = CredentialFingerprint.sha256(request.secret());
         UpstreamCredentialVersion active = versionRepository.findActiveByCredentialId(credentialId).orElse(null);
         boolean matchesActive = active != null && MessageDigest.isEqual(active.secretFingerprint(), fingerprint);
-        if (matchesActive) {
-            return new ValidateCredentialResponse(true, null);
+        if (!matchesActive) {
+            return new ValidateCredentialResponse(false, "The secret does not match the active version");
         }
-        return new ValidateCredentialResponse(false, "The secret does not match the active version");
+        // The candidate matches the active version; probe the real provider
+        // (G4.x wiring: adapter validateCredential over a credential-scoped
+        // client). Failures map to UNREACHABLE, never block the check.
+        return probeProvider(credentialId, admin.tenantId(), request.secret());
+    }
+
+    /**
+     * Probes the provider with the candidate secret (the active version's key
+     * material). Requires the credential's subscription to resolve a product with a
+     * registered adapter and a base URL; anything missing yields
+     * {@code NOT_CHECKED}.
+     */
+    private ValidateCredentialResponse probeProvider(UUID credentialId, UUID tenantId, String secret) {
+        try {
+            UpstreamCredential credential = credentialRepository.findById(credentialId).orElse(null);
+            if (credential == null) {
+                return new ValidateCredentialResponse(true, null, "NOT_CHECKED", null, null);
+            }
+            UpstreamSubscription subscription = subscriptionRepository.findById(credential.subscriptionId())
+                    .filter(s -> s.tenantId().equals(tenantId)).orElse(null);
+            if (subscription == null) {
+                return new ValidateCredentialResponse(true, null, "NOT_CHECKED", null, null);
+            }
+            ProviderProduct product = productRepository.findById(subscription.providerProductId()).orElse(null);
+            if (product == null) {
+                return new ValidateCredentialResponse(true, null, "NOT_CHECKED", null, null);
+            }
+            var adapter = adapterRegistry.findById(product.productCode()).orElse(null);
+            URI baseUrl = firstBaseUrl(product.baseUrlTemplates());
+            if (adapter == null || baseUrl == null) {
+                return new ValidateCredentialResponse(true, null, "NOT_CHECKED", null, null);
+            }
+            var client = clientFactory.create(baseUrl, "Authorization", "Bearer " + secret);
+            var check = adapter.validateCredential(client).block(Duration.ofSeconds(10));
+            if (check == null) {
+                return new ValidateCredentialResponse(true, null, "UNREACHABLE", "provider timed out", Instant.now());
+            }
+            if (check.valid()) {
+                return new ValidateCredentialResponse(true, null, "VALID", null, check.checkedAt());
+            }
+            return new ValidateCredentialResponse(true, null, "REJECTED", check.message(), check.checkedAt());
+        } catch (Exception e) {
+            return new ValidateCredentialResponse(true, null, "UNREACHABLE", "provider call failed", Instant.now());
+        }
+    }
+
+    private static URI firstBaseUrl(String baseUrlTemplates) {
+        if (baseUrlTemplates == null || baseUrlTemplates.isBlank()) {
+            return null;
+        }
+        try {
+            var node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(baseUrlTemplates);
+            if (node.isArray() && !node.isEmpty()) {
+                String url = node.get(0).path("url").asText(null);
+                return url != null ? URI.create(url) : null;
+            }
+        } catch (Exception ignored) {
+            return null;
+        }
+        return null;
     }
 
     /**

@@ -54,7 +54,7 @@ class ModelCatalogServiceIntegrationTest extends AbstractControlPlaneIntegration
 
     private static final UUID PROVIDER_ID = UUID.fromString("eeeeeeee-0000-0000-0000-000000000001");
     private static final UUID PRODUCT_ID = UUID.fromString("ffffffff-0000-0000-0000-000000000001");
-    private static final String PRODUCT_CODE = "deepseek-payg-api";
+    private static final String PRODUCT_CODE = "catalog-test-product";
 
     @DynamicPropertySource
     public static void configureProperties(DynamicPropertyRegistry registry) {
@@ -132,7 +132,23 @@ class ModelCatalogServiceIntegrationTest extends AbstractControlPlaneIntegration
     @Test
     @DisplayName("end-to-end: real adapter + real ProviderClient against the official API shape (G3.1)")
     void refreshProductEndToEndWithOfficialApiShape() throws Exception {
-        seedProduct();
+        // The real DeepSeek adapter resolves product code 'deepseek-payg-api';
+        // the startup catalog seed owns that code, so drop the seed row and
+        // re-seed the fixture row with the same code under the fixture product.
+        jdbc.update("DELETE FROM provider_products WHERE product_code = 'deepseek-payg-api'",
+                new MapSqlParameterSource());
+        jdbc.update("""
+                INSERT INTO providers (id, slug, display_name, status, version)
+                VALUES (:providerId, 'catalog-test-provider', 'Catalog Test Provider', 'ACTIVE', 0)
+                """, new MapSqlParameterSource("providerId", PROVIDER_ID));
+        jdbc.update("""
+                INSERT INTO provider_products
+                    (id, provider_id, product_code, display_name, billing_mode, credential_topology,
+                     supported_wire_protocols, base_url_templates, auth_scheme, implementation_status, version)
+                VALUES (:productId, :providerId, 'deepseek-payg-api', 'Catalog Test Product', 'PAYG',
+                        'SINGLE_SHARED', '["messages"]', '[{"url":"https://api.test.example"}]',
+                        '{"type":"bearer"}', 'VERIFIED', 0)
+                """, new MapSqlParameterSource("productId", PRODUCT_ID).addValue("providerId", PROVIDER_ID));
         AtomicReference<String> authorization = new AtomicReference<>();
         AtomicInteger hits = new AtomicInteger();
         HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0);

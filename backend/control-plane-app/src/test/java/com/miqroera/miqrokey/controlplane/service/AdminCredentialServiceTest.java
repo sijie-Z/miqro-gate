@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.service;
 
+import com.miqroera.miqrokey.controlplane.client.ProviderClientFactory;
 import com.miqroera.miqrokey.controlplane.config.AuthProperties;
 import com.miqroera.miqrokey.controlplane.dto.AdminCredentialCreateRequest;
 import com.miqroera.miqrokey.controlplane.dto.CredentialDetailView;
@@ -11,10 +12,17 @@ import com.miqroera.miqrokey.controlplane.service.credential.FormatCredentialVal
 import com.miqroera.miqrokey.domain.crypto.CredentialFingerprint;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
+import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
 import com.miqroera.miqrokey.domain.model.BillingMode;
+import com.miqroera.miqrokey.spi.AdapterRegistry;
+import com.miqroera.miqrokey.spi.CredentialCheck;
+import com.miqroera.miqrokey.controlplane.client.HttpProviderClient;
+import com.miqroera.miqrokey.spi.ProviderProductAdapter;
 import com.miqroera.miqrokey.domain.model.CredentialStatus;
 import com.miqroera.miqrokey.domain.model.CredentialVersionStatus;
 import com.miqroera.miqrokey.domain.model.PlanScope;
+import com.miqroera.miqrokey.domain.model.ProviderProduct;
+import reactor.core.publisher.Mono;
 import com.miqroera.miqrokey.domain.model.StatusSource;
 import com.miqroera.miqrokey.domain.model.SubscriptionStatus;
 import com.miqroera.miqrokey.domain.model.UpstreamCredential;
@@ -48,6 +56,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -77,6 +87,12 @@ class AdminCredentialServiceTest {
     private KeyEncryptionProvider keyEncryptionProvider;
     @Mock
     private AuditService auditService;
+    @Mock
+    private AdapterRegistry adapterRegistry;
+    @Mock
+    private ProviderClientFactory clientFactory;
+    @Mock
+    private ProviderProductRepository productRepository;
 
     private final AuthProperties authProperties = new AuthProperties();
     private AdminCredentialService service;
@@ -86,7 +102,7 @@ class AdminCredentialServiceTest {
     void setUp() {
         service = new AdminCredentialService(credentialRepository, versionRepository, subscriptionRepository,
                 keyEncryptionProvider, new FormatCredentialValidator(), auditService, authProperties,
-                RouteRefreshPublisher.NONE);
+                RouteRefreshPublisher.NONE, adapterRegistry, clientFactory, productRepository);
         admin = new User(UUID.randomUUID(), TENANT, "admin", "Admin", new byte[32], UserRole.SYSTEM_ADMIN,
                 UserStatus.ACTIVE, false, 0, null, null, 0L, Instant.now(), Instant.now());
     }
@@ -374,5 +390,87 @@ class AdminCredentialServiceTest {
             Instant validFrom, Instant retiredAt) {
         return new UpstreamCredentialVersion(UUID.randomUUID(), TENANT, UUID.randomUUID(), new byte[]{1, 2, 3},
                 new byte[]{4}, "v1", fingerprint, status, validFrom, retiredAt, Instant.now());
+    }
+
+    private static ProviderProduct productFor(UUID productId) {
+        return new ProviderProduct(productId, UUID.randomUUID(), "deepseek-payg-api", "DeepSeek PAYG", BillingMode.PAYG,
+                PlanScope.NONE, null, null, "[\"messages\"]", "[{\"url\":\"https://api.deepseek.com\"}]", "bearer",
+                "OFFICIAL_API", "OFFICIAL_API", com.miqroera.miqrokey.domain.model.BalanceAuthority.OFFICIAL_API,
+                com.miqroera.miqrokey.domain.model.ImplementationStatus.IMPLEMENTED, "1", 0, Instant.now(),
+                Instant.now());
+    }
+
+    @Test
+    void validateProbesProviderWhenSecretMatches() {
+        UpstreamCredential credential = credentialOfStatus(CredentialStatus.ACTIVE);
+        UpstreamSubscription subscription = subscription();
+        ProviderProduct product = productFor(subscription.providerProductId());
+        ProviderProductAdapter adapter = mock(ProviderProductAdapter.class);
+        HttpProviderClient client = mock(HttpProviderClient.class);
+        when(credentialRepository.findById(credential.id())).thenReturn(java.util.Optional.of(credential));
+        when(versionRepository.findActiveByCredentialId(credential.id())).thenReturn(
+                java.util.Optional.of(version(com.miqroera.miqrokey.domain.model.CredentialVersionStatus.ACTIVE,
+                        CredentialFingerprint.sha256(SECRET), Instant.now(), null)));
+        when(subscriptionRepository.findById(credential.subscriptionId()))
+                .thenReturn(java.util.Optional.of(subscription));
+        when(productRepository.findById(subscription.providerProductId())).thenReturn(java.util.Optional.of(product));
+        when(adapterRegistry.findById("deepseek-payg-api")).thenReturn(java.util.Optional.of(adapter));
+        when(clientFactory.create(any(), any(), any())).thenReturn(client);
+        when(adapter.validateCredential(client)).thenReturn(Mono.just(CredentialCheck.valid(Instant.now())));
+
+        ValidateCredentialResponse response = service.validate(admin, credential.id(),
+                new ValidateCredentialRequest(SECRET), "req");
+
+        assertThat(response.matchesActive()).isTrue();
+        assertThat(response.providerStatus()).isEqualTo("VALID");
+    }
+
+    @Test
+    void validateReportsProviderRejection() {
+        UpstreamCredential credential = credentialOfStatus(CredentialStatus.ACTIVE);
+        UpstreamSubscription subscription = subscription();
+        ProviderProduct product = productFor(subscription.providerProductId());
+        ProviderProductAdapter adapter = mock(ProviderProductAdapter.class);
+        HttpProviderClient client = mock(HttpProviderClient.class);
+        when(credentialRepository.findById(credential.id())).thenReturn(java.util.Optional.of(credential));
+        when(versionRepository.findActiveByCredentialId(credential.id())).thenReturn(
+                java.util.Optional.of(version(com.miqroera.miqrokey.domain.model.CredentialVersionStatus.ACTIVE,
+                        CredentialFingerprint.sha256(SECRET), Instant.now(), null)));
+        when(subscriptionRepository.findById(credential.subscriptionId()))
+                .thenReturn(java.util.Optional.of(subscription));
+        when(productRepository.findById(subscription.providerProductId())).thenReturn(java.util.Optional.of(product));
+        when(adapterRegistry.findById("deepseek-payg-api")).thenReturn(java.util.Optional.of(adapter));
+        when(clientFactory.create(any(), any(), any())).thenReturn(client);
+        when(adapter.validateCredential(client))
+                .thenReturn(Mono.just(CredentialCheck.invalid("credential rejected", Instant.now())));
+
+        ValidateCredentialResponse response = service.validate(admin, credential.id(),
+                new ValidateCredentialRequest(SECRET), "req");
+
+        assertThat(response.matchesActive()).isTrue();
+        assertThat(response.providerStatus()).isEqualTo("REJECTED");
+    }
+
+    @Test
+    void validateMarksUnreachableWhenProviderCallFails() {
+        UpstreamCredential credential = credentialOfStatus(CredentialStatus.ACTIVE);
+        UpstreamSubscription subscription = subscription();
+        ProviderProduct product = productFor(subscription.providerProductId());
+        when(credentialRepository.findById(credential.id())).thenReturn(java.util.Optional.of(credential));
+        when(versionRepository.findActiveByCredentialId(credential.id())).thenReturn(
+                java.util.Optional.of(version(com.miqroera.miqrokey.domain.model.CredentialVersionStatus.ACTIVE,
+                        CredentialFingerprint.sha256(SECRET), Instant.now(), null)));
+        when(subscriptionRepository.findById(credential.subscriptionId()))
+                .thenReturn(java.util.Optional.of(subscription));
+        when(productRepository.findById(subscription.providerProductId())).thenReturn(java.util.Optional.of(product));
+        when(adapterRegistry.findById("deepseek-payg-api"))
+                .thenReturn(java.util.Optional.of(mock(ProviderProductAdapter.class)));
+        when(clientFactory.create(any(), any(), any())).thenThrow(new RuntimeException("boom"));
+
+        ValidateCredentialResponse response = service.validate(admin, credential.id(),
+                new ValidateCredentialRequest(SECRET), "req");
+
+        assertThat(response.matchesActive()).isTrue();
+        assertThat(response.providerStatus()).isEqualTo("UNREACHABLE");
     }
 }

@@ -359,8 +359,19 @@
 验证响应：
 
 ```json
-{ "matchesActive": true, "message": null }
+{ "matchesActive": true, "message": null, "providerStatus": "VALID", "providerMessage": null, "checkedAt": "2026-08-31T00:00:00Z" }
 ```
+
+`providerStatus`（候选与生效版本一致时执行真实供应商探活；不一致或不适用时为 `NOT_CHECKED`）：
+
+| 值 | 含义 |
+|---|---|
+| `VALID` | 供应商接受了该 Key（如 2xx 探活） |
+| `REJECTED` | 供应商拒绝（401/403） |
+| `UNREACHABLE` | 供应商调用失败或超时（10s） |
+| `NOT_CHECKED` | 无适配器/Base URL，或候选与生效版本不一致 |
+
+探活使用候选 Secret 直连供应商（适配器 `validateCredential`），失败不阻塞校验；供应商响应不在日志与审计中保留正文。
 
 安全规则：
 

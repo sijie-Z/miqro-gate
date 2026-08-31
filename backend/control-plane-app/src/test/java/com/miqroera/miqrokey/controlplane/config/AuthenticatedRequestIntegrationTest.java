@@ -21,12 +21,12 @@ import org.springframework.test.context.DynamicPropertySource;
 import java.util.Map;
 
 /**
- * Regression for the real-container SessionFilter bug: with
- * HIGHEST_PRECEDENCE the filter wrote the request-scoped UserContext before
- * Spring Boot's RequestContextFilter bound the request to the thread, so
- * every authenticated request 500'd with ScopeNotActiveException. MockMvc
- * binds the request context itself and never exposed it — this test drives a
- * real server over HTTP with a real session cookie.
+ * Regression for the real-container SessionFilter bug: with HIGHEST_PRECEDENCE
+ * the filter wrote the request-scoped UserContext before Spring Boot's
+ * RequestContextFilter bound the request to the thread, so every authenticated
+ * request 500'd with ScopeNotActiveException. MockMvc binds the request context
+ * itself and never exposed it — this test drives a real server over HTTP with a
+ * real session cookie.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Tag("integration")
@@ -74,8 +74,8 @@ class AuthenticatedRequestIntegrationTest {
 
         HttpHeaders headers = sessionHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<PasswordChangeRequest> change = new HttpEntity<>(
-                new PasswordChangeRequest(tempPw, "DrillPass2026!"), headers);
+        HttpEntity<PasswordChangeRequest> change = new HttpEntity<>(new PasswordChangeRequest(tempPw, "DrillPass2026!"),
+                headers);
         rest.exchange("/api/v1/auth/password", HttpMethod.POST, change, Map.class);
     }
 

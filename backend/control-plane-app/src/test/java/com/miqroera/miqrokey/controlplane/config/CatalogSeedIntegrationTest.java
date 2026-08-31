@@ -45,10 +45,10 @@ class CatalogSeedIntegrationTest {
     @Test
     @DisplayName("startup seeds all 23 catalog products with trusted URLs")
     void seedsCatalog() {
-        Integer products = jdbc.queryForObject("SELECT count(*) FROM provider_products", new org.springframework.jdbc.core.namedparam.MapSqlParameterSource(),
-                Integer.class);
-        Integer providers = jdbc.queryForObject("SELECT count(*) FROM providers", new org.springframework.jdbc.core.namedparam.MapSqlParameterSource(),
-                Integer.class);
+        Integer products = jdbc.queryForObject("SELECT count(*) FROM provider_products",
+                new org.springframework.jdbc.core.namedparam.MapSqlParameterSource(), Integer.class);
+        Integer providers = jdbc.queryForObject("SELECT count(*) FROM providers",
+                new org.springframework.jdbc.core.namedparam.MapSqlParameterSource(), Integer.class);
 
         assertThat(products).isGreaterThanOrEqualTo(23);
         assertThat(providers).isGreaterThanOrEqualTo(8);
