@@ -20,6 +20,7 @@ import {
   ServerIcon,
   SettingIcon,
   ShopIcon,
+  ToolsIcon,
   UserIcon,
   UsergroupCircleIcon,
 } from 'tdesign-icons-vue-next';
@@ -71,6 +72,7 @@ const opsNav: NavItem[] = [
   { name: 'agents', label: 'Agents', icon: RobotIcon },
   { name: 'services', label: '服务管理', icon: ServerIcon },
   { name: 'configs', label: '全局配置', icon: SettingIcon },
+  { name: 'mcp-services', label: 'MCP 服务', icon: ToolsIcon },
   { name: 'alert-rules', label: 'Alert Rules', icon: ErrorCircleIcon },
   { name: 'audit', label: 'Audit', icon: FilePasteIcon },
 ];

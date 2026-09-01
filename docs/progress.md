@@ -6,7 +6,7 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `P3.3`（全局配置中心，P0–P3 全部落地）
+- Current goal: `P3.4`（MCP 服务管理：上下线 + 健康检查）
 - Goal status: `IN_PROGRESS`（实现与验证完成，待 PR 合并）
 - Last updated: `2026-09-01 CST`
 - Branch: `goal/g7.2-price-catalog`
@@ -262,6 +262,14 @@
 - **P3 内部治理**：Agent 管理（P3.1）+ 服务管理（P3.2）+ 全局配置（P3.3）
 - 待合并 PR：#110/#111（SkillHub）、#112（Agent）、#113（服务）、#114（配置）
 - 阻塞项：用户级映射 + 平台确权细节（等 leader 提供注册字段）；Kafka 场景（等 leader 细化）
+
+## P3.4 — MCP 服务管理（对标腾讯 AI 网关 MCP 管理）
+
+- **来源**：用户指示继续依据腾讯/阿里结构补齐能力；对照两家能力清单，MCP 管理是最大缺口（腾讯：MCP 服务管理 + 上下线 + 健康检查 + Tools；阿里：MCP 全生命周期）。本轮实现前两块，Tools 发现列为扩展。
+- **交付**：`mcp_services` 表（V20：传输类型/上下线状态/健康状态/失败恢复计数器/检查配置）；`AdminMcpService`（注册——端点 https 无 userinfo 校验、手动上下线——重复切换 409、健康检查配置更新）；`McpHealthChecker`（定时 15s 遍历 ONLINE 服务，按各自间隔探测 `endpoint + checkPath`，GET 2xx 计健康；连续失败达 fail_threshold → UNHEALTHY、连续成功达 recover_threshold → HEALTHY；**手动下线不被健康检查覆盖**——腾讯语义）；前端 `AdminMcpServicesView`（表格——接入地址/传输/上下线/健康三态徽标 + 注册表单 + 上下线确认 + 健康检查配置弹窗）；路由/导航（运营组「MCP 服务」）。
+- **验证**：`McpHealthCheckerTest` 4/4（真实 loopback HttpServer：2xx 健康/500 与连接拒绝不健康/失败阈值翻转/恢复阈值翻转——状态机提取为纯函数 `nextHealth`）；`AdminMcpServiceApiIntegrationTest` 3/3（生命周期含默认配置与健康配置更新、端点校验与重名）；前端 vitest 71/71（+4）；全量后端 `verify -P integration` **BUILD SUCCESS**（全模块 1058 = 1051 + 7）。
+- **边界**：Tools 自动发现/启停（腾讯 Tools 管理）为扩展；健康检查为控制面出站直连（管理员配置端点，与内部服务同信任域）；`miqrokey.mcp.health-cycle-ms` 可配置。
+- **gitflow**：分支 `goal/p3.4-mcp-services`，验证后 push + PR，合并由用户在 GitHub 执行。
 
 ## 待办需求（2026-08-28 leader 指示，细节待补充，暂不实施）
 

@@ -156,6 +156,12 @@ const router = createRouter({
           meta: adminMeta('全局配置'),
         },
         {
+          path: 'mcp-services',
+          name: 'mcp-services',
+          component: () => import('@/views/AdminMcpServicesView.vue'),
+          meta: adminMeta('MCP 服务'),
+        },
+        {
           path: 'webhooks',
           name: 'webhooks',
           component: () => import('@/views/AdminWebhooksView.vue'),

@@ -71,6 +71,23 @@ export interface ConfigEntryView {
   updatedAt: string;
 }
 
+export interface McpServiceView {
+  id: string;
+  name: string;
+  description?: string;
+  endpoint: string;
+  transport: string;
+  status: string;
+  healthStatus: string;
+  healthCheckedAt: string | null;
+  checkIntervalSeconds: number;
+  checkTimeoutSeconds: number;
+  failThreshold: number;
+  recoverThreshold: number;
+  checkPath: string;
+  createdAt: string;
+}
+
 export interface BudgetView {
   projectId: string;
   projectCode: string;
