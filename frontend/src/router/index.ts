@@ -144,6 +144,12 @@ const router = createRouter({
           meta: adminMeta('Agents'),
         },
         {
+          path: 'services',
+          name: 'services',
+          component: () => import('@/views/AdminServicesView.vue'),
+          meta: adminMeta('服务管理'),
+        },
+        {
           path: 'webhooks',
           name: 'webhooks',
           component: () => import('@/views/AdminWebhooksView.vue'),

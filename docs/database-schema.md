@@ -300,6 +300,10 @@ V14（ADR-0011）新增 JWT 验签公钥：`jwt_public_key_pem text`（RSA Subje
 
 管理智能体：`name`、`description`、`upstream_credential_id`（出口绑定凭证，产品由凭证派生）、`status`（`ACTIVE|DISABLED`）、`created_by`。唯一 `(tenant_id, name)`；`(tenant_id, upstream_credential_id)` 索引（用量聚合路径）。
 
+### `services` (V18，P3.2)
+
+内部服务注册表：`name`、`kind`（`HTTP|MCP|OTHER`）、`description`、`base_url`（https、无 userinfo/query/fragment）、`status`（`ACTIVE|DISABLED`）、`created_by`。唯一 `(tenant_id, name)`。
+
 ## 7. 告警、导出和审计
 
 ### `webhook_endpoints`

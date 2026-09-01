@@ -6,7 +6,7 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `P3.1`（Agent 管理：出口绑定凭证 + 按 Agent 用量观测）
+- Current goal: `P3.2`（内部服务管理：注册表 + URL 校验）
 - Goal status: `IN_PROGRESS`（实现与验证完成，待 PR 合并）
 - Last updated: `2026-09-01 CST`
 - Branch: `goal/g7.2-price-catalog`
@@ -239,6 +239,13 @@
 - **排障记录**：用量聚合 0 行的根因——PROJECT 分组是 INNER JOIN projects，seed 的随机 project_id 被丢弃（测试 seed 真实项目后修复）。
 - **边界**：入口路由（外部访问 Agent 的域名/消费者认证）为后续扩展；Agent 凭证轮换/吊销后 Agent 自动失效（绑定凭证引用，凭证级联 RESTRICT）。
 - **gitflow**：分支 `goal/p3.1-agent-management`，验证后 push + PR，合并由用户在 GitHub 执行。
+
+## P3.2 — 内部服务管理（对标腾讯服务来源）
+
+- **交付**：`services` 表（V18，内部服务注册表：名称/类型 HTTP|MCP|OTHER/描述/服务地址/状态）；`AdminServiceService`（base_url 校验：https 必选、无 userinfo/query/fragment——镜像上游目标规则）+ `AdminServiceController`（CRUD + 禁用）；前端 `AdminServicesView`（表格——类型徽标/服务地址/状态 + 注册表单——类型下拉 + 禁用确认）；路由/导航（运营组「服务管理」）。
+- **验证**：`AdminServiceApiIntegrationTest` 3/3（生命周期含 kind 缺省 HTTP、URL 校验——http/userinfo/query 全拒、重名 409）；前端 vitest 63/63（+3）；全量后端 `verify -P integration` **BUILD SUCCESS**（全模块 1048 = 1045 + 3）。
+- **边界**：注册表为网关集成的前置目录；实际路由接线（服务 → 网关转发）等 leader 集成细节；禁用后注册信息保留（软禁用）。
+- **gitflow**：分支 `goal/p3.2-service-management`，验证后 push + PR，合并由用户在 GitHub 执行。
 
 ## 待办需求（2026-08-28 leader 指示，细节待补充，暂不实施）
 

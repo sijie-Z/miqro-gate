@@ -50,6 +50,16 @@ export interface AgentView {
   createdAt: string;
 }
 
+export interface InternalServiceView {
+  id: string;
+  name: string;
+  kind: string;
+  description?: string;
+  baseUrl: string;
+  status: string;
+  createdAt: string;
+}
+
 export interface BudgetView {
   projectId: string;
   projectCode: string;
