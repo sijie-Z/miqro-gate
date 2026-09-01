@@ -61,6 +61,7 @@ const opsNav: NavItem[] = [
   { name: 'exports', label: 'Exports', icon: DownloadIcon },
   { name: 'deletions', label: 'Deletions', icon: DeleteIcon },
   { name: 'webhooks', label: 'Webhooks', icon: NotificationIcon },
+  { name: 'consumers', label: 'API 消费者', icon: SecuredIcon },
   { name: 'alert-rules', label: 'Alert Rules', icon: ErrorCircleIcon },
   { name: 'audit', label: 'Audit', icon: FilePasteIcon },
 ];

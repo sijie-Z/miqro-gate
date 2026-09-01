@@ -4,6 +4,8 @@
 
 import { del, get, patch, post } from './http';
 import type {
+  ApiConsumerView,
+  CreateApiConsumerResponse,
   AdminUser,
   AlertRule,
   AuditEventView,
@@ -243,6 +245,18 @@ export function createPrice(body: {
   source: string;
 }): Promise<PriceSnapshotView> {
   return post<PriceSnapshotView>('/api/v1/admin/prices', body);
+}
+
+export function listApiConsumers(): Promise<ApiConsumerView[]> {
+  return get<ApiConsumerView[]>('/api/v1/admin/api-consumers');
+}
+
+export function createApiConsumer(name: string): Promise<CreateApiConsumerResponse> {
+  return post<CreateApiConsumerResponse>('/api/v1/admin/api-consumers', { name });
+}
+
+export function disableApiConsumer(id: string): Promise<ApiConsumerView> {
+  return post<ApiConsumerView>(`/api/v1/admin/api-consumers/${id}/disable`);
 }
 
 // ---- admin provider/Plan (G5.3) ----

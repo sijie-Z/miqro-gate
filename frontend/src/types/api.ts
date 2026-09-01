@@ -217,6 +217,20 @@ export interface PriceSnapshotView {
   createdAt: string;
 }
 
+export interface ApiConsumerView {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface CreateApiConsumerResponse {
+  consumer: ApiConsumerView;
+  apiKey: string;
+  shownOnce: boolean;
+}
+
 export interface CredentialView {
   id: string;
   name: string;

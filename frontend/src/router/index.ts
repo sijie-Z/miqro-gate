@@ -120,6 +120,12 @@ const router = createRouter({
           meta: adminMeta('Usage Deletions'),
         },
         {
+          path: 'consumers',
+          name: 'consumers',
+          component: () => import('@/views/AdminConsumersView.vue'),
+          meta: adminMeta('API 消费者'),
+        },
+        {
           path: 'webhooks',
           name: 'webhooks',
           component: () => import('@/views/AdminWebhooksView.vue'),
