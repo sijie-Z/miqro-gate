@@ -2,7 +2,7 @@
  * /api/v1/auth and /api/v1/me endpoint clients (api-contract.md §3–§4).
  */
 
-import { del, get, patch, post, put } from './http';
+import { del, downloadBlob, get, patch, post, put, uploadBytes } from './http';
 import type {
   ApiConsumerView,
   CreateApiConsumerResponse,
@@ -11,6 +11,7 @@ import type {
   AuditEventView,
   BudgetView,
   ExportTask,
+  SkillView,
   UsageDeletionRequest,
   WebhookDelivery,
   WebhookEndpointView,
@@ -304,6 +305,46 @@ export function updateSeat(
   body: { assignedUserId?: string; status?: string; displayName?: string },
 ): Promise<SeatView> {
   return patch<SeatView>(`/api/v1/admin/subscriptions/${subscriptionId}/seats/${seatId}`, body);
+}
+
+// ---- SkillHub (P2.4) ----
+
+export function listSkills(): Promise<SkillView[]> {
+  return get<SkillView[]>('/api/v1/skills');
+}
+
+export function getSkill(id: string): Promise<SkillView> {
+  return get<SkillView>(`/api/v1/skills/${id}`);
+}
+
+/** Downloads the skill package; throws ApiError (403 SKILL_DOWNLOAD_FORBIDDEN). */
+export async function downloadSkill(id: string, filename: string): Promise<void> {
+  const blob = await downloadBlob(`/api/v1/skills/${id}/download`);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${filename}.zip`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function adminListSkills(): Promise<SkillView[]> {
+  return get<SkillView[]>('/api/v1/admin/skills');
+}
+
+export function adminUploadSkill(version: string, zip: Blob): Promise<SkillView> {
+  return uploadBytes<SkillView>(`/api/v1/admin/skills?version=${encodeURIComponent(version)}`, zip);
+}
+
+export function adminArchiveSkill(id: string): Promise<SkillView> {
+  return post<SkillView>(`/api/v1/admin/skills/${id}/archive`);
+}
+
+export function adminSetSkillAccess(
+  id: string,
+  scopes: Array<{ scopeType: string; scopeId: string }>,
+): Promise<void> {
+  return put<void>(`/api/v1/admin/skills/${id}/access`, scopes);
 }
 
 // ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
+  AppIcon,
   ChartBarIcon,
   DashboardIcon,
   DeleteIcon,
@@ -39,6 +40,7 @@ const regularNav: NavItem[] = [
   { name: 'keys', label: 'Virtual Keys', icon: LockOnIcon },
   { name: 'usage', label: 'Usage', icon: ChartBarIcon },
   { name: 'profile', label: 'Profile', icon: UserIcon },
+  { name: 'skills', label: 'SkillHub', icon: AppIcon },
 ];
 
 const orgNav: NavItem[] = [
@@ -62,6 +64,7 @@ const opsNav: NavItem[] = [
   { name: 'deletions', label: 'Deletions', icon: DeleteIcon },
   { name: 'webhooks', label: 'Webhooks', icon: NotificationIcon },
   { name: 'consumers', label: 'API 消费者', icon: SecuredIcon },
+  { name: 'skillhub', label: 'SkillHub 管理', icon: AppIcon },
   { name: 'alert-rules', label: 'Alert Rules', icon: ErrorCircleIcon },
   { name: 'audit', label: 'Audit', icon: FilePasteIcon },
 ];

@@ -48,6 +48,12 @@ const router = createRouter({
           meta: { title: 'Profile' },
         },
         {
+          path: 'skills',
+          name: 'skills',
+          component: () => import('@/views/SkillHubView.vue'),
+          meta: { title: 'SkillHub' },
+        },
+        {
           path: 'users',
           name: 'users',
           component: () => import('@/views/AdminUsersView.vue'),
@@ -124,6 +130,12 @@ const router = createRouter({
           name: 'consumers',
           component: () => import('@/views/AdminConsumersView.vue'),
           meta: adminMeta('API 消费者'),
+        },
+        {
+          path: 'skillhub',
+          name: 'skillhub',
+          component: () => import('@/views/AdminSkillsView.vue'),
+          meta: adminMeta('SkillHub 管理'),
         },
         {
           path: 'webhooks',
