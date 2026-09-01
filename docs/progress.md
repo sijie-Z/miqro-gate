@@ -195,7 +195,8 @@
 - **消费者管理 UI**：`AdminConsumersView`（创建表单 + 一次性 Key 弹窗 + 列表 + 吊销确认）+ 类型/API 层/路由/导航（运营组「API 消费者」）；vitest +3。
 - **配额状态端点（本会话扩展）**：`GET /api/v1/billing/quota` —— 全租户最近配额快照按订阅分组（含订阅名；无快照订阅以空列表出现）；`QuotaSnapshotRepository.findLatestForTenant`（DISTINCT ON 跨订阅取每作用域最新）；外部视图 `QuotaEntryView` 只含配额数字与 `source` 权威级别，内部字段（`errorMessage`/`providerStatusJson`）不暴露；api-contract §5.10 更新。
 - **测试基建修复（既有 flaky，对照组证实与本功能无关）**：全套件下 `RouteSnapshotRefreshNotifierTest` 3/3 失败，根因 `PSQL FATAL: sorry, too many clients` —— 共享 Testcontainers Postgres（默认 100 连接）被多个缓存 Spring 上下文的 Hikari 池（默认 20/上下文）耗尽，裸 probe 连接打不开。修复：测试基类池降至 10 + 共享容器 `max_connections=200`（测试专用配置，生产零影响）。
-- **验证**：`BillingApiIntegrationTest` 5/5（新增 quota 分组/字段/空订阅/内部字段不暴露断言）；全量后端 `verify -P integration` **BUILD SUCCESS**（控制面 273/0；全模块 1004 计数基线 +1）。
+- **JWT 认证（ADR-0011，对标阿里消费者认证）**：消费者可选配置 RS256 验签公钥（PEM），平台自持私钥签发 JWT（`sub`=消费者名，`exp` 必填），网关 JDK 原生验签（零三方库）——`ConsumerJwtVerifier`（RS256-only、无 padding Base64url 补位、exp/nbf 校验、token/payload 大小上限）；`ApiKeyAuthFilter` 双凭据（`X-API-Key` 只走 API Key，`Authorization: Bearer` 按 `mqk_api_` 前缀分流）；管理 API `PUT/DELETE /jwt-key`（返回 SHA-256 指纹，轮换立即失效）；V14 加列。验证：`ConsumerJwtVerifierTest` 14/14（篡改/过期/nbf/alg=none/错签名/无 padding/超限）+ `BillingApiIntegrationTest` 8/8（JWT 主流程/轮换/禁用/删除即失效/API Key 回归）。
+- **验证**：全量后端 `verify -P integration` **BUILD SUCCESS**（控制面 290/0：273 + billing 3 + verifier 14；全模块 1021 基线 1004 + 17）。
 - **排障记录**：MockMvc 下 billing 401 根因是 SessionFilter（order -100）先于 ApiKeyAuthFilter（-90）拦截无 session 请求 —— 会话过滤器豁免 billing 路径，由 API Key 过滤器接管。
 - **后续**：用户级映射与 JWT 确权（平台注册细节明确后）；SkillHub/Agent 管理按 roadmap P2/P3。
 
