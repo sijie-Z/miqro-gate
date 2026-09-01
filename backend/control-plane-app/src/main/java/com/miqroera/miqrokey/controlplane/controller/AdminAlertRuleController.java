@@ -37,7 +37,7 @@ public class AdminAlertRuleController {
     @PostMapping
     public AlertRule create(@RequestBody CreateRequest body) {
         return ruleService.create(userContext.getUser().tenantId(), body.name(), body.type(), body.threshold(),
-                body.dedupeMinutes() != null ? body.dedupeMinutes() : 60, body.webhookEndpointId());
+                body.dedupeMinutes() != null ? body.dedupeMinutes() : 60, body.webhookEndpointId(), body.scopeJson());
     }
 
     @GetMapping
@@ -53,7 +53,7 @@ public class AdminAlertRuleController {
     @PatchMapping("/{ruleId}")
     public AlertRule update(@PathVariable UUID ruleId, @RequestBody UpdateRequest body) {
         return ruleService.update(userContext.getUser().tenantId(), ruleId, body.name(), body.threshold(),
-                body.dedupeMinutes(), body.enabled(), body.webhookEndpointId());
+                body.dedupeMinutes(), body.enabled(), body.webhookEndpointId(), body.scopeJson());
     }
 
     @DeleteMapping("/{ruleId}")
@@ -62,10 +62,10 @@ public class AdminAlertRuleController {
     }
 
     public record CreateRequest(String name, String type, BigDecimal threshold, Integer dedupeMinutes,
-            UUID webhookEndpointId) {
+            UUID webhookEndpointId, String scopeJson) {
     }
 
     public record UpdateRequest(String name, BigDecimal threshold, Integer dedupeMinutes, Boolean enabled,
-            UUID webhookEndpointId) {
+            UUID webhookEndpointId, String scopeJson) {
     }
 }

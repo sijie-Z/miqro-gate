@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.controlplane.service;
 
 import com.miqroera.miqrokey.controlplane.service.WebhookEndpointService.WebhookEndpoint;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,6 +15,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
@@ -48,12 +50,14 @@ public class AlertEvaluator {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final WebhookEndpointService endpointService;
+    private final AdminBudgetService budgetService;
     private final ObjectMapper objectMapper;
 
     public AlertEvaluator(NamedParameterJdbcTemplate jdbc, WebhookEndpointService endpointService,
-            ObjectMapper objectMapper) {
+            AdminBudgetService budgetService, ObjectMapper objectMapper) {
         this.jdbc = jdbc;
         this.endpointService = endpointService;
+        this.budgetService = budgetService;
         this.objectMapper = objectMapper;
     }
 
@@ -72,11 +76,15 @@ public class AlertEvaluator {
     }
 
     private void evaluate(AlertRuleService.AlertRule rule) {
-        BigDecimal value = metric(rule.type());
+        BigDecimal value = metric(rule.type(), rule.tenantId(), rule.scopeJson());
         if (value == null || value.compareTo(rule.threshold()) < 0) {
             return;
         }
-        String dedupeKey = rule.type() + ":" + Instant.now().truncatedTo(ChronoUnit.HOURS);
+        // Budget watermarks are monthly: one event per (rule, month). The other
+        // metrics dedupe per (rule, hour) as before.
+        String dedupeKey = "BUDGET_THRESHOLD".equals(rule.type())
+                ? rule.type() + ":" + YearMonth.now()
+                : rule.type() + ":" + Instant.now().truncatedTo(ChronoUnit.HOURS);
         UUID eventId = UUID.randomUUID();
         Instant now = Instant.now();
         int inserted = jdbc.update("""
@@ -99,7 +107,7 @@ public class AlertEvaluator {
     }
 
     /** Metric over the last rolling hour; ratio in 0..1, surge as a ratio. */
-    BigDecimal metric(String type) {
+    BigDecimal metric(String type, UUID tenantId, String scopeJson) {
         return switch (type) {
             case "USAGE_MISSING_RATE" -> ratio("""
                     SELECT COUNT(*) FILTER (WHERE usage_missing)::float / NULLIF(COUNT(*), 0)
@@ -115,8 +123,29 @@ public class AlertEvaluator {
                     WHERE source = 'UNAVAILABLE' AND synced_at >= now() - interval '1 hour'
                     """);
             case "USAGE_SURGE" -> surge();
+            case "BUDGET_THRESHOLD" -> budgetWatermark(tenantId, scopeJson);
             default -> null;
         };
+    }
+
+    /**
+     * The project's current-month budget watermark as a percentage (spent / amount
+     * × 100); null when the scope is absent or the project has no budget for this
+     * month (nothing to alert on).
+     */
+    private BigDecimal budgetWatermark(UUID tenantId, String scopeJson) {
+        try {
+            JsonNode node = objectMapper.readTree(scopeJson);
+            String projectId = node.path("projectId").asText(null);
+            if (projectId == null) {
+                return null;
+            }
+            com.miqroera.miqrokey.controlplane.dto.BudgetView view = budgetService.view(tenantId,
+                    UUID.fromString(projectId), YearMonth.now().toString());
+            return "ACTIVE".equals(view.status()) ? view.spentPct() : null;
+        } catch (Exception e) {
+            return null; // malformed scope or no budget yet — nothing to alert
+        }
     }
 
     private BigDecimal ratio(String sql) {
@@ -254,9 +283,10 @@ public class AlertEvaluator {
 
     private static final RowMapper<AlertRuleService.AlertRule> RULE_ROW_MAPPER = (rs,
             rowNum) -> new AlertRuleService.AlertRule((UUID) rs.getObject("id"), (UUID) rs.getObject("tenant_id"),
-                    rs.getString("name"), rs.getString("type"), rs.getObject("threshold", BigDecimal.class),
-                    rs.getInt("dedupe_minutes"), rs.getBoolean("enabled"), (UUID) rs.getObject("webhook_endpoint_id"),
-                    rs.getLong("version"), rs.getTimestamp("created_at").toInstant(),
+                    rs.getString("name"), rs.getString("type"), rs.getString("scope_json"),
+                    rs.getObject("threshold", BigDecimal.class), rs.getInt("dedupe_minutes"), rs.getBoolean("enabled"),
+                    (UUID) rs.getObject("webhook_endpoint_id"), rs.getLong("version"),
+                    rs.getTimestamp("created_at").toInstant(),
                     rs.getTimestamp("updated_at") != null ? rs.getTimestamp("updated_at").toInstant() : null);
 
     private static final RowMapper<AlertEvent> EVENT_ROW_MAPPER = (rs, rowNum) -> new AlertEvent(

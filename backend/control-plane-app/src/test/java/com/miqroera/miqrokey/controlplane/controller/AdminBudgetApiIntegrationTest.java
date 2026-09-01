@@ -21,11 +21,13 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.miqroera.miqrokey.controlplane.service.AlertEvaluator;
 
 import java.time.YearMonth;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -64,6 +66,8 @@ class AdminBudgetApiIntegrationTest {
     ObjectMapper objectMapper;
     @Autowired
     NamedParameterJdbcTemplate jdbc;
+    @Autowired
+    AlertEvaluator alertEvaluator;
 
     private Cookie sessionCookie;
     private Cookie csrfCookie;
@@ -96,10 +100,10 @@ class AdminBudgetApiIntegrationTest {
     }
 
     private void clean() {
-        for (String table : new String[]{"budget", "usage_event", "price_snapshot", "virtual_keys",
-                "project_provider_grant_models", "project_provider_grants", "upstream_credential_versions",
-                "upstream_credentials", "quota_snapshots", "upstream_subscriptions", "projects", "user_sessions",
-                "users", "admin_audit_events"}) {
+        for (String table : new String[]{"webhook_delivery_attempts", "alert_events", "alert_rules", "budget",
+                "usage_event", "price_snapshot", "virtual_keys", "project_provider_grant_models",
+                "project_provider_grants", "upstream_credential_versions", "upstream_credentials", "quota_snapshots",
+                "upstream_subscriptions", "projects", "user_sessions", "users", "admin_audit_events"}) {
             try {
                 jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
             } catch (Exception ignored) {
@@ -205,6 +209,68 @@ class AdminBudgetApiIntegrationTest {
         // Monthly list shows both with correct levels.
         mockMvc.perform(get("/api/v1/admin/budgets").cookie(sessionCookie)).andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)));
+    }
+
+    @Test
+    @DisplayName("BUDGET_THRESHOLD rules fire once per month when the watermark crosses the threshold")
+    void budgetAlertFiresOncePerMonth() throws Exception {
+        UUID projectId = seedProject("BUD", "Budget Project");
+        seedUsage(projectId, "budget-model", 1000L, 1000L);
+        mockMvc.perform(put("/api/v1/admin/projects/" + projectId + "/budget").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"month\":\"" + month + "\",\"amount\":0.01,\"alertThresholdPct\":100}"))
+                .andExpect(status().isOk());
+
+        // Before the rule exists nothing evaluates.
+        alertEvaluator.evaluateAll();
+        assertThat(eventCount()).isEqualTo(0);
+
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/alert-rules").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"budget-fire","type":"BUDGET_THRESHOLD","threshold":80,
+                         "scopeJson":"{\\"projectId\\":\\"%s\\"}"}
+                        """.formatted(projectId))).andExpect(status().isOk()).andReturn();
+        String ruleId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        // Watermark is 100% >= 80 -> event fired.
+        alertEvaluator.evaluateAll();
+        assertThat(eventCount()).isEqualTo(1);
+        java.math.BigDecimal value = jdbc.queryForObject("SELECT value FROM alert_events WHERE rule_id = :ruleId",
+                new MapSqlParameterSource("ruleId", UUID.fromString(ruleId)), java.math.BigDecimal.class);
+        assertThat(value).isEqualByComparingTo("100");
+
+        // Same month -> deduplicated, still exactly one event.
+        alertEvaluator.evaluateAll();
+        assertThat(eventCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("BUDGET_THRESHOLD rules require a scope pointing at an existing tenant project")
+    void budgetAlertScopeValidation() throws Exception {
+        mockMvc.perform(post("/api/v1/admin/alert-rules").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"no-scope\",\"type\":\"BUDGET_THRESHOLD\",\"threshold\":80}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("SCOPE_INVALID"));
+
+        mockMvc.perform(post("/api/v1/admin/alert-rules").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"bad-scope\",\"type\":\"BUDGET_THRESHOLD\",\"threshold\":80,"
+                        + "\"scopeJson\":\"{\\\"projectId\\\":\\\"" + UUID.randomUUID() + "\\\"}\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("SCOPE_INVALID"));
+
+        // An existing project passes.
+        UUID projectId = seedProject("BUD", "Budget Project");
+        mockMvc.perform(post("/api/v1/admin/alert-rules").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"ok-scope\",\"type\":\"BUDGET_THRESHOLD\",\"threshold\":80,"
+                        + "\"scopeJson\":\"{\\\"projectId\\\":\\\"" + projectId + "\\\"}\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.scopeJson").isNotEmpty());
+    }
+
+    private long eventCount() {
+        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM alert_events", new MapSqlParameterSource(), Long.class);
+        return count != null ? count : 0;
     }
 
     // ------------------------------------------------------------------
