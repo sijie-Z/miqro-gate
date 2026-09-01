@@ -304,6 +304,10 @@ V14（ADR-0011）新增 JWT 验签公钥：`jwt_public_key_pem text`（RSA Subje
 
 内部服务注册表：`name`、`kind`（`HTTP|MCP|OTHER`）、`description`、`base_url`（https、无 userinfo/query/fragment）、`status`（`ACTIVE|DISABLED`）、`created_by`。唯一 `(tenant_id, name)`。
 
+### `config_entries` (V19，P3.3)
+
+全局配置中心：`group_name`、`key`、`value text`、`description`、`updated_by`（乐观 `version`）。唯一 `(tenant_id, group_name, key)`。仅非机密配置（机密走 env/加密凭证）。
+
 ## 7. 告警、导出和审计
 
 ### `webhook_endpoints`

@@ -11,6 +11,7 @@ import type {
   AlertRule,
   AuditEventView,
   BudgetView,
+  ConfigEntryView,
   ExportTask,
   InternalServiceView,
   SkillView,
@@ -388,6 +389,26 @@ export function adminCreateService(body: {
 
 export function adminDisableService(id: string): Promise<InternalServiceView> {
   return post<InternalServiceView>(`/api/v1/admin/services/${id}/disable`);
+}
+
+// ---- global config (P3.3) ----
+
+export function adminListConfigs(group?: string): Promise<ConfigEntryView[]> {
+  const params = group ? `?group=${encodeURIComponent(group)}` : '';
+  return get<ConfigEntryView[]>(`/api/v1/admin/configs${params}`);
+}
+
+export function adminPutConfig(body: {
+  group: string;
+  key: string;
+  value: string;
+  description?: string;
+}): Promise<ConfigEntryView> {
+  return put<ConfigEntryView>('/api/v1/admin/configs', body);
+}
+
+export function adminDeleteConfig(group: string, key: string): Promise<void> {
+  return del<void>(`/api/v1/admin/configs/${encodeURIComponent(group)}/${encodeURIComponent(key)}`);
 }
 
 // ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----

@@ -6,7 +6,7 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `P3.2`（内部服务管理：注册表 + URL 校验）
+- Current goal: `P3.3`（全局配置中心，P0–P3 全部落地）
 - Goal status: `IN_PROGRESS`（实现与验证完成，待 PR 合并）
 - Last updated: `2026-09-01 CST`
 - Branch: `goal/g7.2-price-catalog`
@@ -246,6 +246,22 @@
 - **验证**：`AdminServiceApiIntegrationTest` 3/3（生命周期含 kind 缺省 HTTP、URL 校验——http/userinfo/query 全拒、重名 409）；前端 vitest 63/63（+3）；全量后端 `verify -P integration` **BUILD SUCCESS**（全模块 1048 = 1045 + 3）。
 - **边界**：注册表为网关集成的前置目录；实际路由接线（服务 → 网关转发）等 leader 集成细节；禁用后注册信息保留（软禁用）。
 - **gitflow**：分支 `goal/p3.2-service-management`，验证后 push + PR，合并由用户在 GitHub 执行。
+
+## P3.3 — 全局配置中心（P 计划收官）
+
+- **交付**：`config_entries` 表（V19，分组键值条目 + 乐观 version）；`AdminConfigService`/`AdminConfigController`（`GET /admin/configs?group` 列表/分组过滤、`PUT` upsert、`DELETE /{group}/{key}`；名称规则 `[a-zA-Z][a-zA-Z0-9._-]{0,127}`）；前端 `AdminConfigsView`（分组筛选条 + 表格 + 新增/编辑弹窗——编辑时 group/key 锁定 + 删除确认）；路由/导航（运营组「全局配置」）。
+- **验证**：`AdminConfigApiIntegrationTest` 3/3（生命周期含 upsert 原地替换与分组过滤、名称/值校验全拒绝路径）；前端 vitest 67/67（+4）；全量后端 `verify -P integration` **BUILD SUCCESS**（全模块 1051 = 1048 + 3）。
+- **边界**：仅非机密配置（机密走 env/加密凭证体系，页面明示）；配置项为目录形态，应用侧热更新接线待集成细节。
+- **gitflow**：分支 `goal/p3.3-global-config`，验证后 push + PR，合并由用户在 GitHub 执行。
+
+## P0–P3 全部落地（2026-09-01 里程碑）
+
+- **P0 身份地基**：消费者 API Key（G8.1）+ JWT 认证（ADR-0011）+ 计费查询 API
+- **P1 计费服务化**：计费/配额查询 + 项目月度预算（G8.2）+ 预算水位告警（G8.3）
+- **P2 SkillHub**：形态调研（P2.1）+ 目录/授权后端（P2.2/P2.3）+ 浏览/管理前端（P2.4）
+- **P3 内部治理**：Agent 管理（P3.1）+ 服务管理（P3.2）+ 全局配置（P3.3）
+- 待合并 PR：#110/#111（SkillHub）、#112（Agent）、#113（服务）、#114（配置）
+- 阻塞项：用户级映射 + 平台确权细节（等 leader 提供注册字段）；Kafka 场景（等 leader 细化）
 
 ## 待办需求（2026-08-28 leader 指示，细节待补充，暂不实施）
 
