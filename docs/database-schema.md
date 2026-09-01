@@ -251,9 +251,9 @@ Key → 项目绑定（标签路由的鉴权权威），与 `virtual_keys.projec
 
 URL（创建时经控制面 SSRF 门控：默认仅公网 https，`MIQROKEY_CONTROL_PROVIDER_CLIENT_ALLOWED_CIDRS` 可扩展）、HMAC 签名 Secret（AES-GCM 加密，AAD 绑定 tenant + endpoint）、启停、超时、version。Secret 明文永不返回。
 
-### `alert_rules` / `alert_events` / `webhook_delivery_attempts` (V12，G4.5 实现)
+### `alert_rules` / `alert_events` / `webhook_delivery_attempts` (V12/V15，G4.5/G8.3 实现)
 
-规则：`type`（`USAGE_MISSING_RATE|UPSTREAM_ERROR_RATE|BALANCE_UNAVAILABLE|USAGE_SURGE`）、`threshold`、`dedupe_minutes`、`enabled`、可选 `webhook_endpoint_id`（null = 仅记录事件）。事件：`dedupe_key`（type + 小时桶）唯一约束 `(tenant_id, rule_id, dedupe_key)` 实现去重；`value` 为指标实际值；`payload_json` 脱敏。投递表：事件 × 端点 × 尝试次数唯一；`next_retry_at` 指数退避（2^attempt × 1min，最多 3 次）、`http_status`、脱敏错误。评估调度：`@Scheduled` 固定延迟（`miqrokey.alerts.evaluation-interval-ms` 默认 5min）；指标基于滚动 1 小时、租户级（单租户部署语义）。
+规则：`type`（`USAGE_MISSING_RATE|UPSTREAM_ERROR_RATE|BALANCE_UNAVAILABLE|USAGE_SURGE|BUDGET_THRESHOLD`，V15 扩展 CHECK 约束）、`threshold`、`dedupe_minutes`、`enabled`、可选 `webhook_endpoint_id`（null = 仅记录事件）、`scope_json jsonb`（`BUDGET_THRESHOLD` 必填：`{"projectId": "…"}`）。事件：`dedupe_key`（type + 小时桶；`BUDGET_THRESHOLD` 为 type + 月份）唯一约束 `(tenant_id, rule_id, dedupe_key)` 实现去重；`value` 为指标实际值；`payload_json` 脱敏。投递表：事件 × 端点 × 尝试次数唯一；`next_retry_at` 指数退避（2^attempt × 1min，最多 3 次）、`http_status`、脱敏错误。评估调度：`@Scheduled` 固定延迟（`miqrokey.alerts.evaluation-interval-ms` 默认 5min）；指标基于滚动 1 小时、租户级（单租户部署语义）；`BUDGET_THRESHOLD` 由 `AlertEvaluator` 复用 `AdminBudgetService` 水位（当月分摊成本/预算 × 100）。
 
 ### `export_tasks` (V11，G4.4 实现)
 

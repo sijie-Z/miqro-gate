@@ -6,7 +6,7 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G8.2`（项目月度预算：管理面 + 实时水位 + 预警状态，只预警不阻断）
+- Current goal: `G8.3`（预算水位告警：BUDGET_THRESHOLD 规则 + Webhook 投递 + 月度去重）
 - Goal status: `IN_PROGRESS`（后端 + 前端 + 验证完成，待 PR 合并）
 - Last updated: `2026-09-01 CST`
 - Branch: `goal/g7.2-price-catalog`
@@ -207,6 +207,14 @@
 - **验证**：`AdminBudgetApiIntegrationTest` 4/4（生命周期/校验/水位链路：seed usage_event + price_snapshot → spent=0.01 → EXCEEDED 精确断言）；前端 vitest 46/46（+3：水位渲染/编辑保存参数/删除确认）；全量后端 `verify -P integration` **BUILD SUCCESS**（全模块 1025 = 1021 + 4）。
 - **对齐**：腾讯「正常/预警/超限」三态 + 阿里「事前定规则、事中控风险」—— 只告警不阻断，符合「不因预算阻断」产品锁定决策；硬阻断与 Token/请求次数配额列为后续（需 ADR）。
 - **风险**：`spent` 取读时刻最新单价快照（价格变更后历史水位随单价变化，与 G4.3 同语义）；预算告警（BUDGET_THRESHOLD 事件/Webhook）未接线，列为扩展点。
+
+## G8.3 — 预算水位告警（BUDGET_THRESHOLD，配额管理预警闭环）
+
+- **来源**：G8.2 扩展点落地 —— 腾讯消费者配额「预警状态 + 超配策略」中的预警经 Webhook 通知闭环。
+- **交付**：新告警类型 `BUDGET_THRESHOLD`（V15 扩展 `alert_rules.type` CHECK 约束）：规则 `scopeJson={"projectId": …}`（创建/更新时校验项目存在且同租户，`400 SCOPE_INVALID`）；`AlertEvaluator` 复用 `AdminBudgetService` 计算当月水位百分比，命中阈值触发事件 + HMAC 签名 Webhook 投递；去重键按（规则 × 月份）——同月仅告警一次（其余类型仍按小时桶）。前端告警规则页：类型「预算水位」+ 条件项目选择 + 阈值单位切换 + 列表 scope 项目名提示。
+- **验证**：`AdminBudgetApiIntegrationTest` 6/6（+2：水位 100% ≥ 阈值 80 触发事件 value=100、同月二次评估去重仍 1 条、无 scope/未知项目 400、有预算不触发路径）；前端 vitest 48/48（+2 告警页：scope 提示渲染、预算规则创建必须选项目 + scopeJson 组装）；全量后端 `verify -P integration` **BUILD SUCCESS**（全模块 1027 = 1025 + 2）。
+- **排障记录**：Postgres jsonb 列传 String 参数报「column is of type jsonb but expression is of type character varying」—— JDBC 需 `:scopeJson::jsonb` 显式 cast。
+- **风险**：预算事件 payload 只含 rule/type/value（无项目名）——投递方可按 ruleId 反查；与既有四类告警行为一致。
 
 ## 待办需求（2026-08-28 leader 指示，细节待补充，暂不实施）
 
