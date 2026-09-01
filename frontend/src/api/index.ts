@@ -4,6 +4,7 @@
 
 import { del, downloadBlob, get, patch, post, put, uploadBytes } from './http';
 import type {
+  AgentView,
   ApiConsumerView,
   CreateApiConsumerResponse,
   AdminUser,
@@ -345,6 +346,28 @@ export function adminSetSkillAccess(
   scopes: Array<{ scopeType: string; scopeId: string }>,
 ): Promise<void> {
   return put<void>(`/api/v1/admin/skills/${id}/access`, scopes);
+}
+
+// ---- agents (P3.1) ----
+
+export function adminListAgents(): Promise<AgentView[]> {
+  return get<AgentView[]>('/api/v1/admin/agents');
+}
+
+export function adminCreateAgent(body: {
+  name: string;
+  description?: string;
+  credentialId: string;
+}): Promise<AgentView> {
+  return post<AgentView>('/api/v1/admin/agents', body);
+}
+
+export function adminDisableAgent(id: string): Promise<AgentView> {
+  return post<AgentView>(`/api/v1/admin/agents/${id}/disable`);
+}
+
+export function adminAgentUsage(id: string): Promise<UsageSummary> {
+  return get<UsageSummary>(`/api/v1/admin/agents/${id}/usage`);
 }
 
 // ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----

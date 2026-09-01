@@ -296,6 +296,10 @@ V14（ADR-0011）新增 JWT 验签公钥：`jwt_public_key_pem text`（RSA Subje
 
 `skill_access`：下载授权——`skill_id`（ON DELETE CASCADE）、`scope_type`（`TEAM|PROJECT`）、`scope_id`；唯一 `(skill_id, scope_type, scope_id)`。无行 = 公开技能。
 
+### `agents` (V17，P3.1)
+
+管理智能体：`name`、`description`、`upstream_credential_id`（出口绑定凭证，产品由凭证派生）、`status`（`ACTIVE|DISABLED`）、`created_by`。唯一 `(tenant_id, name)`；`(tenant_id, upstream_credential_id)` 索引（用量聚合路径）。
+
 ## 7. 告警、导出和审计
 
 ### `webhook_endpoints`

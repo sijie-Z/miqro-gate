@@ -138,6 +138,12 @@ const router = createRouter({
           meta: adminMeta('SkillHub 管理'),
         },
         {
+          path: 'agents',
+          name: 'agents',
+          component: () => import('@/views/AdminAgentsView.vue'),
+          meta: adminMeta('Agents'),
+        },
+        {
           path: 'webhooks',
           name: 'webhooks',
           component: () => import('@/views/AdminWebhooksView.vue'),
