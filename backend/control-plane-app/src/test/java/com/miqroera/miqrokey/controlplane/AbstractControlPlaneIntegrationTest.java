@@ -24,7 +24,7 @@ public abstract class AbstractControlPlaneIntegrationTest {
         POSTGRES = new PostgreSQLContainer<>(DockerImageName
                 .parse("postgres:17.6-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73")
                 .asCompatibleSubstituteFor("postgres")).withDatabaseName("miqrokey_test").withUsername("miqrokey_test")
-                .withPassword("miqrokey_test");
+                .withPassword("miqrokey_test").withCommand("postgres", "-c", "max_connections=200");
         POSTGRES.start();
     }
 
@@ -37,5 +37,11 @@ public abstract class AbstractControlPlaneIntegrationTest {
         registry.add("spring.flyway.enabled", () -> "true");
         registry.add("spring.flyway.locations", () -> "classpath:db/migration");
         registry.add("spring.flyway.clean-disabled", () -> "true");
+        // The shared container allows 100 connections; cached test contexts each
+        // hold a pool, so the production default of 20 per context lets 5+ cached
+        // contexts exhaust the server and raw probe connections fail with
+        // "too many clients" (RouteSnapshotRefreshNotifierTest). Test workloads
+        // run fine on a smaller pool, leaving headroom.
+        registry.add("spring.datasource.hikari.maximum-pool-size", () -> "10");
     }
 }
