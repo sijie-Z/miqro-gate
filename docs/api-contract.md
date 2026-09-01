@@ -538,9 +538,32 @@
 |---|---|
 | `GET /api/v1/billing/summary?from&to&groupBy` | 全租户用量/成本汇总 |
 | `GET /api/v1/billing/records?from&to&page&size` | 全租户分页明细 |
+| `GET /api/v1/billing/quota` | 全租户配额状态：按订阅分组的最近快照 |
 
+**`GET /api/v1/billing/quota` 响应**（按订阅名排序；无快照的订阅以空列表出现）：
+
+```json
+[
+  {
+    "subscriptionId": "…",
+    "subscriptionName": "DeepSeek PAYG",
+    "snapshots": [
+      {
+        "seatId": null, "credentialId": null,
+        "windowType": "PERIOD",
+        "total": 1000000, "used": 250000, "remaining": 750000,
+        "unit": "TOKENS", "sharedPool": false,
+        "source": "LOCAL_ESTIMATE", "syncedAt": "2026-09-01T00:00:00Z"
+      }
+    ]
+  }
+]
+```
+
+- `source` 为权威级别：`OFFICIAL_API`（适配器官方余额/用量接口）、`LOCAL_ESTIMATE`（按本地用量估算）、`UNAVAILABLE`（产品无官方接口，明确标注未知）
+- 外部通道只暴露配额数字与权威级别，不含内部错误消息与 provider 状态载荷（`errorMessage`/`providerStatusJson` 仅管理员面可见）
 - API Key 格式 `mqk_api_<8 hex>_<32 hex>`，仅存 SHA-256 哈希；提交方式 `X-API-Key` 或 `Authorization: Bearer mqk_api_…`
-- 响应仅元数据（时间/模型/Token/成本），无正文
+- 响应仅元数据（时间/模型/Token/成本/配额），无正文
 - 错误码：`CONSUMER_NAME_TAKEN`（409）、`CONSUMER_NOT_FOUND`（404）、`CONSUMER_ALREADY_DISABLED`（409）、匿名 401
 
 ## 6. 导出与对账任务

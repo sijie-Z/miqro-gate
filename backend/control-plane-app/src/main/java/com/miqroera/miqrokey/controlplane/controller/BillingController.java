@@ -3,6 +3,8 @@ package com.miqroera.miqrokey.controlplane.controller;
 import com.miqroera.miqrokey.controlplane.security.ApiKeyAuthFilter;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminUsageStatsService;
+import com.miqroera.miqrokey.controlplane.service.QuotaSnapshotService;
+import com.miqroera.miqrokey.controlplane.dto.SubscriptionQuotaView;
 import com.miqroera.miqrokey.controlplane.dto.UsageRecordPage;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.servlet.http.HttpServletRequest;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -25,10 +28,13 @@ import java.util.UUID;
 public class BillingController {
 
     private final AdminUsageStatsService usageStatsService;
+    private final QuotaSnapshotService quotaSnapshotService;
     private final UserContext userContext;
 
-    public BillingController(AdminUsageStatsService usageStatsService, UserContext userContext) {
+    public BillingController(AdminUsageStatsService usageStatsService, QuotaSnapshotService quotaSnapshotService,
+            UserContext userContext) {
         this.usageStatsService = usageStatsService;
+        this.quotaSnapshotService = quotaSnapshotService;
         this.userContext = userContext;
     }
 
@@ -46,6 +52,12 @@ public class BillingController {
             @RequestParam(defaultValue = "50") int size, HttpServletRequest request) {
         UUID tenantId = tenant(request);
         return usageStatsService.records(tenantId, iso(from), iso(to), page, size);
+    }
+
+    /** Latest quota status per subscription (tenant-wide, metadata only). */
+    @GetMapping("/quota")
+    public List<SubscriptionQuotaView> quota(HttpServletRequest request) {
+        return quotaSnapshotService.quotaStatus(tenant(request));
     }
 
     private UUID tenant(HttpServletRequest request) {

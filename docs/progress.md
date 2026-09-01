@@ -6,9 +6,9 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G8.1`（外部系统 API 通道：消费者 API Key 认证 + 计费查询 API，ADR-0010）
-- Goal status: `IN_PROGRESS`（实现完成，验证中）
-- Last updated: `2026-08-27 CST`
+- Current goal: `G8.1`（外部系统 API 通道：消费者 API Key 认证 + 计费查询 API + 配额状态，ADR-0010）
+- Goal status: `IN_PROGRESS`（后端+前端+配额扩展完成，待 PR 合并）
+- Last updated: `2026-09-01 CST`
 - Branch: `goal/g7.2-price-catalog`
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
 
@@ -192,7 +192,10 @@
 
 - **决策**：ADR-0010 —— 双认证通道并存（门户 session 不变 + 外部系统 API Key）；对齐阿里消费者认证模型。
 - **交付**：`api_consumers` 表（V13，Key 仅存 SHA-256 哈希）；`ApiConsumer`/repository/`ApiConsumerService`；`AdminApiConsumerController`（创建一次性 Key/列表/吊销）；`ApiKeyAuthFilter`（保护 `/api/v1/billing/**`，SessionFilter 豁免 billing 路径）；`BillingController`（summary/records 复用全租户用量查询，仅元数据）。
-- **验证**：`BillingApiIntegrationTest` 4/4（无 Key 401/有效 Key 200/管理员 session 200/吊销后 401/重名 409）；全量后端 1003/0。
+- **消费者管理 UI**：`AdminConsumersView`（创建表单 + 一次性 Key 弹窗 + 列表 + 吊销确认）+ 类型/API 层/路由/导航（运营组「API 消费者」）；vitest +3。
+- **配额状态端点（本会话扩展）**：`GET /api/v1/billing/quota` —— 全租户最近配额快照按订阅分组（含订阅名；无快照订阅以空列表出现）；`QuotaSnapshotRepository.findLatestForTenant`（DISTINCT ON 跨订阅取每作用域最新）；外部视图 `QuotaEntryView` 只含配额数字与 `source` 权威级别，内部字段（`errorMessage`/`providerStatusJson`）不暴露；api-contract §5.10 更新。
+- **测试基建修复（既有 flaky，对照组证实与本功能无关）**：全套件下 `RouteSnapshotRefreshNotifierTest` 3/3 失败，根因 `PSQL FATAL: sorry, too many clients` —— 共享 Testcontainers Postgres（默认 100 连接）被多个缓存 Spring 上下文的 Hikari 池（默认 20/上下文）耗尽，裸 probe 连接打不开。修复：测试基类池降至 10 + 共享容器 `max_connections=200`（测试专用配置，生产零影响）。
+- **验证**：`BillingApiIntegrationTest` 5/5（新增 quota 分组/字段/空订阅/内部字段不暴露断言）；全量后端 `verify -P integration` **BUILD SUCCESS**（控制面 273/0；全模块 1004 计数基线 +1）。
 - **排障记录**：MockMvc 下 billing 401 根因是 SessionFilter（order -100）先于 ApiKeyAuthFilter（-90）拦截无 session 请求 —— 会话过滤器豁免 billing 路径，由 API Key 过滤器接管。
 - **后续**：用户级映射与 JWT 确权（平台注册细节明确后）；SkillHub/Agent 管理按 roadmap P2/P3。
 

@@ -22,8 +22,11 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.math.BigDecimal;
 import java.util.Map;
+import java.util.UUID;
 
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -41,6 +44,9 @@ class BillingApiIntegrationTest {
     static {
         AbstractControlPlaneIntegrationTest.POSTGRES.getJdbcUrl();
     }
+
+    /** Seed tenant of the single-tenant deployment (bootstrap creates it). */
+    private static final UUID SEED_TENANT = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
@@ -87,8 +93,8 @@ class BillingApiIntegrationTest {
     private void clean() {
         for (String table : new String[]{"api_consumers", "usage_event", "cache_hit_event", "virtual_keys",
                 "project_provider_grant_models", "project_provider_grants", "upstream_credential_versions",
-                "upstream_credentials", "upstream_subscriptions", "projects", "user_sessions", "users",
-                "admin_audit_events"}) {
+                "upstream_credentials", "quota_snapshots", "upstream_subscriptions", "projects", "user_sessions",
+                "users", "admin_audit_events"}) {
             try {
                 jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
             } catch (Exception ignored) {
@@ -102,6 +108,7 @@ class BillingApiIntegrationTest {
     void billingRequiresAuth() throws Exception {
         mockMvc.perform(get("/api/v1/billing/summary")).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/billing/records")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/billing/quota")).andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -157,6 +164,68 @@ class BillingApiIntegrationTest {
         mockMvc.perform(post("/api/v1/admin/api-consumers").contentType(MediaType.APPLICATION_JSON)
                 .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken).content("{\"name\":\"platform\"}"))
                 .andExpect(status().isConflict());
+    }
+
+    @Test
+    @DisplayName("quota endpoint returns latest snapshots grouped by subscription (metadata only)")
+    void quotaEndpointReturnsGroupedStatus() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/api-consumers").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken).content("{\"name\":\"platform\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        String apiKey = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("apiKey")
+                .toString();
+
+        UUID withSnapshot = seedSubscription("quota-sub");
+        UUID withoutSnapshot = seedSubscription("quota-unused");
+        seedQuotaSnapshot(withSnapshot, new BigDecimal("1000000"), new BigDecimal("250000"));
+
+        mockMvc.perform(get("/api/v1/billing/quota").header("X-API-Key", apiKey)).andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].subscriptionId").value(withSnapshot.toString()))
+                .andExpect(jsonPath("$[0].subscriptionName").value("quota-sub"))
+                .andExpect(jsonPath("$[0].snapshots", hasSize(1)))
+                .andExpect(jsonPath("$[0].snapshots[0].windowType").value("PERIOD"))
+                .andExpect(jsonPath("$[0].snapshots[0].total").value(1000000))
+                .andExpect(jsonPath("$[0].snapshots[0].used").value(250000))
+                .andExpect(jsonPath("$[0].snapshots[0].remaining").value(750000))
+                .andExpect(jsonPath("$[0].snapshots[0].unit").value("TOKENS"))
+                .andExpect(jsonPath("$[0].snapshots[0].source").value("LOCAL_ESTIMATE"))
+                .andExpect(jsonPath("$[0].snapshots[0].syncedAt").isNotEmpty())
+                .andExpect(jsonPath("$[0].snapshots[0].errorMessage").doesNotExist())
+                .andExpect(jsonPath("$[0].snapshots[0].providerStatusJson").doesNotExist())
+                .andExpect(jsonPath("$[1].subscriptionId").value(withoutSnapshot.toString()))
+                .andExpect(jsonPath("$[1].snapshots", hasSize(0)));
+
+        // Admin session sees the same tenant-wide view.
+        mockMvc.perform(get("/api/v1/billing/quota").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)));
+    }
+
+    private UUID seedSubscription(String name) {
+        UUID productId = jdbc.queryForObject("SELECT id FROM provider_products ORDER BY display_name LIMIT 1",
+                new MapSqlParameterSource(), UUID.class);
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO upstream_subscriptions
+                    (id, tenant_id, provider_product_id, name, billing_mode, subscription_price, status, version,
+                     created_at, updated_at)
+                VALUES (:id, :tenantId, :productId, :name, 'PAYG', 0, 'ACTIVE', 1, now(), now())
+                """, new MapSqlParameterSource("id", id).addValue("tenantId", SEED_TENANT)
+                .addValue("productId", productId).addValue("name", name));
+        return id;
+    }
+
+    private void seedQuotaSnapshot(UUID subscriptionId, BigDecimal total, BigDecimal used) {
+        jdbc.update("""
+                INSERT INTO quota_snapshots
+                    (id, tenant_id, subscription_id, window_type, total, used, remaining, unit, shared_pool, source,
+                     synced_at, created_at)
+                VALUES (:id, :tenantId, :subscriptionId, 'PERIOD', :total, :used, :remaining, 'TOKENS', false,
+                        'LOCAL_ESTIMATE', now(), now())
+                """,
+                new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", SEED_TENANT)
+                        .addValue("subscriptionId", subscriptionId).addValue("total", total).addValue("used", used)
+                        .addValue("remaining", total.subtract(used)));
     }
 
     private static Cookie cookie(MvcResult result, String name) {

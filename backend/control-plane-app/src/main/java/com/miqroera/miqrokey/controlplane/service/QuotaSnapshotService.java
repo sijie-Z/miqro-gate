@@ -29,6 +29,8 @@ import com.miqroera.miqrokey.spi.ProviderProductAdapter;
 import com.miqroera.miqrokey.spi.SubscriptionContext;
 import com.miqroera.miqrokey.spi.SubscriptionKind;
 import com.miqroera.miqrokey.controlplane.client.ProviderClientFactory;
+import com.miqroera.miqrokey.controlplane.dto.SubscriptionQuotaView;
+import com.miqroera.miqrokey.controlplane.dto.QuotaEntryView;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
@@ -46,8 +48,11 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Quota/Plan status snapshots (G4.2, {@code quota_snapshots} V9). A refresh
@@ -177,6 +182,30 @@ public class QuotaSnapshotService {
                     "Subscription not found or not visible");
         }
         return snapshotRepository.findLatestPerScope(tenantId, subscriptionId);
+    }
+
+    /**
+     * Tenant-wide quota status for the external billing API: latest snapshot per
+     * scope, grouped by subscription. Subscriptions without snapshots appear with
+     * an empty list. Only quota numbers and their authority level are exposed —
+     * internal error hints and provider status payloads stay on the admin surface.
+     */
+    public List<SubscriptionQuotaView> quotaStatus(UUID tenantId) {
+        Map<UUID, UpstreamSubscription> subscriptions = subscriptionRepository.findAllByTenantId(tenantId).stream()
+                .collect(Collectors.toMap(UpstreamSubscription::id, s -> s));
+        Map<UUID, List<QuotaSnapshot>> bySubscription = snapshotRepository.findLatestForTenant(tenantId).stream()
+                .collect(Collectors.groupingBy(QuotaSnapshot::subscriptionId));
+        return subscriptions.values().stream()
+                .sorted(Comparator.comparing(UpstreamSubscription::name, Comparator.nullsLast(String::compareTo)))
+                .map(s -> new SubscriptionQuotaView(s.id(), s.name(), bySubscription.getOrDefault(s.id(), List.of())
+                        .stream().map(QuotaSnapshotService::toEntry).toList()))
+                .toList();
+    }
+
+    private static QuotaEntryView toEntry(QuotaSnapshot snapshot) {
+        return new QuotaEntryView(snapshot.seatId(), snapshot.credentialId(), snapshot.windowType(), snapshot.total(),
+                snapshot.used(), snapshot.remaining(), snapshot.unit(), snapshot.sharedPool(), snapshot.source(),
+                snapshot.syncedAt());
     }
 
     // -------------------------------------------------------------------

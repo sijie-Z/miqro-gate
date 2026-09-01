@@ -19,6 +19,12 @@ public interface QuotaSnapshotRepository {
      */
     List<QuotaSnapshot> findLatestPerScope(UUID tenantId, UUID subscriptionId);
 
+    /**
+     * Latest row per scope across every subscription of the tenant — the
+     * tenant-wide "current quota status" view for the external billing API.
+     */
+    List<QuotaSnapshot> findLatestForTenant(UUID tenantId);
+
     /** Newest {@code limit} rows for one subscription (history view). */
     List<QuotaSnapshot> findLatestBySubscription(UUID tenantId, UUID subscriptionId, int limit);
 }
