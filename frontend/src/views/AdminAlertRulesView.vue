@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { confirmDialog } from '@/utils/confirm';
 import type { PrimaryTableCol } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
-import type { AlertRule, WebhookEndpointView } from '@/types/api';
+import type { AlertRule, Project, WebhookEndpointView } from '@/types/api';
 
 const rules = ref<AlertRule[]>([]);
 const webhooks = ref<WebhookEndpointView[]>([]);
+const projects = ref<Project[]>([]);
 const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
@@ -29,9 +30,12 @@ const form = ref({
   threshold: 0.5,
   dedupeMinutes: 60,
   webhookEndpointId: '',
+  projectId: '',
 });
 const formError = ref('');
 const submitting = ref(false);
+
+const isBudgetType = computed(() => form.value.type === 'BUDGET_THRESHOLD');
 
 async function load() {
   loading.value = true;
@@ -49,9 +53,24 @@ async function load() {
   }
 }
 
+function resetForm() {
+  form.value = {
+    name: '',
+    type: 'USAGE_MISSING_RATE',
+    threshold: 0.5,
+    dedupeMinutes: 60,
+    webhookEndpointId: '',
+    projectId: '',
+  };
+}
+
 async function createRule() {
   if (!form.value.name.trim()) {
     formError.value = '规则名称必填。';
+    return;
+  }
+  if (isBudgetType.value && !form.value.projectId) {
+    formError.value = '预算水位规则必须选择项目。';
     return;
   }
   submitting.value = true;
@@ -62,15 +81,12 @@ async function createRule() {
       threshold: Number(form.value.threshold),
       dedupeMinutes: Number(form.value.dedupeMinutes) || 60,
       webhookEndpointId: form.value.webhookEndpointId || undefined,
+      scopeJson: isBudgetType.value
+        ? JSON.stringify({ projectId: form.value.projectId })
+        : undefined,
     });
     creating.value = false;
-    form.value = {
-      name: '',
-      type: 'USAGE_MISSING_RATE',
-      threshold: 0.5,
-      dedupeMinutes: 60,
-      webhookEndpointId: '',
-    };
+    resetForm();
     await load();
   } catch (error) {
     formError.value = error instanceof ApiError ? error.message : '创建失败，请稍后重试。';
@@ -110,12 +126,37 @@ function typeLabel(type: string): string {
       return '余额不可用';
     case 'USAGE_SURGE':
       return '用量激增';
+    case 'BUDGET_THRESHOLD':
+      return '预算水位';
     default:
       return type;
   }
 }
 
-onMounted(load);
+function projectName(rule: AlertRule): string {
+  if (!rule.scopeJson) {
+    return '';
+  }
+  try {
+    const scope = JSON.parse(rule.scopeJson) as { projectId?: string };
+    const project = projects.value.find((p) => p.id === scope.projectId);
+    return project ? `${project.name}（${project.code}）` : '';
+  } catch {
+    return '';
+  }
+}
+
+onMounted(() => {
+  void load();
+  api
+    .listProjects()
+    .then((list) => {
+      projects.value = list;
+    })
+    .catch(() => {
+      projects.value = [];
+    });
+});
 </script>
 
 <template>
@@ -148,14 +189,29 @@ onMounted(load);
             <t-option label="上游错误率" value="UPSTREAM_ERROR_RATE" />
             <t-option label="余额不可用" value="BALANCE_UNAVAILABLE" />
             <t-option label="用量激增" value="USAGE_SURGE" />
+            <t-option label="预算水位" value="BUDGET_THRESHOLD" />
+          </t-select>
+        </t-form-item>
+        <t-form-item v-if="isBudgetType" label="项目" required>
+          <t-select
+            v-model="form.projectId"
+            placeholder="选择项目"
+            data-testid="rule-project-select"
+          >
+            <t-option
+              v-for="p in projects"
+              :key="p.id"
+              :value="p.id"
+              :label="`${p.name}（${p.code}）`"
+            />
           </t-select>
         </t-form-item>
         <div class="form-row">
-          <t-form-item label="阈值">
+          <t-form-item :label="isBudgetType ? '阈值（水位 %）' : '阈值'">
             <t-input
               v-model="form.threshold"
               type="number"
-              step="0.05"
+              :step="isBudgetType ? 1 : 0.05"
               data-testid="rule-create-threshold"
             />
           </t-form-item>
@@ -188,7 +244,14 @@ onMounted(load);
         size="small"
         data-testid="rules-table"
       >
-        <template #type="{ row }">{{ typeLabel(row.type) }}</template>
+        <template #type="{ row }">
+          {{ typeLabel(row.type)
+          }}<span
+            v-if="row.type === 'BUDGET_THRESHOLD' && projectName(row)"
+            class="mk-mono scope-hint"
+            >· {{ projectName(row) }}</span
+          >
+        </template>
         <template #threshold="{ row }"
           ><span class="mk-num">{{ row.threshold }}</span></template
         >
@@ -252,5 +315,10 @@ onMounted(load);
 .form-error {
   margin-bottom: 12px;
   color: var(--miqrokey-danger);
+}
+
+.scope-hint {
+  font-size: 12px;
+  color: var(--miqrokey-text-secondary);
 }
 </style>

@@ -380,10 +380,18 @@ export interface WebhookDelivery {
   createdAt: string;
 }
 
+export type AlertRuleType =
+  | 'USAGE_MISSING_RATE'
+  | 'UPSTREAM_ERROR_RATE'
+  | 'BALANCE_UNAVAILABLE'
+  | 'USAGE_SURGE'
+  | 'BUDGET_THRESHOLD';
+
 export interface AlertRule {
   id: string;
   name: string;
-  type: 'USAGE_MISSING_RATE' | 'UPSTREAM_ERROR_RATE' | 'BALANCE_UNAVAILABLE' | 'USAGE_SURGE';
+  type: AlertRuleType;
+  scopeJson?: string;
   threshold: number;
   dedupeMinutes: number;
   enabled: boolean;

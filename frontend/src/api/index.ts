@@ -452,6 +452,7 @@ export function createAlertRule(body: {
   threshold: number;
   dedupeMinutes?: number;
   webhookEndpointId?: string;
+  scopeJson?: string;
 }): Promise<AlertRule> {
   return post<AlertRule>('/api/v1/admin/alert-rules', body);
 }
@@ -464,6 +465,7 @@ export function updateAlertRule(
     dedupeMinutes?: number;
     enabled?: boolean;
     webhookEndpointId?: string;
+    scopeJson?: string;
   },
 ): Promise<AlertRule> {
   return patch<AlertRule>(`/api/v1/admin/alert-rules/${id}`, body);
