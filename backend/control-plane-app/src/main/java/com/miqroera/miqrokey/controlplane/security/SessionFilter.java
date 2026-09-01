@@ -79,6 +79,12 @@ public class SessionFilter implements Filter {
 
         String rawToken = sessionService.extractSessionToken(httpReq);
         if (rawToken == null) {
+            // The external-system channel (/api/v1/billing) is authenticated
+            // by ApiKeyAuthFilter instead; let it through here.
+            if (httpReq.getRequestURI().startsWith(ApiKeyAuthFilter.BILLING_PATH)) {
+                chain.doFilter(httpReq, httpRes);
+                return;
+            }
             sendUnauthorized(httpRes, "Authentication required", "UNAUTHORIZED");
             return;
         }

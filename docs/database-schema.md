@@ -276,6 +276,10 @@ PostgreSQL 响应缓存（L2），默认关闭（缓存子系统显式启用且 
 - `meta_json jsonb`、`hit_count_l1`、`hit_count_l2`、`expires_at`、时间戳
 - 唯一 `(tenant_id, cache_key)`；`project_id`、`expires_at`、`tenant_id` 索引
 
+### `api_consumers` (V13，ADR-0010)
+
+外部系统 API 消费者：`name`、`key_digest bytea`（SHA-256，仅哈希）、`key_prefix varchar(8)`、`status`（`ACTIVE|DISABLED`）。唯一 `(tenant_id, name)`；`key_digest` 索引用于认证查找。
+
 ### `price_snapshot` (V5，当前实现)
 
 每百万 token 单价快照，**不租户隔离**（价格属于全局产品目录）：`provider_product_id`、`model_id`、`token_type`（`INPUT|OUTPUT|CACHE_READ|CACHE_CREATION`）、`currency`（默认 CNY）、`unit_price numeric(24,10)`、`effective_from`、`source`（`MANUAL|OFFICIAL|ESTIMATED`）、`created_by`。查询索引 `(provider_product_id, model_id, token_type, effective_from DESC)`。控制面用量汇总按此计算成本；无快照的模型成本记 0。

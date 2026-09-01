@@ -60,12 +60,32 @@ public class AdminUsageStatsService {
      * @param to
      *            exclusive end, null defaults to now
      */
+    /** Tenant-scoped summary for the system (billing) channel. */
+    public UsageSummary summary(UUID tenantId, String groupBy, Instant from, Instant to) {
+        return summary(tenantId, groupBy, from, to, null, null, null, null, null, null, null);
+    }
+
+    public UsageSummary summary(UUID tenantId, String groupBy, Instant from, Instant to, UUID userId, UUID projectId,
+            UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId, String modelId) {
+        UsageStatsRepository.GroupBy dimension = UsageStatsService.parseGroupBy(groupBy);
+        UsageStatsService.validateTimeRange(from, to);
+        UsageStatsRepository.UsageFilter filter = adminFilter(tenantId, from, to, userId, projectId, virtualKeyId,
+                credentialId, subscriptionId, providerProductId, modelId);
+        Map<String, BigDecimal> prices = new LinkedHashMap<>();
+        for (PriceSnapshot p : priceSnapshotRepository.findAllLatestAt(Instant.now())) {
+            prices.put(p.providerProductId() + ":" + p.modelId() + ":" + p.tokenType().name(), p.unitPrice());
+        }
+        List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
+        List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
+        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows, prices);
+    }
+
     public UsageSummary summary(User admin, String groupBy, Instant from, Instant to, UUID userId, UUID projectId,
             UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId, String modelId) {
         UsageStatsRepository.GroupBy dimension = UsageStatsService.parseGroupBy(groupBy);
         UsageStatsService.validateTimeRange(from, to);
-        UsageStatsRepository.UsageFilter filter = adminFilter(admin, from, to, userId, projectId, virtualKeyId,
-                credentialId, subscriptionId, providerProductId, modelId);
+        UsageStatsRepository.UsageFilter filter = adminFilter(admin.tenantId(), from, to, userId, projectId,
+                virtualKeyId, credentialId, subscriptionId, providerProductId, modelId);
 
         Map<String, BigDecimal> prices = new LinkedHashMap<>();
         for (PriceSnapshot p : priceSnapshotRepository.findAllLatestAt(Instant.now())) {
@@ -77,6 +97,26 @@ public class AdminUsageStatsService {
     }
 
     /** Paged raw usage records over the whole tenant, newest first. */
+    /** Tenant-scoped records for the system (billing) channel. */
+    public UsageRecordPage records(UUID tenantId, Instant from, Instant to, long page, int size) {
+        return records(tenantId, from, to, page, size, null, null, null, null, null, null, null);
+    }
+
+    public UsageRecordPage records(UUID tenantId, Instant from, Instant to, long page, int size, UUID userId,
+            UUID projectId, UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId,
+            String modelId) {
+        if (page < 1) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "PAGE_INVALID", "page must be >= 1");
+        }
+        if (size < 1 || size > MAX_PAGE_SIZE) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "SIZE_INVALID",
+                    "size must be between 1 and " + MAX_PAGE_SIZE);
+        }
+        UsageStatsRepository.UsageFilter filter = adminFilter(tenantId, from, to, userId, projectId, virtualKeyId,
+                credentialId, subscriptionId, providerProductId, modelId);
+        return recordsFor(tenantId, filter, page, size);
+    }
+
     public UsageRecordPage records(User admin, Instant from, Instant to, long page, int size, UUID userId,
             UUID projectId, UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId,
             String modelId) {
@@ -88,9 +128,12 @@ public class AdminUsageStatsService {
                     "size must be between 1 and " + MAX_PAGE_SIZE);
         }
         UsageStatsService.validateTimeRange(from, to);
-        UsageStatsRepository.UsageFilter filter = adminFilter(admin, from, to, userId, projectId, virtualKeyId,
-                credentialId, subscriptionId, providerProductId, modelId);
+        UsageStatsRepository.UsageFilter filter = adminFilter(admin.tenantId(), from, to, userId, projectId,
+                virtualKeyId, credentialId, subscriptionId, providerProductId, modelId);
+        return recordsFor(admin.tenantId(), filter, page, size);
+    }
 
+    private UsageRecordPage recordsFor(UUID tenantId, UsageStatsRepository.UsageFilter filter, long page, int size) {
         long total = usageStatsRepository.countRecords(filter);
         List<UsageEvent> events = usageStatsRepository.findRecords(filter, (page - 1) * size, size);
         List<UsageRecordPage.UsageRecordView> items = new ArrayList<>(events.size());
@@ -107,15 +150,15 @@ public class AdminUsageStatsService {
      * dimension is an optional filter. Tenant scoping still comes from the
      * authenticated admin — there is no cross-tenant query shape.
      */
-    private static UsageStatsRepository.UsageFilter adminFilter(User admin, Instant from, Instant to, UUID userId,
+    private static UsageStatsRepository.UsageFilter adminFilter(UUID tenantId, Instant from, Instant to, UUID userId,
             UUID projectId, UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId,
             String modelId) {
         UsageStatsService.validateTimeRange(from, to);
         Instant toResolved = to == null ? Instant.now() : to;
         Instant fromResolved = from == null ? toResolved.minus(UsageStatsService.MAX_WINDOW) : from;
-        return new UsageStatsRepository.UsageFilter(admin.tenantId(),
-                virtualKeyId != null ? Set.of(virtualKeyId) : null, userId, projectId, credentialId, subscriptionId,
-                providerProductId, modelId != null && !modelId.isBlank() ? modelId : null, fromResolved, toResolved);
+        return new UsageStatsRepository.UsageFilter(tenantId, virtualKeyId != null ? Set.of(virtualKeyId) : null,
+                userId, projectId, credentialId, subscriptionId, providerProductId,
+                modelId != null && !modelId.isBlank() ? modelId : null, fromResolved, toResolved);
     }
 
     private static UsageRecordPage.UsageRecordView view(UsageEvent e) {

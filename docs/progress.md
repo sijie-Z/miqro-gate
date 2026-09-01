@@ -6,7 +6,7 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G7.4`（响应缓存启用：对齐腾讯 L1 精确缓存方案，ADR-0009）—— 已合并 main
+- Current goal: `G8.1`（外部系统 API 通道：消费者 API Key 认证 + 计费查询 API，ADR-0010）
 - Goal status: `IN_PROGRESS`（实现完成，验证中）
 - Last updated: `2026-08-27 CST`
 - Branch: `goal/g7.2-price-catalog`
@@ -187,6 +187,14 @@
   - **providers/provider_products 无初始化（已修复）**：新增 `CatalogSeedService`（启动时从签名目录幂等 seed 8 供应商 + 23 产品，URL 只来自签名目录），`CatalogSeedIntegrationTest` 回归；本地真实环境验证生效。
   - 联调脚本与本地环境位于 `miqro-local/`（不入库）；DeepSeek Key 已暴露于会话，**建议轮换**。
 - **价值**：真实链路验证了凭证加密/指纹、Virtual Key 鉴权、透明代理转发、用量解析（含 cache 字段）、成本计算全部与真实供应商行为一致；mock 到真实的差距仅剩 NOTIFY 刷新与产品实例管理两处。
+
+## G8.1 — 外部系统 API 通道（ADR-0010，平台中间件 P0 身份地基）
+
+- **决策**：ADR-0010 —— 双认证通道并存（门户 session 不变 + 外部系统 API Key）；对齐阿里消费者认证模型。
+- **交付**：`api_consumers` 表（V13，Key 仅存 SHA-256 哈希）；`ApiConsumer`/repository/`ApiConsumerService`；`AdminApiConsumerController`（创建一次性 Key/列表/吊销）；`ApiKeyAuthFilter`（保护 `/api/v1/billing/**`，SessionFilter 豁免 billing 路径）；`BillingController`（summary/records 复用全租户用量查询，仅元数据）。
+- **验证**：`BillingApiIntegrationTest` 4/4（无 Key 401/有效 Key 200/管理员 session 200/吊销后 401/重名 409）；全量后端 1003/0。
+- **排障记录**：MockMvc 下 billing 401 根因是 SessionFilter（order -100）先于 ApiKeyAuthFilter（-90）拦截无 session 请求 —— 会话过滤器豁免 billing 路径，由 API Key 过滤器接管。
+- **后续**：用户级映射与 JWT 确权（平台注册细节明确后）；SkillHub/Agent 管理按 roadmap P2/P3。
 
 ## 待办需求（2026-08-28 leader 指示，细节待补充，暂不实施）
 

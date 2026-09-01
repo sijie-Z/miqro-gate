@@ -4,9 +4,11 @@ import com.miqroera.miqrokey.controlplane.security.AuthenticationService;
 import com.miqroera.miqrokey.controlplane.security.CsrfInterceptor;
 import com.miqroera.miqrokey.controlplane.security.OriginInterceptor;
 import com.miqroera.miqrokey.controlplane.security.RoleInterceptor;
+import com.miqroera.miqrokey.controlplane.security.ApiKeyAuthFilter;
 import com.miqroera.miqrokey.controlplane.security.SessionFilter;
 import com.miqroera.miqrokey.controlplane.security.SessionService;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
+import com.miqroera.miqrokey.domain.repository.ApiConsumerRepository;
 import com.miqroera.miqrokey.domain.repository.UserRepository;
 import jakarta.annotation.PostConstruct;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
@@ -60,6 +62,21 @@ public class SecurityConfig implements WebMvcConfigurer {
         // (MockMvc never exposed this).
         registration.setOrder(-100);
         return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<ApiKeyAuthFilter> apiKeyAuthFilterRegistration(ApiKeyAuthFilter filter) {
+        FilterRegistrationBean<ApiKeyAuthFilter> registration = new FilterRegistrationBean<>();
+        registration.setFilter(filter);
+        registration.addUrlPatterns("/api/v1/billing/*");
+        // After the SessionFilter: a portal admin session short-circuits.
+        registration.setOrder(-90);
+        return registration;
+    }
+
+    @Bean
+    public ApiKeyAuthFilter apiKeyAuthFilter(ApiConsumerRepository consumerRepository, UserContext userContext) {
+        return new ApiKeyAuthFilter(consumerRepository, userContext);
     }
 
     @Override

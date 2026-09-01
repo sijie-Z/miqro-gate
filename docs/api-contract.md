@@ -520,6 +520,29 @@
 | `PRODUCT_NOT_FOUND` | 404 | 供应商产品不存在 |
 | `PARAM_INVALID` | 400 | tokenType 非法或参数校验失败 |
 
+### 5.10 外部系统计费通道与 API 消费者（G8.1，ADR-0010）
+
+平台等外部系统通过独立 API 通道查询计费数据，与门户会话认证并存。
+
+**API 消费者**（管理员管理）：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/api-consumers` | 消费者列表（掩码视图） |
+| `POST /api/v1/admin/api-consumers` | 创建：`{ "name" }` → `201`，返回一次性 API Key（明文仅此一次） |
+| `POST /api/v1/admin/api-consumers/{id}/disable` | 立即吊销（禁用的 Key 即刻失效） |
+
+**计费查询**（API Key 或管理员 session 认证）：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/billing/summary?from&to&groupBy` | 全租户用量/成本汇总 |
+| `GET /api/v1/billing/records?from&to&page&size` | 全租户分页明细 |
+
+- API Key 格式 `mqk_api_<8 hex>_<32 hex>`，仅存 SHA-256 哈希；提交方式 `X-API-Key` 或 `Authorization: Bearer mqk_api_…`
+- 响应仅元数据（时间/模型/Token/成本），无正文
+- 错误码：`CONSUMER_NAME_TAKEN`（409）、`CONSUMER_NOT_FOUND`（404）、`CONSUMER_ALREADY_DISABLED`（409）、匿名 401
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：
