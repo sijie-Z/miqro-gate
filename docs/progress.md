@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G8.3`（预算水位告警：BUDGET_THRESHOLD 规则 + Webhook 投递 + 月度去重）
-- Goal status: `IN_PROGRESS`（后端 + 前端 + 验证完成，待 PR 合并）
+- Current goal: `P2.2/P2.3`（SkillHub 后端：技能目录 + 下载授权门禁）
+- Goal status: `IN_PROGRESS`（后端完成并验证，前端 P2.4 待做）
 - Last updated: `2026-09-01 CST`
 - Branch: `goal/g7.2-price-catalog`
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
@@ -215,6 +215,14 @@
 - **验证**：`AdminBudgetApiIntegrationTest` 6/6（+2：水位 100% ≥ 阈值 80 触发事件 value=100、同月二次评估去重仍 1 条、无 scope/未知项目 400、有预算不触发路径）；前端 vitest 48/48（+2 告警页：scope 提示渲染、预算规则创建必须选项目 + scopeJson 组装）；全量后端 `verify -P integration` **BUILD SUCCESS**（全模块 1027 = 1025 + 2）。
 - **排障记录**：Postgres jsonb 列传 String 参数报「column is of type jsonb but expression is of type character varying」—— JDBC 需 `:scopeJson::jsonb` 显式 cast。
 - **风险**：预算事件 payload 只含 rule/type/value（无项目名）——投递方可按 ruleId 反查；与既有四类告警行为一致。
+
+## P2.2/P2.3 — SkillHub 技能目录后端（Anthropic Agent Skills 格式 + 腾讯 SkillHub 分发模式）
+
+- **来源**：leader 蓝图「SkillHub：部门/项目看到所有 skill、只下载对应的 skill」；P2.1 形态调研（2026-09-01 存档 roadmap）：格式采用 Anthropic Agent Skills 规范（SKILL.md frontmatter），分发对标腾讯 SkillHub「应用商店」模式（安全审核 + 标签）。
+- **交付**：V16 迁移（`skills` + `skill_access`）；`SkillZipValidator`（zip 单根目录校验 + SKILL.md frontmatter 解析：name kebab-case/目录一致/保留词禁令、description 必填、tags 提取；上限 5MB/200 条目/512KB——zip 炸弹防护，只读 SKILL.md 不解压）；`SkillService`/`SkillRepository`（上传 upsert、归档、授权管理）；公开目录 API（`GET /api/v1/skills[/{id}]`）+ 下载门禁（`canDownload`：无授权行=公开、TEAM/PROJECT 成员、管理员绕过）+ 管理 API（上传/归档/授权整体替换）。**可见性=全部 ACTIVE，下载=按授权**。
+- **验证**：`SkillZipValidatorTest` 10/10（合法/BOM/缺 SKILL.md/名不匹配/保留词/description/无 frontmatter/多根/非 zip/超限）；`SkillApiIntegrationTest` 4/4（上传解析+可见性+匿名 401+校验码、下载门禁字节一致+成员/非成员 403/管理员、归档隐藏+重传恢复、授权 scope 校验）；全量后端 `verify -P integration` **BUILD SUCCESS**（全模块 1041 = 1027 + 14）。
+- **排障记录**：① archive 曾走 upsert 但 upsert 的 ON CONFLICT 硬编码 `status='ACTIVE'` 把归档覆盖回去（真实缺陷，加独立 `archive` 方法）；② 归档后详情/下载仍 200（目录面只暴露 ACTIVE，`findActive` 门禁）；③ 非 zip 垃圾字节被误判「空包」（<22 字节=必然无效 zip，≥22 无条目=真空包）。
+- **后续**：P2.4 前端（SkillHub 浏览页 + 管理上传页，下一轮）。
 
 ## 待办需求（2026-08-28 leader 指示，细节待补充，暂不实施）
 

@@ -596,6 +596,26 @@
 - 校验：`month` 格式 `YYYY-MM`（`MONTH_INVALID` 400）；`amount` > 0；`alertThresholdPct` 0–100；项目不存在/跨租户 `PROJECT_NOT_FOUND` 404；无预算 `BUDGET_NOT_FOUND` 404
 - 预算表（`budget`，V7）在 V7 已建表，本 Goal 零迁移
 
+### 5.12 SkillHub 技能目录（P2.2/P2.3，Anthropic Agent Skills 格式）
+
+公司内部技能目录：管理员上传 zip 技能包（SKILL.md + 可选 scripts/references/assets），服务端校验后解析 frontmatter 入库；**全部 ACTIVE 技能对登录用户可见，下载按授权**（leader：能看到所有 skill、只下载对应 skill）。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/skills` | 目录（登录用户可见全部 ACTIVE） |
+| `GET /api/v1/skills/{id}` | 详情（元数据，无包体） |
+| `GET /api/v1/skills/{id}/download` | 下载 zip（授权门禁；公开 = 全员可下） |
+| `POST /api/v1/admin/skills?version=1.0.0` | 上传（raw zip body，`Content-Type: application/zip`）；重传同名 = upsert 替换并恢复 ACTIVE |
+| `GET /api/v1/admin/skills` | 管理目录 |
+| `POST /api/v1/admin/skills/{id}/archive` | 归档（目录隐藏、数据保留、授权保留） |
+| `PUT /api/v1/admin/skills/{id}/access` | 整体替换下载授权：`[{"scopeType":"TEAM\|PROJECT","scopeId":"…"}]`；空数组 = 公开 |
+
+**格式校验（上传时）**：zip 必须只含一个技能目录（`skill-name/`），含 `SKILL.md`（YAML frontmatter：`name` 必填且为小写 kebab-case、与目录名一致、不含 claude/anthropic 保留词；`description` 必填 ≤ 1024 字符；可选 `author`/`license`/`tags`）。包上限 5MB、条目上限 200、SKILL.md 上限 512KB（防 zip 炸弹——只读 SKILL.md，不解压）。`version` 必填语义化（`\d+\.\d+\.\d+`）。
+
+**下载授权语义**：无 `skill_access` 行 = 公开；有行 = 仅授权 TEAM/PROJECT 成员（及管理员）可下载；非成员 `403 SKILL_DOWNLOAD_FORBIDDEN`；归档技能对目录/详情/下载一律 `404 SKILL_NOT_FOUND`。
+
+**错误码**：`SKILL_NOT_FOUND`（404）、`SKILL_DOWNLOAD_FORBIDDEN`（403）、`VERSION_INVALID`（400）、`SKILL_EMPTY`/`SKILL_TOO_LARGE`/`SKILL_TOO_MANY_ENTRIES`/`SKILL_ZIP_INVALID`/`SKILL_MD_MISSING`/`SKILL_MD_TOO_LARGE`/`SKILL_FRONTMATTER_INVALID`/`SKILL_NAME_INVALID`/`SKILL_NAME_MISMATCH`/`SKILL_DESCRIPTION_INVALID`（400）、`SCOPE_INVALID`（400）。
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

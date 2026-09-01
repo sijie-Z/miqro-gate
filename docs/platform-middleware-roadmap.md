@@ -83,5 +83,27 @@
 | **JWT 认证** | **进行中（ADR-0011）** | 平台自签 JWT → 网关公钥验签 → 消费者映射（阿里消费者认证模式） |
 | 配额管理 | 只读快照 | 配额规则配置 + 水位 + 预警（轻量，不硬阻断；硬阻断另走 ADR） |
 | Agent 管理 | 无 | 对标阿里 Agent 拓扑（入口认证 + 出口模型 + 按 Agent 观测） |
-| SkillHub | 无 | 形态先调研（腾讯元器/阿里百炼生态） |
+| SkillHub | 无 | **进行中（P2.1 形态已定）**：Anthropic Agent Skills 规范 + 腾讯 SkillHub 分发模式 |
 | 服务管理/全局配置 | Provider 实例 | P3 后置 |
+
+## 2026-09-01 SkillHub 形态调研（P2.1，存档）
+
+### Skill 格式：采用 Anthropic Agent Skills 规范（事实标准）
+
+- skill = 一个含 `SKILL.md` 的目录：`skill-name/`（目录名 kebab-case，与 frontmatter `name` 完全一致）+ 可选 `scripts/`（可执行代码，不进上下文）、`references/`（按需加载文档）、`assets/`（模板/静态资源）
+- `SKILL.md`：YAML frontmatter 必需 `name`（≤64 字符、小写连字符、不得含 claude/anthropic 保留词）+ `description`（第三人称「做什么 + 何时触发」，200–1024 字符）；可选 `author`/`license`（SPDX）/`source`/`requires_tools`/`requires_skills`/`tags`/`dependencies`
+- 打包：zip 根目录包含技能文件夹本身（`my-skill.zip └── my-skill/`）
+- 渐进式披露：元数据（name/description）常驻 → SKILL.md 触发时加载 → 资源按需
+- **选择理由**：Claude Code / Claude.ai 原生支持，公司内部 agent 可直接消费；验证规则明确（SKILL.md 必须存在、frontmatter 必须可解析、name 与目录一致）
+
+### 分发模式：对标腾讯 SkillHub「应用商店」
+
+- 腾讯 SkillHub（2026-03 上线）：OpenClaw 生态本地镜像站 —— 安全审核 + 官方认证标签 + 榜单 + 加速下载；阿里（钉钉悟空）做 To B Skill 市场；字节（Find Skill）做多源聚合
+- 共识：skill 是「可标准化、封装、复用和分发的能力单元」，分发入口 = 生态控制点
+- **落地到本项目**：管理员上传（zip → 服务端解包校验 SKILL.md → 元数据入库 + zip 存 DB，与 export_tasks 产物同风格）；**全部 ACTIVE skill 对登录用户可见**（目录/详情），**下载按授权**（skill 配置 TEAM/PROJECT 授权范围，用户在范围内才可下载）—— 与 leader「能看到所有的 skill，但只能下载对应的 skill」一致
+
+### P2 拆分
+
+- P2.2 数据模型 + 迁移（`skills` + `skill_access`，V16）
+- P2.3 后端 API：上传（SKILL.md 校验）/目录/详情/下载（授权门禁）/授权管理
+- P2.4 前端：SkillHub 浏览页（全员）+ 管理上传页（管理员）

@@ -290,6 +290,12 @@ V14（ADR-0011）新增 JWT 验签公钥：`jwt_public_key_pem text`（RSA Subje
 
 月度预算（仅告警，永不阻断）：`project_id`、`period_month`（`YYYY-MM`）、`amount numeric(24,10)`、`currency`、`alert_threshold_pct`、`status`（`ACTIVE|PAUSED`）、`version`。`budget` 唯一 `(tenant_id, project_id, period_month)`；`model_budget` 额外含 `model_id`，唯一 `(tenant_id, project_id, model_id, period_month)`。V7 已建表，告警消费为后续 Goal。
 
+### `skills` / `skill_access` (V16，P2.2 SkillHub)
+
+`skills`：技能目录条目——`name varchar(64)`（kebab-case，= SKILL.md frontmatter name）、`description`、`version`（语义化）、`author`、`license`、`tags text[]`、`content_zip bytea`（校验后的技能包）、`content_sha256`、`content_bytes`、`status`（`ACTIVE|ARCHIVED`）、`created_by`。唯一 `(tenant_id, name)`。
+
+`skill_access`：下载授权——`skill_id`（ON DELETE CASCADE）、`scope_type`（`TEAM|PROJECT`）、`scope_id`；唯一 `(skill_id, scope_type, scope_id)`。无行 = 公开技能。
+
 ## 7. 告警、导出和审计
 
 ### `webhook_endpoints`
