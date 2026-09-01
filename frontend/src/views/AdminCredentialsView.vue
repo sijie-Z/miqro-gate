@@ -526,12 +526,22 @@ async function load() {
           class="validate-result"
           data-testid="credential-validate-result"
         >
-          <div>{{ validateResult.matchesActive ? '与当前生效版本一致。' : (validateResult.message ?? '与当前生效版本不一致。') }}</div>
+          <div>
+            {{
+              validateResult.matchesActive
+                ? '与当前生效版本一致。'
+                : (validateResult.message ?? '与当前生效版本不一致。')
+            }}
+          </div>
           <div v-if="validateResult.providerStatus !== 'NOT_CHECKED'" class="provider-check">
             供应商验证：{{ providerStatusLabel[validateResult.providerStatus] }}
-            <span v-if="validateResult.providerMessage" class="mk-mono">（{{ validateResult.providerMessage }}）</span>
+            <span v-if="validateResult.providerMessage" class="mk-mono"
+              >（{{ validateResult.providerMessage }}）</span
+            >
           </div>
-          <div v-else class="provider-check">供应商验证：未执行（无适配器或候选与生效版本不一致）</div>
+          <div v-else class="provider-check">
+            供应商验证：未执行（无适配器或候选与生效版本不一致）
+          </div>
         </t-alert>
         <t-alert
           v-if="validateError"
