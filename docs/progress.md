@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G8.1`（外部系统 API 通道：消费者 API Key 认证 + 计费查询 API + 配额状态，ADR-0010）
-- Goal status: `IN_PROGRESS`（后端+前端+配额扩展完成，待 PR 合并）
+- Current goal: `G8.2`（项目月度预算：管理面 + 实时水位 + 预警状态，只预警不阻断）
+- Goal status: `IN_PROGRESS`（后端 + 前端 + 验证完成，待 PR 合并）
 - Last updated: `2026-09-01 CST`
 - Branch: `goal/g7.2-price-catalog`
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
@@ -199,6 +199,14 @@
 - **验证**：全量后端 `verify -P integration` **BUILD SUCCESS**（控制面 290/0：273 + billing 3 + verifier 14；全模块 1021 基线 1004 + 17）。
 - **排障记录**：MockMvc 下 billing 401 根因是 SessionFilter（order -100）先于 ApiKeyAuthFilter（-90）拦截无 session 请求 —— 会话过滤器豁免 billing 路径，由 API Key 过滤器接管。
 - **后续**：用户级映射与 JWT 确权（平台注册细节明确后）；SkillHub/Agent 管理按 roadmap P2/P3。
+
+## G8.2 — 项目月度预算（配额管理的落地，只预警不阻断）
+
+- **来源**：leader 蓝图「配额的管理」；腾讯消费者配额管理（Token/请求次数 × 日周月 × 预警状态）+ 阿里 FinOps 消费者配额（周期总量 + 水位大盘）文档研究后本土化 —— 预算表（`budget`/`model_budget`，V7）早已建表但管理面与水位缺失。
+- **交付**：`Budget` 领域模型 + `BudgetRepository`（(project, month) upsert）；`AdminBudgetService`（水位 = 当月分摊成本经 `UsageStatsAggregator` 实时计算；level = NORMAL/WARNING/EXCEEDED 按阈值派生）+ `AdminBudgetController`（GET /budgets 全项目水位、GET/PUT/DELETE /projects/{id}/budget）；前端 AdminCostView 新增「月度预算」面板（汇总水位条 + 每项目水位/状态徽标/编辑删除 + 设置弹窗）。**零迁移**（V7 已建表）。
+- **验证**：`AdminBudgetApiIntegrationTest` 4/4（生命周期/校验/水位链路：seed usage_event + price_snapshot → spent=0.01 → EXCEEDED 精确断言）；前端 vitest 46/46（+3：水位渲染/编辑保存参数/删除确认）；全量后端 `verify -P integration` **BUILD SUCCESS**（全模块 1025 = 1021 + 4）。
+- **对齐**：腾讯「正常/预警/超限」三态 + 阿里「事前定规则、事中控风险」—— 只告警不阻断，符合「不因预算阻断」产品锁定决策；硬阻断与 Token/请求次数配额列为后续（需 ADR）。
+- **风险**：`spent` 取读时刻最新单价快照（价格变更后历史水位随单价变化，与 G4.3 同语义）；预算告警（BUDGET_THRESHOLD 事件/Webhook）未接线，列为扩展点。
 
 ## 待办需求（2026-08-28 leader 指示，细节待补充，暂不实施）
 

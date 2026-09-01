@@ -569,6 +569,33 @@
 - 响应仅元数据（时间/模型/Token/成本/配额），无正文
 - 错误码：`CONSUMER_NAME_TAKEN`（409）、`CONSUMER_NOT_FOUND`（404）、`CONSUMER_ALREADY_DISABLED`（409）、`JWT_KEY_INVALID`（400）、匿名 401
 
+### 5.11 项目月度预算（G8.2，配额管理）
+
+项目级月度预算：**只预警不阻断**（符合「不因预算阻断」产品决策），水位按当月分摊成本实时计算。对标腾讯消费者配额管理的预警状态（正常/预警/超限）。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/budgets?month` | 全部项目当月预算 + 水位（`month` 缺省为当月） |
+| `GET /api/v1/admin/projects/{projectId}/budget?month` | 单项目预算 + 水位 |
+| `PUT /api/v1/admin/projects/{projectId}/budget` | 创建/更新（按 `(project, month)` upsert）：`{ "month", "amount", "currency"?, "alertThresholdPct"? }` |
+| `DELETE /api/v1/admin/projects/{projectId}/budget?month` | 删除（`204`） |
+
+**响应 `BudgetView`**：
+
+```json
+{
+  "projectId": "…", "projectCode": "CORE", "projectName": "Core AI",
+  "month": "2026-09", "amount": 5000, "currency": "CNY",
+  "alertThresholdPct": 80, "status": "ACTIVE",
+  "spent": 123.45, "spentPct": 2.47, "level": "NORMAL"
+}
+```
+
+- `spent` = 当月分摊成本（usage × 最新单价快照，复用全局用量聚合）；`spentPct` = `spent / amount × 100`
+- `level`：`NORMAL`（< 阈值）/ `WARNING`（≥ 阈值且 < 100%）/ `EXCEEDED`（≥ 100%）
+- 校验：`month` 格式 `YYYY-MM`（`MONTH_INVALID` 400）；`amount` > 0；`alertThresholdPct` 0–100；项目不存在/跨租户 `PROJECT_NOT_FOUND` 404；无预算 `BUDGET_NOT_FOUND` 404
+- 预算表（`budget`，V7）在 V7 已建表，本 Goal 零迁移
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：
