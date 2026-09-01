@@ -18,8 +18,11 @@ public class ApiConsumerRepositoryImpl implements ApiConsumerRepository {
 
     private static final RowMapper<ApiConsumer> ROW_MAPPER = (rs, rowNum) -> new ApiConsumer((UUID) rs.getObject("id"),
             (UUID) rs.getObject("tenant_id"), rs.getString("name"), rs.getBytes("key_digest"),
-            rs.getString("key_prefix"), rs.getString("status"), rs.getLong("version"),
-            rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
+            rs.getString("key_prefix"), rs.getString("status"), rs.getString("jwt_public_key_pem"),
+            rs.getString("jwt_key_fingerprint"),
+            rs.getTimestamp("jwt_key_set_at") != null ? rs.getTimestamp("jwt_key_set_at").toInstant() : null,
+            rs.getLong("version"), rs.getTimestamp("created_at").toInstant(),
+            rs.getTimestamp("updated_at").toInstant());
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -30,14 +33,18 @@ public class ApiConsumerRepositoryImpl implements ApiConsumerRepository {
     @Override
     @Transactional
     public ApiConsumer insert(ApiConsumer consumer) {
-        jdbc.update(
-                """
-                        INSERT INTO api_consumers (id, tenant_id, name, key_digest, key_prefix, status, version, created_at, updated_at)
-                        VALUES (:id, :tenantId, :name, :keyDigest, :keyPrefix, :status, 0, now(), now())
-                        """,
-                new MapSqlParameterSource("id", consumer.id()).addValue("tenantId", consumer.tenantId())
-                        .addValue("name", consumer.name()).addValue("keyDigest", consumer.keyDigest())
-                        .addValue("keyPrefix", consumer.keyPrefix()).addValue("status", consumer.status()));
+        jdbc.update("""
+                INSERT INTO api_consumers
+                    (id, tenant_id, name, key_digest, key_prefix, status, jwt_public_key_pem,
+                     jwt_key_fingerprint, jwt_key_set_at, version, created_at, updated_at)
+                VALUES (:id, :tenantId, :name, :keyDigest, :keyPrefix, :status, :jwtPem, :jwtFingerprint,
+                        :jwtSetAt, 0, now(), now())
+                """, new MapSqlParameterSource("id", consumer.id()).addValue("tenantId", consumer.tenantId())
+                .addValue("name", consumer.name()).addValue("keyDigest", consumer.keyDigest())
+                .addValue("keyPrefix", consumer.keyPrefix()).addValue("status", consumer.status())
+                .addValue("jwtPem", consumer.jwtPublicKeyPem()).addValue("jwtFingerprint", consumer.jwtKeyFingerprint())
+                .addValue("jwtSetAt",
+                        consumer.jwtKeySetAt() != null ? java.sql.Timestamp.from(consumer.jwtKeySetAt()) : null));
         return consumer;
     }
 
@@ -70,17 +77,32 @@ public class ApiConsumerRepositoryImpl implements ApiConsumerRepository {
     }
 
     @Override
+    public Optional<ApiConsumer> findByName(String name) {
+        try {
+            return Optional.ofNullable(jdbc.queryForObject("SELECT * FROM api_consumers WHERE name = :name",
+                    new MapSqlParameterSource("name", name), ROW_MAPPER));
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            return Optional.empty();
+        }
+    }
+
+    @Override
     @Transactional
     public ApiConsumer update(ApiConsumer consumer) {
         jdbc.update("""
-                UPDATE api_consumers SET name = :name, status = :status, version = :version, updated_at = now()
+                UPDATE api_consumers
+                SET name = :name, status = :status, jwt_public_key_pem = :jwtPem,
+                    jwt_key_fingerprint = :jwtFingerprint, jwt_key_set_at = :jwtSetAt,
+                    version = :version, updated_at = now()
                 WHERE id = :id AND tenant_id = :tenantId AND version = :oldVersion
-                """,
-                new MapSqlParameterSource("name", consumer.name()).addValue("status", consumer.status())
-                        .addValue("version", consumer.version() + 1).addValue("oldVersion", consumer.version())
-                        .addValue("id", consumer.id()).addValue("tenantId", consumer.tenantId()));
+                """, new MapSqlParameterSource("name", consumer.name()).addValue("status", consumer.status())
+                .addValue("jwtPem", consumer.jwtPublicKeyPem()).addValue("jwtFingerprint", consumer.jwtKeyFingerprint())
+                .addValue("jwtSetAt",
+                        consumer.jwtKeySetAt() != null ? java.sql.Timestamp.from(consumer.jwtKeySetAt()) : null)
+                .addValue("version", consumer.version() + 1).addValue("oldVersion", consumer.version())
+                .addValue("id", consumer.id()).addValue("tenantId", consumer.tenantId()));
         return new ApiConsumer(consumer.id(), consumer.tenantId(), consumer.name(), consumer.keyDigest(),
-                consumer.keyPrefix(), consumer.status(), consumer.version() + 1, consumer.createdAt(),
-                java.time.Instant.now());
+                consumer.keyPrefix(), consumer.status(), consumer.jwtPublicKeyPem(), consumer.jwtKeyFingerprint(),
+                consumer.jwtKeySetAt(), consumer.version() + 1, consumer.createdAt(), java.time.Instant.now());
     }
 }

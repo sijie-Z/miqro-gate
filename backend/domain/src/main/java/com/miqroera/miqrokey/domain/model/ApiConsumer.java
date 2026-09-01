@@ -6,18 +6,27 @@ import java.util.HexFormat;
 import java.util.UUID;
 
 /**
- * External-system API consumer (ADR-0010): an API identity for the platform to
- * query billing data through {@code /api/v1/billing/**}. The API key plaintext
- * is shown once at creation; only a SHA-256 digest is persisted, mirroring the
- * Virtual Key secret hygiene rules.
+ * External-system API consumer (ADR-0010/0011): an API identity for the
+ * platform to query billing data through {@code /api/v1/billing/**}. The API
+ * key plaintext is shown once at creation; only a SHA-256 digest is persisted,
+ * mirroring the Virtual Key secret hygiene rules. Optionally carries an RS256
+ * JWT verification public key (PEM) so the platform can authenticate with
+ * self-signed tokens instead of the long-lived API key.
  *
  * @param keyDigest
  *            SHA-256 over the full {@code mqk_api_…} key bytes
  * @param keyPrefix
  *            first 8 hex chars of the key (display only)
+ * @param jwtPublicKeyPem
+ *            PEM SubjectPublicKeyInfo for RS256 JWT verification, or null
+ * @param jwtKeyFingerprint
+ *            SHA-256 of the DER public key, first 8 bytes hex (display only)
+ * @param jwtKeySetAt
+ *            when the JWT key was set/rotated, or null
  */
 public record ApiConsumer(UUID id, UUID tenantId, String name, byte[] keyDigest, String keyPrefix, String status,
-        long version, Instant createdAt, Instant updatedAt) {
+        String jwtPublicKeyPem, String jwtKeyFingerprint, Instant jwtKeySetAt, long version, Instant createdAt,
+        Instant updatedAt) {
 
     public ApiConsumer {
         if (id == null || tenantId == null) {
@@ -29,7 +38,15 @@ public record ApiConsumer(UUID id, UUID tenantId, String name, byte[] keyDigest,
         if (keyDigest == null || keyDigest.length != 32) {
             throw new IllegalArgumentException("keyDigest must be SHA-256");
         }
+        if (jwtPublicKeyPem == null ^ jwtKeyFingerprint == null) {
+            throw new IllegalArgumentException("jwtPublicKeyPem and jwtKeyFingerprint must be set together");
+        }
         keyDigest = keyDigest.clone();
+    }
+
+    /** True when a JWT verification key is configured. */
+    public boolean hasJwtKey() {
+        return jwtPublicKeyPem != null;
     }
 
     @Override

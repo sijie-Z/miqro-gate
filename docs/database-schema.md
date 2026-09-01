@@ -276,9 +276,11 @@ PostgreSQL 响应缓存（L2），默认关闭（缓存子系统显式启用且 
 - `meta_json jsonb`、`hit_count_l1`、`hit_count_l2`、`expires_at`、时间戳
 - 唯一 `(tenant_id, cache_key)`；`project_id`、`expires_at`、`tenant_id` 索引
 
-### `api_consumers` (V13，ADR-0010)
+### `api_consumers` (V13/V14，ADR-0010/0011)
 
 外部系统 API 消费者：`name`、`key_digest bytea`（SHA-256，仅哈希）、`key_prefix varchar(8)`、`status`（`ACTIVE|DISABLED`）。唯一 `(tenant_id, name)`；`key_digest` 索引用于认证查找。
+
+V14（ADR-0011）新增 JWT 验签公钥：`jwt_public_key_pem text`（RSA SubjectPublicKeyInfo，公钥非机密）、`jwt_key_fingerprint varchar(16)`（SHA-256 前 8 字节 hex，展示）、`jwt_key_set_at timestamptz`。三列同设同清（`ApiConsumer` 构造校验同 null）。
 
 ### `price_snapshot` (V5，当前实现)
 

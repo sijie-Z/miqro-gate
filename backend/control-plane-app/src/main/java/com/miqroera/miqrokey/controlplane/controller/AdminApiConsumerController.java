@@ -8,9 +8,11 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,8 +22,9 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Admin API-consumer management (ADR-0010): create (one-time key), list,
- * disable. SYSTEM_ADMIN-only via RoleInterceptor.
+ * Admin API-consumer management (ADR-0010/0011): create (one-time key), list,
+ * disable, and the optional RS256 JWT verification key. SYSTEM_ADMIN-only via
+ * RoleInterceptor.
  */
 @RestController
 @RequestMapping("/api/v1/admin/api-consumers")
@@ -53,6 +56,23 @@ public class AdminApiConsumerController {
         return consumerService.disable(userContext.getUser().tenantId(), consumerId);
     }
 
+    /**
+     * Sets/rotates the RS256 JWT verification key (PEM); returns the fingerprint.
+     */
+    @PutMapping("/{consumerId}/jwt-key")
+    public ApiConsumerView setJwtKey(@PathVariable UUID consumerId, @Valid @RequestBody SetJwtKeyRequest body) {
+        return consumerService.setJwtKey(userContext.getUser().tenantId(), consumerId, body.publicKeyPem());
+    }
+
+    /** Removes the JWT verification key; JWT auth stops immediately. */
+    @DeleteMapping("/{consumerId}/jwt-key")
+    public ApiConsumerView removeJwtKey(@PathVariable UUID consumerId) {
+        return consumerService.removeJwtKey(userContext.getUser().tenantId(), consumerId);
+    }
+
     public record CreateRequest(@NotBlank @Size(max = 200) String name) {
+    }
+
+    public record SetJwtKeyRequest(@NotBlank @Size(max = 8192) String publicKeyPem) {
     }
 }

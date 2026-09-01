@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.controlplane.security.CsrfInterceptor;
 import com.miqroera.miqrokey.controlplane.security.OriginInterceptor;
 import com.miqroera.miqrokey.controlplane.security.RoleInterceptor;
 import com.miqroera.miqrokey.controlplane.security.ApiKeyAuthFilter;
+import com.miqroera.miqrokey.controlplane.security.ConsumerJwtVerifier;
 import com.miqroera.miqrokey.controlplane.security.SessionFilter;
 import com.miqroera.miqrokey.controlplane.security.SessionService;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
@@ -75,8 +76,15 @@ public class SecurityConfig implements WebMvcConfigurer {
     }
 
     @Bean
-    public ApiKeyAuthFilter apiKeyAuthFilter(ApiConsumerRepository consumerRepository, UserContext userContext) {
-        return new ApiKeyAuthFilter(consumerRepository, userContext);
+    public ApiKeyAuthFilter apiKeyAuthFilter(ApiConsumerRepository consumerRepository, ConsumerJwtVerifier jwtVerifier,
+            UserContext userContext) {
+        return new ApiKeyAuthFilter(consumerRepository, jwtVerifier, userContext);
+    }
+
+    /** JDK-native RS256 JWT verifier for consumer auth (ADR-0011). */
+    @Bean
+    public ConsumerJwtVerifier consumerJwtVerifier() {
+        return new ConsumerJwtVerifier();
     }
 
     @Override

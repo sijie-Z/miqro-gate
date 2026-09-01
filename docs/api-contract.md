@@ -528,9 +528,11 @@
 
 | 方法与路径 | 用途 |
 |---|---|
-| `GET /api/v1/admin/api-consumers` | 消费者列表（掩码视图） |
+| `GET /api/v1/admin/api-consumers` | 消费者列表（掩码视图 + JWT 公钥指纹） |
 | `POST /api/v1/admin/api-consumers` | 创建：`{ "name" }` → `201`，返回一次性 API Key（明文仅此一次） |
 | `POST /api/v1/admin/api-consumers/{id}/disable` | 立即吊销（禁用的 Key 即刻失效） |
+| `PUT /api/v1/admin/api-consumers/{id}/jwt-key` | 设置/轮换 JWT 验签公钥：`{ "publicKeyPem" }`（RSA PEM SubjectPublicKeyInfo）→ 返回带 `jwtKeyFingerprint` 的视图；非法 PEM → `400 JWT_KEY_INVALID` |
+| `DELETE /api/v1/admin/api-consumers/{id}/jwt-key` | 移除公钥（JWT 认证立即失效） |
 
 **计费查询**（API Key 或管理员 session 认证）：
 
@@ -563,8 +565,9 @@
 - `source` 为权威级别：`OFFICIAL_API`（适配器官方余额/用量接口）、`LOCAL_ESTIMATE`（按本地用量估算）、`UNAVAILABLE`（产品无官方接口，明确标注未知）
 - 外部通道只暴露配额数字与权威级别，不含内部错误消息与 provider 状态载荷（`errorMessage`/`providerStatusJson` 仅管理员面可见）
 - API Key 格式 `mqk_api_<8 hex>_<32 hex>`，仅存 SHA-256 哈希；提交方式 `X-API-Key` 或 `Authorization: Bearer mqk_api_…`
+- **JWT 凭据（ADR-0011）**：`Authorization: Bearer <jwt>`（非 `mqk_api_` 前缀即按 JWT 处理）——RS256 签名，`sub` = 消费者名称，`exp` 必填且未过期（`nbf` 可选）；网关用消费者配置的 RSA 公钥验签，`X-API-Key` 头只接受 API Key。平台自持私钥签发，公钥经管理 API 一次性配置。
 - 响应仅元数据（时间/模型/Token/成本/配额），无正文
-- 错误码：`CONSUMER_NAME_TAKEN`（409）、`CONSUMER_NOT_FOUND`（404）、`CONSUMER_ALREADY_DISABLED`（409）、匿名 401
+- 错误码：`CONSUMER_NAME_TAKEN`（409）、`CONSUMER_NOT_FOUND`（404）、`CONSUMER_ALREADY_DISABLED`（409）、`JWT_KEY_INVALID`（400）、匿名 401
 
 ## 6. 导出与对账任务
 

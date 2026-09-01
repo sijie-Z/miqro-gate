@@ -14,11 +14,12 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
 /**
- * API-key authentication for the external-system channel (ADR-0010), protecting
+ * Authentication for the external-system channel (ADR-0010/0011), protecting
  * {@code /api/v1/billing/**}. A valid session (portal admin) also passes;
- * otherwise the presented key is hashed and matched against an ACTIVE consumer.
- * The consumer identity is exposed as a request attribute for the billing
- * controllers.
+ * otherwise the presented credential is either an API key (SHA-256 digest match
+ * against an ACTIVE consumer) or an RS256 JWT (verified against the consumer's
+ * configured public key, {@code sub} = consumer name). The consumer identity is
+ * exposed as a request attribute for the billing controllers.
  */
 public class ApiKeyAuthFilter extends OncePerRequestFilter {
 
@@ -32,10 +33,13 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     private static final String KEY_PREFIX = "mqk_api_";
 
     private final ApiConsumerRepository consumerRepository;
+    private final ConsumerJwtVerifier jwtVerifier;
     private final UserContext userContext;
 
-    public ApiKeyAuthFilter(ApiConsumerRepository consumerRepository, UserContext userContext) {
+    public ApiKeyAuthFilter(ApiConsumerRepository consumerRepository, ConsumerJwtVerifier jwtVerifier,
+            UserContext userContext) {
         this.consumerRepository = consumerRepository;
+        this.jwtVerifier = jwtVerifier;
         this.userContext = userContext;
     }
 
@@ -52,12 +56,21 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
-        String key = extractKey(request);
-        if (key != null && key.startsWith(KEY_PREFIX)) {
-            ApiConsumer consumer = consumerRepository.findByKeyDigest(sha256(key)).orElse(null);
-            if (consumer != null) {
-                request.setAttribute(CONSUMER_ATTR, consumer.id());
-                request.setAttribute(TENANT_ATTR, consumer.tenantId());
+        Credential credential = extractCredential(request);
+        if (credential != null) {
+            // The X-API-Key header is API-key-only; Authorization: Bearer splits
+            // by prefix (mqk_api_… = API key, otherwise an RS256 JWT).
+            if (credential.origin() == Origin.API_KEY_HEADER) {
+                if (authenticateApiKey(credential.value(), request)) {
+                    chain.doFilter(request, response);
+                    return;
+                }
+            } else if (credential.value().startsWith(KEY_PREFIX)) {
+                if (authenticateApiKey(credential.value(), request)) {
+                    chain.doFilter(request, response);
+                    return;
+                }
+            } else if (authenticateJwt(credential.value(), request)) {
                 chain.doFilter(request, response);
                 return;
             }
@@ -65,14 +78,49 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         unauthorized(response);
     }
 
-    private static String extractKey(HttpServletRequest request) {
-        String header = request.getHeader("X-API-Key");
-        if (header != null && !header.isBlank()) {
-            return header.trim();
+    private boolean authenticateApiKey(String key, HttpServletRequest request) {
+        ApiConsumer consumer = consumerRepository.findByKeyDigest(sha256(key)).orElse(null);
+        if (consumer != null) {
+            request.setAttribute(CONSUMER_ATTR, consumer.id());
+            request.setAttribute(TENANT_ATTR, consumer.tenantId());
+            return true;
+        }
+        return false;
+    }
+
+    private boolean authenticateJwt(String token, HttpServletRequest request) {
+        String subject = ConsumerJwtVerifier.extractSubject(token);
+        if (subject == null) {
+            return false;
+        }
+        ApiConsumer consumer = consumerRepository.findByName(subject).orElse(null);
+        if (consumer == null || !"ACTIVE".equals(consumer.status()) || !consumer.hasJwtKey()) {
+            return false;
+        }
+        if (!jwtVerifier.verify(token, consumer.jwtPublicKeyPem(), subject)) {
+            return false;
+        }
+        request.setAttribute(CONSUMER_ATTR, consumer.id());
+        request.setAttribute(TENANT_ATTR, consumer.tenantId());
+        return true;
+    }
+
+    /** Where the presented credential came from. */
+    private enum Origin {
+        API_KEY_HEADER, BEARER
+    }
+
+    private record Credential(String value, Origin origin) {
+    }
+
+    private static Credential extractCredential(HttpServletRequest request) {
+        String apiKeyHeader = request.getHeader("X-API-Key");
+        if (apiKeyHeader != null && !apiKeyHeader.isBlank()) {
+            return new Credential(apiKeyHeader.trim(), Origin.API_KEY_HEADER);
         }
         String auth = request.getHeader("Authorization");
         if (auth != null && auth.startsWith("Bearer ")) {
-            return auth.substring("Bearer ".length()).trim();
+            return new Credential(auth.substring("Bearer ".length()).trim(), Origin.BEARER);
         }
         return null;
     }

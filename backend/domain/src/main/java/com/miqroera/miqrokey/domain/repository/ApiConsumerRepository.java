@@ -20,5 +20,8 @@ public interface ApiConsumerRepository {
     /** Digest lookup for the auth filter (whole-tenant match is implicit). */
     Optional<ApiConsumer> findByKeyDigest(byte[] keyDigest);
 
+    /** Name lookup for JWT auth (whole-tenant match is implicit). */
+    Optional<ApiConsumer> findByName(String name);
+
     ApiConsumer update(ApiConsumer consumer);
 }

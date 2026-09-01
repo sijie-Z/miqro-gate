@@ -23,12 +23,23 @@ import org.springframework.test.web.servlet.MvcResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.Signature;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -199,6 +210,145 @@ class BillingApiIntegrationTest {
         // Admin session sees the same tenant-wide view.
         mockMvc.perform(get("/api/v1/billing/quota").cookie(sessionCookie)).andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)));
+    }
+
+    // ------------------------------------------------------- JWT (ADR-0011)
+
+    @Test
+    @DisplayName("a consumer with a configured public key authenticates with an RS256 JWT")
+    void jwtConsumerAuthenticates() throws Exception {
+        KeyPair keys = jwtKeys();
+        UUID consumerId = createConsumer("platform");
+        mockMvc.perform(put("/api/v1/admin/api-consumers/" + consumerId + "/jwt-key").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("publicKeyPem", pem(keys.getPublic())))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.jwtKeyFingerprint").isNotEmpty()).andExpect(
+                        jsonPath("$.jwtKeyFingerprint").value(org.hamcrest.Matchers.matchesPattern("^[0-9a-f]{16}$")));
+
+        String valid = signJwt(keys.getPrivate(), "platform", Instant.now().plusSeconds(600));
+        mockMvc.perform(get("/api/v1/billing/summary").header("Authorization", "Bearer " + valid))
+                .andExpect(status().isOk());
+
+        // Expired token.
+        String expired = signJwt(keys.getPrivate(), "platform", Instant.now().minusSeconds(60));
+        mockMvc.perform(get("/api/v1/billing/summary").header("Authorization", "Bearer " + expired))
+                .andExpect(status().isUnauthorized());
+
+        // Token signed by another key.
+        String forged = signJwt(jwtKeys().getPrivate(), "platform", Instant.now().plusSeconds(600));
+        mockMvc.perform(get("/api/v1/billing/summary").header("Authorization", "Bearer " + forged))
+                .andExpect(status().isUnauthorized());
+
+        // Unknown consumer subject.
+        String unknown = signJwt(keys.getPrivate(), "nobody", Instant.now().plusSeconds(600));
+        mockMvc.perform(get("/api/v1/billing/summary").header("Authorization", "Bearer " + unknown))
+                .andExpect(status().isUnauthorized());
+
+        // JWT in the X-API-Key header is not accepted (that header is key-only).
+        mockMvc.perform(get("/api/v1/billing/summary").header("X-API-Key", valid)).andExpect(status().isUnauthorized());
+
+        // The API-key credential still works alongside JWT.
+        String apiKey = objectMapper.readValue(mockMvc
+                .perform(post("/api/v1/admin/api-consumers").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content("{\"name\":\"platform-key\"}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString(), Map.class)
+                .get("apiKey").toString();
+        mockMvc.perform(get("/api/v1/billing/summary").header("X-API-Key", apiKey)).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("JWT key lifecycle: invalid/unknown rejections, rotation invalidates old keys, removal revokes")
+    void jwtKeyLifecycle() throws Exception {
+        // Unknown consumer -> 404; invalid PEM -> 400.
+        mockMvc.perform(put("/api/v1/admin/api-consumers/" + UUID.randomUUID() + "/jwt-key")
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"publicKeyPem\":\"not-a-pem\"}"))
+                .andExpect(status().isNotFound());
+        UUID consumerId = createConsumer("platform");
+        mockMvc.perform(put("/api/v1/admin/api-consumers/" + consumerId + "/jwt-key").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"publicKeyPem\":\"not-a-pem\"}")).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("JWT_KEY_INVALID"));
+
+        // Rotation: old key stops verifying immediately, new key works.
+        KeyPair first = jwtKeys();
+        KeyPair second = jwtKeys();
+        mockMvc.perform(put("/api/v1/admin/api-consumers/" + consumerId + "/jwt-key").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("publicKeyPem", pem(first.getPublic())))))
+                .andExpect(status().isOk());
+        String firstToken = signJwt(first.getPrivate(), "platform", Instant.now().plusSeconds(600));
+        String secondToken = signJwt(second.getPrivate(), "platform", Instant.now().plusSeconds(600));
+        mockMvc.perform(put("/api/v1/admin/api-consumers/" + consumerId + "/jwt-key").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("publicKeyPem", pem(second.getPublic())))))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/billing/summary").header("Authorization", "Bearer " + firstToken))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/billing/summary").header("Authorization", "Bearer " + secondToken))
+                .andExpect(status().isOk());
+
+        // Removal: view clears the fingerprint, JWT auth stops.
+        mockMvc.perform(delete("/api/v1/admin/api-consumers/" + consumerId + "/jwt-key")
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.jwtKeyFingerprint").value(org.hamcrest.Matchers.nullValue()));
+        mockMvc.perform(get("/api/v1/billing/summary").header("Authorization", "Bearer " + secondToken))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("a disabled consumer cannot authenticate with JWT")
+    void disabledConsumerJwtRejected() throws Exception {
+        KeyPair keys = jwtKeys();
+        UUID consumerId = createConsumer("platform");
+        mockMvc.perform(put("/api/v1/admin/api-consumers/" + consumerId + "/jwt-key").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("publicKeyPem", pem(keys.getPublic())))))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/admin/api-consumers/" + consumerId + "/disable").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+
+        String token = signJwt(keys.getPrivate(), "platform", Instant.now().plusSeconds(600));
+        mockMvc.perform(get("/api/v1/billing/summary").header("Authorization", "Bearer " + token))
+                .andExpect(status().isUnauthorized());
+    }
+
+    private UUID createConsumer(String name) throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/api-consumers").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content("{\"name\":\"" + name + "\"}")).andExpect(status().isCreated()).andReturn();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> consumer = (Map<String, Object>) objectMapper
+                .readValue(created.getResponse().getContentAsString(), Map.class).get("consumer");
+        return UUID.fromString(consumer.get("id").toString());
+    }
+
+    private static KeyPair jwtKeys() throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        return generator.generateKeyPair();
+    }
+
+    private String signJwt(PrivateKey key, String subject, Instant exp) throws Exception {
+        String header = b64url("{\"alg\":\"RS256\",\"typ\":\"JWT\"}".getBytes(StandardCharsets.UTF_8));
+        Map<String, Object> claims = new LinkedHashMap<>();
+        claims.put("sub", subject);
+        claims.put("exp", exp.getEpochSecond());
+        String payload = b64url(objectMapper.writeValueAsBytes(claims));
+        Signature signature = Signature.getInstance("SHA256withRSA");
+        signature.initSign(key);
+        signature.update((header + "." + payload).getBytes(StandardCharsets.US_ASCII));
+        return header + "." + payload + "." + b64url(signature.sign());
+    }
+
+    private static String b64url(byte[] bytes) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private static String pem(PublicKey key) {
+        return "-----BEGIN PUBLIC KEY-----\n" + Base64.getMimeEncoder().encodeToString(key.getEncoded())
+                + "\n-----END PUBLIC KEY-----";
     }
 
     private UUID seedSubscription(String name) {
