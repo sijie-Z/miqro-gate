@@ -5,7 +5,8 @@ import type { PrimaryTableCol } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
-import type { UsageGroup, UsageSummary } from '@/types/api';
+import { confirmDialog } from '@/utils/confirm';
+import type { BudgetView, Project, UsageGroup, UsageSummary } from '@/types/api';
 
 const WINDOWS = [
   { label: '近 7 天', days: 7 },
@@ -146,7 +147,137 @@ function switchWindow(days: number) {
   void load();
 }
 
-onMounted(load);
+// ---- monthly budget (G8.2) ----
+
+const budgets = ref<BudgetView[]>([]);
+const budgetLoading = ref(false);
+const projects = ref<Project[]>([]);
+const budgetDialogVisible = ref(false);
+const budgetSaving = ref(false);
+const budgetFormError = ref('');
+const budgetForm = ref({ projectId: '', amount: '', alertThresholdPct: '80' });
+const editingBudget = ref<BudgetView | null>(null);
+
+const budgetMonth = computed(() => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+});
+
+const budgetTotalAmount = computed(() =>
+  budgets.value.reduce((sum, b) => sum + Number(b.amount), 0),
+);
+const budgetTotalSpent = computed(() => budgets.value.reduce((sum, b) => sum + Number(b.spent), 0));
+const budgetOverallPct = computed(() =>
+  budgetTotalAmount.value > 0 ? (budgetTotalSpent.value / budgetTotalAmount.value) * 100 : 0,
+);
+
+const budgetLevelLabel: Record<string, string> = {
+  NORMAL: '正常',
+  WARNING: '预警',
+  EXCEEDED: '超限',
+};
+
+async function loadBudgets() {
+  budgetLoading.value = true;
+  try {
+    budgets.value = await api.adminBudgets(budgetMonth.value);
+  } catch {
+    budgets.value = [];
+  } finally {
+    budgetLoading.value = false;
+  }
+}
+
+async function openBudgetDialog(budget: BudgetView | null) {
+  editingBudget.value = budget;
+  budgetFormError.value = '';
+  if (budget) {
+    budgetForm.value = {
+      projectId: budget.projectId,
+      amount: budget.amount,
+      alertThresholdPct: budget.alertThresholdPct,
+    };
+  } else {
+    if (!projects.value.length) {
+      try {
+        projects.value = await api.listProjects();
+      } catch {
+        projects.value = [];
+      }
+    }
+    budgetForm.value = { projectId: '', amount: '', alertThresholdPct: '80' };
+  }
+  budgetDialogVisible.value = true;
+}
+
+async function saveBudget() {
+  budgetFormError.value = '';
+  const amount = Number(budgetForm.value.amount);
+  const threshold = Number(budgetForm.value.alertThresholdPct);
+  if (!budgetForm.value.projectId) {
+    budgetFormError.value = '请选择项目。';
+    return;
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    budgetFormError.value = '预算金额必须大于 0。';
+    return;
+  }
+  if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 100) {
+    budgetFormError.value = '预警阈值必须在 0–100 之间。';
+    return;
+  }
+  budgetSaving.value = true;
+  try {
+    await api.putProjectBudget(budgetForm.value.projectId, {
+      month: budgetMonth.value,
+      amount,
+      alertThresholdPct: threshold,
+    });
+    budgetDialogVisible.value = false;
+    MessagePlugin.success('预算已保存');
+    await loadBudgets();
+  } catch (error) {
+    budgetFormError.value = error instanceof ApiError ? error.message : '保存失败，请稍后重试。';
+  } finally {
+    budgetSaving.value = false;
+  }
+}
+
+async function removeBudget(budget: BudgetView) {
+  try {
+    await confirmDialog({
+      header: `删除预算「${budget.projectName}」`,
+      body: `删除后 ${budget.month} 的预算计划将被移除，用量与成本数据不受影响。`,
+      confirmBtn: '删除',
+      cancelBtn: '取消',
+      theme: 'warning',
+    });
+  } catch {
+    return;
+  }
+  try {
+    await api.deleteProjectBudget(budget.projectId, budget.month);
+    MessagePlugin.success('预算已删除');
+    await loadBudgets();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      MessagePlugin.error(error.message);
+    }
+  }
+}
+
+function levelClass(level: string): string {
+  return level === 'EXCEEDED' ? 'danger' : level === 'WARNING' ? 'warning' : 'success';
+}
+
+function fillClass(level: string): string {
+  return level === 'EXCEEDED' ? 'fill-danger' : level === 'WARNING' ? 'fill-warning' : '';
+}
+
+onMounted(() => {
+  void load();
+  void loadBudgets();
+});
 </script>
 
 <template>
@@ -209,6 +340,147 @@ onMounted(load);
         <span class="mk-stat-hint">命中 {{ formatCount(cacheHits) }} 次 · 未调用上游</span>
       </div>
     </div>
+
+    <section class="budget-panel" data-testid="cost-budget-panel">
+      <div class="budget-header">
+        <div>
+          <h3 class="panel-title">月度预算 · {{ budgetMonth }}</h3>
+          <p class="hint">
+            只预警不阻断；达到阈值进入预警，超过 100% 标记超限。水位按当月分摊成本实时计算。
+          </p>
+        </div>
+        <t-button
+          theme="primary"
+          variant="outline"
+          data-testid="budget-create-open"
+          @click="openBudgetDialog(null)"
+        >
+          设置预算
+        </t-button>
+      </div>
+      <t-loading :loading="budgetLoading" size="small">
+        <div v-if="budgets.length" class="budget-summary-row" data-testid="budget-summary">
+          <span class="budget-summary-label">
+            总预算 <b class="mk-num">{{ formatCost(budgetTotalAmount) }}</b>
+          </span>
+          <span class="budget-summary-label">
+            已花费 <b class="mk-num">{{ formatCost(budgetTotalSpent) }}</b>
+          </span>
+          <div class="share-track budget-track">
+            <div
+              class="share-fill"
+              :class="
+                budgetOverallPct >= 100
+                  ? 'fill-danger'
+                  : budgetOverallPct >= 80
+                    ? 'fill-warning'
+                    : ''
+              "
+              :style="{ width: `${Math.min(budgetOverallPct, 100)}%` }"
+            />
+          </div>
+          <span class="mk-num">{{ budgetOverallPct.toFixed(1) }}%</span>
+        </div>
+        <div v-if="budgets.length" class="budget-rows">
+          <div v-for="b in budgets" :key="b.projectId" class="budget-row" data-testid="budget-row">
+            <div class="budget-project">
+              <span class="budget-name">{{ b.projectName }}</span>
+              <span class="mk-mono budget-code">{{ b.projectCode }}</span>
+              <span
+                class="mk-status"
+                :class="`mk-status--${levelClass(b.level)}`"
+                :data-testid="`budget-level-${b.projectCode}`"
+              >
+                {{ budgetLevelLabel[b.level] }}
+              </span>
+            </div>
+            <div class="budget-metrics">
+              <span class="mk-num budget-figures"
+                >{{ formatCost(Number(b.spent)) }} / {{ formatCost(Number(b.amount)) }}</span
+              >
+              <div class="share-track budget-track">
+                <div
+                  class="share-fill"
+                  :class="fillClass(b.level)"
+                  :style="{ width: `${Math.min(Number(b.spentPct), 100)}%` }"
+                />
+              </div>
+              <span class="mk-num budget-pct">{{ Number(b.spentPct).toFixed(1) }}%</span>
+            </div>
+            <div class="budget-actions">
+              <t-button variant="text" data-testid="budget-edit" @click="openBudgetDialog(b)"
+                >编辑</t-button
+              >
+              <t-button
+                variant="text"
+                theme="danger"
+                data-testid="budget-delete"
+                @click="removeBudget(b)"
+              >
+                删除
+              </t-button>
+            </div>
+          </div>
+        </div>
+        <div v-else class="budget-empty">
+          <span>本月还没有预算计划。</span>
+          <t-link theme="primary" data-testid="budget-empty-set" @click="openBudgetDialog(null)"
+            >立即设置</t-link
+          >
+        </div>
+      </t-loading>
+    </section>
+
+    <t-dialog
+      v-model:visible="budgetDialogVisible"
+      :header="editingBudget ? `编辑预算「${editingBudget.projectName}」` : '设置月度预算'"
+      width="480px"
+      :close-on-overlay-click="false"
+    >
+      <t-form label-align="top">
+        <t-form-item label="项目" required-mark>
+          <t-select
+            v-model="budgetForm.projectId"
+            :disabled="!!editingBudget"
+            placeholder="选择项目"
+            data-testid="budget-project-select"
+          >
+            <t-option
+              v-for="p in projects"
+              :key="p.id"
+              :value="p.id"
+              :label="`${p.name}（${p.code}）`"
+            />
+          </t-select>
+        </t-form-item>
+        <t-form-item label="预算金额（CNY）" required-mark>
+          <t-input
+            v-model="budgetForm.amount"
+            type="number"
+            placeholder="例如 5000"
+            data-testid="budget-amount"
+          />
+        </t-form-item>
+        <t-form-item label="预警阈值（%）" required-mark>
+          <t-input
+            v-model="budgetForm.alertThresholdPct"
+            type="number"
+            data-testid="budget-threshold"
+          />
+        </t-form-item>
+        <p v-if="budgetFormError" class="form-error">{{ budgetFormError }}</p>
+      </t-form>
+      <template #footer>
+        <t-button
+          theme="primary"
+          :loading="budgetSaving"
+          data-testid="budget-save"
+          @click="saveBudget"
+          >保存</t-button
+        >
+        <t-button @click="budgetDialogVisible = false">取消</t-button>
+      </template>
+    </t-dialog>
 
     <t-loading :loading="loading" size="small" show-overlay>
       <t-table
@@ -280,6 +552,130 @@ onMounted(load);
 <style scoped>
 .block-alert {
   margin-bottom: 16px;
+}
+
+.budget-panel {
+  border: 1px solid var(--miqrokey-border-default);
+  border-radius: var(--miqrokey-radius-panel);
+  background: var(--miqrokey-bg-surface);
+  padding: 16px 20px 20px;
+  margin-bottom: 20px;
+}
+
+.budget-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.panel-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.budget-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--miqrokey-border-muted);
+  border-radius: var(--miqrokey-radius-panel);
+  background: var(--miqrokey-bg-subtle);
+  margin-bottom: 12px;
+}
+
+.budget-summary-label {
+  font-size: 13px;
+  color: var(--miqrokey-text-secondary);
+  white-space: nowrap;
+}
+
+.budget-summary-label b {
+  color: var(--miqrokey-text-primary);
+}
+
+.budget-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.budget-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--miqrokey-border-muted);
+  border-radius: var(--miqrokey-radius-panel);
+}
+
+.budget-project {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+}
+
+.budget-name {
+  font-weight: 500;
+}
+
+.budget-code {
+  font-size: 12px;
+  color: var(--miqrokey-text-secondary);
+}
+
+.budget-metrics {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.budget-figures {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.budget-track {
+  flex: 1;
+  max-width: 320px;
+}
+
+.budget-pct {
+  min-width: 52px;
+  text-align: right;
+  font-size: 12px;
+}
+
+.budget-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.budget-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0;
+  color: var(--miqrokey-text-secondary);
+  font-size: 13px;
+}
+
+.form-error {
+  margin: 0 0 8px;
+  color: var(--miqrokey-danger);
+}
+
+.share-fill.fill-warning {
+  background: var(--miqrokey-warning);
+}
+
+.share-fill.fill-danger {
+  background: var(--miqrokey-danger);
 }
 
 .cost-table {

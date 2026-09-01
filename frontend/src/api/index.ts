@@ -2,13 +2,14 @@
  * /api/v1/auth and /api/v1/me endpoint clients (api-contract.md §3–§4).
  */
 
-import { del, get, patch, post } from './http';
+import { del, get, patch, post, put } from './http';
 import type {
   ApiConsumerView,
   CreateApiConsumerResponse,
   AdminUser,
   AlertRule,
   AuditEventView,
+  BudgetView,
   ExportTask,
   UsageDeletionRequest,
   WebhookDelivery,
@@ -306,6 +307,25 @@ export function updateSeat(
 }
 
 // ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----
+
+// ---- admin budget (G8.2) ----
+
+export function adminBudgets(month?: string): Promise<BudgetView[]> {
+  const params = month ? `?month=${encodeURIComponent(month)}` : '';
+  return get<BudgetView[]>(`/api/v1/admin/budgets${params}`);
+}
+
+export function putProjectBudget(
+  projectId: string,
+  body: { month: string; amount: number; currency?: string; alertThresholdPct?: number },
+): Promise<BudgetView> {
+  return put<BudgetView>(`/api/v1/admin/projects/${projectId}/budget`, body);
+}
+
+export function deleteProjectBudget(projectId: string, month?: string): Promise<void> {
+  const params = month ? `?month=${encodeURIComponent(month)}` : '';
+  return del(`/api/v1/admin/projects/${projectId}/budget${params}`);
+}
 
 export function adminUsageSummary(query: {
   groupBy?: string;

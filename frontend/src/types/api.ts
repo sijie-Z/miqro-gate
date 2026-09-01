@@ -22,6 +22,22 @@ export type VirtualKeyPurpose = 'CLAUDE_CODE' | 'CLAUDE_DESKTOP' | 'CODEX' | 'CU
 export type CacheLevel = 'UPSTREAM' | 'COALESCED' | 'L1_HIT' | 'L2_HIT';
 export type UsageGroupBy = 'project' | 'virtual_key' | 'cache_level' | 'day';
 
+export type BudgetLevel = 'NORMAL' | 'WARNING' | 'EXCEEDED';
+
+export interface BudgetView {
+  projectId: string;
+  projectCode: string;
+  projectName: string;
+  month: string;
+  amount: string;
+  currency: string;
+  alertThresholdPct: string;
+  status: string;
+  spent: string;
+  spentPct: string;
+  level: BudgetLevel;
+}
+
 export interface UserResponse {
   id: string;
   username: string;

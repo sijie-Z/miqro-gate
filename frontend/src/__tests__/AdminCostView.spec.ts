@@ -4,10 +4,14 @@ import { createPinia, setActivePinia } from 'pinia';
 import TDesign from 'tdesign-vue-next';
 import AdminCostView from '@/views/AdminCostView.vue';
 import * as api from '@/api';
-import type { UsageSummary } from '@/types/api';
+import type { BudgetView, UsageSummary } from '@/types/api';
 
 vi.mock('@/api', () => ({
   adminUsageSummary: vi.fn(),
+  adminBudgets: vi.fn(),
+  putProjectBudget: vi.fn(),
+  deleteProjectBudget: vi.fn(),
+  listProjects: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -79,12 +83,28 @@ function mountView() {
   });
 }
 
+const budget = (overrides: Partial<BudgetView> = {}): BudgetView => ({
+  projectId: '0190-0000-0000-0000-0000000000b1',
+  projectCode: 'CORE',
+  projectName: 'Core AI',
+  month: '2026-09',
+  amount: '100',
+  currency: 'CNY',
+  alertThresholdPct: '80',
+  status: 'ACTIVE',
+  spent: '0',
+  spentPct: '0',
+  level: 'NORMAL',
+  ...overrides,
+});
+
 describe('AdminCostView', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.resetAllMocks();
     document.body.innerHTML = '';
     mockApi.adminUsageSummary.mockResolvedValue(projectSummary);
+    mockApi.adminBudgets.mockResolvedValue([]);
     vi.stubGlobal('URL', {
       createObjectURL: () => 'blob:test',
       revokeObjectURL: vi.fn(),
@@ -162,5 +182,87 @@ describe('AdminCostView', () => {
       (URL as unknown as { revokeObjectURL: ReturnType<typeof vi.fn> }).revokeObjectURL,
     ).toHaveBeenCalled();
     clickSpy.mockRestore();
+  });
+
+  it('renders monthly budgets with spend watermarks and levels', async () => {
+    mockApi.adminBudgets.mockResolvedValue([
+      budget({
+        projectId: 'p1',
+        projectCode: 'CORE',
+        projectName: 'Core AI',
+        spent: '95',
+        spentPct: '95',
+        level: 'WARNING',
+      }),
+      budget({
+        projectId: 'p2',
+        projectCode: 'TOOLS',
+        projectName: 'Tools',
+        spent: '120',
+        spentPct: '120',
+        level: 'EXCEEDED',
+      }),
+    ]);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(mockApi.adminBudgets).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}$/));
+    expect(wrapper.find('[data-testid="cost-budget-panel"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('Core AI');
+    expect(wrapper.text()).toContain('预警');
+    expect(wrapper.text()).toContain('超限');
+    expect(wrapper.text()).toContain('95.0%');
+    // Summary row: total 200, spent 215 -> 107.5%.
+    expect(wrapper.text()).toContain('107.5%');
+  });
+
+  it('saves an edited budget with the project preselected', async () => {
+    // Editing path: the project is preselected, so no dropdown interaction is
+    // needed (option popup rendering is TDesign's concern, covered by e2e).
+    mockApi.adminBudgets.mockResolvedValue([budget()]);
+    mockApi.putProjectBudget.mockResolvedValue(budget());
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="budget-edit"]').trigger('click');
+    await flushPromises();
+
+    await wrapper.find('[data-testid="budget-amount"] input').setValue('5000');
+    await wrapper.find('[data-testid="budget-threshold"] input').setValue('90');
+    await wrapper.find('[data-testid="budget-save"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.putProjectBudget).toHaveBeenCalledWith('0190-0000-0000-0000-0000000000b1', {
+      month: expect.stringMatching(/^\d{4}-\d{2}$/) as never,
+      amount: 5000,
+      alertThresholdPct: 90,
+    });
+    expect(mockApi.adminBudgets).toHaveBeenCalled();
+  });
+
+  it('deletes a budget after confirming the dialog', async () => {
+    mockApi.adminBudgets.mockResolvedValue([budget()]);
+    mockApi.deleteProjectBudget.mockResolvedValue(undefined);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="budget-delete"]').trigger('click');
+    await flushPromises();
+
+    const confirmButton = Array.from(document.querySelectorAll('.t-dialog__confirm')).find((b) =>
+      b.textContent?.includes('删除'),
+    );
+    expect(confirmButton, 'confirm dialog should render').toBeTruthy();
+    (confirmButton as HTMLElement).click();
+    await flushPromises();
+    await new Promise((r) => setTimeout(r, 400));
+
+    expect(mockApi.deleteProjectBudget).toHaveBeenCalledWith(
+      '0190-0000-0000-0000-0000000000b1',
+      '2026-09',
+    );
   });
 });
