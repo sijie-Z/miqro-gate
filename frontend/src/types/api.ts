@@ -600,7 +600,11 @@ export type AlertRuleType =
   | 'UPSTREAM_ERROR_RATE'
   | 'BALANCE_UNAVAILABLE'
   | 'USAGE_SURGE'
-  | 'BUDGET_THRESHOLD';
+  | 'BUDGET_THRESHOLD'
+  | 'QUOTA_THRESHOLD'
+  | 'MODEL_APPROVAL_SUBMITTED'
+  | 'MODEL_APPROVAL_APPROVED'
+  | 'MODEL_APPROVAL_REJECTED';
 
 export interface AlertRule {
   id: string;
