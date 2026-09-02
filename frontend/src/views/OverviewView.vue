@@ -46,7 +46,7 @@ const statCards = computed(() => {
     },
     {
       label: '本月成本',
-      value: `¥${totalCost.toFixed(2)}`,
+      value: `¥${Number(totalCost).toFixed(2)}`,
       hint: '按价格快照估算',
       icon: '¥',
       chip: 'mk-chip-aliyun',
@@ -219,7 +219,7 @@ onMounted(load);
                       background: DONUT_COLORS[costDonut.groups.indexOf(g) % DONUT_COLORS.length],
                     }"
                   />
-                  {{ g.label }} · ¥{{ g.value.toFixed(2) }}
+                  {{ g.label }} · ¥{{ Number(g.value).toFixed(2) }}
                 </span>
               </div>
             </div>
