@@ -217,6 +217,47 @@ export interface ModelApprovalPage {
   nextCursor?: string;
 }
 
+export type QuotaScopeType = 'USER' | 'PROJECT';
+export type QuotaMetric = 'TOKENS' | 'REQUESTS';
+export type QuotaPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY';
+export type QuotaRuleStatus = 'ACTIVE' | 'DISABLED';
+export type QuotaLevel = 'NORMAL' | 'WARNING' | 'EXCEEDED';
+
+export interface QuotaRuleView {
+  id: string;
+  scopeType: QuotaScopeType;
+  scopeId: string;
+  /** Display name of the user / project the rule applies to. */
+  scopeName?: string;
+  /** Username for USER scope, project code for PROJECT scope. */
+  scopeTag?: string;
+  metric: QuotaMetric;
+  period: QuotaPeriod;
+  limitValue: number;
+  warnPercent: number;
+  status: QuotaRuleStatus;
+  /** Current-period usage of the metric. */
+  used: number;
+  /** used / limit in percent. */
+  usedPct: number;
+  level: QuotaLevel;
+  windowFrom: string;
+  windowTo: string;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+export interface UpsertQuotaRuleRequest {
+  scopeType: QuotaScopeType;
+  scopeId: string;
+  metric: QuotaMetric;
+  period: QuotaPeriod;
+  limitValue: number;
+  warnPercent?: number;
+  status?: QuotaRuleStatus;
+}
+
 export interface UsageCost {
   upstreamPaid: string;
   gatewayObserved: string;
