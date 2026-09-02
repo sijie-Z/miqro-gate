@@ -231,6 +231,10 @@ async function mockApi(page: Page, admin = false) {
       }),
     }),
   );
+  // Budget panel on the cost report page (G8.2): empty by default.
+  await page.route('**/api/v1/admin/budgets*', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+  );
   await page.route('**/api/v1/admin/teams', (route) =>
     route.fulfill({
       status: 200,
