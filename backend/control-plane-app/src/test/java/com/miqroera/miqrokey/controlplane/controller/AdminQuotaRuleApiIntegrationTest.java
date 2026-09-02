@@ -6,6 +6,7 @@ import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.LoginRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import com.miqroera.miqrokey.domain.service.PasswordHasher;
+import com.miqroera.miqrokey.controlplane.service.AlertEvaluator;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,6 +66,8 @@ class AdminQuotaRuleApiIntegrationTest {
     NamedParameterJdbcTemplate jdbc;
     @Autowired
     PasswordHasher passwordHasher;
+    @Autowired
+    AlertEvaluator alertEvaluator;
 
     private Cookie adminSession;
     private Cookie adminCsrf;
@@ -226,6 +229,75 @@ class AdminQuotaRuleApiIntegrationTest {
         assertThat(actions).containsExactly("QUOTA_RULE_CREATE", "QUOTA_RULE_UPDATE", "QUOTA_RULE_DELETE");
     }
 
+    @Test
+    @DisplayName("QUOTA_THRESHOLD rules fire once per reset window when the watermark crosses the threshold")
+    void quotaAlertFiresOncePerWindow() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant();
+        UUID keyId = fx.createKeyViaAdmin();
+        fx.insertUsage(keyId, 600L, 400L); // 1000 tokens in the current DAILY window
+
+        MvcResult put = putQuota(quotaBody("USER", adminUserId, "TOKENS", "DAILY", 1000, 80)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.usedPct").value(100.0)).andReturn();
+        String ruleId = (String) objectMapper.readValue(put.getResponse().getContentAsString(), Map.class).get("id");
+
+        // Nothing evaluates before the alert rule exists.
+        alertEvaluator.evaluateAll();
+        assertThat(eventCount()).isZero();
+
+        mockMvc.perform(post("/api/v1/admin/alert-rules").cookie(adminSession, adminCsrf)
+                .header("X-CSRF-Token", adminCsrfToken).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"quota-fire","type":"QUOTA_THRESHOLD","threshold":80,
+                         "scopeJson":"{\\"quotaRuleId\\":\\"%s\\"}"}
+                        """.formatted(ruleId))).andExpect(status().isOk());
+
+        // Watermark 100% >= 80 -> one event for the current window.
+        alertEvaluator.evaluateAll();
+        assertThat(eventCount()).isEqualTo(1);
+        java.math.BigDecimal value = jdbc.queryForObject("SELECT value FROM alert_events", new MapSqlParameterSource(),
+                java.math.BigDecimal.class);
+        assertThat(value).isEqualByComparingTo("100");
+
+        // Same window -> deduplicated, still exactly one event.
+        alertEvaluator.evaluateAll();
+        assertThat(eventCount()).isEqualTo(1);
+
+        // Disabling the quota rule stops new alerts (the event stays).
+        putQuota(quotaBody("USER", adminUserId, "TOKENS", "DAILY", 1000, 80, "DISABLED")).andExpect(status().isOk());
+        alertEvaluator.evaluateAll();
+        assertThat(eventCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("QUOTA_THRESHOLD rules require a scope pointing at an existing tenant quota rule")
+    void quotaAlertScopeValidation() throws Exception {
+        mockMvc.perform(post("/api/v1/admin/alert-rules").cookie(adminSession, adminCsrf)
+                .header("X-CSRF-Token", adminCsrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"no-scope\",\"type\":\"QUOTA_THRESHOLD\",\"threshold\":80}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("SCOPE_INVALID"));
+
+        mockMvc.perform(post("/api/v1/admin/alert-rules").cookie(adminSession, adminCsrf)
+                .header("X-CSRF-Token", adminCsrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"bad-scope\",\"type\":\"QUOTA_THRESHOLD\",\"threshold\":80,"
+                        + "\"scopeJson\":\"{\\\"quotaRuleId\\\":\\\"" + UUID.randomUUID() + "\\\"}\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("SCOPE_INVALID"));
+
+        // An existing same-tenant quota rule passes.
+        MvcResult put = putQuota(quotaBody("USER", adminUserId, "TOKENS", "MONTHLY", 10000, 80))
+                .andExpect(status().isOk()).andReturn();
+        String ruleId = (String) objectMapper.readValue(put.getResponse().getContentAsString(), Map.class).get("id");
+        mockMvc.perform(post("/api/v1/admin/alert-rules").cookie(adminSession, adminCsrf)
+                .header("X-CSRF-Token", adminCsrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"ok-scope\",\"type\":\"QUOTA_THRESHOLD\",\"threshold\":80,"
+                        + "\"scopeJson\":\"{\\\"quotaRuleId\\\":\\\"" + ruleId + "\\\"}\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.scopeJson").isNotEmpty());
+    }
+
+    private long eventCount() {
+        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM alert_events", new MapSqlParameterSource(), Long.class);
+        return count != null ? count : 0;
+    }
+
     // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
@@ -277,11 +349,12 @@ class AdminQuotaRuleApiIntegrationTest {
         UUID keyId;
 
         void reset() {
-            for (String table : List.of("usage_event", "price_snapshot", "quota_rules", "virtual_key_models",
-                    "key_project_binding", "model_approval", "virtual_keys", "project_provider_grant_models",
-                    "project_provider_grants", "upstream_credential_versions", "upstream_credentials", "plan_seats",
-                    "upstream_subscriptions", "project_memberships", "projects", "provider_products", "providers",
-                    "admin_audit_events", "user_sessions", "users")) {
+            for (String table : List.of("webhook_delivery_attempts", "alert_events", "alert_rules", "usage_event",
+                    "price_snapshot", "quota_rules", "virtual_key_models", "key_project_binding", "model_approval",
+                    "virtual_keys", "project_provider_grant_models", "project_provider_grants",
+                    "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
+                    "project_memberships", "projects", "provider_products", "providers", "admin_audit_events",
+                    "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {
