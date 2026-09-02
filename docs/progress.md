@@ -19,6 +19,39 @@
 - 合并后 develop 全量后端 `verify -P integration` BUILD SUCCESS；前端 vitest 67/67。
 - CodeRabbit review：PR #112 的 Major（Agent 凭证共享）已修复；其余 PR 无 actionable 问题。
 
+## 2026-09-02 会话交接要点（新 session 必读，含踩坑记录）
+
+**操作环境（Windows）**
+- Java：每次 Maven 命令前 `export JAVA_HOME="D:\programming\jdk-21.0.12.1+1" && export PATH="$JAVA_HOME/bin:$PATH"`；仓库根执行 `./mvnw.cmd`（backend/pom.xml 是聚合 POM，命令在仓库根跑；模块级用 `-pl control-plane-app -am`）
+- 网络：GitHub 直连时断时续——失败时用 `HTTPS_PROXY=http://127.0.0.1:7897 HTTP_PROXY=http://127.0.0.1:7897 git push/gh ...`（一次性环境变量，不改 git 配置）
+- Git：当前习惯 = 每个 Goal 开 `goal/<name>` 分支（从 develop），验证后 commit → push 分支 → `gh pr create --base develop` → 等 CI 全绿 + CodeRabbit 无未处理问题 → 用户授权后 `gh pr merge --squash --delete-branch`；禁止直接 push develop 业务实现、禁 force push
+- 前端验证：`cd frontend && npm run lint/typecheck/test/build`；vitest 在 frontend 目录跑（`@` 别名只在 frontend 配置）
+- e2e：`npx playwright test` 前先 build；**旧 vite preview 进程会复用旧 dist**——若页面行为异常先查 `netstat -ano | grep 4173` 并杀 LISTENING 进程
+- 后端格式：新写 Java 文件后全量 verify 前先跑 `./mvnw.cmd spotless:apply --batch-mode -pl control-plane-app,persistence-postgres,domain -am`（否则 verify 的 spotless:check 会挂）
+- 集成测试：`-P integration` profile + `-Dtest=XxxTest -Dsurefire.failIfNoSpecifiedTests=false`；Testcontainers 需 Docker Desktop
+- 已知 flaky：`HmacVirtualKeyProviderTest.shouldFollowFormat`（随机边界，重跑即可）、`RouteSnapshotRefreshNotifierTest`（连接数问题已修复：测试基类池 10 + 容器 max_connections=200）
+
+**CI / 机器人审查状态**
+- CI（ci.yml）：pull_request 已覆盖 main+develop；Backend unit/integration、Frontend、e2e、Compose、Security gate、CodeQL 全在 PR 上跑
+- CodeRabbit：.coderabbit.yaml 已配（base 含 develop）；OSS 仓库首次 review 需所有者在 coderabbit.ai 批准；限流时用 `@coderabbitai review` 评论错开触发；CodeRabbit 的 inline comment 用 `gh api repos/sijie-Z/miqro-gate/pulls/<n>/comments` 查
+- SonarCloud：workflow 已备（sonarqube.yml），无 SONAR_TOKEN 时自动跳过；用户想装时按 docs/ai-code-review-bots.md 步骤（需用户创建项目提供 projectKey/organization）
+- Qodo/Ellipsis/Bito：用户尚未安装（GitHub Marketplace App，需用户操作）
+
+**文档资产**
+- `docs/tencent-ai-gateway-study/`：腾讯 AI 网关 30 篇研究（README 总结 + raw 底稿）
+- `docs/ai-gateway-comparison.md`、`docs/tencent-ai-gateway-mapping.md`：早前对照
+- `docs/ai-code-review-bots.md`：机器人安装指南
+- `docs/platform-middleware-roadmap.md`：P0–P3 规划 + P2.1 形态调研存档
+- 契约事实源：api-contract.md / database-schema.md / configuration-reference.md（API/表/配置变更必须同步）
+
+**下一步候选**（用户定方向后开 Goal 分支）：
+1. MCP 两级访问控制（Server + Tool 级 ACL，对齐腾讯文档 15）——补 MCP Tools 授权闭环，纯元数据
+2. 默认配额模板（创建时快照复制语义，对齐腾讯文档 22）——可借鉴到预算
+3. MCP 路由规则 / Tools 分组 / 重试熔断护栏（腾讯 10/17/12/13）
+4. 阿里云 Higress 文档体系系统对照（用户最初要求两家都看）
+
+**设计原则红线**（不可变决策）：单客户私有化、网关透明代理不改写 JSON 不读正文、1:1 绑定不跨供应商不负载均衡、不自动故障切换（首字节前最多安全重试一次）、不限流不因预算阻断（只 Webhook 告警）、凭证 AES-GCM、Key 摘要存储、目录签名、宽松许可证。
+
 ## 2026-09-02 腾讯 AI 网关 30 篇文档研究（已完成入库）
 
 - **入库**：`docs/tencent-ai-gateway-study/`（README.md 总结 + raw/ 28 篇纯文本底稿），commit 87a20b0/f3fa80a，develop 已推送。
