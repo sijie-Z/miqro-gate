@@ -24,6 +24,20 @@ export type UsageGroupBy = 'project' | 'virtual_key' | 'cache_level' | 'day';
 
 export type BudgetLevel = 'NORMAL' | 'WARNING' | 'EXCEEDED';
 
+export interface SkillView {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  author?: string;
+  license?: string;
+  tags: string[];
+  contentSha256: string;
+  contentBytes: number;
+  status: string;
+  createdAt: string;
+}
+
 export interface BudgetView {
   projectId: string;
   projectCode: string;

@@ -148,3 +148,35 @@ export function put<T>(path: string, body?: unknown): Promise<T> {
 export function del<T>(path: string): Promise<T> {
   return request<T>(path, { method: 'DELETE' });
 }
+
+/** Fetches a binary resource (e.g. skill package zip) as a Blob. */
+export async function downloadBlob(path: string): Promise<Blob> {
+  const response = await fetch(path, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { Accept: 'application/zip' },
+  });
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return response.blob();
+}
+
+/** Uploads a raw binary body (e.g. skill package zip) with CSRF protection. */
+export async function uploadBytes<T>(path: string, blob: Blob): Promise<T> {
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  const csrf = readCookie(CSRF_COOKIE_NAME);
+  if (csrf) {
+    headers['X-CSRF-Token'] = csrf;
+  }
+  const response = await fetch(path, {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: blob,
+  });
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return (await response.json()) as T;
+}

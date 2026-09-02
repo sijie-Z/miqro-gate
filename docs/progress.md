@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `P2.2/P2.3`（SkillHub 后端：技能目录 + 下载授权门禁）
-- Goal status: `IN_PROGRESS`（后端完成并验证，前端 P2.4 待做）
+- Current goal: `P2.4`（SkillHub 前端：浏览页 + 管理页，P2 收官）
+- Goal status: `IN_PROGRESS`（实现与验证完成，待 PR 合并）
 - Last updated: `2026-09-01 CST`
 - Branch: `goal/g7.2-price-catalog`
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
@@ -223,6 +223,13 @@
 - **验证**：`SkillZipValidatorTest` 10/10（合法/BOM/缺 SKILL.md/名不匹配/保留词/description/无 frontmatter/多根/非 zip/超限）；`SkillApiIntegrationTest` 4/4（上传解析+可见性+匿名 401+校验码、下载门禁字节一致+成员/非成员 403/管理员、归档隐藏+重传恢复、授权 scope 校验）；全量后端 `verify -P integration` **BUILD SUCCESS**（全模块 1041 = 1027 + 14）。
 - **排障记录**：① archive 曾走 upsert 但 upsert 的 ON CONFLICT 硬编码 `status='ACTIVE'` 把归档覆盖回去（真实缺陷，加独立 `archive` 方法）；② 归档后详情/下载仍 200（目录面只暴露 ACTIVE，`findActive` 门禁）；③ 非 zip 垃圾字节被误判「空包」（<22 字节=必然无效 zip，≥22 无条目=真空包）。
 - **后续**：P2.4 前端（SkillHub 浏览页 + 管理上传页，下一轮）。
+
+## P2.4 — SkillHub 前端（浏览 + 管理，P2 SkillHub 收官）
+
+- **交付**：`SkillHubView`（全员浏览页：技能卡片网格——名称/版本/描述/标签/作者/许可证/大小 + 下载按钮，403 时友好提示）；`AdminSkillsView`（管理页：上传表单——zip 文件 + 语义化版本、技能表格——状态徽标/授权/归档、授权弹窗——项目/团队多选整体替换）；http 层新增 `downloadBlob`/`uploadBytes`（Blob 下载 + 原始字节上传带 CSRF）；路由/导航（常规组 SkillHub + 运营组 SkillHub 管理）。
+- **验证**：vitest 56/56（+8：浏览渲染/下载调用/403 提示/空态；管理表格/上传参数/归档确认/授权保存）；lint/typecheck/build 全 PASS。
+- **gitflow**：本 Goal 起严格按 git-workflow.md 在 `goal/` 分支开发（`goal/p2.4-skillhub-frontend`），验证后 push 分支，合并由用户在 GitHub 执行。
+- **后续**：P2 SkillHub 全部完成 → P3.1 Agent 管理（阿里 Agent 拓扑）。
 
 ## 待办需求（2026-08-28 leader 指示，细节待补充，暂不实施）
 
