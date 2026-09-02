@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `G6.5`（发布就绪收尾）— `DONE`（粗版发布候选基线；正式 tag/版本号待用户授权）
-- Goal status: `DONE`（本会话 2026-09-02 完成；下一方向待用户定：正式规划已闭环，增量候选见下）
+- Current goal: `模型申请审批流`（原始设计文档 §13 P6.1 / §8.2）— `DONE`
+- Goal status: `DONE`（本会话 2026-09-02 完成，PR 待合并；方向由原始设计文档定，下一候选仍待用户）
 - Last updated: `2026-09-02 CST`
-- Branch: `goal/g6.5-release-candidate`（验证后 push + PR，勿直推 develop）
+- Branch: `goal/model-approval-workflow`（验证后 push + PR，勿直推 develop）
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
 
 ## G6.5 — 发布就绪收尾（2026-09-02，DONE；粗版发布候选基线）
@@ -28,6 +28,17 @@
 - **文档契约缺口（记录为延期项）**：api-contract §8 / document-map §3 要求「Control Plane 生成 OpenAPI 3.1 + CI 破坏性变更检查」——仓库无 openapi 生成配置与产物，尚未实现；api-contract.md 为唯一事实源。待专项 Goal 或正式发布前补。
 - **Windows 踩坑（记录）**：`npm run lint`（eslint --fix）会把 CRLF 文件整批重写为 LF → 23 个文件出现 EOL-only M（`git diff` 为空）；跑 lint 后先 `git restore` 或区分内容 diff，勿误提交。
 - **剩余风险/待办**：代码 0.1.0-SNAPSHOT 从未 tag——正式版本号 + tag 待用户授权（git-workflow §9）；23 产品真实凭证全部 `WAITING_FOR_CREDENTIAL`；G6.5 后 vitest 基线修正为 **73/73**（非 67）；下一步增量候选（MCP 两级 ACL / 默认配额模板 / MCP 路由+Tools 护栏 / 阿里 Higress 对照）待用户定方向，立项时先写入 implementation-plan。
+
+## 模型申请审批流 — 原始设计文档 §13 P6.1 / §8.2（2026-09-02，DONE）
+
+- **背景与方向**：G6.5 收尾后用户指示「以项目本身的规划文档定方向」——对照工作区 8-14 AI 组设计交付包（架构设计报告 + 开发设计文档），模型申请审批流是唯一「表已备（V4 `model_approval`）、文档完整（§8.2/§5.6/§13 P6.1）、无外部依赖」的缺口。用户拍板开工。
+- **后端**：V22 迁移（`model_approval.reason` 申请理由）；domain record/Repository/Impl 补 reason 列 + `findAllByRequestedBy` + keySet 游标 `findPage`（`(created_at,id) DESC`，null 参数显式 `::varchar/::timestamptz/::uuid` cast——PG 对 `? IS NULL` + 行比较混用的 null 参数无法推断类型，G8.3 jsonb cast 同族坑）；`ModelApprovalService`（提交校验 MODEL_ALREADY_AVAILABLE/DUPLICATE_PENDING/KEY_NOT_ACTIVE/IDOR 404；白名单 `ApprovalProperties(miqrokey.approval.whitelist-models)` 自动批准；approve 生效 = 写 `virtual_key_models`（申请 Key）+ `project_provider_grant_models` ON CONFLICT（若缺失；网关按 `key.models ∩ grant.models` 放行两处缺一不可）+ `routeRefreshPublisher.publishChanged()` 即时生效；reject 留痕；乐观锁并发评审 409 ALREADY_REVIEWED）；`MeModelApprovalController`（POST/GET `/api/v1/me/model-approvals`）+ `AdminModelApprovalController`（GET 队列 status/size/before 游标、POST `/{id}/approve|reject`，SYSTEM_ADMIN deny-by-default）；审计 `MODEL_APPROVAL_SUBMITTED/APPROVED/REJECTED`（auto-approve 双事件留痕）。
+- **前端**：`ModelApprovalsView`（我的申请 + 内联申请面板：Key 下拉/模型/理由）+ `AdminModelApprovalsView`（审批中心：状态筛选/通过·驳回内联评审面板带意见/加载更多游标）；api/types/router/导航（常规组「模型申请」EditIcon + 组织组「审批中心」CheckCircleIcon）。
+- **验证（全部真实 PASS）**：`ModelApprovalApiIntegrationTest` 10/10（闭环：提交→队列→approve→**JdbcRouteSnapshotLoader 快照断言** grant/key 双表含新模型；grant 内模型同步不重写 grant；白名单 auto-approve 即时生效；reject 不动模型；IDOR 404/403/401；校验矩阵；KEY_NOT_ACTIVE/GRANT_INACTIVE；keySet 分页无重叠 + 非法游标 400）；后端全量 `verify -P integration` **BUILD SUCCESS 2110 tests / 0 failures**（1051+10 等全模块；1 次已知 flaky `HmacVirtualKeyProviderTest.shouldFollowFormat` 随机边界单独重跑 33/33 过）；前端 vitest **18 文件 81/81**（+8）、typecheck/build PASS；Playwright **33/33**（+approval-center + model-approvals 两页 baseline 覆盖）。
+- **前端实现经验（记录）**：inline `t-dialog`（v-model:visible + 表单）在 jsdom 下 teleport 内容不挂载（TDialog 走 popup 状态机，与 TPopup 同族时序问题）——vitest 对带输入交互的表单统一用**内联展开面板**（KeysView/AdminConfigs 同款），确认类对话框走 DialogPlugin（document 级可查）；表格操作列用 `<template #colKey>` slot 而非 `h('t-button')` 渲染函数；图标导出名以 `tdesign-icons-vue-next/esm/icons.d.ts` 为准（`EditPenIcon` 不存在，用 `EditIcon`）。
+- **文档**：api-contract §4.6（用户申请/白名单/审计事件）与 §5.18（审批队列/通过语义/游标）、§4.7 错误码表补 6 个新 code；database-schema `model_approval` 段（V22 + 生效双表语义）；configuration-reference `MIQROKEY_APPROVAL_WHITELIST_MODELS`；CLAUDE.md 不动。
+- **边界/取舍（已记录）**：审批通过把模型写入 Grant 模型集（影响同 Grant 其它 Key 的未来创建继承——仓库授权模型的最小粒度即 Grant，Key 现有快照不受影响）；白名单自动批准 reviewedBy=null（留痕由审计双事件 + reviewNote 承担）；Webhook 通知按文档「预留」未实现；model_access V7 维持未消费（以 V4 APPROVED 行为放行源）。
+- **gitflow**：分支 `goal/model-approval-workflow`（基于 df126d4/#117 合并后 develop），验证后 push + PR。
 
 ## 2026-09-02 合并记录（PR #110–#116 全部合入 develop）
 

@@ -250,7 +250,32 @@
 - `usageMissing=true` 表示上游未返回 usage（如异常中断）；该行仍入账但用量为 0，便于排查。
 - `providerRequestId` 在 tenant 内唯一（幂等写，重复 flush 不双计）。
 
-### 4.6 错误码
+### 4.6 模型申请（审批流）`POST/GET /api/v1/me/model-approvals`
+
+用户在 Virtual Key 上申请授权范围外的模型；管理员在 `5.18` 审批队列处理。
+
+- `POST /api/v1/me/model-approvals`：`{ "virtualKeyId", "modelId", "reason"? }` → 201 `ModelApprovalView`。
+  - `modelId` 精确匹配（trim、≤ 128、禁控制字符）；理由 ≤ 500。
+  - 模型已在 Key 上 → `400 MODEL_ALREADY_AVAILABLE`；同 Key 同模型已有 PENDING → `409 DUPLICATE_PENDING`；Key 非本人/不存在 → 通用 `404 KEY_NOT_FOUND`（防枚举）；Key 非 ACTIVE → `409 KEY_NOT_ACTIVE`。
+  - 白名单模型（`miqrokey.approval.whitelist-models`）提交即自动 `APPROVED` 并立即生效，`reviewNote="Auto-approved: model on the approval whitelist"`、`reviewedBy=null`；仍写入 SUBMITTED + APPROVED 两条审计。
+- `GET /api/v1/me/model-approvals`：本人全部申请（时间倒序）。
+
+`ModelApprovalView`（安全视图，仅掩码/显示名，无 Key 明文）：
+
+```json
+{
+  "id": "0190...", "virtualKeyId": "0190...", "keyName": "claude-code-main",
+  "keyDisplay": "mqk_live_…8f2a", "projectTag": "core-ai",
+  "modelId": "deepseek-v4-flash", "reason": "编码需要", "status": "PENDING",
+  "requesterId": "0190...", "requesterName": "张三",
+  "reviewNote": null, "reviewedByName": null,
+  "createdAt": "2026-09-02T00:00:00Z", "updatedAt": "2026-09-02T00:00:00Z"
+}
+```
+
+审计事件：`MODEL_APPROVAL_SUBMITTED` / `MODEL_APPROVAL_APPROVED` / `MODEL_APPROVAL_REJECTED`（target=MODEL_APPROVAL，summary 含 virtualKeyId/modelId，自动批准含 `"autoApproved":true`）。
+
+### 4.7 错误码
 
 | code | HTTP | 场景 |
 |---|---|---|
@@ -261,6 +286,11 @@
 | `GRANT_INVALID` | 400 | 授权不属于该项目或产品 |
 | `GRANT_INACTIVE` | 409 | 授权已停用 |
 | `MODEL_NOT_GRANTED` | 400 | 请求的模型超出授权范围 |
+| `MODEL_ALREADY_AVAILABLE` | 400 | 模型已在该 Key 上（无需申请） |
+| `MODEL_INVALID` | 400 | 模型 ID 格式非法（空白/控制字符/超长） |
+| `DUPLICATE_PENDING` | 409 | 同 Key 同模型已有待审批申请 |
+| `KEY_NOT_ACTIVE` | 409 | Key 已停用/吊销，不能申请或审批生效 |
+| `ALREADY_REVIEWED` | 409 | 申请已被审批（乐观锁，重复审批被拒） |
 | `KEY_NOT_FOUND` | 404 | Key 不存在或不属于当前用户 |
 | `KEY_NOT_ROTATABLE` | 409 | 仅 ACTIVE 可轮换 |
 | `KEY_NOT_REVOCABLE` | 409 | 该状态不可吊销 |
@@ -683,6 +713,19 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 
 - `toolName` 规则：小写字母开头 snake_case（`TOOL_NAME_INVALID` 400）；`path` 必须以 `/` 开头（`TOOL_PATH_INVALID` 400）；同服务重名 `409 TOOL_NAME_TAKEN`；服务不存在 `404 MCP_SERVICE_NOT_FOUND`
 - **错误码**：`TOOL_NOT_FOUND`（404）、`TOOL_NAME_TAKEN`（409）、`TOOL_STATUS_UNCHANGED`（409）、`TOOL_STATUS_INVALID`（400）、`TOOL_NAME_INVALID`（400）、`TOOL_PATH_INVALID`（400）
+
+### 5.18 模型审批队列（原始设计文档 §8.2，SYSTEM_ADMIN-only）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/model-approvals?status=&size=&before=` | 审批队列（keySet 游标分页） |
+| `POST /api/v1/admin/model-approvals/{id}/approve` | 通过（`{ "reviewNote"? }`）→ 生效 |
+| `POST /api/v1/admin/model-approvals/{id}/reject` | 驳回（`{ "reviewNote"? }`） |
+
+- `status` ∈ `PENDING\|APPROVED\|REJECTED`，缺省返回全部；`size` 默认 20、上限 100；`before` 为上一页 `nextCursor`（不透明，编码 `(created_at, id)`；非法游标 `400 PARAM_INVALID`）。倒序返回 `{ "items": [ModelApprovalView], "nextCursor" }`。
+- **通过语义**：写入 `virtual_key_models`（申请 Key）+ 若模型不在 Grant 中先写入 `project_provider_grant_models`（网关按 `key.models ∩ grant.models` 放行，两处缺一不可），随后**立即**触发路由快照刷新（不等 30s 定时）。同 Grant 其它 Key 不受影响（各自 Key 快照独立）。
+- 仅 PENDING 可审批：重复审批 `409 ALREADY_REVIEWED`（乐观锁，并发评审只有一个成功）；Key 已吊销/停用 → `409 KEY_NOT_ACTIVE`；Grant 已停用 → `409 GRANT_INACTIVE`；不存在 → `404 APPROVAL_NOT_FOUND`。
+- 审批/驳回写 `MODEL_APPROVAL_APPROVED` / `MODEL_APPROVAL_REJECTED` 审计（含 reviewNote 长度 ≤ 500 校验）。
 
 ## 6. 导出与对账任务
 
