@@ -643,6 +643,19 @@
 
 **错误码**：`SERVICE_NOT_FOUND`（404）、`SERVICE_NAME_TAKEN`（409）、`SERVICE_ALREADY_DISABLED`（409）、`BASE_URL_INVALID`（400）。
 
+### 5.15 全局配置中心（P3.3）
+
+网关侧配置中心：分组键值条目，管理员维护，乐观 upsert。**仅限非机密配置**——机密走环境变量/加密凭证体系，不得写入此目录。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/configs?group` | 全部或按分组列出 |
+| `PUT /api/v1/admin/configs` | 创建/更新：`{ "group", "key", "value", "description"? }`（按 `(group, key)` upsert） |
+| `DELETE /api/v1/admin/configs/{group}/{key}` | 删除（`204`） |
+
+- 名称规则：`[a-zA-Z][a-zA-Z0-9._-]{0,127}`（`CONFIG_NAME_INVALID` 400）；值必填（`CONFIG_VALUE_REQUIRED` 400）
+- 错误码：`CONFIG_NOT_FOUND`（404）、`CONFIG_NAME_INVALID`（400）、`CONFIG_VALUE_REQUIRED`（400）
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

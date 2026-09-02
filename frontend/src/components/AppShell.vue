@@ -18,6 +18,7 @@ import {
   RobotIcon,
   SecuredIcon,
   ServerIcon,
+  SettingIcon,
   ShopIcon,
   UserIcon,
   UsergroupCircleIcon,
@@ -69,6 +70,7 @@ const opsNav: NavItem[] = [
   { name: 'skillhub', label: 'SkillHub 管理', icon: AppIcon },
   { name: 'agents', label: 'Agents', icon: RobotIcon },
   { name: 'services', label: '服务管理', icon: ServerIcon },
+  { name: 'configs', label: '全局配置', icon: SettingIcon },
   { name: 'alert-rules', label: 'Alert Rules', icon: ErrorCircleIcon },
   { name: 'audit', label: 'Audit', icon: FilePasteIcon },
 ];

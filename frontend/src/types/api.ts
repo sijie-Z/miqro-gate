@@ -60,6 +60,17 @@ export interface InternalServiceView {
   createdAt: string;
 }
 
+export interface ConfigEntryView {
+  id: string;
+  groupName: string;
+  key: string;
+  value: string;
+  description?: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface BudgetView {
   projectId: string;
   projectCode: string;

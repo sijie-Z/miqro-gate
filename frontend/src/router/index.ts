@@ -150,6 +150,12 @@ const router = createRouter({
           meta: adminMeta('服务管理'),
         },
         {
+          path: 'configs',
+          name: 'configs',
+          component: () => import('@/views/AdminConfigsView.vue'),
+          meta: adminMeta('全局配置'),
+        },
+        {
           path: 'webhooks',
           name: 'webhooks',
           component: () => import('@/views/AdminWebhooksView.vue'),
