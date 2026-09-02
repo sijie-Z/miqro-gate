@@ -60,6 +60,10 @@ public class AdminAgentService {
         if (!credential.tenantId().equals(tenantId) || credential.status() != CredentialStatus.ACTIVE) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "CREDENTIAL_NOT_FOUND", "凭证不存在或未启用。");
         }
+        if (agentRepository.existsByCredentialId(tenantId, credentialId)) {
+            throw new ApiException(HttpStatus.CONFLICT, "AGENT_CREDENTIAL_TAKEN",
+                    "该凭证已被其他 Agent 绑定（一个凭证只支持一个 Agent，保证按 Agent 用量可区分）。");
+        }
         Agent agent = new Agent(UUID.randomUUID(), tenantId, name, description, credentialId, "ACTIVE", 0, adminId,
                 Instant.now(), Instant.now());
         try {
