@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `P0–P3 全部合并完成`（2026-09-02：PR #110–#116 全部 squash 合入 develop）
-- Goal status: `DONE`（P 计划收官；develop 全量验证 BUILD SUCCESS）
+- Current goal: `checkpoint`（P0–P3 已合并收官；腾讯 AI 网关 30 篇文档研究已入库）
+- Goal status: `IN_PROGRESS`（下一步候选见下，待用户定方向）
 - Last updated: `2026-09-02 CST`
-- Branch: `develop`
+- Branch: `develop`（与 origin 同步，工作区干净，无未提交改动）
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
 
 ## 2026-09-02 合并记录（PR #110–#116 全部合入 develop）
@@ -18,6 +18,12 @@
 - 合并冲突处理：多个 PR 同改前端公共文件（api/types/router/AppShell）且历史分支互带对方文件，逐个分支 `merge origin/develop` 手动解决（Agent 文件取 develop 侧保留 CodeRabbit 修复；各 PR 自身新增段保留）。
 - 合并后 develop 全量后端 `verify -P integration` BUILD SUCCESS；前端 vitest 67/67。
 - CodeRabbit review：PR #112 的 Major（Agent 凭证共享）已修复；其余 PR 无 actionable 问题。
+
+## 2026-09-02 腾讯 AI 网关 30 篇文档研究（已完成入库）
+
+- **入库**：`docs/tencent-ai-gateway-study/`（README.md 总结 + raw/ 28 篇纯文本底稿），commit 87a20b0/f3fa80a，develop 已推送。
+- **结论**：A 类 15 项元数据级设计可直接借鉴（MCP 两级访问控制、消费者默认配额快照复制语义、Agent 服务与入口分离、Tools 版本/重试/熔断、模型探测等）；B 类 4 项需读正文（参数改写/流量镜像/脱敏/包体采集）与「不读正文」冲突仅对照；架构核对方向正确。
+- **下一步候选**（待用户定方向）：1) MCP 两级访问控制（补 Tools 授权闭环）；2) 默认配额模板（快照复制语义）；3) MCP 路由规则/Tools 分组/重试熔断护栏；4) 阿里云 Higress 文档体系系统对照。
 
 ## P0–P3 里程碑（2026-09-01 达成，2026-09-02 合并）
 
