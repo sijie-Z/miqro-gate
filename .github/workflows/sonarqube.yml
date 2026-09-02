@@ -15,6 +15,9 @@ jobs:
     name: SonarCloud analysis
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Skip until the owner configures the SONAR_TOKEN secret (see
+    # docs/ai-code-review-bots.md §1); an empty secret would fail every PR.
+    if: ${{ secrets.SONAR_TOKEN != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
