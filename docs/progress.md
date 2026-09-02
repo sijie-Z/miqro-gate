@@ -6,11 +6,28 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `checkpoint`（P0–P3 已合并收官；腾讯 AI 网关 30 篇文档研究已入库）
-- Goal status: `IN_PROGRESS`（下一步候选见下，待用户定方向）
+- Current goal: `G6.5`（发布就绪收尾）— `DONE`（粗版发布候选基线；正式 tag/版本号待用户授权）
+- Goal status: `DONE`（本会话 2026-09-02 完成；下一方向待用户定：正式规划已闭环，增量候选见下）
 - Last updated: `2026-09-02 CST`
-- Branch: `develop`（与 origin 同步，工作区干净，无未提交改动）
+- Branch: `goal/g6.5-release-candidate`（验证后 push + PR，勿直推 develop）
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
+
+## G6.5 — 发布就绪收尾（2026-09-02，DONE；粗版发布候选基线）
+
+- **背景修正**：正式 Goal 序列（implementation-plan Phase 0–6）至此全部闭环——G6.1–G6.4 早已 DONE，G6.5（本 Goal）是唯一挂账；5 个「下一步候选」（MCP ACL/配额模板等）是腾讯研究建议，未正式立项。P0–P3（leader 蓝图线）已先行合入。用户定调：**先打粗版，后续功能逐步做大**——本 Goal 产出发布候选基线而非终版。
+- **CHANGELOG**：`[Unreleased]` 补齐 2026-08-29 → 09-02（G8.x 外部通道/预算告警、P2 SkillHub、P3 内部治理含 MCP、真实 DeepSeek 联调、腾讯 30 篇研究入库、发布状态）；`[0.1.0]` 归档段修正（Phase 6 标题改为 G6.1–G6.4、Phase 3 补 Aliyun 3 产品、计数 20→23、注明从未 tag）。
+- **release-checklist.md**：新增 §0「G6.5 执行盘点」表——逐项判定 ✅/⏳/➖ 并附依据；清单本体保持可复用。判定要点：供应商矩阵与团队 Plan 真实共享池 ⏳（真实凭证）；升级/回滚演练 ➖（无上一正式版本，首版建立基线）；无应用容器镜像（源码交付，➖）；§8 Go/No-Go ⏳（版本号与 tag 由用户授权）。
+- **发现并修复（合并残留真实缺陷）**：`AdminMcpServicesView.vue` 重复 `import type { McpServiceView }`（PR #116 冲突合并残留）→ vue/compiler-sfc 编译失败 → vitest 该 suite 持续红；develop 合并后无 CI 触发（ci.yml 只在 PR 上跑）故漏网，9-2 记录的「vitest 67/67」实际漏 1 failed suite。删重复行后 **vitest 16/16 文件、73/73**（73 与 P3.5 分支记录一致，67 应作废）。
+- **发现并修复（Secret 门禁违规）**：`docs/tencent-ai-gateway-study/raw/03-quickstart-mcp.md` 腾讯原文示例凭证（sk-5db73b…，标注"仅测试使用"）触发 check-secrets——打码 `sk-…REDACTED`（2 处），修复后 `secret scan ok`。
+- **验证矩阵（全部真实 PASS）**：
+  - 后端 `./mvnw.cmd -f backend/pom.xml verify -P integration` **BUILD SUCCESS**（11 模块、5:35）
+  - 前端 lint / typecheck PASS、vitest **16 文件 73/73**、production build PASS
+  - Playwright e2e **31/31**（preview 端口残留清理后）
+  - **SoakIntegrationTest 50 并发取证 PASS**（25.45s、0 上游错误、usage 全落库；临时 CONCURRENCY=50 实跑后还原为 8）
+  - `check-secrets` ok（修复后）；`check-sbom` **license gate ok（107 组件）**；`docker compose config` OK
+- **文档契约缺口（记录为延期项）**：api-contract §8 / document-map §3 要求「Control Plane 生成 OpenAPI 3.1 + CI 破坏性变更检查」——仓库无 openapi 生成配置与产物，尚未实现；api-contract.md 为唯一事实源。待专项 Goal 或正式发布前补。
+- **Windows 踩坑（记录）**：`npm run lint`（eslint --fix）会把 CRLF 文件整批重写为 LF → 23 个文件出现 EOL-only M（`git diff` 为空）；跑 lint 后先 `git restore` 或区分内容 diff，勿误提交。
+- **剩余风险/待办**：代码 0.1.0-SNAPSHOT 从未 tag——正式版本号 + tag 待用户授权（git-workflow §9）；23 产品真实凭证全部 `WAITING_FOR_CREDENTIAL`；G6.5 后 vitest 基线修正为 **73/73**（非 67）；下一步增量候选（MCP 两级 ACL / 默认配额模板 / MCP 路由+Tools 护栏 / 阿里 Higress 对照）待用户定方向，立项时先写入 implementation-plan。
 
 ## 2026-09-02 合并记录（PR #110–#116 全部合入 develop）
 
@@ -337,12 +354,10 @@
 - 真实供应商凭证尚未提供；不阻塞 Mock 与本地契约开发。
 - 本机 Docker Desktop 可用（`D:\programming\Docker_4.78.0`）；Compose config 本地 PASS，digest 门禁由 CI 复核。
 
-## Next Goal
+## Next Goal（历史遗留段——已于 2026-09-02 G6.5 会话完成，见文件顶部 Current State）
 
-- Goal ID: `G6.5`
-- Name: 发布就绪收尾（CHANGELOG、发布清单执行、最终全量验证）
-- Status: `NOT_STARTED`
-- Source: [`implementation-plan.md`](implementation-plan.md)（Phase 6 交付）
+- Goal ID: `G6.5` — 发布就绪收尾：**DONE**（2026-09-02；本段当时为 G6.x 时期写入，勿再按此执行）
+- 正式 Goal 序列（implementation-plan Phase 0–6）已全部闭环；后续增量候选与立项见文件顶部。
 
 ## G6.4 — Performance and soak（DONE）
 

@@ -2,6 +2,25 @@
 
 任何一项硬门禁未通过都不得标记正式版本。例外必须由客户负责人书面接受并记录范围、期限和补救计划。
 
+## 0. G6.5 执行盘点（2026-09-02）
+
+> G6.5（发布就绪收尾）按本清单逐项盘点。判定符号：✅ 已满足（附证据）；⏳ 条件未到（真实凭证/部署环境/发布负责人授权）；➖ 不适用（当前交付形态无此对象）。清单本体保持可复用，正式 Go/No-Go 前由发布负责人复核本表。
+
+| 门禁 | 判定 | 依据 / 条件 |
+|---|---|---|
+| §1 进度与文档一致性 | ✅ | 本 Goal 收尾时更新 progress.md；文档契约同步检查发现 1 项未实现（见下 OpenAPI） |
+| §2 构建与测试硬门禁 | ✅ | 2026-09-02 全量 `verify -P integration` BUILD SUCCESS + 前端 lint/typecheck/vitest/build/e2e + 50 并发浸泡取证（见 §2.1） |
+| §2.1 50 条并发流式容量验收 | ✅ | `SoakIntegrationTest` 并发提升至 50 本机实跑 PASS（真实 gateway + mock 上游 + PostgreSQL，0 上游错误 + 全部落库），跑后还原；长效 soak 命令见 operations-runbook §性能（需部署环境） |
+| §3 供应商矩阵 | ⏳ | 23 产品全部 IMPLEMENTED/`WAITING_FOR_CREDENTIAL`（真实凭证未提供，禁止 VERIFIED——保持如实状态） |
+| §3.2 团队 Plan 真实共享池验证 | ⏳ | 需 MiniMax/智谱/腾讯团队产品真实凭证与真实组织账号 |
+| §4.1 Flyway/升级回滚 | ✅/➖ | 从空库 V1–V21 Testcontainers 全建（CI 每 PR）；真实恢复演练 PASS（G6.2）；「上一正式版本升级」不适用——尚无已发布正式版本，首版发布时建立基线 |
+| §4.2 大表/分区 migration 评估 | ➖ | 单客户私有化、50 并发上限（CLAUDE.md §2），无生产数据量副本可评估；`usage_event` 分区保留策略见 database-schema §6 |
+| §5.5 镜像非 root/固定 digest | ➖/✅ | 当前交付 = 源码 + wrapper + Compose（无应用容器镜像，见 §7）；Compose 依赖镜像已按 digest 固定（postgres 17.6-alpine @sha256…） |
+| §6.1 告警已测试 | ✅/⏳ | 已测：Webhook 签名投递/去重/指数退避（G4.5）、备份 Webhook（G6.2）、usage 队列饱和 drop warn + 指标（G2.4）、预算水位 BUDGET_THRESHOLD（G8.3）；未实现为告警类型：usage 队列饱和/解析失败/供应商错误/Plan 同步/磁盘（G4.5 已知缺口，接入需数据源接线）→ 正式发布前按需补充 |
+| §7 交付物 | ✅/⏳/➖ | 源码/wrapper/锁文件/Compose/Secret 模板/.env.example/签名目录/文档全齐；OpenAPI 生成物未实现（api-contract §8 契约）；容器镜像/离线包（无镜像构建，源码交付形态不适用）；客户侧构建/恢复演练（无客户，➖） |
+| §8 Go/No-Go | ⏳ | 版本号与 tag 未定（代码 0.1.0-SNAPSHOT、无 tag）；由发布负责人（项目所有者）在发布节点签署 |
+| OpenAPI 3.1 生成 + CI 破坏性变更检查（api-contract §8 / document-map §3） | ⏳ | 仓库无 openapi 生成配置与产物；api-contract.md 为当前唯一事实源。列为 G6.5 发现的文档契约未实现项，待专项 Goal 或发布延期项 |
+
 ## 1. 范围与状态
 
 - [ ] `docs/progress.md` 与代码、测试、提交一致，目标 Goal 均为 `DONE`。
