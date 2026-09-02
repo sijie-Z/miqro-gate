@@ -6,11 +6,20 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `P3.5`（MCP Tools 管理：工具创建 + 逐个启停）
-- Goal status: `IN_PROGRESS`（实现与验证完成，待 PR 合并）
-- Last updated: `2026-09-01 CST`
-- Branch: `goal/p3.1-agent-management`
+- Current goal: `P0–P3 全部合并完成`（2026-09-02：PR #110–#116 全部 squash 合入 develop）
+- Goal status: `DONE`（P 计划收官；develop 全量验证 BUILD SUCCESS）
+- Last updated: `2026-09-02 CST`
+- Branch: `develop`
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
+
+## 2026-09-02 合并记录（PR #110–#116 全部合入 develop）
+
+- #110 Dependabot（codeql-action bump）、#111 SkillHub 前端、#112 Agent 管理、#113 服务管理、#114 全局配置、#115 MCP 服务、#116 MCP Tools —— 全部 squash merge + 删除远端分支。
+- 合并冲突处理：多个 PR 同改前端公共文件（api/types/router/AppShell）且历史分支互带对方文件，逐个分支 `merge origin/develop` 手动解决（Agent 文件取 develop 侧保留 CodeRabbit 修复；各 PR 自身新增段保留）。
+- 合并后 develop 全量后端 `verify -P integration` BUILD SUCCESS；前端 vitest 67/67。
+- CodeRabbit review：PR #112 的 Major（Agent 凭证共享）已修复；其余 PR 无 actionable 问题。
+
+## P0–P3 里程碑（2026-09-01 达成，2026-09-02 合并）
 
 ## Completed
 
