@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
+import com.miqroera.miqrokey.domain.repository.QuotaRuleRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -16,10 +17,11 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Alert rule management (G4.5/G8.3, {@code alert_rules} V12/V15): metric type,
- * threshold, dedupe window, an optional webhook endpoint (null = the alert is
- * only recorded as an event, not delivered) and a JSON scope
- * ({@code {"projectId": "…"}} for {@code BUDGET_THRESHOLD} rules).
+ * Alert rule management (G4.5/G8.3/quota-alerting, {@code alert_rules}
+ * V12/V15/V24): metric type, threshold, dedupe window, an optional webhook
+ * endpoint (null = the alert is only recorded as an event, not delivered) and a
+ * JSON scope ({@code {"projectId": "…"}} for {@code BUDGET_THRESHOLD} rules,
+ * {@code {"quotaRuleId": "…"}} for {@code QUOTA_THRESHOLD} rules).
  */
 @Service
 public class AlertRuleService {
@@ -28,10 +30,13 @@ public class AlertRuleService {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ProjectRepository projectRepository;
+    private final QuotaRuleRepository quotaRuleRepository;
 
-    public AlertRuleService(NamedParameterJdbcTemplate jdbc, ProjectRepository projectRepository) {
+    public AlertRuleService(NamedParameterJdbcTemplate jdbc, ProjectRepository projectRepository,
+            QuotaRuleRepository quotaRuleRepository) {
         this.jdbc = jdbc;
         this.projectRepository = projectRepository;
+        this.quotaRuleRepository = quotaRuleRepository;
     }
 
     public AlertRule create(UUID tenantId, String name, String type, BigDecimal threshold, int dedupeMinutes,
@@ -96,18 +101,28 @@ public class AlertRuleService {
 
     private static void validateType(String type) {
         if (!List.of("USAGE_MISSING_RATE", "UPSTREAM_ERROR_RATE", "BALANCE_UNAVAILABLE", "USAGE_SURGE",
-                "BUDGET_THRESHOLD").contains(type)) {
+                "BUDGET_THRESHOLD", "QUOTA_THRESHOLD").contains(type)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "ALERT_TYPE_INVALID",
                     "type must be one of USAGE_MISSING_RATE, UPSTREAM_ERROR_RATE, BALANCE_UNAVAILABLE, "
-                            + "USAGE_SURGE, BUDGET_THRESHOLD");
+                            + "USAGE_SURGE, BUDGET_THRESHOLD, QUOTA_THRESHOLD");
         }
     }
 
-    /** BUDGET_THRESHOLD rules require a scope pointing at an existing project. */
+    /**
+     * Scoped rule types must point at an existing same-tenant target:
+     * BUDGET_THRESHOLD → a project; QUOTA_THRESHOLD → a quota rule.
+     */
     private void validateScope(UUID tenantId, String type, String scopeJson) {
-        if (!"BUDGET_THRESHOLD".equals(type)) {
-            return;
+        switch (type) {
+            case "BUDGET_THRESHOLD" -> requireProjectScope(tenantId, scopeJson);
+            case "QUOTA_THRESHOLD" -> requireQuotaScope(tenantId, scopeJson);
+            default -> {
+                // unscoped metric types need no scopeJson
+            }
         }
+    }
+
+    private void requireProjectScope(UUID tenantId, String scopeJson) {
         try {
             JsonNode node = JSON.readTree(scopeJson);
             String projectId = node.path("projectId").asText(null);
@@ -122,6 +137,23 @@ public class AlertRuleService {
         } catch (Exception e) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "SCOPE_INVALID",
                     "BUDGET_THRESHOLD 规则必须提供 scopeJson: {\"projectId\": \"<uuid>\"}，且项目需存在。");
+        }
+    }
+
+    private void requireQuotaScope(UUID tenantId, String scopeJson) {
+        try {
+            JsonNode node = JSON.readTree(scopeJson);
+            String quotaRuleId = node.path("quotaRuleId").asText(null);
+            if (quotaRuleId == null) {
+                throw new IllegalArgumentException("missing quotaRuleId");
+            }
+            UUID id = UUID.fromString(quotaRuleId);
+            if (quotaRuleRepository.findById(tenantId, id).isEmpty()) {
+                throw new IllegalArgumentException("unknown quota rule");
+            }
+        } catch (Exception e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "SCOPE_INVALID",
+                    "QUOTA_THRESHOLD 规则必须提供 scopeJson: {\"quotaRuleId\": \"<uuid>\"}，且配额规则需存在。");
         }
     }
 

@@ -5,11 +5,12 @@ import type { PrimaryTableCol } from 'tdesign-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
-import type { AlertRule, Project, WebhookEndpointView } from '@/types/api';
+import type { AlertRule, Project, QuotaRuleView, WebhookEndpointView } from '@/types/api';
 
 const rules = ref<AlertRule[]>([]);
 const webhooks = ref<WebhookEndpointView[]>([]);
 const projects = ref<Project[]>([]);
+const quotaRules = ref<QuotaRuleView[]>([]);
 const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
@@ -31,18 +32,29 @@ const form = ref({
   dedupeMinutes: 60,
   webhookEndpointId: '',
   projectId: '',
+  quotaRuleId: '',
 });
 const formError = ref('');
 const submitting = ref(false);
 
 const isBudgetType = computed(() => form.value.type === 'BUDGET_THRESHOLD');
+const isQuotaType = computed(() => form.value.type === 'QUOTA_THRESHOLD');
+const isWatermarkType = computed(() => isBudgetType.value || isQuotaType.value);
+
+const metricText: Record<string, string> = { TOKENS: 'Token', REQUESTS: '请求' };
+const periodText: Record<string, string> = { DAILY: '日', WEEKLY: '周', MONTHLY: '月' };
 
 async function load() {
   loading.value = true;
   try {
-    const [ruleList, webhookList] = await Promise.all([api.listAlertRules(), api.listWebhooks()]);
+    const [ruleList, webhookList, quotaList] = await Promise.all([
+      api.listAlertRules(),
+      api.listWebhooks(),
+      api.listQuotaRules(),
+    ]);
     rules.value = ruleList;
     webhooks.value = webhookList;
+    quotaRules.value = quotaList;
   } catch (error) {
     if (error instanceof ApiError) {
       loadError.value = error.message;
@@ -61,6 +73,7 @@ function resetForm() {
     dedupeMinutes: 60,
     webhookEndpointId: '',
     projectId: '',
+    quotaRuleId: '',
   };
 }
 
@@ -73,6 +86,10 @@ async function createRule() {
     formError.value = '预算水位规则必须选择项目。';
     return;
   }
+  if (isQuotaType.value && !form.value.quotaRuleId) {
+    formError.value = '配额水位规则必须选择配额规则。';
+    return;
+  }
   submitting.value = true;
   try {
     await api.createAlertRule({
@@ -83,7 +100,9 @@ async function createRule() {
       webhookEndpointId: form.value.webhookEndpointId || undefined,
       scopeJson: isBudgetType.value
         ? JSON.stringify({ projectId: form.value.projectId })
-        : undefined,
+        : isQuotaType.value
+          ? JSON.stringify({ quotaRuleId: form.value.quotaRuleId })
+          : undefined,
     });
     creating.value = false;
     resetForm();
@@ -128,6 +147,8 @@ function typeLabel(type: string): string {
       return '用量激增';
     case 'BUDGET_THRESHOLD':
       return '预算水位';
+    case 'QUOTA_THRESHOLD':
+      return '配额水位';
     default:
       return type;
   }
@@ -141,6 +162,24 @@ function projectName(rule: AlertRule): string {
     const scope = JSON.parse(rule.scopeJson) as { projectId?: string };
     const project = projects.value.find((p) => p.id === scope.projectId);
     return project ? `${project.name}（${project.code}）` : '';
+  } catch {
+    return '';
+  }
+}
+
+function quotaRuleName(rule: AlertRule): string {
+  if (!rule.scopeJson) {
+    return '';
+  }
+  try {
+    const scope = JSON.parse(rule.scopeJson) as { quotaRuleId?: string };
+    const quota = quotaRules.value.find((q) => q.id === scope.quotaRuleId);
+    if (!quota) {
+      return '';
+    }
+    const dim = metricText[quota.metric] ?? quota.metric;
+    const period = periodText[quota.period] ?? quota.period;
+    return `${quota.scopeName ?? ''}（${dim}·${period}）`;
   } catch {
     return '';
   }
@@ -190,6 +229,7 @@ onMounted(() => {
             <t-option label="余额不可用" value="BALANCE_UNAVAILABLE" />
             <t-option label="用量激增" value="USAGE_SURGE" />
             <t-option label="预算水位" value="BUDGET_THRESHOLD" />
+            <t-option label="配额水位" value="QUOTA_THRESHOLD" />
           </t-select>
         </t-form-item>
         <t-form-item v-if="isBudgetType" label="项目" required>
@@ -206,12 +246,26 @@ onMounted(() => {
             />
           </t-select>
         </t-form-item>
+        <t-form-item v-else-if="isQuotaType" label="配额规则" required>
+          <t-select
+            v-model="form.quotaRuleId"
+            placeholder="选择配额规则"
+            data-testid="rule-quota-select"
+          >
+            <t-option
+              v-for="q in quotaRules"
+              :key="q.id"
+              :value="q.id"
+              :label="`${q.scopeName ?? q.scopeId}（${metricText[q.metric] ?? q.metric}·${periodText[q.period] ?? q.period}）`"
+            />
+          </t-select>
+        </t-form-item>
         <div class="form-row">
-          <t-form-item :label="isBudgetType ? '阈值（水位 %）' : '阈值'">
+          <t-form-item :label="isWatermarkType ? '阈值（水位 %）' : '阈值'">
             <t-input
               v-model="form.threshold"
               type="number"
-              :step="isBudgetType ? 1 : 0.05"
+              :step="isWatermarkType ? 1 : 0.05"
               data-testid="rule-create-threshold"
             />
           </t-form-item>
@@ -250,6 +304,10 @@ onMounted(() => {
             v-if="row.type === 'BUDGET_THRESHOLD' && projectName(row)"
             class="mk-mono scope-hint"
             >· {{ projectName(row) }}</span
+          ><span
+            v-if="row.type === 'QUOTA_THRESHOLD' && quotaRuleName(row)"
+            class="mk-mono scope-hint"
+            >· {{ quotaRuleName(row) }}</span
           >
         </template>
         <template #threshold="{ row }"

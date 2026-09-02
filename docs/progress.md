@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `配额规则配置`（platform-middleware roadmap「配额管理」步骤）— `DONE`
+- Current goal: `配额水位告警 QUOTA_THRESHOLD`（roadmap「配额管理」行第三项收尾）— `DONE`
 - Goal status: `DONE`（本会话 2026-09-02 完成，PR 待合并）
 - Last updated: `2026-09-02 CST`
-- Branch: `goal/quota-rules`（验证后 push + PR，勿直推 develop）
+- Branch: `goal/quota-alerting`（验证后 push + PR，勿直推 develop）
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
 
 ## G6.5 — 发布就绪收尾（2026-09-02，DONE；粗版发布候选基线）
@@ -28,6 +28,16 @@
 - **文档契约缺口（记录为延期项）**：api-contract §8 / document-map §3 要求「Control Plane 生成 OpenAPI 3.1 + CI 破坏性变更检查」——仓库无 openapi 生成配置与产物，尚未实现；api-contract.md 为唯一事实源。待专项 Goal 或正式发布前补。
 - **Windows 踩坑（记录）**：`npm run lint`（eslint --fix）会把 CRLF 文件整批重写为 LF → 23 个文件出现 EOL-only M（`git diff` 为空）；跑 lint 后先 `git restore` 或区分内容 diff，勿误提交。
 - **剩余风险/待办**：代码 0.1.0-SNAPSHOT 从未 tag——正式版本号 + tag 待用户授权（git-workflow §9）；23 产品真实凭证全部 `WAITING_FOR_CREDENTIAL`；G6.5 后 vitest 基线修正为 **73/73**（非 67）；下一步增量候选（MCP 两级 ACL / 默认配额模板 / MCP 路由+Tools 护栏 / 阿里 Higress 对照）待用户定方向，立项时先写入 implementation-plan。
+
+## 配额水位告警 QUOTA_THRESHOLD — roadmap「配额管理」行第三项（2026-09-02，DONE）
+
+- **背景**：#119（配额规则配置）合并后，按 roadmap 行「配额规则配置 + 水位 + 预警」收尾第三项；G8.3（BUDGET_THRESHOLD）同款接线。
+- **后端**：V24 迁移（alert_rules type CHECK 加 `QUOTA_THRESHOLD`）；`AlertRuleService` 类型列表与 scope 校验扩展（QUOTA_THRESHOLD 必填 `scopeJson: {"quotaRuleId": …}` 且规则存在同租户，否则 `400 SCOPE_INVALID`）；`AlertEvaluator` 注入 `AdminQuotaRuleService`——水位 = 配额规则当前窗口 `usedPct`（规则 DISABLED 不评估），**去重键 = 规则 × 配额重置窗口起点**（日/周/月随规则周期，跨窗口可再触发）；事件/投递/重试全复用既有机制。
+- **前端**：AdminAlertRulesView 类型加「配额水位」+ 条件配额规则下拉（label = scope 名 + 维度·周期）+ 阈值单位切「水位 %」+ 列表 scope 提示（同预算模式）。
+- **验证（全部真实 PASS）**：`AdminQuotaRuleApiIntegrationTest` +2 → 8/8（水位 100% ≥ 阈值 80 触发事件 value=100、同窗口二次评估去重仍 1 条、规则 DISABLED 后不再触发；scope 缺失/未知规则 400 SCOPE_INVALID、存在规则通过）；前端 vitest **19 文件 88/88**（+2 配额告警页）、typecheck/lint/build PASS；Playwright 34/34；后端全量 `verify -P integration` **BUILD SUCCESS 2132 tests / 0 failures**。
+- **文档**：api-contract §5.8（QUOTA_THRESHOLD 类型/scope/窗口去重语义）；database-schema alert 段 V24。
+- **至此 roadmap「配额管理」行闭环**：配额规则（#119）+ 水位（#119）+ 预警（本 PR）——只预警不阻断，符合锁定决策；硬阻断与默认配额模板（腾讯 A10）仍需 ADR/立项。
+- **gitflow**：分支 `goal/quota-alerting`（基于 466372c/#119 合并后 develop），验证后 push + PR。
 
 ## 配额规则配置 — platform-middleware roadmap「配额管理」步骤（2026-09-02，DONE）
 
