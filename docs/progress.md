@@ -6,10 +6,12 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `F06 过期导出/删除请求定时清理 GC`（feature-backlog A 组）— `DONE`
-- Goal status: `DONE`（本会话 2026-09-03 完成；#122–#125 同日先合并）
+- Current goal: `F06 过期导出/删除请求定时清理 GC`（feature-backlog A 组）— `DONE`（PR #126 已合并）
+- Goal status: `DONE`（本会话 2026-09-03 完成；#122–#126 全部同日合并入 develop 7fdaecd）
 - Last updated: `2026-09-03 CST`
-- Branch: `goal/expired-record-gc`（基于 #125 合并后 develop db9407b；验证后 push + PR）
+- Branch: `goal/expired-record-gc`（已合并）；develop @ 7fdaecd，工作区清洁
+- 会话交付链（#122–#126）：MCP ACL（合并时解 CI 队列冻结）→ F24 默认配额模板 → F03 审批 Webhook 通知 → F04 用户自助配额可见性 → F06 过期记录 GC
+- 下一步候选（按 backlog 推荐顺序）：**F02 缓存键升级**（对齐腾讯「最后一条 user 消息」——需先核对缓存契约字节一致回归；正文提取仅限 opt-in 缓存流）+ **F35 usage 队列饱和同步写入应急模式**（gateway-app，架构边界）→ 之后 A 组剩余（F09 OpenAPI、F01 MCP 代理接线需先定传输实现）
 
 ## F06 过期记录定时 GC — feature-backlog A 组（2026-09-03，DONE）
 
