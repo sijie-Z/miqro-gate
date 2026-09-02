@@ -69,6 +69,7 @@ const opsNav: NavItem[] = [
   { name: 'admin-usage', label: 'Usage', icon: ChartBarIcon },
   { name: 'cost', label: '成本报表', icon: MoneyIcon },
   { name: 'quota-rules', label: '配额规则', icon: ErrorCircleIcon },
+  { name: 'roi', label: '缓存 ROI', icon: DownloadIcon },
   { name: 'exports', label: 'Exports', icon: DownloadIcon },
   { name: 'deletions', label: 'Deletions', icon: DeleteIcon },
   { name: 'webhooks', label: 'Webhooks', icon: NotificationIcon },

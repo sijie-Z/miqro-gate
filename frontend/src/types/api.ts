@@ -258,6 +258,29 @@ export interface UpsertQuotaRuleRequest {
   status?: QuotaRuleStatus;
 }
 
+export interface RoiReportView {
+  from: string;
+  to: string;
+  totals: {
+    upstreamRequests: number;
+    coalescedRequests: number;
+    l1Hits: number;
+    l2Hits: number;
+    hitRatePct: number;
+    paidCost: number;
+    savedCost: number;
+    savedPct: number;
+  };
+  byDay: Array<{
+    date: string;
+    upstreamRequests: number;
+    hitRequests: number;
+    hitRatePct: number;
+    paidCost: number;
+    savedCost: number;
+  }>;
+}
+
 export interface UsageCost {
   upstreamPaid: string;
   gatewayObserved: string;

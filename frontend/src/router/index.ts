@@ -126,6 +126,12 @@ const router = createRouter({
           meta: adminMeta('配额规则'),
         },
         {
+          path: 'roi',
+          name: 'roi',
+          component: () => import('@/views/AdminRoiView.vue'),
+          meta: adminMeta('缓存 ROI'),
+        },
+        {
           path: 'admin-usage',
           name: 'admin-usage',
           component: () => import('@/views/AdminUsageView.vue'),
