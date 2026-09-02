@@ -116,6 +116,12 @@ export function listMyModelApprovals(): Promise<ModelApprovalView[]> {
   return get<ModelApprovalView[]>('/api/v1/me/model-approvals');
 }
 
+// ---- self-service quota visibility (F04) ----
+
+export function listMyQuotaRules(): Promise<QuotaRuleView[]> {
+  return get<QuotaRuleView[]>('/api/v1/me/quota-rules');
+}
+
 // ---- usage ----
 
 export function usageSummary(
