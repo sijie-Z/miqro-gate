@@ -532,6 +532,12 @@
 
 规则类型：`USAGE_MISSING_RATE`（1h 内 usage_missing 占比）、`UPSTREAM_ERROR_RATE`（1h 内非 2xx 占比）、`BALANCE_UNAVAILABLE`（1h 内 UNAVAILABLE 配额快照数）、`USAGE_SURGE`（当前 1h 事件数 / 前一 1h 比率）、**`BUDGET_THRESHOLD`**（项目当月预算水位 %，`scopeJson: {"projectId": "…"}` 必填且项目需存在，否则 `400 SCOPE_INVALID`）、**`QUOTA_THRESHOLD`**（配额规则当前窗口水位 %，`scopeJson: {"quotaRuleId": "…"}` 必填且配额规则需存在，否则 `400 SCOPE_INVALID`；规则停用即不评估）。评估周期 `miqrokey.alerts.evaluation-interval-ms`（默认 5min）；`BUDGET_THRESHOLD` 按（规则 × 月份）、`QUOTA_THRESHOLD` 按（规则 × 配额重置窗口，日/周/月随规则周期）去重（同窗口仅告警一次），其余按（规则 × 小时桶）去重；仅首个事件触发投递；投递失败指数退避重试最多 3 次。错误码：`ALERT_RULE_NOT_FOUND`（404）、`ALERT_TYPE_INVALID`（400）、`SCOPE_INVALID`（400）。
 
+**事件驱动类型（F03，V27）**：`MODEL_APPROVAL_SUBMITTED` / `MODEL_APPROVAL_APPROVED` / `MODEL_APPROVAL_REJECTED` ——模型审批流的即时通知（提交→订阅方、通过/驳回→申请人侧），**不参与周期评估**：审批工作流在状态迁移瞬间直接触发（`AlertEventDispatcher` 复用同一投递/签名/退避重试机制）。语义：
+- 阈值/scope 不适用（创建阈值恒发送 `1`，服务端事件 value 固定为 1 = 一次发生；无需 scopeJson）。
+- 事件去重 = 规则 × `type:approvalId`——同一申请的同一次迁移只通知一次（申请本身只能迁移一次，天然唯一）。
+- **Webhook payload**（HMAC 签名同既有告警，`X-MiQroKey-Signature: sha256=…`）：信封（eventId/ruleId/type/value/occurredAt）+ 明细字段：`approvalId`、`modelId`、`status`（PENDING/APPROVED/REJECTED）、`username`/`requesterName`（申请人）、`keyName`/`keyDisplay`（申请 Key 展示）、`reason`（提交理由，提交事件）、`reviewNote`（评审意见，结果事件）、`autoApproved`（白名单自动批准时 true）。纯元数据，无正文/密钥。明细随事件存 `alert_events.payload_json`，重试投递时原样带上。
+- 无端点的规则仅记录事件；规则停用即不通知；白名单自动批准在同一次提交里触发 SUBMITTED + APPROVED 两个事件。
+
 ### 5.9 模型单价（G7.2）
 
 按（供应商产品、模型、Token 类型）三元组维护每百万 Token 单价，驱动成本计算。单价是不可变快照：修改即追加新快照，历史成本不重算（与官方控制台「修改不追溯」语义一致）。价格是全局目录数据，不租户隔离；端点仍 SYSTEM_ADMIN-only。

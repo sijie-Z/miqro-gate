@@ -6,10 +6,21 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `F24 默认配额模板`（腾讯 doc 135489：全局模板 + 创建时快照复制）— `DONE`
-- Goal status: `DONE`（本会话 2026-09-03 完成；#122 MCP ACL 同日先合并）
+- Current goal: `F03 模型审批 Webhook 通知`（feature-backlog A 组）— `DONE`
+- Goal status: `DONE`（本会话 2026-09-03 完成；#122/#123 同日先合并）
 - Last updated: `2026-09-03 CST`
-- Branch: `goal/quota-default-template`（基于 #122 合并后 develop f5970f6；验证后 push + PR）
+- Branch: `goal/model-approval-webhook`（基于 #123 合并后 develop ede3540；验证后 push + PR）
+
+## F03 模型审批 Webhook 通知 — feature-backlog A 组（2026-09-03，DONE）
+
+- **背景与方向**：#123（默认配额模板）合并后按 backlog 推荐顺序第 2 组开工——补 #118 模型审批流「Webhook 通知按文档预留未实现」的闭环。语义：审批三事件（提交/通过/驳回）在迁移瞬间通知订阅方（申请人/管理员侧由接收端点自行路由），不做阻断。
+- **设计决策（记录）**：复用 alert/webhook 机制 = 新**事件驱动**规则类型而非周期评估——提交/评审是点事件，调度轮询模型不匹配（阈值语义也不适用）。三个类型镜像审计动作：`MODEL_APPROVAL_SUBMITTED/APPROVED/REJECTED`（V27 扩 CHECK）；阈值不适用（前端隐藏输入、提交恒 1，事件 value 恒 1=一次发生）；去重键 = 规则 × `type:approvalId`（申请一次迁移天然唯一）；投递/签名/退避重试全复用；通知明细（approvalId/modelId/status/username/requesterName/keyName/keyDisplay/reason/reviewNote/autoApproved——纯元数据）随 `alert_events.payload_json` 落库、重试原样带出。无端点规则仅记录事件；白名单自动批准单次提交触发 SUBMITTED+APPROVED 双事件（与审计双事件留痕同构）。
+- **后端**：`AlertEventDispatcher` 新服务（从 `AlertEvaluator` 抽取投递原语 deliver/attempt/recordAttempt/retryDue/truncate + payload 信封构造；`notifyForType` 查启用规则→逐规则事件落库+投递；`deliverEvent` 供评估器用——周期型评估行为零变化）；`AlertEvaluator` 瘦身为评估器（metric/evaluate 委托 dispatcher 投递）；`ModelApprovalService` 三个迁移点（submit/approve/reject + auto-approve 双发）调 `notifyApproval`（Key/申请人展示字段查找组装）；`AlertRuleService.validateType` +3。
+- **前端**：AdminAlertRulesView 类型下拉 +3（模型审批 · 提交/通过/驳回）；`isApprovalType` 时隐藏阈值/去重输入并显示「事件型规则」提示（提交阈值恒 1）；typeLabel +3；types `AlertRuleType` union 补 3 并顺带补上 #120 漏掉的 `QUOTA_THRESHOLD`（只扩不缩，无编译面影响）。
+- **验证（全部真实 PASS）**：`ModelApprovalNotificationApiIntegrationTest` 4/4（提交 → 签名投递 payload 全字段断言 + 事件行 value=1/payload_json 留存；approve/reject 各自类型 + reviewNote 断言；停用规则静默 + 无端点规则仅事件；白名单自动批准双事件 autoApproved）；**重构回归** `WebhookAlertApiIntegrationTest` 2/2 + `AdminBudgetApiIntegrationTest` 6/6 + `AdminQuotaRuleApiIntegrationTest` 8/8 + `ModelApprovalApiIntegrationTest` 10/10（投递原语抽取后周期型/水位型行为不变）；前端 vitest **100/100**（+2 事件型：创建体 threshold 1 无 scope、通过/驳回类型渲染）、lint/typecheck/build PASS；Playwright **35/35**；后端全量 `verify -P integration` **BUILD SUCCESS 0 failures**（control-plane 模块汇总 376 = 372+4 净增）。
+- **排障记录**：alert_events.value 为 numeric(12,6)——断言用 BigDecimal isEqualByComparingTo；Webhook 回调投递走控制面 SSRF 门（测试加 allowed-cidrs 127.0.0.0/8）。
+- **文档**：api-contract §5.8（事件驱动类型语义/payload 明细字段/去重）；database-schema alert 段（类型表 V27 + payload_json 语义 + dispatcher 说明）；CHANGELOG Unreleased；feature-backlog F03 → DONE；progress。
+- **gitflow**：分支 `goal/model-approval-webhook`（基于 #123 合并后 develop ede3540）；#123 合并记录：PR CI 全绿（13 checks）→ `gh pr merge --squash --delete-branch` → develop ede3540。
 
 ## F24 默认配额模板 — 腾讯 AI 网关 doc 135489（2026-09-03，DONE）
 
