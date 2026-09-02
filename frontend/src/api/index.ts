@@ -33,7 +33,9 @@ import type {
   ModelApprovalPage,
   ModelApprovalStatus,
   ModelApprovalView,
+  QuotaRuleView,
   SubmitModelApprovalRequest,
+  UpsertQuotaRuleRequest,
   Provider,
   ProviderProductView,
   SeatView,
@@ -248,6 +250,20 @@ export function rejectModelApproval(id: string, reviewNote?: string): Promise<Mo
     `/api/v1/admin/model-approvals/${id}/reject`,
     reviewNote ? { reviewNote } : {},
   );
+}
+
+// ---- admin quota rules (usage quota plans, alerting-only) ----
+
+export function listQuotaRules(): Promise<QuotaRuleView[]> {
+  return get<QuotaRuleView[]>('/api/v1/admin/quota-rules');
+}
+
+export function putQuotaRule(request: UpsertQuotaRuleRequest): Promise<QuotaRuleView> {
+  return put<QuotaRuleView>('/api/v1/admin/quota-rules', request);
+}
+
+export function deleteQuotaRule(id: string): Promise<void> {
+  return del<void>(`/api/v1/admin/quota-rules/${id}`);
 }
 
 export function listCredentials(): Promise<CredentialView[]> {
