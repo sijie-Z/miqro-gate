@@ -6,10 +6,19 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `F03 模型审批 Webhook 通知`（feature-backlog A 组）— `DONE`
-- Goal status: `DONE`（本会话 2026-09-03 完成；#122/#123 同日先合并）
+- Current goal: `F04 用户自助配额可见性`（feature-backlog A 组）— `DONE`
+- Goal status: `DONE`（本会话 2026-09-03 完成；#122/#123/#124 同日先合并）
 - Last updated: `2026-09-03 CST`
-- Branch: `goal/model-approval-webhook`（基于 #123 合并后 develop ede3540；验证后 push + PR）
+- Branch: `goal/me-quota-visibility`（基于 #124 合并后 develop 3b0244d；验证后 push + PR）
+
+## F04 用户自助配额可见性 — feature-backlog A 组（2026-09-03，DONE）
+
+- **背景与方向**：#124（审批 Webhook 通知）合并后按 backlog 推荐顺序第 2 组收官——补 #119 配额规则边界「用户自助配额可见性未做」。配额线（规则+模板+告警+自助可见）至此闭环：用户能在用量页看到管理员给自己设的限额与实时水位（含 F24 默认模板自动复制规则、停用规则），超限仅提示不阻断。
+- **后端**：`AdminQuotaRuleService.listForUser(tenantId, userId)`（USER 作用域 + scopeId=本人过滤，复用同一 view() 水位/level/窗口装配——算户口径与 5.19 管理端完全一致）；新 `MeQuotaController` `GET /api/v1/me/quota-rules`（会话鉴权任意角色，无审计，其他用户/项目规则绝不出现）。
+- **前端**：UsageView 顶部「我的配额」面板（维度·周期/限额·本期用量·水位条/状态徽标：正常/预警/超限/停用；空态提示「暂无配额规则——管理员未为你设置用量限额」；加载失败静默降级不干扰用量视图）+ api `listMyQuotaRules`。
+- **验证（全部真实 PASS）**：`MeQuotaApiIntegrationTest` 2/2（本人 2 条规则含 DISABLED 可见、其他用户与管理员规则不可见（集合断言不依赖列表顺序）、admin 自身切片正确；匿名 401/空列表）；前端新 `UsageView.spec` 2/2（空态 + 三规则渲染：维度文案/限额用量文案/预警/超限/停用徽标）、全量 vitest **102/102**（100+2）、lint/typecheck/build PASS；Playwright **35/35**；后端全量 `verify -P integration` **BUILD SUCCESS 0 failures**（control-plane 模块汇总 378 = 376+2 净增）。
+- **文档**：api-contract §4.7 新增（错误码段重编号 4.8——站内无外部引用）；CHANGELOG Unreleased；feature-backlog F04 → DONE；progress。
+- **gitflow**：分支 `goal/me-quota-visibility`（基于 #124 合并后 develop 3b0244d）；#124 合并记录：CI 全绿 → `gh pr merge --squash --delete-branch`。
 
 ## F03 模型审批 Webhook 通知 — feature-backlog A 组（2026-09-03，DONE）
 
