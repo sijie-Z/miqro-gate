@@ -19,4 +19,7 @@ CREATE TABLE agents (
 );
 
 CREATE UNIQUE INDEX uq_agents_tenant_name ON agents (tenant_id, name);
-CREATE INDEX idx_agents_credential ON agents (tenant_id, upstream_credential_id);
+-- One credential backs at most one agent: usage aggregation by credential is
+-- the per-agent observability, so sharing a credential would blur the view
+-- (CodeRabbit review, PR #112). The unique index also serves the lookup.
+CREATE UNIQUE INDEX uq_agents_tenant_credential ON agents (tenant_id, upstream_credential_id);

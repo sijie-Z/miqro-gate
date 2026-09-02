@@ -56,6 +56,14 @@ public class AgentRepositoryImpl implements AgentRepository {
     }
 
     @Override
+    public boolean existsByCredentialId(UUID tenantId, UUID credentialId) {
+        Long count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM agents WHERE tenant_id = :tenantId AND upstream_credential_id = :credentialId",
+                new MapSqlParameterSource("tenantId", tenantId).addValue("credentialId", credentialId), Long.class);
+        return count != null && count > 0;
+    }
+
+    @Override
     public List<Agent> findAllByTenantId(UUID tenantId) {
         return jdbc.query("SELECT * FROM agents WHERE tenant_id = :tenantId ORDER BY created_at",
                 new MapSqlParameterSource("tenantId", tenantId), ROW_MAPPER);

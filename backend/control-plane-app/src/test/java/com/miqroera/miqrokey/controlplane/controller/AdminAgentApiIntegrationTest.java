@@ -156,14 +156,23 @@ class AdminAgentApiIntegrationTest {
                 .content("{\"name\":\"forge\",\"credentialId\":\"" + disabled + "\"}"))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("CREDENTIAL_NOT_FOUND"));
 
-        // Duplicate name.
-        UUID credentialId = seedCredential("Forge Cred", "ACTIVE");
-        String body = "{\"name\":\"forge\",\"credentialId\":\"" + credentialId + "\"}";
+        // Duplicate name with a fresh credential (the credential check must not win).
+        UUID nameCredentialA = seedCredential("Forge Cred A", "ACTIVE");
+        UUID nameCredentialB = seedCredential("Forge Cred B", "ACTIVE");
         mockMvc.perform(post("/api/v1/admin/agents").cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"forge\",\"credentialId\":\"" + nameCredentialA + "\"}"))
+                .andExpect(status().isOk());
         mockMvc.perform(post("/api/v1/admin/agents").cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("AGENT_NAME_TAKEN"));
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"forge\",\"credentialId\":\"" + nameCredentialB + "\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("AGENT_NAME_TAKEN"));
+
+        // Same credential cannot back a second agent (1:1 per-agent observability).
+        mockMvc.perform(post("/api/v1/admin/agents").cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"forge-2\",\"credentialId\":\"" + nameCredentialA + "\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("AGENT_CREDENTIAL_TAKEN"));
     }
 
     @Test

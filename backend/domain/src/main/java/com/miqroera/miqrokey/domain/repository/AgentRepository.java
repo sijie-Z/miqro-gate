@@ -15,6 +15,9 @@ public interface AgentRepository {
 
     Optional<Agent> findByIdAndTenantId(UUID id, UUID tenantId);
 
+    /** True when another agent already binds the credential (1:1 rule). */
+    boolean existsByCredentialId(UUID tenantId, UUID credentialId);
+
     List<Agent> findAllByTenantId(UUID tenantId);
 
     /** Status update with optimistic version bump; returns the stored row. */
