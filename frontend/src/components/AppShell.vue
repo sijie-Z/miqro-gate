@@ -15,6 +15,7 @@ import {
   MoneyIcon,
   NotificationIcon,
   PoweroffIcon,
+  RobotIcon,
   SecuredIcon,
   ShopIcon,
   UserIcon,
@@ -65,6 +66,7 @@ const opsNav: NavItem[] = [
   { name: 'webhooks', label: 'Webhooks', icon: NotificationIcon },
   { name: 'consumers', label: 'API 消费者', icon: SecuredIcon },
   { name: 'skillhub', label: 'SkillHub 管理', icon: AppIcon },
+  { name: 'agents', label: 'Agents', icon: RobotIcon },
   { name: 'alert-rules', label: 'Alert Rules', icon: ErrorCircleIcon },
   { name: 'audit', label: 'Audit', icon: FilePasteIcon },
 ];

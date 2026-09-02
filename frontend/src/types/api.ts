@@ -38,6 +38,18 @@ export interface SkillView {
   createdAt: string;
 }
 
+export interface AgentView {
+  id: string;
+  name: string;
+  description?: string;
+  credentialId: string;
+  credentialName: string;
+  providerProductId: string;
+  providerProductName: string;
+  status: string;
+  createdAt: string;
+}
+
 export interface BudgetView {
   projectId: string;
   projectCode: string;

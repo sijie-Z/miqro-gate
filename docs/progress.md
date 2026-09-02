@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `P2.4`（SkillHub 前端：浏览页 + 管理页，P2 收官）
+- Current goal: `P3.1`（Agent 管理：出口绑定凭证 + 按 Agent 用量观测）
 - Goal status: `IN_PROGRESS`（实现与验证完成，待 PR 合并）
 - Last updated: `2026-09-01 CST`
-- Branch: `goal/g7.2-price-catalog`
+- Branch: `goal/p3.1-agent-management`
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
 
 ## Completed
@@ -230,6 +230,15 @@
 - **验证**：vitest 56/56（+8：浏览渲染/下载调用/403 提示/空态；管理表格/上传参数/归档确认/授权保存）；lint/typecheck/build 全 PASS。
 - **gitflow**：本 Goal 起严格按 git-workflow.md 在 `goal/` 分支开发（`goal/p2.4-skillhub-frontend`），验证后 push 分支，合并由用户在 GitHub 执行。
 - **后续**：P2 SkillHub 全部完成 → P3.1 Agent 管理（阿里 Agent 拓扑）。
+
+## P3.1 — Agent 管理（对标阿里 AI 网关 Agent 拓扑）
+
+- **来源**：leader 蓝图「Agent 管理」；P2 阶段文档研究结论（阿里 Agent 拓扑：入口认证 + 出口模型链路 + 按 Agent 观测）。
+- **交付**：`agents` 表（V17，出口绑定 ACTIVE 凭证，产品由凭证 → 订阅派生）；`AdminAgentService`/`AgentRepository`（创建校验凭证、禁用乐观锁、按凭证聚合用量——复用 `AdminUsageStatsService.summary(credentialId)`）；`AdminAgentController`（CRUD + `GET /{id}/usage`）；前端 `AdminAgentsView`（表格——凭证/派生产品名/状态 + 创建表单——凭证下拉 + 用量弹窗——请求/Token/成本四卡 + 禁用确认）；路由/导航（运营组 Agents）。
+- **验证**：`AdminAgentApiIntegrationTest` 4/4（生命周期/凭证与重名校验/用量聚合精确断言 1 请求 100/50 tokens）；前端 vitest 60/60（+4）；全量后端 `verify -P integration` **BUILD SUCCESS**（全模块 1045 = 1041 + 4）。
+- **排障记录**：用量聚合 0 行的根因——PROJECT 分组是 INNER JOIN projects，seed 的随机 project_id 被丢弃（测试 seed 真实项目后修复）。
+- **边界**：入口路由（外部访问 Agent 的域名/消费者认证）为后续扩展；Agent 凭证轮换/吊销后 Agent 自动失效（绑定凭证引用，凭证级联 RESTRICT）。
+- **gitflow**：分支 `goal/p3.1-agent-management`，验证后 push + PR，合并由用户在 GitHub 执行。
 
 ## 待办需求（2026-08-28 leader 指示，细节待补充，暂不实施）
 
