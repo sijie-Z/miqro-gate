@@ -15,7 +15,7 @@
 | F03 | 模型审批 Webhook 通知（文档「预留」） | progress 审批流边界 | 清晰（复用 alert/webhook 机制） | DONE（2026-09-03） | 无 | 交付见 progress「模型审批 Webhook 通知」：事件驱动规则类型 ×3（提交/通过/驳回，V27）+ 审批迁移瞬间即时投递（共享 AlertEventDispatcher）+ 前端类型选项；不做阻断 |
 | F04 | 用户自助配额可见性（个人看自己的配额规则水位） | progress 配额规则边界 | 清晰 | DONE（2026-09-03） | 无 | 交付见 progress「用户自助配额可见性」：`GET /api/v1/me/quota-rules`（只读本人 USER 规则 + 水位）+ 用量页「我的配额」面板 |
 | F05 | 管理门户 IP 白名单 | security §6；middleware 安全边界 | 清晰 | TBD | 配置项不存在，需先核对代码 | 按 security 规格「支持配置 IP 白名单」落实；推理 API 来源 IP 限制为远期 F40 |
-| F06 | 过期导出/删除请求定时清理（GC） | progress G4.4 边界 | 清晰 | PLANNED | 无 | 定时清理 EXPIRED export_tasks 与过期 usage_deletions |
+| F06 | 过期导出/删除请求定时清理（GC） | progress G4.4 边界 | 清晰 | DONE（2026-09-03） | 无 | 交付见 progress「过期记录定时 GC」：@Scheduled 回收 SUCCEEDED 过窗导出（file_bytes 释放）与过期删除请求；EXECUTED/审计永久保留（G4.4 语义） |
 | F07 | 告警类型补齐（usage 队列饱和/解析失败/供应商错误/Plan 同步/磁盘等 → alert_rules 类型） | progress G4.5 风险；release-checklist §6.1 | 部分（多数类型定义清晰，数据源需接线） | SCAFFOLD | 各类型数据源接线 | 现有框架支持新增类型；先登记类型清单与数据源，逐类接线 |
 | F08 | 官方价格 24h 自动同步（source=OFFICIAL 自动化） | progress G7.2 风险 | 部分（依赖供应商官方价格源） | SCAFFOLD | 供应商价格源确认 | source=OFFICIAL 现为人工标记；无源则保持人工 |
 | F09 | OpenAPI 3.1 生成 + CI 破坏性变更检查 | api-contract §8；release-checklist §0 | 清晰（规格已写死） | PLANNED | 无（发布前补） | springdoc 或手写 spec 生成；CI 检查破坏性变更 |

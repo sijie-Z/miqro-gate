@@ -240,6 +240,19 @@ public class ExportTaskService {
         return message.length() > 500 ? message.substring(0, 500) : message;
     }
 
+    /**
+     * Reclaims finished artifacts past their 24h download window (F06): SUCCEEDED
+     * rows whose {@code expires_at} passed are physically removed with their
+     * payload. FAILED rows stay visible for operations review. Returns the number
+     * of removed tasks. Single atomic DELETE — no surrounding transaction needed.
+     */
+    public int sweepExpired() {
+        return jdbc.update("""
+                DELETE FROM export_tasks
+                WHERE status = 'SUCCEEDED' AND expires_at IS NOT NULL AND expires_at < now()
+                """, new MapSqlParameterSource());
+    }
+
     private static final RowMapper<ExportTask> ROW_MAPPER = (rs, rowNum) -> new ExportTask((UUID) rs.getObject("id"),
             (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("created_by"),
             ExportFormat.valueOf(rs.getString("format")), rs.getTimestamp("period_from").toInstant(),

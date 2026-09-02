@@ -24,6 +24,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - **默认配额模板**（腾讯 doc 135489，V26）：全局模板（每租户一份）+ **创建时快照复制**——启用后每个新建用户自动获得一条 USER 作用域配额规则（warn 80）；改模板不惊动已分配、停用不删已分配、手动规则优先（insert-if-absent）；`AdminOrgService.createUser` 事务内复制并审计 `auto:true`；前端配额规则页「默认配额模板」面板（状态/定义/三条提示文案/配置与启停）。
 - **模型审批 Webhook 通知**（F03，V27）：告警框架新增三个**事件驱动**规则类型 `MODEL_APPROVAL_SUBMITTED/APPROVED/REJECTED`——审批提交/通过/驳回瞬间即时触发（非周期评估），复用同一签名投递/指数退避重试；payload 带审批明细（approvalId/申请人/Key/模型/理由/意见/autoApproved，纯元数据）；白名单自动批准一次提交触发双事件；投递原语抽取为共享 `AlertEventDispatcher`（评估器与审批流共用）；前端告警规则页三类型选项（事件型隐藏阈值/去重输入）。
 - **用户自助配额可见性**（F04）：`GET /api/v1/me/quota-rules`——调用者名下 USER 作用域配额规则 + 当前窗口实时水位（含模板自动规则，停用仍可见），只读不分页、其他作用域绝不出现；前端用量页「我的配额」面板（维度/限额/本期用量/水位条/状态徽标，空态提示）。
+- **过期记录定时 GC**（F06）：定时回收（`MIQROKEY_CLEANUP_EXPIRED_SWEEP_MS` 默认 1h）下载窗口已过的导出产物（`SUCCEEDED` 超 `expires_at` 连同 `file_bytes` 删除，FAILED/PENDING 保留查看）与确认窗口已过的删除请求（PENDING_CONFIRMATION/CONFIRMED/EXPIRED 删除，**EXECUTED 永久保留**——执行审计）。
 - 全局修复：请求体 JSON 解析失败统一 `400 PARAM_INVALID`（含字段名提示，此前 500）。
 
 ### G8.x — 平台中间件 P0/P1（外部系统通道与预算告警）
