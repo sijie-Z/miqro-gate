@@ -54,13 +54,15 @@ public class AdminOrgService {
     private final PasswordHasher passwordHasher;
     private final SessionService sessionService;
     private final AuditService auditService;
+    private final AdminQuotaDefaultTemplateService quotaDefaultTemplateService;
     private final NamedParameterJdbcTemplate jdbc;
 
     public AdminOrgService(UserRepository userRepository, TeamRepository teamRepository,
             ProjectRepository projectRepository, ProjectMembershipRepository projectMembershipRepository,
             ProjectProviderGrantRepository grantRepository, UpstreamCredentialRepository credentialRepository,
             ProviderProductRepository productRepository, PasswordHasher passwordHasher, SessionService sessionService,
-            AuditService auditService, NamedParameterJdbcTemplate jdbc) {
+            AuditService auditService, AdminQuotaDefaultTemplateService quotaDefaultTemplateService,
+            NamedParameterJdbcTemplate jdbc) {
         this.userRepository = userRepository;
         this.teamRepository = teamRepository;
         this.projectRepository = projectRepository;
@@ -71,6 +73,7 @@ public class AdminOrgService {
         this.passwordHasher = passwordHasher;
         this.sessionService = sessionService;
         this.auditService = auditService;
+        this.quotaDefaultTemplateService = quotaDefaultTemplateService;
         this.jdbc = jdbc;
     }
 
@@ -99,6 +102,7 @@ public class AdminOrgService {
         userRepository.insert(user);
         auditService.record(tenantId, adminId, "USER_CREATE", "USER", user.id(),
                 "{\"username\":\"" + username + "\",\"role\":\"" + user.role().name() + "\"}", null);
+        quotaDefaultTemplateService.applyToNewUser(tenantId, adminId, user.id());
         return new UserCreated(sanitize(user), temporaryPassword);
     }
 

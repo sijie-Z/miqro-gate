@@ -22,6 +22,13 @@ public interface QuotaRuleRepository {
      */
     QuotaRule upsert(QuotaRule rule);
 
+    /**
+     * Insert only when the (tenant, scope, metric, period) tuple is free; returns
+     * empty when a row already exists. Used by the default-quota snapshot copy
+     * (Tencent doc 135489) so manual rules always win over the template.
+     */
+    Optional<QuotaRule> insertIfAbsent(QuotaRule rule);
+
     Optional<QuotaRule> findById(UUID tenantId, UUID id);
 
     Optional<QuotaRule> findByKey(UUID tenantId, QuotaScopeType scopeType, UUID scopeId, QuotaMetric metric,
