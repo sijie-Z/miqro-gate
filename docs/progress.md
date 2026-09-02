@@ -6,10 +6,21 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `MCP 两级访问控制`（腾讯 doc 134890：Server+Tool 级 ACL）— `DONE`
-- Goal status: `DONE`（本会话 2026-09-02 完成，PR 待合并）
-- Last updated: `2026-09-02 CST`
-- Branch: `goal/mcp-access-control`（验证后 push + PR，勿直推 develop）
+- Current goal: `F24 默认配额模板`（腾讯 doc 135489：全局模板 + 创建时快照复制）— `DONE`
+- Goal status: `DONE`（本会话 2026-09-03 完成；#122 MCP ACL 同日先合并）
+- Last updated: `2026-09-03 CST`
+- Branch: `goal/quota-default-template`（基于 #122 合并后 develop f5970f6；验证后 push + PR）
+
+## F24 默认配额模板 — 腾讯 AI 网关 doc 135489（2026-09-03，DONE）
+
+- **背景与方向**：#122（MCP ACL）合并后按 feature-backlog PLANNED 组推荐顺序第一项开工——腾讯「配额管理 → 默认配额策略」：全局模板 + **创建时快照复制**（改模板不惊动存量、关闭不删已分配、手动规则覆盖默认、自动规则默认启用），防新账号「裸奔」。配额线延伸，语义完整无外部依赖。
+- **映射决策（记录）**：腾讯模板面向「消费者」（配额规则挂靠对象）；本系统配额规则挂靠 USER/PROJECT 双作用域，其中消费者语义最近似**用户**（拥有 Virtual Key 的消费主体）→ 复制只落在新建用户（`AdminOrgService.createUser` 事务内）；PROJECT 不参与模板化（腾讯无此概念，不发明，feature-backlog F24 架子已注）；预算模板化列后续候选。
+- **后端**：V26 `quota_default_template`（**每租户一行** tenant_id PK：enabled + metric TOKENS|REQUESTS + period DAILY|WEEKLY|MONTHLY + limit_value + updated_by 引用 users + version——行仅在首次配置后存在）；domain `QuotaDefaultTemplate` + `QuotaDefaultTemplateRepository`（upsertDefinition 保 enabled 翻转语义、setEnabled 只翻开关）；`QuotaRuleRepository.insertIfAbsent`（ON CONFLICT DO NOTHING RETURNING——手动规则优先的落点）；`AdminQuotaDefaultTemplateService`（GET 空态视图 = enabled:false + 定义 null；configure 保留当前 enabled——重新配置不会重新启用；enable/disable 冲突码 QUOTA_TEMPLATE_NOT_CONFIGURED/ALREADY_ENABLED/ALREADY_DISABLED；applyToNewUser：模板缺失或停用即跳过，复制 USER 规则 warn 80 ACTIVE created_by=建用户执行者，插入成功才审计）；Controller 4 端点（GET/PUT + POST enable|disable，SYSTEM_ADMIN-only）；审计 4 事件（CREATE/UPDATE/ENABLE/DISABLE）+ 自动复制记 QUOTA_RULE_CREATE 摘要含 `"auto":true`。
+- **前端**：AdminQuotaRulesView 顶部「默认配额模板」面板（状态徽标 未配置/未启用/已启用 + 定义文案 + 腾讯三条提示文案 + 配置内联表单 metric/period/限额 + 启用/停用按钮，未配置时禁用）+ api 4 函数 + 类型 2 组。
+- **验证（全部真实 PASS）**：`AdminQuotaDefaultTemplateServiceTest` 5/5（无/停用模板跳过不审计、启用快照字段全断言 + audit auto、手动规则存在则不插入不审计、configure 保 enabled + CREATE/UPDATE 动作、setEnabled 三冲突码）；`AdminQuotaDefaultTemplateApiIntegrationTest` 7/7（空态→配置→重复 PUT 保 disabled→enable→重复 409→disable 保定义；未配置 enable/disable 409；定义校验 400 矩阵；403/401；**快照语义闭环**：启用→建用户 A 得 TOKENS/MONTHLY/1M 规则（warn 80/ACTIVE/created_by 断言）→ 改模板 REQUESTS/WEEKLY/500 → A 规则不变 → 停用 → 建 B 无规则 A 保留 → 再启用 → 建 C 得新定义规则 B 仍无；审计 3 模板事件 + auto 规则摘要断言）；前端 vitest **98/98**（+4 模板面板：未配置态/定义渲染+停用/配置保存+面板关闭/启用）、lint/typecheck/build PASS；Playwright **35/35**（+quota 页新端点 mock）；后端全量 `verify -P integration` **BUILD SUCCESS 0 failures**（控制面模块汇总 372 = F24 净增 12：单测 5 + 集成 7；基线 2156 计数口径延续上轮）。
+- **排障记录**：POST /api/v1/admin/users 返回 200（非 201）；change_summary 是 jsonb——getString 规范化输出 `": "` 分隔符（断言按 jsonb 规范写）；重复 enable/disable 走 409 冲突码（与 MCP 上下线同族）。
+- **文档**：api-contract §5.22（视图/快照复制语义/冲突码/审计/映射取舍）；database-schema V26 段；CHANGELOG Unreleased（截至 09-03 + F24 行）；feature-backlog F24 → DONE（图例补 DONE 口径）；progress。
+- **gitflow**：分支 `goal/quota-default-template`；#122 合并记录：CI 曾 12h 卡 pending（Actions 队列瞬断），cancel + rerun 后全绿，`gh pr merge --squash --delete-branch` → develop f5970f6，本地同步后开本分支。
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
 
 ## G6.5 — 发布就绪收尾（2026-09-02，DONE；粗版发布候选基线）

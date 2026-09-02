@@ -296,6 +296,10 @@ V14（ADR-0011）新增 JWT 验签公钥：`jwt_public_key_pem text`（RSA Subje
 
 用量配额计划（仅预警永不阻断，roadmap「配额管理」）：`scope_type`（`USER|PROJECT`）、`scope_id`、`metric`（`TOKENS|REQUESTS`）、`period`（`DAILY|WEEKLY|MONTHLY`）、`limit_value bigint`（>0）、`warn_percent`（1–99，默认 80）、`status`（`ACTIVE|DISABLED`）、`created_by`、`version`。唯一 `(tenant_id, scope_type, scope_id, metric, period)`（同 scope 同维同周期仅一条，重复 PUT 原地编辑）。表只存计划；**当前窗口水位在读取时由 usage 事件计算**（UTC 窗口；TOKENS=全部 token 口径，REQUESTS=上游请求数），`(tenant_id, scope_type, scope_id, status)` 索引。规则永不阻断流量——硬阻断需 ADR。
 
+### `quota_default_template` (V26，默认配额模板)
+
+全局默认配额策略（腾讯 doc 135489，`AdminQuotaDefaultTemplateService`）：**每租户一行**（`tenant_id` PK）——`enabled`、`metric`（`TOKENS|REQUESTS`）、`period`（`DAILY|WEEKLY|MONTHLY`）、`limit_value bigint`（>0）、`updated_by`（`(tenant_id, updated_by)` 引用 users）、`version`。行仅在管理员首次配置定义后存在（GET 未配置 = 空态视图）。**创建时快照复制**：启用状态下 `AdminOrgService.createUser` 同事务内按模板复制一条 `quota_rules` 行（USER 作用域、warn 80、ACTIVE、insert-if-absent）——改模板不惊动存量、停用不删已分配、手动规则优先。启用开关独立于定义（enable/disable 端点只翻 `enabled`）。
+
 ### `skills` / `skill_access` (V16，P2.2 SkillHub)
 
 `skills`：技能目录条目——`name varchar(64)`（kebab-case，= SKILL.md frontmatter name）、`description`、`version`（语义化）、`author`、`license`、`tags text[]`、`content_zip bytea`（校验后的技能包）、`content_sha256`、`content_bytes`、`status`（`ACTIVE|ARCHIVED`）、`created_by`。唯一 `(tenant_id, name)`。
