@@ -141,6 +141,34 @@ async function mockApi(page: Page, admin = false) {
       body: JSON.stringify({ items: MODEL_APPROVALS, nextCursor: null }),
     }),
   );
+  await page.route('**/api/v1/admin/quota-rules', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0051',
+          scopeType: 'USER',
+          scopeId: '0190-0000-0000-0011',
+          scopeName: 'Alice',
+          scopeTag: 'alice',
+          metric: 'TOKENS',
+          period: 'MONTHLY',
+          limitValue: 1000000,
+          warnPercent: 80,
+          status: 'ACTIVE',
+          used: 640000,
+          usedPct: 64,
+          level: 'NORMAL',
+          windowFrom: '2026-09-01T00:00:00Z',
+          windowTo: '2026-10-01T00:00:00Z',
+          createdAt: '2026-09-01T00:00:00Z',
+          updatedAt: '2026-09-01T00:00:00Z',
+          version: 0,
+        },
+      ]),
+    }),
+  );
   await page.route('**/api/v1/me/usage/**', (route) =>
     route.fulfill({
       status: 200,
@@ -749,6 +777,7 @@ const ADMIN_PAGES = [
   { path: '/app/projects', testid: 'projects-table', expect: 'Core AI' },
   { path: '/app/grants', testid: 'grants-table', expect: 'ACTIVE' },
   { path: '/app/approval-center', testid: 'approvals-queue-table', expect: 'deepseek-v4-flash' },
+  { path: '/app/quota-rules', testid: 'quota-rules-table', expect: '1,000,000' },
   { path: '/app/plans', testid: 'subscriptions-table', expect: 'DeepSeek PAYG' },
   { path: '/app/webhooks', testid: 'webhooks-table', expect: 'ops-alerts' },
   { path: '/app/alert-rules', testid: 'rules-table', expect: 'usage-missing' },
