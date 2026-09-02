@@ -1,6 +1,5 @@
 package com.miqroera.miqrokey.controlplane.service;
 
-import com.miqroera.miqrokey.controlplane.service.WebhookEndpointService.WebhookEndpoint;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -18,16 +17,16 @@ import java.time.Instant;
 import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
- * Alert evaluation and webhook delivery (G4.5, {@code alert_rules} /
- * {@code alert_events} / {@code webhook_delivery_attempts} V12). Runs on a
- * fixed-delay schedule: every enabled rule's metric is computed over a rolling
- * hour, compared to the threshold, deduplicated per (rule, hour bucket), and
- * delivered to the rule's endpoint with HMAC-SHA256 signing. Failed deliveries
- * are retried with exponential backoff up to {@value #MAX_ATTEMPTS} attempts.
+ * Alert evaluation (G4.5, {@code alert_rules} V12): every enabled rule's metric
+ * is computed over a rolling hour, compared to the threshold, deduplicated per
+ * (rule, hour bucket / reset window), and delivered by
+ * {@link AlertEventDispatcher} (signing, attempts, retries). Event-driven
+ * notification rule types (model-approval transitions, F03) never reach this
+ * evaluator's metric switch — the workflow fires them immediately through the
+ * same dispatcher.
  *
  * <p>
  * Metrics (all over the last rolling hour, tenant-wide):
@@ -46,18 +45,16 @@ public class AlertEvaluator {
 
     private static final Logger LOG = LoggerFactory.getLogger(AlertEvaluator.class);
 
-    static final int MAX_ATTEMPTS = 3;
-
     private final NamedParameterJdbcTemplate jdbc;
-    private final WebhookEndpointService endpointService;
+    private final AlertEventDispatcher dispatcher;
     private final AdminBudgetService budgetService;
     private final AdminQuotaRuleService quotaRuleService;
     private final ObjectMapper objectMapper;
 
-    public AlertEvaluator(NamedParameterJdbcTemplate jdbc, WebhookEndpointService endpointService,
+    public AlertEvaluator(NamedParameterJdbcTemplate jdbc, AlertEventDispatcher dispatcher,
             AdminBudgetService budgetService, AdminQuotaRuleService quotaRuleService, ObjectMapper objectMapper) {
         this.jdbc = jdbc;
-        this.endpointService = endpointService;
+        this.dispatcher = dispatcher;
         this.budgetService = budgetService;
         this.quotaRuleService = quotaRuleService;
         this.objectMapper = objectMapper;
@@ -71,7 +68,7 @@ public class AlertEvaluator {
             for (AlertRuleService.AlertRule rule : rules) {
                 evaluate(rule);
             }
-            retryDue();
+            dispatcher.retryDue();
         } catch (Exception e) {
             LOG.warn("Alert evaluation cycle failed", e);
         }
@@ -106,11 +103,7 @@ public class AlertEvaluator {
         if (inserted == 0) {
             return; // deduplicated within the window — no new event, no delivery
         }
-        if (rule.webhookEndpointId() == null) {
-            LOG.info("Alert rule {} fired (value {}) — no webhook endpoint configured", rule.name(), value);
-            return;
-        }
-        deliver(eventId, rule, value, now);
+        dispatcher.deliverEvent(rule.tenantId(), eventId, rule, value, now);
     }
 
     /** Metric over the last rolling hour; ratio in 0..1, surge as a ratio. */
@@ -132,7 +125,7 @@ public class AlertEvaluator {
             case "USAGE_SURGE" -> surge();
             case "BUDGET_THRESHOLD" -> budgetWatermark(tenantId, scopeJson);
             case "QUOTA_THRESHOLD" -> quotaWatermark(tenantId, scopeJson);
-            default -> null;
+            default -> null; // event-driven notification types fire outside the scheduler
         };
     }
 
@@ -220,111 +213,6 @@ public class AlertEvaluator {
         return BigDecimal.valueOf(current).divide(BigDecimal.valueOf(previous), 4, RoundingMode.HALF_UP);
     }
 
-    private void deliver(UUID eventId, AlertRuleService.AlertRule rule, BigDecimal value, Instant occurredAt) {
-        WebhookEndpoint endpoint = endpointService.get(rule.tenantId(), rule.webhookEndpointId());
-        if (!endpoint.enabled()) {
-            return;
-        }
-        byte[] payload;
-        try {
-            payload = objectMapper.writeValueAsBytes(Map.of("eventId", eventId.toString(), "ruleId",
-                    rule.id().toString(), "type", rule.type(), "value", value, "occurredAt", occurredAt.toString()));
-        } catch (Exception e) {
-            LOG.warn("Alert payload serialization failed", e);
-            return;
-        }
-        attempt(eventId, rule, endpoint, payload, 1);
-    }
-
-    private void attempt(UUID eventId, AlertRuleService.AlertRule rule, WebhookEndpoint endpoint, byte[] payload,
-            int attempt) {
-        Instant now = Instant.now();
-        try {
-            int status = endpointService.postSigned(endpoint, payload);
-            recordAttempt(eventId, endpoint, attempt, status, null, null);
-            LOG.info("Alert {} delivered to endpoint {} (HTTP {})", eventId, endpoint.id(), status);
-        } catch (Exception e) {
-            LOG.warn("Alert {} delivery attempt {} failed", eventId, attempt);
-            Instant nextRetry = attempt < MAX_ATTEMPTS ? now.plusSeconds((long) Math.pow(2, attempt) * 60) : null;
-            recordAttempt(eventId, endpoint, attempt, null, nextRetry, truncate(e.getMessage()));
-        }
-    }
-
-    private void retryDue() {
-        List<Map<String, Object>> due = jdbc.query("""
-                SELECT a.event_id, a.endpoint_id, a.attempt, r.id AS rule_id, r.tenant_id
-                FROM webhook_delivery_attempts a
-                JOIN alert_events e ON e.id = a.event_id
-                JOIN alert_rules r ON r.id = e.rule_id
-                WHERE a.next_retry_at IS NOT NULL AND a.next_retry_at <= now()
-                """, new MapSqlParameterSource(),
-                (rs, rowNum) -> Map.of("eventId", rs.getObject("event_id"), "endpointId", rs.getObject("endpoint_id"),
-                        "attempt", rs.getInt("attempt"), "ruleId", rs.getObject("rule_id"), "tenantId",
-                        rs.getObject("tenant_id")));
-        for (Map<String, Object> row : due) {
-            UUID eventId = (UUID) row.get("eventId");
-            UUID endpointId = (UUID) row.get("endpointId");
-            int attempt = (int) row.get("attempt") + 1;
-            UUID ruleId = (UUID) row.get("ruleId");
-            UUID tenantId = (UUID) row.get("tenantId");
-            try {
-                WebhookEndpoint endpoint = endpointService.get(tenantId, endpointId);
-                AlertEvent event = event(eventId);
-                AlertRuleService.AlertRule rule = ruleFor(ruleId);
-                if (event == null || rule == null) {
-                    continue;
-                }
-                byte[] payload = objectMapper
-                        .writeValueAsBytes(Map.of("eventId", eventId.toString(), "ruleId", ruleId.toString(), "type",
-                                rule.type(), "value", event.value(), "occurredAt", event.occurredAt().toString()));
-                attempt(eventId, rule, endpoint, payload, attempt);
-            } catch (Exception e) {
-                LOG.warn("Alert retry for event {} failed", eventId);
-            }
-        }
-    }
-
-    private void recordAttempt(UUID eventId, WebhookEndpoint endpoint, int attempt, Integer httpStatus,
-            Instant nextRetryAt, String error) {
-        jdbc.update("""
-                INSERT INTO webhook_delivery_attempts
-                    (id, tenant_id, event_id, endpoint_id, attempt, http_status, next_retry_at, error_message,
-                     created_at)
-                VALUES (:id, :tenantId, :eventId, :endpointId, :attempt, :httpStatus, :nextRetryAt, :error, now())
-                ON CONFLICT (event_id, endpoint_id, attempt) DO UPDATE
-                    SET http_status = EXCLUDED.http_status, next_retry_at = EXCLUDED.next_retry_at,
-                        error_message = EXCLUDED.error_message
-                """,
-                new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", endpoint.tenantId())
-                        .addValue("eventId", eventId).addValue("endpointId", endpoint.id()).addValue("attempt", attempt)
-                        .addValue("httpStatus", httpStatus)
-                        .addValue("nextRetryAt", nextRetryAt != null ? Timestamp.from(nextRetryAt) : null)
-                        .addValue("error", error));
-    }
-
-    private AlertRuleService.AlertRule ruleFor(UUID ruleId) {
-        List<AlertRuleService.AlertRule> found = jdbc.query("SELECT * FROM alert_rules WHERE id = :id",
-                new MapSqlParameterSource("id", ruleId), RULE_ROW_MAPPER);
-        return found.isEmpty() ? null : found.get(0);
-    }
-
-    private AlertEvent event(UUID eventId) {
-        List<AlertEvent> found = jdbc.query("SELECT * FROM alert_events WHERE id = :id",
-                new MapSqlParameterSource("id", eventId), EVENT_ROW_MAPPER);
-        return found.isEmpty() ? null : found.get(0);
-    }
-
-    private static String truncate(String message) {
-        if (message == null) {
-            return null;
-        }
-        return message.length() > 500 ? message.substring(0, 500) : message;
-    }
-
-    public record AlertEvent(UUID id, UUID tenantId, UUID ruleId, String dedupeKey, Instant occurredAt,
-            BigDecimal value, String status, String payloadJson, Instant createdAt) {
-    }
-
     private static final RowMapper<AlertRuleService.AlertRule> RULE_ROW_MAPPER = (rs,
             rowNum) -> new AlertRuleService.AlertRule((UUID) rs.getObject("id"), (UUID) rs.getObject("tenant_id"),
                     rs.getString("name"), rs.getString("type"), rs.getString("scope_json"),
@@ -332,10 +220,4 @@ public class AlertEvaluator {
                     (UUID) rs.getObject("webhook_endpoint_id"), rs.getLong("version"),
                     rs.getTimestamp("created_at").toInstant(),
                     rs.getTimestamp("updated_at") != null ? rs.getTimestamp("updated_at").toInstant() : null);
-
-    private static final RowMapper<AlertEvent> EVENT_ROW_MAPPER = (rs, rowNum) -> new AlertEvent(
-            (UUID) rs.getObject("id"), (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("rule_id"),
-            rs.getString("dedupe_key"), rs.getTimestamp("occurred_at").toInstant(),
-            rs.getObject("value", BigDecimal.class), rs.getString("status"), rs.getString("payload_json"),
-            rs.getTimestamp("created_at").toInstant());
 }

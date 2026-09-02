@@ -215,4 +215,51 @@ describe('AdminAlertRulesView', () => {
       scopeJson: '{"quotaRuleId":"q1"}',
     });
   });
+
+  it('creates an event-driven model-approval rule without threshold or scope', async () => {
+    mockApi.createAlertRule.mockResolvedValue(rule({ type: 'MODEL_APPROVAL_SUBMITTED' }));
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="rule-create-open"]').trigger('click');
+    await wrapper.find('[data-testid="rule-create-name"] input').setValue('审批提交通知');
+
+    const typeOption = wrapper
+      .findAll('.t-select-option')
+      .find((o) => o.text().includes('模型审批 · 提交'));
+    expect(typeOption, 'approval type option should render').toBeTruthy();
+    await typeOption!.trigger('click');
+    await flushPromises();
+
+    // Event-driven types have no threshold/dedupe row and no scope picker.
+    expect(wrapper.find('[data-testid="rule-create-threshold"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="rule-project-select"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="rule-approval-hint"]').exists()).toBe(true);
+
+    await wrapper.find('[data-testid="rule-create-submit"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.createAlertRule).toHaveBeenCalledWith({
+      name: '审批提交通知',
+      type: 'MODEL_APPROVAL_SUBMITTED',
+      threshold: 1,
+      dedupeMinutes: 60,
+      webhookEndpointId: undefined,
+      scopeJson: undefined,
+    });
+  });
+
+  it('renders decided approval rules with their type label', async () => {
+    mockApi.listAlertRules.mockResolvedValue([
+      rule({ name: '通过通知', type: 'MODEL_APPROVAL_APPROVED', threshold: 1 }),
+      rule({ name: '驳回通知', type: 'MODEL_APPROVAL_REJECTED', threshold: 1 }),
+    ]);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('模型审批 · 通过');
+    expect(wrapper.text()).toContain('模型审批 · 驳回');
+  });
 });

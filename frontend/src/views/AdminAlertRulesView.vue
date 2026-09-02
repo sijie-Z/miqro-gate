@@ -40,6 +40,8 @@ const submitting = ref(false);
 const isBudgetType = computed(() => form.value.type === 'BUDGET_THRESHOLD');
 const isQuotaType = computed(() => form.value.type === 'QUOTA_THRESHOLD');
 const isWatermarkType = computed(() => isBudgetType.value || isQuotaType.value);
+/** Event-driven rule types (F03): fired by the workflow itself, no threshold. */
+const isApprovalType = computed(() => form.value.type.startsWith('MODEL_APPROVAL_'));
 
 const metricText: Record<string, string> = { TOKENS: 'Token', REQUESTS: '请求' };
 const periodText: Record<string, string> = { DAILY: '日', WEEKLY: '周', MONTHLY: '月' };
@@ -95,7 +97,7 @@ async function createRule() {
     await api.createAlertRule({
       name: form.value.name.trim(),
       type: form.value.type,
-      threshold: Number(form.value.threshold),
+      threshold: isApprovalType.value ? 1 : Number(form.value.threshold),
       dedupeMinutes: Number(form.value.dedupeMinutes) || 60,
       webhookEndpointId: form.value.webhookEndpointId || undefined,
       scopeJson: isBudgetType.value
@@ -149,6 +151,12 @@ function typeLabel(type: string): string {
       return '预算水位';
     case 'QUOTA_THRESHOLD':
       return '配额水位';
+    case 'MODEL_APPROVAL_SUBMITTED':
+      return '模型审批 · 提交';
+    case 'MODEL_APPROVAL_APPROVED':
+      return '模型审批 · 通过';
+    case 'MODEL_APPROVAL_REJECTED':
+      return '模型审批 · 驳回';
     default:
       return type;
   }
@@ -230,6 +238,9 @@ onMounted(() => {
             <t-option label="用量激增" value="USAGE_SURGE" />
             <t-option label="预算水位" value="BUDGET_THRESHOLD" />
             <t-option label="配额水位" value="QUOTA_THRESHOLD" />
+            <t-option label="模型审批 · 提交" value="MODEL_APPROVAL_SUBMITTED" />
+            <t-option label="模型审批 · 通过" value="MODEL_APPROVAL_APPROVED" />
+            <t-option label="模型审批 · 驳回" value="MODEL_APPROVAL_REJECTED" />
           </t-select>
         </t-form-item>
         <t-form-item v-if="isBudgetType" label="项目" required>
@@ -260,7 +271,7 @@ onMounted(() => {
             />
           </t-select>
         </t-form-item>
-        <div class="form-row">
+        <div v-if="!isApprovalType" class="form-row">
           <t-form-item :label="isWatermarkType ? '阈值（水位 %）' : '阈值'">
             <t-input
               v-model="form.threshold"
@@ -273,6 +284,9 @@ onMounted(() => {
             <t-input v-model="form.dedupeMinutes" type="number" />
           </t-form-item>
         </div>
+        <p v-else class="approval-hint" data-testid="rule-approval-hint">
+          事件型规则：模型审批发生时立即通知（无阈值/去重窗口）。
+        </p>
         <t-form-item label="Webhook 端点">
           <t-select v-model="form.webhookEndpointId" clearable placeholder="不选则仅记录事件">
             <t-option v-for="w in webhooks" :key="w.id" :label="w.name" :value="w.id" />
@@ -373,6 +387,12 @@ onMounted(() => {
 .form-error {
   margin-bottom: 12px;
   color: var(--miqrokey-danger);
+}
+
+.approval-hint {
+  margin: 0 0 12px;
+  color: var(--miqrokey-text-secondary);
+  font-size: 13px;
 }
 
 .scope-hint {

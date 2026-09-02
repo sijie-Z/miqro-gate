@@ -26,8 +26,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -66,11 +68,13 @@ public class ModelApprovalService {
     private final ApprovalProperties approvalProperties;
     private final AuditService auditService;
     private final RouteRefreshPublisher routeRefreshPublisher;
+    private final AlertEventDispatcher alertEventDispatcher;
 
     public ModelApprovalService(ModelApprovalRepository approvalRepository, VirtualKeyRepository keyRepository,
             ProjectProviderGrantRepository grantRepository, ProjectRepository projectRepository,
             UserRepository userRepository, NamedParameterJdbcTemplate jdbc, ApprovalProperties approvalProperties,
-            AuditService auditService, RouteRefreshPublisher routeRefreshPublisher) {
+            AuditService auditService, RouteRefreshPublisher routeRefreshPublisher,
+            AlertEventDispatcher alertEventDispatcher) {
         this.approvalRepository = approvalRepository;
         this.keyRepository = keyRepository;
         this.grantRepository = grantRepository;
@@ -80,6 +84,7 @@ public class ModelApprovalService {
         this.approvalProperties = approvalProperties;
         this.auditService = auditService;
         this.routeRefreshPublisher = routeRefreshPublisher;
+        this.alertEventDispatcher = alertEventDispatcher;
     }
 
     /** Submits a request for one additional model on the caller's key. */
@@ -117,8 +122,15 @@ public class ModelApprovalService {
             ModelApproval autoApproved = review(tenantId, null, approval, AUTO_APPROVE_NOTE, now);
             auditService.record(tenantId, user.id(), "MODEL_APPROVAL_APPROVED", "MODEL_APPROVAL", approval.id(),
                     auditSummary("virtualKeyId", key.id(), "modelId", modelId, "autoApproved", true), requestId);
+            notifyApproval(tenantId, "MODEL_APPROVAL_SUBMITTED", approval, user.id(), key.id(),
+                    Map.of("reason", approval.reason() == null ? "" : approval.reason()));
+            notifyApproval(tenantId, "MODEL_APPROVAL_APPROVED", autoApproved, user.id(), key.id(),
+                    Map.of("autoApproved", true, "reviewNote",
+                            autoApproved.reviewNote() == null ? "" : autoApproved.reviewNote()));
             return view(autoApproved, tenantId);
         }
+        notifyApproval(tenantId, "MODEL_APPROVAL_SUBMITTED", approval, user.id(), key.id(),
+                Map.of("reason", approval.reason() == null ? "" : approval.reason()));
         return view(approval, tenantId);
     }
 
@@ -154,6 +166,9 @@ public class ModelApprovalService {
         ModelApproval approved = review(admin.tenantId(), admin.id(), approval, trimmed(reviewNote), now);
         auditService.record(admin.tenantId(), admin.id(), "MODEL_APPROVAL_APPROVED", "MODEL_APPROVAL", approval.id(),
                 auditSummary("virtualKeyId", approval.virtualKeyId(), "modelId", approval.modelId()), requestId);
+        notifyApproval(admin.tenantId(), "MODEL_APPROVAL_APPROVED", approved, approval.requestedBy(),
+                approval.virtualKeyId(),
+                Map.of("reviewNote", approved.reviewNote() == null ? "" : approved.reviewNote()));
         return view(approved, admin.tenantId());
     }
 
@@ -168,12 +183,42 @@ public class ModelApprovalService {
                 trimmed(reviewNote), approval.version() + 1, approval.createdAt(), now));
         auditService.record(tenantId, admin.id(), "MODEL_APPROVAL_REJECTED", "MODEL_APPROVAL", approval.id(),
                 auditSummary("virtualKeyId", approval.virtualKeyId(), "modelId", approval.modelId()), requestId);
+        notifyApproval(tenantId, "MODEL_APPROVAL_REJECTED", rejected, approval.requestedBy(), approval.virtualKeyId(),
+                Map.of("reviewNote", rejected.reviewNote() == null ? "" : rejected.reviewNote()));
         return view(rejected, tenantId);
     }
 
     // -------------------------------------------------------------------
     // approval side effects
     // -------------------------------------------------------------------
+
+    /**
+     * Fires an event-driven webhook notification (F03) for an approval transition.
+     * Details are pure metadata — approval id, model, requester, key display and
+     * transition specifics — never key material or request bodies. No-op unless the
+     * tenant configured an enabled rule of the type.
+     */
+    private void notifyApproval(UUID tenantId, String type, ModelApproval approval, UUID requesterId, UUID keyId,
+            Map<String, Object> transition) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("approvalId", approval.id().toString());
+        details.put("modelId", approval.modelId());
+        details.put("status", approval.status().name());
+        VirtualKey key = keyId == null
+                ? null
+                : keyRepository.findById(keyId).filter(k -> k.tenantId().equals(tenantId)).orElse(null);
+        if (key != null) {
+            details.put("keyName", key.name());
+            details.put("keyDisplay", key.displayPrefix() + "…" + key.lastFour());
+        }
+        User requester = userRepository.findById(requesterId).filter(u -> u.tenantId().equals(tenantId)).orElse(null);
+        if (requester != null) {
+            details.put("username", requester.username());
+            details.put("requesterName", requester.displayName());
+        }
+        details.putAll(transition);
+        alertEventDispatcher.notifyForType(tenantId, type, details);
+    }
 
     /**
      * Transitions a PENDING request to APPROVED and applies its effect: the model
