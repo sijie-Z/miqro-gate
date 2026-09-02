@@ -501,6 +501,7 @@
 
 - 窗口 ≤ 93 天；产物只含计数与元数据列（见 database-schema `export_tasks`），绝不包含 prompt、代码、Secret 或 Virtual Key 明文。
 - 产物保存 24 小时后 `EXPIRED`，下载返回 `410 EXPORT_EXPIRED`；未完成/不存在 → `404 EXPORT_NOT_FOUND`。
+- **GC（F06）**：定时回收过窗产物（`miqrokey.cleanup.expired-sweep-ms`，默认 1h）——`SUCCEEDED` 且超过 `expires_at` 的行连同 `file_bytes` 物理删除；清理后下载返回 `404 EXPORT_NOT_FOUND`（410 语义仅在清理前可观测）。`FAILED`/`PENDING` 行保留供运维查看。
 - 错误码：`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400）。
 
 ### 5.6 用量删除（G4.4）
@@ -514,6 +515,7 @@
 
 - 删除是物理且永久的（无软删除）；执行后写 `USAGE_DELETE` 审计事件，审计链本身永不删除。
 - token 仅存 SHA-256 哈希；错误 token → `403 DELETION_TOKEN_INVALID`；确认窗口 1 小时 → `410 DELETION_EXPIRED`；重复确认 → `409 DELETION_NOT_CONFIRMABLE`。
+- **GC（F06）**：定时物理清理过期删除请求（同调度属性）——`PENDING_CONFIRMATION`/`CONFIRMED`/`EXPIRED` 且超过 `expires_at` 的行被删除；`EXECUTED` 行**永久保留**（执行审计，与 G4.4「请求本身与审计链保留」一致）。
 - 窗口 ≤ 93 天；`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400）。
 
 ### 5.7 Webhook 端点（G4.5）

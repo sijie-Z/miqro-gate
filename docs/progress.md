@@ -6,10 +6,18 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `F04 用户自助配额可见性`（feature-backlog A 组）— `DONE`
-- Goal status: `DONE`（本会话 2026-09-03 完成；#122/#123/#124 同日先合并）
+- Current goal: `F06 过期导出/删除请求定时清理 GC`（feature-backlog A 组）— `DONE`
+- Goal status: `DONE`（本会话 2026-09-03 完成；#122–#125 同日先合并）
 - Last updated: `2026-09-03 CST`
-- Branch: `goal/me-quota-visibility`（基于 #124 合并后 develop 3b0244d；验证后 push + PR）
+- Branch: `goal/expired-record-gc`（基于 #125 合并后 develop db9407b；验证后 push + PR）
+
+## F06 过期记录定时 GC — feature-backlog A 组（2026-09-03，DONE）
+
+- **背景与方向**：#125（自助配额可见性）合并后按 backlog 推荐顺序第 2 组收官——补 G4.4 边界「定时清理 EXPIRED 导出/过期删除请求未接线（运维目标）」。纯后端小闭环，无前端。
+- **后端**：`ExportTaskService.sweepExpired()`（`DELETE … WHERE status='SUCCEEDED' AND expires_at < now()`——过窗产物连同 `file_bytes` 物理回收；FAILED/PENDING 保留供运维查看，取舍记录）；`UsageDeletionService.sweepExpired()`（`PENDING_CONFIRMATION/CONFIRMED/EXPIRED` 且过窗删除；**EXECUTED 永久保留**——G4.4「请求本身与审计链保留」语义）；新 `ExpiredRecordSweeper`（`@Scheduled(fixedDelayString = "${miqrokey.cleanup.expired-sweep-ms:3600000}")`，调用两服务并记 count 日志——`AlertEvaluator` 同款固定延迟模式）。
+- **验证（全部真实 PASS）**：`ExpiredRecordSweepIntegrationTest` 2/2（导出：过窗 SUCCEEDED 删/未过窗保/40 天 FAILED 与 PENDING 保；删除：三种过期态删/PENDING 未过窗保/EXECUTED 10 天保）；后端全量 `verify -P integration` **BUILD SUCCESS 0 failures**（control-plane 模块汇总 380 = 378+2 净增；前端零改动，vitest/Playwright 基线不受影响）。
+- **文档**：api-contract §5.5/§5.6（GC 语义 + 清理后 410→404 行为说明）；configuration-reference 新行 `MIQROKEY_CLEANUP_EXPIRED_SWEEP_MS`（默认 3600000，1h）；CHANGELOG；feature-backlog F06 → DONE；progress。
+- **gitflow**：分支 `goal/expired-record-gc`（基于 #125 合并后 develop db9407b）；#125 合并记录：CI 全绿 → `gh pr merge --squash --delete-branch`。
 
 ## F04 用户自助配额可见性 — feature-backlog A 组（2026-09-03，DONE）
 
