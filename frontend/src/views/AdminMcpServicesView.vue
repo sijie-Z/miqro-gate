@@ -6,7 +6,13 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
 import { confirmDialog } from '@/utils/confirm';
-import type { McpServiceView, McpToolView } from '@/types/api';
+import type {
+  ApiConsumerView,
+  McpAclMode,
+  McpAccessView,
+  McpServiceView,
+  McpToolView,
+} from '@/types/api';
 
 const services = ref<McpServiceView[]>([]);
 const loading = ref(true);
@@ -21,6 +27,12 @@ const columns: PrimaryTableCol[] = [
   { colKey: 'health', title: '健康', width: 100 },
   { colKey: 'healthCheckedAt', title: '最近检查', width: 170 },
   { colKey: 'actions', title: '操作', width: 200, fixed: 'right' },
+];
+const toolAccessColumns: PrimaryTableCol[] = [
+  { colKey: 'toolName', title: '工具', minWidth: 140 },
+  { colKey: 'mode', title: '权限模式', width: 170 },
+  { colKey: 'list', title: '名单', minWidth: 240 },
+  { colKey: 'actions', title: '操作', width: 70 },
 ];
 
 const creating = ref(false);
@@ -50,6 +62,141 @@ const toolForm = ref({ toolName: '', description: '', method: 'GET', path: '' })
 const toolSaving = ref(false);
 const toolFormError = ref('');
 const toolCreating = ref(false);
+
+// MCP access control (Tencent doc 134890: two-level ACL)
+const accessService = ref<McpServiceView | null>(null);
+const accessVisible = ref(false);
+const accessLoading = ref(false);
+const accessError = ref('');
+const access = ref<McpAccessView | null>(null);
+const consumers = ref<ApiConsumerView[]>([]);
+const serverMode = ref<McpAclMode>('NONE');
+const serverIds = ref<string[]>([]);
+const serverSaving = ref(false);
+const serverResetSaving = ref(false);
+const accessNotice = ref('');
+/** Draft overrides per tool: null = inherit, otherwise ALLOW/DENY + ids. */
+const toolDrafts = ref<Record<string, { mode: McpAclMode | null; ids: string[] }>>({});
+
+function toolDraft(toolId: string, mode: McpAclMode | null, ids: string[]) {
+  toolDrafts.value[toolId] = { mode, ids: [...ids] };
+}
+
+async function openAccess(service: McpServiceView) {
+  accessService.value = service;
+  accessVisible.value = true;
+  accessError.value = '';
+  accessNotice.value = '';
+  toolDrafts.value = {};
+  await loadAccess();
+}
+
+async function loadAccess() {
+  if (!accessService.value) return;
+  accessLoading.value = true;
+  accessError.value = '';
+  try {
+    const [view, consumerList] = await Promise.all([
+      api.getMcpServiceAccess(accessService.value.id),
+      api.listApiConsumers(),
+    ]);
+    access.value = view;
+    consumers.value = consumerList;
+    serverMode.value = view.mode;
+    serverIds.value = view.serverConsumers.map((c) => c.id);
+    for (const tool of view.tools) {
+      toolDraft(
+        tool.toolId,
+        tool.mode,
+        tool.consumers.map((c) => c.id),
+      );
+    }
+    accessNotice.value =
+      view.mode === 'NONE'
+        ? '全部开放：任何调用方均可访问。可在下方为单个工具配置更细的名单（工具级规则只会进一步收窄）。'
+        : view.mode === 'ALLOW'
+          ? '白名单：仅名单内的 API 消费者可调用该服务。'
+          : '黑名单：名单内的 API 消费者被禁止调用，其余放行。';
+  } catch (err) {
+    accessError.value = err instanceof Error ? err.message : '加载失败';
+  } finally {
+    accessLoading.value = false;
+  }
+}
+
+async function saveServerMode() {
+  if (!accessService.value) return;
+  serverSaving.value = true;
+  accessError.value = '';
+  try {
+    await api.setMcpAccessMode(accessService.value.id, serverMode.value);
+    MessagePlugin.success('服务访问模式已保存');
+    await loadAccess();
+  } catch (err) {
+    accessError.value = err instanceof Error ? err.message : '保存失败';
+  } finally {
+    serverSaving.value = false;
+  }
+}
+
+async function saveServerList() {
+  if (!accessService.value || serverMode.value === 'NONE') return;
+  serverSaving.value = true;
+  accessError.value = '';
+  try {
+    await api.setMcpAccessGrants(accessService.value.id, {
+      mode: serverMode.value,
+      consumerIds: serverIds.value,
+    });
+    MessagePlugin.success('服务名单已更新');
+    await loadAccess();
+  } catch (err) {
+    accessError.value = err instanceof Error ? err.message : '保存失败';
+  } finally {
+    serverSaving.value = false;
+  }
+}
+
+async function resetServerAccess() {
+  if (!accessService.value) return;
+  serverResetSaving.value = true;
+  accessError.value = '';
+  try {
+    await api.setMcpAccessMode(accessService.value.id, 'NONE');
+    MessagePlugin.success('已重置为全部开放');
+    await loadAccess();
+  } catch (err) {
+    accessError.value = err instanceof Error ? err.message : '重置失败';
+  } finally {
+    serverResetSaving.value = false;
+  }
+}
+
+async function saveToolDraft(toolId: string, toolName: string) {
+  if (!accessService.value) return;
+  const draft = toolDrafts.value[toolId];
+  if (!draft) return;
+  toolSaving.value = true;
+  accessError.value = '';
+  try {
+    if (draft.mode === null) {
+      await api.clearMcpAccessGrants(accessService.value.id, toolId);
+      MessagePlugin.success(`${toolName} 已恢复为继承服务规则`);
+    } else {
+      await api.setMcpAccessGrants(accessService.value.id, {
+        toolId,
+        mode: draft.mode,
+        consumerIds: draft.ids,
+      });
+      MessagePlugin.success(`${toolName} 的访问名单已更新`);
+    }
+    await loadAccess();
+  } catch (err) {
+    accessError.value = err instanceof Error ? err.message : '保存失败';
+  } finally {
+    toolSaving.value = false;
+  }
+}
 
 const canCreateTool = computed(
   () => toolForm.value.toolName.trim().length > 0 && toolForm.value.path.trim().length > 0,
@@ -328,6 +475,9 @@ onMounted(load);
         <template #healthCheckedAt="{ row }">{{ formatTime(row.healthCheckedAt) }}</template>
         <template #actions="{ row }">
           <t-button variant="text" data-testid="mcp-tools" @click="openTools(row)">Tools</t-button>
+          <t-button variant="text" data-testid="mcp-access" @click="openAccess(row)"
+            >访问控制</t-button
+          >
           <t-button variant="text" data-testid="mcp-health-config" @click="openConfig(row)"
             >健康检查</t-button
           >
@@ -500,6 +650,147 @@ onMounted(load);
         <t-button @click="toolsVisible = false">关闭</t-button>
       </template>
     </t-dialog>
+
+    <t-dialog
+      v-model:visible="accessVisible"
+      :header="'访问控制 · ' + (accessService?.name ?? '')"
+      width="760px"
+      :footer="false"
+      :close-on-overlay-click="false"
+    >
+      <t-alert v-if="accessError" theme="error" :message="accessError" class="block-alert" />
+      <t-loading :loading="accessLoading">
+        <template v-if="access">
+          <p class="access-notice">{{ accessNotice }}</p>
+
+          <div class="access-section">
+            <div class="access-section-title">服务级访问（谁能调用整个服务）</div>
+            <div class="access-row">
+              <t-radio-group
+                v-model="serverMode"
+                variant="default-filled"
+                data-testid="mcp-access-mode"
+              >
+                <t-radio-button value="NONE">全部开放</t-radio-button>
+                <t-radio-button value="ALLOW">白名单</t-radio-button>
+                <t-radio-button value="DENY">黑名单</t-radio-button>
+              </t-radio-group>
+              <t-button
+                variant="outline"
+                :loading="serverSaving"
+                data-testid="mcp-access-mode-save"
+                @click="saveServerMode"
+              >
+                保存模式
+              </t-button>
+            </div>
+            <div v-if="serverMode !== 'NONE'" class="access-list-block">
+              <div class="access-row">
+                <t-select
+                  v-model="serverIds"
+                  multiple
+                  clearable
+                  placeholder="选择 API 消费者"
+                  data-testid="mcp-access-server-list"
+                  class="access-select"
+                >
+                  <t-option
+                    v-for="c in consumers"
+                    :key="c.id"
+                    :value="c.id"
+                    :label="`${c.name}（${c.keyPrefix}…）`"
+                  />
+                </t-select>
+                <t-button
+                  theme="primary"
+                  :loading="serverSaving"
+                  data-testid="mcp-access-server-save"
+                  @click="saveServerList"
+                >
+                  保存{{ serverMode === 'ALLOW' ? '白' : '黑' }}名单
+                </t-button>
+                <t-button
+                  variant="outline"
+                  :loading="serverResetSaving"
+                  data-testid="mcp-access-server-reset"
+                  @click="resetServerAccess"
+                >
+                  重置为全部开放
+                </t-button>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="serverMode === 'NONE'" class="access-section">
+            <div class="access-section-title">
+              工具级访问（谁可调用某个工具；仅服务全开放时可配置）
+            </div>
+            <t-table
+              :data="access.tools"
+              row-key="toolId"
+              size="small"
+              :columns="toolAccessColumns"
+              data-testid="mcp-access-tools"
+            >
+              <template #toolName="{ row }">
+                <span class="mk-mono">{{ row.toolName }}</span>
+              </template>
+              <template #mode="{ row }">
+                <t-select
+                  :value="toolDrafts[row.toolId]?.mode ?? ''"
+                  :options="[
+                    { label: '继承服务规则', value: '' },
+                    { label: '仅名单内可调用', value: 'ALLOW' },
+                    { label: '名单内禁止', value: 'DENY' },
+                  ]"
+                  data-testid="mcp-access-tool-mode"
+                  @change="
+                    (v: string | number) =>
+                      toolDraft(
+                        row.toolId,
+                        (v ? String(v) : null) as 'ALLOW' | 'DENY' | null,
+                        toolDrafts[row.toolId]?.ids ?? [],
+                      )
+                  "
+                />
+              </template>
+              <template #list="{ row }">
+                <div class="access-row">
+                  <t-select
+                    v-if="toolDrafts[row.toolId]?.mode"
+                    v-model="toolDrafts[row.toolId].ids"
+                    multiple
+                    clearable
+                    placeholder="选择 API 消费者"
+                    class="access-select"
+                  >
+                    <t-option
+                      v-for="c in consumers"
+                      :key="c.id"
+                      :value="c.id"
+                      :label="`${c.name}（${c.keyPrefix}…）`"
+                    />
+                  </t-select>
+                  <span v-else class="access-inherit">继承服务级规则</span>
+                </div>
+              </template>
+              <template #actions="{ row }">
+                <t-button
+                  theme="primary"
+                  variant="text"
+                  size="small"
+                  :loading="toolSaving"
+                  data-testid="mcp-access-tool-save"
+                  @click="saveToolDraft(row.toolId, row.toolName)"
+                >
+                  保存
+                </t-button>
+              </template>
+            </t-table>
+          </div>
+        </template>
+      </t-loading>
+    </t-dialog>
   </div>
 </template>
 
@@ -630,5 +921,40 @@ onMounted(load);
 
 .tool-create-form {
   margin-top: 12px;
+}
+
+.access-section {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+.access-section:last-of-type {
+  border-bottom: none;
+}
+.access-section-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.access-notice {
+  color: var(--td-text-color-secondary);
+  margin: 0 0 16px;
+  line-height: 1.6;
+}
+.access-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.access-list-block {
+  margin-top: 10px;
+}
+.access-select {
+  min-width: 280px;
+  flex: 1;
+}
+.access-inherit {
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
 }
 </style>

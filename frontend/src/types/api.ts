@@ -281,6 +281,28 @@ export interface RoiReportView {
   }>;
 }
 
+export type McpAclMode = 'NONE' | 'ALLOW' | 'DENY';
+
+export interface McpAccessView {
+  serviceId: string;
+  serviceName: string;
+  mode: McpAclMode;
+  serverConsumers: Array<{ id: string; name: string }>;
+  tools: Array<{
+    toolId: string;
+    toolName: string;
+    /** Override mode; null = inherit the server rule. */
+    mode: McpAclMode | null;
+    consumers: Array<{ id: string; name: string }>;
+  }>;
+}
+
+export interface SetMcpAccessGrantsRequest {
+  toolId?: string;
+  mode: 'ALLOW' | 'DENY';
+  consumerIds: string[];
+}
+
 export interface UsageCost {
   upstreamPaid: string;
   gatewayObserved: string;
