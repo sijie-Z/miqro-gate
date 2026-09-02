@@ -9,7 +9,7 @@
 - Current goal: `P3.2`（内部服务管理：注册表 + URL 校验）
 - Goal status: `IN_PROGRESS`（实现与验证完成，待 PR 合并）
 - Last updated: `2026-09-01 CST`
-- Branch: `goal/g7.2-price-catalog`
+- Branch: `goal/p3.1-agent-management`
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
 
 ## Completed

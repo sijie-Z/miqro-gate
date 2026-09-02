@@ -623,13 +623,13 @@
 | 方法与路径 | 用途 |
 |---|---|
 | `GET /api/v1/admin/agents` / `/{id}` | 列表/详情（含派生的凭证名与产品名） |
-| `POST /api/v1/admin/agents` | 创建：`{ "name", "description"?, "credentialId" }`；凭证必须存在且 ACTIVE（`400 CREDENTIAL_NOT_FOUND`）、重名 `409 AGENT_NAME_TAKEN` |
+| `POST /api/v1/admin/agents` | 创建：`{ "name", "description"?, "credentialId" }`；凭证必须存在且 ACTIVE（`400 CREDENTIAL_NOT_FOUND`）、重名 `409 AGENT_NAME_TAKEN`、**凭证已被其他 Agent 绑定 `409 AGENT_CREDENTIAL_TAKEN`**（1:1 规则：一个凭证只支持一个 Agent，保证按 Agent 用量可区分） |
 | `POST /api/v1/admin/agents/{id}/disable` | 禁用（`409 AGENT_ALREADY_DISABLED` 重复禁用） |
 | `GET /api/v1/admin/agents/{id}/usage?from&to` | 按绑定凭证的用量汇总（请求/Token/成本，默认近 93 天） |
 
 **响应 `AgentView`**：`name`/`description`/`credentialId`/`credentialName`/`providerProductId`/`providerProductName`（派生）/`status`/`createdAt`。
 
-**错误码**：`AGENT_NOT_FOUND`（404）、`AGENT_NAME_TAKEN`（409）、`AGENT_ALREADY_DISABLED`（409）、`CREDENTIAL_NOT_FOUND`（400）。
+**错误码**：`AGENT_NOT_FOUND`（404）、`AGENT_NAME_TAKEN`（409）、`AGENT_CREDENTIAL_TAKEN`（409）、`AGENT_ALREADY_DISABLED`（409）、`CREDENTIAL_NOT_FOUND`（400）。
 
 ### 5.14 内部服务注册表（P3.2）
 
