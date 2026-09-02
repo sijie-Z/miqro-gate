@@ -14,6 +14,7 @@ import type {
   ConfigEntryView,
   ExportTask,
   InternalServiceView,
+  McpServiceView,
   SkillView,
   UsageDeletionRequest,
   WebhookDelivery,
@@ -409,6 +410,43 @@ export function adminPutConfig(body: {
 
 export function adminDeleteConfig(group: string, key: string): Promise<void> {
   return del<void>(`/api/v1/admin/configs/${encodeURIComponent(group)}/${encodeURIComponent(key)}`);
+}
+
+// ---- MCP services (P3.4) ----
+
+export function adminListMcpServices(): Promise<McpServiceView[]> {
+  return get<McpServiceView[]>('/api/v1/admin/mcp-services');
+}
+
+export function adminCreateMcpService(body: {
+  name: string;
+  description?: string;
+  endpoint: string;
+  transport?: string;
+  checkIntervalSeconds?: number;
+  checkTimeoutSeconds?: number;
+  failThreshold?: number;
+  recoverThreshold?: number;
+  checkPath?: string;
+}): Promise<McpServiceView> {
+  return post<McpServiceView>('/api/v1/admin/mcp-services', body);
+}
+
+export function adminSetMcpStatus(id: string, status: string): Promise<McpServiceView> {
+  return post<McpServiceView>(`/api/v1/admin/mcp-services/${id}/status?status=${status}`);
+}
+
+export function adminUpdateMcpHealthConfig(
+  id: string,
+  body: {
+    checkIntervalSeconds?: number;
+    checkTimeoutSeconds?: number;
+    failThreshold?: number;
+    recoverThreshold?: number;
+    checkPath?: string;
+  },
+): Promise<McpServiceView> {
+  return post<McpServiceView>(`/api/v1/admin/mcp-services/${id}/health-config`, body);
 }
 
 // ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----

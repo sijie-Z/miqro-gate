@@ -656,6 +656,21 @@
 - 名称规则：`[a-zA-Z][a-zA-Z0-9._-]{0,127}`（`CONFIG_NAME_INVALID` 400）；值必填（`CONFIG_VALUE_REQUIRED` 400）
 - 错误码：`CONFIG_NOT_FOUND`（404）、`CONFIG_NAME_INVALID`（400）、`CONFIG_VALUE_REQUIRED`（400）
 
+### 5.16 MCP 服务管理（P3.4，对标腾讯 AI 网关 MCP 管理）
+
+MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下线与健康检查」：下线后健康检查不会自动恢复，需手动上线；健康状态由失败/恢复阈值驱动）。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/mcp-services` / `/{id}` | 列表/详情（含健康状态与检查配置） |
+| `POST /api/v1/admin/mcp-services` | 注册：`{ "name", "description"?, "endpoint", "transport"?, "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"? }`（默认 STREAMABLE_HTTP / 30s / 5s / 3 / 1 / `/health`） |
+| `POST /api/v1/admin/mcp-services/{id}/status?status=ONLINE\|OFFLINE` | 手动上下线（重复切换 `409 MCP_STATUS_UNCHANGED`） |
+| `POST /api/v1/admin/mcp-services/{id}/health-config` | 更新健康检查配置 |
+
+- 接入地址：https、无 userinfo/query/fragment（`MCP_ENDPOINT_INVALID` 400）；重名 `409 MCP_SERVICE_NAME_TAKEN`
+- **健康检查**：`McpHealthChecker` 定时（`miqrokey.mcp.health-cycle-ms` 默认 15s）遍历 ONLINE 服务，按各自间隔探测 `endpoint + checkPath`（GET，2xx 计健康）；连续失败达 `failThreshold` → `UNHEALTHY`，连续成功达 `recoverThreshold` → `HEALTHY`；OFFLINE 服务不被探测
+- **错误码**：`MCP_SERVICE_NOT_FOUND`（404）、`MCP_SERVICE_NAME_TAKEN`（409）、`MCP_STATUS_UNCHANGED`（409）、`MCP_STATUS_INVALID`（400）、`MCP_ENDPOINT_INVALID`（400）
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

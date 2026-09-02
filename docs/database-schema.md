@@ -308,6 +308,10 @@ V14（ADR-0011）新增 JWT 验签公钥：`jwt_public_key_pem text`（RSA Subje
 
 全局配置中心：`group_name`、`key`、`value text`、`description`、`updated_by`（乐观 `version`）。唯一 `(tenant_id, group_name, key)`。仅非机密配置（机密走 env/加密凭证）。
 
+### `mcp_services` (V20，P3.4)
+
+MCP Server 管理：`name`、`description`、`endpoint`（https）、`transport`（`STREAMABLE_HTTP|SSE`）、`status`（`ONLINE|OFFLINE`，手动切换，健康检查不覆盖）、`health_status`（`UNKNOWN|HEALTHY|UNHEALTHY`）、`health_checked_at`、`consecutive_failures/successes`、检查配置（`check_interval_seconds`/`check_timeout_seconds`/`fail_threshold`/`recover_threshold`/`check_path`）。唯一 `(tenant_id, name)`；`(tenant_id, health_status)` 索引（探活列表）。
+
 ## 7. 告警、导出和审计
 
 ### `webhook_endpoints`
