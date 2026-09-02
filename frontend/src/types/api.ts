@@ -179,6 +179,44 @@ export interface MeGrantsResponse {
   purposes: VirtualKeyPurpose[];
 }
 
+export type ModelApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface SubmitModelApprovalRequest {
+  virtualKeyId: string;
+  modelId: string;
+  /** Applicant's stated justification, ≤ 500 chars. */
+  reason?: string;
+}
+
+export interface ReviewModelApprovalRequest {
+  /** Reviewer's decision note, ≤ 500 chars. */
+  reviewNote?: string;
+}
+
+export interface ModelApprovalView {
+  id: string;
+  virtualKeyId: string;
+  keyName?: string;
+  /** Masked key display (prefix…last4) — never the plaintext. */
+  keyDisplay?: string;
+  projectTag?: string;
+  modelId: string;
+  reason?: string;
+  status: ModelApprovalStatus;
+  requesterId: string;
+  requesterName: string;
+  reviewNote?: string;
+  reviewedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModelApprovalPage {
+  items: ModelApprovalView[];
+  /** Opaque keyset cursor for the next page; null/undefined = no more items. */
+  nextCursor?: string;
+}
+
 export interface UsageCost {
   upstreamPaid: string;
   gatewayObserved: string;
