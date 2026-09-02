@@ -51,13 +51,15 @@ public class AlertEvaluator {
     private final NamedParameterJdbcTemplate jdbc;
     private final WebhookEndpointService endpointService;
     private final AdminBudgetService budgetService;
+    private final AdminQuotaRuleService quotaRuleService;
     private final ObjectMapper objectMapper;
 
     public AlertEvaluator(NamedParameterJdbcTemplate jdbc, WebhookEndpointService endpointService,
-            AdminBudgetService budgetService, ObjectMapper objectMapper) {
+            AdminBudgetService budgetService, AdminQuotaRuleService quotaRuleService, ObjectMapper objectMapper) {
         this.jdbc = jdbc;
         this.endpointService = endpointService;
         this.budgetService = budgetService;
+        this.quotaRuleService = quotaRuleService;
         this.objectMapper = objectMapper;
     }
 
@@ -80,11 +82,16 @@ public class AlertEvaluator {
         if (value == null || value.compareTo(rule.threshold()) < 0) {
             return;
         }
-        // Budget watermarks are monthly: one event per (rule, month). The other
-        // metrics dedupe per (rule, hour) as before.
-        String dedupeKey = "BUDGET_THRESHOLD".equals(rule.type())
-                ? rule.type() + ":" + YearMonth.now()
-                : rule.type() + ":" + Instant.now().truncatedTo(ChronoUnit.HOURS);
+        // Scoped watermarks dedupe per reset window, not per hour: budgets are
+        // monthly, quota rules reset daily/weekly/monthly. The other metrics
+        // dedupe per (rule, hour) as before.
+        String dedupeKey;
+        switch (rule.type()) {
+            case "BUDGET_THRESHOLD" -> dedupeKey = "BUDGET_THRESHOLD:" + YearMonth.now();
+            case "QUOTA_THRESHOLD" ->
+                dedupeKey = "QUOTA_THRESHOLD:" + quotaWindowEpoch(rule.tenantId(), rule.scopeJson());
+            default -> dedupeKey = rule.type() + ":" + Instant.now().truncatedTo(ChronoUnit.HOURS);
+        }
         UUID eventId = UUID.randomUUID();
         Instant now = Instant.now();
         int inserted = jdbc.update("""
@@ -124,8 +131,45 @@ public class AlertEvaluator {
                     """);
             case "USAGE_SURGE" -> surge();
             case "BUDGET_THRESHOLD" -> budgetWatermark(tenantId, scopeJson);
+            case "QUOTA_THRESHOLD" -> quotaWatermark(tenantId, scopeJson);
             default -> null;
         };
+    }
+
+    /**
+     * The quota rule's current-window watermark as a percentage (used / limit ×
+     * 100); null when the scope is absent or the rule is disabled (nothing to alert
+     * on).
+     */
+    private BigDecimal quotaWatermark(UUID tenantId, String scopeJson) {
+        com.miqroera.miqrokey.controlplane.dto.QuotaRuleView view = quotaRuleView(tenantId, scopeJson);
+        return view == null || view.status() != com.miqroera.miqrokey.domain.model.QuotaRuleStatus.ACTIVE
+                ? null
+                : view.usedPct();
+    }
+
+    /**
+     * Epoch millis of the rule's current reset window (the watermark above was
+     * computed for this window) — used as the dedupe scope so a rule fires once per
+     * reset, not once per evaluation cycle.
+     */
+    private long quotaWindowEpoch(UUID tenantId, String scopeJson) {
+        com.miqroera.miqrokey.controlplane.dto.QuotaRuleView view = quotaRuleView(tenantId, scopeJson);
+        return view == null ? 0L : view.windowFrom().toEpochMilli();
+    }
+
+    private com.miqroera.miqrokey.controlplane.dto.QuotaRuleView quotaRuleView(UUID tenantId, String scopeJson) {
+        try {
+            JsonNode node = objectMapper.readTree(scopeJson);
+            String quotaRuleId = node.path("quotaRuleId").asText(null);
+            if (quotaRuleId == null) {
+                return null;
+            }
+            UUID id = UUID.fromString(quotaRuleId);
+            return quotaRuleService.list(tenantId).stream().filter(v -> v.id().equals(id)).findFirst().orElse(null);
+        } catch (Exception e) {
+            return null; // malformed scope — nothing to alert
+        }
     }
 
     /**
