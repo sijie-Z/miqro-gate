@@ -172,6 +172,21 @@ public class UsageDeletionService {
         }
     }
 
+    /**
+     * Reclaims deletion requests whose 1h confirmation window passed (F06):
+     * PENDING_CONFIRMATION / CONFIRMED / EXPIRED rows past {@code expires_at} are
+     * removed. EXECUTED requests are kept permanently (permanent audit, G4.4).
+     * Returns the number of removed requests.
+     */
+    @Transactional
+    public int sweepExpired() {
+        return jdbc.update("""
+                DELETE FROM usage_deletions
+                WHERE status IN ('PENDING_CONFIRMATION', 'CONFIRMED', 'EXPIRED')
+                  AND expires_at < now()
+                """, new MapSqlParameterSource());
+    }
+
     private static final RowMapper<UsageDeletion> ROW_MAPPER = (rs, rowNum) -> new UsageDeletion(
             (UUID) rs.getObject("id"), (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("requested_by"),
             rs.getTimestamp("period_from").toInstant(), rs.getTimestamp("period_to").toInstant(),
