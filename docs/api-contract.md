@@ -671,6 +671,19 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 - **健康检查**：`McpHealthChecker` 定时（`miqrokey.mcp.health-cycle-ms` 默认 15s）遍历 ONLINE 服务，按各自间隔探测 `endpoint + checkPath`（GET，2xx 计健康）；连续失败达 `failThreshold` → `UNHEALTHY`，连续成功达 `recoverThreshold` → `HEALTHY`；OFFLINE 服务不被探测
 - **错误码**：`MCP_SERVICE_NOT_FOUND`（404）、`MCP_SERVICE_NAME_TAKEN`（409）、`MCP_STATUS_UNCHANGED`（409）、`MCP_STATUS_INVALID`（400）、`MCP_ENDPOINT_INVALID`（400）
 
+### 5.17 MCP Tools 管理（P3.5，对标腾讯 AI 网关 Tools 管理）
+
+工具注册在 MCP 服务下，逐个启用/禁用（腾讯 Tools 管理语义）；工具名是 AI Agent 调用该工具的唯一标识。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/mcp-services/{id}/tools` | 服务下工具列表 |
+| `POST /api/v1/admin/mcp-services/{id}/tools` | 手动创建：`{ "toolName", "description"?, "method"?, "path" }`（方法默认 GET） |
+| `POST /api/v1/admin/mcp-services/{id}/tools/{toolId}/status?status=ENABLED\|DISABLED` | 单个工具启用/禁用（重复切换 `409 TOOL_STATUS_UNCHANGED`） |
+
+- `toolName` 规则：小写字母开头 snake_case（`TOOL_NAME_INVALID` 400）；`path` 必须以 `/` 开头（`TOOL_PATH_INVALID` 400）；同服务重名 `409 TOOL_NAME_TAKEN`；服务不存在 `404 MCP_SERVICE_NOT_FOUND`
+- **错误码**：`TOOL_NOT_FOUND`（404）、`TOOL_NAME_TAKEN`（409）、`TOOL_STATUS_UNCHANGED`（409）、`TOOL_STATUS_INVALID`（400）、`TOOL_NAME_INVALID`（400）、`TOOL_PATH_INVALID`（400）
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

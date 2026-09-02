@@ -6,6 +6,8 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import PageHeader from '@/components/PageHeader.vue';
 import { confirmDialog } from '@/utils/confirm';
+import type { McpServiceView, McpToolView } from '@/types/api';
+
 import type { McpServiceView } from '@/types/api';
 
 const services = ref<McpServiceView[]>([]);
@@ -39,6 +41,21 @@ const configForm = ref({
 });
 const configSaving = ref(false);
 const configError = ref('');
+
+// Tools dialog
+const toolsService = ref<McpServiceView | null>(null);
+const toolsVisible = ref(false);
+const tools = ref<McpToolView[]>([]);
+const toolsLoading = ref(false);
+const toolsError = ref('');
+const toolForm = ref({ toolName: '', description: '', method: 'GET', path: '' });
+const toolSaving = ref(false);
+const toolFormError = ref('');
+const toolCreating = ref(false);
+
+const canCreateTool = computed(
+  () => toolForm.value.toolName.trim().length > 0 && toolForm.value.path.trim().length > 0,
+);
 
 const canCreate = computed(
   () => form.value.name.trim().length > 0 && form.value.endpoint.trim().length > 0,
@@ -162,6 +179,64 @@ async function saveConfig() {
   }
 }
 
+async function openTools(service: McpServiceView) {
+  toolsService.value = service;
+  tools.value = [];
+  toolsError.value = '';
+  toolForm.value = { toolName: '', description: '', method: 'GET', path: '' };
+  toolCreating.value = false;
+  toolsVisible.value = true;
+  toolsLoading.value = true;
+  try {
+    tools.value = await api.adminListMcpTools(service.id);
+  } catch (error) {
+    toolsError.value = error instanceof ApiError ? error.message : '加载工具失败。';
+  } finally {
+    toolsLoading.value = false;
+  }
+}
+
+async function createTool() {
+  if (!toolsService.value || !canCreateTool.value) {
+    toolFormError.value = '请填写工具名与路径。';
+    return;
+  }
+  toolSaving.value = true;
+  toolFormError.value = '';
+  try {
+    await api.adminCreateMcpTool(toolsService.value.id, {
+      toolName: toolForm.value.toolName.trim(),
+      description: toolForm.value.description.trim() || undefined,
+      method: toolForm.value.method,
+      path: toolForm.value.path.trim(),
+    });
+    toolCreating.value = false;
+    toolForm.value = { toolName: '', description: '', method: 'GET', path: '' };
+    MessagePlugin.success('工具已创建');
+    tools.value = await api.adminListMcpTools(toolsService.value.id);
+  } catch (error) {
+    toolFormError.value = error instanceof ApiError ? error.message : '创建失败，请稍后重试。';
+  } finally {
+    toolSaving.value = false;
+  }
+}
+
+async function setToolStatus(tool: McpToolView, status: string) {
+  if (!toolsService.value) {
+    return;
+  }
+  const action = status === 'ENABLED' ? '启用' : '禁用';
+  try {
+    await api.adminSetMcpToolStatus(toolsService.value.id, tool.id, status);
+    MessagePlugin.success(`工具已${action}`);
+    tools.value = await api.adminListMcpTools(toolsService.value.id);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      MessagePlugin.error(error.message);
+    }
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -254,6 +329,7 @@ onMounted(load);
         </template>
         <template #healthCheckedAt="{ row }">{{ formatTime(row.healthCheckedAt) }}</template>
         <template #actions="{ row }">
+          <t-button variant="text" data-testid="mcp-tools" @click="openTools(row)">Tools</t-button>
           <t-button variant="text" data-testid="mcp-health-config" @click="openConfig(row)"
             >健康检查</t-button
           >
@@ -321,6 +397,109 @@ onMounted(load);
           保存
         </t-button>
         <t-button @click="configVisible = false">取消</t-button>
+      </template>
+    </t-dialog>
+
+    <t-dialog
+      v-model:visible="toolsVisible"
+      :header="toolsService ? `Tools · ${toolsService.name}` : 'Tools'"
+      width="640px"
+      :close-on-overlay-click="false"
+    >
+      <t-loading :loading="toolsLoading" size="small">
+        <div v-if="toolsError" class="form-error">{{ toolsError }}</div>
+        <div v-if="tools.length" class="tool-rows" data-testid="mcp-tool-list">
+          <div v-for="tool in tools" :key="tool.id" class="tool-row">
+            <div class="tool-info">
+              <span class="mk-mono tool-name">{{ tool.toolName }}</span>
+              <span class="tool-desc">{{ tool.description || '—' }}</span>
+              <span class="mk-mono tool-path">{{ tool.method }} {{ tool.path }}</span>
+            </div>
+            <span
+              class="mk-status"
+              :class="tool.status === 'ENABLED' ? 'mk-status--success' : 'mk-status--neutral'"
+            >
+              {{ tool.status === 'ENABLED' ? 'Enabled' : 'Disabled' }}
+            </span>
+            <t-button
+              v-if="tool.status === 'ENABLED'"
+              variant="text"
+              theme="danger"
+              data-testid="mcp-tool-disable"
+              @click="setToolStatus(tool, 'DISABLED')"
+            >
+              禁用
+            </t-button>
+            <t-button
+              v-else
+              variant="text"
+              data-testid="mcp-tool-enable"
+              @click="setToolStatus(tool, 'ENABLED')"
+            >
+              启用
+            </t-button>
+          </div>
+        </div>
+        <div v-else-if="!toolsLoading && !toolsError" class="tool-empty">
+          <p>该服务还没有工具。</p>
+          <p class="hint">手动创建工具后，AI Agent 即可按工具名调用。</p>
+        </div>
+      </t-loading>
+      <div class="tool-create">
+        <t-button
+          variant="outline"
+          size="small"
+          data-testid="mcp-tool-create-open"
+          @click="toolCreating = !toolCreating"
+        >
+          {{ toolCreating ? '收起表单' : '新建工具' }}
+        </t-button>
+        <div v-if="toolCreating" class="tool-create-form" data-testid="mcp-tool-create-form">
+          <t-form label-align="top">
+            <div class="form-row">
+              <t-form-item label="工具名" required-mark>
+                <t-input
+                  v-model="toolForm.toolName"
+                  placeholder="query_order"
+                  data-testid="mcp-tool-name"
+                />
+              </t-form-item>
+              <t-form-item label="方法">
+                <t-select v-model="toolForm.method">
+                  <t-option label="GET" value="GET" />
+                  <t-option label="POST" value="POST" />
+                  <t-option label="PUT" value="PUT" />
+                  <t-option label="DELETE" value="DELETE" />
+                  <t-option label="PATCH" value="PATCH" />
+                </t-select>
+              </t-form-item>
+            </div>
+            <t-form-item label="路径" required-mark>
+              <t-input
+                v-model="toolForm.path"
+                placeholder="/orders/{id}"
+                data-testid="mcp-tool-path"
+              />
+            </t-form-item>
+            <t-form-item label="描述">
+              <t-input v-model="toolForm.description" placeholder="工具用途（可选）" />
+            </t-form-item>
+            <p v-if="toolFormError" class="form-error">{{ toolFormError }}</p>
+            <t-button
+              theme="primary"
+              size="small"
+              :disabled="!canCreateTool"
+              :loading="toolSaving"
+              data-testid="mcp-tool-create-submit"
+              @click="createTool"
+            >
+              创建
+            </t-button>
+          </t-form>
+        </div>
+      </div>
+      <template #footer>
+        <t-button @click="toolsVisible = false">关闭</t-button>
       </template>
     </t-dialog>
   </div>
@@ -395,5 +574,63 @@ onMounted(load);
 
 .form-row .t-form__item {
   flex: 1;
+}
+
+.tool-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--miqrokey-border-muted);
+  border-radius: var(--miqrokey-radius-panel);
+}
+
+.tool-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tool-name {
+  font-weight: 500;
+}
+
+.tool-desc {
+  font-size: 12px;
+  color: var(--miqrokey-text-secondary);
+}
+
+.tool-path {
+  font-size: 12px;
+  color: var(--miqrokey-text-disabled);
+}
+
+.tool-empty {
+  padding: 16px 0;
+  color: var(--miqrokey-text-secondary);
+}
+
+.tool-empty .hint {
+  font-size: 12px;
+  color: var(--miqrokey-text-disabled);
+  margin: 4px 0 0;
+}
+
+.tool-create {
+  border-top: 1px solid var(--miqrokey-border-muted);
+  padding-top: 16px;
+}
+
+.tool-create-form {
+  margin-top: 12px;
 }
 </style>

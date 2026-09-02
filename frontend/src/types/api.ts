@@ -88,6 +88,17 @@ export interface McpServiceView {
   createdAt: string;
 }
 
+export interface McpToolView {
+  id: string;
+  mcpServiceId: string;
+  toolName: string;
+  description?: string;
+  method: string;
+  path: string;
+  status: string;
+  createdAt: string;
+}
+
 export interface BudgetView {
   projectId: string;
   projectCode: string;

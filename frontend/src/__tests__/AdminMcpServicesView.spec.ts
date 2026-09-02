@@ -11,6 +11,9 @@ vi.mock('@/api', () => ({
   adminCreateMcpService: vi.fn(),
   adminSetMcpStatus: vi.fn(),
   adminUpdateMcpHealthConfig: vi.fn(),
+  adminListMcpTools: vi.fn(),
+  adminCreateMcpTool: vi.fn(),
+  adminSetMcpToolStatus: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -136,5 +139,84 @@ describe('AdminMcpServicesView', () => {
         checkPath: '/ready',
       },
     );
+  });
+
+  it('lists tools and disables one from the tools dialog', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminListMcpTools.mockResolvedValue([
+      {
+        id: 't1',
+        mcpServiceId: '0190-0000-0000-0000-0000000000f2',
+        toolName: 'query_order',
+        description: '查询订单',
+        method: 'GET',
+        path: '/orders/{id}',
+        status: 'ENABLED',
+        createdAt: '2026-09-01T00:00:00Z',
+      },
+    ]);
+    mockApi.adminSetMcpToolStatus.mockResolvedValue({
+      id: 't1',
+      mcpServiceId: '0190-0000-0000-0000-0000000000f2',
+      toolName: 'query_order',
+      description: '查询订单',
+      method: 'GET',
+      path: '/orders/{id}',
+      status: 'DISABLED',
+      createdAt: '2026-09-01T00:00:00Z',
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-tools"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="mcp-tool-list"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('query_order');
+    expect(wrapper.text()).toContain('/orders/{id}');
+
+    await wrapper.find('[data-testid="mcp-tool-disable"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.adminSetMcpToolStatus).toHaveBeenCalledWith(
+      '0190-0000-0000-0000-0000000000f2',
+      't1',
+      'DISABLED',
+    );
+  });
+
+  it('creates a tool from the tools dialog', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminListMcpTools.mockResolvedValue([]);
+    mockApi.adminCreateMcpTool.mockResolvedValue({
+      id: 't1',
+      mcpServiceId: '0190-0000-0000-0000-0000000000f2',
+      toolName: 'create_order',
+      description: undefined,
+      method: 'POST',
+      path: '/orders',
+      status: 'ENABLED',
+      createdAt: '2026-09-01T00:00:00Z',
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-tools"]').trigger('click');
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-tool-create-open"]').trigger('click');
+    await wrapper.find('[data-testid="mcp-tool-name"] input').setValue('create_order');
+    await wrapper.find('[data-testid="mcp-tool-path"] input').setValue('/orders');
+    await wrapper.find('[data-testid="mcp-tool-create-submit"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.adminCreateMcpTool).toHaveBeenCalledWith('0190-0000-0000-0000-0000000000f2', {
+      toolName: 'create_order',
+      description: undefined,
+      method: 'GET',
+      path: '/orders',
+    });
   });
 });
