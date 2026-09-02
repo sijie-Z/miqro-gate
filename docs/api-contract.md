@@ -275,7 +275,15 @@
 
 审计事件：`MODEL_APPROVAL_SUBMITTED` / `MODEL_APPROVAL_APPROVED` / `MODEL_APPROVAL_REJECTED`（target=MODEL_APPROVAL，summary 含 virtualKeyId/modelId，自动批准含 `"autoApproved":true`）。
 
-### 4.7 错误码
+### 4.7 我的配额 `GET /api/v1/me/quota-rules`（F04）
+
+用户自助配额可见性：调用者名下的 **USER 作用域**配额规则 + 当前窗口实时水位（只读）。管理员设置的规则（含默认配额模板自动复制）对用户透明展示；停用规则仍可见。
+
+- 响应 = `QuotaRuleView[]`（同 `5.19` 管理端视图字段：metric/period/limitValue/warnPercent/status/used/usedPct/level/windowFrom/windowTo 等）——仅含 `scopeId == 当前用户` 的行，其他人/项目规则绝不出现。
+- 口径与审计同 `5.19`（水位读时计算、NORMAL/WARNING/EXCEEDED）；本端点不触发审计（只读）。
+- 会话鉴权（任意角色，含普通用户）；匿名 `401`。无规则时返回空数组。
+
+### 4.8 错误码
 
 | code | HTTP | 场景 |
 |---|---|---|

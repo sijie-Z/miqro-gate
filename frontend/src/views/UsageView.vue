@@ -4,7 +4,15 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import * as api from '@/api';
 import PageHeader from '@/components/PageHeader.vue';
 import { ApiError } from '@/api/http';
-import type { UsageGroupBy, UsageSummary, UsageRecordPage } from '@/types/api';
+import type {
+  QuotaLevel,
+  QuotaMetric,
+  QuotaPeriod,
+  QuotaRuleView,
+  UsageGroupBy,
+  UsageSummary,
+  UsageRecordPage,
+} from '@/types/api';
 
 const groupBy = ref<UsageGroupBy>('project');
 const summary = ref<UsageSummary | null>(null);
@@ -16,6 +24,40 @@ const recordsLoading = ref(true);
 const recordsError = ref('');
 const page = ref(1);
 const pageSize = ref(20);
+
+// ---- self-service quota visibility (F04) ----
+
+const myQuotaRules = ref<QuotaRuleView[]>([]);
+const quotaLoading = ref(true);
+
+const quotaMetricText: Record<QuotaMetric, string> = { TOKENS: 'Token 用量', REQUESTS: '请求次数' };
+const quotaPeriodText: Record<QuotaPeriod, string> = {
+  DAILY: '每日',
+  WEEKLY: '每周',
+  MONTHLY: '每月',
+};
+const quotaLevelText: Record<QuotaLevel, string> = {
+  NORMAL: '正常',
+  WARNING: '预警',
+  EXCEEDED: '超限',
+};
+
+function quotaLevelClass(level: QuotaLevel): string {
+  if (level === 'EXCEEDED') return 'mk-status--danger';
+  if (level === 'WARNING') return 'mk-status--warning';
+  return 'mk-status--success';
+}
+
+async function loadQuota() {
+  quotaLoading.value = true;
+  try {
+    myQuotaRules.value = await api.listMyQuotaRules();
+  } catch {
+    myQuotaRules.value = []; // panel degrades silently — usage views stay usable
+  } finally {
+    quotaLoading.value = false;
+  }
+}
 
 const summaryColumns = [
   { colKey: 'group', title: '分组', minWidth: 160 },
@@ -60,6 +102,7 @@ const cacheLevelLabel: Record<string, string> = {
 onMounted(() => {
   void loadSummary();
   void loadRecords();
+  void loadQuota();
 });
 
 async function loadSummary() {
@@ -188,6 +231,57 @@ function formatTime(iso: string): string {
         </t-button>
       </template>
     </PageHeader>
+
+    <!-- Self-service quota visibility (F04) -->
+    <section class="quota-panel" data-testid="my-quota-panel">
+      <div class="panel-head">
+        <span class="panel-title">我的配额</span>
+        <span class="panel-sub"
+          >管理员为你设置的用户级限额；当前窗口用量实时计算，超限仅提示不阻断。</span
+        >
+      </div>
+      <t-loading :loading="quotaLoading" size="small" show-overlay>
+        <div v-if="!quotaLoading && myQuotaRules.length === 0" class="quota-empty">
+          暂无配额规则——管理员未为你设置用量限额。
+        </div>
+        <div
+          v-for="rule in myQuotaRules"
+          :key="rule.id"
+          class="quota-row"
+          data-testid="my-quota-row"
+        >
+          <div class="quota-row-head">
+            <span class="quota-dim"
+              >{{ quotaMetricText[rule.metric] }} · {{ quotaPeriodText[rule.period] }}</span
+            >
+            <span v-if="rule.status === 'DISABLED'" class="mk-status mk-status--neutral">停用</span>
+            <span v-else class="mk-status" :class="quotaLevelClass(rule.level)">{{
+              quotaLevelText[rule.level]
+            }}</span>
+          </div>
+          <div class="quota-row-body">
+            <span class="quota-nums"
+              >限额 {{ rule.limitValue.toLocaleString() }} · 本期用量
+              {{ rule.used.toLocaleString() }}（{{ rule.usedPct }}%）</span
+            >
+            <div class="quota-bar">
+              <div
+                class="quota-bar-fill"
+                :style="{
+                  width: `${Math.min(100, rule.usedPct)}%`,
+                  background:
+                    rule.level === 'EXCEEDED'
+                      ? 'var(--td-error-color)'
+                      : rule.level === 'WARNING'
+                        ? 'var(--td-warning-color)'
+                        : 'var(--td-brand-color)',
+                }"
+              ></div>
+            </div>
+          </div>
+        </div>
+      </t-loading>
+    </section>
 
     <!-- Summary -->
     <section class="summary-panel">
@@ -416,5 +510,64 @@ function formatTime(iso: string): string {
 .table-empty {
   padding: 16px 0;
   color: var(--miqrokey-text-secondary);
+}
+
+.quota-panel {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--td-radius-default);
+}
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.panel-title {
+  font-weight: 600;
+}
+.panel-sub {
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+}
+.quota-empty {
+  padding: 8px 0;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+}
+.quota-row {
+  padding: 10px 0;
+  border-top: 1px solid var(--td-component-stroke);
+}
+.quota-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.quota-dim {
+  font-weight: 500;
+}
+.quota-row-body {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.quota-nums {
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.quota-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--td-bg-color-component);
+  overflow: hidden;
+}
+.quota-bar-fill {
+  height: 100%;
+  border-radius: 3px;
 }
 </style>
