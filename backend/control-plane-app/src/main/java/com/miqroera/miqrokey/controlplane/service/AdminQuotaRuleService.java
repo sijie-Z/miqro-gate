@@ -64,6 +64,17 @@ public class AdminQuotaRuleService {
     }
 
     /**
+     * USER-scope rules that apply to the given user — the self-service visibility
+     * slice of the admin list (F04): the user sees exactly the plans set on their
+     * own account, watermarks and all, never another scope's rules.
+     */
+    public List<QuotaRuleView> listForUser(UUID tenantId, UUID userId) {
+        return quotaRuleRepository.findAllByTenant(tenantId).stream()
+                .filter(rule -> rule.scopeType() == QuotaScopeType.USER && rule.scopeId().equals(userId))
+                .map(rule -> view(tenantId, rule)).toList();
+    }
+
+    /**
      * Inserts or updates the plan keyed on (tenant, scope, metric, period). An
      * existing rule keeps its id, version bumps and created_at stays.
      */
