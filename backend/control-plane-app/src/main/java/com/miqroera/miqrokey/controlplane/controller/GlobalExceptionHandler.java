@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.miqroera.miqrokey.controlplane.security.AuthenticationException;
 import com.miqroera.miqrokey.controlplane.security.ResourceOwnershipException;
 import com.miqroera.miqrokey.controlplane.service.ApiException;
@@ -9,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -97,6 +99,36 @@ public class GlobalExceptionHandler {
         body.put("detail", "Parameter '" + e.getName() + "' has an invalid value.");
         body.put("requestId", requestId);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
+    }
+
+    /**
+     * Malformed request JSON (unknown enum value, wrong type, truncated body) is a
+     * client error, never a 500: 400 PARAM_INVALID with the field name when the
+     * parser reports one.
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, Object>> handleUnreadableBody(HttpMessageNotReadableException e,
+            HttpServletRequest request) {
+        String requestId = resolveRequestId(request);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("type", "about:blank");
+        body.put("title", "Invalid request body");
+        body.put("status", 400);
+        body.put("code", "PARAM_INVALID");
+        String field = fieldOf(e);
+        body.put("detail",
+                field == null
+                        ? "The request body is not valid JSON for this endpoint."
+                        : "Field '" + field + "' has an invalid value.");
+        body.put("requestId", requestId);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
+    }
+
+    private static String fieldOf(HttpMessageNotReadableException e) {
+        if (e.getCause() instanceof InvalidFormatException ife && ife.getPath() != null && !ife.getPath().isEmpty()) {
+            return ife.getPath().get(ife.getPath().size() - 1).getFieldName();
+        }
+        return null;
     }
 
     @ExceptionHandler(Exception.class)
