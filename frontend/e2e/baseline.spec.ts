@@ -76,6 +76,41 @@ const KEYS = [
   },
 ];
 
+const MODEL_APPROVALS = [
+  {
+    id: '0190-0000-0000-0031',
+    virtualKeyId: '0190-0000-0000-0002',
+    keyName: 'claude-code-main',
+    keyDisplay: 'mqk_live_…8f2a',
+    projectTag: 'core-ai',
+    modelId: 'deepseek-v4-flash',
+    reason: '编码任务需要更强的推理模型',
+    status: 'PENDING',
+    requesterId: '0190-0000-0000-0041',
+    requesterName: '张三',
+    reviewNote: null,
+    reviewedByName: null,
+    createdAt: '2026-09-02T00:00:00Z',
+    updatedAt: '2026-09-02T00:00:00Z',
+  },
+  {
+    id: '0190-0000-0000-0032',
+    virtualKeyId: '0190-0000-0000-0003',
+    keyName: 'codex-tools',
+    keyDisplay: 'mqk_live_…1b4c',
+    projectTag: 'tools',
+    modelId: 'glm-5',
+    reason: null,
+    status: 'APPROVED',
+    requesterId: '0190-0000-0000-0041',
+    requesterName: '张三',
+    reviewNote: 'granted',
+    reviewedByName: 'Admin',
+    createdAt: '2026-09-01T00:00:00Z',
+    updatedAt: '2026-09-01T00:00:00Z',
+  },
+];
+
 /** Mocks the control-plane API so the shell renders without a backend. */
 async function mockApi(page: Page, admin = false) {
   await page.route('**/api/v1/auth/me', async (route) => {
@@ -91,6 +126,20 @@ async function mockApi(page: Page, admin = false) {
   });
   await page.route('**/api/v1/me/virtual-keys', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(KEYS) }),
+  );
+  await page.route('**/api/v1/me/model-approvals', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(MODEL_APPROVALS),
+    }),
+  );
+  await page.route('**/api/v1/admin/model-approvals*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: MODEL_APPROVALS, nextCursor: null }),
+    }),
   );
   await page.route('**/api/v1/me/usage/**', (route) =>
     route.fulfill({
@@ -699,6 +748,7 @@ const ADMIN_PAGES = [
   { path: '/app/teams', testid: 'teams-table', expect: 'Platform' },
   { path: '/app/projects', testid: 'projects-table', expect: 'Core AI' },
   { path: '/app/grants', testid: 'grants-table', expect: 'ACTIVE' },
+  { path: '/app/approval-center', testid: 'approvals-queue-table', expect: 'deepseek-v4-flash' },
   { path: '/app/plans', testid: 'subscriptions-table', expect: 'DeepSeek PAYG' },
   { path: '/app/webhooks', testid: 'webhooks-table', expect: 'ops-alerts' },
   { path: '/app/alert-rules', testid: 'rules-table', expect: 'usage-missing' },
@@ -722,6 +772,20 @@ for (const pageCfg of ADMIN_PAGES) {
     });
   });
 }
+
+test('model approval request page baseline at 1440x900', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/model-approvals');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('model-approvals-table')).toBeVisible();
+  await expect(page.getByTestId('model-approvals-table')).toContainText('deepseek-v4-flash');
+  await expect(page.getByTestId('model-approvals-table')).toContainText('待审批');
+  await page.screenshot({
+    path: 'test-results/baseline/model-approvals-1440x900.png',
+    fullPage: true,
+  });
+});
 
 test('forbidden aesthetics are absent from the rendered shell', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });

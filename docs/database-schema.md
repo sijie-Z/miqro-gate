@@ -191,12 +191,14 @@ Key → 项目绑定（标签路由的鉴权权威），与 `virtual_keys.projec
 - 复合 FK 到 `virtual_keys(tenant_id, id)` 和 `projects(tenant_id, id)`（防跨租户）
 - 唯一 `(virtual_key_id, project_id)`；`project_id`、`tenant_id` 索引
 
-### `model_approval` (V4)
+### `model_approval` (V4 + V22)
 
-为 Key 追加模型的审批工作流：
+为 Key 追加模型的审批工作流（接线于模型申请审批 Goal；`reviewed_by IS NULL` = 白名单自动批准）：
 
-- `virtual_key_id`、`model_id`、`requested_by`、`status`（`PENDING|APPROVED|REJECTED`）、`reviewed_by`、`review_note varchar(500)`、`version`
+- `virtual_key_id`、`model_id`、`requested_by`、`status`（`PENDING|APPROVED|REJECTED`）、`reviewed_by`、`reason varchar(500)`（V22 新增，申请理由）、`review_note varchar(500)`（审核意见）、`version`（乐观锁，PENDING → 终态唯一一次）
 - 复合 FK 到 Key 和 `users(tenant_id, id)`；`virtual_key_id`、`status`、`tenant_id` 索引
+- **无重复申请的数据库约束**：同 Key 同模型重复 PENDING 由服务层检查（`409 DUPLICATE_PENDING`）
+- **审批生效**：`APPROVED` 行的 `model_id` 写入 `virtual_key_models`（申请 Key）+ `project_provider_grant_models`（如缺失）并触发路由快照即时刷新——两表分别对应网关放行的 Key 层与 Grant 层
 
 ## 6. 请求与用量
 

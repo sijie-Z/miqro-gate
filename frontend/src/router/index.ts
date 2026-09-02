@@ -54,6 +54,12 @@ const router = createRouter({
           meta: { title: 'SkillHub' },
         },
         {
+          path: 'model-approvals',
+          name: 'model-approvals',
+          component: () => import('@/views/ModelApprovalsView.vue'),
+          meta: { title: '模型申请' },
+        },
+        {
           path: 'users',
           name: 'users',
           component: () => import('@/views/AdminUsersView.vue'),
@@ -76,6 +82,12 @@ const router = createRouter({
           name: 'grants',
           component: () => import('@/views/AdminGrantsView.vue'),
           meta: adminMeta('Grants'),
+        },
+        {
+          path: 'approval-center',
+          name: 'approval-center',
+          component: () => import('@/views/AdminModelApprovalsView.vue'),
+          meta: adminMeta('审批中心'),
         },
         {
           path: 'providers',

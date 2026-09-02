@@ -25,6 +25,10 @@ miqrokey:
       connect-timeout: ${MIQROKEY_CONTROL_PROVIDER_CLIENT_CONNECT_TIMEOUT:10s}
       request-timeout: ${MIQROKEY_CONTROL_PROVIDER_CLIENT_REQUEST_TIMEOUT:30s}
       max-response-bytes: ${MIQROKEY_CONTROL_PROVIDER_CLIENT_MAX_RESPONSE_BYTES:1048576}
+  approval:
+    # Model IDs that skip the review cycle (exact, case-sensitive). A request
+    # for a whitelisted model is auto-approved and takes effect immediately.
+    whitelist-models: ${MIQROKEY_APPROVAL_WHITELIST_MODELS:}
 
 # Actuator
 management:

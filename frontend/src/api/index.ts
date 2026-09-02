@@ -30,6 +30,10 @@ import type {
   LoginResponse,
   MeGrantsResponse,
   MemberView,
+  ModelApprovalPage,
+  ModelApprovalStatus,
+  ModelApprovalView,
+  SubmitModelApprovalRequest,
   Provider,
   ProviderProductView,
   SeatView,
@@ -90,6 +94,18 @@ export function revokeVirtualKey(id: string): Promise<{ message: string }> {
 
 export function myGrants(): Promise<MeGrantsResponse> {
   return get<MeGrantsResponse>('/api/v1/me/grants');
+}
+
+// ---- self-service model approvals (model-approval workflow) ----
+
+export function submitModelApproval(
+  request: SubmitModelApprovalRequest,
+): Promise<ModelApprovalView> {
+  return post<ModelApprovalView>('/api/v1/me/model-approvals', request);
+}
+
+export function listMyModelApprovals(): Promise<ModelApprovalView[]> {
+  return get<ModelApprovalView[]>('/api/v1/me/model-approvals');
 }
 
 // ---- usage ----
@@ -206,6 +222,32 @@ export function updateGrantModels(grantId: string, models: string[]): Promise<Gr
 
 export function disableGrant(grantId: string): Promise<void> {
   return del<void>(`/api/v1/admin/grants/${grantId}`);
+}
+
+// ---- admin model-approval queue ----
+
+export function listModelApprovals(
+  params: {
+    status?: ModelApprovalStatus;
+    size?: number;
+    before?: string;
+  } = {},
+): Promise<ModelApprovalPage> {
+  return get<ModelApprovalPage>('/api/v1/admin/model-approvals', params);
+}
+
+export function approveModelApproval(id: string, reviewNote?: string): Promise<ModelApprovalView> {
+  return post<ModelApprovalView>(
+    `/api/v1/admin/model-approvals/${id}/approve`,
+    reviewNote ? { reviewNote } : {},
+  );
+}
+
+export function rejectModelApproval(id: string, reviewNote?: string): Promise<ModelApprovalView> {
+  return post<ModelApprovalView>(
+    `/api/v1/admin/model-approvals/${id}/reject`,
+    reviewNote ? { reviewNote } : {},
+  );
 }
 
 export function listCredentials(): Promise<CredentialView[]> {

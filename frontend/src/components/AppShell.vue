@@ -4,9 +4,11 @@ import { useRoute, useRouter } from 'vue-router';
 import {
   AppIcon,
   ChartBarIcon,
+  CheckCircleIcon,
   DashboardIcon,
   DeleteIcon,
   DownloadIcon,
+  EditIcon,
   ErrorCircleIcon,
   FilePasteIcon,
   FolderOpenIcon,
@@ -45,6 +47,7 @@ const regularNav: NavItem[] = [
   { name: 'usage', label: 'Usage', icon: ChartBarIcon },
   { name: 'profile', label: 'Profile', icon: UserIcon },
   { name: 'skills', label: 'SkillHub', icon: AppIcon },
+  { name: 'model-approvals', label: '模型申请', icon: EditIcon },
 ];
 
 const orgNav: NavItem[] = [
@@ -52,6 +55,7 @@ const orgNav: NavItem[] = [
   { name: 'teams', label: 'Teams', icon: UsergroupCircleIcon },
   { name: 'projects', label: 'Projects', icon: FolderOpenIcon },
   { name: 'grants', label: 'Grants', icon: LockOnIcon },
+  { name: 'approval-center', label: '审批中心', icon: CheckCircleIcon },
 ];
 
 const providerNav: NavItem[] = [
