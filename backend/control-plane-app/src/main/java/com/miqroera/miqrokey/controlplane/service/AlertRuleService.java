@@ -101,10 +101,12 @@ public class AlertRuleService {
 
     private static void validateType(String type) {
         if (!List.of("USAGE_MISSING_RATE", "UPSTREAM_ERROR_RATE", "BALANCE_UNAVAILABLE", "USAGE_SURGE",
-                "BUDGET_THRESHOLD", "QUOTA_THRESHOLD").contains(type)) {
+                "BUDGET_THRESHOLD", "QUOTA_THRESHOLD", "MODEL_APPROVAL_SUBMITTED", "MODEL_APPROVAL_APPROVED",
+                "MODEL_APPROVAL_REJECTED").contains(type)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "ALERT_TYPE_INVALID",
                     "type must be one of USAGE_MISSING_RATE, UPSTREAM_ERROR_RATE, BALANCE_UNAVAILABLE, "
-                            + "USAGE_SURGE, BUDGET_THRESHOLD, QUOTA_THRESHOLD");
+                            + "USAGE_SURGE, BUDGET_THRESHOLD, QUOTA_THRESHOLD, MODEL_APPROVAL_SUBMITTED, "
+                            + "MODEL_APPROVAL_APPROVED, MODEL_APPROVAL_REJECTED");
         }
     }
 
