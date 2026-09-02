@@ -2,7 +2,7 @@
 
 MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；版本号语义化（MAJOR.MINOR.PATCH）。
 
-## [Unreleased] — 2026-08-29（界面与成本账本增强）
+## [Unreleased] — 截至 2026-09-02（发布候选基线）
 
 ### G7.x — 对照腾讯云 / 阿里云 AI 网关能力
 
@@ -14,7 +14,34 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - 修复（自测发现）：登录提交链路失效、t-drawer 标题/默认 footer、DialogPlugin.confirm 非 Promise（危险操作确认前即执行，全站修复）、jsdom 缺 ResizeObserver 等。
 - 工程：CI 拆分 6+ job + 路径过滤 + CodeQL + npm audit；CodeRabbit / Dependabot / OSSF Scorecard / Stale；Issue 模板 / SECURITY.md / 标签体系；GitHub 公开 + MIT。
 
-## [0.1.0] — 2026-08-26（首个候选版本，未标记 VERIFIED）
+### G8.x — 平台中间件 P0/P1（外部系统通道与预算告警）
+
+- **G8.1 消费者 API Key + JWT 双认证通道**（ADR-0010/0011，对齐阿里消费者认证）：`api_consumers` 表（Key 仅存 SHA-256 哈希）；`/api/v1/billing/**` 对外通道（summary/records 全租户用量、仅元数据）；JWT 可选 RS256 验签公钥（平台私钥签发，JDK 原生验签零三方库，exp/nbf/size 校验）；Key 轮换/吊销即时失效；消费者管理 UI（一次性 Key 弹窗/吊销）；配额状态端点 `GET /api/v1/billing/quota`（订阅分组最新快照，外部视图不暴露内部字段）。
+- **G8.2 项目月度预算**：`budget` 管理面落地（水位 = 当月分摊成本实时计算，NORMAL/WARNING/EXCEEDED 三态）；成本页「月度预算」面板（汇总水位条 + 每项目编辑/删除）。只告警不阻断。
+- **G8.3 预算水位告警**：`BUDGET_THRESHOLD` 规则类型（scope=项目、阈值百分比、同月按（规则×月份）去重一次）→ 事件 + HMAC 签名 Webhook 投递；项目不存在/跨租户 400。
+- 测试基建：共享 Testcontainers 连接耗尽修复（测试池降至 10 + 容器 `max_connections=200`）。
+
+### P2 SkillHub — 技能目录（Anthropic Agent Skills 格式）
+
+- P2.1 形态调研（存档于 platform-middleware-roadmap.md）：格式采用 Anthropic Agent Skills 规范（SKILL.md frontmatter），分发对标腾讯 SkillHub 应用商店模式。
+- P2.2/P2.3 后端（V16 `skills`/`skill_access`）：上传 zip 校验（单根目录、name 与目录一致、保留词禁令、5MB/200 条目/512KB 上限 zip 炸弹防护，只读 SKILL.md 不解压其余）；目录公开（全部 ACTIVE 可见）+ 下载双层授权（无授权行=公开、TEAM/PROJECT 成员、管理员绕过）；上传 upsert/归档/授权整体替换（修复 upsert 硬编码 ACTIVE 覆盖归档的真实缺陷）。
+- P2.4 前端：SkillHub 浏览页（全员：卡片网格 + 下载门禁 403 友好提示）+ 管理上传页（zip + 语义化版本、授权弹窗）。
+
+### P3 内部治理 — Agent / 服务 / 全局配置 / MCP
+
+- P3.1 Agent 管理（V17）：绑定 ACTIVE 凭证（产品由凭证→订阅派生）、重名校验、禁用乐观锁、按凭证聚合用量；凭证轮换/吊销后 Agent 自动失效（级联 RESTRICT）。
+- P3.2 服务注册（V18）：内部服务目录（HTTP/MCP/OTHER），base_url 校验镜像上游目标规则（https 必选、无 userinfo/query/fragment）、重名 409。
+- P3.3 全局配置中心（V19）：分组键值 + 乐观 version upsert；名称白名单规则；仅非机密配置（机密走 env/加密凭证体系）。
+- P3.4 MCP 服务管理（V20，对标腾讯 MCP 管理）：传输/上下线/健康三态；`McpHealthChecker` 定时 15s 探测 ONLINE 服务（GET 2xx 计健康、连续失败/成功达阈值翻转 UNHEALTHY/HEALTHY，手动下线不被健康检查覆盖）；失败恢复计数器。
+- P3.5 MCP Tools 管理（V21，对标腾讯 Tools 管理）：工具注册（snake_case 名唯一标识/描述/方法/路径）+ 逐个启停 + 同服务重名 409；绑定服务级联删除。
+
+### 真实联调、研究与发布状态
+
+- **DeepSeek 官方 Key 全链路联调（2026-08-30）**：bootstrap→凭证→Grant→Virtual Key→真实推理（`MQROK-DRILL-OK`）→用量落库（含 cacheCreation）→成本精确断言全通过；修复真实容器缺陷（SessionFilter order 先于 RequestContextFilter 导致带 session 请求 500）+ 新增 `CatalogSeedService`（启动幂等 seed 8 供应商/23 产品，URL 只来自签名目录）。
+- **腾讯云 AI 网关 30 篇文档研究**（入库 `docs/tencent-ai-gateway-study/`）：A 类 15 项元数据级设计可直接借鉴（MCP 两级 ACL、消费者默认配额快照复制、Agent 服务分离、Tools 版本/重试/熔断、模型探测、操作记录等）；B 类 4 项（参数改写/流量镜像/脱敏/包体采集）与「不读正文」产品决策冲突仅对照。
+- **发布状态**：代码版本 0.1.0-SNAPSHOT / 前端 0.1.0，从未打 tag；23 产品真实凭证契约测试全部 `WAITING_FOR_CREDENTIAL`（禁止标记 VERIFIED）；G6.5 收尾后为发布候选基线，正式版本号与 tag 由发布负责人授权后记录。
+
+## [0.1.0] — 2026-08-26（首个候选版本，未标记 VERIFIED；从未 tag/发布，历史归档）
 
 ### Phase 0 — 工程基线（G0.1–G0.4）
 
@@ -38,7 +65,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - 四层超时 + 首字节前至多重试一次 + 慢客户端内存有界
 - SSRF 双重门控、路径白名单、Header/body 上限、错误脱敏
 
-### Phase 3 — 供应商适配器（G3.1–G3.7，20 个产品，全部 IMPLEMENTED / WAITING_FOR_CREDENTIAL）
+### Phase 3 — 供应商适配器（G3.1–G3.8，23 个产品，全部 IMPLEMENTED / WAITING_FOR_CREDENTIAL）
 
 - DeepSeek PAYG（官方余额 OFFICIAL_API）
 - Tencent TokenHub 5 产品（Coding Plan / Token Plan 个人版 / 企业专业 / 企业轻享 / 按量）
@@ -47,6 +74,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - Moonshot/Kimi 2 产品（Kimi Code 会员 / 按量，按量官方余额 OFFICIAL_API）
 - Baidu Qianfan 3 产品（Coding Plan / Token Plan 个人版 / 按量）
 - Volcengine Ark 3 产品（Coding Plan / Agent Plan / 按量）
+- Aliyun Bailian 3 产品（Coding Plan / Token Plan 团队版 / 按量）
 - 共享基础设施：`TokenUsageParser`（双形状 + `prompt_tokens_details.cached_tokens`）、`TransparentResolve`、`HttpProviderClient`（SSRF 门控/超时/1MB 上限）、编译期注册
 
 ### Phase 4 — 控制面服务（G4.x）
@@ -61,7 +89,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - UI 安全与可访问性（管理路由守卫、no-store 防缓存、focus-visible、aria 标签）
 - Playwright 生产构建 baseline（12 项）+ vite 冷启动根治
 
-### Phase 6 — 交付（G6.1–G6.5）
+### Phase 6 — 交付（G6.1–G6.4；G6.5 发布收尾见 [Unreleased]）
 
 - Observability：`monitoring`/`json` profiles、Prometheus 指标（低基数标签禁令）、Logstash JSON 日志、Grafana dashboard
 - Backup & Restore：加密备份（AES-256-CBC+PBKDF2+manifest）、校验、恢复、真实恢复演练 PASS
