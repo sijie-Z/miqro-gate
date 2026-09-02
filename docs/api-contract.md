@@ -727,6 +727,24 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 - 仅 PENDING 可审批：重复审批 `409 ALREADY_REVIEWED`（乐观锁，并发评审只有一个成功）；Key 已吊销/停用 → `409 KEY_NOT_ACTIVE`；Grant 已停用 → `409 GRANT_INACTIVE`；不存在 → `404 APPROVAL_NOT_FOUND`。
 - 审批/驳回写 `MODEL_APPROVAL_APPROVED` / `MODEL_APPROVAL_REJECTED` 审计（含 reviewNote 长度 ≤ 500 校验）。
 
+### 5.19 配额规则（用量配额，platform-middleware roadmap「配额管理」步骤）
+
+只预警不阻断的用量配额（对齐腾讯消费者配额 / 阿里消费者配额，alerting-only）：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/quota-rules` | 全部规则 + 当前窗口水位（读时计算） |
+| `PUT /api/v1/admin/quota-rules` | 新增/更新规则（`(scopeType, scopeId, metric, period)` 为自然键，重复 PUT 原地编辑） |
+| `DELETE /api/v1/admin/quota-rules/{id}` | 删除规则（`404 QUOTA_RULE_NOT_FOUND`） |
+
+- 请求体 `{ "scopeType": USER\|PROJECT, "scopeId", "metric": TOKENS\|REQUESTS, "period": DAILY\|WEEKLY\|MONTHLY, "limitValue"（正整数）, "warnPercent"?（1–99，默认 80）, "status"?（默认 ACTIVE）}`；scope 不存在 → `404 SCOPE_NOT_FOUND`（防枚举）。
+- **水位口径（读时计算，非预聚合）**：TOKENS = 当期窗口 usage 事件全部 token（input+output+cacheRead+cacheCreation，与个人用量 TotalTokens 同口径）；REQUESTS = 当期到达上游的请求数（缓存命中不计）。窗口为 UTC 切片：DAILY=当日 / WEEKLY=周一起 / MONTHLY=当月（与月度预算同约定）。
+- `level`：`NORMAL` → `WARNING`（≥ warnPercent）→ `EXCEEDED`（≥ 100%）。**规则永不阻断流量**；硬阻断需 ADR。
+- DISABLED 规则保留计划并展示水位，页面按停用渲染。
+- 审计：`QUOTA_RULE_CREATE` / `QUOTA_RULE_UPDATE` / `QUOTA_RULE_DELETE`。
+- 视图含 `scopeName`（用户显示名/项目名）与 `scopeTag`（用户名/项目 code）。
+- 错误码补充：body JSON 解析失败（未知枚举/类型错误）统一 `400 PARAM_INVALID`（GlobalExceptionHandler 对 `HttpMessageNotReadableException` 的映射，含字段名提示）。
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

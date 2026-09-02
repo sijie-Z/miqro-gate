@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `模型申请审批流`（原始设计文档 §13 P6.1 / §8.2）— `DONE`
-- Goal status: `DONE`（本会话 2026-09-02 完成，PR 待合并；方向由原始设计文档定，下一候选仍待用户）
+- Current goal: `配额规则配置`（platform-middleware roadmap「配额管理」步骤）— `DONE`
+- Goal status: `DONE`（本会话 2026-09-02 完成，PR 待合并）
 - Last updated: `2026-09-02 CST`
-- Branch: `goal/model-approval-workflow`（验证后 push + PR，勿直推 develop）
+- Branch: `goal/quota-rules`（验证后 push + PR，勿直推 develop）
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
 
 ## G6.5 — 发布就绪收尾（2026-09-02，DONE；粗版发布候选基线）
@@ -28,6 +28,17 @@
 - **文档契约缺口（记录为延期项）**：api-contract §8 / document-map §3 要求「Control Plane 生成 OpenAPI 3.1 + CI 破坏性变更检查」——仓库无 openapi 生成配置与产物，尚未实现；api-contract.md 为唯一事实源。待专项 Goal 或正式发布前补。
 - **Windows 踩坑（记录）**：`npm run lint`（eslint --fix）会把 CRLF 文件整批重写为 LF → 23 个文件出现 EOL-only M（`git diff` 为空）；跑 lint 后先 `git restore` 或区分内容 diff，勿误提交。
 - **剩余风险/待办**：代码 0.1.0-SNAPSHOT 从未 tag——正式版本号 + tag 待用户授权（git-workflow §9）；23 产品真实凭证全部 `WAITING_FOR_CREDENTIAL`；G6.5 后 vitest 基线修正为 **73/73**（非 67）；下一步增量候选（MCP 两级 ACL / 默认配额模板 / MCP 路由+Tools 护栏 / 阿里 Higress 对照）待用户定方向，立项时先写入 implementation-plan。
+
+## 配额规则配置 — platform-middleware roadmap「配额管理」步骤（2026-09-02，DONE）
+
+- **背景与方向**：G6.5 后用户指示「按文档从最重要开始」自主立项——8-31 leader 蓝图（platform-middleware-roadmap.md 修正后路线表）明文：配额管理模块下一步 =「配额规则配置 + 水位 + 预警（轻量，不硬阻断）」。补齐用量维度治理（既有 = 成本预算 G8.2/G8.3 + 只读配额快照 G4.2；本 Goal = Token/请求次数 × 周期 × 阈值规则 + 实时水位）。
+- **后端**：V23 `quota_rules`（scope USER|PROJECT × metric TOKENS|REQUESTS × period DAILY|WEEKLY|MONTHLY + limit/warn_percent(1-99 默认 80)/status，唯一 (tenant,scope,metric,period)，ON CONFLICT upsert 原地编辑保 id/created_at）；`QuotaRule`/4 枚举/Repository/Impl；`AdminQuotaRuleService`（scope 存在性校验 404 防枚举；**水位读时计算** = `AdminUsageStatsService.summary` 现行窗口：TOKENS=全部 token（含 cacheRead/cacheCreation，与个人 TotalTokens 口径一致）、REQUESTS=上游请求数（缓存命中不计）；窗口 UTC 切片 DAILY/WEEKLY(周一始)/MONTHLY；level NORMAL/WARNING(≥warn%)/EXCEEDED(≥100%)——**永不阻断**；DISABLED 保留水位）；`AdminQuotaRuleController`（GET/PUT/DELETE /api/v1/admin/quota-rules）；审计 QUOTA_RULE_CREATE/UPDATE/DELETE。
+- **顺带全局修复（测试发现）**：`GlobalExceptionHandler` 补 `HttpMessageNotReadableException` → `400 PARAM_INVALID`（body 枚举非法/类型错误此前 500；含字段名提示，api-contract §5.19 记录）。
+- **前端**：`AdminQuotaRulesView`（配额规则页：对象/维度/周期/限额/用量+水位条/level 徽标/状态 + 内联新增编辑面板：对象类型切换用户/项目下拉、维度周期单选、限额/阈值、停用开关；删除走 confirmDialog 门禁）+ api/types/router/导航（数据与告警组「配额规则」）。
+- **验证（全部真实 PASS）**：`AdminQuotaRuleApiIntegrationTest` 6/6（生命周期 upsert 保 id/version、同 scope 三 period 水位 NORMAL 10.00%/WARNING 90.91%/EXCEEDED 100.00% 精确断言、REQUESTS=usage 行数、PROJECT scope、scope 404、枚举/数值校验 400、403/401、审计三动作序列）+ `AdminQuotaRuleServiceTest` 3/3（UTC 窗口边界：日/周一/月跨年）；后端全量 `verify -P integration` **BUILD SUCCESS 2128 tests / 0 failures**（+9 净增；GlobalExceptionHandler 变更全回归）；前端 vitest **19 文件 86/86**（+5）、typecheck/lint/build PASS；Playwright **34/34**（+quota-rules baseline）。
+- **文档**：api-contract §5.19（配额规则/水位口径/level 语义/审计/400 body 解析修复）；database-schema `quota_rules` V23；progress。
+- **边界/取舍（已记录）**：REQUEST 配额口径 = 上游请求数（缓存命中不计——配额度量的是对供应商额度的消耗）；水位为读时计算（N 规则 N 次聚合查询，内部规模可接受；量级上来再考虑预聚合）；**告警接线（QUOTA_THRESHOLD Webhook）按 G8.2→G8.3 节奏列为后续轮**；用户自助配额可见性与默认配额模板（腾讯 A10）未做（候选待立项）；硬阻断需 ADR（锁定决策）。
+- **gitflow**：分支 `goal/quota-rules`（基于 b948a5c/#118 合并后 develop），验证后 push + PR。
 
 ## 模型申请审批流 — 原始设计文档 §13 P6.1 / §8.2（2026-09-02，DONE）
 

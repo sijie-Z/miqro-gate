@@ -292,6 +292,10 @@ V14（ADR-0011）新增 JWT 验签公钥：`jwt_public_key_pem text`（RSA Subje
 
 月度预算（仅告警，永不阻断）：`project_id`、`period_month`（`YYYY-MM`）、`amount numeric(24,10)`、`currency`、`alert_threshold_pct`、`status`（`ACTIVE|PAUSED`）、`version`。`budget` 唯一 `(tenant_id, project_id, period_month)`；`model_budget` 额外含 `model_id`，唯一 `(tenant_id, project_id, model_id, period_month)`。V7 已建表，告警消费为后续 Goal。
 
+### `quota_rules` (V23，用量配额)
+
+用量配额计划（仅预警永不阻断，roadmap「配额管理」）：`scope_type`（`USER|PROJECT`）、`scope_id`、`metric`（`TOKENS|REQUESTS`）、`period`（`DAILY|WEEKLY|MONTHLY`）、`limit_value bigint`（>0）、`warn_percent`（1–99，默认 80）、`status`（`ACTIVE|DISABLED`）、`created_by`、`version`。唯一 `(tenant_id, scope_type, scope_id, metric, period)`（同 scope 同维同周期仅一条，重复 PUT 原地编辑）。表只存计划；**当前窗口水位在读取时由 usage 事件计算**（UTC 窗口；TOKENS=全部 token 口径，REQUESTS=上游请求数），`(tenant_id, scope_type, scope_id, status)` 索引。规则永不阻断流量——硬阻断需 ADR。
+
 ### `skills` / `skill_access` (V16，P2.2 SkillHub)
 
 `skills`：技能目录条目——`name varchar(64)`（kebab-case，= SKILL.md frontmatter name）、`description`、`version`（语义化）、`author`、`license`、`tags text[]`、`content_zip bytea`（校验后的技能包）、`content_sha256`、`content_bytes`、`status`（`ACTIVE|ARCHIVED`）、`created_by`。唯一 `(tenant_id, name)`。
