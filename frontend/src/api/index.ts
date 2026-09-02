@@ -15,6 +15,7 @@ import type {
   ExportTask,
   InternalServiceView,
   McpServiceView,
+  McpToolView,
   SkillView,
   UsageDeletionRequest,
   WebhookDelivery,
@@ -447,6 +448,27 @@ export function adminUpdateMcpHealthConfig(
   },
 ): Promise<McpServiceView> {
   return post<McpServiceView>(`/api/v1/admin/mcp-services/${id}/health-config`, body);
+}
+
+export function adminListMcpTools(serviceId: string): Promise<McpToolView[]> {
+  return get<McpToolView[]>(`/api/v1/admin/mcp-services/${serviceId}/tools`);
+}
+
+export function adminCreateMcpTool(
+  serviceId: string,
+  body: { toolName: string; description?: string; method?: string; path: string },
+): Promise<McpToolView> {
+  return post<McpToolView>(`/api/v1/admin/mcp-services/${serviceId}/tools`, body);
+}
+
+export function adminSetMcpToolStatus(
+  serviceId: string,
+  toolId: string,
+  status: string,
+): Promise<McpToolView> {
+  return post<McpToolView>(
+    `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/status?status=${status}`,
+  );
 }
 
 // ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----

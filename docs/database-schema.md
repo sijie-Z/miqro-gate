@@ -312,6 +312,10 @@ V14（ADR-0011）新增 JWT 验签公钥：`jwt_public_key_pem text`（RSA Subje
 
 MCP Server 管理：`name`、`description`、`endpoint`（https）、`transport`（`STREAMABLE_HTTP|SSE`）、`status`（`ONLINE|OFFLINE`，手动切换，健康检查不覆盖）、`health_status`（`UNKNOWN|HEALTHY|UNHEALTHY`）、`health_checked_at`、`consecutive_failures/successes`、检查配置（`check_interval_seconds`/`check_timeout_seconds`/`fail_threshold`/`recover_threshold`/`check_path`）。唯一 `(tenant_id, name)`；`(tenant_id, health_status)` 索引（探活列表）。
 
+### `mcp_tools` (V21，P3.5)
+
+MCP Tools 管理：`tool_name`（AI Agent 调用唯一标识，snake_case）、`description`、`method`（`GET|POST|PUT|DELETE|PATCH`）、`path`（以 `/` 开头）、`status`（`ENABLED|DISABLED`）、绑定 `mcp_service_id`（ON DELETE CASCADE）。唯一 `(tenant_id, mcp_service_id, tool_name)`；`mcp_service_id` 索引。
+
 ## 7. 告警、导出和审计
 
 ### `webhook_endpoints`
