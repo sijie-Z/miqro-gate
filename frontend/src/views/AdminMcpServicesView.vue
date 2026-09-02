@@ -8,6 +8,8 @@ import PageHeader from '@/components/PageHeader.vue';
 import { confirmDialog } from '@/utils/confirm';
 import type { McpServiceView, McpToolView } from '@/types/api';
 
+import type { McpServiceView } from '@/types/api';
+
 const services = ref<McpServiceView[]>([]);
 const loading = ref(true);
 const loadError = ref('');
