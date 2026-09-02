@@ -44,6 +44,7 @@
 | `deployment-and-operations.md` | 部署拓扑和基础运维 | 部署变化 |
 | `operations-runbook.md` | 日常故障和恢复步骤 | 运维流程变化 |
 | `implementation-plan.md` | 可执行 Goal 及依赖 | Goal 调整 |
+| `feature-backlog.md` | 跨文档功能总登记（未做与候选：PLANNED/SCAFFOLD/BLOCKED/ADR/DECLINED + 出处与前置） | 文档提及新功能/能力时登记；条目状态变化时更新 |
 | `git-workflow.md` | 分支、commit、push、PR 和发布权限 | Git 流程变化 |
 | `progress.md` | 当前真实进度 | 每个 Goal |
 | `release-checklist.md` | 发布门禁 | 发布流程变化 |

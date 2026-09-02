@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `缓存 ROI 报表 P5.4`（原始设计文档 P5.4）— `DONE`
+- Current goal: `MCP 两级访问控制`（腾讯 doc 134890：Server+Tool 级 ACL）— `DONE`
 - Goal status: `DONE`（本会话 2026-09-02 完成，PR 待合并）
 - Last updated: `2026-09-02 CST`
-- Branch: `goal/cache-roi-report`（验证后 push + PR，勿直推 develop）
+- Branch: `goal/mcp-access-control`（验证后 push + PR，勿直推 develop）
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
 
 ## G6.5 — 发布就绪收尾（2026-09-02，DONE；粗版发布候选基线）
@@ -28,6 +28,17 @@
 - **文档契约缺口（记录为延期项）**：api-contract §8 / document-map §3 要求「Control Plane 生成 OpenAPI 3.1 + CI 破坏性变更检查」——仓库无 openapi 生成配置与产物，尚未实现；api-contract.md 为唯一事实源。待专项 Goal 或正式发布前补。
 - **Windows 踩坑（记录）**：`npm run lint`（eslint --fix）会把 CRLF 文件整批重写为 LF → 23 个文件出现 EOL-only M（`git diff` 为空）；跑 lint 后先 `git restore` 或区分内容 diff，勿误提交。
 - **剩余风险/待办**：代码 0.1.0-SNAPSHOT 从未 tag——正式版本号 + tag 待用户授权（git-workflow §9）；23 产品真实凭证全部 `WAITING_FOR_CREDENTIAL`；G6.5 后 vitest 基线修正为 **73/73**（非 67）；下一步增量候选（MCP 两级 ACL / 默认配额模板 / MCP 路由+Tools 护栏 / 阿里 Higress 对照）待用户定方向，立项时先写入 implementation-plan。
+
+## MCP 两级访问控制 — 腾讯 AI 网关 doc 134890（2026-09-02，DONE）
+
+- **背景**：用户指示「功能参考阿里云和腾讯云，按具体文档做」——直接研读已入库的腾讯 AI 网关 doc 134890（MCP 访问控制原文：Server 级 None/Allow/Deny ACL × 调用方名单 + Tool 级在 Server 基础上进一步收窄；仅 Server 全开放时 Tool 可自定义；变更即时生效）落地为管理面 + 判定策略。
+- **后端**：V25 迁移（`mcp_service_access` 每服务一行 mode NONE|ALLOW|DENY + `mcp_access_grants` 名单行：tool_id 可空 = 服务级名单/非空 = 工具覆盖，consumer 引用 `api_consumers` CASCADE）；domain `McpAclMode`/`McpServiceAccess`/`McpAccessGrant` + **`McpAccessPolicy` 纯函数判定**（服务层先判：ALLOW 名单内才放行 / DENY 名单内拒绝 / NONE 全放；工具无覆盖继承、有覆盖只能收窄不能放宽——腾讯「Tool 级在 Server 级基础上进一步收敛」精确语义，单测覆盖判定矩阵）；`McpAccessRepository`（upsert 服务模式含切 NONE 清名单、scope 级整体替换/清除，PG 参数 cast 同族坑修复）；`AdminMcpAccessService`（视图组装含服务名单与逐工具 mode/名单；校验：NONE 配服务名单 409 SERVER_LIST_UNSUPPORTED、非 NONE 配工具覆盖 409 TOOL_ACL_UNSUPPORTED、消费者不存在/非 ACTIVE 400、tool 不属于服务 404；消费者仅 ACTIVE 可入名单）；Controller 4 端点（GET access、PUT mode、PUT grants、DELETE grants?toolId=）；审计 MCP_ACCESS_MODE/GRANTS/RESET。
+- **前端**：MCP 服务页行操作「访问控制」→ t-dialog：服务模式 radio（全开放/白名单/黑名单）+ 名单多选消费者（仅 ALLOW/DENY 显示）+ 重置回开放；工具级表格（NONE 模式显示：每工具 继承/白名单/黑名单 选择 + 名单编辑与保存；继承=DELETE 覆盖）。api/types 5 函数 + 2 类型组。
+- **验证（全部真实 PASS）**：domain `McpAccessPolicyTest` 3/3（判定矩阵：开放+工具收窄/白名单不可被工具放宽/黑名单）→ 单测口径 3 项含多断言；`AdminMcpAccessApiIntegrationTest` 6/6（服务 ALLOW 生命周期含替换与清空回 NONE、DENY 黑名单、工具覆盖生命周期按 toolName 断言（tools 列表无序——避免 jsonPath 下标）、模式约束与校验矩阵、审计三动作、401）；后端全量 `verify -P integration` **BUILD SUCCESS 2156 tests / 0 failures**（+18 净增含 domain 3）；前端 vitest **20 文件 94/94**（+3 访问控制：打开渲染/白名单保存/工具覆盖保存）、typecheck/lint/build PASS；Playwright 35/35。
+- **排障记录**：clearGrants 的 `(:toolId IS NULL OR tool_id = :toolId)` 触发 PG 参数类型推断失败 → `::uuid` cast（与 quota findPage 同族坑）；MVC 集成测试的 MvcResult 无 andExpect（用 perform 链）；api-consumers 创建响应 id 在 `consumer` 键内；consumer 端点路径 `/api/v1/admin/api-consumers`（非 consumers）。
+- **文档**：api-contract §5.21（模式语义/判定规则/错误码/审计/接线说明）；database-schema V25 段；CHANGELOG Unreleased 补记；progress。
+- **边界/取舍（已记录）**：判定策略（McpAccessPolicy）已就绪但调用入口未接线——MCP 代理接线（P3.4/P3.5 后续集成）时按「谁能调服务/谁能调工具」把关（与模型授权模型一致：先配置后判定）；消费者组批量授权（腾讯维度）未做（无组实体，消费者直配）；「变更即时生效」由配置读取保证。
+- **gitflow**：分支 `goal/mcp-access-control`（基于 #121 合并后 develop），验证后 push + PR。
 
 ## 缓存 ROI 报表 — 原始设计文档 P5.4（2026-09-02，DONE）
 

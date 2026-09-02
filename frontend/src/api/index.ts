@@ -14,8 +14,11 @@ import type {
   ConfigEntryView,
   ExportTask,
   InternalServiceView,
+  McpAccessView,
+  McpAclMode,
   McpServiceView,
   McpToolView,
+  SetMcpAccessGrantsRequest,
   SkillView,
   UsageDeletionRequest,
   WebhookDelivery,
@@ -271,6 +274,30 @@ export function deleteQuotaRule(id: string): Promise<void> {
 
 export function getRoiReport(from?: string, to?: string): Promise<RoiReportView> {
   return get<RoiReportView>('/api/v1/admin/usage/roi', { from, to });
+}
+
+// ---- MCP two-level access control (Tencent doc 134890) ----
+
+export function getMcpServiceAccess(serviceId: string): Promise<McpAccessView> {
+  return get<McpAccessView>(`/api/v1/admin/mcp-services/${serviceId}/access`);
+}
+
+export function setMcpAccessMode(serviceId: string, mode: McpAclMode): Promise<McpAccessView> {
+  return put<McpAccessView>(`/api/v1/admin/mcp-services/${serviceId}/access/mode`, { mode });
+}
+
+export function setMcpAccessGrants(
+  serviceId: string,
+  request: SetMcpAccessGrantsRequest,
+): Promise<McpAccessView> {
+  return put<McpAccessView>(`/api/v1/admin/mcp-services/${serviceId}/access/grants`, request);
+}
+
+export function clearMcpAccessGrants(serviceId: string, toolId?: string): Promise<McpAccessView> {
+  return del<McpAccessView>(
+    `/api/v1/admin/mcp-services/${serviceId}/access/grants`,
+    toolId ? { toolId } : undefined,
+  );
 }
 
 export function listCredentials(): Promise<CredentialView[]> {

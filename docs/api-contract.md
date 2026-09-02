@@ -757,6 +757,23 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 - 响应：`{ from, to, totals { upstreamRequests, coalescedRequests, l1Hits, l2Hits, hitRatePct, paidCost, savedCost, savedPct }, byDay [ { date, upstreamRequests, hitRequests, hitRatePct, paidCost, savedCost } ] }`。
 - 零缓存事件也产出完整报表（全部为实付）；金额为十进制数。
 
+### 5.21 MCP 两级访问控制（腾讯 AI 网关 doc 134890）
+
+Server 级（谁能调用整个服务）+ Tool 级（谁可调用某工具）ACL，Tool 规则在 Server 规则上进一步收窄。调用方 = API 消费者（G8.1）。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/mcp-services/{id}/access` | 全貌：服务模式 + 服务名单 + 每个工具的模式（null=继承）与名单 |
+| `PUT /access/mode` | `{ "mode": NONE\|ALLOW\|DENY }`；切回 NONE 会清空服务名单 |
+| `PUT /access/grants` | `{ "toolId"?, "mode": ALLOW\|DENY, "consumerIds"[] }` 整体替换一层名单（服务名单或某工具覆盖） |
+| `DELETE /access/grants?toolId=` | 重置一层：无 toolId=服务回全开放（NONE）；带 toolId=该工具回继承 |
+
+- **模式语义**：`NONE` 全部开放（此时才能配置工具级覆盖，腾讯约束）；`ALLOW` 白名单（仅名单内消费者可调用）；`DENY` 黑名单（名单内禁止、其余放行）。
+- **判定**（调用侧使用，domain `McpAccessPolicy` 纯函数）：服务层先判（ALLOW=必须在名单、DENY=不在黑名单、NONE=放行）；工具无覆盖 → 继承服务判定；有覆盖 → 在服务放行基础上按工具名单再收窄（**只能收窄不能放宽**）。
+- 校验错误：`MCP_SERVICE_NOT_FOUND`（404）、`TOOL_NOT_FOUND`（404，tool 不属于服务）、`SERVER_LIST_UNSUPPORTED`（409，NONE 模式配服务名单）、`TOOL_ACL_UNSUPPORTED`（409，非 NONE 模式配工具覆盖）、`CONSUMER_NOT_FOUND`/`CONSUMER_NOT_ACTIVE`（400，仅 ACTIVE 消费者可入名单）；consumerIds 非空由 bean 校验（400）。
+- 审计：`MCP_ACCESS_MODE` / `MCP_ACCESS_GRANTS` / `MCP_ACCESS_RESET`。
+- 配置变更即时生效（判定在调用入口读取配置）；真实 MCP 调用代理接线后由判定策略把关（P3.4/P3.5 后续集成）。
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：
