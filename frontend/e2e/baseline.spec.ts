@@ -169,6 +169,20 @@ async function mockApi(page: Page, admin = false) {
       ]),
     }),
   );
+  await page.route('**/api/v1/admin/quota-default-template', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        enabled: true,
+        metric: 'TOKENS',
+        period: 'MONTHLY',
+        limitValue: 1000000,
+        version: 1,
+        updatedAt: '2026-09-01T00:00:00Z',
+      }),
+    }),
+  );
   await page.route('**/api/v1/admin/usage/roi*', (route) =>
     route.fulfill({
       status: 200,

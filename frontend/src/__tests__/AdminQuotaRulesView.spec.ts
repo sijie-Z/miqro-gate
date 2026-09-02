@@ -5,7 +5,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import TDesign from 'tdesign-vue-next';
 import AdminQuotaRulesView from '@/views/AdminQuotaRulesView.vue';
 import * as api from '@/api';
-import type { AdminUser, Project, QuotaRuleView } from '@/types/api';
+import type { AdminUser, Project, QuotaDefaultTemplateView, QuotaRuleView } from '@/types/api';
 
 vi.mock('@/api', () => ({
   listQuotaRules: vi.fn(),
@@ -13,6 +13,10 @@ vi.mock('@/api', () => ({
   listProjects: vi.fn(),
   putQuotaRule: vi.fn(),
   deleteQuotaRule: vi.fn(),
+  getQuotaDefaultTemplate: vi.fn(),
+  putQuotaDefaultTemplate: vi.fn(),
+  enableQuotaDefaultTemplate: vi.fn(),
+  disableQuotaDefaultTemplate: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -74,6 +78,25 @@ const rule = (overrides: Partial<QuotaRuleView> = {}): QuotaRuleView => ({
   ...overrides,
 });
 
+const emptyTemplate = (): QuotaDefaultTemplateView => ({
+  enabled: false,
+  metric: null,
+  period: null,
+  limitValue: null,
+  version: 0,
+  updatedAt: null,
+});
+
+const template = (overrides: Partial<QuotaDefaultTemplateView> = {}): QuotaDefaultTemplateView => ({
+  enabled: false,
+  metric: 'TOKENS',
+  period: 'MONTHLY',
+  limitValue: 1000000,
+  version: 2,
+  updatedAt: '2026-09-01T00:00:00Z',
+  ...overrides,
+});
+
 function mountView() {
   return mount(AdminQuotaRulesView, {
     global: { plugins: [TDesign, createPinia()], stubs: { TPopup: PopupStub } },
@@ -88,6 +111,7 @@ describe('AdminQuotaRulesView', () => {
     mockApi.listUsers.mockResolvedValue([user()]);
     mockApi.listProjects.mockResolvedValue([project()]);
     mockApi.listQuotaRules.mockResolvedValue([]);
+    mockApi.getQuotaDefaultTemplate.mockResolvedValue(emptyTemplate());
   });
 
   it('renders rules with scope, watermark and level', async () => {
@@ -202,5 +226,90 @@ describe('AdminQuotaRulesView', () => {
     await new Promise((r) => setTimeout(r, 400));
 
     expect(mockApi.deleteQuotaRule).toHaveBeenCalledWith(rule().id);
+  });
+
+  it('shows the unconfigured default template with a disabled toggle', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const panel = wrapper.find('[data-testid="quota-template-panel"]');
+    expect(panel.exists()).toBe(true);
+    expect(panel.text()).toContain('默认配额模板');
+    expect(panel.text()).toContain('未配置');
+    expect(panel.text()).toContain('已自动分配的配额规则保持不变');
+    expect(
+      wrapper.find('[data-testid="quota-template-toggle"]').attributes('disabled'),
+    ).toBeDefined();
+  });
+
+  it('renders the enabled template definition and disables the strategy', async () => {
+    mockApi.getQuotaDefaultTemplate.mockResolvedValue(template({ enabled: true }));
+    mockApi.disableQuotaDefaultTemplate.mockResolvedValue(template());
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('已启用');
+    expect(wrapper.text()).toContain('Token 用量 · 每月 · 限额 1,000,000');
+
+    await wrapper.find('[data-testid="quota-template-toggle"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.disableQuotaDefaultTemplate).toHaveBeenCalledTimes(1);
+    expect(mockApi.getQuotaDefaultTemplate).toHaveBeenCalledTimes(2); // reload after toggle
+  });
+
+  it('configures the template definition via the inline form', async () => {
+    mockApi.putQuotaDefaultTemplate.mockResolvedValue(
+      template({ metric: 'REQUESTS', period: 'WEEKLY', limitValue: 500 }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="quota-template-open"]').trigger('click');
+    await flushPromises();
+
+    const period = wrapper.find('[data-testid="template-period"]');
+    const weekly = period.findAll('.t-radio-button').find((l) => l.text().includes('每周'));
+    expect(weekly, 'period option should render').toBeTruthy();
+    await weekly!.trigger('click');
+    await flushPromises();
+
+    const metric = wrapper.find('[data-testid="template-metric"]');
+    const requests = metric.findAll('.t-radio-button').find((l) => l.text().includes('请求次数'));
+    await requests!.trigger('click');
+    await flushPromises();
+
+    const limitInput = wrapper.find('[data-testid="template-limit"] input');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(limitInput.element, '500');
+    limitInput.element.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+
+    await wrapper.find('[data-testid="template-save"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.putQuotaDefaultTemplate).toHaveBeenCalledWith({
+      metric: 'REQUESTS',
+      period: 'WEEKLY',
+      limitValue: 500,
+    });
+    expect(wrapper.find('[data-testid="template-save"]').exists()).toBe(false); // panel closes after save
+  });
+
+  it('enables the template from a configured state', async () => {
+    mockApi.getQuotaDefaultTemplate
+      .mockResolvedValueOnce(template())
+      .mockResolvedValue(template({ enabled: true }));
+    mockApi.enableQuotaDefaultTemplate.mockResolvedValue(template({ enabled: true }));
+
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.text()).toContain('未启用');
+    await wrapper.find('[data-testid="quota-template-toggle"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.enableQuotaDefaultTemplate).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain('已启用');
   });
 });

@@ -8,6 +8,7 @@ import PageHeader from '@/components/PageHeader.vue';
 import type {
   AdminUser,
   Project,
+  QuotaDefaultTemplateView,
   QuotaLevel,
   QuotaMetric,
   QuotaPeriod,
@@ -18,6 +19,7 @@ import type {
 const rules = ref<QuotaRuleView[]>([]);
 const users = ref<AdminUser[]>([]);
 const projects = ref<Project[]>([]);
+const template = ref<QuotaDefaultTemplateView | null>(null);
 const loading = ref(true);
 const loadError = ref('');
 
@@ -35,6 +37,15 @@ const form = ref({
   status: 'ACTIVE',
 });
 
+const configuring = ref(false);
+const templateError = ref('');
+const templateSaving = ref(false);
+const templateForm = ref({
+  metric: 'TOKENS' as QuotaMetric,
+  period: 'DAILY' as QuotaPeriod,
+  limitValue: undefined as number | undefined,
+});
+
 const metricText: Record<QuotaMetric, string> = { TOKENS: 'Token 用量', REQUESTS: '请求次数' };
 const periodText: Record<QuotaPeriod, string> = { DAILY: '每日', WEEKLY: '每周', MONTHLY: '每月' };
 
@@ -44,6 +55,26 @@ function levelClass(level: QuotaLevel): string {
   if (level === 'EXCEEDED') return 'mk-status--danger';
   if (level === 'WARNING') return 'mk-status--warning';
   return 'mk-status--success';
+}
+
+/** Template state badge: 未配置 → 未启用 → 已启用. */
+function templateStateClass(): string {
+  if (!template.value || template.value.metric === null) return 'mk-status--neutral';
+  return template.value.enabled ? 'mk-status--success' : 'mk-status--neutral';
+}
+
+function templateStateText(): string {
+  if (!template.value || template.value.metric === null) return '未配置';
+  return template.value.enabled ? '已启用' : '未启用';
+}
+
+function templateDefinitionText(): string {
+  if (!template.value || template.value.limitValue === null) return '';
+  return `${metricText[template.value.metric!]} · ${periodText[template.value.period!]} · 限额 ${template.value.limitValue.toLocaleString()}`;
+}
+
+function templateConfigured(): boolean {
+  return !!template.value && template.value.metric !== null;
 }
 
 const columns: PrimaryTableCol[] = [
@@ -125,14 +156,16 @@ async function load() {
   loading.value = true;
   loadError.value = '';
   try {
-    const [ruleList, userList, projectList] = await Promise.all([
+    const [ruleList, userList, projectList, templateState] = await Promise.all([
       api.listQuotaRules(),
       api.listUsers(),
       api.listProjects(),
+      api.getQuotaDefaultTemplate(),
     ]);
     rules.value = ruleList;
     users.value = userList;
     projects.value = projectList;
+    template.value = templateState;
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : '加载失败';
   } finally {
@@ -232,6 +265,68 @@ async function remove(row: QuotaRuleView) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// default quota template (Tencent doc 135489)
+// ---------------------------------------------------------------------------
+
+function openTemplateConfig() {
+  templateForm.value = {
+    metric: template.value?.metric ?? 'TOKENS',
+    period: template.value?.period ?? 'MONTHLY',
+    limitValue: template.value?.limitValue ?? undefined,
+  };
+  templateError.value = '';
+  configuring.value = true;
+}
+
+function cancelTemplateConfig() {
+  configuring.value = false;
+  templateError.value = '';
+}
+
+async function saveTemplate() {
+  const limitValue = Number(templateForm.value.limitValue);
+  if (!Number.isInteger(limitValue) || limitValue <= 0) {
+    templateError.value = '限额必须是正整数';
+    return;
+  }
+  templateSaving.value = true;
+  templateError.value = '';
+  try {
+    await api.putQuotaDefaultTemplate({
+      metric: templateForm.value.metric,
+      period: templateForm.value.period,
+      limitValue,
+    });
+    configuring.value = false;
+    MessagePlugin.success('默认配额模板已保存');
+    await load();
+  } catch (err) {
+    templateError.value = err instanceof Error ? err.message : '保存失败';
+  } finally {
+    templateSaving.value = false;
+  }
+}
+
+async function toggleTemplate() {
+  if (!templateConfigured() || !template.value) {
+    MessagePlugin.warning('请先配置默认配额模板');
+    return;
+  }
+  try {
+    if (template.value.enabled) {
+      await api.disableQuotaDefaultTemplate();
+      MessagePlugin.success('已停用：仅影响之后新建的用户，已分配的规则保留');
+    } else {
+      await api.enableQuotaDefaultTemplate();
+      MessagePlugin.success('已启用：新建用户将自动获得配额规则');
+    }
+    await load();
+  } catch (err) {
+    MessagePlugin.error(err instanceof Error ? err.message : '操作失败');
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -247,6 +342,98 @@ onMounted(load);
         </t-button>
       </template>
     </PageHeader>
+
+    <div class="mk-panel template-panel" data-testid="quota-template-panel">
+      <div class="template-head">
+        <div class="mk-cell-stack">
+          <span class="template-title">默认配额模板</span>
+          <span v-if="templateConfigured()" class="mk-cell-sub">
+            {{ templateDefinitionText() }}
+          </span>
+          <span v-else class="mk-cell-sub">尚未配置——新用户不会自动获得配额规则</span>
+        </div>
+        <span class="template-actions">
+          <span class="mk-status" :class="templateStateClass()" data-testid="quota-template-state">
+            {{ templateStateText() }}
+          </span>
+          <t-button
+            variant="outline"
+            size="small"
+            data-testid="quota-template-toggle"
+            :disabled="!templateConfigured()"
+            @click="toggleTemplate"
+          >
+            {{ template?.enabled ? '停用' : '启用' }}
+          </t-button>
+          <t-button
+            theme="primary"
+            variant="text"
+            size="small"
+            data-testid="quota-template-open"
+            @click="openTemplateConfig"
+          >
+            配置模板
+          </t-button>
+        </span>
+      </div>
+      <ul class="template-notices">
+        <li>仅对配置保存后新建的用户生效，已有用户配额不受影响。</li>
+        <li>修改策略后仅后续新建用户采用新策略，已自动分配的配额规则保持不变。</li>
+        <li>停用策略不会删除已自动分配的规则，但新用户不再自动获得配额。</li>
+      </ul>
+      <div v-if="configuring" class="quota-form">
+        <div class="mk-panel-title">配置默认配额模板</div>
+        <t-form label-align="top" class="create-form">
+          <div class="mk-form-row">
+            <t-form-item label="配额类型" required-mark>
+              <t-radio-group
+                v-model="templateForm.metric"
+                variant="default-filled"
+                data-testid="template-metric"
+              >
+                <t-radio-button value="TOKENS">Token 用量</t-radio-button>
+                <t-radio-button value="REQUESTS">请求次数</t-radio-button>
+              </t-radio-group>
+            </t-form-item>
+            <t-form-item label="统计周期" required-mark>
+              <t-radio-group
+                v-model="templateForm.period"
+                variant="default-filled"
+                data-testid="template-period"
+              >
+                <t-radio-button value="DAILY">每日</t-radio-button>
+                <t-radio-button value="WEEKLY">每周</t-radio-button>
+                <t-radio-button value="MONTHLY">每月</t-radio-button>
+              </t-radio-group>
+            </t-form-item>
+          </div>
+          <div class="mk-form-row">
+            <t-form-item label="限额" required-mark>
+              <t-input-number
+                v-model="templateForm.limitValue"
+                :min="1"
+                :max="9007199254740991"
+                :step="1000"
+                placeholder="正整数"
+                data-testid="template-limit"
+              />
+            </t-form-item>
+          </div>
+          <div v-if="templateError" class="mk-inline-error" role="alert">{{ templateError }}</div>
+          <t-form-item>
+            <t-button
+              theme="primary"
+              :loading="templateSaving"
+              data-testid="template-save"
+              @click="saveTemplate"
+            >
+              保存
+            </t-button>
+            <t-button variant="text" @click="cancelTemplateConfig">取消</t-button>
+          </t-form-item>
+        </t-form>
+      </div>
+    </div>
 
     <div v-if="editing" class="mk-panel quota-form" data-testid="quota-rule-form">
       <div class="mk-panel-title">{{ editId ? '编辑配额规则' : '新增配额规则' }}</div>
@@ -398,6 +585,34 @@ onMounted(load);
 .quota-form {
   margin-bottom: 16px;
   max-width: 760px;
+}
+.template-panel {
+  margin-bottom: 16px;
+}
+.template-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.template-title {
+  font-weight: 600;
+}
+.template-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.template-notices {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.template-panel .quota-form {
+  margin-top: 12px;
 }
 .mk-panel-title {
   font-weight: 600;

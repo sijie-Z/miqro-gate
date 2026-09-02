@@ -37,6 +37,8 @@ import type {
   ModelApprovalStatus,
   ModelApprovalView,
   QuotaRuleView,
+  QuotaDefaultTemplateView,
+  ConfigureQuotaDefaultTemplateRequest,
   RoiReportView,
   SubmitModelApprovalRequest,
   UpsertQuotaRuleRequest,
@@ -268,6 +270,26 @@ export function putQuotaRule(request: UpsertQuotaRuleRequest): Promise<QuotaRule
 
 export function deleteQuotaRule(id: string): Promise<void> {
   return del<void>(`/api/v1/admin/quota-rules/${id}`);
+}
+
+// ---- admin default quota template (Tencent doc 135489) ----
+
+export function getQuotaDefaultTemplate(): Promise<QuotaDefaultTemplateView> {
+  return get<QuotaDefaultTemplateView>('/api/v1/admin/quota-default-template');
+}
+
+export function putQuotaDefaultTemplate(
+  request: ConfigureQuotaDefaultTemplateRequest,
+): Promise<QuotaDefaultTemplateView> {
+  return put<QuotaDefaultTemplateView>('/api/v1/admin/quota-default-template', request);
+}
+
+export function enableQuotaDefaultTemplate(): Promise<QuotaDefaultTemplateView> {
+  return post<QuotaDefaultTemplateView>('/api/v1/admin/quota-default-template/enable');
+}
+
+export function disableQuotaDefaultTemplate(): Promise<QuotaDefaultTemplateView> {
+  return post<QuotaDefaultTemplateView>('/api/v1/admin/quota-default-template/disable');
 }
 
 // ---- admin cache-ROI report (P5.4) ----
