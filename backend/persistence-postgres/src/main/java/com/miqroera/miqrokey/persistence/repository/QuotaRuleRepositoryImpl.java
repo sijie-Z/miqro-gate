@@ -65,6 +65,31 @@ public class QuotaRuleRepositoryImpl implements QuotaRuleRepository {
     }
 
     @Override
+    @Transactional
+    public Optional<QuotaRule> insertIfAbsent(QuotaRule rule) {
+        try {
+            return Optional.ofNullable(jdbc.queryForObject("""
+                    INSERT INTO quota_rules (id, tenant_id, scope_type, scope_id, metric, period, limit_value,
+                        warn_percent, status, created_by, version, created_at, updated_at)
+                    VALUES (:id, :tenantId, :scopeType, :scopeId, :metric, :period, :limitValue,
+                        :warnPercent, :status, :createdBy, 0, :createdAt, :updatedAt)
+                    ON CONFLICT (tenant_id, scope_type, scope_id, metric, period) DO NOTHING
+                    RETURNING
+                    """ + COLS,
+                    new MapSqlParameterSource().addValue("id", rule.id()).addValue("tenantId", rule.tenantId())
+                            .addValue("scopeType", rule.scopeType().name()).addValue("scopeId", rule.scopeId())
+                            .addValue("metric", rule.metric().name()).addValue("period", rule.period().name())
+                            .addValue("limitValue", rule.limitValue()).addValue("warnPercent", rule.warnPercent())
+                            .addValue("status", rule.status().name()).addValue("createdBy", rule.createdBy())
+                            .addValue("createdAt", Timestamp.from(rule.createdAt()))
+                            .addValue("updatedAt", Timestamp.from(rule.updatedAt())),
+                    ROW_MAPPER));
+        } catch (EmptyResultDataAccessException e) {
+            return Optional.empty();
+        }
+    }
+
+    @Override
     public Optional<QuotaRule> findById(UUID tenantId, UUID id) {
         try {
             return Optional.ofNullable(jdbc.queryForObject(

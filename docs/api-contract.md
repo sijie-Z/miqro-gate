@@ -774,6 +774,27 @@ Server 级（谁能调用整个服务）+ Tool 级（谁可调用某工具）ACL
 - 审计：`MCP_ACCESS_MODE` / `MCP_ACCESS_GRANTS` / `MCP_ACCESS_RESET`。
 - 配置变更即时生效（判定在调用入口读取配置）；真实 MCP 调用代理接线后由判定策略把关（P3.4/P3.5 后续集成）。
 
+### 5.22 默认配额模板（腾讯 AI 网关 doc 135489）
+
+全局默认配额策略：配置一个（每租户一份的）快照源，启用后**每个新创建的用户自动获得一条 USER 作用域配额规则**（复制模板定义；防止新用户"裸奔"）。模板编辑/停用不影响已自动分配的规则；手动规则永远优先（复制为 insert-if-absent）。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/quota-default-template` | 当前模板状态（从未配置 = `enabled:false` 且定义字段为 null） |
+| `PUT /api/v1/admin/quota-default-template` | 保存模板定义 `{ "metric": TOKENS\|REQUESTS, "period": DAILY\|WEEKLY\|MONTHLY, "limitValue"（正整数）}`；保留当前启用状态（重新配置不会重新启用） |
+| `POST /api/v1/admin/quota-default-template/enable` | 启用自动分配 |
+| `POST /api/v1/admin/quota-default-template/disable` | 停用自动分配（已分配规则保留） |
+
+- **响应视图**：`{ enabled, metric?, period?, limitValue?, version, updatedBy?, updatedAt? }`——首次配置前 `enabled=false` 且 `metric/period/limitValue/updatedBy/updatedAt` 为 null（页面显示"未配置"空态）。
+- **快照复制语义（在 `AdminOrgService.createUser` 事务内执行）**：
+  - 自动复制 = 新建 `quota_rules` 行：`scope=USER`（新用户）、模板的 metric/period/limitValue、`warn_percent=80`（与手动创建缺省一致）、`ACTIVE`、`created_by`=建用户的执行者；变更即时生效。
+  - **改模板不惊动存量**：编辑定义只改快照源，已自动分配的规则保持创建时副本不变。
+  - **关闭不删已分配**：disable 后已分配规则全部保留，仅新用户不再自动获得。
+  - **手动规则覆盖默认**：复制用 `ON CONFLICT (tenant, scope, metric, period) DO NOTHING`——已存在的（手动）规则永不被模板覆盖；自动规则本身是普通规则，可随时编辑/删除。
+- 冲突错误：`QUOTA_TEMPLATE_NOT_CONFIGURED`（409，未配置即 enable/disable）、`QUOTA_TEMPLATE_ALREADY_ENABLED` / `QUOTA_TEMPLATE_ALREADY_DISABLED`（409，重复切换）；定义字段校验沿用 `400 PARAM_INVALID`。
+- 审计：`QUOTA_DEFAULT_TEMPLATE_CREATE` / `QUOTA_DEFAULT_TEMPLATE_UPDATE` / `QUOTA_DEFAULT_TEMPLATE_ENABLE` / `QUOTA_DEFAULT_TEMPLATE_DISABLE`（target = tenant）；自动复制产生的规则记 `QUOTA_RULE_CREATE` 且摘要含 `"auto":true`。
+- **映射取舍**：腾讯模板面向"消费者"（配额规则的挂靠对象）；本系统配额规则挂靠 USER/PROJECT 双作用域，其中"消费者"语义最近似**用户**（拥有 Virtual Key 的消费主体），故模板复制只落在新建用户上；PROJECT 作用域不参与模板化（腾讯无此概念，不发明）。预算模板化（roadmap 提及）另行立项。
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

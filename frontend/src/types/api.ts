@@ -258,6 +258,22 @@ export interface UpsertQuotaRuleRequest {
   status?: QuotaRuleStatus;
 }
 
+/** Global default quota strategy (Tencent doc 135489) — nulls before first config. */
+export interface QuotaDefaultTemplateView {
+  enabled: boolean;
+  metric: QuotaMetric | null;
+  period: QuotaPeriod | null;
+  limitValue: number | null;
+  version: number;
+  updatedAt: string | null;
+}
+
+export interface ConfigureQuotaDefaultTemplateRequest {
+  metric: QuotaMetric;
+  period: QuotaPeriod;
+  limitValue: number;
+}
+
 export interface RoiReportView {
   from: string;
   to: string;
