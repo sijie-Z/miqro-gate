@@ -6,10 +6,10 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `配额水位告警 QUOTA_THRESHOLD`（roadmap「配额管理」行第三项收尾）— `DONE`
+- Current goal: `缓存 ROI 报表 P5.4`（原始设计文档 P5.4）— `DONE`
 - Goal status: `DONE`（本会话 2026-09-02 完成，PR 待合并）
 - Last updated: `2026-09-02 CST`
-- Branch: `goal/quota-alerting`（验证后 push + PR，勿直推 develop）
+- Branch: `goal/cache-roi-report`（验证后 push + PR，勿直推 develop）
 - Remote: `https://github.com/sijie-Z/miqro-gate.git`（PUBLIC + MIT；2026-08-27 品牌改名 MiQroGate，历史按所有者指示单提交重发布，旧历史本地 bundle 备份）
 
 ## G6.5 — 发布就绪收尾（2026-09-02，DONE；粗版发布候选基线）
@@ -28,6 +28,17 @@
 - **文档契约缺口（记录为延期项）**：api-contract §8 / document-map §3 要求「Control Plane 生成 OpenAPI 3.1 + CI 破坏性变更检查」——仓库无 openapi 生成配置与产物，尚未实现；api-contract.md 为唯一事实源。待专项 Goal 或正式发布前补。
 - **Windows 踩坑（记录）**：`npm run lint`（eslint --fix）会把 CRLF 文件整批重写为 LF → 23 个文件出现 EOL-only M（`git diff` 为空）；跑 lint 后先 `git restore` 或区分内容 diff，勿误提交。
 - **剩余风险/待办**：代码 0.1.0-SNAPSHOT 从未 tag——正式版本号 + tag 待用户授权（git-workflow §9）；23 产品真实凭证全部 `WAITING_FOR_CREDENTIAL`；G6.5 后 vitest 基线修正为 **73/73**（非 67）；下一步增量候选（MCP 两级 ACL / 默认配额模板 / MCP 路由+Tools 护栏 / 阿里 Higress 对照）待用户定方向，立项时先写入 implementation-plan。
+
+## 缓存 ROI 报表 — 原始设计文档 P5.4（2026-09-02，DONE）
+
+- **背景**：配额治理行闭环后，按文档重要度续做 P5.4（开发设计文档 §13 P5.4：ROI 回归——省量/实付/命中率周报）。直接回答 G7.4 缓存启用后的收益问题（编码 Agent 流量缓存值不值），数据驱动缓存策略。
+- **后端**：`AdminRoiService`（复用 `AdminUsageStatsService.summary(groupBy=day)`：paid = `cost.upstreamPaid`、saved = `cost.savedByGatewayCache`（命中 token × 最新单价快照）、hitRatePct = (L1+L2)/(upstream+coalesced+hits)、savedPct = saved/(paid+saved)；零缓存也产出全实付报表）；`AdminRoiController` `GET /api/v1/admin/usage/roi?from&to`（缺省近 30 天；共享 93 天窗口校验；ISO 解析错误 400）。
+- **前端**：`AdminRoiView`（缓存 ROI 页：4 统计卡 = 节省金额/上游实付/等效折扣/请求命中率 + 7/30/93 天窗口 + 逐日表 + CSV 导出（BOM，成本页同款））；路由/导航（数据与告警组「缓存 ROI」）。
+- **验证（全部真实 PASS）**：`AdminRoiApiIntegrationTest` 3/3（usage 1000/500 + 2 次 L2 命中精确断言 paid=0.006/saved=0.005/hitRate=66.67%/savedPct=45.45%；空窗口零值；非法时间 400/超 93 天 400/匿名 401）；后端全量 `verify -P integration` **BUILD SUCCESS**（见 Current State 计数）；前端 vitest **20 文件 91/91**（+3 ROI 页）、typecheck/lint/build PASS；Playwright **35/35**（+roi baseline）。
+- **排障记录**：测试 seed 的 cache_hit_event 用 `now()+1s` 作为第二条命中时间——查询 `occurred_at < to(=now())` 把它滤掉了（l2Hits=1）→ 改负偏移（now()-2s/-3s）；cache_entry 有 virtual_key/project FK → 测试需完整 key 链 seed（不能只 seed usage）。
+- **文档**：api-contract §5.20（口径/响应）；CHANGELOG Unreleased 补记 4 功能（审批流/配额规则/配额告警/ROI + body 解析 400 修复）；database-schema 无迁移；progress。
+- **至此原设计文档 P5「分级统计」剩余**：P5.3 对账（需真实账单样本）未做，其余统计线闭环。缓存 ROI 数据可支撑后续缓存默认值/键策略决策。
+- **gitflow**：分支 `goal/cache-roi-report`（基于 #120 合并后 develop），验证后 push + PR。
 
 ## 配额水位告警 QUOTA_THRESHOLD — roadmap「配额管理」行第三项（2026-09-02，DONE）
 

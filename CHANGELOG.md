@@ -14,6 +14,14 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - 修复（自测发现）：登录提交链路失效、t-drawer 标题/默认 footer、DialogPlugin.confirm 非 Promise（危险操作确认前即执行，全站修复）、jsdom 缺 ResizeObserver 等。
 - 工程：CI 拆分 6+ job + 路径过滤 + CodeQL + npm audit；CodeRabbit / Dependabot / OSSF Scorecard / Stale；Issue 模板 / SECURITY.md / 标签体系；GitHub 公开 + MIT。
 
+### 治理闭环（2026-09-02：#118–#120）
+
+- **模型申请审批流**（原始设计文档 §8.2/§13 P6.1，V22）：用户给 Virtual Key 申请授权外模型 → 管理员审批中心通过/驳回（keySet 游标队列）；通过即写入 Key + Grant 模型集并立即刷新路由快照；白名单模型（`MIQROKEY_APPROVAL_WHITELIST_MODELS`）自动批准；乐观锁防重复审批；审计三事件。
+- **配额规则**（roadmap「配额管理」行，V23）：用量配额（用户/项目 × Token/请求次数 × 日/周/月 UTC 窗口 + 预警阈值），管理面 CRUD 与实时水位（NORMAL/WARNING/EXCEEDED，只预警不阻断）；前端配额规则页（水位条 + 门禁删除）。
+- **配额水位告警**（V24）：`QUOTA_THRESHOLD` 告警类型（scope=配额规则，按规则重置窗口去重）→ 事件 + 签名 Webhook；规则停用即停止评估。roadmap 配额管理行至此闭环。
+- **缓存 ROI 报表**（原始设计文档 P5.4）：`GET /api/v1/admin/usage/roi` 窗口 + 逐日实付/节省/命中率/等效折扣（共享聚合器派生，按单价快照计价）；前端缓存 ROI 页（统计卡 + 逐日表 + CSV 导出）——G7.4 缓存收益的数据化。
+- 全局修复：请求体 JSON 解析失败统一 `400 PARAM_INVALID`（含字段名提示，此前 500）。
+
 ### G8.x — 平台中间件 P0/P1（外部系统通道与预算告警）
 
 - **G8.1 消费者 API Key + JWT 双认证通道**（ADR-0010/0011，对齐阿里消费者认证）：`api_consumers` 表（Key 仅存 SHA-256 哈希）；`/api/v1/billing/**` 对外通道（summary/records 全租户用量、仅元数据）；JWT 可选 RS256 验签公钥（平台私钥签发，JDK 原生验签零三方库，exp/nbf/size 校验）；Key 轮换/吊销即时失效；消费者管理 UI（一次性 Key 弹窗/吊销）；配额状态端点 `GET /api/v1/billing/quota`（订阅分组最新快照，外部视图不暴露内部字段）。

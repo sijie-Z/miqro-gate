@@ -169,6 +169,36 @@ async function mockApi(page: Page, admin = false) {
       ]),
     }),
   );
+  await page.route('**/api/v1/admin/usage/roi*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        from: '2026-08-03T00:00:00Z',
+        to: '2026-09-02T00:00:00Z',
+        totals: {
+          upstreamRequests: 120,
+          coalescedRequests: 0,
+          l1Hits: 10,
+          l2Hits: 20,
+          hitRatePct: 20.0,
+          paidCost: 0.84,
+          savedCost: 0.21,
+          savedPct: 20.0,
+        },
+        byDay: [
+          {
+            date: '2026-09-02',
+            upstreamRequests: 120,
+            hitRequests: 30,
+            hitRatePct: 20.0,
+            paidCost: 0.84,
+            savedCost: 0.21,
+          },
+        ],
+      }),
+    }),
+  );
   await page.route('**/api/v1/me/usage/**', (route) =>
     route.fulfill({
       status: 200,
@@ -778,6 +808,7 @@ const ADMIN_PAGES = [
   { path: '/app/grants', testid: 'grants-table', expect: 'ACTIVE' },
   { path: '/app/approval-center', testid: 'approvals-queue-table', expect: 'deepseek-v4-flash' },
   { path: '/app/quota-rules', testid: 'quota-rules-table', expect: '1,000,000' },
+  { path: '/app/roi', testid: 'roi-report', expect: '缓存节省' },
   { path: '/app/plans', testid: 'subscriptions-table', expect: 'DeepSeek PAYG' },
   { path: '/app/webhooks', testid: 'webhooks-table', expect: 'ops-alerts' },
   { path: '/app/alert-rules', testid: 'rules-table', expect: 'usage-missing' },

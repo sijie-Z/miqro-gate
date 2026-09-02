@@ -745,6 +745,18 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 - 视图含 `scopeName`（用户显示名/项目名）与 `scopeTag`（用户名/项目 code）。
 - 错误码补充：body JSON 解析失败（未知枚举/类型错误）统一 `400 PARAM_INVALID`（GlobalExceptionHandler 对 `HttpMessageNotReadableException` 的映射，含字段名提示）。
 
+### 5.20 缓存 ROI 报表 `GET /api/v1/admin/usage/roi`（P5.4）
+
+窗口 + 逐日序列的缓存收益视图：什么仍付了上游、缓存省了多少。
+
+- 参数：`from`/`to`（ISO-8601，缺省近 30 天）；复用用量查询共享校验（93 天窗口上限，`400 TIME_RANGE_TOO_WIDE` 等）；非法时间格式 → `400 PARAM_INVALID`。
+- 口径（读取时由共享聚合器计算，`groupBy=day`）：
+  - `paidCost` = 上游实付（`cost.upstreamPaid`）；`savedCost` = 缓存命中省下的上游费（`cost.savedByGatewayCache`，按当前单价快照对命中 token 计价）
+  - `hitRatePct` = (L1+L2 命中) / (上游 + coalesced + 命中) × 100——缓存命中占全部已服务请求比例
+  - `savedPct` = savedCost / (paidCost + savedCost) × 100——缓存不存在时的等效折扣
+- 响应：`{ from, to, totals { upstreamRequests, coalescedRequests, l1Hits, l2Hits, hitRatePct, paidCost, savedCost, savedPct }, byDay [ { date, upstreamRequests, hitRequests, hitRatePct, paidCost, savedCost } ] }`。
+- 零缓存事件也产出完整报表（全部为实付）；金额为十进制数。
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

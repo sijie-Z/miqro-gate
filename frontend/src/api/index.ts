@@ -34,6 +34,7 @@ import type {
   ModelApprovalStatus,
   ModelApprovalView,
   QuotaRuleView,
+  RoiReportView,
   SubmitModelApprovalRequest,
   UpsertQuotaRuleRequest,
   Provider,
@@ -264,6 +265,12 @@ export function putQuotaRule(request: UpsertQuotaRuleRequest): Promise<QuotaRule
 
 export function deleteQuotaRule(id: string): Promise<void> {
   return del<void>(`/api/v1/admin/quota-rules/${id}`);
+}
+
+// ---- admin cache-ROI report (P5.4) ----
+
+export function getRoiReport(from?: string, to?: string): Promise<RoiReportView> {
+  return get<RoiReportView>('/api/v1/admin/usage/roi', { from, to });
 }
 
 export function listCredentials(): Promise<CredentialView[]> {
