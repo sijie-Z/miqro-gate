@@ -32,16 +32,15 @@ jobs:
           path: ~/.sonar/cache
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
-      - name: Build and analyze (backend + frontend sources)
+      - name: Build and analyze
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Required for PR decoration
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }} # SonarCloud project token
         run: |
+          # sonar.sources stays at the Maven default (per-module src/main):
+          # module-relative overrides break the multi-module layout.
           ./mvnw -B -f backend/pom.xml verify \
             -Dsonar.projectKey=sijie-Z_miqro-gate \
             -Dsonar.organization=sijie-z \
             -Dsonar.host.url=https://sonarcloud.io \
-            -Dsonar.sources=backend,frontend/src \
-            -Dsonar.exclusions=frontend/src/__tests__/**,frontend/e2e/** \
-            -Dsonar.javascript.lcov.reportPaths= \
             org.sonarsource.scanner.maven:sonar-maven-plugin:4.0.0.4121:sonar
