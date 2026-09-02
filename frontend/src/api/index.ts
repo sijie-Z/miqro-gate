@@ -12,6 +12,7 @@ import type {
   AuditEventView,
   BudgetView,
   ExportTask,
+  InternalServiceView,
   SkillView,
   UsageDeletionRequest,
   WebhookDelivery,
@@ -368,6 +369,25 @@ export function adminDisableAgent(id: string): Promise<AgentView> {
 
 export function adminAgentUsage(id: string): Promise<UsageSummary> {
   return get<UsageSummary>(`/api/v1/admin/agents/${id}/usage`);
+}
+
+// ---- internal services (P3.2) ----
+
+export function adminListServices(): Promise<InternalServiceView[]> {
+  return get<InternalServiceView[]>('/api/v1/admin/services');
+}
+
+export function adminCreateService(body: {
+  name: string;
+  kind?: string;
+  description?: string;
+  baseUrl: string;
+}): Promise<InternalServiceView> {
+  return post<InternalServiceView>('/api/v1/admin/services', body);
+}
+
+export function adminDisableService(id: string): Promise<InternalServiceView> {
+  return post<InternalServiceView>(`/api/v1/admin/services/${id}/disable`);
 }
 
 // ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----

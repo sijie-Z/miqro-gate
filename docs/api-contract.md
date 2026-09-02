@@ -631,6 +631,18 @@
 
 **错误码**：`AGENT_NOT_FOUND`（404）、`AGENT_NAME_TAKEN`（409）、`AGENT_CREDENTIAL_TAKEN`（409）、`AGENT_ALREADY_DISABLED`（409）、`CREDENTIAL_NOT_FOUND`（400）。
 
+### 5.14 内部服务注册表（P3.2）
+
+平台组件、MCP 端点等内部服务经网关集成前的注册目录（对标腾讯服务来源）。服务地址必须为 https、不含用户信息/查询参数/片段（镜像上游目标规则）。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/services` / `/{id}` | 列表/详情 |
+| `POST /api/v1/admin/services` | 注册：`{ "name", "kind"?, "description"?, "baseUrl" }`（`kind` ∈ `HTTP\|MCP\|OTHER`，缺省 `HTTP`） |
+| `POST /api/v1/admin/services/{id}/disable` | 禁用（`409 SERVICE_ALREADY_DISABLED` 重复禁用） |
+
+**错误码**：`SERVICE_NOT_FOUND`（404）、`SERVICE_NAME_TAKEN`（409）、`SERVICE_ALREADY_DISABLED`（409）、`BASE_URL_INVALID`（400）。
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：
