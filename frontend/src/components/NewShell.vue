@@ -20,8 +20,12 @@ const navGroups = computed(() => [
   {
     title: '常规',
     items: [
+      { label: '总览', to: '/app-new/overview', icon: 'home' },
       { label: '我的 Key', to: '/app-new/keys', icon: 'key' },
       { label: '用量', to: '/app-new/usage', icon: 'chart' },
+      { label: '技能库', to: '/app-new/skills', icon: 'box' },
+      { label: '模型申请', to: '/app-new/model-approvals', icon: 'spark' },
+      { label: '资料', to: '/app-new/profile', icon: 'user' },
     ],
   },
   ...(isAdmin.value
@@ -89,6 +93,37 @@ async function handleLogout() {
                 stroke="currentColor"
                 stroke-width="1.6"
                 stroke-linecap="round"
+              />
+              <path
+                v-else-if="item.icon === 'home'"
+                d="M4 10.5 12 4l8 6.5V20h-6v-5h-4v5H4v-9.5Z"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path
+                v-else-if="item.icon === 'box'"
+                d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5v-9ZM4 7.5l8 4.5m0 0 8-4.5M12 12v9"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path
+                v-else-if="item.icon === 'spark'"
+                d="M12 3v4m0 10v4M3 12h4m10 0h4M5.6 5.6l2.8 2.8m7.2 7.2 2.8 2.8m0-12.8-2.8 2.8m-7.2 7.2-2.8 2.8"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+              />
+              <path
+                v-else-if="item.icon === 'user'"
+                d="M12 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm0 2c-4 0-6.5 2.3-6.5 5.5V20h13v-1.5C18.5 15.3 16 13 12 13Z"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
               />
               <path
                 v-else-if="item.icon === 'users'"

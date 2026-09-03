@@ -30,6 +30,12 @@ const router = createRouter({
           redirect: '/app-new/keys',
         },
         {
+          path: 'overview',
+          name: 'next-overview',
+          component: () => import('@/views/next/NextOverviewView.vue'),
+          meta: { title: '总览' },
+        },
+        {
           path: 'keys',
           name: 'next-keys',
           component: () => import('@/views/next/NextKeysView.vue'),
@@ -40,6 +46,24 @@ const router = createRouter({
           name: 'next-usage',
           component: () => import('@/views/next/NextUsageView.vue'),
           meta: { title: '用量' },
+        },
+        {
+          path: 'skills',
+          name: 'next-skills',
+          component: () => import('@/views/next/NextSkillsView.vue'),
+          meta: { title: '技能库' },
+        },
+        {
+          path: 'model-approvals',
+          name: 'next-model-approvals',
+          component: () => import('@/views/next/NextModelApprovalsView.vue'),
+          meta: { title: '模型申请' },
+        },
+        {
+          path: 'profile',
+          name: 'next-profile',
+          component: () => import('@/views/next/NextProfileView.vue'),
+          meta: { title: '资料' },
         },
         {
           path: 'users',
