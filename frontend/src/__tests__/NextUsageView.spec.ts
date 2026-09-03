@@ -126,11 +126,11 @@ describe('NextUsageView', () => {
     expect(wrapper.find('[data-testid="summary-table"]').exists()).toBe(true);
     expect(wrapper.text()).toContain('Core AI');
     expect(wrapper.text()).toContain('19'); // 12 + 2 + 4 + 1
-    expect(wrapper.find('[data-testid="summary-totals"]').text()).toContain('14 请求');
-    expect(wrapper.find('[data-testid="summary-totals"]').text()).toContain(
-      '1,000 输入 / 500 输出',
-    );
-    expect(wrapper.find('[data-testid="summary-totals"]').text()).toContain('$0.0020');
+    const totals = wrapper.find('[data-testid="summary-totals"]').text();
+    expect(totals).toContain('合计');
+    expect(totals).toContain('19'); // all requests incl. cache hits, matches the 请求 column
+    expect(totals).toContain('$0.0020');
+    expect(totals).toContain('$0.0004');
   });
 
   it('renders usage distribution bars for the top groups', async () => {

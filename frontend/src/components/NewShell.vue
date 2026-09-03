@@ -273,6 +273,7 @@ async function handleLogout() {
   gap: var(--ui-space-2);
   padding: var(--ui-space-2);
   border-radius: var(--ui-radius-control);
+  border-top: 1px solid var(--ui-border-muted);
 }
 
 .new-shell__user-avatar {

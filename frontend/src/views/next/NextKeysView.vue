@@ -96,7 +96,6 @@ const columns = [
   { key: 'status', title: '状态', width: '110px' },
   { key: 'cachePolicy', title: '缓存', width: '90px' },
   { key: 'createdAt', title: '创建时间', width: '170px', sortable: true },
-  { key: 'lastUsedAt', title: '最近使用', width: '170px', sortable: true },
   { key: 'actions', title: '', width: '60px', align: 'center' },
 ];
 
@@ -297,9 +296,11 @@ async function confirmAndRun() {
   await state.run();
 }
 
-function formatTime(iso?: string): string {
+function formatDate(iso?: string): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString();
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
@@ -502,14 +503,14 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
     <!-- Key list -->
     <section class="ui-panel">
       <div class="ui-panel-head">
-        <div class="next-keys__list-head">
-          <h2 class="ui-panel-title">Virtual Key</h2>
-          <span class="ui-panel-sub" data-testid="keys-summary">{{ keySummary }}</span>
-        </div>
+        <h2 class="ui-panel-title">Virtual Key</h2>
+      </div>
+      <div class="next-keys__toolbar">
+        <span class="ui-panel-sub" data-testid="keys-summary">{{ keySummary }}</span>
         <UiInput
           v-model="keyFilter"
           placeholder="按名称 / 项目 / Key 前缀过滤"
-          width="280px"
+          width="260px"
           data-testid="keys-filter"
         />
       </div>
@@ -546,10 +547,7 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
           />
         </template>
         <template #createdAt="{ row }">{{
-          formatTime((row as VirtualKeyView).createdAt)
-        }}</template>
-        <template #lastUsedAt="{ row }">{{
-          formatTime((row as VirtualKeyView).lastUsedAt)
+          formatDate((row as VirtualKeyView).createdAt)
         }}</template>
         <template #actions="{ row }">
           <DropdownMenuRoot>
@@ -844,24 +842,31 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
   grid-column: 1 / -1;
 }
 
-.next-keys__list-head {
+.next-keys__toolbar {
   display: flex;
-  align-items: baseline;
-  gap: var(--ui-space-3);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-3) var(--ui-space-5);
+  border-bottom: 1px solid var(--ui-border-muted);
 }
 
 .next-keys__name {
-  font-weight: var(--ui-weight-medium);
+  font-weight: var(--ui-weight-semibold);
+  line-height: var(--ui-line-height-lg);
 }
 
 .next-keys__mask {
-  font-size: var(--ui-font-size-xs);
+  font-size: 11px;
+  line-height: var(--ui-line-height-sm);
   color: var(--ui-foreground-faint);
+  margin-top: 2px;
 }
 
 .next-keys__models {
   font-size: var(--ui-font-size-xs);
-  color: var(--ui-foreground-secondary);
+  line-height: var(--ui-line-height-sm);
+  color: var(--ui-foreground-faint);
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 480px;

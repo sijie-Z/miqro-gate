@@ -263,8 +263,8 @@ function renderError(error: unknown, fallback: string) {
 }
 
 .next-login__card {
-  width: min(420px, 100%);
-  padding: var(--ui-space-8) var(--ui-space-8) var(--ui-space-6);
+  width: min(440px, 100%);
+  padding: 40px 40px 36px;
   background: var(--ui-card);
   border: 1px solid var(--ui-border);
   border-radius: var(--ui-radius-dialog);
@@ -273,26 +273,26 @@ function renderError(error: unknown, fallback: string) {
 
 .next-login__head {
   text-align: center;
-  margin-bottom: var(--ui-space-6);
+  margin-bottom: var(--ui-space-8);
 }
 
 .next-login__mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: var(--ui-radius-control);
   background: var(--ui-primary);
   color: #fff;
-  font-size: 19px;
+  font-size: 21px;
   font-weight: 700;
-  margin-bottom: var(--ui-space-4);
+  margin-bottom: var(--ui-space-5);
 }
 
 .next-login__title {
   margin: 0;
-  font-size: var(--ui-font-size-xl);
+  font-size: 21px;
   font-weight: var(--ui-weight-semibold);
   letter-spacing: -0.01em;
 }
@@ -306,23 +306,27 @@ function renderError(error: unknown, fallback: string) {
 .next-login__tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  margin-bottom: var(--ui-space-5);
-  border-bottom: 1px solid var(--ui-border);
+  gap: var(--ui-space-1);
+  padding: var(--ui-space-1);
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border-muted);
+  border-radius: var(--ui-radius-control);
+  margin-bottom: var(--ui-space-6);
 }
 
 .next-login__tab {
   border: 0;
-  border-bottom: 2px solid transparent;
-  padding: 0 0 var(--ui-space-3);
-  font-size: var(--ui-font-size-base);
+  height: 34px;
+  border-radius: calc(var(--ui-radius-control) - 2px);
+  font-size: var(--ui-font-size-sm);
   font-weight: var(--ui-weight-medium);
   color: var(--ui-foreground-secondary);
   background: transparent;
   cursor: pointer;
-  margin-bottom: -1px;
   transition:
     color var(--ui-ease),
-    border-color var(--ui-ease);
+    background-color var(--ui-ease),
+    box-shadow var(--ui-ease);
 }
 
 .next-login__tab:hover {
@@ -330,14 +334,19 @@ function renderError(error: unknown, fallback: string) {
 }
 
 .next-login__tab--active {
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
   color: var(--ui-primary);
-  border-bottom-color: var(--ui-primary);
   font-weight: var(--ui-weight-semibold);
+}
+
+.next-login__tab--active:hover {
+  color: var(--ui-primary);
 }
 
 .next-login__tab:focus-visible {
   outline: none;
-  box-shadow: inset 0 -2px 0 0 var(--ui-ring);
+  box-shadow: var(--ui-shadow-focus);
 }
 
 .next-login__error {
@@ -353,15 +362,19 @@ function renderError(error: unknown, fallback: string) {
 .next-login__form {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-space-4);
+  gap: 22px;
+}
+
+.next-login__form :deep(.ui-field) {
+  gap: var(--ui-space-2);
 }
 
 .next-login__eye {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border: none;
   border-radius: var(--ui-radius-control);
   background: transparent;
@@ -381,12 +394,13 @@ function renderError(error: unknown, fallback: string) {
 
 .next-login__submit {
   width: 100%;
-  margin-top: var(--ui-space-2);
+  margin-top: var(--ui-space-1);
 }
 
 .next-login__foot {
   position: absolute;
   bottom: var(--ui-space-6);
+  left: var(--ui-space-8);
   margin: 0;
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-faint);

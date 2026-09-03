@@ -275,7 +275,7 @@ test('usage page shows quota, summary totals and pages the records', async ({ pa
   await page.goto('/app-new/usage');
   await expect(page.getByTestId('my-quota-row').first()).toBeVisible();
   await expect(page.getByText('限额 2,000,000 · 本期用量 160,000（8%）')).toBeVisible();
-  await expect(page.getByTestId('summary-totals')).toContainText('14 请求');
+  await expect(page.getByTestId('summary-totals')).toContainText('19');
   await expect(page.getByTestId('usage-chart')).toBeVisible();
   await expect(page.getByText('deepseek-v4-flash')).toBeVisible();
 

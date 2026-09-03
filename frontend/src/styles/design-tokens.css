@@ -30,11 +30,11 @@
   /* text — near-black ink + cool slates (PostHog foreground family) */
   --ui-foreground: #1d1d1f;
   --ui-foreground-secondary: #5f5f66;
-  --ui-foreground-faint: #8a8a93;
+  --ui-foreground-faint: #82828b;
   --ui-foreground-inverse: #ffffff;
 
   /* lines */
-  --ui-border: #e3e1db; /* hairline default */
+  --ui-border: #dedcd4; /* hairline default */
   --ui-border-muted: #ecebe6;
   --ui-border-strong: #cfccc4;
   --ui-input-border: #c9c7c0;
@@ -55,8 +55,8 @@
   --ui-danger-bg: #f9dfdc;
   --ui-info-fg: #1d4aff;
   --ui-info-bg: #e9edff;
-  --ui-neutral-fg: #5f5f66;
-  --ui-neutral-bg: #ecebe6;
+  --ui-neutral-fg: #4e4e55;
+  --ui-neutral-bg: #e9e8e2;
 
   /* typography */
   --ui-font:

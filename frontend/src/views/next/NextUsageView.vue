@@ -63,9 +63,9 @@ function quotaLevelTone(
 const summaryColumns = [
   { key: 'group', title: '分组', minWidth: '160px' },
   { key: 'requests', title: '请求', width: '100px', align: 'right' as const },
-  { key: 'inputTokens', title: '输入 tokens', width: '130px', align: 'right' as const },
-  { key: 'outputTokens', title: '输出 tokens', width: '130px', align: 'right' as const },
-  { key: 'cacheRead', title: 'Cache 读', width: '120px', align: 'right' as const },
+  { key: 'inputTokens', title: '输入 Token', width: '130px', align: 'right' as const },
+  { key: 'outputTokens', title: '输出 Token', width: '130px', align: 'right' as const },
+  { key: 'cacheRead', title: '缓存读取', width: '120px', align: 'right' as const },
   { key: 'upstreamCost', title: '上游成本', width: '130px', align: 'right' as const },
   { key: 'gatewayCost', title: '网关观测成本', width: '150px', align: 'right' as const },
 ];
@@ -266,7 +266,7 @@ function formatTime(iso: string): string {
         <p class="ui-page-desc">仅统计你名下 Virtual Key 产生的用量。</p>
       </div>
       <div class="ui-page-actions">
-        <UiButton variant="secondary" data-testid="usage-export" @click="exportRecords">
+        <UiButton variant="primary" data-testid="usage-export" @click="exportRecords">
           导出 CSV
         </UiButton>
       </div>
@@ -332,15 +332,17 @@ function formatTime(iso: string): string {
       <div class="ui-panel-head">
         <div class="next-usage__head-inline">
           <h2 class="ui-panel-title">用量汇总</h2>
-          <span class="ui-panel-sub">按维度分组</span>
         </div>
-        <UiSelect
-          :model-value="groupBy"
-          :options="groupByOptions"
-          width="180px"
-          data-testid="summary-groupby"
-          @change="changeGroupBy"
-        />
+        <div class="next-usage__groupby">
+          <span class="next-usage__groupby-label">分组维度</span>
+          <UiSelect
+            :model-value="groupBy"
+            :options="groupByOptions"
+            width="180px"
+            data-testid="summary-groupby"
+            @change="changeGroupBy"
+          />
+        </div>
       </div>
       <UiTable
         :columns="summaryColumns"
@@ -369,17 +371,29 @@ function formatTime(iso: string): string {
       </UiTable>
       <div v-if="summary" class="next-usage__totals" data-testid="summary-totals">
         <span class="next-usage__totals-label">合计</span>
-        <span class="ui-num"
-          >{{
-            formatNumber(summary.totals.requests.upstream + summary.totals.requests.coalesced)
-          }}
-          请求</span
-        >
-        <span class="ui-num"
-          >{{ formatNumber(summary.totals.tokens.input) }} 输入 /
-          {{ formatNumber(summary.totals.tokens.output) }} 输出 tokens</span
-        >
-        <span class="ui-num">{{ formatCost(summary.totals.cost.upstreamPaid) }} 上游成本</span>
+        <span class="ui-num next-usage__totals-col next-usage__totals-col--wide">{{
+          formatNumber(
+            summary.totals.requests.upstream +
+              summary.totals.requests.coalesced +
+              summary.totals.requests.l1Hit +
+              summary.totals.requests.l2Hit,
+          )
+        }}</span>
+        <span class="ui-num next-usage__totals-col">{{
+          formatNumber(summary.totals.tokens.input)
+        }}</span>
+        <span class="ui-num next-usage__totals-col">{{
+          formatNumber(summary.totals.tokens.output)
+        }}</span>
+        <span class="ui-num next-usage__totals-col">{{
+          formatNumber(summary.totals.tokens.cacheRead)
+        }}</span>
+        <span class="ui-num next-usage__totals-col">{{
+          formatCost(summary.totals.cost.upstreamPaid)
+        }}</span>
+        <span class="ui-num next-usage__totals-col">{{
+          formatCost(summary.totals.cost.gatewayObserved)
+        }}</span>
       </div>
     </section>
 
@@ -481,6 +495,17 @@ function formatTime(iso: string): string {
   gap: var(--ui-space-3);
 }
 
+.next-usage__groupby {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+}
+
+.next-usage__groupby-label {
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
 .next-usage__quota-empty {
   font-size: var(--ui-font-size-sm);
   color: var(--ui-foreground-secondary);
@@ -509,7 +534,7 @@ function formatTime(iso: string): string {
 
 .next-usage__quota-dim {
   font-size: var(--ui-font-size-sm);
-  font-weight: var(--ui-weight-medium);
+  font-weight: var(--ui-weight-semibold);
 }
 
 .next-usage__quota-body {
@@ -543,7 +568,7 @@ function formatTime(iso: string): string {
 .next-usage__totals {
   display: flex;
   align-items: center;
-  gap: var(--ui-space-6);
+  gap: var(--ui-space-2);
   margin: 0 var(--ui-space-5);
   padding: var(--ui-space-3) 0;
   border-top: 1px solid var(--ui-border);
@@ -554,6 +579,18 @@ function formatTime(iso: string): string {
 .next-usage__totals-label {
   font-weight: var(--ui-weight-semibold);
   color: var(--ui-foreground);
+  width: 148px;
+  flex-shrink: 0;
+}
+
+.next-usage__totals-col {
+  width: 110px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.next-usage__totals-col--wide {
+  width: 100px;
 }
 
 .next-usage__columns {

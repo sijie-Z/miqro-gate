@@ -226,8 +226,11 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
   }
 }
 
-function formatTime(iso?: string): string {
-  return iso ? new Date(iso).toLocaleString() : '从未登录';
+function formatDate(iso?: string): string {
+  if (!iso) return '从未登录';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 </script>
 
@@ -336,12 +339,8 @@ function formatTime(iso?: string): string {
             :label="statusLabel((row as AdminUser).status)"
           />
         </template>
-        <template #lastLoginAt="{ row }">{{ formatTime((row as AdminUser).lastLoginAt) }}</template>
-        <template #createdAt="{ row }">{{
-          (row as AdminUser).createdAt
-            ? new Date((row as AdminUser).createdAt).toLocaleString()
-            : '—'
-        }}</template>
+        <template #lastLoginAt="{ row }">{{ formatDate((row as AdminUser).lastLoginAt) }}</template>
+        <template #createdAt="{ row }">{{ formatDate((row as AdminUser).createdAt) }}</template>
         <template #actions="{ row }">
           <DropdownMenuRoot>
             <DropdownMenuTrigger
@@ -507,12 +506,15 @@ function formatTime(iso?: string): string {
 }
 
 .next-users__name {
-  font-weight: var(--ui-weight-medium);
+  font-weight: var(--ui-weight-semibold);
+  line-height: var(--ui-line-height-lg);
 }
 
 .next-users__display {
-  font-size: var(--ui-font-size-xs);
+  font-size: 11px;
+  line-height: var(--ui-line-height-sm);
   color: var(--ui-foreground-faint);
+  margin-top: 2px;
 }
 
 .next-users__kebab {
