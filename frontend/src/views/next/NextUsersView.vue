@@ -302,13 +302,10 @@ function formatDate(iso?: string): string {
 
     <!-- List -->
     <section class="ui-panel">
-      <div class="ui-panel-head">
-        <div class="next-users__head-inline">
-          <h2 class="ui-panel-title">账号列表</h2>
-          <span class="ui-panel-sub" data-testid="users-summary"
-            >共 {{ users.length }} 个账号 · {{ activeCount }} 正常</span
-          >
-        </div>
+      <div class="ui-panel-toolbar">
+        <span class="ui-panel-sub" data-testid="users-summary"
+          >共 {{ users.length }} 个账号，{{ activeCount }} 个正常</span
+        >
       </div>
       <UiTable
         :columns="columns"

@@ -93,6 +93,16 @@
   flex: 1;
 }
 
+/* slim list toolbar between panel edge and the table band */
+.ui-panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-3) var(--ui-space-5);
+  border-bottom: 1px solid var(--ui-border);
+}
+
 /* ---- numbers & code ---- */
 .ui-num {
   font-variant-numeric: tabular-nums;

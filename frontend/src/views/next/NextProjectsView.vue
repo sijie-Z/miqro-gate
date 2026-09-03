@@ -200,8 +200,8 @@ onMounted(load);
     </section>
 
     <section class="ui-panel">
-      <div class="ui-panel-head">
-        <h2 class="ui-panel-title">项目列表</h2>
+      <div class="ui-panel-toolbar">
+        <span class="ui-panel-sub">共 {{ projects.length }} 个项目</span>
       </div>
       <UiTable
         :columns="columns"

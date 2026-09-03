@@ -297,8 +297,8 @@ onMounted(async () => {
     </section>
 
     <section class="ui-panel">
-      <div class="ui-panel-head">
-        <h2 class="ui-panel-title">授权列表</h2>
+      <div class="ui-panel-toolbar">
+        <span class="ui-panel-sub">共 {{ grants.length }} 条授权</span>
       </div>
       <UiTable
         :columns="columns"

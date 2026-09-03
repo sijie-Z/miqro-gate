@@ -197,8 +197,8 @@ onMounted(load);
     </section>
 
     <section class="ui-panel">
-      <div class="ui-panel-head">
-        <h2 class="ui-panel-title">团队列表</h2>
+      <div class="ui-panel-toolbar">
+        <span class="ui-panel-sub">共 {{ teams.length }} 个团队</span>
       </div>
       <UiTable
         :columns="columns"
