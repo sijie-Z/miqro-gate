@@ -1,0 +1,112 @@
+/* MiQroGate UI v2 design tokens — PostHog-derived console language (U0 pilot).
+ *
+ * Reference master: PostHog product console (github.com/PostHog/posthog, MIT;
+ * source material archived in miqro-local/posthog-design-ref/ with extraction
+ * notes). Layout/component organization borrows from Vben Admin 5 as a
+ * reference only — no code is copied from either project.
+ *
+ * System: warm near-white canvas, white content surfaces separated by 1px
+ * hairlines (no card drop shadows), a single restrained brand blue, muted
+ * low-saturation status colors, 4px spacing base, radii control 6 / card 8 /
+ * dialog 12, shadows only on popper/dialog/focus rings.
+ *
+ * Token vocabulary mirrors PostHog/Quill semantics (background / card / muted /
+ * chrome / border / input / ring + -foreground pairs) so both the code and the
+ * upstream reference stay comparable. v1 `--miqrokey-*` tokens and their
+ * TDesign-era pages are untouched and coexist until each page migrates (U1-U3).
+ * The aesthetic audit (aesthetic.spec.ts) gates forbidden patterns on both
+ * layers.
+ */
+:root {
+  /* surfaces — warm neutrals, hue ≈ 75-90, near-zero chroma */
+  --ui-background: #f4f3ef; /* canvas — matches PostHog hsl(75 14% 95%) */
+  --ui-card: #ffffff;
+  --ui-muted: #f1efea; /* subdued rows / secondary fills */
+  --ui-chrome: #ecebe6; /* sidebar / toolbar furniture */
+  --ui-fill-hover: rgba(24, 24, 27, 0.045);
+  --ui-fill-selected: rgba(24, 24, 27, 0.07);
+  --ui-fill-expanded: rgba(24, 24, 27, 0.09);
+
+  /* text — near-black ink + cool slates (PostHog foreground family) */
+  --ui-foreground: #1d1d1f;
+  --ui-foreground-secondary: #5f5f66;
+  --ui-foreground-faint: #8a8a93;
+  --ui-foreground-inverse: #ffffff;
+
+  /* lines */
+  --ui-border: #e3e1db; /* hairline default */
+  --ui-border-muted: #ecebe6;
+  --ui-border-strong: #cfccc4;
+  --ui-input-border: #c9c7c0;
+
+  /* brand — single restrained cobalt blue */
+  --ui-primary: #1d4aff;
+  --ui-primary-hover: #1640d6;
+  --ui-primary-active: #1235b8;
+  --ui-primary-soft: #e9edff; /* subtle brand tint fills */
+  --ui-ring: rgba(29, 74, 255, 0.38);
+
+  /* status — muted foregrounds on pale backgrounds (Quill light tuples) */
+  --ui-success-fg: #046630;
+  --ui-success-bg: #d5f2de;
+  --ui-warning-fg: #8a4b00;
+  --ui-warning-bg: #f8e8d2;
+  --ui-danger-fg: #bd1426;
+  --ui-danger-bg: #f9dfdc;
+  --ui-info-fg: #1d4aff;
+  --ui-info-bg: #e9edff;
+  --ui-neutral-fg: #5f5f66;
+  --ui-neutral-bg: #ecebe6;
+
+  /* typography */
+  --ui-font:
+    -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei',
+    Arial, sans-serif;
+  --ui-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+    monospace;
+  --ui-font-size-xs: 12px;
+  --ui-font-size-sm: 13px;
+  --ui-font-size-base: 14px;
+  --ui-font-size-lg: 15px;
+  --ui-font-size-xl: 18px;
+  --ui-line-height-sm: 18px;
+  --ui-line-height-base: 20px;
+  --ui-line-height-lg: 24px;
+  --ui-weight-regular: 400;
+  --ui-weight-medium: 500;
+  --ui-weight-semibold: 600;
+
+  /* spacing — 4px base */
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-5: 20px;
+  --ui-space-6: 24px;
+  --ui-space-8: 32px;
+  --ui-space-10: 40px;
+  --ui-space-12: 48px;
+
+  /* shape */
+  --ui-radius-control: 6px;
+  --ui-radius-panel: 8px;
+  --ui-radius-dialog: 12px;
+  --ui-radius-pill: 999px;
+
+  /* sizes */
+  --ui-control-height: 32px;
+  --ui-control-height-lg: 36px;
+  --ui-row-height: 44px;
+  --ui-table-row-height: 44px;
+  --ui-header-height: 56px;
+  --ui-sidebar-width: 240px;
+  --ui-content-max: 1440px;
+
+  /* shadows — only popper / dialog / focus affordance */
+  --ui-shadow-popper: 0 4px 12px rgba(15, 15, 17, 0.12);
+  --ui-shadow-dialog: 0 12px 40px rgba(15, 15, 17, 0.2);
+  --ui-shadow-focus: 0 0 0 2px var(--ui-ring);
+
+  /* motion — subtle, feedback only */
+  --ui-ease: 120ms ease;
+}

@@ -4,6 +4,8 @@ import TDesign from 'tdesign-vue-next';
 import 'tdesign-vue-next/es/style/index.css';
 import '@/styles/tokens.css';
 import '@/styles/global.css';
+import '@/styles/design-tokens.css';
+import '@/styles/design-base.css';
 
 import App from './App.vue';
 import router from './router';

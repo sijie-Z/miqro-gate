@@ -40,7 +40,12 @@ describe('aesthetic audit', () => {
     let checked = 0;
     for (const block of blocks) {
       const isStatusPill = /\.mk-status/.test(block);
-      const isModal = /\.t-dialog/.test(block) || /radius-modal/.test(block);
+      // Sanctioned exceptions: dialog/modal tokens (--*radius-modal, ui
+      // dialog layer) and pill tokens (status pill, segmented fills).
+      const isModal =
+        /\.t-dialog/.test(block) ||
+        /radius-(modal|dialog)/.test(block) ||
+        /radius-pill/.test(block);
       const skip = isStatusPill || isModal;
       for (const m of block.matchAll(/--?[a-z-]*radius[a-z-]*:\s*([0-9.]+)px/g)) {
         if (!skip) {
