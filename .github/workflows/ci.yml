@@ -116,6 +116,12 @@ jobs:
         run: ./mvnw verify -Pintegration --batch-mode
         env:
           MAVEN_PROJECTBASEDIR: ${{ github.workspace }}/backend
+      # F09 (api-contract §8): the generated spec (OpenApiSpecIntegrationTest
+      # writes backend/control-plane-app/target/openapi-spec.json) must not
+      # remove or tighten anything the committed baseline promises.
+      - name: OpenAPI breaking-change diff vs committed baseline
+        run: python3 deploy/openapi/check-openapi-breaking.py docs/openapi/openapi-3.1.json backend/control-plane-app/target/openapi-spec.json
+        if: ${{ needs.changes.outputs.backend == 'true' }}
 
   # Frontend static checks + unit tests + production build.
   frontend:

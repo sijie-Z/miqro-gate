@@ -203,6 +203,8 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 | `SPRING_PROFILES_ACTIVE` | 空 | 附加 `monitoring`（Prometheus 抓取端点）与 `json`（Logstash JSON 日志，G6.1） |
 | `MIQROKEY_LOG_LEVEL` | `INFO` | 生产禁止默认 DEBUG |
 
+管理面 OpenAPI（F09）：Control Plane 固定暴露 `GET /v3/api-docs`（OpenAPI 3.1，springdoc，无 swagger-ui）。该端点只读、无需鉴权（文档消费）；基线 `docs/openapi/openapi-3.1.json` 与 CI 破坏性 diff 见 api-contract §8。如生产不希望暴露可后续加 `springdoc.api-docs.enabled=false` 环境开关（本版本未暴露为 `MIQROKEY_` 变量）。
+
 指标标签不得使用用户 ID、完整模型输入、Key、request body 或供应商错误正文等高基数/敏感值。
 
 ## 9. Cache（ADR-0009 已启用）

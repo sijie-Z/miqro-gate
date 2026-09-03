@@ -53,8 +53,8 @@
 
 实现后以下文件由代码生成，并与手写规格共同校验：
 
-- OpenAPI JSON/YAML：由 Control Plane controller 生成。
-- 前端 API 类型：由 OpenAPI 生成。
+- OpenAPI JSON/YAML：由 Control Plane 生成（springdoc，`GET /v3/api-docs`，OpenAPI 3.1）；机器可读基线提交于 `docs/openapi/openapi-3.1.json`，CI 跑破坏性 diff（F09，deploy/openapi/check-openapi-breaking.py）。
+- 前端 API 类型：**手写维护中**（`frontend/src/api` + `types/api`；OpenAPI codegen 迁移为发布前候选，未实现前 API 变更需人工同步两处并跑 frontend typecheck）。
 - Flyway schema：migration 是数据库执行事实，`database-schema.md` 是可读规格。
 - SBOM 和许可证清单：由构建生成。
 - Provider catalog 签名包：由发布任务生成。

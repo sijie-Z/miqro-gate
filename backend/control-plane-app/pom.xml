@@ -36,6 +36,13 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
+        <!-- OpenAPI 3.1 generation (F09, api-contract §8): /v3/api-docs without the
+             swagger-ui bundle — the spec is the machine-readable contract source. -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-api</artifactId>
+            <version>${springdoc.version}</version>
+        </dependency>
 
         <!-- Spring Boot Actuator -->
         <dependency>

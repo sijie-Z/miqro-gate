@@ -26,6 +26,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - **用户自助配额可见性**（F04）：`GET /api/v1/me/quota-rules`——调用者名下 USER 作用域配额规则 + 当前窗口实时水位（含模板自动规则，停用仍可见），只读不分页、其他作用域绝不出现；前端用量页「我的配额」面板（维度/限额/本期用量/水位条/状态徽标，空态提示）。
 - **过期记录定时 GC**（F06）：定时回收（`MIQROKEY_CLEANUP_EXPIRED_SWEEP_MS` 默认 1h）下载窗口已过的导出产物（`SUCCEEDED` 超 `expires_at` 连同 `file_bytes` 删除，FAILED/PENDING 保留查看）与确认窗口已过的删除请求（PENDING_CONFIRMATION/CONFIRMED/EXPIRED 删除，**EXECUTED 永久保留**——执行审计）。
 - **usage 队列饱和应急直写**（F35，architecture §5）：`MIQROKEY_GATEWAY_QUEUE_SATURATION_MODE` 默认 `DROP`（行为不变）；置 `WRITE_THROUGH` 时队列满的事件经专用 writer 执行器单条幂等直写、发布线程有界等待（`MIQROKEY_GATEWAY_QUEUE_WRITE_THROUGH_TIMEOUT` 默认 5s）——审计完整性优先，JDBC 仍只在 writer 执行器，超时/失败照旧计数丢弃、发布线程永不无限阻塞。
+- **OpenAPI 3.1 生成 + CI 破坏性变更检查**（F09，api-contract §8 契约收尾）：springdoc 接入 Control Plane（无 swagger-ui），`GET /v3/api-docs` 输出 3.1.0（105 paths / 89 schemas）；Info 元数据 + 四类鉴权 scheme 建模（门户 Cookie/CSRF/外部 API Key/JWT，不强制任何操作）；机器可读基线 `docs/openapi/openapi-3.1.json` 入库；CI backend-integration job 对生成结果跑 `deploy/openapi/check-openapi-breaking.py`（删 path/op/response/参数或属性变 required 即红）。前端 TS client 仍手写（codegen 列发布前候选，document-map §3 注明）。
 - 全局修复：请求体 JSON 解析失败统一 `400 PARAM_INVALID`（含字段名提示，此前 500）。
 
 ### G8.x — 平台中间件 P0/P1（外部系统通道与预算告警）
