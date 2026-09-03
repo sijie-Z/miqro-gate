@@ -15,6 +15,41 @@ const router = createRouter({
       meta: { public: true, title: '登录' },
     },
     {
+      path: '/login-new',
+      name: 'login-next',
+      component: () => import('@/views/next/NextLoginView.vue'),
+      meta: { public: true, title: '登录' },
+    },
+    {
+      path: '/app-new',
+      component: () => import('@/components/NewShell.vue'),
+      meta: { requiresAuth: true },
+      children: [
+        {
+          path: '',
+          redirect: '/app-new/keys',
+        },
+        {
+          path: 'keys',
+          name: 'next-keys',
+          component: () => import('@/views/next/NextKeysView.vue'),
+          meta: { title: '我的 Key' },
+        },
+        {
+          path: 'usage',
+          name: 'next-usage',
+          component: () => import('@/views/next/NextUsageView.vue'),
+          meta: { title: '用量' },
+        },
+        {
+          path: 'users',
+          name: 'next-users',
+          component: () => import('@/views/next/NextUsersView.vue'),
+          meta: adminMeta('用户'),
+        },
+      ],
+    },
+    {
       path: '/app',
       component: () => import('@/components/AppShell.vue'),
       meta: { requiresAuth: true },
@@ -230,13 +265,17 @@ router.beforeEach(async (to) => {
 
   if (to.meta.public) {
     if (auth.isAuthenticated) {
-      return auth.mustChangePassword ? '/app/profile' : '/app/keys';
+      if (auth.mustChangePassword) return '/app/profile';
+      return to.name === 'login-next' ? '/app-new/keys' : '/app/keys';
     }
     return true;
   }
 
   if (!auth.isAuthenticated) {
-    return { name: 'login', query: { redirect: to.fullPath } };
+    return {
+      name: to.path.startsWith('/app-new') || to.name === 'login-next' ? 'login-next' : 'login',
+      query: { redirect: to.fullPath },
+    };
   }
 
   // Password must be changed before anything else.
@@ -247,7 +286,7 @@ router.beforeEach(async (to) => {
   // Admin routes are SYSTEM_ADMIN-only; regular users are redirected to the
   // keys page (never to the admin route, which would render a 403 page).
   if (to.meta.requiresAdmin && auth.user?.role !== 'SYSTEM_ADMIN') {
-    return { name: 'keys' };
+    return to.path.startsWith('/app-new') ? { name: 'next-keys' } : { name: 'keys' };
   }
 
   return true;
