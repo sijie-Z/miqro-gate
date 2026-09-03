@@ -6,36 +6,31 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `F-REG 账号自助注册 + 登录页重做` — `DONE`（PR #131 已开，**待 CI 全绿后按授权模式合并**）
-- Goal status: `DONE`（2026-09-03；分支 goal/self-registration @ 3ff50fe，工作区干净）
+- Current goal: `UI 专项 U0 — PostHog 设计语言 + ui/ 组件首批 + 试点 4 页` — `AWAITING_USER_ACCEPTANCE`（分支 goal/ui-posthog-u0 @ 803f552 已 push、PR 待用户查看；代码+测试完成并全绿，视觉评审中位 ~7-7.5 未达 9 → 停止逐轮追分，等用户真机点验后决定 U1 或调整方向）
+- Goal status: `AWAITING_USER_ACCEPTANCE`（2026-09-03；vitest 27 文件 135/135、e2e 41/41 全绿；评审档案与截图在 miqro-local/ui-reviews/，含 U0-VISION-SCORES.md 与每轮 raw；预览入口见 NEXT_SESSION_PLAN 状态段）
 - Last updated: `2026-09-03 CST`
-- 本地试跑环境（**非仓库内容**）：control-plane(8080)/gateway(8081)/frontend dev(5173) 均在跑，代码=本分支最新；管理员 root/DrillPass2026!；DeepSeek key 在 miqro-local/.deepseek-key.tmp（不入库、已建议轮换）
-- **下一会话启动必读**：`docs/NEXT_SESSION_PLAN.md`（分阶段执行计划：PR #131 收尾 → PostHog 自绘 UI 专项 U0-U3 → 功能候选；含验收/评审/环境备忘/状态段）
-- **会话交接点（功能面待办，见下段）**——本段为后续 session 的执行清单
+## 会话交接点 2026-09-03 — UI 专项 U0 待验收（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；U0 验收通过前暂停功能 backlog）
 
-## 会话交接点 2026-09-03 — 功能面待办清单（用户点名写清楚）
+### U0 待办（下一动作，只等用户）
+1. **用户真机点验**：http://localhost:5173/login-new 与 /app-new/{keys,usage,users}（登录 root/DrillPass2026!；旧版对照 /login、/app/*）。
+2. 点头 → U1；否定 → 停下问方向（不改设计母版）。验收材料：miqro-local/ui-reviews/（截图 + U0-VISION-SCORES.md + 每轮 raw 评审）。
+3. 合并（用户点头后）：CI 全绿 → squash merge goal/ui-posthog-u0 → 删分支 → 同步 develop（分支已 push @ 803f552）。
 
-### A. 立即动作（下一 session 第一优先）
-1. **PR #131 收尾**：`gh pr checks 131` → 全绿后 `gh pr merge 131 --squash --delete-branch` → 同步 develop → progress 更新合并标记。PR 内容：F-REG 注册全栈（后端 register + 开关 + 测试 4 + 前端 spec 5 + vitest 108/108 + e2e 35/35）+ 登录页四轮视觉（2→8/10）+ 新用户 onboarding 引导 + 修复（confirmDialog 弹窗残留、usage 路由误标 admin、t-dropdown-item attrs、导航/标题中文化、tokens 视觉 pass）。
-2. **注册→授权→推理闭环演示**：管理员把 demo2_user 加进 LIVE 项目（项目成员）+ 其建 Key（真实 DeepSeek key 在 miqro-local）→ 真推理 → usage/quota 验证（此前 root 链路已验证 MQROK-LIVE-OK，注册用户链路未走）。
+### PR #131 收尾记录（2026-09-03）
+- CI 曾红（Frontend job）：KeysView onboarding 用例只 stub myGrants、resetAllMocks 后 listVirtualKeys 无默认 → keys.value=undefined → 模板 keys.length 渲染抛错（本地 108/108 曾因异步时序侥幸通过）。修复：beforeEach 默认 stub `listVirtualKeys→[]`（commit 149f1cd）+ 顺带 eslint 格式漂移对齐 3 文件（32067d7，dabaae4 后未再跑 lint）。
+- 修复后重推 CI **全绿**（Backend unit ubuntu+windows / Backend integration / Frontend / e2e / Security gate / CodeQL×3 / CodeRabbit skip），`gh pr merge 131 --squash --delete-branch` → develop 80dddad。gh 自动删本地分支并切 develop；随后 git pull 曾因 github.com 直连断网失败 → 代理重拉成功。
+- 本地探活：control-plane/gateway/frontend 均 200；合并代码相对实跑代码仅前端测试+格式变更（零运行时差异）。
 
-### B. 功能候选（按 backlog 现状，用户未再指定优先级）
-1. **F11 MCP 路由规则**（B 组第一个可独立于 F01 的 PLANNED：default 兜底 + 自定义规则、Path/Host/Method/Header 匹配纯函数 + 冲突校验，配置面先行）。
-2. **管理员对"已注册无项目"用户的快捷路径**（用户验收反馈方向：新用户引导写了"找管理员"，管理员侧可在用户列表提供「加入项目」快捷操作，避免跨两页手点）。
-3. **前端 OpenAPI codegen 迁移**（document-map §3 承诺，发布前候选——移除手写 api/types）。
-4. **供应商真实凭证联调矩阵**（23 产品逐个 VERIFIED；现仅 DeepSeek 有 key 在本地，V4-flash/vision-exp 已实测）。
-5. B 组 F12–F15、C 组 F19–F21 等维持原状态；F01 MCP 代理与公司 MCP/Forge 积分集成**暂缓（用户明确，保密不外发细节）**；BLOCKED 组等 leader/平台。
-6. **待用户决断**：版本 tag 与正式发布（0.1.0-SNAPSHOT 未 tag）；依赖升级 PR（dependabot ~20 个 open）；CodeRabbit OSS 首审授权。
+### A. U0 执行目标与设计资产（本分支在途）
+- 设计 token 权威源已抓取并换算（miqro-local/posthog-design-ref/）：**暖灰中性系** canvas≈#f5f4f0 / card≈#fefdfc / muted≈#f1efea / chrome≈#e8e5de / hairline border≈#dfdeda / muted-foreground≈#4a5565；hover/selected 用前景色 α 叠层（4-6%）；状态色低饱和 muted 系；radius 4/6/8/12；4px 间距基；10-14px 紧行高字号阶。注意：colors.ts 字面 oklch 值处于 Quill 迁移中段（与注释矛盾处信注释），最终值以 vision 评审迭代为准。
+- 执行路线（已定）：tokens v2（新语义名，不覆盖 v1 值——避免 TDesign 时代页面与 e2e baseline 漂移）→ frontend/src/ui/ 自绘组件（**取舍：引入 radix-vue 原语包（MIT、headless、可测）做 Dialog/Select/Dropdown 的 a11y/portal/焦点管理；Button/Input/Table/Badge/EmptyState/Toast 纯自绘**；不加运行时设计系统依赖）→ /app-new/* 平行路由（保留 TDesign 版对照）→ 试点 Login/Keys/Usage/AdminUsers → Playwright 1440x900 截图 → DeepSeek 视觉评审 ≥9/10 → 存 miqro-local/ui-reviews/ → 用户点验。
+- 验收后（用户点头）→ U1 用户面全量 + 拆并行开关。
 
-### C. UI 专项（用户 2026-09-03 拍板，非功能但单独建档）
-- **母版 = PostHog + Vben Admin 5**（用户明确"认真参考"）：PostHog 取表格/留白/细节气质（浅底细边、hover 行、数字右对齐），Vben 取中后台布局与组件组织参考。
-- 执行路径（下 session 或专门 UI session）：① 抽取两母版设计语言（间距/字号/边框/表格/侧栏/状态徽标）→ ② tokens.css/global.css 重写 → ③ AppShell/表格/表单全局 → ④ 逐页精修 → ⑤ 每轮 vision 模型截图评分（会话内图片不可见，用 deepseek-v4-flash-vision-exp 评审，基线已从 2/10 到 8/10）。
-- 目标：用户可见观感 8-9/10；约束不变：无渐变、无紫色、浅色操作台、审美审计规则维持。
-
-### D. 环境与密钥备忘（本地，不入库）
+### B. 环境与密钥备忘（本地，不入库）
 - 服务启动：mvnw spring-boot:run 需先 `install -Dmaven.test.skip=true`（自定义父 POM 不打 fat jar、依赖需进 .m2）；仓库根 java/密钥 env 模板见 miqro-local/restart.bat。
-- 登录凭据与 key 见 Current State；miqro-local 含旧 drill 数据与截图（ui-login-v1..v4 等，可作 UI 对比）。
-- Windows shell 中文 curl 需 UTF-8 文件体重发；python 路径需 `D:/` 盘符格式；cwd 易漂移（命令前显式 cd 仓库根）。
+- 登录凭据与 key 见 Current State；miqro-local 含旧 drill 数据与截图（ui-login-v1..v4、ui-keys-posthog.png 等，可作 UI 对比）。vision_review.py = 标准化评审器（SCORE x/10 + 中文问题 + NIT1-3；python stdout 已设 utf-8、max_tokens 8000 防 reasoning 占满）。
+- 另一个 Claude 会话的 dev server 可能在跑（5173/8080/8081）——探活勿杀；e2e/截图需自起 preview 时避开 4173 占用。
+- Windows shell 中文 curl 需 UTF-8 文件体重发；python 路径需 `D:/` 盘符格式；cwd 易漂移（命令前显式 cd 仓库根）；github.com 直连断网时用 `HTTPS_PROXY=http://127.0.0.1:7897` 单条命令代理。
 
 ## F-REG 账号自助注册 + 登录页重做 — 用户现场需求（2026-09-03，DONE）
 
