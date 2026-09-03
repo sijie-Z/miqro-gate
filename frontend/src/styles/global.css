@@ -445,3 +445,102 @@ td.mk-col-num {
   align-items: center;
   gap: var(--miqrokey-space-2);
 }
+
+/* ============================================================================
+   Component language — PostHog / Vben-admin derived (2026-09-03 owner brief).
+   Tables carry the data; keep them quiet, dense and precise: hairline rules,
+   no fills on headers, subtle row hover, right-aligned numerics.
+   ============================================================================ */
+
+/* ---- tables ---- */
+.t-table {
+  --td-table-border-color: var(--miqrokey-border-muted);
+  font-variant-numeric: tabular-nums;
+}
+.t-table__header {
+  color: var(--miqrokey-text-secondary);
+}
+.t-table th.t-table__th {
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--miqrokey-text-secondary);
+  border-bottom: 1px solid var(--miqrokey-border-strong);
+}
+.t-table tbody tr {
+  transition: background-color 0.12s ease;
+}
+.t-table tbody tr:hover {
+  background: var(--miqrokey-bg-subtle);
+}
+.t-table td.t-table__td {
+  border-bottom: 1px solid var(--miqrokey-border-muted);
+  font-size: 13px;
+  color: var(--miqrokey-text-primary);
+}
+.t-table .t-table__cell--fixed-left,
+.t-table .t-table__cell--fixed-right {
+  background: var(--miqrokey-bg-surface);
+}
+
+/* numeric cells: right aligned tabular by utility class .mk-num */
+.mk-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* ---- buttons: quiet primary, light hover states ---- */
+.t-button {
+  font-weight: 500;
+}
+.t-button--variant-base.t-button--theme-primary {
+  box-shadow: none;
+}
+.t-button--variant-base.t-button--theme-primary:hover {
+  background: var(--miqrokey-accent-hover);
+}
+.t-button--variant-text,
+.t-button--variant-outline {
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+/* ---- inputs: taller hit area, hairline border, calm focus ---- */
+.t-input {
+  border-color: var(--miqrokey-border-default);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.t-input--focused,
+.t-input:focus-within {
+  border-color: var(--miqrokey-accent);
+  box-shadow: 0 0 0 2px var(--miqrokey-accent-soft);
+}
+.t-select .t-input,
+.t-textarea .t-textarea__inner {
+  border-color: var(--miqrokey-border-default);
+}
+
+/* ---- tags / status chips: compact, no border bleed ---- */
+.t-tag {
+  border-radius: 6px;
+  font-weight: 500;
+}
+.mk-status {
+  border-radius: 999px;
+}
+
+/* ---- pagination: reduce chrome ---- */
+.t-pagination__btn,
+.t-pagination .t-pagination__number {
+  border-radius: 6px;
+}
+.t-pagination .t-pagination__number--active {
+  background: var(--miqrokey-accent-soft);
+  color: var(--miqrokey-accent);
+}
+
+/* ---- dialogs: calmer radius + surface ---- */
+.t-dialog {
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06), 0 16px 48px rgba(15, 23, 42, 0.12);
+}

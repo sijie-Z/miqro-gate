@@ -255,7 +255,9 @@ onMounted(load);
       >
         <template #username="{ row }">
           <div class="user-name">{{ row.username }}</div>
-          <div class="user-display">{{ row.displayName }}</div>
+          <div v-if="row.displayName && row.displayName !== row.username" class="user-display">
+            {{ row.displayName }}
+          </div>
         </template>
         <template #status="{ row }">
           <span class="mk-status" :class="statusClass(row.status)">{{
@@ -263,7 +265,7 @@ onMounted(load);
           }}</span>
         </template>
         <template #lastLoginAt="{ row }">
-          {{ row.lastLoginAt ? new Date(row.lastLoginAt).toLocaleString() : '—' }}
+          {{ row.lastLoginAt ? new Date(row.lastLoginAt).toLocaleString() : '从未登录' }}
         </template>
         <template #actions="{ row }">
           <t-dropdown trigger="click">

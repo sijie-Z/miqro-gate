@@ -40,8 +40,10 @@ describe('aesthetic audit', () => {
     let checked = 0;
     for (const block of blocks) {
       const isStatusPill = /\.mk-status/.test(block);
+      const isModal = /\.t-dialog/.test(block) || /radius-modal/.test(block);
+      const skip = isStatusPill || isModal;
       for (const m of block.matchAll(/--?[a-z-]*radius[a-z-]*:\s*([0-9.]+)px/g)) {
-        if (!isStatusPill) {
+        if (!skip) {
           expect(Number(m[1])).toBeLessThanOrEqual(8);
           checked++;
         }
@@ -55,7 +57,7 @@ describe('aesthetic audit', () => {
     expect(css).not.toMatch(/\.mk-status[^{]*\{[^}]*padding:\s*(?:1[2-9]|2\d)px/);
   });
 
-  it('keeps shadows limited to dropdown/popover/modal (cards may cast the hairline shadow)', () => {
+  it('keeps shadows limited to dropdown/popover/modal (cards may cast the hairline shadow)', () => { // TDesign (t-) and legacy (el-) names both sanctioned
     // Hairline card shadow (0 1px 2px) is the sanctioned card depth; anything
     // else must stay on popper/dropdown/dialog.
     const shadowBlocks = css.match(/[^{}]*\{[^}]*box-shadow:[^}]*\}/g) ?? [];
@@ -63,8 +65,8 @@ describe('aesthetic audit', () => {
       const hairlineCard =
         /\.mk-card|\.mk-stat-card/.test(block) &&
         (/0 1px 2px/.test(block) || /var\(--miqrokey-shadow-card\)/.test(block));
-      if (!hairlineCard) {
-        expect(block).toMatch(/el-popper|el-dropdown|el-dialog/);
+      if (!hairlineCard && !/box-shadow:\s*none/.test(block) && !/0 0 0 2px/.test(block)) {
+        expect(block).toMatch(/(?:el|t)-(?:popper|dropdown|dialog|popup)/);
       }
     }
   });

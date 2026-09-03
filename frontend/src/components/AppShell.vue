@@ -308,7 +308,7 @@ async function handleLogout() {
 
 .shell-nav {
   width: var(--miqrokey-nav-width);
-  padding: var(--miqrokey-space-4) var(--miqrokey-space-2);
+  padding: var(--miqrokey-space-4) 10px;
   background: var(--miqrokey-bg-surface);
   border-right: 1px solid var(--miqrokey-border-default);
   flex-shrink: 0;
@@ -328,25 +328,27 @@ async function handleLogout() {
 }
 
 .nav-group-title {
-  padding: var(--miqrokey-space-2) var(--miqrokey-space-3) 4px;
-  font-size: 12px;
+  padding: 16px 14px 6px;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--miqrokey-text-disabled);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: var(--miqrokey-space-2);
-  padding: 7px var(--miqrokey-space-3);
-  margin-bottom: 2px;
-  border-radius: var(--miqrokey-radius-control);
-  border-left: 2px solid transparent;
+  gap: 10px;
+  height: 34px;
+  padding: 0 12px;
+  margin-bottom: 1px;
+  border-radius: 7px;
   color: var(--miqrokey-text-secondary);
-  font-size: 14px;
+  font-size: 13.5px;
+  font-weight: 500;
   text-decoration: none;
   cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .collapsed .nav-item {
@@ -367,9 +369,8 @@ async function handleLogout() {
 
 .nav-item.active {
   background: var(--miqrokey-accent-soft);
-  border-left-color: var(--miqrokey-accent);
   color: var(--miqrokey-accent);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .shell-content {
