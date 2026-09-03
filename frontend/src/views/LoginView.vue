@@ -255,7 +255,7 @@ function renderError(error: unknown, fallback: string) {
 }
 
 .intro-brand::before {
-  content: "";
+  content: '';
   width: 8px;
   height: 8px;
   border-radius: 2px;
@@ -326,7 +326,9 @@ function renderError(error: unknown, fallback: string) {
   background: var(--miqrokey-bg-surface);
   border: 1px solid var(--miqrokey-border-default);
   border-radius: 10px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 32px rgba(15, 23, 42, 0.08);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 12px 32px rgba(15, 23, 42, 0.08);
 }
 
 .panel-head {
@@ -367,7 +369,9 @@ function renderError(error: unknown, fallback: string) {
   background: transparent;
   cursor: pointer;
   margin-bottom: -1px;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .mode-tab:hover {
@@ -404,7 +408,9 @@ function renderError(error: unknown, fallback: string) {
   min-height: 44px;
   border-radius: 8px;
   border-color: var(--miqrokey-border-default);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .login-panel :deep(.t-input:hover:not(:focus-within)) {
@@ -427,7 +433,9 @@ function renderError(error: unknown, fallback: string) {
   font-size: 15px;
   margin-top: 6px;
   border-radius: 8px;
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
 }
 
 .login-submit:hover {

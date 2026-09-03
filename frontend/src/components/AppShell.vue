@@ -348,7 +348,9 @@ async function handleLogout() {
   font-weight: 500;
   text-decoration: none;
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
 }
 
 .collapsed .nav-item {

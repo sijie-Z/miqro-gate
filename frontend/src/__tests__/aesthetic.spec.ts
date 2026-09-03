@@ -57,7 +57,8 @@ describe('aesthetic audit', () => {
     expect(css).not.toMatch(/\.mk-status[^{]*\{[^}]*padding:\s*(?:1[2-9]|2\d)px/);
   });
 
-  it('keeps shadows limited to dropdown/popover/modal (cards may cast the hairline shadow)', () => { // TDesign (t-) and legacy (el-) names both sanctioned
+  it('keeps shadows limited to dropdown/popover/modal (cards may cast the hairline shadow)', () => {
+    // TDesign (t-) and legacy (el-) names both sanctioned
     // Hairline card shadow (0 1px 2px) is the sanctioned card depth; anything
     // else must stay on popper/dropdown/dialog.
     const shadowBlocks = css.match(/[^{}]*\{[^}]*box-shadow:[^}]*\}/g) ?? [];
