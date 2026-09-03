@@ -27,6 +27,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - **过期记录定时 GC**（F06）：定时回收（`MIQROKEY_CLEANUP_EXPIRED_SWEEP_MS` 默认 1h）下载窗口已过的导出产物（`SUCCEEDED` 超 `expires_at` 连同 `file_bytes` 删除，FAILED/PENDING 保留查看）与确认窗口已过的删除请求（PENDING_CONFIRMATION/CONFIRMED/EXPIRED 删除，**EXECUTED 永久保留**——执行审计）。
 - **usage 队列饱和应急直写**（F35，architecture §5）：`MIQROKEY_GATEWAY_QUEUE_SATURATION_MODE` 默认 `DROP`（行为不变）；置 `WRITE_THROUGH` 时队列满的事件经专用 writer 执行器单条幂等直写、发布线程有界等待（`MIQROKEY_GATEWAY_QUEUE_WRITE_THROUGH_TIMEOUT` 默认 5s）——审计完整性优先，JDBC 仍只在 writer 执行器，超时/失败照旧计数丢弃、发布线程永不无限阻塞。
 - **管理门户 IP 白名单**（F05，security §6）：`MIQROKEY_CONTROL_ADMIN_IP_ALLOWLIST`（CIDR，空 = 不限制）——配置后门户面仅名单内来源可达（403 `IP_NOT_ALLOWED`），billing 外部通道与 bootstrap 引导豁免；`MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES` 声明受信反代，只有其 `X-Forwarded-For` 被采纳（直连无法伪造头绕过）；非法 CIDR 启动失败；纯函数 `IpCidrMatcher`（v4/v6）。
+- **账号自助注册**（F-REG）：`POST /api/v1/auth/register`（公开端点，注册即登录，USER 角色；重名 409 USERNAME_TAKEN / 弱密码 400 PASSWORD_INVALID / `MIQROKEY_REGISTRATION_ENABLED=false` 时 403 REGISTRATION_DISABLED）；登录页重做为双模式卡片（登录/注册页签 + 账号/昵称文案统一）+ 布局整改（对称双栏、卡片浮起、控件 40px、focus 环、额度条入卡）——按视觉模型评审意见修正。
 - **OpenAPI 3.1 生成 + CI 破坏性变更检查**（F09，api-contract §8 契约收尾）：springdoc 接入 Control Plane（无 swagger-ui），`GET /v3/api-docs` 输出 3.1.0（105 paths / 89 schemas）；Info 元数据 + 四类鉴权 scheme 建模（门户 Cookie/CSRF/外部 API Key/JWT，不强制任何操作）；机器可读基线 `docs/openapi/openapi-3.1.json` 入库；CI backend-integration job 对生成结果跑 `deploy/openapi/check-openapi-breaking.py`（删 path/op/response/参数或属性变 required 即红）。前端 TS client 仍手写（codegen 列发布前候选，document-map §3 注明）。
 - 全局修复：请求体 JSON 解析失败统一 `400 PARAM_INVALID`（含字段名提示，此前 500）。
 

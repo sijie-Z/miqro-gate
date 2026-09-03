@@ -11,7 +11,8 @@
 - Last updated: `2026-09-03 CST`
 - Branch: `goal/admin-ip-allowlist`（已合并）；develop @ 4b8d8b9，工作区清洁
 - 会话交付链（#122–#130，9 连发）：MCP ACL → F24 → F03 → F04 → F06 → F02 盘点 → F35 → F09 → F05
-- 下一步候选：A 组剩 **F01 MCP 代理接线**（需先定 SSE/Streamable HTTP 传输实现；用户已明确与公司 slurm MCP/Forge 积分集成一并暂缓）→ B 组 F11（路由规则，可配置面先行）→ 前端 OpenAPI codegen 迁移（发布前候选）
+- 会话中新增交付：**F-REG 账号自助注册 + 登录页重做**（用户现场需求：注册能力 + UI 评审整改；分支 goal/self-registration）
+- 下一步候选：A 组剩 **F01 MCP 代理接线**（与公司 slurm MCP/Forge 集成一并暂缓）→ B 组 F11（路由规则）→ 前端 OpenAPI codegen（发布前候选）
 - **教训（本会话）**：① 建分支命令若 `git pull && git switch -c` 因网络失败整链中断会静默留在 develop 上提交——提交前先 `git branch --show-current` 复核；本地误提交用 `git branch -f` 移回原位（未 push 无碍）。② 新集成测试 setUp 必须含 bootstrap 后改密步骤（其他测试同款流程），否则换 remote 地址的用例全 401
 
 ## F09 OpenAPI 3.1 生成 + CI 破坏性变更检查 — api-contract §8（2026-09-03，DONE）
@@ -26,6 +27,17 @@
 - **文档**：api-contract §8（实现态 + 前端手写取舍）；document-map §3；release-checklist（§0 OpenAPI 行 ⏳→✅ + §7 交付物更新）；configuration-reference（§8 端点说明）；CHANGELOG；feature-backlog F09 → DONE；progress。
 - **gitflow**：分支 `goal/openapi-spec`（基于 develop a97ce7e/#128 后）。
 
+## F-REG 账号自助注册 + 登录页重做 — 用户现场需求（2026-09-03，DONE）
+
+- **背景**：用户试跑后明确要求：① 账号要能自助注册（企业内测/未来客户部署都不可接受"管理员手工建号"，虽 50 账号容量/邀请制是早期产品决策，注册能力应为可配置项而非缺项）；② 登录页 UI 不满意（"差劲/没品味/没有注册"）。处置：用真实 DeepSeek key（用户提供，本地 miqro-local 不入库；已提示用后轮换）跑通全链路 + 以 `deepseek-v4-flash-vision-exp` 视觉模型对截图做客观评审作为"眼睛"（会话图片通道不可用），据此整改。
+- **视觉评审摘录（已采纳）**：布局左右失衡/大片留白、登录卡与背景对比不足、输入控件偏小且 focus 不明确、额度条与文案排版粗糙、品牌蓝缺乏呼应。
+- **后端**：`POST /api/v1/auth/register`（公开端点——SessionFilter PUBLIC_PATHS + CSRF 豁免集已扩；租户行锁序列化并发重名；`validatePasswordPolicy`/`isCommonPassword` 复用；注册即建会话同 /login；审计 `REGISTER`）；开关 `miqrokey.registration-enabled`（AuthProperties，默认 true，yml 显式行 + `MIQROKEY_REGISTRATION_ENABLED`）；错误码 USERNAME_INVALID/USERNAME_TAKEN/PASSWORD_INVALID/REGISTRATION_DISABLED。
+- **前端**：LoginView 重做——登录/注册双模式分段页签（账号/昵称/密码/确认密码；注册即进入）；布局整改按评审意见（对称双栏 grid、左栏内容留白平衡、卡片浮起阴影、控件 40px+focus 环、额度条入浅色卡、品牌强调色）；术语统一（"账号"与"昵称"）。
+- **验证（全部真实 PASS）**：集成 `RegistrationApiIntegrationTest` 3/3（注册即登入 + /me 立即可用 + DB 断言；重名 409/弱密码 400；无会话无 CSRF 可注册）+ `RegistrationDisabledApiIntegrationTest` 1/1（开关关 → 403 REGISTRATION_DISABLED）；前端 vitest LoginView.spec 3/3（模式切换/注册提交带昵称/密码不一致拦截）+ auth.spec +1（store register）；**本地真实链路**：演示账号 demo2_user 经 UI 注册→自动登录→进入系统（浏览器 pane DOM 验证）；control-plane 模块级 BUILD SUCCESS。
+- **排障记录**：Windows shell 中文 curl 请求体乱码 → UTF-8 文件体重发；TDesign t-button submit 在 jsdom 不派发原生 submit → 测试触发 `form` submit 事件；Vitest 对 t-form @submit 需要原生事件。
+- **文档**：api-contract §3.1b（注册语义/校验/开关/审计/防滥用注记）+ §3.1 表行；configuration-reference `MIQROKEY_REGISTRATION_ENABLED`；CHANGELOG；feature-backlog F32 备注自助注册已交付（平台映射仍 BLOCKED）；progress。
+- **gitflow**：分支 `goal/self-registration`。
+
 ## F05 管理门户 IP 白名单 — security §6（2026-09-03，DONE）
 
 - **背景与方向**：#129（OpenAPI）合并后按候选顺序做 F05（TBD → 核对后立项）。核对发现：全后端**无任何** IP 过滤/转发头基建（`MIQROKEY_TRUSTED_PROXY_CIDRS` 仅为文档行、无实现——已顺手标注"预留未实现"防误用）。security §6 规格"管理门户支持配置 IP 白名单"需全新实现。
@@ -37,6 +49,17 @@
 - **gitflow**：分支 `goal/admin-ip-allowlist`（基于 develop 1f454d5）。
 
 ## F35 usage 队列饱和应急直写 — architecture §5（2026-09-03，DONE）
+
+## F-REG 账号自助注册 + 登录页重做 — 用户现场需求（2026-09-03，DONE）
+
+- **背景**：用户试跑后明确要求：① 账号要能自助注册（企业内测/未来客户部署都不可接受"管理员手工建号"，虽 50 账号容量/邀请制是早期产品决策，注册能力应为可配置项而非缺项）；② 登录页 UI 不满意（"差劲/没品味/没有注册"）。处置：用真实 DeepSeek key（用户提供，本地 miqro-local 不入库；已提示用后轮换）跑通全链路 + 以 `deepseek-v4-flash-vision-exp` 视觉模型对截图做客观评审作为"眼睛"（会话图片通道不可用），据此整改。
+- **视觉评审摘录（已采纳）**：布局左右失衡/大片留白、登录卡与背景对比不足、输入控件偏小且 focus 不明确、额度条与文案排版粗糙、品牌蓝缺乏呼应。
+- **后端**：`POST /api/v1/auth/register`（公开端点——SessionFilter PUBLIC_PATHS + CSRF 豁免集已扩；租户行锁序列化并发重名；`validatePasswordPolicy`/`isCommonPassword` 复用；注册即建会话同 /login；审计 `REGISTER`）；开关 `miqrokey.registration-enabled`（AuthProperties，默认 true，yml 显式行 + `MIQROKEY_REGISTRATION_ENABLED`）；错误码 USERNAME_INVALID/USERNAME_TAKEN/PASSWORD_INVALID/REGISTRATION_DISABLED。
+- **前端**：LoginView 重做——登录/注册双模式分段页签（账号/昵称/密码/确认密码；注册即进入）；布局整改按评审意见（对称双栏 grid、左栏内容留白平衡、卡片浮起阴影、控件 40px+focus 环、额度条入浅色卡、品牌强调色）；术语统一（"账号"与"昵称"）。
+- **验证（全部真实 PASS）**：集成 `RegistrationApiIntegrationTest` 3/3（注册即登入 + /me 立即可用 + DB 断言；重名 409/弱密码 400；无会话无 CSRF 可注册）+ `RegistrationDisabledApiIntegrationTest` 1/1（开关关 → 403 REGISTRATION_DISABLED）；前端 vitest LoginView.spec 3/3（模式切换/注册提交带昵称/密码不一致拦截）+ auth.spec +1（store register）；**本地真实链路**：演示账号 demo2_user 经 UI 注册→自动登录→进入系统（浏览器 pane DOM 验证）；control-plane 模块级 BUILD SUCCESS。
+- **排障记录**：Windows shell 中文 curl 请求体乱码 → UTF-8 文件体重发；TDesign t-button submit 在 jsdom 不派发原生 submit → 测试触发 `form` submit 事件；Vitest 对 t-form @submit 需要原生事件。
+- **文档**：api-contract §3.1b（注册语义/校验/开关/审计/防滥用注记）+ §3.1 表行；configuration-reference `MIQROKEY_REGISTRATION_ENABLED`；CHANGELOG；feature-backlog F32 备注自助注册已交付（平台映射仍 BLOCKED）；progress。
+- **gitflow**：分支 `goal/self-registration`。
 
 ## F05 管理门户 IP 白名单 — security §6（2026-09-03，DONE）
 
