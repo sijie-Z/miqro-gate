@@ -6,12 +6,19 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `F06 过期导出/删除请求定时清理 GC`（feature-backlog A 组）— `DONE`（PR #126 已合并）
-- Goal status: `DONE`（本会话 2026-09-03 完成；#122–#126 全部同日合并入 develop 7fdaecd）
+- Current goal: `F02 缓存键盘点核对`（feature-backlog A 组）— `DONE`（盘点修正 + 契约补全）
+- Goal status: `DONE`（本会话 2026-09-03；#122–#126 合并入 develop 8ec9783 之后续做）
 - Last updated: `2026-09-03 CST`
-- Branch: `goal/expired-record-gc`（已合并）；develop @ 7fdaecd，工作区清洁
-- 会话交付链（#122–#126）：MCP ACL（合并时解 CI 队列冻结）→ F24 默认配额模板 → F03 审批 Webhook 通知 → F04 用户自助配额可见性 → F06 过期记录 GC
-- 下一步候选（按 backlog 推荐顺序）：**F02 缓存键升级**（对齐腾讯「最后一条 user 消息」——需先核对缓存契约字节一致回归；正文提取仅限 opt-in 缓存流）+ **F35 usage 队列饱和同步写入应急模式**（gateway-app，架构边界）→ 之后 A 组剩余（F09 OpenAPI、F01 MCP 代理接线需先定传输实现）
+- Branch: `goal/cache-key-user-message`（F02 盘点修正，验证后 push + PR）
+- 会话交付链（#122–#126 + F02 盘点）：MCP ACL → F24 默认配额模板 → F03 审批 Webhook 通知 → F04 用户自助配额可见性 → F06 过期记录 GC → F02 核对（实现早已在 commit 3086187，补端到端语义键契约）
+- 下一步候选：**F35 usage 队列饱和同步写入应急模式**（gateway-app，架构边界；推荐顺序第 3 项第二件）→ 之后 A 组剩余（F09 OpenAPI 生成、F01 MCP 代理接线需先定传输实现）
+
+## F02 缓存键升级 — 盘点核对修正（2026-09-03，DONE）
+
+- **发现**：feature-backlog 盘点把 F02 登记 PLANNED，但核对代码（`CacheKeyFactory`）与 git 历史证明**实现早已完成**——commit 3086187「feat(cache): semantic cache key from system + last user message」（G7.4 时期）已将键从全请求 hash 升级为：`SHA-256(tenant|key|product|model|purpose|scope)`，`scope = system + 最后一条 user 消息`（对齐腾讯「最新用户消息」/Higress GJSON），支持 OpenAI chat / Anthropic messages / OpenAI Responses(input) 三形状与数组 content parts；无法提取 user 消息时回退全 body 归一化 hash。正文解析只发生在 opt-in 缓存流、仅用于键派生（转发字节原样，`CacheKeyFactory` javadoc 明示）。
+- **本会话补全**：端到端契约缺「语义键」专属场景——`VirtualKeyAuthContractTest$L1Caching` 增 2 用例（不同历史前缀 + 相同末条 user 消息 → 第二次 L1 命中且字节一致、上游仅 1 次调用；不同末条消息 → miss 两次）。注意用例文本需全局唯一（共享 Caffeine 实例跨用例存活，首个断言曾因前一用例预置同问句而误报 L1）。
+- **验证**：`VirtualKeyAuthContractTest` 24/24 PASS（含新 2 场景，gateway 模块 BUILD SUCCESS）；无生产代码改动（test + 文档盘点修正）。
+- **backlog 教训**：F02 类目照抄「优化项」文档措辞而未核对代码——本次盘点修正后，feature-backlog 以代码为准回写（同 TBD 口径用途）。
 
 ## F06 过期记录定时 GC — feature-backlog A 组（2026-09-03，DONE）
 
