@@ -113,7 +113,11 @@ async function handleLogout() {
       <header class="new-shell__topbar">
         <span class="new-shell__context">MiQroGate 控制台 · 试点</span>
         <div class="new-shell__topbar-right">
-          <router-link to="/app/keys" class="new-shell__legacy-btn" title="迁移完成前使用旧版控制台">
+          <router-link
+            to="/app/keys"
+            class="new-shell__legacy-btn"
+            title="迁移完成前使用旧版控制台"
+          >
             旧版控制台
           </router-link>
           <span class="new-shell__divider" aria-hidden="true" />
