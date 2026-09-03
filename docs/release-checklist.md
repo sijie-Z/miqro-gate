@@ -17,9 +17,9 @@
 | §4.2 大表/分区 migration 评估 | ➖ | 单客户私有化、50 并发上限（CLAUDE.md §2），无生产数据量副本可评估；`usage_event` 分区保留策略见 database-schema §6 |
 | §5.5 镜像非 root/固定 digest | ➖/✅ | 当前交付 = 源码 + wrapper + Compose（无应用容器镜像，见 §7）；Compose 依赖镜像已按 digest 固定（postgres 17.6-alpine @sha256…） |
 | §6.1 告警已测试 | ✅/⏳ | 已测：Webhook 签名投递/去重/指数退避（G4.5）、备份 Webhook（G6.2）、usage 队列饱和 drop warn + 指标（G2.4）、预算水位 BUDGET_THRESHOLD（G8.3）；未实现为告警类型：usage 队列饱和/解析失败/供应商错误/Plan 同步/磁盘（G4.5 已知缺口，接入需数据源接线）→ 正式发布前按需补充 |
-| §7 交付物 | ✅/⏳/➖ | 源码/wrapper/锁文件/Compose/Secret 模板/.env.example/签名目录/文档全齐；OpenAPI 生成物未实现（api-contract §8 契约）；容器镜像/离线包（无镜像构建，源码交付形态不适用）；客户侧构建/恢复演练（无客户，➖） |
+| §7 交付物 | ✅/⏳/➖ | 源码/wrapper/锁文件/Compose/Secret 模板/.env.example/签名目录/文档全齐；OpenAPI 生成物已实现（F09，见下行）；容器镜像/离线包（无镜像构建，源码交付形态不适用）；客户侧构建/恢复演练（无客户，➖） |
 | §8 Go/No-Go | ⏳ | 版本号与 tag 未定（代码 0.1.0-SNAPSHOT、无 tag）；由发布负责人（项目所有者）在发布节点签署 |
-| OpenAPI 3.1 生成 + CI 破坏性变更检查（api-contract §8 / document-map §3） | ⏳ | 仓库无 openapi 生成配置与产物；api-contract.md 为当前唯一事实源。列为 G6.5 发现的文档契约未实现项，待专项 Goal 或发布延期项 |
+| OpenAPI 3.1 生成 + CI 破坏性变更检查（api-contract §8 / document-map §3） | ✅ | F09 已实现：springdoc 生成 `GET /v3/api-docs`（3.1.0，无 swagger-ui）+ 鉴权 scheme 建模 + Info 元数据；基线 `docs/openapi/openapi-3.1.json`；CI backend-integration job 跑 `deploy/openapi/check-openapi-breaking.py`（删除 path/op/response/参数、属性变 required 即红）。遗留：前端 TS client 仍手写（codegen 列发布前候选） |
 
 ## 1. 范围与状态
 

@@ -6,12 +6,26 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `F35 usage 队列饱和应急直写`（feature-backlog F 组/architecture §5）— `DONE`（PR #128 已合并）
-- Goal status: `DONE`（本会话 2026-09-03；#122–#128 全部合并入 develop f663fb8）
+- Current goal: `F09 OpenAPI 3.1 生成 + CI 破坏性变更检查`（api-contract §8 契约收尾）— `DONE`
+- Goal status: `DONE`（本会话 2026-09-03；#122–#128 已并入 develop，F09 PR 待合并）
 - Last updated: `2026-09-03 CST`
-- Branch: `goal/usage-queue-emergency-write`（已合并）；develop @ f663fb8，工作区清洁
-- 会话交付链（#122–#128，7 连发）：MCP ACL 合并恢复 → F24 默认配额模板 → F03 审批 Webhook 通知 → F04 用户自助配额可见性 → F06 过期记录 GC → F02 盘点核对（含端到端语义键契约补全）→ F35 队列饱和应急直写
-- 下一步候选：A 组剩余 **F09 OpenAPI 3.1 生成 + CI 破坏性变更检查**（发布前补项）→ F01 MCP 代理接线（需先定传输实现）→ F05 管理门户 IP 白名单核对（TBD）
+- Branch: `goal/openapi-spec`（验证后 push + PR）
+- 会话交付链（#122–#128 + F09）：MCP ACL → F24 → F03 → F04 → F06 → F02 盘点 → F35 → F09
+- 下一步候选：A 组剩 **F01 MCP 代理接线**（需先定 SSE/Streamable HTTP 传输实现）→ **F05 管理门户 IP 白名单**核对（TBD）→ 前端 OpenAPI codegen 迁移（发布前候选，document-map §3）
+
+## F09 OpenAPI 3.1 生成 + CI 破坏性变更检查 — api-contract §8（2026-09-03，DONE）
+
+- **背景与方向**：G6.5 发现的文档契约未实现项（api-contract §8 / document-map §3 / release-checklist §0：仓库无 openapi 生成配置与产物）。规格要求：Control Plane 生成 OpenAPI 3.1 + CI 检查未提交的破坏性变更。
+- **后端**：springdoc `springdoc-openapi-starter-webmvc-api` 2.8.9（父 pom 加 `springdoc.version` 属性；**无 swagger-ui**，spec 即机器可读产物）；`springdoc.api-docs.version=OPENAPI_3_1`；`OpenApiSecuritySchemes`（config 包 customizer：Info 元数据 title/description/version + 四类鉴权 scheme 建模——portalSession Cookie / csrfToken Header / apiKey X-API-Key / consumerJwt Bearer，**只声明 components 不强制任何 operation**，登录/bootstrap 保持公开、角色强制在拦截器层）；`/v3/api-docs` 无需鉴权（只读文档，config doc 已注明）。
+- **契约测试**：`OpenApiSpecIntegrationTest` 1/1（MockMvc GET /v3/api-docs：openapi==3.1.0、info title、paths>30 + 9 个代表端点跨门户/管理/配额/审批/billing、schemas>20、4 security schemes；并写 `target/openapi-spec.json` 供 CI diff）。
+- **破坏性门禁**：基线 `docs/openapi/openapi-3.1.json`（82KB，105 paths / 89 schemas，确定性无 UUID/时间戳——springdoc LinkedHashMap 稳定序）入库；`deploy/openapi/check-openapi-breaking.py`（python3 无依赖）：删除 path/operation/response code/参数、schema 属性变 required → exit 1（新增端点/参数/属性合法，仅汇总）；ci.yml backend-integration job 追加「OpenAPI breaking-change diff vs committed baseline」步骤。三规则本地负例验证（删 op exit 1 / required 分支 exit 1 / 自身 diff exit 0）。
+- **验证（全部真实 PASS）**：`OpenApiSpecIntegrationTest` 1/1；后端全量 `verify -P integration` **BUILD SUCCESS 0 failures**（control-plane 381 = 380+1）；check-openapi-breaking.py 三规则自测；secret scan ok。
+- **排障记录**：类名与 @Bean 方法同名 → BeanDefinitionOverrideException（改名 securitySchemesDocs）；springdoc.info.* yml 属性不生效 → customizer 直接设 Info；swagger Info setter 返回 void 不能链式；spec 中既有 `required` 含所选属性的模拟导致 set diff 为空（脚本本身正确）。
+- **取舍（记录）**：**前端 TS client codegen 未纳入 F09**（document-map §3「由 OpenAPI 生成」愿景）——现有手写 `frontend/src/api` + `types/api`（~30 视图）继续维护，api-contract §8 / document-map / backlog F09 均注明 codegen 迁移为发布前候选；运行时 spec 覆盖 105 paths 不含 /v3/api-docs 自身与 actuator（OK）。
+- **文档**：api-contract §8（实现态 + 前端手写取舍）；document-map §3；release-checklist（§0 OpenAPI 行 ⏳→✅ + §7 交付物更新）；configuration-reference（§8 端点说明）；CHANGELOG；feature-backlog F09 → DONE；progress。
+- **gitflow**：分支 `goal/openapi-spec`（基于 develop a97ce7e/#128 后）。
+
+## F35 usage 队列饱和应急直写 — architecture §5（2026-09-03，DONE）
 
 ## F35 usage 队列饱和应急直写 — architecture §5（2026-09-03，DONE）
 

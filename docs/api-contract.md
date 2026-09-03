@@ -857,7 +857,7 @@ Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 
 
 ## 8. OpenAPI 与兼容性
 
-- Control Plane 必须生成 OpenAPI 3.1，并在 CI 检查未提交的破坏性变更。
-- 前端 TypeScript client 从 OpenAPI 生成，禁止复制维护 DTO。
+- Control Plane 生成 **OpenAPI 3.1**（F09 已实现）：`GET /v3/api-docs`（springdoc，无 swagger-ui；`springdoc.api-docs.version=OPENAPI_3_1`）。机器可读基线提交于 `docs/openapi/openapi-3.1.json`；CI（backend-integration job）对每次生成结果跑破坏性 diff（`deploy/openapi/check-openapi-breaking.py`：删除 path/operation/response code/参数、属性变 required 即失败）。本文仍是业务语义事实源；生成物是机器可读镜像，OpenAPI 不得改变本文语义。
+- 前端 TypeScript client **目前由手写 `frontend/src/api` + `types/api` 维护**（未从 OpenAPI 生成——规格愿景；codegen 迁移列为发布前候选，届时删除手写 DTO）。
 - 同一 major 版本只允许新增可选字段和新端点；删除、改名、改变含义必须进入下一 major。
 - 推理入口不进入管理 API 的 DTO 生成流程，以透明代理契约和 fixtures 验证。

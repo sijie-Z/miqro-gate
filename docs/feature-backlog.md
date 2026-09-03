@@ -18,7 +18,7 @@
 | F06 | 过期导出/删除请求定时清理（GC） | progress G4.4 边界 | 清晰 | DONE（2026-09-03） | 无 | 交付见 progress「过期记录定时 GC」：@Scheduled 回收 SUCCEEDED 过窗导出（file_bytes 释放）与过期删除请求；EXECUTED/审计永久保留（G4.4 语义） |
 | F07 | 告警类型补齐（usage 队列饱和/解析失败/供应商错误/Plan 同步/磁盘等 → alert_rules 类型） | progress G4.5 风险；release-checklist §6.1 | 部分（多数类型定义清晰，数据源需接线） | SCAFFOLD | 各类型数据源接线 | 现有框架支持新增类型；先登记类型清单与数据源，逐类接线 |
 | F08 | 官方价格 24h 自动同步（source=OFFICIAL 自动化） | progress G7.2 风险 | 部分（依赖供应商官方价格源） | SCAFFOLD | 供应商价格源确认 | source=OFFICIAL 现为人工标记；无源则保持人工 |
-| F09 | OpenAPI 3.1 生成 + CI 破坏性变更检查 | api-contract §8；release-checklist §0 | 清晰（规格已写死） | PLANNED | 无（发布前补） | springdoc 或手写 spec 生成；CI 检查破坏性变更 |
+| F09 | OpenAPI 3.1 生成 + CI 破坏性变更检查 | api-contract §8；release-checklist §0 | 清晰（规格已写死） | DONE（2026-09-03） | 无（发布前补项，本会话完成） | 交付见 progress「OpenAPI 3.1 生成」：springdoc `/v3/api-docs`（3.1.0）+ 鉴权 scheme 建模 + 基线 docs/openapi/openapi-3.1.json + CI 破坏性 diff（deploy/openapi/check-openapi-breaking.py）；**前端 TS client codegen（document-map §3 愿景）未纳入**——手写 api/types 继续维护，codegen 迁移列为发布前候选 |
 | F10 | 网关部署信息页核对与补齐 | mapping 表行 8 | TBD | TBD | 需核对既有「部署信息页」（progress 曾记录 commit） | mapping 低优先级候选 |
 
 ## B 组 · MCP 运行时护栏（腾讯 A 类研究建议，方向明确）
