@@ -10,6 +10,7 @@
 - Goal status: `DONE`（2026-09-03；分支 goal/self-registration @ 3ff50fe，工作区干净）
 - Last updated: `2026-09-03 CST`
 - 本地试跑环境（**非仓库内容**）：control-plane(8080)/gateway(8081)/frontend dev(5173) 均在跑，代码=本分支最新；管理员 root/DrillPass2026!；DeepSeek key 在 miqro-local/.deepseek-key.tmp（不入库、已建议轮换）
+- **下一会话启动必读**：`docs/NEXT_SESSION_PLAN.md`（分阶段执行计划：PR #131 收尾 → PostHog 自绘 UI 专项 U0-U3 → 功能候选；含验收/评审/环境备忘/状态段）
 - **会话交接点（功能面待办，见下段）**——本段为后续 session 的执行清单
 
 ## 会话交接点 2026-09-03 — 功能面待办清单（用户点名写清楚）
