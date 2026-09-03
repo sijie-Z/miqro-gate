@@ -1,45 +1,118 @@
 <script setup lang="ts">
 /**
- * NewShell — v2 console chrome for the /app-new/* pilot (U0).
+ * NewShell — v2 console chrome (U1 formal shell for /app).
  * PostHog-style rail: white sidebar with hairline divider over warm canvas,
- * grouped nav with a left accent bar on the active item. The user chip and
- * logout live in a slim topbar (console convention); the legacy console is
- * one reachable hop away for everything outside the pilot.
+ * grouped nav with a left accent bar on the active item and a slim topbar
+ * holding the user chip. Nav mirrors the legacy AppShell structure 1:1;
+ * admin pages still render their TDesign-era content until U2 migrates them.
  */
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import {
+  AppIcon,
+  ChartBarIcon,
+  CheckCircleIcon,
+  DashboardIcon,
+  DeleteIcon,
+  DownloadIcon,
+  EditIcon,
+  ErrorCircleIcon,
+  FilePasteIcon,
+  FolderOpenIcon,
+  LayersIcon,
+  LockOnIcon,
+  MoneyIcon,
+  NotificationIcon,
+  RobotIcon,
+  SecuredIcon,
+  ServerIcon,
+  SettingIcon,
+  ShopIcon,
+  ToolsIcon,
+  UserIcon,
+  UsergroupCircleIcon,
+} from 'tdesign-icons-vue-next';
 import { useAuthStore } from '@/stores/auth';
+import type { Component } from 'vue';
 
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 
+interface NavItem {
+  name: string;
+  label: string;
+  icon: Component;
+}
+
+const regularNav: NavItem[] = [
+  { name: 'overview', label: '总览', icon: DashboardIcon },
+  { name: 'keys', label: '我的 Key', icon: LockOnIcon },
+  { name: 'usage', label: '用量', icon: ChartBarIcon },
+  { name: 'skills', label: '技能库', icon: AppIcon },
+  { name: 'model-approvals', label: '模型申请', icon: EditIcon },
+  { name: 'profile', label: '资料', icon: UserIcon },
+];
+
+const orgNav: NavItem[] = [
+  { name: 'users', label: '用户', icon: UserIcon },
+  { name: 'teams', label: '团队', icon: UsergroupCircleIcon },
+  { name: 'projects', label: '项目', icon: FolderOpenIcon },
+  { name: 'grants', label: '授权', icon: LockOnIcon },
+  { name: 'approval-center', label: '审批中心', icon: CheckCircleIcon },
+];
+
+const providerNav: NavItem[] = [
+  { name: 'providers', label: '供应商', icon: ShopIcon },
+  { name: 'plans', label: '订阅', icon: LayersIcon },
+  { name: 'credentials', label: '上游凭证', icon: SecuredIcon },
+  { name: 'prices', label: '定价', icon: MoneyIcon },
+];
+
+const opsNav: NavItem[] = [
+  { name: 'admin-usage', label: '用量', icon: ChartBarIcon },
+  { name: 'cost', label: '成本报表', icon: MoneyIcon },
+  { name: 'quota-rules', label: '配额规则', icon: ErrorCircleIcon },
+  { name: 'roi', label: '缓存收益', icon: DownloadIcon },
+  { name: 'exports', label: '导出任务', icon: DownloadIcon },
+  { name: 'deletions', label: '用量删除', icon: DeleteIcon },
+  { name: 'webhooks', label: 'Webhook 端点', icon: NotificationIcon },
+  { name: 'consumers', label: 'API 消费者', icon: SecuredIcon },
+  { name: 'skillhub', label: '技能库管理', icon: AppIcon },
+  { name: 'agents', label: '智能体', icon: RobotIcon },
+  { name: 'services', label: '服务管理', icon: ServerIcon },
+  { name: 'configs', label: '全局配置', icon: SettingIcon },
+  { name: 'mcp-services', label: 'MCP 服务', icon: ToolsIcon },
+  { name: 'alert-rules', label: '告警规则', icon: ErrorCircleIcon },
+  { name: 'audit', label: '审计日志', icon: FilePasteIcon },
+];
+
 const isAdmin = computed(() => auth.user?.role === 'SYSTEM_ADMIN');
 
-const navGroups = computed(() => [
-  {
-    title: '常规',
-    items: [
-      { label: '我的 Key', to: '/app-new/keys', icon: 'key' },
-      { label: '用量', to: '/app-new/usage', icon: 'chart' },
-    ],
-  },
-  ...(isAdmin.value
-    ? [
-        {
-          title: '管理',
-          items: [{ label: '用户', to: '/app-new/users', icon: 'users' }],
-        },
-      ]
-    : []),
-]);
+const navGroups = computed(() => {
+  const groups: { title?: string; items: NavItem[] }[] = [{ items: regularNav }];
+  if (isAdmin.value) {
+    groups.push(
+      { title: '组织', items: orgNav },
+      { title: '供应商', items: providerNav },
+      { title: '数据与告警', items: opsNav },
+    );
+  }
+  return groups;
+});
 
 const userInitial = computed(() => {
   const name = auth.user?.username ?? '?';
   return name.slice(0, 1).toUpperCase();
 });
 
-const isActive = (to: string) => route.path === to;
+const isActive = (name: string) => route.name === name;
+
+/** Narrow screens collapse the rail to icons only (>=640 hides the drawer entirely). */
+const iconOnly = ref(false);
+window.addEventListener('resize', () => {
+  iconOnly.value = window.innerWidth < 1080 && window.innerWidth >= 640;
+});
 
 async function handleLogout() {
   await auth.logout();
@@ -49,78 +122,39 @@ async function handleLogout() {
 
 <template>
   <div class="new-shell">
-    <aside class="new-shell__rail">
+    <aside class="new-shell__rail" :class="{ 'new-shell__rail--icons': iconOnly }">
       <div class="new-shell__brand">
         <span class="new-shell__brand-mark">M</span>
-        <span class="new-shell__brand-name">MiQroGate</span>
-        <span class="new-shell__brand-badge">试点</span>
+        <span v-if="!iconOnly" class="new-shell__brand-name">MiQroGate</span>
       </div>
 
       <nav class="new-shell__nav" aria-label="主导航">
-        <div v-for="group in navGroups" :key="group.title" class="new-shell__group">
-          <p class="new-shell__group-title">{{ group.title }}</p>
+        <div v-for="group in navGroups" :key="group.title ?? 'regular'" class="new-shell__group">
+          <p v-if="group.title && !iconOnly" class="new-shell__group-title">{{ group.title }}</p>
           <router-link
             v-for="item in group.items"
-            :key="item.to"
-            :to="item.to"
+            :key="item.name"
+            :to="{ name: item.name }"
             class="new-shell__nav-item"
-            :class="{ 'new-shell__nav-item--active': isActive(item.to) }"
+            :title="iconOnly ? item.label : undefined"
+            :class="{ 'new-shell__nav-item--active': isActive(item.name) }"
           >
             <span class="new-shell__nav-accent" aria-hidden="true" />
-            <svg
-              class="new-shell__nav-icon"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              aria-hidden="true"
-            >
-              <path
-                v-if="item.icon === 'key'"
-                d="M14.5 6.5a4 4 0 1 1-1.2 2.9m1.2-2.9 4.5 4.5m-6.4 6.4 1.9-1.9m-1.9 1.9-1.6 1.6H7l-1-1.9V14l2-2h2.3l1.2-1.2m2.9-3.2.3-.3"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-              <path
-                v-else-if="item.icon === 'chart'"
-                d="M4 20h16M6 16v-5m4 5V6m4 10v-8m4 8V9"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linecap="round"
-              />
-              <path
-                v-else-if="item.icon === 'users'"
-                d="M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm0 2c-3.9 0-6 2.2-6 5v1h12v-1c0-2.8-2.1-5-6-5Zm7-1.2a3 3 0 0 0 0-5.6M20 19v-1c0-2.3-1.5-4-4-4.5"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-            <span class="new-shell__nav-label">{{ item.label }}</span>
+            <component :is="item.icon" class="new-shell__nav-icon" />
+            <span v-if="!iconOnly" class="new-shell__nav-label">{{ item.label }}</span>
           </router-link>
         </div>
       </nav>
 
       <div class="new-shell__rail-foot">
-        <p class="new-shell__version">MiQroGate 0.1 · 试点版</p>
+        <p v-if="!iconOnly" class="new-shell__version">MiQroGate 0.1</p>
       </div>
     </aside>
 
     <main class="new-shell__main">
       <header class="new-shell__topbar">
-        <span class="new-shell__context">MiQroGate 控制台 · 试点</span>
+        <span class="new-shell__context">MiQroGate 控制台</span>
         <div class="new-shell__topbar-right">
-          <router-link
-            to="/app/keys"
-            class="new-shell__legacy-btn"
-            title="迁移完成前使用旧版控制台"
-          >
-            旧版控制台
-          </router-link>
-          <span class="new-shell__divider" aria-hidden="true" />
           <div class="new-shell__user">
             <span class="new-shell__user-avatar" aria-hidden="true">{{ userInitial }}</span>
             <span class="new-shell__user-name">{{ auth.user?.username }}</span>
@@ -168,6 +202,11 @@ async function handleLogout() {
   flex-shrink: 0;
   background: var(--ui-card);
   border-right: 1px solid var(--ui-border);
+  transition: width var(--ui-ease);
+}
+
+.new-shell__rail--icons {
+  width: 64px;
 }
 
 .new-shell__brand {
@@ -177,6 +216,11 @@ async function handleLogout() {
   height: var(--ui-header-height);
   padding: 0 var(--ui-space-5);
   border-bottom: 1px solid var(--ui-border);
+}
+
+.new-shell__rail--icons .new-shell__brand {
+  padding: 0;
+  justify-content: center;
 }
 
 .new-shell__brand-mark {
@@ -198,20 +242,14 @@ async function handleLogout() {
   letter-spacing: -0.01em;
 }
 
-.new-shell__brand-badge {
-  margin-left: auto;
-  font-size: 10px;
-  font-weight: var(--ui-weight-medium);
-  color: var(--ui-primary);
-  background: var(--ui-primary-soft);
-  border-radius: var(--ui-radius-pill);
-  padding: 2px 8px;
-}
-
 .new-shell__nav {
   flex: 1;
   padding: var(--ui-space-5) var(--ui-space-3);
   overflow-y: auto;
+}
+
+.new-shell__rail--icons .new-shell__nav {
+  padding: var(--ui-space-4) var(--ui-space-2);
 }
 
 .new-shell__group {
@@ -244,6 +282,11 @@ async function handleLogout() {
     color var(--ui-ease);
 }
 
+.new-shell__rail--icons .new-shell__nav-item {
+  justify-content: center;
+  padding: 0;
+}
+
 .new-shell__nav-item:hover {
   background: var(--ui-fill-hover);
   color: var(--ui-foreground);
@@ -270,18 +313,24 @@ async function handleLogout() {
   background: var(--ui-primary);
 }
 
-.new-shell__nav-item--active .new-shell__nav-icon {
-  color: var(--ui-primary);
-}
-
 .new-shell__nav-icon {
+  width: 18px;
+  height: 18px;
   color: var(--ui-foreground-faint);
   flex-shrink: 0;
+}
+
+.new-shell__nav-item--active .new-shell__nav-icon {
+  color: var(--ui-primary);
 }
 
 .new-shell__rail-foot {
   border-top: 1px solid var(--ui-border);
   padding: var(--ui-space-3) var(--ui-space-5);
+}
+
+.new-shell__rail--icons .new-shell__rail-foot {
+  padding: var(--ui-space-3) 0;
 }
 
 .new-shell__version {
@@ -319,41 +368,7 @@ async function handleLogout() {
 .new-shell__topbar-right {
   display: flex;
   align-items: center;
-  gap: var(--ui-space-3);
-}
-
-.new-shell__legacy-btn {
-  display: inline-flex;
-  align-items: center;
-  height: 28px;
-  padding: 0 var(--ui-space-3);
-  border: 1px solid var(--ui-input-border);
-  border-radius: var(--ui-radius-control);
-  font-size: var(--ui-font-size-xs);
-  color: var(--ui-foreground-secondary);
-  text-decoration: none;
-  transition:
-    background-color var(--ui-ease),
-    color var(--ui-ease),
-    border-color var(--ui-ease);
-}
-
-.new-shell__legacy-btn:hover {
-  background: var(--ui-fill-hover);
-  color: var(--ui-foreground);
-  border-color: var(--ui-border-strong);
-}
-
-.new-shell__legacy-btn:focus-visible,
-.new-shell__logout:focus-visible {
-  outline: none;
-  box-shadow: var(--ui-shadow-focus);
-}
-
-.new-shell__divider {
-  width: 1px;
-  height: 20px;
-  background: var(--ui-border);
+  gap: var(--ui-space-4);
 }
 
 .new-shell__user {
@@ -401,6 +416,11 @@ async function handleLogout() {
 .new-shell__logout:hover {
   background: var(--ui-fill-hover);
   color: var(--ui-danger-fg);
+}
+
+.new-shell__logout:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-shadow-focus);
 }
 
 .new-shell__content {

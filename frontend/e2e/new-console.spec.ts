@@ -8,14 +8,6 @@ import { test, expect, type Page } from '@playwright/test';
  * Screenshots land in test-results/baseline/ for the vision review loop.
  */
 
-const ADMIN_USER = {
-  id: '0190-0000-0000-0001',
-  username: 'root',
-  displayName: 'Root Admin',
-  role: 'SYSTEM_ADMIN',
-  mustChangePassword: false,
-};
-
 const REGULAR_USER = {
   id: '0190-0000-0000-0009',
   username: 'demo2_user',
@@ -369,6 +361,80 @@ async function mockPilotApi(page: Page) {
   });
 }
 
+const SKILLS = [
+  {
+    id: '0190-0000-0000-00e1',
+    name: 'commit-msg-lint',
+    version: '1.2.0',
+    description: '规范 git 提交信息并自动生成变更提示的技能包，支持 Conventional Commits。',
+    tags: ['git', 'workflow'],
+    author: 'platform',
+    license: 'MIT',
+    contentBytes: 204_800,
+    createdAt: '2026-08-20T00:00:00Z',
+    updatedAt: '2026-08-20T00:00:00Z',
+    status: 'ACTIVE',
+  },
+  {
+    id: '0190-0000-0000-00e2',
+    name: 'pr-summarizer',
+    version: '0.4.1',
+    description: '基于 diff 生成 PR 摘要与风险点提示。',
+    tags: ['review'],
+    author: 'qa-team',
+    license: 'MIT',
+    contentBytes: 1_540_000,
+    createdAt: '2026-08-25T00:00:00Z',
+    updatedAt: '2026-08-25T00:00:00Z',
+    status: 'ACTIVE',
+  },
+];
+
+const MODEL_APPROVALS = [
+  {
+    id: '0190-0000-0000-00f1',
+    virtualKeyId: '0190-0000-0000-0002',
+    keyName: 'claude-code-main',
+    keyDisplay: 'mqk_live_…8f2a',
+    projectTag: 'live',
+    modelId: 'deepseek-v4.1',
+    reason: '编码任务需要更强推理',
+    status: 'PENDING',
+    requesterId: '0190-0000-0000-0009',
+    requesterName: 'demo2_user',
+    reviewNote: null,
+    reviewedByName: null,
+    createdAt: '2026-09-03T00:00:00Z',
+    updatedAt: '2026-09-03T00:00:00Z',
+  },
+  {
+    id: '0190-0000-0000-00f2',
+    virtualKeyId: '0190-0000-0000-0002',
+    keyName: 'claude-code-main',
+    keyDisplay: 'mqk_live_…8f2a',
+    projectTag: 'live',
+    modelId: 'kimi-k2.5',
+    reason: '长上下文任务',
+    status: 'APPROVED',
+    requesterId: '0190-0000-0000-0009',
+    requesterName: 'demo2_user',
+    reviewNote: '符合项目范围',
+    reviewedByName: 'root',
+    createdAt: '2026-09-02T00:00:00Z',
+    updatedAt: '2026-09-02T06:30:00Z',
+  },
+];
+
+async function mockUserPages(page: Page) {
+  await page.route('**/api/v1/skills', (route) => route.fulfill({ json: SKILLS }));
+  await page.route('**/api/v1/skills/*/download', (route) =>
+    route.fulfill({ status: 200, body: 'zipped-skill' }),
+  );
+  await page.route('**/api/v1/me/model-approvals', (route) =>
+    route.fulfill({ json: MODEL_APPROVALS }),
+  );
+}
+
 test('new login page renders login and register modes', async ({ page }) => {
   // Public page — the session probe must read unauthenticated or the guard
   // would redirect straight into the console.
@@ -452,34 +518,72 @@ test('usage page shows quota, summary totals and pages the records', async ({ pa
   await page.screenshot({ path: 'test-results/baseline/next-usage-1440x900.png', fullPage: true });
 });
 
-test('admin users page renders badges and gates the temp password reveal', async ({ page }) => {
-  await mockSession(page, ADMIN_USER);
-  await mockPilotApi(page);
-
-  await page.goto('/app-new/users');
-  await expect(page.getByTestId('users-table')).toBeVisible();
-  await expect(page.getByText('系统管理员').first()).toBeVisible();
-  await expect(page.getByTestId('users-summary')).toContainText('共 6 个账号');
-
-  // Create → temp password dialog (dismissible=false until acknowledged).
-  await page.getByTestId('user-create-open').click();
-  await page.getByTestId('user-create-username').fill('newbie');
-  await page.getByTestId('user-create-submit').click();
-  await expect(page.getByTestId('temp-password-dialog')).toBeVisible();
-  await expect(page.getByTestId('temp-password')).toContainText('TempPass2026!');
-  await expect(page.getByTestId('temp-password-close')).toBeDisabled();
-  await page.getByTestId('temp-password-ack').click();
-  await expect(page.getByTestId('temp-password-close')).toBeEnabled();
-  await page.getByTestId('temp-password-close').click();
-  await expect(page.getByTestId('temp-password-dialog')).toBeHidden();
-
-  await page.screenshot({ path: 'test-results/baseline/next-users-1440x900.png', fullPage: true });
-});
-
-test('regular users are redirected from the admin pilot route', async ({ page }) => {
+test('overview page shows stats, usage bars and recent keys', async ({ page }) => {
   await mockSession(page, REGULAR_USER);
   await mockPilotApi(page);
 
-  await page.goto('/app-new/users');
-  await expect(page).toHaveURL(/\/app-new\/keys/);
+  await page.goto('/app-new/overview');
+  await expect(page.getByTestId('overview-stats')).toBeVisible();
+  await expect(page.getByText('本月 Tokens')).toBeVisible();
+  await expect(page.getByTestId('overview-usage')).toContainText('用量分布');
+  await expect(page.getByTestId('overview-keys')).toContainText('claude-code-main');
+  await page.screenshot({
+    path: 'test-results/baseline/next-overview-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('skills page renders cards and downloads a skill', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockUserPages(page);
+
+  await page.goto('/app-new/skills');
+  await expect(page.getByTestId('skill-card').first()).toBeVisible();
+  await expect(page.getByText('commit-msg-lint')).toBeVisible();
+  await page.getByTestId('skill-download').first().click();
+  await expect(page.getByText('已下载 commit-msg-lint')).toBeVisible();
+  await page.screenshot({ path: 'test-results/baseline/next-skills-1440x900.png', fullPage: true });
+});
+
+test('model approvals lists applications and gates the create form', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+  await mockUserPages(page);
+
+  await page.goto('/app-new/model-approvals');
+  await expect(page.getByTestId('model-approvals-table')).toBeVisible();
+  await expect(page.getByText('待审批')).toBeVisible();
+
+  await page.getByTestId('model-approval-open').click();
+  await expect(page.getByTestId('model-approval-form')).toBeVisible();
+  await page.getByTestId('model-approval-submit').click();
+  await expect(page.getByText('请选择 Virtual Key')).toBeVisible();
+  await page.screenshot({
+    path: 'test-results/baseline/next-model-approvals-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('profile page validates the password form', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+
+  await page.goto('/app-new/profile');
+  await expect(page.getByTestId('account-username')).toHaveText('demo2_user');
+  await page.getByTestId('current-password').fill('TempPass2026!');
+  await page.getByTestId('new-password').fill('StrongPass2026!');
+  await page.getByTestId('confirm-password').fill('Different2026!');
+  await page.getByTestId('password-submit').click();
+  await expect(page.getByTestId('field-error')).toContainText('两次输入的新密码不一致');
+  await page.screenshot({
+    path: 'test-results/baseline/next-profile-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('regular users are redirected from admin routes', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+
+  await page.goto('/app/users');
+  await expect(page).toHaveURL(/\/app\/keys/);
 });
