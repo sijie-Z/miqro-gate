@@ -11,71 +11,16 @@ const router = createRouter({
     {
       path: '/login',
       name: 'login',
-      component: () => import('@/views/LoginView.vue'),
-      meta: { public: true, title: '登录' },
-    },
-    {
-      path: '/login-new',
-      name: 'login-next',
       component: () => import('@/views/next/NextLoginView.vue'),
       meta: { public: true, title: '登录' },
     },
     {
-      path: '/app-new',
-      component: () => import('@/components/NewShell.vue'),
-      meta: { requiresAuth: true },
-      children: [
-        {
-          path: '',
-          redirect: '/app-new/keys',
-        },
-        {
-          path: 'overview',
-          name: 'next-overview',
-          component: () => import('@/views/next/NextOverviewView.vue'),
-          meta: { title: '总览' },
-        },
-        {
-          path: 'keys',
-          name: 'next-keys',
-          component: () => import('@/views/next/NextKeysView.vue'),
-          meta: { title: '我的 Key' },
-        },
-        {
-          path: 'usage',
-          name: 'next-usage',
-          component: () => import('@/views/next/NextUsageView.vue'),
-          meta: { title: '用量' },
-        },
-        {
-          path: 'skills',
-          name: 'next-skills',
-          component: () => import('@/views/next/NextSkillsView.vue'),
-          meta: { title: '技能库' },
-        },
-        {
-          path: 'model-approvals',
-          name: 'next-model-approvals',
-          component: () => import('@/views/next/NextModelApprovalsView.vue'),
-          meta: { title: '模型申请' },
-        },
-        {
-          path: 'profile',
-          name: 'next-profile',
-          component: () => import('@/views/next/NextProfileView.vue'),
-          meta: { title: '资料' },
-        },
-        {
-          path: 'users',
-          name: 'next-users',
-          component: () => import('@/views/next/NextUsersView.vue'),
-          meta: adminMeta('用户'),
-        },
-      ],
+      path: '/login-new',
+      redirect: '/login',
     },
     {
       path: '/app',
-      component: () => import('@/components/AppShell.vue'),
+      component: () => import('@/components/NewShell.vue'),
       meta: { requiresAuth: true },
       children: [
         {
@@ -85,37 +30,37 @@ const router = createRouter({
         {
           path: 'overview',
           name: 'overview',
-          component: () => import('@/views/OverviewView.vue'),
+          component: () => import('@/views/next/NextOverviewView.vue'),
           meta: { title: '总览' },
         },
         {
           path: 'keys',
           name: 'keys',
-          component: () => import('@/views/KeysView.vue'),
+          component: () => import('@/views/next/NextKeysView.vue'),
           meta: { title: '我的 Key' },
         },
         {
           path: 'usage',
           name: 'usage',
-          component: () => import('@/views/UsageView.vue'),
+          component: () => import('@/views/next/NextUsageView.vue'),
           meta: { title: '用量' },
         },
         {
           path: 'profile',
           name: 'profile',
-          component: () => import('@/views/ProfileView.vue'),
+          component: () => import('@/views/next/NextProfileView.vue'),
           meta: { title: '资料' },
         },
         {
           path: 'skills',
           name: 'skills',
-          component: () => import('@/views/SkillHubView.vue'),
+          component: () => import('@/views/next/NextSkillsView.vue'),
           meta: { title: '技能库' },
         },
         {
           path: 'model-approvals',
           name: 'model-approvals',
-          component: () => import('@/views/ModelApprovalsView.vue'),
+          component: () => import('@/views/next/NextModelApprovalsView.vue'),
           meta: { title: '模型申请' },
         },
         {
@@ -271,6 +216,11 @@ const router = createRouter({
       ],
     },
     {
+      // Pilot prefix retired in U1-2 — old pilot URLs keep working via redirect.
+      path: '/app-new/:pathMatch(.*)*',
+      redirect: (to) => '/app' + to.path.slice('/app-new'.length),
+    },
+    {
       path: '/',
       redirect: '/app/overview',
     },
@@ -290,16 +240,13 @@ router.beforeEach(async (to) => {
   if (to.meta.public) {
     if (auth.isAuthenticated) {
       if (auth.mustChangePassword) return '/app/profile';
-      return to.name === 'login-next' ? '/app-new/keys' : '/app/keys';
+      return '/app/keys';
     }
     return true;
   }
 
   if (!auth.isAuthenticated) {
-    return {
-      name: to.path.startsWith('/app-new') || to.name === 'login-next' ? 'login-next' : 'login',
-      query: { redirect: to.fullPath },
-    };
+    return { name: 'login', query: { redirect: to.fullPath } };
   }
 
   // Password must be changed before anything else.
@@ -310,7 +257,7 @@ router.beforeEach(async (to) => {
   // Admin routes are SYSTEM_ADMIN-only; regular users are redirected to the
   // keys page (never to the admin route, which would render a 403 page).
   if (to.meta.requiresAdmin && auth.user?.role !== 'SYSTEM_ADMIN') {
-    return to.path.startsWith('/app-new') ? { name: 'next-keys' } : { name: 'keys' };
+    return { name: 'keys' };
   }
 
   return true;

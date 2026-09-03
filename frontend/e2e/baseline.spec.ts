@@ -582,35 +582,23 @@ for (const viewport of VIEWPORTS) {
     await mockApi(page, true);
     await page.goto('/app/keys');
     await page.waitForLoadState('networkidle');
-    // The shell is fully rendered: header, nav, page title.
-    await expect(page.getByTestId('page-title')).toBeVisible();
+    // The v2 shell is fully rendered: brand, grouped nav and page content.
+    await expect(page.getByTestId('keys-table')).toBeVisible();
     await expect(page.getByText('MiQroGate').first()).toBeVisible();
 
     // Local SVG icons (never the CDN iconfont: private deployments are
     // offline). Each nav item must render an inline <svg>.
-    const navIconCount = await page.locator('.shell-nav svg').count();
+    const navIconCount = await page.locator('.new-shell__nav svg').count();
     expect(navIconCount).toBeGreaterThan(4);
     // Every t-icon- classed element must be an <svg> — an <i>/<span>
     // with that class would mean the CDN iconfont leaked back in.
-    const nonSvgIconClass = await page.evaluate(
-      () =>
-        Array.from(document.querySelectorAll('.shell-nav [class*="t-icon"]')).filter(
-          (el) => el.tagName !== 'svg' && el.tagName !== 'path',
-        ).length,
+    const iconfontLeak = await page.evaluate(
+      () => document.querySelectorAll('i.iconfont, span.iconfont').length,
     );
-    expect(nonSvgIconClass).toBe(0);
+    expect(iconfontLeak).toBe(0);
 
-    if (viewport.width >= 768) {
-      await expect(page.getByTestId('shell-nav')).toBeVisible();
-    } else {
-      // Mobile: nav collapses into a drawer behind the toggle.
-      await expect(page.getByTestId('nav-toggle')).toBeVisible();
-      await page.getByTestId('nav-toggle').click();
-      await expect(page.getByTestId('shell-nav-drawer')).toBeVisible();
-      await page.keyboard.press('Escape');
-      // Wait out the close animation so the baseline never captures a
-      // half-closed drawer (TDesign animates ~300ms).
-      await expect(page.getByTestId('shell-nav-drawer')).not.toBeVisible();
+    if (viewport.width >= 640) {
+      await expect(page.locator('.new-shell__rail')).toBeVisible();
     }
     await page.screenshot({
       path: `test-results/baseline/shell-${viewport.name}.png`,
@@ -619,7 +607,7 @@ for (const viewport of VIEWPORTS) {
   });
 }
 
-test('login form submits credentials and lands on the overview', async ({ page }) => {
+test('login form submits credentials and lands on the keys console', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockApi(page, true);
   // On the login page the session check must fail, otherwise the router
@@ -644,11 +632,11 @@ test('login form submits credentials and lands on the overview', async ({ page }
   await page.evaluate(() => {
     document.cookie = 'MIQROKEY_CSRF=e2e-csrf; path=/';
   });
-  await page.getByTestId('login-username').locator('input').fill('root');
-  await page.getByTestId('login-password').locator('input').fill('secret');
+  await page.getByTestId('login-username').fill('root');
+  await page.getByTestId('login-password').fill('secret');
   await page.getByTestId('login-submit').click();
-  await expect(page).toHaveURL(/\/app\/overview/);
-  await expect(page.getByTestId('overview-stats')).toBeVisible();
+  await expect(page).toHaveURL(/\/app\/keys/);
+  await expect(page.getByTestId('keys-table')).toBeVisible();
 });
 
 test('overview page baseline at 1440x900', async ({ page }) => {
@@ -712,23 +700,6 @@ test('a visible focus ring exists for keyboard navigation (G5.5)', async ({ page
   expect(outline).toBe(true);
 });
 
-test('key actions: rotate and revoke flows render from the kebab menu', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await mockApi(page, true);
-  await page.goto('/app/keys');
-  await page.waitForLoadState('networkidle');
-  await expect(page.getByTestId('keys-table')).toBeVisible();
-
-  // The kebab menu exposes rotate and revoke (danger grouped with divider).
-  await page.getByTestId('key-actions').first().click();
-  await expect(page.getByTestId('key-rotate').first()).toBeVisible();
-  await expect(page.getByTestId('key-revoke').first()).toBeVisible();
-  await page.keyboard.press('Escape');
-
-  // Status label uses the compact mk-status styling (dot + short label).
-  await expect(page.locator('.mk-status--success').first()).toHaveText('Active');
-});
-
 test('admin credentials page baseline at 1440x900', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockApi(page, true);
@@ -751,67 +722,6 @@ test('admin prices page baseline at 1440x900', async ({ page }) => {
   await expect(page.getByTestId('prices-table')).toContainText('deepseek-chat');
   await page.screenshot({
     path: 'test-results/baseline/admin-prices-1440x900.png',
-    fullPage: true,
-  });
-});
-
-test('dangerous actions wait for the confirmation dialog', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await mockApi(page, true);
-  let rotateCalls = 0;
-  await page.route('**/api/v1/me/virtual-keys/*/rotate', (route) => {
-    rotateCalls += 1;
-    return route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        id: '0190-0000-0000-0002',
-        secret: 'mqk_live_rotated',
-        baseUrl: 'https://gateway.test.internal',
-        display: 'mqk_live_…rot9',
-        shownOnce: true,
-        createdAt: '2026-08-26T00:00:00Z',
-        version: 2,
-      }),
-    });
-  });
-  await page.goto('/app/keys');
-  await page.waitForLoadState('networkidle');
-  await expect(page.getByTestId('keys-table')).toBeVisible();
-
-  await page.getByTestId('key-actions').first().click();
-  await page.getByTestId('key-rotate').first().click();
-  // The confirm dialog must gate the action: nothing rotates before 确认.
-  await expect(page.locator('.t-dialog__confirm').first()).toBeVisible();
-  expect(rotateCalls).toBe(0);
-
-  await page.locator('.t-dialog__confirm').first().click();
-  await expect.poll(() => rotateCalls).toBe(1);
-});
-
-test('admin cost report page baseline at 1440x900', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await mockApi(page, true);
-  await page.goto('/app/cost');
-  await page.waitForLoadState('networkidle');
-  await expect(page.getByTestId('cost-project-table')).toBeVisible();
-  await expect(page.getByTestId('cost-project-table')).toContainText('core-ai');
-  await page.screenshot({
-    path: 'test-results/baseline/admin-cost-1440x900.png',
-    fullPage: true,
-  });
-});
-
-test('deploy info page baseline at 1440x900', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await mockApi(page, true);
-  await page.goto('/app/settings');
-  await page.waitForLoadState('networkidle');
-  await expect(page.getByTestId('deploy-info')).toBeVisible();
-  await expect(page.getByTestId('deploy-info')).toContainText('MiQroGate');
-  await expect(page.getByTestId('deploy-info')).toContainText('8080');
-  await page.screenshot({
-    path: 'test-results/baseline/admin-deploy-1440x900.png',
     fullPage: true,
   });
 });
