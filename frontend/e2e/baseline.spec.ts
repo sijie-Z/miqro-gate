@@ -657,7 +657,8 @@ test('admin users page baseline at 1440x900', async ({ page }) => {
   await page.waitForLoadState('networkidle');
   await expect(page.getByTestId('users-table')).toBeVisible();
   await expect(page.getByTestId('users-table')).toContainText('alice');
-  await expect(page.locator('.mk-status--success').first()).toHaveText('Active');
+  await expect(page.getByTestId('users-table')).toContainText('正常');
+  await expect(page.getByTestId('users-table')).toContainText('停用');
   await page.screenshot({ path: 'test-results/baseline/admin-users-1440x900.png', fullPage: true });
 });
 
@@ -729,7 +730,7 @@ test('admin prices page baseline at 1440x900', async ({ page }) => {
 const ADMIN_PAGES = [
   { path: '/app/teams', testid: 'teams-table', expect: 'Platform' },
   { path: '/app/projects', testid: 'projects-table', expect: 'Core AI' },
-  { path: '/app/grants', testid: 'grants-table', expect: 'ACTIVE' },
+  { path: '/app/grants', testid: 'grants-table', expect: '正常' },
   { path: '/app/approval-center', testid: 'approvals-queue-table', expect: 'deepseek-v4-flash' },
   { path: '/app/quota-rules', testid: 'quota-rules-table', expect: '1,000,000' },
   { path: '/app/roi', testid: 'roi-report', expect: '缓存节省' },

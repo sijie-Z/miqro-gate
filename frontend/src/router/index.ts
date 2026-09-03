@@ -66,31 +66,31 @@ const router = createRouter({
         {
           path: 'users',
           name: 'users',
-          component: () => import('@/views/AdminUsersView.vue'),
+          component: () => import('@/views/next/NextUsersView.vue'),
           meta: adminMeta('用户'),
         },
         {
           path: 'teams',
           name: 'teams',
-          component: () => import('@/views/AdminTeamsView.vue'),
+          component: () => import('@/views/next/NextTeamsView.vue'),
           meta: adminMeta('团队'),
         },
         {
           path: 'projects',
           name: 'projects',
-          component: () => import('@/views/AdminProjectsView.vue'),
+          component: () => import('@/views/next/NextProjectsView.vue'),
           meta: adminMeta('项目'),
         },
         {
           path: 'grants',
           name: 'grants',
-          component: () => import('@/views/AdminGrantsView.vue'),
+          component: () => import('@/views/next/NextGrantsView.vue'),
           meta: adminMeta('授权'),
         },
         {
           path: 'approval-center',
           name: 'approval-center',
-          component: () => import('@/views/AdminModelApprovalsView.vue'),
+          component: () => import('@/views/next/NextApprovalCenterView.vue'),
           meta: adminMeta('审批中心'),
         },
         {
