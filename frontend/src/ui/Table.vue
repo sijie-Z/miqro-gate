@@ -226,7 +226,7 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
   font-weight: var(--ui-weight-semibold);
   letter-spacing: 0.01em;
   color: #4f4f58;
-  background: #faf9f6;
+  background: #f7f6f2;
   white-space: nowrap;
 }
 

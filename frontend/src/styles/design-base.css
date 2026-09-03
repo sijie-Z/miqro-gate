@@ -52,16 +52,16 @@
 
 .ui-panel-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--ui-space-3);
   padding: var(--ui-space-4) var(--ui-space-5);
-  border-bottom: 1px solid var(--ui-border-muted);
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .ui-panel-title {
   margin: 0;
-  font-size: var(--ui-font-size-lg);
+  font-size: 15px;
   font-weight: var(--ui-weight-semibold);
   color: var(--ui-foreground);
 }

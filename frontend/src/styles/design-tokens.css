@@ -19,7 +19,7 @@
  */
 :root {
   /* surfaces — warm neutrals, hue ≈ 75-90, near-zero chroma */
-  --ui-background: #f4f3ef; /* canvas — matches PostHog hsl(75 14% 95%) */
+  --ui-background: #f2f2ee; /* canvas — warm-neutral console ground */
   --ui-card: #ffffff;
   --ui-muted: #efede7; /* subdued rows / secondary fills */
   --ui-chrome: #ecebe6; /* sidebar / toolbar furniture */

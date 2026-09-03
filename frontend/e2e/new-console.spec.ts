@@ -168,23 +168,60 @@ const KEYS = [
   },
 ];
 
-const USAGE_SUMMARY = {
-  groupBy: 'project',
-  groups: [
-    {
-      groupKey: 'live',
-      label: 'LIVE 项目',
-      requests: { upstream: 12, coalesced: 2, l1Hit: 4, l2Hit: 1 },
-      tokens: { input: 120_000, output: 40_000, cacheRead: 8_000, cacheCreation: 15_000 },
-      cost: { upstreamPaid: '0.320000', gatewayObserved: '0.002000' },
-    },
-  ],
-  totals: {
-    groupKey: '__totals__',
-    label: '合计',
+const GROUPS = [
+  {
+    groupKey: 'live',
+    label: 'LIVE 项目',
     requests: { upstream: 12, coalesced: 2, l1Hit: 4, l2Hit: 1 },
     tokens: { input: 120_000, output: 40_000, cacheRead: 8_000, cacheCreation: 15_000 },
     cost: { upstreamPaid: '0.320000', gatewayObserved: '0.002000' },
+  },
+  {
+    groupKey: 'coding-plan',
+    label: '编码计划',
+    requests: { upstream: 9, coalesced: 0, l1Hit: 1, l2Hit: 0 },
+    tokens: { input: 64_000, output: 21_000, cacheRead: 0, cacheCreation: 2_400 },
+    cost: { upstreamPaid: '0.152000', gatewayObserved: '0.001100' },
+  },
+  {
+    groupKey: 'agent-exp',
+    label: '智能体实验',
+    requests: { upstream: 6, coalesced: 1, l1Hit: 2, l2Hit: 0 },
+    tokens: { input: 41_000, output: 12_000, cacheRead: 1_200, cacheCreation: 3_800 },
+    cost: { upstreamPaid: '0.090000', gatewayObserved: '0.000700' },
+  },
+  {
+    groupKey: 'qa-suite',
+    label: 'QA 回归',
+    requests: { upstream: 4, coalesced: 0, l1Hit: 0, l2Hit: 0 },
+    tokens: { input: 18_000, output: 9_600, cacheRead: 0, cacheCreation: 900 },
+    cost: { upstreamPaid: '0.048000', gatewayObserved: '0.000300' },
+  },
+  {
+    groupKey: 'docs-writer',
+    label: '文档写作',
+    requests: { upstream: 3, coalesced: 0, l1Hit: 1, l2Hit: 0 },
+    tokens: { input: 9_500, output: 7_200, cacheRead: 400, cacheCreation: 600 },
+    cost: { upstreamPaid: '0.034000', gatewayObserved: '0.000200' },
+  },
+  {
+    groupKey: 'support-triage',
+    label: '工单初筛',
+    requests: { upstream: 2, coalesced: 0, l1Hit: 0, l2Hit: 0 },
+    tokens: { input: 6_200, output: 2_100, cacheRead: 0, cacheCreation: 300 },
+    cost: { upstreamPaid: '0.016000', gatewayObserved: '0.000100' },
+  },
+];
+
+const USAGE_SUMMARY = {
+  groupBy: 'project',
+  groups: GROUPS,
+  totals: {
+    groupKey: '__totals__',
+    label: '合计',
+    requests: { upstream: 36, coalesced: 3, l1Hit: 8, l2Hit: 1 },
+    tokens: { input: 258_700, output: 91_900, cacheRead: 9_600, cacheCreation: 23_000 },
+    cost: { upstreamPaid: '0.660000', gatewayObserved: '0.004400' },
   },
 };
 
@@ -219,25 +256,25 @@ const USERS = [
     role: 'SYSTEM_ADMIN',
     status: 'ACTIVE',
     mustChangePassword: false,
-    createdAt: '2026-07-01T00:00:00Z',
+    createdAt: '2026-06-28T03:14:00Z',
   },
   {
     id: '0190-0000-0000-0011',
     username: 'alice',
-    displayName: 'Alice',
+    displayName: 'Alice Wang',
     role: 'USER',
     status: 'ACTIVE',
     mustChangePassword: true,
-    createdAt: '2026-08-01T00:00:00Z',
+    createdAt: '2026-07-19T09:47:00Z',
   },
   {
     id: '0190-0000-0000-0012',
     username: 'bob',
-    displayName: 'Bob',
+    displayName: 'Bob Chen',
     role: 'USER',
     status: 'DISABLED',
     mustChangePassword: false,
-    createdAt: '2026-08-10T00:00:00Z',
+    createdAt: '2026-08-10T16:05:00Z',
   },
   {
     id: '0190-0000-0000-0013',
@@ -257,7 +294,7 @@ const USERS = [
     status: 'ACTIVE',
     mustChangePassword: false,
     lastLoginAt: '2026-09-02T06:40:00Z',
-    createdAt: '2026-08-15T00:00:00Z',
+    createdAt: '2026-08-15T11:23:00Z',
   },
   {
     id: '0190-0000-0000-0015',
@@ -406,7 +443,7 @@ test('usage page shows quota, summary totals and pages the records', async ({ pa
   await page.goto('/app-new/usage');
   await expect(page.getByTestId('my-quota-row').first()).toBeVisible();
   await expect(page.getByText('限额 2,000,000 · 本期用量 160,000（8%）')).toBeVisible();
-  await expect(page.getByTestId('summary-totals')).toContainText('19');
+  await expect(page.getByTestId('summary-totals')).toContainText('48');
   await expect(page.getByTestId('usage-chart')).toBeVisible();
   await expect(page.getByText('deepseek-v4-flash').first()).toBeVisible();
 

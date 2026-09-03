@@ -249,7 +249,7 @@ async function handleLogout() {
 }
 
 .new-shell__foot {
-  border-top: 1px solid var(--ui-border-muted);
+  border-top: 1px solid var(--ui-border);
   padding: var(--ui-space-3);
   display: flex;
   flex-direction: column;
@@ -260,7 +260,16 @@ async function handleLogout() {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-faint);
   text-decoration: none;
-  padding: 0 var(--ui-space-2);
+  padding: var(--ui-space-1) var(--ui-space-2);
+  border-radius: var(--ui-radius-control);
+  transition:
+    background-color var(--ui-ease),
+    color var(--ui-ease);
+}
+
+.new-shell__legacy-link:hover {
+  background: var(--ui-fill-hover);
+  color: var(--ui-foreground);
 }
 
 .new-shell__legacy-link:hover {
@@ -273,7 +282,11 @@ async function handleLogout() {
   gap: var(--ui-space-2);
   padding: var(--ui-space-2);
   border-radius: var(--ui-radius-control);
-  border-top: 1px solid var(--ui-border-muted);
+  transition: background-color var(--ui-ease);
+}
+
+.new-shell__user:hover {
+  background: var(--ui-fill-hover);
 }
 
 .new-shell__user-avatar {

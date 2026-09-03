@@ -298,7 +298,7 @@ function renderError(error: unknown, fallback: string) {
 
 .next-login__subtitle {
   margin: var(--ui-space-2) 0 0;
-  font-size: var(--ui-font-size-base);
+  font-size: 14px;
   color: #56565e;
 }
 
@@ -361,7 +361,7 @@ function renderError(error: unknown, fallback: string) {
 .next-login__form {
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 24px;
 }
 
 .next-login__form :deep(.ui-field) {
@@ -393,7 +393,7 @@ function renderError(error: unknown, fallback: string) {
 
 .next-login__submit {
   width: 100%;
-  margin-top: var(--ui-space-1);
+  margin-top: var(--ui-space-2);
 }
 
 .next-login__foot {
