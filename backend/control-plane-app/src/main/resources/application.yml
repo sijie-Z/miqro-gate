@@ -30,6 +30,17 @@ miqrokey:
     # for a whitelisted model is auto-approved and takes effect immediately.
     whitelist-models: ${MIQROKEY_APPROVAL_WHITELIST_MODELS:}
 
+# OpenAPI 3.1 generation (F09, api-contract §8): the machine-readable contract
+# served at /v3/api-docs. UI bundle is intentionally not included; the spec is
+# the artifact CI diffs against the committed baseline. Info and security
+# scheme docs are applied by OpenApiSecuritySchemes (config package).
+springdoc:
+  api-docs:
+    version: OPENAPI_3_1
+    enabled: true
+  swagger-ui:
+    enabled: false
+
 # Actuator
 management:
   endpoints:
