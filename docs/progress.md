@@ -6,12 +6,13 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `F09 OpenAPI 3.1 生成 + CI 破坏性变更检查`（api-contract §8 契约收尾）— `DONE`
-- Goal status: `DONE`（本会话 2026-09-03；#122–#128 已并入 develop，F09 PR 待合并）
+- Current goal: `F09 OpenAPI 3.1 生成 + CI 破坏性变更检查`（api-contract §8 契约收尾）— `DONE`（PR #129 已合并）
+- Goal status: `DONE`（本会话 2026-09-03；#122–#129 全部合并入 develop dd81371）
 - Last updated: `2026-09-03 CST`
-- Branch: `goal/openapi-spec`（验证后 push + PR）
-- 会话交付链（#122–#128 + F09）：MCP ACL → F24 → F03 → F04 → F06 → F02 盘点 → F35 → F09
+- Branch: `goal/openapi-spec`（已合并）；develop @ dd81371，工作区清洁
+- 会话交付链（#122–#129，8 连发）：MCP ACL → F24 → F03 → F04 → F06 → F02 盘点 → F35 → F09
 - 下一步候选：A 组剩 **F01 MCP 代理接线**（需先定 SSE/Streamable HTTP 传输实现）→ **F05 管理门户 IP 白名单**核对（TBD）→ 前端 OpenAPI codegen 迁移（发布前候选，document-map §3）
+- **教训（本会话）**：建分支命令若 `git pull && git switch -c` 因网络失败整链中断会静默留在 develop 上提交——提交前先 `git branch --show-current` 复核；本地误提交用 `git branch -f` 移回原位即可（未 push 无碍）
 
 ## F09 OpenAPI 3.1 生成 + CI 破坏性变更检查 — api-contract §8（2026-09-03，DONE）
 
