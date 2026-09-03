@@ -67,7 +67,10 @@ describe('LoginView', () => {
 
     const setVal = async (testid: string, value: string) => {
       const input = wrapper.find(`${testid} input`);
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set;
       setter?.call(input.element, value);
       input.element.dispatchEvent(new Event('input', { bubbles: true }));
       await flushPromises();
@@ -91,7 +94,10 @@ describe('LoginView', () => {
 
     const setVal = async (testid: string, value: string) => {
       const input = wrapper.find(`${testid} input`);
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set;
       setter?.call(input.element, value);
       input.element.dispatchEvent(new Event('input', { bubbles: true }));
       await flushPromises();

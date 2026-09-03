@@ -63,7 +63,11 @@ async function submit() {
   }
   loading.value = true;
   try {
-    await auth.register(username.value.trim(), displayName.value.trim() || undefined, password.value);
+    await auth.register(
+      username.value.trim(),
+      displayName.value.trim() || undefined,
+      password.value,
+    );
     await afterAuthenticated();
   } catch (error) {
     renderError(error, '注册失败，请稍后重试。');
@@ -100,29 +104,11 @@ function renderError(error: unknown, fallback: string) {
           MiQroGate 是内部 AI 编码流量的凭证治理网关：一个 Virtual Key
           绑定一个项目、一个供应商产品、一份额度。不跨供应商、不负载均衡、不留 prompt。
         </p>
-        <div class="intro-quota-card">
-          <div class="mk-quota-band">
-            <div class="mk-quota-segment">
-              <div class="mk-quota-segment-label">
-                <span>5 小时</span><span class="mk-num">34%</span>
-              </div>
-              <div class="mk-quota-track"><div class="mk-quota-fill" style="width: 34%" /></div>
-            </div>
-            <div class="mk-quota-segment">
-              <div class="mk-quota-segment-label">
-                <span>本周</span><span class="mk-num">27%</span>
-              </div>
-              <div class="mk-quota-track"><div class="mk-quota-fill" style="width: 27%" /></div>
-            </div>
-            <div class="mk-quota-segment">
-              <div class="mk-quota-segment-label">
-                <span>本月</span><span class="mk-num">20%</span>
-              </div>
-              <div class="mk-quota-track"><div class="mk-quota-fill" style="width: 20%" /></div>
-            </div>
-          </div>
-          <p class="intro-quota-note">滚动额度窗口 —— 每家供应商的套餐都按这个节拍运转。</p>
-        </div>
+        <ul class="intro-points">
+          <li><span class="point-mark"></span>一个 Virtual Key，只绑一个项目、一个供应商产品</li>
+          <li><span class="point-mark"></span>用量与额度入账，只告警、不阻断</li>
+          <li><span class="point-mark"></span>prompt 与回答正文零留存</li>
+        </ul>
       </div>
     </aside>
 
@@ -234,14 +220,14 @@ function renderError(error: unknown, fallback: string) {
   background: var(--miqrokey-bg-canvas);
 }
 
-/* Left brand column — content vertically centered with breathing room. */
+/* Left brand column — deep slate panel, white type: the product face. */
 .login-intro {
   display: none;
   flex-direction: column;
   justify-content: center;
   padding: clamp(32px, 6vw, 96px);
-  background: var(--miqrokey-bg-surface);
-  border-right: 1px solid var(--miqrokey-border-default);
+  background: #0f172a;
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .intro-inner {
@@ -257,50 +243,76 @@ function renderError(error: unknown, fallback: string) {
 }
 
 .intro-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--miqrokey-accent);
-  margin-bottom: var(--miqrokey-space-6);
+  color: #7dd3fc;
+  margin-bottom: 32px;
+}
+
+.intro-brand::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: #38bdf8;
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.18);
 }
 
 .intro-headline {
   margin: 0 0 var(--miqrokey-space-5);
-  font-size: clamp(24px, 2.4vw, 32px);
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--miqrokey-text-primary);
+  font-size: clamp(28px, 2.8vw, 42px);
+  font-weight: 700;
+  line-height: 1.32;
+  color: #f8fafc;
+  letter-spacing: -0.02em;
 }
 
 .intro-accent {
-  color: var(--miqrokey-accent);
+  color: #7dd3fc;
   font-weight: 650;
 }
 
 .intro-copy {
-  max-width: 420px;
-  margin: 0 0 var(--miqrokey-space-8);
+  max-width: 430px;
+  margin: 0 0 40px;
+  font-size: 14.5px;
+  line-height: 2;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.intro-points {
+  max-width: 430px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.intro-points li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   font-size: 14px;
-  line-height: 1.8;
-  color: var(--miqrokey-text-secondary);
+  line-height: 1.6;
+  color: rgba(226, 232, 240, 0.9);
 }
 
-.intro-quota-card {
-  max-width: 420px;
-  padding: var(--miqrokey-space-5);
-  background: var(--miqrokey-bg-canvas);
-  border: 1px solid var(--miqrokey-border-default);
-  border-radius: var(--miqrokey-radius-panel);
+.point-mark {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.16);
 }
 
-.intro-quota-note {
-  margin: var(--miqrokey-space-3) 0 0;
-  font-size: 12px;
-  color: var(--miqrokey-text-disabled);
-}
-
-/* Right column — card centered with real presence. */
 .login-side {
   display: flex;
   align-items: center;
@@ -314,7 +326,7 @@ function renderError(error: unknown, fallback: string) {
   background: var(--miqrokey-bg-surface);
   border: 1px solid var(--miqrokey-border-default);
   border-radius: 10px;
-  box-shadow: 0 10px 34px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 32px rgba(15, 23, 42, 0.08);
 }
 
 .panel-head {
@@ -324,9 +336,10 @@ function renderError(error: unknown, fallback: string) {
 
 .login-title {
   margin: 0;
-  font-size: 22px;
-  font-weight: 650;
-  color: var(--miqrokey-text-primary);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #0f172a;
 }
 
 .login-subtitle {
@@ -335,34 +348,36 @@ function renderError(error: unknown, fallback: string) {
   color: var(--miqrokey-text-secondary);
 }
 
-/* Login / register segmented switch */
+/* Login / register underline tabs */
 .mode-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding: 4px;
-  margin-bottom: 24px;
-  background: var(--miqrokey-bg-canvas);
-  border: 1px solid var(--miqrokey-border-default);
-  border-radius: 8px;
+  gap: 0;
+  margin-bottom: 26px;
+  border-bottom: 1px solid var(--miqrokey-border-default);
 }
 
 .mode-tab {
   border: 0;
-  padding: 8px 0;
-  font-size: 14px;
+  border-bottom: 2px solid transparent;
+  padding: 0 0 10px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--miqrokey-text-secondary);
   background: transparent;
-  border-radius: 6px;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  margin-bottom: -1px;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.mode-tab:hover {
+  color: var(--miqrokey-text-primary);
 }
 
 .mode-tab.active {
-  background: var(--miqrokey-bg-surface);
-  color: var(--miqrokey-text-primary);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
+  color: var(--miqrokey-accent);
+  border-bottom-color: var(--miqrokey-accent);
+  font-weight: 600;
 }
 
 .mode-tab:focus-visible {
@@ -386,7 +401,14 @@ function renderError(error: unknown, fallback: string) {
 }
 
 .login-panel :deep(.t-input) {
-  min-height: 40px;
+  min-height: 44px;
+  border-radius: 8px;
+  border-color: var(--miqrokey-border-default);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.login-panel :deep(.t-input:hover:not(:focus-within)) {
+  border-color: #cbd5e1;
 }
 
 .login-panel :deep(.t-input:focus-within) {
@@ -401,8 +423,20 @@ function renderError(error: unknown, fallback: string) {
 
 .login-submit {
   width: 100%;
-  min-height: 44px;
+  min-height: 46px;
   font-size: 15px;
-  margin-top: 4px;
+  margin-top: 6px;
+  border-radius: 8px;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.login-submit:hover {
+  box-shadow: 0 4px 16px rgba(0, 102, 255, 0.32);
+  transform: translateY(-1px);
+}
+
+.login-submit:active {
+  transform: translateY(0);
+  box-shadow: none;
 }
 </style>

@@ -41,7 +41,11 @@ export const useAuthStore = defineStore('auth', () => {
     loaded.value = true;
   }
 
-  async function register(username: string, displayName: string | undefined, password: string): Promise<void> {
+  async function register(
+    username: string,
+    displayName: string | undefined,
+    password: string,
+  ): Promise<void> {
     const response = await api.register(username, displayName, password);
     user.value = {
       id: response.id,
