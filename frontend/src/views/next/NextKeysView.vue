@@ -115,9 +115,13 @@ const filteredKeys = computed(() => {
 const keySummary = computed(() => {
   const active = keys.value.filter((k) => k.status === 'ACTIVE').length;
   const rotating = keys.value.filter((k) => k.status === 'ROTATING').length;
+  const unusual = keys.value.filter(
+    (k) => k.status === 'REVOKED' || k.status === 'DISABLED',
+  ).length;
   const parts = [`共 ${keys.value.length} 个`];
   if (active) parts.push(`${active} 可用`);
   if (rotating) parts.push(`${rotating} 轮换中`);
+  if (unusual) parts.push(`${unusual} 异常`);
   return parts.join(' · ');
 });
 
@@ -310,9 +314,9 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
     case 'ROTATING':
       return 'warning';
     case 'REVOKED':
-      return 'neutral';
-    default:
       return 'danger';
+    default:
+      return 'neutral';
   }
 }
 </script>
@@ -542,7 +546,7 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
         </template>
         <template #cachePolicy="{ row }">
           <UiStatusBadge
-            :tone="(row as VirtualKeyView).cachePolicy === 'ENABLED' ? 'success' : 'neutral'"
+            :tone="(row as VirtualKeyView).cachePolicy === 'ENABLED' ? 'info' : 'neutral'"
             :label="(row as VirtualKeyView).cachePolicy === 'ENABLED' ? '开启' : '关闭'"
           />
         </template>
@@ -870,6 +874,7 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
   color: var(--ui-foreground-faint);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
   max-width: 480px;
 }
 

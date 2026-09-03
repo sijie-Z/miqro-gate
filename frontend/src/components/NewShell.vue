@@ -111,7 +111,7 @@ async function handleLogout() {
 
     <main class="new-shell__main">
       <header class="new-shell__topbar">
-        <span class="new-shell__context">{{ (route.meta.title as string) ?? '控制台' }}</span>
+        <span class="new-shell__context">MiQroGate 控制台 · 试点</span>
         <div class="new-shell__topbar-right">
           <router-link to="/app/keys" class="new-shell__legacy-btn" title="迁移完成前使用旧版控制台">
             旧版控制台
@@ -119,12 +119,7 @@ async function handleLogout() {
           <span class="new-shell__divider" aria-hidden="true" />
           <div class="new-shell__user">
             <span class="new-shell__user-avatar" aria-hidden="true">{{ userInitial }}</span>
-            <div class="new-shell__user-meta">
-              <span class="new-shell__user-name">{{ auth.user?.username }}</span>
-              <span class="new-shell__user-role">{{
-                auth.user?.role === 'SYSTEM_ADMIN' ? '系统管理员' : '用户'
-              }}</span>
-            </div>
+            <span class="new-shell__user-name">{{ auth.user?.username }}</span>
           </div>
           <button
             type="button"
@@ -314,7 +309,7 @@ async function handleLogout() {
 .new-shell__context {
   font-size: var(--ui-font-size-sm);
   font-weight: var(--ui-weight-medium);
-  color: var(--ui-foreground-secondary);
+  color: var(--ui-foreground-faint);
 }
 
 .new-shell__topbar-right {
@@ -377,20 +372,9 @@ async function handleLogout() {
   flex-shrink: 0;
 }
 
-.new-shell__user-meta {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.2;
-}
-
 .new-shell__user-name {
   font-size: var(--ui-font-size-sm);
   font-weight: var(--ui-weight-medium);
-}
-
-.new-shell__user-role {
-  font-size: 11px;
-  color: var(--ui-foreground-faint);
 }
 
 .new-shell__logout {

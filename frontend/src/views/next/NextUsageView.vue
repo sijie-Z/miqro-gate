@@ -105,7 +105,11 @@ const usageBars = computed(() => {
     .sort((a, b) => b.value - a.value)
     .slice(0, 8);
   const max = Math.max(...ranked.map((r) => r.value), 1);
-  return ranked.map((r) => ({ ...r, width: `${Math.max(4, (r.value / max) * 100)}%` }));
+  return ranked.map((r, index) => ({
+    ...r,
+    width: `${Math.max(4, (r.value / max) * 100)}%`,
+    alpha: Math.max(0.28, 0.85 - index * 0.11),
+  }));
 });
 
 const totalPages = computed(() => {
@@ -254,7 +258,9 @@ function formatNumber(value?: number): string {
 }
 
 function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString();
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 </script>
 
@@ -474,7 +480,10 @@ function formatTime(iso: string): string {
           <div v-for="bar in usageBars" :key="bar.label" class="next-usage__bar-row">
             <span class="next-usage__bar-label" :title="bar.label">{{ bar.label }}</span>
             <div class="next-usage__bar-track">
-              <div class="next-usage__bar-fill" :style="{ width: bar.width }" />
+              <div
+                class="next-usage__bar-fill"
+                :style="{ width: bar.width, opacity: bar.alpha }"
+              />
             </div>
             <span class="next-usage__bar-value ui-num">{{ bar.value }}</span>
           </div>
@@ -573,7 +582,7 @@ function formatTime(iso: string): string {
   padding: var(--ui-space-3) var(--ui-space-4);
   margin-top: var(--ui-space-2);
   border-radius: var(--ui-radius-control);
-  background: var(--ui-primary-soft);
+  background: color-mix(in srgb, var(--ui-primary) 7%, white);
   font-size: var(--ui-font-size-sm);
   color: var(--ui-foreground-secondary);
 }
@@ -643,7 +652,6 @@ function formatTime(iso: string): string {
   height: 100%;
   border-radius: var(--ui-radius-pill);
   background: var(--ui-primary);
-  opacity: 0.85;
 }
 
 .next-usage__bar-value {
