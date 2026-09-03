@@ -79,7 +79,7 @@
 
 ## 状态段（每阶段更新）
 
-- [x] U0 前置：PR #131 收尾（若新会话已完成则勾；否则见 §1）
+- [x] U0 前置：PR #131 收尾（2026-09-03 已完成：CI 曾红一次——KeysView onboarding spec 缺 listVirtualKeys 默认 stub，修复重推后全绿 → squash merge → develop 80dddad，见 progress.md 顶部）
 - [ ] U0 设计语言抽取 + ui/ 组件首批 + 试点 4 页（Login/Keys/Usage/AdminUsers）+ 视觉 ≥9 验收
 - [ ] U1 用户面全量切换 + 并行开关拆除
 - [ ] U2 管理面三组逐批切换
