@@ -983,6 +983,7 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
 }
 
 .next-keys__ack {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--ui-space-2);
@@ -994,8 +995,12 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
 
 .next-keys__ack-input {
   position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   opacity: 0;
-  pointer-events: none;
+  cursor: pointer;
 }
 
 .next-keys__ack-box {
@@ -1009,6 +1014,8 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
   background: var(--ui-card);
   color: transparent;
   flex-shrink: 0;
+
+  pointer-events: none;
 }
 
 .next-keys__ack-input:checked + .next-keys__ack-box {

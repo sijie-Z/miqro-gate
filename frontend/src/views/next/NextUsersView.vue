@@ -598,6 +598,7 @@ function formatTime(iso?: string): string {
 }
 
 .next-users__ack {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--ui-space-2);
@@ -609,8 +610,12 @@ function formatTime(iso?: string): string {
 
 .next-users__ack-input {
   position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   opacity: 0;
-  pointer-events: none;
+  cursor: pointer;
 }
 
 .next-users__ack-box {
@@ -624,6 +629,8 @@ function formatTime(iso?: string): string {
   background: var(--ui-card);
   color: transparent;
   flex-shrink: 0;
+
+  pointer-events: none;
 }
 
 .next-users__ack-input:checked + .next-users__ack-box {

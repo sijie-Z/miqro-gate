@@ -14,6 +14,7 @@ import {
   DialogRoot,
   DialogTitle,
 } from 'radix-vue';
+import { useAttrs } from 'vue';
 
 const props = withDefaults(
   defineProps<{
@@ -37,6 +38,8 @@ const emit = defineEmits<{
 
 defineOptions({ inheritAttrs: false });
 
+const attrs = useAttrs();
+
 function dismiss() {
   if (!props.dismissible) return;
   emit('update:open', false);
@@ -48,7 +51,7 @@ function dismiss() {
   <DialogRoot :open="open" :modal="true" @update:open="dismissible && emit('update:open', $event)">
     <DialogPortal>
       <DialogOverlay class="ui-dialog__overlay" />
-      <DialogContent class="ui-dialog__content" :style="{ width }">
+      <DialogContent class="ui-dialog__content" :style="{ width }" v-bind="attrs">
         <header class="ui-dialog__head">
           <div>
             <DialogTitle class="ui-dialog__title">{{ title }}</DialogTitle>
