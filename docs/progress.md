@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `UI 专项 U0 — PostHog 设计语言 + ui/ 组件首批 + 试点 4 页` — `AWAITING_USER_ACCEPTANCE`（分支 goal/ui-posthog-u0 @ 803f552 已 push、PR 待用户查看；代码+测试完成并全绿，视觉评审中位 ~7-7.5 未达 9 → 停止逐轮追分，等用户真机点验后决定 U1 或调整方向）
-- Goal status: `AWAITING_USER_ACCEPTANCE`（2026-09-03；vitest 27 文件 135/135、e2e 41/41 全绿；评审档案与截图在 miqro-local/ui-reviews/，含 U0-VISION-SCORES.md 与每轮 raw；预览入口见 NEXT_SESSION_PLAN 状态段）
+- Current goal: `U1 用户面全量切换` — `IN_PROGRESS`（U0 已于 2026-09-03 合并进 develop @ 42f0864（PR #132）；U1-1 完成于分支 goal/ui-u1-user-console @ cded653（6 页 v2 + 壳导航扩展，vitest 147/147、Playwright 45/45）；剩余 U1-2 路由正式化 + 旧 TDesign 用户面清理 + e2e 断言迁移）
+- Goal status: `IN_PROGRESS`（2026-09-03；U1-2 待做：路由正式化 / 并行开关拆除 / 旧页与 spec 清理 / e2e baseline 用户面断言迁移；预览入口 http://localhost:4174（preview 服务仍在跑，serve U1 分支最新代码）或前端 dev 5173 需合并后重启）
 - Last updated: `2026-09-03 CST`
 ## 会话交接点 2026-09-03 — UI 专项 U0 待验收（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；U0 验收通过前暂停功能 backlog）
 

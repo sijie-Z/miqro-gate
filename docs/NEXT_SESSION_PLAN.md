@@ -81,7 +81,7 @@
 
 - [x] U0 前置：PR #131 收尾（2026-09-03 已完成：CI 曾红一次——KeysView onboarding spec 缺 listVirtualKeys 默认 stub，修复重推后全绿 → squash merge → develop 80dddad，见 progress.md 顶部）
 - [~] U0 设计语言抽取 + ui/ 组件首批 + 试点 4 页（Login/Keys/Usage/AdminUsers）+ 视觉评审 —— **代码与测试完成，等待用户点验（见文末视觉评审记录；评分中位 ~7-7.5 未达 9，因评审器噪声大已停止逐轮追分；分支 goal/ui-posthog-u0 @ 803f552 已 push，PR 待开/已开）**
-- [ ] U1 用户面全量切换 + 并行开关拆除
+- [~] U1 用户面切换 —— **U1-1 完成**（6 页 v2：总览/我的 Key/用量/技能库/模型申请/资料；分支 goal/ui-u1-user-console @ cded653，vitest 147/147、e2e 45/45、首轮评审 overview 8.5）；**剩余 U1-2**：路由正式化（/app/* 用户面与 /login 指到 v2、/app-new 并行开关拆除、旧 TDesign 用户页/spec 清理、e2e baseline 用户面断言迁移）
 - [ ] U2 管理面三组逐批切换
 - [ ] U3 收尾：无 TDesign 残留 / 审计规则迁移 / e2e / chunk 对比
 - [ ] 功能 1：F11 MCP 路由规则
