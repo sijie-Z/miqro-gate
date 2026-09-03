@@ -25,6 +25,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - **模型审批 Webhook 通知**（F03，V27）：告警框架新增三个**事件驱动**规则类型 `MODEL_APPROVAL_SUBMITTED/APPROVED/REJECTED`——审批提交/通过/驳回瞬间即时触发（非周期评估），复用同一签名投递/指数退避重试；payload 带审批明细（approvalId/申请人/Key/模型/理由/意见/autoApproved，纯元数据）；白名单自动批准一次提交触发双事件；投递原语抽取为共享 `AlertEventDispatcher`（评估器与审批流共用）；前端告警规则页三类型选项（事件型隐藏阈值/去重输入）。
 - **用户自助配额可见性**（F04）：`GET /api/v1/me/quota-rules`——调用者名下 USER 作用域配额规则 + 当前窗口实时水位（含模板自动规则，停用仍可见），只读不分页、其他作用域绝不出现；前端用量页「我的配额」面板（维度/限额/本期用量/水位条/状态徽标，空态提示）。
 - **过期记录定时 GC**（F06）：定时回收（`MIQROKEY_CLEANUP_EXPIRED_SWEEP_MS` 默认 1h）下载窗口已过的导出产物（`SUCCEEDED` 超 `expires_at` 连同 `file_bytes` 删除，FAILED/PENDING 保留查看）与确认窗口已过的删除请求（PENDING_CONFIRMATION/CONFIRMED/EXPIRED 删除，**EXECUTED 永久保留**——执行审计）。
+- **usage 队列饱和应急直写**（F35，architecture §5）：`MIQROKEY_GATEWAY_QUEUE_SATURATION_MODE` 默认 `DROP`（行为不变）；置 `WRITE_THROUGH` 时队列满的事件经专用 writer 执行器单条幂等直写、发布线程有界等待（`MIQROKEY_GATEWAY_QUEUE_WRITE_THROUGH_TIMEOUT` 默认 5s）——审计完整性优先，JDBC 仍只在 writer 执行器，超时/失败照旧计数丢弃、发布线程永不无限阻塞。
 - 全局修复：请求体 JSON 解析失败统一 `400 PARAM_INVALID`（含字段名提示，此前 500）。
 
 ### G8.x — 平台中间件 P0/P1（外部系统通道与预算告警）

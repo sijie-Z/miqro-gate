@@ -69,7 +69,7 @@
 
 | ID | 功能 | 出处 | 清晰度 | 状态 | 前置/依赖 | 架子与要点 |
 |---|---|---|---|---|---|---|
-| F35 | usage 队列饱和切换同步写入（应急模式） | architecture §5 | 清晰 | PLANNED | 无 | 现 drop→warn+重入队；加同步写入开关保护审计完整性 |
+| F35 | usage 队列饱和切换同步写入（应急模式） | architecture §5 | 清晰 | DONE（2026-09-03） | 无 | 交付见 progress「usage 队列饱和应急直写」：`saturation-mode=WRITE_THROUGH`（默认 DROP 行为不变）+ `write-through-timeout`（默认 5s）；单事件经 writer 执行器幂等直写并有界等待，JDBC 仍只在 writer 执行器 |
 | F36 | 阿里云 Higress 文档体系系统对照研究 | progress 候选 4 | —（研究型） | DEFERRED | 用户定方向 | 腾讯 30 篇已入库；阿里对照补全后更新本表 |
 | F37 | 多实例/K8s 演进（Helm、NOTIFY 放大语义、副本） | roadmap；deployment §10；ADR-0005 | 部分 | DEFERRED | 部署形态决策 | 无状态化/Secret 外注已预留；Redis 经 SPI 引入点为 ADR-0005 |
 | F38 | OIDC/LDAP 认证、云 KMS、OpenTelemetry、细粒度项目角色 | roadmap 后续版本 | 部分 | DEFERRED | 各自形态决策 | KeyEncryptionProvider 已留 KMS 锚点 |
