@@ -6,13 +6,13 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `F09 OpenAPI 3.1 生成 + CI 破坏性变更检查`（api-contract §8 契约收尾）— `DONE`（PR #129 已合并）
-- Goal status: `DONE`（本会话 2026-09-03；#122–#129 全部合并入 develop dd81371）
+- Current goal: `F05 管理门户 IP 白名单`（security §6）— `DONE`
+- Goal status: `DONE`（本会话 2026-09-03；#122–#129 已并入 develop，F05 PR 待合并）
 - Last updated: `2026-09-03 CST`
-- Branch: `goal/openapi-spec`（已合并）；develop @ dd81371，工作区清洁
-- 会话交付链（#122–#129，8 连发）：MCP ACL → F24 → F03 → F04 → F06 → F02 盘点 → F35 → F09
-- 下一步候选：A 组剩 **F01 MCP 代理接线**（需先定 SSE/Streamable HTTP 传输实现）→ **F05 管理门户 IP 白名单**核对（TBD）→ 前端 OpenAPI codegen 迁移（发布前候选，document-map §3）
-- **教训（本会话）**：建分支命令若 `git pull && git switch -c` 因网络失败整链中断会静默留在 develop 上提交——提交前先 `git branch --show-current` 复核；本地误提交用 `git branch -f` 移回原位即可（未 push 无碍）
+- Branch: `goal/admin-ip-allowlist`（验证后 push + PR）
+- 会话交付链（#122–#129 + F05）：MCP ACL → F24 → F03 → F04 → F06 → F02 盘点 → F35 → F09 → F05
+- 下一步候选：A 组剩 **F01 MCP 代理接线**（需先定 SSE/Streamable HTTP 传输实现；用户已明确与公司 slurm MCP/Forge 积分集成一并暂缓）→ B 组 F11（路由规则，可配置面先行）→ 前端 OpenAPI codegen 迁移（发布前候选）
+- **教训（本会话）**：① 建分支命令若 `git pull && git switch -c` 因网络失败整链中断会静默留在 develop 上提交——提交前先 `git branch --show-current` 复核；本地误提交用 `git branch -f` 移回原位（未 push 无碍）。② 新集成测试 setUp 必须含 bootstrap 后改密步骤（其他测试同款流程），否则换 remote 地址的用例全 401
 
 ## F09 OpenAPI 3.1 生成 + CI 破坏性变更检查 — api-contract §8（2026-09-03，DONE）
 
@@ -26,7 +26,27 @@
 - **文档**：api-contract §8（实现态 + 前端手写取舍）；document-map §3；release-checklist（§0 OpenAPI 行 ⏳→✅ + §7 交付物更新）；configuration-reference（§8 端点说明）；CHANGELOG；feature-backlog F09 → DONE；progress。
 - **gitflow**：分支 `goal/openapi-spec`（基于 develop a97ce7e/#128 后）。
 
+## F05 管理门户 IP 白名单 — security §6（2026-09-03，DONE）
+
+- **背景与方向**：#129（OpenAPI）合并后按候选顺序做 F05（TBD → 核对后立项）。核对发现：全后端**无任何** IP 过滤/转发头基建（`MIQROKEY_TRUSTED_PROXY_CIDRS` 仅为文档行、无实现——已顺手标注"预留未实现"防误用）。security §6 规格"管理门户支持配置 IP 白名单"需全新实现。
+- **设计决策（记录）**：白名单 opt-in（默认空 = 不限制，防运维锁死）；**豁免** `/api/v1/billing/**`（外部系统 API Key/JWT 通道——白名单语义是"人用浏览器管门户"，机器通道走自己的凭证）与 `/api/v1/auth/bootstrap`（一次性引导）；反代场景必须可信 XFF——只有直连对端 ∈ `trusted-proxies` 时才采纳 `X-Forwarded-For` 最左地址（直连攻击者无法伪造头绕过）；非法 CIDR 启动失败（fail-fast）。
+- **后端**：`IpCidrMatcher`（security 包纯函数：v4/v6 网络位比较、族不匹配拒、解析失败抛 IllegalArgument）；`AdminIpAllowlistFilter`（OncePerRequestFilter：空名单放行 → 豁免路径 → XFF 可信解析 → allowlist 匹配 → 403 ProblemDetails `IP_NOT_ALLOWED`+requestId，与 ORIGIN_REJECTED 同形）；`AdminAccessProperties`（`miqrokey.control.admin-access` ip-allowlist/trusted-proxies，@DefaultValue 空）；SecurityConfig 装配：matcher 解析在 bean（启动期校验）+ FilterRegistrationBean order -110（SessionFilter -100 之前 fail-fast，注册 /api/*）。
+- **验证（全部真实 PASS）**：`IpCidrMatcherTest` 5/5（/24 成员、/32 与 /0、IPv6 /64 与压缩、解析校验矩阵、非法候选）；`AdminIpAllowlistApiIntegrationTest` 3/3（名单内 127.0.0.1 与 198.51.100.9 放行 / 名单外 203.0.113.5 → 403 IP_NOT_ALLOWED；bootstrap 与 billing 豁免——重复 bootstrap 由**业务层** 401 而非 IP 403；可信代理 XFF 采纳 / 非可信直连伪造 XFF 仍 403 / 可信代理转发名单外客户 403）；空名单行为由全量既有测试回归（默认不启用）；后端全量 `verify -P integration` **BUILD SUCCESS 0 failures**（control-plane 389 = 381+8）。
+- **排障记录**：① 集成测试首轮全 401——setUp 漏了 bootstrap 后改密步骤（must_change_password 会话被拒），补 PasswordChangeRequest 后通过；② exemptions 里"异地重复 bootstrap"断言 201 → 实际业务层拒绝 401（该 401 恰证明豁免生效），断言改为 isUnauthorized 并注释。
+- **文档**：security §6（实现语义/豁免/防伪造）；configuration-reference 两新行 + `MIQROKEY_TRUSTED_PROXY_CIDRS` 标注预留未实现；api-contract §4.8 错误码表 + `IP_NOT_ALLOWED`；CHANGELOG；feature-backlog F05 → DONE（F40 推理 API IP 限制仍远期）；progress。
+- **gitflow**：分支 `goal/admin-ip-allowlist`（基于 develop 1f454d5）。
+
 ## F35 usage 队列饱和应急直写 — architecture §5（2026-09-03，DONE）
+
+## F05 管理门户 IP 白名单 — security §6（2026-09-03，DONE）
+
+- **背景与方向**：#129（OpenAPI）合并后按候选顺序做 F05（TBD → 核对后立项）。核对发现：全后端**无任何** IP 过滤/转发头基建（`MIQROKEY_TRUSTED_PROXY_CIDRS` 仅为文档行、无实现——已顺手标注"预留未实现"防误用）。security §6 规格"管理门户支持配置 IP 白名单"需全新实现。
+- **设计决策（记录）**：白名单 opt-in（默认空 = 不限制，防运维锁死）；**豁免** `/api/v1/billing/**`（外部系统 API Key/JWT 通道——白名单语义是"人用浏览器管门户"，机器通道走自己的凭证）与 `/api/v1/auth/bootstrap`（一次性引导）；反代场景必须可信 XFF——只有直连对端 ∈ `trusted-proxies` 时才采纳 `X-Forwarded-For` 最左地址（直连攻击者无法伪造头绕过）；非法 CIDR 启动失败（fail-fast）。
+- **后端**：`IpCidrMatcher`（security 包纯函数：v4/v6 网络位比较、族不匹配拒、解析失败抛 IllegalArgument）；`AdminIpAllowlistFilter`（OncePerRequestFilter：空名单放行 → 豁免路径 → XFF 可信解析 → allowlist 匹配 → 403 ProblemDetails `IP_NOT_ALLOWED`+requestId，与 ORIGIN_REJECTED 同形）；`AdminAccessProperties`（`miqrokey.control.admin-access` ip-allowlist/trusted-proxies，@DefaultValue 空）；SecurityConfig 装配：matcher 解析在 bean（启动期校验）+ FilterRegistrationBean order -110（SessionFilter -100 之前 fail-fast，注册 /api/*）。
+- **验证（全部真实 PASS）**：`IpCidrMatcherTest` 5/5（/24 成员、/32 与 /0、IPv6 /64 与压缩、解析校验矩阵、非法候选）；`AdminIpAllowlistApiIntegrationTest` 3/3（名单内 127.0.0.1 与 198.51.100.9 放行 / 名单外 203.0.113.5 → 403 IP_NOT_ALLOWED；bootstrap 与 billing 豁免——重复 bootstrap 由**业务层** 401 而非 IP 403；可信代理 XFF 采纳 / 非可信直连伪造 XFF 仍 403 / 可信代理转发名单外客户 403）；空名单行为由全量既有测试回归（默认不启用）；后端全量 `verify -P integration` **BUILD SUCCESS 0 failures**（control-plane 389 = 381+8）。
+- **排障记录**：① 集成测试首轮全 401——setUp 漏了 bootstrap 后改密步骤（must_change_password 会话被拒），补 PasswordChangeRequest 后通过；② exemptions 里"异地重复 bootstrap"断言 201 → 实际业务层拒绝 401（该 401 恰证明豁免生效），断言改为 isUnauthorized 并注释。
+- **文档**：security §6（实现语义/豁免/防伪造）；configuration-reference 两新行 + `MIQROKEY_TRUSTED_PROXY_CIDRS` 标注预留未实现；api-contract §4.8 错误码表 + `IP_NOT_ALLOWED`；CHANGELOG；feature-backlog F05 → DONE（F40 推理 API IP 限制仍远期）；progress。
+- **gitflow**：分支 `goal/admin-ip-allowlist`（基于 develop 1f454d5）。
 
 ## F35 usage 队列饱和应急直写 — architecture §5（2026-09-03，DONE）
 

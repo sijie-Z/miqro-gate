@@ -61,7 +61,7 @@
 - 生产环境只通过 HTTPS 暴露。
 - 容器端口仅位于 Compose 内部网络，由 Nginx、Caddy 或客户现有入口终止 TLS。
 - 本地开发允许 `localhost` HTTP。
-- 管理门户支持配置 IP 白名单。
+- 管理门户支持配置 IP 白名单（F05 已实现）：`miqrokey.control.admin-access.ip-allowlist`（CIDR 列表，空 = 不限制）。配置后门户面（会话 UI/API）仅名单内来源可访问，其余 403 `IP_NOT_ALLOWED`；`/api/v1/billing/**` 外部系统通道与 `/api/v1/auth/bootstrap` 一次性引导豁免（IP 名单语义是"人用浏览器管门户"，机器通道走自己的凭证体系）。反代部署配 `...trusted-proxies`（CIDR）：只有来自受信代理的 `X-Forwarded-For` 被采纳，直连来源无法伪造头绕过。非法 CIDR 配置导致启动失败。
 - 推理 API 默认不限制来源 IP，以免影响远程开发；可作为后续可选策略。
 - 上游目标主机只能来自签名供应商目录，禁止用户输入任意 URL，防止 SSRF。
 - 所有上游目标经 `UpstreamTargetValidator`（G2.6）双重门控后才会建立连接：
