@@ -6,11 +6,11 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `F35 usage 队列饱和应急直写`（feature-backlog F 组/architecture §5）— `DONE`（PR #128 待合并）
-- Goal status: `DONE`（本会话 2026-09-03；#122–#127 已并入 develop）
+- Current goal: `F35 usage 队列饱和应急直写`（feature-backlog F 组/architecture §5）— `DONE`（PR #128 已合并）
+- Goal status: `DONE`（本会话 2026-09-03；#122–#128 全部合并入 develop f663fb8）
 - Last updated: `2026-09-03 CST`
-- Branch: `goal/usage-queue-emergency-write`（基于 develop 含 #127；验证后 push + PR）
-- 会话交付链（#122–#128）：MCP ACL → F24 默认配额模板 → F03 审批 Webhook 通知 → F04 用户自助配额可见性 → F06 过期记录 GC → F02 盘点核对（含端到端语义键契约补全）→ F35 队列饱和应急直写
+- Branch: `goal/usage-queue-emergency-write`（已合并）；develop @ f663fb8，工作区清洁
+- 会话交付链（#122–#128，7 连发）：MCP ACL 合并恢复 → F24 默认配额模板 → F03 审批 Webhook 通知 → F04 用户自助配额可见性 → F06 过期记录 GC → F02 盘点核对（含端到端语义键契约补全）→ F35 队列饱和应急直写
 - 下一步候选：A 组剩余 **F09 OpenAPI 3.1 生成 + CI 破坏性变更检查**（发布前补项）→ F01 MCP 代理接线（需先定传输实现）→ F05 管理门户 IP 白名单核对（TBD）
 
 ## F35 usage 队列饱和应急直写 — architecture §5（2026-09-03，DONE）
