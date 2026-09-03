@@ -287,6 +287,7 @@
 
 | code | HTTP | 场景 |
 |---|---|---|
+| `IP_NOT_ALLOWED` | 403 | 来源 IP 不在管理门户白名单（F05：`miqrokey.control.admin-access.ip-allowlist`；billing 通道与 bootstrap 豁免） |
 | `PROJECT_NOT_FOUND` | 404 | 项目不存在 |
 | `PROJECT_MEMBERSHIP_REQUIRED` | 403 | 当前用户不是项目成员 |
 | `PROJECT_INACTIVE` | 409 | 项目已停用 |

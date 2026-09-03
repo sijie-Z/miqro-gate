@@ -121,7 +121,7 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_MAX_CONTROL_BODY_BYTES` | `1MB` | 管理 API body 上限 |
 | `MIQROKEY_MAX_PROXY_BUFFER_BYTES` | `256KB` | 只限制必要解析缓冲，不聚合完整响应 |
 | `MIQROKEY_MAX_CONCURRENT_STREAMS` | `50` | 首版容量目标；不是用户限流策略 |
-| `MIQROKEY_TRUSTED_PROXY_CIDRS` | 空 | 仅从这些代理接受 forwarded headers |
+| `MIQROKEY_TRUSTED_PROXY_CIDRS` | 空 | （**预留未实现**：数据面无 forwarded-header 消费方，见 F05 的 control-plane 对等配置 `MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES`） |
 | `MIQROKEY_UPSTREAM_ALLOWED_CIDRS` | 空 | SSRF 门控 allowlist（G2.6）：命中这些 CIDR 的目标豁免「非公网地址」与「明文 http」两道拒绝（`127.0.0.0/8, ::1/128` 用于本地自建模型）；空 = 仅接受 https + 公网地址；`userinfo` URL 永不豁免 |
 | `MIQROKEY_UPSTREAM_FOLLOW_REDIRECTS` | `false` | 重定向跟随硬编码禁用（G2.6：防止 30x 把已通过 SSRF 校验的目标重定向到任意地址）；当前版本不可配置 |
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_CONNECT_TIMEOUT` | `10s` | 控制面 → 供应商调用的 TCP 连接超时（G3.1，`ProviderClient`） |
@@ -131,6 +131,8 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_CLEANUP_EXPIRED_SWEEP_MS` | `3600000` | 过期记录 GC 固定延迟（F06，`@Scheduled`）：回收下载窗口已过的导出产物与确认窗口已过的删除请求（EXECUTED 删除记录与审计链永久保留，不入 GC） |
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_ALLOWED_CIDRS` | 空 | 控制面 → 供应商调用的 SSRF 门控 allowlist（G4.2）：命中这些 CIDR 的目标豁免「非公网地址」与「明文 http」两道拒绝（配额刷新对接本地/内网供应商网关时配置，如 `127.0.0.0/8`）；空 = 仅接受 https + 公网地址 |
 | `MIQROKEY_APPROVAL_WHITELIST_MODELS` | 空 | 模型审批白名单（逗号分隔的精确模型 ID）：用户申请命中白名单即自动批准并立即生效（写入授权 + 快照刷新），免管理员审批；空 = 全部模型走人工审批 |
+| `MIQROKEY_CONTROL_ADMIN_IP_ALLOWLIST` | 空 | 管理门户来源 IP 白名单（F05，security §6，CIDR 逗号分隔如 `10.0.0.0/8,203.0.113.0/24`）：空 = 不限制（历史行为）；配置后门户面仅名单内来源可达（403 IP_NOT_ALLOWED），billing 通道与 bootstrap 豁免；非法 CIDR 启动失败 |
+| `MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES` | 空 | 受信反向代理 CIDR（F05）：只有来自这些代理的 `X-Forwarded-For` 被采纳为真实客户端地址——直连来源无法伪造头绕过白名单 |
 
 `MIQROKEY_MAX_CONCURRENT_STREAMS` 是保护实例稳定性的容量边界，不是按用户/团队配额。达到物理上限时返回明确的 `503 CAPACITY_EXHAUSTED` 并告警。
 
