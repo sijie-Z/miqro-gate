@@ -13,7 +13,6 @@ import {
   UiButton,
   UiDialog,
   UiDrawer,
-  UiInput,
   UiSelect,
   UiStatusBadge,
   UiTable,
