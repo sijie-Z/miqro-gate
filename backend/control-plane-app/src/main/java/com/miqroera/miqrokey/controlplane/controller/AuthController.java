@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapResponse;
 import com.miqroera.miqrokey.controlplane.dto.CsrfResponse;
 import com.miqroera.miqrokey.controlplane.dto.LoginRequest;
+import com.miqroera.miqrokey.controlplane.dto.RegisterRequest;
 import com.miqroera.miqrokey.controlplane.dto.LoginResponse;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import com.miqroera.miqrokey.controlplane.dto.UserResponse;
@@ -95,6 +96,25 @@ public class AuthController {
         } catch (AuthenticationException e) {
             return problemResponse(401, "UNAUTHORIZED", "Bootstrap failed", e.getMessage(), requestId);
         }
+    }
+
+    /**
+     * Open self-registration (F-REG): creates a USER account and logs it in with
+     * the same session cookies as /login. Disabled by configuration returns 403
+     * REGISTRATION_DISABLED. PUBLIC (no session/CSRF required) — the endpoint is in
+     * the SessionFilter public list and the CSRF exemption set.
+     */
+    @PostMapping("/register")
+    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest httpReq,
+            HttpServletResponse httpRes) {
+        String requestId = resolveRequestId(httpReq);
+        AuthenticationService.RegisterResult result = authenticationService.register(request.username(),
+                request.displayName(), request.password(), requestId);
+        sessionService.setCookies(httpRes, result.tokens(), result.sessionExpires());
+        User u = result.user();
+        LoginResponse resp = new LoginResponse(u.id().toString(), u.username(), u.displayName(), u.role().name(),
+                u.mustChangePassword(), result.sessionExpires());
+        return ResponseEntity.status(HttpStatus.CREATED).body(resp);
     }
 
     @PostMapping("/logout")

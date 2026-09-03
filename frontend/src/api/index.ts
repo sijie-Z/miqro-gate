@@ -64,6 +64,10 @@ export function login(username: string, password: string): Promise<LoginResponse
   return post<LoginResponse>('/api/v1/auth/login', { username, password });
 }
 
+export function register(username: string, displayName: string | undefined, password: string): Promise<LoginResponse> {
+  return post<LoginResponse>('/api/v1/auth/register', { username, displayName, password });
+}
+
 export function logout(): Promise<void> {
   return post<void>('/api/v1/auth/logout');
 }

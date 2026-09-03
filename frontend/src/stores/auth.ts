@@ -41,6 +41,20 @@ export const useAuthStore = defineStore('auth', () => {
     loaded.value = true;
   }
 
+  async function register(username: string, displayName: string | undefined, password: string): Promise<void> {
+    const response = await api.register(username, displayName, password);
+    user.value = {
+      id: response.id,
+      username: response.username,
+      displayName: response.displayName,
+      role: response.role,
+      status: 'ACTIVE',
+      mustChangePassword: response.mustChangePassword,
+      sessionExpiresAt: response.sessionExpiresAt,
+    };
+    loaded.value = true;
+  }
+
   async function logout(): Promise<void> {
     try {
       await api.logout();
@@ -66,6 +80,7 @@ export const useAuthStore = defineStore('auth', () => {
     mustChangePassword,
     fetchMe,
     login,
+    register,
     logout,
     changePassword,
   };

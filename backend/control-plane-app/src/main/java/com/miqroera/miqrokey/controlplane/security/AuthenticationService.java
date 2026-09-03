@@ -7,6 +7,7 @@ import com.miqroera.miqrokey.domain.model.UserStatus;
 import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import com.miqroera.miqrokey.domain.service.PasswordHasher;
+import com.miqroera.miqrokey.controlplane.service.ApiException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
@@ -279,6 +280,49 @@ public class AuthenticationService {
         return new BootstrapResult(sanitizeUser(admin), temporaryPassword, tokens, sessionExpires);
     }
 
+    /**
+     * Open self-registration (F-REG): anyone may create a USER account when
+     * registration is enabled. The tenant row lock serializes concurrent
+     * registrations so duplicate usernames resolve deterministically. The caller is
+     * authenticated immediately — same cookies as a login.
+     */
+    @Transactional
+    public RegisterResult register(String username, String displayName, String password, String requestId) {
+        if (!authProperties.isRegistrationEnabled()) {
+            throw new ApiException(org.springframework.http.HttpStatus.FORBIDDEN, "REGISTRATION_DISABLED",
+                    "Self-registration is disabled by configuration");
+        }
+        if (username == null || username.isBlank() || username.length() > 128) {
+            throw new ApiException(org.springframework.http.HttpStatus.BAD_REQUEST, "USERNAME_INVALID",
+                    "username is required (<= 128 chars)");
+        }
+        String normalizedName = displayName == null || displayName.isBlank() ? username : displayName;
+        try {
+            validatePasswordPolicy(password);
+            if (isCommonPassword(password)) {
+                throw new AuthenticationException("That password is too common. Please choose a different one.");
+            }
+        } catch (AuthenticationException e) {
+            throw new ApiException(org.springframework.http.HttpStatus.BAD_REQUEST, "PASSWORD_INVALID", e.getMessage());
+        }
+
+        userRepository.lockTenantForBootstrap(SEED_TENANT_ID);
+        if (userRepository.findByTenantIdAndUsername(SEED_TENANT_ID, username).isPresent()) {
+            throw new ApiException(org.springframework.http.HttpStatus.CONFLICT, "USERNAME_TAKEN",
+                    "username already exists");
+        }
+        Instant now = Instant.now();
+        User user = new User(UUID.randomUUID(), SEED_TENANT_ID, username, normalizedName, passwordHasher.hash(password),
+                UserRole.USER, UserStatus.ACTIVE, false, 0, null, null, 0, now, now);
+        userRepository.insert(user);
+        SessionToken tokens = sessionService.createSession(user);
+        Instant sessionExpires = now.plus(authProperties.getSessionAbsoluteTimeout());
+        auditService.record(SEED_TENANT_ID, user.id(), "REGISTER", "USER", user.id(), buildSummary(username),
+                requestId);
+        LOG.info("User {} self-registered", username);
+        return new RegisterResult(user, tokens, sessionExpires);
+    }
+
     @Transactional
     public void changePassword(User currentUser, UUID currentSessionId, String currentPassword, String newPassword,
             String requestId) {
@@ -473,5 +517,9 @@ public class AuthenticationService {
     public record LoginResult(UserView user, SessionToken tokens, Instant sessionExpires) {
     }
     public record BootstrapResult(User user, String temporaryPassword, SessionToken tokens, Instant sessionExpires) {
+    }
+
+    /** Result of a successful self-registration: the new user plus live cookies. */
+    public record RegisterResult(User user, SessionToken tokens, Instant sessionExpires) {
     }
 }

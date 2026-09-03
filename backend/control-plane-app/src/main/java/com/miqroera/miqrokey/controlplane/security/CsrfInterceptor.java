@@ -27,7 +27,8 @@ public class CsrfInterceptor implements HandlerInterceptor {
     private static final Set<String> STATE_CHANGING_METHODS = Set.of("POST", "PUT", "PATCH", "DELETE");
 
     /** Public paths exempt from CSRF (login, bootstrap). */
-    private static final Set<String> CSRF_EXEMPT = Set.of("/api/v1/auth/login", "/api/v1/auth/bootstrap");
+    private static final Set<String> CSRF_EXEMPT = Set.of("/api/v1/auth/login", "/api/v1/auth/bootstrap",
+            "/api/v1/auth/register");
 
     private final SessionService sessionService;
     private final UserContext userContext;
