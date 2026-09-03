@@ -108,6 +108,11 @@ describe('KeysView', () => {
     // resetAllMocks clears implementations too — a previous test's
     // mockResolvedValue must not leak into the next test.
     vi.resetAllMocks();
+    // KeysView loads keys and grants together on mount. Tests that only vary
+    // the grants shape (onboarding cases) rely on a stable keys default —
+    // leaving listVirtualKeys unstubbed makes load() assign undefined and the
+    // next render throws reading `keys.length`.
+    mockApi.listVirtualKeys.mockResolvedValue([]);
     // Closed t-select poppers stay teleported in <body>; drop leftovers so
     // option lookups only see the current test's dropdown.
     document.body.innerHTML = '';
