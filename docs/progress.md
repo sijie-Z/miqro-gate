@@ -6,14 +6,15 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `UI 专项 U0 — PostHog 设计语言 + ui/ 组件首批 + 试点 4 页` — `IN_PROGRESS`（分支 goal/ui-posthog-u0）
-- Goal status: `IN_PROGRESS`（2026-09-03）
+- Current goal: `UI 专项 U0 — PostHog 设计语言 + ui/ 组件首批 + 试点 4 页` — `AWAITING_USER_ACCEPTANCE`（分支 goal/ui-posthog-u0 @ 803f552 已 push、PR 待用户查看；代码+测试完成并全绿，视觉评审中位 ~7-7.5 未达 9 → 停止逐轮追分，等用户真机点验后决定 U1 或调整方向）
+- Goal status: `AWAITING_USER_ACCEPTANCE`（2026-09-03；vitest 27 文件 135/135、e2e 41/41 全绿；评审档案与截图在 miqro-local/ui-reviews/，含 U0-VISION-SCORES.md 与每轮 raw；预览入口见 NEXT_SESSION_PLAN 状态段）
 - Last updated: `2026-09-03 CST`
-- 本地试跑环境（**非仓库内容**）：control-plane(8080)/gateway(8081)/frontend dev(5173) 均在跑且健康（200/200/200）；管理员 root/DrillPass2026!；DeepSeek key 在 miqro-local/.deepseek-key.tmp（不入库、已建议轮换）；PostHog 设计 token 源与换算归档在 miqro-local/posthog-design-ref/（不入库，含 EXTRACTION-NOTES.md）
-- **下一会话启动必读**：`docs/NEXT_SESSION_PLAN.md`（分阶段执行计划：PR #131 收尾 ✓ → PostHog 自绘 UI 专项 U0-U3 → 功能候选；含验收/评审/环境备忘/状态段）
-- **会话交接点（UI 专项在途，见下段）**——本段为后续 session 的执行清单
+## 会话交接点 2026-09-03 — UI 专项 U0 待验收（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；U0 验收通过前暂停功能 backlog）
 
-## 会话交接点 2026-09-03 — UI 专项 U0 在途（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；UI 专项 U0 验收通过前暂停功能 backlog）
+### U0 待办（下一动作，只等用户）
+1. **用户真机点验**：http://localhost:5173/login-new 与 /app-new/{keys,usage,users}（登录 root/DrillPass2026!；旧版对照 /login、/app/*）。
+2. 点头 → U1；否定 → 停下问方向（不改设计母版）。验收材料：miqro-local/ui-reviews/（截图 + U0-VISION-SCORES.md + 每轮 raw 评审）。
+3. 合并（用户点头后）：CI 全绿 → squash merge goal/ui-posthog-u0 → 删分支 → 同步 develop（分支已 push @ 803f552）。
 
 ### PR #131 收尾记录（2026-09-03）
 - CI 曾红（Frontend job）：KeysView onboarding 用例只 stub myGrants、resetAllMocks 后 listVirtualKeys 无默认 → keys.value=undefined → 模板 keys.length 渲染抛错（本地 108/108 曾因异步时序侥幸通过）。修复：beforeEach 默认 stub `listVirtualKeys→[]`（commit 149f1cd）+ 顺带 eslint 格式漂移对齐 3 文件（32067d7，dabaae4 后未再跑 lint）。

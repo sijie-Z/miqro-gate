@@ -80,7 +80,7 @@
 ## 状态段（每阶段更新）
 
 - [x] U0 前置：PR #131 收尾（2026-09-03 已完成：CI 曾红一次——KeysView onboarding spec 缺 listVirtualKeys 默认 stub，修复重推后全绿 → squash merge → develop 80dddad，见 progress.md 顶部）
-- [ ] U0 设计语言抽取 + ui/ 组件首批 + 试点 4 页（Login/Keys/Usage/AdminUsers）+ 视觉 ≥9 验收
+- [~] U0 设计语言抽取 + ui/ 组件首批 + 试点 4 页（Login/Keys/Usage/AdminUsers）+ 视觉评审 —— **代码与测试完成，等待用户点验（见文末视觉评审记录；评分中位 ~7-7.5 未达 9，因评审器噪声大已停止逐轮追分；分支 goal/ui-posthog-u0 @ 803f552 已 push，PR 待开/已开）**
 - [ ] U1 用户面全量切换 + 并行开关拆除
 - [ ] U2 管理面三组逐批切换
 - [ ] U3 收尾：无 TDesign 残留 / 审计规则迁移 / e2e / chunk 对比
@@ -88,3 +88,12 @@
 - [ ] 功能 2：管理员快捷加入项目
 - [ ] 功能 3：注册用户闭环演示
 - [ ] 功能 4：OpenAPI codegen 迁移（发布前）
+
+## 视觉评审记录（U0，2026-09-03；raw 存档 miqro-local/ui-reviews/，见 U0-VISION-SCORES.md）
+
+- 方法：Playwright mock 截图（1440x900，fullPage）→ deepseek-v4-flash-vision-exp 评审（SCORE + 中文问题 + NIT）。
+- 历程分（login/keys/usage/users）：R1 6.5/7.8/6.8/— → R2 6.5/6.5/7.5/6.8 → R3 7.6/—/5.7/6.5 → R4 7.8/—/7.1/8.4 → R5 8.2/7.5/5.6/7.5 → R6 6.8/7.0/6.8/6.5 → 终审双票中位 ≈7.2/7.5/6.2/7.2。
+- 结论：目标 ≥9 未达成；评审器噪声大（相邻轮 ±1.5、同一元素意见自相矛盾、静态截图误判 hover/focus 缺失），逐轮追分进入破坏性循环，已停止并以多轮中位数为准；跨轮一致且可落地的意见全部已实施（语义色分离、摘要彩色分段、缓存列纯文本、动态列、紧凑日期、分段控件、顶栏用户区、激活色条、真实数据密度 fixture 等）。
+- 拒绝项（违反审美审计/母版纪律）：渐变条形、卡片投影、紫色调。
+- 残余差距：侧栏试点期仅 2-3 项（U1 填满）；品牌 Logo 待用户拍板资产；usage fullPage 纵向观感。
+- 下一步：用户以真实浏览器点验（preview URL：http://localhost:5173/login-new、/app-new/keys、/app-new/usage、/app-new/users；旧版对照 /login、/app/keys 等）。**用户点头 → U1；否定 → 停下问方向。**
