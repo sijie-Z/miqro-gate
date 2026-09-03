@@ -6,6 +6,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.ComponentScan;
 
 import com.miqroera.miqrokey.controlplane.config.ApprovalProperties;
+import com.miqroera.miqrokey.controlplane.config.AdminAccessProperties;
 import com.miqroera.miqrokey.controlplane.config.AuthProperties;
 
 /**
@@ -19,7 +20,7 @@ import com.miqroera.miqrokey.controlplane.config.AuthProperties;
  */
 @SpringBootApplication
 @ComponentScan("com.miqroera.miqrokey")
-@EnableConfigurationProperties({AuthProperties.class, ApprovalProperties.class})
+@EnableConfigurationProperties({AuthProperties.class, ApprovalProperties.class, AdminAccessProperties.class})
 public class ControlPlaneApplication {
 
     public static void main(String[] args) {

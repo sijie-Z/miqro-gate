@@ -19,6 +19,13 @@ spring:
 
 miqrokey:
   control:
+    admin-access:
+      # 管理门户来源 IP 白名单（F05，security §6）：空 = 不限制（历史行为）。
+      # 配置后仅名单内地址可访问门户面（/api/v1/billing/** 外部通道与
+      # /api/v1/auth/bootstrap 引导豁免）。反代部署时 trusted-proxies 列出
+      # 受信代理 CIDR，只有来自它们的 X-Forwarded-For 才被采纳。
+      ip-allowlist: ${MIQROKEY_CONTROL_ADMIN_IP_ALLOWLIST:}
+      trusted-proxies: ${MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES:}
     provider-client:
       # Bounds for control-plane provider calls (G3.1): connect timeout,
       # overall request deadline, single-response body cap.
