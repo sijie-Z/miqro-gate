@@ -480,10 +480,7 @@ function formatTime(iso: string): string {
           <div v-for="bar in usageBars" :key="bar.label" class="next-usage__bar-row">
             <span class="next-usage__bar-label" :title="bar.label">{{ bar.label }}</span>
             <div class="next-usage__bar-track">
-              <div
-                class="next-usage__bar-fill"
-                :style="{ width: bar.width, opacity: bar.alpha }"
-              />
+              <div class="next-usage__bar-fill" :style="{ width: bar.width, opacity: bar.alpha }" />
             </div>
             <span class="next-usage__bar-value ui-num">{{ bar.value }}</span>
           </div>

@@ -222,7 +222,7 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
     case 'LOCKED':
       return 'warning';
     default:
-      return 'danger';
+      return 'neutral';
   }
 }
 
@@ -304,7 +304,7 @@ function formatDate(iso?: string): string {
     <section class="ui-panel">
       <div class="ui-panel-head">
         <div class="next-users__head-inline">
-          <h2 class="ui-panel-title">账号</h2>
+          <h2 class="ui-panel-title">账号列表</h2>
           <span class="ui-panel-sub" data-testid="users-summary"
             >共 {{ users.length }} 个账号 · {{ activeCount }} 正常</span
           >

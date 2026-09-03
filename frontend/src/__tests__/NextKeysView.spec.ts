@@ -119,7 +119,14 @@ describe('NextKeysView', () => {
   it('renders masked keys with Chinese statuses, never the plaintext', async () => {
     mockApi.listVirtualKeys.mockResolvedValue([
       key(),
-      key({ id: '0190-0009', name: 'codex-extra', status: 'REVOKED', cachePolicy: 'ENABLED' }),
+      key({
+        id: '0190-0009',
+        name: 'codex-extra',
+        status: 'REVOKED',
+        cachePolicy: 'ENABLED',
+        projectId: 'p2',
+        projectTag: 'tools',
+      }),
     ]);
 
     const wrapper = mountView();

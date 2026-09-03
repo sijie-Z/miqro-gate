@@ -112,17 +112,28 @@ const filteredKeys = computed(() => {
   );
 });
 
-const keySummary = computed(() => {
-  const active = keys.value.filter((k) => k.status === 'ACTIVE').length;
-  const rotating = keys.value.filter((k) => k.status === 'ROTATING').length;
-  const unusual = keys.value.filter(
-    (k) => k.status === 'REVOKED' || k.status === 'DISABLED',
-  ).length;
-  const parts = [`共 ${keys.value.length} 个`];
-  if (active) parts.push(`${active} 可用`);
-  if (rotating) parts.push(`${rotating} 轮换中`);
-  if (unusual) parts.push(`${unusual} 异常`);
-  return parts.join(' · ');
+const keySummary = computed<{ text: string; tone: 'plain' | 'success' | 'warning' | 'danger' }[]>(
+  () => {
+    const active = keys.value.filter((k) => k.status === 'ACTIVE').length;
+    const rotating = keys.value.filter((k) => k.status === 'ROTATING').length;
+    const unusual = keys.value.filter(
+      (k) => k.status === 'REVOKED' || k.status === 'DISABLED',
+    ).length;
+    const parts = [{ text: `共 ${keys.value.length} 个`, tone: 'plain' as const }];
+    if (active) parts.push({ text: `${active} 可用`, tone: 'success' as const });
+    if (rotating) parts.push({ text: `${rotating} 轮换中`, tone: 'warning' as const });
+    if (unusual) parts.push({ text: `${unusual} 异常`, tone: 'danger' as const });
+    return parts;
+  },
+);
+
+/** Hide the project column while every key shares one project. */
+const tableColumns = computed(() => {
+  const distinctProjects = new Set(keys.value.map((k) => k.projectTag));
+  if (distinctProjects.size <= 1 && keys.value.length > 0) {
+    return columns.filter((c) => c.key !== 'projectTag');
+  }
+  return columns;
 });
 
 /** Registered-but-empty account: has the admin joined this account to a project yet? */
@@ -509,7 +520,14 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
       <div class="ui-panel-head next-keys__list-head">
         <div class="next-keys__list-title">
           <h2 class="ui-panel-title">Virtual Key</h2>
-          <span class="ui-panel-sub" data-testid="keys-summary">{{ keySummary }}</span>
+          <span class="ui-panel-sub next-keys__summary" data-testid="keys-summary">
+            <span
+              v-for="part in keySummary"
+              :key="part.text"
+              :class="`next-keys__summary-${part.tone}`"
+              >{{ part.text }}</span
+            >
+          </span>
         </div>
         <UiInput
           v-model="keyFilter"
@@ -519,7 +537,7 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
         />
       </div>
       <UiTable
-        :columns="columns"
+        :columns="tableColumns"
         :data="filteredKeys"
         :loading="loading"
         row-key="id"
@@ -545,10 +563,14 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
           />
         </template>
         <template #cachePolicy="{ row }">
-          <UiStatusBadge
-            :tone="(row as VirtualKeyView).cachePolicy === 'ENABLED' ? 'info' : 'neutral'"
-            :label="(row as VirtualKeyView).cachePolicy === 'ENABLED' ? '开启' : '关闭'"
-          />
+          <span
+            :class="
+              (row as VirtualKeyView).cachePolicy === 'ENABLED'
+                ? 'next-keys__cache next-keys__cache--on'
+                : 'next-keys__cache'
+            "
+            >{{ (row as VirtualKeyView).cachePolicy === 'ENABLED' ? '开启' : '关闭' }}</span
+          >
         </template>
         <template #createdAt="{ row }">{{
           formatDate((row as VirtualKeyView).createdAt)
@@ -854,6 +876,34 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
   display: flex;
   align-items: baseline;
   gap: var(--ui-space-3);
+}
+
+.next-keys__cache {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-neutral-fg);
+}
+
+.next-keys__cache--on {
+  color: var(--ui-primary);
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-keys__summary {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ui-space-3);
+}
+
+.next-keys__summary-success {
+  color: var(--ui-success-fg);
+}
+
+.next-keys__summary-warning {
+  color: var(--ui-warning-fg);
+}
+
+.next-keys__summary-danger {
+  color: var(--ui-danger-fg);
 }
 
 .next-keys__name {

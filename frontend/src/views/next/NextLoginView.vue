@@ -140,7 +140,7 @@ function renderError(error: unknown, fallback: string) {
             label="账号"
             large
             autocomplete="username"
-            placeholder="设置你的登录账号"
+            :placeholder="mode === 'register' ? '设置你的登录账号' : '请输入账号'"
             data-testid="login-username"
           />
           <UiInput
@@ -361,7 +361,7 @@ function renderError(error: unknown, fallback: string) {
 .next-login__form {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--ui-space-6);
 }
 
 .next-login__form :deep(.ui-field) {
@@ -393,7 +393,7 @@ function renderError(error: unknown, fallback: string) {
 
 .next-login__submit {
   width: 100%;
-  margin-top: var(--ui-space-2);
+  margin-top: var(--ui-space-3);
 }
 
 .next-login__foot {
