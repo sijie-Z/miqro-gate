@@ -259,12 +259,11 @@ function renderError(error: unknown, fallback: string) {
   align-items: center;
   justify-content: center;
   padding: var(--ui-space-8) var(--ui-space-4);
-  position: relative;
 }
 
 .next-login__card {
-  width: min(440px, 100%);
-  padding: 40px 40px 36px;
+  width: min(460px, 100%);
+  padding: 44px 44px 40px;
   background: var(--ui-card);
   border: 1px solid var(--ui-border);
   border-radius: var(--ui-radius-dialog);
@@ -298,9 +297,9 @@ function renderError(error: unknown, fallback: string) {
 }
 
 .next-login__subtitle {
-  margin: var(--ui-space-1) 0 0;
-  font-size: var(--ui-font-size-sm);
-  color: var(--ui-foreground-secondary);
+  margin: var(--ui-space-2) 0 0;
+  font-size: var(--ui-font-size-base);
+  color: #56565e;
 }
 
 .next-login__tabs {
@@ -398,11 +397,9 @@ function renderError(error: unknown, fallback: string) {
 }
 
 .next-login__foot {
-  position: absolute;
-  bottom: var(--ui-space-6);
-  left: var(--ui-space-8);
-  margin: 0;
+  margin: var(--ui-space-6) 0 0;
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-faint);
+  text-align: center;
 }
 </style>

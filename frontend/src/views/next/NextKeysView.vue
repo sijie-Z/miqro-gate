@@ -96,7 +96,7 @@ const columns = [
   { key: 'status', title: '状态', width: '110px' },
   { key: 'cachePolicy', title: '缓存', width: '90px' },
   { key: 'createdAt', title: '创建时间', width: '170px', sortable: true },
-  { key: 'actions', title: '', width: '60px', align: 'center' },
+  { key: 'actions', title: '操作', width: '80px', align: 'center' },
 ];
 
 const keyFilter = ref('');
@@ -502,15 +502,15 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
 
     <!-- Key list -->
     <section class="ui-panel">
-      <div class="ui-panel-head">
-        <h2 class="ui-panel-title">Virtual Key</h2>
-      </div>
-      <div class="next-keys__toolbar">
-        <span class="ui-panel-sub" data-testid="keys-summary">{{ keySummary }}</span>
+      <div class="ui-panel-head next-keys__list-head">
+        <div class="next-keys__list-title">
+          <h2 class="ui-panel-title">Virtual Key</h2>
+          <span class="ui-panel-sub" data-testid="keys-summary">{{ keySummary }}</span>
+        </div>
         <UiInput
           v-model="keyFilter"
           placeholder="按名称 / 项目 / Key 前缀过滤"
-          width="260px"
+          width="240px"
           data-testid="keys-filter"
         />
       </div>
@@ -542,7 +542,7 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
         </template>
         <template #cachePolicy="{ row }">
           <UiStatusBadge
-            :tone="(row as VirtualKeyView).cachePolicy === 'ENABLED' ? 'info' : 'neutral'"
+            :tone="(row as VirtualKeyView).cachePolicy === 'ENABLED' ? 'success' : 'neutral'"
             :label="(row as VirtualKeyView).cachePolicy === 'ENABLED' ? '开启' : '关闭'"
           />
         </template>
@@ -842,13 +842,14 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
   grid-column: 1 / -1;
 }
 
-.next-keys__toolbar {
-  display: flex;
+.next-keys__list-head {
   align-items: center;
-  justify-content: space-between;
-  gap: var(--ui-space-4);
-  padding: var(--ui-space-3) var(--ui-space-5);
-  border-bottom: 1px solid var(--ui-border-muted);
+}
+
+.next-keys__list-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ui-space-3);
 }
 
 .next-keys__name {

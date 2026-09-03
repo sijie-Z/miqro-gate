@@ -21,9 +21,9 @@
   /* surfaces — warm neutrals, hue ≈ 75-90, near-zero chroma */
   --ui-background: #f4f3ef; /* canvas — matches PostHog hsl(75 14% 95%) */
   --ui-card: #ffffff;
-  --ui-muted: #f1efea; /* subdued rows / secondary fills */
+  --ui-muted: #efede7; /* subdued rows / secondary fills */
   --ui-chrome: #ecebe6; /* sidebar / toolbar furniture */
-  --ui-fill-hover: rgba(24, 24, 27, 0.045);
+  --ui-fill-hover: rgba(24, 24, 27, 0.055);
   --ui-fill-selected: rgba(24, 24, 27, 0.07);
   --ui-fill-expanded: rgba(24, 24, 27, 0.09);
 
@@ -104,7 +104,7 @@
 
   /* shadows — only popper / dialog / focus affordance */
   --ui-shadow-popper: 0 4px 12px rgba(15, 15, 17, 0.12);
-  --ui-shadow-dialog: 0 12px 40px rgba(15, 15, 17, 0.2);
+  --ui-shadow-dialog: 0 2px 6px rgba(15, 15, 17, 0.04), 0 10px 28px rgba(15, 15, 17, 0.12);
   --ui-shadow-focus: 0 0 0 2px var(--ui-ring);
 
   /* motion — subtle, feedback only */

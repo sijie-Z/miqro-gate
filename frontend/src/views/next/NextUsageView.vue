@@ -297,6 +297,7 @@ function formatTime(iso: string): string {
               >{{ quotaMetricText[rule.metric] }} · {{ quotaPeriodText[rule.period] }}</span
             >
             <UiStatusBadge
+              variant="pill"
               :tone="quotaLevelTone(rule.level, rule.status)"
               :label="rule.status === 'DISABLED' ? '停用' : quotaLevelText[rule.level]"
             />
@@ -417,7 +418,6 @@ function formatTime(iso: string): string {
           </template>
           <template #cacheLevel="{ row }">
             <UiStatusBadge
-              tone="neutral"
               :label="cacheLevelLabel[asRecord(row).cacheLevel] ?? asRecord(row).cacheLevel"
             />
           </template>

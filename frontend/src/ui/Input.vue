@@ -159,7 +159,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .ui-field__input::placeholder {
-  color: var(--ui-foreground-faint);
+  color: color-mix(in srgb, var(--ui-foreground) 36%, transparent);
 }
 
 .ui-field__input:hover:not(:disabled):not(:focus) {

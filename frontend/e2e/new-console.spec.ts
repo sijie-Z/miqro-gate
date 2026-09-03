@@ -70,6 +70,102 @@ const KEYS = [
     createdAt: '2026-08-05T00:00:00Z',
     lastUsedAt: null,
   },
+  {
+    id: '0190-0000-0000-0004',
+    name: 'claude-code-legacy',
+    display: 'mqk_live_…7c21',
+    displayPrefix: 'mqk_live_oldkeyprefix',
+    lastFour: '7c21',
+    purpose: 'CLAUDE_CODE',
+    status: 'ROTATING',
+    cachePolicy: 'DISABLED',
+    projectId: '0190-0000-0000-00a1',
+    projectTag: 'live',
+    modelIds: ['deepseek-v4-flash'],
+    baseUrl: 'https://gateway.test.internal',
+    createdAt: '2026-07-12T00:00:00Z',
+    lastUsedAt: '2026-09-01T12:30:00Z',
+  },
+  {
+    id: '0190-0000-0000-0005',
+    name: 'glm-agent-main',
+    display: 'mqk_live_…90f3',
+    displayPrefix: 'mqk_live_glmagent00',
+    lastFour: '90f3',
+    purpose: 'CUSTOM',
+    status: 'ACTIVE',
+    cachePolicy: 'ENABLED',
+    projectId: '0190-0000-0000-00a1',
+    projectTag: 'live',
+    modelIds: ['glm-5.1'],
+    baseUrl: 'https://gateway.test.internal',
+    createdAt: '2026-08-14T09:15:00Z',
+    lastUsedAt: '2026-09-03T02:05:00Z',
+  },
+  {
+    id: '0190-0000-0000-0006',
+    name: 'desktop-sync',
+    display: 'mqk_live_…4ba9',
+    displayPrefix: 'mqk_live_desktopkey',
+    lastFour: '4ba9',
+    purpose: 'CLAUDE_DESKTOP',
+    status: 'ACTIVE',
+    cachePolicy: 'DISABLED',
+    projectId: '0190-0000-0000-00a1',
+    projectTag: 'live',
+    modelIds: ['deepseek-v4-flash', 'deepseek-v4.1'],
+    baseUrl: 'https://gateway.test.internal',
+    createdAt: '2026-08-20T14:00:00Z',
+    lastUsedAt: '2026-09-02T18:44:00Z',
+  },
+  {
+    id: '0190-0000-0000-0007',
+    name: 'retired-qa-key',
+    display: 'mqk_live_…e08d',
+    displayPrefix: 'mqk_live_retiredqa0',
+    lastFour: 'e08d',
+    purpose: 'CUSTOM',
+    status: 'REVOKED',
+    cachePolicy: 'DISABLED',
+    projectId: '0190-0000-0000-00a1',
+    projectTag: 'live',
+    modelIds: ['deepseek-v4-flash'],
+    baseUrl: 'https://gateway.test.internal',
+    createdAt: '2026-06-01T00:00:00Z',
+    revokedAt: '2026-08-28T00:00:00Z',
+  },
+  {
+    id: '0190-0000-0000-0008',
+    name: 'suspended-tools',
+    display: 'mqk_live_…c5d7',
+    displayPrefix: 'mqk_live_suspended00',
+    lastFour: 'c5d7',
+    purpose: 'CODEX',
+    status: 'DISABLED',
+    cachePolicy: 'DISABLED',
+    projectId: '0190-0000-0000-00a1',
+    projectTag: 'live',
+    modelIds: ['deepseek-v4.1'],
+    baseUrl: 'https://gateway.test.internal',
+    createdAt: '2026-07-30T10:00:00Z',
+    lastUsedAt: '2026-08-25T16:20:00Z',
+  },
+  {
+    id: '0190-0000-0000-000a',
+    name: 'kimi-coding-daily',
+    display: 'mqk_live_…22f6',
+    displayPrefix: 'mqk_live_kimicoding',
+    lastFour: '22f6',
+    purpose: 'CLAUDE_CODE',
+    status: 'ACTIVE',
+    cachePolicy: 'DISABLED',
+    projectId: '0190-0000-0000-00a1',
+    projectTag: 'live',
+    modelIds: ['kimi-k2.5'],
+    baseUrl: 'https://gateway.test.internal',
+    createdAt: '2026-09-01T08:00:00Z',
+    lastUsedAt: '2026-09-03T09:12:00Z',
+  },
 ];
 
 const USAGE_SUMMARY = {
@@ -143,6 +239,36 @@ const USERS = [
     mustChangePassword: false,
     createdAt: '2026-08-10T00:00:00Z',
   },
+  {
+    id: '0190-0000-0000-0013',
+    username: 'demo2_user',
+    displayName: 'Demo 用户',
+    role: 'USER',
+    status: 'ACTIVE',
+    mustChangePassword: false,
+    lastLoginAt: '2026-09-03T01:22:00Z',
+    createdAt: '2026-08-28T00:00:00Z',
+  },
+  {
+    id: '0190-0000-0000-0014',
+    username: 'carol',
+    displayName: 'Carol',
+    role: 'USER',
+    status: 'ACTIVE',
+    mustChangePassword: false,
+    lastLoginAt: '2026-09-02T06:40:00Z',
+    createdAt: '2026-08-15T00:00:00Z',
+  },
+  {
+    id: '0190-0000-0000-0015',
+    username: 'dave',
+    displayName: 'Dave',
+    role: 'USER',
+    status: 'LOCKED',
+    mustChangePassword: false,
+    lastLoginAt: '2026-08-30T11:05:00Z',
+    createdAt: '2026-08-20T00:00:00Z',
+  },
 ];
 
 async function mockSession(page: Page, user: typeof REGULAR_USER) {
@@ -177,7 +303,12 @@ async function mockPilotApi(page: Page) {
       virtualKeyId: '0190-0000-0000-0002',
     };
     const size = Number(url.searchParams.get('size') ?? 20);
-    const items = pageNo === 1 ? [record] : [{ ...record, occurredAt: '2026-09-02T08:00:00Z' }];
+    const items = Array.from({ length: 8 }, (_, i) => ({
+      ...record,
+      occurredAt: `2026-09-0${Math.min(pageNo, 3)}T0${i + 1}:20:00Z`,
+      providerRequestId: `req_${pageNo}_${i}`,
+      gatewayRequestId: `gw-${pageNo}-${i}`,
+    }));
     await route.fulfill({ json: { items, page: pageNo, size, total: 45 } });
   });
   await page.route('**/api/v1/admin/users*', (route) => {
@@ -277,7 +408,7 @@ test('usage page shows quota, summary totals and pages the records', async ({ pa
   await expect(page.getByText('限额 2,000,000 · 本期用量 160,000（8%）')).toBeVisible();
   await expect(page.getByTestId('summary-totals')).toContainText('19');
   await expect(page.getByTestId('usage-chart')).toBeVisible();
-  await expect(page.getByText('deepseek-v4-flash')).toBeVisible();
+  await expect(page.getByText('deepseek-v4-flash').first()).toBeVisible();
 
   await page.getByTestId('records-next').click();
   await expect(page.getByText('共 45 条 · 第 2 / 3 页')).toBeVisible();
@@ -291,7 +422,7 @@ test('admin users page renders badges and gates the temp password reveal', async
   await page.goto('/app-new/users');
   await expect(page.getByTestId('users-table')).toBeVisible();
   await expect(page.getByText('系统管理员').first()).toBeVisible();
-  await expect(page.getByTestId('users-summary')).toContainText('共 3 个账号');
+  await expect(page.getByTestId('users-summary')).toContainText('共 6 个账号');
 
   // Create → temp password dialog (dismissible=false until acknowledged).
   await page.getByTestId('user-create-open').click();

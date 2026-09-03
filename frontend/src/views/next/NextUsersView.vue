@@ -62,9 +62,9 @@ const columns = [
   { key: 'username', title: '用户', minWidth: '200px' },
   { key: 'role', title: '角色', width: '140px' },
   { key: 'status', title: '状态', width: '110px' },
-  { key: 'lastLoginAt', title: '最近登录', width: '180px' },
+  { key: 'lastLoginAt', title: '最近登录', width: '150px' },
   { key: 'createdAt', title: '创建时间', width: '180px' },
-  { key: 'actions', title: '', width: '60px', align: 'center' as const },
+  { key: 'actions', title: '操作', width: '80px', align: 'center' as const },
 ];
 
 const activeCount = computed(() => users.value.filter((u) => u.status === 'ACTIVE').length);
