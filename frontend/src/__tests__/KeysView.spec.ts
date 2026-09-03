@@ -248,4 +248,34 @@ describe('KeysView', () => {
     );
     expect(wrapper.find('[data-testid="create-error"]').text()).toContain('req-123');
   });
+
+  it('shows the admin-contact onboarding card when the account is in no project', async () => {
+    mockApi.myGrants.mockResolvedValue({
+      projects: [],
+      grants: [],
+      purposes: ['CLAUDE_CODE'],
+    } as MeGrantsResponse);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const card = wrapper.find('[data-testid="onboard-no-project"]');
+    expect(card.exists()).toBe(true);
+    expect(card.text()).toContain('把账号加入一个项目');
+    expect(wrapper.find('[data-testid="onboard-has-project"]').exists()).toBe(false);
+  });
+
+  it('keeps the plain empty hint once the account has a project', async () => {
+    mockApi.myGrants.mockResolvedValue({
+      projects: grants.projects,
+      grants: [],
+      purposes: ['CLAUDE_CODE'],
+    } as MeGrantsResponse);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="onboard-no-project"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="onboard-has-project"]').exists()).toBe(true);
+  });
 });

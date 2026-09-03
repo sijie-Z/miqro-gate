@@ -123,6 +123,10 @@ const canCreate = computed(
 
 onMounted(load);
 
+/** Onboarding state (registered but empty account): has the admin added the
+ * account to a project yet? */
+const hasNoProjects = computed(() => (grants.value?.projects.length ?? 0) === 0);
+
 async function load() {
   loading.value = true;
   loadError.value = '';
@@ -469,9 +473,31 @@ function formatTime(iso?: string): string {
           </t-dropdown>
         </template>
         <template #empty>
-          <div class="table-empty">
+          <div v-if="hasNoProjects" class="onboard-card" data-testid="onboard-no-project">
+            <div class="onboard-step">
+              <span class="onboard-num">1</span>
+              <div>
+                <p class="onboard-title">把账号加入一个项目</p>
+                <p class="onboard-copy">
+                  你的账号还没有被加入任何项目，需要管理员在「用户管理 → 项目成员」中把你加进项目，
+                  并在对应项目下配好供应商授权（Grant）。
+                </p>
+              </div>
+            </div>
+            <div class="onboard-step">
+              <span class="onboard-num">2</span>
+              <div>
+                <p class="onboard-title">回来刷新</p>
+                <p class="onboard-copy">管理员开通后，点下方按钮刷新，即可看到可用的项目与授权。</p>
+              </div>
+            </div>
+            <t-button variant="outline" size="small" data-testid="onboard-refresh" @click="load">
+              刷新检查
+            </t-button>
+          </div>
+          <div v-else class="table-empty" data-testid="onboard-has-project">
             <p>还没有 Virtual Key。</p>
-            <p class="hint">点击右上角「创建 Virtual Key」开始使用。</p>
+            <p class="hint">点击右上角「创建 Virtual Key」，用已授权的项目与供应商开始调用。</p>
           </div>
         </template>
       </t-table>
@@ -566,6 +592,55 @@ function formatTime(iso?: string): string {
 }
 
 .model-list {
+  color: var(--miqrokey-text-secondary);
+}
+
+.onboard-card {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: flex-start;
+  background: var(--miqrokey-bg-surface);
+  border: 1px solid var(--miqrokey-border-default);
+  border-radius: 10px;
+  margin: 4px 0;
+  max-width: 560px;
+  text-align: left;
+}
+
+.onboard-step {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.onboard-num {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--miqrokey-accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+
+.onboard-title {
+  margin: 0 0 2px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--miqrokey-text-primary);
+}
+
+.onboard-copy {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
   color: var(--miqrokey-text-secondary);
 }
 
