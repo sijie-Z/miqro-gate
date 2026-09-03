@@ -6,11 +6,11 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `F05 管理门户 IP 白名单`（security §6）— `DONE`
-- Goal status: `DONE`（本会话 2026-09-03；#122–#129 已并入 develop，F05 PR 待合并）
+- Current goal: `F05 管理门户 IP 白名单`（security §6）— `DONE`（PR #130 已合并）
+- Goal status: `DONE`（本会话 2026-09-03；#122–#130 全部合并入 develop 4b8d8b9）
 - Last updated: `2026-09-03 CST`
-- Branch: `goal/admin-ip-allowlist`（验证后 push + PR）
-- 会话交付链（#122–#129 + F05）：MCP ACL → F24 → F03 → F04 → F06 → F02 盘点 → F35 → F09 → F05
+- Branch: `goal/admin-ip-allowlist`（已合并）；develop @ 4b8d8b9，工作区清洁
+- 会话交付链（#122–#130，9 连发）：MCP ACL → F24 → F03 → F04 → F06 → F02 盘点 → F35 → F09 → F05
 - 下一步候选：A 组剩 **F01 MCP 代理接线**（需先定 SSE/Streamable HTTP 传输实现；用户已明确与公司 slurm MCP/Forge 积分集成一并暂缓）→ B 组 F11（路由规则，可配置面先行）→ 前端 OpenAPI codegen 迁移（发布前候选）
 - **教训（本会话）**：① 建分支命令若 `git pull && git switch -c` 因网络失败整链中断会静默留在 develop 上提交——提交前先 `git branch --show-current` 复核；本地误提交用 `git branch -f` 移回原位（未 push 无碍）。② 新集成测试 setUp 必须含 bootstrap 后改密步骤（其他测试同款流程），否则换 remote 地址的用例全 401
 
