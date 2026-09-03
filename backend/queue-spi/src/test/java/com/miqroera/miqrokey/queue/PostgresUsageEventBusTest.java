@@ -14,6 +14,7 @@ import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -45,7 +46,8 @@ class PostgresUsageEventBusTest {
     @DisplayName("a failed flush re-enqueues every drained event; the next flush persists them")
     void failedFlushReenqueuesForNextFlush() {
         RecordingWriter writer = new RecordingWriter();
-        PostgresUsageEventBus bus = new PostgresUsageEventBus(100, 100, writer, Schedulers.immediate(), CLOCK);
+        PostgresUsageEventBus bus = new PostgresUsageEventBus(100, 100, writer, Schedulers.immediate(), CLOCK,
+                SaturationMode.DROP, Duration.ofSeconds(5));
         UsageEvent usage = usageEvent("u1");
         CacheHitEvent hit = hitEvent();
         RequestStartedEvent start = startedEvent();
@@ -76,7 +78,8 @@ class PostgresUsageEventBusTest {
     @DisplayName("a saturated queue drops offers and counts them; never blocks the publisher")
     void saturationDropsAndCounts() {
         RecordingWriter writer = new RecordingWriter();
-        PostgresUsageEventBus bus = new PostgresUsageEventBus(2, 100, writer, Schedulers.immediate(), CLOCK);
+        PostgresUsageEventBus bus = new PostgresUsageEventBus(2, 100, writer, Schedulers.immediate(), CLOCK,
+                SaturationMode.DROP, Duration.ofSeconds(5));
         for (int i = 0; i < 5; i++) {
             bus.publish(usageEvent("u" + i));
         }
@@ -93,7 +96,8 @@ class PostgresUsageEventBusTest {
     @DisplayName("flush drains at most flush-threshold events; the rest stay queued")
     void flushRespectsThreshold() {
         RecordingWriter writer = new RecordingWriter();
-        PostgresUsageEventBus bus = new PostgresUsageEventBus(10, 2, writer, Schedulers.immediate(), CLOCK);
+        PostgresUsageEventBus bus = new PostgresUsageEventBus(10, 2, writer, Schedulers.immediate(), CLOCK,
+                SaturationMode.DROP, Duration.ofSeconds(5));
         bus.publish(usageEvent("a"));
         bus.publish(usageEvent("b"));
         bus.publish(usageEvent("c"));
@@ -112,7 +116,8 @@ class PostgresUsageEventBusTest {
     void inFlightGuardSkipsOverlappingFlushes() throws Exception {
         BlockingWriter writer = new BlockingWriter();
         scheduler = Schedulers.newSingle("writer-test");
-        PostgresUsageEventBus bus = new PostgresUsageEventBus(10, 10, writer, scheduler, CLOCK);
+        PostgresUsageEventBus bus = new PostgresUsageEventBus(10, 10, writer, scheduler, CLOCK, SaturationMode.DROP,
+                Duration.ofSeconds(5));
         bus.publish(usageEvent("u1"));
 
         bus.scheduledFlush();
@@ -130,9 +135,71 @@ class PostgresUsageEventBusTest {
     @DisplayName("empty flush is a no-op (no writer call, no metrics movement)")
     void emptyFlushIsNoop() {
         RecordingWriter writer = new RecordingWriter();
-        PostgresUsageEventBus bus = new PostgresUsageEventBus(10, 10, writer, Schedulers.immediate(), CLOCK);
+        PostgresUsageEventBus bus = new PostgresUsageEventBus(10, 10, writer, Schedulers.immediate(), CLOCK,
+                SaturationMode.DROP, Duration.ofSeconds(5));
         bus.flush();
         assertThat(writer.callCount.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("WRITE_THROUGH saturation persists the single event through the writer executor")
+    void writeThroughPersistsOnSaturation() {
+        RecordingWriter writer = new RecordingWriter();
+        PostgresUsageEventBus bus = new PostgresUsageEventBus(1, 100, writer, Schedulers.immediate(), CLOCK,
+                SaturationMode.WRITE_THROUGH, Duration.ofSeconds(5));
+        bus.publish(usageEvent("queued")); // fills the only slot
+        UsageEvent spill = usageEvent("spill");
+
+        bus.publish(spill); // queue full -> emergency single-event write
+
+        assertThat(bus.metrics().totalDropped()).isZero();
+        // Only the write-through event is persisted so far; the queued one waits
+        // for the next regular flush.
+        assertThat(bus.metrics().totalPersisted()).isEqualTo(1);
+        assertThat(bus.metrics().queuedCount()).isEqualTo(1);
+        assertThat(writer.lastUsage).containsExactly(spill);
+
+        bus.flush();
+        assertThat(bus.metrics().totalPersisted()).isEqualTo(2);
+        assertThat(bus.metrics().queuedCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("WRITE_THROUGH falls back to a counted drop when the emergency write fails")
+    void writeThroughFailureCountsDrop() {
+        RecordingWriter writer = new RecordingWriter();
+        PostgresUsageEventBus bus = new PostgresUsageEventBus(1, 100, writer, Schedulers.immediate(), CLOCK,
+                SaturationMode.WRITE_THROUGH, Duration.ofSeconds(5));
+        bus.publish(usageEvent("queued"));
+        writer.failNextCall = true;
+
+        bus.publish(usageEvent("spill"));
+
+        UsageEventBus.QueueMetrics m = bus.metrics();
+        assertThat(m.totalDropped()).isEqualTo(1);
+        assertThat(m.totalPersisted()).isZero(); // nothing has been persisted yet
+    }
+
+    @Test
+    @DisplayName("WRITE_THROUGH times out instead of stalling the publisher forever")
+    void writeThroughTimesOut() throws Exception {
+        BlockingWriter writer = new BlockingWriter();
+        scheduler = Schedulers.newSingle("writer-test");
+        PostgresUsageEventBus bus = new PostgresUsageEventBus(1, 100, writer, scheduler, CLOCK,
+                SaturationMode.WRITE_THROUGH, Duration.ofMillis(50));
+        bus.publish(usageEvent("queued"));
+
+        long started = System.nanoTime();
+        bus.publish(usageEvent("spill")); // blocks on the writer latch -> times out
+        long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+
+        // The bounded stall returned while the writer was still blocked.
+        assertThat(elapsedMs).isLessThan(2_000);
+        assertThat(bus.metrics().totalDropped()).isEqualTo(1);
+        assertThat(bus.metrics().totalPersisted()).isZero();
+
+        writer.release.countDown();
+        writer.done.await(5, TimeUnit.SECONDS);
     }
 
     /** Polls until the flush counter reaches the target (writer thread lag). */

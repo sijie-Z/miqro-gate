@@ -6,12 +6,22 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `F02 缓存键盘点核对`（feature-backlog A 组）— `DONE`（盘点修正 + 契约补全）
-- Goal status: `DONE`（本会话 2026-09-03；#122–#126 合并入 develop 8ec9783 之后续做）
+- Current goal: `F35 usage 队列饱和应急直写`（feature-backlog F 组/architecture §5）— `DONE`（PR #128 待合并）
+- Goal status: `DONE`（本会话 2026-09-03；#122–#127 已并入 develop）
 - Last updated: `2026-09-03 CST`
-- Branch: `goal/cache-key-user-message`（F02 盘点修正，验证后 push + PR）
-- 会话交付链（#122–#126 + F02 盘点）：MCP ACL → F24 默认配额模板 → F03 审批 Webhook 通知 → F04 用户自助配额可见性 → F06 过期记录 GC → F02 核对（实现早已在 commit 3086187，补端到端语义键契约）
-- 下一步候选：**F35 usage 队列饱和同步写入应急模式**（gateway-app，架构边界；推荐顺序第 3 项第二件）→ 之后 A 组剩余（F09 OpenAPI 生成、F01 MCP 代理接线需先定传输实现）
+- Branch: `goal/usage-queue-emergency-write`（基于 develop 含 #127；验证后 push + PR）
+- 会话交付链（#122–#128）：MCP ACL → F24 默认配额模板 → F03 审批 Webhook 通知 → F04 用户自助配额可见性 → F06 过期记录 GC → F02 盘点核对（含端到端语义键契约补全）→ F35 队列饱和应急直写
+- 下一步候选：A 组剩余 **F09 OpenAPI 3.1 生成 + CI 破坏性变更检查**（发布前补项）→ F01 MCP 代理接线（需先定传输实现）→ F05 管理门户 IP 白名单核对（TBD）
+
+## F35 usage 队列饱和应急直写 — architecture §5（2026-09-03，DONE）
+
+- **背景与方向**：实现 architecture §5「缓冲达到上限时…可切换为同步写入以保护审计完整性」。现状（G2.4）饱和 = offer 拒绝 + drop 计数 + warn。F35 加**应急开关**把「必然丢弃」升级为「尽力直写、完整性优先」。
+- **设计决策（记录）**：直写 ≠ 发布线程执行 JDBC（红线：JDBC 只在专用 writer 执行器）——饱和事件改经 writer 执行器单条幂等直写，发布线程对完成做**有界等待**（默认 5s 可配），超时/失败照旧计数丢弃（发布线程永不无限阻塞）；应急模式默认关闭（`DROP` 保持热路径零等待，行为与现状完全一致）。
+- **后端**：`SaturationMode` 枚举（queue-spi，`DROP|WRITE_THROUGH`）；`QueueProperties` 增 `saturation-mode`（默认 DROP）+ `write-through-timeout`（默认 5s，绑定校验）；`PostgresUsageEventBus` 构造扩展两参，`offer()` 饱和分支：WRITE_THROUGH 时 `writeThrough(event)`（CompletableFuture + writerScheduler.schedule 单元素批写 + `totalPersisted` 计入 + done.get(timeout)，成功即不 drop）；javadoc 明示线程/失败语义。InMemory bus 不适用（无 writer，mode 忽略）。QueueConfig bean 装配更新。
+- **验证（全部真实 PASS）**：`PostgresUsageEventBusTest` 8/8 = 原 5（DROP 行为零变化回归：drop 计数/重入队/阈值/in-flight 守卫/空 flush）+ 新 3（WRITE_THROUGH 饱和直写单事件成功且 queued 保留待常规 flush；直写失败回退计数 drop；50ms 超时有界返回不无限阻塞——断言时序：先断言再释放 writer latch，防竞态）。后端全量 `verify -P integration` **BUILD SUCCESS 0 failures**（queue-spi 14 = writer 6 + bus 8；gateway 198 = 196 + F02 语义键契约 2）。
+- **排障记录**：三个新用例首跑失败均为断言逻辑错误（persisted 计数期望错 + latch 释放与断言竞态），实现本身正确；DROP 回归全绿证明行为零变化。
+- **文档**：configuration-reference 两新配置行（§5 queue 表）；architecture §5 批量写入段补充 F35 实现语义；CHANGELOG；feature-backlog F35 → DONE；progress。
+- **gitflow**：分支 `goal/usage-queue-emergency-write`（#127 合并后 merge origin/develop 进分支无冲突）。
 
 ## F02 缓存键升级 — 盘点核对修正（2026-09-03，DONE）
 

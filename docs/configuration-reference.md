@@ -151,6 +151,8 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 | `MIQROKEY_GATEWAY_QUEUE_FLUSH_THRESHOLD` | `100` | 批量 flush 条数上限 |
 | `MIQROKEY_GATEWAY_QUEUE_FLUSH_INTERVAL` | `5s` | 批量 flush 周期 |
 | `MIQROKEY_GATEWAY_QUEUE_WRITER_THREADS` | `4` | 专用有界 writer 执行器线程数（G2.4） |
+| `MIQROKEY_GATEWAY_QUEUE_SATURATION_MODE` | `DROP` | 队列饱和策略（F35）：`DROP` = 保持热路径不阻塞、事件计数丢弃（默认）；`WRITE_THROUGH` = 应急直写——单事件经专用 writer 执行器幂等写入并**有界等待**（见下），审计完整性优先、发布线程短暂停滞可接受 |
+| `MIQROKEY_GATEWAY_QUEUE_WRITE_THROUGH_TIMEOUT` | `5s` | WRITE_THROUGH 单事件直写的等待上限；超时/失败仍按 drop 计数兜底，发布线程永不无限阻塞 |
 | `MIQROKEY_GATEWAY_COALESCER_ENABLED` | `false` | 请求合并（single-flight）：默认关闭（ADR-0008） |
 | `MIQROKEY_GATEWAY_COALESCER_WAIT_TIMEOUT` | `2s` | 合并等待窗口 |
 | `MIQROKEY_CACHE_ENABLED` | `false` | 响应缓存总开关（默认关闭，见 §9） |
