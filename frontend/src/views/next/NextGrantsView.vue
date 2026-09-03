@@ -102,7 +102,7 @@ const columns = [
   { key: 'credential', title: '上游凭证', minWidth: '200px' },
   { key: 'product', title: '供应商产品', minWidth: '220px' },
   { key: 'status', title: '状态', width: '110px' },
-  { key: 'actions', title: '操作', width: '150px', align: 'center' as const },
+  { key: 'actions', title: '操作', width: '150px' },
 ];
 
 async function load() {
@@ -477,6 +477,7 @@ onMounted(async () => {
 .next-grants__actions-cell {
   display: inline-flex;
   gap: var(--ui-space-1);
+  justify-content: flex-start;
 }
 
 .next-grants__danger {

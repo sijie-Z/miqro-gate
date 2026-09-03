@@ -70,7 +70,7 @@ const providerNav: NavItem[] = [
 ];
 
 const opsNav: NavItem[] = [
-  { name: 'admin-usage', label: '用量', icon: ChartBarIcon },
+  { name: 'admin-usage', label: '用量报表', icon: ChartBarIcon },
   { name: 'cost', label: '成本报表', icon: MoneyIcon },
   { name: 'quota-rules', label: '配额规则', icon: ErrorCircleIcon },
   { name: 'roi', label: '缓存收益', icon: DownloadIcon },
@@ -200,7 +200,7 @@ async function handleLogout() {
   flex-direction: column;
   width: var(--ui-sidebar-width);
   flex-shrink: 0;
-  background: var(--ui-card);
+  background: #fbfaf7;
   border-right: 1px solid var(--ui-border);
   transition: width var(--ui-ease);
 }
@@ -253,17 +253,17 @@ async function handleLogout() {
 }
 
 .new-shell__group {
-  margin-bottom: var(--ui-space-6);
+  margin-bottom: var(--ui-space-2);
 }
 
 .new-shell__group-title {
-  margin: 0 0 var(--ui-space-2);
+  margin: var(--ui-space-5) 0 var(--ui-space-2);
   padding: 0 var(--ui-space-2);
   font-size: 11px;
   font-weight: var(--ui-weight-semibold);
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--ui-foreground-faint);
+  color: #8a8a94;
 }
 
 .new-shell__nav-item {
@@ -335,8 +335,9 @@ async function handleLogout() {
 
 .new-shell__version {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-faint);
+  letter-spacing: 0.02em;
 }
 
 .new-shell__main {

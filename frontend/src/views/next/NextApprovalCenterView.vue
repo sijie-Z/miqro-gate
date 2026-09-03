@@ -41,15 +41,15 @@ function statusTone(status: ModelApprovalStatus): 'success' | 'warning' | 'dange
 }
 
 const columns = [
-  { key: 'requesterName', title: '申请人', width: '110px' },
-  { key: 'keyInfo', title: 'Virtual Key', minWidth: '220px' },
-  { key: 'modelId', title: '模型', width: '190px' },
-  { key: 'reason', title: '申请理由', minWidth: '170px' },
-  { key: 'createdAt', title: '提交时间', width: '170px' },
-  { key: 'status', title: '状态', width: '100px' },
-  { key: 'reviewNote', title: '审核意见', minWidth: '140px' },
-  { key: 'reviewedByName', title: '审核人', width: '100px' },
-  { key: 'actions', title: '操作', width: '130px', align: 'center' as const },
+  { key: 'requesterName', title: '申请人', width: '96px' },
+  { key: 'keyInfo', title: 'Virtual Key', minWidth: '190px' },
+  { key: 'modelId', title: '模型', width: '160px' },
+  { key: 'reason', title: '申请理由', minWidth: '150px' },
+  { key: 'createdAt', title: '提交时间', width: '140px' },
+  { key: 'status', title: '状态', width: '90px' },
+  { key: 'reviewNote', title: '审核意见', minWidth: '130px' },
+  { key: 'reviewedByName', title: '审核人', width: '90px' },
+  { key: 'actions', title: '操作', width: '120px', align: 'center' as const },
 ];
 
 async function load() {
@@ -395,11 +395,21 @@ onMounted(load);
   display: flex;
   flex-direction: column;
   line-height: 1.35;
+  max-width: 260px;
+}
+
+.next-approvals-center__key > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .next-approvals-center__key-sub {
   font-size: 11px;
   color: var(--ui-foreground-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .next-approvals-center__actions {

@@ -37,7 +37,10 @@ describe('NextTeamsView', () => {
     setActivePinia(createPinia());
     vi.resetAllMocks();
     toastState.items.splice(0);
-    mockApi.listTeams.mockResolvedValue([team(), team({ id: 't2', name: 'qa', status: 'DISABLED' })]);
+    mockApi.listTeams.mockResolvedValue([
+      team(),
+      team({ id: 't2', name: 'qa', status: 'DISABLED' }),
+    ]);
     document.body.innerHTML = '';
   });
 

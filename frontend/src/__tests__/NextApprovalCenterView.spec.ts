@@ -38,7 +38,10 @@ describe('NextApprovalCenterView', () => {
     vi.resetAllMocks();
     toastState.items.splice(0);
     mockApi.listModelApprovals.mockResolvedValue({
-      items: [approval(), approval({ id: 'a2', status: 'APPROVED', reviewedByName: 'root', reviewNote: 'ok' })],
+      items: [
+        approval(),
+        approval({ id: 'a2', status: 'APPROVED', reviewedByName: 'root', reviewNote: 'ok' }),
+      ],
       nextCursor: undefined,
     });
   });
@@ -87,9 +90,9 @@ describe('NextApprovalCenterView', () => {
     await flushPromises();
 
     expect(mockApi.approveModelApproval).toHaveBeenCalledWith('a1', '符合项目范围');
-    expect((mockApi.listModelApprovals as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(
-      callsBefore,
-    );
+    expect(
+      (mockApi.listModelApprovals as ReturnType<typeof vi.fn>).mock.calls.length,
+    ).toBeGreaterThan(callsBefore);
     expect(toastState.items.some((t) => t.message.includes('已通过模型'))).toBe(true);
   });
 

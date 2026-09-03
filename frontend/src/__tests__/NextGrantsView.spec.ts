@@ -70,19 +70,85 @@ describe('NextGrantsView', () => {
     document.body.innerHTML = '';
     mockApi.listGrants.mockResolvedValue([
       grant(),
-      grant({ id: 'g2', projectId: 'p2', status: 'DISABLED', upstreamCredentialId: 'c2', providerProductId: 'pr2' }),
+      grant({
+        id: 'g2',
+        projectId: 'p2',
+        status: 'DISABLED',
+        upstreamCredentialId: 'c2',
+        providerProductId: 'pr2',
+      }),
     ]);
     mockApi.listProjects.mockResolvedValue([
-      { id: 'p1', code: 'CORE', name: 'Core AI', status: 'ACTIVE', projectTag: 'core-ai', createdAt: '2026-08-01T00:00:00Z' },
-      { id: 'p2', code: 'QA', name: 'QA 回归', status: 'ACTIVE', projectTag: 'qa', createdAt: '2026-08-01T00:00:00Z' },
+      {
+        id: 'p1',
+        code: 'CORE',
+        name: 'Core AI',
+        status: 'ACTIVE',
+        projectTag: 'core-ai',
+        createdAt: '2026-08-01T00:00:00Z',
+      },
+      {
+        id: 'p2',
+        code: 'QA',
+        name: 'QA 回归',
+        status: 'ACTIVE',
+        projectTag: 'qa',
+        createdAt: '2026-08-01T00:00:00Z',
+      },
     ]);
     mockApi.listCredentials.mockResolvedValue([
-      { id: 'c1', name: 'deepseek-main', subscriptionId: 's1', status: 'ACTIVE', activeVersionId: 'v1', fingerprintPrefix: 'fp1', lastValidatedAt: null, lastValidationError: null, version: 1, createdAt: '2026-07-01T00:00:00Z', updatedAt: '2026-07-01T00:00:00Z' },
-      { id: 'c2', name: 'moonshot-main', subscriptionId: 's2', status: 'ACTIVE', activeVersionId: 'v1', fingerprintPrefix: 'fp2', lastValidatedAt: null, lastValidationError: null, version: 1, createdAt: '2026-07-02T00:00:00Z', updatedAt: '2026-07-02T00:00:00Z' },
+      {
+        id: 'c1',
+        name: 'deepseek-main',
+        subscriptionId: 's1',
+        status: 'ACTIVE',
+        activeVersionId: 'v1',
+        fingerprintPrefix: 'fp1',
+        lastValidatedAt: null,
+        lastValidationError: null,
+        version: 1,
+        createdAt: '2026-07-01T00:00:00Z',
+        updatedAt: '2026-07-01T00:00:00Z',
+      },
+      {
+        id: 'c2',
+        name: 'moonshot-main',
+        subscriptionId: 's2',
+        status: 'ACTIVE',
+        activeVersionId: 'v1',
+        fingerprintPrefix: 'fp2',
+        lastValidatedAt: null,
+        lastValidationError: null,
+        version: 1,
+        createdAt: '2026-07-02T00:00:00Z',
+        updatedAt: '2026-07-02T00:00:00Z',
+      },
     ]);
     mockApi.listProviderProducts.mockResolvedValue([
-      { id: 'pr1', providerSlug: 'deepseek', providerName: 'DeepSeek', productCode: 'deepseek-v4', displayName: 'DeepSeek V4', billingMode: 'PAYG', protocols: 'openai,anthropic', baseUrlHost: 'api.deepseek.com', implementationStatus: 'IMPLEMENTED', balanceAuthority: 'none' },
-      { id: 'pr2', providerSlug: 'moonshot', providerName: 'Moonshot', productCode: 'moonshot', displayName: 'Moonshot', billingMode: 'PAYG', protocols: 'openai', baseUrlHost: 'api.moonshot.cn', implementationStatus: 'IMPLEMENTED', balanceAuthority: 'official' },
+      {
+        id: 'pr1',
+        providerSlug: 'deepseek',
+        providerName: 'DeepSeek',
+        productCode: 'deepseek-v4',
+        displayName: 'DeepSeek V4',
+        billingMode: 'PAYG',
+        protocols: 'openai,anthropic',
+        baseUrlHost: 'api.deepseek.com',
+        implementationStatus: 'IMPLEMENTED',
+        balanceAuthority: 'none',
+      },
+      {
+        id: 'pr2',
+        providerSlug: 'moonshot',
+        providerName: 'Moonshot',
+        productCode: 'moonshot',
+        displayName: 'Moonshot',
+        billingMode: 'PAYG',
+        protocols: 'openai',
+        baseUrlHost: 'api.moonshot.cn',
+        implementationStatus: 'IMPLEMENTED',
+        balanceAuthority: 'official',
+      },
     ]);
   });
 
@@ -142,7 +208,9 @@ describe('NextGrantsView', () => {
     await flushPromises();
 
     expect(document.querySelector('[data-testid="grant-models-drawer"]')).toBeTruthy();
-    const input = document.querySelector('[data-testid="grant-models-input"]') as HTMLTextAreaElement;
+    const input = document.querySelector(
+      '[data-testid="grant-models-input"]',
+    ) as HTMLTextAreaElement;
     expect(input).toBeTruthy();
     expect(input.value).toContain('claude-3-7-sonnet');
 

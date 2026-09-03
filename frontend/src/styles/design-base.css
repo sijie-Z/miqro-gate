@@ -9,7 +9,7 @@
 /* ---- page structure ---- */
 .ui-page {
   max-width: var(--ui-content-max);
-  padding: var(--ui-space-6) var(--ui-space-8) var(--ui-space-12);
+  padding: var(--ui-space-8) var(--ui-space-8) var(--ui-space-12);
 }
 
 .ui-page-header {
