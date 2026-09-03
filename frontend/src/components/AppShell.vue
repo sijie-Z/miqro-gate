@@ -43,44 +43,44 @@ interface NavItem {
 
 const regularNav: NavItem[] = [
   { name: 'overview', label: '总览', icon: DashboardIcon },
-  { name: 'keys', label: 'Virtual Keys', icon: LockOnIcon },
-  { name: 'usage', label: 'Usage', icon: ChartBarIcon },
-  { name: 'profile', label: 'Profile', icon: UserIcon },
-  { name: 'skills', label: 'SkillHub', icon: AppIcon },
+  { name: 'keys', label: '我的 Key', icon: LockOnIcon },
+  { name: 'usage', label: '用量', icon: ChartBarIcon },
+  { name: 'profile', label: '资料', icon: UserIcon },
+  { name: 'skills', label: '技能库', icon: AppIcon },
   { name: 'model-approvals', label: '模型申请', icon: EditIcon },
 ];
 
 const orgNav: NavItem[] = [
-  { name: 'users', label: 'Users', icon: UserIcon },
-  { name: 'teams', label: 'Teams', icon: UsergroupCircleIcon },
-  { name: 'projects', label: 'Projects', icon: FolderOpenIcon },
-  { name: 'grants', label: 'Grants', icon: LockOnIcon },
+  { name: 'users', label: '用户', icon: UserIcon },
+  { name: 'teams', label: '团队', icon: UsergroupCircleIcon },
+  { name: 'projects', label: '项目', icon: FolderOpenIcon },
+  { name: 'grants', label: '授权', icon: LockOnIcon },
   { name: 'approval-center', label: '审批中心', icon: CheckCircleIcon },
 ];
 
 const providerNav: NavItem[] = [
-  { name: 'providers', label: 'Providers', icon: ShopIcon },
-  { name: 'plans', label: 'Plans', icon: LayersIcon },
-  { name: 'credentials', label: 'Credentials', icon: SecuredIcon },
+  { name: 'providers', label: '供应商', icon: ShopIcon },
+  { name: 'plans', label: '订阅', icon: LayersIcon },
+  { name: 'credentials', label: '上游凭证', icon: SecuredIcon },
   { name: 'prices', label: '定价', icon: MoneyIcon },
 ];
 
 const opsNav: NavItem[] = [
-  { name: 'admin-usage', label: 'Usage', icon: ChartBarIcon },
+  { name: 'admin-usage', label: '用量', icon: ChartBarIcon },
   { name: 'cost', label: '成本报表', icon: MoneyIcon },
   { name: 'quota-rules', label: '配额规则', icon: ErrorCircleIcon },
-  { name: 'roi', label: '缓存 ROI', icon: DownloadIcon },
-  { name: 'exports', label: 'Exports', icon: DownloadIcon },
-  { name: 'deletions', label: 'Deletions', icon: DeleteIcon },
-  { name: 'webhooks', label: 'Webhooks', icon: NotificationIcon },
+  { name: 'roi', label: '缓存收益', icon: DownloadIcon },
+  { name: 'exports', label: '导出任务', icon: DownloadIcon },
+  { name: 'deletions', label: '用量删除', icon: DeleteIcon },
+  { name: 'webhooks', label: 'Webhook 端点', icon: NotificationIcon },
   { name: 'consumers', label: 'API 消费者', icon: SecuredIcon },
-  { name: 'skillhub', label: 'SkillHub 管理', icon: AppIcon },
-  { name: 'agents', label: 'Agents', icon: RobotIcon },
+  { name: 'skillhub', label: '技能库管理', icon: AppIcon },
+  { name: 'agents', label: '智能体', icon: RobotIcon },
   { name: 'services', label: '服务管理', icon: ServerIcon },
   { name: 'configs', label: '全局配置', icon: SettingIcon },
   { name: 'mcp-services', label: 'MCP 服务', icon: ToolsIcon },
-  { name: 'alert-rules', label: 'Alert Rules', icon: ErrorCircleIcon },
-  { name: 'audit', label: 'Audit', icon: FilePasteIcon },
+  { name: 'alert-rules', label: '告警规则', icon: ErrorCircleIcon },
+  { name: 'audit', label: '审计日志', icon: FilePasteIcon },
 ];
 
 const navGroups = computed(() => {
@@ -218,7 +218,6 @@ async function handleLogout() {
     <footer class="mk-shell-footer">
       <span>MiQroGate 0.1.0</span>
       <span>catalog v1</span>
-      <span>last sync —</span>
     </footer>
   </div>
 </template>

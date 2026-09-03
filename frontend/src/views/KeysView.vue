@@ -258,7 +258,7 @@ function formatTime(iso?: string): string {
 
 <template>
   <div class="keys-page">
-    <PageHeader title="Virtual Keys" description="通过 CC Switch 使用这些 Key 访问授权模型。">
+    <PageHeader title="我的 Key" description="通过 CC Switch 使用这些 Key 访问授权模型。">
       <template #actions>
         <t-button theme="primary" data-testid="create-key-open" @click="creating = !creating">
           {{ creating ? '收起表单' : '创建 Virtual Key' }}
