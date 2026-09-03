@@ -580,6 +580,103 @@ test('profile page validates the password form', async ({ page }) => {
   });
 });
 
+test('admin credentials: kebab flows run validate, rotate and history', async ({ page }) => {
+  await mockSession(page, {
+    id: '0190-0000-0000-0001',
+    username: 'root',
+    displayName: 'Root Admin',
+    role: 'SYSTEM_ADMIN',
+    mustChangePassword: false,
+  });
+  const SUB = {
+    id: '0190-0000-0000-00g1',
+    providerProductId: '0190-0000-0000-00g0',
+    productName: 'DeepSeek PAYG',
+    name: 'Main',
+    billingMode: 'PAYG',
+    planScope: 'PERSONAL',
+    subscriptionPrice: null,
+    currency: 'USD',
+    quotaTotal: null,
+    quotaUnit: null,
+    status: 'ACTIVE',
+    createdAt: '2026-08-01T00:00:00Z',
+  };
+  const CRED = {
+    id: '0190-0000-0000-00g2',
+    name: 'deepseek-main',
+    subscriptionId: SUB.id,
+    status: 'ACTIVE',
+    activeVersionId: '0190-0000-0000-00g3',
+    fingerprintPrefix: 'sk-a1b2c3d4e5f6',
+    lastValidatedAt: null,
+    lastValidationError: null,
+    version: 1,
+    createdAt: '2026-08-01T00:00:00Z',
+    updatedAt: '2026-08-01T00:00:00Z',
+  };
+  await page.route('**/api/v1/admin/credentials', (route) => route.fulfill({ json: [CRED] }));
+  await page.route('**/api/v1/admin/subscriptions', (route) => route.fulfill({ json: [SUB] }));
+  await page.route('**/api/v1/admin/credentials/0190-0000-0000-00g2', (route) =>
+    route.fulfill({
+      json: {
+        credential: CRED,
+        versions: [
+          {
+            id: '0190-0000-0000-00g3',
+            status: 'ACTIVE',
+            encryptionKeyVersion: 'v2026-1',
+            fingerprintPrefix: 'sk-a1b2c3d4e5f6',
+            validFrom: '2026-08-01T00:00:00Z',
+            retiredAt: null,
+            createdAt: '2026-08-01T00:00:00Z',
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/v1/admin/credentials/*/validate', (route) =>
+    route.fulfill({
+      json: {
+        matchesActive: true,
+        message: null,
+        providerStatus: 'VALID',
+        providerMessage: 'ok',
+        checkedAt: '2026-09-04T00:00:00Z',
+      },
+    }),
+  );
+  await page.route('**/api/v1/admin/credentials/*/rotate', (route) =>
+    route.fulfill({
+      json: { ...CRED, version: 2, activeVersionId: '0190-0000-0000-00g4' },
+    }),
+  );
+
+  await page.goto('/app/credentials');
+  await expect(page.getByTestId('credentials-table')).toBeVisible();
+
+  await page.getByTestId('credential-actions-0190-0000-0000-00g2').click();
+  await page.getByRole('menuitem', { name: '测试 Secret' }).click();
+  await page.getByTestId('credential-validate-secret').fill('sk-candidate');
+  await page.getByTestId('credential-validate-run').click();
+  await expect(page.getByTestId('credential-validate-result')).toContainText('与当前生效版本一致');
+
+  await page.getByRole('button', { name: '关闭', exact: true }).last().click();
+  await page.getByTestId('credential-actions-0190-0000-0000-00g2').click();
+  await page.getByRole('menuitem', { name: '轮换' }).click();
+  await page.getByTestId('credential-rotate-secret').fill('sk-new-secret');
+  await page.getByTestId('credential-rotate-submit').click();
+  await expect(page.getByText('凭证已轮换，旧版本进入宽限期')).toBeVisible();
+
+  await page.getByTestId('credential-actions-0190-0000-0000-00g2').click();
+  await page.getByRole('menuitem', { name: '版本历史' }).click();
+  await expect(page.getByTestId('credential-versions')).toContainText('sk-a1b2c3d4e5f6');
+  await page.screenshot({
+    path: 'test-results/baseline/app-credentials-1440x900.png',
+    fullPage: true,
+  });
+});
+
 test('regular users are redirected from admin routes', async ({ page }) => {
   await mockSession(page, REGULAR_USER);
   await mockPilotApi(page);

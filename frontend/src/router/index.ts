@@ -114,7 +114,7 @@ const router = createRouter({
         {
           path: 'credentials',
           name: 'credentials',
-          component: () => import('@/views/AdminCredentialsView.vue'),
+          component: () => import('@/views/next/NextCredentialsView.vue'),
           meta: adminMeta('上游凭证'),
         },
         {
