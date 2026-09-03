@@ -9,15 +9,7 @@
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import {
-  UiButton,
-  UiDialog,
-  UiDrawer,
-  UiSelect,
-  UiStatusBadge,
-  UiTable,
-  toast,
-} from '@/ui';
+import { UiButton, UiDialog, UiDrawer, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
 import type { Grant, Project } from '@/types/api';
 
