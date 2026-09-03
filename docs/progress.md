@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `U1 用户面全量切换` — `IN_PROGRESS`（U0 已于 2026-09-03 合并进 develop @ 42f0864（PR #132）；U1-1 完成于分支 goal/ui-u1-user-console @ cded653（6 页 v2 + 壳导航扩展，vitest 147/147、Playwright 45/45）；剩余 U1-2 路由正式化 + 旧 TDesign 用户面清理 + e2e 断言迁移）
-- Goal status: `IN_PROGRESS`（2026-09-03；U1-2 待做：路由正式化 / 并行开关拆除 / 旧页与 spec 清理 / e2e baseline 用户面断言迁移；预览入口 http://localhost:4174（preview 服务仍在跑，serve U1 分支最新代码）或前端 dev 5173 需合并后重启）
+- Current goal: `U2 管理面三组逐批切换` — `NOT_STARTED`（U1 已完成：正式路由 42f0864+ 分支 goal/ui-u1-user-console @ 79a8823（PR #133，待 CI 绿合并）；用户面全部 v2，试点前缀退役）
+- Goal status: `NOT_STARTED`（2026-09-03；U2 首批建议组织组用户/团队/项目/授权/审批中心，NextUsersView 已存在可接线；preview http://localhost:4174 已指向 U1 正式路由）
 - Last updated: `2026-09-03 CST`
 ## 会话交接点 2026-09-03 — UI 专项 U0 待验收（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；U0 验收通过前暂停功能 backlog）
 
