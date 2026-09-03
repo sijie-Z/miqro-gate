@@ -43,44 +43,44 @@ interface NavItem {
 
 const regularNav: NavItem[] = [
   { name: 'overview', label: '总览', icon: DashboardIcon },
-  { name: 'keys', label: 'Virtual Keys', icon: LockOnIcon },
-  { name: 'usage', label: 'Usage', icon: ChartBarIcon },
-  { name: 'profile', label: 'Profile', icon: UserIcon },
-  { name: 'skills', label: 'SkillHub', icon: AppIcon },
+  { name: 'keys', label: '我的 Key', icon: LockOnIcon },
+  { name: 'usage', label: '用量', icon: ChartBarIcon },
+  { name: 'profile', label: '资料', icon: UserIcon },
+  { name: 'skills', label: '技能库', icon: AppIcon },
   { name: 'model-approvals', label: '模型申请', icon: EditIcon },
 ];
 
 const orgNav: NavItem[] = [
-  { name: 'users', label: 'Users', icon: UserIcon },
-  { name: 'teams', label: 'Teams', icon: UsergroupCircleIcon },
-  { name: 'projects', label: 'Projects', icon: FolderOpenIcon },
-  { name: 'grants', label: 'Grants', icon: LockOnIcon },
+  { name: 'users', label: '用户', icon: UserIcon },
+  { name: 'teams', label: '团队', icon: UsergroupCircleIcon },
+  { name: 'projects', label: '项目', icon: FolderOpenIcon },
+  { name: 'grants', label: '授权', icon: LockOnIcon },
   { name: 'approval-center', label: '审批中心', icon: CheckCircleIcon },
 ];
 
 const providerNav: NavItem[] = [
-  { name: 'providers', label: 'Providers', icon: ShopIcon },
-  { name: 'plans', label: 'Plans', icon: LayersIcon },
-  { name: 'credentials', label: 'Credentials', icon: SecuredIcon },
+  { name: 'providers', label: '供应商', icon: ShopIcon },
+  { name: 'plans', label: '订阅', icon: LayersIcon },
+  { name: 'credentials', label: '上游凭证', icon: SecuredIcon },
   { name: 'prices', label: '定价', icon: MoneyIcon },
 ];
 
 const opsNav: NavItem[] = [
-  { name: 'admin-usage', label: 'Usage', icon: ChartBarIcon },
+  { name: 'admin-usage', label: '用量', icon: ChartBarIcon },
   { name: 'cost', label: '成本报表', icon: MoneyIcon },
   { name: 'quota-rules', label: '配额规则', icon: ErrorCircleIcon },
-  { name: 'roi', label: '缓存 ROI', icon: DownloadIcon },
-  { name: 'exports', label: 'Exports', icon: DownloadIcon },
-  { name: 'deletions', label: 'Deletions', icon: DeleteIcon },
-  { name: 'webhooks', label: 'Webhooks', icon: NotificationIcon },
+  { name: 'roi', label: '缓存收益', icon: DownloadIcon },
+  { name: 'exports', label: '导出任务', icon: DownloadIcon },
+  { name: 'deletions', label: '用量删除', icon: DeleteIcon },
+  { name: 'webhooks', label: 'Webhook 端点', icon: NotificationIcon },
   { name: 'consumers', label: 'API 消费者', icon: SecuredIcon },
-  { name: 'skillhub', label: 'SkillHub 管理', icon: AppIcon },
-  { name: 'agents', label: 'Agents', icon: RobotIcon },
+  { name: 'skillhub', label: '技能库管理', icon: AppIcon },
+  { name: 'agents', label: '智能体', icon: RobotIcon },
   { name: 'services', label: '服务管理', icon: ServerIcon },
   { name: 'configs', label: '全局配置', icon: SettingIcon },
   { name: 'mcp-services', label: 'MCP 服务', icon: ToolsIcon },
-  { name: 'alert-rules', label: 'Alert Rules', icon: ErrorCircleIcon },
-  { name: 'audit', label: 'Audit', icon: FilePasteIcon },
+  { name: 'alert-rules', label: '告警规则', icon: ErrorCircleIcon },
+  { name: 'audit', label: '审计日志', icon: FilePasteIcon },
 ];
 
 const navGroups = computed(() => {
@@ -218,7 +218,6 @@ async function handleLogout() {
     <footer class="mk-shell-footer">
       <span>MiQroGate 0.1.0</span>
       <span>catalog v1</span>
-      <span>last sync —</span>
     </footer>
   </div>
 </template>
@@ -309,7 +308,7 @@ async function handleLogout() {
 
 .shell-nav {
   width: var(--miqrokey-nav-width);
-  padding: var(--miqrokey-space-4) var(--miqrokey-space-2);
+  padding: var(--miqrokey-space-4) 10px;
   background: var(--miqrokey-bg-surface);
   border-right: 1px solid var(--miqrokey-border-default);
   flex-shrink: 0;
@@ -329,25 +328,29 @@ async function handleLogout() {
 }
 
 .nav-group-title {
-  padding: var(--miqrokey-space-2) var(--miqrokey-space-3) 4px;
-  font-size: 12px;
+  padding: 16px 14px 6px;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--miqrokey-text-disabled);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: var(--miqrokey-space-2);
-  padding: 7px var(--miqrokey-space-3);
-  margin-bottom: 2px;
-  border-radius: var(--miqrokey-radius-control);
-  border-left: 2px solid transparent;
+  gap: 10px;
+  height: 34px;
+  padding: 0 12px;
+  margin-bottom: 1px;
+  border-radius: 7px;
   color: var(--miqrokey-text-secondary);
-  font-size: 14px;
+  font-size: 13.5px;
+  font-weight: 500;
   text-decoration: none;
   cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
 }
 
 .collapsed .nav-item {
@@ -368,9 +371,8 @@ async function handleLogout() {
 
 .nav-item.active {
   background: var(--miqrokey-accent-soft);
-  border-left-color: var(--miqrokey-accent);
   color: var(--miqrokey-accent);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .shell-content {

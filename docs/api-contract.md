@@ -44,10 +44,21 @@
 |---|---|---|
 | `POST /api/v1/auth/bootstrap` | 一次性创建首个 SYSTEM_ADMIN 管理员 | 匿名（需 bootstrap secret） |
 | `POST /api/v1/auth/login` | 用户名/密码登录，创建会话 | 匿名 |
+| `POST /api/v1/auth/register` | 自助注册（F-REG）：创建普通用户并直接登录 | 匿名（开关 `miqrokey.registration-enabled`，默认开） |
 | `POST /api/v1/auth/logout` | 当前会话失效 | 已登录 |
 | `GET /api/v1/auth/me` | 当前用户、角色、会话到期时间 | 已登录 |
 | `POST /api/v1/auth/password` | 修改自己的密码并撤销其他会话 | 已登录 |
 | `GET /api/v1/auth/csrf` | 获取 CSRF token（从配置名称的 Cookie 读取） | 已登录 |
+
+### 3.1b 自助注册（F-REG）
+
+`POST /api/v1/auth/register`：`{ "username", "displayName"?, "password" }` → `201`（响应体与 `/login` 相同，并下发同一套会话 Cookie，注册即登录）。语义：
+
+- 只创建 `USER` 角色账号（管理员仍走 `/admin/users` 邀请制流程）；`mustChangePassword=false`（密码为本人所设）。
+- 校验：用户名空白/超长 → `400 USERNAME_INVALID`；重复 → `409 USERNAME_TAKEN`（租户行锁序列化并发注册）；密码不满足策略（长度/字符类别/常见密码）→ `400 PASSWORD_INVALID`。
+- 开关 `miqrokey.registration-enabled`（`MIQROKEY_REGISTRATION_ENABLED`，默认 `true`）为 `false` 时 → `403 REGISTRATION_DISABLED`；登录、bootstrap 不受影响。私有化部署需要"仅邀请"时可关闭。
+- 公开端点：与 login/bootstrap 一样无会话、无 CSRF 要求；审计事件 `REGISTER`。
+- 防滥用注记：单租户内部/试用规模未加频率限制；对外公网部署建议在网络层加速率限制（记录于配置参考）。
 
 ### 3.2 Bootstrap 流程
 

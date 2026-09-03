@@ -48,6 +48,25 @@ describe('auth store', () => {
     expect(store.user?.username).toBe('alice');
   });
 
+  it('registers a new account and populates the user immediately', async () => {
+    vi.spyOn(api, 'register').mockResolvedValue({
+      id: 'u9',
+      username: 'newbie',
+      displayName: '新同学',
+      role: 'USER',
+      mustChangePassword: false,
+      sessionExpiresAt: '2026-08-26T00:00:00Z',
+    });
+
+    const store = useAuthStore();
+    await store.register('newbie', '新同学', 'StrongPass2026!');
+
+    expect(api.register).toHaveBeenCalledWith('newbie', '新同学', 'StrongPass2026!');
+    expect(store.isAuthenticated).toBe(true);
+    expect(store.user?.username).toBe('newbie');
+    expect(store.mustChangePassword).toBe(false);
+  });
+
   it('clears the user on logout even if the API call fails', async () => {
     vi.spyOn(api, 'logout').mockRejectedValue(new Error('network'));
     const store = useAuthStore();

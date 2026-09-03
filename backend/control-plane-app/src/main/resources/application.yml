@@ -18,6 +18,8 @@ spring:
     locations: classpath:db/migration
 
 miqrokey:
+  # 自助注册开关（F-REG）：默认开启便于内测/试用；需要邀请制时置 false。
+  registration-enabled: ${MIQROKEY_REGISTRATION_ENABLED:true}
   control:
     admin-access:
       # 管理门户来源 IP 白名单（F05，security §6）：空 = 不限制（历史行为）。

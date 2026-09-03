@@ -30,6 +30,13 @@ public class AuthProperties {
     private String bootstrapSecretFile;
 
     /**
+     * Whether open self-registration is enabled (F-REG). Defaults to true for
+     * trial/internal deployment; production deployments that want invitation-only
+     * accounts set {@code MIQROKEY_REGISTRATION_ENABLED=false}.
+     */
+    private boolean registrationEnabled = true;
+
+    /**
      * Whether to set the {@code Secure} flag on cookies. Derived from
      * {@code miqrokey.production} and the active Spring profiles at startup.
      * Manually setting this to {@code false} when production mode is active will
@@ -151,5 +158,11 @@ public class AuthProperties {
     }
     public void setCredentialDrainGrace(Duration v) {
         this.credentialDrainGrace = v;
+    }
+    public boolean isRegistrationEnabled() {
+        return registrationEnabled;
+    }
+    public void setRegistrationEnabled(boolean v) {
+        this.registrationEnabled = v;
     }
 }

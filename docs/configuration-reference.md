@@ -80,6 +80,7 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | 配置 | 默认 | 说明 |
 |---|---:|---|
 | `MIQROKEY_BOOTSTRAP_SECRET_FILE` | 无 | 仅首个管理员创建时使用，完成后移除 |
+| `MIQROKEY_REGISTRATION_ENABLED` | `true` | 自助注册开关（F-REG，api-contract §3.1b）：`false` 时 `/api/v1/auth/register` 返回 403 REGISTRATION_DISABLED（邀请制部署）；公网部署建议另配网络层速率限制 |
 | `MIQROKEY_SESSION_COOKIE_NAME` | `MIQROKEY_SESSION` | Secure/HttpOnly/SameSite cookie |
 | `MIQROKEY_CSRF_COOKIE_NAME` | `MIQROKEY_CSRF` | non-HttpOnly/SameSite cookie（JavaScript 可读） |
 | `MIQROKEY_SESSION_IDLE_TIMEOUT` | `PT30M` | 空闲失效 |

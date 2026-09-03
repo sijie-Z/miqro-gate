@@ -6,25 +6,47 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `F05 管理门户 IP 白名单`（security §6）— `DONE`（PR #130 已合并）
-- Goal status: `DONE`（本会话 2026-09-03；#122–#130 全部合并入 develop 4b8d8b9）
+- Current goal: `F-REG 账号自助注册 + 登录页重做` — `DONE`（PR #131 已开，**待 CI 全绿后按授权模式合并**）
+- Goal status: `DONE`（2026-09-03；分支 goal/self-registration @ 3ff50fe，工作区干净）
 - Last updated: `2026-09-03 CST`
-- Branch: `goal/admin-ip-allowlist`（已合并）；develop @ 4b8d8b9，工作区清洁
-- 会话交付链（#122–#130，9 连发）：MCP ACL → F24 → F03 → F04 → F06 → F02 盘点 → F35 → F09 → F05
-- 下一步候选：A 组剩 **F01 MCP 代理接线**（需先定 SSE/Streamable HTTP 传输实现；用户已明确与公司 slurm MCP/Forge 积分集成一并暂缓）→ B 组 F11（路由规则，可配置面先行）→ 前端 OpenAPI codegen 迁移（发布前候选）
-- **教训（本会话）**：① 建分支命令若 `git pull && git switch -c` 因网络失败整链中断会静默留在 develop 上提交——提交前先 `git branch --show-current` 复核；本地误提交用 `git branch -f` 移回原位（未 push 无碍）。② 新集成测试 setUp 必须含 bootstrap 后改密步骤（其他测试同款流程），否则换 remote 地址的用例全 401
+- 本地试跑环境（**非仓库内容**）：control-plane(8080)/gateway(8081)/frontend dev(5173) 均在跑，代码=本分支最新；管理员 root/DrillPass2026!；DeepSeek key 在 miqro-local/.deepseek-key.tmp（不入库、已建议轮换）
+- **下一会话启动必读**：`docs/NEXT_SESSION_PLAN.md`（分阶段执行计划：PR #131 收尾 → PostHog 自绘 UI 专项 U0-U3 → 功能候选；含验收/评审/环境备忘/状态段）
+- **会话交接点（功能面待办，见下段）**——本段为后续 session 的执行清单
 
-## F09 OpenAPI 3.1 生成 + CI 破坏性变更检查 — api-contract §8（2026-09-03，DONE）
+## 会话交接点 2026-09-03 — 功能面待办清单（用户点名写清楚）
 
-- **背景与方向**：G6.5 发现的文档契约未实现项（api-contract §8 / document-map §3 / release-checklist §0：仓库无 openapi 生成配置与产物）。规格要求：Control Plane 生成 OpenAPI 3.1 + CI 检查未提交的破坏性变更。
-- **后端**：springdoc `springdoc-openapi-starter-webmvc-api` 2.8.9（父 pom 加 `springdoc.version` 属性；**无 swagger-ui**，spec 即机器可读产物）；`springdoc.api-docs.version=OPENAPI_3_1`；`OpenApiSecuritySchemes`（config 包 customizer：Info 元数据 title/description/version + 四类鉴权 scheme 建模——portalSession Cookie / csrfToken Header / apiKey X-API-Key / consumerJwt Bearer，**只声明 components 不强制任何 operation**，登录/bootstrap 保持公开、角色强制在拦截器层）；`/v3/api-docs` 无需鉴权（只读文档，config doc 已注明）。
-- **契约测试**：`OpenApiSpecIntegrationTest` 1/1（MockMvc GET /v3/api-docs：openapi==3.1.0、info title、paths>30 + 9 个代表端点跨门户/管理/配额/审批/billing、schemas>20、4 security schemes；并写 `target/openapi-spec.json` 供 CI diff）。
-- **破坏性门禁**：基线 `docs/openapi/openapi-3.1.json`（82KB，105 paths / 89 schemas，确定性无 UUID/时间戳——springdoc LinkedHashMap 稳定序）入库；`deploy/openapi/check-openapi-breaking.py`（python3 无依赖）：删除 path/operation/response code/参数、schema 属性变 required → exit 1（新增端点/参数/属性合法，仅汇总）；ci.yml backend-integration job 追加「OpenAPI breaking-change diff vs committed baseline」步骤。三规则本地负例验证（删 op exit 1 / required 分支 exit 1 / 自身 diff exit 0）。
-- **验证（全部真实 PASS）**：`OpenApiSpecIntegrationTest` 1/1；后端全量 `verify -P integration` **BUILD SUCCESS 0 failures**（control-plane 381 = 380+1）；check-openapi-breaking.py 三规则自测；secret scan ok。
-- **排障记录**：类名与 @Bean 方法同名 → BeanDefinitionOverrideException（改名 securitySchemesDocs）；springdoc.info.* yml 属性不生效 → customizer 直接设 Info；swagger Info setter 返回 void 不能链式；spec 中既有 `required` 含所选属性的模拟导致 set diff 为空（脚本本身正确）。
-- **取舍（记录）**：**前端 TS client codegen 未纳入 F09**（document-map §3「由 OpenAPI 生成」愿景）——现有手写 `frontend/src/api` + `types/api`（~30 视图）继续维护，api-contract §8 / document-map / backlog F09 均注明 codegen 迁移为发布前候选；运行时 spec 覆盖 105 paths 不含 /v3/api-docs 自身与 actuator（OK）。
-- **文档**：api-contract §8（实现态 + 前端手写取舍）；document-map §3；release-checklist（§0 OpenAPI 行 ⏳→✅ + §7 交付物更新）；configuration-reference（§8 端点说明）；CHANGELOG；feature-backlog F09 → DONE；progress。
-- **gitflow**：分支 `goal/openapi-spec`（基于 develop a97ce7e/#128 后）。
+### A. 立即动作（下一 session 第一优先）
+1. **PR #131 收尾**：`gh pr checks 131` → 全绿后 `gh pr merge 131 --squash --delete-branch` → 同步 develop → progress 更新合并标记。PR 内容：F-REG 注册全栈（后端 register + 开关 + 测试 4 + 前端 spec 5 + vitest 108/108 + e2e 35/35）+ 登录页四轮视觉（2→8/10）+ 新用户 onboarding 引导 + 修复（confirmDialog 弹窗残留、usage 路由误标 admin、t-dropdown-item attrs、导航/标题中文化、tokens 视觉 pass）。
+2. **注册→授权→推理闭环演示**：管理员把 demo2_user 加进 LIVE 项目（项目成员）+ 其建 Key（真实 DeepSeek key 在 miqro-local）→ 真推理 → usage/quota 验证（此前 root 链路已验证 MQROK-LIVE-OK，注册用户链路未走）。
+
+### B. 功能候选（按 backlog 现状，用户未再指定优先级）
+1. **F11 MCP 路由规则**（B 组第一个可独立于 F01 的 PLANNED：default 兜底 + 自定义规则、Path/Host/Method/Header 匹配纯函数 + 冲突校验，配置面先行）。
+2. **管理员对"已注册无项目"用户的快捷路径**（用户验收反馈方向：新用户引导写了"找管理员"，管理员侧可在用户列表提供「加入项目」快捷操作，避免跨两页手点）。
+3. **前端 OpenAPI codegen 迁移**（document-map §3 承诺，发布前候选——移除手写 api/types）。
+4. **供应商真实凭证联调矩阵**（23 产品逐个 VERIFIED；现仅 DeepSeek 有 key 在本地，V4-flash/vision-exp 已实测）。
+5. B 组 F12–F15、C 组 F19–F21 等维持原状态；F01 MCP 代理与公司 MCP/Forge 积分集成**暂缓（用户明确，保密不外发细节）**；BLOCKED 组等 leader/平台。
+6. **待用户决断**：版本 tag 与正式发布（0.1.0-SNAPSHOT 未 tag）；依赖升级 PR（dependabot ~20 个 open）；CodeRabbit OSS 首审授权。
+
+### C. UI 专项（用户 2026-09-03 拍板，非功能但单独建档）
+- **母版 = PostHog + Vben Admin 5**（用户明确"认真参考"）：PostHog 取表格/留白/细节气质（浅底细边、hover 行、数字右对齐），Vben 取中后台布局与组件组织参考。
+- 执行路径（下 session 或专门 UI session）：① 抽取两母版设计语言（间距/字号/边框/表格/侧栏/状态徽标）→ ② tokens.css/global.css 重写 → ③ AppShell/表格/表单全局 → ④ 逐页精修 → ⑤ 每轮 vision 模型截图评分（会话内图片不可见，用 deepseek-v4-flash-vision-exp 评审，基线已从 2/10 到 8/10）。
+- 目标：用户可见观感 8-9/10；约束不变：无渐变、无紫色、浅色操作台、审美审计规则维持。
+
+### D. 环境与密钥备忘（本地，不入库）
+- 服务启动：mvnw spring-boot:run 需先 `install -Dmaven.test.skip=true`（自定义父 POM 不打 fat jar、依赖需进 .m2）；仓库根 java/密钥 env 模板见 miqro-local/restart.bat。
+- 登录凭据与 key 见 Current State；miqro-local 含旧 drill 数据与截图（ui-login-v1..v4 等，可作 UI 对比）。
+- Windows shell 中文 curl 需 UTF-8 文件体重发；python 路径需 `D:/` 盘符格式；cwd 易漂移（命令前显式 cd 仓库根）。
+
+## F-REG 账号自助注册 + 登录页重做 — 用户现场需求（2026-09-03，DONE）
+
+- **背景**：用户试跑后明确要求：① 账号要能自助注册（企业内测/未来客户部署都不可接受"管理员手工建号"，虽 50 账号容量/邀请制是早期产品决策，注册能力应为可配置项而非缺项）；② 登录页 UI 不满意（"差劲/没品味/没有注册"）。处置：用真实 DeepSeek key（用户提供，本地 miqro-local 不入库；已提示用后轮换）跑通全链路 + 以 `deepseek-v4-flash-vision-exp` 视觉模型对截图做客观评审作为"眼睛"（会话图片通道不可用），据此整改。
+- **视觉评审摘录（已采纳）**：布局左右失衡/大片留白、登录卡与背景对比不足、输入控件偏小且 focus 不明确、额度条与文案排版粗糙、品牌蓝缺乏呼应。
+- **后端**：`POST /api/v1/auth/register`（公开端点——SessionFilter PUBLIC_PATHS + CSRF 豁免集已扩；租户行锁序列化并发重名；`validatePasswordPolicy`/`isCommonPassword` 复用；注册即建会话同 /login；审计 `REGISTER`）；开关 `miqrokey.registration-enabled`（AuthProperties，默认 true，yml 显式行 + `MIQROKEY_REGISTRATION_ENABLED`）；错误码 USERNAME_INVALID/USERNAME_TAKEN/PASSWORD_INVALID/REGISTRATION_DISABLED。
+- **前端**：LoginView 重做——登录/注册双模式分段页签（账号/昵称/密码/确认密码；注册即进入）；布局整改按评审意见（对称双栏 grid、左栏内容留白平衡、卡片浮起阴影、控件 40px+focus 环、额度条入浅色卡、品牌强调色）；术语统一（"账号"与"昵称"）。
+- **验证（全部真实 PASS）**：集成 `RegistrationApiIntegrationTest` 3/3（注册即登入 + /me 立即可用 + DB 断言；重名 409/弱密码 400；无会话无 CSRF 可注册）+ `RegistrationDisabledApiIntegrationTest` 1/1（开关关 → 403 REGISTRATION_DISABLED）；前端 vitest LoginView.spec 3/3（模式切换/注册提交带昵称/密码不一致拦截）+ auth.spec +1（store register）；**本地真实链路**：演示账号 demo2_user 经 UI 注册→自动登录→进入系统（浏览器 pane DOM 验证）；control-plane 模块级 BUILD SUCCESS。
+- **排障记录**：Windows shell 中文 curl 请求体乱码 → UTF-8 文件体重发；TDesign t-button submit 在 jsdom 不派发原生 submit → 测试触发 `form` submit 事件；Vitest 对 t-form @submit 需要原生事件。
+- **文档**：api-contract §3.1b（注册语义/校验/开关/审计/防滥用注记）+ §3.1 表行；configuration-reference `MIQROKEY_REGISTRATION_ENABLED`；CHANGELOG；feature-backlog F32 备注自助注册已交付（平台映射仍 BLOCKED）；progress。
+- **gitflow**：分支 `goal/self-registration`。
 
 ## F05 管理门户 IP 白名单 — security §6（2026-09-03，DONE）
 
@@ -37,6 +59,17 @@
 - **gitflow**：分支 `goal/admin-ip-allowlist`（基于 develop 1f454d5）。
 
 ## F35 usage 队列饱和应急直写 — architecture §5（2026-09-03，DONE）
+
+## F-REG 账号自助注册 + 登录页重做 — 用户现场需求（2026-09-03，DONE）
+
+- **背景**：用户试跑后明确要求：① 账号要能自助注册（企业内测/未来客户部署都不可接受"管理员手工建号"，虽 50 账号容量/邀请制是早期产品决策，注册能力应为可配置项而非缺项）；② 登录页 UI 不满意（"差劲/没品味/没有注册"）。处置：用真实 DeepSeek key（用户提供，本地 miqro-local 不入库；已提示用后轮换）跑通全链路 + 以 `deepseek-v4-flash-vision-exp` 视觉模型对截图做客观评审作为"眼睛"（会话图片通道不可用），据此整改。
+- **视觉评审摘录（已采纳）**：布局左右失衡/大片留白、登录卡与背景对比不足、输入控件偏小且 focus 不明确、额度条与文案排版粗糙、品牌蓝缺乏呼应。
+- **后端**：`POST /api/v1/auth/register`（公开端点——SessionFilter PUBLIC_PATHS + CSRF 豁免集已扩；租户行锁序列化并发重名；`validatePasswordPolicy`/`isCommonPassword` 复用；注册即建会话同 /login；审计 `REGISTER`）；开关 `miqrokey.registration-enabled`（AuthProperties，默认 true，yml 显式行 + `MIQROKEY_REGISTRATION_ENABLED`）；错误码 USERNAME_INVALID/USERNAME_TAKEN/PASSWORD_INVALID/REGISTRATION_DISABLED。
+- **前端**：LoginView 重做——登录/注册双模式分段页签（账号/昵称/密码/确认密码；注册即进入）；布局整改按评审意见（对称双栏 grid、左栏内容留白平衡、卡片浮起阴影、控件 40px+focus 环、额度条入浅色卡、品牌强调色）；术语统一（"账号"与"昵称"）。
+- **验证（全部真实 PASS）**：集成 `RegistrationApiIntegrationTest` 3/3（注册即登入 + /me 立即可用 + DB 断言；重名 409/弱密码 400；无会话无 CSRF 可注册）+ `RegistrationDisabledApiIntegrationTest` 1/1（开关关 → 403 REGISTRATION_DISABLED）；前端 vitest LoginView.spec 3/3（模式切换/注册提交带昵称/密码不一致拦截）+ auth.spec +1（store register）；**本地真实链路**：演示账号 demo2_user 经 UI 注册→自动登录→进入系统（浏览器 pane DOM 验证）；control-plane 模块级 BUILD SUCCESS。
+- **排障记录**：Windows shell 中文 curl 请求体乱码 → UTF-8 文件体重发；TDesign t-button submit 在 jsdom 不派发原生 submit → 测试触发 `form` submit 事件；Vitest 对 t-form @submit 需要原生事件。
+- **文档**：api-contract §3.1b（注册语义/校验/开关/审计/防滥用注记）+ §3.1 表行；configuration-reference `MIQROKEY_REGISTRATION_ENABLED`；CHANGELOG；feature-backlog F32 备注自助注册已交付（平台映射仍 BLOCKED）；progress。
+- **gitflow**：分支 `goal/self-registration`。
 
 ## F05 管理门户 IP 白名单 — security §6（2026-09-03，DONE）
 

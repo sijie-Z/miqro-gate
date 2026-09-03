@@ -5,15 +5,15 @@
 
 :root {
   /* color — Tencent-console-inspired ledger palette */
-  --miqrokey-bg-canvas: #f2f4f8;
+  --miqrokey-bg-canvas: #f4f6fa;
   --miqrokey-bg-surface: #ffffff;
-  --miqrokey-bg-subtle: #f7f8fa;
-  --miqrokey-border-default: #e5e7eb;
-  --miqrokey-border-muted: #eef0f3;
-  --miqrokey-border-strong: #d4d8df;
-  --miqrokey-text-primary: #1f2329;
-  --miqrokey-text-secondary: #646a73;
-  --miqrokey-text-disabled: #8a9099;
+  --miqrokey-bg-subtle: #f6f8fb;
+  --miqrokey-border-default: #e4e9f1;
+  --miqrokey-border-muted: #eef1f6;
+  --miqrokey-border-strong: #ccd6e4;
+  --miqrokey-text-primary: #0f172a;
+  --miqrokey-text-secondary: #5b6b82;
+  --miqrokey-text-disabled: #8b98ab;
   --miqrokey-accent: #0066ff;
   --miqrokey-accent-hover: #0052cc;
   --miqrokey-accent-soft: #eaf2ff;
@@ -31,13 +31,13 @@
   --miqrokey-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
   --miqrokey-font-size-body: 13px;
   --miqrokey-font-size-table: 12px;
-  --miqrokey-font-size-title: 18px;
+  --miqrokey-font-size-title: 20px;
   --miqrokey-font-size-hero: 24px;
 
   /* shape & spacing */
-  --miqrokey-radius-control: 4px;
-  --miqrokey-radius-panel: 6px;
-  --miqrokey-radius-modal: 8px;
+  --miqrokey-radius-control: 6px;
+  --miqrokey-radius-panel: 8px;
+  --miqrokey-radius-modal: 10px;
   --miqrokey-space-1: 4px;
   --miqrokey-space-2: 8px;
   --miqrokey-space-3: 12px;

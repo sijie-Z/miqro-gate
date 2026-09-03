@@ -108,6 +108,11 @@ describe('KeysView', () => {
     // resetAllMocks clears implementations too — a previous test's
     // mockResolvedValue must not leak into the next test.
     vi.resetAllMocks();
+    // KeysView loads keys and grants together on mount. Tests that only vary
+    // the grants shape (onboarding cases) rely on a stable keys default —
+    // leaving listVirtualKeys unstubbed makes load() assign undefined and the
+    // next render throws reading `keys.length`.
+    mockApi.listVirtualKeys.mockResolvedValue([]);
     // Closed t-select poppers stay teleported in <body>; drop leftovers so
     // option lookups only see the current test's dropdown.
     document.body.innerHTML = '';
@@ -247,5 +252,35 @@ describe('KeysView', () => {
       'One or more models are not granted',
     );
     expect(wrapper.find('[data-testid="create-error"]').text()).toContain('req-123');
+  });
+
+  it('shows the admin-contact onboarding card when the account is in no project', async () => {
+    mockApi.myGrants.mockResolvedValue({
+      projects: [],
+      grants: [],
+      purposes: ['CLAUDE_CODE'],
+    } as MeGrantsResponse);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const card = wrapper.find('[data-testid="onboard-no-project"]');
+    expect(card.exists()).toBe(true);
+    expect(card.text()).toContain('把账号加入一个项目');
+    expect(wrapper.find('[data-testid="onboard-has-project"]').exists()).toBe(false);
+  });
+
+  it('keeps the plain empty hint once the account has a project', async () => {
+    mockApi.myGrants.mockResolvedValue({
+      projects: grants.projects,
+      grants: [],
+      purposes: ['CLAUDE_CODE'],
+    } as MeGrantsResponse);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="onboard-no-project"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="onboard-has-project"]').exists()).toBe(true);
   });
 });

@@ -58,7 +58,7 @@ onMounted(load);
 <template>
   <div class="skillhub-page">
     <PageHeader
-      title="SkillHub"
+      title="技能库"
       description="公司内部技能目录：全部技能对登录用户可见；下载按团队/项目授权。"
     />
 
