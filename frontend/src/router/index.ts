@@ -96,19 +96,19 @@ const router = createRouter({
         {
           path: 'providers',
           name: 'providers',
-          component: () => import('@/views/AdminProvidersView.vue'),
+          component: () => import('@/views/next/NextProvidersView.vue'),
           meta: adminMeta('供应商'),
         },
         {
           path: 'plans',
           name: 'plans',
-          component: () => import('@/views/AdminPlansView.vue'),
+          component: () => import('@/views/next/NextPlansView.vue'),
           meta: adminMeta('订阅'),
         },
         {
           path: 'prices',
           name: 'prices',
-          component: () => import('@/views/AdminPricesView.vue'),
+          component: () => import('@/views/next/NextPricesView.vue'),
           meta: adminMeta('定价'),
         },
         {
