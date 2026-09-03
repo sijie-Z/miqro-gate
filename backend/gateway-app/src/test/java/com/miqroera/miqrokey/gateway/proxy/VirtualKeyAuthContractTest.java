@@ -324,6 +324,64 @@ class VirtualKeyAuthContractTest {
         }
 
         @Test
+        @DisplayName("semantic key: different histories with the same last user message still hit")
+        void semanticKeyHitsAcrossHistories() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+
+            // Earlier turns differ; the last user message and the system prompt
+            // are identical — the semantic cache key (F02, aligned with Tencent's
+            // "latest user message") must hit. The final question text is unique
+            // to this test so no other scenario can pre-populate its key.
+            String first = """
+                    {"model":"gpt-4o-mini","messages":[
+                      {"role":"user","content":"earlier question about project A"},
+                      {"role":"user","content":"What time is it in Beijing exactly?"}]}""";
+            String second = """
+                    {"model":"gpt-4o-mini","messages":[
+                      {"role":"user","content":"earlier question about project B"},
+                      {"role":"user","content":"What time is it in Beijing exactly?"}]}""";
+
+            byte[] hit = webTestClient.post().uri("/v1/chat/completions").header(CacheEligibility.CACHEABLE_HEADER, "1")
+                    .bodyValue(first).exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss").expectBody().returnResult()
+                    .getResponseBody();
+
+            byte[] replayed = webTestClient.post().uri("/v1/chat/completions")
+                    .header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(second).exchange().expectStatus().isOk()
+                    .expectHeader().valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "L1").expectBody().returnResult()
+                    .getResponseBody();
+
+            assertThat(replayed).isEqualTo(hit);
+            assertThat(replayed).isEqualTo(ChatFixtures.RESPONSE_BASIC.getBytes(StandardCharsets.UTF_8));
+            assertThat(mockProvider.getCapturedRequests()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("semantic key: a different last user message misses")
+        void semanticKeyMissesOnDifferentQuestion() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+
+            String question = """
+                    {"model":"gpt-4o-mini","messages":[
+                      {"role":"user","content":"What time is it in Tokyo?"}]}""";
+            String otherQuestion = """
+                    {"model":"gpt-4o-mini","messages":[
+                      {"role":"user","content":"What time is it in Paris?"}]}""";
+
+            webTestClient.post().uri("/v1/chat/completions").header(CacheEligibility.CACHEABLE_HEADER, "1")
+                    .bodyValue(question).exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+            webTestClient.post().uri("/v1/chat/completions").header(CacheEligibility.CACHEABLE_HEADER, "1")
+                    .bodyValue(otherQuestion).exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+
+            // Both went upstream: different last user messages are different keys.
+            assertThat(mockProvider.getCapturedRequests()).hasSize(2);
+        }
+
+        @Test
         @DisplayName("should not cache without the explicit opt-in header")
         void shouldNotCacheWithoutOptIn() {
             mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
