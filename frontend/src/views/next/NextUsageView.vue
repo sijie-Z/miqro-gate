@@ -570,15 +570,17 @@ function formatTime(iso: string): string {
   align-items: center;
   gap: var(--ui-space-2);
   margin: 0 var(--ui-space-5);
-  padding: var(--ui-space-3) 0;
-  border-top: 1px solid var(--ui-border);
+  padding: var(--ui-space-3) var(--ui-space-4);
+  margin-top: var(--ui-space-2);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-primary-soft);
   font-size: var(--ui-font-size-sm);
   color: var(--ui-foreground-secondary);
 }
 
 .next-usage__totals-label {
   font-weight: var(--ui-weight-semibold);
-  color: var(--ui-foreground);
+  color: var(--ui-primary);
   width: 148px;
   flex-shrink: 0;
 }
@@ -617,9 +619,9 @@ function formatTime(iso: string): string {
 
 .next-usage__bar-row {
   display: grid;
-  grid-template-columns: 88px 1fr 64px;
+  grid-template-columns: 110px 1fr 70px;
   align-items: center;
-  gap: var(--ui-space-2);
+  gap: var(--ui-space-3);
   font-size: var(--ui-font-size-xs);
 }
 

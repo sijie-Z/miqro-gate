@@ -2,8 +2,9 @@
 /**
  * NewShell — v2 console chrome for the /app-new/* pilot (U0).
  * PostHog-style rail: white sidebar with hairline divider over warm canvas,
- * grouped nav, user chip pinned at the bottom. Routes outside the pilot
- * keep the legacy /app console — a subtle link returns to it.
+ * grouped nav with a left accent bar on the active item. The user chip and
+ * logout live in a slim topbar (console convention); the legacy console is
+ * one reachable hop away for everything outside the pilot.
  */
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -38,6 +39,8 @@ const userInitial = computed(() => {
   return name.slice(0, 1).toUpperCase();
 });
 
+const isActive = (to: string) => route.path === to;
+
 async function handleLogout() {
   await auth.logout();
   await router.push({ name: 'login' });
@@ -61,8 +64,9 @@ async function handleLogout() {
             :key="item.to"
             :to="item.to"
             class="new-shell__nav-item"
-            :class="{ 'new-shell__nav-item--active': route.path === item.to }"
+            :class="{ 'new-shell__nav-item--active': isActive(item.to) }"
           >
+            <span class="new-shell__nav-accent" aria-hidden="true" />
             <svg
               class="new-shell__nav-icon"
               width="16"
@@ -100,22 +104,33 @@ async function handleLogout() {
         </div>
       </nav>
 
-      <div class="new-shell__foot">
-        <router-link to="/app/keys" class="new-shell__legacy-link" title="返回旧版控制台">
-          旧版控制台 →
-        </router-link>
-        <div class="new-shell__user">
-          <span class="new-shell__user-avatar" aria-hidden="true">{{ userInitial }}</span>
-          <div class="new-shell__user-meta">
-            <span class="new-shell__user-name">{{ auth.user?.username }}</span>
-            <span class="new-shell__user-role">{{
-              auth.user?.role === 'SYSTEM_ADMIN' ? '系统管理员' : '用户'
-            }}</span>
+      <div class="new-shell__rail-foot">
+        <p class="new-shell__version">MiQroGate 0.1 · 试点版</p>
+      </div>
+    </aside>
+
+    <main class="new-shell__main">
+      <header class="new-shell__topbar">
+        <span class="new-shell__context">{{ (route.meta.title as string) ?? '控制台' }}</span>
+        <div class="new-shell__topbar-right">
+          <router-link to="/app/keys" class="new-shell__legacy-btn" title="迁移完成前使用旧版控制台">
+            旧版控制台
+          </router-link>
+          <span class="new-shell__divider" aria-hidden="true" />
+          <div class="new-shell__user">
+            <span class="new-shell__user-avatar" aria-hidden="true">{{ userInitial }}</span>
+            <div class="new-shell__user-meta">
+              <span class="new-shell__user-name">{{ auth.user?.username }}</span>
+              <span class="new-shell__user-role">{{
+                auth.user?.role === 'SYSTEM_ADMIN' ? '系统管理员' : '用户'
+              }}</span>
+            </div>
           </div>
           <button
             type="button"
             class="new-shell__logout"
             aria-label="退出登录"
+            data-testid="shell-logout"
             @click="handleLogout"
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -129,11 +144,11 @@ async function handleLogout() {
             </svg>
           </button>
         </div>
-      </div>
-    </aside>
+      </header>
 
-    <main class="new-shell__main">
-      <RouterView />
+      <div class="new-shell__content">
+        <RouterView />
+      </div>
     </main>
   </div>
 </template>
@@ -141,7 +156,8 @@ async function handleLogout() {
 <style scoped>
 .new-shell {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background: var(--ui-background);
   color: var(--ui-foreground);
 }
@@ -161,19 +177,19 @@ async function handleLogout() {
   gap: var(--ui-space-2);
   height: var(--ui-header-height);
   padding: 0 var(--ui-space-5);
-  border-bottom: 1px solid var(--ui-border-muted);
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .new-shell__brand-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: var(--ui-radius-control);
   background: var(--ui-primary);
   color: #fff;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -195,29 +211,30 @@ async function handleLogout() {
 
 .new-shell__nav {
   flex: 1;
-  padding: var(--ui-space-4) var(--ui-space-3);
+  padding: var(--ui-space-5) var(--ui-space-3);
   overflow-y: auto;
 }
 
 .new-shell__group {
-  margin-bottom: var(--ui-space-5);
+  margin-bottom: var(--ui-space-6);
 }
 
 .new-shell__group-title {
-  margin: 0 0 var(--ui-space-1);
+  margin: 0 0 var(--ui-space-2);
   padding: 0 var(--ui-space-2);
   font-size: 11px;
   font-weight: var(--ui-weight-semibold);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--ui-foreground-faint);
 }
 
 .new-shell__nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--ui-space-2);
-  height: 32px;
+  height: 34px;
   padding: 0 var(--ui-space-2);
   border-radius: var(--ui-radius-control);
   color: var(--ui-foreground-secondary);
@@ -233,10 +250,25 @@ async function handleLogout() {
   color: var(--ui-foreground);
 }
 
+.new-shell__nav-accent {
+  position: absolute;
+  left: -3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: var(--ui-radius-pill);
+  background: transparent;
+}
+
 .new-shell__nav-item--active {
   background: var(--ui-primary-soft);
   color: var(--ui-primary);
   font-weight: var(--ui-weight-medium);
+}
+
+.new-shell__nav-item--active .new-shell__nav-accent {
+  background: var(--ui-primary);
 }
 
 .new-shell__nav-item--active .new-shell__nav-icon {
@@ -248,56 +280,98 @@ async function handleLogout() {
   flex-shrink: 0;
 }
 
-.new-shell__foot {
+.new-shell__rail-foot {
   border-top: 1px solid var(--ui-border);
-  padding: var(--ui-space-3);
+  padding: var(--ui-space-3) var(--ui-space-5);
+}
+
+.new-shell__version {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ui-foreground-faint);
+}
+
+.new-shell__main {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--ui-space-2);
+  height: 100vh;
 }
 
-.new-shell__legacy-link {
-  font-size: var(--ui-font-size-xs);
-  color: var(--ui-foreground-faint);
-  text-decoration: none;
-  padding: var(--ui-space-1) var(--ui-space-2);
+.new-shell__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-4);
+  height: var(--ui-header-height);
+  padding: 0 var(--ui-space-6);
+  background: var(--ui-card);
+  border-bottom: 1px solid var(--ui-border);
+  flex-shrink: 0;
+}
+
+.new-shell__context {
+  font-size: var(--ui-font-size-sm);
+  font-weight: var(--ui-weight-medium);
+  color: var(--ui-foreground-secondary);
+}
+
+.new-shell__topbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+}
+
+.new-shell__legacy-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 var(--ui-space-3);
+  border: 1px solid var(--ui-input-border);
   border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  text-decoration: none;
   transition:
     background-color var(--ui-ease),
-    color var(--ui-ease);
+    color var(--ui-ease),
+    border-color var(--ui-ease);
 }
 
-.new-shell__legacy-link:hover {
+.new-shell__legacy-btn:hover {
   background: var(--ui-fill-hover);
   color: var(--ui-foreground);
+  border-color: var(--ui-border-strong);
 }
 
-.new-shell__legacy-link:hover {
-  color: var(--ui-primary);
+.new-shell__legacy-btn:focus-visible,
+.new-shell__logout:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-shadow-focus);
+}
+
+.new-shell__divider {
+  width: 1px;
+  height: 20px;
+  background: var(--ui-border);
 }
 
 .new-shell__user {
   display: flex;
   align-items: center;
   gap: var(--ui-space-2);
-  padding: var(--ui-space-2);
-  border-radius: var(--ui-radius-control);
-  transition: background-color var(--ui-ease);
-}
-
-.new-shell__user:hover {
-  background: var(--ui-fill-hover);
 }
 
 .new-shell__user-avatar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: var(--ui-radius-control);
-  background: var(--ui-muted);
-  color: var(--ui-foreground-secondary);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary);
   font-size: var(--ui-font-size-xs);
   font-weight: var(--ui-weight-semibold);
   flex-shrink: 0;
@@ -306,16 +380,12 @@ async function handleLogout() {
 .new-shell__user-meta {
   display: flex;
   flex-direction: column;
-  min-width: 0;
-  flex: 1;
+  line-height: 1.2;
 }
 
 .new-shell__user-name {
   font-size: var(--ui-font-size-sm);
   font-weight: var(--ui-weight-medium);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .new-shell__user-role {
@@ -327,14 +397,17 @@ async function handleLogout() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   border: none;
   border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--ui-foreground-faint);
   cursor: pointer;
   flex-shrink: 0;
+  transition:
+    background-color var(--ui-ease),
+    color var(--ui-ease);
 }
 
 .new-shell__logout:hover {
@@ -342,13 +415,8 @@ async function handleLogout() {
   color: var(--ui-danger-fg);
 }
 
-.new-shell__logout:focus-visible {
-  outline: none;
-  box-shadow: var(--ui-shadow-focus);
-}
-
-.new-shell__main {
+.new-shell__content {
   flex: 1;
-  min-width: 0;
+  overflow-y: auto;
 }
 </style>

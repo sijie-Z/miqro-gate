@@ -379,7 +379,7 @@ test('new login page renders login and register modes', async ({ page }) => {
   await page.getByTestId('tab-register').click();
   await expect(page.getByTestId('register-display-name')).toBeVisible();
   await page.getByTestId('tab-login').click();
-  await page.screenshot({ path: 'test-results/baseline/next-login-1440x900.png' });
+  await page.screenshot({ path: 'test-results/baseline/next-login-1440x900.png', fullPage: true });
 });
 
 test('keys page lists keys and rotates through the kebab confirm gate', async ({ page }) => {
@@ -418,7 +418,7 @@ test('keys page lists keys and rotates through the kebab confirm gate', async ({
   await page.getByTestId('secret-close').click();
   await expect(page.getByTestId('secret-dialog')).toBeHidden();
 
-  await page.screenshot({ path: 'test-results/baseline/next-keys-1440x900.png' });
+  await page.screenshot({ path: 'test-results/baseline/next-keys-1440x900.png', fullPage: true });
 });
 
 test('revoke also walks the confirm gate and reloads the list', async ({ page }) => {
@@ -449,7 +449,7 @@ test('usage page shows quota, summary totals and pages the records', async ({ pa
 
   await page.getByTestId('records-next').click();
   await expect(page.getByText('共 45 条 · 第 2 / 3 页')).toBeVisible();
-  await page.screenshot({ path: 'test-results/baseline/next-usage-1440x900.png' });
+  await page.screenshot({ path: 'test-results/baseline/next-usage-1440x900.png', fullPage: true });
 });
 
 test('admin users page renders badges and gates the temp password reveal', async ({ page }) => {
@@ -473,7 +473,7 @@ test('admin users page renders badges and gates the temp password reveal', async
   await page.getByTestId('temp-password-close').click();
   await expect(page.getByTestId('temp-password-dialog')).toBeHidden();
 
-  await page.screenshot({ path: 'test-results/baseline/next-users-1440x900.png' });
+  await page.screenshot({ path: 'test-results/baseline/next-users-1440x900.png', fullPage: true });
 });
 
 test('regular users are redirected from the admin pilot route', async ({ page }) => {
