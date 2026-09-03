@@ -8,14 +8,6 @@ import { test, expect, type Page } from '@playwright/test';
  * Screenshots land in test-results/baseline/ for the vision review loop.
  */
 
-const ADMIN_USER = {
-  id: '0190-0000-0000-0001',
-  username: 'root',
-  displayName: 'Root Admin',
-  role: 'SYSTEM_ADMIN',
-  mustChangePassword: false,
-};
-
 const REGULAR_USER = {
   id: '0190-0000-0000-0009',
   username: 'demo2_user',
@@ -524,6 +516,68 @@ test('usage page shows quota, summary totals and pages the records', async ({ pa
   await page.getByTestId('records-next').click();
   await expect(page.getByText('共 45 条 · 第 2 / 3 页')).toBeVisible();
   await page.screenshot({ path: 'test-results/baseline/next-usage-1440x900.png', fullPage: true });
+});
+
+test('overview page shows stats, usage bars and recent keys', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+
+  await page.goto('/app-new/overview');
+  await expect(page.getByTestId('overview-stats')).toBeVisible();
+  await expect(page.getByText('本月 Tokens')).toBeVisible();
+  await expect(page.getByTestId('overview-usage')).toContainText('用量分布');
+  await expect(page.getByTestId('overview-keys')).toContainText('claude-code-main');
+  await page.screenshot({
+    path: 'test-results/baseline/next-overview-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('skills page renders cards and downloads a skill', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockUserPages(page);
+
+  await page.goto('/app-new/skills');
+  await expect(page.getByTestId('skill-card').first()).toBeVisible();
+  await expect(page.getByText('commit-msg-lint')).toBeVisible();
+  await page.getByTestId('skill-download').first().click();
+  await expect(page.getByText('已下载 commit-msg-lint')).toBeVisible();
+  await page.screenshot({ path: 'test-results/baseline/next-skills-1440x900.png', fullPage: true });
+});
+
+test('model approvals lists applications and gates the create form', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+  await mockUserPages(page);
+
+  await page.goto('/app-new/model-approvals');
+  await expect(page.getByTestId('model-approvals-table')).toBeVisible();
+  await expect(page.getByText('待审批')).toBeVisible();
+
+  await page.getByTestId('model-approval-open').click();
+  await expect(page.getByTestId('model-approval-form')).toBeVisible();
+  await page.getByTestId('model-approval-submit').click();
+  await expect(page.getByText('请选择 Virtual Key')).toBeVisible();
+  await page.screenshot({
+    path: 'test-results/baseline/next-model-approvals-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('profile page validates the password form', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+
+  await page.goto('/app-new/profile');
+  await expect(page.getByTestId('account-username')).toHaveText('demo2_user');
+  await page.getByTestId('current-password').fill('TempPass2026!');
+  await page.getByTestId('new-password').fill('StrongPass2026!');
+  await page.getByTestId('confirm-password').fill('Different2026!');
+  await page.getByTestId('password-submit').click();
+  await expect(page.getByTestId('field-error')).toContainText('两次输入的新密码不一致');
+  await page.screenshot({
+    path: 'test-results/baseline/next-profile-1440x900.png',
+    fullPage: true,
+  });
 });
 
 test('regular users are redirected from admin routes', async ({ page }) => {
