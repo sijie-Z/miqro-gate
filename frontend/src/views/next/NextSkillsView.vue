@@ -64,7 +64,9 @@ onMounted(load);
     <header class="ui-page-header">
       <div>
         <h1 class="ui-page-title">技能库</h1>
-        <p class="ui-page-desc">公司内部技能目录：全部技能对登录用户可见；下载按团队/项目授权。</p>
+        <p class="ui-page-desc">
+          公司内部技能目录，全部技能对登录用户可见。下载权限按团队/项目授权。
+        </p>
       </div>
     </header>
 
@@ -98,9 +100,9 @@ onMounted(load);
         </div>
         <footer class="next-skills__foot">
           <div class="next-skills__meta">
-            <span v-if="skill.author">{{ skill.author }}</span>
-            <span v-if="skill.license" class="ui-mono">{{ skill.license }}</span>
-            <span class="ui-num">{{ formatBytes(skill.contentBytes) }}</span>
+            <span v-if="skill.author" class="next-skills__meta-item">{{ skill.author }}</span>
+            <span v-if="skill.license" class="next-skills__license">{{ skill.license }}</span>
+            <span class="next-skills__meta-item ui-num">{{ formatBytes(skill.contentBytes) }}</span>
           </div>
           <UiButton
             variant="secondary"
@@ -170,7 +172,7 @@ onMounted(load);
 
 .next-skills__version {
   font-size: var(--ui-font-size-xs);
-  color: var(--ui-foreground-faint);
+  color: var(--ui-foreground-secondary);
   white-space: nowrap;
 }
 
@@ -212,8 +214,19 @@ onMounted(load);
 
 .next-skills__meta {
   display: flex;
+  align-items: center;
   gap: var(--ui-space-3);
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-faint);
+}
+
+.next-skills__license {
+  padding: 1px 8px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border-muted);
+  color: var(--ui-foreground-secondary);
+  font-family: var(--ui-font-mono);
+  font-size: 11px;
 }
 </style>

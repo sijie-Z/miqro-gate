@@ -17,6 +17,8 @@ const loadError = ref('');
 
 const creating = ref(false);
 const submitError = ref('');
+const keyError = ref('');
+const modelError = ref('');
 const submitting = ref(false);
 const form = ref({ virtualKeyId: '', modelId: '', reason: '' });
 
@@ -45,7 +47,7 @@ const columns = [
   { key: 'reason', title: '申请理由', minWidth: '180px' },
   { key: 'status', title: '状态', width: '110px' },
   { key: 'reviewNote', title: '审核意见', minWidth: '160px' },
-  { key: 'updatedAt', title: '更新时间', width: '170px' },
+  { key: 'updatedAt', title: '更新时间', width: '170px', align: 'right' as const },
 ];
 
 async function load() {
@@ -68,12 +70,16 @@ async function load() {
 function openCreate() {
   form.value = { virtualKeyId: '', modelId: '', reason: '' };
   submitError.value = '';
+  keyError.value = '';
+  modelError.value = '';
   creating.value = true;
 }
 
 async function submit() {
-  if (!form.value.virtualKeyId || !form.value.modelId.trim()) {
-    submitError.value = '请选择 Virtual Key 并填写模型 ID';
+  keyError.value = form.value.virtualKeyId ? '' : '请选择 Virtual Key';
+  modelError.value = form.value.modelId.trim() ? '' : '请填写模型 ID';
+  if (keyError.value || modelError.value) {
+    submitError.value = '';
     return;
   }
   submitting.value = true;
@@ -138,6 +144,7 @@ onMounted(load);
             required
             placeholder="选择要扩展模型的 Key"
             :options="keyOptions"
+            :error="keyError || undefined"
             width="100%"
             data-testid="model-approval-key"
           />
@@ -146,6 +153,7 @@ onMounted(load);
             label="模型 ID"
             required
             placeholder="精确模型 ID，如 deepseek-v4-flash"
+            :error="modelError || undefined"
             data-testid="model-approval-model"
           />
           <div class="ui-field">
@@ -156,7 +164,7 @@ onMounted(load);
               v-model="form.reason"
               class="ui-textarea"
               :maxlength="500"
-              rows="3"
+              rows="4"
               placeholder="为什么需要这个模型？"
               data-testid="model-approval-reason"
             />
@@ -210,6 +218,7 @@ onMounted(load);
         <template #reason="{ row }">{{ (row as ModelApprovalView).reason || '—' }}</template>
         <template #status="{ row }">
           <UiStatusBadge
+            variant="pill"
             :tone="statusTone((row as ModelApprovalView).status)"
             :label="
               statusText[(row as ModelApprovalView).status] ?? (row as ModelApprovalView).status
@@ -217,7 +226,7 @@ onMounted(load);
           />
         </template>
         <template #reviewNote="{ row }">{{
-          (row as ModelApprovalView).reviewNote || '—'
+          (row as ModelApprovalView).reviewNote || '暂无'
         }}</template>
         <template #updatedAt="{ row }">{{
           formatDate((row as ModelApprovalView).updatedAt)
@@ -273,6 +282,7 @@ onMounted(load);
 
 .ui-textarea {
   width: 100%;
+  min-height: 110px;
   padding: var(--ui-space-2) var(--ui-space-3);
   border: 1px solid var(--ui-input-border);
   border-radius: var(--ui-radius-control);

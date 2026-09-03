@@ -95,7 +95,7 @@ async function submit() {
       </div>
       <div class="ui-panel-body">
         <dl class="next-profile__grid">
-          <template v-for="row in accountRows" :key="row.label">
+          <div v-for="row in accountRows" :key="row.label" class="next-profile__fact">
             <dt>{{ row.label }}</dt>
             <dd
               :class="{ 'ui-mono': row.mono }"
@@ -103,7 +103,7 @@ async function submit() {
             >
               {{ row.value }}
             </dd>
-          </template>
+          </div>
         </dl>
       </div>
     </section>
@@ -137,13 +137,16 @@ async function submit() {
             large
             type="password"
             autocomplete="new-password"
+            :error="errorMessage || undefined"
             data-testid="confirm-password"
           />
-          <p v-if="errorMessage" class="ui-form-error" role="alert" data-testid="password-error">
-            {{ errorMessage
-            }}<span v-if="errorRequestId" class="ui-request-id">
-              requestId: {{ errorRequestId }}</span
-            >
+          <p
+            v-if="errorRequestId"
+            class="ui-request-id next-profile__reqid"
+            role="alert"
+            data-testid="password-error-reqid"
+          >
+            requestId: {{ errorRequestId }}
           </p>
           <div class="next-profile__actions">
             <UiButton
@@ -185,18 +188,32 @@ async function submit() {
 
 .next-profile__grid {
   display: grid;
-  grid-template-columns: 120px 1fr;
-  gap: var(--ui-space-3) var(--ui-space-5);
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ui-space-4) var(--ui-space-8);
+  margin: 0;
+}
+
+.next-profile__fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+  padding-bottom: var(--ui-space-2);
+}
+
+.next-profile__fact dt {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-profile__fact dd {
   margin: 0;
   font-size: var(--ui-font-size-sm);
 }
 
-.next-profile__grid dt {
-  color: var(--ui-foreground-secondary);
-}
-
-.next-profile__grid dd {
-  margin: 0;
+.next-profile__reqid {
+  margin: -var(--ui-space-3) 0 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
 }
 
 .next-profile__form {

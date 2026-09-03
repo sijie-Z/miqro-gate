@@ -81,9 +81,7 @@ describe('NextProfileView', () => {
     await wrapper.find('form').trigger('submit');
     await flushPromises();
 
-    expect(wrapper.find('[data-testid="password-error"]').text()).toContain(
-      '两次输入的新密码不一致',
-    );
+    expect(wrapper.find('[data-testid="field-error"]').text()).toContain('两次输入的新密码不一致');
     expect(authMock.changePassword).not.toHaveBeenCalled();
   });
 });

@@ -21,6 +21,7 @@ const SelectStub = defineComponent({
     modelValue: { type: String, default: '' },
     options: { type: Array, default: () => [] },
     label: { type: String, default: '' },
+    error: { type: String, default: '' },
   },
   emits: ['update:modelValue', 'change'],
   setup(props, { emit }) {
@@ -42,6 +43,7 @@ const SelectStub = defineComponent({
       >
         {{ opt.label }}
       </button>
+      <p v-if="props.error" class="stub-error">{{ props.error }}</p>
     </div>
   `,
 });
@@ -164,9 +166,8 @@ describe('NextModelApprovalsView', () => {
     await wrapper.find('[data-testid="model-approval-submit"]').trigger('click');
     await flushPromises();
 
-    expect(wrapper.find('[data-testid="model-approval-error"]').text()).toContain(
-      '请选择 Virtual Key',
-    );
+    expect(wrapper.text()).toContain('请选择 Virtual Key');
+    expect(wrapper.text()).toContain('请填写模型 ID');
     expect(mockApi.submitModelApproval).not.toHaveBeenCalled();
   });
 });

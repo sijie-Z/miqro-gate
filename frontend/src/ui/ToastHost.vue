@@ -4,12 +4,6 @@
  * bus in ./toast.ts is app-global, so duplicate mounts would duplicate toasts.
  */
 import { toastState, dismissToast } from './toast';
-
-const toneLabel: Record<string, string> = {
-  success: '成功',
-  error: '错误',
-  info: '提示',
-};
 </script>
 
 <template>
@@ -23,7 +17,48 @@ const toneLabel: Record<string, string> = {
           :class="`ui-toast--${item.tone}`"
           :data-testid="`ui-toast-${item.tone}`"
         >
-          <span class="ui-toast__tone">{{ toneLabel[item.tone] }}</span>
+          <span class="ui-toast__icon" aria-hidden="true">
+            <svg
+              v-if="item.tone === 'success'"
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+            >
+              <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3" />
+              <path
+                d="M5.2 8.2 7.2 10.2 11 5.8"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <svg
+              v-else-if="item.tone === 'error'"
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+            >
+              <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3" />
+              <path
+                d="M8 5v3.4M8 10.6v.2"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
+            <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3" />
+              <path
+                d="M8 7.2v3.6M8 4.8v.2"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
+          </span>
           <span class="ui-toast__message">{{ item.message }}</span>
           <button
             v-if="item.closable"
@@ -77,21 +112,23 @@ const toneLabel: Record<string, string> = {
   border-color: rgba(189, 20, 38, 0.55);
 }
 
-.ui-toast__tone {
+.ui-toast__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  font-weight: var(--ui-weight-semibold);
-  font-size: var(--ui-font-size-xs);
+  margin-top: 1px;
 }
 
-.ui-toast--success .ui-toast__tone {
+.ui-toast--success .ui-toast__icon {
   color: #7cd992;
 }
 
-.ui-toast--info .ui-toast__tone {
+.ui-toast--info .ui-toast__icon {
   color: #9db4ff;
 }
 
-.ui-toast--error .ui-toast__tone {
+.ui-toast--error .ui-toast__icon {
   color: #ff8a94;
 }
 

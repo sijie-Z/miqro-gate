@@ -57,7 +57,6 @@ async function handleLogout() {
       <div class="new-shell__brand">
         <span class="new-shell__brand-mark">M</span>
         <span class="new-shell__brand-name">MiQroGate</span>
-        <span class="new-shell__brand-badge">试点</span>
       </div>
 
       <nav class="new-shell__nav" aria-label="主导航">
@@ -140,13 +139,13 @@ async function handleLogout() {
       </nav>
 
       <div class="new-shell__rail-foot">
-        <p class="new-shell__version">MiQroGate 0.1 · 试点版</p>
+        <p class="new-shell__version">MiQroGate 0.1</p>
       </div>
     </aside>
 
     <main class="new-shell__main">
       <header class="new-shell__topbar">
-        <span class="new-shell__context">MiQroGate 控制台 · 试点</span>
+        <span class="new-shell__context">MiQroGate 控制台</span>
         <div class="new-shell__topbar-right">
           <router-link
             to="/app/keys"
@@ -155,7 +154,6 @@ async function handleLogout() {
           >
             旧版控制台
           </router-link>
-          <span class="new-shell__divider" aria-hidden="true" />
           <div class="new-shell__user">
             <span class="new-shell__user-avatar" aria-hidden="true">{{ userInitial }}</span>
             <span class="new-shell__user-name">{{ auth.user?.username }}</span>
@@ -354,7 +352,7 @@ async function handleLogout() {
 .new-shell__topbar-right {
   display: flex;
   align-items: center;
-  gap: var(--ui-space-3);
+  gap: var(--ui-space-4);
 }
 
 .new-shell__legacy-btn {
@@ -362,7 +360,7 @@ async function handleLogout() {
   align-items: center;
   height: 28px;
   padding: 0 var(--ui-space-3);
-  border: 1px solid var(--ui-input-border);
+  border: 1px solid var(--ui-border-strong);
   border-radius: var(--ui-radius-control);
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
@@ -385,16 +383,12 @@ async function handleLogout() {
   box-shadow: var(--ui-shadow-focus);
 }
 
-.new-shell__divider {
-  width: 1px;
-  height: 20px;
-  background: var(--ui-border);
-}
-
 .new-shell__user {
   display: flex;
   align-items: center;
   gap: var(--ui-space-2);
+  padding-left: var(--ui-space-4);
+  border-left: 1px solid var(--ui-border);
 }
 
 .new-shell__user-avatar {

@@ -589,7 +589,7 @@ test('model approvals lists applications and gates the create form', async ({ pa
   await page.getByTestId('model-approval-open').click();
   await expect(page.getByTestId('model-approval-form')).toBeVisible();
   await page.getByTestId('model-approval-submit').click();
-  await expect(page.getByTestId('model-approval-error')).toContainText('请选择 Virtual Key');
+  await expect(page.getByText('请选择 Virtual Key')).toBeVisible();
   await page.screenshot({
     path: 'test-results/baseline/next-model-approvals-1440x900.png',
     fullPage: true,
@@ -605,7 +605,7 @@ test('profile page validates the password form', async ({ page }) => {
   await page.getByTestId('new-password').fill('StrongPass2026!');
   await page.getByTestId('confirm-password').fill('Different2026!');
   await page.getByTestId('password-submit').click();
-  await expect(page.getByTestId('password-error')).toContainText('两次输入的新密码不一致');
+  await expect(page.getByTestId('field-error')).toContainText('两次输入的新密码不一致');
   await page.screenshot({
     path: 'test-results/baseline/next-profile-1440x900.png',
     fullPage: true,
