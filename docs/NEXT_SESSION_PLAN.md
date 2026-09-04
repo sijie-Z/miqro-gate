@@ -89,7 +89,7 @@
 - [~] 功能 2：管理员快捷加入项目 —— **2026-09-04 实现完成待合并**（后端用户所属项目查询 + 用户页「项目成员」抽屉（移除/加入 ACTIVE 项目））
 - [x] 功能 3：注册用户闭环演示 —— **2026-09-04 完成**（miqro-local/demo-registration-loop.sh；memberships→LIVE 加入→grant 选型→Key→deepseek-v4-flash 推理 200；usage 核对受阻见下）
 - [ ] 功能 4：OpenAPI codegen 迁移（发布前；勘察：基线/生成/CI diff 已齐，前端 openapi-typescript 生成名与手写类型错位需全仓改名，专项再做）
-- [ ] 功能 5：usage 记账排查（2026-09-04 登记：gateway writer 批量写失败持续重试、usage 不落库；DB 侧正常）
+- [x] 功能 5：usage 记账排查 —— **2026-09-04 结案**（非代码缺陷：网关进程加载过期 queue-spi jar；重建重启后写入/落库正常；附带 writer 失败日志带完整异常改进已提交）
 
 ## 视觉评审记录（U0，2026-09-03；raw 存档 miqro-local/ui-reviews/，见 U0-VISION-SCORES.md）
 
