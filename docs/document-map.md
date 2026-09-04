@@ -31,6 +31,7 @@
 | `database-schema.md` | 物理表、约束、索引和迁移 | 数据库变化 |
 | `api-contract.md` | 管理 API 与推理入口契约 | API 变化 |
 | `proxy-and-cc-switch.md` | 透明代理、协议和 CC Switch 边界 | 数据面行为变化 |
+| `protocol-agents.md` | Agent/模型协议全景（入站协议、客户端矩阵、上游协议声明、红线） | 协议面变化 |
 | `provider-catalog.md` | 支持的供应商产品及证据 | 产品目录变化 |
 | `provider-adapter-contract.md` | Java SPI 与适配器验收 | SPI/fixture 变化 |
 | `usage-accounting.md` | Token、成本、导出与对账 | 计量变化 |

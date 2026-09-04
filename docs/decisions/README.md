@@ -7,3 +7,4 @@
 - [ADR-0005：第一版不引入 Redis](0005-no-redis-v1.md)
 - [ADR-0006：Gateway WebFlux，Control Plane MVC](0006-split-webflux-mvc.md)
 - [ADR-0007：产品与工程标识采用 MiQroKey](0007-miqrokey-product-identity.md)
+- [ADR-0012：Kafka 引入评估（草案，待所有者拍板）](0012-kafka-events-proposal.md)
