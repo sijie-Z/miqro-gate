@@ -217,7 +217,9 @@ jobs:
         run: bash deploy/security/check-sbom.sh
       - name: npm audit (high+)
         working-directory: frontend
-        run: npm audit --audit-level=high
+        # npm >= 11 audits via the bulk advisory endpoint; the legacy
+        # /security/audits/quick endpoint was retired upstream (2026-09-04).
+        run: npx --yes npm@11 audit --audit-level=high
       - name: Trivy scan of the pinned Postgres image
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock             -v "${{ github.workspace }}/deploy/security/.trivyignore:/root/.trivyignore:ro"             aquasec/trivy:0.58.2 image --severity HIGH,CRITICAL            --ignorefile /root/.trivyignore             --ignore-unfixed --exit-code 1 --no-progress             postgres:17.6-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
