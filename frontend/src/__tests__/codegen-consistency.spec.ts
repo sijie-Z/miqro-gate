@@ -3,19 +3,19 @@ import { readFileSync } from 'node:fs';
 
 /**
  * OpenAPI codegen step one (backlog F09 follow-up / 功能 4, stage 1):
- * docs/openapi/openapi-3.1.json is the machine-readable contract — the
- * control plane generates it (springdoc) and CI guards it against breaking
- * diffs. src/types/generated.ts is produced from it by openapi-typescript
- * (`npm run gen:types`). Handwritten src/types/api.ts stays the runtime
- * source for now, but its core DTOs must not carry fields the OpenAPI schema
- * does not declare — that would mean portal/API drift.
+ * docs/openapi/openapi-3.1.json is the machine-readable contract (springdoc
+ * generates it; CI guards it against breaking diffs; openapi-typescript
+ * renders src/types/generated.ts from it via `npm run gen:types`).
+ * Handwritten types/api.ts stays the runtime source for now, but its core
+ * DTOs must not carry fields the OpenAPI schema does not declare — that
+ * would mean portal/API drift. Members are read from the JSON source
+ * directly, so this spec is independent of the generated file formatting.
  *
- * The pair table maps handwritten names to generated schema names (they
- * differ for *View DTOs: McpServiceView → McpService, …). Textual member
- * parsing is fine because every paired type is a flat DTO.
+ * The pair table maps handwritten names to schema names (*View DTOs map to
+ * their backend record: McpServiceView → McpService, …).
  */
-describe('codegen consistency (generated vs handwritten core types)', () => {
-  const generated = readFileSync('src/types/generated.ts', 'utf-8');
+describe('codegen consistency (openapi schema vs handwritten core types)', () => {
+  const spec = JSON.parse(readFileSync('../docs/openapi/openapi-3.1.json', 'utf-8'));
   const handwritten = readFileSync('src/types/api.ts', 'utf-8');
 
   const PAIRS: Record<string, string> = {
@@ -38,17 +38,10 @@ describe('codegen consistency (generated vs handwritten core types)', () => {
     AuditEventView: 'AuditEventView',
   };
 
-  /** Top-level members of a components.schemas DTO (12-space indent). */
   function schemaMembers(schemaName: string): Set<string> {
-    const schemas = generated.slice(generated.indexOf('schemas: {'));
-    const block = new RegExp(`\\n {8}${schemaName}: \\{([\\s\\S]*?)\\n {8}\\}`).exec(schemas);
-    if (!block) return new Set();
-    const fields = new Set<string>();
-    for (const line of block[1].split('\n')) {
-      const m = /^ {12}([A-Za-z_$][\w$]*)\??:/.exec(line);
-      if (m) fields.add(m[1]);
-    }
-    return fields;
+    const schema = spec.components?.schemas?.[schemaName];
+    if (!schema?.properties) return new Set();
+    return new Set(Object.keys(schema.properties));
   }
 
   function apiMembers(name: string): Set<string> {
@@ -65,13 +58,13 @@ describe('codegen consistency (generated vs handwritten core types)', () => {
   for (const [apiName, schemaName] of Object.entries(PAIRS)) {
     it(`core DTO ${apiName}: handwritten fields are declared by the OpenAPI schema`, () => {
       const api = apiMembers(apiName);
-      const spec = schemaMembers(schemaName);
+      const specFields = schemaMembers(schemaName);
       expect(api.size, `${apiName} should resolve in api.ts`).toBeGreaterThan(0);
       expect(
-        spec.size,
-        `${schemaName} should resolve in generated.ts — re-run npm run gen:types after spec changes`,
+        specFields.size,
+        `${schemaName} should resolve in docs/openapi/openapi-3.1.json`,
       ).toBeGreaterThan(0);
-      const missing = [...api].filter((f) => !spec.has(f));
+      const missing = [...api].filter((f) => !specFields.has(f));
       expect(missing, `${apiName} has handwritten fields missing from the OpenAPI schema`).toEqual(
         [],
       );
