@@ -225,8 +225,8 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
   font-size: var(--ui-font-size-xs);
   font-weight: var(--ui-weight-semibold);
   letter-spacing: 0.01em;
-  color: #4f4f58;
-  background: #f7f6f2;
+  color: #45454d;
+  background: #f3f1ec;
   white-space: nowrap;
 }
 
@@ -269,7 +269,7 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
 }
 
 .ui-table__row {
-  border-bottom: 1px solid var(--ui-border-muted);
+  border-bottom: 1px solid var(--ui-border);
   transition: background-color var(--ui-ease);
 }
 

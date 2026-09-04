@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `U2 管理面三组逐批切换` — `NOT_STARTED`（U1 已完成：正式路由 42f0864+ 分支 goal/ui-u1-user-console @ 79a8823（PR #133，待 CI 绿合并）；用户面全部 v2，试点前缀退役）
-- Goal status: `NOT_STARTED`（2026-09-03；U2 首批建议组织组用户/团队/项目/授权/审批中心，NextUsersView 已存在可接线；preview http://localhost:4174 已指向 U1 正式路由）
+- Current goal: `U2 组织组首批` — `IN_PROGRESS`（PR #134 待 CI 绿合并；组织 5 页 v2 完成 @ goal/ui-u2-org-console e7256ec；下一批=平台组 8 页）
+- Goal status: `IN_PROGRESS`（2026-09-03；第二批平台组待 U2 首批评审/合并后开做；preview http://localhost:4174 需在 U2 分支构建后含组织组 v2）
 - Last updated: `2026-09-03 CST`
 ## 会话交接点 2026-09-03 — UI 专项 U0 待验收（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；U0 验收通过前暂停功能 backlog）
 

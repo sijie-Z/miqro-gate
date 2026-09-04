@@ -9,7 +9,7 @@
 /* ---- page structure ---- */
 .ui-page {
   max-width: var(--ui-content-max);
-  padding: var(--ui-space-6) var(--ui-space-8) var(--ui-space-12);
+  padding: var(--ui-space-8) var(--ui-space-8) var(--ui-space-12);
 }
 
 .ui-page-header {
@@ -91,6 +91,16 @@
 
 .ui-toolbar-spacer {
   flex: 1;
+}
+
+/* slim list toolbar between panel edge and the table band */
+.ui-panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-3) var(--ui-space-5);
+  border-bottom: 1px solid var(--ui-border);
 }
 
 /* ---- numbers & code ---- */
