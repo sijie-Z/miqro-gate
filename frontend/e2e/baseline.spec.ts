@@ -552,6 +552,87 @@ async function mockApi(page: Page, admin = false) {
       ]),
     }),
   );
+  await page.route('**/api/v1/admin/skills', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0109',
+          name: 'web-scraper',
+          description: 'Scrapes public web pages into markdown.',
+          version: '1.0.0',
+          author: 'Platform Team',
+          license: 'MIT',
+          tags: ['scraping'],
+          contentSha256: 'aa'.repeat(32),
+          contentBytes: 2048,
+          status: 'ACTIVE',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/agents', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0110',
+          name: 'forge-agent',
+          description: 'Forge 集成出口',
+          credentialId: '0190-0000-0000-0030',
+          credentialName: 'anthropic-main',
+          providerProductId: '0190-0000-0000-0020',
+          providerProductName: 'DeepSeek PAYG',
+          status: 'ACTIVE',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/services', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0111',
+          name: 'platform-api',
+          kind: 'HTTP',
+          description: '平台内部 API',
+          baseUrl: 'https://platform.internal.example',
+          status: 'ACTIVE',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  await page.route('**/api/v1/admin/mcp-services', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: '0190-0000-0000-0112',
+          name: 'erp-mcp',
+          description: 'ERP 查询服务',
+          endpoint: 'https://erp.internal.example',
+          transport: 'STREAMABLE_HTTP',
+          status: 'ONLINE',
+          healthStatus: 'HEALTHY',
+          healthCheckedAt: '2026-09-02T00:00:00Z',
+          checkIntervalSeconds: 30,
+          checkTimeoutSeconds: 5,
+          failThreshold: 3,
+          recoverThreshold: 1,
+          checkPath: '/health',
+          createdAt: '2026-08-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
   await page.route('**/api/v1/admin/audit-events?*', (route) =>
     route.fulfill({
       status: 200,
@@ -887,11 +968,15 @@ const ADMIN_PAGES = [
   { path: '/app/quota-rules', testid: 'quota-rules-table', expect: '1,000,000' },
   { path: '/app/roi', testid: 'roi-report', expect: '缓存节省' },
   { path: '/app/plans', testid: 'subscriptions-table', expect: 'DeepSeek PAYG' },
+  { path: '/app/skillhub', testid: 'admin-skills-table', expect: 'web-scraper' },
+  { path: '/app/agents', testid: 'agents-table', expect: 'forge-agent' },
+  { path: '/app/services', testid: 'services-table', expect: 'platform-api' },
+  { path: '/app/mcp-services', testid: 'mcp-table', expect: 'erp-mcp' },
   { path: '/app/webhooks', testid: 'webhooks-table', expect: 'ops-alerts' },
   { path: '/app/alert-rules', testid: 'rules-table', expect: 'usage-missing' },
   { path: '/app/audit', testid: 'audit-table', expect: 'LOGIN_SUCCESS' },
   { path: '/app/exports', testid: 'exports-table', expect: 'CSV' },
-  { path: '/app/deletions', testid: 'deletions-table', expect: 'PENDING_CONFIRMATION' },
+  { path: '/app/deletions', testid: 'deletions-table', expect: '待确认' },
   { path: '/app/admin-usage', testid: 'usage-records-table', expect: 'deepseek-chat' },
 ];
 

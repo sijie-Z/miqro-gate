@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { defineComponent, h } from 'vue';
-import TDesign from 'tdesign-vue-next';
-import AdminSkillsView from '@/views/AdminSkillsView.vue';
+import NextAdminSkillsView from '@/views/next/NextAdminSkillsView.vue';
 import * as api from '@/api';
 import type { SkillView } from '@/types/api';
 
@@ -18,24 +16,8 @@ vi.mock('@/api', () => ({
 
 const mockApi = vi.mocked(api);
 
-/** See KeysView.spec.ts — popup positioning is not app logic in jsdom. */
-const PopupStub = defineComponent({
-  name: 'TPopup',
-  inheritAttrs: false,
-  setup(_, { slots, expose }) {
-    expose({
-      update: () => {},
-      getOverlay: () => null,
-      getOverlayState: () => ({ hover: false }),
-      getPopper: () => null,
-      close: () => {},
-    });
-    return () => h('div', { class: 't-popup-stub' }, [slots.default?.(), slots.content?.()]);
-  },
-});
-
 const skill = (overrides: Partial<SkillView> = {}): SkillView => ({
-  id: '0190-0000-0000-0000-0000000000c1',
+  id: 's1',
   name: 'web-scraper',
   description: 'Scrapes public web pages into markdown.',
   version: '1.0.0',
@@ -49,16 +31,7 @@ const skill = (overrides: Partial<SkillView> = {}): SkillView => ({
   ...overrides,
 });
 
-function mountView() {
-  return mount(AdminSkillsView, {
-    global: {
-      plugins: [TDesign, createPinia()],
-      stubs: { TPopup: PopupStub },
-    },
-  });
-}
-
-describe('AdminSkillsView', () => {
+describe('NextAdminSkillsView', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.resetAllMocks();
@@ -68,12 +41,15 @@ describe('AdminSkillsView', () => {
     mockApi.listTeams.mockResolvedValue([]);
   });
 
-  it('renders the skill table with statuses', async () => {
+  function mountView() {
+    return mount(NextAdminSkillsView, { global: { plugins: [createPinia()] } });
+  }
+
+  it('renders skills with Chinese statuses and sizes', async () => {
     mockApi.adminListSkills.mockResolvedValue([
       skill(),
-      skill({ name: 'old-tool', status: 'ARCHIVED' }),
+      skill({ id: 's2', name: 'old-tool', status: 'ARCHIVED', contentBytes: 2097152 }),
     ]);
-
     const wrapper = mountView();
     await flushPromises();
 
@@ -81,18 +57,18 @@ describe('AdminSkillsView', () => {
     expect(wrapper.text()).toContain('web-scraper');
     expect(wrapper.text()).toContain('v1.0.0');
     expect(wrapper.text()).toContain('2 KB');
-    expect(wrapper.text()).toContain('Active');
-    expect(wrapper.text()).toContain('Archived');
+    expect(wrapper.text()).toContain('2.0 MB');
+    expect(wrapper.text()).toContain('已发布');
+    expect(wrapper.text()).toContain('已归档');
   });
 
   it('uploads a zip with the entered version', async () => {
     mockApi.adminUploadSkill.mockResolvedValue(skill());
-
     const wrapper = mountView();
     await flushPromises();
 
     await wrapper.find('[data-testid="skill-upload-open"]').trigger('click');
-    await wrapper.find('[data-testid="skill-upload-version"] input').setValue('1.2.0');
+    await wrapper.find('[data-testid="skill-upload-version"]').setValue('1.2.0');
 
     const file = new File(['zip-content'], 'web-scraper.zip', { type: 'application/zip' });
     const input = wrapper.find('[data-testid="skill-upload-file"]');
@@ -106,28 +82,26 @@ describe('AdminSkillsView', () => {
     expect(mockApi.adminUploadSkill).toHaveBeenCalledWith('1.2.0', file);
   });
 
-  it('archives a skill after confirming the dialog', async () => {
+  it('archives a skill through the confirm gate', async () => {
     mockApi.adminListSkills.mockResolvedValue([skill()]);
     mockApi.adminArchiveSkill.mockResolvedValue(skill({ status: 'ARCHIVED' }));
-
     const wrapper = mountView();
     await flushPromises();
 
     await wrapper.find('[data-testid="skill-archive"]').trigger('click');
     await flushPromises();
-
-    const confirmButton = Array.from(document.querySelectorAll('.t-dialog__confirm')).find((b) =>
-      b.textContent?.includes('归档'),
+    const buttons = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
+    const confirm = buttons.find(
+      (b) => b.textContent?.trim() === '归档' && b.className.includes('ui-btn--danger'),
     );
-    expect(confirmButton, 'confirm dialog should render').toBeTruthy();
-    (confirmButton as HTMLElement).click();
+    expect(confirm, 'confirm dialog should render').toBeTruthy();
+    confirm!.click();
     await flushPromises();
-    await new Promise((r) => setTimeout(r, 400));
 
-    expect(mockApi.adminArchiveSkill).toHaveBeenCalledWith('0190-0000-0000-0000-0000000000c1');
+    expect(mockApi.adminArchiveSkill).toHaveBeenCalledWith('s1');
   });
 
-  it('saves access scopes from the dialog', async () => {
+  it('saves access scopes from the dialog checkboxes', async () => {
     mockApi.adminListSkills.mockResolvedValue([skill()]);
     mockApi.listProjects.mockResolvedValue([
       {
@@ -138,24 +112,38 @@ describe('AdminSkillsView', () => {
         createdAt: '2026-01-01T00:00:00Z',
       },
     ]);
+    mockApi.listTeams.mockResolvedValue([
+      {
+        id: 't1',
+        name: 'Platform',
+        status: 'ACTIVE',
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+    ]);
     mockApi.adminSetSkillAccess.mockResolvedValue(undefined);
-
     const wrapper = mountView();
     await flushPromises();
 
     await wrapper.find('[data-testid="skill-access"]').trigger('click');
     await flushPromises();
 
-    // Pick the only project option.
-    const option = wrapper.findAll('.t-select-option').find((o) => o.text().includes('Core AI'));
-    expect(option, 'project options should render').toBeTruthy();
-    await option!.trigger('click');
+    const check = (id: string) => {
+      const el = document.querySelector(`[data-testid="${id}"]`) as HTMLInputElement;
+      el.checked = true;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    check('skill-access-project');
+    await flushPromises();
+    // The team box stays unchecked — scopes must only contain the project.
+    const team = document.querySelectorAll('[data-testid="skill-access-team"]');
+    expect(team).toHaveLength(1);
+    expect((team[0] as HTMLInputElement).checked).toBe(false);
+
+    const save = document.querySelector('[data-testid="skill-access-save"]') as HTMLButtonElement;
+    save.click();
     await flushPromises();
 
-    await wrapper.find('[data-testid="skill-access-save"]').trigger('click');
-    await flushPromises();
-
-    expect(mockApi.adminSetSkillAccess).toHaveBeenCalledWith('0190-0000-0000-0000-0000000000c1', [
+    expect(mockApi.adminSetSkillAccess).toHaveBeenCalledWith('s1', [
       { scopeType: 'PROJECT', scopeId: 'p1' },
     ]);
   });
