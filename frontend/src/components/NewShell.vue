@@ -9,6 +9,14 @@
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuRoot,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from 'radix-vue';
+import {
   AppIcon,
   ChartBarIcon,
   CheckCircleIcon,
@@ -89,6 +97,19 @@ const opsNav: NavItem[] = [
 
 const isAdmin = computed(() => auth.user?.role === 'SYSTEM_ADMIN');
 
+/** "数据与告警 / Webhook 端点" style trail for the topbar (Vben-like chrome). */
+const breadcrumb = computed(() => {
+  const name = route.name as string | undefined;
+  if (!name) return '';
+  for (const group of navGroups.value) {
+    const item = group.items.find((i) => i.name === name);
+    if (item) {
+      return group.title ? `${group.title} / ${item.label}` : item.label;
+    }
+  }
+  return '';
+});
+
 const navGroups = computed(() => {
   const groups: { title?: string; items: NavItem[] }[] = [{ items: regularNav }];
   if (isAdmin.value) {
@@ -153,28 +174,51 @@ async function handleLogout() {
 
     <main class="new-shell__main">
       <header class="new-shell__topbar">
+        <div class="new-shell__topbar-left">
+          <span v-if="breadcrumb" class="new-shell__breadcrumb" data-testid="shell-breadcrumb">{{
+            breadcrumb
+          }}</span>
+        </div>
         <div class="new-shell__topbar-right">
-          <div class="new-shell__user">
-            <span class="new-shell__user-avatar" aria-hidden="true">{{ userInitial }}</span>
-            <span class="new-shell__user-name">{{ auth.user?.username }}</span>
-          </div>
-          <button
-            type="button"
-            class="new-shell__logout"
-            aria-label="退出登录"
-            data-testid="shell-logout"
-            @click="handleLogout"
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M6 3H3.5A1.5 1.5 0 0 0 2 4.5v7A1.5 1.5 0 0 0 3.5 13H6m4-2.5L12.5 8 10 5.5M6.5 8H12.5"
-                stroke="currentColor"
-                stroke-width="1.4"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </button>
+          <DropdownMenuRoot>
+            <DropdownMenuTrigger class="new-shell__user" data-testid="shell-user-menu">
+              <span class="new-shell__user-avatar" aria-hidden="true">{{ userInitial }}</span>
+              <span class="new-shell__user-name">{{ auth.user?.username }}</span>
+              <svg
+                class="new-shell__user-chevron"
+                width="12"
+                height="12"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M4 6.5 8 10.5 12 6.5"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </DropdownMenuTrigger>
+            <DropdownMenuPortal>
+              <DropdownMenuContent class="new-shell__user-menu" :side-offset="6" :align="'end'">
+                <div class="new-shell__user-menu-head">
+                  <span class="new-shell__user-menu-name">{{ auth.user?.username }}</span>
+                  <span class="new-shell__user-menu-role">{{
+                    auth.user?.role === 'SYSTEM_ADMIN' ? '系统管理员' : '用户'
+                  }}</span>
+                </div>
+                <DropdownMenuSeparator class="new-shell__user-menu-sep" />
+                <DropdownMenuItem
+                  class="new-shell__user-menu-item new-shell__user-menu-item--danger"
+                  data-testid="shell-logout"
+                  @select="handleLogout"
+                  >退出登录</DropdownMenuItem
+                >
+              </DropdownMenuContent>
+            </DropdownMenuPortal>
+          </DropdownMenuRoot>
         </div>
       </header>
 
@@ -349,13 +393,27 @@ async function handleLogout() {
 .new-shell__topbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: var(--ui-space-4);
   height: var(--ui-header-height);
   padding: 0 var(--ui-space-6);
   background: var(--ui-card);
   border-bottom: 1px solid var(--ui-border);
   flex-shrink: 0;
+}
+
+.new-shell__topbar-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.new-shell__breadcrumb {
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .new-shell__topbar-right {
@@ -389,30 +447,88 @@ async function handleLogout() {
   font-weight: var(--ui-weight-medium);
 }
 
-.new-shell__logout {
+.new-shell__user {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
+  gap: var(--ui-space-2);
   border: none;
   border-radius: var(--ui-radius-control);
   background: transparent;
-  color: var(--ui-foreground-faint);
+  color: var(--ui-foreground);
+  font-family: inherit;
+  padding: var(--ui-space-1) var(--ui-space-2);
   cursor: pointer;
-  flex-shrink: 0;
-  transition:
-    background-color var(--ui-ease),
-    color var(--ui-ease);
+  transition: background-color var(--ui-ease);
 }
 
-.new-shell__logout:hover {
+.new-shell__user:hover {
   background: var(--ui-fill-hover);
+}
+
+.new-shell__user:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-shadow-focus);
+}
+
+.new-shell__user-chevron {
+  color: var(--ui-foreground-faint);
+}
+
+.new-shell__user-menu {
+  min-width: 180px;
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-control);
+  box-shadow: var(--ui-shadow-popper);
+  padding: var(--ui-space-1);
+  z-index: 2000;
+}
+
+.new-shell__user-menu-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--ui-space-2) var(--ui-space-3);
+}
+
+.new-shell__user-menu-name {
+  font-size: var(--ui-font-size-sm);
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+}
+
+.new-shell__user-menu-role {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.new-shell__user-menu-sep {
+  height: 1px;
+  background: var(--ui-border-muted);
+  margin: var(--ui-space-1) 0;
+}
+
+.new-shell__user-menu-item {
+  display: flex;
+  align-items: center;
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border-radius: calc(var(--ui-radius-control) - 2px);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground);
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+
+.new-shell__user-menu-item[data-highlighted] {
+  background: var(--ui-fill-hover);
+}
+
+.new-shell__user-menu-item--danger {
   color: var(--ui-danger-fg);
 }
 
-.new-shell__logout:focus-visible {
-  outline: none;
+.new-shell__user-menu-item:focus-visible {
   box-shadow: var(--ui-shadow-focus);
 }
 
