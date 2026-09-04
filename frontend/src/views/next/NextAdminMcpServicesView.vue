@@ -11,13 +11,24 @@
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
+import {
+  UiButton,
+  UiDialog,
+  UiDrawer,
+  UiInput,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  toast,
+} from '@/ui';
 import type {
   ApiConsumerView,
   McpAclMode,
   McpAccessView,
+  McpRouteRule,
   McpServiceView,
   McpToolView,
+  UpsertMcpRouteRuleRequest,
 } from '@/types/api';
 
 const services = ref<McpServiceView[]>([]);
@@ -453,6 +464,241 @@ async function saveToolDraft(toolId: string, toolName: string) {
   }
 }
 
+// ---- route rules (F11, Tencent doc 135482) ----
+
+const HTTP_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
+const MATCH_MODES = [
+  { value: '', label: '不限' },
+  { value: 'EXACT', label: '精确' },
+  { value: 'PREFIX', label: '前缀' },
+  { value: 'REGEX', label: '正则' },
+] as const;
+
+interface HeaderDraft {
+  name: string;
+  mode: 'EXACT' | 'PREFIX' | 'REGEX';
+  value: string;
+}
+
+const rulesService = ref<McpServiceView | null>(null);
+const rulesVisible = ref(false);
+const rules = ref<McpRouteRule[]>([]);
+const rulesLoading = ref(false);
+const rulesError = ref('');
+
+const routeDialogVisible = ref(false);
+const routeEditing = ref<McpRouteRule | null>(null);
+const routeForm = ref({
+  name: '',
+  description: '',
+  priority: '1000',
+  pathMode: '' as '' | 'EXACT' | 'PREFIX' | 'REGEX',
+  pathValue: '',
+  hostMode: '' as '' | 'EXACT' | 'PREFIX' | 'REGEX',
+  hostValue: '',
+  methods: new Set<string>(),
+  headers: [] as HeaderDraft[],
+});
+const routeSaving = ref(false);
+const routeFormError = ref('');
+
+const routeConfirm = ref<{
+  title: string;
+  body: string;
+  confirmLabel: string;
+  tone: 'danger' | 'primary';
+  run: () => Promise<void>;
+} | null>(null);
+
+function methodList(rule: McpRouteRule): string {
+  if (!rule.methods) return '全部方法';
+  const list = rule.methods.split(',');
+  return list.length === HTTP_METHODS.length ? '全部方法' : list.join(' / ');
+}
+
+function conditionText(rule: McpRouteRule): string {
+  const parts: string[] = [];
+  if (rule.pathMode) {
+    const mode = MATCH_MODES.find((m) => m.value === rule.pathMode)?.label ?? rule.pathMode;
+    parts.push(`路径 ${mode} ${rule.pathValue}`);
+  }
+  if (rule.hostMode) {
+    const mode = MATCH_MODES.find((m) => m.value === rule.hostMode)?.label ?? rule.hostMode;
+    parts.push(`Host ${mode} ${rule.hostValue}`);
+  }
+  if (rule.headerConditions.length) {
+    parts.push(
+      ...rule.headerConditions.map(
+        (h) =>
+          `${h.name} ${MATCH_MODES.find((m) => m.value === h.mode)?.label ?? h.mode} ${h.value}`,
+      ),
+    );
+  }
+  if (!parts.length) return '全部请求（兜底）';
+  return parts.join(' · ');
+}
+
+async function openRoutes(service: McpServiceView) {
+  rulesService.value = service;
+  rules.value = [];
+  rulesError.value = '';
+  rulesVisible.value = true;
+  rulesLoading.value = true;
+  try {
+    rules.value = await api.adminListMcpRouteRules(service.id);
+  } catch (error) {
+    rulesError.value = errorText(error, '加载路由规则失败。');
+  } finally {
+    rulesLoading.value = false;
+  }
+}
+
+function emptyRouteForm() {
+  return {
+    name: '',
+    description: '',
+    priority: '1000',
+    pathMode: '' as '' | 'EXACT' | 'PREFIX' | 'REGEX',
+    pathValue: '',
+    hostMode: '' as '' | 'EXACT' | 'PREFIX' | 'REGEX',
+    hostValue: '',
+    methods: new Set<string>(),
+    headers: [] as HeaderDraft[],
+  };
+}
+
+function openRouteCreate() {
+  routeEditing.value = null;
+  routeForm.value = emptyRouteForm();
+  routeFormError.value = '';
+  routeDialogVisible.value = true;
+}
+
+function openRouteEdit(rule: McpRouteRule) {
+  routeEditing.value = rule;
+  routeForm.value = {
+    name: rule.name,
+    description: rule.description ?? '',
+    priority: String(rule.priority),
+    pathMode: rule.pathMode ?? '',
+    pathValue: rule.pathValue ?? '',
+    hostMode: rule.hostMode ?? '',
+    hostValue: rule.hostValue ?? '',
+    methods: new Set(rule.methods ? rule.methods.split(',') : HTTP_METHODS),
+    headers: rule.headerConditions.map((h) => ({ name: h.name, mode: h.mode, value: h.value })),
+  };
+  routeFormError.value = '';
+  routeDialogVisible.value = true;
+}
+
+function addHeaderRow() {
+  if (routeForm.value.headers.length >= 8) return;
+  routeForm.value.headers.push({ name: '', mode: 'EXACT', value: '' });
+}
+
+function removeHeaderRow(index: number) {
+  routeForm.value.headers.splice(index, 1);
+}
+
+async function saveRouteRule() {
+  const form = routeForm.value;
+  if (!form.name.trim()) {
+    routeFormError.value = '路由名称必填。';
+    return;
+  }
+  if ((form.pathMode && !form.pathValue.trim()) || (form.hostMode && !form.hostValue.trim())) {
+    routeFormError.value = '选择了匹配方式后必须填写匹配值。';
+    return;
+  }
+  for (const [index, header] of form.headers.entries()) {
+    if (!header.name.trim()) {
+      routeFormError.value = `第 ${index + 1} 条 Header 条件缺少名称。`;
+      return;
+    }
+    if (!header.value.trim()) {
+      routeFormError.value = `第 ${index + 1} 条 Header 条件缺少匹配值。`;
+      return;
+    }
+  }
+  if (!rulesService.value) return;
+  const serviceId = rulesService.value.id;
+  const body: UpsertMcpRouteRuleRequest = {
+    name: form.name.trim(),
+    description: form.description.trim() || undefined,
+    priority: Number(form.priority) || 1000,
+    pathMode: form.pathMode || null,
+    pathValue: form.pathMode ? form.pathValue.trim() : null,
+    hostMode: form.hostMode || null,
+    hostValue: form.hostMode ? form.hostValue.trim() : null,
+    methods: form.methods.size === HTTP_METHODS.length ? null : [...form.methods],
+    headers: form.headers
+      .filter((h) => h.name.trim())
+      .map((h) => ({ name: h.name.trim(), mode: h.mode, value: h.value.trim() })),
+  };
+  routeSaving.value = true;
+  routeFormError.value = '';
+  try {
+    if (routeEditing.value) {
+      await api.adminUpdateMcpRouteRule(serviceId, routeEditing.value.id, body);
+      toast.success('路由已更新');
+    } else {
+      await api.adminCreateMcpRouteRule(serviceId, body);
+      toast.success('路由已创建');
+    }
+    routeDialogVisible.value = false;
+    rules.value = await api.adminListMcpRouteRules(serviceId);
+  } catch (error) {
+    routeFormError.value = errorText(
+      error,
+      routeEditing.value ? '保存失败，请稍后重试。' : '创建失败，请稍后重试。',
+    );
+  } finally {
+    routeSaving.value = false;
+  }
+}
+
+async function toggleRouteStatus(rule: McpRouteRule) {
+  if (!rulesService.value) return;
+  const next = rule.status === 'ENABLED' ? 'DISABLED' : 'ENABLED';
+  try {
+    await api.adminSetMcpRouteStatus(rulesService.value.id, rule.id, next);
+    toast.success(rule.status === 'ENABLED' ? '路由已停用' : '路由已启用');
+    rules.value = await api.adminListMcpRouteRules(rulesService.value.id);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      toast.error(error.message);
+    }
+  }
+}
+
+function requestRouteDelete(rule: McpRouteRule) {
+  routeConfirm.value = {
+    title: `删除路由「${rule.name}」`,
+    body: '删除后该路由不再参与匹配（默认路由不可删除）。',
+    confirmLabel: '删除',
+    tone: 'danger',
+    run: async () => {
+      if (!rulesService.value) return;
+      try {
+        await api.adminDeleteMcpRouteRule(rulesService.value.id, rule.id);
+        toast.success('路由已删除');
+        rules.value = await api.adminListMcpRouteRules(rulesService.value.id);
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(error.message);
+        }
+      }
+    },
+  };
+}
+
+async function routeConfirmAndRun() {
+  const state = routeConfirm.value;
+  if (!state) return;
+  routeConfirm.value = null;
+  await state.run();
+}
+
 onMounted(load);
 </script>
 
@@ -585,6 +831,13 @@ onMounted(load);
               data-testid="mcp-access"
               @click="openAccess(row as McpServiceView)"
               >访问控制</UiButton
+            >
+            <UiButton
+              variant="ghost"
+              size="sm"
+              data-testid="mcp-routes"
+              @click="openRoutes(row as McpServiceView)"
+              >路由规则</UiButton
             >
             <UiButton
               variant="ghost"
@@ -960,6 +1213,266 @@ onMounted(load);
         </UiButton>
       </template>
     </UiDialog>
+
+    <!-- Route rules (F11): per-service priority rules gating inbound requests -->
+    <UiDrawer
+      :open="rulesVisible"
+      :title="rulesService ? `路由规则 · ${rulesService.name}` : '路由规则'"
+      width="760px"
+      data-testid="mcp-routes-drawer"
+      @update:open="rulesVisible = false"
+    >
+      <div v-if="rulesError" class="ui-alert ui-alert--error">{{ rulesError }}</div>
+      <div class="next-mcp__routes-head">
+        <p class="next-mcp__routes-note">
+          规则按优先级匹配（数值大者优先）；全部自定义规则未命中时回落到系统 default 路由兜底。
+        </p>
+        <UiButton
+          variant="primary"
+          size="sm"
+          data-testid="mcp-route-create-open"
+          @click="openRouteCreate"
+          >新建规则</UiButton
+        >
+      </div>
+      <div v-if="rulesLoading" class="next-mcp__access-loading">
+        <div v-for="n in 3" :key="n" class="ui-skeleton next-mcp__tool-skeleton">&nbsp;</div>
+      </div>
+      <div v-else-if="rules.length" class="next-mcp__route-list" data-testid="mcp-routes-list">
+        <div
+          v-for="rule in rules"
+          :key="rule.id"
+          class="next-mcp__route-row"
+          :data-rule-id="rule.id"
+        >
+          <span class="ui-num next-mcp__route-priority">{{ rule.priority }}</span>
+          <div class="next-mcp__route-info">
+            <div class="next-mcp__route-name-line">
+              <span class="next-mcp__route-name">{{ rule.name }}</span>
+              <span v-if="rule.name === 'default'" class="next-mcp__route-default-chip"
+                >系统默认</span
+              >
+              <span v-if="rule.description" class="next-mcp__route-desc">{{
+                rule.description
+              }}</span>
+            </div>
+            <div class="ui-mono next-mcp__route-conditions">{{ conditionText(rule) }}</div>
+            <div class="next-mcp__route-methods">{{ methodList(rule) }}</div>
+          </div>
+          <UiStatusBadge
+            :tone="rule.status === 'ENABLED' ? 'success' : 'neutral'"
+            :label="rule.status === 'ENABLED' ? '已启用' : '已停用'"
+          />
+          <div v-if="rule.name !== 'default'" class="next-mcp__route-actions">
+            <UiButton
+              variant="ghost"
+              size="sm"
+              data-testid="mcp-route-edit"
+              @click="openRouteEdit(rule)"
+              >编辑</UiButton
+            >
+            <UiButton variant="ghost" size="sm" @click="toggleRouteStatus(rule)">{{
+              rule.status === 'ENABLED' ? '停用' : '启用'
+            }}</UiButton>
+            <UiButton
+              variant="ghost"
+              size="sm"
+              class="next-mcp__danger"
+              data-testid="mcp-route-delete"
+              @click="requestRouteDelete(rule)"
+              >删除</UiButton
+            >
+          </div>
+        </div>
+      </div>
+      <p v-else class="next-mcp__route-empty">
+        该服务还没有自定义路由。<br /><span class="next-mcp__hint"
+          >只有 default 兜底在生效——新建规则后即可按条件分流。</span
+        >
+      </p>
+    </UiDrawer>
+
+    <!-- Route rule editor (create/edit share one form; save = full replace) -->
+    <UiDialog
+      :open="routeDialogVisible"
+      :title="routeEditing ? `编辑路由 · ${routeEditing.name}` : '新建路由'"
+      width="680px"
+      data-testid="mcp-route-dialog"
+      @update:open="routeDialogVisible = false"
+    >
+      <div class="next-mcp__route-form">
+        <div class="next-mcp__row">
+          <UiInput
+            v-model="routeForm.name"
+            label="路由名称"
+            required
+            placeholder="例如 gray-v2"
+            data-testid="mcp-route-name"
+          />
+          <UiInput
+            v-model="routeForm.priority"
+            label="优先级"
+            placeholder="1000"
+            hint="数值越大越先匹配；0 为系统默认保留"
+            data-testid="mcp-route-priority"
+          />
+        </div>
+        <div class="ui-field">
+          <span class="ui-field__label">描述</span>
+          <textarea
+            v-model="routeForm.description"
+            class="ui-textarea"
+            rows="2"
+            maxlength="200"
+            placeholder="用途说明（可选）"
+            data-testid="mcp-route-desc"
+          />
+        </div>
+
+        <div class="ui-field">
+          <span class="ui-field__label">路径匹配</span>
+          <div class="next-mcp__segmented" data-testid="mcp-route-path-mode">
+            <button
+              v-for="m in MATCH_MODES"
+              :key="m.value"
+              type="button"
+              class="next-mcp__seg"
+              :class="{ 'next-mcp__seg--on': routeForm.pathMode === m.value }"
+              @click="routeForm.pathMode = m.value"
+            >
+              {{ m.label }}
+            </button>
+          </div>
+          <UiInput
+            v-if="routeForm.pathMode"
+            v-model="routeForm.pathValue"
+            placeholder="例如 /api（精确/前缀）或 ^/api/v[0-9]+$（正则）"
+            data-testid="mcp-route-path-value"
+          />
+        </div>
+
+        <div class="ui-field">
+          <span class="ui-field__label">Host 匹配</span>
+          <div class="next-mcp__segmented" data-testid="mcp-route-host-mode">
+            <button
+              v-for="m in MATCH_MODES"
+              :key="m.value"
+              type="button"
+              class="next-mcp__seg"
+              :class="{ 'next-mcp__seg--on': routeForm.hostMode === m.value }"
+              @click="routeForm.hostMode = m.value"
+            >
+              {{ m.label }}
+            </button>
+          </div>
+          <UiInput
+            v-if="routeForm.hostMode"
+            v-model="routeForm.hostValue"
+            placeholder="例如 mcp-prod.example.com"
+            data-testid="mcp-route-host-value"
+          />
+        </div>
+
+        <div class="ui-field">
+          <span class="ui-field__label">HTTP 方法（全选 = 不限）</span>
+          <div class="next-mcp__method-chips" data-testid="mcp-route-methods">
+            <label v-for="method in HTTP_METHODS" :key="method" class="next-mcp__check">
+              <input
+                v-model="routeForm.methods"
+                type="checkbox"
+                :value="method"
+                data-testid="mcp-route-method"
+              />
+              <span>{{ method }}</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="ui-field">
+          <span class="ui-field__label"
+            >Header 条件（AND 关系，最多 8 条）
+            <UiButton
+              v-if="routeForm.headers.length < 8"
+              variant="ghost"
+              size="sm"
+              data-testid="mcp-route-header-add"
+              @click="addHeaderRow"
+              >+ 添加条件</UiButton
+            ></span
+          >
+          <div class="next-mcp__header-rows" data-testid="mcp-route-headers">
+            <div
+              v-for="(header, index) in routeForm.headers"
+              :key="index"
+              class="next-mcp__header-row"
+            >
+              <UiInput
+                v-model="header.name"
+                placeholder="名称，如 X-Tenant-Id"
+                data-testid="mcp-route-header-name"
+              />
+              <div class="next-mcp__segmented next-mcp__segmented--sm">
+                <button
+                  v-for="m in MATCH_MODES.filter((x) => x.value)"
+                  :key="m.value"
+                  type="button"
+                  class="next-mcp__seg"
+                  :class="{ 'next-mcp__seg--on': header.mode === m.value }"
+                  @click="header.mode = m.value as 'EXACT' | 'PREFIX' | 'REGEX'"
+                >
+                  {{ m.label }}
+                </button>
+              </div>
+              <UiInput
+                v-model="header.value"
+                placeholder="匹配值"
+                data-testid="mcp-route-header-value"
+              />
+              <UiButton
+                variant="ghost"
+                size="sm"
+                aria-label="移除该条件"
+                @click="removeHeaderRow(index)"
+                >移除</UiButton
+              >
+            </div>
+          </div>
+        </div>
+
+        <p v-if="routeFormError" class="ui-form-error" data-testid="mcp-route-form-error">
+          {{ routeFormError }}
+        </p>
+      </div>
+      <template #footer>
+        <UiButton variant="ghost" @click="routeDialogVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="routeSaving"
+          data-testid="mcp-route-save"
+          @click="saveRouteRule"
+          >保存</UiButton
+        >
+      </template>
+    </UiDialog>
+
+    <UiDialog
+      v-if="routeConfirm"
+      :open="true"
+      :title="routeConfirm.title"
+      :description="routeConfirm.body"
+      width="440px"
+      @update:open="routeConfirm = null"
+    >
+      <template #footer>
+        <UiButton variant="ghost" @click="routeConfirm = null">取消</UiButton>
+        <UiButton
+          :variant="routeConfirm.tone === 'danger' ? 'danger' : 'primary'"
+          @click="routeConfirmAndRun"
+        >
+          {{ routeConfirm.confirmLabel }}
+        </UiButton>
+      </template>
+    </UiDialog>
   </div>
 </template>
 
@@ -1274,6 +1787,132 @@ onMounted(load);
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
+  gap: var(--ui-space-2);
+}
+
+/* route rules (F11) */
+.next-mcp__routes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  margin-bottom: var(--ui-space-4);
+}
+
+.next-mcp__routes-note {
+  margin: 0;
+  font-size: var(--ui-font-size-xs);
+  line-height: var(--ui-line-height-base);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__route-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.next-mcp__route-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-3);
+  border: 1px solid var(--ui-border-muted);
+  border-radius: var(--ui-radius-control);
+}
+
+.next-mcp__route-priority {
+  min-width: 44px;
+  padding-top: 2px;
+  font-size: var(--ui-font-size-base);
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+}
+
+.next-mcp__route-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.next-mcp__route-name-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+}
+
+.next-mcp__route-name {
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+}
+
+.next-mcp__route-default-chip {
+  font-size: var(--ui-font-size-xs);
+  line-height: var(--ui-line-height-sm);
+  padding: 0 var(--ui-space-2);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-neutral-bg);
+  color: var(--ui-neutral-fg);
+}
+
+.next-mcp__route-desc {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__route-conditions {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  overflow-wrap: anywhere;
+}
+
+.next-mcp__route-methods {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.next-mcp__route-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-1);
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.next-mcp__route-empty {
+  margin: 0;
+  padding: var(--ui-space-8) 0;
+  text-align: center;
+  font-size: var(--ui-font-size-sm);
+  line-height: var(--ui-line-height-lg);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__route-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+}
+
+.next-mcp__method-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-1);
+}
+
+.next-mcp__header-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.next-mcp__header-row {
+  display: grid;
+  grid-template-columns: 150px auto minmax(120px, 1fr) auto;
+  align-items: center;
   gap: var(--ui-space-2);
 }
 </style>

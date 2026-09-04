@@ -16,6 +16,13 @@
     <description>JDBC repositories, Flyway migrations, and PostgreSQL integration — no JPA/R2DBC</description>
 
     <dependencies>
+
+        <!-- Jackson for jsonb columns (route header_conditions) - version
+             managed by the Spring Boot BOM -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.miqroera.miqrokey</groupId>
             <artifactId>domain</artifactId>

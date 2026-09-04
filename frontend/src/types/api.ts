@@ -319,6 +319,45 @@ export interface SetMcpAccessGrantsRequest {
   consumerIds: string[];
 }
 
+// ---- MCP route rules (F11, Tencent doc 135482) ----
+
+export interface McpHeaderCondition {
+  name: string;
+  mode: 'EXACT' | 'PREFIX' | 'REGEX';
+  value: string;
+}
+
+export interface McpRouteRule {
+  id: string;
+  mcpServiceId: string;
+  name: string;
+  description?: string;
+  priority: number;
+  /** Null matcher fields mean unrestricted. */
+  pathMode?: 'EXACT' | 'PREFIX' | 'REGEX' | null;
+  pathValue?: string | null;
+  hostMode?: 'EXACT' | 'PREFIX' | 'REGEX' | null;
+  hostValue?: string | null;
+  /** Comma-joined method whitelist (e.g. "GET,POST"); null = unrestricted. */
+  methods?: string | null;
+  headerConditions: McpHeaderCondition[];
+  status: 'ENABLED' | 'DISABLED';
+  version: number;
+  createdAt: string;
+}
+
+export interface UpsertMcpRouteRuleRequest {
+  name: string;
+  description?: string;
+  priority?: number;
+  pathMode?: 'EXACT' | 'PREFIX' | 'REGEX' | null;
+  pathValue?: string | null;
+  hostMode?: 'EXACT' | 'PREFIX' | 'REGEX' | null;
+  hostValue?: string | null;
+  methods?: string[] | null;
+  headers?: McpHeaderCondition[] | null;
+}
+
 export interface UsageCost {
   upstreamPaid: string;
   gatewayObserved: string;

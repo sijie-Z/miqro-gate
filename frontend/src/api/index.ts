@@ -16,9 +16,11 @@ import type {
   InternalServiceView,
   McpAccessView,
   McpAclMode,
+  McpRouteRule,
   McpServiceView,
   McpToolView,
   SetMcpAccessGrantsRequest,
+  UpsertMcpRouteRuleRequest,
   SkillView,
   UsageDeletionRequest,
   WebhookDelivery,
@@ -597,6 +599,41 @@ export function adminSetMcpToolStatus(
   return post<McpToolView>(
     `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/status?status=${status}`,
   );
+}
+
+// ---- MCP route rules (F11, Tencent doc 135482) ----
+
+export function adminListMcpRouteRules(serviceId: string): Promise<McpRouteRule[]> {
+  return get<McpRouteRule[]>(`/api/v1/admin/mcp-services/${serviceId}/route-rules`);
+}
+
+export function adminCreateMcpRouteRule(
+  serviceId: string,
+  body: UpsertMcpRouteRuleRequest,
+): Promise<McpRouteRule> {
+  return post<McpRouteRule>(`/api/v1/admin/mcp-services/${serviceId}/route-rules`, body);
+}
+
+export function adminUpdateMcpRouteRule(
+  serviceId: string,
+  ruleId: string,
+  body: UpsertMcpRouteRuleRequest,
+): Promise<McpRouteRule> {
+  return patch<McpRouteRule>(`/api/v1/admin/mcp-services/${serviceId}/route-rules/${ruleId}`, body);
+}
+
+export function adminSetMcpRouteStatus(
+  serviceId: string,
+  ruleId: string,
+  status: 'ENABLED' | 'DISABLED',
+): Promise<McpRouteRule> {
+  return post<McpRouteRule>(
+    `/api/v1/admin/mcp-services/${serviceId}/route-rules/${ruleId}/status?status=${status}`,
+  );
+}
+
+export function adminDeleteMcpRouteRule(serviceId: string, ruleId: string): Promise<void> {
+  return del<void>(`/api/v1/admin/mcp-services/${serviceId}/route-rules/${ruleId}`);
 }
 
 // ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----

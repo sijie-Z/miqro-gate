@@ -330,6 +330,11 @@ MCP Tools 管理：`tool_name`（AI Agent 调用唯一标识，snake_case）、`
 
 腾讯 doc 134890 语义：`mcp_service_access` 每服务一行——`mode`（`NONE|ALLOW|DENY`，缺行 = NONE）、唯一 `mcp_service_id`（ON DELETE CASCADE）；`mcp_access_grants` 名单行——`service_access_id`（CASCADE）、`tool_id`（可空：NULL=服务级名单，非 NULL=该工具覆盖）、`consumer_id`（引用 `api_consumers`，CASCADE）、`mode`（`ALLOW|DENY`）。唯一 `(service_access_id, tool_id, consumer_id)`。模式约束由 API 层保证：服务名单仅 ALLOW/DENY 模式存在（NONE 时清空）；工具覆盖仅服务 NONE 时可配置；服务模式切 NONE 自动清服务名单。判定在调用侧用 `McpAccessPolicy`（domain 纯函数：服务层判定 + 工具层收窄，工具只能进一步限制）。
 
+### `mcp_route_rule` (V28，F11 MCP 路由规则)
+
+腾讯 doc 135482 语义：每 MCP 服务一组路由规则（`mcp_service_id` ON DELETE CASCADE），决定哪些入站请求可达服务（上游恒为服务本身，配置面先行）。`name`（≤64）服务内唯一 `(tenant_id, mcp_service_id, name)`；`priority`（0–65535，默认 1000）大者优先，0 为系统 default 保留；匹配条件列：`path_mode/path_value`（EXACT|PREFIX|REGEX + 值，RE2 全匹配，REGEX 豁免 `/` 前缀，DB CHECK 同步）、`host_mode/host_value`（同上，域名大小写不敏感）、`methods`（逗号 CSV 白名单，NULL=不限）、`header_conditions jsonb`（`[{name, mode, value}]` AND 语义，≤8，default `[]`）；`status`（ENABLED|DISABLED，仅启用参与匹配）；`version` 乐观锁。**default 行**（name=default/priority=0/无条件/ENABLED/created_by NULL）随服务创建生成、V28 对存量服务以确定性 md5 uuid 回填，API 层禁改禁删禁停；自定义行 `created_by` 必填。匹配/冲突/正则校验逻辑集中在 domain 纯函数 `McpRouteRules`（可被后续数据面复用，不读正文）。
+
+
 ## 7. 告警、导出和审计
 
 ### `webhook_endpoints`

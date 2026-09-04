@@ -19,6 +19,11 @@ vi.mock('@/api', () => ({
   setMcpAccessMode: vi.fn(),
   setMcpAccessGrants: vi.fn(),
   clearMcpAccessGrants: vi.fn(),
+  adminListMcpRouteRules: vi.fn(),
+  adminCreateMcpRouteRule: vi.fn(),
+  adminUpdateMcpRouteRule: vi.fn(),
+  adminSetMcpRouteStatus: vi.fn(),
+  adminDeleteMcpRouteRule: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -118,6 +123,7 @@ describe('NextAdminMcpServicesView', () => {
     document.body.innerHTML = '';
     mockApi.adminListMcpServices.mockResolvedValue([]);
     mockApi.listApiConsumers.mockResolvedValue(consumers);
+    mockApi.adminListMcpRouteRules.mockResolvedValue([]);
   });
 
   function mountView() {
@@ -355,5 +361,178 @@ describe('NextAdminMcpServicesView', () => {
       mode: 'DENY',
       consumerIds: ['c1'],
     });
+  });
+
+  it('opens the route rules drawer with the immutable default rule', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminListMcpRouteRules.mockResolvedValue([
+      {
+        id: 'd1',
+        mcpServiceId: 'm1',
+        name: 'default',
+        description: null,
+        priority: 0,
+        pathMode: null,
+        pathValue: null,
+        hostMode: null,
+        hostValue: null,
+        methods: null,
+        headerConditions: [],
+        status: 'ENABLED',
+        version: 0,
+        createdAt: '2026-09-01T00:00:00Z',
+      },
+      {
+        id: 'r2',
+        mcpServiceId: 'm1',
+        name: 'gray-v2',
+        description: '灰度 v2',
+        priority: 1500,
+        pathMode: 'PREFIX',
+        pathValue: '/api/v2',
+        hostMode: 'EXACT',
+        hostValue: 'mcp-prod.example.com',
+        methods: 'GET,POST',
+        headerConditions: [{ name: 'X-Tenant-Id', mode: 'EXACT', value: 'acme' }],
+        status: 'ENABLED',
+        version: 1,
+        createdAt: '2026-09-02T00:00:00Z',
+      },
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-routes"]').trigger('click');
+    await flushPromises();
+
+    const drawer = document.querySelector('[data-testid="mcp-routes-drawer"]');
+    expect(drawer, 'routes drawer should render').toBeTruthy();
+    expect(drawer!.textContent).toContain('系统默认');
+    expect(drawer!.textContent).toContain('gray-v2');
+    expect(drawer!.textContent).toContain('GET / POST');
+    expect(drawer!.textContent).toContain('全部请求（兜底）');
+    // The default row carries no actions; the custom row does.
+    const defaultRow = document.querySelector('[data-rule-id="d1"]') as HTMLElement;
+    const customRow = document.querySelector('[data-rule-id="r2"]') as HTMLElement;
+    expect(defaultRow.querySelector('[data-testid="mcp-route-edit"]')).toBeNull();
+    expect(customRow.querySelector('[data-testid="mcp-route-edit"]')).toBeTruthy();
+  });
+
+  it('creates a route rule with path/method/header conditions', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminCreateMcpRouteRule.mockResolvedValue({
+      id: 'r3',
+      mcpServiceId: 'm1',
+      name: 'canary',
+      priority: 1000,
+      pathMode: 'EXACT',
+      pathValue: '/api',
+      methods: 'POST',
+      headerConditions: [{ name: 'X-Tenant-Id', mode: 'EXACT', value: 'acme' }],
+      status: 'ENABLED',
+      version: 0,
+      createdAt: '2026-09-03T00:00:00Z',
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-routes"]').trigger('click');
+    await flushPromises();
+    (document.querySelector('[data-testid="mcp-route-create-open"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    const setInput = (testid: string, value: string) => {
+      const el = document.querySelector(`[data-testid="${testid}"]`) as HTMLInputElement;
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set;
+      setter?.call(el, value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    setInput('mcp-route-name', 'canary');
+    // Path: 精确 + value.
+    const pathSeg = document.querySelector('[data-testid="mcp-route-path-mode"]') as HTMLElement;
+    const exact = Array.from(pathSeg.querySelectorAll('button')).find(
+      (b) => b.textContent === '精确',
+    )!;
+    exact.click();
+    await flushPromises();
+    setInput('mcp-route-path-value', '/api');
+    // Methods: pick POST only.
+    const post = Array.from(document.querySelectorAll('[data-testid="mcp-route-method"]')).find(
+      (c) => (c as HTMLInputElement).value === 'POST',
+    ) as HTMLInputElement;
+    post.checked = true;
+    post.dispatchEvent(new Event('change', { bubbles: true }));
+    // One header condition.
+    (document.querySelector('[data-testid="mcp-route-header-add"]') as HTMLButtonElement).click();
+    await flushPromises();
+    setInput('mcp-route-header-name', 'X-Tenant-Id');
+    setInput('mcp-route-header-value', 'acme');
+    await flushPromises();
+    (document.querySelector('[data-testid="mcp-route-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(mockApi.adminCreateMcpRouteRule).toHaveBeenCalledWith('m1', {
+      name: 'canary',
+      description: undefined,
+      priority: 1000,
+      pathMode: 'EXACT',
+      pathValue: '/api',
+      hostMode: null,
+      hostValue: null,
+      methods: ['POST'],
+      headers: [{ name: 'X-Tenant-Id', mode: 'EXACT', value: 'acme' }],
+    });
+  });
+
+  it('disables and deletes a custom rule through gates', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    const custom = {
+      id: 'r2',
+      mcpServiceId: 'm1',
+      name: 'gray-v2',
+      description: null,
+      priority: 1500,
+      pathMode: 'PREFIX',
+      pathValue: '/api/v2',
+      hostMode: null,
+      hostValue: null,
+      methods: 'GET',
+      headerConditions: [],
+      status: 'ENABLED',
+      version: 1,
+      createdAt: '2026-09-02T00:00:00Z',
+    };
+    mockApi.adminListMcpRouteRules.mockResolvedValue([
+      { ...custom, id: 'd1', name: 'default', priority: 0, methods: null, status: 'ENABLED' },
+      custom,
+    ]);
+    mockApi.adminSetMcpRouteStatus.mockResolvedValue({ ...custom, status: 'DISABLED' });
+    mockApi.adminDeleteMcpRouteRule.mockResolvedValue(undefined);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-routes"]').trigger('click');
+    await flushPromises();
+    const customRow = document.querySelector('[data-rule-id="r2"]') as HTMLElement;
+    const disable = Array.from(customRow.querySelectorAll('button')).find(
+      (b) => b.textContent === '停用',
+    ) as HTMLButtonElement;
+    disable.click();
+    await flushPromises();
+    expect(mockApi.adminSetMcpRouteStatus).toHaveBeenCalledWith('m1', 'r2', 'DISABLED');
+
+    (customRow.querySelector('[data-testid="mcp-route-delete"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const buttons = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
+    const confirm = buttons.find(
+      (b) => b.textContent?.trim() === '删除' && b.className.includes('ui-btn--danger'),
+    );
+    expect(confirm, 'delete gate should render').toBeTruthy();
+    confirm!.click();
+    await flushPromises();
+    expect(mockApi.adminDeleteMcpRouteRule).toHaveBeenCalledWith('m1', 'r2');
   });
 });
