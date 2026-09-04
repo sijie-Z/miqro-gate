@@ -40,6 +40,14 @@ public class AdminUserController {
         return orgService.listUsers(userContext.getUser().tenantId());
     }
 
+    /** Projects the user belongs to (admin quick-join entry, F-REG loop). */
+    @GetMapping("/{userId}/project-memberships")
+    public List<com.miqroera.miqrokey.controlplane.service.AdminOrgService.UserProjectMembershipView> userProjectMemberships(
+            @PathVariable UUID userId) {
+        var admin = userContext.getUser();
+        return orgService.userProjectMemberships(admin.tenantId(), userId);
+    }
+
     @PostMapping
     public UserCreated create(@RequestBody CreateRequest body) {
         var admin = userContext.getUser();

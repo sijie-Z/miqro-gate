@@ -309,4 +309,59 @@ class AdminOrgApiIntegrationTest {
             return SECRET;
         }
     }
+
+    @Test
+    @DisplayName("user project memberships list for the quick-join entry; unknown user 404s")
+    void userProjectMemberships() throws Exception {
+        MvcResult user = mockMvc
+                .perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("username", "join-me"))))
+                .andExpect(status().isOk()).andReturn();
+        String userId = ((Map<?, ?>) objectMapper.readValue(user.getResponse().getContentAsString(), Map.class)
+                .get("user")).get("id").toString();
+
+        // Fresh user has no project memberships.
+        mockMvc.perform(get("/api/v1/admin/users/" + userId + "/project-memberships").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$").isEmpty());
+
+        String core = projectId("CORE", "Core AI");
+        String tools = projectId("TOOLS", "Tools");
+        addMember(core, userId);
+        mockMvc.perform(get("/api/v1/admin/users/" + userId + "/project-memberships").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].projectCode").value("CORE"))
+                .andExpect(jsonPath("$[0].projectName").value("Core AI")).andExpect(jsonPath("$[0].joinedAt").exists());
+        addMember(tools, userId);
+        mockMvc.perform(get("/api/v1/admin/users/" + userId + "/project-memberships").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[0].projectCode").value("CORE"))
+                .andExpect(jsonPath("$[1].projectCode").value("TOOLS"));
+
+        // Removing the membership drops the row again.
+        mockMvc.perform(delete("/api/v1/admin/projects/" + core + "/members/" + userId)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/admin/users/" + userId + "/project-memberships").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].projectCode").value("TOOLS"));
+
+        // Unknown users and anonymous callers are rejected.
+        mockMvc.perform(get("/api/v1/admin/users/" + UUID.randomUUID() + "/project-memberships").cookie(sessionCookie))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("USER_NOT_FOUND"));
+        mockMvc.perform(get("/api/v1/admin/users/" + userId + "/project-memberships"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    private String projectId(String code, String name) throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/projects").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("code", code, "name", name))))
+                .andExpect(status().isOk()).andReturn();
+        return objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
+    }
+
+    private void addMember(String projectId, String userId) throws Exception {
+        mockMvc.perform(post("/api/v1/admin/projects/" + projectId + "/members").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("userId", userId)))).andExpect(status().isOk());
+    }
 }

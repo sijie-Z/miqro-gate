@@ -262,6 +262,20 @@ public class AdminOrgService {
                         rs.getString("display_name"), rs.getTimestamp("created_at").toInstant()));
     }
 
+    /** Projects a user is a member of (quick-join entry point, F-REG loop). */
+    public List<UserProjectMembershipView> userProjectMemberships(UUID tenantId, UUID userId) {
+        requireUser(tenantId, userId);
+        return jdbc.query("""
+                SELECT p.id, p.code, p.name, p.status, pm.created_at AS joined_at
+                FROM project_memberships pm
+                JOIN projects p ON p.id = pm.project_id AND p.tenant_id = pm.tenant_id
+                WHERE pm.tenant_id = :tenantId AND pm.user_id = :userId
+                ORDER BY p.code
+                """, new MapSqlParameterSource("tenantId", tenantId).addValue("userId", userId),
+                (rs, rowNum) -> new UserProjectMembershipView((UUID) rs.getObject("id"), rs.getString("code"),
+                        rs.getString("name"), rs.getString("status"), rs.getTimestamp("joined_at").toInstant()));
+    }
+
     @Transactional
     public void addProjectMember(UUID tenantId, UUID adminId, UUID projectId, UUID userId) {
         requireProject(tenantId, projectId);
@@ -437,6 +451,10 @@ public class AdminOrgService {
     }
 
     public record ProjectMemberView(UUID userId, String username, String displayName, Instant createdAt) {
+    }
+
+    public record UserProjectMembershipView(UUID projectId, String projectCode, String projectName,
+            String projectStatus, Instant joinedAt) {
     }
 
     private static final RowMapper<ProjectProviderGrant> GRANT_ROW_MAPPER = (rs, rowNum) -> new ProjectProviderGrant(
