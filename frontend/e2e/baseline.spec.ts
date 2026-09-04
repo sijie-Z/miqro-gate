@@ -1262,6 +1262,7 @@ const ADMIN_PAGES = [
   { path: '/app/deletions', testid: 'deletions-table', expect: '待确认' },
   { path: '/app/consumers', testid: 'consumers-table', expect: 'billing-sync' },
   { path: '/app/configs', testid: 'configs-table', expect: 'cache_enabled' },
+  { path: '/app/settings', testid: 'deploy-info', expect: 'MiQroGate' },
   { path: '/app/admin-usage', testid: 'usage-records-table', expect: 'deepseek-chat' },
 ];
 
@@ -1302,9 +1303,10 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
 
   const violations = await page.evaluate(() => {
     // In the production bundle all CSS is one same-origin file, so the audit
-    // scopes to the application's own design rules: :root (tokens) and
-    // .mk-* selectors. Element Plus vendor rules are not part of the tokens
-    // the spec governs.
+    // scopes to the application's own design rules: the v1 token layer
+    // (:root + .mk-* + --miqrokey-*) and the v2 design system (.ui-* +
+    // --ui-*), which is the dominant layer since U2. Vendor rules are not
+    // part of the tokens the spec governs.
     const sheet = [...document.styleSheets].flatMap((s) => {
       try {
         return [...s.cssRules];
@@ -1320,7 +1322,13 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
       if (selector.includes('.mk-brand-chip') || selector.includes('.mk-donut')) {
         return false;
       }
-      return selector === ':root' || selector.includes('.mk-') || selector.includes('--miqrokey');
+      return (
+        selector === ':root' ||
+        selector.includes('.mk-') ||
+        selector.includes('.ui-') ||
+        selector.includes('--miqrokey') ||
+        selector.includes('--ui-')
+      );
     });
     const sanitized = own.map((r) => {
       const selector = (r as CSSStyleRule).selectorText ?? '';
