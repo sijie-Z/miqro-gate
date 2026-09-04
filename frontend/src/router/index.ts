@@ -144,19 +144,19 @@ const router = createRouter({
         {
           path: 'exports',
           name: 'exports',
-          component: () => import('@/views/AdminExportsView.vue'),
+          component: () => import('@/views/next/NextAdminExportsView.vue'),
           meta: adminMeta('导出任务'),
         },
         {
           path: 'deletions',
           name: 'deletions',
-          component: () => import('@/views/AdminDeletionsView.vue'),
+          component: () => import('@/views/next/NextAdminDeletionsView.vue'),
           meta: adminMeta('用量删除'),
         },
         {
           path: 'consumers',
           name: 'consumers',
-          component: () => import('@/views/AdminConsumersView.vue'),
+          component: () => import('@/views/next/NextAdminConsumersView.vue'),
           meta: adminMeta('API 消费者'),
         },
         {
@@ -180,7 +180,7 @@ const router = createRouter({
         {
           path: 'configs',
           name: 'configs',
-          component: () => import('@/views/AdminConfigsView.vue'),
+          component: () => import('@/views/next/NextAdminConfigsView.vue'),
           meta: adminMeta('全局配置'),
         },
         {
@@ -204,7 +204,7 @@ const router = createRouter({
         {
           path: 'audit',
           name: 'audit',
-          component: () => import('@/views/AdminAuditView.vue'),
+          component: () => import('@/views/next/NextAdminAuditView.vue'),
           meta: adminMeta('审计日志'),
         },
         {

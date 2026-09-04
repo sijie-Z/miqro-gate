@@ -891,7 +891,7 @@ const ADMIN_PAGES = [
   { path: '/app/alert-rules', testid: 'rules-table', expect: 'usage-missing' },
   { path: '/app/audit', testid: 'audit-table', expect: 'LOGIN_SUCCESS' },
   { path: '/app/exports', testid: 'exports-table', expect: 'CSV' },
-  { path: '/app/deletions', testid: 'deletions-table', expect: 'PENDING_CONFIRMATION' },
+  { path: '/app/deletions', testid: 'deletions-table', expect: '待确认' },
   { path: '/app/admin-usage', testid: 'usage-records-table', expect: 'deepseek-chat' },
 ];
 
