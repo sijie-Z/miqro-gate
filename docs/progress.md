@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `U2 运营组 B 批（6 页）` — `DONE`（组织组 PR #134 已并入 develop；平台组 8 页完成、PR #135 CI 中；运营组全组 11 页完成 @ goal/ui-u2-ops-console 7c21a02；vitest 146/146、Playwright 44/44）
-- Goal status: `DONE`（2026-09-04；B 批=技能库管理/智能体/服务管理/Webhook/告警规则/MCP 服务已 v2 化，待开 PR（base develop）合并；合并后 C 步=组织/平台首评低分页统一视觉修正轮，再 U3 收尾；preview http://localhost:4174 重建后含全部运营组 v2）
+- Current goal: `U2 视觉统一轮（C 步）` — `DONE`（运营组全组 + 组织/平台低分页统一视觉评审两轮完成 @ goal/ui-u2-visual-pass 70b53f8；截图/raw 评审存 miqro-local/ui-reviews/ops-c/；vitest 36 文件 138/138、Playwright 47/47）
+- Goal status: `DONE`（2026-09-04；U2 管理面三组全部 v2 并合入 develop：组织 #134 / 平台 #135 / 运营 #136；C 步采纳项=壳层激活态强化+顶栏去品牌重复+e2e 真实密度 fixtures（含 audit chainPosition 字段修正）；评审噪声项按 U0 纪律不追；待 PR 合并后进入 U3 收尾（需用户"继续"指令）；preview http://localhost:4174 重建后含全部 v2）
 - Last updated: `2026-09-04 CST`
 ## 会话交接点 2026-09-03 — UI 专项 U0 待验收（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；U0 验收通过前暂停功能 backlog）
 
