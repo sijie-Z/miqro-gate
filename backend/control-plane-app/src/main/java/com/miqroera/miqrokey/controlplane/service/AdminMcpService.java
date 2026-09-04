@@ -22,9 +22,11 @@ import java.util.UUID;
 public class AdminMcpService {
 
     private final McpServiceRepository repository;
+    private final AdminMcpRouteRuleService routeRules;
 
-    public AdminMcpService(McpServiceRepository repository) {
+    public AdminMcpService(McpServiceRepository repository, AdminMcpRouteRuleService routeRules) {
         this.repository = repository;
+        this.routeRules = routeRules;
     }
 
     public List<McpService> list(UUID tenantId) {
@@ -52,6 +54,8 @@ public class AdminMcpService {
         } catch (DuplicateKeyException e) {
             throw new ApiException(HttpStatus.CONFLICT, "MCP_SERVICE_NAME_TAKEN", "MCP 服务名称已存在。");
         }
+        // F11: every service owns an immutable default catch-all route.
+        routeRules.createDefault(tenantId, service.id());
         return service;
     }
 

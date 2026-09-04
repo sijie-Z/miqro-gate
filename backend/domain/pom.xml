@@ -16,6 +16,14 @@
     <description>Pure domain model — no Spring, no database, no HTTP dependencies</description>
 
     <dependencies>
+        <!-- RE2 regular expressions for route-rule patterns (linear-time, no
+             backreferences - the upstream route spec (doc 135482) requires RE2
+             semantics; BSD-3 licensed) -->
+        <dependency>
+            <groupId>com.google.re2j</groupId>
+            <artifactId>re2j</artifactId>
+            <version>1.7</version>
+        </dependency>
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
