@@ -6,9 +6,9 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `功能 3 注册用户闭环演示` — `DONE`（memberships→LIVE 加入→授权→Key→真实推理 200→usage 核对 upstream=1/89+8 tokens 全链路实证；脚本 miqro-local/demo-registration-loop.sh 不入库）
-- Goal status: `DONE`（2026-09-04；**usage 记账告警解除**：22:05 起 writer 批量失败系网关进程加载过期 queue-spi 旧 jar 所致，以最新代码重建重启后写入与落库正常；附带改进=writer 失败日志携带完整 throwable（原只记 message 丢 cause）；服务 8080/8081 双活运行最新代码）
-- Last updated: `2026-09-04 CST`
+- Current goal: `无人值守续作（09-04 夜-09-05）` — `IN_PROGRESS`：功能 4 stage 1 完成并并入（#150 ceb0959：openapi-typescript 生成 + CI 漂移门 + JSON 源一致性守卫 17 DTO）；ADR-0012/0013 草案入库待 owner 拍板；UI Vben 轮抽样 plans 7.5/credentials 8.0/admin-usage 6.5（多数评审项为已实现误判，未追分）
+- Goal status: `IN_PROGRESS`（2026-09-05；待 owner 拍板项=ADR-0012（Kafka 场景/拓扑）、ADR-0013（MCP 鉴权 A/B/C 等）；可自主续作=UI 真机后定向、功能 4 stage 2、F18 小项评估）
+- Last updated: `2026-09-05 CST`
 ## 会话交接点 2026-09-03 — UI 专项 U0 待验收（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；U0 验收通过前暂停功能 backlog）
 
 ### U0 待办（下一动作，只等用户）

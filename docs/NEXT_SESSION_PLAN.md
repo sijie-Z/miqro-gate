@@ -88,7 +88,7 @@
 - [x] 功能 1：F11 MCP 路由规则 —— **2026-09-04 配置面完成并入 develop**（V28 mcp_route_rule + McpRouteRules 纯函数（RE2/冲突等价面）+ §5.23 管理 API + MCP 页路由规则抽屉；default 随服务自动生成/存量回填；数据面匹配待 F01 接线）
 - [~] 功能 2：管理员快捷加入项目 —— **2026-09-04 实现完成待合并**（后端用户所属项目查询 + 用户页「项目成员」抽屉（移除/加入 ACTIVE 项目））
 - [x] 功能 3：注册用户闭环演示 —— **2026-09-04 完成**（miqro-local/demo-registration-loop.sh；memberships→LIVE 加入→grant 选型→Key→deepseek-v4-flash 推理 200；usage 核对受阻见下）
-- [ ] 功能 4：OpenAPI codegen 迁移（发布前；勘察：基线/生成/CI diff 已齐，前端 openapi-typescript 生成名与手写类型错位需全仓改名，专项再做）
+- [~] 功能 4：OpenAPI codegen 迁移 —— **stage 1 完成并入 develop**（#150：openapi-typescript 7.6.1 生成 src/types/generated.ts + CI drift check + JSON 源一致性守卫 17 核心 DTO 字段⊆schema）；stage 2=手写层切换生成类型（发布前候选，需 owner 排期）
 - [x] 功能 5：usage 记账排查 —— **2026-09-04 结案**（非代码缺陷：网关进程加载过期 queue-spi jar；重建重启后写入/落库正常；附带 writer 失败日志带完整异常改进已提交）
 
 ## 视觉评审记录（U0，2026-09-03；raw 存档 miqro-local/ui-reviews/，见 U0-VISION-SCORES.md）
