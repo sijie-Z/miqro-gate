@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main, develop]
+  # Manual full run (used when the pull_request event misbehaves on a base
+  # branch, e.g. GitHub-side dispatch gaps: gh workflow run CI --ref <branch>).
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,12 +19,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-      compose: ${{ steps.filter.outputs.compose }}
-      docs: ${{ steps.filter.outputs.docs }}
+      backend: ${{ steps.force.outputs.backend || steps.filter.outputs.backend }}
+      frontend: ${{ steps.force.outputs.frontend || steps.filter.outputs.frontend }}
+      compose: ${{ steps.force.outputs.compose || steps.filter.outputs.compose }}
+      docs: ${{ steps.force.outputs.docs || steps.filter.outputs.docs }}
     steps:
-      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+      # Manual dispatches always run every job (no path filtering).
+      - id: force
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "backend=true" >> "$GITHUB_OUTPUT"
+          echo "frontend=true" >> "$GITHUB_OUTPUT"
+          echo "compose=true" >> "$GITHUB_OUTPUT"
+          echo "docs=true" >> "$GITHUB_OUTPUT"
+      - if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
         id: filter
         with:
           filters: |
