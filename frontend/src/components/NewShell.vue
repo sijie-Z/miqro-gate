@@ -153,7 +153,6 @@ async function handleLogout() {
 
     <main class="new-shell__main">
       <header class="new-shell__topbar">
-        <span class="new-shell__context">MiQroGate 控制台</span>
         <div class="new-shell__topbar-right">
           <div class="new-shell__user">
             <span class="new-shell__user-avatar" aria-hidden="true">{{ userInitial }}</span>
@@ -253,17 +252,16 @@ async function handleLogout() {
 }
 
 .new-shell__group {
-  margin-bottom: var(--ui-space-2);
+  margin-bottom: var(--ui-space-3);
 }
 
 .new-shell__group-title {
-  margin: var(--ui-space-5) 0 var(--ui-space-2);
-  padding: 0 var(--ui-space-2);
+  margin: var(--ui-space-5) var(--ui-space-2) var(--ui-space-2);
   font-size: 11px;
   font-weight: var(--ui-weight-semibold);
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #8a8a94;
+  color: #76767e;
 }
 
 .new-shell__nav-item {
@@ -304,9 +302,9 @@ async function handleLogout() {
 }
 
 .new-shell__nav-item--active {
-  background: var(--ui-primary-soft);
+  background: rgba(29, 74, 255, 0.1);
   color: var(--ui-primary);
-  font-weight: var(--ui-weight-medium);
+  font-weight: var(--ui-weight-semibold);
 }
 
 .new-shell__nav-item--active .new-shell__nav-accent {
@@ -351,19 +349,13 @@ async function handleLogout() {
 .new-shell__topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--ui-space-4);
   height: var(--ui-header-height);
   padding: 0 var(--ui-space-6);
   background: var(--ui-card);
   border-bottom: 1px solid var(--ui-border);
   flex-shrink: 0;
-}
-
-.new-shell__context {
-  font-size: var(--ui-font-size-sm);
-  font-weight: var(--ui-weight-medium);
-  color: var(--ui-foreground-faint);
 }
 
 .new-shell__topbar-right {
