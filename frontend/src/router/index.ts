@@ -120,13 +120,13 @@ const router = createRouter({
         {
           path: 'cost',
           name: 'cost',
-          component: () => import('@/views/AdminCostView.vue'),
+          component: () => import('@/views/next/NextCostView.vue'),
           meta: adminMeta('成本报表'),
         },
         {
           path: 'quota-rules',
           name: 'quota-rules',
-          component: () => import('@/views/AdminQuotaRulesView.vue'),
+          component: () => import('@/views/next/NextQuotaRulesView.vue'),
           meta: adminMeta('配额规则'),
         },
         {
