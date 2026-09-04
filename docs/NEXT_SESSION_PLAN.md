@@ -82,7 +82,8 @@
 - [x] U0 前置：PR #131 收尾（2026-09-03 已完成：CI 曾红一次——KeysView onboarding spec 缺 listVirtualKeys 默认 stub，修复重推后全绿 → squash merge → develop 80dddad，见 progress.md 顶部）
 - [~] U0 设计语言抽取 + ui/ 组件首批 + 试点 4 页（Login/Keys/Usage/AdminUsers）+ 视觉评审 —— **代码与测试完成，等待用户点验（见文末视觉评审记录；评分中位 ~7-7.5 未达 9，因评审器噪声大已停止逐轮追分；分支 goal/ui-posthog-u0 @ 803f552 已 push，PR 待开/已开）**
 - [x] U1 用户面全量切换 —— **2026-09-03 完成并入 develop**（PR #133 squash @ bc34874；/login 与 /app 六用户路由正式指向 v2；试点前缀退役；-4294 行清理）
-- [~] U2 管理面三组逐批切换 —— **组织组完成**（PR #134 CI 跑动中；两轮评审记档）；**平台组进行中**：供应商/定价/订阅/上游凭证 4 页 v2 已完成 @ goal/ui-u2-platform-console 7460a12（首评 7.5/6.8/6.5 待数据页后统一修）；**剩余平台组数据域 4 页**：用量报表 / 成本报表 / 配额规则 / 缓存收益 ROI → 之后第三批运营组
+<<<<<<< HEAD
+- [~] U2 管理面三组逐批切换 —— **组织组完成并入 develop**（PR #134 squash；两轮评审记档）；**平台组 8 页全部完成** @ goal/ui-u2-platform-console（供应商/定价/订阅/上游凭证/用量报表/成本报表/配额规则/缓存收益；vitest 131/131、Playwright 41/41 绿；首评 7.5/6.8/6.5 待与运营组后统一修）；**剩余运营组第三批**
 - [ ] U2 管理面三组逐批切换
 - [ ] U3 收尾：无 TDesign 残留 / 审计规则迁移 / e2e / chunk 对比
 - [ ] 功能 1：F11 MCP 路由规则
