@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `U2 视觉统一轮（C 步）` — `DONE`（视觉评审两轮完成并并入 develop（PR #137 squash @ 55c1e13）；截图/raw 评审存 miqro-local/ui-reviews/ops-c/；vitest 36 文件 138/138、Playwright 47/47）
-- Goal status: `DONE`（2026-09-04；U2 管理面三组 + 视觉统一轮全部合入 develop：#134/#135/#136/#137；下一阶段=U3 收尾（需用户"继续"指令）；preview http://localhost:4174 重建后含全部 v2）
+- Current goal: `U3 UI 专项收尾` — `DONE`（tdesign-vue-next 移除 + settings 页 v2 化 + 审计扩到 v2 层 @ goal/ui-u3-wrapup f6ee97a；vitest 37 文件 139/139、Playwright 48/48）
+- Goal status: `DONE`（2026-09-04；chunk 对比：tdesign 1,181.40 kB/gzip 326.34 → 0；tdesign-icons 224.46→80.33 kB（gzip 14.70→6.89）；残余=零路由 legacy 页、v1 --miqrokey CSS 文件仅为审计兼容保留、tdesign-icons SVG 图标集保留；UI 专项 U0–U3 全链完成；功能 backlog 待用户指示）
 - Last updated: `2026-09-04 CST`
 ## 会话交接点 2026-09-03 — UI 专项 U0 待验收（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；U0 验收通过前暂停功能 backlog）
 
