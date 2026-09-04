@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `功能 2 管理员快捷加入项目` — `IN_PROGRESS`（后端 GET /users/{id}/project-memberships + 前端用户行菜单「项目成员」抽屉（当前项目移除/ACTIVE 项目加入）；org 集成 5/5、用户页 vitest 7/7；待全量验证与合并）
-- Goal status: `IN_PROGRESS`（2026-09-04；合并后进入 UI 精修轮——用户指示参考 Vben Admin 5（vben.vvbin.cn 预览）打磨观感）
+- Current goal: `UI 精修轮（Vben Admin 5 观感参照）` — `IN_PROGRESS`（#141 快捷加入项目已合并待本地同步；UI 轮代码完成并推送 @ goal/ui-vben-polish 22b2da1，PR #143 待 CI）
+- Goal status: `IN_PROGRESS`（2026-09-04；**外部阻塞**：GitHub Actions pull_request 事件自 08:0x 起约 2h 未投递（push/CodeQL 正常、status 页正常——平台侧 PR 事件故障，多次空 commit+重建 PR 均未触发）；github.com:443 网络间歇黑洞（代理 7897 失效、ssh:443 通但无已授权 key）。恢复动作=守卫循环 push+探测 CI；待 CI 全绿后 merge #143 → 同步 develop（含 #141 32bb933 之后））
 - Last updated: `2026-09-04 CST`
 ## 会话交接点 2026-09-03 — UI 专项 U0 待验收（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；U0 验收通过前暂停功能 backlog）
 
