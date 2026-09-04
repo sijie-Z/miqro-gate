@@ -84,7 +84,7 @@
 - [x] U1 用户面全量切换 —— **2026-09-03 完成并入 develop**（PR #133 squash @ bc34874；/login 与 /app 六用户路由正式指向 v2；试点前缀退役；-4294 行清理）
 - [x] U2 管理面三组逐批切换 —— **全部并入 develop**（组织 #134 / 平台 #135 / 运营 #136：A 批导出·用量删除·审计·全局配置·API 消费者；B 批技能库管理·智能体·服务管理·Webhook·告警规则·MCP 服务）**C 步视觉统一轮并入 develop（PR #137 squash @ 55c1e13；两轮评审 16 页，采纳：壳层激活态强化/顶栏去品牌重复/e2e 真实密度 fixtures；raw 存档 miqro-local/ui-reviews/ops-c/；下一阶段=U3 收尾，待用户继续指令）**
 - [ ] U2 管理面三组逐批切换
-- [ ] U3 收尾：无 TDesign 残留 / 审计规则迁移 / e2e / chunk 对比
+- [x] U3 UI 专项收尾 —— **2026-09-04 并入 develop**（PR #139 squash；tdesign-vue-next 1.18 MB chunk 移除、settings 页 v2 化（唯一遗留路由页退役）、e2e 审美审计扩到 --ui/.ui- 层 + ui-layer 防回归守卫、chunk 对比记档于 progress.md；残余=零 legacy 路由页，--miqrokey CSS 审计兼容保留，tdesign-icons 图标集保留）
 - [ ] 功能 1：F11 MCP 路由规则
 - [ ] 功能 2：管理员快捷加入项目
 - [ ] 功能 3：注册用户闭环演示

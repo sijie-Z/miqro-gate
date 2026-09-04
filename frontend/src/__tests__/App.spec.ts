@@ -1,7 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import TDesign from 'tdesign-vue-next';
 import App from '@/App.vue';
 import router from '@/router';
 import * as api from '@/api';
@@ -19,7 +18,7 @@ describe('App', () => {
 
     const wrapper = mount(App, {
       global: {
-        plugins: [router, TDesign],
+        plugins: [router],
       },
     });
     await flushPromises();
@@ -34,7 +33,7 @@ describe('App', () => {
 
     const wrapper = mount(App, {
       global: {
-        plugins: [router, TDesign],
+        plugins: [router],
       },
     });
     await flushPromises();
