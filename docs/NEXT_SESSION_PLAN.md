@@ -87,8 +87,9 @@
 - [x] U3 UI 专项收尾 —— **2026-09-04 并入 develop**（PR #139 squash；tdesign-vue-next 1.18 MB chunk 移除、settings 页 v2 化（唯一遗留路由页退役）、e2e 审美审计扩到 --ui/.ui- 层 + ui-layer 防回归守卫、chunk 对比记档于 progress.md；残余=零 legacy 路由页，--miqrokey CSS 审计兼容保留，tdesign-icons 图标集保留）
 - [x] 功能 1：F11 MCP 路由规则 —— **2026-09-04 配置面完成并入 develop**（V28 mcp_route_rule + McpRouteRules 纯函数（RE2/冲突等价面）+ §5.23 管理 API + MCP 页路由规则抽屉；default 随服务自动生成/存量回填；数据面匹配待 F01 接线）
 - [~] 功能 2：管理员快捷加入项目 —— **2026-09-04 实现完成待合并**（后端用户所属项目查询 + 用户页「项目成员」抽屉（移除/加入 ACTIVE 项目））
-- [ ] 功能 3：注册用户闭环演示
-- [ ] 功能 4：OpenAPI codegen 迁移（发布前）
+- [x] 功能 3：注册用户闭环演示 —— **2026-09-04 完成**（miqro-local/demo-registration-loop.sh；memberships→LIVE 加入→grant 选型→Key→deepseek-v4-flash 推理 200；usage 核对受阻见下）
+- [ ] 功能 4：OpenAPI codegen 迁移（发布前；勘察：基线/生成/CI diff 已齐，前端 openapi-typescript 生成名与手写类型错位需全仓改名，专项再做）
+- [ ] 功能 5：usage 记账排查（2026-09-04 登记：gateway writer 批量写失败持续重试、usage 不落库；DB 侧正常）
 
 ## 视觉评审记录（U0，2026-09-03；raw 存档 miqro-local/ui-reviews/，见 U0-VISION-SCORES.md）
 
