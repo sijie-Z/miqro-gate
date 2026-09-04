@@ -465,6 +465,14 @@ export interface MemberView {
   createdAt: string;
 }
 
+export interface UserProjectMembership {
+  projectId: string;
+  projectCode: string;
+  projectName: string;
+  projectStatus: ProjectStatusValue;
+  joinedAt: string;
+}
+
 export interface Grant {
   id: string;
   projectId: string;

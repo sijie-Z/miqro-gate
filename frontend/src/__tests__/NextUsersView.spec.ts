@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import { defineComponent } from 'vue';
 import NextUsersView from '@/views/next/NextUsersView.vue';
 import * as api from '@/api';
 import type { AdminUser } from '@/types/api';
@@ -11,6 +12,10 @@ vi.mock('@/api', () => ({
   updateUserStatus: vi.fn(),
   resetUserPassword: vi.fn(),
   revokeUserSessions: vi.fn(),
+  adminUserProjectMemberships: vi.fn(),
+  listProjects: vi.fn(),
+  addProjectMember: vi.fn(),
+  removeProjectMember: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -26,6 +31,37 @@ const user = (overrides: Partial<AdminUser> = {}): AdminUser => ({
   ...overrides,
 });
 
+const SelectStub = defineComponent({
+  name: 'UiSelect',
+  props: {
+    modelValue: { type: String, default: '' },
+    options: { type: Array, default: () => [] },
+    placeholder: { type: String, default: '' },
+    disabled: { type: Boolean, default: false },
+  },
+  emits: ['update:modelValue', 'change'],
+  setup(props, { emit }) {
+    function pick(value: unknown) {
+      emit('update:modelValue', value);
+      emit('change', value);
+    }
+    return { pick, props };
+  },
+  template: `
+    <div class="ui-select-stub">
+      <button
+        v-for="opt in props.options"
+        :key="opt.value"
+        type="button"
+        class="stub-option"
+        @click="pick(opt.value)"
+      >
+        {{ opt.label }}
+      </button>
+    </div>
+  `,
+});
+
 describe('NextUsersView', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -37,10 +73,14 @@ describe('NextUsersView', () => {
     ]);
     document.body.innerHTML = '';
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    mockApi.adminUserProjectMemberships.mockResolvedValue([]);
+    mockApi.listProjects.mockResolvedValue([]);
   });
 
   function mountView() {
-    return mount(NextUsersView, { global: { plugins: [createPinia()] } });
+    return mount(NextUsersView, {
+      global: { plugins: [createPinia()], stubs: { UiSelect: SelectStub } },
+    });
   }
 
   async function setField(wrapper: ReturnType<typeof mountView>, testid: string, value: string) {
@@ -148,5 +188,87 @@ describe('NextUsersView', () => {
     expect((mockApi.listUsers as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(
       callsBefore,
     );
+  });
+
+  it('joins a project from the membership drawer (quick-join)', async () => {
+    mockApi.listProjects.mockResolvedValue([
+      {
+        id: 'p1',
+        code: 'P1',
+        name: 'Core AI',
+        status: 'ACTIVE',
+        createdAt: '2026-08-01T00:00:00Z',
+      },
+      { id: 'p2', code: 'P2', name: 'Tools', status: 'ACTIVE', createdAt: '2026-08-01T00:00:00Z' },
+      { id: 'p3', code: 'P3', name: 'QA', status: 'DISABLED', createdAt: '2026-08-01T00:00:00Z' },
+    ]);
+    mockApi.addProjectMember.mockResolvedValue(undefined);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="user-actions-u1"]').trigger('click');
+    await flushPromises();
+    (document.querySelector('[data-testid="user-project-members"]') as HTMLElement).click();
+    await flushPromises();
+
+    const drawer = document.querySelector('[data-testid="user-membership-drawer"]');
+    expect(drawer, 'membership drawer should render').toBeTruthy();
+    expect(drawer!.textContent).toContain('还没有加入任何项目');
+    // DISABLED projects are not offered.
+    const options = Array.from(document.querySelectorAll('.stub-option')).map((o) => o.textContent);
+    expect(options).toEqual(['P1 · Core AI', 'P2 · Tools']);
+
+    const option = Array.from(document.querySelectorAll('.stub-option')).find(
+      (o) => o.textContent === 'P2 · Tools',
+    ) as HTMLButtonElement;
+    option.click();
+    await flushPromises();
+    (document.querySelector('[data-testid="user-project-add"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(mockApi.addProjectMember).toHaveBeenCalledWith('p2', 'u1');
+  });
+
+  it('lists current memberships and removes one', async () => {
+    mockApi.adminUserProjectMemberships.mockResolvedValue([
+      {
+        projectId: 'p1',
+        projectCode: 'P1',
+        projectName: 'Core AI',
+        projectStatus: 'ACTIVE',
+        joinedAt: '2026-09-01T00:00:00Z',
+      },
+    ]);
+    mockApi.listProjects.mockResolvedValue([
+      {
+        id: 'p1',
+        code: 'P1',
+        name: 'Core AI',
+        status: 'ACTIVE',
+        createdAt: '2026-08-01T00:00:00Z',
+      },
+      { id: 'p2', code: 'P2', name: 'Tools', status: 'ACTIVE', createdAt: '2026-08-01T00:00:00Z' },
+    ]);
+    mockApi.removeProjectMember.mockResolvedValue(undefined);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="user-actions-u1"]').trigger('click');
+    await flushPromises();
+    (document.querySelector('[data-testid="user-project-members"]') as HTMLElement).click();
+    await flushPromises();
+
+    expect(mockApi.adminUserProjectMemberships).toHaveBeenCalledWith('u1');
+    const list = document.querySelector('[data-testid="user-memberships"]');
+    expect(list, 'membership rows should render').toBeTruthy();
+    expect(list!.textContent).toContain('P1');
+    expect(list!.textContent).toContain('Core AI');
+    // Already-joined projects drop out of the join options.
+    const labels = Array.from(document.querySelectorAll('.stub-option')).map((o) => o.textContent);
+    expect(labels).toEqual(['P2 · Tools']);
+
+    (document.querySelector('[data-testid="user-project-remove"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(mockApi.removeProjectMember).toHaveBeenCalledWith('p1', 'u1');
   });
 });

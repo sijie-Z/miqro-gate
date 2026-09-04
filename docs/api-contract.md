@@ -350,6 +350,7 @@
 | `PATCH /api/v1/admin/users/{id}` | 更新状态（`status`：ACTIVE/DISABLED；禁用即撤销全部会话；SYSTEM_ADMIN 不可禁用 → 409 `ADMIN_NOT_DISABLEABLE`） |
 | `POST /api/v1/admin/users/{id}/reset-password` | 重置密码 + 撤销全部会话；返回新临时密码（仅本次） |
 | `POST /api/v1/admin/users/{id}/revoke-sessions` | 撤销该用户全部会话 |
+| `GET /api/v1/admin/users/{id}/project-memberships` | 用户所属项目列表（`[{projectId, projectCode, projectName, projectStatus, joinedAt}]`，按 code 排序）——管理员「加入项目」快捷入口数据面（F-REG 闭环）；用户不存在 `404 USER_NOT_FOUND` |
 | `GET/POST /api/v1/admin/teams`、`PATCH /{id}` | 团队列表/创建/更新 |
 | `GET/POST /api/v1/admin/teams/{id}/members`、`DELETE /members/{userId}` | 团队成员管理 |
 | `GET/POST /api/v1/admin/projects`、`PATCH /{id}` | 项目列表/创建（`code` 唯一，冲突 → 409 `PROJECT_CODE_TAKEN`）/更新 |
