@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `F11 MCP 路由规则（配置面）` — `DONE`（V28 规则表 + domain 纯函数 + 管理 API §5.23 + 前端路由规则抽屉 @ goal/f11-mcp-route-rules；domain 单测 114/114（+9）、control-plane 集成 6/6 + MCP 回归 12/12、前端 vitest 38 文件 143/143、Playwright 48/48）
-- Goal status: `DONE`（2026-09-04；default 兜底不可改删禁 + 自定义优先级规则；RE2 全匹配/冲突等价面校验/幂等启停；数据面按优先级匹配待 F01 代理接线；下一项=功能 2 管理员快捷加入项目）
+- Current goal: `UI 精修轮（Vben Admin 5 观感参照）` — `IN_PROGRESS`（#141 快捷加入项目已合并；本轮=顶栏面包屑+用户下拉菜单+表头浅底+页面描述 14px；三页抽样评审 users 7.8→7.5 / skillhub 6.5→7.4 / keys 6.5→7.5（评审器噪声 ±1.5 已知）；raw 存档 miqro-local/ui-reviews/vben-r*.txt）
+- Goal status: `IN_PROGRESS`（2026-09-04；用户休息指令：UI 仍丑 → 以 Vben Admin 5（vben.vvbin.cn）为观感参照继续打磨；待本分支合并后按同轮次扩展更多页面）
 - Last updated: `2026-09-04 CST`
 ## 会话交接点 2026-09-03 — UI 专项 U0 待验收（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；U0 验收通过前暂停功能 backlog）
 
