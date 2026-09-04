@@ -155,6 +155,11 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install
         run: npm ci
+      - name: Codegen drift check
+        working-directory: frontend
+        # Regenerate from the committed OpenAPI baseline and fail when the
+        # checked-in generated types differ (feature backlog 功能 4 stage 1).
+        run: npm run gen:types && git diff --exit-code -- src/types/generated.ts
       - name: Lint
         run: npm run lint
       - name: Typecheck
