@@ -65,8 +65,8 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
         } catch (Exception e) {
             // Idempotent writes: a failed batch can be retried safely.
             log.warn(
-                    "Usage batch write failed (usage={}, hits={}, starts={}, completions={}); will be retried on next flush: {}",
-                    usageEvents.size(), hitEvents.size(), startedEvents.size(), completedEvents.size(), e.getMessage());
+                    "Usage batch write failed (usage={}, hits={}, starts={}, completions={}); will be retried on next flush",
+                    usageEvents.size(), hitEvents.size(), startedEvents.size(), completedEvents.size(), e);
             throw e;
         }
     }
