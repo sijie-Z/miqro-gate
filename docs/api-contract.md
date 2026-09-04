@@ -721,7 +721,7 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | 方法与路径 | 用途 |
 |---|---|
 | `GET /api/v1/admin/mcp-services` / `/{id}` | 列表/详情（含健康状态与检查配置） |
-| `POST /api/v1/admin/mcp-services` | 注册：`{ "name", "description"?, "endpoint", "transport"?, "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"? }`（默认 STREAMABLE_HTTP / 30s / 5s / 3 / 1 / `/health`） |
+| `POST /api/v1/admin/mcp-services` | 注册：`{ "name", "description"?, "endpoint", "transport"?, "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"? }`（默认 STREAMABLE_HTTP / 30s / 5s / 3 / 1 / `/health`；注册即自动生成 default 路由，见 5.23） |
 | `POST /api/v1/admin/mcp-services/{id}/status?status=ONLINE\|OFFLINE` | 手动上下线（重复切换 `409 MCP_STATUS_UNCHANGED`） |
 | `POST /api/v1/admin/mcp-services/{id}/health-config` | 更新健康检查配置 |
 
@@ -822,6 +822,30 @@ Server 级（谁能调用整个服务）+ Tool 级（谁可调用某工具）ACL
 - 冲突错误：`QUOTA_TEMPLATE_NOT_CONFIGURED`（409，未配置即 enable/disable）、`QUOTA_TEMPLATE_ALREADY_ENABLED` / `QUOTA_TEMPLATE_ALREADY_DISABLED`（409，重复切换）；定义字段校验沿用 `400 PARAM_INVALID`。
 - 审计：`QUOTA_DEFAULT_TEMPLATE_CREATE` / `QUOTA_DEFAULT_TEMPLATE_UPDATE` / `QUOTA_DEFAULT_TEMPLATE_ENABLE` / `QUOTA_DEFAULT_TEMPLATE_DISABLE`（target = tenant）；自动复制产生的规则记 `QUOTA_RULE_CREATE` 且摘要含 `"auto":true`。
 - **映射取舍**：腾讯模板面向"消费者"（配额规则的挂靠对象）；本系统配额规则挂靠 USER/PROJECT 双作用域，其中"消费者"语义最近似**用户**（拥有 Virtual Key 的消费主体），故模板复制只落在新建用户上；PROJECT 作用域不参与模板化（腾讯无此概念，不发明）。预算模板化（roadmap 提及）另行立项。
+
+### 5.23 MCP 路由规则（F11，腾讯 AI 网关 doc 135482，V28）
+
+路由规则决定哪些入站请求能到达某个 MCP 服务；**所有规则共用同一上游（服务本身）**——本能力只控制"谁能进来"，不控制转发去向。配置面先行：规则落库并经管理 API 维护；数据面按优先级匹配在 MCP 代理接线（F01）后生效。**匹配与校验全程不读请求正文。**
+
+- **default 兜底路由**：注册 MCP 服务时自动创建（`name=default`、`priority=0`、无条件匹配、`ENABLED`）；**不可修改/禁用/删除**（`409 ROUTE_DEFAULT_IMMUTABLE`），保证服务始终可达。存量服务由 V28 迁移回填（确定性 id）。
+- **自定义路由**：`priority` 默认 1000（1–65535；0 为系统保留），数值越大优先；可编辑、启停、删除。仅 `ENABLED` 规则参与匹配；未命中所有自定义规则时回落到 default。
+- **单条规则内 AND 语义**：路径、Host、方法白名单、每条 Header 条件全部满足才命中；多规则间按优先级（大者先）。
+- **匹配方式**：`EXACT` / `PREFIX` / `REGEX`（RE2）。正则按**全匹配**语义执行（上游示例自带 `^…$` 锚点）；非法 RE2（含回溯引用）提交即拦截（`400 ROUTE_PATTERN_INVALID`）。路径值必须以 `/` 开头（REGEX 豁免）；Host 值大小写不敏感（EXACT/PREFIX 归一后比较，REGEX 原文执行）；Header 名大小写不敏感、值与模式敏感。Header 条件最多 8 条。
+- **方法白名单**：`GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS`，不选/全选 = 不限。
+- **冲突实时校验**（创建/更新/启用时执行）：与同服务**已启用**规则（排除自身）的**匹配面完全等价**（path+host+方法+header 条件的规范化集合相同）即 `409 ROUTE_MATCH_CONFLICT`，detail 含冲突路由名。正则包含关系不可判定，等价是所执行的上界（如实记录）；停用规则不参与校验，但**重新启用会再次校验**，防休眠重复被武装。无条件自定义规则与 default 等价 → 创建即冲突。
+- **更新语义**：`PATCH` 为可编辑字段**全量替换**（除 status；缺省匹配字段 = 清空/不限；priority 缺省保留现值）。启停**幂等**（同状态重复调用 200 不报错，对齐上游 doc；与 Tools 的 409 惯例不同，如实记录）。
+- 路由删除后配置即失；删除 MCP 服务级联清理其路由（DB CASCADE）。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/mcp-services/{serviceId}/route-rules` | 规则列表（优先级降序，default 在末尾） |
+| `POST /api/v1/admin/mcp-services/{serviceId}/route-rules` | 新建（默认启用）：`{ "name", "description"?, "priority"?, "pathMode"?, "pathValue"?, "hostMode"?, "hostValue"?, "methods"?, "headers"? }` |
+| `PATCH /api/v1/admin/mcp-services/{serviceId}/route-rules/{ruleId}` | 全量替换可编辑字段（见上） |
+| `POST /api/v1/admin/mcp-services/{serviceId}/route-rules/{ruleId}/status?status=ENABLED\|DISABLED` | 启用/禁用（幂等） |
+| `DELETE /api/v1/admin/mcp-services/{serviceId}/route-rules/{ruleId}` | 删除自定义路由 |
+
+- 名称：1–64 字符、同一服务唯一（`409 ROUTE_NAME_TAKEN`）、`default` 保留（`400 ROUTE_NAME_RESERVED`）；描述 ≤200。
+- 错误码：`ROUTE_NOT_FOUND`（404）、`ROUTE_NAME_TAKEN`（409）、`ROUTE_NAME_RESERVED`（400）、`ROUTE_NAME_INVALID`（400）、`ROUTE_DESCRIPTION_INVALID`（400）、`ROUTE_PRIORITY_INVALID`（400）、`ROUTE_PATH_INVALID`（400）、`ROUTE_MATCHER_INVALID`（400）、`ROUTE_PATTERN_INVALID`（400）、`ROUTE_METHOD_INVALID`（400）、`ROUTE_HEADERS_TOO_MANY`（400）、`ROUTE_HEADER_INVALID`（400）、`ROUTE_MATCH_CONFLICT`（409）、`ROUTE_DEFAULT_IMMUTABLE`（409）、`ROUTE_STATUS_INVALID`（400）；服务不存在 `404 MCP_SERVICE_NOT_FOUND`。
 
 ## 6. 导出与对账任务
 
