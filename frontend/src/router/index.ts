@@ -132,13 +132,13 @@ const router = createRouter({
         {
           path: 'roi',
           name: 'roi',
-          component: () => import('@/views/AdminRoiView.vue'),
+          component: () => import('@/views/next/NextRoiView.vue'),
           meta: adminMeta('缓存收益'),
         },
         {
           path: 'admin-usage',
           name: 'admin-usage',
-          component: () => import('@/views/AdminUsageView.vue'),
+          component: () => import('@/views/next/NextAdminUsageView.vue'),
           meta: adminMeta('用量报表'),
         },
         {
