@@ -77,15 +77,13 @@ class HmacVirtualKeyProviderTest {
             VirtualKeyMaterial material = provider.generate(TENANT_ID, null);
             String display = material.fullDisplayString();
 
-            // Format: mqk_live_<publicKeyId>_<encodedSecret>
-            // publicKeyId and encodedSecret are base64url (may contain - and _)
+            // Format: mqk_live_<publicKeyId>_<encodedSecret>. Both id and the
+            // encoded secret are base64url and may contain - and _, so the
+            // underscore separator cannot be located by indexOf (a leading _
+            // in the secret used to trip the position check ~1/64 runs).
             assertThat(display).startsWith("mqk_live_");
-            // Verify it has exactly one underscore after the prefix
-            int firstUnderscore = display.indexOf('_', PREFIX.length());
-            assertThat(firstUnderscore).isGreaterThan(PREFIX.length());
-            // The rest after the underscore is the encoded secret
-            String encodedSecret = display.substring(firstUnderscore + 1);
-            assertThat(encodedSecret).isNotEmpty();
+            assertThat(display.length()).isGreaterThan("mqk_live_".length() + 24);
+            assertThat(material.rawSecret()).hasSize(32);
         }
 
         @Test
