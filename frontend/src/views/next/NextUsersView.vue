@@ -16,8 +16,17 @@ import {
 } from 'radix-vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
-import type { AdminUser, UserRole } from '@/types/api';
+import {
+  UiButton,
+  UiDialog,
+  UiDrawer,
+  UiInput,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  toast,
+} from '@/ui';
+import type { AdminUser, Project, UserProjectMembership, UserRole } from '@/types/api';
 
 const users = ref<AdminUser[]>([]);
 const loading = ref(true);
@@ -83,6 +92,85 @@ async function load() {
     }
   } finally {
     loading.value = false;
+  }
+}
+
+// Project membership drawer (admin quick-join, F-REG loop).
+const membershipUser = ref<AdminUser | null>(null);
+const membershipDrawer = ref(false);
+const memberships = ref<UserProjectMembership[]>([]);
+const projects = ref<Project[]>([]);
+const projectsLoaded = ref(false);
+const membershipLoading = ref(false);
+const membershipError = ref('');
+const pickProjectId = ref('');
+const membershipSaving = ref(false);
+
+const joinableProjects = computed(() => {
+  const memberIds = new Set(memberships.value.map((m) => m.projectId));
+  return projects.value.filter((p) => p.status === 'ACTIVE' && !memberIds.has(p.id));
+});
+
+function openProjectMembership(user: AdminUser) {
+  membershipUser.value = user;
+  memberships.value = [];
+  membershipError.value = '';
+  pickProjectId.value = '';
+  membershipDrawer.value = true;
+  void refreshMemberships();
+  if (!projectsLoaded.value) {
+    api
+      .listProjects()
+      .then((list) => {
+        projects.value = list;
+        projectsLoaded.value = true;
+      })
+      .catch(() => {
+        projects.value = [];
+      });
+  }
+}
+
+async function refreshMemberships() {
+  if (!membershipUser.value) return;
+  membershipLoading.value = true;
+  membershipError.value = '';
+  try {
+    memberships.value = await api.adminUserProjectMemberships(membershipUser.value.id);
+  } catch (error) {
+    membershipError.value = error instanceof ApiError ? error.message : '加载项目成员关系失败。';
+  } finally {
+    membershipLoading.value = false;
+  }
+}
+
+async function addMembership() {
+  if (!membershipUser.value || !pickProjectId.value) return;
+  membershipSaving.value = true;
+  membershipError.value = '';
+  try {
+    await api.addProjectMember(pickProjectId.value, membershipUser.value.id);
+    pickProjectId.value = '';
+    toast.success('已加入项目');
+    await refreshMemberships();
+  } catch (error) {
+    membershipError.value = error instanceof ApiError ? error.message : '加入项目失败。';
+  } finally {
+    membershipSaving.value = false;
+  }
+}
+
+async function removeMembership(membership: UserProjectMembership) {
+  if (!membershipUser.value) return;
+  membershipError.value = '';
+  try {
+    await api.removeProjectMember(membership.projectId, membershipUser.value.id);
+    toast.success('已从「' + membership.projectName + '」移除');
+    await refreshMemberships();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      toast.error(error.message);
+    }
   }
 }
 
@@ -361,6 +449,14 @@ function formatDate(iso?: string): string {
               <DropdownMenuContent class="next-users__menu" :side-offset="4" :align="'end'">
                 <DropdownMenuItem
                   class="next-users__menu-item"
+                  @select="openProjectMembership(row as AdminUser)"
+                >
+                  <DropdownMenuItemIndicator class="next-users__menu-ind" />
+                  <span data-testid="user-project-members">项目成员</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator class="next-users__menu-sep" />
+                <DropdownMenuItem
+                  class="next-users__menu-item"
                   @select="toggleStatus(row as AdminUser)"
                 >
                   <DropdownMenuItemIndicator class="next-users__menu-ind" />
@@ -389,6 +485,66 @@ function formatDate(iso?: string): string {
         </template>
       </UiTable>
     </section>
+
+    <!-- Project membership quick-join (admin) -->
+    <UiDrawer
+      :open="membershipDrawer"
+      :title="membershipUser ? `项目成员 · ${membershipUser.username}` : '项目成员'"
+      width="560px"
+      data-testid="user-membership-drawer"
+      @update:open="membershipDrawer = false"
+    >
+      <div v-if="membershipError" class="ui-alert ui-alert--error">{{ membershipError }}</div>
+      <h3 class="next-users__drawer-title">当前项目</h3>
+      <div v-if="membershipLoading" class="next-users__skeleton">
+        <div v-for="n in 2" :key="n" class="ui-skeleton next-users__skeleton-row">&nbsp;</div>
+      </div>
+      <div
+        v-else-if="memberships.length"
+        class="next-users__member-list"
+        data-testid="user-memberships"
+      >
+        <div v-for="m in memberships" :key="m.projectId" class="next-users__member-row">
+          <div class="next-users__member-info">
+            <span class="ui-mono next-users__member-code">{{ m.projectCode }}</span>
+            <span class="next-users__member-name">{{ m.projectName }}</span>
+            <span class="next-users__member-since">{{ formatDate(m.joinedAt) }} 加入</span>
+          </div>
+          <UiButton
+            variant="ghost"
+            size="sm"
+            class="next-users__danger"
+            data-testid="user-project-remove"
+            @click="removeMembership(m)"
+            >移除</UiButton
+          >
+        </div>
+      </div>
+      <p v-else class="next-users__member-empty" data-testid="user-memberships-empty">
+        该用户还没有加入任何项目——创建 Virtual Key 前需要先加入项目。
+      </p>
+
+      <h3 class="next-users__drawer-title">加入项目</h3>
+      <div class="next-users__join-row">
+        <UiSelect
+          v-model="pickProjectId"
+          :options="joinableProjects.map((p) => ({ value: p.id, label: p.code + ' · ' + p.name }))"
+          placeholder="选择项目"
+          data-testid="user-project-pick"
+        />
+        <UiButton
+          variant="primary"
+          :disabled="!pickProjectId"
+          :loading="membershipSaving"
+          data-testid="user-project-add"
+          @click="addMembership"
+          >加入</UiButton
+        >
+      </div>
+      <p v-if="!joinableProjects.length" class="next-users__member-hint">
+        没有更多可加入的 ACTIVE 项目。
+      </p>
+    </UiDrawer>
 
     <!-- One-time temporary password -->
     <UiDialog
@@ -640,5 +796,111 @@ function formatDate(iso?: string): string {
 
 .next-users__ack:has(.next-users__ack-input:focus-visible) .next-users__ack-box {
   box-shadow: var(--ui-shadow-focus);
+}
+
+.ui-alert {
+  padding: var(--ui-space-3) var(--ui-space-4);
+  margin-bottom: var(--ui-space-4);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-sm);
+}
+
+.ui-alert--error {
+  background: var(--ui-danger-bg);
+  color: var(--ui-danger-fg);
+}
+
+.next-users__drawer-title {
+  margin: 0 0 var(--ui-space-2);
+  font-size: var(--ui-font-size-sm);
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+}
+
+.next-users__drawer-title + .next-users__drawer-title,
+.next-users__member-empty + .next-users__drawer-title,
+.next-users__member-hint + .next-users__drawer-title {
+  margin-top: var(--ui-space-5);
+}
+
+.next-users__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  margin-bottom: var(--ui-space-4);
+}
+
+.next-users__skeleton-row {
+  height: 48px;
+}
+
+.next-users__member-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-users__member-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border: 1px solid var(--ui-border-muted);
+  border-radius: var(--ui-radius-control);
+}
+
+.next-users__member-info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+  flex: 1;
+  min-width: 0;
+}
+
+.next-users__member-code {
+  font-size: var(--ui-font-size-xs);
+  padding: 0 var(--ui-space-2);
+  border-radius: calc(var(--ui-radius-control) - 2px);
+  background: var(--ui-muted);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-users__member-name {
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-users__member-since {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.next-users__danger {
+  color: var(--ui-danger-fg);
+}
+
+.next-users__member-empty {
+  margin: 0 0 var(--ui-space-5);
+  padding: var(--ui-space-6) 0;
+  text-align: center;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-users__join-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+
+.next-users__join-row :deep(.ui-select) {
+  flex: 1;
+}
+
+.next-users__member-hint {
+  margin: var(--ui-space-2) 0 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
 }
 </style>

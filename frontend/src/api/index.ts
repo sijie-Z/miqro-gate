@@ -44,6 +44,7 @@ import type {
   RoiReportView,
   SubmitModelApprovalRequest,
   UpsertQuotaRuleRequest,
+  UserProjectMembership,
   Provider,
   ProviderProductView,
   SeatView,
@@ -221,6 +222,10 @@ export function addProjectMember(projectId: string, userId: string): Promise<voi
 
 export function removeProjectMember(projectId: string, userId: string): Promise<void> {
   return del<void>(`/api/v1/admin/projects/${projectId}/members/${userId}`);
+}
+
+export function adminUserProjectMemberships(userId: string): Promise<UserProjectMembership[]> {
+  return get<UserProjectMembership[]>(`/api/v1/admin/users/${userId}/project-memberships`);
 }
 
 export function listGrants(): Promise<Grant[]> {
