@@ -162,19 +162,19 @@ const router = createRouter({
         {
           path: 'skillhub',
           name: 'skillhub',
-          component: () => import('@/views/AdminSkillsView.vue'),
+          component: () => import('@/views/next/NextAdminSkillsView.vue'),
           meta: adminMeta('技能库管理'),
         },
         {
           path: 'agents',
           name: 'agents',
-          component: () => import('@/views/AdminAgentsView.vue'),
+          component: () => import('@/views/next/NextAdminAgentsView.vue'),
           meta: adminMeta('智能体'),
         },
         {
           path: 'services',
           name: 'services',
-          component: () => import('@/views/AdminServicesView.vue'),
+          component: () => import('@/views/next/NextAdminServicesView.vue'),
           meta: adminMeta('服务管理'),
         },
         {
@@ -186,19 +186,19 @@ const router = createRouter({
         {
           path: 'mcp-services',
           name: 'mcp-services',
-          component: () => import('@/views/AdminMcpServicesView.vue'),
+          component: () => import('@/views/next/NextAdminMcpServicesView.vue'),
           meta: adminMeta('MCP 服务'),
         },
         {
           path: 'webhooks',
           name: 'webhooks',
-          component: () => import('@/views/AdminWebhooksView.vue'),
+          component: () => import('@/views/next/NextAdminWebhooksView.vue'),
           meta: adminMeta('Webhook 端点'),
         },
         {
           path: 'alert-rules',
           name: 'alert-rules',
-          component: () => import('@/views/AdminAlertRulesView.vue'),
+          component: () => import('@/views/next/NextAdminAlertRulesView.vue'),
           meta: adminMeta('告警规则'),
         },
         {

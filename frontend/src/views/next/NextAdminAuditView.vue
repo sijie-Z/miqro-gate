@@ -7,7 +7,7 @@
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiInput, UiTable, toast } from '@/ui';
+import { UiButton, UiInput, UiTable } from '@/ui';
 import type { AuditEventView } from '@/types/api';
 
 const events = ref<AuditEventView[]>([]);
