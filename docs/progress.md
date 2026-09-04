@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `U2 组织组首批` — `IN_PROGRESS`（PR #134 待 CI 绿合并；组织 5 页 v2 完成 @ goal/ui-u2-org-console e7256ec；下一批=平台组 8 页）
-- Goal status: `IN_PROGRESS`（2026-09-03；第二批平台组待 U2 首批评审/合并后开做；preview http://localhost:4174 需在 U2 分支构建后含组织组 v2）
+- Current goal: `U2 运营组 B 批（6 页）` — `IN_PROGRESS`（组织组 PR #134 已并入 develop；平台组 8 页完成、PR #135 CI 中；运营组 A 批 5 页完成 @ goal/ui-u2-ops-console 92b86d9；vitest 144/144、Playwright 40/40）
+- Goal status: `IN_PROGRESS`（2026-09-04；B 批=技能库管理/智能体/服务管理/Webhook/告警规则/MCP 服务；随后 U3 收尾；preview http://localhost:4174 已含组织+平台组 v2）
 - Last updated: `2026-09-03 CST`
 ## 会话交接点 2026-09-03 — UI 专项 U0 待验收（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；U0 验收通过前暂停功能 backlog）
 
