@@ -4,7 +4,8 @@ import { createPinia, setActivePinia } from 'pinia';
 import NextSkillsView from '@/views/next/NextSkillsView.vue';
 import * as api from '@/api';
 import { toastState } from '@/ui/toast';
-import type { SkillView } from '@/types/api';
+import type {} from '@/types/api';
+import type { SkillView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listSkills: vi.fn(),

@@ -14,3 +14,6 @@ import type { components } from './generated';
 
 export type UsageRecord = components['schemas']['UsageRecordView'];
 export type UsageRecordPage = components['schemas']['UsageRecordPage'];
+export type SkillView = components['schemas']['SkillView'];
+export type AgentView = components['schemas']['AgentView'];
+export type BudgetView = components['schemas']['BudgetView'];

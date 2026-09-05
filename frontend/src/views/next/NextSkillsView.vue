@@ -8,7 +8,8 @@ import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiEmptyState, toast } from '@/ui';
-import type { SkillView } from '@/types/api';
+import type {} from '@/types/api';
+import type { SkillView } from '@/types/generated-api';
 
 const skills = ref<SkillView[]>([]);
 const loading = ref(true);

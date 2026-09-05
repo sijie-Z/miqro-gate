@@ -10,7 +10,8 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type { BudgetView, Project, UsageGroup } from '@/types/api';
+import type { Project, UsageGroup } from '@/types/api';
+import type { BudgetView } from '@/types/generated-api';
 
 const WINDOWS = [
   { label: '近 7 天', days: 7 },

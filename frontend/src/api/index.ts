@@ -8,13 +8,11 @@
   uploadBytes,
 } from './http';
 import type {
-  AgentView,
   ApiConsumerView,
   CreateApiConsumerResponse,
   AdminUser,
   AlertRule,
   AuditEventView,
-  BudgetView,
   ConfigEntryView,
   ExportTask,
   InternalServiceView,
@@ -24,7 +22,6 @@ import type {
   McpServiceView,
   McpToolView,
   UpsertMcpRouteRuleRequest,
-  SkillView,
   UsageDeletionRequest,
   WebhookDelivery,
   WebhookEndpointView,
@@ -58,7 +55,7 @@ import type {
   UserStatusValue,
   VirtualKeyView,
 } from '@/types/api';
-import type { UsageRecordPage } from '@/types/generated-api';
+import type { AgentView, BudgetView, SkillView, UsageRecordPage } from '@/types/generated-api';
 import type { components } from '@/types/generated';
 
 // Stage-2 codegen migration (batch 1): request DTOs now alias the OpenAPI
