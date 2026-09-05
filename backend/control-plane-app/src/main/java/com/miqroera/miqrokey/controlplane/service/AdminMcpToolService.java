@@ -23,10 +23,13 @@ public class AdminMcpToolService {
 
     private final McpToolRepository toolRepository;
     private final McpServiceRepository serviceRepository;
+    private final RouteRefreshPublisher routeRefreshPublisher;
 
-    public AdminMcpToolService(McpToolRepository toolRepository, McpServiceRepository serviceRepository) {
+    public AdminMcpToolService(McpToolRepository toolRepository, McpServiceRepository serviceRepository,
+            RouteRefreshPublisher routeRefreshPublisher) {
         this.toolRepository = toolRepository;
         this.serviceRepository = serviceRepository;
+        this.routeRefreshPublisher = routeRefreshPublisher;
     }
 
     public List<McpTool> list(UUID tenantId, UUID mcpServiceId) {
@@ -53,6 +56,7 @@ public class AdminMcpToolService {
         } catch (DuplicateKeyException e) {
             throw new ApiException(HttpStatus.CONFLICT, "TOOL_NAME_TAKEN", "该服务下已存在同名工具。");
         }
+        routeRefreshPublisher.publishChanged();
         return tool;
     }
 
@@ -66,7 +70,9 @@ public class AdminMcpToolService {
         if (tool.status().equals(status)) {
             throw new ApiException(HttpStatus.CONFLICT, "TOOL_STATUS_UNCHANGED", "工具已处于该状态。");
         }
-        return toolRepository.updateStatus(tenantId, toolId, status, tool.version());
+        McpTool updated = toolRepository.updateStatus(tenantId, toolId, status, tool.version());
+        routeRefreshPublisher.publishChanged();
+        return updated;
     }
 
     private void requireService(UUID tenantId, UUID mcpServiceId) {

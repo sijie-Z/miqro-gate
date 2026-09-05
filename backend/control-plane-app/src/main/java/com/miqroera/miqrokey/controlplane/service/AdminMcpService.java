@@ -23,10 +23,13 @@ public class AdminMcpService {
 
     private final McpServiceRepository repository;
     private final AdminMcpRouteRuleService routeRules;
+    private final RouteRefreshPublisher routeRefreshPublisher;
 
-    public AdminMcpService(McpServiceRepository repository, AdminMcpRouteRuleService routeRules) {
+    public AdminMcpService(McpServiceRepository repository, AdminMcpRouteRuleService routeRules,
+            RouteRefreshPublisher routeRefreshPublisher) {
         this.repository = repository;
         this.routeRules = routeRules;
+        this.routeRefreshPublisher = routeRefreshPublisher;
     }
 
     public List<McpService> list(UUID tenantId) {
@@ -56,6 +59,7 @@ public class AdminMcpService {
         }
         // F11: every service owns an immutable default catch-all route.
         routeRules.createDefault(tenantId, service.id());
+        routeRefreshPublisher.publishChanged();
         return service;
     }
 
@@ -69,7 +73,9 @@ public class AdminMcpService {
         if (service.status().equals(status)) {
             throw new ApiException(HttpStatus.CONFLICT, "MCP_STATUS_UNCHANGED", "MCP 服务已处于该状态。");
         }
-        return repository.update(withStatus(service, status), service.version());
+        McpService updated = repository.update(withStatus(service, status), service.version());
+        routeRefreshPublisher.publishChanged();
+        return updated;
     }
 
     /**
