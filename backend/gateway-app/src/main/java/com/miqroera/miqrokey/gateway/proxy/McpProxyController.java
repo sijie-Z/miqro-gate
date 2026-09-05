@@ -3,9 +3,12 @@ package com.miqroera.miqrokey.gateway.proxy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.model.McpAccessLogEntry;
+import com.miqroera.miqrokey.domain.model.McpAccessPolicy;
 import com.miqroera.miqrokey.domain.model.McpAccessStatus;
 import com.miqroera.miqrokey.domain.model.McpAclMode;
-import com.miqroera.miqrokey.domain.model.McpAccessPolicy;
+import com.miqroera.miqrokey.domain.model.McpCircuitBreaker;
+import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
+import com.miqroera.miqrokey.domain.model.McpRetryPolicy;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import com.miqroera.miqrokey.gateway.mcplog.McpAccessLogSink;
 import com.miqroera.miqrokey.route.RouteSnapshotProvider;
@@ -22,16 +25,19 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeoutException;
 
 /**
  * MCP invocation proxy (F01, Tencent AI gateway doc 135906 wiring shape):
@@ -61,13 +67,22 @@ import java.util.UUID;
  * </p>
  *
  * <p>
+ * Resilience (F12/F13, per-service {@code mcp_resilience_policy} V30, both
+ * default OFF): retries apply only to failures observed before the first
+ * upstream response byte reaches the caller (5xx / connection failure / timeout
+ * per policy conditions; non-idempotent POST/PUT/PATCH tool calls need the
+ * explicit idempotency confirmation); the circuit breaker fail-fasts with 503
+ * {@code circuit_open} while OPEN and probes in HALF_OPEN.
+ * </p>
+ *
+ * <p>
  * Every request with a resolvable identity (consumer authenticated AND service
  * resolved) writes one metadata row to {@code mcp_access_log} via
  * {@link McpAccessLogSink} (F15): outcome FORWARDED / *_DENIED /
- * TOOL_UNAVAILABLE / INVALID_ENVELOPE / UPSTREAM_FAILURE plus the client-facing
- * or upstream HTTP status. Pre-resolution failures (401/404) carry no
- * trustworthy identity and are not logged. Sink calls are fire-and-forget and
- * never block the pipeline.
+ * TOOL_UNAVAILABLE / INVALID_ENVELOPE / UPSTREAM_FAILURE / CIRCUIT_OPEN plus
+ * the client-facing or upstream HTTP status. Pre-resolution failures (401/404)
+ * carry no trustworthy identity and are not logged. Sink calls are
+ * fire-and-forget and never block the pipeline.
  * </p>
  */
 @RestController
@@ -76,20 +91,22 @@ public class McpProxyController {
     private static final Logger log = LoggerFactory.getLogger(McpProxyController.class);
 
     private static final String BEARER_PREFIX = "Bearer ";
-    /** Per-envelope upstream budget (Tencent default 60s). */
+    /** Per-attempt upstream budget (Tencent default 60s). */
     private static final Duration MCP_TIMEOUT = Duration.ofSeconds(60);
 
     private final RouteSnapshotProvider routeSnapshotProvider;
     private final WebClient proxyWebClient;
     private final ObjectMapper objectMapper;
     private final McpAccessLogSink accessLogSink;
+    private final McpCircuitBreakerRegistry circuitRegistry;
 
     public McpProxyController(RouteSnapshotProvider routeSnapshotProvider, WebClient proxyWebClient,
-            ObjectMapper objectMapper, McpAccessLogSink accessLogSink) {
+            ObjectMapper objectMapper, McpAccessLogSink accessLogSink, Clock clock) {
         this.routeSnapshotProvider = routeSnapshotProvider;
         this.proxyWebClient = proxyWebClient;
         this.objectMapper = objectMapper;
         this.accessLogSink = accessLogSink;
+        this.circuitRegistry = new McpCircuitBreakerRegistry(clock);
     }
 
     @PostMapping("/mcpservers/{serviceName}/mcp")
@@ -121,8 +138,9 @@ public class McpProxyController {
                 return error(exchange.getResponse(), HttpStatus.FORBIDDEN, "mcp_access_denied",
                         "Consumer is not allowed to call this MCP service");
             }
+            RouteSnapshot.McpToolRecord tool = null;
             if (toolName != null && !toolName.isBlank()) {
-                RouteSnapshot.McpToolRecord tool = service.tool(toolName);
+                tool = service.tool(toolName);
                 if (tool == null || !"ENABLED".equals(tool.status())) {
                     record(context, rpcMethod, toolName, McpAccessStatus.TOOL_UNAVAILABLE, 403);
                     return error(exchange.getResponse(), HttpStatus.FORBIDDEN, "mcp_tool_unavailable",
@@ -139,7 +157,11 @@ public class McpProxyController {
             log.info("aigw.mcp.call requestId={} service={} consumer={} rpcMethod={} tool={}", gatewayRequestId,
                     service.name(), consumer.name(), rpcMethod == null ? "-" : rpcMethod,
                     toolName == null ? "-" : toolName);
-            return forward(exchange, service.endpoint(), body, context, rpcMethod, toolName);
+            McpResiliencePolicy policy = service.resilience() == null
+                    ? McpResiliencePolicy.disabled()
+                    : service.resilience();
+            String toolHttpMethod = tool == null ? null : tool.method();
+            return forward(exchange, service.endpoint(), body, context, rpcMethod, toolName, toolHttpMethod, policy);
         } catch (Exception e) {
             log.warn("aigw.mcp.invalid envelope service={}: {}", service.name(), e.getMessage());
             record(context, null, null, McpAccessStatus.INVALID_ENVELOPE, 400);
@@ -148,8 +170,7 @@ public class McpProxyController {
     }
 
     private Mono<Void> forward(ServerWebExchange exchange, String endpoint, byte[] body, CallContext context,
-            String rpcMethod, String toolName) {
-        ServerHttpResponse clientResponse = exchange.getResponse();
+            String rpcMethod, String toolName, String toolHttpMethod, McpResiliencePolicy policy) {
         ServerHttpRequest in = exchange.getRequest();
         HttpHeaders headers = new HttpHeaders();
         MediaType contentType = in.getHeaders().getContentType();
@@ -162,26 +183,106 @@ public class McpProxyController {
         if (sessionId != null) {
             headers.set("Session-Id", sessionId);
         }
-        boolean[] rowRecorded = new boolean[1];
+        String bucket = toolName != null ? toolName : (rpcMethod == null ? "envelope" : rpcMethod);
+        McpCircuitBreaker breaker = policy.breakerEnabled()
+                ? circuitRegistry.get(context.service.id(), bucket, policy).breaker()
+                : null;
+        return attempt(exchange, endpoint, body, headers, context, rpcMethod, toolName, toolHttpMethod, policy, breaker,
+                0, new boolean[1]);
+    }
+
+    /**
+     * One upstream attempt with retry/breaker orchestration. Retries only happen
+     * before any response byte reached the caller; a retryable 5xx or a
+     * pre-response transport failure re-enters with {@code attempt + 1} while
+     * {@code McpRetryPolicy.shouldRetry} allows it.
+     */
+    private Mono<Void> attempt(ServerWebExchange exchange, String endpoint, byte[] body, HttpHeaders headers,
+            CallContext context, String rpcMethod, String toolName, String toolHttpMethod, McpResiliencePolicy policy,
+            McpCircuitBreaker breaker, int attempt, boolean[] rowRecorded) {
+        if (breaker != null) {
+            McpCircuitBreaker.Decision decision = breaker.beforeCall();
+            if (decision == McpCircuitBreaker.Decision.REJECTED) {
+                record(context, rpcMethod, toolName, McpAccessStatus.CIRCUIT_OPEN, 503);
+                rowRecorded[0] = true;
+                log.info("aigw.mcp.circuit_open requestId={} service={} bucket={}", context.gatewayRequestId,
+                        context.service.name(), toolName == null ? rpcMethod : toolName);
+                return error(exchange.getResponse(), HttpStatus.SERVICE_UNAVAILABLE, "circuit_open",
+                        "MCP upstream circuit is open");
+            }
+        }
+        ServerHttpResponse clientResponse = exchange.getResponse();
+        long startedNanos = System.nanoTime();
         return proxyWebClient.post().uri(URI.create(endpoint)).headers(h -> h.addAll(headers))
-                .body(BodyInserters.fromValue(body)).exchangeToMono(upstream -> {
-                    record(context, rpcMethod, toolName, McpAccessStatus.FORWARDED, upstream.statusCode().value());
+                .body(BodyInserters.fromValue(body))
+                // Body consumption happens INSIDE the exchangeToMono callback (the
+                // response stream is bound to it): deferring the read to a later
+                // flatMap yields an empty body stream.
+                .exchangeToMono(resp -> {
+                    long ttfbMs = (System.nanoTime() - startedNanos) / 1_000_000;
+                    int status = resp.statusCode().value();
+                    if (McpRetryPolicy.isServerError(status) && McpRetryPolicy.shouldRetry(policy,
+                            McpRetryPolicy.FailureKind.SERVER_5XX, toolHttpMethod, attempt)) {
+                        log.info("aigw.mcp.retry requestId={} service={} attempt={} upstreamStatus={}",
+                                context.gatewayRequestId, context.service.name(), attempt, status);
+                        return resp.releaseBody()
+                                .then(Mono.defer(() -> attempt(exchange, endpoint, body, headers, context, rpcMethod,
+                                        toolName, toolHttpMethod, policy, breaker, attempt + 1, rowRecorded)));
+                    }
+                    record(context, rpcMethod, toolName, McpAccessStatus.FORWARDED, status);
                     rowRecorded[0] = true;
-                    clientResponse.setStatusCode(upstream.statusCode());
-                    HttpHeaders out = HeaderFilters.filterResponseHeaders(upstream.headers().asHttpHeaders());
+                    if (breaker != null) {
+                        breaker.afterCall(!policy.breakerErrorStatusCodes().contains(status), ttfbMs);
+                    }
+                    clientResponse.setStatusCode(resp.statusCode());
+                    HttpHeaders out = HeaderFilters.filterResponseHeaders(resp.headers().asHttpHeaders());
                     clientResponse.getHeaders().addAll(out);
                     return clientResponse
-                            .writeWith(
-                                    upstream.bodyToFlux(byte[].class).map(b -> clientResponse.bufferFactory().wrap(b)))
+                            .writeWith(resp.bodyToFlux(byte[].class).map(b -> clientResponse.bufferFactory().wrap(b)))
                             .then();
-                }).timeout(MCP_TIMEOUT).doOnError(e -> {
-                    if (!rowRecorded[0]) {
-                        // No upstream response within the budget (or connect/IO
-                        // failure): the attempt is worth auditing even without an
-                        // HTTP status.
-                        record(context, rpcMethod, toolName, McpAccessStatus.UPSTREAM_FAILURE, null);
+                }).timeout(MCP_TIMEOUT).onErrorResume(error -> {
+                    // A retried inner chain is self-contained (its own timeout +
+                    // onErrorResume): once a terminal row was recorded anywhere,
+                    // this layer must not retry again or double-record.
+                    long elapsedMs = (System.nanoTime() - startedNanos) / 1_000_000;
+                    McpRetryPolicy.FailureKind kind = classifyFailure(error);
+                    if (!rowRecorded[0] && kind != null
+                            && McpRetryPolicy.shouldRetry(policy, kind, toolHttpMethod, attempt)) {
+                        log.info("aigw.mcp.retry requestId={} service={} attempt={} kind={}", context.gatewayRequestId,
+                                context.service.name(), attempt, kind);
+                        return attempt(exchange, endpoint, body, headers, context, rpcMethod, toolName, toolHttpMethod,
+                                policy, breaker, attempt + 1, rowRecorded);
                     }
+                    if (breaker != null) {
+                        breaker.afterCall(false, elapsedMs);
+                    }
+                    if (!rowRecorded[0]) {
+                        record(context, rpcMethod, toolName, McpAccessStatus.UPSTREAM_FAILURE, null);
+                        rowRecorded[0] = true;
+                    }
+                    return Mono.error(error);
                 });
+    }
+
+    private static McpRetryPolicy.FailureKind classifyFailure(Throwable error) {
+        if (error instanceof TimeoutException) {
+            return McpRetryPolicy.FailureKind.TIMEOUT;
+        }
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            String name = cause.getClass().getName();
+            if (cause instanceof java.net.ConnectException || cause instanceof java.net.UnknownHostException
+                    || cause instanceof java.net.NoRouteToHostException) {
+                return McpRetryPolicy.FailureKind.CONNECTION_FAILURE;
+            }
+            if (name.contains("Timeout")) {
+                return McpRetryPolicy.FailureKind.TIMEOUT;
+            }
+        }
+        if (error instanceof WebClientRequestException) {
+            return McpRetryPolicy.FailureKind.CONNECTION_FAILURE;
+        }
+        // Any pre-response failure not otherwise classified is connection-class.
+        return McpRetryPolicy.FailureKind.CONNECTION_FAILURE;
     }
 
     private void record(CallContext context, String rpcMethod, String toolName, McpAccessStatus status,

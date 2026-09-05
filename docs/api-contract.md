@@ -866,6 +866,31 @@ MCP 代理调用（F01 入口 `/mcpservers/{serviceName}/mcp`）的**纯元数�
 
 响应：`McpAccessLogEntry[]`（`id/serviceId/serviceName/consumerId/consumerName/rpcMethod/toolName/status/httpStatus/gatewayRequestId/occurredAt`；`rpcMethod`/`toolName` 可空）。
 
+### 5.25 MCP 韧性配置 `GET/PUT /api/v1/admin/mcp-services/{serviceId}/resilience`（F12/F13，V30）
+
+每个 MCP 服务一份韧性策略（`mcp_resilience_policy`）：**重试门禁与熔断均默认关闭**——无策略行（或全 false）时数据面行为与之前完全一致。GET 返回生效策略（无行时返回 disabled 默认视图）；PUT 整份替换（省略字段=disabled 默认值），审计 `MCP_RESILIENCE_UPDATE`，并即时触发路由快照刷新（~1 刷新周期内生效）。
+
+**F12 重试（doc 134831 语义本土化）**：`retryEnabled` + `retryMax`（1–5）+ `retryConditions`（`SERVER_5XX|CONNECTION_FAILURE|TIMEOUT`，启用时至少一项）+ `idempotencyConfirmed`。重试只发生在**网关把上游首字节回给调用方之前**；5xx 重试在响应尚未写出时进行。**非幂等门**：`tools/call` 命中的工具行 method 为 POST/PUT/PATCH 时，未勾选 `idempotencyConfirmed` 一律不重试（防重复写）；GET/HEAD/OPTIONS/DELETE 与无工具行的方法（initialize/tools/list 等）不受限。
+
+**F13 熔断（doc 134859）**：三态 CLOSED/OPEN/HALF_OPEN。滑动窗口 `breakerWindowSeconds`（1–60，默认 10）+ 最小请求数 `breakerMinRequests`（1–100，默认 10）防低流量误判；错误比例触发 `breakerErrorEnabled`/`breakerErrorRatio`（1–100，默认 50）+ `breakerErrorStatusCodes`（400–599、≤32、默认 500/502/503/504，**429 需显式加入**）；慢调用触发 `breakerSlowEnabled`/`breakerSlowCallMs`（100–60000）/`breakerSlowRatio`——两触发至少启用其一。**`breakerSlowCallMs` 必须小于服务自身 `check_timeout_seconds`×1000**（超时字段即健康检查配置的 `checkTimeoutSeconds`；否则慢调用永远观察不到），越界 → `400 RESILIENCE_SLOW_EXCEEDS_TIMEOUT`。OPEN 持续 `breakerOpenSeconds`（5–600，默认 30）后进入 HALF_OPEN，放行 `breakerProbeCount`（1–10，默认 3）个探测，成功 `breakerProbeSuccess`（≤probeCount，默认 2）个即恢复 CLOSED，任一失败重新 OPEN。`breakerSkipRetry`（默认 true）语义：OPEN 期间请求快速失败（503 `circuit_open` 错误信封），天然不进入重试。熔断桶= `tools/call` 按工具名、其余信封方法按方法名，桶间互不影响。
+
+其余校验失败 → `400 RESILIENCE_INVALID`（范围/条件/触发组合/状态码集合）；服务不存在 → `404 MCP_SERVICE_NOT_FOUND`；SYSTEM_ADMIN-only（deny-by-default）。
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `retryEnabled` | bool | 重试总开关（默认 false） |
+| `retryMax` | int 1–5 | 重试次数（启用时必填） |
+| `retryConditions` | enum[] | `SERVER_5XX` / `CONNECTION_FAILURE` / `TIMEOUT` |
+| `idempotencyConfirmed` | bool | 确认后端幂等（POST/PUT/PATCH 工具调用可重试） |
+| `breakerEnabled` | bool | 熔断总开关（默认 false） |
+| `breakerWindowSeconds` | int | 滑动统计窗口 |
+| `breakerMinRequests` | int | 最小请求数防误判 |
+| `breakerErrorEnabled` / `breakerErrorRatio` / `breakerErrorStatusCodes` | bool / int / int[] | 错误比例触发 |
+| `breakerSlowEnabled` / `breakerSlowCallMs` / `breakerSlowRatio` | bool / int / int | 慢调用触发（slowMs < checkTimeout×1000） |
+| `breakerOpenSeconds` | int | OPEN 持续时长 |
+| `breakerProbeCount` / `breakerProbeSuccess` | int / int | 半开探测 |
+| `breakerSkipRetry` | bool | OPEN 期间跳过重试（默认 true） |
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

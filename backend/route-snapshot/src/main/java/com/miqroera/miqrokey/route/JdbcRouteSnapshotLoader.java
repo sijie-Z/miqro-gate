@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.route;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
+import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -264,22 +265,34 @@ public final class JdbcRouteSnapshotLoader {
     private Map<String, RouteSnapshot.McpServerRecord> loadMcpServices() {
         Map<String, RouteSnapshot.McpServerRecord> services = new LinkedHashMap<>();
         Map<UUID, Set<UUID>> serverLists = new LinkedHashMap<>();
-        // serviceId -> toolId -> {toolName, status, overrideMode|null, consumerIds}
+        // serviceId -> toolId -> {toolName, status, overrideMode|null, method,
+        // consumerIds}
         Map<UUID, Map<UUID, Object[]>> toolsByService = new LinkedHashMap<>();
+        Map<UUID, McpResiliencePolicy> resilienceById = new LinkedHashMap<>();
 
         jdbc.query("""
-                SELECT s.id, s.tenant_id, s.name, s.endpoint, s.transport, s.status, a.mode AS acl_mode
+                SELECT s.id, s.tenant_id, s.name, s.endpoint, s.transport, s.status, a.mode AS acl_mode,
+                       p.retry_enabled, p.retry_max, p.retry_conditions, p.retry_idempotency_confirmed,
+                       p.breaker_enabled, p.breaker_window_seconds, p.breaker_min_requests,
+                       p.breaker_error_enabled, p.breaker_error_ratio, p.breaker_error_status_codes,
+                       p.breaker_slow_enabled, p.breaker_slow_call_ms, p.breaker_slow_ratio,
+                       p.breaker_open_seconds, p.breaker_probe_count, p.breaker_probe_success,
+                       p.breaker_skip_retry
                 FROM mcp_services s
                 LEFT JOIN mcp_service_access a ON a.mcp_service_id = s.id
+                LEFT JOIN mcp_resilience_policy p ON p.mcp_service_id = s.id
                 WHERE s.status = 'ONLINE'
                 """, (rs, rowNum) -> {
             UUID id = (UUID) rs.getObject("id");
             services.put(rs.getString("name"),
                     new RouteSnapshot.McpServerRecord(id, (UUID) rs.getObject("tenant_id"), rs.getString("name"),
                             rs.getString("endpoint"), rs.getString("transport"), rs.getString("status"),
-                            rs.getString("acl_mode"), Set.of(), List.of()));
+                            rs.getString("acl_mode"), Set.of(), List.of(), null));
             serverLists.put(id, new LinkedHashSet<>());
             toolsByService.put(id, new LinkedHashMap<>());
+            if (rs.getObject("retry_enabled") != null) {
+                resilienceById.put(id, mapPolicy(rs));
+            }
             return null;
         });
 
@@ -298,7 +311,7 @@ public final class JdbcRouteSnapshotLoader {
         });
 
         jdbc.query("""
-                SELECT t.mcp_service_id AS service_id, t.id AS tool_id, t.tool_name, t.status,
+                SELECT t.mcp_service_id AS service_id, t.id AS tool_id, t.tool_name, t.status, t.method,
                        g.mode AS override_mode, g.consumer_id AS override_consumer
                 FROM mcp_tools t
                 LEFT JOIN mcp_access_grants g ON g.tool_id = t.id
@@ -312,14 +325,14 @@ public final class JdbcRouteSnapshotLoader {
             Object[] state = byId.get(toolId);
             if (state == null) {
                 state = new Object[]{rs.getString("tool_name"), rs.getString("status"), rs.getString("override_mode"),
-                        new LinkedHashSet<UUID>()};
+                        rs.getString("method"), new LinkedHashSet<UUID>()};
                 byId.put(toolId, state);
             }
             UUID consumer = (UUID) rs.getObject("override_consumer");
             if (consumer != null) {
                 state[2] = rs.getString("override_mode");
                 @SuppressWarnings("unchecked")
-                Set<UUID> ids = (Set<UUID>) state[3];
+                Set<UUID> ids = (Set<UUID>) state[4];
                 ids.add(consumer);
             }
             return null;
@@ -330,16 +343,49 @@ public final class JdbcRouteSnapshotLoader {
             List<RouteSnapshot.McpToolRecord> tools = new ArrayList<>();
             for (Object[] state : toolsByService.getOrDefault(service.id(), Map.of()).values()) {
                 @SuppressWarnings("unchecked")
-                Set<UUID> ids = (Set<UUID>) state[3];
-                tools.add(
-                        new RouteSnapshot.McpToolRecord((String) state[0], (String) state[1], (String) state[2], ids));
+                Set<UUID> ids = (Set<UUID>) state[4];
+                tools.add(new RouteSnapshot.McpToolRecord((String) state[0], (String) state[1], (String) state[2], ids,
+                        (String) state[3]));
             }
             result.put(service.name(),
                     new RouteSnapshot.McpServerRecord(service.id(), service.tenantId(), service.name(),
                             service.endpoint(), service.transport(), service.status(), service.aclMode(),
-                            serverLists.getOrDefault(service.id(), Set.of()), tools));
+                            serverLists.getOrDefault(service.id(), Set.of()), tools, resilienceById.get(service.id())));
         }
         return result;
+    }
+
+    private static McpResiliencePolicy mapPolicy(java.sql.ResultSet rs) throws java.sql.SQLException {
+        Set<McpResiliencePolicy.RetryCondition> conditions = new LinkedHashSet<>();
+        for (String part : splitCsv(rs.getString("retry_conditions"))) {
+            conditions.add(McpResiliencePolicy.RetryCondition.valueOf(part));
+        }
+        Set<Integer> codes = new LinkedHashSet<>();
+        for (String part : splitCsv(rs.getString("breaker_error_status_codes"))) {
+            codes.add(Integer.valueOf(part));
+        }
+        return new McpResiliencePolicy(rs.getBoolean("retry_enabled"), rs.getInt("retry_max"), conditions,
+                rs.getBoolean("retry_idempotency_confirmed"), rs.getBoolean("breaker_enabled"),
+                rs.getInt("breaker_window_seconds"), rs.getInt("breaker_min_requests"),
+                rs.getBoolean("breaker_error_enabled"), rs.getInt("breaker_error_ratio"), codes,
+                rs.getBoolean("breaker_slow_enabled"), rs.getInt("breaker_slow_call_ms"),
+                rs.getInt("breaker_slow_ratio"), rs.getInt("breaker_open_seconds"), rs.getInt("breaker_probe_count"),
+                rs.getInt("breaker_probe_success"), rs.getBoolean("breaker_skip_retry"),
+                rs.getLong("version") /* loader ignores the row version */);
+    }
+
+    private static List<String> splitCsv(String value) {
+        List<String> parts = new ArrayList<>();
+        if (value == null || value.isBlank()) {
+            return parts;
+        }
+        for (String part : value.split(",")) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) {
+                parts.add(trimmed);
+            }
+        }
+        return parts;
     }
 
     private record ProductIds(Map<UUID, String> productCodes, Map<UUID, UUID> providerIds) {

@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.domain.route;
 
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
+import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
 
 import java.time.Instant;
 import java.util.Collections;
@@ -264,10 +265,11 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
      * An MCP service exposed at {@code /mcpservers/<name>/mcp} (Tencent doc
      * 135906): endpoint/transport/status plus its two-level access control (server
      * mode + per-tool overrides, Tencent doc 134890). Only rows that match the
-     * loader's ACTIVE filter appear.
+     * loader's ACTIVE filter appear. {@code resilience} is the F12/F13 policy (V30)
+     * or null when no policy row exists (everything disabled).
      */
     public record McpServerRecord(UUID id, UUID tenantId, String name, String endpoint, String transport, String status,
-            String aclMode, Set<UUID> serverConsumerIds, List<McpToolRecord> tools) {
+            String aclMode, Set<UUID> serverConsumerIds, List<McpToolRecord> tools, McpResiliencePolicy resilience) {
 
         public McpServerRecord {
             serverConsumerIds = Set.copyOf(serverConsumerIds);
@@ -286,8 +288,11 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
 
     /**
      * One tool of an MCP service; overrideMode null means inherit the server rule.
+     * {@code method} is the tool's registered HTTP method (V21, default GET) used
+     * by the F12 retry idempotency gate.
      */
-    public record McpToolRecord(String toolName, String status, String overrideMode, Set<UUID> toolConsumerIds) {
+    public record McpToolRecord(String toolName, String status, String overrideMode, Set<UUID> toolConsumerIds,
+            String method) {
 
         public McpToolRecord {
             toolConsumerIds = Set.copyOf(toolConsumerIds);
