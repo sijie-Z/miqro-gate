@@ -28,3 +28,6 @@ export type CredentialView = components['schemas']['CredentialView'];
 export type CredentialVersionView = components['schemas']['CredentialVersionView'];
 export type CredentialDetailView = components['schemas']['CredentialDetailView'];
 export type ValidateCredentialResponse = components['schemas']['ValidateCredentialResponse'];
+export type SubscriptionView = components['schemas']['SubscriptionView'];
+export type SeatView = components['schemas']['SeatView'];
+export type AuditEventView = components['schemas']['AuditEventView'];

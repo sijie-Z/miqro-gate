@@ -29,8 +29,8 @@ import {
   toast,
 } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type {SubscriptionView} from '@/types/api';
-import type { CredentialView, CredentialVersionView, CredentialDetailView, ValidateCredentialResponse } from '@/types/generated-api';
+import type {} from '@/types/api';
+import type { CredentialDetailView, CredentialVersionView, CredentialView, SubscriptionView, ValidateCredentialResponse } from '@/types/generated-api';
 
 const credentials = ref<CredentialView[]>([]);
 const subscriptions = ref<SubscriptionView[]>([]);

@@ -18,7 +18,8 @@ import {
   toast,
 } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type { ProviderProductView, SeatView, SubscriptionView } from '@/types/api';
+import type {ProviderProductView} from '@/types/api';
+import type { SubscriptionView, SeatView } from '@/types/generated-api';
 
 const subscriptions = ref<SubscriptionView[]>([]);
 const products = ref<ProviderProductView[]>([]);

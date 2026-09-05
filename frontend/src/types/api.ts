@@ -322,33 +322,6 @@ export interface Provider {
   status: string;
 }
 
-export interface SubscriptionView {
-  id: string;
-  providerProductId: string;
-  productName: string;
-  name: string;
-  billingMode: string;
-  planScope: string;
-  subscriptionPrice?: number;
-  currency?: string;
-  quotaTotal?: number;
-  quotaUnit?: string;
-  status: string;
-  createdAt: string;
-}
-
-export interface SeatView {
-  id: string;
-  subscriptionId: string;
-  externalSeatRef?: string;
-  assignedUserId?: string;
-  username?: string;
-  userDisplay?: string;
-  displayName?: string;
-  seatStatus: string;
-  createdAt: string;
-}
-
 // ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----
 
 export interface ExportTask {
@@ -421,13 +394,3 @@ export interface AlertRule {
   createdAt: string;
 }
 
-export interface AuditEventView {
-  id: string;
-  actorId?: string;
-  action: string;
-  targetType?: string;
-  targetId?: string;
-  changeSummary?: string;
-  createdAt: string;
-  chainPosition: number;
-}

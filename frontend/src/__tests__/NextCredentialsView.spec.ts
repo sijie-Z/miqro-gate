@@ -4,8 +4,8 @@ import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextCredentialsView from '@/views/next/NextCredentialsView.vue';
 import * as api from '@/api';
-import type {SubscriptionView} from '@/types/api';
-import type { CredentialView } from '@/types/generated-api';
+import type {} from '@/types/api';
+import type { CredentialView, SubscriptionView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listCredentials: vi.fn(),
