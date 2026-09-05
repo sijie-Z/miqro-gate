@@ -79,7 +79,7 @@
 
 ## 状态段（每阶段更新）
 
-> **2026-09-05 交接**：全部进行中/待办与极细步骤见 [session-handoff-2026-09-05.md](session-handoff-2026-09-05.md)；F01 MCP 代理 v1 已并入（#154）；PR 合并通道=手动 workflow_dispatch（ci.yml 支持）。
+> **2026-09-05 执行轮**：Q1（#160 MCP 契约测试）、Q2（#161 F15 日志）、Q3（F12/F13 韧性，本地全量绿）本日交付；Q6 codegen stage2 已开批（分支 goal/codegen-stage2-b1）；逐批记录见 progress.md「会话交接点 2026-09-05」；队列总纲（Q4/Q5/Q7）仍见 [session-handoff-2026-09-05.md](session-handoff-2026-09-05.md)；PR 合并通道=手动 workflow_dispatch（ci.yml 支持）。
 
 - [x] U0 前置：PR #131 收尾（2026-09-03 已完成：CI 曾红一次——KeysView onboarding spec 缺 listVirtualKeys 默认 stub，修复重推后全绿 → squash merge → develop 80dddad，见 progress.md 顶部）
 - [~] U0 设计语言抽取 + ui/ 组件首批 + 试点 4 页（Login/Keys/Usage/AdminUsers）+ 视觉评审 —— **代码与测试完成，等待用户点验（见文末视觉评审记录；评分中位 ~7-7.5 未达 9，因评审器噪声大已停止逐轮追分；分支 goal/ui-posthog-u0 @ 803f552 已 push，PR 待开/已开）**
