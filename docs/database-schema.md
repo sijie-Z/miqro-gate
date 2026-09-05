@@ -335,6 +335,10 @@ MCP Tools 管理：`tool_name`（AI Agent 调用唯一标识，snake_case）、`
 腾讯 doc 135482 语义：每 MCP 服务一组路由规则（`mcp_service_id` ON DELETE CASCADE），决定哪些入站请求可达服务（上游恒为服务本身，配置面先行）。`name`（≤64）服务内唯一 `(tenant_id, mcp_service_id, name)`；`priority`（0–65535，默认 1000）大者优先，0 为系统 default 保留；匹配条件列：`path_mode/path_value`（EXACT|PREFIX|REGEX + 值，RE2 全匹配，REGEX 豁免 `/` 前缀，DB CHECK 同步）、`host_mode/host_value`（同上，域名大小写不敏感）、`methods`（逗号 CSV 白名单，NULL=不限）、`header_conditions jsonb`（`[{name, mode, value}]` AND 语义，≤8，default `[]`）；`status`（ENABLED|DISABLED，仅启用参与匹配）；`version` 乐观锁。**default 行**（name=default/priority=0/无条件/ENABLED/created_by NULL）随服务创建生成、V28 对存量服务以确定性 md5 uuid 回填，API 层禁改禁删禁停；自定义行 `created_by` 必填。匹配/冲突/正则校验逻辑集中在 domain 纯函数 `McpRouteRules`（可被后续数据面复用，不读正文）。
 
 
+
+### `mcp_access_log` (V29，F15 MCP 元数据访问日志)
+
+网关数据面 F01 代理的审计行（写方=网关异步批量 writer，读方=管理 API §5.24）。列：`id uuid`（网关侧生成）、`tenant_id`（FK tenants ON DELETE RESTRICT）、`service_id/service_name`、`consumer_id/consumer_name`（快照身份快照值，非 FK——服务/消费者删除不毁审计）、`rpc_method`（信封 method，可空=不可解析）、`tool_name`（tools/call 的 `params.name`，其余方法空）、`status`（CHECK：`FORWARDED|SERVICE_DENIED|TOOL_DENIED|TOOL_UNAVAILABLE|INVALID_ENVELOPE|UPSTREAM_FAILURE`）、`http_status`（FORWARDED=上游状态；拒绝类=客户端可见 403/400；UPSTREAM_FAILURE=空）、`gateway_request_id`、`occurred_at timestamptz`。**幂等**：唯一索引 `(tenant_id, gateway_request_id)`（重试 flush `ON CONFLICT DO NOTHING`）。查询索引：`(tenant_id, occurred_at DESC)`、`(tenant_id, service_name, occurred_at DESC)`、`(tenant_id, consumer_name, occurred_at DESC)`。正文永不入表。
 ## 7. 告警、导出和审计
 
 ### `webhook_endpoints`
