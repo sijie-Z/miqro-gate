@@ -25,9 +25,17 @@ describe('codegen consistency (openapi schema vs handwritten core types)', () =>
     [...handwritten.matchAll(/^export interface (\w+) \{/gm)].map((m) => m[1]),
   );
 
+  // Known naming exceptions to the *View-suffix convention.
+  const EXCEPTIONS: Record<string, string> = {
+    ProviderProductView: 'ProductView', // the admin list view, not the catalog DTO
+  };
+
   const PAIRS: Array<[apiName: string, schemaName: string]> = [...exportedInterfaces]
-    .filter((n) => schemas.has(n) || (n.endsWith('View') && schemas.has(n.slice(0, -4))))
-    .map((n) => (schemas.has(n) ? [n, n] : [n, n.slice(0, -4)]));
+    .filter((n) => EXCEPTIONS[n] || schemas.has(n) || (n.endsWith('View') && schemas.has(n.slice(0, -4))))
+    .map((n) => {
+      if (EXCEPTIONS[n]) return [n, EXCEPTIONS[n]];
+      return schemas.has(n) ? [n, n] : [n, n.slice(0, -4)];
+    });
 
   expect(PAIRS.length).toBeGreaterThan(20);
 
