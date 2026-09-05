@@ -148,9 +148,9 @@ public final class GatewayTestKeys {
      * product code. {@code baseUrl} is the upstream base URL of every credential
      * (the mock provider in tests).
      * <p>
-     * Every snapshot also carries the MCP proxy fixtures (consumers by digest +
-     * the open/gated services under {@code baseUrl}/mcp); they are inert unless a
-     * test calls {@code /mcpservers/<name>/mcp}.
+     * Every snapshot also carries the MCP proxy fixtures (consumers by digest + the
+     * open/gated services under {@code baseUrl}/mcp); they are inert unless a test
+     * calls {@code /mcpservers/<name>/mcp}.
      * </p>
      */
     public static RouteSnapshot snapshot(String baseUrl, KeyFixture... keys) {
@@ -229,13 +229,13 @@ public final class GatewayTestKeys {
 
     private static Map<String, RouteSnapshot.McpServerRecord> mcpServices(String baseUrl) {
         String endpoint = baseUrl + "/mcp";
-        RouteSnapshot.McpServerRecord open = new RouteSnapshot.McpServerRecord(
-                serviceId(MCP_OPEN_SERVICE), TENANT_ID, MCP_OPEN_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE",
-                "NONE", Set.of(),
-                List.of(tool(MCP_TOOL_ECHO, "ENABLED", null, Set.of()), tool(MCP_TOOL_LEGACY, "DISABLED", null, Set.of())));
-        RouteSnapshot.McpServerRecord gated = new RouteSnapshot.McpServerRecord(
-                serviceId(MCP_GATED_SERVICE), TENANT_ID, MCP_GATED_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE",
-                "ALLOW", Set.of(MCP_ALLOWED.id(), MCP_SERVER_ONLY.id()),
+        RouteSnapshot.McpServerRecord open = new RouteSnapshot.McpServerRecord(serviceId(MCP_OPEN_SERVICE), TENANT_ID,
+                MCP_OPEN_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE", "NONE", Set.of(),
+                List.of(tool(MCP_TOOL_ECHO, "ENABLED", null, Set.of()),
+                        tool(MCP_TOOL_LEGACY, "DISABLED", null, Set.of())));
+        RouteSnapshot.McpServerRecord gated = new RouteSnapshot.McpServerRecord(serviceId(MCP_GATED_SERVICE), TENANT_ID,
+                MCP_GATED_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE", "ALLOW",
+                Set.of(MCP_ALLOWED.id(), MCP_SERVER_ONLY.id()),
                 List.of(tool(MCP_TOOL_SHARED, "ENABLED", null, Set.of()),
                         tool(MCP_TOOL_RESTRICTED, "ENABLED", "ALLOW", Set.of(MCP_ALLOWED.id())),
                         tool(MCP_TOOL_QUIET, "DISABLED", null, Set.of())));
@@ -249,7 +249,8 @@ public final class GatewayTestKeys {
         return UUID.nameUUIDFromBytes(("mqk-mcp-service-" + name).getBytes(StandardCharsets.UTF_8));
     }
 
-    private static RouteSnapshot.McpToolRecord tool(String name, String status, String overrideMode, Set<UUID> allowed) {
+    private static RouteSnapshot.McpToolRecord tool(String name, String status, String overrideMode,
+            Set<UUID> allowed) {
         return new RouteSnapshot.McpToolRecord(name, status, overrideMode, allowed);
     }
 
