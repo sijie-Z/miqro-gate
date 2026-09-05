@@ -9,7 +9,6 @@ import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
-import type {} from '@/types/api';
 import type { AgentView, CredentialView, UsageSummary } from '@/types/generated-api';
 
 const agents = ref<AgentView[]>([]);

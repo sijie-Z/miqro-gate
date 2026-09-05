@@ -4,7 +4,6 @@ import { createPinia, setActivePinia } from 'pinia';
 import NextApprovalCenterView from '@/views/next/NextApprovalCenterView.vue';
 import * as api from '@/api';
 import { toastState } from '@/ui/toast';
-import type {} from '@/types/api';
 import type { ModelApprovalView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({

@@ -8,7 +8,6 @@ import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiInput, UiTable } from '@/ui';
-import type {} from '@/types/api';
 import type { AuditEventView } from '@/types/generated-api';
 
 const events = ref<AuditEventView[]>([]);

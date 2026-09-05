@@ -3,7 +3,6 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextAdminExportsView from '@/views/next/NextAdminExportsView.vue';
 import * as api from '@/api';
-import type {} from '@/types/api';
 import type { ExportTask } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({

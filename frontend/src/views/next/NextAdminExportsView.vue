@@ -8,7 +8,6 @@ import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
-import type {} from '@/types/api';
 import type { ExportTask } from '@/types/generated-api';
 
 const tasks = ref<ExportTask[]>([]);

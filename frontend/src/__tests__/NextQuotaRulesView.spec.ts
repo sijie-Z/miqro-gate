@@ -4,7 +4,6 @@ import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextQuotaRulesView from '@/views/next/NextQuotaRulesView.vue';
 import * as api from '@/api';
-import type {} from '@/types/api';
 import type { QuotaDefaultTemplateView, QuotaRuleView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({

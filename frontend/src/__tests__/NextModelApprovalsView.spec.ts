@@ -5,7 +5,6 @@ import { defineComponent } from 'vue';
 import NextModelApprovalsView from '@/views/next/NextModelApprovalsView.vue';
 import * as api from '@/api';
 import { toastState } from '@/ui/toast';
-import type {} from '@/types/api';
 import type { VirtualKeyView, ModelApprovalView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({

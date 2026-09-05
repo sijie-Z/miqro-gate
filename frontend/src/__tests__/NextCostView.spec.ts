@@ -5,7 +5,6 @@ import { defineComponent } from 'vue';
 import NextCostView from '@/views/next/NextCostView.vue';
 import * as api from '@/api';
 import { toastState } from '@/ui/toast';
-import type {} from '@/types/api';
 import type { BudgetView, UsageSummary } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({

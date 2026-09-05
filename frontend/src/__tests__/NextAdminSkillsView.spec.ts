@@ -3,8 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextAdminSkillsView from '@/views/next/NextAdminSkillsView.vue';
 import * as api from '@/api';
-import type {} from '@/types/api';
-import type { SkillView, Team } from '@/types/generated-api';
+import type { SkillView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   adminListSkills: vi.fn(),

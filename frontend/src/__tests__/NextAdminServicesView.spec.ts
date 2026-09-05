@@ -4,7 +4,6 @@ import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextAdminServicesView from '@/views/next/NextAdminServicesView.vue';
 import * as api from '@/api';
-import type {} from '@/types/api';
 import type { InternalServiceView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
