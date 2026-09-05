@@ -1,7 +1,7 @@
-# ADR-0013：MCP 调用代理接线（草案，待所有者拍板）
+# ADR-0013：MCP 调用代理接线
 
-- 状态：**Proposal（草案）**——数据面形态涉及鉴权通道与传输选择，按 backlog F01「需定」项留待所有者/leader 确认后 Accepted
-- 日期：2026-09-04
+- 状态：**Accepted（2026-09-05）**——决策依据：所有者指示「按阿里云/腾讯云怎么做的、参考他们的文档做」；实际实现 #154 已按腾讯 doc 135906（MCP 调用代理形态）/134890（两级 ACL）落地，即下方决策点 1 的推荐选项 **B**（消费者 API Key 进网关快照 + 服务/工具两级 ACL 判定）。决策点 2 按推荐（streamable HTTP 入站最小集、SSE 二期）；决策点 3 挂点（`McpUpstreamClient` 出口）随 F12/F13/F15 实施。
+- 日期：2026-09-04（状态化：2026-09-05）
 - 关联：[feature-backlog F01](../feature-backlog.md)（接线）、F11（路由规则，配置面已 DONE）、F12-F15（运行时护栏/日志，全部依赖 F01）、[ADR-0002](0002-transparent-proxy.md)（协议透明）、[ADR-0010](0010-consumer-api-key-billing.md)/[0011](0011-consumer-jwt-authentication.md)（消费者凭据）、腾讯 doc 134890/134818（ACL/模型探测）、raw 03（MCP quickstart）
 
 ## 现状（配置面已就绪，调用面未接线）
@@ -44,3 +44,10 @@ ACL 名单语义（doc 134890）基于 **API 消费者**（`api_consumers`），
 
 - 鉴权选项 A/B/C；入站前缀与是否暴露服务名；usage 口径；SSE transport 是否一期做（推荐二期）。
 - 在此之前不写数据面代码（F01 保持 PLANNED）；管理面（已交付部分）不受影响。
+
+## Accepted 裁决记录（2026-09-05）
+
+- 决策点 1 → **B**（#154 已实现：`mqk_api_` 消费者 Key SHA-256 digest 进网关只读快照，路由面按服务名解析 → 服务级 ACL → `tools/call` 工具覆盖与启停判定）。
+- 决策点 2 → 入站形态 `/mcpservers/{serviceName}/mcp`（#154）；transport=STREAMABLE_HTTP 最小集，SSE 传输维持二期；会话无状态透传（无分布式会话缓存）。
+- 决策点 3 → usage 请求级元数据行口径维持未定，暂以 F15 元数据日志（不存正文）先行；F12/F13 默认关闭挂 `McpUpstreamClient` 出口（Q3 队列）。
+
