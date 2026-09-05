@@ -183,7 +183,7 @@ vitest + 截图比对），守卫白名单同步移除已迁移项。
 
 ## 3b. 新增：内容留痕/Kafka/OAuth 需求（2026-09-05 用户转述 leader×平台沟通）
 
-- 需求整理与方案见 [ADR-0014（草案）](decisions/0014-content-retention-and-kafka-events.md)：
+- 需求整理与方案见 [ADR-0014（草案，v3）](decisions/0014-content-retention-and-kafka-events.md)（§0b 覆盖矩阵 M1-M14：口述每条→主流做法或口述方案；本地缓冲 WAL 与消费端本地文件输出为一等设计；带宽估算见 P8）：
   内容留痕（用户请求加密冷存、按用户追溯、默认关闭）+ Kafka 事件管道（平台多进程消费端）+ OAuth 用户无感同步（映射表骨架，本系统登录思路不变）。
 - 待拍板：P1 内容范围 / P2 默认关 / P3 存储目标与保留期 / P5 加密密钥管理 / P7 OAuth 细节（平台后续改）。
 - 红线冲突：与 CLAUDE.md「不保存 prompt/正文」冲突，ADR Accepted 前不做实现。
