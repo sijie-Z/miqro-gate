@@ -19,16 +19,16 @@
 | F07 | 告警类型补齐（usage 队列饱和/解析失败/供应商错误/Plan 同步/磁盘等 → alert_rules 类型） | progress G4.5 风险；release-checklist §6.1 | 部分（多数类型定义清晰，数据源需接线） | SCAFFOLD | 各类型数据源接线 | 现有框架支持新增类型；先登记类型清单与数据源，逐类接线 |
 | F08 | 官方价格 24h 自动同步（source=OFFICIAL 自动化） | progress G7.2 风险 | 部分（依赖供应商官方价格源） | SCAFFOLD | 供应商价格源确认 | source=OFFICIAL 现为人工标记；无源则保持人工 |
 | F09 | OpenAPI 3.1 生成 + CI 破坏性变更检查 | api-contract §8；release-checklist §0 | 清晰（规格已写死） | DONE（2026-09-03） | 无（发布前补项，本会话完成） | 交付见 progress「OpenAPI 3.1 生成」：springdoc `/v3/api-docs`（3.1.0）+ 鉴权 scheme 建模 + 基线 docs/openapi/openapi-3.1.json + CI 破坏性 diff（deploy/openapi/check-openapi-breaking.py）；**前端 TS client codegen（document-map §3 愿景）未纳入**——手写 api/types 继续维护，codegen 迁移列为发布前候选 |
-| F10 | 网关部署信息页核对与补齐 | mapping 表行 8 | TBD | TBD | 需核对既有「部署信息页」（progress 曾记录 commit） | mapping 低优先级候选 |
+| F10 | 网关部署信息页核对与补齐 | mapping 表行 8 | 清晰（核对完成） | **DONE（2026-09-05 核对）** | 无 | 核对：NextSettingsView 含部署信息段（网关/控制面版本与仓库信息页）；无独立补齐缺口 |
 
 ## B 组 · MCP 运行时护栏（腾讯 A 类研究建议，方向明确）
 
 | ID | 功能 | 出处 | 清晰度 | 状态 | 前置/依赖 | 架子与要点 |
 |---|---|---|---|---|---|---|
-| F11 | MCP 路由规则（default 兜底不可改删 + 自定义高优先级；Path/Host/Method/Header 匹配；冲突实时校验；不读正文） | study A4（raw 10） | 清晰 | **DONE（2026-09-04，配置面）** | F01 代理接线后才有调用面（数据面待接线） | 交付见 CHANGELOG 2026-09-04：V28 规则表（default 随服务创建+存量回填）+ domain 纯函数 `McpRouteRules`（RE2 全匹配/冲突等价面）+ 管理 API §5.23 + 前端「路由规则」抽屉；数据面按优先级匹配待 F01 接线（F44 路由级指标同挂） |
+| F11 | MCP 路由规则（default 兜底不可改删 + 自定义高优先级；Path/Host/Method/Header 匹配；冲突实时校验；不读正文） | study A4（raw 10） | 清晰 | **DONE（2026-09-04，配置面）** | F01 代理接线后才有调用面（数据面待接线） | 交付见 CHANGELOG 2026-09-04：V28 规则表（default 随服务创建+存量回填）+ domain 纯函数 `McpRouteRules`（RE2 全匹配/冲突等价面）+ 管理 API §5.23 + 前端「路由规则」抽屉；数据面按优先级匹配待 F01 接线（F44 路由级指标同挂）——**2026-09-05 裁决：DEFERRED**：单固定入口 + default 恒兜底下无差异化分发承载（raw 10 的多 Host/多租户/灰度场景属多入口形态），McpRouteRules 纯函数与 V28 配置面已备，形态出现（多域名入口/私有化多租户）再接 |
 | F12 | Tools 重试门禁（非幂等显式确认；首字节前才重试；默认关闭） | study A6（raw 12） | 清晰 | DONE（2026-09-05，V30+数据面，PR #→） | F01 | 语义与网关「首字节前一次重试」同源：5xx/连接失败/超时条件可选，POST/PUT/PATCH 工具需 `idempotencyConfirmed` 才重试 |
 | F13 | Tools 熔断（三态；最小请求数防误判；慢调用阈值 < 后端超时校验；熔断期跳过重试；429 可触发） | study A7（raw 13） | 清晰 | DONE（2026-09-05，V30+数据面，PR #→） | F01 | 状态机纯函数 + 默认关闭；慢阈值校验对照服务 check_timeout_seconds；429 需显式加入触发状态码；熔断桶按工具名/方法名隔离 |
-| F14 | Tools 分组（引用不复制；组内唯一；AutoPrefix 冲突处理；单组默认 10 个控 Token） | study A9（raw 17） | 清晰 | PLANNED | F01 | 引用式虚拟端点 |
+| F14 | Tools 分组（引用不复制；组内唯一；AutoPrefix 冲突处理；单组默认 10 个控 Token） | study A9（raw 17） | 清晰 | **DEFERRED（2026-09-05 裁决）** | F01 | raw 17 的组级暴露面=HTTP-to-MCP 直连端点（组名入路径）；本系统标准 MCP 信封单一入口无承载；形态出现（HTTP-to-MCP/Agent 组直连）再立项 |
 | F15 | MCP 纯元数据访问日志（`aigw.mcp.*` 固定前缀，不存正文） | study A8（raw 16） | 清晰 | DONE（2026-09-05，V29+网关 writer+查询 API，PR #→） | F01 | 随代理接线落：网关异步批量写 `mcp_access_log`（幂等/饱和 drop+计数），管理端 `GET /api/v1/admin/mcp-access-logs`；401/404 无可信身份不落行 |
 | F16 | Tools 版本管理（配置快照与运行分离；语义版本化；生效版永不裁剪；幂等回滚） | study A3（raw 11） | 部分（语义清晰、落点需定） | SCAFFOLD | 无（可独立于 F01） | 架子：工具定义加版本列 + 快照表设计待细化 |
 | F17 | Tools OpenAPI 批量导入 | progress P3.5 边界 | 部分（导入格式依赖工具 OpenAPI 结构） | SCAFFOLD | 无 | 解析器契约先立（vendor 扩展字段未知） |
