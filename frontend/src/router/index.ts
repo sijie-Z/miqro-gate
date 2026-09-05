@@ -190,6 +190,12 @@ const router = createRouter({
           meta: adminMeta('MCP 服务'),
         },
         {
+          path: 'mcp-access-logs',
+          name: 'mcp-access-logs',
+          component: () => import('@/views/next/NextAdminMcpAccessLogsView.vue'),
+          meta: adminMeta('MCP 访问日志'),
+        },
+        {
           path: 'webhooks',
           name: 'webhooks',
           component: () => import('@/views/next/NextAdminWebhooksView.vue'),
