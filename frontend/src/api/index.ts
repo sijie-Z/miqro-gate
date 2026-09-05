@@ -8,7 +8,7 @@
   uploadBytes,
 } from './http';
 import type {CreateApiConsumerResponse, AdminUser, McpAclMode, McpRouteRule, UpsertMcpRouteRuleRequest, UsageDeletionRequest, WebhookDelivery, Grant, LoginResponse, MemberView, ModelApprovalStatus, RoiReportView, UserProjectMembership, ProviderProductView, UsageGroupBy, UserCreatedResponse, UserResponse, UserRole, UserStatusValue} from '@/types/api';
-import type { AgentView, AlertRule, ApiConsumerView, AuditEventView, BudgetView, ConfigEntryView, CreateVirtualKeyResponse, CredentialDetailView, CredentialView, ExportTask, InternalServiceView, McpAccessView, McpServiceView, McpToolView, MeGrantsResponse, ModelApprovalPage, ModelApprovalView, PriceSnapshotView, Project, Provider, QuotaDefaultTemplateView, QuotaRuleView, SeatView, SkillView, SubscriptionView, Team, UsageRecordPage, UsageSummary, ValidateCredentialResponse, VirtualKeyView, WebhookEndpointView , McpAccessLogEntry } from '@/types/generated-api';
+import type { AgentView, AlertRule, ApiConsumerView, AuditEventView, BudgetView, ConfigEntryView, CreateVirtualKeyResponse, CredentialDetailView, CredentialView, ExportTask, InternalServiceView, McpAccessView, McpServiceView, McpToolView, MeGrantsResponse, ModelApprovalPage, ModelApprovalView, PriceSnapshotView, Project, Provider, QuotaDefaultTemplateView, QuotaRuleView, SeatView, SkillView, SubscriptionView, Team, UsageRecordPage, UsageSummary, ValidateCredentialResponse, VirtualKeyView, WebhookEndpointView , McpAccessLogEntry , McpResiliencePolicy } from '@/types/generated-api';
 import type { components } from '@/types/generated';
 
 // Stage-2 codegen migration (batch 1): request DTOs now alias the OpenAPI
@@ -538,6 +538,37 @@ export function adminCreateMcpService(body: {
 
 export function adminSetMcpStatus(id: string, status: string): Promise<McpServiceView> {
   return post<McpServiceView>(`/api/v1/admin/mcp-services/${id}/status?status=${status}`);
+}
+
+export interface McpResilienceDraft {
+  retryEnabled?: boolean;
+  retryMax?: number;
+  retryConditions?: string[];
+  idempotencyConfirmed?: boolean;
+  breakerEnabled?: boolean;
+  breakerWindowSeconds?: number;
+  breakerMinRequests?: number;
+  breakerErrorEnabled?: boolean;
+  breakerErrorRatio?: number;
+  breakerErrorStatusCodes?: number[];
+  breakerSlowEnabled?: boolean;
+  breakerSlowCallMs?: number;
+  breakerSlowRatio?: number;
+  breakerOpenSeconds?: number;
+  breakerProbeCount?: number;
+  breakerProbeSuccess?: number;
+  breakerSkipRetry?: boolean;
+}
+
+export function getMcpServiceResilience(id: string): Promise<McpResiliencePolicy> {
+  return get<McpResiliencePolicy>(`/api/v1/admin/mcp-services/${id}/resilience`);
+}
+
+export function putMcpServiceResilience(
+  id: string,
+  body: McpResilienceDraft,
+): Promise<McpResiliencePolicy> {
+  return put<McpResiliencePolicy>(`/api/v1/admin/mcp-services/${id}/resilience`, body);
 }
 
 export function adminUpdateMcpHealthConfig(

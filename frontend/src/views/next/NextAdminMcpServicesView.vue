@@ -22,7 +22,8 @@ import {
   toast,
 } from '@/ui';
 import type {McpAclMode, McpRouteRule, UpsertMcpRouteRuleRequest} from '@/types/api';
-import type { ApiConsumerView, McpAccessView, McpServiceView, McpToolView } from '@/types/generated-api';
+import type { ApiConsumerView, McpAccessView, McpServiceView, McpToolView , McpResiliencePolicy } from '@/types/generated-api';
+import type { McpResilienceDraft } from '@/api';
 
 const services = ref<McpServiceView[]>([]);
 const loading = ref(true);
@@ -693,6 +694,123 @@ async function routeConfirmAndRun() {
 }
 
 onMounted(load);
+
+// ---- F12/F13 resilience configuration ----
+const resilienceOpen = ref(false);
+const resilienceService = ref<McpServiceView | null>(null);
+const resilienceLoading = ref(false);
+const resilienceSaving = ref(false);
+const resilienceError = ref('');
+
+const resilience = ref<McpResiliencePolicy | null>(null);
+// Editable form state (numbers as strings for inputs; codes as CSV).
+const rForm = ref({
+  retryEnabled: false,
+  retryMax: '1',
+  retryConditions: [] as string[],
+  idempotencyConfirmed: false,
+  breakerEnabled: false,
+  breakerWindowSeconds: '10',
+  breakerMinRequests: '10',
+  breakerErrorEnabled: true,
+  breakerErrorRatio: '50',
+  breakerErrorStatusCodes: '500,502,503,504',
+  breakerSlowEnabled: false,
+  breakerSlowCallMs: '3000',
+  breakerSlowRatio: '80',
+  breakerOpenSeconds: '30',
+  breakerProbeCount: '3',
+  breakerProbeSuccess: '2',
+  breakerSkipRetry: true,
+});
+const RETRY_CONDITION_LABELS: Record<string, string> = {
+  SERVER_5XX: '后端 5xx',
+  CONNECTION_FAILURE: '连接失败',
+  TIMEOUT: '请求超时',
+};
+
+async function openResilience(service: McpServiceView) {
+  resilienceService.value = service;
+  resilienceOpen.value = true;
+  resilienceLoading.value = true;
+  resilienceError.value = '';
+  try {
+    const policy = await api.getMcpServiceResilience(service.id);
+    resilience.value = policy;
+    rForm.value = {
+      retryEnabled: policy.retryEnabled,
+      retryMax: String(policy.retryMax),
+      retryConditions: [...policy.retryConditions],
+      idempotencyConfirmed: policy.idempotencyConfirmed,
+      breakerEnabled: policy.breakerEnabled,
+      breakerWindowSeconds: String(policy.breakerWindowSeconds),
+      breakerMinRequests: String(policy.breakerMinRequests),
+      breakerErrorEnabled: policy.breakerErrorEnabled,
+      breakerErrorRatio: String(policy.breakerErrorRatio),
+      breakerErrorStatusCodes: [...policy.breakerErrorStatusCodes].join(','),
+      breakerSlowEnabled: policy.breakerSlowEnabled,
+      breakerSlowCallMs: String(policy.breakerSlowCallMs),
+      breakerSlowRatio: String(policy.breakerSlowRatio),
+      breakerOpenSeconds: String(policy.breakerOpenSeconds),
+      breakerProbeCount: String(policy.breakerProbeCount),
+      breakerProbeSuccess: String(policy.breakerProbeSuccess),
+      breakerSkipRetry: policy.breakerSkipRetry,
+    };
+  } catch (error) {
+    resilienceError.value = error instanceof ApiError ? error.message : '读取韧性配置失败';
+  } finally {
+    resilienceLoading.value = false;
+  }
+}
+
+function toggleRetryCondition(condition: string) {
+  const list = rForm.value.retryConditions;
+  const index = list.indexOf(condition);
+  if (index >= 0) {
+    list.splice(index, 1);
+  } else {
+    list.push(condition);
+  }
+}
+
+async function saveResilience() {
+  if (!resilienceService.value) return;
+  resilienceSaving.value = true;
+  resilienceError.value = '';
+  try {
+    const codes = rForm.value.breakerErrorStatusCodes
+      .split(',')
+      .map((part) => Number(part.trim()))
+      .filter((value) => Number.isInteger(value) && value >= 400 && value <= 599);
+    const draft: McpResilienceDraft = {
+      retryEnabled: rForm.value.retryEnabled,
+      retryMax: rForm.value.retryEnabled ? Number(rForm.value.retryMax) : undefined,
+      retryConditions: rForm.value.retryEnabled ? [...rForm.value.retryConditions] : undefined,
+      idempotencyConfirmed: rForm.value.idempotencyConfirmed,
+      breakerEnabled: rForm.value.breakerEnabled,
+      breakerWindowSeconds: Number(rForm.value.breakerWindowSeconds),
+      breakerMinRequests: Number(rForm.value.breakerMinRequests),
+      breakerErrorEnabled: rForm.value.breakerErrorEnabled,
+      breakerErrorRatio: Number(rForm.value.breakerErrorRatio),
+      breakerErrorStatusCodes: codes,
+      breakerSlowEnabled: rForm.value.breakerSlowEnabled,
+      breakerSlowCallMs: Number(rForm.value.breakerSlowCallMs),
+      breakerSlowRatio: Number(rForm.value.breakerSlowRatio),
+      breakerOpenSeconds: Number(rForm.value.breakerOpenSeconds),
+      breakerProbeCount: Number(rForm.value.breakerProbeCount),
+      breakerProbeSuccess: Number(rForm.value.breakerProbeSuccess),
+      breakerSkipRetry: rForm.value.breakerSkipRetry,
+    };
+    const stored = await api.putMcpServiceResilience(resilienceService.value.id, draft);
+    resilience.value = stored;
+    toast.success('韧性配置已保存');
+    resilienceOpen.value = false;
+  } catch (error) {
+    resilienceError.value = error instanceof ApiError ? error.message : '保存失败';
+  } finally {
+    resilienceSaving.value = false;
+  }
+}
 </script>
 
 <template>
@@ -838,6 +956,13 @@ onMounted(load);
               data-testid="mcp-health-config"
               @click="openConfig(row as McpServiceView)"
               >健康检查</UiButton
+            >
+            <UiButton
+              variant="ghost"
+              size="sm"
+              data-testid="mcp-resilience"
+              @click="openResilience(row as McpServiceView)"
+              >韧性配置</UiButton
             >
             <UiButton
               v-if="(row as McpServiceView).status === 'ONLINE'"
@@ -1467,6 +1592,108 @@ onMounted(load);
       </template>
     </UiDialog>
   </div>
+
+    <!-- F12/F13 resilience configuration -->
+    <UiDrawer
+      :open="resilienceOpen"
+      :title="resilienceService ? `韧性配置 · ${resilienceService.name}` : '韧性配置'"
+      width="640px"
+      data-testid="mcp-resilience-drawer"
+      @update:open="resilienceOpen = false"
+    >
+      <div v-if="resilienceError" class="ui-alert ui-alert--error" data-testid="mcp-resilience-error">
+        {{ resilienceError }}
+      </div>
+      <div v-if="resilienceLoading" class="next-mcp__tools-loading">
+        <div v-for="n in 3" :key="n" class="ui-skeleton">&nbsp;</div>
+      </div>
+      <template v-else-if="resilience">
+        <div class="next-mcp__dialog-form">
+          <div class="next-mcp__resilience-group">
+            <h3 class="next-mcp__resilience-title">重试（F12 · 默认关闭）</h3>
+            <label class="next-mcp__checkbox">
+              <input v-model="rForm.retryEnabled" type="checkbox" data-testid="mcp-res-retry-enabled" />
+              <span>启用重试（仅首字节前；默认关闭）</span>
+            </label>
+            <template v-if="rForm.retryEnabled">
+              <div class="next-mcp__row">
+                <UiInput v-model="rForm.retryMax" label="重试次数（1–5）" data-testid="mcp-res-retry-max" />
+              </div>
+              <div class="next-mcp__resilience-checks">
+                <span class="next-mcp__resilience-label">重试条件（至少一项）</span>
+                <label v-for="(label, condition) in RETRY_CONDITION_LABELS" :key="condition" class="next-mcp__checkbox">
+                  <input
+                    type="checkbox"
+                    :checked="rForm.retryConditions.includes(condition)"
+                    :data-testid="`mcp-res-retry-${condition.toLowerCase()}`"
+                    @change="toggleRetryCondition(condition)"
+                  />
+                  <span>{{ label }}</span>
+                </label>
+              </div>
+              <label class="next-mcp__checkbox">
+                <input v-model="rForm.idempotencyConfirmed" type="checkbox" data-testid="mcp-res-idempotent" />
+                <span>已确认后端接口幂等（POST/PUT/PATCH 工具可重试）</span>
+              </label>
+            </template>
+          </div>
+
+          <div class="next-mcp__resilience-group">
+            <h3 class="next-mcp__resilience-title">熔断（F13 · 默认关闭）</h3>
+            <label class="next-mcp__checkbox">
+              <input v-model="rForm.breakerEnabled" type="checkbox" data-testid="mcp-res-breaker-enabled" />
+              <span>启用熔断（三态状态机；429 需加入下方状态码）</span>
+            </label>
+            <template v-if="rForm.breakerEnabled">
+              <div class="next-mcp__row">
+                <UiInput v-model="rForm.breakerWindowSeconds" label="统计窗口（秒 1–60）" data-testid="mcp-res-window" />
+                <UiInput v-model="rForm.breakerMinRequests" label="最小请求数（1–100）" data-testid="mcp-res-minreq" />
+              </div>
+              <label class="next-mcp__checkbox">
+                <input v-model="rForm.breakerErrorEnabled" type="checkbox" data-testid="mcp-res-error-enabled" />
+                <span>错误比例触发</span>
+              </label>
+              <div class="next-mcp__row">
+                <UiInput v-model="rForm.breakerErrorRatio" label="错误比例阈值 %（1–100）" data-testid="mcp-res-error-ratio" />
+                <UiInput v-model="rForm.breakerErrorStatusCodes" label="计入错误的状态码（CSV，≤32）" data-testid="mcp-res-codes" />
+              </div>
+              <label class="next-mcp__checkbox">
+                <input v-model="rForm.breakerSlowEnabled" type="checkbox" data-testid="mcp-res-slow-enabled" />
+                <span>慢调用触发</span>
+              </label>
+              <div v-if="rForm.breakerSlowEnabled" class="next-mcp__row">
+                <UiInput v-model="rForm.breakerSlowCallMs" label="慢调用阈值 ms（须小于服务超时）" data-testid="mcp-res-slow-ms" />
+                <UiInput v-model="rForm.breakerSlowRatio" label="慢调用比例 %（1–100）" data-testid="mcp-res-slow-ratio" />
+              </div>
+              <div class="next-mcp__row">
+                <UiInput v-model="rForm.breakerOpenSeconds" label="熔断时长（秒 5–600）" data-testid="mcp-res-open" />
+              </div>
+              <div class="next-mcp__row">
+                <UiInput v-model="rForm.breakerProbeCount" label="半开探测数（1–10）" data-testid="mcp-res-probes" />
+                <UiInput v-model="rForm.breakerProbeSuccess" label="恢复成功数" data-testid="mcp-res-probe-ok" />
+              </div>
+              <label class="next-mcp__checkbox">
+                <input v-model="rForm.breakerSkipRetry" type="checkbox" data-testid="mcp-res-skip-retry" />
+                <span>熔断期跳过重试</span>
+              </label>
+            </template>
+          </div>
+          <p class="next-mcp__resilience-hint">
+            修改经路由快照下发，约一个刷新周期（默认 30s）内生效。慢调用阈值校验、状态码范围等错误会在保存时提示。
+          </p>
+        </div>
+      </template>
+      <template #footer>
+        <UiButton variant="ghost" @click="resilienceOpen = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="resilienceSaving"
+          data-testid="mcp-resilience-save"
+          @click="saveResilience"
+          >保存</UiButton
+        >
+      </template>
+    </UiDrawer>
 </template>
 
 <style scoped>
@@ -1907,5 +2134,38 @@ onMounted(load);
   grid-template-columns: 150px auto minmax(120px, 1fr) auto;
   align-items: center;
   gap: var(--ui-space-2);
+}
+
+.next-mcp__resilience-group {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--ui-border-muted);
+}
+.next-mcp__resilience-title {
+  font-size: var(--ui-font-size-sm);
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+.next-mcp__resilience-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: center;
+  margin: 6px 0;
+}
+.next-mcp__resilience-label {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+.next-mcp__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--ui-font-size-sm);
+  margin: 4px 0;
+}
+.next-mcp__resilience-hint {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  margin: 8px 0 0;
 }
 </style>

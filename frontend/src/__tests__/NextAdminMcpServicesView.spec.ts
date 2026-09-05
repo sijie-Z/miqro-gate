@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { nextTick } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextAdminMcpServicesView from '@/views/next/NextAdminMcpServicesView.vue';
@@ -24,6 +25,8 @@ vi.mock('@/api', () => ({
   adminUpdateMcpRouteRule: vi.fn(),
   adminSetMcpRouteStatus: vi.fn(),
   adminDeleteMcpRouteRule: vi.fn(),
+  getMcpServiceResilience: vi.fn(),
+  putMcpServiceResilience: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -534,5 +537,120 @@ describe('NextAdminMcpServicesView', () => {
     confirm!.click();
     await flushPromises();
     expect(mockApi.adminDeleteMcpRouteRule).toHaveBeenCalledWith('m1', 'r2');
+  });
+  it('opens the resilience drawer with the stored policy', async () => {
+    const service = {
+      id: 'svc-1',
+      name: 'weather-mcp',
+      status: 'ONLINE',
+    } as McpServiceView;
+    mockApi.adminListMcpServices.mockResolvedValue([service]);
+    mockApi.getMcpServiceResilience.mockResolvedValue({
+      retryEnabled: true,
+      retryMax: 2,
+      retryConditions: ['SERVER_5XX'],
+      idempotencyConfirmed: true,
+      breakerEnabled: false,
+      breakerWindowSeconds: 10,
+      breakerMinRequests: 10,
+      breakerErrorEnabled: true,
+      breakerErrorRatio: 50,
+      breakerErrorStatusCodes: [500, 502, 503, 504],
+      breakerSlowEnabled: false,
+      breakerSlowCallMs: 3000,
+      breakerSlowRatio: 80,
+      breakerOpenSeconds: 30,
+      breakerProbeCount: 3,
+      breakerProbeSuccess: 2,
+      breakerSkipRetry: true,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="mcp-resilience"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.getMcpServiceResilience).toHaveBeenCalledWith('svc-1');
+    const drawer = document.querySelector('[data-testid="mcp-resilience-drawer"]');
+    expect(drawer?.textContent).toContain('韧性配置 · weather-mcp');
+    expect(drawer?.textContent).toContain('已确认后端接口幂等');
+  });
+
+  it('saves the edited resilience policy', async () => {
+    const service = { id: 'svc-1', name: 'weather-mcp', status: 'ONLINE' } as McpServiceView;
+    mockApi.adminListMcpServices.mockResolvedValue([service]);
+    mockApi.getMcpServiceResilience.mockResolvedValue({
+      retryEnabled: false,
+      retryMax: 1,
+      retryConditions: [],
+      idempotencyConfirmed: false,
+      breakerEnabled: false,
+      breakerWindowSeconds: 10,
+      breakerMinRequests: 10,
+      breakerErrorEnabled: true,
+      breakerErrorRatio: 50,
+      breakerErrorStatusCodes: [500, 502, 503, 504],
+      breakerSlowEnabled: false,
+      breakerSlowCallMs: 3000,
+      breakerSlowRatio: 80,
+      breakerOpenSeconds: 30,
+      breakerProbeCount: 3,
+      breakerProbeSuccess: 2,
+      breakerSkipRetry: true,
+    });
+    mockApi.putMcpServiceResilience.mockResolvedValue({
+      retryEnabled: true,
+      retryMax: 1,
+      retryConditions: ['CONNECTION_FAILURE'],
+      idempotencyConfirmed: false,
+      breakerEnabled: true,
+      breakerWindowSeconds: 10,
+      breakerMinRequests: 10,
+      breakerErrorEnabled: true,
+      breakerErrorRatio: 50,
+      breakerErrorStatusCodes: [500, 502, 503, 504],
+      breakerSlowEnabled: false,
+      breakerSlowCallMs: 3000,
+      breakerSlowRatio: 80,
+      breakerOpenSeconds: 30,
+      breakerProbeCount: 3,
+      breakerProbeSuccess: 2,
+      breakerSkipRetry: true,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="mcp-resilience"]').trigger('click');
+    await flushPromises();
+    const drawerEl = document.querySelector(
+      '[data-testid="mcp-resilience-drawer"]',
+    ) as HTMLElement;
+    const findInDrawer = (testId: string) => {
+      const el = drawerEl.querySelector(`[data-testid="${testId}"]`) as HTMLInputElement;
+      expect(el, testId).toBeTruthy();
+      return el;
+    };
+    (findInDrawer('mcp-res-retry-enabled') as HTMLInputElement).click();
+    await nextTick();
+    (findInDrawer('mcp-res-idempotent') as HTMLInputElement).click();
+    await nextTick();
+    const retryMax = findInDrawer('mcp-res-retry-max');
+    retryMax.value = '1';
+    retryMax.dispatchEvent(new Event('input', { bubbles: true }));
+    (findInDrawer('mcp-res-breaker-enabled') as HTMLInputElement).click();
+    await nextTick();
+    const save = drawerEl.querySelector('[data-testid="mcp-resilience-save"]') as HTMLElement;
+    expect(save).toBeTruthy();
+    save.click();
+    await flushPromises();
+    expect(mockApi.putMcpServiceResilience).toHaveBeenCalledTimes(1);
+    const body = mockApi.putMcpServiceResilience.mock.calls[0][1] as {
+      retryEnabled: boolean;
+      retryConditions: string[];
+      idempotencyConfirmed: boolean;
+      breakerEnabled: boolean;
+      breakerErrorStatusCodes: number[];
+    };
+    expect(body.retryEnabled).toBe(true);
+    expect(body.idempotencyConfirmed).toBe(true);
+    expect(body.breakerEnabled).toBe(true);
+    expect(body.breakerErrorStatusCodes).toContain(500);
   });
 });
