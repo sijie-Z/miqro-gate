@@ -63,7 +63,7 @@
 | F31 | SkillHub 公司内 skill 来源接入 | middleware 待办 | 部分 | BLOCKED | 公司 skill 存放/格式 | 上传/目录/下载已按 Agent Skills 实现 |
 | F32 | 平台用户同步（电话/userid 注册 → 网关账号） | middleware P0；报备需求 | 部分 | BLOCKED | 平台注册字段/形态（leader） | 需 ADR（触碰本地 Argon2 体系）；JWT sub→平台 user_id 叠加为 ADR-0011 后果。**自助注册（F-REG，2026-09-03）已交付**（`/auth/register` + 开关），平台级映射/同步仍等 leader |
 | F33 | 平台 OAuth 确权（OAuth/OIDC 访问受保护资源） | middleware P0 | 部分 | BLOCKED | OAuth 形态决策 | JWT 通道（ADR-0011）为前置形态 |
-| F34 | Kafka 引入（事件管道演进） | progress 待办 1 | 不清晰（场景未定） | BLOCKED | leader 场景细化 | 现 PostgreSQL NOTIFY + 有界队列；落地需 ADR |
+| F34 | Kafka 引入（事件管道演进） | leader×平台沟通（2026-09）；ADR-0014 | 清晰（场景=内容留痕事件流，见 ADR-0014） | BLOCKED | ADR-0014 Accepted + 拓扑拍板 | 场景已细化：请求内容合规留痕事件（按用户可追溯/加密/冷数据）经 Kafka 投递、平台消费端多进程持久化；落地需 ADR-0012/0014 Accepted |
 
 ## F 组 · 基础设施与远期（多数 DEFERRED/SCAFFOLD）
 
@@ -103,6 +103,7 @@
 | F56 | spec §9 人工视觉审查 | progress G5.5 | TBD | 需人工执行 |
 | F57 | 版本号与 tag（0.1.0-SNAPSHOT） | progress G6.5 | BLOCKED | 待所有者授权 |
 | F58 | release-checklist 未勾门禁复核（§1/§4/§6 相关项随 F19/F20 落地） | release-checklist | DEFERRED | 逐项由对应功能闭合 |
+| F59 | 请求内容合规留痕管道（加密冷存/按用户追溯/OAuth uid 映射骨架） | leader×平台沟通；ADR-0014 | 部分（范围/存储/密钥待 P1-P8 拍板） | BLOCKED | ADR-0014 Accepted | 见 ADR-0014：网关旁路密文信封→Kafka→消费端持久化（文件/S3/DB 候选）；触碰「不存正文」红线需显式放行 |
 
 ## 文档一致性缺口（盘点发现，登记待修）
 
