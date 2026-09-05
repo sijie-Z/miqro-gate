@@ -224,12 +224,6 @@ export interface UsageGroup {
   cost: UsageCost;
 }
 
-export interface UsageSummary {
-  groupBy: UsageGroupBy;
-  groups: UsageGroup[];
-  totals: UsageGroup;
-}
-
 // ---- admin organization (G5.2) ----
 
 export type UserStatusValue = 'ACTIVE' | 'DISABLED' | 'LOCKED';
@@ -294,19 +288,6 @@ export interface Grant {
   createdAt: string;
 }
 
-export interface PriceSnapshotView {
-  id: string;
-  providerProductId: string;
-  modelId: string;
-  tokenType: string;
-  currency: string;
-  unitPrice: string;
-  effectiveFrom: string;
-  source: string;
-  createdBy: string;
-  createdAt: string;
-}
-
 export interface ApiConsumerView {
   id: string;
   name: string;
@@ -319,43 +300,6 @@ export interface CreateApiConsumerResponse {
   consumer: ApiConsumerView;
   apiKey: string;
   shownOnce: boolean;
-}
-
-export interface CredentialView {
-  id: string;
-  name: string;
-  subscriptionId: string;
-  status: string;
-  activeVersionId: string;
-  fingerprintPrefix: string;
-  lastValidatedAt: string | null;
-  lastValidationError: string | null;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CredentialVersionView {
-  id: string;
-  status: string;
-  encryptionKeyVersion: string;
-  fingerprintPrefix: string;
-  validFrom: string;
-  retiredAt: string | null;
-  createdAt: string;
-}
-
-export interface CredentialDetailView {
-  credential: CredentialView;
-  versions: CredentialVersionView[];
-}
-
-export interface ValidateCredentialResponse {
-  matchesActive: boolean;
-  message: string | null;
-  providerStatus: 'VALID' | 'REJECTED' | 'UNREACHABLE' | 'NOT_CHECKED';
-  providerMessage: string | null;
-  checkedAt: string | null;
 }
 
 export interface ProviderProductView {
