@@ -2178,3 +2178,9 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - verify -P integration 跑动中严禁改文件/切分支（结果作废一次）。
 - Q1/Q2 dup 内容在 Q3 合并时产生重复内容冲突：统一 checkout --ours（develop 侧为同内容 squash）。
 - `McpProxyController` 修改面：F15/F12/F13 全部在 exchangeToMono 回调内完成 body 消费与回写，README 已注释。
+
+## 会话交接点 2026-09-05（第二批长跑轮）— codegen stage2 收尾 + 契约债/裁决记录
+- **Q6 stage2 批 3-11（PR #165）**：全部可安全迁移 DTO 切到生成类型——统一别名枢纽 frontend/src/types/generated-api.ts（此后迁移类型集中 re-export）；迁移清单：UsageRecord(-View)/UsageRecordPage、Skill/Agent/Budget/VirtualKey/CreateVirtualKeyResponse/ModelApproval(View+Page)/QuotaRule/UsageSummary/PriceSnapshot/Credential×3/ValidateCredentialResponse/Subscription/Seat/AuditEvent/MeGrantsResponse/QuotaDefaultTemplate/McpAccess/Team/Project/ApiConsumer/Provider/ExportTask/WebhookEndpoint/AlertRule/InternalServiceView→InternalService/ConfigEntryView→ConfigEntry/McpServiceView→McpService/McpToolView→McpTool（View 去尾→stem schema）。守卫配对 40→2（EXCEPTIONS 残余），下限终态 ≥1；per-pair 字段子集断言保留为真守卫。
+- **保留手写清单（有意为之）**：auth 信封 ProblemDetails/UserResponse/LoginResponse（spec 盲区无 schema）；route-rules 三件套（openapi 无此端点，后端补契约后可迁）；RoiReportView（**spec 缺口**：缺 coalescedRequests/hitRatePct/l1Hits/l2Hits/paidCost/savedCost/savedPct/upstreamRequests 8 字段，需后端补）；ProviderProductView（EXCEPTIONS→ProductView）；嵌套 usage 组类型与字面量枚举别名（schema 内联无法复用，保留为复用形态）。
+- **OpenAPI 基线滞后修复（#→）**：#161/#163 新增管理端点未刷 docs/openapi/openapi-3.1.json（breaking-check 允许 additions 故 CI 绿）→ 重跑 OpenApiSpecIntegrationTest 产出 head spec 覆盖基线 + 前端 generated.ts 重生成（新增 McpAccessLogEntry/McpResiliencePolicy schema，无 breaking）。
+- **裁决（文档驱动，不发明层）**：F11 数据面路由匹配与 F14 工具分组 → **DEFERRED**：raw 10/17 语义的差异化分发/组级暴露面依赖「多入口/Host 分流/HTTP-to-MCP 直连」形态，本系统单固定入口 + 标准 MCP 信封 + default 恒兜底下无承载对象；McpRouteRules 纯函数/快照位已备，形态出现再接。F10 部署信息页核对：NextSettingsView 含部署信息段 → TBD 收尾登记。
