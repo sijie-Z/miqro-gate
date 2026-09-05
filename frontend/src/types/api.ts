@@ -181,18 +181,6 @@ export interface MeGrantsResponse {
 
 export type ModelApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
-export interface SubmitModelApprovalRequest {
-  virtualKeyId: string;
-  modelId: string;
-  /** Applicant's stated justification, ≤ 500 chars. */
-  reason?: string;
-}
-
-export interface ReviewModelApprovalRequest {
-  /** Reviewer's decision note, ≤ 500 chars. */
-  reviewNote?: string;
-}
-
 export interface ModelApprovalView {
   id: string;
   virtualKeyId: string;
@@ -248,16 +236,6 @@ export interface QuotaRuleView {
   version: number;
 }
 
-export interface UpsertQuotaRuleRequest {
-  scopeType: QuotaScopeType;
-  scopeId: string;
-  metric: QuotaMetric;
-  period: QuotaPeriod;
-  limitValue: number;
-  warnPercent?: number;
-  status?: QuotaRuleStatus;
-}
-
 /** Global default quota strategy (Tencent doc 135489) — nulls before first config. */
 export interface QuotaDefaultTemplateView {
   enabled: boolean;
@@ -266,12 +244,6 @@ export interface QuotaDefaultTemplateView {
   limitValue: number | null;
   version: number;
   updatedAt: string | null;
-}
-
-export interface ConfigureQuotaDefaultTemplateRequest {
-  metric: QuotaMetric;
-  period: QuotaPeriod;
-  limitValue: number;
 }
 
 export interface RoiReportView {
@@ -311,12 +283,6 @@ export interface McpAccessView {
     mode: McpAclMode | null;
     consumers: Array<{ id: string; name: string }>;
   }>;
-}
-
-export interface SetMcpAccessGrantsRequest {
-  toolId?: string;
-  mode: 'ALLOW' | 'DENY';
-  consumerIds: string[];
 }
 
 // ---- MCP route rules (F11, Tencent doc 135482) ----
