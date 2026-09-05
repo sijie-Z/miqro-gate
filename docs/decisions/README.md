@@ -9,3 +9,4 @@
 - [ADR-0007：产品与工程标识采用 MiQroKey](0007-miqrokey-product-identity.md)
 - [ADR-0012：Kafka 引入评估（草案，待所有者拍板）](0012-kafka-events-proposal.md)
 - [ADR-0013：MCP 调用代理接线（草案，待所有者拍板）](0013-mcp-proxy-wiring-proposal.md)
+- [ADR-0014：请求内容合规留痕管道 + Kafka 事件流 + OAuth 用户映射（草案）](0014-content-retention-and-kafka-events.md)
