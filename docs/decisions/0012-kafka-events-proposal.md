@@ -1,7 +1,7 @@
-# ADR-0012：Kafka 引入评估（草案，待所有者拍板）
+# ADR-0012：Kafka 引入评估
 
-- 状态：**Proposal（草案）**——未决策，等待项目所有者/leader 确认场景与拓扑
-- 日期：2026-09-04
+- 状态：**Accepted（2026-09-05）**——所有者答复「ADR-0014 按 v3 默认 Accepted」；Kafka 首个真实场景即 ADR-0014 内容留痕事件管道（合规增强、默认关）。拓扑按 ADR-0014 §5 P4 默认：标准 Apache Kafka 协议（腾讯 CKafka/阿里云 Kafka 兼容）、单 broker（KRaft）起步、topic `content-retention` 按 user hash 分区保序、JSON 信封（at-least-once + 消费端幂等）、消费组归平台侧；queue-spi 维持「PostgreSQL 主写 + Kafka 仅扇出/旁路」边界。F32 映射骨架（`user_identity_link`）随 V31 一并落库，平台 OAuth 细节到达后接线。
+- 日期：2026-09-04（状态化：2026-09-05）
 - 关联：[feature-backlog F34](feature-backlog 见 ../feature-backlog.md)（Kafka 引入）、F32（平台用户同步）、ADR-0002（透明代理）、ADR-0006（WebFlux/MVC 边界）、[queue-spi 架构](../architecture.md)（usage 有界队列）、[platform-middleware-roadmap.md](../platform-middleware-roadmap.md)
 
 ## 背景与事实
@@ -33,12 +33,14 @@
 4. **告警/审批等事件的统一投递总线**：把 Webhook 退避投递前移为 Kafka 消费
    （改动面大，不推荐先行）。
 
-## 决策点（草案建议，全部待 owner 拍板）
+## 决策点（2026-09-05 Accepted 后裁决）
 
-- **范围**：只对场景 1（导出流）或场景 3（同步事件）之一开 Kafka 最小闭环，
-  其余保持现状；不做「替换 usage 写路径」。
-- **拓扑**：单 broker 起步（KRaft），topic 按事件族划分；序列化 JSON（与现有
-  payload 一致）或 Avro 待定；消费方鉴权沿用控制面凭据体系。
+- **范围**（已裁决）：ADR-0014 内容留痕事件流为 Kafka 首个场景（原候选场景 1 的
+  合规变体），最小闭环=网关旁路 producer + 平台消费端；其余候选（usage 导出流、
+  统一投递总线）维持不开，不做「替换 usage 写路径」。
+- **拓扑**（已裁决）：单 broker（KRaft）起步，topic `content-retention` 按
+  user hash 分区（保序）；序列化=JSON 信封（版本化 schema）；消费组归平台侧；
+  消费方鉴权沿用控制面凭据体系（外部系统 API Key/JWT，ADR-0010/0011）。
 - **queue-spi 边界**：新增 `KafkaUsageEventPublisher` 只做**扇出**，`PostgresUsageEventWriter`
   保持主写路径；失败降级不阻塞请求（对齐 F35 语义）。
 - **F32 同步本体**（独立于 Kafka）：建议先在 ADR-0011 的 JWT `sub` 映射上加
