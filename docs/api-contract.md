@@ -891,6 +891,10 @@ MCP 代理调用（F01 入口 `/mcpservers/{serviceName}/mcp`）的**纯元数�
 | `breakerProbeCount` / `breakerProbeSuccess` | int / int | 半开探测 |
 | `breakerSkipRetry` | bool | OPEN 期间跳过重试（默认 true） |
 
+### 5.26 合规留痕开关 `GET/PUT /api/v1/admin/retention-config`（ADR-0014 v3 Accepted，V31）
+
+内容留痕通道的**租户级总开关**：默认**全关**（无行=任何请求内容不被采集；CLAUDE.md「不保存正文」红线仅在此行 enabled 时按 ADR-0014 §1 例外放行）。GET 返回生效配置（无行时=disabled 默认）；PUT 体 `{"enabled": bool}` 切换并审计 `RETENTION_CONFIG_UPDATE`、经路由快照即时下发网关（运行中生效，无需重启）。v1 固定 `contentScope=USER_TEXT_ONLY`（P1：仅用户消息文本起步，模型回复/工具正文不在范围）与 `keyVersion=v1`（P5：部署密钥集；KMS/轮换随 P5 落地扩展）。启用本身只开通道——网关侧采集/密文信封/Kafka 投递为后续批次（见 ADR-0014 §6）。SYSTEM_ADMIN-only（deny-by-default）；body 非法 → 400。
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

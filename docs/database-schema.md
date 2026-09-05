@@ -343,6 +343,11 @@ MCP Tools 管理：`tool_name`（AI Agent 调用唯一标识，snake_case）、`
 ### `mcp_resilience_policy` (V30，F12/F13 韧性配置)
 
 每 MCP 服务一行（`mcp_service_id` PK，FK mcp_services ON DELETE CASCADE）：重试门禁与熔断配置，**默认全关**（无行=行为不变）。F12 列：`retry_enabled`、`retry_max`（1–5）、`retry_conditions`（CSV `SERVER_5XX|CONNECTION_FAILURE|TIMEOUT`）、`retry_idempotency_confirmed`（POST/PUT/PATCH 工具调用重试需显式确认）。F13 列：`breaker_enabled`、`breaker_window_seconds`（1–60）、`breaker_min_requests`（1–100）、`breaker_error_enabled`/`breaker_error_ratio`（1–100）/`breaker_error_status_codes`（CSV 400–599，≤32，默认 500,502,503,504）、`breaker_slow_enabled`/`breaker_slow_call_ms`（100–60000）/`breaker_slow_ratio`、`breaker_open_seconds`（5–600）、`breaker_probe_count`（1–10）、`breaker_probe_success`（1–10 且 ≤probe_count）、`breaker_skip_retry`（默认 true）。`version`（每次 upsert +1）、`created_by`/`updated_by`、时间戳。慢阈值与服务 `check_timeout_seconds` 的跨字段校验在管理 API 层（`RESILIENCE_SLOW_EXCEEDS_TIMEOUT`）。数据面经路由快照读取本表（loader LEFT JOIN，无行→null=全关）。
+
+### `retention_config` / `user_identity_link` (V31，ADR-0014 v3 Accepted)
+
+- `retention_config`：每租户一行（PK tenant_id FK tenants），`enabled`（默认 false）、`content_scope`（CHECK `USER_TEXT_ONLY`）、`key_version`（默认 'v1'，P5 信封密钥版本）、`version`（每次 upsert+1）、`updated_by`、`updated_at`。网关经路由快照读取（loader 全表入 `retentionByTenant`），控制面 PUT 后即时生效。
+- `user_identity_link`：OAuth 平台映射骨架（R4/P7，等平台 claims 后接线）：`internal_user_id`（FK users）↔ `platform_user_id` + `idp`，唯一 `(tenant_id, idp, platform_user_id)`，索引按 internal_user_id。数据面暂不读取。
 ## 7. 告警、导出和审计
 
 ### `webhook_endpoints`

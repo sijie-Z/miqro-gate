@@ -4,6 +4,9 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
+### 2026-09-06
+- **ADR-0012/0014 Accepted + 留痕 R1 配置面（V31）**：Kafka 引入与内容留痕管道获所有者批准（v3 默认值，P1–P8 已裁决）。V31 新增 `retention_config`（租户级默认关开关，快照下发即时生效）与 `user_identity_link`（平台 OAuth 映射骨架）；管理 API `GET/PUT /api/v1/admin/retention-config`（审计 + 即时刷新）。网关密文采集/信封、Kafka producer、消费端参考实现为后续批次。
+
 ### 2026-09-05
 - **F15 MCP 元数据访问日志（V29）**：MCP 代理（F01）每次身份可解析的调用落一条纯元数据审计行（`mcp_access_log`：租户/服务/消费者/方法/工具/终态/HTTP 状态；网关异步有界队列批量写入、`(tenant, gateway_request_id)` 幂等、饱和 drop+计数）；管理端查询 `GET /api/v1/admin/mcp-access-logs`（service/consumer/窗口 ≤31d/limit≤1000 过滤，SYSTEM_ADMIN-only）。工具参数与响应正文永不入表。
 - **F12/F13 MCP 韧性（V30）**：MCP 代理出口新增**重试门禁与熔断**（均默认关闭；路由快照承载配置，改后即时生效）。重试=首字节前、条件可选（5xx/连接失败/超时）、1–5 次、POST/PUT/PATCH 工具需显式幂等确认；熔断=三态状态机（滑动窗口+最小请求数+错误比例/慢调用双触发+半开探测恢复），按工具桶隔离，OPEN 期间 503 `circuit_open` 快速失败。管理 API `GET/PUT /api/v1/admin/mcp-services/{id}/resilience`；F15 日志新增 `CIRCUIT_OPEN` 终态。腾讯 doc 134831/134859。

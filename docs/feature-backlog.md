@@ -103,7 +103,7 @@
 | F56 | spec §9 人工视觉审查 | progress G5.5 | TBD | 需人工执行 |
 | F57 | 版本号与 tag（0.1.0-SNAPSHOT） | progress G6.5 | BLOCKED | 待所有者授权 |
 | F58 | release-checklist 未勾门禁复核（§1/§4/§6 相关项随 F19/F20 落地） | release-checklist | DEFERRED | 逐项由对应功能闭合 |
-| F59 | 请求内容合规留痕管道（加密冷存/按用户追溯/OAuth uid 映射骨架） | leader×平台沟通；ADR-0014 | 部分（范围/存储/密钥待 P1-P8 拍板） | BLOCKED | ADR-0014 Accepted | 见 ADR-0014：网关旁路密文信封→Kafka→消费端持久化（文件/S3/DB 候选）；触碰「不存正文」红线需显式放行 |
+| F59 | 请求内容合规留痕管道（加密冷存/按用户追溯/OAuth uid 映射骨架） | leader×平台沟通；ADR-0014 | 清晰（2026-09-05 Accepted，P1-P8 v3 默认裁决） | **IN_PROGRESS（2026-09-06 R1 配置面完成：V31 retention_config+user_identity_link+管理开关 API；R2 网关密文采集/信封 → R3 Kafka producer → R4 消费端参考实现待续）** | 无（红线已获所有者显式放行，见 ADR-0014 §1） | 见 ADR-0014：网关旁路密文信封→Kafka→消费端持久化（文件/S3/DB 候选）；「不存正文」例外通道=默认关 |
 
 ## 文档一致性缺口（盘点发现，登记待修）
 

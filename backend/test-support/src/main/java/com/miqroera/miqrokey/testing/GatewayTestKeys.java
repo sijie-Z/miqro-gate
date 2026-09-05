@@ -186,7 +186,8 @@ public final class GatewayTestKeys {
             providerIdsMap.putIfAbsent(key.productId(), key.providerId());
         }
         return new RouteSnapshot(1, Instant.EPOCH, keyMap, bindingMap, credentialMap, modelsMap, grantModelsMap,
-                upstreamModelsMap, productCodesMap, providerIdsMap, mcpConsumers(), mcpServices(baseUrl, policies));
+                upstreamModelsMap, productCodesMap, providerIdsMap, mcpConsumers(), mcpServices(baseUrl, policies),
+                Map.of());
     }
 
     // ------------------------------------------------------------------

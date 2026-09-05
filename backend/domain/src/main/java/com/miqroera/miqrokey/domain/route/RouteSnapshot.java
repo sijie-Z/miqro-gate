@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.domain.route;
 
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
+import com.miqroera.miqrokey.domain.model.RetentionConfig;
 
 import java.time.Instant;
 import java.util.Collections;
@@ -48,7 +49,7 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         Map<UUID, Set<String>> modelsByKeyId, Map<UUID, Set<String>> grantModelsByGrantId,
         Map<UUID, Set<String>> upstreamModelsByProductId, Map<UUID, String> productCodesByProductId,
         Map<UUID, UUID> providerIdsByProductId, Map<String, ConsumerRecord> consumersByDigest,
-        Map<String, McpServerRecord> mcpServicesByName) {
+        Map<String, McpServerRecord> mcpServicesByName, Map<UUID, RetentionConfig> retentionByTenant) {
 
     public RouteSnapshot {
         keys = Map.copyOf(keys);
@@ -61,6 +62,7 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         providerIdsByProductId = Map.copyOf(providerIdsByProductId);
         consumersByDigest = Map.copyOf(consumersByDigest);
         mcpServicesByName = Map.copyOf(mcpServicesByName);
+        retentionByTenant = Map.copyOf(retentionByTenant);
     }
 
     private static Map<UUID, Set<String>> immutableSets(Map<UUID, Set<String>> map) {
@@ -70,7 +72,7 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
 
     public static RouteSnapshot empty(long version, Instant loadedAt) {
         return new RouteSnapshot(version, loadedAt, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
-                Map.of(), Map.of(), Map.of(), Map.of());
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
     }
 
     public KeyRecord key(String publicKeyId) {
@@ -222,13 +224,15 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
                 && modelsByKeyId.equals(that.modelsByKeyId) && grantModelsByGrantId.equals(that.grantModelsByGrantId)
                 && upstreamModelsByProductId.equals(that.upstreamModelsByProductId)
                 && productCodesByProductId.equals(that.productCodesByProductId)
-                && providerIdsByProductId.equals(that.providerIdsByProductId);
+                && providerIdsByProductId.equals(that.providerIdsByProductId)
+                && retentionByTenant.equals(that.retentionByTenant);
     }
 
     @Override
     public int hashCode() {
         return java.util.Objects.hash(version, loadedAt, keys, bindings, credentials, modelsByKeyId,
-                grantModelsByGrantId, upstreamModelsByProductId, productCodesByProductId, providerIdsByProductId);
+                grantModelsByGrantId, upstreamModelsByProductId, productCodesByProductId, providerIdsByProductId,
+                retentionByTenant);
     }
 
     /** Finds an ACTIVE consumer by its API-key digest (small set, linear scan). */
@@ -243,6 +247,11 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
 
     public McpServerRecord mcpService(String name) {
         return mcpServicesByName.get(name);
+    }
+
+    /** Compliance-retention switch of the tenant; null/absent = fully off. */
+    public RetentionConfig retention(UUID tenantId) {
+        return retentionByTenant.get(tenantId);
     }
 
     /**

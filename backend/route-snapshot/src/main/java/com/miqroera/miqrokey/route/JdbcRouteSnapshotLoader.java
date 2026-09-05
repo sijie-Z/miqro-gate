@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
+import com.miqroera.miqrokey.domain.model.RetentionConfig;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,8 +77,23 @@ public final class JdbcRouteSnapshotLoader {
         ProductIds productIds = loadProductIds();
         Map<String, RouteSnapshot.ConsumerRecord> consumers = loadConsumers();
         Map<String, RouteSnapshot.McpServerRecord> mcpServices = loadMcpServices();
+        Map<UUID, RetentionConfig> retention = loadRetention();
         return new RouteSnapshot(version, loadedAt, keys, bindings, credentials, models, grantModels, upstreamModels,
-                productIds.productCodes(), productIds.providerIds(), consumers, mcpServices);
+                productIds.productCodes(), productIds.providerIds(), consumers, mcpServices, retention);
+    }
+
+    /** Configured retention switches per tenant (V31, ADR-0014). */
+    private Map<UUID, RetentionConfig> loadRetention() {
+        Map<UUID, RetentionConfig> byTenant = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT tenant_id, enabled, content_scope, key_version
+                FROM retention_config
+                """, rs -> {
+            RetentionConfig config = new RetentionConfig(rs.getBoolean("enabled"), rs.getString("content_scope"),
+                    rs.getString("key_version"), 0);
+            byTenant.putIfAbsent((UUID) rs.getObject("tenant_id"), config);
+        });
+        return byTenant;
     }
 
     private Map<String, RouteSnapshot.KeyRecord> loadKeys() {
