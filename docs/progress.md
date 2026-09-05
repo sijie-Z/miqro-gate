@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `会话执行 2026-09-05（Q1-Q3/Q6 自主轮）` — `IN_PROGRESS`（执行与逐批记录见 docs/progress.md「会话交接点 2026-09-05」段；队列总纲仍见 docs/session-handoff-2026-09-05.md）
-- Goal status: `IN_PROGRESS`（2026-09-05；develop @ d57d9a7：#159 ADR-0013 Accepted+postgres digest 刷新+trivyignore 残余、#160 Q1 MCP 契约测试、#161 Q2 F15 元数据日志 已并入；Q3 F12/F13 韧性分支 goal/mcp-resilience-f12-f13 CI 进行中（本地全量 verify 绿）；Q6 codegen stage2 批1/批2 分支 goal/codegen-stage2-b1 CI 进行中；Q4 冒烟=测试通道（Q1 契约测试即演示路径，真机 https 冒烟排后）；Q5 UI 无页面清单保持克制不 churn；Q7 Kafka/F32/发布仍等拍板）
+- Current goal: `会话执行 2026-09-05（自主长跑轮：Q1-Q3/Q6 收尾/UI 管理面）` — `IN_PROGRESS`（执行与逐批记录见本文件两个「会话交接点 2026-09-05」段；队列总纲仍见 docs/session-handoff-2026-09-05.md）
+- Goal status: `IN_PROGRESS`（2026-09-05；develop @ 2b37af3。本日全量并入：#159 infra/ADR-0013、#160 Q1 契约测试、#161 Q2 F15 日志、#162/#165 codegen stage2（手写类型→生成类型收尾，保留清单与理由已记录）、#163 Q3 F12/F13 韧性、#164 文档 checkpoint、#166 OpenAPI 基线刷新（补齐 #161/#163 契约债）、#167 裁决文档轮（F11/F14 DEFERRED、F10 DONE）、#168 UI 管理面（MCP 访问日志页 + 韧性配置抽屉）。剩：Q4 真机 https 冒烟（测试通道验收路径已交付，真机排后）、Q5 UI 等你真机反馈、Q7 Kafka/F32/发布等拍板、Q6 stage2 残余 spec 缺口项待后端补契约（RoiReportView/route-rules/auth-envelope））
 - Last updated: `2026-09-05 CST`
 ## 会话交接点 2026-09-03 — UI 专项 U0 待验收（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；U0 验收通过前暂停功能 backlog）
 
