@@ -35,3 +35,25 @@ CVE-2026-56858
 CVE-2026-56859
 CVE-2026-56860
 CVE-2026-56862
+#
+# 2026-09-05 (digest ef257d85... refreshed same-day): postgres:17.6-alpine
+# base = alpine 3.22.2, which lags the alpine 3.22 security rebuilds
+# (alpine-release 3.22.5 / openssl 3.5.7-r0 / musl 1.2.5-r12 / libxml2
+# 2.13.9-r1 already in the repo). All rows below are package-level fixes the
+# official image build has not baked in yet; the TLS-handshake/QUIC rows live
+# on the openssl path postgres exposes only to trusted app servers on a
+# private single-tenant LAN (localhost/docker-network binding), and the
+# util-linux/zlib rows concern host-side mount(8)/untgz tooling the container
+# never runs. DROP these entries at the next official digest refresh once the
+# base catches up.
+CVE-2025-15467
+CVE-2025-69421
+CVE-2026-28387
+CVE-2026-28388
+CVE-2026-28389
+CVE-2026-28390
+CVE-2026-31789
+CVE-2026-45447
+CVE-2026-6732
+CVE-2026-40200
+CVE-2026-22184
