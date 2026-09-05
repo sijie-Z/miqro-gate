@@ -133,16 +133,6 @@ export interface LoginResponse {
   sessionExpiresAt: string;
 }
 
-export interface CreateVirtualKeyRequest {
-  name: string;
-  projectId: string;
-  providerProductId: string;
-  credentialGrantId: string;
-  purpose: VirtualKeyPurpose;
-  allowedModels?: string[];
-  cachePolicy?: 'DISABLED' | 'ENABLED';
-}
-
 export interface CreateVirtualKeyResponse {
   id: string;
   /** Plaintext Virtual Key — present exactly once, in this response only. */

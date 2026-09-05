@@ -28,7 +28,6 @@ import type {
   PriceSnapshotView,
   CredentialView,
   ValidateCredentialResponse,
-  CreateVirtualKeyRequest,
   CreateVirtualKeyResponse,
   Grant,
   LoginResponse,
@@ -65,6 +64,9 @@ type ConfigureQuotaDefaultTemplateRequest =
 type SetMcpAccessGrantsRequest = components['schemas']['SetMcpAccessGrantsRequest'];
 type SubmitModelApprovalRequest = components['schemas']['SubmitModelApprovalRequest'];
 type UpsertQuotaRuleRequest = components['schemas']['UpsertQuotaRuleRequest'];
+// The spec leaves name optional here (server derives/validates); the schema is
+// the authority after this migration.
+type CreateVirtualKeyRequest = components['schemas']['CreateVirtualKeyRequest'];
 
 // ---- auth ----
 
