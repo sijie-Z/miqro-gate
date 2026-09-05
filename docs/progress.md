@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `无人值守续作（09-04 夜-09-05）` — `IN_PROGRESS`：功能 4 stage 1 完成并并入（#150 ceb0959：openapi-typescript 生成 + CI 漂移门 + JSON 源一致性守卫 17 DTO）；ADR-0012/0013 草案入库待 owner 拍板；UI Vben 轮抽样 plans 7.5/credentials 8.0/admin-usage 6.5（多数评审项为已实现误判，未追分）
-- Goal status: `IN_PROGRESS`（2026-09-05；待 owner 拍板项=ADR-0012（Kafka 场景/拓扑）、ADR-0013（MCP 鉴权 A/B/C 等）；可自主续作=UI 真机后定向、功能 4 stage 2、F18 小项评估）
+- Current goal: `会话交接 2026-09-05` — `IN_PROGRESS`（详细交接见 docs/session-handoff-2026-09-05.md；Q1-Q7 全量队列与验收清单在该文件）
+- Goal status: `IN_PROGRESS`（2026-09-05；develop @ b8b354d（#154 F01 MCP 代理 v1 已并入，腾讯 doc 135906 形态）；ADR-0013 按用户指令 Accepted（照腾讯/阿里文档实现），状态文本更新待下会话随 handoff 分支合并；剩余：Q1 网关 MCP 契约测试 → Q2 F15 日志 → Q3 F12/F13 → Q4 冒烟 → Q5 UI（等真机反馈）→ Q6 codegen stage2（等知情）→ Q7 Kafka/F32/发布（等拍板））
 - Last updated: `2026-09-05 CST`
 ## 会话交接点 2026-09-03 — UI 专项 U0 待验收（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；U0 验收通过前暂停功能 backlog）
 
