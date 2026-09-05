@@ -349,31 +349,6 @@ export interface UsageSummary {
   totals: UsageGroup;
 }
 
-export interface UsageRecord {
-  occurredAt: string;
-  modelId: string;
-  cacheLevel: CacheLevel;
-  inputTokens?: number;
-  outputTokens?: number;
-  cacheReadInputTokens?: number;
-  cacheCreationInputTokens?: number;
-  totalTokens?: number;
-  latencyMs?: number;
-  upstreamStatusCode?: number;
-  providerRequestId?: string;
-  gatewayRequestId?: string;
-  isComplete: boolean;
-  usageMissing: boolean;
-  virtualKeyId: string;
-}
-
-export interface UsageRecordPage {
-  items: UsageRecord[];
-  page: number;
-  size: number;
-  total: number;
-}
-
 // ---- admin organization (G5.2) ----
 
 export type UserStatusValue = 'ACTIVE' | 'DISABLED' | 'LOCKED';

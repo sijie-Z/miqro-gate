@@ -1,8 +1,12 @@
-/**
- * /api/v1/auth and /api/v1/me endpoint clients (api-contract.md §3–§4).
- */
-
-import { del, downloadBlob, get, patch, post, put, uploadBytes } from './http';
+/** * /api/v1/auth and /api/v1/me endpoint clients (api-contract.md §3–§4). */ import {
+  del,
+  downloadBlob,
+  get,
+  patch,
+  post,
+  put,
+  uploadBytes,
+} from './http';
 import type {
   AgentView,
   ApiConsumerView,
@@ -47,7 +51,6 @@ import type {
   Team,
   SubscriptionView,
   UsageGroupBy,
-  UsageRecordPage,
   UsageSummary,
   UserCreatedResponse,
   UserResponse,
@@ -55,6 +58,7 @@ import type {
   UserStatusValue,
   VirtualKeyView,
 } from '@/types/api';
+import type { UsageRecordPage } from '@/types/generated-api';
 import type { components } from '@/types/generated';
 
 // Stage-2 codegen migration (batch 1): request DTOs now alias the OpenAPI

@@ -17,10 +17,10 @@ import type {
   QuotaRuleView,
   UsageGroup,
   UsageGroupBy,
-  UsageRecord,
   UsageRecordPage,
   UsageSummary,
 } from '@/types/api';
+import type { UsageRecord } from '@/types/generated-api';
 
 const groupBy = ref<UsageGroupBy>('project');
 const summary = ref<UsageSummary | null>(null);
