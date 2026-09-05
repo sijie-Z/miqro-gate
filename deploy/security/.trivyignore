@@ -57,3 +57,16 @@ CVE-2026-45447
 CVE-2026-6732
 CVE-2026-40200
 CVE-2026-22184
+#
+# 2026-09-06 util-linux/libuuid rows (alpine 3.22 backports now published as
+# 2.41-r10+; the official postgres:17.6-alpine image is not rebuilt yet -
+# same base-lag situation as the rows above). mount(8)/nsenter/cgroup and
+# X-mount helper code paths are host-side tools the container never runs;
+# postgres does not mount filesystems. DROP with the next official digest
+# refresh.
+CVE-2026-53612
+CVE-2026-53613
+CVE-2026-53614
+CVE-2026-76642
+CVE-2026-78408
+CVE-2026-78410
