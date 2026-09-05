@@ -19,7 +19,6 @@ import type {
   McpRouteRule,
   McpServiceView,
   McpToolView,
-  SetMcpAccessGrantsRequest,
   UpsertMcpRouteRuleRequest,
   SkillView,
   UsageDeletionRequest,
@@ -29,7 +28,6 @@ import type {
   PriceSnapshotView,
   CredentialView,
   ValidateCredentialResponse,
-  CreateVirtualKeyRequest,
   CreateVirtualKeyResponse,
   Grant,
   LoginResponse,
@@ -40,10 +38,7 @@ import type {
   ModelApprovalView,
   QuotaRuleView,
   QuotaDefaultTemplateView,
-  ConfigureQuotaDefaultTemplateRequest,
   RoiReportView,
-  SubmitModelApprovalRequest,
-  UpsertQuotaRuleRequest,
   UserProjectMembership,
   Provider,
   ProviderProductView,
@@ -60,6 +55,18 @@ import type {
   UserStatusValue,
   VirtualKeyView,
 } from '@/types/api';
+import type { components } from '@/types/generated';
+
+// Stage-2 codegen migration (batch 1): request DTOs now alias the OpenAPI
+// schema types instead of handwritten duplicates.
+type ConfigureQuotaDefaultTemplateRequest =
+  components['schemas']['ConfigureQuotaDefaultTemplateRequest'];
+type SetMcpAccessGrantsRequest = components['schemas']['SetMcpAccessGrantsRequest'];
+type SubmitModelApprovalRequest = components['schemas']['SubmitModelApprovalRequest'];
+type UpsertQuotaRuleRequest = components['schemas']['UpsertQuotaRuleRequest'];
+// The spec leaves name optional here (server derives/validates); the schema is
+// the authority after this migration.
+type CreateVirtualKeyRequest = components['schemas']['CreateVirtualKeyRequest'];
 
 // ---- auth ----
 
