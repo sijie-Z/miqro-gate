@@ -10,8 +10,8 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type {AdminUser, Project, QuotaDefaultTemplateView, QuotaLevel, QuotaMetric, QuotaPeriod} from '@/types/api';
-import type { QuotaRuleView } from '@/types/generated-api';
+import type {AdminUser, QuotaLevel, QuotaMetric, QuotaPeriod} from '@/types/api';
+import type { Project, QuotaDefaultTemplateView, QuotaRuleView } from '@/types/generated-api';
 
 const rules = ref<QuotaRuleView[]>([]);
 const users = ref<AdminUser[]>([]);

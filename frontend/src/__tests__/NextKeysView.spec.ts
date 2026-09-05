@@ -5,8 +5,8 @@ import { defineComponent } from 'vue';
 import NextKeysView from '@/views/next/NextKeysView.vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import type {MeGrantsResponse} from '@/types/api';
-import type { VirtualKeyView, CreateVirtualKeyResponse } from '@/types/generated-api';
+import type {} from '@/types/api';
+import type { CreateVirtualKeyResponse, MeGrantsResponse, Project, VirtualKeyView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listVirtualKeys: vi.fn(),

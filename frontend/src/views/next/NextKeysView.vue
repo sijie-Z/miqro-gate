@@ -28,8 +28,8 @@ import {
   toast,
 } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type {MeGrantsResponse, VirtualKeyPurpose} from '@/types/api';
-import type { VirtualKeyView, CreateVirtualKeyResponse } from '@/types/generated-api';
+import type {VirtualKeyPurpose} from '@/types/api';
+import type { CreateVirtualKeyResponse, MeGrantsResponse, VirtualKeyView } from '@/types/generated-api';
 
 const keys = ref<VirtualKeyView[]>([]);
 const grants = ref<MeGrantsResponse | null>(null);

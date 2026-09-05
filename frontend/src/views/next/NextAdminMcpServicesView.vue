@@ -21,15 +21,8 @@ import {
   UiTable,
   toast,
 } from '@/ui';
-import type {
-  ApiConsumerView,
-  McpAclMode,
-  McpAccessView,
-  McpRouteRule,
-  McpServiceView,
-  McpToolView,
-  UpsertMcpRouteRuleRequest,
-} from '@/types/api';
+import type {McpAclMode, McpRouteRule, McpServiceView, McpToolView, UpsertMcpRouteRuleRequest} from '@/types/api';
+import type { ApiConsumerView, McpAccessView } from '@/types/generated-api';
 
 const services = ref<McpServiceView[]>([]);
 const loading = ref(true);

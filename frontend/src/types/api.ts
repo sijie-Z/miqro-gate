@@ -93,12 +93,6 @@ export interface LoginResponse {
   sessionExpiresAt: string;
 }
 
-export interface MeGrantsResponse {
-  projects: Array<{ id: string; code: string; name: string; projectTag: string }>;
-  grants: Array<{ id: string; projectId: string; providerProductId: string; models: string[] }>;
-  purposes: VirtualKeyPurpose[];
-}
-
 export type ModelApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 export type QuotaScopeType = 'USER' | 'PROJECT';
@@ -108,15 +102,6 @@ export type QuotaRuleStatus = 'ACTIVE' | 'DISABLED';
 export type QuotaLevel = 'NORMAL' | 'WARNING' | 'EXCEEDED';
 
 /** Global default quota strategy (Tencent doc 135489) — nulls before first config. */
-export interface QuotaDefaultTemplateView {
-  enabled: boolean;
-  metric: QuotaMetric | null;
-  period: QuotaPeriod | null;
-  limitValue: number | null;
-  version: number;
-  updatedAt: string | null;
-}
-
 export interface RoiReportView {
   from: string;
   to: string;
@@ -141,20 +126,6 @@ export interface RoiReportView {
 }
 
 export type McpAclMode = 'NONE' | 'ALLOW' | 'DENY';
-
-export interface McpAccessView {
-  serviceId: string;
-  serviceName: string;
-  mode: McpAclMode;
-  serverConsumers: Array<{ id: string; name: string }>;
-  tools: Array<{
-    toolId: string;
-    toolName: string;
-    /** Override mode; null = inherit the server rule. */
-    mode: McpAclMode | null;
-    consumers: Array<{ id: string; name: string }>;
-  }>;
-}
 
 // ---- MCP route rules (F11, Tencent doc 135482) ----
 
@@ -247,23 +218,6 @@ export interface UserCreatedResponse {
   temporaryPassword: string;
 }
 
-export interface Team {
-  id: string;
-  name: string;
-  description?: string;
-  status: TeamStatusValue;
-  createdAt: string;
-}
-
-export interface Project {
-  id: string;
-  code: string;
-  name: string;
-  status: ProjectStatusValue;
-  projectTag?: string;
-  createdAt: string;
-}
-
 export interface MemberView {
   userId: string;
   username: string;
@@ -288,14 +242,6 @@ export interface Grant {
   createdAt: string;
 }
 
-export interface ApiConsumerView {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  status: string;
-  createdAt: string;
-}
-
 export interface CreateApiConsumerResponse {
   consumer: ApiConsumerView;
   apiKey: string;
@@ -315,29 +261,7 @@ export interface ProviderProductView {
   balanceAuthority: string;
 }
 
-export interface Provider {
-  id: string;
-  slug: string;
-  displayName: string;
-  status: string;
-}
-
 // ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----
-
-export interface ExportTask {
-  id: string;
-  format: 'CSV' | 'JSONL';
-  periodFrom: string;
-  periodTo: string;
-  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'EXPIRED';
-  sha256?: string;
-  rowCount?: number;
-  byteCount?: number;
-  errorMessage?: string;
-  createdAt: string;
-  finishedAt?: string;
-  expiresAt?: string;
-}
 
 export interface UsageDeletionRequest {
   id: string;
@@ -348,15 +272,6 @@ export interface UsageDeletionRequest {
   deletedCount?: number;
   executedAt?: string;
   expiresAt: string;
-  createdAt: string;
-}
-
-export interface WebhookEndpointView {
-  id: string;
-  name: string;
-  url: string;
-  enabled: boolean;
-  timeoutMs: number;
   createdAt: string;
 }
 
@@ -381,16 +296,4 @@ export type AlertRuleType =
   | 'MODEL_APPROVAL_SUBMITTED'
   | 'MODEL_APPROVAL_APPROVED'
   | 'MODEL_APPROVAL_REJECTED';
-
-export interface AlertRule {
-  id: string;
-  name: string;
-  type: AlertRuleType;
-  scopeJson?: string;
-  threshold: number;
-  dedupeMinutes: number;
-  enabled: boolean;
-  webhookEndpointId?: string;
-  createdAt: string;
-}
 
