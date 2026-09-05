@@ -11,7 +11,7 @@ import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
-import type { Project, SkillView, Team } from '@/types/api';
+import type { Project, SkillView, Team } from '@/types/generated-api';
 
 const skills = ref<SkillView[]>([]);
 const projects = ref<Project[]>([]);

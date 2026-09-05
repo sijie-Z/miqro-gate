@@ -4,7 +4,8 @@ import { createPinia, setActivePinia } from 'pinia';
 import NextTeamsView from '@/views/next/NextTeamsView.vue';
 import * as api from '@/api';
 import { toastState } from '@/ui/toast';
-import type { MemberView, Team } from '@/types/api';
+import type {MemberView} from '@/types/api';
+import type { Team } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listTeams: vi.fn(),

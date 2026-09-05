@@ -37,7 +37,12 @@ describe('codegen consistency (openapi schema vs handwritten core types)', () =>
       return schemas.has(n) ? [n, n] : [n, n.slice(0, -4)];
     });
 
-  expect(PAIRS.length).toBeGreaterThan(20);
+  // Stage-2 codegen migration has replaced every migratable handwritten DTO
+  // with its schema alias: when stage 1 landed the derived set was 40 pairs,
+  // today it is the intentionally-unmigrated remainder (ProviderProductView
+  // via EXCEPTIONS and any schema-named interface still handwritten). The
+  // per-pair field-subset assertions below stay the real guard.
+  expect(PAIRS.length).toBeGreaterThanOrEqual(1);
 
   function schemaMembers(schemaName: string): Set<string> {
     const schema = spec.components?.schemas?.[schemaName];

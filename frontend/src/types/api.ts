@@ -24,95 +24,6 @@ export type UsageGroupBy = 'project' | 'virtual_key' | 'cache_level' | 'day';
 
 export type BudgetLevel = 'NORMAL' | 'WARNING' | 'EXCEEDED';
 
-export interface SkillView {
-  id: string;
-  name: string;
-  description: string;
-  version: string;
-  author?: string;
-  license?: string;
-  tags: string[];
-  contentSha256: string;
-  contentBytes: number;
-  status: string;
-  createdAt: string;
-}
-
-export interface AgentView {
-  id: string;
-  name: string;
-  description?: string;
-  credentialId: string;
-  credentialName: string;
-  providerProductId: string;
-  providerProductName: string;
-  status: string;
-  createdAt: string;
-}
-
-export interface InternalServiceView {
-  id: string;
-  name: string;
-  kind: string;
-  description?: string;
-  baseUrl: string;
-  status: string;
-  createdAt: string;
-}
-
-export interface ConfigEntryView {
-  id: string;
-  groupName: string;
-  key: string;
-  value: string;
-  description?: string;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface McpServiceView {
-  id: string;
-  name: string;
-  description?: string;
-  endpoint: string;
-  transport: string;
-  status: string;
-  healthStatus: string;
-  healthCheckedAt: string | null;
-  checkIntervalSeconds: number;
-  checkTimeoutSeconds: number;
-  failThreshold: number;
-  recoverThreshold: number;
-  checkPath: string;
-  createdAt: string;
-}
-
-export interface McpToolView {
-  id: string;
-  mcpServiceId: string;
-  toolName: string;
-  description?: string;
-  method: string;
-  path: string;
-  status: string;
-  createdAt: string;
-}
-
-export interface BudgetView {
-  projectId: string;
-  projectCode: string;
-  projectName: string;
-  month: string;
-  amount: string;
-  currency: string;
-  alertThresholdPct: string;
-  status: string;
-  spent: string;
-  spentPct: string;
-  level: BudgetLevel;
-}
-
 export interface UserResponse {
   id: string;
   username: string;
@@ -133,67 +44,7 @@ export interface LoginResponse {
   sessionExpiresAt: string;
 }
 
-export interface CreateVirtualKeyResponse {
-  id: string;
-  /** Plaintext Virtual Key — present exactly once, in this response only. */
-  secret: string;
-  baseUrl: string;
-  display: string;
-  shownOnce: boolean;
-  createdAt: string;
-  version: number;
-}
-
-export interface VirtualKeyView {
-  id: string;
-  name: string;
-  purpose: VirtualKeyPurpose;
-  status: VirtualKeyStatus;
-  displayPrefix: string;
-  lastFour: string;
-  /** Masked display string, e.g. mqk_live_…8f2a — never the plaintext. */
-  display: string;
-  modelIds: string[];
-  projectId: string;
-  projectTag: string;
-  cachePolicy: string;
-  baseUrl: string;
-  createdAt: string;
-  lastUsedAt?: string;
-  revokedAt?: string;
-}
-
-export interface MeGrantsResponse {
-  projects: Array<{ id: string; code: string; name: string; projectTag: string }>;
-  grants: Array<{ id: string; projectId: string; providerProductId: string; models: string[] }>;
-  purposes: VirtualKeyPurpose[];
-}
-
 export type ModelApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
-
-export interface ModelApprovalView {
-  id: string;
-  virtualKeyId: string;
-  keyName?: string;
-  /** Masked key display (prefix…last4) — never the plaintext. */
-  keyDisplay?: string;
-  projectTag?: string;
-  modelId: string;
-  reason?: string;
-  status: ModelApprovalStatus;
-  requesterId: string;
-  requesterName: string;
-  reviewNote?: string;
-  reviewedByName?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ModelApprovalPage {
-  items: ModelApprovalView[];
-  /** Opaque keyset cursor for the next page; null/undefined = no more items. */
-  nextCursor?: string;
-}
 
 export type QuotaScopeType = 'USER' | 'PROJECT';
 export type QuotaMetric = 'TOKENS' | 'REQUESTS';
@@ -201,41 +52,7 @@ export type QuotaPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY';
 export type QuotaRuleStatus = 'ACTIVE' | 'DISABLED';
 export type QuotaLevel = 'NORMAL' | 'WARNING' | 'EXCEEDED';
 
-export interface QuotaRuleView {
-  id: string;
-  scopeType: QuotaScopeType;
-  scopeId: string;
-  /** Display name of the user / project the rule applies to. */
-  scopeName?: string;
-  /** Username for USER scope, project code for PROJECT scope. */
-  scopeTag?: string;
-  metric: QuotaMetric;
-  period: QuotaPeriod;
-  limitValue: number;
-  warnPercent: number;
-  status: QuotaRuleStatus;
-  /** Current-period usage of the metric. */
-  used: number;
-  /** used / limit in percent. */
-  usedPct: number;
-  level: QuotaLevel;
-  windowFrom: string;
-  windowTo: string;
-  createdAt: string;
-  updatedAt: string;
-  version: number;
-}
-
 /** Global default quota strategy (Tencent doc 135489) — nulls before first config. */
-export interface QuotaDefaultTemplateView {
-  enabled: boolean;
-  metric: QuotaMetric | null;
-  period: QuotaPeriod | null;
-  limitValue: number | null;
-  version: number;
-  updatedAt: string | null;
-}
-
 export interface RoiReportView {
   from: string;
   to: string;
@@ -260,20 +77,6 @@ export interface RoiReportView {
 }
 
 export type McpAclMode = 'NONE' | 'ALLOW' | 'DENY';
-
-export interface McpAccessView {
-  serviceId: string;
-  serviceName: string;
-  mode: McpAclMode;
-  serverConsumers: Array<{ id: string; name: string }>;
-  tools: Array<{
-    toolId: string;
-    toolName: string;
-    /** Override mode; null = inherit the server rule. */
-    mode: McpAclMode | null;
-    consumers: Array<{ id: string; name: string }>;
-  }>;
-}
 
 // ---- MCP route rules (F11, Tencent doc 135482) ----
 
@@ -343,37 +146,6 @@ export interface UsageGroup {
   cost: UsageCost;
 }
 
-export interface UsageSummary {
-  groupBy: UsageGroupBy;
-  groups: UsageGroup[];
-  totals: UsageGroup;
-}
-
-export interface UsageRecord {
-  occurredAt: string;
-  modelId: string;
-  cacheLevel: CacheLevel;
-  inputTokens?: number;
-  outputTokens?: number;
-  cacheReadInputTokens?: number;
-  cacheCreationInputTokens?: number;
-  totalTokens?: number;
-  latencyMs?: number;
-  upstreamStatusCode?: number;
-  providerRequestId?: string;
-  gatewayRequestId?: string;
-  isComplete: boolean;
-  usageMissing: boolean;
-  virtualKeyId: string;
-}
-
-export interface UsageRecordPage {
-  items: UsageRecord[];
-  page: number;
-  size: number;
-  total: number;
-}
-
 // ---- admin organization (G5.2) ----
 
 export type UserStatusValue = 'ACTIVE' | 'DISABLED' | 'LOCKED';
@@ -395,23 +167,6 @@ export interface AdminUser {
 export interface UserCreatedResponse {
   user: AdminUser;
   temporaryPassword: string;
-}
-
-export interface Team {
-  id: string;
-  name: string;
-  description?: string;
-  status: TeamStatusValue;
-  createdAt: string;
-}
-
-export interface Project {
-  id: string;
-  code: string;
-  name: string;
-  status: ProjectStatusValue;
-  projectTag?: string;
-  createdAt: string;
 }
 
 export interface MemberView {
@@ -438,68 +193,10 @@ export interface Grant {
   createdAt: string;
 }
 
-export interface PriceSnapshotView {
-  id: string;
-  providerProductId: string;
-  modelId: string;
-  tokenType: string;
-  currency: string;
-  unitPrice: string;
-  effectiveFrom: string;
-  source: string;
-  createdBy: string;
-  createdAt: string;
-}
-
-export interface ApiConsumerView {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  status: string;
-  createdAt: string;
-}
-
 export interface CreateApiConsumerResponse {
   consumer: ApiConsumerView;
   apiKey: string;
   shownOnce: boolean;
-}
-
-export interface CredentialView {
-  id: string;
-  name: string;
-  subscriptionId: string;
-  status: string;
-  activeVersionId: string;
-  fingerprintPrefix: string;
-  lastValidatedAt: string | null;
-  lastValidationError: string | null;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CredentialVersionView {
-  id: string;
-  status: string;
-  encryptionKeyVersion: string;
-  fingerprintPrefix: string;
-  validFrom: string;
-  retiredAt: string | null;
-  createdAt: string;
-}
-
-export interface CredentialDetailView {
-  credential: CredentialView;
-  versions: CredentialVersionView[];
-}
-
-export interface ValidateCredentialResponse {
-  matchesActive: boolean;
-  message: string | null;
-  providerStatus: 'VALID' | 'REJECTED' | 'UNREACHABLE' | 'NOT_CHECKED';
-  providerMessage: string | null;
-  checkedAt: string | null;
 }
 
 export interface ProviderProductView {
@@ -515,56 +212,7 @@ export interface ProviderProductView {
   balanceAuthority: string;
 }
 
-export interface Provider {
-  id: string;
-  slug: string;
-  displayName: string;
-  status: string;
-}
-
-export interface SubscriptionView {
-  id: string;
-  providerProductId: string;
-  productName: string;
-  name: string;
-  billingMode: string;
-  planScope: string;
-  subscriptionPrice?: number;
-  currency?: string;
-  quotaTotal?: number;
-  quotaUnit?: string;
-  status: string;
-  createdAt: string;
-}
-
-export interface SeatView {
-  id: string;
-  subscriptionId: string;
-  externalSeatRef?: string;
-  assignedUserId?: string;
-  username?: string;
-  userDisplay?: string;
-  displayName?: string;
-  seatStatus: string;
-  createdAt: string;
-}
-
 // ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----
-
-export interface ExportTask {
-  id: string;
-  format: 'CSV' | 'JSONL';
-  periodFrom: string;
-  periodTo: string;
-  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'EXPIRED';
-  sha256?: string;
-  rowCount?: number;
-  byteCount?: number;
-  errorMessage?: string;
-  createdAt: string;
-  finishedAt?: string;
-  expiresAt?: string;
-}
 
 export interface UsageDeletionRequest {
   id: string;
@@ -575,15 +223,6 @@ export interface UsageDeletionRequest {
   deletedCount?: number;
   executedAt?: string;
   expiresAt: string;
-  createdAt: string;
-}
-
-export interface WebhookEndpointView {
-  id: string;
-  name: string;
-  url: string;
-  enabled: boolean;
-  timeoutMs: number;
   createdAt: string;
 }
 
@@ -609,25 +248,3 @@ export type AlertRuleType =
   | 'MODEL_APPROVAL_APPROVED'
   | 'MODEL_APPROVAL_REJECTED';
 
-export interface AlertRule {
-  id: string;
-  name: string;
-  type: AlertRuleType;
-  scopeJson?: string;
-  threshold: number;
-  dedupeMinutes: number;
-  enabled: boolean;
-  webhookEndpointId?: string;
-  createdAt: string;
-}
-
-export interface AuditEventView {
-  id: string;
-  actorId?: string;
-  action: string;
-  targetType?: string;
-  targetId?: string;
-  changeSummary?: string;
-  createdAt: string;
-  chainPosition: number;
-}

@@ -9,7 +9,7 @@ import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiStatusBadge, UiTable } from '@/ui';
-import type { ProviderProductView } from '@/types/api';
+import type {ProviderProductView} from '@/types/api';
 
 const products = ref<ProviderProductView[]>([]);
 const loading = ref(true);

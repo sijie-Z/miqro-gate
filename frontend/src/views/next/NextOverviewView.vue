@@ -10,7 +10,8 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
 import { UiButton, UiStatusBadge } from '@/ui';
-import type { SubscriptionView, UsageGroup, VirtualKeyView } from '@/types/api';
+import type {UsageGroup} from '@/types/api';
+import type { SubscriptionView, VirtualKeyView } from '@/types/generated-api';
 
 const auth = useAuthStore();
 

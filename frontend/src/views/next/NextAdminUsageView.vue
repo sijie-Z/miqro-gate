@@ -9,7 +9,8 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiInput, UiSelect, UiStatusBadge, UiTable } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type { UsageGroupBy, UsageRecordPage, UsageSummary } from '@/types/api';
+import type {UsageGroupBy} from '@/types/api';
+import type { UsageRecordPage, UsageSummary } from '@/types/generated-api';
 
 const groupBy = ref<UsageGroupBy>('project');
 const modelId = ref('');

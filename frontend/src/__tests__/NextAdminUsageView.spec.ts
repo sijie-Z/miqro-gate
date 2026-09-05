@@ -3,7 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextAdminUsageView from '@/views/next/NextAdminUsageView.vue';
 import * as api from '@/api';
-import type { UsageRecordPage, UsageSummary } from '@/types/api';
+import type {UsageRecordPage} from '@/types/api';
+import type { UsageSummary } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   adminUsageSummary: vi.fn(),

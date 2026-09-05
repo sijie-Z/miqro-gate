@@ -8,7 +8,8 @@ import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiDrawer, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
-import type { MemberView, Project } from '@/types/api';
+import type {MemberView} from '@/types/api';
+import type { Project } from '@/types/generated-api';
 
 const projects = ref<Project[]>([]);
 const loading = ref(true);

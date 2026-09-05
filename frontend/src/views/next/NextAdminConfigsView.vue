@@ -9,7 +9,7 @@ import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiTable, toast } from '@/ui';
-import type { ConfigEntryView } from '@/types/api';
+import type { ConfigEntryView } from '@/types/generated-api';
 
 const entries = ref<ConfigEntryView[]>([]);
 const loading = ref(true);

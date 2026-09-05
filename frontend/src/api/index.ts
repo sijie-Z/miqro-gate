@@ -1,60 +1,14 @@
-/**
- * /api/v1/auth and /api/v1/me endpoint clients (api-contract.md §3–§4).
- */
-
-import { del, downloadBlob, get, patch, post, put, uploadBytes } from './http';
-import type {
-  AgentView,
-  ApiConsumerView,
-  CreateApiConsumerResponse,
-  AdminUser,
-  AlertRule,
-  AuditEventView,
-  BudgetView,
-  ConfigEntryView,
-  ExportTask,
-  InternalServiceView,
-  McpAccessView,
-  McpAclMode,
-  McpRouteRule,
-  McpServiceView,
-  McpToolView,
-  UpsertMcpRouteRuleRequest,
-  SkillView,
-  UsageDeletionRequest,
-  WebhookDelivery,
-  WebhookEndpointView,
-  CredentialDetailView,
-  PriceSnapshotView,
-  CredentialView,
-  ValidateCredentialResponse,
-  CreateVirtualKeyResponse,
-  Grant,
-  LoginResponse,
-  MeGrantsResponse,
-  MemberView,
-  ModelApprovalPage,
-  ModelApprovalStatus,
-  ModelApprovalView,
-  QuotaRuleView,
-  QuotaDefaultTemplateView,
-  RoiReportView,
-  UserProjectMembership,
-  Provider,
-  ProviderProductView,
-  SeatView,
-  Project,
-  Team,
-  SubscriptionView,
-  UsageGroupBy,
-  UsageRecordPage,
-  UsageSummary,
-  UserCreatedResponse,
-  UserResponse,
-  UserRole,
-  UserStatusValue,
-  VirtualKeyView,
-} from '@/types/api';
+/** * /api/v1/auth and /api/v1/me endpoint clients (api-contract.md §3–§4). */ import {
+  del,
+  downloadBlob,
+  get,
+  patch,
+  post,
+  put,
+  uploadBytes,
+} from './http';
+import type {CreateApiConsumerResponse, AdminUser, McpAclMode, McpRouteRule, UpsertMcpRouteRuleRequest, UsageDeletionRequest, WebhookDelivery, Grant, LoginResponse, MemberView, ModelApprovalStatus, RoiReportView, UserProjectMembership, ProviderProductView, UsageGroupBy, UserCreatedResponse, UserResponse, UserRole, UserStatusValue} from '@/types/api';
+import type { AgentView, AlertRule, ApiConsumerView, AuditEventView, BudgetView, ConfigEntryView, CreateVirtualKeyResponse, CredentialDetailView, CredentialView, ExportTask, InternalServiceView, McpAccessView, McpServiceView, McpToolView, MeGrantsResponse, ModelApprovalPage, ModelApprovalView, PriceSnapshotView, Project, Provider, QuotaDefaultTemplateView, QuotaRuleView, SeatView, SkillView, SubscriptionView, Team, UsageRecordPage, UsageSummary, ValidateCredentialResponse, VirtualKeyView, WebhookEndpointView } from '@/types/generated-api';
 import type { components } from '@/types/generated';
 
 // Stage-2 codegen migration (batch 1): request DTOs now alias the OpenAPI

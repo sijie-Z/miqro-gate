@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextOverviewView from '@/views/next/NextOverviewView.vue';
 import * as api from '@/api';
-import type { UsageSummary, VirtualKeyView } from '@/types/api';
+import type { UsageSummary, VirtualKeyView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listVirtualKeys: vi.fn(),

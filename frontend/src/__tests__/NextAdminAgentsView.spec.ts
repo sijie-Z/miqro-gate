@@ -4,7 +4,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextAdminAgentsView from '@/views/next/NextAdminAgentsView.vue';
 import * as api from '@/api';
-import type { AgentView, UsageSummary } from '@/types/api';
+import type { AgentView, UsageSummary } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   adminListAgents: vi.fn(),

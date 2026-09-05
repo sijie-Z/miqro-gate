@@ -4,7 +4,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextAdminMcpServicesView from '@/views/next/NextAdminMcpServicesView.vue';
 import * as api from '@/api';
-import type { McpAccessView, McpServiceView, McpToolView } from '@/types/api';
+import type { McpAccessView, McpServiceView, McpToolView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   adminListMcpServices: vi.fn(),

@@ -5,7 +5,7 @@ import { defineComponent } from 'vue';
 import NextGrantsView from '@/views/next/NextGrantsView.vue';
 import * as api from '@/api';
 import { toastState } from '@/ui/toast';
-import type { Grant } from '@/types/api';
+import type {Grant} from '@/types/api';
 
 vi.mock('@/api', () => ({
   listGrants: vi.fn(),
