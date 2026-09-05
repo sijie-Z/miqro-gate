@@ -99,7 +99,7 @@
 |---|---|---|---|---|
 | F53 | 真实供应商凭证实测矩阵（23 产品含团队 Plan 共享池/Anthropic 入口 Bearer 兼容/Agent Plan 端点等细分） | progress G3.x | BLOCKED | WAITING_FOR_CREDENTIAL；逐产品登记于各 Goal 记录 |
 | F54 | 长期浸泡验收（并发 20×30min、队列 drop=0、p99≤2×） | runbook 性能 | BLOCKED | 需部署环境；本机 50 并发 PASS |
-| F55 | Trivy 测试镜像 digest 固定 | progress CI 待办 | TBD | 网络受限未拉到，按标准补 |
+| F55 | Trivy 测试镜像 digest 固定 | progress CI 待办 | **DONE（2026-09-05 盘点核对）** | 全部 testcontainers PG 镜像与 CI Trivy 均 digest 固定（postgres:17.6-alpine@sha256:18cfe3…，见 AbstractControlPlaneIntegrationTest/Gateway 各集成测试/ci.yml）——TBD 系当时网络受限误记 |
 | F56 | spec §9 人工视觉审查 | progress G5.5 | TBD | 需人工执行 |
 | F57 | 版本号与 tag（0.1.0-SNAPSHOT） | progress G6.5 | BLOCKED | 待所有者授权 |
 | F58 | release-checklist 未勾门禁复核（§1/§4/§6 相关项随 F19/F20 落地） | release-checklist | DEFERRED | 逐项由对应功能闭合 |

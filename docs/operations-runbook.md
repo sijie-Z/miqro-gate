@@ -17,6 +17,18 @@
 
 停止时先从入口摘除新流量，等待活动流在维护窗口内结束，再停止应用，最后停止数据库。除紧急事件外不要直接中断所有流。
 
+
+### 发布后闭环冒烟（注册 → 加入 → Key → 真实推理 → 用量核对）
+
+本地开发环境可运行 `miqro-local/demo-registration-loop.sh`（不入库）自动执行六步；私有化环境按同步骤人工核对（替换账号/项目名）：
+
+1. 管理员登录 → 定位目标用户（无则创建）。
+2. `GET /admin/users/{id}/project-memberships` 为空 → 管理员把用户加入 ACTIVE 项目 → 列表出现该项目（快捷加入闭环）。
+3. 用户登录 → `me/grants` 含该项目授权与模型集。
+4. 用授权模型集创建 Virtual Key（`allowedModels` 必须取自 grant 模型，否则网关 403 `model_not_allowed`）。
+5. 经网关发一次最小推理（建议 max_tokens≤8）：期望 200 且返回 model 字段；400 多为请求体编码/JSON 问题，403 多为模型未授权。
+6. 数秒后 `me/usage/summary` 应有 upstream=1 与 tokens>0；usage_event 表新增行（`is_complete=true`）。若推理 200 但 usage 持续为空：查网关日志 `Usage batch write failed`（旧 jar 部署常见；以最新代码重建）。
+
 ## 3. 新增/轮换真实凭证
 
 1. 管理员创建或选择供应商产品/订阅。
