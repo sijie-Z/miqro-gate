@@ -2,9 +2,12 @@ package com.miqroera.miqrokey.gateway.proxy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.miqroera.miqrokey.domain.model.McpAccessPolicy;
+import com.miqroera.miqrokey.domain.model.McpAccessLogEntry;
+import com.miqroera.miqrokey.domain.model.McpAccessStatus;
 import com.miqroera.miqrokey.domain.model.McpAclMode;
+import com.miqroera.miqrokey.domain.model.McpAccessPolicy;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
+import com.miqroera.miqrokey.gateway.mcplog.McpAccessLogSink;
 import com.miqroera.miqrokey.route.RouteSnapshotProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,7 +29,9 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * MCP invocation proxy (F01, Tencent AI gateway doc 135906 wiring shape):
@@ -54,6 +59,16 @@ import java.util.List;
  * headers flow back and caller {@code Session-Id} request headers flow through
  * untouched (distributed MCP session caching is a separate follow-up).
  * </p>
+ *
+ * <p>
+ * Every request with a resolvable identity (consumer authenticated AND service
+ * resolved) writes one metadata row to {@code mcp_access_log} via
+ * {@link McpAccessLogSink} (F15): outcome FORWARDED / *_DENIED /
+ * TOOL_UNAVAILABLE / INVALID_ENVELOPE / UPSTREAM_FAILURE plus the client-facing
+ * or upstream HTTP status. Pre-resolution failures (401/404) carry no
+ * trustworthy identity and are not logged. Sink calls are fire-and-forget and
+ * never block the pipeline.
+ * </p>
  */
 @RestController
 public class McpProxyController {
@@ -67,12 +82,14 @@ public class McpProxyController {
     private final RouteSnapshotProvider routeSnapshotProvider;
     private final WebClient proxyWebClient;
     private final ObjectMapper objectMapper;
+    private final McpAccessLogSink accessLogSink;
 
     public McpProxyController(RouteSnapshotProvider routeSnapshotProvider, WebClient proxyWebClient,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper, McpAccessLogSink accessLogSink) {
         this.routeSnapshotProvider = routeSnapshotProvider;
         this.proxyWebClient = proxyWebClient;
         this.objectMapper = objectMapper;
+        this.accessLogSink = accessLogSink;
     }
 
     @PostMapping("/mcpservers/{serviceName}/mcp")
@@ -86,44 +103,52 @@ public class McpProxyController {
         if (service == null) {
             return error(exchange.getResponse(), HttpStatus.NOT_FOUND, "mcp_service_not_found", "Unknown MCP service");
         }
+        String gatewayRequestId = UUID.randomUUID().toString();
         return exchange.getRequest().getBody().collectList().map(McpProxyController::concatBuffers)
-                .flatMap(body -> authorizeAndForward(exchange, snapshot, consumer, service, body));
+                .flatMap(body -> authorizeAndForward(exchange, consumer, service, body, gatewayRequestId));
     }
 
-    private Mono<Void> authorizeAndForward(ServerWebExchange exchange, RouteSnapshot snapshot,
-            RouteSnapshot.ConsumerRecord consumer, RouteSnapshot.McpServerRecord service, byte[] body) {
+    private Mono<Void> authorizeAndForward(ServerWebExchange exchange, RouteSnapshot.ConsumerRecord consumer,
+            RouteSnapshot.McpServerRecord service, byte[] body, String gatewayRequestId) {
+        CallContext context = new CallContext(consumer, service, gatewayRequestId);
         try {
             JsonNode envelope = objectMapper.readTree(body);
-            String rpcMethod = envelope.path("method").asText("");
-            String toolName = "tools/call".equals(rpcMethod) ? envelope.path("params").path("name").asText("") : null;
+            String rpcMethod = textOrNull(envelope.path("method"));
+            String toolName = "tools/call".equals(rpcMethod) ? textOrNull(envelope.path("params").path("name")) : null;
             McpAclMode serverMode = parseMode(service.aclMode());
             if (!McpAccessPolicy.isAllowed(serverMode, service.serverConsumerIds(), null, List.of(), consumer.id())) {
+                record(context, rpcMethod, toolName, McpAccessStatus.SERVICE_DENIED, 403);
                 return error(exchange.getResponse(), HttpStatus.FORBIDDEN, "mcp_access_denied",
                         "Consumer is not allowed to call this MCP service");
             }
             if (toolName != null && !toolName.isBlank()) {
                 RouteSnapshot.McpToolRecord tool = service.tool(toolName);
                 if (tool == null || !"ENABLED".equals(tool.status())) {
+                    record(context, rpcMethod, toolName, McpAccessStatus.TOOL_UNAVAILABLE, 403);
                     return error(exchange.getResponse(), HttpStatus.FORBIDDEN, "mcp_tool_unavailable",
                             "Tool is unknown or disabled: " + toolName);
                 }
                 McpAclMode overrideMode = parseMode(tool.overrideMode());
                 if (overrideMode != null && !McpAccessPolicy.isAllowed(serverMode, service.serverConsumerIds(),
                         overrideMode, tool.toolConsumerIds(), consumer.id())) {
+                    record(context, rpcMethod, toolName, McpAccessStatus.TOOL_DENIED, 403);
                     return error(exchange.getResponse(), HttpStatus.FORBIDDEN, "mcp_access_denied",
                             "Consumer is not allowed to call tool: " + toolName);
                 }
             }
-            log.info("aigw.mcp.call service={} consumer={} rpcMethod={} tool={}", service.name(), consumer.name(),
-                    rpcMethod, toolName == null ? "-" : toolName);
-            return forward(exchange, service.endpoint(), body);
+            log.info("aigw.mcp.call requestId={} service={} consumer={} rpcMethod={} tool={}", gatewayRequestId,
+                    service.name(), consumer.name(), rpcMethod == null ? "-" : rpcMethod,
+                    toolName == null ? "-" : toolName);
+            return forward(exchange, service.endpoint(), body, context, rpcMethod, toolName);
         } catch (Exception e) {
             log.warn("aigw.mcp.invalid envelope service={}: {}", service.name(), e.getMessage());
+            record(context, null, null, McpAccessStatus.INVALID_ENVELOPE, 400);
             return error(exchange.getResponse(), HttpStatus.BAD_REQUEST, "invalid_jsonrpc", "Invalid JSON-RPC body");
         }
     }
 
-    private Mono<Void> forward(ServerWebExchange exchange, String endpoint, byte[] body) {
+    private Mono<Void> forward(ServerWebExchange exchange, String endpoint, byte[] body, CallContext context,
+            String rpcMethod, String toolName) {
         ServerHttpResponse clientResponse = exchange.getResponse();
         ServerHttpRequest in = exchange.getRequest();
         HttpHeaders headers = new HttpHeaders();
@@ -137,8 +162,11 @@ public class McpProxyController {
         if (sessionId != null) {
             headers.set("Session-Id", sessionId);
         }
+        boolean[] rowRecorded = new boolean[1];
         return proxyWebClient.post().uri(URI.create(endpoint)).headers(h -> h.addAll(headers))
                 .body(BodyInserters.fromValue(body)).exchangeToMono(upstream -> {
+                    record(context, rpcMethod, toolName, McpAccessStatus.FORWARDED, upstream.statusCode().value());
+                    rowRecorded[0] = true;
                     clientResponse.setStatusCode(upstream.statusCode());
                     HttpHeaders out = HeaderFilters.filterResponseHeaders(upstream.headers().asHttpHeaders());
                     clientResponse.getHeaders().addAll(out);
@@ -146,7 +174,42 @@ public class McpProxyController {
                             .writeWith(
                                     upstream.bodyToFlux(byte[].class).map(b -> clientResponse.bufferFactory().wrap(b)))
                             .then();
-                }).timeout(MCP_TIMEOUT);
+                }).timeout(MCP_TIMEOUT).doOnError(e -> {
+                    if (!rowRecorded[0]) {
+                        // No upstream response within the budget (or connect/IO
+                        // failure): the attempt is worth auditing even without an
+                        // HTTP status.
+                        record(context, rpcMethod, toolName, McpAccessStatus.UPSTREAM_FAILURE, null);
+                    }
+                });
+    }
+
+    private void record(CallContext context, String rpcMethod, String toolName, McpAccessStatus status,
+            Integer httpStatus) {
+        accessLogSink.record(new McpAccessLogEntry(UUID.randomUUID(), context.service.tenantId(), context.service.id(),
+                context.service.name(), context.consumer.id(), context.consumer.name(), rpcMethod, toolName, status,
+                httpStatus, context.gatewayRequestId, Instant.now()));
+    }
+
+    private static final class CallContext {
+        private final RouteSnapshot.ConsumerRecord consumer;
+        private final RouteSnapshot.McpServerRecord service;
+        private final String gatewayRequestId;
+
+        private CallContext(RouteSnapshot.ConsumerRecord consumer, RouteSnapshot.McpServerRecord service,
+                String gatewayRequestId) {
+            this.consumer = consumer;
+            this.service = service;
+            this.gatewayRequestId = gatewayRequestId;
+        }
+    }
+
+    private static String textOrNull(JsonNode node) {
+        if (node == null || !node.isTextual()) {
+            return null;
+        }
+        String value = node.asText().trim();
+        return value.isEmpty() ? null : value;
     }
 
     private static RouteSnapshot.ConsumerRecord authenticate(ServerHttpRequest request, RouteSnapshot snapshot) {
