@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.domain.crypto.KeyRing;
 import com.miqroera.miqrokey.domain.crypto.VirtualKeyCrypto;
 import com.miqroera.miqrokey.domain.crypto.VirtualKeyMaterial;
 import com.miqroera.miqrokey.domain.crypto.impl.HmacVirtualKeyProvider;
+import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 
 import java.nio.charset.StandardCharsets;
@@ -154,6 +155,15 @@ public final class GatewayTestKeys {
      * </p>
      */
     public static RouteSnapshot snapshot(String baseUrl, KeyFixture... keys) {
+        return snapshotWithResilience(baseUrl, Map.of(), keys);
+    }
+
+    /**
+     * Fixture snapshot with per-service resilience policies (F12/F13, V30)
+     * overrides keyed by service name; absent services stay fully disabled.
+     */
+    public static RouteSnapshot snapshotWithResilience(String baseUrl, Map<String, McpResiliencePolicy> policies,
+            KeyFixture... keys) {
         Map<String, RouteSnapshot.KeyRecord> keyMap = new LinkedHashMap<>();
         Map<UUID, RouteSnapshot.BindingRecord> bindingMap = new LinkedHashMap<>();
         Map<UUID, RouteSnapshot.CredentialRecord> credentialMap = new LinkedHashMap<>();
@@ -176,7 +186,7 @@ public final class GatewayTestKeys {
             providerIdsMap.putIfAbsent(key.productId(), key.providerId());
         }
         return new RouteSnapshot(1, Instant.EPOCH, keyMap, bindingMap, credentialMap, modelsMap, grantModelsMap,
-                upstreamModelsMap, productCodesMap, providerIdsMap, mcpConsumers(), mcpServices(baseUrl));
+                upstreamModelsMap, productCodesMap, providerIdsMap, mcpConsumers(), mcpServices(baseUrl, policies));
     }
 
     // ------------------------------------------------------------------
@@ -227,18 +237,21 @@ public final class GatewayTestKeys {
         return consumers;
     }
 
-    private static Map<String, RouteSnapshot.McpServerRecord> mcpServices(String baseUrl) {
+    private static Map<String, RouteSnapshot.McpServerRecord> mcpServices(String baseUrl,
+            Map<String, McpResiliencePolicy> policies) {
         String endpoint = baseUrl + "/mcp";
         RouteSnapshot.McpServerRecord open = new RouteSnapshot.McpServerRecord(serviceId(MCP_OPEN_SERVICE), TENANT_ID,
                 MCP_OPEN_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE", "NONE", Set.of(),
-                List.of(tool(MCP_TOOL_ECHO, "ENABLED", null, Set.of()),
-                        tool(MCP_TOOL_LEGACY, "DISABLED", null, Set.of())));
+                List.of(tool(MCP_TOOL_ECHO, "ENABLED", null, Set.of(), "GET"),
+                        tool(MCP_TOOL_LEGACY, "DISABLED", null, Set.of(), "GET")),
+                policies.get(MCP_OPEN_SERVICE));
         RouteSnapshot.McpServerRecord gated = new RouteSnapshot.McpServerRecord(serviceId(MCP_GATED_SERVICE), TENANT_ID,
                 MCP_GATED_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE", "ALLOW",
                 Set.of(MCP_ALLOWED.id(), MCP_SERVER_ONLY.id()),
-                List.of(tool(MCP_TOOL_SHARED, "ENABLED", null, Set.of()),
-                        tool(MCP_TOOL_RESTRICTED, "ENABLED", "ALLOW", Set.of(MCP_ALLOWED.id())),
-                        tool(MCP_TOOL_QUIET, "DISABLED", null, Set.of())));
+                List.of(tool(MCP_TOOL_SHARED, "ENABLED", null, Set.of(), "GET"),
+                        tool(MCP_TOOL_RESTRICTED, "ENABLED", "ALLOW", Set.of(MCP_ALLOWED.id()), "POST"),
+                        tool(MCP_TOOL_QUIET, "DISABLED", null, Set.of(), "GET")),
+                policies.get(MCP_GATED_SERVICE));
         Map<String, RouteSnapshot.McpServerRecord> services = new LinkedHashMap<>();
         services.put(MCP_OPEN_SERVICE, open);
         services.put(MCP_GATED_SERVICE, gated);
@@ -249,9 +262,9 @@ public final class GatewayTestKeys {
         return UUID.nameUUIDFromBytes(("mqk-mcp-service-" + name).getBytes(StandardCharsets.UTF_8));
     }
 
-    private static RouteSnapshot.McpToolRecord tool(String name, String status, String overrideMode,
-            Set<UUID> allowed) {
-        return new RouteSnapshot.McpToolRecord(name, status, overrideMode, allowed);
+    private static RouteSnapshot.McpToolRecord tool(String name, String status, String overrideMode, Set<UUID> allowed,
+            String method) {
+        return new RouteSnapshot.McpToolRecord(name, status, overrideMode, allowed, method);
     }
 
     private static byte[] sha256(String value) {

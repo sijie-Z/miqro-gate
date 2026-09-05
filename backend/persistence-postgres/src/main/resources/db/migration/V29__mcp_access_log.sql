@@ -10,8 +10,9 @@
 --
 -- Recorded outcomes: FORWARDED (upstream answered; http_status = upstream
 -- HTTP status), SERVICE_DENIED / TOOL_DENIED / TOOL_UNAVAILABLE (access
--- control, Tencent doc 134890), INVALID_ENVELOPE (non-JSON-RPC body) and
--- UPSTREAM_FAILURE (no upstream response within the per-envelope budget).
+-- control, Tencent doc 134890), INVALID_ENVELOPE (non-JSON-RPC body),
+-- UPSTREAM_FAILURE (no upstream response within the per-envelope budget) and
+-- CIRCUIT_OPEN (F13 breaker rejected the call before any upstream attempt).
 --
 -- Metadata only: tool name comes from the JSON-RPC envelope method/name, and
 -- neither tool arguments nor response bodies are ever read or stored.
@@ -28,7 +29,7 @@ CREATE TABLE mcp_access_log (
     tool_name           varchar(128),
     status              varchar(32)   NOT NULL
                         CHECK (status IN ('FORWARDED', 'SERVICE_DENIED', 'TOOL_DENIED', 'TOOL_UNAVAILABLE',
-                            'INVALID_ENVELOPE', 'UPSTREAM_FAILURE')),
+                            'INVALID_ENVELOPE', 'UPSTREAM_FAILURE', 'CIRCUIT_OPEN')),
     http_status         integer,
     gateway_request_id  varchar(64)   NOT NULL,
     occurred_at         timestamptz   NOT NULL
