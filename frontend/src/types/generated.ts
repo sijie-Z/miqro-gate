@@ -68,6 +68,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/mcp-services/{serviceId}/resilience": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_1"];
+        put: operations["put_2"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/mcp-services/{id}/access/mode": {
         parameters: {
             query?: never;
@@ -108,7 +124,7 @@ export interface paths {
             cookie?: never;
         };
         get: operations["list_1"];
-        put: operations["put_2"];
+        put: operations["put_3"];
         post?: never;
         delete?: never;
         options?: never;
@@ -190,6 +206,22 @@ export interface paths {
         get: operations["listMine"];
         put?: never;
         post: operations["submit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["register"];
         delete?: never;
         options?: never;
         head?: never;
@@ -708,6 +740,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/mcp-services/{serviceId}/route-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_13"];
+        put?: never;
+        post: operations["create_11"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/mcp-services/{serviceId}/route-rules/{ruleId}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["setStatus_2"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/mcp-services/{serviceId}/health-config": {
         parameters: {
             query?: never;
@@ -731,9 +795,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_13"];
+        get: operations["list_14"];
         put?: never;
-        post: operations["create_11"];
+        post: operations["create_12"];
         delete?: never;
         options?: never;
         head?: never;
@@ -765,7 +829,7 @@ export interface paths {
         };
         get: operations["recent_1"];
         put?: never;
-        post: operations["create_12"];
+        post: operations["create_13"];
         delete?: never;
         options?: never;
         head?: never;
@@ -779,9 +843,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_14"];
+        get: operations["list_15"];
         put?: never;
-        post: operations["create_13"];
+        post: operations["create_14"];
         delete?: never;
         options?: never;
         head?: never;
@@ -843,9 +907,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_15"];
+        get: operations["list_16"];
         put?: never;
-        post: operations["create_14"];
+        post: operations["create_15"];
         delete?: never;
         options?: never;
         head?: never;
@@ -875,9 +939,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_16"];
+        get: operations["list_17"];
         put?: never;
-        post: operations["create_15"];
+        post: operations["create_16"];
         delete?: never;
         options?: never;
         head?: never;
@@ -891,9 +955,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_17"];
+        get: operations["list_18"];
         put?: never;
-        post: operations["create_16"];
+        post: operations["create_17"];
         delete?: never;
         options?: never;
         head?: never;
@@ -923,7 +987,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_1"];
+        get: operations["get_2"];
         put?: never;
         post?: never;
         delete: operations["delete_1"];
@@ -971,7 +1035,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_2"];
+        get: operations["get_3"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1012,6 +1076,22 @@ export interface paths {
         patch: operations["update_3"];
         trace?: never;
     };
+    "/api/v1/admin/mcp-services/{serviceId}/route-rules/{ruleId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["delete_2"];
+        options?: never;
+        head?: never;
+        patch: operations["update_4"];
+        trace?: never;
+    };
     "/api/v1/admin/alert-rules/{ruleId}": {
         parameters: {
             query?: never;
@@ -1019,13 +1099,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_3"];
+        get: operations["get_4"];
         put?: never;
         post?: never;
-        delete: operations["delete_2"];
+        delete: operations["delete_3"];
         options?: never;
         head?: never;
-        patch: operations["update_4"];
+        patch: operations["update_5"];
         trace?: never;
     };
     "/api/v1/test/ownership/{ownerUserId}": {
@@ -1051,7 +1131,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_18"];
+        get: operations["list_19"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1067,7 +1147,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_4"];
+        get: operations["get_5"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1099,7 +1179,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_5"];
+        get: operations["get_6"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1268,6 +1348,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/users/{userId}/project-memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["userProjectMemberships"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/usage/summary": {
         parameters: {
             query?: never;
@@ -1387,7 +1483,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_6"];
+        get: operations["get_7"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1403,7 +1499,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_19"];
+        get: operations["list_20"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1419,7 +1515,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_7"];
+        get: operations["get_8"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1451,7 +1547,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_20"];
+        get: operations["list_21"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1467,7 +1563,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_8"];
+        get: operations["get_9"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1484,6 +1580,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["view_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/mcp-access-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_22"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1531,7 +1643,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_9"];
+        get: operations["get_10"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1563,7 +1675,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_21"];
+        get: operations["list_23"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1579,7 +1691,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_10"];
+        get: operations["get_11"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1630,7 +1742,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete: operations["delete_3"];
+        delete: operations["delete_4"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1678,7 +1790,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete: operations["delete_4"];
+        delete: operations["delete_5"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1798,6 +1910,64 @@ export interface components {
             spent?: number;
             spentPct?: number;
             level?: string;
+        };
+        RequestedPolicy: {
+            retryEnabled?: boolean;
+            /** Format: int32 */
+            retryMax?: number;
+            retryConditions?: string[];
+            idempotencyConfirmed?: boolean;
+            breakerEnabled?: boolean;
+            /** Format: int32 */
+            breakerWindowSeconds?: number;
+            /** Format: int32 */
+            breakerMinRequests?: number;
+            breakerErrorEnabled?: boolean;
+            /** Format: int32 */
+            breakerErrorRatio?: number;
+            breakerErrorStatusCodes?: number[];
+            breakerSlowEnabled?: boolean;
+            /** Format: int32 */
+            breakerSlowCallMs?: number;
+            /** Format: int32 */
+            breakerSlowRatio?: number;
+            /** Format: int32 */
+            breakerOpenSeconds?: number;
+            /** Format: int32 */
+            breakerProbeCount?: number;
+            /** Format: int32 */
+            breakerProbeSuccess?: number;
+            breakerSkipRetry?: boolean;
+        };
+        McpResiliencePolicy: {
+            retryEnabled?: boolean;
+            /** Format: int32 */
+            retryMax?: number;
+            retryConditions?: ("SERVER_5XX" | "CONNECTION_FAILURE" | "TIMEOUT")[];
+            idempotencyConfirmed?: boolean;
+            breakerEnabled?: boolean;
+            /** Format: int32 */
+            breakerWindowSeconds?: number;
+            /** Format: int32 */
+            breakerMinRequests?: number;
+            breakerErrorEnabled?: boolean;
+            /** Format: int32 */
+            breakerErrorRatio?: number;
+            breakerErrorStatusCodes?: number[];
+            breakerSlowEnabled?: boolean;
+            /** Format: int32 */
+            breakerSlowCallMs?: number;
+            /** Format: int32 */
+            breakerSlowRatio?: number;
+            /** Format: int32 */
+            breakerOpenSeconds?: number;
+            /** Format: int32 */
+            breakerProbeCount?: number;
+            /** Format: int32 */
+            breakerProbeSuccess?: number;
+            breakerSkipRetry?: boolean;
+            /** Format: int64 */
+            version?: number;
         };
         SetMcpAccessModeRequest: {
             /** @enum {string} */
@@ -1923,6 +2093,11 @@ export interface components {
             createdAt?: string;
             /** Format: date-time */
             updatedAt?: string;
+        };
+        RegisterRequest: {
+            username: string;
+            displayName?: string;
+            password: string;
         };
         PasswordChangeRequest: {
             currentPassword: string;
@@ -2302,6 +2477,56 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
         };
+        HeaderConditionRequest: {
+            name: string;
+            mode?: string;
+            value?: string;
+        };
+        UpsertRequest: {
+            name: string;
+            description?: string;
+            /** Format: int32 */
+            priority?: number;
+            pathMode?: string;
+            pathValue?: string;
+            hostMode?: string;
+            hostValue?: string;
+            methods?: string[];
+            headers?: components["schemas"]["HeaderConditionRequest"][];
+        };
+        McpHeaderCondition: {
+            name?: string;
+            mode?: string;
+            value?: string;
+        };
+        McpRouteRule: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            /** Format: uuid */
+            mcpServiceId?: string;
+            name?: string;
+            description?: string;
+            /** Format: int32 */
+            priority?: number;
+            pathMode?: string;
+            pathValue?: string;
+            hostMode?: string;
+            hostValue?: string;
+            methods?: string;
+            headerConditions?: components["schemas"]["McpHeaderCondition"][];
+            status?: string;
+            /** Format: int64 */
+            version?: number;
+            /** Format: uuid */
+            createdBy?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            default?: boolean;
+        };
         HealthConfigRequest: {
             /** Format: int32 */
             checkIntervalSeconds?: number;
@@ -2623,6 +2848,15 @@ export interface components {
             /** Format: date-time */
             createdAt?: string;
         };
+        UserProjectMembershipView: {
+            /** Format: uuid */
+            projectId?: string;
+            projectCode?: string;
+            projectName?: string;
+            projectStatus?: string;
+            /** Format: date-time */
+            joinedAt?: string;
+        };
         RoiDay: {
             date?: string;
             /** Format: int64 */
@@ -2758,6 +2992,27 @@ export interface components {
         ModelApprovalPage: {
             items?: components["schemas"]["ModelApprovalView"][];
             nextCursor?: string;
+        };
+        McpAccessLogEntry: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            /** Format: uuid */
+            serviceId?: string;
+            serviceName?: string;
+            /** Format: uuid */
+            consumerId?: string;
+            consumerName?: string;
+            rpcMethod?: string;
+            toolName?: string;
+            /** @enum {string} */
+            status?: "FORWARDED" | "SERVICE_DENIED" | "TOOL_DENIED" | "TOOL_UNAVAILABLE" | "INVALID_ENVELOPE" | "UPSTREAM_FAILURE" | "CIRCUIT_OPEN";
+            /** Format: int32 */
+            httpStatus?: number;
+            gatewayRequestId?: string;
+            /** Format: date-time */
+            occurredAt?: string;
         };
         CredentialDetailView: {
             credential?: components["schemas"]["CredentialView"];
@@ -2986,6 +3241,54 @@ export interface operations {
             };
         };
     };
+    get_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["McpResiliencePolicy"];
+                };
+            };
+        };
+    };
+    put_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RequestedPolicy"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["McpResiliencePolicy"];
+                };
+            };
+        };
+    };
     setMode: {
         parameters: {
             query?: never;
@@ -3084,7 +3387,7 @@ export interface operations {
             };
         };
     };
-    put_2: {
+    put_3: {
         parameters: {
             query?: never;
             header?: never;
@@ -3286,6 +3589,30 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ModelApprovalView"];
+                };
+            };
+        };
+    };
+    register: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": Record<string, never>;
                 };
             };
         };
@@ -4335,6 +4662,79 @@ export interface operations {
             };
         };
     };
+    list_13: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["McpRouteRule"][];
+                };
+            };
+        };
+    };
+    create_11: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["McpRouteRule"];
+                };
+            };
+        };
+    };
+    setStatus_2: {
+        parameters: {
+            query: {
+                status: string;
+            };
+            header?: never;
+            path: {
+                serviceId: string;
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["McpRouteRule"];
+                };
+            };
+        };
+    };
     updateHealthConfig: {
         parameters: {
             query?: never;
@@ -4361,7 +4761,7 @@ export interface operations {
             };
         };
     };
-    list_13: {
+    list_14: {
         parameters: {
             query?: never;
             header?: never;
@@ -4381,7 +4781,7 @@ export interface operations {
             };
         };
     };
-    create_11: {
+    create_12: {
         parameters: {
             query?: never;
             header?: never;
@@ -4475,7 +4875,7 @@ export interface operations {
             };
         };
     };
-    create_12: {
+    create_13: {
         parameters: {
             query: {
                 format: "CSV" | "JSONL";
@@ -4499,7 +4899,7 @@ export interface operations {
             };
         };
     };
-    list_14: {
+    list_15: {
         parameters: {
             query?: never;
             header?: never;
@@ -4519,7 +4919,7 @@ export interface operations {
             };
         };
     };
-    create_13: {
+    create_14: {
         parameters: {
             query?: never;
             header?: never;
@@ -4619,7 +5019,7 @@ export interface operations {
             };
         };
     };
-    list_15: {
+    list_16: {
         parameters: {
             query?: never;
             header?: never;
@@ -4639,7 +5039,7 @@ export interface operations {
             };
         };
     };
-    create_14: {
+    create_15: {
         parameters: {
             query?: never;
             header?: never;
@@ -4687,7 +5087,7 @@ export interface operations {
             };
         };
     };
-    list_16: {
+    list_17: {
         parameters: {
             query?: never;
             header?: never;
@@ -4707,7 +5107,7 @@ export interface operations {
             };
         };
     };
-    create_15: {
+    create_16: {
         parameters: {
             query?: never;
             header?: never;
@@ -4731,7 +5131,7 @@ export interface operations {
             };
         };
     };
-    list_17: {
+    list_18: {
         parameters: {
             query?: never;
             header?: never;
@@ -4751,7 +5151,7 @@ export interface operations {
             };
         };
     };
-    create_16: {
+    create_17: {
         parameters: {
             query?: never;
             header?: never;
@@ -4797,7 +5197,7 @@ export interface operations {
             };
         };
     };
-    get_1: {
+    get_2: {
         parameters: {
             query?: never;
             header?: never;
@@ -4941,7 +5341,7 @@ export interface operations {
             };
         };
     };
-    get_2: {
+    get_3: {
         parameters: {
             query?: never;
             header?: never;
@@ -5042,7 +5442,55 @@ export interface operations {
             };
         };
     };
-    get_3: {
+    delete_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_4: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["McpRouteRule"];
+                };
+            };
+        };
+    };
+    get_4: {
         parameters: {
             query?: never;
             header?: never;
@@ -5064,7 +5512,7 @@ export interface operations {
             };
         };
     };
-    delete_2: {
+    delete_3: {
         parameters: {
             query?: never;
             header?: never;
@@ -5084,7 +5532,7 @@ export interface operations {
             };
         };
     };
-    update_4: {
+    update_5: {
         parameters: {
             query?: never;
             header?: never;
@@ -5134,7 +5582,7 @@ export interface operations {
             };
         };
     };
-    list_18: {
+    list_19: {
         parameters: {
             query?: never;
             header?: never;
@@ -5154,7 +5602,7 @@ export interface operations {
             };
         };
     };
-    get_4: {
+    get_5: {
         parameters: {
             query?: never;
             header?: never;
@@ -5198,7 +5646,7 @@ export interface operations {
             };
         };
     };
-    get_5: {
+    get_6: {
         parameters: {
             query?: never;
             header?: never;
@@ -5442,6 +5890,28 @@ export interface operations {
             };
         };
     };
+    userProjectMemberships: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["UserProjectMembershipView"][];
+                };
+            };
+        };
+    };
     summary_2: {
         parameters: {
             query?: {
@@ -5620,7 +6090,7 @@ export interface operations {
             };
         };
     };
-    get_6: {
+    get_7: {
         parameters: {
             query?: never;
             header?: never;
@@ -5642,7 +6112,7 @@ export interface operations {
             };
         };
     };
-    list_19: {
+    list_20: {
         parameters: {
             query?: never;
             header?: never;
@@ -5662,7 +6132,7 @@ export interface operations {
             };
         };
     };
-    get_7: {
+    get_8: {
         parameters: {
             query?: never;
             header?: never;
@@ -5704,7 +6174,7 @@ export interface operations {
             };
         };
     };
-    list_20: {
+    list_21: {
         parameters: {
             query?: {
                 status?: "PENDING" | "APPROVED" | "REJECTED";
@@ -5728,7 +6198,7 @@ export interface operations {
             };
         };
     };
-    get_8: {
+    get_9: {
         parameters: {
             query?: never;
             header?: never;
@@ -5768,6 +6238,32 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["McpAccessView"];
+                };
+            };
+        };
+    };
+    list_22: {
+        parameters: {
+            query?: {
+                service?: string;
+                consumer?: string;
+                from?: string;
+                to?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["McpAccessLogEntry"][];
                 };
             };
         };
@@ -5816,7 +6312,7 @@ export interface operations {
             };
         };
     };
-    get_9: {
+    get_10: {
         parameters: {
             query?: never;
             header?: never;
@@ -5860,7 +6356,7 @@ export interface operations {
             };
         };
     };
-    list_21: {
+    list_23: {
         parameters: {
             query?: {
                 size?: number;
@@ -5884,7 +6380,7 @@ export interface operations {
             };
         };
     };
-    get_10: {
+    get_11: {
         parameters: {
             query?: never;
             header?: never;
@@ -5952,7 +6448,7 @@ export interface operations {
             };
         };
     };
-    delete_3: {
+    delete_4: {
         parameters: {
             query?: never;
             header?: never;
@@ -6013,7 +6509,7 @@ export interface operations {
             };
         };
     };
-    delete_4: {
+    delete_5: {
         parameters: {
             query?: never;
             header?: never;
