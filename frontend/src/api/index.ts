@@ -8,7 +8,7 @@
   uploadBytes,
 } from './http';
 import type {CreateApiConsumerResponse, AdminUser, McpAclMode, McpRouteRule, UpsertMcpRouteRuleRequest, UsageDeletionRequest, WebhookDelivery, Grant, LoginResponse, MemberView, ModelApprovalStatus, RoiReportView, UserProjectMembership, ProviderProductView, UsageGroupBy, UserCreatedResponse, UserResponse, UserRole, UserStatusValue} from '@/types/api';
-import type { AgentView, AlertRule, ApiConsumerView, AuditEventView, BudgetView, ConfigEntryView, CreateVirtualKeyResponse, CredentialDetailView, CredentialView, ExportTask, InternalServiceView, McpAccessView, McpServiceView, McpToolView, MeGrantsResponse, ModelApprovalPage, ModelApprovalView, PriceSnapshotView, Project, Provider, QuotaDefaultTemplateView, QuotaRuleView, SeatView, SkillView, SubscriptionView, Team, UsageRecordPage, UsageSummary, ValidateCredentialResponse, VirtualKeyView, WebhookEndpointView } from '@/types/generated-api';
+import type { AgentView, AlertRule, ApiConsumerView, AuditEventView, BudgetView, ConfigEntryView, CreateVirtualKeyResponse, CredentialDetailView, CredentialView, ExportTask, InternalServiceView, McpAccessView, McpServiceView, McpToolView, MeGrantsResponse, ModelApprovalPage, ModelApprovalView, PriceSnapshotView, Project, Provider, QuotaDefaultTemplateView, QuotaRuleView, SeatView, SkillView, SubscriptionView, Team, UsageRecordPage, UsageSummary, ValidateCredentialResponse, VirtualKeyView, WebhookEndpointView , McpAccessLogEntry } from '@/types/generated-api';
 import type { components } from '@/types/generated';
 
 // Stage-2 codegen migration (batch 1): request DTOs now alias the OpenAPI
@@ -281,6 +281,13 @@ export function getRoiReport(from?: string, to?: string): Promise<RoiReportView>
 }
 
 // ---- MCP two-level access control (Tencent doc 134890) ----
+
+export function listMcpAccessLogs(params?: { service?: string; consumer?: string }): Promise<McpAccessLogEntry[]> {
+  const query: Record<string, string> = {};
+  if (params?.service) query.service = params.service;
+  if (params?.consumer) query.consumer = params.consumer;
+  return get<McpAccessLogEntry[]>('/api/v1/admin/mcp-access-logs', query);
+}
 
 export function getMcpServiceAccess(serviceId: string): Promise<McpAccessView> {
   return get<McpAccessView>(`/api/v1/admin/mcp-services/${serviceId}/access`);

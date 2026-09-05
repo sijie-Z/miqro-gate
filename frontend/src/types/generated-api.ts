@@ -45,3 +45,4 @@ export type InternalServiceView = components['schemas']['InternalService'];
 export type ConfigEntryView = components['schemas']['ConfigEntry'];
 export type McpServiceView = components['schemas']['McpService'];
 export type McpToolView = components['schemas']['McpTool'];
+export type McpAccessLogEntry = components['schemas']['McpAccessLogEntry'];

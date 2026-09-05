@@ -93,6 +93,7 @@ const opsNav: NavItem[] = [
   { name: 'mcp-services', label: 'MCP 服务', icon: ToolsIcon },
   { name: 'alert-rules', label: '告警规则', icon: ErrorCircleIcon },
   { name: 'audit', label: '审计日志', icon: FilePasteIcon },
+  { name: 'mcp-access-logs', label: 'MCP 访问日志', icon: FilePasteIcon },
 ];
 
 const isAdmin = computed(() => auth.user?.role === 'SYSTEM_ADMIN');
