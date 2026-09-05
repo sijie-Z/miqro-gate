@@ -848,6 +848,24 @@ Server 级（谁能调用整个服务）+ Tool 级（谁可调用某工具）ACL
 - 名称：1–64 字符、同一服务唯一（`409 ROUTE_NAME_TAKEN`）、`default` 保留（`400 ROUTE_NAME_RESERVED`）；描述 ≤200。
 - 错误码：`ROUTE_NOT_FOUND`（404）、`ROUTE_NAME_TAKEN`（409）、`ROUTE_NAME_RESERVED`（400）、`ROUTE_NAME_INVALID`（400）、`ROUTE_DESCRIPTION_INVALID`（400）、`ROUTE_PRIORITY_INVALID`（400）、`ROUTE_PATH_INVALID`（400）、`ROUTE_MATCHER_INVALID`（400）、`ROUTE_PATTERN_INVALID`（400）、`ROUTE_METHOD_INVALID`（400）、`ROUTE_HEADERS_TOO_MANY`（400）、`ROUTE_HEADER_INVALID`（400）、`ROUTE_MATCH_CONFLICT`（409）、`ROUTE_DEFAULT_IMMUTABLE`（409）、`ROUTE_STATUS_INVALID`（400）；服务不存在 `404 MCP_SERVICE_NOT_FOUND`。
 
+### 5.24 MCP 访问日志查询 `GET /api/v1/admin/mcp-access-logs`（F15，V29）
+
+MCP 代理调用（F01 入口 `/mcpservers/{serviceName}/mcp`）的**纯元数据审计行**：每次身份可解析的调用（消费者认证通过且服务名解析成功）由网关异步批量写一行；**不存工具参数、请求正文或响应正文**（信封 method/`params.name` 是唯一被读取的正文元数据，raw 16 `aigw.mcp.*` 语义）。`status` 为网关侧终态：`FORWARDED`（上游已应答，`httpStatus`=上游 HTTP 状态）/ `SERVICE_DENIED`、`TOOL_DENIED`、`TOOL_UNAVAILABLE`（ACL，doc 134890，`httpStatus`=403）/ `INVALID_ENVELOPE`（400）/ `UPSTREAM_FAILURE`（60s 预算内无上游应答，`httpStatus` 空）。
+
+- **写入口**：网关 `McpAccessLogSink`（有界队列 4096 + 1s 周期 flush；饱和 drop+计数 WARN；批量失败整批重入队重试）。写入幂等：`(tenant_id, gateway_request_id)` 唯一，重试 flush 不双写。参数 `miqrokey.gateway.mcp-log.capacity` / `.flush-interval-ms`。
+- **不落行**：预解析失败（401 未知 Key、404 未知服务）无可信身份，仅留在请求日志——与 usage_event 同口径。
+- **查询语义**：新→旧排序（`occurred_at DESC, id DESC`）；`service`/`consumer` 按名称精确过滤；`from`/`to`（ISO-8601 instant，含 `Z`）默认近 24h，窗口 ≤ 31 天（`TIME_RANGE_TOO_WIDE`）；`from > to` → `TIME_RANGE_INVALID`；`limit` 默认 200、上限 1000（`SIZE_INVALID`）；`from/to` 非法格式 → `PARAM_INVALID`。
+- 权限：SYSTEM_ADMIN-only（deny-by-default）；只读端点无审计事件。
+
+| 参数 | 类型 | 缺省 |
+|---|---|---|
+| `service` | string（服务名精确） | 全部 |
+| `consumer` | string（消费者名精确） | 全部 |
+| `from` / `to` | ISO-8601 instant | now-24h / now |
+| `limit` | int 1–1000 | 200 |
+
+响应：`McpAccessLogEntry[]`（`id/serviceId/serviceName/consumerId/consumerName/rpcMethod/toolName/status/httpStatus/gatewayRequestId/occurredAt`；`rpcMethod`/`toolName` 可空）。
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

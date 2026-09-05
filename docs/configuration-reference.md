@@ -179,6 +179,8 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 
 队列达到高水位必须告警；队列满不能静默丢弃。G2.4 实现语义：写失败把整批**按序重入队**并记 `warn`（幂等写入保证重试不双计），饱和 drop 按高优先级 `warn` 计数——均不静默；`miqrokey.usage.queue.*` 无标签 gauge（深度/发布/持久化/drop/flush）供告警。
 
+F15 MCP 访问日志队列（网关数据面）：`miqrokey.gateway.mcp-log.capacity`（默认 4096，`MIQROKEY_GATEWAY_MCP_LOG_CAPACITY`）、`miqrokey.gateway.mcp-log.flush-interval-ms`（默认 1000，`MIQROKEY_GATEWAY_MCP_LOG_FLUSH_INTERVAL_MS`）。语义同 usage 队列：饱和 drop+WARN 计数、批量写失败整批重入队（`(tenant_id, gateway_request_id)` 幂等保证重试不双写）；`miqrokey.gateway.persistence.enabled=false`（默认）时日志为 no-op（不产行），与 usage 持久化同一开关。
+
 ## 7. Webhook 与告警
 
 | 配置 | 默认 | 说明 |

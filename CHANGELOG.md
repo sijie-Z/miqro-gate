@@ -4,6 +4,9 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
+### 2026-09-05
+- **F15 MCP 元数据访问日志（V29）**：MCP 代理（F01）每次身份可解析的调用落一条纯元数据审计行（`mcp_access_log`：租户/服务/消费者/方法/工具/终态/HTTP 状态；网关异步有界队列批量写入、`(tenant, gateway_request_id)` 幂等、饱和 drop+计数）；管理端查询 `GET /api/v1/admin/mcp-access-logs`（service/consumer/窗口 ≤31d/limit≤1000 过滤，SYSTEM_ADMIN-only）。工具参数与响应正文永不入表。
+
 ### 2026-09-04
 
 - **管理员「加入项目」快捷入口**：`GET /api/v1/admin/users/{id}/project-memberships`（用户所属项目，按 code 排序）；用户列表菜单新增「项目成员」→ 抽屉展示当前项目（可移除）与可加入的 ACTIVE 项目（下拉+加入），注册用户引导闭环（F-REG）。
