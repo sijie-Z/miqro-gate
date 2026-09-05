@@ -7,7 +7,8 @@
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { UiButton, UiStatusBadge, UiTable, toast } from '@/ui';
-import type { ModelApprovalStatus, ModelApprovalView } from '@/types/api';
+import type {ModelApprovalStatus} from '@/types/api';
+import type { ModelApprovalView } from '@/types/generated-api';
 
 const items = ref<ModelApprovalView[]>([]);
 const loading = ref(true);

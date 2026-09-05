@@ -93,36 +93,6 @@ export interface LoginResponse {
   sessionExpiresAt: string;
 }
 
-export interface CreateVirtualKeyResponse {
-  id: string;
-  /** Plaintext Virtual Key — present exactly once, in this response only. */
-  secret: string;
-  baseUrl: string;
-  display: string;
-  shownOnce: boolean;
-  createdAt: string;
-  version: number;
-}
-
-export interface VirtualKeyView {
-  id: string;
-  name: string;
-  purpose: VirtualKeyPurpose;
-  status: VirtualKeyStatus;
-  displayPrefix: string;
-  lastFour: string;
-  /** Masked display string, e.g. mqk_live_…8f2a — never the plaintext. */
-  display: string;
-  modelIds: string[];
-  projectId: string;
-  projectTag: string;
-  cachePolicy: string;
-  baseUrl: string;
-  createdAt: string;
-  lastUsedAt?: string;
-  revokedAt?: string;
-}
-
 export interface MeGrantsResponse {
   projects: Array<{ id: string; code: string; name: string; projectTag: string }>;
   grants: Array<{ id: string; projectId: string; providerProductId: string; models: string[] }>;
@@ -131,60 +101,11 @@ export interface MeGrantsResponse {
 
 export type ModelApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
-export interface ModelApprovalView {
-  id: string;
-  virtualKeyId: string;
-  keyName?: string;
-  /** Masked key display (prefix…last4) — never the plaintext. */
-  keyDisplay?: string;
-  projectTag?: string;
-  modelId: string;
-  reason?: string;
-  status: ModelApprovalStatus;
-  requesterId: string;
-  requesterName: string;
-  reviewNote?: string;
-  reviewedByName?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ModelApprovalPage {
-  items: ModelApprovalView[];
-  /** Opaque keyset cursor for the next page; null/undefined = no more items. */
-  nextCursor?: string;
-}
-
 export type QuotaScopeType = 'USER' | 'PROJECT';
 export type QuotaMetric = 'TOKENS' | 'REQUESTS';
 export type QuotaPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY';
 export type QuotaRuleStatus = 'ACTIVE' | 'DISABLED';
 export type QuotaLevel = 'NORMAL' | 'WARNING' | 'EXCEEDED';
-
-export interface QuotaRuleView {
-  id: string;
-  scopeType: QuotaScopeType;
-  scopeId: string;
-  /** Display name of the user / project the rule applies to. */
-  scopeName?: string;
-  /** Username for USER scope, project code for PROJECT scope. */
-  scopeTag?: string;
-  metric: QuotaMetric;
-  period: QuotaPeriod;
-  limitValue: number;
-  warnPercent: number;
-  status: QuotaRuleStatus;
-  /** Current-period usage of the metric. */
-  used: number;
-  /** used / limit in percent. */
-  usedPct: number;
-  level: QuotaLevel;
-  windowFrom: string;
-  windowTo: string;
-  createdAt: string;
-  updatedAt: string;
-  version: number;
-}
 
 /** Global default quota strategy (Tencent doc 135489) — nulls before first config. */
 export interface QuotaDefaultTemplateView {

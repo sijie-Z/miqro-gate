@@ -3,7 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextUsageView from '@/views/next/NextUsageView.vue';
 import * as api from '@/api';
-import type { QuotaRuleView, UsageRecordPage, UsageSummary } from '@/types/api';
+import type {UsageRecordPage, UsageSummary} from '@/types/api';
+import type { QuotaRuleView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listMyQuotaRules: vi.fn(),

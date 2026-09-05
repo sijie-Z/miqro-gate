@@ -10,17 +10,8 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type {
-  QuotaLevel,
-  QuotaMetric,
-  QuotaPeriod,
-  QuotaRuleView,
-  UsageGroup,
-  UsageGroupBy,
-  UsageRecordPage,
-  UsageSummary,
-} from '@/types/api';
-import type { UsageRecord } from '@/types/generated-api';
+import type {QuotaLevel, QuotaMetric, QuotaPeriod, UsageGroup, UsageGroupBy, UsageRecordPage, UsageSummary} from '@/types/api';
+import type { QuotaRuleView, UsageRecord } from '@/types/generated-api';
 
 const groupBy = ref<UsageGroupBy>('project');
 const summary = ref<UsageSummary | null>(null);
