@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextProvidersView from '@/views/next/NextProvidersView.vue';
 import * as api from '@/api';
-import type { ProviderProductView } from '@/types/api';
+import type {ProviderProductView} from '@/types/api';
 
 vi.mock('@/api', () => ({ listProviderProducts: vi.fn() }));
 

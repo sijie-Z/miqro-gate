@@ -4,7 +4,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextUsersView from '@/views/next/NextUsersView.vue';
 import * as api from '@/api';
-import type { AdminUser } from '@/types/api';
+import type {AdminUser} from '@/types/api';
 
 vi.mock('@/api', () => ({
   listUsers: vi.fn(),

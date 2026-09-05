@@ -4,7 +4,8 @@ import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextAdminAlertRulesView from '@/views/next/NextAdminAlertRulesView.vue';
 import * as api from '@/api';
-import type { AlertRule } from '@/types/api';
+import type {} from '@/types/api';
+import type { AlertRule } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listAlertRules: vi.fn(),

@@ -26,7 +26,8 @@ import {
   UiTable,
   toast,
 } from '@/ui';
-import type { AdminUser, Project, UserProjectMembership, UserRole } from '@/types/api';
+import type {AdminUser, UserProjectMembership, UserRole} from '@/types/api';
+import type { Project } from '@/types/generated-api';
 
 const users = ref<AdminUser[]>([]);
 const loading = ref(true);
