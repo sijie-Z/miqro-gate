@@ -41,3 +41,7 @@ export type Provider = components['schemas']['Provider'];
 export type ExportTask = components['schemas']['ExportTask'];
 export type WebhookEndpointView = components['schemas']['WebhookEndpointView'];
 export type AlertRule = components['schemas']['AlertRule'];
+export type InternalServiceView = components['schemas']['InternalService'];
+export type ConfigEntryView = components['schemas']['ConfigEntry'];
+export type McpServiceView = components['schemas']['McpService'];
+export type McpToolView = components['schemas']['McpTool'];

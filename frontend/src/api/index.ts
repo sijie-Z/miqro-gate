@@ -7,8 +7,8 @@
   put,
   uploadBytes,
 } from './http';
-import type {CreateApiConsumerResponse, AdminUser, ConfigEntryView, InternalServiceView, McpAclMode, McpRouteRule, McpServiceView, McpToolView, UpsertMcpRouteRuleRequest, UsageDeletionRequest, WebhookDelivery, Grant, LoginResponse, MemberView, ModelApprovalStatus, RoiReportView, UserProjectMembership, ProviderProductView, UsageGroupBy, UserCreatedResponse, UserResponse, UserRole, UserStatusValue} from '@/types/api';
-import type { AgentView, AlertRule, ApiConsumerView, AuditEventView, BudgetView, CreateVirtualKeyResponse, CredentialDetailView, CredentialView, ExportTask, McpAccessView, MeGrantsResponse, ModelApprovalPage, ModelApprovalView, PriceSnapshotView, Project, Provider, QuotaDefaultTemplateView, QuotaRuleView, SeatView, SkillView, SubscriptionView, Team, UsageRecordPage, UsageSummary, ValidateCredentialResponse, VirtualKeyView, WebhookEndpointView } from '@/types/generated-api';
+import type {CreateApiConsumerResponse, AdminUser, McpAclMode, McpRouteRule, UpsertMcpRouteRuleRequest, UsageDeletionRequest, WebhookDelivery, Grant, LoginResponse, MemberView, ModelApprovalStatus, RoiReportView, UserProjectMembership, ProviderProductView, UsageGroupBy, UserCreatedResponse, UserResponse, UserRole, UserStatusValue} from '@/types/api';
+import type { AgentView, AlertRule, ApiConsumerView, AuditEventView, BudgetView, ConfigEntryView, CreateVirtualKeyResponse, CredentialDetailView, CredentialView, ExportTask, InternalServiceView, McpAccessView, McpServiceView, McpToolView, MeGrantsResponse, ModelApprovalPage, ModelApprovalView, PriceSnapshotView, Project, Provider, QuotaDefaultTemplateView, QuotaRuleView, SeatView, SkillView, SubscriptionView, Team, UsageRecordPage, UsageSummary, ValidateCredentialResponse, VirtualKeyView, WebhookEndpointView } from '@/types/generated-api';
 import type { components } from '@/types/generated';
 
 // Stage-2 codegen migration (batch 1): request DTOs now alias the OpenAPI

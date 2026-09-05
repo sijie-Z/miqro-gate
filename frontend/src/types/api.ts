@@ -24,55 +24,6 @@ export type UsageGroupBy = 'project' | 'virtual_key' | 'cache_level' | 'day';
 
 export type BudgetLevel = 'NORMAL' | 'WARNING' | 'EXCEEDED';
 
-export interface InternalServiceView {
-  id: string;
-  name: string;
-  kind: string;
-  description?: string;
-  baseUrl: string;
-  status: string;
-  createdAt: string;
-}
-
-export interface ConfigEntryView {
-  id: string;
-  groupName: string;
-  key: string;
-  value: string;
-  description?: string;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface McpServiceView {
-  id: string;
-  name: string;
-  description?: string;
-  endpoint: string;
-  transport: string;
-  status: string;
-  healthStatus: string;
-  healthCheckedAt: string | null;
-  checkIntervalSeconds: number;
-  checkTimeoutSeconds: number;
-  failThreshold: number;
-  recoverThreshold: number;
-  checkPath: string;
-  createdAt: string;
-}
-
-export interface McpToolView {
-  id: string;
-  mcpServiceId: string;
-  toolName: string;
-  description?: string;
-  method: string;
-  path: string;
-  status: string;
-  createdAt: string;
-}
-
 export interface UserResponse {
   id: string;
   username: string;

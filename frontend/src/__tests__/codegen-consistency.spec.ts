@@ -37,12 +37,12 @@ describe('codegen consistency (openapi schema vs handwritten core types)', () =>
       return schemas.has(n) ? [n, n] : [n, n.slice(0, -4)];
     });
 
-  // Floor guard against pair-discovery regressions (typos in the naming
-  // convention / EXCEPTIONS). The floor shrinks as stage-2 codegen migration
-  // replaces handwritten types with schema aliases (40 pairs when stage 1
-  // landed); the remaining pairs are the intentionally unmigrated set
-  // (route-rules trio and auth-envelope types have no schema counterpart).
-  expect(PAIRS.length).toBeGreaterThan(4);
+  // Stage-2 codegen migration has replaced every migratable handwritten DTO
+  // with its schema alias: when stage 1 landed the derived set was 40 pairs,
+  // today it is the intentionally-unmigrated remainder (ProviderProductView
+  // via EXCEPTIONS and any schema-named interface still handwritten). The
+  // per-pair field-subset assertions below stay the real guard.
+  expect(PAIRS.length).toBeGreaterThanOrEqual(1);
 
   function schemaMembers(schemaName: string): Set<string> {
     const schema = spec.components?.schemas?.[schemaName];
