@@ -7,8 +7,11 @@ import com.miqroera.miqrokey.domain.crypto.VirtualKeyMaterial;
 import com.miqroera.miqrokey.domain.crypto.impl.HmacVirtualKeyProvider;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -144,6 +147,11 @@ public final class GatewayTestKeys {
      * binding, credential, model allowlist, grant models, upstream models and
      * product code. {@code baseUrl} is the upstream base URL of every credential
      * (the mock provider in tests).
+     * <p>
+     * Every snapshot also carries the MCP proxy fixtures (consumers by digest +
+     * the open/gated services under {@code baseUrl}/mcp); they are inert unless a
+     * test calls {@code /mcpservers/<name>/mcp}.
+     * </p>
      */
     public static RouteSnapshot snapshot(String baseUrl, KeyFixture... keys) {
         Map<String, RouteSnapshot.KeyRecord> keyMap = new LinkedHashMap<>();
@@ -168,7 +176,89 @@ public final class GatewayTestKeys {
             providerIdsMap.putIfAbsent(key.productId(), key.providerId());
         }
         return new RouteSnapshot(1, Instant.EPOCH, keyMap, bindingMap, credentialMap, modelsMap, grantModelsMap,
-                upstreamModelsMap, productCodesMap, providerIdsMap, Map.of(), Map.of());
+                upstreamModelsMap, productCodesMap, providerIdsMap, mcpConsumers(), mcpServices(baseUrl));
+    }
+
+    // ------------------------------------------------------------------
+    // MCP proxy fixtures (F01 contract tests; see McpProxyContractTest)
+    // ------------------------------------------------------------------
+
+    /** Service with server ACL mode NONE — any consumer may call it. */
+    public static final String MCP_OPEN_SERVICE = "open-demo";
+    /** Service with server ACL mode ALLOW (MCP_ALLOWED + MCP_SERVER_ONLY). */
+    public static final String MCP_GATED_SERVICE = "gated-demo";
+    /** Enabled tool on {@link #MCP_OPEN_SERVICE} (inherits server rule). */
+    public static final String MCP_TOOL_ECHO = "echo-tool";
+    /** Disabled tool on {@link #MCP_OPEN_SERVICE}. */
+    public static final String MCP_TOOL_LEGACY = "legacy-tool";
+    /** Enabled tool on {@link #MCP_GATED_SERVICE} (inherits server rule). */
+    public static final String MCP_TOOL_SHARED = "shared-tool";
+    /** Enabled tool on {@link #MCP_GATED_SERVICE} with an ALLOW override. */
+    public static final String MCP_TOOL_RESTRICTED = "restricted-tool";
+    /** Disabled tool on {@link #MCP_GATED_SERVICE}. */
+    public static final String MCP_TOOL_QUIET = "quiet-tool";
+
+    /** One API-consumer fixture: self-consistent presented key + digest. */
+    public record ConsumerFixture(UUID id, String name, String presentedKey) {
+        public byte[] digest() {
+            return sha256(presentedKey);
+        }
+    }
+
+    /** On the gated service's server list and restricted-tool ALLOW list. */
+    public static final ConsumerFixture MCP_ALLOWED = consumer("allowed");
+    /** On the gated service's server list only (tool override must deny). */
+    public static final ConsumerFixture MCP_SERVER_ONLY = consumer("server-only");
+    /** On no list at all. */
+    public static final ConsumerFixture MCP_OUTSIDER = consumer("outsider");
+
+    private static ConsumerFixture consumer(String label) {
+        String name = "drill-" + label;
+        return new ConsumerFixture(UUID.nameUUIDFromBytes(("mqk-consumer-" + name).getBytes(StandardCharsets.UTF_8)),
+                name, "mqk_api_drill_" + label + "_" + UUID.randomUUID());
+    }
+
+    private static Map<String, RouteSnapshot.ConsumerRecord> mcpConsumers() {
+        Map<String, RouteSnapshot.ConsumerRecord> consumers = new LinkedHashMap<>();
+        for (ConsumerFixture fixture : List.of(MCP_ALLOWED, MCP_SERVER_ONLY, MCP_OUTSIDER)) {
+            consumers.putIfAbsent(fixture.id().toString(),
+                    new RouteSnapshot.ConsumerRecord(fixture.id(), TENANT_ID, fixture.name(), fixture.digest()));
+        }
+        return consumers;
+    }
+
+    private static Map<String, RouteSnapshot.McpServerRecord> mcpServices(String baseUrl) {
+        String endpoint = baseUrl + "/mcp";
+        RouteSnapshot.McpServerRecord open = new RouteSnapshot.McpServerRecord(
+                serviceId(MCP_OPEN_SERVICE), TENANT_ID, MCP_OPEN_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE",
+                "NONE", Set.of(),
+                List.of(tool(MCP_TOOL_ECHO, "ENABLED", null, Set.of()), tool(MCP_TOOL_LEGACY, "DISABLED", null, Set.of())));
+        RouteSnapshot.McpServerRecord gated = new RouteSnapshot.McpServerRecord(
+                serviceId(MCP_GATED_SERVICE), TENANT_ID, MCP_GATED_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE",
+                "ALLOW", Set.of(MCP_ALLOWED.id(), MCP_SERVER_ONLY.id()),
+                List.of(tool(MCP_TOOL_SHARED, "ENABLED", null, Set.of()),
+                        tool(MCP_TOOL_RESTRICTED, "ENABLED", "ALLOW", Set.of(MCP_ALLOWED.id())),
+                        tool(MCP_TOOL_QUIET, "DISABLED", null, Set.of())));
+        Map<String, RouteSnapshot.McpServerRecord> services = new LinkedHashMap<>();
+        services.put(MCP_OPEN_SERVICE, open);
+        services.put(MCP_GATED_SERVICE, gated);
+        return services;
+    }
+
+    private static UUID serviceId(String name) {
+        return UUID.nameUUIDFromBytes(("mqk-mcp-service-" + name).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static RouteSnapshot.McpToolRecord tool(String name, String status, String overrideMode, Set<UUID> allowed) {
+        return new RouteSnapshot.McpToolRecord(name, status, overrideMode, allowed);
+    }
+
+    private static byte[] sha256(String value) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
     }
 
     /**
