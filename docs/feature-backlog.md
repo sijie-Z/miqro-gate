@@ -29,7 +29,7 @@
 | F12 | Tools 重试门禁（非幂等显式确认；首字节前才重试；默认关闭） | study A6（raw 12） | 清晰 | DONE（2026-09-05，V30+数据面，PR #→） | F01 | 语义与网关「首字节前一次重试」同源：5xx/连接失败/超时条件可选，POST/PUT/PATCH 工具需 `idempotencyConfirmed` 才重试 |
 | F13 | Tools 熔断（三态；最小请求数防误判；慢调用阈值 < 后端超时校验；熔断期跳过重试；429 可触发） | study A7（raw 13） | 清晰 | DONE（2026-09-05，V30+数据面，PR #→） | F01 | 状态机纯函数 + 默认关闭；慢阈值校验对照服务 check_timeout_seconds；429 需显式加入触发状态码；熔断桶按工具名/方法名隔离 |
 | F14 | Tools 分组（引用不复制；组内唯一；AutoPrefix 冲突处理；单组默认 10 个控 Token） | study A9（raw 17） | 清晰 | PLANNED | F01 | 引用式虚拟端点 |
-| F15 | MCP 纯元数据访问日志（`aigw.mcp.*` 固定前缀，不存正文） | study A8（raw 16） | 清晰 | PLANNED | F01 | 随代理接线落 |
+| F15 | MCP 纯元数据访问日志（`aigw.mcp.*` 固定前缀，不存正文） | study A8（raw 16） | 清晰 | DONE（2026-09-05，V29+网关 writer+查询 API，PR #→） | F01 | 随代理接线落：网关异步批量写 `mcp_access_log`（幂等/饱和 drop+计数），管理端 `GET /api/v1/admin/mcp-access-logs`；401/404 无可信身份不落行 |
 | F16 | Tools 版本管理（配置快照与运行分离；语义版本化；生效版永不裁剪；幂等回滚） | study A3（raw 11） | 部分（语义清晰、落点需定） | SCAFFOLD | 无（可独立于 F01） | 架子：工具定义加版本列 + 快照表设计待细化 |
 | F17 | Tools OpenAPI 批量导入 | progress P3.5 边界 | 部分（导入格式依赖工具 OpenAPI 结构） | SCAFFOLD | 无 | 解析器契约先立（vendor 扩展字段未知） |
 | F18 | 模型探测失败的手动录入兜底（模型目录人工维护入口） | study A5 | 清晰 | SCAFFOLD | 模型目录现仅成功抓取写入 | 手动录入需保留「目录来源」标记防与抓取冲突 |
