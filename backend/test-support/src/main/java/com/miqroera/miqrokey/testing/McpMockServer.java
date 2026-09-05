@@ -25,14 +25,19 @@ public final class McpMockServer implements AutoCloseable {
 
     private static final String DEFAULT_RESPONSE = "{\"jsonrpc\":\"2.0\",\"result\":{},\"id\":1}";
 
-    /** One captured inbound request. */
+    /** One inbound request. */
     public record Request(String method, String path, String sessionId, String authorization, String xApiKey,
             String contentType, byte[] body) {
+    }
+
+    /** A scripted next response (retry/breaker scenarios). */
+    public record QueuedResponse(String body, int status) {
     }
 
     private final HttpServer server;
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final List<Request> requests = new CopyOnWriteArrayList<>();
+    private final java.util.concurrent.ConcurrentLinkedQueue<QueuedResponse> scripted = new java.util.concurrent.ConcurrentLinkedQueue<>();
     private volatile byte[] responseBody = DEFAULT_RESPONSE.getBytes(StandardCharsets.UTF_8);
     private volatile int responseStatus = 200;
 
@@ -52,15 +57,21 @@ public final class McpMockServer implements AutoCloseable {
         return "http://127.0.0.1:" + server.getAddress().getPort();
     }
 
-    /** Configures the response the mock serves for subsequent requests. */
+    /** Configures the fallback response for requests without a scripted one. */
     public void setResponse(String body, int status) {
         this.responseBody = body == null ? new byte[0] : body.getBytes(StandardCharsets.UTF_8);
         this.responseStatus = status;
     }
 
-    /** Clears captured requests and restores the default 200 result envelope. */
+    /** Scripts one response per upcoming request, consumed in FIFO order. */
+    public void queueResponse(String body, int status) {
+        scripted.add(new QueuedResponse(body, status));
+    }
+
+    /** Clears captured requests, scripted queue and restores the 200 default. */
     public void reset() {
         requests.clear();
+        scripted.clear();
         responseBody = DEFAULT_RESPONSE.getBytes(StandardCharsets.UTF_8);
         responseStatus = 200;
     }
@@ -79,9 +90,11 @@ public final class McpMockServer implements AutoCloseable {
                 exchange.getRequestHeaders().getFirst("Authorization"),
                 exchange.getRequestHeaders().getFirst("x-api-key"),
                 exchange.getRequestHeaders().getFirst("Content-Type"), body));
-        byte[] out = responseBody;
+        QueuedResponse scriptedResponse = scripted.poll();
+        byte[] out = scriptedResponse != null ? scriptedResponse.body().getBytes(StandardCharsets.UTF_8) : responseBody;
+        int status = scriptedResponse != null ? scriptedResponse.status() : responseStatus;
         exchange.getResponseHeaders().set("Content-Type", "application/json");
-        exchange.sendResponseHeaders(responseStatus, out.length);
+        exchange.sendResponseHeaders(status, out.length);
         try (OutputStream os = exchange.getResponseBody()) {
             os.write(out);
         }

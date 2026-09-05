@@ -339,6 +339,10 @@ MCP Tools 管理：`tool_name`（AI Agent 调用唯一标识，snake_case）、`
 ### `mcp_access_log` (V29，F15 MCP 元数据访问日志)
 
 网关数据面 F01 代理的审计行（写方=网关异步批量 writer，读方=管理 API §5.24）。列：`id uuid`（网关侧生成）、`tenant_id`（FK tenants ON DELETE RESTRICT）、`service_id/service_name`、`consumer_id/consumer_name`（快照身份快照值，非 FK——服务/消费者删除不毁审计）、`rpc_method`（信封 method，可空=不可解析）、`tool_name`（tools/call 的 `params.name`，其余方法空）、`status`（CHECK：`FORWARDED|SERVICE_DENIED|TOOL_DENIED|TOOL_UNAVAILABLE|INVALID_ENVELOPE|UPSTREAM_FAILURE`）、`http_status`（FORWARDED=上游状态；拒绝类=客户端可见 403/400；UPSTREAM_FAILURE=空）、`gateway_request_id`、`occurred_at timestamptz`。**幂等**：唯一索引 `(tenant_id, gateway_request_id)`（重试 flush `ON CONFLICT DO NOTHING`）。查询索引：`(tenant_id, occurred_at DESC)`、`(tenant_id, service_name, occurred_at DESC)`、`(tenant_id, consumer_name, occurred_at DESC)`。正文永不入表。
+
+### `mcp_resilience_policy` (V30，F12/F13 韧性配置)
+
+每 MCP 服务一行（`mcp_service_id` PK，FK mcp_services ON DELETE CASCADE）：重试门禁与熔断配置，**默认全关**（无行=行为不变）。F12 列：`retry_enabled`、`retry_max`（1–5）、`retry_conditions`（CSV `SERVER_5XX|CONNECTION_FAILURE|TIMEOUT`）、`retry_idempotency_confirmed`（POST/PUT/PATCH 工具调用重试需显式确认）。F13 列：`breaker_enabled`、`breaker_window_seconds`（1–60）、`breaker_min_requests`（1–100）、`breaker_error_enabled`/`breaker_error_ratio`（1–100）/`breaker_error_status_codes`（CSV 400–599，≤32，默认 500,502,503,504）、`breaker_slow_enabled`/`breaker_slow_call_ms`（100–60000）/`breaker_slow_ratio`、`breaker_open_seconds`（5–600）、`breaker_probe_count`（1–10）、`breaker_probe_success`（1–10 且 ≤probe_count）、`breaker_skip_retry`（默认 true）。`version`（每次 upsert +1）、`created_by`/`updated_by`、时间戳。慢阈值与服务 `check_timeout_seconds` 的跨字段校验在管理 API 层（`RESILIENCE_SLOW_EXCEEDS_TIMEOUT`）。数据面经路由快照读取本表（loader LEFT JOIN，无行→null=全关）。
 ## 7. 告警、导出和审计
 
 ### `webhook_endpoints`
