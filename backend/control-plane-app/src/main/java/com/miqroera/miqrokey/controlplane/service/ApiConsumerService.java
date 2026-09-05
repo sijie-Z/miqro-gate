@@ -24,10 +24,13 @@ public class ApiConsumerService {
 
     private final ApiConsumerRepository repository;
     private final ConsumerJwtVerifier jwtVerifier;
+    private final RouteRefreshPublisher routeRefreshPublisher;
 
-    public ApiConsumerService(ApiConsumerRepository repository, ConsumerJwtVerifier jwtVerifier) {
+    public ApiConsumerService(ApiConsumerRepository repository, ConsumerJwtVerifier jwtVerifier,
+            RouteRefreshPublisher routeRefreshPublisher) {
         this.repository = repository;
         this.jwtVerifier = jwtVerifier;
+        this.routeRefreshPublisher = routeRefreshPublisher;
     }
 
     public List<ApiConsumerView> list(UUID tenantId) {
@@ -44,6 +47,7 @@ public class ApiConsumerService {
         } catch (DuplicateKeyException e) {
             throw new ApiException(HttpStatus.CONFLICT, "CONSUMER_NAME_TAKEN", "消费者名称已存在。");
         }
+        routeRefreshPublisher.publishChanged();
         return new CreatedConsumer(toView(consumer), key.plaintext());
     }
 
@@ -53,7 +57,9 @@ public class ApiConsumerService {
         if ("DISABLED".equals(consumer.status())) {
             throw new ApiException(HttpStatus.CONFLICT, "CONSUMER_ALREADY_DISABLED", "消费者已禁用。");
         }
-        return toView(repository.update(withVersion(consumer, "DISABLED", null, null, null)));
+        ApiConsumerView view = toView(repository.update(withVersion(consumer, "DISABLED", null, null, null)));
+        routeRefreshPublisher.publishChanged();
+        return view;
     }
 
     /**

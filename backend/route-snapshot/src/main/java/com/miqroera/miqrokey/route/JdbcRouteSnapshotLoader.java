@@ -9,9 +9,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.net.URI;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -70,8 +73,10 @@ public final class JdbcRouteSnapshotLoader {
         Map<UUID, Set<String>> grantModels = loadGrantModels();
         Map<UUID, Set<String>> upstreamModels = loadUpstreamModels();
         ProductIds productIds = loadProductIds();
+        Map<String, RouteSnapshot.ConsumerRecord> consumers = loadConsumers();
+        Map<String, RouteSnapshot.McpServerRecord> mcpServices = loadMcpServices();
         return new RouteSnapshot(version, loadedAt, keys, bindings, credentials, models, grantModels, upstreamModels,
-                productIds.productCodes(), productIds.providerIds());
+                productIds.productCodes(), productIds.providerIds(), consumers, mcpServices);
     }
 
     private Map<String, RouteSnapshot.KeyRecord> loadKeys() {
@@ -229,6 +234,112 @@ public final class JdbcRouteSnapshotLoader {
             providerIds.put(productId, (UUID) rs.getObject("provider_id"));
         });
         return new ProductIds(productCodes, providerIds);
+    }
+
+    /**
+     * ACTIVE external-system consumers by API-key digest (MCP caller auth, Tencent
+     * doc 134890).
+     */
+    private Map<String, RouteSnapshot.ConsumerRecord> loadConsumers() {
+        Map<String, RouteSnapshot.ConsumerRecord> byDigest = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT id, tenant_id, name, key_digest
+                FROM api_consumers
+                WHERE status = 'ACTIVE'
+                """, (rs, rowNum) -> {
+            UUID id = (UUID) rs.getObject("id");
+            byDigest.putIfAbsent(id.toString(), new RouteSnapshot.ConsumerRecord(id, (UUID) rs.getObject("tenant_id"),
+                    rs.getString("name"), rs.getBytes("key_digest")));
+            return null;
+        });
+        return byDigest;
+    }
+
+    /**
+     * ONLINE MCP services by service name (Tencent docs 135906 / 134890) with their
+     * two-level access control. Three read passes merged in memory: service+mode,
+     * server-list grants, tools joined with optional override grants (a tool row
+     * repeats once per override consumer).
+     */
+    private Map<String, RouteSnapshot.McpServerRecord> loadMcpServices() {
+        Map<String, RouteSnapshot.McpServerRecord> services = new LinkedHashMap<>();
+        Map<UUID, Set<UUID>> serverLists = new LinkedHashMap<>();
+        // serviceId -> toolId -> {toolName, status, overrideMode|null, consumerIds}
+        Map<UUID, Map<UUID, Object[]>> toolsByService = new LinkedHashMap<>();
+
+        jdbc.query("""
+                SELECT s.id, s.tenant_id, s.name, s.endpoint, s.transport, s.status, a.mode AS acl_mode
+                FROM mcp_services s
+                LEFT JOIN mcp_service_access a ON a.mcp_service_id = s.id
+                WHERE s.status = 'ONLINE'
+                """, (rs, rowNum) -> {
+            UUID id = (UUID) rs.getObject("id");
+            services.put(rs.getString("name"),
+                    new RouteSnapshot.McpServerRecord(id, (UUID) rs.getObject("tenant_id"), rs.getString("name"),
+                            rs.getString("endpoint"), rs.getString("transport"), rs.getString("status"),
+                            rs.getString("acl_mode"), Set.of(), List.of()));
+            serverLists.put(id, new LinkedHashSet<>());
+            toolsByService.put(id, new LinkedHashMap<>());
+            return null;
+        });
+
+        jdbc.query("""
+                SELECT sa.mcp_service_id AS service_id, g.consumer_id
+                FROM mcp_access_grants g
+                JOIN mcp_service_access sa ON sa.id = g.service_access_id
+                WHERE g.tool_id IS NULL
+                """, (rs, rowNum) -> {
+            UUID serviceId = (UUID) rs.getObject("service_id");
+            Set<UUID> list = serverLists.get(serviceId);
+            if (list != null) {
+                list.add((UUID) rs.getObject("consumer_id"));
+            }
+            return null;
+        });
+
+        jdbc.query("""
+                SELECT t.mcp_service_id AS service_id, t.id AS tool_id, t.tool_name, t.status,
+                       g.mode AS override_mode, g.consumer_id AS override_consumer
+                FROM mcp_tools t
+                LEFT JOIN mcp_access_grants g ON g.tool_id = t.id
+                """, (rs, rowNum) -> {
+            UUID serviceId = (UUID) rs.getObject("service_id");
+            UUID toolId = (UUID) rs.getObject("tool_id");
+            Map<UUID, Object[]> byId = toolsByService.get(serviceId);
+            if (byId == null) {
+                return null;
+            }
+            Object[] state = byId.get(toolId);
+            if (state == null) {
+                state = new Object[]{rs.getString("tool_name"), rs.getString("status"), rs.getString("override_mode"),
+                        new LinkedHashSet<UUID>()};
+                byId.put(toolId, state);
+            }
+            UUID consumer = (UUID) rs.getObject("override_consumer");
+            if (consumer != null) {
+                state[2] = rs.getString("override_mode");
+                @SuppressWarnings("unchecked")
+                Set<UUID> ids = (Set<UUID>) state[3];
+                ids.add(consumer);
+            }
+            return null;
+        });
+
+        Map<String, RouteSnapshot.McpServerRecord> result = new LinkedHashMap<>();
+        for (RouteSnapshot.McpServerRecord service : services.values()) {
+            List<RouteSnapshot.McpToolRecord> tools = new ArrayList<>();
+            for (Object[] state : toolsByService.getOrDefault(service.id(), Map.of()).values()) {
+                @SuppressWarnings("unchecked")
+                Set<UUID> ids = (Set<UUID>) state[3];
+                tools.add(
+                        new RouteSnapshot.McpToolRecord((String) state[0], (String) state[1], (String) state[2], ids));
+            }
+            result.put(service.name(),
+                    new RouteSnapshot.McpServerRecord(service.id(), service.tenantId(), service.name(),
+                            service.endpoint(), service.transport(), service.status(), service.aclMode(),
+                            serverLists.getOrDefault(service.id(), Set.of()), tools));
+        }
+        return result;
     }
 
     private record ProductIds(Map<UUID, String> productCodes, Map<UUID, UUID> providerIds) {

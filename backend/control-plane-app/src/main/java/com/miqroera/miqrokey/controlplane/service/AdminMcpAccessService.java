@@ -41,14 +41,17 @@ public class AdminMcpAccessService {
     private final McpToolRepository toolRepository;
     private final ApiConsumerRepository consumerRepository;
     private final AuditService auditService;
+    private final RouteRefreshPublisher routeRefreshPublisher;
 
     public AdminMcpAccessService(McpAccessRepository accessRepository, McpServiceRepository serviceRepository,
-            McpToolRepository toolRepository, ApiConsumerRepository consumerRepository, AuditService auditService) {
+            McpToolRepository toolRepository, ApiConsumerRepository consumerRepository, AuditService auditService,
+            RouteRefreshPublisher routeRefreshPublisher) {
         this.accessRepository = accessRepository;
         this.serviceRepository = serviceRepository;
         this.toolRepository = toolRepository;
         this.consumerRepository = consumerRepository;
         this.auditService = auditService;
+        this.routeRefreshPublisher = routeRefreshPublisher;
     }
 
     public McpAccessView view(UUID tenantId, UUID serviceId) {
@@ -95,6 +98,7 @@ public class AdminMcpAccessService {
         }
         auditService.record(tenantId, adminId, "MCP_ACCESS_MODE", "MCP_SERVICE", serviceId,
                 "{\"mode\":\"" + mode.name() + "\"}", requestId);
+        routeRefreshPublisher.publishChanged();
         return view(tenantId, serviceId);
     }
 
@@ -136,6 +140,7 @@ public class AdminMcpAccessService {
                 "{\"toolId\":" + (toolId == null ? "null" : "\"" + toolId + "\"") + ",\"mode\":\"" + mode.name()
                         + "\",\"consumers\":" + validated.size() + "}",
                 requestId);
+        routeRefreshPublisher.publishChanged();
         return view(tenantId, serviceId);
     }
 
@@ -158,6 +163,7 @@ public class AdminMcpAccessService {
         }
         auditService.record(tenantId, adminId, "MCP_ACCESS_RESET", "MCP_SERVICE", serviceId,
                 "{\"toolId\":" + (toolId == null ? "null" : "\"" + toolId + "\"") + "}", requestId);
+        routeRefreshPublisher.publishChanged();
         return view(tenantId, serviceId);
     }
 

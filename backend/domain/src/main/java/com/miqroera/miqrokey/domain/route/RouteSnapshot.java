@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import java.time.Instant;
 import java.util.Collections;
 import java.net.URI;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -45,7 +46,8 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         Map<UUID, BindingRecord> bindings, Map<UUID, CredentialRecord> credentials,
         Map<UUID, Set<String>> modelsByKeyId, Map<UUID, Set<String>> grantModelsByGrantId,
         Map<UUID, Set<String>> upstreamModelsByProductId, Map<UUID, String> productCodesByProductId,
-        Map<UUID, UUID> providerIdsByProductId) {
+        Map<UUID, UUID> providerIdsByProductId, Map<String, ConsumerRecord> consumersByDigest,
+        Map<String, McpServerRecord> mcpServicesByName) {
 
     public RouteSnapshot {
         keys = Map.copyOf(keys);
@@ -56,6 +58,8 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         upstreamModelsByProductId = immutableSets(upstreamModelsByProductId);
         productCodesByProductId = Map.copyOf(productCodesByProductId);
         providerIdsByProductId = Map.copyOf(providerIdsByProductId);
+        consumersByDigest = Map.copyOf(consumersByDigest);
+        mcpServicesByName = Map.copyOf(mcpServicesByName);
     }
 
     private static Map<UUID, Set<String>> immutableSets(Map<UUID, Set<String>> map) {
@@ -65,7 +69,7 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
 
     public static RouteSnapshot empty(long version, Instant loadedAt) {
         return new RouteSnapshot(version, loadedAt, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
-                Map.of(), Map.of());
+                Map.of(), Map.of(), Map.of(), Map.of());
     }
 
     public KeyRecord key(String publicKeyId) {
@@ -225,4 +229,69 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         return java.util.Objects.hash(version, loadedAt, keys, bindings, credentials, modelsByKeyId,
                 grantModelsByGrantId, upstreamModelsByProductId, productCodesByProductId, providerIdsByProductId);
     }
+
+    /** Finds an ACTIVE consumer by its API-key digest (small set, linear scan). */
+    public ConsumerRecord consumerByDigest(byte[] digestBytes) {
+        for (ConsumerRecord consumer : consumersByDigest.values()) {
+            if (java.security.MessageDigest.isEqual(consumer.digest(), digestBytes)) {
+                return consumer;
+            }
+        }
+        return null;
+    }
+
+    public McpServerRecord mcpService(String name) {
+        return mcpServicesByName.get(name);
+    }
+
+    /**
+     * One external-system consumer (Tencent doc 134890 semantics) — indexed by the
+     * SHA-256 hex digest of its API key so the gateway can authenticate MCP callers
+     * without storing or decrypting any secret.
+     */
+    public record ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest) {
+
+        public ConsumerRecord {
+            digest = digest.clone();
+        }
+
+        public byte[] digest() {
+            return digest.clone();
+        }
+    }
+
+    /**
+     * An MCP service exposed at {@code /mcpservers/<name>/mcp} (Tencent doc
+     * 135906): endpoint/transport/status plus its two-level access control (server
+     * mode + per-tool overrides, Tencent doc 134890). Only rows that match the
+     * loader's ACTIVE filter appear.
+     */
+    public record McpServerRecord(UUID id, UUID tenantId, String name, String endpoint, String transport, String status,
+            String aclMode, Set<UUID> serverConsumerIds, List<McpToolRecord> tools) {
+
+        public McpServerRecord {
+            serverConsumerIds = Set.copyOf(serverConsumerIds);
+            tools = List.copyOf(tools);
+        }
+
+        public McpToolRecord tool(String toolName) {
+            for (McpToolRecord tool : tools) {
+                if (tool.toolName().equals(toolName)) {
+                    return tool;
+                }
+            }
+            return null;
+        }
+    }
+
+    /**
+     * One tool of an MCP service; overrideMode null means inherit the server rule.
+     */
+    public record McpToolRecord(String toolName, String status, String overrideMode, Set<UUID> toolConsumerIds) {
+
+        public McpToolRecord {
+            toolConsumerIds = Set.copyOf(toolConsumerIds);
+        }
+    }
+
 }
