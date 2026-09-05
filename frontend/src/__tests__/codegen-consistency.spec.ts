@@ -6,37 +6,30 @@ import { readFileSync } from 'node:fs';
  * docs/openapi/openapi-3.1.json is the machine-readable contract (springdoc
  * generates it; CI guards it against breaking diffs; openapi-typescript
  * renders src/types/generated.ts from it via `npm run gen:types`).
- * Handwritten types/api.ts stays the runtime source for now, but its core
- * DTOs must not carry fields the OpenAPI schema does not declare — that
- * would mean portal/API drift. Members are read from the JSON source
- * directly, so this spec is independent of the generated file formatting.
+ * Handwritten types/api.ts stays the runtime source for now, but its DTOs
+ * must not carry fields the OpenAPI schema does not declare — that would
+ * mean portal/API drift.
  *
- * The pair table maps handwritten names to schema names (*View DTOs map to
- * their backend record: McpServiceView → McpService, …).
+ * Pair derivation is automatic so the guard never goes stale: every exported
+ * `interface` in api.ts is matched against the schema by exact name, or by
+ * the *View-suffix convention (McpServiceView → McpService). Type aliases
+ * and enums have no members and are skipped. Members come from the JSON
+ * source, so the spec is independent of the generated file formatting.
  */
 describe('codegen consistency (openapi schema vs handwritten core types)', () => {
   const spec = JSON.parse(readFileSync('../docs/openapi/openapi-3.1.json', 'utf-8'));
   const handwritten = readFileSync('src/types/api.ts', 'utf-8');
+  const schemas = new Set(Object.keys(spec.components?.schemas ?? {}));
 
-  const PAIRS: Record<string, string> = {
-    VirtualKeyView: 'VirtualKeyView',
-    McpServiceView: 'McpService',
-    McpToolView: 'McpTool',
-    McpAccessView: 'McpAccessView',
-    AlertRule: 'AlertRule',
-    ExportTask: 'ExportTask',
-    QuotaRuleView: 'QuotaRuleView',
-    SubscriptionView: 'SubscriptionView',
-    UsageRecordPage: 'UsageRecordPage',
-    CredentialView: 'CredentialView',
-    SkillView: 'SkillView',
-    AgentView: 'AgentView',
-    ProviderProductView: 'ProductView',
-    ConfigEntryView: 'ConfigEntry',
-    ApiConsumerView: 'ApiConsumerView',
-    WebhookEndpointView: 'WebhookEndpointView',
-    AuditEventView: 'AuditEventView',
-  };
+  const exportedInterfaces = new Set(
+    [...handwritten.matchAll(/^export interface (\w+) \{/gm)].map((m) => m[1]),
+  );
+
+  const PAIRS: Array<[apiName: string, schemaName: string]> = [...exportedInterfaces]
+    .filter((n) => schemas.has(n) || (n.endsWith('View') && schemas.has(n.slice(0, -4))))
+    .map((n) => (schemas.has(n) ? [n, n] : [n, n.slice(0, -4)]));
+
+  expect(PAIRS.length).toBeGreaterThan(20);
 
   function schemaMembers(schemaName: string): Set<string> {
     const schema = spec.components?.schemas?.[schemaName];
@@ -55,8 +48,8 @@ describe('codegen consistency (openapi schema vs handwritten core types)', () =>
     return fields;
   }
 
-  for (const [apiName, schemaName] of Object.entries(PAIRS)) {
-    it(`core DTO ${apiName}: handwritten fields are declared by the OpenAPI schema`, () => {
+  for (const [apiName, schemaName] of PAIRS) {
+    it(`core DTO ${apiName} → ${schemaName}: handwritten fields are declared by the OpenAPI schema`, () => {
       const api = apiMembers(apiName);
       const specFields = schemaMembers(schemaName);
       expect(api.size, `${apiName} should resolve in api.ts`).toBeGreaterThan(0);
