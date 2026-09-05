@@ -102,9 +102,8 @@ class McpProxyContractTest {
         @DisplayName("should reject a request with no credential")
         void shouldRejectMissingCredential() {
             byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
-                    .headers(h -> h.set(HttpHeaders.AUTHORIZATION, ""))
-                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized().expectBody()
-                    .returnResult().getResponseBody();
+                    .headers(h -> h.set(HttpHeaders.AUTHORIZATION, "")).bodyValue(envelope("tools/list", null))
+                    .exchange().expectStatus().isUnauthorized().expectBody().returnResult().getResponseBody();
 
             assertThat(errorType(body)).isEqualTo("invalid_api_key");
             assertThat(mockServer.capturedRequests()).isEmpty();
@@ -154,8 +153,9 @@ class McpProxyContractTest {
         @DisplayName("should reject a body that is not a JSON envelope")
         void shouldRejectMalformedEnvelope() {
             byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
-                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_ALLOWED)).bodyValue("this is not json")
-                    .exchange().expectStatus().isBadRequest().expectBody().returnResult().getResponseBody();
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_ALLOWED))
+                    .bodyValue("this is not json").exchange().expectStatus().isBadRequest().expectBody().returnResult()
+                    .getResponseBody();
 
             assertThat(errorType(body)).isEqualTo("invalid_jsonrpc");
             assertThat(mockServer.capturedRequests()).isEmpty();
@@ -241,7 +241,8 @@ class McpProxyContractTest {
         void shouldInheritServerRule() {
             webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_GATED_SERVICE)
                     .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_SERVER_ONLY))
-                    .bodyValue(envelope("tools/call", GatewayTestKeys.MCP_TOOL_SHARED)).exchange().expectStatus().isOk();
+                    .bodyValue(envelope("tools/call", GatewayTestKeys.MCP_TOOL_SHARED)).exchange().expectStatus()
+                    .isOk();
 
             assertThat(mockServer.capturedRequests()).hasSize(1);
         }
@@ -335,8 +336,7 @@ class McpProxyContractTest {
             String upstreamBody = "{\"jsonrpc\":\"2.0\",\"result\":{\"tools\":[{\"name\":\"echo-tool\"}]},\"id\":1}";
             mockServer.setResponse(upstreamBody, 200);
 
-            byte[] received = webTestClient.post()
-                    .uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+            byte[] received = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
                     .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER))
                     .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isOk().expectBody()
                     .returnResult().getResponseBody();
@@ -350,8 +350,7 @@ class McpProxyContractTest {
             String upstreamBody = "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32001,\"message\":\"upstream boom\"},\"id\":1}";
             mockServer.setResponse(upstreamBody, 503);
 
-            byte[] received = webTestClient.post()
-                    .uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+            byte[] received = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
                     .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER))
                     .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isEqualTo(503).expectBody()
                     .returnResult().getResponseBody();
