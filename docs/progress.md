@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `会话交接 2026-09-05` — `IN_PROGRESS`（详细交接见 docs/session-handoff-2026-09-05.md；Q1-Q7 全量队列与验收清单在该文件）
-- Goal status: `IN_PROGRESS`（2026-09-05；develop @ b8b354d（#154 F01 MCP 代理 v1 已并入，腾讯 doc 135906 形态）；ADR-0013 按用户指令 Accepted（照腾讯/阿里文档实现），状态文本更新待下会话随 handoff 分支合并；剩余：Q1 网关 MCP 契约测试 → Q2 F15 日志 → Q3 F12/F13 → Q4 冒烟 → Q5 UI（等真机反馈）→ Q6 codegen stage2（等知情）→ Q7 Kafka/F32/发布（等拍板））
+- Current goal: `会话执行 2026-09-05（Q1-Q3/Q6 自主轮）` — `IN_PROGRESS`（执行与逐批记录见 docs/progress.md「会话交接点 2026-09-05」段；队列总纲仍见 docs/session-handoff-2026-09-05.md）
+- Goal status: `IN_PROGRESS`（2026-09-05；develop @ d57d9a7：#159 ADR-0013 Accepted+postgres digest 刷新+trivyignore 残余、#160 Q1 MCP 契约测试、#161 Q2 F15 元数据日志 已并入；Q3 F12/F13 韧性分支 goal/mcp-resilience-f12-f13 CI 进行中（本地全量 verify 绿）；Q6 codegen stage2 批1/批2 分支 goal/codegen-stage2-b1 CI 进行中；Q4 冒烟=测试通道（Q1 契约测试即演示路径，真机 https 冒烟排后）；Q5 UI 无页面清单保持克制不 churn；Q7 Kafka/F32/发布仍等拍板）
 - Last updated: `2026-09-05 CST`
 ## 会话交接点 2026-09-03 — UI 专项 U0 待验收（用户 2026-09-03 拍板：PostHog 视觉母版 + Vben 布局参考；U0 验收通过前暂停功能 backlog）
 
@@ -2143,3 +2143,38 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - 适配器注册（G3.x）之前 `model_catalog` 恒空，`/v1/models` 返回空列表——严格交集是刻意的安全边界。
 - 30s 定时刷新仍为 NOTIFY 丢失兜底；单节点单监听者范围不变。
 - 真实供应商凭证未提供：`refreshProduct` 只经 Mock/契约测试，真实抓取 `WAITING_FOR_CREDENTIAL`。
+
+## 会话交接点 2026-09-05 — Q1-Q3 数据面轮（逐批记录）
+
+### Q1 网关 MCP 契约测试（#160，merged @6f945cc，DONE）
+- `McpProxyContractTest` 19 用例（gateway-app，无 PG）：401 invalid_api_key（缺凭据/未知 key/空 bearer）、x-api-key 通道、404 mcp_service_not_found、400 invalid_jsonrpc；NONE 开放服务（名单外可调 tools/list、DISABLED 工具仍 403 mcp_tool_unavailable）；ALLOW 门禁服务（名单外 403 mcp_access_denied、工具覆盖 ALLOW 收窄名单内放行/名单外拒绝、DISABLED/未知工具 403 mcp_tool_unavailable、initialize 等非 tools/call 不受工具表影响）；透传卫生（Session-Id 上行转发、消费者凭据绝不上行、响应体逐字节一致、上游 503 状态与体原样拷贝）。
+- fixture：`GatewayTestKeys.snapshot()` 现恒带 consumer（digest 索引）+ open/gated 两个 McpServerRecord（endpoint=baseUrl+/mcp）；新增 test-support `McpMockServer`（loopback JSON-RPC：捕获请求、可配响应/响应序列）。
+- 验证：本类 19/19 + gateway 全模块绿（曾因 Q1 分支未跑 spotless 被 CI verify 抓红 → 补 style commit）。
+
+### Q2 F15 MCP 元数据访问日志（#161，merged @d57d9a7，DONE）
+- V29 `mcp_access_log`：id/tenant/service(id+name 快照)/consumer(id+name 快照)/rpc_method(可空)/tool_name/status CHECK(FORWARDED|SERVICE_DENIED|TOOL_DENIED|TOOL_UNAVAILABLE|INVALID_ENVELOPE|UPSTREAM_FAILURE|CIRCUIT_OPEN)/http_status/gateway_request_id/occurred_at；唯一 (tenant_id, gateway_request_id)（幂等 flush）；查询索引 (tenant,occurred_at DESC)、(tenant,service_name,…)、(tenant,consumer_name,…)。正文永不入表。
+- 网关写路径（gateway-app `mcplog` 包）：有界队列（`miqrokey.gateway.mcp-log.capacity` 4096 / `.flush-interval-ms` 1000）专用线程周期 flush；饱和 drop+节流 WARN；批量失败整批重入队（幂等保证重试安全）；persistence 关闭=Noop sink（与 usage 同开关）。sink 调用 fire-and-forget 不阻塞 Reactor。**401/404（预解析失败、无身份）不落行**（与 usage_event 同口径）。
+- 管理查询 API：`GET /api/v1/admin/mcp-access-logs`（service/consumer 精确名、from/to 默认 24h、窗口 ≤31d、limit 默认 200 ≤1000；TIME_RANGE_INVALID/TOO_WIDE/SIZE_INVALID/PARAM_INVALID）；SYSTEM_ADMIN-only deny-by-default；纯读无审计。
+- 测试：McpAccessLogQueueTest 4/4（drain、饱和 drop+count、失败重入队重试、空/非法守卫）；McpAccessLogIntegrationTest 6/6 PG 端到端（FORWARDED 身份/终态/200、上游 503→FORWARDED+503、三种拒绝行、INVALID_ENVELOPE、401/404 零行、writer 幂等）；AdminMcpAccessLogApiIntegrationTest 5/5（新→旧排序、过滤器、窗口/limit、校验矩阵、匿名 401+普通用户 403）。
+- 排障：PG null 参数 cast（`::text/::timestamptz`）；集成测试需 `miqrokey.crypto.*.versions.v1` key 文件（KeyFiles 惯例）；注册端点 201；@AfterEach 清理而非等 0 行。
+
+### Q3 F12/F13 MCP 韧性（分支 goal/mcp-resilience-f12-f13，本地全量 verify 绿，CI 进行中）
+- V30 `mcp_resilience_policy`（每服务一行 PK FK CASCADE；全默认关闭）；domain 纯状态机：`McpResiliencePolicy`（范围校验/disabled() 默认）、`McpRetryPolicy`（SERVER_5XX|CONNECTION_FAILURE|TIMEOUT 条件、1–5 次、首字节前才重试、POST/PUT/PATCH 工具需 idempotencyConfirmed）、`McpCircuitBreaker`（CLOSED/OPEN/HALF_OPEN；滑动窗口+最小请求数防误判；错误比例/慢调用双触发≥1；OPEN 计时→半开探测 probeCount/probeSuccess；线程安全）。
+- 快照承载：McpServerRecord+`resilience`（loader LEFT JOIN 解析 CSV 条件/状态码；无行=null=全关）；McpToolRecord+`method`（V21 列，幂等门用）。
+- 数据面（McpProxyController）：每层 attempt 独立 60s 预算；exchangeToMono 回调内消费 body（**延迟订阅会得到空 body 流——回写必须留在回调内**）；5xx/传输错递归重试（内层链自管错误，rowRecorded 守卫防外层二次重试/双行）；OPEN 快速失败 503 `circuit_open` + F15 CIRCUIT_OPEN 行；熔断桶=工具名或方法名隔离；每次网关调用恰一行 F15 终态。
+- 管理 API：GET/PUT `/api/v1/admin/mcp-services/{serviceId}/resilience`（缺省=disabled；校验：retryMax 1–5+启用必有条件、breaker 双触发≥1、**slowMs < check_timeout_seconds×1000**（`RESILIENCE_SLOW_EXCEEDS_TIMEOUT`）、probeSuccess≤probeCount、状态码 400–599 ≤32；审计 MCP_RESILIENCE_UPDATE+route refresh publish）。
+- 测试：McpCircuitBreakerTest 8/8（守卫/比例开断/窗口滑动/慢调用边界(严格 >)/半开恢复/半开失败重开/探测槽=probeCount）；McpRetryPolicyTest 3 组矩阵；McpResilienceIntegrationTest 7/7 网关 e2e（5xx→200 透明重试、耗尽回 503、POST 幂等门（确认前不重试/确认后重试）、默认零变化、开断快败 503、桶隔离）；AdminMcpResilienceApiIntegrationTest 4/4（默认视图、PUT 往返+审计、校验矩阵含 slow==checkTimeout 边界 400、404/401）。
+- 教训：断路器跨用例状态残留 → 测试按桶隔离/顺序无关设计；嵌套 onErrorResume 双重重试 → rowRecorded 终态守卫。
+
+### Q6 codegen stage 2（分支 goal/codegen-stage2-b1，批1/批2，CI 进行中）
+- 侦察（Explore 子代理）：generated.ts 89 schemas 全 camelCase；全部 View 类字段 spec 输出为 optional（springdoc 未标 required——结构性摩擦，迁移=原子替换且接受 `?:`）；守卫=vitest codegen-consistency.spec 自动 40 对（EXCEPTIONS 仅 ProviderProductView→ProductView）；**路由规则三件套无 spec 对应（openapi-3.1.json 无 route-rules 端点）→ 保留手写**；auth 信封（UserResponse/LoginResponse/ProblemDetails）无 schema 可迁。
+- 批1（merged into 分支）：SubmitModelApprovalRequest/ConfigureQuotaDefaultTemplateRequest/SetMcpAccessGrantsRequest/UpsertQuotaRuleRequest → `components['schemas'][…]` 别名（api/index.ts 内部 type 别名）；ReviewModelApprovalRequest 无调用方直接删除手写定义。
+- 批2：CreateVirtualKeyRequest → schema 类型（spec 中 name 可选——schema 权威化，注释记录）；枚举字面量一致零编译面。
+- 验证：typecheck/vitest(179，守卫配对随手写删除-1 属预期)/lint/build 全绿。后续批候选见 Explore 报告要点（UsageRecord→UsageRecordView 改名、View 类字段 optional 原子替换、null 语义点 formatTime 等）。
+
+### 环境教训（本轮新增/复用）
+- npm run lint（eslint --fix）EOL 重写 ~50 前端文件：`git diff --numstat` 为空即纯 EOL；用 `git checkout-index -f -- $(git status --porcelain | sed 's/^ M //')` 按 index 重写回（git restore 对 autocrlf 归一相等文件不生效）。
+- 分支切换前必须清工作树（多次把脏文件带过分支导致误提交/丢失风险）；stash 后拆分要小心（无路径 stash 会吞全部）。
+- verify -P integration 跑动中严禁改文件/切分支（结果作废一次）。
+- Q1/Q2 dup 内容在 Q3 合并时产生重复内容冲突：统一 checkout --ours（develop 侧为同内容 squash）。
+- `McpProxyController` 修改面：F15/F12/F13 全部在 exchangeToMono 回调内完成 body 消费与回写，README 已注释。
