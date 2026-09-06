@@ -981,10 +981,10 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
 }
 
 .next-keys__mask {
-  font-size: 11px;
+  font-size: var(--ui-font-size-xs);
   line-height: var(--ui-line-height-sm);
   color: var(--ui-foreground-faint);
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 .next-keys__models {
