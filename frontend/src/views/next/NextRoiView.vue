@@ -7,7 +7,7 @@
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { UiButton, UiTable } from '@/ui';
-import type { RoiReportView } from '@/types/api';
+import type { RoiReportView } from '@/types/generated-api';
 
 const report = ref<RoiReportView | null>(null);
 const loading = ref(true);
