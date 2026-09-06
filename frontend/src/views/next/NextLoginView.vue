@@ -148,13 +148,6 @@ function renderError(error: unknown, fallback: string) {
 
     <main class="next-login__form-side" data-testid="login-panel">
       <section class="next-login__form-col">
-        <span class="next-login__mark" aria-hidden="true">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-            <rect x="5" y="10.5" width="14" height="9" rx="2.5" stroke="currentColor" stroke-width="2" />
-            <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" stroke="currentColor" stroke-width="2" />
-            <circle cx="12" cy="15" r="1.6" fill="currentColor" />
-          </svg>
-        </span>
         <div class="next-login__tabs" role="tablist" aria-label="登录或注册">
           <button
             type="button"
@@ -302,78 +295,94 @@ function renderError(error: unknown, fallback: string) {
 
 <style scoped>
 .next-login {
-  position: relative;
-  overflow: hidden;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
   min-height: 100vh;
-  background: var(--ui-background);
   color: var(--ui-foreground);
 }
 
-/* faint geometric accents — our own quiet mark language, not a copied scene */
-.next-login::before {
-  content: '';
-  position: absolute;
-  right: -120px;
-  top: -120px;
-  width: 400px;
-  height: 400px;
-  border-radius: 50%;
-  border: 1.5px solid color-mix(in srgb, var(--ui-primary) 22%, transparent);
-}
-
-.next-login::after {
-  content: '';
-  position: absolute;
-  left: -70px;
-  bottom: -140px;
-  width: 330px;
-  height: 330px;
-  border-radius: 50%;
-  border: 1.5px solid color-mix(in srgb, var(--ui-primary) 14%, transparent);
-}
-
-/* ---- brand panel retired: login keeps our own centered card identity
-       (owner: borrow small details, never the whole page) ---- */
+/* ---- brand panel ---- */
 .next-login__brand {
-  display: none;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: var(--ui-space-8) var(--ui-space-10) var(--ui-space-10);
+  background: var(--ui-login-panel);
+  color: var(--ui-foreground-inverse);
+}
+
+.next-login__brand-top {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+}
+
+.next-login__brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-card);
+  color: var(--ui-primary);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.next-login__brand-name {
+  font-size: var(--ui-font-size-xl);
+  font-weight: var(--ui-weight-semibold);
+  letter-spacing: -0.01em;
+}
+
+.next-login__art {
+  width: 100%;
+  max-width: 560px;
+  margin: var(--ui-space-6) auto;
+}
+
+.next-login__art svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.next-login__brand-body {
+  max-width: 480px;
+}
+
+.next-login__brand-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: var(--ui-weight-semibold);
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+}
+
+.next-login__brand-desc {
+  margin: var(--ui-space-3) 0 0;
+  font-size: var(--ui-font-size-sm);
+  line-height: 1.8;
+  color: rgba(255, 255, 255, 0.72);
 }
 
 /* ---- form column ---- */
 .next-login__form-side {
-  position: relative;
-  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex: 1;
-  background: transparent;
-  padding: var(--ui-space-8) var(--ui-space-4);
+  background: var(--ui-card);
+  padding: var(--ui-space-8) var(--ui-space-6);
 }
 
 .next-login__form-col {
-  width: min(420px, 100%);
+  width: min(400px, 100%);
   display: flex;
   flex-direction: column;
-  background: var(--ui-card);
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-dialog);
-  box-shadow: var(--ui-shadow-card);
-  padding: var(--ui-space-8);
-}
-
-.next-login__mark {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  margin-bottom: var(--ui-space-5);
-  border-radius: 10px;
-  background: var(--ui-primary);
-  color: var(--ui-foreground-inverse);
-  box-shadow: var(--ui-shadow-card);
 }
 
 .next-login__tabs {
@@ -500,14 +509,12 @@ function renderError(error: unknown, fallback: string) {
 
 .next-login__foot {
   margin: var(--ui-space-6) 0 0;
-  padding-top: var(--ui-space-4);
-  border-top: 1px solid var(--ui-border-muted);
-  font-size: var(--ui-font-size-xs);
-  color: var(--ui-foreground-faint);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
   text-align: center;
 }
 
-/* ---- responsive: single centered column on small screens ---- */
+/* ---- responsive: brand panel yields to a single centered column ---- */
 @media (max-width: 959px) {
   .next-login {
     grid-template-columns: 1fr;
