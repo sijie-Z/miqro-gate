@@ -139,6 +139,10 @@ function onClick(event: MouseEvent) {
   background: var(--ui-muted);
 }
 
+.ui-btn--secondary:active:not(:disabled) {
+  background: var(--ui-fill-selected);
+}
+
 .ui-btn--ghost {
   background: transparent;
   color: var(--ui-foreground-secondary);
@@ -147,6 +151,10 @@ function onClick(event: MouseEvent) {
 .ui-btn--ghost:hover:not(:disabled) {
   background: var(--ui-fill-hover);
   color: var(--ui-foreground);
+}
+
+.ui-btn--ghost:active:not(:disabled) {
+  background: var(--ui-fill-selected);
 }
 
 .ui-btn--danger {
