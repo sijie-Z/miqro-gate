@@ -106,7 +106,7 @@ onMounted(load);
     <header class="ui-page-header">
       <div>
         <h1 class="ui-page-title">用量报表</h1>
-        <p class="ui-page-desc">全租户用量：先按条件筛选，再核对汇总与明细。</p>
+        <p class="ui-page-desc">全租户用量：筛选条件 → 汇总 → 明细表。</p>
       </div>
     </header>
 

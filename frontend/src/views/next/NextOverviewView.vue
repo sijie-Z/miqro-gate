@@ -136,9 +136,9 @@ onMounted(load);
   <div class="ui-page next-overview">
     <header class="ui-page-header">
       <div>
-        <h1 class="ui-page-title">总览</h1>
+        <h1 class="ui-page-title">{{ auth.user?.displayName ?? auth.user?.username }}，欢迎回来</h1>
         <p class="ui-page-desc">
-          Virtual Key、用量与成本的关键指标——数据来自网关逐笔记账，与明细页口径一致。
+          内部凭证治理控制台 · 单租户部署 · {{ new Date().getFullYear() }} 年
         </p>
       </div>
       <div class="ui-page-actions">
@@ -158,33 +158,29 @@ onMounted(load);
     </div>
 
     <template v-if="loading">
-      <div class="ui-panel next-overview__panel">
-        <div class="next-overview__stat-band">
-          <div v-for="n in 4" :key="n" class="ui-skeleton next-overview__stat-skeleton" />
-        </div>
+      <div class="next-overview__stat-grid">
+        <div v-for="n in 4" :key="n" class="ui-skeleton next-overview__stat-skeleton" />
       </div>
     </template>
 
     <template v-else>
       <!-- Stat band -->
-      <section class="ui-panel next-overview__panel" data-testid="overview-stats">
-        <div class="next-overview__stat-band">
-          <div v-for="card in stats" :key="card.label" class="next-overview__stat">
-            <div class="next-overview__stat-main">
-              <span class="next-overview__stat-label">{{ card.label }}</span>
-              <span class="next-overview__stat-value ui-num">{{ card.value }}</span>
-              <span class="next-overview__stat-hint">{{ card.hint }}</span>
-            </div>
-            <span
-              class="next-overview__stat-icon"
-              :class="`next-overview__stat-icon--${card.tone}`"
-              aria-hidden="true"
-            >
-              <component :is="card.icon" />
-            </span>
+      <div class="next-overview__stat-grid" data-testid="overview-stats">
+        <section v-for="card in stats" :key="card.label" class="ui-panel next-overview__stat">
+          <div class="next-overview__stat-main">
+            <span class="next-overview__stat-label">{{ card.label }}</span>
+            <span class="next-overview__stat-value ui-num">{{ card.value }}</span>
+            <span class="next-overview__stat-hint">{{ card.hint }}</span>
           </div>
-        </div>
-      </section>
+          <span
+            class="next-overview__stat-icon"
+            :class="`next-overview__stat-icon--${card.tone}`"
+            aria-hidden="true"
+          >
+            <component :is="card.icon" />
+          </span>
+        </section>
+      </div>
 
       <!-- Usage bars + recent keys -->
       <div class="next-overview__grid">
@@ -350,24 +346,25 @@ onMounted(load);
   margin-bottom: var(--ui-space-5);
 }
 
-.next-overview__stat-band {
+.next-overview__stat-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--ui-space-2);
-  padding: var(--ui-space-4) var(--ui-space-5);
+  gap: var(--ui-space-4);
+  margin-bottom: var(--ui-space-5);
+}
+
+@media (max-width: 1100px) {
+  .next-overview__stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .next-overview__stat {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--ui-space-3);
-  padding: var(--ui-space-2) var(--ui-space-4) var(--ui-space-2) var(--ui-space-2);
-  border-right: 1px solid var(--ui-border-muted);
-}
-
-.next-overview__stat:last-child {
-  border-right: none;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-5) var(--ui-space-6);
 }
 
 .next-overview__stat-main {
@@ -437,7 +434,8 @@ onMounted(load);
 }
 
 .next-overview__stat-skeleton {
-  height: 64px;
+  height: 112px;
+  border-radius: var(--ui-radius-panel);
 }
 
 .next-overview__grid {
