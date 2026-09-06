@@ -142,6 +142,17 @@ describe('NextKeysView', () => {
     expect(wrapper.text()).toContain('core-ai');
   });
 
+  it('copies the masked key id from the row action', async () => {
+    mockApi.listVirtualKeys.mockResolvedValue([key({ id: 'k-copy-1', display: 'mqk_live_…8f2a' })]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="key-copy-k-copy-1"]').trigger('click');
+    await flushPromises();
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('mqk_live_…8f2a');
+  });
+
   it('shows the admin-contact onboarding when the account is in no project', async () => {
     mockApi.myGrants.mockResolvedValue({ projects: [], grants: [], purposes: [] });
 
