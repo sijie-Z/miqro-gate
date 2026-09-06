@@ -79,6 +79,41 @@ const columns = [
 
 const activeCount = computed(() => users.value.filter((u) => u.status === 'ACTIVE').length);
 
+// ---- list filters (client-side over the loaded page of users) ----
+const userSearch = ref('');
+const roleFilter = ref('');
+const statusFilter = ref('');
+
+const roleFilterOptions = [
+  { value: '', label: '全部角色' },
+  { value: 'USER', label: '用户' },
+  { value: 'SYSTEM_ADMIN', label: '系统管理员' },
+];
+
+const statusFilterOptions = [
+  { value: '', label: '全部状态' },
+  { value: 'ACTIVE', label: '正常' },
+  { value: 'DISABLED', label: '停用' },
+  { value: 'LOCKED', label: '锁定' },
+];
+
+const filteredUsers = computed(() => {
+  const q = userSearch.value.trim().toLowerCase();
+  return users.value.filter((u) => {
+    if (q) {
+      const haystack = `${u.username} ${u.displayName ?? ''}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    if (roleFilter.value && u.role !== roleFilter.value) return false;
+    if (statusFilter.value && u.status !== statusFilter.value) return false;
+    return true;
+  });
+});
+
+const listEmptyTitle = computed(() =>
+  users.value.length ? '没有符合条件的用户' : '还没有用户',
+);
+
 onMounted(load);
 
 async function load() {
@@ -394,12 +429,38 @@ function formatDate(iso?: string): string {
 
     <!-- List -->
     <section class="ui-panel">
+      <div class="ui-panel-toolbar next-users__filters">
+        <UiInput
+          v-model="userSearch"
+          placeholder="搜索用户名或昵称"
+          width="240px"
+          data-testid="users-search"
+        />
+        <UiSelect
+          v-model="roleFilter"
+          :options="roleFilterOptions"
+          width="150px"
+          data-testid="users-role-filter"
+        />
+        <UiSelect
+          v-model="statusFilter"
+          :options="statusFilterOptions"
+          width="150px"
+          data-testid="users-status-filter"
+        />
+        <span
+          v-if="users.length && filteredUsers.length !== users.length"
+          class="next-users__filter-count ui-num"
+          data-testid="users-filter-count"
+          >{{ filteredUsers.length }} / {{ users.length }} 条</span
+        >
+      </div>
       <UiTable
         :columns="columns"
-        :data="users"
+        :data="filteredUsers"
         :loading="loading"
         row-key="id"
-        empty-title="还没有用户"
+        :empty-title="listEmptyTitle"
         data-testid="users-table"
       >
         <template #username="{ row }">
@@ -661,6 +722,18 @@ function formatDate(iso?: string): string {
   font-size: var(--ui-font-size-sm);
   color: var(--ui-foreground-secondary);
   white-space: nowrap;
+}
+
+.next-users__filters {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.next-users__filter-count {
+  margin-left: auto;
+  align-self: center;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
 }
 
 .next-users__head-inline {
