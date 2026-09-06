@@ -104,6 +104,40 @@ describe('NextUsersView', () => {
     expect(wrapper.text()).toContain('锁定');
   });
 
+  it('filters the list by free text and by role', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await setField(wrapper, '[data-testid="users-search"]', 'root');
+    await flushPromises();
+    const table = wrapper.find('[data-testid="users-table"]');
+    expect(table.text()).toContain('root');
+    expect(table.text()).not.toContain('Alice');
+    expect(wrapper.find('[data-testid="users-filter-count"]').text()).toContain('1 / 3 条');
+
+    await setField(wrapper, '[data-testid="users-search"]', '');
+    await flushPromises();
+    const roleAdmin = wrapper.findAll('.stub-option').find((b) => b.text() === '系统管理员');
+    await roleAdmin!.trigger('click');
+    await flushPromises();
+    const table2 = wrapper.find('[data-testid="users-table"]');
+    expect(table2.text()).toContain('root');
+    expect(table2.text()).not.toContain('alice');
+  });
+
+  it('filters the list by status', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const statusLocked = wrapper.findAll('.stub-option').find((b) => b.text() === '锁定');
+    await statusLocked!.trigger('click');
+    await flushPromises();
+    const table = wrapper.find('[data-testid="users-table"]');
+    expect(table.text()).toContain('locked-acc');
+    expect(table.text()).not.toContain('alice');
+    expect(table.text()).not.toContain('root');
+  });
+
   it('surfaces the load error alert with request id', async () => {
     mockApi.listUsers.mockRejectedValue(
       new (await import('@/api/http')).ApiError({
