@@ -66,6 +66,21 @@ describe('NextAdminUsageView', () => {
     return mount(NextAdminUsageView, { global: { plugins: [createPinia()] } });
   }
 
+  it('passes a picked time range to the summary and records APIs', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="admin-usage-range-30"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.adminUsageSummary).toHaveBeenLastCalledWith(
+      expect.objectContaining({ groupBy: 'project', from: expect.any(String), to: expect.any(String) }),
+    );
+    expect(mockApi.adminUsageRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, size: 20, from: expect.any(String), to: expect.any(String) }),
+    );
+  });
+
   it('renders the tenant summary strip and records with usage badges', async () => {
     const wrapper = mountView();
     await flushPromises();

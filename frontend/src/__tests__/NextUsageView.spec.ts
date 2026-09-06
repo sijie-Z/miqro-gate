@@ -134,6 +134,28 @@ describe('NextUsageView', () => {
     expect(totals).toContain('$0.0004');
   });
 
+  it('passes the picked time range to summary and records', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="usage-range-7"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.usageSummary).toHaveBeenLastCalledWith(
+      'project',
+      expect.any(String),
+      expect.any(String),
+    );
+    expect(mockApi.usageRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        page: 1,
+        size: 20,
+        from: expect.any(String),
+        to: expect.any(String),
+      }),
+    );
+  });
+
   it('renders usage distribution bars for the top groups', async () => {
     const wrapper = mountView();
     await flushPromises();
