@@ -7,7 +7,6 @@
  */
 import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ChartBarIcon, LockOnIcon, NotificationIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
 import { UiButton, UiInput } from '@/ui';
@@ -104,60 +103,46 @@ function renderError(error: unknown, fallback: string) {
         <span class="next-login__brand-name">MiQroGate</span>
       </div>
 
-      <!-- Scene illustration on a white surface card (Vben login style):
-           gateway console + plant + key, flat palette, no gradients -->
+      <!-- Scene illustration floating on the brand panel (Vben style) —
+           white strokes and translucent fills, flat, no gradients -->
       <div class="next-login__art" aria-hidden="true">
-        <svg viewBox="0 0 400 170" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <!-- slim ground line -->
-          <path d="M18 138h364" stroke="#dbe3f2" stroke-width="2" stroke-linecap="round" />
+        <svg viewBox="0 0 460 210" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- ground -->
+          <path d="M30 178h400" stroke="rgba(255,255,255,0.35)" stroke-width="2" stroke-linecap="round" />
           <!-- monitor -->
-          <rect x="120" y="34" width="170" height="104" rx="14" fill="#ffffff" stroke="#c9d6ec" stroke-width="2" />
-          <rect x="130" y="44" width="150" height="84" rx="8" fill="#0f2d6b" />
-          <rect x="146" y="100" width="16" height="20" rx="3" fill="#6aa5ff" />
-          <rect x="172" y="84" width="16" height="36" rx="3" fill="#93b9ff" />
-          <rect x="198" y="66" width="16" height="54" rx="3" fill="#c4d8ff" />
-          <path d="M230 106l16-14 14 10 22-20" stroke="#eef4ff" stroke-width="3"
+          <rect x="150" y="40" width="170" height="116" rx="16" fill="rgba(255,255,255,0.16)"
+            stroke="rgba(255,255,255,0.85)" stroke-width="2" />
+          <rect x="161" y="51" width="148" height="92" rx="9" fill="rgba(10,26,66,0.9)" />
+          <rect x="177" y="115" width="16" height="20" rx="3" fill="#6aa5ff" />
+          <rect x="203" y="97" width="16" height="38" rx="3" fill="#93b9ff" />
+          <rect x="229" y="78" width="16" height="57" rx="3" fill="#c4d8ff" />
+          <path d="M262 122l16-15 15 11 22-22" stroke="#eef4ff" stroke-width="3"
             stroke-linecap="round" stroke-linejoin="round" />
-          <circle cx="268" cy="76" r="4" fill="#ffd9a0" />
-          <!-- monitor stand -->
-          <path d="M205 138v-8M205 130h-28M205 130h28" stroke="#b9c6dd" stroke-width="5"
+          <circle cx="294" cy="84" r="4" fill="#ffd9a0" />
+          <!-- stand -->
+          <path d="M235 156v10M235 166h-30M235 166h30" stroke="rgba(255,255,255,0.6)"
+            stroke-width="5" stroke-linecap="round" />
+          <!-- shield + check -->
+          <path d="M56 96c12-4 22-4 32 0v18c0 15-15 25-32 30-17-5-32-15-32-30V96c10-4 20-4 32 0Z"
+            fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.85)" stroke-width="2" />
+          <path d="m68 106-10 11-5-5" stroke="#a8e8c5" stroke-width="3.5" stroke-linecap="round"
+            stroke-linejoin="round" />
+          <!-- key -->
+          <circle cx="392" cy="92" r="18" stroke="rgba(255,255,255,0.85)" stroke-width="4" />
+          <path d="M392 110v6m0-8 10 10" stroke="rgba(255,255,255,0.85)" stroke-width="4"
             stroke-linecap="round" />
-          <!-- plant in a small pot -->
-          <path d="M46 138h34l-4-14H50l-4 14Z" fill="#f3b45e" />
-          <path d="M63 124V96" stroke="#3f9e6f" stroke-width="3" stroke-linecap="round" />
-          <path d="M63 100c-4-10-16-12-20-8 6 4 14 6 20 8Zm0 6c6-8 16-8 20-3-7 3-14 4-20 3Z"
-            fill="#7fd0a3" />
-          <!-- key leaning on the desk -->
-          <circle cx="336" cy="104" r="13" stroke="#8fb4e8" stroke-width="4" />
-          <path d="M336 117v3m0-4 7 7" stroke="#8fb4e8" stroke-width="4" stroke-linecap="round" />
-          <!-- soft floating dots -->
-          <circle cx="84" cy="52" r="5" fill="#ffd9a0" opacity="0.9" />
-          <circle cx="358" cy="44" r="4" fill="#b9d0f5" />
-          <circle cx="62" cy="76" r="3" fill="#ffffff" opacity="0.55" />
+          <!-- dots -->
+          <circle cx="120" cy="50" r="5" fill="#ffd9a0" />
+          <circle cx="420" cy="46" r="4" fill="rgba(255,255,255,0.55)" />
+          <circle cx="58" cy="140" r="3" fill="rgba(255,255,255,0.4)" />
         </svg>
       </div>
 
       <div class="next-login__brand-body">
-        <ul class="next-login__brand-features" aria-hidden="true">
-          <li class="next-login__brand-feature">
-            <LockOnIcon class="next-login__brand-icon" />
-            <span>上游密钥加密存放，目录签名后下发</span>
-          </li>
-          <li class="next-login__brand-feature">
-            <ChartBarIcon class="next-login__brand-icon" />
-            <span>每次调用按 Key 记账，用量成本可追溯</span>
-          </li>
-          <li class="next-login__brand-feature">
-            <NotificationIcon class="next-login__brand-icon" />
-            <span>配额与预算只告警，从不悄悄截断</span>
-          </li>
-        </ul>
-        <div class="next-login__brand-bottom">
-          <p class="next-login__brand-title">企业内 AI 编码流量的凭证与用量治理</p>
-          <p class="next-login__brand-desc">
-            MiQroKey Gateway · 一次签发、处处留痕；把上游密钥和每一分用量管在看得见的地方。
-          </p>
-        </div>
+        <p class="next-login__brand-title">企业内 AI 编码流量的凭证与用量治理</p>
+        <p class="next-login__brand-desc">
+          MiQroKey Gateway · 一次签发、处处留痕；把上游密钥和每一分用量管在看得见的地方。
+        </p>
       </div>
     </aside>
 
@@ -355,12 +340,8 @@ function renderError(error: unknown, fallback: string) {
 
 .next-login__art {
   width: 100%;
-  max-width: 440px;
-  margin: var(--ui-space-8) 0 var(--ui-space-4);
-  padding: 10px;
-  background: #ffffff;
-  border-radius: 16px;
-  box-shadow: var(--ui-shadow-dialog);
+  max-width: 560px;
+  margin: var(--ui-space-6) auto;
 }
 
 .next-login__art svg {
@@ -370,53 +351,22 @@ function renderError(error: unknown, fallback: string) {
 }
 
 .next-login__brand-body {
-  margin: auto 0;
-  max-width: 440px;
-}
-
-.next-login__brand-features {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-space-4);
-}
-
-.next-login__brand-feature {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-space-3);
-  font-size: var(--ui-font-size-sm);
-  line-height: var(--ui-line-height-base);
-  color: rgba(255, 255, 255, 0.78);
-}
-
-.next-login__brand-icon {
-  width: 16px;
-  height: 16px;
-  color: rgba(255, 255, 255, 0.92);
-  flex-shrink: 0;
-  display: block;
-}
-
-.next-login__brand-bottom {
-  margin-top: var(--ui-space-4);
+  max-width: 480px;
 }
 
 .next-login__brand-title {
   margin: 0;
-  font-size: 22px;
+  font-size: 26px;
   font-weight: var(--ui-weight-semibold);
-  line-height: 1.55;
+  line-height: 1.5;
   letter-spacing: -0.01em;
 }
 
 .next-login__brand-desc {
-  margin: var(--ui-space-2) 0 0;
+  margin: var(--ui-space-3) 0 0;
   font-size: var(--ui-font-size-sm);
   line-height: 1.8;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.72);
 }
 
 /* ---- form column ---- */
