@@ -33,18 +33,19 @@ describe('aesthetic audit', () => {
     );
   });
 
-  it('never exceeds 8px radius on regular containers (modal and the status pill are the exceptions)', () => {
+  it('never exceeds 8px radius on regular controls (panels/dialogs/pills are the sanctioned exceptions)', () => {
     // Split into rule blocks so the sanctioned .mk-status pill radius (spec
     // §3: pill only for short status labels) is not treated as a container.
     const blocks = css.split('}');
     let checked = 0;
     for (const block of blocks) {
       const isStatusPill = /\.mk-status/.test(block);
-      // Sanctioned exceptions: dialog/modal tokens (--*radius-modal, ui
-      // dialog layer) and pill tokens (status pill, segmented fills).
+      // Sanctioned exceptions: panel/card tokens (Vben console family —
+      // radius-panel 12px), dialog/modal tokens (--*radius-modal, ui dialog
+      // layer), and pill tokens (status pill, segmented fills).
       const isModal =
         /\.t-dialog/.test(block) ||
-        /radius-(modal|dialog)/.test(block) ||
+        /radius-(modal|dialog|panel)/.test(block) ||
         /radius-pill/.test(block);
       const skip = isStatusPill || isModal;
       for (const m of block.matchAll(/--?[a-z-]*radius[a-z-]*:\s*([0-9.]+)px/g)) {
@@ -64,13 +65,14 @@ describe('aesthetic audit', () => {
 
   it('keeps shadows limited to dropdown/popover/modal (cards may cast the hairline shadow)', () => {
     // TDesign (t-) and legacy (el-) names both sanctioned
-    // Hairline card shadow (0 1px 2px) is the sanctioned card depth; anything
-    // else must stay on popper/dropdown/dialog.
+    // Hairline card shadow (0 1px 2px, or the --ui-shadow-card token) is the
+    // sanctioned card depth; anything else must stay on popper/dropdown/dialog.
     const shadowBlocks = css.match(/[^{}]*\{[^}]*box-shadow:[^}]*\}/g) ?? [];
     for (const block of shadowBlocks) {
       const hairlineCard =
-        /\.mk-card|\.mk-stat-card/.test(block) &&
-        (/0 1px 2px/.test(block) || /var\(--miqrokey-shadow-card\)/.test(block));
+        /\.mk-card|\.mk-stat-card|\.ui-panel/.test(block) &&
+        (/0 1px 2px/.test(block) || /var\(--miqrokey-shadow-card\)/.test(block) ||
+            /var\(--ui-shadow-card\)/.test(block));
       if (!hairlineCard && !/box-shadow:\s*none/.test(block) && !/0 0 0 2px/.test(block)) {
         expect(block).toMatch(/(?:el|t)-(?:popper|dropdown|dialog|popup)/);
       }

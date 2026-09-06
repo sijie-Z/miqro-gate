@@ -316,12 +316,12 @@ async function handleLogout() {
   position: relative;
   display: flex;
   align-items: center;
-  gap: var(--ui-space-2);
-  height: 34px;
-  padding: 0 var(--ui-space-2);
+  gap: var(--ui-space-3);
+  height: 38px;
+  padding: 0 var(--ui-space-3);
   border-radius: var(--ui-radius-control);
   color: var(--ui-rail-text);
-  font-size: var(--ui-font-size-sm);
+  font-size: var(--ui-font-size-base);
   text-decoration: none;
   transition:
     background-color var(--ui-ease),

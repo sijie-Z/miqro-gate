@@ -37,10 +37,10 @@ const stats = computed(() => {
     0,
   );
   return [
-    { label: 'Virtual Key', value: String(keys.value.length), hint: `${active} 个可用`, icon: LockOnIcon },
-    { label: '本月请求', value: formatCount(totalRequests), hint: '经网关的请求数', icon: ChartBarIcon },
-    { label: '本月 Tokens', value: formatCount(totalTokens), hint: '输入 + 输出', icon: LayersIcon },
-    { label: '本月成本', value: `¥${Number(totalCost).toFixed(2)}`, hint: '按价格快照估算', icon: MoneyIcon },
+    { label: 'Virtual Key', value: String(keys.value.length), hint: `${active} 个可用`, icon: LockOnIcon, tone: 'blue' },
+    { label: '本月请求', value: formatCount(totalRequests), hint: '经网关的请求数', icon: ChartBarIcon, tone: 'green' },
+    { label: '本月 Tokens', value: formatCount(totalTokens), hint: '输入 + 输出', icon: LayersIcon, tone: 'cyan' },
+    { label: '本月成本', value: `¥${Number(totalCost).toFixed(2)}`, hint: '按价格快照估算', icon: MoneyIcon, tone: 'gold' },
   ];
 });
 
@@ -136,9 +136,9 @@ onMounted(load);
   <div class="ui-page next-overview">
     <header class="ui-page-header">
       <div>
-        <h1 class="ui-page-title">总览</h1>
+        <h1 class="ui-page-title">{{ auth.user?.displayName ?? auth.user?.username }}，欢迎回来</h1>
         <p class="ui-page-desc">
-          Virtual Key、用量与成本的关键指标——数据来自网关逐笔记账，与明细页口径一致。
+          内部凭证治理控制台 · 单租户部署 · {{ new Date().getFullYear() }} 年
         </p>
       </div>
       <div class="ui-page-actions">
@@ -158,29 +158,29 @@ onMounted(load);
     </div>
 
     <template v-if="loading">
-      <div class="ui-panel next-overview__panel">
-        <div class="next-overview__stat-band">
-          <div v-for="n in 4" :key="n" class="ui-skeleton next-overview__stat-skeleton" />
-        </div>
+      <div class="next-overview__stat-grid">
+        <div v-for="n in 4" :key="n" class="ui-skeleton next-overview__stat-skeleton" />
       </div>
     </template>
 
     <template v-else>
       <!-- Stat band -->
-      <section class="ui-panel next-overview__panel" data-testid="overview-stats">
-        <div class="next-overview__stat-band">
-          <div v-for="card in stats" :key="card.label" class="next-overview__stat">
-            <div class="next-overview__stat-main">
-              <span class="next-overview__stat-label">{{ card.label }}</span>
-              <span class="next-overview__stat-value ui-num">{{ card.value }}</span>
-              <span class="next-overview__stat-hint">{{ card.hint }}</span>
-            </div>
-            <span class="next-overview__stat-icon" aria-hidden="true">
-              <component :is="card.icon" />
-            </span>
+      <div class="next-overview__stat-grid" data-testid="overview-stats">
+        <section v-for="card in stats" :key="card.label" class="ui-panel next-overview__stat">
+          <div class="next-overview__stat-main">
+            <span class="next-overview__stat-label">{{ card.label }}</span>
+            <span class="next-overview__stat-value ui-num">{{ card.value }}</span>
+            <span class="next-overview__stat-hint">{{ card.hint }}</span>
           </div>
-        </div>
-      </section>
+          <span
+            class="next-overview__stat-icon"
+            :class="`next-overview__stat-icon--${card.tone}`"
+            aria-hidden="true"
+          >
+            <component :is="card.icon" />
+          </span>
+        </section>
+      </div>
 
       <!-- Usage bars + recent keys -->
       <div class="next-overview__grid">
@@ -316,7 +316,7 @@ onMounted(load);
               <span v-else class="next-overview__ledger-unset">未配置滚动额度</span>
             </div>
             <span class="next-overview__ledger-quota ui-num">{{
-              row.quotaTotal ? `${formatCount(row.quotaTotal)} ${row.quotaUnit}` : '—'
+              row.quotaTotal ? `${formatCount(row.quotaTotal)} ${row.quotaUnit}` : '未配置'
             }}</span>
           </div>
         </div>
@@ -346,24 +346,25 @@ onMounted(load);
   margin-bottom: var(--ui-space-5);
 }
 
-.next-overview__stat-band {
+.next-overview__stat-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--ui-space-2);
-  padding: var(--ui-space-4) var(--ui-space-5);
+  gap: var(--ui-space-4);
+  margin-bottom: var(--ui-space-5);
+}
+
+@media (max-width: 1100px) {
+  .next-overview__stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .next-overview__stat {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--ui-space-3);
-  padding: var(--ui-space-2) var(--ui-space-4) var(--ui-space-2) var(--ui-space-2);
-  border-right: 1px solid var(--ui-border-muted);
-}
-
-.next-overview__stat:last-child {
-  border-right: none;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-5) var(--ui-space-6);
 }
 
 .next-overview__stat-main {
@@ -380,7 +381,7 @@ onMounted(load);
 }
 
 .next-overview__stat-value {
-  font-size: 24px;
+  font-size: 26px;
   font-weight: var(--ui-weight-semibold);
   letter-spacing: -0.01em;
   white-space: nowrap;
@@ -395,21 +396,46 @@ onMounted(load);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--ui-radius-panel);
-  background: var(--ui-primary-soft);
-  color: var(--ui-primary-active);
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
   flex-shrink: 0;
 }
 
+/* Vben workbench style: each stat carries its own tinted icon chip */
+.next-overview__stat-icon--blue {
+  background: var(--ui-info-bg);
+  color: var(--ui-info-fg);
+}
+
+.next-overview__stat-icon--green {
+  background: var(--ui-success-bg);
+  color: var(--ui-success-fg);
+}
+
+.next-overview__stat-icon--orange {
+  background: var(--ui-warning-bg);
+  color: var(--ui-warning-fg);
+}
+
+.next-overview__stat-icon--cyan {
+  background: #e0f4f6;
+  color: #0e7490;
+}
+
+.next-overview__stat-icon--gold {
+  background: #fdf3e0;
+  color: #a16207;
+}
+
 .next-overview__stat-icon svg {
-  width: 17px;
-  height: 17px;
+  width: 18px;
+  height: 18px;
 }
 
 .next-overview__stat-skeleton {
-  height: 64px;
+  height: 112px;
+  border-radius: var(--ui-radius-panel);
 }
 
 .next-overview__grid {

@@ -97,10 +97,10 @@
   --ui-space-10: 40px;
   --ui-space-12: 48px;
 
-  /* shape */
+  /* shape — Vben console family: generous card corners, tight controls */
   --ui-radius-control: 6px;
-  --ui-radius-panel: 8px;
-  --ui-radius-dialog: 12px;
+  --ui-radius-panel: 12px;
+  --ui-radius-dialog: 14px;
   --ui-radius-pill: 999px;
 
   /* sizes */
@@ -112,7 +112,8 @@
   --ui-sidebar-width: 240px;
   --ui-content-max: 1440px;
 
-  /* shadows — only popper / dialog / focus affordance */
+  /* shadows — popper / dialog / focus affordance + hairline card lift */
+  --ui-shadow-card: 0 1px 2px rgba(17, 20, 28, 0.05);
   --ui-shadow-popper: 0 4px 12px rgba(15, 15, 17, 0.12);
   --ui-shadow-dialog: 0 2px 6px rgba(15, 15, 17, 0.04), 0 10px 28px rgba(15, 15, 17, 0.12);
   --ui-shadow-focus: 0 0 0 2px var(--ui-ring);

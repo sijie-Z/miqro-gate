@@ -43,11 +43,12 @@
   flex-shrink: 0;
 }
 
-/* ---- panels (white card with hairline border, no drop shadow) ---- */
+/* ---- panels (white card, hairline lift, generous Vben corners) ---- */
 .ui-panel {
   background: var(--ui-card);
   border: 1px solid var(--ui-border);
   border-radius: var(--ui-radius-panel);
+  box-shadow: var(--ui-shadow-card);
 }
 
 .ui-panel-head {
