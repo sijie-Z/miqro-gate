@@ -15,6 +15,10 @@ import type { components } from './generated';
 export type UsageRecord = components['schemas']['UsageRecordView'];
 export type UsageRecordPage = components['schemas']['UsageRecordPage'];
 export type RoiReportView = components['schemas']['RoiReportView'];
+// route rules (F11): the schema names the nested controller record
+// 'UpsertRequest'; the alias keeps the domain name the consumers use.
+export type McpRouteRule = components['schemas']['McpRouteRule'];
+export type UpsertMcpRouteRuleRequest = components['schemas']['UpsertRequest'];
 export type SkillView = components['schemas']['SkillView'];
 export type AgentView = components['schemas']['AgentView'];
 export type BudgetView = components['schemas']['BudgetView'];

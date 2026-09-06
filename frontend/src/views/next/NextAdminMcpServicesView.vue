@@ -21,7 +21,8 @@ import {
   UiTable,
   toast,
 } from '@/ui';
-import type {McpAclMode, McpRouteRule, UpsertMcpRouteRuleRequest} from '@/types/api';
+import type {McpAclMode} from '@/types/api';
+import type { McpRouteRule, UpsertMcpRouteRuleRequest } from '@/types/generated-api';
 import type { ApiConsumerView, McpAccessView, McpServiceView, McpToolView , McpResiliencePolicy } from '@/types/generated-api';
 import type { McpResilienceDraft } from '@/api';
 
