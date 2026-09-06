@@ -24,6 +24,30 @@ const recordsError = ref('');
 const page = ref(1);
 const pageSize = ref(20);
 
+// ---- time range presets (server default when 0 — behaviour unchanged) ----
+const rangeDays = ref<number>(0);
+const windowOptions = [
+  { value: 0, label: '默认' },
+  { value: 7, label: '近 7 天' },
+  { value: 30, label: '近 30 天' },
+  { value: 93, label: '近 93 天' },
+];
+
+function windowFromTo(): { from?: string; to?: string } {
+  if (!rangeDays.value) return {};
+  const to = new Date();
+  return {
+    from: new Date(to.getTime() - rangeDays.value * 24 * 3600 * 1000).toISOString(),
+    to: to.toISOString(),
+  };
+}
+
+function applyRange(value: number) {
+  rangeDays.value = value;
+  void loadSummary();
+  void loadRecords();
+}
+
 // ---- self-service quota visibility (F04) ----
 
 const myQuotaRules = ref<QuotaRuleView[]>([]);
@@ -129,7 +153,11 @@ async function loadSummary() {
   summaryLoading.value = true;
   summaryError.value = '';
   try {
-    summary.value = await api.usageSummary(groupBy.value);
+    const w = windowFromTo();
+    summary.value =
+      w.from && w.to
+        ? await api.usageSummary(groupBy.value, w.from, w.to)
+        : await api.usageSummary(groupBy.value);
   } catch (error) {
     if (error instanceof ApiError) {
       summaryError.value = `${error.message}（requestId: ${error.requestId ?? '-'}）`;
@@ -145,7 +173,7 @@ async function loadRecords() {
   recordsLoading.value = true;
   recordsError.value = '';
   try {
-    records.value = await api.usageRecords({ page: page.value, size: pageSize.value });
+    records.value = await api.usageRecords({ page: page.value, size: pageSize.value, ...windowFromTo() });
   } catch (error) {
     if (error instanceof ApiError) {
       recordsError.value = `${error.message}（requestId: ${error.requestId ?? '-'}）`;
@@ -169,7 +197,7 @@ async function exportRecords() {
   let pageNo = 1;
   try {
     for (;;) {
-      const batch = await api.usageRecords({ page: pageNo, size });
+      const batch = await api.usageRecords({ page: pageNo, size, ...windowFromTo() });
       all.push(...batch.items);
       if (pageNo * size >= batch.total) break;
       pageNo += 1;
@@ -331,15 +359,30 @@ function formatTime(iso: string): string {
         <div class="next-usage__head-inline">
           <h2 class="ui-panel-title">用量汇总</h2>
         </div>
-        <div class="next-usage__groupby">
-          <span class="next-usage__groupby-label">分组维度</span>
-          <UiSelect
-            :model-value="groupBy"
-            :options="groupByOptions"
-            width="180px"
-            data-testid="summary-groupby"
-            @change="changeGroupBy"
-          />
+        <div class="next-usage__controls">
+          <div class="next-usage__range" aria-label="时间范围">
+            <button
+              v-for="w in windowOptions"
+              :key="w.value"
+              type="button"
+              class="next-usage__seg"
+              :class="{ 'next-usage__seg--on': rangeDays === w.value }"
+              :data-testid="`usage-range-${w.value}`"
+              @click="applyRange(w.value)"
+            >
+              {{ w.label }}
+            </button>
+          </div>
+          <div class="next-usage__groupby">
+            <span class="next-usage__groupby-label">分组维度</span>
+            <UiSelect
+              :model-value="groupBy"
+              :options="groupByOptions"
+              width="180px"
+              data-testid="summary-groupby"
+              @change="changeGroupBy"
+            />
+          </div>
         </div>
       </div>
       <UiTable
@@ -490,6 +533,48 @@ function formatTime(iso: string): string {
   display: flex;
   align-items: baseline;
   gap: var(--ui-space-3);
+}
+
+.next-usage__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-5);
+  flex-wrap: wrap;
+}
+
+.next-usage__range {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border-muted);
+  border-radius: var(--ui-radius-control);
+}
+
+.next-usage__seg {
+  height: 28px;
+  padding: 0 var(--ui-space-3);
+  border: 0;
+  border-radius: calc(var(--ui-radius-control) - 2px);
+  background: transparent;
+  color: var(--ui-foreground-secondary);
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-medium);
+  cursor: pointer;
+  transition:
+    color var(--ui-ease),
+    background-color var(--ui-ease);
+}
+
+.next-usage__seg:hover {
+  color: var(--ui-foreground);
+}
+
+.next-usage__seg--on {
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-primary);
+  font-weight: var(--ui-weight-semibold);
 }
 
 .next-usage__groupby {

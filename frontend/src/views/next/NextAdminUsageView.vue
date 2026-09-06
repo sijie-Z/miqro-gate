@@ -26,6 +26,30 @@ const recordsLoading = ref(true);
 const page = ref(1);
 const pageSize = ref(20);
 
+// ---- time range presets (server default when 0 — behaviour unchanged) ----
+const rangeDays = ref<number>(0);
+const windowOptions = [
+  { value: 0, label: '默认' },
+  { value: 7, label: '近 7 天' },
+  { value: 30, label: '近 30 天' },
+  { value: 93, label: '近 93 天' },
+];
+
+function rangeParams(): { from?: string; to?: string } {
+  if (!rangeDays.value) return {};
+  const to = new Date();
+  return {
+    from: new Date(to.getTime() - rangeDays.value * 24 * 3600 * 1000).toISOString(),
+    to: to.toISOString(),
+  };
+}
+
+function applyRange(value: number) {
+  rangeDays.value = value;
+  page.value = 1;
+  void load();
+}
+
 const groupOptions: UiSelectOption[] = [
   { value: 'project', label: '项目' },
   { value: 'virtual_key', label: 'Virtual Key' },
@@ -53,12 +77,14 @@ async function load() {
       groupBy: groupBy.value,
       modelId: modelId.value || undefined,
       projectId: projectId.value || undefined,
+      ...rangeParams(),
     });
     records.value = await api.adminUsageRecords({
       modelId: modelId.value || undefined,
       projectId: projectId.value || undefined,
       page: page.value,
       size: pageSize.value,
+      ...rangeParams(),
     });
   } catch (error) {
     if (error instanceof ApiError) {
@@ -113,6 +139,19 @@ onMounted(load);
 
     <section class="ui-panel next-admin-usage__filters" data-testid="usage-filter-bar">
       <div class="ui-panel-toolbar">
+        <div class="next-admin-usage__range" aria-label="时间范围">
+          <button
+            v-for="w in windowOptions"
+            :key="w.value"
+            type="button"
+            class="next-admin-usage__seg"
+            :class="{ 'next-admin-usage__seg--on': rangeDays === w.value }"
+            :data-testid="`admin-usage-range-${w.value}`"
+            @click="applyRange(w.value)"
+          >
+            {{ w.label }}
+          </button>
+        </div>
         <UiSelect
           v-model="groupBy"
           :options="groupOptions"
@@ -280,6 +319,41 @@ onMounted(load);
 <style scoped>
 .next-admin-usage__filters {
   margin-bottom: var(--ui-space-4);
+}
+
+.next-admin-usage__range {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border-muted);
+  border-radius: var(--ui-radius-control);
+}
+
+.next-admin-usage__seg {
+  height: 28px;
+  padding: 0 var(--ui-space-3);
+  border: 0;
+  border-radius: calc(var(--ui-radius-control) - 2px);
+  background: transparent;
+  color: var(--ui-foreground-secondary);
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-medium);
+  cursor: pointer;
+  transition:
+    color var(--ui-ease),
+    background-color var(--ui-ease);
+}
+
+.next-admin-usage__seg:hover {
+  color: var(--ui-foreground);
+}
+
+.next-admin-usage__seg--on {
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-primary);
+  font-weight: var(--ui-weight-semibold);
 }
 
 /* keep the filter controls in one tight cluster (no space-between spread) */
