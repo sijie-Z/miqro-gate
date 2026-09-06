@@ -14,6 +14,10 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - **ADR-0014 R3 Kafka producer（本批）**：标准 Kafka 协议投递信封到 `content-retention` topic（记录键 = SHA-256(tenant/user)，同用户恒同分区保序）；信封 JSON 只带 base64 AES 密文/IV，明文不出网关；`miqrokey.retention.kafka.bootstrap-servers` 配置后经 @Primary 替换 no-op（默认仍 fail-closed）；发送异步、失败节流计数。测试：payload/partition-key 单测 2 + Redpanda 容器端到端 1（真实 broker 收信、分区亲和、密文语义）。
 
 - **ADR-0014 R4 消费端参考实现（本批）**：`docs/retention-consumer.md` 定义消费端契约（topic/键语义/at-least-once + eventId 幂等/信封 JSON schema/解密说明 RETENTION_AAD_ID/本地文件布局 `<tenant>/<user>/<YYYY-MM-DD>.jsonl`）；`scripts/retention/consumer-file-ref.py` 为平台侧可照抄的 kafka-python 参考消费者（批量落盘后 commit、跨重启去重、--dry-run 联调）。产品门禁不执行 Python；逻辑冒烟已过。
+- **UI 临摹轮 #179（Vben 精仿）**：登录页白卡场景插画（内联 SVG，无渐变）；面板圆角 12px + 发丝浮起；总览统计四张独立卡 + 四色图标徽章；审计规则升级（radius-panel / --ui-shadow-card 豁免）。owner 规则：学习只动视觉皮，产品文案逐字保留（此前两处误改已还原）。
+- **codegen 收尾 #180**：RoiReportView 迁至 OpenAPI schema 类型（手写接口删除，hub 别名统一；旧 spec-缺口记录已过期）。
+- **#181 Key ID 复制入口**：keys 行内复制钮（clipboard + 回退，toast 反馈）。
+
 ### 2026-09-05
 - **F15 MCP 元数据访问日志（V29）**：MCP 代理（F01）每次身份可解析的调用落一条纯元数据审计行（`mcp_access_log`：租户/服务/消费者/方法/工具/终态/HTTP 状态；网关异步有界队列批量写入、`(tenant, gateway_request_id)` 幂等、饱和 drop+计数）；管理端查询 `GET /api/v1/admin/mcp-access-logs`（service/consumer/窗口 ≤31d/limit≤1000 过滤，SYSTEM_ADMIN-only）。工具参数与响应正文永不入表。
 - **F12/F13 MCP 韧性（V30）**：MCP 代理出口新增**重试门禁与熔断**（均默认关闭；路由快照承载配置，改后即时生效）。重试=首字节前、条件可选（5xx/连接失败/超时）、1–5 次、POST/PUT/PATCH 工具需显式幂等确认；熔断=三态状态机（滑动窗口+最小请求数+错误比例/慢调用双触发+半开探测恢复），按工具桶隔离，OPEN 期间 503 `circuit_open` 快速失败。管理 API `GET/PUT /api/v1/admin/mcp-services/{id}/resilience`；F15 日志新增 `CIRCUIT_OPEN` 终态。腾讯 doc 134831/134859。

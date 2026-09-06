@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `会话执行 2026-09-06（夜间自主轮：UI Vben 母版重塑 + ADR-0014 R3/R4）` — `IN_PROGRESS`（本轮记录见下方「会话交接点 2026-09-06」段；队列总纲仍见 docs/session-handoff-2026-09-05.md + NEXT_SESSION_PLAN.md）
-- Goal status: `IN_PROGRESS`（develop @ 96a4ce0 = #175。本夜已并入：#173 UI Vben console edition（母版修订 v3，frontend-design.md 同步）、#174 overview cost 空态 followup、#175 R3 Kafka producer（Redpanda IT 全绿）。**待办：Q4 真机 https 冒烟、R4 消费端参考（本批在途：docs/retention-consumer.md + scripts/retention/consumer-file-ref.py）、keys/overview 残余页级、Q7 Kafka 拓扑/发布等拍板、Q6 stage2 残余 spec 缺口**）
+- Current goal: `会话执行 2026-09-06（UI Vben 临摹轮 + 功能收尾轮）` — `IN_PROGRESS`（记录见「会话交接点 2026-09-06」与「UI 临摹」段；队列总纲见 docs/session-handoff-2026-09-05.md + NEXT_SESSION_PLAN.md）
+- Goal status: `IN_PROGRESS`（develop @ 8cd11a1 = #181。本日已并入：#173 UI Vben console edition、#174 overview 成本空态、#175 R3 Kafka producer、#176 R4 消费端参考、#177 keys 文案、#178 阿里云对照、#179 UI 临摹轮（插画/12px 圆角/四卡统计/四色徽章/审计规则升级）、#180 RoiReportView 契约迁移（codegen 收尾）、#181 Key ID 复制入口。**待办：Q4 真机冒烟、UI 临摹继续（owner 在场逐轮指导）、发布 tag 等拍板、F32/OAuth 与 Kafka 平台侧等外部**）
 - Last updated: `2026-09-06 CST`
 
 ## 会话交接点 2026-09-06 — UI 母版修订(Vben console edition)与夜间自主轮
@@ -2204,3 +2204,9 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - **保留手写清单（有意为之）**：auth 信封 ProblemDetails/UserResponse/LoginResponse（spec 盲区无 schema）；route-rules 三件套（openapi 无此端点，后端补契约后可迁）；RoiReportView（**spec 缺口**：缺 coalescedRequests/hitRatePct/l1Hits/l2Hits/paidCost/savedCost/savedPct/upstreamRequests 8 字段，需后端补）；ProviderProductView（EXCEPTIONS→ProductView）；嵌套 usage 组类型与字面量枚举别名（schema 内联无法复用，保留为复用形态）。
 - **OpenAPI 基线滞后修复（#→）**：#161/#163 新增管理端点未刷 docs/openapi/openapi-3.1.json（breaking-check 允许 additions 故 CI 绿）→ 重跑 OpenApiSpecIntegrationTest 产出 head spec 覆盖基线 + 前端 generated.ts 重生成（新增 McpAccessLogEntry/McpResiliencePolicy schema，无 breaking）。
 - **裁决（文档驱动，不发明层）**：F11 数据面路由匹配与 F14 工具分组 → **DEFERRED**：raw 10/17 语义的差异化分发/组级暴露面依赖「多入口/Host 分流/HTTP-to-MCP 直连」形态，本系统单固定入口 + 标准 MCP 信封 + default 恒兜底下无承载对象；McpRouteRules 纯函数/快照位已备，形态出现再接。F10 部署信息页核对：NextSettingsView 含部署信息段 → TBD 收尾登记。
+
+### UI 临摹轮与功能收尾（2026-09-06 白天，owner 在场）
+- **owner 反馈**：参考图对比"还差得远但有雏形,接着学";允许直接抄 Vben(vue-vben-admin 为 MIT 可商用,仓库自身亦 MIT,仅借鉴布局/配色/写法、自绘实现);**规则:学习只动视觉皮,不得改动产品原有文案/内容**(此前误改的总览欢迎语与用量报表描述已逐字还原)。
+- **#179 UI 临摹轮**：登录页白卡场景插画(内联 SVG 显示器网关屏+绿植+钥匙,无渐变无外部资源);面板圆角 8→12px + 发丝浮起阴影(--ui-shadow-card,审计规则同步豁免 radius-panel 与 --ui-shadow-card);总览统计改四张独立白卡 + 四色图标徽章(蓝/绿/青/金);导航项 38px/14px。视觉评审:overview 6.5→7.0→(四卡后待定),仍在逐轮逼近。
+- **#180 codegen 收尾**：RoiReportView 手写接口删除 → 别名 `components['schemas']['RoiReportView']`(schema 早已全字段,#166 刷新使旧"spec 缺口"记录过期);消费者(api/视图/spec)全部切 hub 类型;App.spec 登录用例 15s 超时防全量并发抖动。typecheck+vitest 153/153 绿。
+- **#181 Key ID 复制入口**：keys 行内小复制钮(clipboard + execCommand 回退,toast 反馈),单测覆盖。
