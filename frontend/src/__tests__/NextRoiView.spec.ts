@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextRoiView from '@/views/next/NextRoiView.vue';
 import * as api from '@/api';
-import type { RoiReportView } from '@/types/api';
+import type { RoiReportView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({ getRoiReport: vi.fn() }));
 

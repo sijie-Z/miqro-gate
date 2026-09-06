@@ -52,30 +52,6 @@ export type QuotaPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY';
 export type QuotaRuleStatus = 'ACTIVE' | 'DISABLED';
 export type QuotaLevel = 'NORMAL' | 'WARNING' | 'EXCEEDED';
 
-/** Global default quota strategy (Tencent doc 135489) — nulls before first config. */
-export interface RoiReportView {
-  from: string;
-  to: string;
-  totals: {
-    upstreamRequests: number;
-    coalescedRequests: number;
-    l1Hits: number;
-    l2Hits: number;
-    hitRatePct: number;
-    paidCost: number;
-    savedCost: number;
-    savedPct: number;
-  };
-  byDay: Array<{
-    date: string;
-    upstreamRequests: number;
-    hitRequests: number;
-    hitRatePct: number;
-    paidCost: number;
-    savedCost: number;
-  }>;
-}
-
 export type McpAclMode = 'NONE' | 'ALLOW' | 'DENY';
 
 // ---- MCP route rules (F11, Tencent doc 135482) ----

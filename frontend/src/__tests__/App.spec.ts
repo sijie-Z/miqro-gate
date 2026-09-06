@@ -12,7 +12,9 @@ describe('App', () => {
     vi.spyOn(api, 'me').mockRejectedValue(new Error('401'));
   });
 
-  it('renders the login view when unauthenticated', async () => {
+  // Whole-app mount under the 40-file parallel jsdom run is CPU-contended;
+  // 15s keeps the case meaningful without racing the runner.
+  it('renders the login view when unauthenticated', { timeout: 15_000 }, async () => {
     await router.push('/login');
     await flushPromises();
 
