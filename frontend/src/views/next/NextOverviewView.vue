@@ -134,8 +134,8 @@ onMounted(load);
 
 <template>
   <div class="ui-page next-overview">
-    <header class="ui-page-header">
-      <div>
+    <section class="ui-panel next-overview__hero">
+      <div class="next-overview__hero-main">
         <h1 class="ui-page-title">{{ auth.user?.displayName ?? auth.user?.username }}，欢迎回来</h1>
         <p class="ui-page-desc">
           内部凭证治理控制台 · 单租户部署 · {{ new Date().getFullYear() }} 年
@@ -150,7 +150,7 @@ onMounted(load);
           创建 Virtual Key
         </UiButton>
       </div>
-    </header>
+    </section>
 
     <div v-if="loadError" class="ui-alert ui-alert--error" data-testid="overview-load-error">
       {{ loadError
@@ -344,6 +344,19 @@ onMounted(load);
 
 .next-overview__panel {
   margin-bottom: var(--ui-space-5);
+}
+
+.next-overview__hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-5) var(--ui-space-6);
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-overview__hero-main {
+  min-width: 0;
 }
 
 .next-overview__stat-grid {
