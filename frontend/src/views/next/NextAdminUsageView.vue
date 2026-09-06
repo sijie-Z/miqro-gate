@@ -6,6 +6,7 @@
  */
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
+import { ChartBarIcon, DownloadIcon, MoneyIcon, UploadIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { UiButton, UiInput, UiSelect, UiStatusBadge, UiTable } from '@/ui';
 import type { UiSelectOption } from '@/ui';
@@ -146,28 +147,48 @@ onMounted(load);
         data-testid="usage-summary"
       >
         <div class="next-admin-usage__stat">
-          <span class="next-admin-usage__stat-label">请求</span>
-          <span class="next-admin-usage__stat-value ui-num">{{
-            fmtNum(summary.totals?.requests?.upstream)
-          }}</span>
+          <span class="next-admin-usage__stat-icon next-admin-usage__stat-icon--blue">
+            <ChartBarIcon />
+          </span>
+          <span class="next-admin-usage__stat-main">
+            <span class="next-admin-usage__stat-label">请求</span>
+            <span class="next-admin-usage__stat-value ui-num">{{
+              fmtNum(summary.totals?.requests?.upstream)
+            }}</span>
+          </span>
         </div>
         <div class="next-admin-usage__stat">
-          <span class="next-admin-usage__stat-label">输入 tokens</span>
-          <span class="next-admin-usage__stat-value ui-num">{{
-            fmtNum(summary.totals?.tokens?.input)
-          }}</span>
+          <span class="next-admin-usage__stat-icon next-admin-usage__stat-icon--green">
+            <DownloadIcon />
+          </span>
+          <span class="next-admin-usage__stat-main">
+            <span class="next-admin-usage__stat-label">输入 tokens</span>
+            <span class="next-admin-usage__stat-value ui-num">{{
+              fmtNum(summary.totals?.tokens?.input)
+            }}</span>
+          </span>
         </div>
         <div class="next-admin-usage__stat">
-          <span class="next-admin-usage__stat-label">输出 tokens</span>
-          <span class="next-admin-usage__stat-value ui-num">{{
-            fmtNum(summary.totals?.tokens?.output)
-          }}</span>
+          <span class="next-admin-usage__stat-icon next-admin-usage__stat-icon--cyan">
+            <UploadIcon />
+          </span>
+          <span class="next-admin-usage__stat-main">
+            <span class="next-admin-usage__stat-label">输出 tokens</span>
+            <span class="next-admin-usage__stat-value ui-num">{{
+              fmtNum(summary.totals?.tokens?.output)
+            }}</span>
+          </span>
         </div>
         <div class="next-admin-usage__stat">
-          <span class="next-admin-usage__stat-label">上游成本</span>
-          <span class="next-admin-usage__stat-value ui-num"
-            >¥{{ fmtMoney(summary.totals?.cost?.upstreamPaid) }}</span
-          >
+          <span class="next-admin-usage__stat-icon next-admin-usage__stat-icon--gold">
+            <MoneyIcon />
+          </span>
+          <span class="next-admin-usage__stat-main">
+            <span class="next-admin-usage__stat-label">上游成本</span>
+            <span class="next-admin-usage__stat-value ui-num"
+              >¥{{ fmtMoney(summary.totals?.cost?.upstreamPaid) }}</span
+            >
+          </span>
         </div>
       </div>
     </section>
@@ -269,28 +290,72 @@ onMounted(load);
 
 .next-admin-usage__summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: var(--ui-space-6);
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--ui-space-4);
   padding: var(--ui-space-4) var(--ui-space-5);
   border-top: 1px solid var(--ui-border-muted);
 }
 
 .next-admin-usage__stat {
   display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+}
+
+.next-admin-usage__stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.next-admin-usage__stat-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.next-admin-usage__stat-icon--blue {
+  background: var(--ui-info-bg);
+  color: var(--ui-info-fg);
+}
+
+.next-admin-usage__stat-icon--green {
+  background: var(--ui-success-bg);
+  color: var(--ui-success-fg);
+}
+
+.next-admin-usage__stat-icon--cyan {
+  background: #e0f4f6;
+  color: #0e7490;
+}
+
+.next-admin-usage__stat-icon--gold {
+  background: #fdf3e0;
+  color: #a16207;
+}
+
+.next-admin-usage__stat-main {
+  display: flex;
   flex-direction: column;
-  gap: var(--ui-space-2);
+  gap: 2px;
+  min-width: 0;
 }
 
 .next-admin-usage__stat-label {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
+  white-space: nowrap;
 }
 
 .next-admin-usage__stat-value {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: var(--ui-weight-semibold);
   color: var(--ui-foreground);
   letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 
 .next-admin-usage__reqid {
