@@ -260,6 +260,32 @@ async function copySecret() {
 
 // ---- row actions ----
 
+async function copyKeyId(key: VirtualKeyView) {
+  const text = key.display;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      toast.success('Key ID 已复制');
+      return;
+    }
+  } catch {
+    // fall through to the legacy path
+  }
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.appendChild(area);
+  area.select();
+  const ok = document.execCommand('copy');
+  area.remove();
+  if (ok) {
+    toast.success('Key ID 已复制');
+  } else {
+    toast.error('复制失败，请手动选择复制');
+  }
+}
+
 async function handleRotate(key: VirtualKeyView) {
   confirmState.value = {
     title: `轮换 Virtual Key「${key.name}」`,
@@ -541,7 +567,22 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
         data-testid="keys-table"
       >
         <template #name="{ row }">
-          <div class="next-keys__name">{{ (row as VirtualKeyView).name }}</div>
+          <div class="next-keys__name-line">
+            <span class="next-keys__name">{{ (row as VirtualKeyView).name }}</span>
+            <button
+              type="button"
+              class="next-keys__copy"
+              :aria-label="`复制 ${(row as VirtualKeyView).name} 的 Key ID`"
+              :title="'复制 Key ID'"
+              :data-testid="`key-copy-${(row as VirtualKeyView).id}`"
+              @click="copyKeyId(row as VirtualKeyView)"
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4" />
+                <path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5" stroke="currentColor" stroke-width="1.4" />
+              </svg>
+            </button>
+          </div>
           <div class="ui-mono next-keys__mask">{{ (row as VirtualKeyView).display }}</div>
         </template>
         <template #purpose="{ row }">{{
@@ -900,6 +941,38 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
 
 .next-keys__summary-danger {
   color: var(--ui-danger-fg);
+}
+
+.next-keys__name-line {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+
+.next-keys__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: var(--ui-radius-control);
+  background: transparent;
+  color: var(--ui-foreground-faint);
+  cursor: pointer;
+  transition:
+    color var(--ui-ease),
+    background-color var(--ui-ease);
+}
+
+.next-keys__copy:hover {
+  background: var(--ui-muted);
+  color: var(--ui-foreground);
+}
+
+.next-keys__copy:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-shadow-focus);
 }
 
 .next-keys__name {
