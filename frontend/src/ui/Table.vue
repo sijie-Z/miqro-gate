@@ -187,6 +187,14 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
             <td :colspan="columns.length" class="ui-table__empty">
               <slot name="empty" :title="emptyTitle" :description="emptyDescription">
                 <div class="ui-table__empty-body">
+                  <span class="ui-table__empty-mark" aria-hidden="true">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+                      <rect x="4" y="5" width="16" height="14" rx="2.5" stroke="currentColor"
+                        stroke-width="1.6" />
+                      <path d="M4 10.5h16M9 14.5h6" stroke="currentColor" stroke-width="1.6"
+                        stroke-linecap="round" />
+                    </svg>
+                  </span>
                   <p class="ui-table__empty-title">{{ emptyTitle }}</p>
                   <p v-if="emptyDescription" class="ui-table__empty-desc">{{ emptyDescription }}</p>
                 </div>
@@ -305,6 +313,26 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
   text-align: center;
   vertical-align: middle;
   border-bottom: none;
+}
+
+.ui-table__empty-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-4);
+}
+
+.ui-table__empty-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: var(--ui-space-1);
+  border-radius: var(--ui-radius-panel);
+  background: var(--ui-muted);
+  color: var(--ui-foreground-faint);
 }
 
 .ui-table__empty-title {
