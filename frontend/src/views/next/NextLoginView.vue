@@ -103,6 +103,40 @@ function renderError(error: unknown, fallback: string) {
         <span class="next-login__brand-mark">M</span>
         <span class="next-login__brand-name">MiQroGate</span>
       </div>
+
+      <!-- Scene illustration on a white surface card (Vben login style):
+           gateway console + plant + key, flat palette, no gradients -->
+      <div class="next-login__art" aria-hidden="true">
+        <svg viewBox="0 0 400 170" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- slim ground line -->
+          <path d="M18 138h364" stroke="#dbe3f2" stroke-width="2" stroke-linecap="round" />
+          <!-- monitor -->
+          <rect x="120" y="34" width="170" height="104" rx="14" fill="#ffffff" stroke="#c9d6ec" stroke-width="2" />
+          <rect x="130" y="44" width="150" height="84" rx="8" fill="#0f2d6b" />
+          <rect x="146" y="100" width="16" height="20" rx="3" fill="#6aa5ff" />
+          <rect x="172" y="84" width="16" height="36" rx="3" fill="#93b9ff" />
+          <rect x="198" y="66" width="16" height="54" rx="3" fill="#c4d8ff" />
+          <path d="M230 106l16-14 14 10 22-20" stroke="#eef4ff" stroke-width="3"
+            stroke-linecap="round" stroke-linejoin="round" />
+          <circle cx="268" cy="76" r="4" fill="#ffd9a0" />
+          <!-- monitor stand -->
+          <path d="M205 138v-8M205 130h-28M205 130h28" stroke="#b9c6dd" stroke-width="5"
+            stroke-linecap="round" />
+          <!-- plant in a small pot -->
+          <path d="M46 138h34l-4-14H50l-4 14Z" fill="#f3b45e" />
+          <path d="M63 124V96" stroke="#3f9e6f" stroke-width="3" stroke-linecap="round" />
+          <path d="M63 100c-4-10-16-12-20-8 6 4 14 6 20 8Zm0 6c6-8 16-8 20-3-7 3-14 4-20 3Z"
+            fill="#7fd0a3" />
+          <!-- key leaning on the desk -->
+          <circle cx="336" cy="104" r="13" stroke="#8fb4e8" stroke-width="4" />
+          <path d="M336 117v3m0-4 7 7" stroke="#8fb4e8" stroke-width="4" stroke-linecap="round" />
+          <!-- soft floating dots -->
+          <circle cx="84" cy="52" r="5" fill="#ffd9a0" opacity="0.9" />
+          <circle cx="358" cy="44" r="4" fill="#b9d0f5" />
+          <circle cx="62" cy="76" r="3" fill="#ffffff" opacity="0.55" />
+        </svg>
+      </div>
+
       <div class="next-login__brand-body">
         <ul class="next-login__brand-features" aria-hidden="true">
           <li class="next-login__brand-feature">
@@ -319,6 +353,22 @@ function renderError(error: unknown, fallback: string) {
   letter-spacing: -0.01em;
 }
 
+.next-login__art {
+  width: 100%;
+  max-width: 440px;
+  margin: var(--ui-space-8) 0 var(--ui-space-4);
+  padding: 10px;
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: var(--ui-shadow-dialog);
+}
+
+.next-login__art svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .next-login__brand-body {
   margin: auto 0;
   max-width: 440px;
@@ -351,24 +401,22 @@ function renderError(error: unknown, fallback: string) {
 }
 
 .next-login__brand-bottom {
-  margin-top: var(--ui-space-6);
-  padding-top: var(--ui-space-6);
-  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  margin-top: var(--ui-space-4);
 }
 
 .next-login__brand-title {
   margin: 0;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: var(--ui-weight-semibold);
   line-height: 1.55;
   letter-spacing: -0.01em;
 }
 
 .next-login__brand-desc {
-  margin: var(--ui-space-3) 0 0;
+  margin: var(--ui-space-2) 0 0;
   font-size: var(--ui-font-size-sm);
-  line-height: 1.9;
-  color: rgba(255, 255, 255, 0.68);
+  line-height: 1.8;
+  color: rgba(255, 255, 255, 0.7);
 }
 
 /* ---- form column ---- */
@@ -512,7 +560,7 @@ function renderError(error: unknown, fallback: string) {
 .next-login__foot {
   margin: var(--ui-space-6) 0 0;
   font-size: var(--ui-font-size-sm);
-  color: var(--ui-foreground-faint);
+  color: var(--ui-foreground-secondary);
   text-align: center;
 }
 

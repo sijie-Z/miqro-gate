@@ -37,10 +37,10 @@ const stats = computed(() => {
     0,
   );
   return [
-    { label: 'Virtual Key', value: String(keys.value.length), hint: `${active} 个可用`, icon: LockOnIcon },
-    { label: '本月请求', value: formatCount(totalRequests), hint: '经网关的请求数', icon: ChartBarIcon },
-    { label: '本月 Tokens', value: formatCount(totalTokens), hint: '输入 + 输出', icon: LayersIcon },
-    { label: '本月成本', value: `¥${Number(totalCost).toFixed(2)}`, hint: '按价格快照估算', icon: MoneyIcon },
+    { label: 'Virtual Key', value: String(keys.value.length), hint: `${active} 个可用`, icon: LockOnIcon, tone: 'blue' },
+    { label: '本月请求', value: formatCount(totalRequests), hint: '经网关的请求数', icon: ChartBarIcon, tone: 'green' },
+    { label: '本月 Tokens', value: formatCount(totalTokens), hint: '输入 + 输出', icon: LayersIcon, tone: 'cyan' },
+    { label: '本月成本', value: `¥${Number(totalCost).toFixed(2)}`, hint: '按价格快照估算', icon: MoneyIcon, tone: 'gold' },
   ];
 });
 
@@ -175,7 +175,11 @@ onMounted(load);
               <span class="next-overview__stat-value ui-num">{{ card.value }}</span>
               <span class="next-overview__stat-hint">{{ card.hint }}</span>
             </div>
-            <span class="next-overview__stat-icon" aria-hidden="true">
+            <span
+              class="next-overview__stat-icon"
+              :class="`next-overview__stat-icon--${card.tone}`"
+              aria-hidden="true"
+            >
               <component :is="card.icon" />
             </span>
           </div>
@@ -316,7 +320,7 @@ onMounted(load);
               <span v-else class="next-overview__ledger-unset">未配置滚动额度</span>
             </div>
             <span class="next-overview__ledger-quota ui-num">{{
-              row.quotaTotal ? `${formatCount(row.quotaTotal)} ${row.quotaUnit}` : '—'
+              row.quotaTotal ? `${formatCount(row.quotaTotal)} ${row.quotaUnit}` : '未配置'
             }}</span>
           </div>
         </div>
@@ -380,7 +384,7 @@ onMounted(load);
 }
 
 .next-overview__stat-value {
-  font-size: 24px;
+  font-size: 26px;
   font-weight: var(--ui-weight-semibold);
   letter-spacing: -0.01em;
   white-space: nowrap;
@@ -395,17 +399,41 @@ onMounted(load);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--ui-radius-panel);
-  background: var(--ui-primary-soft);
-  color: var(--ui-primary-active);
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
   flex-shrink: 0;
 }
 
+/* Vben workbench style: each stat carries its own tinted icon chip */
+.next-overview__stat-icon--blue {
+  background: var(--ui-info-bg);
+  color: var(--ui-info-fg);
+}
+
+.next-overview__stat-icon--green {
+  background: var(--ui-success-bg);
+  color: var(--ui-success-fg);
+}
+
+.next-overview__stat-icon--orange {
+  background: var(--ui-warning-bg);
+  color: var(--ui-warning-fg);
+}
+
+.next-overview__stat-icon--cyan {
+  background: #e0f4f6;
+  color: #0e7490;
+}
+
+.next-overview__stat-icon--gold {
+  background: #fdf3e0;
+  color: #a16207;
+}
+
 .next-overview__stat-icon svg {
-  width: 17px;
-  height: 17px;
+  width: 18px;
+  height: 18px;
 }
 
 .next-overview__stat-skeleton {
