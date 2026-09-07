@@ -78,6 +78,18 @@ git status --short
 
 规则：小写、ASCII、连字符，不使用开发者姓名；一个分支只包含一个 Goal。`pull --ff-only` 不能完成时停止，不能自行 rebase/merge 未知分歧。
 
+## 3b. Issue 纪律（owner 2026-09-07 拍板：流程正规化，一个 PR 一个 issue）
+
+- 功能/修复动工前先在 GitHub 开 issue（issue 可以是 feature 型：该功能本身）；
+  issue 是该工作的正式记录、验收与回溯挂点，不只是 bug 追踪。
+- 一个 PR 对应一个 issue：PR 标题或正文引用 —— 完成即关闭用 `Closes #n`；
+  部分完成/前后置/多批拆解用 `Refs #n`（如写面 feature 的 ADR 拍板 issue）。
+- 例外与补救：dependabot 自动 PR、纯 CI 应急修复可无前置 issue，但合入后补登
+  issue 并在其上附 merge commit 后关闭；已合入 PR 补登 issue 时在 issue 评论附
+  PR 号与 squash commit 后关闭。
+- 带决策的设计文档（ADR Proposed）若在等人拍板，同步开 issue 挂拍板人
+  （样板：#206 挂 ADR-0016 机器执行者语义）。
+
 ## 4. 修改前和修改后检查
 
 开始时：
