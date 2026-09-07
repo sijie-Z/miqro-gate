@@ -8,6 +8,7 @@ import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ChartBarIcon, DownloadIcon, MoneyIcon, UploadIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
+import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import { UiButton, UiInput, UiSelect, UiStatusBadge, UiTable } from '@/ui';
 import type { UiSelectOption } from '@/ui';
 import type {UsageGroupBy} from '@/types/api';
@@ -136,6 +137,8 @@ onMounted(load);
         <p class="ui-page-desc">全租户用量：筛选条件 → 汇总 → 明细表。</p>
       </div>
     </header>
+
+    <UsageCaliberTip />
 
     <section class="ui-panel next-admin-usage__filters" data-testid="usage-filter-bar">
       <div class="ui-panel-toolbar">

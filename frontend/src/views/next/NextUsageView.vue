@@ -9,6 +9,7 @@ import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
+import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import type { UiSelectOption } from '@/ui';
 import type {QuotaLevel, QuotaMetric, QuotaPeriod, UsageGroup, UsageGroupBy, UsageRecordPage} from '@/types/api';
 import type { QuotaRuleView, UsageRecord, UsageSummary } from '@/types/generated-api';
@@ -296,6 +297,8 @@ function formatTime(iso: string): string {
         </UiButton>
       </div>
     </header>
+
+    <UsageCaliberTip />
 
     <!-- Self-service quota visibility (F04) -->
     <section class="ui-panel next-usage__panel" data-testid="my-quota-panel">

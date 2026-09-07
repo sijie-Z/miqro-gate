@@ -90,6 +90,18 @@ describe('NextUsageView', () => {
     return mount(NextUsageView, { global: { plugins: [createPinia()] } });
   }
 
+  it('shows the dismissible usage-caliber tip and hides it on dismiss', async () => {
+    localStorage.clear();
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="usage-caliber-tip"]').exists()).toBe(true);
+    await wrapper.find('[data-testid="usage-caliber-dismiss"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="usage-caliber-tip"]').exists()).toBe(false);
+    expect(localStorage.getItem('miqrokey.usage-caliber-tip-dismissed')).toBe('1');
+  });
+
   it('renders my quota rules with level and disabled badges', async () => {
     mockApi.listMyQuotaRules.mockResolvedValue([
       quotaRule({ id: 'qr-1', level: 'EXCEEDED', usedPct: 110, used: 1_100_000 }),
