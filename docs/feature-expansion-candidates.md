@@ -30,3 +30,21 @@
 3. D 需小裁决(健康探测仅元数据+白名单模型);E/G 等拍板;F 需明确「组」收益再反转。
 
 > 纪律：凡需反转既有裁决/加 ADR 的候选一律停在 ⏸,不自行动工。
+
+## 核对记录 2026-09-07：F01 实态 + 大厂「做了没做」对照入档
+
+**F01 代码核对**：`McpProxyController`（gateway-app/proxy）即 F01 数据面完整实现（类注释自述
+"F01, Tencent AI gateway doc 135906 wiring shape"）——消费者 Bearer 摘要鉴权 → 两级 ACL →
+上游流转发 → F12/F13 韧性 → F15 日志；契约/韧性/日志三套测试在库。backlog F01 已校为 DONE
+（原 PLANNED 为登记期滞后；仅「分布式 MCP 会话缓存」为独立 follow-up）。
+
+**大厂对照（腾讯 TSE / 阿里 Higress，出处：ai-gateway-comparison.md 与 platform-middleware-roadmap.md 研究段）**：
+- 两家都做、我们按五红线裁剪后补齐中：管理 OpenAPI 写面（F60，等 ADR-0016）、OAuth/OIDC 身份
+  （F33）、告警体系（F07）、SkillHub（F31，腾讯 2026-03 形态）、Agent 管理（F27，阿里 Agent 拓扑）。
+- 两家做、我们刻意不学（不采纳清单见 comparison.md）：硬配额拦截（腾讯超配拒绝/降级、阿里
+  Credits 硬拦）、智能路由/Fallback、L2 向量缓存、正文脱敏/日志、Key 池轮询、消费者组。
+- 两家不需要做（=我们单租户定位的增量价值）：对上游供应商账单的四级对账（F19/F20/F23——
+  它们是计费方，无上游账单概念）、供应商官方价格自动同步（F08，同源）、凭证 1:1 审计绑定与
+  正文不落库（自身即差异支柱）。
+- 平台自建账号直同步（F32 电话/userid）：两家均无此形态（云厂商卖标准云身份 SSO），属
+  leader 平台侧内部形态，BLOCKED 待接口。
