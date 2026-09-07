@@ -1,0 +1,129 @@
+# Postgres image scan exemptions. Each entry needs a rationale; none are permanent.
+# Review EVERY entry when the image digest is next upgraded (see deploy/compose.yaml;
+# the postgres-image-update workflow opens a PR when the official digest moves) and
+# when an entry nears its expired_at.
+#
+# Migrated 2026-09-07 from the legacy text .trivyignore to .trivyignore.yaml so entries
+# can scope by package (purls) and expire (expired_at). Format docs:
+# https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/#trivyignoreyaml
+
+vulnerabilities:
+  # G6.3 (2026-08-26): Postgres image scan exemptions, each with rationale.
+  # Review EVERY entry when the image digest is next upgraded (see
+  # deploy/compose.yaml) — drop the entries that no longer apply.
+  #
+  # OpenSSL QUIC-server memory-growth DoS (libcrypto3/libssl3 3.5.7-r0,
+  # fixed 3.5.8-r0): Postgres serves TCP TLS, never QUIC, so the vulnerable
+  # code path is not reachable.
+  #
+  # gosu (/usr/local/bin/gosu): Go su-wrapper used only by the entrypoint.
+  # The full golang CVE set below is local-DoS class in bundled tooling, not
+  # part of the postgres server attack surface.
+  #
+  # golang toolchain local-DoS inside the alpine image (net/url, crypto/tls):
+  # bundled tooling, not part of the postgres server attack surface.
+  - id: CVE-2026-14456
+  # G6.3 (2026-08-26): Postgres image scan exemptions, each with rationale.
+  # Review EVERY entry when the image digest is next upgraded (see
+  # deploy/compose.yaml) — drop the entries that no longer apply.
+  #
+  # OpenSSL QUIC-server memory-growth DoS (libcrypto3/libssl3 3.5.7-r0,
+  # fixed 3.5.8-r0): Postgres serves TCP TLS, never QUIC, so the vulnerable
+  # code path is not reachable.
+  #
+  # gosu (/usr/local/bin/gosu): Go su-wrapper used only by the entrypoint.
+  # The full golang CVE set below is local-DoS class in bundled tooling, not
+  # part of the postgres server attack surface.
+  #
+  # golang toolchain local-DoS inside the alpine image (net/url, crypto/tls):
+  # bundled tooling, not part of the postgres server attack surface.
+  - id: CVE-2025-61726
+  - id: CVE-2025-61729
+  - id: CVE-2025-68121
+  - id: CVE-2026-25679
+  - id: CVE-2026-27145
+  - id: CVE-2026-32280
+  - id: CVE-2026-32281
+  - id: CVE-2026-32283
+  - id: CVE-2026-33811
+  - id: CVE-2026-33814
+  - id: CVE-2026-33818
+  - id: CVE-2026-39820
+  - id: CVE-2026-39821
+  - id: CVE-2026-39822
+  - id: CVE-2026-39836
+  - id: CVE-2026-42499
+  - id: CVE-2026-42504
+  - id: CVE-2026-56853
+  - id: CVE-2026-56858
+  # G6.3 (2026-08-26): Postgres image scan exemptions, each with rationale.
+  # Review EVERY entry when the image digest is next upgraded (see
+  # deploy/compose.yaml) — drop the entries that no longer apply.
+  #
+  # OpenSSL QUIC-server memory-growth DoS (libcrypto3/libssl3 3.5.7-r0,
+  # fixed 3.5.8-r0): Postgres serves TCP TLS, never QUIC, so the vulnerable
+  # code path is not reachable.
+  #
+  # gosu (/usr/local/bin/gosu): Go su-wrapper used only by the entrypoint.
+  # The full golang CVE set below is local-DoS class in bundled tooling, not
+  # part of the postgres server attack surface.
+  #
+  # golang toolchain local-DoS inside the alpine image (net/url, crypto/tls):
+  # bundled tooling, not part of the postgres server attack surface.
+  - id: CVE-2026-56859
+  - id: CVE-2026-56860
+  - id: CVE-2026-56862
+
+  # --- Temporary: util-linux (libuuid 2.42.1-r0) inherited from the
+  # postgres:17.11-alpine / alpine 3.24.1 base (digest sha256:18cfe3ef..., built
+  # 2026-08-13). Fix exists upstream (util-linux 2.42.3-r0/r1) but no official alpine
+  # rebuild is published yet - 18cfe3ef... is still the newest official postgres 17
+  # alpine image (17-alpine / 17.11-alpine / 17-alpine3.24 all point at it). The
+  # postgres-image-update workflow opens a PR as soon as upstream rebuilds; drop these
+  # entries when that scan goes green.
+  #
+  # Scope/rationale: local-privilege / restricted-mount vulnerabilities in util-linux
+  # (mount(8), nsenter, X-mount). Their documented exploit chains depend on
+  # attacker-controlled /etc/fstab user mounts, X-mount.* options, restricted bind
+  # mounts, external mount helpers, or a privileged operator invoking
+  # nsenter --join-cgroup - none of which are part of the deployed postgres workload
+  # or its configuration. CVE-2026-53614 specifically needs SUID mount(8) plus an
+  # fstab user bind mount of attacker content under nosuid/noexec - not configured
+  # in this container.
+  # Added 2026-09-07. Review 2026-10-07 (hard expiry via expired_at): the Security
+  # gate goes red again on that date if the image has not been rebuilt by then.
+  - id: CVE-2026-53612
+    purls:
+      - pkg:apk/alpine/libuuid
+    expired_at: 2026-10-07
+    statement: TOCTOU in mount(8) post-mount ownership/mode changes - requires SUID mount + fstab user mount; absent from the postgres workload.
+  - id: CVE-2026-53613
+    purls:
+      - pkg:apk/alpine/libuuid
+    expired_at: 2026-10-07
+    statement: TOCTOU in mount(8) via ancestor directory swap - requires SUID mount + attacker-writable ancestor dirs; absent from the postgres workload.
+  - id: CVE-2026-53614
+    purls:
+      - pkg:apk/alpine/libuuid
+    expired_at: 2026-10-07
+    statement: SUID mount nosuid/noexec bypass via LIBMOUNT_FORCE_MOUNT2 - requires an fstab user bind mount of SUID content under nosuid/noexec; not configured here.
+  - id: CVE-2026-76642
+    purls:
+      - pkg:apk/alpine/libuuid
+    expired_at: 2026-10-07
+    statement: Failed external mount helper runs privileged X-mount post-hooks - requires fstab user-mount + external helper config; absent from the postgres workload.
+  - id: CVE-2026-78408
+    purls:
+      - pkg:apk/alpine/libuuid
+    expired_at: 2026-10-07
+    statement: nsenter --join-cgroup leaks root cgroup migration authority - needs a privileged operator to invoke nsenter against an attacker target; not part of the workload.
+  - id: CVE-2026-78409
+    purls:
+      - pkg:apk/alpine/libuuid
+    expired_at: 2026-10-07
+    statement: X-mount.subdir detached-tree escape via symlinks - requires fstab-authorized X-mount.subdir; absent from the postgres workload.
+  - id: CVE-2026-78410
+    purls:
+      - pkg:apk/alpine/libuuid
+    expired_at: 2026-10-07
+    statement: Restricted bind mounts do not pin source - requires fstab-authorized restricted mounts + X-mount.owner/group/mode; absent from the postgres workload.
