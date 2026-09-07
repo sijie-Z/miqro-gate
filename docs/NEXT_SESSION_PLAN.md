@@ -2,6 +2,8 @@
 
 > 给新 Claude Code 会话的启动指令与分阶段计划。新会话第一步：通读本文件 + `CLAUDE.md` + `docs/claude-code-execution-contract.md` + `docs/progress.md`（顶部 Current State 与"会话交接点"段）+ `docs/git-workflow.md`。
 >
+> **2026-09-07 状态注**：当前状态与待办以 `docs/progress.md` Current State 与「会话交接点」为准；本文件 09-03 版指令已被 09-06/07 轮次逐步执行/覆盖（设计师母版→Vben→权威稿→中文化；开放 API 批1/1b；issue 纪律）。继续执行前先读 progress.md 顶部。
+>
 > 创建时间：2026-09-03。创建人：上一会话（用户授权连续执行；用户明确"token 不敏感、不太在意工作量、会让我一直做"，故计划按可连续执行的分阶段 Goal 组织，每阶段独立验收、独立 checkpoint、可随时停）。
 
 ## 0. 用户交给下一会话的总体命令（原话要点）

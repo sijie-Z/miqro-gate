@@ -7,8 +7,17 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `会话执行 2026-09-07（开放 API 批1 + 设计师 UI + 文档收口；pre-release 评估）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS`（develop @ #202（#200 ADR-0015 批1 + #201 Scorecard ghcr 修复已合 main + #202 docs 收口）。**2026-09-07 语言方向（owner）：中文产品**——登录页设计师稿遗留英文文案已整体中文化（详见 #213）；此前 #194/#196 记录的「登录文案 EN 按稿」被本方向覆盖。**上一轮 `goal/open-admin-api-batch1b` → PR #204（2026-09-07）**：批1b 读面全开——/api/v1/admin-api/** 新增 audit-events（共享 AuditEventReadService，人类端点回归受保护）、api-keys、quota-rules、export-tasks 元数据（SQL 不读 file_bytes）、mcp-access-logs；会话硬化（仅 SYSTEM_ADMIN 放行开放面，403 ADMIN_API_FORBIDDEN，修批1 会话路径租户属性缺失隐患）；首个开放面端到端集成测试（全端点/跨租户隔离/吊销过期即时 401/审计光标/会话规则）。写面草案 ADR-0016（机器执行者语义，Proposed，等 owner/leader 拍板）。**待办：Q4 真机、F53 真实凭证、F32/OAuth、pre-release tag 0.1.0-rc.1 已在 #202 打上并推送、OpenAPI 基线 docs/openapi/openapi-3.1.json 落后（新增端点，破坏性 diff 不受影响，下轮 docs 刷新）**）
+- Goal status: `IN_PROGRESS`（develop 已至 #218 + 本轮 rc.2 收口。09-07 全量并入：#198-#200 开放 API 批1 → #204 批1b 读面+会话硬化（含批1 机器通道被 SessionFilter 前置拦截的修复）→ #209 issue 纪律 → #212 登录打磨 → #214 登录中文化（owner：中文产品，覆盖 #194/#196「EN 按稿」）→ #216 backlog 卫生（F59→F60；F34/留痕校正 DONE）→ #218 F01 核对 DONE + 大厂对照入档。pre-release 0.1.0-rc.2 已打标并推送。**待办：F60 写面拍板（ADR-0016，#206 上 A+C 建议）、Q4 真机与 F53 真实凭证（#211 BLOCKED）、F32 平台用户同步/OAuth（leader 接口形态）、登录稿残余 NIT（可选，reopen #210）**）
 - Last updated: `2026-09-07 CST`
+
+## 会话交接点 2026-09-07（下半场：#204-#218 六 PR + pre-release rc.2）
+
+- **批 1b（#204，issue #205）**：/api/v1/admin-api 读面全开——audit-events（共享 AuditEventReadService，人类端点委托回归受保护）/api-keys/quota-rules/export-tasks（元数据 SQL 不读 file_bytes）/mcp-access-logs；**发现并修复批 1 真 bug**：SessionFilter(-100) 拦截一切无会话 /api 请求，机器 Bearer 到不了 AdminApiKeyAuthFilter(-95)——首个开放面集成测试（7/7：全端点/跨租户隔离/吊销过期即时 401/审计光标/会话 SYSTEM_ADMIN 403 规则/人类端点回归）暴露并锁定；写面草案 ADR-0016(Proposed) 等拍板。
+- **Issue 纪律（#209→#207）**：owner 拍板流程正规化（一个 PR 一个 issue，issue 可以是 feature）；git-workflow §3b 生效；#205/#210/#211/#213/#215/#217/#219 均按此登记闭环。
+- **登录稿（#212→#210、#214→#213）**：最终对照打磨 7.5→8.5 收口合入；随后 owner「我们是中文的」→ 全页文案中文化（hero「网关悄然运行。/ 密钥由你掌控。」等，品牌与供应商名除外；覆盖 #194/#196「EN 按稿」记录）。
+- **Backlog 卫生（#216→#215）**：F59 撞号（留痕保留 F59，管理开放 API→**F60**），F34/F59-留痕按交付事实校正 DONE；引用方同步。
+- **F01 核对（#218→#217）**：McpProxyController=完整数据面（类注释自述 F01 wiring），契约/韧性/日志三测试在库 → PLANNED→DONE；大厂「做了没做」三类对照（对标补差/刻意不学/大厂不需要）入 feature-expansion-candidates。
+- **Pre-release（#219）**：rc.1(#202) 后 6 PR → 文档全量补记 + OpenAPI 基线刷新 → **0.1.0-rc.2** annotated tag @ 收口 commit 并推送；release-checklist 状态：构建/测试/安全硬门禁 ✅（CI 全绿矩阵+本地 verify）、供应商真实凭证 ⏳(#211)、§6.1 部分告警类型 ⏳、Go/No-Go 由 owner 签署。
 
 ## 会话交接点 2026-09-06 — UI 母版修订(Vben console edition)与夜间自主轮
 
