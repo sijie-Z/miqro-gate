@@ -44,7 +44,11 @@
 - 机器凭据与 api_consumers（外部平台账单通道）语义分开登记，不混用。
 
 ## 状态追踪
-- [ ] 批 1 后端（V32 + 过滤 + 端点 + 集成测试）—— 建议先出 ADR-0015（管理面
-      机器凭据与 Principal 建模），Accepted 后动工
-- [ ] 批 2 契约/示例
+- [x] 批 1 后端（V32 + 过滤 + 端点 + 集成测试；ADR-0015 Accepted；#200 合入 2026-09-07）
+- [x] 批 1b 读面扩展（#2xx 合入 2026-09-07）：/api/v1/admin-api 读面全开——
+      audit-events（共享 AdminAuditController 查询服务）、api-keys、quota-rules、
+      export-tasks 元数据（不读 file_bytes）、mcp-access-logs；会话仅 SYSTEM_ADMIN
+      放行（403 ADMIN_API_FORBIDDEN）；首个开放面端到端集成测试（跨租户隔离/吊销
+      即时/过期/审计光标）
+- [ ] 批 2 契约/示例 —— 写面先拍板 ADR-0016（机器执行者语义,Proposed 2026-09-07）
 - [ ] 批 3 治理可选
