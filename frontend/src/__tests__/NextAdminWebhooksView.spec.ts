@@ -47,6 +47,7 @@ describe('NextAdminWebhooksView', () => {
     toastState.items.splice(0);
     document.body.innerHTML = '';
     mockApi.listWebhooks.mockResolvedValue([]);
+    mockApi.webhookDeliveries.mockResolvedValue([]);
   });
 
   function mountView() {
@@ -138,5 +139,19 @@ describe('NextAdminWebhooksView', () => {
     await flushPromises();
 
     expect(mockApi.deleteWebhook).toHaveBeenCalledWith('w1');
+  });
+
+  it('shows the recent-20 delivery success rate per endpoint', async () => {
+    mockApi.listWebhooks.mockResolvedValue([endpoint()]);
+    mockApi.webhookDeliveries.mockResolvedValue([
+      delivery({ httpStatus: 200 }),
+      delivery({ attempt: 2, httpStatus: 200 }),
+      delivery({ attempt: 3, httpStatus: 502, errorMessage: 'upstream down' }),
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+    const badge = wrapper.find('[data-testid="webhook-rate-w1"]');
+    expect(badge.exists()).toBe(true);
+    expect(badge.text()).toContain('2/3');
   });
 });

@@ -216,13 +216,14 @@ public class ExportTaskService {
                         .getBytes(StandardCharsets.UTF_8));
                 gzip.write("gatewayRequestId,isComplete,usageMissing,virtualKeyId,projectId,providerProductId,"
                         .getBytes(StandardCharsets.UTF_8));
-                gzip.write("credentialId\n".getBytes(StandardCharsets.UTF_8));
+                gzip.write("credentialId,local_caliber_note\n".getBytes(StandardCharsets.UTF_8));
                 for (Map<String, Object> row : rows) {
                     gzip.write(join(row.values()).getBytes(StandardCharsets.UTF_8));
-                    gzip.write('\n');
+                    gzip.write(",local-instant\n".getBytes(StandardCharsets.UTF_8));
                 }
             } else {
                 for (Map<String, Object> row : rows) {
+                    row.put("localCaliberNote", "local-instant");
                     gzip.write(objectMapper.writeValueAsBytes(row));
                     gzip.write('\n');
                 }

@@ -134,6 +134,7 @@ class ExportDeletionApiIntegrationTest {
         String csv = gunzip(artifact);
         org.assertj.core.api.Assertions.assertThat(csv).contains("req-1", "req-2", MODEL);
         org.assertj.core.api.Assertions.assertThat(csv).doesNotContain("sk-");
+        org.assertj.core.api.Assertions.assertThat(csv).contains("local_caliber_note", "local-instant");
     }
 
     @Test

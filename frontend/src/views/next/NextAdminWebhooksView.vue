@@ -15,11 +15,14 @@ const webhooks = ref<WebhookEndpointView[]>([]);
 const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
+/** Recent-20 delivery success summary per endpoint (absent = no attempts yet). */
+const rate = ref<Record<string, { ok: number; total: number }>>({});
 
 const columns = [
   { key: 'name', title: '名称', minWidth: '170px' },
   { key: 'url', title: 'URL', minWidth: '260px' },
   { key: 'status', title: '状态', width: '110px' },
+  { key: 'rate', title: '近 20 次投递成功率', width: '150px' },
   { key: 'createdAt', title: '创建时间', width: '170px' },
   { key: 'actions', title: '操作', width: '250px' },
 ];
@@ -58,6 +61,7 @@ async function load() {
   loadError.value = '';
   try {
     webhooks.value = await api.listWebhooks();
+    await loadRates(webhooks.value);
   } catch (error) {
     if (error instanceof ApiError) {
       loadError.value = error.message;
@@ -66,6 +70,38 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+/** Summarises the recent-20 delivery history per endpoint (best-effort). */
+async function loadRates(endpoints: WebhookEndpointView[]) {
+  await Promise.all(
+    endpoints.map(async (endpoint) => {
+      try {
+        const deliveries = await api.webhookDeliveries(endpoint.id);
+        if (!deliveries || deliveries.length === 0) return;
+        const ok = deliveries.filter((d) => (d.httpStatus ?? 0) >= 200 && d.httpStatus! < 300).length;
+        rate.value[endpoint.id] = { ok, total: deliveries.length };
+      } catch {
+        // rate stays absent when the history call fails; the table shows '—'
+      }
+    }),
+  );
+}
+
+function rateOf(endpoint: WebhookEndpointView): { ok: number; total: number } | null {
+  return rate.value[endpoint.id] ?? null;
+}
+
+function rateLabel(endpoint: WebhookEndpointView): string {
+  const r = rateOf(endpoint);
+  return r ? `${r.ok}/${r.total}` : '—';
+}
+
+function rateTone(endpoint: WebhookEndpointView): 'success' | 'warning' | 'danger' | 'neutral' {
+  const r = rateOf(endpoint);
+  if (!r) return 'neutral';
+  if (r.ok === r.total) return 'success';
+  return r.ok > 0 ? 'warning' : 'danger';
 }
 
 async function createWebhook() {
@@ -302,6 +338,18 @@ onMounted(load);
             :tone="(row as WebhookEndpointView).enabled ? 'success' : 'neutral'"
             :label="(row as WebhookEndpointView).enabled ? '已启用' : '已停用'"
           />
+        </template>
+        <template #rate="{ row }">
+          <span
+            v-if="rate[(row as WebhookEndpointView).id]"
+            :data-testid="`webhook-rate-${(row as WebhookEndpointView).id}`"
+          >
+            <UiStatusBadge
+              :tone="rateTone(row as WebhookEndpointView)"
+              :label="rateLabel(row as WebhookEndpointView)"
+            />
+          </span>
+          <span v-else class="ui-muted">—</span>
         </template>
         <template #createdAt="{ row }">{{
           formatTime((row as WebhookEndpointView).createdAt)

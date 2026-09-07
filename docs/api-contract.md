@@ -513,6 +513,7 @@
 | `GET /api/v1/admin/exports?limit` | 最近任务列表 |
 
 - 窗口 ≤ 93 天；产物只含计数与元数据列（见 database-schema `export_tasks`），绝不包含 prompt、代码、Secret 或 Virtual Key 明文。
+- **口径标注（2026-09-07）**：CSV 末列 `local_caliber_note` / JSONL 同名字段 = `local-instant`（本地即时记账口径；供应商官方账单通常 T+1 滞后，对账勿以官方值直接核对本地明细）。
 - 产物保存 24 小时后 `EXPIRED`，下载返回 `410 EXPORT_EXPIRED`；未完成/不存在 → `404 EXPORT_NOT_FOUND`。
 - **GC（F06）**：定时回收过窗产物（`miqrokey.cleanup.expired-sweep-ms`，默认 1h）——`SUCCEEDED` 且超过 `expires_at` 的行连同 `file_bytes` 物理删除；清理后下载返回 `404 EXPORT_NOT_FOUND`（410 语义仅在清理前可观测）。`FAILED`/`PENDING` 行保留供运维查看。
 - 错误码：`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400）。
