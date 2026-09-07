@@ -5,6 +5,11 @@
 > 口径图例：`PLANNED`=已立项可做 | `SCAFFOLD`=清晰度不足，先留架子 | `BLOCKED`=外部阻塞（等 leader/平台/凭证） | `ADR`=需决策反转/新 ADR 方可做 | `DECLINED`=刻意不做（红线，防误入） | `DEFERRED`=明确远期（无立即价值） | `DONE`=已交付（交付记录见 docs/progress.md） | `TBD`=待核对代码/出处
 >
 > 本表登记于 2026-09-02（G6.5→MCP ACL 六连交付后全景盘点），来源跨 9 文档族。
+>
+> **2026-09-07 校正轮**：F59 撞号修正——「请求内容合规留痕管道」保留 F59（先登记）；
+> 「管理开放 API」改为 **F60**（引用方同步：ADR-0015 关联行、CHANGELOG 2026-09-07 条目）。
+> 状态按交付事实校正：F34（Kafka 引入）与 F59-留痕（R1-R4）2026-09-06 已随 ADR-0014 全交付→DONE；
+> 平台侧接线/演进仍属 BLOCKED（F32 类）。
 
 ## A 组 · 数据面与治理闭环（清晰待做）
 
@@ -63,7 +68,7 @@
 | F31 | SkillHub 公司内 skill 来源接入 | middleware 待办 | 部分 | BLOCKED | 公司 skill 存放/格式 | 上传/目录/下载已按 Agent Skills 实现 |
 | F32 | 平台用户同步（电话/userid 注册 → 网关账号） | middleware P0；报备需求 | 部分 | BLOCKED | 平台注册字段/形态（leader） | 需 ADR（触碰本地 Argon2 体系）；JWT sub→平台 user_id 叠加为 ADR-0011 后果。**自助注册（F-REG，2026-09-03）已交付**（`/auth/register` + 开关），平台级映射/同步仍等 leader |
 | F33 | 平台 OAuth 确权（OAuth/OIDC 访问受保护资源） | middleware P0 | 部分 | BLOCKED | OAuth 形态决策 | JWT 通道（ADR-0011）为前置形态 |
-| F34 | Kafka 引入（事件管道演进） | leader×平台沟通（2026-09）；ADR-0014 | 清晰（场景=内容留痕事件流，见 ADR-0014） | BLOCKED | ADR-0014 Accepted + 拓扑拍板 | 场景已细化：请求内容合规留痕事件（按用户可追溯/加密/冷数据）经 Kafka 投递、平台消费端多进程持久化；落地需 ADR-0012/0014 Accepted |
+| F34 | Kafka 引入（事件管道演进） | leader×平台沟通（2026-09）；ADR-0014 | 清晰（场景=内容留痕事件流，见 ADR-0014） | **DONE（2026-09-07 校正：ADR-0014 Accepted 后 R1-R4 已于 2026-09-06 交付——R3 Kafka producer、R4 消费端参考实现，见 CHANGELOG/progress）** | ADR-0014 Accepted（已交付） | 场景已细化：请求内容合规留痕事件经 Kafka 投递、平台消费端多进程持久化——producer 与参考消费端已交付；生产侧消费部署与事件拓扑演进属平台接线（BLOCKED，另见 F32） |
 
 ## F 组 · 基础设施与远期（多数 DEFERRED/SCAFFOLD）
 
@@ -103,7 +108,7 @@
 | F56 | spec §9 人工视觉审查 | progress G5.5 | TBD | 需人工执行 |
 | F57 | 版本号与 tag（0.1.0-SNAPSHOT） | progress G6.5 | BLOCKED | 待所有者授权 |
 | F58 | release-checklist 未勾门禁复核（§1/§4/§6 相关项随 F19/F20 落地） | release-checklist | DEFERRED | 逐项由对应功能闭合 |
-| F59 | 请求内容合规留痕管道（加密冷存/按用户追溯/OAuth uid 映射骨架） | leader×平台沟通；ADR-0014 | 清晰（2026-09-05 Accepted，P1-P8 v3 默认裁决） | **IN_PROGRESS（2026-09-06 R1 配置面完成：V31 retention_config+user_identity_link+管理开关 API；R2 网关密文采集/信封 → R3 Kafka producer → R4 消费端参考实现待续）** | 无（红线已获所有者显式放行，见 ADR-0014 §1） | 见 ADR-0014：网关旁路密文信封→Kafka→消费端持久化（文件/S3/DB 候选）；「不存正文」例外通道=默认关 |
+| F59 | 请求内容合规留痕管道（加密冷存/按用户追溯/OAuth uid 映射骨架） | leader×平台沟通；ADR-0014 | 清晰（2026-09-05 Accepted，P1-P8 v3 默认裁决） | **DONE（2026-09-07 校正：R1-R4 已于 2026-09-06 全量交付——V31 配置面+管理开关、R2 网关密文信封、R3 Kafka producer、R4 消费端参考实现；见 ADR-0014 与 CHANGELOG 2026-09-06）** | 无（红线已获所有者显式放行，见 ADR-0014 §1） | 见 ADR-0014：网关旁路密文信封→Kafka→消费端持久化（文件/S3/DB 候选）；「不存正文」例外通道=默认关 |
 
 ## 文档一致性缺口（盘点发现，登记待修）
 
@@ -118,4 +123,4 @@
 
 | ID | 功能 | 出处 | 清晰度 | 状态 | 前置/依赖 | 架子与要点 |
 |---|---|---|---|---|---|---|
-| F59 | 管理开放 API：机器对机器管理凭据 + OpenAPI 对外发布 + curl/Python 示例（+可选频控/作用域） | leader 2026-09-07；腾讯 AI 网关既有形态 | 清晰（见 docs/open-admin-api-plan.md） | **IN_PROGRESS（2026-09-07 ADR-0015 Accepted → #200 批1 机器凭据+usage 读面；批1b 读面全开：audit/api-keys/quota-rules/export-tasks/mcp-access-logs + 会话 SYSTEM_ADMIN 硬化）** | 批 2 写面须先拍板 ADR-0016（机器执行者语义,Proposed） | 现状=/api/v1 全量 REST + OpenAPI 3.1 + CI breaking；先例=api_consumers/JWT(ADR-0010/11)。批1 V32 admin_api_key（SHA-256 digest + prefix，Bearer 鉴权，审计；读子集先行）→ 批2 契约/示例（写面等 ADR-0016）→ 批3 治理（作用域/频控,可选） |
+| F60 | 管理开放 API：机器对机器管理凭据 + OpenAPI 对外发布 + curl/Python 示例（+可选频控/作用域） | leader 2026-09-07；腾讯 AI 网关既有形态 | 清晰（见 docs/open-admin-api-plan.md） | **IN_PROGRESS（2026-09-07 ADR-0015 Accepted → #200 批1 机器凭据+usage 读面；批1b 读面全开：audit/api-keys/quota-rules/export-tasks/mcp-access-logs + 会话 SYSTEM_ADMIN 硬化）** | 批 2 写面须先拍板 ADR-0016（机器执行者语义,Proposed） | 现状=/api/v1 全量 REST + OpenAPI 3.1 + CI breaking；先例=api_consumers/JWT(ADR-0010/11)。批1 V32 admin_api_key（SHA-256 digest + prefix，Bearer 鉴权，审计；读子集先行）→ 批2 契约/示例（写面等 ADR-0016）→ 批3 治理（作用域/频控,可选） |

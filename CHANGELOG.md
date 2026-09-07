@@ -7,7 +7,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ### 2026-09-07
 - **登录页文案中文化（owner 方向：中文产品）**：设计师稿遗留的英文文案（hero 标语/标签/按钮/卡片/页脚）全部改中文,语义保留;品牌与供应商名除外;hero 标语收紧为七字对仗（网关悄然运行。/ 密钥由你掌控。）以适配窄列不折行,行高按 CJK 放宽;spec 文案断言同步。
 
-- **开放管理 API（F59）立项与 ADR-0015 Accepted**：机器凭据（`mqk_admin_`、SHA-256 摘要、过期/吊销）+ 只读开放面批 1（#198/#199/#200）。详细：V32 `admin_api_keys`；`POST/GET /api/v1/admin/api-keys` 与 revoke（审计两事件）；`/api/v1/admin-api/**` Bearer 过滤（门户会话放行、吊销即时）；开放读端点 usage summary/records。批 1b/2 与批 3 见 docs/open-admin-api-plan.md。
+- **开放管理 API（F60）立项与 ADR-0015 Accepted**：机器凭据（`mqk_admin_`、SHA-256 摘要、过期/吊销）+ 只读开放面批 1（#198/#199/#200）。详细：V32 `admin_api_keys`；`POST/GET /api/v1/admin/api-keys` 与 revoke（审计两事件）；`/api/v1/admin-api/**` Bearer 过滤（门户会话放行、吊销即时）；开放读端点 usage summary/records。批 1b/2 与批 3 见 docs/open-admin-api-plan.md。
 - **开放管理 API 批 1b 读面（本批）**：`/api/v1/admin-api/**` 只读子集全开——audit-events（审计链尾,与 `GET /api/v1/admin/audit-events` 共享新 AuditEventReadService）、api-keys（视图列表,digest 永不外泄）、quota-rules（计划+当期水位）、export-tasks（仅元数据,SQL 不读 file_bytes）、mcp-access-logs（同会话端参数/窗口校验）；**会话硬化 + 机器通道修复**：SessionFilter 豁免 `/api/v1/admin-api/**`（批1 机器通道此前被会话过滤器前置 401 拦截、从未端到端生效——首个集成测试暴露）；开放面仅 SYSTEM_ADMIN 放行（403 `ADMIN_API_FORBIDDEN`）且会话租户即开放面租户（修 batch1 会话路径租户属性缺失的隐患）；首个开放面端到端集成测试（机器密钥全端点 200、跨租户隔离、吊销/过期即时 401、审计光标、非管理员会话 403、人类端 audit 端点回归）。写面扩展草案 ADR-0016（机器执行者语义,Proposed,等拍板）。
 - **docs 收口**：progress/CHANGELOG/database-schema/api-contract 全量同步至 #200；ADR-0015 状态 Accepted。
 
