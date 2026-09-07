@@ -7,8 +7,8 @@
   put,
   uploadBytes,
 } from './http';
-import type {CreateApiConsumerResponse, AdminUser, McpAclMode, UsageDeletionRequest, WebhookDelivery, Grant, LoginResponse, MemberView, ModelApprovalStatus, UserProjectMembership, ProviderProductView, UsageGroupBy, UserCreatedResponse, UserResponse, UserRole, UserStatusValue} from '@/types/api';
-import type { AgentView, AlertRule, ApiConsumerView, AuditEventView, BudgetView, ConfigEntryView, CreateVirtualKeyResponse, CredentialDetailView, CredentialView, ExportTask, InternalServiceView, McpAccessView, McpRouteRule, McpServiceView, McpToolView, MeGrantsResponse, ModelApprovalPage, ModelApprovalView, PriceSnapshotView, Project, Provider, QuotaDefaultTemplateView, QuotaRuleView, RoiReportView, SeatView, SkillView, SubscriptionView, Team, UpsertMcpRouteRuleRequest, UsageRecordPage, UsageSummary, ValidateCredentialResponse, VirtualKeyView, WebhookEndpointView , McpAccessLogEntry , McpResiliencePolicy } from '@/types/generated-api';
+import type {CreateApiConsumerResponse, AdminUser, McpAclMode, UsageDeletionRequest, Grant, LoginResponse, MemberView, ModelApprovalStatus, UserProjectMembership, ProviderProductView, UsageGroupBy, UserCreatedResponse, UserResponse, UserRole, UserStatusValue} from '@/types/api';
+import type { AgentView, AlertRule, ApiConsumerView, AuditEventView, BudgetView, ConfigEntryView, CreateVirtualKeyResponse, CredentialDetailView, CredentialView, ExportTask, InternalServiceView, McpAccessView, McpRouteRule, McpServiceView, McpToolView, MeGrantsResponse, ModelApprovalPage, ModelApprovalView, PriceSnapshotView, Project, Provider, QuotaDefaultTemplateView, QuotaRuleView, RoiReportView, SeatView, SkillView, SubscriptionView, Team, UpsertMcpRouteRuleRequest, UsageRecordPage, UsageSummary, ValidateCredentialResponse, VirtualKeyView, WebhookDelivery, WebhookEndpointView , McpAccessLogEntry , McpResiliencePolicy } from '@/types/generated-api';
 import type { components } from '@/types/generated';
 
 // Stage-2 codegen migration (batch 1): request DTOs now alias the OpenAPI
