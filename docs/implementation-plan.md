@@ -1,5 +1,9 @@
 # 可执行实现计划
 
+> **2026-09-07 审计注**：本文为早期 Phase-Goal 版执行清单，执行事实源已转移——
+> 完成状态见 `docs/progress.md`，未做与候选见 `docs/feature-backlog.md`（F 系列）与
+> `docs/open-admin-api-plan.md`。本文保留作历史追溯，不再逐项同步。
+
 ## 1. 使用方式
 
 本文件面向 Claude Code Goal 模式。一次只执行一个 Goal。每个 Goal 应控制在一个可独立验证的垂直切片内；完成后更新 `progress.md` 并停止。

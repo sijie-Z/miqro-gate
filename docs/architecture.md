@@ -193,6 +193,20 @@ public interface GatewayResponseCache {
 
 接口表达职责即可，具体签名在实现阶段通过 ADR 固化。
 
+## 10. 近期数据面增补（2026-09-07 核对，细节以 api-contract/ADR 为准）
+
+- **MCP 调用代理（F01，V25/V28-V30）**：gateway `McpProxyController`——
+  `POST /mcpservers/{serviceName}/mcp`，消费者 Bearer 摘要鉴权（route snapshot）→ 两级 ACL
+  （McpAccessPolicy：服务级 + tools/call 工具级）→ 上游 JSON-RPC 原样流转发；F12/F13 韧性
+  （首字节前重试 + 熔断 503）同管线；F15 元数据日志（V29）。MCP 属网关应用内，协议转换仍属
+  CC Switch 边界。
+- **开放管理面（ADR-0015，V32）**：control-plane 过滤链次序——SessionFilter(-100) →
+  AdminApiKeyAuthFilter(-95，`/api/v1/admin-api/**`，机器 Bearer 或 SYSTEM_ADMIN 会话)
+  → RoleInterceptor（`/api/v1/admin/**` deny-by-default 不变）。
+- **内容留痕旁路（ADR-0014，V31，默认关）**：网关密文信封侧信道 → Kafka producer →
+  消费端持久化（参考实现见 docs/retention-consumer.md）；明文只在抽取与加密之间短暂存在。
+- **导出/删除任务 GC（F06）**：`@Scheduled` 回收过窗导出产物与过期删除请求；EXECUTED 与审计永久保留。
+
 ## 9. 技术栈
 
 - Java 21。
