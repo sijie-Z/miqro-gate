@@ -5,6 +5,8 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-07
+- **登录稿最终打磨（#212）**：对照权威稿收口轮——hero 标题收紧不折行、能力卡改回纵向单列带说明、按钮改紫→蓝渐变呼应 portal、portal 光晕/拱门内光加强、白面板微渐变、底部两卡强化容器感、分隔线淡彩、占位符对比度提升（视觉评审 7.5→8.5，文案与 testid 零改动）。
+- **文档收口轮（#216/#218 及本行，2026-09-07 下午）**：issue 纪律入 git-workflow §3b（一个 PR 一个 issue，#209）；backlog 卫生（#216：管理开放 API F59→F60 撞号修正、F34 Kafka 与 F59-留痕按交付事实校正 DONE）；F01 MCP 调用代理经代码核对转 DONE（#218：McpProxyController 数据面+三套测试实锤）；大厂「做了没做」三类对照入 feature-expansion-candidates；OpenAPI 基线刷新至当前契约（落后 #166 起）；pre-release **0.1.0-rc.2** 打标（rc.1 之后合入 #204/#209/#212/#214/#216/#218）。
 - **登录页文案中文化（owner 方向：中文产品）**：设计师稿遗留的英文文案（hero 标语/标签/按钮/卡片/页脚）全部改中文,语义保留;品牌与供应商名除外;hero 标语收紧为七字对仗（网关悄然运行。/ 密钥由你掌控。）以适配窄列不折行,行高按 CJK 放宽;spec 文案断言同步。
 
 - **开放管理 API（F60）立项与 ADR-0015 Accepted**：机器凭据（`mqk_admin_`、SHA-256 摘要、过期/吊销）+ 只读开放面批 1（#198/#199/#200）。详细：V32 `admin_api_keys`；`POST/GET /api/v1/admin/api-keys` 与 revoke（审计两事件）；`/api/v1/admin-api/**` Bearer 过滤（门户会话放行、吊销即时）；开放读端点 usage summary/records。批 1b/2 与批 3 见 docs/open-admin-api-plan.md。
