@@ -51,7 +51,7 @@ describe('NextLoginView', () => {
 
     await wrapper.find('[data-testid="tab-login"]').trigger('click');
     await flushPromises();
-    expect(wrapper.text()).toContain('Welcome back');
+    expect(wrapper.text()).toContain('欢迎回来');
     expect(wrapper.find('[data-testid="register-confirm"]').exists()).toBe(false);
   });
 

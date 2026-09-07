@@ -121,17 +121,17 @@ function renderError(error: unknown, fallback: string) {
           </span>
           <span class="brand-name">MiQroGate</span>
           <span class="brand-divider" />
-          <span class="brand-product">AI Credential Control Plane</span>
+          <span class="brand-product">AI 凭证控制平台</span>
         </div>
         <span class="hero-locale">🌐 简体中文 ⌄</span>
       </header>
 
       <div class="hero-content">
         <div class="hero-copy">
-          <p class="hero-eyebrow">ENTERPRISE AI INFRASTRUCTURE</p>
+          <p class="hero-eyebrow">企业级 AI 基础设施</p>
           <h1>
-            The gateway stays quiet.<br />
-            <span>The control stays <em>yours.</em></span>
+            网关悄然运行。<br />
+            <span>密钥由你<em>掌控</em>。</span>
           </h1>
           <p class="hero-description">
             MiQroGate 是企业级 AI 凭证加密与访问控制平台。为你的大模型 API 提供安全、可观测、可审计的统一网关。
@@ -141,28 +141,28 @@ function renderError(error: unknown, fallback: string) {
             <article class="capability">
               <span class="capability-icon"><LockOnIcon size="18px" /></span>
               <span>
-                <strong>Virtual Keys</strong>
+                <strong>虚拟密钥</strong>
                 <small>统一凭证管理，灵活分配与权限控制</small>
               </span>
             </article>
             <article class="capability">
               <span class="capability-icon"><SecuredIcon size="18px" /></span>
               <span>
-                <strong>Permission Control</strong>
+                <strong>权限控制</strong>
                 <small>细粒度授权，最小化访问风险</small>
               </span>
             </article>
             <article class="capability">
               <span class="capability-icon"><ChartBarIcon size="18px" /></span>
               <span>
-                <strong>Usage &amp; Audit</strong>
+                <strong>用量与审计</strong>
                 <small>实时用量统计，完整审计日志</small>
               </span>
             </article>
             <article class="capability">
               <span class="capability-icon"><ServerIcon size="18px" /></span>
               <span>
-                <strong>Private Deployment</strong>
+                <strong>私有化部署</strong>
                 <small>本地化部署，数据不出环境</small>
               </span>
             </article>
@@ -205,7 +205,7 @@ function renderError(error: unknown, fallback: string) {
             <span class="provider-logo">◈</span><span>DeepSeek</span><i />
           </div>
           <div class="provider-card provider-custom">
-            <span class="provider-logo">⌁</span><span>Custom Endpoint</span><i />
+            <span class="provider-logo">⌁</span><span>自定义端点</span><i />
           </div>
 
           <div class="gate-arch">
@@ -223,15 +223,15 @@ function renderError(error: unknown, fallback: string) {
               <span class="mini-symbol"><i /></span>
               <strong>MiQroGate</strong>
             </div>
-            <div class="status-check"><span class="check-ok">✓</span> Auth</div>
-            <div class="status-check"><span class="check-ok">✓</span> Rate Limit</div>
-            <div class="status-check"><span class="check-ok">✓</span> Logging</div>
-            <div class="status-check"><span class="check-ok">✓</span> Auditing</div>
+            <div class="status-check"><span class="check-ok">✓</span> 认证</div>
+            <div class="status-check"><span class="check-ok">✓</span> 限流</div>
+            <div class="status-check"><span class="check-ok">✓</span> 日志</div>
+            <div class="status-check"><span class="check-ok">✓</span> 审计</div>
           </div>
 
           <div class="scene-terminal">
             <span class="terminal-dot" />
-            <span>GATEWAY / ONLINE</span>
+            <span>网关 · 在线</span>
             <b>99.99%</b>
           </div>
         </div>
@@ -240,11 +240,11 @@ function renderError(error: unknown, fallback: string) {
       <footer class="hero-footer">
         <div class="footer-trust">
           <span><LockOnIcon size="13px" /> HTTPS / JWT</span>
-          <span><span class="footer-slash" />No Prompt Storage</span>
-          <span><span class="footer-slash" />Deterministic Routing</span>
-          <span><SecuredIcon size="13px" />Auditable Usage</span>
+          <span><span class="footer-slash" />不留存 Prompt</span>
+          <span><span class="footer-slash" />确定性路由</span>
+          <span><SecuredIcon size="13px" />用量可审计</span>
         </div>
-        <span class="hero-footer-version">MiQroGate · Control Plane for AI Credentials</span>
+        <span class="hero-footer-version">MiQroGate · AI 凭证控制平台</span>
       </footer>    </section>
 
     <!-- White auth panel -->
@@ -261,11 +261,10 @@ function renderError(error: unknown, fallback: string) {
         </div>
 
         <div class="auth-heading">
-          <h2 v-if="mode === 'login'">Welcome back <span class="wave">👋</span></h2>
+          <h2 v-if="mode === 'login'">欢迎回来 <span class="wave">👋</span></h2>
           <h2 v-else>创建账号</h2>
           <p v-if="mode === 'login'">
-            Sign in to your account to access the MiQroGate control plane. Manage your virtual
-            keys, permissions and usage data.
+            登录你的账号进入 MiQroGate 控制台，管理虚拟密钥、权限与用量数据。
           </p>
           <p v-else>注册后立即可用，无需审核；若部署关闭自助注册请联系管理员。</p>
         </div>
@@ -279,12 +278,12 @@ function renderError(error: unknown, fallback: string) {
 
         <form class="auth-form" novalidate @submit.prevent="submit">
           <div class="auth-field">
-            <span class="auth-label">{{ mode === 'login' ? 'Email / Username' : '账号' }}</span>
+            <span class="auth-label">{{ mode === 'login' ? '账号 / 邮箱' : '账号' }}</span>
             <div class="auth-input">
               <UiInput
                 v-model="username"
                 :label="undefined"
-                :placeholder="mode === 'login' ? 'Enter your email or username' : '例如 alice'"
+                :placeholder="mode === 'login' ? '输入账号或邮箱' : '例如 alice'"
                 autocomplete="username"
                 data-testid="login-username"
               >
@@ -310,7 +309,7 @@ function renderError(error: unknown, fallback: string) {
 
           <div class="auth-field">
             <span class="auth-label-row">
-              <span class="auth-label">{{ mode === 'login' ? 'Password' : '密码' }}</span>
+              <span class="auth-label">密码</span>
               <button
                 v-if="mode === 'login'"
                 type="button"
@@ -327,7 +326,7 @@ function renderError(error: unknown, fallback: string) {
                 :label="undefined"
                 :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
                 :placeholder="
-                  mode === 'login' ? 'Enter your password' : '至少 8 位，含大小写字母和数字'
+                  mode === 'login' ? '输入密码' : '至少 8 位，含大小写字母和数字'
                 "
                 data-testid="login-password"
                 @enter="submit"
@@ -337,7 +336,7 @@ function renderError(error: unknown, fallback: string) {
                   <button
                     type="button"
                     class="input-eye"
-                    :aria-label="showPassword ? 'Hide password' : 'Show password'"
+                    :aria-label="showPassword ? '隐藏密码' : '显示密码'"
                     :aria-pressed="showPassword"
                     data-testid="password-toggle"
                     @click="showPassword = !showPassword"
@@ -356,7 +355,7 @@ function renderError(error: unknown, fallback: string) {
               </UiInput>
             </div>
             <div v-if="mode === 'login'" class="password-help">
-              <button type="button" class="text-link" @click="onForgot">Forgot password?</button>
+              <button type="button" class="text-link" @click="onForgot">忘记密码？</button>
             </div>
           </div>
 
@@ -383,12 +382,12 @@ function renderError(error: unknown, fallback: string) {
             class="auth-submit"
             data-testid="login-submit"
           >
-            <span>{{ mode === 'login' ? 'Sign in' : '注册并进入' }}</span>
+            <span>{{ mode === 'login' ? '登 录' : '注册并进入' }}</span>
             <ArrowRightIcon size="17px" />
           </UiButton>
         </form>
 
-        <div class="or-divider"><span /> <em>or</em> <span /></div>
+        <div class="or-divider"><span /> <em>或</em> <span /></div>
 
         <button
           type="button"
@@ -399,9 +398,8 @@ function renderError(error: unknown, fallback: string) {
           <span class="request-access-icon"><UserIcon size="20px" /></span>
           <span class="request-access-copy">
             <template v-if="mode === 'login'">
-              <strong>Request an account</strong>
-              <small>Need access to MiQroGate? Create an account when self-service is enabled, or
-                ask your administrator.</small>
+              <strong>申请账号</strong>
+              <small>需要访问 MiQroGate？自助注册开启时可创建账号，或联系你的管理员。</small>
             </template>
             <template v-else>
               <strong>返回登录</strong>
@@ -414,15 +412,14 @@ function renderError(error: unknown, fallback: string) {
         <div class="privacy-card">
           <span class="privacy-icon"><SecuredIcon size="19px" /></span>
           <span>
-            <strong>Your data is protected</strong>
-            <small>MiQroGate runs in your private environment. We never store your prompts or
-              sensitive data.</small>
+            <strong>你的数据受到保护</strong>
+            <small>MiQroGate 运行在你的私有环境，绝不存储你的提示词与敏感数据。</small>
           </span>
         </div>
       </div>
 
       <footer class="auth-footer">
-        <span class="auth-footer-links"><span>Privacy Policy</span><i /> <span>Terms of Service</span></span>
+        <span class="auth-footer-links"><span>隐私政策</span><i /> <span>服务条款</span></span>
       </footer>
     </section>
   </main>
@@ -598,9 +595,9 @@ function renderError(error: unknown, fallback: string) {
 
 .hero-copy h1 {
   margin: 14px 0 20px;
-  font-size: clamp(34px, 3.1vw, 48px);
-  line-height: 1.04;
-  letter-spacing: -0.04em;
+  font-size: clamp(30px, 2.4vw, 38px);
+  line-height: 1.22;
+  letter-spacing: -0.02em;
   font-weight: 700;
   max-width: 560px;
   text-wrap: balance;
