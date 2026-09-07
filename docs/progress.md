@@ -7,7 +7,7 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `会话执行 2026-09-07（开放 API 批1 + 设计师 UI + 文档收口；pre-release 评估）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS`（develop @ #202（#200 ADR-0015 批1 + #201 Scorecard ghcr 修复已合 main + #202 docs 收口）。**本轮分支 `goal/open-admin-api-batch1b` → PR #204（2026-09-07）**：批1b 读面全开——/api/v1/admin-api/** 新增 audit-events（共享 AuditEventReadService，人类端点回归受保护）、api-keys、quota-rules、export-tasks 元数据（SQL 不读 file_bytes）、mcp-access-logs；会话硬化（仅 SYSTEM_ADMIN 放行开放面，403 ADMIN_API_FORBIDDEN，修批1 会话路径租户属性缺失隐患）；首个开放面端到端集成测试（全端点/跨租户隔离/吊销过期即时 401/审计光标/会话规则）。写面草案 ADR-0016（机器执行者语义，Proposed，等 owner/leader 拍板）。**待办：Q4 真机、F53 真实凭证、F32/OAuth、pre-release tag 0.1.0-rc.1 已在 #202 打上并推送、OpenAPI 基线 docs/openapi/openapi-3.1.json 落后（新增端点，破坏性 diff 不受影响，下轮 docs 刷新）**）
+- Goal status: `IN_PROGRESS`（develop @ #202（#200 ADR-0015 批1 + #201 Scorecard ghcr 修复已合 main + #202 docs 收口）。**2026-09-07 语言方向（owner）：中文产品**——登录页设计师稿遗留英文文案已整体中文化（详见 #213）；此前 #194/#196 记录的「登录文案 EN 按稿」被本方向覆盖。**上一轮 `goal/open-admin-api-batch1b` → PR #204（2026-09-07）**：批1b 读面全开——/api/v1/admin-api/** 新增 audit-events（共享 AuditEventReadService，人类端点回归受保护）、api-keys、quota-rules、export-tasks 元数据（SQL 不读 file_bytes）、mcp-access-logs；会话硬化（仅 SYSTEM_ADMIN 放行开放面，403 ADMIN_API_FORBIDDEN，修批1 会话路径租户属性缺失隐患）；首个开放面端到端集成测试（全端点/跨租户隔离/吊销过期即时 401/审计光标/会话规则）。写面草案 ADR-0016（机器执行者语义，Proposed，等 owner/leader 拍板）。**待办：Q4 真机、F53 真实凭证、F32/OAuth、pre-release tag 0.1.0-rc.1 已在 #202 打上并推送、OpenAPI 基线 docs/openapi/openapi-3.1.json 落后（新增端点，破坏性 diff 不受影响，下轮 docs 刷新）**）
 - Last updated: `2026-09-07 CST`
 
 ## 会话交接点 2026-09-06 — UI 母版修订(Vben console edition)与夜间自主轮
