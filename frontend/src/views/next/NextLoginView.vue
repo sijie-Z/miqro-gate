@@ -597,11 +597,13 @@ function renderError(error: unknown, fallback: string) {
 }
 
 .hero-copy h1 {
-  margin: 17px 0 24px;
-  font-size: clamp(44px, 4.4vw, 64px);
-  line-height: 1.02;
-  letter-spacing: -0.05em;
-  font-weight: 760;
+  margin: 14px 0 20px;
+  font-size: clamp(34px, 3.1vw, 48px);
+  line-height: 1.04;
+  letter-spacing: -0.04em;
+  font-weight: 700;
+  max-width: 560px;
+  text-wrap: balance;
 }
 
 .hero-copy h1 span {
@@ -617,34 +619,36 @@ function renderError(error: unknown, fallback: string) {
 }
 
 .hero-description {
-  max-width: 500px;
-  margin: 0 0 36px;
+  max-width: 520px;
+  margin: 0 0 24px;
   color: #a4afc7;
   font-size: 13px;
-  line-height: 1.9;
+  line-height: 1.85;
 }
 
+/* Capability list: one vertical column hugging the left edge, mirroring the
+   authoritative reference (icon + title + one-line description, tight rows). */
 .hero-capabilities {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px 18px;
+  grid-template-columns: 1fr;
+  gap: 12px;
   max-width: 480px;
 }
 
 .capability {
   display: grid;
   grid-template-columns: 34px 1fr;
-  gap: 11px;
+  gap: 12px;
   align-items: start;
 }
 
 .capability-icon {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   display: grid;
   place-items: center;
   border: 1px solid rgba(139, 155, 255, 0.14);
-  border-radius: 10px;
+  border-radius: 9px;
   color: #7c8aff;
   background: rgba(83, 98, 179, 0.08);
 }
@@ -652,16 +656,16 @@ function renderError(error: unknown, fallback: string) {
 .capability strong {
   display: block;
   color: #e7ebf7;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .capability small {
   display: block;
-  margin-top: 4px;
+  margin-top: 2px;
   color: #7d8aa3;
-  font-size: 9px;
-  line-height: 1.55;
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 /* portal scene */
@@ -674,13 +678,13 @@ function renderError(error: unknown, fallback: string) {
 
 .scene-aura {
   position: absolute;
-  left: 31%;
-  top: 35%;
-  width: 42%;
-  height: 30%;
+  left: 24%;
+  top: 30%;
+  width: 52%;
+  height: 40%;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(114, 114, 255, 0.4), rgba(83, 83, 255, 0.06) 52%, transparent 72%);
-  filter: blur(35px);
+  background: radial-gradient(circle, rgba(124, 120, 255, 0.5), rgba(96, 90, 255, 0.12) 52%, transparent 74%);
+  filter: blur(40px);
 }
 
 .scene-floor {
@@ -827,7 +831,9 @@ function renderError(error: unknown, fallback: string) {
   top: 17%;
   bottom: 10%;
   border-radius: 50px 50px 0 0;
-  background: linear-gradient(180deg, rgba(64, 76, 143, 0.22), rgba(19, 27, 54, 0.04));
+  background:
+    radial-gradient(58% 42% at 50% 12%, rgba(158, 140, 255, 0.5), transparent 70%),
+    linear-gradient(180deg, rgba(64, 76, 143, 0.22), rgba(19, 27, 54, 0.04));
 }
 
 .gate-light-edge {
@@ -988,7 +994,7 @@ function renderError(error: unknown, fallback: string) {
   position: relative;
   min-width: 0;
   min-height: 100vh;
-  background: #fff;
+  background: linear-gradient(178deg, #ffffff 0%, #fdfdff 55%, #f9fafe 100%);
   border-left: 1px solid #e8ebf2;
   display: flex;
   flex-direction: column;
@@ -1130,7 +1136,7 @@ function renderError(error: unknown, fallback: string) {
 }
 
 .auth-input :deep(.ui-field__input::placeholder) {
-  color: #9aa7bb;
+  color: #6f7e96;
 }
 
 .auth-input :deep(.ui-field__prefix) {
@@ -1177,7 +1183,8 @@ function renderError(error: unknown, fallback: string) {
   justify-content: center;
   gap: 8px;
   border-radius: 8px;
-  background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);
+  background: linear-gradient(90deg, #7a5cff 0%, #4a6bff 52%, #2f7ef5 100%);
+  box-shadow: 0 10px 22px rgba(93, 94, 255, 0.28);
   font-weight: 650;
 }
 
@@ -1189,13 +1196,13 @@ function renderError(error: unknown, fallback: string) {
   display: flex;
   align-items: center;
   gap: 13px;
-  margin: 22px 0;
+  margin: 20px 0;
 }
 
 .or-divider span {
   flex: 1;
   height: 1px;
-  background: #e5e9f0;
+  background: linear-gradient(90deg, transparent, #cdd6ff 22%, #cdd6ff 78%, transparent);
 }
 
 .or-divider em {
@@ -1206,16 +1213,16 @@ function renderError(error: unknown, fallback: string) {
 
 .request-access {
   width: 100%;
-  min-height: 78px;
+  min-height: 76px;
   display: grid;
-  grid-template-columns: 50px 1fr 18px;
+  grid-template-columns: 46px 1fr 18px;
   align-items: center;
   gap: 13px;
-  padding: 12px 13px;
+  padding: 11px 14px;
   text-align: left;
-  border: 1px solid #e4e9f2;
+  border: 1px solid #e0e6f2;
   border-radius: 10px;
-  background: #f7f9fd;
+  background: #f5f7fc;
   color: #16213a;
   cursor: pointer;
   transition:
@@ -1259,11 +1266,11 @@ function renderError(error: unknown, fallback: string) {
   display: grid;
   grid-template-columns: 38px 1fr;
   gap: 11px;
-  margin-top: 14px;
-  padding: 14px 15px;
-  border: 1px solid #ebeff5;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e3e9f4;
   border-radius: 10px;
-  background: #fbfcfe;
+  background: #f8faff;
 }
 
 .privacy-icon {
