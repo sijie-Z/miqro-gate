@@ -80,9 +80,12 @@ public class SessionFilter implements Filter {
 
         String rawToken = sessionService.extractSessionToken(httpReq);
         if (rawToken == null) {
-            // The external-system channel (/api/v1/billing) is authenticated
-            // by ApiKeyAuthFilter instead; let it through here.
-            if (httpReq.getRequestURI().startsWith(ApiKeyAuthFilter.BILLING_PATH)) {
+            // Machine channels authenticate without a session: the external-system
+            // channel (/api/v1/billing) via ApiKeyAuthFilter and the open admin
+            // surface (/api/v1/admin-api, ADR-0015) via AdminApiKeyAuthFilter —
+            // let both through here, they enforce their own credentials.
+            if (httpReq.getRequestURI().startsWith(ApiKeyAuthFilter.BILLING_PATH)
+                    || httpReq.getRequestURI().startsWith(AdminApiKeyAuthFilter.OPEN_PATH)) {
                 chain.doFilter(httpReq, httpRes);
                 return;
             }

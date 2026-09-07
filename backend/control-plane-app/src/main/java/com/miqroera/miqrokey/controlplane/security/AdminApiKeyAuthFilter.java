@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.controlplane.security;
 
 import com.miqroera.miqrokey.domain.model.AdminApiKey;
+import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.repository.AdminApiKeyRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -15,11 +16,11 @@ import java.util.UUID;
 
 /**
  * Authentication for the open admin surface (ADR-0015), protecting
- * {@code /api/v1/admin-api/**}. A valid portal admin session also passes;
- * otherwise the presented {@code Authorization: Bearer mqk_admin_…} credential
- * is matched against the stored SHA-256 digest (revoked keys fail immediately,
- * expiry is checked). The key identity is exposed as request attributes for the
- * open controllers.
+ * {@code /api/v1/admin-api/**}. A SYSTEM_ADMIN portal session also passes and
+ * is treated like a machine key of its own tenant; otherwise the presented
+ * {@code Authorization: Bearer mqk_admin_…} credential is matched against the
+ * stored SHA-256 digest (revoked keys fail immediately, expiry is checked). The
+ * key identity is exposed as request attributes for the open controllers.
  */
 public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
 
@@ -51,6 +52,13 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
             return;
         }
         if (userContext.isAuthenticated()) {
+            // Portal sessions need SYSTEM_ADMIN on the open surface (parity with
+            // /api/v1/admin/**); their tenant seeds the same attribute contract.
+            if (userContext.getUser().role() != UserRole.SYSTEM_ADMIN) {
+                forbidden(response);
+                return;
+            }
+            request.setAttribute(TENANT_ATTR, userContext.getUser().tenantId());
             chain.doFilter(request, response);
             return;
         }
@@ -89,6 +97,13 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
         response.setContentType("application/problem+json");
         response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"Unauthorized\",\"status\":401,"
                 + "\"code\":\"ADMIN_API_KEY_INVALID\",\"detail\":\"管理密钥缺失或无效\"}");
+    }
+
+    private static void forbidden(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        response.setContentType("application/problem+json");
+        response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"Forbidden\",\"status\":403,"
+                + "\"code\":\"ADMIN_API_FORBIDDEN\",\"detail\":\"开放管理面需机器密钥或 SYSTEM_ADMIN 会话\"}");
     }
 
     static UUID asUuid(Object value) {
