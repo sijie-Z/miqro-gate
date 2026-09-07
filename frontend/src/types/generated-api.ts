@@ -15,6 +15,8 @@ import type { components } from './generated';
 export type UsageRecord = components['schemas']['UsageRecordView'];
 export type UsageRecordPage = components['schemas']['UsageRecordPage'];
 export type RoiReportView = components['schemas']['RoiReportView'];
+// webhook deliveries: the backend service record is named DeliveryAttempt
+export type WebhookDelivery = components['schemas']['DeliveryAttempt'];
 // route rules (F11): the schema names the nested controller record
 // 'UpsertRequest'; the alias keeps the domain name the consumers use.
 export type McpRouteRule = components['schemas']['McpRouteRule'];

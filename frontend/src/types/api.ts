@@ -171,17 +171,6 @@ export interface UsageDeletionRequest {
   createdAt: string;
 }
 
-export interface WebhookDelivery {
-  id: string;
-  eventId: string;
-  endpointId: string;
-  attempt: number;
-  httpStatus?: number;
-  nextRetryAt?: string;
-  errorMessage?: string;
-  createdAt: string;
-}
-
 export type AlertRuleType =
   | 'USAGE_MISSING_RATE'
   | 'UPSTREAM_ERROR_RATE'

@@ -9,8 +9,7 @@ import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiDrawer, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
-import type {WebhookDelivery} from '@/types/api';
-import type { WebhookEndpointView } from '@/types/generated-api';
+import type { WebhookEndpointView, WebhookDelivery } from '@/types/generated-api';
 
 const webhooks = ref<WebhookEndpointView[]>([]);
 const loading = ref(true);
