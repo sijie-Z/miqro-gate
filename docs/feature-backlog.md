@@ -15,7 +15,7 @@
 
 | ID | 功能 | 出处 | 清晰度 | 状态 | 前置/依赖 | 架子与要点 |
 |---|---|---|---|---|---|---|
-| F01 | MCP 调用代理接线（McpAccessPolicy 把关 + `/mcpservers/{name}/mcp` 路由形态） | progress P3.5/ACL 边界；study C | 清晰（机制明确，路由形态有一候选） | PLANNED | 需定 MCP 传输实现（SSE/Streamable HTTP 客户端）、调用鉴权接线 | 判定策略已就绪；接入时同步落 MCP 元数据日志（F15） |
+| F01 | MCP 调用代理接线（McpAccessPolicy 把关 + `/mcpservers/{name}/mcp` 路由形态） | progress P3.5/ACL 边界；study C | 清晰（机制明确，路由形态已定） | **DONE（2026-09-07 代码核对校正：此前误标 PLANNED——数据面已全量实现并测试）** | 无 | 实现=gateway McpProxyController：`POST /mcpservers/{serviceName}/mcp`（腾讯 doc 135906 形态），消费者 Bearer 摘要鉴权（route snapshot，明文不落网关）→ ONLINE 服务解析 → McpAccessPolicy 两级 ACL（服务级 + tools/call 工具级覆盖与启用）→ 上游 JSON-RPC 原样流转发（WebClient）；韧性 F12/F13（首字节前重试 + 熔断 503）与 F15 元数据日志同管线。测试：McpProxyContractTest、McpResilienceIntegrationTest、McpAccessLogIntegrationTest。残余：分布式 MCP 会话缓存为独立 follow-up（非本项范围） |
 | F02 | 缓存键升级为「提取最后一条 user 消息」（对齐腾讯/阿里） | ADR-0009 后果；mapping 启示 1 | 清晰（两家一致做法） | DONE（2026-09-03 盘点核对） | 需回归缓存契约测试（字节一致仍须成立） | **盘点修正**：盘点时登记 PLANNED 有误——代码 commit 3086187（G7.4 时代）早已实现：键 = tenant/Key 作用域 + **system+最后一条 user 消息**语义键（CacheKeyFactory.semanticScope，OpenAI chat/Responses/Anthropic 三形状 + content parts），非 chat 形状回退全请求归一化 hash；正文解析仅限 opt-in 缓存流且只用于键派生、转发仍原样字节。本会话补**端到端契约场景 ×2**（VirtualKeyAuthContractTest$L1Caching：不同历史同末条消息命中、不同末条消息 miss） |
 | F03 | 模型审批 Webhook 通知（文档「预留」） | progress 审批流边界 | 清晰（复用 alert/webhook 机制） | DONE（2026-09-03） | 无 | 交付见 progress「模型审批 Webhook 通知」：事件驱动规则类型 ×3（提交/通过/驳回，V27）+ 审批迁移瞬间即时投递（共享 AlertEventDispatcher）+ 前端类型选项；不做阻断 |
 | F04 | 用户自助配额可见性（个人看自己的配额规则水位） | progress 配额规则边界 | 清晰 | DONE（2026-09-03） | 无 | 交付见 progress「用户自助配额可见性」：`GET /api/v1/me/quota-rules`（只读本人 USER 规则 + 水位）+ 用量页「我的配额」面板 |
