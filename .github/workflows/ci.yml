@@ -14,13 +14,20 @@ jobs:
   # Path filter: each test job runs only when its area changed.
   changes:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
       compose: ${{ steps.filter.outputs.compose }}
       docs: ${{ steps.filter.outputs.docs }}
     steps:
+      # paths-filter compares against the parent commit on push events and its
+      # checkout-less self-init fails there ("not a git repository"), so give it
+      # a real clone; depth 2 is enough for the parent, PR base refs are fetched
+      # by the action itself.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 2
       - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
         id: filter
         with:

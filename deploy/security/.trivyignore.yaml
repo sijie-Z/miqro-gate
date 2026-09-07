@@ -79,8 +79,8 @@ vulnerabilities:
   # 2026-08-13). Fix exists upstream (util-linux 2.42.3-r0/r1) but no official alpine
   # rebuild is published yet - 18cfe3ef... is still the newest official postgres 17
   # alpine image (17-alpine / 17.11-alpine / 17-alpine3.24 all point at it). The
-  # postgres-image-update workflow opens a PR as soon as upstream rebuilds; drop these
-  # entries when that scan goes green.
+  # postgres-image-update workflow opens a PR as soon as upstream rebuilds and strips
+  # this section automatically once its probe scan of the rebuilt image passes.
   #
   # Scope/rationale: local-privilege / restricted-mount vulnerabilities in util-linux
   # (mount(8), nsenter, X-mount). Their documented exploit chains depend on
@@ -127,3 +127,4 @@ vulnerabilities:
       - pkg:apk/alpine/libuuid
     expired_at: 2026-10-07
     statement: Restricted bind mounts do not pin source - requires fstab-authorized restricted mounts + X-mount.owner/group/mode; absent from the postgres workload.
+  # --- end util-linux temporary set (2026-09-07; this section is stripped wholesale by postgres-image-update)

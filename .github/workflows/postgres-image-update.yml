@@ -2,9 +2,15 @@
 # opens/updates a PR when it moves. docker-library rebuilds the alpine image
 # whenever alpine security updates land; this workflow is the tripwire that
 # picks those rebuilds up and re-runs the Security gate against the new
-# digest. The util-linux exemptions in deploy/security/.trivyignore.yaml
-# (added 2026-09-07) expire on 2026-10-07 and are meant to be dropped once
-# this workflow lands a rebuild that no longer needs them.
+# digest.
+#
+# Closing the loop automatically: before opening the PR, the new digest is
+# probe-scanned with Trivy using .trivyignore.yaml minus the temporary
+# util-linux section (marked by the "--- Temporary: util-linux" / "--- end
+# util-linux" comment markers in deploy/security/.trivyignore.yaml). If that
+# probe passes, the same PR removes the section - no manual follow-up needed.
+# If the probe still fails, the exemptions are kept so the Security gate on
+# the PR shows exactly what a human still needs to decide on.
 name: postgres-image-update
 
 on:
@@ -24,7 +30,7 @@ jobs:
   compare-digest:
     name: Compare pinned digest
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -37,6 +43,8 @@ jobs:
         run: |
           set -euo pipefail
           COMPOSE=deploy/compose.yaml
+          IGNORE=deploy/security/.trivyignore.yaml
+          UTIL_IDS='CVE-2026-53612|CVE-2026-53613|CVE-2026-53614|CVE-2026-76642|CVE-2026-78408|CVE-2026-78409|CVE-2026-78410'
           PINNED=$(sed -n 's/^.*@\(sha256:[0-9a-f]\{64\}\).*/\1/p' "$COMPOSE" | head -1)
           if [ -z "$PINNED" ]; then
             echo "::error::no digest-pinned image found in $COMPOSE"; exit 1
@@ -51,9 +59,33 @@ jobs:
           if [ -z "$NEW" ]; then
             echo "::error::could not resolve upstream postgres:17-alpine digest"; exit 1
           fi
-          echo "pinned:  $PINNED"
+          echo "pinned:   $PINNED"
           echo "upstream: $NEW"
-          [ "$PINNED" = "$NEW" ] && { echo "digest unchanged — nothing to do"; exit 0; }
+          [ "$PINNED" = "$NEW" ] && { echo "digest unchanged - nothing to do"; exit 0; }
+
+          # Probe-scan the rebuilt image with the util-linux section of the
+          # ignore file removed: pass => exemptions can go, fail => keep them.
+          REMOVE=0
+          if [ -f "$IGNORE" ] && grep -q '^  # --- Temporary: util-linux' "$IGNORE" && grep -q '^  # --- end util-linux' "$IGNORE"; then
+            awk '/^  # --- Temporary: util-linux/{skip=1; next} /^  # --- end util-linux/{skip=0; next} !skip' "$IGNORE" \
+              > "$RUNNER_TEMP/probe.trivyignore.yaml"
+            set +e
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "$RUNNER_TEMP/probe.trivyignore.yaml:/root/probe.trivyignore.yaml:ro" \
+              aquasec/trivy:0.58.2 image --severity HIGH,CRITICAL \
+              --ignorefile /root/probe.trivyignore.yaml --ignore-unfixed \
+              --exit-code 1 --no-progress "postgres:17-alpine@$NEW"
+            PROBE_EXIT=$?
+            set -e
+            if [ "$PROBE_EXIT" -eq 0 ]; then
+              REMOVE=1
+              echo "probe scan of the rebuilt image passes WITHOUT the util-linux exemptions - removing them"
+            else
+              echo "probe scan still fails without the util-linux exemptions ($UTIL_IDS) - keeping them for review"
+            fi
+          else
+            echo "no util-linux marker section in $IGNORE - skipping probe/removal"
+          fi
 
           BRANCH=ci/postgres-image-update
           git config user.name "github-actions[bot]"
@@ -61,28 +93,55 @@ jobs:
           git switch -c "$BRANCH" main --quiet
           sed -i "s/$PINNED/$NEW/" "$COMPOSE"
           git add "$COMPOSE"
-          git commit -m "chore(deploy): bump postgres alpine image digest
+          if [ "$REMOVE" -eq 1 ]; then
+            awk '/^  # --- Temporary: util-linux/{skip=1; next} /^  # --- end util-linux/{skip=0; next} !skip' "$IGNORE" \
+              > "$IGNORE.tmp" && mv "$IGNORE.tmp" "$IGNORE"
+            git add "$IGNORE"
+            git commit -m "chore(deploy): bump postgres alpine image digest; drop util-linux exemptions
 
           $PINNED -> $NEW (official postgres:17-alpine rebuild).
 
-          Follow-up for the reviewer, after the Security gate on this PR:
-          * drop util-linux entries in deploy/security/.trivyignore.yaml that
-            no longer apply (the 2026-09-07 set expires 2026-10-07 anyway);
-          * if the new build is a newer 17.x-alpine tag, update the image
-            label and the comment in $COMPOSE to match (digest stays pinned)."
+          A probe scan of the rebuilt image passes WITHOUT the util-linux exemptions
+          (CVE-2026-53612/13/14, CVE-2026-76642, CVE-2026-78408/09/10), so the
+          temporary section in deploy/security/.trivyignore.yaml was removed. Update
+          the image label/comment in deploy/compose.yaml if the build moved to a newer
+          17.x-alpine tag (the digest stays pinned)."
+          else
+            git commit -m "chore(deploy): bump postgres alpine image digest
+
+          $PINNED -> $NEW (official postgres:17-alpine rebuild).
+
+          Probe scan of the new digest still reports the util-linux set without the
+          exemptions - the .trivyignore.yaml section is kept. Review the Security gate
+          on this PR; the exemptions expire on 2026-10-07 regardless. Update the image
+          label/comment in deploy/compose.yaml if the build moved to a newer 17.x-alpine
+          tag (the digest stays pinned)."
+          fi
           if git ls-remote --exit-code origin "$BRANCH" >/dev/null 2>&1; then
             git push --force origin "$BRANCH"
             echo "existing branch updated"
           else
+            if [ "$REMOVE" -eq 1 ]; then
+              BODY="Official \`postgres:17-alpine\` was rebuilt upstream (docker-library alpine refresh).
+
+          Pinned digest: \`$PINNED\` -> \`$NEW\`
+
+          The probe scan of the new digest passes WITHOUT the util-linux exemptions - they were removed in this PR.
+
+          If the build moved to a newer \`17.x-alpine\` tag, update the image label/comment in \`deploy/compose.yaml\` (the digest pin is what matters).
+          🤖 Auto-generated by the postgres-image-update workflow."
+            else
+              BODY="Official \`postgres:17-alpine\` was rebuilt upstream (docker-library alpine refresh).
+
+          Pinned digest: \`$PINNED\` -> \`$NEW\`
+
+          The probe scan still fails without the util-linux exemptions - they are kept; check the Security gate results on this PR (exemptions expire 2026-10-07 regardless).
+
+          If the build moved to a newer \`17.x-alpine\` tag, update the image label/comment in \`deploy/compose.yaml\` (the digest pin is what matters).
+          🤖 Auto-generated by the postgres-image-update workflow."
+            fi
             git push -u origin "$BRANCH"
             gh pr create --base main --head "$BRANCH" \
               --title "chore(deploy): postgres alpine image digest update" \
-              --body "Official \`postgres:17-alpine\` was rebuilt upstream (docker-library alpine refresh).
-
-Pinned digest: \`$PINNED\` -> \`$NEW\`
-
-This PR exists so the Security gate re-scans the new digest against \`deploy/security/.trivyignore.yaml\`. After it goes green:
-* drop the util-linux exceptions there if the new build no longer needs them (they expire 2026-10-07 by design);
-* update the image label/comment in \`deploy/compose.yaml\` if the build moved to a newer \`17.x-alpine\` tag (the digest pin is what matters).
-🤖 Auto-generated by the postgres-image-update workflow."
+              --body "$BODY"
           fi
