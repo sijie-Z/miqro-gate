@@ -4,8 +4,12 @@
 
 services:
   postgres:
-    # Multi-platform manifest digest reported by Docker Hub for postgres:17.6-alpine.
-    image: postgres:17.6-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    # Multi-platform manifest digest of the current official postgres:17.11-alpine
+    # (built 2026-08-13; PG 17.11 is the newest 17.x patch). Originally pinned as
+    # "17.6-alpine" - the label was stale; the image content is the 17.11 build.
+    # The postgres-image-update workflow bumps this digest when docker-library
+    # rebuilds the alpine image; update label/comment to match then.
+    image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     container_name: miqrokey-postgres
     restart: unless-stopped
     environment:
