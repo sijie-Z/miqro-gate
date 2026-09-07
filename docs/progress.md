@@ -6,9 +6,9 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `会话执行 2026-09-06（UI Vben 临摹轮 + 功能收尾轮）` — `IN_PROGRESS`（记录见「会话交接点 2026-09-06」与「UI 临摹」段；队列总纲见 docs/session-handoff-2026-09-05.md + NEXT_SESSION_PLAN.md）
-- Goal status: `IN_PROGRESS`（develop @ 8cd11a1 = #181。本日已并入：#173 UI Vben console edition、#174 overview 成本空态、#175 R3 Kafka producer、#176 R4 消费端参考、#177 keys 文案、#178 阿里云对照、#179 UI 临摹轮（插画/12px 圆角/四卡统计/四色徽章/审计规则升级）、#180 RoiReportView 契约迁移（codegen 收尾）、#181 Key ID 复制入口。**待办：Q4 真机冒烟、UI 临摹继续（owner 在场逐轮指导）、发布 tag 等拍板、F32/OAuth 与 Kafka 平台侧等外部**）
-- Last updated: `2026-09-06 CST`
+- Current goal: `会话执行 2026-09-07（功能收尾 + 设计师 UI 接入轮；pre-release 评估中）` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS`（develop @ 最新 = #194 设计师登录稿。9-06→07 已并入：#173 UI Vben 方向→#184 登录插画→#186 还原→#187/188 内部细节→#189 用户筛选→#190 route-rules schema→#191 用量时间窗口→#193 口径提示+候选文档→#194 设计师登录稿（先暗色预览后按权威稿 左暗色传送门 hero+右白面板）。**待办：登录稿最终逐区对齐（与权威设计图）、pre-release 评估（leader 询问；tag 需授权）、Q4 真机冒烟、F53 真实凭证、F32/OAuth 平台侧**）
+- Last updated: `2026-09-07 CST`
 
 ## 会话交接点 2026-09-06 — UI 母版修订(Vben console edition)与夜间自主轮
 
@@ -2210,3 +2210,11 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - **#179 UI 临摹轮**：登录页白卡场景插画(内联 SVG 显示器网关屏+绿植+钥匙,无渐变无外部资源);面板圆角 8→12px + 发丝浮起阴影(--ui-shadow-card,审计规则同步豁免 radius-panel 与 --ui-shadow-card);总览统计改四张独立白卡 + 四色图标徽章(蓝/绿/青/金);导航项 38px/14px。视觉评审:overview 6.5→7.0→(四卡后待定),仍在逐轮逼近。
 - **#180 codegen 收尾**：RoiReportView 手写接口删除 → 别名 `components['schemas']['RoiReportView']`(schema 早已全字段,#166 刷新使旧"spec 缺口"记录过期);消费者(api/视图/spec)全部切 hub 类型;App.spec 登录用例 15s 超时防全量并发抖动。typecheck+vitest 153/153 绿。
 - **#181 Key ID 复制入口**：keys 行内小复制钮(clipboard + execCommand 回退,toast 反馈),单测覆盖。
+
+### 会话交接点 2026-09-07 — 功能收尾批 + 设计师 UI 接入（记录）
+- **#189 用户管理筛选器**（搜索用户名/昵称 + 角色 + 状态下拉 + 命中计数,纯前端,spec ×2）。
+- **#190 codegen 收尾**：route-rules 三件套（McpRouteRule + UpsertMcpRouteRuleRequest→schema UpsertRequest）迁到 OpenAPI schema；WebhookDelivery→DeliveryAttempt 别名（#193 内）——手写 DTO 迁移线全部清完。
+- **#191 用量时间窗口**：个人与管理用量页 默认/近7/30/93,选预设才带 from/to,导出同步;默认行为零变化。
+- **#193 口径提示条 + 候选文档**：两用量页顶部可关闭提示（本地即时记账 vs 供应商 T+1）;docs/feature-expansion-candidates.md（大厂文档→候选 A-H,裁决反向项停泊）。
+- **#194 设计师登录稿（权威稿接入第一轮）**：素材 other/miqro-gate-auth-ui（LoginView/RegisterView/preview.html + 设计图）;按权威图实现「左暗色网关传送门 hero（provider 卡/状态卡/终端/信任条）+ 右侧白色认证面板（Welcome back 👋 / Sign in / Request an account / Your data is protected）」;TDesign 标签翻译为自绘 Ui（UiInput 增 prefix 槽）;登录文案按设计稿（EN）,注册保留产品自助语义（中文）,测试钩子全部保留。登录稿与设计图仍有逐区差距（3D 体积感/局部排版/密度）——最后一轮对齐排期进行中。
+- **pre-release 评估（leader 询问 2026-09-07）**：代码基线 develop 全绿可出 0.1.0-rc 候选;tag 动作待 owner/leader 授权;真实凭证矩阵与 Q4 https 冒烟仍 WAITING（不阻塞 pre-release,清单如实标注）。
