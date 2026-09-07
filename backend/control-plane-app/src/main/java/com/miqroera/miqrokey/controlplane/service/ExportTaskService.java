@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.controlplane.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.miqroera.miqrokey.controlplane.dto.ExportTaskView;
 import com.miqroera.miqrokey.domain.usage.ExportFormat;
 import com.miqroera.miqrokey.domain.usage.ExportStatus;
 import com.miqroera.miqrokey.domain.usage.ExportTask;
@@ -98,6 +99,34 @@ public class ExportTaskService {
                 ORDER BY created_at DESC LIMIT :limit
                 """, new MapSqlParameterSource("tenantId", tenantId).addValue("limit", Math.min(limit, 50)),
                 ROW_MAPPER);
+    }
+
+    /**
+     * Recent tasks for the open admin API (ADR-0015): metadata only, and the query
+     * never reads {@code file_bytes} so artifact payloads stay off the machine
+     * surface entirely.
+     */
+    public List<ExportTaskView> recentMeta(UUID tenantId, int limit) {
+        return jdbc.query("""
+                SELECT id, created_by, format, period_from, period_to, status, sha256, row_count, byte_count,
+                       error_message, created_at, finished_at, expires_at
+                FROM export_tasks WHERE tenant_id = :tenantId
+                ORDER BY created_at DESC LIMIT :limit
+                """, new MapSqlParameterSource("tenantId", tenantId).addValue("limit", Math.min(limit, 50)),
+                EXPORT_META_MAPPER);
+    }
+
+    /** One task's metadata for the open admin API (ADR-0015). */
+    public ExportTaskView taskMeta(UUID tenantId, UUID taskId) {
+        List<ExportTaskView> found = jdbc.query("""
+                SELECT id, created_by, format, period_from, period_to, status, sha256, row_count, byte_count,
+                       error_message, created_at, finished_at, expires_at
+                FROM export_tasks WHERE id = :id AND tenant_id = :tenantId
+                """, new MapSqlParameterSource("id", taskId).addValue("tenantId", tenantId), EXPORT_META_MAPPER);
+        if (found.isEmpty()) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "EXPORT_NOT_FOUND", "Export task not found or not visible");
+        }
+        return found.get(0);
     }
 
     // -------------------------------------------------------------------
@@ -259,6 +288,16 @@ public class ExportTaskService {
             rs.getTimestamp("period_to").toInstant(), ExportStatus.valueOf(rs.getString("status")),
             rs.getString("sha256"), rs.getObject("row_count", Long.class), rs.getObject("byte_count", Long.class),
             rs.getBytes("file_bytes"), rs.getString("error_message"), rs.getTimestamp("created_at").toInstant(),
+            rs.getTimestamp("finished_at") != null ? rs.getTimestamp("finished_at").toInstant() : null,
+            rs.getTimestamp("expires_at") != null ? rs.getTimestamp("expires_at").toInstant() : null);
+
+    /** Metadata row mapper shared by the open-surface queries (no file_bytes). */
+    private static final RowMapper<ExportTaskView> EXPORT_META_MAPPER = (rs, rowNum) -> new ExportTaskView(
+            (UUID) rs.getObject("id"), (UUID) rs.getObject("created_by"), ExportFormat.valueOf(rs.getString("format")),
+            rs.getTimestamp("period_from").toInstant(), rs.getTimestamp("period_to").toInstant(),
+            ExportStatus.valueOf(rs.getString("status")), rs.getString("sha256"), rs.getObject("row_count", Long.class),
+            rs.getObject("byte_count", Long.class), rs.getString("error_message"),
+            rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("finished_at") != null ? rs.getTimestamp("finished_at").toInstant() : null,
             rs.getTimestamp("expires_at") != null ? rs.getTimestamp("expires_at").toInstant() : null);
 }
