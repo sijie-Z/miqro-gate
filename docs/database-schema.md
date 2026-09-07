@@ -348,6 +348,14 @@ MCP Tools 管理：`tool_name`（AI Agent 调用唯一标识，snake_case）、`
 
 - `retention_config`：每租户一行（PK tenant_id FK tenants），`enabled`（默认 false）、`content_scope`（CHECK `USER_TEXT_ONLY`）、`key_version`（默认 'v1'，P5 信封密钥版本）、`version`（每次 upsert+1）、`updated_by`、`updated_at`。网关经路由快照读取（loader 全表入 `retentionByTenant`），控制面 PUT 后即时生效。
 - `user_identity_link`：OAuth 平台映射骨架（R4/P7，等平台 claims 后接线）：`internal_user_id`（FK users）↔ `platform_user_id` + `idp`，唯一 `(tenant_id, idp, platform_user_id)`，索引按 internal_user_id。数据面暂不读取。
+### `admin_api_keys` (V32，ADR-0015 Accepted，2026-09-07)
+
+开放管理 API 机器凭据：`tenant_id`（FK tenants）、`name`（租户内唯一）、
+`key_digest`（SHA-256 bytea，明文仅发行时展示一次）、`key_prefix`（`mqk_admin_…`）、
+`created_by`（FK users，可空）、`expires_at`/`revoked_at`（可空，吊销即时生效，
+按请求查库校验）、`created_at`。数据面不进网关快照；鉴权=管理面过滤链
+`/api/v1/admin-api/**`（门户会话放行；Bearer 摘要匹配，无效 401）。
+
 ## 7. 告警、导出和审计
 
 ### `webhook_endpoints`

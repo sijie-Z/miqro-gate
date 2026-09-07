@@ -5,6 +5,9 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-07
+- **开放管理 API（F59）立项与 ADR-0015 Accepted**：机器凭据（`mqk_admin_`、SHA-256 摘要、过期/吊销）+ 只读开放面批 1（#198/#199/#200）。详细：V32 `admin_api_keys`；`POST/GET /api/v1/admin/api-keys` 与 revoke（审计两事件）；`/api/v1/admin-api/**` Bearer 过滤（门户会话放行、吊销即时）；开放读端点 usage summary/records。批 1b/2 与批 3 见 docs/open-admin-api-plan.md。
+- **docs 收口**：progress/CHANGELOG/database-schema/api-contract 全量同步至 #200；ADR-0015 状态 Accepted。
+
 - **用户管理筛选器 #189**：搜索（用户名/昵称）+ 角色 + 状态 + 命中/总数,纯前端带测试。
 - **用量时间范围 #191**：个人与管理用量页 默认/近7/近30/近93,预设即带 from/to（导出同步）;默认语义零变化。
 - **codegen 收尾 #190/#193**：route-rules 三件套与 WebhookDelivery 全部迁 OpenAPI schema（含命名映射备注）。

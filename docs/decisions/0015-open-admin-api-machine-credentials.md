@@ -1,7 +1,7 @@
 # ADR-0015：管理开放 API 的机器凭据（Admin API Keys）
 
 - 日期：2026-09-07
-- 状态：Proposal（owner Accepted 后动工批 1）
+- 状态：Accepted（owner 2026-09-07「都做」拍板；批 1 已实现 #200，批 1b/2 待扩）
 - 关联：ADR-0010/0011（api_consumers/JWT 机器通道先例）、F59（backlog）、
   docs/open-admin-api-plan.md（三批拆解）
 
