@@ -1,12 +1,18 @@
 <script setup lang="ts">
 /**
- * NextLoginView — /login page (Vben Admin console edition, 2026-09-06).
- * Split-screen login: deep-blue brand panel + white form column. Login /
- * register dual mode. Logic mirrors the legacy LoginView (register-and-enter,
- * redirect query, error envelope). Visual master: v2.vben.pro login screen.
+ * NextLoginView — /login (designer visual pass 2 adaptation, 2026-09-07).
+ * Dark enterprise-gateway hero + restrained white auth panel. Behaviour is
+ * the product's own: login / self-service register dual mode, error
+ * envelope, redirect query. Copy and data-testids unchanged.
  */
 import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import {
+  ChartBarIcon,
+  LockOnIcon,
+  SecuredIcon,
+  ServerIcon,
+} from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
 import { UiButton, UiInput } from '@/ui';
@@ -56,7 +62,7 @@ async function submit() {
     return;
   }
 
-  // register
+  // register (self-service)
   if (!username.value || !password.value || !confirmPassword.value) {
     errorMessage.value = '请填写账号和密码。';
     return;
@@ -96,63 +102,148 @@ function renderError(error: unknown, fallback: string) {
 </script>
 
 <template>
-  <div class="next-login">
-    <aside class="next-login__brand" aria-hidden="true">
-      <div class="next-login__brand-top">
-        <span class="next-login__brand-mark">M</span>
-        <span class="next-login__brand-name">MiQroGate</span>
+  <main class="gate-auth">
+    <!-- Dark hero: the credential gateway visual (designer scene, CSS/SVG) -->
+    <section class="gate-hero">
+      <header class="hero-header">
+        <div class="brand" aria-label="MiQroGate">
+          <span class="brand-symbol" aria-hidden="true">
+            <span class="brand-wing brand-wing-left" />
+            <span class="brand-wing brand-wing-right" />
+            <span class="brand-core" />
+          </span>
+          <span class="brand-name">MiQroGate</span>
+          <span class="brand-divider" />
+          <span class="brand-product">AI Credential Control Plane</span>
+        </div>
+        <span class="hero-locale">内部凭证治理控制台</span>
+      </header>
+
+      <div class="hero-content">
+        <div class="hero-copy">
+          <p class="hero-eyebrow">ENTERPRISE AI INFRASTRUCTURE</p>
+          <h1>
+            The gateway stays quiet.<br />
+            <span>The control stays <em>yours.</em></span>
+          </h1>
+          <p class="hero-description">
+            MiQroGate 是企业级 AI 凭证虚拟化与访问控制平面，为你的大模型 API 提供安全、可观测、可审计的统一网关。
+          </p>
+
+          <div class="hero-capabilities">
+            <article class="capability">
+              <span class="capability-icon"><LockOnIcon size="18px" /></span>
+              <span>
+                <strong>Virtual Keys</strong>
+                <small>统一凭证管理，灵活分配与权限控制</small>
+              </span>
+            </article>
+            <article class="capability">
+              <span class="capability-icon"><SecuredIcon size="18px" /></span>
+              <span>
+                <strong>Permission Control</strong>
+                <small>细粒度授权，最小化访问风险</small>
+              </span>
+            </article>
+            <article class="capability">
+              <span class="capability-icon"><ChartBarIcon size="18px" /></span>
+              <span>
+                <strong>Usage &amp; Audit</strong>
+                <small>实时用量统计，完整审计日志</small>
+              </span>
+            </article>
+            <article class="capability">
+              <span class="capability-icon"><ServerIcon size="18px" /></span>
+              <span>
+                <strong>Private Deployment</strong>
+                <small>本地化部署，数据不出环境</small>
+              </span>
+            </article>
+          </div>
+        </div>
+
+        <div class="gate-scene" aria-hidden="true">
+          <div class="scene-aura" />
+          <div class="scene-floor" />
+          <div class="scene-grid" />
+
+          <svg class="scene-lines" viewBox="0 0 760 540" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="flow" x1="0" x2="1">
+                <stop offset="0" stop-color="#5d6bff" stop-opacity="0" />
+                <stop offset="0.48" stop-color="#8590ff" stop-opacity="0.85" />
+                <stop offset="1" stop-color="#b2a8ff" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+            <ellipse cx="372" cy="258" rx="180" ry="132" fill="none" stroke="#7c87ff"
+              stroke-opacity=".24" stroke-dasharray="3 8" />
+            <ellipse cx="372" cy="258" rx="250" ry="183" fill="none" stroke="#6772e9"
+              stroke-opacity=".12" stroke-dasharray="2 12" />
+            <path d="M138 177 C254 177 296 214 346 238" stroke="url(#flow)" stroke-width="2" fill="none" />
+            <path d="M136 270 C257 270 288 261 343 252" stroke="url(#flow)" stroke-width="2" fill="none" />
+            <path d="M160 358 C262 348 294 293 344 269" stroke="url(#flow)" stroke-width="2" fill="none" />
+            <path d="M414 244 C489 217 544 201 632 180" stroke="url(#flow)" stroke-width="2" fill="none" />
+            <path d="M414 258 C498 258 552 258 642 258" stroke="url(#flow)" stroke-width="2" fill="none" />
+            <path d="M414 272 C491 300 549 323 640 340" stroke="url(#flow)" stroke-width="2" fill="none" />
+          </svg>
+
+          <div class="gate-arch">
+            <div class="gate-column gate-column-left" />
+            <div class="gate-column gate-column-right" />
+            <div class="gate-top" />
+            <div class="gate-inner-glow" />
+            <div class="gate-light-edge gate-light-left" />
+            <div class="gate-light-edge gate-light-right" />
+            <div class="gate-floor-reflection" />
+          </div>
+
+          <div class="gate-status-card">
+            <div class="gate-status-brand">
+              <span class="mini-symbol"><i /></span>
+              <strong>MiQroGate</strong>
+            </div>
+            <div class="status-check"><span class="check-ok">✓</span> Auth</div>
+            <div class="status-check"><span class="check-ok">✓</span> Rate Limit</div>
+            <div class="status-check"><span class="check-ok">✓</span> Logging</div>
+            <div class="status-check"><span class="check-ok">✓</span> Auditing</div>
+          </div>
+
+          <div class="scene-terminal">
+            <span class="terminal-dot" />
+            <span>GATEWAY / ONLINE</span>
+            <b>99.99%</b>
+          </div>
+        </div>
       </div>
 
-      <!-- Scene illustration floating on the brand panel (Vben style) —
-           white strokes and translucent fills, flat, no gradients -->
-      <div class="next-login__art" aria-hidden="true">
-        <svg viewBox="0 0 460 210" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <!-- ground -->
-          <path d="M30 178h400" stroke="rgba(255,255,255,0.35)" stroke-width="2" stroke-linecap="round" />
-          <!-- monitor -->
-          <rect x="150" y="40" width="170" height="116" rx="16" fill="rgba(255,255,255,0.16)"
-            stroke="rgba(255,255,255,0.85)" stroke-width="2" />
-          <rect x="161" y="51" width="148" height="92" rx="9" fill="rgba(10,26,66,0.9)" />
-          <rect x="177" y="115" width="16" height="20" rx="3" fill="#6aa5ff" />
-          <rect x="203" y="97" width="16" height="38" rx="3" fill="#93b9ff" />
-          <rect x="229" y="78" width="16" height="57" rx="3" fill="#c4d8ff" />
-          <path d="M262 122l16-15 15 11 22-22" stroke="#eef4ff" stroke-width="3"
-            stroke-linecap="round" stroke-linejoin="round" />
-          <circle cx="294" cy="84" r="4" fill="#ffd9a0" />
-          <!-- stand -->
-          <path d="M235 156v10M235 166h-30M235 166h30" stroke="rgba(255,255,255,0.6)"
-            stroke-width="5" stroke-linecap="round" />
-          <!-- shield + check -->
-          <path d="M56 96c12-4 22-4 32 0v18c0 15-15 25-32 30-17-5-32-15-32-30V96c10-4 20-4 32 0Z"
-            fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.85)" stroke-width="2" />
-          <path d="m68 106-10 11-5-5" stroke="#a8e8c5" stroke-width="3.5" stroke-linecap="round"
-            stroke-linejoin="round" />
-          <!-- key -->
-          <circle cx="392" cy="92" r="18" stroke="rgba(255,255,255,0.85)" stroke-width="4" />
-          <path d="M392 110v6m0-8 10 10" stroke="rgba(255,255,255,0.85)" stroke-width="4"
-            stroke-linecap="round" />
-          <!-- dots -->
-          <circle cx="120" cy="50" r="5" fill="#ffd9a0" />
-          <circle cx="420" cy="46" r="4" fill="rgba(255,255,255,0.55)" />
-          <circle cx="58" cy="140" r="3" fill="rgba(255,255,255,0.4)" />
-        </svg>
-      </div>
+      <footer class="hero-footer">
+        <div class="footer-trust">
+          <span><LockOnIcon size="13px" /> HTTPS / JWT</span>
+          <span><span class="footer-slash" />不保存 Prompt</span>
+          <span><span class="footer-slash" />确定性路由</span>
+          <span><ShieldIcon size="13px" />用量可审计</span>
+        </div>
+        <span class="hero-footer-version">MiQroGate · Control Plane for AI Credentials</span>
+      </footer>
+    </section>
 
-      <div class="next-login__brand-body">
-        <p class="next-login__brand-title">企业内 AI 编码流量的凭证与用量治理</p>
-        <p class="next-login__brand-desc">
-          MiQroKey Gateway · 一次签发、处处留痕；把上游密钥和每一分用量管在看得见的地方。
-        </p>
-      </div>
-    </aside>
+    <!-- Right: restrained white panel -->
+    <section class="auth-panel">
+      <div class="auth-content" data-testid="login-panel">
+        <div class="auth-brand-inline">
+          <span class="brand-symbol" aria-hidden="true">
+            <span class="brand-wing brand-wing-left" />
+            <span class="brand-wing brand-wing-right" />
+            <span class="brand-core" />
+          </span>
+          <span>MiQroGate</span>
+        </div>
 
-    <main class="next-login__form-side" data-testid="login-panel">
-      <section class="next-login__form-col">
-        <div class="next-login__tabs" role="tablist" aria-label="登录或注册">
+        <div class="auth-tabs" role="tablist" aria-label="登录或注册">
           <button
             type="button"
-            class="next-login__tab"
-            :class="{ 'next-login__tab--active': mode === 'login' }"
+            class="auth-tab"
+            :class="{ 'auth-tab--on': mode === 'login' }"
             data-testid="tab-login"
             @click="switchMode('login')"
           >
@@ -160,8 +251,8 @@ function renderError(error: unknown, fallback: string) {
           </button>
           <button
             type="button"
-            class="next-login__tab"
-            :class="{ 'next-login__tab--active': mode === 'register' }"
+            class="auth-tab"
+            :class="{ 'auth-tab--on': mode === 'register' }"
             data-testid="tab-register"
             @click="switchMode('register')"
           >
@@ -169,363 +260,934 @@ function renderError(error: unknown, fallback: string) {
           </button>
         </div>
 
-        <header class="next-login__head">
-          <h1 class="next-login__title">{{ mode === 'login' ? '登录 MiQroGate' : '创建账号' }}</h1>
-          <p class="next-login__subtitle">
+        <div class="auth-heading">
+          <p class="auth-eyebrow">SECURE ACCESS</p>
+          <h2>{{ mode === 'login' ? '登录 MiQroGate' : '创建账号' }}</h2>
+          <p>
             {{ mode === 'login' ? '使用门户账号进入控制台。' : '注册后立即可用，无需审核。' }}
           </p>
-        </header>
+        </div>
 
-        <div v-if="errorMessage" class="next-login__error" role="alert" data-testid="login-error">
+        <div v-if="errorMessage" class="login-error" role="alert" data-testid="login-error">
           {{ errorMessage
-          }}<span v-if="errorRequestId" class="ui-request-id">
+          }}<span v-if="errorRequestId" class="error-request-id">
             requestId: {{ errorRequestId }}</span
           >
         </div>
 
-        <form class="next-login__form" novalidate @submit.prevent="submit">
-          <UiInput
-            v-model="username"
-            label="账号"
-            large
-            autocomplete="username"
-            :placeholder="mode === 'register' ? '设置你的登录账号' : '请输入账号'"
-            data-testid="login-username"
-          />
-          <UiInput
-            v-if="mode === 'register'"
-            v-model="displayName"
-            label="昵称（可选）"
-            large
-            autocomplete="name"
-            placeholder="团队里展示的名字"
-            data-testid="register-display-name"
-          />
-          <UiInput
-            v-model="password"
-            :type="showPassword ? 'text' : 'password'"
-            label="密码"
-            large
-            :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
-            :placeholder="mode === 'login' ? '请输入密码' : '至少 8 位，含大小写字母和数字'"
-            data-testid="login-password"
-          >
-            <template #suffix>
-              <button
-                type="button"
-                class="next-login__eye"
-                :aria-label="showPassword ? '隐藏密码' : '显示密码'"
-                :aria-pressed="showPassword"
-                data-testid="password-toggle"
-                @click="showPassword = !showPassword"
+        <form class="auth-form" novalidate @submit.prevent="submit">
+          <div class="auth-field">
+            <label class="auth-label" for="login-username">账号</label>
+            <div class="auth-control">
+              <UiInput
+                v-model="username"
+                :label="undefined"
+                placeholder="例如 alice"
+                autocomplete="username"
+                data-testid="login-username"
+              />
+            </div>
+          </div>
+
+          <div v-if="mode === 'register'" class="auth-field">
+            <label class="auth-label" for="register-display-name">昵称（可选）</label>
+            <div class="auth-control">
+              <UiInput
+                v-model="displayName"
+                :label="undefined"
+                placeholder="团队里展示的名字"
+                autocomplete="name"
+                data-testid="register-display-name"
+              />
+            </div>
+          </div>
+
+          <div class="auth-field">
+            <label class="auth-label" for="login-password">密码</label>
+            <div class="auth-control auth-control--suffix">
+              <UiInput
+                v-model="password"
+                :type="showPassword ? 'text' : 'password'"
+                :label="undefined"
+                :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
+                :placeholder="mode === 'login' ? '请输入密码' : '至少 8 位，含大小写字母和数字'"
+                data-testid="login-password"
               >
-                <svg
-                  v-if="showPassword"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M4 12s3.5-5.5 8-5.5S20 12 20 12s-3.5 5.5-8 5.5S4 12 4 12Z"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                  />
-                  <path
-                    d="M9.8 12a2.2 2.2 0 1 0 4.4 0 2.2 2.2 0 0 0-4.4 0Z"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                  />
-                  <path
-                    d="m4.5 4 15 16"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                  />
-                </svg>
-                <svg
-                  v-else
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M4 12s3.5-5.5 8-5.5S20 12 20 12s-3.5 5.5-8 5.5S4 12 4 12Z"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                  />
-                  <path
-                    d="M9.8 12a2.2 2.2 0 1 0 4.4 0 2.2 2.2 0 0 0-4.4 0Z"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                  />
-                </svg>
-              </button>
-            </template>
-          </UiInput>
-          <UiInput
-            v-if="mode === 'register'"
-            v-model="confirmPassword"
-            :type="showPassword ? 'text' : 'password'"
-            label="确认密码"
-            large
-            autocomplete="new-password"
-            placeholder="再次输入密码"
-            data-testid="register-confirm"
-          />
+                <template #suffix>
+                  <button
+                    type="button"
+                    class="input-eye"
+                    :aria-label="showPassword ? '隐藏密码' : '显示密码'"
+                    :aria-pressed="showPassword"
+                    data-testid="password-toggle"
+                    @click="showPassword = !showPassword"
+                  >
+                    <svg v-if="showPassword" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M4 12s3.5-5.5 8-5.5S20 12 20 12s-3.5 5.5-8 5.5S4 12 4 12Z" stroke="currentColor" stroke-width="1.5" />
+                      <path d="M9.8 12a2.2 2.2 0 1 0 4.4 0 2.2 2.2 0 0 0-4.4 0Z" stroke="currentColor" stroke-width="1.5" />
+                      <path d="m4.5 4 15 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                    </svg>
+                    <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M4 12s3.5-5.5 8-5.5S20 12 20 12s-3.5 5.5-8 5.5S4 12 4 12Z" stroke="currentColor" stroke-width="1.5" />
+                      <path d="M9.8 12a2.2 2.2 0 1 0 4.4 0 2.2 2.2 0 0 0-4.4 0Z" stroke="currentColor" stroke-width="1.5" />
+                    </svg>
+                  </button>
+                </template>
+              </UiInput>
+            </div>
+          </div>
+
+          <div v-if="mode === 'register'" class="auth-field">
+            <label class="auth-label" for="register-confirm">确认密码</label>
+            <div class="auth-control">
+              <UiInput
+                v-model="confirmPassword"
+                :type="showPassword ? 'text' : 'password'"
+                :label="undefined"
+                placeholder="再次输入密码"
+                autocomplete="new-password"
+                data-testid="register-confirm"
+              />
+            </div>
+          </div>
+
           <UiButton
             variant="primary"
-            size="lg"
             native-type="submit"
             :loading="loading"
-            class="next-login__submit"
+            class="auth-submit"
             data-testid="login-submit"
           >
             {{ mode === 'login' ? '登录' : '注册并进入' }}
           </UiButton>
         </form>
-        <p class="next-login__foot">MiQroGate · 内部 AI 编码流量凭证治理网关</p>
-      </section>
-    </main>
-  </div>
+
+        <div class="privacy-card">
+          <span class="privacy-icon"><SecuredIcon size="19px" /></span>
+          <span>
+            <strong>你的数据是受保护的</strong>
+            <small>MiQroGate 运行在你的私有环境：网关不保存 prompt、代码与模型回答正文。</small>
+          </span>
+        </div>
+      </div>
+
+      <footer class="auth-footer">
+        <span>MiQroGate · 内部 AI 编码流量凭证治理网关</span>
+      </footer>
+    </section>
+  </main>
 </template>
 
 <style scoped>
-.next-login {
-  display: grid;
-  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+.gate-auth {
+  --navy: #071224;
+  --navy-2: #0d1a32;
+  --blue: #6674ff;
+  --blue-2: #9f8dff;
+  --ink: #0f1730;
+  --muted: #72809a;
+  --line: #e6eaf2;
   min-height: 100vh;
-  color: var(--ui-foreground);
+  display: grid;
+  grid-template-columns: minmax(580px, 1.06fr) minmax(520px, 0.94fr);
+  overflow: hidden;
+  background: #fff;
+  color: var(--ink);
 }
 
-/* ---- brand panel ---- */
-.next-login__brand {
+.gate-hero {
   position: relative;
-  overflow: hidden;
+  min-width: 0;
+  min-height: 100vh;
+  padding: 34px 54px 30px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  padding: var(--ui-space-8) var(--ui-space-10) var(--ui-space-10);
-  background: var(--ui-login-panel);
-  color: var(--ui-foreground-inverse);
+  background:
+    radial-gradient(circle at 63% 61%, rgba(96, 105, 255, 0.26), transparent 19%),
+    radial-gradient(circle at 43% 28%, rgba(57, 108, 255, 0.16), transparent 26%),
+    linear-gradient(156deg, #071224 0%, #0a1428 42%, #07101f 100%);
+  color: #f5f7ff;
+  isolation: isolate;
 }
 
-.next-login__brand-top {
+.gate-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.16;
+  background-image:
+    linear-gradient(rgba(157, 175, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(157, 175, 255, 0.06) 1px, transparent 1px);
+  background-size: 52px 52px;
+  mask-image: linear-gradient(to right, #000, transparent 95%);
+  z-index: -2;
+}
+
+.gate-hero::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 42%;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(6, 13, 26, 0.82), transparent);
+  z-index: -1;
+}
+
+.hero-header,
+.hero-footer {
+  position: relative;
+  z-index: 5;
+}
+
+.hero-header {
   display: flex;
   align-items: center;
-  gap: var(--ui-space-3);
+  justify-content: space-between;
 }
 
-.next-login__brand-mark {
+.brand {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 11px;
+  color: inherit;
+}
+
+.brand-name {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+}
+
+.brand-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px 0 7px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.brand-product {
+  color: #9aa6c2;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.brand-symbol {
+  position: relative;
   width: 34px;
   height: 34px;
-  border-radius: var(--ui-radius-control);
-  background: var(--ui-card);
-  color: var(--ui-primary);
-  font-size: 18px;
+  flex: 0 0 auto;
+}
+
+.brand-wing {
+  position: absolute;
+  top: 8px;
+  width: 19px;
+  height: 14px;
+  border: 3px solid #7380ff;
+  border-radius: 4px 10px 4px 10px;
+  transform: skewY(-13deg);
+}
+
+.brand-wing-left {
+  left: 2px;
+  transform-origin: right center;
+}
+
+.brand-wing-right {
+  right: 2px;
+  transform: scaleX(-1) skewY(-13deg);
+  opacity: 0.8;
+}
+
+.brand-core {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  left: 13px;
+  top: 13px;
+  border-radius: 2px;
+  background: linear-gradient(135deg, #a38eff, #5c7fff);
+  box-shadow: 0 0 17px rgba(117, 123, 255, 0.75);
+}
+
+.hero-locale {
+  color: #8c99b7;
+  font-size: 11px;
+}
+
+.hero-content {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(420px, 1.2fr);
+  gap: 20px;
+  align-items: center;
+}
+
+.hero-copy {
+  position: relative;
+  z-index: 5;
+  align-self: center;
+  max-width: 520px;
+  padding-bottom: 22px;
+}
+
+.hero-eyebrow,
+.auth-eyebrow {
+  margin: 0;
+  color: #8e9dff;
+  font-size: 10px;
   font-weight: 700;
+  letter-spacing: 0.18em;
 }
 
-.next-login__brand-name {
-  font-size: var(--ui-font-size-xl);
-  font-weight: var(--ui-weight-semibold);
-  letter-spacing: -0.01em;
+.hero-copy h1 {
+  margin: 17px 0 24px;
+  font-size: clamp(44px, 4.4vw, 64px);
+  line-height: 1.02;
+  letter-spacing: -0.05em;
+  font-weight: 760;
 }
 
-.next-login__art {
-  width: 100%;
-  max-width: 560px;
-  margin: var(--ui-space-6) auto;
+.hero-copy h1 span {
+  color: #eef2ff;
 }
 
-.next-login__art svg {
-  display: block;
-  width: 100%;
-  height: auto;
+.hero-copy h1 em {
+  color: #9db0ff;
+  font-style: normal;
+  text-shadow: 0 0 34px rgba(140, 152, 255, 0.35);
 }
 
-.next-login__brand-body {
+.hero-description {
+  max-width: 500px;
+  margin: 0 0 36px;
+  color: #a4afc7;
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+.hero-capabilities {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 18px;
   max-width: 480px;
 }
 
-.next-login__brand-title {
-  margin: 0;
-  font-size: 26px;
-  font-weight: var(--ui-weight-semibold);
-  line-height: 1.5;
-  letter-spacing: -0.01em;
+.capability {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 11px;
+  align-items: start;
 }
 
-.next-login__brand-desc {
-  margin: var(--ui-space-3) 0 0;
-  font-size: var(--ui-font-size-sm);
-  line-height: 1.8;
-  color: rgba(255, 255, 255, 0.72);
-}
-
-/* ---- form column ---- */
-.next-login__form-side {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  background: var(--ui-card);
-  padding: var(--ui-space-8) var(--ui-space-6);
-}
-
-.next-login__form-col {
-  width: min(400px, 100%);
-  display: flex;
-  flex-direction: column;
-}
-
-.next-login__tabs {
-  display: flex;
-  align-self: stretch;
-  gap: var(--ui-space-5);
-  margin-bottom: var(--ui-space-8);
-}
-
-.next-login__tab {
-  border: 0;
-  height: 40px;
-  padding: 0 2px;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  font-size: var(--ui-font-size-base);
-  font-weight: var(--ui-weight-medium);
-  color: var(--ui-foreground-secondary);
-  cursor: pointer;
-  transition:
-    color var(--ui-ease),
-    border-color var(--ui-ease);
-}
-
-.next-login__tab:hover {
-  color: var(--ui-foreground);
-}
-
-.next-login__tab--active {
-  border-bottom-color: var(--ui-primary);
-  color: var(--ui-primary);
-  font-weight: var(--ui-weight-semibold);
-}
-
-.next-login__tab--active:hover {
-  color: var(--ui-primary-active);
-}
-
-.next-login__tab:focus-visible {
-  outline: none;
-  box-shadow: var(--ui-shadow-focus);
-}
-
-.next-login__head {
-  margin-bottom: var(--ui-space-5);
-}
-
-.next-login__title {
-  margin: 0;
-  font-size: 26px;
-  font-weight: var(--ui-weight-semibold);
-  line-height: 1.3;
-  letter-spacing: -0.01em;
-}
-
-.next-login__subtitle {
-  margin: var(--ui-space-2) 0 0;
-  font-size: var(--ui-font-size-base);
-  line-height: var(--ui-line-height-base);
-  color: var(--ui-foreground-secondary);
-}
-
-.next-login__error {
-  margin-bottom: var(--ui-space-4);
-  padding: var(--ui-space-3) var(--ui-space-4);
-  background: var(--ui-danger-bg);
-  color: var(--ui-danger-fg);
-  border-radius: var(--ui-radius-control);
-  font-size: var(--ui-font-size-sm);
-  line-height: var(--ui-line-height-base);
-}
-
-.next-login__form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-space-5);
-}
-
-.next-login__form :deep(.ui-field) {
-  gap: var(--ui-space-2);
-}
-
-.next-login__form :deep(.ui-field__label) {
-  font-size: var(--ui-font-size-base);
-}
-
-/* login screen controls sit taller than in-console controls (44px) */
-.next-login__form :deep(.ui-field--large .ui-field__input) {
-  height: 44px;
-}
-
-.next-login__form :deep(.ui-field--large .ui-field__suffix) {
-  height: 44px;
-}
-
-.next-login__submit {
-  width: 100%;
-  height: 44px;
-  margin-top: var(--ui-space-2);
-}
-
-.next-login__eye {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.capability-icon {
   width: 34px;
   height: 34px;
-  border: none;
-  border-radius: var(--ui-radius-control);
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(139, 155, 255, 0.14);
+  border-radius: 10px;
+  color: #7c8aff;
+  background: rgba(83, 98, 179, 0.08);
+}
+
+.capability strong {
+  display: block;
+  color: #e7ebf7;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.capability small {
+  display: block;
+  margin-top: 4px;
+  color: #7d8aa3;
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.gate-scene {
+  position: relative;
+  min-height: 560px;
+  margin-right: -24px;
+  align-self: stretch;
+}
+
+.scene-aura {
+  position: absolute;
+  left: 31%;
+  top: 35%;
+  width: 42%;
+  height: 30%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(114, 114, 255, 0.4), rgba(83, 83, 255, 0.06) 52%, transparent 72%);
+  filter: blur(35px);
+}
+
+.scene-floor {
+  position: absolute;
+  left: 12%;
+  right: 0;
+  bottom: 11%;
+  height: 24%;
+  transform: perspective(850px) rotateX(64deg);
+  transform-origin: center bottom;
+  border-top: 1px solid rgba(129, 146, 255, 0.1);
+  background: linear-gradient(to bottom, rgba(61, 77, 144, 0.09), rgba(10, 17, 35, 0.75));
+}
+
+.scene-grid {
+  position: absolute;
+  inset: 10% -2% 10% 6%;
+  opacity: 0.14;
+  background-image:
+    linear-gradient(rgba(115, 136, 255, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(115, 136, 255, 0.18) 1px, transparent 1px);
+  background-size: 38px 38px;
+  mask-image: radial-gradient(circle at 58% 53%, #000, transparent 67%);
+}
+
+.scene-lines {
+  position: absolute;
+  inset: 13% 0 14% 0;
+  width: 100%;
+  height: 72%;
+  overflow: visible;
+}
+
+.gate-arch {
+  position: absolute;
+  z-index: 4;
+  left: 33%;
+  top: 22%;
+  width: 38%;
+  height: 55%;
+  filter: drop-shadow(0 22px 40px rgba(0, 0, 0, 0.3));
+}
+
+.gate-column {
+  position: absolute;
+  top: 6%;
+  width: 31%;
+  height: 83%;
+  border: 1px solid rgba(128, 145, 255, 0.55);
+  background: linear-gradient(90deg, rgba(51, 63, 114, 0.85), rgba(21, 29, 58, 0.96));
+}
+
+.gate-column-left {
+  left: 0;
+  border-right: 0;
+  border-radius: 22px 0 0 10px;
+  transform: perspective(200px) rotateY(7deg);
+}
+
+.gate-column-right {
+  right: 0;
+  border-left: 0;
+  border-radius: 0 22px 10px 0;
+  transform: perspective(200px) rotateY(-7deg);
+}
+
+.gate-top {
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  top: 0;
+  height: 18%;
+  border: 1px solid rgba(145, 159, 255, 0.54);
+  border-bottom: 0;
+  border-radius: 28px 28px 0 0;
+  background: linear-gradient(180deg, rgba(54, 66, 117, 0.92), rgba(34, 43, 79, 0.88));
+}
+
+.gate-inner-glow {
+  position: absolute;
+  left: 16%;
+  right: 16%;
+  top: 17%;
+  bottom: 10%;
+  border-radius: 50px 50px 0 0;
+  background: linear-gradient(180deg, rgba(64, 76, 143, 0.22), rgba(19, 27, 54, 0.04));
+}
+
+.gate-light-edge {
+  position: absolute;
+  top: 18%;
+  bottom: 8%;
+  width: 2px;
+  background: linear-gradient(to bottom, transparent 0%, #7d89ff 16%, #c2b8ff 53%, rgba(86, 95, 255, 0.2) 100%);
+  box-shadow: 0 0 20px rgba(128, 125, 255, 0.9), 0 0 45px rgba(102, 103, 255, 0.38);
+}
+
+.gate-light-left {
+  left: 27%;
+  transform: skewX(1deg);
+}
+
+.gate-light-right {
+  right: 27%;
+  transform: skewX(-1deg);
+}
+
+.gate-floor-reflection {
+  position: absolute;
+  left: 28%;
+  right: 28%;
+  bottom: -10%;
+  height: 14%;
+  background: radial-gradient(ellipse at center, rgba(116, 112, 255, 0.33), transparent 70%);
+  filter: blur(18px);
+}
+
+.gate-status-card {
+  position: absolute;
+  z-index: 7;
+  right: 2%;
+  top: 39%;
+  width: 150px;
+  padding: 14px;
+  border: 1px solid rgba(179, 189, 255, 0.22);
+  border-radius: 14px;
+  background: rgba(15, 24, 45, 0.82);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.gate-status-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-bottom: 10px;
+  margin-bottom: 9px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+}
+
+.mini-symbol {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(116, 126, 255, 0.25);
+  border: 1px solid rgba(145, 155, 255, 0.26);
+}
+
+.mini-symbol i {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: #7f91ff;
+  box-shadow: 0 0 10px rgba(127, 145, 255, 0.9);
+}
+
+.status-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-top: 6px;
+  color: #abb5cb;
+  font-size: 9px;
+}
+
+.check-ok {
+  color: #62d8a8;
+  font-weight: 700;
+}
+
+.scene-terminal {
+  position: absolute;
+  left: 24%;
+  right: 9%;
+  bottom: 4%;
+  height: 31px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  border: 1px solid rgba(128, 145, 255, 0.12);
+  border-radius: 8px;
+  color: #72809c;
+  background: rgba(16, 25, 45, 0.68);
+  font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+}
+
+.scene-terminal b {
+  margin-left: auto;
+  color: #8a97bb;
+  font-weight: 600;
+}
+
+.terminal-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #65d8a3;
+  box-shadow: 0 0 9px rgba(101, 216, 163, 0.7);
+}
+
+.hero-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  color: #75829d;
+  font-size: 9px;
+}
+
+.footer-trust {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+
+.footer-trust span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.footer-slash {
+  width: 1px;
+  height: 13px;
+  background: rgba(160, 170, 199, 0.15);
+}
+
+.hero-footer-version {
+  color: #4f5b73;
+  letter-spacing: 0.04em;
+}
+
+/* ---- auth panel ---- */
+.auth-panel {
+  position: relative;
+  min-width: 0;
+  min-height: 100vh;
+  background: #fff;
+  border-left: 1px solid #e8ebf2;
+  display: flex;
+  flex-direction: column;
+}
+
+.auth-content {
+  width: min(470px, calc(100% - 64px));
+  margin: auto;
+  padding: 16px 0 28px;
+}
+
+.auth-brand-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 44px;
+  color: #17213a;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.auth-brand-inline .brand-symbol {
+  width: 30px;
+  height: 30px;
+}
+
+.auth-brand-inline .brand-wing {
+  top: 7px;
+  width: 17px;
+  height: 12px;
+  border-width: 2.5px;
+}
+
+.auth-brand-inline .brand-core {
+  left: 11px;
+  top: 11px;
+  width: 7px;
+  height: 7px;
+}
+
+.auth-tabs {
+  display: inline-flex;
+  gap: var(--ui-space-5);
+  margin-bottom: 18px;
+  border-bottom: 1px solid #e6eaf2;
+}
+
+.auth-tab {
+  border: 0;
+  height: 38px;
+  padding: 0 2px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
   background: transparent;
-  color: var(--ui-foreground-faint);
+  font-size: 14px;
+  font-weight: 500;
+  color: #72809a;
   cursor: pointer;
 }
 
-.next-login__eye:hover {
-  color: var(--ui-foreground);
-  background: var(--ui-fill-hover);
+.auth-tab:hover {
+  color: #17213a;
 }
 
-.next-login__eye:focus-visible {
-  outline: none;
-  box-shadow: var(--ui-shadow-focus);
+.auth-tab--on {
+  border-bottom-color: #6a72ff;
+  color: #0c1730;
+  font-weight: 700;
 }
 
-.next-login__foot {
-  margin: var(--ui-space-6) 0 0;
-  font-size: var(--ui-font-size-sm);
-  color: var(--ui-foreground-secondary);
-  text-align: center;
+.auth-eyebrow {
+  color: #6d76ff;
+  margin-bottom: 10px;
 }
 
-/* ---- responsive: brand panel yields to a single centered column ---- */
-@media (max-width: 959px) {
-  .next-login {
-    grid-template-columns: 1fr;
+.auth-heading h2 {
+  margin: 0;
+  color: #0c1730;
+  font-size: 36px;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+  font-weight: 760;
+}
+
+.auth-heading p {
+  max-width: 460px;
+  margin: 12px 0 30px;
+  color: #70809d;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.login-error {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fdf0f1;
+  color: #b4232c;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.error-request-id {
+  color: #8b3340;
+  font: 9px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-label {
+  color: #17213a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.auth-control :deep(.ui-field__input) {
+  height: 48px;
+  border-radius: 8px;
+  border-color: #d8dfeb;
+  font-size: 14px;
+}
+
+.auth-control :deep(.ui-field__input:hover:not(:disabled):not(:focus)) {
+  border-color: #bbc6d9;
+}
+
+.auth-control :deep(.ui-field__input:focus) {
+  border-color: #7f8aff;
+  box-shadow: 0 0 0 3px rgba(107, 118, 255, 0.1);
+}
+
+.auth-control :deep(.ui-field__input::placeholder) {
+  color: #9aa7bb;
+}
+
+.auth-control--suffix :deep(.ui-field__suffix) {
+  height: 48px;
+}
+
+.input-eye {
+  display: inline-grid;
+  place-items: center;
+  padding: 3px;
+  border: 0;
+  background: none;
+  color: #5f6c84;
+  cursor: pointer;
+}
+
+.auth-submit {
+  width: 100%;
+  height: 48px;
+  justify-content: center;
+  margin-top: 6px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #7055ff 0%, #328df1 100%);
+  box-shadow: 0 11px 24px rgba(81, 91, 245, 0.19);
+  font-weight: 650;
+}
+
+.auth-submit:hover {
+  filter: brightness(1.04);
+}
+
+.privacy-card {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 11px;
+  margin-top: 22px;
+  padding: 14px 15px;
+  border: 1px solid #ebeff5;
+  border-radius: 10px;
+  background: #fbfcfe;
+}
+
+.privacy-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: #4d61cb;
+  background: #eef1ff;
+}
+
+.privacy-card strong {
+  display: block;
+  color: #26324a;
+  font-size: 12px;
+}
+
+.privacy-card small {
+  display: block;
+  max-width: 380px;
+  margin-top: 4px;
+  color: #8a95a9;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.auth-footer {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px 28px 22px;
+  border-top: 1px solid #eef1f5;
+  color: #a0aabd;
+  font-size: 11px;
+}
+
+@media (max-width: 1180px) {
+  .gate-auth {
+    grid-template-columns: minmax(540px, 1fr) minmax(460px, 0.82fr);
   }
 
-  .next-login__brand {
+  .gate-hero {
+    padding-left: 36px;
+    padding-right: 22px;
+  }
+
+  .hero-copy h1 {
+    font-size: clamp(40px, 4.6vw, 58px);
+  }
+
+  .gate-scene {
+    margin-right: -36px;
+    transform: scale(0.92);
+    transform-origin: center center;
+  }
+
+  .auth-content {
+    width: min(430px, calc(100% - 52px));
+  }
+}
+
+@media (max-width: 920px) {
+  .gate-auth {
+    display: block;
+  }
+
+  .gate-hero {
+    min-height: 620px;
+    height: 620px;
+  }
+
+  .gate-scene {
+    position: absolute;
+    inset: 0 -20px 0 28%;
+    margin: 0;
+    opacity: 0.7;
+  }
+
+  .hero-content {
+    display: block;
+  }
+
+  .auth-panel {
+    min-height: 640px;
+    border-left: 0;
+  }
+
+  .auth-content {
+    padding-top: 30px;
+  }
+
+  .auth-brand-inline {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .gate-hero {
+    min-height: 560px;
+    height: auto;
+    padding: 24px 20px;
+  }
+
+  .brand-product,
+  .brand-divider,
+  .hero-footer-version {
     display: none;
   }
 
-  .next-login__form-side {
-    padding: var(--ui-space-10) var(--ui-space-6);
+  .hero-copy h1 {
+    font-size: 42px;
+  }
+
+  .hero-capabilities {
+    grid-template-columns: 1fr;
+  }
+
+  .gate-scene {
+    inset: 18% -80px 0 10%;
+    opacity: 0.3;
+  }
+
+  .hero-footer {
+    display: none;
+  }
+
+  .auth-content {
+    width: calc(100% - 36px);
+  }
+
+  .auth-footer {
+    padding-left: 18px;
+    padding-right: 18px;
   }
 }
 </style>
