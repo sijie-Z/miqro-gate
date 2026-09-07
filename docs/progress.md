@@ -6,8 +6,8 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `会话执行 2026-09-07（功能收尾 + 设计师 UI 接入轮；pre-release 评估中）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS`（develop @ 最新 = #194 设计师登录稿。9-06→07 已并入：#173 UI Vben 方向→#184 登录插画→#186 还原→#187/188 内部细节→#189 用户筛选→#190 route-rules schema→#191 用量时间窗口→#193 口径提示+候选文档→#194 设计师登录稿（先暗色预览后按权威稿 左暗色传送门 hero+右白面板）。**待办：登录稿最终逐区对齐（与权威设计图）、pre-release 评估（leader 询问；tag 需授权）、Q4 真机冒烟、F53 真实凭证、F32/OAuth 平台侧**）
+- Current goal: `会话执行 2026-09-07（开放 API 批1 + 设计师 UI + 文档收口；pre-release 评估）` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS`（develop @ #200 ADR-0015 批1。9-06→07 全量并入：#173-#194（UI/功能/设计师登录稿）→ #195 文档轮 → #196 登录稿逐项对齐（权威图）→ #197 用户筛选空值修复 → #198 开放 API 立项 → #199 ADR-0015 → #200 批1（V32 admin_api_keys + 发行/吊销 + Bearer 过滤 + 只读开放面 usage summary/records）。**待办：批1b 读面扩展/写面语义、Q4 真机、F53 真实凭证、F32/OAuth、pre-release tag（0.1.0-rc.1 候选）**）
 - Last updated: `2026-09-07 CST`
 
 ## 会话交接点 2026-09-06 — UI 母版修订(Vben console edition)与夜间自主轮

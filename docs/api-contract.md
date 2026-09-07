@@ -945,3 +945,17 @@ Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 
 - 前端 TypeScript client **目前由手写 `frontend/src/api` + `types/api` 维护**（未从 OpenAPI 生成——规格愿景；codegen 迁移列为发布前候选，届时删除手写 DTO）。
 - 同一 major 版本只允许新增可选字段和新端点；删除、改名、改变含义必须进入下一 major。
 - 推理入口不进入管理 API 的 DTO 生成流程，以透明代理契约和 fixtures 验证。
+
+
+## 9. 管理开放 API（ADR-0015，2026-09-07 Accepted，批 1）
+
+**凭据生命周期（SYSTEM_ADMIN-only，网页会话）**
+- `POST /api/v1/admin/api-keys?expiresAt=` body `{"name"}` → 201 `{key, secret, shownOnce:true}`；secret 仅此一次。
+- `GET /api/v1/admin/api-keys` → 视图列表（无 digest）。
+- `POST /api/v1/admin/api-keys/{id}/revoke` → 视图；冲突码 `ADMIN_API_KEY_NAME_TAKEN`（409）、`ADMIN_API_KEY_NOT_FOUND`（404）、`ADMIN_API_KEY_ALREADY_REVOKED`（409）；审计 `ADMIN_API_KEY_ISSUE/REVOKE`。
+
+**只读开放面（机器凭据 `Authorization: Bearer mqk_admin_…`）**
+- `GET /api/v1/admin-api/usage/summary?groupBy&from&to` — 租户级汇总（与 §5 管理员用量口径一致）。
+- `GET /api/v1/admin-api/usage/records?from&to&page&size` — 租户级明细（窗口/分页校验同管理端点）。
+- 无效/吊销/过期密钥 → 401 `ADMIN_API_KEY_INVALID`；门户会话可直接访问同一开放面。
+- 安全：密钥只存摘要、吊销即时、机器调用走审计（操作审计沿用既有链）、正文不落库；批 1b 扩展更多读面并评估写面 machine-executor 语义；批 3 作用域/频控可选。
