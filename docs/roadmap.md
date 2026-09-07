@@ -1,5 +1,8 @@
 # 开发路线图
 
+> **2026-09-07 审计注**：早期分阶段路线（含大厂研究出处）的当前状态以 feature-backlog 与
+> platform-middleware-roadmap 为准；本文作历史追溯。
+
 ## 阶段 0：技术骨架与风险 PoC
 
 目标：在完整业务开发前证明 Java WebFlux 数据面可行。

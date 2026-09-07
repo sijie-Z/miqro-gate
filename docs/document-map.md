@@ -45,6 +45,10 @@
 | `deployment-and-operations.md` | 部署拓扑和基础运维 | 部署变化 |
 | `operations-runbook.md` | 日常故障和恢复步骤 | 运维流程变化 |
 | `implementation-plan.md` | 可执行 Goal 及依赖 | Goal 调整 |
+| `open-admin-api-plan.md` | 管理开放 API（F60）三批拆解与状态 | 该专项计划变化 |
+| `feature-expansion-candidates.md` | 大厂文档→功能候选池与核对记录 | 研究出新候选/裁决 |
+| `retention-consumer.md` | 留痕消费端契约与参考实现（ADR-0014） | 消费端契约变化 |
+| `NEXT_SESSION_PLAN.md` | 跨会话启动计划（2026-09-07 起以 progress Current State 为准） | 每轮结束 |
 | `feature-backlog.md` | 跨文档功能总登记（未做与候选：PLANNED/SCAFFOLD/BLOCKED/ADR/DECLINED + 出处与前置） | 文档提及新功能/能力时登记；条目状态变化时更新 |
 | `git-workflow.md` | 分支、commit、push、PR 和发布权限 | Git 流程变化 |
 | `progress.md` | 当前真实进度 | 每个 Goal |

@@ -1,5 +1,9 @@
 # 门户 UI 规格
 
+> **2026-09-07 审计注（归档）**：本文描述 TDesign/旧路由（v1 门户 `/app`、`/api/auth/*` 时代）页面规格；
+> 现行门户 = `/login-new` 与 `/app-new/*`（自绘 ui 组件库，tokens/布局见 `frontend-design.md`，
+> 字段/交互验收 = 各页面 vitest 与 e2e）。本文保留为历史对照，**不再作为验收事实源**。
+
 首版使用 Vue 3、TypeScript、Vite、TDesign（tdesign-vue-next）。门户面向约 50 个内部账号，优先保证准确、可审计和易运维。视觉语言、tokens、布局密度和禁用风格以 [`frontend-design.md`](frontend-design.md) 为准。
 
 ## 1. 路由和权限
