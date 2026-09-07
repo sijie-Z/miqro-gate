@@ -740,9 +740,12 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | `GET /api/v1/admin/mcp-services/{id}/tools` | 服务下工具列表 |
 | `POST /api/v1/admin/mcp-services/{id}/tools` | 手动创建：`{ "toolName", "description"?, "method"?, "path" }`（方法默认 GET） |
 | `POST /api/v1/admin/mcp-services/{id}/tools/{toolId}/status?status=ENABLED\|DISABLED` | 单个工具启用/禁用（重复切换 `409 TOOL_STATUS_UNCHANGED`） |
+| `GET /api/v1/admin/mcp-services/{id}/tools/{toolId}/revisions?limit` | 定义修订历史，新→旧（默认 20、上限 50；**永不裁剪**） |
+| `POST /api/v1/admin/mcp-services/{id}/tools/{toolId}/revisions` | 发布编辑为新修订（部分编辑：缺省字段沿用当前激活修订值；自动成为生效版并镜像到工具行） |
+| `POST /api/v1/admin/mcp-services/{id}/tools/{toolId}/revisions/{revision}/activate` | 激活指定修订 = 回滚/切换生效版（幂等；不产生新版本号） |
 
 - `toolName` 规则：小写字母开头 snake_case（`TOOL_NAME_INVALID` 400）；`path` 必须以 `/` 开头（`TOOL_PATH_INVALID` 400）；同服务重名 `409 TOOL_NAME_TAKEN`；服务不存在 `404 MCP_SERVICE_NOT_FOUND`
-- **错误码**：`TOOL_NOT_FOUND`（404）、`TOOL_NAME_TAKEN`（409）、`TOOL_STATUS_UNCHANGED`（409）、`TOOL_STATUS_INVALID`（400）、`TOOL_NAME_INVALID`（400）、`TOOL_PATH_INVALID`（400）
+- **错误码**：`TOOL_NOT_FOUND`（404）、`TOOL_NAME_TAKEN`（409）、`TOOL_STATUS_UNCHANGED`（409）、`TOOL_STATUS_INVALID`（400）、`TOOL_NAME_INVALID`（400）、`TOOL_PATH_INVALID`（400）；修订面另增：`TOOL_REVISION_NOT_FOUND`（404）、`TOOL_REVISION_CONFLICT`（409，并发发布）、`TOOL_METHOD_INVALID`（400，发布时 method 校验）
 
 ### 5.18 模型审批队列（原始设计文档 §8.2，SYSTEM_ADMIN-only）
 

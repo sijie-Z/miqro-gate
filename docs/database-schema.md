@@ -354,7 +354,16 @@ MCP Tools 管理：`tool_name`（AI Agent 调用唯一标识，snake_case）、`
 `key_digest`（SHA-256 bytea，明文仅发行时展示一次）、`key_prefix`（`mqk_admin_…`）、
 `created_by`（FK users，可空）、`expires_at`/`revoked_at`（可空，吊销即时生效，
 按请求查库校验）、`created_at`。数据面不进网关快照；鉴权=管理面过滤链
-`/api/v1/admin-api/**`（门户会话放行；Bearer 摘要匹配，无效 401）。
+`/api/v1/admin-api/**`（门户会话仅 SYSTEM_ADMIN 放行；Bearer 摘要匹配，无效/吊销/过期 401）。
+
+### `mcp_tool_revisions`（V33，F16 Tools 定义版本管理，腾讯 raw 11）
+
+- 工具定义（description/method/path）的**不可变修订快照**：发布编辑=追加下一
+  `revision`（租户内按工具递增）并移动激活指针；历史修订**永不裁剪**。
+- 每工具至多一个激活修订（部分唯一索引 `uq_mcp_tool_active_revision`）；激活
+  修订的规格同步镜像到 `mcp_tools` 父行（路由快照照旧读父行）。
+- 回滚=激活旧修订（幂等：重复激活当前激活修订为 no-op，不产生新版本号）；
+  状态启停沿用 `mcp_tools` 乐观 `version`，不创建修订。
 
 ## 7. 告警、导出和审计
 
