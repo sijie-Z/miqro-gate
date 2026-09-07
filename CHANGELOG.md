@@ -4,6 +4,12 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
+### 2026-09-07
+- **用户管理筛选器 #189**：搜索（用户名/昵称）+ 角色 + 状态 + 命中/总数,纯前端带测试。
+- **用量时间范围 #191**：个人与管理用量页 默认/近7/近30/近93,预设即带 from/to（导出同步）;默认语义零变化。
+- **codegen 收尾 #190/#193**：route-rules 三件套与 WebhookDelivery 全部迁 OpenAPI schema（含命名映射备注）。
+- **口径提示条 #193**：用量页可关闭提示（本地即时记账 vs 供应商 T+1）。
+- **设计师登录稿 #194**：按权威设计图实现（暗色网关传送门 hero + 白色认证面板;登录文案 EN 按稿,注册/错误仍中文;功能与测试不变）。大厂扩展候选清单入库 docs/feature-expansion-candidates.md。
 ### 2026-09-06
 - **UI 视觉母版 v3（#173，Vben console edition）**：owner 指令把母版从 PostHog 切到 Vben Admin 观感。tokens v2.1（冷画布 #f0f2f5、antd 蓝 #1677ff、深海军蓝导航轨 #001529、hover ≥7%、lg 控件 40px）；NewShell 深色轨 + 分组面包屑（普通页不再重复标题）；UiTable 表头 muted 底 13/600 + 正文 14；登录页 Vben 式左右分屏（#2a5ad7 品牌板 + 白表单列、下划线 tab、44px 控件）；用户页（页头汇总/角色徽标/kebab 控件化）与用量报表（统计卡组/筛选行/Request ID 截断/分页右对齐）结构性打磨；总览页（去空洞欢迎语、统计卡图标徽章、成本分布独立卡、账本空态）。frontend-design.md 修订 v3 段。
 
