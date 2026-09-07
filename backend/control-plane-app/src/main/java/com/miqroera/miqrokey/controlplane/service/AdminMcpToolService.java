@@ -1,8 +1,10 @@
 package com.miqroera.miqrokey.controlplane.service;
 
 import com.miqroera.miqrokey.domain.model.McpTool;
+import com.miqroera.miqrokey.domain.model.McpToolRevision;
 import com.miqroera.miqrokey.domain.repository.McpServiceRepository;
 import com.miqroera.miqrokey.domain.repository.McpToolRepository;
+import com.miqroera.miqrokey.domain.repository.McpToolRevisionRepository;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -23,12 +25,14 @@ public class AdminMcpToolService {
 
     private final McpToolRepository toolRepository;
     private final McpServiceRepository serviceRepository;
+    private final McpToolRevisionRepository revisionRepository;
     private final RouteRefreshPublisher routeRefreshPublisher;
 
     public AdminMcpToolService(McpToolRepository toolRepository, McpServiceRepository serviceRepository,
-            RouteRefreshPublisher routeRefreshPublisher) {
+            McpToolRevisionRepository revisionRepository, RouteRefreshPublisher routeRefreshPublisher) {
         this.toolRepository = toolRepository;
         this.serviceRepository = serviceRepository;
+        this.revisionRepository = revisionRepository;
         this.routeRefreshPublisher = routeRefreshPublisher;
     }
 
@@ -53,6 +57,11 @@ public class AdminMcpToolService {
                 method != null ? method : "GET", normalizedPath, "ENABLED", 0, adminId, Instant.now(), Instant.now());
         try {
             toolRepository.insert(tool);
+            // Seed the immutable baseline revision (F16): every tool always has
+            // revision 1 as its rollback target, active at creation.
+            Instant now = Instant.now();
+            revisionRepository.insert(new McpToolRevision(UUID.randomUUID(), tenantId, tool.id(), 1, tool.description(),
+                    tool.method(), tool.path(), adminId, now, now));
         } catch (DuplicateKeyException e) {
             throw new ApiException(HttpStatus.CONFLICT, "TOOL_NAME_TAKEN", "该服务下已存在同名工具。");
         }
