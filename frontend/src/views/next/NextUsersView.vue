@@ -81,17 +81,17 @@ const activeCount = computed(() => users.value.filter((u) => u.status === 'ACTIV
 
 // ---- list filters (client-side over the loaded page of users) ----
 const userSearch = ref('');
-const roleFilter = ref('');
-const statusFilter = ref('');
+const roleFilter = ref('ALL');
+const statusFilter = ref('ALL');
 
 const roleFilterOptions = [
-  { value: '', label: '全部角色' },
+  { value: 'ALL', label: '全部角色' },
   { value: 'USER', label: '用户' },
   { value: 'SYSTEM_ADMIN', label: '系统管理员' },
 ];
 
 const statusFilterOptions = [
-  { value: '', label: '全部状态' },
+  { value: 'ALL', label: '全部状态' },
   { value: 'ACTIVE', label: '正常' },
   { value: 'DISABLED', label: '停用' },
   { value: 'LOCKED', label: '锁定' },
@@ -104,8 +104,8 @@ const filteredUsers = computed(() => {
       const haystack = `${u.username} ${u.displayName ?? ''}`.toLowerCase();
       if (!haystack.includes(q)) return false;
     }
-    if (roleFilter.value && u.role !== roleFilter.value) return false;
-    if (statusFilter.value && u.status !== statusFilter.value) return false;
+    if (roleFilter.value !== 'ALL' && u.role !== roleFilter.value) return false;
+    if (statusFilter.value !== 'ALL' && u.status !== statusFilter.value) return false;
     return true;
   });
 });
