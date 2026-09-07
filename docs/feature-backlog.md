@@ -113,3 +113,9 @@
 | D02 | future-kafka-and-reporting-users.md 已被引用但不存在 | middleware 关联段引用；内容已并入本表 F32/F34 |
 | D03 | 「429 信号量」出处待核对（architecture 风险清单提到的 P1 实测项在原始设计包，仓库文档无信号量表述） | 若实现需回到原始设计包核证 |
 | D04 | 生产启动校验「开启响应缓存拒绝」表述与 ADR-0009 opt-in 并存需复核 | configuration-reference §10 |
+
+## 开放 API 专项（2026-09-07 立项，leader「既有 Web 也要 API 操作」）
+
+| ID | 功能 | 出处 | 清晰度 | 状态 | 前置/依赖 | 架子与要点 |
+|---|---|---|---|---|---|---|
+| F59 | 管理开放 API：机器对机器管理凭据 + OpenAPI 对外发布 + curl/Python 示例（+可选频控/作用域） | leader 2026-09-07；腾讯 AI 网关既有形态 | 清晰（见 docs/open-admin-api-plan.md） | PLANNED | 批1 先出 ADR-0015（管理面机器凭据 + Principal 建模） | 现状=/api/v1 全量 REST + OpenAPI 3.1 + CI breaking；先例=api_consumers/JWT(ADR-0010/11)。批1 V32 admin_api_key（SHA-256 digest + prefix，Bearer 鉴权，审计；写操作子集先行）→ 批2 契约/示例 → 批3 治理（作用域/频控,可选） |
