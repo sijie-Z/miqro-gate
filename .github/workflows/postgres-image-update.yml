@@ -8,7 +8,7 @@
 # probe-scanned with Trivy using .trivyignore.yaml minus the temporary
 # util-linux section (marked by the "--- Temporary: util-linux" / "--- end
 # util-linux" comment markers in deploy/security/.trivyignore.yaml). If that
-# probe passes, the same PR removes the section — no manual follow-up needed.
+# probe passes, the same PR removes the section - no manual follow-up needed.
 # If the probe still fails, the exemptions are kept so the Security gate on
 # the PR shows exactly what a human still needs to decide on.
 name: postgres-image-update
@@ -67,20 +67,8 @@ jobs:
           # ignore file removed: pass => exemptions can go, fail => keep them.
           REMOVE=0
           if [ -f "$IGNORE" ] && grep -q '^  # --- Temporary: util-linux' "$IGNORE" && grep -q '^  # --- end util-linux' "$IGNORE"; then
-            python3 - "$IGNORE" > "$RUNNER_TEMP/probe.trivyignore.yaml" <<'PYEOF'
-import sys
-path = sys.argv[1]
-lines = open(path, encoding='utf-8').read().splitlines()
-start = next(i for i, l in enumerate(lines) if l.startswith('  # --- Temporary: util-linux'))
-end = next(i for i, l in enumerate(lines) if l.startswith('  # --- end util-linux'))
-if start < end:
-    out = lines[:start] + lines[end + 1:]
-    while out and out[-1] == '':
-        out.pop()
-    sys.stdout.write('\n'.join(out) + '\n')
-else:
-    sys.stdout.write(open(path, encoding='utf-8').read())
-PYEOF
+            awk '/^  # --- Temporary: util-linux/{skip=1; next} /^  # --- end util-linux/{skip=0; next} !skip' "$IGNORE" \
+              > "$RUNNER_TEMP/probe.trivyignore.yaml"
             set +e
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
               -v "$RUNNER_TEMP/probe.trivyignore.yaml:/root/probe.trivyignore.yaml:ro" \
@@ -106,36 +94,28 @@ PYEOF
           sed -i "s/$PINNED/$NEW/" "$COMPOSE"
           git add "$COMPOSE"
           if [ "$REMOVE" -eq 1 ]; then
-            python3 - "$IGNORE" <<'PYEOF' && git add "$IGNORE"
-import sys
-path = sys.argv[1]
-lines = open(path, encoding='utf-8').read().splitlines()
-start = next(i for i, l in enumerate(lines) if l.startswith('  # --- Temporary: util-linux'))
-end = next(i for i, l in enumerate(lines) if l.startswith('  # --- end util-linux'))
-out = lines[:start] + lines[end + 1:]
-while out and out[-1] == '':
-    out.pop()
-open(path, 'w', encoding='utf-8', newline='\n').write('\n'.join(out) + '\n')
-PYEOF
+            awk '/^  # --- Temporary: util-linux/{skip=1; next} /^  # --- end util-linux/{skip=0; next} !skip' "$IGNORE" \
+              > "$IGNORE.tmp" && mv "$IGNORE.tmp" "$IGNORE"
+            git add "$IGNORE"
             git commit -m "chore(deploy): bump postgres alpine image digest; drop util-linux exemptions
 
-$PINNED -> $NEW (official postgres:17-alpine rebuild).
+          $PINNED -> $NEW (official postgres:17-alpine rebuild).
 
-A probe scan of the rebuilt image passes WITHOUT the util-linux exemptions
-(CVE-2026-53612/13/14, CVE-2026-76642, CVE-2026-78408/09/10), so the
-temporary section in deploy/security/.trivyignore.yaml was removed. Update
-the image label/comment in deploy/compose.yaml if the build moved to a newer
-17.x-alpine tag (the digest stays pinned)."
+          A probe scan of the rebuilt image passes WITHOUT the util-linux exemptions
+          (CVE-2026-53612/13/14, CVE-2026-76642, CVE-2026-78408/09/10), so the
+          temporary section in deploy/security/.trivyignore.yaml was removed. Update
+          the image label/comment in deploy/compose.yaml if the build moved to a newer
+          17.x-alpine tag (the digest stays pinned)."
           else
             git commit -m "chore(deploy): bump postgres alpine image digest
 
-$PINNED -> $NEW (official postgres:17-alpine rebuild).
+          $PINNED -> $NEW (official postgres:17-alpine rebuild).
 
-Probe scan of the new digest still reports the util-linux set without the
-exemptions - the .trivyignore.yaml section is kept. Review the Security gate
-on this PR; the exemptions expire on 2026-10-07 regardless. Update the image
-label/comment in deploy/compose.yaml if the build moved to a newer 17.x-alpine
-tag (the digest stays pinned)."
+          Probe scan of the new digest still reports the util-linux set without the
+          exemptions - the .trivyignore.yaml section is kept. Review the Security gate
+          on this PR; the exemptions expire on 2026-10-07 regardless. Update the image
+          label/comment in deploy/compose.yaml if the build moved to a newer 17.x-alpine
+          tag (the digest stays pinned)."
           fi
           if git ls-remote --exit-code origin "$BRANCH" >/dev/null 2>&1; then
             git push --force origin "$BRANCH"
@@ -144,19 +124,21 @@ tag (the digest stays pinned)."
             if [ "$REMOVE" -eq 1 ]; then
               BODY="Official \`postgres:17-alpine\` was rebuilt upstream (docker-library alpine refresh).
 
-Pinned digest: \`$PINNED\` -> \`$NEW\`
+          Pinned digest: \`$PINNED\` -> \`$NEW\`
 
-The probe scan of the new digest passes WITHOUT the util-linux exemptions — they were removed in this PR.
+          The probe scan of the new digest passes WITHOUT the util-linux exemptions - they were removed in this PR.
 
-If the build moved to a newer \`17.x-alpine\` tag, update the image label/comment in \`deploy/compose.yaml\` (the digest pin is what matters)."
+          If the build moved to a newer \`17.x-alpine\` tag, update the image label/comment in \`deploy/compose.yaml\` (the digest pin is what matters).
+          🤖 Auto-generated by the postgres-image-update workflow."
             else
               BODY="Official \`postgres:17-alpine\` was rebuilt upstream (docker-library alpine refresh).
 
-Pinned digest: \`$PINNED\` -> \`$NEW\`
+          Pinned digest: \`$PINNED\` -> \`$NEW\`
 
-The probe scan still fails without the util-linux exemptions — they are kept; check the Security gate results on this PR (exemptions expire 2026-10-07 regardless).
+          The probe scan still fails without the util-linux exemptions - they are kept; check the Security gate results on this PR (exemptions expire 2026-10-07 regardless).
 
-If the build moved to a newer \`17.x-alpine\` tag, update the image label/comment in \`deploy/compose.yaml\` (the digest pin is what matters)."
+          If the build moved to a newer \`17.x-alpine\` tag, update the image label/comment in \`deploy/compose.yaml\` (the digest pin is what matters).
+          🤖 Auto-generated by the postgres-image-update workflow."
             fi
             git push -u origin "$BRANCH"
             gh pr create --base main --head "$BRANCH" \
