@@ -45,7 +45,7 @@
 
 ## 状态追踪
 - [x] 批 1 后端（V32 + 过滤 + 端点 + 集成测试；ADR-0015 Accepted；#200 合入 2026-09-07）
-- [x] 批 1b 读面扩展（#2xx 合入 2026-09-07）：/api/v1/admin-api 读面全开——
+- [x] 批 1b 读面扩展（#204 合入 2026-09-07）：/api/v1/admin-api 读面全开——
       audit-events（共享 AdminAuditController 查询服务）、api-keys、quota-rules、
       export-tasks 元数据（不读 file_bytes）、mcp-access-logs；会话仅 SYSTEM_ADMIN
       放行（403 ADMIN_API_FORBIDDEN）；首个开放面端到端集成测试（跨租户隔离/吊销
