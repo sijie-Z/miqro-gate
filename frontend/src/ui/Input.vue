@@ -73,9 +73,15 @@ function onKeydown(event: KeyboardEvent) {
       {{ label }}<span v-if="required" class="ui-field__required" aria-hidden="true"> *</span>
     </label>
     <span class="ui-field__control">
+      <span v-if="$slots.prefix" class="ui-field__prefix">
+        <slot name="prefix" />
+      </span>
       <input
         class="ui-field__input"
-        :class="{ 'ui-field__input--suffix': $slots.suffix }"
+        :class="{
+          'ui-field__input--prefix': $slots.prefix,
+          'ui-field__input--suffix': $slots.suffix,
+        }"
         :type="type"
         :value="modelValue"
         :placeholder="placeholder"
@@ -138,6 +144,21 @@ function onKeydown(event: KeyboardEvent) {
   padding-right: 34px;
 }
 
+.ui-field__input--prefix {
+  padding-left: 34px;
+}
+
+.ui-field__prefix {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: var(--ui-control-height);
+  display: flex;
+  align-items: center;
+  padding-left: var(--ui-space-3);
+  color: var(--ui-foreground-faint);
+}
+
 .ui-field__suffix {
   position: absolute;
   top: 0;
@@ -150,7 +171,8 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .ui-field--large .ui-field__control .ui-field__input,
-.ui-field--large .ui-field__suffix {
+.ui-field--large .ui-field__control .ui-field__suffix,
+.ui-field--large .ui-field__control .ui-field__prefix {
   height: var(--ui-control-height-lg);
 }
 

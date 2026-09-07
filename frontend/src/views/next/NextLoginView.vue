@@ -1,21 +1,24 @@
 <script setup lang="ts">
 /**
- * NextLoginView — /login (designer visual pass 2 adaptation, 2026-09-07).
- * Dark enterprise-gateway hero + restrained white auth panel. Behaviour is
- * the product's own: login / self-service register dual mode, error
- * envelope, redirect query. Copy and data-testids unchanged.
+ * NextLoginView — /login. Visual master = the authoritative design image
+ * (dark enterprise-gateway portal hero + white auth panel, English copy as
+ * designed). Product behaviour is preserved: login and self-service
+ * registration share this panel through the secondary card action; error
+ * envelope and redirect query unchanged; testids intact.
  */
 import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
+  ArrowRightIcon,
   ChartBarIcon,
   LockOnIcon,
   SecuredIcon,
   ServerIcon,
+  UserIcon,
 } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
-import { UiButton, UiInput } from '@/ui';
+import { toast, UiButton, UiInput } from '@/ui';
 
 const route = useRoute();
 const router = useRouter();
@@ -41,12 +44,16 @@ function switchMode(next: Mode) {
   confirmPassword.value = '';
 }
 
+function onForgot() {
+  toast.info('请联系部署管理员重置密码。');
+}
+
 async function submit() {
   if (loading.value) return;
   errorMessage.value = '';
   errorRequestId.value = '';
   if (mode.value === 'login') {
-    if (!username.value || !password.value) {
+    if (!username.value.trim() || !password.value) {
       errorMessage.value = '请输入账号和密码。';
       return;
     }
@@ -102,11 +109,11 @@ function renderError(error: unknown, fallback: string) {
 </script>
 
 <template>
-  <main class="gate-auth">
-    <!-- Dark hero: the credential gateway visual (designer scene, CSS/SVG) -->
+  <main class="gate-auth" data-testid="login-panel">
+    <!-- Dark hero: gateway portal scene -->
     <section class="gate-hero">
       <header class="hero-header">
-        <div class="brand" aria-label="MiQroGate">
+        <div class="brand">
           <span class="brand-symbol" aria-hidden="true">
             <span class="brand-wing brand-wing-left" />
             <span class="brand-wing brand-wing-right" />
@@ -116,7 +123,7 @@ function renderError(error: unknown, fallback: string) {
           <span class="brand-divider" />
           <span class="brand-product">AI Credential Control Plane</span>
         </div>
-        <span class="hero-locale">内部凭证治理控制台</span>
+        <span class="hero-locale">🌐 简体中文 ⌄</span>
       </header>
 
       <div class="hero-content">
@@ -127,7 +134,7 @@ function renderError(error: unknown, fallback: string) {
             <span>The control stays <em>yours.</em></span>
           </h1>
           <p class="hero-description">
-            MiQroGate 是企业级 AI 凭证虚拟化与访问控制平面，为你的大模型 API 提供安全、可观测、可审计的统一网关。
+            MiQroGate 是企业级 AI 凭证加密与访问控制平台。为你的大模型 API 提供安全、可观测、可审计的统一网关。
           </p>
 
           <div class="hero-capabilities">
@@ -162,6 +169,7 @@ function renderError(error: unknown, fallback: string) {
           </div>
         </div>
 
+        <!-- Portal graphic: providers into the gate -->
         <div class="gate-scene" aria-hidden="true">
           <div class="scene-aura" />
           <div class="scene-floor" />
@@ -186,6 +194,19 @@ function renderError(error: unknown, fallback: string) {
             <path d="M414 258 C498 258 552 258 642 258" stroke="url(#flow)" stroke-width="2" fill="none" />
             <path d="M414 272 C491 300 549 323 640 340" stroke="url(#flow)" stroke-width="2" fill="none" />
           </svg>
+
+          <div class="provider-card provider-openai">
+            <span class="provider-logo">✳</span><span>OpenAI</span><i />
+          </div>
+          <div class="provider-card provider-anthropic">
+            <span class="provider-logo">AI</span><span>Anthropic</span><i />
+          </div>
+          <div class="provider-card provider-deepseek">
+            <span class="provider-logo">◈</span><span>DeepSeek</span><i />
+          </div>
+          <div class="provider-card provider-custom">
+            <span class="provider-logo">⌁</span><span>Custom Endpoint</span><i />
+          </div>
 
           <div class="gate-arch">
             <div class="gate-column gate-column-left" />
@@ -219,17 +240,17 @@ function renderError(error: unknown, fallback: string) {
       <footer class="hero-footer">
         <div class="footer-trust">
           <span><LockOnIcon size="13px" /> HTTPS / JWT</span>
-          <span><span class="footer-slash" />不保存 Prompt</span>
-          <span><span class="footer-slash" />确定性路由</span>
-          <span><ShieldIcon size="13px" />用量可审计</span>
+          <span><span class="footer-slash" />No Prompt Storage</span>
+          <span><span class="footer-slash" />Deterministic Routing</span>
+          <span><SecuredIcon size="13px" />Auditable Usage</span>
         </div>
         <span class="hero-footer-version">MiQroGate · Control Plane for AI Credentials</span>
-      </footer>
-    </section>
+      </footer>    </section>
 
-    <!-- Right: restrained white panel -->
+    <!-- White auth panel -->
     <section class="auth-panel">
-      <div class="auth-content" data-testid="login-panel">
+      <span class="panel-locale" aria-hidden="true">🌐 简体中文 ⌄</span>
+      <div class="auth-content">
         <div class="auth-brand-inline">
           <span class="brand-symbol" aria-hidden="true">
             <span class="brand-wing brand-wing-left" />
@@ -239,33 +260,14 @@ function renderError(error: unknown, fallback: string) {
           <span>MiQroGate</span>
         </div>
 
-        <div class="auth-tabs" role="tablist" aria-label="登录或注册">
-          <button
-            type="button"
-            class="auth-tab"
-            :class="{ 'auth-tab--on': mode === 'login' }"
-            data-testid="tab-login"
-            @click="switchMode('login')"
-          >
-            登录
-          </button>
-          <button
-            type="button"
-            class="auth-tab"
-            :class="{ 'auth-tab--on': mode === 'register' }"
-            data-testid="tab-register"
-            @click="switchMode('register')"
-          >
-            注册
-          </button>
-        </div>
-
         <div class="auth-heading">
-          <p class="auth-eyebrow">SECURE ACCESS</p>
-          <h2>{{ mode === 'login' ? '登录 MiQroGate' : '创建账号' }}</h2>
-          <p>
-            {{ mode === 'login' ? '使用门户账号进入控制台。' : '注册后立即可用，无需审核。' }}
+          <h2 v-if="mode === 'login'">Welcome back <span class="wave">👋</span></h2>
+          <h2 v-else>创建账号</h2>
+          <p v-if="mode === 'login'">
+            Sign in to your account to access the MiQroGate control plane. Manage your virtual
+            keys, permissions and usage data.
           </p>
+          <p v-else>注册后立即可用，无需审核；若部署关闭自助注册请联系管理员。</p>
         </div>
 
         <div v-if="errorMessage" class="login-error" role="alert" data-testid="login-error">
@@ -277,47 +279,65 @@ function renderError(error: unknown, fallback: string) {
 
         <form class="auth-form" novalidate @submit.prevent="submit">
           <div class="auth-field">
-            <label class="auth-label" for="login-username">账号</label>
-            <div class="auth-control">
+            <span class="auth-label">{{ mode === 'login' ? 'Email / Username' : '账号' }}</span>
+            <div class="auth-input">
               <UiInput
                 v-model="username"
                 :label="undefined"
-                placeholder="例如 alice"
+                :placeholder="mode === 'login' ? 'Enter your email or username' : '例如 alice'"
                 autocomplete="username"
                 data-testid="login-username"
-              />
+              >
+                <template #prefix><UserIcon size="17px" /></template>
+              </UiInput>
             </div>
           </div>
 
           <div v-if="mode === 'register'" class="auth-field">
-            <label class="auth-label" for="register-display-name">昵称（可选）</label>
-            <div class="auth-control">
+            <span class="auth-label">昵称（可选）</span>
+            <div class="auth-input">
               <UiInput
                 v-model="displayName"
                 :label="undefined"
                 placeholder="团队里展示的名字"
                 autocomplete="name"
                 data-testid="register-display-name"
-              />
+              >
+                <template #prefix><UserIcon size="17px" /></template>
+              </UiInput>
             </div>
           </div>
 
           <div class="auth-field">
-            <label class="auth-label" for="login-password">密码</label>
-            <div class="auth-control auth-control--suffix">
+            <span class="auth-label-row">
+              <span class="auth-label">{{ mode === 'login' ? 'Password' : '密码' }}</span>
+              <button
+                v-if="mode === 'login'"
+                type="button"
+                class="text-link"
+                @click="onForgot"
+              >
+                Forgot password?
+              </button>
+            </span>
+            <div class="auth-input">
               <UiInput
                 v-model="password"
                 :type="showPassword ? 'text' : 'password'"
                 :label="undefined"
                 :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
-                :placeholder="mode === 'login' ? '请输入密码' : '至少 8 位，含大小写字母和数字'"
+                :placeholder="
+                  mode === 'login' ? 'Enter your password' : '至少 8 位，含大小写字母和数字'
+                "
                 data-testid="login-password"
+                @enter="submit"
               >
+                <template #prefix><LockOnIcon size="17px" /></template>
                 <template #suffix>
                   <button
                     type="button"
                     class="input-eye"
-                    :aria-label="showPassword ? '隐藏密码' : '显示密码'"
+                    :aria-label="showPassword ? 'Hide password' : 'Show password'"
                     :aria-pressed="showPassword"
                     data-testid="password-toggle"
                     @click="showPassword = !showPassword"
@@ -335,11 +355,14 @@ function renderError(error: unknown, fallback: string) {
                 </template>
               </UiInput>
             </div>
+            <div v-if="mode === 'login'" class="password-help">
+              <button type="button" class="text-link" @click="onForgot">Forgot password?</button>
+            </div>
           </div>
 
           <div v-if="mode === 'register'" class="auth-field">
-            <label class="auth-label" for="register-confirm">确认密码</label>
-            <div class="auth-control">
+            <span class="auth-label">确认密码</span>
+            <div class="auth-input">
               <UiInput
                 v-model="confirmPassword"
                 :type="showPassword ? 'text' : 'password'"
@@ -347,7 +370,9 @@ function renderError(error: unknown, fallback: string) {
                 placeholder="再次输入密码"
                 autocomplete="new-password"
                 data-testid="register-confirm"
-              />
+              >
+                <template #prefix><LockOnIcon size="17px" /></template>
+              </UiInput>
             </div>
           </div>
 
@@ -358,21 +383,46 @@ function renderError(error: unknown, fallback: string) {
             class="auth-submit"
             data-testid="login-submit"
           >
-            {{ mode === 'login' ? '登录' : '注册并进入' }}
+            <span>{{ mode === 'login' ? 'Sign in' : '注册并进入' }}</span>
+            <ArrowRightIcon size="17px" />
           </UiButton>
         </form>
+
+        <div class="or-divider"><span /> <em>or</em> <span /></div>
+
+        <button
+          type="button"
+          class="request-access"
+          :data-testid="mode === 'login' ? 'tab-register' : 'tab-login'"
+          @click="switchMode(mode === 'login' ? 'register' : 'login')"
+        >
+          <span class="request-access-icon"><UserIcon size="20px" /></span>
+          <span class="request-access-copy">
+            <template v-if="mode === 'login'">
+              <strong>Request an account</strong>
+              <small>Need access to MiQroGate? Create an account when self-service is enabled, or
+                ask your administrator.</small>
+            </template>
+            <template v-else>
+              <strong>返回登录</strong>
+              <small>已有门户账号？回到登录页。</small>
+            </template>
+          </span>
+          <ArrowRightIcon size="18px" />
+        </button>
 
         <div class="privacy-card">
           <span class="privacy-icon"><SecuredIcon size="19px" /></span>
           <span>
-            <strong>你的数据是受保护的</strong>
-            <small>MiQroGate 运行在你的私有环境：网关不保存 prompt、代码与模型回答正文。</small>
+            <strong>Your data is protected</strong>
+            <small>MiQroGate runs in your private environment. We never store your prompts or
+              sensitive data.</small>
           </span>
         </div>
       </div>
 
       <footer class="auth-footer">
-        <span>MiQroGate · 内部 AI 编码流量凭证治理网关</span>
+        <span class="auth-footer-links"><span>Privacy Policy</span><i /> <span>Terms of Service</span></span>
       </footer>
     </section>
   </main>
@@ -381,7 +431,6 @@ function renderError(error: unknown, fallback: string) {
 <style scoped>
 .gate-auth {
   --navy: #071224;
-  --navy-2: #0d1a32;
   --blue: #6674ff;
   --blue-2: #9f8dff;
   --ink: #0f1730;
@@ -395,6 +444,7 @@ function renderError(error: unknown, fallback: string) {
   color: var(--ink);
 }
 
+/* ---------------- dark hero ---------------- */
 .gate-hero {
   position: relative;
   min-width: 0;
@@ -446,6 +496,11 @@ function renderError(error: unknown, fallback: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.hero-locale {
+  color: #8c99b7;
+  font-size: 11px;
 }
 
 .brand {
@@ -514,11 +569,6 @@ function renderError(error: unknown, fallback: string) {
   box-shadow: 0 0 17px rgba(117, 123, 255, 0.75);
 }
 
-.hero-locale {
-  color: #8c99b7;
-  font-size: 11px;
-}
-
 .hero-content {
   position: relative;
   flex: 1;
@@ -559,9 +609,11 @@ function renderError(error: unknown, fallback: string) {
 }
 
 .hero-copy h1 em {
-  color: #9db0ff;
   font-style: normal;
-  text-shadow: 0 0 34px rgba(140, 152, 255, 0.35);
+  background: linear-gradient(90deg, #8ab4ff 0%, #4d6bff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .hero-description {
@@ -612,6 +664,7 @@ function renderError(error: unknown, fallback: string) {
   line-height: 1.55;
 }
 
+/* portal scene */
 .gate-scene {
   position: relative;
   min-height: 560px;
@@ -659,6 +712,67 @@ function renderError(error: unknown, fallback: string) {
   width: 100%;
   height: 72%;
   overflow: visible;
+}
+
+.provider-card {
+  position: absolute;
+  z-index: 6;
+  min-width: 150px;
+  height: 48px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(151, 165, 255, 0.19);
+  border-radius: 11px;
+  background: linear-gradient(180deg, rgba(35, 47, 77, 0.83), rgba(13, 22, 43, 0.83));
+  box-shadow:
+    0 16px 30px rgba(0, 0, 0, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  color: #ecf0ff;
+  font-size: 10px;
+}
+
+.provider-card i {
+  margin-left: auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6fe4b1;
+  box-shadow: 0 0 12px rgba(111, 228, 177, 0.8);
+}
+
+.provider-logo {
+  width: 23px;
+  height: 23px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  font-size: 10px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.provider-openai {
+  left: 7%;
+  top: 33%;
+}
+
+.provider-anthropic {
+  left: 2%;
+  top: 49%;
+}
+
+.provider-deepseek {
+  left: 7%;
+  top: 65%;
+}
+
+.provider-custom {
+  left: 18%;
+  top: 80%;
+  min-width: 164px;
 }
 
 .gate-arch {
@@ -722,7 +836,9 @@ function renderError(error: unknown, fallback: string) {
   bottom: 8%;
   width: 2px;
   background: linear-gradient(to bottom, transparent 0%, #7d89ff 16%, #c2b8ff 53%, rgba(86, 95, 255, 0.2) 100%);
-  box-shadow: 0 0 20px rgba(128, 125, 255, 0.9), 0 0 45px rgba(102, 103, 255, 0.38);
+  box-shadow:
+    0 0 20px rgba(128, 125, 255, 0.9),
+    0 0 45px rgba(102, 103, 255, 0.38);
 }
 
 .gate-light-left {
@@ -755,7 +871,9 @@ function renderError(error: unknown, fallback: string) {
   border: 1px solid rgba(179, 189, 255, 0.22);
   border-radius: 14px;
   background: rgba(15, 24, 45, 0.82);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow:
+    0 20px 40px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .gate-status-brand {
@@ -834,11 +952,11 @@ function renderError(error: unknown, fallback: string) {
 
 .hero-footer {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 20px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
   color: #75829d;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .footer-trust {
@@ -862,9 +980,10 @@ function renderError(error: unknown, fallback: string) {
 .hero-footer-version {
   color: #4f5b73;
   letter-spacing: 0.04em;
+  font-size: 10px;
 }
 
-/* ---- auth panel ---- */
+/* ---------------- white auth panel ---------------- */
 .auth-panel {
   position: relative;
   min-width: 0;
@@ -875,17 +994,25 @@ function renderError(error: unknown, fallback: string) {
   flex-direction: column;
 }
 
+.panel-locale {
+  position: absolute;
+  top: 24px;
+  right: 30px;
+  color: #7f8ba4;
+  font-size: 11px;
+}
+
 .auth-content {
-  width: min(470px, calc(100% - 64px));
+  width: min(470px, calc(100% - 72px));
   margin: auto;
-  padding: 16px 0 28px;
+  padding: 24px 0 26px;
 }
 
 .auth-brand-inline {
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  margin-bottom: 44px;
+  margin-bottom: 40px;
   color: #17213a;
   font-size: 15px;
   font-weight: 800;
@@ -911,36 +1038,6 @@ function renderError(error: unknown, fallback: string) {
   height: 7px;
 }
 
-.auth-tabs {
-  display: inline-flex;
-  gap: var(--ui-space-5);
-  margin-bottom: 18px;
-  border-bottom: 1px solid #e6eaf2;
-}
-
-.auth-tab {
-  border: 0;
-  height: 38px;
-  padding: 0 2px;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  background: transparent;
-  font-size: 14px;
-  font-weight: 500;
-  color: #72809a;
-  cursor: pointer;
-}
-
-.auth-tab:hover {
-  color: #17213a;
-}
-
-.auth-tab--on {
-  border-bottom-color: #6a72ff;
-  color: #0c1730;
-  font-weight: 700;
-}
-
 .auth-eyebrow {
   color: #6d76ff;
   margin-bottom: 10px;
@@ -949,15 +1046,19 @@ function renderError(error: unknown, fallback: string) {
 .auth-heading h2 {
   margin: 0;
   color: #0c1730;
-  font-size: 36px;
-  line-height: 1.1;
-  letter-spacing: -0.04em;
-  font-weight: 760;
+  font-size: 38px;
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+  font-weight: 770;
+}
+
+.auth-heading h2 .wave {
+  font-size: 24px;
 }
 
 .auth-heading p {
   max-width: 460px;
-  margin: 12px 0 30px;
+  margin: 12px 0 28px;
   color: #70809d;
   font-size: 13px;
   line-height: 1.8;
@@ -990,33 +1091,58 @@ function renderError(error: unknown, fallback: string) {
   gap: 8px;
 }
 
+.auth-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .auth-label {
   color: #17213a;
   font-size: 12px;
   font-weight: 700;
 }
 
-.auth-control :deep(.ui-field__input) {
+.text-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #6a72ff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.auth-input :deep(.ui-field__input) {
   height: 48px;
   border-radius: 8px;
   border-color: #d8dfeb;
-  font-size: 14px;
+  background: #fff;
+  font-size: 13px;
 }
 
-.auth-control :deep(.ui-field__input:hover:not(:disabled):not(:focus)) {
+.auth-input :deep(.ui-field__input:hover:not(:disabled):not(:focus)) {
   border-color: #bbc6d9;
 }
 
-.auth-control :deep(.ui-field__input:focus) {
+.auth-input :deep(.ui-field__input:focus) {
   border-color: #7f8aff;
   box-shadow: 0 0 0 3px rgba(107, 118, 255, 0.1);
 }
 
-.auth-control :deep(.ui-field__input::placeholder) {
+.auth-input :deep(.ui-field__input::placeholder) {
   color: #9aa7bb;
 }
 
-.auth-control--suffix :deep(.ui-field__suffix) {
+.auth-input :deep(.ui-field__prefix) {
+  height: 48px;
+  color: #8592a9;
+}
+
+.auth-input :deep(.ui-field__input--prefix) {
+  padding-left: 38px;
+}
+
+.auth-input :deep(.ui-field__suffix) {
   height: 48px;
 }
 
@@ -1026,7 +1152,22 @@ function renderError(error: unknown, fallback: string) {
   padding: 3px;
   border: 0;
   background: none;
-  color: #5f6c84;
+  color: #7f8ca2;
+  cursor: pointer;
+}
+
+.password-help {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -2px;
+}
+
+.text-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #6a72ff;
+  font-size: 11px;
   cursor: pointer;
 }
 
@@ -1034,22 +1175,91 @@ function renderError(error: unknown, fallback: string) {
   width: 100%;
   height: 48px;
   justify-content: center;
-  margin-top: 6px;
+  gap: 8px;
   border-radius: 8px;
-  background: linear-gradient(90deg, #7055ff 0%, #328df1 100%);
-  box-shadow: 0 11px 24px rgba(81, 91, 245, 0.19);
+  background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);
   font-weight: 650;
 }
 
 .auth-submit:hover {
-  filter: brightness(1.04);
+  filter: brightness(1.05);
+}
+
+.or-divider {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin: 22px 0;
+}
+
+.or-divider span {
+  flex: 1;
+  height: 1px;
+  background: #e5e9f0;
+}
+
+.or-divider em {
+  color: #a0aabe;
+  font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-style: normal;
+}
+
+.request-access {
+  width: 100%;
+  min-height: 78px;
+  display: grid;
+  grid-template-columns: 50px 1fr 18px;
+  align-items: center;
+  gap: 13px;
+  padding: 12px 13px;
+  text-align: left;
+  border: 1px solid #e4e9f2;
+  border-radius: 10px;
+  background: #f7f9fd;
+  color: #16213a;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease,
+    background 0.18s ease;
+}
+
+.request-access:hover {
+  transform: translateY(-1px);
+  border-color: #cbd5e6;
+  background: #f9fbff;
+}
+
+.request-access-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: #5f70ff;
+  background: linear-gradient(145deg, #edf0ff, #eaf5ff);
+  border: 1px solid #dbe1ff;
+}
+
+.request-access-copy strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.request-access-copy small {
+  display: block;
+  color: #77849a;
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .privacy-card {
   display: grid;
   grid-template-columns: 38px 1fr;
   gap: 11px;
-  margin-top: 22px;
+  margin-top: 14px;
   padding: 14px 15px;
   border: 1px solid #ebeff5;
   border-radius: 10px;
@@ -1069,7 +1279,7 @@ function renderError(error: unknown, fallback: string) {
 .privacy-card strong {
   display: block;
   color: #26324a;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .privacy-card small {
@@ -1077,18 +1287,30 @@ function renderError(error: unknown, fallback: string) {
   max-width: 380px;
   margin-top: 4px;
   color: #8a95a9;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.6;
 }
 
 .auth-footer {
   display: flex;
-  justify-content: center;
-  gap: 16px;
-  padding: 16px 28px 22px;
+  justify-content: flex-end;
+  padding: 16px 30px 20px;
   border-top: 1px solid #eef1f5;
   color: #a0aabd;
   font-size: 11px;
+}
+
+.auth-footer-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.auth-footer-links i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #c3cad6;
 }
 
 @media (max-width: 1180px) {
@@ -1112,7 +1334,7 @@ function renderError(error: unknown, fallback: string) {
   }
 
   .auth-content {
-    width: min(430px, calc(100% - 52px));
+    width: min(430px, calc(100% - 56px));
   }
 }
 
@@ -1130,7 +1352,7 @@ function renderError(error: unknown, fallback: string) {
     position: absolute;
     inset: 0 -20px 0 28%;
     margin: 0;
-    opacity: 0.7;
+    opacity: 0.72;
   }
 
   .hero-content {
@@ -1143,7 +1365,7 @@ function renderError(error: unknown, fallback: string) {
   }
 
   .auth-content {
-    padding-top: 30px;
+    padding-top: 26px;
   }
 
   .auth-brand-inline {

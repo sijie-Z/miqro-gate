@@ -51,7 +51,7 @@ describe('NextLoginView', () => {
 
     await wrapper.find('[data-testid="tab-login"]').trigger('click');
     await flushPromises();
-    expect(wrapper.text()).toContain('登录 MiQroGate');
+    expect(wrapper.text()).toContain('Welcome back');
     expect(wrapper.find('[data-testid="register-confirm"]').exists()).toBe(false);
   });
 
