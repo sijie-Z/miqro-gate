@@ -189,9 +189,9 @@
                         <eclipse>
                             <file>${maven.multiModuleProjectDirectory}/spotless.xml</file>
                         </eclipse>
-                        <removeUnusedImports></removeUnusedImports>
-                        <trimTrailingWhitespace></trimTrailingWhitespace>
-                        <endWithNewline></endWithNewline>
+                        <removeUnusedImports/>
+                        <trimTrailingWhitespace/>
+                        <endWithNewline/>
                     </java>
                     <pom>
                         <sortPom>
@@ -228,8 +228,8 @@
                                 <requireMavenVersion>
                                     <version>[3.9,4)</version>
                                 </requireMavenVersion>
-                                <dependencyConvergence></dependencyConvergence>
-                                <banDuplicatePomDependencyVersions></banDuplicatePomDependencyVersions>
+                                <dependencyConvergence/>
+                                <banDuplicatePomDependencyVersions/>
                             </rules>
                         </configuration>
                     </execution>
