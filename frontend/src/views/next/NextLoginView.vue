@@ -6,7 +6,8 @@
  * registration share this panel through the secondary card action; error
  * envelope and redirect query unchanged; testids intact.
  */
-import { ref } from 'vue';
+import { onMounted, ref } from 'vue';
+import * as api from '@/api';
 import { useRoute, useRouter } from 'vue-router';
 import {
   ArrowRightIcon,
@@ -33,6 +34,7 @@ const password = ref('');
 const confirmPassword = ref('');
 const showPassword = ref(false);
 const loading = ref(false);
+const oauthProviders = ref<Array<{ code: string; name: string }>>([]);
 const errorMessage = ref('');
 const errorRequestId = ref('');
 
@@ -106,6 +108,19 @@ function renderError(error: unknown, fallback: string) {
     errorMessage.value = fallback;
   }
 }
+
+function startOauth() {
+  window.location.assign('/api/v1/auth/oauth/start');
+}
+
+onMounted(async () => {
+  try {
+    oauthProviders.value = await api.publicOauthProviders();
+  } catch {
+    // provider discovery is best-effort on the login page
+    oauthProviders.value = [];
+  }
+});
 </script>
 
 <template>
@@ -134,7 +149,8 @@ function renderError(error: unknown, fallback: string) {
             <span>密钥由你<em>掌控</em>。</span>
           </h1>
           <p class="hero-description">
-            MiQroGate 是企业级 AI 凭证加密与访问控制平台。为你的大模型 API 提供安全、可观测、可审计的统一网关。
+            MiQroGate 是企业级 AI 凭证加密与访问控制平台。为你的大模型 API
+            提供安全、可观测、可审计的统一网关。
           </p>
 
           <div class="hero-capabilities">
@@ -183,16 +199,62 @@ function renderError(error: unknown, fallback: string) {
                 <stop offset="1" stop-color="#b2a8ff" stop-opacity="0" />
               </linearGradient>
             </defs>
-            <ellipse cx="372" cy="258" rx="180" ry="132" fill="none" stroke="#7c87ff"
-              stroke-opacity=".24" stroke-dasharray="3 8" />
-            <ellipse cx="372" cy="258" rx="250" ry="183" fill="none" stroke="#6772e9"
-              stroke-opacity=".12" stroke-dasharray="2 12" />
-            <path d="M138 177 C254 177 296 214 346 238" stroke="url(#flow)" stroke-width="2" fill="none" />
-            <path d="M136 270 C257 270 288 261 343 252" stroke="url(#flow)" stroke-width="2" fill="none" />
-            <path d="M160 358 C262 348 294 293 344 269" stroke="url(#flow)" stroke-width="2" fill="none" />
-            <path d="M414 244 C489 217 544 201 632 180" stroke="url(#flow)" stroke-width="2" fill="none" />
-            <path d="M414 258 C498 258 552 258 642 258" stroke="url(#flow)" stroke-width="2" fill="none" />
-            <path d="M414 272 C491 300 549 323 640 340" stroke="url(#flow)" stroke-width="2" fill="none" />
+            <ellipse
+              cx="372"
+              cy="258"
+              rx="180"
+              ry="132"
+              fill="none"
+              stroke="#7c87ff"
+              stroke-opacity=".24"
+              stroke-dasharray="3 8"
+            />
+            <ellipse
+              cx="372"
+              cy="258"
+              rx="250"
+              ry="183"
+              fill="none"
+              stroke="#6772e9"
+              stroke-opacity=".12"
+              stroke-dasharray="2 12"
+            />
+            <path
+              d="M138 177 C254 177 296 214 346 238"
+              stroke="url(#flow)"
+              stroke-width="2"
+              fill="none"
+            />
+            <path
+              d="M136 270 C257 270 288 261 343 252"
+              stroke="url(#flow)"
+              stroke-width="2"
+              fill="none"
+            />
+            <path
+              d="M160 358 C262 348 294 293 344 269"
+              stroke="url(#flow)"
+              stroke-width="2"
+              fill="none"
+            />
+            <path
+              d="M414 244 C489 217 544 201 632 180"
+              stroke="url(#flow)"
+              stroke-width="2"
+              fill="none"
+            />
+            <path
+              d="M414 258 C498 258 552 258 642 258"
+              stroke="url(#flow)"
+              stroke-width="2"
+              fill="none"
+            />
+            <path
+              d="M414 272 C491 300 549 323 640 340"
+              stroke="url(#flow)"
+              stroke-width="2"
+              fill="none"
+            />
           </svg>
 
           <div class="provider-card provider-openai">
@@ -245,7 +307,8 @@ function renderError(error: unknown, fallback: string) {
           <span><SecuredIcon size="13px" />用量可审计</span>
         </div>
         <span class="hero-footer-version">MiQroGate · AI 凭证控制平台</span>
-      </footer>    </section>
+      </footer>
+    </section>
 
     <!-- White auth panel -->
     <section class="auth-panel">
@@ -310,12 +373,7 @@ function renderError(error: unknown, fallback: string) {
           <div class="auth-field">
             <span class="auth-label-row">
               <span class="auth-label">密码</span>
-              <button
-                v-if="mode === 'login'"
-                type="button"
-                class="text-link"
-                @click="onForgot"
-              >
+              <button v-if="mode === 'login'" type="button" class="text-link" @click="onForgot">
                 忘记密码？
               </button>
             </span>
@@ -325,9 +383,7 @@ function renderError(error: unknown, fallback: string) {
                 :type="showPassword ? 'text' : 'password'"
                 :label="undefined"
                 :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
-                :placeholder="
-                  mode === 'login' ? '输入密码' : '至少 8 位，含大小写字母和数字'
-                "
+                :placeholder="mode === 'login' ? '输入密码' : '至少 8 位，含大小写字母和数字'"
                 data-testid="login-password"
                 @enter="submit"
               >
@@ -341,14 +397,49 @@ function renderError(error: unknown, fallback: string) {
                     data-testid="password-toggle"
                     @click="showPassword = !showPassword"
                   >
-                    <svg v-if="showPassword" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <path d="M4 12s3.5-5.5 8-5.5S20 12 20 12s-3.5 5.5-8 5.5S4 12 4 12Z" stroke="currentColor" stroke-width="1.5" />
-                      <path d="M9.8 12a2.2 2.2 0 1 0 4.4 0 2.2 2.2 0 0 0-4.4 0Z" stroke="currentColor" stroke-width="1.5" />
-                      <path d="m4.5 4 15 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                    <svg
+                      v-if="showPassword"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M4 12s3.5-5.5 8-5.5S20 12 20 12s-3.5 5.5-8 5.5S4 12 4 12Z"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                      />
+                      <path
+                        d="M9.8 12a2.2 2.2 0 1 0 4.4 0 2.2 2.2 0 0 0-4.4 0Z"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                      />
+                      <path
+                        d="m4.5 4 15 16"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                      />
                     </svg>
-                    <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <path d="M4 12s3.5-5.5 8-5.5S20 12 20 12s-3.5 5.5-8 5.5S4 12 4 12Z" stroke="currentColor" stroke-width="1.5" />
-                      <path d="M9.8 12a2.2 2.2 0 1 0 4.4 0 2.2 2.2 0 0 0-4.4 0Z" stroke="currentColor" stroke-width="1.5" />
+                    <svg
+                      v-else
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M4 12s3.5-5.5 8-5.5S20 12 20 12s-3.5 5.5-8 5.5S4 12 4 12Z"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                      />
+                      <path
+                        d="M9.8 12a2.2 2.2 0 1 0 4.4 0 2.2 2.2 0 0 0-4.4 0Z"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                      />
                     </svg>
                   </button>
                 </template>
@@ -385,6 +476,17 @@ function renderError(error: unknown, fallback: string) {
         </form>
 
         <div class="or-divider"><span /> <em>或</em> <span /></div>
+
+        <div v-if="oauthProviders.length" class="auth-oauth">
+          <UiButton
+            variant="secondary"
+            class="auth-oauth__btn"
+            data-testid="oauth-login"
+            @click="startOauth()"
+          >
+            {{ oauthProviders[0].name }}
+          </UiButton>
+        </div>
 
         <button
           type="button"
@@ -677,7 +779,12 @@ function renderError(error: unknown, fallback: string) {
   width: 52%;
   height: 40%;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(124, 120, 255, 0.5), rgba(96, 90, 255, 0.12) 52%, transparent 74%);
+  background: radial-gradient(
+    circle,
+    rgba(124, 120, 255, 0.5),
+    rgba(96, 90, 255, 0.12) 52%,
+    transparent 74%
+  );
   filter: blur(40px);
 }
 
@@ -835,7 +942,13 @@ function renderError(error: unknown, fallback: string) {
   top: 18%;
   bottom: 8%;
   width: 2px;
-  background: linear-gradient(to bottom, transparent 0%, #7d89ff 16%, #c2b8ff 53%, rgba(86, 95, 255, 0.2) 100%);
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #7d89ff 16%,
+    #c2b8ff 53%,
+    rgba(86, 95, 255, 0.2) 100%
+  );
   box-shadow:
     0 0 20px rgba(128, 125, 255, 0.9),
     0 0 45px rgba(102, 103, 255, 0.38);
@@ -932,7 +1045,11 @@ function renderError(error: unknown, fallback: string) {
   border-radius: 8px;
   color: #72809c;
   background: rgba(16, 25, 45, 0.68);
-  font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    8px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   letter-spacing: 0.08em;
 }
 
@@ -1076,7 +1193,11 @@ function renderError(error: unknown, fallback: string) {
 
 .error-request-id {
   color: #8b3340;
-  font: 9px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    9px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
 }
 
 .auth-form {
@@ -1201,7 +1322,11 @@ function renderError(error: unknown, fallback: string) {
 
 .or-divider em {
   color: #a0aabe;
-  font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    8px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   font-style: normal;
 }
 
@@ -1412,5 +1537,13 @@ function renderError(error: unknown, fallback: string) {
     padding-left: 18px;
     padding-right: 18px;
   }
+}
+
+.auth-oauth {
+  margin-bottom: 14px;
+}
+.auth-oauth__btn {
+  width: 100%;
+  justify-content: center;
 }
 </style>

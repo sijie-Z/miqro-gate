@@ -36,6 +36,28 @@ public class AuthProperties {
      */
     private boolean registrationEnabled = true;
 
+    // ---- Platform OIDC login (P0a, ADR-0017): authorization-code RP flow ----
+
+    /** Master switch; disabled until the platform client is registered. */
+    private boolean platformOidcEnabled = false;
+
+    /** Identifier of this IdP link row (user_identity_link.idp). */
+    private String platformOidcIdpCode = "forge";
+
+    /** Display name shown on the login page. */
+    private String platformOidcName = "平台账号登录";
+
+    private String platformOidcClientId;
+    private String platformOidcClientSecret;
+    private String platformOidcAuthorizeUri;
+    private String platformOidcTokenUri;
+    private String platformOidcUserinfoUri;
+    private String platformOidcRedirectUri;
+    private String platformOidcScope = "openid profile";
+
+    /** Auto-provision a gateway user on first platform login (link + create). */
+    private boolean platformOidcAutoProvision = true;
+
     /**
      * Whether to set the {@code Secure} flag on cookies. Derived from
      * {@code miqrokey.production} and the active Spring profiles at startup.
@@ -164,5 +186,93 @@ public class AuthProperties {
     }
     public void setRegistrationEnabled(boolean v) {
         this.registrationEnabled = v;
+    }
+
+    public boolean isPlatformOidcEnabled() {
+        return platformOidcEnabled;
+    }
+
+    public void setPlatformOidcEnabled(boolean v) {
+        this.platformOidcEnabled = v;
+    }
+
+    public String getPlatformOidcIdpCode() {
+        return platformOidcIdpCode;
+    }
+
+    public void setPlatformOidcIdpCode(String v) {
+        this.platformOidcIdpCode = v;
+    }
+
+    public String getPlatformOidcName() {
+        return platformOidcName;
+    }
+
+    public void setPlatformOidcName(String v) {
+        this.platformOidcName = v;
+    }
+
+    public String getPlatformOidcClientId() {
+        return platformOidcClientId;
+    }
+
+    public void setPlatformOidcClientId(String v) {
+        this.platformOidcClientId = v;
+    }
+
+    public String getPlatformOidcClientSecret() {
+        return platformOidcClientSecret;
+    }
+
+    public void setPlatformOidcClientSecret(String v) {
+        this.platformOidcClientSecret = v;
+    }
+
+    public String getPlatformOidcAuthorizeUri() {
+        return platformOidcAuthorizeUri;
+    }
+
+    public void setPlatformOidcAuthorizeUri(String v) {
+        this.platformOidcAuthorizeUri = v;
+    }
+
+    public String getPlatformOidcTokenUri() {
+        return platformOidcTokenUri;
+    }
+
+    public void setPlatformOidcTokenUri(String v) {
+        this.platformOidcTokenUri = v;
+    }
+
+    public String getPlatformOidcUserinfoUri() {
+        return platformOidcUserinfoUri;
+    }
+
+    public void setPlatformOidcUserinfoUri(String v) {
+        this.platformOidcUserinfoUri = v;
+    }
+
+    public String getPlatformOidcRedirectUri() {
+        return platformOidcRedirectUri;
+    }
+
+    public void setPlatformOidcRedirectUri(String v) {
+        this.platformOidcRedirectUri = v;
+    }
+
+    public String getPlatformOidcScope() {
+        return platformOidcScope;
+    }
+
+    public void setPlatformOidcScope(String v) {
+        this.platformOidcScope = v;
+    }
+
+    public boolean isPlatformOidcAutoProvision() {
+        return platformOidcAutoProvision;
+    }
+
+    public void setPlatformOidcAutoProvision(boolean v) {
+        this.platformOidcAutoProvision = v;
     }
 }

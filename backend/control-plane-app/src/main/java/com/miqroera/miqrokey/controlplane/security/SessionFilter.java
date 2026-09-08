@@ -49,7 +49,8 @@ public class SessionFilter implements Filter {
 
     /** Public paths that do not require authentication. */
     private static final String[] PUBLIC_PATHS = {"/api/v1/auth/login", "/api/v1/auth/bootstrap",
-            "/api/v1/auth/register"};
+            "/api/v1/auth/register", "/api/v1/auth/oauth/providers", "/api/v1/auth/oauth/start",
+            "/api/v1/auth/oauth/callback"};
 
     public SessionFilter(SessionService sessionService, UserRepository userRepository, UserContext userContext,
             AuthProperties authProperties) {

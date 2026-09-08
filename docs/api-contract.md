@@ -60,6 +60,18 @@
 - 公开端点：与 login/bootstrap 一样无会话、无 CSRF 要求；审计事件 `REGISTER`。
 - 防滥用注记：单租户内部/试用规模未加频率限制；对外公网部署建议在网络层加速率限制（记录于配置参考）。
 
+### 3.1c 平台 OIDC 登录（P0a，ADR-0017，2026-09-08）
+
+授权码 RP：登录页出现「平台账号登录」（开关关闭时不出现）→ 平台 `authorize` → 回调。
+
+- `GET /api/v1/auth/oauth/providers`（公开）→ `[{code,name}]`（空数组=未启用）。
+- `GET /api/v1/auth/oauth/start`（公开）→ 302 至平台 `authorize`（带 state Cookie）。
+- `GET /api/v1/auth/oauth/callback?code&state`（公开）→ 换 token → `/oauth2/userinfo`
+  → `sub` 经 `user_identity_link`（idp=forge）映射/自动建号（可配关）→ 建立普通门户会话 → `/app/keys`。
+  失败重定向 `/login-new?oauth_error=<ASCII 码>`：`STATE_MISMATCH` / `ACCOUNT_UNLINKED` /
+  `CONFIG_INCOMPLETE` / `AUTH_ERROR` / `USERINFO_INVALID` / `USERNAME_CONFLICT` / `PROVIDER_UNKNOWN`。
+- 审计：`OAUTH_LOGIN` / `OAUTH_PROVISION`（首次建号）；自动建号用户无口令登录通道（随机口令）。
+
 ### 3.2 Bootstrap 流程
 
 首个管理员通过 `POST /api/v1/auth/bootstrap` 创建，需提供一次性 bootstrap secret（来自 `MIQROKEY_BOOTSTRAP_SECRET_FILE` 配置的文件）。bootstrap 在数据库层通过 `SELECT ... FOR UPDATE` 锁租户行序列化并发请求：即使两个请求使用不同用户名，也只有恰好一个能成功创建管理员。
