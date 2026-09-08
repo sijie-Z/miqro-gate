@@ -15,7 +15,10 @@ name: postgres-image-update
 
 on:
   schedule:
+    # Two daily chances: GitHub has been observed to drop individual
+    # scheduled events; digest checks are cheap no-ops when unchanged.
     - cron: "17 3 * * *"
+    - cron: "17 15 * * *"
   workflow_dispatch:
 
 permissions:
