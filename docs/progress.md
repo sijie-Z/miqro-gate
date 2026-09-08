@@ -7,7 +7,7 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `会话执行 2026-09-07（开放 API 批1 + 设计师 UI + 文档收口；pre-release 评估）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS`（develop 已至 #218 + 本轮 rc.2 收口。09-07 全量并入：#198-#200 开放 API 批1 → #204 批1b 读面+会话硬化（含批1 机器通道被 SessionFilter 前置拦截的修复）→ #209 issue 纪律 → #212 登录打磨 → #214 登录中文化（owner：中文产品，覆盖 #194/#196「EN 按稿」）→ #216 backlog 卫生（F59→F60；F34/留痕校正 DONE）→ #218 F01 核对 DONE + 大厂对照入档。pre-release 0.1.0-rc.2 已打标并推送。**待办：F60 写面拍板（ADR-0016，#206 上 A+C 建议）、Q4 真机与 F53 真实凭证（#211 BLOCKED）、F32 平台用户同步/OAuth（leader 接口形态）、登录稿残余 NIT（可选，reopen #210）**）
+- Goal status: `IN_PROGRESS`（develop 已至 #218 + 本轮 rc.2 收口。09-07 全量并入：#198-#200 开放 API 批1 → #204 批1b 读面+会话硬化（含批1 机器通道被 SessionFilter 前置拦截的修复）→ #209 issue 纪律 → #212 登录打磨 → #214 登录中文化（owner：中文产品，覆盖 #194/#196「EN 按稿」）→ #216 backlog 卫生（F59→F60；F34/留痕校正 DONE）→ #218 F01 核对 DONE + 大厂对照入档。pre-release 0.1.0-rc.2 已打标并推送。**待办：Q4 真机与 F53 真实凭证（#211 BLOCKED）、F32 平台用户同步/OAuth（leader 接口形态）、F60 批 2 v2（Virtual Key 委托创建）、视觉深打磨 #244**）
 - Last updated: `2026-09-07 CST`
 
 ## 会话交接点 2026-09-08（rc.2→rc.3：功能与 UI 收尾七 PR）

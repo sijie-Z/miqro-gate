@@ -1092,6 +1092,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin-api/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_21"];
+        put?: never;
+        post: operations["create_18"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin-api/webhooks/{endpointId}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["test_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin-api/export-tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["recent_2"];
+        put?: never;
+        post: operations["create_19"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin-api/alert-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_22"];
+        put?: never;
+        post: operations["create_20"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/webhooks/{endpointId}": {
         parameters: {
             query?: never;
@@ -1220,6 +1284,38 @@ export interface paths {
         patch: operations["update_5"];
         trace?: never;
     };
+    "/api/v1/admin-api/webhooks/{endpointId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_6"];
+        put?: never;
+        post?: never;
+        delete: operations["delete_4"];
+        options?: never;
+        head?: never;
+        patch: operations["update_6"];
+        trace?: never;
+    };
+    "/api/v1/admin-api/alert-rules/{ruleId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_7"];
+        put?: never;
+        post?: never;
+        delete: operations["delete_5"];
+        options?: never;
+        head?: never;
+        patch: operations["update_7"];
+        trace?: never;
+    };
     "/api/v1/test/ownership/{ownerUserId}": {
         parameters: {
             query?: never;
@@ -1243,7 +1339,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_21"];
+        get: operations["list_23"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1259,7 +1355,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_6"];
+        get: operations["get_8"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1291,7 +1387,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_7"];
+        get: operations["get_9"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1595,7 +1691,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_8"];
+        get: operations["get_10"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1611,7 +1707,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_22"];
+        get: operations["list_24"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1627,7 +1723,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_9"];
+        get: operations["get_11"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1659,7 +1755,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_23"];
+        get: operations["list_25"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1675,7 +1771,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_10"];
+        get: operations["get_12"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1707,7 +1803,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_24"];
+        get: operations["list_26"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1755,7 +1851,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_11"];
+        get: operations["get_13"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1787,7 +1883,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_25"];
+        get: operations["list_27"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1803,7 +1899,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_12"];
+        get: operations["get_14"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1820,6 +1916,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin-api/webhooks/{endpointId}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["deliveries_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1867,7 +1979,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_26"];
+        get: operations["list_28"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1883,23 +1995,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_27"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin-api/export-tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["recent_2"];
+        get: operations["list_29"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1931,7 +2027,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_28"];
+        get: operations["list_30"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1947,7 +2043,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_29"];
+        get: operations["list_31"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1982,7 +2078,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete: operations["delete_4"];
+        delete: operations["delete_6"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2046,7 +2142,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete: operations["delete_5"];
+        delete: operations["delete_7"];
         options?: never;
         head?: never;
         patch?: never;
@@ -5828,6 +5924,162 @@ export interface operations {
             };
         };
     };
+    list_21: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["WebhookEndpointView"][];
+                };
+            };
+        };
+    };
+    create_18: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["WebhookEndpointView"];
+                };
+            };
+        };
+    };
+    test_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                endpointId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["TestResult"];
+                };
+            };
+        };
+    };
+    recent_2: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ExportTaskView"][];
+                };
+            };
+        };
+    };
+    create_19: {
+        parameters: {
+            query: {
+                format: "CSV" | "JSONL";
+                from: string;
+                to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ExportTask"];
+                };
+            };
+        };
+    };
+    list_22: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["AlertRule"][];
+                };
+            };
+        };
+    };
+    create_20: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["AlertRule"];
+                };
+            };
+        };
+    };
     get_3: {
         parameters: {
             query?: never;
@@ -6189,6 +6441,142 @@ export interface operations {
             };
         };
     };
+    get_6: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                endpointId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["WebhookEndpointView"];
+                };
+            };
+        };
+    };
+    delete_4: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                endpointId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_6: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                endpointId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["WebhookEndpointView"];
+                };
+            };
+        };
+    };
+    get_7: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["AlertRule"];
+                };
+            };
+        };
+    };
+    delete_5: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_7: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["AlertRule"];
+                };
+            };
+        };
+    };
     ownershipProtected: {
         parameters: {
             query?: never;
@@ -6213,7 +6601,7 @@ export interface operations {
             };
         };
     };
-    list_21: {
+    list_23: {
         parameters: {
             query?: never;
             header?: never;
@@ -6233,7 +6621,7 @@ export interface operations {
             };
         };
     };
-    get_6: {
+    get_8: {
         parameters: {
             query?: never;
             header?: never;
@@ -6277,7 +6665,7 @@ export interface operations {
             };
         };
     };
-    get_7: {
+    get_9: {
         parameters: {
             query?: never;
             header?: never;
@@ -6721,7 +7109,7 @@ export interface operations {
             };
         };
     };
-    get_8: {
+    get_10: {
         parameters: {
             query?: never;
             header?: never;
@@ -6743,7 +7131,7 @@ export interface operations {
             };
         };
     };
-    list_22: {
+    list_24: {
         parameters: {
             query?: never;
             header?: never;
@@ -6763,7 +7151,7 @@ export interface operations {
             };
         };
     };
-    get_9: {
+    get_11: {
         parameters: {
             query?: never;
             header?: never;
@@ -6805,7 +7193,7 @@ export interface operations {
             };
         };
     };
-    list_23: {
+    list_25: {
         parameters: {
             query?: {
                 status?: "PENDING" | "APPROVED" | "REJECTED";
@@ -6829,7 +7217,7 @@ export interface operations {
             };
         };
     };
-    get_10: {
+    get_12: {
         parameters: {
             query?: never;
             header?: never;
@@ -6873,7 +7261,7 @@ export interface operations {
             };
         };
     };
-    list_24: {
+    list_26: {
         parameters: {
             query?: {
                 service?: string;
@@ -6943,7 +7331,7 @@ export interface operations {
             };
         };
     };
-    get_11: {
+    get_13: {
         parameters: {
             query?: never;
             header?: never;
@@ -6987,7 +7375,7 @@ export interface operations {
             };
         };
     };
-    list_25: {
+    list_27: {
         parameters: {
             query?: {
                 size?: number;
@@ -7011,7 +7399,7 @@ export interface operations {
             };
         };
     };
-    get_12: {
+    get_14: {
         parameters: {
             query?: never;
             header?: never;
@@ -7054,6 +7442,30 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["UsageSummary"];
+                };
+            };
+        };
+    };
+    deliveries_1: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                endpointId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["DeliveryAttempt"][];
                 };
             };
         };
@@ -7107,7 +7519,7 @@ export interface operations {
             };
         };
     };
-    list_26: {
+    list_28: {
         parameters: {
             query?: never;
             header?: never;
@@ -7127,7 +7539,7 @@ export interface operations {
             };
         };
     };
-    list_27: {
+    list_29: {
         parameters: {
             query?: {
                 service?: string;
@@ -7149,28 +7561,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["McpAccessLogEntry"][];
-                };
-            };
-        };
-    };
-    recent_2: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ExportTaskView"][];
                 };
             };
         };
@@ -7197,7 +7587,7 @@ export interface operations {
             };
         };
     };
-    list_28: {
+    list_30: {
         parameters: {
             query?: {
                 size?: number;
@@ -7221,7 +7611,7 @@ export interface operations {
             };
         };
     };
-    list_29: {
+    list_31: {
         parameters: {
             query?: never;
             header?: never;
@@ -7262,7 +7652,7 @@ export interface operations {
             };
         };
     };
-    delete_4: {
+    delete_6: {
         parameters: {
             query?: never;
             header?: never;
@@ -7343,7 +7733,7 @@ export interface operations {
             };
         };
     };
-    delete_5: {
+    delete_7: {
         parameters: {
             query?: never;
             header?: never;

@@ -994,6 +994,7 @@ Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 
 - `POST /api/v1/admin-api/export-tasks?format&from&to` → 202（A 委托：任务的
   `created_by` = 该机器密钥的发行管理员；响应与下载面不含文件字节）。
 - 错误码沿用人类端点；新增 `EXECUTOR_UNKNOWN`（403，密钥缺发行管理员时写面拒绝）。
+- 可运行示例与最小权限建议：`scripts/open-api-examples/`（curl.sh / example.py / README.md）。
 
 **鉴权规则（批 1b 硬化）**
 - 机器密钥：无效/吊销/过期 → 401 `ADMIN_API_KEY_INVALID`；密钥身份租户化，跨租户不可见。
