@@ -3,8 +3,10 @@ package com.miqroera.miqrokey.controlplane.controller;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminMcpToolService;
 import com.miqroera.miqrokey.controlplane.service.McpToolRevisionService;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.miqroera.miqrokey.domain.model.McpTool;
 import com.miqroera.miqrokey.domain.model.McpToolRevision;
+import com.miqroera.miqrokey.controlplane.service.ToolOpenApiParser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -51,6 +53,20 @@ public class AdminMcpToolController {
         var user = userContext.getUser();
         return toolService.create(user.tenantId(), user.id(), serviceId, body.toolName(), body.description(),
                 body.method(), body.path());
+    }
+
+    /**
+     * F17: batch-imports tools from an OpenAPI document (JSON). Tolerates unknown
+     * vendor extensions; operations that cannot be derived or collide with existing
+     * names are reported per item instead of failing the import.
+     */
+    @PostMapping("/import")
+    public ImportResult importFromOpenApi(@PathVariable UUID serviceId, @RequestBody(required = false) JsonNode spec) {
+        var user = userContext.getUser();
+        ToolOpenApiParser.Parsed parsed = ToolOpenApiParser.parse(spec);
+        AdminMcpToolService.ImportReport report = toolService.createImported(user.tenantId(), user.id(), serviceId,
+                parsed.tools());
+        return new ImportResult(report.created(), report.skipped(), parsed.skipped());
     }
 
     /** Individual enable/disable of a tool. */
@@ -101,5 +117,9 @@ public class AdminMcpToolController {
     public record PublishRequest(@Size(max = 2000) String description,
             @Pattern(regexp = "GET|POST|PUT|DELETE|PATCH", message = "method must be GET, POST, PUT, DELETE or PATCH") String method,
             @Size(max = 512) String path) {
+    }
+
+    public record ImportResult(java.util.List<McpTool> created, java.util.List<AdminMcpToolService.ImportSkip> skipped,
+            java.util.List<ToolOpenApiParser.SkipNote> parseSkips) {
     }
 }

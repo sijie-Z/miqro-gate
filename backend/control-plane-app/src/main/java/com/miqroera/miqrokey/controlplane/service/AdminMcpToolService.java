@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -67,6 +68,54 @@ public class AdminMcpToolService {
         }
         routeRefreshPublisher.publishChanged();
         return tool;
+    }
+
+    /**
+     * F17 batch import: inserts parser-validated tool specs and seeds their
+     * baseline revision, skipping per-item conflicts instead of failing the whole
+     * request. A single route-refresh notification is published for the batch
+     * (create publishes per call, so this path stays one signal).
+     */
+    @Transactional
+    public ImportReport createImported(UUID tenantId, UUID adminId, UUID mcpServiceId,
+            List<ToolOpenApiParser.ToolSpec> specs) {
+        requireService(tenantId, mcpServiceId);
+        // Duplicate detection happens inside the transaction (before any write):
+        // catching a duplicate AFTER the insert would mark the shared tx
+        // rollback-only and fail the whole import on commit.
+        Set<String> names = new java.util.HashSet<>();
+        toolRepository.findAllByService(tenantId, mcpServiceId).forEach(tool -> names.add(tool.toolName()));
+        List<McpTool> created = new java.util.ArrayList<>();
+        List<ImportSkip> skipped = new java.util.ArrayList<>();
+        for (ToolOpenApiParser.ToolSpec spec : specs) {
+            String normalizedName = spec.toolName();
+            String normalizedPath = spec.path().trim();
+            if (!normalizedPath.startsWith("/")) {
+                skipped.add(new ImportSkip(normalizedName, "路径必须以 / 开头"));
+                continue;
+            }
+            if (!names.add(normalizedName)) {
+                skipped.add(new ImportSkip(normalizedName, "该服务下已存在同名工具"));
+                continue;
+            }
+            Instant now = Instant.now();
+            McpTool tool = new McpTool(UUID.randomUUID(), tenantId, mcpServiceId, normalizedName, spec.description(),
+                    spec.method(), normalizedPath, "ENABLED", 0, adminId, now, now);
+            toolRepository.insert(tool);
+            revisionRepository.insert(new McpToolRevision(UUID.randomUUID(), tenantId, tool.id(), 1, tool.description(),
+                    tool.method(), tool.path(), adminId, now, now));
+            created.add(tool);
+        }
+        if (!created.isEmpty()) {
+            routeRefreshPublisher.publishChanged();
+        }
+        return new ImportReport(created, skipped);
+    }
+
+    public record ImportReport(List<McpTool> created, List<ImportSkip> skipped) {
+    }
+
+    public record ImportSkip(String toolName, String reason) {
     }
 
     /** Individual enable/disable of a tool (Tencent Tools 启停管理). */
