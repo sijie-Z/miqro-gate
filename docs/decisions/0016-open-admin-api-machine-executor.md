@@ -1,7 +1,7 @@
 # ADR-0016：管理开放 API 写面 —— 机器执行者（machine executor）语义（草案）
 
 - 日期：2026-09-07
-- 状态：**Proposed**（等 owner/leader 拍板；拍板前不实现任何写面端点）
+- 状态：**Accepted（2026-09-08 owner 拍板：A+C）**——批 2 v1 = 无执行者列配置写直接开（C：告警规则、Webhook 端点全生命周期）+ 需执行者列操作用委托（A：导出创建 created_by=发行管理员、审计沿机器密钥）；Virtual Key 创建因需目标用户委托语义另行评估，不进批 2 v1。
 - 关联：ADR-0015（机器凭据，批 1/1b 读面已 Accepted）、F59（feature-backlog）、
   docs/open-admin-api-plan.md（批 2 拆解）。先例：ADR-0010/0011（api_consumers 机器通道
   面向"内容数据面"，与管理面语义分离）。
@@ -14,7 +14,16 @@ ADR-0015 批 1/1b 只开放了只读子集；写面（建 Virtual Key、配额/�
 NOT NULL REFERENCES users、`quota_rules.created_by` 复合 FK、`admin_api_keys.created_by`
 REFERENCES users）都指向 users 行，而机器身份 = 租户级系统主体，**没有 userId**。
 
-## 决策选项（等拍板，未选定）
+## 决策（2026-09-08 Accepted：A+C 组合，见下文 v1 范围）
+
+> 选型过程记录保留（原三案）。v1 范围：
+> - C 直接开：`/api/v1/admin-api/alert-rules` 与 `/api/v1/admin-api/webhooks` 全生命周期
+>   （表无执行者列，tenant 参数即隔离边界）
+> - A 委托开：`POST /api/v1/admin-api/export-tasks`——created_by = 密钥发行管理员
+>   （过滤器新增 ISSUER_ATTR；导出下载/状态仍走元数据面）
+> - 后续待评估：Virtual Key 创建（目标用户委托语义）、配额/模板写、批 3 治理。
+
+## 决策选项（历史记录，已裁决）
 
 ### 候选 A：委托执行（recommended for v1）
 机器密钥的"业务执行者" = **发行该密钥的管理员**。写面端点照常写

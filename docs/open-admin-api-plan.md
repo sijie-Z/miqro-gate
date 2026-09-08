@@ -50,5 +50,7 @@
       export-tasks 元数据（不读 file_bytes）、mcp-access-logs；会话仅 SYSTEM_ADMIN
       放行（403 ADMIN_API_FORBIDDEN）；首个开放面端到端集成测试（跨租户隔离/吊销
       即时/过期/审计光标）
-- [ ] 批 2 契约/示例 —— 写面先拍板 ADR-0016（机器执行者语义,Proposed 2026-09-07）
+- [x] 批 2 v1 写面（2026-09-08 ADR-0016 Accepted A+C）：告警规则/Webhook 全生命周期直接开（C）+
+      导出创建委托（A）；Virtual Key 创建与批量治理留待 v2
+- [ ] 批 2 契约/示例（OpenAPI 快照刷新、curl/Python 示例）—— 随 v1 合入后补
 - [ ] 批 3 治理可选
