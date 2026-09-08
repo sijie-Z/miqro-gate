@@ -11,7 +11,14 @@ import { ApiError } from '@/api/http';
 import { UiButton, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import type { UiSelectOption } from '@/ui';
-import type {QuotaLevel, QuotaMetric, QuotaPeriod, UsageGroup, UsageGroupBy, UsageRecordPage} from '@/types/api';
+import type {
+  QuotaLevel,
+  QuotaMetric,
+  QuotaPeriod,
+  UsageGroup,
+  UsageGroupBy,
+  UsageRecordPage,
+} from '@/types/api';
 import type { QuotaRuleView, UsageRecord, UsageSummary } from '@/types/generated-api';
 
 const groupBy = ref<UsageGroupBy>('project');
@@ -174,7 +181,11 @@ async function loadRecords() {
   recordsLoading.value = true;
   recordsError.value = '';
   try {
-    records.value = await api.usageRecords({ page: page.value, size: pageSize.value, ...windowFromTo() });
+    records.value = await api.usageRecords({
+      page: page.value,
+      size: pageSize.value,
+      ...windowFromTo(),
+    });
   } catch (error) {
     if (error instanceof ApiError) {
       recordsError.value = `${error.message}（requestId: ${error.requestId ?? '-'}）`;
@@ -413,7 +424,11 @@ function formatTime(iso: string): string {
           formatCost(asGroup(row).cost.gatewayObserved)
         }}</template>
       </UiTable>
-      <div v-if="summary" class="next-usage__totals" data-testid="summary-totals">
+      <div
+        v-if="summary && summary.groups.length > 0"
+        class="next-usage__totals"
+        data-testid="summary-totals"
+      >
         <span class="next-usage__totals-label">合计</span>
         <span class="ui-num next-usage__totals-col next-usage__totals-col--wide">{{
           formatNumber(
@@ -751,5 +766,11 @@ function formatTime(iso: string): string {
 .next-usage__pager-actions {
   display: flex;
   gap: var(--ui-space-2);
+}
+
+/* usage micro-polish (issue #261): empty summaries skip the misleading
+   totals band; records list keeps a touch of bottom air. */
+.next-usage__records {
+  padding-bottom: var(--ui-space-2);
 }
 </style>
