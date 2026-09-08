@@ -1,6 +1,6 @@
 # AI 代码审查机器人安装指南
 
-> 更新：2026-09-01。目标：用免费机器人对每个 PR 做尽可能多的自动代码审查。
+> 更新：2026-09-08。目标：用免费机器人对每个 PR 做尽可能多的自动代码审查。
 > 除 CodeRabbit 已配置外，其余需在 GitHub Marketplace 安装 App 或在对应平台生成 token——**必须由仓库所有者（sijie-Z）在 GitHub 账号下操作**，Claude Code 无法代替授权。
 
 ## 已配置（开箱即用）
@@ -10,7 +10,7 @@
 | **CodeRabbit** | ✅ 已接入 | `.coderabbit.yaml`（ASSERTIVE profile，base_branches 含 main/develop/goal/*/feat/*/fix/*）。OSS 仓库首次 review 需在 [CodeRabbit 仪表盘](https://coderabbit.ai) 批准一次，或对 PR 评论 `@coderabbitai review` 触发单次审查 |
 | **CodeQL** | ✅ 已有 | GitHub 内置（java-kotlin + javascript-typescript），push/PR 全触发 |
 | **Trivy / Scorecard / Dependabot** | ✅ 已有 | 安全扫描、供应链评分、依赖升级 PR |
-| **SonarCloud** | 🔧 workflow 已备好 | 见下，需两个 secret |
+| **SonarCloud** | 🔧 workflow 已备好 | 见下，需 1 个 secret + 1 个 variable |
 
 ## 推荐安装（免费，可叠加）
 
@@ -19,10 +19,10 @@
 1. 登录 [sonarcloud.io](https://sonarcloud.io)（GitHub 账号 OAuth）。
 2. Import 组织/仓库 `sijie-Z/miqro-gate` → 创建项目（project key 默认 `sijie-Z_miqro-gate`）。
 3. 在 SonarCloud 项目 → Administration → Analysis Method → 复制 **SONAR_TOKEN**。
-4. GitHub 仓库 → Settings → Secrets and variables → Actions → 新建两个 secret：
-   - `SONAR_TOKEN` = 上面的 token
-   - `GITHUB_TOKEN` 不需要手动建（`secrets.GITHUB_TOKEN` 内置）
-5. 提交 `.github/workflows/sonarqube.yml`（已写好）→ 下一次 push/PR 自动分析，PR 上显示 Quality Gate 与行内评论。
+4. GitHub 仓库 → Settings → Secrets and variables → Actions：
+   - Actions secrets：新建 `SONAR_TOKEN` = 上面的 token（`GITHUB_TOKEN` 内置、无需建）
+   - Actions variables：新建 `SONAR_ENABLED` = `true`（workflow 门控开关）
+5. `.github/workflows/sonarqube.yml` 已合入 develop（2026-09-08 #242 规范重写：原 secrets 门控形态通不过 GitHub workflow 校验、会让每次 push 产生零 job 失败；现以 `vars.SONAR_ENABLED` 门控，变量未设时 workflow 安静跳过）→ 下一次 push/PR 自动分析，PR 上显示 Quality Gate 与行内评论。
 
 > 若 organization key 不是 `sijie-z`，改 workflow 里 `-Dsonar.organization` 与 `-Dsonar.projectKey`。
 
