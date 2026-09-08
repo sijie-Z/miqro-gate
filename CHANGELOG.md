@@ -13,6 +13,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - 前端：Element Plus → TDesign 全量迁移（含 CDN 图标改本地 SVG）；bundle 拆分（入口 1.46MB → 15KB）；UsageView 导出 CSV；部署信息页。
 - 修复（自测发现）：登录提交链路失效、t-drawer 标题/默认 footer、DialogPlugin.confirm 非 Promise（危险操作确认前即执行，全站修复）、jsdom 缺 ResizeObserver 等。
 - 工程：CI 拆分 6+ job + 路径过滤 + CodeQL + npm audit；CodeRabbit / Dependabot / OSSF Scorecard / Stale；Issue 模板 / SECURITY.md / 标签体系；GitHub 公开 + MIT。
+- 工程（2026-09-07/08 CI 治理）：Scorecard 换源 ghcr.io（v2.4.4，gcr.io 停运拒拉）；Security gate 新增 util-linux 临时豁免（`.trivyignore.yaml`，purl 限定 + 2026-10-07 到期）；新增 `postgres-image-update` digest watcher（上游重建自动开升级 PR、实扫通过自动剥离豁免）；`changes` job push 事件修复（补 checkout）；CodeQL PR 双跑去重；Sonar workflow 规范重写（develop，#242，vars 门控）；21 个 Dependabot PR 合并（Actions 全线升级至 v6/v7、spotless 3、eslint 10、vitest 5、jsdom 30 等，含 spotless 3 下 4 处 pom 空标签适配、eslint 10 依赖联动后转绿）。
 
 ## [0.1.0] — 2026-08-26（首个候选版本，未标记 VERIFIED）
 
