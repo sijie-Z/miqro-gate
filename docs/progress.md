@@ -10,6 +10,14 @@
 - Goal status: `IN_PROGRESS`（develop 已至 #218 + 本轮 rc.2 收口。09-07 全量并入：#198-#200 开放 API 批1 → #204 批1b 读面+会话硬化（含批1 机器通道被 SessionFilter 前置拦截的修复）→ #209 issue 纪律 → #212 登录打磨 → #214 登录中文化（owner：中文产品，覆盖 #194/#196「EN 按稿」）→ #216 backlog 卫生（F59→F60；F34/留痕校正 DONE）→ #218 F01 核对 DONE + 大厂对照入档。pre-release 0.1.0-rc.2 已打标并推送。**待办：F60 写面拍板（ADR-0016，#206 上 A+C 建议）、Q4 真机与 F53 真实凭证（#211 BLOCKED）、F32 平台用户同步/OAuth（leader 接口形态）、登录稿残余 NIT（可选，reopen #210）**）
 - Last updated: `2026-09-07 CST`
 
+## 会话交接点 2026-09-08（rc.2→rc.3：功能与 UI 收尾七 PR）
+
+- **#225 导出口径列 + Webhook 成功率卡**、**#226 codegen 漂移修复**、**#228 F16 工具版本管理(V33)**、
+  **#230 F16 UI(历史/回滚抽屉)**、**#232 F18 模型人工兜底(V34)**、**#234 F17 OpenAPI 批量导入**、
+  **#236 控制台 UI 收尾(编辑发布/导入弹窗/模型目录抽屉)**——每步本地验证 + CI 全绿后合并。
+- **rc.3 轮**：OpenAPI 基线再生 + 前端生成类型同步；0.1.0-rc.3 tag + 中文 Release。
+- 待办不变：#206 F60 写面拍板(A+C)、#211 真机凭证(BLOCKED)、F32/F33(leader 接口)。
+
 ## 会话交接点 2026-09-07（下半场：#204-#218 六 PR + pre-release rc.2）
 
 - **批 1b（#204，issue #205）**：/api/v1/admin-api 读面全开——audit-events（共享 AuditEventReadService，人类端点委托回归受保护）/api-keys/quota-rules/export-tasks（元数据 SQL 不读 file_bytes）/mcp-access-logs；**发现并修复批 1 真 bug**：SessionFilter(-100) 拦截一切无会话 /api 请求，机器 Bearer 到不了 AdminApiKeyAuthFilter(-95)——首个开放面集成测试（7/7：全端点/跨租户隔离/吊销过期即时 401/审计光标/会话 SYSTEM_ADMIN 403 规则/人类端点回归）暴露并锁定；写面草案 ADR-0016(Proposed) 等拍板。
