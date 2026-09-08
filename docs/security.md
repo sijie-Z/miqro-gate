@@ -117,7 +117,7 @@
 |---|---|---|
 | Secret 扫描 | `deploy/security/check-secrets.sh` | `git grep` 高信号凭证模式（sk-/Bearer/AKIA/xox/ghp_）；放行构建产物、测试夹具与 compose 占位符；**文档示例 Key 一律打码**（G6.3 已清理 23 处） |
 | 许可证门禁 + SBOM | `deploy/security/check-sbom.sh` | CycloneDX 聚合 BOM（gateway + control-plane 运行时依赖）；拒绝 GPL/LGPL/AGPL/SSPL/EPL/MPL/CC-BY-NC/SA |
-| 镜像扫描 | CI `security` job | Trivy 扫 compose 固定 digest 镜像（postgres 17.6-alpine @sha256:18cfe3ef…（2026-08-16 最新，替代含 golang 工具链 CVE 的旧 digest），HIGH/CRITICAL 未修复即失败；`deploy/security/.trivyignore` 记录镜像内 golang 工具链本地 DoS CVE（非 postgres 服务攻击面），**镜像升级时移除豁免** |
+| 镜像扫描 | CI `security` job | Trivy 扫 compose 固定 digest 镜像（postgres 17.11-alpine @sha256:18cfe3ef…，2026-08-13 官方构建、17 线最新 patch；标签原写 17.6-alpine 系陈旧，digest 内容即 17.11），HIGH/CRITICAL 未修复即失败；`deploy/security/.trivyignore.yaml`（2026-09-07 由文本格式迁移）逐条豁免并附理由、按 purl 限定包、可设 `expired_at`：openssl QUIC 不可达路径、gosu/golang 打包工具本地 DoS、**util-linux 7 项临时豁免（2026-10-07 硬到期，官方 alpine 重建后移除）**；`postgres-image-update` workflow 每日对比官方 `17-alpine` digest，上游重建自动开升级 PR、实扫通过即自动剥离 util-linux 临时集 |
 | 目录签名 | 既有（G2.1） | provider-catalog.json Ed25519 签名 + 启动强校验，篡改即启动失败 |
 | 审计完整性 | 既有（G2.3） | admin_audit_events 哈希链（previous/current_event_hash + chain_position），链断裂测试覆盖 |
 
