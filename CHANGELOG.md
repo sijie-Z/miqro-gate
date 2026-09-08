@@ -5,6 +5,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-07
+- **平台 OIDC + rc.6（2026-09-08）**：平台 OIDC 登录（ADR-0017，#258，授权码 RP+映射/自动建号，等平台 client）；平台申请单（#260）；usage 空态合计行微修（#262）；rc.6 tag/Release。F60 v2 委托建钥设计稿（#264）待圈案 1/案 2（#263）。
 - **F60 写面 v1 + 批 2 契约/示例 + rc.4（2026-09-08）**：ADR-0016 Accepted(A+C)——开放面告警规则/Webhook 全生命周期机器写(C)、导出创建委托=发行管理员(A,ISSUER_ATTR)、机器通道 CSRF 豁免语义;curl/Python 示例集与最小权限建议(scripts/open-api-examples/);OpenAPI 基线再生并同步前端类型;tag 0.1.0-rc.4 + 中文 Release。
 - **Pre-release 0.1.0-rc.3（2026-09-08）**：rc.2 后合入 #225-#236（导出口径列/Webhook 成功率卡/codegen 修复/F16 工具版本管理+UI/F17 OpenAPI 导入/F18 模型人工兜底+UI）；OpenAPI 基线再生并同步前端生成类型；progress 交接点更新。tag `0.1.0-rc.3` + 中文 Release。
 - **登录稿最终打磨（#212）**：对照权威稿收口轮——hero 标题收紧不折行、能力卡改回纵向单列带说明、按钮改紫→蓝渐变呼应 portal、portal 光晕/拱门内光加强、白面板微渐变、底部两卡强化容器感、分隔线淡彩、占位符对比度提升（视觉评审 7.5→8.5，文案与 testid 零改动）。
