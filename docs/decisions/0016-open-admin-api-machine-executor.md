@@ -23,6 +23,29 @@ REFERENCES users）都指向 users 行，而机器身份 = 租户级系统主体
 >   （过滤器新增 ISSUER_ATTR；导出下载/状态仍走元数据面）
 > - 后续待评估：Virtual Key 创建（目标用户委托语义）、配额/模板写、批 3 治理。
 
+## 增补：批 2 v2 Virtual Key 委托创建（2026-09-09 Accepted：案 1，issue #263）
+
+机器密钥开放「代指定用户建 Virtual Key」，但**边界语义与自助建钥完全一致**
+（1:1 固定绑定不变：钥归属目标用户，成员/授权校验按目标执行，密钥只存摘要、
+secret 一次性）。设计稿与案型记录：docs/f60-v2-virtual-key-delegation-design.md。
+
+- 端点：`POST /api/v1/admin-api/virtual-keys`（body = CreateVirtualKeyRequest 字段 +
+  `userId`）→ 201 `{key, secret, shownOnce:true}`；只读配套
+  `GET /api/v1/admin-api/virtual-keys?userId=`（视图列表，便于开通流程查询）。
+- 委托语义：operator = 密钥的发行管理员（ISSUER_ATTR，同导出委托 A），且**现行角色
+  必须仍为 SYSTEM_ADMIN**（`DELEGATION_FORBIDDEN` 403）——代他人发钥是系统管理员权限，
+  防止被降权的历史委托人继续借钥扩散凭据。密钥缺发行管理员 → 既有 `EXECUTOR_UNKNOWN`。
+- 成员边界（案 1 关键）：项目/授权/模型/cachePolicy 校验与自助一致；成员校验按
+  **目标用户**执行，目标为 SYSTEM_ADMIN 时豁免（与管理员自助建钥一致）；
+  `key.userId = 目标用户`。目标用户须租户内存在（404 `TARGET_USER_NOT_FOUND`）且
+  ACTIVE（409 `TARGET_USER_INACTIVE`）；非成员目标 → 403 `PROJECT_MEMBERSHIP_REQUIRED`。
+- 审计双元：action `VIRTUAL_KEY_CREATE`，actor = 委托人（机器永远不冒充用户），
+  change_summary 增加 `targetUserId`——沿审计链可同时回到「谁执行」与「钥归谁」。
+- 不分用途白名单（默认不限，与管理员自建一致）；不设目标用户白名单。
+- 验收（2026-09-09 集成测试 6/6 + 自服务回归 8/8）：目标成员 201 且钥归属目标、
+  secret 一次性；非成员 403；SYSTEM_ADMIN 目标豁免成员；停用/跨租户/不存在 404/409；
+  创建链不变量（routing tag 缺失 409）仍生效；无凭据 401；审计 actor+targetUserId。
+
 ## 决策选项（历史记录，已裁决）
 
 ### 候选 A：委托执行（recommended for v1）

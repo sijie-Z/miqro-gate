@@ -53,5 +53,7 @@
 - [x] 批 2 v1 写面（2026-09-08 ADR-0016 Accepted A+C）：告警规则/Webhook 全生命周期直接开（C）+
       导出创建委托（A）；Virtual Key 创建与批量治理留待 v2
 - [x] 批 2 契约/示例（2026-09-08）：scripts/open-api-examples/（curl+Python+最小权限 README）+ OpenAPI 基线刷新
-- [ ] 批 2 v2（Virtual Key 委托建钥）：设计稿 docs/f60-v2-virtual-key-delegation-design.md 待圈（issue #263，案 1/案 2）
+- [x] 批 2 v2（Virtual Key 委托建钥，2026-09-09 案 1）：ADR-0016 增补 + POST/GET
+      `/api/v1/admin-api/virtual-keys`（委托=发行管理员现行 SYSTEM_ADMIN；成员校验按目标用户，
+      钥归属目标；审计 actor+targetUserId）+ 集成测试 6/6 + api-contract §9 + 示例集补建钥段
 - [ ] 批 3 治理可选

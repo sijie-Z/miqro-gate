@@ -15,6 +15,7 @@ import com.miqroera.miqrokey.domain.model.ProjectProviderGrant;
 import com.miqroera.miqrokey.domain.model.ProjectStatus;
 import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.UserRole;
+import com.miqroera.miqrokey.domain.model.UserStatus;
 import com.miqroera.miqrokey.domain.model.VirtualKey;
 import com.miqroera.miqrokey.domain.model.VirtualKeyPurpose;
 import com.miqroera.miqrokey.domain.model.VirtualKeyStatus;
@@ -22,6 +23,7 @@ import com.miqroera.miqrokey.domain.repository.KeyProjectBindingRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectMembershipRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectProviderGrantRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
+import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.http.HttpStatus;
@@ -66,6 +68,7 @@ public class VirtualKeyService {
     private final ProjectRepository projectRepository;
     private final ProjectProviderGrantRepository grantRepository;
     private final ProjectMembershipRepository membershipRepository;
+    private final UserRepository userRepository;
     private final VirtualKeyCrypto keyCrypto;
     private final AuditService auditService;
     private final AuthProperties authProperties;
@@ -73,13 +76,14 @@ public class VirtualKeyService {
 
     public VirtualKeyService(VirtualKeyRepository keyRepository, KeyProjectBindingRepository bindingRepository,
             ProjectRepository projectRepository, ProjectProviderGrantRepository grantRepository,
-            ProjectMembershipRepository membershipRepository, VirtualKeyCrypto keyCrypto, AuditService auditService,
-            AuthProperties authProperties, RouteRefreshPublisher routeRefreshPublisher) {
+            ProjectMembershipRepository membershipRepository, UserRepository userRepository, VirtualKeyCrypto keyCrypto,
+            AuditService auditService, AuthProperties authProperties, RouteRefreshPublisher routeRefreshPublisher) {
         this.keyRepository = keyRepository;
         this.bindingRepository = bindingRepository;
         this.projectRepository = projectRepository;
         this.grantRepository = grantRepository;
         this.membershipRepository = membershipRepository;
+        this.userRepository = userRepository;
         this.keyCrypto = keyCrypto;
         this.auditService = auditService;
         this.authProperties = authProperties;
@@ -92,7 +96,38 @@ public class VirtualKeyService {
      */
     @Transactional
     public CreateVirtualKeyResponse create(User user, CreateVirtualKeyRequest request, String requestId) {
-        UUID tenantId = user.tenantId();
+        return createKey(user.tenantId(), user, user.id(), request, requestId, user.id(), null);
+    }
+
+    /**
+     * Open-admin delegation (ADR-0016 增补, 案 1): a SYSTEM_ADMIN operator issues a
+     * key whose owner is {@code targetUserId}. All creation invariants hold — the
+     * project must be active and tagged, the grant must match, the member check
+     * runs against the <em>target</em> user (SYSTEM_ADMIN targets are exempt, same
+     * as self-service), and the key is bound 1:1 to the target. The audit actor
+     * stays the delegating operator and the summary carries {@code targetUserId},
+     * so both halves of the chain remain attributable.
+     */
+    @Transactional
+    public CreateVirtualKeyResponse createForUser(UUID tenantId, UUID operatorId, UUID targetUserId,
+            CreateVirtualKeyRequest request, String requestId) {
+        User operator = operatorId == null
+                ? null
+                : userRepository.findById(operatorId).filter(u -> u.tenantId().equals(tenantId)).orElse(null);
+        if (operator == null || operator.role() != UserRole.SYSTEM_ADMIN) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "DELEGATION_FORBIDDEN",
+                    "代指定用户创建 Virtual Key 仅限 SYSTEM_ADMIN 委托人。");
+        }
+        User target = userRepository.findById(targetUserId).filter(u -> u.tenantId().equals(tenantId))
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "TARGET_USER_NOT_FOUND", "目标用户不存在。"));
+        if (target.status() != UserStatus.ACTIVE) {
+            throw new ApiException(HttpStatus.CONFLICT, "TARGET_USER_INACTIVE", "目标用户已停用，不能代其建钥。");
+        }
+        return createKey(tenantId, target, target.id(), request, requestId, operator.id(), target.id());
+    }
+
+    private CreateVirtualKeyResponse createKey(UUID tenantId, User memberSubject, UUID ownerUserId,
+            CreateVirtualKeyRequest request, String requestId, UUID actorId, UUID delegatedTargetId) {
         Project project = projectRepository.findById(request.projectId()).filter(p -> p.tenantId().equals(tenantId))
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "PROJECT_NOT_FOUND", "Project not found"));
         if (project.status() != ProjectStatus.ACTIVE) {
@@ -102,9 +137,10 @@ public class VirtualKeyService {
             throw new ApiException(HttpStatus.CONFLICT, "ROUTING_TAG_MISSING",
                     "The project has no routing tag; an administrator must assign one before keys can be created");
         }
-        if (user.role() != UserRole.SYSTEM_ADMIN && !membershipRepository.exists(project.id(), user.id())) {
+        if (memberSubject.role() != UserRole.SYSTEM_ADMIN
+                && !membershipRepository.exists(project.id(), memberSubject.id())) {
             throw new ApiException(HttpStatus.FORBIDDEN, "PROJECT_MEMBERSHIP_REQUIRED",
-                    "You are not a member of this project");
+                    delegatedTargetId != null ? "目标用户不是该项目成员，不能代其建钥。" : "You are not a member of this project");
         }
 
         ProjectProviderGrant grant = grantRepository.findById(request.credentialGrantId())
@@ -131,16 +167,19 @@ public class VirtualKeyService {
             Instant now = Instant.now();
             UUID keyId = UUID.randomUUID();
             VirtualKey key = new VirtualKey(keyId, tenantId, material.publicKeyId(), material.digest(),
-                    material.displayPrefix(), material.lastFour(), user.id(), project.id(), grant.id(),
+                    material.displayPrefix(), material.lastFour(), ownerUserId, project.id(), grant.id(),
                     grant.upstreamCredentialId(), request.purpose(), request.name(), cachePolicy,
                     VirtualKeyStatus.ACTIVE, now, null, null, null, 0L);
             keyRepository.insert(key);
             bindingRepository.insert(new KeyProjectBinding(UUID.randomUUID(), tenantId, keyId, project.id(),
                     KeyProjectBindingStatus.ACTIVE, 0L, now, now));
             keyRepository.replaceKeyModels(tenantId, keyId, requested);
-            auditService.record(tenantId, user.id(), "VIRTUAL_KEY_CREATE", "VIRTUAL_KEY", keyId,
-                    auditSummary("name", sanitize(request.name()), "purpose", request.purpose(), "models",
-                            requested.size(), "cachePolicy", cachePolicy),
+            auditService.record(tenantId, actorId, "VIRTUAL_KEY_CREATE", "VIRTUAL_KEY", keyId,
+                    delegatedTargetId != null
+                            ? auditSummary("name", sanitize(request.name()), "purpose", request.purpose(), "models",
+                                    requested.size(), "cachePolicy", cachePolicy, "targetUserId", delegatedTargetId)
+                            : auditSummary("name", sanitize(request.name()), "purpose", request.purpose(), "models",
+                                    requested.size(), "cachePolicy", cachePolicy),
                     requestId);
             routeRefreshPublisher.publishChanged();
             return response(keyId, material, now);
@@ -227,6 +266,11 @@ public class VirtualKeyService {
             views.add(view(key, user.tenantId()));
         }
         return views;
+    }
+
+    /** Open-admin view (ADR-0016 增补): all keys owned by one tenant user. */
+    public List<VirtualKeyView> listForTenantUser(UUID tenantId, UUID userId) {
+        return keyRepository.findAllByTenantIdAndUserId(tenantId, userId).stream().map(k -> view(k, tenantId)).toList();
     }
 
     /** Detail of one of the caller's own keys; generic 404 for anything else. */

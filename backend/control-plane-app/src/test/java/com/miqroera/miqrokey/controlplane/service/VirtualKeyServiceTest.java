@@ -23,6 +23,7 @@ import com.miqroera.miqrokey.domain.repository.KeyProjectBindingRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectMembershipRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectProviderGrantRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
+import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import org.junit.jupiter.api.BeforeEach;
@@ -77,6 +78,8 @@ class VirtualKeyServiceTest {
     @Mock
     private ProjectMembershipRepository membershipRepository;
     @Mock
+    private UserRepository userRepository;
+    @Mock
     private VirtualKeyCrypto keyCrypto;
     @Mock
     private AuditService auditService;
@@ -92,7 +95,8 @@ class VirtualKeyServiceTest {
         authProperties.setGatewayBaseUrl("https://gateway.example.internal");
         authProperties.setVirtualKeyRotateGrace(Duration.ZERO);
         service = new VirtualKeyService(keyRepository, bindingRepository, projectRepository, grantRepository,
-                membershipRepository, keyCrypto, auditService, authProperties, RouteRefreshPublisher.NONE);
+                membershipRepository, userRepository, keyCrypto, auditService, authProperties,
+                RouteRefreshPublisher.NONE);
         user = user(UserRole.USER);
         admin = user(UserRole.SYSTEM_ADMIN);
     }

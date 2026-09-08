@@ -1008,8 +1008,21 @@ Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 
 - 错误码沿用人类端点；新增 `EXECUTOR_UNKNOWN`（403，密钥缺发行管理员时写面拒绝）。
 - 可运行示例与最小权限建议：`scripts/open-api-examples/`（curl.sh / example.py / README.md）。
 
+**Virtual Key 委托创建（批 2 v2，ADR-0016 增补 2026-09-09 案 1，issue #263）**
+- `POST /api/v1/admin-api/virtual-keys` body `{userId, name?, projectId, providerProductId,
+  credentialGrantId, purpose, allowedModels?, cachePolicy?}`（= §4 建钥字段 + 目标 `userId`）
+  → 201 `{id, secret, shownOnce:true, baseUrl, display, createdAt, version}`；secret 仅此一次，
+  **钥归属 = 目标用户**（`user_id` 落目标），成员/授权校验按目标执行。
+- `GET /api/v1/admin-api/virtual-keys?userId=` → 该租户用户拥有的钥视图列表（无 secret，
+  便于开通流程查询/校验）。
+- 委托边界（案 1）：委托人 = 密钥发行管理员且现行角色须为 SYSTEM_ADMIN，否则 403
+  `DELEGATION_FORBIDDEN`；目标用户不存在 → 404 `TARGET_USER_NOT_FOUND`、停用 → 409
+  `TARGET_USER_INACTIVE`；目标非项目成员 → 403 `PROJECT_MEMBERSHIP_REQUIRED`
+  （SYSTEM_ADMIN 目标豁免，同自助）；创建链不变量全部沿用（tag/授权/模型/缓存）。
+- 审计：`VIRTUAL_KEY_CREATE`，actor = 委托人，change_summary 含 `targetUserId`。
+
 **鉴权规则（批 1b 硬化）**
 - 机器密钥：无效/吊销/过期 → 401 `ADMIN_API_KEY_INVALID`；密钥身份租户化，跨租户不可见。
 - 门户会话：仅 SYSTEM_ADMIN 可访问开放面（403 `ADMIN_API_FORBIDDEN`，其他角色）；会话租户即开放面租户。
 - 安全红线不变：密钥只存摘要、吊销即时、机器调用走审计（操作审计沿用既有链）、正文不落库、导出文件字节
-  不上机器面。写面扩展（机器执行者语义）待 ADR-0016 拍板；批 3 作用域/频控可选。
+  不上机器面。批 3 作用域/频控可选。

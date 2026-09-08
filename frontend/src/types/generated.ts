@@ -1124,6 +1124,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin-api/virtual-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listForUser"];
+        put?: never;
+        post: operations["createForUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin-api/export-tasks": {
         parameters: {
             query?: never;
@@ -1508,6 +1524,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/oauth/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["start"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oauth/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["providers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oauth/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["callback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/me": {
         parameters: {
             query?: never;
@@ -1739,7 +1803,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["providers"];
+        get: operations["providers_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3113,6 +3177,21 @@ export interface components {
             /** Format: date-time */
             createdAt?: string;
         };
+        DelegatedCreateRequest: {
+            /** Format: uuid */
+            userId: string;
+            name?: string;
+            /** Format: uuid */
+            projectId: string;
+            /** Format: uuid */
+            providerProductId: string;
+            /** Format: uuid */
+            credentialGrantId: string;
+            /** @enum {string} */
+            purpose: "CLAUDE_CODE" | "CLAUDE_DESKTOP" | "CODEX" | "CUSTOM";
+            allowedModels?: string[];
+            cachePolicy?: string;
+        };
         StatusRequest: {
             /** @enum {string} */
             status?: "ACTIVE" | "DISABLED" | "LOCKED";
@@ -3266,6 +3345,10 @@ export interface components {
             subscriptionId?: string;
             subscriptionName?: string;
             snapshots?: components["schemas"]["QuotaEntryView"][];
+        };
+        ProviderInfo: {
+            code?: string;
+            name?: string;
         };
         DeliveryAttempt: {
             /** Format: uuid */
@@ -5990,6 +6073,52 @@ export interface operations {
             };
         };
     };
+    listForUser: {
+        parameters: {
+            query: {
+                userId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["VirtualKeyView"][];
+                };
+            };
+        };
+    };
+    createForUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DelegatedCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["CreateVirtualKeyResponse"];
+                };
+            };
+        };
+    };
     recent_2: {
         parameters: {
             query?: {
@@ -6845,6 +6974,65 @@ export interface operations {
             };
         };
     };
+    start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    providers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ProviderInfo"][];
+                };
+            };
+        };
+    };
+    callback: {
+        parameters: {
+            query?: {
+                code?: string;
+                state?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     me: {
         parameters: {
             query?: never;
@@ -7173,7 +7361,7 @@ export interface operations {
             };
         };
     };
-    providers: {
+    providers_1: {
         parameters: {
             query?: never;
             header?: never;
