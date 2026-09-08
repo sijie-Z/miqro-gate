@@ -66,7 +66,9 @@ class ModelCatalogServiceTest {
 
         service.applySnapshot(snapshot("deepseek-payg-api", "m1", "m2"));
 
-        verify(jdbc).update(eq("DELETE FROM model_catalog WHERE provider_product_id = :productId"), anyMap());
+        verify(jdbc).update(
+                eq("DELETE FROM model_catalog WHERE provider_product_id = :productId AND source = 'OFFICIAL'"),
+                anyMap());
         ArgumentCaptor<SqlParameterSource[]> batch = ArgumentCaptor.forClass(SqlParameterSource[].class);
         verify(jdbc).batchUpdate(anyString(), batch.capture());
         assertThat(batch.getValue()).hasSize(2);
@@ -83,7 +85,9 @@ class ModelCatalogServiceTest {
 
         service.applySnapshot(snapshot("deepseek-payg-api"));
 
-        verify(jdbc).update(eq("DELETE FROM model_catalog WHERE provider_product_id = :productId"), anyMap());
+        verify(jdbc).update(
+                eq("DELETE FROM model_catalog WHERE provider_product_id = :productId AND source = 'OFFICIAL'"),
+                anyMap());
         verify(jdbc, never()).batchUpdate(anyString(), any(SqlParameterSource[].class));
         verify(publisher).publishChanged();
     }
@@ -119,7 +123,9 @@ class ModelCatalogServiceTest {
 
         service.refreshProduct(adapter, client);
 
-        verify(jdbc).update(eq("DELETE FROM model_catalog WHERE provider_product_id = :productId"), anyMap());
+        verify(jdbc).update(
+                eq("DELETE FROM model_catalog WHERE provider_product_id = :productId AND source = 'OFFICIAL'"),
+                anyMap());
         verify(publisher).publishChanged();
     }
 

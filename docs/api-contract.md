@@ -760,6 +760,19 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 - 仅 PENDING 可审批：重复审批 `409 ALREADY_REVIEWED`（乐观锁，并发评审只有一个成功）；Key 已吊销/停用 → `409 KEY_NOT_ACTIVE`；Grant 已停用 → `409 GRANT_INACTIVE`；不存在 → `404 APPROVAL_NOT_FOUND`。
 - 审批/驳回写 `MODEL_APPROVAL_APPROVED` / `MODEL_APPROVAL_REJECTED` 审计（含 reviewNote 长度 ≤ 500 校验）。
 
+### 5.18b 模型目录人工维护（F18，腾讯 raw 5 探测兜底）
+
+官方目录抓取「只写成功」——探测失败时若无人工入口，管理员将无法补录模型 ID。本组端点提供人工兜底：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `GET /api/v1/admin/models?providerProductId&source` | 目录行列表（source 过滤，如 `MANUAL`） |
+| `POST /api/v1/admin/models` | 人工录入：`{providerProductId, modelId, displayName?, contextWindow?, maxOutputTokens?}` → 201（`source=MANUAL`；同产品重名 409） |
+| `DELETE /api/v1/admin/models/{rowId}` | 删除 MANUAL 行（OFFICIAL 行拒绝 409） |
+
+- 语义：MANUAL 行是官方探测失败的回退入口，官方刷新永不覆盖/删除（`ON CONFLICT DO NOTHING`）；`status` 默认 ACTIVE，照常参与 `/v1/models` 交集。
+- 错误码：`MODEL_ID_INVALID`（400）、`PRODUCT_NOT_FOUND`（404）、`MODEL_ALREADY_IN_CATALOG`（409）、`MODEL_NOT_FOUND`（404）、`MODEL_NOT_MANUAL`（409）。
+
 ### 5.19 配额规则（用量配额，platform-middleware roadmap「配额管理」步骤）
 
 只预警不阻断的用量配额（对齐腾讯消费者配额 / 阿里消费者配额，alerting-only）：
