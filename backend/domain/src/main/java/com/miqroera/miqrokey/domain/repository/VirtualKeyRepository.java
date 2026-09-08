@@ -18,6 +18,8 @@ public interface VirtualKeyRepository {
 
     List<VirtualKey> findAllByUserId(UUID userId);
 
+    List<VirtualKey> findAllByTenantIdAndUserId(UUID tenantId, UUID userId);
+
     List<VirtualKey> findAllByProjectId(UUID projectId);
 
     List<VirtualKey> findAllByGrantId(UUID grantId);
