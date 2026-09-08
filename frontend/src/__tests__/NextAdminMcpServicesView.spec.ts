@@ -6,6 +6,7 @@ import { defineComponent } from 'vue';
 import NextAdminMcpServicesView from '@/views/next/NextAdminMcpServicesView.vue';
 import * as api from '@/api';
 import type { McpAccessView, McpServiceView, McpToolView } from '@/types/generated-api';
+import { toastState } from '@/ui/toast';
 
 vi.mock('@/api', () => ({
   adminListMcpServices: vi.fn(),
@@ -15,6 +16,8 @@ vi.mock('@/api', () => ({
   adminListMcpTools: vi.fn(),
   adminCreateMcpTool: vi.fn(),
   adminSetMcpToolStatus: vi.fn(),
+  adminListToolRevisions: vi.fn(),
+  adminActivateToolRevision: vi.fn(),
   getMcpServiceAccess: vi.fn(),
   listApiConsumers: vi.fn(),
   setMcpAccessMode: vi.fn(),
@@ -619,9 +622,7 @@ describe('NextAdminMcpServicesView', () => {
     await flushPromises();
     await wrapper.find('[data-testid="mcp-resilience"]').trigger('click');
     await flushPromises();
-    const drawerEl = document.querySelector(
-      '[data-testid="mcp-resilience-drawer"]',
-    ) as HTMLElement;
+    const drawerEl = document.querySelector('[data-testid="mcp-resilience-drawer"]') as HTMLElement;
     const findInDrawer = (testId: string) => {
       const el = drawerEl.querySelector(`[data-testid="${testId}"]`) as HTMLInputElement;
       expect(el, testId).toBeTruthy();
@@ -652,5 +653,58 @@ describe('NextAdminMcpServicesView', () => {
     expect(body.idempotencyConfirmed).toBe(true);
     expect(body.breakerEnabled).toBe(true);
     expect(body.breakerErrorStatusCodes).toContain(500);
+  });
+
+  it('F16: shows revision history and rolls back through the confirm dialog', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminListMcpTools.mockResolvedValue([tool()]);
+    const rev1 = {
+      id: 'r1',
+      revision: 1,
+      description: '查询订单',
+      method: 'GET',
+      path: '/orders/{id}',
+      createdAt: '2026-09-01T00:00:00Z',
+      activatedAt: '2026-09-01T00:00:01Z',
+    };
+    const rev2 = {
+      id: 'r2',
+      revision: 2,
+      description: '查询订单 v2',
+      method: 'POST',
+      path: '/orders/v2/{id}',
+      createdAt: '2026-09-02T00:00:00Z',
+      activatedAt: null,
+    };
+    mockApi.adminListToolRevisions.mockResolvedValue([rev2, rev1]);
+    mockApi.adminActivateToolRevision.mockResolvedValue(rev1);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-tools"]').trigger('click');
+    await flushPromises();
+    (
+      document.querySelector('[data-testid="mcp-tool-revisions-open"]') as HTMLButtonElement
+    ).click();
+    await flushPromises();
+
+    const dialog = document.querySelector('[data-testid="mcp-tool-revisions-dialog"]');
+    expect(dialog, 'revisions dialog should open').toBeTruthy();
+    expect(dialog!.textContent).toContain('#2');
+    expect(dialog!.textContent).toContain('已生效');
+    expect(dialog!.textContent).toContain('#1');
+    expect(dialog!.textContent).toContain('历史');
+
+    (document.querySelector('[data-testid="mcp-rev-rollback-2"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const buttons = Array.from(document.body.querySelectorAll('button')).filter(
+      (b) => b.textContent?.trim() === '回滚',
+    );
+    expect(buttons.length).toBeGreaterThan(0);
+    buttons[buttons.length - 1].click();
+    await flushPromises();
+
+    expect(mockApi.adminActivateToolRevision).toHaveBeenCalledWith('m1', 't1', 2);
+    expect(toastState.items.some((item) => item.message?.includes('已回滚到修订 #2'))).toBe(true);
   });
 });

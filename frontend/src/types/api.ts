@@ -171,6 +171,16 @@ export interface UsageDeletionRequest {
   createdAt: string;
 }
 
+export interface McpToolRevisionRow {
+  id: string;
+  revision: number;
+  description?: string;
+  method: string;
+  path: string;
+  createdAt: string;
+  activatedAt?: string | null;
+}
+
 export type AlertRuleType =
   | 'USAGE_MISSING_RATE'
   | 'UPSTREAM_ERROR_RATE'
@@ -181,4 +191,3 @@ export type AlertRuleType =
   | 'MODEL_APPROVAL_SUBMITTED'
   | 'MODEL_APPROVAL_APPROVED'
   | 'MODEL_APPROVAL_REJECTED';
-
