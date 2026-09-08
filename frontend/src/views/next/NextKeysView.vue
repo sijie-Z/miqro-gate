@@ -1083,14 +1083,11 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
 .next-keys__onboard-steps strong {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  margin-right: var(--ui-space-2);
-  border-radius: 50%;
-  background: var(--ui-primary-soft);
+  margin-right: var(--ui-space-1);
   color: var(--ui-primary);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: var(--ui-line-height-base);
 }
 
 .next-keys__reveal-url {

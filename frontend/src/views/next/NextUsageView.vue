@@ -28,7 +28,7 @@ const pageSize = ref(20);
 // ---- time range presets (server default when 0 — behaviour unchanged) ----
 const rangeDays = ref<number>(0);
 const windowOptions = [
-  { value: 0, label: '默认' },
+  { value: 0, label: '全部时间' },
   { value: 7, label: '近 7 天' },
   { value: 30, label: '近 30 天' },
   { value: 93, label: '近 93 天' },
