@@ -2,8 +2,12 @@
 
 > 给新 Claude Code 会话的启动指令与分阶段计划。新会话第一步：通读本文件 + `CLAUDE.md` + `docs/claude-code-execution-contract.md` + `docs/progress.md`（顶部 Current State 与"会话交接点"段）+ `docs/git-workflow.md`。
 >
-> **2026-09-07 状态注**：当前状态与待办以 `docs/progress.md` Current State 与「会话交接点」为准；本文件 09-03 版指令已被 09-06/07 轮次逐步执行/覆盖（设计师母版→Vben→权威稿→中文化；开放 API 批1/1b；issue 纪律）。继续执行前先读 progress.md 顶部。
->
+> **2026-09-08 换新（阶段收口）**：凭证治理控制台程序（开放管理 API 读/写面 +
+> 控制台打磨 + 预发布 rc.1-rc.4）已完成并收口。**下一阶段 = 平台中间件 P0**
+> （platform-middleware-roadmap）：F32 平台用户同步 / F33 OAuth 确权（前置=leader 接口
+> 形态，需 ADR）、#211 真机冒烟（等凭证）、F60 批 2 v2（Virtual Key 委托创建）、
+> codegen 迁移（F09 候选，后端契约建模先行）、usage 视觉 NIT（token 决策后）。
+> 状态与交接始终以 `docs/progress.md` 为准。>
 > 创建时间：2026-09-03。创建人：上一会话（用户授权连续执行；用户明确"token 不敏感、不太在意工作量、会让我一直做"，故计划按可连续执行的分阶段 Goal 组织，每阶段独立验收、独立 checkpoint、可随时停）。
 
 ## 0. 用户交给下一会话的总体命令（原话要点）

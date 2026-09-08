@@ -10,6 +10,20 @@
 - Goal status: `IN_PROGRESS`（develop 已至 #218 + 本轮 rc.2 收口。09-07 全量并入：#198-#200 开放 API 批1 → #204 批1b 读面+会话硬化（含批1 机器通道被 SessionFilter 前置拦截的修复）→ #209 issue 纪律 → #212 登录打磨 → #214 登录中文化（owner：中文产品，覆盖 #194/#196「EN 按稿」）→ #216 backlog 卫生（F59→F60；F34/留痕校正 DONE）→ #218 F01 核对 DONE + 大厂对照入档。pre-release 0.1.0-rc.2 已打标并推送。**待办：Q4 真机与 F53 真实凭证（#211 BLOCKED）、F32 平台用户同步/OAuth（leader 接口形态）、F60 批 2 v2（Virtual Key 委托创建）、视觉深打磨 #244**）
 - Last updated: `2026-09-07 CST`
 
+## 会话交接点 2026-09-08（晚，阶段收口：F60 程序全链 + 控制台打磨）
+
+- **F60 开放管理 API 全链交付**：#200 批1 → #204 批1b 读面 → #251 写面 v1（ADR-0016
+  Accepted A+C：告警/Webhook 机器 CRUD + 导出委托=发行管理员）→ 批 2 契约与示例
+  （scripts/open-api-examples/，curl+Python+最小权限 README）→ OpenAPI 基线/前端类型
+  同步 → rc.1..rc.4（各带中文 Release）。
+- **控制台打磨**：视觉轮基线 keys 8.5/usage 7.5/overview 7.6→7.5 区；#254 总览收口
+  （货币层级/空态居中/空格规范）；usage 横幅与卡片 padding NIT 属设计 token 决策，记档。
+- **盘点封存**：#246 codegen 全量迁移→DEFERRED（109 schema 中 25 个手写类型 0 覆盖，
+  迁移前置=后端契约建模，F09 发布前候选）；#245 告警接线（全局饱和承载口径）待裁决；
+  #211 真机凭证 BLOCKED；F60 批 2 v2（Virtual Key 委托创建）待评估。
+- **进入下一阶段**：平台中间件 P0（platform-middleware-roadmap）——F32 平台用户同步/
+  OAuth（等 leader 接口形态）、真机冒烟、F60v2、codegen；详见 NEXT_SESSION_PLAN 新计划。
+
 ## 会话交接点 2026-09-08（rc.2→rc.3：功能与 UI 收尾七 PR）
 
 - **#225 导出口径列 + Webhook 成功率卡**、**#226 codegen 漂移修复**、**#228 F16 工具版本管理(V33)**、
