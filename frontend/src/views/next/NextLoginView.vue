@@ -278,7 +278,7 @@ function renderError(error: unknown, fallback: string) {
 
         <form class="auth-form" novalidate @submit.prevent="submit">
           <div class="auth-field">
-            <span class="auth-label">{{ mode === 'login' ? '账号 / 邮箱' : '账号' }}</span>
+            <span class="auth-label">{{ mode === 'login' ? '账号/邮箱' : '账号' }}</span>
             <div class="auth-input">
               <UiInput
                 v-model="username"
@@ -316,7 +316,7 @@ function renderError(error: unknown, fallback: string) {
                 class="text-link"
                 @click="onForgot"
               >
-                Forgot password?
+                忘记密码？
               </button>
             </span>
             <div class="auth-input">
@@ -353,9 +353,6 @@ function renderError(error: unknown, fallback: string) {
                   </button>
                 </template>
               </UiInput>
-            </div>
-            <div v-if="mode === 'login'" class="password-help">
-              <button type="button" class="text-link" @click="onForgot">忘记密码？</button>
             </div>
           </div>
 
