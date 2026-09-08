@@ -6,9 +6,26 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `会话执行 2026-09-07（开放 API 批1 + 设计师 UI + 文档收口；pre-release 评估）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS`（develop 已至 #218 + 本轮 rc.2 收口。09-07 全量并入：#198-#200 开放 API 批1 → #204 批1b 读面+会话硬化（含批1 机器通道被 SessionFilter 前置拦截的修复）→ #209 issue 纪律 → #212 登录打磨 → #214 登录中文化（owner：中文产品，覆盖 #194/#196「EN 按稿」）→ #216 backlog 卫生（F59→F60；F34/留痕校正 DONE）→ #218 F01 核对 DONE + 大厂对照入档。pre-release 0.1.0-rc.2 已打标并推送。**待办：Q4 真机与 F53 真实凭证（#211 BLOCKED）、F32 平台用户同步/OAuth（leader 接口形态）、F60 批 2 v2（Virtual Key 委托创建）、视觉深打磨 #244**）
-- Last updated: `2026-09-07 CST`
+- Current goal: `2026-09-09 自主夜轮（F60 批 2 v2 委托建钥 + codegen 第一步）` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS`（develop @ 18bd061 = #268 + #269 已合。本轮交付见下方
+  「2026-09-09」交接点；**待办：#211 真机凭证（BLOCKED）、#245 告警接线裁决（leader）、
+  F32/F33 平台接口（BLOCKED）、#246 codegen 剩余手写类型、F60 批 3 治理可选**）
+- Last updated: `2026-09-09 CST`
+
+## 会话交接点 2026-09-09（夜，自主轮：F60 批 2 v2 + codegen 第一步 + 例集补段）
+
+- **F60 批 2 v2 Virtual Key 委托创建（#268→#263，owner 圈定案 1「自己看着做、边界不能越过」）**：
+  `POST/GET /api/v1/admin-api/virtual-keys`——机器密钥代**目标用户**建钥，成员/授权校验链按目标执行
+  （1:1 归属不变）；委托人=发行管理员且现行须 SYSTEM_ADMIN（403 `DELEGATION_FORBIDDEN`），目标
+  租户外 404 / 停用 409；审计 actor=委托人 + change_summary `targetUserId`（双元可溯）。ADR-0016
+  增补 + api-contract §9 + 示例集补委托建钥段（curl/Python/README）+ 基线/前端类型同步；
+  OpenAdminVirtualKeysApiIntegrationTest 6/6 + 自服务回归 8/8，后端全模块 verify 绿。
+- **codegen 第一步（#269→#265，方案 B 注解显式 content）**：/auth/* 五个端点成功体 schema 化
+  （login/bootstrap/register/me/csrf，application/json）——auth 信封不再是 OpenAPI 盲区；
+  FE LoginResponse/UserResponse 手写 interface → generated-api hub 别名，消费方换源；
+  typecheck/vitest 163/163 + 守卫绿；logout/password 的 message 体保持不建模（非本块范围）。
+- **待办延续**：#211 真机凭证、#245 告警接线裁决、F32/F33 平台接口（BLOCKED）、#246 codegen
+  剩余手写类型按 hub 顺序逐页小 PR、F60 批 3 治理可选、文档/backlog 同步见下。
 
 ## 会话交接点 2026-09-08（晚，阶段收口：F60 程序全链 + 控制台打磨）
 

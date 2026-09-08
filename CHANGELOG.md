@@ -4,6 +4,14 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
+### 2026-09-09
+- **F60 批 2 v2 Virtual Key 委托创建（#268，#263）**：机器密钥代指定用户建钥——案 1 语义
+  （钥归属目标、成员校验按目标执行、SYSTEM_ADMIN 目标豁免；委托人须现行 SYSTEM_ADMIN），
+  审计 actor=委托人+summary targetUserId；ADR-0016 增补、api-contract §9、示例集补委托段；
+  集成 6/6 + 自服务回归 8/8。
+- **codegen 第一步（#269，#265，方案 B）**：/auth/* 成功体 @ApiResponse 显式 content schema
+  （auth 信封出盲区）；FE LoginResponse/UserResponse 迁 generated-api hub。
+
 ### 2026-09-07
 - **平台 OIDC + rc.6（2026-09-08）**：平台 OIDC 登录（ADR-0017，#258，授权码 RP+映射/自动建号，等平台 client）；平台申请单（#260）；usage 空态合计行微修（#262）；rc.6 tag/Release。F60 v2 委托建钥设计稿（#264）待圈案 1/案 2（#263）。
 - **F60 写面 v1 + 批 2 契约/示例 + rc.4（2026-09-08）**：ADR-0016 Accepted(A+C)——开放面告警规则/Webhook 全生命周期机器写(C)、导出创建委托=发行管理员(A,ISSUER_ATTR)、机器通道 CSRF 豁免语义;curl/Python 示例集与最小权限建议(scripts/open-api-examples/);OpenAPI 基线再生并同步前端类型;tag 0.1.0-rc.4 + 中文 Release。
