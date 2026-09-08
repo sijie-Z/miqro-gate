@@ -8,8 +8,8 @@
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiStatusBadge, UiTable } from '@/ui';
-import type {ProviderProductView} from '@/types/api';
+import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
+import type { ModelCatalogRow, ProviderProductView } from '@/types/api';
 
 const products = ref<ProviderProductView[]>([]);
 const loading = ref(true);
@@ -23,6 +23,7 @@ const columns = [
   { key: 'baseUrl', title: 'Base URL', minWidth: '220px' },
   { key: 'implementationStatus', title: '实现状态', width: '130px' },
   { key: 'balanceAuthority', title: '余额来源', width: '120px' },
+  { key: 'actions', title: '操作', width: '150px' },
 ];
 
 function chipLetter(name: string): string {
@@ -81,6 +82,73 @@ function balanceLabel(authority: string): string {
       return '不可用';
     default:
       return authority;
+  }
+}
+
+// F18 model-catalog maintenance (manual entry fallback)
+const modelsProduct = ref<ProviderProductView | null>(null);
+const modelsVisible = ref(false);
+const models = ref<ModelCatalogRow[]>([]);
+const modelsLoading = ref(false);
+const modelsError = ref('');
+const modelForm = ref({ modelId: '', displayName: '' });
+const modelSaving = ref(false);
+const modelError = ref('');
+
+async function openModels(product: ProviderProductView) {
+  modelsProduct.value = product;
+  models.value = [];
+  modelsError.value = '';
+  modelForm.value = { modelId: '', displayName: '' };
+  modelError.value = '';
+  modelsVisible.value = true;
+  modelsLoading.value = true;
+  try {
+    models.value = await api.adminListModels(product.id);
+  } catch (error) {
+    modelsError.value = error instanceof ApiError ? error.message : '加载模型目录失败。';
+  } finally {
+    modelsLoading.value = false;
+  }
+}
+
+async function addManualModel() {
+  if (!modelsProduct.value) {
+    return;
+  }
+  const modelId = modelForm.value.modelId.trim();
+  if (!modelId) {
+    modelError.value = '模型 ID 必填。';
+    return;
+  }
+  modelSaving.value = true;
+  modelError.value = '';
+  try {
+    await api.adminCreateModel(modelsProduct.value.id, {
+      modelId,
+      displayName: modelForm.value.displayName.trim() || undefined,
+    });
+    modelForm.value = { modelId: '', displayName: '' };
+    toast.success('人工模型已录入');
+    models.value = await api.adminListModels(modelsProduct.value.id);
+  } catch (error) {
+    modelError.value = error instanceof ApiError ? error.message : '录入失败，请稍后重试。';
+  } finally {
+    modelSaving.value = false;
+  }
+}
+
+async function removeManualModel(row: ModelCatalogRow) {
+  try {
+    await api.adminDeleteModel(row.id);
+    toast.success(`已删除 ${row.modelId}`);
+    if (modelsProduct.value) {
+      models.value = await api.adminListModels(modelsProduct.value.id);
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      toast.error(error.message);
+    }
   }
 }
 
@@ -164,8 +232,79 @@ onMounted(load);
             balanceLabel((row as ProviderProductView).balanceAuthority)
           }}</span>
         </template>
+        <template #actions="{ row }">
+          <UiButton
+            variant="ghost"
+            size="sm"
+            data-testid="product-models-open"
+            @click="openModels(row as ProviderProductView)"
+            >模型目录</UiButton
+          >
+        </template>
       </UiTable>
     </section>
+
+    <!-- F18 model catalog (manual entry fallback) -->
+    <UiDialog
+      :open="modelsVisible"
+      :title="modelsProduct ? `模型目录 · ${modelsProduct.displayName}` : '模型目录'"
+      width="620px"
+      data-testid="product-models-dialog"
+      @update:open="modelsVisible = false"
+    >
+      <div v-if="modelsError" class="ui-alert ui-alert--error">{{ modelsError }}</div>
+      <div v-if="modelsLoading" class="ui-panel-sub">加载中…</div>
+      <div v-else class="next-providers__model-list" data-testid="product-models-list">
+        <div v-for="m in models" :key="m.id" class="next-providers__model-row">
+          <div class="next-providers__model-info">
+            <span class="ui-mono">{{ m.modelId }}</span>
+            <span class="next-providers__balance">{{ m.displayName || '—' }}</span>
+          </div>
+          <UiStatusBadge
+            :tone="m.source === 'MANUAL' ? 'warning' : 'success'"
+            :label="m.source === 'MANUAL' ? '人工' : '官方'"
+          />
+          <UiButton
+            v-if="m.source === 'MANUAL'"
+            variant="ghost"
+            size="sm"
+            class="next-providers__danger"
+            :data-testid="`product-model-delete-${m.modelId}`"
+            @click="removeManualModel(m)"
+            >删除</UiButton
+          >
+        </div>
+        <p v-if="!models.length" class="next-providers__empty">
+          暂无目录模型。探测失败时可在此手工补录。
+        </p>
+      </div>
+      <div class="next-providers__model-form" data-testid="product-models-form">
+        <div v-if="modelError" class="ui-alert ui-alert--error">{{ modelError }}</div>
+        <div class="next-providers__model-form-row">
+          <UiInput
+            v-model="modelForm.modelId"
+            label="模型 ID"
+            placeholder="manual-fallback-model"
+            data-testid="product-models-id"
+          />
+          <UiInput
+            v-model="modelForm.displayName"
+            label="显示名（可选）"
+            data-testid="product-models-name"
+          />
+          <UiButton
+            variant="secondary"
+            :loading="modelSaving"
+            data-testid="product-models-add"
+            @click="addManualModel"
+            >录入人工模型</UiButton
+          >
+        </div>
+      </div>
+      <template #footer>
+        <UiButton variant="secondary" @click="modelsVisible = false">关闭</UiButton>
+      </template>
+    </UiDialog>
   </div>
 </template>
 
@@ -200,5 +339,36 @@ onMounted(load);
 .next-providers__balance {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
+}
+
+.next-providers__model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.next-providers__model-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.next-providers__model-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.next-providers__model-form-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.next-providers__danger {
+  color: var(--ui-danger-fg);
+}
+.next-providers__empty {
+  color: var(--ui-foreground-faint);
+  font-size: var(--ui-font-size-sm);
 }
 </style>

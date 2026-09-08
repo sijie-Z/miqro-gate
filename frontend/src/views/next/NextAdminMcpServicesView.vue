@@ -103,6 +103,20 @@ const revisions = ref<McpToolRevisionRow[]>([]);
 const revisionsLoading = ref(false);
 const revisionsError = ref('');
 const toolForm = ref({ toolName: '', description: '', method: 'GET', path: '' });
+
+// F16 edit-and-publish dialog
+const editTool = ref<McpToolView | null>(null);
+const editVisible = ref(false);
+const editForm = ref({ description: '', method: 'GET', path: '' });
+const editSaving = ref(false);
+const editError = ref('');
+
+// F17 OpenAPI batch import dialog
+const importVisible = ref(false);
+const importSpec = ref('');
+const importBusy = ref(false);
+const importError = ref('');
+const importResult = ref<import('@/types/api').ToolImportResult | null>(null);
 const toolSaving = ref(false);
 const toolFormError = ref('');
 const toolCreating = ref(false);
@@ -367,6 +381,79 @@ async function rollbackToolRevision(tool: McpToolView, revision: McpToolRevision
       await refreshTools();
     },
   };
+}
+
+async function openEditTool(tool: McpToolView) {
+  editTool.value = tool;
+  editForm.value = {
+    description: tool.description ?? '',
+    method: tool.method ?? 'GET',
+    path: tool.path ?? '',
+  };
+  editError.value = '';
+  editVisible.value = true;
+}
+
+async function publishToolEdit() {
+  if (!toolsService.value || !editTool.value) {
+    return;
+  }
+  const path = editForm.value.path.trim();
+  if (!path.startsWith('/')) {
+    editError.value = '路径必须以 / 开头。';
+    return;
+  }
+  editSaving.value = true;
+  editError.value = '';
+  try {
+    const revision = await api.adminPublishToolRevision(toolsService.value.id, editTool.value.id, {
+      description: editForm.value.description.trim() || undefined,
+      method: editForm.value.method,
+      path,
+    });
+    toast.success(`已发布修订 #${revision.revision}`);
+    editVisible.value = false;
+    await refreshRevisions();
+    await refreshTools();
+  } catch (error) {
+    editError.value = errorText(error, '发布失败，请稍后重试。');
+  } finally {
+    editSaving.value = false;
+  }
+}
+
+async function openImportDialog() {
+  importSpec.value = '';
+  importError.value = '';
+  importResult.value = null;
+  importVisible.value = true;
+}
+
+async function runImport() {
+  if (!toolsService.value) {
+    return;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(importSpec.value);
+  } catch {
+    importError.value = '不是合法的 JSON。';
+    return;
+  }
+  importBusy.value = true;
+  importError.value = '';
+  try {
+    const result = await api.adminImportMcpTools(toolsService.value.id, parsed);
+    importResult.value = result;
+    if (result.created.length > 0) {
+      toast.success(`已导入 ${result.created.length} 个工具`);
+    }
+    await refreshTools();
+  } catch (error) {
+    importError.value = errorText(error, '导入失败，请稍后重试。');
+  } finally {
+    importBusy.value = false;
+  }
 }
 
 async function setToolStatus(tool: McpToolView, status: string) {
@@ -1127,6 +1214,13 @@ async function saveResilience() {
               >版本</UiButton
             >
             <UiButton
+              variant="ghost"
+              size="sm"
+              data-testid="mcp-tool-edit-open"
+              @click="openEditTool(tool as McpToolView)"
+              >编辑</UiButton
+            >
+            <UiButton
               v-if="tool.status === 'ENABLED'"
               variant="ghost"
               size="sm"
@@ -1159,6 +1253,13 @@ async function saveResilience() {
           >
             {{ toolCreating ? '收起表单' : '新建工具' }}
           </UiButton>
+          <UiButton
+            variant="secondary"
+            size="sm"
+            data-testid="mcp-tool-import-open"
+            @click="openImportDialog"
+            >OpenAPI 导入</UiButton
+          >
           <div
             v-if="toolCreating"
             class="next-mcp__tool-create-form"
@@ -1255,6 +1356,89 @@ async function saveResilience() {
       </template>
       <template #footer>
         <UiButton variant="secondary" @click="revisionsVisible = false">关闭</UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- F16 edit-and-publish: snapshot the next revision -->
+    <UiDialog
+      :open="editVisible"
+      :title="editTool ? `编辑并发布 · ${editTool.toolName}` : '编辑并发布'"
+      width="560px"
+      data-testid="mcp-tool-edit-dialog"
+      @update:open="editVisible = false"
+    >
+      <div v-if="editError" class="ui-alert ui-alert--error">{{ editError }}</div>
+      <div class="next-mcp__tool-create-form">
+        <div class="next-mcp__row">
+          <UiSelect v-model="editForm.method" label="方法" :options="methodOptions" />
+          <UiInput
+            v-model="editForm.path"
+            label="路径"
+            required
+            placeholder="/orders/{id}"
+            data-testid="mcp-tool-edit-path"
+          />
+        </div>
+        <UiInput
+          v-model="editForm.description"
+          label="描述"
+          placeholder="工具用途说明"
+          data-testid="mcp-tool-edit-desc"
+        />
+        <p class="ui-field__hint">发布即生成新修订并切换生效版；历史修订可随时回滚。</p>
+      </div>
+      <template #footer>
+        <UiButton variant="ghost" @click="editVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="editSaving"
+          data-testid="mcp-tool-edit-submit"
+          @click="publishToolEdit"
+          >发布修订</UiButton
+        >
+      </template>
+    </UiDialog>
+
+    <!-- F17 OpenAPI batch import -->
+    <UiDialog
+      :open="importVisible"
+      :title="'OpenAPI 导入'"
+      width="640px"
+      data-testid="mcp-tool-import-dialog"
+      @update:open="importVisible = false"
+    >
+      <div v-if="importError" class="ui-alert ui-alert--error">{{ importError }}</div>
+      <textarea
+        v-model="importSpec"
+        class="next-mcp__import-spec"
+        rows="12"
+        placeholder='示例：{"openapi":"3.1.0","paths":{...}}'
+        data-testid="mcp-tool-import-spec"
+      />
+      <p class="ui-field__hint">
+        粘贴 OpenAPI JSON（paths
+        下每个受支持操作注册一个工具；重名/不可派生的操作会逐项跳过并报告，上限 100）。
+      </p>
+      <div v-if="importResult" class="next-mcp__import-result" data-testid="mcp-tool-import-result">
+        <strong
+          >导入完成：新建 {{ importResult.created.length }}，跳过
+          {{ importResult.skipped.length + importResult.parseSkips.length }}</strong
+        >
+        <ul v-if="importResult.skipped.length || importResult.parseSkips.length">
+          <li v-for="(s, idx) in [...importResult.skipped, ...importResult.parseSkips]" :key="idx">
+            {{ s.toolName || '（无法命名）' }} — {{ s.reason }}
+          </li>
+        </ul>
+      </div>
+      <template #footer>
+        <UiButton variant="ghost" @click="importVisible = false">关闭</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="importBusy"
+          data-testid="mcp-tool-import-submit"
+          @click="runImport"
+          >导入</UiButton
+        >
       </template>
     </UiDialog>
 
@@ -2352,5 +2536,39 @@ async function saveResilience() {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
   margin: 8px 0 0;
+}
+
+.next-mcp__import-spec {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid #d8dfeb;
+  border-radius: 8px;
+  font:
+    12px/1.6 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  color: #17213a;
+  resize: vertical;
+}
+.next-mcp__import-spec:focus {
+  outline: none;
+  border-color: #7f8aff;
+  box-shadow: 0 0 0 3px rgba(107, 118, 255, 0.1);
+}
+.next-mcp__import-result {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e3e9f4;
+  border-radius: 8px;
+  background: #f8faff;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.next-mcp__import-result ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: #5b6b85;
 }
 </style>

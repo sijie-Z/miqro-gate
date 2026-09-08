@@ -181,6 +181,30 @@ export interface McpToolRevisionRow {
   activatedAt?: string | null;
 }
 
+export interface ModelCatalogRow {
+  id: string;
+  providerProductId: string;
+  modelId: string;
+  displayName?: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  status: string;
+  source: 'OFFICIAL' | 'MANUAL' | string;
+  version: number;
+  updatedAt: string;
+}
+
+export interface ToolImportSkip {
+  toolName?: string;
+  reason: string;
+}
+
+export interface ToolImportResult {
+  created: Array<{ toolName?: string; method?: string; path?: string }>;
+  skipped: ToolImportSkip[];
+  parseSkips: ToolImportSkip[];
+}
+
 export type AlertRuleType =
   | 'USAGE_MISSING_RATE'
   | 'UPSTREAM_ERROR_RATE'
