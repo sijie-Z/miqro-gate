@@ -7,8 +7,63 @@
   put,
   uploadBytes,
 } from './http';
-import type {CreateApiConsumerResponse, AdminUser, McpAclMode, UsageDeletionRequest, Grant, LoginResponse, MemberView, ModelApprovalStatus, UserProjectMembership, ProviderProductView, UsageGroupBy, UserCreatedResponse, UserResponse, UserRole, UserStatusValue} from '@/types/api';
-import type { AgentView, AlertRule, ApiConsumerView, AuditEventView, BudgetView, ConfigEntryView, CreateVirtualKeyResponse, CredentialDetailView, CredentialView, ExportTask, InternalServiceView, McpAccessView, McpRouteRule, McpServiceView, McpToolView, MeGrantsResponse, ModelApprovalPage, ModelApprovalView, PriceSnapshotView, Project, Provider, QuotaDefaultTemplateView, QuotaRuleView, RoiReportView, SeatView, SkillView, SubscriptionView, Team, UpsertMcpRouteRuleRequest, UsageRecordPage, UsageSummary, ValidateCredentialResponse, VirtualKeyView, WebhookDelivery, WebhookEndpointView , McpAccessLogEntry , McpResiliencePolicy } from '@/types/generated-api';
+import type {
+  CreateApiConsumerResponse,
+  AdminUser,
+  McpAclMode,
+  UsageDeletionRequest,
+  Grant,
+  LoginResponse,
+  MemberView,
+  ModelApprovalStatus,
+  UserProjectMembership,
+  ProviderProductView,
+  UsageGroupBy,
+  UserCreatedResponse,
+  UserResponse,
+  UserRole,
+  UserStatusValue,
+  McpToolRevisionRow,
+} from '@/types/api';
+import type {
+  AgentView,
+  AlertRule,
+  ApiConsumerView,
+  AuditEventView,
+  BudgetView,
+  ConfigEntryView,
+  CreateVirtualKeyResponse,
+  CredentialDetailView,
+  CredentialView,
+  ExportTask,
+  InternalServiceView,
+  McpAccessView,
+  McpRouteRule,
+  McpServiceView,
+  McpToolView,
+  MeGrantsResponse,
+  ModelApprovalPage,
+  ModelApprovalView,
+  PriceSnapshotView,
+  Project,
+  Provider,
+  QuotaDefaultTemplateView,
+  QuotaRuleView,
+  RoiReportView,
+  SeatView,
+  SkillView,
+  SubscriptionView,
+  Team,
+  UpsertMcpRouteRuleRequest,
+  UsageRecordPage,
+  UsageSummary,
+  ValidateCredentialResponse,
+  VirtualKeyView,
+  WebhookDelivery,
+  WebhookEndpointView,
+  McpAccessLogEntry,
+  McpResiliencePolicy,
+} from '@/types/generated-api';
 import type { components } from '@/types/generated';
 
 // Stage-2 codegen migration (batch 1): request DTOs now alias the OpenAPI
@@ -282,7 +337,10 @@ export function getRoiReport(from?: string, to?: string): Promise<RoiReportView>
 
 // ---- MCP two-level access control (Tencent doc 134890) ----
 
-export function listMcpAccessLogs(params?: { service?: string; consumer?: string }): Promise<McpAccessLogEntry[]> {
+export function listMcpAccessLogs(params?: {
+  service?: string;
+  consumer?: string;
+}): Promise<McpAccessLogEntry[]> {
   const query: Record<string, string> = {};
   if (params?.service) query.service = params.service;
   if (params?.consumer) query.consumer = params.consumer;
@@ -602,6 +660,27 @@ export function adminSetMcpToolStatus(
 ): Promise<McpToolView> {
   return post<McpToolView>(
     `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/status?status=${status}`,
+  );
+}
+
+// ---- F16 tool definition versioning (V33) ----
+
+export function adminListToolRevisions(
+  serviceId: string,
+  toolId: string,
+): Promise<McpToolRevisionRow[]> {
+  return get<McpToolRevisionRow[]>(
+    `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/revisions`,
+  );
+}
+
+export function adminActivateToolRevision(
+  serviceId: string,
+  toolId: string,
+  revision: number,
+): Promise<McpToolRevisionRow> {
+  return post<McpToolRevisionRow>(
+    `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/revisions/${revision}/activate`,
   );
 }
 

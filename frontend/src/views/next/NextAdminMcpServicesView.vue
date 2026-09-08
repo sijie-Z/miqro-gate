@@ -21,9 +21,15 @@ import {
   UiTable,
   toast,
 } from '@/ui';
-import type {McpAclMode} from '@/types/api';
+import type { McpAclMode, McpToolRevisionRow } from '@/types/api';
 import type { McpRouteRule, UpsertMcpRouteRuleRequest } from '@/types/generated-api';
-import type { ApiConsumerView, McpAccessView, McpServiceView, McpToolView , McpResiliencePolicy } from '@/types/generated-api';
+import type {
+  ApiConsumerView,
+  McpAccessView,
+  McpServiceView,
+  McpToolView,
+  McpResiliencePolicy,
+} from '@/types/generated-api';
 import type { McpResilienceDraft } from '@/api';
 
 const services = ref<McpServiceView[]>([]);
@@ -89,6 +95,13 @@ const toolsVisible = ref(false);
 const tools = ref<McpToolView[]>([]);
 const toolsLoading = ref(false);
 const toolsError = ref('');
+
+// F16 revision history / rollback drawer
+const revisionsTool = ref<McpToolView | null>(null);
+const revisionsVisible = ref(false);
+const revisions = ref<McpToolRevisionRow[]>([]);
+const revisionsLoading = ref(false);
+const revisionsError = ref('');
 const toolForm = ref({ toolName: '', description: '', method: 'GET', path: '' });
 const toolSaving = ref(false);
 const toolFormError = ref('');
@@ -310,6 +323,50 @@ async function createTool() {
   } finally {
     toolSaving.value = false;
   }
+}
+
+async function openToolRevisions(tool: McpToolView) {
+  if (!toolsService.value) {
+    return;
+  }
+  revisionsTool.value = tool;
+  revisions.value = [];
+  revisionsError.value = '';
+  revisionsVisible.value = true;
+  revisionsLoading.value = true;
+  try {
+    revisions.value = await api.adminListToolRevisions(toolsService.value.id, tool.id);
+  } catch (error) {
+    revisionsError.value = errorText(error, '加载版本历史失败。');
+  } finally {
+    revisionsLoading.value = false;
+  }
+}
+
+async function refreshRevisions() {
+  if (!toolsService.value || !revisionsTool.value) {
+    return;
+  }
+  revisions.value = await api.adminListToolRevisions(toolsService.value.id, revisionsTool.value.id);
+}
+
+async function rollbackToolRevision(tool: McpToolView, revision: McpToolRevisionRow) {
+  if (!toolsService.value) {
+    return;
+  }
+  const serviceId = toolsService.value.id;
+  confirmState.value = {
+    title: `回滚「${tool.toolName}」到修订 #${revision.revision}`,
+    body: '工具定义将切回该修订版本（不产生新版本号，历史保留）。确认回滚？',
+    confirmLabel: '回滚',
+    tone: 'primary',
+    run: async () => {
+      await api.adminActivateToolRevision(serviceId, tool.id, revision.revision);
+      toast.success(`已回滚到修订 #${revision.revision}`);
+      await refreshRevisions();
+      await refreshTools();
+    },
+  };
 }
 
 async function setToolStatus(tool: McpToolView, status: string) {
@@ -1063,6 +1120,13 @@ async function saveResilience() {
               :label="tool.status === 'ENABLED' ? '已启用' : '已禁用'"
             />
             <UiButton
+              variant="ghost"
+              size="sm"
+              data-testid="mcp-tool-revisions-open"
+              @click="openToolRevisions(tool as McpToolView)"
+              >版本</UiButton
+            >
+            <UiButton
               v-if="tool.status === 'ENABLED'"
               variant="ghost"
               size="sm"
@@ -1140,6 +1204,57 @@ async function saveResilience() {
       </template>
       <template #footer>
         <UiButton variant="secondary" @click="toolsVisible = false">关闭</UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- Tool revision history (F16): snapshot list with idempotent rollback -->
+    <UiDialog
+      :open="revisionsVisible"
+      :title="revisionsTool ? `版本历史 · ${revisionsTool.toolName}` : '版本历史'"
+      width="640px"
+      data-testid="mcp-tool-revisions-dialog"
+      @update:open="revisionsVisible = false"
+    >
+      <div v-if="revisionsError" class="ui-alert ui-alert--error">{{ revisionsError }}</div>
+      <div v-if="revisionsLoading" class="next-mcp__tools-loading">
+        <div v-for="n in 3" :key="n" class="ui-skeleton next-mcp__tool-skeleton">&nbsp;</div>
+      </div>
+      <template v-else>
+        <div
+          v-if="revisions.length"
+          class="next-mcp__tool-list"
+          data-testid="mcp-tool-revisions-list"
+        >
+          <div
+            v-for="rev in revisions"
+            :key="rev.revision"
+            class="next-mcp__tool-row"
+            :data-revision="rev.revision"
+          >
+            <div class="next-mcp__tool-info">
+              <span class="ui-mono next-mcp__tool-name">#{{ rev.revision }}</span>
+              <span class="next-mcp__tool-desc">{{ rev.description || '—' }}</span>
+              <span class="ui-mono next-mcp__tool-path">{{ rev.method }} {{ rev.path }}</span>
+            </div>
+            <UiStatusBadge
+              :tone="rev.activatedAt ? 'success' : 'neutral'"
+              :label="rev.activatedAt ? '已生效' : '历史'"
+            />
+            <span class="next-mcp__tool-time">{{ formatTime(rev.createdAt ?? null) }}</span>
+            <UiButton
+              v-if="!rev.activatedAt"
+              variant="ghost"
+              size="sm"
+              :data-testid="`mcp-rev-rollback-${rev.revision}`"
+              @click="rollbackToolRevision(revisionsTool as McpToolView, rev)"
+              >回滚</UiButton
+            >
+          </div>
+        </div>
+        <p v-else class="next-mcp__tool-empty">该工具还没有修订记录。</p>
+      </template>
+      <template #footer>
+        <UiButton variant="secondary" @click="revisionsVisible = false">关闭</UiButton>
       </template>
     </UiDialog>
 
@@ -1594,107 +1709,176 @@ async function saveResilience() {
     </UiDialog>
   </div>
 
-    <!-- F12/F13 resilience configuration -->
-    <UiDrawer
-      :open="resilienceOpen"
-      :title="resilienceService ? `韧性配置 · ${resilienceService.name}` : '韧性配置'"
-      width="640px"
-      data-testid="mcp-resilience-drawer"
-      @update:open="resilienceOpen = false"
-    >
-      <div v-if="resilienceError" class="ui-alert ui-alert--error" data-testid="mcp-resilience-error">
-        {{ resilienceError }}
-      </div>
-      <div v-if="resilienceLoading" class="next-mcp__tools-loading">
-        <div v-for="n in 3" :key="n" class="ui-skeleton">&nbsp;</div>
-      </div>
-      <template v-else-if="resilience">
-        <div class="next-mcp__dialog-form">
-          <div class="next-mcp__resilience-group">
-            <h3 class="next-mcp__resilience-title">重试（F12 · 默认关闭）</h3>
+  <!-- F12/F13 resilience configuration -->
+  <UiDrawer
+    :open="resilienceOpen"
+    :title="resilienceService ? `韧性配置 · ${resilienceService.name}` : '韧性配置'"
+    width="640px"
+    data-testid="mcp-resilience-drawer"
+    @update:open="resilienceOpen = false"
+  >
+    <div v-if="resilienceError" class="ui-alert ui-alert--error" data-testid="mcp-resilience-error">
+      {{ resilienceError }}
+    </div>
+    <div v-if="resilienceLoading" class="next-mcp__tools-loading">
+      <div v-for="n in 3" :key="n" class="ui-skeleton">&nbsp;</div>
+    </div>
+    <template v-else-if="resilience">
+      <div class="next-mcp__dialog-form">
+        <div class="next-mcp__resilience-group">
+          <h3 class="next-mcp__resilience-title">重试（F12 · 默认关闭）</h3>
+          <label class="next-mcp__checkbox">
+            <input
+              v-model="rForm.retryEnabled"
+              type="checkbox"
+              data-testid="mcp-res-retry-enabled"
+            />
+            <span>启用重试（仅首字节前；默认关闭）</span>
+          </label>
+          <template v-if="rForm.retryEnabled">
+            <div class="next-mcp__row">
+              <UiInput
+                v-model="rForm.retryMax"
+                label="重试次数（1–5）"
+                data-testid="mcp-res-retry-max"
+              />
+            </div>
+            <div class="next-mcp__resilience-checks">
+              <span class="next-mcp__resilience-label">重试条件（至少一项）</span>
+              <label
+                v-for="(label, condition) in RETRY_CONDITION_LABELS"
+                :key="condition"
+                class="next-mcp__checkbox"
+              >
+                <input
+                  type="checkbox"
+                  :checked="rForm.retryConditions.includes(condition)"
+                  :data-testid="`mcp-res-retry-${condition.toLowerCase()}`"
+                  @change="toggleRetryCondition(condition)"
+                />
+                <span>{{ label }}</span>
+              </label>
+            </div>
             <label class="next-mcp__checkbox">
-              <input v-model="rForm.retryEnabled" type="checkbox" data-testid="mcp-res-retry-enabled" />
-              <span>启用重试（仅首字节前；默认关闭）</span>
+              <input
+                v-model="rForm.idempotencyConfirmed"
+                type="checkbox"
+                data-testid="mcp-res-idempotent"
+              />
+              <span>已确认后端接口幂等（POST/PUT/PATCH 工具可重试）</span>
             </label>
-            <template v-if="rForm.retryEnabled">
-              <div class="next-mcp__row">
-                <UiInput v-model="rForm.retryMax" label="重试次数（1–5）" data-testid="mcp-res-retry-max" />
-              </div>
-              <div class="next-mcp__resilience-checks">
-                <span class="next-mcp__resilience-label">重试条件（至少一项）</span>
-                <label v-for="(label, condition) in RETRY_CONDITION_LABELS" :key="condition" class="next-mcp__checkbox">
-                  <input
-                    type="checkbox"
-                    :checked="rForm.retryConditions.includes(condition)"
-                    :data-testid="`mcp-res-retry-${condition.toLowerCase()}`"
-                    @change="toggleRetryCondition(condition)"
-                  />
-                  <span>{{ label }}</span>
-                </label>
-              </div>
-              <label class="next-mcp__checkbox">
-                <input v-model="rForm.idempotencyConfirmed" type="checkbox" data-testid="mcp-res-idempotent" />
-                <span>已确认后端接口幂等（POST/PUT/PATCH 工具可重试）</span>
-              </label>
-            </template>
-          </div>
-
-          <div class="next-mcp__resilience-group">
-            <h3 class="next-mcp__resilience-title">熔断（F13 · 默认关闭）</h3>
-            <label class="next-mcp__checkbox">
-              <input v-model="rForm.breakerEnabled" type="checkbox" data-testid="mcp-res-breaker-enabled" />
-              <span>启用熔断（三态状态机；429 需加入下方状态码）</span>
-            </label>
-            <template v-if="rForm.breakerEnabled">
-              <div class="next-mcp__row">
-                <UiInput v-model="rForm.breakerWindowSeconds" label="统计窗口（秒 1–60）" data-testid="mcp-res-window" />
-                <UiInput v-model="rForm.breakerMinRequests" label="最小请求数（1–100）" data-testid="mcp-res-minreq" />
-              </div>
-              <label class="next-mcp__checkbox">
-                <input v-model="rForm.breakerErrorEnabled" type="checkbox" data-testid="mcp-res-error-enabled" />
-                <span>错误比例触发</span>
-              </label>
-              <div class="next-mcp__row">
-                <UiInput v-model="rForm.breakerErrorRatio" label="错误比例阈值 %（1–100）" data-testid="mcp-res-error-ratio" />
-                <UiInput v-model="rForm.breakerErrorStatusCodes" label="计入错误的状态码（CSV，≤32）" data-testid="mcp-res-codes" />
-              </div>
-              <label class="next-mcp__checkbox">
-                <input v-model="rForm.breakerSlowEnabled" type="checkbox" data-testid="mcp-res-slow-enabled" />
-                <span>慢调用触发</span>
-              </label>
-              <div v-if="rForm.breakerSlowEnabled" class="next-mcp__row">
-                <UiInput v-model="rForm.breakerSlowCallMs" label="慢调用阈值 ms（须小于服务超时）" data-testid="mcp-res-slow-ms" />
-                <UiInput v-model="rForm.breakerSlowRatio" label="慢调用比例 %（1–100）" data-testid="mcp-res-slow-ratio" />
-              </div>
-              <div class="next-mcp__row">
-                <UiInput v-model="rForm.breakerOpenSeconds" label="熔断时长（秒 5–600）" data-testid="mcp-res-open" />
-              </div>
-              <div class="next-mcp__row">
-                <UiInput v-model="rForm.breakerProbeCount" label="半开探测数（1–10）" data-testid="mcp-res-probes" />
-                <UiInput v-model="rForm.breakerProbeSuccess" label="恢复成功数" data-testid="mcp-res-probe-ok" />
-              </div>
-              <label class="next-mcp__checkbox">
-                <input v-model="rForm.breakerSkipRetry" type="checkbox" data-testid="mcp-res-skip-retry" />
-                <span>熔断期跳过重试</span>
-              </label>
-            </template>
-          </div>
-          <p class="next-mcp__resilience-hint">
-            修改经路由快照下发，约一个刷新周期（默认 30s）内生效。慢调用阈值校验、状态码范围等错误会在保存时提示。
-          </p>
+          </template>
         </div>
-      </template>
-      <template #footer>
-        <UiButton variant="ghost" @click="resilienceOpen = false">取消</UiButton>
-        <UiButton
-          variant="primary"
-          :loading="resilienceSaving"
-          data-testid="mcp-resilience-save"
-          @click="saveResilience"
-          >保存</UiButton
-        >
-      </template>
-    </UiDrawer>
+
+        <div class="next-mcp__resilience-group">
+          <h3 class="next-mcp__resilience-title">熔断（F13 · 默认关闭）</h3>
+          <label class="next-mcp__checkbox">
+            <input
+              v-model="rForm.breakerEnabled"
+              type="checkbox"
+              data-testid="mcp-res-breaker-enabled"
+            />
+            <span>启用熔断（三态状态机；429 需加入下方状态码）</span>
+          </label>
+          <template v-if="rForm.breakerEnabled">
+            <div class="next-mcp__row">
+              <UiInput
+                v-model="rForm.breakerWindowSeconds"
+                label="统计窗口（秒 1–60）"
+                data-testid="mcp-res-window"
+              />
+              <UiInput
+                v-model="rForm.breakerMinRequests"
+                label="最小请求数（1–100）"
+                data-testid="mcp-res-minreq"
+              />
+            </div>
+            <label class="next-mcp__checkbox">
+              <input
+                v-model="rForm.breakerErrorEnabled"
+                type="checkbox"
+                data-testid="mcp-res-error-enabled"
+              />
+              <span>错误比例触发</span>
+            </label>
+            <div class="next-mcp__row">
+              <UiInput
+                v-model="rForm.breakerErrorRatio"
+                label="错误比例阈值 %（1–100）"
+                data-testid="mcp-res-error-ratio"
+              />
+              <UiInput
+                v-model="rForm.breakerErrorStatusCodes"
+                label="计入错误的状态码（CSV，≤32）"
+                data-testid="mcp-res-codes"
+              />
+            </div>
+            <label class="next-mcp__checkbox">
+              <input
+                v-model="rForm.breakerSlowEnabled"
+                type="checkbox"
+                data-testid="mcp-res-slow-enabled"
+              />
+              <span>慢调用触发</span>
+            </label>
+            <div v-if="rForm.breakerSlowEnabled" class="next-mcp__row">
+              <UiInput
+                v-model="rForm.breakerSlowCallMs"
+                label="慢调用阈值 ms（须小于服务超时）"
+                data-testid="mcp-res-slow-ms"
+              />
+              <UiInput
+                v-model="rForm.breakerSlowRatio"
+                label="慢调用比例 %（1–100）"
+                data-testid="mcp-res-slow-ratio"
+              />
+            </div>
+            <div class="next-mcp__row">
+              <UiInput
+                v-model="rForm.breakerOpenSeconds"
+                label="熔断时长（秒 5–600）"
+                data-testid="mcp-res-open"
+              />
+            </div>
+            <div class="next-mcp__row">
+              <UiInput
+                v-model="rForm.breakerProbeCount"
+                label="半开探测数（1–10）"
+                data-testid="mcp-res-probes"
+              />
+              <UiInput
+                v-model="rForm.breakerProbeSuccess"
+                label="恢复成功数"
+                data-testid="mcp-res-probe-ok"
+              />
+            </div>
+            <label class="next-mcp__checkbox">
+              <input
+                v-model="rForm.breakerSkipRetry"
+                type="checkbox"
+                data-testid="mcp-res-skip-retry"
+              />
+              <span>熔断期跳过重试</span>
+            </label>
+          </template>
+        </div>
+        <p class="next-mcp__resilience-hint">
+          修改经路由快照下发，约一个刷新周期（默认
+          30s）内生效。慢调用阈值校验、状态码范围等错误会在保存时提示。
+        </p>
+      </div>
+    </template>
+    <template #footer>
+      <UiButton variant="ghost" @click="resilienceOpen = false">取消</UiButton>
+      <UiButton
+        variant="primary"
+        :loading="resilienceSaving"
+        data-testid="mcp-resilience-save"
+        @click="saveResilience"
+        >保存</UiButton
+      >
+    </template>
+  </UiDrawer>
 </template>
 
 <style scoped>
