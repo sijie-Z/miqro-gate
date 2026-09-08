@@ -1,8 +1,12 @@
-"""管理开放 API Python 示例（ADR-0015/0016,仅标准库）。
+"""管理开放 API Python 示例（ADR-0015/0016/0016 增补,仅标准库）。
 
 先由 SYSTEM_ADMIN 网页会话发行机器密钥,再设环境变量:
   export MQK_BASE=http://localhost:8080
   export MQK_TOKEN=mqk_admin_CHANGE_ME
+  export MQK_TARGET_USER_ID=...   # 委托建钥的目标用户(需为项目成员)
+  export MQK_PROJECT_ID=...       # 项目/产品/授权取自网页端或读面
+  export MQK_PRODUCT_ID=...
+  export MQK_GRANT_ID=...
   python example.py
 """
 import json
@@ -71,7 +75,28 @@ def main() -> None:
     )
     print(" task id:", task["id"], "created_by:", task["createdBy"])
 
-    print("== 6) 清理演示对象(规则/端点) ==")
+    print("== 6) 代指定用户建 Virtual Key(批2 v2:钥归属目标,secret 仅此一次) ==")
+    # 目标用户需是该项目的成员;委托人须为发行本密钥的 SYSTEM_ADMIN。
+    # 环境变量: MQK_TARGET_USER_ID / MQK_PROJECT_ID / MQK_PRODUCT_ID / MQK_GRANT_ID
+    vkey = call(
+        "POST",
+        "/api/v1/admin-api/virtual-keys",
+        {
+            "userId": os.environ["MQK_TARGET_USER_ID"],
+            "name": "ci-delegated",
+            "projectId": os.environ["MQK_PROJECT_ID"],
+            "providerProductId": os.environ["MQK_PRODUCT_ID"],
+            "credentialGrantId": os.environ["MQK_GRANT_ID"],
+            "purpose": "CLAUDE_CODE",
+        },
+    )
+    print(" vkey id:", vkey["id"], "| secret 仅此一次返回,展示:", vkey["display"])
+
+    print("== 7) 查该用户拥有的钥(无 secret) ==")
+    keys = call("GET", "/api/v1/admin-api/virtual-keys?userId=" + os.environ["MQK_TARGET_USER_ID"])
+    print(" count:", len(keys), "| first:", keys[0]["id"] if keys else "-")
+
+    print("== 8) 清理演示对象(规则/端点;Virtual Key 吊销走网页会话) ==")
     call("DELETE", f"/api/v1/admin-api/alert-rules/{rule['id']}")
     call("DELETE", f"/api/v1/admin-api/webhooks/{hook['id']}")
     print(" done")
