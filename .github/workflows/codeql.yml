@@ -3,7 +3,7 @@ name: CodeQL
 
 on:
   push:
-    branches: [main, develop, goal/*, feat/*, fix/*]
+    branches: [main, develop] # feature branches are analyzed via pull_request - no duplicate runs
   pull_request:
     branches: [main, develop]
   schedule:
