@@ -21,8 +21,8 @@
 | F04 | 用户自助配额可见性（个人看自己的配额规则水位） | progress 配额规则边界 | 清晰 | DONE（2026-09-03） | 无 | 交付见 progress「用户自助配额可见性」：`GET /api/v1/me/quota-rules`（只读本人 USER 规则 + 水位）+ 用量页「我的配额」面板 |
 | F05 | 管理门户 IP 白名单 | security §6；middleware 安全边界 | 清晰 | DONE（2026-09-03） | 无 | 交付见 progress「管理门户 IP 白名单」：admin-access 双配置（allowlist + trusted-proxies XFF 防伪造）、billing/bootstrap 豁免、IpCidrMatcher v4/v6；推理 API 来源 IP 限制为远期 F40 |
 | F06 | 过期导出/删除请求定时清理（GC） | progress G4.4 边界 | 清晰 | DONE（2026-09-03） | 无 | 交付见 progress「过期记录定时 GC」：@Scheduled 回收 SUCCEEDED 过窗导出（file_bytes 释放）与过期删除请求；EXECUTED/审计永久保留（G4.4 语义） |
-| F07 | 告警类型补齐（usage 队列饱和/解析失败/供应商错误/Plan 同步/磁盘等 → alert_rules 类型） | progress G4.5 风险；release-checklist §6.1 | 部分（多数类型定义清晰，数据源需接线） | SCAFFOLD | 各类型数据源接线 | 现有框架支持新增类型；先登记类型清单与数据源，逐类接线 |
-| F08 | 官方价格 24h 自动同步（source=OFFICIAL 自动化） | progress G7.2 风险 | 部分（依赖供应商官方价格源） | SCAFFOLD | 供应商价格源确认 | source=OFFICIAL 现为人工标记；无源则保持人工 |
+| F07 | 告警类型补齐（usage 队列饱和/解析失败/供应商错误/Plan 同步/磁盘等 → alert_rules 类型） | progress G4.5 风险；release-checklist §6.1 | 部分（多数类型定义清晰，数据源需接线） | SCAFFOLD |各类型数据源接线 **验收口径**：验收口径：配置各类型规则后,对应数据源事件能产出 alert_events 且去重/退避/投递同既有链路；至少 usage 队列饱和与解析失败两类先接（队列全局性需先定承载租户口径）。| 现有框架支持新增类型；先登记类型清单与数据源，逐类接线 |
+| F08 | 官方价格 24h 自动同步（source=OFFICIAL 自动化） | progress G7.2 风险 | 部分（依赖供应商官方价格源） | SCAFFOLD |供应商价格源确认 **验收口径**：验收口径：官方价源确认后,24h 定时拉取 → price_snapshot source=OFFICIAL 增量写入(与 MANUAL 并存,同模型同 type 冲突策略=保留 MANUAL 并提示)；失败留日志不静默。| source=OFFICIAL 现为人工标记；无源则保持人工 |
 | F09 | OpenAPI 3.1 生成 + CI 破坏性变更检查 | api-contract §8；release-checklist §0 | 清晰（规格已写死） | DONE（2026-09-03） | 无（发布前补项，本会话完成） | 交付见 progress「OpenAPI 3.1 生成」：springdoc `/v3/api-docs`（3.1.0）+ 鉴权 scheme 建模 + 基线 docs/openapi/openapi-3.1.json + CI 破坏性 diff（deploy/openapi/check-openapi-breaking.py）；**前端 TS client codegen（document-map §3 愿景）未纳入**——手写 api/types 继续维护，codegen 迁移列为发布前候选 |
 | F10 | 网关部署信息页核对与补齐 | mapping 表行 8 | 清晰（核对完成） | **DONE（2026-09-05 核对）** | 无 | 核对：NextSettingsView 含部署信息段（网关/控制面版本与仓库信息页）；无独立补齐缺口 |
 
@@ -35,34 +35,34 @@
 | F13 | Tools 熔断（三态；最小请求数防误判；慢调用阈值 < 后端超时校验；熔断期跳过重试；429 可触发） | study A7（raw 13） | 清晰 | DONE（2026-09-05，V30+数据面，PR #→） | F01 | 状态机纯函数 + 默认关闭；慢阈值校验对照服务 check_timeout_seconds；429 需显式加入触发状态码；熔断桶按工具名/方法名隔离 |
 | F14 | Tools 分组（引用不复制；组内唯一；AutoPrefix 冲突处理；单组默认 10 个控 Token） | study A9（raw 17） | 清晰 | **DEFERRED（2026-09-05 裁决）** | F01 | raw 17 的组级暴露面=HTTP-to-MCP 直连端点（组名入路径）；本系统标准 MCP 信封单一入口无承载；形态出现（HTTP-to-MCP/Agent 组直连）再立项 |
 | F15 | MCP 纯元数据访问日志（`aigw.mcp.*` 固定前缀，不存正文） | study A8（raw 16） | 清晰 | DONE（2026-09-05，V29+网关 writer+查询 API，PR #→） | F01 | 随代理接线落：网关异步批量写 `mcp_access_log`（幂等/饱和 drop+计数），管理端 `GET /api/v1/admin/mcp-access-logs`；401/404 无可信身份不落行 |
-| F16 | Tools 版本管理（配置快照与运行分离；语义版本化；生效版永不裁剪；幂等回滚） | study A3（raw 11） | 清晰（V33 已定：修订快照+激活指针+父行镜像） | **IN_PROGRESS（2026-09-07 后端+API+V33 交付，PR 待合；UI 历史抽屉后续轮）** | 无 | 交付：mcp_tool_revisions 修订快照（发布=追加修订并激活、部分编辑基线=当前激活版、回滚幂等不产新号、历史永不裁剪、路由快照父行镜像不变）；状态启停沿用 mcp_tools 乐观 version 不建修订 |
-| F17 | Tools OpenAPI 批量导入 | progress P3.5 边界 | 清晰（解析器已定：容错+逐项报告） | **IN_PROGRESS（2026-09-08 后端+API 交付，PR 待合；前端导入按钮后续轮）** | 无 | 交付：POST /mcp-services/{id}/tools/import 批量注册（OpenAPI JSON→工具：operationId/路径派生 snake 名、summary 描述、方法与路径沿用校验；重名/不可派生/不支持方法逐项报告；上限 100；路由刷新单次）。解析器契约已立（未知 vendor 扩展忽略）。前端导入入口后续轮 |
-| F18 | 模型探测失败的手动录入兜底（模型目录人工维护入口） | study A5 | 清晰 | **IN_PROGRESS（2026-09-08 后端+API+V34 交付；管理 UI 待后续轮）** | 无 | 交付：model_catalog.source(OFFICIAL/MANUAL,V34)；官方刷新只删/写 OFFICIAL 且 ON CONFLICT DO NOTHING 保 MANUAL；POST/GET/DELETE /api/v1/admin/models 人工兜底（仅 MANUAL 可删）。前端目录管理页后续轮 | 手动录入需保留「目录来源」标记防与抓取冲突 |
+| F16 | Tools 版本管理（配置快照与运行分离；语义版本化；生效版永不裁剪；幂等回滚） | study A3（raw 11） | **DONE（2026-09-08：#228 后端+API+V33；#230/#236 UI 历史抽屉与编辑发布）** | **IN_PROGRESS（2026-09-07 后端+API+V33 交付，PR 待合；UI 历史抽屉后续轮）** | 交付：V33 mcp_tool_revisions 修订快照（发布=追加修订并激活、部分编辑基线=当前激活版、回滚幂等不产新号、历史永不裁剪、父行镜像）；管理台版本历史/回滚/编辑发布 UI。 | 交付：mcp_tool_revisions 修订快照（发布=追加修订并激活、部分编辑基线=当前激活版、回滚幂等不产新号、历史永不裁剪、路由快照父行镜像不变）；状态启停沿用 mcp_tools 乐观 version 不建修订 |
+| F17 | Tools OpenAPI 批量导入 | progress P3.5 边界 | **DONE（2026-09-08：#234 后端+API；#236 UI 导入弹窗）** | **IN_PROGRESS（2026-09-08 后端+API 交付，PR 待合；前端导入按钮后续轮）** | 交付：POST /mcp-services/{id}/tools/import 批量注册（operationId/路径派生 snake 名、summary 描述、重名/不可派生/不支持方法逐项报告、上限 100、单次路由刷新）；UI 粘贴导入。 | 交付：POST /mcp-services/{id}/tools/import 批量注册（OpenAPI JSON→工具：operationId/路径派生 snake 名、summary 描述、方法与路径沿用校验；重名/不可派生/不支持方法逐项报告；上限 100；路由刷新单次）。解析器契约已立（未知 vendor 扩展忽略）。前端导入入口后续轮 |
+| F18 | 模型探测失败的手动录入兜底（模型目录人工维护入口） | study A5 | **DONE（2026-09-08：#232 后端+API+V34；#236 UI 模型目录抽屉）** | **IN_PROGRESS（2026-09-08 后端+API+V34 交付；管理 UI 待后续轮）** | 交付：model_catalog.source(OFFICIAL/MANUAL,V34)；官方刷新只管理 OFFICIAL 行且 ON CONFLICT DO NOTHING 保人工行；POST/GET/DELETE /api/v1/admin/models；供应商页模型目录抽屉（人工录入/删除）。 | 交付：model_catalog.source(OFFICIAL/MANUAL,V34)；官方刷新只删/写 OFFICIAL 且 ON CONFLICT DO NOTHING 保 MANUAL；POST/GET/DELETE /api/v1/admin/models 人工兜底（仅 MANUAL 可删）。前端目录管理页后续轮 | 手动录入需保留「目录来源」标记防与抓取冲突 |
 
 ## C 组 · 财务与统计深化（清晰度分层）
 
 | ID | 功能 | 出处 | 清晰度 | 状态 | 前置/依赖 | 架子与要点 |
 |---|---|---|---|---|---|---|
-| F19 | 官方账单导入 + 自动差异报告（四级匹配：request ID → 指纹+模型+时间 → Token/费用 → 时间窗） | usage-accounting §11；roadmap 后续 | 部分（匹配规则文档清晰；账单格式依赖真实样本） | SCAFFOLD | 真实账单样本（任一供应商） | api-contract §6 规格已超前：异步任务 + MATCHED/PARTIAL/UNMATCHED_LOCAL/UNMATCHED_PROVIDER；导入器契约可先行定义，供应商解析器待样本 |
-| F20 | 用量差异「追加 adjustment」机制（不覆盖原始事实） | operations-runbook §7 | 清晰（追加语义明确） | SCAFFOLD | F19 差异产生后闭环需要 | 架子：adjustment 表结构（追加行 + 原因 + 引用原始行）待建；release-checklist 的 adjustment schema 门禁随之可勾 |
-| F21 | usage_event 延后列批量落地（team/subscription/名称指纹快照/error_category/token authority/provider_usage_json/price 快照/成本列/plan_window_ref/usage_integrity） | database-schema §6 | 部分（列清单明确；写路径与成本语义需定） | SCAFFOLD | 与 F19/成本重算语义绑定 | 架子：列清单已登记；逐事件价格快照解决「价格变更重算历史」语义风险 |
+| F19 | 官方账单导入 + 自动差异报告（四级匹配：request ID → 指纹+模型+时间 → Token/费用 → 时间窗） | usage-accounting §11；roadmap 后续 | 部分（匹配规则文档清晰；账单格式依赖真实样本） | SCAFFOLD |真实账单样本（任一供应商） **验收口径**：验收口径：任一家真实账单样本到位后,导入解析→四级匹配(重名覆盖由明细级去重)→差异报告页可看可导出；无样本阶段保持 SCAFFOLD。| api-contract §6 规格已超前：异步任务 + MATCHED/PARTIAL/UNMATCHED_LOCAL/UNMATCHED_PROVIDER；导入器契约可先行定义，供应商解析器待样本 |
+| F20 | 用量差异「追加 adjustment」机制（不覆盖原始事实） | operations-runbook §7 | 清晰（追加语义明确） | SCAFFOLD |F19 差异产生后闭环需要 **验收口径**：验收口径：F19 差异确认后写 usage_adjustments(不覆盖原始事实),明细查询带净额列,审计/导出含调整标记。| 架子：adjustment 表结构（追加行 + 原因 + 引用原始行）待建；release-checklist 的 adjustment schema 门禁随之可勾 |
+| F21 | usage_event 延后列批量落地（team/subscription/名称指纹快照/error_category/token authority/provider_usage_json/price 快照/成本列/plan_window_ref/usage_integrity） | database-schema §6 | 部分（列清单明确；写路径与成本语义需定） | SCAFFOLD |与 F19/成本重算语义绑定 **验收口径**：验收口径：与 F19 同批评估落地列清单(team/subscription/名称指纹/error_category/…),出 migration+快照回填+查询使用示例。| 架子：列清单已登记；逐事件价格快照解决「价格变更重算历史」语义风险 |
 | F22 | 成本分摊 USER 维度（target_type=USER 预留） | progress G4.3 边界 | 清晰 | DEFERRED | 无 | 表唯一键已支持；需按人聚合的产品决策 |
-| F23 | 导出与文档「可对账等级」标记落地 | usage-accounting §11 | 部分（规格承诺） | SCAFFOLD | F19 | 导出列加 reconcile-level（provider_request_id 有无） |
+| F23 | 导出与文档「可对账等级」标记落地 | usage-accounting §11 | 部分（规格承诺） | SCAFFOLD |F19 **验收口径**：验收口径：导出文件头或伴生 manifest 声明可对账等级(原始/净额/含调整),页面展示等级徽标。| 导出列加 reconcile-level（provider_request_id 有无） |
 
 ## D 组 · 默认模板与消费者（研究建议方向）
 
 | ID | 功能 | 出处 | 清晰度 | 状态 | 前置/依赖 | 架子与要点 |
 |---|---|---|---|---|---|---|
 | F24 | 默认配额模板（全局模板；创建时快照复制；改模板不惊动存量；关闭不删已分配；手动规则覆盖默认） | study A10（raw 22）；roadmap 配额 | 清晰（语义完整） | DONE（2026-09-03） | 无 | 交付见 progress「默认配额模板」：V26 每租户单行模板 + 新建用户自动快照复制（USER 作用域规则）+ 前端配额页面板；映射取舍：复制只落新用户（腾讯「消费者」≈本系统用户），PROJECT 不参与模板化；预算模板化列为后续候选 |
-| F25 | 消费者组（组级启停一键熔断 / 删除依赖检查 / 改属性与管成员解耦） | study A11（raw 21） | 部分（组实体建模需定） | SCAFFOLD | MCP ACL 消费者组批量授权（腾讯维度） | 架子：consumer_group 表 + 成员表 + 组级 status；部分能力可被消费者级吊销替代 |
-| F26 | 计费查询开放维度扩展（按消费者等） | middleware 修正路线 | 部分（维度选择等 leader） | SCAFFOLD | 开放维度决策 | 现 summary/records/quota 已平台化；维度扩接消费者分组 |
+| F25 | 消费者组（组级启停一键熔断 / 删除依赖检查 / 改属性与管成员解耦） | study A11（raw 21） | 部分（组实体建模需定） | SCAFFOLD |MCP ACL 消费者组批量授权（腾讯维度） **验收口径**：验收口径：引入前需反转旧裁决(消费者直配不引入组)并给出收益证据;若立项:组表+成员+组级启停/授权批量,ACL 评审沿用。| 架子：consumer_group 表 + 成员表 + 组级 status；部分能力可被消费者级吊销替代 |
+| F26 | 计费查询开放维度扩展（按消费者等） | middleware 修正路线 | 部分（维度选择等 leader） | SCAFFOLD |开放维度决策 **验收口径**：验收口径：定开放维度后 extension 端点带分页/过滤与成本口径一致;契约进 api-contract。| 现 summary/records/quota 已平台化；维度扩接消费者分组 |
 
 ## E 组 · Agent / 服务 / 外部平台（需外部细节 → 架子为主）
 
 | ID | 功能 | 出处 | 清晰度 | 状态 | 前置/依赖 | 架子与要点 |
 |---|---|---|---|---|---|---|
-| F27 | Agent 对外入口认证 + 按 Agent 观测补齐 | middleware 修正路线；阿里 Agent 拓扑 | 部分（认证机制候选多） | SCAFFOLD | 入口形态决策（域名/消费者认证/Key） | 架子：注册/禁用/用量已交付；入口路由与观测维度登记待细化 |
-| F28 | Agent 引用「绑定后禁改禁删」+ Skill 快照语义 | study A2 | 部分 | SCAFFOLD | 与 F27 一起 | 凭证引用已绑定级联；「不可变标识」语义登记 |
+| F27 | Agent 对外入口认证 + 按 Agent 观测补齐 | middleware 修正路线；阿里 Agent 拓扑 | 部分（认证机制候选多） | SCAFFOLD |入口形态决策（域名/消费者认证/Key） **验收口径**：验收口径：入口形态(域名/消费者认证/Key)定后:Agent 注册的出口认证+按 Agent 观测视图;形态未定保持 SCAFFOLD。| 架子：注册/禁用/用量已交付；入口路由与观测维度登记待细化 |
+| F28 | Agent 引用「绑定后禁改禁删」+ Skill 快照语义 | study A2 | 部分 | SCAFFOLD |与 F27 一起 **验收口径**：验收口径：随 F27:绑定后禁改禁删约束测试+Skill 快照(引用版本)语义;独立于 F27 的部分(绑定约束)可先行。| 凭证引用已绑定级联；「不可变标识」语义登记 |
 | F29 | 服务来源分层 / 服务→网关实际路由接线 | middleware；P3.2 边界 | 部分 | BLOCKED | leader 集成细节 | 注册表已交付（HTTP/MCP/OTHER 目录） |
 | F30 | 全局配置应用侧热更新接线 | middleware；P3.3 边界 | 部分 | BLOCKED | 集成细节 | 配置目录已交付；消费侧热更新待定 |
 | F31 | SkillHub 公司内 skill 来源接入 | middleware 待办 | 部分 | BLOCKED | 公司 skill 存放/格式 | 上传/目录/下载已按 Agent Skills 实现 |
@@ -83,8 +83,8 @@
 | F41 | 语义缓存 L2（向量库） | ADR-0009 后果；study B | — | ADR | 新 ADR（向量库依赖） | 接口预留；维持禁用 |
 | F42 | 分布式会话缓存（Redis+TTL 1800s） | study C | — | ADR/DEFERRED | 违背 ADR-0005 | 多实例场景候选 |
 | F43 | 用量保留轮转策略（MANUAL_ONLY 外的模式） | configuration-reference §6 | — | DEFERRED | 产品决策 | 现枚举名预留 |
-| F44 | Prometheus 按 Route 粒度开关采集 | study C | 清晰 | SCAFFOLD | 路由实体（F11）后 | 现租户级无标签指标；防热路径开销 |
-| F45 | 凭证类审计差异化保留期 | study A13 | 清晰 | SCAFFOLD | 审计策略决策 | 现审计永久保留 |
+| F44 | Prometheus 按 Route 粒度开关采集 | study C | 清晰 | SCAFFOLD |路由实体（F11）后 **验收口径**：验收口径：路由实体出现后:Prometheus 按 Route 粒度开关采样,指标名带 route 标签,开关默认关。| 现租户级无标签指标；防热路径开销 |
+| F45 | 凭证类审计差异化保留期 | study A13 | 清晰 | SCAFFOLD |审计策略决策 **验收口径**：验收口径：审计策略拍板后:凭证类事件差异化保留期配置项+清理任务+文档;拍板前保持 SCAFFOLD。| 现审计永久保留 |
 
 ## G 组 · 决策候选（需 ADR / 刻意不做——登记防误入）
 
