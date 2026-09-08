@@ -1124,6 +1124,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin-api/virtual-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listForUser"];
+        put?: never;
+        post: operations["createForUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin-api/export-tasks": {
         parameters: {
             query?: never;
@@ -3177,6 +3193,21 @@ export interface components {
             status?: string;
             /** Format: date-time */
             createdAt?: string;
+        };
+        DelegatedCreateRequest: {
+            /** Format: uuid */
+            userId: string;
+            name?: string;
+            /** Format: uuid */
+            projectId: string;
+            /** Format: uuid */
+            providerProductId: string;
+            /** Format: uuid */
+            credentialGrantId: string;
+            /** @enum {string} */
+            purpose: "CLAUDE_CODE" | "CLAUDE_DESKTOP" | "CODEX" | "CUSTOM";
+            allowedModels?: string[];
+            cachePolicy?: string;
         };
         StatusRequest: {
             /** @enum {string} */
@@ -6090,6 +6121,52 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["TestResult"];
+                };
+            };
+        };
+    };
+    listForUser: {
+        parameters: {
+            query: {
+                userId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["VirtualKeyView"][];
+                };
+            };
+        };
+    };
+    createForUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DelegatedCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["CreateVirtualKeyResponse"];
                 };
             };
         };

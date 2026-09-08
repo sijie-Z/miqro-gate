@@ -83,6 +83,14 @@ public class VirtualKeyRepositoryImpl implements VirtualKeyRepository {
     }
 
     @Override
+    public List<VirtualKey> findAllByTenantIdAndUserId(UUID tenantId, UUID userId) {
+        return jdbc.query(
+                SELECT_WITH_LAST_USED
+                        + " WHERE vk.tenant_id = :tenantId AND vk.user_id = :userId ORDER BY vk.created_at DESC",
+                new MapSqlParameterSource("tenantId", tenantId).addValue("userId", userId), ROW_MAPPER);
+    }
+
+    @Override
     public List<VirtualKey> findAllByProjectId(UUID projectId) {
         return jdbc.query(SELECT_WITH_LAST_USED + " WHERE vk.project_id = :projectId ORDER BY vk.created_at DESC",
                 new MapSqlParameterSource("projectId", projectId), ROW_MAPPER);

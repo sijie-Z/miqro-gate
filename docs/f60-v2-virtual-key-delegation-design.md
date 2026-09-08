@@ -1,6 +1,7 @@
-# F60 批 2 v2：Virtual Key 委托创建（设计稿，待 owner 圈定）
+# F60 批 2 v2：Virtual Key 委托创建（设计稿）
 
-> 状态：DESIGN-READY（2026-09-08）。拍板后转 ADR 增补并实现。关联：ADR-0015/0016
+> 状态：**IMPLEMENTED（2026-09-09，owner 圈定案 1）**。决策与验收已落
+> ADR-0016 增补；端点/错误码/审计语义见 api-contract §9。关联：ADR-0015/0016
 > （机器凭据/写面 A+C，v1 已交付 #251）、VirtualKey 模型与 create 校验链
 > （VirtualKeyService.create，vkey 1:1 绑定 user/project/grant/credential/purpose）。
 
@@ -45,11 +46,11 @@ operator 角色为 SYSTEM_ADMIN（会话或密钥发行者本身须为 SYSTEM_AD
 ### 案 3：v1 保持现状，v2 只加"给指定用户建"但限制 target 也是 SYSTEM_ADMIN
 适用面极窄，不建议。
 
-## 拍板点
+## 拍板点（2026-09-09 已裁决）
 
-1. 案 1 还是案 2（默认建议案 1）；
-2. 端点命名 `virtual-keys` 与列表查询 userId 过滤是否够用；
-3. 是否需要按目的（purpose）白名单限制机器可建类型（默认不限，与管理员一致）。
+1. **案 1**（owner「自己看着做，边界不能越过」→ 保留成员边界语义）；
+2. 端点 `POST/GET /api/v1/admin-api/virtual-keys`（GET 按 `userId` 过滤）——够用，已定；
+3. 不设 purpose 白名单（默认不限，与管理员自建一致）。
 
 ## 验收（拍板后）
 

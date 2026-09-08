@@ -30,5 +30,18 @@ FROM="$(date -u -d '2 days ago' +%Y-%m-%dT%H:%M:%SZ)"
 TO="$(date -u -d '1 day ago' +%Y-%m-%dT%H:%M:%SZ)"
 curl -fsS -X POST -H "$AUTH" "$BASE/api/v1/admin-api/export-tasks?format=CSV&from=$FROM&to=$TO" | head -c 300; echo
 
-echo "== 6) 吊销这把密钥（SYSTEM_ADMIN 网页会话执行,此处仅示例调用形态） =="
+echo "== 6) 代指定用户建 Virtual Key（批 2 v2：钥归属目标用户,secret 仅此一次） =="
+# 目标用户需是该项目的成员；委托人须为发行本密钥的 SYSTEM_ADMIN。
+TARGET_USER_ID="${TARGET_USER_ID:-CHANGE_ME}"
+PROJECT_ID="${PROJECT_ID:-CHANGE_ME}"
+PRODUCT_ID="${PRODUCT_ID:-CHANGE_ME}"
+GRANT_ID="${GRANT_ID:-CHANGE_ME}"
+curl -fsS -X POST -H "$AUTH" -H "$CT" \
+  -d "{\"userId\":\"$TARGET_USER_ID\",\"name\":\"ci-delegated\",\"projectId\":\"$PROJECT_ID\",\"providerProductId\":\"$PRODUCT_ID\",\"credentialGrantId\":\"$GRANT_ID\",\"purpose\":\"CLAUDE_CODE\"}" \
+  "$BASE/api/v1/admin-api/virtual-keys" | head -c 300; echo
+
+echo "== 7) 查该用户拥有的钥（无 secret） =="
+curl -fsS -H "$AUTH" "$BASE/api/v1/admin-api/virtual-keys?userId=$TARGET_USER_ID" | head -c 400; echo
+
+echo "== 8) 吊销这把密钥（SYSTEM_ADMIN 网页会话执行,此处仅示例调用形态） =="
 echo "# POST /api/v1/admin/api-keys/{id}/revoke 需要会话 + CSRF,不由机器钥自吊销"
