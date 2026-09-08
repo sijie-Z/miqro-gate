@@ -24,26 +24,6 @@ export type UsageGroupBy = 'project' | 'virtual_key' | 'cache_level' | 'day';
 
 export type BudgetLevel = 'NORMAL' | 'WARNING' | 'EXCEEDED';
 
-export interface UserResponse {
-  id: string;
-  username: string;
-  displayName: string;
-  role: UserRole;
-  status: UserStatus;
-  mustChangePassword: boolean;
-  lastLoginAt?: string;
-  sessionExpiresAt: string;
-}
-
-export interface LoginResponse {
-  id: string;
-  username: string;
-  displayName: string;
-  role: UserRole;
-  mustChangePassword: boolean;
-  sessionExpiresAt: string;
-}
-
 export type ModelApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 export type QuotaScopeType = 'USER' | 'PROJECT';

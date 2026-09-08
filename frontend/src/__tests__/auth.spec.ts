@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import * as api from '@/api';
 import { useAuthStore } from '@/stores/auth';
-import type { UserResponse } from '@/types/api';
+import type { UserResponse } from '@/types/generated-api';
 
 const user = (overrides: Partial<UserResponse> = {}): UserResponse => ({
   id: 'u1',

@@ -1508,6 +1508,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/oauth/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["start"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oauth/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["providers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oauth/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["callback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/me": {
         parameters: {
             query?: never;
@@ -1739,7 +1787,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["providers"];
+        get: operations["providers_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2461,6 +2509,15 @@ export interface components {
             displayName?: string;
             password: string;
         };
+        LoginResponse: {
+            id?: string;
+            username?: string;
+            displayName?: string;
+            role?: string;
+            mustChangePassword?: boolean;
+            /** Format: date-time */
+            sessionExpiresAt?: string;
+        };
         PasswordChangeRequest: {
             currentPassword: string;
             newPassword: string;
@@ -2473,6 +2530,14 @@ export interface components {
             bootstrapSecret: string;
             username: string;
             displayName: string;
+        };
+        BootstrapResponse: {
+            userId?: string;
+            username?: string;
+            temporaryPassword?: string;
+            shownOnce?: boolean;
+            /** Format: date-time */
+            sessionExpiresAt?: string;
         };
         CreateRequest: {
             name?: string;
@@ -3266,6 +3331,27 @@ export interface components {
             subscriptionId?: string;
             subscriptionName?: string;
             snapshots?: components["schemas"]["QuotaEntryView"][];
+        };
+        ProviderInfo: {
+            code?: string;
+            name?: string;
+        };
+        UserResponse: {
+            id?: string;
+            username?: string;
+            displayName?: string;
+            role?: string;
+            status?: string;
+            mustChangePassword?: boolean;
+            /** Format: date-time */
+            lastLoginAt?: string;
+            /** Format: date-time */
+            sessionExpiresAt?: string;
+        };
+        CsrfResponse: {
+            token?: string;
+            /** Format: date-time */
+            expiresAt?: string;
         };
         DeliveryAttempt: {
             /** Format: uuid */
@@ -4114,13 +4200,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
-            200: {
+            /** @description User created and logged in; body matches /login */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": Record<string, never>;
+                    "application/json": components["schemas"]["LoginResponse"];
                 };
             };
         };
@@ -4182,8 +4268,17 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
+            /** @description Logged in; session and CSRF cookies are set */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Invalid credentials, disabled or locked account */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4206,8 +4301,17 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
-            200: {
+            /** @description First SYSTEM_ADMIN created; temporary password is shown once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BootstrapResponse"];
+                };
+            };
+            /** @description Invalid bootstrap secret or tenant already bootstrapped */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6845,7 +6949,7 @@ export interface operations {
             };
         };
     };
-    me: {
+    start: {
         parameters: {
             query?: never;
             header?: never;
@@ -6856,6 +6960,74 @@ export interface operations {
         responses: {
             /** @description OK */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    providers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ProviderInfo"][];
+                };
+            };
+        };
+    };
+    callback: {
+        parameters: {
+            query?: {
+                code?: string;
+                state?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    me: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current user, role, status and session expiry */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6874,8 +7046,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OK */
+            /** @description CSRF token read from its cookie plus session expiry */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CsrfResponse"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7173,7 +7354,7 @@ export interface operations {
             };
         };
     };
-    providers: {
+    providers_1: {
         parameters: {
             query?: never;
             header?: never;
