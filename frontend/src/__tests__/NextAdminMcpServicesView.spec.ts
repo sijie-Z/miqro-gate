@@ -18,6 +18,8 @@ vi.mock('@/api', () => ({
   adminSetMcpToolStatus: vi.fn(),
   adminListToolRevisions: vi.fn(),
   adminActivateToolRevision: vi.fn(),
+  adminPublishToolRevision: vi.fn(),
+  adminImportMcpTools: vi.fn(),
   getMcpServiceAccess: vi.fn(),
   listApiConsumers: vi.fn(),
   setMcpAccessMode: vi.fn(),
@@ -706,5 +708,72 @@ describe('NextAdminMcpServicesView', () => {
 
     expect(mockApi.adminActivateToolRevision).toHaveBeenCalledWith('m1', 't1', 2);
     expect(toastState.items.some((item) => item.message?.includes('已回滚到修订 #2'))).toBe(true);
+  });
+
+  it('F16: publishes an edited revision from the tool row', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminListMcpTools.mockResolvedValue([tool()]);
+    mockApi.adminPublishToolRevision.mockResolvedValue({
+      id: 'r2',
+      revision: 2,
+      description: '查询订单（已改）',
+      method: 'POST',
+      path: '/orders/{id}',
+      createdAt: '2026-09-08T00:00:00Z',
+      activatedAt: '2026-09-08T00:00:01Z',
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="mcp-tools"]').trigger('click');
+    await flushPromises();
+    (document.querySelector('[data-testid="mcp-tool-edit-open"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const dialog = document.querySelector('[data-testid="mcp-tool-edit-dialog"]');
+    expect(dialog, 'edit dialog should open').toBeTruthy();
+    const setEdit = (testid: string, value: string) => {
+      const el = document.querySelector(`[data-testid="${testid}"]`) as HTMLInputElement;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(el, value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    setEdit('mcp-tool-edit-path', '/orders/{id}');
+    setEdit('mcp-tool-edit-desc', '查询订单（已改）');
+    (document.querySelector('[data-testid="mcp-tool-edit-submit"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(mockApi.adminPublishToolRevision).toHaveBeenCalledWith('m1', 't1', {
+      description: '查询订单（已改）',
+      method: 'GET',
+      path: '/orders/{id}',
+    });
+  });
+
+  it('F17: imports tools from a pasted OpenAPI document', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminListMcpTools.mockResolvedValue([]);
+    mockApi.adminImportMcpTools.mockResolvedValue({
+      created: [{ toolName: 'list_orders', method: 'GET', path: '/orders' }],
+      skipped: [],
+      parseSkips: [{ toolName: '', reason: 'HTTP 方法不支持：TRACE' }],
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="mcp-tools"]').trigger('click');
+    await flushPromises();
+    (document.querySelector('[data-testid="mcp-tool-import-open"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const textarea = document.querySelector(
+      '[data-testid="mcp-tool-import-spec"]',
+    ) as HTMLTextAreaElement;
+    textarea.value = JSON.stringify({
+      paths: { '/orders': { get: { operationId: 'listOrders' } } },
+    });
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    (document.querySelector('[data-testid="mcp-tool-import-submit"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(mockApi.adminImportMcpTools).toHaveBeenCalledTimes(1);
+    const result = document.querySelector('[data-testid="mcp-tool-import-result"]');
+    expect(result, 'import result should render').toBeTruthy();
+    expect(result!.textContent).toContain('新建 1');
+    expect(result!.textContent).toContain('TRACE');
   });
 });

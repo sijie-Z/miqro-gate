@@ -24,6 +24,8 @@ import type {
   UserRole,
   UserStatusValue,
   McpToolRevisionRow,
+  ModelCatalogRow,
+  ToolImportResult,
 } from '@/types/api';
 import type {
   AgentView,
@@ -682,6 +684,42 @@ export function adminActivateToolRevision(
   return post<McpToolRevisionRow>(
     `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/revisions/${revision}/activate`,
   );
+}
+
+export function adminPublishToolRevision(
+  serviceId: string,
+  toolId: string,
+  body: { description?: string; method?: string; path?: string },
+): Promise<McpToolRevisionRow> {
+  return post<McpToolRevisionRow>(
+    `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/revisions`,
+    body,
+  );
+}
+
+export function adminImportMcpTools(serviceId: string, spec: unknown): Promise<ToolImportResult> {
+  return post<ToolImportResult>(`/api/v1/admin/mcp-services/${serviceId}/tools/import`, spec);
+}
+
+// ---- F18 model catalog manual maintenance (V34) ----
+
+export function adminListModels(productId?: string, source?: string): Promise<ModelCatalogRow[]> {
+  const params = new URLSearchParams();
+  if (productId) params.set('providerProductId', productId);
+  if (source) params.set('source', source);
+  const qs = params.toString();
+  return get<ModelCatalogRow[]>(`/api/v1/admin/models${qs ? `?${qs}` : ''}`);
+}
+
+export function adminCreateModel(
+  productId: string,
+  body: { modelId: string; displayName?: string; contextWindow?: number; maxOutputTokens?: number },
+): Promise<ModelCatalogRow> {
+  return post<ModelCatalogRow>('/api/v1/admin/models', { providerProductId: productId, ...body });
+}
+
+export function adminDeleteModel(rowId: string): Promise<void> {
+  return del<void>(`/api/v1/admin/models/${rowId}`);
 }
 
 // ---- MCP route rules (F11, Tencent doc 135482) ----

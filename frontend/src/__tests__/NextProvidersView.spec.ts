@@ -3,9 +3,14 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextProvidersView from '@/views/next/NextProvidersView.vue';
 import * as api from '@/api';
-import type {ProviderProductView} from '@/types/api';
+import type { ProviderProductView } from '@/types/api';
 
-vi.mock('@/api', () => ({ listProviderProducts: vi.fn() }));
+vi.mock('@/api', () => ({
+  listProviderProducts: vi.fn(),
+  adminListModels: vi.fn(),
+  adminCreateModel: vi.fn(),
+  adminDeleteModel: vi.fn(),
+}));
 
 const mockApi = vi.mocked(api);
 
@@ -59,5 +64,59 @@ describe('NextProvidersView', () => {
     expect(wrapper.text()).toContain('已实现');
     expect(wrapper.text()).toContain('不可用');
     expect(wrapper.text()).toContain('api.deepseek.com');
+  });
+
+  it('F18: opens the model catalog drawer and adds a manual model', async () => {
+    mockApi.adminListModels.mockResolvedValue([]);
+    mockApi.adminCreateModel.mockResolvedValue({
+      id: 'mm1',
+      providerProductId: '0190-0000-0000-0020',
+      modelId: 'manual-probe-fallback',
+      displayName: '人工兜底',
+      status: 'ACTIVE',
+      source: 'MANUAL',
+      version: 0,
+      updatedAt: '2026-09-08T00:00:00Z',
+    });
+    const wrapper = mount(NextProvidersView, { global: { plugins: [createPinia()] } });
+    await flushPromises();
+
+    await wrapper.find('[data-testid="product-models-open"]').trigger('click');
+    await flushPromises();
+    await flushPromises();
+    expect(mockApi.adminListModels).toHaveBeenCalledWith('0190-0000-0000-0020');
+    const dialog = document.querySelector('[data-testid="product-models-dialog"]');
+    expect(dialog, 'models dialog should open').toBeTruthy();
+    expect(dialog!.textContent).toContain('暂无目录模型');
+
+    mockApi.adminListModels.mockResolvedValue([
+      {
+        id: 'mm1',
+        providerProductId: '0190-0000-0000-0020',
+        modelId: 'manual-probe-fallback',
+        displayName: '人工兜底',
+        status: 'ACTIVE',
+        source: 'MANUAL',
+        version: 0,
+        updatedAt: '2026-09-08T00:00:00Z',
+      },
+    ]);
+    const idInput = document.querySelector(
+      '[data-testid="product-models-id"]',
+    ) as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(idInput, 'manual-probe-fallback');
+    idInput.dispatchEvent(new Event('input', { bubbles: true }));
+    (document.querySelector('[data-testid="product-models-add"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const dialogAfter = document.querySelector('[data-testid="product-models-dialog"]');
+    expect(dialogAfter?.textContent, 'no guard error expected').not.toContain('模型 ID 必填');
+    expect(mockApi.adminCreateModel).toHaveBeenCalledWith('0190-0000-0000-0020', {
+      modelId: 'manual-probe-fallback',
+      displayName: undefined,
+    });
+    await flushPromises();
+    expect(dialog!.textContent).toContain('manual-probe-fallback');
+    expect(dialog!.textContent).toContain('人工');
   });
 });
