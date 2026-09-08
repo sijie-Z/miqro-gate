@@ -52,5 +52,5 @@
       即时/过期/审计光标）
 - [x] 批 2 v1 写面（2026-09-08 ADR-0016 Accepted A+C）：告警规则/Webhook 全生命周期直接开（C）+
       导出创建委托（A）；Virtual Key 创建与批量治理留待 v2
-- [ ] 批 2 契约/示例（OpenAPI 快照刷新、curl/Python 示例）—— 随 v1 合入后补
+- [x] 批 2 契约/示例（2026-09-08）：scripts/open-api-examples/（curl+Python+最小权限 README）+ OpenAPI 基线刷新
 - [ ] 批 3 治理可选
