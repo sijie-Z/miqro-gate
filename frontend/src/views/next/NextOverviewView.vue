@@ -25,7 +25,16 @@ const loadRequestId = ref('');
 
 const isAdmin = computed(() => auth.user?.role === 'SYSTEM_ADMIN');
 
-const stats = computed(() => {
+interface StatCard {
+  label: string;
+  value: string;
+  prefix?: string;
+  hint: string;
+  icon: unknown;
+  tone: string;
+}
+
+const stats = computed<StatCard[]>(() => {
   const active = keys.value.filter((k) => k.status === 'ACTIVE').length;
   const totalTokens = usageGroups.value.reduce(
     (sum, g) => sum + (g.tokens?.input ?? 0) + (g.tokens?.output ?? 0),
@@ -39,8 +48,8 @@ const stats = computed(() => {
   return [
     { label: 'Virtual Key', value: String(keys.value.length), hint: `${active} 个可用`, icon: LockOnIcon, tone: 'blue' },
     { label: '本月请求', value: formatCount(totalRequests), hint: '经网关的请求数', icon: ChartBarIcon, tone: 'green' },
-    { label: '本月 Tokens', value: formatCount(totalTokens), hint: '输入 + 输出', icon: LayersIcon, tone: 'cyan' },
-    { label: '本月成本', value: `¥${Number(totalCost).toFixed(2)}`, hint: '按价格快照估算', icon: MoneyIcon, tone: 'gold' },
+    { label: '本月 Tokens', value: formatCount(totalTokens), hint: '输入+输出', icon: LayersIcon, tone: 'cyan' },
+    { label: '本月成本', value: Number(totalCost).toFixed(2), prefix: '¥', hint: '按价格快照估算', icon: MoneyIcon, tone: 'gold' },
   ];
 });
 
@@ -138,7 +147,7 @@ onMounted(load);
       <div class="next-overview__hero-main">
         <h1 class="ui-page-title">{{ auth.user?.displayName ?? auth.user?.username }}，欢迎回来</h1>
         <p class="ui-page-desc">
-          内部凭证治理控制台 · 单租户部署 · {{ new Date().getFullYear() }} 年
+          内部凭证治理控制台 · 单租户部署 · {{ new Date().getFullYear() }}年
         </p>
       </div>
       <div class="ui-page-actions">
@@ -169,7 +178,9 @@ onMounted(load);
         <section v-for="card in stats" :key="card.label" class="ui-panel next-overview__stat">
           <div class="next-overview__stat-main">
             <span class="next-overview__stat-label">{{ card.label }}</span>
-            <span class="next-overview__stat-value ui-num">{{ card.value }}</span>
+            <span class="next-overview__stat-value ui-num"
+              ><i v-if="card.prefix" class="next-overview__stat-currency">{{ card.prefix }}</i>{{ card.value }}</span
+            >
             <span class="next-overview__stat-hint">{{ card.hint }}</span>
           </div>
           <span
@@ -202,9 +213,11 @@ onMounted(load);
                 <span class="next-overview__bar-value ui-num">{{ formatCount(bar.value) }}</span>
               </div>
             </div>
-            <p v-else class="next-overview__empty">
-              还没有用量记录。创建 Key 并开始调用后，这里会出现用量分布。
-            </p>
+            <div v-else class="next-overview__usage-empty">
+              <p class="next-overview__empty">
+                还没有用量记录。创建 Key 并开始调用后，这里会出现用量分布。
+              </p>
+            </div>
           </div>
         </section>
 
@@ -700,5 +713,27 @@ onMounted(load);
   text-align: right;
   font-size: var(--ui-font-size-sm);
   color: var(--ui-foreground);
+}
+
+.next-overview__stat-grid {
+  margin-top: 2px;
+}
+.next-overview__stat-currency {
+  font-style: normal;
+  font-size: 0.78em;
+  margin-right: 1px;
+}
+.next-overview__usage-empty,
+.next-overview__recent-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 26px 0;
+  text-align: center;
+}
+.next-overview__usage-empty p,
+.next-overview__recent-empty p {
+  margin: 0;
 }
 </style>
