@@ -30,6 +30,12 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
     public static final String TENANT_ATTR = "adminApiKeyTenantId";
     /** Request attribute holding the key name. */
     public static final String NAME_ATTR = "adminApiKeyName";
+    /**
+     * Request attribute holding the executor/delegator user id: for machine keys
+     * the issuing admin (ADR-0016 option A delegation), for SYSTEM_ADMIN sessions
+     * the session user. Write ops record it as actor/created_by.
+     */
+    public static final String ISSUER_ATTR = "adminApiKeyIssuerId";
 
     /** Path prefix of the open admin surface. */
     public static final String OPEN_PATH = "/api/v1/admin-api";
@@ -59,6 +65,7 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
                 return;
             }
             request.setAttribute(TENANT_ATTR, userContext.getUser().tenantId());
+            request.setAttribute(ISSUER_ATTR, userContext.getUser().id());
             chain.doFilter(request, response);
             return;
         }
@@ -81,6 +88,9 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
         request.setAttribute(KEY_ATTR, key.id());
         request.setAttribute(TENANT_ATTR, key.tenantId());
         request.setAttribute(NAME_ATTR, key.name());
+        if (key.createdBy() != null) {
+            request.setAttribute(ISSUER_ATTR, key.createdBy());
+        }
         return true;
     }
 

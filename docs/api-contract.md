@@ -986,6 +986,15 @@ Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 
 - `GET /api/v1/admin-api/mcp-access-logs?service&consumer&from&to&limit` — MCP 访问日志
   （参数/窗口/上限同 `GET /api/v1/admin/mcp-access-logs`）。
 
+**写面（批 2 v1，ADR-0016 Accepted A+C，2026-09-08）**
+- `POST/PATCH/DELETE /api/v1/admin-api/alert-rules[/{id}]` + `GET` 列表/单个 — 与
+  `GET/POST/PATCH/DELETE /api/v1/admin/alert-rules` 同语义（C：表无执行者列，租户即边界）。
+- `POST/PATCH/DELETE /api/v1/admin-api/webhooks[/{endpointId}]` + `GET`/`{id}/deliveries` 与
+  `POST /{endpointId}/test` — 与人类端点同语义同 SSRF 校验。
+- `POST /api/v1/admin-api/export-tasks?format&from&to` → 202（A 委托：任务的
+  `created_by` = 该机器密钥的发行管理员；响应与下载面不含文件字节）。
+- 错误码沿用人类端点；新增 `EXECUTOR_UNKNOWN`（403，密钥缺发行管理员时写面拒绝）。
+
 **鉴权规则（批 1b 硬化）**
 - 机器密钥：无效/吊销/过期 → 401 `ADMIN_API_KEY_INVALID`；密钥身份租户化，跨租户不可见。
 - 门户会话：仅 SYSTEM_ADMIN 可访问开放面（403 `ADMIN_API_FORBIDDEN`，其他角色）；会话租户即开放面租户。

@@ -54,6 +54,15 @@ public class CsrfInterceptor implements HandlerInterceptor {
             return true;
         }
 
+        // Open admin surface (ADR-0015/0016): machine-key calls carry no
+        // cookie, so CSRF is meaningless there - the bearer digest already
+        // authenticated the caller. SYSTEM_ADMIN browser sessions still go
+        // through the token check below.
+        if (path.startsWith(AdminApiKeyAuthFilter.OPEN_PATH)
+                && request.getAttribute(AdminApiKeyAuthFilter.KEY_ATTR) != null) {
+            return true;
+        }
+
         String requestId = resolveRequestId(request);
 
         // User must be authenticated

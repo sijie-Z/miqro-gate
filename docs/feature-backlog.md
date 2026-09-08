@@ -123,4 +123,4 @@
 
 | ID | 功能 | 出处 | 清晰度 | 状态 | 前置/依赖 | 架子与要点 |
 |---|---|---|---|---|---|---|
-| F60 | 管理开放 API：机器对机器管理凭据 + OpenAPI 对外发布 + curl/Python 示例（+可选频控/作用域） | leader 2026-09-07；腾讯 AI 网关既有形态 | 清晰（见 docs/open-admin-api-plan.md） | **IN_PROGRESS（2026-09-07 ADR-0015 Accepted → #200 批1 机器凭据+usage 读面；批1b 读面全开：audit/api-keys/quota-rules/export-tasks/mcp-access-logs + 会话 SYSTEM_ADMIN 硬化）** | 批 2 写面须先拍板 ADR-0016（机器执行者语义,Proposed） | 现状=/api/v1 全量 REST + OpenAPI 3.1 + CI breaking；先例=api_consumers/JWT(ADR-0010/11)。批1 V32 admin_api_key（SHA-256 digest + prefix，Bearer 鉴权，审计；读子集先行）→ 批2 契约/示例（写面等 ADR-0016）→ 批3 治理（作用域/频控,可选） |
+| F60 | 管理开放 API：机器对机器管理凭据 + OpenAPI 对外发布 + curl/Python 示例（+可选频控/作用域） | leader 2026-09-07；腾讯 AI 网关既有形态 | 清晰（见 docs/open-admin-api-plan.md） | ADR-0016 Accepted（2026-09-08，A+C）；批 2 v1 写面随合入交付 |批 2 写面须先拍板 ADR-0016（机器执行者语义,Proposed） 写面 v1（#→PR）：告警规则/Webhook 全生命周期机器写（C）；导出创建委托=发行管理员（A，ISSUER_ATTR）。| 现状=/api/v1 全量 REST + OpenAPI 3.1 + CI breaking；先例=api_consumers/JWT(ADR-0010/11)。批1 V32 admin_api_key（SHA-256 digest + prefix，Bearer 鉴权，审计；读子集先行）→ 批2 契约/示例（写面等 ADR-0016）→ 批3 治理（作用域/频控,可选） |
