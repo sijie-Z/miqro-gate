@@ -54,3 +54,7 @@ export type McpServiceView = components['schemas']['McpService'];
 export type McpToolView = components['schemas']['McpTool'];
 export type McpAccessLogEntry = components['schemas']['McpAccessLogEntry'];
 export type McpResiliencePolicy = components['schemas']['McpResiliencePolicy'];
+// auth envelope (issue #265): content schemas from springdoc annotations on
+// /api/v1/auth — LoginResponse/UserResponse previously had no schema at all.
+export type LoginResponse = components['schemas']['LoginResponse'];
+export type UserResponse = components['schemas']['UserResponse'];

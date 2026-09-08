@@ -16,6 +16,9 @@ import com.miqroera.miqrokey.controlplane.security.SessionService;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.UserSession;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -64,6 +67,8 @@ public class AuthController {
     }
 
     @PostMapping("/login")
+    @ApiResponse(responseCode = "200", description = "Logged in; session and CSRF cookies are set", content = @Content(mediaType = "application/json", schema = @Schema(implementation = LoginResponse.class)))
+    @ApiResponse(responseCode = "401", description = "Invalid credentials, disabled or locked account")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpReq,
             HttpServletResponse httpRes) {
         String requestId = resolveRequestId(httpReq);
@@ -82,6 +87,8 @@ public class AuthController {
     }
 
     @PostMapping("/bootstrap")
+    @ApiResponse(responseCode = "201", description = "First SYSTEM_ADMIN created; temporary password is shown once", content = @Content(mediaType = "application/json", schema = @Schema(implementation = BootstrapResponse.class)))
+    @ApiResponse(responseCode = "401", description = "Invalid bootstrap secret or tenant already bootstrapped")
     public ResponseEntity<?> bootstrap(@Valid @RequestBody BootstrapRequest request, HttpServletRequest httpReq,
             HttpServletResponse httpRes) {
         String requestId = resolveRequestId(httpReq);
@@ -105,6 +112,7 @@ public class AuthController {
      * the SessionFilter public list and the CSRF exemption set.
      */
     @PostMapping("/register")
+    @ApiResponse(responseCode = "201", description = "User created and logged in; body matches /login", content = @Content(mediaType = "application/json", schema = @Schema(implementation = LoginResponse.class)))
     public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest httpReq,
             HttpServletResponse httpRes) {
         String requestId = resolveRequestId(httpReq);
@@ -129,6 +137,8 @@ public class AuthController {
     }
 
     @GetMapping("/me")
+    @ApiResponse(responseCode = "200", description = "Current user, role, status and session expiry", content = @Content(mediaType = "application/json", schema = @Schema(implementation = UserResponse.class)))
+    @ApiResponse(responseCode = "401", description = "Not authenticated")
     public ResponseEntity<?> me() {
         if (!userContext.isAuthenticated()) {
             return problemResponse(401, "UNAUTHORIZED", "Not authenticated", null, null);
@@ -157,6 +167,8 @@ public class AuthController {
     }
 
     @GetMapping("/csrf")
+    @ApiResponse(responseCode = "200", description = "CSRF token read from its cookie plus session expiry", content = @Content(mediaType = "application/json", schema = @Schema(implementation = CsrfResponse.class)))
+    @ApiResponse(responseCode = "401", description = "Not authenticated")
     public ResponseEntity<?> csrfToken(HttpServletRequest httpReq) {
         if (!userContext.isAuthenticated() || userContext.getSession() == null) {
             return problemResponse(401, "UNAUTHORIZED", "Not authenticated", null, resolveRequestId(httpReq));

@@ -6,7 +6,7 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import * as api from '@/api';
-import type { UserResponse } from '@/types/api';
+import type { UserResponse } from '@/types/generated-api';
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<UserResponse | null>(null);
