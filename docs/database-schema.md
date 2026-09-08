@@ -101,9 +101,11 @@ V1 migration 可以创建首批核心表；后续 Goal 只能追加 migration。
 
 `provider_product_id`、`model_id`、`currency`、各 Token 单价、`unit_tokens`、`effective_from/to`、`catalog_version`。价格不可覆盖历史版本。
 
-### `model_catalog` (V7，当前实现)
+### `model_catalog` (V7/V34，当前实现)
 
-目录级模型注册表：`provider_product_id`、`model_id`、`display_name`、`context_window`、`max_output_tokens`、`status`（`ACTIVE|DISABLED|DEPRECATED`）、`version`。唯一 `(provider_product_id, model_id)`。V7 已建表，供未来门户目录浏览使用；当前无应用代码消费。
+目录级模型注册表：`provider_product_id`、`model_id`、`display_name`、`context_window`、`max_output_tokens`、`status`（`ACTIVE|DISABLED|DEPRECATED`）、`version`，**V34 增 `source`（`OFFICIAL|MANUAL`，默认 OFFICIAL）**。唯一 `(provider_product_id, model_id)`。
+- 消费方：网关按产品读取 ACTIVE 模型做 `/v1/models` 交集（route-snapshot `loadUpstreamModels`）；官方抓取仅写成功（失败保留上次成功目录）。
+- **F18（V34）**：`OFFICIAL` 行由官方抓取全权管理（抓取刷新只删/写 OFFICIAL，遇同名模型 ID 用 `ON CONFLICT DO NOTHING` 保留 MANUAL 行）；`MANUAL` 行为管理员人工兜底录入（探测失败回退入口），可单独删除，官方刷新永不覆盖。
 
 ### `model_access` (V7，当前实现)
 

@@ -36,8 +36,8 @@
 | F14 | Tools 分组（引用不复制；组内唯一；AutoPrefix 冲突处理；单组默认 10 个控 Token） | study A9（raw 17） | 清晰 | **DEFERRED（2026-09-05 裁决）** | F01 | raw 17 的组级暴露面=HTTP-to-MCP 直连端点（组名入路径）；本系统标准 MCP 信封单一入口无承载；形态出现（HTTP-to-MCP/Agent 组直连）再立项 |
 | F15 | MCP 纯元数据访问日志（`aigw.mcp.*` 固定前缀，不存正文） | study A8（raw 16） | 清晰 | DONE（2026-09-05，V29+网关 writer+查询 API，PR #→） | F01 | 随代理接线落：网关异步批量写 `mcp_access_log`（幂等/饱和 drop+计数），管理端 `GET /api/v1/admin/mcp-access-logs`；401/404 无可信身份不落行 |
 | F16 | Tools 版本管理（配置快照与运行分离；语义版本化；生效版永不裁剪；幂等回滚） | study A3（raw 11） | 清晰（V33 已定：修订快照+激活指针+父行镜像） | **IN_PROGRESS（2026-09-07 后端+API+V33 交付，PR 待合；UI 历史抽屉后续轮）** | 无 | 交付：mcp_tool_revisions 修订快照（发布=追加修订并激活、部分编辑基线=当前激活版、回滚幂等不产新号、历史永不裁剪、路由快照父行镜像不变）；状态启停沿用 mcp_tools 乐观 version 不建修订 |
-| F17 | Tools OpenAPI 批量导入 | progress P3.5 边界 | **IN_PROGRESS（2026-09-08 后端+API 交付；前端导入按钮后续轮）** | 无 | 交付：POST /mcp-services/{id}/tools/import 批量注册（OpenAPI JSON→工具：operationId/路径派生 snake 名、summary 描述、方法与路径沿用校验；重名/不可派生/不支持方法逐项报告；上限 100；路由刷新单次）。前端导入入口后续轮 | 解析器契约先立（vendor 扩展字段未知） |
-| F18 | 模型探测失败的手动录入兜底（模型目录人工维护入口） | study A5 | 清晰 | SCAFFOLD | 模型目录现仅成功抓取写入 | 手动录入需保留「目录来源」标记防与抓取冲突 |
+| F17 | Tools OpenAPI 批量导入 | progress P3.5 边界 | 清晰（解析器已定：容错+逐项报告） | **IN_PROGRESS（2026-09-08 后端+API 交付，PR 待合；前端导入按钮后续轮）** | 无 | 交付：POST /mcp-services/{id}/tools/import 批量注册（OpenAPI JSON→工具：operationId/路径派生 snake 名、summary 描述、方法与路径沿用校验；重名/不可派生/不支持方法逐项报告；上限 100；路由刷新单次）。解析器契约已立（未知 vendor 扩展忽略）。前端导入入口后续轮 |
+| F18 | 模型探测失败的手动录入兜底（模型目录人工维护入口） | study A5 | 清晰 | **IN_PROGRESS（2026-09-08 后端+API+V34 交付；管理 UI 待后续轮）** | 无 | 交付：model_catalog.source(OFFICIAL/MANUAL,V34)；官方刷新只删/写 OFFICIAL 且 ON CONFLICT DO NOTHING 保 MANUAL；POST/GET/DELETE /api/v1/admin/models 人工兜底（仅 MANUAL 可删）。前端目录管理页后续轮 | 手动录入需保留「目录来源」标记防与抓取冲突 |
 
 ## C 组 · 财务与统计深化（清晰度分层）
 
