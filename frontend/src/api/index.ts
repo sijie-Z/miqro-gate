@@ -81,6 +81,15 @@ type CreateVirtualKeyRequest = components['schemas']['CreateVirtualKeyRequest'];
 
 // ---- auth ----
 
+export interface OAuthProviderInfo {
+  code: string;
+  name: string;
+}
+
+export function publicOauthProviders(): Promise<OAuthProviderInfo[]> {
+  return get<OAuthProviderInfo[]>('/api/v1/auth/oauth/providers');
+}
+
 export function login(username: string, password: string): Promise<LoginResponse> {
   return post<LoginResponse>('/api/v1/auth/login', { username, password });
 }

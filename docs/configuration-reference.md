@@ -81,6 +81,11 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 |---|---:|---|
 | `MIQROKEY_BOOTSTRAP_SECRET_FILE` | 无 | 仅首个管理员创建时使用，完成后移除 |
 | `MIQROKEY_REGISTRATION_ENABLED` | `true` | 自助注册开关（F-REG，api-contract §3.1b）：`false` 时 `/api/v1/auth/register` 返回 403 REGISTRATION_DISABLED（邀请制部署）；公网部署建议另配网络层速率限制 |
+| `MIQROKEY_PLATFORM_OIDC_ENABLED` | `false` | 平台 OIDC 登录总开关（P0a，ADR-0017）：`true` 后登录页出现「平台账号登录」 |
+| `MIQROKEY_PLATFORM_OIDC_CLIENT_ID` / `_SECRET` | 空 | 平台侧注册的 OAuth2 client（test.forge 环境向平台申请） |
+| `MIQROKEY_PLATFORM_OIDC_AUTHORIZE_URI` / `_TOKEN_URI` / `_USERINFO_URI` | 空 | 平台 OAuth2 端点；test 环境形如 `https://test.forge.miqroera.com/api/oauth2/authorize`（token/userinfo 同基址） |
+| `MIQROKEY_PLATFORM_OIDC_REDIRECT_URI` | 空 | 本系统回调地址（需在平台 client 白名单登记） |
+| `MIQROKEY_PLATFORM_OIDC_AUTO_PROVISION` | `true` | 首登自动建号并写 `user_identity_link`；`false` 时未绑定平台账号的登录被拒（ACCOUNT_UNLINKED） |
 | `MIQROKEY_SESSION_COOKIE_NAME` | `MIQROKEY_SESSION` | Secure/HttpOnly/SameSite cookie |
 | `MIQROKEY_CSRF_COOKIE_NAME` | `MIQROKEY_CSRF` | non-HttpOnly/SameSite cookie（JavaScript 可读） |
 | `MIQROKEY_SESSION_IDLE_TIMEOUT` | `PT30M` | 空闲失效 |
