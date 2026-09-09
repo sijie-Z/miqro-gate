@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -60,6 +61,19 @@ public class AdminApiKeyController {
         return service.revoke(user.tenantId(), user.id(), keyId);
     }
 
+    /**
+     * F60 batch 3: sets the key's capability scope (empty body list = deny all,
+     * omitted scope field = full access). SYSTEM_ADMIN-only, audited.
+     */
+    @PatchMapping("/{keyId}/scope")
+    public AdminApiKeyView updateScope(@PathVariable UUID keyId, @Valid @RequestBody ScopeRequest body) {
+        var user = userContext.getUser();
+        return service.updateScope(user.tenantId(), user.id(), keyId, body.capabilities());
+    }
+
     public record IssueRequest(@NotBlank @Size(max = 200) String name) {
+    }
+
+    public record ScopeRequest(List<String> capabilities) {
     }
 }

@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.config;
 import com.miqroera.miqrokey.controlplane.security.AdminApiKeyAuthFilter;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.domain.repository.AdminApiKeyRepository;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,8 +13,9 @@ import org.springframework.context.annotation.Configuration;
 public class OpenAdminApiSecurityConfig {
 
     @Bean
-    public AdminApiKeyAuthFilter adminApiKeyAuthFilter(AdminApiKeyRepository repository, UserContext userContext) {
-        return new AdminApiKeyAuthFilter(repository, userContext);
+    public AdminApiKeyAuthFilter adminApiKeyAuthFilter(AdminApiKeyRepository repository, UserContext userContext,
+            AuditService auditService) {
+        return new AdminApiKeyAuthFilter(repository, userContext, auditService);
     }
 
     @Bean

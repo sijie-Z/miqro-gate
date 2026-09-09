@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.service;
 
 import com.miqroera.miqrokey.controlplane.dto.AdminApiKeyView;
 import com.miqroera.miqrokey.domain.model.AdminApiKey;
+import com.miqroera.miqrokey.domain.model.AdminApiKeyCapabilities;
 import com.miqroera.miqrokey.domain.repository.AdminApiKeyRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import org.junit.jupiter.api.BeforeEach;
@@ -62,13 +63,24 @@ class AdminApiKeyServiceTest {
         }
 
         @Override
+        public boolean updateScope(UUID id, UUID tenantId, List<String> capabilities) {
+            AdminApiKey row = findByIdAndTenantId(id, tenantId).orElse(null);
+            if (row == null) {
+                return false;
+            }
+            rows.set(rows.indexOf(row), new AdminApiKey(row.id(), row.tenantId(), row.name(), row.keyDigest(),
+                    row.keyPrefix(), row.createdBy(), row.expiresAt(), row.revokedAt(), row.createdAt(), capabilities));
+            return true;
+        }
+
+        @Override
         public boolean revoke(UUID id, UUID tenantId, Instant revokedAt) {
             AdminApiKey row = findByIdAndTenantId(id, tenantId).orElse(null);
             if (row == null || row.revokedAt() != null) {
                 return false;
             }
             rows.set(rows.indexOf(row), new AdminApiKey(row.id(), row.tenantId(), row.name(), row.keyDigest(),
-                    row.keyPrefix(), row.createdBy(), row.expiresAt(), revokedAt, row.createdAt()));
+                    row.keyPrefix(), row.createdBy(), row.expiresAt(), revokedAt, row.createdAt(), row.capabilities()));
             return true;
         }
     }
@@ -128,5 +140,34 @@ class AdminApiKeyServiceTest {
     void duplicateName() {
         service.issue(tenant, actor, "dup", null);
         assertThatThrownBy(() -> service.issue(tenant, actor, "dup", null)).isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    @DisplayName("updateScope narrows the key and audits the change")
+    void updateScopeSetsCapabilities() {
+        AdminApiKeyService.Issued issued = service.issue(tenant, actor, "scoped", null);
+        AdminApiKeyView updated = service.updateScope(tenant, actor, issued.id(),
+                List.of(AdminApiKeyCapabilities.USAGE_READ));
+        assertThat(updated.capabilities()).containsExactly(AdminApiKeyCapabilities.USAGE_READ);
+        assertThat(repository.findByIdAndTenantId(issued.id(), tenant).orElseThrow().allows("usage:read")).isTrue();
+        assertThat(repository.findByIdAndTenantId(issued.id(), tenant).orElseThrow().allows("alerts:write")).isFalse();
+        assertThat(recorded).contains("ADMIN_API_KEY_SCOPE_UPDATE");
+
+        // Clearing to null restores full access.
+        service.updateScope(tenant, actor, issued.id(), null);
+        assertThat(repository.findByIdAndTenantId(issued.id(), tenant).orElseThrow().allows("alerts:write")).isTrue();
+    }
+
+    @Test
+    @DisplayName("updateScope rejects unknown or duplicate capabilities")
+    void updateScopeRejectsInvalid() {
+        AdminApiKeyService.Issued issued = service.issue(tenant, actor, "ops", null);
+        assertThatThrownBy(() -> service.updateScope(tenant, actor, issued.id(), List.of("usage:read", "unknown:cap")))
+                .isInstanceOf(ApiException.class).hasMessageContaining("能力组");
+        assertThatThrownBy(() -> service.updateScope(tenant, actor, issued.id(), List.of("usage:read", "usage:read")))
+                .isInstanceOf(ApiException.class).hasMessageContaining("能力组");
+        assertThatThrownBy(() -> service.updateScope(tenant, actor, UUID.randomUUID(),
+                List.of(AdminApiKeyCapabilities.USAGE_READ))).isInstanceOf(ApiException.class)
+                .hasMessageContaining("不存在");
     }
 }
