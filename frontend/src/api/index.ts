@@ -437,6 +437,14 @@ export function disableApiConsumer(id: string): Promise<ApiConsumerView> {
   return post<ApiConsumerView>(`/api/v1/admin/api-consumers/${id}/disable`);
 }
 
+/** Replaces the channel scope: null = full access, empty array = no channels. */
+export function updateApiConsumerScope(
+  id: string,
+  capabilities: string[] | null,
+): Promise<ApiConsumerView> {
+  return patch<ApiConsumerView>(`/api/v1/admin/api-consumers/${id}/scope`, { capabilities });
+}
+
 // ---- admin provider/Plan (G5.3) ----
 
 export function listProviderProducts(): Promise<ProviderProductView[]> {

@@ -33,12 +33,65 @@ const confirmState = ref<{
   run: () => Promise<void>;
 } | null>(null);
 
+const scopeTarget = ref<ApiConsumerView | null>(null);
+const scopeMode = ref<'full' | 'custom'>('full');
+const scopeBilling = ref(true);
+const scopeMcp = ref(true);
+const scopeSaving = ref(false);
+const scopeError = ref('');
+
+function openScope(consumer: ApiConsumerView) {
+  const caps = consumer.capabilities ?? null;
+  scopeTarget.value = consumer;
+  if (caps === null) {
+    scopeMode.value = 'full';
+    scopeBilling.value = true;
+    scopeMcp.value = true;
+  } else {
+    scopeMode.value = 'custom';
+    scopeBilling.value = caps.includes('billing:read');
+    scopeMcp.value = caps.includes('mcp:call');
+  }
+  scopeError.value = '';
+}
+
+function capabilityText(consumer: ApiConsumerView): string {
+  const caps = consumer.capabilities;
+  if (caps == null) return '全量';
+  if (caps.length === 0) return '无通道';
+  return caps.join('、');
+}
+
+async function saveScope() {
+  const target = scopeTarget.value;
+  if (!target) return;
+  scopeSaving.value = true;
+  scopeError.value = '';
+  try {
+    let capabilities: string[] | null = null;
+    if (scopeMode.value === 'custom') {
+      capabilities = [];
+      if (scopeBilling.value) capabilities.push('billing:read');
+      if (scopeMcp.value) capabilities.push('mcp:call');
+    }
+    await api.updateApiConsumerScope(target.id!, capabilities);
+    toast.success('能力作用域已更新');
+    scopeTarget.value = null;
+    await load();
+  } catch (error) {
+    scopeError.value = error instanceof ApiError ? error.message : '更新失败';
+  } finally {
+    scopeSaving.value = false;
+  }
+}
+
 const columns = [
   { key: 'name', title: '名称', minWidth: '200px' },
-  { key: 'keyPrefix', title: 'Key 前缀', width: '200px' },
-  { key: 'status', title: '状态', width: '110px' },
-  { key: 'createdAt', title: '创建时间', width: '180px' },
-  { key: 'actions', title: '操作', width: '100px', align: 'center' as const },
+  { key: 'keyPrefix', title: 'Key 前缀', width: '160px' },
+  { key: 'capabilities', title: '能力作用域', minWidth: '150px' },
+  { key: 'status', title: '状态', width: '100px' },
+  { key: 'createdAt', title: '创建时间', width: '170px' },
+  { key: 'actions', title: '操作', width: '150px', align: 'center' as const },
 ];
 
 async function load() {
@@ -201,6 +254,17 @@ onMounted(load);
         <template #keyPrefix="{ row }">
           <span class="ui-mono">{{ (row as ApiConsumerView).keyPrefix }}</span>
         </template>
+        <template #capabilities="{ row }">
+          <span
+            class="next-consumers__caps"
+            :class="{
+              'next-consumers__caps--full': (row as ApiConsumerView).capabilities === null,
+            }"
+            data-testid="consumer-capabilities"
+          >
+            {{ capabilityText(row as ApiConsumerView) }}
+          </span>
+        </template>
         <template #status="{ row }">
           <UiStatusBadge
             :tone="(row as ApiConsumerView).status === 'ACTIVE' ? 'success' : 'neutral'"
@@ -215,13 +279,22 @@ onMounted(load);
             v-if="(row as ApiConsumerView).status === 'ACTIVE'"
             variant="ghost"
             size="sm"
+            data-testid="consumer-scope"
+            @click="openScope(row as ApiConsumerView)"
+          >
+            作用域
+          </UiButton>
+          <UiButton
+            v-if="(row as ApiConsumerView).status === 'ACTIVE'"
+            variant="ghost"
+            size="sm"
             class="next-consumers__danger"
             data-testid="consumer-disable"
             @click="requestDisable(row as ApiConsumerView)"
           >
             吊销
           </UiButton>
-          <span v-else>—</span>
+          <span v-if="(row as ApiConsumerView).status !== 'ACTIVE'">—</span>
         </template>
       </UiTable>
     </section>
@@ -291,6 +364,51 @@ onMounted(load);
         </UiButton>
       </template>
     </UiDialog>
+    <!-- Channel scope (issue #316) -->
+    <UiDialog
+      v-if="scopeTarget"
+      :open="true"
+      :title="`能力作用域 — ${scopeTarget.name}`"
+      description="控制这把消费者 Key 能访问哪些通道；能力不足的调用会被拒绝（403 CONSUMER_SCOPE_DENIED / consumer_scope_denied）。"
+      width="520px"
+      @update:open="scopeTarget = null"
+    >
+      <div class="next-consumers__scope-mode">
+        <label>
+          <input v-model="scopeMode" type="radio" value="full" data-testid="scope-mode-full" />
+          <span>全量（不裁剪，默认）</span>
+        </label>
+        <label>
+          <input v-model="scopeMode" type="radio" value="custom" data-testid="scope-mode-custom" />
+          <span>自定义通道</span>
+        </label>
+      </div>
+      <div v-if="scopeMode === 'custom'" class="next-consumers__scope-caps">
+        <label data-testid="scope-cap-billing">
+          <input v-model="scopeBilling" type="checkbox" />
+          <span>计费查询通道（billing:read）</span>
+        </label>
+        <label data-testid="scope-cap-mcp">
+          <input v-model="scopeMcp" type="checkbox" />
+          <span>MCP 数据面通道（mcp:call）</span>
+        </label>
+        <p class="next-consumers__scope-hint">
+          一个都不选 = 无任何通道（该 Key 立即无法访问计费接口与 MCP 服务）。
+        </p>
+      </div>
+      <p v-if="scopeError" class="ui-form-error">{{ scopeError }}</p>
+      <template #footer>
+        <UiButton variant="ghost" @click="scopeTarget = null">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="scopeSaving"
+          data-testid="scope-save"
+          @click="saveScope"
+        >
+          保存
+        </UiButton>
+      </template>
+    </UiDialog>
   </div>
 </template>
 
@@ -330,6 +448,44 @@ onMounted(load);
 
 .next-consumers__danger {
   color: var(--ui-danger-fg);
+}
+
+.next-consumers__caps {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--ui-space-2);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-fill-muted, var(--ui-bg-muted));
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-consumers__caps--full {
+  background: var(--ui-success-soft, var(--ui-success-bg));
+  color: var(--ui-success-fg, var(--ui-color-success));
+}
+
+.next-consumers__scope-mode,
+.next-consumers__scope-caps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  margin-bottom: var(--ui-space-3);
+}
+
+.next-consumers__scope-mode label,
+.next-consumers__scope-caps label {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  font-size: var(--ui-font-size-sm);
+  cursor: pointer;
+}
+
+.next-consumers__scope-hint {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  margin: var(--ui-space-1) 0 0 var(--ui-space-5);
 }
 
 .next-consumers__key {
