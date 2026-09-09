@@ -6,11 +6,30 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-09 自主轮（F60 v2 + codegen 第一步 + admin 契约修复）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS`（develop @ b738b92 = #268/#269/#271/#273/#275 已合。本轮交付见
-  下方交接点；**待办：#211 真机凭证（BLOCKED）、#245 告警接线裁决（leader）、F32/F33 平台接口
-  （BLOCKED）、#246 codegen 剩余手写类型、F19 账单对账（等真实样本）、F60 批 3 治理可选**）
+- Current goal: `2026-09-09 自主轮（F60 v2 + codegen 收尾 + typecheck 修复）` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS`（develop @ 52f8727 = #268/#269/#271/#273/#275/#277/#279/#281 已合。
+  本轮交付见下方交接点；**待办：#211 真机凭证（BLOCKED）、#245 告警接线裁决（leader）、F32/F33
+  平台接口（BLOCKED）、codegen 剩余手写类型（Grant/ToolImport*/Usage* 嵌套族等，下一步）、
+  F19 账单对账（等真实样本）、F60 批 3 治理可选**）
 - Last updated: `2026-09-09 CST`
+
+## 会话交接点 2026-09-09（午间轮：#279 codegen 小步 2 + #281 typecheck 修复）
+
+- **#279 codegen hub 小步 2（#278）**：McpToolRevisionRow/ModelCatalogRow/UserProjectMembership/
+  MemberView/McpHeaderCondition → hub（后端返回类型逐一核实）；消费方换源 + 清 #273 遗留
+  spec 陈旧导入。
+- **#281 typecheck 空转修复（#280，重要）**：发现 `npm run typecheck`(vue-tsc --noEmit)对
+  project-references 壳零检查——CI 绿灯是假的；实测 app 项目 360 个积压错误。修复：脚本显式
+  检查 app/node；**360 错清零**(30 视图+3 文件，导入源漂移 + hub 可选字段收窄，零行为改动)；
+  暴露 2 真 bug：toast 定时回调未定义 dismiss（toast 永不自动移除）、clearMcpAccessGrants 第二
+  参被 del() 丢弃（工具级 ACL 重置一直在重置服务级，改 `?toolId=`）。验证：tsc 双项目 0 错、
+  vitest 162/162、CI 前端 job 现跑真 typecheck 全绿。
+- **教训**：project-references 根配置下 `vue-tsc --noEmit` 无 `-p`/`--build` 即空转——凡引
+  references 的项目 typecheck 脚本必须显式 `-p tsconfig.app.json` 或 `--build`；后续新增工程
+  检查同款。
+- **待办延续**：codegen 小步 3（Grant→ProjectProviderGrant、UsageDeletionRequest→UsageDeletion、
+  ToolImportSkip/Result→ImportSkip/ImportResult 已核实可迁；Usage* 嵌套与 CreateApiConsumer
+  Response 需后端命名建模后迁）；typecheck 余项（spec 仍排除在 tsconfig.app 外）可选跟进。
 
 ## 会话交接点 2026-09-09（晨，收尾轮：#273 admin 契约修复 + #275 依赖审计）
 

@@ -5,6 +5,15 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-09
+- **typecheck 空转修复（#281，#280）**：`vue-tsc --noEmit` 对 project-references 壳零检查 →
+  脚本改为显式检查 app/node 两个子项目；**被假绿灯掩盖的 360 个积压错误清零**（导入源漂移 +
+  hub 可选字段收窄），并暴露 2 个真 bug：toast 自动消失回调引用未定义 `dismiss`（toast 永不
+  自动移除）；`clearMcpAccessGrants` 第二参被 `del()` 静默丢弃 → 工具级 ACL 重置一直在重置
+  服务级（改走 `?toolId=` query）。验证：tsc 双项目 0 错、vitest 162/162、CI 前端 job 现跑真实
+  typecheck 全绿。
+- **codegen hub 小步 2（#279，#278）**：McpToolRevisionRow/ModelCatalogRow/UserProjectMembership/
+  MemberView/McpHeaderCondition 五个手写 DTO 迁 hub（后端返回类型逐一核实后别名）；
+  消费方 6 视图 + 3 spec 换导入源；顺手清 #273 遗留的 NextUsersView.spec 陈旧 AdminUser 导入。
 - **admin 用户契约修复（#273，#272）**：/api/v1/admin/users 改返 AdminUserView（domain User 去
   passwordHash）——OpenAPI 契约不再公开哈希（原 schema 含 passwordHash、运行时靠 mixin 隐藏，
   文档违约红线）；spec 测试加防回归断言；FE AdminUser/UserCreatedResponse 迁 hub。
@@ -169,3 +178,4 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - Supply-chain gate：Secret 扫描（修复 23 处文档示例 Key）、CycloneDX SBOM + 许可证门禁、Trivy 镜像扫描（驱动 postgres 镜像 digest 升级）
 - Performance & soak：并发流浸泡测试 + 生产 soak 脚本
 - 本版本：**未标记 VERIFIED**（无真实供应商凭证契约测试，`WAITING_FOR_CREDENTIAL`）
+
