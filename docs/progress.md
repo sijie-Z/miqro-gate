@@ -7,9 +7,9 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `2026-09-09 自主轮（F60 v2 + codegen 迁移线收口 + typecheck 确定性）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS`（develop @ 916842a = #268…#289/#292/#293/#295 已合。
+- Goal status: `IN_PROGRESS`（develop @ 728bbd3 = #268…#299/#301 已合。
   本轮交付见下方交接点；**待办：#211 真机凭证（BLOCKED）、#245 告警接线裁决（leader）、F32/F33
-  平台接口（BLOCKED）、codegen 迁移线收口；spec 已纳入真实 typecheck(#295)；F60 批3 与 F19 契约设计稿已合入待拍板(#292/#293)、
+  平台接口（BLOCKED）、codegen 迁移线收口；spec 已纳入真实 typecheck(#295)；F60 批 3 scope 已实现(#299);F19 引擎先行已实现(#301,真实解析等样本);到期提醒/UI 徽标 follow-up、
   F19 账单对账（等真实样本）、F60 批 3 治理可选**）
 - Last updated: `2026-09-09 CST`
 
