@@ -5,6 +5,12 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-09
+- **admin 用户契约修复（#273，#272）**：/api/v1/admin/users 改返 AdminUserView（domain User 去
+  passwordHash）——OpenAPI 契约不再公开哈希（原 schema 含 passwordHash、运行时靠 mixin 隐藏，
+  文档违约红线）；spec 测试加防回归断言；FE AdminUser/UserCreatedResponse 迁 hub。
+- **依赖审计清零（#275，#274）**：Security gate 因 2026-09-09 新公告失败（vitest ≤4.1.10 /
+  js-yaml 4.0.0–4.3.1）→ vitest ^5.0.0（零配置破坏，163/163 绿）+ js-yaml overrides；
+  npm audit 0 漏洞。
 - **F60 批 2 v2 Virtual Key 委托创建（#268，#263）**：机器密钥代指定用户建钥——案 1 语义
   （钥归属目标、成员校验按目标执行、SYSTEM_ADMIN 目标豁免；委托人须现行 SYSTEM_ADMIN），
   审计 actor=委托人+summary targetUserId；ADR-0016 增补、api-contract §9、示例集补委托段；

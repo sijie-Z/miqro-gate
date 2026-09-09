@@ -6,11 +6,24 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-09 自主夜轮（F60 批 2 v2 委托建钥 + codegen 第一步）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS`（develop @ 18bd061 = #268 + #269 已合。本轮交付见下方
-  「2026-09-09」交接点；**待办：#211 真机凭证（BLOCKED）、#245 告警接线裁决（leader）、
-  F32/F33 平台接口（BLOCKED）、#246 codegen 剩余手写类型、F60 批 3 治理可选**）
+- Current goal: `2026-09-09 自主轮（F60 v2 + codegen 第一步 + admin 契约修复）` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS`（develop @ b738b92 = #268/#269/#271/#273/#275 已合。本轮交付见
+  下方交接点；**待办：#211 真机凭证（BLOCKED）、#245 告警接线裁决（leader）、F32/F33 平台接口
+  （BLOCKED）、#246 codegen 剩余手写类型、F19 账单对账（等真实样本）、F60 批 3 治理可选**）
 - Last updated: `2026-09-09 CST`
+
+## 会话交接点 2026-09-09（晨，收尾轮：#273 admin 契约修复 + #275 依赖审计）
+
+- **#273 admin 用户契约修复（#272）**：GET/PATCH /api/v1/admin/users 原先直接返回 domain
+  User → springdoc 在 OpenAPI 里公开了 passwordHash(运行时靠 Jackson mixin 隐藏)= 文档违约
+  「password_hash 永不返回」红线。改为 AdminUserView(去 hash,仿 TeamMemberView 先例),
+  create/reset 嵌套同步;spec 测试加全契约防回归断言(passwordHash 不得出现);基线再生
+  (User→AdminUserView,可选属性级非 breaking);FE AdminUser/UserCreatedResponse 迁 hub。
+- **#275 依赖审计清零（#274）**：CI security gate 因 2026-09-09 新增公告失败——vitest ≤4.1.10
+  (GHSA-82fw,@vitest/mocker)与 js-yaml 4.0.0–4.3.1(GHSA-2883)。vitest ^3→^5.0.0(零配置
+  破坏,163/163 绿)+ js-yaml overrides ^4.3.2;npm audit 0 漏洞。
+- **待办延续**：F19 账单对账骨架维持 SCAFFOLD(验收口径=等真实账单样本;usage_event 已具备
+  provider_request_id 匹配基础);codegen 剩余手写类型按 hub 顺序;F60 批 3 可选。
 
 ## 会话交接点 2026-09-09（夜，自主轮：F60 批 2 v2 + codegen 第一步 + 例集补段）
 
