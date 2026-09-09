@@ -53,3 +53,18 @@ OpenAPI 3.1 + CI breaking-check，但管理面认证面向“人”（会话 + C
 
 - 版本口径：本 ADR Accepted 即动工批 1（read-only 子集）；写面扩展需本 ADR
   修订（补 machine-executor 的 userId/created_by 语义）。
+
+## 增补：批 3 能力组 scope（2026-09-09 Accepted 执行，issue #298）
+
+机器密钥可裁剪为**预设能力组**（案 A，见 docs/f60-batch3-admin-key-governance-design.md）：
+
+- V35 `admin_api_keys.scope jsonb`：NULL=全量（存量零影响）；空数组=全拒；
+  枚举码 `usage:read` / `alerts:write` / `exports:create` / `vkeys:delegate`。
+- 端点 `PATCH /api/v1/admin/api-keys/{id}/scope`（SYSTEM_ADMIN-only；body
+  `{capabilities:[...]}`，缺省=恢复全量；未知/重复码 400 `ADMIN_API_KEY_SCOPE_INVALID`）。
+- 强制层：AdminApiKeyAuthFilter 按「路径→能力组」映射校验，能力不足 →
+  403 `ADMIN_API_KEY_SCOPE_DENIED`（problem+json）；越权尝试记审计
+  `ADMIN_API_KEY_SCOPE_DENIED`（有发行管理员时）。SYSTEM_ADMIN 会话不受 scope 限制。
+- 审计：`ADMIN_API_KEY_SCOPE_UPDATE`（摘要含 from/to）。
+- 到期提醒：scope 本批不含 webhook 事件（默认关候选）；管理密钥当前无 UI 列表页
+  （管理面=API-only），到期徽标与 `ADMIN_API_KEY_EXPIRING` 事件列入 follow-up。

@@ -981,10 +981,24 @@ Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 
 
 **凭据生命周期（SYSTEM_ADMIN-only，网页会话）**
 - `POST /api/v1/admin/api-keys?expiresAt=` body `{"name"}` → 201 `{key, secret, shownOnce:true}`；secret 仅此一次。
-- `GET /api/v1/admin/api-keys` → 视图列表（无 digest）。
+- `GET /api/v1/admin/api-keys` → 视图列表（无 digest；含 `capabilities`，null=全量）。
+- `PATCH /api/v1/admin/api-keys/{id}/scope` body `{"capabilities":["usage:read",…]}` → 视图；
+  `capabilities` 缺省（null）= 恢复全量；空数组 = 全拒；未知/重复码 → 400
+  `ADMIN_API_KEY_SCOPE_INVALID`；审计 `ADMIN_API_KEY_SCOPE_UPDATE`（摘要 from/to）。
 - `POST /api/v1/admin/api-keys/{id}/revoke` → 视图；冲突码 `ADMIN_API_KEY_NAME_TAKEN`（409）、
   `ADMIN_API_KEY_NOT_FOUND`（404）、`ADMIN_API_KEY_ALREADY_REVOKED`（409）；审计
   `ADMIN_API_KEY_ISSUE/REVOKE`。
+
+**能力组 scope（批 3，ADR-0015 增补 2026-09-09，V35）**：机器密钥可裁剪到预设能力组；
+NULL scope = 全量（存量兼容）。强制层按「开放面路径 → 能力组」映射校验，能力不足 →
+403 `ADMIN_API_SCOPE_DENIED`（problem+json；有发行管理员的越权尝试进审计）。
+
+| 能力组 | 覆盖开放面端点 |
+|---|---|
+| `usage:read` | usage summary/records、audit-events、api-keys 视图、quota-rules 读、mcp-access-logs |
+| `alerts:write` | alert-rules、webhooks 全生命周期（含读） |
+| `exports:create` | export-tasks 创建与元数据 |
+| `vkeys:delegate` | virtual-keys 委托创建与列表 |
 
 **只读开放面（机器凭据 `Authorization: Bearer mqk_admin_…`，租户级）**
 - `GET /api/v1/admin-api/usage/summary?groupBy&from&to` — 租户级汇总（与 §5 管理员用量口径一致）。
