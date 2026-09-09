@@ -95,6 +95,8 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_VK_ROTATION_GRACE` | `PT5M` | 规格默认旧 Key 宽限；管理员可立即失效 |
 | `MIQROKEY_GATEWAY_BASE_URL` | `http://localhost:8081` | （当前实现）展示给用户的 Key Base URL（`miqrokey.gateway-base-url`） |
 | `MIQROKEY_VIRTUAL_KEY_ROTATE_GRACE` | `PT0S` | （当前实现）轮换宽限期（`miqrokey.virtual-key-rotate-grace`）：`PT0S` = 快照刷新后旧 Key 立即失效；控制面在此窗口内对轮换 Key 的旋转状态提示 |
+| `MIQROKEY_ALERTS_EVALUATION_INTERVAL_MS` | `300000` | 告警周期评估间隔（`miqrokey.alerts.evaluation-interval-ms`，5 分钟）；阈值型规则按此节奏计算 |
+| `MIQROKEY_ALERTS_ADMIN_KEY_EXPIRY_INTERVAL_MS` | `21600000` | 管理密钥到期扫描间隔（`miqrokey.alerts.admin-key-expiry-interval-ms`，6 小时）：有启用的 `ADMIN_API_KEY_EXPIRING` 规则时检查 ≤7 天到期密钥并产生事件（规则 opt-in，默认关） |
 | `MIQROKEY_CREDENTIAL_DRAIN_GRACE` | `PT0S` | （当前实现）上游凭证轮换/禁用宽限期（`miqrokey.credential-drain-grace`）：旧凭证版本在 `retiredAt = now + grace` 前保持可解密，请求启动时已解密旧 Secret 的请求可完成；`PT0S` = 快照刷新后旧版本立即退役 |
 | `MIQROKEY_PRODUCTION` | `false` | 生产模式：启用严格 Origin 验证、强制 cookie Secure 标志、拒绝 localhost 来源 |
 | `MIQROKEY_ORIGIN_ALLOWLIST` | `localhost:5173,localhost:8080` | 生产模式下至少需要一个非 localhost 条目 |
