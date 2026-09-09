@@ -217,7 +217,13 @@ public final class GatewayTestKeys {
     public static final String MCP_TOOL_QUIET = "quiet-tool";
 
     /** One API-consumer fixture: self-consistent presented key + digest. */
-    public record ConsumerFixture(UUID id, String name, String presentedKey) {
+    public record ConsumerFixture(UUID id, String name, String presentedKey, java.util.List<String> capabilities) {
+
+        /** Legacy constructor: no scope means full access. */
+        public ConsumerFixture(UUID id, String name, String presentedKey) {
+            this(id, name, presentedKey, null);
+        }
+
         public byte[] digest() {
             return sha256(presentedKey);
         }
@@ -229,6 +235,8 @@ public final class GatewayTestKeys {
     public static final ConsumerFixture MCP_SERVER_ONLY = consumer("server-only");
     /** On no list at all. */
     public static final ConsumerFixture MCP_OUTSIDER = consumer("outsider");
+    /** Issue #316: scoped to zero channels — the MCP data plane must refuse. */
+    public static final ConsumerFixture MCP_NO_CHANNELS = scopedConsumer("no-channels");
 
     private static ConsumerFixture consumer(String label) {
         String name = "drill-" + label;
@@ -236,11 +244,16 @@ public final class GatewayTestKeys {
                 name, "mqk_api_drill_" + label + "_" + UUID.randomUUID());
     }
 
+    private static ConsumerFixture scopedConsumer(String label) {
+        ConsumerFixture fixture = consumer(label);
+        return new ConsumerFixture(fixture.id(), fixture.name(), fixture.presentedKey(), java.util.List.of());
+    }
+
     private static Map<String, RouteSnapshot.ConsumerRecord> mcpConsumers() {
         Map<String, RouteSnapshot.ConsumerRecord> consumers = new LinkedHashMap<>();
-        for (ConsumerFixture fixture : List.of(MCP_ALLOWED, MCP_SERVER_ONLY, MCP_OUTSIDER)) {
-            consumers.putIfAbsent(fixture.id().toString(),
-                    new RouteSnapshot.ConsumerRecord(fixture.id(), TENANT_ID, fixture.name(), fixture.digest()));
+        for (ConsumerFixture fixture : List.of(MCP_ALLOWED, MCP_SERVER_ONLY, MCP_OUTSIDER, MCP_NO_CHANNELS)) {
+            consumers.putIfAbsent(fixture.id().toString(), new RouteSnapshot.ConsumerRecord(fixture.id(), TENANT_ID,
+                    fixture.name(), fixture.digest(), fixture.capabilities()));
         }
         return consumers;
     }
