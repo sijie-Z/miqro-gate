@@ -23,7 +23,8 @@
 | F06 | 过期导出/删除请求定时清理（GC） | progress G4.4 边界 | 清晰 | DONE（2026-09-03） | 无 | 交付见 progress「过期记录定时 GC」：@Scheduled 回收 SUCCEEDED 过窗导出（file_bytes 释放）与过期删除请求；EXECUTED/审计永久保留（G4.4 语义） |
 | F07 | 告警类型补齐（usage 队列饱和/解析失败/供应商错误/Plan 同步/磁盘等 → alert_rules 类型） | progress G4.5 风险；release-checklist §6.1 | 部分（多数类型定义清晰，数据源需接线） | SCAFFOLD |各类型数据源接线 **验收口径**：验收口径：配置各类型规则后,对应数据源事件能产出 alert_events 且去重/退避/投递同既有链路；至少 usage 队列饱和与解析失败两类先接（队列全局性需先定承载租户口径）。| 现有框架支持新增类型；先登记类型清单与数据源，逐类接线 |
 | F08 | 官方价格 24h 自动同步（source=OFFICIAL 自动化） | progress G7.2 风险 | 部分（依赖供应商官方价格源） | SCAFFOLD |供应商价格源确认 **验收口径**：验收口径：官方价源确认后,24h 定时拉取 → price_snapshot source=OFFICIAL 增量写入(与 MANUAL 并存,同模型同 type 冲突策略=保留 MANUAL 并提示)；失败留日志不静默。| source=OFFICIAL 现为人工标记；无源则保持人工 |
-| F09 | OpenAPI 3.1 生成 + CI 破坏性变更检查 | api-contract §8；release-checklist §0 | 清晰（规格已写死） | DONE（2026-09-03） | 无（发布前补项，本会话完成） | 交付见 progress「OpenAPI 3.1 生成」：springdoc `/v3/api-docs`（3.1.0）+ 鉴权 scheme 建模 + 基线 docs/openapi/openapi-3.1.json + CI 破坏性 diff（deploy/openapi/check-openapi-breaking.py）；**前端 TS client codegen（document-map §3 愿景）未纳入**——手写 api/types 继续维护，codegen 迁移列为发布前候选 |
+| F09 | OpenAPI 3.1 生成 + CI 破坏性变更检查 | api-contract §8；release-checklist §0 | 清晰（规格已写死） | DONE（2026-09-03） | 无（发布前补项，本会话完成） | 交付见 progress「OpenAPI 3.1 生成」：springdoc `/v3/api-docs`（3.1.0）+ 鉴权 scheme 建模 + 基线 docs/openapi/openapi-3.1.json + CI 破坏性 diff（deploy/openapi/check-openapi-breaking.py）；**前端 TS client codegen（document-map §3 愿景）2026-09-09 迁移线已收口**（25 个手写 DTO 迁 hub，
+  见 #269/#273/#278/#284/#286；types/api.ts 仅剩 ProblemDetails/ProviderProductView 刻意保留） |
 | F10 | 网关部署信息页核对与补齐 | mapping 表行 8 | 清晰（核对完成） | **DONE（2026-09-05 核对）** | 无 | 核对：NextSettingsView 含部署信息段（网关/控制面版本与仓库信息页）；无独立补齐缺口 |
 
 ## B 组 · MCP 运行时护栏（腾讯 A 类研究建议，方向明确）
@@ -43,7 +44,7 @@
 
 | ID | 功能 | 出处 | 清晰度 | 状态 | 前置/依赖 | 架子与要点 |
 |---|---|---|---|---|---|---|
-| F19 | 官方账单导入 + 自动差异报告（四级匹配：request ID → 指纹+模型+时间 → Token/费用 → 时间窗） | usage-accounting §11；roadmap 后续 | 部分（匹配规则文档清晰；账单格式依赖真实样本） | SCAFFOLD |真实账单样本（任一供应商） **验收口径**：验收口径：任一家真实账单样本到位后,导入解析→四级匹配(重名覆盖由明细级去重)→差异报告页可看可导出；无样本阶段保持 SCAFFOLD。| api-contract §6 规格已超前：异步任务 + MATCHED/PARTIAL/UNMATCHED_LOCAL/UNMATCHED_PROVIDER；导入器契约可先行定义，供应商解析器待样本 |
+| F19 | 官方账单导入 + 自动差异报告（四级匹配：request ID → 指纹+模型+时间 → Token/费用 → 时间窗） | usage-accounting §11；roadmap 后续 | 部分（匹配规则文档清晰；账单格式依赖真实样本） | SCAFFOLD（**引擎先行 2026-09-09 已交付 #301**：canonical 解析器+四级匹配+四态+桶聚合,合成测试 10/10；真实解析器/端点仍 WAITING_FOR_SAMPLE） |真实账单样本（任一供应商） **验收口径**：验收口径：任一家真实账单样本到位后,导入解析→四级匹配(重名覆盖由明细级去重)→差异报告页可看可导出；无样本阶段保持 SCAFFOLD。| api-contract §6 规格已超前：异步任务 + MATCHED/PARTIAL/UNMATCHED_LOCAL/UNMATCHED_PROVIDER；契约稿 docs/bill-reconciliation-contract.md（#293）已定 canonical v0 与端点契约；供应商解析器待样本 |
 | F20 | 用量差异「追加 adjustment」机制（不覆盖原始事实） | operations-runbook §7 | 清晰（追加语义明确） | SCAFFOLD |F19 差异产生后闭环需要 **验收口径**：验收口径：F19 差异确认后写 usage_adjustments(不覆盖原始事实),明细查询带净额列,审计/导出含调整标记。| 架子：adjustment 表结构（追加行 + 原因 + 引用原始行）待建；release-checklist 的 adjustment schema 门禁随之可勾 |
 | F21 | usage_event 延后列批量落地（team/subscription/名称指纹快照/error_category/token authority/provider_usage_json/price 快照/成本列/plan_window_ref/usage_integrity） | database-schema §6 | 部分（列清单明确；写路径与成本语义需定） | SCAFFOLD |与 F19/成本重算语义绑定 **验收口径**：验收口径：与 F19 同批评估落地列清单(team/subscription/名称指纹/error_category/…),出 migration+快照回填+查询使用示例。| 架子：列清单已登记；逐事件价格快照解决「价格变更重算历史」语义风险 |
 | F22 | 成本分摊 USER 维度（target_type=USER 预留） | progress G4.3 边界 | 清晰 | DEFERRED | 无 | 表唯一键已支持；需按人聚合的产品决策 |
