@@ -22,8 +22,8 @@ const productById = computed(
   () => new Map(products.value.map((p) => [p.id, p]) as [string, ProviderProductView][]),
 );
 
-function productName(productId: string): string {
-  return productById.value.get(productId)?.displayName ?? productId;
+function productName(productId: string | undefined): string {
+  return productById.value.get(productId ?? '')?.displayName ?? productId ?? '—';
 }
 
 const tokenTypeLabel: Record<string, string> = {
@@ -138,7 +138,8 @@ async function createPrice() {
   }
 }
 
-function formatTime(iso: string): string {
+function formatTime(iso?: string): string {
+  if (!iso) return '—';
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -281,7 +282,7 @@ onMounted(load);
           <span class="ui-mono">{{ (row as PriceSnapshotView).modelId }}</span>
         </template>
         <template #tokenType="{ row }">{{
-          tokenTypeLabel[(row as PriceSnapshotView).tokenType] ??
+          tokenTypeLabel[(row as PriceSnapshotView).tokenType ?? ''] ??
           (row as PriceSnapshotView).tokenType
         }}</template>
         <template #unitPrice="{ row }">
@@ -294,7 +295,10 @@ onMounted(load);
           formatTime((row as PriceSnapshotView).effectiveFrom)
         }}</template>
         <template #source="{ row }">
-          {{ sourceLabel[(row as PriceSnapshotView).source] ?? (row as PriceSnapshotView).source }}
+          {{
+            sourceLabel[(row as PriceSnapshotView).source ?? ''] ??
+            (row as PriceSnapshotView).source
+          }}
         </template>
       </UiTable>
     </section>

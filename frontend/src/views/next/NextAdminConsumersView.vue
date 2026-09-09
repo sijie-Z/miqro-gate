@@ -67,7 +67,7 @@ async function createConsumer() {
     const response = await api.createApiConsumer(createName.value.trim());
     creating.value = false;
     createName.value = '';
-    revealName.value = response.consumer.name;
+    revealName.value = response.consumer.name ?? '';
     revealKey.value = response.apiKey;
     revealAcked.value = false;
     reveal.value = true;
@@ -89,6 +89,8 @@ async function copyKey() {
 }
 
 function requestDisable(consumer: ApiConsumerView) {
+  // Hub View schemas mark every field optional (springdoc omits `required`);
+  // consumer rows always carry the id — the `!` restores the pre-hub contract.
   confirmState.value = {
     title: `吊销消费者「${consumer.name}」`,
     body: '吊销后该 API Key 立即失效，外部系统将无法再调用计费查询接口。',
@@ -96,7 +98,7 @@ function requestDisable(consumer: ApiConsumerView) {
     tone: 'danger',
     run: async () => {
       try {
-        await api.disableApiConsumer(consumer.id);
+        await api.disableApiConsumer(consumer.id!);
         toast.success('消费者已吊销');
         await load();
       } catch (error) {

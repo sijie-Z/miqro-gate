@@ -36,6 +36,11 @@ function pct(value: number): string {
   return `${value.toFixed(2)}%`;
 }
 
+/** UiTable row slots are generic records; narrow to the report's day shape. */
+function asDay(row: unknown): NonNullable<RoiReportView['byDay']>[number] {
+  return row as NonNullable<RoiReportView['byDay']>[number];
+}
+
 async function load() {
   loading.value = true;
   loadError.value = '';
@@ -52,14 +57,14 @@ async function load() {
 
 function exportCsv() {
   if (!report.value) return;
-  const rows = report.value.byDay.map((d) =>
+  const rows = (report.value.byDay ?? []).map((d) =>
     [
       d.date,
       d.upstreamRequests,
       d.hitRequests,
-      d.hitRatePct.toFixed(2),
-      d.paidCost.toFixed(4),
-      d.savedCost.toFixed(4),
+      (d.hitRatePct ?? 0).toFixed(2),
+      (d.paidCost ?? 0).toFixed(4),
+      (d.savedCost ?? 0).toFixed(4),
     ].join(','),
   );
   const header = 'date,upstreamRequests,hitRequests,hitRatePct,paidCost,savedCost';
@@ -67,7 +72,7 @@ function exportCsv() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `cache-roi-${report.value.from.slice(0, 10)}_${report.value.to.slice(0, 10)}.csv`;
+  a.download = `cache-roi-${(report.value.from ?? '').slice(0, 10)}_${(report.value.to ?? '').slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -119,20 +124,20 @@ onMounted(load);
     <div v-if="report" class="next-roi__cards" data-testid="roi-report">
       <div class="ui-panel next-roi__card">
         <span class="next-roi__value next-roi__value--accent ui-num">{{
-          money(report.totals.savedCost)
+          money(report.totals?.savedCost ?? 0)
         }}</span>
         <span class="next-roi__label">缓存节省（无缓存时需多付）</span>
       </div>
       <div class="ui-panel next-roi__card">
-        <span class="next-roi__value ui-num">{{ money(report.totals.paidCost) }}</span>
+        <span class="next-roi__value ui-num">{{ money(report.totals?.paidCost ?? 0) }}</span>
         <span class="next-roi__label">上游实付</span>
       </div>
       <div class="ui-panel next-roi__card">
-        <span class="next-roi__value ui-num">{{ pct(report.totals.savedPct) }}</span>
+        <span class="next-roi__value ui-num">{{ pct(report.totals?.savedPct ?? 0) }}</span>
         <span class="next-roi__label">等效折扣（节省 / 实付+节省）</span>
       </div>
       <div class="ui-panel next-roi__card">
-        <span class="next-roi__value ui-num">{{ pct(report.totals.hitRatePct) }}</span>
+        <span class="next-roi__value ui-num">{{ pct(report.totals?.hitRatePct ?? 0) }}</span>
         <span class="next-roi__label">请求命中率（L1+L2）</span>
       </div>
     </div>
@@ -150,17 +155,17 @@ onMounted(load);
         data-testid="roi-table"
       >
         <template #requests="{ row }">
-          {{ (row as RoiReportView['byDay'][number]).upstreamRequests }} /
-          {{ (row as RoiReportView['byDay'][number]).hitRequests }}
+          {{ asDay(row).upstreamRequests }} /
+          {{ asDay(row).hitRequests }}
         </template>
         <template #hitRatePct="{ row }">{{
-          pct((row as RoiReportView['byDay'][number]).hitRatePct)
+          pct(asDay(row).hitRatePct ?? 0)
         }}</template>
         <template #paidCost="{ row }">{{
-          money((row as RoiReportView['byDay'][number]).paidCost)
+          money(asDay(row).paidCost ?? 0)
         }}</template>
         <template #savedCost="{ row }">{{
-          money((row as RoiReportView['byDay'][number]).savedCost)
+          money(asDay(row).savedCost ?? 0)
         }}</template>
       </UiTable>
     </section>

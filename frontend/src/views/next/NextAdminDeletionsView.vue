@@ -44,12 +44,17 @@ const statusText: Record<string, string> = {
   EXPIRED: '已过期',
 };
 
-const statusTone: Record<string, 'warning' | 'success' | 'neutral' | 'danger'> = {
+const statusTone: Record<string, 'warning' | 'success' | 'neutral' | 'danger' | 'info'> = {
   PENDING_CONFIRMATION: 'warning',
   CONFIRMED: 'info',
   EXECUTED: 'success',
   EXPIRED: 'neutral',
 };
+
+/** UiTable row slots are generic records; narrow to the deletion request shape. */
+function asDeletion(row: unknown): UsageDeletionRequest {
+  return row as UsageDeletionRequest;
+}
 
 async function load() {
   loading.value = true;
@@ -193,32 +198,32 @@ onMounted(load);
       >
         <template #period="{ row }">
           <span class="ui-mono"
-            >{{ (row as UsageDeletionRequest).periodFrom.slice(0, 10) }} →
-            {{ (row as UsageDeletionRequest).periodTo.slice(0, 10) }}</span
+            >{{ asDeletion(row).periodFrom.slice(0, 10) }} →
+            {{ asDeletion(row).periodTo.slice(0, 10) }}</span
           >
         </template>
         <template #previewCount="{ row }">
           <span class="ui-num">{{
-            (row as UsageDeletionRequest).previewCount.toLocaleString()
+            asDeletion(row).previewCount.toLocaleString()
           }}</span>
         </template>
         <template #status="{ row }">
           <UiStatusBadge
             variant="pill"
-            :tone="statusTone[(row as UsageDeletionRequest).status] ?? 'neutral'"
+            :tone="statusTone[asDeletion(row).status] ?? 'neutral'"
             :label="
-              statusText[(row as UsageDeletionRequest).status] ??
-              (row as UsageDeletionRequest).status
+              statusText[asDeletion(row).status] ??
+              asDeletion(row).status
             "
           />
         </template>
         <template #deletedCount="{ row }">
           <span class="ui-num">{{
-            (row as UsageDeletionRequest).deletedCount?.toLocaleString() ?? '—'
+            asDeletion(row).deletedCount?.toLocaleString() ?? '—'
           }}</span>
         </template>
         <template #createdAt="{ row }">{{
-          formatTime((row as UsageDeletionRequest).createdAt)
+          formatTime(asDeletion(row).createdAt)
         }}</template>
       </UiTable>
     </section>

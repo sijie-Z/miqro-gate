@@ -167,12 +167,15 @@ function openProjectMembership(user: AdminUser) {
   }
 }
 
+// Hub View schemas mark every field optional (springdoc omits `required`);
+// user rows from listUsers / create / reset responses always carry the fields
+// asserted below — the `!` restore the pre-hub required-field contract.
 async function refreshMemberships() {
   if (!membershipUser.value) return;
   membershipLoading.value = true;
   membershipError.value = '';
   try {
-    memberships.value = await api.adminUserProjectMemberships(membershipUser.value.id);
+    memberships.value = await api.adminUserProjectMemberships(membershipUser.value.id!);
   } catch (error) {
     membershipError.value = error instanceof ApiError ? error.message : '加载项目成员关系失败。';
   } finally {
@@ -185,7 +188,7 @@ async function addMembership() {
   membershipSaving.value = true;
   membershipError.value = '';
   try {
-    await api.addProjectMember(pickProjectId.value, membershipUser.value.id);
+    await api.addProjectMember(pickProjectId.value, membershipUser.value.id!);
     pickProjectId.value = '';
     toast.success('已加入项目');
     await refreshMemberships();
@@ -200,7 +203,7 @@ async function removeMembership(membership: UserProjectMembership) {
   if (!membershipUser.value) return;
   membershipError.value = '';
   try {
-    await api.removeProjectMember(membership.projectId, membershipUser.value.id);
+    await api.removeProjectMember(membership.projectId!, membershipUser.value.id!);
     toast.success('已从「' + membership.projectName + '」移除');
     await refreshMemberships();
   } catch (error) {
@@ -227,7 +230,7 @@ async function createUser() {
     createUsername.value = '';
     createDisplayName.value = '';
     await load();
-    openReveal(response.user.username, response.temporaryPassword);
+    openReveal(response.user!.username!, response.temporaryPassword!);
   } catch (error) {
     if (error instanceof ApiError) {
       formError.value = error.message;
@@ -268,7 +271,7 @@ function toggleStatus(user: AdminUser) {
     tone: disabling ? 'danger' : 'primary',
     run: async () => {
       try {
-        await api.updateUserStatus(user.id, disabling ? 'DISABLED' : 'ACTIVE');
+        await api.updateUserStatus(user.id!, disabling ? 'DISABLED' : 'ACTIVE');
         toast.success(disabling ? '用户已禁用' : '用户已启用');
         await load();
       } catch (error) {
@@ -288,9 +291,9 @@ function resetPassword(user: AdminUser) {
     tone: 'danger',
     run: async () => {
       try {
-        const response = await api.resetUserPassword(user.id);
+        const response = await api.resetUserPassword(user.id!);
         await load();
-        openReveal(response.user.username, response.temporaryPassword);
+        openReveal(response.user!.username!, response.temporaryPassword!);
       } catch (error) {
         if (error instanceof ApiError) {
           toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
@@ -308,7 +311,7 @@ function revokeSessions(user: AdminUser) {
     tone: 'primary',
     run: async () => {
       try {
-        await api.revokeUserSessions(user.id);
+        await api.revokeUserSessions(user.id!);
         toast.success('会话已撤销');
       } catch (error) {
         if (error instanceof ApiError) {
@@ -326,7 +329,7 @@ async function confirmAndRun() {
   await state.run();
 }
 
-function statusLabel(status: string): string {
+function statusLabel(status?: string): string {
   switch (status) {
     case 'ACTIVE':
       return '正常';
@@ -335,11 +338,11 @@ function statusLabel(status: string): string {
     case 'LOCKED':
       return '锁定';
     default:
-      return status;
+      return status ?? '';
   }
 }
 
-function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
+function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutral' {
   switch (status) {
     case 'ACTIVE':
       return 'success';
@@ -481,7 +484,7 @@ function formatDate(iso?: string): string {
             :class="{
               'next-users__role--admin': (row as AdminUser).role === 'SYSTEM_ADMIN',
             }"
-            >{{ roleLabel[(row as AdminUser).role] ?? (row as AdminUser).role }}</span
+            >{{ roleLabel[(row as AdminUser).role ?? ''] ?? (row as AdminUser).role }}</span
           >
         </template>
         <template #status="{ row }">
@@ -594,7 +597,7 @@ function formatDate(iso?: string): string {
       <div class="next-users__join-row">
         <UiSelect
           v-model="pickProjectId"
-          :options="joinableProjects.map((p) => ({ value: p.id, label: p.code + ' · ' + p.name }))"
+          :options="joinableProjects.map((p) => ({ value: p.id ?? '', label: p.code + ' · ' + p.name }))"
           placeholder="选择项目"
           data-testid="user-project-pick"
         />

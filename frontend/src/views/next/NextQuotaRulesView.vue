@@ -53,10 +53,33 @@ const levelTone: Record<QuotaLevel, 'success' | 'warning' | 'danger' | 'neutral'
   EXCEEDED: 'danger',
 };
 
+// ---- display helpers: generated schema marks row fields optional, but the
+// backend always returns complete rows, so fold undefined into blanks ----
+
+function metricLabel(metric: QuotaMetric | undefined): string {
+  return metric ? metricText[metric] : '';
+}
+
+function periodLabel(period: QuotaPeriod | undefined): string {
+  return period ? periodText[period] : '';
+}
+
+function numText(value: number | undefined): string {
+  return value == null ? '' : value.toLocaleString();
+}
+
+function levelToneFor(level: string | undefined): 'success' | 'warning' | 'danger' | 'neutral' {
+  return levelTone[level as QuotaLevel] ?? 'neutral';
+}
+
+function levelLabel(level: string | undefined): string {
+  return level ? (levelText[level as QuotaLevel] ?? '') : '';
+}
+
 const scopeOptions = computed<UiSelectOption[]>(() =>
   form.value.scopeType === 'USER'
-    ? users.value.map((u) => ({ value: u.id, label: u.username }))
-    : projects.value.map((p) => ({ value: p.id, label: `${p.code} · ${p.name}` })),
+    ? users.value.map((u) => ({ value: u.id ?? '', label: u.username ?? '' }))
+    : projects.value.map((p) => ({ value: p.id ?? '', label: `${p.code ?? ''} · ${p.name ?? ''}` })),
 );
 
 const templateConfigured = computed(
@@ -80,8 +103,11 @@ const templateDefinitionText = computed(() => {
   if (
     !quotaTemplate.value ||
     quotaTemplate.value.limitValue === null ||
+    quotaTemplate.value.limitValue === undefined ||
     quotaTemplate.value.metric === null ||
-    quotaTemplate.value.period === null
+    quotaTemplate.value.metric === undefined ||
+    quotaTemplate.value.period === null ||
+    quotaTemplate.value.period === undefined
   )
     return '';
   return `${metricText[quotaTemplate.value.metric]} · ${periodText[quotaTemplate.value.period]} · 限额 ${quotaTemplate.value.limitValue.toLocaleString()}`;
@@ -138,14 +164,16 @@ function openCreate() {
 
 function openEdit(row: QuotaRuleView) {
   editId.value = row.id;
+  // Rule rows from listQuotaRules always carry every editable field; the
+  // generated schema models them optional, so assert the contract here.
   form.value = {
-    scopeType: row.scopeType,
-    scopeId: row.scopeId,
-    metric: row.metric,
-    period: row.period,
-    limitValue: String(row.limitValue),
-    warnPercent: String(row.warnPercent),
-    status: row.status,
+    scopeType: row.scopeType!,
+    scopeId: row.scopeId!,
+    metric: row.metric!,
+    period: row.period!,
+    limitValue: String(row.limitValue!),
+    warnPercent: String(row.warnPercent!),
+    status: row.status!,
   };
   editError.value = '';
   editing.value = true;
@@ -202,14 +230,15 @@ const confirmState = ref<{
 } | null>(null);
 
 function requestRemove(row: QuotaRuleView) {
+  // Same row contract as openEdit: id/metric/period always present on list rows.
   confirmState.value = {
     title: '删除配额规则',
-    body: `删除「${row.scopeName ?? row.scopeId}」的${metricText[row.metric]}${periodText[row.period]}规则？历史用量不受影响。`,
+    body: `删除「${row.scopeName ?? row.scopeId}」的${metricText[row.metric!]}${periodText[row.period!]}规则？历史用量不受影响。`,
     confirmLabel: '删除',
     tone: 'danger',
     run: async () => {
       try {
-        await api.deleteQuotaRule(row.id);
+        await api.deleteQuotaRule(row.id!);
         toast.success('配额规则已删除');
         await load();
       } catch (err) {
@@ -287,7 +316,7 @@ async function toggleTemplate() {
   }
 }
 
-function levelFill(level: QuotaLevel): string {
+function levelFill(level: string | undefined): string {
   if (level === 'EXCEEDED') return 'var(--ui-danger-fg)';
   if (level === 'WARNING') return 'var(--ui-warning-fg)';
   return 'var(--ui-primary)';
@@ -498,22 +527,22 @@ onMounted(load);
             {{ (row as QuotaRuleView).scopeTag }}
           </div>
         </template>
-        <template #metric="{ row }">{{ metricText[(row as QuotaRuleView).metric] }}</template>
-        <template #period="{ row }">{{ periodText[(row as QuotaRuleView).period] }}</template>
+        <template #metric="{ row }">{{ metricLabel((row as QuotaRuleView).metric) }}</template>
+        <template #period="{ row }">{{ periodLabel((row as QuotaRuleView).period) }}</template>
         <template #limitValue="{ row }">
-          <span class="ui-num">{{ (row as QuotaRuleView).limitValue.toLocaleString() }}</span>
+          <span class="ui-num">{{ numText((row as QuotaRuleView).limitValue) }}</span>
         </template>
         <template #watermark="{ row }">
           <div class="next-quota__bar-row">
             <span class="ui-num next-quota__bar-nums"
-              >{{ (row as QuotaRuleView).used.toLocaleString() }} /
-              {{ (row as QuotaRuleView).limitValue.toLocaleString() }}</span
+              >{{ numText((row as QuotaRuleView).used) }} /
+              {{ numText((row as QuotaRuleView).limitValue) }}</span
             >
             <div class="next-quota__bar-track">
               <div
                 class="next-quota__bar-fill"
                 :style="{
-                  width: `${Math.min(100, (row as QuotaRuleView).usedPct)}%`,
+                  width: `${Math.min(100, (row as QuotaRuleView).usedPct ?? 0)}%`,
                   background: levelFill((row as QuotaRuleView).level),
                 }"
               />
@@ -523,8 +552,8 @@ onMounted(load);
         <template #level="{ row }">
           <UiStatusBadge
             variant="pill"
-            :tone="levelTone[(row as QuotaRuleView).level]"
-            :label="levelText[(row as QuotaRuleView).level]"
+            :tone="levelToneFor((row as QuotaRuleView).level)"
+            :label="levelLabel((row as QuotaRuleView).level)"
           />
         </template>
         <template #status="{ row }">

@@ -17,6 +17,13 @@ const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
 
+// UiTable slot rows arrive as loose Records; the catalogue list always returns
+// complete product rows, so cast back to the handwritten view type (which is
+// deliberately kept in @/types/api, not migrated to the generated hub).
+function productOf(row: unknown): ProviderProductView {
+  return row as unknown as ProviderProductView;
+}
+
 const columns = [
   { key: 'provider', title: '供应商', width: '220px' },
   { key: 'product', title: '产品', minWidth: '220px' },
@@ -140,8 +147,9 @@ async function addManualModel() {
 }
 
 async function removeManualModel(row: ModelCatalogRow) {
+  // Model rows come from adminListModels; the server always issues ids.
   try {
-    await api.adminDeleteModel(row.id);
+    await api.adminDeleteModel(row.id!);
     toast.success(`已删除 ${row.modelId}`);
     if (modelsProduct.value) {
       models.value = await api.adminListModels(modelsProduct.value.id);
@@ -200,37 +208,35 @@ onMounted(load);
           <span class="next-providers__provider">
             <span
               class="mk-brand-chip mk-brand-chip--sm"
-              :class="chipClass((row as ProviderProductView).providerSlug)"
+              :class="chipClass(productOf(row).providerSlug)"
               aria-hidden="true"
-              >{{ chipLetter((row as ProviderProductView).providerName) }}</span
+              >{{ chipLetter(productOf(row).providerName) }}</span
             >
-            <span>{{ (row as ProviderProductView).providerName }}</span>
+            <span>{{ productOf(row).providerName }}</span>
           </span>
         </template>
         <template #product="{ row }">
-          <div class="next-providers__name">{{ (row as ProviderProductView).displayName }}</div>
-          <div class="ui-mono next-providers__code">
-            {{ (row as ProviderProductView).productCode }}
-          </div>
+          <div class="next-providers__name">{{ productOf(row).displayName }}</div>
+          <div class="ui-mono next-providers__code">{{ productOf(row).productCode }}</div>
         </template>
         <template #protocols="{ row }">
-          <span class="ui-mono">{{ (row as ProviderProductView).protocols }}</span>
+          <span class="ui-mono">{{ productOf(row).protocols }}</span>
         </template>
         <template #baseUrl="{ row }">
-          <span class="ui-mono">{{ (row as ProviderProductView).baseUrlHost || '—' }}</span>
+          <span class="ui-mono">{{ productOf(row).baseUrlHost || '—' }}</span>
         </template>
         <template #implementationStatus="{ row }">
           <UiStatusBadge
-            :tone="implTone((row as ProviderProductView).implementationStatus)"
+            :tone="implTone(productOf(row).implementationStatus)"
             :label="
-              implLabel[(row as ProviderProductView).implementationStatus] ??
-              (row as ProviderProductView).implementationStatus
+              implLabel[productOf(row).implementationStatus] ??
+              productOf(row).implementationStatus
             "
           />
         </template>
         <template #balanceAuthority="{ row }">
           <span class="next-providers__balance">{{
-            balanceLabel((row as ProviderProductView).balanceAuthority)
+            balanceLabel(productOf(row).balanceAuthority)
           }}</span>
         </template>
         <template #actions="{ row }">
@@ -238,7 +244,7 @@ onMounted(load);
             variant="ghost"
             size="sm"
             data-testid="product-models-open"
-            @click="openModels(row as ProviderProductView)"
+            @click="openModels(productOf(row))"
             >模型目录</UiButton
           >
         </template>

@@ -55,8 +55,10 @@ const confirmState = ref<{
   run: () => Promise<void>;
 } | null>(null);
 
+// listProjects rows always include id (hub Project fields are all optional) —
+// the `!` restores the pre-hub required-field contract.
 const projectOptions = computed<UiSelectOption[]>(() =>
-  projects.value.map((p) => ({ value: p.id, label: `${p.code} · ${p.name}` })),
+  projects.value.map((p) => ({ value: p.id!, label: `${p.code} · ${p.name}` })),
 );
 
 const credentialOptions = computed<UiSelectOption[]>(() =>
@@ -301,25 +303,25 @@ onMounted(async () => {
         data-testid="grants-table"
       >
         <template #project="{ row }">
-          <span class="next-grants__name">{{ nameOf.project((row as Grant).projectId) }}</span>
+          <span class="next-grants__name">{{ nameOf.project((row as unknown as Grant).projectId) }}</span>
         </template>
         <template #credential="{ row }">
           <span class="next-grants__name">{{
-            nameOf.credential((row as Grant).upstreamCredentialId)
+            nameOf.credential((row as unknown as Grant).upstreamCredentialId)
           }}</span>
         </template>
         <template #product="{ row }">
           <span class="next-grants__name">{{
-            nameOf.product((row as Grant).providerProductId)
+            nameOf.product((row as unknown as Grant).providerProductId)
           }}</span>
         </template>
         <template #status="{ row }">
           <UiStatusBadge
-            :tone="(row as Grant).status === 'ACTIVE' ? 'success' : 'neutral'"
+            :tone="(row as unknown as Grant).status === 'ACTIVE' ? 'success' : 'neutral'"
             :label="
-              (row as Grant).status === 'ACTIVE'
+              (row as unknown as Grant).status === 'ACTIVE'
                 ? '正常'
-                : (row as Grant).status === 'EXPIRED'
+                : (row as unknown as Grant).status === 'EXPIRED'
                   ? '已过期'
                   : '停用'
             "
@@ -331,17 +333,17 @@ onMounted(async () => {
               variant="ghost"
               size="sm"
               data-testid="grant-models-open"
-              @click="openModels(row as Grant)"
+              @click="openModels(row as unknown as Grant)"
             >
               模型
             </UiButton>
             <UiButton
-              v-if="(row as Grant).status === 'ACTIVE'"
+              v-if="(row as unknown as Grant).status === 'ACTIVE'"
               variant="ghost"
               size="sm"
               class="next-grants__danger"
               data-testid="grant-disable"
-              @click="requestDisable(row as Grant)"
+              @click="requestDisable(row as unknown as Grant)"
             >
               禁用
             </UiButton>

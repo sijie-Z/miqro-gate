@@ -34,7 +34,9 @@ async function load() {
 
 async function download(skill: SkillView) {
   try {
-    await api.downloadSkill(skill.id, skill.name);
+    // Hub View schemas mark every field optional (springdoc omits `required`);
+    // directory rows always carry id/name — the `!` restores the pre-hub contract.
+    await api.downloadSkill(skill.id!, skill.name!);
     toast.success(`已下载 ${skill.name} v${skill.version}`);
   } catch (error) {
     if (error instanceof ApiError) {
@@ -102,7 +104,9 @@ onMounted(load);
           <div class="next-skills__meta">
             <span v-if="skill.author" class="next-skills__meta-item">{{ skill.author }}</span>
             <span v-if="skill.license" class="next-skills__license">{{ skill.license }}</span>
-            <span class="next-skills__meta-item ui-num">{{ formatBytes(skill.contentBytes) }}</span>
+            <span class="next-skills__meta-item ui-num">{{
+              formatBytes(skill.contentBytes ?? 0)
+            }}</span>
           </div>
           <UiButton
             variant="secondary"

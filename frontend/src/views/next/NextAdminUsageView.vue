@@ -12,7 +12,7 @@ import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import { UiButton, UiInput, UiSelect, UiStatusBadge, UiTable } from '@/ui';
 import type { UiSelectOption } from '@/ui';
 import type {UsageGroupBy} from '@/types/api';
-import type { UsageRecordPage, UsageSummary } from '@/types/generated-api';
+import type { UsageRecord, UsageRecordPage, UsageSummary } from '@/types/generated-api';
 
 const groupBy = ref<UsageGroupBy>('project');
 const modelId = ref('');
@@ -108,7 +108,7 @@ function fmtNum(value: number | undefined): string {
   return (value ?? 0).toLocaleString();
 }
 
-function fmtMoney(value: string | undefined): string {
+function fmtMoney(value: number | string | undefined): string {
   return Number(value ?? 0).toFixed(4);
 }
 
@@ -252,43 +252,43 @@ onMounted(load);
         data-testid="usage-records-table"
       >
         <template #occurredAt="{ row }">{{
-          formatTime((row as UsageRecordPage['items'][number]).occurredAt)
+          formatTime((row as UsageRecord).occurredAt)
         }}</template>
         <template #modelId="{ row }">
-          <span class="ui-mono">{{ (row as UsageRecordPage['items'][number]).modelId }}</span>
+          <span class="ui-mono">{{ (row as UsageRecord).modelId }}</span>
         </template>
         <template #inputTokens="{ row }">
           <span class="ui-num">{{
-            (row as UsageRecordPage['items'][number]).inputTokens ?? 0
+            (row as UsageRecord).inputTokens ?? 0
           }}</span>
         </template>
         <template #outputTokens="{ row }">
           <span class="ui-num">{{
-            (row as UsageRecordPage['items'][number]).outputTokens ?? 0
+            (row as UsageRecord).outputTokens ?? 0
           }}</span>
         </template>
         <template #cacheLevel="{ row }">
           <UiStatusBadge
             :label="
-              cacheLabel[(row as UsageRecordPage['items'][number]).cacheLevel] ??
-              (row as UsageRecordPage['items'][number]).cacheLevel
+              cacheLabel[(row as UsageRecord).cacheLevel ?? ''] ??
+              (row as UsageRecord).cacheLevel
             "
           />
         </template>
         <template #upstreamStatusCode="{ row }">
           <span class="ui-num">{{
-            (row as UsageRecordPage['items'][number]).upstreamStatusCode ?? '—'
+            (row as UsageRecord).upstreamStatusCode ?? '—'
           }}</span>
         </template>
         <template #usageMissing="{ row }">
           <UiStatusBadge
-            :tone="(row as UsageRecordPage['items'][number]).usageMissing ? 'warning' : 'success'"
-            :label="(row as UsageRecordPage['items'][number]).usageMissing ? 'missing' : 'ok'"
+            :tone="(row as UsageRecord).usageMissing ? 'warning' : 'success'"
+            :label="(row as UsageRecord).usageMissing ? 'missing' : 'ok'"
           />
         </template>
         <template #gatewayRequestId="{ row }">
           <span class="ui-mono next-admin-usage__reqid">{{
-            (row as UsageRecordPage['items'][number]).gatewayRequestId
+            (row as UsageRecord).gatewayRequestId
           }}</span>
         </template>
       </UiTable>

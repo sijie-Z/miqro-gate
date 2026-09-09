@@ -12,14 +12,17 @@ import { UiButton, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import type { UiSelectOption } from '@/ui';
 import type {
-  QuotaLevel,
   QuotaMetric,
   QuotaPeriod,
   UsageGroup,
   UsageGroupBy,
-  UsageRecordPage,
 } from '@/types/api';
-import type { QuotaRuleView, UsageRecord, UsageSummary } from '@/types/generated-api';
+import type {
+  QuotaRuleView,
+  UsageRecord,
+  UsageRecordPage,
+  UsageSummary,
+} from '@/types/generated-api';
 
 const groupBy = ref<UsageGroupBy>('project');
 const summary = ref<UsageSummary | null>(null);
@@ -67,14 +70,15 @@ const quotaPeriodText: Record<QuotaPeriod, string> = {
   WEEKLY: '每周',
   MONTHLY: '每月',
 };
-const quotaLevelText: Record<QuotaLevel, string> = {
+// hub schema types level as a plain string, so keep the label map string-keyed
+const quotaLevelText: Record<string, string> = {
   NORMAL: '正常',
   WARNING: '预警',
   EXCEEDED: '超限',
 };
 
 function quotaLevelTone(
-  level: QuotaLevel,
+  level: QuotaRuleView['level'],
   status: QuotaRuleView['status'],
 ): 'success' | 'warning' | 'danger' | 'neutral' {
   if (status === 'DISABLED') return 'neutral';
@@ -137,7 +141,7 @@ const usageBars = computed(() => {
 
 const totalPages = computed(() => {
   if (!records.value || records.value.total === 0) return 1;
-  return Math.ceil(records.value.total / pageSize.value);
+  return Math.ceil((records.value.total ?? 0) / pageSize.value);
 });
 
 onMounted(() => {
@@ -205,13 +209,13 @@ function changeGroupBy(value: string) {
 /** Exports every record of the current filter (all pages) as CSV. */
 async function exportRecords() {
   const size = 200; // records API upper bound
-  const all: UsageRecordPage['items'] = [];
+  const all: UsageRecord[] = [];
   let pageNo = 1;
   try {
     for (;;) {
       const batch = await api.usageRecords({ page: pageNo, size, ...windowFromTo() });
-      all.push(...batch.items);
-      if (pageNo * size >= batch.total) break;
+      all.push(...(batch.items ?? []));
+      if (pageNo * size >= (batch.total ?? 0)) break;
       pageNo += 1;
     }
   } catch (error) {
@@ -235,7 +239,7 @@ async function exportRecords() {
   const rows = all.map((r) => [
     r.occurredAt,
     r.modelId ?? '',
-    cacheLevelLabel[r.cacheLevel] ?? r.cacheLevel,
+    cacheLevelLabel[r.cacheLevel ?? ''] ?? r.cacheLevel,
     String(r.inputTokens ?? ''),
     String(r.outputTokens ?? ''),
     String(r.latencyMs ?? ''),
@@ -277,10 +281,10 @@ function asRecord(row: unknown): UsageRecord {
   return row as UsageRecord;
 }
 
-function formatCost(value?: string): string {
+function formatCost(value?: string | number): string {
   if (value === undefined || value === null) return '—';
   const num = Number(value);
-  if (Number.isNaN(num)) return value;
+  if (Number.isNaN(num)) return String(value);
   return `$${num.toFixed(4)}`;
 }
 
@@ -288,7 +292,8 @@ function formatNumber(value?: number): string {
   return value === undefined || value === null ? '—' : value.toLocaleString();
 }
 
-function formatTime(iso: string): string {
+function formatTime(iso?: string): string {
+  if (!iso) return '—';
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -333,30 +338,30 @@ function formatTime(iso: string): string {
         >
           <div class="next-usage__quota-head">
             <span class="next-usage__quota-dim"
-              >{{ quotaMetricText[rule.metric] }} · {{ quotaPeriodText[rule.period] }}</span
+              >{{ quotaMetricText[rule.metric!] }} · {{ quotaPeriodText[rule.period!] }}</span
             >
             <UiStatusBadge
               variant="pill"
               :tone="quotaLevelTone(rule.level, rule.status)"
-              :label="rule.status === 'DISABLED' ? '停用' : quotaLevelText[rule.level]"
+              :label="rule.status === 'DISABLED' ? '停用' : quotaLevelText[rule.level!]"
             />
           </div>
           <div class="next-usage__quota-body">
             <span class="next-usage__quota-nums ui-num"
-              >限额 {{ rule.limitValue.toLocaleString() }} · 本期用量
-              {{ rule.used.toLocaleString() }}（{{ rule.usedPct }}%）</span
+              >限额 {{ formatNumber(rule.limitValue) }} · 本期用量
+              {{ formatNumber(rule.used) }}（{{ rule.usedPct }}%）</span
             >
             <div
               class="next-usage__quota-bar"
               role="progressbar"
-              :aria-valuenow="Math.min(100, rule.usedPct)"
+              :aria-valuenow="Math.min(100, rule.usedPct ?? 0)"
               aria-valuemin="0"
               aria-valuemax="100"
             >
               <div
                 class="next-usage__quota-fill"
                 :style="{
-                  width: `${Math.min(100, rule.usedPct)}%`,
+                  width: `${Math.min(100, rule.usedPct ?? 0)}%`,
                   background: quotaBarFill(rule),
                 }"
               />
@@ -425,33 +430,33 @@ function formatTime(iso: string): string {
         }}</template>
       </UiTable>
       <div
-        v-if="summary && summary.groups.length > 0"
+        v-if="summary && (summary.groups?.length ?? 0) > 0"
         class="next-usage__totals"
         data-testid="summary-totals"
       >
         <span class="next-usage__totals-label">合计</span>
         <span class="ui-num next-usage__totals-col next-usage__totals-col--wide">{{
           formatNumber(
-            summary.totals.requests.upstream +
-              summary.totals.requests.coalesced +
-              summary.totals.requests.l1Hit +
-              summary.totals.requests.l2Hit,
+            (summary.totals?.requests?.upstream ?? 0) +
+              (summary.totals?.requests?.coalesced ?? 0) +
+              (summary.totals?.requests?.l1Hit ?? 0) +
+              (summary.totals?.requests?.l2Hit ?? 0),
           )
         }}</span>
         <span class="ui-num next-usage__totals-col">{{
-          formatNumber(summary.totals.tokens.input)
+          formatNumber(summary.totals?.tokens?.input)
         }}</span>
         <span class="ui-num next-usage__totals-col">{{
-          formatNumber(summary.totals.tokens.output)
+          formatNumber(summary.totals?.tokens?.output)
         }}</span>
         <span class="ui-num next-usage__totals-col">{{
-          formatNumber(summary.totals.tokens.cacheRead)
+          formatNumber(summary.totals?.tokens?.cacheRead)
         }}</span>
         <span class="ui-num next-usage__totals-col">{{
-          formatCost(summary.totals.cost.upstreamPaid)
+          formatCost(summary.totals?.cost?.upstreamPaid)
         }}</span>
         <span class="ui-num next-usage__totals-col">{{
-          formatCost(summary.totals.cost.gatewayObserved)
+          formatCost(summary.totals?.cost?.gatewayObserved)
         }}</span>
       </div>
     </section>
@@ -476,7 +481,7 @@ function formatTime(iso: string): string {
           </template>
           <template #cacheLevel="{ row }">
             <UiStatusBadge
-              :label="cacheLevelLabel[asRecord(row).cacheLevel] ?? asRecord(row).cacheLevel"
+              :label="cacheLevelLabel[asRecord(row).cacheLevel!] ?? asRecord(row).cacheLevel"
             />
           </template>
           <template #input="{ row }">{{ formatNumber(asRecord(row).inputTokens) }}</template>
@@ -495,7 +500,7 @@ function formatTime(iso: string): string {
             <span class="ui-mono">{{ asRecord(row).providerRequestId || '—' }}</span>
           </template>
         </UiTable>
-        <div v-if="records && records.total > 0" class="next-usage__pager">
+        <div v-if="records && (records.total ?? 0) > 0" class="next-usage__pager">
           <span class="next-usage__pager-total ui-num"
             >共 {{ records.total }} 条 · 第 {{ page }} / {{ totalPages }} 页</span
           >

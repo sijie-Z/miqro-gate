@@ -23,13 +23,13 @@ const modelError = ref('');
 const submitting = ref(false);
 const form = ref({ virtualKeyId: '', modelId: '', reason: '' });
 
-const statusText: Record<ModelApprovalStatus, string> = {
+const statusText: Record<string, string> = {
   PENDING: '待审批',
   APPROVED: '已通过',
   REJECTED: '已驳回',
 };
 
-function statusTone(status: ModelApprovalStatus): 'success' | 'warning' | 'danger' | 'neutral' {
+function statusTone(status?: ModelApprovalStatus): 'success' | 'warning' | 'danger' | 'neutral' {
   if (status === 'APPROVED') return 'success';
   if (status === 'REJECTED') return 'neutral';
   return 'warning';
@@ -37,7 +37,7 @@ function statusTone(status: ModelApprovalStatus): 'success' | 'warning' | 'dange
 
 const keyOptions = computed<UiSelectOption[]>(() =>
   keys.value.map((k) => ({
-    value: k.id,
+    value: k.id ?? '',
     label: `${k.display}${k.name ? ' · ' + k.name : ''}`,
   })),
 );
@@ -222,7 +222,7 @@ onMounted(load);
             variant="pill"
             :tone="statusTone((row as ModelApprovalView).status)"
             :label="
-              statusText[(row as ModelApprovalView).status] ?? (row as ModelApprovalView).status
+              statusText[(row as ModelApprovalView).status ?? ''] ?? (row as ModelApprovalView).status
             "
           />
         </template>

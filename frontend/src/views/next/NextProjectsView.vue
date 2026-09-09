@@ -93,7 +93,7 @@ async function openMembers(project: Project) {
   memberOpen.value = true;
   memberLoading.value = true;
   try {
-    memberUsers.value = await api.listProjectMembers(project.id);
+    memberUsers.value = await api.listProjectMembers(project.id!); // list rows always carry ids
   } catch {
     memberUsers.value = [];
   } finally {
@@ -106,14 +106,14 @@ function requestRemove(user: MemberView) {
   const project = memberProject.value;
   confirmState.value = {
     title: '移除成员',
-    body: `将「${user.username}」移出项目「${project.name}」。`,
+    body: `将「${user.username!}」移出项目「${project.name!}」。`,
     confirmLabel: '移除',
     tone: 'danger',
     run: async () => {
       try {
-        await api.removeProjectMember(project.id, user.userId);
+        await api.removeProjectMember(project.id!, user.userId!);
         toast.success('成员已移除');
-        memberUsers.value = await api.listProjectMembers(project.id);
+        memberUsers.value = await api.listProjectMembers(project.id!); // list rows always carry ids
       } catch (error) {
         if (error instanceof ApiError) {
           toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);

@@ -143,8 +143,11 @@ onMounted(load);
         </template>
         <template #status="{ row }">
           <UiStatusBadge
-            :tone="STATUS_META[(row as McpAccessLogEntry).status]?.tone ?? 'neutral'"
-            :label="STATUS_META[(row as McpAccessLogEntry).status]?.label ?? (row as McpAccessLogEntry).status"
+            :tone="STATUS_META[(row as McpAccessLogEntry).status ?? '']?.tone ?? 'neutral'"
+            :label="
+              STATUS_META[(row as McpAccessLogEntry).status ?? '']?.label ??
+              (row as McpAccessLogEntry).status
+            "
           />
         </template>
         <template #httpStatus="{ row }">
@@ -152,7 +155,7 @@ onMounted(load);
         </template>
         <template #gatewayRequestId="{ row }">
           <span class="ui-mono ui-muted" :title="(row as McpAccessLogEntry).gatewayRequestId">{{
-            (row as McpAccessLogEntry).gatewayRequestId.slice(0, 8)
+            (row as McpAccessLogEntry).gatewayRequestId?.slice(0, 8) ?? '—'
           }}</span>
         </template>
       </UiTable>

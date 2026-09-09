@@ -31,7 +31,7 @@ const columns = [
 ];
 
 const statusTone: Record<
-  ExportTask['status'],
+  NonNullable<ExportTask['status']>,
   'success' | 'warning' | 'danger' | 'neutral' | 'info'
 > = {
   PENDING: 'info',
@@ -41,13 +41,25 @@ const statusTone: Record<
   EXPIRED: 'neutral',
 };
 
-const statusText: Record<ExportTask['status'], string> = {
+const statusText: Record<NonNullable<ExportTask['status']>, string> = {
   PENDING: '排队中',
   RUNNING: '生成中',
   SUCCEEDED: '已完成',
   FAILED: '失败',
   EXPIRED: '已过期',
 };
+
+function statusToneFor(
+  status: ExportTask['status'],
+): 'success' | 'warning' | 'danger' | 'neutral' | 'info' {
+  // export rows always carry a status; fold unknown/absent into the neutral default
+  return statusTone[status as NonNullable<ExportTask['status']>] ?? 'neutral';
+}
+
+function statusLabelFor(status: ExportTask['status']): string {
+  // export rows always carry a status; unknown values render blank like before
+  return statusText[status as NonNullable<ExportTask['status']>] ?? '';
+}
 
 async function load() {
   loading.value = true;
@@ -75,7 +87,8 @@ async function createExport() {
     creating.value = false;
     toast.success('导出任务已创建，完成后可下载');
     await load();
-    poll(created.id);
+    // server contract: createExport responses always carry the task id
+    poll(created.id!);
   } catch (error) {
     formError.value = error instanceof ApiError ? error.message : '创建失败';
   }
@@ -191,15 +204,15 @@ onMounted(load);
       >
         <template #period="{ row }">
           <span class="ui-mono"
-            >{{ (row as ExportTask).periodFrom.slice(0, 10) }} →
-            {{ (row as ExportTask).periodTo.slice(0, 10) }}</span
+            >{{ (row as ExportTask).periodFrom?.slice(0, 10) ?? '' }} →
+            {{ (row as ExportTask).periodTo?.slice(0, 10) ?? '' }}</span
           >
         </template>
         <template #status="{ row }">
           <UiStatusBadge
             variant="pill"
-            :tone="statusTone[(row as ExportTask).status]"
-            :label="statusText[(row as ExportTask).status]"
+            :tone="statusToneFor((row as ExportTask).status)"
+            :label="statusLabelFor((row as ExportTask).status)"
           />
         </template>
         <template #rowCount="{ row }">
