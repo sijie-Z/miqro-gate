@@ -374,10 +374,8 @@ export function setMcpAccessGrants(
 }
 
 export function clearMcpAccessGrants(serviceId: string, toolId?: string): Promise<McpAccessView> {
-  return del<McpAccessView>(
-    `/api/v1/admin/mcp-services/${serviceId}/access/grants`,
-    toolId ? { toolId } : undefined,
-  );
+  const query = toolId ? `?toolId=${encodeURIComponent(toolId)}` : '';
+  return del<McpAccessView>(`/api/v1/admin/mcp-services/${serviceId}/access/grants${query}`);
 }
 
 export function listCredentials(): Promise<CredentialView[]> {

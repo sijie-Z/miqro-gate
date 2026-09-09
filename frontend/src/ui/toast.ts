@@ -29,7 +29,7 @@ function push(tone: ToastTone, message: string, duration: number) {
   toastState.items.push({ id, tone, message, closable: tone === 'error' });
   timers.set(
     id,
-    setTimeout(() => dismiss(id), duration),
+    setTimeout(() => dismissToast(id), duration),
   );
   return id;
 }

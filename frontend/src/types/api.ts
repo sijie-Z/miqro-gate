@@ -4,6 +4,10 @@
  * CI generates the OpenAPI client as the machine-readable source of truth.
  */
 
+// Cross-hub reference: ApiConsumerView already lives in the generated schema
+// hub; this handwritten file only imports it for the few DTOs that nest it.
+import type { ApiConsumerView } from './generated-api';
+
 /** RFC 9457 problem+json error body from the Control Plane. */
 export interface ProblemDetails {
   type: string;
