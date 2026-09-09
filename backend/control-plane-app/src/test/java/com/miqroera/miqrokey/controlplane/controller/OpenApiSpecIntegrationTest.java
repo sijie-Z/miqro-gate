@@ -106,6 +106,11 @@ class OpenApiSpecIntegrationTest {
         // Request and response bodies are modeled as named components.
         assertThat(spec.path("components").path("schemas").size()).isGreaterThan(20);
 
+        // The admin user contract must never advertise the password hash: admin
+        // endpoints serialize AdminUserView (domain User minus hash), so no
+        // schema anywhere may mention it.
+        assertThat(objectMapper.writeValueAsString(spec)).doesNotContain("passwordHash");
+
         // Export for the CI breaking-change diff against the committed baseline.
         Path out = Path.of("target", "openapi-spec.json");
         Files.createDirectories(out.getParent());

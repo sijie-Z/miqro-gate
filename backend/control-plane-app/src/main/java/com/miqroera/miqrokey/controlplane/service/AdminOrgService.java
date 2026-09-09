@@ -81,8 +81,8 @@ public class AdminOrgService {
     // users
     // ------------------------------------------------------------------
 
-    public List<User> listUsers(UUID tenantId) {
-        return userRepository.findAllByTenantId(tenantId).stream().map(AdminOrgService::sanitize).toList();
+    public List<AdminUserView> listUsers(UUID tenantId) {
+        return userRepository.findAllByTenantId(tenantId).stream().map(AdminUserView::from).toList();
     }
 
     /** Creates a user and returns the one-time temporary password. */
@@ -103,10 +103,10 @@ public class AdminOrgService {
         auditService.record(tenantId, adminId, "USER_CREATE", "USER", user.id(),
                 "{\"username\":\"" + username + "\",\"role\":\"" + user.role().name() + "\"}", null);
         quotaDefaultTemplateService.applyToNewUser(tenantId, adminId, user.id());
-        return new UserCreated(sanitize(user), temporaryPassword);
+        return new UserCreated(AdminUserView.from(user), temporaryPassword);
     }
 
-    public User updateUserStatus(UUID tenantId, UUID adminId, UUID userId, UserStatus status) {
+    public AdminUserView updateUserStatus(UUID tenantId, UUID adminId, UUID userId, UserStatus status) {
         User user = requireUser(tenantId, userId);
         if (user.role() == UserRole.SYSTEM_ADMIN && status == UserStatus.DISABLED) {
             throw new ApiException(HttpStatus.CONFLICT, "ADMIN_NOT_DISABLEABLE", "system admins cannot be disabled");
@@ -120,7 +120,7 @@ public class AdminOrgService {
         }
         auditService.record(tenantId, adminId, "USER_STATUS", "USER", userId, "{\"status\":\"" + status.name() + "\"}",
                 null);
-        return sanitize(updated);
+        return AdminUserView.from(updated);
     }
 
     /**
@@ -137,7 +137,7 @@ public class AdminOrgService {
         userRepository.update(updated);
         sessionService.revokeOtherSessions(userId, null);
         auditService.record(tenantId, adminId, "USER_PASSWORD_RESET", "USER", userId, "{}", null);
-        return new UserPasswordReset(sanitize(updated), temporaryPassword);
+        return new UserPasswordReset(AdminUserView.from(updated), temporaryPassword);
     }
 
     public void revokeSessions(UUID tenantId, UUID adminId, UUID userId) {
@@ -434,17 +434,27 @@ public class AdminOrgService {
         return sb.toString();
     }
 
-    /** Strip password hash — never serialize it. */
-    private static User sanitize(User user) {
-        return new User(user.id(), user.tenantId(), user.username(), user.displayName(), new byte[0], user.role(),
-                user.status(), user.mustChangePassword(), user.failedLoginCount(), user.lockedUntil(),
-                user.lastLoginAt(), user.version(), user.createdAt(), user.updatedAt());
+    /**
+     * Admin-facing user view — the domain {@link User} record minus its password
+     * hash. The response contract must never advertise {@code passwordHash}, so
+     * admin user endpoints serialize this view, not the domain row (the Jackson
+     * mixin stays as a second line of defense).
+     */
+    public record AdminUserView(UUID id, UUID tenantId, String username, String displayName, UserRole role,
+            UserStatus status, boolean mustChangePassword, int failedLoginCount, Instant lockedUntil,
+            Instant lastLoginAt, long version, Instant createdAt, Instant updatedAt) {
+
+        static AdminUserView from(User user) {
+            return new AdminUserView(user.id(), user.tenantId(), user.username(), user.displayName(), user.role(),
+                    user.status(), user.mustChangePassword(), user.failedLoginCount(), user.lockedUntil(),
+                    user.lastLoginAt(), user.version(), user.createdAt(), user.updatedAt());
+        }
     }
 
-    public record UserCreated(User user, String temporaryPassword) {
+    public record UserCreated(AdminUserView user, String temporaryPassword) {
     }
 
-    public record UserPasswordReset(User user, String temporaryPassword) {
+    public record UserPasswordReset(AdminUserView user, String temporaryPassword) {
     }
 
     public record TeamMemberView(UUID userId, String username, String displayName, Instant createdAt) {

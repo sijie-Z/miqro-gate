@@ -2,9 +2,9 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminOrgService;
+import com.miqroera.miqrokey.controlplane.service.AdminOrgService.AdminUserView;
 import com.miqroera.miqrokey.controlplane.service.AdminOrgService.UserCreated;
 import com.miqroera.miqrokey.controlplane.service.AdminOrgService.UserPasswordReset;
-import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.model.UserStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,7 +36,7 @@ public class AdminUserController {
     }
 
     @GetMapping
-    public List<User> list() {
+    public List<AdminUserView> list() {
         return orgService.listUsers(userContext.getUser().tenantId());
     }
 
@@ -55,7 +55,7 @@ public class AdminUserController {
     }
 
     @PatchMapping("/{userId}")
-    public User updateStatus(@PathVariable UUID userId, @RequestBody StatusRequest body) {
+    public AdminUserView updateStatus(@PathVariable UUID userId, @RequestBody StatusRequest body) {
         var admin = userContext.getUser();
         return orgService.updateUserStatus(admin.tenantId(), admin.id(), userId, body.status());
     }
