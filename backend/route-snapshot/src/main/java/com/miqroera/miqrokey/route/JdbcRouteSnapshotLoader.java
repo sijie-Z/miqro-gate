@@ -260,16 +260,46 @@ public final class JdbcRouteSnapshotLoader {
     private Map<String, RouteSnapshot.ConsumerRecord> loadConsumers() {
         Map<String, RouteSnapshot.ConsumerRecord> byDigest = new LinkedHashMap<>();
         jdbc.query("""
-                SELECT id, tenant_id, name, key_digest
+                SELECT id, tenant_id, name, key_digest, capabilities
                 FROM api_consumers
                 WHERE status = 'ACTIVE'
                 """, (rs, rowNum) -> {
             UUID id = (UUID) rs.getObject("id");
             byDigest.putIfAbsent(id.toString(), new RouteSnapshot.ConsumerRecord(id, (UUID) rs.getObject("tenant_id"),
-                    rs.getString("name"), rs.getBytes("key_digest")));
+                    rs.getString("name"), rs.getBytes("key_digest"), capabilities(rs)));
             return null;
         });
         return byDigest;
+    }
+
+    /**
+     * Reads the nullable jsonb capabilities column as a list (null = full). The
+     * codes are application-validated to a fixed word set, so a character-level
+     * parse is safe here.
+     */
+    private static List<String> capabilities(java.sql.ResultSet rs) throws java.sql.SQLException {
+        String raw = rs.getString("capabilities");
+        if (raw == null) {
+            return null;
+        }
+        String inner = raw.trim();
+        if (inner.length() < 2 || !inner.startsWith("[")) {
+            throw new IllegalStateException("Unreadable api_consumers.capabilities json for row");
+        }
+        inner = inner.substring(1, inner.length() - 1);
+        if (inner.isBlank()) {
+            return List.of();
+        }
+        List<String> codes = new ArrayList<>();
+        for (String part : inner.split(",")) {
+            String code = part.trim();
+            if (code.length() >= 2 && code.startsWith("\"") && code.endsWith("\"")) {
+                codes.add(code.substring(1, code.length() - 1));
+            } else {
+                throw new IllegalStateException("Unreadable api_consumers.capabilities json for row");
+            }
+        }
+        return codes;
     }
 
     /**

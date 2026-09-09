@@ -257,9 +257,16 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
     /**
      * One external-system consumer (Tencent doc 134890 semantics) — indexed by the
      * SHA-256 hex digest of its API key so the gateway can authenticate MCP callers
-     * without storing or decrypting any secret.
+     * without storing or decrypting any secret. The capability scope (#316) is null
+     * when full; the MCP channel requires {@code mcp:call}.
      */
-    public record ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest) {
+    public record ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest,
+            java.util.List<String> capabilities) {
+
+        /** Legacy constructor: no scope means full access. */
+        public ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest) {
+            this(id, tenantId, name, digest, null);
+        }
 
         public ConsumerRecord {
             digest = digest.clone();
@@ -267,6 +274,11 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
 
         public byte[] digest() {
             return digest.clone();
+        }
+
+        /** Fail-closed channel check. */
+        public boolean allows(String capability) {
+            return capabilities == null || capabilities.contains(capability);
         }
     }
 

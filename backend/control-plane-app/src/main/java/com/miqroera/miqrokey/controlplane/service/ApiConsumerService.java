@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.service;
 import com.miqroera.miqrokey.controlplane.dto.ApiConsumerView;
 import com.miqroera.miqrokey.controlplane.security.ConsumerJwtVerifier;
 import com.miqroera.miqrokey.domain.model.ApiConsumer;
+import com.miqroera.miqrokey.domain.model.ConsumerCapabilities;
 import com.miqroera.miqrokey.domain.repository.ApiConsumerRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.dao.DuplicateKeyException;
@@ -124,12 +125,51 @@ public class ApiConsumerService {
             Instant jwtKeySetAt) {
         return new ApiConsumer(consumer.id(), consumer.tenantId(), consumer.name(), consumer.keyDigest(),
                 consumer.keyPrefix(), status, pem, fingerprint, jwtKeySetAt, consumer.version(), consumer.createdAt(),
-                consumer.updatedAt());
+                consumer.updatedAt(), consumer.capabilities());
     }
 
     private ApiConsumerView toView(ApiConsumer consumer) {
         return new ApiConsumerView(consumer.id(), consumer.name(), consumer.keyPrefix(), consumer.status(),
-                consumer.jwtKeyFingerprint(), consumer.jwtKeySetAt(), consumer.createdAt());
+                consumer.jwtKeyFingerprint(), consumer.jwtKeySetAt(), consumer.createdAt(),
+                consumer.capabilities() == null ? null : List.copyOf(consumer.capabilities()));
+    }
+
+    /**
+     * Issue #316: replaces the channel scope (null = full access, empty = no
+     * channels). Validation rejects unknown or duplicate codes; changes are audited
+     * with the previous and next scope so the trail shows who shrank which
+     * consumer.
+     */
+    @Transactional
+    public ApiConsumerView updateScope(UUID tenantId, UUID adminId, UUID consumerId, List<String> capabilities,
+            String requestId) {
+        ApiConsumer consumer = find(tenantId, consumerId);
+        if (!ConsumerCapabilities.isValid(capabilities)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "CONSUMER_SCOPE_INVALID",
+                    "能力只能取 billing:read/mcp:call，且不得重复。");
+        }
+        repository.updateCapabilities(consumerId, tenantId, capabilities);
+        routeRefreshPublisher.publishChanged();
+        auditService
+                .record(tenantId, adminId, "CONSUMER_SCOPE_UPDATE", "CONSUMER", consumerId,
+                        "{\"name\":\"" + AuditSummaries.sanitize(consumer.name()) + "\",\"from\":"
+                                + scopeJson(consumer.capabilities()) + ",\"to\":" + scopeJson(capabilities) + "}",
+                        requestId);
+        return toView(repository.findByIdAndTenantId(consumerId, tenantId).orElseThrow());
+    }
+
+    private static String scopeJson(List<String> capabilities) {
+        if (capabilities == null) {
+            return "null";
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < capabilities.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append('"').append(capabilities.get(i)).append('"');
+        }
+        return sb.append(']').toString();
     }
 
     public record CreatedConsumer(ApiConsumerView consumer, String apiKey) {
