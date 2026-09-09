@@ -46,13 +46,13 @@ describe('http client', () => {
 
   it('does not attach the CSRF token to GET requests', async () => {
     let seen: RequestInit | null = null;
-    stubFetch(async (url, init) => {
+    stubFetch(async (_url, init) => {
       seen = init;
       return jsonResponse(200, []);
     });
 
     await get('/api/v1/me/virtual-keys');
-    expect(seen?.headers).not.toHaveProperty('X-CSRF-Token');
+    expect((seen as RequestInit | null)?.headers).not.toHaveProperty('X-CSRF-Token');
   });
 
   it('serializes GET query parameters, skipping undefined values', async () => {
@@ -77,7 +77,7 @@ describe('http client', () => {
     };
     stubFetch(async () => jsonResponse(404, details));
 
-    const error = await get('/api/v1/me/virtual-keys/abc').catch((e) => e);
+    const error = (await get('/api/v1/me/virtual-keys/abc').catch((e) => e)) as ApiError;
     expect(error).toBeInstanceOf(ApiError);
     expect(error.code).toBe('VIRTUAL_KEY_NOT_FOUND');
     expect(error.requestId).toBe('0190...');
@@ -87,7 +87,7 @@ describe('http client', () => {
   it('throws a generic ApiError when the body is not problem+json', async () => {
     stubFetch(async () => new Response('upstream exploded', { status: 502 }));
 
-    const error = await get('/api/v1/me/usage/summary').catch((e) => e);
+    const error = (await get('/api/v1/me/usage/summary').catch((e) => e)) as ApiError;
     expect(error).toBeInstanceOf(ApiError);
     expect(error.code).toBe('HTTP_ERROR');
     expect(error.status).toBe(502);
@@ -98,7 +98,7 @@ describe('http client', () => {
       throw new TypeError('Failed to fetch');
     });
 
-    const error = await get('/api/v1/auth/me').catch((e) => e);
+    const error = (await get('/api/v1/auth/me').catch((e) => e)) as ApiError;
     expect(error).toBeInstanceOf(ApiError);
     expect(error.code).toBe('NETWORK_ERROR');
   });

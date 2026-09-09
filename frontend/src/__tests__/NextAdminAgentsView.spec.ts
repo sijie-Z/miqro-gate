@@ -69,10 +69,10 @@ const summary = (overrides: Partial<UsageSummary['totals']> = {}): UsageSummary 
     requests: { upstream: 120, coalesced: 0, l1Hit: 0, l2Hit: 0 },
     tokens: { input: 240000, output: 120000, cacheRead: 0, cacheCreation: 0 },
     cost: {
-      upstreamPaid: '0.0123',
-      gatewayObserved: '0.0123',
-      projectAllocated: '0.0123',
-      savedByGatewayCache: '0.0000',
+      upstreamPaid: 0.0123,
+      gatewayObserved: 0.0123,
+      projectAllocated: 0.0123,
+      savedByGatewayCache: 0,
     },
     ...overrides,
   },
@@ -119,8 +119,8 @@ describe('NextAdminAgentsView', () => {
         status: 'ACTIVE',
         activeVersionId: 'v1',
         fingerprintPrefix: 'a1b2',
-        lastValidatedAt: null,
-        lastValidationError: null,
+        lastValidatedAt: undefined,
+        lastValidationError: undefined,
         version: 1,
         createdAt: '2026-08-01T00:00:00Z',
         updatedAt: '2026-08-01T00:00:00Z',
@@ -132,8 +132,8 @@ describe('NextAdminAgentsView', () => {
         status: 'DISABLED',
         activeVersionId: 'v1',
         fingerprintPrefix: 'c3d4',
-        lastValidatedAt: null,
-        lastValidationError: null,
+        lastValidatedAt: undefined,
+        lastValidationError: undefined,
         version: 1,
         createdAt: '2026-07-01T00:00:00Z',
         updatedAt: '2026-07-01T00:00:00Z',
@@ -148,8 +148,8 @@ describe('NextAdminAgentsView', () => {
     // Only the ACTIVE credential is offered.
     const options = wrapper.findAll('.stub-option');
     expect(options).toHaveLength(1);
-    expect(options[0].text()).toBe('anthropic-main');
-    await options[0].trigger('click');
+    expect(options[0]!.text()).toBe('anthropic-main');
+    await options[0]!.trigger('click');
     await flushPromises();
     await wrapper.find('[data-testid="agent-create-submit"]').trigger('click');
     await flushPromises();

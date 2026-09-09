@@ -97,7 +97,7 @@ describe('NextPlansView', () => {
     document.body.innerHTML = '';
     mockApi.listSubscriptions.mockResolvedValue([
       subscription(),
-      subscription({ id: 's2', name: 'Staging', status: 'DISABLED', quotaTotal: null }),
+      subscription({ id: 's2', name: 'Staging', status: 'DISABLED', quotaTotal: undefined }),
     ]);
     mockApi.listProviderProducts.mockResolvedValue([product]);
     mockApi.listSeats.mockResolvedValue([seat()]);

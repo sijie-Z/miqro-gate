@@ -155,7 +155,7 @@ describe('NextAdminMcpServicesView', () => {
         name: 'search-mcp',
         status: 'OFFLINE',
         healthStatus: 'UNHEALTHY',
-        healthCheckedAt: null,
+        healthCheckedAt: null as unknown as string,
       }),
     ]);
     const wrapper = mountView();
@@ -334,7 +334,9 @@ describe('NextAdminMcpServicesView', () => {
       accessView({
         mode: 'NONE',
         serverConsumers: [],
-        tools: [{ toolId: 't1', toolName: 'query_order', mode: null, consumers: [] }],
+        tools: [
+          { toolId: 't1', toolName: 'query_order', mode: null as unknown as 'NONE' | 'ALLOW' | 'DENY', consumers: [] },
+        ],
       }),
     );
     mockApi.setMcpAccessGrants.mockResolvedValue(accessView({ mode: 'NONE' }));
@@ -378,13 +380,13 @@ describe('NextAdminMcpServicesView', () => {
         id: 'd1',
         mcpServiceId: 'm1',
         name: 'default',
-        description: null,
+        description: null as unknown as string,
         priority: 0,
-        pathMode: null,
-        pathValue: null,
-        hostMode: null,
-        hostValue: null,
-        methods: null,
+        pathMode: null as unknown as string,
+        pathValue: null as unknown as string,
+        hostMode: null as unknown as string,
+        hostValue: null as unknown as string,
+        methods: null as unknown as string,
         headerConditions: [],
         status: 'ENABLED',
         version: 0,
@@ -501,12 +503,12 @@ describe('NextAdminMcpServicesView', () => {
       id: 'r2',
       mcpServiceId: 'm1',
       name: 'gray-v2',
-      description: null,
+      description: null as unknown as string,
       priority: 1500,
       pathMode: 'PREFIX',
       pathValue: '/api/v2',
-      hostMode: null,
-      hostValue: null,
+      hostMode: null as unknown as string,
+      hostValue: null as unknown as string,
       methods: 'GET',
       headerConditions: [],
       status: 'ENABLED',
@@ -514,7 +516,7 @@ describe('NextAdminMcpServicesView', () => {
       createdAt: '2026-09-02T00:00:00Z',
     };
     mockApi.adminListMcpRouteRules.mockResolvedValue([
-      { ...custom, id: 'd1', name: 'default', priority: 0, methods: null, status: 'ENABLED' },
+      { ...custom, id: 'd1', name: 'default', priority: 0, methods: null as unknown as string, status: 'ENABLED' },
       custom,
     ]);
     mockApi.adminSetMcpRouteStatus.mockResolvedValue({ ...custom, status: 'DISABLED' });
@@ -644,13 +646,7 @@ describe('NextAdminMcpServicesView', () => {
     save.click();
     await flushPromises();
     expect(mockApi.putMcpServiceResilience).toHaveBeenCalledTimes(1);
-    const body = mockApi.putMcpServiceResilience.mock.calls[0][1] as {
-      retryEnabled: boolean;
-      retryConditions: string[];
-      idempotencyConfirmed: boolean;
-      breakerEnabled: boolean;
-      breakerErrorStatusCodes: number[];
-    };
+    const body = mockApi.putMcpServiceResilience.mock.calls[0]![1];
     expect(body.retryEnabled).toBe(true);
     expect(body.idempotencyConfirmed).toBe(true);
     expect(body.breakerEnabled).toBe(true);
@@ -676,7 +672,7 @@ describe('NextAdminMcpServicesView', () => {
       method: 'POST',
       path: '/orders/v2/{id}',
       createdAt: '2026-09-02T00:00:00Z',
-      activatedAt: null,
+      activatedAt: null as unknown as string,
     };
     mockApi.adminListToolRevisions.mockResolvedValue([rev2, rev1]);
     mockApi.adminActivateToolRevision.mockResolvedValue(rev1);
@@ -703,7 +699,7 @@ describe('NextAdminMcpServicesView', () => {
       (b) => b.textContent?.trim() === '回滚',
     );
     expect(buttons.length).toBeGreaterThan(0);
-    buttons[buttons.length - 1].click();
+    buttons[buttons.length - 1]!.click();
     await flushPromises();
 
     expect(mockApi.adminActivateToolRevision).toHaveBeenCalledWith('m1', 't1', 2);

@@ -3,8 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextUsageView from '@/views/next/NextUsageView.vue';
 import * as api from '@/api';
-import type {UsageRecordPage} from '@/types/api';
-import type { QuotaRuleView, UsageSummary } from '@/types/generated-api';
+import type { QuotaRuleView, UsageCost, UsageRecordPage, UsageSummary } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listMyQuotaRules: vi.fn(),
@@ -42,7 +41,7 @@ const summary: UsageSummary = {
       label: 'Core AI',
       requests: { upstream: 12, coalesced: 2, l1Hit: 4, l2Hit: 1 },
       tokens: { input: 1000, output: 500, cacheRead: 200, cacheCreation: 300 },
-      cost: { upstreamPaid: '0.002000', gatewayObserved: '0.000400' },
+      cost: { upstreamPaid: '0.002000', gatewayObserved: '0.000400' } as unknown as UsageCost,
     },
   ],
   totals: {
@@ -50,7 +49,7 @@ const summary: UsageSummary = {
     label: '合计',
     requests: { upstream: 12, coalesced: 2, l1Hit: 4, l2Hit: 1 },
     tokens: { input: 1000, output: 500, cacheRead: 200, cacheCreation: 300 },
-    cost: { upstreamPaid: '0.002000', gatewayObserved: '0.000400' },
+    cost: { upstreamPaid: '0.002000', gatewayObserved: '0.000400' } as unknown as UsageCost,
   },
 };
 
@@ -114,10 +113,10 @@ describe('NextUsageView', () => {
     const rows = wrapper.findAll('[data-testid="my-quota-row"]');
     expect(rows).toHaveLength(2);
     expect(wrapper.text()).toContain('Token 用量 · 每月');
-    expect(rows[0].text()).toContain('超限');
-    expect(rows[1].text()).toContain('停用');
-    expect(rows[0].text()).toContain('限额 1,000,000');
-    expect(rows[0].text()).toContain('本期用量 1,100,000（110%）');
+    expect(rows[0]!.text()).toContain('超限');
+    expect(rows[1]!.text()).toContain('停用');
+    expect(rows[0]!.text()).toContain('限额 1,000,000');
+    expect(rows[0]!.text()).toContain('本期用量 1,100,000（110%）');
   });
 
   it('shows the empty quota hint when no rules exist', async () => {

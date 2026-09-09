@@ -5,7 +5,7 @@ import { defineComponent } from 'vue';
 import NextCostView from '@/views/next/NextCostView.vue';
 import * as api from '@/api';
 import { toastState } from '@/ui/toast';
-import type { BudgetView, UsageSummary } from '@/types/generated-api';
+import type { BudgetView, UsageCost, UsageSummary } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   adminUsageSummary: vi.fn(),
@@ -60,7 +60,7 @@ const summary = (project: boolean): UsageSummary => ({
             upstreamPaid: '1.000000',
             projectAllocated: '1.500000',
             gatewayObserved: '0.010000',
-          },
+          } as unknown as UsageCost,
         },
         {
           groupKey: 'p2',
@@ -71,7 +71,7 @@ const summary = (project: boolean): UsageSummary => ({
             upstreamPaid: '0.200000',
             projectAllocated: '0.300000',
             gatewayObserved: '0.002000',
-          },
+          } as unknown as UsageCost,
         },
       ]
     : [
@@ -84,7 +84,7 @@ const summary = (project: boolean): UsageSummary => ({
             upstreamPaid: '1.200000',
             projectAllocated: '1.800000',
             gatewayObserved: '0.012000',
-          },
+          } as unknown as UsageCost,
         },
       ],
   totals: {
@@ -97,7 +97,7 @@ const summary = (project: boolean): UsageSummary => ({
       projectAllocated: '1.800000',
       savedByGatewayCache: '0.040000',
       gatewayObserved: '0.012000',
-    },
+    } as unknown as UsageCost,
   },
 });
 
@@ -114,7 +114,7 @@ const budget = (overrides: Partial<BudgetView> = {}): BudgetView => ({
   spentPct: '90',
   level: 'WARNING',
   ...overrides,
-});
+} as unknown as BudgetView);
 
 describe('NextCostView', () => {
   beforeEach(() => {
@@ -177,7 +177,7 @@ describe('NextCostView', () => {
   });
 
   it('saves a new budget through the dialog', async () => {
-    mockApi.putProjectBudget.mockResolvedValue(budget({ amount: '500' }));
+    mockApi.putProjectBudget.mockResolvedValue(budget({ amount: '500' as unknown as number }));
     const wrapper = mountView();
     await flushPromises();
 

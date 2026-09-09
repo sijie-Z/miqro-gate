@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextOverviewView from '@/views/next/NextOverviewView.vue';
 import * as api from '@/api';
-import type { UsageSummary, VirtualKeyView } from '@/types/generated-api';
+import type { UsageCost, UsageSummary, VirtualKeyView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listVirtualKeys: vi.fn(),
@@ -45,14 +45,14 @@ const summary: UsageSummary = {
       label: 'Core AI',
       requests: { upstream: 12, coalesced: 2, l1Hit: 4, l2Hit: 1 },
       tokens: { input: 1_200_000, output: 400_000, cacheRead: 20_000, cacheCreation: 40_000 },
-      cost: { upstreamPaid: '3.200000', gatewayObserved: '0.010000' },
+      cost: { upstreamPaid: '3.200000', gatewayObserved: '0.010000' } as unknown as UsageCost,
     },
     {
       groupKey: 'p2',
       label: 'Agent Lab',
       requests: { upstream: 5, coalesced: 0, l1Hit: 0, l2Hit: 0 },
       tokens: { input: 100_000, output: 30_000, cacheRead: 0, cacheCreation: 5_000 },
-      cost: { upstreamPaid: '0.400000', gatewayObserved: '0.002000' },
+      cost: { upstreamPaid: '0.400000', gatewayObserved: '0.002000' } as unknown as UsageCost,
     },
   ],
   totals: {
@@ -60,7 +60,7 @@ const summary: UsageSummary = {
     label: '合计',
     requests: { upstream: 17, coalesced: 2, l1Hit: 4, l2Hit: 1 },
     tokens: { input: 1_300_000, output: 430_000, cacheRead: 20_000, cacheCreation: 45_000 },
-    cost: { upstreamPaid: '3.600000', gatewayObserved: '0.012000' },
+    cost: { upstreamPaid: '3.600000', gatewayObserved: '0.012000' } as unknown as UsageCost,
   },
 };
 
