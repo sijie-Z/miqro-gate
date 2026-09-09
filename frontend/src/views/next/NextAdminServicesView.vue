@@ -92,6 +92,8 @@ async function createService() {
 }
 
 function requestDisable(service: InternalServiceView) {
+  // Hub View schemas mark every field optional (springdoc omits `required`);
+  // service rows always carry the id — the `!` restores the pre-hub contract.
   confirmState.value = {
     title: `禁用服务「${service.name}」`,
     body: '禁用后该服务从可用注册表中移除，注册信息保留。',
@@ -99,7 +101,7 @@ function requestDisable(service: InternalServiceView) {
     tone: 'danger',
     run: async () => {
       try {
-        await api.adminDisableService(service.id);
+        await api.adminDisableService(service.id!);
         toast.success('服务已禁用');
         await load();
       } catch (error) {
@@ -118,7 +120,8 @@ async function confirmAndRun() {
   await state.run();
 }
 
-function formatTime(iso: string): string {
+function formatTime(iso?: string): string {
+  if (!iso) return '—';
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;

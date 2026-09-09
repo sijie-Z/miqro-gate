@@ -484,7 +484,7 @@ onMounted(async () => {
             data-testid="oauth-login"
             @click="startOauth()"
           >
-            {{ oauthProviders[0].name }}
+            {{ oauthProviders[0]?.name }}
           </UiButton>
         </div>
 

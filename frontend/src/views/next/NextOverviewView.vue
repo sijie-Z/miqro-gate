@@ -124,7 +124,9 @@ async function load() {
       : api.usageSummary('project');
     const [keyList, summary] = await Promise.all([api.listVirtualKeys(), summaryPromise]);
     keys.value = keyList;
-    usageGroups.value = summary.groups ?? [];
+    // adminUsageSummary groups are the optional-field hub GroupSummary rows;
+    // the stats helpers below read the legacy UsageGroup shape — narrow here.
+    usageGroups.value = (summary.groups ?? []) as unknown as UsageGroup[];
     if (isAdmin.value) {
       subscriptions.value = await api.listSubscriptions();
     }

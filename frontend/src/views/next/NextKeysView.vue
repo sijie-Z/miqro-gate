@@ -78,9 +78,9 @@ const statusLabel: Record<string, string> = {
 };
 
 const purposeOptions = computed<UiSelectOption[]>(() => {
-  const available = grants.value?.purposes.length
-    ? grants.value.purposes
-    : (Object.keys(purposeLabel) as VirtualKeyPurpose[]);
+  const purposes = grants.value?.purposes;
+  const available =
+    purposes && purposes.length ? purposes : (Object.keys(purposeLabel) as VirtualKeyPurpose[]);
   return available.map((p) => ({ value: p, label: purposeLabel[p] ?? p }));
 });
 
@@ -92,7 +92,7 @@ const columns = [
   { key: 'status', title: '状态', width: '110px' },
   { key: 'cachePolicy', title: '缓存', width: '90px' },
   { key: 'createdAt', title: '创建时间', width: '170px', sortable: true },
-  { key: 'actions', title: '操作', width: '80px', align: 'center' },
+  { key: 'actions', title: '操作', width: '80px', align: 'center' as const },
 ];
 
 const keyFilter = ref('');
@@ -102,9 +102,9 @@ const filteredKeys = computed(() => {
   if (!q) return keys.value;
   return keys.value.filter(
     (k) =>
-      k.name.toLowerCase().includes(q) ||
-      k.projectTag.toLowerCase().includes(q) ||
-      k.display.toLowerCase().includes(q),
+      (k.name ?? '').toLowerCase().includes(q) ||
+      (k.projectTag ?? '').toLowerCase().includes(q) ||
+      (k.display ?? '').toLowerCase().includes(q),
   );
 });
 
@@ -115,7 +115,9 @@ const keySummary = computed<{ text: string; tone: 'plain' | 'success' | 'warning
     const unusual = keys.value.filter(
       (k) => k.status === 'REVOKED' || k.status === 'DISABLED',
     ).length;
-    const parts = [{ text: `共 ${keys.value.length} 个`, tone: 'plain' as const }];
+    const parts: { text: string; tone: 'plain' | 'success' | 'warning' | 'danger' }[] = [
+      { text: `共 ${keys.value.length} 个`, tone: 'plain' },
+    ];
     if (active) parts.push({ text: `${active} 可用`, tone: 'success' as const });
     if (rotating) parts.push({ text: `${rotating} 轮换中`, tone: 'warning' as const });
     if (unusual) parts.push({ text: `${unusual} 异常`, tone: 'danger' as const });
@@ -133,7 +135,7 @@ const tableColumns = computed(() => {
 });
 
 /** Registered-but-empty account: has the admin joined this account to a project yet? */
-const hasNoProjects = computed(() => (grants.value?.projects.length ?? 0) === 0);
+const hasNoProjects = computed(() => (grants.value?.projects?.length ?? 0) === 0);
 
 // ---- create form derived lists (identical semantics to legacy page) ----
 
@@ -217,7 +219,8 @@ async function createKey() {
     const response = await api.createVirtualKey({
       name: createName.value.trim(),
       projectId: createProjectId.value,
-      providerProductId: selectedGrant.value.providerProductId,
+      // server contract: grant rows always carry their provider product id
+      providerProductId: selectedGrant.value.providerProductId!,
       credentialGrantId: createGrantId.value,
       purpose: createPurpose.value,
       allowedModels: createModels.value,
@@ -251,7 +254,8 @@ function openReveal(response: CreateVirtualKeyResponse) {
 async function copySecret() {
   if (!revealData.value) return;
   try {
-    await navigator.clipboard.writeText(revealData.value.secret);
+    // server contract: create/rotate responses always carry the one-shot secret
+    await navigator.clipboard.writeText(revealData.value.secret!);
     revealCopied.value = true;
   } catch {
     toast.error('复制失败，请手动选择复制');
@@ -261,7 +265,7 @@ async function copySecret() {
 // ---- row actions ----
 
 async function copyKeyId(key: VirtualKeyView) {
-  const text = key.display;
+  const text = key.display ?? '';
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
@@ -294,7 +298,8 @@ async function handleRotate(key: VirtualKeyView) {
     tone: 'primary',
     run: async () => {
       try {
-        const response = await api.rotateVirtualKey(key.id);
+        // server contract: listed keys always carry their id
+        const response = await api.rotateVirtualKey(key.id!);
         await load();
         openReveal(response);
       } catch (error) {
@@ -314,7 +319,7 @@ async function handleRevoke(key: VirtualKeyView) {
     tone: 'danger',
     run: async () => {
       try {
-        await api.revokeVirtualKey(key.id);
+        await api.revokeVirtualKey(key.id!);
         toast.success('Virtual Key 已吊销');
         await load();
       } catch (error) {
@@ -340,7 +345,7 @@ function formatDate(iso?: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
+function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutral' {
   switch (status) {
     case 'ACTIVE':
       return 'success';
@@ -393,7 +398,10 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
             required
             placeholder="选择项目"
             :options="
-              projectsForGrant.map((p) => ({ value: p.id, label: `${p.name}（${p.projectTag}）` }))
+              projectsForGrant.map((p) => ({
+                value: p.id ?? '',
+                label: `${p.name}（${p.projectTag}）`,
+              }))
             "
             width="100%"
             data-testid="create-project"
@@ -407,8 +415,8 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
             placeholder="选择已授权的供应商产品"
             :options="
               grantOptions.map((g) => ({
-                value: g.id,
-                label: `${g.providerProductId}（${g.models.length} 个模型）`,
+                value: g.id ?? '',
+                label: `${g.providerProductId}（${g.models?.length ?? 0} 个模型）`,
               }))
             "
             width="100%"
@@ -586,17 +594,17 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
           <div class="ui-mono next-keys__mask">{{ (row as VirtualKeyView).display }}</div>
         </template>
         <template #purpose="{ row }">{{
-          purposeLabel[(row as VirtualKeyView).purpose] ?? (row as VirtualKeyView).purpose
+          purposeLabel[(row as VirtualKeyView).purpose!] ?? (row as VirtualKeyView).purpose
         }}</template>
         <template #modelIds="{ row }">
           <div class="ui-mono next-keys__models">
-            {{ (row as VirtualKeyView).modelIds.join(', ') }}
+            {{ (row as VirtualKeyView).modelIds?.join(', ') ?? '' }}
           </div>
         </template>
         <template #status="{ row }">
           <UiStatusBadge
             :tone="statusTone((row as VirtualKeyView).status)"
-            :label="statusLabel[(row as VirtualKeyView).status] ?? (row as VirtualKeyView).status"
+            :label="statusLabel[(row as VirtualKeyView).status!] ?? (row as VirtualKeyView).status"
           />
         </template>
         <template #cachePolicy="{ row }">
@@ -644,7 +652,7 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral
                 <DropdownMenuSeparator class="next-keys__menu-sep" />
                 <DropdownMenuItem
                   class="next-keys__menu-item next-keys__menu-item--danger"
-                  :disabled="!(row as VirtualKeyView).status.match(/^(ACTIVE|ROTATING)$/)"
+                  :disabled="!(row as VirtualKeyView).status?.match(/^(ACTIVE|ROTATING)$/)"
                   @select="handleRevoke(row as VirtualKeyView)"
                 >
                   <DropdownMenuItemIndicator class="next-keys__menu-ind" />

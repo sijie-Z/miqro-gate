@@ -27,7 +27,10 @@ const columns = [
 
 const groupOptions = computed(() => {
   const set = new Set<string>();
-  entries.value.forEach((e) => set.add(e.groupName));
+  entries.value.forEach((e) => {
+    // Hub schemas mark groupName optional; entries without a group are noise.
+    if (e.groupName) set.add(e.groupName);
+  });
   return [...set];
 });
 
@@ -71,11 +74,14 @@ async function load() {
 function openEdit(entry: ConfigEntryView | null) {
   editing.value = entry;
   formError.value = '';
+  // Hub View schemas mark every field optional (springdoc omits `required`);
+  // listed entries always carry group/key/value — the `?? ''` edit defaults
+  // and the `!` on delete restore the pre-hub required-field contract.
   form.value = entry
     ? {
-        group: entry.groupName,
-        key: entry.key,
-        value: entry.value,
+        group: entry.groupName ?? '',
+        key: entry.key ?? '',
+        value: entry.value ?? '',
         description: entry.description ?? '',
       }
     : { group: activeGroup.value, key: '', value: '', description: '' };
@@ -114,7 +120,7 @@ function requestRemove(entry: ConfigEntryView) {
     tone: 'danger',
     run: async () => {
       try {
-        await api.adminDeleteConfig(entry.groupName, entry.key);
+        await api.adminDeleteConfig(entry.groupName!, entry.key!);
         toast.success('配置已删除');
         await load();
       } catch (error) {
@@ -133,7 +139,8 @@ async function confirmAndRun() {
   await state.run();
 }
 
-function formatTime(iso: string): string {
+function formatTime(iso?: string): string {
+  if (!iso) return '—';
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;

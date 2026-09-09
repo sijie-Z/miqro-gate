@@ -52,8 +52,11 @@ const canCreate = computed(
   () => form.value.name.trim().length > 0 && form.value.credentialId.length > 0,
 );
 
+// Hub View schemas mark every field optional (springdoc omits `required`);
+// the endpoints here always populate the fields asserted below — the `!`
+// restore the pre-hub required-field contract.
 const credentialOptions = computed(() =>
-  credentials.value.map((c) => ({ value: c.id, label: c.name })),
+  credentials.value.map((c) => ({ value: c.id!, label: c.name! })),
 );
 
 async function load() {
@@ -110,7 +113,7 @@ function requestDisable(agent: AgentView) {
     tone: 'danger',
     run: async () => {
       try {
-        await api.adminDisableAgent(agent.id);
+        await api.adminDisableAgent(agent.id!);
         toast.success('Agent 已禁用');
         await load();
       } catch (error) {
@@ -136,7 +139,7 @@ async function showUsage(agent: AgentView) {
   usageVisible.value = true;
   usageLoading.value = true;
   try {
-    usageSummary.value = await api.adminAgentUsage(agent.id);
+    usageSummary.value = await api.adminAgentUsage(agent.id!);
   } catch (error) {
     usageError.value = error instanceof ApiError ? error.message : '加载用量失败。';
   } finally {
@@ -252,7 +255,7 @@ onMounted(load);
             :label="(row as AgentView).status === 'ACTIVE' ? '正常' : '已禁用'"
           />
         </template>
-        <template #createdAt="{ row }">{{ formatTime((row as AgentView).createdAt) }}</template>
+        <template #createdAt="{ row }">{{ formatTime((row as AgentView).createdAt!) }}</template>
         <template #actions="{ row }">
           <div class="next-agents__actions">
             <UiButton
@@ -297,25 +300,25 @@ onMounted(load);
         <div class="next-agents__usage-tile">
           <span class="next-agents__usage-label">请求</span>
           <span class="next-agents__usage-value ui-num">{{
-            usageSummary.totals.requests.upstream.toLocaleString()
+            (usageSummary.totals?.requests?.upstream ?? 0).toLocaleString()
           }}</span>
         </div>
         <div class="next-agents__usage-tile">
           <span class="next-agents__usage-label">输入 Tokens</span>
           <span class="next-agents__usage-value ui-num">{{
-            usageSummary.totals.tokens.input.toLocaleString()
+            (usageSummary.totals?.tokens?.input ?? 0).toLocaleString()
           }}</span>
         </div>
         <div class="next-agents__usage-tile">
           <span class="next-agents__usage-label">输出 Tokens</span>
           <span class="next-agents__usage-value ui-num">{{
-            usageSummary.totals.tokens.output.toLocaleString()
+            (usageSummary.totals?.tokens?.output ?? 0).toLocaleString()
           }}</span>
         </div>
         <div class="next-agents__usage-tile">
           <span class="next-agents__usage-label">分摊成本</span>
           <span class="next-agents__usage-value ui-num"
-            >¥{{ Number(usageSummary.totals.cost.projectAllocated).toFixed(4) }}</span
+            >¥{{ Number(usageSummary.totals?.cost?.projectAllocated ?? 0).toFixed(4) }}</span
           >
         </div>
       </div>

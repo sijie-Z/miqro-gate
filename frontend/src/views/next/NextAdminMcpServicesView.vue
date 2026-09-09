@@ -159,11 +159,12 @@ const canCreateTool = computed(
   () => toolForm.value.toolName.trim().length > 0 && toolForm.value.path.trim().length > 0,
 );
 
-function healthLabel(status: string): string {
+// hub 类型里 healthStatus 为可选；未上报健康状态时按「未知」渲染与旧行为一致。
+function healthLabel(status: string | undefined): string {
   return status === 'HEALTHY' ? '健康' : status === 'UNHEALTHY' ? '不健康' : '未知';
 }
 
-function healthTone(status: string): 'success' | 'danger' | 'neutral' {
+function healthTone(status: string | undefined): 'success' | 'danger' | 'neutral' {
   return status === 'HEALTHY' ? 'success' : status === 'UNHEALTHY' ? 'danger' : 'neutral';
 }
 
@@ -230,7 +231,8 @@ function requestStatusChange(service: McpServiceView, status: string) {
     tone: status === 'OFFLINE' ? 'danger' : 'primary',
     run: async () => {
       try {
-        await api.adminSetMcpStatus(service.id, status);
+        // 行数据来自服务列表接口，id 恒存在。
+        await api.adminSetMcpStatus(service.id!, status);
         toast.success(`服务已${action}`);
         await load();
       } catch (error) {
@@ -258,7 +260,7 @@ function openConfig(service: McpServiceView) {
     checkTimeoutSeconds: String(service.checkTimeoutSeconds),
     failThreshold: String(service.failThreshold),
     recoverThreshold: String(service.recoverThreshold),
-    checkPath: service.checkPath,
+    checkPath: service.checkPath ?? '/health',
   };
   configError.value = '';
   configVisible.value = true;
@@ -271,7 +273,7 @@ async function saveConfig() {
   configSaving.value = true;
   configError.value = '';
   try {
-    await api.adminUpdateMcpHealthConfig(configService.value.id, {
+    await api.adminUpdateMcpHealthConfig(configService.value.id!, {
       checkIntervalSeconds: Number(configForm.value.checkIntervalSeconds),
       checkTimeoutSeconds: Number(configForm.value.checkTimeoutSeconds),
       failThreshold: Number(configForm.value.failThreshold),
@@ -299,7 +301,7 @@ async function openTools(service: McpServiceView) {
   toolsVisible.value = true;
   toolsLoading.value = true;
   try {
-    tools.value = await api.adminListMcpTools(service.id);
+    tools.value = await api.adminListMcpTools(service.id!);
   } catch (error) {
     toolsError.value = errorText(error, '加载工具失败。');
   } finally {
@@ -311,7 +313,7 @@ async function refreshTools() {
   if (!toolsService.value) {
     return;
   }
-  tools.value = await api.adminListMcpTools(toolsService.value.id);
+  tools.value = await api.adminListMcpTools(toolsService.value.id!);
 }
 
 async function createTool() {
@@ -322,7 +324,7 @@ async function createTool() {
   toolSaving.value = true;
   toolFormError.value = '';
   try {
-    await api.adminCreateMcpTool(toolsService.value.id, {
+    await api.adminCreateMcpTool(toolsService.value.id!, {
       toolName: toolForm.value.toolName.trim(),
       description: toolForm.value.description.trim() || undefined,
       method: toolForm.value.method,
@@ -349,7 +351,7 @@ async function openToolRevisions(tool: McpToolView) {
   revisionsVisible.value = true;
   revisionsLoading.value = true;
   try {
-    revisions.value = await api.adminListToolRevisions(toolsService.value.id, tool.id);
+    revisions.value = await api.adminListToolRevisions(toolsService.value.id!, tool.id!);
   } catch (error) {
     revisionsError.value = errorText(error, '加载版本历史失败。');
   } finally {
@@ -361,21 +363,26 @@ async function refreshRevisions() {
   if (!toolsService.value || !revisionsTool.value) {
     return;
   }
-  revisions.value = await api.adminListToolRevisions(toolsService.value.id, revisionsTool.value.id);
+  revisions.value = await api.adminListToolRevisions(
+    toolsService.value.id!,
+    revisionsTool.value.id!,
+  );
 }
 
 async function rollbackToolRevision(tool: McpToolView, revision: McpToolRevisionRow) {
   if (!toolsService.value) {
     return;
   }
-  const serviceId = toolsService.value.id;
+  // 服务/工具行与修订记录均来自列表接口，主键字段恒存在。
+  const serviceId = toolsService.value.id!;
+  const toolId = tool.id!;
   confirmState.value = {
     title: `回滚「${tool.toolName}」到修订 #${revision.revision}`,
     body: '工具定义将切回该修订版本（不产生新版本号，历史保留）。确认回滚？',
     confirmLabel: '回滚',
     tone: 'primary',
     run: async () => {
-      await api.adminActivateToolRevision(serviceId, tool.id, revision.revision);
+      await api.adminActivateToolRevision(serviceId, toolId, revision.revision!);
       toast.success(`已回滚到修订 #${revision.revision}`);
       await refreshRevisions();
       await refreshTools();
@@ -406,11 +413,15 @@ async function publishToolEdit() {
   editSaving.value = true;
   editError.value = '';
   try {
-    const revision = await api.adminPublishToolRevision(toolsService.value.id, editTool.value.id, {
-      description: editForm.value.description.trim() || undefined,
-      method: editForm.value.method,
-      path,
-    });
+    const revision = await api.adminPublishToolRevision(
+      toolsService.value.id!,
+      editTool.value.id!,
+      {
+        description: editForm.value.description.trim() || undefined,
+        method: editForm.value.method,
+        path,
+      },
+    );
     toast.success(`已发布修订 #${revision.revision}`);
     editVisible.value = false;
     await refreshRevisions();
@@ -443,7 +454,7 @@ async function runImport() {
   importBusy.value = true;
   importError.value = '';
   try {
-    const result = await api.adminImportMcpTools(toolsService.value.id, parsed);
+    const result = await api.adminImportMcpTools(toolsService.value.id!, parsed);
     importResult.value = result;
     if (result.created.length > 0) {
       toast.success(`已导入 ${result.created.length} 个工具`);
@@ -462,7 +473,7 @@ async function setToolStatus(tool: McpToolView, status: string) {
   }
   const action = status === 'ENABLED' ? '启用' : '禁用';
   try {
-    await api.adminSetMcpToolStatus(toolsService.value.id, tool.id, status);
+    await api.adminSetMcpToolStatus(toolsService.value.id!, tool.id!, status);
     toast.success(`工具已${action}`);
     await refreshTools();
   } catch (error) {
@@ -474,11 +485,26 @@ async function setToolStatus(tool: McpToolView, status: string) {
 
 // ---- access control ----
 
-function toolDraft(toolId: string, mode: McpAclMode | null, ids: string[]) {
+/**
+ * 工具访问行（access view）恒携带 toolId；参数放宽到 string | undefined 仅
+ * 为适配 hub 可选字段的模板传参，undefined 实际不会出现。
+ */
+function toolDraft(toolId: string | undefined, mode: McpAclMode | null, ids: string[]) {
+  if (toolId === undefined) return;
   toolDrafts.value[toolId] = { mode, ids: [...ids] };
 }
 
-function toggleToolConsumer(toolId: string, consumerId: string, checked: boolean) {
+/** 模板只读入口：读某工具当前草稿（无草稿 = undefined）。 */
+function accessDraft(toolId: string | undefined) {
+  return toolId === undefined ? undefined : toolDrafts.value[toolId];
+}
+
+function toggleToolConsumer(
+  toolId: string | undefined,
+  consumerId: string | undefined,
+  checked: boolean,
+) {
+  if (toolId === undefined || consumerId === undefined) return;
   const draft = toolDrafts.value[toolId];
   if (!draft) return;
   toolDraft(
@@ -502,18 +528,20 @@ async function loadAccess() {
   accessError.value = '';
   try {
     const [view, consumerList] = await Promise.all([
-      api.getMcpServiceAccess(accessService.value.id),
+      api.getMcpServiceAccess(accessService.value.id!),
       api.listApiConsumers(),
     ]);
     access.value = view;
     consumers.value = consumerList;
-    serverMode.value = view.mode;
-    serverIds.value = view.serverConsumers.map((c) => c.id);
-    for (const tool of view.tools) {
+    // Access 视图由已落库的服务/消费者/授权行构建，mode、consumer/tool 的
+    // id 恒非空（无授权的工具 mode 为 null = 继承服务规则）。
+    serverMode.value = view.mode!;
+    serverIds.value = (view.serverConsumers ?? []).map((c) => c.id!);
+    for (const tool of view.tools ?? []) {
       toolDraft(
-        tool.toolId,
-        tool.mode,
-        tool.consumers.map((c) => c.id),
+        tool.toolId!,
+        tool.mode ?? null,
+        tool.consumers?.map((c) => c.id!) ?? [],
       );
     }
     accessNotice.value =
@@ -534,7 +562,7 @@ async function saveServerMode() {
   serverSaving.value = true;
   accessError.value = '';
   try {
-    await api.setMcpAccessMode(accessService.value.id, serverMode.value);
+    await api.setMcpAccessMode(accessService.value.id!, serverMode.value);
     toast.success('服务访问模式已保存');
     await loadAccess();
   } catch (err) {
@@ -549,7 +577,7 @@ async function saveServerList() {
   serverSaving.value = true;
   accessError.value = '';
   try {
-    await api.setMcpAccessGrants(accessService.value.id, {
+    await api.setMcpAccessGrants(accessService.value.id!, {
       mode: serverMode.value,
       consumerIds: serverIds.value,
     });
@@ -567,7 +595,7 @@ async function resetServerAccess() {
   serverResetSaving.value = true;
   accessError.value = '';
   try {
-    await api.setMcpAccessMode(accessService.value.id, 'NONE');
+    await api.setMcpAccessMode(accessService.value.id!, 'NONE');
     toast.success('已重置为全部开放');
     await loadAccess();
   } catch (err) {
@@ -577,7 +605,8 @@ async function resetServerAccess() {
   }
 }
 
-async function saveToolDraft(toolId: string, toolName: string) {
+async function saveToolDraft(toolId: string | undefined, toolName: string | undefined) {
+  if (toolId === undefined) return;
   if (!accessService.value) return;
   const draft = toolDrafts.value[toolId];
   if (!draft) return;
@@ -585,10 +614,10 @@ async function saveToolDraft(toolId: string, toolName: string) {
   accessError.value = '';
   try {
     if (draft.mode === null) {
-      await api.clearMcpAccessGrants(accessService.value.id, toolId);
+      await api.clearMcpAccessGrants(accessService.value.id!, toolId);
       toast.success(`${toolName} 已恢复为继承服务规则`);
     } else {
-      await api.setMcpAccessGrants(accessService.value.id, {
+      await api.setMcpAccessGrants(accessService.value.id!, {
         toolId,
         mode: draft.mode,
         consumerIds: draft.ids,
@@ -665,9 +694,10 @@ function conditionText(rule: McpRouteRule): string {
     const mode = MATCH_MODES.find((m) => m.value === rule.hostMode)?.label ?? rule.hostMode;
     parts.push(`Host ${mode} ${rule.hostValue}`);
   }
-  if (rule.headerConditions.length) {
+  const headerConditions = rule.headerConditions ?? [];
+  if (headerConditions.length) {
     parts.push(
-      ...rule.headerConditions.map(
+      ...headerConditions.map(
         (h) =>
           `${h.name} ${MATCH_MODES.find((m) => m.value === h.mode)?.label ?? h.mode} ${h.value}`,
       ),
@@ -684,7 +714,7 @@ async function openRoutes(service: McpServiceView) {
   rulesVisible.value = true;
   rulesLoading.value = true;
   try {
-    rules.value = await api.adminListMcpRouteRules(service.id);
+    rules.value = await api.adminListMcpRouteRules(service.id!);
   } catch (error) {
     rulesError.value = errorText(error, '加载路由规则失败。');
   } finally {
@@ -715,16 +745,21 @@ function openRouteCreate() {
 
 function openRouteEdit(rule: McpRouteRule) {
   routeEditing.value = rule;
+  // 路由行由本弹窗（校验后）或系统默认路由生成：name 恒有；mode 值域受限。
   routeForm.value = {
-    name: rule.name,
+    name: rule.name ?? '',
     description: rule.description ?? '',
     priority: String(rule.priority),
-    pathMode: rule.pathMode ?? '',
+    pathMode: rule.pathMode as '' | 'EXACT' | 'PREFIX' | 'REGEX',
     pathValue: rule.pathValue ?? '',
-    hostMode: rule.hostMode ?? '',
+    hostMode: rule.hostMode as '' | 'EXACT' | 'PREFIX' | 'REGEX',
     hostValue: rule.hostValue ?? '',
     methods: new Set(rule.methods ? rule.methods.split(',') : HTTP_METHODS),
-    headers: rule.headerConditions.map((h) => ({ name: h.name, mode: h.mode, value: h.value })),
+    headers: (rule.headerConditions ?? []).map((h) => ({
+      name: h.name ?? '',
+      mode: h.mode as 'EXACT' | 'PREFIX' | 'REGEX',
+      value: h.value ?? '',
+    })),
   };
   routeFormError.value = '';
   routeDialogVisible.value = true;
@@ -760,16 +795,17 @@ async function saveRouteRule() {
     }
   }
   if (!rulesService.value) return;
-  const serviceId = rulesService.value.id;
+  // 行来自路由列表接口，id 恒存在；body 可选字段按 hub 契约以缺省代替 null。
+  const serviceId = rulesService.value.id!;
   const body: UpsertMcpRouteRuleRequest = {
     name: form.name.trim(),
     description: form.description.trim() || undefined,
     priority: Number(form.priority) || 1000,
-    pathMode: form.pathMode || null,
-    pathValue: form.pathMode ? form.pathValue.trim() : null,
-    hostMode: form.hostMode || null,
-    hostValue: form.hostMode ? form.hostValue.trim() : null,
-    methods: form.methods.size === HTTP_METHODS.length ? null : [...form.methods],
+    pathMode: form.pathMode || undefined,
+    pathValue: form.pathMode ? form.pathValue.trim() : undefined,
+    hostMode: form.hostMode || undefined,
+    hostValue: form.hostMode ? form.hostValue.trim() : undefined,
+    methods: form.methods.size === HTTP_METHODS.length ? undefined : [...form.methods],
     headers: form.headers
       .filter((h) => h.name.trim())
       .map((h) => ({ name: h.name.trim(), mode: h.mode, value: h.value.trim() })),
@@ -778,7 +814,7 @@ async function saveRouteRule() {
   routeFormError.value = '';
   try {
     if (routeEditing.value) {
-      await api.adminUpdateMcpRouteRule(serviceId, routeEditing.value.id, body);
+      await api.adminUpdateMcpRouteRule(serviceId, routeEditing.value.id!, body);
       toast.success('路由已更新');
     } else {
       await api.adminCreateMcpRouteRule(serviceId, body);
@@ -800,9 +836,10 @@ async function toggleRouteStatus(rule: McpRouteRule) {
   if (!rulesService.value) return;
   const next = rule.status === 'ENABLED' ? 'DISABLED' : 'ENABLED';
   try {
-    await api.adminSetMcpRouteStatus(rulesService.value.id, rule.id, next);
+    // 服务/路由行 id 恒存在（列表接口返回落库主键）。
+    await api.adminSetMcpRouteStatus(rulesService.value.id!, rule.id!, next);
     toast.success(rule.status === 'ENABLED' ? '路由已停用' : '路由已启用');
-    rules.value = await api.adminListMcpRouteRules(rulesService.value.id);
+    rules.value = await api.adminListMcpRouteRules(rulesService.value.id!);
   } catch (error) {
     if (error instanceof ApiError) {
       toast.error(error.message);
@@ -819,9 +856,9 @@ function requestRouteDelete(rule: McpRouteRule) {
     run: async () => {
       if (!rulesService.value) return;
       try {
-        await api.adminDeleteMcpRouteRule(rulesService.value.id, rule.id);
+        await api.adminDeleteMcpRouteRule(rulesService.value.id!, rule.id!);
         toast.success('路由已删除');
-        rules.value = await api.adminListMcpRouteRules(rulesService.value.id);
+        rules.value = await api.adminListMcpRouteRules(rulesService.value.id!);
       } catch (error) {
         if (error instanceof ApiError) {
           toast.error(error.message);
@@ -880,26 +917,27 @@ async function openResilience(service: McpServiceView) {
   resilienceLoading.value = true;
   resilienceError.value = '';
   try {
-    const policy = await api.getMcpServiceResilience(service.id);
+    const policy = await api.getMcpServiceResilience(service.id!);
     resilience.value = policy;
+    // 韧性策略恒为完整快照（无记录时后端返回全默认 disabled 策略）。
     rForm.value = {
-      retryEnabled: policy.retryEnabled,
-      retryMax: String(policy.retryMax),
-      retryConditions: [...policy.retryConditions],
-      idempotencyConfirmed: policy.idempotencyConfirmed,
-      breakerEnabled: policy.breakerEnabled,
-      breakerWindowSeconds: String(policy.breakerWindowSeconds),
-      breakerMinRequests: String(policy.breakerMinRequests),
-      breakerErrorEnabled: policy.breakerErrorEnabled,
-      breakerErrorRatio: String(policy.breakerErrorRatio),
-      breakerErrorStatusCodes: [...policy.breakerErrorStatusCodes].join(','),
-      breakerSlowEnabled: policy.breakerSlowEnabled,
-      breakerSlowCallMs: String(policy.breakerSlowCallMs),
-      breakerSlowRatio: String(policy.breakerSlowRatio),
-      breakerOpenSeconds: String(policy.breakerOpenSeconds),
-      breakerProbeCount: String(policy.breakerProbeCount),
-      breakerProbeSuccess: String(policy.breakerProbeSuccess),
-      breakerSkipRetry: policy.breakerSkipRetry,
+      retryEnabled: policy.retryEnabled!,
+      retryMax: String(policy.retryMax!),
+      retryConditions: [...policy.retryConditions!],
+      idempotencyConfirmed: policy.idempotencyConfirmed!,
+      breakerEnabled: policy.breakerEnabled!,
+      breakerWindowSeconds: String(policy.breakerWindowSeconds!),
+      breakerMinRequests: String(policy.breakerMinRequests!),
+      breakerErrorEnabled: policy.breakerErrorEnabled!,
+      breakerErrorRatio: String(policy.breakerErrorRatio!),
+      breakerErrorStatusCodes: [...policy.breakerErrorStatusCodes!].join(','),
+      breakerSlowEnabled: policy.breakerSlowEnabled!,
+      breakerSlowCallMs: String(policy.breakerSlowCallMs!),
+      breakerSlowRatio: String(policy.breakerSlowRatio!),
+      breakerOpenSeconds: String(policy.breakerOpenSeconds!),
+      breakerProbeCount: String(policy.breakerProbeCount!),
+      breakerProbeSuccess: String(policy.breakerProbeSuccess!),
+      breakerSkipRetry: policy.breakerSkipRetry!,
     };
   } catch (error) {
     resilienceError.value = error instanceof ApiError ? error.message : '读取韧性配置失败';
@@ -946,7 +984,7 @@ async function saveResilience() {
       breakerProbeSuccess: Number(rForm.value.breakerProbeSuccess),
       breakerSkipRetry: rForm.value.breakerSkipRetry,
     };
-    const stored = await api.putMcpServiceResilience(resilienceService.value.id, draft);
+    const stored = await api.putMcpServiceResilience(resilienceService.value.id!, draft);
     resilience.value = stored;
     toast.success('韧性配置已保存');
     resilienceOpen.value = false;
@@ -1070,7 +1108,7 @@ async function saveResilience() {
           />
         </template>
         <template #healthCheckedAt="{ row }">{{
-          formatTime((row as McpServiceView).healthCheckedAt)
+          formatTime((row as McpServiceView).healthCheckedAt ?? null)
         }}</template>
         <template #actions="{ row }">
           <div class="next-mcp__row-actions">
@@ -1556,14 +1594,14 @@ async function saveResilience() {
                     class="next-mcp__seg"
                     :class="{
                       'next-mcp__seg--on':
-                        (toolDrafts[tool.toolId]?.mode ?? null) ===
+                        (accessDraft(tool.toolId)?.mode ?? null) ===
                         (opt.value === '' ? null : opt.value),
                     }"
                     @click="
                       toolDraft(
                         tool.toolId,
                         opt.value === '' ? null : (opt.value as 'ALLOW' | 'DENY'),
-                        toolDrafts[tool.toolId]?.ids ?? [],
+                        accessDraft(tool.toolId)?.ids ?? [],
                       )
                     "
                   >
@@ -1572,13 +1610,13 @@ async function saveResilience() {
                 </div>
               </div>
               <div
-                v-if="toolDrafts[tool.toolId]?.mode"
+                v-if="accessDraft(tool.toolId)?.mode"
                 class="next-mcp__check-list next-mcp__check-list--nested"
               >
                 <label v-for="c in consumerOptions" :key="c.id" class="next-mcp__check">
                   <input
                     :value="c.id"
-                    :checked="toolDrafts[tool.toolId]?.ids.includes(c.id) ?? false"
+                    :checked="(accessDraft(tool.toolId)?.ids.includes(c.id ?? '') ?? false)"
                     type="checkbox"
                     data-testid="mcp-tool-consumer"
                     @change="
@@ -1604,7 +1642,7 @@ async function saveResilience() {
                 >
               </div>
             </div>
-            <p v-if="!access.tools.length" class="next-mcp__hint">该服务暂无工具。</p>
+            <p v-if="!access.tools?.length" class="next-mcp__hint">该服务暂无工具。</p>
           </div>
         </section>
       </template>

@@ -77,10 +77,11 @@ async function loadRates(endpoints: WebhookEndpointView[]) {
   await Promise.all(
     endpoints.map(async (endpoint) => {
       try {
-        const deliveries = await api.webhookDeliveries(endpoint.id);
+        // list rows always carry ids
+        const deliveries = await api.webhookDeliveries(endpoint.id!);
         if (!deliveries || deliveries.length === 0) return;
         const ok = deliveries.filter((d) => (d.httpStatus ?? 0) >= 200 && d.httpStatus! < 300).length;
-        rate.value[endpoint.id] = { ok, total: deliveries.length };
+        rate.value[endpoint.id!] = { ok, total: deliveries.length };
       } catch {
         // rate stays absent when the history call fails; the table shows '—'
       }
@@ -89,7 +90,8 @@ async function loadRates(endpoints: WebhookEndpointView[]) {
 }
 
 function rateOf(endpoint: WebhookEndpointView): { ok: number; total: number } | null {
-  return rate.value[endpoint.id] ?? null;
+  // list rows always carry ids
+  return rate.value[endpoint.id!] ?? null;
 }
 
 function rateLabel(endpoint: WebhookEndpointView): string {
@@ -131,7 +133,8 @@ async function createWebhook() {
 
 async function toggle(endpoint: WebhookEndpointView) {
   try {
-    await api.updateWebhook(endpoint.id, { enabled: !endpoint.enabled });
+    // list rows always carry ids
+    await api.updateWebhook(endpoint.id!, { enabled: !endpoint.enabled });
     toast.success(endpoint.enabled ? 'Webhook 已停用' : 'Webhook 已启用');
     await load();
   } catch (error) {
@@ -143,7 +146,8 @@ async function toggle(endpoint: WebhookEndpointView) {
 
 async function test(endpoint: WebhookEndpointView) {
   try {
-    const result = await api.testWebhook(endpoint.id);
+    // list rows always carry ids
+    const result = await api.testWebhook(endpoint.id!);
     if (result.httpStatus) {
       toast.success(`测试投递成功（HTTP ${result.httpStatus}）`);
     } else {
@@ -164,7 +168,8 @@ function requestRemove(endpoint: WebhookEndpointView) {
     tone: 'danger',
     run: async () => {
       try {
-        await api.deleteWebhook(endpoint.id);
+        // list rows always carry ids
+        await api.deleteWebhook(endpoint.id!);
         toast.success('Webhook 已删除');
         await load();
       } catch (error) {
@@ -190,7 +195,8 @@ async function openDeliveries(endpoint: WebhookEndpointView) {
   deliveriesOpen.value = true;
   deliveriesLoading.value = true;
   try {
-    deliveries.value = await api.webhookDeliveries(endpoint.id);
+    // list rows always carry ids
+    deliveries.value = await api.webhookDeliveries(endpoint.id!);
   } catch (error) {
     deliveriesError.value = error instanceof ApiError ? error.message : '加载投递记录失败。';
   } finally {
@@ -341,7 +347,7 @@ onMounted(load);
         </template>
         <template #rate="{ row }">
           <span
-            v-if="rate[(row as WebhookEndpointView).id]"
+            v-if="rateOf(row as WebhookEndpointView)"
             :data-testid="`webhook-rate-${(row as WebhookEndpointView).id}`"
           >
             <UiStatusBadge

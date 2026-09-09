@@ -31,18 +31,18 @@ const daySummary = ref<Awaited<ReturnType<typeof api.adminUsageSummary>> | null>
 const projectGroups = computed(() => projectSummary.value?.groups ?? []);
 const dayGroups = computed(() => daySummary.value?.groups ?? []);
 
-const totalCost = computed(() => projectSummary.value?.totals.cost.projectAllocated ?? '0');
-const upstreamCost = computed(() => projectSummary.value?.totals.cost.upstreamPaid ?? '0');
-const totalRequests = computed(() => projectSummary.value?.totals.requests.upstream ?? 0);
+const totalCost = computed(() => projectSummary.value?.totals?.cost?.projectAllocated ?? 0);
+const upstreamCost = computed(() => projectSummary.value?.totals?.cost?.upstreamPaid ?? 0);
+const totalRequests = computed(() => projectSummary.value?.totals?.requests?.upstream ?? 0);
 const totalTokens = computed(
   () =>
-    (projectSummary.value?.totals.tokens.input ?? 0) +
-    (projectSummary.value?.totals.tokens.output ?? 0),
+    (projectSummary.value?.totals?.tokens?.input ?? 0) +
+    (projectSummary.value?.totals?.tokens?.output ?? 0),
 );
-const cacheSaved = computed(() => projectSummary.value?.totals.cost.savedByGatewayCache ?? '0');
+const cacheSaved = computed(() => projectSummary.value?.totals?.cost?.savedByGatewayCache ?? 0);
 const cacheHits = computed(() => {
   const t = projectSummary.value?.totals;
-  return t ? (t.requests.l1Hit ?? 0) + (t.requests.l2Hit ?? 0) : 0;
+  return t ? (t.requests?.l1Hit ?? 0) + (t.requests?.l2Hit ?? 0) : 0;
 });
 
 const projectColumns = [
@@ -60,7 +60,7 @@ const dayColumns = [
   { key: 'cost', title: '分摊成本', width: '150px', align: 'right' as const },
 ];
 
-function costNumber(value: string | undefined): number {
+function costNumber(value: string | number | undefined): number {
   return Number(value ?? 0);
 }
 
@@ -70,6 +70,11 @@ function costOf(group: UsageGroup): number {
 
 function tokensOf(group: UsageGroup): number {
   return (group.tokens?.input ?? 0) + (group.tokens?.output ?? 0);
+}
+
+/** UiTable row slots are generic records; narrow to the legacy group shape. */
+function asGroup(row: unknown): UsageGroup {
+  return row as UsageGroup;
 }
 
 function shareOf(group: UsageGroup): number {
@@ -129,12 +134,17 @@ function exportCsv() {
     return;
   }
   const header = ['分组', '请求', 'Tokens', '分摊成本(CNY)'];
-  const rows = groups.map((g) => [
-    g.label,
-    String(g.requests.upstream),
-    String(tokensOf(g)),
-    costOf(g).toFixed(4),
-  ]);
+  const rows = groups.map((g) => {
+    // adminUsageSummary groups are GroupSummary; the group helpers below use
+    // the (non-optional) legacy UsageGroup shape — narrow the row here.
+    const row = g as unknown as UsageGroup;
+    return [
+      row.label,
+      String(row.requests.upstream),
+      String(tokensOf(row)),
+      costOf(row).toFixed(4),
+    ];
+  });
   const csv = [header, ...rows]
     .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
     .join('\n');
@@ -186,7 +196,7 @@ const budgetLevelTone: Record<string, 'success' | 'warning' | 'danger' | 'neutra
 
 const budgetProjectOptions = computed<UiSelectOption[]>(() =>
   projects.value.map((p) => ({
-    value: p.id,
+    value: p.id ?? '',
     label: `${p.code} · ${p.name}`,
   })),
 );
@@ -213,9 +223,9 @@ async function openBudgetDialog(budget: BudgetView | null) {
   budgetFormError.value = '';
   if (budget) {
     budgetForm.value = {
-      projectId: budget.projectId,
-      amount: budget.amount,
-      alertThresholdPct: budget.alertThresholdPct,
+      projectId: budget.projectId ?? '',
+      amount: String(budget.amount ?? ''),
+      alertThresholdPct: String(budget.alertThresholdPct ?? ''),
     };
   } else {
     if (!projects.value.length) {
@@ -279,7 +289,8 @@ function requestRemoveBudget(budget: BudgetView) {
     tone: 'danger',
     run: async () => {
       try {
-        await api.deleteProjectBudget(budget.projectId, budget.month);
+        // budget rows come from the server budget list, so projectId is always set
+        await api.deleteProjectBudget(budget.projectId!, budget.month);
         toast.success('预算已删除');
         await loadBudgets();
       } catch (error) {
@@ -445,11 +456,11 @@ onMounted(async () => {
             <span class="ui-mono next-cost__budget-code">{{ b.projectCode }}</span>
           </div>
           <div class="next-cost__budget-figures">
-            <span class="ui-num">{{ formatCost(b.spent) }} / {{ formatCost(b.amount) }}</span>
+            <span class="ui-num">{{ formatCost(b.spent ?? 0) }} / {{ formatCost(b.amount ?? 0) }}</span>
             <UiStatusBadge
               variant="pill"
-              :tone="budgetLevelTone[b.level] ?? 'neutral'"
-              :label="budgetLevelLabel[b.level] ?? b.level"
+              :tone="budgetLevelTone[b.level ?? ''] ?? 'neutral'"
+              :label="budgetLevelLabel[b.level ?? ''] ?? b.level"
               :data-testid="`budget-level-${b.projectCode}`"
             />
           </div>
@@ -458,7 +469,7 @@ onMounted(async () => {
               class="next-cost__budget-fill"
               :style="{
                 width: `${Math.min(100, Number(b.spentPct))}%`,
-                background: levelFill(b.level),
+                background: levelFill(b.level ?? ''),
               }"
             />
           </div>
@@ -501,23 +512,23 @@ onMounted(async () => {
         data-testid="cost-table"
       >
         <template #requests="{ row }">
-          <span class="ui-num">{{ formatCount((row as UsageGroup).requests.upstream) }}</span>
+          <span class="ui-num">{{ formatCount(asGroup(row).requests.upstream) }}</span>
         </template>
         <template #tokens="{ row }">
-          <span class="ui-num">{{ formatCount(tokensOf(row as UsageGroup)) }}</span>
+          <span class="ui-num">{{ formatCount(tokensOf(asGroup(row))) }}</span>
         </template>
         <template #cost="{ row }">
-          <span class="ui-num">{{ formatCost(costOf(row as UsageGroup)) }}</span>
+          <span class="ui-num">{{ formatCost(costOf(asGroup(row))) }}</span>
         </template>
         <template #share="{ row }">
           <div class="next-cost__share">
             <div class="next-cost__share-track">
               <div
                 class="next-cost__share-fill"
-                :style="{ width: `${Math.min(100, shareOf(row as UsageGroup))}%` }"
+                :style="{ width: `${Math.min(100, shareOf(asGroup(row)))}%` }"
               />
             </div>
-            <span class="ui-num">{{ shareOf(row as UsageGroup).toFixed(1) }}%</span>
+            <span class="ui-num">{{ shareOf(asGroup(row)).toFixed(1) }}%</span>
           </div>
         </template>
       </UiTable>
@@ -531,13 +542,13 @@ onMounted(async () => {
         data-testid="cost-day-table"
       >
         <template #requests="{ row }">
-          <span class="ui-num">{{ formatCount((row as UsageGroup).requests.upstream) }}</span>
+          <span class="ui-num">{{ formatCount(asGroup(row).requests.upstream) }}</span>
         </template>
         <template #tokens="{ row }">
-          <span class="ui-num">{{ formatCount(tokensOf(row as UsageGroup)) }}</span>
+          <span class="ui-num">{{ formatCount(tokensOf(asGroup(row))) }}</span>
         </template>
         <template #cost="{ row }">
-          <span class="ui-num">{{ formatCost(costOf(row as UsageGroup)) }}</span>
+          <span class="ui-num">{{ formatCost(costOf(asGroup(row))) }}</span>
         </template>
       </UiTable>
     </section>

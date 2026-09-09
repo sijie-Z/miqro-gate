@@ -41,15 +41,15 @@ const subscriptionById = computed(
   () => new Map(subscriptions.value.map((s) => [s.id, s]) as [string, SubscriptionView][]),
 );
 
-function productName(subscriptionId: string): string {
-  const sub = subscriptionById.value.get(subscriptionId);
+function productName(subscriptionId: string | undefined): string {
+  const sub = subscriptionId ? subscriptionById.value.get(subscriptionId) : undefined;
   return sub ? `${sub.productName} · ${sub.name}` : '—';
 }
 
 const subscriptionOptions = computed<UiSelectOption[]>(() =>
   subscriptions.value.map((s) => ({
-    value: s.id,
-    label: `${s.productName} · ${s.name}`,
+    value: s.id ?? '',
+    label: `${s.productName ?? ''} · ${s.name ?? ''}`,
   })),
 );
 
@@ -66,7 +66,7 @@ const statusLabel: Record<string, string> = {
   DISABLED: '已禁用',
 };
 
-function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
+function statusTone(status: string | undefined): 'success' | 'warning' | 'danger' | 'neutral' {
   switch (status) {
     case 'ACTIVE':
       return 'success';
@@ -177,7 +177,8 @@ async function runValidate() {
   validateError.value = '';
   validateRequestId.value = '';
   try {
-    validateResult.value = await api.validateCredential(validateTarget.value.id, {
+    // The tested credential comes from the list; ids are always present.
+    validateResult.value = await api.validateCredential(validateTarget.value.id!, {
       secret: candidateSecret.value,
     });
   } catch (error) {
@@ -218,7 +219,8 @@ async function runRotate() {
   rotateError.value = '';
   rotateRequestId.value = '';
   try {
-    await api.rotateCredential(rotateTarget.value.id, { secret: rotateSecret.value });
+    // Rotation targets a listed credential; ids are always present.
+    await api.rotateCredential(rotateTarget.value.id!, { secret: rotateSecret.value });
     toast.success('凭证已轮换，旧版本进入宽限期');
     rotateTarget.value = null;
     rotateSecret.value = '';
@@ -245,8 +247,9 @@ async function openHistory(cred: CredentialView) {
   historyLoading.value = true;
   versions.value = [];
   try {
-    const detail: CredentialDetailView = await api.getCredential(cred.id);
-    versions.value = detail.versions;
+    // History targets a listed credential; ids are always present.
+    const detail: CredentialDetailView = await api.getCredential(cred.id!);
+    versions.value = detail.versions ?? [];
   } catch (error) {
     if (error instanceof ApiError) {
       toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
@@ -273,7 +276,8 @@ function requestDisable(cred: CredentialView) {
     tone: 'danger',
     run: async () => {
       try {
-        await api.disableCredential(cred.id);
+        // Disabling targets a listed credential; ids are always present.
+        await api.disableCredential(cred.id!);
         toast.success('凭证已禁用');
         await load();
       } catch (error) {
@@ -480,7 +484,11 @@ onMounted(load);
         <template #status="{ row }">
           <UiStatusBadge
             :tone="statusTone((row as CredentialView).status)"
-            :label="statusLabel[(row as CredentialView).status] ?? (row as CredentialView).status"
+            :label="
+              statusLabel[(row as CredentialView).status ?? ''] ??
+              (row as CredentialView).status ??
+              ''
+            "
           />
         </template>
         <template #lastValidated="{ row }">
@@ -638,7 +646,7 @@ onMounted(load);
             v-if="validateResult.providerStatus !== 'NOT_CHECKED'"
             class="next-credentials__provider"
           >
-            供应商验证：{{ providerStatusLabel[validateResult.providerStatus] }}
+            供应商验证：{{ providerStatusLabel[validateResult.providerStatus ?? ''] }}
             <span v-if="validateResult.providerMessage" class="ui-mono"
               >（{{ validateResult.providerMessage }}）</span
             >
@@ -769,8 +777,9 @@ onMounted(load);
           <UiStatusBadge
             :tone="statusTone((row as CredentialVersionView).status)"
             :label="
-              statusLabel[(row as CredentialVersionView).status] ??
-              (row as CredentialVersionView).status
+              statusLabel[(row as CredentialVersionView).status ?? ''] ??
+              (row as CredentialVersionView).status ??
+              ''
             "
           />
         </template>

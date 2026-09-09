@@ -72,17 +72,19 @@ const metricText: Record<string, string> = { TOKENS: 'Token', REQUESTS: '请求'
 const periodText: Record<string, string> = { DAILY: '日', WEEKLY: '周', MONTHLY: '月' };
 
 const projectOptions = computed(() =>
-  projects.value.map((p) => ({ value: p.id, label: `${p.name}（${p.code}）` })),
+  projects.value.map((p) => ({ value: p.id ?? '', label: `${p.name}（${p.code}）` })),
 );
 
 const quotaOptions = computed(() =>
   quotaRules.value.map((q) => ({
-    value: q.id,
-    label: `${q.scopeName ?? q.scopeId}（${metricText[q.metric] ?? q.metric}·${periodText[q.period] ?? q.period}）`,
+    value: q.id ?? '',
+    label: `${q.scopeName ?? q.scopeId}（${metricText[q.metric ?? ''] ?? q.metric}·${periodText[q.period ?? ''] ?? q.period}）`,
   })),
 );
 
-const webhookOptions = computed(() => webhooks.value.map((w) => ({ value: w.id, label: w.name })));
+const webhookOptions = computed(() =>
+  webhooks.value.map((w) => ({ value: w.id ?? '', label: w.name ?? '' })),
+);
 
 async function load() {
   loading.value = true;
@@ -159,7 +161,8 @@ async function createRule() {
 
 async function toggle(rule: AlertRule) {
   try {
-    await api.updateAlertRule(rule.id, { enabled: !rule.enabled });
+    // list rows always carry ids
+    await api.updateAlertRule(rule.id!, { enabled: !rule.enabled });
     toast.success(rule.enabled ? '规则已停用' : '规则已启用');
     await load();
   } catch (error) {
@@ -177,7 +180,8 @@ function requestRemove(rule: AlertRule) {
     tone: 'danger',
     run: async () => {
       try {
-        await api.deleteAlertRule(rule.id);
+        // list rows always carry ids
+        await api.deleteAlertRule(rule.id!);
         toast.success('告警规则已删除');
         await load();
       } catch (error) {
@@ -216,8 +220,8 @@ function scopeHint(rule: AlertRule): string {
       if (!quota) {
         return '';
       }
-      const dim = metricText[quota.metric] ?? quota.metric;
-      const period = periodText[quota.period] ?? quota.period;
+      const dim = metricText[quota.metric ?? ''] ?? quota.metric;
+      const period = periodText[quota.period ?? ''] ?? quota.period;
       return `${quota.scopeName ?? ''}（${dim}·${period}）`;
     }
     return '';
@@ -360,7 +364,7 @@ onMounted(() => {
           <span class="next-alert-rules__name">{{ (row as AlertRule).name }}</span>
         </template>
         <template #type="{ row }">
-          {{ typeLabel((row as AlertRule).type)
+          {{ typeLabel((row as AlertRule).type ?? '')
           }}<span v-if="scopeHint(row as AlertRule)" class="ui-mono next-alert-rules__scope"
             >· {{ scopeHint(row as AlertRule) }}</span
           >

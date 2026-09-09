@@ -488,8 +488,8 @@ describe('NextAdminMcpServicesView', () => {
       priority: 1000,
       pathMode: 'EXACT',
       pathValue: '/api',
-      hostMode: null,
-      hostValue: null,
+      hostMode: undefined, // absent host conditions: hub contract sends omitted keys
+      hostValue: undefined, // (server default = match any host)
       methods: ['POST'],
       headers: [{ name: 'X-Tenant-Id', mode: 'EXACT', value: 'acme' }],
     });

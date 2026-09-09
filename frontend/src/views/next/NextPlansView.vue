@@ -101,7 +101,7 @@ const confirmState = ref<{
   run: () => Promise<void>;
 } | null>(null);
 
-function planLabel(scope: string): string {
+function planLabel(scope?: string): string {
   switch (scope) {
     case 'PERSONAL':
       return '个人 Plan';
@@ -110,7 +110,7 @@ function planLabel(scope: string): string {
     case 'ENTERPRISE':
       return '企业 Plan';
     default:
-      return scope;
+      return scope ?? '—';
   }
 }
 
@@ -188,9 +188,12 @@ async function openSeats(subscription: SubscriptionView) {
 
 async function refreshSeats() {
   if (!seatSubscription.value) return;
+  // Hub View schemas mark every field optional (springdoc omits `required`);
+  // subscription rows and the drawer target always carry their ids — the `!`
+  // restore the pre-hub required-field contract.
   seatLoading.value = true;
   try {
-    seats.value = await api.listSeats(seatSubscription.value.id);
+    seats.value = await api.listSeats(seatSubscription.value.id!);
   } finally {
     seatLoading.value = false;
   }
@@ -203,7 +206,7 @@ async function addSeat() {
   }
   seatError.value = '';
   try {
-    await api.createSeat(seatSubscription.value.id, {
+    await api.createSeat(seatSubscription.value.id!, {
       displayName: seatDisplay.value.trim() || undefined,
       assignedUserId: seatAssignUser.value.trim(),
     });
@@ -226,7 +229,7 @@ function requestRelease(seat: SeatView) {
     tone: 'danger',
     run: async () => {
       try {
-        await api.updateSeat(subscription.id, seat.id, { status: 'AVAILABLE' });
+        await api.updateSeat(subscription.id!, seat.id!, { status: 'AVAILABLE' });
         toast.success('席位已释放');
         await refreshSeats();
       } catch (error) {

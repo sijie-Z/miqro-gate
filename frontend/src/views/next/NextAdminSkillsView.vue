@@ -119,6 +119,8 @@ async function saveAccess() {
   if (!accessSkill.value) {
     return;
   }
+  // Hub View schemas mark every field optional (springdoc omits `required`);
+  // skill rows always carry the id — the `!` restores the pre-hub contract.
   accessSaving.value = true;
   accessError.value = '';
   const scopes = [
@@ -126,7 +128,7 @@ async function saveAccess() {
     ...accessTeamIds.value.map((id) => ({ scopeType: 'TEAM', scopeId: id })),
   ];
   try {
-    await api.adminSetSkillAccess(accessSkill.value.id, scopes);
+    await api.adminSetSkillAccess(accessSkill.value.id!, scopes);
     accessVisible.value = false;
     toast.success(scopes.length ? '下载授权已更新' : '技能已设为公开（全员可下载）');
   } catch (error) {
@@ -144,7 +146,7 @@ function requestArchive(skill: SkillView) {
     tone: 'danger',
     run: async () => {
       try {
-        await api.adminArchiveSkill(skill.id);
+        await api.adminArchiveSkill(skill.id!);
         toast.success('技能已归档');
         await load();
       } catch (error) {
@@ -170,7 +172,8 @@ function formatBytes(bytes: number): string {
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
-function formatTime(iso: string): string {
+function formatTime(iso?: string): string {
+  if (!iso) return '—';
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -297,7 +300,7 @@ onMounted(() => {
           <span v-else>—</span>
         </template>
         <template #contentBytes="{ row }">
-          <span class="ui-num">{{ formatBytes((row as SkillView).contentBytes) }}</span>
+          <span class="ui-num">{{ formatBytes((row as SkillView).contentBytes ?? 0) }}</span>
         </template>
         <template #status="{ row }">
           <UiStatusBadge

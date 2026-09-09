@@ -29,13 +29,13 @@ const filters = [
   { value: 'ALL', label: '全部' },
 ] as const;
 
-const statusText: Record<ModelApprovalStatus, string> = {
+const statusText: Record<string, string> = {
   PENDING: '待审批',
   APPROVED: '已通过',
   REJECTED: '已驳回',
 };
 
-function statusTone(status: ModelApprovalStatus): 'success' | 'warning' | 'danger' | 'neutral' {
+function statusTone(status?: ModelApprovalStatus): 'success' | 'warning' | 'danger' | 'neutral' {
   if (status === 'APPROVED') return 'success';
   if (status === 'REJECTED') return 'danger';
   return 'warning';
@@ -60,7 +60,7 @@ async function load() {
     const page = await api.listModelApprovals(
       filter.value === 'ALL' ? {} : { status: filter.value, size: 20 },
     );
-    items.value = page.items;
+    items.value = page.items ?? [];
     nextCursor.value = page.nextCursor;
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : '加载失败';
@@ -76,7 +76,7 @@ async function loadMore() {
     size: 20,
     before: nextCursor.value,
   });
-  items.value = items.value.concat(page.items);
+  items.value = items.value.concat(page.items ?? []);
   nextCursor.value = page.nextCursor;
 }
 
@@ -94,15 +94,18 @@ function cancelReview() {
 
 async function confirmReview() {
   if (!reviewTarget.value) return;
+  // Hub View schemas mark every field optional (springdoc omits `required`);
+  // queue rows from listModelApprovals always carry the id — the `!` restores
+  // the pre-hub required-field contract.
   submitting.value = true;
   reviewError.value = '';
   try {
     const note = reviewNote.value.trim() || undefined;
     if (reviewAction.value === 'approve') {
-      await api.approveModelApproval(reviewTarget.value.id, note);
+      await api.approveModelApproval(reviewTarget.value.id!, note);
       toast.success(`已通过模型 ${reviewTarget.value.modelId}，立即生效`);
     } else {
-      await api.rejectModelApproval(reviewTarget.value.id, note);
+      await api.rejectModelApproval(reviewTarget.value.id!, note);
       toast.success('已驳回申请');
     }
     reviewTarget.value = null;
@@ -239,7 +242,7 @@ onMounted(load);
             variant="pill"
             :tone="statusTone((row as ModelApprovalView).status)"
             :label="
-              statusText[(row as ModelApprovalView).status] ?? (row as ModelApprovalView).status
+              statusText[(row as ModelApprovalView).status ?? ''] ?? (row as ModelApprovalView).status
             "
           />
         </template>
