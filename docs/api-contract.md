@@ -348,7 +348,10 @@
 - `/api/v1/admin/exports`：创建和下载原始记录导出任务。
 - `/api/v1/admin/reconciliation/**`：导入官方账单并生成匹配结果。
 - `/api/v1/admin/webhooks`：目标、签名 Secret、测试和投递记录。
-- `/api/v1/admin/audit-events`：不可修改的管理审计事件。
+- `/api/v1/admin/audit-events`：不可修改的管理审计事件（读面可选 `action`/`targetType`/`actorId`/
+  `from`/`to` 精确筛选 + `beforePosition` cursor）；`GET /api/v1/admin/audit-events/export`：
+  CSV 合规导出（对齐腾讯 AI 网关操作记录下载；上限 5 万行、截断以 `X-MiQroKey-Truncated` 声明，
+  参数/形状同 §9 机器端点）。
 - `/api/v1/admin/usage-deletions`：双确认后人工删除用量范围。
 
 真实凭证写接口只接受明文输入，响应只返回掩码、指纹、版本和验证状态。凭证测试不得自动把未保存值写入数据库。
@@ -1003,8 +1006,15 @@ NULL scope = 全量（存量兼容）。强制层按「开放面路径 → 能�
 **只读开放面（机器凭据 `Authorization: Bearer mqk_admin_…`，租户级）**
 - `GET /api/v1/admin-api/usage/summary?groupBy&from&to` — 租户级汇总（与 §5 管理员用量口径一致）。
 - `GET /api/v1/admin-api/usage/records?from&to&page&size` — 租户级明细（窗口/分页校验同管理端点）。
-- `GET /api/v1/admin-api/audit-events?size&action&beforePosition` — 审计链尾（因果序倒排，cursor 语义
-  同 `GET /api/v1/admin/audit-events`；哈希永不序列化）。
+- `GET /api/v1/admin-api/audit-events?size&action&targetType&actorId&from&to&beforePosition` — 审计
+  链尾（因果序倒排；可选精确筛选：资源类型 `targetType`、操作人 `actorId`、时间窗 `from`/`to`
+  ISO-8601 UTC，非法值 400 `PARAM_INVALID`、from>to 400 `TIME_RANGE_INVALID`；cursor 语义同
+  `GET /api/v1/admin/audit-events`；哈希永不序列化）。
+- `GET /api/v1/admin-api/audit-events/export?action&targetType&actorId&from&to` → `text/csv`（附件下载，
+  usage:read；与人类端 `GET /api/v1/admin/audit-events/export` 同筛选同形状）——合规导出：
+  RFC 4180 转义 + UTF-8 BOM，列=时间/action/targetType/targetId/actorId/changeSummary/chainPosition，
+  不含哈希链与正文；单次上限 50000 行，超出以响应头 `X-MiQroKey-Truncated: true` 显式截断声明
+  （调用方应收窄窗口，不静默丢行）。
 - `GET /api/v1/admin-api/api-keys` — 本租户管理密钥视图（无 digest/secret）。
 - `GET /api/v1/admin-api/quota-rules` — 配额计划 + 当期水位（与 `GET /api/v1/admin/quota-rules` 同口径）。
 - `GET /api/v1/admin-api/export-tasks?limit` / `GET /api/v1/admin-api/export-tasks/{id}` — 导出任务元数据

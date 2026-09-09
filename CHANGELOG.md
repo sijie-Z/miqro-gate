@@ -5,6 +5,14 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-09
+- **操作记录查询补全 + 合规导出（#314）**：audit-events 读面新增 targetType/actorId/from/to 筛选
+  （人类 + 机器双端点共享 AuditEventReadService，cursor 可组合）；新增 CSV 合规导出
+  `GET /api/v1/admin/audit-events/export` 与 `/api/v1/admin-api/audit-events/export`
+  （RFC 4180 转义 + UTF-8 BOM，不含哈希链/正文；单次上限 5 万行，超限以响应头
+  `X-MiQroKey-Truncated` 显式声明，不静默截断；不合法时间参数 400 PARAM_INVALID/
+  TIME_RANGE_INVALID）。对齐腾讯 AI 网关「数据观测 > 操作记录」下载能力（raw 27）。
+  前端审计页加资源类型/时间窗筛选与导出按钮（截断提示）。集成测试 5/5（双面筛选组合/
+  租户隔离/CSV 形状与转义/截断声明/时间参数校验）。
 - **spec 纳入真实类型检查(#295,#294)**：tsconfig.spec.json(composite=false 防 TS6307)；
   typecheck 三段链 app→spec→node；20 个 spec 文件 95 积压错误清零(仅类型层)；
   codegen-consistency.spec 潜在 any 掩盖修正。
