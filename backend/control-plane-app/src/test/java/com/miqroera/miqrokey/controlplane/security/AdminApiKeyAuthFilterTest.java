@@ -4,7 +4,9 @@ import com.miqroera.miqrokey.domain.model.AdminApiKey;
 import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.model.UserStatus;
+import com.miqroera.miqrokey.domain.model.AdminApiKeyCapabilities;
 import com.miqroera.miqrokey.domain.repository.AdminApiKeyRepository;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -18,6 +20,7 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -39,9 +42,10 @@ class AdminApiKeyAuthFilterTest {
     private static final String OPEN_PATH = "/api/v1/admin-api/usage/summary";
 
     private final AdminApiKeyRepository repository = mock(AdminApiKeyRepository.class);
+    private final AuditService auditService = mock(AuditService.class);
     private final FilterChain chain = mock(FilterChain.class);
     private final UserContext userContext = new UserContext();
-    private final AdminApiKeyAuthFilter filter = new AdminApiKeyAuthFilter(repository, userContext);
+    private final AdminApiKeyAuthFilter filter = new AdminApiKeyAuthFilter(repository, userContext, auditService);
 
     private final UUID tenant = UUID.randomUUID();
     private final UUID keyId = UUID.randomUUID();
@@ -56,7 +60,47 @@ class AdminApiKeyAuthFilterTest {
     }
 
     private static AdminApiKey activeKey(UUID id, UUID tenantId, String name, byte[] digest) {
-        return new AdminApiKey(id, tenantId, name, digest, "mqk_admin_", null, null, null, Instant.now());
+        return new AdminApiKey(id, tenantId, name, digest, "mqk_admin_", null, null, null, Instant.now(), null);
+    }
+
+    @Test
+    @DisplayName("a scoped key may reach its capability paths but is denied elsewhere (F60 batch 3)")
+    void scopedKeyEnforcement() throws Exception {
+        AdminApiKey scoped = new AdminApiKey(keyId, tenant, "usage-only", new byte[32], "mqk_admin_", null, null, null,
+                Instant.now(), List.of(AdminApiKeyCapabilities.USAGE_READ));
+        when(repository.findActiveByDigest(any())).thenReturn(Optional.of(scoped));
+
+        MockHttpServletRequest allowed = new MockHttpServletRequest();
+        allowed.setRequestURI("/api/v1/admin-api/usage/summary?groupBy=project");
+        allowed.addHeader("Authorization", "Bearer mqk_admin_usage-only-token");
+        filter.doFilter(allowed, response, chain);
+        verify(chain).doFilter(allowed, response);
+
+        MockHttpServletResponse deniedResponse = new MockHttpServletResponse();
+        MockHttpServletRequest denied = new MockHttpServletRequest();
+        denied.setRequestURI("/api/v1/admin-api/alert-rules");
+        denied.addHeader("Authorization", "Bearer mqk_admin_usage-only-token");
+        filter.doFilter(denied, deniedResponse, chain);
+        assertThat(deniedResponse.getStatus()).isEqualTo(403);
+        assertThat(deniedResponse.getContentAsString()).contains("ADMIN_API_SCOPE_DENIED");
+        verify(chain, never()).doFilter(denied, deniedResponse);
+    }
+
+    @Test
+    @DisplayName("an unscoped (full-access) key is never scope-denied")
+    void unscopedKeyNotDenied() throws Exception {
+        AdminApiKey full = new AdminApiKey(keyId, tenant, "full", new byte[32], "mqk_admin_", null, null, null,
+                Instant.now(), null);
+        when(repository.findActiveByDigest(any())).thenReturn(Optional.of(full));
+
+        for (String path : List.of("/api/v1/admin-api/usage/summary", "/api/v1/admin-api/alert-rules",
+                "/api/v1/admin-api/virtual-keys?userId=1", "/api/v1/admin-api/webhooks")) {
+            MockHttpServletRequest request = new MockHttpServletRequest();
+            request.setRequestURI(path);
+            request.addHeader("Authorization", "Bearer mqk_admin_full-token");
+            filter.doFilter(request, response, chain);
+            verify(chain).doFilter(request, response);
+        }
     }
 
     private static User user(UUID tenantId, UserRole role) {
@@ -115,7 +159,7 @@ class AdminApiKeyAuthFilterTest {
     void revokedOrExpiredKeyRejected() throws Exception {
         String revokedToken = "mqk_admin_revoked-token";
         when(repository.findActiveByDigest(any())).thenReturn(Optional.of(new AdminApiKey(keyId, tenant, "revoked",
-                new byte[32], "mqk_admin_", null, null, Instant.now(), Instant.now())));
+                new byte[32], "mqk_admin_", null, null, Instant.now(), Instant.now(), null)));
         request.setRequestURI(OPEN_PATH);
         request.addHeader("Authorization", "Bearer " + revokedToken);
         filter.doFilter(request, response, chain);
@@ -123,8 +167,9 @@ class AdminApiKeyAuthFilterTest {
 
         MockHttpServletResponse second = new MockHttpServletResponse();
         MockHttpServletRequest secondRequest = new MockHttpServletRequest();
-        when(repository.findActiveByDigest(any())).thenReturn(Optional.of(new AdminApiKey(keyId, tenant, "expired",
-                new byte[32], "mqk_admin_", null, Instant.now().minus(1, ChronoUnit.MINUTES), null, Instant.now())));
+        when(repository.findActiveByDigest(any()))
+                .thenReturn(Optional.of(new AdminApiKey(keyId, tenant, "expired", new byte[32], "mqk_admin_", null,
+                        Instant.now().minus(1, ChronoUnit.MINUTES), null, Instant.now(), null)));
         secondRequest.setRequestURI(OPEN_PATH);
         secondRequest.addHeader("Authorization", "Bearer mqk_admin_expired-token");
         filter.doFilter(secondRequest, second, chain);
