@@ -13,6 +13,16 @@
   （leader）、F32/F33 平台接口（BLOCKED）、F19 账单对账（等真实样本）**）
 - Last updated: `2026-09-09 CST`
 
+## 会话交接点 2026-09-09（夜 #2，服务族审计覆盖：#315）
+
+- **#315 服务与集成族审计覆盖（本 PR）**：六族管理写操作 21 个事件全量入链（此前零审计）——
+  consumers（create/disable/jwt set/remove）、agents、services 注册表、mcp_services
+  （create/上下线/健康配置）、mcp_tools（create/批量导入/启停/F16 修订发布与激活）、skills
+  （upload/access/archive）；共享 AuditSummaries（控制字符剥离 + JSON 转义）保证摘要 jsonb 安全；
+  actor=操作管理员 + X-Request-Id 关联。验证：AdminFamilyAuditIntegrationTest 5/5（HTTP 全链路 +
+  链上断言 + 明文 Key 不出现）、全量 verify 绿后合入。
+- 待办延续：#316 消费者能力 scope（下一 PR）、#211/#245/F32/F33 等外部项不变。
+
 ## 会话交接点 2026-09-09（夜，leader 三方向词盘点 + 操作记录读面：#314）
 
 - **leader 2026-09-09 方向词：权鉴 / 服务（腾讯功能极多）/ 接口**——以腾讯研究 corpus 为对照扫描

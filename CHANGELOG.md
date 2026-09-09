@@ -5,6 +5,10 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-09
+- **服务与集成族审计覆盖（#315）**：消费者/Agent/内部服务注册表/MCP 服务/MCP 工具（含 F16 修订发布与
+  回滚激活）/Skill 六族管理写操作全部进审计链（此前零审计）——事件 action/targetType 同词表、actor=
+  操作管理员、共享 AuditSummaries 生成 jsonb 安全摘要（控制字符剥离 + JSON 转义，不含明文密钥/PEM/包体）、
+  X-Request-Id 关联；控制器统一传参。集成测试 5/5（含"摘要不含明文 Key"断言）。
 - **操作记录查询补全 + 合规导出（#314）**：audit-events 读面新增 targetType/actorId/from/to 筛选
   （人类 + 机器双端点共享 AuditEventReadService，cursor 可组合）；新增 CSV 合规导出
   `GET /api/v1/admin/audit-events/export` 与 `/api/v1/admin-api/audit-events/export`
