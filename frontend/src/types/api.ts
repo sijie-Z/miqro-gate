@@ -78,22 +78,6 @@ export type TeamStatusValue = 'ACTIVE' | 'DISABLED';
 export type ProjectStatusValue = 'ACTIVE' | 'DISABLED';
 export type GrantStatusValue = 'ACTIVE' | 'DISABLED' | 'EXPIRED';
 
-export interface AdminUser {
-  id: string;
-  username: string;
-  displayName: string;
-  role: UserRole;
-  status: UserStatusValue;
-  mustChangePassword: boolean;
-  lastLoginAt?: string;
-  createdAt: string;
-}
-
-export interface UserCreatedResponse {
-  user: AdminUser;
-  temporaryPassword: string;
-}
-
 export interface MemberView {
   userId: string;
   username: string;

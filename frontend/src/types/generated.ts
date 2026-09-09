@@ -2584,15 +2584,13 @@ export interface components {
             httpStatus?: number;
             errorMessage?: string;
         };
-        User: {
+        AdminUserView: {
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
             tenantId?: string;
             username?: string;
             displayName?: string;
-            /** Format: byte */
-            passwordHash?: string;
             /** @enum {string} */
             role?: "SYSTEM_ADMIN" | "USER";
             /** @enum {string} */
@@ -2612,11 +2610,11 @@ export interface components {
             updatedAt?: string;
         };
         UserCreated: {
-            user?: components["schemas"]["User"];
+            user?: components["schemas"]["AdminUserView"];
             temporaryPassword?: string;
         };
         UserPasswordReset: {
-            user?: components["schemas"]["User"];
+            user?: components["schemas"]["AdminUserView"];
             temporaryPassword?: string;
         };
         DeletionRequest: {
@@ -4433,7 +4431,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["User"][];
+                    "*/*": components["schemas"]["AdminUserView"][];
                 };
             };
         };
@@ -6374,7 +6372,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["User"];
+                    "*/*": components["schemas"]["AdminUserView"];
                 };
             };
         };
