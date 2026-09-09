@@ -63,6 +63,14 @@ class AdminApiKeyServiceTest {
         }
 
         @Override
+        public java.util.List<AdminApiKey> findActiveExpiringBetween(UUID tenantId, Instant from, Instant to) {
+            return rows
+                    .stream().filter(k -> k.tenantId().equals(tenantId) && k.revokedAt() == null
+                            && k.expiresAt() != null && !k.expiresAt().isBefore(from) && !k.expiresAt().isAfter(to))
+                    .toList();
+        }
+
+        @Override
         public boolean updateScope(UUID id, UUID tenantId, List<String> capabilities) {
             AdminApiKey row = findByIdAndTenantId(id, tenantId).orElse(null);
             if (row == null) {

@@ -26,4 +26,10 @@ public interface AdminApiKeyRepository {
 
     /** Replaces the capability scope (null list = full access). */
     boolean updateScope(UUID id, UUID tenantId, List<String> capabilities);
+
+    /**
+     * Active, non-revoked keys whose expiry falls inside the window (expiry
+     * notifier).
+     */
+    List<AdminApiKey> findActiveExpiringBetween(UUID tenantId, Instant from, Instant to);
 }

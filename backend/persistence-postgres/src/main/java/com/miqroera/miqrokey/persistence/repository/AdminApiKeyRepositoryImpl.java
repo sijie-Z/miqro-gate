@@ -116,6 +116,16 @@ public class AdminApiKeyRepositoryImpl implements AdminApiKeyRepository {
     }
 
     @Override
+    public List<AdminApiKey> findActiveExpiringBetween(UUID tenantId, Instant from, Instant to) {
+        return jdbc.query(
+                "SELECT * FROM admin_api_keys WHERE tenant_id = :tenantId AND revoked_at IS NULL"
+                        + " AND expires_at >= :from AND expires_at <= :to ORDER BY expires_at",
+                new MapSqlParameterSource("tenantId", tenantId).addValue("from", Timestamp.from(from)).addValue("to",
+                        Timestamp.from(to)),
+                rowMapper);
+    }
+
+    @Override
     @Transactional
     public boolean updateScope(UUID id, UUID tenantId, List<String> capabilities) {
         int rows = jdbc.update("""

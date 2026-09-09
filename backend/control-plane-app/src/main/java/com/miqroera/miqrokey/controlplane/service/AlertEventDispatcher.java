@@ -60,6 +60,23 @@ public class AlertEventDispatcher {
     }
 
     /**
+     * F60 batch 3 follow-up: one event per admin key expiring soon, deduplicated
+     * per (key, day). Inert until an admin creates an
+     * {@code ADMIN_API_KEY_EXPIRING} rule (default off).
+     */
+    public void notifyAdminKeyExpiring(UUID tenantId, String keyId, String name, Instant expiresAt) {
+        List<AlertRuleService.AlertRule> rules = enabledRulesOfType(tenantId, "ADMIN_API_KEY_EXPIRING");
+        if (rules.isEmpty()) {
+            return;
+        }
+        String dedupeKey = "ADMIN_API_KEY_EXPIRING:" + keyId + ":" + java.time.LocalDate.now();
+        Map<String, Object> details = Map.of("keyId", keyId, "name", name, "expiresAt", expiresAt.toString());
+        for (AlertRuleService.AlertRule rule : rules) {
+            fireEvent(rule, dedupeKey, details);
+        }
+    }
+
+    /**
      * Inserts the event row and, when the rule carries an enabled endpoint,
      * delivers it.
      */

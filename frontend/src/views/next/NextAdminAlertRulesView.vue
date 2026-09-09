@@ -39,6 +39,7 @@ const typeOptions = [
   { value: 'MODEL_APPROVAL_SUBMITTED', label: '模型审批 · 提交' },
   { value: 'MODEL_APPROVAL_APPROVED', label: '模型审批 · 通过' },
   { value: 'MODEL_APPROVAL_REJECTED', label: '模型审批 · 驳回' },
+  { value: 'ADMIN_API_KEY_EXPIRING', label: '管理密钥 · 即将到期' },
 ];
 
 const creating = ref(false);
@@ -66,7 +67,9 @@ const isBudgetType = computed(() => form.value.type === 'BUDGET_THRESHOLD');
 const isQuotaType = computed(() => form.value.type === 'QUOTA_THRESHOLD');
 const isWatermarkType = computed(() => isBudgetType.value || isQuotaType.value);
 /** Event-driven rule types (F03): fired by the workflow itself, no threshold. */
-const isApprovalType = computed(() => form.value.type.startsWith('MODEL_APPROVAL_'));
+const isApprovalType = computed(
+  () => form.value.type.startsWith('MODEL_APPROVAL_') || form.value.type === 'ADMIN_API_KEY_EXPIRING',
+);
 
 const metricText: Record<string, string> = { TOKENS: 'Token', REQUESTS: '请求' };
 const periodText: Record<string, string> = { DAILY: '日', WEEKLY: '周', MONTHLY: '月' };

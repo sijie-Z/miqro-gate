@@ -1284,6 +1284,22 @@ export interface paths {
         patch: operations["update_4"];
         trace?: never;
     };
+    "/api/v1/admin/api-keys/{keyId}/scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateScope"];
+        trace?: never;
+    };
     "/api/v1/admin/alert-rules/{ruleId}": {
         parameters: {
             query?: never;
@@ -3155,6 +3171,7 @@ export interface components {
             /** Format: date-time */
             revokedAt?: string;
             active?: boolean;
+            capabilities?: string[];
         };
         CreateApiConsumerResponse: {
             consumer?: components["schemas"]["ApiConsumerView"];
@@ -6551,6 +6568,32 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["McpRouteRule"];
+                };
+            };
+        };
+    };
+    updateScope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                keyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScopeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["AdminApiKeyView"];
                 };
             };
         };
