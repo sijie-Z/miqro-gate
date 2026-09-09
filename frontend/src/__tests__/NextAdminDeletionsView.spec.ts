@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextAdminDeletionsView from '@/views/next/NextAdminDeletionsView.vue';
 import * as api from '@/api';
-import type { UsageDeletionRequest } from '@/types/api';
+import type { UsageDeletionRequest } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   deletionRecent: vi.fn(),

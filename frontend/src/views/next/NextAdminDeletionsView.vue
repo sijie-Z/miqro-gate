@@ -10,7 +10,7 @@ import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
-import type { UsageDeletionRequest } from '@/types/api';
+import type { UsageDeletionRequest } from '@/types/generated-api';
 
 const deletions = ref<UsageDeletionRequest[]>([]);
 const loading = ref(true);
@@ -198,21 +198,21 @@ onMounted(load);
       >
         <template #period="{ row }">
           <span class="ui-mono"
-            >{{ asDeletion(row).periodFrom.slice(0, 10) }} →
-            {{ asDeletion(row).periodTo.slice(0, 10) }}</span
+            >{{ (asDeletion(row).periodFrom ?? '').slice(0, 10) }} →
+            {{ (asDeletion(row).periodTo ?? '').slice(0, 10) }}</span
           >
         </template>
         <template #previewCount="{ row }">
           <span class="ui-num">{{
-            asDeletion(row).previewCount.toLocaleString()
+            (asDeletion(row).previewCount ?? 0).toLocaleString()
           }}</span>
         </template>
         <template #status="{ row }">
           <UiStatusBadge
             variant="pill"
-            :tone="statusTone[asDeletion(row).status] ?? 'neutral'"
+            :tone="statusTone[asDeletion(row).status ?? ''] ?? 'neutral'"
             :label="
-              statusText[asDeletion(row).status] ??
+              statusText[asDeletion(row).status ?? ''] ??
               asDeletion(row).status
             "
           />
