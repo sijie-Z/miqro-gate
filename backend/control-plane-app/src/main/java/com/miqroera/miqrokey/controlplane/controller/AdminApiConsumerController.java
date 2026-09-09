@@ -18,7 +18,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -44,11 +43,11 @@ public class AdminApiConsumerController {
     }
 
     @PostMapping
-    public ResponseEntity<Map<String, Object>> create(@Valid @RequestBody CreateRequest body) {
+    public ResponseEntity<CreateApiConsumerResponse> create(@Valid @RequestBody CreateRequest body) {
         ApiConsumerService.CreatedConsumer created = consumerService.create(userContext.getUser().tenantId(),
                 body.name().trim());
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(Map.of("consumer", created.consumer(), "apiKey", created.apiKey(), "shownOnce", true));
+                .body(new CreateApiConsumerResponse(created.consumer(), created.apiKey(), true));
     }
 
     @PostMapping("/{consumerId}/disable")
@@ -71,6 +70,10 @@ public class AdminApiConsumerController {
     }
 
     public record CreateRequest(@NotBlank @Size(max = 200) String name) {
+    }
+
+    /** Creation response (201): consumer view + one-time api key. */
+    public record CreateApiConsumerResponse(ApiConsumerView consumer, String apiKey, boolean shownOnce) {
     }
 
     public record SetJwtKeyRequest(@NotBlank @Size(max = 8192) String publicKeyPem) {
