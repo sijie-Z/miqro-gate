@@ -69,10 +69,8 @@ describe('NextRoiView', () => {
     await wrapper.find('[data-testid="roi-window-7"]').trigger('click');
     await flushPromises();
 
-    const lastCall = (mockApi.getRoiReport as ReturnType<typeof vi.fn>).mock.calls.at(-1) as [
-      string,
-      string,
-    ];
+    const calls = (mockApi.getRoiReport as ReturnType<typeof vi.fn>).mock.calls;
+    const lastCall = calls[calls.length - 1] as [string, string];
     const from = new Date(lastCall[0]);
     const to = new Date(lastCall[1]);
     expect((to.getTime() - from.getTime()) / (24 * 3600 * 1000)).toBeCloseTo(7, 0);

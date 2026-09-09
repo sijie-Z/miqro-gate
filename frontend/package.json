@@ -9,7 +9,7 @@
     "build": "run-p typecheck \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",
-    "typecheck": "node -e \"require('fs').rmSync('node_modules/.tmp/tsconfig.app.tsbuildinfo',{force:true});require('fs').rmSync('node_modules/.tmp/tsconfig.node.tsbuildinfo',{force:true})\" && vue-tsc --noEmit -p tsconfig.app.json && vue-tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "node -e \"require('fs').rmSync('node_modules/.tmp/tsconfig.app.tsbuildinfo',{force:true});require('fs').rmSync('node_modules/.tmp/tsconfig.node.tsbuildinfo',{force:true})\" && vue-tsc --noEmit -p tsconfig.app.json && vue-tsc --noEmit -p tsconfig.spec.json && vue-tsc --noEmit -p tsconfig.node.json",
     "lint": "eslint . --ext .vue,.ts,.tsx --fix",
     "format": "prettier --write src/",
     "test": "vitest run",

@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
@@ -22,7 +23,7 @@ describe('codegen consistency (openapi schema vs handwritten core types)', () =>
   const schemas = new Set(Object.keys(spec.components?.schemas ?? {}));
 
   const exportedInterfaces = new Set(
-    [...handwritten.matchAll(/^export interface (\w+) \{/gm)].map((m) => m[1]),
+    [...handwritten.matchAll(/^export interface (\w+) \{/gm)].map((m) => m[1]!),
   );
 
   // Known naming exceptions to the *View-suffix convention.
@@ -54,9 +55,10 @@ describe('codegen consistency (openapi schema vs handwritten core types)', () =>
     const block = new RegExp(`export interface ${name} \\{([\\s\\S]*?)\\n\\}`).exec(handwritten);
     if (!block) return new Set();
     const fields = new Set<string>();
-    for (const line of block[1].split('\n')) {
-      const m = /^\s{2}([A-Za-z_$][\w$]*)\??:/.exec(line);
-      if (m) fields.add(m[1]);
+    const body = block[1] ?? '';
+    for (const line of body.split('\n')) {
+      const field = /^\s{2}([A-Za-z_$][\w$]*)\??:/.exec(line)?.[1];
+      if (field) fields.add(field);
     }
     return fields;
   }

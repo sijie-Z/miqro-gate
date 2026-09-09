@@ -3,11 +3,12 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextAdminMcpAccessLogsView from '@/views/next/NextAdminMcpAccessLogsView.vue';
 import * as api from '@/api';
+import type { McpAccessLogEntry } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({ listMcpAccessLogs: vi.fn() }));
 const mockApi = vi.mocked(api);
 
-const rows = [
+const rows: McpAccessLogEntry[] = [
   {
     id: '00000000-0000-0000-0000-000000000001',
     serviceName: 'weather-mcp',
@@ -24,7 +25,7 @@ const rows = [
     serviceName: 'weather-mcp',
     consumerName: 'drill-outside',
     rpcMethod: 'tools/list',
-    toolName: null,
+    toolName: null as unknown as string,
     status: 'SERVICE_DENIED',
     httpStatus: 403,
     gatewayRequestId: 'req-0002',

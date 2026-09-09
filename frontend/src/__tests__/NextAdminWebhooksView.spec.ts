@@ -4,8 +4,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import NextAdminWebhooksView from '@/views/next/NextAdminWebhooksView.vue';
 import * as api from '@/api';
 import { toastState } from '@/ui/toast';
-import type {WebhookDelivery} from '@/types/api';
-import type { WebhookEndpointView } from '@/types/generated-api';
+import type { WebhookDelivery, WebhookEndpointView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listWebhooks: vi.fn(),

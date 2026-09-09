@@ -3,8 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextAdminUsageView from '@/views/next/NextAdminUsageView.vue';
 import * as api from '@/api';
-import type {UsageRecordPage} from '@/types/api';
-import type { UsageSummary } from '@/types/generated-api';
+import type { UsageCost, UsageRecordPage, UsageSummary } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   adminUsageSummary: vi.fn(),
@@ -21,14 +20,14 @@ const summary: UsageSummary = {
     label: '合计',
     requests: { upstream: 14, coalesced: 1, l1Hit: 2, l2Hit: 0 },
     tokens: { input: 20_000, output: 5_000, cacheRead: 300, cacheCreation: 800 },
-    cost: { upstreamPaid: '¥0.0300', gatewayObserved: '0.000100' },
+    cost: { upstreamPaid: '¥0.0300', gatewayObserved: '0.000100' } as unknown as UsageCost,
   },
 };
 
 function recordRow(
   i: number,
   overrides: Record<string, unknown> = {},
-): UsageRecordPage['items'][number] {
+): NonNullable<UsageRecordPage['items']>[number] {
   return {
     occurredAt: `2026-09-03T08:0${i}:00Z`,
     modelId: 'deepseek-v4-flash',
@@ -44,7 +43,7 @@ function recordRow(
     usageMissing: i === 1,
     virtualKeyId: 'k1',
     ...overrides,
-  } as UsageRecordPage['items'][number];
+  } as NonNullable<UsageRecordPage['items']>[number];
 }
 
 const page: UsageRecordPage = {

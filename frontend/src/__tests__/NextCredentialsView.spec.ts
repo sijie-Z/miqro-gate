@@ -55,10 +55,10 @@ const subscription: SubscriptionView = {
   name: 'Main',
   billingMode: 'PAYG',
   planScope: 'PERSONAL',
-  subscriptionPrice: null,
+  subscriptionPrice: null as unknown as number,
   currency: 'USD',
-  quotaTotal: null,
-  quotaUnit: null,
+  quotaTotal: null as unknown as number,
+  quotaUnit: null as unknown as string,
   status: 'ACTIVE',
   createdAt: '2026-08-01T00:00:00Z',
 };
@@ -70,8 +70,8 @@ const credential = (overrides: Partial<CredentialView> = {}): CredentialView => 
   status: 'ACTIVE',
   activeVersionId: '0190-0000-0000-0031',
   fingerprintPrefix: 'sk-a1b2c3d4e5f6',
-  lastValidatedAt: null,
-  lastValidationError: null,
+  lastValidatedAt: null as unknown as string,
+  lastValidationError: null as unknown as string,
   version: 2,
   createdAt: '2026-08-01T00:00:00Z',
   updatedAt: '2026-08-20T00:00:00Z',
@@ -90,7 +90,7 @@ describe('NextCredentialsView', () => {
         name: 'moonshot-main',
         status: 'DRAINING',
         lastValidatedAt: '2026-08-26T00:00:00Z',
-        lastValidationError: null,
+        lastValidationError: null as unknown as string,
       }),
     ]);
     mockApi.listSubscriptions.mockResolvedValue([subscription]);

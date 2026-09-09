@@ -65,7 +65,7 @@ const price = (overrides: Partial<PriceSnapshotView> = {}): PriceSnapshotView =>
   modelId: 'deepseek-chat',
   tokenType: 'INPUT',
   currency: 'CNY',
-  unitPrice: '2.0000',
+  unitPrice: 2,
   effectiveFrom: '2026-08-26T00:00:00Z',
   source: 'MANUAL',
   createdBy: 'root',
@@ -80,7 +80,7 @@ describe('NextPricesView', () => {
     toastState.items.splice(0);
     mockApi.listPrices.mockResolvedValue([
       price(),
-      price({ id: '0041', tokenType: 'OUTPUT', unitPrice: '16.0000', currency: 'USD' }),
+      price({ id: '0041', tokenType: 'OUTPUT', unitPrice: 16, currency: 'USD' }),
     ]);
     mockApi.listProviderProducts.mockResolvedValue([product]);
   });

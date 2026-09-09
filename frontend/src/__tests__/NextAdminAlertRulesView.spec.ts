@@ -113,7 +113,7 @@ describe('NextAdminAlertRulesView', () => {
     await wrapper.find('[data-testid="rule-create-open"]').trigger('click');
     await wrapper.find('[data-testid="rule-create-name"]').setValue('upstream-errors');
     // Pick the 上游错误率 type from the stub options (first stub = type).
-    const typeStub = wrapper.findAll('.ui-select-stub')[0];
+    const typeStub = wrapper.findAll('.ui-select-stub')[0]!;
     await typeStub
       .findAll('.stub-option')
       .find((o) => o.text() === '上游错误率')!
@@ -123,7 +123,7 @@ describe('NextAdminAlertRulesView', () => {
     const webhookStub = wrapper
       .findAll('.ui-select-stub')
       .find((s) => s.text().includes('Webhook 端点'))!;
-    await webhookStub.findAll('.stub-option')[0].trigger('click');
+    await webhookStub.findAll('.stub-option')[0]!.trigger('click');
     await flushPromises();
     await wrapper.find('[data-testid="rule-create-submit"]').trigger('click');
     await flushPromises();
@@ -167,7 +167,7 @@ describe('NextAdminAlertRulesView', () => {
 
     await wrapper.find('[data-testid="rule-create-open"]').trigger('click');
     await wrapper.find('[data-testid="rule-create-name"]').setValue('alice-quota');
-    const typeStub = wrapper.findAll('.ui-select-stub')[0];
+    const typeStub = wrapper.findAll('.ui-select-stub')[0]!;
     await typeStub
       .findAll('.stub-option')
       .find((o) => o.text() === '配额水位')!
@@ -176,7 +176,7 @@ describe('NextAdminAlertRulesView', () => {
     const quotaStub = wrapper.find('[data-testid="rule-quota-select"]');
     expect(quotaStub.exists()).toBe(true);
     expect(quotaStub.text()).toContain('Alice（Token·月）');
-    await quotaStub.findAll('.stub-option')[0].trigger('click');
+    await quotaStub.findAll('.stub-option')[0]!.trigger('click');
     await flushPromises();
     await wrapper.find('[data-testid="rule-create-submit"]').trigger('click');
     await flushPromises();
@@ -197,7 +197,7 @@ describe('NextAdminAlertRulesView', () => {
     await flushPromises();
 
     await wrapper.find('[data-testid="rule-create-open"]').trigger('click');
-    const typeStub = wrapper.findAll('.ui-select-stub')[0];
+    const typeStub = wrapper.findAll('.ui-select-stub')[0]!;
     await typeStub
       .findAll('.stub-option')
       .find((o) => o.text() === '模型审批 · 提交')!
