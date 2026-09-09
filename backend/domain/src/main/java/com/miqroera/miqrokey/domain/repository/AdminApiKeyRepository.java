@@ -23,4 +23,7 @@ public interface AdminApiKeyRepository {
 
     /** Marks revoked; returns false when the row is missing or already revoked. */
     boolean revoke(UUID id, UUID tenantId, Instant revokedAt);
+
+    /** Replaces the capability scope (null list = full access). */
+    boolean updateScope(UUID id, UUID tenantId, List<String> capabilities);
 }

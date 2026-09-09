@@ -5,6 +5,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -12,9 +13,15 @@ import java.util.UUID;
  * admin surface. Only the SHA-256 digest is persisted; the plaintext is shown
  * exactly once at issue time. Expiry and revocation are supported; revocation
  * is immediate (checked per request against the store).
+ *
+ * <p>
+ * {@code capabilities} is the F60 batch 3 scope: {@code null} means full access
+ * (backwards compatible), an empty list denies everything, otherwise the key is
+ * limited to the listed capability codes (see {@code AdminApiKeyCapabilities}).
+ * </p>
  */
 public record AdminApiKey(UUID id, UUID tenantId, String name, byte[] keyDigest, String keyPrefix, UUID createdBy,
-        Instant expiresAt, Instant revokedAt, Instant createdAt) {
+        Instant expiresAt, Instant revokedAt, Instant createdAt, List<String> capabilities) {
 
     private static final SecureRandom RANDOM = new SecureRandom();
     /** Distinct from the external-consumer prefix {@code mqk_api_}. */
@@ -30,6 +37,11 @@ public record AdminApiKey(UUID id, UUID tenantId, String name, byte[] keyDigest,
             return false;
         }
         return expiresAt == null || expiresAt.isAfter(Instant.now());
+    }
+
+    /** Scope check: no scope means full access; otherwise membership decides. */
+    public boolean allows(String capability) {
+        return capabilities == null || capabilities.contains(capability);
     }
 
     public static GeneratedKey generateKey() {
