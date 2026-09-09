@@ -6,13 +6,24 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-09 自主轮（F60 v2 + codegen 收尾 + typecheck 修复）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS`（develop @ 52f8727 = #268/#269/#271/#273/#275/#277/#279/#281 已合。
+- Current goal: `2026-09-09 自主轮（F60 v2 + codegen 迁移线收口 + typecheck 确定性）` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS`（develop @ d0f8551 = #268/#269/#271/#273/#275/#277/#279/#281/#285/#287 已合。
   本轮交付见下方交接点；**待办：#211 真机凭证（BLOCKED）、#245 告警接线裁决（leader）、F32/F33
-  平台接口（BLOCKED）、codegen 剩余手写类型（Grant/ToolImport*/Usage* 嵌套族等，下一步）、
+  平台接口（BLOCKED）、codegen 迁移线已收口（剩 ProblemDetails/ProviderProductView 刻意保留）、
   F19 账单对账（等真实样本）、F60 批 3 治理可选**）
 - Last updated: `2026-09-09 CST`
 
+## 会话交接点 2026-09-09（下午，codegen 迁移线收口：#285/#287）
+
+- **#285 codegen 小步 3（#284）**：Grant/UsageDeletionRequest/ToolImportSkip/ToolImportResult →
+  ProjectProviderGrant/UsageDeletion/ImportSkip/ImportResult 别名；消费方换源。
+- **#287 codegen 小步 4（#286）+ typecheck 确定性**：usage 嵌套族(UsageCost/Requests/Tokens/
+  UsageGroup→Cost/Requests/Tokens/GroupSummary)+ CreateApiConsumerResponse(后端 ResponseEntity<Map>
+  改具名记录建模、响应键不变、基线再生)迁 hub；types/api.ts 只剩 ProblemDetails/ProviderProductView
+  两个刻意保留 interface，**codegen 迁移线收口**(#246 原 25 目标全完成)。
+- **教训(CI 抓到假绿)**：复合项目(tsBuildInfoFile 增量缓存)下 vue-tsc --noEmit 本地复跑会复用
+  缓存 → 曾本地 0 错而 CI 20 错；typecheck 脚本改为先删 node_modules/.tmp/*.tsbuildinfo 再跑，
+  本地≡CI。后续任何前端改动都以清缓存后的 typecheck 为准。
 ## 会话交接点 2026-09-09（午间轮：#279 codegen 小步 2 + #281 typecheck 修复）
 
 - **#279 codegen hub 小步 2（#278）**：McpToolRevisionRow/ModelCatalogRow/UserProjectMembership/
