@@ -5,6 +5,16 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-09
+- **spec 纳入真实类型检查(#295,#294)**：tsconfig.spec.json(composite=false 防 TS6307)；
+  typecheck 三段链 app→spec→node；20 个 spec 文件 95 积压错误清零(仅类型层)；
+  codegen-consistency.spec 潜在 any 掩盖修正。
+- **F60 批 3 治理设计稿(#292,#290,待拍板)**：docs/f60-batch3-admin-key-governance-design.md
+  (能力组 scope,案 A 推荐;过期提醒;拍板 4 项)。
+- **F19 账单对账契约先行稿(#293,#291,待样本)**：docs/bill-reconciliation-contract.md
+  (canonical JSONL v0+四级匹配+四态报告+异步端点契约)。
+- **codegen 小步 3/4(#285/#287,#284/#286)**：Grant/ToolImport*/UsageDeletionRequest/Usage*
+  嵌套族/CreateApiConsumerResponse(后端改具名记录建模)迁 hub；types/api.ts 仅剩两个刻意
+  保留 interface——迁移线收口(#246)；typecheck 脚本改确定性(清 tsbuildinfo,CI 抓到本地假绿)。
 - **typecheck 空转修复（#281，#280）**：`vue-tsc --noEmit` 对 project-references 壳零检查 →
   脚本改为显式检查 app/node 两个子项目；**被假绿灯掩盖的 360 个积压错误清零**（导入源漂移 +
   hub 可选字段收窄），并暴露 2 个真 bug：toast 自动消失回调引用未定义 `dismiss`（toast 永不
