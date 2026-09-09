@@ -9,7 +9,8 @@ import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
-import type { ModelCatalogRow, ProviderProductView } from '@/types/api';
+import type { ProviderProductView } from '@/types/api';
+import type { ModelCatalogRow } from '@/types/generated-api';
 
 const products = ref<ProviderProductView[]>([]);
 const loading = ref(true);

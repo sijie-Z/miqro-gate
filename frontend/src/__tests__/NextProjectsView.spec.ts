@@ -3,8 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextProjectsView from '@/views/next/NextProjectsView.vue';
 import * as api from '@/api';
-import type {MemberView} from '@/types/api';
-import type { Project } from '@/types/generated-api';
+import type { MemberView, Project } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listProjects: vi.fn(),
