@@ -10,6 +10,7 @@ import com.miqroera.miqrokey.domain.repository.AgentRepository;
 import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
 import com.miqroera.miqrokey.domain.repository.UpstreamCredentialRepository;
 import com.miqroera.miqrokey.domain.repository.UpstreamSubscriptionRepository;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
@@ -24,7 +25,8 @@ import java.util.UUID;
  * Managed smart agents (P3.1, {@code agents} V17) modeled after the Alibaba AI
  * Gateway agent topology: an agent's egress is bound to one ACTIVE upstream
  * credential (the provider product follows from the credential), and usage
- * observability aggregates by that credential for the per-agent view.
+ * observability aggregates by that credential for the per-agent view. Every
+ * mutation records an audit event (AGENT_CREATE/AGENT_DISABLE).
  */
 @Service
 public class AdminAgentService {
@@ -34,15 +36,17 @@ public class AdminAgentService {
     private final UpstreamSubscriptionRepository subscriptionRepository;
     private final ProviderProductRepository productRepository;
     private final AdminUsageStatsService usageStatsService;
+    private final AuditService auditService;
 
     public AdminAgentService(AgentRepository agentRepository, UpstreamCredentialRepository credentialRepository,
             UpstreamSubscriptionRepository subscriptionRepository, ProviderProductRepository productRepository,
-            AdminUsageStatsService usageStatsService) {
+            AdminUsageStatsService usageStatsService, AuditService auditService) {
         this.agentRepository = agentRepository;
         this.credentialRepository = credentialRepository;
         this.subscriptionRepository = subscriptionRepository;
         this.productRepository = productRepository;
         this.usageStatsService = usageStatsService;
+        this.auditService = auditService;
     }
 
     public List<AgentView> list(UUID tenantId) {
@@ -54,7 +58,8 @@ public class AdminAgentService {
     }
 
     @Transactional
-    public AgentView create(UUID tenantId, UUID adminId, String name, String description, UUID credentialId) {
+    public AgentView create(UUID tenantId, UUID adminId, String name, String description, UUID credentialId,
+            String requestId) {
         UpstreamCredential credential = credentialRepository.findById(credentialId)
                 .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "CREDENTIAL_NOT_FOUND", "凭证不存在。"));
         if (!credential.tenantId().equals(tenantId) || credential.status() != CredentialStatus.ACTIVE) {
@@ -64,23 +69,28 @@ public class AdminAgentService {
             throw new ApiException(HttpStatus.CONFLICT, "AGENT_CREDENTIAL_TAKEN",
                     "该凭证已被其他 Agent 绑定（一个凭证只支持一个 Agent，保证按 Agent 用量可区分）。");
         }
-        Agent agent = new Agent(UUID.randomUUID(), tenantId, name, description, credentialId, "ACTIVE", 0, adminId,
-                Instant.now(), Instant.now());
+        Agent agent = new Agent(UUID.randomUUID(), tenantId, name.trim(), description, credentialId, "ACTIVE", 0,
+                adminId, Instant.now(), Instant.now());
         try {
             agentRepository.insert(agent);
         } catch (DuplicateKeyException e) {
             throw new ApiException(HttpStatus.CONFLICT, "AGENT_NAME_TAKEN", "Agent 名称已存在。");
         }
+        auditService.record(tenantId, adminId, "AGENT_CREATE", "AGENT", agent.id(),
+                AuditSummaries.summary("name", AuditSummaries.sanitize(agent.name())), requestId);
         return toView(tenantId, agent);
     }
 
     @Transactional
-    public AgentView disable(UUID tenantId, UUID agentId) {
+    public AgentView disable(UUID tenantId, UUID adminId, UUID agentId, String requestId) {
         Agent agent = find(tenantId, agentId);
         if ("DISABLED".equals(agent.status())) {
             throw new ApiException(HttpStatus.CONFLICT, "AGENT_ALREADY_DISABLED", "Agent 已禁用。");
         }
-        return toView(tenantId, agentRepository.updateStatus(tenantId, agentId, "DISABLED", agent.version()));
+        AgentView view = toView(tenantId, agentRepository.updateStatus(tenantId, agentId, "DISABLED", agent.version()));
+        auditService.record(tenantId, adminId, "AGENT_DISABLE", "AGENT", agentId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(agent.name())), requestId);
+        return view;
     }
 
     /** Per-agent usage: aggregation over the bound credential. */

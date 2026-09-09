@@ -4,6 +4,7 @@ import com.miqroera.miqrokey.domain.model.McpTool;
 import com.miqroera.miqrokey.domain.model.McpToolRevision;
 import com.miqroera.miqrokey.domain.repository.McpToolRepository;
 import com.miqroera.miqrokey.domain.repository.McpToolRevisionRepository;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -19,7 +20,8 @@ import java.util.UUID;
  * the activation pointer; the active revision's spec is mirrored onto
  * {@code mcp_tools} so route-snapshot reads stay unchanged. History is never
  * pruned and rollback is an idempotent pointer move that does not mint a new
- * revision number.
+ * revision number. Publish/activate record audit events
+ * (MCP_TOOL_REVISION_PUBLISH / MCP_TOOL_REVISION_ACTIVATE).
  */
 @Service
 public class McpToolRevisionService {
@@ -27,12 +29,14 @@ public class McpToolRevisionService {
     private final McpToolRepository toolRepository;
     private final McpToolRevisionRepository revisionRepository;
     private final RouteRefreshPublisher routeRefreshPublisher;
+    private final AuditService auditService;
 
     public McpToolRevisionService(McpToolRepository toolRepository, McpToolRevisionRepository revisionRepository,
-            RouteRefreshPublisher routeRefreshPublisher) {
+            RouteRefreshPublisher routeRefreshPublisher, AuditService auditService) {
         this.toolRepository = toolRepository;
         this.revisionRepository = revisionRepository;
         this.routeRefreshPublisher = routeRefreshPublisher;
+        this.auditService = auditService;
     }
 
     /**
@@ -42,7 +46,7 @@ public class McpToolRevisionService {
      */
     @Transactional
     public McpToolRevision publish(UUID tenantId, UUID adminId, UUID toolId, String description, String method,
-            String path) {
+            String path, String requestId) {
         McpTool tool = findTool(tenantId, toolId);
         McpToolRevision current = revisionRepository.findActive(tenantId, toolId).orElse(null);
         String baseDescription = current != null ? current.description() : tool.description();
@@ -70,6 +74,8 @@ public class McpToolRevisionService {
             throw new ApiException(HttpStatus.CONFLICT, "TOOL_REVISION_CONFLICT", "并发发布冲突，请刷新后重试。");
         }
         routeRefreshPublisher.publishChanged();
+        auditService.record(tenantId, adminId, "MCP_TOOL_REVISION_PUBLISH", "MCP_TOOL", toolId,
+                AuditSummaries.summary("name", tool.toolName(), "revision", revision), requestId);
         return created;
     }
 
@@ -85,7 +91,7 @@ public class McpToolRevisionService {
      * is a no-op success).
      */
     @Transactional
-    public McpToolRevision activate(UUID tenantId, UUID toolId, long revision) {
+    public McpToolRevision activate(UUID tenantId, UUID adminId, UUID toolId, long revision, String requestId) {
         McpToolRevision target = revisionRepository.findByToolAndRevision(tenantId, toolId, revision)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "TOOL_REVISION_NOT_FOUND", "工具修订不存在。"));
         if (target.activatedAt() == null) {
@@ -93,6 +99,8 @@ public class McpToolRevisionService {
             revisionRepository.activate(tenantId, toolId, revision, Instant.now());
             revisionRepository.mirrorToTool(tenantId, toolId, target.description(), target.method(), target.path());
             routeRefreshPublisher.publishChanged();
+            auditService.record(tenantId, adminId, "MCP_TOOL_REVISION_ACTIVATE", "MCP_TOOL", toolId,
+                    AuditSummaries.summary("revision", revision), requestId);
         }
         return revisionRepository.findByToolAndRevision(tenantId, toolId, revision).orElseThrow();
     }

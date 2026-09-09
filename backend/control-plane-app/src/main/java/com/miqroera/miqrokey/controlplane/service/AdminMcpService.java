@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.service;
 
 import com.miqroera.miqrokey.domain.model.McpService;
 import com.miqroera.miqrokey.domain.repository.McpServiceRepository;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -16,7 +17,8 @@ import java.util.UUID;
  * MCP service management (P3.4, {@code mcp_services} V20) modeled after the
  * Tencent AI gateway MCP management: registration, manual online/offline
  * switching (health checking never overrides a manual offline) and health check
- * configuration. Tool discovery is a follow-up.
+ * configuration. Tool discovery is a follow-up. Every mutation records an audit
+ * event (MCP_SERVICE_CREATE/MCP_SERVICE_STATUS/MCP_SERVICE_HEALTH_UPDATE).
  */
 @Service
 public class AdminMcpService {
@@ -24,12 +26,14 @@ public class AdminMcpService {
     private final McpServiceRepository repository;
     private final AdminMcpRouteRuleService routeRules;
     private final RouteRefreshPublisher routeRefreshPublisher;
+    private final AuditService auditService;
 
     public AdminMcpService(McpServiceRepository repository, AdminMcpRouteRuleService routeRules,
-            RouteRefreshPublisher routeRefreshPublisher) {
+            RouteRefreshPublisher routeRefreshPublisher, AuditService auditService) {
         this.repository = repository;
         this.routeRules = routeRules;
         this.routeRefreshPublisher = routeRefreshPublisher;
+        this.auditService = auditService;
     }
 
     public List<McpService> list(UUID tenantId) {
@@ -43,9 +47,9 @@ public class AdminMcpService {
     @Transactional
     public McpService create(UUID tenantId, UUID adminId, String name, String description, String endpoint,
             String transport, Integer checkIntervalSeconds, Integer checkTimeoutSeconds, Integer failThreshold,
-            Integer recoverThreshold, String checkPath) {
+            Integer recoverThreshold, String checkPath, String requestId) {
         String normalizedEndpoint = validateEndpoint(endpoint);
-        McpService service = new McpService(UUID.randomUUID(), tenantId, name, description, normalizedEndpoint,
+        McpService service = new McpService(UUID.randomUUID(), tenantId, name.trim(), description, normalizedEndpoint,
                 transport != null ? transport : "STREAMABLE_HTTP", "ONLINE", "UNKNOWN", null, 0, 0,
                 checkIntervalSeconds != null ? checkIntervalSeconds : 30,
                 checkTimeoutSeconds != null ? checkTimeoutSeconds : 5, failThreshold != null ? failThreshold : 3,
@@ -60,12 +64,14 @@ public class AdminMcpService {
         // F11: every service owns an immutable default catch-all route.
         routeRules.createDefault(tenantId, service.id());
         routeRefreshPublisher.publishChanged();
+        auditService.record(tenantId, adminId, "MCP_SERVICE_CREATE", "MCP_SERVICE", service.id(),
+                AuditSummaries.summary("name", AuditSummaries.sanitize(service.name())), requestId);
         return service;
     }
 
     /** Manual online/offline switch; health checking never overrides it. */
     @Transactional
-    public McpService setStatus(UUID tenantId, UUID serviceId, String status) {
+    public McpService setStatus(UUID tenantId, UUID adminId, UUID serviceId, String status, String requestId) {
         McpService service = find(tenantId, serviceId);
         if (!(status.equals("ONLINE") || status.equals("OFFLINE"))) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "MCP_STATUS_INVALID", "状态必须是 ONLINE 或 OFFLINE。");
@@ -75,6 +81,8 @@ public class AdminMcpService {
         }
         McpService updated = repository.update(withStatus(service, status), service.version());
         routeRefreshPublisher.publishChanged();
+        auditService.record(tenantId, adminId, "MCP_SERVICE_STATUS", "MCP_SERVICE", serviceId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(service.name()), "status", status), requestId);
         return updated;
     }
 
@@ -82,8 +90,9 @@ public class AdminMcpService {
      * Updates the health check configuration (path/interval/timeout/thresholds).
      */
     @Transactional
-    public McpService updateHealthConfig(UUID tenantId, UUID serviceId, Integer checkIntervalSeconds,
-            Integer checkTimeoutSeconds, Integer failThreshold, Integer recoverThreshold, String checkPath) {
+    public McpService updateHealthConfig(UUID tenantId, UUID adminId, UUID serviceId, Integer checkIntervalSeconds,
+            Integer checkTimeoutSeconds, Integer failThreshold, Integer recoverThreshold, String checkPath,
+            String requestId) {
         McpService service = find(tenantId, serviceId);
         McpService updated = new McpService(service.id(), service.tenantId(), service.name(), service.description(),
                 service.endpoint(), service.transport(), service.status(), service.healthStatus(),
@@ -94,7 +103,10 @@ public class AdminMcpService {
                 recoverThreshold != null ? recoverThreshold : service.recoverThreshold(),
                 checkPath != null && !checkPath.isBlank() ? checkPath : service.checkPath(), service.version(),
                 service.createdBy(), service.createdAt(), service.updatedAt());
-        return repository.update(updated, service.version());
+        McpService saved = repository.update(updated, service.version());
+        auditService.record(tenantId, adminId, "MCP_SERVICE_HEALTH_UPDATE", "MCP_SERVICE", serviceId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(service.name())), requestId);
+        return saved;
     }
 
     private static McpService withStatus(McpService service, String status) {
