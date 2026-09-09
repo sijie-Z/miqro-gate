@@ -1972,6 +1972,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/audit-events/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["exportCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/agents/{agentId}": {
         parameters: {
             query?: never;
@@ -2108,6 +2124,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["list_30"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin-api/audit-events/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["exportCsv_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7682,6 +7714,10 @@ export interface operations {
             query?: {
                 size?: number;
                 action?: string;
+                targetType?: string;
+                actorId?: string;
+                from?: string;
+                to?: string;
                 beforePosition?: number;
             };
             header?: never;
@@ -7698,6 +7734,30 @@ export interface operations {
                 content: {
                     "*/*": components["schemas"]["AuditEventView"][];
                 };
+            };
+        };
+    };
+    exportCsv: {
+        parameters: {
+            query?: {
+                action?: string;
+                targetType?: string;
+                actorId?: string;
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -7894,6 +7954,10 @@ export interface operations {
             query?: {
                 size?: number;
                 action?: string;
+                targetType?: string;
+                actorId?: string;
+                from?: string;
+                to?: string;
                 beforePosition?: number;
             };
             header?: never;
@@ -7910,6 +7974,30 @@ export interface operations {
                 content: {
                     "*/*": components["schemas"]["AuditEventView"][];
                 };
+            };
+        };
+    };
+    exportCsv_1: {
+        parameters: {
+            query?: {
+                action?: string;
+                targetType?: string;
+                actorId?: string;
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
