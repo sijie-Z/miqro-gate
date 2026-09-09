@@ -58,3 +58,7 @@ export type McpResiliencePolicy = components['schemas']['McpResiliencePolicy'];
 // /api/v1/auth — LoginResponse/UserResponse previously had no schema at all.
 export type LoginResponse = components['schemas']['LoginResponse'];
 export type UserResponse = components['schemas']['UserResponse'];
+// admin users (issue: admin list contract modeled as AdminUserView — the
+// domain User record minus passwordHash, so no schema advertises it)
+export type AdminUser = components['schemas']['AdminUserView'];
+export type UserCreatedResponse = components['schemas']['UserCreated'];
