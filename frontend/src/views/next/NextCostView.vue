@@ -139,7 +139,7 @@ function exportCsv() {
     const row = g as unknown as UsageGroup;
     return [
       row.label,
-      String(row.requests.upstream),
+      String(row.requests?.upstream ?? 0),
       String(tokensOf(row)),
       costOf(row).toFixed(4),
     ];
@@ -511,7 +511,7 @@ onMounted(async () => {
         data-testid="cost-table"
       >
         <template #requests="{ row }">
-          <span class="ui-num">{{ formatCount(asGroup(row).requests.upstream) }}</span>
+          <span class="ui-num">{{ formatCount(asGroup(row).requests?.upstream ?? 0) }}</span>
         </template>
         <template #tokens="{ row }">
           <span class="ui-num">{{ formatCount(tokensOf(asGroup(row))) }}</span>
@@ -541,7 +541,7 @@ onMounted(async () => {
         data-testid="cost-day-table"
       >
         <template #requests="{ row }">
-          <span class="ui-num">{{ formatCount(asGroup(row).requests.upstream) }}</span>
+          <span class="ui-num">{{ formatCount(asGroup(row).requests?.upstream ?? 0) }}</span>
         </template>
         <template #tokens="{ row }">
           <span class="ui-num">{{ formatCount(tokensOf(asGroup(row))) }}</span>

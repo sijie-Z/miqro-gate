@@ -67,8 +67,8 @@ async function createConsumer() {
     const response = await api.createApiConsumer(createName.value.trim());
     creating.value = false;
     createName.value = '';
-    revealName.value = response.consumer.name ?? '';
-    revealKey.value = response.apiKey;
+    revealName.value = response.consumer?.name ?? '';
+    revealKey.value = response.apiKey ?? '';
     revealAcked.value = false;
     reveal.value = true;
     await load();

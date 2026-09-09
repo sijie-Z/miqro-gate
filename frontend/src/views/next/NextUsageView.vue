@@ -414,19 +414,19 @@ function formatTime(iso?: string): string {
       >
         <template #group="{ row }">{{ asGroup(row).label || asGroup(row).groupKey }}</template>
         <template #requests="{ row }">{{
-          asGroup(row).requests.upstream +
-          asGroup(row).requests.coalesced +
-          asGroup(row).requests.l1Hit +
-          asGroup(row).requests.l2Hit
+          (asGroup(row).requests?.upstream ?? 0) +
+          (asGroup(row).requests?.coalesced ?? 0) +
+          (asGroup(row).requests?.l1Hit ?? 0) +
+          (asGroup(row).requests?.l2Hit ?? 0)
         }}</template>
-        <template #inputTokens="{ row }">{{ formatNumber(asGroup(row).tokens.input) }}</template>
-        <template #outputTokens="{ row }">{{ formatNumber(asGroup(row).tokens.output) }}</template>
-        <template #cacheRead="{ row }">{{ formatNumber(asGroup(row).tokens.cacheRead) }}</template>
+        <template #inputTokens="{ row }">{{ formatNumber(asGroup(row).tokens?.input ?? 0) }}</template>
+        <template #outputTokens="{ row }">{{ formatNumber(asGroup(row).tokens?.output ?? 0) }}</template>
+        <template #cacheRead="{ row }">{{ formatNumber(asGroup(row).tokens?.cacheRead ?? 0) }}</template>
         <template #upstreamCost="{ row }">{{
-          formatCost(asGroup(row).cost.upstreamPaid)
+          formatCost(asGroup(row).cost?.upstreamPaid)
         }}</template>
         <template #gatewayCost="{ row }">{{
-          formatCost(asGroup(row).cost.gatewayObserved)
+          formatCost(asGroup(row).cost?.gatewayObserved)
         }}</template>
       </UiTable>
       <div
