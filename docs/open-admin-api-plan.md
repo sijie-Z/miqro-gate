@@ -60,5 +60,7 @@
       `/api/v1/admin/api-keys/{id}/scope` + 过滤器路径→能力组强制（403
       ADMIN_API_SCOPE_DENIED 进审计）+ 审计 SCOPE_UPDATE + 集成矩阵 3/3（设计稿
       docs/f60-batch3-admin-key-governance-design.md；到期提醒 UI/事件=follow-up）
-- [ ] 批 3 follow-up：到期提醒（`ADMIN_API_KEY_EXPIRING` 事件默认关 + 管理密钥列表页徽标候选）
+- [x] 批 3 follow-up 到期提醒（事件）：V36 `ADMIN_API_KEY_EXPIRING` 事件型(默认关,规则级 opt-in;
+      per key+日期去重;6h 周期检查 ≤7d 到期密钥;IT 覆盖)—UI 徽标仍无载体(管理密钥无前端列表页,
+      密钥管理=API-only)
 - [ ] 批 3 其余（频控等，长期可选）
