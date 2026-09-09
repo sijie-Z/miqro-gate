@@ -286,6 +286,9 @@ PostgreSQL 响应缓存（L2），默认关闭（缓存子系统显式启用且 
 
 V14（ADR-0011）新增 JWT 验签公钥：`jwt_public_key_pem text`（RSA SubjectPublicKeyInfo，公钥非机密）、`jwt_key_fingerprint varchar(16)`（SHA-256 前 8 字节 hex，展示）、`jwt_key_set_at timestamptz`。三列同设同清（`ApiConsumer` 构造校验同 null）。
 
+V37（#316）新增通道能力作用域：`capabilities jsonb`（NULL = 全量；JSON 数组取值 `billing:read`/`mcp:call`，
+值域与去重在应用层校验，镜像 V35 admin key scope 先例）。快照加载器（`JdbcRouteSnapshotLoader`）随行读取供网关判定。
+
 ### `price_snapshot` (V5，当前实现)
 
 每百万 token 单价快照，**不租户隔离**（价格属于全局产品目录）：`provider_product_id`、`model_id`、`token_type`（`INPUT|OUTPUT|CACHE_READ|CACHE_CREATION`）、`currency`（默认 CNY）、`unit_price numeric(24,10)`、`effective_from`、`source`（`MANUAL|OFFICIAL|ESTIMATED`）、`created_by`。查询索引 `(provider_product_id, model_id, token_type, effective_from DESC)`。控制面用量汇总按此计算成本；无快照的模型成本记 0。

@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.domain.model;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -23,10 +24,22 @@ import java.util.UUID;
  *            SHA-256 of the DER public key, first 8 bytes hex (display only)
  * @param jwtKeySetAt
  *            when the JWT key was set/rotated, or null
+ * @param capabilities
+ *            issue #316 channel scope: null = full access; a non-null list
+ *            narrows the consumer to the listed codes (see
+ *            {@link ConsumerCapabilities}). Empty list = no channels.
  */
 public record ApiConsumer(UUID id, UUID tenantId, String name, byte[] keyDigest, String keyPrefix, String status,
         String jwtPublicKeyPem, String jwtKeyFingerprint, Instant jwtKeySetAt, long version, Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt, List<String> capabilities) {
+
+    /** Backwards-compatible constructor: no capability scope means full access. */
+    public ApiConsumer(UUID id, UUID tenantId, String name, byte[] keyDigest, String keyPrefix, String status,
+            String jwtPublicKeyPem, String jwtKeyFingerprint, Instant jwtKeySetAt, long version, Instant createdAt,
+            Instant updatedAt) {
+        this(id, tenantId, name, keyDigest, keyPrefix, status, jwtPublicKeyPem, jwtKeyFingerprint, jwtKeySetAt, version,
+                createdAt, updatedAt, null);
+    }
 
     public ApiConsumer {
         if (id == null || tenantId == null) {
@@ -47,6 +60,11 @@ public record ApiConsumer(UUID id, UUID tenantId, String name, byte[] keyDigest,
     /** True when a JWT verification key is configured. */
     public boolean hasJwtKey() {
         return jwtPublicKeyPem != null;
+    }
+
+    /** Channel check (fail-closed): null scope means full access. */
+    public boolean allows(String capability) {
+        return capabilities == null || capabilities.contains(capability);
     }
 
     @Override

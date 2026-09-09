@@ -58,19 +58,25 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         }
         Credential credential = extractCredential(request);
         if (credential != null) {
+            ApiConsumer consumer = null;
             // The X-API-Key header is API-key-only; Authorization: Bearer splits
             // by prefix (mqk_api_… = API key, otherwise an RS256 JWT).
             if (credential.origin() == Origin.API_KEY_HEADER) {
-                if (authenticateApiKey(credential.value(), request)) {
-                    chain.doFilter(request, response);
-                    return;
-                }
+                consumer = authenticateApiKey(credential.value());
             } else if (credential.value().startsWith(KEY_PREFIX)) {
-                if (authenticateApiKey(credential.value(), request)) {
-                    chain.doFilter(request, response);
+                consumer = authenticateApiKey(credential.value());
+            } else {
+                consumer = authenticateJwt(credential.value());
+            }
+            if (consumer != null) {
+                // Issue #316 channel scope: the billing channel requires
+                // billing:read (null scope = full access). Fail closed.
+                if (!consumer.allows("billing:read")) {
+                    forbidden(response);
                     return;
                 }
-            } else if (authenticateJwt(credential.value(), request)) {
+                request.setAttribute(CONSUMER_ATTR, consumer.id());
+                request.setAttribute(TENANT_ATTR, consumer.tenantId());
                 chain.doFilter(request, response);
                 return;
             }
@@ -78,31 +84,23 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         unauthorized(response);
     }
 
-    private boolean authenticateApiKey(String key, HttpServletRequest request) {
-        ApiConsumer consumer = consumerRepository.findByKeyDigest(sha256(key)).orElse(null);
-        if (consumer != null) {
-            request.setAttribute(CONSUMER_ATTR, consumer.id());
-            request.setAttribute(TENANT_ATTR, consumer.tenantId());
-            return true;
-        }
-        return false;
+    private ApiConsumer authenticateApiKey(String key) {
+        return consumerRepository.findByKeyDigest(sha256(key)).orElse(null);
     }
 
-    private boolean authenticateJwt(String token, HttpServletRequest request) {
+    private ApiConsumer authenticateJwt(String token) {
         String subject = ConsumerJwtVerifier.extractSubject(token);
         if (subject == null) {
-            return false;
+            return null;
         }
         ApiConsumer consumer = consumerRepository.findByName(subject).orElse(null);
         if (consumer == null || !"ACTIVE".equals(consumer.status()) || !consumer.hasJwtKey()) {
-            return false;
+            return null;
         }
         if (!jwtVerifier.verify(token, consumer.jwtPublicKeyPem(), subject)) {
-            return false;
+            return null;
         }
-        request.setAttribute(CONSUMER_ATTR, consumer.id());
-        request.setAttribute(TENANT_ATTR, consumer.tenantId());
-        return true;
+        return consumer;
     }
 
     /** Where the presented credential came from. */
@@ -131,6 +129,17 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         } catch (Exception e) {
             throw new IllegalStateException("SHA-256 not available", e);
         }
+    }
+
+    private static void forbidden(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.getWriter()
+                .write("""
+                        {"type":"about:blank","title":"Scope denied","status":403,"code":"CONSUMER_SCOPE_DENIED","detail":"该消费者未被授予 billing:read 能力。"}
+                        """
+                        .trim());
     }
 
     private static void unauthorized(HttpServletResponse response) throws IOException {

@@ -604,6 +604,10 @@
 
 平台等外部系统通过独立 API 通道查询计费数据，与门户会话认证并存。
 
+**能力作用域（#316，V37）**：消费者可裁剪到预设通道；`capabilities` NULL = 全量（存量兼容），强制层按通道
+校验（fail-closed）：计费通道缺 `billing:read` → `403 CONSUMER_SCOPE_DENIED`；网关 MCP 数据面缺 `mcp:call`
+→ `403 consumer_scope_denied`（error 信封）；与 ACL/白名单判断正交。通道变更即时生效（路由快照刷新）。
+
 **API 消费者**（管理员管理）：
 
 | 方法与路径 | 用途 |
@@ -613,6 +617,8 @@
 | `POST /api/v1/admin/api-consumers/{id}/disable` | 立即吊销（禁用的 Key 即刻失效） |
 | `PUT /api/v1/admin/api-consumers/{id}/jwt-key` | 设置/轮换 JWT 验签公钥：`{ "publicKeyPem" }`（RSA PEM SubjectPublicKeyInfo）→ 返回带 `jwtKeyFingerprint` 的视图；非法 PEM → `400 JWT_KEY_INVALID` |
 | `DELETE /api/v1/admin/api-consumers/{id}/jwt-key` | 移除公钥（JWT 认证立即失效） |
+| `PATCH /api/v1/admin/api-consumers/{id}/scope` | 替换能力作用域（#316）：body `{"capabilities":[…]}`，`null`（缺省）= 全量、`[]` = 无通道；
+  取值限 `billing:read`/`mcp:call` 且不得重复，未知码 → `400 CONSUMER_SCOPE_INVALID`；审计 `CONSUMER_SCOPE_UPDATE`（from/to） |
 
 **计费查询**（API Key 或管理员 session 认证）：
 

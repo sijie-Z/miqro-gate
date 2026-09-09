@@ -5,6 +5,12 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-09
+- **API 消费者能力作用域（#316）**：V37 `api_consumers.capabilities`（NULL=全量，值域 billing:read/mcp:call）——
+  一把消费者 Key 不再隐式同时拥有「整租户计费读 + MCP 数据面调用」；计费通道缺 billing:read → 403
+  CONSUMER_SCOPE_DENIED，网关 MCP 数据面缺 mcp:call → 403 consumer_scope_denied（均 fail-closed、与
+  ACL 正交、快照即时刷新）；`PATCH /api/v1/admin/api-consumers/{id}/scope` + 审计 CONSUMER_SCOPE_UPDATE
+  （from/to）+ 400 CONSUMER_SCOPE_INVALID；前端消费者页作用域徽标与编辑。验证：控制面 IT 2/2（计费门禁/
+  恢复全量/校验/空列表=无通道/审计断言）+ 网关契约 6/6（含 consumer_scope_denied）。
 - **服务与集成族审计覆盖（#315）**：消费者/Agent/内部服务注册表/MCP 服务/MCP 工具（含 F16 修订发布与
   回滚激活）/Skill 六族管理写操作全部进审计链（此前零审计）——事件 action/targetType 同词表、actor=
   操作管理员、共享 AuditSummaries 生成 jsonb 安全摘要（控制字符剥离 + JSON 转义，不含明文密钥/PEM/包体）、

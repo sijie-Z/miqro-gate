@@ -150,6 +150,18 @@ class McpProxyContractTest {
         }
 
         @Test
+        @DisplayName("should reject a consumer scoped to no channels (issue #316)")
+        void shouldRejectConsumerWithoutMcpCallScope() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_NO_CHANNELS))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isForbidden().expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("consumer_scope_denied");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
         @DisplayName("should reject a body that is not a JSON envelope")
         void shouldRejectMalformedEnvelope() {
             byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)

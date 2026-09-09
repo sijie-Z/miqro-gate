@@ -13,6 +13,16 @@
   （leader）、F32/F33 平台接口（BLOCKED）、F19 账单对账（等真实样本）**）
 - Last updated: `2026-09-09 CST`
 
+## 会话交接点 2026-09-09（深夜，消费者能力作用域：#316）
+
+- **#316 API 消费者能力作用域（本 PR）**：一把 `mqk_api_` Key 原同时具备整租户计费读与 MCP 数据面调用——
+  V37 capabilities jsonb（NULL=全量，值域 billing:read/mcp:call，镜像 V35 管理密钥 scope 先例）；
+  计费通道缺 billing:read → 403 CONSUMER_SCOPE_DENIED（problem+json），网关快照带 capabilities、缺 mcp:call
+  → 403 consumer_scope_denied；PATCH /api/v1/admin/api-consumers/{id}/scope + CONSUMER_SCOPE_UPDATE
+  （from/to）+ 400 CONSUMER_SCOPE_INVALID；scope 变更触发路由快照刷新。验证：控制面 IT 2/2、网关契约测试
+  6/6、typecheck/vitest、全量 verify 绿后合入。
+- 待办延续：#211/#245/F32/F33 外部项；F60 批 3 剩余治理（频控）长期可选。
+
 ## 会话交接点 2026-09-09（夜 #2，服务族审计覆盖：#315）
 
 - **#315 服务与集成族审计覆盖（本 PR）**：六族管理写操作 21 个事件全量入链（此前零审计）——

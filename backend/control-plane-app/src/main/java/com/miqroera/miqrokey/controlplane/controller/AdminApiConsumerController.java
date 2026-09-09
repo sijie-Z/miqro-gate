@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -81,7 +82,23 @@ public class AdminApiConsumerController {
         return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
+    /**
+     * Replaces the capability scope (issue #316): null = full access, empty list =
+     * no channels; unknown/duplicate codes → 400 CONSUMER_SCOPE_INVALID. Audited as
+     * CONSUMER_SCOPE_UPDATE with the previous and next scope.
+     */
+    @PatchMapping("/{consumerId}/scope")
+    public ApiConsumerView updateScope(@PathVariable UUID consumerId, @Valid @RequestBody ScopeRequest body,
+            HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return consumerService.updateScope(user.tenantId(), user.id(), consumerId, body.capabilities(),
+                requestId(httpReq));
+    }
+
     public record CreateRequest(@NotBlank @Size(max = 200) String name) {
+    }
+
+    public record ScopeRequest(List<String> capabilities) {
     }
 
     /** Creation response (201): consumer view + one-time api key. */

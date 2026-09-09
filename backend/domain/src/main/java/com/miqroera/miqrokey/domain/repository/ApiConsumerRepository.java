@@ -24,4 +24,7 @@ public interface ApiConsumerRepository {
     Optional<ApiConsumer> findByName(String name);
 
     ApiConsumer update(ApiConsumer consumer);
+
+    /** Replaces the capability scope (null = full access); bumps the version. */
+    ApiConsumer updateCapabilities(UUID id, UUID tenantId, List<String> capabilities);
 }

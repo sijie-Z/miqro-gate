@@ -1300,6 +1300,22 @@ export interface paths {
         patch: operations["updateScope"];
         trace?: never;
     };
+    "/api/v1/admin/api-consumers/{consumerId}/scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateScope_1"];
+        trace?: never;
+    };
     "/api/v1/admin/alert-rules/{ruleId}": {
         parameters: {
             query?: never;
@@ -2514,6 +2530,7 @@ export interface components {
             jwtKeySetAt?: string;
             /** Format: date-time */
             createdAt?: string;
+            capabilities?: string[];
         };
         CreateVirtualKeyRequest: {
             name?: string;
@@ -6626,6 +6643,32 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["AdminApiKeyView"];
+                };
+            };
+        };
+    };
+    updateScope_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                consumerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScopeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiConsumerView"];
                 };
             };
         };

@@ -116,6 +116,12 @@ public class McpProxyController {
         if (consumer == null) {
             return error(exchange.getResponse(), HttpStatus.UNAUTHORIZED, "invalid_api_key", "Unknown API key");
         }
+        // Issue #316 channel scope: the MCP data plane requires mcp:call (null
+        // scope = full access). Fail closed before any service/ACL resolution.
+        if (!consumer.allows("mcp:call")) {
+            return error(exchange.getResponse(), HttpStatus.FORBIDDEN, "consumer_scope_denied",
+                    "Consumer is not allowed to call the MCP data plane");
+        }
         RouteSnapshot.McpServerRecord service = snapshot.mcpService(serviceName);
         if (service == null) {
             return error(exchange.getResponse(), HttpStatus.NOT_FOUND, "mcp_service_not_found", "Unknown MCP service");
