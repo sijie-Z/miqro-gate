@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.domain.model.McpToolRevision;
 import com.miqroera.miqrokey.domain.repository.McpServiceRepository;
 import com.miqroera.miqrokey.domain.repository.McpToolRepository;
 import com.miqroera.miqrokey.domain.repository.McpToolRevisionRepository;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -19,7 +20,8 @@ import java.util.UUID;
  * MCP tools management (P3.5, {@code mcp_tools} V21) modeled after the Tencent
  * AI gateway Tools management: tools are registered under an MCP service and
  * enabled/disabled individually; the tool name is the identifier AI agents
- * invoke.
+ * invoke. Every mutation records an audit event
+ * (MCP_TOOL_CREATE/MCP_TOOL_IMPORT/MCP_TOOL_STATUS).
  */
 @Service
 public class AdminMcpToolService {
@@ -28,13 +30,16 @@ public class AdminMcpToolService {
     private final McpServiceRepository serviceRepository;
     private final McpToolRevisionRepository revisionRepository;
     private final RouteRefreshPublisher routeRefreshPublisher;
+    private final AuditService auditService;
 
     public AdminMcpToolService(McpToolRepository toolRepository, McpServiceRepository serviceRepository,
-            McpToolRevisionRepository revisionRepository, RouteRefreshPublisher routeRefreshPublisher) {
+            McpToolRevisionRepository revisionRepository, RouteRefreshPublisher routeRefreshPublisher,
+            AuditService auditService) {
         this.toolRepository = toolRepository;
         this.serviceRepository = serviceRepository;
         this.revisionRepository = revisionRepository;
         this.routeRefreshPublisher = routeRefreshPublisher;
+        this.auditService = auditService;
     }
 
     public List<McpTool> list(UUID tenantId, UUID mcpServiceId) {
@@ -44,7 +49,7 @@ public class AdminMcpToolService {
 
     @Transactional
     public McpTool create(UUID tenantId, UUID adminId, UUID mcpServiceId, String toolName, String description,
-            String method, String path) {
+            String method, String path, String requestId) {
         requireService(tenantId, mcpServiceId);
         String normalizedName = toolName.trim();
         if (!normalizedName.matches("[a-z][a-z0-9_]*")) {
@@ -67,6 +72,9 @@ public class AdminMcpToolService {
             throw new ApiException(HttpStatus.CONFLICT, "TOOL_NAME_TAKEN", "该服务下已存在同名工具。");
         }
         routeRefreshPublisher.publishChanged();
+        auditService.record(tenantId, adminId, "MCP_TOOL_CREATE", "MCP_TOOL", tool.id(),
+                AuditSummaries.summary("name", normalizedName, "method", tool.method(), "path", tool.path()),
+                requestId);
         return tool;
     }
 
@@ -78,7 +86,7 @@ public class AdminMcpToolService {
      */
     @Transactional
     public ImportReport createImported(UUID tenantId, UUID adminId, UUID mcpServiceId,
-            List<ToolOpenApiParser.ToolSpec> specs) {
+            List<ToolOpenApiParser.ToolSpec> specs, String requestId) {
         requireService(tenantId, mcpServiceId);
         // Duplicate detection happens inside the transaction (before any write):
         // catching a duplicate AFTER the insert would mark the shared tx
@@ -109,6 +117,8 @@ public class AdminMcpToolService {
         if (!created.isEmpty()) {
             routeRefreshPublisher.publishChanged();
         }
+        auditService.record(tenantId, adminId, "MCP_TOOL_IMPORT", "MCP_TOOL", mcpServiceId, AuditSummaries.summary(
+                "service", mcpServiceId.toString(), "created", created.size(), "skipped", skipped.size()), requestId);
         return new ImportReport(created, skipped);
     }
 
@@ -120,7 +130,7 @@ public class AdminMcpToolService {
 
     /** Individual enable/disable of a tool (Tencent Tools 启停管理). */
     @Transactional
-    public McpTool setStatus(UUID tenantId, UUID toolId, String status) {
+    public McpTool setStatus(UUID tenantId, UUID adminId, UUID toolId, String status, String requestId) {
         McpTool tool = find(tenantId, toolId);
         if (!(status.equals("ENABLED") || status.equals("DISABLED"))) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "TOOL_STATUS_INVALID", "状态必须是 ENABLED 或 DISABLED。");
@@ -130,6 +140,8 @@ public class AdminMcpToolService {
         }
         McpTool updated = toolRepository.updateStatus(tenantId, toolId, status, tool.version());
         routeRefreshPublisher.publishChanged();
+        auditService.record(tenantId, adminId, "MCP_TOOL_STATUS", "MCP_TOOL", toolId,
+                AuditSummaries.summary("name", tool.toolName(), "status", status), requestId);
         return updated;
     }
 

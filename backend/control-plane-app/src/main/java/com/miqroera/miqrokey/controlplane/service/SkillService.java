@@ -8,6 +8,7 @@ import com.miqroera.miqrokey.domain.model.Team;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
 import com.miqroera.miqrokey.domain.repository.SkillRepository;
 import com.miqroera.miqrokey.domain.repository.TeamRepository;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,7 +24,9 @@ import java.util.UUID;
  * admin uploads validated skill packages (Anthropic Agent Skills format, parsed
  * by {@link SkillZipValidator}); every ACTIVE skill is visible to all signed-in
  * users; downloads are gated by TEAM/PROJECT grants (no grants = public).
- * Re-uploading the same name upserts the entry; archiving hides it.
+ * Re-uploading the same name upserts the entry; archiving hides it. Every
+ * mutation records an audit event (SKILL_UPLOAD/SKILL_ARCHIVE/SKILL_ACCESS);
+ * summaries carry names and counts only — never package bytes.
  */
 @Service
 public class SkillService {
@@ -31,17 +34,19 @@ public class SkillService {
     private final SkillRepository skillRepository;
     private final TeamRepository teamRepository;
     private final ProjectRepository projectRepository;
+    private final AuditService auditService;
 
     public SkillService(SkillRepository skillRepository, TeamRepository teamRepository,
-            ProjectRepository projectRepository) {
+            ProjectRepository projectRepository, AuditService auditService) {
         this.skillRepository = skillRepository;
         this.teamRepository = teamRepository;
         this.projectRepository = projectRepository;
+        this.auditService = auditService;
     }
 
     /** Validates and stores a skill package; re-upload replaces the entry. */
     @Transactional
-    public SkillView upload(UUID tenantId, UUID adminId, byte[] zipBytes, String version) {
+    public SkillView upload(UUID tenantId, UUID adminId, byte[] zipBytes, String version, String requestId) {
         if (version == null || !version.matches("\\d+\\.\\d+\\.\\d+")) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "VERSION_INVALID", "版本必须是语义化版本号（如 1.0.0）。");
         }
@@ -56,6 +61,9 @@ public class SkillService {
                 meta.license(), meta.tags(), zipBytes, sha256Hex(zipBytes), zipBytes.length, "ACTIVE", adminId, 0, now,
                 now);
         Skill stored = skillRepository.upsert(skill);
+        auditService.record(tenantId, adminId, "SKILL_UPLOAD", "SKILL", stored.id(),
+                AuditSummaries.summary("name", AuditSummaries.sanitize(stored.name()), "version", stored.version()),
+                requestId);
         return toView(stored);
     }
 
@@ -82,9 +90,12 @@ public class SkillService {
 
     /** Archives the skill: removed from the catalog, grants kept for restore. */
     @Transactional
-    public SkillView archive(UUID tenantId, UUID skillId) {
-        find(tenantId, skillId);
-        return toView(skillRepository.archive(tenantId, skillId));
+    public SkillView archive(UUID tenantId, UUID adminId, UUID skillId, String requestId) {
+        Skill skill = find(tenantId, skillId);
+        SkillView view = toView(skillRepository.archive(tenantId, skillId));
+        auditService.record(tenantId, adminId, "SKILL_ARCHIVE", "SKILL", skillId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(skill.name())), requestId);
+        return view;
     }
 
     /**
@@ -92,7 +103,8 @@ public class SkillService {
      * teams/projects tables. Empty list = public.
      */
     @Transactional
-    public List<SkillAccess> setAccess(UUID tenantId, UUID skillId, List<ScopeRequest> scopes) {
+    public List<SkillAccess> setAccess(UUID tenantId, UUID adminId, UUID skillId, List<ScopeRequest> scopes,
+            String requestId) {
         Skill skill = find(tenantId, skillId);
         List<SkillAccess> existing = skillRepository.findAccess(tenantId, skillId);
         for (SkillAccess access : existing) {
@@ -103,7 +115,11 @@ public class SkillService {
             skillRepository.insertAccess(new SkillAccess(UUID.randomUUID(), tenantId, skill.id(), scope.scopeType(),
                     scope.scopeId(), Instant.now()));
         }
-        return skillRepository.findAccess(tenantId, skillId);
+        List<SkillAccess> access = skillRepository.findAccess(tenantId, skillId);
+        auditService.record(tenantId, adminId, "SKILL_ACCESS", "SKILL", skillId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(skill.name()), "scopeCount", access.size()),
+                requestId);
+        return access;
     }
 
     private void validateScope(UUID tenantId, ScopeRequest scope) {

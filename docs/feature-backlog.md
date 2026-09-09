@@ -28,7 +28,7 @@
 | F10 | 网关部署信息页核对与补齐 | mapping 表行 8 | 清晰（核对完成） | **DONE（2026-09-05 核对）** | 无 | 核对：NextSettingsView 含部署信息段（网关/控制面版本与仓库信息页）；无独立补齐缺口 |
 
 | F61 | 操作记录查询补全 + 合规导出（读面筛选 targetType/actorId/from/to + CSV，对齐腾讯 raw 27） | tencent-ai-gateway-study/raw/27 | 清晰 | PLANNED（#314 实施中，2026-09-09） | 无 | 审计链读面原仅 action 一维；#314：双端点共享查询服务 + `/export` CSV（上限 5 万行、截断头显式声明）；FE 审计页筛选/导出。配套写覆盖=#315 |
-| F62 | 服务与集成族管理写操作审计覆盖（消费者/Agent/服务/MCP 服务/Tool/Skill 现为零审计） | tencent raw 27 资源类型表；domain-model §7 | 清晰 | PLANNED（#315 已登记，2026-09-09） | 无 | create/disable/上下线/JWT 钥/导入/归档逐操作 record（摘要无 Secret）；API 契约事件清单同步 |
+| F62 | 服务与集成族管理写操作审计覆盖（消费者/Agent/服务/MCP 服务/Tool/Skill 现为零审计） | tencent raw 27 资源类型表；domain-model §7 | 清晰 | DONE（2026-09-09，#315） | 无 | 六族 21 个写操作事件（CONSUMER_*/AGENT_*/SERVICE_*/MCP_SERVICE_*/MCP_TOOL_*含修订发布与激活/SKILL_*）；摘要 jsonb 安全无明文；IT 5/5 |
 | F63 | API 消费者能力作用域（billing:read / mcp:call，最小权限） | tencent raw 15/21；F60 scope 先例 V35 | 清晰 | PLANNED（#316 已登记，2026-09-09） | 无 | 一钥双通道（整租户计费读 + MCP 数据面）越权；V37 capabilities jsonb NULL=全量 + 计费/MCP 双面强制 + PATCH scope + 快照链路 |
 
 ## B 组 · MCP 运行时护栏（腾讯 A 类研究建议，方向明确）

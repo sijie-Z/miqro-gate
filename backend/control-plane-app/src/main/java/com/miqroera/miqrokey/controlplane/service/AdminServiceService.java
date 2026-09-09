@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.service;
 
 import com.miqroera.miqrokey.domain.model.InternalService;
 import com.miqroera.miqrokey.domain.repository.InternalServiceRepository;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -15,15 +16,18 @@ import java.util.UUID;
 /**
  * Internal service registry (P3.2, {@code services} V18): platform components
  * and MCP endpoints registered for gateway integration. Base URLs must be https
- * without userinfo, mirroring the upstream target rules.
+ * without userinfo, mirroring the upstream target rules. Every mutation records
+ * an audit event (SERVICE_CREATE/SERVICE_DISABLE).
  */
 @Service
 public class AdminServiceService {
 
     private final InternalServiceRepository serviceRepository;
+    private final AuditService auditService;
 
-    public AdminServiceService(InternalServiceRepository serviceRepository) {
+    public AdminServiceService(InternalServiceRepository serviceRepository, AuditService auditService) {
         this.serviceRepository = serviceRepository;
+        this.auditService = auditService;
     }
 
     public List<InternalService> list(UUID tenantId) {
@@ -36,26 +40,32 @@ public class AdminServiceService {
 
     @Transactional
     public InternalService create(UUID tenantId, UUID adminId, String name, String kind, String description,
-            String baseUrl) {
+            String baseUrl, String requestId) {
         String normalized = validateBaseUrl(baseUrl);
         String normalizedKind = kind == null || kind.isBlank() ? "HTTP" : kind;
-        InternalService service = new InternalService(UUID.randomUUID(), tenantId, name, normalizedKind, description,
-                normalized, "ACTIVE", 0, adminId, Instant.now(), Instant.now());
+        InternalService service = new InternalService(UUID.randomUUID(), tenantId, name.trim(), normalizedKind,
+                description, normalized, "ACTIVE", 0, adminId, Instant.now(), Instant.now());
         try {
             serviceRepository.insert(service);
         } catch (DuplicateKeyException e) {
             throw new ApiException(HttpStatus.CONFLICT, "SERVICE_NAME_TAKEN", "服务名称已存在。");
         }
+        auditService.record(tenantId, adminId, "SERVICE_CREATE", "SERVICE", service.id(),
+                AuditSummaries.summary("name", AuditSummaries.sanitize(service.name()), "kind", normalizedKind),
+                requestId);
         return service;
     }
 
     @Transactional
-    public InternalService disable(UUID tenantId, UUID serviceId) {
+    public InternalService disable(UUID tenantId, UUID adminId, UUID serviceId, String requestId) {
         InternalService service = find(tenantId, serviceId);
         if ("DISABLED".equals(service.status())) {
             throw new ApiException(HttpStatus.CONFLICT, "SERVICE_ALREADY_DISABLED", "服务已禁用。");
         }
-        return serviceRepository.updateStatus(tenantId, serviceId, "DISABLED", service.version());
+        InternalService updated = serviceRepository.updateStatus(tenantId, serviceId, "DISABLED", service.version());
+        auditService.record(tenantId, adminId, "SERVICE_DISABLE", "SERVICE", serviceId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(service.name())), requestId);
+        return updated;
     }
 
     /** https required, no userinfo, no query/fragment — mirror upstream rules. */

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.miqroera.miqrokey.domain.model.McpTool;
 import com.miqroera.miqrokey.domain.model.McpToolRevision;
 import com.miqroera.miqrokey.controlplane.service.ToolOpenApiParser;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -49,10 +50,11 @@ public class AdminMcpToolController {
     }
 
     @PostMapping
-    public McpTool create(@PathVariable UUID serviceId, @Valid @RequestBody CreateRequest body) {
+    public McpTool create(@PathVariable UUID serviceId, @Valid @RequestBody CreateRequest body,
+            HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return toolService.create(user.tenantId(), user.id(), serviceId, body.toolName(), body.description(),
-                body.method(), body.path());
+                body.method(), body.path(), requestId(httpReq));
     }
 
     /**
@@ -61,19 +63,21 @@ public class AdminMcpToolController {
      * names are reported per item instead of failing the import.
      */
     @PostMapping("/import")
-    public ImportResult importFromOpenApi(@PathVariable UUID serviceId, @RequestBody(required = false) JsonNode spec) {
+    public ImportResult importFromOpenApi(@PathVariable UUID serviceId, @RequestBody(required = false) JsonNode spec,
+            HttpServletRequest httpReq) {
         var user = userContext.getUser();
         ToolOpenApiParser.Parsed parsed = ToolOpenApiParser.parse(spec);
         AdminMcpToolService.ImportReport report = toolService.createImported(user.tenantId(), user.id(), serviceId,
-                parsed.tools());
+                parsed.tools(), requestId(httpReq));
         return new ImportResult(report.created(), report.skipped(), parsed.skipped());
     }
 
     /** Individual enable/disable of a tool. */
     @PostMapping("/{toolId}/status")
     public McpTool setStatus(@PathVariable UUID serviceId, @PathVariable UUID toolId,
-            @RequestParam("status") String status) {
-        return toolService.setStatus(userContext.getUser().tenantId(), toolId, status);
+            @RequestParam("status") String status, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return toolService.setStatus(user.tenantId(), user.id(), toolId, status, requestId(httpReq));
     }
 
     // ------------------------------------------------------------------
@@ -92,10 +96,10 @@ public class AdminMcpToolController {
      */
     @PostMapping("/{toolId}/revisions")
     public McpToolRevision publish(@PathVariable UUID serviceId, @PathVariable UUID toolId,
-            @Valid @RequestBody PublishRequest body) {
+            @Valid @RequestBody PublishRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return revisionService.publish(user.tenantId(), user.id(), toolId, body.description(), body.method(),
-                body.path());
+                body.path(), requestId(httpReq));
     }
 
     /**
@@ -105,13 +109,19 @@ public class AdminMcpToolController {
      */
     @PostMapping("/{toolId}/revisions/{revision}/activate")
     public McpToolRevision activate(@PathVariable UUID serviceId, @PathVariable UUID toolId,
-            @PathVariable long revision) {
-        return revisionService.activate(userContext.getUser().tenantId(), toolId, revision);
+            @PathVariable long revision, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return revisionService.activate(user.tenantId(), user.id(), toolId, revision, requestId(httpReq));
     }
 
     public record CreateRequest(@NotBlank @Size(max = 128) String toolName, @Size(max = 2000) String description,
             @Pattern(regexp = "GET|POST|PUT|DELETE|PATCH", message = "method must be GET, POST, PUT, DELETE or PATCH") String method,
             @NotBlank @Size(max = 512) String path) {
+    }
+
+    private static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
     public record PublishRequest(@Size(max = 2000) String description,

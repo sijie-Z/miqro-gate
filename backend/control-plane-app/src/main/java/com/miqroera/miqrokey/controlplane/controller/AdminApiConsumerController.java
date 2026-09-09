@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 import com.miqroera.miqrokey.controlplane.dto.ApiConsumerView;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.ApiConsumerService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -43,30 +44,41 @@ public class AdminApiConsumerController {
     }
 
     @PostMapping
-    public ResponseEntity<CreateApiConsumerResponse> create(@Valid @RequestBody CreateRequest body) {
-        ApiConsumerService.CreatedConsumer created = consumerService.create(userContext.getUser().tenantId(),
-                body.name().trim());
+    public ResponseEntity<CreateApiConsumerResponse> create(@Valid @RequestBody CreateRequest body,
+            HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        ApiConsumerService.CreatedConsumer created = consumerService.create(user.tenantId(), user.id(),
+                body.name().trim(), requestId(httpReq));
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new CreateApiConsumerResponse(created.consumer(), created.apiKey(), true));
     }
 
     @PostMapping("/{consumerId}/disable")
-    public ApiConsumerView disable(@PathVariable UUID consumerId) {
-        return consumerService.disable(userContext.getUser().tenantId(), consumerId);
+    public ApiConsumerView disable(@PathVariable UUID consumerId, HttpServletRequest httpReq) {
+        return consumerService.disable(userContext.getUser().tenantId(), userContext.getUser().id(), consumerId,
+                requestId(httpReq));
     }
 
     /**
      * Sets/rotates the RS256 JWT verification key (PEM); returns the fingerprint.
      */
     @PutMapping("/{consumerId}/jwt-key")
-    public ApiConsumerView setJwtKey(@PathVariable UUID consumerId, @Valid @RequestBody SetJwtKeyRequest body) {
-        return consumerService.setJwtKey(userContext.getUser().tenantId(), consumerId, body.publicKeyPem());
+    public ApiConsumerView setJwtKey(@PathVariable UUID consumerId, @Valid @RequestBody SetJwtKeyRequest body,
+            HttpServletRequest httpReq) {
+        return consumerService.setJwtKey(userContext.getUser().tenantId(), userContext.getUser().id(), consumerId,
+                body.publicKeyPem(), requestId(httpReq));
     }
 
     /** Removes the JWT verification key; JWT auth stops immediately. */
     @DeleteMapping("/{consumerId}/jwt-key")
-    public ApiConsumerView removeJwtKey(@PathVariable UUID consumerId) {
-        return consumerService.removeJwtKey(userContext.getUser().tenantId(), consumerId);
+    public ApiConsumerView removeJwtKey(@PathVariable UUID consumerId, HttpServletRequest httpReq) {
+        return consumerService.removeJwtKey(userContext.getUser().tenantId(), userContext.getUser().id(), consumerId,
+                requestId(httpReq));
+    }
+
+    private static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
     public record CreateRequest(@NotBlank @Size(max = 200) String name) {

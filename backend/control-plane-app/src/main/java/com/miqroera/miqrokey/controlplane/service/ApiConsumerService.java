@@ -4,6 +4,7 @@ import com.miqroera.miqrokey.controlplane.dto.ApiConsumerView;
 import com.miqroera.miqrokey.controlplane.security.ConsumerJwtVerifier;
 import com.miqroera.miqrokey.domain.model.ApiConsumer;
 import com.miqroera.miqrokey.domain.repository.ApiConsumerRepository;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -17,7 +18,9 @@ import java.util.UUID;
  * Admin lifecycle for external-system API consumers (ADR-0010/0011): create
  * (one-time plaintext key), list, disable, and manage the optional RS256 JWT
  * verification key. API keys are stored as SHA-256 digests only; JWT keys are
- * public keys stored in PEM, never a secret.
+ * public keys stored in PEM, never a secret. Every mutation records an audit
+ * event (CONSUMER_CREATE/DISABLE/JWT_KEY_SET/JWT_KEY_REMOVED); summaries carry
+ * names and fingerprints only — never the plaintext key.
  */
 @Service
 public class ApiConsumerService {
@@ -25,12 +28,14 @@ public class ApiConsumerService {
     private final ApiConsumerRepository repository;
     private final ConsumerJwtVerifier jwtVerifier;
     private final RouteRefreshPublisher routeRefreshPublisher;
+    private final AuditService auditService;
 
     public ApiConsumerService(ApiConsumerRepository repository, ConsumerJwtVerifier jwtVerifier,
-            RouteRefreshPublisher routeRefreshPublisher) {
+            RouteRefreshPublisher routeRefreshPublisher, AuditService auditService) {
         this.repository = repository;
         this.jwtVerifier = jwtVerifier;
         this.routeRefreshPublisher = routeRefreshPublisher;
+        this.auditService = auditService;
     }
 
     public List<ApiConsumerView> list(UUID tenantId) {
@@ -38,27 +43,31 @@ public class ApiConsumerService {
     }
 
     @Transactional
-    public CreatedConsumer create(UUID tenantId, String name) {
+    public CreatedConsumer create(UUID tenantId, UUID adminId, String name, String requestId) {
         ApiConsumer.GeneratedKey key = ApiConsumer.generateKey();
-        ApiConsumer consumer = new ApiConsumer(UUID.randomUUID(), tenantId, name, key.digest(), key.prefix(), "ACTIVE",
-                null, null, null, 0, Instant.now(), Instant.now());
+        ApiConsumer consumer = new ApiConsumer(UUID.randomUUID(), tenantId, name.trim(), key.digest(), key.prefix(),
+                "ACTIVE", null, null, null, 0, Instant.now(), Instant.now());
         try {
             repository.insert(consumer);
         } catch (DuplicateKeyException e) {
             throw new ApiException(HttpStatus.CONFLICT, "CONSUMER_NAME_TAKEN", "消费者名称已存在。");
         }
         routeRefreshPublisher.publishChanged();
+        auditService.record(tenantId, adminId, "CONSUMER_CREATE", "CONSUMER", consumer.id(),
+                AuditSummaries.summary("name", AuditSummaries.sanitize(consumer.name())), requestId);
         return new CreatedConsumer(toView(consumer), key.plaintext());
     }
 
     @Transactional
-    public ApiConsumerView disable(UUID tenantId, UUID consumerId) {
+    public ApiConsumerView disable(UUID tenantId, UUID adminId, UUID consumerId, String requestId) {
         ApiConsumer consumer = find(tenantId, consumerId);
         if ("DISABLED".equals(consumer.status())) {
             throw new ApiException(HttpStatus.CONFLICT, "CONSUMER_ALREADY_DISABLED", "消费者已禁用。");
         }
         ApiConsumerView view = toView(repository.update(withVersion(consumer, "DISABLED", null, null, null)));
         routeRefreshPublisher.publishChanged();
+        auditService.record(tenantId, adminId, "CONSUMER_DISABLE", "CONSUMER", consumerId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(consumer.name())), requestId);
         return view;
     }
 
@@ -69,7 +78,8 @@ public class ApiConsumerService {
      * previous key stop verifying.
      */
     @Transactional
-    public ApiConsumerView setJwtKey(UUID tenantId, UUID consumerId, String publicKeyPem) {
+    public ApiConsumerView setJwtKey(UUID tenantId, UUID adminId, UUID consumerId, String publicKeyPem,
+            String requestId) {
         ApiConsumer consumer = find(tenantId, consumerId);
         if ("DISABLED".equals(consumer.status())) {
             throw new ApiException(HttpStatus.CONFLICT, "CONSUMER_DISABLED", "消费者已禁用。");
@@ -84,7 +94,12 @@ public class ApiConsumerService {
         }
         Instant now = Instant.now();
         String fingerprint = ConsumerJwtVerifier.fingerprint(key);
-        return toView(repository.update(withVersion(consumer, consumer.status(), pem, fingerprint, now)));
+        ApiConsumerView view = toView(
+                repository.update(withVersion(consumer, consumer.status(), pem, fingerprint, now)));
+        auditService.record(tenantId, adminId, "CONSUMER_JWT_KEY_SET", "CONSUMER", consumerId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(consumer.name()), "fingerprint", fingerprint),
+                requestId);
+        return view;
     }
 
     /**
@@ -92,9 +107,12 @@ public class ApiConsumerService {
      * immediately.
      */
     @Transactional
-    public ApiConsumerView removeJwtKey(UUID tenantId, UUID consumerId) {
+    public ApiConsumerView removeJwtKey(UUID tenantId, UUID adminId, UUID consumerId, String requestId) {
         ApiConsumer consumer = find(tenantId, consumerId);
-        return toView(repository.update(withVersion(consumer, consumer.status(), null, null, null)));
+        ApiConsumerView view = toView(repository.update(withVersion(consumer, consumer.status(), null, null, null)));
+        auditService.record(tenantId, adminId, "CONSUMER_JWT_KEY_REMOVED", "CONSUMER", consumerId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(consumer.name())), requestId);
+        return view;
     }
 
     private ApiConsumer find(UUID tenantId, UUID consumerId) {

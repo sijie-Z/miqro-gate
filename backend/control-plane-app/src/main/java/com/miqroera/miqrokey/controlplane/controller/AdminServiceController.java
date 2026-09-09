@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminServiceService;
 import com.miqroera.miqrokey.domain.model.InternalService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -45,15 +46,21 @@ public class AdminServiceController {
     }
 
     @PostMapping
-    public InternalService create(@Valid @RequestBody CreateRequest body) {
+    public InternalService create(@Valid @RequestBody CreateRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return serviceService.create(user.tenantId(), user.id(), body.name().trim(), body.kind(), body.description(),
-                body.baseUrl());
+                body.baseUrl(), requestId(httpReq));
     }
 
     @PostMapping("/{serviceId}/disable")
-    public InternalService disable(@PathVariable UUID serviceId) {
-        return serviceService.disable(userContext.getUser().tenantId(), serviceId);
+    public InternalService disable(@PathVariable UUID serviceId, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return serviceService.disable(user.tenantId(), user.id(), serviceId, requestId(httpReq));
+    }
+
+    private static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
     public record CreateRequest(@NotBlank @Size(max = 200) String name,

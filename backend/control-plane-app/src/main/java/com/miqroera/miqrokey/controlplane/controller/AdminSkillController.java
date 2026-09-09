@@ -4,6 +4,7 @@ import com.miqroera.miqrokey.controlplane.dto.SkillView;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.SkillService;
 import com.miqroera.miqrokey.domain.model.SkillAccess;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -44,21 +45,28 @@ public class AdminSkillController {
      * the same name replaces the entry.
      */
     @PostMapping
-    public SkillView upload(@RequestParam("version") String version, @RequestBody byte[] zip) {
+    public SkillView upload(@RequestParam("version") String version, @RequestBody byte[] zip,
+            HttpServletRequest httpReq) {
         var user = userContext.getUser();
-        return skillService.upload(user.tenantId(), user.id(), zip, version);
+        return skillService.upload(user.tenantId(), user.id(), zip, version, requestId(httpReq));
     }
 
     /** Archives the skill: removed from the catalog; grants kept for restore. */
     @PostMapping("/{skillId}/archive")
-    public SkillView archive(@PathVariable UUID skillId) {
-        return skillService.archive(userContext.getUser().tenantId(), skillId);
+    public SkillView archive(@PathVariable UUID skillId, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return skillService.archive(user.tenantId(), user.id(), skillId, requestId(httpReq));
     }
 
     /** Replaces the download grants; empty list = public skill. */
     @PutMapping("/{skillId}/access")
-    public List<SkillAccess> setAccess(@PathVariable UUID skillId,
-            @RequestBody List<SkillService.ScopeRequest> scopes) {
-        return skillService.setAccess(userContext.getUser().tenantId(), skillId, scopes);
+    public List<SkillAccess> setAccess(@PathVariable UUID skillId, @RequestBody List<SkillService.ScopeRequest> scopes,
+            HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return skillService.setAccess(user.tenantId(), user.id(), skillId, scopes, requestId(httpReq));
+    }
+    private static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 }
