@@ -11,8 +11,7 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiDrawer, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type {Grant} from '@/types/api';
-import type { Project } from '@/types/generated-api';
+import type { Grant, Project } from '@/types/generated-api';
 
 interface CredentialOption {
   id: string;
@@ -159,7 +158,7 @@ async function openModels(grant: Grant) {
   modelsGrant.value = grant;
   modelsError.value = '';
   try {
-    modelsText.value = (await api.grantModels(grant.id)).join('\n');
+    modelsText.value = (await api.grantModels(grant.id!)).join('\n'); // list rows always carry ids
     modelsOpen.value = true;
   } catch {
     toast.error('加载模型范围失败');
@@ -171,7 +170,7 @@ async function saveModels() {
   modelsSaving.value = true;
   modelsError.value = '';
   try {
-    await api.updateGrantModels(modelsGrant.value.id, parseModels(modelsText.value));
+    await api.updateGrantModels(modelsGrant.value.id!, parseModels(modelsText.value)); // drawer row carries id
     toast.success('模型范围已更新');
     modelsOpen.value = false;
   } catch (error) {
@@ -189,7 +188,7 @@ function requestDisable(grant: Grant) {
     tone: 'danger',
     run: async () => {
       try {
-        await api.disableGrant(grant.id);
+        await api.disableGrant(grant.id!); // list rows always carry ids
         toast.success('Grant 已禁用');
         await load();
       } catch (error) {
@@ -303,16 +302,16 @@ onMounted(async () => {
         data-testid="grants-table"
       >
         <template #project="{ row }">
-          <span class="next-grants__name">{{ nameOf.project((row as unknown as Grant).projectId) }}</span>
+          <span class="next-grants__name">{{ nameOf.project((row as unknown as Grant).projectId!) }}</span>
         </template>
         <template #credential="{ row }">
           <span class="next-grants__name">{{
-            nameOf.credential((row as unknown as Grant).upstreamCredentialId)
+            nameOf.credential((row as unknown as Grant).upstreamCredentialId!)
           }}</span>
         </template>
         <template #product="{ row }">
           <span class="next-grants__name">{{
-            nameOf.product((row as unknown as Grant).providerProductId)
+            nameOf.product((row as unknown as Grant).providerProductId!)
           }}</span>
         </template>
         <template #status="{ row }">
@@ -354,7 +353,7 @@ onMounted(async () => {
 
     <UiDrawer
       :open="modelsOpen"
-      :title="`模型范围${modelsGrant ? '：' + nameOf.product(modelsGrant.providerProductId) : ''}`"
+      :title="`模型范围${modelsGrant ? '：' + nameOf.product(modelsGrant.providerProductId!) : ''}`"
       width="560px"
       data-testid="grant-models-drawer"
       @close="modelsOpen = false"

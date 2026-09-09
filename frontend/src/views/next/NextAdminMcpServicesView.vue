@@ -22,7 +22,7 @@ import {
   toast,
 } from '@/ui';
 import type { McpAclMode } from '@/types/api';
-import type { McpRouteRule, McpToolRevisionRow, UpsertMcpRouteRuleRequest } from '@/types/generated-api';
+import type { McpRouteRule, McpToolRevisionRow, ToolImportResult, UpsertMcpRouteRuleRequest } from '@/types/generated-api';
 import type {
   ApiConsumerView,
   McpAccessView,
@@ -116,7 +116,7 @@ const importVisible = ref(false);
 const importSpec = ref('');
 const importBusy = ref(false);
 const importError = ref('');
-const importResult = ref<import('@/types/api').ToolImportResult | null>(null);
+const importResult = ref<ToolImportResult | null>(null);
 const toolSaving = ref(false);
 const toolFormError = ref('');
 const toolCreating = ref(false);
@@ -456,8 +456,9 @@ async function runImport() {
   try {
     const result = await api.adminImportMcpTools(toolsService.value.id!, parsed);
     importResult.value = result;
-    if (result.created.length > 0) {
-      toast.success(`已导入 ${result.created.length} 个工具`);
+    const createdCount = result.created?.length ?? 0;
+    if (createdCount > 0) {
+      toast.success(`已导入 ${createdCount} 个工具`);
     }
     await refreshTools();
   } catch (error) {
@@ -1459,11 +1460,16 @@ async function saveResilience() {
       </p>
       <div v-if="importResult" class="next-mcp__import-result" data-testid="mcp-tool-import-result">
         <strong
-          >导入完成：新建 {{ importResult.created.length }}，跳过
-          {{ importResult.skipped.length + importResult.parseSkips.length }}</strong
+          >导入完成：新建 {{ (importResult.created ?? []).length }}，跳过
+          {{ (importResult.skipped ?? []).length + (importResult.parseSkips ?? []).length }}</strong
         >
-        <ul v-if="importResult.skipped.length || importResult.parseSkips.length">
-          <li v-for="(s, idx) in [...importResult.skipped, ...importResult.parseSkips]" :key="idx">
+        <ul
+          v-if="(importResult.skipped?.length ?? 0) || (importResult.parseSkips?.length ?? 0)"
+        >
+          <li
+            v-for="(s, idx) in [...(importResult.skipped ?? []), ...(importResult.parseSkips ?? [])]"
+            :key="idx"
+          >
             {{ s.toolName || '（无法命名）' }} — {{ s.reason }}
           </li>
         </ul>

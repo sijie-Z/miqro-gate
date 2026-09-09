@@ -70,3 +70,9 @@ export type MemberView = components['schemas']['TeamMemberView'];
 export type UserProjectMembership = components['schemas']['UserProjectMembershipView'];
 export type McpToolRevisionRow = components['schemas']['McpToolRevision'];
 export type ModelCatalogRow = components['schemas']['ModelCatalogView'];
+// step 3 (issue #284): FE display names alias backend-named schemas.
+export type Grant = components['schemas']['ProjectProviderGrant'];
+// legacy FE name describes the deletion *task* entity the endpoints return
+export type UsageDeletionRequest = components['schemas']['UsageDeletion'];
+export type ToolImportSkip = components['schemas']['ImportSkip'];
+export type ToolImportResult = components['schemas']['ImportResult'];

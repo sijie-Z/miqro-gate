@@ -76,15 +76,6 @@ export type TeamStatusValue = 'ACTIVE' | 'DISABLED';
 export type ProjectStatusValue = 'ACTIVE' | 'DISABLED';
 export type GrantStatusValue = 'ACTIVE' | 'DISABLED' | 'EXPIRED';
 
-export interface Grant {
-  id: string;
-  projectId: string;
-  providerProductId: string;
-  upstreamCredentialId: string;
-  status: GrantStatusValue;
-  createdAt: string;
-}
-
 export interface CreateApiConsumerResponse {
   consumer: ApiConsumerView;
   apiKey: string;
@@ -105,29 +96,6 @@ export interface ProviderProductView {
 }
 
 // ---- admin usage / export / deletion / webhook / alert / audit (G5.4) ----
-
-export interface UsageDeletionRequest {
-  id: string;
-  periodFrom: string;
-  periodTo: string;
-  previewCount: number;
-  status: 'PENDING_CONFIRMATION' | 'CONFIRMED' | 'EXECUTED' | 'EXPIRED';
-  deletedCount?: number;
-  executedAt?: string;
-  expiresAt: string;
-  createdAt: string;
-}
-
-export interface ToolImportSkip {
-  toolName?: string;
-  reason: string;
-}
-
-export interface ToolImportResult {
-  created: Array<{ toolName?: string; method?: string; path?: string }>;
-  skipped: ToolImportSkip[];
-  parseSkips: ToolImportSkip[];
-}
 
 export type AlertRuleType =
   | 'USAGE_MISSING_RATE'
