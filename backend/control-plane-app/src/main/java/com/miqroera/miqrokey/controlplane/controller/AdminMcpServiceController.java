@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminMcpService;
 import com.miqroera.miqrokey.domain.model.McpService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -47,24 +48,34 @@ public class AdminMcpServiceController {
     }
 
     @PostMapping
-    public McpService create(@Valid @RequestBody CreateRequest body) {
+    public McpService create(@Valid @RequestBody CreateRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return mcpService.create(user.tenantId(), user.id(), body.name().trim(), body.description(), body.endpoint(),
                 body.transport(), body.checkIntervalSeconds(), body.checkTimeoutSeconds(), body.failThreshold(),
-                body.recoverThreshold(), body.checkPath());
+                body.recoverThreshold(), body.checkPath(), requestId(httpReq));
     }
 
     /** Manual online/offline switch (health checking never overrides it). */
     @PostMapping("/{serviceId}/status")
-    public McpService setStatus(@PathVariable UUID serviceId, @RequestParam("status") String status) {
-        return mcpService.setStatus(userContext.getUser().tenantId(), serviceId, status);
+    public McpService setStatus(@PathVariable UUID serviceId, @RequestParam("status") String status,
+            HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return mcpService.setStatus(user.tenantId(), user.id(), serviceId, status, requestId(httpReq));
     }
 
     /** Updates the health check configuration. */
     @PostMapping("/{serviceId}/health-config")
-    public McpService updateHealthConfig(@PathVariable UUID serviceId, @RequestBody HealthConfigRequest body) {
-        return mcpService.updateHealthConfig(userContext.getUser().tenantId(), serviceId, body.checkIntervalSeconds(),
-                body.checkTimeoutSeconds(), body.failThreshold(), body.recoverThreshold(), body.checkPath());
+    public McpService updateHealthConfig(@PathVariable UUID serviceId, @RequestBody HealthConfigRequest body,
+            HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return mcpService.updateHealthConfig(user.tenantId(), user.id(), serviceId, body.checkIntervalSeconds(),
+                body.checkTimeoutSeconds(), body.failThreshold(), body.recoverThreshold(), body.checkPath(),
+                requestId(httpReq));
+    }
+
+    private static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
     public record CreateRequest(@NotBlank @Size(max = 200) String name, @Size(max = 2000) String description,

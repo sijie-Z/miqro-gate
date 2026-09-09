@@ -4,6 +4,7 @@ import com.miqroera.miqrokey.controlplane.dto.AgentView;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminAgentService;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -47,15 +48,16 @@ public class AdminAgentController {
     }
 
     @PostMapping
-    public AgentView create(@Valid @RequestBody CreateRequest body) {
+    public AgentView create(@Valid @RequestBody CreateRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return agentService.create(user.tenantId(), user.id(), body.name().trim(), body.description(),
-                body.credentialId());
+                body.credentialId(), requestId(httpReq));
     }
 
     @PostMapping("/{agentId}/disable")
-    public AgentView disable(@PathVariable UUID agentId) {
-        return agentService.disable(userContext.getUser().tenantId(), agentId);
+    public AgentView disable(@PathVariable UUID agentId, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return agentService.disable(user.tenantId(), user.id(), agentId, requestId(httpReq));
     }
 
     /** Per-agent usage over the bound credential; from/to optional ISO-8601. */
@@ -65,6 +67,11 @@ public class AdminAgentController {
         Instant fromIso = from != null && !from.isBlank() ? Instant.parse(from) : null;
         Instant toIso = to != null && !to.isBlank() ? Instant.parse(to) : null;
         return agentService.usage(userContext.getUser().tenantId(), agentId, fromIso, toIso);
+    }
+
+    private static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
     public record CreateRequest(@NotBlank @Size(max = 200) String name, @Size(max = 2000) String description,
