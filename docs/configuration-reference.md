@@ -95,8 +95,6 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_VK_ROTATION_GRACE` | `PT5M` | 规格默认旧 Key 宽限；管理员可立即失效 |
 | `MIQROKEY_GATEWAY_BASE_URL` | `http://localhost:8081` | （当前实现）展示给用户的 Key Base URL（`miqrokey.gateway-base-url`） |
 | `MIQROKEY_VIRTUAL_KEY_ROTATE_GRACE` | `PT0S` | （当前实现）轮换宽限期（`miqrokey.virtual-key-rotate-grace`）：`PT0S` = 快照刷新后旧 Key 立即失效；控制面在此窗口内对轮换 Key 的旋转状态提示 |
-| `MIQROKEY_ALERTS_EVALUATION_INTERVAL_MS` | `300000` | 告警周期评估间隔（`miqrokey.alerts.evaluation-interval-ms`，5 分钟）；阈值型规则按此节奏计算 |
-| `MIQROKEY_ALERTS_ADMIN_KEY_EXPIRY_INTERVAL_MS` | `21600000` | 管理密钥到期扫描间隔（`miqrokey.alerts.admin-key-expiry-interval-ms`，6 小时）：有启用的 `ADMIN_API_KEY_EXPIRING` 规则时检查 ≤7 天到期密钥并产生事件（规则 opt-in，默认关） |
 | `MIQROKEY_CREDENTIAL_DRAIN_GRACE` | `PT0S` | （当前实现）上游凭证轮换/禁用宽限期（`miqrokey.credential-drain-grace`）：旧凭证版本在 `retiredAt = now + grace` 前保持可解密，请求启动时已解密旧 Secret 的请求可完成；`PT0S` = 快照刷新后旧版本立即退役 |
 | `MIQROKEY_PRODUCTION` | `false` | 生产模式：启用严格 Origin 验证、强制 cookie Secure 标志、拒绝 localhost 来源 |
 | `MIQROKEY_ORIGIN_ALLOWLIST` | `localhost:5173,localhost:8080` | 生产模式下至少需要一个非 localhost 条目 |
@@ -136,6 +134,7 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_REQUEST_TIMEOUT` | `30s` | 控制面 → 供应商单次调用整体截止（G3.1） |
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_MAX_RESPONSE_BYTES` | `1048576` | 控制面 → 供应商单次响应体上限（G3.1）；超限中止交换 |
 | `MIQROKEY_ALERTS_EVALUATION_INTERVAL_MS` | `300000` | 告警规则评估固定延迟（G4.5，`@Scheduled`）；也控制投递重试扫描节奏 |
+| `MIQROKEY_ALERTS_ADMIN_KEY_EXPIRY_INTERVAL_MS` | `21600000` | 管理密钥到期扫描间隔（`miqrokey.alerts.admin-key-expiry-interval-ms`，6 小时）：有启用的 ADMIN_API_KEY_EXPIRING 规则时检查 ≤7 天到期密钥并产生事件（规则 opt-in，默认关） |
 | `MIQROKEY_CLEANUP_EXPIRED_SWEEP_MS` | `3600000` | 过期记录 GC 固定延迟（F06，`@Scheduled`）：回收下载窗口已过的导出产物与确认窗口已过的删除请求（EXECUTED 删除记录与审计链永久保留，不入 GC） |
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_ALLOWED_CIDRS` | 空 | 控制面 → 供应商调用的 SSRF 门控 allowlist（G4.2）：命中这些 CIDR 的目标豁免「非公网地址」与「明文 http」两道拒绝（配额刷新对接本地/内网供应商网关时配置，如 `127.0.0.0/8`）；空 = 仅接受 https + 公网地址 |
 | `MIQROKEY_APPROVAL_WHITELIST_MODELS` | 空 | 模型审批白名单（逗号分隔的精确模型 ID）：用户申请命中白名单即自动批准并立即生效（写入授权 + 快照刷新），免管理员审批；空 = 全部模型走人工审批 |
