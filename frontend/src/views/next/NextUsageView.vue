@@ -14,11 +14,11 @@ import type { UiSelectOption } from '@/ui';
 import type {
   QuotaMetric,
   QuotaPeriod,
-  UsageGroup,
   UsageGroupBy,
 } from '@/types/api';
 import type {
   QuotaRuleView,
+  UsageGroup,
   UsageRecord,
   UsageRecordPage,
   UsageSummary,

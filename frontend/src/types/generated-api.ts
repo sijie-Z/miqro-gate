@@ -76,3 +76,9 @@ export type Grant = components['schemas']['ProjectProviderGrant'];
 export type UsageDeletionRequest = components['schemas']['UsageDeletion'];
 export type ToolImportSkip = components['schemas']['ImportSkip'];
 export type ToolImportResult = components['schemas']['ImportResult'];
+// step 4 (issue #286): usage summary nested shapes + consumer create response.
+export type UsageCost = components['schemas']['Cost'];
+export type UsageRequests = components['schemas']['Requests'];
+export type UsageTokens = components['schemas']['Tokens'];
+export type UsageGroup = components['schemas']['GroupSummary'];
+export type CreateApiConsumerResponse = components['schemas']['CreateApiConsumerResponse'];

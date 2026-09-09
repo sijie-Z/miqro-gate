@@ -4,10 +4,6 @@
  * CI generates the OpenAPI client as the machine-readable source of truth.
  */
 
-// Cross-hub reference: ApiConsumerView already lives in the generated schema
-// hub; this handwritten file only imports it for the few DTOs that nest it.
-import type { ApiConsumerView } from './generated-api';
-
 /** RFC 9457 problem+json error body from the Control Plane. */
 export interface ProblemDetails {
   type: string;
@@ -38,49 +34,12 @@ export type QuotaLevel = 'NORMAL' | 'WARNING' | 'EXCEEDED';
 
 export type McpAclMode = 'NONE' | 'ALLOW' | 'DENY';
 
-// ---- MCP route rules (F11, Tencent doc 135482) ----
-
-export interface UsageCost {
-  upstreamPaid: string;
-  gatewayObserved: string;
-  projectAllocated: string;
-  savedByGatewayCache: string;
-}
-
-export interface UsageRequests {
-  upstream: number;
-  coalesced: number;
-  l1Hit: number;
-  l2Hit: number;
-}
-
-export interface UsageTokens {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheCreation: number;
-}
-
-export interface UsageGroup {
-  groupKey: string;
-  label: string;
-  requests: UsageRequests;
-  tokens: UsageTokens;
-  cost: UsageCost;
-}
-
 // ---- admin organization (G5.2) ----
 
 export type UserStatusValue = 'ACTIVE' | 'DISABLED' | 'LOCKED';
 export type TeamStatusValue = 'ACTIVE' | 'DISABLED';
 export type ProjectStatusValue = 'ACTIVE' | 'DISABLED';
 export type GrantStatusValue = 'ACTIVE' | 'DISABLED' | 'EXPIRED';
-
-export interface CreateApiConsumerResponse {
-  consumer: ApiConsumerView;
-  apiKey: string;
-  shownOnce: boolean;
-}
 
 export interface ProviderProductView {
   id: string;

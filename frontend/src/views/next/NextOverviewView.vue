@@ -11,8 +11,7 @@ import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
 import { ChartBarIcon, LayersIcon, LockOnIcon, MoneyIcon } from 'tdesign-icons-vue-next';
 import { UiButton, UiStatusBadge } from '@/ui';
-import type {UsageGroup} from '@/types/api';
-import type { SubscriptionView, VirtualKeyView } from '@/types/generated-api';
+import type { SubscriptionView, UsageGroup, VirtualKeyView } from '@/types/generated-api';
 
 const auth = useAuthStore();
 
