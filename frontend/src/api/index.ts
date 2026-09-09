@@ -8,7 +8,6 @@
   uploadBytes,
 } from './http';
 import type {
-  CreateApiConsumerResponse,
   McpAclMode,
   ModelApprovalStatus,
   ProviderProductView,
@@ -47,6 +46,7 @@ import type {
   Team,
   UpsertMcpRouteRuleRequest,
   AdminUser,
+  CreateApiConsumerResponse,
   Grant,
   LoginResponse,
   McpToolRevisionRow,

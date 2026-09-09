@@ -3156,6 +3156,11 @@ export interface components {
             revokedAt?: string;
             active?: boolean;
         };
+        CreateApiConsumerResponse: {
+            consumer?: components["schemas"]["ApiConsumerView"];
+            apiKey?: string;
+            shownOnce?: boolean;
+        };
         AlertRule: {
             /** Format: uuid */
             id?: string;
@@ -5918,9 +5923,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["CreateApiConsumerResponse"];
                 };
             };
         };

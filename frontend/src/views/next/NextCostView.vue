@@ -10,8 +10,7 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type {UsageGroup} from '@/types/api';
-import type { BudgetView, Project } from '@/types/generated-api';
+import type { BudgetView, Project, UsageGroup } from '@/types/generated-api';
 
 const WINDOWS = [
   { label: '近 7 天', days: 7 },
@@ -140,7 +139,7 @@ function exportCsv() {
     const row = g as unknown as UsageGroup;
     return [
       row.label,
-      String(row.requests.upstream),
+      String(row.requests?.upstream ?? 0),
       String(tokensOf(row)),
       costOf(row).toFixed(4),
     ];
@@ -512,7 +511,7 @@ onMounted(async () => {
         data-testid="cost-table"
       >
         <template #requests="{ row }">
-          <span class="ui-num">{{ formatCount(asGroup(row).requests.upstream) }}</span>
+          <span class="ui-num">{{ formatCount(asGroup(row).requests?.upstream ?? 0) }}</span>
         </template>
         <template #tokens="{ row }">
           <span class="ui-num">{{ formatCount(tokensOf(asGroup(row))) }}</span>
@@ -542,7 +541,7 @@ onMounted(async () => {
         data-testid="cost-day-table"
       >
         <template #requests="{ row }">
-          <span class="ui-num">{{ formatCount(asGroup(row).requests.upstream) }}</span>
+          <span class="ui-num">{{ formatCount(asGroup(row).requests?.upstream ?? 0) }}</span>
         </template>
         <template #tokens="{ row }">
           <span class="ui-num">{{ formatCount(tokensOf(asGroup(row))) }}</span>
