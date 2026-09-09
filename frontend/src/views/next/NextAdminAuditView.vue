@@ -15,6 +15,12 @@ const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
 const actionFilter = ref('');
+const targetTypeFilter = ref('');
+const fromFilter = ref('');
+const toFilter = ref('');
+const exporting = ref(false);
+const exportNotice = ref('');
+const exportIsError = ref(false);
 
 const columns = [
   { key: 'chainPosition', title: '位置', width: '90px', align: 'right' as const },
@@ -30,6 +36,9 @@ async function load() {
   try {
     events.value = await api.auditEvents({
       action: actionFilter.value.trim() || undefined,
+      targetType: targetTypeFilter.value.trim() || undefined,
+      from: toIso(fromFilter.value),
+      to: toIso(toFilter.value),
     });
   } catch (error) {
     if (error instanceof ApiError) {
@@ -38,6 +47,42 @@ async function load() {
     }
   } finally {
     loading.value = false;
+  }
+}
+
+/** datetime-local value (browser-local) → UTC ISO instant, matching the API contract. */
+function toIso(local: string): string | undefined {
+  if (!local) return undefined;
+  const date = new Date(local);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+async function exportCsv() {
+  exporting.value = true;
+  exportNotice.value = '';
+  exportIsError.value = false;
+  try {
+    const { csv, truncated } = await api.exportAuditCsv({
+      action: actionFilter.value.trim() || undefined,
+      targetType: targetTypeFilter.value.trim() || undefined,
+      from: toIso(fromFilter.value),
+      to: toIso(toFilter.value),
+    });
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `audit-events-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    const rows = csv.trim().split('\n').length - 1;
+    exportNotice.value = truncated
+      ? `已导出前 ${rows} 行并截断（单次上限 5 万行）——请缩小时间范围或补充筛选后重试。`
+      : `已导出 ${rows} 行 CSV。`;
+  } catch (error) {
+    exportIsError.value = true;
+    exportNotice.value = error instanceof ApiError ? error.message : '导出失败，请稍后重试。';
+  } finally {
+    exporting.value = false;
   }
 }
 
@@ -61,14 +106,43 @@ onMounted(load);
     </header>
 
     <section class="ui-panel next-audit__filter">
-      <div class="ui-panel-toolbar">
+      <div class="next-audit__filters">
         <UiInput
           v-model="actionFilter"
-          placeholder="按动作过滤，如 LOGIN_SUCCESS"
-          width="280px"
+          placeholder="动作，如 LOGIN_SUCCESS"
+          width="200px"
           data-testid="audit-action-filter"
         />
+        <UiInput
+          v-model="targetTypeFilter"
+          placeholder="资源类型，如 MCP_SERVICE"
+          width="200px"
+          data-testid="audit-targettype-filter"
+        />
+        <UiInput
+          v-model="fromFilter"
+          type="datetime-local"
+          width="200px"
+          data-testid="audit-from"
+        />
+        <UiInput v-model="toFilter" type="datetime-local" width="200px" data-testid="audit-to" />
         <UiButton variant="primary" data-testid="audit-refresh" @click="load">查询</UiButton>
+        <UiButton
+          variant="secondary"
+          :loading="exporting"
+          data-testid="audit-export"
+          @click="exportCsv"
+        >
+          导出 CSV
+        </UiButton>
+      </div>
+      <div
+        v-if="exportNotice"
+        class="next-audit__notice"
+        :class="{ 'next-audit__notice--error': exportIsError }"
+        data-testid="audit-export-notice"
+      >
+        {{ exportNotice }}
       </div>
     </section>
 
@@ -109,6 +183,23 @@ onMounted(load);
 <style scoped>
 .next-audit__filter {
   margin-bottom: var(--ui-space-5);
+}
+
+.next-audit__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-3);
+  align-items: center;
+}
+
+.next-audit__notice {
+  margin-top: var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-color-text-secondary);
+}
+
+.next-audit__notice--error {
+  color: var(--ui-color-danger);
 }
 
 .ui-alert {

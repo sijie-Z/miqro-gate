@@ -1,4 +1,5 @@
 /** * /api/v1/auth and /api/v1/me endpoint clients (api-contract.md §3–§4). */ import {
+  ApiError,
   del,
   downloadBlob,
   get,
@@ -933,9 +934,69 @@ export function deleteAlertRule(id: string): Promise<void> {
   return del<void>(`/api/v1/admin/alert-rules/${id}`);
 }
 
-export function auditEvents(query: { size?: number; action?: string }): Promise<AuditEventView[]> {
+/** Audit record query filters shared by the list and CSV export endpoints. */
+export interface AuditQuery {
+  size?: number;
+  action?: string;
+  targetType?: string;
+  actorId?: string;
+  /** ISO-8601 instants (UTC), same semantics as the backend TIME_RANGE_INVALID check. */
+  from?: string;
+  to?: string;
+}
+
+export function auditEvents(query: AuditQuery): Promise<AuditEventView[]> {
   const params = new URLSearchParams();
   if (query.size) params.set('size', String(query.size));
   if (query.action) params.set('action', query.action);
+  if (query.targetType) params.set('targetType', query.targetType);
+  if (query.actorId) params.set('actorId', query.actorId);
+  if (query.from) params.set('from', query.from);
+  if (query.to) params.set('to', query.to);
   return get<AuditEventView[]>(`/api/v1/admin/audit-events?${params.toString()}`);
+}
+
+export interface AuditCsvExport {
+  csv: string;
+  truncated: boolean;
+}
+
+/**
+ * Downloads the filtered audit chain as a compliance CSV. The backend truncates
+ * at 50k rows and declares it via {@code X-MiQroKey-Truncated}; the caller
+ * surfaces that instead of silently handing over an incomplete file.
+ */
+export async function exportAuditCsv(
+  query: Omit<AuditQuery, 'size' | 'actorId'>,
+): Promise<AuditCsvExport> {
+  const params = new URLSearchParams();
+  if (query.action) params.set('action', query.action);
+  if (query.targetType) params.set('targetType', query.targetType);
+  if (query.from) params.set('from', query.from);
+  if (query.to) params.set('to', query.to);
+  const response = await fetch(`/api/v1/admin/audit-events/export?${params.toString()}`, {
+    headers: { Accept: 'text/csv' },
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    let details:
+      { detail?: string; code?: string; status?: number; requestId?: string } | undefined;
+    try {
+      details = (await response.json()) as typeof details;
+    } catch {
+      // Not JSON — generic error below.
+    }
+    throw new ApiError({
+      type: 'about:blank',
+      title: '导出失败',
+      status: response.status,
+      code: details?.code ?? 'HTTP_ERROR',
+      detail: details?.detail,
+      requestId: details?.requestId ?? '',
+    });
+  }
+  return {
+    csv: await response.text(),
+    truncated: response.headers.get('X-MiQroKey-Truncated') === 'true',
+  };
 }
