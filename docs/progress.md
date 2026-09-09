@@ -7,11 +7,29 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `2026-09-09 自主轮（F60 v2 + codegen 迁移线收口 + typecheck 确定性）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS`（develop @ 75dbf65 = #268…#305 已合。
-  本轮交付见下方交接点；**待办：#211 真机凭证（BLOCKED）、#245 告警接线裁决（leader）、F32/F33
-  平台接口（BLOCKED）、codegen 迁移线收口；spec 已纳入真实 typecheck(#295)；F60 批 3 scope 已实现(#299);F19 引擎先行已实现(#301,真实解析等样本);到期提醒/UI 徽标 follow-up、
-  F19 账单对账（等真实样本）、F60 批 3 治理可选**）
+- Goal status: `IN_PROGRESS`（develop @ e4ba772 = 截至 #313 已合；#314 实施中。
+  本轮交付见下方交接点；**待办：#314 操作记录查询补全（IN_PROGRESS，本 PR）、#315 服务族审计
+  覆盖（已登记）、#316 消费者 scope（已登记）、#211 真机凭证（BLOCKED）、#245 告警接线裁决
+  （leader）、F32/F33 平台接口（BLOCKED）、F19 账单对账（等真实样本）**）
 - Last updated: `2026-09-09 CST`
+
+## 会话交接点 2026-09-09（夜，leader 三方向词盘点 + 操作记录读面：#314）
+
+- **leader 2026-09-09 方向词：权鉴 / 服务（腾讯功能极多）/ 接口**——以腾讯研究 corpus 为对照扫描
+  （Explore ×3 并行）得共识缺口清单：审计查询面（raw 27）、服务族审计写覆盖、消费者最小权限 scope、
+  MCP 上游后端鉴权注入、服务上下线/健康扩展等；外部依赖项（服务→网关数据面接线 F29/F27 形态、
+  数据面 JWT 认证 F33）仍等 leader，不抢跑。三词盘点对应三 issue：#314（读面）、#315（写覆盖）、
+  #316（scope）。
+- **#314 操作记录查询补全 + 合规导出（本 PR，对齐腾讯 raw 27「操作记录」筛选+下载）**：读面新增
+  `targetType`/`actorId`/`from`/`to` 精确筛选（人类与机器端点共享 AuditEventReadService，cursor 可
+  组合）；CSV 合规导出双端点 `GET /admin/audit-events/export` 与
+  `GET /admin-api/audit-events/export`（RFC 4180 转义 + UTF-8 BOM、列不含哈希链与正文、单次上限
+  5 万行、超限响应头 `X-MiQroKey-Truncated: true` 显式声明不静默截断）；400 `PARAM_INVALID`/
+  `TIME_RANGE_INVALID`。前端审计页补资源类型/时间窗筛选与导出按钮（截断提示）。
+  验证：新 IT 5/5（双面筛选组合/租户隔离/CSV 形状与转义/截断/参数校验）、typecheck 三段链 0 错、
+  vitest 163/163。
+- **环境备忘**：mvnw.cmd 需 java 在 cmd PATH——本机改用 miqro-local/mvnw21.sh（直接调 wrapper
+  jar + JDK21 绝对路径，multiModuleProjectDirectory=backend）规避 MSYS PATH 冒号截断。
 
 ## 会话交接点 2026-09-09（下午，codegen 迁移线收口：#285/#287）
 

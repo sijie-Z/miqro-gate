@@ -41,4 +41,15 @@ describe('NextAdminAuditView', () => {
     await flushPromises();
     expect(mockApi.auditEvents).toHaveBeenLastCalledWith({ action: 'LOGIN_SUCCESS' });
   });
+  it('passes resource-type and time-window filters', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="audit-targettype-filter"]').setValue('MCP_SERVICE');
+    await wrapper.find('[data-testid="audit-from"]').setValue('2026-09-09T00:00');
+    await wrapper.find('[data-testid="audit-refresh"]').trigger('click');
+    await flushPromises();
+    const call = mockApi.auditEvents.mock.calls.at(-1)?.[0];
+    expect(call?.targetType).toBe('MCP_SERVICE');
+    expect(call?.from).toBe(new Date('2026-09-09T00:00').toISOString());
+  });
 });

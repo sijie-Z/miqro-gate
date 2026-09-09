@@ -74,3 +74,6 @@ frontend/*-fresh.png
 
 # Local editor launch configs
 .claude/launch.json
+
+# Local-only working files (secrets, review assets, dev helpers)
+/miqro-local/
