@@ -62,3 +62,11 @@ export type UserResponse = components['schemas']['UserResponse'];
 // domain User record minus passwordHash, so no schema advertises it)
 export type AdminUser = components['schemas']['AdminUserView'];
 export type UserCreatedResponse = components['schemas']['UserCreated'];
+// step 2 (issue #278): FE display names alias backend-named schemas.
+// MemberView covers both team and project member endpoints (identical shape;
+// schema name taken from the team side).
+export type McpHeaderCondition = components['schemas']['McpHeaderCondition'];
+export type MemberView = components['schemas']['TeamMemberView'];
+export type UserProjectMembership = components['schemas']['UserProjectMembershipView'];
+export type McpToolRevisionRow = components['schemas']['McpToolRevision'];
+export type ModelCatalogRow = components['schemas']['ModelCatalogView'];

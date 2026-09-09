@@ -36,12 +36,6 @@ export type McpAclMode = 'NONE' | 'ALLOW' | 'DENY';
 
 // ---- MCP route rules (F11, Tencent doc 135482) ----
 
-export interface McpHeaderCondition {
-  name: string;
-  mode: 'EXACT' | 'PREFIX' | 'REGEX';
-  value: string;
-}
-
 export interface UsageCost {
   upstreamPaid: string;
   gatewayObserved: string;
@@ -77,21 +71,6 @@ export type UserStatusValue = 'ACTIVE' | 'DISABLED' | 'LOCKED';
 export type TeamStatusValue = 'ACTIVE' | 'DISABLED';
 export type ProjectStatusValue = 'ACTIVE' | 'DISABLED';
 export type GrantStatusValue = 'ACTIVE' | 'DISABLED' | 'EXPIRED';
-
-export interface MemberView {
-  userId: string;
-  username: string;
-  displayName?: string;
-  createdAt: string;
-}
-
-export interface UserProjectMembership {
-  projectId: string;
-  projectCode: string;
-  projectName: string;
-  projectStatus: ProjectStatusValue;
-  joinedAt: string;
-}
 
 export interface Grant {
   id: string;
@@ -133,29 +112,6 @@ export interface UsageDeletionRequest {
   executedAt?: string;
   expiresAt: string;
   createdAt: string;
-}
-
-export interface McpToolRevisionRow {
-  id: string;
-  revision: number;
-  description?: string;
-  method: string;
-  path: string;
-  createdAt: string;
-  activatedAt?: string | null;
-}
-
-export interface ModelCatalogRow {
-  id: string;
-  providerProductId: string;
-  modelId: string;
-  displayName?: string;
-  contextWindow?: number;
-  maxOutputTokens?: number;
-  status: string;
-  source: 'OFFICIAL' | 'MANUAL' | string;
-  version: number;
-  updatedAt: string;
 }
 
 export interface ToolImportSkip {
