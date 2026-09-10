@@ -5,6 +5,11 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **F16 修订字段级 diff + 路由匹配表达式只读展示（#354，I10，doc 11/10）**：`McpToolRevision.changedFieldsVs`
+  纯函数——修订列表每项携带只读 `changedFields`（相邻旧版差异：描述/方法/路径；基线为空）；`McpRouteRules.renderExpression`
+  纯函数——路由规则响应增只读 `matchExpression`（与引擎执行的规范条件面同一语义）。前端：修订对话框差异 chips
+  + 基线「初始版本」标记；路由抽屉只读表达式行。两领域记录均提供旧签名兼容构造器；无迁移。
+  验证：域单测 +2（表达式渲染 / 变更字段），路由 IT 6/6、修订 IT 4/4；前端 16/16（本 spec）；OpenAPI 再生无破坏。
 - **Skill 搜索 + 标签筛选 + Examples + 创建人（#352，I9，doc 20/28）**：`GET /api/v1/skills?q=&tags=&tags=`
   与 `GET /api/v1/admin/skills?...` 支持关键字（≤60，名称/描述/ID 不区分大小写）与标签多选（**与**语义）；
   上传校验新增 `examples`（≤10×512，V44 `skills.examples text[]`）与 tags 上限（≤5×20，去重）；
