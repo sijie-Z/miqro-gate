@@ -575,6 +575,25 @@ export function adminDisableService(id: string): Promise<InternalServiceView> {
   return post<InternalServiceView>(`/api/v1/admin/services/${id}/disable`);
 }
 
+/** #326: re-enable a disabled registry service (mirror of disable). */
+export function adminEnableService(id: string): Promise<InternalServiceView> {
+  return post<InternalServiceView>(`/api/v1/admin/services/${id}/enable`);
+}
+
+/** #326: partial health-probe configuration update (mirror of the MCP endpoint). */
+export function adminUpdateServiceHealthConfig(
+  id: string,
+  body: {
+    checkIntervalSeconds?: number;
+    checkTimeoutSeconds?: number;
+    failThreshold?: number;
+    recoverThreshold?: number;
+    checkPath?: string;
+  },
+): Promise<InternalServiceView> {
+  return post<InternalServiceView>(`/api/v1/admin/services/${id}/health-config`, body);
+}
+
 // ---- global config (P3.3) ----
 
 export function adminListConfigs(group?: string): Promise<ConfigEntryView[]> {

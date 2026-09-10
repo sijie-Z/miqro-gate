@@ -21,9 +21,11 @@ const columns = [
   { key: 'kind', title: '类型', width: '90px' },
   { key: 'description', title: '描述', minWidth: '180px' },
   { key: 'baseUrl', title: '服务地址', minWidth: '240px' },
-  { key: 'status', title: '状态', width: '110px' },
+  { key: 'status', title: '状态', width: '100px' },
+  { key: 'healthStatus', title: '健康', width: '100px' },
+  { key: 'healthCheckedAt', title: '最近检查', width: '160px' },
   { key: 'createdAt', title: '创建时间', width: '170px' },
-  { key: 'actions', title: '操作', width: '110px', align: 'center' as const },
+  { key: 'actions', title: '操作', width: '190px', align: 'center' as const },
 ];
 
 const kindOptions = [
@@ -48,6 +50,89 @@ const confirmState = ref<{
 const canCreate = computed(
   () => form.value.name.trim().length > 0 && form.value.baseUrl.trim().length > 0,
 );
+
+// #326 runtime governance: health badge + config dialog.
+const healthTarget = ref<InternalServiceView | null>(null);
+const healthVisible = ref(false);
+const healthForm = ref({
+  checkIntervalSeconds: '30',
+  checkTimeoutSeconds: '5',
+  failThreshold: '3',
+  recoverThreshold: '1',
+  checkPath: '/health',
+});
+const healthSaving = ref(false);
+const healthError = ref('');
+
+function healthBadge(service: InternalServiceView): {
+  tone: 'success' | 'danger' | 'neutral';
+  label: string;
+} {
+  if (service.status !== 'ACTIVE') return { tone: 'neutral', label: '—' };
+  switch (service.healthStatus) {
+    case 'HEALTHY':
+      return { tone: 'success', label: '健康' };
+    case 'UNHEALTHY':
+      return { tone: 'danger', label: '异常' };
+    default:
+      return { tone: 'neutral', label: '未知' };
+  }
+}
+
+function openHealth(service: InternalServiceView) {
+  healthTarget.value = service;
+  healthForm.value = {
+    checkIntervalSeconds: String(service.checkIntervalSeconds ?? 30),
+    checkTimeoutSeconds: String(service.checkTimeoutSeconds ?? 5),
+    failThreshold: String(service.failThreshold ?? 3),
+    recoverThreshold: String(service.recoverThreshold ?? 1),
+    checkPath: service.checkPath ?? '/health',
+  };
+  healthError.value = '';
+  healthVisible.value = true;
+}
+
+async function saveHealth() {
+  if (!healthTarget.value) return;
+  healthSaving.value = true;
+  healthError.value = '';
+  try {
+    await api.adminUpdateServiceHealthConfig(healthTarget.value.id!, {
+      checkIntervalSeconds: Number(healthForm.value.checkIntervalSeconds),
+      checkTimeoutSeconds: Number(healthForm.value.checkTimeoutSeconds),
+      failThreshold: Number(healthForm.value.failThreshold),
+      recoverThreshold: Number(healthForm.value.recoverThreshold),
+      checkPath: healthForm.value.checkPath.trim(),
+    });
+    healthVisible.value = false;
+    toast.success('健康检查配置已更新');
+    await load();
+  } catch (error) {
+    healthError.value = error instanceof ApiError ? error.message : '更新失败';
+  } finally {
+    healthSaving.value = false;
+  }
+}
+
+function requestEnable(service: InternalServiceView) {
+  confirmState.value = {
+    title: '启用服务「' + service.name + '」',
+    body: '启用后该服务重新进入可用注册表并恢复健康探测。',
+    confirmLabel: '启用',
+    tone: 'primary',
+    run: async () => {
+      try {
+        await api.adminEnableService(service.id!);
+        toast.success('服务已启用');
+        await load();
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(error.message);
+        }
+      }
+    },
+  };
+}
 
 async function load() {
   loading.value = true;
@@ -232,10 +317,28 @@ onMounted(load);
             :label="(row as InternalServiceView).status === 'ACTIVE' ? '正常' : '已禁用'"
           />
         </template>
+        <template #healthStatus="{ row }">
+          <UiStatusBadge
+            :tone="healthBadge(row as InternalServiceView).tone"
+            :label="healthBadge(row as InternalServiceView).label"
+            data-testid="service-health"
+          />
+        </template>
+        <template #healthCheckedAt="{ row }">{{
+          formatTime((row as InternalServiceView).healthCheckedAt)
+        }}</template>
         <template #createdAt="{ row }">{{
           formatTime((row as InternalServiceView).createdAt)
         }}</template>
         <template #actions="{ row }">
+          <UiButton
+            v-if="(row as InternalServiceView).status === 'ACTIVE'"
+            variant="ghost"
+            size="sm"
+            data-testid="service-health-config"
+            @click="openHealth(row as InternalServiceView)"
+            >健康检查</UiButton
+          >
           <UiButton
             v-if="(row as InternalServiceView).status === 'ACTIVE'"
             variant="ghost"
@@ -245,10 +348,67 @@ onMounted(load);
             @click="requestDisable(row as InternalServiceView)"
             >禁用</UiButton
           >
-          <span v-else>—</span>
+          <UiButton
+            v-if="(row as InternalServiceView).status !== 'ACTIVE'"
+            variant="ghost"
+            size="sm"
+            data-testid="service-enable"
+            @click="requestEnable(row as InternalServiceView)"
+            >启用</UiButton
+          >
         </template>
       </UiTable>
     </section>
+
+    <!-- #326 health probe configuration -->
+    <UiDialog
+      v-if="healthTarget"
+      :open="healthVisible"
+      :title="'健康检查 — ' + healthTarget.name"
+      description="按各自间隔探测服务地址 + 检查路径（GET，2xx 计健康）；连续失败/成功达阈值后在健康/异常间迁移。禁用状态不被探测。"
+      width="540px"
+      @update:open="healthVisible = false"
+    >
+      <div class="next-services__health-grid">
+        <UiInput
+          v-model="healthForm.checkIntervalSeconds"
+          label="探测间隔（秒）"
+          data-testid="service-health-interval"
+        />
+        <UiInput
+          v-model="healthForm.checkTimeoutSeconds"
+          label="超时（秒）"
+          data-testid="service-health-timeout"
+        />
+        <UiInput
+          v-model="healthForm.failThreshold"
+          label="失败阈值"
+          data-testid="service-health-fail"
+        />
+        <UiInput
+          v-model="healthForm.recoverThreshold"
+          label="恢复阈值"
+          data-testid="service-health-recover"
+        />
+        <UiInput
+          v-model="healthForm.checkPath"
+          label="检查路径"
+          data-testid="service-health-path"
+        />
+      </div>
+      <p v-if="healthError" class="ui-form-error">{{ healthError }}</p>
+      <template #footer>
+        <UiButton variant="ghost" @click="healthVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="healthSaving"
+          data-testid="service-health-save"
+          @click="saveHealth"
+        >
+          保存
+        </UiButton>
+      </template>
+    </UiDialog>
 
     <UiDialog
       v-if="confirmState"
@@ -352,5 +512,11 @@ onMounted(load);
 
 .next-services__danger {
   color: var(--ui-danger-fg);
+}
+.next-services__health-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ui-space-3);
+  margin-bottom: var(--ui-space-3);
 }
 </style>
