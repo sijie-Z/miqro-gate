@@ -5,6 +5,10 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **运维文档补齐轮（#328）**：runbook §3c 消费者密钥运维（scope 最小权限/到期静默失效语义/轮换=重建/
+  CONSUMER_KEY_EXPIRING 提醒）、§3d MCP 上游后端密钥运维（写后不可读/上游轮换双活窗口/
+  backend_auth_unavailable 排障）、§3e 服务注册表健康运维（上下线对称/探测与阈值语义/调度周期配置）；
+  configuration-reference 补 `MIQROKEY_MCP_HEALTH_CYCLE_MS` 欠账行；NEXT_SESSION_PLAN 重写。
 - **服务注册表运行时治理（#326）**：V40 扩展 `services`——健康探测列（镜像 mcp_services 先例）+ 上下线补全：
   `POST /{id}/enable`（对称为一等操作，审计 `SERVICE_ENABLE`）、`POST /{id}/health-config`（部分更新，审计
   `SERVICE_HEALTH_UPDATE`）；`ServiceHealthChecker` 按各自间隔探测 ACTIVE 服务（GET baseUrl+checkPath，2xx
