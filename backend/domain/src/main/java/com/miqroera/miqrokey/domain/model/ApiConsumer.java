@@ -28,17 +28,21 @@ import java.util.UUID;
  *            issue #316 channel scope: null = full access; a non-null list
  *            narrows the consumer to the listed codes (see
  *            {@link ConsumerCapabilities}). Empty list = no channels.
+ * @param expiresAt
+ *            issue #322 optional expiry: null = never expires; at/after this
+ *            instant the credential is silently rejected on every channel (401,
+ *            same semantics as an expired admin machine key).
  */
 public record ApiConsumer(UUID id, UUID tenantId, String name, byte[] keyDigest, String keyPrefix, String status,
         String jwtPublicKeyPem, String jwtKeyFingerprint, Instant jwtKeySetAt, long version, Instant createdAt,
-        Instant updatedAt, List<String> capabilities) {
+        Instant updatedAt, List<String> capabilities, Instant expiresAt) {
 
-    /** Backwards-compatible constructor: no capability scope means full access. */
+    /** Backwards-compatible constructor: no capability scope, never expires. */
     public ApiConsumer(UUID id, UUID tenantId, String name, byte[] keyDigest, String keyPrefix, String status,
             String jwtPublicKeyPem, String jwtKeyFingerprint, Instant jwtKeySetAt, long version, Instant createdAt,
             Instant updatedAt) {
         this(id, tenantId, name, keyDigest, keyPrefix, status, jwtPublicKeyPem, jwtKeyFingerprint, jwtKeySetAt, version,
-                createdAt, updatedAt, null);
+                createdAt, updatedAt, null, null);
     }
 
     public ApiConsumer {

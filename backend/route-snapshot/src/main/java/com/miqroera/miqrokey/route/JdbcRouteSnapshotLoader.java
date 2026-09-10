@@ -260,13 +260,15 @@ public final class JdbcRouteSnapshotLoader {
     private Map<String, RouteSnapshot.ConsumerRecord> loadConsumers() {
         Map<String, RouteSnapshot.ConsumerRecord> byDigest = new LinkedHashMap<>();
         jdbc.query("""
-                SELECT id, tenant_id, name, key_digest, capabilities
+                SELECT id, tenant_id, name, key_digest, capabilities, expires_at
                 FROM api_consumers
                 WHERE status = 'ACTIVE'
                 """, (rs, rowNum) -> {
             UUID id = (UUID) rs.getObject("id");
-            byDigest.putIfAbsent(id.toString(), new RouteSnapshot.ConsumerRecord(id, (UUID) rs.getObject("tenant_id"),
-                    rs.getString("name"), rs.getBytes("key_digest"), capabilities(rs)));
+            byDigest.putIfAbsent(id.toString(),
+                    new RouteSnapshot.ConsumerRecord(id, (UUID) rs.getObject("tenant_id"), rs.getString("name"),
+                            rs.getBytes("key_digest"), capabilities(rs),
+                            rs.getTimestamp("expires_at") != null ? rs.getTimestamp("expires_at").toInstant() : null));
             return null;
         });
         return byDigest;
