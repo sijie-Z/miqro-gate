@@ -752,10 +752,17 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | `POST /api/v1/admin/mcp-services` | 注册：`{ "name", "description"?, "endpoint", "transport"?, "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"? }`（默认 STREAMABLE_HTTP / 30s / 5s / 3 / 1 / `/health`；注册即自动生成 default 路由，见 5.23） |
 | `POST /api/v1/admin/mcp-services/{id}/status?status=ONLINE\|OFFLINE` | 手动上下线（重复切换 `409 MCP_STATUS_UNCHANGED`） |
 | `POST /api/v1/admin/mcp-services/{id}/health-config` | 更新健康检查配置 |
+| `PUT /api/v1/admin/mcp-services/{id}/backend-auth` | 上游后端鉴权（#320，腾讯 raw 03）：body `{"mode":"VISITOR\|API_KEY","secret"?}`——
+  `VISITOR` 清除已存密钥；`API_KEY` 必填 `secret`（≤4096）。密钥**只写不读**：任何读面（列表/详情/审计）永不返回；
+  存储 AES-GCM 加密（AAD 绑定 tenant+service）；网关向上游注入固定 `Authorization: Bearer <secret>`；变更即时生效（快照刷新）。
+  `400 MCP_BACKEND_AUTH_INVALID`；审计 `MCP_SERVICE_BACKEND_AUTH`（摘要含 name+mode，永不含 secret） |
 
 - 接入地址：https、无 userinfo/query/fragment（`MCP_ENDPOINT_INVALID` 400）；重名 `409 MCP_SERVICE_NAME_TAKEN`
 - **健康检查**：`McpHealthChecker` 定时（`miqrokey.mcp.health-cycle-ms` 默认 15s）遍历 ONLINE 服务，按各自间隔探测 `endpoint + checkPath`（GET，2xx 计健康）；连续失败达 `failThreshold` → `UNHEALTHY`，连续成功达 `recoverThreshold` → `HEALTHY`；OFFLINE 服务不被探测
 - **错误码**：`MCP_SERVICE_NOT_FOUND`（404）、`MCP_SERVICE_NAME_TAKEN`（409）、`MCP_STATUS_UNCHANGED`（409）、`MCP_STATUS_INVALID`（400）、`MCP_ENDPOINT_INVALID`（400）
+- **上游后端鉴权语义（#320）**：`VISITOR`（默认）不向上游携带任何凭据；`API_KEY` 由网关按请求解密注入
+  `Authorization: Bearer <secret>`（密文随路由快照下发，**明文永不出网关进程**，用后清零）；解密不可用/失败 → 上游零请求、
+  `502 backend_auth_unavailable`（fail-closed）。消费者凭据任何情况下不透传给上游。
 
 ### 5.17 MCP Tools 管理（P3.5，对标腾讯 AI 网关 Tools 管理）
 

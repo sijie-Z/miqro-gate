@@ -31,6 +31,8 @@
 | F62 | 服务与集成族管理写操作审计覆盖（消费者/Agent/服务/MCP 服务/Tool/Skill 现为零审计） | tencent raw 27 资源类型表；domain-model §7 | 清晰 | DONE（2026-09-09，#315） | 无 | 六族 21 个写操作事件（CONSUMER_*/AGENT_*/SERVICE_*/MCP_SERVICE_*/MCP_TOOL_*含修订发布与激活/SKILL_*）；摘要 jsonb 安全无明文；IT 5/5 |
 | F63 | API 消费者能力作用域（billing:read / mcp:call，最小权限） | tencent raw 15/21；F60 scope 先例 V35 | 清晰 | DONE（2026-09-09，#316） | 无 | V37 capabilities jsonb NULL=全量 + 计费/MCP 双面 fail-closed 强制 + PATCH scope + 审计 + 快照链路 + 前端编辑 |
 
+| F64 | MCP 上游后端鉴权注入（Visitor / API Key 三级鉴权链，对齐腾讯 raw 03） | tencent-ai-gateway-study/raw/03 | 清晰 | DONE（2026-09-10，#320） | 无 | V38 backend_auth_mode + AES-GCM 密文（写后不可读）；网关快照携带密文、按请求解密注入固定 Bearer；解密失败 fail-closed 502；管理端点 + 审计（无 secret）+ 前端编辑 |
+
 ## B 组 · MCP 运行时护栏（腾讯 A 类研究建议，方向明确）
 
 | ID | 功能 | 出处 | 清晰度 | 状态 | 前置/依赖 | 架子与要点 |
