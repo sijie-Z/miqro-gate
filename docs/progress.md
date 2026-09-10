@@ -13,6 +13,14 @@
   F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态）**）
 - Last updated: `2026-09-10 CST`
 
+## 会话交接点 2026-09-11（bug 修复：快照装配丢 backend 鉴权：#371）
+
+- **#371（本 PR）**：`JdbcRouteSnapshotLoader` 最终装配用 10 参兼容构造器重建 `McpServerRecord`，
+  `backend_auth_mode`/密文在装配末端被静默重置为 VISITOR/null——#321 引入字段时漏改 #154 时代的重建行；
+  生产 API_KEY 模式数据面不注入上游 Authorization（上游 401）、网关无错无日志。修复：重建行回填两字段
+  （发现于 I20 现场勘察，按「一 PR 一 issue」独立修复）；回归：`McpBackendAuthApiIntegrationTest`
+  以真实加载器断言密文信封逐字节回环。全量 verify 绿（276 测试，spotless 干净）。
+
 ## 会话交接点 2026-09-10（深夜，F19 对账端点层：#334 + 全量对照表启动）
 
 - **#334 F19 对账端点层（本 PR）**：canonical 导入→异步四级匹配→四态报告（V42 两表；只读、不写 usage、不存上传内容）；三端点 + 幂等重传 + gzip + 审计；引擎补行级 UNMATCHED_LOCAL。IT 2/2；修复两处自查 bug（get/view 双层包装、桶边界夹具）。

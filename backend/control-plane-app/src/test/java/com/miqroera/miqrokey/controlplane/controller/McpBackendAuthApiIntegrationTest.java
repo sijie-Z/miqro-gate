@@ -5,6 +5,8 @@ import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.controller.AdminProviderApiIntegrationTest.BootstrapHelper;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
+import com.miqroera.miqrokey.domain.route.RouteSnapshot;
+import com.miqroera.miqrokey.route.JdbcRouteSnapshotLoader;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +25,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -154,6 +157,16 @@ class McpBackendAuthApiIntegrationTest {
         assertThat(row.get("backend_secret_key_version")).isNotNull();
         assertThat(row.get("backend_secret_updated_at")).isNotNull();
 
+        // Regression #371: the real snapshot loader (the production data-plane
+        // path) must carry the credential through final assembly — the gateway
+        // reads it from the snapshot record, not from the database.
+        RouteSnapshot loaded = new JdbcRouteSnapshotLoader(jdbc, objectMapper).load(1L, Instant.now());
+        RouteSnapshot.McpServerRecord secured = loaded.mcpService("secured-mcp");
+        assertThat(secured).isNotNull();
+        assertThat(secured.backendAuthMode()).isEqualTo("API_KEY");
+        assertThat(secured.encryptedBackendSecret()).isNotNull();
+        assertThat(secured.encryptedBackendSecret().ciphertext()).isEqualTo(ciphertext);
+
         // The read surfaces never echo it either.
         MvcResult list = mockMvc.perform(get("/api/v1/admin/mcp-services").cookie(sessionCookie, csrfCookie))
                 .andExpect(status().isOk()).andReturn();
@@ -169,6 +182,10 @@ class McpBackendAuthApiIntegrationTest {
                 new MapSqlParameterSource("id", UUID.fromString(serviceId)));
         assertThat(clearedRow.get("backend_secret_ciphertext")).isNull();
         assertThat(clearedRow.get("backend_secret_updated_at")).isNull();
+        RouteSnapshot clearedSnapshot = new JdbcRouteSnapshotLoader(jdbc, objectMapper).load(1L, Instant.now());
+        RouteSnapshot.McpServerRecord clearedService = clearedSnapshot.mcpService("secured-mcp");
+        assertThat(clearedService.backendAuthMode()).isEqualTo("VISITOR");
+        assertThat(clearedService.encryptedBackendSecret()).isNull();
 
         // Three audited changes, actor = admin, summaries carry the mode only.
         Long events = jdbc.queryForObject(
