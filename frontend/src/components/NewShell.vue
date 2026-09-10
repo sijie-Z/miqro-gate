@@ -83,6 +83,7 @@ const opsNav: NavItem[] = [
   { name: 'quota-rules', label: '配额规则', icon: ErrorCircleIcon },
   { name: 'roi', label: '缓存收益', icon: DownloadIcon },
   { name: 'exports', label: '导出任务', icon: DownloadIcon },
+  { name: 'reconciliations', label: '账单对账', icon: FilePasteIcon },
   { name: 'deletions', label: '用量删除', icon: DeleteIcon },
   { name: 'webhooks', label: 'Webhook 端点', icon: NotificationIcon },
   { name: 'consumers', label: 'API 消费者', icon: SecuredIcon },
