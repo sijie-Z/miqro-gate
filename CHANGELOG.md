@@ -5,6 +5,11 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **模型目录定期重探（#350，I8，doc 05 建议频率）**：`ModelCatalogReprobeScheduler`——`miqrokey.model-catalog.reprobe.enabled`
+  开启（**默认关**）后按 `miqrokey.model-catalog.reprobe.cycle-ms`（默认 6h，fixedDelay）对种子租户 ACTIVE 订阅关联的
+  OFFICIAL_API 产品执行与手动探测**同一实现**的抓取（成功才落目录、失败记录 V43 状态面并计数不中断）；
+  审计沿用 `MODEL_CATALOG_PROBE_SUCCEEDED/FAILED`（actor=null 系统行为）。无迁移、无端点变化；
+  configuration-reference 增两条属性。验证：调度器单测 2/2（逐产品探测 + 系统 actor + 失败隔离 / 无订阅零调用）。
 - **审计页收口（#348，I7，doc 27）**：审计日志页新增 **actorId 过滤**（UUID 形态校验，非法内联报错且不发请求；
   列表与 CSV 导出均生效——后端两端点本就支持）、**快捷时间窗**（近 7 天 / 近 30 天一键回填并查询）、
   **targetType 下拉**（28 个实际资源类型 + 全部类型）。纯前端，无契约与会话变更。
