@@ -259,6 +259,15 @@ URL（创建时经控制面 SSRF 门控：默认仅公网 https，`MIQROKEY_CONT
 
 规则：`type`（`USAGE_MISSING_RATE|UPSTREAM_ERROR_RATE|BALANCE_UNAVAILABLE|USAGE_SURGE|BUDGET_THRESHOLD|QUOTA_THRESHOLD|MODEL_APPROVAL_SUBMITTED|MODEL_APPROVAL_APPROVED|MODEL_APPROVAL_REJECTED|ADMIN_API_KEY_EXPIRING`，V15/V24/V27/V36 扩展 CHECK 约束）、`threshold`、`dedupe_minutes`、`enabled`、可选 `webhook_endpoint_id`（null = 仅记录事件）、`scope_json jsonb`（`BUDGET_THRESHOLD` 必填：`{"projectId": "…"}`；`QUOTA_THRESHOLD` 必填：`{"quotaRuleId": "…"}`）。事件：`dedupe_key`（type + 小时桶；`BUDGET_THRESHOLD` 为 type + 月份；`QUOTA_THRESHOLD` 为 type + 配额重置窗口起点 epoch；审批通知型为 type + approvalId）唯一约束 `(tenant_id, rule_id, dedupe_key)` 实现去重；`value` 为指标实际值（审批通知型恒为 1 = 一次发生）；`payload_json` 存事件明细（审批通知型 = 通知字段原样，重试投递时随信封带出），不含正文/密钥。投递表：事件 × 端点 × 尝试次数唯一；`next_retry_at` 指数退避（2^attempt × 1min，最多 3 次）、`http_status`、脱敏错误。评估调度：`@Scheduled` 固定延迟（`miqrokey.alerts.evaluation-interval-ms` 默认 5min）；指标基于滚动 1 小时、租户级（单租户部署语义）；`BUDGET_THRESHOLD` 由 `AlertEvaluator` 复用 `AdminBudgetService` 水位（当月分摊成本/预算 × 100），`QUOTA_THRESHOLD` 复用 `AdminQuotaRuleService` 水位（当前窗口用量/限额 × 100；规则 DISABLED 不评估）。**投递/重试/退避原语抽取为 `AlertEventDispatcher`**（G4.5 机制），周期型由 `AlertEvaluator` 经它投递；`MODEL_APPROVAL_*` 事件型不评估、由审批工作流（`ModelApprovalService` 迁移瞬间）直接触发。
 
+### `reconciliation_reports` / `reconciliation_rows` (V42，F19 端点层)
+
+对账报告（#334）：`reconciliation_reports` 每次导入一行——`provider_code`/`currency`/`window_from`/`window_to`/
+`status(PENDING|RUNNING|SUCCEEDED|FAILED)`/`upload_sha256`/`upload_bytes`/汇总列（`total_rows`/`matched`/
+`partial_buckets`/`unmatched_provider`/`unmatched_local`/`line_error_count`/`amount_diff`）/`error_message`；
+`(tenant_id, provider_code, window_from, window_to, upload_sha256)` 索引支撑幂等重传。
+`reconciliation_rows` 明细——`report_id`（CASCADE）/`row_no`（UNIQUE per report）/`verdict(四态)`/`matched_by`/
+`provider_row_ref`/`local_ref`/`detail jsonb`。**不写 usage_event、不存上传内容**（仅摘要+大小）。
+
 ### `export_tasks` (V11，G4.4 实现)
 
 异步导出任务：`format`（`CSV|JSONL`）、窗口、`status`（`PENDING|RUNNING|SUCCEEDED|FAILED|EXPIRED`）、`sha256`（gzip 产物哈希）、`row_count`/`byte_count`、`file_bytes`（gzip 产物本体，24h 过期）、`error_message`（脱敏）。产物只含计数与元数据列（时间/模型/缓存层级/token/延迟/状态码/request ID/Key/项目/产品/凭证 ID），绝不包含 prompt、代码、Secret 或 Virtual Key 明文。

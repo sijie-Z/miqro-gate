@@ -8,6 +8,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - **能力覆盖对照表（#336）**：docs/coverage-matrix.md 首版——腾讯 29 篇 + 阿里对照逐能力四态定级
   （对等/部分/未做/不适用+理由），含「可立即实现（I 编号）/需裁决/需外部」清单与每-rc 刷新纪律；
   feature-backlog 与 NEXT_SESSION_PLAN 增加指针（立项登记 vs 能力底账分工）。封堵"缺口等关键词才浮现"流程缺口。
+- **F19 对账端点层（#334）**：canonical 账单导入→异步四级匹配→四态报告全链落地（V42 两表，**结果只读、不写 usage_event、不存上传内容**）——`POST /admin/reconciliations`（JSONL/可选 gzip、202）、`GET /{id}` 汇总、`GET /{id}/rows` 四态明细（游标分页）；幂等重传（同 provider+window+currency+sha 返回既有报告）；引擎补行级 UNMATCHED_LOCAL 输出；审计 RECONCILIATION_CREATED/SUCCEEDED/FAILED（不存正文）。供应商私有解析器与指纹级匹配仍 WAITING_FOR_SAMPLE（canonical 路径不依赖样本）。验证：集成测试 2/2（四态/幂等/gzip/校验/审计）。
 - **App.spec 并发 flake 修复（#332）**：全量 vitest 并发跑下 `App.spec` 登录视图用例间歇失败
   （懒加载路由组件 chunk 在 CPU 竞争下晚于 flushPromises 就绪，断言竞态）——改用 `vi.waitFor`
   条件等待，全量套件连跑 3 次稳定绿 163/163（未用 timeout/retry 掩盖）。

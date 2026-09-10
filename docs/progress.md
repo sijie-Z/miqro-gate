@@ -13,6 +13,12 @@
   F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态）**）
 - Last updated: `2026-09-10 CST`
 
+## 会话交接点 2026-09-10（深夜，F19 对账端点层：#334 + 全量对照表启动）
+
+- **#334 F19 对账端点层（本 PR）**：canonical 导入→异步四级匹配→四态报告（V42 两表；只读、不写 usage、不存上传内容）；三端点 + 幂等重传 + gzip + 审计；引擎补行级 UNMATCHED_LOCAL。IT 2/2；修复两处自查 bug（get/view 双层包装、桶边界夹具）。
+- **全量对照表（29 篇 × 代码四态）**：三路并行扫描完成，产出可立即实现清单（消费者/接口方向优先）与需裁决/外部清单——将落 docs/coverage-matrix.md（next PR）。
+- 下一批（用户指定消费者/接口优先）：① F19 前端页；② 消费者 MCP 调用概览（mcp_access_log 聚合，候选 C）；③ MCP 面消费者 JWT 回退（复用 ConsumerJwtVerifier+快照公钥）；④ MCP tools/list 自动同步。
+
 ## 会话交接点 2026-09-10（夜，导出可对账等级：#330）
 
 - **#330 导出「可对账等级」（本 PR，兑现 usage-accounting §11 先行部分）**：V41 export_tasks.reconcile_level
