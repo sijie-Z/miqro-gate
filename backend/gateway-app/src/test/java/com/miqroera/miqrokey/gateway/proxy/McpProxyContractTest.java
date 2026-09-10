@@ -387,6 +387,98 @@ class McpProxyContractTest {
     // Upstream backend auth (#320, Tencent raw 03): Visitor vs API Key
     // -------------------------------------------------------------------
 
+    // -------------------------------------------------------------------
+    // Consumer JWT authentication (#340): same identity model as the key
+    // channel, sub -> snapshot consumer, RS256 against the snapshot PEM.
+    // -------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("Consumer JWT authentication")
+    class ConsumerJwtAuth {
+
+        private static final java.time.Instant FUTURE = java.time.Instant.now().plusSeconds(3600);
+        private static final java.time.Instant PAST = java.time.Instant.now().minusSeconds(3600);
+
+        private String withJwt(String jwt) {
+            return "Bearer " + jwt;
+        }
+
+        @Test
+        @DisplayName("should accept a valid JWT and never forward it upstream")
+        void validJwtAccepted() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, withJwt(GatewayTestKeys.signJwt("drill-jwt", FUTURE)))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+            assertThat(mockServer.capturedRequests().get(0).authorization()).isNull();
+        }
+
+        @Test
+        @DisplayName("should reject an expired JWT")
+        void expiredJwtRejected() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, withJwt(GatewayTestKeys.signJwt("drill-jwt", PAST)))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized().expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("invalid_api_key");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should reject a JWT signed by a different key")
+        void wrongKeyRejected() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION,
+                            withJwt(GatewayTestKeys.signJwtWithOtherKey("drill-jwt", FUTURE)))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized();
+
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should reject an unknown subject and a consumer without a JWT key")
+        void unknownSubjectAndKeylessConsumerRejected() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, withJwt(GatewayTestKeys.signJwt("ghost", FUTURE)))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized();
+            // MCP_ALLOWED exists but carries no JWT PEM in the snapshot.
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, withJwt(GatewayTestKeys.signJwt("drill-allowed", FUTURE)))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized();
+
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should enforce scope and expiry on the JWT path too")
+        void scopeAndExpiryApplyToJwt() {
+            byte[] denied = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, withJwt(GatewayTestKeys.signJwt("drill-no-channels", FUTURE)))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isForbidden().expectBody()
+                    .returnResult().getResponseBody();
+            assertThat(errorType(denied)).isEqualTo("consumer_scope_denied");
+
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, withJwt(GatewayTestKeys.signJwt("drill-expired", FUTURE)))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized();
+
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should treat the x-api-key header as key-only (a JWT there is rejected)")
+        void jwtInApiKeyHeaderRejected() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .headers(h -> h.set(HttpHeaders.AUTHORIZATION, ""))
+                    .header("x-api-key", GatewayTestKeys.signJwt("drill-jwt", FUTURE))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized();
+
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+    }
+
     @Nested
     @DisplayName("Upstream backend authentication")
     class BackendAuth {

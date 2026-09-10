@@ -224,22 +224,31 @@ public final class GatewayTestKeys {
 
     /** One API-consumer fixture: self-consistent presented key + digest. */
     public record ConsumerFixture(UUID id, String name, String presentedKey, java.util.List<String> capabilities,
-            java.time.Instant expiresAt) {
+            java.time.Instant expiresAt, String jwtPublicKeyPem) {
 
-        /** Legacy constructor: no scope, never expires. */
+        /** Legacy constructor: no scope, never expires, no JWT key. */
         public ConsumerFixture(UUID id, String name, String presentedKey) {
-            this(id, name, presentedKey, null, null);
+            this(id, name, presentedKey, null, null, null);
         }
 
-        /** Legacy constructor: never expires. */
+        /** Legacy constructor: never expires, no JWT key. */
         public ConsumerFixture(UUID id, String name, String presentedKey, java.util.List<String> capabilities) {
-            this(id, name, presentedKey, capabilities, null);
+            this(id, name, presentedKey, capabilities, null, null);
+        }
+
+        /** Legacy constructor: no JWT key (#340 added the PEM for the data plane). */
+        public ConsumerFixture(UUID id, String name, String presentedKey, java.util.List<String> capabilities,
+                java.time.Instant expiresAt) {
+            this(id, name, presentedKey, capabilities, expiresAt, null);
         }
 
         public byte[] digest() {
             return sha256(presentedKey);
         }
     }
+
+    private static final java.security.KeyPair JWT_KEYPAIR = generateRsaKeyPair();
+    private static final java.security.KeyPair OTHER_JWT_KEYPAIR = generateRsaKeyPair();
 
     /** On the gated service's server list and restricted-tool ALLOW list. */
     public static final ConsumerFixture MCP_ALLOWED = consumer("allowed");
@@ -251,6 +260,13 @@ public final class GatewayTestKeys {
     public static final ConsumerFixture MCP_NO_CHANNELS = scopedConsumer("no-channels");
     /** Issue #322: expires at the epoch — the MCP data plane must refuse. */
     public static final ConsumerFixture MCP_EXPIRED = expiredConsumer("expired");
+    /** Issue #340: JWT-only consumer (no scope/expiry on top of the JWT path). */
+    public static final ConsumerFixture MCP_JWT = jwtConsumer("jwt");
+
+    private static ConsumerFixture jwtConsumer(String label) {
+        ConsumerFixture fixture = consumer(label);
+        return new ConsumerFixture(fixture.id(), fixture.name(), fixture.presentedKey(), null, null, jwtPublicKeyPem());
+    }
 
     private static ConsumerFixture consumer(String label) {
         String name = "drill-" + label;
@@ -260,21 +276,25 @@ public final class GatewayTestKeys {
 
     private static ConsumerFixture scopedConsumer(String label) {
         ConsumerFixture fixture = consumer(label);
-        return new ConsumerFixture(fixture.id(), fixture.name(), fixture.presentedKey(), java.util.List.of());
+        // #340: JWT-capable too, so the scope-denial path is testable via JWT.
+        return new ConsumerFixture(fixture.id(), fixture.name(), fixture.presentedKey(), java.util.List.of(), null,
+                jwtPublicKeyPem());
     }
 
     private static ConsumerFixture expiredConsumer(String label) {
         ConsumerFixture fixture = consumer(label);
+        // #340: JWT-capable too, so the expiry path is testable via JWT.
         return new ConsumerFixture(fixture.id(), fixture.name(), fixture.presentedKey(), null,
-                java.time.Instant.parse("2000-01-01T00:00:00Z"));
+                java.time.Instant.parse("2000-01-01T00:00:00Z"), jwtPublicKeyPem());
     }
 
     private static Map<String, RouteSnapshot.ConsumerRecord> mcpConsumers() {
         Map<String, RouteSnapshot.ConsumerRecord> consumers = new LinkedHashMap<>();
-        for (ConsumerFixture fixture : List.of(MCP_ALLOWED, MCP_SERVER_ONLY, MCP_OUTSIDER, MCP_NO_CHANNELS,
-                MCP_EXPIRED)) {
-            consumers.putIfAbsent(fixture.id().toString(), new RouteSnapshot.ConsumerRecord(fixture.id(), TENANT_ID,
-                    fixture.name(), fixture.digest(), fixture.capabilities(), fixture.expiresAt()));
+        for (ConsumerFixture fixture : List.of(MCP_ALLOWED, MCP_SERVER_ONLY, MCP_OUTSIDER, MCP_NO_CHANNELS, MCP_EXPIRED,
+                MCP_JWT)) {
+            consumers.putIfAbsent(fixture.id().toString(),
+                    new RouteSnapshot.ConsumerRecord(fixture.id(), TENANT_ID, fixture.name(), fixture.digest(),
+                            fixture.capabilities(), fixture.expiresAt(), fixture.jwtPublicKeyPem()));
         }
         return consumers;
     }
@@ -376,5 +396,58 @@ public final class GatewayTestKeys {
             return new RouteSnapshot.CredentialRecord(credentialId, TENANT_ID, productId, baseUrl, AUTH_SCHEME,
                     new EncryptedSecret(new byte[]{1, 2, 3}, new byte[]{4, 5, 6}, "v1"), java.util.Map.of());
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Consumer JWT fixtures (#340): one shared RSA keypair signs valid tokens;
+    // a second keypair produces wrong-key signatures.
+    // ------------------------------------------------------------------
+
+    private static java.security.KeyPair generateRsaKeyPair() {
+        try {
+            java.security.KeyPairGenerator generator = java.security.KeyPairGenerator.getInstance("RSA");
+            generator.initialize(2048);
+            return generator.generateKeyPair();
+        } catch (Exception e) {
+            throw new IllegalStateException("RSA keypair unavailable", e);
+        }
+    }
+
+    /** PEM (SubjectPublicKeyInfo) of the shared fixture public key. */
+    public static String jwtPublicKeyPem() {
+        return pem(JWT_KEYPAIR.getPublic());
+    }
+
+    private static String pem(java.security.PublicKey key) {
+        return "-----BEGIN PUBLIC KEY-----\n" + java.util.Base64.getEncoder().encodeToString(key.getEncoded())
+                + "\n-----END PUBLIC KEY-----";
+    }
+
+    /** RS256 JWT signed by the shared fixture key (sub + required exp). */
+    public static String signJwt(String subject, java.time.Instant expiresAt) {
+        return signJwt(JWT_KEYPAIR, subject, expiresAt);
+    }
+
+    /** RS256 JWT signed by a different key - the signature check must fail. */
+    public static String signJwtWithOtherKey(String subject, java.time.Instant expiresAt) {
+        return signJwt(OTHER_JWT_KEYPAIR, subject, expiresAt);
+    }
+
+    private static String signJwt(java.security.KeyPair keyPair, String subject, java.time.Instant expiresAt) {
+        try {
+            String header = b64url("{\"alg\":\"RS256\",\"typ\":\"JWT\"}".getBytes(StandardCharsets.UTF_8));
+            String payload = b64url(("{\"sub\":\"" + subject + "\",\"exp\":" + expiresAt.getEpochSecond() + "}")
+                    .getBytes(StandardCharsets.UTF_8));
+            java.security.Signature signer = java.security.Signature.getInstance("SHA256withRSA");
+            signer.initSign(keyPair.getPrivate());
+            signer.update((header + "." + payload).getBytes(StandardCharsets.US_ASCII));
+            return header + "." + payload + "." + b64url(signer.sign());
+        } catch (Exception e) {
+            throw new IllegalStateException("JWT signing failed", e);
+        }
+    }
+
+    private static String b64url(byte[] bytes) {
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 }
