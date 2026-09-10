@@ -6,6 +6,7 @@ import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.repository.BudgetRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,12 +32,14 @@ public class AdminBudgetService {
     private final BudgetRepository budgetRepository;
     private final ProjectRepository projectRepository;
     private final AdminUsageStatsService usageStatsService;
+    private final AuditService auditService;
 
     public AdminBudgetService(BudgetRepository budgetRepository, ProjectRepository projectRepository,
-            AdminUsageStatsService usageStatsService) {
+            AdminUsageStatsService usageStatsService, AuditService auditService) {
         this.budgetRepository = budgetRepository;
         this.projectRepository = projectRepository;
         this.usageStatsService = usageStatsService;
+        this.auditService = auditService;
     }
 
     public List<BudgetView> monthlyView(UUID tenantId, String month) {
@@ -55,7 +58,7 @@ public class AdminBudgetService {
     /** Creates or updates the (project, month) budget in place (upsert). */
     @Transactional
     public BudgetView put(UUID tenantId, UUID projectId, String month, BigDecimal amount, String currency,
-            BigDecimal alertThresholdPct) {
+            BigDecimal alertThresholdPct, AuditContext context) {
         validateMonth(month);
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "PROJECT_NOT_FOUND", "项目不存在。"));
@@ -66,15 +69,23 @@ public class AdminBudgetService {
                 currency == null || currency.isBlank() ? "CNY" : currency.trim().toUpperCase(),
                 alertThresholdPct != null ? alertThresholdPct : new BigDecimal("80"), "ACTIVE", 0, Instant.now(),
                 Instant.now());
-        return toView(tenantId, budgetRepository.upsert(budget));
+        BudgetView view = toView(tenantId, budgetRepository.upsert(budget));
+        auditService.record(
+                tenantId, context.actorId(), "BUDGET_PUT", "BUDGET", budget.id(), AuditSummaries.summary(context,
+                        "projectId", projectId.toString(), "month", month, "amount", amount.toPlainString()),
+                context.requestId());
+        return view;
     }
 
     @Transactional
-    public void delete(UUID tenantId, UUID projectId, String month) {
+    public void delete(UUID tenantId, UUID projectId, String month, AuditContext context) {
         validateMonth(month);
         if (!budgetRepository.delete(tenantId, projectId, month)) {
             throw new ApiException(HttpStatus.NOT_FOUND, "BUDGET_NOT_FOUND", "该月份未设置预算。");
         }
+        auditService.record(tenantId, context.actorId(), "BUDGET_DELETE", "BUDGET", projectId,
+                AuditSummaries.summary(context, "projectId", projectId.toString(), "month", month),
+                context.requestId());
     }
 
     static void validateMonth(String month) {

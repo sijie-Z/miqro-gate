@@ -69,11 +69,14 @@ public class ModelCatalogService {
      */
     private final ObjectFactory<ModelCatalogService> self;
 
+    private final com.miqroera.miqrokey.domain.service.AuditService auditService;
+
     public ModelCatalogService(NamedParameterJdbcTemplate jdbc, RouteRefreshPublisher routeRefreshPublisher,
-            ObjectFactory<ModelCatalogService> self) {
+            ObjectFactory<ModelCatalogService> self, com.miqroera.miqrokey.domain.service.AuditService auditService) {
         this.jdbc = jdbc;
         this.routeRefreshPublisher = routeRefreshPublisher;
         this.self = self;
+        this.auditService = auditService;
     }
 
     /**
@@ -157,12 +160,13 @@ public class ModelCatalogService {
      * removed by later official refreshes.
      */
     @Transactional
-    public ModelCatalogView addManual(UUID adminId, UUID providerProductId, String modelId, String displayName,
-            Integer contextWindow, Integer maxOutputTokens) {
+    public ModelCatalogView addManual(UUID tenantId, UUID adminId, UUID providerProductId, String modelId,
+            String displayName, Integer contextWindow, Integer maxOutputTokens, AuditContext context) {
         String normalizedId = modelId.trim();
         if (normalizedId.isBlank()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "MODEL_ID_INVALID", "模型 ID 不能为空。");
         }
+        // The provider catalog is global (no tenant column) — existence only.
         if (jdbc.query("SELECT 1 FROM provider_products WHERE id = :productId", Map.of("productId", providerProductId),
                 rs -> rs.next() ? 1 : 0) == 0) {
             throw new ApiException(HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND", "供应商产品不存在。");
@@ -183,6 +187,9 @@ public class ModelCatalogService {
         }
         // AFTER_COMMIT so the gateway never reloads against uncommitted rows.
         routeRefreshPublisher.publishChanged();
+        auditService.record(tenantId, context.actorId(), "MODEL_CATALOG_ADD_MANUAL", "MODEL_CATALOG", rowId,
+                AuditSummaries.summary(context, "productId", providerProductId.toString(), "modelId", normalizedId),
+                context.requestId());
         return list(providerProductId, "MANUAL").stream().filter(v -> v.id().equals(rowId)).findFirst().orElseThrow();
     }
 
@@ -191,18 +198,28 @@ public class ModelCatalogService {
      * and cannot be deleted by hand.
      */
     @Transactional
-    public void removeManual(UUID adminId, UUID rowId) {
-        Integer source = jdbc.query("""
-                SELECT CASE source WHEN 'MANUAL' THEN 1 ELSE 0 END FROM model_catalog WHERE id = :id
-                """, Map.of("id", rowId), rs -> rs.next() ? rs.getInt(1) : null);
-        if (source == null) {
+    public void removeManual(UUID tenantId, UUID adminId, UUID rowId, AuditContext context) {
+        Map<String, Object> row = jdbc.query("""
+                SELECT source, model_id FROM model_catalog WHERE id = :id
+                """, Map.of("id", rowId), rs -> {
+            if (!rs.next()) {
+                return null;
+            }
+            Map<String, Object> found = new java.util.HashMap<>();
+            found.put("source", rs.getString("source"));
+            found.put("modelId", rs.getString("model_id"));
+            return found;
+        });
+        if (row == null) {
             throw new ApiException(HttpStatus.NOT_FOUND, "MODEL_NOT_FOUND", "目录行不存在。");
         }
-        if (source == 0) {
+        if (!"MANUAL".equals(row.get("source"))) {
             throw new ApiException(HttpStatus.CONFLICT, "MODEL_NOT_MANUAL", "仅人工录入的模型可删除。");
         }
         jdbc.update("DELETE FROM model_catalog WHERE id = :id", Map.of("id", rowId));
         routeRefreshPublisher.publishChanged();
+        auditService.record(tenantId, context.actorId(), "MODEL_CATALOG_DELETE_MANUAL", "MODEL_CATALOG", rowId,
+                AuditSummaries.summary(context, "modelId", String.valueOf(row.get("modelId"))), context.requestId());
     }
 
     private static final RowMapper<ModelCatalogView> VIEW_MAPPER = (rs, rowNum) -> new ModelCatalogView(

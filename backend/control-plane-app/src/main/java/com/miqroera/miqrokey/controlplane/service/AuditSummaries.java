@@ -27,4 +27,19 @@ final class AuditSummaries {
         }
         return sb.append('}').toString();
     }
+
+    /**
+     * Summary with the context's machine marker appended when present (issue #324):
+     * human calls render exactly like {@link #summary(Object...)}, open admin API
+     * calls additionally carry {@code via: admin-api:<key name>}.
+     */
+    static String summary(AuditContext context, Object... kv) {
+        if (context.via() == null) {
+            return summary(kv);
+        }
+        Object[] extended = java.util.Arrays.copyOf(kv, kv.length + 2);
+        extended[kv.length] = "via";
+        extended[kv.length + 1] = context.via();
+        return summary(extended);
+    }
 }
