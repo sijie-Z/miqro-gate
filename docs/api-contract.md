@@ -800,9 +800,12 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | `GET /api/v1/admin/mcp-services/{id}/tools/{toolId}/revisions?limit` | 定义修订历史，新→旧（默认 20、上限 50；**永不裁剪**） |
 | `POST /api/v1/admin/mcp-services/{id}/tools/{toolId}/revisions` | 发布编辑为新修订（部分编辑：缺省字段沿用当前激活修订值；自动成为生效版并镜像到工具行） |
 | `POST /api/v1/admin/mcp-services/{id}/tools/import` | **F17 OpenAPI 批量导入**：body `{"spec": <OpenAPI JSON>}` → `{created, skipped, parseSkips}`（逐项容错：不可派生/重名/不支持方法各自报告，不整体失败；上限 100） |
+| `POST /api/v1/admin/mcp-services/{id}/tools/sync?dryRun=` | **tools/list 自动同步（#344，doc 03）**：上游 `POST {endpoint}` `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` → 差量合并 + 逐项报告 `{dryRun, upstreamToolCount, added[], updated[], unchanged, absentUpstream[], skipped[{toolName,reason}]}`；`dryRun=true` 只算不写不审计 |
 | `POST /api/v1/admin/mcp-services/{id}/tools/{toolId}/revisions/{revision}/activate` | 激活指定修订 = 回滚/切换生效版（幂等；不产生新版本号） |
 
 - `toolName` 规则：小写字母开头 snake_case（`TOOL_NAME_INVALID` 400）；`path` 必须以 `/` 开头（`TOOL_PATH_INVALID` 400）；同服务重名 `409 TOOL_NAME_TAKEN`；服务不存在 `404 MCP_SERVICE_NOT_FOUND`
+- **同步语义（#344）**：新增工具用占位映射 `POST /`（MCP 原生工具无 HTTP 映射）并播种基线修订 1；上游描述变化经 F16 发布下一修订（自动激活并镜像回工具行）；上游未返回的本地工具仅列入 `absentUpstream`（**不自动禁用/删除**）；上游名不合规/重复/缺 name 逐项 `skipped`；有变更时触发一次路由快照刷新；应用阶段记 `MCP_TOOLS_SYNCED` 审计（计数摘要，无正文）
+- **同步上游调用（#344）**：`API_KEY` 后端模式注入 `Authorization: Bearer <后端密钥>`（密文服务端读取、明文用后清零、fail-closed，密钥不落日志）；守卫：响应体 ≤2MB、工具数 ≤1000、超时 30s；上游非 2xx / JSON 非法 / JSON-RPC error → `502 TOOLS_SYNC_UPSTREAM_FAILED`（原因脱敏，不含 URL 与密钥）；并发冲突 `409 TOOLS_SYNC_CONFLICT`；需要 initialize 会话握手的上游不在本版范围（直接调用失败会明确报出）
 - **错误码**：`TOOL_NOT_FOUND`（404）、`TOOL_NAME_TAKEN`（409）、`TOOL_STATUS_UNCHANGED`（409）、`TOOL_STATUS_INVALID`（400）、`TOOL_NAME_INVALID`（400）、`TOOL_PATH_INVALID`（400）；修订面另增：`TOOL_REVISION_NOT_FOUND`（404）、`TOOL_REVISION_CONFLICT`（409，并发发布）、`TOOL_METHOD_INVALID`（400，发布时 method 校验）；导入面另增：`SPEC_INVALID`（400，缺 paths）、`TOO_MANY_TOOLS`（400，>100 项）
 
 ### 5.18 模型审批队列（原始设计文档 §8.2，SYSTEM_ADMIN-only）

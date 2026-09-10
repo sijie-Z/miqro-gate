@@ -120,6 +120,22 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
         return findByIdAndTenantId(id, tenantId).orElseThrow();
     }
 
+    @Override
+    public Optional<EncryptedSecret> findBackendSecret(UUID id, UUID tenantId) {
+        List<EncryptedSecret> secrets = jdbc.query("""
+                SELECT backend_secret_ciphertext, backend_secret_nonce, backend_secret_key_version
+                FROM mcp_services WHERE id = :id AND tenant_id = :tenantId
+                """, new MapSqlParameterSource("id", id).addValue("tenantId", tenantId), (rs, rowNum) -> {
+            byte[] ciphertext = rs.getBytes("backend_secret_ciphertext");
+            if (ciphertext == null) {
+                return null;
+            }
+            return new EncryptedSecret(ciphertext, rs.getBytes("backend_secret_nonce"),
+                    rs.getString("backend_secret_key_version"));
+        });
+        return secrets.isEmpty() || secrets.get(0) == null ? Optional.empty() : Optional.of(secrets.get(0));
+    }
+
     private static MapSqlParameterSource params(McpService s) {
         return new MapSqlParameterSource("id", s.id()).addValue("tenantId", s.tenantId()).addValue("name", s.name())
                 .addValue("description", s.description()).addValue("endpoint", s.endpoint())

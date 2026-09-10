@@ -79,6 +79,24 @@ public class McpToolRevisionService {
         return created;
     }
 
+    /**
+     * Sync-driven description refresh (#344): mints the next revision with the
+     * upstream description, keeps the current method/path and mirrors it onto the
+     * tool row. No per-tool audit or route refresh — the sync batches both.
+     */
+    @Transactional
+    public McpToolRevision publishSyncDescription(UUID tenantId, UUID adminId, UUID toolId, String description) {
+        McpTool tool = findTool(tenantId, toolId);
+        long revision = revisionRepository.maxRevision(tenantId, toolId) + 1;
+        Instant now = Instant.now();
+        McpToolRevision created = new McpToolRevision(UUID.randomUUID(), tenantId, toolId, revision, description,
+                tool.method(), tool.path(), adminId, now, now);
+        revisionRepository.deactivateOthers(tenantId, toolId, revision);
+        revisionRepository.insert(created);
+        revisionRepository.mirrorToTool(tenantId, toolId, description, tool.method(), tool.path());
+        return created;
+    }
+
     /** Newest-first history, capped at 50. */
     public List<McpToolRevision> list(UUID tenantId, UUID toolId, int limit) {
         findTool(tenantId, toolId);
