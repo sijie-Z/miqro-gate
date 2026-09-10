@@ -16,7 +16,6 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -51,7 +50,8 @@ class ModelCatalogReprobeSchedulerTest {
     void probesEachDueProduct() {
         UUID first = UUID.randomUUID();
         UUID second = UUID.randomUUID();
-        when(jdbc.queryForList(anyString(), ArgumentMatchers.<SqlParameterSource>any())).thenReturn(List.of(pair(first), pair(second)));
+        when(jdbc.queryForList(anyString(), ArgumentMatchers.<SqlParameterSource>any()))
+                .thenReturn(List.of(pair(first), pair(second)));
         when(probeService.probe(eq(TENANT), isNull(), eq(first), any(AuditContext.class)))
                 .thenReturn(Map.of("modelCount", 1));
         when(probeService.probe(eq(TENANT), isNull(), eq(second), any(AuditContext.class))).thenThrow(new ApiException(
