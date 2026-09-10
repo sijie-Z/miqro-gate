@@ -1,5 +1,7 @@
 package com.miqroera.miqrokey.controlplane.service;
 
+import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
+import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
 import com.miqroera.miqrokey.domain.model.McpService;
 import com.miqroera.miqrokey.domain.repository.McpServiceRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
@@ -18,7 +20,8 @@ import java.util.UUID;
  * Tencent AI gateway MCP management: registration, manual online/offline
  * switching (health checking never overrides a manual offline) and health check
  * configuration. Tool discovery is a follow-up. Every mutation records an audit
- * event (MCP_SERVICE_CREATE/MCP_SERVICE_STATUS/MCP_SERVICE_HEALTH_UPDATE).
+ * event (MCP_SERVICE_CREATE/MCP_SERVICE_STATUS/MCP_SERVICE_HEALTH_UPDATE/
+ * MCP_SERVICE_BACKEND_AUTH).
  */
 @Service
 public class AdminMcpService {
@@ -27,13 +30,16 @@ public class AdminMcpService {
     private final AdminMcpRouteRuleService routeRules;
     private final RouteRefreshPublisher routeRefreshPublisher;
     private final AuditService auditService;
+    private final KeyEncryptionProvider keyEncryptionProvider;
 
     public AdminMcpService(McpServiceRepository repository, AdminMcpRouteRuleService routeRules,
-            RouteRefreshPublisher routeRefreshPublisher, AuditService auditService) {
+            RouteRefreshPublisher routeRefreshPublisher, AuditService auditService,
+            KeyEncryptionProvider keyEncryptionProvider) {
         this.repository = repository;
         this.routeRules = routeRules;
         this.routeRefreshPublisher = routeRefreshPublisher;
         this.auditService = auditService;
+        this.keyEncryptionProvider = keyEncryptionProvider;
     }
 
     public List<McpService> list(UUID tenantId) {
@@ -102,7 +108,8 @@ public class AdminMcpService {
                 failThreshold != null ? failThreshold : service.failThreshold(),
                 recoverThreshold != null ? recoverThreshold : service.recoverThreshold(),
                 checkPath != null && !checkPath.isBlank() ? checkPath : service.checkPath(), service.version(),
-                service.createdBy(), service.createdAt(), service.updatedAt());
+                service.createdBy(), service.createdAt(), service.updatedAt(), service.backendAuthMode(),
+                service.backendSecretUpdatedAt());
         McpService saved = repository.update(updated, service.version());
         auditService.record(tenantId, adminId, "MCP_SERVICE_HEALTH_UPDATE", "MCP_SERVICE", serviceId,
                 AuditSummaries.summary("name", AuditSummaries.sanitize(service.name())), requestId);
@@ -114,7 +121,43 @@ public class AdminMcpService {
                 service.endpoint(), service.transport(), status, service.healthStatus(), service.healthCheckedAt(),
                 service.consecutiveFailures(), service.consecutiveSuccesses(), service.checkIntervalSeconds(),
                 service.checkTimeoutSeconds(), service.failThreshold(), service.recoverThreshold(), service.checkPath(),
-                service.version(), service.createdBy(), service.createdAt(), service.updatedAt());
+                service.version(), service.createdBy(), service.createdAt(), service.updatedAt(),
+                service.backendAuthMode(), service.backendSecretUpdatedAt());
+    }
+
+    /**
+     * Sets the upstream backend authentication (#320, Tencent raw 03): VISITOR
+     * clears any stored secret; API_KEY requires a non-blank secret which is
+     * encrypted with the shared key ring (AAD bound to tenant + service id) and
+     * never returned again. Summaries carry the mode only.
+     */
+    @Transactional
+    public McpService setBackendAuth(UUID tenantId, UUID adminId, UUID serviceId, String mode, String secret,
+            String requestId) {
+        McpService service = find(tenantId, serviceId);
+        if (!("VISITOR".equals(mode) || "API_KEY".equals(mode))) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "MCP_BACKEND_AUTH_INVALID", "模式必须是 VISITOR 或 API_KEY。");
+        }
+        EncryptedSecret encrypted = null;
+        if ("API_KEY".equals(mode)) {
+            if (secret == null || secret.isBlank()) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "MCP_BACKEND_AUTH_INVALID", "API Key 模式必须提供密钥。");
+            }
+            if (secret.length() > 4096) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "MCP_BACKEND_AUTH_INVALID", "密钥长度超过上限（4096）。");
+            }
+            byte[] plaintext = secret.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            try {
+                encrypted = keyEncryptionProvider.encrypt(plaintext, tenantId, serviceId);
+            } finally {
+                com.miqroera.miqrokey.domain.crypto.impl.SecretWiping.clearArray(plaintext);
+            }
+        }
+        McpService updated = repository.updateBackendAuth(serviceId, tenantId, mode, encrypted);
+        routeRefreshPublisher.publishChanged();
+        auditService.record(tenantId, adminId, "MCP_SERVICE_BACKEND_AUTH", "MCP_SERVICE", serviceId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(service.name()), "mode", mode), requestId);
+        return updated;
     }
 
     /** https required, no userinfo/query/fragment — mirror upstream rules. */
