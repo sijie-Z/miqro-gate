@@ -5,6 +5,13 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **MCP 数据面接受消费者 JWT（#340，I6）**：`/mcpservers/{name}/mcp` 的 `Authorization: Bearer` 非
+  `mqk_api_` 前缀时按消费者 RS256 JWT 处理（`sub`→快照按名映射，公钥随快照 `jwt_public_key_pem` 下发；
+  验签失败/未知 sub/未配公钥 401 与未知 Key 同形）；到期与 `mcp:call` 作用域检查对两通道一致；
+  `X-API-Key` 保持 Key-only。`ConsumerJwtVerifier` 上移 domain（纯 JDK：自带严格 JSON 扫描，零三方库；claims
+  不做类型强转，ArchUnit domain 门禁拦截序列化库依赖）供两进程复用。ADR-0011 增补。验证：网关契约 +6（有效/
+  过期/错签/未知 sub/无公钥/scope 与到期/x-api-key 误用）全量 30/30；验签器单测 +4（类型严格/嵌套诱饵/重复键
+  last-wins/文档严格解析）。
 - **消费者「最近调用概览」（#338，I5）**：`GET /api/v1/admin/api-consumers/{id}/activity?hours=24`——
   `mcp_access_log` 窗口聚合（总数/已转发/被拒/失败、最近调用、Top 工具/Top 服务各 ≤5；hours 1..168）；
   无新表、无网关改动（复用 V29 纯元数据日志）；前端消费者页「调用概览」对话框（24h/7d 切换）。

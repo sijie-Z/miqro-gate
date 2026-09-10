@@ -38,4 +38,4 @@
 （`POST /mcpservers/{name}/mcp`）：`sub` 经路由快照按名映射消费者，RS256 验签用快照携带的
 `jwt_public_key_pem`（快照随消费者变更刷新）；验签失败/未知 sub/未配公钥与未知 Key 同形 401，
 随后到期与能力作用域检查与 Key 通道一致。`X-API-Key` 头保持 Key-only。验签器（`ConsumerJwtVerifier`）
-上移至 domain 模块（纯 JDK 实现）供两个进程复用；无新增产品决策，属本 ADR 既定机制的范围扩展。
+上移至 domain 模块（纯 JDK 实现：自带严格 JSON 扫描、claims 不做类型强转，domain 不依赖序列化库）供两个进程复用；无新增产品决策，属本 ADR 既定机制的范围扩展。
