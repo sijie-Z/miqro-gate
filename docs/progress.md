@@ -13,6 +13,15 @@
   F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态）**）
 - Last updated: `2026-09-10 CST`
 
+## 会话交接点 2026-09-10（夜，导出可对账等级：#330）
+
+- **#330 导出「可对账等级」（本 PR，兑现 usage-accounting §11 先行部分）**：V41 export_tasks.reconcile_level
+  （PROVIDER_ID_BACKED/PARTIAL/LOCAL_ONLY 按 provider_request_id 覆盖度；空窗口 null）；会话/机器元数据
+  均带字段；产物 local_caliber_note 扩展 `;reconcile=…`（前缀兼容）；前端导出页徽标。验证：IT 2/2、
+  FE 三件套、全量 verify 绿后合入。
+- 另：App.spec 并发 flake 已登记为独立后台任务（chip），本 PR 不做掩盖式处理。
+- rc.11 攒批候选已含 #326/#328/#330。
+
 ## 会话交接点 2026-09-10（傍晚，运维文档补齐轮：#328）
 
 - **#328 运维文档轮（本 PR）**：runbook 新增 §3c 消费者密钥运维（scope/到期/轮换=重建/提醒规则）、

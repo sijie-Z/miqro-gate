@@ -24,7 +24,8 @@ const formError = ref('');
 const columns = [
   { key: 'format', title: '格式', width: '100px' },
   { key: 'period', title: '窗口', minWidth: '260px' },
-  { key: 'status', title: '状态', width: '130px' },
+  { key: 'status', title: '状态', width: '120px' },
+  { key: 'reconcileLevel', title: '可对账等级', width: '130px' },
   { key: 'rowCount', title: '行数', width: '110px', align: 'right' as const },
   { key: 'createdAt', title: '创建时间', width: '180px' },
   { key: 'actions', title: '操作', width: '100px', align: 'center' as const },
@@ -54,6 +55,21 @@ function statusToneFor(
 ): 'success' | 'warning' | 'danger' | 'neutral' | 'info' {
   // export rows always carry a status; fold unknown/absent into the neutral default
   return statusTone[status as NonNullable<ExportTask['status']>] ?? 'neutral';
+}
+
+function reconcileBadge(
+  level?: string | null,
+): { tone: 'success' | 'warning' | 'neutral'; label: string } | null {
+  switch (level) {
+    case 'PROVIDER_ID_BACKED':
+      return { tone: 'success', label: '可对账' };
+    case 'PARTIAL':
+      return { tone: 'warning', label: '部分' };
+    case 'LOCAL_ONLY':
+      return { tone: 'neutral', label: '本地口径' };
+    default:
+      return null;
+  }
 }
 
 function statusLabelFor(status: ExportTask['status']): string {
@@ -214,6 +230,16 @@ onMounted(load);
             :tone="statusToneFor((row as ExportTask).status)"
             :label="statusLabelFor((row as ExportTask).status)"
           />
+        </template>
+        <template #reconcileLevel="{ row }">
+          <UiStatusBadge
+            v-if="reconcileBadge((row as ExportTask).reconcileLevel)"
+            variant="pill"
+            :tone="reconcileBadge((row as ExportTask).reconcileLevel)!.tone"
+            :label="reconcileBadge((row as ExportTask).reconcileLevel)!.label"
+            data-testid="export-reconcile-level"
+          />
+          <span v-else>—</span>
         </template>
         <template #rowCount="{ row }">
           <span class="ui-num">{{ (row as ExportTask).rowCount?.toLocaleString() ?? '—' }}</span>

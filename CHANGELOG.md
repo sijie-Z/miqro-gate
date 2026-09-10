@@ -5,6 +5,11 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **导出「可对账等级」标记（#330）**：V41 `export_tasks.reconcile_level`——任务完成按 provider_request_id
+  覆盖度声明 `PROVIDER_ID_BACKED/PARTIAL/LOCAL_ONLY`（空窗口/历史任务 null）；会话与机器元数据面均带
+  `reconcileLevel`；产物 `local_caliber_note` 扩展 `;reconcile=…`（前缀向后兼容）；前端导出页等级徽标。
+  兑现 usage-accounting §11 文档承诺的先行部分（净额/含调整随 F20）。验证：IT 2/2（四场景等级/文件注记/
+  双读面字段）。
 - **运维文档补齐轮（#328）**：runbook §3c 消费者密钥运维（scope 最小权限/到期静默失效语义/轮换=重建/
   CONSUMER_KEY_EXPIRING 提醒）、§3d MCP 上游后端密钥运维（写后不可读/上游轮换双活窗口/
   backend_auth_unavailable 排障）、§3e 服务注册表健康运维（上下线对称/探测与阈值语义/调度周期配置）；

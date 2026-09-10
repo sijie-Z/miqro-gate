@@ -60,7 +60,7 @@
 | F20 | 用量差异「追加 adjustment」机制（不覆盖原始事实） | operations-runbook §7 | 清晰（追加语义明确） | SCAFFOLD |F19 差异产生后闭环需要 **验收口径**：验收口径：F19 差异确认后写 usage_adjustments(不覆盖原始事实),明细查询带净额列,审计/导出含调整标记。| 架子：adjustment 表结构（追加行 + 原因 + 引用原始行）待建；release-checklist 的 adjustment schema 门禁随之可勾 |
 | F21 | usage_event 延后列批量落地（team/subscription/名称指纹快照/error_category/token authority/provider_usage_json/price 快照/成本列/plan_window_ref/usage_integrity） | database-schema §6 | 部分（列清单明确；写路径与成本语义需定） | SCAFFOLD |与 F19/成本重算语义绑定 **验收口径**：验收口径：与 F19 同批评估落地列清单(team/subscription/名称指纹/error_category/…),出 migration+快照回填+查询使用示例。| 架子：列清单已登记；逐事件价格快照解决「价格变更重算历史」语义风险 |
 | F22 | 成本分摊 USER 维度（target_type=USER 预留） | progress G4.3 边界 | 清晰 | DEFERRED | 无 | 表唯一键已支持；需按人聚合的产品决策 |
-| F23 | 导出与文档「可对账等级」标记落地 | usage-accounting §11 | 部分（规格承诺） | SCAFFOLD |F19 **验收口径**：验收口径：导出文件头或伴生 manifest 声明可对账等级(原始/净额/含调整),页面展示等级徽标。| 导出列加 reconcile-level（provider_request_id 有无） |
+| F23 | 导出与文档「可对账等级」标记落地 | usage-accounting §11 | 部分（规格承诺） | **部分交付（2026-09-10，#330）**：provider_request_id 覆盖度维度已交付（V41 reconcile_level + 文件注记 + 双读面 + 前端徽标）；净额/含调整维度随 F20 | F20 **验收口径**：净额/含调整等级随 adjustment 机制扩展。| 导出列加 reconcile-level（provider_request_id 有无）——已交付 |
 
 ## D 组 · 默认模板与消费者（研究建议方向）
 

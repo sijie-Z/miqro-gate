@@ -3237,6 +3237,7 @@ export interface components {
             finishedAt?: string;
             /** Format: date-time */
             expiresAt?: string;
+            reconcileLevel?: string;
         };
         AdminCredentialCreateRequest: {
             name: string;
@@ -3768,6 +3769,7 @@ export interface components {
             finishedAt?: string;
             /** Format: date-time */
             expiresAt?: string;
+            reconcileLevel?: string;
         };
     };
     responses: never;
