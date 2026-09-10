@@ -48,8 +48,13 @@ public final class ReconciliationTypes {
      * amounts - the billed-but-unattributed gap (local rows carry no billed amount,
      * so this is the attribution gap, not a per-row delta).
      */
-    public record Report(int total, int matched, int partial, int unmatchedProvider, int unmatchedLocal,
+    public record Report(int total, int matched, int partial, int unmatchedProvider, List<RowResult> unmatchedLocalRows,
             BigDecimal amountDiff, List<RowResult> rows, List<BucketDiff> buckets) {
+
+        /** Backwards-compatible count accessor (#334 added the row-level list). */
+        public int unmatchedLocal() {
+            return unmatchedLocalRows.size();
+        }
     }
 
     /** One malformed/missing-field canonical line (parser keeps going). */
