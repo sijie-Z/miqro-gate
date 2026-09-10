@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.controlplane.service;
 
+import com.miqroera.miqrokey.domain.crypto.ConsumerJwtVerifier;
 import com.miqroera.miqrokey.controlplane.dto.ApiConsumerView;
-import com.miqroera.miqrokey.controlplane.security.ConsumerJwtVerifier;
 import com.miqroera.miqrokey.domain.model.ApiConsumer;
 import com.miqroera.miqrokey.domain.model.ConsumerCapabilities;
 import com.miqroera.miqrokey.domain.repository.ApiConsumerRepository;

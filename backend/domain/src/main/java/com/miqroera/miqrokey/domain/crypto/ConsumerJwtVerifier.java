@@ -1,4 +1,4 @@
-package com.miqroera.miqrokey.controlplane.security;
+package com.miqroera.miqrokey.domain.crypto;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
