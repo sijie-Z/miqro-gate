@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import com.miqroera.miqrokey.controlplane.service.ServiceHealthChecker;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,6 +25,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -53,6 +55,8 @@ class AdminServiceApiIntegrationTest {
 
     @Autowired
     MockMvc mockMvc;
+    @Autowired
+    ServiceHealthChecker serviceHealthChecker;
     @Autowired
     ObjectMapper objectMapper;
     @Autowired
@@ -133,6 +137,35 @@ class AdminServiceApiIntegrationTest {
         mockMvc.perform(post("/api/v1/admin/services/" + serviceId + "/disable").cookie(sessionCookie, csrfCookie)
                 .header("X-CSRF-Token", csrfToken)).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("SERVICE_ALREADY_DISABLED"));
+    }
+
+    @Test
+    @DisplayName("#361: health probes update telemetry without contending on the row version")
+    void healthProbeDoesNotBlockStatusSwitch() throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/services").cookie(sessionCookie, csrfCookie)
+                        .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"probed-api\",\"baseUrl\":\"https://probed.internal.example\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String serviceId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        // A probe cycle writes health telemetry only: the version stays put (so a
+        // concurrent admin edit cannot lose) but the checked-at marker advances.
+        serviceHealthChecker.checkAll();
+
+        MvcResult afterProbe = mockMvc.perform(get("/api/v1/admin/services/" + serviceId).cookie(sessionCookie))
+                .andExpect(status().isOk()).andReturn();
+        Map<?, ?> view = objectMapper.readValue(afterProbe.getResponse().getContentAsString(), Map.class);
+        assertThat(view.get("version")).isEqualTo(0);
+        assertThat(view.get("healthCheckedAt")).isNotNull();
+        assertThat(((Number) view.get("consecutiveFailures")).longValue()).isGreaterThanOrEqualTo(1L);
+
+        // The status switch right after a probe still succeeds (no optimistic-lock
+        // race with the checker).
+        mockMvc.perform(post("/api/v1/admin/services/" + serviceId + "/disable").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DISABLED"));
     }
 
     @Test
