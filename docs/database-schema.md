@@ -321,6 +321,10 @@ alert_rules 类型 CHECK 同步扩展 `CONSUMER_KEY_EXPIRING`（V36 同款模式
 
 ### `services` (V18，P3.2)
 
+V40（#326）新增运行时治理列（镜像 mcp_services V20）：`health_status`（`UNKNOWN|HEALTHY|UNHEALTHY`，默认 UNKNOWN）、
+`health_checked_at`、连续失败/成功计数、`check_interval_seconds`（30）/`check_timeout_seconds`（5）/`fail_threshold`（3）/
+`recover_threshold`（1）/`check_path`（`/health`）。纯加列+默认值，存量行 UNKNOWN 不受影响。
+
 内部服务注册表：`name`、`kind`（`HTTP|MCP|OTHER`）、`description`、`base_url`（https、无 userinfo/query/fragment）、`status`（`ACTIVE|DISABLED`）、`created_by`。唯一 `(tenant_id, name)`。
 
 ### `config_entries` (V19，P3.3)

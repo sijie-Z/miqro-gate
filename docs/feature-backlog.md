@@ -37,6 +37,8 @@
 
 | F66 | 审计覆盖第二批（告警规则/Webhook/预算/全局配置/模型目录人工维护 + F60 机器面归属） | #315 follow-up；domain-model §7 | 清晰 | DONE（2026-09-10，#324） | 无 | 五族 12 事件 + AuditContext（机器面 actor=发行管理员、via 标记）；secret/config value 红线断言 |
 
+| F67 | 服务注册表运行时治理（上下线补全 + 健康检查） | 服务方向盘点 gap#3；mcp_services V20 先例 | 清晰 | DONE（2026-09-10，#326） | 无 | V40 健康列 + enable 端点 + ServiceHealthChecker（ACTIVE 才探测、阈值迁移）+ 审计 SERVICE_ENABLE/SERVICE_HEALTH_UPDATE + 前端徽标/对话框；数据面（F29）BLOCKED 不受影响 |
+
 ## B 组 · MCP 运行时护栏（腾讯 A 类研究建议，方向明确）
 
 | ID | 功能 | 出处 | 清晰度 | 状态 | 前置/依赖 | 架子与要点 |

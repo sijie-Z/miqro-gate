@@ -5,6 +5,11 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **服务注册表运行时治理（#326）**：V40 扩展 `services`——健康探测列（镜像 mcp_services 先例）+ 上下线补全：
+  `POST /{id}/enable`（对称为一等操作，审计 `SERVICE_ENABLE`）、`POST /{id}/health-config`（部分更新，审计
+  `SERVICE_HEALTH_UPDATE`）；`ServiceHealthChecker` 按各自间隔探测 ACTIVE 服务（GET baseUrl+checkPath，2xx
+  计健康，阈值驱动 UNKNOWN/HEALTHY/UNHEALTHY），DISABLED 永不探测；前端服务页健康徽标/最近检查/启用按钮/
+  健康配置对话框。验证：检查器单测 2/2（阈值迁移 + 真实本地 HTTP 探测）+ IT 3/3（往返/配置/探测生命周期）。
 - **审计覆盖第二批（#324）**：兑现 #315 follow-up——告警规则/Webhook/预算/全局配置/模型目录人工维护五族
   12 个写操作全量入审计链（此前零审计，含 F60 机器写面对告警规则/Webhook 的改动）：
   `ALERT_RULE_*`/`WEBHOOK_*`（secret 永不入摘要，断言）`BUDGET_PUT/DELETE`/`CONFIG_PUT/DELETE`

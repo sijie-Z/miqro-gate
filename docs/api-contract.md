@@ -736,8 +736,15 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/services` / `/{id}` | 列表/详情 |
 | `POST /api/v1/admin/services` | 注册：`{ "name", "kind"?, "description"?, "baseUrl" }`（`kind` ∈ `HTTP\|MCP\|OTHER`，缺省 `HTTP`） |
 | `POST /api/v1/admin/services/{id}/disable` | 禁用（`409 SERVICE_ALREADY_DISABLED` 重复禁用） |
+| `POST /api/v1/admin/services/{id}/enable` | 重新启用（#326；`409 SERVICE_ALREADY_ENABLED` 重复启用；审计 `SERVICE_ENABLE`） |
+| `POST /api/v1/admin/services/{id}/health-config` | 健康探测配置部分更新（#326，镜像 MCP 端点）：`{ "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"? }`；审计 `SERVICE_HEALTH_UPDATE` |
 
 **错误码**：`SERVICE_NOT_FOUND`（404）、`SERVICE_NAME_TAKEN`（409）、`SERVICE_ALREADY_DISABLED`（409）、`BASE_URL_INVALID`（400）。
+
+**运行时状态（#326）**：`status`（`ACTIVE|DISABLED`，手动启停，上下线对称为一等操作并经审计）与
+`healthStatus`（`UNKNOWN|HEALTHY|UNHEALTHY`，仅探测 ACTIVE 服务：`GET baseUrl + checkPath`，2xx 计健康，
+连续失败/成功达 `failThreshold`/`recoverThreshold` 迁移；DISABLED 永不探测，手动停用不被覆盖）正交；
+列表/详情返回探测配置与 `healthCheckedAt`。
 
 ### 5.15 全局配置中心（P3.3）
 
