@@ -154,6 +154,41 @@ Master key 丢失无法从数据库恢复真实凭证；使用受保护备份恢
 保留 request ID、时间、账号、Virtual Key ID、凭证版本、产品、模型、状态、token/费用、来源 IP（按客户策略）和审计事件。不得为了排错临时开启 prompt、代码或 response body 日志。需要协议样本时使用合成请求或经批准的完全脱敏 capture。
 
 
+## 14. 常见误配与归因（阿里/腾讯运营口径对照，I16）
+
+### 14.1 Key 形态误配（401 一步定位）
+
+本系统有三类凭据，**端点各认各的**——混用一律 401（不区分原因，防枚举）：
+
+| 凭据 | 形态 | 适用面 | 错误用法示例 |
+|---|---|---|---|
+| Virtual Key | `mqk_live_…` | 推理数据面 `/v1/**`（`Authorization: Bearer` 或 `x-api-key`） | 拿去调 `/mcpservers/{name}/mcp` → 401（MCP 面只认消费者凭据） |
+| 消费者 Key | `mqk_api_…` | 计费 API `/api/v1/billing/**` 与 MCP 数据面（`Authorization: Bearer`；MCP 面 `x-api-key` 也认） | 拿去调 `/v1/messages` → 401 |
+| 消费者 JWT | 三段式 RS256 | 同上（`Authorization: Bearer`，非 `mqk_` 前缀） | 平台私钥未配公钥/轮换后旧 token → 401（检查消费者 `jwt_public_key_pem` 指纹） |
+
+定位步骤：① 看 401 的 `WWW-Authenticate`/请求路径确定「哪一面”；② 看凭据前缀确定「哪一类」；③ MCP 面查
+`GET /api/v1/admin/mcp-access-logs`（401 未知 Key 不入日志——日志无行 + 上游无请求 = 凭据层失败）；④ 消费者
+凭据还要核对 `expires_at`（到期静默 401）与 `capabilities`（缺失 `mcp:call` 是 403 而非 401）。
+
+### 14.2 供应商账单 T+1（对账窗口建议）
+
+绝大多数供应商账单**T+1 才稳定**（当日增量仍在滚动）。对账时：窗口取 **T-1 及更早**、避开当日；F19 上传
+窗口 ≤31 天；「本地与官方账单不一致」（§7）里若差异集中在最新一天，先等 T+1 再定论——先用导出的
+`reconcile=provider-id`（#330）等级判断该批数据是否具备逐请求对账资格。
+
+### 14.3 429 / 403 归因（谁拒绝的？）
+
+- **429 只可能来自上游**：本系统**不限流、不阻断**（红线）——网关卡本身不产生 429；出现即供应商限流
+  （查上游配额/控制台），网关只透传状态与错误体。
+- **403 全部来自本系统的授权层**，按错误码归因（MCP 面）：
+  - `consumer_scope_denied` → 消费者 `capabilities` 缺 `mcp:call`（`PATCH /admin/api-consumers/{id}/scope`）；
+  - `mcp_access_denied` → 服务级或工具级 ACL 未放行（doc 134890 语义，`GET /admin/mcp-services/{id}/access`）；
+  - `mcp_tool_unavailable` → 工具未登记或已禁用（Tools 管理页）；
+  - `session_credential_mismatch` → SSE 会话被另一消费者凭据使用（#356）；
+  - `SERVICE_STATE_CONFLICT`（409）→ 并发状态变更，刷新重试即可（#361）。
+- 归因入口：`mcp_access_log` 的 `status` 列（SERVICE_DENIED/TOOL_DENIED/TOOL_UNAVAILABLE 精确到桶）+
+  审计链事件（含操作人）。
+
 ## 备份与恢复（G6.2）
 
 脚本位于 `deploy/backup/`：
