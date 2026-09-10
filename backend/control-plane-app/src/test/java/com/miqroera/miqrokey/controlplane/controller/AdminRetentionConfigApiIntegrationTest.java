@@ -177,4 +177,21 @@ class AdminRetentionConfigApiIntegrationTest {
             return SECRET;
         }
     }
+
+    @Test
+    @DisplayName("content cap round-trips and out-of-range values are rejected (#367)")
+    void contentCap() throws Exception {
+        mockMvc.perform(put("/api/v1/admin/retention-config").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("enabled", true, "maxContentBytes", 4096))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.maxContentBytes").value(4096));
+
+        mockMvc.perform(get("/api/v1/admin/retention-config").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.maxContentBytes").value(4096));
+
+        mockMvc.perform(put("/api/v1/admin/retention-config").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("enabled", true, "maxContentBytes", 10))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("RETENTION_CONFIG_INVALID"));
+    }
 }

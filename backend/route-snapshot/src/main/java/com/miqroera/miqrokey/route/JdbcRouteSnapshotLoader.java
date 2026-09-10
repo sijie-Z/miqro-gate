@@ -86,11 +86,11 @@ public final class JdbcRouteSnapshotLoader {
     private Map<UUID, RetentionConfig> loadRetention() {
         Map<UUID, RetentionConfig> byTenant = new LinkedHashMap<>();
         jdbc.query("""
-                SELECT tenant_id, enabled, content_scope, key_version
+                SELECT tenant_id, enabled, content_scope, key_version, max_content_bytes
                 FROM retention_config
                 """, rs -> {
             RetentionConfig config = new RetentionConfig(rs.getBoolean("enabled"), rs.getString("content_scope"),
-                    rs.getString("key_version"), 0);
+                    rs.getString("key_version"), 0, rs.getInt("max_content_bytes"));
             byTenant.putIfAbsent((UUID) rs.getObject("tenant_id"), config);
         });
         return byTenant;

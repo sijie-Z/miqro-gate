@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.service;
 import com.miqroera.miqrokey.domain.model.RetentionConfig;
 import com.miqroera.miqrokey.domain.repository.RetentionConfigRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,15 +36,22 @@ public class AdminRetentionConfigService {
     }
 
     @Transactional
-    public RetentionConfig configure(UUID tenantId, UUID adminId, Boolean enabled, String requestId) {
+    public RetentionConfig configure(UUID tenantId, UUID adminId, Boolean enabled, Integer maxContentBytes,
+            String requestId) {
         boolean enable = Boolean.TRUE.equals(enabled);
         RetentionConfig current = view(tenantId);
-        RetentionConfig next = new RetentionConfig(enable, current.contentScope(), current.keyVersion(),
-                current.version());
+        RetentionConfig next;
+        try {
+            next = new RetentionConfig(enable, current.contentScope(), current.keyVersion(), current.version(),
+                    maxContentBytes != null ? maxContentBytes : current.maxContentBytes());
+        } catch (IllegalArgumentException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "RETENTION_CONFIG_INVALID", e.getMessage());
+        }
         RetentionConfig stored = repository.upsert(tenantId, next, adminId);
         auditService.record(tenantId, adminId, "RETENTION_CONFIG_UPDATE", "TENANT", tenantId,
                 "{\"enabled\":" + stored.enabled() + ",\"contentScope\":\"" + stored.contentScope()
-                        + "\",\"keyVersion\":\"" + stored.keyVersion() + "\",\"version\":" + stored.version() + "}",
+                        + "\",\"keyVersion\":\"" + stored.keyVersion() + "\",\"maxContentBytes\":"
+                        + stored.maxContentBytes() + ",\"version\":" + stored.version() + "}",
                 requestId);
         routeRefreshPublisher.publishChanged();
         return stored;

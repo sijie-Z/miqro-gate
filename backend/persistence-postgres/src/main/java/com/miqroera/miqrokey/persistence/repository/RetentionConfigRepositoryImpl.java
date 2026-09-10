@@ -20,7 +20,7 @@ import java.util.UUID;
 @Transactional
 public class RetentionConfigRepositoryImpl implements RetentionConfigRepository {
 
-    private static final String COLS = "enabled, content_scope, key_version, version";
+    private static final String COLS = "enabled, content_scope, key_version, version, max_content_bytes";
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -43,13 +43,14 @@ public class RetentionConfigRepositoryImpl implements RetentionConfigRepository 
     @Override
     public RetentionConfig upsert(UUID tenantId, RetentionConfig config, UUID updatedBy) {
         return jdbc.queryForObject("""
-                INSERT INTO retention_config (tenant_id, enabled, content_scope, key_version, version, updated_by,
-                    updated_at)
-                VALUES (:tenantId, :enabled, :scope, :keyVersion, 0, :updatedBy, now())
+                INSERT INTO retention_config (tenant_id, enabled, content_scope, key_version, max_content_bytes,
+                    version, updated_by, updated_at)
+                VALUES (:tenantId, :enabled, :scope, :keyVersion, :maxContentBytes, 0, :updatedBy, now())
                 ON CONFLICT (tenant_id) DO UPDATE SET
                     enabled = EXCLUDED.enabled,
                     content_scope = EXCLUDED.content_scope,
                     key_version = EXCLUDED.key_version,
+                    max_content_bytes = EXCLUDED.max_content_bytes,
                     version = retention_config.version + 1,
                     updated_by = EXCLUDED.updated_by,
                     updated_at = now()
@@ -57,12 +58,12 @@ public class RetentionConfigRepositoryImpl implements RetentionConfigRepository 
                 """ + COLS,
                 new MapSqlParameterSource("tenantId", tenantId).addValue("enabled", config.enabled())
                         .addValue("scope", config.contentScope()).addValue("keyVersion", config.keyVersion())
-                        .addValue("updatedBy", updatedBy),
+                        .addValue("maxContentBytes", config.maxContentBytes()).addValue("updatedBy", updatedBy),
                 (rs, rowNum) -> map(rs));
     }
 
     private static RetentionConfig map(ResultSet rs) throws SQLException {
         return new RetentionConfig(rs.getBoolean("enabled"), rs.getString("content_scope"), rs.getString("key_version"),
-                rs.getLong("version"));
+                rs.getLong("version"), rs.getInt("max_content_bytes"));
     }
 }
