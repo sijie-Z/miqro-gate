@@ -62,11 +62,12 @@ public final class BillReconciliationEngine {
             rows.add(new RowResult(bill.providerRowRef(), Verdict.MATCHED, level(bill, match), match.localRef()));
         }
 
-        // Local rows that should have appeared on the bill but did not (id-based only).
-        int unmatchedLocal = 0;
+        // Local rows that should have appeared on the bill but did not (id-based
+        // only) - row-level since #334 so the detail surface can list them.
+        List<RowResult> unmatchedLocalRows = new ArrayList<>();
         for (LocalUsageRow local : windowed) {
             if (local.providerRequestId() != null && !consumedLocal.contains(local.localRef())) {
-                unmatchedLocal++;
+                unmatchedLocalRows.add(new RowResult(null, Verdict.UNMATCHED_LOCAL, MatchLevel.NONE, local.localRef()));
             }
         }
 
@@ -74,7 +75,7 @@ public final class BillReconciliationEngine {
 
         int matched = count(rows, Verdict.MATCHED);
         int unmatchedProvider = count(rows, Verdict.UNMATCHED_PROVIDER);
-        return new Report(bills.size(), matched, buckets.size(), unmatchedProvider, unmatchedLocal, amountGap, rows,
+        return new Report(bills.size(), matched, buckets.size(), unmatchedProvider, unmatchedLocalRows, amountGap, rows,
                 buckets);
     }
 
