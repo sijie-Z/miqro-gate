@@ -5,6 +5,12 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **模型探测端点 + 失败可见面（#346，I4）**：`POST /api/v1/admin/models/probe`（适配器 + 首个 ACTIVE 凭证 →
+  官方 `/models` 抓取，30s 上限，成功才落目录）+ `GET /api/v1/admin/models/probe-status`（最近结果可见面）；
+  V43 在 `provider_products` 记录 probe 状态 / 脱敏错误 / 模型数 / 时间；`refreshProduct` 与探测共用抓取核心
+  （成功才落库、失败保留最后成功目录、不覆盖 MANUAL 行）；审计 `MODEL_CATALOG_PROBE_SUCCEEDED/FAILED`。
+  前端供应商产品「模型目录」对话框「探测模型」+ 上次探测状态行（成功/失败原因）。验证：目录服务单测 8/8、
+  探测集成 5/5（成功落库 / 失败脱敏且目录不动 / 无凭证 / 未知产品 404 / 401）；OpenAPI 基线再生（无破坏）+ gen:types。
 - **MCP Tools 自动同步（#344，I3）**：`POST /api/v1/admin/mcp-services/{id}/tools/sync?dryRun=`——上游 `tools/list`
   差量合并：新增工具（占位 `POST /` + 基线修订 1）、描述变化经 F16 发布下一修订（激活并镜像）、上游缺失仅报告
   `absentUpstream`（不自动禁用/删除）；逐项报告 added/updated/unchanged/absent/skipped；`dryRun` 预览零写入零审计；
