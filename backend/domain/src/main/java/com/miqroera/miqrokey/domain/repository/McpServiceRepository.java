@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.domain.repository;
 
+import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.model.McpService;
 
 import java.util.List;
@@ -24,4 +25,11 @@ public interface McpServiceRepository {
      * Replaces the full row (status switch or health update with optimistic lock).
      */
     McpService update(McpService service, long expectedVersion);
+
+    /**
+     * Sets the upstream backend authentication (#320): {@code API_KEY} with an
+     * encrypted secret triple, or {@code VISITOR} with {@code null} (clears the
+     * ciphertext). Bumps the version; the plaintext never passes through here.
+     */
+    McpService updateBackendAuth(UUID id, UUID tenantId, String mode, EncryptedSecret encryptedSecret);
 }

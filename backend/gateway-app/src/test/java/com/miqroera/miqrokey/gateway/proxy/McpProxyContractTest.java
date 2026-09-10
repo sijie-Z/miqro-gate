@@ -370,4 +370,50 @@ class McpProxyContractTest {
             assertThat(new String(received, StandardCharsets.UTF_8)).isEqualTo(upstreamBody);
         }
     }
+
+    // -------------------------------------------------------------------
+    // Upstream backend auth (#320, Tencent raw 03): Visitor vs API Key
+    // -------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("Upstream backend authentication")
+    class BackendAuth {
+
+        @Test
+        @DisplayName("should inject Authorization: Bearer <secret> for an API_KEY service")
+        void shouldInjectBackendBearer() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_SECURED_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+            assertThat(mockServer.capturedRequests().get(0).authorization())
+                    .isEqualTo("Bearer " + GatewayTestKeys.MCP_SECURED_BACKEND_KEY);
+            // The consumer credential is consumed at the gateway, never forwarded.
+            assertThat(mockServer.capturedRequests().get(0).xApiKey()).isNull();
+        }
+
+        @Test
+        @DisplayName("should not inject anything for a VISITOR service")
+        void shouldNotInjectForVisitor() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+            assertThat(mockServer.capturedRequests().get(0).authorization()).isNull();
+        }
+
+        @Test
+        @DisplayName("should fail closed with backend_auth_unavailable when decryption fails")
+        void shouldFailClosedWhenUndecryptable() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_BROKEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isEqualTo(502).expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("backend_auth_unavailable");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+    }
 }

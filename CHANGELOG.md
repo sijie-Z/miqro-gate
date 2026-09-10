@@ -4,6 +4,14 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
+### 2026-09-10
+- **MCP 上游后端鉴权注入（#320）**：对齐腾讯 raw 03「Visitor / API Key」三级鉴权链——`mcp_services` 新增
+  `backend_auth_mode`（VISITOR 默认 / API Key，V38）；API Key 模式网关按请求解密注入固定
+  `Authorization: Bearer <secret>`（密文随路由快照、AAD 绑定 tenant+service、明文不出网关、用后清零）；
+  密钥写后不可读（任何读面/审计不含）；解密失败 fail-closed 502 `backend_auth_unavailable`（上游零请求）；
+  `PUT /api/v1/admin/mcp-services/{id}/backend-auth` + 400 `MCP_BACKEND_AUTH_INVALID` + 审计
+  `MCP_SERVICE_BACKEND_AUTH`；前端服务页后端鉴权徽标与编辑对话框。验证：控制面 IT 2/2（只写/加密落库/
+  轮换/清除/审计/校验）+ 网关契约 3/3（注入/VISITOR 不注入/失败关闭）。
 ### 2026-09-09
 - **API 消费者能力作用域（#316）**：V37 `api_consumers.capabilities`（NULL=全量，值域 billing:read/mcp:call）——
   一把消费者 Key 不再隐式同时拥有「整租户计费读 + MCP 数据面调用」；计费通道缺 billing:read → 403

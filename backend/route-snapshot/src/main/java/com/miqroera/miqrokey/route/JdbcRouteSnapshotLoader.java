@@ -318,6 +318,8 @@ public final class JdbcRouteSnapshotLoader {
 
         jdbc.query("""
                 SELECT s.id, s.tenant_id, s.name, s.endpoint, s.transport, s.status, a.mode AS acl_mode,
+                       s.backend_auth_mode, s.backend_secret_ciphertext, s.backend_secret_nonce,
+                       s.backend_secret_key_version,
                        p.retry_enabled, p.retry_max, p.retry_conditions, p.retry_idempotency_confirmed,
                        p.breaker_enabled, p.breaker_window_seconds, p.breaker_min_requests,
                        p.breaker_error_enabled, p.breaker_error_ratio, p.breaker_error_status_codes,
@@ -330,10 +332,16 @@ public final class JdbcRouteSnapshotLoader {
                 WHERE s.status = 'ONLINE'
                 """, (rs, rowNum) -> {
             UUID id = (UUID) rs.getObject("id");
+            byte[] ciphertext = rs.getBytes("backend_secret_ciphertext");
+            com.miqroera.miqrokey.domain.crypto.EncryptedSecret backendSecret = ciphertext == null
+                    ? null
+                    : new com.miqroera.miqrokey.domain.crypto.EncryptedSecret(ciphertext,
+                            rs.getBytes("backend_secret_nonce"), rs.getString("backend_secret_key_version"));
             services.put(rs.getString("name"),
                     new RouteSnapshot.McpServerRecord(id, (UUID) rs.getObject("tenant_id"), rs.getString("name"),
                             rs.getString("endpoint"), rs.getString("transport"), rs.getString("status"),
-                            rs.getString("acl_mode"), Set.of(), List.of(), null));
+                            rs.getString("acl_mode"), Set.of(), List.of(), null, rs.getString("backend_auth_mode"),
+                            backendSecret));
             serverLists.put(id, new LinkedHashSet<>());
             toolsByService.put(id, new LinkedHashMap<>());
             if (rs.getObject("retry_enabled") != null) {

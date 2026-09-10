@@ -14,6 +14,7 @@ import com.miqroera.miqrokey.gateway.mcplog.McpAccessLogSink;
 import com.miqroera.miqrokey.route.RouteSnapshotProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -28,6 +29,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -99,14 +101,20 @@ public class McpProxyController {
     private final ObjectMapper objectMapper;
     private final McpAccessLogSink accessLogSink;
     private final McpCircuitBreakerRegistry circuitRegistry;
+    private final ObjectProvider<com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider> keyEncryptionProvider;
+    private final Scheduler credentialDecryptScheduler;
 
     public McpProxyController(RouteSnapshotProvider routeSnapshotProvider, WebClient proxyWebClient,
-            ObjectMapper objectMapper, McpAccessLogSink accessLogSink, Clock clock) {
+            ObjectMapper objectMapper, McpAccessLogSink accessLogSink, Clock clock,
+            ObjectProvider<com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider> keyEncryptionProvider,
+            Scheduler credentialDecryptScheduler) {
         this.routeSnapshotProvider = routeSnapshotProvider;
         this.proxyWebClient = proxyWebClient;
         this.objectMapper = objectMapper;
         this.accessLogSink = accessLogSink;
         this.circuitRegistry = new McpCircuitBreakerRegistry(clock);
+        this.keyEncryptionProvider = keyEncryptionProvider;
+        this.credentialDecryptScheduler = credentialDecryptScheduler;
     }
 
     @PostMapping("/mcpservers/{serviceName}/mcp")
@@ -167,7 +175,37 @@ public class McpProxyController {
                     ? McpResiliencePolicy.disabled()
                     : service.resilience();
             String toolHttpMethod = tool == null ? null : tool.method();
-            return forward(exchange, service.endpoint(), body, context, rpcMethod, toolName, toolHttpMethod, policy);
+            if (!"API_KEY".equals(service.backendAuthMode())) {
+                return forward(exchange, service.endpoint(), body, context, rpcMethod, toolName, toolHttpMethod, policy,
+                        null);
+            }
+            // Upstream backend credential (#320, Tencent raw 03): decrypt the
+            // snapshot ciphertext off the event loop (first use may load key
+            // material from disk) and attach Authorization: Bearer upstream.
+            // Unavailable/undecryptable credentials fail closed before any
+            // upstream request.
+            com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider crypto = keyEncryptionProvider.getIfAvailable();
+            com.miqroera.miqrokey.domain.crypto.EncryptedSecret encrypted = service.encryptedBackendSecret();
+            if (crypto == null || encrypted == null) {
+                record(context, rpcMethod, toolName, McpAccessStatus.UPSTREAM_FAILURE, 502);
+                return error(exchange.getResponse(), HttpStatus.BAD_GATEWAY, "backend_auth_unavailable",
+                        "MCP upstream credential is not available");
+            }
+            return Mono.fromCallable(() -> {
+                byte[] secret = crypto.decrypt(encrypted, service.tenantId(), service.id());
+                try {
+                    return new String(secret, StandardCharsets.UTF_8);
+                } finally {
+                    com.miqroera.miqrokey.domain.crypto.impl.SecretWiping.clearArray(secret);
+                }
+            }).subscribeOn(credentialDecryptScheduler).flatMap(bearer -> forward(exchange, service.endpoint(), body,
+                    context, rpcMethod, toolName, toolHttpMethod, policy, bearer)).onErrorResume(decryptError -> {
+                        log.warn("aigw.mcp.backend_auth_failed service={}: {}", service.name(),
+                                decryptError.getMessage());
+                        record(context, rpcMethod, toolName, McpAccessStatus.UPSTREAM_FAILURE, 502);
+                        return error(exchange.getResponse(), HttpStatus.BAD_GATEWAY, "backend_auth_unavailable",
+                                "MCP upstream credential could not be decrypted");
+                    });
         } catch (Exception e) {
             log.warn("aigw.mcp.invalid envelope service={}: {}", service.name(), e.getMessage());
             record(context, null, null, McpAccessStatus.INVALID_ENVELOPE, 400);
@@ -176,7 +214,8 @@ public class McpProxyController {
     }
 
     private Mono<Void> forward(ServerWebExchange exchange, String endpoint, byte[] body, CallContext context,
-            String rpcMethod, String toolName, String toolHttpMethod, McpResiliencePolicy policy) {
+            String rpcMethod, String toolName, String toolHttpMethod, McpResiliencePolicy policy,
+            String upstreamBearer) {
         ServerHttpRequest in = exchange.getRequest();
         HttpHeaders headers = new HttpHeaders();
         MediaType contentType = in.getHeaders().getContentType();
@@ -188,6 +227,11 @@ public class McpProxyController {
         String sessionId = in.getHeaders().getFirst("Session-Id");
         if (sessionId != null) {
             headers.set("Session-Id", sessionId);
+        }
+        if (upstreamBearer != null) {
+            // Fixed bearer shape (Tencent raw 03); the consumer credential is
+            // consumed at the gateway and never forwarded.
+            headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + upstreamBearer);
         }
         String bucket = toolName != null ? toolName : (rpcMethod == null ? "envelope" : rpcMethod);
         McpCircuitBreaker breaker = policy.breakerEnabled()

@@ -660,6 +660,17 @@ export function adminUpdateMcpHealthConfig(
   return post<McpServiceView>(`/api/v1/admin/mcp-services/${id}/health-config`, body);
 }
 
+/**
+ * #320 upstream backend auth: VISITOR clears any stored secret; API_KEY
+ * requires a non-blank write-only secret (never returned by any read surface).
+ */
+export function adminSetMcpBackendAuth(
+  id: string,
+  body: { mode: 'VISITOR' | 'API_KEY'; secret?: string },
+): Promise<McpServiceView> {
+  return put<McpServiceView>(`/api/v1/admin/mcp-services/${id}/backend-auth`, body);
+}
+
 export function adminListMcpTools(serviceId: string): Promise<McpToolView[]> {
   return get<McpToolView[]>(`/api/v1/admin/mcp-services/${serviceId}/tools`);
 }

@@ -325,6 +325,11 @@ V37（#316）新增通道能力作用域：`capabilities jsonb`（NULL = 全量�
 
 ### `mcp_services` (V20，P3.4)
 
+V38（#320）新增上游后端鉴权：`backend_auth_mode`（`VISITOR|API_KEY`，默认 VISITOR）、密文三列
+（`backend_secret_ciphertext bytea` / `backend_secret_nonce bytea` / `backend_secret_key_version varchar(32)`）与
+`backend_secret_updated_at timestamptz`；约束 `ck_mcp_services_backend_secret` 保证 API_KEY ⇔ 密文三列非空。
+密钥复用 `KeyEncryptionProvider`（AES-GCM，AAD 绑定 tenant+service），写后不可读。
+
 MCP Server 管理：`name`、`description`、`endpoint`（https）、`transport`（`STREAMABLE_HTTP|SSE`）、`status`（`ONLINE|OFFLINE`，手动切换，健康检查不覆盖）、`health_status`（`UNKNOWN|HEALTHY|UNHEALTHY`）、`health_checked_at`、`consecutive_failures/successes`、检查配置（`check_interval_seconds`/`check_timeout_seconds`/`fail_threshold`/`recover_threshold`/`check_path`）。唯一 `(tenant_id, name)`；`(tenant_id, health_status)` 索引（探活列表）。
 
 ### `mcp_tools` (V21，P3.5)

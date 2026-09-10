@@ -13,6 +13,16 @@
   （leader）、F32/F33 平台接口（BLOCKED）、F19 账单对账（等真实样本）**）
 - Last updated: `2026-09-09 CST`
 
+## 会话交接点 2026-09-10（凌晨，MCP 上游后端鉴权：#320）
+
+- **rc.9 已发布**（含 #314/#315/#316 三批，中文 Release Notes）。
+- **#320 MCP 上游后端鉴权注入（本 PR）**：腾讯 raw 03「Visitor / API Key」三级鉴权链补齐——V38
+  backend_auth_mode（默认 VISITOR 零行为变化）+ 密文三列 + CHECK 一致性约束；API Key 模式网关按请求解密
+  （AAD 绑定 tenant+service、明文不出网关、SecretWiping 清零）注入固定 `Authorization: Bearer`；解密失败
+  fail-closed 502 backend_auth_unavailable；`PUT …/backend-auth` + 审计 MCP_SERVICE_BACKEND_AUTH（无 secret）；
+  前端服务页徽标+编辑。验证：控制面 IT 2/2、网关契约 3/3、全量 verify 绿后合入。
+- 待办延续：#211/#245/F32/F33 外部项；下一候选=服务注册表运行时治理（上下线/健康扩展，服务方向盘点）。
+
 ## 会话交接点 2026-09-09（深夜，消费者能力作用域：#316）
 
 - **#316 API 消费者能力作用域（本 PR）**：一把 `mqk_api_` Key 原同时具备整租户计费读与 MCP 数据面调用——

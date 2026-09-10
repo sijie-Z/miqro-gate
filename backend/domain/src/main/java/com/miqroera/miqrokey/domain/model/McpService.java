@@ -8,11 +8,31 @@ import java.util.UUID;
  * V20) modeled after the Tencent AI gateway MCP management: online/offline is a
  * manual switch that health checking never overrides; the health probe reports
  * UNKNOWN/HEALTHY/UNHEALTHY driven by fail/recover thresholds.
+ *
+ * <p>
+ * Upstream backend authentication (#320, Tencent raw 03): {@code VISITOR} (no
+ * upstream credential) or {@code API_KEY} (the gateway attaches
+ * {@code Authorization: Bearer <secret>} upstream). The ciphertext lives in
+ * dedicated columns and is deliberately NOT part of this record — the admin
+ * read surfaces serialize it directly, and the secret must stay write-only.
+ * </p>
  */
 public record McpService(UUID id, UUID tenantId, String name, String description, String endpoint, String transport,
         String status, String healthStatus, Instant healthCheckedAt, int consecutiveFailures, int consecutiveSuccesses,
         int checkIntervalSeconds, int checkTimeoutSeconds, int failThreshold, int recoverThreshold, String checkPath,
-        long version, UUID createdBy, Instant createdAt, Instant updatedAt) {
+        long version, UUID createdBy, Instant createdAt, Instant updatedAt, String backendAuthMode,
+        Instant backendSecretUpdatedAt) {
+
+    /** Backwards-compatible constructor: no upstream backend credential. */
+    public McpService(UUID id, UUID tenantId, String name, String description, String endpoint, String transport,
+            String status, String healthStatus, Instant healthCheckedAt, int consecutiveFailures,
+            int consecutiveSuccesses, int checkIntervalSeconds, int checkTimeoutSeconds, int failThreshold,
+            int recoverThreshold, String checkPath, long version, UUID createdBy, Instant createdAt,
+            Instant updatedAt) {
+        this(id, tenantId, name, description, endpoint, transport, status, healthStatus, healthCheckedAt,
+                consecutiveFailures, consecutiveSuccesses, checkIntervalSeconds, checkTimeoutSeconds, failThreshold,
+                recoverThreshold, checkPath, version, createdBy, createdAt, updatedAt, "VISITOR", null);
+    }
 
     public McpService {
         if (id == null || tenantId == null || name == null || name.isBlank() || endpoint == null
@@ -31,6 +51,9 @@ public record McpService(UUID id, UUID tenantId, String name, String description
         }
         if (failThreshold < 1 || recoverThreshold < 1 || checkIntervalSeconds < 1 || checkTimeoutSeconds < 1) {
             throw new IllegalArgumentException("thresholds and check intervals must be positive");
+        }
+        if (backendAuthMode == null || !(backendAuthMode.equals("VISITOR") || backendAuthMode.equals("API_KEY"))) {
+            throw new IllegalArgumentException("backendAuthMode must be VISITOR or API_KEY");
         }
     }
 }

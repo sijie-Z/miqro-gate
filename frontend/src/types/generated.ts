@@ -100,6 +100,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/mcp-services/{serviceId}/backend-auth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["setBackendAuth"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/mcp-services/{id}/access/mode": {
         parameters: {
             query?: never;
@@ -2459,6 +2475,48 @@ export interface components {
             /** Format: int64 */
             version?: number;
         };
+        BackendAuthRequest: {
+            mode: string;
+            secret?: string;
+        };
+        McpService: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            name?: string;
+            description?: string;
+            endpoint?: string;
+            transport?: string;
+            status?: string;
+            healthStatus?: string;
+            /** Format: date-time */
+            healthCheckedAt?: string;
+            /** Format: int32 */
+            consecutiveFailures?: number;
+            /** Format: int32 */
+            consecutiveSuccesses?: number;
+            /** Format: int32 */
+            checkIntervalSeconds?: number;
+            /** Format: int32 */
+            checkTimeoutSeconds?: number;
+            /** Format: int32 */
+            failThreshold?: number;
+            /** Format: int32 */
+            recoverThreshold?: number;
+            checkPath?: string;
+            /** Format: int64 */
+            version?: number;
+            /** Format: uuid */
+            createdBy?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            backendAuthMode?: string;
+            /** Format: date-time */
+            backendSecretUpdatedAt?: string;
+        };
         SetMcpAccessModeRequest: {
             /** @enum {string} */
             mode: "NONE" | "ALLOW" | "DENY";
@@ -2954,41 +3012,6 @@ export interface components {
         };
         ReviewModelApprovalRequest: {
             reviewNote?: string;
-        };
-        McpService: {
-            /** Format: uuid */
-            id?: string;
-            /** Format: uuid */
-            tenantId?: string;
-            name?: string;
-            description?: string;
-            endpoint?: string;
-            transport?: string;
-            status?: string;
-            healthStatus?: string;
-            /** Format: date-time */
-            healthCheckedAt?: string;
-            /** Format: int32 */
-            consecutiveFailures?: number;
-            /** Format: int32 */
-            consecutiveSuccesses?: number;
-            /** Format: int32 */
-            checkIntervalSeconds?: number;
-            /** Format: int32 */
-            checkTimeoutSeconds?: number;
-            /** Format: int32 */
-            failThreshold?: number;
-            /** Format: int32 */
-            recoverThreshold?: number;
-            checkPath?: string;
-            /** Format: int64 */
-            version?: number;
-            /** Format: uuid */
-            createdBy?: string;
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
         };
         McpTool: {
             /** Format: uuid */
@@ -3979,6 +4002,32 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["McpResiliencePolicy"];
+                };
+            };
+        };
+    };
+    setBackendAuth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackendAuthRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["McpService"];
                 };
             };
         };

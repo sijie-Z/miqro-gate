@@ -12,6 +12,7 @@ import jakarta.validation.constraints.Size;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -73,6 +74,20 @@ public class AdminMcpServiceController {
                 requestId(httpReq));
     }
 
+    /**
+     * Sets the upstream backend authentication (#320): {@code VISITOR} clears any
+     * stored secret; {@code API_KEY} attaches
+     * {@code Authorization: Bearer <secret>} upstream. The secret is write-only —
+     * no read surface ever returns it.
+     */
+    @PutMapping("/{serviceId}/backend-auth")
+    public McpService setBackendAuth(@PathVariable UUID serviceId, @Valid @RequestBody BackendAuthRequest body,
+            HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return mcpService.setBackendAuth(user.tenantId(), user.id(), serviceId, body.mode(), body.secret(),
+                requestId(httpReq));
+    }
+
     private static String requestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");
         return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
@@ -88,5 +103,8 @@ public class AdminMcpServiceController {
     public record HealthConfigRequest(@Min(5) @Max(3600) Integer checkIntervalSeconds,
             @Min(1) @Max(60) Integer checkTimeoutSeconds, @Min(1) @Max(20) Integer failThreshold,
             @Min(1) @Max(20) Integer recoverThreshold, @Size(max = 512) String checkPath) {
+    }
+
+    public record BackendAuthRequest(@NotBlank String mode, @Size(max = 4096) String secret) {
     }
 }
