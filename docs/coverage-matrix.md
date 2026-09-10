@@ -6,7 +6,7 @@
 >
 > **维护纪律**：每个 rc 轮刷新一次（对 diff 走查新增/状态变化行）；新 gap 直接登记 issue 并在本表状态列回链。
 > 与 `feature-backlog.md` 的关系：本表是**能力维度的全景底账**（含"不适用"与理由），backlog 是**已立项工作的登记**；
-> 凡本表定级为"未做-可立即实现"的项，应尽快在 backlog 建 F 行。
+> I 编号即这些项的登记锚点（每项独立 issue，完成后回链）。
 >
 > **定级口径**（四态）：
 > - `对等`：已实现（代码/测试在库），可指出实现位置；
@@ -61,7 +61,7 @@
 | I2 | F19 前端页（列表/上传/报告明细） | 同上 | 新视图 + 路由 | 中 | TODO |
 | I3 | **MCP tools/list 自动同步**（差量合并+逐项报告，镜像 F17） | 03 | AdminMcpToolService 加同步器 + 端点 + UI 按钮 | 中 | TODO |
 | I4 | **模型探测端点 + 失败可见面** | 05 | refreshProduct 已有仅缺 Controller/UI 触发器 | 小-中 | TODO |
-| I5 | **消费者「最近调用概览」**（mcp_access_log 聚合近 24h：计数/状态/工具） | 对比段 C | AdminMcpAccessLogService 加聚合 + 消费者页列/抽屉 | 中 | TODO |
+| I5 | **消费者「最近调用概览」**（mcp_access_log 聚合 24h/7d：计数/状态/Top 工具与服务） | 对比段 C | 新服务聚合 + `/activity` 端点 + 消费者页对话框 | 中 | **DONE（#338，2026-09-10）** |
 | I6 | **MCP 面消费者 JWT 回退** | 15 | McpProxyController.authenticate 加 JWT 分支 + 快照携带公钥 | 中 | TODO |
 | I7 | 审计页收口（actorId 输入/快捷时间/targetType 下拉） | 27 | 纯前端 | 小 | TODO |
 | I8 | 模型目录定期重探（@Scheduled，默认关） | 05 | 仿 QuotaSnapshotService | 小 | TODO |
@@ -99,3 +99,4 @@
 ## 4. 维护记录
 
 - 2026-09-10 首版：三路全量扫描（01-10 / 11-20 / 21-29+阿里）合并；I1 当日交付（#334）。
+- 2026-09-10（续）：I1 合并（PR #335）；I5 交付（#338）。

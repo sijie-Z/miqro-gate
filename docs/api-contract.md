@@ -633,6 +633,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `PUT /api/v1/admin/api-consumers/{id}/jwt-key` | 设置/轮换 JWT 验签公钥：`{ "publicKeyPem" }`（RSA PEM SubjectPublicKeyInfo）→ 返回带 `jwtKeyFingerprint` 的视图；非法 PEM → `400 JWT_KEY_INVALID` |
 | `DELETE /api/v1/admin/api-consumers/{id}/jwt-key` | 移除公钥（JWT 认证立即失效） |
 | `PATCH /api/v1/admin/api-consumers/{id}/scope` | 替换能力作用域（#316）：body `{"capabilities":[…]}`，`null`（缺省）= 全量、`[]` = 无通道；
+| `GET /api/v1/admin/api-consumers/{id}/activity?hours=24` | 最近调用概览（#338，I5）：`mcp_access_log` 窗口聚合——`totalCalls/forwarded/denied（被拒：ACL/工具不可用/信封非法）/failed（上游失败/熔断）`、`lastCallAt`、`topTools`/`topServices`（各 ≤5）；`hours` ∈ [1,168]（越界 400 `PARAM_INVALID`）；消费者不存在/跨租户 404 `CONSUMER_NOT_FOUND`；空窗口返回零值视图；401/404 无可信身份的请求按 V29 约定不入日志、不计入 |
   取值限 `billing:read`/`mcp:call` 且不得重复，未知码 → `400 CONSUMER_SCOPE_INVALID`；审计 `CONSUMER_SCOPE_UPDATE`（from/to） |
 
 **计费查询**（API Key 或管理员 session 认证）：
