@@ -90,6 +90,7 @@ public final class KafkaRetentionPublisher implements RetentionPublisher, AutoCl
         node.put("occurredAt", envelope.occurredAt().toString());
         node.put("keyVersion", envelope.keyVersion());
         node.put("textCharCount", envelope.textCharCount());
+        node.put("truncated", envelope.truncated());
         node.put("ciphertext", envelope.ciphertext());
         node.put("nonce", envelope.nonce());
         return node;

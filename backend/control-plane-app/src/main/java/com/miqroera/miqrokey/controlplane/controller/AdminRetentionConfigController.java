@@ -33,13 +33,14 @@ public class AdminRetentionConfigController {
         return service.view(userContext.getUser().tenantId());
     }
 
-    public record UpdateRequest(Boolean enabled) {
+    public record UpdateRequest(Boolean enabled, Integer maxContentBytes) {
     }
 
     @PutMapping
     public RetentionConfig put(@RequestBody UpdateRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
-        return service.configure(user.tenantId(), user.id(), body.enabled(), requestId(httpReq));
+        return service.configure(user.tenantId(), user.id(), body.enabled(), body.maxContentBytes(),
+                requestId(httpReq));
     }
 
     private static String requestId(HttpServletRequest request) {

@@ -10,7 +10,15 @@ import java.util.UUID;
  */
 public record RetentionEnvelope(UUID eventId, UUID tenantId, UUID userId, UUID virtualKeyId, String wireProtocol,
         String gatewayRequestId, Instant occurredAt, String keyVersion, byte[] ciphertext, byte[] nonce,
-        int textCharCount) {
+        int textCharCount, boolean truncated) {
+
+    /** Compatibility constructor: not truncated (#367). */
+    public RetentionEnvelope(UUID eventId, UUID tenantId, UUID userId, UUID virtualKeyId, String wireProtocol,
+            String gatewayRequestId, Instant occurredAt, String keyVersion, byte[] ciphertext, byte[] nonce,
+            int textCharCount) {
+        this(eventId, tenantId, userId, virtualKeyId, wireProtocol, gatewayRequestId, occurredAt, keyVersion,
+                ciphertext, nonce, textCharCount, false);
+    }
 
     public RetentionEnvelope {
         ciphertext = ciphertext.clone();

@@ -63,6 +63,7 @@ public final class RetentionSidecar {
     private final Clock clock;
     private final ArrayBlockingQueue<RetentionEnvelope> queue;
     private final AtomicLong dropped = new AtomicLong();
+    private final AtomicLong truncatedCount = new AtomicLong();
     private volatile ScheduledExecutorService scheduler;
 
     public RetentionSidecar(RouteSnapshotProvider routeSnapshotProvider,
@@ -107,10 +108,22 @@ public final class RetentionSidecar {
                 return;
             }
             byte[] plain = text.getBytes(StandardCharsets.UTF_8);
+            // Tenant content cap (#367, I18): oversized payloads are truncated on a
+            // UTF-8 boundary and flagged/counted instead of dropped.
+            boolean truncated = false;
+            int cap = config.maxContentBytes();
+            if (plain.length > cap) {
+                plain = truncateUtf8(plain, cap);
+                truncated = true;
+                truncatedCount.incrementAndGet();
+                if (truncatedCount.get() % DROP_LOG_THROTTLE == 0) {
+                    log.warn("retention content truncated {} times (latest tenant {})", truncatedCount.get(), tenantId);
+                }
+            }
             EncryptedSecret secret = provider.encrypt(plain, tenantId, RETENTION_AAD_ID);
             RetentionEnvelope envelope = new RetentionEnvelope(UUID.randomUUID(), tenantId, ctx.key().userId(),
                     ctx.key().keyId(), protocol.name(), gatewayRequestId, Instant.now(clock), secret.keyVersion(),
-                    secret.ciphertext(), secret.nonce(), text.length());
+                    secret.ciphertext(), secret.nonce(), plain.length, truncated);
             if (!offer(envelope)) {
                 countDrop("queue saturated");
             }
@@ -123,6 +136,20 @@ public final class RetentionSidecar {
     /** Number of events dropped since start (observability/tests). */
     public long droppedCount() {
         return dropped.get();
+    }
+
+    /** Number of captures truncated at the tenant content cap (#367, I18). */
+    public long truncatedCount() {
+        return truncatedCount.get();
+    }
+
+    /** First {@code cap} bytes, backed off to a UTF-8 character boundary. */
+    private static byte[] truncateUtf8(byte[] plain, int cap) {
+        int end = cap;
+        while (end > 0 && (plain[end] & 0xC0) == 0x80) {
+            end--;
+        }
+        return java.util.Arrays.copyOf(plain, end);
     }
 
     /** Drains the queue into the publisher synchronously (tests). */

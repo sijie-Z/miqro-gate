@@ -375,7 +375,7 @@ MCP Tools 管理：`tool_name`（AI Agent 调用唯一标识，snake_case）、`
 
 每工具一行（`mcp_tool_id` PK，FK mcp_tools ON DELETE CASCADE；`tenant_id` FK tenants）：`retry_enabled`/`retry_max`（CHECK 1..5）/`retry_conditions`（CSV）/`retry_idempotency_confirmed` + `version`/`updated_by`/时间戳。数据面经路由快照读取（loader LEFT JOIN，无行→null=跟随服务级策略）；覆盖仅替换重试字段，**熔断保持服务级**（含 `breaker_skip_retry`）。
 
-### `retention_config` / `user_identity_link` (V31，ADR-0014 v3 Accepted)
+### `retention_config` / `user_identity_link` (V31，ADR-0014 v3 Accepted；V47 增 `max_content_bytes`)
 
 - `retention_config`：每租户一行（PK tenant_id FK tenants），`enabled`（默认 false）、`content_scope`（CHECK `USER_TEXT_ONLY`）、`key_version`（默认 'v1'，P5 信封密钥版本）、`version`（每次 upsert+1）、`updated_by`、`updated_at`。网关经路由快照读取（loader 全表入 `retentionByTenant`），控制面 PUT 后即时生效。
 - `user_identity_link`：OAuth 平台映射骨架（R4/P7，等平台 claims 后接线）：`internal_user_id`（FK users）↔ `platform_user_id` + `idp`，唯一 `(tenant_id, idp, platform_user_id)`，索引按 internal_user_id。数据面暂不读取。

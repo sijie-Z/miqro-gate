@@ -132,7 +132,11 @@ class RetentionCaptureTest {
     }
 
     private void installRetention(boolean enabled) {
-        RetentionConfig config = new RetentionConfig(enabled, RetentionConfig.USER_TEXT_ONLY, "v1", 1);
+        installRetention(enabled, RetentionConfig.DEFAULT_MAX_CONTENT_BYTES);
+    }
+
+    private void installRetention(boolean enabled, int maxContentBytes) {
+        RetentionConfig config = new RetentionConfig(enabled, RetentionConfig.USER_TEXT_ONLY, "v1", 1, maxContentBytes);
         snapshotProvider.install(GatewayTestKeys.snapshotWithRetention("http://127.0.0.1:1", Map.of(),
                 Map.of(GatewayTestKeys.TENANT_ID, config), GatewayTestKeys.DEFAULT_KEY));
     }
@@ -191,6 +195,32 @@ class RetentionCaptureTest {
         sidecar.capture("/some/other/path", CHAT_BODY.getBytes(StandardCharsets.UTF_8), ctx(), "req-3");
         sidecar.flushNow();
         assertThat(publisher.published).isEmpty();
+        assertThat(sidecar.droppedCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("content beyond the tenant cap truncates on a UTF-8 boundary, flagged and counted (#367)")
+    void truncatesAtTenantCap() {
+        installRetention(true, 1024);
+        String longText = "user-".repeat(700); // 3500 ASCII chars, above the 1024-byte cap
+        String body = "{\"messages\":[{\"role\":\"system\",\"content\":\"secret system prompt\"},"
+                + "{\"role\":\"user\",\"content\":\"" + longText + "\"}]}";
+        sidecar.capture("/v1/chat/completions", body.getBytes(StandardCharsets.UTF_8), ctx(), "req-cap-1");
+        sidecar.flushNow();
+
+        assertThat(publisher.published).hasSize(1);
+        RetentionEnvelope envelope = publisher.published.get(0);
+        assertThat(envelope.truncated()).isTrue();
+        assertThat(envelope.textCharCount()).isLessThanOrEqualTo(1024);
+        assertThat(sidecar.truncatedCount()).isEqualTo(1);
+
+        byte[] plain = new FakeCrypto().decrypt(
+                new EncryptedSecret(envelope.ciphertext(), envelope.nonce(), envelope.keyVersion()),
+                envelope.tenantId(), UUID.randomUUID());
+        String text = new String(plain, StandardCharsets.UTF_8);
+        assertThat(plain.length).isLessThanOrEqualTo(1024);
+        assertThat(text).startsWith("user-user-");
+        assertThat(text).doesNotContain("secret system prompt");
         assertThat(sidecar.droppedCount()).isZero();
     }
 }

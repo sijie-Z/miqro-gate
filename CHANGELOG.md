@@ -5,6 +5,11 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-11
+- **留痕通道内容上限（#367，I18，doc 26 衍生）**：V47 `retention_config.max_content_bytes`（默认 256 KiB，范围
+  1 KiB–4 MiB，租户级）；超限由「整条丢弃」改为 **UTF-8 边界截断 + `truncated` 标记（envelope/Kafka payload）+
+  超限计数**（节流 WARN）；PUT `/admin/retention-config` 接受 `maxContentBytes`（越界 400
+  `RETENTION_CONFIG_INVALID`，审计含值）。验证：网关捕获测试 4/4（新增截断用例：1 条 envelope、flag、计数、
+  UTF-8 安全前缀、零丢弃）、管理 IT 5/5（回读 + 越界 400）、Kafka IT 原样绿。
 - **修复：`breakerSkipRetry` 真分支 + SERVER_5XX 收窄（#365，I17，doc 12/13）**：`breakerSkipRetry=false` 时熔断
   只观测不限流（`beforeCall` 仍驱动状态机/探测计数，REJECTED 不再阻断调用；默认 true 行为不变）；
   `SERVER_5XX` 重试触发由 500–599 收窄为 **500/502/503/504**（501/505 等确定性状态直接回传）。
