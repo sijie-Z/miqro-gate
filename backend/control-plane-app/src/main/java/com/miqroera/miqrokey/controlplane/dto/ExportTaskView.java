@@ -13,5 +13,5 @@ import java.util.UUID;
  */
 public record ExportTaskView(UUID id, UUID createdBy, ExportFormat format, Instant periodFrom, Instant periodTo,
         ExportStatus status, String sha256, Long rowCount, Long byteCount, String errorMessage, Instant createdAt,
-        Instant finishedAt, Instant expiresAt) {
+        Instant finishedAt, Instant expiresAt, String reconcileLevel) {
 }

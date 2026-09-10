@@ -109,7 +109,7 @@ public class ExportTaskService {
     public List<ExportTaskView> recentMeta(UUID tenantId, int limit) {
         return jdbc.query("""
                 SELECT id, created_by, format, period_from, period_to, status, sha256, row_count, byte_count,
-                       error_message, created_at, finished_at, expires_at
+                       error_message, created_at, finished_at, expires_at, reconcile_level
                 FROM export_tasks WHERE tenant_id = :tenantId
                 ORDER BY created_at DESC LIMIT :limit
                 """, new MapSqlParameterSource("tenantId", tenantId).addValue("limit", Math.min(limit, 50)),
@@ -120,7 +120,7 @@ public class ExportTaskService {
     public ExportTaskView taskMeta(UUID tenantId, UUID taskId) {
         List<ExportTaskView> found = jdbc.query("""
                 SELECT id, created_by, format, period_from, period_to, status, sha256, row_count, byte_count,
-                       error_message, created_at, finished_at, expires_at
+                       error_message, created_at, finished_at, expires_at, reconcile_level
                 FROM export_tasks WHERE id = :id AND tenant_id = :tenantId
                 """, new MapSqlParameterSource("id", taskId).addValue("tenantId", tenantId), EXPORT_META_MAPPER);
         if (found.isEmpty()) {
@@ -135,20 +135,20 @@ public class ExportTaskService {
         mark(task.id(), ExportStatus.RUNNING, null);
         try {
             List<Map<String, Object>> rows = readRows(task);
-            byte[] gzip = render(task.format(), rows);
+            String reconcileLevel = reconcileLevelOf(rows);
+            byte[] gzip = render(task.format(), rows, reconcileLevel);
             String sha256 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(gzip));
             jdbc.update("""
                     UPDATE export_tasks
                     SET status = 'SUCCEEDED', sha256 = :sha256, row_count = :rows, byte_count = :bytes,
                         file_bytes = :file, error_message = NULL, finished_at = :finishedAt,
-                        expires_at = :expiresAt
+                        expires_at = :expiresAt, reconcile_level = :reconcileLevel
                     WHERE id = :id
-                    """,
-                    new MapSqlParameterSource("sha256", sha256).addValue("rows", rows.size())
-                            .addValue("bytes", gzip.length).addValue("file", gzip)
-                            .addValue("finishedAt", java.sql.Timestamp.from(Instant.now()))
-                            .addValue("expiresAt", java.sql.Timestamp.from(Instant.now().plus(DOWNLOAD_TTL)))
-                            .addValue("id", task.id()));
+                    """, new MapSqlParameterSource("sha256", sha256).addValue("rows", rows.size())
+                    .addValue("bytes", gzip.length).addValue("file", gzip).addValue("reconcileLevel", reconcileLevel)
+                    .addValue("finishedAt", java.sql.Timestamp.from(Instant.now()))
+                    .addValue("expiresAt", java.sql.Timestamp.from(Instant.now().plus(DOWNLOAD_TTL)))
+                    .addValue("id", task.id()));
         } catch (Exception e) {
             LOG.warn("Export task {} failed", task.id(), e);
             mark(task.id(), ExportStatus.FAILED, truncate(e.getMessage()));
@@ -205,8 +205,40 @@ public class ExportTaskService {
                 });
     }
 
+    /**
+     * Issue #330: provider-request-id coverage determines the task's reconcile
+     * level; an empty window has nothing to declare (null).
+     */
+    static String reconcileLevelOf(List<Map<String, Object>> rows) {
+        if (rows.isEmpty()) {
+            return null;
+        }
+        long withId = rows.stream().filter(r -> r.get("providerRequestId") != null).count();
+        if (withId == rows.size()) {
+            return "PROVIDER_ID_BACKED";
+        }
+        return withId == 0 ? "LOCAL_ONLY" : "PARTIAL";
+    }
+
+    /**
+     * Note suffix for the file's local_caliber_note column (backwards compatible
+     * prefix).
+     */
+    private static String caliberNote(String reconcileLevel) {
+        if (reconcileLevel == null) {
+            return "local-instant";
+        }
+        String suffix = switch (reconcileLevel) {
+            case "PROVIDER_ID_BACKED" -> "provider-id";
+            case "PARTIAL" -> "mixed";
+            default -> "local-only";
+        };
+        return "local-instant;reconcile=" + suffix;
+    }
+
     /** Renders rows into the requested format and gzips the result. */
-    private byte[] render(ExportFormat format, List<Map<String, Object>> rows) throws Exception {
+    private byte[] render(ExportFormat format, List<Map<String, Object>> rows, String reconcileLevel) throws Exception {
+        String note = caliberNote(reconcileLevel);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (GZIPOutputStream gzip = new GZIPOutputStream(out)) {
             if (format == ExportFormat.CSV) {
@@ -219,11 +251,11 @@ public class ExportTaskService {
                 gzip.write("credentialId,local_caliber_note\n".getBytes(StandardCharsets.UTF_8));
                 for (Map<String, Object> row : rows) {
                     gzip.write(join(row.values()).getBytes(StandardCharsets.UTF_8));
-                    gzip.write(",local-instant\n".getBytes(StandardCharsets.UTF_8));
+                    gzip.write(("," + note + "\n").getBytes(StandardCharsets.UTF_8));
                 }
             } else {
                 for (Map<String, Object> row : rows) {
-                    row.put("localCaliberNote", "local-instant");
+                    row.put("localCaliberNote", note);
                     gzip.write(objectMapper.writeValueAsBytes(row));
                     gzip.write('\n');
                 }
@@ -290,7 +322,8 @@ public class ExportTaskService {
             rs.getString("sha256"), rs.getObject("row_count", Long.class), rs.getObject("byte_count", Long.class),
             rs.getBytes("file_bytes"), rs.getString("error_message"), rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("finished_at") != null ? rs.getTimestamp("finished_at").toInstant() : null,
-            rs.getTimestamp("expires_at") != null ? rs.getTimestamp("expires_at").toInstant() : null);
+            rs.getTimestamp("expires_at") != null ? rs.getTimestamp("expires_at").toInstant() : null,
+            rs.getString("reconcile_level"));
 
     /** Metadata row mapper shared by the open-surface queries (no file_bytes). */
     private static final RowMapper<ExportTaskView> EXPORT_META_MAPPER = (rs, rowNum) -> new ExportTaskView(
@@ -300,5 +333,6 @@ public class ExportTaskService {
             rs.getObject("byte_count", Long.class), rs.getString("error_message"),
             rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("finished_at") != null ? rs.getTimestamp("finished_at").toInstant() : null,
-            rs.getTimestamp("expires_at") != null ? rs.getTimestamp("expires_at").toInstant() : null);
+            rs.getTimestamp("expires_at") != null ? rs.getTimestamp("expires_at").toInstant() : null,
+            rs.getString("reconcile_level"));
 }
