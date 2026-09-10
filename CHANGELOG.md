@@ -5,6 +5,10 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **审计页收口（#348，I7，doc 27）**：审计日志页新增 **actorId 过滤**（UUID 形态校验，非法内联报错且不发请求；
+  列表与 CSV 导出均生效——后端两端点本就支持）、**快捷时间窗**（近 7 天 / 近 30 天一键回填并查询）、
+  **targetType 下拉**（28 个实际资源类型 + 全部类型）。纯前端，无契约与会话变更。
+  验证：audit spec 5/5、全量 41 文件 172 用例、typecheck/eslint/build 通过。
 - **模型探测端点 + 失败可见面（#346，I4）**：`POST /api/v1/admin/models/probe`（适配器 + 首个 ACTIVE 凭证 →
   官方 `/models` 抓取，30s 上限，成功才落目录）+ `GET /api/v1/admin/models/probe-status`（最近结果可见面）；
   V43 在 `provider_products` 记录 probe 状态 / 脱敏错误 / 模型数 / 时间；`refreshProduct` 与探测共用抓取核心

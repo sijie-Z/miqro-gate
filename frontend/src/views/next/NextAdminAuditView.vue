@@ -7,7 +7,7 @@
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiInput, UiTable } from '@/ui';
+import { UiButton, UiInput, UiSelect, UiTable } from '@/ui';
 import type { AuditEventView } from '@/types/generated-api';
 
 const events = ref<AuditEventView[]>([]);
@@ -16,11 +16,50 @@ const loadError = ref('');
 const loadRequestId = ref('');
 const actionFilter = ref('');
 const targetTypeFilter = ref('');
+const actorFilter = ref('');
+const actorError = ref('');
 const fromFilter = ref('');
 const toFilter = ref('');
 const exporting = ref(false);
 const exportNotice = ref('');
 const exportIsError = ref(false);
+
+/** Resource types actually recorded by the control plane (free text stays possible via the API). */
+const TARGET_TYPES = [
+  'ADMIN_API_KEY',
+  'AGENT',
+  'ALERT_RULE',
+  'BUDGET',
+  'CONFIG',
+  'CONSUMER',
+  'DELETION',
+  'GRANT',
+  'MCP_SERVICE',
+  'MCP_TOOL',
+  'MODEL_APPROVAL',
+  'MODEL_CATALOG',
+  'PRICE_SNAPSHOT',
+  'PROJECT',
+  'PROVIDER_PRODUCT',
+  'QUOTA_RULE',
+  'RECONCILIATION',
+  'SEAT',
+  'SERVICE',
+  'SESSION',
+  'SKILL',
+  'SUBSCRIPTION',
+  'TEAM',
+  'TENANT',
+  'UPSTREAM_CREDENTIAL',
+  'USER',
+  'VIRTUAL_KEY',
+  'WEBHOOK',
+];
+
+const targetTypeOptions = [
+  { value: '', label: '全部类型' },
+  ...TARGET_TYPES.map((type) => ({ value: type, label: type })),
+];
 
 const columns = [
   { key: 'chainPosition', title: '位置', width: '90px', align: 'right' as const },
@@ -30,13 +69,28 @@ const columns = [
   { key: 'changeSummary', title: '摘要', minWidth: '260px' },
 ];
 
+/** actorId must be UUID-shaped; an invalid value blocks the request with an inline hint. */
+function validActor(): boolean {
+  actorError.value = '';
+  const actor = actorFilter.value.trim();
+  if (actor && !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(actor)) {
+    actorError.value = '操作者必须是 UUID。';
+    return false;
+  }
+  return true;
+}
+
 async function load() {
+  if (!validActor()) {
+    return;
+  }
   loading.value = true;
   loadError.value = '';
   try {
     events.value = await api.auditEvents({
       action: actionFilter.value.trim() || undefined,
       targetType: targetTypeFilter.value.trim() || undefined,
+      actorId: actorFilter.value.trim() || undefined,
       from: toIso(fromFilter.value),
       to: toIso(toFilter.value),
     });
@@ -57,7 +111,25 @@ function toIso(local: string): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
+/** Quick windows: fill the datetime-local inputs with the trailing N days and query. */
+function applyRange(days: number) {
+  const now = new Date();
+  fromFilter.value = toLocalInput(new Date(now.getTime() - days * 24 * 3600 * 1000));
+  toFilter.value = toLocalInput(now);
+  void load();
+}
+
+function toLocalInput(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`;
+}
+
 async function exportCsv() {
+  if (!validActor()) {
+    return;
+  }
   exporting.value = true;
   exportNotice.value = '';
   exportIsError.value = false;
@@ -65,6 +137,7 @@ async function exportCsv() {
     const { csv, truncated } = await api.exportAuditCsv({
       action: actionFilter.value.trim() || undefined,
       targetType: targetTypeFilter.value.trim() || undefined,
+      actorId: actorFilter.value.trim() || undefined,
       from: toIso(fromFilter.value),
       to: toIso(toFilter.value),
     });
@@ -113,11 +186,17 @@ onMounted(load);
           width="200px"
           data-testid="audit-action-filter"
         />
-        <UiInput
+        <UiSelect
           v-model="targetTypeFilter"
-          placeholder="资源类型，如 MCP_SERVICE"
+          :options="targetTypeOptions"
           width="200px"
           data-testid="audit-targettype-filter"
+        />
+        <UiInput
+          v-model="actorFilter"
+          placeholder="操作者 UUID"
+          width="260px"
+          data-testid="audit-actor-filter"
         />
         <UiInput
           v-model="fromFilter"
@@ -126,6 +205,12 @@ onMounted(load);
           data-testid="audit-from"
         />
         <UiInput v-model="toFilter" type="datetime-local" width="200px" data-testid="audit-to" />
+        <UiButton variant="ghost" size="sm" data-testid="audit-range-7" @click="applyRange(7)"
+          >近 7 天</UiButton
+        >
+        <UiButton variant="ghost" size="sm" data-testid="audit-range-30" @click="applyRange(30)"
+          >近 30 天</UiButton
+        >
         <UiButton variant="primary" data-testid="audit-refresh" @click="load">查询</UiButton>
         <UiButton
           variant="secondary"
@@ -136,6 +221,7 @@ onMounted(load);
           导出 CSV
         </UiButton>
       </div>
+      <p v-if="actorError" class="ui-form-error" data-testid="audit-actor-error">{{ actorError }}</p>
       <div
         v-if="exportNotice"
         class="next-audit__notice"

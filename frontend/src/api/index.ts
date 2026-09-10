@@ -1066,12 +1066,11 @@ export interface AuditCsvExport {
  * at 50k rows and declares it via {@code X-MiQroKey-Truncated}; the caller
  * surfaces that instead of silently handing over an incomplete file.
  */
-export async function exportAuditCsv(
-  query: Omit<AuditQuery, 'size' | 'actorId'>,
-): Promise<AuditCsvExport> {
+export async function exportAuditCsv(query: Omit<AuditQuery, 'size'>): Promise<AuditCsvExport> {
   const params = new URLSearchParams();
   if (query.action) params.set('action', query.action);
   if (query.targetType) params.set('targetType', query.targetType);
+  if (query.actorId) params.set('actorId', query.actorId);
   if (query.from) params.set('from', query.from);
   if (query.to) params.set('to', query.to);
   const response = await fetch(`/api/v1/admin/audit-events/export?${params.toString()}`, {
