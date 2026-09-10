@@ -290,7 +290,16 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
      * or null when no policy row exists (everything disabled).
      */
     public record McpServerRecord(UUID id, UUID tenantId, String name, String endpoint, String transport, String status,
-            String aclMode, Set<UUID> serverConsumerIds, List<McpToolRecord> tools, McpResiliencePolicy resilience) {
+            String aclMode, Set<UUID> serverConsumerIds, List<McpToolRecord> tools, McpResiliencePolicy resilience,
+            String backendAuthMode, com.miqroera.miqrokey.domain.crypto.EncryptedSecret encryptedBackendSecret) {
+
+        /** Legacy constructor: no upstream backend credential (VISITOR). */
+        public McpServerRecord(UUID id, UUID tenantId, String name, String endpoint, String transport, String status,
+                String aclMode, Set<UUID> serverConsumerIds, List<McpToolRecord> tools,
+                McpResiliencePolicy resilience) {
+            this(id, tenantId, name, endpoint, transport, status, aclMode, serverConsumerIds, tools, resilience,
+                    "VISITOR", null);
+        }
 
         public McpServerRecord {
             serverConsumerIds = Set.copyOf(serverConsumerIds);

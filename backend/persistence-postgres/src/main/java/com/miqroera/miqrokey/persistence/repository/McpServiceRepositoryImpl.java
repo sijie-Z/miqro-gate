@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.persistence.repository;
 
+import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.model.McpService;
 import com.miqroera.miqrokey.domain.repository.McpServiceRepository;
 import org.springframework.jdbc.core.RowMapper;
@@ -24,7 +25,11 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
             rs.getInt("consecutive_failures"), rs.getInt("consecutive_successes"), rs.getInt("check_interval_seconds"),
             rs.getInt("check_timeout_seconds"), rs.getInt("fail_threshold"), rs.getInt("recover_threshold"),
             rs.getString("check_path"), rs.getLong("version"), (UUID) rs.getObject("created_by"),
-            rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
+            rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
+            rs.getString("backend_auth_mode"),
+            rs.getTimestamp("backend_secret_updated_at") != null
+                    ? rs.getTimestamp("backend_secret_updated_at").toInstant()
+                    : null);
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -89,6 +94,30 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
             throw new IllegalStateException("Optimistic lock failure: mcp service " + service.id());
         }
         return findByIdAndTenantId(service.id(), service.tenantId()).orElseThrow();
+    }
+
+    @Override
+    @Transactional
+    public McpService updateBackendAuth(UUID id, UUID tenantId, String mode, EncryptedSecret encryptedSecret) {
+        int rows = jdbc.update("""
+                UPDATE mcp_services
+                SET backend_auth_mode = :mode,
+                    backend_secret_ciphertext = :ciphertext,
+                    backend_secret_nonce = :nonce,
+                    backend_secret_key_version = :keyVersion,
+                    backend_secret_updated_at = :updatedAt,
+                    version = version + 1, updated_at = now()
+                WHERE id = :id AND tenant_id = :tenantId
+                """,
+                new MapSqlParameterSource("id", id).addValue("tenantId", tenantId).addValue("mode", mode)
+                        .addValue("ciphertext", encryptedSecret != null ? encryptedSecret.ciphertext() : null)
+                        .addValue("nonce", encryptedSecret != null ? encryptedSecret.nonce() : null)
+                        .addValue("keyVersion", encryptedSecret != null ? encryptedSecret.keyVersion() : null).addValue(
+                                "updatedAt", encryptedSecret != null ? Timestamp.from(java.time.Instant.now()) : null));
+        if (rows != 1) {
+            throw new IllegalStateException("MCP service not found for backend-auth update: " + id);
+        }
+        return findByIdAndTenantId(id, tenantId).orElseThrow();
     }
 
     private static MapSqlParameterSource params(McpService s) {
