@@ -5,6 +5,9 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **能力覆盖对照表（#336）**：docs/coverage-matrix.md 首版——腾讯 29 篇 + 阿里对照逐能力四态定级
+  （对等/部分/未做/不适用+理由），含「可立即实现（I 编号）/需裁决/需外部」清单与每-rc 刷新纪律；
+  feature-backlog 与 NEXT_SESSION_PLAN 增加指针（立项登记 vs 能力底账分工）。封堵"缺口等关键词才浮现"流程缺口。
 - **App.spec 并发 flake 修复（#332）**：全量 vitest 并发跑下 `App.spec` 登录视图用例间歇失败
   （懒加载路由组件 chunk 在 CPU 竞争下晚于 flushPromises 就绪，断言竞态）——改用 `vi.waitFor`
   条件等待，全量套件连跑 3 次稳定绿 163/163（未用 timeout/retry 掩盖）。
