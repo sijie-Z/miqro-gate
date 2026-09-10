@@ -103,6 +103,7 @@ public class McpProxyController {
     private final McpCircuitBreakerRegistry circuitRegistry;
     private final ObjectProvider<com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider> keyEncryptionProvider;
     private final Scheduler credentialDecryptScheduler;
+    private final Clock clock;
 
     public McpProxyController(RouteSnapshotProvider routeSnapshotProvider, WebClient proxyWebClient,
             ObjectMapper objectMapper, McpAccessLogSink accessLogSink, Clock clock,
@@ -115,6 +116,7 @@ public class McpProxyController {
         this.circuitRegistry = new McpCircuitBreakerRegistry(clock);
         this.keyEncryptionProvider = keyEncryptionProvider;
         this.credentialDecryptScheduler = credentialDecryptScheduler;
+        this.clock = clock;
     }
 
     @PostMapping("/mcpservers/{serviceName}/mcp")
@@ -122,6 +124,12 @@ public class McpProxyController {
         RouteSnapshot snapshot = routeSnapshotProvider.current();
         RouteSnapshot.ConsumerRecord consumer = authenticate(exchange.getRequest(), snapshot);
         if (consumer == null) {
+            return error(exchange.getResponse(), HttpStatus.UNAUTHORIZED, "invalid_api_key", "Unknown API key");
+        }
+        // Issue #322 expiry: at/after expires_at the credential is silently
+        // rejected (same 401 shape as an unknown key — no "used to be valid"
+        // oracle), checked against the injected clock.
+        if (consumer.expiredAt(clock.instant())) {
             return error(exchange.getResponse(), HttpStatus.UNAUTHORIZED, "invalid_api_key", "Unknown API key");
         }
         // Issue #316 channel scope: the MCP data plane requires mcp:call (null
