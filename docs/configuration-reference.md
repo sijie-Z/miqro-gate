@@ -135,6 +135,7 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_MAX_RESPONSE_BYTES` | `1048576` | 控制面 → 供应商单次响应体上限（G3.1）；超限中止交换 |
 | `MIQROKEY_ALERTS_EVALUATION_INTERVAL_MS` | `300000` | 告警规则评估固定延迟（G4.5，`@Scheduled`）；也控制投递重试扫描节奏 |
 | `MIQROKEY_ALERTS_ADMIN_KEY_EXPIRY_INTERVAL_MS` | `21600000` | 管理密钥到期扫描间隔（`miqrokey.alerts.admin-key-expiry-interval-ms`，6 小时）：有启用的 ADMIN_API_KEY_EXPIRING 规则时检查 ≤7 天到期密钥并产生事件（规则 opt-in，默认关） |
+| `MIQROKEY_ALERTS_CONSUMER_KEY_EXPIRY_INTERVAL_MS` | `21600000` | 消费者密钥到期扫描间隔（`miqrokey.alerts.consumer-key-expiry-interval-ms`，6 小时，镜像管理密钥先例）：有启用的 CONSUMER_KEY_EXPIRING 规则时检查 ≤7 天到期消费者并产生事件（规则 opt-in，默认关） |
 | `MIQROKEY_CLEANUP_EXPIRED_SWEEP_MS` | `3600000` | 过期记录 GC 固定延迟（F06，`@Scheduled`）：回收下载窗口已过的导出产物与确认窗口已过的删除请求（EXECUTED 删除记录与审计链永久保留，不入 GC） |
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_ALLOWED_CIDRS` | 空 | 控制面 → 供应商调用的 SSRF 门控 allowlist（G4.2）：命中这些 CIDR 的目标豁免「非公网地址」与「明文 http」两道拒绝（配额刷新对接本地/内网供应商网关时配置，如 `127.0.0.0/8`）；空 = 仅接受 https + 公网地址 |
 | `MIQROKEY_APPROVAL_WHITELIST_MODELS` | 空 | 模型审批白名单（逗号分隔的精确模型 ID）：用户申请命中白名单即自动批准并立即生效（写入授权 + 快照刷新），免管理员审批；空 = 全部模型走人工审批 |
