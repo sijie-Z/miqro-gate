@@ -72,4 +72,15 @@ class McpRetryPolicyTest {
         assertThat(McpRetryPolicy.isServerError(503)).isTrue();
         assertThat(McpRetryPolicy.isServerError(429)).isFalse();
     }
+
+    @Test
+    @DisplayName("SERVER_5XX retries only the documented retryable statuses (#365)")
+    void retryableStatusesNarrowed() {
+        for (int status : new int[]{500, 502, 503, 504}) {
+            assertThat(McpRetryPolicy.isServerError(status)).as("status " + status).isTrue();
+        }
+        for (int status : new int[]{501, 505, 429, 400, 404}) {
+            assertThat(McpRetryPolicy.isServerError(status)).as("status " + status).isFalse();
+        }
+    }
 }

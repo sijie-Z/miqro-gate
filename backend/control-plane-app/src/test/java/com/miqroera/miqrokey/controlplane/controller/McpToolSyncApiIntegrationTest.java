@@ -119,7 +119,10 @@ class McpToolSyncApiIntegrationTest {
                 .andExpect(status().isOk()).andReturn();
         serviceId = UUID.fromString(
                 objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString());
-        jdbc.update("UPDATE mcp_services SET endpoint = :endpoint WHERE id = :id",
+        // OFFLINE keeps the scheduled McpHealthChecker away from the loopback stub:
+        // its probes carry no Authorization header and would race the captured-header
+        // assertions; the sync endpoints ignore the service status.
+        jdbc.update("UPDATE mcp_services SET endpoint = :endpoint, status = 'OFFLINE' WHERE id = :id",
                 new MapSqlParameterSource("endpoint", "http://127.0.0.1:" + upstreamPort + "/mcp").addValue("id",
                         serviceId));
     }

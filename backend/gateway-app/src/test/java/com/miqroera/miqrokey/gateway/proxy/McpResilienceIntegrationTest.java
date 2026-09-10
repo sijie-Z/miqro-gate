@@ -104,6 +104,11 @@ class McpResilienceIntegrationTest {
                 10, 10, true, 50, Set.of(500), false, 3000, 80, 30, 3, 2, true, 0);
     }
 
+    private static McpResiliencePolicy breakerPolicySkipRetryOff() {
+        return new McpResiliencePolicy(false, 1, Set.of(), false, true, 60, 2, true, 50, Set.of(500), false, 3000, 80,
+                30, 3, 2, false, 0);
+    }
+
     private static McpResiliencePolicy breakerPolicy() {
         return new McpResiliencePolicy(false, 1, Set.of(), false, true, 60, 2, true, 50, Set.of(500), false, 3000, 80,
                 30, 3, 2, true, 0);
@@ -192,6 +197,25 @@ class McpResilienceIntegrationTest {
             assertThat(errorType(body)).isEqualTo("circuit_open");
             // Only the two real upstream attempts happened.
             assertThat(mockServer.capturedRequests()).hasSize(2);
+        }
+
+        @Test
+        @DisplayName("breakerSkipRetry=false keeps the breaker observing only: calls still reach the upstream")
+        void skipRetryOffOnlyObserves() {
+            install(Map.of(GatewayTestKeys.MCP_GATED_SERVICE, breakerPolicySkipRetryOff()));
+            mockServer.setResponse("{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-1},\"id\":1}", 500);
+            callGated(GatewayTestKeys.MCP_ALLOWED.presentedKey(), GatewayTestKeys.MCP_TOOL_SHARED,
+                    envelope("tools/call", GatewayTestKeys.MCP_TOOL_SHARED)).expectStatus().isEqualTo(500);
+            callGated(GatewayTestKeys.MCP_ALLOWED.presentedKey(), GatewayTestKeys.MCP_TOOL_SHARED,
+                    envelope("tools/call", GatewayTestKeys.MCP_TOOL_SHARED)).expectStatus().isEqualTo(500);
+
+            // The bucket would be OPEN now (minRequests=2, ratio=50); with the flag
+            // off the call still goes upstream instead of fast-failing.
+            mockServer.setResponse("{\"jsonrpc\":\"2.0\",\"result\":{\"ok\":true},\"id\":1}", 200);
+            callGated(GatewayTestKeys.MCP_ALLOWED.presentedKey(), GatewayTestKeys.MCP_TOOL_SHARED,
+                    envelope("tools/call", GatewayTestKeys.MCP_TOOL_SHARED)).expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(3);
         }
 
         @Test
