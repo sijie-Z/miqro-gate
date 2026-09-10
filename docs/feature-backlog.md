@@ -35,6 +35,8 @@
 
 | F65 | 消费者密钥到期治理（expires_at + 双面静默强制 + CONSUMER_KEY_EXPIRING 提醒） | #316 备注 follow-up；管理密钥先例 V32/V36 | 清晰 | DONE（2026-09-10，#322） | 无 | V39 加列；创建可选到期；仓储层 `expires_at > now()` + 网关快照 `expiredAt(clock)` 双面 401；提醒事件镜像 V36；前端到期列/表单/规则选项 |
 
+| F66 | 审计覆盖第二批（告警规则/Webhook/预算/全局配置/模型目录人工维护 + F60 机器面归属） | #315 follow-up；domain-model §7 | 清晰 | DONE（2026-09-10，#324） | 无 | 五族 12 事件 + AuditContext（机器面 actor=发行管理员、via 标记）；secret/config value 红线断言 |
+
 ## B 组 · MCP 运行时护栏（腾讯 A 类研究建议，方向明确）
 
 | ID | 功能 | 出处 | 清晰度 | 状态 | 前置/依赖 | 架子与要点 |

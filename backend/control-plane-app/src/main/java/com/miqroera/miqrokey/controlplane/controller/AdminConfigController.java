@@ -2,11 +2,14 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminConfigService;
+import com.miqroera.miqrokey.controlplane.service.AuditContext;
+
 import com.miqroera.miqrokey.domain.model.ConfigEntry;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,6 +21,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Global configuration center (P3.3, api-contract §5.15): grouped key-value
@@ -43,19 +47,25 @@ public class AdminConfigController {
 
     /** Creates or updates the (group, key) entry in place. */
     @PutMapping
-    public ConfigEntry put(@Valid @RequestBody PutRequest body) {
+    public ConfigEntry put(@Valid @RequestBody PutRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
-        return configService.put(user.tenantId(), user.id(), body.group(), body.key(), body.value(),
-                body.description());
+        return configService.put(user.tenantId(), user.id(), body.group(), body.key(), body.value(), body.description(),
+                AuditContext.human(user.id(), requestId(httpReq)));
     }
 
     @DeleteMapping("/{group}/{key}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable String group, @PathVariable String key) {
-        configService.delete(userContext.getUser().tenantId(), group, key);
+    public void delete(@PathVariable String group, @PathVariable String key, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        configService.delete(user.tenantId(), group, key, AuditContext.human(user.id(), requestId(httpReq)));
     }
 
     public record PutRequest(@NotBlank @Size(max = 64) String group, @NotBlank @Size(max = 128) String key,
             @NotBlank String value, @Size(max = 500) String description) {
     }
+    private static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
+    }
+
 }

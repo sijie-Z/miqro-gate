@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
 import com.miqroera.miqrokey.domain.repository.QuotaRuleRepository;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -31,16 +32,18 @@ public class AlertRuleService {
     private final NamedParameterJdbcTemplate jdbc;
     private final ProjectRepository projectRepository;
     private final QuotaRuleRepository quotaRuleRepository;
+    private final AuditService auditService;
 
     public AlertRuleService(NamedParameterJdbcTemplate jdbc, ProjectRepository projectRepository,
-            QuotaRuleRepository quotaRuleRepository) {
+            QuotaRuleRepository quotaRuleRepository, AuditService auditService) {
         this.jdbc = jdbc;
         this.projectRepository = projectRepository;
         this.quotaRuleRepository = quotaRuleRepository;
+        this.auditService = auditService;
     }
 
     public AlertRule create(UUID tenantId, String name, String type, BigDecimal threshold, int dedupeMinutes,
-            UUID webhookEndpointId, String scopeJson) {
+            UUID webhookEndpointId, String scopeJson, AuditContext context) {
         validateType(type);
         validateScope(tenantId, type, scopeJson);
         UUID id = UUID.randomUUID();
@@ -53,7 +56,11 @@ public class AlertRuleService {
                 """,
                 new MapSqlParameterSource("id", id).addValue("tenantId", tenantId).addValue("name", name)
                         .addValue("type", type).addValue("scopeJson", scopeJson).addValue("threshold", threshold)
-                        .addValue("dedupeMinutes", dedupeMinutes).addValue("webhookEndpointId", webhookEndpointId));
+                        .addValue("threshold", threshold).addValue("dedupeMinutes", dedupeMinutes)
+                        .addValue("webhookEndpointId", webhookEndpointId));
+        auditService.record(tenantId, context.actorId(), "ALERT_RULE_CREATE", "ALERT_RULE", id,
+                AuditSummaries.summary(context, "name", AuditSummaries.sanitize(name), "type", type),
+                context.requestId());
         return get(tenantId, id);
     }
 
@@ -72,7 +79,7 @@ public class AlertRuleService {
     }
 
     public AlertRule update(UUID tenantId, UUID ruleId, String name, BigDecimal threshold, Integer dedupeMinutes,
-            Boolean enabled, UUID webhookEndpointId, String scopeJson) {
+            Boolean enabled, UUID webhookEndpointId, String scopeJson, AuditContext context) {
         AlertRule existing = get(tenantId, ruleId);
         String newScope = scopeJson != null ? scopeJson : existing.scopeJson();
         validateScope(tenantId, existing.type(), newScope);
@@ -90,13 +97,21 @@ public class AlertRuleService {
                         .addValue("webhookEndpointId",
                                 webhookEndpointId != null ? webhookEndpointId : existing.webhookEndpointId())
                         .addValue("scopeJson", newScope).addValue("id", ruleId).addValue("tenantId", tenantId));
-        return get(tenantId, ruleId);
+        AlertRule updated = get(tenantId, ruleId);
+        auditService.record(tenantId, context.actorId(), "ALERT_RULE_UPDATE", "ALERT_RULE", ruleId, AuditSummaries
+                .summary(context, "name", AuditSummaries.sanitize(updated.name()), "type", updated.type()),
+                context.requestId());
+        return updated;
     }
 
-    public void delete(UUID tenantId, UUID ruleId) {
-        get(tenantId, ruleId);
+    public void delete(UUID tenantId, UUID ruleId, AuditContext context) {
+        AlertRule existing = get(tenantId, ruleId);
         jdbc.update("DELETE FROM alert_rules WHERE id = :id AND tenant_id = :tenantId",
                 new MapSqlParameterSource("id", ruleId).addValue("tenantId", tenantId));
+        auditService.record(
+                tenantId, context.actorId(), "ALERT_RULE_DELETE", "ALERT_RULE", ruleId, AuditSummaries.summary(context,
+                        "name", AuditSummaries.sanitize(existing.name()), "type", existing.type()),
+                context.requestId());
     }
 
     private static void validateType(String type) {

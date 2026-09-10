@@ -3,6 +3,8 @@ package com.miqroera.miqrokey.controlplane.controller;
 import com.miqroera.miqrokey.controlplane.dto.BudgetView;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminBudgetService;
+import com.miqroera.miqrokey.controlplane.service.AuditContext;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -11,6 +13,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import org.springframework.http.HttpStatus;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -56,15 +59,20 @@ public class AdminBudgetController {
 
     /** Creates or updates the (project, month) budget in place. */
     @PutMapping("/projects/{projectId}/budget")
-    public BudgetView put(@PathVariable UUID projectId, @Valid @RequestBody PutBudgetRequest body) {
-        return budgetService.put(userContext.getUser().tenantId(), projectId, body.month(), body.amount(),
-                body.currency(), body.alertThresholdPct());
+    public BudgetView put(@PathVariable UUID projectId, @Valid @RequestBody PutBudgetRequest body,
+            HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return budgetService.put(user.tenantId(), projectId, body.month(), body.amount(), body.currency(),
+                body.alertThresholdPct(), AuditContext.human(user.id(), requestId(httpReq)));
     }
 
     @DeleteMapping("/projects/{projectId}/budget")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable UUID projectId, @RequestParam(required = false) String month) {
-        budgetService.delete(userContext.getUser().tenantId(), projectId, month != null ? month : currentMonth());
+    public void delete(@PathVariable UUID projectId, @RequestParam(required = false) String month,
+            HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        budgetService.delete(user.tenantId(), projectId, month != null ? month : currentMonth(),
+                AuditContext.human(user.id(), requestId(httpReq)));
     }
 
     private static String currentMonth() {
@@ -77,4 +85,9 @@ public class AdminBudgetController {
             @Pattern(regexp = "[A-Za-z]{3}") String currency,
             @DecimalMin(value = "0.01") @DecimalMax(value = "100.00") BigDecimal alertThresholdPct) {
     }
+    private static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
+    }
+
 }

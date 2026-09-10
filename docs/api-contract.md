@@ -380,6 +380,12 @@
 `MCP_TOOL_CREATE/IMPORT/STATUS/REVISION_PUBLISH/REVISION_ACTIVATE`、`SKILL_UPLOAD/ARCHIVE/ACCESS`
 （targetType 与 action 前缀同名；摘要只含名称/状态/计数类元数据，永不含明文密钥、PEM 或包体）。
 
+审计覆盖第二批（#324）：`ALERT_RULE_CREATE/UPDATE/DELETE`、`WEBHOOK_CREATE/UPDATE/DELETE`（摘要含
+name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projectId/month/amount）、`CONFIG_PUT/DELETE`
+（group/key，**value 永不入摘要**）、`MODEL_CATALOG_ADD/DELETE_MANUAL`（productId/modelId）。
+**机器面归属（#324）**：开放管理 API 调用同一服务时，actor=发行管理员，摘要附 `via: admin-api:<密钥名>`
+（F60 先例的 `adminApiKeyIssuerId`/`adminApiKeyName` 请求属性）；人类会话 actor=操作用户。
+
 ### 5.0b 供应商产品与 Plan（G5.3）
 
 | 方法与路径 | 用途 |

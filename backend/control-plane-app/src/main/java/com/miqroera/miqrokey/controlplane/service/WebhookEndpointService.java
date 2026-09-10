@@ -4,6 +4,7 @@ import com.miqroera.miqrokey.controlplane.client.UpstreamTargetPin;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
 import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -38,14 +39,18 @@ public class WebhookEndpointService {
     private final KeyEncryptionProvider keyEncryptionProvider;
     private final UpstreamTargetValidator targetValidator;
 
+    private final AuditService auditService;
+
     public WebhookEndpointService(NamedParameterJdbcTemplate jdbc, KeyEncryptionProvider keyEncryptionProvider,
-            UpstreamTargetValidator controlPlaneTargetValidator) {
+            UpstreamTargetValidator controlPlaneTargetValidator, AuditService auditService) {
         this.jdbc = jdbc;
         this.keyEncryptionProvider = keyEncryptionProvider;
         this.targetValidator = controlPlaneTargetValidator;
+        this.auditService = auditService;
     }
 
-    public WebhookEndpointView create(UUID tenantId, String name, String url, String secret, int timeoutMs) {
+    public WebhookEndpointView create(UUID tenantId, String name, String url, String secret, int timeoutMs,
+            AuditContext context) {
         validateUrl(url);
         UUID id = UUID.randomUUID();
         // AAD binds the ciphertext to (tenant, endpoint) — the same ids used
@@ -60,6 +65,9 @@ public class WebhookEndpointService {
                 """, new MapSqlParameterSource("id", id).addValue("tenantId", tenantId).addValue("name", name)
                 .addValue("url", url).addValue("encrypted", encrypted.ciphertext()).addValue("nonce", encrypted.nonce())
                 .addValue("keyVersion", encrypted.keyVersion()).addValue("timeoutMs", timeoutMs));
+        auditService.record(tenantId, context.actorId(), "WEBHOOK_CREATE", "WEBHOOK", id,
+                AuditSummaries.summary(context, "name", AuditSummaries.sanitize(name), "host", hostOf(url)),
+                context.requestId());
         return view(get(tenantId, id));
     }
 
@@ -86,7 +94,8 @@ public class WebhookEndpointService {
     }
 
     @Transactional
-    public WebhookEndpoint update(UUID tenantId, UUID endpointId, String name, Boolean enabled, Integer timeoutMs) {
+    public WebhookEndpoint update(UUID tenantId, UUID endpointId, String name, Boolean enabled, Integer timeoutMs,
+            AuditContext context) {
         WebhookEndpoint existing = get(tenantId, endpointId);
         jdbc.update("""
                 UPDATE webhook_endpoints
@@ -98,21 +107,41 @@ public class WebhookEndpointService {
                         .addValue("enabled", enabled != null ? enabled : existing.enabled())
                         .addValue("timeoutMs", timeoutMs != null ? timeoutMs : existing.timeoutMs())
                         .addValue("id", endpointId).addValue("tenantId", tenantId));
-        return get(tenantId, endpointId);
+        WebhookEndpoint updated = get(tenantId, endpointId);
+        auditService.record(
+                tenantId, context.actorId(), "WEBHOOK_UPDATE", "WEBHOOK", endpointId, AuditSummaries.summary(context,
+                        "name", AuditSummaries.sanitize(updated.name()), "host", hostOf(updated.url())),
+                context.requestId());
+        return updated;
     }
 
     /** Update returning the safe view. */
     @Transactional
     public WebhookEndpointView updateView(UUID tenantId, UUID endpointId, String name, Boolean enabled,
-            Integer timeoutMs) {
-        return view(update(tenantId, endpointId, name, enabled, timeoutMs));
+            Integer timeoutMs, AuditContext context) {
+        return view(update(tenantId, endpointId, name, enabled, timeoutMs, context));
     }
 
     @Transactional
-    public void delete(UUID tenantId, UUID endpointId) {
-        get(tenantId, endpointId);
+    public void delete(UUID tenantId, UUID endpointId, AuditContext context) {
+        WebhookEndpoint existing = get(tenantId, endpointId);
         jdbc.update("DELETE FROM webhook_endpoints WHERE id = :id AND tenant_id = :tenantId",
                 new MapSqlParameterSource("id", endpointId).addValue("tenantId", tenantId));
+        auditService.record(
+                tenantId, context.actorId(), "WEBHOOK_DELETE", "WEBHOOK", endpointId, AuditSummaries.summary(context,
+                        "name", AuditSummaries.sanitize(existing.name()), "host", hostOf(existing.url())),
+                context.requestId());
+    }
+
+    /**
+     * Host-only extraction: the summary must never carry userinfo or query parts.
+     */
+    private static String hostOf(String url) {
+        try {
+            return java.net.URI.create(url).getHost();
+        } catch (Exception e) {
+            return "invalid";
+        }
     }
 
     /** Sends a signed test payload and reports the upstream HTTP status. */

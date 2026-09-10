@@ -50,13 +50,15 @@ class ModelCatalogServiceTest {
     ProviderClient client;
     @Mock
     ProviderProductAdapter adapter;
+    @Mock
+    com.miqroera.miqrokey.domain.service.AuditService auditService;
 
     private final UUID productId = UUID.randomUUID();
     private ModelCatalogService service;
 
     @BeforeEach
     void setUp() {
-        service = new ModelCatalogService(jdbc, publisher, () -> service);
+        service = new ModelCatalogService(jdbc, publisher, () -> service, auditService);
     }
 
     @Test
