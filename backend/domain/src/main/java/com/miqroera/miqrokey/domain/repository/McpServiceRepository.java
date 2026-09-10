@@ -32,4 +32,11 @@ public interface McpServiceRepository {
      * ciphertext). Bumps the version; the plaintext never passes through here.
      */
     McpService updateBackendAuth(UUID id, UUID tenantId, String mode, EncryptedSecret encryptedSecret);
+
+    /**
+     * The encrypted upstream credential (#320) for server-side use only (tool sync;
+     * the gateway reads it through its own snapshot); never serialized into admin
+     * responses.
+     */
+    Optional<EncryptedSecret> findBackendSecret(UUID id, UUID tenantId);
 }

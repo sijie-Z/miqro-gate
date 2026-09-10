@@ -1,5 +1,7 @@
 package com.miqroera.miqrokey.controlplane.service;
 
+import com.miqroera.miqrokey.controlplane.service.McpToolsListClient.UpstreamTool;
+
 import com.miqroera.miqrokey.domain.model.McpTool;
 import com.miqroera.miqrokey.domain.model.McpToolRevision;
 import com.miqroera.miqrokey.domain.repository.McpServiceRepository;
@@ -12,7 +14,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -29,15 +33,17 @@ public class AdminMcpToolService {
     private final McpToolRepository toolRepository;
     private final McpServiceRepository serviceRepository;
     private final McpToolRevisionRepository revisionRepository;
+    private final McpToolRevisionService revisionService;
     private final RouteRefreshPublisher routeRefreshPublisher;
     private final AuditService auditService;
 
     public AdminMcpToolService(McpToolRepository toolRepository, McpServiceRepository serviceRepository,
-            McpToolRevisionRepository revisionRepository, RouteRefreshPublisher routeRefreshPublisher,
-            AuditService auditService) {
+            McpToolRevisionRepository revisionRepository, McpToolRevisionService revisionService,
+            RouteRefreshPublisher routeRefreshPublisher, AuditService auditService) {
         this.toolRepository = toolRepository;
         this.serviceRepository = serviceRepository;
         this.revisionRepository = revisionRepository;
+        this.revisionService = revisionService;
         this.routeRefreshPublisher = routeRefreshPublisher;
         this.auditService = auditService;
     }
@@ -123,6 +129,51 @@ public class AdminMcpToolService {
     }
 
     public record ImportReport(List<McpTool> created, List<ImportSkip> skipped) {
+    }
+
+    /**
+     * Applies a tools/list sync plan (issue #344): registers added tools with their
+     * baseline revision, refreshes changed descriptions through the next revision
+     * (F16), and reports upstream-absent tools without touching them. Runs in one
+     * transaction — the upstream call happened before this point, so any failure
+     * here rolls the whole batch back without partial rows.
+     */
+    @Transactional
+    public Map<String, Object> applySync(UUID tenantId, UUID adminId, UUID mcpServiceId, List<UpstreamTool> upstream,
+            String requestId) {
+        requireService(tenantId, mcpServiceId);
+        List<McpTool> existing = toolRepository.findAllByService(tenantId, mcpServiceId);
+        McpToolSyncService.Diff diff = McpToolSyncService.classify(existing, upstream);
+        Instant now = Instant.now();
+        for (UpstreamTool spec : diff.addedSpecs()) {
+            McpTool tool = new McpTool(UUID.randomUUID(), tenantId, mcpServiceId, spec.name(), spec.description(),
+                    McpToolSyncService.SYNCED_METHOD, McpToolSyncService.SYNCED_PATH, "ENABLED", 0, adminId, now, now);
+            try {
+                toolRepository.insert(tool);
+            } catch (DuplicateKeyException e) {
+                // Another writer raced the same tool name; fail the batch, nothing partial.
+                throw new ApiException(HttpStatus.CONFLICT, "TOOLS_SYNC_CONFLICT", "并发同步冲突，请重试。");
+            }
+            revisionRepository.insert(new McpToolRevision(UUID.randomUUID(), tenantId, tool.id(), 1, tool.description(),
+                    tool.method(), tool.path(), adminId, now, now));
+        }
+        Map<String, String> upstreamDescription = new HashMap<>();
+        for (UpstreamTool spec : upstream) {
+            upstreamDescription.put(spec.name(), spec.description());
+        }
+        for (McpTool tool : diff.updatedTools()) {
+            revisionService.publishSyncDescription(tenantId, adminId, tool.id(),
+                    upstreamDescription.get(tool.toolName()));
+        }
+        if (!diff.addedSpecs().isEmpty() || !diff.updatedTools().isEmpty()) {
+            routeRefreshPublisher.publishChanged();
+        }
+        auditService.record(tenantId, adminId, "MCP_TOOLS_SYNCED", "MCP_SERVICE", mcpServiceId,
+                AuditSummaries.summary("upstream", upstream.size(), "added", diff.addedSpecs().size(), "updated",
+                        diff.updatedTools().size(), "absentUpstream", diff.absentUpstream().size(), "skipped",
+                        diff.skipped().size()),
+                requestId);
+        return McpToolSyncService.report(false, upstream.size(), diff);
     }
 
     public record ImportSkip(String toolName, String reason) {

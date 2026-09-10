@@ -5,6 +5,12 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **MCP Tools 自动同步（#344，I3）**：`POST /api/v1/admin/mcp-services/{id}/tools/sync?dryRun=`——上游 `tools/list`
+  差量合并：新增工具（占位 `POST /` + 基线修订 1）、描述变化经 F16 发布下一修订（激活并镜像）、上游缺失仅报告
+  `absentUpstream`（不自动禁用/删除）；逐项报告 added/updated/unchanged/absent/skipped；`dryRun` 预览零写入零审计；
+  `API_KEY` 后端注入解密 Bearer（fail-closed、用后清零）；2MB/1000 工具/30s 守卫；审计 `MCP_TOOLS_SYNCED`。
+  前端 MCP 服务 Tools 对话框「同步 Tools」→ 预览 → 确认应用。验证：客户端单测 7、同步服务单测 9、集成 8
+  （新增/幂等/修订发布/缺失只报/dryRun/脱敏 502/Bearer 注入/404）；OpenAPI 基线再生（无破坏）+ gen:types。
 - **账单对账前端页（#342，I2）**：新增「账单对账」管理页（运营分组）——报告列表（新→旧，状态 / 四态计数 /
   金额差）、canonical JSONL/.gz 上传（16MB 预检、gzip 魔数提示、202 后自动轮询到终态）、报告详情（汇总卡 +
   四态明细按 verdict 过滤 + 游标「加载更多」+ 失败原因展示）。后端配套 `GET /api/v1/admin/reconciliations?limit=`

@@ -714,6 +714,23 @@ export function adminListMcpTools(serviceId: string): Promise<McpToolView[]> {
   return get<McpToolView[]>(`/api/v1/admin/mcp-services/${serviceId}/tools`);
 }
 
+/** Tools/list sync report (#344, doc 03): per-item diff, previewed or applied. */
+export interface McpToolSyncReport {
+  dryRun: boolean;
+  upstreamToolCount: number;
+  added: string[];
+  updated: string[];
+  unchanged: number;
+  absentUpstream: string[];
+  skipped: Array<{ toolName: string; reason: string }>;
+}
+
+export function adminSyncMcpTools(serviceId: string, dryRun = false): Promise<McpToolSyncReport> {
+  return post<McpToolSyncReport>(
+    `/api/v1/admin/mcp-services/${serviceId}/tools/sync?dryRun=${dryRun}`,
+  );
+}
+
 export function adminCreateMcpTool(
   serviceId: string,
   body: { toolName: string; description?: string; method?: string; path: string },

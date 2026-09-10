@@ -145,6 +145,11 @@ const tools = ref<McpToolView[]>([]);
 const toolsLoading = ref(false);
 const toolsError = ref('');
 
+// Tools/list sync (doc 03, #344): dry-run preview, then apply on confirm
+const syncReport = ref<api.McpToolSyncReport | null>(null);
+const syncBusy = ref(false);
+const syncError = ref('');
+
 // F16 revision history / rollback drawer
 const revisionsTool = ref<McpToolView | null>(null);
 const revisionsVisible = ref(false);
@@ -349,6 +354,9 @@ async function openTools(service: McpServiceView) {
   toolCreating.value = false;
   toolsVisible.value = true;
   toolsLoading.value = true;
+  syncReport.value = null;
+  syncError.value = '';
+  syncBusy.value = false;
   try {
     tools.value = await api.adminListMcpTools(service.id!);
   } catch (error) {
@@ -363,6 +371,38 @@ async function refreshTools() {
     return;
   }
   tools.value = await api.adminListMcpTools(toolsService.value.id!);
+}
+
+async function previewToolSync() {
+  if (!toolsService.value) {
+    return;
+  }
+  syncBusy.value = true;
+  syncError.value = '';
+  try {
+    syncReport.value = await api.adminSyncMcpTools(toolsService.value.id!, true);
+  } catch (error) {
+    syncError.value = errorText(error, '同步预览失败。');
+  } finally {
+    syncBusy.value = false;
+  }
+}
+
+async function applyToolSync() {
+  if (!toolsService.value) {
+    return;
+  }
+  syncBusy.value = true;
+  syncError.value = '';
+  try {
+    syncReport.value = await api.adminSyncMcpTools(toolsService.value.id!, false);
+    toast.success('工具清单已同步');
+    await refreshTools();
+  } catch (error) {
+    syncError.value = errorText(error, '同步失败。');
+  } finally {
+    syncBusy.value = false;
+  }
 }
 
 async function createTool() {
@@ -1357,6 +1397,14 @@ async function saveResilience() {
             @click="openImportDialog"
             >OpenAPI 导入</UiButton
           >
+          <UiButton
+            variant="secondary"
+            size="sm"
+            :loading="syncBusy"
+            data-testid="mcp-tool-sync"
+            @click="previewToolSync"
+            >同步 Tools</UiButton
+          >
           <div
             v-if="toolCreating"
             class="next-mcp__tool-create-form"
@@ -1397,6 +1445,43 @@ async function saveResilience() {
                 >创建</UiButton
               >
             </div>
+          </div>
+        </div>
+        <div v-if="syncError" class="ui-alert ui-alert--error" data-testid="mcp-tool-sync-error">
+          {{ syncError }}
+        </div>
+        <div v-if="syncReport" class="next-mcp__sync-report" data-testid="mcp-tool-sync-report">
+          <p class="ui-panel-sub">
+            上游 {{ syncReport.upstreamToolCount }} 个工具 · 新增 {{ syncReport.added.length }} · 更新
+            {{ syncReport.updated.length }} · 未变 {{ syncReport.unchanged
+            }}<template v-if="syncReport.dryRun">（预览，未写入）</template>
+          </p>
+          <p v-if="syncReport.added.length" class="next-mcp__sync-line">
+            新增：<span class="ui-mono">{{ syncReport.added.join('、') }}</span>
+          </p>
+          <p v-if="syncReport.updated.length" class="next-mcp__sync-line">
+            更新（描述）：<span class="ui-mono">{{ syncReport.updated.join('、') }}</span>
+          </p>
+          <p v-if="syncReport.absentUpstream.length" class="next-mcp__sync-line">
+            上游未返回（未改动）：<span class="ui-mono">{{ syncReport.absentUpstream.join('、') }}</span>
+          </p>
+          <p v-if="syncReport.skipped.length" class="next-mcp__sync-line">
+            跳过：<span class="ui-mono">{{
+              syncReport.skipped.map((entry) => `${entry.toolName || '—'}（${entry.reason}）`).join('；')
+            }}</span>
+          </p>
+          <div
+            v-if="syncReport.dryRun && (syncReport.added.length || syncReport.updated.length)"
+            class="next-mcp__actions"
+          >
+            <UiButton
+              variant="primary"
+              size="sm"
+              :loading="syncBusy"
+              data-testid="mcp-tool-sync-apply"
+              @click="applyToolSync"
+              >确认应用</UiButton
+            >
           </div>
         </div>
       </template>
@@ -2753,5 +2838,20 @@ async function saveResilience() {
   gap: var(--ui-space-2);
   font-size: var(--ui-font-size-sm);
   cursor: pointer;
+}
+
+.next-mcp__sync-report {
+  margin-top: var(--ui-space-3);
+  padding: var(--ui-space-3) var(--ui-space-4);
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border-muted);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-sm);
+}
+
+.next-mcp__sync-line {
+  margin: var(--ui-space-1) 0 0;
+  color: var(--ui-foreground-secondary);
+  word-break: break-word;
 }
 </style>

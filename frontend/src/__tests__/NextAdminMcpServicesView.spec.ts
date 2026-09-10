@@ -14,6 +14,7 @@ vi.mock('@/api', () => ({
   adminSetMcpStatus: vi.fn(),
   adminUpdateMcpHealthConfig: vi.fn(),
   adminListMcpTools: vi.fn(),
+  adminSyncMcpTools: vi.fn(),
   adminCreateMcpTool: vi.fn(),
   adminSetMcpToolStatus: vi.fn(),
   adminListToolRevisions: vi.fn(),
@@ -771,5 +772,43 @@ describe('NextAdminMcpServicesView', () => {
     expect(result, 'import result should render').toBeTruthy();
     expect(result!.textContent).toContain('新建 1');
     expect(result!.textContent).toContain('TRACE');
+  });
+
+  it('previews the upstream tools/list sync and applies it on confirm', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminListMcpTools.mockResolvedValue([]);
+    const preview = {
+      dryRun: true,
+      upstreamToolCount: 2,
+      added: ['alpha', 'beta'],
+      updated: [],
+      unchanged: 0,
+      absentUpstream: [],
+      skipped: [],
+    };
+    mockApi.adminSyncMcpTools
+      .mockResolvedValueOnce(preview)
+      .mockResolvedValueOnce({ ...preview, dryRun: false });
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="mcp-tools"]').trigger('click');
+    await flushPromises();
+
+    (document.querySelector('[data-testid="mcp-tool-sync"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(mockApi.adminSyncMcpTools).toHaveBeenCalledWith('m1', true);
+    const report = document.querySelector('[data-testid="mcp-tool-sync-report"]');
+    expect(report, 'sync report should render').toBeTruthy();
+    expect(report!.textContent).toContain('alpha');
+    expect(report!.textContent).toContain('预览');
+
+    (document.querySelector('[data-testid="mcp-tool-sync-apply"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(mockApi.adminSyncMcpTools).toHaveBeenLastCalledWith('m1', false);
+    expect(mockApi.adminListMcpTools).toHaveBeenCalledTimes(2);
+    expect(
+      document.querySelector('[data-testid="mcp-tool-sync-apply"]'),
+      'apply button hides after the preview turns into an applied report',
+    ).toBeNull();
   });
 });

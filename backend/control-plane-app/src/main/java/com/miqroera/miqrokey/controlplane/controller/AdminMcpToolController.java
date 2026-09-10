@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminMcpToolService;
 import com.miqroera.miqrokey.controlplane.service.McpToolRevisionService;
+import com.miqroera.miqrokey.controlplane.service.McpToolSyncService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.miqroera.miqrokey.domain.model.McpTool;
 import com.miqroera.miqrokey.domain.model.McpToolRevision;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -35,12 +37,14 @@ public class AdminMcpToolController {
 
     private final AdminMcpToolService toolService;
     private final McpToolRevisionService revisionService;
+    private final McpToolSyncService toolSyncService;
     private final UserContext userContext;
 
     public AdminMcpToolController(AdminMcpToolService toolService, McpToolRevisionService revisionService,
-            UserContext userContext) {
+            McpToolSyncService toolSyncService, UserContext userContext) {
         this.toolService = toolService;
         this.revisionService = revisionService;
+        this.toolSyncService = toolSyncService;
         this.userContext = userContext;
     }
 
@@ -73,6 +77,19 @@ public class AdminMcpToolController {
     }
 
     /** Individual enable/disable of a tool. */
+    /**
+     * Syncs the tool list from the upstream {@code tools/list} (issue #344, raw doc
+     * 03); {@code dryRun=true} returns the per-item diff without writing.
+     */
+    @PostMapping("/sync")
+    public Map<String, Object> syncTools(@PathVariable UUID serviceId,
+            @RequestParam(defaultValue = "false") boolean dryRun, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        String requestId = httpReq.getHeader("X-Request-Id");
+        return toolSyncService.sync(user.tenantId(), user.id(), serviceId, dryRun,
+                requestId != null && !requestId.isBlank() ? requestId : UUID.randomUUID().toString());
+    }
+
     @PostMapping("/{toolId}/status")
     public McpTool setStatus(@PathVariable UUID serviceId, @PathVariable UUID toolId,
             @RequestParam("status") String status, HttpServletRequest httpReq) {
