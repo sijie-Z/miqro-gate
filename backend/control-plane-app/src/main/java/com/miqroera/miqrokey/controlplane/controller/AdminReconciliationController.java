@@ -21,9 +21,9 @@ import java.util.UUID;
 
 /**
  * Bill reconciliation (issue #334, F19 contract draft v0): canonical JSONL
- * upload creates an async four-state report; metadata and detail rows are
- * read-only. SYSTEM_ADMIN-only via the deny-by-default {@code /api/v1/admin/**}
- * interceptor.
+ * upload creates an async four-state report; the report list, metadata and
+ * detail rows are read-only. SYSTEM_ADMIN-only via the deny-by-default
+ * {@code /api/v1/admin/**} interceptor.
  */
 @RestController
 @RequestMapping("/api/v1/admin/reconciliations")
@@ -48,6 +48,12 @@ public class AdminReconciliationController {
                 AuditContext.human(user.id(), requestId(httpReq)), providerCode, currency, windowFrom, windowTo,
                 body == null ? new byte[0] : body);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(report);
+    }
+
+    /** Tenant reports, newest first; limit 1..100 (default 20). */
+    @GetMapping
+    public Map<String, Object> list(@RequestParam(defaultValue = "20") int limit) {
+        return reconciliationService.list(userContext.getUser().tenantId(), limit);
     }
 
     @GetMapping("/{reportId}")

@@ -1058,3 +1058,75 @@ export async function exportAuditCsv(
     truncated: response.headers.get('X-MiQroKey-Truncated') === 'true',
   };
 }
+
+// ---------------------------------------------------------------------------
+// Bill reconciliation (F19, coverage-matrix I2). The endpoints return Maps, so
+// the DTOs live here next to their clients (same pattern as ApiConsumerActivity).
+// ---------------------------------------------------------------------------
+
+export type ReconciliationStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+export type ReconciliationVerdict =
+  | 'MATCHED'
+  | 'PARTIAL'
+  | 'UNMATCHED_PROVIDER'
+  | 'UNMATCHED_LOCAL';
+
+/** Report metadata view; identical shape for create, list entries and GET /{id}. */
+export interface ReconciliationReport {
+  id: string;
+  providerCode: string;
+  currency: string;
+  windowFrom: string;
+  windowTo: string;
+  status: ReconciliationStatus;
+  uploadSha256?: string | null;
+  uploadBytes?: number | null;
+  totalRows?: number | null;
+  matched?: number | null;
+  partialBuckets?: number | null;
+  unmatchedProvider?: number | null;
+  unmatchedLocal?: number | null;
+  lineErrorCount?: number | null;
+  amountDiff?: string | null;
+  errorMessage?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+  finishedAt?: string | null;
+}
+
+/** One four-state detail row; `detail` carries per-verdict context fields. */
+export interface ReconciliationRow {
+  rowNo: number;
+  verdict: ReconciliationVerdict;
+  matchedBy?: string | null;
+  providerRowRef?: string | null;
+  localRef?: string | null;
+  detail?: Record<string, unknown> | null;
+}
+
+export function listReconciliations(limit = 20): Promise<{ reports: ReconciliationReport[] }> {
+  return get<{ reports: ReconciliationReport[] }>('/api/v1/admin/reconciliations', { limit });
+}
+
+export function reconciliationReport(id: string): Promise<ReconciliationReport> {
+  return get<ReconciliationReport>(`/api/v1/admin/reconciliations/${id}`);
+}
+
+/** One cursor page of detail rows; `nextCursor` is '' once the slice is exhausted. */
+export function reconciliationRows(
+  id: string,
+  query: { state?: string; cursor?: string | number; limit?: number } = {},
+): Promise<{ rows: ReconciliationRow[]; nextCursor: string | number }> {
+  return get<{ rows: ReconciliationRow[]; nextCursor: string | number }>(
+    `/api/v1/admin/reconciliations/${id}/rows`,
+    query,
+  );
+}
+
+export function createReconciliation(
+  params: { providerCode: string; currency: string; windowFrom: string; windowTo: string },
+  content: Blob,
+): Promise<ReconciliationReport> {
+  const qs = new URLSearchParams(params).toString();
+  return uploadBytes<ReconciliationReport>(`/api/v1/admin/reconciliations?${qs}`, content);
+}

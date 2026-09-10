@@ -148,6 +148,12 @@ const router = createRouter({
           meta: adminMeta('导出任务'),
         },
         {
+          path: 'reconciliations',
+          name: 'reconciliations',
+          component: () => import('@/views/next/NextAdminReconciliationsView.vue'),
+          meta: adminMeta('账单对账'),
+        },
+        {
           path: 'deletions',
           name: 'deletions',
           component: () => import('@/views/next/NextAdminDeletionsView.vue'),

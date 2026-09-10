@@ -28,6 +28,13 @@
 - 另：App.spec 并发 flake 已直接修复（#332，vi.waitFor 条件等待，全量 ×3 稳定绿）——见 rc.11 后修补。
 - rc.11 攒批候选已含 #326/#328/#330。
 
+## 会话交接点 2026-09-10（深夜 #5，F19 对账前端页：#342 = I2）
+
+- **#342 F19 前端页（本 PR）**：报告列表 + 上传（JSONL/.gz；202 后轮询至终态）+ 四态明细（verdict 过滤、
+  游标分页、失败原因）；后端补 `GET /reconciliations?limit=`（1..100，越界 400；空列表 `[]`，租户隔离）。
+  对账 IT 3/3；前端新 spec 3/3、全量 vitest 167/167、typecheck/build 通过；OpenAPI 再生无破坏 + gen:types。
+- 在途：I3 tools/list 自动同步、I4 模型探测端点（矩阵 §2 继续）。
+
 ## 会话交接点 2026-09-10（深夜 #4，MCP 面消费者 JWT：#340 = I6）
 
 - **#340 MCP 数据面消费者 JWT（本 PR）**：快照携带公钥 + `consumerByName` + authenticate JWT 分支；

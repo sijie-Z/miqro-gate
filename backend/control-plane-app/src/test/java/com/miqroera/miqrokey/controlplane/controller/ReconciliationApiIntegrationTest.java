@@ -41,8 +41,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Bill reconciliation endpoints (issue #334, F19 contract v0): canonical upload
  * → async four-state report (request-id match, bucket PARTIAL, unmatched
  * provider, row-level unmatched local), idempotent re-upload, gzip transport,
- * validation, and the audit trail. The provider-specific parsers stay
- * WAITING_FOR_SAMPLE.
+ * validation, the report list, and the audit trail. The provider-specific
+ * parsers stay WAITING_FOR_SAMPLE.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
@@ -279,6 +279,68 @@ class ReconciliationApiIntegrationTest {
         // Unknown report id is a 404.
         mockMvc.perform(get("/api/v1/admin/reconciliations/" + UUID.randomUUID()).cookie(sessionCookie, csrfCookie))
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("RECONCILIATION_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("list: newest-first tenant reports, limit bounds, no cross-tenant leak")
+    void listReports() throws Exception {
+        // Empty tenant renders an empty list, not a 404.
+        mockMvc.perform(get("/api/v1/admin/reconciliations").cookie(sessionCookie, csrfCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.reports.length()").value(0));
+
+        seedUsage("req-1", "m-1", occurred, 10L, 5L);
+        MvcResult first = postReport(billJsonl().getBytes(StandardCharsets.UTF_8));
+        String firstId = objectMapper.readTree(first.getResponse().getContentAsString()).get("id").asText();
+        awaitSucceeded(firstId);
+        Thread.sleep(50); // distinct created_at for the ordering assertion
+        MvcResult second = postReport(gzip(billJsonl().getBytes(StandardCharsets.UTF_8)));
+        String secondId = objectMapper.readTree(second.getResponse().getContentAsString()).get("id").asText();
+        awaitSucceeded(secondId);
+
+        // Newest first, with the same metadata view as GET /{id}.
+        mockMvc.perform(get("/api/v1/admin/reconciliations").cookie(sessionCookie, csrfCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.reports.length()").value(2))
+                .andExpect(jsonPath("$.reports[0].id").value(secondId))
+                .andExpect(jsonPath("$.reports[1].id").value(firstId))
+                .andExpect(jsonPath("$.reports[0].providerCode").value(productCode))
+                .andExpect(jsonPath("$.reports[0].currency").value("USD"))
+                .andExpect(jsonPath("$.reports[0].status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.reports[0].matched").value(1))
+                .andExpect(jsonPath("$.reports[0].amountDiff").value("5.00000000"));
+
+        // limit is honored and bounded (no silent clamp).
+        mockMvc.perform(get("/api/v1/admin/reconciliations").param("limit", "1").cookie(sessionCookie, csrfCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.reports.length()").value(1))
+                .andExpect(jsonPath("$.reports[0].id").value(secondId));
+        mockMvc.perform(get("/api/v1/admin/reconciliations").param("limit", "0").cookie(sessionCookie, csrfCookie))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("RECONCILIATION_PARAM_INVALID"));
+        mockMvc.perform(get("/api/v1/admin/reconciliations").param("limit", "101").cookie(sessionCookie, csrfCookie))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("RECONCILIATION_PARAM_INVALID"));
+
+        // A foreign tenant's report never leaks into this tenant's list.
+        UUID foreignTenant = UUID.randomUUID();
+        UUID adminId = jdbc.queryForObject("SELECT id FROM users LIMIT 1", new MapSqlParameterSource(), UUID.class);
+        jdbc.update("INSERT INTO tenants (id, code, name) VALUES (:id, :code, 'List IT B')",
+                new MapSqlParameterSource("id", foreignTenant).addValue("code",
+                        "list-it-" + foreignTenant.toString().substring(0, 8)));
+        try {
+            jdbc.update("""
+                    INSERT INTO reconciliation_reports (id, tenant_id, created_by, provider_code, currency,
+                        window_from, window_to, status, upload_sha256, upload_bytes, created_at)
+                    VALUES (:id, :tenantId, :createdBy, :code, 'USD', :from, :to, 'PENDING', :sha, 1, now())
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", foreignTenant)
+                            .addValue("createdBy", adminId).addValue("code", productCode)
+                            .addValue("from", java.sql.Timestamp.from(windowFrom))
+                            .addValue("to", java.sql.Timestamp.from(windowTo)).addValue("sha", "0".repeat(64)));
+            mockMvc.perform(
+                    get("/api/v1/admin/reconciliations").param("limit", "100").cookie(sessionCookie, csrfCookie))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.reports.length()").value(2));
+        } finally {
+            jdbc.update("DELETE FROM reconciliation_reports WHERE tenant_id = :tenantId",
+                    new MapSqlParameterSource("tenantId", foreignTenant));
+            jdbc.update("DELETE FROM tenants WHERE id = :id", new MapSqlParameterSource("id", foreignTenant));
+        }
     }
 
     /** Poll an audit count (async run writes status and audit separately). */
