@@ -408,6 +408,8 @@ describe('NextAdminMcpServicesView', () => {
         status: 'ENABLED',
         version: 1,
         createdAt: '2026-09-02T00:00:00Z',
+        matchExpression:
+          '路径 PREFIX /api/v2 · Host EXACT mcp-prod.example.com · 方法 GET,POST · 头 X-Tenant-Id EXACT acme',
       },
     ]);
     const wrapper = mountView();
@@ -418,6 +420,9 @@ describe('NextAdminMcpServicesView', () => {
 
     const drawer = document.querySelector('[data-testid="mcp-routes-drawer"]');
     expect(drawer, 'routes drawer should render').toBeTruthy();
+    expect(document.querySelector('[data-testid="mcp-route-expr-r2"]')?.textContent).toContain(
+      '路径 PREFIX /api/v2',
+    );
     expect(drawer!.textContent).toContain('系统默认');
     expect(drawer!.textContent).toContain('gray-v2');
     expect(drawer!.textContent).toContain('GET / POST');
@@ -674,6 +679,7 @@ describe('NextAdminMcpServicesView', () => {
       path: '/orders/v2/{id}',
       createdAt: '2026-09-02T00:00:00Z',
       activatedAt: null as unknown as string,
+      changedFields: ['description', 'method', 'path'],
     };
     mockApi.adminListToolRevisions.mockResolvedValue([rev2, rev1]);
     mockApi.adminActivateToolRevision.mockResolvedValue(rev1);
@@ -693,6 +699,13 @@ describe('NextAdminMcpServicesView', () => {
     expect(dialog!.textContent).toContain('已生效');
     expect(dialog!.textContent).toContain('#1');
     expect(dialog!.textContent).toContain('历史');
+    const diff = document.querySelector('[data-testid="mcp-rev-diff-2"]');
+    expect(diff?.textContent).toContain('描述');
+    expect(diff?.textContent).toContain('方法');
+    expect(diff?.textContent).toContain('路径');
+    expect(document.querySelector('[data-testid="mcp-rev-baseline-1"]')?.textContent).toContain(
+      '初始版本',
+    );
 
     (document.querySelector('[data-testid="mcp-rev-rollback-2"]') as HTMLButtonElement).click();
     await flushPromises();

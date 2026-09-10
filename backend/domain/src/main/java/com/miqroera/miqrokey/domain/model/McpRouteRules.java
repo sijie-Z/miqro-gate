@@ -85,6 +85,36 @@ public final class McpRouteRules {
     }
 
     /**
+     * Rule-bound renderer; see
+     * {@link #renderExpression(String, String, String, String, String, List)}.
+     */
+    public static String matchExpression(McpRouteRule rule) {
+        return renderExpression(rule.pathMode(), rule.pathValue(), rule.hostMode(), rule.hostValue(), rule.methods(),
+                rule.headerConditions());
+    }
+
+    /**
+     * Human-readable rendering of the canonical match surface (raw doc 10) for
+     * read-only display; the engine still evaluates {@link #matchSurface} semantics
+     * — this only describes them. Blank modes render as "任意".
+     */
+    public static String renderExpression(String pathMode, String pathValue, String hostMode, String hostValue,
+            String methods, List<McpHeaderCondition> headerConditions) {
+        List<String> parts = new ArrayList<>();
+        parts.add("路径 " + describe(pathMode, pathValue));
+        parts.add("Host " + describe(hostMode, hostValue));
+        parts.add("方法 " + (methods == null || methods.isBlank() ? "任意" : methods));
+        for (McpHeaderCondition header : headerConditions == null ? List.<McpHeaderCondition>of() : headerConditions) {
+            parts.add("头 " + header.name() + " " + describe(header.mode(), header.value()));
+        }
+        return String.join(" · ", parts);
+    }
+
+    private static String describe(String mode, String value) {
+        return mode == null || mode.isBlank() ? "任意" : mode + " " + value;
+    }
+
+    /**
      * Two rules describe the same inbound surface when their canonical condition
      * sets are equal (path/host/methods/headers all equal). Name, description,
      * priority and status are not part of the surface.

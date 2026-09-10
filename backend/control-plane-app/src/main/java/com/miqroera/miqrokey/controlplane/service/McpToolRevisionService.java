@@ -97,10 +97,23 @@ public class McpToolRevisionService {
         return created;
     }
 
-    /** Newest-first history, capped at 50. */
+    /**
+     * Newest-first history, capped at 50; each entry carries its field-level diff
+     * against the next-older revision (issue #354, computed on read). When the cap
+     * truncates the page the oldest fetched entry has no peer to diff against.
+     */
     public List<McpToolRevision> list(UUID tenantId, UUID toolId, int limit) {
         findTool(tenantId, toolId);
-        return revisionRepository.listByTool(tenantId, toolId, limit);
+        List<McpToolRevision> newestFirst = revisionRepository.listByTool(tenantId, toolId, limit);
+        List<McpToolRevision> result = new java.util.ArrayList<>(newestFirst.size());
+        for (int i = 0; i < newestFirst.size(); i++) {
+            McpToolRevision current = newestFirst.get(i);
+            McpToolRevision older = i + 1 < newestFirst.size() ? newestFirst.get(i + 1) : null;
+            result.add(new McpToolRevision(current.id(), current.tenantId(), current.toolId(), current.revision(),
+                    current.description(), current.method(), current.path(), current.createdBy(), current.createdAt(),
+                    current.activatedAt(), current.changedFieldsVs(older)));
+        }
+        return result;
     }
 
     /**

@@ -28,6 +28,12 @@
 - 另：App.spec 并发 flake 已直接修复（#332，vi.waitFor 条件等待，全量 ×3 稳定绿）——见 rc.11 后修补。
 - rc.11 攒批候选已含 #326/#328/#330。
 
+## 会话交接点 2026-09-10（深夜 #11，修订 diff + 路由表达式：#354 = I10）
+
+- **#354 I10（本 PR）**：`changedFieldsVs`/`renderExpression` 纯函数 + 只读视图字段（changedFields/matchExpression，
+  计算不入库，兼容构造器保持调用点不变）；前端修订 chips/基线标记与路由表达式行。**I1–I10 全部 DONE**。
+- 在途：I11 入站 SSE 双端点（中）、I12 日志字段、I13 工具级重试等（矩阵 §2 继续）。
+
 ## 会话交接点 2026-09-10（深夜 #10，Skill 搜索/标签/Examples：#352 = I9）
 
 - **#352 Skill 目录收口（本 PR）**：V44 `skills.examples`；校验上限（examples ≤10×512、tags ≤5×20 去重）；

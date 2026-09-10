@@ -26,6 +26,8 @@ import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -138,13 +140,16 @@ class McpToolRevisionApiIntegrationTest {
         String toolId = createTool("query_order");
         mockMvc.perform(get("/api/v1/admin/mcp-services/" + serviceId + "/tools/" + toolId + "/revisions")
                 .cookie(sessionCookie)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].revision").value(1)).andExpect(jsonPath("$[0].activatedAt").exists());
+                .andExpect(jsonPath("$[0].revision").value(1)).andExpect(jsonPath("$[0].activatedAt").exists())
+                .andExpect(jsonPath("$[0].changedFields", hasSize(0)));
 
         publish(toolId, "{\"description\":\"查询订单 v2\",\"method\":\"POST\"}");
         mockMvc.perform(get("/api/v1/admin/mcp-services/" + serviceId + "/tools/" + toolId + "/revisions")
                 .cookie(sessionCookie)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[0].revision").value(2)).andExpect(jsonPath("$[0].activatedAt").exists())
-                .andExpect(jsonPath("$[1].revision").value(1)).andExpect(jsonPath("$[1].activatedAt").doesNotExist());
+                .andExpect(jsonPath("$[0].changedFields", contains("description", "method")))
+                .andExpect(jsonPath("$[1].revision").value(1)).andExpect(jsonPath("$[1].activatedAt").doesNotExist())
+                .andExpect(jsonPath("$[1].changedFields", hasSize(0)));
         // Parent row mirrors the active revision for route-snapshot reads.
         mockMvc.perform(get("/api/v1/admin/mcp-services/" + serviceId + "/tools").cookie(sessionCookie))
                 .andExpect(status().isOk()).andExpect(jsonPath("$[0].description").value("查询订单 v2"))

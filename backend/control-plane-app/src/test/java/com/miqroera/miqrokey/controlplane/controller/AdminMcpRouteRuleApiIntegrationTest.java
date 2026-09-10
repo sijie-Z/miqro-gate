@@ -139,7 +139,8 @@ class AdminMcpRouteRuleApiIntegrationTest {
         mockMvc.perform(get(rulesUrl()).cookie(sessionCookie)).andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1))).andExpect(jsonPath("$[0].name").value("default"))
                 .andExpect(jsonPath("$[0].priority").value(0)).andExpect(jsonPath("$[0].status").value("ENABLED"))
-                .andExpect(jsonPath("$[0].pathMode").value(org.hamcrest.Matchers.nullValue()));
+                .andExpect(jsonPath("$[0].pathMode").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$[0].matchExpression").value("路径 任意 · Host 任意 · 方法 任意"));
 
         String defaultId = jdbc.queryForObject(
                 "SELECT id FROM mcp_route_rule WHERE tenant_id = (SELECT id FROM tenants LIMIT 1) "
@@ -174,6 +175,10 @@ class AdminMcpRouteRuleApiIntegrationTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("gray-v2"))
                 .andExpect(jsonPath("$.priority").value(1500)).andExpect(jsonPath("$.pathMode").value("REGEX"))
                 .andExpect(jsonPath("$.status").value("ENABLED"))
+                .andExpect(
+                        jsonPath("$.matchExpression", org.hamcrest.Matchers.containsString("路径 REGEX ^/api/v[0-9]+$")))
+                .andExpect(jsonPath("$.matchExpression", org.hamcrest.Matchers.containsString("Host PREFIX mcp-")))
+                .andExpect(jsonPath("$.matchExpression", org.hamcrest.Matchers.containsString("方法 GET,POST")))
                 .andExpect(jsonPath("$.headerConditions[0].name").value("X-Tenant-Id")).andReturn();
         String ruleId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
                 .toString();

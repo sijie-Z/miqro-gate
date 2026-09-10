@@ -154,6 +154,13 @@ const syncError = ref('');
 const revisionsTool = ref<McpToolView | null>(null);
 const revisionsVisible = ref(false);
 const revisions = ref<McpToolRevisionRow[]>([]);
+
+/** F16 field-level diff labels (issue #354; server computes changedFields). */
+const REVISION_FIELD_LABELS: Record<string, string> = {
+  description: '描述',
+  method: '方法',
+  path: '路径',
+};
 const revisionsLoading = ref(false);
 const revisionsError = ref('');
 const toolForm = ref({ toolName: '', description: '', method: 'GET', path: '' });
@@ -1518,6 +1525,21 @@ async function saveResilience() {
               <span class="ui-mono next-mcp__tool-name">#{{ rev.revision }}</span>
               <span class="next-mcp__tool-desc">{{ rev.description || '—' }}</span>
               <span class="ui-mono next-mcp__tool-path">{{ rev.method }} {{ rev.path }}</span>
+              <span
+                v-if="rev.changedFields && rev.changedFields.length"
+                class="next-mcp__rev-diff"
+                :data-testid="`mcp-rev-diff-${rev.revision}`"
+              >
+                <span v-for="field in rev.changedFields" :key="field" class="next-mcp__rev-diff-chip">
+                  {{ REVISION_FIELD_LABELS[field] ?? field }}
+                </span>
+              </span>
+              <span
+                v-else-if="rev.revision === 1"
+                class="next-mcp__rev-diff-chip next-mcp__rev-diff-chip--baseline"
+                :data-testid="`mcp-rev-baseline-${rev.revision}`"
+                >初始版本</span
+              >
             </div>
             <UiStatusBadge
               :tone="rev.activatedAt ? 'success' : 'neutral'"
@@ -1863,6 +1885,13 @@ async function saveResilience() {
               }}</span>
             </div>
             <div class="ui-mono next-mcp__route-conditions">{{ conditionText(rule) }}</div>
+            <div
+              v-if="rule.matchExpression"
+              class="ui-mono next-mcp__route-expression"
+              :data-testid="`mcp-route-expr-${rule.id}`"
+            >
+              {{ rule.matchExpression }}
+            </div>
             <div class="next-mcp__route-methods">{{ methodList(rule) }}</div>
           </div>
           <UiStatusBadge
@@ -2853,5 +2882,30 @@ async function saveResilience() {
   margin: var(--ui-space-1) 0 0;
   color: var(--ui-foreground-secondary);
   word-break: break-word;
+}
+
+.next-mcp__rev-diff {
+  display: inline-flex;
+  gap: var(--ui-space-1);
+}
+
+.next-mcp__rev-diff-chip {
+  font-size: var(--ui-font-size-xs);
+  padding: 1px 8px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__rev-diff-chip--baseline {
+  border-style: dashed;
+  color: var(--ui-foreground-faint);
+}
+
+.next-mcp__route-expression {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+  overflow-wrap: anywhere;
 }
 </style>

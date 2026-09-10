@@ -21,6 +21,18 @@ class McpRouteRulesTest {
 
     private static final UUID SERVICE = UUID.randomUUID();
 
+    @Test
+    @DisplayName("matchExpression renders the canonical surface read-only (raw doc 10)")
+    void matchExpressionRenders() {
+        assertThat(McpRouteRules.matchExpression(rule(null, null, null, null, null, List.of())))
+                .isEqualTo("路径 任意 · Host 任意 · 方法 任意");
+
+        McpHeaderCondition header = new McpHeaderCondition("X-Env", "EXACT", "prod");
+        assertThat(McpRouteRules
+                .matchExpression(rule("PREFIX", "/mcp", "EXACT", "gw.internal", "GET,POST", List.of(header))))
+                .isEqualTo("路径 PREFIX /mcp · Host EXACT gw.internal · 方法 GET,POST · 头 X-Env EXACT prod");
+    }
+
     private McpRouteRule rule(String pathMode, String pathValue, String hostMode, String hostValue, String methods,
             List<McpHeaderCondition> headers) {
         return new McpRouteRule(UUID.randomUUID(), UUID.randomUUID(), SERVICE, "custom", null, 1000, pathMode,

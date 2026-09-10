@@ -3238,6 +3238,7 @@ export interface components {
             createdAt?: string;
             /** Format: date-time */
             activatedAt?: string;
+            changedFields?: string[];
         };
         JsonNode: unknown;
         ImportResult: {
@@ -3301,6 +3302,7 @@ export interface components {
             createdAt?: string;
             /** Format: date-time */
             updatedAt?: string;
+            matchExpression?: string;
             default?: boolean;
         };
         ProjectProviderGrant: {
