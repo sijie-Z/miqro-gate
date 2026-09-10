@@ -5,6 +5,12 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **审计覆盖第二批（#324）**：兑现 #315 follow-up——告警规则/Webhook/预算/全局配置/模型目录人工维护五族
+  12 个写操作全量入审计链（此前零审计，含 F60 机器写面对告警规则/Webhook 的改动）：
+  `ALERT_RULE_*`/`WEBHOOK_*`（secret 永不入摘要，断言）`BUDGET_PUT/DELETE`/`CONFIG_PUT/DELETE`
+  （value 永不入摘要，断言）/`MODEL_CATALOG_ADD/DELETE_MANUAL`；新增 `AuditContext` 统一归属模型——
+  机器面 actor=发行管理员 + 摘要 `via: admin-api:<密钥名>`（人机双元可溯），会话面 actor=操作用户。
+  验证：综合 IT 2/2（五族逐事件断言 + 机器面 via/actor + secret/value 缺席断言）+ 全量回归。
 - **消费者密钥到期治理（#322）**：V39 `api_consumers.expires_at`（NULL=永不过期，存量零行为变化）——创建时可选
   到期（必须为将来，非法 400 CONSUMER_EXPIRES_INVALID）；到期后**双面静默失效**（控制面计费通道仓储查询
   `expires_at > now()` 条件 + 网关 MCP 数据面快照 `expiredAt(clock)` 判定，均 401 与未知 Key 同形）；
