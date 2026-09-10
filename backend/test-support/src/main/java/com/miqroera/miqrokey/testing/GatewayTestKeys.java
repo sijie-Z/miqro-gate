@@ -215,6 +215,12 @@ public final class GatewayTestKeys {
     public static final String MCP_TOOL_RESTRICTED = "restricted-tool";
     /** Disabled tool on {@link #MCP_GATED_SERVICE}. */
     public static final String MCP_TOOL_QUIET = "quiet-tool";
+    /** #320: API_KEY upstream auth with a test-decryptable ciphertext. */
+    public static final String MCP_SECURED_SERVICE = "secured-demo";
+    /** #320: API_KEY upstream auth whose ciphertext the test decryptor rejects. */
+    public static final String MCP_BROKEN_SERVICE = "secured-broken";
+    /** Plaintext the test decryptor yields for the secured fixture's ciphertext. */
+    public static final String MCP_SECURED_BACKEND_KEY = "test-mcp-backend-key";
 
     /** One API-consumer fixture: self-consistent presented key + digest. */
     public record ConsumerFixture(UUID id, String name, String presentedKey, java.util.List<String> capabilities) {
@@ -273,9 +279,21 @@ public final class GatewayTestKeys {
                         tool(MCP_TOOL_RESTRICTED, "ENABLED", "ALLOW", Set.of(MCP_ALLOWED.id()), "POST"),
                         tool(MCP_TOOL_QUIET, "DISABLED", null, Set.of(), "GET")),
                 policies.get(MCP_GATED_SERVICE));
+        // #320 upstream backend auth: a decryptable API_KEY service and one whose
+        // ciphertext the test decryptor deliberately rejects (fail-closed probe).
+        RouteSnapshot.McpServerRecord secured = new RouteSnapshot.McpServerRecord(serviceId(MCP_SECURED_SERVICE),
+                TENANT_ID, MCP_SECURED_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE", "NONE", Set.of(), List.of(),
+                policies.get(MCP_SECURED_SERVICE), "API_KEY",
+                new EncryptedSecret(new byte[]{7, 7, 7}, new byte[]{8, 8}, "v1"));
+        RouteSnapshot.McpServerRecord broken = new RouteSnapshot.McpServerRecord(serviceId(MCP_BROKEN_SERVICE),
+                TENANT_ID, MCP_BROKEN_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE", "NONE", Set.of(), List.of(),
+                policies.get(MCP_BROKEN_SERVICE), "API_KEY",
+                new EncryptedSecret(new byte[]{0, 0, 0}, new byte[]{0, 0}, "v1"));
         Map<String, RouteSnapshot.McpServerRecord> services = new LinkedHashMap<>();
         services.put(MCP_OPEN_SERVICE, open);
         services.put(MCP_GATED_SERVICE, gated);
+        services.put(MCP_SECURED_SERVICE, secured);
+        services.put(MCP_BROKEN_SERVICE, broken);
         return services;
     }
 

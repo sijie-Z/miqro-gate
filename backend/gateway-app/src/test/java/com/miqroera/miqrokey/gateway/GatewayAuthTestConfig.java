@@ -74,6 +74,48 @@ public class GatewayAuthTestConfig {
      * it). {@code GatewaySecurityHardeningTest} deliberately does not import this
      * config and exercises the strict path.
      */
+    /**
+     * #320 deterministic decryptor for the MCP backend-auth contract tests: the
+     * secured fixture's ciphertext yields a fixed plaintext; the broken fixture's
+     * all-zero ciphertext (and anything else) throws, exercising the fail-closed
+     * path. Never used for real secrets (tests only).
+     */
+    // Deliberately NOT @Primary: suites that need their own cipher stand-in
+    // (e.g. RetentionCaptureTest.FakeCrypto) declare a @Primary bean, and the
+    // ObjectProvider-based consumers resolve that primary deterministically.
+    @Bean
+    public com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider gatewayTestKeyEncryptionProvider() {
+        return new com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider() {
+            @Override
+            public com.miqroera.miqrokey.domain.crypto.EncryptedSecret encrypt(byte[] plaintext,
+                    java.util.UUID tenantId, java.util.UUID credentialId) {
+                return new com.miqroera.miqrokey.domain.crypto.EncryptedSecret(plaintext.clone(), new byte[]{1}, "v1");
+            }
+
+            @Override
+            public String activeKeyVersion() {
+                return "v1";
+            }
+
+            @Override
+            public com.miqroera.miqrokey.domain.crypto.EncryptedSecret reEncrypt(
+                    com.miqroera.miqrokey.domain.crypto.EncryptedSecret secret, java.util.UUID tenantId,
+                    java.util.UUID credentialId) {
+                return secret;
+            }
+
+            @Override
+            public byte[] decrypt(com.miqroera.miqrokey.domain.crypto.EncryptedSecret secret, java.util.UUID tenantId,
+                    java.util.UUID credentialId) {
+                byte[] ciphertext = secret.ciphertext();
+                if (ciphertext.length == 3 && ciphertext[0] == 7 && ciphertext[1] == 7 && ciphertext[2] == 7) {
+                    return GatewayTestKeys.MCP_SECURED_BACKEND_KEY.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                }
+                throw new IllegalStateException("test decryptor rejects this ciphertext");
+            }
+        };
+    }
+
     @Bean
     @Primary
     public UpstreamTargetValidator gatewayTestUpstreamTargetValidator() {
