@@ -217,4 +217,49 @@ class McpResilienceIntegrationTest {
             assertThat(mockServer.capturedRequests()).hasSize(3);
         }
     }
+
+    // -------------------------------------------------------------------
+    // Tool-level retry override (#360, I13): no service policy installed
+    // -------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("tool-level retry override")
+    class ToolLevelRetry {
+
+        @Test
+        @DisplayName("a GET tool override retries even with no service-level policy")
+        void toolOverrideRetriesWithoutServicePolicy() {
+            install(Map.of()); // service-level retries stay off
+            mockServer.queueResponse("{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-1},\"id\":1}", 503);
+
+            callGated(GatewayTestKeys.MCP_ALLOWED.presentedKey(), GatewayTestKeys.MCP_TOOL_RETRY,
+                    envelope("tools/call", GatewayTestKeys.MCP_TOOL_RETRY)).expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(2);
+        }
+
+        @Test
+        @DisplayName("a POST tool override without idempotency confirmation does not retry")
+        void toolOverrideRespectsIdempotencyGate() {
+            install(Map.of());
+            mockServer.queueResponse("{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-1},\"id\":1}", 503);
+
+            callGated(GatewayTestKeys.MCP_ALLOWED.presentedKey(), GatewayTestKeys.MCP_TOOL_RETRY_POST,
+                    envelope("tools/call", GatewayTestKeys.MCP_TOOL_RETRY_POST)).expectStatus().isEqualTo(503);
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("a tool without an override keeps the (disabled) service behavior")
+        void uncoveredToolDoesNotRetry() {
+            install(Map.of());
+            mockServer.queueResponse("{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-1},\"id\":1}", 503);
+
+            callGated(GatewayTestKeys.MCP_ALLOWED.presentedKey(), GatewayTestKeys.MCP_TOOL_SHARED,
+                    envelope("tools/call", GatewayTestKeys.MCP_TOOL_SHARED)).expectStatus().isEqualTo(503);
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+        }
+    }
 }

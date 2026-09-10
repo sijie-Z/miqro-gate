@@ -292,9 +292,14 @@ public class McpProxyController {
             log.info("aigw.mcp.call requestId={} service={} consumer={} rpcMethod={} tool={}", gatewayRequestId,
                     service.name(), consumer.name(), rpcMethod == null ? "-" : rpcMethod,
                     toolName == null ? "-" : toolName);
-            McpResiliencePolicy policy = service.resilience() == null
+            McpResiliencePolicy servicePolicy = service.resilience() == null
                     ? McpResiliencePolicy.disabled()
                     : service.resilience();
+            // Tool-level retry override (#360, I13): the retry fields are replaced
+            // for this tool's calls; the breaker stays service-level.
+            McpResiliencePolicy policy = tool != null && tool.retry() != null
+                    ? servicePolicy.withRetry(tool.retry())
+                    : servicePolicy;
             String toolHttpMethod = tool == null ? null : tool.method();
             if (!"API_KEY".equals(service.backendAuthMode())) {
                 return forward(exchange, target, service.endpoint(), body, context, rpcMethod, toolName, toolHttpMethod,

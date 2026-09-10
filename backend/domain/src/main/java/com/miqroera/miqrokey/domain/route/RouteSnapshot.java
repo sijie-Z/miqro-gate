@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.domain.route;
 
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
+import com.miqroera.miqrokey.domain.model.McpToolRetryPolicy;
 import com.miqroera.miqrokey.domain.model.RetentionConfig;
 
 import java.time.Instant;
@@ -353,7 +354,13 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
      * by the F12 retry idempotency gate.
      */
     public record McpToolRecord(String toolName, String status, String overrideMode, Set<UUID> toolConsumerIds,
-            String method) {
+            String method, McpToolRetryPolicy retry) {
+
+        /** Compatibility constructor: no tool-level retry override (#360). */
+        public McpToolRecord(String toolName, String status, String overrideMode, Set<UUID> toolConsumerIds,
+                String method) {
+            this(toolName, status, overrideMode, toolConsumerIds, method, null);
+        }
 
         public McpToolRecord {
             toolConsumerIds = Set.copyOf(toolConsumerIds);

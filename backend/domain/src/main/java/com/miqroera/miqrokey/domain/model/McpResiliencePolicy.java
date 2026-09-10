@@ -35,6 +35,18 @@ public record McpResiliencePolicy(boolean retryEnabled, int retryMax, Set<RetryC
     public static final int DEFAULT_PROBE_COUNT = 3;
     public static final int DEFAULT_PROBE_SUCCESS = 2;
 
+    /**
+     * Effective policy for a tool-level retry override (issue #360, I13): the retry
+     * fields are replaced, the service-level breaker is kept as-is.
+     */
+    public McpResiliencePolicy withRetry(McpToolRetryPolicy retry) {
+        return new McpResiliencePolicy(retry.retryEnabled(), retry.retryMax(), retry.retryConditions(),
+                retry.idempotencyConfirmed(), breakerEnabled, breakerWindowSeconds, breakerMinRequests,
+                breakerErrorEnabled, breakerErrorRatio, breakerErrorStatusCodes, breakerSlowEnabled, breakerSlowCallMs,
+                breakerSlowRatio, breakerOpenSeconds, breakerProbeCount, breakerProbeSuccess, breakerSkipRetry,
+                version);
+    }
+
     /** Fully-disabled default: data plane behaves exactly as before. */
     public static McpResiliencePolicy disabled() {
         return new McpResiliencePolicy(false, 1, Set.of(), false, false, DEFAULT_WINDOW_SECONDS, DEFAULT_MIN_REQUESTS,

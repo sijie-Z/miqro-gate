@@ -741,6 +741,40 @@ export function adminSyncMcpTools(serviceId: string, dryRun = false): Promise<Mc
   );
 }
 
+/** Tool-level retry override (#360, I13): only the retry fields, breaker stays service-level. */
+export interface McpToolRetryPolicy {
+  retryEnabled: boolean;
+  retryMax: number;
+  retryConditions: string[];
+  idempotencyConfirmed: boolean;
+  version: number;
+}
+
+export function getMcpToolRetryPolicy(
+  serviceId: string,
+  toolId: string,
+): Promise<McpToolRetryPolicy> {
+  return get<McpToolRetryPolicy>(
+    `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/retry-policy`,
+  );
+}
+
+export function putMcpToolRetryPolicy(
+  serviceId: string,
+  toolId: string,
+  body: {
+    retryEnabled: boolean;
+    retryMax: number;
+    retryConditions: string[];
+    idempotencyConfirmed: boolean;
+  },
+): Promise<McpToolRetryPolicy> {
+  return put<McpToolRetryPolicy>(
+    `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/retry-policy`,
+    body,
+  );
+}
+
 export function adminCreateMcpTool(
   serviceId: string,
   body: { toolName: string; description?: string; method?: string; path: string },

@@ -369,9 +369,12 @@ public final class JdbcRouteSnapshotLoader {
 
         jdbc.query("""
                 SELECT t.mcp_service_id AS service_id, t.id AS tool_id, t.tool_name, t.status, t.method,
-                       g.mode AS override_mode, g.consumer_id AS override_consumer
+                       g.mode AS override_mode, g.consumer_id AS override_consumer,
+                       rp.retry_enabled, rp.retry_max, rp.retry_conditions, rp.retry_idempotency_confirmed,
+                       rp.version AS retry_version
                 FROM mcp_tools t
                 LEFT JOIN mcp_access_grants g ON g.tool_id = t.id
+                LEFT JOIN mcp_tool_retry_policy rp ON rp.mcp_tool_id = t.id
                 """, (rs, rowNum) -> {
             UUID serviceId = (UUID) rs.getObject("service_id");
             UUID toolId = (UUID) rs.getObject("tool_id");
@@ -382,7 +385,7 @@ public final class JdbcRouteSnapshotLoader {
             Object[] state = byId.get(toolId);
             if (state == null) {
                 state = new Object[]{rs.getString("tool_name"), rs.getString("status"), rs.getString("override_mode"),
-                        rs.getString("method"), new LinkedHashSet<UUID>()};
+                        rs.getString("method"), new LinkedHashSet<UUID>(), mapToolRetry(rs)};
                 byId.put(toolId, state);
             }
             UUID consumer = (UUID) rs.getObject("override_consumer");
@@ -402,7 +405,7 @@ public final class JdbcRouteSnapshotLoader {
                 @SuppressWarnings("unchecked")
                 Set<UUID> ids = (Set<UUID>) state[4];
                 tools.add(new RouteSnapshot.McpToolRecord((String) state[0], (String) state[1], (String) state[2], ids,
-                        (String) state[3]));
+                        (String) state[3], (com.miqroera.miqrokey.domain.model.McpToolRetryPolicy) state[5]));
             }
             result.put(service.name(),
                     new RouteSnapshot.McpServerRecord(service.id(), service.tenantId(), service.name(),
@@ -410,6 +413,21 @@ public final class JdbcRouteSnapshotLoader {
                             serverLists.getOrDefault(service.id(), Set.of()), tools, resilienceById.get(service.id())));
         }
         return result;
+    }
+
+    /** Null when the tool has no retry override row (V46, issue #360). */
+    private static com.miqroera.miqrokey.domain.model.McpToolRetryPolicy mapToolRetry(java.sql.ResultSet rs)
+            throws java.sql.SQLException {
+        if (rs.getObject("retry_enabled") == null) {
+            return null;
+        }
+        Set<McpResiliencePolicy.RetryCondition> conditions = new LinkedHashSet<>();
+        for (String part : splitCsv(rs.getString("retry_conditions"))) {
+            conditions.add(McpResiliencePolicy.RetryCondition.valueOf(part));
+        }
+        return new com.miqroera.miqrokey.domain.model.McpToolRetryPolicy(rs.getBoolean("retry_enabled"),
+                rs.getInt("retry_max"), conditions, rs.getBoolean("retry_idempotency_confirmed"),
+                rs.getLong("retry_version"));
     }
 
     private static McpResiliencePolicy mapPolicy(java.sql.ResultSet rs) throws java.sql.SQLException {

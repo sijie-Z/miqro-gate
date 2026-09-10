@@ -28,6 +28,7 @@ import java.util.UUID;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -91,6 +92,54 @@ class AdminMcpResilienceApiIntegrationTest {
                         new PasswordChangeRequest((String) bootBody.get("temporaryPassword"), "NewSecurePass1!"))))
                 .andExpect(status().isOk());
         serviceId = insertService(3);
+    }
+
+    @Test
+    @DisplayName("tool-level retry override: defaults, validation, round-trip and audit (#360)")
+    void toolRetryOverride() throws Exception {
+        UUID toolId = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO mcp_tools (id, tenant_id, mcp_service_id, tool_name, description, method, path, status,
+                    version, created_by, created_at, updated_at)
+                VALUES (:id, :tenantId, :serviceId, 'retry-tool', null, 'GET', '/x', 'ENABLED', 0, :createdBy,
+                    now(), now())
+                """, new MapSqlParameterSource("id", toolId).addValue("tenantId", TENANT_ID)
+                .addValue("serviceId", serviceId).addValue("createdBy", adminUserId));
+        String url = "/api/v1/admin/mcp-services/" + serviceId + "/tools/" + toolId + "/retry-policy";
+
+        // Defaults: no row = the disabled override.
+        mockMvc.perform(get(url).cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.retryEnabled").value(false)).andExpect(jsonPath("$.retryMax").value(1));
+
+        // Validation mirrors the service-level endpoint.
+        mockMvc.perform(put(url).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"retryEnabled\":true,\"retryMax\":9,\"retryConditions\":[\"SERVER_5XX\"]}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("TOOL_RETRY_POLICY_INVALID"));
+        mockMvc.perform(put(url).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"retryEnabled\":true,\"retryMax\":1}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("TOOL_RETRY_POLICY_INVALID"));
+        mockMvc.perform(put(url).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"retryEnabled\":true,\"retryMax\":1,\"retryConditions\":[\"NOPE\"]}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("TOOL_RETRY_POLICY_INVALID"));
+
+        // Happy path round-trips; the audit row lands.
+        mockMvc.perform(put(url).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"retryEnabled\":true,\"retryMax\":2,\"retryConditions\":[\"SERVER_5XX\",\"TIMEOUT\"],"
+                        + "\"idempotencyConfirmed\":true}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.retryEnabled").value(true))
+                .andExpect(jsonPath("$.retryMax").value(2)).andExpect(jsonPath("$.idempotencyConfirmed").value(true));
+        mockMvc.perform(get(url).cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.retryMax").value(2));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM admin_audit_events WHERE action = 'MCP_TOOL_RETRY_UPDATE'",
+                new MapSqlParameterSource(), Integer.class)).isEqualTo(1);
+
+        // Unknown tool under a valid service is a 404.
+        mockMvc.perform(get("/api/v1/admin/mcp-services/" + serviceId + "/tools/" + UUID.randomUUID() + "/retry-policy")
+                .cookie(sessionCookie)).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("TOOL_NOT_FOUND"));
     }
 
     @AfterEach
