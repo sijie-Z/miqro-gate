@@ -5,6 +5,11 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **账单对账前端页（#342，I2）**：新增「账单对账」管理页（运营分组）——报告列表（新→旧，状态 / 四态计数 /
+  金额差）、canonical JSONL/.gz 上传（16MB 预检、gzip 魔数提示、202 后自动轮询到终态）、报告详情（汇总卡 +
+  四态明细按 verdict 过滤 + 游标「加载更多」+ 失败原因展示）。后端配套 `GET /api/v1/admin/reconciliations?limit=`
+  （租户内新→旧，limit 1..100 越界 400，空列表 `[]`）；OpenAPI 基线再生（无破坏变更）、`gen:types` 同步。
+  验证：对账 IT +1（列表排序 / limit 边界 / 跨租户隔离）；前端 spec +3；全量 vitest 41 文件 167 用例。
 - **MCP 数据面接受消费者 JWT（#340，I6）**：`/mcpservers/{name}/mcp` 的 `Authorization: Bearer` 非
   `mqk_api_` 前缀时按消费者 RS256 JWT 处理（`sub`→快照按名映射，公钥随快照 `jwt_public_key_pem` 下发；
   验签失败/未知 sub/未配公钥 401 与未知 Key 同形）；到期与 `mcp:call` 作用域检查对两通道一致；
