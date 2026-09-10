@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminMcpToolService;
+import com.miqroera.miqrokey.controlplane.service.AdminMcpToolRetryService;
 import com.miqroera.miqrokey.controlplane.service.McpToolRevisionService;
 import com.miqroera.miqrokey.controlplane.service.McpToolSyncService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -16,6 +17,7 @@ import jakarta.validation.constraints.Size;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -38,13 +40,15 @@ public class AdminMcpToolController {
     private final AdminMcpToolService toolService;
     private final McpToolRevisionService revisionService;
     private final McpToolSyncService toolSyncService;
+    private final AdminMcpToolRetryService toolRetryService;
     private final UserContext userContext;
 
     public AdminMcpToolController(AdminMcpToolService toolService, McpToolRevisionService revisionService,
-            McpToolSyncService toolSyncService, UserContext userContext) {
+            McpToolSyncService toolSyncService, AdminMcpToolRetryService toolRetryService, UserContext userContext) {
         this.toolService = toolService;
         this.revisionService = revisionService;
         this.toolSyncService = toolSyncService;
+        this.toolRetryService = toolRetryService;
         this.userContext = userContext;
     }
 
@@ -87,6 +91,27 @@ public class AdminMcpToolController {
         var user = userContext.getUser();
         String requestId = httpReq.getHeader("X-Request-Id");
         return toolSyncService.sync(user.tenantId(), user.id(), serviceId, dryRun,
+                requestId != null && !requestId.isBlank() ? requestId : UUID.randomUUID().toString());
+    }
+
+    /** Tool-level retry override (issue #360, I13): view (defaults to disabled). */
+    @GetMapping("/{toolId}/retry-policy")
+    public com.miqroera.miqrokey.domain.model.McpToolRetryPolicy retryPolicy(@PathVariable UUID serviceId,
+            @PathVariable UUID toolId) {
+        return toolRetryService.view(userContext.getUser().tenantId(), serviceId, toolId);
+    }
+
+    /**
+     * Configures the tool-level retry override; the data plane picks it up via
+     * snapshot refresh.
+     */
+    @PutMapping("/{toolId}/retry-policy")
+    public com.miqroera.miqrokey.domain.model.McpToolRetryPolicy configureRetryPolicy(@PathVariable UUID serviceId,
+            @PathVariable UUID toolId, @RequestBody AdminMcpToolRetryService.RequestedPolicy body,
+            HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        String requestId = httpReq.getHeader("X-Request-Id");
+        return toolRetryService.configure(user.tenantId(), user.id(), serviceId, toolId, body,
                 requestId != null && !requestId.isBlank() ? requestId : UUID.randomUUID().toString());
     }
 

@@ -6,6 +6,7 @@ import com.miqroera.miqrokey.domain.crypto.VirtualKeyCrypto;
 import com.miqroera.miqrokey.domain.crypto.VirtualKeyMaterial;
 import com.miqroera.miqrokey.domain.crypto.impl.HmacVirtualKeyProvider;
 import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
+import com.miqroera.miqrokey.domain.model.McpToolRetryPolicy;
 import com.miqroera.miqrokey.domain.model.RetentionConfig;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 
@@ -215,6 +216,10 @@ public final class GatewayTestKeys {
     public static final String MCP_TOOL_RESTRICTED = "restricted-tool";
     /** Disabled tool on {@link #MCP_GATED_SERVICE}. */
     public static final String MCP_TOOL_QUIET = "quiet-tool";
+    /** GET tool carrying a tool-level retry override (#360, I13). */
+    public static final String MCP_TOOL_RETRY = "retry-tool";
+    /** POST tool carrying a retry override without the idempotency confirmation. */
+    public static final String MCP_TOOL_RETRY_POST = "retry-post-tool";
     /** #320: API_KEY upstream auth with a test-decryptable ciphertext. */
     public static final String MCP_SECURED_SERVICE = "secured-demo";
     /** #320: API_KEY upstream auth whose ciphertext the test decryptor rejects. */
@@ -312,7 +317,9 @@ public final class GatewayTestKeys {
                 Set.of(MCP_ALLOWED.id(), MCP_SERVER_ONLY.id()),
                 List.of(tool(MCP_TOOL_SHARED, "ENABLED", null, Set.of(), "GET"),
                         tool(MCP_TOOL_RESTRICTED, "ENABLED", "ALLOW", Set.of(MCP_ALLOWED.id()), "POST"),
-                        tool(MCP_TOOL_QUIET, "DISABLED", null, Set.of(), "GET")),
+                        tool(MCP_TOOL_QUIET, "DISABLED", null, Set.of(), "GET"),
+                        tool(MCP_TOOL_RETRY, "ENABLED", null, Set.of(), "GET", retryOverride(false)),
+                        tool(MCP_TOOL_RETRY_POST, "ENABLED", null, Set.of(), "POST", retryOverride(false))),
                 policies.get(MCP_GATED_SERVICE));
         // #320 upstream backend auth: a decryptable API_KEY service and one whose
         // ciphertext the test decryptor deliberately rejects (fail-closed probe).
@@ -339,6 +346,20 @@ public final class GatewayTestKeys {
     private static RouteSnapshot.McpToolRecord tool(String name, String status, String overrideMode, Set<UUID> allowed,
             String method) {
         return new RouteSnapshot.McpToolRecord(name, status, overrideMode, allowed, method);
+    }
+
+    /** Tool with a tool-level retry override (issue #360, I13). */
+    private static RouteSnapshot.McpToolRecord tool(String name, String status, String overrideMode, Set<UUID> allowed,
+            String method, McpToolRetryPolicy retry) {
+        return new RouteSnapshot.McpToolRecord(name, status, overrideMode, allowed, method, retry);
+    }
+
+    /**
+     * Server-5xx single-retry override; the idempotency gate stays caller-driven.
+     */
+    private static McpToolRetryPolicy retryOverride(boolean idempotencyConfirmed) {
+        return new McpToolRetryPolicy(true, 1, Set.of(McpResiliencePolicy.RetryCondition.SERVER_5XX),
+                idempotencyConfirmed, 0);
     }
 
     private static byte[] sha256(String value) {
