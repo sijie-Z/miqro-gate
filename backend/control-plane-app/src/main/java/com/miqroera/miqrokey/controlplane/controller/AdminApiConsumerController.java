@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.dto.ApiConsumerView;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
+import com.miqroera.miqrokey.controlplane.service.ApiConsumerActivityService;
 import com.miqroera.miqrokey.controlplane.service.ApiConsumerService;
 import com.miqroera.miqrokey.controlplane.service.ApiException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -33,10 +35,13 @@ import java.util.UUID;
 public class AdminApiConsumerController {
 
     private final ApiConsumerService consumerService;
+    private final ApiConsumerActivityService activityService;
     private final UserContext userContext;
 
-    public AdminApiConsumerController(ApiConsumerService consumerService, UserContext userContext) {
+    public AdminApiConsumerController(ApiConsumerService consumerService, ApiConsumerActivityService activityService,
+            UserContext userContext) {
         this.consumerService = consumerService;
+        this.activityService = activityService;
         this.userContext = userContext;
     }
 
@@ -89,6 +94,16 @@ public class AdminApiConsumerController {
     public ApiConsumerView removeJwtKey(@PathVariable UUID consumerId, HttpServletRequest httpReq) {
         return consumerService.removeJwtKey(userContext.getUser().tenantId(), userContext.getUser().id(), consumerId,
                 requestId(httpReq));
+    }
+
+    /**
+     * Per-consumer MCP call overview (#338): mcp_access_log window aggregates —
+     * totals by outcome class, top tools/services, last call. Read-only.
+     */
+    @GetMapping("/{consumerId}/activity")
+    public java.util.Map<String, Object> activity(@PathVariable UUID consumerId,
+            @RequestParam(defaultValue = "24") int hours) {
+        return activityService.activity(userContext.getUser().tenantId(), consumerId, hours);
     }
 
     private static String requestId(HttpServletRequest request) {

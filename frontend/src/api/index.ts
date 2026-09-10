@@ -440,6 +440,23 @@ export function disableApiConsumer(id: string): Promise<ApiConsumerView> {
   return post<ApiConsumerView>(`/api/v1/admin/api-consumers/${id}/disable`);
 }
 
+/** Issue #338 (I5): per-consumer MCP call overview from the access log. */
+export interface ApiConsumerActivity {
+  consumerId: string;
+  windowHours: number;
+  totalCalls: number;
+  forwarded: number;
+  denied: number;
+  failed: number;
+  lastCallAt: string | null;
+  topTools: Array<{ name: string; calls: number }>;
+  topServices: Array<{ name: string; calls: number }>;
+}
+
+export function adminConsumerActivity(id: string, hours = 24): Promise<ApiConsumerActivity> {
+  return get<ApiConsumerActivity>(`/api/v1/admin/api-consumers/${id}/activity`, { hours });
+}
+
 /** Replaces the channel scope: null = full access, empty array = no channels. */
 export function updateApiConsumerScope(
   id: string,
