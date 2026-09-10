@@ -18,6 +18,8 @@ vi.mock('@/api', () => ({
   adminCreateMcpTool: vi.fn(),
   adminSetMcpToolStatus: vi.fn(),
   adminListToolRevisions: vi.fn(),
+  getMcpToolRetryPolicy: vi.fn(),
+  putMcpToolRetryPolicy: vi.fn(),
   adminActivateToolRevision: vi.fn(),
   adminPublishToolRevision: vi.fn(),
   adminImportMcpTools: vi.fn(),
@@ -785,6 +787,50 @@ describe('NextAdminMcpServicesView', () => {
     expect(result, 'import result should render').toBeTruthy();
     expect(result!.textContent).toContain('新建 1');
     expect(result!.textContent).toContain('TRACE');
+  });
+
+  it('I13: loads and saves the tool-level retry override', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminListMcpTools.mockResolvedValue([tool()]);
+    mockApi.getMcpToolRetryPolicy.mockResolvedValue({
+      retryEnabled: true,
+      retryMax: 2,
+      retryConditions: ['SERVER_5XX'],
+      idempotencyConfirmed: true,
+      version: 3,
+    });
+    mockApi.putMcpToolRetryPolicy.mockResolvedValue({
+      retryEnabled: true,
+      retryMax: 2,
+      retryConditions: ['SERVER_5XX', 'TIMEOUT'],
+      idempotencyConfirmed: false,
+      version: 4,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="mcp-tools"]').trigger('click');
+    await flushPromises();
+
+    (document.querySelector('[data-testid="mcp-tool-retry-open"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(mockApi.getMcpToolRetryPolicy).toHaveBeenCalledWith('m1', 't1');
+    const dialog = document.querySelector('[data-testid="mcp-tool-retry-dialog"]');
+    expect(dialog, 'retry dialog should render').toBeTruthy();
+    expect((document.querySelector('[data-testid="mcp-tool-retry-max"]') as HTMLInputElement).value).toBe(
+      '2',
+    );
+
+    (document.querySelector('[data-testid="mcp-tool-retry-timeout"]') as HTMLInputElement).click();
+    await flushPromises();
+    (document.querySelector('[data-testid="mcp-tool-retry-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(mockApi.putMcpToolRetryPolicy).toHaveBeenCalledWith('m1', 't1', {
+      retryEnabled: true,
+      retryMax: 2,
+      retryConditions: ['SERVER_5XX', 'TIMEOUT'],
+      idempotencyConfirmed: true,
+    });
   });
 
   it('previews the upstream tools/list sync and applies it on confirm', async () => {

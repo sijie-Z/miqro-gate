@@ -84,6 +84,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/mcp-services/{serviceId}/tools/{toolId}/retry-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["retryPolicy"];
+        put: operations["configureRetryPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/mcp-services/{serviceId}/resilience": {
         parameters: {
             query?: never;
@@ -2567,27 +2583,15 @@ export interface components {
             retryMax?: number;
             retryConditions?: string[];
             idempotencyConfirmed?: boolean;
-            breakerEnabled?: boolean;
+        };
+        McpToolRetryPolicy: {
+            retryEnabled?: boolean;
             /** Format: int32 */
-            breakerWindowSeconds?: number;
-            /** Format: int32 */
-            breakerMinRequests?: number;
-            breakerErrorEnabled?: boolean;
-            /** Format: int32 */
-            breakerErrorRatio?: number;
-            breakerErrorStatusCodes?: number[];
-            breakerSlowEnabled?: boolean;
-            /** Format: int32 */
-            breakerSlowCallMs?: number;
-            /** Format: int32 */
-            breakerSlowRatio?: number;
-            /** Format: int32 */
-            breakerOpenSeconds?: number;
-            /** Format: int32 */
-            breakerProbeCount?: number;
-            /** Format: int32 */
-            breakerProbeSuccess?: number;
-            breakerSkipRetry?: boolean;
+            retryMax?: number;
+            retryConditions?: ("SERVER_5XX" | "CONNECTION_FAILURE" | "TIMEOUT")[];
+            idempotencyConfirmed?: boolean;
+            /** Format: int64 */
+            version?: number;
         };
         McpResiliencePolicy: {
             retryEnabled?: boolean;
@@ -4132,6 +4136,56 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    retryPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+                toolId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["McpToolRetryPolicy"];
+                };
+            };
+        };
+    };
+    configureRetryPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+                toolId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestedPolicy"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["McpToolRetryPolicy"];
+                };
             };
         };
     };

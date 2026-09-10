@@ -165,6 +165,19 @@ const revisionsLoading = ref(false);
 const revisionsError = ref('');
 const toolForm = ref({ toolName: '', description: '', method: 'GET', path: '' });
 
+// Tool-level retry override (F12/#360, I13)
+const toolRetryTool = ref<McpToolView | null>(null);
+const toolRetryVisible = ref(false);
+const toolRetryLoading = ref(false);
+const toolRetrySaving = ref(false);
+const toolRetryError = ref('');
+const toolRetryForm = ref({
+  retryEnabled: false,
+  retryMax: '1',
+  retryConditions: [] as string[],
+  idempotencyConfirmed: false,
+});
+
 // F16 edit-and-publish dialog
 const editTool = ref<McpToolView | null>(null);
 const editVisible = ref(false);
@@ -434,6 +447,58 @@ async function createTool() {
     toolFormError.value = errorText(error, '创建失败，请稍后重试。');
   } finally {
     toolSaving.value = false;
+  }
+}
+
+async function openToolRetry(tool: McpToolView) {
+  if (!toolsService.value) {
+    return;
+  }
+  toolRetryTool.value = tool;
+  toolRetryVisible.value = true;
+  toolRetryLoading.value = true;
+  toolRetryError.value = '';
+  try {
+    const policy = await api.getMcpToolRetryPolicy(toolsService.value.id!, tool.id!);
+    toolRetryForm.value = {
+      retryEnabled: policy.retryEnabled,
+      retryMax: String(policy.retryMax),
+      retryConditions: [...policy.retryConditions],
+      idempotencyConfirmed: policy.idempotencyConfirmed,
+    };
+  } catch (error) {
+    toolRetryError.value = errorText(error, '加载工具重试策略失败。');
+  } finally {
+    toolRetryLoading.value = false;
+  }
+}
+
+function toggleToolRetryCondition(condition: string) {
+  const current = toolRetryForm.value.retryConditions;
+  toolRetryForm.value.retryConditions = current.includes(condition)
+    ? current.filter((entry) => entry !== condition)
+    : [...current, condition];
+}
+
+async function saveToolRetry() {
+  if (!toolsService.value || !toolRetryTool.value) {
+    return;
+  }
+  toolRetrySaving.value = true;
+  toolRetryError.value = '';
+  try {
+    await api.putMcpToolRetryPolicy(toolsService.value.id!, toolRetryTool.value.id!, {
+      retryEnabled: toolRetryForm.value.retryEnabled,
+      retryMax: Number(toolRetryForm.value.retryMax) || 1,
+      retryConditions: toolRetryForm.value.retryConditions,
+      idempotencyConfirmed: toolRetryForm.value.idempotencyConfirmed,
+    });
+    toast.success('工具重试策略已保存');
+    toolRetryVisible.value = false;
+  } catch (error) {
+    toolRetryError.value = errorText(error, '保存失败，请稍后重试。');
+  } finally {
+    toolRetrySaving.value = false;
   }
 }
 
@@ -1360,6 +1425,13 @@ async function saveResilience() {
             <UiButton
               variant="ghost"
               size="sm"
+              data-testid="mcp-tool-retry-open"
+              @click="openToolRetry(tool as McpToolView)"
+              >重试</UiButton
+            >
+            <UiButton
+              variant="ghost"
+              size="sm"
               data-testid="mcp-tool-edit-open"
               @click="openEditTool(tool as McpToolView)"
               >编辑</UiButton
@@ -1560,6 +1632,81 @@ async function saveResilience() {
       </template>
       <template #footer>
         <UiButton variant="secondary" @click="revisionsVisible = false">关闭</UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- Tool-level retry override (F12/#360, I13) -->
+    <UiDialog
+      :open="toolRetryVisible"
+      :title="toolRetryTool ? `重试策略 · ${toolRetryTool.toolName}` : '重试策略'"
+      width="560px"
+      data-testid="mcp-tool-retry-dialog"
+      @update:open="toolRetryVisible = false"
+    >
+      <div v-if="toolRetryError" class="ui-alert ui-alert--error" data-testid="mcp-tool-retry-error">
+        {{ toolRetryError }}
+      </div>
+      <div v-if="toolRetryLoading" class="next-mcp__tools-loading">
+        <div v-for="n in 3" :key="n" class="ui-skeleton">&nbsp;</div>
+      </div>
+      <template v-else>
+        <p class="next-mcp__routes-note">
+          工具级重试仅覆盖服务级策略的重试字段（熔断保持服务级）；无记录时跟随服务策略。
+        </p>
+        <div class="next-mcp__dialog-form">
+          <label class="next-mcp__checkbox">
+            <input
+              v-model="toolRetryForm.retryEnabled"
+              type="checkbox"
+              data-testid="mcp-tool-retry-enabled"
+            />
+            <span>启用重试（仅首字节前；默认关闭）</span>
+          </label>
+          <template v-if="toolRetryForm.retryEnabled">
+            <div class="next-mcp__row">
+              <UiInput
+                v-model="toolRetryForm.retryMax"
+                label="重试次数（1–5）"
+                data-testid="mcp-tool-retry-max"
+              />
+            </div>
+            <div class="next-mcp__resilience-checks">
+              <span class="next-mcp__resilience-label">重试条件（至少一项）</span>
+              <label
+                v-for="(label, condition) in RETRY_CONDITION_LABELS"
+                :key="condition"
+                class="next-mcp__checkbox"
+              >
+                <input
+                  type="checkbox"
+                  :checked="toolRetryForm.retryConditions.includes(condition)"
+                  :data-testid="`mcp-tool-retry-${condition.toLowerCase()}`"
+                  @change="toggleToolRetryCondition(condition)"
+                />
+                <span>{{ label }}</span>
+              </label>
+            </div>
+            <label class="next-mcp__checkbox">
+              <input
+                v-model="toolRetryForm.idempotencyConfirmed"
+                type="checkbox"
+                data-testid="mcp-tool-retry-idempotent"
+              />
+              <span>已确认后端接口幂等（POST/PUT/PATCH 工具可重试）</span>
+            </label>
+          </template>
+        </div>
+      </template>
+      <template #footer>
+        <UiButton variant="ghost" @click="toolRetryVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="toolRetrySaving"
+          data-testid="mcp-tool-retry-save"
+          @click="saveToolRetry"
+        >
+          保存
+        </UiButton>
       </template>
     </UiDialog>
 
