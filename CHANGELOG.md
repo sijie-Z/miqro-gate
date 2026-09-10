@@ -5,6 +5,10 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **消费者「最近调用概览」（#338，I5）**：`GET /api/v1/admin/api-consumers/{id}/activity?hours=24`——
+  `mcp_access_log` 窗口聚合（总数/已转发/被拒/失败、最近调用、Top 工具/Top 服务各 ≤5；hours 1..168）；
+  无新表、无网关改动（复用 V29 纯元数据日志）；前端消费者页「调用概览」对话框（24h/7d 切换）。
+  验证：IT 2/2（多状态聚合/Top/窗口/租户隔离/空窗口/跨租户 404）+ FE spec。
 - **能力覆盖对照表（#336）**：docs/coverage-matrix.md 首版——腾讯 29 篇 + 阿里对照逐能力四态定级
   （对等/部分/未做/不适用+理由），含「可立即实现（I 编号）/需裁决/需外部」清单与每-rc 刷新纪律；
   feature-backlog 与 NEXT_SESSION_PLAN 增加指针（立项登记 vs 能力底账分工）。封堵"缺口等关键词才浮现"流程缺口。
