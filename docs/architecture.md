@@ -198,7 +198,9 @@ public interface GatewayResponseCache {
 - **MCP 调用代理（F01，V25/V28-V30）**：gateway `McpProxyController`——
   `POST /mcpservers/{serviceName}/mcp`，消费者 Bearer 摘要鉴权（route snapshot）→ 两级 ACL
   （McpAccessPolicy：服务级 + tools/call 工具级）→ 上游 JSON-RPC 原样流转发；F12/F13 韧性
-  （首字节前重试 + 熔断 503）同管线；F15 元数据日志（V29）。MCP 属网关应用内，协议转换仍属
+  （首字节前重试 + 熔断 503）同管线；F15 元数据日志（V29）。另提供入站 SSE 双端点（#356，I11）：
+  `GET /mcpservers/{name}/sse`（单节点内存会话，endpoint 事件 + 保活）+ `POST …/message`（202 后同一流水线
+  分发、结果以 message/error 事件回流）。MCP 属网关应用内，协议转换仍属
   CC Switch 边界。
 - **开放管理面（ADR-0015，V32）**：control-plane 过滤链次序——SessionFilter(-100) →
   AdminApiKeyAuthFilter(-95，`/api/v1/admin-api/**`，机器 Bearer 或 SYSTEM_ADMIN 会话)

@@ -16,9 +16,18 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -518,6 +527,158 @@ class McpProxyContractTest {
 
             assertThat(errorType(body)).isEqualTo("backend_auth_unavailable");
             assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Inbound SSE transport (#356, I11): GET /sse + POST /message
+    // -------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("inbound SSE transport")
+    class SseTransport {
+
+        private Flux<ServerSentEvent<String>> openStream(String service, GatewayTestKeys.ConsumerFixture consumer) {
+            return webTestClient.get().uri("/mcpservers/{service}/sse", service)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(consumer)).exchange().expectStatus().isOk()
+                    .returnResult(new ParameterizedTypeReference<ServerSentEvent<String>>() {
+                    }).getResponseBody();
+        }
+
+        private ServerSentEvent<String> poll(BlockingQueue<ServerSentEvent<String>> events, Duration timeout)
+                throws InterruptedException {
+            return events.poll(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        }
+
+        private String sessionIdOf(ServerSentEvent<String> endpointEvent) {
+            assertThat(endpointEvent).isNotNull();
+            assertThat(endpointEvent.event()).isEqualTo("endpoint");
+            String data = endpointEvent.data();
+            int index = data == null ? -1 : data.indexOf("sessionId=");
+            assertThat(index).isGreaterThan(-1);
+            return data.substring(index + "sessionId=".length());
+        }
+
+        private WebTestClient.ResponseSpec postMessage(String service, String sessionId,
+                GatewayTestKeys.ConsumerFixture consumer, String body) {
+            return webTestClient.post()
+                    .uri(builder -> builder.path("/mcpservers/{service}/message").queryParam("sessionId", sessionId)
+                            .build(service))
+                    .header(HttpHeaders.AUTHORIZATION, bearer(consumer)).bodyValue(body).exchange();
+        }
+
+        @Test
+        @DisplayName("should require a credential on both halves")
+        void shouldRequireCredential() {
+            webTestClient.get().uri("/mcpservers/{service}/sse", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .headers(h -> h.set(HttpHeaders.AUTHORIZATION, "")).exchange().expectStatus().isUnauthorized();
+            webTestClient.post()
+                    .uri(builder -> builder.path("/mcpservers/{service}/message")
+                            .queryParam("sessionId", UUID.randomUUID().toString())
+                            .build(GatewayTestKeys.MCP_OPEN_SERVICE))
+                    .headers(h -> h.set(HttpHeaders.AUTHORIZATION, "")).bodyValue(envelope("tools/list", null))
+                    .exchange().expectStatus().isUnauthorized();
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should 404 an unknown service on both halves")
+        void shouldRejectUnknownService() {
+            webTestClient.get().uri("/mcpservers/{service}/sse", "ghost-service")
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER)).exchange().expectStatus()
+                    .isNotFound();
+            postMessage("ghost-service", UUID.randomUUID().toString(), GatewayTestKeys.MCP_OUTSIDER,
+                    envelope("tools/list", null)).expectStatus().isNotFound();
+        }
+
+        @Test
+        @DisplayName("should announce an endpoint, accept a message and relay the upstream body verbatim")
+        void shouldRelayOverTheStream() throws Exception {
+            String upstreamBody = "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"result\": {}\n}";
+            mockServer.setResponse(upstreamBody, 200);
+            BlockingQueue<ServerSentEvent<String>> events = new LinkedBlockingQueue<>();
+            Disposable subscription = openStream(GatewayTestKeys.MCP_OPEN_SERVICE, GatewayTestKeys.MCP_OUTSIDER)
+                    .subscribe(events::add);
+            try {
+                String sessionId = sessionIdOf(poll(events, Duration.ofSeconds(5)));
+
+                postMessage(GatewayTestKeys.MCP_OPEN_SERVICE, sessionId, GatewayTestKeys.MCP_OUTSIDER,
+                        envelope("tools/list", null)).expectStatus().isAccepted();
+
+                ServerSentEvent<String> message = poll(events, Duration.ofSeconds(5));
+                assertThat(message).isNotNull();
+                assertThat(message.event()).isEqualTo("message");
+                // Multi-line upstream bodies survive the data-frame split.
+                assertThat(message.data()).isEqualTo(upstreamBody);
+
+                assertThat(mockServer.capturedRequests()).hasSize(1);
+                assertThat(mockServer.capturedRequests().get(0).path()).isEqualTo("/mcp");
+            } finally {
+                subscription.dispose();
+            }
+        }
+
+        @Test
+        @DisplayName("should deliver ACL denials as error events, with no upstream call")
+        void shouldDeliverDenialsAsErrorEvents() throws Exception {
+            BlockingQueue<ServerSentEvent<String>> events = new LinkedBlockingQueue<>();
+            Disposable subscription = openStream(GatewayTestKeys.MCP_GATED_SERVICE, GatewayTestKeys.MCP_OUTSIDER)
+                    .subscribe(events::add);
+            try {
+                String sessionId = sessionIdOf(poll(events, Duration.ofSeconds(5)));
+
+                postMessage(GatewayTestKeys.MCP_GATED_SERVICE, sessionId, GatewayTestKeys.MCP_OUTSIDER,
+                        envelope("tools/call", GatewayTestKeys.MCP_TOOL_SHARED)).expectStatus().isAccepted();
+
+                ServerSentEvent<String> error = poll(events, Duration.ofSeconds(5));
+                assertThat(error).isNotNull();
+                assertThat(error.event()).isEqualTo("error");
+                assertThat(error.data()).contains("mcp_access_denied");
+                assertThat(mockServer.capturedRequests()).isEmpty();
+            } finally {
+                subscription.dispose();
+            }
+        }
+
+        @Test
+        @DisplayName("should 404 an unknown session")
+        void should404UnknownSession() {
+            postMessage(GatewayTestKeys.MCP_OPEN_SERVICE, UUID.randomUUID().toString(), GatewayTestKeys.MCP_OUTSIDER,
+                    envelope("tools/list", null)).expectStatus().isNotFound().expectBody().jsonPath("$.error.type")
+                    .isEqualTo("unknown_session");
+        }
+
+        @Test
+        @DisplayName("should reject a session presented with another consumer credential")
+        void shouldRejectForeignCredential() throws Exception {
+            BlockingQueue<ServerSentEvent<String>> events = new LinkedBlockingQueue<>();
+            Disposable subscription = openStream(GatewayTestKeys.MCP_OPEN_SERVICE, GatewayTestKeys.MCP_OUTSIDER)
+                    .subscribe(events::add);
+            try {
+                String sessionId = sessionIdOf(poll(events, Duration.ofSeconds(5)));
+
+                postMessage(GatewayTestKeys.MCP_OPEN_SERVICE, sessionId, GatewayTestKeys.MCP_ALLOWED,
+                        envelope("tools/list", null)).expectStatus().isForbidden().expectBody().jsonPath("$.error.type")
+                        .isEqualTo("session_credential_mismatch");
+            } finally {
+                subscription.dispose();
+            }
+        }
+
+        @Test
+        @DisplayName("should drop the session once the stream disconnects")
+        void shouldDropSessionAfterDisconnect() throws Exception {
+            BlockingQueue<ServerSentEvent<String>> events = new LinkedBlockingQueue<>();
+            Disposable subscription = openStream(GatewayTestKeys.MCP_OPEN_SERVICE, GatewayTestKeys.MCP_OUTSIDER)
+                    .subscribe(events::add);
+            String sessionId = sessionIdOf(poll(events, Duration.ofSeconds(5)));
+
+            subscription.dispose();
+            // The doFinally hook closes the session; give it a beat to run.
+            Thread.sleep(200);
+
+            postMessage(GatewayTestKeys.MCP_OPEN_SERVICE, sessionId, GatewayTestKeys.MCP_OUTSIDER,
+                    envelope("tools/list", null)).expectStatus().isNotFound();
         }
     }
 }

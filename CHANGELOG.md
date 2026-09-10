@@ -5,6 +5,12 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **入站 MCP SSE 双端点（#356，I11，ADR-0013 二期）**：`GET /mcpservers/{name}/sse`（单节点内存会话 +
+  endpoint 事件 + 15s 保活 + 容量 256/空闲 5 分钟回收）+ `POST /mcpservers/{name}/message`（传输级检查直答、
+  202 后沿与 /mcp 完全同一流水线分发，结果以 `message`/`error` 事件回流；上游响应体逐字节原样，v1 上游流式
+  响应整段聚合）；会话绑定单一消费者+服务、F15 日志同记。`McpProxyController` 抽出 `ResponseTarget`
+  （直连/SSE 两种目标），流水线代码零分叉。验证：`SseFrames` 4/4、会话注册表 4/4、SSE 契约 7/7
+  （401/404、字节原样回流、ACL→error 事件、会话越权 403、断开即失效）；全量 verify 绿。
 - **F16 修订字段级 diff + 路由匹配表达式只读展示（#354，I10，doc 11/10）**：`McpToolRevision.changedFieldsVs`
   纯函数——修订列表每项携带只读 `changedFields`（相邻旧版差异：描述/方法/路径；基线为空）；`McpRouteRules.renderExpression`
   纯函数——路由规则响应增只读 `matchExpression`（与引擎执行的规范条件面同一语义）。前端：修订对话框差异 chips

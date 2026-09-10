@@ -23,12 +23,15 @@ import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 
@@ -99,6 +102,8 @@ public class McpProxyController {
     private static final ConsumerJwtVerifier JWT_VERIFIER = new ConsumerJwtVerifier();
     /** Per-attempt upstream budget (Tencent default 60s). */
     private static final Duration MCP_TIMEOUT = Duration.ofSeconds(60);
+    /** SSE keep-alive comment cadence (issue #356). */
+    private static final Duration SSE_KEEP_ALIVE = Duration.ofSeconds(15);
 
     private final RouteSnapshotProvider routeSnapshotProvider;
     private final WebClient proxyWebClient;
@@ -107,12 +112,13 @@ public class McpProxyController {
     private final McpCircuitBreakerRegistry circuitRegistry;
     private final ObjectProvider<com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider> keyEncryptionProvider;
     private final Scheduler credentialDecryptScheduler;
+    private final McpSseSessionRegistry sseSessions;
     private final Clock clock;
 
     public McpProxyController(RouteSnapshotProvider routeSnapshotProvider, WebClient proxyWebClient,
             ObjectMapper objectMapper, McpAccessLogSink accessLogSink, Clock clock,
             ObjectProvider<com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider> keyEncryptionProvider,
-            Scheduler credentialDecryptScheduler) {
+            Scheduler credentialDecryptScheduler, McpSseSessionRegistry sseSessions) {
         this.routeSnapshotProvider = routeSnapshotProvider;
         this.proxyWebClient = proxyWebClient;
         this.objectMapper = objectMapper;
@@ -120,6 +126,7 @@ public class McpProxyController {
         this.circuitRegistry = new McpCircuitBreakerRegistry(clock);
         this.keyEncryptionProvider = keyEncryptionProvider;
         this.credentialDecryptScheduler = credentialDecryptScheduler;
+        this.sseSessions = sseSessions;
         this.clock = clock;
     }
 
@@ -147,12 +154,108 @@ public class McpProxyController {
             return error(exchange.getResponse(), HttpStatus.NOT_FOUND, "mcp_service_not_found", "Unknown MCP service");
         }
         String gatewayRequestId = UUID.randomUUID().toString();
+        ResponseTarget target = new ExchangeTarget(exchange);
         return exchange.getRequest().getBody().collectList().map(McpProxyController::concatBuffers)
-                .flatMap(body -> authorizeAndForward(exchange, consumer, service, body, gatewayRequestId));
+                .flatMap(body -> authorizeAndForward(exchange, consumer, service, body, gatewayRequestId, target));
+    }
+
+    /**
+     * Inbound MCP SSE transport, stream half (issue #356, I11): same credential /
+     * expiry / scope / service checks as {@code /mcp}, then a single-node in-memory
+     * session whose stream carries the {@code endpoint} announcement, relayed
+     * {@code message} events and gateway {@code error} events. Keep-alive comments
+     * hold the connection; idle sessions end via the registry sweep.
+     */
+    @GetMapping(value = "/mcpservers/{serviceName}/sse")
+    public Mono<Void> sse(ServerWebExchange exchange, @PathVariable String serviceName) {
+        RouteSnapshot snapshot = routeSnapshotProvider.current();
+        RouteSnapshot.ConsumerRecord consumer = authenticate(exchange.getRequest(), snapshot);
+        if (consumer == null || consumer.expiredAt(clock.instant())) {
+            return error(exchange.getResponse(), HttpStatus.UNAUTHORIZED, "invalid_api_key", "Unknown API key");
+        }
+        if (!consumer.allows("mcp:call")) {
+            return error(exchange.getResponse(), HttpStatus.FORBIDDEN, "consumer_scope_denied",
+                    "Consumer is not allowed to call the MCP data plane");
+        }
+        RouteSnapshot.McpServerRecord service = snapshot.mcpService(serviceName);
+        if (service == null) {
+            return error(exchange.getResponse(), HttpStatus.NOT_FOUND, "mcp_service_not_found", "Unknown MCP service");
+        }
+        McpSseSessionRegistry.SseSession session = sseSessions.tryOpen(consumer.id(), service.id(), service.name())
+                .orElse(null);
+        if (session == null) {
+            return error(exchange.getResponse(), HttpStatus.SERVICE_UNAVAILABLE, "session_capacity_exceeded",
+                    "MCP SSE session capacity is exhausted");
+        }
+        ServerHttpResponse response = exchange.getResponse();
+        response.setStatusCode(HttpStatus.OK);
+        response.getHeaders().setContentType(MediaType.TEXT_EVENT_STREAM);
+        response.getHeaders().setCacheControl("no-store");
+        String endpointUrl = "/mcpservers/" + service.name() + "/message?sessionId=" + session.id();
+        Flux<byte[]> frames = Flux
+                .concat(Flux.just(SseFrames.event("endpoint", endpointUrl)), session.frames().asFlux())
+                .publish(shared -> Flux.merge(shared, Flux.interval(SSE_KEEP_ALIVE)
+                        .map(tick -> SseFrames.comment("ping")).takeUntilOther(shared.ignoreElements())));
+        return response.writeAndFlushWith(frames.map(frame -> Mono.just(response.bufferFactory().wrap(frame))))
+                .doFinally(signal -> sseSessions.close(session.id()));
+    }
+
+    /**
+     * Inbound MCP SSE transport, message half (issue #356): transport-level checks
+     * are answered directly (401/403/404), the POST acknowledges with 202 and the
+     * JSON-RPC call then runs the same pipeline as {@code /mcp} with its outcome
+     * delivered on the session stream.
+     */
+    @PostMapping("/mcpservers/{serviceName}/message")
+    public Mono<Void> message(ServerWebExchange exchange, @PathVariable String serviceName,
+            @RequestParam("sessionId") String sessionId) {
+        RouteSnapshot snapshot = routeSnapshotProvider.current();
+        RouteSnapshot.ConsumerRecord consumer = authenticate(exchange.getRequest(), snapshot);
+        if (consumer == null || consumer.expiredAt(clock.instant())) {
+            return error(exchange.getResponse(), HttpStatus.UNAUTHORIZED, "invalid_api_key", "Unknown API key");
+        }
+        if (!consumer.allows("mcp:call")) {
+            return error(exchange.getResponse(), HttpStatus.FORBIDDEN, "consumer_scope_denied",
+                    "Consumer is not allowed to call the MCP data plane");
+        }
+        RouteSnapshot.McpServerRecord service = snapshot.mcpService(serviceName);
+        if (service == null) {
+            return error(exchange.getResponse(), HttpStatus.NOT_FOUND, "mcp_service_not_found", "Unknown MCP service");
+        }
+        McpSseSessionRegistry.SseSession session = null;
+        try {
+            session = sseSessions.find(UUID.fromString(sessionId)).orElse(null);
+        } catch (IllegalArgumentException e) {
+            session = null;
+        }
+        if (session == null || !session.serviceId().equals(service.id())) {
+            return error(exchange.getResponse(), HttpStatus.NOT_FOUND, "unknown_session", "Unknown MCP SSE session");
+        }
+        if (!session.consumerId().equals(consumer.id())) {
+            return error(exchange.getResponse(), HttpStatus.FORBIDDEN, "session_credential_mismatch",
+                    "This SSE session belongs to another consumer credential");
+        }
+        sseSessions.touch(session);
+        String gatewayRequestId = UUID.randomUUID().toString();
+        ResponseTarget target = new SseTarget(session);
+        McpSseSessionRegistry.SseSession boundSession = session;
+        return exchange.getRequest().getBody().collectList().map(McpProxyController::concatBuffers).flatMap(body -> {
+            Mono<Void> dispatch = authorizeAndForward(exchange, consumer, service, body, gatewayRequestId, target)
+                    .onErrorResume(error -> {
+                        log.warn("aigw.mcp.sse.dispatch_failed session={}: {}", boundSession.id(), error.getMessage());
+                        return target.errorResponse(HttpStatus.BAD_GATEWAY, "mcp_upstream_failed",
+                                "MCP upstream call failed");
+                    });
+            // Outcomes stream over the session; the POST acknowledges now.
+            dispatch.subscribe();
+            ServerHttpResponse response = exchange.getResponse();
+            response.setStatusCode(HttpStatus.ACCEPTED);
+            return response.setComplete();
+        });
     }
 
     private Mono<Void> authorizeAndForward(ServerWebExchange exchange, RouteSnapshot.ConsumerRecord consumer,
-            RouteSnapshot.McpServerRecord service, byte[] body, String gatewayRequestId) {
+            RouteSnapshot.McpServerRecord service, byte[] body, String gatewayRequestId, ResponseTarget target) {
         CallContext context = new CallContext(consumer, service, gatewayRequestId);
         try {
             JsonNode envelope = objectMapper.readTree(body);
@@ -161,7 +264,7 @@ public class McpProxyController {
             McpAclMode serverMode = parseMode(service.aclMode());
             if (!McpAccessPolicy.isAllowed(serverMode, service.serverConsumerIds(), null, List.of(), consumer.id())) {
                 record(context, rpcMethod, toolName, McpAccessStatus.SERVICE_DENIED, 403);
-                return error(exchange.getResponse(), HttpStatus.FORBIDDEN, "mcp_access_denied",
+                return target.errorResponse(HttpStatus.FORBIDDEN, "mcp_access_denied",
                         "Consumer is not allowed to call this MCP service");
             }
             RouteSnapshot.McpToolRecord tool = null;
@@ -169,14 +272,14 @@ public class McpProxyController {
                 tool = service.tool(toolName);
                 if (tool == null || !"ENABLED".equals(tool.status())) {
                     record(context, rpcMethod, toolName, McpAccessStatus.TOOL_UNAVAILABLE, 403);
-                    return error(exchange.getResponse(), HttpStatus.FORBIDDEN, "mcp_tool_unavailable",
+                    return target.errorResponse(HttpStatus.FORBIDDEN, "mcp_tool_unavailable",
                             "Tool is unknown or disabled: " + toolName);
                 }
                 McpAclMode overrideMode = parseMode(tool.overrideMode());
                 if (overrideMode != null && !McpAccessPolicy.isAllowed(serverMode, service.serverConsumerIds(),
                         overrideMode, tool.toolConsumerIds(), consumer.id())) {
                     record(context, rpcMethod, toolName, McpAccessStatus.TOOL_DENIED, 403);
-                    return error(exchange.getResponse(), HttpStatus.FORBIDDEN, "mcp_access_denied",
+                    return target.errorResponse(HttpStatus.FORBIDDEN, "mcp_access_denied",
                             "Consumer is not allowed to call tool: " + toolName);
                 }
             }
@@ -188,8 +291,8 @@ public class McpProxyController {
                     : service.resilience();
             String toolHttpMethod = tool == null ? null : tool.method();
             if (!"API_KEY".equals(service.backendAuthMode())) {
-                return forward(exchange, service.endpoint(), body, context, rpcMethod, toolName, toolHttpMethod, policy,
-                        null);
+                return forward(exchange, target, service.endpoint(), body, context, rpcMethod, toolName, toolHttpMethod,
+                        policy, null);
             }
             // Upstream backend credential (#320, Tencent raw 03): decrypt the
             // snapshot ciphertext off the event loop (first use may load key
@@ -200,7 +303,7 @@ public class McpProxyController {
             com.miqroera.miqrokey.domain.crypto.EncryptedSecret encrypted = service.encryptedBackendSecret();
             if (crypto == null || encrypted == null) {
                 record(context, rpcMethod, toolName, McpAccessStatus.UPSTREAM_FAILURE, 502);
-                return error(exchange.getResponse(), HttpStatus.BAD_GATEWAY, "backend_auth_unavailable",
+                return target.errorResponse(HttpStatus.BAD_GATEWAY, "backend_auth_unavailable",
                         "MCP upstream credential is not available");
             }
             return Mono.fromCallable(() -> {
@@ -210,23 +313,23 @@ public class McpProxyController {
                 } finally {
                     com.miqroera.miqrokey.domain.crypto.impl.SecretWiping.clearArray(secret);
                 }
-            }).subscribeOn(credentialDecryptScheduler).flatMap(bearer -> forward(exchange, service.endpoint(), body,
-                    context, rpcMethod, toolName, toolHttpMethod, policy, bearer)).onErrorResume(decryptError -> {
+            }).subscribeOn(credentialDecryptScheduler).flatMap(bearer -> forward(exchange, target, service.endpoint(),
+                    body, context, rpcMethod, toolName, toolHttpMethod, policy, bearer)).onErrorResume(decryptError -> {
                         log.warn("aigw.mcp.backend_auth_failed service={}: {}", service.name(),
                                 decryptError.getMessage());
                         record(context, rpcMethod, toolName, McpAccessStatus.UPSTREAM_FAILURE, 502);
-                        return error(exchange.getResponse(), HttpStatus.BAD_GATEWAY, "backend_auth_unavailable",
+                        return target.errorResponse(HttpStatus.BAD_GATEWAY, "backend_auth_unavailable",
                                 "MCP upstream credential could not be decrypted");
                     });
         } catch (Exception e) {
             log.warn("aigw.mcp.invalid envelope service={}: {}", service.name(), e.getMessage());
             record(context, null, null, McpAccessStatus.INVALID_ENVELOPE, 400);
-            return error(exchange.getResponse(), HttpStatus.BAD_REQUEST, "invalid_jsonrpc", "Invalid JSON-RPC body");
+            return target.errorResponse(HttpStatus.BAD_REQUEST, "invalid_jsonrpc", "Invalid JSON-RPC body");
         }
     }
 
-    private Mono<Void> forward(ServerWebExchange exchange, String endpoint, byte[] body, CallContext context,
-            String rpcMethod, String toolName, String toolHttpMethod, McpResiliencePolicy policy,
+    private Mono<Void> forward(ServerWebExchange exchange, ResponseTarget target, String endpoint, byte[] body,
+            CallContext context, String rpcMethod, String toolName, String toolHttpMethod, McpResiliencePolicy policy,
             String upstreamBearer) {
         ServerHttpRequest in = exchange.getRequest();
         HttpHeaders headers = new HttpHeaders();
@@ -249,8 +352,8 @@ public class McpProxyController {
         McpCircuitBreaker breaker = policy.breakerEnabled()
                 ? circuitRegistry.get(context.service.id(), bucket, policy).breaker()
                 : null;
-        return attempt(exchange, endpoint, body, headers, context, rpcMethod, toolName, toolHttpMethod, policy, breaker,
-                0, new boolean[1]);
+        return attempt(exchange, target, endpoint, body, headers, context, rpcMethod, toolName, toolHttpMethod, policy,
+                breaker, 0, new boolean[1]);
     }
 
     /**
@@ -259,9 +362,9 @@ public class McpProxyController {
      * pre-response transport failure re-enters with {@code attempt + 1} while
      * {@code McpRetryPolicy.shouldRetry} allows it.
      */
-    private Mono<Void> attempt(ServerWebExchange exchange, String endpoint, byte[] body, HttpHeaders headers,
-            CallContext context, String rpcMethod, String toolName, String toolHttpMethod, McpResiliencePolicy policy,
-            McpCircuitBreaker breaker, int attempt, boolean[] rowRecorded) {
+    private Mono<Void> attempt(ServerWebExchange exchange, ResponseTarget target, String endpoint, byte[] body,
+            HttpHeaders headers, CallContext context, String rpcMethod, String toolName, String toolHttpMethod,
+            McpResiliencePolicy policy, McpCircuitBreaker breaker, int attempt, boolean[] rowRecorded) {
         if (breaker != null) {
             McpCircuitBreaker.Decision decision = breaker.beforeCall();
             if (decision == McpCircuitBreaker.Decision.REJECTED) {
@@ -269,7 +372,7 @@ public class McpProxyController {
                 rowRecorded[0] = true;
                 log.info("aigw.mcp.circuit_open requestId={} service={} bucket={}", context.gatewayRequestId,
                         context.service.name(), toolName == null ? rpcMethod : toolName);
-                return error(exchange.getResponse(), HttpStatus.SERVICE_UNAVAILABLE, "circuit_open",
+                return target.errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "circuit_open",
                         "MCP upstream circuit is open");
             }
         }
@@ -287,8 +390,8 @@ public class McpProxyController {
                             McpRetryPolicy.FailureKind.SERVER_5XX, toolHttpMethod, attempt)) {
                         log.info("aigw.mcp.retry requestId={} service={} attempt={} upstreamStatus={}",
                                 context.gatewayRequestId, context.service.name(), attempt, status);
-                        return resp.releaseBody()
-                                .then(Mono.defer(() -> attempt(exchange, endpoint, body, headers, context, rpcMethod,
+                        return resp.releaseBody().then(
+                                Mono.defer(() -> attempt(exchange, target, endpoint, body, headers, context, rpcMethod,
                                         toolName, toolHttpMethod, policy, breaker, attempt + 1, rowRecorded)));
                     }
                     record(context, rpcMethod, toolName, McpAccessStatus.FORWARDED, status);
@@ -296,12 +399,7 @@ public class McpProxyController {
                     if (breaker != null) {
                         breaker.afterCall(!policy.breakerErrorStatusCodes().contains(status), ttfbMs);
                     }
-                    clientResponse.setStatusCode(resp.statusCode());
-                    HttpHeaders out = HeaderFilters.filterResponseHeaders(resp.headers().asHttpHeaders());
-                    clientResponse.getHeaders().addAll(out);
-                    return clientResponse
-                            .writeWith(resp.bodyToFlux(byte[].class).map(b -> clientResponse.bufferFactory().wrap(b)))
-                            .then();
+                    return target.complete(status, resp.headers().asHttpHeaders(), resp.bodyToFlux(byte[].class));
                 }).timeout(MCP_TIMEOUT).onErrorResume(error -> {
                     // A retried inner chain is self-contained (its own timeout +
                     // onErrorResume): once a terminal row was recorded anywhere,
@@ -312,8 +410,8 @@ public class McpProxyController {
                             && McpRetryPolicy.shouldRetry(policy, kind, toolHttpMethod, attempt)) {
                         log.info("aigw.mcp.retry requestId={} service={} attempt={} kind={}", context.gatewayRequestId,
                                 context.service.name(), attempt, kind);
-                        return attempt(exchange, endpoint, body, headers, context, rpcMethod, toolName, toolHttpMethod,
-                                policy, breaker, attempt + 1, rowRecorded);
+                        return attempt(exchange, target, endpoint, body, headers, context, rpcMethod, toolName,
+                                toolHttpMethod, policy, breaker, attempt + 1, rowRecorded);
                     }
                     if (breaker != null) {
                         breaker.afterCall(false, elapsedMs);
@@ -436,8 +534,85 @@ public class McpProxyController {
     private Mono<Void> error(ServerHttpResponse response, HttpStatus status, String type, String message) {
         response.setStatusCode(status);
         response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
-        byte[] bytes = ("{\"error\":{\"type\":\"" + type + "\",\"message\":\"" + message + "\"}}")
+        return response.writeWith(Mono.just(response.bufferFactory().wrap(problemJson(type, message)))).then();
+    }
+
+    /** Gateway error body shared by the direct and SSE transports. */
+    private static byte[] problemJson(String type, String message) {
+        return ("{\"error\":{\"type\":\"" + type + "\",\"message\":\"" + message + "\"}}")
                 .getBytes(StandardCharsets.UTF_8);
-        return response.writeWith(Mono.just(response.bufferFactory().wrap(bytes))).then();
+    }
+
+    private static byte[] join(List<byte[]> chunks) {
+        int total = chunks.stream().mapToInt(chunk -> chunk.length).sum();
+        byte[] joined = new byte[total];
+        int offset = 0;
+        for (byte[] chunk : chunks) {
+            System.arraycopy(chunk, 0, joined, offset, chunk.length);
+            offset += chunk.length;
+        }
+        return joined;
+    }
+
+    /**
+     * Where a call's outcome is delivered: the HTTP exchange (direct POST) or an
+     * SSE session stream.
+     */
+    private interface ResponseTarget {
+
+        /** Delivers the upstream response (status + headers + raw body bytes). */
+        Mono<Void> complete(int status, HttpHeaders headers, Flux<byte[]> body);
+
+        /** Delivers a gateway-shaped error with the shared problem JSON. */
+        Mono<Void> errorResponse(HttpStatus status, String type, String message);
+    }
+
+    /** Direct transport: the current HTTP response (behavior unchanged). */
+    private final class ExchangeTarget implements ResponseTarget {
+
+        private final ServerWebExchange exchange;
+
+        private ExchangeTarget(ServerWebExchange exchange) {
+            this.exchange = exchange;
+        }
+
+        @Override
+        public Mono<Void> complete(int status, HttpHeaders headers, Flux<byte[]> body) {
+            ServerHttpResponse response = exchange.getResponse();
+            response.setStatusCode(HttpStatus.valueOf(status));
+            response.getHeaders().addAll(HeaderFilters.filterResponseHeaders(headers));
+            return response.writeWith(body.map(response.bufferFactory()::wrap)).then();
+        }
+
+        @Override
+        public Mono<Void> errorResponse(HttpStatus status, String type, String message) {
+            return error(exchange.getResponse(), status, type, message);
+        }
+    }
+
+    /**
+     * SSE transport (issue #356): upstream bodies are relayed verbatim as one
+     * {@code message} event (streaming upstream SSE responses are aggregated —
+     * documented v1 limitation); gateway failures travel as {@code error} events
+     * with the same problem JSON as the direct path.
+     */
+    private final class SseTarget implements ResponseTarget {
+
+        private final McpSseSessionRegistry.SseSession session;
+
+        private SseTarget(McpSseSessionRegistry.SseSession session) {
+            this.session = session;
+        }
+
+        @Override
+        public Mono<Void> complete(int status, HttpHeaders headers, Flux<byte[]> body) {
+            return body.collectList().doOnNext(chunks -> session.emit(SseFrames.event("message", join(chunks)))).then();
+        }
+
+        @Override
+        public Mono<Void> errorResponse(HttpStatus status, String type, String message) {
+            session.emit(SseFrames.event("error", problemJson(type, message)));
+            return Mono.empty();
+        }
     }
 }
