@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.gateway.proxy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.miqroera.miqrokey.domain.crypto.ConsumerJwtVerifier;
 import com.miqroera.miqrokey.domain.model.McpAccessLogEntry;
 import com.miqroera.miqrokey.domain.model.McpAccessPolicy;
 import com.miqroera.miqrokey.domain.model.McpAccessStatus;
@@ -93,6 +94,9 @@ public class McpProxyController {
     private static final Logger log = LoggerFactory.getLogger(McpProxyController.class);
 
     private static final String BEARER_PREFIX = "Bearer ";
+    private static final String CONSUMER_KEY_PREFIX = "mqk_api_";
+    /** Stateless RS256 verifier (JDK-native; no key material of its own). */
+    private static final ConsumerJwtVerifier JWT_VERIFIER = new ConsumerJwtVerifier();
     /** Per-attempt upstream budget (Tencent default 60s). */
     private static final Duration MCP_TIMEOUT = Duration.ofSeconds(60);
 
@@ -371,22 +375,38 @@ public class McpProxyController {
         return value.isEmpty() ? null : value;
     }
 
+    /**
+     * Caller authentication (#340): {@code X-API-Key} is key-only; an
+     * {@code Authorization: Bearer} value with the {@code mqk_api_} prefix is a key
+     * (digest scan over the snapshot), anything else is treated as a consumer RS256
+     * JWT — {@code sub} maps to the consumer by name, the signature verifies
+     * against the snapshot PEM, and every failure is a plain null (401, same shape
+     * as an unknown key). Downstream expiry/scope/ ACL checks apply identically to
+     * both credential types.
+     */
     private static RouteSnapshot.ConsumerRecord authenticate(ServerHttpRequest request, RouteSnapshot snapshot) {
-        String token = extractCredential(request);
-        if (token == null || token.isEmpty()) {
+        String apiKeyHeader = request.getHeaders().getFirst("x-api-key");
+        if (apiKeyHeader != null && !apiKeyHeader.isBlank()) {
+            return snapshot.consumerByDigest(sha256(apiKeyHeader.trim()));
+        }
+        String auth = request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+        if (auth == null || !auth.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())
+                || auth.length() <= BEARER_PREFIX.length()) {
             return null;
         }
-        return snapshot.consumerByDigest(sha256(token));
-    }
-
-    private static String extractCredential(ServerHttpRequest request) {
-        String auth = request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
-        if (auth != null && auth.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())
-                && auth.length() > BEARER_PREFIX.length()) {
-            return auth.substring(BEARER_PREFIX.length()).trim();
+        String token = auth.substring(BEARER_PREFIX.length()).trim();
+        if (token.startsWith(CONSUMER_KEY_PREFIX)) {
+            return snapshot.consumerByDigest(sha256(token));
         }
-        String apiKey = request.getHeaders().getFirst("x-api-key");
-        return apiKey == null ? null : apiKey.trim();
+        String subject = ConsumerJwtVerifier.extractSubject(token);
+        if (subject == null) {
+            return null;
+        }
+        RouteSnapshot.ConsumerRecord consumer = snapshot.consumerByName(subject);
+        if (consumer == null || consumer.jwtPublicKeyPem() == null) {
+            return null;
+        }
+        return JWT_VERIFIER.verify(token, consumer.jwtPublicKeyPem(), subject) ? consumer : null;
     }
 
     private static byte[] concatBuffers(List<DataBuffer> buffers) {

@@ -1,7 +1,4 @@
-package com.miqroera.miqrokey.controlplane.security;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+package com.miqroera.miqrokey.domain.crypto;
 
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
@@ -20,9 +17,16 @@ import java.util.HexFormat;
  * Accepts only the {@code RS256} algorithm, parses the three JWT segments as
  * padding-less Base64url, validates {@code exp}/{@code nbf} against an
  * injectable clock and verifies the signature with the consumer's RSA public
- * key (PEM SubjectPublicKeyInfo). No third-party JWT library: the surface is
- * deliberately tiny, so every failure mode (wrong alg, tampered payload,
- * expired token, oversized claims) is an explicit false.
+ * key (PEM SubjectPublicKeyInfo).
+ *
+ * <p>
+ * No third-party JWT or JSON library: the header and claims are read by the
+ * strict built-in {@link MinimalJson} scanner (the domain module must not
+ * depend on serialization libraries), and claim values are never coerced — a
+ * claim of the wrong JSON type fails verification instead of being converted.
+ * The surface is deliberately tiny, so every failure mode (wrong alg, tampered
+ * payload, expired token, oversized claims) is an explicit false.
+ * </p>
  */
 public final class ConsumerJwtVerifier {
 
@@ -32,8 +36,6 @@ public final class ConsumerJwtVerifier {
     public static final int MAX_PAYLOAD_BYTES = 8 * 1024;
     /** Standard clock-skew tolerance for {@code nbf}. */
     public static final Duration NBF_TOLERANCE = Duration.ofSeconds(60);
-
-    private static final ObjectMapper JSON = new ObjectMapper();
 
     private final Clock clock;
 
@@ -71,25 +73,24 @@ public final class ConsumerJwtVerifier {
                 return false;
             }
 
-            JsonNode headerNode = JSON.readTree(header);
-            if (headerNode == null || !"RS256".equals(headerNode.path("alg").asText())) {
+            MinimalJson headerJson = MinimalJson.parse(header);
+            if (headerJson == null || !"RS256".equals(headerJson.string("alg"))) {
                 return false;
             }
 
-            JsonNode claims = JSON.readTree(payload);
-            if (claims == null) {
+            MinimalJson claims = MinimalJson.parse(payload);
+            if (claims == null || !expectedSubject.equals(claims.string("sub"))) {
                 return false;
             }
-            if (!expectedSubject.equals(claims.path("sub").asText())) {
+            Long exp = claims.integer("exp");
+            if (exp == null || exp < 0 || !Instant.ofEpochSecond(exp).isAfter(clock.instant())) {
                 return false;
             }
-            long exp = claims.path("exp").asLong(-1);
-            if (exp < 0 || !Instant.ofEpochSecond(exp).isAfter(clock.instant())) {
-                return false;
-            }
-            if (claims.hasNonNull("nbf") && Instant.ofEpochSecond(claims.path("nbf").asLong())
-                    .isAfter(clock.instant().plus(NBF_TOLERANCE))) {
-                return false;
+            if (claims.has("nbf")) {
+                Long nbf = claims.integer("nbf");
+                if (nbf == null || Instant.ofEpochSecond(nbf).isAfter(clock.instant().plus(NBF_TOLERANCE))) {
+                    return false;
+                }
             }
 
             byte[] data = (parts[0] + "." + parts[1]).getBytes(StandardCharsets.US_ASCII);
@@ -124,11 +125,11 @@ public final class ConsumerJwtVerifier {
             if (payload == null || payload.length > MAX_PAYLOAD_BYTES) {
                 return null;
             }
-            JsonNode claims = JSON.readTree(payload);
+            MinimalJson claims = MinimalJson.parse(payload);
             if (claims == null) {
                 return null;
             }
-            String sub = claims.path("sub").asText(null);
+            String sub = claims.string("sub");
             return sub == null || sub.isBlank() ? null : sub;
         } catch (Exception e) {
             return null;

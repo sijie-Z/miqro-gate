@@ -260,7 +260,7 @@ public final class JdbcRouteSnapshotLoader {
     private Map<String, RouteSnapshot.ConsumerRecord> loadConsumers() {
         Map<String, RouteSnapshot.ConsumerRecord> byDigest = new LinkedHashMap<>();
         jdbc.query("""
-                SELECT id, tenant_id, name, key_digest, capabilities, expires_at
+                SELECT id, tenant_id, name, key_digest, capabilities, expires_at, jwt_public_key_pem
                 FROM api_consumers
                 WHERE status = 'ACTIVE'
                 """, (rs, rowNum) -> {
@@ -268,7 +268,8 @@ public final class JdbcRouteSnapshotLoader {
             byDigest.putIfAbsent(id.toString(),
                     new RouteSnapshot.ConsumerRecord(id, (UUID) rs.getObject("tenant_id"), rs.getString("name"),
                             rs.getBytes("key_digest"), capabilities(rs),
-                            rs.getTimestamp("expires_at") != null ? rs.getTimestamp("expires_at").toInstant() : null));
+                            rs.getTimestamp("expires_at") != null ? rs.getTimestamp("expires_at").toInstant() : null,
+                            rs.getString("jwt_public_key_pem")));
             return null;
         });
         return byDigest;

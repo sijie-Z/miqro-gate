@@ -668,6 +668,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 - 外部通道只暴露配额数字与权威级别，不含内部错误消息与 provider 状态载荷（`errorMessage`/`providerStatusJson` 仅管理员面可见）
 - API Key 格式 `mqk_api_<8 hex>_<32 hex>`，仅存 SHA-256 哈希；提交方式 `X-API-Key` 或 `Authorization: Bearer mqk_api_…`
 - **JWT 凭据（ADR-0011）**：`Authorization: Bearer <jwt>`（非 `mqk_api_` 前缀即按 JWT 处理）——RS256 签名，`sub` = 消费者名称，`exp` 必填且未过期（`nbf` 可选）；网关用消费者配置的 RSA 公钥验签，`X-API-Key` 头只接受 API Key。平台自持私钥签发，公钥经管理 API 一次性配置。
+- **同一凭据亦用于 MCP 数据面（#340）**：`/mcpservers/{name}/mcp` 接受消费者 Key（快照摘要）或消费者 JWT（快照携带 PEM，`sub`→消费者名验签）；验签失败/未知 sub/未配公钥 → `401 invalid_api_key`（与未知 Key 同形），随后到期（#322）与 `mcp:call` 作用域（#316）检查与 Key 通道完全一致；`X-API-Key` 头只接受 API Key。
 - 响应仅元数据（时间/模型/Token/成本/配额），无正文
 - 错误码：`CONSUMER_NAME_TAKEN`（409）、`CONSUMER_NOT_FOUND`（404）、`CONSUMER_ALREADY_DISABLED`（409）、`JWT_KEY_INVALID`（400）、匿名 401
 

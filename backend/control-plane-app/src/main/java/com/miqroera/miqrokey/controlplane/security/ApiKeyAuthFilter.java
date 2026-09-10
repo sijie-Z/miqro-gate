@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.security;
 
+import com.miqroera.miqrokey.domain.crypto.ConsumerJwtVerifier;
 import com.miqroera.miqrokey.domain.model.ApiConsumer;
 import com.miqroera.miqrokey.domain.repository.ApiConsumerRepository;
 import jakarta.servlet.FilterChain;

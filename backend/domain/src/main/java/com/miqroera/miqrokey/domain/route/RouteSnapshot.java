@@ -236,6 +236,21 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
     }
 
     /** Finds an ACTIVE consumer by its API-key digest (small set, linear scan). */
+    /**
+     * Consumer by name (#340): the JWT {@code sub} maps here before verification.
+     */
+    public ConsumerRecord consumerByName(String name) {
+        if (name == null) {
+            return null;
+        }
+        for (ConsumerRecord consumer : consumersByDigest.values()) {
+            if (name.equals(consumer.name())) {
+                return consumer;
+            }
+        }
+        return null;
+    }
+
     public ConsumerRecord consumerByDigest(byte[] digestBytes) {
         for (ConsumerRecord consumer : consumersByDigest.values()) {
             if (java.security.MessageDigest.isEqual(consumer.digest(), digestBytes)) {
@@ -261,16 +276,22 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
      * when full; the MCP channel requires {@code mcp:call}.
      */
     public record ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest,
-            java.util.List<String> capabilities, java.time.Instant expiresAt) {
+            java.util.List<String> capabilities, java.time.Instant expiresAt, String jwtPublicKeyPem) {
 
-        /** Legacy constructor: no scope, never expires. */
+        /** Legacy constructor: no scope, never expires, no JWT key. */
         public ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest) {
-            this(id, tenantId, name, digest, null, null);
+            this(id, tenantId, name, digest, null, null, null);
         }
 
-        /** Legacy constructor: no expiry. */
+        /** Legacy constructor: no expiry, no JWT key. */
         public ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest, java.util.List<String> capabilities) {
-            this(id, tenantId, name, digest, capabilities, null);
+            this(id, tenantId, name, digest, capabilities, null, null);
+        }
+
+        /** Legacy constructor: no JWT key (#340 added the PEM for the data plane). */
+        public ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest, java.util.List<String> capabilities,
+                java.time.Instant expiresAt) {
+            this(id, tenantId, name, digest, capabilities, expiresAt, null);
         }
 
         public ConsumerRecord {

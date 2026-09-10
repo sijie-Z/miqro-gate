@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.config;
 
+import com.miqroera.miqrokey.domain.crypto.ConsumerJwtVerifier;
 import com.miqroera.miqrokey.controlplane.security.AdminIpAllowlistFilter;
 import com.miqroera.miqrokey.controlplane.security.AuthenticationService;
 import com.miqroera.miqrokey.controlplane.security.CsrfInterceptor;
@@ -7,7 +8,6 @@ import com.miqroera.miqrokey.controlplane.security.IpCidrMatcher;
 import com.miqroera.miqrokey.controlplane.security.OriginInterceptor;
 import com.miqroera.miqrokey.controlplane.security.RoleInterceptor;
 import com.miqroera.miqrokey.controlplane.security.ApiKeyAuthFilter;
-import com.miqroera.miqrokey.controlplane.security.ConsumerJwtVerifier;
 import com.miqroera.miqrokey.controlplane.security.SessionFilter;
 import com.miqroera.miqrokey.controlplane.security.SessionService;
 import com.miqroera.miqrokey.controlplane.security.UserContext;

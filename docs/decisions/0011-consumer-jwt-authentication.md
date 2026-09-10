@@ -31,3 +31,11 @@
 - 新增 `ConsumerJwtVerifier`（JDK 原生 RS256 验签 + claims 校验 + 大小上限），管理 API 校验 PEM 可解析为 RSA 公钥。
 - 安全边界：token/payload 大小上限（防大 claim DoS）；`alg=none`/非 RS256 一律拒绝；禁用消费者的 JWT 一律拒绝。
 - 平台接入：管理员为消费者配置公钥（平台提供 PEM）→ 平台用自己的私钥签 JWT（`sub`=消费者名，`exp` 短期）→ 调计费 API。API Key 通道不受影响。
+
+## 增补 2026-09-10（#340）
+
+同一消费者 JWT 的适用范围由计费通道（`/api/v1/billing/**`）扩展至 **MCP 数据面**
+（`POST /mcpservers/{name}/mcp`）：`sub` 经路由快照按名映射消费者，RS256 验签用快照携带的
+`jwt_public_key_pem`（快照随消费者变更刷新）；验签失败/未知 sub/未配公钥与未知 Key 同形 401，
+随后到期与能力作用域检查与 Key 通道一致。`X-API-Key` 头保持 Key-only。验签器（`ConsumerJwtVerifier`）
+上移至 domain 模块（纯 JDK 实现：自带严格 JSON 扫描、claims 不做类型强转，domain 不依赖序列化库）供两个进程复用；无新增产品决策，属本 ADR 既定机制的范围扩展。
