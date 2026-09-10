@@ -2589,6 +2589,8 @@ export interface components {
             /** Format: date-time */
             createdAt?: string;
             capabilities?: string[];
+            /** Format: date-time */
+            expiresAt?: string;
         };
         CreateVirtualKeyRequest: {
             name?: string;
