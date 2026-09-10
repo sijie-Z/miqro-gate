@@ -37,13 +37,14 @@ public final class PostgresMcpAccessLogWriter implements McpAccessLogWriter {
                     .addValue("rpcMethod", e.rpcMethod()).addValue("toolName", e.toolName())
                     .addValue("status", e.status().name()).addValue("httpStatus", e.httpStatus())
                     .addValue("gatewayRequestId", e.gatewayRequestId())
-                    .addValue("occurredAt", Timestamp.from(e.occurredAt())));
+                    .addValue("occurredAt", Timestamp.from(e.occurredAt())).addValue("sessionId", e.sessionId())
+                    .addValue("ttfbMs", e.ttfbMs()));
         }
         jdbc.batchUpdate("""
                 INSERT INTO mcp_access_log (id, tenant_id, service_id, service_name, consumer_id, consumer_name,
-                    rpc_method, tool_name, status, http_status, gateway_request_id, occurred_at)
+                    rpc_method, tool_name, status, http_status, gateway_request_id, occurred_at, session_id, ttfb_ms)
                 VALUES (:id, :tenantId, :serviceId, :serviceName, :consumerId, :consumerName, :rpcMethod, :toolName,
-                    :status, :httpStatus, :gatewayRequestId, :occurredAt)
+                    :status, :httpStatus, :gatewayRequestId, :occurredAt, :sessionId, :ttfbMs)
                 ON CONFLICT (tenant_id, gateway_request_id) DO NOTHING
                 """, params.toArray(new MapSqlParameterSource[0]));
     }

@@ -151,8 +151,10 @@ class McpAccessLogIntegrationTest {
     }
 
     private Map<String, Object> singleRow() {
-        return jdbc.queryForMap("SELECT service_name, consumer_name, rpc_method, tool_name, status, http_status,"
-                + " tenant_id, gateway_request_id FROM mcp_access_log", new MapSqlParameterSource());
+        return jdbc.queryForMap(
+                "SELECT service_name, consumer_name, rpc_method, tool_name, status, http_status,"
+                        + " tenant_id, gateway_request_id, session_id, ttfb_ms FROM mcp_access_log",
+                new MapSqlParameterSource());
     }
 
     @Test
@@ -172,6 +174,26 @@ class McpAccessLogIntegrationTest {
         assertThat(row.get("status")).isEqualTo("FORWARDED");
         assertThat(row.get("http_status")).isEqualTo(200);
         assertThat(row.get("gateway_request_id")).isNotNull();
+        // No Session-Id header on this call: no session correlation, but latency
+        // recorded (#358).
+        assertThat(row.get("session_id")).isNull();
+        assertThat(((Number) row.get("ttfb_ms")).longValue()).isGreaterThanOrEqualTo(0L);
+    }
+
+    @Test
+    @DisplayName("a forwarded call carries the Session-Id header and upstream first-byte latency (#358)")
+    void forwardedCallRecordsSessionAndLatency() {
+        mockServer.setResponse("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}", 200);
+        webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE).headers(h -> {
+            h.set(HttpHeaders.AUTHORIZATION, "Bearer " + GatewayTestKeys.MCP_OUTSIDER.presentedKey());
+            h.set("Session-Id", "sess-log-7");
+        }).bodyValue(envelope("tools/list", null)).exchange().expectStatus().isOk();
+        awaitRowCount(1);
+
+        Map<String, Object> row = singleRow();
+        assertThat(row.get("session_id")).isEqualTo("sess-log-7");
+        assertThat(((Number) row.get("ttfb_ms")).longValue()).isGreaterThanOrEqualTo(0L);
+        assertThat(row.get("status")).isEqualTo("FORWARDED");
     }
 
     @Test

@@ -17,6 +17,8 @@ const rows: McpAccessLogEntry[] = [
     toolName: 'forecast',
     status: 'FORWARDED',
     httpStatus: 200,
+    sessionId: 'sess-log-1',
+    ttfbMs: 42,
     gatewayRequestId: 'req-0001',
     occurredAt: '2026-09-05T08:00:00Z',
   },
@@ -49,6 +51,8 @@ describe('NextAdminMcpAccessLogsView', () => {
     expect(wrapper.text()).toContain('weather-mcp');
     expect(wrapper.text()).toContain('drill-allowed');
     expect(wrapper.text()).toContain('已转发');
+    expect(wrapper.text()).toContain('sess-log-1');
+    expect(wrapper.text()).toContain('42 ms');
     expect(wrapper.text()).toContain('服务被拒');
     expect(wrapper.text()).toContain('tools/call');
     expect(wrapper.text()).toContain('200');

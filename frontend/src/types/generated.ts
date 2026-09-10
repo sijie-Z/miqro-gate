@@ -3833,6 +3833,9 @@ export interface components {
             gatewayRequestId?: string;
             /** Format: date-time */
             occurredAt?: string;
+            sessionId?: string;
+            /** Format: int64 */
+            ttfbMs?: number;
         };
         CredentialDetailView: {
             credential?: components["schemas"]["CredentialView"];

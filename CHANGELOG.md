@@ -5,6 +5,10 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **MCP 访问日志补 session_id / ttfb_ms（#358，I12，doc 16）**：V45 两列（纯加列）；网关写入 `session_id`
+  （客户端 Session-Id 头；SSE 分发未带头回落入站会话 id）与 `ttfb_ms`（上游首字节，仅 FORWARDED，重试按最终
+  成功计）；管理/开放读面与前端日志页两列同步（null 占位 —）。验证：网关 F15 集成 5/5（新增带会话头的转发
+  行断言 + 无头行 null 断言）、既有契约 30 例原样通过；OpenAPI 再生无破坏 + gen:types。
 - **入站 MCP SSE 双端点（#356，I11，ADR-0013 二期）**：`GET /mcpservers/{name}/sse`（单节点内存会话 +
   endpoint 事件 + 15s 保活 + 容量 256/空闲 5 分钟回收）+ `POST /mcpservers/{name}/message`（传输级检查直答、
   202 后沿与 /mcp 完全同一流水线分发，结果以 `message`/`error` 事件回流；上游响应体逐字节原样，v1 上游流式

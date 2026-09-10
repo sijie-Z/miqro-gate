@@ -947,6 +947,7 @@ MCP 代理调用（F01 入口 `/mcpservers/{serviceName}/mcp`）的**纯元数�
 - **写入口**：网关 `McpAccessLogSink`（有界队列 4096 + 1s 周期 flush；饱和 drop+计数 WARN；批量失败整批重入队重试）。写入幂等：`(tenant_id, gateway_request_id)` 唯一，重试 flush 不双写。参数 `miqrokey.gateway.mcp-log.capacity` / `.flush-interval-ms`。
 - **不落行**：预解析失败（401 未知 Key、404 未知服务）无可信身份，仅留在请求日志——与 usage_event 同口径。
 - **查询语义**：新→旧排序（`occurred_at DESC, id DESC`）；`service`/`consumer` 按名称精确过滤；`from`/`to`（ISO-8601 instant，含 `Z`）默认近 24h，窗口 ≤ 31 天（`TIME_RANGE_TOO_WIDE`）；`from > to` → `TIME_RANGE_INVALID`；`limit` 默认 200、上限 1000（`SIZE_INVALID`）；`from/to` 非法格式 → `PARAM_INVALID`。
+- **会话与耗时（#358，I12，raw 16）**：行含 `sessionId`（客户端 `Session-Id` 头；SSE 双端点分发未带头时回落为入站会话 id；皆无为空）与 `ttfbMs`（上游首字节毫秒，**仅 FORWARDED 行**；重试按最终成功那次计）——会话过滤参数为后续增强。
 - 权限：SYSTEM_ADMIN-only（deny-by-default）；只读端点无审计事件。
 
 | 参数 | 类型 | 缺省 |

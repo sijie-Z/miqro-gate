@@ -25,6 +25,8 @@ const columns = [
   { key: 'toolName', title: '工具', minWidth: '120px' },
   { key: 'status', title: '结果', width: '150px' },
   { key: 'httpStatus', title: 'HTTP', width: '80px', align: 'center' as const },
+  { key: 'sessionId', title: '会话', width: '150px' },
+  { key: 'ttfbMs', title: '首字节', width: '90px', align: 'right' as const },
   { key: 'gatewayRequestId', title: '网关请求 ID', width: '300px' },
 ];
 
@@ -152,6 +154,16 @@ onMounted(load);
         </template>
         <template #httpStatus="{ row }">
           <span class="ui-mono">{{ (row as McpAccessLogEntry).httpStatus ?? '—' }}</span>
+        </template>
+        <template #sessionId="{ row }">
+          <span class="ui-mono ui-muted" :title="(row as McpAccessLogEntry).sessionId">{{
+            (row as McpAccessLogEntry).sessionId?.slice(0, 12) ?? '—'
+          }}</span>
+        </template>
+        <template #ttfbMs="{ row }">
+          <span class="ui-num">{{
+            (row as McpAccessLogEntry).ttfbMs != null ? `${(row as McpAccessLogEntry).ttfbMs} ms` : '—'
+          }}</span>
         </template>
         <template #gatewayRequestId="{ row }">
           <span class="ui-mono ui-muted" :title="(row as McpAccessLogEntry).gatewayRequestId">{{

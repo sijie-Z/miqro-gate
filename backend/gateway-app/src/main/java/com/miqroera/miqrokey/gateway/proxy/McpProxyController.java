@@ -154,9 +154,10 @@ public class McpProxyController {
             return error(exchange.getResponse(), HttpStatus.NOT_FOUND, "mcp_service_not_found", "Unknown MCP service");
         }
         String gatewayRequestId = UUID.randomUUID().toString();
+        String logSessionId = exchange.getRequest().getHeaders().getFirst("Session-Id");
         ResponseTarget target = new ExchangeTarget(exchange);
-        return exchange.getRequest().getBody().collectList().map(McpProxyController::concatBuffers)
-                .flatMap(body -> authorizeAndForward(exchange, consumer, service, body, gatewayRequestId, target));
+        return exchange.getRequest().getBody().collectList().map(McpProxyController::concatBuffers).flatMap(
+                body -> authorizeAndForward(exchange, consumer, service, body, gatewayRequestId, logSessionId, target));
     }
 
     /**
@@ -240,8 +241,12 @@ public class McpProxyController {
         ResponseTarget target = new SseTarget(session);
         McpSseSessionRegistry.SseSession boundSession = session;
         return exchange.getRequest().getBody().collectList().map(McpProxyController::concatBuffers).flatMap(body -> {
-            Mono<Void> dispatch = authorizeAndForward(exchange, consumer, service, body, gatewayRequestId, target)
-                    .onErrorResume(error -> {
+            // Log-row session correlation (#358): the client's Session-Id header
+            // wins; otherwise this inbound SSE session identifies the conversation.
+            String headerSessionId = exchange.getRequest().getHeaders().getFirst("Session-Id");
+            String logSessionId = headerSessionId != null ? headerSessionId : boundSession.id().toString();
+            Mono<Void> dispatch = authorizeAndForward(exchange, consumer, service, body, gatewayRequestId, logSessionId,
+                    target).onErrorResume(error -> {
                         log.warn("aigw.mcp.sse.dispatch_failed session={}: {}", boundSession.id(), error.getMessage());
                         return target.errorResponse(HttpStatus.BAD_GATEWAY, "mcp_upstream_failed",
                                 "MCP upstream call failed");
@@ -255,8 +260,9 @@ public class McpProxyController {
     }
 
     private Mono<Void> authorizeAndForward(ServerWebExchange exchange, RouteSnapshot.ConsumerRecord consumer,
-            RouteSnapshot.McpServerRecord service, byte[] body, String gatewayRequestId, ResponseTarget target) {
-        CallContext context = new CallContext(consumer, service, gatewayRequestId);
+            RouteSnapshot.McpServerRecord service, byte[] body, String gatewayRequestId, String logSessionId,
+            ResponseTarget target) {
+        CallContext context = new CallContext(consumer, service, gatewayRequestId, logSessionId);
         try {
             JsonNode envelope = objectMapper.readTree(body);
             String rpcMethod = textOrNull(envelope.path("method"));
@@ -394,7 +400,7 @@ public class McpProxyController {
                                 Mono.defer(() -> attempt(exchange, target, endpoint, body, headers, context, rpcMethod,
                                         toolName, toolHttpMethod, policy, breaker, attempt + 1, rowRecorded)));
                     }
-                    record(context, rpcMethod, toolName, McpAccessStatus.FORWARDED, status);
+                    record(context, rpcMethod, toolName, McpAccessStatus.FORWARDED, status, ttfbMs);
                     rowRecorded[0] = true;
                     if (breaker != null) {
                         breaker.afterCall(!policy.breakerErrorStatusCodes().contains(status), ttfbMs);
@@ -447,21 +453,36 @@ public class McpProxyController {
 
     private void record(CallContext context, String rpcMethod, String toolName, McpAccessStatus status,
             Integer httpStatus) {
+        record(context, rpcMethod, toolName, status, httpStatus, null);
+    }
+
+    /**
+     * FORWARDED rows carry the upstream first-byte latency (#358); others pass
+     * null.
+     */
+    private void record(CallContext context, String rpcMethod, String toolName, McpAccessStatus status,
+            Integer httpStatus, Long ttfbMs) {
         accessLogSink.record(new McpAccessLogEntry(UUID.randomUUID(), context.service.tenantId(), context.service.id(),
                 context.service.name(), context.consumer.id(), context.consumer.name(), rpcMethod, toolName, status,
-                httpStatus, context.gatewayRequestId, Instant.now()));
+                httpStatus, context.gatewayRequestId, Instant.now(), context.sessionId, ttfbMs));
     }
 
     private static final class CallContext {
         private final RouteSnapshot.ConsumerRecord consumer;
         private final RouteSnapshot.McpServerRecord service;
         private final String gatewayRequestId;
+        /**
+         * Log-row session correlation (client Session-Id header or inbound SSE
+         * session).
+         */
+        private final String sessionId;
 
         private CallContext(RouteSnapshot.ConsumerRecord consumer, RouteSnapshot.McpServerRecord service,
-                String gatewayRequestId) {
+                String gatewayRequestId, String sessionId) {
             this.consumer = consumer;
             this.service = service;
             this.gatewayRequestId = gatewayRequestId;
+            this.sessionId = sessionId;
         }
     }
 
