@@ -68,6 +68,40 @@ public class AdminServiceService {
         return updated;
     }
 
+    /** Re-enables a disabled service (#326); mirror of disable with audit. */
+    @Transactional
+    public InternalService enable(UUID tenantId, UUID adminId, UUID serviceId, String requestId) {
+        InternalService service = find(tenantId, serviceId);
+        if ("ACTIVE".equals(service.status())) {
+            throw new ApiException(HttpStatus.CONFLICT, "SERVICE_ALREADY_ENABLED", "服务已启用。");
+        }
+        InternalService updated = serviceRepository.updateStatus(tenantId, serviceId, "ACTIVE", service.version());
+        auditService.record(tenantId, adminId, "SERVICE_ENABLE", "SERVICE", serviceId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(service.name())), requestId);
+        return updated;
+    }
+
+    /** Health probe configuration (partial update, mirror of the MCP endpoint). */
+    @Transactional
+    public InternalService updateHealthConfig(UUID tenantId, UUID adminId, UUID serviceId, Integer checkIntervalSeconds,
+            Integer checkTimeoutSeconds, Integer failThreshold, Integer recoverThreshold, String checkPath,
+            String requestId) {
+        InternalService service = find(tenantId, serviceId);
+        InternalService updated = new InternalService(service.id(), service.tenantId(), service.name(), service.kind(),
+                service.description(), service.baseUrl(), service.status(), service.version(), service.createdBy(),
+                service.createdAt(), service.updatedAt(), service.healthStatus(), service.healthCheckedAt(),
+                service.consecutiveFailures(), service.consecutiveSuccesses(),
+                checkIntervalSeconds != null ? checkIntervalSeconds : service.checkIntervalSeconds(),
+                checkTimeoutSeconds != null ? checkTimeoutSeconds : service.checkTimeoutSeconds(),
+                failThreshold != null ? failThreshold : service.failThreshold(),
+                recoverThreshold != null ? recoverThreshold : service.recoverThreshold(),
+                checkPath != null && !checkPath.isBlank() ? checkPath : service.checkPath());
+        InternalService saved = serviceRepository.update(updated, service.version());
+        auditService.record(tenantId, adminId, "SERVICE_HEALTH_UPDATE", "SERVICE", serviceId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(service.name())), requestId);
+        return saved;
+    }
+
     /** https required, no userinfo, no query/fragment — mirror upstream rules. */
     static String validateBaseUrl(String baseUrl) {
         if (baseUrl == null || baseUrl.isBlank()) {

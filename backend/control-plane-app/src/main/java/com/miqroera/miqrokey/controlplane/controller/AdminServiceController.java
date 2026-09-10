@@ -5,6 +5,8 @@ import com.miqroera.miqrokey.controlplane.service.AdminServiceService;
 import com.miqroera.miqrokey.domain.model.InternalService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -56,6 +58,28 @@ public class AdminServiceController {
     public InternalService disable(@PathVariable UUID serviceId, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return serviceService.disable(user.tenantId(), user.id(), serviceId, requestId(httpReq));
+    }
+
+    /** Re-enables a disabled service (#326; mirror of disable). */
+    @PostMapping("/{serviceId}/enable")
+    public InternalService enable(@PathVariable UUID serviceId, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return serviceService.enable(user.tenantId(), user.id(), serviceId, requestId(httpReq));
+    }
+
+    /** Health probe configuration (#326; partial update). */
+    @PostMapping("/{serviceId}/health-config")
+    public InternalService updateHealthConfig(@PathVariable UUID serviceId,
+            @Valid @RequestBody HealthConfigRequest body, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return serviceService.updateHealthConfig(user.tenantId(), user.id(), serviceId, body.checkIntervalSeconds(),
+                body.checkTimeoutSeconds(), body.failThreshold(), body.recoverThreshold(), body.checkPath(),
+                requestId(httpReq));
+    }
+
+    public record HealthConfigRequest(@Min(5) @Max(3600) Integer checkIntervalSeconds,
+            @Min(1) @Max(60) Integer checkTimeoutSeconds, @Min(1) @Max(20) Integer failThreshold,
+            @Min(1) @Max(20) Integer recoverThreshold, @Size(max = 512) String checkPath) {
     }
 
     private static String requestId(HttpServletRequest request) {

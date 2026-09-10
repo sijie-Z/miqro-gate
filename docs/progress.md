@@ -13,6 +13,15 @@
   （leader）、F32/F33 平台接口（BLOCKED）、F19 账单对账（等真实样本）**）
 - Last updated: `2026-09-09 CST`
 
+## 会话交接点 2026-09-10（下午，服务注册表运行时治理：#326）
+
+- **#326 服务注册表运行时治理（本 PR）**：V40 健康探测列（镜像 mcp_services）；`enable` 端点补齐上下线对称
+  （审计 SERVICE_ENABLE；重复启用 409）；`health-config` 部分更新（审计 SERVICE_HEALTH_UPDATE）；
+  `ServiceHealthChecker` 探测 ACTIVE 服务（GET baseUrl+checkPath、2xx 计健康、阈值迁移、DISABLED 不探测、
+  乐观锁并发跳过）；前端健康徽标/最近检查/启用/配置对话框。验证：单测 2/2 + IT 3/3、FE 三件套、全量 verify 绿后合入。
+- 盘点闭环总览：rc.9（#314-316）→ #320（MCP 后端鉴权）→ #322（消费者到期）→ #324（审计二批）→ rc.10 →
+  #326（服务运行时）；leader 三词的 NOW 可实现项已全部交付。下一批候选=攒 rc.11 或等外部输入。
+
 ## 会话交接点 2026-09-10（午间，审计覆盖第二批：#324）
 
 - **#324 审计覆盖第二批（本 PR）**：兑现 #315 备注 follow-up——告警规则/Webhook/预算/全局配置/模型目录

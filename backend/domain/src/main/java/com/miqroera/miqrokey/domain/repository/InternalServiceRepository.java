@@ -19,4 +19,10 @@ public interface InternalServiceRepository {
 
     /** Status update with optimistic version bump; returns the stored row. */
     InternalService updateStatus(UUID tenantId, UUID serviceId, String status, long expectedVersion);
+
+    /** ACTIVE services only — the health checker's probe list (#326). */
+    List<InternalService> findAllActiveByTenantId(UUID tenantId);
+
+    /** Full-row update with optimistic lock (health checker writes, #326). */
+    InternalService update(InternalService service, long expectedVersion);
 }

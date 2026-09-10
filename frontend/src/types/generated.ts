@@ -580,6 +580,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/services/{serviceId}/health-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["updateHealthConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/services/{serviceId}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["enable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/services/{serviceId}/disable": {
         parameters: {
             query?: never;
@@ -605,7 +637,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["enable"];
+        post: operations["enable_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -877,7 +909,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["updateHealthConfig"];
+        post: operations["updateHealthConfig_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2947,6 +2979,33 @@ export interface components {
             createdAt?: string;
             /** Format: date-time */
             updatedAt?: string;
+            healthStatus?: string;
+            /** Format: date-time */
+            healthCheckedAt?: string;
+            /** Format: int32 */
+            consecutiveFailures?: number;
+            /** Format: int32 */
+            consecutiveSuccesses?: number;
+            /** Format: int32 */
+            checkIntervalSeconds?: number;
+            /** Format: int32 */
+            checkTimeoutSeconds?: number;
+            /** Format: int32 */
+            failThreshold?: number;
+            /** Format: int32 */
+            recoverThreshold?: number;
+            checkPath?: string;
+        };
+        HealthConfigRequest: {
+            /** Format: int32 */
+            checkIntervalSeconds?: number;
+            /** Format: int32 */
+            checkTimeoutSeconds?: number;
+            /** Format: int32 */
+            failThreshold?: number;
+            /** Format: int32 */
+            recoverThreshold?: number;
+            checkPath?: string;
         };
         Project: {
             /** Format: uuid */
@@ -3123,17 +3182,6 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
             default?: boolean;
-        };
-        HealthConfigRequest: {
-            /** Format: int32 */
-            checkIntervalSeconds?: number;
-            /** Format: int32 */
-            checkTimeoutSeconds?: number;
-            /** Format: int32 */
-            failThreshold?: number;
-            /** Format: int32 */
-            recoverThreshold?: number;
-            checkPath?: string;
         };
         ProjectProviderGrant: {
             /** Format: uuid */
@@ -5036,6 +5084,54 @@ export interface operations {
             };
         };
     };
+    updateHealthConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HealthConfigRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["InternalService"];
+                };
+            };
+        };
+    };
+    enable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["InternalService"];
+                };
+            };
+        };
+    };
     disable: {
         parameters: {
             query?: never;
@@ -5058,7 +5154,7 @@ export interface operations {
             };
         };
     };
-    enable: {
+    enable_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -5647,7 +5743,7 @@ export interface operations {
             };
         };
     };
-    updateHealthConfig: {
+    updateHealthConfig_1: {
         parameters: {
             query?: never;
             header?: never;
