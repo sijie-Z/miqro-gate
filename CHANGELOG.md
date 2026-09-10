@@ -5,6 +5,9 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-11
+- **runbook §14 常见误配与归因（#369，I16，阿里/腾讯运营口径对照）**：Key 形态误配一步定位（三类凭据 × 端点面
+  对照表 + 定位四步）；供应商账单 T+1 对账窗口建议（接 #330 reconcile 等级）；429 只来自上游（不限流红线）与
+  403 六类归因码 + 归因入口（mcp_access_log/审计链）。纯文档。
 - **留痕通道内容上限（#367，I18，doc 26 衍生）**：V47 `retention_config.max_content_bytes`（默认 256 KiB，范围
   1 KiB–4 MiB，租户级）；超限由「整条丢弃」改为 **UTF-8 边界截断 + `truncated` 标记（envelope/Kafka payload）+
   超限计数**（节流 WARN）；PUT `/admin/retention-config` 接受 `maxContentBytes`（越界 400
