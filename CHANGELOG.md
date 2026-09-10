@@ -5,6 +5,9 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **App.spec 并发 flake 修复（#332）**：全量 vitest 并发跑下 `App.spec` 登录视图用例间歇失败
+  （懒加载路由组件 chunk 在 CPU 竞争下晚于 flushPromises 就绪，断言竞态）——改用 `vi.waitFor`
+  条件等待，全量套件连跑 3 次稳定绿 163/163（未用 timeout/retry 掩盖）。
 - **导出「可对账等级」标记（#330）**：V41 `export_tasks.reconcile_level`——任务完成按 provider_request_id
   覆盖度声明 `PROVIDER_ID_BACKED/PARTIAL/LOCAL_ONLY`（空窗口/历史任务 null）；会话与机器元数据面均带
   `reconcileLevel`；产物 `local_caliber_note` 扩展 `;reconcile=…`（前缀向后兼容）；前端导出页等级徽标。

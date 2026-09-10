@@ -19,7 +19,7 @@
   （PROVIDER_ID_BACKED/PARTIAL/LOCAL_ONLY 按 provider_request_id 覆盖度；空窗口 null）；会话/机器元数据
   均带字段；产物 local_caliber_note 扩展 `;reconcile=…`（前缀兼容）；前端导出页徽标。验证：IT 2/2、
   FE 三件套、全量 verify 绿后合入。
-- 另：App.spec 并发 flake 已登记为独立后台任务（chip），本 PR 不做掩盖式处理。
+- 另：App.spec 并发 flake 已直接修复（#332，vi.waitFor 条件等待，全量 ×3 稳定绿）——见 rc.11 后修补。
 - rc.11 攒批候选已含 #326/#328/#330。
 
 ## 会话交接点 2026-09-10（傍晚，运维文档补齐轮：#328）
