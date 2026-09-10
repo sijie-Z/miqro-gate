@@ -378,7 +378,12 @@ public class McpProxyController {
             McpResiliencePolicy policy, McpCircuitBreaker breaker, int attempt, boolean[] rowRecorded) {
         if (breaker != null) {
             McpCircuitBreaker.Decision decision = breaker.beforeCall();
-            if (decision == McpCircuitBreaker.Decision.REJECTED) {
+            // F13 gate (raw doc 134859): breakerSkipRetry ON (default, recommended)
+            // fast-fails the bucket while OPEN / half-open probes are exhausted.
+            // With it OFF the breaker only observes — beforeCall still drives the
+            // state machine and probe counting, but a REJECTED verdict no longer
+            // blocks the call (discouraged mode, explicit and off by default).
+            if (decision == McpCircuitBreaker.Decision.REJECTED && policy.breakerSkipRetry()) {
                 record(context, rpcMethod, toolName, McpAccessStatus.CIRCUIT_OPEN, 503);
                 rowRecorded[0] = true;
                 log.info("aigw.mcp.circuit_open requestId={} service={} bucket={}", context.gatewayRequestId,

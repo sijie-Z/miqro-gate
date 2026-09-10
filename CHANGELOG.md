@@ -4,6 +4,12 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
+### 2026-09-11
+- **修复：`breakerSkipRetry` 真分支 + SERVER_5XX 收窄（#365，I17，doc 12/13）**：`breakerSkipRetry=false` 时熔断
+  只观测不限流（`beforeCall` 仍驱动状态机/探测计数，REJECTED 不再阻断调用；默认 true 行为不变）；
+  `SERVER_5XX` 重试触发由 500–599 收窄为 **500/502/503/504**（501/505 等确定性状态直接回传）。
+  验证：熔断 IT 3/3（新增 skipRetry-off：开断后第三次调用落上游）、重试门 5/5、契约 30 例、域单测全绿。
+
 ### 2026-09-10
 - **修复：服务状态切换与健康巡检的乐观锁竞态（#361）**：`updateStatus` 改为**按状态列 compare-and-set**
   （并发切换 → `409 SERVICE_STATE_CONFLICT`，不再 500；不再与巡检的 version 争用）；`ServiceHealthChecker`

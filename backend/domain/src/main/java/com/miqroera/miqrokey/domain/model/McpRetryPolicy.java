@@ -73,9 +73,15 @@ public final class McpRetryPolicy {
         };
     }
 
-    /** Statuses that count as a {@link FailureKind#SERVER_5XX} retry trigger. */
+    /**
+     * Statuses that count as a {@link FailureKind#SERVER_5XX} retry trigger (issue
+     * #365, raw docs 12/13): the documented retryable gateway failures
+     * 500/502/503/504 only. Deterministic statuses (501 not-implemented, 505
+     * version-not-supported, ...) are returned to the caller instead of being
+     * retried. The breaker's own error set stays configurable.
+     */
     public static boolean isServerError(int status) {
-        return status >= 500 && status <= 599;
+        return status == 500 || status == 502 || status == 503 || status == 504;
     }
 
     /** Equality helper for tests and registry keying. */
