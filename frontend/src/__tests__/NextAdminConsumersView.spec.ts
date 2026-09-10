@@ -8,6 +8,7 @@ vi.mock('@/api', () => ({
   listApiConsumers: vi.fn(),
   createApiConsumer: vi.fn(),
   disableApiConsumer: vi.fn(),
+  adminConsumerActivity: vi.fn(),
 }));
 const mockApi = vi.mocked(api);
 
@@ -57,6 +58,27 @@ describe('NextAdminConsumersView', () => {
     (document.querySelector('[data-testid="consumer-key-ack"]') as HTMLInputElement).click();
     await flushPromises();
     expect(close.disabled).toBe(false);
+  });
+  it('opens the call overview dialog with aggregates', async () => {
+    mockApi.adminConsumerActivity.mockResolvedValue({
+      consumerId: 'k1',
+      windowHours: 24,
+      totalCalls: 5,
+      forwarded: 3,
+      denied: 1,
+      failed: 1,
+      lastCallAt: '2026-09-10T08:00:00Z',
+      topTools: [{ name: 'echo-tool', calls: 3 }],
+      topServices: [{ name: 'svc-1', calls: 3 }],
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="consumer-activity"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.adminConsumerActivity).toHaveBeenCalledWith('k1', 24);
+    const body = document.querySelector('[data-testid="consumer-activity-body"]');
+    expect(body?.textContent).toContain('echo-tool');
+    expect(body?.textContent).toContain('总调用');
   });
   it('revokes a consumer through the gate', async () => {
     mockApi.disableApiConsumer.mockResolvedValue({ ...consumer, status: 'DISABLED' });

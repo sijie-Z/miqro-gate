@@ -41,6 +41,36 @@ const scopeMcp = ref(true);
 const scopeSaving = ref(false);
 const scopeError = ref('');
 
+// #338 call overview dialog.
+const activityTarget = ref<ApiConsumerView | null>(null);
+const activityVisible = ref(false);
+const activityLoading = ref(false);
+const activityHours = ref(24);
+const activity = ref<api.ApiConsumerActivity | null>(null);
+const activityError = ref('');
+
+function openActivity(consumer: ApiConsumerView) {
+  activityTarget.value = consumer;
+  activityHours.value = 24;
+  activity.value = null;
+  activityError.value = '';
+  activityVisible.value = true;
+  void loadActivity();
+}
+
+async function loadActivity() {
+  if (!activityTarget.value) return;
+  activityLoading.value = true;
+  activityError.value = '';
+  try {
+    activity.value = await api.adminConsumerActivity(activityTarget.value.id!, activityHours.value);
+  } catch (error) {
+    activityError.value = error instanceof ApiError ? error.message : '加载失败';
+  } finally {
+    activityLoading.value = false;
+  }
+}
+
 function openScope(consumer: ApiConsumerView) {
   const caps = consumer.capabilities ?? null;
   scopeTarget.value = consumer;
@@ -115,7 +145,7 @@ const columns = [
   { key: 'expiresAt', title: '到期', width: '150px' },
   { key: 'status', title: '状态', width: '100px' },
   { key: 'createdAt', title: '创建时间', width: '170px' },
-  { key: 'actions', title: '操作', width: '150px', align: 'center' as const },
+  { key: 'actions', title: '操作', width: '200px', align: 'center' as const },
 ];
 
 async function load() {
@@ -319,6 +349,14 @@ onMounted(load);
         }}</template>
         <template #actions="{ row }">
           <UiButton
+            variant="ghost"
+            size="sm"
+            data-testid="consumer-activity"
+            @click="openActivity(row as ApiConsumerView)"
+          >
+            调用概览
+          </UiButton>
+          <UiButton
             v-if="(row as ApiConsumerView).status === 'ACTIVE'"
             variant="ghost"
             size="sm"
@@ -407,6 +445,101 @@ onMounted(load);
         </UiButton>
       </template>
     </UiDialog>
+    <!-- Call overview (issue #338 / I5) -->
+    <UiDialog
+      v-if="activityTarget"
+      :open="activityVisible"
+      :title="'调用概览 — ' + activityTarget.name"
+      description="来自 MCP 访问日志（纯元数据）的窗口聚合；401 未知 Key / 404 未知服务无可信身份，不计入。"
+      width="560px"
+      @update:open="activityVisible = false"
+    >
+      <div class="next-consumers__activity-range">
+        <button
+          type="button"
+          class="next-consumers__seg"
+          :class="{ 'next-consumers__seg--on': activityHours === 24 }"
+          data-testid="activity-range-24h"
+          @click="
+            activityHours = 24;
+            loadActivity();
+          "
+        >
+          近 24 小时
+        </button>
+        <button
+          type="button"
+          class="next-consumers__seg"
+          :class="{ 'next-consumers__seg--on': activityHours === 168 }"
+          data-testid="activity-range-7d"
+          @click="
+            activityHours = 168;
+            loadActivity();
+          "
+        >
+          近 7 天
+        </button>
+      </div>
+      <div v-if="activityLoading" class="next-consumers__activity-loading">统计中…</div>
+      <p v-else-if="activityError" class="ui-form-error">{{ activityError }}</p>
+      <div
+        v-else-if="activity"
+        class="next-consumers__activity"
+        data-testid="consumer-activity-body"
+      >
+        <div class="next-consumers__stats">
+          <div class="next-consumers__stat">
+            <span class="next-consumers__stat-num">{{ activity.totalCalls }}</span>
+            <span class="next-consumers__stat-label">总调用</span>
+          </div>
+          <div class="next-consumers__stat">
+            <span class="next-consumers__stat-num">{{ activity.forwarded }}</span>
+            <span class="next-consumers__stat-label">已转发</span>
+          </div>
+          <div class="next-consumers__stat">
+            <span class="next-consumers__stat-num">{{ activity.denied }}</span>
+            <span class="next-consumers__stat-label">被拒</span>
+          </div>
+          <div class="next-consumers__stat">
+            <span class="next-consumers__stat-num">{{ activity.failed }}</span>
+            <span class="next-consumers__stat-label">失败</span>
+          </div>
+        </div>
+        <p class="next-consumers__activity-last">
+          最近调用：{{ activity.lastCallAt ? formatTime(activity.lastCallAt) : '窗口内无调用' }}
+        </p>
+        <div class="next-consumers__lists">
+          <div>
+            <h4 class="next-consumers__list-title">Top 工具</h4>
+            <p v-if="activity.topTools.length === 0" class="next-consumers__list-empty">
+              窗口内无调用
+            </p>
+            <ul v-else class="next-consumers__list">
+              <li v-for="item in activity.topTools" :key="item.name">
+                <span class="ui-mono">{{ item.name }}</span
+                ><span>{{ item.calls }}</span>
+              </li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="next-consumers__list-title">Top 服务</h4>
+            <p v-if="activity.topServices.length === 0" class="next-consumers__list-empty">
+              窗口内无调用
+            </p>
+            <ul v-else class="next-consumers__list">
+              <li v-for="item in activity.topServices" :key="item.name">
+                <span class="ui-mono">{{ item.name }}</span
+                ><span>{{ item.calls }}</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <UiButton variant="primary" @click="activityVisible = false">关闭</UiButton>
+      </template>
+    </UiDialog>
+
     <!-- Channel scope (issue #316) -->
     <UiDialog
       v-if="scopeTarget"
@@ -591,5 +724,89 @@ onMounted(load);
   background: var(--ui-primary);
   border-color: var(--ui-primary);
   color: #fff;
+}
+.next-consumers__activity-range {
+  display: flex;
+  gap: var(--ui-space-2);
+  margin-bottom: var(--ui-space-3);
+}
+
+.next-consumers__seg {
+  padding: 4px 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-control);
+  background: transparent;
+  color: var(--ui-foreground-secondary);
+  font-size: var(--ui-font-size-xs);
+  cursor: pointer;
+}
+
+.next-consumers__seg--on {
+  border-color: var(--ui-primary);
+  color: var(--ui-primary);
+}
+
+.next-consumers__stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--ui-space-2);
+  margin-bottom: var(--ui-space-3);
+}
+
+.next-consumers__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--ui-space-2);
+  background: var(--ui-fill-muted, var(--ui-bg-muted));
+  border-radius: var(--ui-radius-control);
+}
+
+.next-consumers__stat-num {
+  font-size: var(--ui-font-size-lg);
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-consumers__stat-label {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-consumers__activity-last {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  margin-bottom: var(--ui-space-3);
+}
+
+.next-consumers__lists {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ui-space-4);
+}
+
+.next-consumers__list-title {
+  font-size: var(--ui-font-size-sm);
+  margin-bottom: var(--ui-space-2);
+}
+
+.next-consumers__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+  font-size: var(--ui-font-size-sm);
+}
+
+.next-consumers__list li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+}
+
+.next-consumers__list-empty {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
 }
 </style>
