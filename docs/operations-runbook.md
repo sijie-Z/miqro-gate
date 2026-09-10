@@ -54,6 +54,42 @@
    「管理密钥 · 即将到期」），此后 ≤7 天到期密钥每天至多一条事件（默认关：
    不建规则即无通知）。到期当天密钥静默失效——务必在到期前完成轮换。
 
+## 3c. 消费者密钥运维（scope / 到期 / 轮换）
+
+平台等外部系统的 `mqk_api_…` 凭据（管理 API `/api/v1/admin/api-consumers`，#316/#322）：
+
+1. **最小权限**：发行后按用途配 scope（`PATCH …/{id}/scope`，`billing:read`/`mcp:call`；不配=全量）。
+   只调 MCP 的 Agent 务必去掉 `billing:read`——越权调用计费面返回 `403 CONSUMER_SCOPE_DENIED`。
+2. **到期**：创建时给 `expiresAt`（90 天等）成为常态；**到期即静默失效**（计费与网关 MCP 双面 401，
+   与未知 Key 同形）——列表仍可见到期行。到期前完成轮换，勿依赖当天操作。
+3. **轮换 = 重建**：发新消费者（新名）→ 迁移调用方 → 在旧消费者上 disable。**scope/到期不继承**，
+   重建时显式重配。`CONSUMER_CREATE/DISABLE/SCOPE_UPDATE` 均进审计。
+4. **到期提醒**：需要时建 `CONSUMER_KEY_EXPIRING` 告警规则（默认关）：≤7 天到期者每（消费者×天）
+   至多一条事件。
+
+## 3d. MCP 上游后端密钥运维（backend-auth）
+
+需要 Key 的内网 MCP 服务（`/api/v1/admin/mcp-services/{id}/backend-auth`，#320）：
+
+1. **设定/轮换**：`PUT` body `{"mode":"API_KEY","secret":"…"}`——**密钥写后不可读**（任何读面/审计不含），
+   轮换即重设；上游轮换窗口内先在 MCP 服务侧保留旧 Key 双活，再重设网关侧，最后撤销旧 Key。
+2. **清除**：`{"mode":"VISITOR"}` 回到不注入模式（上游必须已放开鉴权，否则调用将 401）。
+3. **排障**：消费者调用返回 `502 backend_auth_unavailable` = 网关未能解密/密钥缺失（fail-closed，
+   上游零请求）——检查 crypto 配置与 backend-auth 是否已设；正常注入时上游看到固定
+   `Authorization: Bearer <secret>`，且**消费者凭据从不下传**。
+
+## 3e. 服务注册表健康运维
+
+内部服务目录（`/api/v1/admin/services`，#326）的运行时状态：
+
+1. **上下线**：`disable`/`enable` 对称为一等操作（审计 `SERVICE_DISABLE/ENABLE`）；禁用后不再探测，
+   健康状态冻结显示原值。
+2. **健康探测**：仅 ACTIVE 服务按各自间隔探测 `baseUrl + checkPath`（GET，2xx 计健康；
+   周期 `MIQROKEY_SERVICES_HEALTH_CYCLE_MS` 默认 15s，单服务间隔/超时/阈值可配）；连续失败达
+   `failThreshold` → `UNHEALTHY`，连续成功达 `recoverThreshold` → `HEALTHY`。
+3. **语义**：健康状态是**运营信号**，当前不驱动任何流量行为（数据面接线 F29 待形态确认）——
+   `UNHEALTHY` 时人工核实服务与网络，处理后在页面「健康检查」对话框调整阈值或路径。
+
 ## 4. 吊销 Virtual Key
 
 确认 Key 掩码、所属用户/项目/产品和最近使用，执行立即吊销。新请求立刻拒绝；是否取消既有流按安全事件等级决定并记录。怀疑泄漏时同时撤销相关会话、检查 IP/模型/用量异常，并建议用户轮换 CC Switch 配置。

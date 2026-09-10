@@ -7,11 +7,19 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `2026-09-09 自主轮（F60 v2 + codegen 迁移线收口 + typecheck 确定性）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS`（develop @ e4ba772 = 截至 #313 已合；#314 实施中。
-  本轮交付见下方交接点；**待办：#314 操作记录查询补全（IN_PROGRESS，本 PR）、#315 服务族审计
-  覆盖（已登记）、#316 消费者 scope（已登记）、#211 真机凭证（BLOCKED）、#245 告警接线裁决
-  （leader）、F32/F33 平台接口（BLOCKED）、F19 账单对账（等真实样本）**）
-- Last updated: `2026-09-09 CST`
+- Goal status: `IN_PROGRESS`（develop @ b35cea0 = 截至 #327 已合；**rc.10 已发布**；#328 文档轮实施中。
+  本轮交付见下方交接点；**待办：#328 文档轮（本 PR）、rc.11 攒批（#326 待锚）、
+  #211 真机凭证（BLOCKED）、#245 告警接线裁决（leader）、F32/F33 平台接口（BLOCKED）、
+  F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态）**）
+- Last updated: `2026-09-10 CST`
+
+## 会话交接点 2026-09-10（傍晚，运维文档补齐轮：#328）
+
+- **#328 运维文档轮（本 PR）**：runbook 新增 §3c 消费者密钥运维（scope/到期/轮换=重建/提醒规则）、
+  §3d MCP 上游后端密钥运维（写后不可读/轮换窗口/fail-closed 502 排障）、§3e 服务注册表健康运维
+  （上下线/探测语义/阈值/告警面）；configuration-reference 补 `MIQROKEY_MCP_HEALTH_CYCLE_MS` 行；
+  NEXT_SESSION_PLAN 重写为 rc.10 后状态；本段与 Current State 刷新。
+- 下一步默认：rc.11 攒批（#326 待锚）或 §2 候选（F23 导出对账等级标记等）。
 
 ## 会话交接点 2026-09-10（下午，服务注册表运行时治理：#326）
 
