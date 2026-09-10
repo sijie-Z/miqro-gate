@@ -513,8 +513,18 @@ export function updateSeat(
 
 // ---- SkillHub (P2.4) ----
 
-export function listSkills(): Promise<SkillView[]> {
-  return get<SkillView[]>('/api/v1/skills');
+export function listSkills(q?: string, tags?: string[]): Promise<SkillView[]> {
+  return get<SkillView[]>(`/api/v1/skills${skillQuery(q, tags)}`);
+}
+
+/** Keyword (name/description/ID) + tag filters shared by the market and admin lists. */
+function skillQuery(q?: string, tags?: string[]): string {
+  const params = new URLSearchParams();
+  const keyword = q?.trim();
+  if (keyword) params.set('q', keyword);
+  for (const tag of tags ?? []) params.append('tags', tag);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
 }
 
 export function getSkill(id: string): Promise<SkillView> {
@@ -532,8 +542,8 @@ export async function downloadSkill(id: string, filename: string): Promise<void>
   URL.revokeObjectURL(url);
 }
 
-export function adminListSkills(): Promise<SkillView[]> {
-  return get<SkillView[]>('/api/v1/admin/skills');
+export function adminListSkills(q?: string, tags?: string[]): Promise<SkillView[]> {
+  return get<SkillView[]>(`/api/v1/admin/skills${skillQuery(q, tags)}`);
 }
 
 export function adminUploadSkill(version: string, zip: Blob): Promise<SkillView> {
