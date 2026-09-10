@@ -410,7 +410,8 @@ public final class JdbcRouteSnapshotLoader {
             result.put(service.name(),
                     new RouteSnapshot.McpServerRecord(service.id(), service.tenantId(), service.name(),
                             service.endpoint(), service.transport(), service.status(), service.aclMode(),
-                            serverLists.getOrDefault(service.id(), Set.of()), tools, resilienceById.get(service.id())));
+                            serverLists.getOrDefault(service.id(), Set.of()), tools, resilienceById.get(service.id()),
+                            service.backendAuthMode(), service.encryptedBackendSecret()));
         }
         return result;
     }
