@@ -49,6 +49,58 @@ class SkillZipValidatorTest {
         assertThat(meta.author()).isEqualTo("Platform Team");
         assertThat(meta.license()).isEqualTo("MIT");
         assertThat(meta.tags()).containsExactly("scraping", "web");
+        assertThat(meta.examples()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("frontmatter examples parse; duplicate tags collapse")
+    void examplesAndTagDedupe() throws Exception {
+        String md = """
+                ---
+                name: web-scraper
+                description: Scrapes public web pages into markdown.
+                tags:
+                  - web
+                  - web
+                  - scraping
+                examples:
+                  - 抓取 example.com 并转 markdown
+                  - 批量抓取站点地图
+                ---
+
+                # body
+                """;
+
+        SkillMetadata meta = SkillZipValidator.validate(zip("web-scraper/SKILL.md", md));
+
+        assertThat(meta.examples()).containsExactly("抓取 example.com 并转 markdown", "批量抓取站点地图");
+        assertThat(meta.tags()).containsExactly("web", "scraping");
+    }
+
+    @Test
+    @DisplayName("tag and example limits are enforced (raw doc 20)")
+    void tagsAndExamplesLimitsEnforced() throws Exception {
+        String tooManyTags = SKILL_MD.replace("tags:\n  - scraping\n  - web",
+                "tags:\n  - a\n  - b\n  - c\n  - d\n  - e\n  - f");
+        assertThatThrownBy(() -> SkillZipValidator.validate(zip("web-scraper/SKILL.md", tooManyTags)))
+                .isInstanceOf(SkillValidationException.class).hasMessageContaining("tags");
+
+        String longTag = SKILL_MD.replace("- scraping", "- " + "x".repeat(21));
+        assertThatThrownBy(() -> SkillZipValidator.validate(zip("web-scraper/SKILL.md", longTag)))
+                .isInstanceOf(SkillValidationException.class).hasMessageContaining("tags");
+
+        StringBuilder tooManyExamples = new StringBuilder("examples:\n");
+        for (int i = 0; i < 11; i++) {
+            tooManyExamples.append("  - example ").append(i).append('\n');
+        }
+        String withManyExamples = SKILL_MD.replace("---\n\n# Web Scraper", tooManyExamples + "---\n\n# Web Scraper");
+        assertThatThrownBy(() -> SkillZipValidator.validate(zip("web-scraper/SKILL.md", withManyExamples)))
+                .isInstanceOf(SkillValidationException.class).hasMessageContaining("examples");
+
+        String longExample = SKILL_MD.replace("---\n\n# Web Scraper",
+                "examples:\n  - " + "y".repeat(513) + "\n---\n\n# Web Scraper");
+        assertThatThrownBy(() -> SkillZipValidator.validate(zip("web-scraper/SKILL.md", longExample)))
+                .isInstanceOf(SkillValidationException.class).hasMessageContaining("examples");
     }
 
     @Test

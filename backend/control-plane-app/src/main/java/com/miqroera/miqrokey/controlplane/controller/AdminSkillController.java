@@ -34,8 +34,9 @@ public class AdminSkillController {
     }
 
     @GetMapping
-    public List<SkillView> list() {
-        return skillService.list(userContext.getUser().tenantId());
+    public List<SkillView> list(@RequestParam(required = false) String q,
+            @RequestParam(required = false) List<String> tags) {
+        return skillService.list(userContext.getUser().tenantId(), q, tags);
     }
 
     /**

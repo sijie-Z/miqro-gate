@@ -26,12 +26,18 @@ public final class SkillZipValidator {
     public static final int MAX_SKILL_MD_BYTES = 512 * 1024;
     /** Upper bound for zip entries (bomb guard). */
     public static final int MAX_ENTRIES = 200;
+    /** Catalog bounds from the SkillHub spec (raw docs 20/28). */
+    public static final int MAX_TAGS = 5;
+    public static final int MAX_TAG_CHARS = 20;
+    public static final int MAX_EXAMPLES = 10;
+    public static final int MAX_EXAMPLE_CHARS = 512;
 
     private SkillZipValidator() {
     }
 
     /** Catalog metadata parsed from a validated skill package. */
-    public record SkillMetadata(String name, String description, String author, String license, List<String> tags) {
+    public record SkillMetadata(String name, String description, String author, String license, List<String> tags,
+            List<String> examples) {
     }
 
     public static SkillMetadata validate(byte[] zip) {
@@ -114,17 +120,37 @@ public final class SkillZipValidator {
         if (description == null || description.isBlank() || description.length() > 1024) {
             throw invalid("SKILL_DESCRIPTION_INVALID", "frontmatter 的 description 必填且不超过 1024 字符。");
         }
-        List<String> tags = new ArrayList<>();
+        java.util.Set<String> tagSet = new java.util.LinkedHashSet<>();
         Object rawTags = meta.get("tags");
         if (rawTags instanceof List<?> list) {
             for (Object tag : list) {
                 String value = str(tag);
                 if (value != null && value.matches("[a-z0-9]+(-[a-z0-9]+)*")) {
-                    tags.add(value);
+                    tagSet.add(value);
                 }
             }
         }
-        return new SkillMetadata(name, description, str(meta.get("author")), str(meta.get("license")), tags);
+        if (tagSet.size() > MAX_TAGS || tagSet.stream().anyMatch(tag -> tag.length() > MAX_TAG_CHARS)) {
+            throw invalid("SKILL_TAGS_INVALID",
+                    "frontmatter 的 tags 最多 %d 个、每个不超过 %d 字符。".formatted(MAX_TAGS, MAX_TAG_CHARS));
+        }
+        List<String> examples = new ArrayList<>();
+        Object rawExamples = meta.get("examples");
+        if (rawExamples instanceof List<?> list) {
+            for (Object example : list) {
+                String value = str(example);
+                if (value != null && !value.isBlank()) {
+                    examples.add(value);
+                }
+            }
+        }
+        if (examples.size() > MAX_EXAMPLES
+                || examples.stream().anyMatch(example -> example.length() > MAX_EXAMPLE_CHARS)) {
+            throw invalid("SKILL_EXAMPLES_INVALID",
+                    "frontmatter 的 examples 最多 %d 条、每条不超过 %d 字符。".formatted(MAX_EXAMPLES, MAX_EXAMPLE_CHARS));
+        }
+        return new SkillMetadata(name, description, str(meta.get("author")), str(meta.get("license")),
+                new ArrayList<>(tagSet), examples);
     }
 
     private static String str(Object value) {

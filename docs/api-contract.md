@@ -705,19 +705,19 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 
 | 方法与路径 | 用途 |
 |---|---|
-| `GET /api/v1/skills` | 目录（登录用户可见全部 ACTIVE） |
+| `GET /api/v1/skills?q=&tags=&tags=` | 目录（登录用户可见全部 ACTIVE；`q` ≤60 字符，匹配名称/描述/ID 不区分大小写；`tags` 多选为**与**语义） |
 | `GET /api/v1/skills/{id}` | 详情（元数据，无包体） |
 | `GET /api/v1/skills/{id}/download` | 下载 zip（授权门禁；公开 = 全员可下） |
 | `POST /api/v1/admin/skills?version=1.0.0` | 上传（raw zip body，`Content-Type: application/zip`）；重传同名 = upsert 替换并恢复 ACTIVE |
-| `GET /api/v1/admin/skills` | 管理目录 |
+| `GET /api/v1/admin/skills?q=&tags=&tags=` | 管理目录（过滤语义同上） |
 | `POST /api/v1/admin/skills/{id}/archive` | 归档（目录隐藏、数据保留、授权保留） |
 | `PUT /api/v1/admin/skills/{id}/access` | 整体替换下载授权：`[{"scopeType":"TEAM\|PROJECT","scopeId":"…"}]`；空数组 = 公开 |
 
-**格式校验（上传时）**：zip 必须只含一个技能目录（`skill-name/`），含 `SKILL.md`（YAML frontmatter：`name` 必填且为小写 kebab-case、与目录名一致、不含 claude/anthropic 保留词；`description` 必填 ≤ 1024 字符；可选 `author`/`license`/`tags`）。包上限 5MB、条目上限 200、SKILL.md 上限 512KB（防 zip 炸弹——只读 SKILL.md，不解压）。`version` 必填语义化（`\d+\.\d+\.\d+`）。
+**格式校验（上传时）**：zip 必须只含一个技能目录（`skill-name/`），含 `SKILL.md`（YAML frontmatter：`name` 必填且为小写 kebab-case、与目录名一致、不含 claude/anthropic 保留词；`description` 必填 ≤ 1024 字符；可选 `author`/`license`/`tags`/`examples`；`tags` ≤5 个 × ≤20 字符（重复去重）；`examples` ≤10 条 × ≤512 字符）。包上限 5MB、条目上限 200、SKILL.md 上限 512KB（防 zip 炸弹——只读 SKILL.md，不解压）。`version` 必填语义化（`\d+\.\d+\.\d+`）。
 
 **下载授权语义**：无 `skill_access` 行 = 公开；有行 = 仅授权 TEAM/PROJECT 成员（及管理员）可下载；非成员 `403 SKILL_DOWNLOAD_FORBIDDEN`；归档技能对目录/详情/下载一律 `404 SKILL_NOT_FOUND`。
 
-**错误码**：`SKILL_NOT_FOUND`（404）、`SKILL_DOWNLOAD_FORBIDDEN`（403）、`VERSION_INVALID`（400）、`SKILL_EMPTY`/`SKILL_TOO_LARGE`/`SKILL_TOO_MANY_ENTRIES`/`SKILL_ZIP_INVALID`/`SKILL_MD_MISSING`/`SKILL_MD_TOO_LARGE`/`SKILL_FRONTMATTER_INVALID`/`SKILL_NAME_INVALID`/`SKILL_NAME_MISMATCH`/`SKILL_DESCRIPTION_INVALID`（400）、`SCOPE_INVALID`（400）。
+**错误码**：`SKILL_NOT_FOUND`（404）、`SKILL_DOWNLOAD_FORBIDDEN`（403）、`VERSION_INVALID`（400）、`SKILL_EMPTY`/`SKILL_TOO_LARGE`/`SKILL_TOO_MANY_ENTRIES`/`SKILL_ZIP_INVALID`/`SKILL_MD_MISSING`/`SKILL_MD_TOO_LARGE`/`SKILL_FRONTMATTER_INVALID`/`SKILL_NAME_INVALID`/`SKILL_NAME_MISMATCH`/`SKILL_DESCRIPTION_INVALID`/`SKILL_TAGS_INVALID`/`SKILL_EXAMPLES_INVALID`/`SKILL_QUERY_INVALID`（400）、`SCOPE_INVALID`（400）。视图（列表/详情）含 `examples` 与 `createdBy`/`createdByName`（创建人姓名，服务端解析）。
 
 ### 5.13 Agent 管理（P3.1，对标阿里 AI 网关 Agent 拓扑）
 

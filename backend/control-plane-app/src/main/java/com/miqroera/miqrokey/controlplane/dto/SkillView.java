@@ -11,7 +11,8 @@ import java.util.UUID;
  * to every signed-in user.
  */
 public record SkillView(UUID id, String name, String description, String version, String author, String license,
-        List<String> tags, String contentSha256, long contentBytes, String status, Instant createdAt) {
+        List<String> tags, String contentSha256, long contentBytes, String status, Instant createdAt,
+        List<String> examples, UUID createdBy, String createdByName) {
 
     /** Shown as "X MB" in the UI. */
     public BigDecimal contentMegabytes() {
