@@ -852,6 +852,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/mcp-services/{serviceId}/tools/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["syncTools"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/mcp-services/{serviceId}/tools/import": {
         parameters: {
             query?: never;
@@ -5737,6 +5753,32 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["McpToolRevision"];
+                };
+            };
+        };
+    };
+    syncTools: {
+        parameters: {
+            query?: {
+                dryRun?: boolean;
+            };
+            header?: never;
+            path: {
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
