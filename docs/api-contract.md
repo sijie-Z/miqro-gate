@@ -968,6 +968,27 @@ MCP 代理调用（F01 入口 `/mcpservers/{serviceName}/mcp`）的**纯元数�
 
 内容留痕通道的**租户级总开关**：默认**全关**（无行=任何请求内容不被采集；CLAUDE.md「不保存正文」红线仅在此行 enabled 时按 ADR-0014 §1 例外放行）。GET 返回生效配置（无行时=disabled 默认）；PUT 体 `{"enabled": bool}` 切换并审计 `RETENTION_CONFIG_UPDATE`、经路由快照即时下发网关（运行中生效，无需重启）。v1 固定 `contentScope=USER_TEXT_ONLY`（P1：仅用户消息文本起步，模型回复/工具正文不在范围）与 `keyVersion=v1`（P5：部署密钥集；KMS/轮换随 P5 落地扩展）。启用本身只开通道——网关侧采集/密文信封/Kafka 投递为后续批次（见 ADR-0014 §6）。SYSTEM_ADMIN-only（deny-by-default）；body 非法 → 400。
 
+### 5.27 账单对账 `POST/GET /api/v1/admin/reconciliations`（F19，V42）
+
+canonical 账单导入与四态对账报告（契约稿 docs/bill-reconciliation-contract.md v0）：**只读结果**——不写 usage_event、
+不存上传内容（仅 SHA-256 与大小）。供应商私有格式解析器与指纹级匹配仍 WAITING_FOR_SAMPLE；canonical 路径不依赖样本。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/admin/reconciliations?providerCode&currency&windowFrom&windowTo` | body = canonical JSONL（UTF-8，`.gz` 可选——按 gzip 魔数自动识别）；→ `202` + 报告（PENDING）；异步解析→四级匹配→报告落库 |
+| `GET /api/v1/admin/reconciliations/{id}` | 元数据 + 汇总：`totalRows/matched/partialBuckets/unmatchedProvider/unmatchedLocal/lineErrorCount/amountDiff` + `uploadSha256/uploadBytes` + `status(PENDING/RUNNING/SUCCEEDED/FAILED)` |
+| `GET /api/v1/admin/reconciliations/{id}/rows?state=&cursor=&limit=` | 四态明细行（`state` ∈ MATCHED/PARTIAL/UNMATCHED_PROVIDER/UNMATCHED_LOCAL；`row_no` 游标，limit ≤500，`nextCursor`） |
+
+- **幂等**：同 (providerCode, window, currency, uploadSha256) 重复导入返回既有报告（不重复执行）；`FAILED` 除外（可重试）。
+- 上传上限：16MB（解压 64MB / 100,000 行）；超限或 gzip 损坏 `400 RECONCILIATION_UPLOAD_INVALID`。
+- 校验：窗口 ≤31 天且 from<to（`RECONCILIATION_WINDOW_INVALID`）；providerCode 须在供应商目录
+  （`RECONCILIATION_PROVIDER_UNKNOWN`）；currency ISO-4217（`RECONCILIATION_PARAM_INVALID`）；报告不存在
+  `RECONCILIATION_NOT_FOUND`（404）。
+- 审计：`RECONCILIATION_CREATED/SUCCEEDED/FAILED`（摘要含上传 sha 与计数，**不存正文**；RUNNING 为瞬时态不入审计）。
+- 语义口径：无 ID 账单行若未匹配计入 `UNMATCHED_PROVIDER` 行、同时按（productCode, 5 分钟桶）计入
+  `PARTIAL` 桶差；`UNMATCHED_LOCAL` 为行级（本地有 provider_request_id 且未被账单消费）。
+- 导出/前端页为 follow-up（导出将接 #330 reconcile-level 链路）。
+
 ## 6. 导出与对账任务
 
 导出和账单对账均为异步任务：

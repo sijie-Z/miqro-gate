@@ -1,9 +1,10 @@
 # F19 供应商账单对账：契约先行稿（v0，待真实样本）
 
-> 状态：CONTRACT-DRAFT（2026-09-09）。目的：把 feature-backlog F19（SCAFFOLD）中
-> 「导入器契约可先行定义」落成可拍板的契约稿；**任何供应商解析器与真实匹配验收均
-> WAITING_FOR_SAMPLE**（任一真实账单样本到位后按本稿实现并验证，不发明真实格式）。
-> 关联：usage-accounting §11（四级匹配）、api-contract §6（异步任务形态）、
+> 状态：CONTRACT-DRAFT（2026-09-09）；**2026-09-10 更新：端点层已交付（#334，V42）**——
+> canonical 导入 / 元数据 / 四态明细 / 幂等重传 / gzip / 审计全部落地并有集成测试（ReconciliationApiIntegrationTest 2/2）；
+> 残留 WAITING_FOR_SAMPLE 的仅为：**供应商私有格式解析器**与**指纹级（二级"指纹+模型+时间"）匹配**，
+> 以及前端页与导出接入（follow-up）。
+> 关联：usage-accounting §11（四级匹配）、api-contract §5.27/§6（端点与异步任务形态）、
 > F20（adjustment 追加机制，依赖本稿差异输出）、F23（可对账等级标记）。
 
 ## 目标与边界
