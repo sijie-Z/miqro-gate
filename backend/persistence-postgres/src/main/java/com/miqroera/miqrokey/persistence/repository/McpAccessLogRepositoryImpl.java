@@ -23,14 +23,15 @@ import java.util.UUID;
 public class McpAccessLogRepositoryImpl implements McpAccessLogRepository {
 
     private static final String COLS = "id, tenant_id, service_id, service_name, consumer_id, consumer_name,"
-            + " rpc_method, tool_name, status, http_status, gateway_request_id, occurred_at";
+            + " rpc_method, tool_name, status, http_status, gateway_request_id, occurred_at, session_id, ttfb_ms";
 
     private static final RowMapper<McpAccessLogEntry> MAPPER = (rs, rowNum) -> new McpAccessLogEntry(
             (UUID) rs.getObject("id"), (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("service_id"),
             rs.getString("service_name"), (UUID) rs.getObject("consumer_id"), rs.getString("consumer_name"),
             rs.getString("rpc_method"), rs.getString("tool_name"), McpAccessStatus.valueOf(rs.getString("status")),
             (Integer) rs.getObject("http_status"), rs.getString("gateway_request_id"),
-            rs.getTimestamp("occurred_at").toInstant());
+            rs.getTimestamp("occurred_at").toInstant(), rs.getString("session_id"),
+            rs.getObject("ttfb_ms", Long.class));
 
     private final NamedParameterJdbcTemplate jdbc;
 

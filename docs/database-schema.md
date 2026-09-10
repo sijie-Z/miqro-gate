@@ -363,9 +363,9 @@ MCP Tools 管理：`tool_name`（AI Agent 调用唯一标识，snake_case）、`
 
 
 
-### `mcp_access_log` (V29，F15 MCP 元数据访问日志)
+### `mcp_access_log` (V29，F15 MCP 元数据访问日志；V45 增 `session_id`/`ttfb_ms`)
 
-网关数据面 F01 代理的审计行（写方=网关异步批量 writer，读方=管理 API §5.24）。列：`id uuid`（网关侧生成）、`tenant_id`（FK tenants ON DELETE RESTRICT）、`service_id/service_name`、`consumer_id/consumer_name`（快照身份快照值，非 FK——服务/消费者删除不毁审计）、`rpc_method`（信封 method，可空=不可解析）、`tool_name`（tools/call 的 `params.name`，其余方法空）、`status`（CHECK：`FORWARDED|SERVICE_DENIED|TOOL_DENIED|TOOL_UNAVAILABLE|INVALID_ENVELOPE|UPSTREAM_FAILURE`）、`http_status`（FORWARDED=上游状态；拒绝类=客户端可见 403/400；UPSTREAM_FAILURE=空）、`gateway_request_id`、`occurred_at timestamptz`。**幂等**：唯一索引 `(tenant_id, gateway_request_id)`（重试 flush `ON CONFLICT DO NOTHING`）。查询索引：`(tenant_id, occurred_at DESC)`、`(tenant_id, service_name, occurred_at DESC)`、`(tenant_id, consumer_name, occurred_at DESC)`。正文永不入表。
+网关数据面 F01 代理的审计行（写方=网关异步批量 writer，读方=管理 API §5.24）。列：`id uuid`（网关侧生成）、`tenant_id`（FK tenants ON DELETE RESTRICT）、`service_id/service_name`、`consumer_id/consumer_name`（快照身份快照值，非 FK——服务/消费者删除不毁审计）、`rpc_method`（信封 method，可空=不可解析）、`tool_name`（tools/call 的 `params.name`，其余方法空）、`status`（CHECK：`FORWARDED|SERVICE_DENIED|TOOL_DENIED|TOOL_UNAVAILABLE|INVALID_ENVELOPE|UPSTREAM_FAILURE`）、`http_status`（FORWARDED=上游状态；拒绝类=客户端可见 403/400；UPSTREAM_FAILURE=空）、`gateway_request_id`、`occurred_at timestamptz`。**幂等**：唯一索引 `(tenant_id, gateway_request_id)`（重试 flush `ON CONFLICT DO NOTHING`）。查询索引：`(tenant_id, occurred_at DESC)`、`(tenant_id, service_name, occurred_at DESC)`、`(tenant_id, consumer_name, occurred_at DESC)`。正文永不入表。**V45（#358，I12）**增 `session_id varchar(128)`（客户端 `Session-Id` 头；SSE 入站分发未带头时回落为入站会话 id）与 `ttfb_ms bigint`（上游首字节毫秒，仅 FORWARDED 行）。
 
 ### `mcp_resilience_policy` (V30，F12/F13 韧性配置)
 
