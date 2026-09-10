@@ -162,7 +162,8 @@ project_allocated_cost
 3. Token 组合、状态和费用；
 4. 聚合时间窗口。
 
-供应商不返回 request ID 时，Gateway 无法保证逐请求一一对应；文档和导出必须标记可对账等级。
+供应商不返回 request ID 时，Gateway 无法保证逐请求一一对应；文档和导出必须标记可对账等级。（2026-09-10 兑现先行部分：导出的 `reconcileLevel` = PROVIDER_ID_BACKED/PARTIAL/LOCAL_ONLY 按 provider_request_id
+覆盖度计算，文件 `local_caliber_note` 同步标注；净额/含调整等级待 F20。）
 
 ## 12. 永久保留与手动删除
 
