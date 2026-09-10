@@ -9,7 +9,8 @@ import java.util.UUID;
  * status. The API key plaintext is returned only once at creation; the JWT
  * verification key is never returned — only its fingerprint and set time.
  * {@code capabilities} is the issue #316 channel scope: null = full access.
+ * {@code expiresAt} is the issue #322 optional expiry: null = never expires.
  */
 public record ApiConsumerView(UUID id, String name, String keyPrefix, String status, String jwtKeyFingerprint,
-        Instant jwtKeySetAt, Instant createdAt, List<String> capabilities) {
+        Instant jwtKeySetAt, Instant createdAt, List<String> capabilities, Instant expiresAt) {
 }

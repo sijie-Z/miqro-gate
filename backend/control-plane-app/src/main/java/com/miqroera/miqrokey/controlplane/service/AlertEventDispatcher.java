@@ -77,6 +77,22 @@ public class AlertEventDispatcher {
     }
 
     /**
+     * Issue #322: consumer-key expiring mirror of the admin-key notifier; same
+     * per-(consumer, day) dedupe and opt-in rule semantics.
+     */
+    public void notifyConsumerKeyExpiring(UUID tenantId, String consumerId, String name, Instant expiresAt) {
+        List<AlertRuleService.AlertRule> rules = enabledRulesOfType(tenantId, "CONSUMER_KEY_EXPIRING");
+        if (rules.isEmpty()) {
+            return;
+        }
+        String dedupeKey = "CONSUMER_KEY_EXPIRING:" + consumerId + ":" + java.time.LocalDate.now();
+        Map<String, Object> details = Map.of("consumerId", consumerId, "name", name, "expiresAt", expiresAt.toString());
+        for (AlertRuleService.AlertRule rule : rules) {
+            fireEvent(rule, dedupeKey, details);
+        }
+    }
+
+    /**
      * Inserts the event row and, when the rule carries an enabled endpoint,
      * delivers it.
      */
