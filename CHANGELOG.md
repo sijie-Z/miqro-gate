@@ -5,6 +5,15 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-11
+- **MCP 服务级上游超时 + 熔断慢阈值基准修正（#373，I20，raw 03「超时时间」/ raw 13）**：V48
+  `mcp_services.upstream_timeout_ms`（1000–600000，默认 60000）经路由快照下发；数据面每次上游尝试按服务预算计时，
+  超时 → **504 `mcp_upstream_timeout`** 类型化错误（`mcp_access_log` 记 UPSTREAM_FAILURE/504，此前为裸 500）；
+  `PUT /admin/mcp-services/{id}/upstream-timeout` + 创建可带（越界 `400 MCP_TIMEOUT_INVALID`）；熔断慢调用阈值校验基准
+  由健康探测超时（默认 5s）修正为上游预算（doc 134859 原文基准=后端请求超时），保存策略/下调预算**双向拒绝**
+  （`RESILIENCE_SLOW_EXCEEDS_TIMEOUT`）；审计 `MCP_SERVICE_UPSTREAM_TIMEOUT`。
+- **修复：快照装配丢弃 backend 鉴权字段（#371）**：`JdbcRouteSnapshotLoader` 最终装配回填
+  `backendAuthMode/encryptedBackendSecret`（#321 引入字段时漏改 #154 时代重建行）——API_KEY 模式数据面恢复
+  上游 `Authorization` 注入；回归：真实加载器断言密文信封逐字节回环。
 - **runbook §14 常见误配与归因（#369，I16，阿里/腾讯运营口径对照）**：Key 形态误配一步定位（三类凭据 × 端点面
   对照表 + 定位四步）；供应商账单 T+1 对账窗口建议（接 #330 reconcile 等级）；429 只来自上游（不限流红线）与
   403 六类归因码 + 归因入口（mcp_access_log/审计链）。纯文档。

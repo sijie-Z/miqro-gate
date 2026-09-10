@@ -39,4 +39,7 @@ public interface McpServiceRepository {
      * responses.
      */
     Optional<EncryptedSecret> findBackendSecret(UUID id, UUID tenantId);
+
+    /** Sets the per-service data-plane upstream budget (I20, doc 135906). */
+    McpService updateUpstreamTimeout(UUID id, UUID tenantId, int upstreamTimeoutMs);
 }

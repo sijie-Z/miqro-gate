@@ -322,7 +322,7 @@ public final class JdbcRouteSnapshotLoader {
         jdbc.query("""
                 SELECT s.id, s.tenant_id, s.name, s.endpoint, s.transport, s.status, a.mode AS acl_mode,
                        s.backend_auth_mode, s.backend_secret_ciphertext, s.backend_secret_nonce,
-                       s.backend_secret_key_version,
+                       s.backend_secret_key_version, s.upstream_timeout_ms,
                        p.retry_enabled, p.retry_max, p.retry_conditions, p.retry_idempotency_confirmed,
                        p.breaker_enabled, p.breaker_window_seconds, p.breaker_min_requests,
                        p.breaker_error_enabled, p.breaker_error_ratio, p.breaker_error_status_codes,
@@ -344,7 +344,7 @@ public final class JdbcRouteSnapshotLoader {
                     new RouteSnapshot.McpServerRecord(id, (UUID) rs.getObject("tenant_id"), rs.getString("name"),
                             rs.getString("endpoint"), rs.getString("transport"), rs.getString("status"),
                             rs.getString("acl_mode"), Set.of(), List.of(), null, rs.getString("backend_auth_mode"),
-                            backendSecret));
+                            backendSecret, rs.getInt("upstream_timeout_ms")));
             serverLists.put(id, new LinkedHashSet<>());
             toolsByService.put(id, new LinkedHashMap<>());
             if (rs.getObject("retry_enabled") != null) {
@@ -411,7 +411,7 @@ public final class JdbcRouteSnapshotLoader {
                     new RouteSnapshot.McpServerRecord(service.id(), service.tenantId(), service.name(),
                             service.endpoint(), service.transport(), service.status(), service.aclMode(),
                             serverLists.getOrDefault(service.id(), Set.of()), tools, resilienceById.get(service.id()),
-                            service.backendAuthMode(), service.encryptedBackendSecret()));
+                            service.backendAuthMode(), service.encryptedBackendSecret(), service.upstreamTimeoutMs()));
         }
         return result;
     }

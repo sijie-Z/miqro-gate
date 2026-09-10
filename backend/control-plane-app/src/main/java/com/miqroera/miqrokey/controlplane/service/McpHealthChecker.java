@@ -65,7 +65,8 @@ public class McpHealthChecker {
                 service.endpoint(), service.transport(), service.status(), state.healthStatus(), now, state.failures(),
                 state.successes(), service.checkIntervalSeconds(), service.checkTimeoutSeconds(),
                 service.failThreshold(), service.recoverThreshold(), service.checkPath(), service.version(),
-                service.createdBy(), service.createdAt(), service.updatedAt());
+                service.createdBy(), service.createdAt(), service.updatedAt(), service.backendAuthMode(),
+                service.backendSecretUpdatedAt(), service.upstreamTimeoutMs());
         try {
             repository.update(updated, service.version());
         } catch (IllegalStateException e) {

@@ -6,6 +6,7 @@ import com.miqroera.miqrokey.domain.crypto.VirtualKeyCrypto;
 import com.miqroera.miqrokey.domain.crypto.VirtualKeyMaterial;
 import com.miqroera.miqrokey.domain.crypto.impl.HmacVirtualKeyProvider;
 import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
+import com.miqroera.miqrokey.domain.model.McpService;
 import com.miqroera.miqrokey.domain.model.McpToolRetryPolicy;
 import com.miqroera.miqrokey.domain.model.RetentionConfig;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
@@ -169,9 +170,23 @@ public final class GatewayTestKeys {
         return snapshotWithRetention(baseUrl, policies, Map.of(), keys);
     }
 
+    /**
+     * Fixture snapshot with per-service upstream budgets (I20, doc 135906 "超时时间")
+     * keyed by service name; absent services keep the 60s default.
+     */
+    public static RouteSnapshot snapshotWithTimeouts(String baseUrl, Map<String, McpResiliencePolicy> policies,
+            Map<String, Integer> upstreamTimeoutsMs, KeyFixture... keys) {
+        return snapshotFull(baseUrl, policies, upstreamTimeoutsMs, Map.of(), keys);
+    }
+
     /** Fixture snapshot with a retention switch (ADR-0014) keyed by tenant. */
     public static RouteSnapshot snapshotWithRetention(String baseUrl, Map<String, McpResiliencePolicy> policies,
             Map<UUID, RetentionConfig> retentionByTenant, KeyFixture... keys) {
+        return snapshotFull(baseUrl, policies, Map.of(), retentionByTenant, keys);
+    }
+
+    private static RouteSnapshot snapshotFull(String baseUrl, Map<String, McpResiliencePolicy> policies,
+            Map<String, Integer> upstreamTimeoutsMs, Map<UUID, RetentionConfig> retentionByTenant, KeyFixture... keys) {
         Map<String, RouteSnapshot.KeyRecord> keyMap = new LinkedHashMap<>();
         Map<UUID, RouteSnapshot.BindingRecord> bindingMap = new LinkedHashMap<>();
         Map<UUID, RouteSnapshot.CredentialRecord> credentialMap = new LinkedHashMap<>();
@@ -194,8 +209,8 @@ public final class GatewayTestKeys {
             providerIdsMap.putIfAbsent(key.productId(), key.providerId());
         }
         return new RouteSnapshot(1, Instant.EPOCH, keyMap, bindingMap, credentialMap, modelsMap, grantModelsMap,
-                upstreamModelsMap, productCodesMap, providerIdsMap, mcpConsumers(), mcpServices(baseUrl, policies),
-                retentionByTenant);
+                upstreamModelsMap, productCodesMap, providerIdsMap, mcpConsumers(),
+                mcpServices(baseUrl, policies, upstreamTimeoutsMs), retentionByTenant);
     }
 
     // ------------------------------------------------------------------
@@ -305,13 +320,14 @@ public final class GatewayTestKeys {
     }
 
     private static Map<String, RouteSnapshot.McpServerRecord> mcpServices(String baseUrl,
-            Map<String, McpResiliencePolicy> policies) {
+            Map<String, McpResiliencePolicy> policies, Map<String, Integer> upstreamTimeoutsMs) {
         String endpoint = baseUrl + "/mcp";
         RouteSnapshot.McpServerRecord open = new RouteSnapshot.McpServerRecord(serviceId(MCP_OPEN_SERVICE), TENANT_ID,
                 MCP_OPEN_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE", "NONE", Set.of(),
                 List.of(tool(MCP_TOOL_ECHO, "ENABLED", null, Set.of(), "GET"),
                         tool(MCP_TOOL_LEGACY, "DISABLED", null, Set.of(), "GET")),
-                policies.get(MCP_OPEN_SERVICE));
+                policies.get(MCP_OPEN_SERVICE),
+                upstreamTimeoutsMs.getOrDefault(MCP_OPEN_SERVICE, McpService.DEFAULT_UPSTREAM_TIMEOUT_MS));
         RouteSnapshot.McpServerRecord gated = new RouteSnapshot.McpServerRecord(serviceId(MCP_GATED_SERVICE), TENANT_ID,
                 MCP_GATED_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE", "ALLOW",
                 Set.of(MCP_ALLOWED.id(), MCP_SERVER_ONLY.id()),
@@ -320,17 +336,20 @@ public final class GatewayTestKeys {
                         tool(MCP_TOOL_QUIET, "DISABLED", null, Set.of(), "GET"),
                         tool(MCP_TOOL_RETRY, "ENABLED", null, Set.of(), "GET", retryOverride(false)),
                         tool(MCP_TOOL_RETRY_POST, "ENABLED", null, Set.of(), "POST", retryOverride(false))),
-                policies.get(MCP_GATED_SERVICE));
+                policies.get(MCP_GATED_SERVICE),
+                upstreamTimeoutsMs.getOrDefault(MCP_GATED_SERVICE, McpService.DEFAULT_UPSTREAM_TIMEOUT_MS));
         // #320 upstream backend auth: a decryptable API_KEY service and one whose
         // ciphertext the test decryptor deliberately rejects (fail-closed probe).
         RouteSnapshot.McpServerRecord secured = new RouteSnapshot.McpServerRecord(serviceId(MCP_SECURED_SERVICE),
                 TENANT_ID, MCP_SECURED_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE", "NONE", Set.of(), List.of(),
                 policies.get(MCP_SECURED_SERVICE), "API_KEY",
-                new EncryptedSecret(new byte[]{7, 7, 7}, new byte[]{8, 8}, "v1"));
+                new EncryptedSecret(new byte[]{7, 7, 7}, new byte[]{8, 8}, "v1"),
+                upstreamTimeoutsMs.getOrDefault(MCP_SECURED_SERVICE, McpService.DEFAULT_UPSTREAM_TIMEOUT_MS));
         RouteSnapshot.McpServerRecord broken = new RouteSnapshot.McpServerRecord(serviceId(MCP_BROKEN_SERVICE),
                 TENANT_ID, MCP_BROKEN_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE", "NONE", Set.of(), List.of(),
                 policies.get(MCP_BROKEN_SERVICE), "API_KEY",
-                new EncryptedSecret(new byte[]{0, 0, 0}, new byte[]{0, 0}, "v1"));
+                new EncryptedSecret(new byte[]{0, 0, 0}, new byte[]{0, 0}, "v1"),
+                upstreamTimeoutsMs.getOrDefault(MCP_BROKEN_SERVICE, McpService.DEFAULT_UPSTREAM_TIMEOUT_MS));
         Map<String, RouteSnapshot.McpServerRecord> services = new LinkedHashMap<>();
         services.put(MCP_OPEN_SERVICE, open);
         services.put(MCP_GATED_SERVICE, gated);

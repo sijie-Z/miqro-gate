@@ -191,7 +191,8 @@ class McpToolSyncServiceTest {
     private static McpService service(String backendAuthMode) {
         return new McpService(SERVICE_ID, TENANT, "mcp-test", null, "https://mcp.example/mcp", "STREAMABLE_HTTP",
                 "ONLINE", "UNKNOWN", null, 0, 0, 30, 5, 3, 1, "/health", 0, UUID.randomUUID(), Instant.now(),
-                Instant.now(), backendAuthMode, "API_KEY".equals(backendAuthMode) ? Instant.now() : null);
+                Instant.now(), backendAuthMode, "API_KEY".equals(backendAuthMode) ? Instant.now() : null,
+                McpService.DEFAULT_UPSTREAM_TIMEOUT_MS);
     }
 
     private static McpTool tool(String name, String description) {

@@ -74,10 +74,14 @@ class McpResilienceIntegrationTest {
     }
 
     private void install(Map<String, McpResiliencePolicy> policies) {
-        snapshotProvider.install(GatewayTestKeys.snapshotWithResilience(mockServer.getBaseUrl(), policies,
-                GatewayTestKeys.DEFAULT_KEY, GatewayTestKeys.OTHER_KEY, GatewayTestKeys.GRANT_LIMITED_KEY,
-                GatewayTestKeys.UPSTREAM_LIMITED_KEY, GatewayTestKeys.NO_UPSTREAM_KEY,
-                GatewayTestKeys.UNKNOWN_PRODUCT_KEY));
+        install(policies, Map.of());
+    }
+
+    private void install(Map<String, McpResiliencePolicy> policies, Map<String, Integer> upstreamTimeoutsMs) {
+        snapshotProvider.install(GatewayTestKeys.snapshotWithTimeouts(mockServer.getBaseUrl(), policies,
+                upstreamTimeoutsMs, GatewayTestKeys.DEFAULT_KEY, GatewayTestKeys.OTHER_KEY,
+                GatewayTestKeys.GRANT_LIMITED_KEY, GatewayTestKeys.UPSTREAM_LIMITED_KEY,
+                GatewayTestKeys.NO_UPSTREAM_KEY, GatewayTestKeys.UNKNOWN_PRODUCT_KEY));
     }
 
     private static String envelope(String method, String toolName) {
@@ -284,6 +288,35 @@ class McpResilienceIntegrationTest {
                     envelope("tools/call", GatewayTestKeys.MCP_TOOL_SHARED)).expectStatus().isEqualTo(503);
 
             assertThat(mockServer.capturedRequests()).hasSize(1);
+        }
+    }
+
+    @Nested
+    @DisplayName("per-service upstream timeout (I20, doc 135906)")
+    class UpstreamTimeout {
+
+        @Test
+        @DisplayName("the configured budget yields a typed 504 once the upstream exceeds it")
+        void configuredBudgetTimes504() {
+            install(Map.of(), Map.of(GatewayTestKeys.MCP_GATED_SERVICE, 1000));
+            mockServer.setDelayMillis(1600);
+
+            byte[] body = callGated(GatewayTestKeys.MCP_ALLOWED.presentedKey(), GatewayTestKeys.MCP_TOOL_SHARED,
+                    envelope("tools/call", GatewayTestKeys.MCP_TOOL_SHARED)).expectStatus().isEqualTo(504).expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("mcp_upstream_timeout");
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("the default 60s budget leaves a merely slow upstream untouched")
+        void defaultBudgetPassesSlowUpstream() {
+            install(Map.of());
+            mockServer.setDelayMillis(1200);
+
+            callGated(GatewayTestKeys.MCP_ALLOWED.presentedKey(), GatewayTestKeys.MCP_TOOL_SHARED,
+                    envelope("tools/call", GatewayTestKeys.MCP_TOOL_SHARED)).expectStatus().isOk();
         }
     }
 }

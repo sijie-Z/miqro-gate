@@ -40,6 +40,7 @@ public final class McpMockServer implements AutoCloseable {
     private final java.util.concurrent.ConcurrentLinkedQueue<QueuedResponse> scripted = new java.util.concurrent.ConcurrentLinkedQueue<>();
     private volatile byte[] responseBody = DEFAULT_RESPONSE.getBytes(StandardCharsets.UTF_8);
     private volatile int responseStatus = 200;
+    private volatile long delayMillis;
 
     public McpMockServer() {
         try {
@@ -68,12 +69,18 @@ public final class McpMockServer implements AutoCloseable {
         scripted.add(new QueuedResponse(body, status));
     }
 
+    /** Holds every response for this long (upstream-timeout scenarios, I20). */
+    public void setDelayMillis(long millis) {
+        this.delayMillis = millis;
+    }
+
     /** Clears captured requests, scripted queue and restores the 200 default. */
     public void reset() {
         requests.clear();
         scripted.clear();
         responseBody = DEFAULT_RESPONSE.getBytes(StandardCharsets.UTF_8);
         responseStatus = 200;
+        delayMillis = 0;
     }
 
     public List<Request> capturedRequests() {
@@ -90,6 +97,13 @@ public final class McpMockServer implements AutoCloseable {
                 exchange.getRequestHeaders().getFirst("Authorization"),
                 exchange.getRequestHeaders().getFirst("x-api-key"),
                 exchange.getRequestHeaders().getFirst("Content-Type"), body));
+        if (delayMillis > 0) {
+            try {
+                Thread.sleep(delayMillis);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
         QueuedResponse scriptedResponse = scripted.poll();
         byte[] out = scriptedResponse != null ? scriptedResponse.body().getBytes(StandardCharsets.UTF_8) : responseBody;
         int status = scriptedResponse != null ? scriptedResponse.status() : responseStatus;

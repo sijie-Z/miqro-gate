@@ -248,18 +248,13 @@ class AdminMcpResilienceApiIntegrationTest {
                 .content(objectMapper.writeValueAsString(
                         payload("breakerEnabled", true, "breakerErrorEnabled", false, "breakerSlowEnabled", false))))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("RESILIENCE_INVALID"));
-        // slow threshold at the service check timeout (3s -> 3000ms) is rejected
+        // slow threshold baseline (I20): the service upstream timeout (60s
+        // default), not the 3s health-check timeout — 3000ms passes now; the
+        // cross-check directions live in slowBaselineFollowsUpstreamTimeout.
         mockMvc.perform(put(path).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(
                         payload("breakerEnabled", true, "breakerSlowEnabled", true, "breakerSlowCallMs", 3000))))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("RESILIENCE_SLOW_EXCEEDS_TIMEOUT"));
-        // ... and 2999ms passes
-        mockMvc.perform(put(path).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(
-                        payload("breakerEnabled", true, "breakerSlowEnabled", true, "breakerSlowCallMs", 2999))))
                 .andExpect(status().isOk());
         // probe success beyond probe count
         mockMvc.perform(put(path).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
@@ -301,5 +296,45 @@ class AdminMcpResilienceApiIntegrationTest {
         static String secret() {
             return SECRET;
         }
+    }
+
+    @Test
+    @DisplayName("slow threshold baseline is the service upstream timeout, both directions (I20)")
+    void slowBaselineFollowsUpstreamTimeout() throws Exception {
+        String path = "/api/v1/admin/mcp-services/" + serviceId + "/resilience";
+        String timeoutPath = "/api/v1/admin/mcp-services/" + serviceId + "/upstream-timeout";
+        // 10s sits above the 3s health-check timeout but below the 60s upstream
+        // budget — accepted (rejected while the health probe was the baseline).
+        mockMvc.perform(put(path).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(
+                        payload("breakerEnabled", true, "breakerSlowEnabled", true, "breakerSlowCallMs", 10000))))
+                .andExpect(status().isOk());
+
+        // Shrinking the budget to or below the active threshold is rejected...
+        mockMvc.perform(put(timeoutPath).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"upstreamTimeoutMs\":10000}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("RESILIENCE_SLOW_EXCEEDS_TIMEOUT"));
+        mockMvc.perform(put(timeoutPath).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"upstreamTimeoutMs\":9999}"))
+                .andExpect(status().isBadRequest());
+        // ... while a higher budget round-trips.
+        mockMvc.perform(put(timeoutPath).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"upstreamTimeoutMs\":10001}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.upstreamTimeoutMs").value(10001));
+
+        // And the threshold must stay strictly below the new baseline.
+        mockMvc.perform(put(path).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(
+                        payload("breakerEnabled", true, "breakerSlowEnabled", true, "breakerSlowCallMs", 10001))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("RESILIENCE_SLOW_EXCEEDS_TIMEOUT"));
+        mockMvc.perform(put(path).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(
+                        payload("breakerEnabled", true, "breakerSlowEnabled", true, "breakerSlowCallMs", 10000))))
+                .andExpect(status().isOk());
     }
 }
