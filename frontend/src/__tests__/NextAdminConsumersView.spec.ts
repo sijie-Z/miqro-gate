@@ -50,7 +50,7 @@ describe('NextAdminConsumersView', () => {
     await wrapper.find('[data-testid="consumer-create-name"]').setValue('nightly');
     await wrapper.find('[data-testid="consumer-create-submit"]').trigger('click');
     await flushPromises();
-    expect(mockApi.createApiConsumer).toHaveBeenCalledWith('nightly');
+    expect(mockApi.createApiConsumer).toHaveBeenCalledWith('nightly', undefined);
     expect(document.body.textContent).toContain('mqk_ext_secretkey');
     const close = document.querySelector('[data-testid="consumer-key-close"]') as HTMLButtonElement;
     expect(close.disabled).toBe(true);
