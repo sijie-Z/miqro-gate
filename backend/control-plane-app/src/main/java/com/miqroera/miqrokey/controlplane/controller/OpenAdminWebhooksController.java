@@ -1,6 +1,8 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.security.AdminApiKeyAuthFilter;
+import com.miqroera.miqrokey.controlplane.security.UserContext;
+import com.miqroera.miqrokey.controlplane.service.AuditContext;
 import com.miqroera.miqrokey.controlplane.service.WebhookEndpointService;
 import com.miqroera.miqrokey.controlplane.service.WebhookEndpointService.DeliveryAttempt;
 import com.miqroera.miqrokey.controlplane.service.WebhookEndpointService.TestResult;
@@ -33,16 +35,18 @@ import java.util.UUID;
 public class OpenAdminWebhooksController {
 
     private final WebhookEndpointService endpointService;
+    private final UserContext userContext;
 
-    public OpenAdminWebhooksController(WebhookEndpointService endpointService) {
+    public OpenAdminWebhooksController(WebhookEndpointService endpointService, UserContext userContext) {
         this.endpointService = endpointService;
+        this.userContext = userContext;
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public WebhookEndpointView create(HttpServletRequest request, @RequestBody CreateRequest body) {
         return endpointService.create(tenantId(request), body.name(), body.url(), body.secret(),
-                body.timeoutMs() != null ? body.timeoutMs() : 5000);
+                body.timeoutMs() != null ? body.timeoutMs() : 5000, auditContext(request));
     }
 
     @GetMapping
@@ -58,13 +62,14 @@ public class OpenAdminWebhooksController {
     @PatchMapping("/{endpointId}")
     public WebhookEndpointView update(HttpServletRequest request, @PathVariable UUID endpointId,
             @RequestBody UpdateRequest body) {
-        return endpointService.updateView(tenantId(request), endpointId, body.name(), body.enabled(), body.timeoutMs());
+        return endpointService.updateView(tenantId(request), endpointId, body.name(), body.enabled(), body.timeoutMs(),
+                auditContext(request));
     }
 
     @DeleteMapping("/{endpointId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(HttpServletRequest request, @PathVariable UUID endpointId) {
-        endpointService.delete(tenantId(request), endpointId);
+        endpointService.delete(tenantId(request), endpointId, auditContext(request));
     }
 
     /** Sends a signed test payload to the endpoint. */
@@ -84,9 +89,26 @@ public class OpenAdminWebhooksController {
         return (UUID) request.getAttribute(AdminApiKeyAuthFilter.TENANT_ATTR);
     }
 
+    /**
+     * Machine key -> issuing admin + via marker; SYSTEM_ADMIN session -> the user.
+     */
+    private AuditContext auditContext(HttpServletRequest request) {
+        UUID issuer = (UUID) request.getAttribute(AdminApiKeyAuthFilter.ISSUER_ATTR);
+        if (issuer != null) {
+            return AuditContext.machine(issuer, (String) request.getAttribute(AdminApiKeyAuthFilter.NAME_ATTR),
+                    requestId(request));
+        }
+        return AuditContext.human(userContext.getUser().id(), requestId(request));
+    }
+
     public record CreateRequest(String name, String url, String secret, Integer timeoutMs) {
     }
 
     public record UpdateRequest(String name, Boolean enabled, Integer timeoutMs) {
     }
+    private static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
+    }
+
 }

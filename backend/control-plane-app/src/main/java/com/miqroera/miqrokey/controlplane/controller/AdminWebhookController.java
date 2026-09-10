@@ -1,10 +1,12 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.security.UserContext;
+import com.miqroera.miqrokey.controlplane.service.AuditContext;
 import com.miqroera.miqrokey.controlplane.service.WebhookEndpointService;
 import com.miqroera.miqrokey.controlplane.service.WebhookEndpointService.DeliveryAttempt;
 import com.miqroera.miqrokey.controlplane.service.WebhookEndpointService.TestResult;
 import com.miqroera.miqrokey.controlplane.service.WebhookEndpointService.WebhookEndpointView;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -37,9 +39,10 @@ public class AdminWebhookController {
     }
 
     @PostMapping
-    public WebhookEndpointView create(@RequestBody CreateRequest body) {
-        return endpointService.create(userContext.getUser().tenantId(), body.name(), body.url(), body.secret(),
-                body.timeoutMs() != null ? body.timeoutMs() : 5000);
+    public WebhookEndpointView create(@RequestBody CreateRequest body, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return endpointService.create(user.tenantId(), body.name(), body.url(), body.secret(),
+                body.timeoutMs() != null ? body.timeoutMs() : 5000, AuditContext.human(user.id(), requestId(httpReq)));
     }
 
     @GetMapping
@@ -53,14 +56,17 @@ public class AdminWebhookController {
     }
 
     @PatchMapping("/{endpointId}")
-    public WebhookEndpointView update(@PathVariable UUID endpointId, @RequestBody UpdateRequest body) {
-        return endpointService.updateView(userContext.getUser().tenantId(), endpointId, body.name(), body.enabled(),
-                body.timeoutMs());
+    public WebhookEndpointView update(@PathVariable UUID endpointId, @RequestBody UpdateRequest body,
+            HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return endpointService.updateView(user.tenantId(), endpointId, body.name(), body.enabled(), body.timeoutMs(),
+                AuditContext.human(user.id(), requestId(httpReq)));
     }
 
     @DeleteMapping("/{endpointId}")
-    public void delete(@PathVariable UUID endpointId) {
-        endpointService.delete(userContext.getUser().tenantId(), endpointId);
+    public void delete(@PathVariable UUID endpointId, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        endpointService.delete(user.tenantId(), endpointId, AuditContext.human(user.id(), requestId(httpReq)));
     }
 
     /** Sends a signed test payload to the endpoint. */
@@ -81,4 +87,9 @@ public class AdminWebhookController {
 
     public record UpdateRequest(String name, Boolean enabled, Integer timeoutMs) {
     }
+    private static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
+    }
+
 }
