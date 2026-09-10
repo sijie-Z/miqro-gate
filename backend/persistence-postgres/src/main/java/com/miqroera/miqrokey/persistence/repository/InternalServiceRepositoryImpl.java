@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -73,15 +74,31 @@ public class InternalServiceRepositoryImpl implements InternalServiceRepository 
 
     @Override
     @Transactional
-    public InternalService updateStatus(UUID tenantId, UUID serviceId, String status, long expectedVersion) {
+    public InternalService updateStatus(UUID tenantId, UUID serviceId, String status) {
         int rows = jdbc.update("""
                 UPDATE services SET status = :status, version = version + 1, updated_at = now()
-                WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
-                """, new MapSqlParameterSource("status", status).addValue("id", serviceId)
-                .addValue("tenantId", tenantId).addValue("expectedVersion", expectedVersion));
+                WHERE id = :id AND tenant_id = :tenantId AND status <> :status
+                """,
+                new MapSqlParameterSource("status", status).addValue("id", serviceId).addValue("tenantId", tenantId));
         if (rows != 1) {
-            throw new IllegalStateException("Optimistic lock failure: service " + serviceId);
+            throw new IllegalStateException("Concurrent status change: service " + serviceId);
         }
+        return findByIdAndTenantId(serviceId, tenantId).orElseThrow();
+    }
+
+    @Override
+    @Transactional
+    public InternalService updateHealth(UUID tenantId, UUID serviceId, String healthStatus, Instant checkedAt,
+            int consecutiveFailures, int consecutiveSuccesses) {
+        jdbc.update("""
+                UPDATE services
+                SET health_status = :healthStatus, health_checked_at = :checkedAt,
+                    consecutive_failures = :failures, consecutive_successes = :successes, updated_at = now()
+                WHERE id = :id AND tenant_id = :tenantId
+                """,
+                new MapSqlParameterSource("healthStatus", healthStatus).addValue("id", serviceId)
+                        .addValue("tenantId", tenantId).addValue("checkedAt", java.sql.Timestamp.from(checkedAt))
+                        .addValue("failures", consecutiveFailures).addValue("successes", consecutiveSuccesses));
         return findByIdAndTenantId(serviceId, tenantId).orElseThrow();
     }
 

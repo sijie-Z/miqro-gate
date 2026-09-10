@@ -62,7 +62,7 @@ public class AdminServiceService {
         if ("DISABLED".equals(service.status())) {
             throw new ApiException(HttpStatus.CONFLICT, "SERVICE_ALREADY_DISABLED", "服务已禁用。");
         }
-        InternalService updated = serviceRepository.updateStatus(tenantId, serviceId, "DISABLED", service.version());
+        InternalService updated = switchStatus(tenantId, serviceId, "DISABLED");
         auditService.record(tenantId, adminId, "SERVICE_DISABLE", "SERVICE", serviceId,
                 AuditSummaries.summary("name", AuditSummaries.sanitize(service.name())), requestId);
         return updated;
@@ -75,10 +75,23 @@ public class AdminServiceService {
         if ("ACTIVE".equals(service.status())) {
             throw new ApiException(HttpStatus.CONFLICT, "SERVICE_ALREADY_ENABLED", "服务已启用。");
         }
-        InternalService updated = serviceRepository.updateStatus(tenantId, serviceId, "ACTIVE", service.version());
+        InternalService updated = switchStatus(tenantId, serviceId, "ACTIVE");
         auditService.record(tenantId, adminId, "SERVICE_ENABLE", "SERVICE", serviceId,
                 AuditSummaries.summary("name", AuditSummaries.sanitize(service.name())), requestId);
         return updated;
+    }
+
+    /**
+     * Status switch with a clean conflict signal: the write is compare-and-set on
+     * the status column (#361), so losing a concurrent switch is a retriable 409,
+     * never a 500.
+     */
+    private InternalService switchStatus(UUID tenantId, UUID serviceId, String status) {
+        try {
+            return serviceRepository.updateStatus(tenantId, serviceId, status);
+        } catch (IllegalStateException e) {
+            throw new ApiException(HttpStatus.CONFLICT, "SERVICE_STATE_CONFLICT", "并发状态变更，请刷新后重试。");
+        }
     }
 
     /** Health probe configuration (partial update, mirror of the MCP endpoint). */
@@ -96,7 +109,12 @@ public class AdminServiceService {
                 failThreshold != null ? failThreshold : service.failThreshold(),
                 recoverThreshold != null ? recoverThreshold : service.recoverThreshold(),
                 checkPath != null && !checkPath.isBlank() ? checkPath : service.checkPath());
-        InternalService saved = serviceRepository.update(updated, service.version());
+        InternalService saved;
+        try {
+            saved = serviceRepository.update(updated, service.version());
+        } catch (IllegalStateException e) {
+            throw new ApiException(HttpStatus.CONFLICT, "SERVICE_STATE_CONFLICT", "并发状态变更，请刷新后重试。");
+        }
         auditService.record(tenantId, adminId, "SERVICE_HEALTH_UPDATE", "SERVICE", serviceId,
                 AuditSummaries.summary("name", AuditSummaries.sanitize(service.name())), requestId);
         return saved;

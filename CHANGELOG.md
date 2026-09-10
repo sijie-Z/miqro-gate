@@ -5,6 +5,10 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **修复：服务状态切换与健康巡检的乐观锁竞态（#361）**：`updateStatus` 改为**按状态列 compare-and-set**
+  （并发切换 → `409 SERVICE_STATE_CONFLICT`，不再 500；不再与巡检的 version 争用）；`ServiceHealthChecker`
+  改用窄写 `updateHealth`（仅健康列、不 bump version），管理侧版本守卫路径不再被巡检挤掉；健康配置更新遇并发
+  同样 409 化。集成测试：巡检后 version 不变 + 健康列已更新 + 随后禁用成功。
 - **Tool 级重试粒度下沉（#360，I13，doc 12）**：V46 `mcp_tool_retry_policy`（每工具一行，覆盖服务级策略的**重试字段**，
   熔断保持服务级）；`GET/PUT /api/v1/admin/mcp-services/{id}/tools/{toolId}/retry-policy`（校验同 F12；
   `TOOL_RETRY_POLICY_INVALID`；审计 `MCP_TOOL_RETRY_UPDATE`；快照即时刷新）；快照 `McpToolRecord.retry` +

@@ -57,17 +57,10 @@ public class ServiceHealthChecker {
     private void probe(InternalService service, Instant now) {
         boolean healthy = isHealthy(service);
         HealthState state = nextHealth(service, healthy);
-        InternalService updated = new InternalService(service.id(), service.tenantId(), service.name(), service.kind(),
-                service.description(), service.baseUrl(), service.status(), service.version(), service.createdBy(),
-                service.createdAt(), service.updatedAt(), state.healthStatus(), now, state.failures(),
-                state.successes(), service.checkIntervalSeconds(), service.checkTimeoutSeconds(),
-                service.failThreshold(), service.recoverThreshold(), service.checkPath());
-        try {
-            repository.update(updated, service.version());
-        } catch (IllegalStateException e) {
-            // Concurrent status/config change won the optimistic lock; skip.
-            LOG.debug("Service health update skipped for {} (concurrent change)", service.name());
-        }
+        // Narrow telemetry write (#361): health columns only, no version bump, so
+        // status switches and config edits never lose to a probe.
+        repository.updateHealth(service.tenantId(), service.id(), state.healthStatus(), now, state.failures(),
+                state.successes());
     }
 
     /**
