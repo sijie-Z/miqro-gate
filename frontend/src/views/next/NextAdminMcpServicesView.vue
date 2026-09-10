@@ -22,7 +22,12 @@ import {
   toast,
 } from '@/ui';
 import type { McpAclMode } from '@/types/api';
-import type { McpRouteRule, McpToolRevisionRow, ToolImportResult, UpsertMcpRouteRuleRequest } from '@/types/generated-api';
+import type {
+  McpRouteRule,
+  McpToolRevisionRow,
+  ToolImportResult,
+  UpsertMcpRouteRuleRequest,
+} from '@/types/generated-api';
 import type {
   ApiConsumerView,
   McpAccessView,
@@ -41,6 +46,7 @@ const columns = [
   { key: 'name', title: '名称', minWidth: '170px' },
   { key: 'endpoint', title: '接入地址', minWidth: '220px' },
   { key: 'transport', title: '传输', width: '130px' },
+  { key: 'backendAuthMode', title: '后端鉴权', width: '100px' },
   { key: 'status', title: '状态', width: '100px' },
   { key: 'healthStatus', title: '健康', width: '100px' },
   { key: 'healthCheckedAt', title: '最近检查', width: '170px' },
@@ -88,6 +94,49 @@ const configForm = ref({
 });
 const configSaving = ref(false);
 const configError = ref('');
+
+// #320 upstream backend auth: the secret is write-only; API_KEY requires a
+// fresh value on every save, VISITOR clears any stored secret.
+const backendAuthService = ref<McpServiceView | null>(null);
+const backendAuthVisible = ref(false);
+const backendAuthMode = ref<'VISITOR' | 'API_KEY'>('VISITOR');
+const backendAuthSecret = ref('');
+const backendAuthSaving = ref(false);
+const backendAuthError = ref('');
+
+function openBackendAuth(service: McpServiceView) {
+  backendAuthService.value = service;
+  backendAuthMode.value = service.backendAuthMode === 'API_KEY' ? 'API_KEY' : 'VISITOR';
+  backendAuthSecret.value = '';
+  backendAuthError.value = '';
+  backendAuthVisible.value = true;
+}
+
+async function saveBackendAuth() {
+  if (!backendAuthService.value) {
+    return;
+  }
+  if (backendAuthMode.value === 'API_KEY' && !backendAuthSecret.value.trim()) {
+    backendAuthError.value = 'API Key 模式必须填写密钥（每次保存都需要重新填写）。';
+    return;
+  }
+  backendAuthSaving.value = true;
+  backendAuthError.value = '';
+  try {
+    await api.adminSetMcpBackendAuth(backendAuthService.value.id!, {
+      mode: backendAuthMode.value,
+      secret: backendAuthMode.value === 'API_KEY' ? backendAuthSecret.value.trim() : undefined,
+    });
+    backendAuthVisible.value = false;
+    backendAuthSecret.value = '';
+    toast.success('后端鉴权已更新');
+    await load();
+  } catch (error) {
+    backendAuthError.value = error instanceof ApiError ? error.message : '更新失败';
+  } finally {
+    backendAuthSaving.value = false;
+  }
+}
 
 // Tools dialog
 const toolsService = ref<McpServiceView | null>(null);
@@ -539,11 +588,7 @@ async function loadAccess() {
     serverMode.value = view.mode!;
     serverIds.value = (view.serverConsumers ?? []).map((c) => c.id!);
     for (const tool of view.tools ?? []) {
-      toolDraft(
-        tool.toolId!,
-        tool.mode ?? null,
-        tool.consumers?.map((c) => c.id!) ?? [],
-      );
+      toolDraft(tool.toolId!, tool.mode ?? null, tool.consumers?.map((c) => c.id!) ?? []);
     }
     accessNotice.value =
       view.mode === 'NONE'
@@ -1096,6 +1141,19 @@ async function saveResilience() {
         <template #transport="{ row }">
           <span class="ui-mono">{{ (row as McpServiceView).transport }}</span>
         </template>
+        <template #backendAuthMode="{ row }">
+          <button
+            type="button"
+            class="next-mcp__authchip"
+            :class="{
+              'next-mcp__authchip--key': (row as McpServiceView).backendAuthMode === 'API_KEY',
+            }"
+            data-testid="mcp-backend-auth-open"
+            @click="openBackendAuth(row as McpServiceView)"
+          >
+            {{ (row as McpServiceView).backendAuthMode === 'API_KEY' ? 'API Key' : '访客' }}
+          </button>
+        </template>
         <template #status="{ row }">
           <UiStatusBadge
             :tone="(row as McpServiceView).status === 'ONLINE' ? 'success' : 'neutral'"
@@ -1463,11 +1521,12 @@ async function saveResilience() {
           >导入完成：新建 {{ (importResult.created ?? []).length }}，跳过
           {{ (importResult.skipped ?? []).length + (importResult.parseSkips ?? []).length }}</strong
         >
-        <ul
-          v-if="(importResult.skipped?.length ?? 0) || (importResult.parseSkips?.length ?? 0)"
-        >
+        <ul v-if="(importResult.skipped?.length ?? 0) || (importResult.parseSkips?.length ?? 0)">
           <li
-            v-for="(s, idx) in [...(importResult.skipped ?? []), ...(importResult.parseSkips ?? [])]"
+            v-for="(s, idx) in [
+              ...(importResult.skipped ?? []),
+              ...(importResult.parseSkips ?? []),
+            ]"
             :key="idx"
           >
             {{ s.toolName || '（无法命名）' }} — {{ s.reason }}
@@ -1622,7 +1681,7 @@ async function saveResilience() {
                 <label v-for="c in consumerOptions" :key="c.id" class="next-mcp__check">
                   <input
                     :value="c.id"
-                    :checked="(accessDraft(tool.toolId)?.ids.includes(c.id ?? '') ?? false)"
+                    :checked="accessDraft(tool.toolId)?.ids.includes(c.id ?? '') ?? false"
                     type="checkbox"
                     data-testid="mcp-tool-consumer"
                     @change="
@@ -2107,6 +2166,55 @@ async function saveResilience() {
       >
     </template>
   </UiDrawer>
+  <!-- #320 upstream backend auth -->
+  <UiDialog
+    v-if="backendAuthService"
+    :open="backendAuthVisible"
+    :title="`后端鉴权 — ${backendAuthService.name}`"
+    description="控制网关调用该 MCP 服务时向上游携带的凭据：访客模式不携带；API Key 模式由网关注入 Authorization: Bearer <密钥>（密钥只写不读）。"
+    width="540px"
+    @update:open="backendAuthVisible = false"
+  >
+    <div class="next-mcp__auth-mode">
+      <label>
+        <input
+          v-model="backendAuthMode"
+          type="radio"
+          value="VISITOR"
+          data-testid="mcp-auth-visitor"
+        />
+        <span>访客（不向上游携带凭据）</span>
+      </label>
+      <label>
+        <input
+          v-model="backendAuthMode"
+          type="radio"
+          value="API_KEY"
+          data-testid="mcp-auth-apikey"
+        />
+        <span>API Key（网关注入 Bearer 凭据）</span>
+      </label>
+    </div>
+    <UiInput
+      v-if="backendAuthMode === 'API_KEY'"
+      v-model="backendAuthSecret"
+      type="password"
+      label="上游密钥（写入后不可查看）"
+      data-testid="mcp-auth-secret"
+    />
+    <p v-if="backendAuthError" class="ui-form-error">{{ backendAuthError }}</p>
+    <template #footer>
+      <UiButton variant="ghost" @click="backendAuthVisible = false">取消</UiButton>
+      <UiButton
+        variant="primary"
+        :loading="backendAuthSaving"
+        data-testid="mcp-auth-save"
+        @click="saveBackendAuth"
+      >
+        保存
+      </UiButton>
+    </template>
+  </UiDialog>
 </template>
 
 <style scoped>
@@ -2614,5 +2722,36 @@ async function saveResilience() {
   margin: 6px 0 0;
   padding-left: 18px;
   color: #5b6b85;
+}
+.next-mcp__authchip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--ui-space-2);
+  border-radius: var(--ui-radius-pill);
+  border: none;
+  background: var(--ui-fill-muted, var(--ui-bg-muted));
+  color: var(--ui-foreground-secondary);
+  font-size: var(--ui-font-size-xs);
+  cursor: pointer;
+}
+
+.next-mcp__authchip--key {
+  background: var(--ui-success-soft, var(--ui-success-bg));
+  color: var(--ui-success-fg, var(--ui-color-success));
+}
+
+.next-mcp__auth-mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  margin-bottom: var(--ui-space-3);
+}
+
+.next-mcp__auth-mode label {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  font-size: var(--ui-font-size-sm);
+  cursor: pointer;
 }
 </style>
