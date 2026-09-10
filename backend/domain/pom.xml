@@ -16,12 +16,6 @@
     <description>Pure domain model — no Spring, no database, no HTTP dependencies</description>
 
     <dependencies>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <!-- JDK-native consumer JWT verifier parses header/claims with the
-                 shared Jackson stack (version managed by the Spring Boot BOM). -->
-        </dependency>
         <!-- RE2 regular expressions for route-rule patterns (linear-time, no
              backreferences - the upstream route spec (doc 135482) requires RE2
              semantics; BSD-3 licensed) -->

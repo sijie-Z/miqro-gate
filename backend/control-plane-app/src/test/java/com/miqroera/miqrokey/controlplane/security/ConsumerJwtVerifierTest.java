@@ -166,6 +166,11 @@ class ConsumerJwtVerifierTest {
         assertThat(ConsumerJwtVerifier.extractSubject("not-a-jwt")).isNull();
         assertThat(ConsumerJwtVerifier.extractSubject("a.b.")).isNull();
         assertThat(ConsumerJwtVerifier.extractSubject(null)).isNull();
+
+        // A non-string sub is not coerced to text.
+        String numericSub = signRawPayload(keys.getPrivate(),
+                "{\"sub\":7,\"exp\":%d}".formatted(NOW.plusSeconds(600).getEpochSecond()));
+        assertThat(ConsumerJwtVerifier.extractSubject(numericSub)).isNull();
     }
 
     // --------------------------------------------------------------- key tools
@@ -197,6 +202,101 @@ class ConsumerJwtVerifierTest {
         assertThat(first).hasSize(16).isEqualTo(second);
     }
 
+    // ------------------------------------------------- strict document parsing
+
+    @Test
+    @DisplayName("claim values are never coerced: wrong-typed sub/exp/nbf fail closed")
+    void claimTypesAreNotCoerced() throws Exception {
+        KeyPair keys = rsaKeyPair();
+        String pem = pem(keys.getPublic());
+        long exp = NOW.plusSeconds(600).getEpochSecond();
+
+        // exp as a JSON string: no numeric coercion.
+        assertThat(VERIFIER.verify(
+                signRawPayload(keys.getPrivate(), "{\"sub\":\"platform\",\"exp\":\"%d\"}".formatted(exp)), pem,
+                "platform")).isFalse();
+        // sub as a JSON number: no text coercion.
+        assertThat(VERIFIER.verify(signRawPayload(keys.getPrivate(), "{\"sub\":123,\"exp\":%d}".formatted(exp)), pem,
+                "123")).isFalse();
+        // nbf present but not an integer: rejected, not skipped.
+        assertThat(VERIFIER.verify(
+                signRawPayload(keys.getPrivate(), "{\"sub\":\"platform\",\"exp\":%d,\"nbf\":\"soon\"}".formatted(exp)),
+                pem, "platform")).isFalse();
+    }
+
+    @Test
+    @DisplayName("only top-level claims count: nested decoys are ignored")
+    void nestedClaimsIgnored() throws Exception {
+        KeyPair keys = rsaKeyPair();
+        String pem = pem(keys.getPublic());
+
+        // A future exp hidden in a nested object must not stand in for the real one.
+        String decoyExp = signRawPayload(keys.getPrivate(), "{\"sub\":\"platform\",\"meta\":{\"exp\":%d},\"exp\":%d}"
+                .formatted(NOW.plusSeconds(60000).getEpochSecond(), NOW.minusSeconds(10).getEpochSecond()));
+        assertThat(VERIFIER.verify(decoyExp, pem, "platform")).isFalse();
+
+        // A nested sub must not be picked up.
+        String decoySub = signRawPayload(keys.getPrivate(),
+                "{\"sub\":\"other\",\"meta\":{\"sub\":\"platform\"},\"exp\":%d}"
+                        .formatted(NOW.plusSeconds(600).getEpochSecond()));
+        assertThat(VERIFIER.verify(decoySub, pem, "platform")).isFalse();
+    }
+
+    @Test
+    @DisplayName("duplicate keys follow last-wins, matching tree parsers")
+    void duplicateKeysLastWins() throws Exception {
+        KeyPair keys = rsaKeyPair();
+        String token = signRawPayload(keys.getPrivate(),
+                "{\"sub\":\"other\",\"sub\":\"platform\",\"exp\":%d}".formatted(NOW.plusSeconds(600).getEpochSecond()));
+
+        assertThat(VERIFIER.verify(token, pem(keys.getPublic()), "platform")).isTrue();
+    }
+
+    @Test
+    @DisplayName("escapes decode and malformed claim documents fail closed")
+    void strictDocumentParsing() throws Exception {
+        KeyPair keys = rsaKeyPair();
+        String pem = pem(keys.getPublic());
+        long exp = NOW.plusSeconds(600).getEpochSecond();
+
+        // A Unicode escape inside sub decodes before the comparison.
+        assertThat(VERIFIER.verify(
+                signRawPayload(keys.getPrivate(), "{\"sub\":\"plat\\u0066orm\",\"exp\":%d}".formatted(exp)), pem,
+                "platform")).isTrue();
+        // Escaped quote inside sub.
+        assertThat(VERIFIER.verify(signRawPayload(keys.getPrivate(), "{\"sub\":\"a\\\"b\",\"exp\":%d}".formatted(exp)),
+                pem, "a\"b")).isTrue();
+        // Whitespace around tokens is fine.
+        assertThat(VERIFIER.verify(
+                signRawPayload(keys.getPrivate(), " { \"sub\" : \"platform\" , \"exp\" : %d } ".formatted(exp)), pem,
+                "platform")).isTrue();
+        // nbf as JSON null is treated as absent.
+        assertThat(VERIFIER.verify(
+                signRawPayload(keys.getPrivate(), "{\"sub\":\"platform\",\"exp\":%d,\"nbf\":null}".formatted(exp)), pem,
+                "platform")).isTrue();
+
+        // Trailing bytes after the claims object.
+        assertThat(
+                VERIFIER.verify(signRawPayload(keys.getPrivate(), "{\"sub\":\"platform\",\"exp\":%d} x".formatted(exp)),
+                        pem, "platform"))
+                .isFalse();
+        // Claims that are not an object.
+        assertThat(VERIFIER.verify(signRawPayload(keys.getPrivate(), "[1,2,3]"), pem, "platform")).isFalse();
+        // A leading-zero number is invalid JSON.
+        assertThat(
+                VERIFIER.verify(signRawPayload(keys.getPrivate(), "{\"sub\":\"platform\",\"exp\":0%d}".formatted(exp)),
+                        pem, "platform"))
+                .isFalse();
+        // Nesting beyond the depth cap.
+        String deep = "{\"sub\":\"platform\",\"exp\":%d,\"x\":%s}".formatted(exp, "[".repeat(40) + "]".repeat(40));
+        assertThat(VERIFIER.verify(signRawPayload(keys.getPrivate(), deep), pem, "platform")).isFalse();
+        // Payload bytes that are not valid UTF-8 (0xFF never appears in UTF-8).
+        assertThat(VERIFIER.verify(
+                signedRaw(keys.getPrivate(),
+                        "{\"sub\":\"platÿform\",\"exp\":%d}".formatted(exp).getBytes(StandardCharsets.ISO_8859_1)),
+                pem, "platform")).isFalse();
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static Map<String, Object> claims(String sub, Instant exp, Instant nbf) {
@@ -216,6 +316,20 @@ class ConsumerJwtVerifierTest {
     private static String signWith(PrivateKey key, String headerJson, Object claims) throws Exception {
         String header = b64url(headerJson);
         String payload = b64url(new ObjectMapper().writeValueAsBytes(claims));
+        Signature signature = Signature.getInstance("SHA256withRSA");
+        signature.initSign(key);
+        signature.update((header + "." + payload).getBytes(StandardCharsets.US_ASCII));
+        return header + "." + payload + "." + b64url(signature.sign());
+    }
+
+    /** Signs a token whose claims are the given raw JSON (no mapper round-trip). */
+    private static String signRawPayload(PrivateKey key, String payloadJson) throws Exception {
+        return signedRaw(key, payloadJson.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String signedRaw(PrivateKey key, byte[] payloadBytes) throws Exception {
+        String header = b64url("{\"alg\":\"RS256\",\"typ\":\"JWT\"}");
+        String payload = b64url(payloadBytes);
         Signature signature = Signature.getInstance("SHA256withRSA");
         signature.initSign(key);
         signature.update((header + "." + payload).getBytes(StandardCharsets.US_ASCII));
