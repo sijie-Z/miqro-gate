@@ -17,6 +17,7 @@ const loadRequestId = ref('');
 
 const creating = ref(false);
 const createName = ref('');
+const createExpiresAt = ref('');
 const submitting = ref(false);
 const formError = ref('');
 
@@ -62,6 +63,28 @@ function capabilityText(consumer: ApiConsumerView): string {
   return caps.join('、');
 }
 
+function toIso(local: string): string | undefined {
+  if (!local) return undefined;
+  const date = new Date(local);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+function isExpiringSoon(consumer: ApiConsumerView): boolean {
+  const iso = consumer.expiresAt;
+  if (!iso) return false;
+  const ms = new Date(iso).getTime() - Date.now();
+  return ms > 0 && ms <= 7 * 86400000;
+}
+
+function expiryText(consumer: ApiConsumerView): string {
+  const iso = consumer.expiresAt;
+  if (!iso) return '永久';
+  const days = Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
+  if (days <= 0) return `${formatTime(iso)} · 已过期`;
+  if (days <= 7) return `${formatTime(iso)} · 剩 ${days} 天`;
+  return formatTime(iso);
+}
+
 async function saveScope() {
   const target = scopeTarget.value;
   if (!target) return;
@@ -89,6 +112,7 @@ const columns = [
   { key: 'name', title: '名称', minWidth: '200px' },
   { key: 'keyPrefix', title: 'Key 前缀', width: '160px' },
   { key: 'capabilities', title: '能力作用域', minWidth: '150px' },
+  { key: 'expiresAt', title: '到期', width: '150px' },
   { key: 'status', title: '状态', width: '100px' },
   { key: 'createdAt', title: '创建时间', width: '170px' },
   { key: 'actions', title: '操作', width: '150px', align: 'center' as const },
@@ -117,9 +141,13 @@ async function createConsumer() {
   submitting.value = true;
   formError.value = '';
   try {
-    const response = await api.createApiConsumer(createName.value.trim());
+    const response = await api.createApiConsumer(
+      createName.value.trim(),
+      toIso(createExpiresAt.value),
+    );
     creating.value = false;
     createName.value = '';
+    createExpiresAt.value = '';
     revealName.value = response.consumer?.name ?? '';
     revealKey.value = response.apiKey ?? '';
     revealAcked.value = false;
@@ -220,6 +248,12 @@ onMounted(load);
             placeholder="例如 billing-sync"
             data-testid="consumer-create-name"
           />
+          <UiInput
+            v-model="createExpiresAt"
+            type="datetime-local"
+            label="到期时间（可选，留空 = 永不过期）"
+            data-testid="consumer-create-expires"
+          />
           <p v-if="formError" class="ui-form-error">{{ formError }}</p>
           <div class="next-consumers__actions">
             <UiButton
@@ -263,6 +297,15 @@ onMounted(load);
             data-testid="consumer-capabilities"
           >
             {{ capabilityText(row as ApiConsumerView) }}
+          </span>
+        </template>
+        <template #expiresAt="{ row }">
+          <span
+            class="next-consumers__expiry"
+            :class="{ 'next-consumers__expiry--soon': isExpiringSoon(row as ApiConsumerView) }"
+            data-testid="consumer-expires"
+          >
+            {{ expiryText(row as ApiConsumerView) }}
           </span>
         </template>
         <template #status="{ row }">
@@ -458,6 +501,16 @@ onMounted(load);
   background: var(--ui-fill-muted, var(--ui-bg-muted));
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
+}
+
+.next-consumers__expiry {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-consumers__expiry--soon {
+  color: var(--ui-danger-fg);
+  font-weight: var(--ui-weight-medium);
 }
 
 .next-consumers__caps--full {

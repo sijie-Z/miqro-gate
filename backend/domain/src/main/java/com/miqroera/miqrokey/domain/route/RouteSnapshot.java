@@ -261,11 +261,16 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
      * when full; the MCP channel requires {@code mcp:call}.
      */
     public record ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest,
-            java.util.List<String> capabilities) {
+            java.util.List<String> capabilities, java.time.Instant expiresAt) {
 
-        /** Legacy constructor: no scope means full access. */
+        /** Legacy constructor: no scope, never expires. */
         public ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest) {
-            this(id, tenantId, name, digest, null);
+            this(id, tenantId, name, digest, null, null);
+        }
+
+        /** Legacy constructor: no expiry. */
+        public ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest, java.util.List<String> capabilities) {
+            this(id, tenantId, name, digest, capabilities, null);
         }
 
         public ConsumerRecord {
@@ -279,6 +284,11 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         /** Fail-closed channel check. */
         public boolean allows(String capability) {
             return capabilities == null || capabilities.contains(capability);
+        }
+
+        /** #322: at/after the expiry the credential is silently rejected. */
+        public boolean expiredAt(java.time.Instant now) {
+            return expiresAt != null && !now.isBefore(expiresAt);
         }
     }
 

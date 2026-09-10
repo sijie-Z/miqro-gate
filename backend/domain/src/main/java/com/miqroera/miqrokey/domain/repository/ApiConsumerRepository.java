@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.domain.repository;
 
 import com.miqroera.miqrokey.domain.model.ApiConsumer;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,4 +28,10 @@ public interface ApiConsumerRepository {
 
     /** Replaces the capability scope (null = full access); bumps the version. */
     ApiConsumer updateCapabilities(UUID id, UUID tenantId, List<String> capabilities);
+
+    /**
+     * ACTIVE consumers expiring inside the window (issue #322 notifier); rows
+     * without an expiry are never returned.
+     */
+    List<ApiConsumer> findActiveExpiringBetween(UUID tenantId, Instant from, Instant to);
 }

@@ -5,6 +5,12 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **消费者密钥到期治理（#322）**：V39 `api_consumers.expires_at`（NULL=永不过期，存量零行为变化）——创建时可选
+  到期（必须为将来，非法 400 CONSUMER_EXPIRES_INVALID）；到期后**双面静默失效**（控制面计费通道仓储查询
+  `expires_at > now()` 条件 + 网关 MCP 数据面快照 `expiredAt(clock)` 判定，均 401 与未知 Key 同形）；
+  管理列表仍展示到期行；可选 `CONSUMER_KEY_EXPIRING` 告警规则（默认关，≤7 天到期消费者每（消费者×天）
+  至多一条事件，镜像管理密钥 V36 先例）；前端消费者页到期列（≤7 天高亮）+ 创建表单到期输入 + 告警规则类型选项。
+  验证：控制面 IT 4/4（创建/双仓储静默拒绝/列表可见/校验/提醒去重与关停）+ 网关契约含过期 401 用例。
 - **MCP 上游后端鉴权注入（#320）**：对齐腾讯 raw 03「Visitor / API Key」三级鉴权链——`mcp_services` 新增
   `backend_auth_mode`（VISITOR 默认 / API Key，V38）；API Key 模式网关按请求解密注入固定
   `Authorization: Bearer <secret>`（密文随路由快照、AAD 绑定 tenant+service、明文不出网关、用后清零）；

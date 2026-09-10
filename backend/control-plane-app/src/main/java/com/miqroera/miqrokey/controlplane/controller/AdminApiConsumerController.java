@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 import com.miqroera.miqrokey.controlplane.dto.ApiConsumerView;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.ApiConsumerService;
+import com.miqroera.miqrokey.controlplane.service.ApiException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -49,9 +50,22 @@ public class AdminApiConsumerController {
             HttpServletRequest httpReq) {
         var user = userContext.getUser();
         ApiConsumerService.CreatedConsumer created = consumerService.create(user.tenantId(), user.id(),
-                body.name().trim(), requestId(httpReq));
+                body.name().trim(), parseExpiresAt(body.expiresAt()), requestId(httpReq));
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new CreateApiConsumerResponse(created.consumer(), created.apiKey(), true));
+    }
+
+    /** #322: optional ISO-8601 expiry; malformed values are rejected up front. */
+    private static java.time.Instant parseExpiresAt(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return java.time.Instant.parse(value.trim());
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "CONSUMER_EXPIRES_INVALID",
+                    "expiresAt 必须是 ISO-8601 时刻（UTC）。");
+        }
     }
 
     @PostMapping("/{consumerId}/disable")
@@ -95,7 +109,7 @@ public class AdminApiConsumerController {
                 requestId(httpReq));
     }
 
-    public record CreateRequest(@NotBlank @Size(max = 200) String name) {
+    public record CreateRequest(@NotBlank @Size(max = 200) String name, String expiresAt) {
     }
 
     public record ScopeRequest(List<String> capabilities) {

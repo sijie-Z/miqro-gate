@@ -33,6 +33,8 @@
 
 | F64 | MCP 上游后端鉴权注入（Visitor / API Key 三级鉴权链，对齐腾讯 raw 03） | tencent-ai-gateway-study/raw/03 | 清晰 | DONE（2026-09-10，#320） | 无 | V38 backend_auth_mode + AES-GCM 密文（写后不可读）；网关快照携带密文、按请求解密注入固定 Bearer；解密失败 fail-closed 502；管理端点 + 审计（无 secret）+ 前端编辑 |
 
+| F65 | 消费者密钥到期治理（expires_at + 双面静默强制 + CONSUMER_KEY_EXPIRING 提醒） | #316 备注 follow-up；管理密钥先例 V32/V36 | 清晰 | DONE（2026-09-10，#322） | 无 | V39 加列；创建可选到期；仓储层 `expires_at > now()` + 网关快照 `expiredAt(clock)` 双面 401；提醒事件镜像 V36；前端到期列/表单/规则选项 |
+
 ## B 组 · MCP 运行时护栏（腾讯 A 类研究建议，方向明确）
 
 | ID | 功能 | 出处 | 清晰度 | 状态 | 前置/依赖 | 架子与要点 |

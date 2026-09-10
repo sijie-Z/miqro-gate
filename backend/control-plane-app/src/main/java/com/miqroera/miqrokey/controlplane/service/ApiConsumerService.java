@@ -44,10 +44,13 @@ public class ApiConsumerService {
     }
 
     @Transactional
-    public CreatedConsumer create(UUID tenantId, UUID adminId, String name, String requestId) {
+    public CreatedConsumer create(UUID tenantId, UUID adminId, String name, Instant expiresAt, String requestId) {
+        if (expiresAt != null && !expiresAt.isAfter(Instant.now())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "CONSUMER_EXPIRES_INVALID", "到期时间必须是将来的时刻。");
+        }
         ApiConsumer.GeneratedKey key = ApiConsumer.generateKey();
         ApiConsumer consumer = new ApiConsumer(UUID.randomUUID(), tenantId, name.trim(), key.digest(), key.prefix(),
-                "ACTIVE", null, null, null, 0, Instant.now(), Instant.now());
+                "ACTIVE", null, null, null, 0, Instant.now(), Instant.now(), null, expiresAt);
         try {
             repository.insert(consumer);
         } catch (DuplicateKeyException e) {
@@ -55,7 +58,9 @@ public class ApiConsumerService {
         }
         routeRefreshPublisher.publishChanged();
         auditService.record(tenantId, adminId, "CONSUMER_CREATE", "CONSUMER", consumer.id(),
-                AuditSummaries.summary("name", AuditSummaries.sanitize(consumer.name())), requestId);
+                AuditSummaries.summary("name", AuditSummaries.sanitize(consumer.name()), "expiresAt",
+                        expiresAt != null ? expiresAt.toString() : "never"),
+                requestId);
         return new CreatedConsumer(toView(consumer), key.plaintext());
     }
 
@@ -125,13 +130,13 @@ public class ApiConsumerService {
             Instant jwtKeySetAt) {
         return new ApiConsumer(consumer.id(), consumer.tenantId(), consumer.name(), consumer.keyDigest(),
                 consumer.keyPrefix(), status, pem, fingerprint, jwtKeySetAt, consumer.version(), consumer.createdAt(),
-                consumer.updatedAt(), consumer.capabilities());
+                consumer.updatedAt(), consumer.capabilities(), consumer.expiresAt());
     }
 
     private ApiConsumerView toView(ApiConsumer consumer) {
         return new ApiConsumerView(consumer.id(), consumer.name(), consumer.keyPrefix(), consumer.status(),
                 consumer.jwtKeyFingerprint(), consumer.jwtKeySetAt(), consumer.createdAt(),
-                consumer.capabilities() == null ? null : List.copyOf(consumer.capabilities()));
+                consumer.capabilities() == null ? null : List.copyOf(consumer.capabilities()), consumer.expiresAt());
     }
 
     /**

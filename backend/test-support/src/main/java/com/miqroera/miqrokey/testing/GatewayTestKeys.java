@@ -223,11 +223,17 @@ public final class GatewayTestKeys {
     public static final String MCP_SECURED_BACKEND_KEY = "test-mcp-backend-key";
 
     /** One API-consumer fixture: self-consistent presented key + digest. */
-    public record ConsumerFixture(UUID id, String name, String presentedKey, java.util.List<String> capabilities) {
+    public record ConsumerFixture(UUID id, String name, String presentedKey, java.util.List<String> capabilities,
+            java.time.Instant expiresAt) {
 
-        /** Legacy constructor: no scope means full access. */
+        /** Legacy constructor: no scope, never expires. */
         public ConsumerFixture(UUID id, String name, String presentedKey) {
-            this(id, name, presentedKey, null);
+            this(id, name, presentedKey, null, null);
+        }
+
+        /** Legacy constructor: never expires. */
+        public ConsumerFixture(UUID id, String name, String presentedKey, java.util.List<String> capabilities) {
+            this(id, name, presentedKey, capabilities, null);
         }
 
         public byte[] digest() {
@@ -243,6 +249,8 @@ public final class GatewayTestKeys {
     public static final ConsumerFixture MCP_OUTSIDER = consumer("outsider");
     /** Issue #316: scoped to zero channels — the MCP data plane must refuse. */
     public static final ConsumerFixture MCP_NO_CHANNELS = scopedConsumer("no-channels");
+    /** Issue #322: expires at the epoch — the MCP data plane must refuse. */
+    public static final ConsumerFixture MCP_EXPIRED = expiredConsumer("expired");
 
     private static ConsumerFixture consumer(String label) {
         String name = "drill-" + label;
@@ -255,11 +263,18 @@ public final class GatewayTestKeys {
         return new ConsumerFixture(fixture.id(), fixture.name(), fixture.presentedKey(), java.util.List.of());
     }
 
+    private static ConsumerFixture expiredConsumer(String label) {
+        ConsumerFixture fixture = consumer(label);
+        return new ConsumerFixture(fixture.id(), fixture.name(), fixture.presentedKey(), null,
+                java.time.Instant.parse("2000-01-01T00:00:00Z"));
+    }
+
     private static Map<String, RouteSnapshot.ConsumerRecord> mcpConsumers() {
         Map<String, RouteSnapshot.ConsumerRecord> consumers = new LinkedHashMap<>();
-        for (ConsumerFixture fixture : List.of(MCP_ALLOWED, MCP_SERVER_ONLY, MCP_OUTSIDER, MCP_NO_CHANNELS)) {
+        for (ConsumerFixture fixture : List.of(MCP_ALLOWED, MCP_SERVER_ONLY, MCP_OUTSIDER, MCP_NO_CHANNELS,
+                MCP_EXPIRED)) {
             consumers.putIfAbsent(fixture.id().toString(), new RouteSnapshot.ConsumerRecord(fixture.id(), TENANT_ID,
-                    fixture.name(), fixture.digest(), fixture.capabilities()));
+                    fixture.name(), fixture.digest(), fixture.capabilities(), fixture.expiresAt()));
         }
         return consumers;
     }

@@ -23,7 +23,7 @@ public class ApiConsumerRepositoryImpl implements ApiConsumerRepository {
             rs.getString("jwt_key_fingerprint"),
             rs.getTimestamp("jwt_key_set_at") != null ? rs.getTimestamp("jwt_key_set_at").toInstant() : null,
             rs.getLong("version"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
-            capabilities(rs));
+            capabilities(rs), rs.getTimestamp("expires_at") != null ? rs.getTimestamp("expires_at").toInstant() : null);
 
     /**
      * Reads the nullable jsonb scope column as a capability list (null = full).
@@ -67,16 +67,17 @@ public class ApiConsumerRepositoryImpl implements ApiConsumerRepository {
         jdbc.update("""
                 INSERT INTO api_consumers
                     (id, tenant_id, name, key_digest, key_prefix, status, jwt_public_key_pem,
-                     jwt_key_fingerprint, jwt_key_set_at, version, created_at, updated_at, capabilities)
+                     jwt_key_fingerprint, jwt_key_set_at, version, created_at, updated_at, capabilities, expires_at)
                 VALUES (:id, :tenantId, :name, :keyDigest, :keyPrefix, :status, :jwtPem, :jwtFingerprint,
-                        :jwtSetAt, 0, now(), now(), :capabilities::jsonb)
+                        :jwtSetAt, 0, now(), now(), :capabilities::jsonb, :expiresAt)
                 """, new MapSqlParameterSource("id", consumer.id()).addValue("tenantId", consumer.tenantId())
                 .addValue("name", consumer.name()).addValue("keyDigest", consumer.keyDigest())
                 .addValue("keyPrefix", consumer.keyPrefix()).addValue("status", consumer.status())
                 .addValue("jwtPem", consumer.jwtPublicKeyPem()).addValue("jwtFingerprint", consumer.jwtKeyFingerprint())
                 .addValue("jwtSetAt",
                         consumer.jwtKeySetAt() != null ? java.sql.Timestamp.from(consumer.jwtKeySetAt()) : null)
-                .addValue("capabilities", scopeJson(consumer.capabilities())));
+                .addValue("capabilities", scopeJson(consumer.capabilities())).addValue("expiresAt",
+                        consumer.expiresAt() != null ? java.sql.Timestamp.from(consumer.expiresAt()) : null));
         return consumer;
     }
 
@@ -100,8 +101,11 @@ public class ApiConsumerRepositoryImpl implements ApiConsumerRepository {
     @Override
     public Optional<ApiConsumer> findByKeyDigest(byte[] keyDigest) {
         try {
+            // Issue #322: expired consumers are invisible to auth (silent 401,
+            // same semantics as an expired admin machine key).
             return Optional.ofNullable(jdbc.queryForObject(
-                    "SELECT * FROM api_consumers WHERE key_digest = :keyDigest AND status = 'ACTIVE'",
+                    "SELECT * FROM api_consumers WHERE key_digest = :keyDigest AND status = 'ACTIVE'"
+                            + " AND (expires_at IS NULL OR expires_at > now())",
                     new MapSqlParameterSource("keyDigest", keyDigest), ROW_MAPPER));
         } catch (org.springframework.dao.EmptyResultDataAccessException e) {
             return Optional.empty();
@@ -111,7 +115,9 @@ public class ApiConsumerRepositoryImpl implements ApiConsumerRepository {
     @Override
     public Optional<ApiConsumer> findByName(String name) {
         try {
-            return Optional.ofNullable(jdbc.queryForObject("SELECT * FROM api_consumers WHERE name = :name",
+            return Optional.ofNullable(jdbc.queryForObject(
+                    "SELECT * FROM api_consumers WHERE name = :name"
+                            + " AND (expires_at IS NULL OR expires_at > now())",
                     new MapSqlParameterSource("name", name), ROW_MAPPER));
         } catch (org.springframework.dao.EmptyResultDataAccessException e) {
             return Optional.empty();
@@ -136,7 +142,17 @@ public class ApiConsumerRepositoryImpl implements ApiConsumerRepository {
         return new ApiConsumer(consumer.id(), consumer.tenantId(), consumer.name(), consumer.keyDigest(),
                 consumer.keyPrefix(), consumer.status(), consumer.jwtPublicKeyPem(), consumer.jwtKeyFingerprint(),
                 consumer.jwtKeySetAt(), consumer.version() + 1, consumer.createdAt(), java.time.Instant.now(),
-                consumer.capabilities());
+                consumer.capabilities(), consumer.expiresAt());
+    }
+
+    @Override
+    public List<ApiConsumer> findActiveExpiringBetween(UUID tenantId, java.time.Instant from, java.time.Instant to) {
+        return jdbc.query(
+                "SELECT * FROM api_consumers WHERE tenant_id = :tenantId AND status = 'ACTIVE'"
+                        + " AND expires_at >= :from AND expires_at <= :to ORDER BY expires_at",
+                new MapSqlParameterSource("tenantId", tenantId).addValue("from", java.sql.Timestamp.from(from))
+                        .addValue("to", java.sql.Timestamp.from(to)),
+                ROW_MAPPER);
     }
 
     @Override

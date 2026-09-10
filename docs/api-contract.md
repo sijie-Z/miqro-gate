@@ -604,6 +604,10 @@
 
 平台等外部系统通过独立 API 通道查询计费数据，与门户会话认证并存。
 
+**到期语义（#322，V39）**：`expiresAt` 缺省 = 永不过期（存量兼容）。到期（`now >= expires_at`）后凭据在**所有通道**
+静默失效（401，与未知 Key 同形——不留「曾有效」信息）；管理列表仍展示该行与到期时间供审计；更新期限=重建消费者。
+可选告警规则类型 `CONSUMER_KEY_EXPIRING`（默认关，规则级 opt-in）：≤7 天到期消费者每（消费者×天）至多一条事件。
+
 **能力作用域（#316，V37）**：消费者可裁剪到预设通道；`capabilities` NULL = 全量（存量兼容），强制层按通道
 校验（fail-closed）：计费通道缺 `billing:read` → `403 CONSUMER_SCOPE_DENIED`；网关 MCP 数据面缺 `mcp:call`
 → `403 consumer_scope_denied`（error 信封）；与 ACL/白名单判断正交。通道变更即时生效（路由快照刷新）。
@@ -613,7 +617,7 @@
 | 方法与路径 | 用途 |
 |---|---|
 | `GET /api/v1/admin/api-consumers` | 消费者列表（掩码视图 + JWT 公钥指纹） |
-| `POST /api/v1/admin/api-consumers` | 创建：`{ "name" }` → `201`，返回一次性 API Key（明文仅此一次） |
+| `POST /api/v1/admin/api-consumers` | 创建：`{ "name", "expiresAt"? }`（ISO-8601 时刻，必须为将来；#322） → `201`，返回一次性 API Key（明文仅此一次）；非法到期 `400 CONSUMER_EXPIRES_INVALID` |
 | `POST /api/v1/admin/api-consumers/{id}/disable` | 立即吊销（禁用的 Key 即刻失效） |
 | `PUT /api/v1/admin/api-consumers/{id}/jwt-key` | 设置/轮换 JWT 验签公钥：`{ "publicKeyPem" }`（RSA PEM SubjectPublicKeyInfo）→ 返回带 `jwtKeyFingerprint` 的视图；非法 PEM → `400 JWT_KEY_INVALID` |
 | `DELETE /api/v1/admin/api-consumers/{id}/jwt-key` | 移除公钥（JWT 认证立即失效） |
