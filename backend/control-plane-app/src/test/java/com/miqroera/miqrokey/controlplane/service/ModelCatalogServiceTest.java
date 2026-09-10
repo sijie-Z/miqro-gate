@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -129,6 +130,43 @@ class ModelCatalogServiceTest {
                 eq("DELETE FROM model_catalog WHERE provider_product_id = :productId AND source = 'OFFICIAL'"),
                 anyMap());
         verify(publisher).publishChanged();
+    }
+
+    @Test
+    @DisplayName("probeProduct returns the applied snapshot on success")
+    void probeProductApplies() {
+        when(jdbc.query(anyString(), anyMap(), ArgumentMatchers.<ResultSetExtractor<UUID>>any())).thenReturn(productId);
+        when(adapter.fetchModels(client)).thenReturn(Mono.just(snapshot("deepseek-payg-api", "m1")));
+
+        ModelCatalogSnapshot result = service.probeProduct(adapter, client, java.time.Duration.ofSeconds(5));
+
+        assertThat(result.models()).hasSize(1);
+        verify(jdbc).update(
+                eq("DELETE FROM model_catalog WHERE provider_product_id = :productId AND source = 'OFFICIAL'"),
+                anyMap());
+        verify(publisher).publishChanged();
+    }
+
+    @Test
+    @DisplayName("probeProduct propagates a fetch failure with the catalog untouched")
+    void probeProductPropagatesFailure() {
+        when(adapter.fetchModels(client))
+                .thenReturn(Mono.error(new IllegalStateException("provider /models HTTP 500")));
+
+        assertThatThrownBy(() -> service.probeProduct(adapter, client, java.time.Duration.ofSeconds(5)))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("HTTP 500");
+        verifyNoInteractions(jdbc);
+        verifyNoInteractions(publisher);
+    }
+
+    @Test
+    @DisplayName("probeProduct rejects an empty (null) response")
+    void probeProductRejectsEmptyResponse() {
+        when(adapter.fetchModels(client)).thenReturn(Mono.empty());
+
+        assertThatThrownBy(() -> service.probeProduct(adapter, client, java.time.Duration.ofSeconds(5)))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("empty response");
+        verifyNoInteractions(publisher);
     }
 
     private static ModelCatalogSnapshot snapshot(String productCode, String... modelIds) {

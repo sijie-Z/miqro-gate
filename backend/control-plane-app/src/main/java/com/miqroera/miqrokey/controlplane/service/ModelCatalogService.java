@@ -84,18 +84,26 @@ public class ModelCatalogService {
      * previous catalog rows are kept untouched (last-successful fallback).
      */
     public void refreshProduct(ProviderProductAdapter adapter, ProviderClient client) {
-        ModelCatalogSnapshot snapshot;
         try {
-            snapshot = adapter.fetchModels(client).block(FETCH_TIMEOUT);
+            probeProduct(adapter, client, FETCH_TIMEOUT);
         } catch (RuntimeException e) {
             log.warn("Model catalog fetch failed; keeping last successful catalog", e);
-            return;
         }
+    }
+
+    /**
+     * Fetch core shared by the scheduled refresh and the admin probe (#346, I4):
+     * fetches the official model catalog and applies it on success only. Failures
+     * and empty responses throw — the probe surfaces them, {@link #refreshProduct}
+     * swallows them — and the previous rows stay untouched either way.
+     */
+    public ModelCatalogSnapshot probeProduct(ProviderProductAdapter adapter, ProviderClient client, Duration timeout) {
+        ModelCatalogSnapshot snapshot = adapter.fetchModels(client).block(timeout);
         if (snapshot == null) {
-            log.warn("Model catalog fetch returned null; keeping last successful catalog");
-            return;
+            throw new IllegalStateException("model catalog fetch returned an empty response");
         }
         self.getObject().applySnapshot(snapshot);
+        return snapshot;
     }
     /**
      * Replaces a product's {@code model_catalog} rows with a successful fetch's

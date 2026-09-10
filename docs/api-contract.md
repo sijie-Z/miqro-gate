@@ -834,6 +834,19 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 - 语义：MANUAL 行是官方探测失败的回退入口，官方刷新永不覆盖/删除（`ON CONFLICT DO NOTHING`）；`status` 默认 ACTIVE，照常参与 `/v1/models` 交集。
 - 错误码：`MODEL_ID_INVALID`（400）、`PRODUCT_NOT_FOUND`（404）、`MODEL_ALREADY_IN_CATALOG`（409）、`MODEL_NOT_FOUND`（404）、`MODEL_NOT_MANUAL`（409）。
 
+### 5.18c 模型探测（#346，I4，腾讯 raw 5）
+
+管理面触发官方 `/models` 抓取（与 G2.3 定时管道共用「成功才落库」核心），并把**最近一次探测结果持久化**为可见面：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/admin/models/probe` | body `{"providerProductId"}` → 解析适配器与首个 ACTIVE 凭证 → 30s 内抓取官方目录：成功落 `model_catalog`（OFFICIAL）并返回 `{providerProductId, productCode, modelCount, probedAt, models[]}`；失败 `502 MODEL_PROBE_FAILED`（原因脱敏，目录不被触碰） |
+| `GET /api/v1/admin/models/probe-status?providerProductId=` | 最近探测状态 `{status(SUCCEEDED/FAILED/null), error, modelCount, probedAt}`（未探测全空；V43 列） |
+
+- 语义：探测只是**触发器**；失败沿用「保留最后成功目录」，不覆盖 MANUAL 行、不影响人工配置（doc 05 口径）。
+- 凭证：取该产品订阅下**首个 ACTIVE 凭证**（确定性顺序）；无 ACTIVE 凭证 → `400 MODEL_PROBE_CREDENTIAL_UNAVAILABLE`；无适配器 → `400 MODEL_PROBE_ADAPTER_UNAVAILABLE`；产品缺 base URL → `400 MODEL_PROBE_BASE_URL_MISSING`；产品不存在 → `404 MODEL_PROBE_PRODUCT_NOT_FOUND`。
+- 审计：`MODEL_CATALOG_PROBE_SUCCEEDED` / `MODEL_CATALOG_PROBE_FAILED`（计数 / 脱敏原因摘要；无 URL 与密钥）。
+
 ### 5.19 配额规则（用量配额，platform-middleware roadmap「配额管理」步骤）
 
 只预警不阻断的用量配额（对齐腾讯消费者配额 / 阿里消费者配额，alerting-only）：

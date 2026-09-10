@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 import com.miqroera.miqrokey.controlplane.dto.ModelCatalogView;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AuditContext;
+import com.miqroera.miqrokey.controlplane.service.ModelCatalogProbeService;
 import com.miqroera.miqrokey.controlplane.service.ModelCatalogService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -37,10 +39,13 @@ import java.util.UUID;
 public class AdminModelCatalogController {
 
     private final ModelCatalogService catalogService;
+    private final ModelCatalogProbeService probeService;
     private final UserContext userContext;
 
-    public AdminModelCatalogController(ModelCatalogService catalogService, UserContext userContext) {
+    public AdminModelCatalogController(ModelCatalogService catalogService, ModelCatalogProbeService probeService,
+            UserContext userContext) {
         this.catalogService = catalogService;
+        this.probeService = probeService;
         this.userContext = userContext;
     }
 
@@ -60,6 +65,23 @@ public class AdminModelCatalogController {
                 AuditContext.human(user.id(), requestId(httpReq)));
     }
 
+    /** Admin-triggered model probe (#346, I4, raw doc 05). */
+    @PostMapping("/probe")
+    public Map<String, Object> probe(@Valid @RequestBody ProbeRequest body, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return probeService.probe(user.tenantId(), user.id(), body.providerProductId(),
+                AuditContext.human(user.id(), requestId(httpReq)));
+    }
+
+    /**
+     * Last probe outcome for a product (visible failure surface; nulls when never
+     * probed).
+     */
+    @GetMapping("/probe-status")
+    public Map<String, Object> probeStatus(@RequestParam UUID providerProductId) {
+        return probeService.probeStatus(providerProductId);
+    }
+
     /** Removes a MANUAL row only. */
     @DeleteMapping("/{rowId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -71,6 +93,9 @@ public class AdminModelCatalogController {
 
     public record AddRequest(@NotNull UUID providerProductId, @NotBlank @Size(max = 128) String modelId,
             @Size(max = 200) String displayName, @Positive Integer contextWindow, @Positive Integer maxOutputTokens) {
+    }
+
+    public record ProbeRequest(@NotNull UUID providerProductId) {
     }
     private static String requestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");
