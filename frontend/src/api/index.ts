@@ -805,6 +805,31 @@ export function adminDeleteModel(rowId: string): Promise<void> {
   return del<void>(`/api/v1/admin/models/${rowId}`);
 }
 
+/** Model probe (#346, I4, doc 05): admin-triggered official /models fetch. */
+export interface ModelProbeReport {
+  providerProductId: string;
+  productCode: string;
+  modelCount: number;
+  probedAt: string;
+  models: Array<{ modelId: string; displayName: string }>;
+}
+
+/** Last probe outcome for a product; all-null when never probed. */
+export interface ModelProbeStatus {
+  status: 'SUCCEEDED' | 'FAILED' | null;
+  error: string | null;
+  modelCount: number | null;
+  probedAt: string | null;
+}
+
+export function adminProbeModels(providerProductId: string): Promise<ModelProbeReport> {
+  return post<ModelProbeReport>('/api/v1/admin/models/probe', { providerProductId });
+}
+
+export function adminModelProbeStatus(providerProductId: string): Promise<ModelProbeStatus> {
+  return get<ModelProbeStatus>('/api/v1/admin/models/probe-status', { providerProductId });
+}
+
 // ---- MCP route rules (F11, Tencent doc 135482) ----
 
 export function adminListMcpRouteRules(serviceId: string): Promise<McpRouteRule[]> {

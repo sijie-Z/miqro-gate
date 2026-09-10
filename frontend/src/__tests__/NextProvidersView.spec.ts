@@ -3,12 +3,15 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextProvidersView from '@/views/next/NextProvidersView.vue';
 import * as api from '@/api';
+import { ApiError } from '@/api/http';
 import type { ProviderProductView } from '@/types/api';
 
 vi.mock('@/api', () => ({
   listProviderProducts: vi.fn(),
   adminListModels: vi.fn(),
   adminCreateModel: vi.fn(),
+  adminProbeModels: vi.fn(),
+  adminModelProbeStatus: vi.fn(),
   adminDeleteModel: vi.fn(),
 }));
 
@@ -118,5 +121,70 @@ describe('NextProvidersView', () => {
     await flushPromises();
     expect(dialog!.textContent).toContain('manual-probe-fallback');
     expect(dialog!.textContent).toContain('人工');
+  });
+
+  it('I4: probes the provider model catalog and shows the last probe status', async () => {
+    mockApi.adminListModels.mockResolvedValue([]);
+    mockApi.adminModelProbeStatus.mockResolvedValue({
+      status: 'SUCCEEDED',
+      error: null,
+      modelCount: 2,
+      probedAt: '2026-09-10T10:00:00Z',
+    });
+    mockApi.adminProbeModels.mockResolvedValue({
+      providerProductId: '0190-0000-0000-0020',
+      productCode: 'deepseek-payg-api',
+      modelCount: 2,
+      probedAt: '2026-09-10T12:00:00Z',
+      models: [{ modelId: 'deepseek-chat', displayName: 'DeepSeek Chat' }],
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="product-models-open"]').trigger('click');
+    await flushPromises();
+
+    const statusLine = document.querySelector('[data-testid="product-probe-status"]');
+    expect(statusLine?.textContent).toContain('上次探测成功');
+    expect(statusLine?.textContent).toContain('2 个模型');
+
+    (document.querySelector('[data-testid="product-probe"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(mockApi.adminProbeModels).toHaveBeenCalledWith('0190-0000-0000-0020');
+    expect(mockApi.adminListModels).toHaveBeenCalledTimes(2);
+  });
+
+  it('I4: a failed probe surfaces the sanitized error inline', async () => {
+    mockApi.adminListModels.mockResolvedValue([]);
+    mockApi.adminModelProbeStatus.mockResolvedValue({
+      status: 'FAILED',
+      error: 'DeepSeek /models returned HTTP 500',
+      modelCount: null,
+      probedAt: '2026-09-10T11:00:00Z',
+    });
+    mockApi.adminProbeModels.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: 'probe failed',
+        status: 502,
+        code: 'MODEL_PROBE_FAILED',
+        detail: 'DeepSeek /models returned HTTP 500',
+        requestId: 'rq-1',
+      }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="product-models-open"]').trigger('click');
+    await flushPromises();
+
+    (document.querySelector('[data-testid="product-probe"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(document.querySelector('[data-testid="product-probe-error"]')?.textContent).toContain(
+      'HTTP 500',
+    );
+    expect(
+      document.querySelector('[data-testid="product-probe-status"]')?.textContent,
+    ).toContain('上次探测失败');
   });
 });

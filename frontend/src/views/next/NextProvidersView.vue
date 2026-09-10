@@ -102,6 +102,10 @@ const modelsError = ref('');
 const modelForm = ref({ modelId: '', displayName: '' });
 const modelSaving = ref(false);
 const modelError = ref('');
+// Model probe (#346, I4): admin-triggered official catalog fetch
+const probeStatus = ref<api.ModelProbeStatus | null>(null);
+const probing = ref(false);
+const probeError = ref('');
 
 async function openModels(product: ProviderProductView) {
   modelsProduct.value = product;
@@ -111,12 +115,41 @@ async function openModels(product: ProviderProductView) {
   modelError.value = '';
   modelsVisible.value = true;
   modelsLoading.value = true;
+  probeError.value = '';
+  probeStatus.value = null;
   try {
     models.value = await api.adminListModels(product.id);
   } catch (error) {
     modelsError.value = error instanceof ApiError ? error.message : '加载模型目录失败。';
   } finally {
     modelsLoading.value = false;
+  }
+  try {
+    probeStatus.value = await api.adminModelProbeStatus(product.id);
+  } catch {
+    // Probe status is best-effort; the dialog works without it.
+  }
+}
+
+async function probeModels() {
+  if (!modelsProduct.value) {
+    return;
+  }
+  probing.value = true;
+  probeError.value = '';
+  try {
+    const report = await api.adminProbeModels(modelsProduct.value.id);
+    toast.success(`探测完成：发现 ${report.modelCount} 个模型`);
+    models.value = await api.adminListModels(modelsProduct.value.id);
+  } catch (error) {
+    probeError.value = error instanceof ApiError ? error.message : '探测失败，请稍后重试。';
+  } finally {
+    probing.value = false;
+  }
+  try {
+    probeStatus.value = await api.adminModelProbeStatus(modelsProduct.value.id);
+  } catch {
+    // Best-effort status refresh.
   }
 }
 
@@ -260,6 +293,35 @@ onMounted(load);
       @update:open="modelsVisible = false"
     >
       <div v-if="modelsError" class="ui-alert ui-alert--error">{{ modelsError }}</div>
+      <div class="next-providers__probe">
+        <UiButton
+          variant="secondary"
+          size="sm"
+          :loading="probing"
+          data-testid="product-probe"
+          @click="probeModels"
+          >探测模型</UiButton
+        >
+        <span
+          v-if="probeStatus?.probedAt"
+          class="next-providers__probe-status"
+          data-testid="product-probe-status"
+        >
+          <template v-if="probeStatus.status === 'SUCCEEDED'">
+            上次探测成功：{{ probeStatus.modelCount }} 个模型（{{
+              probeStatus.probedAt.slice(0, 16).replace('T', ' ')
+            }}）
+          </template>
+          <template v-else>
+            上次探测失败：{{ probeStatus.error || '未知原因' }}（{{
+              probeStatus.probedAt.slice(0, 16).replace('T', ' ')
+            }}）
+          </template>
+        </span>
+      </div>
+      <div v-if="probeError" class="ui-alert ui-alert--error" data-testid="product-probe-error">
+        {{ probeError }}
+      </div>
       <div v-if="modelsLoading" class="ui-panel-sub">加载中…</div>
       <div v-else class="next-providers__model-list" data-testid="product-models-list">
         <div v-for="m in models" :key="m.id" class="next-providers__model-row">
@@ -377,5 +439,18 @@ onMounted(load);
 .next-providers__empty {
   color: var(--ui-foreground-faint);
   font-size: var(--ui-font-size-sm);
+}
+
+.next-providers__probe {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  margin-bottom: var(--ui-space-3);
+  flex-wrap: wrap;
+}
+
+.next-providers__probe-status {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
 }
 </style>

@@ -740,6 +740,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/models/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["probe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/model-approvals/{id}/reject": {
         parameters: {
             query?: never;
@@ -1956,6 +1972,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/models/probe-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["probeStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/model-approvals": {
         parameters: {
             query?: never;
@@ -3150,6 +3182,10 @@ export interface components {
             version?: number;
             /** Format: date-time */
             updatedAt?: string;
+        };
+        ProbeRequest: {
+            /** Format: uuid */
+            providerProductId: string;
         };
         ReviewModelApprovalRequest: {
             reviewNote?: string;
@@ -5508,6 +5544,32 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ModelCatalogView"];
+                };
+            };
+        };
+    };
+    probe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProbeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
@@ -7928,6 +7990,30 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["Provider"][];
+                };
+            };
+        };
+    };
+    probeStatus: {
+        parameters: {
+            query: {
+                providerProductId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
