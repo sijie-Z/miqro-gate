@@ -84,4 +84,33 @@ describe('NextSkillsView', () => {
 
     expect(toastState.items.some((t) => t.message.includes('未授权'))).toBe(true);
   });
+
+  it('I9: filters by keyword and tags, showing examples and the creator', async () => {
+    mockApi.listSkills.mockResolvedValue([
+      skill({
+        id: '1',
+        name: 'web-scraper',
+        tags: ['git', 'workflow', 'web', 'tools'],
+        examples: ['抓取 example.com 并转 markdown'],
+        createdByName: 'Admin',
+      }),
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="skill-search"]').setValue('SCRAPER');
+    await wrapper.find('[data-testid="skill-search-submit"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.listSkills).toHaveBeenLastCalledWith('SCRAPER', []);
+
+    await wrapper.find('[data-testid="skill-tag-git"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.listSkills).toHaveBeenLastCalledWith('SCRAPER', ['git']);
+
+    const card = wrapper.find('[data-testid="skill-card"]');
+    expect(card.text()).toContain('创建人 Admin');
+    expect(card.text()).toContain('示例：抓取 example.com 并转 markdown');
+    // Four tags render as three chips plus a remainder badge.
+    expect(card.text()).toContain('+1');
+  });
 });

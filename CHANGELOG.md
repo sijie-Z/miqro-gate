@@ -5,6 +5,12 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-10
+- **Skill 搜索 + 标签筛选 + Examples + 创建人（#352，I9，doc 20/28）**：`GET /api/v1/skills?q=&tags=&tags=`
+  与 `GET /api/v1/admin/skills?...` 支持关键字（≤60，名称/描述/ID 不区分大小写）与标签多选（**与**语义）；
+  上传校验新增 `examples`（≤10×512，V44 `skills.examples text[]`）与 tags 上限（≤5×20，去重）；
+  `SkillView` 增 `examples/createdBy/createdByName`。前端技能市场：搜索 + 已有标签筛选 chips + 卡片
+  （≤3 标签+余量、首个示例、创建人）；管理页创建人列。验证：Validator 12/12、Skill IT 5/5（含搜索/与语义/
+  q 超长 400）；前端 173/173；OpenAPI 再生无破坏 + gen:types。
 - **模型目录定期重探（#350，I8，doc 05 建议频率）**：`ModelCatalogReprobeScheduler`——`miqrokey.model-catalog.reprobe.enabled`
   开启（**默认关**）后按 `miqrokey.model-catalog.reprobe.cycle-ms`（默认 6h，fixedDelay）对种子租户 ACTIVE 订阅关联的
   OFFICIAL_API 产品执行与手动探测**同一实现**的抓取（成功才落目录、失败记录 V43 状态面并计数不中断）；

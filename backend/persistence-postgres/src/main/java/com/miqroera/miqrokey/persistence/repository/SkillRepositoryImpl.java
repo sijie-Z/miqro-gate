@@ -21,9 +21,11 @@ public class SkillRepositoryImpl implements SkillRepository {
     private static final RowMapper<Skill> ROW_MAPPER = (rs, rowNum) -> {
         java.sql.Array array = rs.getArray("tags");
         List<String> tags = array != null ? Arrays.asList((String[]) array.getArray()) : List.of();
+        java.sql.Array examplesArray = rs.getArray("examples");
+        List<String> examples = examplesArray != null ? Arrays.asList((String[]) examplesArray.getArray()) : List.of();
         return new Skill((UUID) rs.getObject("id"), (UUID) rs.getObject("tenant_id"), rs.getString("name"),
                 rs.getString("description"), rs.getString("version"), rs.getString("author"), rs.getString("license"),
-                tags, rs.getBytes("content_zip"), rs.getString("content_sha256"), rs.getLong("content_bytes"),
+                tags, examples, rs.getBytes("content_zip"), rs.getString("content_sha256"), rs.getLong("content_bytes"),
                 rs.getString("status"), (UUID) rs.getObject("created_by"), rs.getLong("row_version"),
                 rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
     };
@@ -43,9 +45,9 @@ public class SkillRepositoryImpl implements SkillRepository {
     public Skill insert(Skill skill) {
         jdbc.update("""
                 INSERT INTO skills
-                    (id, tenant_id, name, description, version, author, license, tags, content_zip,
+                    (id, tenant_id, name, description, version, author, license, tags, examples, content_zip,
                      content_sha256, content_bytes, status, created_by, row_version, created_at, updated_at)
-                VALUES (:id, :tenantId, :name, :description, :version, :author, :license, :tags, :contentZip,
+                VALUES (:id, :tenantId, :name, :description, :version, :author, :license, :tags, :examples, :contentZip,
                         :sha256, :bytes, 'ACTIVE', :createdBy, 0, now(), now())
                 """, params(skill));
         return skill;
@@ -56,13 +58,14 @@ public class SkillRepositoryImpl implements SkillRepository {
     public Skill upsert(Skill skill) {
         jdbc.update("""
                 INSERT INTO skills
-                    (id, tenant_id, name, description, version, author, license, tags, content_zip,
+                    (id, tenant_id, name, description, version, author, license, tags, examples, content_zip,
                      content_sha256, content_bytes, status, created_by, row_version, created_at, updated_at)
-                VALUES (:id, :tenantId, :name, :description, :version, :author, :license, :tags, :contentZip,
+                VALUES (:id, :tenantId, :name, :description, :version, :author, :license, :tags, :examples, :contentZip,
                         :sha256, :bytes, 'ACTIVE', :createdBy, 0, now(), now())
                 ON CONFLICT (tenant_id, name) DO UPDATE
                     SET description = EXCLUDED.description, version = EXCLUDED.version,
                         author = EXCLUDED.author, license = EXCLUDED.license, tags = EXCLUDED.tags,
+                        examples = EXCLUDED.examples,
                         content_zip = EXCLUDED.content_zip, content_sha256 = EXCLUDED.content_sha256,
                         content_bytes = EXCLUDED.content_bytes, status = 'ACTIVE', created_by = EXCLUDED.created_by,
                         row_version = skills.row_version + 1, updated_at = now()
@@ -96,6 +99,23 @@ public class SkillRepositoryImpl implements SkillRepository {
     public List<Skill> findAllActive(UUID tenantId) {
         return jdbc.query("SELECT * FROM skills WHERE tenant_id = :tenantId AND status = 'ACTIVE' ORDER BY name",
                 new MapSqlParameterSource("tenantId", tenantId), ROW_MAPPER);
+    }
+
+    @Override
+    public List<Skill> searchActive(UUID tenantId, String q, List<String> tags) {
+        StringBuilder sql = new StringBuilder("SELECT * FROM skills WHERE tenant_id = :tenantId AND status = 'ACTIVE'");
+        MapSqlParameterSource params = new MapSqlParameterSource("tenantId", tenantId);
+        if (q != null && !q.isBlank()) {
+            String keyword = q.trim();
+            sql.append(" AND (name ILIKE :q OR description ILIKE :q OR id::text = :qExact)");
+            params.addValue("q", "%" + keyword + "%").addValue("qExact", keyword.toLowerCase());
+        }
+        if (tags != null && !tags.isEmpty()) {
+            sql.append(" AND tags @> CAST(:tags AS text[])");
+            params.addValue("tags", tags.toArray(new String[0]));
+        }
+        sql.append(" ORDER BY name");
+        return jdbc.query(sql.toString(), params, ROW_MAPPER);
     }
 
     @Override
@@ -180,7 +200,8 @@ public class SkillRepositoryImpl implements SkillRepository {
         return new MapSqlParameterSource("id", s.id()).addValue("tenantId", s.tenantId()).addValue("name", s.name())
                 .addValue("description", s.description()).addValue("version", s.version())
                 .addValue("author", s.author()).addValue("license", s.license())
-                .addValue("tags", s.tags().toArray(new String[0])).addValue("contentZip", s.contentZip())
+                .addValue("tags", s.tags().toArray(new String[0]))
+                .addValue("examples", s.examples().toArray(new String[0])).addValue("contentZip", s.contentZip())
                 .addValue("sha256", s.contentSha256()).addValue("bytes", s.contentBytes())
                 .addValue("createdBy", s.createdBy()).addValue("rowVersion", s.rowVersion());
     }

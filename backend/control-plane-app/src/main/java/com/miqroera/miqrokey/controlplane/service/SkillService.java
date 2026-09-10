@@ -8,6 +8,7 @@ import com.miqroera.miqrokey.domain.model.Team;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
 import com.miqroera.miqrokey.domain.repository.SkillRepository;
 import com.miqroera.miqrokey.domain.repository.TeamRepository;
+import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -34,13 +35,15 @@ public class SkillService {
     private final SkillRepository skillRepository;
     private final TeamRepository teamRepository;
     private final ProjectRepository projectRepository;
+    private final UserRepository userRepository;
     private final AuditService auditService;
 
     public SkillService(SkillRepository skillRepository, TeamRepository teamRepository,
-            ProjectRepository projectRepository, AuditService auditService) {
+            ProjectRepository projectRepository, UserRepository userRepository, AuditService auditService) {
         this.skillRepository = skillRepository;
         this.teamRepository = teamRepository;
         this.projectRepository = projectRepository;
+        this.userRepository = userRepository;
         this.auditService = auditService;
     }
 
@@ -58,22 +61,35 @@ public class SkillService {
         }
         Instant now = Instant.now();
         Skill skill = new Skill(UUID.randomUUID(), tenantId, meta.name(), meta.description(), version, meta.author(),
-                meta.license(), meta.tags(), zipBytes, sha256Hex(zipBytes), zipBytes.length, "ACTIVE", adminId, 0, now,
-                now);
+                meta.license(), meta.tags(), meta.examples(), zipBytes, sha256Hex(zipBytes), zipBytes.length, "ACTIVE",
+                adminId, 0, now, now);
         Skill stored = skillRepository.upsert(skill);
         auditService.record(tenantId, adminId, "SKILL_UPLOAD", "SKILL", stored.id(),
                 AuditSummaries.summary("name", AuditSummaries.sanitize(stored.name()), "version", stored.version()),
                 requestId);
-        return toView(stored);
+        return toViews(List.of(stored)).get(0);
     }
 
-    /** Catalog for signed-in users: every ACTIVE skill. */
-    public List<SkillView> list(UUID tenantId) {
-        return skillRepository.findAllActive(tenantId).stream().map(this::toView).toList();
+    /**
+     * Catalog for signed-in users: every ACTIVE skill, optionally narrowed by a
+     * keyword (name/description substring or exact ID, case-insensitive) and by
+     * holding ALL of the given tags (raw docs 20/28).
+     */
+    public List<SkillView> list(UUID tenantId, String q, List<String> tags) {
+        if (q != null && q.trim().length() > 60) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "SKILL_QUERY_INVALID", "关键字最长 60 字符。");
+        }
+        List<String> normalizedTags = tags == null
+                ? List.of()
+                : tags.stream().filter(tag -> tag != null && !tag.isBlank()).map(String::trim).distinct().toList();
+        List<Skill> skills = (q == null || q.isBlank()) && normalizedTags.isEmpty()
+                ? skillRepository.findAllActive(tenantId)
+                : skillRepository.searchActive(tenantId, q, normalizedTags);
+        return toViews(skills);
     }
 
     public SkillView get(UUID tenantId, UUID skillId) {
-        return toView(findActive(tenantId, skillId));
+        return toViews(List.of(findActive(tenantId, skillId))).get(0);
     }
 
     /** Package bytes for download; 403 when the user holds no grant. */
@@ -92,7 +108,7 @@ public class SkillService {
     @Transactional
     public SkillView archive(UUID tenantId, UUID adminId, UUID skillId, String requestId) {
         Skill skill = find(tenantId, skillId);
-        SkillView view = toView(skillRepository.archive(tenantId, skillId));
+        SkillView view = toViews(List.of(skillRepository.archive(tenantId, skillId))).get(0);
         auditService.record(tenantId, adminId, "SKILL_ARCHIVE", "SKILL", skillId,
                 AuditSummaries.summary("name", AuditSummaries.sanitize(skill.name())), requestId);
         return view;
@@ -157,10 +173,24 @@ public class SkillService {
         return skill;
     }
 
-    private SkillView toView(Skill skill) {
-        return new SkillView(skill.id(), skill.name(), skill.description(), skill.version(), skill.author(),
-                skill.license(), skill.tags(), skill.contentSha256(), skill.contentBytes(), skill.status(),
-                skill.createdAt());
+    private List<SkillView> toViews(List<Skill> skills) {
+        java.util.Map<UUID, String> creatorNames = new java.util.HashMap<>();
+        for (Skill skill : skills) {
+            if (skill.createdBy() != null) {
+                creatorNames.computeIfAbsent(skill.createdBy(),
+                        id -> userRepository.findById(id)
+                                .map(user -> user.displayName() != null && !user.displayName().isBlank()
+                                        ? user.displayName()
+                                        : user.username())
+                                .orElse(null));
+            }
+        }
+        return skills.stream()
+                .map(skill -> new SkillView(skill.id(), skill.name(), skill.description(), skill.version(),
+                        skill.author(), skill.license(), skill.tags(), skill.contentSha256(), skill.contentBytes(),
+                        skill.status(), skill.createdAt(), skill.examples(), skill.createdBy(),
+                        creatorNames.get(skill.createdBy())))
+                .toList();
     }
 
     private static String sha256Hex(byte[] bytes) {

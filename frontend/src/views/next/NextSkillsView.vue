@@ -7,7 +7,7 @@
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiEmptyState, toast } from '@/ui';
+import { UiButton, UiEmptyState, UiInput, toast } from '@/ui';
 import type { SkillView } from '@/types/generated-api';
 
 const skills = ref<SkillView[]>([]);
@@ -15,11 +15,20 @@ const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
 
+// Raw docs 20/28: keyword search plus multi-select tag chips ("从已有标签集选择").
+const q = ref('');
+const selectedTags = ref<string[]>([]);
+const tagOptions = ref<string[]>([]);
+
 async function load() {
   loading.value = true;
   loadError.value = '';
   try {
-    skills.value = await api.listSkills();
+    skills.value = await api.listSkills(q.value.trim() || undefined, selectedTags.value);
+    if (!q.value.trim() && !selectedTags.value.length) {
+      // Tag options come from the unfiltered catalog and stay stable while filtering.
+      tagOptions.value = [...new Set(skills.value.flatMap((skill) => skill.tags ?? []))].sort();
+    }
   } catch (error) {
     if (error instanceof ApiError) {
       loadError.value = error.message;
@@ -30,6 +39,13 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+function toggleTag(tag: string) {
+  selectedTags.value = selectedTags.value.includes(tag)
+    ? selectedTags.value.filter((current) => current !== tag)
+    : [...selectedTags.value, tag];
+  void load();
 }
 
 async function download(skill: SkillView) {
@@ -72,6 +88,32 @@ onMounted(load);
       </div>
     </header>
 
+    <section class="next-skills__filters">
+      <UiInput
+        v-model="q"
+        placeholder="搜索名称 / 描述 / ID（≤60 字符）"
+        width="280px"
+        data-testid="skill-search"
+        @keyup.enter="load"
+      />
+      <UiButton variant="secondary" size="sm" data-testid="skill-search-submit" @click="load"
+        >搜索</UiButton
+      >
+      <div v-if="tagOptions.length" class="next-skills__filter-tags" data-testid="skill-tag-filter">
+        <button
+          v-for="tag in tagOptions"
+          :key="tag"
+          type="button"
+          class="next-skills__filter-tag"
+          :class="{ 'next-skills__filter-tag--on': selectedTags.includes(tag) }"
+          :data-testid="`skill-tag-${tag}`"
+          @click="toggleTag(tag)"
+        >
+          {{ tag }}
+        </button>
+      </div>
+    </section>
+
     <div v-if="loadError" class="ui-alert ui-alert--error" data-testid="skills-load-error">
       {{ loadError
       }}<span v-if="loadRequestId" class="ui-request-id"> requestId: {{ loadRequestId }}</span>
@@ -98,10 +140,21 @@ onMounted(load);
         </header>
         <p class="next-skills__desc">{{ skill.description }}</p>
         <div v-if="skill.tags?.length" class="next-skills__tags">
-          <span v-for="tag in skill.tags" :key="tag" class="next-skills__tag">{{ tag }}</span>
+          <span v-for="tag in (skill.tags ?? []).slice(0, 3)" :key="tag" class="next-skills__tag">{{
+            tag
+          }}</span>
+          <span v-if="(skill.tags ?? []).length > 3" class="next-skills__tag"
+            >+{{ (skill.tags ?? []).length - 3 }}</span
+          >
         </div>
+        <p v-if="skill.examples?.length" class="next-skills__example" data-testid="skill-example">
+          示例：{{ skill.examples[0] }}
+        </p>
         <footer class="next-skills__foot">
           <div class="next-skills__meta">
+            <span v-if="skill.createdByName" class="next-skills__meta-item"
+              >创建人 {{ skill.createdByName }}</span
+            >
             <span v-if="skill.author" class="next-skills__meta-item">{{ skill.author }}</span>
             <span v-if="skill.license" class="next-skills__license">{{ skill.license }}</span>
             <span class="next-skills__meta-item ui-num">{{
@@ -122,8 +175,12 @@ onMounted(load);
 
     <UiEmptyState
       v-else
-      title="技能目录还是空的"
-      description="管理员上传技能包后，这里会展示全部可用技能。"
+      :title="q.trim() || selectedTags.length ? '没有匹配的技能' : '技能目录还是空的'"
+      :description="
+        q.trim() || selectedTags.length
+          ? '试试调整关键字或取消部分标签筛选。'
+          : '管理员上传技能包后，这里会展示全部可用技能。'
+      "
     />
   </div>
 </template>
@@ -140,6 +197,46 @@ onMounted(load);
 .ui-alert--error {
   background: var(--ui-danger-bg);
   color: var(--ui-danger-fg);
+}
+
+.next-skills__filters {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  margin-bottom: var(--ui-space-4);
+  flex-wrap: wrap;
+}
+
+.next-skills__filter-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+}
+
+.next-skills__filter-tag {
+  font-size: var(--ui-font-size-xs);
+  padding: 3px 12px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-foreground-secondary);
+  cursor: pointer;
+}
+
+.next-skills__filter-tag--on {
+  background: var(--ui-muted);
+  border-color: var(--ui-primary);
+  color: var(--ui-primary);
+  font-weight: var(--ui-weight-semibold);
+}
+
+.next-skills__example {
+  margin: 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .next-skills__grid {

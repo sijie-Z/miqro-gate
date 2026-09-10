@@ -26,6 +26,7 @@ const columns = [
   { key: 'tags', title: '标签', minWidth: '160px' },
   { key: 'contentBytes', title: '大小', width: '90px', align: 'right' as const },
   { key: 'status', title: '状态', width: '110px' },
+  { key: 'createdByName', title: '创建人', width: '140px' },
   { key: 'createdAt', title: '发布时间', width: '170px' },
   { key: 'actions', title: '操作', width: '150px', align: 'center' as const },
 ];
@@ -301,6 +302,9 @@ onMounted(() => {
         </template>
         <template #contentBytes="{ row }">
           <span class="ui-num">{{ formatBytes((row as SkillView).contentBytes ?? 0) }}</span>
+        </template>
+        <template #createdByName="{ row }">
+          <span>{{ (row as SkillView).createdByName ?? '—' }}</span>
         </template>
         <template #status="{ row }">
           <UiStatusBadge

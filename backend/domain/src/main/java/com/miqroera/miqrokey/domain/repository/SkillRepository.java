@@ -23,6 +23,12 @@ public interface SkillRepository {
 
     List<Skill> findAllActive(UUID tenantId);
 
+    /**
+     * ACTIVE skills matching an optional keyword (case-insensitive name/description
+     * substring or exact ID) and holding ALL of the given tags (raw docs 20/28).
+     */
+    List<Skill> searchActive(UUID tenantId, String q, List<String> tags);
+
     /** Sets the skill to ARCHIVED (removed from the catalog, data kept). */
     Skill archive(UUID tenantId, UUID skillId);
 

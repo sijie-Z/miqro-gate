@@ -273,6 +273,47 @@ class SkillApiIntegrationTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(0)));
     }
 
+    @Test
+    @DisplayName("I9: keyword and tag filters narrow the catalog (tags are AND)")
+    void searchAndTagFilters() throws Exception {
+        upload("web-scraper", "1.1.0", zip("web-scraper/SKILL.md", SKILL_MD));
+        String reporterMd = """
+                ---
+                name: daily-reporter
+                description: Summarises usage into a daily report.
+                tags:
+                  - reporting
+                  - web
+                examples:
+                  - 生成昨天的使用报告
+                ---
+
+                # Daily Reporter
+                """;
+        upload("daily-reporter", "1.0.0", zip("daily-reporter/SKILL.md", reporterMd));
+
+        // Keyword: case-insensitive substring on name/description; examples and
+        // the creator name ride along on the view.
+        mockMvc.perform(get("/api/v1/skills").param("q", "REPORT").cookie(memberSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1))).andExpect(jsonPath("$[0].name").value("daily-reporter"))
+                .andExpect(jsonPath("$[0].examples", hasSize(1)))
+                .andExpect(jsonPath("$[0].createdByName").isNotEmpty());
+
+        // Tags are AND: only the skill holding both matches.
+        mockMvc.perform(get("/api/v1/skills").param("tags", "web").param("tags", "reporting").cookie(memberSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].name").value("daily-reporter"));
+        mockMvc.perform(get("/api/v1/skills").param("tags", "web").cookie(memberSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)));
+
+        // Overlong keyword is rejected; the admin list honours the same filters.
+        mockMvc.perform(get("/api/v1/skills").param("q", "x".repeat(61)).cookie(memberSession))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("SKILL_QUERY_INVALID"));
+        mockMvc.perform(get("/api/v1/admin/skills").param("q", "scraper").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].name").value("web-scraper"));
+    }
+
     private String upload(String name, String version, byte[] pkg) throws Exception {
         MvcResult result = mockMvc
                 .perform(post("/api/v1/admin/skills?version=" + version).cookie(adminSession, adminCsrf)

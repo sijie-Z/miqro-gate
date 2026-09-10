@@ -28,6 +28,13 @@
 - 另：App.spec 并发 flake 已直接修复（#332，vi.waitFor 条件等待，全量 ×3 稳定绿）——见 rc.11 后修补。
 - rc.11 攒批候选已含 #326/#328/#330。
 
+## 会话交接点 2026-09-10（深夜 #10，Skill 搜索/标签/Examples：#352 = I9）
+
+- **#352 Skill 目录收口（本 PR）**：V44 `skills.examples`；校验上限（examples ≤10×512、tags ≤5×20 去重）；
+  q/tags 过滤（两个列表端点，与语义 + 大小写不敏感 + q>60 → 400）；SkillView 增 examples/createdBy/createdByName。
+  前端市场搜索+标签 chips+示例/创建人；管理页创建人列。Validator 12/12、IT 5/5、前端 173/173。
+- 在途：I10 修订字段级 diff、I11 SSE 双端点等（矩阵 §2 继续）。
+
 ## 会话交接点 2026-09-10（深夜 #9，模型目录定期重探：#350 = I8）
 
 - **#350 定期重探（本 PR）**：`@ConditionalOnProperty` 默认关；开启后按 fixedDelay 周期对 (种子租户, OFFICIAL_API 产品)

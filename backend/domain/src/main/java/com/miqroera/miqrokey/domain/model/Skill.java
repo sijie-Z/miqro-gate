@@ -19,10 +19,12 @@ import java.util.UUID;
  *            package size in bytes (download display)
  */
 public record Skill(UUID id, UUID tenantId, String name, String description, String version, String author,
-        String license, List<String> tags, byte[] contentZip, String contentSha256, long contentBytes, String status,
-        UUID createdBy, long rowVersion, Instant createdAt, Instant updatedAt) {
+        String license, List<String> tags, List<String> examples, byte[] contentZip, String contentSha256,
+        long contentBytes, String status, UUID createdBy, long rowVersion, Instant createdAt, Instant updatedAt) {
 
     public Skill {
+        examples = examples == null ? List.of() : List.copyOf(examples);
+        tags = tags == null ? List.of() : List.copyOf(tags);
         if (id == null || tenantId == null || name == null || name.isBlank() || description == null
                 || description.isBlank() || version == null || version.isBlank()) {
             throw new IllegalArgumentException("id/tenantId/name/description/version are required");

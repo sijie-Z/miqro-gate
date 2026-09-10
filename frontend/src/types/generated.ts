@@ -3072,6 +3072,10 @@ export interface components {
             status?: string;
             /** Format: date-time */
             createdAt?: string;
+            examples?: string[];
+            /** Format: uuid */
+            createdBy?: string;
+            createdByName?: string;
         };
         InternalService: {
             /** Format: uuid */
@@ -5092,7 +5096,10 @@ export interface operations {
     };
     list_7: {
         parameters: {
-            query?: never;
+            query?: {
+                q?: string;
+                tags?: string[];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7275,7 +7282,10 @@ export interface operations {
     };
     list_24: {
         parameters: {
-            query?: never;
+            query?: {
+                q?: string;
+                tags?: string[];
+            };
             header?: never;
             path?: never;
             cookie?: never;
