@@ -25,7 +25,19 @@ import java.util.UUID;
 public record McpRouteRule(UUID id, UUID tenantId, UUID mcpServiceId, String name, String description, int priority,
         String pathMode, String pathValue, String hostMode, String hostValue, String methods,
         List<McpHeaderCondition> headerConditions, String status, long version, UUID createdBy, Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt, String matchExpression) {
+
+    /**
+     * Compatibility constructor: the read-only expression is derived from the
+     * matchers.
+     */
+    public McpRouteRule(UUID id, UUID tenantId, UUID mcpServiceId, String name, String description, int priority,
+            String pathMode, String pathValue, String hostMode, String hostValue, String methods,
+            List<McpHeaderCondition> headerConditions, String status, long version, UUID createdBy, Instant createdAt,
+            Instant updatedAt) {
+        this(id, tenantId, mcpServiceId, name, description, priority, pathMode, pathValue, hostMode, hostValue, methods,
+                headerConditions, status, version, createdBy, createdAt, updatedAt, null);
+    }
 
     public static final String DEFAULT_ROUTE_NAME = "default";
     public static final String DEFAULT_ROUTE_PRIORITY = "0";
@@ -77,6 +89,10 @@ public record McpRouteRule(UUID id, UUID tenantId, UUID mcpServiceId, String nam
         if (description != null && description.isBlank()) {
             description = null;
         }
+        // Read-only display rendering of the canonical surface (issue #354): derived
+        // from the validated matchers, never persisted, never part of equality.
+        matchExpression = McpRouteRules.renderExpression(pathMode, pathValue, hostMode, hostValue, methods,
+                headerConditions);
     }
 
     private static void validateMatcher(String label, String mode, String value, boolean pathMustStartWithSlash) {

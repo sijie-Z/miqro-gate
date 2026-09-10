@@ -797,7 +797,7 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | `GET /api/v1/admin/mcp-services/{id}/tools` | 服务下工具列表 |
 | `POST /api/v1/admin/mcp-services/{id}/tools` | 手动创建：`{ "toolName", "description"?, "method"?, "path" }`（方法默认 GET） |
 | `POST /api/v1/admin/mcp-services/{id}/tools/{toolId}/status?status=ENABLED\|DISABLED` | 单个工具启用/禁用（重复切换 `409 TOOL_STATUS_UNCHANGED`） |
-| `GET /api/v1/admin/mcp-services/{id}/tools/{toolId}/revisions?limit` | 定义修订历史，新→旧（默认 20、上限 50；**永不裁剪**） |
+| `GET /api/v1/admin/mcp-services/{id}/tools/{toolId}/revisions?limit` | 定义修订历史，新→旧（默认 20、上限 50；**永不裁剪**）；每项含只读 `changedFields`（相邻旧版的字段级差异，`description`/`method`/`path`；基线为空） |
 | `POST /api/v1/admin/mcp-services/{id}/tools/{toolId}/revisions` | 发布编辑为新修订（部分编辑：缺省字段沿用当前激活修订值；自动成为生效版并镜像到工具行） |
 | `POST /api/v1/admin/mcp-services/{id}/tools/import` | **F17 OpenAPI 批量导入**：body `{"spec": <OpenAPI JSON>}` → `{created, skipped, parseSkips}`（逐项容错：不可派生/重名/不支持方法各自报告，不整体失败；上限 100） |
 | `POST /api/v1/admin/mcp-services/{id}/tools/sync?dryRun=` | **tools/list 自动同步（#344，doc 03）**：上游 `POST {endpoint}` `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` → 差量合并 + 逐项报告 `{dryRun, upstreamToolCount, added[], updated[], unchanged, absentUpstream[], skipped[{toolName,reason}]}`；`dryRun=true` 只算不写不审计 |
@@ -930,7 +930,7 @@ Server 级（谁能调用整个服务）+ Tool 级（谁可调用某工具）ACL
 
 | 方法与路径 | 用途 |
 |---|---|
-| `GET /api/v1/admin/mcp-services/{serviceId}/route-rules` | 规则列表（优先级降序，default 在末尾） |
+| `GET /api/v1/admin/mcp-services/{serviceId}/route-rules` | 规则列表（优先级降序，default 在末尾）；每项含只读 `matchExpression`（规范条件面渲染，与引擎匹配语义同源） |
 | `POST /api/v1/admin/mcp-services/{serviceId}/route-rules` | 新建（默认启用）：`{ "name", "description"?, "priority"?, "pathMode"?, "pathValue"?, "hostMode"?, "hostValue"?, "methods"?, "headers"? }` |
 | `PATCH /api/v1/admin/mcp-services/{serviceId}/route-rules/{ruleId}` | 全量替换可编辑字段（见上） |
 | `POST /api/v1/admin/mcp-services/{serviceId}/route-rules/{ruleId}/status?status=ENABLED\|DISABLED` | 启用/禁用（幂等） |
