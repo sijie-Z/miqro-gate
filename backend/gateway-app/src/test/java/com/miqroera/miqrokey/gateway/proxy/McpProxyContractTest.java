@@ -162,6 +162,18 @@ class McpProxyContractTest {
         }
 
         @Test
+        @DisplayName("should reject an expired consumer (issue #322)")
+        void shouldRejectExpiredConsumer() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_EXPIRED))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized().expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("invalid_api_key");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
         @DisplayName("should reject a body that is not a JSON envelope")
         void shouldRejectMalformedEnvelope() {
             byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
