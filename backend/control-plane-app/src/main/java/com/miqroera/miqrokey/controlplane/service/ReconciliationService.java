@@ -139,6 +139,27 @@ public class ReconciliationService {
         return get(tenantId, reportId);
     }
 
+    /**
+     * Tenant reports, newest first (limit 1..100; out-of-range is rejected rather
+     * than silently clamped so callers never lose rows without noticing).
+     */
+    public Map<String, Object> list(UUID tenantId, int limit) {
+        if (limit < 1 || limit > 100) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "RECONCILIATION_PARAM_INVALID", "limit 必须在 1..100。");
+        }
+        List<Map<String, Object>> reports = jdbc.queryForList("""
+                SELECT * FROM reconciliation_reports
+                WHERE tenant_id = :tenantId
+                ORDER BY created_at DESC, id
+                LIMIT :limit
+                """, new MapSqlParameterSource("tenantId", tenantId).addValue("limit", limit));
+        List<Map<String, Object>> views = new ArrayList<>(reports.size());
+        for (Map<String, Object> report : reports) {
+            views.add(view(report));
+        }
+        return Map.of("reports", views);
+    }
+
     public Map<String, Object> get(UUID tenantId, UUID reportId) {
         List<Map<String, Object>> found = jdbc.queryForList("""
                 SELECT * FROM reconciliation_reports WHERE id = :id AND tenant_id = :tenantId

@@ -978,6 +978,7 @@ canonical 账单导入与四态对账报告（契约稿 docs/bill-reconciliation
 | 方法与路径 | 用途 |
 |---|---|
 | `POST /api/v1/admin/reconciliations?providerCode&currency&windowFrom&windowTo` | body = canonical JSONL（UTF-8，`.gz` 可选——按 gzip 魔数自动识别）；→ `202` + 报告（PENDING）；异步解析→四级匹配→报告落库 |
+| `GET /api/v1/admin/reconciliations?limit=` | 租户报告列表（新→旧，`created_at DESC`，limit 1..100 默认 20；越界 `400 RECONCILIATION_PARAM_INVALID`；空列表 `[]`） |
 | `GET /api/v1/admin/reconciliations/{id}` | 元数据 + 汇总：`totalRows/matched/partialBuckets/unmatchedProvider/unmatchedLocal/lineErrorCount/amountDiff` + `uploadSha256/uploadBytes` + `status(PENDING/RUNNING/SUCCEEDED/FAILED)` |
 | `GET /api/v1/admin/reconciliations/{id}/rows?state=&cursor=&limit=` | 四态明细行（`state` ∈ MATCHED/PARTIAL/UNMATCHED_PROVIDER/UNMATCHED_LOCAL；`row_no` 游标，limit ≤500，`nextCursor`） |
 
@@ -989,7 +990,7 @@ canonical 账单导入与四态对账报告（契约稿 docs/bill-reconciliation
 - 审计：`RECONCILIATION_CREATED/SUCCEEDED/FAILED`（摘要含上传 sha 与计数，**不存正文**；RUNNING 为瞬时态不入审计）。
 - 语义口径：无 ID 账单行若未匹配计入 `UNMATCHED_PROVIDER` 行、同时按（productCode, 5 分钟桶）计入
   `PARTIAL` 桶差；`UNMATCHED_LOCAL` 为行级（本地有 provider_request_id 且未被账单消费）。
-- 导出/前端页为 follow-up（导出将接 #330 reconcile-level 链路）。
+- 前端页随 coverage-matrix I2 交付（报告列表 / 上传 / 四态明细，2026-09-10）；导出链路接 #330 reconcile-level。
 
 ## 6. 导出与对账任务
 
