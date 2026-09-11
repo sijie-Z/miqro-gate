@@ -34,7 +34,8 @@ public class MeUsageController {
      * {@code GET /api/v1/me/usage/summary?groupBy=VIRTUAL_KEY&from=...&to=...}.
      *
      * @param groupBy
-     *            PROJECT | VIRTUAL_KEY | CACHE_LEVEL | DAY (default PROJECT)
+     *            PROJECT | VIRTUAL_KEY | CACHE_LEVEL | DAY | USER | MODEL | MONTH
+     *            (default PROJECT)
      */
     @GetMapping("/summary")
     public UsageSummary summary(@RequestParam(required = false) String groupBy,

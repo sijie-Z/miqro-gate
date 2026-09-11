@@ -91,7 +91,7 @@ const summary = (project: boolean): UsageSummary => ({
     groupKey: '__totals__',
     label: '合计',
     requests: { upstream: 150, coalesced: 2, l1Hit: 5, l2Hit: 0 },
-    tokens: { input: 120_000, output: 48_000, cacheRead: 0, cacheCreation: 0 },
+    tokens: { input: 120_000, output: 48_000, cacheRead: 12_000, cacheCreation: 0 },
     cost: {
       upstreamPaid: '1.200000',
       projectAllocated: '1.800000',
@@ -123,7 +123,9 @@ describe('NextCostView', () => {
     toastState.items.splice(0);
     document.body.innerHTML = '';
     mockApi.adminUsageSummary.mockImplementation(async (q: { groupBy?: string }) =>
-      q.groupBy === 'day' ? summary(false) : summary(true),
+      q.groupBy === 'day'
+        ? summary(false)
+        : { ...summary(true), groupBy: q.groupBy ?? 'project' },
     );
     mockApi.adminBudgets.mockResolvedValue([budget()]);
     mockApi.listProjects.mockResolvedValue([
@@ -231,5 +233,40 @@ describe('NextCostView', () => {
     await flushPromises();
 
     expect(mockApi.deleteProjectBudget).toHaveBeenCalledWith('p1', '2026-09');
+  });
+
+  it('shows the top-consumer and cache-hit token cards (I15)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="cost-stat-top-consumer"]').text()).toContain('Core AI');
+    expect(wrapper.find('[data-testid="cost-stat-top-consumer"]').text()).toContain('140.0k');
+    expect(wrapper.find('[data-testid="cost-stat-cache-tokens"]').text()).toContain('12.0k');
+    expect(mockApi.adminUsageSummary).toHaveBeenCalledWith(
+      expect.objectContaining({ groupBy: 'user' }),
+    );
+  });
+
+  it('switches to the consumer/model/month dimensions (I15)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="cost-mode-user"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('调用方');
+
+    await wrapper.find('[data-testid="cost-mode-model"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.adminUsageSummary).toHaveBeenCalledWith(
+      expect.objectContaining({ groupBy: 'model' }),
+    );
+
+    await wrapper.find('[data-testid="cost-mode-month"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.adminUsageSummary).toHaveBeenCalledWith(
+      expect.objectContaining({ groupBy: 'month' }),
+    );
+    expect(wrapper.text()).toContain('月份');
+    expect(wrapper.find('[data-testid="cost-table"]').exists()).toBe(true);
   });
 });

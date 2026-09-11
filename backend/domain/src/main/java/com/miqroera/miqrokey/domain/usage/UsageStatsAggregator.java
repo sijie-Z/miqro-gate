@@ -92,7 +92,8 @@ public final class UsageStatsAggregator {
      * Aggregates the given rows.
      *
      * @param groupBy
-     *            dimension name (project | virtualKey | cacheLevel | day)
+     *            dimension name (project | virtualKey | cacheLevel | day | user |
+     *            model | month)
      * @param usageRows
      *            aggregated usage-event rows
      * @param hitRows

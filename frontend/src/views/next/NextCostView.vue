@@ -1,16 +1,18 @@
 <script setup lang="ts">
 /**
  * NextCostView — /app/cost v2 admin page (U2 platform batch).
- * Behaviour parity with the legacy cost report: project/day cost tables,
- * five stat cards, the monthly budget panel (summary water band + per-project
- * rows with edit/delete gates) and CSV export. Rendering only; APIs untouched.
+ * Behaviour parity with the legacy cost report, extended by I15 (raw 23):
+ * project/day/consumer/model/month cost tables with a share column, seven stat
+ * cards (incl. top consumer + cache-hit tokens), the monthly budget panel
+ * (summary water band + per-project rows with edit/delete gates) and CSV
+ * export. Rendering only; APIs untouched.
  */
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type { BudgetView, Project, UsageGroup } from '@/types/generated-api';
+import type { BudgetView, Project, UsageGroup, UsageSummary } from '@/types/generated-api';
 
 const WINDOWS = [
   { label: '近 7 天', days: 7 },
@@ -19,16 +21,34 @@ const WINDOWS = [
 ];
 
 const windowDays = ref(30);
-const mode = ref<'project' | 'day'>('project');
 const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
 
-const projectSummary = ref<Awaited<ReturnType<typeof api.adminUsageSummary>> | null>(null);
-const daySummary = ref<Awaited<ReturnType<typeof api.adminUsageSummary>> | null>(null);
+type CostMode = 'project' | 'day' | 'user' | 'model' | 'month';
 
-const projectGroups = computed(() => projectSummary.value?.groups ?? []);
-const dayGroups = computed(() => daySummary.value?.groups ?? []);
+/** I15 (raw 23): dimension tabs — consumer / model / calendar month added. */
+const COST_MODES: { value: CostMode; label: string; panel: string; columnTitle: string }[] = [
+  { value: 'project', label: '按项目', panel: '按项目分摊', columnTitle: '项目' },
+  { value: 'day', label: '按天', panel: '按天成本', columnTitle: '日期' },
+  { value: 'user', label: '按调用方', panel: '按调用方成本', columnTitle: '调用方' },
+  { value: 'model', label: '按模型', panel: '按模型成本', columnTitle: '模型' },
+  { value: 'month', label: '按月', panel: '按月成本', columnTitle: '月份' },
+];
+
+const mode = ref<CostMode>('project');
+// Per-window summary cache: the cards read the project + user dimensions; the
+// active table dimension loads lazily and is reused until the window changes.
+const summaries = ref<Partial<Record<CostMode, UsageSummary>>>({});
+const projectSummary = computed(() => summaries.value.project ?? null);
+const userSummary = computed(() => summaries.value.user ?? null);
+const activeGroups = computed(() => summaries.value[mode.value]?.groups ?? []);
+const activePanel = computed(
+  () => COST_MODES.find((m) => m.value === mode.value)?.panel ?? '成本明细',
+);
+const activeLabelTitle = computed(
+  () => COST_MODES.find((m) => m.value === mode.value)?.columnTitle ?? '分组',
+);
 
 const totalCost = computed(() => projectSummary.value?.totals?.cost?.projectAllocated ?? 0);
 const upstreamCost = computed(() => projectSummary.value?.totals?.cost?.upstreamPaid ?? 0);
@@ -43,21 +63,25 @@ const cacheHits = computed(() => {
   const t = projectSummary.value?.totals;
   return t ? (t.requests?.l1Hit ?? 0) + (t.requests?.l2Hit ?? 0) : 0;
 });
+/** Doc 134892 token card: cache-hit input tokens (never billed upstream). */
+const cacheHitTokens = computed(() => projectSummary.value?.totals?.tokens?.cacheRead ?? 0);
+/** Doc 134892 token card: the consumer with the highest token volume. */
+const topConsumer = computed<UsageGroup | null>(() => {
+  let best: UsageGroup | null = null;
+  for (const group of userSummary.value?.groups ?? []) {
+    const candidate = group as unknown as UsageGroup;
+    if (!best || tokensOf(candidate) > tokensOf(best)) best = candidate;
+  }
+  return best;
+});
 
-const projectColumns = [
-  { key: 'label', title: '项目', minWidth: '200px' },
+const activeColumns = computed(() => [
+  { key: 'label', title: activeLabelTitle.value, minWidth: '200px' },
   { key: 'requests', title: '请求', width: '100px', align: 'right' as const },
   { key: 'tokens', title: 'Tokens', width: '140px', align: 'right' as const },
   { key: 'cost', title: '分摊成本', width: '150px', align: 'right' as const },
   { key: 'share', title: '占比', minWidth: '220px' },
-];
-
-const dayColumns = [
-  { key: 'label', title: '日期', minWidth: '160px' },
-  { key: 'requests', title: '请求', width: '100px', align: 'right' as const },
-  { key: 'tokens', title: 'Tokens', width: '140px', align: 'right' as const },
-  { key: 'cost', title: '分摊成本', width: '150px', align: 'right' as const },
-];
+]);
 
 function costNumber(value: string | number | undefined): number {
   return Number(value ?? 0);
@@ -105,12 +129,16 @@ async function load() {
   loadError.value = '';
   try {
     const from = fromIso(windowDays.value);
-    const [projects, days] = await Promise.all([
-      api.adminUsageSummary({ groupBy: 'project', from, to: new Date().toISOString() }),
-      api.adminUsageSummary({ groupBy: 'day', from, to: new Date().toISOString() }),
-    ]);
-    projectSummary.value = projects;
-    daySummary.value = days;
+    const to = new Date().toISOString();
+    const needed = Array.from(new Set<CostMode>(['project', 'user', mode.value]));
+    const results = await Promise.all(
+      needed.map((dimension) => api.adminUsageSummary({ groupBy: dimension, from, to })),
+    );
+    const next = { ...summaries.value };
+    needed.forEach((dimension, index) => {
+      next[dimension] = results[index];
+    });
+    summaries.value = next;
   } catch (error) {
     if (error instanceof ApiError) {
       loadError.value = error.message;
@@ -123,11 +151,20 @@ async function load() {
 
 function switchWindow(days: number) {
   windowDays.value = days;
+  summaries.value = {};
+  void load();
+}
+
+function setMode(next: CostMode) {
+  if (mode.value === next) return;
+  mode.value = next;
+  // Cached for this window already (project/user load with the cards)?
+  if (summaries.value[next]) return;
   void load();
 }
 
 function exportCsv() {
-  const groups = mode.value === 'project' ? projectGroups.value : dayGroups.value;
+  const groups = activeGroups.value;
   if (!groups.length) {
     toast.info('当前筛选下没有可导出的数据');
     return;
@@ -336,28 +373,15 @@ onMounted(async () => {
     <div class="next-cost__toolbar">
       <div class="next-cost__segmented" data-testid="cost-mode">
         <button
+          v-for="m in COST_MODES"
+          :key="m.value"
           type="button"
           class="next-cost__seg"
-          :class="{ 'next-cost__seg--on': mode === 'project' }"
-          data-testid="cost-mode-project"
-          @click="
-            mode = 'project';
-            load();
-          "
+          :class="{ 'next-cost__seg--on': mode === m.value }"
+          :data-testid="`cost-mode-${m.value}`"
+          @click="setMode(m.value)"
         >
-          按项目
-        </button>
-        <button
-          type="button"
-          class="next-cost__seg"
-          :class="{ 'next-cost__seg--on': mode === 'day' }"
-          data-testid="cost-mode-day"
-          @click="
-            mode = 'day';
-            load();
-          "
-        >
-          按天
+          {{ m.label }}
         </button>
       </div>
       <div class="next-cost__segmented" data-testid="cost-window">
@@ -401,6 +425,20 @@ onMounted(async () => {
           formatCost(cacheSaved)
         }}</span>
         <span class="next-cost__stat-hint">命中 {{ formatCount(cacheHits) }} 次 · 未调用上游</span>
+      </div>
+      <div class="ui-panel next-cost__stat" data-testid="cost-stat-cache-tokens">
+        <span class="next-cost__stat-label">缓存命中 Tokens</span>
+        <span class="next-cost__stat-value ui-num">{{ formatCount(cacheHitTokens) }}</span>
+        <span class="next-cost__stat-hint">输入侧命中缓存 · 未计上游费用</span>
+      </div>
+      <div class="ui-panel next-cost__stat" data-testid="cost-stat-top-consumer">
+        <span class="next-cost__stat-label">最高消费者</span>
+        <span class="next-cost__stat-value ui-num">{{ topConsumer?.label ?? '—' }}</span>
+        <span class="next-cost__stat-hint">{{
+          topConsumer
+            ? `${formatCount(tokensOf(topConsumer))} Tokens · ${formatCost(costOf(topConsumer))}`
+            : '窗口内暂无调用'
+        }}</span>
       </div>
     </div>
 
@@ -499,16 +537,15 @@ onMounted(async () => {
 
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
-        <span class="ui-panel-sub">{{ mode === 'project' ? '按项目分摊' : '按天成本' }}</span>
+        <span class="ui-panel-sub">{{ activePanel }}</span>
       </div>
       <UiTable
-        v-if="mode === 'project'"
-        :columns="projectColumns"
-        :data="projectGroups"
+        :columns="activeColumns"
+        :data="activeGroups"
         :loading="loading"
         row-key="groupKey"
         empty-title="该时间窗口内没有成本数据"
-        data-testid="cost-table"
+        :data-testid="mode === 'day' ? 'cost-day-table' : 'cost-table'"
       >
         <template #requests="{ row }">
           <span class="ui-num">{{ formatCount(asGroup(row).requests?.upstream ?? 0) }}</span>
@@ -529,25 +566,6 @@ onMounted(async () => {
             </div>
             <span class="ui-num">{{ shareOf(asGroup(row)).toFixed(1) }}%</span>
           </div>
-        </template>
-      </UiTable>
-      <UiTable
-        v-else
-        :columns="dayColumns"
-        :data="dayGroups"
-        :loading="loading"
-        row-key="groupKey"
-        empty-title="该时间窗口内没有成本数据"
-        data-testid="cost-day-table"
-      >
-        <template #requests="{ row }">
-          <span class="ui-num">{{ formatCount(asGroup(row).requests?.upstream ?? 0) }}</span>
-        </template>
-        <template #tokens="{ row }">
-          <span class="ui-num">{{ formatCount(tokensOf(asGroup(row))) }}</span>
-        </template>
-        <template #cost="{ row }">
-          <span class="ui-num">{{ formatCost(costOf(asGroup(row))) }}</span>
         </template>
       </UiTable>
     </section>
@@ -671,7 +689,7 @@ onMounted(async () => {
 
 .next-cost__stats {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: var(--ui-space-4);
   margin-bottom: var(--ui-space-5);
 }

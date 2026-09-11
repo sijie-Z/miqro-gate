@@ -38,7 +38,8 @@ public class AdminUsageController {
      * {@code GET /api/v1/admin/usage/summary?groupBy=DAY&userId=...&modelId=...}.
      *
      * @param groupBy
-     *            PROJECT | VIRTUAL_KEY | CACHE_LEVEL | DAY (default PROJECT)
+     *            PROJECT | VIRTUAL_KEY | CACHE_LEVEL | DAY | USER | MODEL | MONTH
+     *            (default PROJECT)
      */
     @GetMapping("/summary")
     public UsageSummary summary(@RequestParam(required = false) String groupBy,
