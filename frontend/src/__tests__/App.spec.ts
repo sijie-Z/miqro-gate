@@ -4,6 +4,12 @@ import { createPinia, setActivePinia } from 'pinia';
 import App from '@/App.vue';
 import router from '@/router';
 import * as api from '@/api';
+// The /login route lazily imports its chunk. Under the 40-file parallel jsdom
+// run a contended dynamic import can starve past the test timeout even with a
+// condition wait (#332 follow-up; observed as a 15s timeout on router.push).
+// Pre-importing the chunk at module scope pins it into the module cache, so
+// navigation resolves immediately and the tests keep asserting UI state only.
+import '@/views/next/NextLoginView.vue';
 
 describe('App', () => {
   beforeEach(() => {
