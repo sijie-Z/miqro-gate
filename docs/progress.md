@@ -13,6 +13,15 @@
   F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态）**）
 - Last updated: `2026-09-10 CST`
 
+## 会话交接点 2026-09-11（I20：服务级上游超时 + 熔断慢阈值基准修正：#373）
+
+- **#373 I20（本 PR）**：V48 `mcp_services.upstream_timeout_ms`（1000–600000，默认 60000）快照携带；数据面每尝试超时=
+  服务预算，预算耗尽 → 504 `mcp_upstream_timeout`（UPSTREAM_FAILURE/504 行，此前裸 500）；创建可带 / `PUT …/upstream-timeout`
+  （越界 `MCP_TIMEOUT_INVALID`）；熔断慢阈值基准由健康探测超时修正为上游预算（doc 134859），保存/下调**双向拒绝**；
+  审计 `MCP_SERVICE_UPSTREAM_TIMEOUT`；矩阵 I20 行与「慢调用阈值基准」裁决行落定。
+- 同 PR 补记 #371 的 CHANGELOG 条目（修复代码已随 #372 先行合入 develop @ 53f442c）。
+- 下一批候选：I15 成本维度（需后端聚合）、I19 访问日志可插拔 sink、#362 审计链并发复现。
+
 ## 会话交接点 2026-09-11（bug 修复：快照装配丢 backend 鉴权：#371）
 
 - **#371（本 PR）**：`JdbcRouteSnapshotLoader` 最终装配用 10 参兼容构造器重建 `McpServerRecord`，

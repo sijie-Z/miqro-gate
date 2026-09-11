@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.service;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
 import com.miqroera.miqrokey.domain.model.McpService;
+import com.miqroera.miqrokey.domain.repository.McpResilienceRepository;
 import com.miqroera.miqrokey.domain.repository.McpServiceRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.dao.DuplicateKeyException;
@@ -27,15 +28,17 @@ import java.util.UUID;
 public class AdminMcpService {
 
     private final McpServiceRepository repository;
+    private final McpResilienceRepository resilienceRepository;
     private final AdminMcpRouteRuleService routeRules;
     private final RouteRefreshPublisher routeRefreshPublisher;
     private final AuditService auditService;
     private final KeyEncryptionProvider keyEncryptionProvider;
 
-    public AdminMcpService(McpServiceRepository repository, AdminMcpRouteRuleService routeRules,
-            RouteRefreshPublisher routeRefreshPublisher, AuditService auditService,
+    public AdminMcpService(McpServiceRepository repository, McpResilienceRepository resilienceRepository,
+            AdminMcpRouteRuleService routeRules, RouteRefreshPublisher routeRefreshPublisher, AuditService auditService,
             KeyEncryptionProvider keyEncryptionProvider) {
         this.repository = repository;
+        this.resilienceRepository = resilienceRepository;
         this.routeRules = routeRules;
         this.routeRefreshPublisher = routeRefreshPublisher;
         this.auditService = auditService;
@@ -53,15 +56,17 @@ public class AdminMcpService {
     @Transactional
     public McpService create(UUID tenantId, UUID adminId, String name, String description, String endpoint,
             String transport, Integer checkIntervalSeconds, Integer checkTimeoutSeconds, Integer failThreshold,
-            Integer recoverThreshold, String checkPath, String requestId) {
+            Integer recoverThreshold, String checkPath, Integer upstreamTimeoutMs, String requestId) {
         String normalizedEndpoint = validateEndpoint(endpoint);
+        int timeout = upstreamTimeoutMs != null ? upstreamTimeoutMs : McpService.DEFAULT_UPSTREAM_TIMEOUT_MS;
+        requireTimeoutRange(timeout);
         McpService service = new McpService(UUID.randomUUID(), tenantId, name.trim(), description, normalizedEndpoint,
                 transport != null ? transport : "STREAMABLE_HTTP", "ONLINE", "UNKNOWN", null, 0, 0,
                 checkIntervalSeconds != null ? checkIntervalSeconds : 30,
                 checkTimeoutSeconds != null ? checkTimeoutSeconds : 5, failThreshold != null ? failThreshold : 3,
                 recoverThreshold != null ? recoverThreshold : 1,
                 checkPath != null && !checkPath.isBlank() ? checkPath : "/health", 0, adminId, Instant.now(),
-                Instant.now());
+                Instant.now(), "VISITOR", null, timeout);
         try {
             repository.insert(service);
         } catch (DuplicateKeyException e) {
@@ -109,7 +114,7 @@ public class AdminMcpService {
                 recoverThreshold != null ? recoverThreshold : service.recoverThreshold(),
                 checkPath != null && !checkPath.isBlank() ? checkPath : service.checkPath(), service.version(),
                 service.createdBy(), service.createdAt(), service.updatedAt(), service.backendAuthMode(),
-                service.backendSecretUpdatedAt());
+                service.backendSecretUpdatedAt(), service.upstreamTimeoutMs());
         McpService saved = repository.update(updated, service.version());
         auditService.record(tenantId, adminId, "MCP_SERVICE_HEALTH_UPDATE", "MCP_SERVICE", serviceId,
                 AuditSummaries.summary("name", AuditSummaries.sanitize(service.name())), requestId);
@@ -122,7 +127,44 @@ public class AdminMcpService {
                 service.consecutiveFailures(), service.consecutiveSuccesses(), service.checkIntervalSeconds(),
                 service.checkTimeoutSeconds(), service.failThreshold(), service.recoverThreshold(), service.checkPath(),
                 service.version(), service.createdBy(), service.createdAt(), service.updatedAt(),
-                service.backendAuthMode(), service.backendSecretUpdatedAt());
+                service.backendAuthMode(), service.backendSecretUpdatedAt(), service.upstreamTimeoutMs());
+    }
+
+    /**
+     * Sets the data-plane upstream budget (I20, Tencent raw 03 "超时时间"):
+     * 1000..600000 ms. Doc 134859: while a slow-call breaker trigger is enabled the
+     * budget must stay above its threshold, so shrinking it at/below the active
+     * {@code breakerSlowCallMs} is rejected (400).
+     */
+    @Transactional
+    public McpService setUpstreamTimeout(UUID tenantId, UUID adminId, UUID serviceId, Integer upstreamTimeoutMs,
+            String requestId) {
+        McpService service = find(tenantId, serviceId);
+        if (upstreamTimeoutMs == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "MCP_TIMEOUT_INVALID", "上游超时必填。");
+        }
+        requireTimeoutRange(upstreamTimeoutMs);
+        resilienceRepository.find(tenantId, serviceId).ifPresent(policy -> {
+            if (policy.breakerSlowEnabled() && policy.breakerSlowCallMs() >= upstreamTimeoutMs) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "RESILIENCE_SLOW_EXCEEDS_TIMEOUT",
+                        "上游超时必须高于已启用的慢调用阈值（" + policy.breakerSlowCallMs() + " ms）。");
+            }
+        });
+        McpService updated = repository.updateUpstreamTimeout(serviceId, tenantId, upstreamTimeoutMs);
+        routeRefreshPublisher.publishChanged();
+        auditService.record(tenantId, adminId, "MCP_SERVICE_UPSTREAM_TIMEOUT", "MCP_SERVICE", serviceId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(service.name()), "upstreamTimeoutMs",
+                        String.valueOf(upstreamTimeoutMs)),
+                requestId);
+        return updated;
+    }
+
+    private static void requireTimeoutRange(int upstreamTimeoutMs) {
+        if (upstreamTimeoutMs < McpService.MIN_UPSTREAM_TIMEOUT_MS
+                || upstreamTimeoutMs > McpService.MAX_UPSTREAM_TIMEOUT_MS) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "MCP_TIMEOUT_INVALID", "上游超时必须在 "
+                    + McpService.MIN_UPSTREAM_TIMEOUT_MS + ".." + McpService.MAX_UPSTREAM_TIMEOUT_MS + " 毫秒。");
+        }
     }
 
     /**

@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.domain.route;
 
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
+import com.miqroera.miqrokey.domain.model.McpService;
 import com.miqroera.miqrokey.domain.model.McpToolRetryPolicy;
 import com.miqroera.miqrokey.domain.model.RetentionConfig;
 
@@ -320,22 +321,46 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
      * mode + per-tool overrides, Tencent doc 134890). Only rows that match the
      * loader's ACTIVE filter appear. {@code resilience} is the F12/F13 policy (V30)
      * or null when no policy row exists (everything disabled).
+     * {@code upstreamTimeoutMs} is the per-service data-plane attempt budget (I20,
+     * doc 135906 "超时时间", default 60000 ms).
      */
     public record McpServerRecord(UUID id, UUID tenantId, String name, String endpoint, String transport, String status,
             String aclMode, Set<UUID> serverConsumerIds, List<McpToolRecord> tools, McpResiliencePolicy resilience,
-            String backendAuthMode, com.miqroera.miqrokey.domain.crypto.EncryptedSecret encryptedBackendSecret) {
+            String backendAuthMode, com.miqroera.miqrokey.domain.crypto.EncryptedSecret encryptedBackendSecret,
+            int upstreamTimeoutMs) {
 
-        /** Legacy constructor: no upstream backend credential (VISITOR). */
+        /** Legacy constructor: no upstream backend credential, default budget. */
         public McpServerRecord(UUID id, UUID tenantId, String name, String endpoint, String transport, String status,
                 String aclMode, Set<UUID> serverConsumerIds, List<McpToolRecord> tools,
                 McpResiliencePolicy resilience) {
             this(id, tenantId, name, endpoint, transport, status, aclMode, serverConsumerIds, tools, resilience,
-                    "VISITOR", null);
+                    "VISITOR", null, McpService.DEFAULT_UPSTREAM_TIMEOUT_MS);
+        }
+
+        /** Legacy constructor: per-service upstream budget, no backend credential. */
+        public McpServerRecord(UUID id, UUID tenantId, String name, String endpoint, String transport, String status,
+                String aclMode, Set<UUID> serverConsumerIds, List<McpToolRecord> tools, McpResiliencePolicy resilience,
+                int upstreamTimeoutMs) {
+            this(id, tenantId, name, endpoint, transport, status, aclMode, serverConsumerIds, tools, resilience,
+                    "VISITOR", null, upstreamTimeoutMs);
+        }
+
+        /** Legacy constructor: backend credential, default budget. */
+        public McpServerRecord(UUID id, UUID tenantId, String name, String endpoint, String transport, String status,
+                String aclMode, Set<UUID> serverConsumerIds, List<McpToolRecord> tools, McpResiliencePolicy resilience,
+                String backendAuthMode, com.miqroera.miqrokey.domain.crypto.EncryptedSecret encryptedBackendSecret) {
+            this(id, tenantId, name, endpoint, transport, status, aclMode, serverConsumerIds, tools, resilience,
+                    backendAuthMode, encryptedBackendSecret, McpService.DEFAULT_UPSTREAM_TIMEOUT_MS);
         }
 
         public McpServerRecord {
             serverConsumerIds = Set.copyOf(serverConsumerIds);
             tools = List.copyOf(tools);
+            if (upstreamTimeoutMs < McpService.MIN_UPSTREAM_TIMEOUT_MS
+                    || upstreamTimeoutMs > McpService.MAX_UPSTREAM_TIMEOUT_MS) {
+                throw new IllegalArgumentException("upstreamTimeoutMs must be " + McpService.MIN_UPSTREAM_TIMEOUT_MS
+                        + ".." + McpService.MAX_UPSTREAM_TIMEOUT_MS);
+            }
         }
 
         public McpToolRecord tool(String toolName) {

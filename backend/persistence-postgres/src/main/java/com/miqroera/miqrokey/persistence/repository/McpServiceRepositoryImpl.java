@@ -29,7 +29,8 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
             rs.getString("backend_auth_mode"),
             rs.getTimestamp("backend_secret_updated_at") != null
                     ? rs.getTimestamp("backend_secret_updated_at").toInstant()
-                    : null);
+                    : null,
+            rs.getInt("upstream_timeout_ms"));
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -44,11 +45,11 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
                 INSERT INTO mcp_services
                     (id, tenant_id, name, description, endpoint, transport, status, health_status,
                      health_checked_at, consecutive_failures, consecutive_successes, check_interval_seconds,
-                     check_timeout_seconds, fail_threshold, recover_threshold, check_path, version, created_by,
-                     created_at, updated_at)
+                     check_timeout_seconds, fail_threshold, recover_threshold, check_path, upstream_timeout_ms,
+                     version, created_by, created_at, updated_at)
                 VALUES (:id, :tenantId, :name, :description, :endpoint, :transport, :status, :healthStatus,
-                        :checkedAt, 0, 0, :interval, :timeout, :failThreshold, :recoverThreshold, :checkPath, 0,
-                        :createdBy, now(), now())
+                        :checkedAt, 0, 0, :interval, :timeout, :failThreshold, :recoverThreshold, :checkPath,
+                        :upstreamTimeoutMs, 0, :createdBy, now(), now())
                 """, params(service));
         return service;
     }
@@ -87,6 +88,7 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
                     consecutive_failures = :failures, consecutive_successes = :successes,
                     check_interval_seconds = :interval, check_timeout_seconds = :timeout,
                     fail_threshold = :failThreshold, recover_threshold = :recoverThreshold, check_path = :checkPath,
+                    upstream_timeout_ms = :upstreamTimeoutMs,
                     version = version + 1, updated_at = now()
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """, params(service).addValue("expectedVersion", expectedVersion));
@@ -121,6 +123,21 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
     }
 
     @Override
+    @Transactional
+    public McpService updateUpstreamTimeout(UUID id, UUID tenantId, int upstreamTimeoutMs) {
+        int rows = jdbc.update("""
+                UPDATE mcp_services
+                SET upstream_timeout_ms = :timeout, version = version + 1, updated_at = now()
+                WHERE id = :id AND tenant_id = :tenantId
+                """, new MapSqlParameterSource("id", id).addValue("tenantId", tenantId).addValue("timeout",
+                upstreamTimeoutMs));
+        if (rows != 1) {
+            throw new IllegalStateException("MCP service not found for upstream timeout update: " + id);
+        }
+        return findByIdAndTenantId(id, tenantId).orElseThrow();
+    }
+
+    @Override
     public Optional<EncryptedSecret> findBackendSecret(UUID id, UUID tenantId) {
         List<EncryptedSecret> secrets = jdbc.query("""
                 SELECT backend_secret_ciphertext, backend_secret_nonce, backend_secret_key_version
@@ -145,6 +162,7 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
                 .addValue("failures", s.consecutiveFailures()).addValue("successes", s.consecutiveSuccesses())
                 .addValue("interval", s.checkIntervalSeconds()).addValue("timeout", s.checkTimeoutSeconds())
                 .addValue("failThreshold", s.failThreshold()).addValue("recoverThreshold", s.recoverThreshold())
-                .addValue("checkPath", s.checkPath()).addValue("createdBy", s.createdBy());
+                .addValue("checkPath", s.checkPath()).addValue("upstreamTimeoutMs", s.upstreamTimeoutMs())
+                .addValue("createdBy", s.createdBy());
     }
 }

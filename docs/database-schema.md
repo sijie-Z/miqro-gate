@@ -347,6 +347,10 @@ V38（#320）新增上游后端鉴权：`backend_auth_mode`（`VISITOR|API_KEY`�
 `backend_secret_updated_at timestamptz`；约束 `ck_mcp_services_backend_secret` 保证 API_KEY ⇔ 密文三列非空。
 密钥复用 `KeyEncryptionProvider`（AES-GCM，AAD 绑定 tenant+service），写后不可读。
 
+V48（#373，I20）新增上游请求预算 `upstream_timeout_ms integer`（1000–600000，默认 60000；腾讯 raw 03「超时时间」）：
+数据面每次上游尝试的超时随路由快照下发；预算耗尽 → 504 `mcp_upstream_timeout`（`mcp_access_log` UPSTREAM_FAILURE/504）；
+熔断慢阈值跨字段校验的基准（见 `mcp_resilience_policy`）。
+
 MCP Server 管理：`name`、`description`、`endpoint`（https）、`transport`（`STREAMABLE_HTTP|SSE`）、`status`（`ONLINE|OFFLINE`，手动切换，健康检查不覆盖）、`health_status`（`UNKNOWN|HEALTHY|UNHEALTHY`）、`health_checked_at`、`consecutive_failures/successes`、检查配置（`check_interval_seconds`/`check_timeout_seconds`/`fail_threshold`/`recover_threshold`/`check_path`）。唯一 `(tenant_id, name)`；`(tenant_id, health_status)` 索引（探活列表）。
 
 ### `mcp_tools` (V21，P3.5)
@@ -369,7 +373,7 @@ MCP Tools 管理：`tool_name`（AI Agent 调用唯一标识，snake_case）、`
 
 ### `mcp_resilience_policy` (V30，F12/F13 韧性配置)
 
-每 MCP 服务一行（`mcp_service_id` PK，FK mcp_services ON DELETE CASCADE）：重试门禁与熔断配置，**默认全关**（无行=行为不变）。F12 列：`retry_enabled`、`retry_max`（1–5）、`retry_conditions`（CSV `SERVER_5XX|CONNECTION_FAILURE|TIMEOUT`）、`retry_idempotency_confirmed`（POST/PUT/PATCH 工具调用重试需显式确认）。F13 列：`breaker_enabled`、`breaker_window_seconds`（1–60）、`breaker_min_requests`（1–100）、`breaker_error_enabled`/`breaker_error_ratio`（1–100）/`breaker_error_status_codes`（CSV 400–599，≤32，默认 500,502,503,504）、`breaker_slow_enabled`/`breaker_slow_call_ms`（100–60000）/`breaker_slow_ratio`、`breaker_open_seconds`（5–600）、`breaker_probe_count`（1–10）、`breaker_probe_success`（1–10 且 ≤probe_count）、`breaker_skip_retry`（默认 true）。`version`（每次 upsert +1）、`created_by`/`updated_by`、时间戳。慢阈值与服务 `check_timeout_seconds` 的跨字段校验在管理 API 层（`RESILIENCE_SLOW_EXCEEDS_TIMEOUT`）。数据面经路由快照读取本表（loader LEFT JOIN，无行→null=全关）。
+每 MCP 服务一行（`mcp_service_id` PK，FK mcp_services ON DELETE CASCADE）：重试门禁与熔断配置，**默认全关**（无行=行为不变）。F12 列：`retry_enabled`、`retry_max`（1–5）、`retry_conditions`（CSV `SERVER_5XX|CONNECTION_FAILURE|TIMEOUT`）、`retry_idempotency_confirmed`（POST/PUT/PATCH 工具调用重试需显式确认）。F13 列：`breaker_enabled`、`breaker_window_seconds`（1–60）、`breaker_min_requests`（1–100）、`breaker_error_enabled`/`breaker_error_ratio`（1–100）/`breaker_error_status_codes`（CSV 400–599，≤32，默认 500,502,503,504）、`breaker_slow_enabled`/`breaker_slow_call_ms`（100–60000）/`breaker_slow_ratio`、`breaker_open_seconds`（5–600）、`breaker_probe_count`（1–10）、`breaker_probe_success`（1–10 且 ≤probe_count）、`breaker_skip_retry`（默认 true）。`version`（每次 upsert +1）、`created_by`/`updated_by`、时间戳。慢阈值与服务 `upstream_timeout_ms`（V48，I20 基准修正：doc 134859 基准为后端请求超时）的**双向**跨字段校验在管理 API 层（`RESILIENCE_SLOW_EXCEEDS_TIMEOUT`：保存策略时阈值须严格小于预算；下调预算到 ≤ 已启用阈值同样拒绝）。数据面经路由快照读取本表（loader LEFT JOIN，无行→null=全关）。
 
 ### `mcp_tool_retry_policy` (V46，I13 Tool 级重试覆盖)
 

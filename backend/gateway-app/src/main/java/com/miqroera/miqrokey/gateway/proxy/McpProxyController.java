@@ -416,7 +416,7 @@ public class McpProxyController {
                         breaker.afterCall(!policy.breakerErrorStatusCodes().contains(status), ttfbMs);
                     }
                     return target.complete(status, resp.headers().asHttpHeaders(), resp.bodyToFlux(byte[].class));
-                }).timeout(MCP_TIMEOUT).onErrorResume(error -> {
+                }).timeout(Duration.ofMillis(context.service.upstreamTimeoutMs())).onErrorResume(error -> {
                     // A retried inner chain is self-contained (its own timeout +
                     // onErrorResume): once a terminal row was recorded anywhere,
                     // this layer must not retry again or double-record.
@@ -431,6 +431,18 @@ public class McpProxyController {
                     }
                     if (breaker != null) {
                         breaker.afterCall(false, elapsedMs);
+                    }
+                    if (!rowRecorded[0] && kind == McpRetryPolicy.FailureKind.TIMEOUT) {
+                        // I20 (doc 135906 "超时时间"): the per-service upstream
+                        // budget expiring is a configured gateway timeout —
+                        // surface it as a typed 504 instead of the bare
+                        // infrastructure 500 other transport failures keep.
+                        record(context, rpcMethod, toolName, McpAccessStatus.UPSTREAM_FAILURE, 504);
+                        rowRecorded[0] = true;
+                        log.info("aigw.mcp.timeout requestId={} service={} budgetMs={}", context.gatewayRequestId,
+                                context.service.name(), context.service.upstreamTimeoutMs());
+                        return target.errorResponse(HttpStatus.GATEWAY_TIMEOUT, "mcp_upstream_timeout",
+                                "MCP upstream timed out");
                     }
                     if (!rowRecorded[0]) {
                         record(context, rpcMethod, toolName, McpAccessStatus.UPSTREAM_FAILURE, null);

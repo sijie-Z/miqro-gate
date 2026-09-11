@@ -28,6 +28,7 @@ import java.util.UUID;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -171,5 +172,44 @@ class AdminMcpServiceApiIntegrationTest {
     private static Cookie cookie(MvcResult result, String name) {
         return java.util.stream.Stream.of(result.getResponse().getCookies()).filter(c -> c.getName().equals(name))
                 .findFirst().orElse(null);
+    }
+
+    @Test
+    @DisplayName("upstream budget (I20): default, create override, PUT round-trip, range validation")
+    void upstreamTimeoutBudget() throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/mcp-services").cookie(sessionCookie, csrfCookie)
+                        .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"budget-mcp\",\"endpoint\":\"https://budget.example\","
+                                + "\"upstreamTimeoutMs\":8000}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.upstreamTimeoutMs").value(8000)).andReturn();
+        String id = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
+
+        // Doc 135906 default when omitted.
+        mockMvc.perform(post("/api/v1/admin/mcp-services").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"default-mcp\",\"endpoint\":\"https://default.example\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.upstreamTimeoutMs").value(60000));
+
+        mockMvc.perform(put("/api/v1/admin/mcp-services/" + id + "/upstream-timeout").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"upstreamTimeoutMs\":20000}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.upstreamTimeoutMs").value(20000));
+        mockMvc.perform(get("/api/v1/admin/mcp-services/" + id).cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.upstreamTimeoutMs").value(20000));
+
+        mockMvc.perform(put("/api/v1/admin/mcp-services/" + id + "/upstream-timeout").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"upstreamTimeoutMs\":500}")).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MCP_TIMEOUT_INVALID"));
+        mockMvc.perform(put("/api/v1/admin/mcp-services/" + id + "/upstream-timeout").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"upstreamTimeoutMs\":700000}")).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MCP_TIMEOUT_INVALID"));
+        mockMvc.perform(post("/api/v1/admin/mcp-services").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"bad-budget\",\"endpoint\":\"https://bad.example\","
+                        + "\"upstreamTimeoutMs\":100}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MCP_TIMEOUT_INVALID"));
     }
 }

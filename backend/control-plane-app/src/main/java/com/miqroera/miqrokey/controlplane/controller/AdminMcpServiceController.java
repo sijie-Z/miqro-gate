@@ -53,7 +53,7 @@ public class AdminMcpServiceController {
         var user = userContext.getUser();
         return mcpService.create(user.tenantId(), user.id(), body.name().trim(), body.description(), body.endpoint(),
                 body.transport(), body.checkIntervalSeconds(), body.checkTimeoutSeconds(), body.failThreshold(),
-                body.recoverThreshold(), body.checkPath(), requestId(httpReq));
+                body.recoverThreshold(), body.checkPath(), body.upstreamTimeoutMs(), requestId(httpReq));
     }
 
     /** Manual online/offline switch (health checking never overrides it). */
@@ -93,11 +93,26 @@ public class AdminMcpServiceController {
         return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
+    /**
+     * Sets the data-plane upstream budget (I20, Tencent raw 03 "超时时间"). Range and
+     * the slow-call cross-check live in the service (typed 400s).
+     */
+    @PutMapping("/{serviceId}/upstream-timeout")
+    public McpService setUpstreamTimeout(@PathVariable UUID serviceId, @RequestBody UpstreamTimeoutRequest body,
+            HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return mcpService.setUpstreamTimeout(user.tenantId(), user.id(), serviceId, body.upstreamTimeoutMs(),
+                requestId(httpReq));
+    }
+
     public record CreateRequest(@NotBlank @Size(max = 200) String name, @Size(max = 2000) String description,
             @NotBlank @Size(max = 2048) String endpoint, String transport,
             @Min(5) @Max(3600) Integer checkIntervalSeconds, @Min(1) @Max(60) Integer checkTimeoutSeconds,
             @Min(1) @Max(20) Integer failThreshold, @Min(1) @Max(20) Integer recoverThreshold,
-            @Size(max = 512) String checkPath) {
+            @Size(max = 512) String checkPath, Integer upstreamTimeoutMs) {
+    }
+
+    public record UpstreamTimeoutRequest(Integer upstreamTimeoutMs) {
     }
 
     public record HealthConfigRequest(@Min(5) @Max(3600) Integer checkIntervalSeconds,

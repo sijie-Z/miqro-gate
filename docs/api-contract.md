@@ -774,13 +774,14 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | 方法与路径 | 用途 |
 |---|---|
 | `GET /api/v1/admin/mcp-services` / `/{id}` | 列表/详情（含健康状态与检查配置） |
-| `POST /api/v1/admin/mcp-services` | 注册：`{ "name", "description"?, "endpoint", "transport"?, "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"? }`（默认 STREAMABLE_HTTP / 30s / 5s / 3 / 1 / `/health`；注册即自动生成 default 路由，见 5.23） |
+| `POST /api/v1/admin/mcp-services` | 注册：`{ "name", "description"?, "endpoint", "transport"?, "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"?, "upstreamTimeoutMs"? }`（默认 STREAMABLE_HTTP / 30s / 5s / 3 / 1 / `/health` / 60000ms；注册即自动生成 default 路由，见 5.23） |
 | `POST /api/v1/admin/mcp-services/{id}/status?status=ONLINE\|OFFLINE` | 手动上下线（重复切换 `409 MCP_STATUS_UNCHANGED`） |
 | `POST /api/v1/admin/mcp-services/{id}/health-config` | 更新健康检查配置 |
 | `PUT /api/v1/admin/mcp-services/{id}/backend-auth` | 上游后端鉴权（#320，腾讯 raw 03）：body `{"mode":"VISITOR\|API_KEY","secret"?}`——
   `VISITOR` 清除已存密钥；`API_KEY` 必填 `secret`（≤4096）。密钥**只写不读**：任何读面（列表/详情/审计）永不返回；
   存储 AES-GCM 加密（AAD 绑定 tenant+service）；网关向上游注入固定 `Authorization: Bearer <secret>`；变更即时生效（快照刷新）。
   `400 MCP_BACKEND_AUTH_INVALID`；审计 `MCP_SERVICE_BACKEND_AUTH`（摘要含 name+mode，永不含 secret） |
+| `PUT /api/v1/admin/mcp-services/{id}/upstream-timeout` | **数据面上游预算（I20，腾讯 raw 03「超时时间」）**：body `{"upstreamTimeoutMs"}`（1000..600000，默认 60000ms）——数据面每次上游尝试的超时；预算耗尽 → **504 `mcp_upstream_timeout`** 错误信封（`mcp_access_log` 记 UPSTREAM_FAILURE/504）。越界 `400 MCP_TIMEOUT_INVALID`；启用慢调用熔断时不得 ≤ 已配置慢阈值（`400 RESILIENCE_SLOW_EXCEEDS_TIMEOUT`）。审计 `MCP_SERVICE_UPSTREAM_TIMEOUT`，即时快照刷新。 |
 
 - 接入地址：https、无 userinfo/query/fragment（`MCP_ENDPOINT_INVALID` 400）；重名 `409 MCP_SERVICE_NAME_TAKEN`
 - **健康检查**：`McpHealthChecker` 定时（`miqrokey.mcp.health-cycle-ms` 默认 15s）遍历 ONLINE 服务，按各自间隔探测 `endpoint + checkPath`（GET，2xx 计健康）；连续失败达 `failThreshold` → `UNHEALTHY`，连续成功达 `recoverThreshold` → `HEALTHY`；OFFLINE 服务不被探测
@@ -967,7 +968,7 @@ MCP 代理调用（F01 入口 `/mcpservers/{serviceName}/mcp`）的**纯元数�
 
 **Tool 级重试覆盖（#360，I13，raw 12，V46）**：`GET/PUT /api/v1/admin/mcp-services/{serviceId}/tools/{toolId}/retry-policy`——每工具可配覆盖（`retryEnabled/retryMax/retryConditions/idempotencyConfirmed`，校验同 F12；越界/空条件/未知条件 → `400 TOOL_RETRY_POLICY_INVALID`）。**覆盖语义**：`tools/call` 命中带覆盖的工具时，重试字段以工具覆盖为准、**熔断字段保持服务级**；无覆盖行 → 完全跟随服务策略（GET 无行返回 disabled 默认视图）。审计 `MCP_TOOL_RETRY_UPDATE`，即时触发快照刷新；工具/服务不存在 → `404 TOOL_NOT_FOUND`/`MCP_SERVICE_NOT_FOUND`。
 
-**F13 熔断（doc 134859）**：三态 CLOSED/OPEN/HALF_OPEN。滑动窗口 `breakerWindowSeconds`（1–60，默认 10）+ 最小请求数 `breakerMinRequests`（1–100，默认 10）防低流量误判；错误比例触发 `breakerErrorEnabled`/`breakerErrorRatio`（1–100，默认 50）+ `breakerErrorStatusCodes`（400–599、≤32、默认 500/502/503/504，**429 需显式加入**）；慢调用触发 `breakerSlowEnabled`/`breakerSlowCallMs`（100–60000）/`breakerSlowRatio`——两触发至少启用其一。**`breakerSlowCallMs` 必须小于服务自身 `check_timeout_seconds`×1000**（超时字段即健康检查配置的 `checkTimeoutSeconds`；否则慢调用永远观察不到），越界 → `400 RESILIENCE_SLOW_EXCEEDS_TIMEOUT`。OPEN 持续 `breakerOpenSeconds`（5–600，默认 30）后进入 HALF_OPEN，放行 `breakerProbeCount`（1–10，默认 3）个探测，成功 `breakerProbeSuccess`（≤probeCount，默认 2）个即恢复 CLOSED，任一失败重新 OPEN。`breakerSkipRetry`（默认 true）语义：OPEN / 半开探测槽耗尽期间该桶快速失败（503 `circuit_open` 错误信封）；置 false 时熔断**只观测不限流**（`beforeCall` 仍驱动状态机与探测计数，但不再阻断调用——不经建议的显式模式，#365）。熔断桶= `tools/call` 按工具名、其余信封方法按方法名，桶间互不影响。
+**F13 熔断（doc 134859）**：三态 CLOSED/OPEN/HALF_OPEN。滑动窗口 `breakerWindowSeconds`（1–60，默认 10）+ 最小请求数 `breakerMinRequests`（1–100，默认 10）防低流量误判；错误比例触发 `breakerErrorEnabled`/`breakerErrorRatio`（1–100，默认 50）+ `breakerErrorStatusCodes`（400–599、≤32、默认 500/502/503/504，**429 需显式加入**）；慢调用触发 `breakerSlowEnabled`/`breakerSlowCallMs`（100–60000）/`breakerSlowRatio`——两触发至少启用其一。**`breakerSlowCallMs` 必须小于服务上游超时 `upstreamTimeoutMs`**（I20 基准修正：doc 134859 的基准是后端请求超时而非健康探测超时；默认 60000ms；否则慢调用永远观察不到），越界 → `400 RESILIENCE_SLOW_EXCEEDS_TIMEOUT`；反向：`PUT …/upstream-timeout` 把预算下调到 ≤ 已启用慢阈值同样拒绝。OPEN 持续 `breakerOpenSeconds`（5–600，默认 30）后进入 HALF_OPEN，放行 `breakerProbeCount`（1–10，默认 3）个探测，成功 `breakerProbeSuccess`（≤probeCount，默认 2）个即恢复 CLOSED，任一失败重新 OPEN。`breakerSkipRetry`（默认 true）语义：OPEN / 半开探测槽耗尽期间该桶快速失败（503 `circuit_open` 错误信封）；置 false 时熔断**只观测不限流**（`beforeCall` 仍驱动状态机与探测计数，但不再阻断调用——不经建议的显式模式，#365）。熔断桶= `tools/call` 按工具名、其余信封方法按方法名，桶间互不影响。
 
 其余校验失败 → `400 RESILIENCE_INVALID`（范围/条件/触发组合/状态码集合）；服务不存在 → `404 MCP_SERVICE_NOT_FOUND`；SYSTEM_ADMIN-only（deny-by-default）。
 

@@ -24,8 +24,10 @@ import java.util.UUID;
  * (validated at runtime against each tool's HTTP method, doc 134831);</li>
  * <li>breaker enabled requires at least one of the error-ratio / slow-call
  * triggers; the slow-call threshold must stay below the service's own
- * {@code check_timeout_seconds} (doc 134859: otherwise slow calls can never be
- * observed), and probe-success must not exceed the probe count.</li>
+ * {@code upstream_timeout_ms} data-plane budget (I20 rebase; doc 134859's
+ * baseline is the backend request timeout, not the health-probe timeout —
+ * otherwise slow calls can never be observed), and probe-success must not
+ * exceed the probe count.</li>
  * </ul>
  */
 @Service
@@ -54,7 +56,7 @@ public class AdminMcpResilienceService {
     public McpResiliencePolicy configure(UUID tenantId, UUID adminId, UUID serviceId, RequestedPolicy requested,
             String requestId) {
         var service = requireService(tenantId, serviceId);
-        McpResiliencePolicy policy = build(tenantId, requested, service.checkTimeoutSeconds());
+        McpResiliencePolicy policy = build(tenantId, requested, service.upstreamTimeoutMs());
         McpResiliencePolicy stored = resilienceRepository.upsert(tenantId, serviceId, policy, adminId);
         auditService.record(tenantId, adminId, "MCP_RESILIENCE_UPDATE", "MCP_SERVICE", serviceId,
                 "{\"retryEnabled\":" + stored.retryEnabled() + ",\"breakerEnabled\":" + stored.breakerEnabled()
@@ -74,7 +76,7 @@ public class AdminMcpResilienceService {
             Integer breakerProbeSuccess, Boolean breakerSkipRetry) {
     }
 
-    private McpResiliencePolicy build(UUID tenantId, RequestedPolicy r, int checkTimeoutSeconds) {
+    private McpResiliencePolicy build(UUID tenantId, RequestedPolicy r, int upstreamTimeoutMs) {
         McpResiliencePolicy defaults = McpResiliencePolicy.disabled();
         boolean retryEnabled = r.retryEnabled() != null ? r.retryEnabled() : defaults.retryEnabled();
         boolean breakerEnabled = r.breakerEnabled() != null ? r.breakerEnabled() : defaults.breakerEnabled();
@@ -110,12 +112,13 @@ public class AdminMcpResilienceService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "RESILIENCE_INVALID",
                     "at least one breaker trigger (error ratio or slow calls) must be enabled");
         }
-        if (slowEnabled && slowMs >= checkTimeoutSeconds * 1000L) {
+        if (slowEnabled && slowMs >= upstreamTimeoutMs) {
             // Doc 134859: the slow-call threshold must stay below the backend
-            // timeout, otherwise slow calls are never observable.
+            // request timeout, otherwise slow calls are never observable. I20
+            // rebased the baseline from the health-probe timeout onto the
+            // service's data-plane upstream budget.
             throw new ApiException(HttpStatus.BAD_REQUEST, "RESILIENCE_SLOW_EXCEEDS_TIMEOUT",
-                    "breakerSlowCallMs must be below the service check timeout (" + (checkTimeoutSeconds * 1000L)
-                            + " ms)");
+                    "breakerSlowCallMs must be below the service upstream timeout (" + upstreamTimeoutMs + " ms)");
         }
         if (probeSuccess > probeCount) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "RESILIENCE_INVALID",
