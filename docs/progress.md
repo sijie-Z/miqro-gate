@@ -13,6 +13,15 @@
   F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态）**）
 - Last updated: `2026-09-10 CST`
 
+## 会话交接点 2026-09-11（I19：访问日志 webhook/syslog 投递：#379 —— I 序列收官）
+
+- **#379 I19（本 PR）**：`McpAccessLogForwarder` 旁路（落库成功后扇出；失败隔离/不重复投递）；webhook
+  （JSON 数组 + Bearer）与 syslog（RFC 5424 UDP/TCP、facility）两 sink；`miqrokey.gateway.mcp-log.forward.*`
+  配置（默认全关）；测试 6（队列）+3+3（sink，回环 webhook/syslog）+ 既有集成 7 全绿。
+- **I 序列（I1–I20）全部 DONE**（本轮日内完成 I14/I15/I16/I17/I18/I19/I20 + bug #371 修复）。
+- 下一批候选：**rc.13 攒批**（对比 release checklist）；#362（审计链并发偶发）复现定位；F 序列剩余按矩阵 §3 需裁决项。
+- 本地/远端：develop 随本 PR 合并后再同步；本日轨迹：#372→#374→#376→#378→（本）——每项均 issue/PR/CI/关闭闭环。
+
 ## 会话交接点 2026-09-11（I14：Skill 版本历史/回滚：#377）
 
 - **#377 I14（本 PR）**：V49 `skill_revisions`（存量回填 r1、部分唯一激活索引）；同名重传 = 发布修订（历史保留）；

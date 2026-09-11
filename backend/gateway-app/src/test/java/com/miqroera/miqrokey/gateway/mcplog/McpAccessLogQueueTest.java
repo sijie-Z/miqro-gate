@@ -95,6 +95,77 @@ class McpAccessLogQueueTest {
         assertThatIllegalArgumentException().isThrownBy(() -> new McpAccessLogQueue(4, 0, writer));
     }
 
+    @Test
+    @DisplayName("forwarders receive exactly the durably written batches (I19)")
+    void forwardersSeeWrittenBatchesOnly() {
+        CapturingWriter writer = new CapturingWriter();
+        CapturingForwarder forwarder = new CapturingForwarder(false);
+        try (McpAccessLogQueue queue = new McpAccessLogQueue(64, 10_000, writer, List.of(forwarder))) {
+            queue.record(entry(1));
+            queue.record(entry(2));
+            queue.flushNow();
+            assertThat(forwarder.batches()).hasSize(1);
+            assertThat(forwarder.batches().get(0)).hasSize(2);
+
+            queue.flushNow(); // nothing queued: no extra forwarding
+            assertThat(forwarder.batches()).hasSize(1);
+        }
+
+        // A failed write is requeued and NOT forwarded; its retry forwards once.
+        FlakyWriter flaky = new FlakyWriter(1);
+        CapturingForwarder retryForwarder = new CapturingForwarder(false);
+        try (McpAccessLogQueue queue = new McpAccessLogQueue(64, 10_000, flaky, List.of(retryForwarder))) {
+            queue.record(entry(3));
+            queue.flushNow();
+            assertThat(retryForwarder.batches()).isEmpty();
+            queue.flushNow();
+            assertThat(retryForwarder.batches()).hasSize(1);
+            assertThat(flaky.batches()).hasSize(1);
+        }
+    }
+
+    @Test
+    @DisplayName("a throwing forwarder never breaks the flush or the audit rows (I19)")
+    void throwingForwarderIsIsolated() {
+        CapturingWriter writer = new CapturingWriter();
+        CapturingForwarder after = new CapturingForwarder(false);
+        try (McpAccessLogQueue queue = new McpAccessLogQueue(64, 10_000, writer,
+                List.of(new CapturingForwarder(true), after))) {
+            queue.record(entry(1));
+            queue.flushNow();
+            assertThat(writer.batches()).hasSize(1);
+            assertThat(after.batches()).hasSize(1);
+            assertThat(queue.droppedCount()).isZero();
+        }
+    }
+
+    /** Captures every forwarded batch; optionally throws to prove isolation. */
+    private static final class CapturingForwarder implements McpAccessLogForwarder {
+        private final List<List<McpAccessLogEntry>> batches = new CopyOnWriteArrayList<>();
+        private final boolean throwing;
+
+        CapturingForwarder(boolean throwing) {
+            this.throwing = throwing;
+        }
+
+        @Override
+        public String name() {
+            return "capturing";
+        }
+
+        List<List<McpAccessLogEntry>> batches() {
+            return batches;
+        }
+
+        @Override
+        public void forward(List<McpAccessLogEntry> batch) {
+            if (throwing) {
+                throw new IllegalStateException("simulated sink failure");
+            }
+            batches.add(new ArrayList<>(batch));
+        }
+    }
+
     /** Records every flushed batch and the entries inside it. */
     private static final class CapturingWriter implements McpAccessLogWriter {
         private final List<List<McpAccessLogEntry>> batches = new CopyOnWriteArrayList<>();

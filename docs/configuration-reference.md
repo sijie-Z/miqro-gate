@@ -193,6 +193,15 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 
 F15 MCP 访问日志队列（网关数据面）：`miqrokey.gateway.mcp-log.capacity`（默认 4096，`MIQROKEY_GATEWAY_MCP_LOG_CAPACITY`）、`miqrokey.gateway.mcp-log.flush-interval-ms`（默认 1000，`MIQROKEY_GATEWAY_MCP_LOG_FLUSH_INTERVAL_MS`）。语义同 usage 队列：饱和 drop+WARN 计数、批量写失败整批重入队（`(tenant_id, gateway_request_id)` 幂等保证重试不双写）；`miqrokey.gateway.persistence.enabled=false`（默认）时日志为 no-op（不产行），与 usage 持久化同一开关。
 
+**I19 外部投递**（同开关组 `miqrokey.gateway.mcp-log.forward.*`，默认全关）：批次**落库成功后**扇出到已配置 sink
+（重入队批次不重复投递；sink 失败仅节流 WARN，不重试、不阻断数据面）。webhook：`…forward.webhook-url`
+（`MIQROKEY_GATEWAY_MCP_LOG_FORWARD_WEBHOOK_URL`；POST JSON 数组 + 可选 `…forward.webhook-token`
+`MIQROKEY_GATEWAY_MCP_LOG_FORWARD_WEBHOOK_TOKEN` 的 `Authorization: Bearer` 头；`…forward.webhook-timeout-ms`
+默认 5000）。syslog：`…forward.syslog-host`/`…forward.syslog-port`（默认 514）/`…forward.syslog-protocol`
+（`UDP|TCP`，默认 UDP）/`…forward.syslog-facility`（默认 `LOCAL0`）；RFC 5424 帧
+（`<PRI>1 <ts> <host> miqrokey-gateway - - <json>`），MSG 为 `aigw.mcp.*` JSON（OTel 字段风格，纯元数据，
+永不包含工具参数/应答正文）。
+
 合规留痕侧信道（ADR-0014，默认全关——除 retention_config 开关外无任何采集）：`miqrokey.retention.capacity`（默认 512，`MIQROKEY_RETENTION_CAPACITY`）、`miqrokey.retention.flush-interval-ms`（默认 1000，`MIQROKEY_RETENTION_FLUSH_INTERVAL_MS`）、`miqrokey.retention.max-text-chars`（默认 100000，`MIQROKEY_RETENTION_MAX_TEXT_CHARS`，单请求用户文本上限，超限跳过+计数）。采集面由控制面 `retention_config`（管理 API §5.26）逐租户开关并经路由快照下发；无 crypto 或 publisher 时 fail-closed。
 
 **R3 Kafka 出口（ADR-0014，默认关）**：`miqrokey.retention.kafka.bootstrap-servers`（默认空=不启用，`MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS`；配置后替换 no-op publisher 为真实投递，topic 默认 `content-retention`）、`miqrokey.retention.kafka.topic`（`MIQROKEY_RETENTION_KAFKA_TOPIC`）、`miqrokey.retention.kafka.client-id`（默认 `miqrokey-gateway-retention`，`MIQROKEY_RETENTION_KAFKA_CLIENT_ID`）。记录键 = SHA-256(tenant/user)，同用户恒落同分区；信封 JSON 携带 AES 密文（base64），明文永不出网关；发送异步、失败节流计数（消费者按 eventId 幂等容忍重放）。

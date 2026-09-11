@@ -10,6 +10,11 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * MCP access log wiring (F15):
  *
@@ -20,10 +25,13 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
  * flushes rows on a dedicated scheduler.</li>
  * <li>Otherwise (default): a no-op sink — same configuration that turns off
  * usage persistence.</li>
+ * <li>I19: durably written batches are optionally fanned out to webhook /
+ * syslog sinks ({@code miqrokey.gateway.mcp-log.forward.*}).</li>
  * </ul>
  */
 @Configuration
-@EnableConfigurationProperties(McpAccessLogConfig.McpAccessLogProperties.class)
+@EnableConfigurationProperties({McpAccessLogConfig.McpAccessLogProperties.class,
+        McpAccessLogConfig.McpLogForwardProperties.class})
 public class McpAccessLogConfig {
 
     /** Bounded-queue tuning: {@code miqrokey.gateway.mcp-log.*}. */
@@ -41,6 +49,19 @@ public class McpAccessLogConfig {
         }
     }
 
+    /**
+     * External delivery (I19, Tencent raw 16 log shipping):
+     * {@code miqrokey.gateway.mcp-log.forward.*}. Both sinks are off by default
+     * (blank host/url); when configured they receive each durably written batch as
+     * {@code aigw.mcp.*} metadata over HTTP JSON / RFC 5424.
+     */
+    @ConfigurationProperties(prefix = "miqrokey.gateway.mcp-log.forward")
+    public record McpLogForwardProperties(@DefaultValue("") String webhookUrl, @DefaultValue("") String webhookToken,
+            @DefaultValue("5000") long webhookTimeoutMs, @DefaultValue("") String syslogHost,
+            @DefaultValue("514") int syslogPort, @DefaultValue("UDP") String syslogProtocol,
+            @DefaultValue("LOCAL0") String syslogFacility) {
+    }
+
     /** Postgres-backed wiring; requires the gateway DataSource. */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnProperty(name = "miqrokey.gateway.persistence.enabled", havingValue = "true")
@@ -51,9 +72,25 @@ public class McpAccessLogConfig {
             return new PostgresMcpAccessLogWriter(gatewayJdbcTemplate);
         }
 
+        @Bean
+        List<McpAccessLogForwarder> mcpAccessLogForwarders(McpLogForwardProperties props, ObjectMapper objectMapper) {
+            List<McpAccessLogForwarder> forwarders = new ArrayList<>();
+            if (props.webhookUrl() != null && !props.webhookUrl().isBlank()) {
+                forwarders.add(new WebhookMcpAccessLogForwarder(props.webhookUrl(), props.webhookToken(),
+                        props.webhookTimeoutMs(), objectMapper));
+            }
+            if (props.syslogHost() != null && !props.syslogHost().isBlank()) {
+                forwarders.add(new SyslogMcpAccessLogForwarder(props.syslogHost(), props.syslogPort(),
+                        props.syslogProtocol(), props.syslogFacility(), objectMapper));
+            }
+            return List.copyOf(forwarders);
+        }
+
         @Bean(destroyMethod = "close")
-        McpAccessLogSink mcpAccessLogSink(McpAccessLogProperties props, McpAccessLogWriter mcpAccessLogWriter) {
-            return new McpAccessLogQueue(props.capacity(), props.flushIntervalMs(), mcpAccessLogWriter);
+        McpAccessLogSink mcpAccessLogSink(McpAccessLogProperties props, McpAccessLogWriter mcpAccessLogWriter,
+                List<McpAccessLogForwarder> mcpAccessLogForwarders) {
+            return new McpAccessLogQueue(props.capacity(), props.flushIntervalMs(), mcpAccessLogWriter,
+                    mcpAccessLogForwarders);
         }
     }
 
