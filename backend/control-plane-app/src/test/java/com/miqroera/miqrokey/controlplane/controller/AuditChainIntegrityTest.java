@@ -26,6 +26,9 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -581,5 +584,29 @@ class AuditChainIntegrityTest {
         // still proves the fix is correct.
         System.out.println("[diagnostic] created_at ordering "
                 + (orderingDisagrees ? "DIFFERS from" : "happens to match") + " chain_position ordering in this run");
+    }
+
+    @Test
+    @DisplayName("regression #362: sub-microsecond clock values stay hash-reproducible")
+    void subMicrosecondTimestampsStayReproducible() {
+        // A Windows-class clock exposes 100 ns ticks. pgjdbc rounds sub-microsecond
+        // digits into the microsecond column (round-half-up), so a pre-lock value
+        // like <sec>.9999996 s persisted as the NEXT millisecond while the hash had
+        // covered the original one — roughly one event in ~2000 failed the stored
+        // hash recomputation under load (#362). record() must make the persisted
+        // timestamp bit-for-bit reproducible; this pinned clock exercises the
+        // former boundary case deterministically.
+        AuditServiceImpl crafted = new AuditServiceImpl(repository,
+                Clock.fixed(Instant.ofEpochSecond(1_800_000_000L, 999_999_600L), ZoneOffset.UTC));
+        crafted.record(SEED_TENANT_ID, UUID.randomUUID(), "BOUNDARY_PROBE", "TARGET", UUID.randomUUID(), "1", "r-1");
+
+        List<AdminAuditEvent> events = readAllByChainPosition();
+        assertThat(events).hasSize(1);
+        AdminAuditEvent e = events.get(0);
+        byte[] computed = AuditServiceImpl.computeEventHash(e.id(), e.tenantId(), e.actorId(), e.action(),
+                e.targetType(), e.targetId(), e.changeSummary(), e.adminRequestId(), e.createdAt(),
+                e.previousEventHash());
+        assertThat(e.currentEventHash()).as("stored hash reproduces from the persisted row").isEqualTo(computed);
+        assertThat(e.createdAt().getNano() % 1000).as("persisted timestamp is microsecond-aligned").isZero();
     }
 }
