@@ -133,15 +133,21 @@ class AuditQueryExportIntegrationTest {
 
     private void seedAuditRow(UUID tenantId, UUID actorId, String action, String targetType, String summary,
             Instant createdAt) {
+        seedAuditRow(tenantId, actorId, action, targetType, null, summary, createdAt);
+    }
+
+    private void seedAuditRow(UUID tenantId, UUID actorId, String action, String targetType, UUID targetId,
+            String summary, Instant createdAt) {
         jdbc.update("""
-                INSERT INTO admin_audit_events (id, tenant_id, actor_id, action, target_type, change_summary,
-                    current_event_hash, created_at)
-                VALUES (:id, :tenantId, :actorId, :action, :targetType, CAST(:summary AS jsonb),
+                INSERT INTO admin_audit_events (id, tenant_id, actor_id, action, target_type, target_id,
+                    change_summary, current_event_hash, created_at)
+                VALUES (:id, :tenantId, :actorId, :action, :targetType, :targetId, CAST(:summary AS jsonb),
                     decode('00', 'hex'), :createdAt)
                 """,
                 new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
                         .addValue("actorId", actorId).addValue("action", action).addValue("targetType", targetType)
-                        .addValue("summary", summary).addValue("createdAt", java.sql.Timestamp.from(createdAt)));
+                        .addValue("targetId", targetId).addValue("summary", summary)
+                        .addValue("createdAt", java.sql.Timestamp.from(createdAt)));
     }
 
     private void seedStandardSet() {
@@ -312,5 +318,30 @@ class AuditQueryExportIntegrationTest {
         mockMvc.perform(get(base).header("Authorization", "Bearer " + machineToken).param("action", "BULK_SEED")
                 .param("to", Instant.now().minusSeconds(3600).toString())).andExpect(status().isOk())
                 .andExpect(header().doesNotExist("X-MiQroKey-Truncated"));
+    }
+
+    @Test
+    @DisplayName("list: target references resolve to resource names; unknown refs stay null (#389)")
+    void listDecoratesTargetNames() throws Exception {
+        seedStandardSet();
+        // One real project + an audit row pointing at it: the list must carry
+        // the resource name (read-side decoration, chain untouched).
+        UUID projectId = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO projects (id, tenant_id, code, name, status, project_tag, version)
+                VALUES (:id, :tenantId, 'P-NAME', '名称解析目标', 'ACTIVE', 'core-ai', 0)
+                """, new MapSqlParameterSource("id", projectId).addValue("tenantId", TENANT_ID));
+        seedAuditRow(TENANT_ID, adminUserId, "SEED_PROJECT_CREATE", "PROJECT", projectId, "{\"code\":\"P-NAME\"}",
+                Instant.now().minusSeconds(30));
+
+        mockMvc.perform(get("/api/v1/admin/audit-events").cookie(sessionCookie).param("targetType", "PROJECT"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].targetName").value("名称解析目标"));
+
+        // Seeded MCP_SERVICE rows carry no target id: the page still renders and
+        // the unresolved name stays null instead of failing the page.
+        mockMvc.perform(get("/api/v1/admin/audit-events").cookie(sessionCookie).param("targetType", "MCP_SERVICE"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].targetName").isEmpty());
     }
 }

@@ -349,7 +349,9 @@
 - `/api/v1/admin/reconciliation/**`：导入官方账单并生成匹配结果。
 - `/api/v1/admin/webhooks`：目标、签名 Secret、测试和投递记录。
 - `/api/v1/admin/audit-events`：不可修改的管理审计事件（读面可选 `action`/`targetType`/`actorId`/
-  `from`/`to` 精确筛选 + `beforePosition` cursor）；`GET /api/v1/admin/audit-events/export`：
+  `from`/`to` 精确筛选 + `beforePosition` cursor）；每行带**只读** `targetName`（#389，doc 27）：按页内
+  `(targetType, targetId)` 批量子查询解析的资源名（租户内、未知类型或引用已不存在为 null——前端回退短 ID；
+  链上数据与导出**不变**）；`GET /api/v1/admin/audit-events/export`：
   CSV 合规导出（对齐腾讯 AI 网关操作记录下载；上限 5 万行、截断以 `X-MiQroKey-Truncated` 声明，
   参数/形状同 §9 机器端点）。
 - `/api/v1/admin/usage-deletions`：双确认后人工删除用量范围。
