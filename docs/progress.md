@@ -6,13 +6,12 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-09 自主轮（F60 v2 + codegen 迁移线收口 + typecheck 确定性）` — `IN_PROGRESS`
+- Current goal: `2026-09-11 自主轮（coverage-matrix I 序列收官 I1–I20 + 稳定性修复；rc.13 已发布）` — `IN_PROGRESS`
 - Goal status: `IN_PROGRESS`（develop @ 12edf9e；**rc.13 已发布（2026-09-11）**——I 序列 I1–I20 全部 DONE +
-  三处缺陷修复（#361/#371/#362）全清，CI 无红灯；见下方最新交接点。历史：rc.10 已发布（#328 文档轮……
-  本轮交付见下方交接点；**待办：#328 文档轮（本 PR）、rc.11 攒批（#326 待锚）、
-  #211 真机凭证（BLOCKED）、#245 告警接线裁决（leader）、F32/F33 平台接口（BLOCKED）、
-  F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态）**）
-- Last updated: `2026-09-10 CST`
+  三处缺陷修复（#361/#371/#362）全清，CI 无红灯；本轮交付见下方交接点；**待办：矩阵 §3 裁决项（等 leader/外部）、
+  #211 真机凭证（BLOCKED）、#245 告警接线裁决（leader）、F32/F33 平台接口（BLOCKED）、F19 账单对账（等真实样本）、
+  F29 服务数据面（等 leader 形态）**）
+- Last updated: `2026-09-11 CST`
 
 ## 会话交接点 2026-09-11（rc.13 发布：#362 修复后收官）
 
