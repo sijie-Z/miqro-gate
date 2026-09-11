@@ -33,6 +33,8 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -263,5 +265,42 @@ class WebhookAlertApiIntegrationTest {
         static String secret() {
             return SECRET;
         }
+    }
+
+    @Test
+    @DisplayName("deleting an endpoint referenced by alert rules is refused with the dependency list (I21)")
+    void deleteBlockedByRuleReferences() throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/webhooks").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("name", "guarded", "url", mockBaseUrl, "secret", "whsec-test-value"))))
+                .andExpect(status().isOk()).andReturn();
+        String endpointId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+        MvcResult rule = mockMvc
+                .perform(post("/api/v1/admin/alert-rules").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("name", "引用方规则", "type", "USAGE_MISSING_RATE",
+                                "threshold", 0.5, "webhookEndpointId", endpointId))))
+                .andExpect(status().isOk()).andReturn();
+        String ruleId = objectMapper.readValue(rule.getResponse().getContentAsString(), Map.class).get("id").toString();
+
+        // Referenced: the delete is refused with the dependency list; nothing is
+        // touched (no silent SET NULL detach).
+        mockMvc.perform(delete("/api/v1/admin/webhooks/" + endpointId).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RESOURCE_IN_USE"))
+                .andExpect(jsonPath("$.dependencies", hasSize(1)))
+                .andExpect(jsonPath("$.dependencies[0].type").value("ALERT_RULE"))
+                .andExpect(jsonPath("$.dependencies[0].id").value(ruleId))
+                .andExpect(jsonPath("$.dependencies[0].name").value("引用方规则"));
+        mockMvc.perform(get("/api/v1/admin/webhooks/" + endpointId).cookie(sessionCookie)).andExpect(status().isOk());
+
+        // Release the reference, then the delete succeeds (no new endpoint needed).
+        mockMvc.perform(delete("/api/v1/admin/alert-rules/" + ruleId).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+        mockMvc.perform(delete("/api/v1/admin/webhooks/" + endpointId).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
     }
 }

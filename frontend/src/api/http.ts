@@ -20,6 +20,8 @@ export class ApiError extends Error {
   readonly code: string;
   readonly requestId?: string;
   readonly fieldErrors?: Array<{ field: string; code: string }>;
+  /** I21: present on 409 RESOURCE_IN_USE — what blocks the delete. */
+  readonly dependencies?: Array<{ type: string; id: string; name?: string; detail?: string }>;
 
   constructor(details: ProblemDetails) {
     super(details.detail ?? details.title);
@@ -28,6 +30,7 @@ export class ApiError extends Error {
     this.code = details.code;
     this.requestId = details.requestId;
     this.fieldErrors = details.fieldErrors;
+    this.dependencies = details.dependencies;
   }
 }
 

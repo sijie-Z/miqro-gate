@@ -13,6 +13,8 @@ export interface ProblemDetails {
   detail?: string;
   requestId: string;
   fieldErrors?: Array<{ field: string; code: string }>;
+  /** I21: resources blocking a delete (code=RESOURCE_IN_USE). */
+  dependencies?: Array<{ type: string; id: string; name?: string; detail?: string }>;
 }
 
 export type UserRole = 'SYSTEM_ADMIN' | 'USER';

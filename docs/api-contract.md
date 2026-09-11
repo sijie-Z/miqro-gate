@@ -572,7 +572,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `POST /api/v1/admin/webhooks` | 创建（`name`/`url`/`secret`/`timeoutMs`）；URL 经 SSRF 门控，Secret 加密存储且永不返回 |
 | `GET /api/v1/admin/webhooks` / `/{id}` | 列表/详情（无 Secret） |
 | `PATCH /api/v1/admin/webhooks/{id}` | 更新（name/enabled/timeoutMs） |
-| `DELETE /api/v1/admin/webhooks/{id}` | 删除 |
+| `DELETE /api/v1/admin/webhooks/{id}` | 删除。**I21 删除前置依赖检查**（腾讯模型 API 删除语义）：仍被告警规则引用的端点**不再静默脱钩**（原 SET NULL 会让规则悄悄失去投递目标），返回 `409 RESOURCE_IN_USE` + problem 体附 `dependencies: [{type:"ALERT_RULE", id, name, detail:"已启用\|已停用"}]`；先删除或改配这些规则后再删端点。机器面（`/admin-api/webhooks/{id}`）同语义 |
 | `POST /api/v1/admin/webhooks/{id}/test` | 发送 HMAC 签名测试载荷，返回上游 HTTP 状态或脱敏错误 |
 | `GET /api/v1/admin/webhooks/{id}/deliveries` | 投递历史 |
 
