@@ -5,6 +5,10 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-11
+- **MCP 访问日志可插拔 sink（#379，I19，raw 16 日志投递）**：批次**落库成功后**旁路扇出到 webhook（POST JSON 数组，
+  `aigw.mcp.*` 元数据字段集，可选 Bearer token）与 syslog（RFC 5424，UDP/TCP，facility 可配，MSG 为同字段集
+  JSON）；`miqrokey.gateway.mcp-log.forward.*` 部署级开关（默认全关）；重入队批次不重复投递、sink 失败仅节流
+  WARN——永不阻断数据面、不影响审计行；字段集固定为条目元数据（无任何正文）。
 - **Skill 版本历史/回滚（#377，I14，raw 20 版本管理）**：V49 `skill_revisions`（不可变包快照，存量回填 r1；部分唯一
   索引保证每技能至多一激活修订）；**同名重传从「upsert 覆盖」改为「发布下一修订」**——旧包保留、目录/下载镜像激活
   修订；`GET /admin/skills/{id}/revisions`（元数据视图，永不回包体）与 `POST …/revisions/{rev}/activate`

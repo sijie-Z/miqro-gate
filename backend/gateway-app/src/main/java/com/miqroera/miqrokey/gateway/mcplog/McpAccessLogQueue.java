@@ -14,7 +14,11 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Bounded in-process queue + periodic flush of MCP access log rows (F15),
- * modeled on the usage-event bus semantics:
+ * modeled on the usage-event bus semantics. I19: after a batch is durably
+ * written it is fanned out to the configured {@link McpAccessLogForwarder}s
+ * (webhook / syslog) on the same flush thread — silently when none are
+ * configured, drop-and-WARN when a sink fails, and never twice for a batch that
+ * had to be requeued:
  *
  * <ul>
  * <li>{@code record()} only offers to a bounded queue — never blocks the
@@ -36,15 +40,22 @@ public final class McpAccessLogQueue implements McpAccessLogSink, AutoCloseable 
 
     private final ArrayBlockingQueue<McpAccessLogEntry> queue;
     private final McpAccessLogWriter writer;
+    private final List<McpAccessLogForwarder> forwarders;
     private final AtomicLong dropped = new AtomicLong();
     private final ScheduledExecutorService scheduler;
 
     public McpAccessLogQueue(int capacity, long flushIntervalMs, McpAccessLogWriter writer) {
+        this(capacity, flushIntervalMs, writer, List.of());
+    }
+
+    public McpAccessLogQueue(int capacity, long flushIntervalMs, McpAccessLogWriter writer,
+            List<McpAccessLogForwarder> forwarders) {
         if (capacity <= 0 || flushIntervalMs <= 0) {
             throw new IllegalArgumentException("capacity and flush-interval-ms must be positive");
         }
         this.queue = new ArrayBlockingQueue<>(capacity);
         this.writer = writer;
+        this.forwarders = List.copyOf(forwarders);
         this.scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "mcp-access-log-writer");
             thread.setDaemon(true);
@@ -94,6 +105,16 @@ public final class McpAccessLogQueue implements McpAccessLogSink, AutoCloseable 
                 }
             }
             log.error("MCP access log batch write of {} rows failed; requeued for retry", batch.size(), e);
+            return;
+        }
+        // I19: fan out only AFTER the durable write — a requeued batch is never
+        // forwarded twice, and a failing sink never affects the audit rows.
+        for (McpAccessLogForwarder forwarder : forwarders) {
+            try {
+                forwarder.forward(batch);
+            } catch (Exception e) {
+                log.warn("MCP access log forwarder {} failed: {}", forwarder.name(), e.getMessage());
+            }
         }
     }
 
