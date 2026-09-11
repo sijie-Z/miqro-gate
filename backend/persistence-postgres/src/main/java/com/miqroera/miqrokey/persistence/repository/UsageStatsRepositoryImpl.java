@@ -63,6 +63,15 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             case DAY ->
                 new GroupSpec("CAST(ue.occurred_at AS DATE) AS group_key, CAST(ue.occurred_at AS DATE) AS label", "",
                         "CAST(ue.occurred_at AS DATE)");
+            case USER -> new GroupSpec("vk.user_id AS group_key, u.username AS label",
+                    "JOIN virtual_keys vk ON vk.id = ue.virtual_key_id AND vk.tenant_id = ue.tenant_id"
+                            + " JOIN users u ON u.id = vk.user_id AND u.tenant_id = ue.tenant_id",
+                    "vk.user_id, u.username");
+            case MODEL -> new GroupSpec("ue.model_id AS group_key, ue.model_id AS label", "", "ue.model_id");
+            case MONTH -> new GroupSpec(
+                    "to_char(date_trunc('month', ue.occurred_at), 'YYYY-MM') AS group_key,"
+                            + " to_char(date_trunc('month', ue.occurred_at), 'YYYY-MM') AS label",
+                    "", "to_char(date_trunc('month', ue.occurred_at), 'YYYY-MM')");
         };
     }
 
@@ -81,6 +90,15 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             case CACHE_LEVEL -> new GroupSpec("'HIT' AS group_key, 'HIT' AS label", "", "'HIT'");
             case DAY -> new GroupSpec("CAST(h.occurred_at AS DATE) AS group_key, CAST(h.occurred_at AS DATE) AS label",
                     "", "CAST(h.occurred_at AS DATE)");
+            case USER -> new GroupSpec("vk.user_id AS group_key, u.username AS label",
+                    "JOIN virtual_keys vk ON vk.id = h.virtual_key_id AND vk.tenant_id = h.tenant_id"
+                            + " JOIN users u ON u.id = vk.user_id AND u.tenant_id = h.tenant_id",
+                    "vk.user_id, u.username");
+            case MODEL -> new GroupSpec("e.model_id AS group_key, e.model_id AS label", "", "e.model_id");
+            case MONTH -> new GroupSpec(
+                    "to_char(date_trunc('month', h.occurred_at), 'YYYY-MM') AS group_key,"
+                            + " to_char(date_trunc('month', h.occurred_at), 'YYYY-MM') AS label",
+                    "", "to_char(date_trunc('month', h.occurred_at), 'YYYY-MM')");
         };
     }
 

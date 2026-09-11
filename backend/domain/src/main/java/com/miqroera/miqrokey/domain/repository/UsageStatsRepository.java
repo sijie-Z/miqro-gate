@@ -27,7 +27,13 @@ public interface UsageStatsRepository {
 
     /** Aggregation dimension for usage statistics. */
     enum GroupBy {
-        PROJECT, VIRTUAL_KEY, CACHE_LEVEL, DAY
+        PROJECT, VIRTUAL_KEY, CACHE_LEVEL, DAY,
+        /** I15 (doc 134892): per-consumer dimension (label = username). */
+        USER,
+        /** I15: per-model dimension (label = model id). */
+        MODEL,
+        /** I15: calendar-month granularity (label = {@code YYYY-MM}). */
+        MONTH
     }
 
     /**

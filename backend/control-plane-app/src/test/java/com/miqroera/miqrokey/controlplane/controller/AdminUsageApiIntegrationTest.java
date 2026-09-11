@@ -29,6 +29,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -352,6 +354,11 @@ class AdminUsageApiIntegrationTest {
         }
 
         void insertUsage(UUID keyId, String providerRequestId, long input, long output, String model) {
+            insertUsage(keyId, providerRequestId, input, output, model, Instant.now());
+        }
+
+        void insertUsage(UUID keyId, String providerRequestId, long input, long output, String model,
+                Instant occurredAt) {
             jdbc.update("""
                     INSERT INTO usage_event
                         (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
@@ -365,7 +372,7 @@ class AdminUsageApiIntegrationTest {
                             .addValue("projectId", projectId).addValue("productId", productId)
                             .addValue("credentialId", credentialId).addValue("model", model).addValue("input", input)
                             .addValue("output", output).addValue("total", input + output)
-                            .addValue("occurredAt", Timestamp.from(Instant.now())));
+                            .addValue("occurredAt", Timestamp.from(occurredAt)));
         }
     }
 
@@ -386,5 +393,48 @@ class AdminUsageApiIntegrationTest {
         static String secret() {
             return SECRET;
         }
+    }
+
+    @Test
+    @DisplayName("summary groups by consumer and by model (I15)")
+    void summaryGroupsByUserAndModel() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertOtherUsersKey();
+        fx.insertPrices();
+        fx.insertUsage(ownKey, "chatcmpl-own-1", 1_000L, 500L);
+        fx.insertUsage(fx.otherKeyId, "chatcmpl-other-1", 9_000L, 9_000L);
+        fx.insertUsage(ownKey, "chatcmpl-own-2", 200L, 100L, OTHER_MODEL);
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "USER").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.groups.length()").value(2))
+                .andExpect(jsonPath("$.groups[?(@.label=='regular_user')].tokens.input").value(contains(1_200)))
+                .andExpect(jsonPath("$.groups[?(@.label=='other_user')].tokens.input").value(contains(9_000)));
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "MODEL").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.groups.length()").value(2))
+                .andExpect(jsonPath("$.groups[*].label", containsInAnyOrder(MODEL, OTHER_MODEL)))
+                .andExpect(jsonPath("$.groups[?(@.label=='" + MODEL + "')].requests.upstream").value(contains(2)))
+                .andExpect(
+                        jsonPath("$.groups[?(@.label=='" + OTHER_MODEL + "')].requests.upstream").value(contains(1)));
+    }
+
+    @Test
+    @DisplayName("summary groups by calendar month (I15)")
+    void summaryGroupsByMonth() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertPrices();
+        fx.insertUsage(ownKey, "chatcmpl-jul-1", 1_000L, 500L, MODEL, Instant.parse("2026-07-15T10:00:00Z"));
+        fx.insertUsage(ownKey, "chatcmpl-aug-1", 2_000L, 1_000L, MODEL, Instant.parse("2026-08-15T10:00:00Z"));
+
+        // Groups sort by label, so July precedes August.
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "MONTH")
+                .param("from", "2026-07-01T00:00:00Z").param("to", "2026-09-01T00:00:00Z").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.groups.length()").value(2))
+                .andExpect(jsonPath("$.groups[*].label", containsInAnyOrder("2026-07", "2026-08")))
+                .andExpect(jsonPath("$.groups[0].label").value("2026-07"))
+                .andExpect(jsonPath("$.groups[0].tokens.input").value(1_000))
+                .andExpect(jsonPath("$.groups[1].tokens.input").value(2_000));
     }
 }

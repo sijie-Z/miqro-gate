@@ -5,6 +5,10 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-11
+- **成本报表维度补齐（#375，I15，raw 23）**：`usage/summary` 新增 `groupBy=user`（调用方，label=用户名）/
+  `model`/`month`（自然月 `YYYY-MM`）三个维度（缓存命中事件同维度聚合；usage IT 8/8）；成本报表页扩为
+  项目/按天/调用方/模型/月五页签、表格统一占比列、新增**最高消费者**与**缓存命中 Tokens**两卡（共 7 卡）、
+  CSV 导出跟随当前维度。
 - **MCP 服务级上游超时 + 熔断慢阈值基准修正（#373，I20，raw 03「超时时间」/ raw 13）**：V48
   `mcp_services.upstream_timeout_ms`（1000–600000，默认 60000）经路由快照下发；数据面每次上游尝试按服务预算计时，
   超时 → **504 `mcp_upstream_timeout`** 类型化错误（`mcp_access_log` 记 UPSTREAM_FAILURE/504，此前为裸 500）；
