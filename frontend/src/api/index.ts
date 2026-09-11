@@ -726,6 +726,8 @@ export function adminUpdateMcpHealthConfig(
     failThreshold?: number;
     recoverThreshold?: number;
     checkPath?: string;
+    /** #387: HEALTH_PATH (default) | JSONRPC_INITIALIZE. */
+    checkMode?: string;
   },
 ): Promise<McpServiceView> {
   return post<McpServiceView>(`/api/v1/admin/mcp-services/${id}/health-config`, body);

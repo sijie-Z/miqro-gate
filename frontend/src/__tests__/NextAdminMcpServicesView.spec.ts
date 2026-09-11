@@ -247,7 +247,31 @@ describe('NextAdminMcpServicesView', () => {
       failThreshold: 5,
       recoverThreshold: 2,
       checkPath: '/readyz',
+      checkMode: 'HEALTH_PATH',
     });
+  });
+
+  it('switches the health probe to JSON-RPC initialize (#387)', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminUpdateMcpHealthConfig.mockResolvedValue(service());
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-health-config"]').trigger('click');
+    await flushPromises();
+    // Probe-shape select renders as stubbed option buttons inside the dialog.
+    pickStubOption(document.body, 'JSON-RPC initialize');
+    await flushPromises();
+    const path = document.querySelector('[data-testid="mcp-check-path"]') as HTMLInputElement;
+    expect(path.disabled).toBe(true);
+
+    (document.querySelector('[data-testid="mcp-config-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(mockApi.adminUpdateMcpHealthConfig).toHaveBeenCalledWith(
+      'm1',
+      expect.objectContaining({ checkMode: 'JSONRPC_INITIALIZE' }),
+    );
   });
 
   it('lists tools and creates one with the chosen method', async () => {

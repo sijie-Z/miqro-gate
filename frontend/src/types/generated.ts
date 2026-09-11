@@ -2672,6 +2672,7 @@ export interface components {
             backendSecretUpdatedAt?: string;
             /** Format: int32 */
             upstreamTimeoutMs?: number;
+            checkMode?: string;
         };
         RequestedPolicy: {
             retryEnabled?: boolean;

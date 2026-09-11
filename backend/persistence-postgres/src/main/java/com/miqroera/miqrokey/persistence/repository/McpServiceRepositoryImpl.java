@@ -30,7 +30,7 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
             rs.getTimestamp("backend_secret_updated_at") != null
                     ? rs.getTimestamp("backend_secret_updated_at").toInstant()
                     : null,
-            rs.getInt("upstream_timeout_ms"));
+            rs.getInt("upstream_timeout_ms"), rs.getString("check_mode"));
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -46,10 +46,10 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
                     (id, tenant_id, name, description, endpoint, transport, status, health_status,
                      health_checked_at, consecutive_failures, consecutive_successes, check_interval_seconds,
                      check_timeout_seconds, fail_threshold, recover_threshold, check_path, upstream_timeout_ms,
-                     version, created_by, created_at, updated_at)
+                     check_mode, version, created_by, created_at, updated_at)
                 VALUES (:id, :tenantId, :name, :description, :endpoint, :transport, :status, :healthStatus,
                         :checkedAt, 0, 0, :interval, :timeout, :failThreshold, :recoverThreshold, :checkPath,
-                        :upstreamTimeoutMs, 0, :createdBy, now(), now())
+                        :upstreamTimeoutMs, :checkMode, 0, :createdBy, now(), now())
                 """, params(service));
         return service;
     }
@@ -88,7 +88,7 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
                     consecutive_failures = :failures, consecutive_successes = :successes,
                     check_interval_seconds = :interval, check_timeout_seconds = :timeout,
                     fail_threshold = :failThreshold, recover_threshold = :recoverThreshold, check_path = :checkPath,
-                    upstream_timeout_ms = :upstreamTimeoutMs,
+                    upstream_timeout_ms = :upstreamTimeoutMs, check_mode = :checkMode,
                     version = version + 1, updated_at = now()
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """, params(service).addValue("expectedVersion", expectedVersion));
@@ -163,6 +163,6 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
                 .addValue("interval", s.checkIntervalSeconds()).addValue("timeout", s.checkTimeoutSeconds())
                 .addValue("failThreshold", s.failThreshold()).addValue("recoverThreshold", s.recoverThreshold())
                 .addValue("checkPath", s.checkPath()).addValue("upstreamTimeoutMs", s.upstreamTimeoutMs())
-                .addValue("createdBy", s.createdBy());
+                .addValue("checkMode", s.checkMode()).addValue("createdBy", s.createdBy());
     }
 }

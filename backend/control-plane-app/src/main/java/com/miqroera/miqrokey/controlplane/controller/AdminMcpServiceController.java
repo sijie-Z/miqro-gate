@@ -71,7 +71,7 @@ public class AdminMcpServiceController {
         var user = userContext.getUser();
         return mcpService.updateHealthConfig(user.tenantId(), user.id(), serviceId, body.checkIntervalSeconds(),
                 body.checkTimeoutSeconds(), body.failThreshold(), body.recoverThreshold(), body.checkPath(),
-                requestId(httpReq));
+                body.checkMode(), requestId(httpReq));
     }
 
     /**
@@ -117,7 +117,9 @@ public class AdminMcpServiceController {
 
     public record HealthConfigRequest(@Min(5) @Max(3600) Integer checkIntervalSeconds,
             @Min(1) @Max(60) Integer checkTimeoutSeconds, @Min(1) @Max(20) Integer failThreshold,
-            @Min(1) @Max(20) Integer recoverThreshold, @Size(max = 512) String checkPath) {
+            @Min(1) @Max(20) Integer recoverThreshold, @Size(max = 512) String checkPath,
+            /** #387: HEALTH_PATH (default) | JSONRPC_INITIALIZE. */
+            String checkMode) {
     }
 
     public record BackendAuthRequest(@NotBlank String mode, @Size(max = 4096) String secret) {

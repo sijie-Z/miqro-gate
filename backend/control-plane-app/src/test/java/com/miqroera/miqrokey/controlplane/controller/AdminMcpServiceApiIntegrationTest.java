@@ -134,14 +134,23 @@ class AdminMcpServiceApiIntegrationTest {
                 .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ONLINE"));
 
-        // Health config update.
-        mockMvc.perform(
-                post("/api/v1/admin/mcp-services/" + serviceId + "/health-config").cookie(sessionCookie, csrfCookie)
-                        .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"checkIntervalSeconds\":60,\"checkTimeoutSeconds\":10,\"failThreshold\":5,"
-                                + "\"recoverThreshold\":2,\"checkPath\":\"/ready\"}"))
+        // Health config update, including the #387 probe shape.
+        mockMvc.perform(post("/api/v1/admin/mcp-services/" + serviceId + "/health-config")
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"checkIntervalSeconds\":60,\"checkTimeoutSeconds\":10,\"failThreshold\":5,"
+                        + "\"recoverThreshold\":2,\"checkPath\":\"/ready\"," + "\"checkMode\":\"JSONRPC_INITIALIZE\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.checkIntervalSeconds").value(60))
-                .andExpect(jsonPath("$.checkPath").value("/ready"));
+                .andExpect(jsonPath("$.checkPath").value("/ready"))
+                .andExpect(jsonPath("$.checkMode").value("JSONRPC_INITIALIZE"));
+
+        // Unknown probe shape is rejected; the stored value is untouched.
+        mockMvc.perform(post("/api/v1/admin/mcp-services/" + serviceId + "/health-config")
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"checkMode\":\"BOGUS\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MCP_CHECK_MODE_INVALID"));
+        mockMvc.perform(get("/api/v1/admin/mcp-services/" + serviceId).cookie(sessionCookie))
+                .andExpect(jsonPath("$.checkMode").value("JSONRPC_INITIALIZE"));
     }
 
     @Test

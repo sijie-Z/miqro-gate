@@ -66,7 +66,7 @@ public class AdminMcpService {
                 checkTimeoutSeconds != null ? checkTimeoutSeconds : 5, failThreshold != null ? failThreshold : 3,
                 recoverThreshold != null ? recoverThreshold : 1,
                 checkPath != null && !checkPath.isBlank() ? checkPath : "/health", 0, adminId, Instant.now(),
-                Instant.now(), "VISITOR", null, timeout);
+                Instant.now(), "VISITOR", null, timeout, McpService.CHECK_MODE_HEALTH_PATH);
         try {
             repository.insert(service);
         } catch (DuplicateKeyException e) {
@@ -103,8 +103,17 @@ public class AdminMcpService {
     @Transactional
     public McpService updateHealthConfig(UUID tenantId, UUID adminId, UUID serviceId, Integer checkIntervalSeconds,
             Integer checkTimeoutSeconds, Integer failThreshold, Integer recoverThreshold, String checkPath,
-            String requestId) {
+            String checkMode, String requestId) {
         McpService service = find(tenantId, serviceId);
+        String normalizedCheckMode = service.checkMode();
+        if (checkMode != null && !checkMode.isBlank()) {
+            normalizedCheckMode = checkMode.trim().toUpperCase(java.util.Locale.ROOT);
+            if (!(McpService.CHECK_MODE_HEALTH_PATH.equals(normalizedCheckMode)
+                    || McpService.CHECK_MODE_JSONRPC.equals(normalizedCheckMode))) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "MCP_CHECK_MODE_INVALID",
+                        "探测方式必须是 HEALTH_PATH 或 JSONRPC_INITIALIZE。");
+            }
+        }
         McpService updated = new McpService(service.id(), service.tenantId(), service.name(), service.description(),
                 service.endpoint(), service.transport(), service.status(), service.healthStatus(),
                 service.healthCheckedAt(), service.consecutiveFailures(), service.consecutiveSuccesses(),
@@ -114,7 +123,7 @@ public class AdminMcpService {
                 recoverThreshold != null ? recoverThreshold : service.recoverThreshold(),
                 checkPath != null && !checkPath.isBlank() ? checkPath : service.checkPath(), service.version(),
                 service.createdBy(), service.createdAt(), service.updatedAt(), service.backendAuthMode(),
-                service.backendSecretUpdatedAt(), service.upstreamTimeoutMs());
+                service.backendSecretUpdatedAt(), service.upstreamTimeoutMs(), normalizedCheckMode);
         McpService saved = repository.update(updated, service.version());
         auditService.record(tenantId, adminId, "MCP_SERVICE_HEALTH_UPDATE", "MCP_SERVICE", serviceId,
                 AuditSummaries.summary("name", AuditSummaries.sanitize(service.name())), requestId);
@@ -127,7 +136,8 @@ public class AdminMcpService {
                 service.consecutiveFailures(), service.consecutiveSuccesses(), service.checkIntervalSeconds(),
                 service.checkTimeoutSeconds(), service.failThreshold(), service.recoverThreshold(), service.checkPath(),
                 service.version(), service.createdBy(), service.createdAt(), service.updatedAt(),
-                service.backendAuthMode(), service.backendSecretUpdatedAt(), service.upstreamTimeoutMs());
+                service.backendAuthMode(), service.backendSecretUpdatedAt(), service.upstreamTimeoutMs(),
+                service.checkMode());
     }
 
     /**

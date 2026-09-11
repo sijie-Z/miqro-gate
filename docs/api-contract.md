@@ -778,7 +778,7 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | `GET /api/v1/admin/mcp-services` / `/{id}` | 列表/详情（含健康状态与检查配置） |
 | `POST /api/v1/admin/mcp-services` | 注册：`{ "name", "description"?, "endpoint", "transport"?, "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"?, "upstreamTimeoutMs"? }`（默认 STREAMABLE_HTTP / 30s / 5s / 3 / 1 / `/health` / 60000ms；注册即自动生成 default 路由，见 5.23） |
 | `POST /api/v1/admin/mcp-services/{id}/status?status=ONLINE\|OFFLINE` | 手动上下线（重复切换 `409 MCP_STATUS_UNCHANGED`） |
-| `POST /api/v1/admin/mcp-services/{id}/health-config` | 更新健康检查配置 |
+| `POST /api/v1/admin/mcp-services/{id}/health-config` | 健康探测配置部分更新：`{ "checkIntervalSeconds"?, "checkTimeoutSeconds"?, "failThreshold"?, "recoverThreshold"?, "checkPath"?, "checkMode"? }`。**#387 探测方式**：`HEALTH_PATH`（默认，GET `endpoint + checkPath` 2xx 健康）| `JSONRPC_INITIALIZE`（标准 MCP 服务无 HTTP 健康路径时使用：POST `endpoint` JSON-RPC 2.0 `initialize` 信封，2xx 且响应体含 `"jsonrpc"` 健康——兼容 SSE 帧包裹；API_KEY 后端自动携带解密 Bearer，凭证不可用 fail-closed）。非法值 `400 MCP_CHECK_MODE_INVALID` |
 | `PUT /api/v1/admin/mcp-services/{id}/backend-auth` | 上游后端鉴权（#320，腾讯 raw 03）：body `{"mode":"VISITOR\|API_KEY","secret"?}`——
   `VISITOR` 清除已存密钥；`API_KEY` 必填 `secret`（≤4096）。密钥**只写不读**：任何读面（列表/详情/审计）永不返回；
   存储 AES-GCM 加密（AAD 绑定 tenant+service）；网关向上游注入固定 `Authorization: Bearer <secret>`；变更即时生效（快照刷新）。

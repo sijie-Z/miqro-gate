@@ -27,12 +27,19 @@ public record McpService(UUID id, UUID tenantId, String name, String description
         String status, String healthStatus, Instant healthCheckedAt, int consecutiveFailures, int consecutiveSuccesses,
         int checkIntervalSeconds, int checkTimeoutSeconds, int failThreshold, int recoverThreshold, String checkPath,
         long version, UUID createdBy, Instant createdAt, Instant updatedAt, String backendAuthMode,
-        Instant backendSecretUpdatedAt, int upstreamTimeoutMs) {
+        Instant backendSecretUpdatedAt, int upstreamTimeoutMs, String checkMode) {
 
     /** Tencent doc 135906 backend config default ({@code 超时时间} 60000 ms). */
     public static final int DEFAULT_UPSTREAM_TIMEOUT_MS = 60000;
     public static final int MIN_UPSTREAM_TIMEOUT_MS = 1000;
     public static final int MAX_UPSTREAM_TIMEOUT_MS = 600000;
+
+    /**
+     * Health probe shapes (#387, doc 135906): HTTP health path or JSON-RPC
+     * initialize.
+     */
+    public static final String CHECK_MODE_HEALTH_PATH = "HEALTH_PATH";
+    public static final String CHECK_MODE_JSONRPC = "JSONRPC_INITIALIZE";
 
     /** Backwards-compatible constructor: no upstream backend credential. */
     public McpService(UUID id, UUID tenantId, String name, String description, String endpoint, String transport,
@@ -43,7 +50,19 @@ public record McpService(UUID id, UUID tenantId, String name, String description
         this(id, tenantId, name, description, endpoint, transport, status, healthStatus, healthCheckedAt,
                 consecutiveFailures, consecutiveSuccesses, checkIntervalSeconds, checkTimeoutSeconds, failThreshold,
                 recoverThreshold, checkPath, version, createdBy, createdAt, updatedAt, "VISITOR", null,
-                DEFAULT_UPSTREAM_TIMEOUT_MS);
+                DEFAULT_UPSTREAM_TIMEOUT_MS, CHECK_MODE_HEALTH_PATH);
+    }
+
+    /** Compatibility constructor: no check-mode column (pre-V50 shape). */
+    public McpService(UUID id, UUID tenantId, String name, String description, String endpoint, String transport,
+            String status, String healthStatus, Instant healthCheckedAt, int consecutiveFailures,
+            int consecutiveSuccesses, int checkIntervalSeconds, int checkTimeoutSeconds, int failThreshold,
+            int recoverThreshold, String checkPath, long version, UUID createdBy, Instant createdAt, Instant updatedAt,
+            String backendAuthMode, Instant backendSecretUpdatedAt, int upstreamTimeoutMs) {
+        this(id, tenantId, name, description, endpoint, transport, status, healthStatus, healthCheckedAt,
+                consecutiveFailures, consecutiveSuccesses, checkIntervalSeconds, checkTimeoutSeconds, failThreshold,
+                recoverThreshold, checkPath, version, createdBy, createdAt, updatedAt, backendAuthMode,
+                backendSecretUpdatedAt, upstreamTimeoutMs, CHECK_MODE_HEALTH_PATH);
     }
 
     public McpService {
@@ -70,6 +89,9 @@ public record McpService(UUID id, UUID tenantId, String name, String description
         if (upstreamTimeoutMs < MIN_UPSTREAM_TIMEOUT_MS || upstreamTimeoutMs > MAX_UPSTREAM_TIMEOUT_MS) {
             throw new IllegalArgumentException(
                     "upstreamTimeoutMs must be " + MIN_UPSTREAM_TIMEOUT_MS + ".." + MAX_UPSTREAM_TIMEOUT_MS);
+        }
+        if (checkMode == null || !(checkMode.equals(CHECK_MODE_HEALTH_PATH) || checkMode.equals(CHECK_MODE_JSONRPC))) {
+            throw new IllegalArgumentException("checkMode must be HEALTH_PATH or JSONRPC_INITIALIZE");
         }
     }
 }
