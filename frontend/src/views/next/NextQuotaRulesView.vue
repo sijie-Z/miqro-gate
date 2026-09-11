@@ -380,6 +380,9 @@ onMounted(load);
           </UiButton>
         </div>
       </div>
+      <p class="next-quota__template-hint" data-testid="quota-template-hint">
+        变更或停用只影响之后新建的用户；已存在（含自动分配）的配额规则保持不变，停用也不会删除它们。
+      </p>
       <div v-if="configuring" class="ui-panel-body">
         <div class="next-quota__template-form">
           <UiSelect
@@ -622,6 +625,13 @@ onMounted(load);
 
 .next-quota__template {
   margin-bottom: var(--ui-space-5);
+}
+
+.next-quota__template-hint {
+  margin: 0 var(--ui-space-4) var(--ui-space-2);
+  font-size: var(--ui-font-size-sm);
+  line-height: var(--ui-line-height-lg);
+  color: var(--ui-foreground-secondary);
 }
 
 .next-quota__template-actions {

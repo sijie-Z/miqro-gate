@@ -138,6 +138,7 @@ describe('NextQuotaRulesView', () => {
     expect(wrapper.text()).toContain('alice');
     expect(wrapper.text()).toContain('Token 用量 · 每月 · 限额 500,000');
     expect(wrapper.find('[data-testid="quota-template-state"]').text()).toContain('已启用');
+    expect(wrapper.find('[data-testid="quota-template-hint"]').text()).toContain('停用也不会删除');
     expect(wrapper.text()).toContain('超限');
     expect(wrapper.text()).toContain('预警');
     expect(wrapper.text()).toContain('已停用');
