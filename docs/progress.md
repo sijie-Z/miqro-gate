@@ -6,12 +6,21 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-09 自主轮（F60 v2 + codegen 迁移线收口 + typecheck 确定性）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS`（develop @ b35cea0 = 截至 #327 已合；**rc.10 已发布**；#328 文档轮实施中。
-  本轮交付见下方交接点；**待办：#328 文档轮（本 PR）、rc.11 攒批（#326 待锚）、
-  #211 真机凭证（BLOCKED）、#245 告警接线裁决（leader）、F32/F33 平台接口（BLOCKED）、
-  F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态）**）
-- Last updated: `2026-09-10 CST`
+- Current goal: `2026-09-11 自主轮（coverage-matrix I 序列收官 I1–I20 + 稳定性修复；rc.13 已发布）` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS`（develop @ 12edf9e；**rc.13 已发布（2026-09-11）**——I 序列 I1–I20 全部 DONE +
+  三处缺陷修复（#361/#371/#362）全清，CI 无红灯；本轮交付见下方交接点；**待办：矩阵 §3 裁决项（等 leader/外部）、
+  #211 真机凭证（BLOCKED）、#245 告警接线裁决（leader）、F32/F33 平台接口（BLOCKED）、F19 账单对账（等真实样本）、
+  F29 服务数据面（等 leader 形态）**）
+- Last updated: `2026-09-11 CST`
+
+## 会话交接点 2026-09-11（rc.13 发布：#362 修复后收官）
+
+- **rc.13 已发布**（tag `0.1.0-rc.13` @ 12edf9e，GitHub Release 含中文说明）：rc.12 之后 17 个提交——
+  **I 序列（I1–I20）全覆盖收官**（I6–I20 剩余项 + rc.12 后随批项）+ 三处真实缺陷修复
+  （#371 数据面 API Key 上游凭证 / #361 服务状态竞态 / #362 审计链微秒舍入偶发）。
+- CI/已知问题状态：**全清**（#361/#362 已修；develop 工作流无红灯；SonarCloud 配置性 skipped）。
+- 下一批候选：矩阵 §3 裁决项（等 leader/外部：F25/F27/F28/F29、#245、F32/F33）、#211 真机凭证、
+  前端 App.spec 在并发全量跑下的偶发（本地观察，CI 未现；如需可再加固）。
 
 ## 会话交接点 2026-09-11（修复审计链偶发：#362）
 
