@@ -8,7 +8,11 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -56,7 +60,7 @@ public class AuditEventReadService {
             where += " AND chain_position < :beforePosition ";
             params.addValue("beforePosition", beforePosition);
         }
-        return jdbc.query("""
+        List<AuditEventView> events = jdbc.query("""
                 SELECT id, tenant_id, actor_id, action, target_type, target_id, change_summary, created_at,
                        chain_position
                 FROM admin_audit_events
@@ -64,7 +68,72 @@ public class AuditEventReadService {
                 ORDER BY chain_position DESC
                 LIMIT :limit
                 """.formatted(where), params, ROW_MAPPER);
+        return withTargetNames(tenantId, events);
     }
+
+    /**
+     * Read-side resource-name decoration (#389, doc 27): batch-resolves each page's
+     * {@code (targetType, targetId)} pairs with one IN query per type — inside the
+     * tenant, never N+1, unknown types / vanished references stay null (the UI
+     * falls back to the short id). The chain rows are never modified.
+     */
+    private List<AuditEventView> withTargetNames(UUID tenantId, List<AuditEventView> events) {
+        Map<String, List<UUID>> idsByType = new LinkedHashMap<>();
+        for (AuditEventView event : events) {
+            if (event.targetId() != null && event.targetType() != null
+                    && TARGET_RESOLVERS.containsKey(event.targetType())) {
+                idsByType.computeIfAbsent(event.targetType(), key -> new ArrayList<>()).add(event.targetId());
+            }
+        }
+        if (idsByType.isEmpty()) {
+            return events;
+        }
+        Map<String, String> names = new HashMap<>();
+        for (Map.Entry<String, List<UUID>> entry : idsByType.entrySet()) {
+            TargetResolver resolver = TARGET_RESOLVERS.get(entry.getKey());
+            String sql = "SELECT id, " + resolver.nameExpression() + " AS name FROM " + resolver.table()
+                    + (resolver.tenantScoped()
+                            ? " WHERE tenant_id = :tenantId AND id IN (:ids) "
+                            : " WHERE id = :tenantId ");
+            List<UUID> ids = entry.getValue().stream().distinct().toList();
+            jdbc.query(sql, new MapSqlParameterSource("tenantId", tenantId).addValue("ids", ids), rs -> {
+                names.put(entry.getKey() + ":" + rs.getObject("id"), rs.getString("name"));
+            });
+        }
+        List<AuditEventView> decorated = new ArrayList<>(events.size());
+        for (AuditEventView event : events) {
+            decorated.add(new AuditEventView(event.id(), event.actorId(), event.action(), event.targetType(),
+                    event.targetId(), event.changeSummary(), event.createdAt(), event.chainPosition(),
+                    event.targetId() == null ? null : names.get(event.targetType() + ":" + event.targetId())));
+        }
+        return decorated;
+    }
+
+    /** One table + name expression resolving a target reference (#389). */
+    private record TargetResolver(String table, String nameExpression, boolean tenantScoped) {
+    }
+
+    /**
+     * targetType → resource table mapping (doc 27 resource-name column). Types
+     * outside this map stay unresolved by design.
+     */
+    private static final Map<String, TargetResolver> TARGET_RESOLVERS = Map.ofEntries(
+            Map.entry("USER", new TargetResolver("users", "username", true)),
+            Map.entry("MCP_SERVICE", new TargetResolver("mcp_services", "name", true)),
+            Map.entry("MCP_TOOL", new TargetResolver("mcp_tools", "tool_name", true)),
+            Map.entry("SKILL", new TargetResolver("skills", "name", true)),
+            Map.entry("VIRTUAL_KEY", new TargetResolver("virtual_keys", "COALESCE(name, last_four)", true)),
+            Map.entry("TEAM", new TargetResolver("teams", "name", true)),
+            Map.entry("SERVICE", new TargetResolver("services", "name", true)),
+            Map.entry("PROJECT", new TargetResolver("projects", "name", true)),
+            Map.entry("CONSUMER", new TargetResolver("api_consumers", "name", true)),
+            Map.entry("UPSTREAM_CREDENTIAL", new TargetResolver("upstream_credentials", "credential_name", true)),
+            Map.entry("SUBSCRIPTION", new TargetResolver("upstream_subscriptions", "name", true)),
+            Map.entry("AGENT", new TargetResolver("agents", "name", true)),
+            Map.entry("WEBHOOK", new TargetResolver("webhook_endpoints", "name", true)),
+            Map.entry("ALERT_RULE", new TargetResolver("alert_rules", "name", true)),
+            // The tenant is its own scope anchor: resolved by primary key only.
+            Map.entry("TENANT", new TargetResolver("tenants", "name", false)));
 
     /**
      * Compliance CSV export of the filtered slice (RFC 4180 quoting, UTF-8 BOM for
@@ -152,5 +221,5 @@ public class AuditEventReadService {
     private static final RowMapper<AuditEventView> ROW_MAPPER = (rs, rowNum) -> new AuditEventView(
             (UUID) rs.getObject("id"), (UUID) rs.getObject("actor_id"), rs.getString("action"),
             rs.getString("target_type"), (UUID) rs.getObject("target_id"), rs.getString("change_summary"),
-            rs.getTimestamp("created_at").toInstant(), rs.getLong("chain_position"));
+            rs.getTimestamp("created_at").toInstant(), rs.getLong("chain_position"), null);
 }

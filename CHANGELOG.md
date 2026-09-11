@@ -5,6 +5,10 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-11
+- **审计列表资源名称解析（#389，doc 27）**：`GET /admin/audit-events` 每行新增**可空** `targetName`——按页内
+  `(targetType, targetId)` 每类型一条 `IN` 查询批量解析（租户内、只读、无 N+1；USER/MCP_SERVICE/MCP_TOOL/SKILL/
+  VIRTUAL_KEY/TEAM/SERVICE/PROJECT/CONSUMER/UPSTREAM_CREDENTIAL/SUBSCRIPTION/AGENT/WEBHOOK/ALERT_RULE/TENANT），
+  未知类型或引用已不存在为 null。审计页新增「目标」列（名称优先、回退短 ID）；CSV 导出与链上数据不变。
 - **MCP 健康探测支持 JSON-RPC initialize 模式（#387，doc 03）**：V50 `mcp_services.check_mode`（`HEALTH_PATH`
   默认，行为不变 | `JSONRPC_INITIALIZE`）——后者 POST `endpoint` 的 JSON-RPC 2.0 `initialize` 信封（标准 MCP
   服务的协议原生探活，兼容 SSE 帧响应），API_KEY 后端自动注入解密 Bearer（fail-closed）；健康配置 API/管理页

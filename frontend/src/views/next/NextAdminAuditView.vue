@@ -66,8 +66,14 @@ const columns = [
   { key: 'createdAt', title: '时间', width: '180px' },
   { key: 'action', title: '动作', width: '200px' },
   { key: 'targetType', title: '目标类型', width: '120px' },
+  { key: 'target', title: '目标', minWidth: '180px' },
   { key: 'changeSummary', title: '摘要', minWidth: '260px' },
 ];
+
+/** #389: unresolved references fall back to a short id so rows stay readable. */
+function shortId(id: string): string {
+  return id.length > 9 ? `${id.slice(0, 8)}…` : id;
+}
 
 /** actorId must be UUID-shaped; an invalid value blocks the request with an inline hint. */
 function validActor(): boolean {
@@ -256,6 +262,15 @@ onMounted(load);
           <span class="ui-mono">{{ (row as AuditEventView).action }}</span>
         </template>
         <template #targetType="{ row }">{{ (row as AuditEventView).targetType || '—' }}</template>
+        <template #target="{ row }">
+          <span v-if="(row as AuditEventView).targetName">{{
+            (row as AuditEventView).targetName
+          }}</span>
+          <span v-else-if="(row as AuditEventView).targetId" class="ui-mono">{{
+            shortId((row as AuditEventView).targetId!)
+          }}</span>
+          <span v-else>—</span>
+        </template>
         <template #changeSummary="{ row }">
           <span class="next-audit__summary">{{
             (row as AuditEventView).changeSummary || '—'

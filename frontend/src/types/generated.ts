@@ -3954,6 +3954,7 @@ export interface components {
             createdAt?: string;
             /** Format: int64 */
             chainPosition?: number;
+            targetName?: string;
         };
         ExportTaskView: {
             /** Format: uuid */

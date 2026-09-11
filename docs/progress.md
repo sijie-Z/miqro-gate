@@ -13,6 +13,13 @@
   F29 服务数据面（等 leader 形态）**）
 - Last updated: `2026-09-11 CST`
 
+## 会话交接点 2026-09-11（审计资源名称解析：#389）
+
+- **#389（本 PR）**：审计列表 `targetName` 批量装饰（15 类资源映射；未知/失联引用 null）+ 审计页「目标」列
+  （名称优先、短 ID 回退）；CSV 与链数据不变。IT 6/6（新增：真实资源名解析 + 未解析 null 页面不失败）；
+  前端 181/181 + typecheck/build 绿；OpenAPI 基线/TS 类型再生。
+- rc.13 后轨迹：#383/#384/#387（已合）+ 本项；矩阵可立即清单继续收敛。
+
 ## 会话交接点 2026-09-11（MCP JSON-RPC 探活：#387）
 
 - **#387（本 PR）**：V50 `check_mode`（HEALTH_PATH 默认 | JSONRPC_INITIALIZE）；JSON-RPC 探针 POST initialize

@@ -14,6 +14,8 @@ const event = {
   actorId: 'root',
   action: 'LOGIN_SUCCESS',
   targetType: 'USER',
+  targetId: '1f8a2c34-9999-4aaa-bbbb-ccccddddeeee',
+  targetName: '生产密钥',
   changeSummary: 'root 登录成功',
   createdAt: '2026-09-03T08:00:00Z',
 };
@@ -67,6 +69,17 @@ describe('NextAdminAuditView', () => {
     expect(wrapper.find('[data-testid="audit-table"]').exists()).toBe(true);
     expect(wrapper.text()).toContain('LOGIN_SUCCESS');
     expect(wrapper.text()).toContain('root 登录成功');
+    expect(wrapper.text()).toContain('生产密钥');
+  });
+
+  it('falls back to the short target id when the name is unresolved (#389)', async () => {
+    mockApi.auditEvents.mockResolvedValue([
+      { ...event, targetName: undefined, targetId: '1f8a2c34-9999-4aaa-bbbb-ccccddddeeee' },
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.text()).toContain('1f8a2c34…');
+    expect(wrapper.text()).not.toContain('1f8a2c34-9999');
   });
 
   it('filters by action', async () => {
