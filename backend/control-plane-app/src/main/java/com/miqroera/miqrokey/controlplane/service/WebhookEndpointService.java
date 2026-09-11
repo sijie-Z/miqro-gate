@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.controlplane.service;
 
 import com.miqroera.miqrokey.controlplane.client.UpstreamTargetPin;
+import com.miqroera.miqrokey.controlplane.dto.ResourceDependency;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
 import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
@@ -122,9 +123,27 @@ public class WebhookEndpointService {
         return view(update(tenantId, endpointId, name, enabled, timeoutMs, context));
     }
 
+    /**
+     * Deletes the endpoint. I21 (Tencent model-API delete semantics): endpoints
+     * still referenced by alert rules are NOT silently detached
+     * ({@code webhook_endpoint_id} would go null and the rule silently loses its
+     * delivery target) — the delete is refused with the rule list until the
+     * references are released.
+     */
     @Transactional
     public void delete(UUID tenantId, UUID endpointId, AuditContext context) {
         WebhookEndpoint existing = get(tenantId, endpointId);
+        List<ResourceDependency> dependents = jdbc.query("""
+                SELECT id, name, enabled FROM alert_rules
+                WHERE tenant_id = :tenantId AND webhook_endpoint_id = :id
+                ORDER BY name
+                """, new MapSqlParameterSource("tenantId", tenantId).addValue("id", endpointId),
+                (rs, rowNum) -> new ResourceDependency("ALERT_RULE", (UUID) rs.getObject("id"), rs.getString("name"),
+                        rs.getBoolean("enabled") ? "已启用" : "已停用"));
+        if (!dependents.isEmpty()) {
+            throw new ResourceInUseException("该 Webhook 端点被 " + dependents.size() + " 条告警规则引用，请先删除或改配这些规则。",
+                    dependents);
+        }
         jdbc.update("DELETE FROM webhook_endpoints WHERE id = :id AND tenant_id = :tenantId",
                 new MapSqlParameterSource("id", endpointId).addValue("tenantId", tenantId));
         auditService.record(

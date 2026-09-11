@@ -160,10 +160,18 @@ async function test(endpoint: WebhookEndpointView) {
   }
 }
 
+// I21: a blocked delete (still referenced) shows the dependency list instead
+// of a bare error — release the references (or repoint the rules) first.
+const inUseState = ref<{
+  title: string;
+  body: string;
+  dependencies: Array<{ type: string; id: string; name?: string; detail?: string }>;
+} | null>(null);
+
 function requestRemove(endpoint: WebhookEndpointView) {
   confirmState.value = {
     title: `删除 Webhook「${endpoint.name}」`,
-    body: '删除后告警将不再投递到该端点。',
+    body: '删除后告警将不再投递到该端点；若仍被告警规则引用，将先提示解除引用。',
     confirmLabel: '删除',
     tone: 'danger',
     run: async () => {
@@ -173,7 +181,13 @@ function requestRemove(endpoint: WebhookEndpointView) {
         toast.success('Webhook 已删除');
         await load();
       } catch (error) {
-        if (error instanceof ApiError) {
+        if (error instanceof ApiError && error.code === 'RESOURCE_IN_USE') {
+          inUseState.value = {
+            title: `无法删除「${endpoint.name}」`,
+            body: error.message,
+            dependencies: error.dependencies ?? [],
+          };
+        } else if (error instanceof ApiError) {
           toast.error(error.message);
         }
       }
@@ -442,10 +456,40 @@ onMounted(load);
         </UiButton>
       </template>
     </UiDialog>
+
+    <!-- I21: blocked delete — dependency list with release guidance -->
+    <UiDialog
+      v-if="inUseState"
+      :open="true"
+      :title="inUseState.title"
+      :description="inUseState.body"
+      width="560px"
+      data-testid="webhook-in-use-dialog"
+      @update:open="inUseState = null"
+    >
+      <ul v-if="inUseState.dependencies.length" class="next-webhooks__deps" data-testid="webhook-in-use-deps">
+        <li v-for="dep in inUseState.dependencies" :key="dep.id">
+          <span class="ui-mono">{{ dep.type }}</span> · {{ dep.name ?? dep.id }}
+          <span v-if="dep.detail">（{{ dep.detail }}）</span>
+        </li>
+      </ul>
+      <template #footer>
+        <UiButton variant="primary" @click="inUseState = null">知道了</UiButton>
+      </template>
+    </UiDialog>
   </div>
 </template>
 
 <style scoped>
+.next-webhooks__deps {
+  margin: 0;
+  padding-left: var(--ui-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
 .ui-alert {
   padding: var(--ui-space-3) var(--ui-space-4);
   margin-bottom: var(--ui-space-4);

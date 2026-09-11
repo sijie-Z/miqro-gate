@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.miqroera.miqrokey.controlplane.security.AuthenticationException;
 import com.miqroera.miqrokey.controlplane.security.ResourceOwnershipException;
 import com.miqroera.miqrokey.controlplane.service.ApiException;
+import com.miqroera.miqrokey.controlplane.service.ResourceInUseException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,6 +63,15 @@ public class GlobalExceptionHandler {
         Map<String, Object> body = problemDetail(status, e.getCode(), e.getCode().replace('_', ' ').toLowerCase(),
                 e.getMessage(), requestId);
         return ResponseEntity.status(e.getStatus()).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
+    }
+
+    @ExceptionHandler(ResourceInUseException.class)
+    public ResponseEntity<Map<String, Object>> handleResourceInUse(ResourceInUseException e,
+            HttpServletRequest request) {
+        String requestId = resolveRequestId(request);
+        Map<String, Object> body = problemDetail(409, e.getCode(), "resource in use", e.getMessage(), requestId);
+        body.put("dependencies", e.getDependencies());
+        return ResponseEntity.status(HttpStatus.CONFLICT).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

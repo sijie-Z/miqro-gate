@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextAdminWebhooksView from '@/views/next/NextAdminWebhooksView.vue';
 import * as api from '@/api';
+import { ApiError } from '@/api/http';
 import { toastState } from '@/ui/toast';
 import type { WebhookDelivery, WebhookEndpointView } from '@/types/generated-api';
 
@@ -138,6 +139,38 @@ describe('NextAdminWebhooksView', () => {
     await flushPromises();
 
     expect(mockApi.deleteWebhook).toHaveBeenCalledWith('w1');
+  });
+
+  it('surfaces a blocked delete with the dependency list (I21)', async () => {
+    mockApi.listWebhooks.mockResolvedValue([endpoint()]);
+    mockApi.deleteWebhook.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: 'resource in use',
+        status: 409,
+        code: 'RESOURCE_IN_USE',
+        detail: '该 Webhook 端点被 1 条告警规则引用，请先删除或改配这些规则。',
+        requestId: 'rq-1',
+        dependencies: [{ type: 'ALERT_RULE', id: 'r1', name: '引用方规则', detail: '已启用' }],
+      }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="webhook-delete"]').trigger('click');
+    await flushPromises();
+    const buttons = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
+    buttons
+      .find((b) => b.textContent?.trim() === '删除' && b.className.includes('ui-btn--danger'))!
+      .click();
+    await flushPromises();
+
+    // Dialogs teleport to body.
+    const deps = document.querySelector('[data-testid="webhook-in-use-deps"]');
+    expect(deps, 'dependency list dialog should render').toBeTruthy();
+    expect(deps!.textContent).toContain('ALERT_RULE');
+    expect(deps!.textContent).toContain('引用方规则');
+    expect(deps!.textContent).toContain('已启用');
   });
 
   it('shows the recent-20 delivery success rate per endpoint', async () => {
