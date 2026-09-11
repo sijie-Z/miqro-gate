@@ -84,6 +84,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/mcp-services/{serviceId}/upstream-timeout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["setUpstreamTimeout"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/mcp-services/{serviceId}/tools/{toolId}/retry-policy": {
         parameters: {
             query?: never;
@@ -2476,6 +2492,8 @@ export interface components {
         };
         UpdateRequest: {
             enabled?: boolean;
+            /** Format: int32 */
+            maxContentBytes?: number;
         };
         RetentionConfig: {
             enabled?: boolean;
@@ -2483,6 +2501,8 @@ export interface components {
             keyVersion?: string;
             /** Format: int64 */
             version?: number;
+            /** Format: int32 */
+            maxContentBytes?: number;
         };
         UpsertQuotaRuleRequest: {
             /** @enum {string} */
@@ -2577,6 +2597,50 @@ export interface components {
             spentPct?: number;
             level?: string;
         };
+        UpstreamTimeoutRequest: {
+            /** Format: int32 */
+            upstreamTimeoutMs?: number;
+        };
+        McpService: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            name?: string;
+            description?: string;
+            endpoint?: string;
+            transport?: string;
+            status?: string;
+            healthStatus?: string;
+            /** Format: date-time */
+            healthCheckedAt?: string;
+            /** Format: int32 */
+            consecutiveFailures?: number;
+            /** Format: int32 */
+            consecutiveSuccesses?: number;
+            /** Format: int32 */
+            checkIntervalSeconds?: number;
+            /** Format: int32 */
+            checkTimeoutSeconds?: number;
+            /** Format: int32 */
+            failThreshold?: number;
+            /** Format: int32 */
+            recoverThreshold?: number;
+            checkPath?: string;
+            /** Format: int64 */
+            version?: number;
+            /** Format: uuid */
+            createdBy?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            backendAuthMode?: string;
+            /** Format: date-time */
+            backendSecretUpdatedAt?: string;
+            /** Format: int32 */
+            upstreamTimeoutMs?: number;
+        };
         RequestedPolicy: {
             retryEnabled?: boolean;
             /** Format: int32 */
@@ -2626,44 +2690,6 @@ export interface components {
         BackendAuthRequest: {
             mode: string;
             secret?: string;
-        };
-        McpService: {
-            /** Format: uuid */
-            id?: string;
-            /** Format: uuid */
-            tenantId?: string;
-            name?: string;
-            description?: string;
-            endpoint?: string;
-            transport?: string;
-            status?: string;
-            healthStatus?: string;
-            /** Format: date-time */
-            healthCheckedAt?: string;
-            /** Format: int32 */
-            consecutiveFailures?: number;
-            /** Format: int32 */
-            consecutiveSuccesses?: number;
-            /** Format: int32 */
-            checkIntervalSeconds?: number;
-            /** Format: int32 */
-            checkTimeoutSeconds?: number;
-            /** Format: int32 */
-            failThreshold?: number;
-            /** Format: int32 */
-            recoverThreshold?: number;
-            checkPath?: string;
-            /** Format: int64 */
-            version?: number;
-            /** Format: uuid */
-            createdBy?: string;
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
-            backendAuthMode?: string;
-            /** Format: date-time */
-            backendSecretUpdatedAt?: string;
         };
         SetMcpAccessModeRequest: {
             /** @enum {string} */
@@ -4136,6 +4162,32 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    setUpstreamTimeout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpstreamTimeoutRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["McpService"];
+                };
             };
         };
     };
