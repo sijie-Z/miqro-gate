@@ -5,6 +5,11 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-11
+- **Skill 版本历史/回滚（#377，I14，raw 20 版本管理）**：V49 `skill_revisions`（不可变包快照，存量回填 r1；部分唯一
+  索引保证每技能至多一激活修订）；**同名重传从「upsert 覆盖」改为「发布下一修订」**——旧包保留、目录/下载镜像激活
+  修订；`GET /admin/skills/{id}/revisions`（元数据视图，永不回包体）与 `POST …/revisions/{rev}/activate`
+  （回滚=幂等指针移动，不产生新版本号）；审计 `SKILL_REVISION_PUBLISH/ACTIVATE`；管理页「版本」弹窗（历史列表 +
+  回滚确认 + 重传提示）。
 - **成本报表维度补齐（#375，I15，raw 23）**：`usage/summary` 新增 `groupBy=user`（调用方，label=用户名）/
   `model`/`month`（自然月 `YYYY-MM`）三个维度（缓存命中事件同维度聚合；usage IT 8/8）；成本报表页扩为
   项目/按天/调用方/模型/月五页签、表格统一占比列、新增**最高消费者**与**缓存命中 Tokens**两卡（共 7 卡）、

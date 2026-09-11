@@ -709,10 +709,12 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/skills?q=&tags=&tags=` | 目录（登录用户可见全部 ACTIVE；`q` ≤60 字符，匹配名称/描述/ID 不区分大小写；`tags` 多选为**与**语义） |
 | `GET /api/v1/skills/{id}` | 详情（元数据，无包体） |
 | `GET /api/v1/skills/{id}/download` | 下载 zip（授权门禁；公开 = 全员可下） |
-| `POST /api/v1/admin/skills?version=1.0.0` | 上传（raw zip body，`Content-Type: application/zip`）；重传同名 = upsert 替换并恢复 ACTIVE |
+| `POST /api/v1/admin/skills?version=1.0.0` | 上传（raw zip body，`Content-Type: application/zip`）；**I14**：重传同名 = 发布下一修订（历史/旧包保留、恢复 ACTIVE，可回滚），新名 = 建技能 + 基线 r1 |
 | `GET /api/v1/admin/skills?q=&tags=&tags=` | 管理目录（过滤语义同上） |
 | `POST /api/v1/admin/skills/{id}/archive` | 归档（目录隐藏、数据保留、授权保留） |
 | `PUT /api/v1/admin/skills/{id}/access` | 整体替换下载授权：`[{"scopeType":"TEAM\|PROJECT","scopeId":"…"}]`；空数组 = 公开 |
+| `GET /api/v1/admin/skills/{id}/revisions?limit=` | **I14 版本历史**（新→旧，默认 20/上限 50）：`{revision, version, description, author, license, tags, examples, contentSha256, contentBytes, createdBy, createdAt, activatedAt}`——**只回元数据，不回包体**；`activatedAt` 非空即当前版本 |
+| `POST /api/v1/admin/skills/{id}/revisions/{revision}/activate` | **I14 回滚/切换**：激活指定修订（幂等，不产生新版本号），并把该修订的元数据+包体镜像回 `skills`（目录/下载即时生效）；审计 `SKILL_REVISION_ACTIVATE`（发布审计 `SKILL_REVISION_PUBLISH`） |
 
 **格式校验（上传时）**：zip 必须只含一个技能目录（`skill-name/`），含 `SKILL.md`（YAML frontmatter：`name` 必填且为小写 kebab-case、与目录名一致、不含 claude/anthropic 保留词；`description` 必填 ≤ 1024 字符；可选 `author`/`license`/`tags`/`examples`；`tags` ≤5 个 × ≤20 字符（重复去重）；`examples` ≤10 条 × ≤512 字符）。包上限 5MB、条目上限 200、SKILL.md 上限 512KB（防 zip 炸弹——只读 SKILL.md，不解压）。`version` 必填语义化（`\d+\.\d+\.\d+`）。
 

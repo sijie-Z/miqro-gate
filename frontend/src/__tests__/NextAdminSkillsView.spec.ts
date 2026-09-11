@@ -7,6 +7,8 @@ import type { SkillView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   adminListSkills: vi.fn(),
+  adminListSkillRevisions: vi.fn(),
+  adminActivateSkillRevision: vi.fn(),
   adminUploadSkill: vi.fn(),
   adminArchiveSkill: vi.fn(),
   adminSetSkillAccess: vi.fn(),
@@ -146,5 +148,53 @@ describe('NextAdminSkillsView', () => {
     expect(mockApi.adminSetSkillAccess).toHaveBeenCalledWith('s1', [
       { scopeType: 'PROJECT', scopeId: 'p1' },
     ]);
+  });
+
+  it('lists revisions and rolls back through the confirm gate (I14)', async () => {
+    mockApi.adminListSkills.mockResolvedValue([skill()]);
+    mockApi.adminListSkillRevisions.mockResolvedValue([
+      {
+        id: 'r2',
+        skillId: 's1',
+        revision: 2,
+        version: '1.1.0',
+        contentBytes: 2048,
+        createdAt: '2026-09-01T10:00:00Z',
+        activatedAt: '2026-09-01T10:00:00Z',
+      },
+      {
+        id: 'r1',
+        skillId: 's1',
+        revision: 1,
+        version: '1.0.0',
+        contentBytes: 1024,
+        createdAt: '2026-08-01T10:00:00Z',
+      },
+    ]);
+    mockApi.adminActivateSkillRevision.mockResolvedValue({
+      revision: 1,
+      activatedAt: '2026-09-11T10:00:00Z',
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="skill-revisions"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.adminListSkillRevisions).toHaveBeenCalledWith('s1');
+    // Dialogs teleport to body.
+    expect(document.body.textContent).toContain('当前版本');
+    expect(document.body.textContent).toContain('r1');
+
+    (document.querySelector('[data-testid="skill-rollback"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const buttons = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
+    const confirm = buttons.find(
+      (b) => b.textContent?.trim() === '回滚' && b.className.includes('ui-btn--primary'),
+    );
+    expect(confirm).toBeTruthy();
+    confirm!.click();
+    await flushPromises();
+
+    expect(mockApi.adminActivateSkillRevision).toHaveBeenCalledWith('s1', 1);
   });
 });
