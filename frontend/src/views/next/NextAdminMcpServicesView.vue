@@ -92,7 +92,14 @@ const configForm = ref({
   failThreshold: '3',
   recoverThreshold: '1',
   checkPath: '/health',
+  checkMode: 'HEALTH_PATH',
 });
+
+// #387: probe shapes — HTTP health path (default) or JSON-RPC initialize.
+const probeModeOptions = [
+  { value: 'HEALTH_PATH', label: '健康路径' },
+  { value: 'JSONRPC_INITIALIZE', label: 'JSON-RPC initialize' },
+];
 const configSaving = ref(false);
 const configError = ref('');
 
@@ -382,6 +389,7 @@ function openConfig(service: McpServiceView) {
     failThreshold: String(service.failThreshold),
     recoverThreshold: String(service.recoverThreshold),
     checkPath: service.checkPath ?? '/health',
+    checkMode: service.checkMode === 'JSONRPC_INITIALIZE' ? 'JSONRPC_INITIALIZE' : 'HEALTH_PATH',
   };
   configError.value = '';
   configVisible.value = true;
@@ -400,6 +408,7 @@ async function saveConfig() {
       failThreshold: Number(configForm.value.failThreshold),
       recoverThreshold: Number(configForm.value.recoverThreshold),
       checkPath: configForm.value.checkPath.trim(),
+      checkMode: configForm.value.checkMode,
     });
     configVisible.value = false;
     toast.success('健康检查配置已更新');
@@ -1463,12 +1472,26 @@ async function saveResilience() {
             data-testid="mcp-check-recover"
           />
         </div>
+        <UiSelect
+          v-model="configForm.checkMode"
+          label="探测方式"
+          :options="probeModeOptions"
+          data-testid="mcp-check-mode"
+        />
         <UiInput
           v-model="configForm.checkPath"
           label="检查路径"
           placeholder="/health"
+          :disabled="configForm.checkMode === 'JSONRPC_INITIALIZE'"
           data-testid="mcp-check-path"
         />
+        <p class="next-mcp__hint">
+          {{
+            configForm.checkMode === 'JSONRPC_INITIALIZE'
+              ? 'JSON-RPC initialize：POST 服务地址（协议原生探活，适用于无 HTTP 健康路径的标准 MCP 服务；API_KEY 后端自动携带解密凭证）。'
+              : '健康路径：GET 服务地址 + 路径，2xx 视为健康。'
+          }}
+        </p>
         <p v-if="configError" class="ui-form-error">{{ configError }}</p>
       </div>
       <template #footer>

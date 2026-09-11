@@ -13,6 +13,14 @@
   F29 服务数据面（等 leader 形态）**）
 - Last updated: `2026-09-11 CST`
 
+## 会话交接点 2026-09-11（MCP JSON-RPC 探活：#387）
+
+- **#387（本 PR）**：V50 `check_mode`（HEALTH_PATH 默认 | JSONRPC_INITIALIZE）；JSON-RPC 探针 POST initialize
+  信封（2xx+jsonrpc 体，兼容 SSE 帧；API_KEY 后端注入解密 Bearer、fail-closed）；健康配置 API/UI 可选；
+  单测 7/7（含 Bearer 注入与 fail-closed）+ 服务 IT 4/4（往返 + 非法 400）。
+- 本日 rc.13 后轨迹：#383 I20 前端闭环（#386）、#384 App.spec 并发加固（#385）、#387 探活（本）。
+- 下一批候选：审计资源名称解析（doc 27）、Skill「编辑（部分）」核对、矩阵 §3 裁决项（等外部）。
+
 ## 会话交接点 2026-09-11（I20 前端闭环 + App.spec 加固）
 
 - **#383（本 PR，纯前端）**：MCP 服务管理页「上游预算」注册项 + 行内查看/编辑弹窗——I20 的用户可见闭环

@@ -353,6 +353,10 @@ V48（#373，I20）新增上游请求预算 `upstream_timeout_ms integer`（1000
 数据面每次上游尝试的超时随路由快照下发；预算耗尽 → 504 `mcp_upstream_timeout`（`mcp_access_log` UPSTREAM_FAILURE/504）；
 熔断慢阈值跨字段校验的基准（见 `mcp_resilience_policy`）。
 
+V50（#387）新增健康探测方式 `check_mode varchar(24)`（`HEALTH_PATH`（默认，行为不变）| `JSONRPC_INITIALIZE`）：
+JSON-RPC 模式 POST `endpoint` 的 `initialize` 信封探活（2xx 且响应体含 `"jsonrpc"`；API_KEY 后端注入解密 Bearer，
+fail-closed）——标准 MCP 服务无 HTTP 健康路径时的协议原生探测。
+
 MCP Server 管理：`name`、`description`、`endpoint`（https）、`transport`（`STREAMABLE_HTTP|SSE`）、`status`（`ONLINE|OFFLINE`，手动切换，健康检查不覆盖）、`health_status`（`UNKNOWN|HEALTHY|UNHEALTHY`）、`health_checked_at`、`consecutive_failures/successes`、检查配置（`check_interval_seconds`/`check_timeout_seconds`/`fail_threshold`/`recover_threshold`/`check_path`）。唯一 `(tenant_id, name)`；`(tenant_id, health_status)` 索引（探活列表）。
 
 ### `mcp_tools` (V21，P3.5)
