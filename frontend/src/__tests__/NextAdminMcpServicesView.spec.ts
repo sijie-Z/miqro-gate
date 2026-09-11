@@ -11,6 +11,7 @@ import { toastState } from '@/ui/toast';
 vi.mock('@/api', () => ({
   adminListMcpServices: vi.fn(),
   adminCreateMcpService: vi.fn(),
+  adminSetMcpServiceUpstreamTimeout: vi.fn(),
   adminSetMcpStatus: vi.fn(),
   adminUpdateMcpHealthConfig: vi.fn(),
   adminListMcpTools: vi.fn(),
@@ -869,5 +870,53 @@ describe('NextAdminMcpServicesView', () => {
       document.querySelector('[data-testid="mcp-tool-sync-apply"]'),
       'apply button hides after the preview turns into an applied report',
     ).toBeNull();
+  });
+
+  it('edits the upstream budget from the row dialog (I20 follow-up)', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminSetMcpServiceUpstreamTimeout.mockResolvedValue(service());
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-upstream-timeout"]').trigger('click');
+    await flushPromises();
+    // Dialogs teleport to body.
+    const input = document.querySelector('[data-testid="mcp-timeout-input"]') as HTMLInputElement;
+    expect(input).toBeTruthy();
+    expect(input.value).toBe('60000');
+
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value',
+    )?.set;
+    setter?.call(input, '20000');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    (document.querySelector('[data-testid="mcp-timeout-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(mockApi.adminSetMcpServiceUpstreamTimeout).toHaveBeenCalledWith('m1', 20000);
+  });
+
+  it('rejects an out-of-range budget locally (I20 follow-up)', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-upstream-timeout"]').trigger('click');
+    await flushPromises();
+    const input = document.querySelector('[data-testid="mcp-timeout-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value',
+    )?.set;
+    setter?.call(input, '500');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    (document.querySelector('[data-testid="mcp-timeout-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(mockApi.adminSetMcpServiceUpstreamTimeout).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('1000–600000');
   });
 });
