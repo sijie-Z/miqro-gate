@@ -11,7 +11,7 @@ import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
-import type { Project, SkillView, Team } from '@/types/generated-api';
+import type { Project, SkillRevisionView, SkillView, Team } from '@/types/generated-api';
 
 const skills = ref<SkillView[]>([]);
 const projects = ref<Project[]>([]);
@@ -45,6 +45,60 @@ const accessProjectIds = ref<string[]>([]);
 const accessTeamIds = ref<string[]>([]);
 const accessSaving = ref(false);
 const accessError = ref('');
+
+// Version history (I14): re-upload publishes revisions; rollback activates one.
+const revisionsSkill = ref<SkillView | null>(null);
+const revisionsVisible = ref(false);
+const revisions = ref<SkillRevisionView[]>([]);
+const revisionsLoading = ref(false);
+const revisionsError = ref('');
+
+const revisionColumns = [
+  { key: 'revision', title: '修订', width: '80px' },
+  { key: 'version', title: '版本', width: '90px' },
+  { key: 'size', title: '大小', width: '90px', align: 'right' as const },
+  { key: 'createdAt', title: '发布时间', width: '170px' },
+  { key: 'state', title: '状态', width: '110px' },
+  { key: 'actions', title: '操作', width: '90px', align: 'center' as const },
+];
+
+async function openRevisions(skill: SkillView) {
+  revisionsSkill.value = skill;
+  revisionsVisible.value = true;
+  revisionsError.value = '';
+  revisionsLoading.value = true;
+  try {
+    revisions.value = await api.adminListSkillRevisions(skill.id!);
+  } catch (error) {
+    revisionsError.value = error instanceof ApiError ? error.message : '加载失败，请稍后重试。';
+    revisions.value = [];
+  } finally {
+    revisionsLoading.value = false;
+  }
+}
+
+function requestRollback(revision: SkillRevisionView) {
+  const skill = revisionsSkill.value;
+  if (!skill) return;
+  confirmState.value = {
+    title: `回滚「${skill.name}」到 r${revision.revision}`,
+    body: `将把目录与下载切回版本 ${revision.version}（r${revision.revision}），历史记录不受影响。`,
+    confirmLabel: '回滚',
+    tone: 'primary',
+    run: async () => {
+      try {
+        await api.adminActivateSkillRevision(skill.id!, revision.revision!);
+        toast.success(`已回滚到 r${revision.revision}`);
+        await load();
+        await openRevisions(skill);
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+        }
+      }
+    },
+  };
+}
 
 const confirmState = ref<{
   title: string;
@@ -231,7 +285,7 @@ onMounted(() => {
         <p class="next-skills__hint">
           zip 内只包含一个技能目录（如 <span class="ui-mono">web-scraper/</span>），目录内含
           <span class="ui-mono">SKILL.md</span>（YAML frontmatter：name 与目录名一致、description
-          必填）。包上限 5MB。
+          必填）。包上限 5MB。同名重传将发布新版本（保留历史与旧包，可回滚）。
         </p>
         <div class="next-skills__upload-grid">
           <div class="ui-field">
@@ -318,6 +372,13 @@ onMounted(() => {
             <UiButton
               variant="ghost"
               size="sm"
+              data-testid="skill-revisions"
+              @click="openRevisions(row as SkillView)"
+              >版本</UiButton
+            >
+            <UiButton
+              variant="ghost"
+              size="sm"
               data-testid="skill-access"
               @click="openAccess(row as SkillView)"
               >授权</UiButton
@@ -394,6 +455,57 @@ onMounted(() => {
           >保存</UiButton
         >
       </template>
+    </UiDialog>
+
+    <!-- Version history (I14): rollback activates an older revision -->
+    <UiDialog
+      :open="revisionsVisible"
+      :title="revisionsSkill ? `版本历史 · ${revisionsSkill.name}` : '版本历史'"
+      width="640px"
+      data-testid="skill-revisions-dialog"
+      @update:open="revisionsVisible = false"
+    >
+      <p class="next-skills__hint">
+        同名重传发布新版本并保留历史（含旧包）；回滚即激活旧版本，不产生新版本号。
+      </p>
+      <p v-if="revisionsError" class="ui-form-error">{{ revisionsError }}</p>
+      <UiTable
+        :columns="revisionColumns"
+        :data="revisions"
+        :loading="revisionsLoading"
+        row-key="id"
+        empty-title="暂无版本记录"
+        data-testid="skill-revisions-table"
+      >
+        <template #revision="{ row }">
+          <span class="ui-mono">r{{ (row as SkillRevisionView).revision }}</span>
+        </template>
+        <template #version="{ row }">
+          <span class="ui-mono">v{{ (row as SkillRevisionView).version }}</span>
+        </template>
+        <template #size="{ row }">
+          <span class="ui-num">{{ formatBytes((row as SkillRevisionView).contentBytes ?? 0) }}</span>
+        </template>
+        <template #createdAt="{ row }">
+          {{ formatTime((row as SkillRevisionView).createdAt) }}
+        </template>
+        <template #state="{ row }">
+          <UiStatusBadge
+            :tone="(row as SkillRevisionView).activatedAt ? 'success' : 'neutral'"
+            :label="(row as SkillRevisionView).activatedAt ? '当前版本' : '历史版本'"
+          />
+        </template>
+        <template #actions="{ row }">
+          <UiButton
+            v-if="!(row as SkillRevisionView).activatedAt"
+            variant="ghost"
+            size="sm"
+            data-testid="skill-rollback"
+            @click="requestRollback(row as SkillRevisionView)"
+            >回滚</UiButton
+          >
+        </template>
+      </UiTable>
     </UiDialog>
 
     <UiDialog

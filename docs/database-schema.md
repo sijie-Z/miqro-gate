@@ -320,7 +320,9 @@ alert_rules 类型 CHECK 同步扩展 `CONSUMER_KEY_EXPIRING`（V36 同款模式
 
 ### `skills` / `skill_access` (V16，P2.2 SkillHub)
 
-`skills`：技能目录条目——`name varchar(64)`（kebab-case，= SKILL.md frontmatter name）、`description`、`version`（语义化）、`author`、`license`、`tags text[]`、`examples text[]`（V44，≤10 条 × ≤512 字符上传校验）、`content_zip bytea`（校验后的技能包）、`content_sha256`、`content_bytes`、`status`（`ACTIVE|ARCHIVED`）、`created_by`。唯一 `(tenant_id, name)`。
+`skills`：技能目录条目——`name varchar(64)`（kebab-case，= SKILL.md frontmatter name）、`description`、`version`（语义化）、`author`、`license`、`tags text[]`、`examples text[]`（V44，≤10 条 × ≤512 字符上传校验）、`content_zip bytea`（校验后的技能包）、`content_sha256`、`content_bytes`、`status`（`ACTIVE|ARCHIVED`）、`created_by`。唯一 `(tenant_id, name)`。**I14**：本行始终镜像当前激活修订（`skill_revisions`），目录/下载读取不变。
+
+**`skill_revisions`（V49，I14 版本管理）**：每技能若干不可变包快照——`skill_id`（FK CASCADE）、`revision bigint`（≥1，`UNIQUE(skill_id, revision)`）、`version`、`description`/`author`/`license`/`tags`/`examples`（发布时从 frontmatter 固化，回滚免解包）、`content_zip`/`content_sha256`/`content_bytes`、`created_by`、`created_at`、`activated_at`。部分唯一索引 `uq_skill_active_revision` 保证**每技能至多一个激活修订**；历史永不裁剪；回滚=幂等移动激活指针（不产生新版本号）。迁移把存量技能回填为 r1（激活）。
 
 `skill_access`：下载授权——`skill_id`（ON DELETE CASCADE）、`scope_type`（`TEAM|PROJECT`）、`scope_id`；唯一 `(skill_id, scope_type, scope_id)`。无行 = 公开技能。
 

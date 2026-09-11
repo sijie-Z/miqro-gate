@@ -580,6 +580,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/skills/{skillId}/revisions/{revision}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["activateRevision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/skills/{skillId}/archive": {
         parameters: {
             query?: never;
@@ -1908,6 +1924,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/skills/{skillId}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["revisions_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/services/{serviceId}": {
         parameters: {
             query?: never;
@@ -3106,6 +3138,29 @@ export interface components {
             /** Format: uuid */
             createdBy?: string;
             createdByName?: string;
+        };
+        SkillRevisionView: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            skillId?: string;
+            /** Format: int64 */
+            revision?: number;
+            version?: string;
+            description?: string;
+            author?: string;
+            license?: string;
+            tags?: string[];
+            examples?: string[];
+            contentSha256?: string;
+            /** Format: int64 */
+            contentBytes?: number;
+            /** Format: uuid */
+            createdBy?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            activatedAt?: string;
         };
         InternalService: {
             /** Format: uuid */
@@ -5250,6 +5305,29 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["SkillView"];
+                };
+            };
+        };
+    };
+    activateRevision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skillId: string;
+                revision: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SkillRevisionView"];
                 };
             };
         };
@@ -7975,6 +8053,30 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["CostAllocation"][];
+                };
+            };
+        };
+    };
+    revisions_1: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                skillId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SkillRevisionView"][];
                 };
             };
         };

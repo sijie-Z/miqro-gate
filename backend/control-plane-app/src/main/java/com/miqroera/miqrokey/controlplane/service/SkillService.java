@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.service;
 import com.miqroera.miqrokey.controlplane.dto.SkillView;
 import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.model.Skill;
+import com.miqroera.miqrokey.domain.model.SkillRevision;
 import com.miqroera.miqrokey.domain.model.SkillAccess;
 import com.miqroera.miqrokey.domain.model.Team;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
@@ -33,21 +34,29 @@ import java.util.UUID;
 public class SkillService {
 
     private final SkillRepository skillRepository;
+    private final SkillRevisionService skillRevisionService;
     private final TeamRepository teamRepository;
     private final ProjectRepository projectRepository;
     private final UserRepository userRepository;
     private final AuditService auditService;
 
-    public SkillService(SkillRepository skillRepository, TeamRepository teamRepository,
-            ProjectRepository projectRepository, UserRepository userRepository, AuditService auditService) {
+    public SkillService(SkillRepository skillRepository, SkillRevisionService skillRevisionService,
+            TeamRepository teamRepository, ProjectRepository projectRepository, UserRepository userRepository,
+            AuditService auditService) {
         this.skillRepository = skillRepository;
+        this.skillRevisionService = skillRevisionService;
         this.teamRepository = teamRepository;
         this.projectRepository = projectRepository;
         this.userRepository = userRepository;
         this.auditService = auditService;
     }
 
-    /** Validates and stores a skill package; re-upload replaces the entry. */
+    /**
+     * Validates and stores a skill package. I14 (raw 20 版本管理): a same-name package
+     * publishes the next immutable revision (history kept, old zips preserved,
+     * rollback available) instead of overwriting the entry; a new name creates the
+     * skill and its baseline revision 1.
+     */
     @Transactional
     public SkillView upload(UUID tenantId, UUID adminId, byte[] zipBytes, String version, String requestId) {
         if (version == null || !version.matches("\\d+\\.\\d+\\.\\d+")) {
@@ -59,11 +68,17 @@ public class SkillService {
         } catch (SkillZipValidator.SkillValidationException e) {
             throw new ApiException(HttpStatus.BAD_REQUEST, e.code(), e.getMessage());
         }
+        if (skillRepository.findByName(tenantId, meta.name()).isPresent()) {
+            SkillRevision revision = skillRevisionService.publishValidated(tenantId, adminId, meta, version, zipBytes,
+                    requestId);
+            return toViews(List.of(find(tenantId, revision.skillId()))).get(0);
+        }
         Instant now = Instant.now();
         Skill skill = new Skill(UUID.randomUUID(), tenantId, meta.name(), meta.description(), version, meta.author(),
                 meta.license(), meta.tags(), meta.examples(), zipBytes, sha256Hex(zipBytes), zipBytes.length, "ACTIVE",
                 adminId, 0, now, now);
         Skill stored = skillRepository.upsert(skill);
+        skillRevisionService.recordBaseline(tenantId, adminId, stored, now);
         auditService.record(tenantId, adminId, "SKILL_UPLOAD", "SKILL", stored.id(),
                 AuditSummaries.summary("name", AuditSummaries.sanitize(stored.name()), "version", stored.version()),
                 requestId);
@@ -193,7 +208,8 @@ public class SkillService {
                 .toList();
     }
 
-    private static String sha256Hex(byte[] bytes) {
+    /** Shared with {@link SkillRevisionService} (same package). */
+    static String sha256Hex(byte[] bytes) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
         } catch (Exception e) {

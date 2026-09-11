@@ -22,6 +22,8 @@ export type WebhookDelivery = components['schemas']['DeliveryAttempt'];
 export type McpRouteRule = components['schemas']['McpRouteRule'];
 export type UpsertMcpRouteRuleRequest = components['schemas']['UpsertRequest'];
 export type SkillView = components['schemas']['SkillView'];
+// skill version management (I14): revision history view (metadata only)
+export type SkillRevisionView = components['schemas']['SkillRevisionView'];
 export type AgentView = components['schemas']['AgentView'];
 export type BudgetView = components['schemas']['BudgetView'];
 export type VirtualKeyView = components['schemas']['VirtualKeyView'];

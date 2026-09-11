@@ -66,6 +66,7 @@ import type {
   WebhookEndpointView,
   McpAccessLogEntry,
   McpResiliencePolicy,
+  SkillRevisionView,
 } from '@/types/generated-api';
 import type { components } from '@/types/generated';
 
@@ -552,6 +553,16 @@ export function adminUploadSkill(version: string, zip: Blob): Promise<SkillView>
 
 export function adminArchiveSkill(id: string): Promise<SkillView> {
   return post<SkillView>(`/api/v1/admin/skills/${id}/archive`);
+}
+
+// ---- skill revisions (I14) ----
+
+export function adminListSkillRevisions(id: string, limit = 20): Promise<SkillRevisionView[]> {
+  return get<SkillRevisionView[]>(`/api/v1/admin/skills/${id}/revisions?limit=${limit}`);
+}
+
+export function adminActivateSkillRevision(id: string, revision: number): Promise<SkillRevisionView> {
+  return post<SkillRevisionView>(`/api/v1/admin/skills/${id}/revisions/${revision}/activate`);
 }
 
 export function adminSetSkillAccess(
