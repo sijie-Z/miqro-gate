@@ -12,6 +12,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.UUID;
@@ -68,9 +69,18 @@ public class AuditServiceImpl implements AuditService {
     private static final byte[] GENESIS_HASH = new byte[32]; // all-zero genesis
 
     private final AdminAuditEventRepository repository;
+    private final Clock clock;
 
+    /** Constructor selection is explicit: the clock seam is for tests only. */
+    @org.springframework.beans.factory.annotation.Autowired
     public AuditServiceImpl(AdminAuditEventRepository repository) {
+        this(repository, Clock.systemUTC());
+    }
+
+    /** Test seam: a pinned clock drives {@code created_at} + hash determinism. */
+    public AuditServiceImpl(AdminAuditEventRepository repository, Clock clock) {
         this.repository = repository;
+        this.clock = clock;
     }
 
     @Override
@@ -78,7 +88,14 @@ public class AuditServiceImpl implements AuditService {
     public void record(UUID tenantId, UUID actorId, String action, String targetType, UUID targetId,
             String changeSummary, String requestId) {
 
-        Instant now = Instant.now();
+        // #362: fixed to microseconds BEFORE hashing and persisting. Windows-class
+        // clocks expose 100 ns ticks, and pgjdbc rounds sub-microsecond digits
+        // into PG's microsecond timestamptz (round-half-up) — a pre-lock value
+        // like <sec>.9999996 s was stored as the NEXT millisecond while the hash
+        // covered the original one, so ~1 event in 2000 failed the hash
+        // recomputation under load. Microsecond-aligned instants are stored
+        // exactly, making the persisted timestamp bit-for-bit reproducible.
+        Instant now = Instant.now(clock).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         UUID id = UUID.randomUUID();
 
         // Normalise changeSummary to the exact jsonb text form PostgreSQL will

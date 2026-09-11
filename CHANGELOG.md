@@ -5,6 +5,11 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-11
+- **修复审计链偶发校验失败（#362）**：`AuditServiceImpl.record()` 现在把 `created_at` 先**截到微秒**再参与哈希与落库——
+  此前 `Instant.now()` 携带亚微秒位（Windows 时钟 100ns 步进），pgjdbc 向 PG 微秒列写入时**四舍五入**，个别值
+  （如 `.9999996s`）被进位到下一毫秒 → 校验重算的 `toEpochMilli` 与存储值不符（约 1/2000 事件概率，长跑偶发）。
+  微秒对齐值可被 PG 精确存储，存储时间戳与哈希输入逐位一致。回归：`AuditChainIntegrityTest`
+  新增固定时钟边界用例（`.9999996s`，修复前确定性失败）；修复后该类 7/7，并经 120 轮 × 8 线程并发压测复核。
 - **MCP 访问日志可插拔 sink（#379，I19，raw 16 日志投递）**：批次**落库成功后**旁路扇出到 webhook（POST JSON 数组，
   `aigw.mcp.*` 元数据字段集，可选 Bearer token）与 syslog（RFC 5424，UDP/TCP，facility 可配，MSG 为同字段集
   JSON）；`miqrokey.gateway.mcp-log.forward.*` 部署级开关（默认全关）；重入队批次不重复投递、sink 失败仅节流
