@@ -5,6 +5,9 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-11
+- **默认配额语义提示 + 矩阵尾项核销（#391）**：默认配额模板面板补常显提示「变更或停用只影响之后新建的用户；
+  已存在（含自动分配）的配额规则保持不变，停用也不会删除它们」（doc 22 三条语义收齐）；Skill「编辑」核定=
+  重传即发布修订（I14）为编辑路径，直接元数据编辑因与「SKILL.md 为事实源」冲突不做（矩阵 20 行记录）。
 - **审计列表资源名称解析（#389，doc 27）**：`GET /admin/audit-events` 每行新增**可空** `targetName`——按页内
   `(targetType, targetId)` 每类型一条 `IN` 查询批量解析（租户内、只读、无 N+1；USER/MCP_SERVICE/MCP_TOOL/SKILL/
   VIRTUAL_KEY/TEAM/SERVICE/PROJECT/CONSUMER/UPSTREAM_CREDENTIAL/SUBSCRIPTION/AGENT/WEBHOOK/ALERT_RULE/TENANT），
