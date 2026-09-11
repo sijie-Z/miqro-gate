@@ -78,6 +78,7 @@ const form = ref({
   description: '',
   endpoint: '',
   transport: 'STREAMABLE_HTTP',
+  upstreamTimeoutMs: '',
 });
 const formError = ref('');
 const submitting = ref(false);
@@ -94,6 +95,43 @@ const configForm = ref({
 });
 const configSaving = ref(false);
 const configError = ref('');
+
+// I20 follow-up: per-service data-plane upstream budget (doc 135906 超时时间).
+const timeoutService = ref<McpServiceView | null>(null);
+const timeoutVisible = ref(false);
+const timeoutForm = ref({ upstreamTimeoutMs: '' });
+const timeoutSaving = ref(false);
+const timeoutError = ref('');
+
+function openTimeout(service: McpServiceView) {
+  timeoutService.value = service;
+  timeoutForm.value = { upstreamTimeoutMs: String(service.upstreamTimeoutMs ?? 60000) };
+  timeoutError.value = '';
+  timeoutVisible.value = true;
+}
+
+async function saveTimeout() {
+  if (!timeoutService.value) {
+    return;
+  }
+  const value = Number(timeoutForm.value.upstreamTimeoutMs);
+  if (!Number.isFinite(value) || value < 1000 || value > 600000) {
+    timeoutError.value = '上游超时必须为 1000–600000 毫秒。';
+    return;
+  }
+  timeoutSaving.value = true;
+  timeoutError.value = '';
+  try {
+    await api.adminSetMcpServiceUpstreamTimeout(timeoutService.value.id!, value);
+    timeoutVisible.value = false;
+    toast.success('上游预算已更新');
+    await load();
+  } catch (error) {
+    timeoutError.value = errorText(error, '保存失败，请稍后重试。');
+  } finally {
+    timeoutSaving.value = false;
+  }
+}
 
 // #320 upstream backend auth: the secret is write-only; API_KEY requires a
 // fresh value on every save, VISITOR clears any stored secret.
@@ -281,9 +319,18 @@ async function registerService() {
       description: form.value.description.trim() || undefined,
       endpoint: form.value.endpoint.trim(),
       transport: form.value.transport,
+      upstreamTimeoutMs: form.value.upstreamTimeoutMs.trim()
+        ? Number(form.value.upstreamTimeoutMs)
+        : undefined,
     });
     registering.value = false;
-    form.value = { name: '', description: '', endpoint: '', transport: 'STREAMABLE_HTTP' };
+    form.value = {
+      name: '',
+      description: '',
+      endpoint: '',
+      transport: 'STREAMABLE_HTTP',
+      upstreamTimeoutMs: '',
+    };
     toast.success('MCP 服务已注册');
     await load();
   } catch (error) {
@@ -1215,6 +1262,12 @@ async function saveResilience() {
               data-testid="mcp-create-endpoint"
             />
           </div>
+          <UiInput
+            v-model="form.upstreamTimeoutMs"
+            label="上游预算（毫秒，可选）"
+            placeholder="默认 60000；范围 1000–600000"
+            data-testid="mcp-create-timeout"
+          />
           <p v-if="formError" class="ui-form-error">{{ formError }}</p>
           <div class="next-mcp__actions">
             <UiButton
@@ -1307,6 +1360,13 @@ async function saveResilience() {
             <UiButton
               variant="ghost"
               size="sm"
+              data-testid="mcp-upstream-timeout"
+              @click="openTimeout(row as McpServiceView)"
+              >预算</UiButton
+            >
+            <UiButton
+              variant="ghost"
+              size="sm"
               data-testid="mcp-health-config"
               @click="openConfig(row as McpServiceView)"
               >健康检查</UiButton
@@ -1339,6 +1399,37 @@ async function saveResilience() {
         </template>
       </UiTable>
     </section>
+
+    <!-- Upstream budget (I20): the data-plane per-attempt timeout -->
+    <UiDialog
+      :open="timeoutVisible"
+      :title="timeoutService ? `上游预算 · ${timeoutService.name}` : '上游预算'"
+      width="440px"
+      data-testid="mcp-timeout-dialog"
+      @update:open="timeoutVisible = false"
+    >
+      <p class="next-mcp__hint">
+        数据面每次上游尝试的超时（毫秒）。预算耗尽将返回 504 mcp_upstream_timeout；启用慢调用熔断时，预算须高于慢调用阈值。
+      </p>
+      <UiInput
+        v-model="timeoutForm.upstreamTimeoutMs"
+        label="上游预算（毫秒）"
+        required
+        type="number"
+        data-testid="mcp-timeout-input"
+      />
+      <p v-if="timeoutError" class="ui-form-error">{{ timeoutError }}</p>
+      <template #footer>
+        <UiButton variant="ghost" @click="timeoutVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="timeoutSaving"
+          data-testid="mcp-timeout-save"
+          @click="saveTimeout"
+          >保存</UiButton
+        >
+      </template>
+    </UiDialog>
 
     <!-- Health check configuration -->
     <UiDialog

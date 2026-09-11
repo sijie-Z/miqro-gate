@@ -668,8 +668,19 @@ export function adminCreateMcpService(body: {
   failThreshold?: number;
   recoverThreshold?: number;
   checkPath?: string;
+  upstreamTimeoutMs?: number;
 }): Promise<McpServiceView> {
   return post<McpServiceView>('/api/v1/admin/mcp-services', body);
+}
+
+/** I20 follow-up: per-service data-plane upstream budget (doc 135906). */
+export function adminSetMcpServiceUpstreamTimeout(
+  id: string,
+  upstreamTimeoutMs: number,
+): Promise<McpServiceView> {
+  return put<McpServiceView>(`/api/v1/admin/mcp-services/${id}/upstream-timeout`, {
+    upstreamTimeoutMs,
+  });
 }
 
 export function adminSetMcpStatus(id: string, status: string): Promise<McpServiceView> {
