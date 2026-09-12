@@ -6,12 +6,20 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-12 自主轮（PR 自动 AI 审查接入：#410）` — `IN_PROGRESS`
+- Current goal: `2026-09-12 自主轮（全局异常语义修复：#412）` — `IN_PROGRESS`
 - Goal status: `IN_PROGRESS（develop @ 2260f40（rc.15 tag）；**rc.15 已发布（2026-09-12）**——被动健康（#397）
   落地 + 六项缺陷修复（#399/#401/#403/#404/#407 自查轮，全部红→绿闭环）；I 序列 I1–I21 DONE；CI 无红灯；
   待办：矩阵 §3 裁决项（等 leader/外部：消费者 HMAC、内容安全、F11 复活、F25/F27/F28/F29、#245）、
   #211 真机凭证（BLOCKED）、F32/F33 平台接口（BLOCKED）、F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态））`
 - Last updated: `2026-09-12 CST`
+
+## 会话交接点 2026-09-12（全局异常语义修复：#412）
+
+- **#412（本 PR，bug，自查发现）**：`GlobalExceptionHandler` 的 `Exception` 兜底会抢先吞掉框架 4xx ——
+  未知路径/错方法/缺参/不支持介质全部 **500 + ERROR 日志噪音**；未局部映射的约束冲突/死锁同样 500。
+  修复：补 6 个 handler（404/405/400/415 + 409 `RESOURCE_CONFLICT` / 409 `CONCURRENT_MODIFICATION`，
+  响应永不携带 SQL）。测试：单元 3（含不泄露断言）+ IT 2，**修复前红灯精确复现两处 500 现场**。
+- 下一批候选：矩阵 §3 其余（等 leader/外部：HMAC/内容安全/F11 复活/F25/F27/F28/F29、#245、F32/F33、#211）。
 
 ## 会话交接点 2026-09-12（PR 自动 AI 审查接入：#410）
 

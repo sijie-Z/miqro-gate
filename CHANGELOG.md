@@ -39,6 +39,12 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   SHA 固定）——默认未配置 `ANTHROPIC_API_KEY` 时全部步骤跳过、对任何 PR 零影响；配置后每个非草稿 PR
   自动获得一次中文审查（仓库红线核对 + 缺陷/安全/边界视角 + 测试/流程检查 + `track_progress` 进度 +
   行内批注）；同一 PR 并发去重、20 分钟超时上限。停用=删除 secret。
+- **修复全局异常语义（#412）**：`GlobalExceptionHandler` 补 6 个兜底 handler——未知路径→404 `NOT_FOUND`、
+  错方法→405 `METHOD_NOT_ALLOWED`、缺必填参数→400 `PARAM_INVALID`、不支持 Content-Type→415、
+  未局部映射的约束冲突→409 `RESOURCE_CONFLICT`、死锁/锁失败→409 `CONCURRENT_MODIFICATION`
+  （此前全部被 `Exception` 兜底吞成 **500 INTERNAL_ERROR + ERROR 日志噪音**；响应体永不携带 SQL）。
+  服务内 14 处局部映射保持不变。测试：单元 3（含不泄露 SQL 断言）+ IT 2（认证后未知路径 404、
+  错方法 405；**修复前红灯精确复现两处 500 现场**）。
 
 ### 2026-09-11
 - **资源删除前置依赖检查（#393，I21，腾讯模型 API 删除语义）**：删除仍被引用的资源返回 **409 `RESOURCE_IN_USE`**
