@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.persistence.repository;
 
 import com.miqroera.miqrokey.domain.model.McpTool;
 import com.miqroera.miqrokey.domain.repository.McpToolRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -73,7 +74,7 @@ public class McpToolRepositoryImpl implements McpToolRepository {
                 """, new MapSqlParameterSource("status", status).addValue("id", toolId).addValue("tenantId", tenantId)
                 .addValue("expectedVersion", expectedVersion));
         if (rows != 1) {
-            throw new IllegalStateException("Optimistic lock failure: mcp tool " + toolId);
+            throw new OptimisticLockingFailureException("Optimistic lock failure: mcp tool " + toolId);
         }
         return findByIdAndTenantId(toolId, tenantId).orElseThrow();
     }

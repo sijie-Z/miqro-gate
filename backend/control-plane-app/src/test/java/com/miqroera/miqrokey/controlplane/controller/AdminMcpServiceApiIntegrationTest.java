@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
+import com.miqroera.miqrokey.controlplane.service.McpHealthChecker;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import jakarta.servlet.http.Cookie;
@@ -22,8 +23,14 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -59,6 +66,8 @@ class AdminMcpServiceApiIntegrationTest {
     ObjectMapper objectMapper;
     @Autowired
     NamedParameterJdbcTemplate jdbc;
+    @Autowired
+    McpHealthChecker healthChecker;
 
     private Cookie sessionCookie;
     private Cookie csrfCookie;
@@ -220,5 +229,64 @@ class AdminMcpServiceApiIntegrationTest {
                 .content("{\"name\":\"bad-budget\",\"endpoint\":\"https://bad.example\","
                         + "\"upstreamTimeoutMs\":100}"))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MCP_TIMEOUT_INVALID"));
+    }
+
+    @Test
+    @DisplayName("a health-probe cycle writes telemetry only — version stays put and a status switch still succeeds (#415)")
+    void probeCycleDoesNotRaceAdminEdits() throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/mcp-services").cookie(sessionCookie, csrfCookie)
+                        .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"probe-mcp\",\"endpoint\":\"https://probe.internal.example\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String id = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
+
+        healthChecker.checkAll();
+
+        mockMvc.perform(get("/api/v1/admin/mcp-services/" + id).cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.version").value(0)).andExpect(jsonPath("$.healthCheckedAt").isNotEmpty())
+                .andExpect(jsonPath("$.consecutiveFailures").value(1));
+        mockMvc.perform(post("/api/v1/admin/mcp-services/" + id + "/status?status=OFFLINE")
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("OFFLINE"));
+    }
+
+    @Test
+    @DisplayName("an admin edit losing the optimistic lock is 409 CONCURRENT_MODIFICATION, never a 500 (#415)")
+    void concurrentEditConflictMapsTo409() throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/mcp-services").cookie(sessionCookie, csrfCookie)
+                        .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"race-mcp\",\"endpoint\":\"https://race.internal.example\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String id = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
+
+        // T2 (this connection) bumps the version WITHOUT committing — the row
+        // lock is held. T1's status switch reads version 0, then blocks on that
+        // lock in its version-guarded UPDATE; after the commit the UPDATE
+        // re-evaluates against version 1 and loses — a retry-shaped conflict,
+        // never a 500.
+        var dataSource = jdbc.getJdbcTemplate().getDataSource();
+        ExecutorService io = Executors.newSingleThreadExecutor();
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try (PreparedStatement ps = conn
+                    .prepareStatement("UPDATE mcp_services SET version = version + 1 WHERE id = ?")) {
+                ps.setObject(1, UUID.fromString(id));
+                ps.executeUpdate();
+            }
+            Future<Integer> status = io.submit(() -> mockMvc
+                    .perform(post("/api/v1/admin/mcp-services/" + id + "/status?status=OFFLINE")
+                            .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken))
+                    .andReturn().getResponse().getStatus());
+            Thread.sleep(500);
+            org.assertj.core.api.Assertions.assertThat(status.isDone()).as("must wait on the row lock").isFalse();
+            conn.commit();
+            org.assertj.core.api.Assertions.assertThat(status.get(15, TimeUnit.SECONDS)).isEqualTo(409);
+        } finally {
+            io.shutdownNow();
+        }
+        mockMvc.perform(get("/api/v1/admin/mcp-services/" + id).cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ONLINE")).andExpect(jsonPath("$.version").value(1));
     }
 }

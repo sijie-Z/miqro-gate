@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.persistence.repository;
 import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.model.ProjectStatus;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -82,7 +83,7 @@ public class ProjectRepositoryImpl implements ProjectRepository {
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """, params);
         if (rows != 1)
-            throw new IllegalStateException("Optimistic lock failure: project " + project.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: project " + project.id());
         return project;
     }
 

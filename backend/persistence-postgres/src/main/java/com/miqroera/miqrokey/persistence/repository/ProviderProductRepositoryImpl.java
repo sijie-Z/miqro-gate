@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.persistence.repository;
 
 import com.miqroera.miqrokey.domain.model.*;
 import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -88,7 +89,7 @@ public class ProviderProductRepositoryImpl implements ProviderProductRepository 
                 "UPDATE provider_products SET product_code = :productCode, display_name = :displayName, billing_mode = :billingMode, plan_scope = :planScope, credential_topology = :credentialTopology, quota_topology = :quotaTopology, implementation_status = :implementationStatus, version = version + 1, updated_at = :updatedAt WHERE id = :id AND version = :expectedVersion",
                 params);
         if (rows != 1)
-            throw new IllegalStateException("Optimistic lock failure: product " + product.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: product " + product.id());
         return product;
     }
 

@@ -4,6 +4,7 @@ import com.miqroera.miqrokey.domain.model.VirtualKey;
 import com.miqroera.miqrokey.domain.model.VirtualKeyPurpose;
 import com.miqroera.miqrokey.domain.model.VirtualKeyStatus;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -136,7 +137,7 @@ public class VirtualKeyRepositoryImpl implements VirtualKeyRepository {
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """, params);
         if (rows != 1)
-            throw new IllegalStateException("Optimistic lock failure: virtual key " + key.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: virtual key " + key.id());
         return key;
     }
 

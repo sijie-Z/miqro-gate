@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.persistence.repository;
 
 import com.miqroera.miqrokey.domain.model.*;
 import com.miqroera.miqrokey.domain.repository.UpstreamSubscriptionRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -84,7 +85,7 @@ public class UpstreamSubscriptionRepositoryImpl implements UpstreamSubscriptionR
                 "UPDATE upstream_subscriptions SET name = :name, billing_mode = :billingMode, plan_scope = :planScope, status = :status, last_status_sync_at = :lastStatusSyncAt, status_source = :statusSource, version = version + 1, updated_at = :updatedAt WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion",
                 params);
         if (rows != 1)
-            throw new IllegalStateException("Optimistic lock failure: subscription " + sub.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: subscription " + sub.id());
         return sub;
     }
 

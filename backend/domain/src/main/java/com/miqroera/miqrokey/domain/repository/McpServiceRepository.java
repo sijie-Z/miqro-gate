@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.domain.repository;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.model.McpService;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -22,7 +23,16 @@ public interface McpServiceRepository {
     List<McpService> findAllOnlineByTenantId(UUID tenantId);
 
     /**
-     * Replaces the full row (status switch or health update with optimistic lock).
+     * Health telemetry write (#415, mirrors {@code InternalServiceRepository}):
+     * health columns only — no version check and no version bump — so the probe
+     * cycle never races an admin edit that runs under optimistic locking.
+     */
+    McpService updateHealth(UUID tenantId, UUID serviceId, String healthStatus, Instant checkedAt,
+            int consecutiveFailures, int consecutiveSuccesses);
+
+    /**
+     * Replaces the full row (status switch and admin edits with optimistic lock;
+     * health telemetry goes through {@link #updateHealth}).
      */
     McpService update(McpService service, long expectedVersion);
 

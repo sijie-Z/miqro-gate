@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.service;
 import com.miqroera.miqrokey.domain.model.InternalService;
 import com.miqroera.miqrokey.domain.repository.InternalServiceRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -89,7 +90,7 @@ public class AdminServiceService {
     private InternalService switchStatus(UUID tenantId, UUID serviceId, String status) {
         try {
             return serviceRepository.updateStatus(tenantId, serviceId, status);
-        } catch (IllegalStateException e) {
+        } catch (OptimisticLockingFailureException e) {
             throw new ApiException(HttpStatus.CONFLICT, "SERVICE_STATE_CONFLICT", "并发状态变更，请刷新后重试。");
         }
     }
@@ -112,7 +113,7 @@ public class AdminServiceService {
         InternalService saved;
         try {
             saved = serviceRepository.update(updated, service.version());
-        } catch (IllegalStateException e) {
+        } catch (OptimisticLockingFailureException e) {
             throw new ApiException(HttpStatus.CONFLICT, "SERVICE_STATE_CONFLICT", "并发状态变更，请刷新后重试。");
         }
         auditService.record(tenantId, adminId, "SERVICE_HEALTH_UPDATE", "SERVICE", serviceId,

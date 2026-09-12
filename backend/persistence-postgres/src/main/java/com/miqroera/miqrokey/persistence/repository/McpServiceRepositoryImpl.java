@@ -3,12 +3,14 @@ package com.miqroera.miqrokey.persistence.repository;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.model.McpService;
 import com.miqroera.miqrokey.domain.repository.McpServiceRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.sql.Timestamp;
 import java.util.List;
 import java.util.Optional;
@@ -80,6 +82,22 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
 
     @Override
     @Transactional
+    public McpService updateHealth(UUID tenantId, UUID serviceId, String healthStatus, Instant checkedAt,
+            int consecutiveFailures, int consecutiveSuccesses) {
+        jdbc.update("""
+                UPDATE mcp_services
+                SET health_status = :healthStatus, health_checked_at = :checkedAt,
+                    consecutive_failures = :failures, consecutive_successes = :successes, updated_at = now()
+                WHERE id = :id AND tenant_id = :tenantId
+                """,
+                new MapSqlParameterSource("healthStatus", healthStatus).addValue("id", serviceId)
+                        .addValue("tenantId", tenantId).addValue("checkedAt", java.sql.Timestamp.from(checkedAt))
+                        .addValue("failures", consecutiveFailures).addValue("successes", consecutiveSuccesses));
+        return findByIdAndTenantId(serviceId, tenantId).orElseThrow();
+    }
+
+    @Override
+    @Transactional
     public McpService update(McpService service, long expectedVersion) {
         int rows = jdbc.update("""
                 UPDATE mcp_services
@@ -93,7 +111,7 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """, params(service).addValue("expectedVersion", expectedVersion));
         if (rows != 1) {
-            throw new IllegalStateException("Optimistic lock failure: mcp service " + service.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: mcp service " + service.id());
         }
         return findByIdAndTenantId(service.id(), service.tenantId()).orElseThrow();
     }

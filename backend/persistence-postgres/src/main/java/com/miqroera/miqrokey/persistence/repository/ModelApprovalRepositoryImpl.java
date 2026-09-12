@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.persistence.repository;
 import com.miqroera.miqrokey.domain.model.ModelApproval;
 import com.miqroera.miqrokey.domain.model.ModelApprovalStatus;
 import com.miqroera.miqrokey.domain.repository.ModelApprovalRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -105,7 +106,7 @@ public class ModelApprovalRepositoryImpl implements ModelApprovalRepository {
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """, params);
         if (rows != 1)
-            throw new IllegalStateException("Optimistic lock failure: model approval " + approval.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: model approval " + approval.id());
         return approval;
     }
 

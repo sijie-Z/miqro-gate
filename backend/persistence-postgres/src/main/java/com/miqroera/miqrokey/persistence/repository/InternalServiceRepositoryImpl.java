@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.persistence.repository;
 
 import com.miqroera.miqrokey.domain.model.InternalService;
 import com.miqroera.miqrokey.domain.repository.InternalServiceRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -81,7 +82,7 @@ public class InternalServiceRepositoryImpl implements InternalServiceRepository 
                 """,
                 new MapSqlParameterSource("status", status).addValue("id", serviceId).addValue("tenantId", tenantId));
         if (rows != 1) {
-            throw new IllegalStateException("Concurrent status change: service " + serviceId);
+            throw new OptimisticLockingFailureException("Concurrent status change: service " + serviceId);
         }
         return findByIdAndTenantId(serviceId, tenantId).orElseThrow();
     }
@@ -116,7 +117,7 @@ public class InternalServiceRepositoryImpl implements InternalServiceRepository 
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """, params(service).addValue("expectedVersion", expectedVersion));
         if (rows != 1) {
-            throw new IllegalStateException("Optimistic lock failure: service " + service.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: service " + service.id());
         }
         return findByIdAndTenantId(service.id(), service.tenantId()).orElseThrow();
     }

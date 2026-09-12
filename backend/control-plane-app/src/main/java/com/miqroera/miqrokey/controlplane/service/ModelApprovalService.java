@@ -18,6 +18,7 @@ import com.miqroera.miqrokey.domain.repository.ProjectRepository;
 import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -261,7 +262,7 @@ public class ModelApprovalService {
     private ModelApproval optimisticUpdate(ModelApproval next) {
         try {
             return approvalRepository.update(next);
-        } catch (IllegalStateException e) {
+        } catch (OptimisticLockingFailureException e) {
             // Concurrent review lost the optimistic lock — the request was already
             // decided by someone else.
             throw new ApiException(HttpStatus.CONFLICT, "ALREADY_REVIEWED", "This request was already reviewed");

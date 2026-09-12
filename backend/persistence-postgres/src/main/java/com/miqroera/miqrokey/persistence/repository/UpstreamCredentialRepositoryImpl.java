@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.persistence.repository;
 import com.miqroera.miqrokey.domain.model.CredentialStatus;
 import com.miqroera.miqrokey.domain.model.UpstreamCredential;
 import com.miqroera.miqrokey.domain.repository.UpstreamCredentialRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -90,7 +91,7 @@ public class UpstreamCredentialRepositoryImpl implements UpstreamCredentialRepos
                 "UPDATE upstream_credentials SET credential_name = :credentialName, secret_fingerprint = :secretFingerprint, status = :status, active_version_id = :activeVersionId, last_validated_at = :lastValidatedAt, last_validation_error = :lastValidationError, version = version + 1, updated_at = :updatedAt WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion",
                 params);
         if (rows != 1)
-            throw new IllegalStateException("Optimistic lock failure: credential " + credential.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: credential " + credential.id());
         return credential;
     }
 
