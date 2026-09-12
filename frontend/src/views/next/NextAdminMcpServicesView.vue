@@ -489,6 +489,9 @@ async function saveConfig() {
 
 // ---- tools ----
 
+// #407：目标切换的过期响应防护（#399 序号守卫模式，全量收口）。
+let toolsRequestSeq = 0;
+
 async function openTools(service: McpServiceView) {
   toolsService.value = service;
   tools.value = [];
@@ -500,12 +503,22 @@ async function openTools(service: McpServiceView) {
   syncReport.value = null;
   syncError.value = '';
   syncBusy.value = false;
+  const seq = ++toolsRequestSeq;
   try {
-    tools.value = await api.adminListMcpTools(service.id!);
+    const list = await api.adminListMcpTools(service.id!);
+    if (seq !== toolsRequestSeq) {
+      return;
+    }
+    tools.value = list;
   } catch (error) {
+    if (seq !== toolsRequestSeq) {
+      return;
+    }
     toolsError.value = errorText(error, '加载工具失败。');
   } finally {
-    toolsLoading.value = false;
+    if (seq === toolsRequestSeq) {
+      toolsLoading.value = false;
+    }
   }
 }
 
@@ -573,6 +586,9 @@ async function createTool() {
   }
 }
 
+// #407 序号守卫。
+let toolRetryRequestSeq = 0;
+
 async function openToolRetry(tool: McpToolView) {
   if (!toolsService.value) {
     return;
@@ -581,8 +597,12 @@ async function openToolRetry(tool: McpToolView) {
   toolRetryVisible.value = true;
   toolRetryLoading.value = true;
   toolRetryError.value = '';
+  const seq = ++toolRetryRequestSeq;
   try {
     const policy = await api.getMcpToolRetryPolicy(toolsService.value.id!, tool.id!);
+    if (seq !== toolRetryRequestSeq) {
+      return;
+    }
     toolRetryForm.value = {
       retryEnabled: policy.retryEnabled,
       retryMax: String(policy.retryMax),
@@ -590,9 +610,14 @@ async function openToolRetry(tool: McpToolView) {
       idempotencyConfirmed: policy.idempotencyConfirmed,
     };
   } catch (error) {
+    if (seq !== toolRetryRequestSeq) {
+      return;
+    }
     toolRetryError.value = errorText(error, '加载工具重试策略失败。');
   } finally {
-    toolRetryLoading.value = false;
+    if (seq === toolRetryRequestSeq) {
+      toolRetryLoading.value = false;
+    }
   }
 }
 
@@ -625,6 +650,9 @@ async function saveToolRetry() {
   }
 }
 
+// #407 序号守卫。
+let revisionsRequestSeq = 0;
+
 async function openToolRevisions(tool: McpToolView) {
   if (!toolsService.value) {
     return;
@@ -634,12 +662,22 @@ async function openToolRevisions(tool: McpToolView) {
   revisionsError.value = '';
   revisionsVisible.value = true;
   revisionsLoading.value = true;
+  const seq = ++revisionsRequestSeq;
   try {
-    revisions.value = await api.adminListToolRevisions(toolsService.value.id!, tool.id!);
+    const list = await api.adminListToolRevisions(toolsService.value.id!, tool.id!);
+    if (seq !== revisionsRequestSeq) {
+      return;
+    }
+    revisions.value = list;
   } catch (error) {
+    if (seq !== revisionsRequestSeq) {
+      return;
+    }
     revisionsError.value = errorText(error, '加载版本历史失败。');
   } finally {
-    revisionsLoading.value = false;
+    if (seq === revisionsRequestSeq) {
+      revisionsLoading.value = false;
+    }
   }
 }
 
@@ -807,8 +845,12 @@ async function openAccess(service: McpServiceView) {
   await loadAccess();
 }
 
+// #407 序号守卫。
+let accessRequestSeq = 0;
+
 async function loadAccess() {
   if (!accessService.value) return;
+  const seq = ++accessRequestSeq;
   accessLoading.value = true;
   accessError.value = '';
   try {
@@ -816,6 +858,7 @@ async function loadAccess() {
       api.getMcpServiceAccess(accessService.value.id!),
       api.listApiConsumers(),
     ]);
+    if (seq !== accessRequestSeq) return;
     access.value = view;
     consumers.value = consumerList;
     // Access 视图由已落库的服务/消费者/授权行构建，mode、consumer/tool 的
@@ -832,9 +875,10 @@ async function loadAccess() {
           ? '白名单：仅名单内的 API 消费者可调用该服务。'
           : '黑名单：名单内的 API 消费者被禁止调用，其余放行。';
   } catch (err) {
+    if (seq !== accessRequestSeq) return;
     accessError.value = errorText(err, '加载失败');
   } finally {
-    accessLoading.value = false;
+    if (seq === accessRequestSeq) accessLoading.value = false;
   }
 }
 
@@ -988,18 +1032,31 @@ function conditionText(rule: McpRouteRule): string {
   return parts.join(' · ');
 }
 
+// #407 序号守卫。
+let rulesRequestSeq = 0;
+
 async function openRoutes(service: McpServiceView) {
   rulesService.value = service;
   rules.value = [];
   rulesError.value = '';
   rulesVisible.value = true;
   rulesLoading.value = true;
+  const seq = ++rulesRequestSeq;
   try {
-    rules.value = await api.adminListMcpRouteRules(service.id!);
+    const list = await api.adminListMcpRouteRules(service.id!);
+    if (seq !== rulesRequestSeq) {
+      return;
+    }
+    rules.value = list;
   } catch (error) {
+    if (seq !== rulesRequestSeq) {
+      return;
+    }
     rulesError.value = errorText(error, '加载路由规则失败。');
   } finally {
-    rulesLoading.value = false;
+    if (seq === rulesRequestSeq) {
+      rulesLoading.value = false;
+    }
   }
 }
 
@@ -1192,13 +1249,20 @@ const RETRY_CONDITION_LABELS: Record<string, string> = {
   TIMEOUT: '请求超时',
 };
 
+// #407 序号守卫。
+let resilienceRequestSeq = 0;
+
 async function openResilience(service: McpServiceView) {
   resilienceService.value = service;
   resilienceOpen.value = true;
   resilienceLoading.value = true;
   resilienceError.value = '';
+  const seq = ++resilienceRequestSeq;
   try {
     const policy = await api.getMcpServiceResilience(service.id!);
+    if (seq !== resilienceRequestSeq) {
+      return;
+    }
     resilience.value = policy;
     // 韧性策略恒为完整快照（无记录时后端返回全默认 disabled 策略）。
     rForm.value = {
@@ -1221,9 +1285,10 @@ async function openResilience(service: McpServiceView) {
       breakerSkipRetry: policy.breakerSkipRetry!,
     };
   } catch (error) {
+    if (seq !== resilienceRequestSeq) return;
     resilienceError.value = error instanceof ApiError ? error.message : '读取韧性配置失败';
   } finally {
-    resilienceLoading.value = false;
+    if (seq === resilienceRequestSeq) resilienceLoading.value = false;
   }
 }
 

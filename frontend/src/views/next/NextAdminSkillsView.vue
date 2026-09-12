@@ -62,18 +62,31 @@ const revisionColumns = [
   { key: 'actions', title: '操作', width: '90px', align: 'center' as const },
 ];
 
+// #407：目标切换的过期响应防护（#399 序号守卫模式）。
+let skillRevisionsRequestSeq = 0;
+
 async function openRevisions(skill: SkillView) {
   revisionsSkill.value = skill;
   revisionsVisible.value = true;
   revisionsError.value = '';
   revisionsLoading.value = true;
+  const seq = ++skillRevisionsRequestSeq;
   try {
-    revisions.value = await api.adminListSkillRevisions(skill.id!);
+    const list = await api.adminListSkillRevisions(skill.id!);
+    if (seq !== skillRevisionsRequestSeq) {
+      return;
+    }
+    revisions.value = list;
   } catch (error) {
+    if (seq !== skillRevisionsRequestSeq) {
+      return;
+    }
     revisionsError.value = error instanceof ApiError ? error.message : '加载失败，请稍后重试。';
     revisions.value = [];
   } finally {
-    revisionsLoading.value = false;
+    if (seq === skillRevisionsRequestSeq) {
+      revisionsLoading.value = false;
+    }
   }
 }
 
