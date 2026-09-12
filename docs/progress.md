@@ -6,12 +6,20 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-12 自主轮（管理面窗口切换竞态修复：#399）` — `IN_PROGRESS`
+- Current goal: `2026-09-12 自主轮（访问日志转发挂起免疫：#401）` — `IN_PROGRESS`
 - Goal status: `IN_PROGRESS（develop @ 704c71d（rc.14 tag）；**rc.14 已发布（2026-09-12）**——I 序列 I1–I21 全部
   DONE + 官方文档直读吸收（#394）；CI 无红灯；待办：矩阵 §3 裁决项（等 leader/外部：消费者 HMAC、内容安全
   建议不做、F11 复活对齐、被动健康已落地（#397）、F25/F27/F28/F29、#245）、#211 真机凭证（BLOCKED）、F32/F33 平台
   接口（BLOCKED）、F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态））`
 - Last updated: `2026-09-12 CST`
+
+## 会话交接点 2026-09-12（访问日志转发挂起免疫：#401）
+
+- **#401（本 PR，bug，自查发现）**：I19 转发 sink 挂起会拖垮访问日志管线——TCP syslog 写阻塞无上界且不可中断，
+  唯一 flush 调度线程被挂死后**后续批次不再落库、队列打满丢弃**（catch 不到 hang）。修复：队列级
+  `TimeBoundedForwarder` 硬截止包装（守护线程 + `Future.get`；连续超时 ≥3 进 60s 冷却；挂起线程最坏泄漏
+  一个有界守护线程，flush 管线存活）；webhook 请求超时改接配置值。测试：包装器 4 + 队列挂起隔离 1。
+- 下一批候选：矩阵 §3 其余（等 leader/外部：HMAC/内容安全/F11 复活/F25/F27/F28/F29、#245、F32/F33、#211）。
 
 ## 会话交接点 2026-09-12（管理面窗口切换竞态修复：#399）
 

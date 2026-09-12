@@ -34,6 +34,15 @@ import java.util.List;
         McpAccessLogConfig.McpLogForwardProperties.class})
 public class McpAccessLogConfig {
 
+    /**
+     * #401 forwarder deadlines: the webhook deadline covers its own connect +
+     * request bounds (configured timeout + headroom); the syslog deadline covers a
+     * 3s connect plus the write that otherwise has no timeout at all.
+     */
+    static final long WEBHOOK_DEADLINE_HEADROOM_MS = 5_000;
+
+    static final long SYSLOG_DEADLINE_MS = 15_000;
+
     /** Bounded-queue tuning: {@code miqrokey.gateway.mcp-log.*}. */
     @ConfigurationProperties(prefix = "miqrokey.gateway.mcp-log")
     public record McpAccessLogProperties(@DefaultValue("4096") int capacity,
@@ -76,12 +85,17 @@ public class McpAccessLogConfig {
         List<McpAccessLogForwarder> mcpAccessLogForwarders(McpLogForwardProperties props, ObjectMapper objectMapper) {
             List<McpAccessLogForwarder> forwarders = new ArrayList<>();
             if (props.webhookUrl() != null && !props.webhookUrl().isBlank()) {
-                forwarders.add(new WebhookMcpAccessLogForwarder(props.webhookUrl(), props.webhookToken(),
-                        props.webhookTimeoutMs(), objectMapper));
+                forwarders.add(new TimeBoundedForwarder(
+                        new WebhookMcpAccessLogForwarder(props.webhookUrl(), props.webhookToken(),
+                                props.webhookTimeoutMs(), objectMapper),
+                        props.webhookTimeoutMs() + WEBHOOK_DEADLINE_HEADROOM_MS));
             }
             if (props.syslogHost() != null && !props.syslogHost().isBlank()) {
-                forwarders.add(new SyslogMcpAccessLogForwarder(props.syslogHost(), props.syslogPort(),
-                        props.syslogProtocol(), props.syslogFacility(), objectMapper));
+                forwarders
+                        .add(new TimeBoundedForwarder(
+                                new SyslogMcpAccessLogForwarder(props.syslogHost(), props.syslogPort(),
+                                        props.syslogProtocol(), props.syslogFacility(), objectMapper),
+                                SYSLOG_DEADLINE_MS));
             }
             return List.copyOf(forwarders);
         }
