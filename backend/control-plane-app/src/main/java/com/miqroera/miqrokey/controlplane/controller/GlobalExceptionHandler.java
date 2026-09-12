@@ -8,14 +8,20 @@ import com.miqroera.miqrokey.controlplane.service.ResourceInUseException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -139,6 +145,80 @@ public class GlobalExceptionHandler {
             return ife.getPath().get(ife.getPath().size() - 1).getFieldName();
         }
         return null;
+    }
+
+    /**
+     * Database constraint conflicts no service mapped locally (#412): a duplicate
+     * key, a foreign-key/CHECK violation or a NOT NULL breach is a conflict between
+     * the request and existing state — 409, never a bare 500. Full trace
+     * server-side at WARN; the response never carries SQL.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, Object>> handleIntegrity(DataIntegrityViolationException e,
+            HttpServletRequest request) {
+        String requestId = resolveRequestId(request);
+        LOG.warn("Data integrity conflict [requestId={}]", requestId, e);
+        Map<String, Object> body = problemDetail(409, "RESOURCE_CONFLICT", "Resource conflict",
+                "请求与现有数据约束冲突（重复或引用不允许），请刷新后重试。", requestId);
+        return ResponseEntity.status(HttpStatus.CONFLICT).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
+    }
+
+    /**
+     * Deadlocks and lock-acquisition failures are transient concurrency conflicts
+     * (#404/#412): the same retry-shaped 409 as the services' local mappings, never
+     * a bare 500.
+     */
+    @ExceptionHandler(ConcurrencyFailureException.class)
+    public ResponseEntity<Map<String, Object>> handleConcurrency(ConcurrencyFailureException e,
+            HttpServletRequest request) {
+        String requestId = resolveRequestId(request);
+        LOG.warn("Concurrency conflict [requestId={}]", requestId, e);
+        Map<String, Object> body = problemDetail(409, "CONCURRENT_MODIFICATION", "Concurrent modification",
+                "并发操作冲突，请刷新后重试。", requestId);
+        return ResponseEntity.status(HttpStatus.CONFLICT).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
+    }
+
+    /**
+     * Framework-level client errors would otherwise be swallowed by the
+     * {@code Exception} catch-all into 500s (#412): a missing required query
+     * parameter is 400, a wrong method 405, an unsupported media type 415 and an
+     * unknown path 404.
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<Map<String, Object>> handleMissingParam(MissingServletRequestParameterException e,
+            HttpServletRequest request) {
+        String requestId = resolveRequestId(request);
+        Map<String, Object> body = problemDetail(400, "PARAM_INVALID", "Invalid parameter",
+                "缺少必填参数 '" + e.getParameterName() + "'。", requestId);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<Map<String, Object>> handleMethodNotSupported(HttpRequestMethodNotSupportedException e,
+            HttpServletRequest request) {
+        String requestId = resolveRequestId(request);
+        Map<String, Object> body = problemDetail(405, "METHOD_NOT_ALLOWED", "Method not allowed",
+                "该路径不支持 " + e.getMethod() + " 方法。", requestId);
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(body);
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<Map<String, Object>> handleMediaType(HttpMediaTypeNotSupportedException e,
+            HttpServletRequest request) {
+        String requestId = resolveRequestId(request);
+        Map<String, Object> body = problemDetail(415, "UNSUPPORTED_MEDIA_TYPE", "Unsupported media type",
+                "请求 Content-Type 不受支持。", requestId);
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(body);
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleNoResource(NoResourceFoundException e,
+            HttpServletRequest request) {
+        String requestId = resolveRequestId(request);
+        Map<String, Object> body = problemDetail(404, "NOT_FOUND", "Not found", "请求的路径不存在。", requestId);
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
     }
 
     @ExceptionHandler(Exception.class)
