@@ -6,12 +6,22 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-11 自主轮（coverage-matrix I 序列收官 I1–I20 + 稳定性修复；rc.13 已发布）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS`（develop @ 12edf9e；**rc.13 已发布（2026-09-11）**——I 序列 I1–I20 全部 DONE +
-  三处缺陷修复（#361/#371/#362）全清，CI 无红灯；本轮交付见下方交接点；**待办：矩阵 §3 裁决项（等 leader/外部）、
-  #211 真机凭证（BLOCKED）、#245 告警接线裁决（leader）、F32/F33 平台接口（BLOCKED）、F19 账单对账（等真实样本）、
-  F29 服务数据面（等 leader 形态）**）
-- Last updated: `2026-09-11 CST`
+- Current goal: `2026-09-12 自主轮（I21 删除依赖检查落地 + rc.14 发布）` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS（develop @ 704c71d（rc.14 tag）；**rc.14 已发布（2026-09-12）**——I 序列 I1–I21 全部
+  DONE + 官方文档直读吸收（#394）；CI 无红灯；待办：矩阵 §3 裁决项（等 leader/外部：消费者 HMAC、内容安全
+  建议不做、F11 复活对齐、被动健康候选、F25/F27/F28/F29、#245）、#211 真机凭证（BLOCKED）、F32/F33 平台
+  接口（BLOCKED）、F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态））`
+- Last updated: `2026-09-12 CST`
+
+## 会话交接点 2026-09-12（rc.14 发布：I21 落地收官）
+
+- **rc.14 已发布**（tag `0.1.0-rc.14` @ 704c71d，GitHub Release 含中文说明）：rc.13 之后 8 个提交——
+  I21 资源删除前置依赖检查（#393/#395，409 `RESOURCE_IN_USE` + dependencies 清单 + FE 弹窗）、MCP JSON-RPC
+  initialize 探活（#387/#388，V50）、审计名称解析（#389/#390）、MCP 上游预算前端闭环（#383/#386）、默认配额
+  语义提示（#391/#392）、App.spec 并发加固（#384/#385）、官方文档直读吸收（#394）；矩阵 I1–I21 全部 DONE。
+- CI/已知问题状态：全清（本批各 PR 均 CI 绿后 squash 合并；develop 无红灯）。
+- 下一批候选：矩阵 §3（等 leader/外部：消费者 HMAC 裁决、AI 内容安全护栏建议不做、F11 匹配模式复活时对齐、
+  被动健康检查候选、F25/F27/F28/F29、#245、F32/F33、F19、#211 真机凭证）。
 
 ## 会话交接点 2026-09-11（I21 删除依赖检查：#393）
 
