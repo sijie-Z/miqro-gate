@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.model.McpHeaderCondition;
 import com.miqroera.miqrokey.domain.model.McpRouteRule;
 import com.miqroera.miqrokey.domain.repository.McpRouteRuleRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -87,7 +88,7 @@ public class McpRouteRuleRepositoryImpl implements McpRouteRuleRepository {
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """, p);
         if (rows != 1) {
-            throw new IllegalStateException("Optimistic lock failure: mcp route rule " + rule.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: mcp route rule " + rule.id());
         }
         return findByIdAndTenantId(rule.id(), rule.tenantId()).orElseThrow();
     }
@@ -101,7 +102,7 @@ public class McpRouteRuleRepositoryImpl implements McpRouteRuleRepository {
                 """, new MapSqlParameterSource("status", status).addValue("id", ruleId).addValue("tenantId", tenantId)
                 .addValue("expectedVersion", expectedVersion));
         if (rows != 1) {
-            throw new IllegalStateException("Optimistic lock failure: mcp route rule " + ruleId);
+            throw new OptimisticLockingFailureException("Optimistic lock failure: mcp route rule " + ruleId);
         }
         return findByIdAndTenantId(ruleId, tenantId).orElseThrow();
     }

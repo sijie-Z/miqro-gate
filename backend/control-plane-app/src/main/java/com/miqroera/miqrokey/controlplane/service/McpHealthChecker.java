@@ -83,18 +83,11 @@ public class McpHealthChecker {
     private void probe(McpService service, Instant now) {
         boolean healthy = isHealthy(service);
         HealthState state = nextHealth(service, healthy);
-        McpService updated = new McpService(service.id(), service.tenantId(), service.name(), service.description(),
-                service.endpoint(), service.transport(), service.status(), state.healthStatus(), now, state.failures(),
-                state.successes(), service.checkIntervalSeconds(), service.checkTimeoutSeconds(),
-                service.failThreshold(), service.recoverThreshold(), service.checkPath(), service.version(),
-                service.createdBy(), service.createdAt(), service.updatedAt(), service.backendAuthMode(),
-                service.backendSecretUpdatedAt(), service.upstreamTimeoutMs(), service.checkMode());
-        try {
-            repository.update(updated, service.version());
-        } catch (IllegalStateException e) {
-            // Concurrent status switch won the optimistic lock; skip this cycle.
-            LOG.debug("MCP health update skipped for {} (concurrent change)", service.name());
-        }
+        // #415 (mirrors #361 for internal services): health telemetry is written
+        // narrowly — no version check, no version bump — so the probe cycle can
+        // never race an admin edit that runs under optimistic locking.
+        repository.updateHealth(service.tenantId(), service.id(), state.healthStatus(), now, state.failures(),
+                state.successes());
     }
 
     /**

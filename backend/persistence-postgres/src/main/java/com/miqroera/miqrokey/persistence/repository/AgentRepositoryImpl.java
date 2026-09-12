@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.persistence.repository;
 
 import com.miqroera.miqrokey.domain.model.Agent;
 import com.miqroera.miqrokey.domain.repository.AgentRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -78,7 +79,7 @@ public class AgentRepositoryImpl implements AgentRepository {
                 """, new MapSqlParameterSource("status", status).addValue("id", agentId).addValue("tenantId", tenantId)
                 .addValue("expectedVersion", expectedVersion));
         if (rows != 1) {
-            throw new IllegalStateException("Optimistic lock failure: agent " + agentId);
+            throw new OptimisticLockingFailureException("Optimistic lock failure: agent " + agentId);
         }
         return findByIdAndTenantId(agentId, tenantId).orElseThrow();
     }

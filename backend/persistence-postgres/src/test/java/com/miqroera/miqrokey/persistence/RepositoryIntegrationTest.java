@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.persistence;
 import com.miqroera.miqrokey.domain.model.*;
 import com.miqroera.miqrokey.domain.repository.*;
 import org.junit.jupiter.api.*;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Instant;
@@ -329,7 +330,7 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
             // Stale: uses the old version
             var stale = new User(user.id(), TENANT_ID, user.username(), "Stale", user.passwordHash(), UserRole.USER,
                     UserStatus.ACTIVE, false, 0, null, null, original.version() + 1, NOW, NOW);
-            assertThatThrownBy(() -> userRepo.update(stale)).isInstanceOf(IllegalStateException.class)
+            assertThatThrownBy(() -> userRepo.update(stale)).isInstanceOf(OptimisticLockingFailureException.class)
                     .hasMessageContaining("Optimistic lock failure");
         }
     }

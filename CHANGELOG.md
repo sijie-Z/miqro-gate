@@ -45,6 +45,13 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   （此前全部被 `Exception` 兜底吞成 **500 INTERNAL_ERROR + ERROR 日志噪音**；响应体永不携带 SQL）。
   服务内 14 处局部映射保持不变。测试：单元 3（含不泄露 SQL 断言）+ IT 2（认证后未知路径 404、
   错方法 405；**修复前红灯精确复现两处 500 现场**）。
+- **修复 MCP 健康巡检与管理员操作的乐观锁竞态 + 全库乐观锁冲突映射（#415）**：巡检改**窄写**
+  （`McpServiceRepository.updateHealth`，镜像 #361 对 Internal Service 的实现：健康列专属、无版本校验、
+  不推版本）——探测周期不再与管理员编辑竞争（修复前：巡检先提交 → 管理操作 `IllegalStateException` 裸
+  500，CI 集成套件现场复现）；全库 **19 处**乐观锁冲突抛点改用 `OptimisticLockingFailureException`
+  （Spring 类型，extends `ConcurrencyFailureException` → #412 全局兜底自动 **409 `CONCURRENT_MODIFICATION`**）；
+  既有域内映射（SERVICE_STATE_CONFLICT / ALREADY_REVIEWED）对齐保持。测试：巡检版本不动 + 双连接行锁
+  交错 409（红→绿）+ 持久层断言类型更新。
 
 ### 2026-09-11
 - **资源删除前置依赖检查（#393，I21，腾讯模型 API 删除语义）**：删除仍被引用的资源返回 **409 `RESOURCE_IN_USE`**

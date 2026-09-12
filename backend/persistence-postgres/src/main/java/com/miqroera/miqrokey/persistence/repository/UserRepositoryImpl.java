@@ -4,6 +4,7 @@ import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.model.UserStatus;
 import com.miqroera.miqrokey.domain.repository.UserRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -97,7 +98,7 @@ public class UserRepositoryImpl implements UserRepository {
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """, params);
         if (rows != 1)
-            throw new IllegalStateException("Optimistic lock failure: user " + user.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: user " + user.id());
         return user;
     }
 

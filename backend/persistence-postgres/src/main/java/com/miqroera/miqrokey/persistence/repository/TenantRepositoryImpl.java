@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.persistence.repository;
 import com.miqroera.miqrokey.domain.model.Tenant;
 import com.miqroera.miqrokey.domain.model.TenantStatus;
 import com.miqroera.miqrokey.domain.repository.TenantRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -77,7 +78,8 @@ public class TenantRepositoryImpl implements TenantRepository {
                 WHERE id = :id AND version = :expectedVersion
                 """, params);
         if (rows != 1) {
-            throw new IllegalStateException("Optimistic lock failure: tenant " + tenant.id() + " version mismatch");
+            throw new OptimisticLockingFailureException(
+                    "Optimistic lock failure: tenant " + tenant.id() + " version mismatch");
         }
         return tenant;
     }
