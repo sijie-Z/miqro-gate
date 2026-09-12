@@ -733,6 +733,26 @@ export function adminUpdateMcpHealthConfig(
   return post<McpServiceView>(`/api/v1/admin/mcp-services/${id}/health-config`, body);
 }
 
+/** #397 被动健康：服务窗口真实流量（分类口径与 #338 消费者活动一致）。 */
+export interface McpServiceTraffic {
+  serviceId: string;
+  serviceName?: string;
+  windowHours: number;
+  totalCalls: number;
+  forwarded: number;
+  denied: number;
+  failed: number;
+  /** failed / (forwarded + failed)；窗口内无健康相关流量时为 null。 */
+  failureRate: number | null;
+  lastCallAt?: string | null;
+  lastFailureAt?: string | null;
+  topFailingTools: Array<{ name: string; failures: number }>;
+}
+
+export function adminMcpServiceTraffic(id: string, hours = 24): Promise<McpServiceTraffic> {
+  return get<McpServiceTraffic>(`/api/v1/admin/mcp-services/${id}/traffic`, { hours });
+}
+
 /**
  * #320 upstream backend auth: VISITOR clears any stored secret; API_KEY
  * requires a non-blank write-only secret (never returned by any read surface).

@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminMcpService;
+import com.miqroera.miqrokey.controlplane.service.McpServiceTrafficService;
 import com.miqroera.miqrokey.domain.model.McpService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -31,10 +32,13 @@ import java.util.UUID;
 public class AdminMcpServiceController {
 
     private final AdminMcpService mcpService;
+    private final McpServiceTrafficService trafficService;
     private final UserContext userContext;
 
-    public AdminMcpServiceController(AdminMcpService mcpService, UserContext userContext) {
+    public AdminMcpServiceController(AdminMcpService mcpService, McpServiceTrafficService trafficService,
+            UserContext userContext) {
         this.mcpService = mcpService;
+        this.trafficService = trafficService;
         this.userContext = userContext;
     }
 
@@ -103,6 +107,17 @@ public class AdminMcpServiceController {
         var user = userContext.getUser();
         return mcpService.setUpstreamTimeout(user.tenantId(), user.id(), serviceId, body.upstreamTimeoutMs(),
                 requestId(httpReq));
+    }
+
+    /**
+     * Passive health (#397): per-service real-traffic window — the complement to
+     * the active probe. Read-only; classification mirrors the consumer activity
+     * endpoint (#338).
+     */
+    @GetMapping("/{serviceId}/traffic")
+    public java.util.Map<String, Object> traffic(@PathVariable UUID serviceId,
+            @RequestParam(defaultValue = "24") int hours) {
+        return trafficService.traffic(userContext.getUser().tenantId(), serviceId, hours);
     }
 
     public record CreateRequest(@NotBlank @Size(max = 200) String name, @Size(max = 2000) String description,

@@ -8,7 +8,7 @@
  * stays fully open. Multi-selects render as checkbox groups (the v2 select is
  * single-value; consumer lists stay short at console scale).
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import {
@@ -35,7 +35,7 @@ import type {
   McpToolView,
   McpResiliencePolicy,
 } from '@/types/generated-api';
-import type { McpResilienceDraft } from '@/api';
+import type { McpResilienceDraft, McpServiceTraffic } from '@/api';
 
 const services = ref<McpServiceView[]>([]);
 const loading = ref(true);
@@ -102,6 +102,56 @@ const probeModeOptions = [
 ];
 const configSaving = ref(false);
 const configError = ref('');
+
+// #397 被动健康：窗口真实流量（与主动探测互补；只读展示，不阻断）。
+const trafficHours = ref('24');
+const traffic = ref<McpServiceTraffic | null>(null);
+const trafficLoading = ref(false);
+const trafficError = ref('');
+const trafficHourOptions = [
+  { value: '1', label: '近 1 小时' },
+  { value: '24', label: '近 24 小时' },
+  { value: '168', label: '近 7 天' },
+];
+
+function failureRateText(rate: number | null | undefined): string {
+  return rate == null ? '—' : `${(rate * 100).toFixed(1)}%`;
+}
+
+/** 主动探测通过但真实流量有上游失败——主动探测的盲区，必须显式可见。 */
+const trafficHint = computed(() => {
+  if (!traffic.value || !configService.value) {
+    return '';
+  }
+  if (configService.value.healthStatus === 'HEALTHY' && traffic.value.failed > 0) {
+    return `主动探测通过，但所选窗口内有 ${traffic.value.failed} 次真实上游失败——请检查上游凭证 / 配额 / 服务状态。`;
+  }
+  return '';
+});
+
+async function loadTraffic() {
+  if (!configService.value) {
+    return;
+  }
+  trafficLoading.value = true;
+  trafficError.value = '';
+  try {
+    traffic.value = await api.adminMcpServiceTraffic(
+      configService.value.id!,
+      Number(trafficHours.value),
+    );
+  } catch (error) {
+    trafficError.value = errorText(error, '加载真实流量失败。');
+  } finally {
+    trafficLoading.value = false;
+  }
+}
+
+watch(trafficHours, () => {
+  if (configVisible.value) {
+    void loadTraffic();
+  }
+});
 
 // I20 follow-up: per-service data-plane upstream budget (doc 135906 超时时间).
 const timeoutService = ref<McpServiceView | null>(null);
@@ -393,6 +443,11 @@ function openConfig(service: McpServiceView) {
   };
   configError.value = '';
   configVisible.value = true;
+  // #397：每次打开先复位窗口并拉取真实流量。
+  trafficHours.value = '24';
+  traffic.value = null;
+  trafficError.value = '';
+  void loadTraffic();
 }
 
 async function saveConfig() {
@@ -1492,6 +1547,39 @@ async function saveResilience() {
               : '健康路径：GET 服务地址 + 路径，2xx 视为健康。'
           }}
         </p>
+        <!-- #397 被动健康：真实流量（与主动探测互补，只读） -->
+        <div class="next-mcp__traffic" data-testid="mcp-traffic">
+          <UiSelect
+            v-model="trafficHours"
+            label="真实流量窗口"
+            :options="trafficHourOptions"
+            data-testid="mcp-traffic-hours"
+          />
+          <p v-if="trafficLoading" class="next-mcp__hint">真实流量加载中…</p>
+          <p v-else-if="trafficError" class="ui-form-error">{{ trafficError }}</p>
+          <template v-else-if="traffic">
+            <p class="next-mcp__traffic-line" data-testid="mcp-traffic-summary">
+              转发 {{ traffic.forwarded }} · 上游失败 {{ traffic.failed }}（{{
+                failureRateText(traffic.failureRate)
+              }}）· 被拒 {{ traffic.denied }} · 最近失败
+              {{ formatTime(traffic.lastFailureAt ?? null) }}
+            </p>
+            <p v-if="trafficHint" class="next-mcp__traffic-hint" data-testid="mcp-traffic-hint">
+              {{ trafficHint }}
+            </p>
+            <ul
+              v-if="traffic.topFailingTools.length"
+              class="next-mcp__traffic-tools"
+              data-testid="mcp-traffic-tools"
+            >
+              <li v-for="tool in traffic.topFailingTools" :key="tool.name">
+                <span class="ui-mono">{{ tool.name }}</span> × {{ tool.failures }}
+              </li>
+            </ul>
+            <p v-if="traffic.totalCalls === 0" class="next-mcp__hint">所选窗口内暂无真实调用。</p>
+            <p v-else-if="traffic.failed === 0" class="next-mcp__hint">所选窗口内无上游失败。</p>
+          </template>
+        </div>
         <p v-if="configError" class="ui-form-error">{{ configError }}</p>
       </div>
       <template #footer>
@@ -2648,6 +2736,34 @@ async function saveResilience() {
 .next-mcp__register {
   margin-bottom: var(--ui-space-5);
   max-width: 760px;
+}
+
+.next-mcp__traffic {
+  margin-top: var(--ui-space-2);
+  padding-top: var(--ui-space-3);
+  border-top: 1px solid var(--ui-border-muted);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.next-mcp__traffic-line {
+  margin: 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__traffic-hint {
+  margin: 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-warning-fg);
+}
+
+.next-mcp__traffic-tools {
+  margin: 0;
+  padding-left: var(--ui-space-4);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
 }
 
 .next-mcp__hint {
