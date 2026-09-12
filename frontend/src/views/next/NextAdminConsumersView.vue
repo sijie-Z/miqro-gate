@@ -58,16 +58,25 @@ function openActivity(consumer: ApiConsumerView) {
   void loadActivity();
 }
 
+// #399：请求序号守卫——过期响应（含失败）一律丢弃；loading 只由最新请求收尾。
+let activityRequestSeq = 0;
+
 async function loadActivity() {
   if (!activityTarget.value) return;
+  const seq = ++activityRequestSeq;
+  const consumerId = activityTarget.value.id!;
+  const hours = activityHours.value;
   activityLoading.value = true;
   activityError.value = '';
   try {
-    activity.value = await api.adminConsumerActivity(activityTarget.value.id!, activityHours.value);
+    const view = await api.adminConsumerActivity(consumerId, hours);
+    if (seq !== activityRequestSeq) return;
+    activity.value = view;
   } catch (error) {
+    if (seq !== activityRequestSeq) return;
     activityError.value = error instanceof ApiError ? error.message : '加载失败';
   } finally {
-    activityLoading.value = false;
+    if (seq === activityRequestSeq) activityLoading.value = false;
   }
 }
 
