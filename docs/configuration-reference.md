@@ -200,7 +200,10 @@ F15 MCP 访问日志队列（网关数据面）：`miqrokey.gateway.mcp-log.capa
 默认 5000）。syslog：`…forward.syslog-host`/`…forward.syslog-port`（默认 514）/`…forward.syslog-protocol`
 （`UDP|TCP`，默认 UDP）/`…forward.syslog-facility`（默认 `LOCAL0`）；RFC 5424 帧
 （`<PRI>1 <ts> <host> miqrokey-gateway - - <json>`），MSG 为 `aigw.mcp.*` JSON（OTel 字段风格，纯元数据，
-永不包含工具参数/应答正文）。
+永不包含工具参数/应答正文）。投递有**硬截止**（#401）：每个 sink 由 `TimeBoundedForwarder` 包装——专属守护
+线程 + 墙钟截止（webhook=配置超时+5s，syslog=15s）；超时按失败计入节流 WARN，**连续超时 3 次进入 60s 冷却**
+（期间跳过、不重试），冷却后自动探测恢复——挂起的 sink（对端接受连接但停止读取等）不会阻塞落库
+（flush 管线与队列不受影响）。
 
 合规留痕侧信道（ADR-0014，默认全关——除 retention_config 开关外无任何采集）：`miqrokey.retention.capacity`（默认 512，`MIQROKEY_RETENTION_CAPACITY`）、`miqrokey.retention.flush-interval-ms`（默认 1000，`MIQROKEY_RETENTION_FLUSH_INTERVAL_MS`）、`miqrokey.retention.max-text-chars`（默认 100000，`MIQROKEY_RETENTION_MAX_TEXT_CHARS`，单请求用户文本上限，超限跳过+计数）。采集面由控制面 `retention_config`（管理 API §5.26）逐租户开关并经路由快照下发；无 crypto 或 publisher 时 fail-closed。
 

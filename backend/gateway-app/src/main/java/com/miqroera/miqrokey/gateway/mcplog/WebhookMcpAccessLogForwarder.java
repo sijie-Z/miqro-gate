@@ -27,6 +27,7 @@ public final class WebhookMcpAccessLogForwarder implements McpAccessLogForwarder
 
     private final URI url;
     private final String token;
+    private final long timeoutMs;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final AtomicLong failures = new AtomicLong();
@@ -40,6 +41,7 @@ public final class WebhookMcpAccessLogForwarder implements McpAccessLogForwarder
         }
         this.url = URI.create(url.trim());
         this.token = token;
+        this.timeoutMs = timeoutMs;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofMillis(Math.min(timeoutMs, 5000))).build();
     }
@@ -56,7 +58,7 @@ public final class WebhookMcpAccessLogForwarder implements McpAccessLogForwarder
         }
         try {
             byte[] body = objectMapper.writeValueAsBytes(batch.stream().map(McpAccessLogJson::of).toList());
-            HttpRequest.Builder request = HttpRequest.newBuilder(url).timeout(Duration.ofSeconds(5))
+            HttpRequest.Builder request = HttpRequest.newBuilder(url).timeout(Duration.ofMillis(timeoutMs))
                     .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofByteArray(body));
             if (token != null && !token.isBlank()) {
                 request.header("Authorization", "Bearer " + token);

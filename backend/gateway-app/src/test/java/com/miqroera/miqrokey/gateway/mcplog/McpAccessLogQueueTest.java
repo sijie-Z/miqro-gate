@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -136,6 +137,49 @@ class McpAccessLogQueueTest {
             assertThat(writer.batches()).hasSize(1);
             assertThat(after.batches()).hasSize(1);
             assertThat(queue.droppedCount()).isZero();
+        }
+    }
+
+    @Test
+    @DisplayName("a hanging forwarder no longer blocks the flush pipeline (#401)")
+    void hangingForwarderIsIsolated() {
+        CapturingWriter writer = new CapturingWriter();
+        CapturingForwarder after = new CapturingForwarder(false);
+        HangingForwarder hanging = new HangingForwarder();
+        try (McpAccessLogQueue queue = new McpAccessLogQueue(64, 10_000, writer,
+                List.of(new TimeBoundedForwarder(hanging, 100), after))) {
+            queue.record(entry(1));
+            queue.flushNow(); // the hanging sink burns its deadline, nothing else stalls
+            queue.record(entry(2));
+            queue.flushNow();
+
+            assertThat(writer.batches()).hasSize(2);
+            assertThat(after.batches()).hasSize(2);
+            assertThat(queue.droppedCount()).isZero();
+        } finally {
+            hanging.release.countDown();
+        }
+    }
+
+    /** Blocks like a stalled socket write — deliberately ignoring interrupts. */
+    private static final class HangingForwarder implements McpAccessLogForwarder {
+        final CountDownLatch release = new CountDownLatch(1);
+
+        @Override
+        public String name() {
+            return "hanging";
+        }
+
+        @Override
+        public void forward(List<McpAccessLogEntry> batch) {
+            while (true) {
+                try {
+                    release.await();
+                    return;
+                } catch (InterruptedException e) {
+                    // like a blocked socket write: not interruptible in practice
+                }
+            }
         }
     }
 
