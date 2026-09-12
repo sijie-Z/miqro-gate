@@ -6,12 +6,20 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-12 自主轮（自查轮七项交割 + rc.15 发布）` — `IN_PROGRESS`
+- Current goal: `2026-09-12 自主轮（PR 自动 AI 审查接入：#410）` — `IN_PROGRESS`
 - Goal status: `IN_PROGRESS（develop @ 2260f40（rc.15 tag）；**rc.15 已发布（2026-09-12）**——被动健康（#397）
   落地 + 六项缺陷修复（#399/#401/#403/#404/#407 自查轮，全部红→绿闭环）；I 序列 I1–I21 DONE；CI 无红灯；
   待办：矩阵 §3 裁决项（等 leader/外部：消费者 HMAC、内容安全、F11 复活、F25/F27/F28/F29、#245）、
   #211 真机凭证（BLOCKED）、F32/F33 平台接口（BLOCKED）、F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态））`
 - Last updated: `2026-09-12 CST`
+
+## 会话交接点 2026-09-12（PR 自动 AI 审查接入：#410）
+
+- **#410（本 PR，ci）**：新增 `AI review` workflow（claude-code-action v1.0.222，SHA 固定，符合
+  Scorecard Pinned-Dependencies 惯例）——**key 版惰性**：未配 `ANTHROPIC_API_KEY` 时全步骤跳过；
+  配置后非草稿 PR 自动中文审查（红线清单内嵌提示词 + 行内批注 + track_progress）；并发去重 + 20min 上限。
+  启用=管理员加 secret（两步，见 PR 说明）；CodeRabbit 站点侧激活仍为可选并行项。
+- 下一批候选：矩阵 §3 其余（等 leader/外部：HMAC/内容安全/F11 复活/F25/F27/F28/F29、#245、F32/F33、#211）。
 
 ## 会话交接点 2026-09-12（rc.15 发布：自查轮收官）
 
