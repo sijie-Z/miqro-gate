@@ -8,7 +8,7 @@
  * stays fully open. Multi-selects render as checkbox groups (the v2 select is
  * single-value; consumer lists stay short at console scale).
  */
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import {
@@ -129,29 +129,41 @@ const trafficHint = computed(() => {
   return '';
 });
 
+// #399：请求序号守卫——过期响应（含失败）一律丢弃；loading 只由最新请求收尾。
+let trafficRequestSeq = 0;
+
 async function loadTraffic() {
   if (!configService.value) {
     return;
   }
+  const seq = ++trafficRequestSeq;
+  const serviceId = configService.value.id!;
+  const hours = Number(trafficHours.value);
   trafficLoading.value = true;
   trafficError.value = '';
   try {
-    traffic.value = await api.adminMcpServiceTraffic(
-      configService.value.id!,
-      Number(trafficHours.value),
-    );
+    const view = await api.adminMcpServiceTraffic(serviceId, hours);
+    if (seq !== trafficRequestSeq) {
+      return;
+    }
+    traffic.value = view;
   } catch (error) {
+    if (seq !== trafficRequestSeq) {
+      return;
+    }
     trafficError.value = errorText(error, '加载真实流量失败。');
   } finally {
-    trafficLoading.value = false;
+    if (seq === trafficRequestSeq) {
+      trafficLoading.value = false;
+    }
   }
 }
 
-watch(trafficHours, () => {
-  if (configVisible.value) {
-    void loadTraffic();
-  }
-});
+// #399：窗口切换由选择器事件驱动（不再用 watch——重开弹窗时窗口复位会经 watch 再触发一次请求）。
+function onTrafficHoursChange(value: string) {
+  trafficHours.value = value;
+  void loadTraffic();
+}
 
 // I20 follow-up: per-service data-plane upstream budget (doc 135906 超时时间).
 const timeoutService = ref<McpServiceView | null>(null);
@@ -1554,6 +1566,7 @@ async function saveResilience() {
             label="真实流量窗口"
             :options="trafficHourOptions"
             data-testid="mcp-traffic-hours"
+            @change="onTrafficHoursChange"
           />
           <p v-if="trafficLoading" class="next-mcp__hint">真实流量加载中…</p>
           <p v-else-if="trafficError" class="ui-form-error">{{ trafficError }}</p>

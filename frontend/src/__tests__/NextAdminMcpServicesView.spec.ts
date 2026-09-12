@@ -307,6 +307,69 @@ describe('NextAdminMcpServicesView', () => {
     expect(tools?.textContent).toContain('query_order');
   });
 
+  it('discards stale traffic responses and fetches once per reopen (#399)', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    const trafficView = (overrides: Partial<api.McpServiceTraffic> = {}): api.McpServiceTraffic => ({
+      serviceId: 'm1',
+      serviceName: 'erp-mcp',
+      windowHours: 24,
+      totalCalls: 1,
+      forwarded: 1,
+      denied: 0,
+      failed: 0,
+      failureRate: 0,
+      lastCallAt: '2026-09-12T01:00:00Z',
+      lastFailureAt: null,
+      topFailingTools: [],
+      ...overrides,
+    });
+    let resolveFirst: (v: api.McpServiceTraffic) => void = () => {};
+    let resolveSecond: (v: api.McpServiceTraffic) => void = () => {};
+    mockApi.adminMcpServiceTraffic
+      .mockImplementationOnce(
+        () =>
+          new Promise<api.McpServiceTraffic>((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<api.McpServiceTraffic>((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-health-config"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.adminMcpServiceTraffic).toHaveBeenCalledTimes(1);
+    expect(mockApi.adminMcpServiceTraffic).toHaveBeenLastCalledWith('m1', 24);
+
+    // Switch to 7d while the 24h request is still in flight.
+    pickStubOption(document.body, '近 7 天');
+    await flushPromises();
+    expect(mockApi.adminMcpServiceTraffic).toHaveBeenLastCalledWith('m1', 168);
+
+    // The 7d response lands first; the stale 24h response arrives afterwards
+    // and must NOT overwrite the newer window's data.
+    resolveSecond(trafficView({ windowHours: 168, totalCalls: 7, forwarded: 7 }));
+    await flushPromises();
+    resolveFirst(trafficView({ totalCalls: 24, forwarded: 24 }));
+    await flushPromises();
+    const summary = document.querySelector('[data-testid="mcp-traffic-summary"]');
+    expect(summary?.textContent).toContain('转发 7');
+    expect(summary?.textContent).not.toContain('转发 24');
+
+    // Reopen: the window resets to 24h and exactly one request goes out (the
+    // reset must not double-fire a load).
+    mockApi.adminMcpServiceTraffic.mockResolvedValue(trafficView({ totalCalls: 3, forwarded: 3 }));
+    await wrapper.find('[data-testid="mcp-health-config"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.adminMcpServiceTraffic).toHaveBeenCalledTimes(3);
+    expect(mockApi.adminMcpServiceTraffic).toHaveBeenLastCalledWith('m1', 24);
+  });
+
   it('lists tools and creates one with the chosen method', async () => {
     mockApi.adminListMcpServices.mockResolvedValue([service()]);
     mockApi.adminListMcpTools.mockResolvedValue([tool()]);

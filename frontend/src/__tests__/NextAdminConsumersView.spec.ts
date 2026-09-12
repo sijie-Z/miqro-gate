@@ -80,6 +80,55 @@ describe('NextAdminConsumersView', () => {
     expect(body?.textContent).toContain('echo-tool');
     expect(body?.textContent).toContain('总调用');
   });
+  it('discards stale activity responses when the window switches (#399)', async () => {
+    const activityView = (overrides: Partial<api.ApiConsumerActivity> = {}): api.ApiConsumerActivity => ({
+      consumerId: 'k1',
+      windowHours: 24,
+      totalCalls: 1,
+      forwarded: 1,
+      denied: 0,
+      failed: 0,
+      lastCallAt: '2026-09-12T00:00:00Z',
+      topTools: [],
+      topServices: [],
+      ...overrides,
+    });
+    let resolveFirst: (v: api.ApiConsumerActivity) => void = () => {};
+    let resolveSecond: (v: api.ApiConsumerActivity) => void = () => {};
+    mockApi.adminConsumerActivity
+      .mockImplementationOnce(
+        () =>
+          new Promise<api.ApiConsumerActivity>((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<api.ApiConsumerActivity>((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="consumer-activity"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.adminConsumerActivity).toHaveBeenCalledTimes(1);
+    expect(mockApi.adminConsumerActivity).toHaveBeenLastCalledWith('k1', 24);
+
+    (document.querySelector('[data-testid="activity-range-7d"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(mockApi.adminConsumerActivity).toHaveBeenLastCalledWith('k1', 168);
+
+    // The 7d response lands first; the stale 24h response arrives afterwards
+    // and must NOT overwrite the newer window's data.
+    resolveSecond(activityView({ windowHours: 168, totalCalls: 70 }));
+    await flushPromises();
+    resolveFirst(activityView({ totalCalls: 19 }));
+    await flushPromises();
+    const body = document.querySelector('[data-testid="consumer-activity-body"]');
+    expect(body?.textContent).toContain('70');
+    expect(body?.textContent).not.toContain('19');
+  });
   it('revokes a consumer through the gate', async () => {
     mockApi.disableApiConsumer.mockResolvedValue({ ...consumer, status: 'DISABLED' });
     const wrapper = mountView();
