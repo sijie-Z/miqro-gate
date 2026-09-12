@@ -52,6 +52,12 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   （Spring 类型，extends `ConcurrencyFailureException` → #412 全局兜底自动 **409 `CONCURRENT_MODIFICATION`**）；
   既有域内映射（SERVICE_STATE_CONFLICT / ALREADY_REVIEWED）对齐保持。测试：巡检版本不动 + 双连接行锁
   交错 409（红→绿）+ 持久层断言类型更新。
+- **修复用量事件总线吞吐钉死（#417）**：`PostgresUsageEventBus.flush` 改为**全量排空**（`flushThreshold`
+  语义修正为「单次批量写入条数」，按此分块循环 `writeBatch`）——旧实现每次只 drain threshold 条、
+  5s 一轮，稳态排空上限 **20 事件/秒**，红线档（50 并发流，~1000+ 事件/秒入队）下队列 10 秒打满、
+  `DROP` 模式大量丢失用量（soak 红线重构实测 7420 请求仅落 300 行）。单块失败仍整块重入队并结束本轮；
+  capacity/interval/饱和语义不变。测试：`flushDrainsAllInChunks` 红→绿（100/2 → 5 条分 3 块、队列清零、
+  再 flush 空转）；`configuration-reference` 语义说明修正。
 
 ### 2026-09-11
 - **资源删除前置依赖检查（#393，I21，腾讯模型 API 删除语义）**：删除仍被引用的资源返回 **409 `RESOURCE_IN_USE`**

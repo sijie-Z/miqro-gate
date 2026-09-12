@@ -6,12 +6,20 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-12 自主轮（乐观锁竞态与映射：#415）` — `IN_PROGRESS`
+- Current goal: `2026-09-12 自主轮（用量总线排空修复：#417）` — `IN_PROGRESS`
 - Goal status: `IN_PROGRESS（develop @ 2260f40（rc.15 tag）；**rc.15 已发布（2026-09-12）**——被动健康（#397）
   落地 + 六项缺陷修复（#399/#401/#403/#404/#407 自查轮，全部红→绿闭环）；I 序列 I1–I21 DONE；CI 无红灯；
   待办：矩阵 §3 裁决项（等 leader/外部：消费者 HMAC、内容安全、F11 复活、F25/F27/F28/F29、#245）、
   #211 真机凭证（BLOCKED）、F32/F33 平台接口（BLOCKED）、F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态））`
 - Last updated: `2026-09-12 CST`
+
+## 会话交接点 2026-09-12（用量总线排空修复：#417）
+
+- **#417（本 PR，bug，soak 红线重构实测发现）**：`PostgresUsageEventBus.flush` 每次只排空 threshold 条
+  → 稳态上限 20 事件/秒，红线档下队列打满、DROP 丢失用量（7420 请求仅落 300 行）。修复=全量排空
+  （threshold 修正为单块批量大小）；queue-spi 红→绿 8/8。
+- 在途：**#414 soak 红线对齐**（分支待 rebase 到本修复之上后跑绿收尾）。
+- 下一批候选：矩阵 §3 其余（等 leader/外部）；rc.16 攒批。
 
 ## 会话交接点 2026-09-12（乐观锁竞态与映射：#415）
 
