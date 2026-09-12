@@ -21,8 +21,9 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Production usage event bus: bounded blocking queue drained on a fixed
- * schedule (default every 5s or when 100 events accumulate) into
- * {@link UsageEventWriter}.
+ * schedule (default every 5s). Each flush drains the queue COMPLETELY in
+ * {@code flushThreshold}-sized batches (the threshold is a batch size, not a
+ * drain limit — #417) into {@link UsageEventWriter}.
  *
  * <h2>Saturation</h2> The queue is bounded
  * ({@code miqrokey.gateway.queue.capacity}, default 10 000). When full, the
@@ -173,10 +174,26 @@ public final class PostgresUsageEventBus implements UsageEventBus {
 
     @Override
     public void flush() {
+        // #417: drain the queue COMPLETELY, in flushThreshold-sized chunks per
+        // writeBatch call. The previous single-chunk drain capped steady-state
+        // throughput at flushThreshold/flush-interval (100/5s = 20 events/s) —
+        // far below the §10 red-line ingest, so the bounded queue saturated and
+        // DROP mode lost most usage events under 50 concurrent streams.
+        // flushThreshold is the batch size, not a drain limit.
+        while (flushChunk()) {
+            // keep draining until the queue is empty (or a write failed)
+        }
+    }
+
+    /**
+     * One chunked drain + write; {@code false} when the queue emptied or a write
+     * failed.
+     */
+    private boolean flushChunk() {
         List<Object> drained = new ArrayList<>(flushThreshold);
         queue.drainTo(drained, flushThreshold);
         if (drained.isEmpty()) {
-            return;
+            return false;
         }
         List<UsageEvent> usage = new ArrayList<>();
         List<CacheHitEvent> hits = new ArrayList<>();
@@ -200,14 +217,17 @@ public final class PostgresUsageEventBus implements UsageEventBus {
             lastFlushDuration = Duration.between(started, clock.instant());
             lastFlushAt = clock.instant();
             flushCount.incrementAndGet();
+            return true;
         } catch (Exception e) {
-            // Idempotent writes: re-enqueue for the next flush (bounded).
+            // Idempotent writes: re-enqueue for the next flush (bounded), and
+            // stop this round instead of spinning on a failing database.
             for (Object item : drained) {
                 if (!queue.offer(item)) {
                     totalDropped.incrementAndGet();
                 }
             }
             log.warn("Usage flush failed; {} events re-enqueued", drained.size());
+            return false;
         }
     }
 

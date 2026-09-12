@@ -163,7 +163,7 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 | `MIQROKEY_GATEWAY_ROUTE_REFRESH_INTERVAL` | `30s` | 路由快照刷新周期——兜底机制；正常路径由 `pg_notify` 事件即时刷新，通知丢失时按此周期自愈（宽限期配置见 4.5） |
 | `MIQROKEY_GATEWAY_ROUTE_NOTIFY_CHANNEL` | `miqrokey_route_refresh` | PostgreSQL `LISTEN/NOTIFY` 通道名；控制面在变更事务提交后（AFTER_COMMIT）向该通道发布通知，Gateway 专用连接监听并立即重载快照 |
 | `MIQROKEY_GATEWAY_QUEUE_CAPACITY` | `10000` | 用量写入有界队列容量 |
-| `MIQROKEY_GATEWAY_QUEUE_FLUSH_THRESHOLD` | `100` | 批量 flush 条数上限 |
+| `MIQROKEY_GATEWAY_QUEUE_FLUSH_THRESHOLD` | `100` | 单次批量写入条数（#417：每次 flush **全量排空**队列、按此值分块调用 writer；此前误作「每次 flush 排空上限」，把稳态吞吐钉死在 threshold/interval = 20 事件/秒） |
 | `MIQROKEY_GATEWAY_QUEUE_FLUSH_INTERVAL` | `5s` | 批量 flush 周期 |
 | `MIQROKEY_GATEWAY_QUEUE_WRITER_THREADS` | `4` | 专用有界 writer 执行器线程数（G2.4） |
 | `MIQROKEY_GATEWAY_QUEUE_SATURATION_MODE` | `DROP` | 队列饱和策略（F35）：`DROP` = 保持热路径不阻塞、事件计数丢弃（默认）；`WRITE_THROUGH` = 应急直写——单事件经专用 writer 执行器幂等写入并**有界等待**（见下），审计完整性优先、发布线程短暂停滞可接受 |

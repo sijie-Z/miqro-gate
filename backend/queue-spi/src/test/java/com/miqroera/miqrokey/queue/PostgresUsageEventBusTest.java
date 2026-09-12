@@ -25,8 +25,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * {@link PostgresUsageEventBus} reliability contract (no database): failure
- * re-enqueue (no silent loss), saturation drop accounting, bounded per-flush
- * drain, and the in-flight overlap guard on the scheduling thread.
+ * re-enqueue (no silent loss), saturation drop accounting, whole-queue chunked
+ * drain (#417), and the in-flight overlap guard on the scheduling thread.
  */
 @DisplayName("Postgres usage event bus reliability")
 class PostgresUsageEventBusTest {
@@ -93,22 +93,27 @@ class PostgresUsageEventBusTest {
     }
 
     @Test
-    @DisplayName("flush drains at most flush-threshold events; the rest stay queued")
-    void flushRespectsThreshold() {
+    @DisplayName("flush drains EVERYTHING in threshold-sized chunks (#417)")
+    void flushDrainsAllInChunks() {
         RecordingWriter writer = new RecordingWriter();
-        PostgresUsageEventBus bus = new PostgresUsageEventBus(10, 2, writer, Schedulers.immediate(), CLOCK,
+        PostgresUsageEventBus bus = new PostgresUsageEventBus(100, 2, writer, Schedulers.immediate(), CLOCK,
                 SaturationMode.DROP, Duration.ofSeconds(5));
-        bus.publish(usageEvent("a"));
-        bus.publish(usageEvent("b"));
-        bus.publish(usageEvent("c"));
+        for (int i = 0; i < 5; i++) {
+            bus.publish(usageEvent("u" + i));
+        }
 
         bus.flush();
-        assertThat(writer.lastUsage).hasSize(2);
-        assertThat(bus.metrics().queuedCount()).isEqualTo(1);
 
-        bus.flush();
-        assertThat(writer.lastUsage).hasSize(1);
+        // Three chunked writer calls (2 + 2 + 1): the threshold is the batch
+        // size, not a drain cap — the old cap throttled steady-state drain to
+        // threshold/interval and lost usage under the §10 red line.
+        assertThat(writer.callCount.get()).isEqualTo(3);
         assertThat(bus.metrics().queuedCount()).isZero();
+        assertThat(bus.metrics().totalPersisted()).isEqualTo(5);
+
+        // The next flush is a no-op: nothing stays behind.
+        bus.flush();
+        assertThat(writer.callCount.get()).isEqualTo(3);
     }
 
     @Test
