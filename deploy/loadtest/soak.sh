@@ -10,6 +10,9 @@
 #   MQK_VIRTUAL_KEY  the seeded key
 #   MQK_DURATION   seconds (default 180)
 #   MQK_CONCURRENCY (default 20)
+#   MQK_TTFB_P95_BUDGET_MS  optional: exit non-zero when TTFB p95 exceeds this
+#                           budget (run on representative hardware to check the
+#                           §10 product SLO of 30 ms)
 #
 # 红线档（§10 首版容量验收：50 条并发 SSE）：
 #   MQK_CONCURRENCY=50 MQK_DURATION=180 bash deploy/loadtest/soak.sh
@@ -63,6 +66,19 @@ if ttfb:
     print(f"ttfb p50={p(.5):.1f}ms p95={p(.95):.1f}ms max={ttfb[-1]:.1f}ms"
           "  (网关侧开销 = ttfb - 上游首字节预算)")
 PY
+
+if [ -n "${MQK_TTFB_P95_BUDGET_MS:-}" ]; then
+  python - "$OUT" "$MQK_TTFB_P95_BUDGET_MS" <<'PY'
+import sys
+lines = [l.split() for l in open(sys.argv[1]) if len(l.split()) >= 3]
+t = sorted(float(x[2]) * 1000 for x in lines if x[1] == "200")
+if t:
+    p95 = t[min(int(0.95 * len(t)), len(t) - 1)]
+    budget = float(sys.argv[2])
+    print(f"ttfb p95 = {p95:.1f} ms (budget {budget:.0f} ms)")
+    sys.exit(0 if p95 <= budget else 1)
+PY
+fi
 
 echo "== usage queue (must stay 0) =="
 curl -s --max-time 5 "$BASE/actuator/prometheus" | grep -E "miqrokey_usage_queue_dropped" | head -2 || echo "(metrics endpoint not exposed; skip)"
