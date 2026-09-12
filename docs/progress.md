@@ -6,12 +6,19 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-12 自主轮（访问日志转发挂起免疫：#401）` — `IN_PROGRESS`
+- Current goal: `2026-09-12 自主轮（I21 并发窗口行锁：#403）` — `IN_PROGRESS`
 - Goal status: `IN_PROGRESS（develop @ 704c71d（rc.14 tag）；**rc.14 已发布（2026-09-12）**——I 序列 I1–I21 全部
   DONE + 官方文档直读吸收（#394）；CI 无红灯；待办：矩阵 §3 裁决项（等 leader/外部：消费者 HMAC、内容安全
   建议不做、F11 复活对齐、被动健康已落地（#397）、F25/F27/F28/F29、#245）、#211 真机凭证（BLOCKED）、F32/F33 平台
   接口（BLOCKED）、F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态））`
 - Last updated: `2026-09-12 CST`
+
+## 会话交接点 2026-09-12（I21 并发窗口行锁：#403）
+
+- **#403（本 PR，bug，自查发现）**：webhook 端点删除「查引用→删除」间的并发窗口——未提交的引用插入可溜过
+  检查，随后被 `ON DELETE SET NULL` 静默脱钩。修复：检查前 `SELECT … FOR UPDATE` 行锁（与 FK `FOR KEY
+  SHARE` 互斥；并发双击删除干净 404）。测试：并发 IT 先红灯（200 + 脱钩）后修复转绿 4/4。
+- 下一批候选：矩阵 §3 其余（等 leader/外部：HMAC/内容安全/F11 复活/F25/F27/F28/F29、#245、F32/F33、#211）。
 
 ## 会话交接点 2026-09-12（访问日志转发挂起免疫：#401）
 

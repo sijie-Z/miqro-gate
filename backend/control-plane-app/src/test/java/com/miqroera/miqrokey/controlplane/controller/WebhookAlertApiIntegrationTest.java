@@ -30,7 +30,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -302,5 +308,57 @@ class WebhookAlertApiIntegrationTest {
                 .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
         mockMvc.perform(delete("/api/v1/admin/webhooks/" + endpointId).cookie(sessionCookie, csrfCookie)
                 .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("delete serializes against a concurrent rule insert — no silent SET NULL detach (#403)")
+    void deleteWaitsForConcurrentRuleInsert() throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/webhooks").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("name", "racing", "url", mockBaseUrl, "secret", "whsec-test-value"))))
+                .andExpect(status().isOk()).andReturn();
+        String endpointId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+        UUID endpointUuid = UUID.fromString(endpointId);
+        UUID ruleId = UUID.randomUUID();
+
+        var dataSource = jdbc.getJdbcTemplate().getDataSource();
+        ExecutorService io = Executors.newSingleThreadExecutor();
+        try (Connection conn = dataSource.getConnection()) {
+            // T2: an uncommitted rule INSERT referencing the endpoint — its FK
+            // check holds FOR KEY SHARE on the endpoint row.
+            conn.setAutoCommit(false);
+            try (PreparedStatement ps = conn.prepareStatement("""
+                    INSERT INTO alert_rules (id, tenant_id, name, type, threshold, webhook_endpoint_id)
+                    VALUES (?, ?, '并发规则', 'USAGE_MISSING_RATE', 0.5, ?)
+                    """)) {
+                ps.setObject(1, ruleId);
+                ps.setObject(2, fx.tenantId);
+                ps.setObject(3, endpointUuid);
+                ps.executeUpdate();
+            }
+            // T1: the delete must block on the row lock instead of proceeding.
+            Future<Integer> deleteStatus = io
+                    .submit(() -> mockMvc.perform(delete("/api/v1/admin/webhooks/" + endpointId)
+                            .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andReturn()
+                            .getResponse().getStatus());
+            Thread.sleep(700);
+            org.assertj.core.api.Assertions.assertThat(deleteStatus.isDone())
+                    .as("delete must wait on the endpoint row lock").isFalse();
+
+            conn.commit();
+            // Once the insert is visible, the guard sees the reference and
+            // refuses with 409 — and the rule keeps its endpoint (no SET NULL).
+            org.assertj.core.api.Assertions.assertThat(deleteStatus.get(15, TimeUnit.SECONDS)).isEqualTo(409);
+        } finally {
+            io.shutdownNow();
+        }
+        Integer stillReferenced = jdbc.queryForObject(
+                "SELECT count(*) FROM alert_rules WHERE id = :id AND webhook_endpoint_id = :endpointId",
+                new MapSqlParameterSource("id", ruleId).addValue("endpointId", endpointUuid), Integer.class);
+        org.assertj.core.api.Assertions.assertThat(stillReferenced).isEqualTo(1);
+        mockMvc.perform(get("/api/v1/admin/webhooks/" + endpointId).cookie(sessionCookie)).andExpect(status().isOk());
     }
 }

@@ -133,6 +133,21 @@ public class WebhookEndpointService {
     @Transactional
     public void delete(UUID tenantId, UUID endpointId, AuditContext context) {
         WebhookEndpoint existing = get(tenantId, endpointId);
+        // #403: take the row lock before the dependency check. A concurrent
+        // alert-rule INSERT holds FOR KEY SHARE (FK) on this row; FOR UPDATE
+        // serializes against it, so under READ COMMITTED the check below sees
+        // any just-committed reference (409) — or the racing INSERT lands after
+        // the delete and fails cleanly on the FK. Without the lock a committed
+        // insert could slip past the check into the silent ON DELETE SET NULL
+        // detach this method exists to prevent. (A concurrent double delete
+        // finds the row gone here and reports 404.)
+        List<UUID> locked = jdbc.query(
+                "SELECT id FROM webhook_endpoints WHERE id = :id AND tenant_id = :tenantId FOR UPDATE",
+                new MapSqlParameterSource("id", endpointId).addValue("tenantId", tenantId),
+                (rs, rowNum) -> (UUID) rs.getObject("id"));
+        if (locked.isEmpty()) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "WEBHOOK_NOT_FOUND", "Webhook endpoint not found");
+        }
         List<ResourceDependency> dependents = jdbc.query("""
                 SELECT id, name, enabled FROM alert_rules
                 WHERE tenant_id = :tenantId AND webhook_endpoint_id = :id
