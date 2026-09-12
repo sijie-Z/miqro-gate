@@ -202,19 +202,32 @@ async function confirmAndRun() {
   await state.run();
 }
 
+// #407：目标切换的过期响应防护（#399 序号守卫模式）。
+let deliveriesRequestSeq = 0;
+
 async function openDeliveries(endpoint: WebhookEndpointView) {
   deliveriesEndpoint.value = endpoint;
   deliveries.value = [];
   deliveriesError.value = '';
   deliveriesOpen.value = true;
   deliveriesLoading.value = true;
+  const seq = ++deliveriesRequestSeq;
   try {
     // list rows always carry ids
-    deliveries.value = await api.webhookDeliveries(endpoint.id!);
+    const list = await api.webhookDeliveries(endpoint.id!);
+    if (seq !== deliveriesRequestSeq) {
+      return;
+    }
+    deliveries.value = list;
   } catch (error) {
+    if (seq !== deliveriesRequestSeq) {
+      return;
+    }
     deliveriesError.value = error instanceof ApiError ? error.message : '加载投递记录失败。';
   } finally {
-    deliveriesLoading.value = false;
+    if (seq === deliveriesRequestSeq) {
+      deliveriesLoading.value = false;
+    }
   }
 }
 

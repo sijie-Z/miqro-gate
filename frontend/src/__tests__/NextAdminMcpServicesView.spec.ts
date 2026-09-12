@@ -370,6 +370,48 @@ describe('NextAdminMcpServicesView', () => {
     expect(mockApi.adminMcpServiceTraffic).toHaveBeenLastCalledWith('m1', 24);
   });
 
+  it('discards stale tool lists when the service target switches (#407)', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([
+      service(),
+      service({ id: 'm2', name: 'crm-mcp' }),
+    ]);
+    let resolveFirst: (v: McpToolView[]) => void = () => {};
+    let resolveSecond: (v: McpToolView[]) => void = () => {};
+    mockApi.adminListMcpTools
+      .mockImplementationOnce(
+        () =>
+          new Promise<McpToolView[]>((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<McpToolView[]>((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+    const wrapper = mountView();
+    await flushPromises();
+
+    const openers = wrapper.findAll('[data-testid="mcp-tools"]');
+    await openers[0]!.trigger('click');
+    await flushPromises();
+    expect(mockApi.adminListMcpTools).toHaveBeenLastCalledWith('m1');
+    await openers[1]!.trigger('click');
+    await flushPromises();
+    expect(mockApi.adminListMcpTools).toHaveBeenLastCalledWith('m2');
+
+    // The second service's list lands first; the stale first-service list
+    // arrives afterwards and must NOT overwrite it.
+    resolveSecond([tool({ toolName: 'crm-only-tool', mcpServiceId: 'm2' })]);
+    await flushPromises();
+    resolveFirst([tool({ toolName: 'erp-stale-tool' })]);
+    await flushPromises();
+    const list = document.querySelector('[data-testid="mcp-tool-list"]');
+    expect(list?.textContent).toContain('crm-only-tool');
+    expect(list?.textContent).not.toContain('erp-stale-tool');
+  });
+
   it('lists tools and creates one with the chosen method', async () => {
     mockApi.adminListMcpServices.mockResolvedValue([service()]);
     mockApi.adminListMcpTools.mockResolvedValue([tool()]);
