@@ -14,6 +14,7 @@ vi.mock('@/api', () => ({
   adminSetMcpServiceUpstreamTimeout: vi.fn(),
   adminSetMcpStatus: vi.fn(),
   adminUpdateMcpHealthConfig: vi.fn(),
+  adminMcpServiceTraffic: vi.fn(),
   adminListMcpTools: vi.fn(),
   adminSyncMcpTools: vi.fn(),
   adminCreateMcpTool: vi.fn(),
@@ -272,6 +273,38 @@ describe('NextAdminMcpServicesView', () => {
       'm1',
       expect.objectContaining({ checkMode: 'JSONRPC_INITIALIZE' }),
     );
+  });
+
+  it('shows the passive real-traffic view with the probe blind-spot hint (#397)', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminMcpServiceTraffic.mockResolvedValue({
+      serviceId: 'm1',
+      serviceName: 'erp-mcp',
+      windowHours: 24,
+      totalCalls: 10,
+      forwarded: 6,
+      denied: 1,
+      failed: 3,
+      failureRate: 1 / 3,
+      lastCallAt: '2026-09-12T01:00:00Z',
+      lastFailureAt: '2026-09-12T01:00:00Z',
+      topFailingTools: [{ name: 'query_order', failures: 3 }],
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-health-config"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.adminMcpServiceTraffic).toHaveBeenCalledWith('m1', 24);
+    const summary = document.querySelector('[data-testid="mcp-traffic-summary"]');
+    expect(summary?.textContent).toContain('转发 6');
+    expect(summary?.textContent).toContain('33.3%');
+    // Probe HEALTHY + real upstream failures → the blind-spot hint renders.
+    const hint = document.querySelector('[data-testid="mcp-traffic-hint"]');
+    expect(hint?.textContent).toContain('主动探测通过');
+    const tools = document.querySelector('[data-testid="mcp-traffic-tools"]');
+    expect(tools?.textContent).toContain('query_order');
   });
 
   it('lists tools and creates one with the chosen method', async () => {

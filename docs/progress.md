@@ -6,12 +6,21 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-12 自主轮（I21 删除依赖检查落地 + rc.14 发布）` — `IN_PROGRESS`
+- Current goal: `2026-09-12 自主轮（被动健康检查落地：#397）` — `IN_PROGRESS`
 - Goal status: `IN_PROGRESS（develop @ 704c71d（rc.14 tag）；**rc.14 已发布（2026-09-12）**——I 序列 I1–I21 全部
   DONE + 官方文档直读吸收（#394）；CI 无红灯；待办：矩阵 §3 裁决项（等 leader/外部：消费者 HMAC、内容安全
-  建议不做、F11 复活对齐、被动健康候选、F25/F27/F28/F29、#245）、#211 真机凭证（BLOCKED）、F32/F33 平台
+  建议不做、F11 复活对齐、被动健康已落地（#397）、F25/F27/F28/F29、#245）、#211 真机凭证（BLOCKED）、F32/F33 平台
   接口（BLOCKED）、F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态））`
 - Last updated: `2026-09-12 CST`
+
+## 会话交接点 2026-09-12（被动健康检查：#397）
+
+- **#397（本 PR，矩阵 §3 候选落地，阿里「主动+被动并列」）**：新端点
+  `GET /api/v1/admin/mcp-services/{id}/traffic?hours=`——`mcp_access_log` 按服务窗口聚合（口径同 #338：
+  failed=UPSTREAM_FAILURE+CIRCUIT_OPEN；failureRate；lastCallAt/lastFailureAt；topFailingTools ≤5）；
+  管理面「健康检查」弹窗新增「真实流量」区（1h/24h/7d 切换）+ 主动探测通过但流量有失败的盲区提示；
+  只读不阻断、无迁移；IT 3/3 + 组件测试；矩阵/对照/契约/CHANGELOG 同步。
+- 下一批候选：矩阵 §3 其余（等 leader/外部：HMAC/内容安全/F11 复活/F25/F27/F28/F29、#245、F32/F33、#211）。
 
 ## 会话交接点 2026-09-12（rc.14 发布：I21 落地收官）
 

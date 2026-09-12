@@ -786,6 +786,7 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
   存储 AES-GCM 加密（AAD 绑定 tenant+service）；网关向上游注入固定 `Authorization: Bearer <secret>`；变更即时生效（快照刷新）。
   `400 MCP_BACKEND_AUTH_INVALID`；审计 `MCP_SERVICE_BACKEND_AUTH`（摘要含 name+mode，永不含 secret） |
 | `PUT /api/v1/admin/mcp-services/{id}/upstream-timeout` | **数据面上游预算（I20，腾讯 raw 03「超时时间」）**：body `{"upstreamTimeoutMs"}`（1000..600000，默认 60000ms）——数据面每次上游尝试的超时；预算耗尽 → **504 `mcp_upstream_timeout`** 错误信封（`mcp_access_log` 记 UPSTREAM_FAILURE/504）。越界 `400 MCP_TIMEOUT_INVALID`；启用慢调用熔断时不得 ≤ 已配置慢阈值（`400 RESILIENCE_SLOW_EXCEEDS_TIMEOUT`）。审计 `MCP_SERVICE_UPSTREAM_TIMEOUT`，即时快照刷新。 |
+| `GET /api/v1/admin/mcp-services/{id}/traffic?hours=24` | **被动健康（真实流量视图，#397，矩阵 §3 候选落地）**：`mcp_access_log` 按服务窗口聚合——`totalCalls/forwarded/denied（被拒：ACL/工具不可用/信封非法）/failed（UPSTREAM_FAILURE+CIRCUIT_OPEN，口径同 #338）`、`failureRate`（failed/(forwarded+failed)；无健康相关流量为 null）、`lastCallAt`/`lastFailureAt`（可空）、`topFailingTools`（失败工具 top ≤5）；`hours` ∈ [1,168]（越界 400 `PARAM_INVALID`）；服务不存在/跨租户 404 `MCP_SERVICE_NOT_FOUND`；空窗口零值视图（不 404）；只读、不阻断。 |
 
 - 接入地址：https、无 userinfo/query/fragment（`MCP_ENDPOINT_INVALID` 400）；重名 `409 MCP_SERVICE_NAME_TAKEN`
 - **健康检查**：`McpHealthChecker` 定时（`miqrokey.mcp.health-cycle-ms` 默认 15s）遍历 ONLINE 服务，按各自间隔探测 `endpoint + checkPath`（GET，2xx 计健康）；连续失败达 `failThreshold` → `UNHEALTHY`，连续成功达 `recoverThreshold` → `HEALTHY`；OFFLINE 服务不被探测

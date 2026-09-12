@@ -4,6 +4,14 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
+### 2026-09-12
+- **被动健康检查：真实流量失败率入服务健康视图（#397，矩阵 §3 候选落地，阿里「主动+被动并列」）**：新端点
+  `GET /api/v1/admin/mcp-services/{id}/traffic?hours=24`——`mcp_access_log` 按服务窗口聚合（分类口径同 #338：
+  `failed` = UPSTREAM_FAILURE + CIRCUIT_OPEN）、`failureRate`（failed/(forwarded+failed)，无健康相关流量为 null）、
+  `lastCallAt`/`lastFailureAt`、`topFailingTools`（失败工具 top ≤5）；管理面「健康检查」弹窗新增「真实流量」区
+  （1h/24h/7d 窗口切换），**主动探测通过但窗口内存在真实上游失败时显式提示**（主动探测盲区）。只读、不阻断；
+  无迁移（数据已存在）。
+
 ### 2026-09-11
 - **资源删除前置依赖检查（#393，I21，腾讯模型 API 删除语义）**：删除仍被引用的资源返回 **409 `RESOURCE_IN_USE`**
   + problem 体附 **`dependencies` 清单**（type/id/name/detail）——首个落点=webhook 端点（原 `SET NULL` 会
