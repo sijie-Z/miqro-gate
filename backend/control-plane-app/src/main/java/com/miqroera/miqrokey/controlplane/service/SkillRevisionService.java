@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.domain.model.SkillRevision;
 import com.miqroera.miqrokey.domain.repository.SkillRepository;
 import com.miqroera.miqrokey.domain.repository.SkillRevisionRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -70,7 +71,7 @@ public class SkillRevisionService {
             revisionRepository.insert(created);
             revisionRepository.mirrorToSkill(tenantId, skill.id(), meta.description(), meta.author(), meta.license(),
                     meta.tags(), meta.examples(), version, zipBytes, created.contentSha256(), created.contentBytes());
-        } catch (DuplicateKeyException e) {
+        } catch (ConcurrencyFailureException | DuplicateKeyException e) {
             throw new ApiException(HttpStatus.CONFLICT, "SKILL_REVISION_CONFLICT", "并发发布冲突，请刷新后重试。");
         }
         auditService.record(tenantId, adminId, "SKILL_REVISION_PUBLISH", "SKILL", skill.id(), AuditSummaries.summary(
@@ -95,11 +96,19 @@ public class SkillRevisionService {
         SkillRevision target = revisionRepository.findBySkillAndRevision(tenantId, skillId, revision)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "SKILL_REVISION_NOT_FOUND", "技能修订不存在。"));
         if (target.activatedAt() == null) {
-            revisionRepository.deactivateOthers(tenantId, skillId, revision);
-            revisionRepository.activate(tenantId, skillId, revision, Instant.now());
-            revisionRepository.mirrorToSkill(tenantId, skillId, target.description(), target.author(), target.license(),
-                    target.tags(), target.examples(), target.version(), target.contentZip(), target.contentSha256(),
-                    target.contentBytes());
+            try {
+                revisionRepository.deactivateOthers(tenantId, skillId, revision);
+                revisionRepository.activate(tenantId, skillId, revision, Instant.now());
+                revisionRepository.mirrorToSkill(tenantId, skillId, target.description(), target.author(),
+                        target.license(), target.tags(), target.examples(), target.version(), target.contentZip(),
+                        target.contentSha256(), target.contentBytes());
+            } catch (ConcurrencyFailureException | DuplicateKeyException e) {
+                // #404: concurrent activations/publishes serialize through row
+                // locks; the loser can surface as a deadlock or an activation
+                // -pointer unique violation — report the same retry-shaped 409
+                // as publishValidated instead of a bare 500.
+                throw new ApiException(HttpStatus.CONFLICT, "SKILL_REVISION_CONFLICT", "并发操作冲突，请刷新后重试。");
+            }
             auditService.record(tenantId, adminId, "SKILL_REVISION_ACTIVATE", "SKILL", skillId,
                     AuditSummaries.summary("revision", revision), requestId);
         }

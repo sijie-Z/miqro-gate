@@ -26,6 +26,11 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   插入侧干净 FK 失败，**静默 `ON DELETE SET NULL` 脱钩路径彻底关闭**（修复前该交错让刚建的规则被静默
   脱钩）；并发双击删除干净 404。测试：并发 IT（第二连接持未提交引用插入 → 删除阻塞 → 提交后 409 +
   引用原样），修复前红灯精确复现（200 + 引用置 NULL）、修复后 4/4 绿。
+- **修复技能修订并发激活的冲突错误面（#404，I14 补强）**：`activate` 的变更块（deactivateOthers→activate
+  →mirror）捕获 `ConcurrencyFailureException | DuplicateKeyException` → **409 `SKILL_REVISION_CONFLICT`**
+  （与发布路径同形）——并发激活交错（deactivateOthers 互锁 → 死锁输家 / 激活指针唯一索引竞争）此前冒泡
+  **裸 500**；`publishValidated` 捕获同步扩到 `ConcurrencyFailureException`（发布-激活交叉并发同样可死锁）。
+  串行路径行为不变；技能修订 IT 全绿。
 
 ### 2026-09-11
 - **资源删除前置依赖检查（#393，I21，腾讯模型 API 删除语义）**：删除仍被引用的资源返回 **409 `RESOURCE_IN_USE`**
