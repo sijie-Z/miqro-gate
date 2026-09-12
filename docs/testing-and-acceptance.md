@@ -113,6 +113,11 @@ Mock Provider 捕获 Gateway 上游请求并断言：
 - 用量写入不丢失；
 - 导出任务不显著影响推理延迟。
 
+执行入口：**CI 档** `SoakIntegrationTest`（50 并发 × 10s 真窗口：#414 起断言零错误 / 网关侧首包开销
+P95 ≤ 30ms / 事件循环探针最坏延迟 ≤ 500ms / 用量行数 == 请求数）；**长时档**
+`MQK_CONCURRENCY=50 MQK_DURATION=180 bash deploy/loadtest/soak.sh`（吞吐、总延迟与 TTFB 百分位、
+用量队列丢弃计数——#417 起默认配置下应保持 0）。
+
 ## 11. 备份恢复验收
 
 - 自动备份成功并生成校验值；

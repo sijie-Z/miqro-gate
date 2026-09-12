@@ -58,6 +58,12 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   `DROP` 模式大量丢失用量（soak 红线重构实测 7420 请求仅落 300 行）。单块失败仍整块重入队并结束本轮；
   capacity/interval/饱和语义不变。测试：`flushDrainsAllInChunks` 红→绿（100/2 → 5 条分 3 块、队列清零、
   再 flush 空转）；`configuration-reference` 语义说明修正。
+- **压测与红线对齐（#414，测试/脚本）**：`SoakIntegrationTest` 重做为 §10 真实验收——**50 并发 × 10s
+  真窗口**（循环打满；mock 上游按 `chunkDelay` 逐行节流为真并发 SSE），断言：零错误 / **网关侧首包开销
+  P95 ≤ 30ms**（逐请求 TTFB − 上游首字节预算采样）/ 事件循环探针最坏延迟 ≤ 500ms / **用量行数 == 成功
+  请求数**（严格相等＝写入不丢失且不重复；旧版「>0」弱断言作废）。实测首发即检出 #417。`soak.sh` 补 TTFB
+  百分位（curl `time_starttransfer`）与红线档调用说明（`MQK_CONCURRENCY=50`）；`testing-and-acceptance §10`
+  补两条执行入口。
 
 ### 2026-09-11
 - **资源删除前置依赖检查（#393，I21，腾讯模型 API 删除语义）**：删除仍被引用的资源返回 **409 `RESOURCE_IN_USE`**
