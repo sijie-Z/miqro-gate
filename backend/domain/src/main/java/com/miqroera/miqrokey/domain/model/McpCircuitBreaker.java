@@ -46,6 +46,7 @@ public final class McpCircuitBreaker {
     private final Deque<Sample> window = new ArrayDeque<>();
     private State state = State.CLOSED;
     private Instant openedUntil;
+    private Instant halfOpenSince;
     private int probeSlots;
     private int probeSuccesses;
 
@@ -81,7 +82,18 @@ public final class McpCircuitBreaker {
                 }
                 yield Decision.REJECTED;
             }
-            case HALF_OPEN -> probeSlots > 0 ? consumeProbe() : Decision.REJECTED;
+            case HALF_OPEN -> {
+                if (halfOpenSince != null
+                        && !now.isBefore(halfOpenSince.plus(Duration.ofSeconds(policy.breakerOpenSeconds())))) {
+                    // #451: probe outcomes can be lost (a client that cancels
+                    // mid-probe never reaches afterCall) — a half-open window
+                    // that outlives the open window without resolution is
+                    // recycled instead of latching the bucket forever.
+                    enterHalfOpen();
+                    yield consumeProbe();
+                }
+                yield probeSlots > 0 ? consumeProbe() : Decision.REJECTED;
+            }
         };
     }
 
@@ -118,6 +130,7 @@ public final class McpCircuitBreaker {
         state = State.HALF_OPEN;
         probeSlots = policy.breakerProbeCount();
         probeSuccesses = 0;
+        halfOpenSince = clock.instant();
     }
 
     private void open(Instant now) {

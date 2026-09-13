@@ -66,6 +66,24 @@ public class ReconciliationService {
         return t;
     });
 
+    /**
+     * #451: runs execute only in this process — anything PENDING/RUNNING after a
+     * restart was interrupted mid-flight and can never finish. Marked FAILED at
+     * startup so the idempotent re-upload path treats the bill as re-runnable
+     * instead of returning a zombie forever.
+     */
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    public void recoverInterruptedRuns() {
+        int recovered = jdbc.update("""
+                UPDATE reconciliation_reports
+                SET status = 'FAILED', error_message = 'interrupted by restart'
+                WHERE status IN ('PENDING', 'RUNNING')
+                """, new MapSqlParameterSource());
+        if (recovered > 0) {
+            LOG.warn("reconciliation: marked {} interrupted run(s) FAILED after restart", recovered);
+        }
+    }
+
     public ReconciliationService(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper,
             AuditService auditService) {
         this.jdbc = jdbc;
