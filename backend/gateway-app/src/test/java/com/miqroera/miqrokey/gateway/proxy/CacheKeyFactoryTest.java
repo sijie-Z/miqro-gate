@@ -32,6 +32,22 @@ class CacheKeyFactoryTest {
         return body.getBytes(StandardCharsets.UTF_8);
     }
 
+    @Test
+    @DisplayName("stream flag is a key format dimension (#444)")
+    void streamFlagChangesTheKey() {
+        byte[] streaming = json(
+                "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":true}");
+        byte[] buffered = json(
+                "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":false}");
+        byte[] streamingAgain = json(
+                "{\"model\":\"m\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+        // An SSE response must never be replayed to a JSON client (or vice versa).
+        assertThat(factory.compute(ctx, "m", streaming)).isNotEqualTo(factory.compute(ctx, "m", buffered));
+        // Field order and position must not matter for the same format.
+        assertThat(factory.compute(ctx, "m", streaming)).isEqualTo(factory.compute(ctx, "m", streamingAgain));
+    }
+
     @Nested
     @DisplayName("Normalization")
     class Normalization {
