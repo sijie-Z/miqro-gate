@@ -170,16 +170,30 @@ function openProjectMembership(user: AdminUser) {
 // Hub View schemas mark every field optional (springdoc omits `required`);
 // user rows from listUsers / create / reset responses always carry the fields
 // asserted below — the `!` restore the pre-hub required-field contract.
+// #440: request-sequence guard — a slow membership list for user A must not
+// land after the drawer re-targets user B.
+let membershipsRequestSeq = 0;
+
 async function refreshMemberships() {
-  if (!membershipUser.value) return;
+  const target = membershipUser.value;
+  if (!target) return;
+  const seq = ++membershipsRequestSeq;
   membershipLoading.value = true;
   membershipError.value = '';
   try {
-    memberships.value = await api.adminUserProjectMemberships(membershipUser.value.id!);
+    const rows = await api.adminUserProjectMemberships(target.id!);
+    if (seq !== membershipsRequestSeq) {
+      return; // a newer drawer target won — this response is stale
+    }
+    memberships.value = rows;
   } catch (error) {
-    membershipError.value = error instanceof ApiError ? error.message : '加载项目成员关系失败。';
+    if (seq === membershipsRequestSeq) {
+      membershipError.value = error instanceof ApiError ? error.message : '加载项目成员关系失败。';
+    }
   } finally {
-    membershipLoading.value = false;
+    if (seq === membershipsRequestSeq) {
+      membershipLoading.value = false;
+    }
   }
 }
 
@@ -200,10 +214,13 @@ async function addMembership() {
 }
 
 async function removeMembership(membership: UserProjectMembership) {
-  if (!membershipUser.value) return;
+  // #440: capture the drawer target — the user must not change mid-flight and
+  // turn this removal into an action on the wrong account.
+  const target = membershipUser.value;
+  if (!target) return;
   membershipError.value = '';
   try {
-    await api.removeProjectMember(membership.projectId!, membershipUser.value.id!);
+    await api.removeProjectMember(membership.projectId!, target.id!);
     toast.success('已从「' + membership.projectName + '」移除');
     await refreshMemberships();
   } catch (error) {

@@ -46,10 +46,15 @@ async function submit() {
     return;
   }
   submitting.value = true;
+  // #440: capture the forced-change flag BEFORE awaiting — changePassword flips
+  // mustChangePassword to false, so reading isForced afterwards is always false
+  // and the redirect below was dead code (the old spec passed only because its
+  // non-reactive mock never invalidated the computed).
+  const forced = isForced.value;
   try {
     await auth.changePassword(currentPassword.value, newPassword.value);
     toast.success('密码已修改');
-    if (isForced.value) {
+    if (forced) {
       await router.push('/app-new/keys');
     }
   } catch (error) {

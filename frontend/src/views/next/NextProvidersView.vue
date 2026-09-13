@@ -107,7 +107,13 @@ const probeStatus = ref<api.ModelProbeStatus | null>(null);
 const probing = ref(false);
 const probeError = ref('');
 
+// #440: request-sequence guard — a slow catalog load for product A must not
+// land after the dialog re-targets product B (manual row actions would then
+// act under the wrong product's header).
+let modelsRequestSeq = 0;
+
 async function openModels(product: ProviderProductView) {
+  const seq = ++modelsRequestSeq;
   modelsProduct.value = product;
   models.value = [];
   modelsError.value = '';
@@ -118,43 +124,63 @@ async function openModels(product: ProviderProductView) {
   probeError.value = '';
   probeStatus.value = null;
   try {
-    models.value = await api.adminListModels(product.id);
+    const rows = await api.adminListModels(product.id);
+    if (seq !== modelsRequestSeq) {
+      return; // a newer dialog target won — this response is stale
+    }
+    models.value = rows;
   } catch (error) {
-    modelsError.value = error instanceof ApiError ? error.message : '加载模型目录失败。';
+    if (seq === modelsRequestSeq) {
+      modelsError.value = error instanceof ApiError ? error.message : '加载模型目录失败。';
+    }
   } finally {
-    modelsLoading.value = false;
+    if (seq === modelsRequestSeq) {
+      modelsLoading.value = false;
+    }
   }
   try {
-    probeStatus.value = await api.adminModelProbeStatus(product.id);
+    const status = await api.adminModelProbeStatus(product.id);
+    if (seq === modelsRequestSeq) {
+      probeStatus.value = status;
+    }
   } catch {
     // Probe status is best-effort; the dialog works without it.
   }
 }
 
 async function probeModels() {
-  if (!modelsProduct.value) {
+  const target = modelsProduct.value;
+  if (!target) {
     return;
   }
+  const seq = ++modelsRequestSeq;
   probing.value = true;
   probeError.value = '';
   try {
-    const report = await api.adminProbeModels(modelsProduct.value.id);
+    const report = await api.adminProbeModels(target.id);
     toast.success(`探测完成：发现 ${report.modelCount} 个模型`);
-    models.value = await api.adminListModels(modelsProduct.value.id);
+    const rows = await api.adminListModels(target.id);
+    if (seq === modelsRequestSeq) {
+      models.value = rows;
+    }
   } catch (error) {
     probeError.value = error instanceof ApiError ? error.message : '探测失败，请稍后重试。';
   } finally {
     probing.value = false;
   }
   try {
-    probeStatus.value = await api.adminModelProbeStatus(modelsProduct.value.id);
+    const status = await api.adminModelProbeStatus(target.id);
+    if (seq === modelsRequestSeq) {
+      probeStatus.value = status;
+    }
   } catch {
     // Best-effort status refresh.
   }
 }
 
 async function addManualModel() {
-  if (!modelsProduct.value) {
+  const target = modelsProduct.value;
+  if (!target) {
     return;
   }
   const modelId = modelForm.value.modelId.trim();
@@ -165,13 +191,17 @@ async function addManualModel() {
   modelSaving.value = true;
   modelError.value = '';
   try {
-    await api.adminCreateModel(modelsProduct.value.id, {
+    await api.adminCreateModel(target.id, {
       modelId,
       displayName: modelForm.value.displayName.trim() || undefined,
     });
     modelForm.value = { modelId: '', displayName: '' };
     toast.success('人工模型已录入');
-    models.value = await api.adminListModels(modelsProduct.value.id);
+    const seq = ++modelsRequestSeq;
+    const rows = await api.adminListModels(target.id);
+    if (seq === modelsRequestSeq) {
+      models.value = rows;
+    }
   } catch (error) {
     modelError.value = error instanceof ApiError ? error.message : '录入失败，请稍后重试。';
   } finally {
@@ -184,8 +214,13 @@ async function removeManualModel(row: ModelCatalogRow) {
   try {
     await api.adminDeleteModel(row.id!);
     toast.success(`已删除 ${row.modelId}`);
-    if (modelsProduct.value) {
-      models.value = await api.adminListModels(modelsProduct.value.id);
+    const target = modelsProduct.value;
+    if (target) {
+      const seq = ++modelsRequestSeq;
+      const rows = await api.adminListModels(target.id);
+      if (seq === modelsRequestSeq) {
+        models.value = rows;
+      }
     }
   } catch (error) {
     if (error instanceof ApiError) {
