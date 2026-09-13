@@ -195,10 +195,11 @@ Master key 丢失无法从数据库恢复真实凭证；使用受保护备份恢
 
 | 脚本 | 用途 |
 |---|---|
-| `miqrokey-backup.sh` | pg_dump(custom) → gzip → AES-256-CBC(PBKDF2 200k) → `<BACKUP_PATH>/miqrokey-<UTC 时间戳>.sql.gz.enc` + SHA-256 manifest；保留上限 `DAILY_KEEP + WEEKLY_KEEP`（默认 7+4），超出删最旧；成功/失败经 Webhook（可选 HMAC-SHA256 签名 `X-MiQroKey-Signature: sha256=...`）通知 |
+| `miqrokey-backup.sh` | pg_dump(custom) → gzip → AES-256-CBC(PBKDF2 200k) → `<BACKUP_PATH>/miqrokey-<UTC 时间戳>.sql.gz.enc` + SHA-256 manifest；保留（#438）：最新 `DAILY_KEEP` 个日备份（默认 7）+ 其余中每 ISO 周（周一起）最新 1 个、至多 `WEEKLY_KEEP` 周（默认 4）——同一次备份只计一次，其余连 manifest 剪除；失败不残留半成品。成功/失败经 Webhook（可选 HMAC-SHA256 签名 `X-MiQroKey-Signature: sha256=...`）通知 |
 | `miqrokey-verify.sh <file>` | 校验 manifest + 解密干跑（`pg_restore --list`），不触碰任何库 |
-| `miqrokey-restore.sh <file> [target-db]` | 校验 manifest → 解密 → `pg_restore --exit-on-error`；恢复前目标库必须存在 |
+| `miqrokey-restore.sh <file> [target-db]` | 校验 manifest → 解密 → `pg_restore --exit-on-error --single-transaction`（**单事务原子恢复**：#438，中途失败整体回滚、目标库不留半程状态）；恢复前目标库必须存在 |
 | `test-restore.sh` | 真实恢复演练：双 Postgres 容器 → 播种 1000 行 → 真备份 → 校验 → 恢复 → 行数一致断言（已验证 PASS） |
+| `test-retention.sh` | 保留语义夹具测试（无 Docker）：日历周精确保留集（20 → 10：最新 7 日 + W36/W35/W34 各 1）+ 幂等 + 失败零残留断言（已验证 PASS） |
 | `test-retention-webhook.sh` | 保留上限与 Webhook 签名通知测试（已验证 PASS） |
 
 ### 每日备份（cron）
