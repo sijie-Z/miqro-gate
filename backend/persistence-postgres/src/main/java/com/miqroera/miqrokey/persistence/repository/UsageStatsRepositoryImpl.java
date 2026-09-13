@@ -107,7 +107,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
      * dimensions. {@code alias} is the filterable base table alias ({@code ue} for
      * {@code usage_event}, {@code h} for {@code cache_hit_event}); the
      * user/subscription dimensions join through {@code virtual_keys} ({@code vk})
-     * and {@code credentials} ({@code cr}).
+     * and {@code upstream_credentials} ({@code cr}).
      */
     private static final class WhereBuilder {
 
@@ -139,7 +139,8 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 }
             }
             if (filter.subscriptionId() != null) {
-                joins.append(" JOIN credentials crf ON crf.id = vkf.credential_id AND crf.tenant_id = vkf.tenant_id");
+                joins.append(" JOIN upstream_credentials crf ON crf.id = vkf.upstream_credential_id"
+                        + " AND crf.tenant_id = vkf.tenant_id");
                 conditions.add("crf.subscription_id = :subscriptionId");
                 params.addValue("subscriptionId", filter.subscriptionId());
             }
