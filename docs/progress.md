@@ -6,11 +6,11 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-13 自主轮（控制面安全语义：#445）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS（develop @ 7f7fd4e；**rc.18 已发布（2026-09-13）** + 09-13 收口 #430 CSV 公式
-  注入 / #432 主密钥批量重加密 / #433 SSE 缓冲有界化 / #438 备份工具链 / #421 调度噪音 / #423 开放面
-  安全回归 / #424 冲刷节奏 / #427 技能包炸弹；I 序列 I1–I21 DONE；CI 无红灯；待办：**leader 请示稿
-  回执（6 组裁决 + 3 项材料）**、#211（BLOCKED）、F25/F27/F28/F29、#245、F32/F33、F19）`
+- Current goal: `2026-09-13 自主轮（sub-agent 审查修复：网关缓存 #444）` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS（develop @ abd13a9；rc.18 已发布；**sub-agent 全量审查（7 路）完成，约 70 条
+  发现**——已交付 #441（HIGH×2 抢修，等 CodeQL 平台恢复合并）、#440（前端守卫二批，本地绿待推）、
+  #444（网关缓存，本 PR）；队列：控制面锁定/XFF、转义族、导出泄漏、并发族、shutdown flush、语料矩阵
+  刷新；注：CodeQL 自 09:01Z 起平台侧上传故障（GitHub 事件），非代码问题`
 - Last updated: `2026-09-13 CST`
 
 ## 会话交接点 2026-09-13（控制面安全语义修复：#445）
@@ -22,6 +22,15 @@
 - 在途：**#444**（网关缓存，CI 平台恢复后合并）、**#443**（HIGH×2，同上）、#440（前端守卫二批，
   本地绿待推）——三者均因 CodeQL 平台故障暂缓合并（其余全绿）。
 - 下一批：转义族（ErrorEnvelopes no-op 等）、导出泄漏/并发族、shutdown flush、语料矩阵刷新。
+
+## 会话交接点 2026-09-13（网关缓存修复：#444）
+
+- **#444（本 PR，sub-agent 发现）**：①L2 缓存 get/put 阻塞事件环（实测线程 `webflux-http-nio-2`）——
+  get 走有界调度器、put 调度器上尽力而为；②缓存键忽略 stream 致 SSE/JSON 跨格式重放——加格式维度
+  `stream=1/0`。三处测试红→绿（含跨格式 miss 契约与线程探针）；gateway 模块 264/0。
+- **在途/阻塞**：#443（#441 修复）全绿除 CodeQL——平台侧 09:01Z 起上传故障（重试 3 次同因，多语言
+  同现象，疑似 GitHub incidents）；#440 本地完成待推（依赖平台恢复后统一走 CI）。
+- 下一批：控制面锁定失效（HIGH）/XFF 白名单（HIGH）、转义族、导出泄漏、并发族。
 
 ## 会话交接点 2026-09-13（备份工具链三缺陷修复：#438）
 

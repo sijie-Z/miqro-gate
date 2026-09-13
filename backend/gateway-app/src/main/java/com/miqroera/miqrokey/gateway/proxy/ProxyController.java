@@ -257,20 +257,26 @@ public class ProxyController {
                     hasToolFields);
             CacheKey cacheKey = cacheable ? cacheKeyFactory.compute(ctx, modelName, body) : null;
 
-            if (cacheKey != null) {
-                GatewayResponseCache.Lookup lookup = responseCache.get(ctx.tenantId(), cacheKey);
-                if (lookup.response().isPresent()) {
-                    publishCacheHit(lookup.level(), ctx, cacheKey, requestId);
-                    return sseReplayEngine.replay(lookup.response().get(), exchange.getResponse(), requestId,
-                            hitLevelName(lookup.level()));
-                }
-            }
+            // #444: the cache lookup is blocking I/O (L2 hits PostgreSQL) — it
+            // must never run on the event loop. Reads go through the bounded
+            // scheduler; the cached-replay path continues on its thread.
+            Mono<Void> pipeline = cacheKey != null
+                    ? Mono.fromCallable(() -> responseCache.get(ctx.tenantId(), cacheKey))
+                            .subscribeOn(credentialDecryptScheduler).flatMap(lookup -> {
+                                if (lookup.response().isPresent()) {
+                                    publishCacheHit(lookup.level(), ctx, cacheKey, requestId);
+                                    return sseReplayEngine.replay(lookup.response().get(), exchange.getResponse(),
+                                            requestId, hitLevelName(lookup.level()));
+                                }
+                                return forward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis,
+                                        streaming);
+                            })
+                    : forward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming);
 
-            return forward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming)
-                    .onErrorResume(AuthFailureException.class, e -> writeError(exchange, e))
-                    .onErrorResume(WebClientRequestException.class,
-                            e -> writeError(exchange, new AuthFailureException(HttpStatus.BAD_GATEWAY,
-                                    "upstream_unavailable", "Upstream provider is unreachable")));
+            return pipeline.onErrorResume(AuthFailureException.class, e -> writeError(exchange, e)).onErrorResume(
+                    WebClientRequestException.class,
+                    e -> writeError(exchange, new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
+                            "Upstream provider is unreachable")));
         }).onErrorResume(DataBufferLimitException.class,
                 e -> writeError(exchange, new AuthFailureException(HttpStatus.PAYLOAD_TOO_LARGE, "payload_too_large",
                         "Request body exceeds the gateway buffer limit")));
@@ -486,8 +492,15 @@ public class ProxyController {
                             String contentType = outHeaders.getFirst(HttpHeaders.CONTENT_TYPE);
                             cached = new CachedResponse(status, contentType, outHeaders, attempt.collector.bytes(),
                                     tokens, true);
-                            responseCache.put(cacheKey, ctx.tenantId(), ctx.key().keyId(), ctx.projectId(),
-                                    ctx.productId(), modelName, cached);
+                            // #444: the fill is best-effort and blocking I/O — run it
+                            // on the bounded scheduler, never on the response-writing
+                            // event loop; a failed fill only logs (the client already
+                            // has its response).
+                            CachedResponse toStore = cached;
+                            Mono.fromRunnable(() -> responseCache.put(cacheKey, ctx.tenantId(), ctx.key().keyId(),
+                                    ctx.projectId(), ctx.productId(), modelName, toStore))
+                                    .subscribeOn(credentialDecryptScheduler).subscribe(null,
+                                            error -> log.warn("aigw.cache.put_failed: {}", error.getMessage()));
                         }
                         return cached != null
                                 ? cached
