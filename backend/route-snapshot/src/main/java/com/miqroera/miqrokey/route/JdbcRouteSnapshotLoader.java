@@ -328,7 +328,7 @@ public final class JdbcRouteSnapshotLoader {
                        p.breaker_error_enabled, p.breaker_error_ratio, p.breaker_error_status_codes,
                        p.breaker_slow_enabled, p.breaker_slow_call_ms, p.breaker_slow_ratio,
                        p.breaker_open_seconds, p.breaker_probe_count, p.breaker_probe_success,
-                       p.breaker_skip_retry
+                       p.breaker_skip_retry, p.version
                 FROM mcp_services s
                 LEFT JOIN mcp_service_access a ON a.mcp_service_id = s.id
                 LEFT JOIN mcp_resilience_policy p ON p.mcp_service_id = s.id
