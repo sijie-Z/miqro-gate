@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.gateway.proxy;
 import com.miqroera.miqrokey.gateway.GatewayAuthTestConfig;
 import com.miqroera.miqrokey.testing.AnthropicFixtures;
 import com.miqroera.miqrokey.testing.AnthropicMockProvider;
+import com.miqroera.miqrokey.queue.UsageEventBus;
 import com.miqroera.miqrokey.testing.GatewayTestKeys;
 import io.netty.channel.ChannelOption;
 import org.flywaydb.core.Flyway;
@@ -153,6 +154,8 @@ class SoakIntegrationTest {
 
     @Autowired
     NamedParameterJdbcTemplate jdbc;
+    @Autowired
+    UsageEventBus usageEventBus;
 
     @LocalServerPort
     int gatewayPort;
@@ -276,7 +279,14 @@ class SoakIntegrationTest {
                 Thread.sleep(500);
             }
         }
-        assertThat(rows).as("usage rows must equal successful requests (sent=%d, ok=%d)", sent, ok).isEqualTo(ok);
+        UsageEventBus.QueueMetrics queueMetrics = usageEventBus.metrics();
+        System.out.printf("bus: published=%d persisted=%d dropped=%d queued=%d flushes=%d%n",
+                queueMetrics.totalPublished(), queueMetrics.totalPersisted(), queueMetrics.totalDropped(),
+                queueMetrics.queuedCount(), queueMetrics.flushCount());
+        assertThat(rows)
+                .as("usage rows must equal successful requests (sent=%d, ok=%d, bus=%s)", sent, ok, queueMetrics)
+                .isEqualTo(ok);
+        assertThat(queueMetrics.totalDropped()).as("the red-line window must not drop usage events").isZero();
 
         mockProvider.reset();
     }

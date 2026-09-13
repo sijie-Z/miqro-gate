@@ -6,12 +6,19 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-12 自主轮（rc.16 发布：加固轮收官）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS（develop @ 2260f40（rc.15 tag）；**rc.15 已发布（2026-09-12）**——被动健康（#397）
-  落地 + 六项缺陷修复（#399/#401/#403/#404/#407 自查轮，全部红→绿闭环）；I 序列 I1–I21 DONE；CI 无红灯；
-  待办：矩阵 §3 裁决项（等 leader/外部：消费者 HMAC、内容安全、F11 复活、F25/F27/F28/F29、#245）、
-  #211 真机凭证（BLOCKED）、F32/F33 平台接口（BLOCKED）、F19 账单对账（等真实样本）、F29 服务数据面（等 leader 形态））`
-- Last updated: `2026-09-12 CST`
+- Current goal: `2026-09-13 自主轮（用量冲刷节奏修复：#424）` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS（develop @ fc541fd；**rc.16 已发布（2026-09-12）** + 09-13 收口 #421 调度噪音 /
+  #423 开放面安全回归 / #424 冲刷节奏；I 序列 I1–I21 DONE；CI 无红灯；待办：**leader 请示稿回执（6 组
+  裁决 + 3 项材料）**、#211（BLOCKED）、F25/F27/F28/F29、#245、F32/F33、F19）`
+- Last updated: `2026-09-13 CST`
+
+## 会话交接点 2026-09-13（用量冲刷节奏修复：#424）
+
+- **#424（本 PR，bug，verify 承压复现）**：soak 承压短少 697/7982 行（3 事件/请求 × 2400/s，5s 周期间
+  瞬时深度超容量触发 DROP）。修复=冲刷周期默认 5s → 1s；诊断固化（soak 输出总线指标 + `dropped == 0`
+  硬断言）。轻载/承压双条件验证。
+- 待续：**#423**（开放面安全回归）rebase 到本修复之上重验后推 PR；技能包解压炸弹硬化材料已备。
+- 下一批：leader 请示稿回执；rc.17 攒批。
 
 ## 会话交接点 2026-09-12（rc.16 发布：加固轮收官）
 

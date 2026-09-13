@@ -21,14 +21,17 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Production usage event bus: bounded blocking queue drained on a fixed
- * schedule (default every 5s). Each flush drains the queue COMPLETELY in
- * {@code flushThreshold}-sized batches (the threshold is a batch size, not a
- * drain limit — #417) into {@link UsageEventWriter}.
+ * schedule (default every 1s — #424: the 5s cadence let the red-line burst
+ * (~2400 events/s) exceed the queue capacity within one period and drop). Each
+ * flush drains the queue COMPLETELY in {@code flushThreshold}-sized batches
+ * (the threshold is a batch size, not a drain limit — #417) into
+ * {@link UsageEventWriter}.
  *
  * <h2>Saturation</h2> The queue is bounded
- * ({@code miqrokey.gateway.queue.capacity}, default 10 000). When full, the
- * behavior follows {@link SaturationMode}: {@code DROP} (default) rejects the
- * offer — the event is LOST but the gateway never blocks on the hot path;
+ * ({@code miqrokey.gateway.queue.capacity}, default 50 000 — #424: absorbs
+ * multi-second writer stalls at the §10 red-line rate). When full, the behavior
+ * follows {@link SaturationMode}: {@code DROP} (default) rejects the offer —
+ * the event is LOST but the gateway never blocks on the hot path;
  * {@code WRITE_THROUGH} (F35, emergency switch) routes the single event through
  * the dedicated writer executor and waits up to the configured timeout for the
  * idempotent write — audit integrity first, at the cost of a bounded stall.
@@ -159,16 +162,24 @@ public final class PostgresUsageEventBus implements UsageEventBus {
      * Submits to the dedicated writer scheduler; a flush already in flight is
      * skipped, never queued up.
      */
-    @Scheduled(fixedDelayString = "${miqrokey.gateway.queue.flush-interval:5s}")
+    @Scheduled(fixedDelayString = "${miqrokey.gateway.queue.flush-interval:1s}")
     public void scheduledFlush() {
         if (flushing.compareAndSet(false, true)) {
-            writerScheduler.schedule(() -> {
-                try {
-                    flush();
-                } finally {
-                    flushing.set(false);
-                }
-            });
+            try {
+                writerScheduler.schedule(() -> {
+                    try {
+                        flush();
+                    } finally {
+                        flushing.set(false);
+                    }
+                });
+            } catch (RuntimeException e) {
+                // A rejected scheduling (writer queue saturated/disposed) must
+                // not leave the in-flight guard set forever (#424): that would
+                // silently stop ALL future flushes.
+                flushing.set(false);
+                throw e;
+            }
         }
     }
 

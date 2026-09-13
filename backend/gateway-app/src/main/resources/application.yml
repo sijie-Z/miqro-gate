@@ -39,9 +39,9 @@ miqrokey:
       refresh-interval: ${MIQROKEY_GATEWAY_ROUTE_REFRESH_INTERVAL:30s}
       notify-channel: ${MIQROKEY_GATEWAY_ROUTE_NOTIFY_CHANNEL:miqrokey_route_refresh}
     queue:
-      capacity: ${MIQROKEY_GATEWAY_QUEUE_CAPACITY:10000}
+      capacity: ${MIQROKEY_GATEWAY_QUEUE_CAPACITY:50000}
       flush-threshold: ${MIQROKEY_GATEWAY_QUEUE_FLUSH_THRESHOLD:100}
-      flush-interval: ${MIQROKEY_GATEWAY_QUEUE_FLUSH_INTERVAL:5s}
+      flush-interval: ${MIQROKEY_GATEWAY_QUEUE_FLUSH_INTERVAL:1s}
       writer-threads: ${MIQROKEY_GATEWAY_QUEUE_WRITER_THREADS:4}
     coalescer:
       # Request coalescing (single-flight): DISABLED by default (ADR-0008).
