@@ -89,7 +89,8 @@ public class AdminApiKeyService {
     }
 
     private static String safeJson(String value) {
-        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
+        // #447: full escaping (control characters included) via the shared helper.
+        return AuditSummaries.escapeJson(value);
     }
 
     /** Compact JSON array for the audit summary (codes are fixed ASCII). */

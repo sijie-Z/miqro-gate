@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
@@ -27,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -91,6 +93,35 @@ class AdminOrgApiIntegrationTest {
     @AfterEach
     void tearDown() {
         fx.reset();
+    }
+
+    @Test
+    @DisplayName("hostile names keep the audit summary valid JSON and cannot forge members (#447)")
+    void hostileNamesDoNotBreakAudit() throws Exception {
+        // Team name with a quote + newline used to make the ::jsonb cast fail and
+        // roll back the whole transaction (500) — pre-#447 red at the isOk.
+        String teamName = "Team \"Alpha\"\nline2";
+        mockMvc.perform(post("/api/v1/admin/teams").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("name", teamName)))).andExpect(status().isOk());
+        String teamSummary = jdbc
+                .queryForObject("SELECT change_summary::text FROM admin_audit_events WHERE action = 'TEAM_CREATE' "
+                        + "ORDER BY chain_position DESC LIMIT 1", new MapSqlParameterSource(), String.class);
+        assertThat(objectMapper.readTree(teamSummary).get("name").asText()).contains("Alpha");
+
+        // A crafted username must stay a literal username value, not a member.
+        String crafted = "x\",\"role\":\"SYSTEM_ADMIN";
+        mockMvc.perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper
+                        .writeValueAsString(Map.of("username", crafted, "displayName", "Craft", "role", "USER"))))
+                .andExpect(status().isOk());
+        String userSummary = jdbc
+                .queryForObject("SELECT change_summary::text FROM admin_audit_events WHERE action = 'USER_CREATE' "
+                        + "ORDER BY chain_position DESC LIMIT 1", new MapSqlParameterSource(), String.class);
+        JsonNode parsed = objectMapper.readTree(userSummary);
+        assertThat(parsed.get("username").asText()).isEqualTo(crafted);
+        assertThat(parsed.get("role").asText()).isEqualTo("USER");
     }
 
     @Test
