@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
@@ -23,10 +24,12 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -91,6 +94,58 @@ class AdminOrgApiIntegrationTest {
     @AfterEach
     void tearDown() {
         fx.reset();
+    }
+
+    @Test
+    @DisplayName("an admin lock kills the session, blocks login and does not self-heal (#445)")
+    void manualLockIsEnforced() throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("username", "lockme", "displayName", "Lock Me", "role", "USER"))))
+                .andExpect(status().isOk()).andReturn();
+        Map<?, ?> createdBody = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class);
+        String temp = createdBody.get("temporaryPassword").toString();
+        String userId = ((Map<?, ?>) createdBody.get("user")).get("id").toString();
+
+        MvcResult login = mockMvc
+                .perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("lockme", temp))))
+                .andExpect(status().isOk()).andReturn();
+        Cookie userSession = cookie(login, "MIQROKEY_SESSION");
+        assertThat(userSession).isNotNull();
+        mockMvc.perform(get("/api/v1/auth/me").cookie(userSession)).andExpect(status().isOk());
+
+        // Admin locks the account (indefinite: no lock deadline involved).
+        mockMvc.perform(patch("/api/v1/admin/users/" + userId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken).content("{\"status\":\"LOCKED\"}"))
+                .andExpect(status().isOk());
+
+        // (a) the existing session is dead.
+        mockMvc.perform(get("/api/v1/auth/me").cookie(userSession)).andExpect(status().isUnauthorized());
+        // (b) a password login is refused while locked.
+        mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new LoginRequest("lockme", temp))))
+                .andExpect(status().isUnauthorized());
+        // (c) the lock did not self-heal: the user list still shows LOCKED.
+        String usersBody = mockMvc.perform(get("/api/v1/admin/users").cookie(sessionCookie)).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        JsonNode lockme = null;
+        for (JsonNode node : objectMapper.readTree(usersBody)) {
+            if ("lockme".equals(node.path("username").asText())) {
+                lockme = node;
+            }
+        }
+        assertThat(lockme).isNotNull();
+        assertThat(lockme.path("status").asText()).isEqualTo("LOCKED");
+
+        // (d) unlocking restores login.
+        mockMvc.perform(patch("/api/v1/admin/users/" + userId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken).content("{\"status\":\"ACTIVE\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new LoginRequest("lockme", temp)))).andExpect(status().isOk());
     }
 
     @Test

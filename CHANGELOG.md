@@ -25,6 +25,15 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   `lib-retention.sh` 可脱库测试；②备份管线失败残留无 manifest 的半成品 `.enc`——失败分支清理；
   ③还原加 `--single-transaction`（原子恢复，中途失败整体回滚）。测试：新增 `test-retention.sh`
   红→绿（精确保留集/幂等/失败零残留）+ 既有 webhook 测试与真机恢复演练（1000 行）保持 PASS。
+- **控制面安全语义修复（#445，sub-agent 全量审查发现，五红→五绿）**：①「锁定用户」实际不生效且会自愈——
+  LOCKED 未设期限/未吊销会话，且执行点（SessionFilter/AuthenticationService）只识别「带期限」锁，
+  登录成功还会把手动锁定写回 ACTIVE；修复=null 期限语义为无限期管理员锁（执行点统一）+锁定时吊销
+  全部会话+解锁清期限，自动锁到期自愈不变。②X-Forwarded-For **最左取信**——追加式反代下客户端
+  自带伪造条目即绕过 F05 管理门户白名单（实测 200）；修复=从右向左跳过 trusted-proxies 的首个
+  非信任地址（追加/替换两种代理语义均正确）+ `IpCidrMatcher` 仅接受字面 IP（实测 `localhost` 经
+  DNS 解析命中 127.0.0.0/8）。③403 体 `X-Request-Id` 转义（注入实测 code=FAKE）。测试：锁定 IT
+  （会话 401/重登 401/状态保持 LOCKED/解锁恢复）+ 伪造头 403/hostname 403/注入体 JSON 合法 +
+  matcher 字面 IP；认证/会话回归 38/0。
 
 ### 2026-09-12
 - **被动健康检查：真实流量失败率入服务健康视图（#397，矩阵 §3 候选落地，阿里「主动+被动并列」）**：新端点

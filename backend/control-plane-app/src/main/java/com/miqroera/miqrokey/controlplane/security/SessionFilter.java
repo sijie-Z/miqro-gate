@@ -120,7 +120,10 @@ public class SessionFilter implements Filter {
             sendUnauthorized(httpRes, "Account disabled", "UNAUTHORIZED");
             return;
         }
-        if (user.status() == UserStatus.LOCKED && user.lockedUntil() != null && now.isBefore(user.lockedUntil())) {
+        // #445: LOCKED with a null deadline is an indefinite admin lock; the
+        // old condition only recognized timed (auto-lock) entries and let an
+        // admin-locked account keep using its session.
+        if (user.status() == UserStatus.LOCKED && (user.lockedUntil() == null || now.isBefore(user.lockedUntil()))) {
             try {
                 sessionService.revokeSession(session.id());
             } catch (Exception ignored) {
