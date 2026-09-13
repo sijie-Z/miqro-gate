@@ -19,6 +19,9 @@ else
   winpath() { printf '%s' "$1"; }
 fi
 
+# Retention helper (own file so test-retention.sh can run it without a database).
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-retention.sh"
+
 MIQROKEY_BACKUP_PATH="${MIQROKEY_BACKUP_PATH:-/var/backups/miqrokey}"
 MIQROKEY_BACKUP_DAILY_KEEP="${MIQROKEY_BACKUP_DAILY_KEEP:-7}"
 MIQROKEY_BACKUP_WEEKLY_KEEP="${MIQROKEY_BACKUP_WEEKLY_KEEP:-4}"
@@ -63,6 +66,10 @@ if ! pg_dump --format=custom --no-owner --no-privileges "$DB_NAME" \
   | gzip -9 \
   | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
       -pass file:"$(winpath "$MIQROKEY_BACKUP_KEY_FILE")" -out "$FILE"; then
+  # The failed pipeline may have left a partial archive behind (openssl opens
+  # its output file up front) — remove it so ops never finds a
+  # restorable-looking stub without a manifest (#438).
+  rm -f -- "$FILE"
   notify failure "pg_dump or encryption failed"
   exit 1
 fi
@@ -71,17 +78,9 @@ fi
 # always has its own manifest).
 sha256sum "$FILE" > "$MANIFEST"
 
-# Retention: weekly files are the newest file per ISO week.
-NEWEST_WEEKLY=$(ls -1 "$MIQROKEY_BACKUP_PATH"/miqrokey-*.sql.gz.enc 2>/dev/null \
-  | sort -r | head -n "$MIQROKEY_BACKUP_WEEKLY_KEEP" | xargs -r basename -a 2>/dev/null || true)
-PRUNE_COUNT=0
-while [ "$(ls -1 "$MIQROKEY_BACKUP_PATH"/miqrokey-*.sql.gz.enc 2>/dev/null | wc -l)" -gt \
-       "$((MIQROKEY_BACKUP_DAILY_KEEP + MIQROKEY_BACKUP_WEEKLY_KEEP))" ]; do
-  OLDEST=$(ls -1 "$MIQROKEY_BACKUP_PATH"/miqrokey-*.sql.gz.enc | sort | head -n 1)
-  [ -z "$OLDEST" ] && break
-  rm -f "$OLDEST" "$OLDEST.sha256"
-  PRUNE_COUNT=$((PRUNE_COUNT + 1))
-done
+# Retention: daily set + newest per ISO week among the remainder (#438).
+PRUNE_COUNT=$(apply_retention "$MIQROKEY_BACKUP_PATH" "$MIQROKEY_BACKUP_DAILY_KEEP" "$MIQROKEY_BACKUP_WEEKLY_KEEP") \
+  || { notify failure "retention failed"; exit 2; }
 
 if ! notify success "backup completed ($(du -h "$FILE" | cut -f1))"; then
   exit 3

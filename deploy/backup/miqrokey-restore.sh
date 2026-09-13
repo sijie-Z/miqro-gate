@@ -40,9 +40,12 @@ if ! (cd "$(dirname "$BACKUP_FILE")" && sha256sum -c "$(basename "$MANIFEST")" >
 fi
 
 echo "restoring $BACKUP_FILE into $DB_NAME ..."
+# --single-transaction (#438): the restore is atomic — a mid-way failure rolls
+# back and the target database keeps its previous state instead of a
+# half-restored mix.
 openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:"$(winpath "$MIQROKEY_BACKUP_KEY_FILE")" \
   -in "$BACKUP_FILE" \
   | gunzip \
-  | pg_restore --no-owner --no-privileges --exit-on-error -d "$DB_NAME"
+  | pg_restore --no-owner --no-privileges --exit-on-error --single-transaction -d "$DB_NAME"
 
 echo "restore ok"
