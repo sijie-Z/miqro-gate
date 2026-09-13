@@ -2,6 +2,11 @@ package com.miqroera.miqrokey.gateway.proxy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.miqroera.miqrokey.cache.CachedResponse;
+import com.miqroera.miqrokey.cache.CaffeineCacheProvider;
+import com.miqroera.miqrokey.cache.GatewayResponseCache;
+import com.miqroera.miqrokey.cache.NoopCacheProvider;
+import com.miqroera.miqrokey.domain.cache.CacheKey;
 import com.miqroera.miqrokey.gateway.GatewayAuthTestConfig;
 import com.miqroera.miqrokey.testing.AnthropicMockProvider;
 import com.miqroera.miqrokey.testing.ChatFixtures;
@@ -14,13 +19,21 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -35,9 +48,65 @@ import static org.assertj.core.api.Assertions.assertThat;
                 + "org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration",
         "miqrokey.gateway.persistence.enabled=false", "miqrokey.crypto.enabled=false", "miqrokey.cache.enabled=true",
         "spring.main.web-application-type=reactive"})
-@Import(GatewayAuthTestConfig.class)
+@Import({GatewayAuthTestConfig.class, VirtualKeyAuthContractTest.CacheIoProbeConfig.class})
 @DisplayName("Virtual key authentication contract")
 class VirtualKeyAuthContractTest {
+
+    /**
+     * #444: cache I/O must never run on a Reactor Netty event loop. This probe
+     * replaces the context's cache bean with a recording wrapper around the same
+     * Caffeine L1 (noop L2) so tests can assert the executing threads and await the
+     * asynchronous fill.
+     */
+    @TestConfiguration
+    static class CacheIoProbeConfig {
+
+        static final Set<String> CACHE_IO_THREADS = ConcurrentHashMap.newKeySet();
+        static final AtomicInteger PUT_COUNT = new AtomicInteger();
+
+        @Bean
+        @Primary
+        GatewayResponseCache cacheIoProbe() {
+            GatewayResponseCache inner = new CaffeineCacheProvider(new NoopCacheProvider(), Duration.ofMinutes(5));
+            return new GatewayResponseCache() {
+
+                @Override
+                public Lookup get(UUID tenantId, CacheKey key) {
+                    CACHE_IO_THREADS.add(Thread.currentThread().getName());
+                    return inner.get(tenantId, key);
+                }
+
+                @Override
+                public void put(CacheKey key, UUID tenantId, UUID virtualKeyId, UUID projectId, UUID productId,
+                        String modelId, CachedResponse response) {
+                    CACHE_IO_THREADS.add(Thread.currentThread().getName());
+                    inner.put(key, tenantId, virtualKeyId, projectId, productId, modelId, response);
+                    PUT_COUNT.incrementAndGet();
+                }
+
+                @Override
+                public void invalidateProject(UUID tenantId, UUID projectId) {
+                    inner.invalidateProject(tenantId, projectId);
+                }
+
+                @Override
+                public long l1Size() {
+                    return inner.l1Size();
+                }
+            };
+        }
+    }
+
+    /**
+     * Awaits the asynchronous cache fill issued by the previous request (#444).
+     */
+    private static void awaitCacheFill() throws InterruptedException {
+        int before = CacheIoProbeConfig.PUT_COUNT.get();
+        long deadline = System.currentTimeMillis() + 3000;
+        while (CacheIoProbeConfig.PUT_COUNT.get() == before && System.currentTimeMillis() < deadline) {
+            Thread.sleep(25);
+        }
+    }
 
     private static final AnthropicMockProvider mockProvider = new AnthropicMockProvider();
 
@@ -302,7 +371,7 @@ class VirtualKeyAuthContractTest {
 
         @Test
         @DisplayName("should serve a byte-identical L1 hit for an identical cacheable request")
-        void shouldServeL1Hit() {
+        void shouldServeL1Hit() throws InterruptedException {
             mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
                     .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
 
@@ -311,6 +380,7 @@ class VirtualKeyAuthContractTest {
                     .exchange().expectStatus().isOk().expectHeader()
                     .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss").expectBody().returnResult()
                     .getResponseBody();
+            awaitCacheFill();
 
             byte[] second = webTestClient.post().uri("/v1/chat/completions")
                     .header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(ChatFixtures.REQUEST_NON_STREAMING)
@@ -324,8 +394,54 @@ class VirtualKeyAuthContractTest {
         }
 
         @Test
+        @DisplayName("stream format is part of the key: SSE never replays into a JSON request (#444)")
+        void streamFormatIsPartOfTheKey() {
+            // Prime the cache with a streaming request (SSE response gets stored).
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("text/event-stream").body(ChatFixtures.RESPONSE_STREAMING_SSE).build());
+            webTestClient.post().uri("/v1/chat/completions").header(CacheEligibility.CACHEABLE_HEADER, "1")
+                    .bodyValue(ChatFixtures.REQUEST_STREAMING).exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+
+            // Same system prompt + last user message, but a non-streaming request:
+            // it must MISS (different format) and go upstream for a JSON answer —
+            // replaying the stored SSE frames to a JSON client would break parsing.
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+            byte[] body = webTestClient.post().uri("/v1/chat/completions")
+                    .header(CacheEligibility.CACHEABLE_HEADER, "1")
+                    .bodyValue("{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":"
+                            + "\"Tell me a short story.\"}],\"max_tokens\":512}")
+                    .exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss").expectBody().returnResult()
+                    .getResponseBody();
+            assertThat(new String(body, StandardCharsets.UTF_8)).isEqualTo(ChatFixtures.RESPONSE_BASIC);
+        }
+
+        @Test
+        @DisplayName("cache I/O runs on the bounded scheduler, never on the event loop (#444)")
+        void cacheIoRunsOffTheEventLoop() throws Exception {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+            // Unique content so this request's key cannot be pre-filled by others.
+            String unique = """
+                    {"model":"gpt-4o-mini","messages":[{"role":"user","content":"thread probe 444"}]}""";
+
+            webTestClient.post().uri("/v1/chat/completions").header(CacheEligibility.CACHEABLE_HEADER, "1")
+                    .bodyValue(unique).exchange().expectStatus().isOk().expectHeader()
+                    .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss");
+            awaitCacheFill();
+
+            assertThat(CacheIoProbeConfig.CACHE_IO_THREADS).isNotEmpty();
+            // Event loops are named webflux-http-nio-N (server) / reactor-http-nio-N;
+            // the bounded scheduler threads carry our own prefix.
+            assertThat(CacheIoProbeConfig.CACHE_IO_THREADS)
+                    .allSatisfy(name -> assertThat(name).doesNotContain("webflux-http").doesNotContain("reactor-http"));
+        }
+
+        @Test
         @DisplayName("semantic key: different histories with the same last user message still hit")
-        void semanticKeyHitsAcrossHistories() {
+        void semanticKeyHitsAcrossHistories() throws InterruptedException {
             mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
                     .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
 
@@ -346,6 +462,7 @@ class VirtualKeyAuthContractTest {
                     .bodyValue(first).exchange().expectStatus().isOk().expectHeader()
                     .valueEquals(SseReplayEngine.X_MIQROKEY_CACHE, "miss").expectBody().returnResult()
                     .getResponseBody();
+            awaitCacheFill();
 
             byte[] replayed = webTestClient.post().uri("/v1/chat/completions")
                     .header(CacheEligibility.CACHEABLE_HEADER, "1").bodyValue(second).exchange().expectStatus().isOk()
