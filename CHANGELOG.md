@@ -25,6 +25,13 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   `lib-retention.sh` 可脱库测试；②备份管线失败残留无 manifest 的半成品 `.enc`——失败分支清理；
   ③还原加 `--single-transaction`（原子恢复，中途失败整体回滚）。测试：新增 `test-retention.sh`
   红→绿（精确保留集/幂等/失败零残留）+ 既有 webhook 测试与真机恢复演练（1000 行）保持 PASS。
+- **两处 HIGH 数据库缺陷修复（#441，sub-agent 全量审查发现）**：①`JdbcRouteSnapshotLoader` 的 SELECT 缺
+  `p.version` 而行映射读取它——任何服务保存过韧性策略后，每次快照加载抛 PSQLException，刷新器保留旧快照，
+  **吊销/轮换/授权/审批从此永久不再传播**（fail-safe 退化为静默 stale-authorization）；补列后快照恢复
+  正常传播。②`UsageStatsRepositoryImpl` 的订阅过滤 JOIN 引用不存在的 `credentials` 表与
+  `virtual_keys.credential_id` 列——`?subscriptionId=` 的用量查询恒 500；修为
+  `upstream_credentials` + `upstream_credential_id`。测试：两个回归 IT 红→绿（策略行入快照断言；
+  真实 SQL 过滤命中 107 tokens / 陌生订阅 0）。
 
 ### 2026-09-12
 - **被动健康检查：真实流量失败率入服务健康视图（#397，矩阵 §3 候选落地，阿里「主动+被动并列」）**：新端点

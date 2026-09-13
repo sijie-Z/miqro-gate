@@ -6,12 +6,25 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-13 自主轮（备份工具链修复：#438）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS（develop @ 7f7fd4e；**rc.18 已发布（2026-09-13）** + 09-13 收口 #430 CSV 公式
-  注入 / #432 主密钥批量重加密 / #433 SSE 缓冲有界化 / #438 备份工具链 / #421 调度噪音 / #423 开放面
-  安全回归 / #424 冲刷节奏 / #427 技能包炸弹；I 序列 I1–I21 DONE；CI 无红灯；待办：**leader 请示稿
-  回执（6 组裁决 + 3 项材料）**、#211（BLOCKED）、F25/F27/F28/F29、#245、F32/F33、F19）`
+- Current goal: `2026-09-13 自主轮（sub-agent 全量审查 HIGH 抢修：#441）` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS（develop @ abd13a9；**rc.18 已发布（2026-09-13）** + 09-13 收口 #430/#432/#433/
+  #438 + #441 两处 HIGH 抢修（快照 version 列 / 用量订阅 JOIN）；**sub-agent 全量审查（7 路）完成，在途
+  修复队列：前端守卫二批 #440、网关缓存/转义族、控制面锁/XFF/导出族、并发族等**；I 序列 I1–I21 DONE；
+  待办：**leader 请示稿回执（6 组裁决 + 3 项材料）**、#211（BLOCKED）、F25/F27/F28/F29、#245、F32/F33、
+  F19）`
 - Last updated: `2026-09-13 CST`
+
+## 会话交接点 2026-09-13（sub-agent 全量审查 + HIGH 抢修：#441）
+
+- **sub-agent 全量审查（用户指令 task-b）**：7 路并行（网关数据面 / 控制面认证审计 / 控制面资源并发 /
+  持久层队列 / 前端 / 腾讯语料 01-15 / 16-29），约 70 条发现；已逐条复核属实率极高。
+- **#441（本 PR，HIGH×2 抢修）**：①快照加载器缺 `p.version` → 韧性策略启用后快照永久冻结（吊销不传播）；
+  ②用量订阅过滤 JOIN 引用不存在表 → `?subscriptionId=` 恒 500。两回归 IT 红→绿；修复各一行。
+- **在途队列（按优先级）**：#440 前端守卫二批（含 Grants HIGH，部分已提交 wip）；
+  网关缓存事件环阻塞 + `stream` 缓存键（HIGH/MED）；控制面用户锁定不生效（HIGH）+ XFF 白名单伪造（HIGH）；
+  错误/审计信封转义族；导出 fileBytes 泄漏；并发族（审批 RMW/webhook PATCH/setState/熔断探针闩锁）；
+  shutdown flush 缺失；语料矩阵 §1 刷新 + 对比文档失实修正。
+- 下一批：leader 请示稿回执（6 组裁决 + 3 项材料）。
 
 ## 会话交接点 2026-09-13（备份工具链三缺陷修复：#438）
 
