@@ -45,6 +45,10 @@ const modelsGrant = ref<Grant | null>(null);
 const modelsText = ref('');
 const modelsSaving = ref(false);
 const modelsError = ref('');
+// #440: request-sequence guard — a slow load for grant A must never land in the
+// drawer after the user has re-targeted it at grant B (replace-all save would
+// otherwise write A's model list into B's scope).
+let modelsRequestSeq = 0;
 
 const confirmState = ref<{
   title: string;
@@ -155,22 +159,30 @@ function parseModels(text: string): string[] {
 }
 
 async function openModels(grant: Grant) {
+  const seq = ++modelsRequestSeq;
   modelsGrant.value = grant;
   modelsError.value = '';
   try {
-    modelsText.value = (await api.grantModels(grant.id!)).join('\n'); // list rows always carry ids
+    const models = (await api.grantModels(grant.id!)).join('\n'); // list rows always carry ids
+    if (seq !== modelsRequestSeq) {
+      return; // a newer drawer target won — this response is stale
+    }
+    modelsText.value = models;
     modelsOpen.value = true;
   } catch {
-    toast.error('加载模型范围失败');
+    if (seq === modelsRequestSeq) {
+      toast.error('加载模型范围失败');
+    }
   }
 }
 
 async function saveModels() {
-  if (!modelsGrant.value) return;
+  const target = modelsGrant.value;
+  if (!target) return;
   modelsSaving.value = true;
   modelsError.value = '';
   try {
-    await api.updateGrantModels(modelsGrant.value.id!, parseModels(modelsText.value)); // drawer row carries id
+    await api.updateGrantModels(target.id!, parseModels(modelsText.value)); // drawer row carries id
     toast.success('模型范围已更新');
     modelsOpen.value = false;
   } catch (error) {

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import { reactive, ref } from 'vue';
 import NextProfileView from '@/views/next/NextProfileView.vue';
 
 const push = vi.fn();
@@ -10,18 +11,24 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push }),
 }));
 
-const authMock = {
+// #440: the flag must be REACTIVE (like the real store's ref-backed computed) —
+// the previous plain-property mock never invalidated the component's computed,
+// masking the dead-code redirect.
+const mustChangePassword = ref(false);
+const authMock = reactive({
   user: {
     username: 'demo2_user',
     displayName: 'Demo 用户',
     role: 'USER',
     sessionExpiresAt: '2026-09-04T00:00:00Z',
   },
-  mustChangePassword: false,
+  get mustChangePassword() {
+    return mustChangePassword.value;
+  },
   changePassword: vi.fn(async () => {
-    authMock.mustChangePassword = false;
+    mustChangePassword.value = false;
   }),
-};
+});
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => authMock,
@@ -32,7 +39,7 @@ describe('NextProfileView', () => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     push.mockResolvedValue(undefined);
-    authMock.mustChangePassword = false;
+    mustChangePassword.value = false;
     authMock.user.role = 'USER';
   });
 
@@ -57,7 +64,7 @@ describe('NextProfileView', () => {
   });
 
   it('shows the forced password banner and redirects after change', async () => {
-    authMock.mustChangePassword = true;
+    mustChangePassword.value = true;
 
     const wrapper = mountView();
     expect(wrapper.find('[data-testid="forced-password"]').exists()).toBe(true);

@@ -224,6 +224,42 @@ describe('NextGrantsView', () => {
     expect(toastState.items.some((t) => t.message.includes('模型范围已更新'))).toBe(true);
   });
 
+  it('drops a stale model-scope response when the drawer re-targets another grant (#440)', async () => {
+    // A slow load for grant g1 must never land after the user opened g2:
+    // saving would otherwise replace g2's scope with g1's model list.
+    let releaseA: (models: string[]) => void = () => {};
+    mockApi.grantModels
+      .mockImplementationOnce(
+        () =>
+          new Promise<string[]>((resolve) => {
+            releaseA = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(['kimi-k2.5']);
+    mockApi.updateGrantModels.mockResolvedValue({} as never);
+    const wrapper = mountView();
+    await flushPromises();
+
+    const openButtons = wrapper.findAll('[data-testid="grant-models-open"]');
+    expect(openButtons.length).toBe(2);
+    await openButtons[0]!.trigger('click'); // g1 — stays pending
+    await openButtons[1]!.trigger('click'); // g2 — resolves immediately
+    await flushPromises();
+
+    releaseA(['claude-3-7-sonnet']); // the stale g1 response arrives late
+    await flushPromises();
+
+    const input = document.querySelector(
+      '[data-testid="grant-models-input"]',
+    ) as HTMLTextAreaElement;
+    expect(input.value).toContain('kimi-k2.5');
+    expect(input.value).not.toContain('claude-3-7-sonnet');
+
+    (document.querySelector('[data-testid="grant-models-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(mockApi.updateGrantModels).toHaveBeenCalledWith('g2', ['kimi-k2.5']);
+  });
+
   it('disables an active grant through the confirmation gate', async () => {
     mockApi.disableGrant.mockResolvedValue(undefined);
     const wrapper = mountView();

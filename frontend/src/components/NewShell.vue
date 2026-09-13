@@ -6,7 +6,7 @@
  * holding the user chip. Nav mirrors the legacy AppShell structure 1:1;
  * admin pages still render their TDesign-era content until U2 migrates them.
  */
-import { computed, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   DropdownMenuContent,
@@ -135,8 +135,18 @@ const isActive = (name: string) => route.name === name;
 
 /** Narrow screens collapse the rail to icons only (>=640 hides the drawer entirely). */
 const iconOnly = ref(false);
-window.addEventListener('resize', () => {
+function updateIconOnly() {
   iconOnly.value = window.innerWidth < 1080 && window.innerWidth >= 640;
+}
+// #440: initialize from the CURRENT width and clean the listener up on unmount
+// (the old top-level addEventListener never fired before the first resize and
+// leaked one listener per login).
+onMounted(() => {
+  updateIconOnly();
+  window.addEventListener('resize', updateIconOnly);
+});
+onUnmounted(() => {
+  window.removeEventListener('resize', updateIconOnly);
 });
 
 async function handleLogout() {

@@ -42,17 +42,30 @@ function asDay(row: unknown): NonNullable<RoiReportView['byDay']>[number] {
   return row as NonNullable<RoiReportView['byDay']>[number];
 }
 
+// #440: request-sequence guard — a slow window load must not land after the
+// user switched windows (numbers must match the highlighted range).
+let loadRequestSeq = 0;
+
 async function load() {
+  const seq = ++loadRequestSeq;
   loading.value = true;
   loadError.value = '';
   try {
     const to = new Date();
     const from = new Date(to.getTime() - days.value * 24 * 3600 * 1000);
-    report.value = await api.getRoiReport(from.toISOString(), to.toISOString());
+    const result = await api.getRoiReport(from.toISOString(), to.toISOString());
+    if (seq !== loadRequestSeq) {
+      return; // a newer window won — this response is stale
+    }
+    report.value = result;
   } catch (err) {
-    loadError.value = err instanceof Error ? err.message : '加载失败';
+    if (seq === loadRequestSeq) {
+      loadError.value = err instanceof Error ? err.message : '加载失败';
+    }
   } finally {
-    loading.value = false;
+    if (seq === loadRequestSeq) {
+      loading.value = false;
+    }
   }
 }
 

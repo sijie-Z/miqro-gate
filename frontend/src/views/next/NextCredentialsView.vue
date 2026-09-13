@@ -159,7 +159,12 @@ const validateResult = ref<ValidateCredentialResponse | null>(null);
 const validateError = ref('');
 const validateRequestId = ref('');
 
+// #440: request-sequence guard — a slow validation for credential A must not
+// land under credential B's header (the admin would misread B's health).
+let validateRequestSeq = 0;
+
 function openValidate(cred: CredentialView) {
+  validateRequestSeq++; // invalidate any validation still in flight
   validateTarget.value = cred;
   candidateSecret.value = '';
   showCandidateSecret.value = false;
@@ -169,19 +174,28 @@ function openValidate(cred: CredentialView) {
 }
 
 async function runValidate() {
-  if (!validateTarget.value || !candidateSecret.value.trim()) {
+  const target = validateTarget.value;
+  if (!target || !candidateSecret.value.trim()) {
     validateError.value = '请输入要测试的 Secret。';
     return;
   }
+  const seq = ++validateRequestSeq;
   validating.value = true;
   validateError.value = '';
   validateRequestId.value = '';
   try {
     // The tested credential comes from the list; ids are always present.
-    validateResult.value = await api.validateCredential(validateTarget.value.id!, {
+    const result = await api.validateCredential(target.id!, {
       secret: candidateSecret.value,
     });
+    if (seq !== validateRequestSeq) {
+      return; // the dialog re-targeted — this result belongs to the old credential
+    }
+    validateResult.value = result;
   } catch (error) {
+    if (seq !== validateRequestSeq) {
+      return;
+    }
     validateResult.value = null;
     if (error instanceof ApiError) {
       validateError.value = error.message;
@@ -190,7 +204,9 @@ async function runValidate() {
       validateError.value = '验证失败，请稍后重试。';
     }
   } finally {
-    validating.value = false;
+    if (seq === validateRequestSeq) {
+      validating.value = false;
+    }
   }
 }
 
@@ -241,21 +257,30 @@ async function runRotate() {
 const historyTarget = ref<CredentialView | null>(null);
 const versions = ref<CredentialVersionView[]>([]);
 const historyLoading = ref(false);
+// #440: request-sequence guard — a slow history load for credential A must not
+// land after the drawer re-targets credential B.
+let historyRequestSeq = 0;
 
 async function openHistory(cred: CredentialView) {
+  const seq = ++historyRequestSeq;
   historyTarget.value = cred;
   historyLoading.value = true;
   versions.value = [];
   try {
     // History targets a listed credential; ids are always present.
     const detail: CredentialDetailView = await api.getCredential(cred.id!);
+    if (seq !== historyRequestSeq) {
+      return; // a newer drawer target won — this response is stale
+    }
     versions.value = detail.versions ?? [];
   } catch (error) {
-    if (error instanceof ApiError) {
+    if (seq === historyRequestSeq && error instanceof ApiError) {
       toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
     }
   } finally {
-    historyLoading.value = false;
+    if (seq === historyRequestSeq) {
+      historyLoading.value = false;
+    }
   }
 }
 

@@ -53,31 +53,62 @@ const columns = [
   { key: 'actions', title: '操作', width: '120px', align: 'center' as const },
 ];
 
+// #440: request-sequence guard — rapid filter switches and double "load more"
+// clicks must not interleave pages or duplicate rows.
+let listRequestSeq = 0;
+const moreLoading = ref(false);
+
 async function load() {
+  const seq = ++listRequestSeq;
   loading.value = true;
   loadError.value = '';
   try {
     const page = await api.listModelApprovals(
       filter.value === 'ALL' ? {} : { status: filter.value, size: 20 },
     );
+    if (seq !== listRequestSeq) {
+      return; // a newer request won — this response is stale
+    }
     items.value = page.items ?? [];
     nextCursor.value = page.nextCursor;
   } catch (err) {
-    loadError.value = err instanceof Error ? err.message : '加载失败';
+    if (seq === listRequestSeq) {
+      loadError.value = err instanceof Error ? err.message : '加载失败';
+    }
   } finally {
-    loading.value = false;
+    if (seq === listRequestSeq) {
+      loading.value = false;
+    }
   }
 }
 
 async function loadMore() {
-  if (!nextCursor.value) return;
-  const page = await api.listModelApprovals({
-    ...(filter.value === 'ALL' ? {} : { status: filter.value }),
-    size: 20,
-    before: nextCursor.value,
-  });
-  items.value = items.value.concat(page.items ?? []);
-  nextCursor.value = page.nextCursor;
+  if (!nextCursor.value || moreLoading.value) {
+    return;
+  }
+  const seq = ++listRequestSeq;
+  const before = nextCursor.value;
+  moreLoading.value = true;
+  try {
+    const page = await api.listModelApprovals({
+      ...(filter.value === 'ALL' ? {} : { status: filter.value }),
+      size: 20,
+      before,
+    });
+    if (seq !== listRequestSeq) {
+      return; // a newer request won — this page is stale
+    }
+    items.value = items.value.concat(page.items ?? []);
+    nextCursor.value = page.nextCursor;
+  } catch (err) {
+    if (seq === listRequestSeq) {
+      loadError.value = err instanceof Error ? err.message : '加载更多失败';
+    }
+  } finally {
+    if (seq === listRequestSeq) {
+      moreLoading.value = false;
+    }
+  }
 }
 
 function openReview(action: 'approve' | 'reject', row: ModelApprovalView) {

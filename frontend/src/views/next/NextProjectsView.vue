@@ -88,16 +88,31 @@ async function createProject() {
   }
 }
 
+// #440: request-sequence guard — a slow member list for project A must not
+// land after the drawer re-targets project B, and a failure must not
+// impersonate an empty roster for the current project.
+let membersRequestSeq = 0;
+
 async function openMembers(project: Project) {
+  const seq = ++membersRequestSeq;
   memberProject.value = project;
   memberOpen.value = true;
   memberLoading.value = true;
   try {
-    memberUsers.value = await api.listProjectMembers(project.id!); // list rows always carry ids
+    const rows = await api.listProjectMembers(project.id!); // list rows always carry ids
+    if (seq !== membersRequestSeq) {
+      return; // a newer drawer target won — this response is stale
+    }
+    memberUsers.value = rows;
   } catch {
-    memberUsers.value = [];
+    if (seq === membersRequestSeq) {
+      memberUsers.value = [];
+      toast.error('加载成员失败');
+    }
   } finally {
-    memberLoading.value = false;
+    if (seq === membersRequestSeq) {
+      memberLoading.value = false;
+    }
   }
 }
 
@@ -113,7 +128,11 @@ function requestRemove(user: MemberView) {
       try {
         await api.removeProjectMember(project.id!, user.userId!);
         toast.success('成员已移除');
-        memberUsers.value = await api.listProjectMembers(project.id!); // list rows always carry ids
+        const seq = ++membersRequestSeq;
+        const rows = await api.listProjectMembers(project.id!); // list rows always carry ids
+        if (seq === membersRequestSeq) {
+          memberUsers.value = rows;
+        }
       } catch (error) {
         if (error instanceof ApiError) {
           toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);

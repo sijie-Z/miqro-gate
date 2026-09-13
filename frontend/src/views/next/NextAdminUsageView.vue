@@ -69,32 +69,47 @@ const columns = [
   { key: 'gatewayRequestId', title: 'Request ID', minWidth: '230px' },
 ];
 
+// #440: request-sequence guard — rapid filter/window/page changes must not
+// let an older summary+records pair land after a newer one.
+let loadRequestSeq = 0;
+
 async function load() {
+  const seq = ++loadRequestSeq;
   summaryLoading.value = true;
   recordsLoading.value = true;
   summaryError.value = '';
   try {
-    summary.value = await api.adminUsageSummary({
+    const summaryResult = await api.adminUsageSummary({
       groupBy: groupBy.value,
       modelId: modelId.value || undefined,
       projectId: projectId.value || undefined,
       ...rangeParams(),
     });
-    records.value = await api.adminUsageRecords({
+    if (seq !== loadRequestSeq) {
+      return; // a newer request won — this response is stale
+    }
+    summary.value = summaryResult;
+    const recordsResult = await api.adminUsageRecords({
       modelId: modelId.value || undefined,
       projectId: projectId.value || undefined,
       page: page.value,
       size: pageSize.value,
       ...rangeParams(),
     });
+    if (seq !== loadRequestSeq) {
+      return;
+    }
+    records.value = recordsResult;
   } catch (error) {
-    if (error instanceof ApiError) {
+    if (seq === loadRequestSeq && error instanceof ApiError) {
       summaryError.value = error.message;
       summaryRequestId.value = error.requestId ?? '';
     }
   } finally {
-    summaryLoading.value = false;
-    recordsLoading.value = false;
+    if (seq === loadRequestSeq) {
+      summaryLoading.value = false;
+      recordsLoading.value = false;
+    }
   }
 }
 
