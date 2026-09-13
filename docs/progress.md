@@ -6,11 +6,23 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-13 自主轮（CSV 公式注入防护：#430）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS（develop @ fc541fd；**rc.16 已发布（2026-09-12）** + 09-13 收口 #421 调度噪音 /
-  #423 开放面安全回归 / #424 冲刷节奏；I 序列 I1–I21 DONE；CI 无红灯；待办：**leader 请示稿回执（6 组
-  裁决 + 3 项材料）**、#211（BLOCKED）、F25/F27/F28/F29、#245、F32/F33、F19）`
+- Current goal: `2026-09-13 自主轮（主密钥轮换批处理重加密：#432）` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS（develop @ ad055e8；**rc.17 已发布（2026-09-13）** + 09-13 收口 #430 CSV 公式
+  注入 / #421 调度噪音 / #423 开放面安全回归 / #424 冲刷节奏 / #427 技能包炸弹；I 序列 I1–I21 DONE；
+  CI 无红灯；待办：**leader 请示稿回执（6 组裁决 + 3 项材料）**、#211（BLOCKED）、F25/F27/F28/F29、
+  #245、F32/F33、F19）`
 - Last updated: `2026-09-13 CST`
+
+## 会话交接点 2026-09-13（主密钥批量重加密：#432）
+
+- **#432（本 PR，bug/规格兑现，对抗性复核发现）**：规格承诺「后台分批重加密旧密文」（security.md §密钥
+  轮换 / runbook §11 / configuration-reference §4.3）——实现侧 `reEncrypt()` 零调用、无任何入口；
+  照 §4.3 移除旧 key 版本会致三表（upstream_credential_versions / webhook_endpoints / mcp_services，
+  留痕载体经 Kafka 不落库除外）存量密文全线解密失败（fail-closed 502）。新增
+  `POST /api/v1/admin/crypto/reencrypt`：逐行迁移 + CAS 写回（并发不互踩）+ 失败隔离 + 幂等 + 审计
+  `CRYPTO_REENCRYPT`；IT 红→绿 4/4（v1→v2 解密回原文 / 幂等重跑 / 损坏行隔离 / 会话+CSRF）；§4.3
+  重写为可执行 runbook；runbook §11 补 HMAC 环退役语义（摘要单向、只能重发 Key）。
+- 下一批：leader 请示稿回执（6 组裁决 + 3 项材料）；矩阵 §3 等外部。
 
 ## 会话交接点 2026-09-13（CSV 公式注入防护：#430）
 

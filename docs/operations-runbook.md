@@ -141,7 +141,7 @@
 
 ## 11. Master/HMAC Key
 
-正常轮换采用 key version：新写入使用新 key，后台分批重加密，旧 key 保留到所有密文迁移和备份策略确认后再退出。HMAC key 轮换会影响 Virtual Key 验证，应支持多版本校验并逐步轮换用户 Key。
+正常轮换采用 key version：新写入使用新 key，后台分批重加密（`POST /api/v1/admin/crypto/reencrypt`，幂等，重复调用至 `remaining = 0`；步骤见 configuration-reference §4.3），旧 key 保留到所有密文迁移（`remaining = 0`）和备份策略确认后再退出。HMAC key 轮换会影响 Virtual Key 验证且摘要不可重算：多版本校验在场，退役旧 HMAC 版本前必须先让该版本签发的所有 Virtual Key 完成重发。
 
 Master key 丢失无法从数据库恢复真实凭证；使用受保护备份恢复，或重新录入全部上游 Key。不得设计后门或把明文写日志。HMAC key 丢失时现有 Virtual Key 无法验证，必须批量轮换并通知用户。
 

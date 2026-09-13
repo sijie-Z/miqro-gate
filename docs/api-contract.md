@@ -471,6 +471,42 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `CREDENTIAL_NOT_ROTATABLE` | 409 | 仅 ACTIVE 可轮换 |
 | `CREDENTIAL_NOT_DISABLEABLE` | 409 | 已 DISABLED/INVALID 的凭证不可再禁用 |
 
+### 5.1b 加密密钥轮换（主密钥批量重加密，#432）
+
+主密钥轮换的迁移步骤（security.md「后台分批重新加密旧密文」）：把存量密文从旧版本批量重加密到当前
+`active-version`。覆盖三处落库密文：上游凭证版本、Webhook 签名密钥、MCP 后端密钥（留痕载体经 Kafka
+出站、不落库，不在迁移面）。
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/admin/crypto/reencrypt` | 执行一次批量重加密并返回计数报告；幂等，可重复调用 |
+
+响应（计数与行 id only，永不含密文/明文）：
+
+```json
+{
+  "activeKeyVersion": "v2",
+  "scanned": 7,
+  "reencrypted": 6,
+  "skipped": 0,
+  "failed": 1,
+  "remaining": 1,
+  "failures": [ { "table": "upstream_credential_versions", "id": "0190..." } ]
+}
+```
+
+语义：
+
+- 逐行解密（按行内存储的密钥版本 + 原 AAD：tenant + 凭证/端点/服务 id）后以当前 active 版本重加密；
+  写回用 CAS（`WHERE id AND key_version = 旧版本`）——并发生命周期写入（凭证轮换、backend-auth 变更）
+  不会被覆盖，该行计为 `skipped`。
+- 单行失败隔离：解密失败的行保持原样、计入 `failed` 并在 `failures` 中带行 id（上限 50），批量继续。
+- `remaining` = 本次执行后仍处于非 active 版本的行数；**`remaining = 0` 是从配置退役旧密钥版本的前置
+  条件**——remaining > 0 时移除旧版本会使对应密文解密失败（fail-closed）。
+- HMAC 密钥环不可批量迁移：Virtual Key 摘要单向、原值不落库，退役任一 HMAC 版本即让其签发的全部 Key
+  失效，只能先重发（见 operations-runbook §11）。
+- 审计事件 `CRYPTO_REENCRYPT`（摘要：activeVersion/scanned/reencrypted/skipped/failed/remaining）。
+
 ### 5.2 全局用量查询（G4.1）
 
 管理员全局汇总与明细，返回形状与个人端（§4.4/§4.5）一致，但作用域为整个租户，并支持可选维度过滤：

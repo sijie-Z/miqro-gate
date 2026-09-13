@@ -70,10 +70,14 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 
 ### 4.3 多版本轮换
 
-1. 添加 `encryption.versions[v2]=/path/to/new-key.key`，设置 `active-version=v2`。
+1. 添加 `encryption.versions[v2]=/path/to/new-key.key`，设置 `active-version=v2`，重启。
 2. 重启后新加密使用 v2；旧版本 v1 保留用于解密。
-3. 后台通过 `reEncrypt()` 把旧密文重新加密到 v2。
-4. 全部迁移完成后从配置移除 v1，重启。
+3. 以 SYSTEM_ADMIN 会话调用 `POST /api/v1/admin/crypto/reencrypt`（api-contract §5.1b）把旧密文批量
+   重加密到 v2；幂等，可重复调用，直到响应 `remaining = 0`（`failed` 行按 id 排查后重跑）。
+4. 确认 `remaining = 0` 后再从配置移除 v1，重启。**remaining > 0 时移除旧版本会使对应密文解密失败
+   （fail-closed）**。
+5. HMAC 密钥环不可批量迁移：Virtual Key 摘要单向、原值不落库——退役任一 HMAC 版本会使其签发的全部
+   Virtual Key 立即失效且无法重算，必须先让这些 Key 完成重发（详见 operations-runbook §11）。
 
 ### 4.4 会话
 
