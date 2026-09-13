@@ -1098,9 +1098,18 @@ for (const viewport of VIEWPORTS) {
     await mockApi(page, true);
     await page.goto('/app/keys');
     await page.waitForLoadState('networkidle');
-    // The v2 shell is fully rendered: brand, grouped nav and page content.
+    // The v2 shell is fully rendered: brand (or the collapsed icon-only rail),
+    // grouped nav and page content.
     await expect(page.getByTestId('keys-table')).toBeVisible();
-    await expect(page.getByText('MiQroGate').first()).toBeVisible();
+    if (viewport.width < 1080 && viewport.width >= 640) {
+      // Narrow rail: the shell collapses to icons only and intentionally does
+      // not render the brand text (#440 made the initial state honor the actual
+      // width instead of waiting for the first resize event).
+      await expect(page.locator('.new-shell__rail--icons')).toBeVisible();
+      await expect(page.getByText('MiQroGate')).toHaveCount(0);
+    } else {
+      await expect(page.getByText('MiQroGate').first()).toBeVisible();
+    }
 
     // Local SVG icons (never the CDN iconfont: private deployments are
     // offline). Each nav item must render an inline <svg>.
