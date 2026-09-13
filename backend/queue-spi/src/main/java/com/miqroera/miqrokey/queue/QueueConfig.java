@@ -103,9 +103,12 @@ public class QueueConfig {
         return props.waitTimeout();
     }
 
-    /** Bounded-queue tuning: {@code miqrokey.gateway.queue.*}. */
+    /**
+     * Bounded-queue tuning: {@code miqrokey.gateway.queue.*}; the flush cadence
+     * default (1s, #424) lives in the bus's scheduled method.
+     */
     @ConfigurationProperties(prefix = "miqrokey.gateway.queue")
-    public record QueueProperties(@DefaultValue("10000") int capacity, @DefaultValue("100") int flushThreshold,
+    public record QueueProperties(@DefaultValue("50000") int capacity, @DefaultValue("100") int flushThreshold,
             @DefaultValue("4") int writerThreads, @DefaultValue("DROP") SaturationMode saturationMode,
             @DefaultValue("5s") Duration writeThroughTimeout) {
 
