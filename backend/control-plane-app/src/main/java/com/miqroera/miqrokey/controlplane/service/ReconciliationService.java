@@ -74,13 +74,19 @@ public class ReconciliationService {
      */
     @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
     public void recoverInterruptedRuns() {
-        int recovered = jdbc.update("""
-                UPDATE reconciliation_reports
-                SET status = 'FAILED', error_message = 'interrupted by restart'
-                WHERE status IN ('PENDING', 'RUNNING')
-                """, new MapSqlParameterSource());
-        if (recovered > 0) {
-            LOG.warn("reconciliation: marked {} interrupted run(s) FAILED after restart", recovered);
+        try {
+            int recovered = jdbc.update("""
+                    UPDATE reconciliation_reports
+                    SET status = 'FAILED', error_message = 'interrupted by restart'
+                    WHERE status IN ('PENDING', 'RUNNING')
+                    """, new MapSqlParameterSource());
+            if (recovered > 0) {
+                LOG.warn("reconciliation: marked {} interrupted run(s) FAILED after restart", recovered);
+            }
+        } catch (Exception e) {
+            // Best-effort maintenance: an environment without the table (H2
+            // smoke contexts, brand-new databases) must still boot.
+            LOG.warn("reconciliation: interrupted-run recovery skipped: {}", e.getMessage());
         }
     }
 
