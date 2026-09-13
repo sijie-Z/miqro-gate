@@ -20,7 +20,13 @@ import java.util.UUID;
  * <h2>Proxied deployments</h2> The effective client address comes from
  * {@code X-Forwarded-For} only when the direct peer is one of the trusted
  * proxies ({@code miqrokey.control.admin-access.trusted-proxies}) — an
- * untrusted direct caller cannot forge the header to bypass the list.
+ * untrusted direct caller cannot forge the header to bypass the list. Within a
+ * trusted chain the address is derived by walking the header from the RIGHT
+ * (the nearest proxy appends last — #445): every trusted-proxy entry is
+ * skipped, and the first non-trusted entry is the client the nearest trusted
+ * proxy actually observed. Client-supplied text can therefore never become the
+ * decided address, for both append-style ({@code $proxy_add_x_forwarded_for})
+ * and replace-style proxy configurations.
  *
  * <h2>Exemptions</h2> The external-system billing channel
  * ({@code /api/v1/billing/**}, API-key/JWT authenticated) and the one-time
@@ -59,28 +65,50 @@ public class AdminIpAllowlistFilter extends OncePerRequestFilter {
     }
 
     private boolean allowlisted(HttpServletRequest request) {
-        String peer = request.getRemoteAddr();
-        boolean trustedPeer = trustedProxies.stream().anyMatch(m -> m.matches(peer));
-        if (trustedPeer) {
-            String forwarded = firstForwarded(request.getHeader(X_FORWARDED_FOR));
-            if (forwarded != null) {
-                return allowlist.stream().anyMatch(m -> m.matches(forwarded));
-            }
-        }
-        return allowlist.stream().anyMatch(m -> m.matches(peer));
+        String client = effectiveClientAddress(request);
+        return client != null && allowlist.stream().anyMatch(m -> m.matches(client));
     }
 
-    /** Leftmost address of X-Forwarded-For (the client that started the chain). */
-    private static String firstForwarded(String header) {
-        if (header == null || header.isBlank()) {
-            return null;
+    /**
+     * The address the allowlist must decide on (#445): the direct peer unless it is
+     * one of our trusted proxies, in which case the X-Forwarded-For chain is walked
+     * from the RIGHT — trusted-proxy entries are skipped and the first non-trusted
+     * entry (what the nearest trusted proxy actually saw) wins. Rightmost-walk is
+     * correct for both append- and replace-style proxies; trusting the LEFTMOST
+     * entry let any client prepend a forged allowlisted address.
+     */
+    private String effectiveClientAddress(HttpServletRequest request) {
+        String peer = request.getRemoteAddr();
+        if (!isTrusted(peer)) {
+            return peer;
         }
-        String first = header.split(",", -1)[0].trim();
-        return first.isEmpty() || "unknown".equalsIgnoreCase(first) ? null : first;
+        String header = request.getHeader(X_FORWARDED_FOR);
+        if (header == null || header.isBlank()) {
+            return peer;
+        }
+        String[] parts = header.split(",", -1);
+        for (int i = parts.length - 1; i >= 0; i--) {
+            String candidate = parts[i].trim();
+            if (candidate.isEmpty() || "unknown".equalsIgnoreCase(candidate)) {
+                continue;
+            }
+            if (!isTrusted(candidate)) {
+                return candidate;
+            }
+        }
+        // The whole chain is our own infrastructure — fall back to the peer.
+        return peer;
+    }
+
+    private boolean isTrusted(String address) {
+        return address != null && trustedProxies.stream().anyMatch(m -> m.matches(address));
     }
 
     private static String requestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");
-        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
+        String value = header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
+        // #445: same escaping the sibling filters use — the header is
+        // client-controlled and must not break out of the JSON string.
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }

@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
@@ -22,10 +23,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -147,6 +150,45 @@ class AdminIpAllowlistApiIntegrationTest {
         // A trusted proxy forwarding a foreign client is still rejected.
         mockMvc.perform(get("/api/v1/me/virtual-keys").with(remote("127.0.0.1"))
                 .header("X-Forwarded-For", "203.0.113.9").cookie(sessionCookie)).andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("append-style X-Forwarded-For cannot spoof the allowlist (#445)")
+    void appendStyleForwardedHeaderCannotSpoof() throws Exception {
+        // The attacker forges an allowlisted leftmost entry; the trusted proxy
+        // appends the real client (203.0.113.9). The rightmost non-trusted entry
+        // decides -> 403 (pre-#445 the leftmost entry was trusted -> 200).
+        mockMvc.perform(get("/api/v1/me/virtual-keys").with(remote("127.0.0.1"))
+                .header("X-Forwarded-For", "198.51.100.7, 203.0.113.9").cookie(sessionCookie))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("IP_NOT_ALLOWED"));
+
+        // Multi-hop trusted chain: the inner trusted-proxy address is skipped and
+        // the allowlisted real client decides.
+        mockMvc.perform(get("/api/v1/me/virtual-keys").with(remote("127.0.0.1"))
+                .header("X-Forwarded-For", "198.51.100.7, 127.0.0.11").cookie(sessionCookie))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("hostnames in X-Forwarded-For are rejected without DNS resolution (#445)")
+    void hostnameForwardedEntryIsRejected() throws Exception {
+        // Pre-#445 "localhost" was DNS-resolved and matched 127.0.0.0/8.
+        mockMvc.perform(get("/api/v1/me/virtual-keys").with(remote("127.0.0.1")).header("X-Forwarded-For", "localhost")
+                .cookie(sessionCookie)).andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("IP_NOT_ALLOWED"));
+    }
+
+    @Test
+    @DisplayName("the 403 body survives hostile X-Request-Id values (#445)")
+    void forbiddenBodyEscapesRequestId() throws Exception {
+        String body = mockMvc
+                .perform(get("/api/v1/me/virtual-keys").with(remote("203.0.113.5"))
+                        .header("X-Request-Id", "a\",\"code\":\"FAKE").cookie(sessionCookie))
+                .andExpect(status().isForbidden()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        // Pre-#445 the value was interpolated unescaped: invalid JSON with an
+        // injected code member.
+        JsonNode parsed = objectMapper.readTree(body);
+        assertThat(parsed.get("code").asText()).isEqualTo("IP_NOT_ALLOWED");
     }
 
     private void resetDb() {

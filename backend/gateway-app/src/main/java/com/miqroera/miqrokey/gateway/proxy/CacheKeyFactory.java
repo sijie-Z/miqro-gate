@@ -22,7 +22,9 @@ import java.util.Set;
  *
  * <p>
  * Key = SHA-256 of
- * {@code tenantId|projectId|virtualKeyId|productId|model|purpose|scope} where
+ * {@code tenantId|projectId|virtualKeyId|productId|model|purpose|format|scope}
+ * where {@code format} is {@code stream=1/0} (a streamed SSE response must
+ * never replay into a buffered JSON request, or vice versa — #444) and
  * {@code scope} is the <em>semantic scope</em> of the conversation: the system
  * prompt plus the <b>last user message</b> (aligned with Tencent's "latest user
  * message" and Higress's GJSON content extraction — see
@@ -45,8 +47,11 @@ import java.util.Set;
 public final class CacheKeyFactory {
 
     /**
-     * Request fields that do not affect the provider's output and are stripped
-     * before key derivation.
+     * Request fields stripped from the <em>normalized body</em> before key
+     * derivation. {@code stream} is stripped here but captured separately as the
+     * explicit response-format dimension ({@link #streamFlag}) — removing it from
+     * this set is not equivalent and would leave the semantic-scope path without a
+     * format dimension (#444).
      */
     private static final Set<String> STRIP_FIELDS = Set.of("stream", "stream_options", "metadata", "user");
 
@@ -65,8 +70,26 @@ public final class CacheKeyFactory {
         String normalized = scope.isEmpty() ? normalize(body) : scope;
         String canonical = ctx.tenantId() + "|" + ctx.projectId() + "|" + ctx.key().keyId() + "|" + ctx.productId()
                 + "|" + (modelName == null ? "" : modelName) + "|"
-                + (ctx.key().purpose() == null ? "" : ctx.key().purpose()) + "|" + normalized;
+                + (ctx.key().purpose() == null ? "" : ctx.key().purpose()) + "|"
+                + (streamFlag(body) ? "stream=1" : "stream=0") + "|" + normalized;
         return CacheKey.from(sha256(canonical.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    /**
+     * The response-format dimension of the key: {@code stream:true} requests get a
+     * different key than {@code stream:false} ones for the same conversation
+     * (#444).
+     */
+    private boolean streamFlag(byte[] body) {
+        if (body == null || body.length == 0) {
+            return false;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            return root != null && root.path("stream").asBoolean(false);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**
