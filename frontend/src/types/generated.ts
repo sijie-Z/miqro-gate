@@ -1060,6 +1060,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/crypto/reencrypt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reencrypt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/credentials": {
         parameters: {
             query?: never;
@@ -3462,6 +3478,25 @@ export interface components {
             /** Format: date-time */
             expiresAt?: string;
             reconcileLevel?: string;
+        };
+        CryptoReencryptReport: {
+            activeKeyVersion?: string;
+            /** Format: int32 */
+            scanned?: number;
+            /** Format: int32 */
+            reencrypted?: number;
+            /** Format: int32 */
+            skipped?: number;
+            /** Format: int32 */
+            failed?: number;
+            /** Format: int64 */
+            remaining?: number;
+            failures?: components["schemas"]["Failure"][];
+        };
+        Failure: {
+            table?: string;
+            /** Format: uuid */
+            id?: string;
         };
         AdminCredentialCreateRequest: {
             name: string;
@@ -6342,6 +6377,26 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ExportTask"];
+                };
+            };
+        };
+    };
+    reencrypt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["CryptoReencryptReport"];
                 };
             };
         };

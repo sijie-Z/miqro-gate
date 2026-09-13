@@ -4,6 +4,16 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
+### 2026-09-13
+- **主密钥轮换批处理重加密落地（#432）**：规格（security.md / operations-runbook §11 /
+  configuration-reference §4.3）承诺「后台分批重新加密旧密文」，但 `reEncrypt()` 只有原语、全库零调用——
+  照 §4.3 移除旧密钥版本将致三处存量密文（上游凭证版本 / Webhook 签名密钥 / MCP 后端密钥）解密失败、
+  全线 fail-closed。新增 `POST /api/v1/admin/crypto/reencrypt`（SYSTEM_ADMIN + CSRF + 审计
+  `CRYPTO_REENCRYPT`）：逐行 decrypt→reEncrypt，CAS 写回（并发生命周期写入不互踩，计 `skipped`），
+  单行失败隔离并报行 id，幂等可重跑，`remaining = 0` 方为旧密钥退役前置。测试：三表 v1→v2 全量迁移
+  （解密回原文验证）+ 幂等重跑 + 损坏行隔离 + 审计无密文法 红→绿 4/4；§4.3 重写为可执行 runbook，
+  runbook §11 补 HMAC 环退役语义（摘要单向、只能重发 Key）。
+
 ### 2026-09-12
 - **被动健康检查：真实流量失败率入服务健康视图（#397，矩阵 §3 候选落地，阿里「主动+被动并列」）**：新端点
   `GET /api/v1/admin/mcp-services/{id}/traffic?hours=24`——`mcp_access_log` 按服务窗口聚合（分类口径同 #338：
