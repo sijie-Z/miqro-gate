@@ -78,6 +78,10 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   **5s → 1s**；队列容量默认 **10000 → 50000**（吸收 ~24s 级写入停顿）；**`flushing` 标志异常复位加固**
   （调度被拒时不再永久停摆）。诊断固化：soak 接入 `UsageEventBus.metrics()` 输出并新增
   **`dropped == 0` 硬断言**（红线窗口不得丢事件）。
+- **修复技能包 SKILL.md 大小防线失效（#427）**：`SkillZipValidator` 的声明尺寸检查对**流式 zip
+  （数据描述符，本地头尺寸 0/-1）恒不触发**，`readAllBytes` 解压读取无上界——压缩比炸弹可绕过
+  「抗 zip 炸弹」承诺放大到 OOM。修复：声明检查保留 + **有界读取**（`readNBytes(MAX+1)` 超限即报
+  `SKILL_MD_TOO_LARGE`）；诚实 zip 行为不变。测试：流式 zip 的 512KB+1 SKILL.md 红→绿。
 
 ### 2026-09-11
 - **资源删除前置依赖检查（#393，I21，腾讯模型 API 删除语义）**：删除仍被引用的资源返回 **409 `RESOURCE_IN_USE`**

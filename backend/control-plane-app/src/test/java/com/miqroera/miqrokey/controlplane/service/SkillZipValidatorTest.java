@@ -185,6 +185,17 @@ class SkillZipValidatorTest {
     }
 
     @Test
+    @DisplayName("an oversized SKILL.md is rejected on a streamed zip (data-descriptor sizes) (#427)")
+    void oversizedSkillMdRejected() throws Exception {
+        // The ZipOutputStream helper writes data-descriptor entries: the local
+        // header carries 0/-1 sizes, so the declared-size check alone never
+        // fires — the bounded read must catch it with the size error.
+        byte[] oversized = zip("web-scraper/SKILL.md", "a".repeat(SkillZipValidator.MAX_SKILL_MD_BYTES + 1));
+        assertThatThrownBy(() -> SkillZipValidator.validate(oversized)).isInstanceOf(SkillValidationException.class)
+                .hasMessageContaining("超过大小上限");
+    }
+
+    @Test
     @DisplayName("oversized packages are rejected")
     void oversizedRejected() throws Exception {
         byte[] huge = new byte[SkillZipValidator.MAX_ZIP_BYTES + 1];
