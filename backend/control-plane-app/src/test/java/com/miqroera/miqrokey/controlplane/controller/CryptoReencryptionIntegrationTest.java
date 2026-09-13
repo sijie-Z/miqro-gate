@@ -61,22 +61,33 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("Crypto key re-encryption integration tests (PostgreSQL)")
 class CryptoReencryptionIntegrationTest {
 
-    static final byte[] V1_KEY = patternKey(0x40);
-    static final byte[] V2_KEY = patternKey(0x80);
-
-    static byte[] patternKey(int base) {
-        byte[] key = new byte[32];
-        for (int i = 0; i < key.length; i++) {
-            key[i] = (byte) (base + i);
-        }
-        return key;
-    }
-
     /**
-     * Test-only two-version ring: production injection point overridden primary.
+     * Test-only two-version ring ({@code v1} + {@code v2}, active {@code v2}).
+     *
+     * <p>
+     * Deliberately self-contained (keys and helper live <em>inside</em> this
+     * class): test {@code @Configuration} classes in scanned packages are picked up
+     * by sibling test contexts (the module-wide test crypto provider has always
+     * come from exactly that mechanism). Referencing anything on the outer test
+     * class from a {@code @Bean} factory would trigger the outer static initializer
+     * — which starts the Testcontainers PostgreSQL — and break Docker-less runners
+     * (the Windows unit CI job has no Docker; #434 CI failure). This class must
+     * stay constructible without any Docker.
+     * </p>
      */
     @TestConfiguration
     static class TwoVersionCrypto {
+
+        static final byte[] V1_KEY = patternKey(0x40);
+        static final byte[] V2_KEY = patternKey(0x80);
+
+        static byte[] patternKey(int base) {
+            byte[] key = new byte[32];
+            for (int i = 0; i < key.length; i++) {
+                key[i] = (byte) (base + i);
+            }
+            return key;
+        }
 
         @Bean
         @Primary
@@ -108,7 +119,7 @@ class CryptoReencryptionIntegrationTest {
 
     /** Encrypts with the OLD version — simulates pre-rotation ciphertext. */
     private final AesGcmEncryptionProvider v1Provider = new AesGcmEncryptionProvider(
-            new KeyRing("v1", Map.of("v1", V1_KEY.clone(), "v2", V2_KEY.clone())));
+            new KeyRing("v1", Map.of("v1", TwoVersionCrypto.V1_KEY.clone(), "v2", TwoVersionCrypto.V2_KEY.clone())));
 
     private Cookie sessionCookie;
     private Cookie csrfCookie;
