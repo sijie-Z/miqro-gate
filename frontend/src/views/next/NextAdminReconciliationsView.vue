@@ -5,7 +5,7 @@
  * newest-first, and a report's summary plus its four-state detail rows
  * (verdict filter + cursor paging) are read-only.
  */
-import { onMounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
@@ -204,7 +204,12 @@ async function submitUpload() {
   }
 }
 
+// #440: request-sequence guard — a slow detail/rows load for report A must not
+// land after the user selected report B (title and table must agree).
+let detailRequestSeq = 0;
+
 async function selectReport(report: ReconciliationReport) {
+  detailRequestSeq++;
   selected.value = report;
   rowsState.value = '';
   nextCursor.value = '';
@@ -214,39 +219,55 @@ async function selectReport(report: ReconciliationReport) {
 }
 
 async function refreshDetail() {
-  if (!selected.value) {
+  const target = selected.value;
+  if (!target) {
     return;
   }
+  const seq = ++detailRequestSeq;
   try {
-    selected.value = await api.reconciliationReport(selected.value.id);
+    const report = await api.reconciliationReport(target.id);
+    if (seq !== detailRequestSeq) {
+      return; // a newer selection won — this response is stale
+    }
+    selected.value = report;
   } catch (error) {
-    if (error instanceof ApiError) {
+    if (seq === detailRequestSeq && error instanceof ApiError) {
       rowsError.value = error.message;
     }
+  }
+  if (seq !== detailRequestSeq) {
+    return;
   }
   await loadRows(true);
 }
 
 async function loadRows(reset: boolean) {
-  if (!selected.value) {
+  const target = selected.value;
+  if (!target) {
     return;
   }
+  const seq = ++detailRequestSeq;
   rowsLoading.value = true;
   rowsError.value = '';
   try {
-    const page = await api.reconciliationRows(selected.value.id, {
+    const page = await api.reconciliationRows(target.id, {
       state: rowsState.value || undefined,
       cursor: reset ? undefined : nextCursor.value || undefined,
       limit: ROWS_PAGE,
     });
+    if (seq !== detailRequestSeq) {
+      return; // a newer selection/filter won — this page is stale
+    }
     rows.value = reset ? page.rows : [...rows.value, ...page.rows];
     nextCursor.value = page.nextCursor;
   } catch (error) {
-    if (error instanceof ApiError) {
+    if (seq === detailRequestSeq && error instanceof ApiError) {
       rowsError.value = error.message;
     }
   } finally {
-    rowsLoading.value = false;
+    if (seq === detailRequestSeq) {
+      rowsLoading.value = false;
+    }
   }
 }
 
@@ -260,10 +281,20 @@ function closeDetail() {
   rows.value = [];
 }
 
+// #440: poll intervals must die with the component.
+const pollTimers = new Set<ReturnType<typeof setInterval>>();
+onUnmounted(() => {
+  pollTimers.forEach((timer) => clearInterval(timer));
+  pollTimers.clear();
+});
+
 function poll(id: string) {
   const timer = setInterval(async () => {
     try {
       const report = await api.reconciliationReport(id);
+      if (!pollTimers.has(timer)) {
+        return; // cleared on unmount — the response is irrelevant
+      }
       const index = reports.value.findIndex((r) => r.id === id);
       if (index >= 0) {
         reports.value[index] = report;
@@ -273,6 +304,7 @@ function poll(id: string) {
       }
       if (report.status === 'SUCCEEDED' || report.status === 'FAILED') {
         clearInterval(timer);
+        pollTimers.delete(timer);
         if (selected.value?.id === id) {
           await loadRows(true);
         }
@@ -282,8 +314,10 @@ function poll(id: string) {
       }
     } catch {
       clearInterval(timer);
+      pollTimers.delete(timer);
     }
   }, 2000);
+  pollTimers.add(timer);
 }
 
 function formatTime(iso?: string | null): string {

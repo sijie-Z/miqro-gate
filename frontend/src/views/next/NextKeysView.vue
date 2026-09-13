@@ -251,6 +251,18 @@ function openReveal(response: CreateVirtualKeyResponse) {
   revealOpen.value = true;
 }
 
+// #440: clear the one-time secret as soon as the dialog closes — leaving it in
+// component memory until the next create/rotate is an avoidable exposure.
+function onRevealOpenChange(open: boolean) {
+  if (!revealAcked.value) {
+    return;
+  }
+  revealOpen.value = open;
+  if (!open) {
+    revealData.value = null;
+  }
+}
+
 async function copySecret() {
   if (!revealData.value) return;
   try {
@@ -698,7 +710,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
       width="520px"
       :dismissible="false"
       data-testid="secret-dialog"
-      @update:open="revealAcked && (revealOpen = $event)"
+      @update:open="onRevealOpenChange"
     >
       <p class="next-keys__reveal-url">
         接入地址：<span class="ui-mono">{{ revealData.baseUrl }}</span>

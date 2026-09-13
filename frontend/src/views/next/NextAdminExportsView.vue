@@ -4,7 +4,7 @@
  * Behaviour parity with legacy exports page: create async CSV/JSONL export
  * for a window, poll to completion, download product, list recent tasks.
  */
-import { onMounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
@@ -110,24 +110,39 @@ async function createExport() {
   }
 }
 
+// #440: poll intervals must die with the component — previously they kept
+// hitting the API for a dead component until the task finished (or forever,
+// if the task was stranded).
+const pollTimers = new Set<ReturnType<typeof setInterval>>();
+onUnmounted(() => {
+  pollTimers.forEach((timer) => clearInterval(timer));
+  pollTimers.clear();
+});
+
 function poll(id: string) {
   const timer = setInterval(async () => {
     try {
       const task = await api.exportStatus(id);
+      if (!pollTimers.has(timer)) {
+        return; // cleared on unmount — the response is irrelevant
+      }
       const index = tasks.value.findIndex((t) => t.id === id);
       if (index >= 0) {
         tasks.value[index] = task;
       }
       if (task.status === 'SUCCEEDED' || task.status === 'FAILED' || task.status === 'EXPIRED') {
         clearInterval(timer);
+        pollTimers.delete(timer);
         if (task.status === 'FAILED') {
           toast.error(task.errorMessage ?? '导出失败');
         }
       }
     } catch {
       clearInterval(timer);
+      pollTimers.delete(timer);
     }
   }, 2000);
+  pollTimers.add(timer);
 }
 
 function download(task: ExportTask) {

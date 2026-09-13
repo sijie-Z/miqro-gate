@@ -268,6 +268,18 @@ function openReveal(username: string, password: string) {
   revealOpen.value = true;
 }
 
+// #440: clear the one-time temporary password when the dialog closes.
+function onRevealOpenChange(open: boolean) {
+  if (!revealAcked.value) {
+    return;
+  }
+  revealOpen.value = open;
+  if (!open) {
+    revealPassword.value = '';
+    revealUser.value = '';
+  }
+}
+
 async function copyPassword() {
   try {
     await navigator.clipboard.writeText(revealPassword.value);
@@ -640,7 +652,7 @@ function formatDate(iso?: string): string {
       width="520px"
       :dismissible="false"
       data-testid="temp-password-dialog"
-      @update:open="revealAcked && (revealOpen = $event)"
+      @update:open="onRevealOpenChange"
     >
       <p class="next-users__reveal-for">
         用户 <strong>{{ revealUser }}</strong>

@@ -241,8 +241,9 @@ describe('NextGrantsView', () => {
     await flushPromises();
 
     const openButtons = wrapper.findAll('[data-testid="grant-models-open"]');
-    await openButtons[0].trigger('click'); // g1 — stays pending
-    await openButtons[1].trigger('click'); // g2 — resolves immediately
+    expect(openButtons.length).toBe(2);
+    await openButtons[0]!.trigger('click'); // g1 — stays pending
+    await openButtons[1]!.trigger('click'); // g2 — resolves immediately
     await flushPromises();
 
     releaseA(['claude-3-7-sonnet']); // the stale g1 response arrives late
