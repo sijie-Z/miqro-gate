@@ -7,6 +7,7 @@
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { UiButton, UiTable } from '@/ui';
+import { csvCell } from '@/utils/csv';
 import type { RoiReportView } from '@/types/generated-api';
 
 const report = ref<RoiReportView | null>(null);
@@ -65,7 +66,9 @@ function exportCsv() {
       (d.hitRatePct ?? 0).toFixed(2),
       (d.paidCost ?? 0).toFixed(4),
       (d.savedCost ?? 0).toFixed(4),
-    ].join(','),
+    ]
+      .map(csvCell)
+      .join(','),
   );
   const header = 'date,upstreamRequests,hitRequests,hitRatePct,paidCost,savedCost';
   const blob = new Blob([`﻿${header}\n${rows.join('\n')}`], { type: 'text/csv;charset=utf-8' });

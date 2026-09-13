@@ -6,11 +6,18 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-13 自主轮（rc.17 发布：承压与安全纵深加固）` — `IN_PROGRESS`
+- Current goal: `2026-09-13 自主轮（CSV 公式注入防护：#430）` — `IN_PROGRESS`
 - Goal status: `IN_PROGRESS（develop @ fc541fd；**rc.16 已发布（2026-09-12）** + 09-13 收口 #421 调度噪音 /
   #423 开放面安全回归 / #424 冲刷节奏；I 序列 I1–I21 DONE；CI 无红灯；待办：**leader 请示稿回执（6 组
   裁决 + 3 项材料）**、#211（BLOCKED）、F25/F27/F28/F29、#245、F32/F33、F19）`
 - Last updated: `2026-09-13 CST`
+
+## 会话交接点 2026-09-13（CSV 公式注入防护：#430）
+
+- **#430（本 PR，bug，对抗性复核发现）**：前端成本/用量导出的 `row.label`（用户可控名称）以 `=`/`+` 等
+  开头时被 Excel 当公式执行；修复=共享 `csvCell()`（引号 + 公式前缀守卫）收口三处导出（ROI 顺带补全引号）；
+  后端审计 `quote()` 同步加防（审计列 JSON blob 起始、结构免疫——纵深防御），单元红→绿。
+- 下一批：leader 请示稿回执（6 组裁决 + 3 项材料）；矩阵 §3 等外部。
 
 ## 会话交接点 2026-09-13（rc.17 发布：承压与安全纵深加固）
 
