@@ -25,6 +25,14 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   `lib-retention.sh` 可脱库测试；②备份管线失败残留无 manifest 的半成品 `.enc`——失败分支清理；
   ③还原加 `--single-transaction`（原子恢复，中途失败整体回滚）。测试：新增 `test-retention.sh`
   红→绿（精确保留集/幂等/失败零残留）+ 既有 webhook 测试与真机恢复演练（1000 行）保持 PASS。
+- **网关缓存两缺陷修复（#444，sub-agent 全量审查发现）**：①L2 缓存 get/put 在 Reactor 事件环上执行
+  阻塞 JDBC（L1 miss 的 SELECT/存储的 INSERT——数据库故障时每个操作阻塞一个 IO 线程达 Hikari 超时，
+  同环连接全停摆）——get 迁至有界调度器、put 改为调度器上的尽力而为（失败仅 WARN 不阻断）；
+  ②缓存键忽略 `stream` → SSE 与 JSON 响应同键跨格式重放（流式预热后 JSON 请求收到 SSE 帧）——
+  键新增格式维度 `stream=1/0`。测试三处红→绿：键的 stream 维度断言；「流式预热后同会话非流式请求
+  必须 miss 且拿到 JSON」（修复前 L1 命中 SSE）；线程探针断言缓存 I/O 全落在调度器线程、
+  无 `webflux-http-nio` 事件环线程（修复前实测运行于 `webflux-http-nio-2`）。
+
 - **两处 HIGH 数据库缺陷修复（#441，sub-agent 全量审查发现）**：①`JdbcRouteSnapshotLoader` 的 SELECT 缺
   `p.version` 而行映射读取它——任何服务保存过韧性策略后，每次快照加载抛 PSQLException，刷新器保留旧快照，
   **吊销/轮换/授权/审批从此永久不再传播**（fail-safe 退化为静默 stale-authorization）；补列后快照恢复
