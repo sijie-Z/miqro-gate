@@ -126,8 +126,9 @@ public class AuthenticationService {
         Instant now = Instant.now();
 
         boolean rejectDisabled = user != null && user.status() == UserStatus.DISABLED;
-        boolean rejectLocked = user != null && user.status() == UserStatus.LOCKED && user.lockedUntil() != null
-                && now.isBefore(user.lockedUntil());
+        // #445: null deadline = indefinite admin lock (see SessionFilter).
+        boolean rejectLocked = user != null && user.status() == UserStatus.LOCKED
+                && (user.lockedUntil() == null || now.isBefore(user.lockedUntil()));
 
         // Always perform Argon2 work — timing indistinguishable.
         boolean passwordValid;
