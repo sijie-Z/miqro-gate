@@ -6,11 +6,20 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-13 自主轮（用量冲刷节奏修复：#424）` — `IN_PROGRESS`
+- Current goal: `2026-09-13 自主轮（开放面安全回归：#423）` — `IN_PROGRESS`
 - Goal status: `IN_PROGRESS（develop @ fc541fd；**rc.16 已发布（2026-09-12）** + 09-13 收口 #421 调度噪音 /
   #423 开放面安全回归 / #424 冲刷节奏；I 序列 I1–I21 DONE；CI 无红灯；待办：**leader 请示稿回执（6 组
   裁决 + 3 项材料）**、#211（BLOCKED）、F25/F27/F28/F29、#245、F32/F33、F19）`
 - Last updated: `2026-09-13 CST`
+
+## 会话交接点 2026-09-13（调度噪音收口 + 开放面安全回归：#421/#423）
+
+- **#421（#422 已合，本日补记）**：冒烟上下文（空 H2）换用永不触发的 `taskScheduler`——根因「fixedDelay
+  启动即首跳 + 上下文缓存持续存活」；调度 ERROR 噪音 3 → 0，生产零改动。
+- **#423（本 PR）**：对抗性安全复核三个外部可达面（ConsumerJwtVerifier 算法钉死/exp 严格、MinimalJson
+  严格扫描、机器密钥面 + 原始 URI vs MVC 解码路径）——结论全部干净；URI 规范化安全语义固化为**真实 HTTP
+  断言回归**（404/400/404/401），容器/框架升级改变行为即红灯。
+- 下一批：leader 请示稿回执（6 组裁决 + 3 项材料）；rc.17 攒批。
 
 ## 会话交接点 2026-09-13（用量冲刷节奏修复：#424）
 

@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import jakarta.servlet.http.Cookie;
@@ -53,6 +54,9 @@ class AdminApiKeyScopeIntegrationTest {
         registry.add("miqrokey.bootstrap-secret-file",
                 () -> AdminProviderApiIntegrationTest.BootstrapHelper.secretFile().toAbsolutePath().toString());
     }
+
+    @LocalServerPort
+    int port;
 
     @Autowired
     MockMvc mockMvc;
@@ -212,5 +216,52 @@ class AdminApiKeyScopeIntegrationTest {
             }
         }
         return null;
+    }
+
+    /**
+     * Open-surface URI handling (#423): {@code capabilityFor} maps the capability
+     * group from the RAW request URI while MVC dispatches on the decoded path —
+     * verified END-TO-END through Tomcat (real HTTP; MockMvc bypasses container
+     * normalization) that no traversal/encoding variant reaches an out-of-scope
+     * controller with a usage-scoped key:
+     *
+     * <ul>
+     * <li>dot-segments never fold into a different controller mapping (404);
+     * <li>an encoded slash is rejected by the container (400);
+     * <li>a percent-encoded prefix that skips the open-surface filter falls through
+     * to the session filter's deny-by-default (401).</li>
+     * </ul>
+     *
+     * A container/framework upgrade that changes normalization behavior flips one
+     * of these statuses and turns this test red.
+     */
+    @Test
+    @DisplayName("raw-URI capability mapping cannot be dodged by traversal or encoding")
+    void uriNormalizationCannotBypassScope() throws Exception {
+        String secret = issueKey("uri-regression");
+        mockMvc.perform(patch("/api/v1/admin/api-keys/" + keyId(secret) + "/scope").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"capabilities\":[\"usage:read\"]}")).andExpect(status().isOk());
+
+        assertThat(probeStatus("/api/v1/admin-api/usage/%2e%2e/alert-rules", secret))
+                .as("decoded dot-segments must not fold into the alert-rules controller").isEqualTo(404);
+        assertThat(probeStatus("/api/v1/admin-api/usage/..%2falert-rules", secret))
+                .as("encoded slashes are container-rejected").isEqualTo(400);
+        assertThat(probeStatus("/api/v1/admin-api/usage/../alert-rules", secret))
+                .as("plain dot-segments never fold into a controller mapping").isEqualTo(404);
+        assertThat(probeStatus("/api/v1/admin%2Dapi/usage/summary?groupBy=project", secret))
+                .as("an encoded prefix skipping the open-surface filter is caught by session deny-by-default")
+                .isEqualTo(401);
+    }
+
+    /**
+     * Real-HTTP status for one path with the machine key (no assertions inside).
+     */
+    private int probeStatus(String path, String secret) throws Exception {
+        java.net.http.HttpRequest request = java.net.http.HttpRequest
+                .newBuilder(java.net.URI.create("http://127.0.0.1:" + port + path))
+                .header("Authorization", "Bearer " + secret).GET().build();
+        return java.net.http.HttpClient.newHttpClient()
+                .send(request, java.net.http.HttpResponse.BodyHandlers.ofString()).statusCode();
     }
 }

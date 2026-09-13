@@ -63,6 +63,13 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   P95 ≤ 30ms**（逐请求 TTFB − 上游首字节预算采样）/ 事件循环探针最坏延迟 ≤ 500ms / **用量行数 == 成功
   请求数**（严格相等＝写入不丢失且不重复；旧版「>0」弱断言作废）。实测首发即检出 #417。`soak.sh` 补 TTFB
   百分位（curl `time_starttransfer`）与红线档调用说明（`MQK_CONCURRENCY=50`）；`testing-and-acceptance §10`
+  补两条执行入口。
+- **测试基建 · 冒烟上下文调度噪音根治（#421，补记）**：`ControlPlaneApplicationSmokeTest` 换用永不触发的
+  `taskScheduler`（Boot 自动配置按 `@ConditionalOnMissingBean` 退让）——根因=fixedDelay 无 initialDelay
+  时**启动即首跳**，空 H2 库上四个 DB 调度器每轮启动即打 BadSqlGrammar ERROR 且被上下文缓存拖满整个套件；
+  噪音计数 3 → 0，生产零改动。
+- **安全 · 开放面 URI 规范化回归测试（#423）**：对抗性复核三个外部可达面（ConsumerJwtVerifier /
+  MinimalJson / AdminApiKeyAuthFilter + URI 处理）结论全部干净；把「原始 URI 能力映射 × MVC 解码路径」
   的真实 HTTP 实测固化为断言回归（404/400/404/401）——容器/框架升级改变规范化行为即红灯。
 - **修复用量队列冲刷节奏致承压短少（#424）**：全量 verify 下 soak 短少 697/7982 行——根因=每请求 3 事件
   （STARTED/USAGE/COMPLETED）× 2400 事件/秒，**5 秒冲刷周期内队列瞬时深度 12000 > 容量 10000** →
