@@ -43,6 +43,14 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   （会话 401/重登 401/状态保持 LOCKED/解锁恢复）+ 伪造头 403/hostname 403/注入体 JSON 合法 +
   matcher 字面 IP；认证/会话回归 38/0。
 
+- **两处 HIGH 数据库缺陷修复（#441，sub-agent 全量审查发现）**：①`JdbcRouteSnapshotLoader` 的 SELECT 缺
+  `p.version` 而行映射读取它——任何服务保存过韧性策略后，每次快照加载抛 PSQLException，刷新器保留旧快照，
+  **吊销/轮换/授权/审批从此永久不再传播**（fail-safe 退化为静默 stale-authorization）；补列后快照恢复
+  正常传播。②`UsageStatsRepositoryImpl` 的订阅过滤 JOIN 引用不存在的 `credentials` 表与
+  `virtual_keys.credential_id` 列——`?subscriptionId=` 的用量查询恒 500；修为
+  `upstream_credentials` + `upstream_credential_id`。测试：两个回归 IT 红→绿（策略行入快照断言；
+  真实 SQL 过滤命中 107 tokens / 陌生订阅 0）。
+
 - **前端守卫收口二批 + 泄漏/语义修复（#440，sub-agent 全量审查发现，两处红→绿）**：①**HIGH**——Grants
   「模型范围」抽屉竞态：A（慢）→B（快）后 A 的响应晚到把 `modelsText` 覆盖为 A 的清单，保存即把 A 的
   模型列表 **replace-all 写进 B 的授权**（可扩/缩权）；②同族守卫全量收口（#399/#407 惯用法，覆盖上一批
@@ -52,8 +60,6 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   强制改密跳转死代码修复（spec 改真响应式 mock 复现红灯）、NewShell resize 监听清理+初始宽度判定、
   删除页双击在途保护+预览窗口一致性校验、一次性 Secret 关闭即清。测试：Grants 竞态与 Profile 跳转
   红→绿 + 前端全量 190/190 + typecheck 绿。
-
-### 2026-09-12
 
 ### 2026-09-12
 - **被动健康检查：真实流量失败率入服务健康视图（#397，矩阵 §3 候选落地，阿里「主动+被动并列」）**：新端点
