@@ -10,6 +10,7 @@
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
+import { csvCell } from '@/utils/csv';
 import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
 import type { BudgetView, Project, UsageGroup, UsageSummary } from '@/types/generated-api';
@@ -182,7 +183,7 @@ function exportCsv() {
     ];
   });
   const csv = [header, ...rows]
-    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    .map((row) => row.map(csvCell).join(','))
     .join('\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);

@@ -208,14 +208,25 @@ public class AuditEventReadService {
      * RFC 4180: quote only when the field contains a separator, quote or line
      * break.
      */
-    private static String quote(String value) {
+    /** Package-private for the formula-guard unit test (#430). */
+    static String quote(String value) {
         if (value == null) {
             return "";
         }
-        if (value.indexOf(',') < 0 && value.indexOf('"') < 0 && value.indexOf('\n') < 0 && value.indexOf('\r') < 0) {
-            return value;
+        // Spreadsheet formula-injection guard (#430): a cell starting with
+        // =, +, -, @, TAB or CR is executed as a formula by Excel/LibreOffice —
+        // prefix it with an apostrophe (the displayed text is unchanged,
+        // execution is neutralized). change_summary carries user-controlled
+        // resource names.
+        String guarded = value;
+        if (!guarded.isEmpty() && "=+-@\t\r".indexOf(guarded.charAt(0)) >= 0) {
+            guarded = "'" + guarded;
         }
-        return '"' + value.replace("\"", "\"\"") + '"';
+        if (guarded.indexOf(',') < 0 && guarded.indexOf('"') < 0 && guarded.indexOf('\n') < 0
+                && guarded.indexOf('\r') < 0) {
+            return guarded;
+        }
+        return '"' + guarded.replace("\"", "\"\"") + '"';
     }
 
     private static final RowMapper<AuditEventView> ROW_MAPPER = (rs, rowNum) -> new AuditEventView(
