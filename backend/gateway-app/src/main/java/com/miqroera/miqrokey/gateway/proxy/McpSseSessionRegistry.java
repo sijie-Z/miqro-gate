@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Sinks;
+import reactor.util.concurrent.Queues;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -38,6 +39,11 @@ public class McpSseSessionRegistry {
      * Hard cap on concurrent inbound SSE sessions (single-node private deployment).
      */
     static final int MAX_SESSIONS = 256;
+    /**
+     * Bounded per-session frame buffer (#433): a stuck subscriber must not let
+     * pending responses accumulate without limit; overflow ends the session.
+     */
+    static final int MAX_BUFFERED_FRAMES = 256;
 
     private final Map<UUID, SseSession> sessions = new ConcurrentHashMap<>();
     private final Clock clock;
@@ -53,15 +59,22 @@ public class McpSseSessionRegistry {
         private final UUID consumerId;
         private final UUID serviceId;
         private final String serviceName;
-        private final Sinks.Many<byte[]> sink = Sinks.many().unicast().onBackpressureBuffer();
+        private final Sinks.Many<byte[]> sink = Sinks.many().unicast()
+                .onBackpressureBuffer(Queues.<byte[]>get(MAX_BUFFERED_FRAMES).get());
+        /**
+         * Terminates the owning registry entry when a frame is undeliverable (#433).
+         */
+        private final Runnable onUndeliverable;
         private volatile Instant lastActivity;
 
-        private SseSession(UUID id, UUID consumerId, UUID serviceId, String serviceName, Instant now) {
+        private SseSession(UUID id, UUID consumerId, UUID serviceId, String serviceName, Instant now,
+                Runnable onUndeliverable) {
             this.id = id;
             this.consumerId = consumerId;
             this.serviceId = serviceId;
             this.serviceName = serviceName;
             this.lastActivity = now;
+            this.onUndeliverable = onUndeliverable;
         }
 
         public UUID id() {
@@ -92,8 +105,13 @@ public class McpSseSessionRegistry {
         void emit(byte[] frame) {
             Sinks.EmitResult result = sink.tryEmitNext(frame);
             if (result.isFailure()) {
-                // Subscriber gone or saturated: the session is dead, drop the frame.
-                log.debug("aigw.mcp.sse.emit_failed session={} result={}", id, result);
+                // #433: an undeliverable frame must not be dropped silently — the
+                // request waiting on it would hang forever while the idle sweep
+                // keeps being deferred by new messages. Any failure mode (slow-
+                // subscriber overflow, cancelled subscription) ends the session:
+                // the client sees the stream complete and reconnects.
+                log.warn("aigw.mcp.sse.emit_failed session={} result={}, closing session", id, result);
+                onUndeliverable.run();
             }
         }
 
@@ -112,7 +130,8 @@ public class McpSseSessionRegistry {
             return Optional.empty();
         }
         Instant now = clock.instant();
-        SseSession session = new SseSession(UUID.randomUUID(), consumerId, serviceId, serviceName, now);
+        UUID sessionId = UUID.randomUUID();
+        SseSession session = new SseSession(sessionId, consumerId, serviceId, serviceName, now, () -> close(sessionId));
         sessions.put(session.id(), session);
         log.info("aigw.mcp.sse.open session={} service={}", session.id(), serviceName);
         return Optional.of(session);
