@@ -6,11 +6,19 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-13 自主轮（开放面安全回归：#423）` — `IN_PROGRESS`
+- Current goal: `2026-09-13 自主轮（技能包解压炸弹硬化：#427）` — `IN_PROGRESS`
 - Goal status: `IN_PROGRESS（develop @ fc541fd；**rc.16 已发布（2026-09-12）** + 09-13 收口 #421 调度噪音 /
   #423 开放面安全回归 / #424 冲刷节奏；I 序列 I1–I21 DONE；CI 无红灯；待办：**leader 请示稿回执（6 组
   裁决 + 3 项材料）**、#211（BLOCKED）、F25/F27/F28/F29、#245、F32/F33、F19）`
 - Last updated: `2026-09-13 CST`
+
+## 会话交接点 2026-09-13（技能包解压炸弹硬化：#427）
+
+- **#427（本 PR，bug，对抗性复核发现）**：`SkillZipValidator` 的 SKILL.md 尺寸防线对**流式 zip 恒不
+  触发**（本地头尺寸 0/-1），`readAllBytes` 无界解压——压缩比炸弹可达 OOM（与类 javadoc 的「抗 zip
+  炸弹」承诺不符）。修复=声明检查保留 + 有界读取（超限报 `SKILL_MD_TOO_LARGE`）；流式 zip 红→绿。
+  同轮复核另两处（导出下载路径、经完整读的 JWT/扫描器面）为干净。
+- 下一批：leader 请示稿回执（6 组裁决 + 3 项材料）；rc.17 攒批。
 
 ## 会话交接点 2026-09-13（调度噪音收口 + 开放面安全回归：#421/#423）
 

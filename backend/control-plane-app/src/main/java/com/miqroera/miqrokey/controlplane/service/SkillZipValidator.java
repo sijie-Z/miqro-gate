@@ -68,7 +68,15 @@ public final class SkillZipValidator {
                     if (entry.getSize() > MAX_SKILL_MD_BYTES) {
                         throw invalid("SKILL_MD_TOO_LARGE", "SKILL.md 超过大小上限。");
                     }
-                    skillMdText = new String(zis.readAllBytes(), StandardCharsets.UTF_8);
+                    // #427: the declared size above can be 0/-1 for streamed zips
+                    // (data-descriptor mode) — bound the actual decompressed READ
+                    // as well: a small zip must never inflate SKILL.md past the
+                    // cap (zip-bomb guard the class claims).
+                    byte[] skillMd = zis.readNBytes(MAX_SKILL_MD_BYTES + 1);
+                    if (skillMd.length > MAX_SKILL_MD_BYTES) {
+                        throw invalid("SKILL_MD_TOO_LARGE", "SKILL.md 超过大小上限。");
+                    }
+                    skillMdText = new String(skillMd, StandardCharsets.UTF_8);
                 }
             }
         } catch (java.io.IOException e) {
