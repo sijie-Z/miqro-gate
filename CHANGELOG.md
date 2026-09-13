@@ -51,6 +51,18 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   `upstream_credentials` + `upstream_credential_id`。测试：两个回归 IT 红→绿（策略行入快照断言；
   真实 SQL 过滤命中 107 tokens / 陌生订阅 0）。
 
+- **转义族四缺陷修复（#447，sub-agent 全量审查发现，五红→五绿）**：①网关 `ErrorEnvelopes` 的
+  「转义」是 no-op（`.replace("
+", "
+")` 自我替换——G6 修复从未生效）——含模型名的消息带裸控制
+  字符产出非法 JSON（实测 `Illegal unquoted character (CTRL-CHAR, code 10)`）；②`McpProxyController
+  .problemJson` 裸拼工具名——可伪造信封成员（实测注入成功）；③`AdminOrgService` 三处手拼审计摘要
+  （用户名/团队名/项目码）——名字含 `"` 即 jsonb 转换失败回滚（实测 409），构造串可篡改审计摘要；
+  ④`AuditSummaries.summary` 仅转义 `\` 与 `"`、`AdminApiKeyService.safeJson` 同病。修复：统一
+  全量 JSON 转义（控制字符短转义/`\uXXXX` 兜底）共享助手，三处手拼收口，`problemJson` 提为包内
+  可见并转义。测试：五处红→绿（gateway 信封/伪造 + 审计摘要往返/伪造免疫 + 管理面敌意名称 200 且
+  审计可解析）。
+
 ### 2026-09-12
 - **被动健康检查：真实流量失败率入服务健康视图（#397，矩阵 §3 候选落地，阿里「主动+被动并列」）**：新端点
   `GET /api/v1/admin/mcp-services/{id}/traffic?hours=24`——`mcp_access_log` 按服务窗口聚合（分类口径同 #338：

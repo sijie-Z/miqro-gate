@@ -22,10 +22,40 @@ final class AuditSummaries {
                 sb.append(',');
             }
             sb.append('"').append(kv[i]).append("\":\"");
-            String value = String.valueOf(kv[i + 1]).replace("\\", "\\\\").replace("\"", "\\\"");
-            sb.append(value).append('"');
+            sb.append(escapeJson(String.valueOf(kv[i + 1]))).append('"');
         }
         return sb.append('}').toString();
+    }
+
+    /**
+     * Full JSON-string escaping for user-supplied values (#447): backslash, quote
+     * and every control character (short escapes where they exist, {@code \\uXXXX}
+     * otherwise). A crafted value must round-trip as a literal string and can never
+     * forge sibling members of the summary document.
+     */
+    static String escapeJson(String value) {
+        if (value == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '\\' -> sb.append("\\\\");
+                case '"' -> sb.append("\\\"");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        return sb.toString();
     }
 
     /**
