@@ -2,6 +2,8 @@ package com.miqroera.miqrokey.gateway.proxy;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.reactivestreams.Subscription;
+import reactor.core.publisher.BaseSubscriber;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -77,6 +79,28 @@ class McpSseSessionRegistryTest {
 
         assertThat(registry.find(id)).isEmpty();
         assertThat(registry.find(null)).isEqualTo(Optional.empty());
+    }
+
+    @Test
+    @DisplayName("an undeliverable frame ends the session instead of dropping silently (#433)")
+    void saturatedSubscriberEndsTheSession() {
+        McpSseSessionRegistry registry = new McpSseSessionRegistry(clock);
+        McpSseSessionRegistry.SseSession session = registry.tryOpen(UUID.randomUUID(), UUID.randomUUID(), "slow")
+                .orElseThrow();
+        // A subscriber that never requests: the sink's bounded buffer fills up.
+        session.frames().asFlux().subscribe(new BaseSubscriber<byte[]>() {
+            @Override
+            protected void hookOnSubscribe(Subscription subscription) {
+                // request nothing
+            }
+        });
+
+        for (int i = 0; i < 300; i++) {
+            session.emit(new byte[]{1});
+        }
+
+        assertThat(registry.find(session.id())).isEmpty();
+        assertThat(registry.size()).isZero();
     }
 
     /** Test-only clock with controllable time. */
