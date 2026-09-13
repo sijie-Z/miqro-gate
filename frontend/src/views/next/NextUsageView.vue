@@ -162,43 +162,66 @@ async function loadQuota() {
   }
 }
 
+// #440: per-endpoint request-sequence guards — rapid range/group/page changes
+// must not let an older response land after a newer one.
+let summaryRequestSeq = 0;
+let recordsRequestSeq = 0;
+
 async function loadSummary() {
+  const seq = ++summaryRequestSeq;
   summaryLoading.value = true;
   summaryError.value = '';
   try {
     const w = windowFromTo();
-    summary.value =
+    const result =
       w.from && w.to
         ? await api.usageSummary(groupBy.value, w.from, w.to)
         : await api.usageSummary(groupBy.value);
+    if (seq !== summaryRequestSeq) {
+      return; // a newer request won — this response is stale
+    }
+    summary.value = result;
   } catch (error) {
-    if (error instanceof ApiError) {
-      summaryError.value = `${error.message}（requestId: ${error.requestId ?? '-'}）`;
-    } else {
-      summaryError.value = '加载用量汇总失败。';
+    if (seq === summaryRequestSeq) {
+      if (error instanceof ApiError) {
+        summaryError.value = `${error.message}（requestId: ${error.requestId ?? '-'}）`;
+      } else {
+        summaryError.value = '加载用量汇总失败。';
+      }
     }
   } finally {
-    summaryLoading.value = false;
+    if (seq === summaryRequestSeq) {
+      summaryLoading.value = false;
+    }
   }
 }
 
 async function loadRecords() {
+  const seq = ++recordsRequestSeq;
   recordsLoading.value = true;
   recordsError.value = '';
   try {
-    records.value = await api.usageRecords({
+    const result = await api.usageRecords({
       page: page.value,
       size: pageSize.value,
       ...windowFromTo(),
     });
+    if (seq !== recordsRequestSeq) {
+      return; // a newer request won — this response is stale
+    }
+    records.value = result;
   } catch (error) {
-    if (error instanceof ApiError) {
-      recordsError.value = `${error.message}（requestId: ${error.requestId ?? '-'}）`;
-    } else {
-      recordsError.value = '加载用量明细失败。';
+    if (seq === recordsRequestSeq) {
+      if (error instanceof ApiError) {
+        recordsError.value = `${error.message}（requestId: ${error.requestId ?? '-'}）`;
+      } else {
+        recordsError.value = '加载用量明细失败。';
+      }
     }
   } finally {
-    recordsLoading.value = false;
+    if (seq === recordsRequestSeq) {
+      recordsLoading.value = false;
+    }
   }
 }
 

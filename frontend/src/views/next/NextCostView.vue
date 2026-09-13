@@ -125,7 +125,12 @@ function fromIso(days: number): string {
   return d.toISOString();
 }
 
+// #440: request-sequence guard — a slow window load must not land after the
+// user switched windows (numbers must match the highlighted range).
+let loadRequestSeq = 0;
+
 async function load() {
+  const seq = ++loadRequestSeq;
   loading.value = true;
   loadError.value = '';
   try {
@@ -135,18 +140,23 @@ async function load() {
     const results = await Promise.all(
       needed.map((dimension) => api.adminUsageSummary({ groupBy: dimension, from, to })),
     );
+    if (seq !== loadRequestSeq) {
+      return; // a newer window won — this response is stale
+    }
     const next = { ...summaries.value };
     needed.forEach((dimension, index) => {
       next[dimension] = results[index];
     });
     summaries.value = next;
   } catch (error) {
-    if (error instanceof ApiError) {
+    if (seq === loadRequestSeq && error instanceof ApiError) {
       loadError.value = error.message;
       loadRequestId.value = error.requestId ?? '';
     }
   } finally {
-    loading.value = false;
+    if (seq === loadRequestSeq) {
+      loading.value = false;
+    }
   }
 }
 
@@ -197,6 +207,9 @@ function exportCsv() {
 // ---- budgets (G8.2) ----
 const budgets = ref<BudgetView[]>([]);
 const budgetLoading = ref(false);
+// #440: a failed budget load must not masquerade as "no budgets" — the admin
+// could re-create or overwrite real plans based on the empty state.
+const budgetError = ref('');
 const projects = ref<Project[]>([]);
 const budgetDialogVisible = ref(false);
 const budgetSaving = ref(false);
@@ -246,10 +259,11 @@ function levelFill(level: string): string {
 
 async function loadBudgets() {
   budgetLoading.value = true;
+  budgetError.value = '';
   try {
     budgets.value = await api.adminBudgets(budgetMonth.value);
-  } catch {
-    budgets.value = [];
+  } catch (error) {
+    budgetError.value = error instanceof ApiError ? error.message : '预算加载失败，请重试。';
   } finally {
     budgetLoading.value = false;
   }
@@ -530,7 +544,14 @@ onMounted(async () => {
             >
           </div>
         </div>
-        <p v-if="!budgets.length" class="next-cost__budget-empty" data-testid="budget-empty">
+        <div v-if="budgetError" class="ui-alert ui-alert--error" data-testid="budget-error">
+          {{ budgetError }}
+        </div>
+        <p
+          v-if="!budgets.length && !budgetError"
+          class="next-cost__budget-empty"
+          data-testid="budget-empty"
+        >
           本月还没有预算计划。
         </p>
       </div>

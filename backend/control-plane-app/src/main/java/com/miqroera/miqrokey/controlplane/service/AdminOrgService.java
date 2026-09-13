@@ -101,7 +101,8 @@ public class AdminOrgService {
                 null, null, 0L, Instant.now(), Instant.now());
         userRepository.insert(user);
         auditService.record(tenantId, adminId, "USER_CREATE", "USER", user.id(),
-                "{\"username\":\"" + username + "\",\"role\":\"" + user.role().name() + "\"}", null);
+                AuditSummaries.summary("username", AuditSummaries.sanitize(username), "role", user.role().name()),
+                null);
         quotaDefaultTemplateService.applyToNewUser(tenantId, adminId, user.id());
         return new UserCreated(AdminUserView.from(user), temporaryPassword);
     }
@@ -163,7 +164,8 @@ public class AdminOrgService {
         Team team = new Team(UUID.randomUUID(), tenantId, name, description, TeamStatus.ACTIVE, 0, Instant.now(),
                 Instant.now());
         teamRepository.insert(team);
-        auditService.record(tenantId, adminId, "TEAM_CREATE", "TEAM", team.id(), "{\"name\":\"" + name + "\"}", null);
+        auditService.record(tenantId, adminId, "TEAM_CREATE", "TEAM", team.id(),
+                AuditSummaries.summary("name", AuditSummaries.sanitize(name)), null);
         return team;
     }
 
@@ -235,8 +237,8 @@ public class AdminOrgService {
         Project project = new Project(UUID.randomUUID(), tenantId, code, name, name, null, ProjectStatus.ACTIVE,
                 projectTag, 0, Instant.now(), Instant.now());
         projectRepository.insert(project);
-        auditService.record(tenantId, adminId, "PROJECT_CREATE", "PROJECT", project.id(), "{\"code\":\"" + code + "\"}",
-                null);
+        auditService.record(tenantId, adminId, "PROJECT_CREATE", "PROJECT", project.id(),
+                AuditSummaries.summary("code", AuditSummaries.sanitize(code)), null);
         return project;
     }
 

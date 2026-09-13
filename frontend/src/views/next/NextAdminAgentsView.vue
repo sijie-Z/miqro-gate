@@ -132,18 +132,31 @@ async function confirmAndRun() {
   await state.run();
 }
 
+// #440: request-sequence guard — a slow usage load for agent A must not land
+// after the dialog re-targets agent B.
+let usageRequestSeq = 0;
+
 async function showUsage(agent: AgentView) {
+  const seq = ++usageRequestSeq;
   usageAgent.value = agent;
   usageSummary.value = null;
   usageError.value = '';
   usageVisible.value = true;
   usageLoading.value = true;
   try {
-    usageSummary.value = await api.adminAgentUsage(agent.id!);
+    const summary = await api.adminAgentUsage(agent.id!);
+    if (seq !== usageRequestSeq) {
+      return; // a newer dialog target won — this response is stale
+    }
+    usageSummary.value = summary;
   } catch (error) {
-    usageError.value = error instanceof ApiError ? error.message : '加载用量失败。';
+    if (seq === usageRequestSeq) {
+      usageError.value = error instanceof ApiError ? error.message : '加载用量失败。';
+    }
   } finally {
-    usageLoading.value = false;
+    if (seq === usageRequestSeq) {
+      usageLoading.value = false;
+    }
   }
 }
 

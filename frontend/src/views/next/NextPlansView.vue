@@ -179,6 +179,11 @@ async function createSubscription() {
   }
 }
 
+// #440: request-sequence guard — a slow seat list for subscription A must not
+// land after the drawer re-targets subscription B (a release would then act on
+// the wrong row set).
+let seatsRequestSeq = 0;
+
 async function openSeats(subscription: SubscriptionView) {
   seatSubscription.value = subscription;
   seatDrawer.value = true;
@@ -187,15 +192,23 @@ async function openSeats(subscription: SubscriptionView) {
 }
 
 async function refreshSeats() {
-  if (!seatSubscription.value) return;
+  const target = seatSubscription.value;
+  if (!target) return;
+  const seq = ++seatsRequestSeq;
   // Hub View schemas mark every field optional (springdoc omits `required`);
   // subscription rows and the drawer target always carry their ids — the `!`
   // restore the pre-hub required-field contract.
   seatLoading.value = true;
   try {
-    seats.value = await api.listSeats(seatSubscription.value.id!);
+    const rows = await api.listSeats(target.id!);
+    if (seq !== seatsRequestSeq) {
+      return; // a newer drawer target won — this response is stale
+    }
+    seats.value = rows;
   } finally {
-    seatLoading.value = false;
+    if (seq === seatsRequestSeq) {
+      seatLoading.value = false;
+    }
   }
 }
 

@@ -20,6 +20,8 @@ const loadRequestId = ref('');
 const from = ref('2026-08-01T00:00:00Z');
 const to = ref('2026-08-31T00:00:00Z');
 const previewCount = ref<number | null>(null);
+// #440: the window the current preview count belongs to (guards createDeletion).
+const previewedRange = ref<{ from: string; to: string } | null>(null);
 const previewing = ref(false);
 const previewError = ref('');
 
@@ -77,6 +79,9 @@ async function preview() {
   try {
     const result = await api.deletionPreview(from.value, to.value);
     previewCount.value = result.count;
+    // #440: record which window was previewed — creating a deletion over a
+    // different window would bypass the preview safety gate.
+    previewedRange.value = { from: from.value, to: to.value };
   } catch (error) {
     previewError.value = error instanceof ApiError ? error.message : '预览失败';
   } finally {
@@ -84,11 +89,22 @@ async function preview() {
   }
 }
 
+// #440: in-flight guard — a double click must not create two deletion requests.
+const creating = ref(false);
+
 async function createDeletion() {
-  if (previewCount.value === null) {
+  if (previewCount.value === null || previewedRange.value === null) {
     toast.info('请先预览确认窗口内的记录数');
     return;
   }
+  if (previewedRange.value.from !== from.value || previewedRange.value.to !== to.value) {
+    toast.info('时间窗口已变更，请重新预览');
+    return;
+  }
+  if (creating.value) {
+    return;
+  }
+  creating.value = true;
   try {
     const created = await api.createDeletion(from.value, to.value);
     confirmToken.value = created.confirmToken;
@@ -98,6 +114,8 @@ async function createDeletion() {
     await load();
   } catch (error) {
     previewError.value = error instanceof ApiError ? error.message : '创建失败';
+  } finally {
+    creating.value = false;
   }
 }
 
