@@ -73,7 +73,12 @@ public class QueueConfig {
             return Schedulers.newBoundedElastic(props.writerThreads(), 100, "usage-writer");
         }
 
-        @Bean
+        /**
+         * ##451: destroyMethod flushes the queue on graceful shutdown — up to a full
+         * flush interval of accepted events used to be lost on every restart/deploy
+         * (and never counted as dropped).
+         */
+        @Bean(destroyMethod = "flush")
         UsageEventBus usageEventBus(UsageEventWriter usageEventWriter, QueueProperties props, Clock clock,
                 Scheduler usageWriterScheduler) {
             return new PostgresUsageEventBus(props.capacity(), props.flushThreshold(), usageEventWriter,

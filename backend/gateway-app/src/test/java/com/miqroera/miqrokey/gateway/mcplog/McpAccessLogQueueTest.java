@@ -50,6 +50,19 @@ class McpAccessLogQueueTest {
     }
 
     @Test
+    @DisplayName("close() drains buffered entries instead of losing them (#451)")
+    void closeDrainsBufferedEntries() {
+        CapturingWriter writer = new CapturingWriter();
+        McpAccessLogQueue queue = new McpAccessLogQueue(64, 60_000, writer);
+        queue.record(entry(1));
+        queue.record(entry(2));
+
+        queue.close();
+
+        assertThat(writer.batches().stream().flatMap(List::stream).toList()).hasSize(2);
+    }
+
+    @Test
     @DisplayName("saturation drops entries and counts them")
     void saturationDropsAndCounts() {
         CapturingWriter writer = new CapturingWriter();

@@ -34,6 +34,26 @@ class McpCircuitBreakerTest {
     }
 
     @Test
+    @DisplayName("a stale half-open window is recycled instead of latching forever (#451)")
+    void staleHalfOpenIsRecycled() {
+        McpCircuitBreaker breaker = new McpCircuitBreaker(errorPolicy(1, 50), clock);
+        breaker.afterCall(false, 10); // 1/1 >= 50% -> OPEN
+        assertThat(breaker.state()).isEqualTo(McpCircuitBreaker.State.OPEN);
+
+        clock.advance(Duration.ofSeconds(31)); // past breaker_open_seconds (30)
+        // Consume all three probe slots without reporting outcomes (a client that
+        // cancelled mid-probe never reaches afterCall): the breaker must not
+        // latch in HALF_OPEN forever.
+        assertThat(breaker.beforeCall()).isEqualTo(McpCircuitBreaker.Decision.PROBE_ALLOWED);
+        assertThat(breaker.beforeCall()).isEqualTo(McpCircuitBreaker.Decision.PROBE_ALLOWED);
+        assertThat(breaker.beforeCall()).isEqualTo(McpCircuitBreaker.Decision.PROBE_ALLOWED);
+        assertThat(breaker.beforeCall()).isEqualTo(McpCircuitBreaker.Decision.REJECTED);
+
+        clock.advance(Duration.ofSeconds(31)); // a full open-window with no resolution
+        assertThat(breaker.beforeCall()).isEqualTo(McpCircuitBreaker.Decision.PROBE_ALLOWED);
+    }
+
+    @Test
     @DisplayName("below the min-request guard nothing trips")
     void minRequestGuard() {
         McpCircuitBreaker breaker = new McpCircuitBreaker(errorPolicy(10, 50), clock);

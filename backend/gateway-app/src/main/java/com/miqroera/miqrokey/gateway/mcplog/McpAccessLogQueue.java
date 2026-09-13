@@ -120,6 +120,11 @@ public final class McpAccessLogQueue implements McpAccessLogSink, AutoCloseable 
 
     @Override
     public void close() {
+        // #451: stop the scheduler first, then drain whatever the queue still
+        // holds — a graceful stop must not lose audit rows it already accepted.
+        // An in-flight flush interrupted by the shutdown re-queues its batch
+        // (idempotent writes), which the final drain then picks up.
         scheduler.shutdownNow();
+        flush();
     }
 }

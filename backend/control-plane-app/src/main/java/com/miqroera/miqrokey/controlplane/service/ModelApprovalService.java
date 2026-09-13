@@ -28,7 +28,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -247,10 +246,17 @@ public class ModelApprovalService {
                 SELECT tenant_id, :grantId, :modelId FROM project_provider_grants WHERE id = :grantId
                 ON CONFLICT (grant_id, model_id) DO NOTHING
                 """, new MapSqlParameterSource("grantId", grant.id()).addValue("modelId", approval.modelId()));
-        Set<String> keyModels = new LinkedHashSet<>(keyRepository.findModelIds(key.id()));
-        if (keyModels.add(approval.modelId())) {
-            keyRepository.replaceKeyModels(tenantId, key.id(), keyModels);
-        }
+        // #451: add-only semantics as ONE atomic statement. The previous
+        // findModelIds -> replaceKeyModels read-modify-write let two concurrent
+        // approvals for different models silently clobber each other
+        // (replace-all wrote back a stale set).
+        jdbc.update("""
+                INSERT INTO virtual_key_models (tenant_id, virtual_key_id, model_id)
+                SELECT tenant_id, :keyId, :modelId FROM virtual_keys
+                WHERE id = :keyId AND tenant_id = :tenantId
+                ON CONFLICT (virtual_key_id, model_id) DO NOTHING
+                """, new MapSqlParameterSource("keyId", key.id()).addValue("tenantId", tenantId).addValue("modelId",
+                approval.modelId()));
 
         ModelApproval approved = optimisticUpdate(new ModelApproval(approval.id(), tenantId, key.id(),
                 approval.modelId(), approval.requestedBy(), ModelApprovalStatus.APPROVED, reviewerId, approval.reason(),
