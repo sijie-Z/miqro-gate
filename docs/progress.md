@@ -6,12 +6,23 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-13 自主轮（主密钥轮换批处理重加密：#432）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS（develop @ ad055e8；**rc.17 已发布（2026-09-13）** + 09-13 收口 #430 CSV 公式
-  注入 / #421 调度噪音 / #423 开放面安全回归 / #424 冲刷节奏 / #427 技能包炸弹；I 序列 I1–I21 DONE；
-  CI 无红灯；待办：**leader 请示稿回执（6 组裁决 + 3 项材料）**、#211（BLOCKED）、F25/F27/F28/F29、
-  #245、F32/F33、F19）`
+- Current goal: `2026-09-13 自主轮（SSE 会话缓冲有界化：#433）` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS（develop @ 9a67d5a；**rc.17 已发布（2026-09-13）** + 09-13 收口 #430 CSV 公式
+  注入 / #432 主密钥批量重加密 / #421 调度噪音 / #423 开放面安全回归 / #424 冲刷节奏 / #427 技能包炸弹；
+  I 序列 I1–I21 DONE；CI 无红灯；待办：**leader 请示稿回执（6 组裁决 + 3 项材料）**、#211（BLOCKED）、
+  F25/F27/F28/F29、#245、F32/F33、F19）`
 - Last updated: `2026-09-13 CST`
+
+## 会话交接点 2026-09-13（SSE 会话缓冲有界化：#433）
+
+- **#433（本 PR，bug，对抗性复核发现）**：入站 MCP SSE（#356）帧通道用无参 unicast
+  `onBackpressureBuffer`——**无界**（实测澄清：并非有界丢帧）；慢订阅者下每会话响应帧无界堆积
+  （MAX_SESSIONS 只限会话数不限字节），emit 失败仅 debug、会话不自清 → 响应静默搁浅挂死。
+  修复=有界 256 帧（`MAX_BUFFERED_FRAMES`）+ 失败即终止会话（WARN + complete + 注册表移除，幂等）；
+  单测红→绿（原始态红灯）。
+- 同轮副产品：解开「测试 @TestConfiguration 跨上下文扫描」之谜（#434 Windows unit 现场）——测试配置
+  必须自包含、bean 工厂禁引外层静态（详见 PR #434 第二提交与记忆条目）。
+- 下一批：leader 请示稿回执（6 组裁决 + 3 项材料）；矩阵 §3 等外部。
 
 ## 会话交接点 2026-09-13（主密钥批量重加密：#432）
 
