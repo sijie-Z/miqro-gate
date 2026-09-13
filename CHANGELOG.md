@@ -25,6 +25,23 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   `lib-retention.sh` 可脱库测试；②备份管线失败残留无 manifest 的半成品 `.enc`——失败分支清理；
   ③还原加 `--single-transaction`（原子恢复，中途失败整体回滚）。测试：新增 `test-retention.sh`
   红→绿（精确保留集/幂等/失败零残留）+ 既有 webhook 测试与真机恢复演练（1000 行）保持 PASS。
+- **网关缓存两缺陷修复（#444，sub-agent 全量审查发现）**：①L2 缓存 get/put 在 Reactor 事件环上执行
+  阻塞 JDBC（L1 miss 的 SELECT/存储的 INSERT——数据库故障时每个操作阻塞一个 IO 线程达 Hikari 超时，
+  同环连接全停摆）——get 迁至有界调度器、put 改为调度器上的尽力而为（失败仅 WARN 不阻断）；
+  ②缓存键忽略 `stream` → SSE 与 JSON 响应同键跨格式重放（流式预热后 JSON 请求收到 SSE 帧）——
+  键新增格式维度 `stream=1/0`。测试三处红→绿：键的 stream 维度断言；「流式预热后同会话非流式请求
+  必须 miss 且拿到 JSON」（修复前 L1 命中 SSE）；线程探针断言缓存 I/O 全落在调度器线程、
+  无 `webflux-http-nio` 事件环线程（修复前实测运行于 `webflux-http-nio-2`）。
+
+- **控制面安全语义修复（#445，sub-agent 全量审查发现，五红→五绿）**：①「锁定用户」实际不生效且会自愈——
+  LOCKED 未设期限/未吊销会话，且执行点（SessionFilter/AuthenticationService）只识别「带期限」锁，
+  登录成功还会把手动锁定写回 ACTIVE；修复=null 期限语义为无限期管理员锁（执行点统一）+锁定时吊销
+  全部会话+解锁清期限，自动锁到期自愈不变。②X-Forwarded-For **最左取信**——追加式反代下客户端
+  自带伪造条目即绕过 F05 管理门户白名单（实测 200）；修复=从右向左跳过 trusted-proxies 的首个
+  非信任地址（追加/替换两种代理语义均正确）+ `IpCidrMatcher` 仅接受字面 IP（实测 `localhost` 经
+  DNS 解析命中 127.0.0.0/8）。③403 体 `X-Request-Id` 转义（注入实测 code=FAKE）。测试：锁定 IT
+  （会话 401/重登 401/状态保持 LOCKED/解锁恢复）+ 伪造头 403/hostname 403/注入体 JSON 合法 +
+  matcher 字面 IP；认证/会话回归 38/0。
 
 - **转义族四缺陷修复（#447，sub-agent 全量审查发现，五红→五绿）**：①网关 `ErrorEnvelopes` 的
   「转义」是 no-op（`.replace("

@@ -112,11 +112,15 @@ public class AdminOrgService {
         if (user.role() == UserRole.SYSTEM_ADMIN && status == UserStatus.DISABLED) {
             throw new ApiException(HttpStatus.CONFLICT, "ADMIN_NOT_DISABLEABLE", "system admins cannot be disabled");
         }
+        // #445: unlocking clears any stale lock deadline; a manual LOCKED keeps
+        // it (null = indefinite — enforced at the session/login gates) and cuts
+        // every existing session exactly like DISABLED does.
+        Instant lockedUntil = status == UserStatus.ACTIVE ? null : user.lockedUntil();
         User updated = new User(user.id(), user.tenantId(), user.username(), user.displayName(), user.passwordHash(),
-                user.role(), status, user.mustChangePassword(), user.failedLoginCount(), user.lockedUntil(),
+                user.role(), status, user.mustChangePassword(), user.failedLoginCount(), lockedUntil,
                 user.lastLoginAt(), user.version() + 1, user.createdAt(), Instant.now());
         userRepository.update(updated);
-        if (status == UserStatus.DISABLED) {
+        if (status == UserStatus.DISABLED || status == UserStatus.LOCKED) {
             sessionService.revokeOtherSessions(userId, null);
         }
         auditService.record(tenantId, adminId, "USER_STATUS", "USER", userId, "{\"status\":\"" + status.name() + "\"}",
