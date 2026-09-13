@@ -51,6 +51,15 @@ class IpCidrMatcherTest {
     }
 
     @Test
+    @DisplayName("hostnames are rejected outright — no DNS resolution in request paths (#445)")
+    void hostnamesAreRejected() {
+        IpCidrMatcher matcher = IpCidrMatcher.parse("127.0.0.0/8");
+        // Pre-#445 this resolved via InetAddress.getByName -> true (blocking DNS
+        // plus an attacker-controlled-name match vector).
+        assertThat(matcher.matches("localhost")).isFalse();
+    }
+
+    @Test
     @DisplayName("unparseable or blank candidate addresses never match")
     void unparseableCandidates() {
         IpCidrMatcher matcher = IpCidrMatcher.parse("10.0.0.0/8");
