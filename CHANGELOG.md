@@ -73,6 +73,16 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
   删除页双击在途保护+预览窗口一致性校验、一次性 Secret 关闭即清。测试：Grants 竞态与 Profile 跳转
   红→绿 + 前端全量 190/190 + typecheck 绿。
 
+- **可靠性/并发五缺陷修复（#451，sub-agent 全量审查发现）**：①停机丢用量——用量总线 bean 无
+  `destroyMethod`，重启/滚动发布静默丢失未冲刷事件（且不计 dropped）；修复 `destroyMethod="flush"`。
+  ②停机丢审计行——访问日志队列 `close()` 仅 `shutdownNow`；修复为先停后一次全量排空。③熔断半开
+  永久闩锁——探针结果丢失（客户端中断）耗尽槽位后恒 503 直到重启；修复为过期半开窗口按
+  `breaker_open_seconds` 回收。④审批模型集丢失更新——`findModelIds→replaceKeyModels` 读改写改单条
+  原子 `INSERT ... ON CONFLICT DO NOTHING`。⑤对账僵尸行——重启后 PENDING/RUNNING 永不完成且幂等
+  重传恒返回死行；修复为启动（ApplicationReady）标记中断运行 FAILED 可重跑（监听尽力而为，空库
+  启动不阻断）。测试：wiring/排空/回收/恢复四红→绿（含真闩锁 `PROBE_ALLOWED but was REJECTED`
+  与冒烟空 H2 现场）+ 全模块回归。
+
 ### 2026-09-12
 - **被动健康检查：真实流量失败率入服务健康视图（#397，矩阵 §3 候选落地，阿里「主动+被动并列」）**：新端点
   `GET /api/v1/admin/mcp-services/{id}/traffic?hours=24`——`mcp_access_log` 按服务窗口聚合（分类口径同 #338：

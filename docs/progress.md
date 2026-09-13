@@ -6,12 +6,29 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-13 自主轮（sub-agent 审查修复：网关缓存 #444）` — `IN_PROGRESS`
+- Current goal: `2026-09-13 自主轮（rc.19 发布记录）` — `IN_PROGRESS`
 - Goal status: `IN_PROGRESS（develop @ abd13a9；rc.18 已发布；**sub-agent 全量审查（7 路）完成，约 70 条
   发现**——已交付 #441（HIGH×2 抢修，等 CodeQL 平台恢复合并）、#440（前端守卫二批，本地绿待推）、
   #444（网关缓存，本 PR）；队列：控制面锁定/XFF、转义族、导出泄漏、并发族、shutdown flush、语料矩阵
   刷新；注：CodeQL 自 09:01Z 起平台侧上传故障（GitHub 事件），非代码问题`
 - Last updated: `2026-09-13 CST`
+
+## 会话交接点 2026-09-13（rc.19 发布：审查修复波全量落地）
+
+- **rc.19 已发布**（tag `0.1.0-rc.19`，GitHub Release 含中文说明）：rc.18 之后 6 个合并——sub-agent
+  全量审查（7 路）修复波：网关缓存 HIGH×2（事件环阻塞 + stream 键）、控制面安全语义 HIGH×2（锁定
+  失效 / XFF 伪造）、快照冻结 HIGH×2（p.version + 订阅 JOIN）、前端授权错写 HIGH（Grants 竞态）+
+  15 视图守卫二批、转义族四缺陷、可靠性/并发五缺陷；全部红→绿（多处教科书级现场）。**实测阶段
+  推荐候选**。
+- 首批「代码 PR 不带文档」新规落地（#452 起），文档本 PR 统一收口。
+- 下一批（rc.20 候选）：导出泄漏/输入校验族、MCP 体上限/SSRF 字面量、语料矩阵刷新 + 对比文档修正、
+  前端 LOW 批。
+
+## 会话交接点 2026-09-13（可靠性/并发五缺陷：#451）
+
+- **#451（本 PR 前置，已合并）**：停机丢用量（destroyMethod=flush）/ 停机丢审计行（close 先停后排空）/
+  熔断半开闩锁（过期窗口回收）/ 审批原子 add-only / 对账僵尸启动恢复（监听尽力而为）；四处红→绿
+  （含真闩锁与冒烟空 H2 CI 现场）。
 
 ## 会话交接点 2026-09-13（前端守卫收口二批：#440）
 
