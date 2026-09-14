@@ -11,7 +11,7 @@
 #   Prints the number of pruned archives on stdout.
 apply_retention() {
   local dir="$1" daily_keep="$2" weekly_keep="$3"
-  local all keep rest pruned=0 kept_weeks="" weeks_kept=0 f stamp week
+  local all keep rest pruned=0 kept_weeks="" weeks_kept=0 f stamp iso week
   all=$(ls -1 "$dir"/miqrokey-*.sql.gz.enc 2>/dev/null | sort -r || true)
   [ -n "$all" ] || { echo 0; return 0; }
 
@@ -23,7 +23,9 @@ apply_retention() {
     [ -n "$f" ] || continue
     stamp=$(basename "$f")
     stamp=${stamp#miqrokey-}
-    week=$(date -u -d "${stamp:0:8}" +%G%V 2>/dev/null || echo unknown)
+    # busybox date（postgres:alpine 备份镜像）不认紧凑 YYYYMMDD，先转 ISO 再解析。
+    iso="${stamp:0:4}-${stamp:4:2}-${stamp:6:2}"
+    week=$(date -u -d "$iso" +%G%V 2>/dev/null || echo unknown)
     if [ "$weeks_kept" -lt "$weekly_keep" ] && ! printf '%s\n' "$kept_weeks" | grep -qxF "$week"; then
       kept_weeks="$kept_weeks$week"$'\n'
       weeks_kept=$((weeks_kept + 1))

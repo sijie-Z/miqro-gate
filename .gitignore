@@ -62,6 +62,13 @@ test-output/
 # Docker volumes
 deploy/data/
 
+# 生产部署态：密钥/证书/环境文件（保留模板）
+deploy/secrets/*
+!deploy/secrets/README.md
+!deploy/secrets/*.example
+deploy/.env
+deploy/.env.prod
+
 # Maven flatten plugin artifacts
 **/.flattened-pom.xml
 
