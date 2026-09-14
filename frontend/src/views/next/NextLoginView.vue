@@ -954,8 +954,9 @@ onMounted(async () => {
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  object-position: 62% 50%;
+  /* Whole artwork visible — cover would clip the gate top and the floor. */
+  object-fit: contain;
+  object-position: center;
   pointer-events: none;
   user-select: none;
 }
