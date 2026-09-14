@@ -8,7 +8,7 @@
  * panel through the secondary card action; error envelope, redirect query
  * and every data-testid unchanged.
  */
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -33,6 +33,7 @@ import {
 import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
 import { toast } from '@/ui';
+import { language } from '@/i18n';
 
 const route = useRoute();
 const router = useRouter();
@@ -43,12 +44,11 @@ type Mode = 'login' | 'register';
 /**
  * The login page ships Simplified Chinese and English. The language picker is
  * a real radio group: picking a language retranslates the page immediately and
- * the choice persists across visits. Brand tokens (MiQroGate, HTTPS / JWT,
- * provider names, requestId) stay language-neutral; backend error details are
- * shown exactly as the API returns them.
+ * the choice persists across visits (shared app-wide language store). Brand
+ * tokens (MiQroGate, HTTPS / JWT, provider names, requestId) stay
+ * language-neutral; backend error details are shown exactly as the API
+ * returns them.
  */
-const LANG_KEY = 'miqrogate.login-language';
-
 interface LoginCopy {
   brandProduct: string;
   heroEyebrow: string;
@@ -230,14 +230,12 @@ const languages = [
   { code: 'en', label: 'English' },
 ] as const;
 
-const language = ref<'zh-Hans' | 'en'>(localStorage.getItem(LANG_KEY) === 'en' ? 'en' : 'zh-Hans');
 const t = computed(() => COPY[language.value]);
-watch(language, (value) => {
-  localStorage.setItem(LANG_KEY, value);
-});
 
 const CAP_ICONS = [LockOnIcon, SecuredIcon, ChartBarIcon, ServerIcon] as const;
-const capItems = computed(() => t.value.caps.map((cap, index) => ({ ...cap, icon: CAP_ICONS[index] })));
+const capItems = computed(() =>
+  t.value.caps.map((cap, index) => ({ ...cap, icon: CAP_ICONS[index] })),
+);
 
 const mode = ref<Mode>('login');
 const username = ref('');
@@ -294,7 +292,11 @@ async function submit() {
   }
   loading.value = true;
   try {
-    await auth.register(username.value.trim(), displayName.value.trim() || undefined, password.value);
+    await auth.register(
+      username.value.trim(),
+      displayName.value.trim() || undefined,
+      password.value,
+    );
     await afterAuthenticated();
   } catch (error) {
     renderError(error, t.value.errRegister);
@@ -332,7 +334,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="gate-auth" data-testid="login-panel">
+  <main class="gate-auth" data-testid="login-panel" data-i18n-ignore>
     <!-- Dark hero: gateway portal scene -->
     <section class="gate-hero">
       <header class="hero-header">
@@ -353,7 +355,10 @@ onMounted(async () => {
           <p class="hero-eyebrow">{{ t.heroEyebrow }}</p>
           <h1>
             {{ t.heroLine1 }}<br />
-            <span>{{ t.heroLine2Pre }}<em>{{ t.heroLine2Em }}</em>{{ t.heroLine2Post }}</span>
+            <span
+              >{{ t.heroLine2Pre }}<em>{{ t.heroLine2Em }}</em
+              >{{ t.heroLine2Post }}</span
+            >
           </h1>
           <p class="hero-description">{{ t.heroDesc }}</p>
 
@@ -404,12 +409,42 @@ onMounted(async () => {
               stroke-opacity=".12"
               stroke-dasharray="2 12"
             />
-            <path d="M138 177 C254 177 296 214 346 238" stroke="url(#flow)" stroke-width="2" fill="none" />
-            <path d="M136 270 C257 270 288 261 343 252" stroke="url(#flow)" stroke-width="2" fill="none" />
-            <path d="M160 358 C262 348 294 293 344 269" stroke="url(#flow)" stroke-width="2" fill="none" />
-            <path d="M414 244 C489 217 544 201 632 180" stroke="url(#flow)" stroke-width="2" fill="none" />
-            <path d="M414 258 C498 258 552 258 642 258" stroke="url(#flow)" stroke-width="2" fill="none" />
-            <path d="M414 272 C491 300 549 323 640 340" stroke="url(#flow)" stroke-width="2" fill="none" />
+            <path
+              d="M138 177 C254 177 296 214 346 238"
+              stroke="url(#flow)"
+              stroke-width="2"
+              fill="none"
+            />
+            <path
+              d="M136 270 C257 270 288 261 343 252"
+              stroke="url(#flow)"
+              stroke-width="2"
+              fill="none"
+            />
+            <path
+              d="M160 358 C262 348 294 293 344 269"
+              stroke="url(#flow)"
+              stroke-width="2"
+              fill="none"
+            />
+            <path
+              d="M414 244 C489 217 544 201 632 180"
+              stroke="url(#flow)"
+              stroke-width="2"
+              fill="none"
+            />
+            <path
+              d="M414 258 C498 258 552 258 642 258"
+              stroke="url(#flow)"
+              stroke-width="2"
+              fill="none"
+            />
+            <path
+              d="M414 272 C491 300 549 323 640 340"
+              stroke="url(#flow)"
+              stroke-width="2"
+              fill="none"
+            />
             <path
               d="M145 176 C250 176 295 212 346 238 M138 270 C257 270 289 262 343 252 M163 357 C261 348 294 294 344 269"
               stroke="#8790ff"
@@ -598,9 +633,21 @@ onMounted(async () => {
         </div>
 
         <div v-if="errorMessage" class="login-error" role="alert" data-testid="login-error">
-          <svg class="login-error__icon" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <svg
+            class="login-error__icon"
+            width="15"
+            height="15"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+          >
             <circle cx="8" cy="8" r="6.4" stroke="currentColor" stroke-width="1.4" />
-            <path d="M8 5v3.4M8 10.6v.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+            <path
+              d="M8 5v3.4M8 10.6v.2"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+            />
           </svg>
           <span class="login-error__body">
             {{ errorMessage
@@ -682,9 +729,21 @@ onMounted(async () => {
                     stroke="currentColor"
                     stroke-width="1.5"
                   />
-                  <path d="m4.5 4 15 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                  <path
+                    d="m4.5 4 15 16"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                  />
                 </svg>
-                <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <svg
+                  v-else
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
                   <path
                     d="M4 12s3.5-5.5 8-5.5S20 12 20 12s-3.5 5.5-8 5.5S4 12 4 12Z"
                     stroke="currentColor"
@@ -731,7 +790,9 @@ onMounted(async () => {
           </button>
         </form>
 
-        <div class="or-divider"><span /> <em>{{ t.or }}</em> <span /></div>
+        <div class="or-divider">
+          <span /> <em>{{ t.or }}</em> <span />
+        </div>
 
         <button
           v-if="oauthProviders.length"
@@ -775,7 +836,8 @@ onMounted(async () => {
       <footer class="auth-footer">
         <span>{{ t.footerCopy }}</span>
         <span class="auth-footer-links"
-          ><span>{{ t.privacyPolicy }}</span><i /> <span>{{ t.terms }}</span></span
+          ><span>{{ t.privacyPolicy }}</span
+          ><i /> <span>{{ t.terms }}</span></span
         >
       </footer>
     </section>
@@ -790,7 +852,13 @@ onMounted(async () => {
 :global(body) {
   background: #ffffff;
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
 }
 
 .gate-auth {
@@ -1026,7 +1094,12 @@ onMounted(async () => {
   width: 42%;
   height: 30%;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(114, 114, 255, 0.4), rgba(83, 83, 255, 0.06) 52%, transparent 72%);
+  background: radial-gradient(
+    circle,
+    rgba(114, 114, 255, 0.4),
+    rgba(83, 83, 255, 0.06) 52%,
+    transparent 72%
+  );
   filter: blur(35px);
 }
 .scene-floor {
@@ -1282,7 +1355,11 @@ onMounted(async () => {
   border-radius: 8px;
   color: #72809c;
   background: rgba(16, 25, 45, 0.68);
-  font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    8px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   letter-spacing: 0.08em;
 }
 .scene-terminal b {
@@ -1592,7 +1669,11 @@ onMounted(async () => {
   display: block;
   margin-top: 2px;
   color: #8b3340;
-  font: 9px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    9px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
 }
 
 .or-divider {
@@ -1608,7 +1689,11 @@ onMounted(async () => {
 }
 .or-divider em {
   color: #a0aabe;
-  font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    8px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   font-style: normal;
 }
 

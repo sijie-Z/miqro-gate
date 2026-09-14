@@ -11,7 +11,10 @@ import { useRoute, useRouter } from 'vue-router';
 import {
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuItemIndicator,
   DropdownMenuPortal,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuRoot,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -41,11 +44,18 @@ import {
   UsergroupCircleIcon,
 } from 'tdesign-icons-vue-next';
 import { useAuthStore } from '@/stores/auth';
+import { language } from '@/i18n';
 import type { Component } from 'vue';
 
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
+
+/** Language options shown in the user menu (labels are language-neutral). */
+const LANGS = [
+  { code: 'zh-Hans', label: '简体中文' },
+  { code: 'en', label: 'English' },
+] as const;
 
 interface NavItem {
   name: string;
@@ -223,6 +233,36 @@ async function handleLogout() {
                     auth.user?.role === 'SYSTEM_ADMIN' ? '系统管理员' : '用户'
                   }}</span>
                 </div>
+                <DropdownMenuSeparator class="new-shell__user-menu-sep" />
+                <div class="new-shell__user-menu-section">语言</div>
+                <DropdownMenuRadioGroup v-model="language">
+                  <DropdownMenuRadioItem
+                    v-for="lang in LANGS"
+                    :key="lang.code"
+                    :value="lang.code"
+                    class="new-shell__user-menu-item"
+                    :data-testid="`shell-lang-${lang.code}`"
+                  >
+                    <span>{{ lang.label }}</span>
+                    <DropdownMenuItemIndicator class="new-shell__user-menu-check">
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M3.5 8.5 6.5 11.5 12.5 4.5"
+                          stroke="currentColor"
+                          stroke-width="1.8"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </DropdownMenuItemIndicator>
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
                 <DropdownMenuSeparator class="new-shell__user-menu-sep" />
                 <DropdownMenuItem
                   class="new-shell__user-menu-item new-shell__user-menu-item--danger"
@@ -520,6 +560,19 @@ async function handleLogout() {
   height: 1px;
   background: var(--ui-border-muted);
   margin: var(--ui-space-1) 0;
+}
+
+.new-shell__user-menu-section {
+  padding: var(--ui-space-1) var(--ui-space-3) 2px;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.new-shell__user-menu-check {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  color: var(--ui-primary);
 }
 
 .new-shell__user-menu-item {
