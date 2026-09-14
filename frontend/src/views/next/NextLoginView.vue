@@ -732,10 +732,12 @@ onMounted(async () => {
   padding: 34px clamp(48px, 6vw, 96px) 30px;
   display: flex;
   flex-direction: column;
+  /* Sampled from the reference artwork so the composite block's edges are
+     invisible: #0a111f top -> #040a14 mid -> #08101d bottom, plus the faint
+     right-side aura the reference carries on the copy side. */
   background:
-    radial-gradient(circle at 63% 61%, rgba(96, 105, 255, 0.26), transparent 19%),
-    radial-gradient(circle at 43% 28%, rgba(57, 108, 255, 0.16), transparent 26%),
-    linear-gradient(156deg, #071224 0%, #0a1428 42%, #07101f 100%);
+    radial-gradient(circle at 82% 58%, rgba(84, 94, 255, 0.09), transparent 46%),
+    linear-gradient(180deg, #0a111f 0%, #040a14 44%, #08101d 88%, #08101d 100%);
   color: #f5f7ff;
   isolation: isolate;
 }
