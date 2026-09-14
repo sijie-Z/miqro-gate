@@ -6,6 +6,20 @@
  * chip palette, radius caps, shadow policy).
  */
 
+/* ---- global box model ----------------------------------------------------
+   The v2 components size fields as "width X includes its border and padding"
+   (.ui-field__input = width:100% + 1px border + 24px padding). The UA default
+   is content-box, so every such control rendered 26px wider than its wrapper
+   and bled into its flex-row neighbours. One reset fixes the whole family;
+   nothing in the codebase relies on content-box sizing (the only previous
+   box-sizing declaration was a border-box opt-in). */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+
 /* ---- page structure ---- */
 .ui-page {
   max-width: var(--ui-content-max);
@@ -190,4 +204,41 @@
 
 .ui-gap-2 {
   gap: var(--ui-space-2);
+}
+
+/* ---- teleported popover surfaces -----------------------------------------
+   Popper-based radix roots (Select content, DropdownMenu content) render
+   through the library's PopperContent chain, which drops the parent scope's
+   data-v attribute — so component-scoped rules for the bare container never
+   match and the popover shows up as a transparent, uncontained list floating
+   over the page. Their chrome lives here in the global sheet instead; slot
+   children (items, separators) keep their scoped styles as usual. */
+.ui-select__content {
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-control);
+  box-shadow: var(--ui-shadow-popper);
+  padding: var(--ui-space-1);
+  z-index: 2000;
+  min-width: var(--radix-select-trigger-width);
+  max-height: 320px;
+  overflow: hidden;
+}
+
+.ui-select__viewport {
+  overflow-y: auto;
+  padding: 0;
+}
+
+/* Shared dropdown menu panel (shell user menu + per-view row/kebab menus). */
+.ui-menu {
+  min-width: 160px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-control);
+  box-shadow: var(--ui-shadow-popper);
+  padding: var(--ui-space-1);
+  z-index: 2000;
 }
