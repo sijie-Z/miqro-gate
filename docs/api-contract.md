@@ -406,13 +406,13 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 
 ### 5.1 上游凭证
 
-管理员录入真实供应商凭证并管理其生命周期（G1.6）。真实凭证属于供应商产品订阅，不绑定用户；只有 SYSTEM_ADMIN 可操作。
+管理员录入真实供应商凭证并管理其生命周期（G1.6）。真实凭证属于供应商产品订阅，不绑定用户；只有 SYSTEM_ADMIN 可操作。凭证可选绑定订阅下的一个**席位**（`seatId`，团队 Plan 的"每席位独立 Key"拓扑，见 §4 席位）；席位必须属于同一订阅与租户，否则 `404 SEAT_NOT_FOUND`；绑定后掩码视图的 `seatId` 回显归属。
 
 | 方法与路径 | 用途 |
 |---|---|
 | `GET /api/v1/admin/credentials` | 租户内全部凭证（掩码视图） |
 | `GET /api/v1/admin/credentials/{id}` | 凭证元数据 + 完整版本历史（新版本在前） |
-| `POST /api/v1/admin/credentials` | 创建：`{ "name", "subscriptionId", "secret" }`，返回 `201` 掩码视图 |
+| `POST /api/v1/admin/credentials` | 创建：`{ "name", "subscriptionId", "secret", "seatId"? }`，返回 `201` 掩码视图 |
 | `POST /api/v1/admin/credentials/{id}/validate` | 测试候选 Secret；不写入数据库 |
 | `POST /api/v1/admin/credentials/{id}/rotate` | 原子轮换：新 Secret 成为 ACTIVE，旧版本进入 DRAINING |
 | `POST /api/v1/admin/credentials/{id}/disable` | 立即禁用；凭证从路由快照消失 |

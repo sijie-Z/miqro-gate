@@ -93,6 +93,8 @@ class AdminCredentialServiceTest {
     private ProviderClientFactory clientFactory;
     @Mock
     private ProviderProductRepository productRepository;
+    @Mock
+    private org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate jdbc;
 
     private final AuthProperties authProperties = new AuthProperties();
     private AdminCredentialService service;
@@ -102,7 +104,7 @@ class AdminCredentialServiceTest {
     void setUp() {
         service = new AdminCredentialService(credentialRepository, versionRepository, subscriptionRepository,
                 keyEncryptionProvider, new FormatCredentialValidator(), auditService, authProperties,
-                RouteRefreshPublisher.NONE, adapterRegistry, clientFactory, productRepository);
+                RouteRefreshPublisher.NONE, adapterRegistry, clientFactory, productRepository, jdbc);
         admin = new User(UUID.randomUUID(), TENANT, "admin", "Admin", new byte[32], UserRole.SYSTEM_ADMIN,
                 UserStatus.ACTIVE, false, 0, null, null, 0L, Instant.now(), Instant.now());
     }
@@ -117,8 +119,8 @@ class AdminCredentialServiceTest {
         when(keyEncryptionProvider.encrypt(any(), eq(TENANT), any()))
                 .thenReturn(new EncryptedSecret(new byte[]{1, 2, 3}, new byte[]{4, 5}, "v1"));
 
-        CredentialView view = service.create(admin, new AdminCredentialCreateRequest("prod-key", SUBSCRIPTION, SECRET),
-                "req-1");
+        CredentialView view = service.create(admin,
+                new AdminCredentialCreateRequest("prod-key", SUBSCRIPTION, SECRET, null), "req-1");
 
         assertThat(view.status()).isEqualTo("ACTIVE");
         assertThat(view.name()).isEqualTo("prod-key");
@@ -150,10 +152,9 @@ class AdminCredentialServiceTest {
     void createWithInvalidSecretWritesNothing() {
         when(subscriptionRepository.findById(SUBSCRIPTION)).thenReturn(Optional.of(subscription()));
 
-        assertThatThrownBy(
-                () -> service.create(admin, new AdminCredentialCreateRequest("k", SUBSCRIPTION, "short"), "req-1"))
-                .isInstanceOfSatisfying(ApiException.class,
-                        e -> assertThat(e.getCode()).isEqualTo("CREDENTIAL_INVALID"));
+        assertThatThrownBy(() -> service.create(admin,
+                new AdminCredentialCreateRequest("k", SUBSCRIPTION, "short", null), "req-1")).isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.getCode()).isEqualTo("CREDENTIAL_INVALID"));
 
         verifyNoInteractions(credentialRepository, versionRepository, keyEncryptionProvider, auditService);
     }
@@ -166,7 +167,7 @@ class AdminCredentialServiceTest {
         when(subscriptionRepository.findById(SUBSCRIPTION)).thenReturn(Optional.of(foreign));
 
         assertThatThrownBy(
-                () -> service.create(admin, new AdminCredentialCreateRequest("k", SUBSCRIPTION, SECRET), "req-1"))
+                () -> service.create(admin, new AdminCredentialCreateRequest("k", SUBSCRIPTION, SECRET, null), "req-1"))
                 .isInstanceOfSatisfying(ApiException.class,
                         e -> assertThat(e.getCode()).isEqualTo("SUBSCRIPTION_NOT_FOUND"));
         verifyNoInteractions(credentialRepository, versionRepository, keyEncryptionProvider, auditService);

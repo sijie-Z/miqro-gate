@@ -121,6 +121,50 @@ class AdminCredentialApiIntegrationTest {
     }
 
     // ------------------------------------------------------------------
+    // seat binding (#492)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("a credential created with a seatId is bound to that seat and served with it (#492)")
+    void credentialSeatBindingIsPersistedAndServed() throws Exception {
+        UUID seatId = insertSeat("成员A");
+        MvcResult r = mockMvc
+                .perform(post("/api/v1/admin/credentials").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("name", "seat-key", "subscriptionId",
+                                fx.subscriptionId, "secret", SECRET, "seatId", seatId.toString()))))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.seatId").value(seatId.toString())).andReturn();
+        UUID credentialId = UUID
+                .fromString((String) objectMapper.readValue(r.getResponse().getContentAsString(), Map.class).get("id"));
+        assertThat(row("SELECT * FROM upstream_credentials WHERE id = :id", credentialId).get("seat_id"))
+                .isEqualTo(seatId);
+    }
+
+    @Test
+    @DisplayName("an unknown seat or a seat of another subscription is rejected with 404 (#492)")
+    void foreignOrUnknownSeatIsRejected() throws Exception {
+        UUID seatId = insertSeat("成员B");
+        mockMvc.perform(post("/api/v1/admin/credentials").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("name", "k1", "subscriptionId", fx.subscriptionId,
+                        "secret", SECRET, "seatId", UUID.randomUUID().toString()))))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("SEAT_NOT_FOUND"));
+
+        UUID otherSub = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO upstream_subscriptions
+                    (id, tenant_id, provider_product_id, name, billing_mode, status, version)
+                VALUES (:id, :tenantId, :productId, 'Sub-2', 'PAYG', 'ACTIVE', 0)
+                """, new MapSqlParameterSource("id", otherSub).addValue("tenantId", fx.tenantId).addValue("productId",
+                fx.productId));
+        mockMvc.perform(post("/api/v1/admin/credentials").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("name", "k2", "subscriptionId", otherSub.toString(),
+                        "secret", SECRET, "seatId", seatId.toString()))))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("SEAT_NOT_FOUND"));
+    }
+
+    // ------------------------------------------------------------------
     // create
     // ------------------------------------------------------------------
 
@@ -407,6 +451,16 @@ class AdminCredentialApiIntegrationTest {
 
     private Map<String, Object> row(String sql, UUID id) {
         return jdbc.queryForMap(sql, new MapSqlParameterSource("id", id));
+    }
+
+    private UUID insertSeat(String displayName) {
+        UUID seatId = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO plan_seats (id, tenant_id, upstream_subscription_id, display_name, seat_status, version)
+                VALUES (:id, :tenantId, :subscriptionId, :name, 'AVAILABLE', 0)
+                """, new MapSqlParameterSource("id", seatId).addValue("tenantId", fx.tenantId)
+                .addValue("subscriptionId", fx.subscriptionId).addValue("name", displayName));
+        return seatId;
     }
 
     private List<Map<String, Object>> rows(String sql, UUID id) {
