@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -68,7 +69,7 @@ public class AuditEventReadService {
                 ORDER BY chain_position DESC
                 LIMIT :limit
                 """.formatted(where), params, ROW_MAPPER);
-        return withTargetNames(tenantId, events);
+        return withActorNames(tenantId, withTargetNames(tenantId, events));
     }
 
     /**
@@ -102,9 +103,39 @@ public class AuditEventReadService {
         }
         List<AuditEventView> decorated = new ArrayList<>(events.size());
         for (AuditEventView event : events) {
-            decorated.add(new AuditEventView(event.id(), event.actorId(), event.action(), event.targetType(),
-                    event.targetId(), event.changeSummary(), event.createdAt(), event.chainPosition(),
+            decorated.add(new AuditEventView(event.id(), event.actorId(), event.actorName(), event.action(),
+                    event.targetType(), event.targetId(), event.changeSummary(), event.createdAt(),
+                    event.chainPosition(),
                     event.targetId() == null ? null : names.get(event.targetType() + ":" + event.targetId())));
+        }
+        return decorated;
+    }
+
+    /**
+     * Read-side actor decoration (#484): batch-resolves {@code actorId} →
+     * {@code users.display_name} (blank display names fall back to the username)
+     * with one IN query per page — inside the tenant, never N+1; system or vanished
+     * actors stay null and the UI falls back to the short id. The chain rows are
+     * never modified.
+     */
+    private List<AuditEventView> withActorNames(UUID tenantId, List<AuditEventView> events) {
+        List<UUID> actorIds = events.stream().map(AuditEventView::actorId).filter(Objects::nonNull).distinct().toList();
+        if (actorIds.isEmpty()) {
+            return events;
+        }
+        Map<UUID, String> names = new HashMap<>();
+        jdbc.query(
+                "SELECT id, COALESCE(NULLIF(display_name, ''), username) AS name FROM users "
+                        + "WHERE tenant_id = :tenantId AND id IN (:ids)",
+                new MapSqlParameterSource("tenantId", tenantId).addValue("ids", actorIds), rs -> {
+                    names.put((UUID) rs.getObject("id"), rs.getString("name"));
+                });
+        List<AuditEventView> decorated = new ArrayList<>(events.size());
+        for (AuditEventView event : events) {
+            decorated.add(new AuditEventView(event.id(), event.actorId(),
+                    event.actorId() == null ? null : names.get(event.actorId()), event.action(), event.targetType(),
+                    event.targetId(), event.changeSummary(), event.createdAt(), event.chainPosition(),
+                    event.targetName()));
         }
         return decorated;
     }
@@ -230,7 +261,7 @@ public class AuditEventReadService {
     }
 
     private static final RowMapper<AuditEventView> ROW_MAPPER = (rs, rowNum) -> new AuditEventView(
-            (UUID) rs.getObject("id"), (UUID) rs.getObject("actor_id"), rs.getString("action"),
+            (UUID) rs.getObject("id"), (UUID) rs.getObject("actor_id"), null, rs.getString("action"),
             rs.getString("target_type"), (UUID) rs.getObject("target_id"), rs.getString("change_summary"),
             rs.getTimestamp("created_at").toInstant(), rs.getLong("chain_position"), null);
 }

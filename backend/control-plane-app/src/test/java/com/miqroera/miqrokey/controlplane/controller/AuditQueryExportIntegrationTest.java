@@ -204,6 +204,20 @@ class AuditQueryExportIntegrationTest {
     }
 
     @Test
+    @DisplayName("list: actor display name resolves per row; unknown actors stay null (#484)")
+    void listResolvesActorNames() throws Exception {
+        seedStandardSet();
+        mockMvc.perform(get("/api/v1/admin/audit-events").cookie(sessionCookie).header("X-CSRF-Token", csrfToken))
+                .andExpect(status().isOk())
+                // Rows [0]/[2]/[3] were seeded with the bootstrap admin's id (display name
+                // "Admin");
+                // row [1] carries a foreign actor id that resolves to no user and stays null.
+                .andExpect(jsonPath("$[0].actorName").value("Admin")).andExpect(jsonPath("$[1].actorName").isEmpty())
+                .andExpect(jsonPath("$[2].actorName").value("Admin"))
+                .andExpect(jsonPath("$[3].actorName").value("Admin"));
+    }
+
+    @Test
     @DisplayName("list: every filter dimension applies, individually and combined (machine)")
     void listFiltersOnMachineEndpoint() throws Exception {
         seedStandardSet();

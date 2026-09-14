@@ -3996,6 +3996,7 @@ export interface components {
             id?: string;
             /** Format: uuid */
             actorId?: string;
+            actorName?: string;
             action?: string;
             targetType?: string;
             /** Format: uuid */
