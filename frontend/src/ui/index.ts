@@ -7,6 +7,8 @@ export { default as UiTable } from './Table.vue';
 export type { UiTableColumn } from './Table.vue';
 export { default as UiDialog } from './Dialog.vue';
 export { default as UiDrawer } from './Drawer.vue';
+export { default as UiDonut } from './Donut.vue';
+export type { UiDonutSegment } from './Donut.vue';
 export { default as UiStatusBadge } from './StatusBadge.vue';
 export { default as UiEmptyState } from './EmptyState.vue';
 export { default as UiToastHost } from './ToastHost.vue';

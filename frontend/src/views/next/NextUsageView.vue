@@ -9,7 +9,7 @@ import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
-import { UiButton, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
+import { UiButton, UiDonut, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import type { UiSelectOption } from '@/ui';
 import type {
@@ -123,22 +123,32 @@ const cacheLevelLabel: Record<string, string> = {
   L2_HIT: 'L2 hit',
 };
 
-const usageBars = computed(() => {
+const PALETTE = ['#0960bd', '#69c0ff', '#13c2c2', '#fa8c16', '#8c8c8c', '#d9d9d9'];
+
+const compositionSegments = computed(() => {
   const ranked = (summary.value?.groups ?? [])
     .map((g) => ({
       label: g.label,
       value: (g.tokens?.input ?? 0) + (g.tokens?.output ?? 0),
-      cost: g.cost?.upstreamPaid,
     }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 8);
-  const max = Math.max(...ranked.map((r) => r.value), 1);
-  return ranked.map((r, index) => ({
-    ...r,
-    width: `${Math.max(4, (r.value / max) * 100)}%`,
-    alpha: Math.max(0.28, 0.85 - index * 0.11),
+    .filter((g) => g.value > 0)
+    .sort((a, b) => b.value - a.value);
+  const top = ranked.slice(0, 5);
+  const restValue = ranked.slice(5).reduce((sum, g) => sum + g.value, 0);
+  const rows: { label: string; value: number; color: string; pct: number }[] = top.map((g, i) => ({
+    label: g.label ?? '—',
+    value: g.value,
+    color: PALETTE[i]!,
+    pct: 0,
   }));
+  if (restValue > 0) {
+    rows.push({ label: '其他', value: restValue, color: PALETTE[5]!, pct: 0 });
+  }
+  const total = rows.reduce((sum, r) => sum + r.value, 0) || 1;
+  return { rows: rows.map((r) => ({ ...r, pct: (r.value / total) * 100 })), total };
 });
+
+const usageTotalTokens = computed(() => compositionSegments.value.total);
 
 const totalPages = computed(() => {
   if (!records.value || records.value.total === 0) return 1;
@@ -550,20 +560,32 @@ function formatTime(iso?: string): string {
       </section>
 
       <!-- Distribution -->
-      <aside v-if="usageBars.length" class="ui-panel next-usage__aside" data-testid="usage-chart">
+      <aside v-if="compositionSegments.rows.length" class="ui-panel next-usage__aside" data-testid="usage-chart">
         <div class="ui-panel-head">
           <div>
             <h2 class="ui-panel-title">用量分布</h2>
             <span class="ui-panel-sub">Tokens 输入 + 输出 · Top 8</span>
           </div>
         </div>
-        <div class="ui-panel-body next-usage__bars">
-          <div v-for="bar in usageBars" :key="bar.label" class="next-usage__bar-row">
-            <span class="next-usage__bar-label" :title="bar.label">{{ bar.label }}</span>
-            <div class="next-usage__bar-track">
-              <div class="next-usage__bar-fill" :style="{ width: bar.width, opacity: bar.alpha }" />
+        <div class="ui-panel-body next-usage__composition">
+          <UiDonut
+            :segments="
+              compositionSegments.rows.map((r) => ({ label: r.label, value: r.value, color: r.color }))
+            "
+            :center-text="formatNumber(usageTotalTokens)"
+            data-testid="usage-composition-donut"
+          />
+          <div class="next-usage__legend">
+            <div
+              v-for="seg in compositionSegments.rows"
+              :key="seg.label"
+              class="next-usage__legend-row"
+            >
+              <span class="next-usage__legend-dot" :style="{ background: seg.color }" />
+              <span class="next-usage__legend-label" :title="seg.label">{{ seg.label }}</span>
+              <span class="next-usage__legend-pct ui-num">{{ seg.pct.toFixed(0) }}%</span>
+              <span class="next-usage__legend-value ui-num">{{ formatNumber(seg.value) }}</span>
             </div>
-            <span class="next-usage__bar-value ui-num">{{ bar.value }}</span>
           </div>
         </div>
       </aside>
@@ -740,41 +762,48 @@ function formatTime(iso?: string): string {
   flex-shrink: 0;
 }
 
-.next-usage__bars {
+.next-usage__composition {
   display: flex;
-  flex-direction: column;
-  gap: var(--ui-space-3);
+  align-items: center;
+  gap: var(--ui-space-6);
+  flex-wrap: wrap;
 }
 
-.next-usage__bar-row {
+.next-usage__legend {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.next-usage__legend-row {
   display: grid;
-  grid-template-columns: 110px 1fr 70px;
+  grid-template-columns: 10px minmax(0, 1fr) 44px 80px;
   align-items: center;
-  gap: var(--ui-space-3);
+  gap: var(--ui-space-2);
   font-size: var(--ui-font-size-xs);
 }
 
-.next-usage__bar-label {
-  color: var(--ui-foreground-secondary);
+.next-usage__legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.next-usage__legend-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--ui-foreground-secondary);
 }
 
-.next-usage__bar-track {
-  height: 8px;
-  border-radius: var(--ui-radius-pill);
-  background: var(--ui-muted);
-  overflow: hidden;
+.next-usage__legend-pct {
+  text-align: right;
+  color: var(--ui-foreground-secondary);
 }
 
-.next-usage__bar-fill {
-  height: 100%;
-  border-radius: var(--ui-radius-pill);
-  background: var(--ui-primary);
-}
-
-.next-usage__bar-value {
+.next-usage__legend-value {
   text-align: right;
   color: var(--ui-foreground);
 }
