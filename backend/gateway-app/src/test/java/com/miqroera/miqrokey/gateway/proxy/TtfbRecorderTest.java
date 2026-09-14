@@ -62,4 +62,37 @@ class TtfbRecorderTest {
         // Metadata must never contain request or response body content
         metadata.values().forEach(v -> assertThat(v.toString()).doesNotContain("data"));
     }
+
+    @Test
+    @DisplayName("invokes the first-byte listener exactly once with the observed TTFB")
+    void invokesFirstByteListenerOnce() {
+        java.util.concurrent.atomic.AtomicLong observed = new java.util.concurrent.atomic.AtomicLong(-1);
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        TtfbRecorder recorder = new TtfbRecorder("test-4", 1_000L,
+                Clock.fixed(Instant.ofEpochMilli(1_025L), ZoneOffset.UTC), millis -> {
+                    calls.incrementAndGet();
+                    observed.set(millis);
+                });
+
+        var factory = new org.springframework.core.io.buffer.DefaultDataBufferFactory();
+        Flux<org.springframework.core.io.buffer.DataBuffer> wrapped = recorder
+                .wrap(Flux.just(factory.wrap("a".getBytes()), factory.wrap("b".getBytes())));
+
+        StepVerifier.create(wrapped).expectNextCount(2).verifyComplete();
+
+        assertThat(calls.get()).isEqualTo(1);
+        assertThat(observed.get()).isEqualTo(25L);
+    }
+
+    @Test
+    @DisplayName("does not invoke the first-byte listener when no byte arrives")
+    void doesNotInvokeListenerWithoutBytes() {
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        TtfbRecorder recorder = new TtfbRecorder("test-5", 1_000L,
+                Clock.fixed(Instant.ofEpochMilli(1_025L), ZoneOffset.UTC), millis -> calls.incrementAndGet());
+
+        StepVerifier.create(recorder.wrap(Flux.empty())).verifyComplete();
+
+        assertThat(calls.get()).isZero();
+    }
 }

@@ -79,6 +79,7 @@ class GatewayMonitoringProfileTest {
                 .consumeWith(result -> {
                     String body = result.getResponseBody();
                     org.assertj.core.api.Assertions.assertThat(body).contains("miqrokey_gateway_requests_total");
+                    org.assertj.core.api.Assertions.assertThat(body).contains("miqrokey_gateway_ttfb");
                     org.assertj.core.api.Assertions.assertThat(body).contains("jvm_memory_used_bytes");
                 });
     }
