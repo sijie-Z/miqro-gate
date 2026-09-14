@@ -14,6 +14,7 @@ import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
 import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
 import com.miqroera.miqrokey.gateway.retention.RetentionSidecar;
+import com.miqroera.miqrokey.gateway.observability.GatewayTtfbMetrics;
 import com.miqroera.miqrokey.gateway.vkey.AuthContext;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import com.miqroera.miqrokey.adapters.catalog.ProviderCatalog;
@@ -60,6 +61,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.LongConsumer;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -136,6 +138,8 @@ public class ProxyController {
     private final BuiltInAdapterRegistry adapterRegistry;
     private final ProviderCatalog providerCatalog;
     private final RetentionSidecar retentionSidecar;
+    /** TTFB metric hook (#486): observation per attempt that sees a first byte. */
+    private final GatewayTtfbMetrics ttfbMetrics;
 
     public ProxyController(VirtualKeyResolver keyResolver, CredentialInjector credentialInjector,
             GatewayResponseCache responseCache, ObjectProvider<RequestCoalescer> coalescerProvider,
@@ -143,9 +147,10 @@ public class ProxyController {
             CacheKeyFactory cacheKeyFactory, SseReplayEngine sseReplayEngine, WebClient proxyWebClient, Clock clock,
             ObjectMapper objectMapper, ProxyTargetProperties properties,
             UpstreamTargetValidator upstreamTargetValidator, Scheduler credentialDecryptScheduler,
-            BuiltInAdapterRegistry adapterRegistry, ProviderCatalog providerCatalog,
-            RetentionSidecar retentionSidecar) {
+            BuiltInAdapterRegistry adapterRegistry, ProviderCatalog providerCatalog, RetentionSidecar retentionSidecar,
+            GatewayTtfbMetrics ttfbMetrics) {
         this.retentionSidecar = retentionSidecar;
+        this.ttfbMetrics = ttfbMetrics;
         this.keyResolver = keyResolver;
         this.credentialInjector = credentialInjector;
         this.responseCache = responseCache;
@@ -390,7 +395,7 @@ public class ProxyController {
         return Mono.defer(() -> {
             attempts.incrementAndGet();
             UpstreamAttempt attempt = new UpstreamAttempt(requestId, startMillis, clock, objectMapper,
-                    maxProxyBufferBytes);
+                    maxProxyBufferBytes, ttfbMetrics::record);
             attemptRef.set(attempt);
             return callUpstreamOnce(exchange, ctx, cred, body, upstreamUri, filteredHeaders, cacheKey, modelName,
                     requestId, startMillis, streaming, attempt);
@@ -525,8 +530,8 @@ public class ProxyController {
         final AtomicReference<TokenBucket> observedTokens = new AtomicReference<>();
 
         UpstreamAttempt(String requestId, long startMillis, Clock clock, ObjectMapper objectMapper,
-                int maxProxyBufferBytes) {
-            this.ttfb = new TtfbRecorder(requestId, startMillis, clock);
+                int maxProxyBufferBytes, LongConsumer firstByteListener) {
+            this.ttfb = new TtfbRecorder(requestId, startMillis, clock, firstByteListener);
             this.usageObserver = new SseUsageObserver(objectMapper, maxProxyBufferBytes);
             this.collector = new BodyCollector(maxProxyBufferBytes);
         }
