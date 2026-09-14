@@ -688,7 +688,7 @@ onMounted(load);
 }
 
 .next-recon__stat-value {
-  font-size: var(--ui-font-size-md);
+  font-size: var(--ui-font-size-base);
   font-weight: var(--ui-weight-semibold);
 }
 
