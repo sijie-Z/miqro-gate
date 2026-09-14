@@ -1087,6 +1087,15 @@ for (const viewport of VIEWPORTS) {
     await page.goto('/login');
     await page.waitForLoadState('networkidle');
     await expect(page.getByTestId('login-submit')).toBeVisible();
+    // The login visual master is the preset reference package
+    // (other/miqro-gate-auth-ui, issue #490): lock its signature metrics so a
+    // silent re-skin regression fails CI instead of shipping.
+    await expect(page.locator('.auth-submit')).toHaveCSS('height', '47px');
+    await expect(page.locator('.auth-input__inner').first()).toHaveCSS('height', '50px');
+    const submitBackground = await page
+      .locator('.auth-submit')
+      .evaluate((el) => getComputedStyle(el).backgroundImage);
+    expect(submitBackground).toContain('linear-gradient');
     await page.screenshot({
       path: `test-results/baseline/login-${viewport.name}.png`,
       fullPage: true,

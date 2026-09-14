@@ -1,10 +1,12 @@
 <script setup lang="ts">
 /**
- * NextLoginView — /login. Visual master = the authoritative design image
- * (dark enterprise-gateway portal hero + white auth panel, English copy as
- * designed). Product behaviour is preserved: login and self-service
- * registration share this panel through the secondary card action; error
- * envelope and redirect query unchanged; testids intact.
+ * NextLoginView — /login. Visual master = the preset reference package
+ * `other/miqro-gate-auth-ui` (auth-ui visual pass 2: dark enterprise-gateway
+ * hero + white auth panel), ported 1:1 onto the current stack (native
+ * controls, no TDesign runtime) with Simplified-Chinese copy. Product
+ * behaviour is preserved: login and self-service registration share this
+ * panel through the secondary card action; error envelope, redirect query
+ * and every data-testid unchanged.
  */
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
@@ -12,6 +14,8 @@ import { useRoute, useRouter } from 'vue-router';
 import {
   ArrowRightIcon,
   ChartBarIcon,
+  CheckCircleIcon,
+  InternetIcon,
   LockOnIcon,
   SecuredIcon,
   ServerIcon,
@@ -19,7 +23,7 @@ import {
 } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
-import { toast, UiButton, UiInput } from '@/ui';
+import { toast } from '@/ui';
 
 const route = useRoute();
 const router = useRouter();
@@ -82,11 +86,7 @@ async function submit() {
   }
   loading.value = true;
   try {
-    await auth.register(
-      username.value.trim(),
-      displayName.value.trim() || undefined,
-      password.value,
-    );
+    await auth.register(username.value.trim(), displayName.value.trim() || undefined, password.value);
     await afterAuthenticated();
   } catch (error) {
     renderError(error, '注册失败，请稍后重试。');
@@ -128,7 +128,7 @@ onMounted(async () => {
     <!-- Dark hero: gateway portal scene -->
     <section class="gate-hero">
       <header class="hero-header">
-        <div class="brand">
+        <button class="brand" type="button" aria-label="MiQroGate" @click="router.push('/login')">
           <span class="brand-symbol" aria-hidden="true">
             <span class="brand-wing brand-wing-left" />
             <span class="brand-wing brand-wing-right" />
@@ -137,8 +137,13 @@ onMounted(async () => {
           <span class="brand-name">MiQroGate</span>
           <span class="brand-divider" />
           <span class="brand-product">AI 凭证控制平台</span>
+        </button>
+
+        <div class="hero-locale">
+          <InternetIcon size="15px" />
+          <span>简体中文</span>
+          <span class="locale-chevron">⌄</span>
         </div>
-        <span class="hero-locale">🌐 简体中文 ⌄</span>
       </header>
 
       <div class="hero-content">
@@ -149,7 +154,7 @@ onMounted(async () => {
             <span>密钥由你<em>掌控</em>。</span>
           </h1>
           <p class="hero-description">
-            MiQroGate 是企业级 AI 凭证加密与访问控制平台。为你的大模型 API
+            MiQroGate 是企业级 AI 凭证虚拟化与访问控制平面，为你的大模型 API
             提供安全、可观测、可审计的统一网关。
           </p>
 
@@ -185,7 +190,6 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- Portal graphic: providers into the gate -->
         <div class="gate-scene" aria-hidden="true">
           <div class="scene-aura" />
           <div class="scene-floor" />
@@ -198,6 +202,9 @@ onMounted(async () => {
                 <stop offset="0.48" stop-color="#8590ff" stop-opacity="0.85" />
                 <stop offset="1" stop-color="#b2a8ff" stop-opacity="0" />
               </linearGradient>
+              <filter id="blur">
+                <feGaussianBlur stdDeviation="5" />
+              </filter>
             </defs>
             <ellipse
               cx="372"
@@ -219,40 +226,18 @@ onMounted(async () => {
               stroke-opacity=".12"
               stroke-dasharray="2 12"
             />
+            <path d="M138 177 C254 177 296 214 346 238" stroke="url(#flow)" stroke-width="2" fill="none" />
+            <path d="M136 270 C257 270 288 261 343 252" stroke="url(#flow)" stroke-width="2" fill="none" />
+            <path d="M160 358 C262 348 294 293 344 269" stroke="url(#flow)" stroke-width="2" fill="none" />
+            <path d="M414 244 C489 217 544 201 632 180" stroke="url(#flow)" stroke-width="2" fill="none" />
+            <path d="M414 258 C498 258 552 258 642 258" stroke="url(#flow)" stroke-width="2" fill="none" />
+            <path d="M414 272 C491 300 549 323 640 340" stroke="url(#flow)" stroke-width="2" fill="none" />
             <path
-              d="M138 177 C254 177 296 214 346 238"
-              stroke="url(#flow)"
-              stroke-width="2"
-              fill="none"
-            />
-            <path
-              d="M136 270 C257 270 288 261 343 252"
-              stroke="url(#flow)"
-              stroke-width="2"
-              fill="none"
-            />
-            <path
-              d="M160 358 C262 348 294 293 344 269"
-              stroke="url(#flow)"
-              stroke-width="2"
-              fill="none"
-            />
-            <path
-              d="M414 244 C489 217 544 201 632 180"
-              stroke="url(#flow)"
-              stroke-width="2"
-              fill="none"
-            />
-            <path
-              d="M414 258 C498 258 552 258 642 258"
-              stroke="url(#flow)"
-              stroke-width="2"
-              fill="none"
-            />
-            <path
-              d="M414 272 C491 300 549 323 640 340"
-              stroke="url(#flow)"
-              stroke-width="2"
+              d="M145 176 C250 176 295 212 346 238 M138 270 C257 270 289 262 343 252 M163 357 C261 348 294 294 344 269"
+              stroke="#8790ff"
+              stroke-opacity=".32"
+              stroke-width="9"
+              filter="url(#blur)"
               fill="none"
             />
           </svg>
@@ -285,10 +270,10 @@ onMounted(async () => {
               <span class="mini-symbol"><i /></span>
               <strong>MiQroGate</strong>
             </div>
-            <div class="status-check"><span class="check-ok">✓</span> 认证</div>
-            <div class="status-check"><span class="check-ok">✓</span> 限流</div>
-            <div class="status-check"><span class="check-ok">✓</span> 日志</div>
-            <div class="status-check"><span class="check-ok">✓</span> 审计</div>
+            <div class="status-check"><CheckCircleIcon size="12px" /> 认证</div>
+            <div class="status-check"><CheckCircleIcon size="12px" /> 限流</div>
+            <div class="status-check"><CheckCircleIcon size="12px" /> 日志</div>
+            <div class="status-check"><CheckCircleIcon size="12px" /> 审计</div>
           </div>
 
           <div class="scene-terminal">
@@ -312,7 +297,22 @@ onMounted(async () => {
 
     <!-- White auth panel -->
     <section class="auth-panel">
-      <span class="panel-locale" aria-hidden="true">🌐 简体中文 ⌄</span>
+      <div class="auth-panel-top">
+        <div class="mobile-brand">
+          <span class="brand-symbol" aria-hidden="true">
+            <span class="brand-wing brand-wing-left" />
+            <span class="brand-wing brand-wing-right" />
+            <span class="brand-core" />
+          </span>
+          <span>MiQroGate</span>
+        </div>
+        <span class="panel-language">
+          <InternetIcon size="14px" />
+          简体中文
+          <span>⌄</span>
+        </span>
+      </div>
+
       <div class="auth-content">
         <div class="auth-brand-inline">
           <span class="brand-symbol" aria-hidden="true">
@@ -324,7 +324,8 @@ onMounted(async () => {
         </div>
 
         <div class="auth-heading">
-          <h2 v-if="mode === 'login'">欢迎回来 <span class="wave">👋</span></h2>
+          <p class="auth-eyebrow">安全访问</p>
+          <h2 v-if="mode === 'login'">欢迎回来 <span>👋</span></h2>
           <h2 v-else>创建账号</h2>
           <p v-if="mode === 'login'">
             登录你的账号进入 MiQroGate 控制台，管理虚拟密钥、权限与用量数据。
@@ -333,160 +334,148 @@ onMounted(async () => {
         </div>
 
         <div v-if="errorMessage" class="login-error" role="alert" data-testid="login-error">
-          {{ errorMessage
-          }}<span v-if="errorRequestId" class="error-request-id">
-            requestId: {{ errorRequestId }}</span
-          >
+          <svg class="login-error__icon" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="8" cy="8" r="6.4" stroke="currentColor" stroke-width="1.4" />
+            <path d="M8 5v3.4M8 10.6v.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+          </svg>
+          <span class="login-error__body">
+            {{ errorMessage
+            }}<span v-if="errorRequestId" class="error-request-id">
+              requestId: {{ errorRequestId }}</span
+            >
+          </span>
         </div>
 
         <form class="auth-form" novalidate @submit.prevent="submit">
           <div class="auth-field">
             <span class="auth-label">{{ mode === 'login' ? '账号/邮箱' : '账号' }}</span>
             <div class="auth-input">
-              <UiInput
+              <span class="auth-input__prefix"><UserIcon size="18px" /></span>
+              <input
                 v-model="username"
-                :label="undefined"
+                class="auth-input__inner"
+                type="text"
                 :placeholder="mode === 'login' ? '输入账号或邮箱' : '例如 alice'"
                 autocomplete="username"
                 data-testid="login-username"
-              >
-                <template #prefix><UserIcon size="17px" /></template>
-              </UiInput>
+              />
             </div>
           </div>
 
           <div v-if="mode === 'register'" class="auth-field">
             <span class="auth-label">昵称（可选）</span>
             <div class="auth-input">
-              <UiInput
+              <span class="auth-input__prefix"><UserIcon size="18px" /></span>
+              <input
                 v-model="displayName"
-                :label="undefined"
+                class="auth-input__inner"
+                type="text"
                 placeholder="团队里展示的名字"
                 autocomplete="name"
                 data-testid="register-display-name"
-              >
-                <template #prefix><UserIcon size="17px" /></template>
-              </UiInput>
+              />
             </div>
           </div>
 
           <div class="auth-field">
-            <span class="auth-label-row">
-              <span class="auth-label">密码</span>
-              <button v-if="mode === 'login'" type="button" class="text-link" @click="onForgot">
-                忘记密码？
-              </button>
-            </span>
+            <span class="auth-label">密码</span>
             <div class="auth-input">
-              <UiInput
+              <span class="auth-input__prefix"><LockOnIcon size="18px" /></span>
+              <input
                 v-model="password"
+                class="auth-input__inner auth-input__inner--eye"
                 :type="showPassword ? 'text' : 'password'"
-                :label="undefined"
                 :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
                 :placeholder="mode === 'login' ? '输入密码' : '至少 8 位，含大小写字母和数字'"
                 data-testid="login-password"
-                @enter="submit"
+                @keydown.enter="submit"
+              />
+              <button
+                type="button"
+                class="input-eye"
+                :aria-label="showPassword ? '隐藏密码' : '显示密码'"
+                :aria-pressed="showPassword"
+                data-testid="password-toggle"
+                @click="showPassword = !showPassword"
               >
-                <template #prefix><LockOnIcon size="17px" /></template>
-                <template #suffix>
-                  <button
-                    type="button"
-                    class="input-eye"
-                    :aria-label="showPassword ? '隐藏密码' : '显示密码'"
-                    :aria-pressed="showPassword"
-                    data-testid="password-toggle"
-                    @click="showPassword = !showPassword"
-                  >
-                    <svg
-                      v-if="showPassword"
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M4 12s3.5-5.5 8-5.5S20 12 20 12s-3.5 5.5-8 5.5S4 12 4 12Z"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                      />
-                      <path
-                        d="M9.8 12a2.2 2.2 0 1 0 4.4 0 2.2 2.2 0 0 0-4.4 0Z"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                      />
-                      <path
-                        d="m4.5 4 15 16"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        stroke-linecap="round"
-                      />
-                    </svg>
-                    <svg
-                      v-else
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M4 12s3.5-5.5 8-5.5S20 12 20 12s-3.5 5.5-8 5.5S4 12 4 12Z"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                      />
-                      <path
-                        d="M9.8 12a2.2 2.2 0 1 0 4.4 0 2.2 2.2 0 0 0-4.4 0Z"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                      />
-                    </svg>
-                  </button>
-                </template>
-              </UiInput>
+                <svg
+                  v-if="showPassword"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M4 12s3.5-5.5 8-5.5S20 12 20 12s-3.5 5.5-8 5.5S4 12 4 12Z"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                  />
+                  <path
+                    d="M9.8 12a2.2 2.2 0 1 0 4.4 0 2.2 2.2 0 0 0-4.4 0Z"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                  />
+                  <path d="m4.5 4 15 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                </svg>
+                <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M4 12s3.5-5.5 8-5.5S20 12 20 12s-3.5 5.5-8 5.5S4 12 4 12Z"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                  />
+                  <path
+                    d="M9.8 12a2.2 2.2 0 1 0 4.4 0 2.2 2.2 0 0 0-4.4 0Z"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                  />
+                </svg>
+              </button>
+            </div>
+            <div v-if="mode === 'login'" class="password-help">
+              <button type="button" class="text-link" @click="onForgot">忘记密码？</button>
             </div>
           </div>
 
           <div v-if="mode === 'register'" class="auth-field">
             <span class="auth-label">确认密码</span>
             <div class="auth-input">
-              <UiInput
+              <span class="auth-input__prefix"><LockOnIcon size="18px" /></span>
+              <input
                 v-model="confirmPassword"
+                class="auth-input__inner"
                 :type="showPassword ? 'text' : 'password'"
-                :label="undefined"
                 placeholder="再次输入密码"
                 autocomplete="new-password"
                 data-testid="register-confirm"
-              >
-                <template #prefix><LockOnIcon size="17px" /></template>
-              </UiInput>
+              />
             </div>
           </div>
 
-          <UiButton
-            variant="primary"
-            native-type="submit"
-            :loading="loading"
+          <button
             class="auth-submit"
+            type="submit"
+            :disabled="loading"
+            :aria-busy="loading || undefined"
             data-testid="login-submit"
           >
+            <span v-if="loading" class="auth-submit__spinner" aria-hidden="true" />
             <span>{{ mode === 'login' ? '登 录' : '注册并进入' }}</span>
-            <ArrowRightIcon size="17px" />
-          </UiButton>
+            <ArrowRightIcon size="18px" />
+          </button>
         </form>
 
         <div class="or-divider"><span /> <em>或</em> <span /></div>
 
-        <div v-if="oauthProviders.length" class="auth-oauth">
-          <UiButton
-            variant="secondary"
-            class="auth-oauth__btn"
-            data-testid="oauth-login"
-            @click="startOauth()"
-          >
-            {{ oauthProviders[0]?.name }}
-          </UiButton>
-        </div>
+        <button
+          v-if="oauthProviders.length"
+          type="button"
+          class="auth-oauth"
+          data-testid="oauth-login"
+          @click="startOauth()"
+        >
+          {{ oauthProviders[0]?.name }}
+        </button>
 
         <button
           type="button"
@@ -518,6 +507,7 @@ onMounted(async () => {
       </div>
 
       <footer class="auth-footer">
+        <span>© MiQroGate · 私有 AI 基础设施</span>
         <span class="auth-footer-links"><span>隐私政策</span><i /> <span>服务条款</span></span>
       </footer>
     </section>
@@ -525,10 +515,22 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+:global(html, body, #app) {
+  min-height: 100%;
+  margin: 0;
+}
+:global(body) {
+  background: #ffffff;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
 .gate-auth {
   --navy: #071224;
+  --navy-2: #0d1a32;
   --blue: #6674ff;
   --blue-2: #9f8dff;
+  --sky: #3ba7ff;
   --ink: #0f1730;
   --muted: #72809a;
   --line: #e6eaf2;
@@ -540,7 +542,6 @@ onMounted(async () => {
   color: var(--ink);
 }
 
-/* ---------------- dark hero ---------------- */
 .gate-hero {
   position: relative;
   min-width: 0;
@@ -587,52 +588,45 @@ onMounted(async () => {
   position: relative;
   z-index: 5;
 }
-
 .hero-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
-.hero-locale {
-  color: #8c99b7;
-  font-size: 11px;
-}
-
 .brand {
   display: inline-flex;
   align-items: center;
   gap: 11px;
+  border: 0;
+  background: transparent;
   color: inherit;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
 }
-
 .brand-name {
   font-size: 17px;
   font-weight: 800;
   letter-spacing: -0.035em;
 }
-
 .brand-divider {
   width: 1px;
   height: 18px;
   margin: 0 4px 0 7px;
   background: rgba(255, 255, 255, 0.18);
 }
-
 .brand-product {
   color: #9aa6c2;
   font-size: 10px;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
-
 .brand-symbol {
   position: relative;
   width: 34px;
   height: 34px;
   flex: 0 0 auto;
 }
-
 .brand-wing {
   position: absolute;
   top: 8px;
@@ -642,18 +636,15 @@ onMounted(async () => {
   border-radius: 4px 10px 4px 10px;
   transform: skewY(-13deg);
 }
-
 .brand-wing-left {
   left: 2px;
   transform-origin: right center;
 }
-
 .brand-wing-right {
   right: 2px;
   transform: scaleX(-1) skewY(-13deg);
   opacity: 0.8;
 }
-
 .brand-core {
   position: absolute;
   width: 8px;
@@ -663,6 +654,17 @@ onMounted(async () => {
   border-radius: 2px;
   background: linear-gradient(135deg, #a38eff, #5c7fff);
   box-shadow: 0 0 17px rgba(117, 123, 255, 0.75);
+}
+.hero-locale {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #8c99b7;
+  font-size: 11px;
+}
+.locale-chevron {
+  color: #b6c1d5;
+  margin-top: -3px;
 }
 
 .hero-content {
@@ -674,7 +676,6 @@ onMounted(async () => {
   gap: 20px;
   align-items: center;
 }
-
 .hero-copy {
   position: relative;
   z-index: 5;
@@ -682,7 +683,6 @@ onMounted(async () => {
   max-width: 520px;
   padding-bottom: 22px;
 }
-
 .hero-eyebrow,
 .auth-eyebrow {
   margin: 0;
@@ -691,103 +691,83 @@ onMounted(async () => {
   font-weight: 700;
   letter-spacing: 0.18em;
 }
-
 .hero-copy h1 {
-  margin: 14px 0 20px;
-  font-size: clamp(30px, 2.4vw, 38px);
-  line-height: 1.22;
-  letter-spacing: -0.02em;
-  font-weight: 700;
-  max-width: 560px;
-  text-wrap: balance;
+  margin: 17px 0 24px;
+  font-size: clamp(48px, 4.8vw, 74px);
+  line-height: 0.99;
+  letter-spacing: -0.07em;
+  font-weight: 760;
 }
-
 .hero-copy h1 span {
   color: #eef2ff;
 }
-
 .hero-copy h1 em {
+  color: #8190ff;
   font-style: normal;
-  background: linear-gradient(90deg, #8ab4ff 0%, #4d6bff 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  text-shadow: 0 0 34px rgba(94, 105, 255, 0.26);
 }
-
 .hero-description {
-  max-width: 520px;
-  margin: 0 0 24px;
+  max-width: 500px;
+  margin: 0 0 36px;
   color: #a4afc7;
   font-size: 13px;
-  line-height: 1.85;
+  line-height: 1.9;
+  letter-spacing: 0.005em;
 }
 
-/* Capability list: one vertical column hugging the left edge, mirroring the
-   authoritative reference (icon + title + one-line description, tight rows). */
 .hero-capabilities {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 12px;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 18px;
   max-width: 480px;
 }
-
 .capability {
   display: grid;
   grid-template-columns: 34px 1fr;
-  gap: 12px;
+  gap: 11px;
   align-items: start;
 }
-
 .capability-icon {
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   display: grid;
   place-items: center;
   border: 1px solid rgba(139, 155, 255, 0.14);
-  border-radius: 9px;
+  border-radius: 10px;
   color: #7c8aff;
   background: rgba(83, 98, 179, 0.08);
+  box-shadow: inset 0 0 14px rgba(86, 104, 255, 0.04);
 }
-
 .capability strong {
   display: block;
   color: #e7ebf7;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
-
 .capability small {
   display: block;
-  margin-top: 2px;
+  margin-top: 4px;
   color: #7d8aa3;
-  font-size: 10px;
-  line-height: 1.5;
+  font-size: 9px;
+  line-height: 1.55;
 }
 
-/* portal scene */
 .gate-scene {
   position: relative;
-  min-height: 560px;
+  min-height: 600px;
   margin-right: -24px;
   align-self: stretch;
 }
-
 .scene-aura {
   position: absolute;
-  left: 24%;
-  top: 30%;
-  width: 52%;
-  height: 40%;
+  left: 31%;
+  top: 35%;
+  width: 42%;
+  height: 30%;
   border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    rgba(124, 120, 255, 0.5),
-    rgba(96, 90, 255, 0.12) 52%,
-    transparent 74%
-  );
-  filter: blur(40px);
+  background: radial-gradient(circle, rgba(114, 114, 255, 0.4), rgba(83, 83, 255, 0.06) 52%, transparent 72%);
+  filter: blur(35px);
 }
-
 .scene-floor {
   position: absolute;
   left: 12%;
@@ -798,8 +778,8 @@ onMounted(async () => {
   transform-origin: center bottom;
   border-top: 1px solid rgba(129, 146, 255, 0.1);
   background: linear-gradient(to bottom, rgba(61, 77, 144, 0.09), rgba(10, 17, 35, 0.75));
+  box-shadow: 0 -40px 100px rgba(72, 79, 255, 0.08);
 }
-
 .scene-grid {
   position: absolute;
   inset: 10% -2% 10% 6%;
@@ -810,7 +790,6 @@ onMounted(async () => {
   background-size: 38px 38px;
   mask-image: radial-gradient(circle at 58% 53%, #000, transparent 67%);
 }
-
 .scene-lines {
   position: absolute;
   inset: 13% 0 14% 0;
@@ -834,10 +813,11 @@ onMounted(async () => {
   box-shadow:
     0 16px 30px rgba(0, 0, 0, 0.26),
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(14px);
   color: #ecf0ff;
   font-size: 10px;
+  letter-spacing: 0.01em;
 }
-
 .provider-card i {
   margin-left: auto;
   width: 6px;
@@ -846,7 +826,6 @@ onMounted(async () => {
   background: #6fe4b1;
   box-shadow: 0 0 12px rgba(111, 228, 177, 0.8);
 }
-
 .provider-logo {
   width: 23px;
   height: 23px;
@@ -858,22 +837,18 @@ onMounted(async () => {
   background: rgba(255, 255, 255, 0.09);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
-
 .provider-openai {
   left: 7%;
   top: 33%;
 }
-
 .provider-anthropic {
   left: 2%;
   top: 49%;
 }
-
 .provider-deepseek {
   left: 7%;
   top: 65%;
 }
-
 .provider-custom {
   left: 18%;
   top: 80%;
@@ -889,7 +864,6 @@ onMounted(async () => {
   height: 55%;
   filter: drop-shadow(0 22px 40px rgba(0, 0, 0, 0.3));
 }
-
 .gate-column {
   position: absolute;
   top: 6%;
@@ -898,21 +872,31 @@ onMounted(async () => {
   border: 1px solid rgba(128, 145, 255, 0.55);
   background: linear-gradient(90deg, rgba(51, 63, 114, 0.85), rgba(21, 29, 58, 0.96));
 }
-
+.gate-column::after {
+  content: '';
+  position: absolute;
+  inset: 5%;
+  border: 1px solid rgba(180, 190, 255, 0.12);
+  border-radius: 12px 12px 0 0;
+}
 .gate-column-left {
   left: 0;
   border-right: 0;
   border-radius: 22px 0 0 10px;
-  transform: perspective(200px) rotateY(7deg);
+  transform: skewY(0deg) perspective(200px) rotateY(7deg);
+  box-shadow:
+    -22px 0 50px rgba(71, 90, 255, 0.1),
+    inset 10px 0 23px rgba(101, 112, 255, 0.12);
 }
-
 .gate-column-right {
   right: 0;
   border-left: 0;
   border-radius: 0 22px 10px 0;
   transform: perspective(200px) rotateY(-7deg);
+  box-shadow:
+    22px 0 50px rgba(75, 89, 255, 0.13),
+    inset -10px 0 25px rgba(101, 112, 255, 0.16);
 }
-
 .gate-top {
   position: absolute;
   left: 4%;
@@ -923,8 +907,10 @@ onMounted(async () => {
   border-bottom: 0;
   border-radius: 28px 28px 0 0;
   background: linear-gradient(180deg, rgba(54, 66, 117, 0.92), rgba(34, 43, 79, 0.88));
+  box-shadow:
+    0 0 38px rgba(99, 111, 255, 0.11),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
-
 .gate-inner-glow {
   position: absolute;
   left: 16%;
@@ -932,11 +918,9 @@ onMounted(async () => {
   top: 17%;
   bottom: 10%;
   border-radius: 50px 50px 0 0;
-  background:
-    radial-gradient(58% 42% at 50% 12%, rgba(158, 140, 255, 0.5), transparent 70%),
-    linear-gradient(180deg, rgba(64, 76, 143, 0.22), rgba(19, 27, 54, 0.04));
+  background: linear-gradient(180deg, rgba(64, 76, 143, 0.22), rgba(19, 27, 54, 0.04));
+  box-shadow: inset 0 0 70px rgba(94, 105, 255, 0.08);
 }
-
 .gate-light-edge {
   position: absolute;
   top: 18%;
@@ -953,17 +937,14 @@ onMounted(async () => {
     0 0 20px rgba(128, 125, 255, 0.9),
     0 0 45px rgba(102, 103, 255, 0.38);
 }
-
 .gate-light-left {
   left: 27%;
   transform: skewX(1deg);
 }
-
 .gate-light-right {
   right: 27%;
   transform: skewX(-1deg);
 }
-
 .gate-floor-reflection {
   position: absolute;
   left: 28%;
@@ -973,7 +954,6 @@ onMounted(async () => {
   background: radial-gradient(ellipse at center, rgba(116, 112, 255, 0.33), transparent 70%);
   filter: blur(18px);
 }
-
 .gate-status-card {
   position: absolute;
   z-index: 7;
@@ -987,8 +967,8 @@ onMounted(async () => {
   box-shadow:
     0 20px 40px rgba(0, 0, 0, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(18px);
 }
-
 .gate-status-brand {
   display: flex;
   align-items: center;
@@ -998,17 +978,15 @@ onMounted(async () => {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   font-size: 11px;
 }
-
 .mini-symbol {
   width: 24px;
   height: 24px;
   display: grid;
   place-items: center;
   border-radius: 7px;
-  background: rgba(116, 126, 255, 0.25);
+  background: linear-gradient(135deg, rgba(116, 126, 255, 0.25), rgba(67, 87, 255, 0.12));
   border: 1px solid rgba(145, 155, 255, 0.26);
 }
-
 .mini-symbol i {
   width: 7px;
   height: 7px;
@@ -1016,7 +994,6 @@ onMounted(async () => {
   background: #7f91ff;
   box-shadow: 0 0 10px rgba(127, 145, 255, 0.9);
 }
-
 .status-check {
   display: flex;
   align-items: center;
@@ -1025,12 +1002,9 @@ onMounted(async () => {
   color: #abb5cb;
   font-size: 9px;
 }
-
-.check-ok {
+.status-check :deep(svg) {
   color: #62d8a8;
-  font-weight: 700;
 }
-
 .scene-terminal {
   position: absolute;
   left: 24%;
@@ -1045,20 +1019,14 @@ onMounted(async () => {
   border-radius: 8px;
   color: #72809c;
   background: rgba(16, 25, 45, 0.68);
-  font:
-    8px ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace;
+  font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: 0.08em;
 }
-
 .scene-terminal b {
   margin-left: auto;
   color: #8a97bb;
   font-weight: 600;
 }
-
 .terminal-dot {
   width: 5px;
   height: 5px;
@@ -1069,35 +1037,30 @@ onMounted(async () => {
 
 .hero-footer {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
   color: #75829d;
-  font-size: 10px;
+  font-size: 9px;
 }
-
 .footer-trust {
   display: flex;
   align-items: center;
   gap: 22px;
 }
-
 .footer-trust span {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-
 .footer-slash {
   width: 1px;
   height: 13px;
   background: rgba(160, 170, 199, 0.15);
 }
-
 .hero-footer-version {
   color: #4f5b73;
   letter-spacing: 0.04em;
-  font-size: 10px;
 }
 
 /* ---------------- white auth panel ---------------- */
@@ -1105,169 +1068,146 @@ onMounted(async () => {
   position: relative;
   min-width: 0;
   min-height: 100vh;
-  background: linear-gradient(178deg, #ffffff 0%, #fdfdff 55%, #f9fafe 100%);
+  background: #fff;
   border-left: 1px solid #e8ebf2;
   display: flex;
   flex-direction: column;
 }
-
-.panel-locale {
-  position: absolute;
-  top: 24px;
-  right: 30px;
+.auth-panel-top {
+  min-height: 56px;
+  padding: 22px 26px 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+}
+.mobile-brand {
+  display: none;
+}
+.panel-language {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: #7f8ba4;
-  font-size: 11px;
+  font-size: 10px;
 }
-
 .auth-content {
-  width: min(470px, calc(100% - 72px));
+  width: min(490px, calc(100% - 64px));
   margin: auto;
-  padding: 24px 0 26px;
+  padding: 16px 0 32px;
 }
-
 .auth-brand-inline {
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  margin-bottom: 40px;
+  margin-bottom: 54px;
   color: #17213a;
   font-size: 15px;
   font-weight: 800;
   letter-spacing: -0.03em;
 }
-
 .auth-brand-inline .brand-symbol {
   width: 30px;
   height: 30px;
 }
-
 .auth-brand-inline .brand-wing {
   top: 7px;
   width: 17px;
   height: 12px;
   border-width: 2.5px;
 }
-
 .auth-brand-inline .brand-core {
   left: 11px;
   top: 11px;
   width: 7px;
   height: 7px;
 }
-
 .auth-eyebrow {
   color: #6d76ff;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  font-size: 9px;
 }
-
 .auth-heading h2 {
   margin: 0;
   color: #0c1730;
-  font-size: 38px;
-  line-height: 1.08;
-  letter-spacing: -0.045em;
+  font-size: 43px;
+  line-height: 1.05;
+  letter-spacing: -0.055em;
   font-weight: 770;
 }
-
-.auth-heading h2 .wave {
-  font-size: 24px;
+.auth-heading h2 span {
+  font-size: 26px;
+  vertical-align: top;
 }
-
-.auth-heading p {
-  max-width: 460px;
-  margin: 12px 0 28px;
+/* :not(.auth-eyebrow) keeps the shared `.auth-heading p` metrics from
+   outweighing the eyebrow label (0,1,1 beats 0,1,0 — the reference sheet
+   silently swallowed its own eyebrow rule). */
+.auth-heading p:not(.auth-eyebrow) {
+  max-width: 470px;
+  margin: 14px 0 39px;
   color: #70809d;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.8;
 }
 
-.login-error {
-  margin-bottom: 16px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #fdf0f1;
-  color: #b4232c;
-  font-size: 12px;
-  line-height: 1.7;
-}
-
-.error-request-id {
-  color: #8b3340;
-  font:
-    9px ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace;
-}
-
-.auth-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
 .auth-field {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  margin-bottom: 19px;
 }
-
-.auth-label-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
 .auth-label {
+  display: block;
+  margin-bottom: 8px;
   color: #17213a;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
 }
-
-.text-link {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: #6a72ff;
-  font-size: 11px;
-  cursor: pointer;
+.auth-input {
+  position: relative;
 }
-
-.auth-input :deep(.ui-field__input) {
-  height: 48px;
+.auth-input__prefix {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  color: #8592a9;
+  pointer-events: none;
+}
+.auth-input__prefix :deep(svg) {
+  display: block;
+}
+.auth-input__inner {
+  width: 100%;
+  height: 50px;
+  padding: 0 14px 0 42px;
+  border: 1px solid #d8dfeb;
   border-radius: 8px;
-  border-color: #d8dfeb;
   background: #fff;
-  font-size: 13px;
+  color: #152039;
+  font-family: inherit;
+  font-size: 12px;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
-
-.auth-input :deep(.ui-field__input:hover:not(:disabled):not(:focus)) {
+.auth-input__inner--eye {
+  padding-right: 44px;
+}
+.auth-input__inner:hover:not(:focus) {
   border-color: #bbc6d9;
 }
-
-.auth-input :deep(.ui-field__input:focus) {
+.auth-input__inner:focus {
+  outline: none;
   border-color: #7f8aff;
   box-shadow: 0 0 0 3px rgba(107, 118, 255, 0.1);
 }
-
-.auth-input :deep(.ui-field__input::placeholder) {
-  color: #6f7e96;
+.auth-input__inner::placeholder {
+  color: #9aa7bb;
 }
-
-.auth-input :deep(.ui-field__prefix) {
-  height: 48px;
-  color: #8592a9;
-}
-
-.auth-input :deep(.ui-field__input--prefix) {
-  padding-left: 38px;
-}
-
-.auth-input :deep(.ui-field__suffix) {
-  height: 48px;
-}
-
 .input-eye {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
   display: inline-grid;
   place-items: center;
   padding: 3px;
@@ -1276,72 +1216,149 @@ onMounted(async () => {
   color: #7f8ca2;
   cursor: pointer;
 }
-
+.input-eye:hover {
+  color: #4d5a72;
+}
 .password-help {
   display: flex;
   justify-content: flex-end;
-  margin-top: -2px;
+  margin-top: 8px;
 }
-
 .text-link {
   padding: 0;
   border: 0;
   background: none;
   color: #6a72ff;
-  font-size: 11px;
+  font-size: 10px;
   cursor: pointer;
+}
+.text-link:hover {
+  color: #4f57e8;
 }
 
 .auth-submit {
   width: 100%;
-  height: 48px;
+  height: 47px;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 9px;
+  margin-top: 4px;
+  border: 0;
   border-radius: 8px;
-  background: linear-gradient(90deg, #7a5cff 0%, #4a6bff 52%, #2f7ef5 100%);
-  box-shadow: 0 10px 22px rgba(93, 94, 255, 0.28);
+  background: linear-gradient(90deg, #7055ff 0%, #328df1 100%);
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
   font-weight: 650;
+  cursor: pointer;
+  box-shadow: 0 11px 24px rgba(81, 91, 245, 0.19);
+  transition:
+    filter 0.18s ease,
+    opacity 0.18s ease;
+}
+.auth-submit:hover:not(:disabled) {
+  filter: brightness(1.03);
+}
+.auth-submit:disabled {
+  opacity: 0.72;
+  cursor: default;
+}
+.auth-submit__spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: auth-spin 0.7s linear infinite;
+}
+@keyframes auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-.auth-submit:hover {
-  filter: brightness(1.05);
+.login-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  background: #fdecee;
+  color: #b5322b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.login-error__icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #d54941;
+}
+.login-error__body {
+  min-width: 0;
+}
+.error-request-id {
+  display: block;
+  margin-top: 2px;
+  color: #8b3340;
+  font: 9px ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .or-divider {
   display: flex;
   align-items: center;
   gap: 13px;
-  margin: 20px 0;
+  margin: 24px 0;
 }
-
 .or-divider span {
   flex: 1;
   height: 1px;
-  background: linear-gradient(90deg, transparent, #cdd6ff 22%, #cdd6ff 78%, transparent);
+  background: #e5e9f0;
 }
-
 .or-divider em {
   color: #a0aabe;
-  font:
-    8px ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace;
+  font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
   font-style: normal;
+}
+
+.auth-oauth {
+  width: 100%;
+  height: 47px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  border: 1px solid #d8dfeb;
+  border-radius: 8px;
+  background: #fff;
+  color: #16213a;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+.auth-oauth:hover {
+  border-color: #bbc6d9;
+  background: #f9fbff;
 }
 
 .request-access {
   width: 100%;
-  min-height: 76px;
+  min-height: 78px;
   display: grid;
-  grid-template-columns: 46px 1fr 18px;
+  grid-template-columns: 50px 1fr 18px;
   align-items: center;
   gap: 13px;
-  padding: 11px 14px;
+  padding: 12px 13px;
   text-align: left;
-  border: 1px solid #e0e6f2;
+  border: 1px solid #e4e9f2;
   border-radius: 10px;
-  background: #f5f7fc;
+  background: #f7f9fd;
   color: #16213a;
   cursor: pointer;
   transition:
@@ -1349,13 +1366,11 @@ onMounted(async () => {
     transform 0.18s ease,
     background 0.18s ease;
 }
-
 .request-access:hover {
   transform: translateY(-1px);
   border-color: #cbd5e6;
   background: #f9fbff;
 }
-
 .request-access-icon {
   width: 42px;
   height: 42px;
@@ -1366,32 +1381,28 @@ onMounted(async () => {
   background: linear-gradient(145deg, #edf0ff, #eaf5ff);
   border: 1px solid #dbe1ff;
 }
-
 .request-access-copy strong {
   display: block;
   margin-bottom: 4px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 750;
 }
-
 .request-access-copy small {
   display: block;
   color: #77849a;
-  font-size: 10px;
+  font-size: 9px;
   line-height: 1.5;
 }
-
 .privacy-card {
   display: grid;
   grid-template-columns: 38px 1fr;
   gap: 11px;
-  margin-top: 12px;
-  padding: 12px 14px;
-  border: 1px solid #e3e9f4;
+  margin-top: 14px;
+  padding: 14px 15px;
+  border: 1px solid #ebeff5;
   border-radius: 10px;
-  background: #f8faff;
+  background: #fbfcfe;
 }
-
 .privacy-icon {
   width: 34px;
   height: 34px;
@@ -1401,66 +1412,59 @@ onMounted(async () => {
   color: #4d61cb;
   background: #eef1ff;
 }
-
 .privacy-card strong {
   display: block;
   color: #26324a;
-  font-size: 11px;
+  font-size: 10px;
 }
-
 .privacy-card small {
   display: block;
   max-width: 380px;
   margin-top: 4px;
   color: #8a95a9;
-  font-size: 10px;
-  line-height: 1.6;
+  font-size: 9px;
+  line-height: 1.5;
 }
 
 .auth-footer {
   display: flex;
-  justify-content: flex-end;
-  padding: 16px 30px 20px;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 28px 24px;
   border-top: 1px solid #eef1f5;
   color: #a0aabd;
-  font-size: 11px;
+  font-size: 8px;
 }
-
 .auth-footer-links {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
-
-.auth-footer-links i {
-  width: 3px;
-  height: 3px;
+.auth-footer i {
+  width: 2px;
+  height: 2px;
   border-radius: 50%;
-  background: #c3cad6;
+  background: #b7c0cf;
 }
 
 @media (max-width: 1180px) {
   .gate-auth {
     grid-template-columns: minmax(540px, 1fr) minmax(460px, 0.82fr);
   }
-
   .gate-hero {
     padding-left: 36px;
     padding-right: 22px;
   }
-
   .hero-copy h1 {
-    font-size: clamp(40px, 4.6vw, 58px);
+    font-size: clamp(44px, 5vw, 64px);
   }
-
   .gate-scene {
     margin-right: -36px;
     transform: scale(0.92);
     transform-origin: center center;
   }
-
   .auth-content {
-    width: min(430px, calc(100% - 56px));
+    width: min(430px, calc(100% - 52px));
   }
 }
 
@@ -1468,82 +1472,128 @@ onMounted(async () => {
   .gate-auth {
     display: block;
   }
-
   .gate-hero {
-    min-height: 620px;
-    height: 620px;
+    min-height: 640px;
+    height: 640px;
   }
-
   .gate-scene {
     position: absolute;
     inset: 0 -20px 0 28%;
     margin: 0;
     opacity: 0.72;
+    transform: scale(0.9);
+    transform-origin: center;
   }
-
   .hero-content {
     display: block;
   }
-
+  .hero-copy {
+    max-width: 490px;
+  }
+  .hero-description {
+    max-width: 430px;
+  }
+  .hero-capabilities {
+    grid-template-columns: 1fr 1fr;
+  }
   .auth-panel {
-    min-height: 640px;
+    min-height: 680px;
     border-left: 0;
   }
-
   .auth-content {
-    padding-top: 26px;
+    margin: 0 auto;
+    padding-top: 34px;
+    padding-bottom: 55px;
   }
-
   .auth-brand-inline {
     display: none;
+  }
+  .mobile-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #17213a;
+    font-size: 14px;
+    font-weight: 800;
+  }
+  .mobile-brand .brand-symbol {
+    width: 30px;
+    height: 30px;
+  }
+  .mobile-brand .brand-wing {
+    top: 7px;
+    width: 17px;
+    height: 12px;
+    border-width: 2.5px;
+  }
+  .mobile-brand .brand-core {
+    left: 11px;
+    top: 11px;
+    width: 7px;
+    height: 7px;
+  }
+  .auth-panel-top {
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 18px;
   }
 }
 
 @media (max-width: 600px) {
   .gate-hero {
-    min-height: 560px;
+    min-height: 620px;
     height: auto;
     padding: 24px 20px;
   }
-
   .brand-product,
   .brand-divider,
+  .hero-locale,
   .hero-footer-version {
     display: none;
   }
-
+  .hero-content {
+    min-height: 520px;
+  }
+  .hero-copy {
+    padding-top: 52px;
+  }
   .hero-copy h1 {
-    font-size: 42px;
+    font-size: 47px;
   }
-
+  .hero-description {
+    font-size: 12px;
+  }
   .hero-capabilities {
+    position: relative;
     grid-template-columns: 1fr;
+    gap: 12px;
+    max-width: 300px;
   }
-
   .gate-scene {
-    inset: 18% -80px 0 10%;
-    opacity: 0.3;
+    inset: 16% -80px 0 22%;
+    opacity: 0.35;
   }
-
   .hero-footer {
     display: none;
   }
-
-  .auth-content {
-    width: calc(100% - 36px);
-  }
-
-  .auth-footer {
+  .auth-panel-top {
     padding-left: 18px;
     padding-right: 18px;
   }
-}
-
-.auth-oauth {
-  margin-bottom: 14px;
-}
-.auth-oauth__btn {
-  width: 100%;
-  justify-content: center;
+  .auth-content {
+    width: calc(100% - 36px);
+    padding-top: 28px;
+  }
+  .auth-heading h2 {
+    font-size: 34px;
+  }
+  .auth-heading p {
+    margin-bottom: 30px;
+  }
+  .auth-footer {
+    padding-left: 18px;
+    padding-right: 18px;
+    flex-direction: column;
+  }
 }
 </style>
