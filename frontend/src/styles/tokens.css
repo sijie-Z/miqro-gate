@@ -14,6 +14,7 @@
   --miqrokey-text-primary: #0f172a;
   --miqrokey-text-secondary: #5b6b82;
   --miqrokey-text-disabled: #8b98ab;
+  --miqrokey-text-inverse: #ffffff;
   --miqrokey-accent: #0066ff;
   --miqrokey-accent-hover: #0052cc;
   --miqrokey-accent-soft: #eaf2ff;
@@ -50,23 +51,28 @@
   --miqrokey-table-row-height-compact: 38px;
 
   /* brand chip palette (frontend-design.md §4.1): the only gradients in the
-     system, used exclusively for provider/product identity chips. */
-  --miqrokey-chip-tencent-a: #0066ff;
-  --miqrokey-chip-tencent-b: #00b3ff;
-  --miqrokey-chip-deepseek-a: #4d6bfe;
+     system, used exclusively for provider/product identity chips. The "a" stops
+     are the providers' official brand colors (Simple Icons marks / vendor
+     documentation); "b" stops are same-hue light siblings unless the brand
+     publishes a second color (DeepSeek keeps the sanctioned 紫蓝 pairing). */
+  --miqrokey-chip-tencent-a: #0052d9; /* TDesign / Tencent Cloud brand blue */
+  --miqrokey-chip-tencent-b: #00a4ff;
+  --miqrokey-chip-deepseek-a: #5786fe; /* DeepSeek official */
   --miqrokey-chip-deepseek-b: #8b5cf6;
-  --miqrokey-chip-zhipu-a: #2b5cff;
+  --miqrokey-chip-zhipu-a: #2b5cff; /* heuristic blue (no published VI) */
   --miqrokey-chip-zhipu-b: #5ec2ff;
-  --miqrokey-chip-minimax-a: #ff4d4f;
-  --miqrokey-chip-minimax-b: #ff9a2e;
-  --miqrokey-chip-moonshot-a: #1f2329;
-  --miqrokey-chip-moonshot-b: #57606a;
-  --miqrokey-chip-baidu-a: #2932e1;
-  --miqrokey-chip-baidu-b: #4ba2ff;
+  --miqrokey-chip-minimax-a: #e73562; /* MiniMax official */
+  --miqrokey-chip-minimax-b: #ff7a9e;
+  --miqrokey-chip-moonshot-a: #101114; /* Kimi official near-black */
+  --miqrokey-chip-moonshot-b: #3a3f47;
+  --miqrokey-chip-baidu-a: #2932e1; /* Baidu official */
+  --miqrokey-chip-baidu-b: #4e6ef2;
   --miqrokey-chip-volc-a: #1664ff;
-  --miqrokey-chip-volc-b: #3ddc84;
-  --miqrokey-chip-aliyun-a: #ff6a00;
+  --miqrokey-chip-volc-b: #0ecdeb; /* Volcengine published brand accent */
+  --miqrokey-chip-aliyun-a: #ff6a00; /* Alibaba Cloud official */
   --miqrokey-chip-aliyun-b: #ffc53d;
+  --miqrokey-chip-unknown-a: #59636e;
+  --miqrokey-chip-unknown-b: #8c959f;
 
   /* card elevation (Tencent console: hairline shadow on white cards) */
   --miqrokey-shadow-card: 0 1px 2px rgb(31 35 40 / 4%);

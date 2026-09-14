@@ -732,7 +732,7 @@ onMounted(load);
 .next-consumers__ack-input:checked + .next-consumers__ack-box {
   background: var(--ui-primary);
   border-color: var(--ui-primary);
-  color: #fff;
+  color: var(--miqrokey-text-inverse);
 }
 .next-consumers__activity-range {
   display: flex;
