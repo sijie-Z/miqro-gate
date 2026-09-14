@@ -9,6 +9,7 @@ import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
+import ProviderBrandChip from '@/components/ProviderBrandChip.vue';
 import type { ProviderProductView } from '@/types/api';
 import type { ModelCatalogRow } from '@/types/generated-api';
 
@@ -33,33 +34,6 @@ const columns = [
   { key: 'balanceAuthority', title: '余额来源', width: '120px' },
   { key: 'actions', title: '操作', width: '150px' },
 ];
-
-function chipLetter(name: string): string {
-  return (name ?? '?').slice(0, 1).toUpperCase();
-}
-
-function chipClass(slug: string): string {
-  switch (slug) {
-    case 'tencent':
-      return 'mk-chip-tencent';
-    case 'deepseek':
-      return 'mk-chip-deepseek';
-    case 'zhipu':
-      return 'mk-chip-zhipu';
-    case 'minimax':
-      return 'mk-chip-minimax';
-    case 'moonshot':
-      return 'mk-chip-moonshot';
-    case 'baidu':
-      return 'mk-chip-baidu';
-    case 'volcengine':
-      return 'mk-chip-volcengine';
-    case 'aliyun':
-      return 'mk-chip-aliyun';
-    default:
-      return 'mk-chip-tencent';
-  }
-}
 
 function implTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
   switch (status) {
@@ -274,12 +248,11 @@ onMounted(load);
       >
         <template #provider="{ row }">
           <span class="next-providers__provider">
-            <span
-              class="mk-brand-chip mk-brand-chip--sm"
-              :class="chipClass(productOf(row).providerSlug)"
-              aria-hidden="true"
-              >{{ chipLetter(productOf(row).providerName) }}</span
-            >
+            <ProviderBrandChip
+              :slug="productOf(row).providerSlug"
+              :name="productOf(row).providerName"
+              size="sm"
+            />
             <span>{{ productOf(row).providerName }}</span>
           </span>
         </template>
@@ -297,8 +270,7 @@ onMounted(load);
           <UiStatusBadge
             :tone="implTone(productOf(row).implementationStatus)"
             :label="
-              implLabel[productOf(row).implementationStatus] ??
-              productOf(row).implementationStatus
+              implLabel[productOf(row).implementationStatus] ?? productOf(row).implementationStatus
             "
           />
         </template>

@@ -365,6 +365,20 @@ td.mk-col-num {
 .mk-chip-baidu { background: linear-gradient(135deg, var(--miqrokey-chip-baidu-a), var(--miqrokey-chip-baidu-b)); }
 .mk-chip-volcengine { background: linear-gradient(135deg, var(--miqrokey-chip-volc-a), var(--miqrokey-chip-volc-b)); }
 .mk-chip-aliyun { background: linear-gradient(135deg, var(--miqrokey-chip-aliyun-a), var(--miqrokey-chip-aliyun-b)); }
+/* Neutral fallback for providers without a brand palette (still a brand chip). */
+.mk-brand-chip--unknown { background: linear-gradient(135deg, #64748b, #94a3b8); }
+
+/* Provider glyph inside the chip: official mark (currentColor → white) or 单字. */
+.mk-brand-chip__glyph {
+  display: inline-flex;
+  width: 62%;
+  height: 62%;
+}
+
+.mk-brand-chip__glyph svg {
+  width: 100%;
+  height: 100%;
+}
 
 /* Stat card with icon chip (Tencent console metric card). */
 .mk-stat-card {
