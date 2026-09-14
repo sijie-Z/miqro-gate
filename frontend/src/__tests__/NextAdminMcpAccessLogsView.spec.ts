@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import { defineComponent } from 'vue';
 import NextAdminMcpAccessLogsView from '@/views/next/NextAdminMcpAccessLogsView.vue';
 import * as api from '@/api';
 import type { McpAccessLogEntry } from '@/types/generated-api';
@@ -35,6 +36,36 @@ const rows: McpAccessLogEntry[] = [
   },
 ];
 
+/** radix-based UiSelect renders through a portal; the stub keeps options clickable. */
+const SelectStub = defineComponent({
+  name: 'UiSelect',
+  props: {
+    modelValue: { type: String, default: '' },
+    options: { type: Array, default: () => [] },
+  },
+  emits: ['update:modelValue', 'change'],
+  setup(props, { emit }) {
+    return {
+      props,
+      pick: (value: unknown) => {
+        emit('update:modelValue', value);
+        emit('change', value);
+      },
+    };
+  },
+  template: `
+    <div class="ui-select-stub">
+      <button
+        v-for="opt in props.options"
+        :key="opt.value"
+        :data-testid="'mcp-opt-' + opt.value"
+        @click="pick(opt.value)"
+      >
+        {{ opt.label }}
+      </button>
+    </div>`,
+});
+
 describe('NextAdminMcpAccessLogsView', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -42,7 +73,9 @@ describe('NextAdminMcpAccessLogsView', () => {
     mockApi.listMcpAccessLogs.mockResolvedValue(rows);
   });
   function mountView() {
-    return mount(NextAdminMcpAccessLogsView, { global: { plugins: [createPinia()] } });
+    return mount(NextAdminMcpAccessLogsView, {
+      global: { plugins: [createPinia()], stubs: { UiSelect: SelectStub } },
+    });
   }
   it('renders log rows with outcome badges and metadata', async () => {
     const wrapper = mountView();
@@ -69,6 +102,7 @@ describe('NextAdminMcpAccessLogsView', () => {
     expect(mockApi.listMcpAccessLogs).toHaveBeenLastCalledWith({
       service: 'weather-mcp',
       consumer: 'drill-allowed',
+      limit: 200,
     });
   });
   it('reset clears filters and reloads', async () => {
@@ -77,8 +111,55 @@ describe('NextAdminMcpAccessLogsView', () => {
     await wrapper.find('[data-testid="mcp-logs-service-filter"]').setValue('weather-mcp');
     await wrapper.find('[data-testid="mcp-logs-reset"]').trigger('click');
     await flushPromises();
-    expect(mockApi.listMcpAccessLogs).toHaveBeenLastCalledWith({});
+    expect(mockApi.listMcpAccessLogs).toHaveBeenLastCalledWith({ limit: 200 });
     const input = wrapper.find('[data-testid="mcp-logs-service-filter"]').element as HTMLInputElement;
     expect(input.value).toBe('');
+  });
+  it('renders time-range and limit controls', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.find('[data-testid="mcp-logs-from"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="mcp-logs-to"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="mcp-logs-limit"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="mcp-logs-range-7"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="mcp-logs-range-30"]').exists()).toBe(true);
+  });
+  it('sends an ISO time range and the chosen limit with the query', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="mcp-logs-from"]').setValue('2026-09-01T08:00');
+    await wrapper.find('[data-testid="mcp-logs-to"]').setValue('2026-09-02T08:00');
+    await wrapper.find('[data-testid="mcp-opt-500"]').trigger('click');
+    await wrapper.find('[data-testid="mcp-logs-query"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.listMcpAccessLogs).toHaveBeenLastCalledWith({
+      from: new Date('2026-09-01T08:00').toISOString(),
+      to: new Date('2026-09-02T08:00').toISOString(),
+      limit: 500,
+    });
+  });
+  it('the 7-day quick range fills the window and queries', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="mcp-logs-range-7"]').trigger('click');
+    await flushPromises();
+    const calls = mockApi.listMcpAccessLogs.mock.calls;
+    const last = calls[calls.length - 1]?.[0];
+    expect(last?.limit).toBe(200);
+    const from = new Date(last?.from as string).getTime();
+    const to = new Date(last?.to as string).getTime();
+    expect(Math.abs(to - Date.now())).toBeLessThan(60_000);
+    expect(Math.abs(to - from - 7 * 24 * 3600 * 1000)).toBeLessThan(60_000);
+  });
+  it('reset clears the range and restores the default limit', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="mcp-logs-from"]').setValue('2026-09-01T08:00');
+    await wrapper.find('[data-testid="mcp-opt-1000"]').trigger('click');
+    await wrapper.find('[data-testid="mcp-logs-reset"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.listMcpAccessLogs).toHaveBeenLastCalledWith({ limit: 200 });
+    const from = wrapper.find('[data-testid="mcp-logs-from"]').element as HTMLInputElement;
+    expect(from.value).toBe('');
   });
 });
