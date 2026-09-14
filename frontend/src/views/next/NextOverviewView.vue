@@ -175,20 +175,20 @@ onMounted(load);
       <!-- Stat band -->
       <div class="next-overview__stat-grid" data-testid="overview-stats">
         <section v-for="card in stats" :key="card.label" class="ui-panel next-overview__stat">
-          <div class="next-overview__stat-main">
+          <div class="next-overview__stat-top">
             <span class="next-overview__stat-label">{{ card.label }}</span>
-            <span class="next-overview__stat-value ui-num"
-              ><i v-if="card.prefix" class="next-overview__stat-currency">{{ card.prefix }}</i>{{ card.value }}</span
+            <span
+              class="next-overview__stat-icon"
+              :class="`next-overview__stat-icon--${card.tone}`"
+              aria-hidden="true"
             >
-            <span class="next-overview__stat-hint">{{ card.hint }}</span>
+              <component :is="card.icon" />
+            </span>
           </div>
-          <span
-            class="next-overview__stat-icon"
-            :class="`next-overview__stat-icon--${card.tone}`"
-            aria-hidden="true"
+          <span class="next-overview__stat-value ui-num"
+            ><i v-if="card.prefix" class="next-overview__stat-currency">{{ card.prefix }}</i>{{ card.value }}</span
           >
-            <component :is="card.icon" />
-          </span>
+          <span class="next-overview__stat-hint">{{ card.hint }}</span>
         </section>
       </div>
 
@@ -373,35 +373,39 @@ onMounted(load);
 
 .next-overview__stat {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ui-space-4);
-  padding: var(--ui-space-5) var(--ui-space-6);
+  flex-direction: column;
+  padding: var(--ui-space-4) var(--ui-space-4) 0;
 }
 
-.next-overview__stat-main {
+.next-overview__stat-top {
   display: flex;
-  flex-direction: column;
-  gap: var(--ui-space-1);
-  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
 }
 
 .next-overview__stat-label {
-  font-size: var(--ui-font-size-xs);
+  font-size: var(--ui-font-size-sm);
+  font-weight: var(--ui-weight-medium);
   color: var(--ui-foreground-secondary);
   white-space: nowrap;
 }
 
 .next-overview__stat-value {
-  font-size: 26px;
-  font-weight: var(--ui-weight-semibold);
+  margin-top: var(--ui-space-2);
+  font-size: 24px;
+  font-weight: var(--ui-weight-regular);
   letter-spacing: -0.01em;
   white-space: nowrap;
 }
 
+/* Footer strip inside the stat card (Vben analysis-card pattern). */
 .next-overview__stat-hint {
-  font-size: 11px;
-  color: var(--ui-foreground-faint);
+  margin: var(--ui-space-3) calc(-1 * var(--ui-space-4)) 0;
+  padding: var(--ui-space-2) var(--ui-space-4);
+  border-top: 1px solid var(--ui-border);
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
 }
 
 .next-overview__stat-icon {

@@ -440,7 +440,7 @@ async function handleLogout() {
 }
 
 .new-shell__group-title {
-  margin: var(--ui-space-4) var(--ui-space-2) var(--ui-space-1);
+  margin: var(--ui-space-4) var(--ui-space-2) var(--ui-space-1) var(--ui-space-6);
   font-size: 12px;
   font-weight: var(--ui-weight-semibold);
   letter-spacing: 0.05em;
@@ -453,9 +453,9 @@ async function handleLogout() {
   display: flex;
   align-items: center;
   gap: var(--ui-space-3);
-  height: 40px;
-  padding: 0 var(--ui-space-3);
-  border-radius: var(--ui-radius-control);
+  height: 44px;
+  padding: 0 var(--ui-space-4) 0 var(--ui-space-6);
+  border-radius: 0;
   color: var(--ui-rail-text);
   font-size: var(--ui-font-size-base);
   text-decoration: none;
@@ -711,14 +711,12 @@ async function handleLogout() {
 
 .new-shell__tab--active,
 .new-shell__tab--active:hover {
-  height: 32px;
-  margin-top: 0;
-  margin-bottom: -1px;
-  border: 1px solid var(--ui-border-strong);
-  border-bottom-color: var(--ui-card);
-  border-radius: 2px 2px 0 0;
-  background: var(--ui-card);
-  color: var(--ui-primary-text);
+  height: 30px;
+  margin-top: 2px;
+  border: none;
+  border-radius: 6px 6px 0 0;
+  background: var(--ui-primary);
+  color: var(--ui-foreground-inverse);
 }
 
 .new-shell__tab-divider {
@@ -745,6 +743,15 @@ async function handleLogout() {
 
 .new-shell__tab-close:hover {
   background: var(--ui-primary);
+  color: var(--ui-foreground-inverse);
+}
+
+.new-shell__tab--active .new-shell__tab-close {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.new-shell__tab--active .new-shell__tab-close:hover {
+  background: rgba(255, 255, 255, 0.25);
   color: var(--ui-foreground-inverse);
 }
 

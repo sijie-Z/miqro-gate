@@ -99,9 +99,9 @@
   --ui-space-12: 48px;
 
   /* shape — Vben console family: generous card corners, tight controls */
-  --ui-radius-control: 2px; /* antd v4 base radius */
-  --ui-radius-panel: 2px;
-  --ui-radius-dialog: 2px;
+  --ui-radius-control: 6px; /* v2.pro live: buttons/inputs 6px */
+  --ui-radius-panel: 8px; /* v2.pro live: cards 8px */
+  --ui-radius-dialog: 8px;
   --ui-radius-pill: 999px;
 
   /* sizes */
