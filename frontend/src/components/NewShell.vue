@@ -6,12 +6,15 @@
  * holding the user chip. Nav mirrors the legacy AppShell structure 1:1;
  * admin pages still render their TDesign-era content until U2 migrates them.
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuItemIndicator,
   DropdownMenuPortal,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuRoot,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -41,11 +44,18 @@ import {
   UsergroupCircleIcon,
 } from 'tdesign-icons-vue-next';
 import { useAuthStore } from '@/stores/auth';
+import { language } from '@/i18n';
 import type { Component } from 'vue';
 
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
+
+/** Language options shown in the user menu (labels are language-neutral). */
+const LANGS = [
+  { code: 'zh-Hans', label: '简体中文' },
+  { code: 'en', label: 'English' },
+] as const;
 
 interface NavItem {
   name: string;
@@ -133,6 +143,59 @@ const userInitial = computed(() => {
 
 const isActive = (name: string) => route.name === name;
 
+// ---- tab bar (Vben chrome-style visited-page tabs) ----
+interface ShellTab {
+  name: string;
+  label: string;
+}
+
+const TABS_KEY = 'miqrogate.shell-tabs';
+
+function labelOf(name: string): string | undefined {
+  for (const group of navGroups.value) {
+    const item = group.items.find((i) => i.name === name);
+    if (item) return item.label;
+  }
+  return undefined;
+}
+
+const tabs = ref<ShellTab[]>([]);
+try {
+  const saved = JSON.parse(sessionStorage.getItem(TABS_KEY) ?? '[]') as ShellTab[];
+  if (Array.isArray(saved)) tabs.value = saved.filter((t) => t && typeof t.name === 'string');
+} catch {
+  tabs.value = [];
+}
+
+watch(
+  tabs,
+  (value) => sessionStorage.setItem(TABS_KEY, JSON.stringify(value.slice(-24))),
+  { deep: true },
+);
+
+watch(
+  () => route.name as string | undefined,
+  (name) => {
+    if (!name) return;
+    const label = labelOf(name);
+    if (!label) return;
+    if (!tabs.value.some((t) => t.name === name)) {
+      tabs.value = [...tabs.value, { name, label }];
+    }
+  },
+  { immediate: true },
+);
+
+function closeTab(name: string) {
+  const index = tabs.value.findIndex((t) => t.name === name);
+  if (index === -1) return;
+  tabs.value = tabs.value.filter((t) => t.name !== name);
+  if (route.name === name) {
+    const next = tabs.value[Math.min(index, tabs.value.length - 1)];
+    if (next) void router.push({ name: next.name });
+  }
+}
+
 /** Narrow screens collapse the rail to icons only (>=640 hides the drawer entirely). */
 const iconOnly = ref(false);
 function updateIconOnly() {
@@ -174,7 +237,6 @@ async function handleLogout() {
             :title="iconOnly ? item.label : undefined"
             :class="{ 'new-shell__nav-item--active': isActive(item.name) }"
           >
-            <span class="new-shell__nav-accent" aria-hidden="true" />
             <component :is="item.icon" class="new-shell__nav-icon" />
             <span v-if="!iconOnly" class="new-shell__nav-label">{{ item.label }}</span>
           </router-link>
@@ -224,6 +286,36 @@ async function handleLogout() {
                   }}</span>
                 </div>
                 <DropdownMenuSeparator class="new-shell__user-menu-sep" />
+                <div class="new-shell__user-menu-section">语言</div>
+                <DropdownMenuRadioGroup v-model="language">
+                  <DropdownMenuRadioItem
+                    v-for="lang in LANGS"
+                    :key="lang.code"
+                    :value="lang.code"
+                    class="new-shell__user-menu-item"
+                    :data-testid="`shell-lang-${lang.code}`"
+                  >
+                    <span>{{ lang.label }}</span>
+                    <DropdownMenuItemIndicator class="new-shell__user-menu-check">
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M3.5 8.5 6.5 11.5 12.5 4.5"
+                          stroke="currentColor"
+                          stroke-width="1.8"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </DropdownMenuItemIndicator>
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator class="new-shell__user-menu-sep" />
                 <DropdownMenuItem
                   class="new-shell__user-menu-item new-shell__user-menu-item--danger"
                   data-testid="shell-logout"
@@ -235,6 +327,39 @@ async function handleLogout() {
           </DropdownMenuRoot>
         </div>
       </header>
+
+      <div v-if="tabs.length" class="new-shell__tabbar" data-testid="shell-tabbar">
+        <div
+          v-for="(tab, i) in tabs"
+          :key="tab.name"
+          class="new-shell__tab"
+          :class="{ 'new-shell__tab--active': isActive(tab.name) }"
+          @click="router.push({ name: tab.name })"
+        >
+          <span
+            v-if="i > 0 && !isActive(tab.name)"
+            class="new-shell__tab-divider"
+            aria-hidden="true"
+          />
+          <span class="new-shell__tab-label">{{ tab.label }}</span>
+          <button
+            v-if="tabs.length > 1"
+            type="button"
+            class="new-shell__tab-close"
+            :aria-label="`关闭 ${tab.label}`"
+            @click.stop="closeTab(tab.name)"
+          >
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M4 4 12 12M12 4 4 12"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
 
       <div class="new-shell__content">
         <RouterView />
@@ -315,7 +440,7 @@ async function handleLogout() {
 }
 
 .new-shell__group-title {
-  margin: var(--ui-space-4) var(--ui-space-2) var(--ui-space-1);
+  margin: var(--ui-space-4) var(--ui-space-2) var(--ui-space-1) var(--ui-space-6);
   font-size: 12px;
   font-weight: var(--ui-weight-semibold);
   letter-spacing: 0.05em;
@@ -328,9 +453,9 @@ async function handleLogout() {
   display: flex;
   align-items: center;
   gap: var(--ui-space-3);
-  height: 38px;
-  padding: 0 var(--ui-space-3);
-  border-radius: var(--ui-radius-control);
+  height: 44px;
+  padding: 0 var(--ui-space-4) 0 var(--ui-space-6);
+  border-radius: 0;
   color: var(--ui-rail-text);
   font-size: var(--ui-font-size-base);
   text-decoration: none;
@@ -349,35 +474,19 @@ async function handleLogout() {
   color: var(--ui-foreground-inverse);
 }
 
-.new-shell__nav-accent {
-  position: absolute;
-  left: -3px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 16px;
-  border-radius: var(--ui-radius-pill);
-  background: transparent;
-}
-
 .new-shell__nav-item--active {
-  background: rgba(22, 119, 255, 0.16);
+  background: var(--ui-primary);
   color: var(--ui-foreground-inverse);
-  font-weight: var(--ui-weight-semibold);
 }
 
 .new-shell__nav-item--active:hover {
-  background: rgba(22, 119, 255, 0.22);
+  background: var(--ui-primary);
   color: var(--ui-foreground-inverse);
 }
 
-.new-shell__nav-item--active .new-shell__nav-accent {
-  background: var(--ui-primary-hover);
-}
-
 .new-shell__nav-icon {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   color: var(--ui-rail-text-muted);
   flex-shrink: 0;
 }
@@ -460,7 +569,7 @@ async function handleLogout() {
   height: 28px;
   border-radius: 50%;
   background: var(--ui-primary-soft);
-  color: var(--ui-primary);
+  color: var(--ui-primary-text);
   font-size: var(--ui-font-size-xs);
   font-weight: var(--ui-weight-semibold);
   flex-shrink: 0;
@@ -522,6 +631,19 @@ async function handleLogout() {
   margin: var(--ui-space-1) 0;
 }
 
+.new-shell__user-menu-section {
+  padding: var(--ui-space-1) var(--ui-space-3) 2px;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.new-shell__user-menu-check {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  color: var(--ui-primary-text);
+}
+
 .new-shell__user-menu-item {
   display: flex;
   align-items: center;
@@ -544,6 +666,93 @@ async function handleLogout() {
 
 .new-shell__user-menu-item:focus-visible {
   box-shadow: var(--ui-shadow-focus);
+}
+
+/* Visited-page tabs — Vben v2 style: a 32px white strip, tabs separated by
+   hairline rules, the active tab a white card with a border and primary text. */
+.new-shell__tabbar {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  height: 32px;
+  flex-shrink: 0;
+  background: var(--ui-card);
+  border-bottom: 1px solid var(--ui-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.new-shell__tabbar::-webkit-scrollbar {
+  display: none;
+}
+
+.new-shell__tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 31px;
+  margin-top: 1px;
+  padding: 0 12px;
+  border-right: 1px solid var(--ui-border);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color var(--ui-ease),
+    color var(--ui-ease);
+}
+
+.new-shell__tab:hover {
+  background: var(--ui-muted);
+}
+
+.new-shell__tab--active,
+.new-shell__tab--active:hover {
+  height: 30px;
+  margin-top: 2px;
+  border: none;
+  border-radius: 6px 6px 0 0;
+  background: var(--ui-primary);
+  color: var(--ui-foreground-inverse);
+}
+
+.new-shell__tab-divider {
+  display: none;
+}
+
+.new-shell__tab-label {
+  line-height: 1;
+}
+
+.new-shell__tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ui-foreground-faint);
+  cursor: pointer;
+}
+
+.new-shell__tab-close:hover {
+  background: var(--ui-primary);
+  color: var(--ui-foreground-inverse);
+}
+
+.new-shell__tab--active .new-shell__tab-close {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.new-shell__tab--active .new-shell__tab-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+  color: var(--ui-foreground-inverse);
 }
 
 .new-shell__content {

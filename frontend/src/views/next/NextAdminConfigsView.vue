@@ -334,7 +334,7 @@ onMounted(load);
 .next-configs__seg--on {
   background: var(--ui-primary-soft);
   border-color: transparent;
-  color: var(--ui-primary);
+  color: var(--ui-primary-text);
   font-weight: var(--ui-weight-semibold);
 }
 

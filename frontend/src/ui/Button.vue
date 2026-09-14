@@ -119,6 +119,8 @@ function onClick(event: MouseEvent) {
 .ui-btn--primary {
   background: var(--ui-primary);
   color: var(--ui-foreground-inverse);
+  /* antd primary-button depth (as on v2.vben.pro) */
+  box-shadow: 0 2px 0 rgba(0, 155, 228, 0.11);
 }
 
 .ui-btn--primary:hover:not(:disabled) {

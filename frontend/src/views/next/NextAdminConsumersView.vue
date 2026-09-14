@@ -752,7 +752,7 @@ onMounted(load);
 
 .next-consumers__seg--on {
   border-color: var(--ui-primary);
-  color: var(--ui-primary);
+  color: var(--ui-primary-text);
 }
 
 .next-consumers__stats {

@@ -226,7 +226,7 @@ onMounted(load);
 .next-skills__filter-tag--on {
   background: var(--ui-muted);
   border-color: var(--ui-primary);
-  color: var(--ui-primary);
+  color: var(--ui-primary-text);
   font-weight: var(--ui-weight-semibold);
 }
 

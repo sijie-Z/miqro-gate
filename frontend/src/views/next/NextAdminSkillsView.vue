@@ -664,7 +664,7 @@ onMounted(() => {
 }
 
 .next-skills__check input {
-  accent-color: var(--ui-primary);
+  accent-color: var(--ui-primary-text);
   margin: 0;
 }
 </style>

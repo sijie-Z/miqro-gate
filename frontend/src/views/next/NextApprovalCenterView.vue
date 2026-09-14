@@ -359,7 +359,7 @@ onMounted(load);
 .next-approvals-center__seg--on {
   background: var(--ui-card);
   border: 1px solid var(--ui-border);
-  color: var(--ui-primary);
+  color: var(--ui-primary-text);
   font-weight: var(--ui-weight-semibold);
 }
 

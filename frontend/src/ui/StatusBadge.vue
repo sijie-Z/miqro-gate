@@ -68,72 +68,89 @@ const classes = computed(() => [
   height: 7px;
 }
 
-/* pill variant — soft tinted capsule */
+/* pill variant — Vben/antd tag geometry: rectangle, hairline border */
 .ui-badge--pill {
-  gap: var(--ui-space-2);
+  gap: 6px;
   height: 22px;
-  padding: 0 var(--ui-space-2);
-  border-radius: var(--ui-radius-pill);
+  padding: 0 7px;
+  border-radius: 4px;
+  border: 1px solid transparent;
   line-height: 1;
 }
 
-.ui-badge--success {
+.ui-badge--dot.ui-badge--success {
   color: var(--ui-success-fg);
+}
+
+.ui-badge--dot.ui-badge--warning {
+  color: var(--ui-warning-fg);
+}
+
+.ui-badge--dot.ui-badge--danger {
+  color: var(--ui-danger-fg);
+}
+
+.ui-badge--dot.ui-badge--info {
+  color: var(--ui-info-fg);
+}
+
+.ui-badge--dot.ui-badge--neutral {
+  color: var(--ui-neutral-fg);
 }
 
 .ui-badge--success .ui-badge__dot {
   background: var(--ui-success-fg);
 }
 
-.ui-badge--pill.ui-badge--success {
-  background: var(--ui-success-bg);
-}
-
-.ui-badge--warning {
-  color: var(--ui-warning-fg);
-}
-
 .ui-badge--warning .ui-badge__dot {
   background: var(--ui-warning-fg);
-}
-
-.ui-badge--pill.ui-badge--warning {
-  background: var(--ui-warning-bg);
-}
-
-.ui-badge--danger {
-  color: var(--ui-danger-fg);
 }
 
 .ui-badge--danger .ui-badge__dot {
   background: var(--ui-danger-fg);
 }
 
-.ui-badge--pill.ui-badge--danger {
-  background: var(--ui-danger-bg);
-}
-
-.ui-badge--info {
-  color: var(--ui-info-fg);
-}
-
 .ui-badge--info .ui-badge__dot {
   background: var(--ui-info-fg);
-}
-
-.ui-badge--pill.ui-badge--info {
-  background: var(--ui-info-bg);
-}
-
-.ui-badge--neutral {
-  color: var(--ui-neutral-fg);
 }
 
 .ui-badge--neutral .ui-badge__dot {
   background: var(--ui-neutral-fg);
 }
 
+/* Pill/tag variant: Vben/antd tag — tinted fill, coloured text, hairline
+   border mixed from the tone colour. */
+.ui-badge--pill.ui-badge--success {
+  background: var(--ui-success-bg);
+  color: var(--ui-success-fg);
+  border-color: color-mix(in srgb, var(--ui-success-fg) 28%, white);
+}
+
+.ui-badge--pill.ui-badge--warning {
+  background: var(--ui-warning-bg);
+  color: var(--ui-warning-fg);
+  border-color: color-mix(in srgb, var(--ui-warning-fg) 28%, white);
+}
+
+.ui-badge--pill.ui-badge--danger {
+  background: var(--ui-danger-bg);
+  color: var(--ui-danger-fg);
+  border-color: color-mix(in srgb, var(--ui-danger-fg) 28%, white);
+}
+
+.ui-badge--pill.ui-badge--info {
+  background: var(--ui-info-bg);
+  color: var(--ui-info-fg);
+  border-color: color-mix(in srgb, var(--ui-info-fg) 28%, white);
+}
+
 .ui-badge--pill.ui-badge--neutral {
   background: var(--ui-neutral-bg);
+  color: var(--ui-neutral-fg);
+  border-color: color-mix(in srgb, var(--ui-neutral-fg) 28%, white);
+}
+
+.ui-badge--pill .ui-badge__dot {
+  display: none;
 }
 </style>

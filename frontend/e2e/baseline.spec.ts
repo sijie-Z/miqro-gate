@@ -1087,6 +1087,15 @@ for (const viewport of VIEWPORTS) {
     await page.goto('/login');
     await page.waitForLoadState('networkidle');
     await expect(page.getByTestId('login-submit')).toBeVisible();
+    // The login visual master is the preset reference package
+    // (other/miqro-gate-auth-ui, issue #490): lock its signature metrics so a
+    // silent re-skin regression fails CI instead of shipping.
+    await expect(page.locator('.auth-submit')).toHaveCSS('height', '47px');
+    await expect(page.locator('.auth-input__inner').first()).toHaveCSS('height', '50px');
+    const submitBackground = await page
+      .locator('.auth-submit')
+      .evaluate((el) => getComputedStyle(el).backgroundImage);
+    expect(submitBackground).toContain('linear-gradient');
     await page.screenshot({
       path: `test-results/baseline/login-${viewport.name}.png`,
       fullPage: true,
@@ -1197,6 +1206,70 @@ test('failed login shows the Chinese 401 detail with its request id', async ({ p
   await expect(loginError).toContainText('账号或密码不正确');
   await expect(loginError).toContainText('e2e-req-401');
   await expect(loginError).not.toContainText('Invalid username');
+});
+
+test('login language picker switches the page between Chinese and English', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, false);
+  await page.route('**/api/v1/auth/me', (route) =>
+    route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }),
+  );
+  await page.goto('/login');
+  await page.waitForLoadState('networkidle');
+
+  // Chinese default — and exactly ONE locale chip on the page (the hero
+  // header must not duplicate the panel picker).
+  await expect(page.getByText('简体中文')).toHaveCount(1);
+  await expect(page.locator('.hero-copy h1')).toContainText('网关静默运转');
+  await expect(page.getByTestId('login-submit')).toContainText('登 录');
+
+  // A real click through the radio menu translates the page.
+  await page.getByTestId('login-language').click();
+  await page.getByTestId('login-language-en').click();
+  await expect(page.locator('.hero-copy h1')).toContainText('The gateway stays quiet');
+  await expect(page.getByTestId('login-submit')).toContainText('Sign in');
+  await expect(page.locator('.auth-heading h2')).toContainText('Welcome back');
+
+  // The choice persists across reloads.
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.auth-heading h2')).toContainText('Welcome back');
+
+  // Switch back to Chinese for a clean state.
+  await page.getByTestId('login-language').click();
+  await page.getByTestId('login-language-zh-Hans').click();
+  await expect(page.locator('.auth-heading h2')).toContainText('欢迎回来');
+  await expect(page.getByTestId('login-submit')).toContainText('登 录');
+});
+
+test('console language switch translates the shell live and persists', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/keys');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('keys-table')).toBeVisible();
+
+  // Chinese default: nav label and page title.
+  await expect(page.locator('.new-shell__nav-label').first()).toHaveText('总览');
+  await expect(page.locator('.ui-page-title').first()).toHaveText('我的 Key');
+
+  // Live switch through the user menu (no reload): shell and page copy translate.
+  await page.getByTestId('shell-user-menu').click();
+  await page.getByTestId('shell-lang-en').click();
+  await expect(page.locator('.new-shell__nav-label').first()).toHaveText('Overview');
+  await expect(page.locator('.ui-page-title').first()).toHaveText('My Keys');
+
+  // Persists across reloads.
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.new-shell__nav-label').first()).toHaveText('Overview');
+  await expect(page.locator('.ui-page-title').first()).toHaveText('My Keys');
+
+  // Switch back to Chinese — also live.
+  await page.getByTestId('shell-user-menu').click();
+  await page.getByTestId('shell-lang-zh-Hans').click();
+  await expect(page.locator('.new-shell__nav-label').first()).toHaveText('总览');
+  await expect(page.locator('.ui-page-title').first()).toHaveText('我的 Key');
 });
 
 test('overview page baseline at 1440x900', async ({ page }) => {
