@@ -249,7 +249,7 @@ onMounted(load);
       <!-- Quick actions (workbench-style tiles) -->
       <nav class="next-overview__quick" data-testid="overview-quicknav" aria-label="快捷入口">
         <router-link v-for="item in quickNav" :key="item.to" :to="item.to" class="next-overview__quick-tile">
-          <span class="next-overview__quick-icon"><component :is="item.icon" size="18px" /></span>
+          <span class="next-overview__quick-icon"><component :is="item.icon" size="16px" /></span>
           <span class="next-overview__quick-label">{{ item.label }}</span>
         </router-link>
       </nav>

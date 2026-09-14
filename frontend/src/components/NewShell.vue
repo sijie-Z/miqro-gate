@@ -485,8 +485,8 @@ async function handleLogout() {
 }
 
 .new-shell__nav-icon {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   color: var(--ui-rail-text-muted);
   flex-shrink: 0;
 }
