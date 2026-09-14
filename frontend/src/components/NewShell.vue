@@ -422,7 +422,7 @@ async function handleLogout() {
   font-size: var(--ui-font-size-base);
   font-weight: var(--ui-weight-semibold);
   letter-spacing: -0.01em;
-  color: var(--ui-foreground);
+  color: var(--ui-foreground-inverse);
 }
 
 .new-shell__nav {
@@ -475,14 +475,13 @@ async function handleLogout() {
 }
 
 .new-shell__nav-item--active {
-  background: var(--ui-primary-soft);
-  color: var(--ui-primary-text);
-  font-weight: var(--ui-weight-medium);
+  background: var(--ui-primary);
+  color: var(--ui-foreground-inverse);
 }
 
 .new-shell__nav-item--active:hover {
-  background: var(--ui-primary-soft);
-  color: var(--ui-primary-text);
+  background: var(--ui-primary);
+  color: var(--ui-foreground-inverse);
 }
 
 .new-shell__nav-icon {
@@ -497,7 +496,7 @@ async function handleLogout() {
 }
 
 .new-shell__nav-item--active .new-shell__nav-icon {
-  color: var(--ui-primary-text);
+  color: var(--ui-foreground-inverse);
 }
 
 .new-shell__rail-foot {
@@ -669,15 +668,14 @@ async function handleLogout() {
   box-shadow: var(--ui-shadow-focus);
 }
 
-/* Visited-page tabs — Vben 'chrome' style: a 38px strip under the header,
-   rounded-top active tab tinted with the primary color. */
+/* Visited-page tabs — Vben v2 style: a 32px white strip, tabs separated by
+   hairline rules, the active tab a white card with a border and primary text. */
 .new-shell__tabbar {
   display: flex;
   align-items: stretch;
-  gap: 7px;
-  height: 38px;
+  gap: 0;
+  height: 32px;
   flex-shrink: 0;
-  padding: 3px var(--ui-space-3) 0;
   background: var(--ui-card);
   border-bottom: 1px solid var(--ui-border);
   overflow-x: auto;
@@ -693,10 +691,12 @@ async function handleLogout() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  height: 31px;
+  margin-top: 1px;
   padding: 0 12px;
-  border-radius: 7px 7px 0 0;
+  border-right: 1px solid var(--ui-border);
   font-size: var(--ui-font-size-sm);
-  color: var(--ui-foreground-secondary);
+  color: var(--ui-foreground);
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
@@ -707,24 +707,22 @@ async function handleLogout() {
 
 .new-shell__tab:hover {
   background: var(--ui-muted);
-  color: var(--ui-foreground);
 }
 
 .new-shell__tab--active,
 .new-shell__tab--active:hover {
-  background: var(--ui-primary-soft);
+  height: 32px;
+  margin-top: 0;
+  margin-bottom: -1px;
+  border: 1px solid var(--ui-border-strong);
+  border-bottom-color: var(--ui-card);
+  border-radius: 2px 2px 0 0;
+  background: var(--ui-card);
   color: var(--ui-primary-text);
-  font-weight: var(--ui-weight-medium);
 }
 
 .new-shell__tab-divider {
-  position: absolute;
-  left: -4px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 1px;
-  height: 16px;
-  background: var(--ui-border);
+  display: none;
 }
 
 .new-shell__tab-label {
@@ -739,15 +737,15 @@ async function handleLogout() {
   height: 16px;
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: 2px;
   background: transparent;
   color: var(--ui-foreground-faint);
   cursor: pointer;
 }
 
 .new-shell__tab-close:hover {
-  background: var(--ui-fill-selected);
-  color: var(--ui-foreground);
+  background: var(--ui-primary);
+  color: var(--ui-foreground-inverse);
 }
 
 .new-shell__content {
