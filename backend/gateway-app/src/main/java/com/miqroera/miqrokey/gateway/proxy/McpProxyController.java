@@ -16,7 +16,8 @@ import com.miqroera.miqrokey.route.RouteSnapshotProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferLimitException;
+import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -114,11 +115,17 @@ public class McpProxyController {
     private final Scheduler credentialDecryptScheduler;
     private final McpSseSessionRegistry sseSessions;
     private final Clock clock;
+    /**
+     * Bounded request-body buffer (#477): the same ceiling as the LLM path —
+     * collectList() used to aggregate MCP bodies without any limit.
+     */
+    private final int maxMcpBodyBytes;
 
     public McpProxyController(RouteSnapshotProvider routeSnapshotProvider, WebClient proxyWebClient,
             ObjectMapper objectMapper, McpAccessLogSink accessLogSink, Clock clock,
             ObjectProvider<com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider> keyEncryptionProvider,
-            Scheduler credentialDecryptScheduler, McpSseSessionRegistry sseSessions) {
+            Scheduler credentialDecryptScheduler, McpSseSessionRegistry sseSessions,
+            ProxyTargetProperties proxyProperties) {
         this.routeSnapshotProvider = routeSnapshotProvider;
         this.proxyWebClient = proxyWebClient;
         this.objectMapper = objectMapper;
@@ -128,6 +135,7 @@ public class McpProxyController {
         this.credentialDecryptScheduler = credentialDecryptScheduler;
         this.sseSessions = sseSessions;
         this.clock = clock;
+        this.maxMcpBodyBytes = Math.toIntExact(proxyProperties.maxProxyBuffer().toBytes());
     }
 
     @PostMapping("/mcpservers/{serviceName}/mcp")
@@ -156,8 +164,25 @@ public class McpProxyController {
         String gatewayRequestId = UUID.randomUUID().toString();
         String logSessionId = exchange.getRequest().getHeaders().getFirst("Session-Id");
         ResponseTarget target = new ExchangeTarget(exchange);
-        return exchange.getRequest().getBody().collectList().map(McpProxyController::concatBuffers).flatMap(
-                body -> authorizeAndForward(exchange, consumer, service, body, gatewayRequestId, logSessionId, target));
+        return boundedBody(exchange).flatMap(
+                body -> authorizeAndForward(exchange, consumer, service, body, gatewayRequestId, logSessionId, target))
+                .onErrorResume(PayloadTooLargeException.class,
+                        e -> error(exchange.getResponse(), HttpStatus.PAYLOAD_TOO_LARGE, "payload_too_large",
+                                "Request body exceeds the gateway buffer limit"));
+    }
+
+    /** Bounded body aggregation (#477): oversize fails as 413, never OOM. */
+    private Mono<byte[]> boundedBody(ServerWebExchange exchange) {
+        return DataBufferUtils.join(exchange.getRequest().getBody(), maxMcpBodyBytes).map(buffer -> {
+            byte[] bytes = new byte[buffer.readableByteCount()];
+            buffer.read(bytes);
+            DataBufferUtils.release(buffer);
+            return bytes;
+        }).onErrorResume(DataBufferLimitException.class, e -> Mono.error(new PayloadTooLargeException()));
+    }
+
+    /** Marker to route the oversize failure through the shared 413 envelope. */
+    private static final class PayloadTooLargeException extends RuntimeException {
     }
 
     /**
@@ -240,7 +265,7 @@ public class McpProxyController {
         String gatewayRequestId = UUID.randomUUID().toString();
         ResponseTarget target = new SseTarget(session);
         McpSseSessionRegistry.SseSession boundSession = session;
-        return exchange.getRequest().getBody().collectList().map(McpProxyController::concatBuffers).flatMap(body -> {
+        return boundedBody(exchange).flatMap(body -> {
             // Log-row session correlation (#358): the client's Session-Id header
             // wins; otherwise this inbound SSE session identifies the conversation.
             String headerSessionId = exchange.getRequest().getHeaders().getFirst("Session-Id");
@@ -256,7 +281,8 @@ public class McpProxyController {
             ServerHttpResponse response = exchange.getResponse();
             response.setStatusCode(HttpStatus.ACCEPTED);
             return response.setComplete();
-        });
+        }).onErrorResume(PayloadTooLargeException.class, e -> error(exchange.getResponse(),
+                HttpStatus.PAYLOAD_TOO_LARGE, "payload_too_large", "Request body exceeds the gateway buffer limit"));
     }
 
     private Mono<Void> authorizeAndForward(ServerWebExchange exchange, RouteSnapshot.ConsumerRecord consumer,
@@ -548,18 +574,6 @@ public class McpProxyController {
             return null;
         }
         return JWT_VERIFIER.verify(token, consumer.jwtPublicKeyPem(), subject) ? consumer : null;
-    }
-
-    private static byte[] concatBuffers(List<DataBuffer> buffers) {
-        int total = buffers.stream().mapToInt(DataBuffer::readableByteCount).sum();
-        byte[] body = new byte[total];
-        int offset = 0;
-        for (DataBuffer buffer : buffers) {
-            int len = buffer.readableByteCount();
-            buffer.read(body, offset, len);
-            offset += len;
-        }
-        return body;
     }
 
     private static byte[] sha256(String value) {

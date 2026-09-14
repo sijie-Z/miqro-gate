@@ -122,6 +122,27 @@ class AdminMcpServiceApiIntegrationTest {
         org.assertj.core.api.Assertions.assertThat(row.get("consecutive_failures")).isEqualTo(3);
     }
 
+    @Test
+    @DisplayName("literal loopback/private endpoints are rejected at registration (#477)")
+    void literalPrivateEndpointsAreRejected() throws Exception {
+        String loopback = mockMvc
+                .perform(post("/api/v1/admin/mcp-services").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content("{\"name\":\"ssrf-literal\",\"endpoint\":\"https://127.0.0.1:8443/mcp\"}"))
+                .andReturn().getResponse().getContentAsString();
+        org.assertj.core.api.Assertions.assertThat(objectMapper.readTree(loopback).get("code").asText())
+                .isEqualTo("MCP_ENDPOINT_INVALID");
+
+        mockMvc.perform(post("/api/v1/admin/mcp-services").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content("{\"name\":\"ssrf-rfc1918\",\"endpoint\":\"https://10.1.2.3/mcp\"}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/v1/admin/mcp-services").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content("{\"name\":\"ssrf-v6\",\"endpoint\":\"https://[::1]/mcp\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
     @AfterEach
     void tearDown() {
         clean();

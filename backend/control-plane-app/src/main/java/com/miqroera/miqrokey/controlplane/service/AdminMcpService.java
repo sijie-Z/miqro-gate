@@ -231,7 +231,42 @@ public class AdminMcpService {
         if (uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "MCP_ENDPOINT_INVALID", "接入地址不能包含用户信息/查询参数/片段。");
         }
+        requirePublicLiteralOrHostname(uri);
         return uri.toString();
+    }
+
+    /**
+     * #477: a literal-IP endpoint must not point into loopback/private space — the
+     * gateway's connect-time resolver only re-validates names that still need
+     * resolving, so a literal would otherwise skip the SSRF gate entirely.
+     * Hostnames keep today's behavior (their runtime DNS re-validation stands).
+     */
+    private static void requirePublicLiteralOrHostname(URI uri) {
+        String host = uri.getHost();
+        if (host == null || !isIpLiteral(host)) {
+            return;
+        }
+        java.net.InetAddress address;
+        try {
+            address = java.net.InetAddress.getByName(host); // literal — no DNS lookup
+        } catch (java.net.UnknownHostException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "MCP_ENDPOINT_INVALID", "接入地址不是合法的 IP 字面量。");
+        }
+        byte[] bytes = address.getAddress();
+        boolean cgnat = bytes.length == 4 && bytes[0] == 100 && (bytes[1] & 0xC0) == 0x40; // 100.64/10
+        boolean ula = bytes.length == 16 && (bytes[0] & 0xFE) == 0xFC; // fc00::/7
+        if (address.isLoopbackAddress() || address.isSiteLocalAddress() || address.isLinkLocalAddress()
+                || address.isAnyLocalAddress() || cgnat || ula) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "MCP_ENDPOINT_INVALID", "接入地址不能指向本机/内网字面地址。");
+        }
+    }
+
+    /** IPv4 dotted-quad or anything containing ':' (IPv6 literal form). */
+    private static boolean isIpLiteral(String host) {
+        if (host.indexOf(':') >= 0) {
+            return true;
+        }
+        return host.matches("\\d{1,3}(\\.\\d{1,3}){3}");
     }
 
     private McpService find(UUID tenantId, UUID serviceId) {
