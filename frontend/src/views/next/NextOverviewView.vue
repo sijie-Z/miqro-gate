@@ -9,7 +9,15 @@ import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
-import { ChartBarIcon, LayersIcon, LockOnIcon, MoneyIcon } from 'tdesign-icons-vue-next';
+import {
+  ChartBarIcon,
+  FilePasteIcon,
+  LayersIcon,
+  LockOnIcon,
+  MoneyIcon,
+  SecuredIcon,
+  UserIcon,
+} from 'tdesign-icons-vue-next';
 import { UiButton, UiStatusBadge } from '@/ui';
 import type { SubscriptionView, UsageGroup, VirtualKeyView } from '@/types/generated-api';
 
@@ -81,6 +89,52 @@ const costGroups = computed(() =>
 );
 
 const costTotal = computed(() => costGroups.value.reduce((sum, g) => sum + g.cost, 0));
+
+/** Donut palette (frontend-design §4: blue/cyan/orange/gray — no rainbow). */
+const DONUT_COLORS = ['#0960bd', '#69c0ff', '#13c2c2', '#fa8c16', '#8c8c8c', '#d9d9d9'];
+
+const donutSegments = computed(() => {
+  const total = costTotal.value;
+  if (total <= 0) return [];
+  const top = costGroups.value.slice(0, 5);
+  const rest = costGroups.value.slice(5);
+  const restCost = rest.reduce((sum, g) => sum + g.cost, 0);
+  const rows = top.map((g, i) => ({
+    label: g.label,
+    cost: g.cost,
+    pct: (g.cost / total) * 100,
+    color: DONUT_COLORS[i],
+  }));
+  if (restCost > 0) rows.push({ label: '其他', cost: restCost, pct: (restCost / total) * 100, color: DONUT_COLORS[5] });
+  return rows;
+});
+
+const donutBackground = computed(() => {
+  let acc = 0;
+  const stops = donutSegments.value.map((seg) => {
+    const from = acc;
+    acc += seg.pct;
+    return `${seg.color} ${from.toFixed(2)}% ${acc.toFixed(2)}%`;
+  });
+  return `conic-gradient(${stops.join(', ')}${acc < 100 ? `, #f0f0f0 ${acc.toFixed(2)}% 100%` : ''})`;
+});
+
+/** Quick actions (workbench-style tile row). */
+const quickNav = computed(() =>
+  isAdmin.value
+    ? [
+        { label: '创建 Virtual Key', to: '/app/keys', icon: LockOnIcon },
+        { label: '用量报表', to: '/app/admin-usage', icon: ChartBarIcon },
+        { label: '账单对账', to: '/app/reconciliations', icon: FilePasteIcon },
+        { label: '审计日志', to: '/app/audit', icon: SecuredIcon },
+      ]
+    : [
+        { label: '创建 Virtual Key', to: '/app/keys', icon: LockOnIcon },
+        { label: '用量', to: '/app/usage', icon: ChartBarIcon },
+        { label: '申请新模型', to: '/app/model-approvals', icon: LayersIcon },
+        { label: '资料', to: '/app/profile', icon: UserIcon },
+      ],
+);
 
 const recentKeys = computed(() => keys.value.slice(0, 5));
 
@@ -192,6 +246,14 @@ onMounted(load);
         </section>
       </div>
 
+      <!-- Quick actions (workbench-style tiles) -->
+      <nav class="next-overview__quick" data-testid="overview-quicknav" aria-label="快捷入口">
+        <router-link v-for="item in quickNav" :key="item.to" :to="item.to" class="next-overview__quick-tile">
+          <span class="next-overview__quick-icon"><component :is="item.icon" size="18px" /></span>
+          <span class="next-overview__quick-label">{{ item.label }}</span>
+        </router-link>
+      </nav>
+
       <!-- Usage bars + recent keys -->
       <div class="next-overview__grid">
         <section class="ui-panel" data-testid="overview-usage">
@@ -270,21 +332,22 @@ onMounted(load);
           <h2 class="ui-panel-title">成本分布（按项目）</h2>
           <span class="ui-panel-sub">上游实付合计 · ¥{{ costTotal.toFixed(2) }}</span>
         </div>
-        <div v-if="costTotal > 0" class="ui-panel-body">
-          <div class="next-overview__cost-grid">
-            <div v-for="group in costGroups" :key="group.label" class="next-overview__cost-row">
-              <span class="next-overview__cost-label" :title="group.label">{{
-                group.label
-              }}</span>
-              <div class="next-overview__cost-track">
-                <div
-                  class="next-overview__cost-fill"
-                  :style="{ width: `${Math.max(2, (group.cost / costTotal) * 100)}%` }"
-                />
-              </div>
-              <span class="next-overview__cost-value ui-num"
-                >¥{{ group.cost.toFixed(2) }} · {{ ((group.cost / costTotal) * 100).toFixed(0) }}%</span
-              >
+        <div v-if="costTotal > 0" class="ui-panel-body next-overview__cost-layout">
+          <div class="next-overview__donut-wrap">
+            <div class="mk-donut" :style="{ background: donutBackground }" data-testid="overview-cost-donut">
+              <span class="next-overview__donut-center ui-num">¥{{ costTotal.toFixed(2) }}</span>
+            </div>
+          </div>
+          <div class="next-overview__cost-legend">
+            <div
+              v-for="seg in donutSegments"
+              :key="seg.label"
+              class="next-overview__legend-row"
+            >
+              <span class="next-overview__legend-dot" :style="{ background: seg.color }" />
+              <span class="next-overview__legend-label" :title="seg.label">{{ seg.label }}</span>
+              <span class="next-overview__legend-pct ui-num">{{ seg.pct.toFixed(0) }}%</span>
+              <span class="next-overview__legend-value ui-num">¥{{ seg.cost.toFixed(2) }}</span>
             </div>
           </div>
         </div>
@@ -530,6 +593,113 @@ onMounted(load);
   margin: 0;
   font-size: var(--ui-font-size-sm);
   font-weight: var(--ui-weight-semibold);
+}
+
+/* Quick actions row — workbench-style tiles. */
+.next-overview__quick {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ui-space-4);
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-overview__quick-tile {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-4);
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-panel);
+  color: var(--ui-foreground);
+  text-decoration: none;
+  transition:
+    border-color var(--ui-ease),
+    background-color var(--ui-ease);
+}
+
+.next-overview__quick-tile:hover {
+  border-color: var(--ui-primary);
+  background: var(--ui-primary-soft);
+}
+
+.next-overview__quick-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary-text);
+  flex-shrink: 0;
+}
+
+.next-overview__quick-label {
+  font-size: var(--ui-font-size-sm);
+  font-weight: var(--ui-weight-medium);
+}
+
+/* Cost panel: donut + legend (analysis-page 成交占比 pattern). */
+.next-overview__cost-layout {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-8);
+  flex-wrap: wrap;
+}
+
+.next-overview__donut-wrap {
+  position: relative;
+}
+
+.next-overview__donut-center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 1;
+  font-size: var(--ui-font-size-sm);
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+}
+
+.next-overview__cost-legend {
+  flex: 1;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.next-overview__legend-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) 48px 90px;
+  align-items: center;
+  gap: var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+}
+
+.next-overview__legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.next-overview__legend-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-foreground);
+}
+
+.next-overview__legend-pct {
+  text-align: right;
+  color: var(--ui-foreground-secondary);
+}
+
+.next-overview__legend-value {
+  text-align: right;
+  color: var(--ui-foreground);
 }
 
 .next-overview__cost-grid {
