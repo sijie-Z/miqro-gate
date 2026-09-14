@@ -288,7 +288,7 @@ const triggerClasses = computed(() => ({
 }
 
 .ui-select__item-check {
-  color: var(--ui-primary);
+  color: var(--ui-primary-text);
   flex-shrink: 0;
 }
 

@@ -620,7 +620,7 @@ function formatTime(iso?: string): string {
 .next-usage__seg--on {
   background: var(--ui-card);
   border: 1px solid var(--ui-border);
-  color: var(--ui-primary);
+  color: var(--ui-primary-text);
   font-weight: var(--ui-weight-semibold);
 }
 
@@ -709,7 +709,7 @@ function formatTime(iso?: string): string {
 
 .next-usage__totals-label {
   font-weight: var(--ui-weight-semibold);
-  color: var(--ui-primary);
+  color: var(--ui-primary-text);
   width: 148px;
   flex-shrink: 0;
 }

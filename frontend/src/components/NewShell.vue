@@ -500,7 +500,7 @@ async function handleLogout() {
   height: 28px;
   border-radius: 50%;
   background: var(--ui-primary-soft);
-  color: var(--ui-primary);
+  color: var(--ui-primary-text);
   font-size: var(--ui-font-size-xs);
   font-weight: var(--ui-weight-semibold);
   flex-shrink: 0;
@@ -572,7 +572,7 @@ async function handleLogout() {
   margin-left: auto;
   display: grid;
   place-items: center;
-  color: var(--ui-primary);
+  color: var(--ui-primary-text);
 }
 
 .new-shell__user-menu-item {

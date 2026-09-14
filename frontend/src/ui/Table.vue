@@ -251,7 +251,9 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
   gap: var(--ui-space-1);
   border: none;
   background: none;
-  padding: 0;
+  /* Expanded hit area (>=32px) without shifting the header layout. */
+  padding: 6px 2px;
+  margin: -6px -2px;
   font: inherit;
   font-size: inherit;
   font-weight: inherit;
@@ -264,7 +266,7 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
 }
 
 .ui-table__sort--active {
-  color: var(--ui-primary);
+  color: var(--ui-primary-text);
 }
 
 .ui-table__sort-arrow {

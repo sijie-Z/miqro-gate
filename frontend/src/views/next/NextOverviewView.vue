@@ -467,7 +467,7 @@ onMounted(load);
 .next-overview__link {
   font-size: var(--ui-font-size-xs);
   font-weight: var(--ui-weight-medium);
-  color: var(--ui-primary);
+  color: var(--ui-primary-text);
   text-decoration: none;
 }
 

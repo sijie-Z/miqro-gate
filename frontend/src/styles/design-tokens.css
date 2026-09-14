@@ -30,7 +30,7 @@
   /* text — cool near-black ink + slate grays */
   --ui-foreground: #1f2328;
   --ui-foreground-secondary: #59636e;
-  --ui-foreground-faint: #8c959f;
+  --ui-foreground-faint: #68717d; /* 4.9:1 on white — AA for 11-12px hints */
   --ui-foreground-inverse: #ffffff;
 
   /* lines */
@@ -44,6 +44,7 @@
   --ui-primary-hover: #4096ff;
   --ui-primary-active: #0958d9;
   --ui-primary-soft: #e6f0ff; /* subtle brand tint fills */
+  --ui-primary-text: #0958d9; /* brand blue tuned for small TEXT (AA on white) */
   --ui-ring: rgba(22, 119, 255, 0.35);
 
   /* console chrome — deep navy navigation rail (Vben #001529) */
