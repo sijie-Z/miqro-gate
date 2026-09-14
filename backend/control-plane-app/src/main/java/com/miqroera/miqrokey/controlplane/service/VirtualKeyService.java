@@ -135,7 +135,7 @@ public class VirtualKeyService {
         }
         if (project.projectTag() == null || project.projectTag().isBlank()) {
             throw new ApiException(HttpStatus.CONFLICT, "ROUTING_TAG_MISSING",
-                    "The project has no routing tag; an administrator must assign one before keys can be created");
+                    "项目尚未设置路由标签，无法创建 Virtual Key；请联系管理员在项目设置中补充后重试");
         }
         if (memberSubject.role() != UserRole.SYSTEM_ADMIN
                 && !membershipRepository.exists(project.id(), memberSubject.id())) {
