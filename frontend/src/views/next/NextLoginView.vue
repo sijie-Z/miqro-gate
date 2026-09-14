@@ -33,7 +33,7 @@ import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
 import { toast } from '@/ui';
 import { language } from '@/i18n';
-import heroComposite from '@/assets/login/hero-composite.png';
+import heroArt from '@/assets/login/hero-full.png';
 
 const route = useRoute();
 const router = useRouter();
@@ -337,6 +337,10 @@ onMounted(async () => {
   <main class="gate-auth" data-testid="login-panel" data-i18n-ignore>
     <!-- Dark hero: gateway portal scene -->
     <section class="gate-hero">
+      <!-- The entire hero is the reference artwork itself (943x1024),
+           with the text areas blanked out; the headline, copy, capability
+           list and footer below are live bilingual HTML on top. -->
+      <img class="hero-art" :src="heroArt" alt="" aria-hidden="true" draggable="false" />
       <header class="hero-header">
         <button class="brand" type="button" aria-label="MiQroGate" @click="router.push('/login')">
           <span class="brand-symbol" aria-hidden="true">
@@ -376,17 +380,6 @@ onMounted(async () => {
           </article>
         </div>
 
-        <!-- Everything right of the copy/capability columns (provider cards,
-             gate installation, orbit lines, floor, status card, terminal) is
-             ONE block cut from the reference master artwork — its internal
-             composition is the reference's own, so there are no seams. -->
-        <img
-          class="hero-composite"
-          :src="heroComposite"
-          alt=""
-          aria-hidden="true"
-          draggable="false"
-        />
       </div>
 
       <footer class="hero-footer">
@@ -931,13 +924,13 @@ onMounted(async () => {
   line-height: 1.55;
 }
 
-.hero-composite {
+.hero-art {
   position: absolute;
-  top: 0;
-  /* Bleeds to the hero's right edge (offset = the hero's horizontal padding). */
-  right: calc(-1 * clamp(48px, 6vw, 96px));
+  inset: 0;
+  width: 100%;
   height: 100%;
-  width: auto;
+  object-fit: cover;
+  object-position: 62% 50%;
   pointer-events: none;
   user-select: none;
 }
@@ -1418,11 +1411,6 @@ onMounted(async () => {
     margin-top: 20px;
     grid-template-columns: 1fr 1fr;
   }
-  .hero-composite {
-    right: -22px;
-    transform: scale(0.92);
-    transform-origin: center center;
-  }
   .auth-content {
     width: min(430px, calc(100% - 88px));
   }
@@ -1436,14 +1424,8 @@ onMounted(async () => {
     min-height: 640px;
     height: 640px;
   }
-  .hero-composite {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    right: -20px;
-    left: auto;
-    height: 100%;
-    opacity: 0.72;
+  .hero-art {
+    object-position: 70% 50%;
   }
   .hero-content {
     display: block;
@@ -1528,12 +1510,6 @@ onMounted(async () => {
     grid-template-columns: 1fr;
     gap: 12px;
     max-width: 300px;
-  }
-  .hero-composite {
-    top: 16%;
-    bottom: 0;
-    right: -80px;
-    opacity: 0.35;
   }
   .hero-footer {
     display: none;
