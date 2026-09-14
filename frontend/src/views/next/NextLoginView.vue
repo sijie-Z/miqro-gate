@@ -23,7 +23,6 @@ import {
 import {
   ArrowRightIcon,
   ChartBarIcon,
-  CheckCircleIcon,
   InternetIcon,
   LockOnIcon,
   SecuredIcon,
@@ -38,6 +37,7 @@ import cardOpenai from '@/assets/login/provider-openai.png';
 import cardAnthropic from '@/assets/login/provider-anthropic.png';
 import cardDeepseek from '@/assets/login/provider-deepseek.png';
 import cardCustom from '@/assets/login/provider-custom.png';
+import sceneArt from '@/assets/login/scene-art.png';
 
 const route = useRoute();
 const router = useRouter();
@@ -378,86 +378,10 @@ onMounted(async () => {
         </div>
 
         <div class="gate-scene" aria-hidden="true">
-          <div class="scene-aura" />
-          <div class="scene-floor" />
-          <div class="scene-grid" />
-
-          <svg class="scene-lines" viewBox="0 0 760 540" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="flow" x1="0" x2="1">
-                <stop offset="0" stop-color="#5d6bff" stop-opacity="0" />
-                <stop offset="0.48" stop-color="#8590ff" stop-opacity="0.85" />
-                <stop offset="1" stop-color="#b2a8ff" stop-opacity="0" />
-              </linearGradient>
-              <filter id="blur">
-                <feGaussianBlur stdDeviation="5" />
-              </filter>
-            </defs>
-            <ellipse
-              cx="372"
-              cy="258"
-              rx="180"
-              ry="132"
-              fill="none"
-              stroke="#7c87ff"
-              stroke-opacity=".24"
-              stroke-dasharray="3 8"
-            />
-            <ellipse
-              cx="372"
-              cy="258"
-              rx="250"
-              ry="183"
-              fill="none"
-              stroke="#6772e9"
-              stroke-opacity=".12"
-              stroke-dasharray="2 12"
-            />
-            <path
-              d="M138 177 C254 177 296 214 346 238"
-              stroke="url(#flow)"
-              stroke-width="2"
-              fill="none"
-            />
-            <path
-              d="M136 270 C257 270 288 261 343 252"
-              stroke="url(#flow)"
-              stroke-width="2"
-              fill="none"
-            />
-            <path
-              d="M160 358 C262 348 294 293 344 269"
-              stroke="url(#flow)"
-              stroke-width="2"
-              fill="none"
-            />
-            <path
-              d="M414 244 C489 217 544 201 632 180"
-              stroke="url(#flow)"
-              stroke-width="2"
-              fill="none"
-            />
-            <path
-              d="M414 258 C498 258 552 258 642 258"
-              stroke="url(#flow)"
-              stroke-width="2"
-              fill="none"
-            />
-            <path
-              d="M414 272 C491 300 549 323 640 340"
-              stroke="url(#flow)"
-              stroke-width="2"
-              fill="none"
-            />
-            <path
-              d="M145 176 C250 176 295 212 346 238 M138 270 C257 270 289 262 343 252 M163 357 C261 348 294 294 344 269"
-              stroke="#8790ff"
-              stroke-opacity=".32"
-              stroke-width="9"
-              filter="url(#blur)"
-              fill="none"
-            />
-          </svg>
+          <!-- The whole right-side scene (gate, orbit lines, floor grid, status
+               card, terminal strip) is the reference illustration itself,
+               cropped from the master artwork with feathered edges. -->
+          <img class="scene-art" :src="sceneArt" alt="" draggable="false" />
 
           <!-- Provider cards: the reference illustration's drawn cards, cropped
                from the master artwork with feathered edges (issue #490). -->
@@ -477,32 +401,6 @@ onMounted(async () => {
               alt="Custom Endpoint"
               draggable="false"
             />
-          </div>
-
-          <div class="gate-arch">
-            <div class="gate-column gate-column-left" />
-            <div class="gate-column gate-column-right" />
-            <div class="gate-top" />
-            <div class="gate-inner-glow" />
-            <div class="gate-light-edge gate-light-left" />
-            <div class="gate-light-edge gate-light-right" />
-            <div class="gate-floor-reflection" />
-          </div>
-
-          <div class="gate-status-card">
-            <div class="gate-status-brand">
-              <span class="mini-symbol"><i /></span>
-              <strong>MiQroGate</strong>
-            </div>
-            <div v-for="check in t.checks" :key="check" class="status-check">
-              <CheckCircleIcon size="12px" /> {{ check }}
-            </div>
-          </div>
-
-          <div class="scene-terminal">
-            <span class="terminal-dot" />
-            <span>{{ t.terminal }}</span>
-            <b>99.99%</b>
           </div>
         </div>
       </div>
@@ -1051,49 +949,15 @@ onMounted(async () => {
   margin-right: -24px;
   align-self: stretch;
 }
-.scene-aura {
+.scene-art {
   position: absolute;
-  left: 31%;
-  top: 35%;
-  width: 42%;
-  height: 30%;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    rgba(114, 114, 255, 0.4),
-    rgba(83, 83, 255, 0.06) 52%,
-    transparent 72%
-  );
-  filter: blur(35px);
-}
-.scene-floor {
-  position: absolute;
-  left: 12%;
-  right: 0;
-  bottom: 11%;
-  height: 24%;
-  transform: perspective(850px) rotateX(64deg);
-  transform-origin: center bottom;
-  border-top: 1px solid rgba(129, 146, 255, 0.1);
-  background: linear-gradient(to bottom, rgba(61, 77, 144, 0.09), rgba(10, 17, 35, 0.75));
-  box-shadow: 0 -40px 100px rgba(72, 79, 255, 0.08);
-}
-.scene-grid {
-  position: absolute;
-  inset: 10% -2% 10% 6%;
-  opacity: 0.14;
-  background-image:
-    linear-gradient(rgba(115, 136, 255, 0.18) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(115, 136, 255, 0.18) 1px, transparent 1px);
-  background-size: 38px 38px;
-  mask-image: radial-gradient(circle at 58% 53%, #000, transparent 67%);
-}
-.scene-lines {
-  position: absolute;
-  inset: 13% 0 14% 0;
+  inset: 0;
   width: 100%;
-  height: 72%;
-  overflow: visible;
+  height: 100%;
+  object-fit: cover;
+  object-position: 62% 50%;
+  pointer-events: none;
+  user-select: none;
 }
 
 /* Provider cards are image assets cropped from the reference master artwork
@@ -1125,190 +989,6 @@ onMounted(async () => {
 .provider-custom {
   left: 18%;
   top: 80%;
-}
-
-.gate-arch {
-  position: absolute;
-  z-index: 4;
-  left: 33%;
-  top: 22%;
-  width: 38%;
-  height: 55%;
-  filter: drop-shadow(0 22px 40px rgba(0, 0, 0, 0.3));
-}
-.gate-column {
-  position: absolute;
-  top: 6%;
-  width: 31%;
-  height: 83%;
-  border: 1px solid rgba(128, 145, 255, 0.55);
-  background: linear-gradient(90deg, rgba(51, 63, 114, 0.85), rgba(21, 29, 58, 0.96));
-}
-.gate-column::after {
-  content: '';
-  position: absolute;
-  inset: 5%;
-  border: 1px solid rgba(180, 190, 255, 0.12);
-  border-radius: 12px 12px 0 0;
-}
-.gate-column-left {
-  left: 0;
-  border-right: 0;
-  border-radius: 22px 0 0 10px;
-  transform: skewY(0deg) perspective(200px) rotateY(7deg);
-  box-shadow:
-    -22px 0 50px rgba(71, 90, 255, 0.1),
-    inset 10px 0 23px rgba(101, 112, 255, 0.12);
-}
-.gate-column-right {
-  right: 0;
-  border-left: 0;
-  border-radius: 0 22px 10px 0;
-  transform: perspective(200px) rotateY(-7deg);
-  box-shadow:
-    22px 0 50px rgba(75, 89, 255, 0.13),
-    inset -10px 0 25px rgba(101, 112, 255, 0.16);
-}
-.gate-top {
-  position: absolute;
-  left: 4%;
-  right: 4%;
-  top: 0;
-  height: 18%;
-  border: 1px solid rgba(145, 159, 255, 0.54);
-  border-bottom: 0;
-  border-radius: 28px 28px 0 0;
-  background: linear-gradient(180deg, rgba(54, 66, 117, 0.92), rgba(34, 43, 79, 0.88));
-  box-shadow:
-    0 0 38px rgba(99, 111, 255, 0.11),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-.gate-inner-glow {
-  position: absolute;
-  left: 16%;
-  right: 16%;
-  top: 17%;
-  bottom: 10%;
-  border-radius: 50px 50px 0 0;
-  background: linear-gradient(180deg, rgba(64, 76, 143, 0.22), rgba(19, 27, 54, 0.04));
-  box-shadow: inset 0 0 70px rgba(94, 105, 255, 0.08);
-}
-.gate-light-edge {
-  position: absolute;
-  top: 18%;
-  bottom: 8%;
-  width: 2px;
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    #7d89ff 16%,
-    #c2b8ff 53%,
-    rgba(86, 95, 255, 0.2) 100%
-  );
-  box-shadow:
-    0 0 20px rgba(128, 125, 255, 0.9),
-    0 0 45px rgba(102, 103, 255, 0.38);
-}
-.gate-light-left {
-  left: 27%;
-  transform: skewX(1deg);
-}
-.gate-light-right {
-  right: 27%;
-  transform: skewX(-1deg);
-}
-.gate-floor-reflection {
-  position: absolute;
-  left: 28%;
-  right: 28%;
-  bottom: -10%;
-  height: 14%;
-  background: radial-gradient(ellipse at center, rgba(116, 112, 255, 0.33), transparent 70%);
-  filter: blur(18px);
-}
-.gate-status-card {
-  position: absolute;
-  z-index: 7;
-  right: 2%;
-  top: 39%;
-  width: 150px;
-  padding: 14px;
-  border: 1px solid rgba(179, 189, 255, 0.22);
-  border-radius: 14px;
-  background: rgba(15, 24, 45, 0.82);
-  box-shadow:
-    0 20px 40px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(18px);
-}
-.gate-status-brand {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding-bottom: 10px;
-  margin-bottom: 9px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 11px;
-}
-.mini-symbol {
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border-radius: 7px;
-  background: linear-gradient(135deg, rgba(116, 126, 255, 0.25), rgba(67, 87, 255, 0.12));
-  border: 1px solid rgba(145, 155, 255, 0.26);
-}
-.mini-symbol i {
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
-  background: #7f91ff;
-  box-shadow: 0 0 10px rgba(127, 145, 255, 0.9);
-}
-.status-check {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding-top: 6px;
-  color: #abb5cb;
-  font-size: 9px;
-}
-.status-check :deep(svg) {
-  color: #62d8a8;
-}
-.scene-terminal {
-  position: absolute;
-  left: 24%;
-  right: 9%;
-  bottom: 4%;
-  height: 31px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 11px;
-  border: 1px solid rgba(128, 145, 255, 0.12);
-  border-radius: 8px;
-  color: #72809c;
-  background: rgba(16, 25, 45, 0.68);
-  font:
-    8px ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace;
-  letter-spacing: 0.08em;
-}
-.scene-terminal b {
-  margin-left: auto;
-  color: #8a97bb;
-  font-weight: 600;
-}
-.terminal-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #65d8a3;
-  box-shadow: 0 0 9px rgba(101, 216, 163, 0.7);
 }
 
 .hero-footer {
