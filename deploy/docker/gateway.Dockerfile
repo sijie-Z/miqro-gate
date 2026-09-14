@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/root/.m2 \
 FROM eclipse-temurin:21-jre-alpine@sha256:974b08960c5d96694c780e65b2d5705268ab1e1ca1a0dd0caf4ba6c3fe34d699
 RUN addgroup -g 10001 -S miqrokey && adduser -u 10001 -S -G miqrokey -h /app miqrokey
 WORKDIR /app
-COPY --from=build --chown=10001:10001 /src/backend/gateway-app/target/gateway-app-*.jar /app/app.jar
+COPY --from=build --chown=10001:10001 /src/backend/gateway-app/target/gateway-app-*-exec.jar /app/app.jar
 USER 10001:10001
 EXPOSE 8081
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-XX:+ExitOnOutOfMemoryError", "-jar", "/app/app.jar"]
