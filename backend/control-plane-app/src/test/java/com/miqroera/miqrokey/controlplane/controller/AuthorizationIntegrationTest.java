@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.LoginRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
+import com.miqroera.miqrokey.controlplane.security.OwnershipService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -139,7 +140,8 @@ class AuthorizationIntegrationTest {
         UUID otherUserId = UUID.randomUUID();
         mockMvc.perform(get("/api/v1/test/ownership/{ownerUserId}", otherUserId).cookie(ps.session))
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("NOT_FOUND"))
-                .andExpect(jsonPath("$.status").value(404)).andExpect(jsonPath("$.detail").value("Resource not found."))
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.detail").value(OwnershipService.RESOURCE_NOT_FOUND))
                 .andExpect(jsonPath("$.requestId").value(notNullValue()));
     }
 

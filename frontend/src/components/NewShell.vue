@@ -216,7 +216,7 @@ async function handleLogout() {
               </svg>
             </DropdownMenuTrigger>
             <DropdownMenuPortal>
-              <DropdownMenuContent class="new-shell__user-menu" :side-offset="6" :align="'end'">
+              <DropdownMenuContent class="ui-menu" :side-offset="6" :align="'end'">
                 <div class="new-shell__user-menu-head">
                   <span class="new-shell__user-menu-name">{{ auth.user?.username }}</span>
                   <span class="new-shell__user-menu-role">{{
@@ -496,16 +496,6 @@ async function handleLogout() {
 
 .new-shell__user-chevron {
   color: var(--ui-foreground-faint);
-}
-
-.new-shell__user-menu {
-  min-width: 180px;
-  background: var(--ui-card);
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-control);
-  box-shadow: var(--ui-shadow-popper);
-  padding: var(--ui-space-1);
-  z-index: 2000;
 }
 
 .new-shell__user-menu-head {

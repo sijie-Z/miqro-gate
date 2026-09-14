@@ -1164,6 +1164,41 @@ test('login form submits credentials and lands on the keys console', async ({ pa
   await expect(page.getByTestId('keys-table')).toBeVisible();
 });
 
+test('failed login shows the Chinese 401 detail with its request id', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, false);
+  await page.route('**/api/v1/auth/me', (route) =>
+    route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/v1/auth/login', (route) =>
+    route.fulfill({
+      status: 401,
+      contentType: 'application/problem+json',
+      body: JSON.stringify({
+        status: 401,
+        code: 'UNAUTHORIZED',
+        title: 'Authentication failed',
+        detail: '账号或密码不正确。',
+        requestId: 'e2e-req-401',
+      }),
+    }),
+  );
+  await page.goto('/login');
+  await page.waitForLoadState('networkidle');
+  await page.evaluate(() => {
+    document.cookie = 'MIQROKEY_CSRF=e2e-csrf; path=/';
+  });
+  await page.getByTestId('login-username').fill('root');
+  await page.getByTestId('login-password').fill('wrong-password');
+  await page.getByTestId('login-submit').click();
+  // Console language is Simplified Chinese — the 401 detail must not leak
+  // English auth copy, and the request id stays available for support.
+  const loginError = page.getByTestId('login-error');
+  await expect(loginError).toContainText('账号或密码不正确');
+  await expect(loginError).toContainText('e2e-req-401');
+  await expect(loginError).not.toContainText('Invalid username');
+});
+
 test('overview page baseline at 1440x900', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockApi(page, true);

@@ -60,7 +60,7 @@ async function parseError(response: Response): Promise<ApiError> {
   }
   return new ApiError({
     type: 'about:blank',
-    title: `Request failed with status ${response.status}`,
+    title: `请求失败（HTTP ${response.status}）`,
     status: response.status,
     code: 'HTTP_ERROR',
     requestId: '',

@@ -640,7 +640,7 @@ onMounted(load);
   align-items: center;
   padding: 1px var(--ui-space-2);
   border-radius: var(--ui-radius-pill);
-  background: var(--ui-fill-muted, var(--ui-bg-muted));
+  background: var(--ui-muted);
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
 }
@@ -656,8 +656,8 @@ onMounted(load);
 }
 
 .next-consumers__caps--full {
-  background: var(--ui-success-soft, var(--ui-success-bg));
-  color: var(--ui-success-fg, var(--ui-color-success));
+  background: var(--ui-success-bg);
+  color: var(--ui-success-fg);
 }
 
 .next-consumers__scope-mode,
@@ -767,7 +767,7 @@ onMounted(load);
   flex-direction: column;
   align-items: center;
   padding: var(--ui-space-2);
-  background: var(--ui-fill-muted, var(--ui-bg-muted));
+  background: var(--ui-muted);
   border-radius: var(--ui-radius-control);
 }
 

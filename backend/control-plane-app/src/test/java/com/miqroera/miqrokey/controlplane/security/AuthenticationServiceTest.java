@@ -212,7 +212,7 @@ class AuthenticationServiceTest {
             when(passwordHasher.verify("old", PASSWORD_HASH)).thenReturn(true);
 
             assertThatThrownBy(() -> service.changePassword(user, UUID.randomUUID(), "old", "short", "req-1"))
-                    .isInstanceOf(AuthenticationException.class).hasMessageContaining("at least 8");
+                    .isInstanceOf(AuthenticationException.class).hasMessage(AuthenticationService.PASSWORD_TOO_SHORT);
         }
 
         @Test
@@ -223,7 +223,7 @@ class AuthenticationServiceTest {
 
             // "Password1" passes uppercase+lowercase+digit policy but is a common password
             assertThatThrownBy(() -> service.changePassword(user, UUID.randomUUID(), "old", "Password1", "req-1"))
-                    .isInstanceOf(AuthenticationException.class).hasMessageContaining("too common");
+                    .isInstanceOf(AuthenticationException.class).hasMessage(AuthenticationService.PASSWORD_TOO_COMMON);
         }
     }
 

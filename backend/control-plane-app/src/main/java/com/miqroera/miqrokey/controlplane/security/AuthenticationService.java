@@ -69,7 +69,18 @@ public class AuthenticationService {
     private static final Logger LOG = LoggerFactory.getLogger(AuthenticationService.class);
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
-    static final String LOGIN_FAILED = "Invalid username or password.";
+    /**
+     * User-facing auth messages are Simplified Chinese — the console language
+     * (frontend-design.md). Keep 401 login failures to ONE generic message so the
+     * response never reveals which credential was wrong.
+     */
+    static final String LOGIN_FAILED = "账号或密码不正确。";
+
+    static final String PASSWORD_TOO_COMMON = "该密码过于常见，请更换其他密码。";
+    static final String CURRENT_PASSWORD_INCORRECT = "当前密码不正确。";
+    static final String PASSWORD_TOO_SHORT = "密码长度不能少于 8 个字符。";
+    static final String PASSWORD_TOO_LONG = "密码长度不能超过 128 个字符。";
+    static final String PASSWORD_COMPLEXITY = "密码必须包含至少一个大写字母、一个小写字母和一个数字。";
 
     /** Allowed endpoints when mustChangePassword is true. */
     static final Set<String> PASSWORD_CHANGE_ALLOWED = Set.of("/api/v1/auth/password", "/api/v1/auth/logout",
@@ -291,17 +302,17 @@ public class AuthenticationService {
     public RegisterResult register(String username, String displayName, String password, String requestId) {
         if (!authProperties.isRegistrationEnabled()) {
             throw new ApiException(org.springframework.http.HttpStatus.FORBIDDEN, "REGISTRATION_DISABLED",
-                    "Self-registration is disabled by configuration");
+                    "自助注册已被配置关闭。");
         }
         if (username == null || username.isBlank() || username.length() > 128) {
             throw new ApiException(org.springframework.http.HttpStatus.BAD_REQUEST, "USERNAME_INVALID",
-                    "username is required (<= 128 chars)");
+                    "用户名必填，且不超过 128 个字符。");
         }
         String normalizedName = displayName == null || displayName.isBlank() ? username : displayName;
         try {
             validatePasswordPolicy(password);
             if (isCommonPassword(password)) {
-                throw new AuthenticationException("That password is too common. Please choose a different one.");
+                throw new AuthenticationException(PASSWORD_TOO_COMMON);
             }
         } catch (AuthenticationException e) {
             throw new ApiException(org.springframework.http.HttpStatus.BAD_REQUEST, "PASSWORD_INVALID", e.getMessage());
@@ -309,8 +320,7 @@ public class AuthenticationService {
 
         userRepository.lockTenantForBootstrap(SEED_TENANT_ID);
         if (userRepository.findByTenantIdAndUsername(SEED_TENANT_ID, username).isPresent()) {
-            throw new ApiException(org.springframework.http.HttpStatus.CONFLICT, "USERNAME_TAKEN",
-                    "username already exists");
+            throw new ApiException(org.springframework.http.HttpStatus.CONFLICT, "USERNAME_TAKEN", "用户名已存在。");
         }
         Instant now = Instant.now();
         User user = new User(UUID.randomUUID(), SEED_TENANT_ID, username, normalizedName, passwordHasher.hash(password),
@@ -329,13 +339,13 @@ public class AuthenticationService {
             String requestId) {
         if (!passwordHasher.verify(currentPassword, currentUser.passwordHash())) {
             progressiveDelay(3);
-            throw new AuthenticationException("Current password is incorrect.");
+            throw new AuthenticationException(CURRENT_PASSWORD_INCORRECT);
         }
 
         validatePasswordPolicy(newPassword);
 
         if (isCommonPassword(newPassword)) {
-            throw new AuthenticationException("That password is too common. Please choose a different one.");
+            throw new AuthenticationException(PASSWORD_TOO_COMMON);
         }
 
         byte[] newHash = passwordHasher.hash(newPassword);
@@ -378,10 +388,10 @@ public class AuthenticationService {
 
     void validatePasswordPolicy(String password) {
         if (password == null || password.length() < 8) {
-            throw new AuthenticationException("Password must be at least 8 characters.");
+            throw new AuthenticationException(PASSWORD_TOO_SHORT);
         }
         if (password.length() > 128) {
-            throw new AuthenticationException("Password must not exceed 128 characters.");
+            throw new AuthenticationException(PASSWORD_TOO_LONG);
         }
         boolean hasUpper = false, hasLower = false, hasDigit = false;
         for (char c : password.toCharArray()) {
@@ -393,8 +403,7 @@ public class AuthenticationService {
                 hasDigit = true;
         }
         if (!hasUpper || !hasLower || !hasDigit) {
-            throw new AuthenticationException(
-                    "Password must contain at least one uppercase letter, one lowercase letter, and one digit.");
+            throw new AuthenticationException(PASSWORD_COMPLEXITY);
         }
     }
 

@@ -64,8 +64,21 @@ describe('aesthetic audit', () => {
     expect(css).not.toMatch(/\.mk-status[^{]*\{[^}]*padding:\s*(?:1[2-9]|2\d)px/);
   });
 
+  it('keeps the shared box model and the teleported popper chrome in the global sheet', () => {
+    // v2 controls size themselves as border-box (width 100% + 1px border +
+    // 24px padding); without the reset every field rendered 26px wider than
+    // its wrapper and bled into the next control in the row.
+    expect(css).toMatch(/\*,\s*\*::before,\s*\*::after\s*\{\s*box-sizing:\s*border-box/);
+    // radix popper roots drop the scoped data-v attribute, so the popover
+    // containers must live in src/styles/*.css for their chrome to apply.
+    expect(css).toMatch(/\.ui-select__content\s*\{/);
+    expect(css).toMatch(/\.ui-menu\s*\{/);
+  });
+
   it('keeps shadows limited to dropdown/popover/modal (cards may cast the hairline shadow)', () => {
-    // TDesign (t-) and legacy (el-) names both sanctioned
+    // TDesign (t-) and legacy (el-) names both sanctioned; the v2 teleported
+    // popper surfaces (.ui-select__content / .ui-menu) live in the global
+    // sheet because radix's popper root drops the scoped data-v attribute.
     // Hairline card shadow (0 1px 2px, or the --ui-shadow-card token) is the
     // sanctioned card depth; anything else must stay on popper/dropdown/dialog.
     const shadowBlocks = css.match(/[^{}]*\{[^}]*box-shadow:[^}]*\}/g) ?? [];
@@ -74,7 +87,8 @@ describe('aesthetic audit', () => {
         /\.mk-card|\.mk-stat-card|\.ui-panel/.test(block) &&
         (/0 1px 2px/.test(block) || /var\(--miqrokey-shadow-card\)/.test(block) ||
             /var\(--ui-shadow-card\)/.test(block));
-      if (!hairlineCard && !/box-shadow:\s*none/.test(block) && !/0 0 0 2px/.test(block)) {
+      const popperSurface = /(?:el|t)-(?:popper|dropdown|dialog|popup)|\.ui-select__content|\.ui-menu/.test(block);
+      if (!hairlineCard && !popperSurface && !/box-shadow:\s*none/.test(block) && !/0 0 0 2px/.test(block)) {
         expect(block).toMatch(/(?:el|t)-(?:popper|dropdown|dialog|popup)/);
       }
     }

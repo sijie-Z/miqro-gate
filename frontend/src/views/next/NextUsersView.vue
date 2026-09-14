@@ -544,7 +544,7 @@ function formatDate(iso?: string): string {
               </svg>
             </DropdownMenuTrigger>
             <DropdownMenuPortal>
-              <DropdownMenuContent class="next-users__menu" :side-offset="4" :align="'end'">
+              <DropdownMenuContent class="ui-menu" :side-offset="4" :align="'end'">
                 <DropdownMenuItem
                   class="next-users__menu-item"
                   @select="openProjectMembership(row as AdminUser)"
@@ -832,16 +832,9 @@ function formatDate(iso?: string): string {
   box-shadow: var(--ui-shadow-focus);
 }
 
-.next-users__menu {
-  min-width: 160px;
-  background: var(--ui-card);
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-control);
-  box-shadow: var(--ui-shadow-popper);
-  padding: var(--ui-space-1);
-  z-index: 2000;
-}
-
+/* .ui-menu panel chrome lives in styles/design-base.css (the radix popper
+   root drops the scoped data-v attribute). Item rules below are slot
+   children and stay scoped. */
 .next-users__menu-item {
   display: flex;
   align-items: center;

@@ -212,10 +212,10 @@ onMounted(load);
           data-testid="audit-from"
         />
         <UiInput v-model="toFilter" type="datetime-local" width="200px" data-testid="audit-to" />
-        <UiButton variant="ghost" size="sm" data-testid="audit-range-7" @click="applyRange(7)"
+        <UiButton variant="ghost" data-testid="audit-range-7" @click="applyRange(7)"
           >近 7 天</UiButton
         >
-        <UiButton variant="ghost" size="sm" data-testid="audit-range-30" @click="applyRange(30)"
+        <UiButton variant="ghost" data-testid="audit-range-30" @click="applyRange(30)"
           >近 30 天</UiButton
         >
         <UiButton variant="primary" data-testid="audit-refresh" @click="load">查询</UiButton>
@@ -306,11 +306,11 @@ onMounted(load);
 .next-audit__notice {
   margin-top: var(--ui-space-3);
   font-size: var(--ui-font-size-sm);
-  color: var(--ui-color-text-secondary);
+  color: var(--ui-foreground-secondary);
 }
 
 .next-audit__notice--error {
-  color: var(--ui-color-danger);
+  color: var(--ui-danger-fg);
 }
 
 .ui-alert {
