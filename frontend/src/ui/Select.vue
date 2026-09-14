@@ -60,9 +60,26 @@ defineOptions({ name: 'UiSelect', inheritAttrs: false });
 const attrs = useAttrs();
 const open = ref(false);
 
+/**
+ * radix-vue's SelectItem throws on an empty-string value ('' is reserved for
+ * "no selection"), so filter-style options like `{ value: '', label: '全部' }`
+ * crashed the popper and the dropdown never rendered. Map '' to a sentinel
+ * on the way into radix and back to '' on the way out.
+ */
+const EMPTY_VALUE = '__ui-select-none__';
+const hasEmptyOption = computed(() => props.options.some((o) => o.value === ''));
+const radixOptions = computed(() =>
+  props.options.map((o) => (o.value === '' ? { ...o, value: EMPTY_VALUE } : o)),
+);
+const radixValue = computed(() => {
+  if (props.modelValue === '') return hasEmptyOption.value ? EMPTY_VALUE : undefined;
+  return props.modelValue || undefined;
+});
+
 function pick(value: string) {
-  emit('update:modelValue', value);
-  emit('change', value);
+  const emitted = value === EMPTY_VALUE ? '' : value;
+  emit('update:modelValue', emitted);
+  emit('change', emitted);
 }
 
 const triggerClasses = computed(() => ({
@@ -78,7 +95,7 @@ const triggerClasses = computed(() => ({
       {{ label }}<span v-if="required" class="ui-select__required" aria-hidden="true"> *</span>
     </label>
     <SelectRoot
-      :model-value="modelValue || undefined"
+      :model-value="radixValue"
       :disabled="disabled || loading"
       @update:model-value="pick"
       @update:open="open = $event"
@@ -115,7 +132,7 @@ const triggerClasses = computed(() => ({
         >
           <SelectViewport class="ui-select__viewport">
             <SelectItem
-              v-for="option in options"
+              v-for="option in radixOptions"
               :key="option.value"
               :value="option.value"
               :disabled="option.disabled"
@@ -230,22 +247,10 @@ const triggerClasses = computed(() => ({
   transform: rotate(180deg);
 }
 
-.ui-select__content {
-  background: var(--ui-card);
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-control);
-  box-shadow: var(--ui-shadow-popper);
-  padding: var(--ui-space-1);
-  z-index: 2000;
-  min-width: var(--radix-select-trigger-width);
-  max-height: 320px;
-  overflow: hidden;
-}
-
-.ui-select__viewport {
-  overflow-y: auto;
-  padding: 0;
-}
+/* .ui-select__content and .ui-select__viewport chrome lives in the global
+   sheet (styles/design-base.css) — radix's PopperContent chain drops the
+   scoped data-v attribute on those two elements, so scoped rules would
+   never match. Items below are slot children and keep scoped styling. */
 
 .ui-select__item {
   display: flex;

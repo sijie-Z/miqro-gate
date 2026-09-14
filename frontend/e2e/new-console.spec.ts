@@ -684,3 +684,49 @@ test('regular users are redirected from admin routes', async ({ page }) => {
   await page.goto('/app/users');
   await expect(page).toHaveURL(/\/app\/keys/);
 });
+
+test('admin audit: filter select opens with the styled popper (empty-value option regression)', async ({
+  page,
+}) => {
+  await mockSession(page, {
+    id: '0190-0000-0000-0001',
+    username: 'root',
+    displayName: 'Root Admin',
+    role: 'SYSTEM_ADMIN',
+    mustChangePassword: false,
+  });
+  await page.route('**/api/v1/admin/audit-events*', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: '0190-0000-0000-00e1',
+          chainPosition: 167,
+          createdAt: '2026-09-14T06:20:18Z',
+          action: 'LOGIN_SUCCESS',
+          targetType: 'USER',
+          targetId: '0190-0000-0000-0001',
+          targetName: 'root',
+          changeSummary: '{"username": "root"}',
+        },
+      ],
+    }),
+  );
+
+  await page.goto('/app/audit');
+  await expect(page.getByTestId('audit-table')).toBeVisible();
+
+  // The 目标类型 filter carries a `{ value: '', label: '全部类型' }` option.
+  // radix SelectItem rejects empty-string values — opening used to crash the
+  // popper so nothing rendered. The popover must open, list its options and
+  // carry the global popper chrome (white card + border + shadow) even though
+  // the teleported radix root drops the scoped data-v attribute.
+  await page.getByTestId('audit-targettype-filter').click();
+  const listbox = page.getByRole('listbox');
+  await expect(listbox).toBeVisible();
+  await expect(listbox).toContainText('全部类型');
+  await expect(listbox).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  await expect(listbox).toHaveCSS('box-shadow', /rgba?\(/);
+
+  await page.getByRole('option', { name: '全部类型' }).click();
+  await expect(page.getByTestId('audit-targettype-filter')).toContainText('全部类型');
+});
