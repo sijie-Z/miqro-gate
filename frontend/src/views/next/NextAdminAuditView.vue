@@ -64,6 +64,7 @@ const targetTypeOptions = [
 const columns = [
   { key: 'chainPosition', title: '位置', width: '90px', align: 'right' as const },
   { key: 'createdAt', title: '时间', width: '180px' },
+  { key: 'actor', title: '操作者', width: '160px' },
   { key: 'action', title: '动作', width: '200px' },
   { key: 'targetType', title: '目标类型', width: '120px' },
   { key: 'target', title: '目标', minWidth: '180px' },
@@ -258,6 +259,15 @@ onMounted(load);
         <template #createdAt="{ row }">{{
           formatTime((row as AuditEventView).createdAt)
         }}</template>
+        <template #actor="{ row }">
+          <span v-if="(row as AuditEventView).actorName">{{
+            (row as AuditEventView).actorName
+          }}</span>
+          <span v-else-if="(row as AuditEventView).actorId" class="ui-mono" data-testid="audit-actor-fallback">{{
+            shortId((row as AuditEventView).actorId!)
+          }}</span>
+          <span v-else>—</span>
+        </template>
         <template #action="{ row }">
           <span class="ui-mono">{{ (row as AuditEventView).action }}</span>
         </template>

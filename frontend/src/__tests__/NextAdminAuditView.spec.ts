@@ -12,6 +12,7 @@ const event = {
   id: 'a1',
   chainPosition: 12,
   actorId: 'root',
+  actorName: 'Admin',
   action: 'LOGIN_SUCCESS',
   targetType: 'USER',
   targetId: '1f8a2c34-9999-4aaa-bbbb-ccccddddeeee',
@@ -70,6 +71,17 @@ describe('NextAdminAuditView', () => {
     expect(wrapper.text()).toContain('LOGIN_SUCCESS');
     expect(wrapper.text()).toContain('root 登录成功');
     expect(wrapper.text()).toContain('生产密钥');
+    expect(wrapper.text()).toContain('Admin');
+  });
+
+  it('falls back to the short actor id when the name is unresolved (#484)', async () => {
+    mockApi.auditEvents.mockResolvedValue([
+      { ...event, actorName: undefined, actorId: '11111111-2222-3333-4444-555555555555' },
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.text()).toContain('11111111…');
+    expect(wrapper.text()).not.toContain('11111111-2222');
   });
 
   it('falls back to the short target id when the name is unresolved (#389)', async () => {
