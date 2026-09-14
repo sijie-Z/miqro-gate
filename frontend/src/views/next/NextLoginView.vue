@@ -150,8 +150,8 @@ onMounted(async () => {
         <div class="hero-copy">
           <p class="hero-eyebrow">企业级 AI 基础设施</p>
           <h1>
-            网关悄然运行。<br />
-            <span>密钥由你<em>掌控</em>。</span>
+            网关静默运转。<br />
+            <span>密钥<em>尽在掌控</em>。</span>
           </h1>
           <p class="hero-description">
             MiQroGate 是企业级 AI 凭证虚拟化与访问控制平面，为你的大模型 API
@@ -243,16 +243,63 @@ onMounted(async () => {
           </svg>
 
           <div class="provider-card provider-openai">
-            <span class="provider-logo">✳</span><span>OpenAI</span><i />
+            <span class="provider-logo">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true">
+                <g stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+                  <path d="M12 2.8 14.3 6.8 12 10.8 9.7 6.8Z" />
+                  <path d="M12 2.8 14.3 6.8 12 10.8 9.7 6.8Z" transform="rotate(60 12 12)" />
+                  <path d="M12 2.8 14.3 6.8 12 10.8 9.7 6.8Z" transform="rotate(120 12 12)" />
+                  <path d="M12 2.8 14.3 6.8 12 10.8 9.7 6.8Z" transform="rotate(180 12 12)" />
+                  <path d="M12 2.8 14.3 6.8 12 10.8 9.7 6.8Z" transform="rotate(240 12 12)" />
+                  <path d="M12 2.8 14.3 6.8 12 10.8 9.7 6.8Z" transform="rotate(300 12 12)" />
+                </g>
+                <circle cx="12" cy="12" r="1.3" fill="currentColor" />
+              </svg>
+            </span>
+            <span>OpenAI</span><i />
           </div>
           <div class="provider-card provider-anthropic">
-            <span class="provider-logo">AI</span><span>Anthropic</span><i />
+            <span class="provider-logo">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true">
+                <path
+                  d="M5.2 19 12 4.6 18.8 19 M8.6 13.4h6.8"
+                  stroke="currentColor"
+                  stroke-width="1.9"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
+            <span>Anthropic</span><i />
           </div>
           <div class="provider-card provider-deepseek">
-            <span class="provider-logo">◈</span><span>DeepSeek</span><i />
+            <span class="provider-logo">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.2" stroke="currentColor" stroke-width="1.6" />
+                <path
+                  d="M6 13.6c2.6-2.2 5.4-2.2 8 0M8.6 16.6c1.8-1.2 3.6-1.2 5.4 0"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                  stroke-linecap="round"
+                />
+                <circle cx="12" cy="9.4" r="1.1" fill="currentColor" />
+              </svg>
+            </span>
+            <span>DeepSeek</span><i />
           </div>
           <div class="provider-card provider-custom">
-            <span class="provider-logo">⌁</span><span>自定义端点</span><i />
+            <span class="provider-logo">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true">
+                <path
+                  d="M9 7V3.8M15 7V3.8M7 7h10v2.6a5 5 0 0 1-10 0ZM12 14.8V20"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
+            <span>自定义端点</span><i />
           </div>
 
           <div class="gate-arch">
@@ -674,7 +721,7 @@ onMounted(async () => {
   display: grid;
   /* Copy column wide enough for the Chinese headline's 6-glyph lines (the
      reference's 0.8fr squeezed them into four ragged lines). */
-  grid-template-columns: minmax(310px, 1.2fr) minmax(250px, 0.8fr);
+  grid-template-columns: minmax(310px, 1.1fr) minmax(250px, 0.9fr);
   gap: 20px;
   align-items: center;
 }
@@ -835,10 +882,12 @@ onMounted(async () => {
   display: grid;
   place-items: center;
   border-radius: 7px;
-  font-size: 10px;
   color: #fff;
   background: rgba(255, 255, 255, 0.09);
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.provider-logo svg {
+  display: block;
 }
 .provider-openai {
   left: 7%;
