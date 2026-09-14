@@ -145,6 +145,10 @@ class BillingApiIntegrationTest {
         // A random key is rejected.
         mockMvc.perform(get("/api/v1/billing/summary").header("X-API-Key", "mqk_api_00000000_bogus"))
                 .andExpect(status().isUnauthorized());
+
+        // A malformed timestamp is a client error, never a 500 (#475).
+        mockMvc.perform(get("/api/v1/billing/summary").param("from", "notatime").header("X-API-Key", apiKey))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("TIMESTAMP_INVALID"));
     }
 
     @Test

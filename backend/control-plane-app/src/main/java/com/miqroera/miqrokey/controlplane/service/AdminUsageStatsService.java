@@ -39,6 +39,8 @@ import java.util.UUID;
 public class AdminUsageStatsService {
 
     private static final int MAX_PAGE_SIZE = 200;
+    /** Upper bound on page numbers (offset-overflow guard, #475). */
+    private static final long MAX_PAGE = 1_000_000L;
 
     private final UsageStatsRepository usageStatsRepository;
     private final PriceSnapshotRepository priceSnapshotRepository;
@@ -105,8 +107,10 @@ public class AdminUsageStatsService {
     public UsageRecordPage records(UUID tenantId, Instant from, Instant to, long page, int size, UUID userId,
             UUID projectId, UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId,
             String modelId) {
-        if (page < 1) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "PAGE_INVALID", "page must be >= 1");
+        if (page < 1 || page > MAX_PAGE) {
+            // #475: an unchecked huge page overflows (page-1)*size into a negative
+            // SQL OFFSET; bound it as a client error instead.
+            throw new ApiException(HttpStatus.BAD_REQUEST, "PAGE_INVALID", "page must be between 1 and " + MAX_PAGE);
         }
         if (size < 1 || size > MAX_PAGE_SIZE) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "SIZE_INVALID",

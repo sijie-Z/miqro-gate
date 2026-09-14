@@ -98,6 +98,20 @@ public class McpServiceRepositoryImpl implements McpServiceRepository {
 
     @Override
     @Transactional
+    public McpService updateStatus(UUID tenantId, UUID serviceId, String status) {
+        // #475: narrow write — health columns stay untouched (the previous
+        // full-row write replayed a stale read over a newer probe result).
+        jdbc.update("""
+                UPDATE mcp_services
+                SET status = :status, version = version + 1, updated_at = now()
+                WHERE id = :id AND tenant_id = :tenantId
+                """,
+                new MapSqlParameterSource("status", status).addValue("id", serviceId).addValue("tenantId", tenantId));
+        return findByIdAndTenantId(serviceId, tenantId).orElseThrow();
+    }
+
+    @Override
+    @Transactional
     public McpService update(McpService service, long expectedVersion) {
         int rows = jdbc.update("""
                 UPDATE mcp_services

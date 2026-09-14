@@ -92,6 +92,36 @@ class AdminMcpServiceApiIntegrationTest {
                 .andExpect(status().isOk());
     }
 
+    @Test
+    @DisplayName("a manual status switch preserves the latest probe health (#475)")
+    void statusSwitchPreservesHealth() throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/mcp-services").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content("{\"name\":\"health-keep\",\"endpoint\":\"https://mcp.example.test/mcp\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String serviceId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        // A probe commits a fresh health result just before the admin switch.
+        jdbc.update("""
+                UPDATE mcp_services SET health_status = 'UNHEALTHY', health_checked_at = now(),
+                    consecutive_failures = 3 WHERE id = :id
+                """, new MapSqlParameterSource("id", java.util.UUID.fromString(serviceId)));
+
+        mockMvc.perform(post("/api/v1/admin/mcp-services/" + serviceId + "/status").param("status", "OFFLINE")
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+
+        Map<String, Object> row = jdbc.queryForMap(
+                "SELECT status, health_status, consecutive_failures FROM mcp_services WHERE id = :id",
+                new MapSqlParameterSource("id", java.util.UUID.fromString(serviceId)));
+        org.assertj.core.api.Assertions.assertThat(row.get("status")).isEqualTo("OFFLINE");
+        // The narrow write must not roll the probe result back (#475; pre-fix the
+        // full-row write replayed the stale read).
+        org.assertj.core.api.Assertions.assertThat(row.get("health_status")).isEqualTo("UNHEALTHY");
+        org.assertj.core.api.Assertions.assertThat(row.get("consecutive_failures")).isEqualTo(3);
+    }
+
     @AfterEach
     void tearDown() {
         clean();
@@ -262,10 +292,11 @@ class AdminMcpServiceApiIntegrationTest {
         String id = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
 
         // T2 (this connection) bumps the version WITHOUT committing — the row
-        // lock is held. T1's status switch reads version 0, then blocks on that
-        // lock in its version-guarded UPDATE; after the commit the UPDATE
-        // re-evaluates against version 1 and loses — a retry-shaped conflict,
-        // never a 500.
+        // lock is held. T1's health-config update reads version 0, then blocks
+        // on that lock in its version-guarded UPDATE; after the commit the
+        // UPDATE re-evaluates against version 1 and loses — a retry-shaped
+        // conflict, never a 500. (The status switch itself became a narrow
+        // single-column write in #475: it serializes instead of conflicting.)
         var dataSource = jdbc.getJdbcTemplate().getDataSource();
         ExecutorService io = Executors.newSingleThreadExecutor();
         try (Connection conn = dataSource.getConnection()) {
@@ -275,10 +306,11 @@ class AdminMcpServiceApiIntegrationTest {
                 ps.setObject(1, UUID.fromString(id));
                 ps.executeUpdate();
             }
-            Future<Integer> status = io.submit(() -> mockMvc
-                    .perform(post("/api/v1/admin/mcp-services/" + id + "/status?status=OFFLINE")
-                            .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken))
-                    .andReturn().getResponse().getStatus());
+            Future<Integer> status = io
+                    .submit(() -> mockMvc.perform(post("/api/v1/admin/mcp-services/" + id + "/health-config")
+                            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                            .content("{\"checkIntervalSeconds\":45}").cookie(sessionCookie, csrfCookie)
+                            .header("X-CSRF-Token", csrfToken)).andReturn().getResponse().getStatus());
             Thread.sleep(500);
             org.assertj.core.api.Assertions.assertThat(status.isDone()).as("must wait on the row lock").isFalse();
             conn.commit();

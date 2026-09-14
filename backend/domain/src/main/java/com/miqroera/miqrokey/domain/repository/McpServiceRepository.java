@@ -31,6 +31,14 @@ public interface McpServiceRepository {
             int consecutiveFailures, int consecutiveSuccesses);
 
     /**
+     * Narrow status switch (#475): writes only the status column, never the health
+     * telemetry — a stale full-row write could otherwise roll back the latest probe
+     * result (health writes do not bump the version, so the optimistic predicate
+     * cannot catch it).
+     */
+    McpService updateStatus(UUID tenantId, UUID serviceId, String status);
+
+    /**
      * Replaces the full row (status switch and admin edits with optimistic lock;
      * health telemetry goes through {@link #updateHealth}).
      */

@@ -112,7 +112,8 @@ public class ExportTaskService {
                        error_message, created_at, finished_at, expires_at, reconcile_level
                 FROM export_tasks WHERE tenant_id = :tenantId
                 ORDER BY created_at DESC LIMIT :limit
-                """, new MapSqlParameterSource("tenantId", tenantId).addValue("limit", Math.min(limit, 50)),
+                """,
+                new MapSqlParameterSource("tenantId", tenantId).addValue("limit", Math.max(1, Math.min(limit, 50))),
                 EXPORT_META_MAPPER);
     }
 
