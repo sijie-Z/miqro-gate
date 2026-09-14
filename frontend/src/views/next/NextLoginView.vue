@@ -365,16 +365,19 @@ onMounted(async () => {
             >
           </h1>
           <p class="hero-description">{{ t.heroDesc }}</p>
+        </div>
 
-          <div class="hero-capabilities">
-            <article v-for="cap in capItems" :key="cap.title" class="capability">
-              <span class="capability-icon"><component :is="cap.icon" size="18px" /></span>
-              <span>
-                <strong>{{ cap.title }}</strong>
-                <small>{{ cap.small }}</small>
-              </span>
-            </article>
-          </div>
+        <!-- Capability list sits below the copy as its own left-hand column
+             (reference composition: copy on top, capabilities and provider
+             cards stacked underneath it). -->
+        <div class="hero-capabilities">
+          <article v-for="cap in capItems" :key="cap.title" class="capability">
+            <span class="capability-icon"><component :is="cap.icon" size="18px" /></span>
+            <span>
+              <strong>{{ cap.title }}</strong>
+              <small>{{ cap.small }}</small>
+            </span>
+          </article>
         </div>
 
         <div class="gate-scene" aria-hidden="true">
@@ -869,9 +872,10 @@ onMounted(async () => {
 .hero-copy {
   position: relative;
   z-index: 5;
-  align-self: center;
+  /* Top-anchored like the reference (copy occupies the upper third). */
+  align-self: start;
   max-width: 560px;
-  padding-bottom: 22px;
+  padding-top: 56px;
 }
 .hero-eyebrow {
   margin: 0;
@@ -881,7 +885,7 @@ onMounted(async () => {
   letter-spacing: 0.18em;
 }
 .hero-copy h1 {
-  margin: 17px 0 24px;
+  margin: 24px 0 24px;
   /* Sized so 密钥由你掌控。 holds one line at every desktop width (the
      reference image shows the headline as two unbroken lines). */
   font-size: clamp(40px, 3.9vw, 64px);
@@ -899,18 +903,25 @@ onMounted(async () => {
 }
 .hero-description {
   max-width: 500px;
-  margin: 0 0 36px;
+  margin: 0 0 28px;
   color: #a4afc7;
   font-size: 13px;
   line-height: 1.9;
   letter-spacing: 0.005em;
 }
 
+/* Single-column stack in its own left-hand column (reference measured
+   geometry: x ≈ 8–33% of the hero, starting at ~39% viewport height). */
 .hero-capabilities {
+  position: absolute;
+  left: 0;
+  top: 42%;
+  z-index: 5;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px 18px;
-  max-width: 480px;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  width: 34%;
+  max-width: 300px;
 }
 .capability {
   display: grid;
@@ -976,20 +987,20 @@ onMounted(async () => {
   pointer-events: none;
 }
 .provider-openai {
-  left: 7%;
-  top: 33%;
+  left: -23%;
+  top: 38%;
 }
 .provider-anthropic {
-  left: 2%;
-  top: 49%;
+  left: -40%;
+  top: 45.4%;
 }
 .provider-deepseek {
-  left: 7%;
-  top: 65%;
+  left: -43%;
+  top: 53%;
 }
 .provider-custom {
-  left: 18%;
-  top: 80%;
+  left: -34%;
+  top: 60.6%;
 }
 
 .hero-footer {
@@ -1454,6 +1465,34 @@ onMounted(async () => {
   }
   .hero-copy h1 {
     font-size: clamp(40px, 4.6vw, 58px);
+  }
+  .hero-copy {
+    padding-top: 40px;
+  }
+  /* Below the desktop collage the capability list flows under the copy and
+     the provider cards return to positive offsets inside the scene. */
+  .hero-capabilities {
+    position: static;
+    width: auto;
+    max-width: 480px;
+    margin-top: 20px;
+    grid-template-columns: 1fr 1fr;
+  }
+  .provider-openai {
+    left: 2%;
+    top: 33%;
+  }
+  .provider-anthropic {
+    left: 0;
+    top: 41%;
+  }
+  .provider-deepseek {
+    left: 2%;
+    top: 49%;
+  }
+  .provider-custom {
+    left: 12%;
+    top: 57%;
   }
   .gate-scene {
     margin-right: -36px;
