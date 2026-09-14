@@ -147,6 +147,20 @@ class McpProxyContractTest {
         }
 
         @Test
+        @DisplayName("an oversized body is rejected with 413, never buffered unbounded (#477)")
+        void oversizedBodyIsRejected() {
+            String padding = "x".repeat(300 * 1024); // > the 256KB default proxy buffer
+            String big = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{\"pad\":\"" + padding
+                    + "\"}}";
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_ALLOWED)).bodyValue(big).exchange()
+                    .expectStatus().isEqualTo(413).expectBody().returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("payload_too_large");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
         @DisplayName("should reject an unknown MCP service name")
         void shouldRejectUnknownService() {
             byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", "no-such-service")
