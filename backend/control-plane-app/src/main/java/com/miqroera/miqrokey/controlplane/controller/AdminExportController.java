@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.security.UserContext;
+import com.miqroera.miqrokey.controlplane.dto.ExportTaskView;
 import com.miqroera.miqrokey.controlplane.service.ExportTaskService;
 import com.miqroera.miqrokey.domain.usage.ExportFormat;
 import com.miqroera.miqrokey.domain.usage.ExportTask;
@@ -41,18 +42,20 @@ public class AdminExportController {
 
     /** Creates an export task; the artifact is produced asynchronously. */
     @PostMapping
-    public ResponseEntity<ExportTask> create(@RequestParam ExportFormat format,
+    public ResponseEntity<ExportTaskView> create(@RequestParam ExportFormat format,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
         var user = userContext.getUser();
         ExportTask task = exportTaskService.create(user.tenantId(), user.id(), format, from, to);
-        return ResponseEntity.accepted().body(task);
+        // #475: metadata view — the entity's byte[] fileBytes must never be
+        // base64-serialized into responses (downloads are the bytes channel).
+        return ResponseEntity.accepted().body(toView(task));
     }
 
     /** Task metadata (never the artifact bytes). */
     @GetMapping("/{taskId}")
-    public ExportTask status(@PathVariable UUID taskId) {
-        return exportTaskService.status(userContext.getUser().tenantId(), taskId);
+    public ExportTaskView status(@PathVariable UUID taskId) {
+        return exportTaskService.taskMeta(userContext.getUser().tenantId(), taskId);
     }
 
     /** Downloads the finished gzip artifact with its SHA-256 in the header. */
@@ -68,9 +71,15 @@ public class AdminExportController {
                 .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(task.byteCount())).body(task.fileBytes());
     }
 
-    /** Recent tasks for the admin UI. */
+    /** Recent tasks for the admin UI (metadata only, #475). */
     @GetMapping
-    public List<ExportTask> recent(@RequestParam(defaultValue = "20") int limit) {
-        return exportTaskService.recent(userContext.getUser().tenantId(), limit);
+    public List<ExportTaskView> recent(@RequestParam(defaultValue = "20") int limit) {
+        return exportTaskService.recentMeta(userContext.getUser().tenantId(), limit);
+    }
+
+    private static ExportTaskView toView(ExportTask task) {
+        return new ExportTaskView(task.id(), task.createdBy(), task.format(), task.periodFrom(), task.periodTo(),
+                task.status(), task.sha256(), task.rowCount(), task.byteCount(), task.errorMessage(), task.createdAt(),
+                task.finishedAt(), task.expiresAt(), task.reconcileLevel());
     }
 }

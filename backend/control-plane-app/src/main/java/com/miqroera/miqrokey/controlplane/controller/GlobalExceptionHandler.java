@@ -231,6 +231,15 @@ public class GlobalExceptionHandler {
                 .body(body);
     }
 
+    /** #475: manually parsed time parameters (billing from/to etc.) fail as 400. */
+    @ExceptionHandler(java.time.format.DateTimeParseException.class)
+    public ResponseEntity<Map<String, Object>> handleDateTimeParse(java.time.format.DateTimeParseException e,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problemDetail(400, "TIMESTAMP_INVALID", "Invalid timestamp", "时间参数格式无效，需为 ISO-8601。",
+                        resolveRequestId(request)));
+    }
+
     private static String resolveRequestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");
         if (header != null && !header.isBlank())

@@ -42,6 +42,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -131,6 +132,50 @@ class WebhookAlertApiIntegrationTest {
         exchange.sendResponseHeaders(200, body.length);
         exchange.getResponseBody().write(body);
         exchange.close();
+    }
+
+    @Test
+    @DisplayName("a negative deliveries limit is clamped, not a 500 (#475)")
+    void negativeDeliveriesLimitIsClamped() throws Exception {
+        MvcResult created = mockMvc
+                .perform(
+                        post("/api/v1/admin/webhooks").contentType(MediaType.APPLICATION_JSON)
+                                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                                .content(objectMapper.writeValueAsString(Map.of("name",
+                                        "limit-clamp-" + java.util.UUID.randomUUID().toString().substring(0, 8), "url",
+                                        mockBaseUrl, "secret", "whsec-clamp-value"))))
+                .andExpect(status().isOk()).andReturn();
+        String endpointId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        mockMvc.perform(
+                get("/api/v1/admin/webhooks/" + endpointId + "/deliveries").param("limit", "-5").cookie(sessionCookie))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("PATCH keeps working after a foreign commit (re-read semantics, #475)")
+    void patchAfterForeignCommitStillWorks() throws Exception {
+        MvcResult created = mockMvc
+                .perform(
+                        post("/api/v1/admin/webhooks").contentType(MediaType.APPLICATION_JSON)
+                                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                                .content(objectMapper.writeValueAsString(Map.of("name",
+                                        "cas-ok-" + java.util.UUID.randomUUID().toString().substring(0, 8), "url",
+                                        mockBaseUrl, "secret", "whsec-cas-ok-value"))))
+                .andExpect(status().isOk()).andReturn();
+        String endpointId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        // A foreign commit moves the row version; the service must re-read and
+        // still land cleanly (version predicate comes from the fresh read).
+        jdbc.update("UPDATE webhook_endpoints SET version = version + 1 WHERE id = :id",
+                new MapSqlParameterSource("id", java.util.UUID.fromString(endpointId)));
+
+        mockMvc.perform(patch("/api/v1/admin/webhooks/" + endpointId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content("{\"name\":\"renamed-after\"}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("renamed-after"));
     }
 
     @Test

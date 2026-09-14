@@ -13,6 +13,7 @@ import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageAggRow;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -64,6 +65,16 @@ class AdminUsageStatsServiceTest {
         service = new AdminUsageStatsService(usageStatsRepository, priceSnapshotRepository);
         admin = new User(ADMIN_ID, TENANT, "root", "Root Admin", new byte[32], UserRole.SYSTEM_ADMIN, UserStatus.ACTIVE,
                 false, 0, null, null, 0L, Instant.now(), Instant.now());
+    }
+
+    @Test
+    @DisplayName("an absurd page number is rejected instead of overflowing the offset (#475)")
+    void absurdPageNumberRejected() {
+        org.assertj.core.api.Assertions
+                .assertThatThrownBy(() -> service.records(TENANT, Instant.now().minus(1, ChronoUnit.HOURS),
+                        Instant.now(), Long.MAX_VALUE, 50, null, null, null, null, null, null, null))
+                .isInstanceOf(com.miqroera.miqrokey.controlplane.service.ApiException.class)
+                .hasMessageContaining("page");
     }
 
     @Test

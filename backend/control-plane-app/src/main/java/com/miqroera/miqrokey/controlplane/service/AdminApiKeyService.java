@@ -40,6 +40,11 @@ public class AdminApiKeyService {
 
     @Transactional
     public Issued issue(UUID tenantId, UUID actorId, String name, Instant expiresAt) {
+        // #475: an already-expired key is dead on arrival (consumer keys reject
+        // the same input) — refuse instead of issuing unusable credentials.
+        if (expiresAt != null && !expiresAt.isAfter(Instant.now())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "API_KEY_EXPIRES_INVALID", "到期时间必须晚于当前时间。");
+        }
         AdminApiKey.GeneratedKey generated = AdminApiKey.generateKey();
         AdminApiKey key = new AdminApiKey(UUID.randomUUID(), tenantId, name.trim(), generated.digest(),
                 generated.prefix(), actorId, expiresAt, null, Instant.now(), null);
@@ -89,8 +94,7 @@ public class AdminApiKeyService {
     }
 
     private static String safeJson(String value) {
-        // #447: full escaping (control characters included) via the shared helper.
-        return AuditSummaries.escapeJson(value);
+        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     /** Compact JSON array for the audit summary (codes are fixed ASCII). */

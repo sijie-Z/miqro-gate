@@ -102,6 +102,15 @@ class AdminApiKeyServiceTest {
     }
 
     @Test
+    @DisplayName("an already-expired expiry is rejected at issue time (#475)")
+    void pastExpiryRejected() {
+        org.assertj.core.api.Assertions
+                .assertThatThrownBy(() -> service.issue(UUID.randomUUID(), UUID.randomUUID(), "expired-key",
+                        Instant.now().minusSeconds(60)))
+                .isInstanceOf(com.miqroera.miqrokey.controlplane.service.ApiException.class).hasMessageContaining("到期");
+    }
+
+    @Test
     @DisplayName("issue stores only the digest and returns the plaintext once")
     void issueStoresDigestOnly() {
         AdminApiKeyService.Issued issued = service.issue(tenant, actor, "ops-read", null);
@@ -120,7 +129,9 @@ class AdminApiKeyServiceTest {
     @DisplayName("list surfaces views without digests and expiry flips active")
     void listAndExpiry() {
         service.issue(tenant, actor, "short-lived", Instant.now().plus(10, ChronoUnit.MINUTES));
-        service.issue(tenant, actor, "expired", Instant.now().minusSeconds(5));
+        // #475: issue() now refuses past expiries — seed the expired row directly.
+        repository.insert(new AdminApiKey(UUID.randomUUID(), tenant, "expired", new byte[32], "mqk_admin_x", actor,
+                Instant.now().minusSeconds(5), null, Instant.now(), null));
 
         List<AdminApiKeyView> views = service.list(tenant);
         assertThat(views).hasSize(2);

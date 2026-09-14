@@ -90,7 +90,9 @@ public class AdminMcpService {
         if (service.status().equals(status)) {
             throw new ApiException(HttpStatus.CONFLICT, "MCP_STATUS_UNCHANGED", "MCP 服务已处于该状态。");
         }
-        McpService updated = repository.update(withStatus(service, status), service.version());
+        // #475: narrow write — a full-row write from this stale read would roll
+        // back any probe result committed in between.
+        McpService updated = repository.updateStatus(tenantId, serviceId, status);
         routeRefreshPublisher.publishChanged();
         auditService.record(tenantId, adminId, "MCP_SERVICE_STATUS", "MCP_SERVICE", serviceId,
                 AuditSummaries.summary("name", AuditSummaries.sanitize(service.name()), "status", status), requestId);

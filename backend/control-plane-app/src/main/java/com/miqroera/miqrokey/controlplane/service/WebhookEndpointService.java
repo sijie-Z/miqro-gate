@@ -98,16 +98,22 @@ public class WebhookEndpointService {
     public WebhookEndpoint update(UUID tenantId, UUID endpointId, String name, Boolean enabled, Integer timeoutMs,
             AuditContext context) {
         WebhookEndpoint existing = get(tenantId, endpointId);
-        jdbc.update("""
+        // #475: compare-and-set on the version read above — two concurrent PATCHes
+        // used to both commit, the later one re-writing a stale snapshot over the
+        // other's committed fields (silent lost update).
+        int rows = jdbc.update("""
                 UPDATE webhook_endpoints
                 SET name = :name, enabled = :enabled, timeout_ms = :timeoutMs, version = version + 1,
                     updated_at = now()
-                WHERE id = :id AND tenant_id = :tenantId
-                """,
-                new MapSqlParameterSource("name", name != null ? name : existing.name())
-                        .addValue("enabled", enabled != null ? enabled : existing.enabled())
-                        .addValue("timeoutMs", timeoutMs != null ? timeoutMs : existing.timeoutMs())
-                        .addValue("id", endpointId).addValue("tenantId", tenantId));
+                WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
+                """, new MapSqlParameterSource("name", name != null ? name : existing.name())
+                .addValue("enabled", enabled != null ? enabled : existing.enabled())
+                .addValue("timeoutMs", timeoutMs != null ? timeoutMs : existing.timeoutMs()).addValue("id", endpointId)
+                .addValue("tenantId", tenantId).addValue("expectedVersion", existing.version()));
+        if (rows != 1) {
+            throw new org.springframework.dao.OptimisticLockingFailureException(
+                    "Optimistic lock failure: webhook endpoint " + endpointId);
+        }
         WebhookEndpoint updated = get(tenantId, endpointId);
         auditService.record(
                 tenantId, context.actorId(), "WEBHOOK_UPDATE", "WEBHOOK", endpointId, AuditSummaries.summary(context,
@@ -198,7 +204,7 @@ public class WebhookEndpointService {
                 WHERE tenant_id = :tenantId AND endpoint_id = :endpointId
                 ORDER BY created_at DESC LIMIT :limit
                 """, new MapSqlParameterSource("tenantId", tenantId).addValue("endpointId", endpointId)
-                .addValue("limit", Math.min(limit, 100)), DELIVERY_ROW_MAPPER);
+                .addValue("limit", Math.max(1, Math.min(limit, 100))), DELIVERY_ROW_MAPPER);
     }
 
     // -------------------------------------------------------------------
