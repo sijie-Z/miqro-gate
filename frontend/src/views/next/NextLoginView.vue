@@ -33,11 +33,7 @@ import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
 import { toast } from '@/ui';
 import { language } from '@/i18n';
-import cardOpenai from '@/assets/login/provider-openai.png';
-import cardAnthropic from '@/assets/login/provider-anthropic.png';
-import cardDeepseek from '@/assets/login/provider-deepseek.png';
-import cardCustom from '@/assets/login/provider-custom.png';
-import sceneArt from '@/assets/login/scene-art.png';
+import heroComposite from '@/assets/login/hero-composite.png';
 
 const route = useRoute();
 const router = useRouter();
@@ -380,32 +376,17 @@ onMounted(async () => {
           </article>
         </div>
 
-        <div class="gate-scene" aria-hidden="true">
-          <!-- The whole right-side scene (gate, orbit lines, floor grid, status
-               card, terminal strip) is the reference illustration itself,
-               cropped from the master artwork with feathered edges. -->
-          <img class="scene-art" :src="sceneArt" alt="" draggable="false" />
-
-          <!-- Provider cards: the reference illustration's drawn cards, cropped
-               from the master artwork with feathered edges (issue #490). -->
-          <div class="provider-card provider-openai">
-            <img class="provider-card__img" :src="cardOpenai" alt="OpenAI" draggable="false" />
-          </div>
-          <div class="provider-card provider-anthropic">
-            <img class="provider-card__img" :src="cardAnthropic" alt="Anthropic" draggable="false" />
-          </div>
-          <div class="provider-card provider-deepseek">
-            <img class="provider-card__img" :src="cardDeepseek" alt="DeepSeek" draggable="false" />
-          </div>
-          <div class="provider-card provider-custom">
-            <img
-              class="provider-card__img"
-              :src="cardCustom"
-              alt="Custom Endpoint"
-              draggable="false"
-            />
-          </div>
-        </div>
+        <!-- Everything right of the copy/capability columns (provider cards,
+             gate installation, orbit lines, floor, status card, terminal) is
+             ONE block cut from the reference master artwork — its internal
+             composition is the reference's own, so there are no seams. -->
+        <img
+          class="hero-composite"
+          :src="heroComposite"
+          alt=""
+          aria-hidden="true"
+          draggable="false"
+        />
       </div>
 
       <footer class="hero-footer">
@@ -862,12 +843,6 @@ onMounted(async () => {
   position: relative;
   flex: 1;
   min-height: 0;
-  display: grid;
-  /* Copy column wide enough for the Chinese headline's 6-glyph lines (the
-     reference's 0.8fr squeezed them into four ragged lines). */
-  grid-template-columns: minmax(310px, 1.1fr) minmax(250px, 0.9fr);
-  gap: 20px;
-  align-items: center;
 }
 .hero-copy {
   position: relative;
@@ -954,54 +929,17 @@ onMounted(async () => {
   line-height: 1.55;
 }
 
-.gate-scene {
-  position: relative;
-  min-height: 600px;
-  margin-right: -24px;
-  align-self: stretch;
-}
-.scene-art {
+.hero-composite {
   position: absolute;
-  inset: 0;
-  width: 100%;
+  top: 0;
+  /* Bleeds to the hero's right edge (offset = the hero's horizontal padding). */
+  right: calc(-1 * clamp(48px, 6vw, 96px));
   height: 100%;
-  /* Whole artwork visible — cover would clip the gate top and the floor. */
-  object-fit: contain;
-  object-position: center;
+  width: auto;
   pointer-events: none;
   user-select: none;
 }
 
-/* Provider cards are image assets cropped from the reference master artwork
-   (drawn cards with feathered edges), positioned like the CSS build they
-   replaced. */
-.provider-card {
-  position: absolute;
-  z-index: 6;
-}
-.provider-card__img {
-  display: block;
-  height: 48px;
-  width: auto;
-  user-select: none;
-  pointer-events: none;
-}
-.provider-openai {
-  left: -23%;
-  top: 38%;
-}
-.provider-anthropic {
-  left: -40%;
-  top: 45.4%;
-}
-.provider-deepseek {
-  left: -43%;
-  top: 53%;
-}
-.provider-custom {
-  left: -34%;
-  top: 60.6%;
-}
 
 .hero-footer {
   display: flex;
@@ -1478,24 +1416,8 @@ onMounted(async () => {
     margin-top: 20px;
     grid-template-columns: 1fr 1fr;
   }
-  .provider-openai {
-    left: 2%;
-    top: 33%;
-  }
-  .provider-anthropic {
-    left: 0;
-    top: 41%;
-  }
-  .provider-deepseek {
-    left: 2%;
-    top: 49%;
-  }
-  .provider-custom {
-    left: 12%;
-    top: 57%;
-  }
-  .gate-scene {
-    margin-right: -36px;
+  .hero-composite {
+    right: -22px;
     transform: scale(0.92);
     transform-origin: center center;
   }
@@ -1512,13 +1434,14 @@ onMounted(async () => {
     min-height: 640px;
     height: 640px;
   }
-  .gate-scene {
+  .hero-composite {
     position: absolute;
-    inset: 0 -20px 0 28%;
-    margin: 0;
+    top: 0;
+    bottom: 0;
+    right: -20px;
+    left: auto;
+    height: 100%;
     opacity: 0.72;
-    transform: scale(0.9);
-    transform-origin: center;
   }
   .hero-content {
     display: block;
@@ -1604,8 +1527,10 @@ onMounted(async () => {
     gap: 12px;
     max-width: 300px;
   }
-  .gate-scene {
-    inset: 16% -80px 0 22%;
+  .hero-composite {
+    top: 16%;
+    bottom: 0;
+    right: -80px;
     opacity: 0.35;
   }
   .hero-footer {
