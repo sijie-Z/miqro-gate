@@ -300,6 +300,19 @@ class AdminOrgApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("products without catalog data skip the model allowlist (#498 compatibility)")
+    void grantModelCheckSkipsEmptyCatalog() throws Exception {
+        fx.insertProviderAndProductAndCredential();
+        String projectId = createProject("NOCAT");
+        mockMvc.perform(post("/api/v1/admin/grants").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("projectId", projectId, "providerProductId",
+                        fx.secondProductId.toString(), "credentialId", fx.secondCredentialId.toString(), "models",
+                        List.of("any-model-before-catalog-sync")))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     @DisplayName("a grant rejects a credential whose subscription belongs to another product (#498)")
     void grantRejectsCrossProductCredential() throws Exception {
         fx.insertProviderAndProductAndCredential();

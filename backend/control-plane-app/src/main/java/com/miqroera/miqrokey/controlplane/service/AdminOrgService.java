@@ -400,12 +400,20 @@ public class AdminOrgService {
     /**
      * Grant model scopes must reference the product's catalog (#498): an unknown
      * model id would otherwise flow into Virtual Key snapshots and the route
-     * snapshot as bad data, surfacing only at call time. Legacy grants without a
-     * product scope skip the check. Called before any write, inside the caller's
-     * transaction.
+     * snapshot as bad data, surfacing only at call time. The catalog acts as an
+     * allowlist only once it has data for the product — deployments whose catalog
+     * has not been synced yet (offline/private installs) keep today's behavior.
+     * Legacy grants without a product scope skip the check. Called before any
+     * write, inside the caller's transaction.
      */
     private void requireCatalogModels(UUID providerProductId, List<String> models) {
         if (providerProductId == null || models == null) {
+            return;
+        }
+        Integer catalogSize = jdbc.queryForObject(
+                "SELECT count(*) FROM model_catalog WHERE provider_product_id = :providerProductId",
+                new MapSqlParameterSource("providerProductId", providerProductId), Integer.class);
+        if (catalogSize == null || catalogSize == 0) {
             return;
         }
         for (String model : models) {
