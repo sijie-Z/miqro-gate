@@ -1,5 +1,6 @@
 /* eslint-disable */
 export const DICT: Record<string, string> = {
+  "动作分布": "Action distribution",
   '+ 添加条件': '+ Add condition',
   '1000 条': '1,000 rows',
   '200 条': '200 rows',
@@ -1317,6 +1318,7 @@ export const DICT: Record<string, string> = {
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [
+  [/^基于当前 (.+?) 条记录$/, 'Based on the current $1 records'],
   [/^(.+?)\ 个可用$/, '$1 active'],
   [/^(.+?)\ 轮换中$/, '$1 rotating'],
   [/^(.+?)\ 异常$/, '$1 unusual'],

@@ -4,13 +4,29 @@
  * Behaviour parity with the legacy audit page: reverse chain list with an
  * action filter; chain hashes are never serialized.
  */
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiInput, UiSelect, UiTable } from '@/ui';
 import type { AuditEventView } from '@/types/generated-api';
 
 const events = ref<AuditEventView[]>([]);
+
+/** Top actions within the currently loaded events (labelled as such). */
+const topActions = computed(() => {
+  const counts = new Map<string, number>();
+  for (const e of events.value) {
+    const key = e.action || 'UNKNOWN';
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const max = Math.max(...ranked.map(([, n]) => n), 1);
+  return ranked.map(([action, count]) => ({
+    action,
+    count,
+    width: `${Math.max(6, (count / max) * 100)}%`,
+  }));
+});
 const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
@@ -239,6 +255,24 @@ onMounted(load);
       </div>
     </section>
 
+    <section v-if="events.length" class="ui-panel next-audit__actions" data-testid="audit-action-dist">
+      <div class="ui-panel-head">
+        <div>
+          <h2 class="ui-panel-title">动作分布</h2>
+          <span class="ui-panel-sub">基于当前 {{ events.length }} 条记录</span>
+        </div>
+      </div>
+      <div class="ui-panel-body next-audit__action-body">
+        <div v-for="row in topActions" :key="row.action" class="next-audit__action-row">
+          <span class="next-audit__action-label ui-mono" :title="row.action">{{ row.action }}</span>
+          <div class="next-audit__action-track">
+            <div class="next-audit__action-fill" :style="{ width: row.width }" />
+          </div>
+          <span class="next-audit__action-count ui-num">{{ row.count }}</span>
+        </div>
+      </div>
+    </section>
+
     <div v-if="loadError" class="ui-alert ui-alert--error">
       {{ loadError
       }}<span v-if="loadRequestId" class="ui-request-id"> requestId: {{ loadRequestId }}</span>
@@ -301,6 +335,49 @@ onMounted(load);
   flex-wrap: wrap;
   gap: var(--ui-space-3);
   align-items: center;
+}
+
+.next-audit__actions {
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-audit__action-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.next-audit__action-row {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) 56px;
+  align-items: center;
+  gap: var(--ui-space-3);
+  font-size: var(--ui-font-size-xs);
+}
+
+.next-audit__action-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-foreground-secondary);
+}
+
+.next-audit__action-track {
+  height: 8px;
+  border-radius: 2px;
+  background: var(--ui-muted);
+  overflow: hidden;
+}
+
+.next-audit__action-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--ui-primary);
+}
+
+.next-audit__action-count {
+  text-align: right;
+  color: var(--ui-foreground);
 }
 
 .next-audit__notice {
