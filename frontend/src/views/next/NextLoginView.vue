@@ -34,6 +34,10 @@ import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
 import { toast } from '@/ui';
 import { language } from '@/i18n';
+import cardOpenai from '@/assets/login/provider-openai.png';
+import cardAnthropic from '@/assets/login/provider-anthropic.png';
+import cardDeepseek from '@/assets/login/provider-deepseek.png';
+import cardCustom from '@/assets/login/provider-custom.png';
 
 const route = useRoute();
 const router = useRouter();
@@ -455,64 +459,24 @@ onMounted(async () => {
             />
           </svg>
 
+          <!-- Provider cards: the reference illustration's drawn cards, cropped
+               from the master artwork with feathered edges (issue #490). -->
           <div class="provider-card provider-openai">
-            <span class="provider-logo">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true">
-                <g stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
-                  <path d="M12 2.8 14.3 6.8 12 10.8 9.7 6.8Z" />
-                  <path d="M12 2.8 14.3 6.8 12 10.8 9.7 6.8Z" transform="rotate(60 12 12)" />
-                  <path d="M12 2.8 14.3 6.8 12 10.8 9.7 6.8Z" transform="rotate(120 12 12)" />
-                  <path d="M12 2.8 14.3 6.8 12 10.8 9.7 6.8Z" transform="rotate(180 12 12)" />
-                  <path d="M12 2.8 14.3 6.8 12 10.8 9.7 6.8Z" transform="rotate(240 12 12)" />
-                  <path d="M12 2.8 14.3 6.8 12 10.8 9.7 6.8Z" transform="rotate(300 12 12)" />
-                </g>
-                <circle cx="12" cy="12" r="1.3" fill="currentColor" />
-              </svg>
-            </span>
-            <span>OpenAI</span><i />
+            <img class="provider-card__img" :src="cardOpenai" alt="OpenAI" draggable="false" />
           </div>
           <div class="provider-card provider-anthropic">
-            <span class="provider-logo">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true">
-                <path
-                  d="M5.2 19 12 4.6 18.8 19 M8.6 13.4h6.8"
-                  stroke="currentColor"
-                  stroke-width="1.9"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </span>
-            <span>Anthropic</span><i />
+            <img class="provider-card__img" :src="cardAnthropic" alt="Anthropic" draggable="false" />
           </div>
           <div class="provider-card provider-deepseek">
-            <span class="provider-logo">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true">
-                <circle cx="12" cy="12" r="8.2" stroke="currentColor" stroke-width="1.6" />
-                <path
-                  d="M6 13.6c2.6-2.2 5.4-2.2 8 0M8.6 16.6c1.8-1.2 3.6-1.2 5.4 0"
-                  stroke="currentColor"
-                  stroke-width="1.4"
-                  stroke-linecap="round"
-                />
-                <circle cx="12" cy="9.4" r="1.1" fill="currentColor" />
-              </svg>
-            </span>
-            <span>DeepSeek</span><i />
+            <img class="provider-card__img" :src="cardDeepseek" alt="DeepSeek" draggable="false" />
           </div>
           <div class="provider-card provider-custom">
-            <span class="provider-logo">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true">
-                <path
-                  d="M9 7V3.8M15 7V3.8M7 7h10v2.6a5 5 0 0 1-10 0ZM12 14.8V20"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </span>
-            <span>自定义端点</span><i />
+            <img
+              class="provider-card__img"
+              :src="cardCustom"
+              alt="Custom Endpoint"
+              draggable="false"
+            />
           </div>
 
           <div class="gate-arch">
@@ -1132,46 +1096,19 @@ onMounted(async () => {
   overflow: visible;
 }
 
+/* Provider cards are image assets cropped from the reference master artwork
+   (drawn cards with feathered edges), positioned like the CSS build they
+   replaced. */
 .provider-card {
   position: absolute;
   z-index: 6;
-  min-width: 150px;
-  height: 48px;
-  padding: 0 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid rgba(151, 165, 255, 0.19);
-  border-radius: 11px;
-  background: linear-gradient(180deg, rgba(35, 47, 77, 0.83), rgba(13, 22, 43, 0.83));
-  box-shadow:
-    0 16px 30px rgba(0, 0, 0, 0.26),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  backdrop-filter: blur(14px);
-  color: #ecf0ff;
-  font-size: 10px;
-  letter-spacing: 0.01em;
 }
-.provider-card i {
-  margin-left: auto;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #6fe4b1;
-  box-shadow: 0 0 12px rgba(111, 228, 177, 0.8);
-}
-.provider-logo {
-  width: 23px;
-  height: 23px;
-  display: grid;
-  place-items: center;
-  border-radius: 7px;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.09);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-.provider-logo svg {
+.provider-card__img {
   display: block;
+  height: 48px;
+  width: auto;
+  user-select: none;
+  pointer-events: none;
 }
 .provider-openai {
   left: 7%;
@@ -1188,7 +1125,6 @@ onMounted(async () => {
 .provider-custom {
   left: 18%;
   top: 80%;
-  min-width: 164px;
 }
 
 .gate-arch {
