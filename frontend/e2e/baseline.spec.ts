@@ -1208,6 +1208,40 @@ test('failed login shows the Chinese 401 detail with its request id', async ({ p
   await expect(loginError).not.toContainText('Invalid username');
 });
 
+test('login language picker switches the page between Chinese and English', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, false);
+  await page.route('**/api/v1/auth/me', (route) =>
+    route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }),
+  );
+  await page.goto('/login');
+  await page.waitForLoadState('networkidle');
+
+  // Chinese default — and exactly ONE locale chip on the page (the hero
+  // header must not duplicate the panel picker).
+  await expect(page.getByText('简体中文')).toHaveCount(1);
+  await expect(page.locator('.hero-copy h1')).toContainText('网关静默运转');
+  await expect(page.getByTestId('login-submit')).toContainText('登 录');
+
+  // A real click through the radio menu translates the page.
+  await page.getByTestId('login-language').click();
+  await page.getByTestId('login-language-en').click();
+  await expect(page.locator('.hero-copy h1')).toContainText('The gateway stays quiet');
+  await expect(page.getByTestId('login-submit')).toContainText('Sign in');
+  await expect(page.locator('.auth-heading h2')).toContainText('Welcome back');
+
+  // The choice persists across reloads.
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.auth-heading h2')).toContainText('Welcome back');
+
+  // Switch back to Chinese for a clean state.
+  await page.getByTestId('login-language').click();
+  await page.getByTestId('login-language-zh-Hans').click();
+  await expect(page.locator('.auth-heading h2')).toContainText('欢迎回来');
+  await expect(page.getByTestId('login-submit')).toContainText('登 录');
+});
+
 test('overview page baseline at 1440x900', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockApi(page, true);

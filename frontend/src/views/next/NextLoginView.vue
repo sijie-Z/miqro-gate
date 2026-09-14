@@ -8,9 +8,18 @@
  * panel through the secondary card action; error envelope, redirect query
  * and every data-testid unchanged.
  */
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import * as api from '@/api';
 import { useRoute, useRouter } from 'vue-router';
+import {
+  DropdownMenuContent,
+  DropdownMenuItemIndicator,
+  DropdownMenuPortal,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuRoot,
+  DropdownMenuTrigger,
+} from 'radix-vue';
 import {
   ArrowRightIcon,
   ChartBarIcon,
@@ -30,6 +39,205 @@ const router = useRouter();
 const auth = useAuthStore();
 
 type Mode = 'login' | 'register';
+
+/**
+ * The login page ships Simplified Chinese and English. The language picker is
+ * a real radio group: picking a language retranslates the page immediately and
+ * the choice persists across visits. Brand tokens (MiQroGate, HTTPS / JWT,
+ * provider names, requestId) stay language-neutral; backend error details are
+ * shown exactly as the API returns them.
+ */
+const LANG_KEY = 'miqrogate.login-language';
+
+interface LoginCopy {
+  brandProduct: string;
+  heroEyebrow: string;
+  heroLine1: string;
+  heroLine2Pre: string;
+  heroLine2Em: string;
+  heroLine2Post: string;
+  heroDesc: string;
+  caps: Array<{ title: string; small: string }>;
+  checks: string[];
+  terminal: string;
+  trustNoPrompt: string;
+  trustRouting: string;
+  trustAudit: string;
+  footerVersion: string;
+  welcome: string;
+  createAccount: string;
+  welcomeDesc: string;
+  registerDesc: string;
+  usernameLabel: string;
+  usernameLabelRegister: string;
+  usernamePh: string;
+  usernamePhRegister: string;
+  displayNameLabel: string;
+  displayNamePh: string;
+  passwordLabel: string;
+  passwordPh: string;
+  passwordPhRegister: string;
+  confirmLabel: string;
+  confirmPh: string;
+  forgot: string;
+  submitLogin: string;
+  submitRegister: string;
+  or: string;
+  requestTitle: string;
+  requestDesc: string;
+  backTitle: string;
+  backDesc: string;
+  privacyTitle: string;
+  privacyDesc: string;
+  footerCopy: string;
+  privacyPolicy: string;
+  terms: string;
+  errNeedBoth: string;
+  errFill: string;
+  errMismatch: string;
+  errLogin: string;
+  errRegister: string;
+  toastForgot: string;
+  showPw: string;
+  hidePw: string;
+}
+
+const COPY: Record<'zh-Hans' | 'en', LoginCopy> = {
+  'zh-Hans': {
+    brandProduct: 'AI 凭证控制平台',
+    heroEyebrow: '企业级 AI 基础设施',
+    heroLine1: '网关静默运转。',
+    heroLine2Pre: '密钥',
+    heroLine2Em: '尽在掌控',
+    heroLine2Post: '。',
+    heroDesc:
+      'MiQroGate 是企业级 AI 凭证虚拟化与访问控制平面，为你的大模型 API 提供安全、可观测、可审计的统一网关。',
+    caps: [
+      { title: '虚拟密钥', small: '统一凭证管理，灵活分配与权限控制' },
+      { title: '权限控制', small: '细粒度授权，最小化访问风险' },
+      { title: '用量与审计', small: '实时用量统计，完整审计日志' },
+      { title: '私有化部署', small: '本地化部署，数据不出环境' },
+    ],
+    checks: ['认证', '限流', '日志', '审计'],
+    terminal: '网关 · 在线',
+    trustNoPrompt: '不留存 Prompt',
+    trustRouting: '确定性路由',
+    trustAudit: '用量可审计',
+    footerVersion: 'MiQroGate · AI 凭证控制平台',
+    welcome: '欢迎回来',
+    createAccount: '创建账号',
+    welcomeDesc: '登录你的账号进入 MiQroGate 控制台，管理虚拟密钥、权限与用量数据。',
+    registerDesc: '注册后立即可用，无需审核；若部署关闭自助注册请联系管理员。',
+    usernameLabel: '账号/邮箱',
+    usernameLabelRegister: '账号',
+    usernamePh: '输入账号或邮箱',
+    usernamePhRegister: '例如 alice',
+    displayNameLabel: '昵称（可选）',
+    displayNamePh: '团队里展示的名字',
+    passwordLabel: '密码',
+    passwordPh: '输入密码',
+    passwordPhRegister: '至少 8 位，含大小写字母和数字',
+    confirmLabel: '确认密码',
+    confirmPh: '再次输入密码',
+    forgot: '忘记密码？',
+    submitLogin: '登 录',
+    submitRegister: '注册并进入',
+    or: '或',
+    requestTitle: '申请账号',
+    requestDesc: '需要访问 MiQroGate？自助注册开启时可创建账号，或联系你的管理员。',
+    backTitle: '返回登录',
+    backDesc: '已有门户账号？回到登录页。',
+    privacyTitle: '你的数据受到保护',
+    privacyDesc: 'MiQroGate 运行在你的私有环境，绝不存储你的提示词与敏感数据。',
+    footerCopy: '© MiQroGate · 私有 AI 基础设施',
+    privacyPolicy: '隐私政策',
+    terms: '服务条款',
+    errNeedBoth: '请输入账号和密码。',
+    errFill: '请填写账号和密码。',
+    errMismatch: '两次输入的密码不一致。',
+    errLogin: '登录失败，请稍后重试。',
+    errRegister: '注册失败，请稍后重试。',
+    toastForgot: '请联系部署管理员重置密码。',
+    showPw: '显示密码',
+    hidePw: '隐藏密码',
+  },
+  en: {
+    brandProduct: 'AI Credential Control Plane',
+    heroEyebrow: 'ENTERPRISE AI INFRASTRUCTURE',
+    heroLine1: 'The gateway stays quiet.',
+    heroLine2Pre: 'The control stays ',
+    heroLine2Em: 'yours',
+    heroLine2Post: '.',
+    heroDesc:
+      'MiQroGate is an enterprise AI credential virtualization and access-control plane — a secure, observable and auditable gateway for your LLM APIs.',
+    caps: [
+      { title: 'Virtual Keys', small: 'Unified credential management with scoped distribution' },
+      { title: 'Permission Control', small: 'Fine-grained authorization, minimal exposure' },
+      { title: 'Usage & Audit', small: 'Real-time usage stats, complete audit trail' },
+      { title: 'Private Deployment', small: 'Runs in your environment, data never leaves' },
+    ],
+    checks: ['Auth', 'Rate Limit', 'Logging', 'Auditing'],
+    terminal: 'GATEWAY / ONLINE',
+    trustNoPrompt: 'No Prompt Storage',
+    trustRouting: 'Deterministic Routing',
+    trustAudit: 'Auditable Usage',
+    footerVersion: 'MiQroGate · Control Plane for AI Credentials',
+    welcome: 'Welcome back',
+    createAccount: 'Create account',
+    welcomeDesc:
+      'Sign in to your account to access the MiQroGate control plane. Manage your virtual keys, permissions and usage data.',
+    registerDesc:
+      'Ready to use right after sign-up, no approval needed; contact your administrator if self-registration is disabled.',
+    usernameLabel: 'Email / Username',
+    usernameLabelRegister: 'Username',
+    usernamePh: 'Enter your email or username',
+    usernamePhRegister: 'e.g. alice',
+    displayNameLabel: 'Nickname (optional)',
+    displayNamePh: 'Shown to your team',
+    passwordLabel: 'Password',
+    passwordPh: 'Enter your password',
+    passwordPhRegister: 'At least 8 chars with upper/lower case and a digit',
+    confirmLabel: 'Confirm password',
+    confirmPh: 'Repeat your password',
+    forgot: 'Forgot password?',
+    submitLogin: 'Sign in',
+    submitRegister: 'Create account',
+    or: 'OR',
+    requestTitle: 'Request an account',
+    requestDesc:
+      'Need access to MiQroGate? Create an account when self-registration is enabled, or contact your administrator.',
+    backTitle: 'Back to sign in',
+    backDesc: 'Already have a portal account? Return to the sign-in page.',
+    privacyTitle: 'Your data is protected',
+    privacyDesc:
+      'MiQroGate runs in your private environment. We never store your prompts or sensitive data.',
+    footerCopy: '© MiQroGate · Private AI Infrastructure',
+    privacyPolicy: 'Privacy Policy',
+    terms: 'Terms of Service',
+    errNeedBoth: 'Enter your username and password.',
+    errFill: 'Fill in username and password.',
+    errMismatch: 'The two passwords do not match.',
+    errLogin: 'Sign-in failed, please try again.',
+    errRegister: 'Registration failed, please try again.',
+    toastForgot: 'Contact your deployment administrator to reset your password.',
+    showPw: 'Show password',
+    hidePw: 'Hide password',
+  },
+};
+
+const languages = [
+  { code: 'zh-Hans', label: '简体中文' },
+  { code: 'en', label: 'English' },
+] as const;
+
+const language = ref<'zh-Hans' | 'en'>(localStorage.getItem(LANG_KEY) === 'en' ? 'en' : 'zh-Hans');
+const t = computed(() => COPY[language.value]);
+watch(language, (value) => {
+  localStorage.setItem(LANG_KEY, value);
+});
+
+const CAP_ICONS = [LockOnIcon, SecuredIcon, ChartBarIcon, ServerIcon] as const;
+const capItems = computed(() => t.value.caps.map((cap, index) => ({ ...cap, icon: CAP_ICONS[index] })));
 
 const mode = ref<Mode>('login');
 const username = ref('');
@@ -51,7 +259,7 @@ function switchMode(next: Mode) {
 }
 
 function onForgot() {
-  toast.info('请联系部署管理员重置密码。');
+  toast.info(t.value.toastForgot);
 }
 
 async function submit() {
@@ -60,7 +268,7 @@ async function submit() {
   errorRequestId.value = '';
   if (mode.value === 'login') {
     if (!username.value.trim() || !password.value) {
-      errorMessage.value = '请输入账号和密码。';
+      errorMessage.value = t.value.errNeedBoth;
       return;
     }
     loading.value = true;
@@ -68,7 +276,7 @@ async function submit() {
       await auth.login(username.value.trim(), password.value);
       await afterAuthenticated();
     } catch (error) {
-      renderError(error, '登录失败，请稍后重试。');
+      renderError(error, t.value.errLogin);
     } finally {
       loading.value = false;
     }
@@ -77,11 +285,11 @@ async function submit() {
 
   // register (self-service)
   if (!username.value || !password.value || !confirmPassword.value) {
-    errorMessage.value = '请填写账号和密码。';
+    errorMessage.value = t.value.errFill;
     return;
   }
   if (password.value !== confirmPassword.value) {
-    errorMessage.value = '两次输入的密码不一致。';
+    errorMessage.value = t.value.errMismatch;
     return;
   }
   loading.value = true;
@@ -89,7 +297,7 @@ async function submit() {
     await auth.register(username.value.trim(), displayName.value.trim() || undefined, password.value);
     await afterAuthenticated();
   } catch (error) {
-    renderError(error, '注册失败，请稍后重试。');
+    renderError(error, t.value.errRegister);
   } finally {
     loading.value = false;
   }
@@ -136,55 +344,25 @@ onMounted(async () => {
           </span>
           <span class="brand-name">MiQroGate</span>
           <span class="brand-divider" />
-          <span class="brand-product">AI 凭证控制平台</span>
+          <span class="brand-product">{{ t.brandProduct }}</span>
         </button>
-
-        <div class="hero-locale">
-          <InternetIcon size="15px" />
-          <span>简体中文</span>
-          <span class="locale-chevron">⌄</span>
-        </div>
       </header>
 
       <div class="hero-content">
         <div class="hero-copy">
-          <p class="hero-eyebrow">企业级 AI 基础设施</p>
+          <p class="hero-eyebrow">{{ t.heroEyebrow }}</p>
           <h1>
-            网关静默运转。<br />
-            <span>密钥<em>尽在掌控</em>。</span>
+            {{ t.heroLine1 }}<br />
+            <span>{{ t.heroLine2Pre }}<em>{{ t.heroLine2Em }}</em>{{ t.heroLine2Post }}</span>
           </h1>
-          <p class="hero-description">
-            MiQroGate 是企业级 AI 凭证虚拟化与访问控制平面，为你的大模型 API
-            提供安全、可观测、可审计的统一网关。
-          </p>
+          <p class="hero-description">{{ t.heroDesc }}</p>
 
           <div class="hero-capabilities">
-            <article class="capability">
-              <span class="capability-icon"><LockOnIcon size="18px" /></span>
+            <article v-for="cap in capItems" :key="cap.title" class="capability">
+              <span class="capability-icon"><component :is="cap.icon" size="18px" /></span>
               <span>
-                <strong>虚拟密钥</strong>
-                <small>统一凭证管理，灵活分配与权限控制</small>
-              </span>
-            </article>
-            <article class="capability">
-              <span class="capability-icon"><SecuredIcon size="18px" /></span>
-              <span>
-                <strong>权限控制</strong>
-                <small>细粒度授权，最小化访问风险</small>
-              </span>
-            </article>
-            <article class="capability">
-              <span class="capability-icon"><ChartBarIcon size="18px" /></span>
-              <span>
-                <strong>用量与审计</strong>
-                <small>实时用量统计，完整审计日志</small>
-              </span>
-            </article>
-            <article class="capability">
-              <span class="capability-icon"><ServerIcon size="18px" /></span>
-              <span>
-                <strong>私有化部署</strong>
-                <small>本地化部署，数据不出环境</small>
+                <strong>{{ cap.title }}</strong>
+                <small>{{ cap.small }}</small>
               </span>
             </article>
           </div>
@@ -317,15 +495,14 @@ onMounted(async () => {
               <span class="mini-symbol"><i /></span>
               <strong>MiQroGate</strong>
             </div>
-            <div class="status-check"><CheckCircleIcon size="12px" /> 认证</div>
-            <div class="status-check"><CheckCircleIcon size="12px" /> 限流</div>
-            <div class="status-check"><CheckCircleIcon size="12px" /> 日志</div>
-            <div class="status-check"><CheckCircleIcon size="12px" /> 审计</div>
+            <div v-for="check in t.checks" :key="check" class="status-check">
+              <CheckCircleIcon size="12px" /> {{ check }}
+            </div>
           </div>
 
           <div class="scene-terminal">
             <span class="terminal-dot" />
-            <span>网关 · 在线</span>
+            <span>{{ t.terminal }}</span>
             <b>99.99%</b>
           </div>
         </div>
@@ -334,11 +511,11 @@ onMounted(async () => {
       <footer class="hero-footer">
         <div class="footer-trust">
           <span><LockOnIcon size="13px" /> HTTPS / JWT</span>
-          <span><span class="footer-slash" />不留存 Prompt</span>
-          <span><span class="footer-slash" />确定性路由</span>
-          <span><SecuredIcon size="13px" />用量可审计</span>
+          <span><span class="footer-slash" />{{ t.trustNoPrompt }}</span>
+          <span><span class="footer-slash" />{{ t.trustRouting }}</span>
+          <span><SecuredIcon size="13px" />{{ t.trustAudit }}</span>
         </div>
-        <span class="hero-footer-version">MiQroGate · AI 凭证控制平台</span>
+        <span class="hero-footer-version">{{ t.footerVersion }}</span>
       </footer>
     </section>
 
@@ -353,11 +530,54 @@ onMounted(async () => {
           </span>
           <span>MiQroGate</span>
         </div>
-        <span class="panel-language">
-          <InternetIcon size="14px" />
-          简体中文
-          <span>⌄</span>
-        </span>
+        <DropdownMenuRoot>
+          <DropdownMenuTrigger class="panel-language" data-testid="login-language">
+            <InternetIcon size="14px" />
+            <span>{{ languages.find((l) => l.code === language)?.label }}</span>
+            <svg
+              class="panel-language__chevron"
+              width="10"
+              height="10"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M4 6.5 8 10.5 12 6.5"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </DropdownMenuTrigger>
+          <DropdownMenuPortal>
+            <DropdownMenuContent class="ui-menu login-language__menu" :side-offset="6" align="end">
+              <DropdownMenuRadioGroup v-model="language">
+                <DropdownMenuRadioItem
+                  v-for="item in languages"
+                  :key="item.code"
+                  :value="item.code"
+                  class="login-language__item"
+                  :data-testid="`login-language-${item.code}`"
+                >
+                  <span>{{ item.label }}</span>
+                  <DropdownMenuItemIndicator class="login-language__check">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path
+                        d="M3.5 8.5 6.5 11.5 12.5 4.5"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </DropdownMenuItemIndicator>
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenuPortal>
+        </DropdownMenuRoot>
       </div>
 
       <div class="auth-content">
@@ -371,12 +591,10 @@ onMounted(async () => {
         </div>
 
         <div class="auth-heading">
-          <h2 v-if="mode === 'login'">欢迎回来 <span>👋</span></h2>
-          <h2 v-else>创建账号</h2>
-          <p v-if="mode === 'login'">
-            登录你的账号进入 MiQroGate 控制台，管理虚拟密钥、权限与用量数据。
-          </p>
-          <p v-else>注册后立即可用，无需审核；若部署关闭自助注册请联系管理员。</p>
+          <h2 v-if="mode === 'login'">{{ t.welcome }} <span>👋</span></h2>
+          <h2 v-else>{{ t.createAccount }}</h2>
+          <p v-if="mode === 'login'">{{ t.welcomeDesc }}</p>
+          <p v-else>{{ t.registerDesc }}</p>
         </div>
 
         <div v-if="errorMessage" class="login-error" role="alert" data-testid="login-error">
@@ -394,14 +612,16 @@ onMounted(async () => {
 
         <form class="auth-form" novalidate @submit.prevent="submit">
           <div class="auth-field">
-            <span class="auth-label">{{ mode === 'login' ? '账号/邮箱' : '账号' }}</span>
+            <span class="auth-label">{{
+              mode === 'login' ? t.usernameLabel : t.usernameLabelRegister
+            }}</span>
             <div class="auth-input">
               <span class="auth-input__prefix"><UserIcon size="18px" /></span>
               <input
                 v-model="username"
                 class="auth-input__inner"
                 type="text"
-                :placeholder="mode === 'login' ? '输入账号或邮箱' : '例如 alice'"
+                :placeholder="mode === 'login' ? t.usernamePh : t.usernamePhRegister"
                 autocomplete="username"
                 data-testid="login-username"
               />
@@ -409,14 +629,14 @@ onMounted(async () => {
           </div>
 
           <div v-if="mode === 'register'" class="auth-field">
-            <span class="auth-label">昵称（可选）</span>
+            <span class="auth-label">{{ t.displayNameLabel }}</span>
             <div class="auth-input">
               <span class="auth-input__prefix"><UserIcon size="18px" /></span>
               <input
                 v-model="displayName"
                 class="auth-input__inner"
                 type="text"
-                placeholder="团队里展示的名字"
+                :placeholder="t.displayNamePh"
                 autocomplete="name"
                 data-testid="register-display-name"
               />
@@ -424,7 +644,7 @@ onMounted(async () => {
           </div>
 
           <div class="auth-field">
-            <span class="auth-label">密码</span>
+            <span class="auth-label">{{ t.passwordLabel }}</span>
             <div class="auth-input">
               <span class="auth-input__prefix"><LockOnIcon size="18px" /></span>
               <input
@@ -432,14 +652,14 @@ onMounted(async () => {
                 class="auth-input__inner auth-input__inner--eye"
                 :type="showPassword ? 'text' : 'password'"
                 :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
-                :placeholder="mode === 'login' ? '输入密码' : '至少 8 位，含大小写字母和数字'"
+                :placeholder="mode === 'login' ? t.passwordPh : t.passwordPhRegister"
                 data-testid="login-password"
                 @keydown.enter="submit"
               />
               <button
                 type="button"
                 class="input-eye"
-                :aria-label="showPassword ? '隐藏密码' : '显示密码'"
+                :aria-label="showPassword ? t.hidePw : t.showPw"
                 :aria-pressed="showPassword"
                 data-testid="password-toggle"
                 @click="showPassword = !showPassword"
@@ -479,19 +699,19 @@ onMounted(async () => {
               </button>
             </div>
             <div v-if="mode === 'login'" class="password-help">
-              <button type="button" class="text-link" @click="onForgot">忘记密码？</button>
+              <button type="button" class="text-link" @click="onForgot">{{ t.forgot }}</button>
             </div>
           </div>
 
           <div v-if="mode === 'register'" class="auth-field">
-            <span class="auth-label">确认密码</span>
+            <span class="auth-label">{{ t.confirmLabel }}</span>
             <div class="auth-input">
               <span class="auth-input__prefix"><LockOnIcon size="18px" /></span>
               <input
                 v-model="confirmPassword"
                 class="auth-input__inner"
                 :type="showPassword ? 'text' : 'password'"
-                placeholder="再次输入密码"
+                :placeholder="t.confirmPh"
                 autocomplete="new-password"
                 data-testid="register-confirm"
               />
@@ -506,12 +726,12 @@ onMounted(async () => {
             data-testid="login-submit"
           >
             <span v-if="loading" class="auth-submit__spinner" aria-hidden="true" />
-            <span>{{ mode === 'login' ? '登 录' : '注册并进入' }}</span>
+            <span>{{ mode === 'login' ? t.submitLogin : t.submitRegister }}</span>
             <ArrowRightIcon size="18px" />
           </button>
         </form>
 
-        <div class="or-divider"><span /> <em>或</em> <span /></div>
+        <div class="or-divider"><span /> <em>{{ t.or }}</em> <span /></div>
 
         <button
           v-if="oauthProviders.length"
@@ -532,12 +752,12 @@ onMounted(async () => {
           <span class="request-access-icon"><UserIcon size="20px" /></span>
           <span class="request-access-copy">
             <template v-if="mode === 'login'">
-              <strong>申请账号</strong>
-              <small>需要访问 MiQroGate？自助注册开启时可创建账号，或联系你的管理员。</small>
+              <strong>{{ t.requestTitle }}</strong>
+              <small>{{ t.requestDesc }}</small>
             </template>
             <template v-else>
-              <strong>返回登录</strong>
-              <small>已有门户账号？回到登录页。</small>
+              <strong>{{ t.backTitle }}</strong>
+              <small>{{ t.backDesc }}</small>
             </template>
           </span>
           <ArrowRightIcon size="18px" />
@@ -546,15 +766,17 @@ onMounted(async () => {
         <div class="privacy-card">
           <span class="privacy-icon"><SecuredIcon size="19px" /></span>
           <span>
-            <strong>你的数据受到保护</strong>
-            <small>MiQroGate 运行在你的私有环境，绝不存储你的提示词与敏感数据。</small>
+            <strong>{{ t.privacyTitle }}</strong>
+            <small>{{ t.privacyDesc }}</small>
           </span>
         </div>
       </div>
 
       <footer class="auth-footer">
-        <span>© MiQroGate · 私有 AI 基础设施</span>
-        <span class="auth-footer-links"><span>隐私政策</span><i /> <span>服务条款</span></span>
+        <span>{{ t.footerCopy }}</span>
+        <span class="auth-footer-links"
+          ><span>{{ t.privacyPolicy }}</span><i /> <span>{{ t.terms }}</span></span
+        >
       </footer>
     </section>
   </main>
@@ -701,17 +923,6 @@ onMounted(async () => {
   border-radius: 2px;
   background: linear-gradient(135deg, #a38eff, #5c7fff);
   box-shadow: 0 0 17px rgba(117, 123, 255, 0.75);
-}
-.hero-locale {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: #8c99b7;
-  font-size: 11px;
-}
-.locale-chevron {
-  color: #b6c1d5;
-  margin-top: -3px;
 }
 
 .hero-content {
@@ -1139,8 +1350,43 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
   color: #7f8ba4;
+  font-family: inherit;
   font-size: 10px;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+.panel-language:hover {
+  color: #41506e;
+}
+.panel-language__chevron {
+  margin-top: 1px;
+}
+.login-language__menu {
+  min-width: 150px;
+}
+.login-language__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #16213a;
+  cursor: pointer;
+  outline: none;
+}
+.login-language__item[data-highlighted] {
+  background: #f2f4f8;
+}
+.login-language__check {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  color: #6a72ff;
 }
 .auth-content {
   width: min(480px, calc(100% - 104px));
@@ -1596,7 +1842,6 @@ onMounted(async () => {
   }
   .brand-product,
   .brand-divider,
-  .hero-locale,
   .hero-footer-version {
     display: none;
   }
