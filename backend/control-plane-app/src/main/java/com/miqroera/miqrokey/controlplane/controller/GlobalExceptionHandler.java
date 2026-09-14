@@ -225,8 +225,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleGeneral(Exception e, HttpServletRequest request) {
         String requestId = resolveRequestId(request);
         LOG.error("Unhandled exception [requestId={}]", requestId, e);
-        Map<String, Object> body = problemDetail(500, "INTERNAL_ERROR", "Internal server error",
-                "An unexpected error occurred.", requestId);
+        Map<String, Object> body = problemDetail(500, "INTERNAL_ERROR", "Internal server error", "服务内部错误，请稍后重试。",
+                requestId);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .body(body);
     }
