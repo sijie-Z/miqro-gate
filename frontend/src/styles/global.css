@@ -366,7 +366,7 @@ td.mk-col-num {
 .mk-chip-volcengine { background: linear-gradient(135deg, var(--miqrokey-chip-volc-a), var(--miqrokey-chip-volc-b)); }
 .mk-chip-aliyun { background: linear-gradient(135deg, var(--miqrokey-chip-aliyun-a), var(--miqrokey-chip-aliyun-b)); }
 /* Neutral fallback for providers without a brand palette (still a brand chip). */
-.mk-brand-chip--unknown { background: linear-gradient(135deg, #64748b, #94a3b8); }
+.mk-brand-chip--unknown { background: linear-gradient(135deg, var(--miqrokey-chip-unknown-a), var(--miqrokey-chip-unknown-b)); }
 
 /* Provider glyph inside the chip: official mark (currentColor → white) or 单字. */
 .mk-brand-chip__glyph {
@@ -467,36 +467,8 @@ td.mk-col-num {
    ============================================================================ */
 
 /* ---- tables ---- */
-.t-table {
-  --td-table-border-color: var(--miqrokey-border-muted);
-  font-variant-numeric: tabular-nums;
-}
-.t-table__header {
-  color: var(--miqrokey-text-secondary);
-}
-.t-table th.t-table__th {
-  background: transparent;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--miqrokey-text-secondary);
-  border-bottom: 1px solid var(--miqrokey-border-strong);
-}
-.t-table tbody tr {
-  transition: background-color 0.12s ease;
-}
-.t-table tbody tr:hover {
-  background: var(--miqrokey-bg-subtle);
-}
-.t-table td.t-table__td {
-  border-bottom: 1px solid var(--miqrokey-border-muted);
-  font-size: 13px;
-  color: var(--miqrokey-text-primary);
-}
-.t-table .t-table__cell--fixed-left,
-.t-table .t-table__cell--fixed-right {
-  background: var(--miqrokey-bg-surface);
-}
+/* Table chrome lives in src/ui/Table.vue (custom ui-table markup); the old
+   TDesign .t-table overrides were removed as dead code in the #502 polish. */
 
 /* numeric cells: right aligned tabular by utility class .mk-num */
 .mk-num {
