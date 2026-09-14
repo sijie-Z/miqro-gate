@@ -3503,6 +3503,8 @@ export interface components {
             /** Format: uuid */
             subscriptionId: string;
             secret: string;
+            /** Format: uuid */
+            seatId?: string;
         };
         CredentialView: {
             /** Format: uuid */
@@ -3510,6 +3512,8 @@ export interface components {
             name?: string;
             /** Format: uuid */
             subscriptionId?: string;
+            /** Format: uuid */
+            seatId?: string;
             status?: string;
             /** Format: uuid */
             activeVersionId?: string;

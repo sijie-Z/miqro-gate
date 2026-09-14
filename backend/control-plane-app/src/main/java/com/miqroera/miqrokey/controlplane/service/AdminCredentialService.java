@@ -29,6 +29,8 @@ import com.miqroera.miqrokey.domain.repository.UpstreamCredentialVersionReposito
 import com.miqroera.miqrokey.domain.repository.UpstreamSubscriptionRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -81,13 +83,19 @@ public class AdminCredentialService {
     private final AdapterRegistry adapterRegistry;
     private final ProviderClientFactory clientFactory;
     private final ProviderProductRepository productRepository;
+    /**
+     * Seat-subscription lookups for per-seat credentials (#492); seats have no
+     * repository.
+     */
+    private final NamedParameterJdbcTemplate jdbc;
 
     public AdminCredentialService(UpstreamCredentialRepository credentialRepository,
             UpstreamCredentialVersionRepository versionRepository,
             UpstreamSubscriptionRepository subscriptionRepository, KeyEncryptionProvider keyEncryptionProvider,
             CredentialSecretValidator secretValidator, AuditService auditService, AuthProperties authProperties,
             RouteRefreshPublisher routeRefreshPublisher, AdapterRegistry adapterRegistry,
-            ProviderClientFactory clientFactory, ProviderProductRepository productRepository) {
+            ProviderClientFactory clientFactory, ProviderProductRepository productRepository,
+            NamedParameterJdbcTemplate jdbc) {
         this.credentialRepository = credentialRepository;
         this.versionRepository = versionRepository;
         this.subscriptionRepository = subscriptionRepository;
@@ -99,6 +107,7 @@ public class AdminCredentialService {
         this.adapterRegistry = adapterRegistry;
         this.clientFactory = clientFactory;
         this.productRepository = productRepository;
+        this.jdbc = jdbc;
     }
 
     /**
@@ -112,6 +121,10 @@ public class AdminCredentialService {
                 .filter(s -> s.tenantId().equals(tenantId)).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND,
                         "SUBSCRIPTION_NOT_FOUND", "Subscription not found"));
         requireValidSecret(request.secret());
+        UUID seatId = request.seatId();
+        if (seatId != null && !seatExists(tenantId, subscription.id(), seatId)) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "SEAT_NOT_FOUND", "Seat not found on this subscription");
+        }
 
         Instant now = Instant.now();
         UUID credentialId = UUID.randomUUID();
@@ -125,18 +138,22 @@ public class AdminCredentialService {
         // credential_id), so creation is three steps: insert the credential
         // without an active version, insert the version, then point the
         // credential at it via the optimistic-locked update (version 0 -> 1).
-        UpstreamCredential credential = new UpstreamCredential(credentialId, tenantId, subscription.id(), null,
+        UpstreamCredential credential = new UpstreamCredential(credentialId, tenantId, subscription.id(), seatId,
                 request.name(), fingerprint, CredentialStatus.ACTIVE, null, now, null, 0L, now, now);
         credentialRepository.insert(credential);
         versionRepository.insert(new UpstreamCredentialVersion(versionId, tenantId, credentialId,
                 encrypted.ciphertext(), encrypted.nonce(), encrypted.keyVersion(), fingerprint,
                 CredentialVersionStatus.ACTIVE, now, null, now));
-        UpstreamCredential pointed = new UpstreamCredential(credentialId, tenantId, subscription.id(), null,
+        UpstreamCredential pointed = new UpstreamCredential(credentialId, tenantId, subscription.id(), seatId,
                 request.name(), fingerprint, CredentialStatus.ACTIVE, versionId, now, null, 1L, now, now);
         credentialRepository.update(pointed);
 
         auditService.record(tenantId, admin.id(), "CREDENTIAL_CREATE", "UPSTREAM_CREDENTIAL", credentialId,
-                auditSummary("name", sanitize(request.name()), "subscriptionId", subscription.id()), requestId);
+                seatId == null
+                        ? auditSummary("name", sanitize(request.name()), "subscriptionId", subscription.id())
+                        : auditSummary("name", sanitize(request.name()), "subscriptionId", subscription.id(), "seatId",
+                                seatId),
+                requestId);
         routeRefreshPublisher.publishChanged();
         return toView(pointed);
     }
@@ -350,9 +367,18 @@ public class AdminCredentialService {
     }
 
     private CredentialView toView(UpstreamCredential c) {
-        return new CredentialView(c.id(), c.credentialName(), c.subscriptionId(), c.status().name(),
+        return new CredentialView(c.id(), c.credentialName(), c.subscriptionId(), c.seatId(), c.status().name(),
                 c.activeVersionId(), CredentialFingerprint.hexPrefix(c.secretFingerprint(), FINGERPRINT_PREFIX_BYTES),
                 c.lastValidatedAt(), c.lastValidationError(), c.version(), c.createdAt(), c.updatedAt());
+    }
+
+    private boolean seatExists(UUID tenantId, UUID subscriptionId, UUID seatId) {
+        Integer matches = jdbc.queryForObject("""
+                SELECT count(*) FROM plan_seats
+                WHERE tenant_id = :tenantId AND upstream_subscription_id = :subscriptionId AND id = :seatId
+                """, new MapSqlParameterSource("tenantId", tenantId).addValue("subscriptionId", subscriptionId)
+                .addValue("seatId", seatId), Integer.class);
+        return matches != null && matches > 0;
     }
 
     private CredentialVersionView toVersionView(UpstreamCredentialVersion v) {
