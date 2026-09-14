@@ -324,7 +324,6 @@ onMounted(async () => {
         </div>
 
         <div class="auth-heading">
-          <p class="auth-eyebrow">安全访问</p>
           <h2 v-if="mode === 'login'">欢迎回来 <span>👋</span></h2>
           <h2 v-else>创建账号</h2>
           <p v-if="mode === 'login'">
@@ -536,7 +535,8 @@ onMounted(async () => {
   --line: #e6eaf2;
   min-height: 100vh;
   display: grid;
-  grid-template-columns: minmax(580px, 1.06fr) minmax(520px, 0.94fr);
+  /* 61.4 / 38.6 — the reference image's hero:panel split (943 / 1536 px). */
+  grid-template-columns: minmax(580px, 1.23fr) minmax(480px, 0.77fr);
   overflow: hidden;
   background: #fff;
   color: var(--ink);
@@ -546,7 +546,7 @@ onMounted(async () => {
   position: relative;
   min-width: 0;
   min-height: 100vh;
-  padding: 34px 54px 30px;
+  padding: 34px clamp(48px, 6vw, 96px) 30px;
   display: flex;
   flex-direction: column;
   background:
@@ -672,7 +672,9 @@ onMounted(async () => {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(280px, 0.8fr) minmax(420px, 1.2fr);
+  /* Copy column wide enough for the Chinese headline's 6-glyph lines (the
+     reference's 0.8fr squeezed them into four ragged lines). */
+  grid-template-columns: minmax(310px, 1.2fr) minmax(250px, 0.8fr);
   gap: 20px;
   align-items: center;
 }
@@ -680,11 +682,10 @@ onMounted(async () => {
   position: relative;
   z-index: 5;
   align-self: center;
-  max-width: 520px;
+  max-width: 560px;
   padding-bottom: 22px;
 }
-.hero-eyebrow,
-.auth-eyebrow {
+.hero-eyebrow {
   margin: 0;
   color: #8e9dff;
   font-size: 10px;
@@ -693,7 +694,9 @@ onMounted(async () => {
 }
 .hero-copy h1 {
   margin: 17px 0 24px;
-  font-size: clamp(48px, 4.8vw, 74px);
+  /* Sized so 密钥由你掌控。 holds one line at every desktop width (the
+     reference image shows the headline as two unbroken lines). */
+  font-size: clamp(40px, 3.9vw, 64px);
   line-height: 0.99;
   letter-spacing: -0.07em;
   font-weight: 760;
@@ -1091,7 +1094,7 @@ onMounted(async () => {
   font-size: 10px;
 }
 .auth-content {
-  width: min(490px, calc(100% - 64px));
+  width: min(480px, calc(100% - 104px));
   margin: auto;
   padding: 16px 0 32px;
 }
@@ -1099,7 +1102,7 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  margin-bottom: 54px;
+  margin-bottom: 44px;
   color: #17213a;
   font-size: 15px;
   font-weight: 800;
@@ -1121,11 +1124,6 @@ onMounted(async () => {
   width: 7px;
   height: 7px;
 }
-.auth-eyebrow {
-  color: #6d76ff;
-  margin-bottom: 12px;
-  font-size: 9px;
-}
 .auth-heading h2 {
   margin: 0;
   color: #0c1730;
@@ -1138,19 +1136,16 @@ onMounted(async () => {
   font-size: 26px;
   vertical-align: top;
 }
-/* :not(.auth-eyebrow) keeps the shared `.auth-heading p` metrics from
-   outweighing the eyebrow label (0,1,1 beats 0,1,0 — the reference sheet
-   silently swallowed its own eyebrow rule). */
-.auth-heading p:not(.auth-eyebrow) {
+.auth-heading p {
   max-width: 470px;
-  margin: 14px 0 39px;
+  margin: 14px 0 50px;
   color: #70809d;
   font-size: 12px;
   line-height: 1.8;
 }
 
 .auth-field {
-  margin-bottom: 19px;
+  margin-bottom: 24px;
 }
 .auth-label {
   display: block;
@@ -1455,8 +1450,13 @@ onMounted(async () => {
     padding-left: 36px;
     padding-right: 22px;
   }
+  /* Fractions only: the desktop column minimums would push the scene out of
+     the (narrower) hero in the 920–1180 band. */
+  .hero-content {
+    grid-template-columns: minmax(260px, 1.25fr) minmax(0px, 0.75fr);
+  }
   .hero-copy h1 {
-    font-size: clamp(44px, 5vw, 64px);
+    font-size: clamp(40px, 4.6vw, 58px);
   }
   .gate-scene {
     margin-right: -36px;
@@ -1464,7 +1464,7 @@ onMounted(async () => {
     transform-origin: center center;
   }
   .auth-content {
-    width: min(430px, calc(100% - 52px));
+    width: min(430px, calc(100% - 88px));
   }
 }
 
