@@ -6,7 +6,7 @@
  * holding the user chip. Nav mirrors the legacy AppShell structure 1:1;
  * admin pages still render their TDesign-era content until U2 migrates them.
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   DropdownMenuContent,
@@ -143,6 +143,59 @@ const userInitial = computed(() => {
 
 const isActive = (name: string) => route.name === name;
 
+// ---- tab bar (Vben chrome-style visited-page tabs) ----
+interface ShellTab {
+  name: string;
+  label: string;
+}
+
+const TABS_KEY = 'miqrogate.shell-tabs';
+
+function labelOf(name: string): string | undefined {
+  for (const group of navGroups.value) {
+    const item = group.items.find((i) => i.name === name);
+    if (item) return item.label;
+  }
+  return undefined;
+}
+
+const tabs = ref<ShellTab[]>([]);
+try {
+  const saved = JSON.parse(sessionStorage.getItem(TABS_KEY) ?? '[]') as ShellTab[];
+  if (Array.isArray(saved)) tabs.value = saved.filter((t) => t && typeof t.name === 'string');
+} catch {
+  tabs.value = [];
+}
+
+watch(
+  tabs,
+  (value) => sessionStorage.setItem(TABS_KEY, JSON.stringify(value.slice(-24))),
+  { deep: true },
+);
+
+watch(
+  () => route.name as string | undefined,
+  (name) => {
+    if (!name) return;
+    const label = labelOf(name);
+    if (!label) return;
+    if (!tabs.value.some((t) => t.name === name)) {
+      tabs.value = [...tabs.value, { name, label }];
+    }
+  },
+  { immediate: true },
+);
+
+function closeTab(name: string) {
+  const index = tabs.value.findIndex((t) => t.name === name);
+  if (index === -1) return;
+  tabs.value = tabs.value.filter((t) => t.name !== name);
+  if (route.name === name) {
+    const next = tabs.value[Math.min(index, tabs.value.length - 1)];
+    if (next) void router.push({ name: next.name });
+  }
+}
+
 /** Narrow screens collapse the rail to icons only (>=640 hides the drawer entirely). */
 const iconOnly = ref(false);
 function updateIconOnly() {
@@ -184,7 +237,6 @@ async function handleLogout() {
             :title="iconOnly ? item.label : undefined"
             :class="{ 'new-shell__nav-item--active': isActive(item.name) }"
           >
-            <span class="new-shell__nav-accent" aria-hidden="true" />
             <component :is="item.icon" class="new-shell__nav-icon" />
             <span v-if="!iconOnly" class="new-shell__nav-label">{{ item.label }}</span>
           </router-link>
@@ -276,6 +328,39 @@ async function handleLogout() {
         </div>
       </header>
 
+      <div v-if="tabs.length" class="new-shell__tabbar" data-testid="shell-tabbar">
+        <div
+          v-for="(tab, i) in tabs"
+          :key="tab.name"
+          class="new-shell__tab"
+          :class="{ 'new-shell__tab--active': isActive(tab.name) }"
+          @click="router.push({ name: tab.name })"
+        >
+          <span
+            v-if="i > 0 && !isActive(tab.name)"
+            class="new-shell__tab-divider"
+            aria-hidden="true"
+          />
+          <span class="new-shell__tab-label">{{ tab.label }}</span>
+          <button
+            v-if="tabs.length > 1"
+            type="button"
+            class="new-shell__tab-close"
+            :aria-label="`关闭 ${tab.label}`"
+            @click.stop="closeTab(tab.name)"
+          >
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M4 4 12 12M12 4 4 12"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
+
       <div class="new-shell__content">
         <RouterView />
       </div>
@@ -337,7 +422,7 @@ async function handleLogout() {
   font-size: var(--ui-font-size-base);
   font-weight: var(--ui-weight-semibold);
   letter-spacing: -0.01em;
-  color: var(--ui-foreground-inverse);
+  color: var(--ui-foreground);
 }
 
 .new-shell__nav {
@@ -368,7 +453,7 @@ async function handleLogout() {
   display: flex;
   align-items: center;
   gap: var(--ui-space-3);
-  height: 38px;
+  height: 40px;
   padding: 0 var(--ui-space-3);
   border-radius: var(--ui-radius-control);
   color: var(--ui-rail-text);
@@ -389,30 +474,15 @@ async function handleLogout() {
   color: var(--ui-foreground-inverse);
 }
 
-.new-shell__nav-accent {
-  position: absolute;
-  left: -3px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 16px;
-  border-radius: var(--ui-radius-pill);
-  background: transparent;
-}
-
 .new-shell__nav-item--active {
-  background: rgba(22, 119, 255, 0.16);
-  color: var(--ui-foreground-inverse);
-  font-weight: var(--ui-weight-semibold);
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary-text);
+  font-weight: var(--ui-weight-medium);
 }
 
 .new-shell__nav-item--active:hover {
-  background: rgba(22, 119, 255, 0.22);
-  color: var(--ui-foreground-inverse);
-}
-
-.new-shell__nav-item--active .new-shell__nav-accent {
-  background: var(--ui-primary-hover);
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary-text);
 }
 
 .new-shell__nav-icon {
@@ -427,7 +497,7 @@ async function handleLogout() {
 }
 
 .new-shell__nav-item--active .new-shell__nav-icon {
-  color: var(--ui-foreground-inverse);
+  color: var(--ui-primary-text);
 }
 
 .new-shell__rail-foot {
@@ -597,6 +667,87 @@ async function handleLogout() {
 
 .new-shell__user-menu-item:focus-visible {
   box-shadow: var(--ui-shadow-focus);
+}
+
+/* Visited-page tabs — Vben 'chrome' style: a 38px strip under the header,
+   rounded-top active tab tinted with the primary color. */
+.new-shell__tabbar {
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+  height: 38px;
+  flex-shrink: 0;
+  padding: 3px var(--ui-space-3) 0;
+  background: var(--ui-card);
+  border-bottom: 1px solid var(--ui-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.new-shell__tabbar::-webkit-scrollbar {
+  display: none;
+}
+
+.new-shell__tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-radius: 7px 7px 0 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color var(--ui-ease),
+    color var(--ui-ease);
+}
+
+.new-shell__tab:hover {
+  background: var(--ui-muted);
+  color: var(--ui-foreground);
+}
+
+.new-shell__tab--active,
+.new-shell__tab--active:hover {
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary-text);
+  font-weight: var(--ui-weight-medium);
+}
+
+.new-shell__tab-divider {
+  position: absolute;
+  left: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 16px;
+  background: var(--ui-border);
+}
+
+.new-shell__tab-label {
+  line-height: 1;
+}
+
+.new-shell__tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ui-foreground-faint);
+  cursor: pointer;
+}
+
+.new-shell__tab-close:hover {
+  background: var(--ui-fill-selected);
+  color: var(--ui-foreground);
 }
 
 .new-shell__content {

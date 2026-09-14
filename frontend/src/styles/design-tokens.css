@@ -19,40 +19,40 @@
  */
 :root {
   /* surfaces — cool neutral console ground (Vben #f0f2f5 family) */
-  --ui-background: #f0f2f5; /* canvas */
+  --ui-background: #f1f3f6; /* canvas — Vben background-deep hsl(216 20% 95.5%) */
   --ui-card: #ffffff;
-  --ui-muted: #f6f7f9; /* subdued rows / secondary fills / table heads */
-  --ui-chrome: #eceef1; /* toolbar furniture */
-  --ui-fill-hover: rgba(26, 30, 38, 0.07);
-  --ui-fill-selected: rgba(26, 30, 38, 0.09);
-  --ui-fill-expanded: rgba(26, 30, 38, 0.12);
+  --ui-muted: #f4f4f5; /* Vben muted hsl(240 5% 96%) */
+  --ui-chrome: #f4f4f5;
+  --ui-fill-hover: rgba(24, 24, 27, 0.05);
+  --ui-fill-selected: rgba(24, 24, 27, 0.08);
+  --ui-fill-expanded: rgba(24, 24, 27, 0.12);
 
   /* text — cool near-black ink + slate grays */
-  --ui-foreground: #1f2328;
-  --ui-foreground-secondary: #59636e;
+  --ui-foreground: #323639; /* Vben foreground hsl(210 6% 21%) */
+  --ui-foreground-secondary: #71717a; /* Vben muted-foreground */
   --ui-foreground-faint: #68717d; /* 4.9:1 on white — AA for 11-12px hints */
   --ui-foreground-inverse: #ffffff;
 
   /* lines */
-  --ui-border: #dfe3e8; /* hairline default */
-  --ui-border-muted: #eef0f4;
-  --ui-border-strong: #aab2c1;
-  --ui-input-border: #bcc3d1;
+  --ui-border: #e4e4e7; /* Vben border hsl(240 6% 90%) */
+  --ui-border-muted: #f0f0f1;
+  --ui-border-strong: #d4d4d8;
+  --ui-input-border: #e4e4e7;
 
   /* brand — single antd/Vben blue */
-  --ui-primary: #1677ff;
-  --ui-primary-hover: #4096ff;
-  --ui-primary-active: #0958d9;
-  --ui-primary-soft: #e6f0ff; /* subtle brand tint fills */
-  --ui-primary-text: #0958d9; /* brand blue tuned for small TEXT (AA on white) */
-  --ui-ring: rgba(22, 119, 255, 0.35);
+  --ui-primary: #006be6; /* Vben primary hsl(212 100% 45%) */
+  --ui-primary-hover: #1a7beb;
+  --ui-primary-active: #0057b8;
+  --ui-primary-soft: #e6f0fe; /* primary @10% on white */
+  --ui-primary-text: #0057b8; /* brand blue tuned for small TEXT (AA on white) */
+  --ui-ring: rgba(0, 107, 230, 0.35);
 
   /* console chrome — deep navy navigation rail (Vben #001529) */
-  --ui-rail: #001529;
-  --ui-rail-text: rgba(255, 255, 255, 0.74);
-  --ui-rail-text-muted: rgba(255, 255, 255, 0.42);
-  --ui-rail-hover: rgba(255, 255, 255, 0.06);
-  --ui-rail-line: rgba(255, 255, 255, 0.09);
+  --ui-rail: #ffffff; /* Vben light sidebar is white */
+  --ui-rail-text: #323639;
+  --ui-rail-text-muted: #71717a;
+  --ui-rail-hover: #f4f4f5;
+  --ui-rail-line: #e4e4e7;
 
   /* login brand panel (Vben login split-screen blue) */
   --ui-login-panel: #2a5ad7;
@@ -99,9 +99,9 @@
   --ui-space-12: 48px;
 
   /* shape — Vben console family: generous card corners, tight controls */
-  --ui-radius-control: 6px;
-  --ui-radius-panel: 12px;
-  --ui-radius-dialog: 14px;
+  --ui-radius-control: 8px;
+  --ui-radius-panel: 8px; /* Vben --radius 0.5rem */
+  --ui-radius-dialog: 10px;
   --ui-radius-pill: 999px;
 
   /* sizes */
@@ -109,8 +109,8 @@
   --ui-control-height-lg: 40px;
   --ui-row-height: 48px;
   --ui-table-row-height: 48px;
-  --ui-header-height: 56px;
-  --ui-sidebar-width: 240px;
+  --ui-header-height: 50px; /* Vben header.height 50 */
+  --ui-sidebar-width: 224px; /* Vben sidebar.width 224 */
   --ui-content-max: 1440px;
 
   /* shadows — popper / dialog / focus affordance + hairline card lift */
