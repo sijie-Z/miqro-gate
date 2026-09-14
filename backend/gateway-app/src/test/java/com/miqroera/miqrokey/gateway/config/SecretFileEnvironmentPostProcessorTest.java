@@ -47,8 +47,8 @@ class SecretFileEnvironmentPostProcessorTest {
         Path secret = tempDir.resolve("gateway_db_password");
         Files.writeString(secret, "from-file\n");
 
-        StandardEnvironment environment = environmentWith(Map.of(
-                "MIQROKEY_GATEWAY_DB_PASSWORD", "explicit", "MIQROKEY_GATEWAY_DB_PASSWORD_FILE", secret.toString()));
+        StandardEnvironment environment = environmentWith(Map.of("MIQROKEY_GATEWAY_DB_PASSWORD", "explicit",
+                "MIQROKEY_GATEWAY_DB_PASSWORD_FILE", secret.toString()));
         processor.postProcessEnvironment(environment, new SpringApplication(GatewayApplication.class));
 
         assertThat(environment.getProperty("MIQROKEY_GATEWAY_DB_PASSWORD")).isEqualTo("explicit");
@@ -60,9 +60,9 @@ class SecretFileEnvironmentPostProcessorTest {
         StandardEnvironment environment = environmentWith(
                 Map.of("MIQROKEY_GATEWAY_DB_PASSWORD_FILE", tempDir.resolve("missing").toString()));
 
-        assertThatThrownBy(() -> processor.postProcessEnvironment(environment,
-                new SpringApplication(GatewayApplication.class))).isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("MIQROKEY_GATEWAY_DB_PASSWORD_FILE");
+        assertThatThrownBy(
+                () -> processor.postProcessEnvironment(environment, new SpringApplication(GatewayApplication.class)))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("MIQROKEY_GATEWAY_DB_PASSWORD_FILE");
     }
 
     @Test

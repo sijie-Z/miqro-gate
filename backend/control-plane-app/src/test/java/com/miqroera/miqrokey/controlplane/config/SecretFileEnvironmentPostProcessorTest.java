@@ -46,8 +46,8 @@ class SecretFileEnvironmentPostProcessorTest {
         Path secret = tempDir.resolve("db_password");
         Files.writeString(secret, "from-file\n");
 
-        StandardEnvironment environment = environmentWith(Map.of(
-                "MIQROKEY_DB_PASSWORD", "explicit", "MIQROKEY_DB_PASSWORD_FILE", secret.toString()));
+        StandardEnvironment environment = environmentWith(
+                Map.of("MIQROKEY_DB_PASSWORD", "explicit", "MIQROKEY_DB_PASSWORD_FILE", secret.toString()));
         processor.postProcessEnvironment(environment, new SpringApplication(ControlPlaneApplication.class));
 
         assertThat(environment.getProperty("MIQROKEY_DB_PASSWORD")).isEqualTo("explicit");
