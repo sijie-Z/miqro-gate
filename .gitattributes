@@ -8,6 +8,8 @@
 
 # Shell scripts
 *.sh text eol=lf
+# Maven wrapper：容器内直接执行，Windows 检出必须保持 LF（#479）
+mvnw text eol=lf
 
 # Windows batch
 *.bat text eol=crlf
