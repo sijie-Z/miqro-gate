@@ -315,13 +315,27 @@ public class AdminOrgService {
     public ProjectProviderGrant createGrant(UUID tenantId, UUID adminId, UUID projectId, UUID providerProductId,
             UUID credentialId, List<String> models) {
         requireProject(tenantId, projectId);
-        credentialRepository.findById(credentialId).filter(c -> c.tenantId().equals(tenantId))
+        var credential = credentialRepository.findById(credentialId).filter(c -> c.tenantId().equals(tenantId))
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "CREDENTIAL_NOT_FOUND",
                         "Credential not found or not visible"));
         if (providerProductId != null) {
             productRepository.findById(providerProductId).orElseThrow(
                     () -> new ApiException(HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND", "Provider product not found"));
+            // Cross-entity consistency (#498): the credential's subscription must
+            // belong to the declared product. Backstopped by the DB trigger
+            // check_grant_credential_product_consistency; checked here so the API
+            // answers with a clean 400 instead of a 500 from the trigger.
+            UUID subscriptionProduct = jdbc.queryForObject("""
+                    SELECT provider_product_id FROM upstream_subscriptions
+                    WHERE tenant_id = :tenantId AND id = :subscriptionId
+                    """, new MapSqlParameterSource("tenantId", tenantId).addValue("subscriptionId",
+                    credential.subscriptionId()), UUID.class);
+            if (!providerProductId.equals(subscriptionProduct)) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "GRANT_CREDENTIAL_PRODUCT_MISMATCH",
+                        "The credential's subscription belongs to a different provider product");
+            }
         }
+        requireCatalogModels(providerProductId, models);
         if (grantRepository.existsByProjectIdAndProductIdAndCredentialId(projectId, providerProductId, credentialId)) {
             throw new ApiException(HttpStatus.CONFLICT, "GRANT_EXISTS",
                     "a grant for this project/product/credential already exists");
@@ -338,6 +352,7 @@ public class AdminOrgService {
     @Transactional
     public ProjectProviderGrant updateGrantModels(UUID tenantId, UUID adminId, UUID grantId, List<String> models) {
         ProjectProviderGrant grant = requireGrant(tenantId, grantId);
+        requireCatalogModels(grant.providerProductId(), models);
         replaceModels(tenantId, grantId, models);
         auditService.record(tenantId, adminId, "GRANT_MODELS", "GRANT", grantId, "{}", null);
         return grant;
@@ -378,6 +393,42 @@ public class AdminOrgService {
                             """, new MapSqlParameterSource("tenantId", tenantId).addValue("grantId", grantId)
                             .addValue("model", model.trim()));
                 }
+            }
+        }
+    }
+
+    /**
+     * Grant model scopes must reference the product's catalog (#498): an unknown
+     * model id would otherwise flow into Virtual Key snapshots and the route
+     * snapshot as bad data, surfacing only at call time. The catalog acts as an
+     * allowlist only once it has data for the product — deployments whose catalog
+     * has not been synced yet (offline/private installs) keep today's behavior.
+     * Legacy grants without a product scope skip the check. Called before any
+     * write, inside the caller's transaction.
+     */
+    private void requireCatalogModels(UUID providerProductId, List<String> models) {
+        if (providerProductId == null || models == null) {
+            return;
+        }
+        Integer catalogSize = jdbc.queryForObject(
+                "SELECT count(*) FROM model_catalog WHERE provider_product_id = :providerProductId",
+                new MapSqlParameterSource("providerProductId", providerProductId), Integer.class);
+        if (catalogSize == null || catalogSize == 0) {
+            return;
+        }
+        for (String model : models) {
+            if (model == null || model.isBlank()) {
+                continue;
+            }
+            String trimmed = model.trim();
+            Integer known = jdbc.queryForObject("""
+                    SELECT count(*) FROM model_catalog
+                    WHERE provider_product_id = :providerProductId AND model_id = :modelId
+                    """, new MapSqlParameterSource("providerProductId", providerProductId).addValue("modelId", trimmed),
+                    Integer.class);
+            if (known == null || known == 0) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "MODEL_NOT_IN_CATALOG",
+                        "Model is not in the product catalog: " + trimmed);
             }
         }
     }
