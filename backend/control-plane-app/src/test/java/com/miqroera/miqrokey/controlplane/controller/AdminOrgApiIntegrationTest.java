@@ -300,6 +300,41 @@ class AdminOrgApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("a grant rejects a credential whose subscription belongs to another product (#498)")
+    void grantRejectsCrossProductCredential() throws Exception {
+        fx.insertProviderAndProductAndCredential();
+        String projectId = createProject("MISM");
+        mockMvc.perform(
+                post("/api/v1/admin/grants").contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                        .header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("projectId", projectId, "providerProductId",
+                                fx.productId.toString(), "credentialId", fx.secondCredentialId.toString(), "models",
+                                List.of("model-a")))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("GRANT_CREDENTIAL_PRODUCT_MISMATCH"));
+    }
+
+    @Test
+    @DisplayName("grant model scopes must exist in the product catalog (#498)")
+    void grantModelsMustExistInCatalog() throws Exception {
+        fx.insertProviderAndProductAndCredential();
+        String projectId = createProject("MODL");
+        mockMvc.perform(
+                post("/api/v1/admin/grants").contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                        .header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("projectId", projectId, "providerProductId",
+                                fx.productId.toString(), "credentialId", fx.credentialId.toString(), "models",
+                                List.of("not-in-catalog")))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MODEL_NOT_IN_CATALOG"));
+
+        String grantId = createGrant(projectId, List.of("model-a"));
+        mockMvc.perform(post("/api/v1/admin/grants/" + grantId + "/models").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("models", List.of("not-in-catalog")))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MODEL_NOT_IN_CATALOG"));
+    }
+
+    @Test
     @DisplayName("system admins cannot be disabled; anonymous access is rejected")
     void guards() throws Exception {
         // The bootstrap admin is a SYSTEM_ADMIN: disabling must be rejected.
@@ -333,14 +368,17 @@ class AdminOrgApiIntegrationTest {
         final UUID productId = UUID.randomUUID();
         final UUID subscriptionId = UUID.randomUUID();
         final UUID credentialId = UUID.randomUUID();
+        final UUID secondProductId = UUID.randomUUID();
+        final UUID secondSubscriptionId = UUID.randomUUID();
+        final UUID secondCredentialId = UUID.randomUUID();
 
         void reset() {
             for (String table : List.of("quota_snapshots", "cost_allocations", "usage_event", "cache_hit_event",
                     "price_snapshot", "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
-                    "project_provider_grant_models", "project_provider_grants", "upstream_credential_versions",
-                    "upstream_credentials", "plan_seats", "upstream_subscriptions", "project_memberships",
-                    "team_memberships", "projects", "teams", "provider_products", "providers", "admin_audit_events",
-                    "user_sessions", "users")) {
+                    "project_provider_grant_models", "project_provider_grants", "model_catalog",
+                    "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
+                    "project_memberships", "team_memberships", "projects", "teams", "provider_products", "providers",
+                    "admin_audit_events", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {
@@ -372,7 +410,53 @@ class AdminOrgApiIntegrationTest {
                     VALUES (:id, :tenantId, :subscriptionId, 'Cred', 'ACTIVE', 0)
                     """, new MapSqlParameterSource("id", credentialId).addValue("tenantId", tenantId)
                     .addValue("subscriptionId", subscriptionId));
+            // Product catalog scope for the grant model validation (#498).
+            for (String model : List.of("model-a", "model-b")) {
+                jdbc.update("""
+                        INSERT INTO model_catalog (id, provider_product_id, model_id, display_name, status, version)
+                        VALUES (:id, :productId, :model, :model, 'ACTIVE', 0)
+                        """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("productId", productId)
+                        .addValue("model", model));
+            }
+            // A second product with its own subscription/credential for the
+            // cross-product mismatch case (#498).
+            jdbc.update("""
+                    INSERT INTO provider_products
+                        (id, provider_id, product_code, display_name, billing_mode, credential_topology,
+                         supported_wire_protocols, base_url_templates, auth_scheme, implementation_status, version)
+                    VALUES (:productId, :providerId, 'test-product-2', 'Test Product 2', 'PAYG', 'SINGLE_SHARED',
+                            '["messages"]', '[{"url":"https://api.test2.example"}]', '{"type":"bearer"}', 'VERIFIED', 0)
+                    """, new MapSqlParameterSource("productId", secondProductId).addValue("providerId", providerId));
+            jdbc.update("""
+                    INSERT INTO upstream_subscriptions
+                        (id, tenant_id, provider_product_id, name, billing_mode, plan_scope, status, version)
+                    VALUES (:id, :tenantId, :productId, 'Sub-2', 'PAYG', 'NONE', 'ACTIVE', 0)
+                    """, new MapSqlParameterSource("id", secondSubscriptionId).addValue("tenantId", tenantId)
+                    .addValue("productId", secondProductId));
+            jdbc.update("""
+                    INSERT INTO upstream_credentials (id, tenant_id, subscription_id, credential_name, status, version)
+                    VALUES (:id, :tenantId, :subscriptionId, 'Cred-2', 'ACTIVE', 0)
+                    """, new MapSqlParameterSource("id", secondCredentialId).addValue("tenantId", tenantId)
+                    .addValue("subscriptionId", secondSubscriptionId));
         }
+    }
+
+    private String createProject(String code) throws Exception {
+        MvcResult project = mockMvc
+                .perform(post("/api/v1/admin/projects").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("code", code, "name", code))))
+                .andExpect(status().isOk()).andReturn();
+        return objectMapper.readValue(project.getResponse().getContentAsString(), Map.class).get("id").toString();
+    }
+
+    private String createGrant(String projectId, List<String> models) throws Exception {
+        MvcResult grant = mockMvc.perform(post("/api/v1/admin/grants").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("projectId", projectId, "providerProductId",
+                        fx.productId.toString(), "credentialId", fx.credentialId.toString(), "models", models))))
+                .andExpect(status().isOk()).andReturn();
+        return objectMapper.readValue(grant.getResponse().getContentAsString(), Map.class).get("id").toString();
     }
 
     static class BootstrapHelper {
