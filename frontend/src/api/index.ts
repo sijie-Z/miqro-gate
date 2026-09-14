@@ -353,10 +353,16 @@ export function getRoiReport(from?: string, to?: string): Promise<RoiReportView>
 export function listMcpAccessLogs(params?: {
   service?: string;
   consumer?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
 }): Promise<McpAccessLogEntry[]> {
   const query: Record<string, string> = {};
   if (params?.service) query.service = params.service;
   if (params?.consumer) query.consumer = params.consumer;
+  if (params?.from) query.from = params.from;
+  if (params?.to) query.to = params.to;
+  if (params?.limit != null) query.limit = String(params.limit);
   return get<McpAccessLogEntry[]>('/api/v1/admin/mcp-access-logs', query);
 }
 
