@@ -72,7 +72,8 @@ function onClick(event: MouseEvent) {
   border-radius: var(--ui-radius-control);
   border: 1px solid transparent;
   font-family: inherit;
-  font-weight: var(--ui-weight-medium);
+  /* antd v5 buttons are regular weight (v2.pro live: 400 at every size). */
+  font-weight: var(--ui-weight-regular);
   line-height: 1;
   cursor: pointer;
   user-select: none;
@@ -95,15 +96,15 @@ function onClick(event: MouseEvent) {
 }
 
 .ui-btn--sm {
-  height: 28px;
-  padding: 0 var(--ui-space-3);
-  font-size: var(--ui-font-size-xs);
+  height: 24px;
+  padding: 0 7px;
+  font-size: var(--ui-font-size-base);
 }
 
 .ui-btn--md {
   height: var(--ui-control-height);
-  padding: 0 var(--ui-space-4);
-  font-size: var(--ui-font-size-sm);
+  padding: 0 15px;
+  font-size: var(--ui-font-size-base);
 }
 
 .ui-btn--lg {
@@ -133,16 +134,21 @@ function onClick(event: MouseEvent) {
 
 .ui-btn--secondary {
   background: var(--ui-card);
-  border-color: var(--ui-input-border);
-  color: var(--ui-foreground);
+  border-color: #cececd; /* v2.pro live: antd default border in Vben theme */
+  color: #606266; /* v2.pro live: antd default button ink */
+  /* antd default-button bottom edge (v2.pro live) */
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.02);
 }
 
+/* antd hover keeps the white fill and tints border + text together. */
 .ui-btn--secondary:hover:not(:disabled) {
-  background: var(--ui-muted);
+  border-color: var(--ui-primary-hover);
+  color: var(--ui-primary-hover);
 }
 
 .ui-btn--secondary:active:not(:disabled) {
-  background: var(--ui-fill-selected);
+  border-color: var(--ui-primary-active);
+  color: var(--ui-primary-active);
 }
 
 .ui-btn--ghost {

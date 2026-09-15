@@ -43,7 +43,7 @@
 
   /* brand — single antd/Vben blue */
   --ui-primary: #0960bd; /* Vben v2 default themeColor */
-  --ui-primary-hover: #1568c0; /* lighten 5% (antd buttons) */
+  --ui-primary-hover: #2a7dc9; /* v2.pro live: primary button + control hover */
   --ui-primary-active: #095bb4; /* darken 5% */
   --ui-primary-soft: #e6eff8; /* primary @8% on white */
   --ui-primary-text: #0960bd; /* 6.1:1 on white — AA */ /* brand blue tuned for small TEXT (AA on white) */
