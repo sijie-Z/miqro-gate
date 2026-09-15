@@ -230,6 +230,11 @@ describe('NextKeysView', () => {
     ack.click();
     await flushPromises();
     expect(closeButton.disabled).toBe(false);
+
+    // CC Switch one-click import + copy-ready snippets ride along the one-time dialog.
+    expect(document.querySelector('[data-testid="secret-ccswitch"]')).toBeTruthy();
+    expect(document.querySelector('[data-testid="secret-copy-env"]')).toBeTruthy();
+    expect(document.querySelector('[data-testid="secret-copy-settings"]')).toBeTruthy();
   });
 
   it('surfaces API errors with request ids in the create form', async () => {
