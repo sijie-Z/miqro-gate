@@ -60,6 +60,7 @@ import type {
   UserProjectMembership,
   UserResponse,
   UsageSummary,
+  HourlyUsageReport,
   ValidateCredentialResponse,
   VirtualKeyView,
   WebhookDelivery,
@@ -1079,6 +1080,22 @@ export function adminUsageRecords(query: {
     if (value !== undefined && value !== '') params.set(key, String(value));
   }
   return get<UsageRecordPage>(`/api/v1/admin/usage/records?${params.toString()}`);
+}
+
+/** #634: per-hour token table, cross-tabbed by project and user/team. */
+export function adminUsageHourly(query: {
+  date?: string;
+  days?: number;
+  dimension?: string;
+  userId?: string;
+  projectId?: string;
+  tzOffsetMinutes?: number;
+}): Promise<HourlyUsageReport> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  }
+  return get<HourlyUsageReport>(`/api/v1/admin/usage/hourly?${params.toString()}`);
 }
 
 export function createExport(

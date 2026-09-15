@@ -1908,6 +1908,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/usage/hourly": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["hourly"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/usage-deletions/preview": {
         parameters: {
             query?: never;
@@ -3959,6 +3975,37 @@ export interface components {
             paidCost?: number;
             savedCost?: number;
             savedPct?: number;
+        };
+        HourlyUsageReport: {
+            date?: string;
+            /** Format: int32 */
+            days?: number;
+            dimension?: string;
+            /** Format: int32 */
+            tzOffsetMinutes?: number;
+            rows?: components["schemas"]["HourlyUsageRow"][];
+        };
+        HourlyUsageRow: {
+            /** Format: date-time */
+            hourStart?: string;
+            /** Format: uuid */
+            projectId?: string;
+            projectLabel?: string;
+            /** Format: uuid */
+            dimensionId?: string;
+            dimensionLabel?: string;
+            /** Format: int64 */
+            requests?: number;
+            /** Format: int64 */
+            inputTokens?: number;
+            /** Format: int64 */
+            outputTokens?: number;
+            /** Format: int64 */
+            cacheReadTokens?: number;
+            /** Format: int64 */
+            cacheCreationTokens?: number;
+            /** Format: int64 */
+            totalTokens?: number;
         };
         Preview: {
             /** Format: int64 */
@@ -8190,6 +8237,33 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["UsageRecordPage"];
+                };
+            };
+        };
+    };
+    hourly: {
+        parameters: {
+            query?: {
+                date?: string;
+                days?: number;
+                dimension?: string;
+                userId?: string;
+                projectId?: string;
+                tzOffsetMinutes?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["HourlyUsageReport"];
                 };
             };
         };

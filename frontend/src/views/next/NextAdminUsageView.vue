@@ -11,8 +11,14 @@ import { ApiError } from '@/api/http';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import { UiButton, UiInput, UiSelect, UiStatusBadge, UiTable, UiTrendChart } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type {UsageGroupBy} from '@/types/api';
-import type { UsageRecord, UsageRecordPage, UsageSummary } from '@/types/generated-api';
+import type { UsageGroupBy } from '@/types/api';
+import type {
+  UsageRecord,
+  UsageRecordPage,
+  UsageSummary,
+  HourlyUsageReport,
+  HourlyUsageRow,
+} from '@/types/generated-api';
 
 const groupBy = ref<UsageGroupBy>('project');
 const modelId = ref('');
@@ -66,6 +72,98 @@ const trendPoints = computed(() => {
 
 const page = ref(1);
 const pageSize = ref(20);
+
+// ---- hourly token table (#634): per-hour buckets crossed with project x user/team ----
+const hourlyDate = ref<string>(todayLocalIso());
+const hourlyDays = ref<number>(1);
+const hourlyDimension = ref<string>('USER');
+const hourly = ref<HourlyUsageReport | null>(null);
+const hourlyLoading = ref(true);
+const hourlyError = ref('');
+
+const hourlyDayOptions = [
+  { value: 1, label: '当天' },
+  { value: 3, label: '近 3 天' },
+  { value: 7, label: '近 7 天' },
+];
+
+const hourlyDimensionOptions: UiSelectOption[] = [
+  { value: 'NONE', label: '不分组（仅项目）' },
+  { value: 'USER', label: '按用户' },
+  { value: 'TEAM', label: '按团队' },
+];
+
+function todayLocalIso(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function formatHour(iso?: string): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`;
+}
+
+const hourlyRows = computed(() =>
+  (hourly.value?.rows ?? []).map((r, i) => ({
+    ...r,
+    key: `${r.hourStart ?? ''}-${r.projectId ?? ''}-${r.dimensionId ?? ''}-${i}`,
+  })),
+);
+
+const hourlyColumns = computed(() => {
+  const cols: Array<{
+    key: string;
+    title: string;
+    width?: string;
+    minWidth?: string;
+    align?: 'right';
+  }> = [{ key: 'hourStart', title: '小时', width: '130px' }];
+  if (hourlyDimension.value !== 'NONE') {
+    cols.push({
+      key: 'dimensionLabel',
+      title: hourlyDimension.value === 'TEAM' ? '团队' : '用户',
+      minWidth: '150px',
+    });
+  }
+  cols.push(
+    { key: 'projectLabel', title: '项目', minWidth: '150px' },
+    { key: 'requests', title: '请求', width: '90px', align: 'right' },
+    { key: 'inputTokens', title: '输入', width: '110px', align: 'right' },
+    { key: 'outputTokens', title: '输出', width: '110px', align: 'right' },
+    { key: 'cacheReadTokens', title: '缓存读', width: '110px', align: 'right' },
+    { key: 'cacheCreationTokens', title: '缓存写', width: '110px', align: 'right' },
+    { key: 'totalTokens', title: '合计', width: '120px', align: 'right' },
+  );
+  return cols;
+});
+
+async function loadHourly() {
+  hourlyLoading.value = true;
+  hourlyError.value = '';
+  try {
+    hourly.value = await api.adminUsageHourly({
+      date: hourlyDate.value || undefined,
+      days: hourlyDays.value,
+      dimension: hourlyDimension.value,
+      projectId: projectId.value || undefined,
+      tzOffsetMinutes: -new Date().getTimezoneOffset(),
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      hourlyError.value = error.message;
+    }
+  } finally {
+    hourlyLoading.value = false;
+  }
+}
+
+function applyHourlyDays(value: number) {
+  hourlyDays.value = value;
+  void loadHourly();
+}
 
 // ---- time range presets (server default when 0 — behaviour unchanged) ----
 const rangeDays = ref<number>(0);
@@ -187,7 +285,10 @@ const cacheLabel: Record<string, string> = {
   L2_HIT: 'L2 命中',
 };
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  void loadHourly();
+});
 </script>
 
 <template>
@@ -246,6 +347,7 @@ onMounted(load);
           @click="
             page = 1;
             load();
+            loadHourly();
           "
           >查询</UiButton
         >
@@ -309,7 +411,6 @@ onMounted(load);
       >
     </div>
 
-
     <section class="ui-panel next-usage__trend" data-testid="usage-trend">
       <div class="ui-panel-head">
         <h2 class="ui-panel-title">用量趋势</h2>
@@ -338,6 +439,77 @@ onMounted(load);
       </div>
     </section>
 
+    <section class="ui-panel next-admin-usage__hourly" data-testid="usage-hourly">
+      <div class="ui-panel-head">
+        <h2 class="ui-panel-title">每小时 Token</h2>
+        <div class="next-admin-usage__hourly-controls">
+          <UiInput
+            v-model="hourlyDate"
+            type="date"
+            width="160px"
+            data-testid="hourly-date"
+            @change="loadHourly"
+          />
+          <div class="next-admin-usage__range" aria-label="天数">
+            <button
+              v-for="d in hourlyDayOptions"
+              :key="d.value"
+              type="button"
+              class="next-admin-usage__seg"
+              :class="{ 'next-admin-usage__seg--on': hourlyDays === d.value }"
+              :data-testid="`hourly-days-${d.value}`"
+              @click="applyHourlyDays(d.value)"
+            >
+              {{ d.label }}
+            </button>
+          </div>
+          <UiSelect
+            v-model="hourlyDimension"
+            :options="hourlyDimensionOptions"
+            data-testid="hourly-dimension"
+            @change="loadHourly"
+          />
+        </div>
+      </div>
+      <div v-if="hourlyError" class="ui-alert ui-alert--error">{{ hourlyError }}</div>
+      <UiTable
+        :columns="hourlyColumns"
+        :data="hourlyRows"
+        :loading="hourlyLoading"
+        row-key="key"
+        empty-title="该时间窗没有用量"
+        data-testid="usage-hourly-table"
+      >
+        <template #hourStart="{ row }">{{
+          formatHour((row as HourlyUsageRow).hourStart)
+        }}</template>
+        <template #dimensionLabel="{ row }">
+          <span class="ui-mono">{{ (row as HourlyUsageRow).dimensionLabel ?? '—' }}</span>
+        </template>
+        <template #projectLabel="{ row }">{{
+          (row as HourlyUsageRow).projectLabel ?? '—'
+        }}</template>
+        <template #requests="{ row }">
+          <span class="ui-num">{{ fmtNum((row as HourlyUsageRow).requests) }}</span>
+        </template>
+        <template #inputTokens="{ row }">
+          <span class="ui-num">{{ fmtNum((row as HourlyUsageRow).inputTokens) }}</span>
+        </template>
+        <template #outputTokens="{ row }">
+          <span class="ui-num">{{ fmtNum((row as HourlyUsageRow).outputTokens) }}</span>
+        </template>
+        <template #cacheReadTokens="{ row }">
+          <span class="ui-num">{{ fmtNum((row as HourlyUsageRow).cacheReadTokens) }}</span>
+        </template>
+        <template #cacheCreationTokens="{ row }">
+          <span class="ui-num">{{ fmtNum((row as HourlyUsageRow).cacheCreationTokens) }}</span>
+        </template>
+        <template #totalTokens="{ row }">
+          <span class="ui-num">{{ fmtNum((row as HourlyUsageRow).totalTokens) }}</span>
+        </template>
+      </UiTable>
+    </section>
+
     <section class="ui-panel">
       <UiTable
         :columns="columns"
@@ -347,34 +519,25 @@ onMounted(load);
         empty-title="没有用量记录"
         data-testid="usage-records-table"
       >
-        <template #occurredAt="{ row }">{{
-          formatTime((row as UsageRecord).occurredAt)
-        }}</template>
+        <template #occurredAt="{ row }">{{ formatTime((row as UsageRecord).occurredAt) }}</template>
         <template #modelId="{ row }">
           <span class="ui-mono">{{ (row as UsageRecord).modelId }}</span>
         </template>
         <template #inputTokens="{ row }">
-          <span class="ui-num">{{
-            (row as UsageRecord).inputTokens ?? 0
-          }}</span>
+          <span class="ui-num">{{ (row as UsageRecord).inputTokens ?? 0 }}</span>
         </template>
         <template #outputTokens="{ row }">
-          <span class="ui-num">{{
-            (row as UsageRecord).outputTokens ?? 0
-          }}</span>
+          <span class="ui-num">{{ (row as UsageRecord).outputTokens ?? 0 }}</span>
         </template>
         <template #cacheLevel="{ row }">
           <UiStatusBadge
             :label="
-              cacheLabel[(row as UsageRecord).cacheLevel ?? ''] ??
-              (row as UsageRecord).cacheLevel
+              cacheLabel[(row as UsageRecord).cacheLevel ?? ''] ?? (row as UsageRecord).cacheLevel
             "
           />
         </template>
         <template #upstreamStatusCode="{ row }">
-          <span class="ui-num">{{
-            (row as UsageRecord).upstreamStatusCode ?? '—'
-          }}</span>
+          <span class="ui-num">{{ (row as UsageRecord).upstreamStatusCode ?? '—' }}</span>
         </template>
         <template #usageMissing="{ row }">
           <UiStatusBadge
@@ -383,9 +546,7 @@ onMounted(load);
           />
         </template>
         <template #clientIp="{ row }">
-          <span class="ui-mono">{{
-            (row as UsageRecord).clientIp || '—'
-          }}</span>
+          <span class="ui-mono">{{ (row as UsageRecord).clientIp || '—' }}</span>
         </template>
         <template #gatewayRequestId="{ row }">
           <span class="ui-mono next-admin-usage__reqid">{{
@@ -577,6 +738,17 @@ onMounted(load);
 
 .next-usage__trend {
   margin-bottom: var(--ui-space-5);
+}
+
+.next-admin-usage__hourly {
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-admin-usage__hourly-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  flex-wrap: wrap;
 }
 
 .next-usage__trend-tabs {

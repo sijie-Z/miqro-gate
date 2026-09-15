@@ -32,6 +32,9 @@ export type ModelApprovalView = components['schemas']['ModelApprovalView'];
 export type ModelApprovalPage = components['schemas']['ModelApprovalPage'];
 export type QuotaRuleView = components['schemas']['QuotaRuleView'];
 export type UsageSummary = components['schemas']['UsageSummary'];
+// #634 hourly usage report (admin)
+export type HourlyUsageReport = components['schemas']['HourlyUsageReport'];
+export type HourlyUsageRow = components['schemas']['HourlyUsageRow'];
 export type PriceSnapshotView = components['schemas']['PriceSnapshotView'];
 export type CredentialView = components['schemas']['CredentialView'];
 export type CredentialVersionView = components['schemas']['CredentialVersionView'];
