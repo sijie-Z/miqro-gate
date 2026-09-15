@@ -100,6 +100,16 @@ public final class GatewayTestKeys {
     public static final KeyFixture OTHER_KEY = KeyFixture.create(OTHER_PROJECT_TAG, OTHER_PROJECT_ID, PRODUCT_ID,
             OTHER_CREDENTIAL_ID, MODELS_ALLOWED);
 
+    /**
+     * #633 CAA: one key core with TWO project bindings (resolution-ladder tests).
+     */
+    public static final KeyFixture MULTI_BOUND_KEY = KeyFixture.create("demo-multi", PROJECT_ID, PRODUCT_ID,
+            CREDENTIAL_ID, MODELS_ALLOWED);
+
+    /** Second binding of {@link #MULTI_BOUND_KEY}: same core, another project. */
+    public static final KeyFixture MULTI_BOUND_KEY_SECOND = MULTI_BOUND_KEY.rebound("demo-multi-2", OTHER_PROJECT_ID,
+            OTHER_CREDENTIAL_ID, UUID.randomUUID());
+
     /** Well-formed key that does NOT exist in the fixture snapshot. */
     public static final KeyFixture UNKNOWN_KEY = KeyFixture.create("ghost-proj", UUID.randomUUID(), PRODUCT_ID,
             UUID.randomUUID(), MODELS_ALLOWED);
@@ -429,6 +439,13 @@ public final class GatewayTestKeys {
 
         public RouteSnapshot.BindingRecord bindingRecord() {
             return new RouteSnapshot.BindingRecord(keyId, projectId, projectTag, credentialId, productId, grantId);
+        }
+
+        /** The same key core re-bound to another project (CAA multi-binding, #633). */
+        public KeyFixture rebound(String tag, UUID reboundProjectId, UUID reboundCredentialId, UUID reboundGrantId) {
+            return new KeyFixture(presented, publicKeyId, rawSecret, digest, keyId, tag, reboundProjectId, productId,
+                    reboundCredentialId, models, reboundGrantId, productCode, grantModels, upstreamModels, userId,
+                    providerId);
         }
 
         public RouteSnapshot.CredentialRecord credentialRecord(String baseUrl) {

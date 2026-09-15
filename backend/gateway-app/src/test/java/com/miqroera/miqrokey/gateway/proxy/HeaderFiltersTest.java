@@ -130,4 +130,23 @@ class HeaderFiltersTest {
         assertThat(filtered).doesNotContainKeys("Connection", "X-Upstream-Hop", "Transfer-Encoding");
         assertThat(filtered.getFirst("X-Request-Id")).isEqualTo("preserve");
     }
+
+    @Test
+    @DisplayName("should strip the X-Miqro-* claim namespace but keep session-observation headers")
+    void shouldStripCaaClaimHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Miqro-Project-Id", "9f0e2f52-0000-0000-0000-000000000001");
+        headers.set("X-Miqro-Claim-Source", "tool_path");
+        headers.set("X-Miqro-Activity", "act-1");
+        headers.set("X-Claude-Code-Session-Id", "sess-1");
+        headers.set("anthropic-version", "2023-06-01");
+
+        HttpHeaders filtered = HeaderFilters.filterInboundHeaders(headers);
+
+        assertThat(filtered.containsKey("X-Miqro-Project-Id")).isFalse();
+        assertThat(filtered.containsKey("X-Miqro-Claim-Source")).isFalse();
+        assertThat(filtered.containsKey("X-Miqro-Activity")).isFalse();
+        assertThat(filtered.getFirst("X-Claude-Code-Session-Id")).isEqualTo("sess-1");
+        assertThat(filtered.getFirst("anthropic-version")).isEqualTo("2023-06-01");
+    }
 }

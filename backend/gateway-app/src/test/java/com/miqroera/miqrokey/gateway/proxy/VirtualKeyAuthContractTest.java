@@ -219,22 +219,21 @@ class VirtualKeyAuthContractTest {
         }
 
         @Test
-        @DisplayName("should reject a valid key presented under the wrong label")
-        void shouldRejectWrongTag() {
-            // DEFAULT_KEY is bound to tag "demo-proj"; presenting it under a
-            // different label must be indistinguishable from an unknown key.
-            String wrongTag = GatewayTestKeys.DEFAULT_KEY.presented().replace(GatewayTestKeys.PROJECT_TAG,
+        @DisplayName("a non-matching label on a sole-binding key routes by the sole binding (CAA §4)")
+        void soleBindingIgnoresCosmeticLabel() {
+            // CAA (#633): the label is a legacy selector, not a boundary — a
+            // key with exactly one binding resolves regardless of its suffix.
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+            String otherLabel = GatewayTestKeys.DEFAULT_KEY.presented().replace(GatewayTestKeys.PROJECT_TAG,
                     "someone-else");
-            byte[] body = webTestClient.post().uri("/v1/chat/completions").header("Authorization", "Bearer " + wrongTag)
-                    .bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isNotFound().expectBody()
-                    .returnResult().getResponseBody();
-
-            assertThat(errorType(body)).isEqualTo("virtual_key_invalid");
-            assertThat(mockProvider.getCapturedRequests()).isEmpty();
+            webTestClient.post().uri("/v1/chat/completions").header("Authorization", "Bearer " + otherLabel)
+                    .bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isOk();
+            assertThat(mockProvider.getCapturedRequests()).hasSize(1);
         }
 
         @Test
-        @DisplayName("should not reveal whether a key exists, is malformed, or is mislabeled")
+        @DisplayName("should not reveal whether a key exists or is malformed")
         void shouldBeIndistinguishable() {
             String malformed = new String(webTestClient.post().uri("/v1/chat/completions")
                     .header("Authorization", "Bearer garbage").bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange()
@@ -243,13 +242,58 @@ class VirtualKeyAuthContractTest {
                     .header("Authorization", "Bearer " + GatewayTestKeys.UNKNOWN_KEY.presented())
                     .bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isNotFound().expectBody()
                     .returnResult().getResponseBody(), StandardCharsets.UTF_8);
-            String wrongTag = new String(webTestClient.post().uri("/v1/chat/completions").header("Authorization",
-                    "Bearer " + GatewayTestKeys.DEFAULT_KEY.presented().replace(GatewayTestKeys.PROJECT_TAG, "x-other"))
-                    .bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isNotFound().expectBody()
-                    .returnResult().getResponseBody(), StandardCharsets.UTF_8);
-
             assertThat(unknown).isEqualTo(malformed);
-            assertThat(wrongTag).isEqualTo(malformed);
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // CAA request context (#633)
+    // -------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("CAA request context (#633)")
+    class CaaContext {
+
+        @Test
+        @DisplayName("a multi-bound key without context fails closed (400 CONTEXT_REQUIRED)")
+        void multiBoundWithoutContextRequiresContext() {
+            // The suffix is part of the format but names no binding of this
+            // key: no claim, no suffix match, two bindings -> fail closed.
+            String unmatched = GatewayTestKeys.MULTI_BOUND_KEY.presented().replace("demo-multi", "no-such-binding");
+            byte[] body = webTestClient.post().uri("/v1/chat/completions")
+                    .header("Authorization", "Bearer " + unmatched).bodyValue(ChatFixtures.REQUEST_NON_STREAMING)
+                    .exchange().expectStatus().isBadRequest().expectBody().returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("CONTEXT_REQUIRED");
+            assertThat(mockProvider.getCapturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a project-id claim selects the binding and routes (RESOLVED_HEADER)")
+        void claimSelectsBinding() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+            webTestClient.post().uri("/v1/chat/completions")
+                    .header("Authorization", "Bearer " + GatewayTestKeys.MULTI_BOUND_KEY.presented())
+                    .header("X-Miqro-Project-Id", GatewayTestKeys.OTHER_PROJECT_ID.toString())
+                    .bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isOk();
+
+            assertThat(mockProvider.getCapturedRequests()).hasSize(1);
+            // The claim headers never reach the upstream.
+            assertThat(mockProvider.getCapturedRequests().get(0).header("X-Miqro-Project-Id")).isNull();
+        }
+
+        @Test
+        @DisplayName("a claim for a project without a binding is 403 CONTEXT_NOT_ALLOWED")
+        void forgedClaimIsForbidden() {
+            byte[] body = webTestClient.post().uri("/v1/chat/completions")
+                    .header("Authorization", "Bearer " + GatewayTestKeys.MULTI_BOUND_KEY.presented())
+                    .header("X-Miqro-Project-Id", java.util.UUID.randomUUID().toString())
+                    .bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isForbidden().expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("CONTEXT_NOT_ALLOWED");
+            assertThat(mockProvider.getCapturedRequests()).isEmpty();
         }
     }
 

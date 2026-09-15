@@ -45,11 +45,13 @@ public class VirtualKeyResolver {
 
     private final RouteSnapshotProvider routeSnapshotProvider;
     private final ObjectProvider<VirtualKeyCrypto> virtualKeyCrypto;
+    private final RequestContextResolver requestContextResolver;
 
     public VirtualKeyResolver(RouteSnapshotProvider routeSnapshotProvider,
-            ObjectProvider<VirtualKeyCrypto> virtualKeyCrypto) {
+            ObjectProvider<VirtualKeyCrypto> virtualKeyCrypto, RequestContextResolver requestContextResolver) {
         this.routeSnapshotProvider = routeSnapshotProvider;
         this.virtualKeyCrypto = virtualKeyCrypto;
+        this.requestContextResolver = requestContextResolver;
     }
 
     /**
@@ -79,16 +81,14 @@ public class VirtualKeyResolver {
             if (!matched) {
                 return invalid();
             }
-            // ADR-0018: the presented label SELECTS the binding — a key may be
-            // bound to several projects, each with its own grant. A label with
-            // no binding (unbound project, foreign project, forged) is a
-            // uniform invalid key: 404, no enumeration.
-            RouteSnapshot.BindingRecord binding = snapshot.binding(key.keyId(), parsed.projectTag());
-            if (binding == null) {
-                return invalid();
-            }
+            // CAA (Spec v1.1 §4): the request context selects WHICH of the
+            // key's bindings the request runs under — project-id claim (header)
+            // → legacy suffix tag → sole binding; several bindings without any
+            // context fail closed (400 CONTEXT_REQUIRED). Identity/HMAC above
+            // remains the security boundary.
+            ResolvedContext context = requestContextResolver.resolve(snapshot, key, parsed, request);
             Set<String> models = snapshot.models(key.keyId());
-            return new AuthContext(key, binding, models, snapshot);
+            return new AuthContext(key, context.binding(), models, snapshot, context);
         } finally {
             SecretWiping.clearArray(parsed.rawSecret());
         }
