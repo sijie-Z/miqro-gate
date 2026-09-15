@@ -10,6 +10,8 @@ vi.mock('@/api', () => ({
   usageSummary: vi.fn(),
   adminUsageSummary: vi.fn(),
   listSubscriptions: vi.fn(),
+  listMyModelApprovals: vi.fn(),
+  auditEvents: vi.fn(),
 }));
 
 vi.mock('@/stores/auth', () => ({
@@ -73,6 +75,8 @@ describe('NextOverviewView', () => {
       key({ id: '0190-0009', name: 'codex-extra', status: 'ROTATING' }),
     ]);
     mockApi.usageSummary.mockResolvedValue(summary);
+    mockApi.listMyModelApprovals.mockResolvedValue([]);
+    mockApi.auditEvents.mockResolvedValue([]);
   });
 
   function mountView() {

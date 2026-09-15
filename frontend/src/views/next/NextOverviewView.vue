@@ -25,6 +25,7 @@ import {
 } from 'tdesign-icons-vue-next';
 import { UiButton, UiDonut, UiStatusBadge } from '@/ui';
 import type { SubscriptionView, UsageGroup, VirtualKeyView } from '@/types/generated-api';
+import { actionLabel } from '@/utils/audit-labels';
 
 const auth = useAuthStore();
 
@@ -145,11 +146,13 @@ const quickNav = computed(() =>
 const recentKeys = computed(() => keys.value.slice(0, 6));
 
 /** Purpose → icon chip tone, mirroring the Vben project-card tiles. */
-const PURPOSE_META: Record<string, { icon: unknown; tone: string }> = {
-  CLAUDE_CODE: { icon: LockOnIcon, tone: 'blue' },
-  CLAUDE_DESKTOP: { icon: UserIcon, tone: 'cyan' },
-  CODEX: { icon: ToolsIcon, tone: 'green' },
-  CUSTOM: { icon: LayersIcon, tone: 'orange' },
+const PURPOSE_META: Record<string, { icon: unknown; color: string }> = {
+  // Bare colored marks (Vben project-tile style): each purpose gets a
+  // distinct vivid logo color instead of a tinted chip.
+  CLAUDE_CODE: { icon: LockOnIcon, color: '#d97757' },
+  CLAUDE_DESKTOP: { icon: UserIcon, color: '#0960bd' },
+  CODEX: { icon: ToolsIcon, color: '#10a37f' },
+  CUSTOM: { icon: LayersIcon, color: '#8c8c8c' },
 };
 
 const PURPOSE_LABELS: Record<string, string> = {
@@ -170,8 +173,77 @@ function keyStatusMeta(status?: string): { tone: 'success' | 'warning' | 'danger
   return STATUS_META[status ?? ''] ?? { tone: 'neutral', label: status ?? '—' };
 }
 
-function purposeMeta(purpose?: string): { icon: unknown; tone: string } {
-  return PURPOSE_META[purpose ?? ''] ?? { icon: LayersIcon, tone: 'blue' };
+function purposeMeta(purpose?: string): { icon: unknown; color: string } {
+  return PURPOSE_META[purpose ?? ''] ?? { icon: LayersIcon, color: '#0960bd' };
+}
+
+// ---- latest activity feed (Vben workbench 最新动态 parity) ----
+interface FeedItem {
+  text: string;
+  time: string;
+  tone: 'success' | 'info' | 'warning';
+}
+
+const feed = ref<FeedItem[]>([]);
+
+const APPROVAL_STATUS_LABELS: Record<string, string> = {
+  PENDING: '待审批',
+  APPROVED: '已通过',
+  REJECTED: '已驳回',
+};
+
+function relativeTime(iso?: string): string {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} 天前`;
+  return String(iso).slice(0, 10);
+}
+
+/** Admin: recent audit events; regular users: own keys + model requests. */
+async function loadFeed() {
+  try {
+    if (isAdmin.value) {
+      const events = await api.auditEvents({});
+      feed.value = events.slice(0, 6).map((e) => ({
+        text: `${e.actorName || (e.actorId ? String(e.actorId).slice(0, 8) : '系统')} ${actionLabel(e.action)}${
+          e.targetName ? ` · ${e.targetName}` : ''
+        }`,
+        time: relativeTime(e.createdAt),
+        tone: 'info' as const,
+      }));
+    } else {
+      const [keyList, approvals] = await Promise.all([
+        api.listVirtualKeys(),
+        api.listMyModelApprovals(),
+      ]);
+      const items = [
+        ...keyList.slice(0, 4).map((k) => ({
+          ts: k.createdAt ?? '',
+          text: `创建了虚拟密钥 ${k.name}`,
+          tone: (k.status === 'ACTIVE' ? 'success' : 'info') as 'success' | 'info',
+        })),
+        ...approvals.slice(0, 4).map((a) => ({
+          ts: a.createdAt ?? '',
+          text: `申请模型 ${a.modelId ?? '—'}（${APPROVAL_STATUS_LABELS[a.status ?? ''] ?? a.status ?? '—'}）`,
+          tone: (a.status === 'APPROVED' ? 'success' : a.status === 'REJECTED' ? 'warning' : 'info') as
+            | 'success'
+            | 'info'
+            | 'warning',
+        })),
+      ]
+        .sort((x, y) => String(y.ts).localeCompare(String(x.ts)))
+        .slice(0, 6);
+      feed.value = items.map((it) => ({ text: it.text, time: relativeTime(it.ts), tone: it.tone }));
+    }
+  } catch {
+    feed.value = [];
+  }
 }
 
 function purposeLabel(purpose?: string): string {
@@ -248,6 +320,7 @@ async function load() {
     if (isAdmin.value) {
       subscriptions.value = await api.listSubscriptions();
     }
+    await loadFeed();
   } catch (error) {
     if (error instanceof ApiError) {
       loadError.value = error.message;
@@ -319,11 +392,11 @@ onMounted(load);
               >
                 <div class="next-overview__key-tile-top">
                   <span
-                    class="next-overview__key-icon"
-                    :class="`next-overview__tone--${purposeMeta(key.purpose).tone}`"
+                    class="next-overview__key-logo"
+                    :style="{ color: purposeMeta(key.purpose).color }"
                     aria-hidden="true"
                   >
-                    <component :is="purposeMeta(key.purpose).icon" />
+                    <component :is="purposeMeta(key.purpose).icon" size="28px" />
                   </span>
                   <UiStatusBadge
                     :tone="keyStatusMeta(key.status).tone"
@@ -331,9 +404,14 @@ onMounted(load);
                   />
                 </div>
                 <span class="next-overview__key-name" :title="key.name">{{ key.name }}</span>
+                <span class="next-overview__key-desc">
+                  {{ purposeLabel(key.purpose) }}<template v-if="(key.modelIds ?? []).length">
+                    · {{ (key.modelIds ?? []).length }} 个模型</template
+                  >
+                </span>
                 <span class="ui-mono next-overview__key-mask">{{ key.display }}</span>
                 <div class="next-overview__key-foot">
-                  <span>{{ purposeLabel(key.purpose) }}</span>
+                  <span>{{ key.projectTag || '—' }}</span>
                   <span class="ui-num">{{ createdLabel(key.createdAt) }}</span>
                 </div>
               </router-link>
@@ -342,6 +420,27 @@ onMounted(load);
               <p class="next-overview__empty">还没有虚拟密钥。</p>
               <router-link to="/app/keys" class="next-overview__link">创建一个</router-link>
             </div>
+          </section>
+
+          <section class="ui-panel next-overview__panel" data-testid="overview-feed">
+            <div class="ui-panel-head">
+              <h2 class="ui-panel-title">最新动态</h2>
+              <router-link :to="isAdmin ? '/app/audit' : '/app/usage'" class="next-overview__link"
+                >查看全部</router-link
+              >
+            </div>
+            <div v-if="feed.length" class="next-overview__feed">
+              <div v-for="(item, i) in feed" :key="i" class="next-overview__feed-row">
+                <span
+                  class="next-overview__feed-dot"
+                  :class="`next-overview__feed-dot--${item.tone}`"
+                  aria-hidden="true"
+                />
+                <span class="next-overview__feed-text">{{ item.text }}</span>
+                <span class="next-overview__feed-time">{{ item.time }}</span>
+              </div>
+            </div>
+            <p v-else class="next-overview__empty" style="padding: 0 24px 16px">还没有动态记录。</p>
           </section>
 
           <section class="ui-panel next-overview__panel" data-testid="overview-usage">
@@ -635,40 +734,76 @@ onMounted(load);
   margin-bottom: var(--ui-space-1);
 }
 
-.next-overview__key-icon {
+.next-overview__key-logo {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
   flex-shrink: 0;
 }
 
-.next-overview__key-icon svg {
-  width: 22px;
-  height: 22px;
+.next-overview__key-logo svg {
+  width: 28px;
+  height: 28px;
 }
 
-/* tinted icon chips — Vben workbench tone set */
-.next-overview__tone--blue {
-  background: var(--ui-info-bg);
-  color: var(--ui-info-fg);
+.next-overview__key-desc {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.next-overview__tone--green {
-  background: var(--ui-success-bg);
-  color: var(--ui-success-fg);
+/* ---- latest activity feed (Vben 最新动态 rows) ---- */
+.next-overview__feed {
+  display: flex;
+  flex-direction: column;
 }
 
-.next-overview__tone--cyan {
-  background: #e0f4f6;
-  color: #0e7490;
+.next-overview__feed-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  padding: 10px var(--ui-space-6);
+  border-bottom: 1px solid var(--ui-border-muted);
+  font-size: var(--ui-font-size-sm);
 }
 
-.next-overview__tone--orange {
-  background: var(--ui-warning-bg);
-  color: var(--ui-warning-fg);
+.next-overview__feed-row:last-child {
+  border-bottom: none;
+}
+
+.next-overview__feed-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.next-overview__feed-dot--success {
+  background: var(--ui-success-fg);
+}
+
+.next-overview__feed-dot--info {
+  background: var(--ui-primary);
+}
+
+.next-overview__feed-dot--warning {
+  background: var(--ui-warning-fg);
+}
+
+.next-overview__feed-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-foreground);
+}
+
+.next-overview__feed-time {
+  color: var(--ui-foreground-faint);
+  font-size: var(--ui-font-size-xs);
+  flex-shrink: 0;
 }
 
 .next-overview__key-name {

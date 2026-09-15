@@ -217,10 +217,86 @@ function updateNarrow() {
 onMounted(() => {
   updateNarrow();
   window.addEventListener('resize', updateNarrow);
+  window.addEventListener('click', onTabMenuWindowClick);
+  window.addEventListener('keydown', onTabMenuKeydown);
+  window.addEventListener('scroll', onTabMenuWindowClick, true);
 });
 onUnmounted(() => {
   window.removeEventListener('resize', updateNarrow);
+  window.removeEventListener('click', onTabMenuWindowClick);
+  window.removeEventListener('keydown', onTabMenuKeydown);
+  window.removeEventListener('scroll', onTabMenuWindowClick, true);
 });
+
+// ---- tab context menu (right-click, Vben parity) ----
+const tabMenu = ref<{ open: boolean; x: number; y: number; name: string }>({
+  open: false,
+  x: 0,
+  y: 0,
+  name: '',
+});
+
+function openTabMenu(event: MouseEvent, name: string) {
+  tabMenu.value = { open: true, x: event.clientX, y: event.clientY, name };
+}
+
+function closeTabMenu() {
+  tabMenu.value.open = false;
+}
+
+function tabMenuAction(action: 'reload' | 'close' | 'closeLeft' | 'closeRight' | 'closeOthers' | 'closeAll') {
+  const name = tabMenu.value.name;
+  const index = tabs.value.findIndex((t) => t.name === name);
+  closeTabMenu();
+
+  const goTo = (target: string) => {
+    if (route.name !== target) void router.push({ name: target });
+  };
+
+  if (action === 'closeAll') {
+    tabs.value = [];
+    void router.push({ name: 'overview' });
+    return;
+  }
+  if (index === -1) return;
+
+  const current = route.name as string | undefined;
+  switch (action) {
+    case 'reload':
+      if (current === name) window.location.reload();
+      else goTo(name);
+      break;
+    case 'close':
+      closeTab(name);
+      break;
+    case 'closeLeft': {
+      const removed = tabs.value.slice(0, index).map((t) => t.name);
+      tabs.value = tabs.value.filter((t) => !removed.includes(t.name));
+      if (current && removed.includes(current)) goTo(name);
+      break;
+    }
+    case 'closeRight': {
+      const removed = tabs.value.slice(index + 1).map((t) => t.name);
+      tabs.value = tabs.value.filter((t) => !removed.includes(t.name));
+      if (current && removed.includes(current)) goTo(name);
+      break;
+    }
+    case 'closeOthers': {
+      const keepCurrent = current === name;
+      tabs.value = tabs.value.filter((t) => t.name === name);
+      if (!keepCurrent) goTo(name);
+      break;
+    }
+  }
+}
+
+function onTabMenuWindowClick() {
+  if (tabMenu.value.open) closeTabMenu();
+}
+
+function onTabMenuKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') closeTabMenu();
+}
 
 /** Icon-only rail: the user pinned the collapse (settings drawer) OR the window is narrow. */
 const iconOnly = computed(() => narrow.value || preferences.collapsed);
@@ -411,17 +487,13 @@ async function handleLogout() {
         data-testid="shell-tabbar"
       >
         <div
-          v-for="(tab, i) in tabs"
+          v-for="tab in tabs"
           :key="tab.name"
           class="new-shell__tab"
           :class="{ 'new-shell__tab--active': isActive(tab.name) }"
           @click="router.push({ name: tab.name })"
+          @contextmenu.prevent="openTabMenu($event, tab.name)"
         >
-          <span
-            v-if="i > 0 && !isActive(tab.name)"
-            class="new-shell__tab-divider"
-            aria-hidden="true"
-          />
           <span class="new-shell__tab-label">{{ tab.label }}</span>
           <button
             v-if="tabs.length > 1"
@@ -452,6 +524,40 @@ async function handleLogout() {
           <RefreshIcon class="new-shell__icon-btn-icon" />
         </button>
       </div>
+
+      <!-- Tab right-click menu (Vben: reload / close / close left / right /
+           others / all). Positioned at the pointer; chrome comes from .ui-menu. -->
+      <Teleport to="body">
+        <div
+          v-if="tabMenu.open"
+          class="ui-menu new-shell__tabmenu"
+          :style="{ left: `${tabMenu.x}px`, top: `${tabMenu.y}px` }"
+          data-testid="shell-tab-menu"
+          @click.stop
+          @contextmenu.prevent
+        >
+          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('reload')">
+            重新加载
+          </button>
+          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('close')">
+            关闭标签页
+          </button>
+          <div class="new-shell__tabmenu-sep" />
+          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeLeft')">
+            关闭左侧标签页
+          </button>
+          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeRight')">
+            关闭右侧标签页
+          </button>
+          <div class="new-shell__tabmenu-sep" />
+          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeOthers')">
+            关闭其它标签页
+          </button>
+          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeAll')">
+            关闭全部标签页
+          </button>
+        </div>
+      </Teleport>
 
       <div class="new-shell__content">
         <RouterView />
@@ -767,7 +873,9 @@ async function handleLogout() {
 .new-shell__tabbar {
   display: flex;
   align-items: stretch;
-  gap: 0;
+  /* Vben live: 3px gutter between card tabs, small side padding. */
+  gap: 3px;
+  padding: 0 8px;
   height: 32px;
   flex-shrink: 0;
   background: var(--ui-card);
@@ -785,40 +893,59 @@ async function handleLogout() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 31px;
-  margin-top: 1px;
-  padding: 0 12px;
-  border-right: 1px solid var(--ui-border);
-  font-size: var(--ui-font-size-sm);
+  /* Vben card tabs: 30px chrome cards sitting 2px below the strip top,
+     6/6/0/0 corners, hairline border; the active tab fills with primary. */
+  height: 30px;
+  margin-top: 2px;
+  padding: 0 10px 0 16px;
+  border: 1px solid var(--ui-border-strong);
+  border-bottom-color: var(--ui-border);
+  border-radius: 6px 6px 0 0;
+  background: var(--ui-card);
+  font-size: var(--ui-font-size-base);
   color: var(--ui-foreground);
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
   transition:
     background-color var(--ui-ease),
-    color var(--ui-ease);
+    color var(--ui-ease),
+    border-color var(--ui-ease);
 }
 
 .new-shell__tab:hover {
-  background: var(--ui-muted);
+  color: var(--ui-primary-text);
 }
 
 .new-shell__tab--active,
 .new-shell__tab--active:hover {
-  height: 30px;
-  margin-top: 2px;
-  border: none;
-  border-radius: 6px 6px 0 0;
+  border-color: var(--ui-primary);
+  border-bottom-color: var(--ui-primary);
   background: var(--ui-primary);
   color: var(--ui-foreground-inverse);
 }
 
-.new-shell__tab-divider {
-  display: none;
-}
-
 .new-shell__tab-label {
   line-height: 1;
+}
+
+.new-shell__tabmenu {
+  position: fixed;
+  z-index: 3000;
+}
+
+.new-shell__tabmenu-item {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+}
+
+.new-shell__tabmenu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--ui-border-muted);
 }
 
 .new-shell__tab-close {
