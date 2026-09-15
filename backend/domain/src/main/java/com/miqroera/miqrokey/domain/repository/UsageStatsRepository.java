@@ -43,6 +43,36 @@ public interface UsageStatsRepository {
     }
 
     /**
+     * Cross-tab dimension of the hourly report (#634). Every hourly row always
+     * carries the project; the dimension adds a second grouping key: {@code NONE}
+     * (hour × project), {@code USER} (hour × project × user), or {@code TEAM} (hour
+     * × project × team — the same multi-team attribution view as
+     * {@link GroupBy#TEAM}).
+     */
+    enum HourlyDimension {
+        NONE, USER, TEAM
+    }
+
+    /**
+     * One aggregated hour bucket of the hourly report (#634): the row counts usage
+     * events started in {@code [hourStart, hourStart + 1h)} for one project (and,
+     * when a cross-tab dimension is requested, one user or team). Tokens follow the
+     * {@code UsageAggRow} conventions (input falls back to {@code prompt_tokens},
+     * output to {@code completion_tokens}; absent values sum to 0).
+     * {@code hourStart} is an instant aligned to the requested
+     * {@code tzOffsetMinutes} hour boundary.
+     */
+    record HourlyUsageRow(Instant hourStart, UUID projectId, String projectLabel, UUID dimensionId,
+            String dimensionLabel, long requests, long inputTokens, long outputTokens, long cacheReadTokens,
+            long cacheCreationTokens) {
+
+        /** Same total convention as {@code UsageStatsAggregator.Tokens#total()}. */
+        public long totalTokens() {
+            return inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens;
+        }
+    }
+
+    /**
      * Scope of an aggregation or record listing. {@code virtualKeyIds} must be the
      * caller's own key set (enforced by the service layer) and {@code null} for
      * admin-scoped queries. All other dimensions are optional filters (G4.1):
@@ -74,6 +104,15 @@ public interface UsageStatsRepository {
      * the tokens the gateway saved.
      */
     List<UsageStatsAggregator.HitAggRow> aggregateHits(GroupBy groupBy, UsageFilter filter);
+
+    /**
+     * Hourly usage buckets for the filter (#634): one row per (hour bucket,
+     * project[, user/team]). Bucket boundaries are aligned to
+     * {@code tzOffsetMinutes} from UTC so callers get natural-day hours in their
+     * own timezone; the {@code from}/{@code to} window itself is matched in UTC
+     * instants. Fully aggregated in SQL — no cost math involved.
+     */
+    List<HourlyUsageRow> aggregateHourly(HourlyDimension dimension, UsageFilter filter, int tzOffsetMinutes);
 
     /** Total matching {@code usage_event} rows (records pagination). */
     long countRecords(UsageFilter filter);
