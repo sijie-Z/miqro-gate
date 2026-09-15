@@ -4,7 +4,9 @@ import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextGrantsView from '@/views/next/NextGrantsView.vue';
 import * as api from '@/api';
+import { ApiError } from '@/api/http';
 import { toastState } from '@/ui/toast';
+import type { ProblemDetails } from '@/types/api';
 import type { Grant } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
@@ -18,6 +20,7 @@ vi.mock('@/api', () => ({
   updateGrantModels: vi.fn(),
   disableGrant: vi.fn(),
   adminListModels: vi.fn(),
+  adminProbeModels: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -274,7 +277,7 @@ describe('NextGrantsView', () => {
     });
   });
 
-  it('falls back to manual model entry while the catalog is empty', async () => {
+  it('offers the official model fetch when the catalog is empty; manual entry is opt-in (#592)', async () => {
     mockApi.adminListModels.mockResolvedValue([] as never);
     mockApi.createGrant.mockResolvedValue(grant({ id: 'g9' }));
     const wrapper = mountView();
@@ -284,6 +287,12 @@ describe('NextGrantsView', () => {
     await pickOption(wrapper, 'QA · QA 回归');
     await pickOption(wrapper, 'deepseek-main');
 
+    // Probe-first empty state; free text is not the default path anymore.
+    expect(wrapper.find('[data-testid="model-scope-probe"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="model-scope-textarea"]').exists()).toBe(false);
+
+    await wrapper.find('[data-testid="model-scope-manual-open"]').trigger('click');
+    await flushPromises();
     const textarea = wrapper.find('[data-testid="model-scope-textarea"]');
     expect(textarea.exists()).toBe(true);
     await textarea.setValue('model-a\nmodel-b');
@@ -296,6 +305,78 @@ describe('NextGrantsView', () => {
       credentialId: 'c1',
       models: ['model-a', 'model-b'],
     });
+  });
+
+  it('fetches the official list in place and checks the whole discovered set (create mode)', async () => {
+    mockApi.adminListModels
+      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([
+        catalogRow('kimi-k3', { source: 'OFFICIAL' }),
+        catalogRow('kimi-k2.6', { source: 'OFFICIAL' }),
+      ] as never);
+    mockApi.adminProbeModels.mockResolvedValue({
+      providerProductId: 'pr1',
+      productCode: 'qa-product',
+      modelCount: 2,
+      probedAt: '2026-09-15T10:00:00Z',
+      models: [
+        { modelId: 'kimi-k3', displayName: '' },
+        { modelId: 'kimi-k2.6', displayName: '' },
+      ],
+    });
+    mockApi.createGrant.mockResolvedValue(grant({ id: 'g9' }));
+    const wrapper = mountView();
+    await flushPromises();
+
+    await openCreateForm(wrapper);
+    await pickOption(wrapper, 'QA · QA 回归');
+    await pickOption(wrapper, 'deepseek-main');
+
+    await wrapper.find('[data-testid="model-scope-probe"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.adminProbeModels).toHaveBeenCalledWith('pr1');
+    // The discovered list replaces the empty state and is badged as official.
+    expect(wrapper.find('[data-testid="model-scope-list"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="model-scope-probe-notice"]').text()).toContain('2 个模型');
+    expect(wrapper.text()).toContain('官方');
+
+    await wrapper.find('[data-testid="grant-create-submit"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.createGrant).toHaveBeenCalledWith({
+      projectId: 'p2',
+      providerProductId: 'pr1',
+      credentialId: 'c1',
+      models: ['kimi-k3', 'kimi-k2.6'],
+    });
+  });
+
+  it('surfaces the sanitized probe failure and keeps manual entry available', async () => {
+    mockApi.adminListModels.mockResolvedValue([] as never);
+    mockApi.adminProbeModels.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: 'probe failed',
+        status: 502,
+        code: 'MODEL_PROBE_FAILED',
+        detail: '上游拒绝：无效的 API Key',
+        requestId: 'r1',
+      } as ProblemDetails),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await openCreateForm(wrapper);
+    await pickOption(wrapper, 'QA · QA 回归');
+    await pickOption(wrapper, 'deepseek-main');
+
+    await wrapper.find('[data-testid="model-scope-probe"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="model-scope-probe-error"]').text()).toContain('上游拒绝');
+    // The empty state (and with it the manual escape hatch) stays available.
+    expect(wrapper.find('[data-testid="model-scope-manual-open"]').exists()).toBe(true);
   });
 
   it('blocks the submit for an existing project×product×credential triple', async () => {

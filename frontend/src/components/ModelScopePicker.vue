@@ -6,13 +6,14 @@
  * renders it as a checkbox list with filter + select-all/clear + picked
  * counter. v-model is always the granted-model IDs as string[].
  *
- * Fallbacks: with no product, or when the catalog is empty, the server skips
- * catalog validation (#498) — the picker falls back to a free-text textarea
- * (one ID per line/comma) so scoping stays possible while the catalog is
- * being set up. IDs granted but missing from the catalog ("phantom" rows,
- * e.g. after a probe replaced the catalog) render checked with a warning
- * badge: keeping them checked makes the server reject the save
- * (MODEL_NOT_IN_CATALOG); unchecking removes them.
+ * Empty catalog (#592): the picker offers an inline "从官方拉取模型清单" button
+ * that runs the existing probe pipeline (real credential → provider /models →
+ * catalog) and reloads in place, so selection — not free text — stays the
+ * primary path. Manual entry (one ID per line/comma) remains available behind
+ * an explicit toggle; the server skips catalog validation only in that state
+ * (#498). IDs granted but missing from the catalog ("phantom" rows) render
+ * checked with a warning badge: keeping them checked makes the server reject
+ * the save (MODEL_NOT_IN_CATALOG); unchecking removes them.
  */
 import { computed, ref, watch } from 'vue';
 import * as api from '@/api';
@@ -51,6 +52,14 @@ let loadSeq = 0;
 // owns the checked set.
 let defaultPending = false;
 
+// #592: official-fetch (probe) state for the empty-catalog state.
+const probing = ref(false);
+const probeError = ref('');
+const probeNotice = ref('');
+// Manual entry is opt-in — except when a selection already exists (edit mode),
+// where the current scope must stay visible.
+const manualOpen = ref(false);
+
 const catalogIds = computed(() => new Set(rows.value.map((row) => row.modelId!)));
 
 /** Granted IDs missing from the catalog — rows the server will reject. */
@@ -81,9 +90,19 @@ const visibleRows = computed<Option[]>(() => {
   return [...phantoms, ...catalog];
 });
 
-const textareaMode = computed(
-  () => props.productId === '' || (!loading.value && !loadError.value && rows.value.length === 0),
+/** No product at all → the picker cannot offer a probe; manual entry only. */
+const noProduct = computed(() => props.productId === '');
+/** Product known but its catalog is empty (and the load itself succeeded). */
+const catalogEmpty = computed(
+  () => props.productId !== '' && !loading.value && !loadError.value && rows.value.length === 0,
 );
+/** The manual-entry block under the empty-catalog panel is visible when the
+ * operator expanded it, or an existing scope must stay visible (edit mode). */
+const manualVisible = computed(
+  () => catalogEmpty.value && (manualOpen.value || props.modelValue.length > 0),
+);
+/** A "收起" link only makes sense for an explicitly opened, empty fallback. */
+const manualHidable = computed(() => manualOpen.value && props.modelValue.length === 0);
 
 const scopeText = computed(() => props.modelValue.join('\n'));
 
@@ -157,10 +176,50 @@ async function load(productId: string) {
   }
 }
 
+/**
+ * #592: runs the official-fetch probe for this product (registered adapter +
+ * first ACTIVE credential of the product's subscription → provider /models)
+ * and reloads the catalog in place. Create mode checks the whole discovered
+ * set; a failure keeps everything as-is and surfaces the sanitized reason.
+ */
+async function probe() {
+  const target = props.productId;
+  if (!target || probing.value) {
+    return;
+  }
+  probing.value = true;
+  probeError.value = '';
+  probeNotice.value = '';
+  try {
+    const report = await api.adminProbeModels(target);
+    if (props.productId !== target) {
+      return; // re-targeted while probing; discard this result
+    }
+    await load(target);
+    probeNotice.value = `已从官方拉取 ${report.modelCount} 个模型`;
+    if (props.defaultAll) {
+      emit(
+        'update:modelValue',
+        rows.value.map((row) => row.modelId!),
+      );
+    }
+  } catch (error) {
+    if (props.productId === target) {
+      probeError.value =
+        error instanceof ApiError ? error.message : '拉取官方模型清单失败，请稍后重试。';
+    }
+  } finally {
+    probing.value = false;
+  }
+}
+
 watch(
   () => props.productId,
   (productId) => {
     filter.value = '';
+    probeError.value = '';
+    probeNotice.value = '';
+    manualOpen.value = false;
     defaultPending = props.defaultAll;
     if (props.defaultAll) {
       // Create mode: a new product resets the scope to its whole catalog.
@@ -174,14 +233,17 @@ watch(
 
 <template>
   <div class="msp">
-    <template v-if="textareaMode">
+    <p
+      v-if="probeNotice"
+      class="msp__notice msp__notice--ok"
+      data-testid="model-scope-probe-notice"
+    >
+      {{ probeNotice }}
+    </p>
+
+    <template v-if="noProduct">
       <p class="msp__notice" data-testid="model-scope-fallback-notice">
-        <template v-if="productId === ''">
-          该授权未关联供应商产品：手动输入模型 ID，每行一个（此状态下服务端不校验目录）。
-        </template>
-        <template v-else>
-          该产品暂无模型目录：可先到「供应商」页对产品执行「探测模型」或人工录入；也可直接手动输入（此状态下服务端不校验目录）。
-        </template>
+        该授权未关联供应商产品：手动输入模型 ID，每行一个（此状态下服务端不校验目录）。
       </p>
       <textarea
         class="msp__textarea"
@@ -194,60 +256,125 @@ watch(
       />
     </template>
 
-    <div v-else-if="loading" class="msp__loading" data-testid="model-scope-loading">
-      正在加载模型目录…
-    </div>
-
-    <div v-else-if="loadError" class="msp__error" data-testid="model-scope-error">
-      <span>{{ loadError }}</span>
-      <UiButton variant="ghost" size="sm" @click="load(productId)">重试</UiButton>
-    </div>
-
-    <div v-else class="msp__panel" data-testid="model-scope-list">
-      <div class="msp__toolbar">
-        <input
-          class="msp__filter"
-          :value="filter"
-          type="text"
-          placeholder="筛选模型…"
-          data-testid="model-scope-filter"
-          @input="onFilterInput"
-        />
-        <span class="msp__count" data-testid="model-scope-count">
-          已选 {{ modelValue.length }} 个 · 目录 {{ rows.length }} 个
-        </span>
-        <UiButton variant="ghost" size="sm" @click="selectAllVisible">全选</UiButton>
-        <UiButton variant="ghost" size="sm" @click="clearAll">清空</UiButton>
-      </div>
-      <div class="msp__rows">
-        <div
-          v-for="row in visibleRows"
-          :key="row.modelId"
-          class="msp__row"
-          :class="{ 'msp__row--phantom': row.phantom }"
-        >
-          <div class="msp__check">
-            <UiCheckbox
-              :model-value="modelValue"
-              :value="row.modelId"
-              :disabled="disabled"
-              :data-testid="`model-scope-option-${row.modelId}`"
-              @update:model-value="onCheckbox"
-            >
-              <span class="msp__id">{{ row.modelId }}</span>
-              <span v-if="row.displayName" class="msp__name">{{ row.displayName }}</span>
-            </UiCheckbox>
-          </div>
-          <span v-if="row.phantom" class="msp__badge msp__badge--warn">不在目录</span>
-          <span v-else-if="row.source === 'MANUAL'" class="msp__badge">人工</span>
+    <template v-else>
+      <div v-if="catalogEmpty" class="msp__empty-panel" data-testid="model-scope-empty">
+        <p class="msp__notice">
+          该产品暂无模型目录。可从供应商官方接口拉取最新模型清单后勾选——使用该产品已有的可用凭证，失败不影响现有配置。
+        </p>
+        <div class="msp__empty-actions">
+          <UiButton
+            variant="primary"
+            size="sm"
+            :loading="probing"
+            :disabled="disabled"
+            data-testid="model-scope-probe"
+            @click="probe"
+          >
+            从官方拉取模型清单
+          </UiButton>
+          <UiButton
+            v-if="!manualVisible"
+            variant="ghost"
+            size="sm"
+            :disabled="disabled"
+            data-testid="model-scope-manual-open"
+            @click="manualOpen = true"
+          >
+            仍要手动输入
+          </UiButton>
         </div>
-        <p v-if="!visibleRows.length" class="msp__empty">没有匹配的模型。</p>
+        <p
+          v-if="probeError"
+          class="msp__error-inline"
+          role="alert"
+          data-testid="model-scope-probe-error"
+        >
+          {{ probeError }}
+        </p>
       </div>
-      <p v-if="phantomIds.length" class="msp__warn" data-testid="model-scope-phantom-warn">
-        有
-        {{ phantomIds.length }} 个已授权模型不在当前目录：保留勾选会被服务端拒绝，取消勾选即移除。
-      </p>
-    </div>
+
+      <div v-else-if="loading" class="msp__loading" data-testid="model-scope-loading">
+        正在加载模型目录…
+      </div>
+
+      <div v-else-if="loadError" class="msp__error" data-testid="model-scope-error">
+        <span>{{ loadError }}</span>
+        <UiButton variant="ghost" size="sm" @click="load(productId)">重试</UiButton>
+      </div>
+
+      <div v-else class="msp__panel" data-testid="model-scope-list">
+        <div class="msp__toolbar">
+          <input
+            class="msp__filter"
+            :value="filter"
+            type="text"
+            placeholder="筛选模型…"
+            data-testid="model-scope-filter"
+            @input="onFilterInput"
+          />
+          <span class="msp__count" data-testid="model-scope-count">
+            已选 {{ modelValue.length }} 个 · 目录 {{ rows.length }} 个
+          </span>
+          <UiButton variant="ghost" size="sm" @click="selectAllVisible">全选</UiButton>
+          <UiButton variant="ghost" size="sm" @click="clearAll">清空</UiButton>
+        </div>
+        <div class="msp__rows">
+          <div
+            v-for="row in visibleRows"
+            :key="row.modelId"
+            class="msp__row"
+            :class="{ 'msp__row--phantom': row.phantom }"
+          >
+            <div class="msp__check">
+              <UiCheckbox
+                :model-value="modelValue"
+                :value="row.modelId"
+                :disabled="disabled"
+                :data-testid="`model-scope-option-${row.modelId}`"
+                @update:model-value="onCheckbox"
+              >
+                <span class="msp__id">{{ row.modelId }}</span>
+                <span v-if="row.displayName" class="msp__name">{{ row.displayName }}</span>
+              </UiCheckbox>
+            </div>
+            <span v-if="row.phantom" class="msp__badge msp__badge--warn">不在目录</span>
+            <span v-else-if="row.source === 'MANUAL'" class="msp__badge">人工</span>
+            <span v-else-if="row.source === 'OFFICIAL'" class="msp__badge msp__badge--official">
+              官方
+            </span>
+          </div>
+          <p v-if="!visibleRows.length" class="msp__empty">没有匹配的模型。</p>
+        </div>
+        <p v-if="phantomIds.length" class="msp__warn" data-testid="model-scope-phantom-warn">
+          有
+          {{ phantomIds.length }} 个已授权模型不在当前目录：保留勾选会被服务端拒绝，取消勾选即移除。
+        </p>
+      </div>
+
+      <template v-if="manualVisible">
+        <p class="msp__notice" data-testid="model-scope-fallback-notice">
+          手动输入模型 ID，每行一个（此状态下服务端不校验目录）。<button
+            v-if="manualHidable"
+            type="button"
+            class="msp__link"
+            data-testid="model-scope-probe-back"
+            :disabled="disabled"
+            @click="manualOpen = false"
+          >
+            收起
+          </button>
+        </p>
+        <textarea
+          class="msp__textarea"
+          :value="scopeText"
+          :disabled="disabled"
+          rows="6"
+          placeholder="例如 deepseek-flash"
+          data-testid="model-scope-textarea"
+          @input="onTextInput"
+        />
+      </template>
+    </template>
   </div>
 </template>
 
@@ -263,6 +390,47 @@ watch(
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
   line-height: var(--ui-line-height-sm);
+}
+
+.msp__notice--ok {
+  color: var(--ui-success-fg);
+}
+
+.msp__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ui-primary-text);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.msp__link:disabled {
+  color: var(--ui-foreground-faint);
+  cursor: not-allowed;
+}
+
+.msp__error-inline {
+  margin: 0;
+  font-size: var(--ui-font-size-xs);
+  line-height: var(--ui-line-height-sm);
+  color: var(--ui-danger-fg);
+}
+
+.msp__empty-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-3);
+  border: 1px dashed var(--ui-border-strong);
+  border-radius: var(--ui-radius-control);
+}
+
+.msp__empty-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
 }
 
 .msp__textarea {
@@ -397,6 +565,11 @@ watch(
 .msp__badge--warn {
   background: var(--ui-warning-bg);
   color: var(--ui-warning-fg);
+}
+
+.msp__badge--official {
+  background: var(--ui-success-bg);
+  color: var(--ui-success-fg);
 }
 
 .msp__empty {
