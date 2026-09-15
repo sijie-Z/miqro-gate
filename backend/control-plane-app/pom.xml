@@ -36,6 +36,16 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
+        <!-- Reactor Netty HTTP client (client transport only — no WebFlux
+             runtime, ADR-0006 stands; version managed by the Boot BOM): the
+             provider client transport (#507), same client stack as the gateway.
+             Unlike the JDK HttpClient it keeps the Host header on the validated
+             hostname while pinning the connection address — upstream WAFs 418
+             IP-literal Host headers. -->
+        <dependency>
+            <groupId>io.projectreactor.netty</groupId>
+            <artifactId>reactor-netty-http</artifactId>
+        </dependency>
         <!-- OpenAPI 3.1 generation (F09, api-contract §8): /v3/api-docs without the
              swagger-ui bundle — the spec is the machine-readable contract source. -->
         <dependency>

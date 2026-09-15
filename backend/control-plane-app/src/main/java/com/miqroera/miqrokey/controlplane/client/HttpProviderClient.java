@@ -4,20 +4,31 @@ import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
 import com.miqroera.miqrokey.spi.ProviderClient;
 import com.miqroera.miqrokey.spi.ProviderRequest;
 import com.miqroera.miqrokey.spi.ProviderResponse;
+import io.netty.channel.ChannelOption;
+import io.netty.handler.codec.http.HttpHeaders;
+import io.netty.handler.ssl.SslHandler;
+import io.netty.resolver.AbstractAddressResolver;
+import io.netty.resolver.AddressResolver;
+import io.netty.resolver.AddressResolverGroup;
+import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.concurrent.Promise;
 import reactor.core.publisher.Mono;
+import reactor.netty.ByteBufFlux;
+import reactor.netty.http.HttpProtocol;
+import reactor.netty.http.client.HttpClient;
+import reactor.netty.http.client.HttpClientResponse;
 
-import java.io.IOException;
-import java.io.InputStream;
+import javax.net.ssl.SSLParameters;
+import java.io.ByteArrayOutputStream;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-
-import javax.net.ssl.SSLParameters;
 
 /**
  * The SPI {@link ProviderClient} implementation the control plane hands to
@@ -34,11 +45,16 @@ import javax.net.ssl.SSLParameters;
  * URL.</li>
  * <li><b>DNS-rebinding pinning</b> — the base URL is fixed for the lifetime of
  * this client, so it is resolved exactly once at construction and every
- * exchange connects to the validated IP literal ({@link UpstreamTargetPin}). A
- * rebinding DNS answer between validation and connection cannot move the
- * traffic; for {@code https} targets SNI and certificate identity stay on the
- * original hostname.</li>
- * <li><b>Timeouts</b> — connect and overall request deadlines.</li>
+ * exchange reaches that validated address: a {@link AddressResolverGroup} hands
+ * the pinned IP to the socket layer, so a rebinding DNS answer cannot move the
+ * traffic. The URI itself keeps the original hostname, so the TLS SNI, the
+ * certificate identity check and the {@code Host} header all stay on the
+ * validated hostname (the JDK HTTP client could not do this — it derives
+ * {@code Host} from the URI and forbids overriding it, which forced the
+ * IP-literal rewrite that upstream WAFs reject with HTTP 418, #507).</li>
+ * <li><b>Transport</b> — the Reactor Netty HTTP client over HTTP/1.1, the same
+ * client stack the gateway inference path uses.</li>
+ * <li><b>Timeouts</b> — connect and response deadlines.</li>
  * <li><b>Response size cap</b> — bodies over the bound limit abort the exchange
  * instead of buffering unboundedly.</li>
  * <li><b>No redirects</b> — a 3xx would move the request off the validated
@@ -48,19 +64,17 @@ import javax.net.ssl.SSLParameters;
  * </ul>
  *
  * <p>
- * Uses the JDK HTTP client (no extra dependency); inference traffic never
- * passes through this type. DNS resolution inside the validator is blocking, so
- * callers must not run {@link #exchange} on a reactive event loop — the control
- * plane invokes it from MVC worker threads ({@code ModelCatalogService} blocks
- * on the returned Mono).
+ * DNS resolution inside the validator is blocking, so callers must not run
+ * {@link #exchange} on a reactive event loop — the control plane invokes it
+ * from MVC worker threads ({@code ModelCatalogService} blocks on the returned
+ * Mono).
  * </p>
  */
 public final class HttpProviderClient implements ProviderClient {
 
     private final HttpClient http;
     private final URI baseUrl;
-    private final URI pinnedBaseUri;
-    private final SSLParameters sslParameters;
+    private final InetAddress pinnedAddress;
     private final String credentialHeader;
     private final String credentialValue;
     private final UpstreamTargetValidator targetValidator;
@@ -87,26 +101,32 @@ public final class HttpProviderClient implements ProviderClient {
         if (!target.allowed()) {
             throw new IllegalStateException("Upstream target is not allowed for this provider client");
         }
-        this.pinnedBaseUri = UpstreamTargetPin.pin(baseUrl, target.addresses()[0]);
-        this.sslParameters = UpstreamTargetPin.sslParametersFor(baseUrl);
-        HttpClient.Builder builder = HttpClient.newBuilder().connectTimeout(connectTimeout)
-                .followRedirects(HttpClient.Redirect.NEVER);
-        if (sslParameters != null) {
-            // Keep SNI + certificate identity on the original hostname even
-            // though the connection goes to the pinned IP literal.
-            builder.sslParameters(sslParameters);
-        }
-        this.http = builder.build();
+        this.pinnedAddress = target.addresses()[0];
+        this.http = HttpClient.create().protocol(HttpProtocol.HTTP11).followRedirect(false)
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, Math.toIntExact(connectTimeout.toMillis()))
+                .responseTimeout(requestTimeout).resolver(new PinnedAddressResolverGroup(pinnedAddress))
+                .doOnConnected(connection -> {
+                    SslHandler ssl = connection.channel().pipeline().get(SslHandler.class);
+                    if (ssl != null) {
+                        // Keep certificate identity checks on the hostname (the
+                        // pre-#507 JDK client ran with the HTTPS endpoint
+                        // identification algorithm). Idempotent when the
+                        // reactor-netty default already enables it.
+                        SSLParameters parameters = ssl.engine().getSSLParameters();
+                        parameters.setEndpointIdentificationAlgorithm("HTTPS");
+                        ssl.engine().setSSLParameters(parameters);
+                    }
+                });
     }
 
     @Override
     public Mono<ProviderResponse> exchange(ProviderRequest request) {
         try {
             URI uri = buildUri(request);
-            HttpRequest httpRequest = HttpRequest.newBuilder(uri).timeout(requestTimeout)
-                    .header(credentialHeader, credentialValue).header("Accept", "application/json").GET().build();
-            return Mono.fromFuture(http.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofInputStream()))
-                    .flatMap(response -> readBounded(response));
+            return http.headers(headers -> {
+                headers.set(credentialHeader, credentialValue);
+                headers.set("Accept", "application/json");
+            }).get().uri(uri.toString()).response((response, body) -> readBounded(response, body)).single();
         } catch (Exception e) {
             return Mono.error(e);
         }
@@ -119,7 +139,7 @@ public final class HttpProviderClient implements ProviderClient {
             throw new IllegalStateException("Upstream target is not allowed for this provider client");
         }
         String path = request.path();
-        StringBuilder sb = new StringBuilder(pinnedBaseUri.toString());
+        StringBuilder sb = new StringBuilder(baseUrl.toString());
         if (sb.charAt(sb.length() - 1) == '/' && path.startsWith("/") && path.length() > 1) {
             path = path.substring(1);
         }
@@ -133,38 +153,82 @@ public final class HttpProviderClient implements ProviderClient {
         return URI.create(sb.toString());
     }
 
-    /** The URI every exchange connects to: host replaced by the validated IP. */
-    URI pinnedBaseUri() {
-        return pinnedBaseUri;
+    /** The address every exchange connects to: the validated resolution. */
+    InetAddress pinnedAddress() {
+        return pinnedAddress;
     }
 
-    /** Client-level SSL parameters ({@code https} only; null for plain http). */
-    SSLParameters sslParameters() {
-        return sslParameters;
-    }
-
-    private Mono<ProviderResponse> readBounded(HttpResponse<InputStream> response) {
-        long deadline = System.nanoTime() + requestTimeout.toNanos();
-        try (InputStream in = response.body()) {
-            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-            byte[] buf = new byte[8192];
-            int total = 0;
-            int read;
-            while ((read = in.read(buf)) != -1) {
-                if (System.nanoTime() > deadline) {
-                    throw new IllegalStateException("Provider response body read timed out");
-                }
-                total += read;
-                if (total > maxResponseBytes) {
-                    throw new IllegalStateException("Provider response exceeds the control-plane body limit");
-                }
-                out.write(buf, 0, read);
+    private Mono<ProviderResponse> readBounded(HttpClientResponse response, ByteBufFlux body) {
+        HttpHeaders nettyHeaders = response.responseHeaders();
+        Map<String, List<String>> headers = new LinkedHashMap<>();
+        for (String name : nettyHeaders.names()) {
+            headers.put(name.toLowerCase(Locale.ROOT), List.copyOf(nettyHeaders.getAll(name)));
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        return body.map(buffer -> {
+            // ByteBuf lifecycle stays with reactor-netty (it releases the
+            // buffer after this callback); only copy the readable bytes out.
+            byte[] chunk = new byte[buffer.readableBytes()];
+            buffer.readBytes(chunk);
+            return chunk;
+        }).reduce(out, (acc, chunk) -> {
+            if (acc.size() + chunk.length > maxResponseBytes) {
+                throw new IllegalStateException("Provider response exceeds the control-plane body limit");
             }
-            Map<String, List<String>> headers = new LinkedHashMap<>();
-            response.headers().map().forEach((k, v) -> headers.put(k, List.copyOf(v)));
-            return Mono.just(new ProviderResponse(response.statusCode(), headers, out.toByteArray()));
-        } catch (IOException e) {
-            return Mono.error(new IllegalStateException("Provider exchange failed", e));
+            acc.write(chunk, 0, chunk.length);
+            return acc;
+        }).map(acc -> new ProviderResponse(response.status().code(), headers, acc.toByteArray()));
+    }
+
+    /**
+     * Hands the pinned address to every connection attempt, so DNS is never
+     * consulted at exchange time (the DNS-rebinding TOCTOU defense). The hostname
+     * in the URI still drives the {@code Host} header, SNI and the certificate
+     * identity check.
+     */
+    private static final class PinnedAddressResolverGroup extends AddressResolverGroup<InetSocketAddress> {
+
+        private final InetAddress pinned;
+
+        private PinnedAddressResolverGroup(InetAddress pinned) {
+            this.pinned = pinned;
+        }
+
+        @Override
+        protected AddressResolver<InetSocketAddress> newResolver(EventExecutor executor) {
+            return new PinnedAddressResolver(executor, pinned);
+        }
+    }
+
+    private static final class PinnedAddressResolver extends AbstractAddressResolver<InetSocketAddress> {
+
+        private final InetAddress pinned;
+
+        private PinnedAddressResolver(EventExecutor executor, InetAddress pinned) {
+            super(executor);
+            this.pinned = pinned;
+        }
+
+        @Override
+        public boolean isSupported(SocketAddress address) {
+            return address instanceof InetSocketAddress;
+        }
+
+        @Override
+        protected boolean doIsResolved(InetSocketAddress address) {
+            // Unresolved (hostname) addresses must go through doResolve below,
+            // which returns the pinned address instead of consulting DNS.
+            return !address.isUnresolved();
+        }
+
+        @Override
+        protected void doResolve(InetSocketAddress unresolved, Promise<InetSocketAddress> promise) {
+            promise.setSuccess(new InetSocketAddress(pinned, unresolved.getPort()));
+        }
+
+        @Override
+        protected void doResolveAll(InetSocketAddress unresolved, Promise<List<InetSocketAddress>> promise) {
+            promise.setSuccess(List.of(new InetSocketAddress(pinned, unresolved.getPort())));
         }
     }
 }
