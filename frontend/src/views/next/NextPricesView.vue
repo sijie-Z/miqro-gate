@@ -75,6 +75,31 @@ const canCreate = computed(
     Number(form.value.unitPrice) > 0,
 );
 
+// Price-source sync (#585): pulls the public index and upserts snapshots for
+// catalog models of mapped PAYG products.
+const syncing = ref(false);
+
+async function syncPrices() {
+  syncing.value = true;
+  try {
+    const report = await api.syncPrices();
+    const parts = [`写入 ${report.written} 条`, `未变化 ${report.unchanged} 条`];
+    if (report.unmatched.length) {
+      parts.push(`未匹配 ${report.unmatched.length} 条`);
+    }
+    toast.success(`价格同步完成：${parts.join('，')}`);
+    await load();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+    } else {
+      toast.error('价格同步失败，请稍后重试。');
+    }
+  } finally {
+    syncing.value = false;
+  }
+}
+
 const tokenTypeOptions: UiSelectOption[] = [
   { value: 'INPUT', label: '输入' },
   { value: 'OUTPUT', label: '输出' },
@@ -177,10 +202,19 @@ onMounted(load);
         <h1 class="ui-page-title">模型单价</h1>
         <p class="ui-page-desc">
           按（产品、模型、Token 类型）配置每百万 Token
-          单价，驱动成本计算。单价是不可变快照：修改即追加，历史成本不重算。
+          单价，驱动成本计算。单价是不可变快照：修改即追加，历史成本不重算。「从价格源同步」按公开价格索引（USD）经汇率换算写入
+          CNY 单价。
         </p>
       </div>
       <div class="ui-page-actions">
+        <UiButton
+          variant="secondary"
+          :loading="syncing"
+          data-testid="price-sync"
+          @click="syncPrices"
+        >
+          从价格源同步
+        </UiButton>
         <UiButton variant="primary" data-testid="price-create-open" @click="creating = !creating">
           {{ creating ? '收起表单' : '新增单价' }}
         </UiButton>

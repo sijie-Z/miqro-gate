@@ -51,6 +51,15 @@ miqrokey:
     # Model IDs that skip the review cycle (exact, case-sensitive). A request
     # for a whitelisted model is auto-approved and takes effect immediately.
     whitelist-models: ${MIQROKEY_APPROVAL_WHITELIST_MODELS:}
+  # 定价目录动态同步（#585）：从公开价格源（默认 OpenRouter 模型索引，USD/token）
+  # 拉取并换算为 CNY/1M tokens 写入价格快照。URL 是编译期适配器默认值，仅允许
+  # 运维用环境变量覆盖；汇率在同步时应用。
+  price-sync:
+    url: ${MIQROKEY_PRICE_SYNC_URL:https://openrouter.ai/api/v1/models}
+    usd-cny-rate: ${MIQROKEY_PRICE_SYNC_USD_CNY_RATE:7.2}
+    connect-timeout: ${MIQROKEY_PRICE_SYNC_CONNECT_TIMEOUT:10s}
+    request-timeout: ${MIQROKEY_PRICE_SYNC_REQUEST_TIMEOUT:30s}
+    max-bytes: ${MIQROKEY_PRICE_SYNC_MAX_BYTES:10485760}
 
 # OpenAPI 3.1 generation (F09, api-contract §8): the machine-readable contract
 # served at /v3/api-docs. UI bundle is intentionally not included; the spec is

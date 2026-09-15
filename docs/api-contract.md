@@ -642,8 +642,11 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 |---|---|
 | `GET /api/v1/admin/prices` | 每个三元组的最新生效单价列表 |
 | `POST /api/v1/admin/prices` | 追加单价快照：`{ "providerProductId", "modelId", "tokenType", "currency", "unitPrice", "source" }`，返回 `201` |
+| `POST /api/v1/admin/prices/sync` | 从公开价格源同步（#585）：拉取 OpenRouter 模型索引（USD/token），按 `MIQROKEY_PRICE_SYNC_USD_CNY_RATE` 换算为 CNY/1M 写入快照 |
 
 快照字段：`id`、`providerProductId`、`modelId`、`tokenType`（`INPUT`/`OUTPUT`/`CACHE_READ`/`CACHE_CREATION`）、`currency`、`unitPrice`（BigDecimal，每 1M Tokens）、`effectiveFrom`、`source`（`MANUAL`/`OFFICIAL`）、`createdBy`、`createdAt`。
+
+**同步语义（#585）**：只处理 PAYG 计费且 product_code 命中编译期映射表的产品（deepseek-payg-api→deepseek、moonshot-payg-api→moonshotai、zhipu-payg-api→z-ai、minimax-payg-api→minimax、aliyun-payg-api→qwen、baidu-payg-api→baidu、volcengine-payg-api→volcengine）；模型只在该产品 `model_catalog` ACTIVE 行内匹配（后缀精确匹配，另有少量别名表如 deepseek-flash→deepseek-v4.1-flash）；价格源的 `:batch`/`:free` 变体不参与；与最新快照一致的写入被跳过（未变化计数）。写入快照 `source=OFFICIAL`、`currency=CNY`，**会覆盖同键人工价的最新值**（快照 append-only，历史仍在）。成功才写（含 `PRICE_SYNC` 审计；失败 `502 PRICE_SYNC_FAILED` + `PRICE_SYNC_FAILED` 审计，零写入）。响应报告：`{ source, usdCnyRate, written, unchanged, unmatched:[{productCode, modelId}], skippedProducts, syncedAt }`。分时价（如 DeepSeek 峰谷）暂取标准/高峰价，闲时折扣为已知缺口。
 
 错误码：
 
@@ -651,6 +654,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 |---|---|---|
 | `PRODUCT_NOT_FOUND` | 404 | 供应商产品不存在 |
 | `PARAM_INVALID` | 400 | tokenType 非法或参数校验失败 |
+| `PRICE_SYNC_FAILED` | 502 | 价格源不可达/非 200/解析失败/超限（已脱敏，零写入） |
 
 ### 5.10 外部系统计费通道与 API 消费者（G8.1，ADR-0010）
 

@@ -12,6 +12,7 @@ vi.mock('@/api', () => ({
   listPrices: vi.fn(),
   listProviderProducts: vi.fn(),
   createPrice: vi.fn(),
+  syncPrices: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -159,5 +160,31 @@ describe('NextPricesView', () => {
     await wrapper.find('[data-testid="price-create-submit"]').trigger('click');
     await flushPromises();
     expect(mockApi.createPrice).not.toHaveBeenCalled();
+  });
+
+  it('syncs from the price source and reloads the list', async () => {
+    mockApi.syncPrices.mockResolvedValue({
+      source: 'openrouter',
+      usdCnyRate: '7.2',
+      written: 6,
+      unchanged: 2,
+      unmatched: [{ productCode: 'deepseek-payg-api', modelId: 'ghost-model' }],
+      skippedProducts: [],
+      syncedAt: '2026-09-15T08:00:00Z',
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    const callsBefore = (mockApi.listPrices as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    await wrapper.find('[data-testid="price-sync"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.syncPrices).toHaveBeenCalled();
+    const messages = toastState.items.map((t) => t.message);
+    expect(messages.some((m) => m.includes('写入 6 条') && m.includes('未变化 2 条'))).toBe(true);
+    expect(messages.some((m) => m.includes('未匹配 1 条'))).toBe(true);
+    expect((mockApi.listPrices as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(
+      callsBefore,
+    );
   });
 });
