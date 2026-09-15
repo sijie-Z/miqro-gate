@@ -198,8 +198,16 @@ export function createUser(body: {
   return post<UserCreatedResponse>('/api/v1/admin/users', body);
 }
 
+/** PATCH /admin/users/{id} — displayName and/or status (at least one, #614). */
+export function updateUser(
+  id: string,
+  body: { displayName?: string; status?: UserStatusValue },
+): Promise<AdminUser> {
+  return patch<AdminUser>(`/api/v1/admin/users/${id}`, body);
+}
+
 export function updateUserStatus(id: string, status: UserStatusValue): Promise<AdminUser> {
-  return patch<AdminUser>(`/api/v1/admin/users/${id}`, { status });
+  return updateUser(id, { status });
 }
 
 export function resetUserPassword(id: string): Promise<UserCreatedResponse> {
