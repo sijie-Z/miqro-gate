@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.domain.cache.CacheKey;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * real PostgreSQL: write → read (L2_HIT) → overwrite semantics → project
  * invalidation → expiry.
  */
+@Tag("integration")
 class PostgresCacheProviderIntegrationTest {
 
     static PostgreSQLContainer<?> pg;
