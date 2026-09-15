@@ -5,7 +5,7 @@
  * Escape/overlay close; animation is a simple enter transition. The panel
  * content scrolls; footer slot stays pinned at the bottom.
  */
-import { nextTick, onBeforeUnmount, ref, useAttrs, watch } from 'vue';
+import { nextTick, onBeforeUnmount, ref, useAttrs, watch, onUnmounted } from 'vue';
 
 const props = withDefaults(
   defineProps<{
@@ -53,6 +53,14 @@ watch(
 );
 
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
+
+// See Dialog.vue: clear the modal pointer lock left behind by a close that
+// races the exit path, once no modal layer remains open.
+onUnmounted(() => {
+  if (!document.querySelector('[role="dialog"][data-state="open"]')) {
+    document.body.style.pointerEvents = '';
+  }
+});
 </script>
 
 <template>
@@ -104,8 +112,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   position: fixed;
   inset: 0;
   background: rgba(17, 17, 19, 0.36);
-  animation: ui-drawer-fade 140ms ease;
   z-index: 1700;
+}
+
+/* Enter-only, scoped to the open state (see Dialog.vue for the radix
+   close-waits-for-animation gotcha). */
+.ui-drawer__overlay[data-state='open'] {
+  animation: ui-drawer-fade 200ms linear;
 }
 
 .ui-drawer__panel {
@@ -121,7 +134,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   box-shadow: var(--ui-shadow-dialog);
   outline: none;
   z-index: 1701;
-  animation: ui-drawer-slide 180ms ease;
+}
+
+.ui-drawer__panel[data-state='open'] {
+  animation: ui-drawer-slide 200ms var(--ui-ease-enter);
 }
 
 .ui-drawer__head {
@@ -193,4 +209,5 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
     opacity: 0;
   }
 }
+
 </style>
