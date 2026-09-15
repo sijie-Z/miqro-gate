@@ -74,6 +74,16 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
     private void writeUsage(List<UsageEvent> events) {
         List<MapSqlParameterSource> params = new ArrayList<>(events.size());
         for (UsageEvent e : events) {
+            if (e.modelId() == null) {
+                // usage_event.model_id is NOT NULL. A single unrepresentable
+                // event used to fail the whole batch, which the bus re-enqueues
+                // forever — stalling every later usage row behind it. Drop the
+                // one event loudly instead; the gateway never emits it for a
+                // request that names a model.
+                log.warn("Dropping usage event without model_id (id={}, gatewayRequestId={})", e.id(),
+                        e.gatewayRequestId());
+                continue;
+            }
             params.add(new MapSqlParameterSource().addValue("id", e.id()).addValue("tenantId", e.tenantId())
                     .addValue("providerRequestId", e.providerRequestId()).addValue("virtualKeyId", e.virtualKeyId())
                     .addValue("projectId", e.projectId()).addValue("productId", e.providerProductId())
@@ -91,6 +101,9 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                     .addValue("cacheKey", e.cacheKey()).addValue("isComplete", e.isComplete())
                     .addValue("usageMissing", e.usageMissing()).addValue("gatewayRequestId", e.gatewayRequestId())
                     .addValue("occurredAt", Timestamp.from(e.occurredAt())));
+        }
+        if (params.isEmpty()) {
+            return;
         }
         jdbc.batchUpdate("""
                 INSERT INTO usage_event (id, tenant_id, provider_request_id, virtual_key_id, project_id,
