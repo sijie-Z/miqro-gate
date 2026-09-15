@@ -2898,7 +2898,8 @@ export interface components {
         CreateVirtualKeyRequest: {
             name?: string;
             /** Format: uuid */
-            projectId: string;
+            projectId?: string;
+            projectIds?: string[];
             /** Format: uuid */
             providerProductId: string;
             /** Format: uuid */
@@ -2907,6 +2908,11 @@ export interface components {
             purpose: "CLAUDE_CODE" | "CLAUDE_DESKTOP" | "CODEX" | "CUSTOM";
             allowedModels?: string[];
             cachePolicy?: string;
+        };
+        BoundProjectView: {
+            /** Format: uuid */
+            projectId?: string;
+            projectTag?: string;
         };
         CreateVirtualKeyResponse: {
             /** Format: uuid */
@@ -2919,6 +2925,7 @@ export interface components {
             createdAt?: string;
             /** Format: int64 */
             version?: number;
+            boundProjects?: components["schemas"]["BoundProjectView"][];
         };
         SubmitModelApprovalRequest: {
             /** Format: uuid */
@@ -3738,6 +3745,7 @@ export interface components {
             /** Format: uuid */
             projectId?: string;
             projectTag?: string;
+            boundProjects?: components["schemas"]["BoundProjectView"][];
             cachePolicy?: string;
             baseUrl?: string;
             /** Format: date-time */

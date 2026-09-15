@@ -29,7 +29,9 @@ import java.util.UUID;
  * <h2>Lookup semantics</h2>
  * <ul>
  * <li>Keys are indexed by {@code publicKeyId} for O(1) lookup.</li>
- * <li>Each key has at most one ACTIVE binding; the loader resolves it.</li>
+ * <li>A key may hold several ACTIVE label bindings (ADR-0018: one per bound
+ * project); bindings are indexed by {@code (keyId, projectTag)} and the
+ * presented label selects which binding the request routes under.</li>
  * <li>Credentials are indexed by id and carry the upstream base URL, the
  * product's auth scheme, and the ACTIVE version's ciphertext.</li>
  * <li>Model authorization data for {@code /v1/models}: per-key
@@ -47,7 +49,7 @@ import java.util.UUID;
  * and zero-fills the plaintext after use.
  */
 public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecord> keys,
-        Map<UUID, BindingRecord> bindings, Map<UUID, CredentialRecord> credentials,
+        Map<UUID, Map<String, BindingRecord>> bindings, Map<UUID, CredentialRecord> credentials,
         Map<UUID, Set<String>> modelsByKeyId, Map<UUID, Set<String>> grantModelsByGrantId,
         Map<UUID, Set<String>> upstreamModelsByProductId, Map<UUID, String> productCodesByProductId,
         Map<UUID, UUID> providerIdsByProductId, Map<String, ConsumerRecord> consumersByDigest,
@@ -55,7 +57,8 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
 
     public RouteSnapshot {
         keys = Map.copyOf(keys);
-        bindings = Map.copyOf(bindings);
+        bindings = bindings.entrySet().stream().collect(
+                java.util.stream.Collectors.toUnmodifiableMap(Map.Entry::getKey, e -> Map.copyOf(e.getValue())));
         credentials = Map.copyOf(credentials);
         modelsByKeyId = immutableSets(modelsByKeyId);
         grantModelsByGrantId = immutableSets(grantModelsByGrantId);
@@ -81,8 +84,13 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         return keys.get(publicKeyId);
     }
 
-    public BindingRecord binding(UUID keyId) {
-        return bindings.get(keyId);
+    /**
+     * The binding a presented label selects, or null when the key has no ACTIVE
+     * binding for that label (the caller rejects — uniform 404, no enumeration).
+     */
+    public BindingRecord binding(UUID keyId, String projectTag) {
+        Map<String, BindingRecord> byTag = bindings.get(keyId);
+        return byTag == null || projectTag == null ? null : byTag.get(projectTag);
     }
 
     public CredentialRecord credential(UUID credentialId) {
@@ -147,10 +155,12 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
     }
 
     /**
-     * The single ACTIVE label binding of a key. Resolved by the loader (DISTINCT ON
-     * virtual_key_id).
+     * One ACTIVE label binding of a key (ADR-0018: a key may hold one per bound
+     * project). Resolved by the loader; {@code grantId} is the binding's own grant
+     * — credential, product and granted-model scope all derive from it.
      */
-    public record BindingRecord(UUID keyId, UUID projectId, String projectTag, UUID credentialId, UUID productId) {
+    public record BindingRecord(UUID keyId, UUID projectId, String projectTag, UUID credentialId, UUID productId,
+            UUID grantId) {
     }
 
     /**

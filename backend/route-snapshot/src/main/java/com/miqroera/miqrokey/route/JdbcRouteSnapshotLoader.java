@@ -69,7 +69,7 @@ public final class JdbcRouteSnapshotLoader {
      */
     public RouteSnapshot load(long version, Instant loadedAt) {
         Map<String, RouteSnapshot.KeyRecord> keys = loadKeys();
-        Map<UUID, RouteSnapshot.BindingRecord> bindings = loadBindings();
+        Map<UUID, Map<String, RouteSnapshot.BindingRecord>> bindings = loadBindings();
         Map<UUID, RouteSnapshot.CredentialRecord> credentials = loadCredentials();
         Map<UUID, Set<String>> models = loadModels();
         Map<UUID, Set<String>> grantModels = loadGrantModels();
@@ -116,30 +116,28 @@ public final class JdbcRouteSnapshotLoader {
         return keys;
     }
 
-    private Map<UUID, RouteSnapshot.BindingRecord> loadBindings() {
-        Map<UUID, RouteSnapshot.BindingRecord> bindings = new HashMap<>();
+    private Map<UUID, Map<String, RouteSnapshot.BindingRecord>> loadBindings() {
+        Map<UUID, Map<String, RouteSnapshot.BindingRecord>> bindings = new HashMap<>();
         jdbc.query("""
-                SELECT DISTINCT ON (b.virtual_key_id)
-                       b.virtual_key_id, b.project_id, p.project_tag, g.upstream_credential_id, g.provider_product_id
+                SELECT b.virtual_key_id, b.project_id, p.project_tag, g.upstream_credential_id, g.provider_product_id,
+                       b.grant_id
                 FROM key_project_binding b
                 JOIN projects p ON p.id = b.project_id AND p.tenant_id = b.tenant_id
-                -- The binding's grant is authoritative: a project may hold
-                -- several ACTIVE grants (different products/credentials), and
-                -- the key must route only to the grant it was authorized for,
-                -- never to a sibling grant of the same project.
-                JOIN virtual_keys vk ON vk.id = b.virtual_key_id AND vk.tenant_id = b.tenant_id
-                JOIN project_provider_grants g ON g.id = vk.grant_id
+                -- The binding's grant is authoritative (ADR-0018): each binding
+                -- row carries its own grant, so one key may route to several
+                -- projects — each through the credential/product it was bound to.
+                JOIN project_provider_grants g ON g.id = b.grant_id
                                               AND g.project_id = b.project_id
                                               AND g.tenant_id = b.tenant_id
                                               AND g.status = 'ACTIVE'
                 WHERE b.status = 'ACTIVE' AND p.status = 'ACTIVE'
-                ORDER BY b.virtual_key_id, b.created_at
                 """, rs -> {
             UUID keyId = (UUID) rs.getObject("virtual_key_id");
             RouteSnapshot.BindingRecord binding = new RouteSnapshot.BindingRecord(keyId,
                     (UUID) rs.getObject("project_id"), rs.getString("project_tag"),
-                    (UUID) rs.getObject("upstream_credential_id"), (UUID) rs.getObject("provider_product_id"));
-            bindings.put(keyId, binding);
+                    (UUID) rs.getObject("upstream_credential_id"), (UUID) rs.getObject("provider_product_id"),
+                    (UUID) rs.getObject("grant_id"));
+            bindings.computeIfAbsent(keyId, k -> new HashMap<>()).put(binding.projectTag(), binding);
         });
         return bindings;
     }

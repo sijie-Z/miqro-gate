@@ -5,7 +5,11 @@ import { defineComponent } from 'vue';
 import NextKeysView from '@/views/next/NextKeysView.vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import type { CreateVirtualKeyResponse, MeGrantsResponse, VirtualKeyView } from '@/types/generated-api';
+import type {
+  CreateVirtualKeyResponse,
+  MeGrantsResponse,
+  VirtualKeyView,
+} from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listVirtualKeys: vi.fn(),
@@ -76,11 +80,23 @@ const key = (overrides: Partial<VirtualKeyView> = {}): VirtualKeyView => ({
 });
 
 const grants: MeGrantsResponse = {
-  projects: [{ id: 'p1', code: 'P1', name: 'Core AI', projectTag: 'core-ai' }],
+  projects: [
+    { id: 'p1', code: 'P1', name: 'Core AI', projectTag: 'core-ai' },
+    { id: 'p2', code: 'P2', name: 'QA Team', projectTag: 'qa-team' },
+  ],
   grants: [
     {
       id: 'g1',
       projectId: 'p1',
+      providerProductId: '0190-product',
+      providerProductCode: 'claude-api',
+      providerProductName: 'Claude API',
+      models: ['claude-3-7-sonnet', 'claude-3-5-haiku'],
+    },
+    ,
+    {
+      id: 'g2',
+      projectId: 'p2',
       providerProductId: '0190-product',
       providerProductCode: 'claude-api',
       providerProductName: 'Claude API',
@@ -176,6 +192,39 @@ describe('NextKeysView', () => {
     expect(wrapper.text()).toContain('还没有虚拟密钥');
   });
 
+  it('binds additional projects through the optional checkboxes (ADR-0018)', async () => {
+    mockApi.myGrants.mockResolvedValue(grants);
+    mockApi.createVirtualKey.mockResolvedValue(created);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await wrapper.find('[data-testid="create-name"]').setValue('multi-project');
+
+    const projectButton = wrapper
+      .findAll('.stub-option')
+      .find((el) => el.text().includes('Core AI'));
+    await projectButton!.trigger('click');
+    await flushPromises();
+    const grantButton = wrapper
+      .findAll('.stub-option')
+      .find((el) => el.text().includes('Claude API'));
+    await grantButton!.trigger('click');
+    await flushPromises();
+
+    // Extra-project checkbox appears once a primary project is chosen.
+    const extra = wrapper.find('[data-testid="create-extra-project-p2"]');
+    expect(extra.exists()).toBe(true);
+    await extra.setValue(true);
+    await flushPromises();
+
+    await wrapper.find('[data-testid="create-submit"]').trigger('click');
+    await flushPromises();
+
+    const payload = mockApi.createVirtualKey.mock.calls[0][0] as { projectIds?: string[] };
+    expect(payload.projectIds).toEqual(['p1', 'p2']);
+  });
   it('creates a key through the cascade and reveals the secret once (ack required)', async () => {
     mockApi.myGrants.mockResolvedValue(grants);
     mockApi.createVirtualKey.mockResolvedValue(created);
@@ -212,7 +261,7 @@ describe('NextKeysView', () => {
 
     expect(mockApi.createVirtualKey).toHaveBeenCalledWith({
       name: 'claude-code-main',
-      projectId: 'p1',
+      projectIds: ['p1'],
       providerProductId: '0190-product',
       credentialGrantId: 'g1',
       purpose: 'CLAUDE_CODE',

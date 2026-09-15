@@ -67,7 +67,7 @@ public class OpenAdminVirtualKeysController {
             List<@Size(max = 128) String> allowedModels, @Pattern(regexp = "DISABLED|ENABLED") String cachePolicy) {
 
         CreateVirtualKeyRequest toCreateRequest() {
-            return new CreateVirtualKeyRequest(name, projectId, providerProductId, credentialGrantId, purpose,
+            return new CreateVirtualKeyRequest(name, projectId, null, providerProductId, credentialGrantId, purpose,
                     allowedModels, cachePolicy);
         }
     }

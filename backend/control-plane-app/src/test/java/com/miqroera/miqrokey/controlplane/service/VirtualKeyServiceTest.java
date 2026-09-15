@@ -9,6 +9,7 @@ import com.miqroera.miqrokey.domain.crypto.VirtualKeyCrypto;
 import com.miqroera.miqrokey.domain.crypto.VirtualKeyMaterial;
 import com.miqroera.miqrokey.domain.model.GrantStatus;
 import com.miqroera.miqrokey.domain.model.KeyProjectBinding;
+import com.miqroera.miqrokey.domain.model.KeyProjectBindingStatus;
 import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.model.ProjectMembership;
 import com.miqroera.miqrokey.domain.model.ProjectProviderGrant;
@@ -143,7 +144,10 @@ class VirtualKeyServiceTest {
         // string.
         assertThat(stored.secretDigest()).isNotEqualTo(material.rawSecret());
 
-        verify(bindingRepository).insert(any(KeyProjectBinding.class));
+        ArgumentCaptor<KeyProjectBinding> bindingCaptor = ArgumentCaptor.forClass(KeyProjectBinding.class);
+        verify(bindingRepository).insert(bindingCaptor.capture());
+        assertThat(bindingCaptor.getValue().projectId()).isEqualTo(PROJECT_ID);
+        assertThat(bindingCaptor.getValue().grantId()).isEqualTo(GRANT_ID);
         verify(keyRepository).replaceKeyModels(TENANT, stored.id(), Set.of("model-a"));
 
         // Audit summary must not leak the secret.
@@ -283,6 +287,9 @@ class VirtualKeyServiceTest {
         when(keyRepository.findModelIds(oldKey.id())).thenReturn(Set.of("model-a"));
         when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(activeProject(TENANT, TAG)));
         when(keyCrypto.generate(TENANT, TAG)).thenReturn(newMaterial);
+        when(bindingRepository.findAllByVirtualKeyId(oldKey.id()))
+                .thenReturn(List.of(new KeyProjectBinding(UUID.randomUUID(), TENANT, oldKey.id(), PROJECT_ID, GRANT_ID,
+                        KeyProjectBindingStatus.ACTIVE, 0L, Instant.now(), Instant.now())));
 
         CreateVirtualKeyResponse resp = service.rotate(user, oldKey.id(), "req-2");
 
@@ -297,7 +304,10 @@ class VirtualKeyServiceTest {
         assertThat(replacement.cachePolicy()).isEqualTo("DISABLED");
         assertThat(replacement.userId()).isEqualTo(USER_ID);
         verify(keyRepository).replaceKeyModels(TENANT, replacement.id(), Set.of("model-a"));
-        verify(bindingRepository).insert(any(KeyProjectBinding.class));
+        ArgumentCaptor<KeyProjectBinding> mirroredCaptor = ArgumentCaptor.forClass(KeyProjectBinding.class);
+        verify(bindingRepository).insert(mirroredCaptor.capture());
+        assertThat(mirroredCaptor.getValue().projectId()).isEqualTo(PROJECT_ID);
+        assertThat(mirroredCaptor.getValue().grantId()).isEqualTo(GRANT_ID);
 
         ArgumentCaptor<VirtualKey> updated = ArgumentCaptor.forClass(VirtualKey.class);
         verify(keyRepository).update(updated.capture());
@@ -485,7 +495,7 @@ class VirtualKeyServiceTest {
     }
 
     private static CreateVirtualKeyRequest request(String name, List<String> models) {
-        return new CreateVirtualKeyRequest(name, PROJECT_ID, PRODUCT_ID, GRANT_ID, VirtualKeyPurpose.CLAUDE_CODE,
+        return new CreateVirtualKeyRequest(name, PROJECT_ID, null, PRODUCT_ID, GRANT_ID, VirtualKeyPurpose.CLAUDE_CODE,
                 models, null);
     }
 
