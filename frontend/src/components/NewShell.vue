@@ -37,6 +37,7 @@ import {
   NotificationIcon,
   RefreshIcon,
   RobotIcon,
+  SearchIcon,
   SecuredIcon,
   ServerIcon,
   SettingIcon,
@@ -298,6 +299,44 @@ function onTabMenuKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') closeTabMenu();
 }
 
+// ---- rail menu search (Vben 菜单搜索) ----
+const navQuery = ref('');
+
+const filteredNavGroups = computed(() => {
+  const q = navQuery.value.trim().toLowerCase();
+  if (!q) return navGroups.value;
+  return navGroups.value
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (item) => item.label.toLowerCase().includes(q) || item.name.toLowerCase().includes(q),
+      ),
+    }))
+    .filter((group) => group.items.length > 0);
+});
+
+// ---- top route progress bar (Vben 顶部进度条) ----
+const progressActive = ref(false);
+let progressTimer: number | undefined;
+
+watch(
+  () => route.fullPath,
+  () => {
+    window.clearTimeout(progressTimer);
+    progressActive.value = false;
+    requestAnimationFrame(() => {
+      progressActive.value = true;
+      progressTimer = window.setTimeout(() => {
+        progressActive.value = false;
+      }, 600);
+    });
+  },
+);
+
+onUnmounted(() => {
+  window.clearTimeout(progressTimer);
+});
+
 /** Icon-only rail: the user pinned the collapse (settings drawer) OR the window is narrow. */
 const iconOnly = computed(() => narrow.value || preferences.collapsed);
 
@@ -328,8 +367,25 @@ async function handleLogout() {
         <span v-if="!iconOnly" class="new-shell__brand-name">MiQroGate</span>
       </div>
 
+      <div v-if="!iconOnly" class="new-shell__search">
+        <SearchIcon class="new-shell__search-icon" />
+        <input
+          v-model="navQuery"
+          class="new-shell__search-input"
+          type="search"
+          placeholder="搜索菜单"
+          aria-label="搜索菜单"
+          data-testid="shell-nav-search"
+        />
+      </div>
+
       <nav class="new-shell__nav" aria-label="主导航">
-        <div v-for="group in navGroups" :key="group.title ?? 'regular'" class="new-shell__group">
+        <p v-if="!filteredNavGroups.length" class="new-shell__search-empty">无匹配菜单</p>
+        <div
+          v-for="group in filteredNavGroups"
+          :key="group.title ?? 'regular'"
+          class="new-shell__group"
+        >
           <p v-if="group.title && !iconOnly" class="new-shell__group-title">{{ group.title }}</p>
           <router-link
             v-for="item in group.items"
@@ -351,6 +407,11 @@ async function handleLogout() {
     </aside>
 
     <main class="new-shell__main">
+      <div
+        class="new-shell__progress"
+        :class="{ 'new-shell__progress--on': progressActive }"
+        aria-hidden="true"
+      />
       <header v-if="preferences.showHeader" class="new-shell__topbar">
         <div class="new-shell__topbar-left">
           <button
@@ -716,6 +777,73 @@ async function handleLogout() {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-rail-text-muted);
   letter-spacing: 0.02em;
+}
+
+.new-shell__search {
+  position: relative;
+  margin: 0 12px 8px;
+}
+
+.new-shell__search-icon {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  color: var(--ui-rail-text-muted);
+  pointer-events: none;
+}
+
+.new-shell__search-input {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px 0 26px;
+  border: 1px solid var(--ui-rail-line);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-rail-hover);
+  color: var(--ui-rail-text);
+  font-family: inherit;
+  font-size: var(--ui-font-size-xs);
+  outline: none;
+}
+
+.new-shell__search-input::placeholder {
+  color: var(--ui-rail-text-muted);
+}
+
+.new-shell__search-input:focus {
+  border-color: var(--ui-primary);
+}
+
+.new-shell__search-empty {
+  margin: 8px 16px;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-rail-text-muted);
+}
+
+.new-shell__progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--ui-primary);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  opacity: 0;
+  transition:
+    transform 400ms ease,
+    opacity 240ms ease;
+  pointer-events: none;
+  z-index: 3000;
+}
+
+.new-shell__progress--on {
+  transform: scaleX(0.92);
+  opacity: 1;
+  transition:
+    transform 520ms ease-out,
+    opacity 80ms ease;
 }
 
 .new-shell__main {
