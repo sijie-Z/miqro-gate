@@ -3,6 +3,7 @@
 - 日期：2026-09-16
 - 状态：**设计稿 v0.1（待评审——请 ChatGPT / leader 过目，问题清单见 §7）**
 - 关系：PR #615（单密钥多项目·标签路由）已实现 **Identity→Project 的地基**；本文定义其上的更高层问题——**Identity ≠ Workload ≠ Request**，即"请求级归属（Request / Activity Attribution）"的完整方案。
+- **实现级 Spec（AI 可直接开工）：[docs/context-attribution-implementation-spec.md](../context-attribution-implementation-spec.md)**
 - 实验脚本与原始记录：`D:/tmp/ctx-hook.py`、`ctx-helper.py`、`ctx-fake-model.py`、`ctx-capture.log`（可复现）
 
 ---
