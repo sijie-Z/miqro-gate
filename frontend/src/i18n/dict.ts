@@ -728,6 +728,7 @@ export const DICT: Record<string, string> = {
   '显示名': 'Display name',
   '显示名称': 'Display name',
   '显示名（可选）': 'Display name (optional)',
+  '显示名已更新': 'Display name updated',
   '显示密码': 'Show password',
   '普通用户': 'Regular user',
   '智能体': 'Agents',
@@ -1012,6 +1013,7 @@ export const DICT: Record<string, string> = {
   '缓存读': 'Cache reads',
   '缓存读取': 'Cache reads',
   '编辑': 'Edit',
+  '编辑用户': 'Edit user',
   '编辑配置': 'Edit configuration',
   '编辑配额规则': 'Edit quota rule',
   '网关 · 在线': 'GATEWAY · ONLINE',
@@ -1091,6 +1093,7 @@ export const DICT: Record<string, string> = {
   '请输入团队名称。': 'Enter the team name.',
   '请输入新的密钥。': 'Enter the new secret.',
   '请输入消费者名称。': 'Enter the consumer name.',
+  '请输入显示名。': 'Enter a display name.',
   '请输入用户名。': 'Enter a username.',
   '请输入用户名（成员 Key 请到上游凭证页关联）。':
     'Enter a username (member keys are bound on the upstream credentials page).',
@@ -1403,6 +1406,7 @@ export const DICT: Record<string, string> = {
 
 export const PATTERNS: Array<[RegExp, string]> = [
   [/^基于当前 (.+?) 条记录$/, 'Based on the current $1 records'],
+  [/^修改「(.+?)」的显示名。$/, 'Change the display name for "$1".'],
   [/^(.+?)\ 个可用$/, '$1 active'],
   [/^(.+?)\ 轮换中$/, '$1 rotating'],
   [/^(.+?)\ 异常$/, '$1 unusual'],

@@ -198,8 +198,16 @@ export function createUser(body: {
   return post<UserCreatedResponse>('/api/v1/admin/users', body);
 }
 
+/** PATCH /admin/users/{id} — displayName and/or status (at least one, #614). */
+export function updateUser(
+  id: string,
+  body: { displayName?: string; status?: UserStatusValue },
+): Promise<AdminUser> {
+  return patch<AdminUser>(`/api/v1/admin/users/${id}`, body);
+}
+
 export function updateUserStatus(id: string, status: UserStatusValue): Promise<AdminUser> {
-  return patch<AdminUser>(`/api/v1/admin/users/${id}`, { status });
+  return updateUser(id, { status });
 }
 
 export function resetUserPassword(id: string): Promise<UserCreatedResponse> {
@@ -583,7 +591,10 @@ export function adminListSkillRevisions(id: string, limit = 20): Promise<SkillRe
   return get<SkillRevisionView[]>(`/api/v1/admin/skills/${id}/revisions?limit=${limit}`);
 }
 
-export function adminActivateSkillRevision(id: string, revision: number): Promise<SkillRevisionView> {
+export function adminActivateSkillRevision(
+  id: string,
+  revision: number,
+): Promise<SkillRevisionView> {
   return post<SkillRevisionView>(`/api/v1/admin/skills/${id}/revisions/${revision}/activate`);
 }
 
@@ -963,7 +974,11 @@ export function adminTestRunModel(
   modelId: string,
   prompt?: string,
 ): Promise<ModelTestRunResult> {
-  return post<ModelTestRunResult>('/api/v1/admin/models/test-run', { providerProductId, modelId, prompt });
+  return post<ModelTestRunResult>('/api/v1/admin/models/test-run', {
+    providerProductId,
+    modelId,
+    prompt,
+  });
 }
 
 // ---- MCP route rules (F11, Tencent doc 135482) ----
@@ -1244,10 +1259,7 @@ export async function exportAuditCsv(query: Omit<AuditQuery, 'size'>): Promise<A
 
 export type ReconciliationStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
 export type ReconciliationVerdict =
-  | 'MATCHED'
-  | 'PARTIAL'
-  | 'UNMATCHED_PROVIDER'
-  | 'UNMATCHED_LOCAL';
+  'MATCHED' | 'PARTIAL' | 'UNMATCHED_PROVIDER' | 'UNMATCHED_LOCAL';
 
 /** Report metadata view; identical shape for create, list entries and GET /{id}. */
 export interface ReconciliationReport {
@@ -1308,7 +1320,6 @@ export function createReconciliation(
   const qs = new URLSearchParams(params).toString();
   return uploadBytes<ReconciliationReport>(`/api/v1/admin/reconciliations?${qs}`, content);
 }
-
 
 // ---------------------------------------------------------------------------
 // Retention logs (ADR-0014 §8, admin console)

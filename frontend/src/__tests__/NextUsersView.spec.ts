@@ -4,11 +4,12 @@ import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextUsersView from '@/views/next/NextUsersView.vue';
 import * as api from '@/api';
-import type {AdminUser} from '@/types/generated-api';
+import type { AdminUser } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listUsers: vi.fn(),
   createUser: vi.fn(),
+  updateUser: vi.fn(),
   updateUserStatus: vi.fn(),
   resetUserPassword: vi.fn(),
   revokeUserSessions: vi.fn(),
@@ -304,5 +305,46 @@ describe('NextUsersView', () => {
     (document.querySelector('[data-testid="user-project-remove"]') as HTMLButtonElement).click();
     await flushPromises();
     expect(mockApi.removeProjectMember).toHaveBeenCalledWith('p1', 'u1');
+  });
+
+  it('edits a display name from the row menu (#614)', async () => {
+    mockApi.updateUser.mockResolvedValue(user({ displayName: '改后名字' }));
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="user-actions-u1"]').trigger('click');
+    await flushPromises();
+    (document.querySelector('[data-testid="user-edit"]') as HTMLElement).click();
+    await flushPromises();
+
+    const dialog = document.querySelector('[data-testid="user-edit-dialog"]');
+    expect(dialog, 'edit dialog should render').toBeTruthy();
+    const input = document.querySelector('[data-testid="user-edit-display"]') as HTMLInputElement;
+    expect(input.value).toBe('Alice');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+
+    // Blank input is rejected locally — no API call.
+    setter?.call(input, '   ');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    (document.querySelector('[data-testid="user-edit-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(document.querySelector('[data-testid="user-edit-error"]')?.textContent).toContain(
+      '请输入显示名',
+    );
+    expect(mockApi.updateUser).not.toHaveBeenCalled();
+
+    // A real change goes through PATCH and reloads the list.
+    const callsBefore = (mockApi.listUsers as ReturnType<typeof vi.fn>).mock.calls.length;
+    setter?.call(input, '改后名字');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    (document.querySelector('[data-testid="user-edit-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(mockApi.updateUser).toHaveBeenCalledWith('u1', { displayName: '改后名字' });
+    expect((mockApi.listUsers as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(
+      callsBefore,
+    );
   });
 });
