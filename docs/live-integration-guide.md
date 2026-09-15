@@ -68,6 +68,7 @@ MIQROKEY_CRYPTO_HMAC_KEY_FILE=<hmac-key.bin>
 | crypto bean 找不到 | `KeyEncryptionProvider` 无 | control-plane 需 `MIQROKEY_CRYPTO_ENABLED=true` + `ENCRYPTION_VERSIONS_V1`（非 ENC_KEY_FILE） | 见环境变量 |
 | `users already exist` 残留 | bootstrap 401 | 清库需按 FK 顺序（sessions→users→audit）| 用完整 DELETE 顺序 |
 | 推理 404 `Unknown virtual key` | 刚建的 VK 不认 | 之前是环境干扰（残留 gateway）；干净环境 NOTIFY 4s 生效 | 确保只跑一个 gateway |
+| 推理 200 但 `content` 为空 | `finish_reason=length`、`reasoning_content` 非空、`completion_tokens` 吃满 `max_tokens` | 推理型模型的**思考预算与输出共享 `max_tokens`**（V4.1 系实测：小预算全被思考吃掉——12 token ×3 全空、48 token 正常） | 调大 `max_tokens`（≥256 起步）；或按 `finish_reason` 判断后重试；网关透传无异常（#544） |
 | cookie 抓不到 | urllib jar 空 | 手动从 Set-Cookie 解析 | 见 drill2.py 的 raw() |
 
 ## 4. 安全注意
