@@ -18,7 +18,7 @@ import {
   SecuredIcon,
   UserIcon,
 } from 'tdesign-icons-vue-next';
-import { UiButton, UiStatusBadge } from '@/ui';
+import { UiButton, UiDonut, UiStatusBadge } from '@/ui';
 import type { SubscriptionView, UsageGroup, VirtualKeyView } from '@/types/generated-api';
 
 const auth = useAuthStore();
@@ -100,23 +100,13 @@ const donutSegments = computed(() => {
   const rest = costGroups.value.slice(5);
   const restCost = rest.reduce((sum, g) => sum + g.cost, 0);
   const rows = top.map((g, i) => ({
-    label: g.label,
+    label: g.label ?? '—',
     cost: g.cost,
     pct: (g.cost / total) * 100,
-    color: DONUT_COLORS[i],
+    color: DONUT_COLORS[i]!,
   }));
-  if (restCost > 0) rows.push({ label: '其他', cost: restCost, pct: (restCost / total) * 100, color: DONUT_COLORS[5] });
+  if (restCost > 0) rows.push({ label: '其他', cost: restCost, pct: (restCost / total) * 100, color: DONUT_COLORS[5]! });
   return rows;
-});
-
-const donutBackground = computed(() => {
-  let acc = 0;
-  const stops = donutSegments.value.map((seg) => {
-    const from = acc;
-    acc += seg.pct;
-    return `${seg.color} ${from.toFixed(2)}% ${acc.toFixed(2)}%`;
-  });
-  return `conic-gradient(${stops.join(', ')}${acc < 100 ? `, #f0f0f0 ${acc.toFixed(2)}% 100%` : ''})`;
 });
 
 /** Quick actions (workbench-style tile row). */
@@ -334,9 +324,11 @@ onMounted(load);
         </div>
         <div v-if="costTotal > 0" class="ui-panel-body next-overview__cost-layout">
           <div class="next-overview__donut-wrap">
-            <div class="mk-donut" :style="{ background: donutBackground }" data-testid="overview-cost-donut">
-              <span class="next-overview__donut-center ui-num">¥{{ costTotal.toFixed(2) }}</span>
-            </div>
+            <UiDonut
+              :segments="donutSegments.map((s) => ({ label: s.label, value: s.cost, color: s.color }))"
+              :center-text="`¥${costTotal.toFixed(2)}`"
+              data-testid="overview-cost-donut"
+            />
           </div>
           <div class="next-overview__cost-legend">
             <div
