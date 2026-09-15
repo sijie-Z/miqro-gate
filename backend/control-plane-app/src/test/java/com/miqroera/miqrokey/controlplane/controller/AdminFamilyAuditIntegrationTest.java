@@ -108,9 +108,12 @@ class AdminFamilyAuditIntegrationTest {
     }
 
     private void clean() {
+        // plan_seats before upstream_subscriptions: fk_plan_seats_subscription
+        // lets a leftover seat row from a sibling test class block the parent
+        // delete (#520 full-suite pollution).
         for (String table : List.of("mcp_tool_revisions", "mcp_tools", "mcp_route_rule", "mcp_services", "skills",
-                "skill_access", "agents", "api_consumers", "services", "upstream_credentials", "upstream_subscriptions",
-                "admin_audit_events", "user_sessions", "users")) {
+                "skill_access", "agents", "api_consumers", "services", "upstream_credentials", "plan_seats",
+                "upstream_subscriptions", "admin_audit_events", "user_sessions", "users")) {
             jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
         }
     }
