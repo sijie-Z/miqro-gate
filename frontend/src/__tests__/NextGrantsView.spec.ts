@@ -5,17 +5,19 @@ import { defineComponent } from 'vue';
 import NextGrantsView from '@/views/next/NextGrantsView.vue';
 import * as api from '@/api';
 import { toastState } from '@/ui/toast';
-import type {Grant} from '@/types/generated-api';
+import type { Grant } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listGrants: vi.fn(),
   listProjects: vi.fn(),
   listCredentials: vi.fn(),
   listProviderProducts: vi.fn(),
+  listSubscriptions: vi.fn(),
   createGrant: vi.fn(),
   grantModels: vi.fn(),
   updateGrantModels: vi.fn(),
   disableGrant: vi.fn(),
+  adminListModels: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -50,6 +52,16 @@ const SelectStub = defineComponent({
       </button>
     </div>
   `,
+});
+
+const catalogRow = (modelId: string, overrides: Record<string, unknown> = {}) => ({
+  id: `row-${modelId}`,
+  providerProductId: 'pr1',
+  modelId,
+  displayName: '',
+  status: 'ACTIVE',
+  source: 'PROBE',
+  ...overrides,
 });
 
 const grant = (overrides: Partial<Grant> = {}): Grant => ({
@@ -150,6 +162,35 @@ describe('NextGrantsView', () => {
         balanceAuthority: 'official',
       },
     ]);
+    mockApi.listSubscriptions.mockResolvedValue([
+      {
+        id: 's1',
+        providerProductId: 'pr1',
+        productName: 'DeepSeek V4',
+        name: 'DeepSeek 按量',
+        billingMode: 'PAYG',
+        status: 'ACTIVE',
+        createdAt: '2026-07-01T00:00:00Z',
+      },
+      {
+        id: 's2',
+        providerProductId: 'pr2',
+        productName: 'Moonshot',
+        name: 'Moonshot 按量',
+        billingMode: 'PAYG',
+        status: 'ACTIVE',
+        createdAt: '2026-07-01T00:00:00Z',
+      },
+    ]);
+    mockApi.adminListModels.mockImplementation(async (productId?: string) => {
+      if (productId === 'pr1') {
+        return [catalogRow('deepseek-flash'), catalogRow('deepseek-v4-pro')] as never;
+      }
+      if (productId === 'pr2') {
+        return [catalogRow('kimi-k2.5')] as never;
+      }
+      return [] as never;
+    });
   });
 
   function mountView() {
@@ -165,6 +206,11 @@ describe('NextGrantsView', () => {
     await flushPromises();
   }
 
+  async function openCreateForm(wrapper: ReturnType<typeof mountView>) {
+    await wrapper.find('[data-testid="grant-create-open"]').trigger('click');
+    await flushPromises();
+  }
+
   it('renders grants with resolved display names', async () => {
     const wrapper = mountView();
     await flushPromises();
@@ -177,29 +223,97 @@ describe('NextGrantsView', () => {
     expect(wrapper.text()).toContain('停用');
   });
 
-  it('creates a grant with the selected project, credential and models', async () => {
+  it('derives the product from the credential and defaults the scope to the whole catalog', async () => {
     mockApi.createGrant.mockResolvedValue(grant({ id: 'g9' }));
     const wrapper = mountView();
     await flushPromises();
 
-    await wrapper.find('[data-testid="grant-create-open"]').trigger('click');
-    await pickOption(wrapper, 'CORE · Core AI');
+    await openCreateForm(wrapper);
+    await pickOption(wrapper, 'QA · QA 回归');
     await pickOption(wrapper, 'deepseek-main');
-    const models = wrapper.find('[data-testid="grant-create-models"]');
-    await models.setValue('claude-3-7-sonnet\ngpt-5.2');
+
+    // Product block is derived from the credential's subscription (issue #571).
+    const derived = wrapper.find('[data-testid="grant-create-product"]');
+    expect(derived.text()).toContain('DeepSeek · DeepSeek V4');
+    expect(derived.text()).toContain('deepseek-v4');
+
     await wrapper.find('[data-testid="grant-create-submit"]').trigger('click');
     await flushPromises();
 
     expect(mockApi.createGrant).toHaveBeenCalledWith({
-      projectId: 'p1',
-      providerProductId: '',
+      projectId: 'p2',
+      providerProductId: 'pr1',
       credentialId: 'c1',
-      models: ['claude-3-7-sonnet', 'gpt-5.2'],
+      models: ['deepseek-flash', 'deepseek-v4-pro'],
     });
   });
 
-  it('opens the model-scope drawer and replaces the scope on save', async () => {
-    mockApi.grantModels.mockResolvedValue(['claude-3-7-sonnet']);
+  it('narrows the scope when catalog models are unchecked', async () => {
+    mockApi.createGrant.mockResolvedValue(grant({ id: 'g9' }));
+    const wrapper = mountView();
+    await flushPromises();
+
+    await openCreateForm(wrapper);
+    await pickOption(wrapper, 'QA · QA 回归');
+    await pickOption(wrapper, 'deepseek-main');
+
+    const box = wrapper.find('[data-testid="model-scope-option-deepseek-v4-pro"]');
+    expect(box.exists()).toBe(true);
+    await box.setValue(false);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="model-scope-count"]').text()).toContain('已选 1 个');
+
+    await wrapper.find('[data-testid="grant-create-submit"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.createGrant).toHaveBeenCalledWith({
+      projectId: 'p2',
+      providerProductId: 'pr1',
+      credentialId: 'c1',
+      models: ['deepseek-flash'],
+    });
+  });
+
+  it('falls back to manual model entry while the catalog is empty', async () => {
+    mockApi.adminListModels.mockResolvedValue([] as never);
+    mockApi.createGrant.mockResolvedValue(grant({ id: 'g9' }));
+    const wrapper = mountView();
+    await flushPromises();
+
+    await openCreateForm(wrapper);
+    await pickOption(wrapper, 'QA · QA 回归');
+    await pickOption(wrapper, 'deepseek-main');
+
+    const textarea = wrapper.find('[data-testid="model-scope-textarea"]');
+    expect(textarea.exists()).toBe(true);
+    await textarea.setValue('model-a\nmodel-b');
+    await wrapper.find('[data-testid="grant-create-submit"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.createGrant).toHaveBeenCalledWith({
+      projectId: 'p2',
+      providerProductId: 'pr1',
+      credentialId: 'c1',
+      models: ['model-a', 'model-b'],
+    });
+  });
+
+  it('blocks the submit for an existing project×product×credential triple', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await openCreateForm(wrapper);
+    await pickOption(wrapper, 'CORE · Core AI');
+    await pickOption(wrapper, 'deepseek-main');
+
+    expect(wrapper.find('[data-testid="grant-create-duplicate"]').exists()).toBe(true);
+    expect(
+      (wrapper.find('[data-testid="grant-create-submit"]').element as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it('edits the scope through catalog checkboxes and replaces it on save', async () => {
+    mockApi.grantModels.mockResolvedValue(['deepseek-flash']);
     mockApi.updateGrantModels.mockResolvedValue({} as never);
     const wrapper = mountView();
     await flushPromises();
@@ -208,20 +322,48 @@ describe('NextGrantsView', () => {
     await flushPromises();
 
     expect(document.querySelector('[data-testid="grant-models-drawer"]')).toBeTruthy();
-    const input = document.querySelector(
-      '[data-testid="grant-models-input"]',
-    ) as HTMLTextAreaElement;
-    expect(input).toBeTruthy();
-    expect(input.value).toContain('claude-3-7-sonnet');
+    const checked = document.querySelector(
+      '[data-testid="model-scope-option-deepseek-flash"]',
+    ) as HTMLInputElement;
+    expect(checked.checked).toBe(true);
 
-    input.value = 'kimi-k2.5';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const extra = document.querySelector(
+      '[data-testid="model-scope-option-deepseek-v4-pro"]',
+    ) as HTMLInputElement;
+    extra.click();
     await flushPromises();
+
     (document.querySelector('[data-testid="grant-models-save"]') as HTMLButtonElement).click();
     await flushPromises();
 
-    expect(mockApi.updateGrantModels).toHaveBeenCalledWith('g1', ['kimi-k2.5']);
+    expect(mockApi.updateGrantModels).toHaveBeenCalledWith('g1', [
+      'deepseek-flash',
+      'deepseek-v4-pro',
+    ]);
     expect(toastState.items.some((t) => t.message.includes('模型范围已更新'))).toBe(true);
+  });
+
+  it('flags granted models missing from the catalog and drops them when unchecked', async () => {
+    mockApi.grantModels.mockResolvedValue(['deepseek-flash', 'ghost-model']);
+    mockApi.updateGrantModels.mockResolvedValue({} as never);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="grant-models-open"]').trigger('click');
+    await flushPromises();
+
+    expect(document.querySelector('[data-testid="model-scope-phantom-warn"]')).toBeTruthy();
+    const ghost = document.querySelector(
+      '[data-testid="model-scope-option-ghost-model"]',
+    ) as HTMLInputElement;
+    expect(ghost.checked).toBe(true);
+    ghost.click();
+    await flushPromises();
+
+    (document.querySelector('[data-testid="grant-models-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(mockApi.updateGrantModels).toHaveBeenCalledWith('g1', ['deepseek-flash']);
   });
 
   it('drops a stale model-scope response when the drawer re-targets another grant (#440)', async () => {
@@ -246,14 +388,16 @@ describe('NextGrantsView', () => {
     await openButtons[1]!.trigger('click'); // g2 — resolves immediately
     await flushPromises();
 
-    releaseA(['claude-3-7-sonnet']); // the stale g1 response arrives late
+    releaseA(['deepseek-flash']); // the stale g1 response arrives late
     await flushPromises();
 
-    const input = document.querySelector(
-      '[data-testid="grant-models-input"]',
-    ) as HTMLTextAreaElement;
-    expect(input.value).toContain('kimi-k2.5');
-    expect(input.value).not.toContain('claude-3-7-sonnet');
+    // g2's product (pr2 / Moonshot) drives the catalog; the stale g1 scope
+    // must not leak in as checked state.
+    const kimi = document.querySelector(
+      '[data-testid="model-scope-option-kimi-k2.5"]',
+    ) as HTMLInputElement;
+    expect(kimi.checked).toBe(true);
+    expect(document.querySelector('[data-testid="model-scope-option-deepseek-flash"]')).toBeNull();
 
     (document.querySelector('[data-testid="grant-models-save"]') as HTMLButtonElement).click();
     await flushPromises();
