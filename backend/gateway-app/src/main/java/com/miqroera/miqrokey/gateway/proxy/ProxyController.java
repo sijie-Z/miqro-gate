@@ -444,13 +444,10 @@ public class ProxyController {
                     TokenBucket tokens = attempt.observedTokens.get() != null
                             ? attempt.observedTokens.get()
                             : mergeObservations(attempt.usageObserver);
-                    // #623: providers that only carry the request id in the body
-                    // (DeepSeek etc.) — fall back to the staged response prefix
-                    // when the response headers did not provide one.
-                    if (attempt.providerRequestId.get() == null) {
-                        attempt.providerRequestId
-                                .set(UpstreamRequestIdExtractor.fromBodyPrefix(attempt.collector.bytes()));
-                    }
+                    // #623: lifecycle events still need the id when the stream
+                    // ended without the response-completion block (client
+                    // cancels); the usage event path resolves it earlier.
+                    effectiveProviderRequestId(attempt);
                     publishLifecycleComplete(ctx, modelName, requestId, startedAt, streaming, wireProtocol, signal,
                             attempt.httpStatus.get(), attempt.providerRequestId.get(), attempt.upstreamError.get(),
                             attempt.ttfb, tokens, clientCancelled, attempts.get() - 1);
@@ -513,8 +510,8 @@ public class ProxyController {
                         attempt.observedTokens.set(tokens);
                         boolean successful = status >= 200 && status < 300;
                         long latencyMs = clock.millis() - startMillis;
-                        publishUsageEvent(ctx, modelName, cacheKey, tokens, status, upstreamRequestId, requestId,
-                                latencyMs, true, successful && tokens.isEmpty(),
+                        publishUsageEvent(ctx, modelName, cacheKey, tokens, status, effectiveProviderRequestId(attempt),
+                                requestId, latencyMs, true, successful && tokens.isEmpty(),
                                 clientAddressResolver.resolve(exchange.getRequest()));
                         // Retention (ADR-0014 增补): the reply is fully written —
                         // capture its text on the compliance side channel
@@ -770,6 +767,23 @@ public class ProxyController {
             return null;
         }
         return id.length() > 128 ? id.substring(0, 128) : id;
+    }
+
+    /**
+     * Headers first ({@link #pickProviderRequestId}); when both are absent the
+     * observed response prefix is scanned for the body {@code "id"} (#623 —
+     * DeepSeek and other OpenAI-compatible providers only carry the id in the
+     * body). The first resolution wins for the whole attempt: the usage event is
+     * published at response-completion, before the terminal lifecycle record, so it
+     * must not depend on the later doFinally stage.
+     */
+    private static String effectiveProviderRequestId(UpstreamAttempt attempt) {
+        String id = attempt.providerRequestId.get();
+        if (id == null) {
+            id = UpstreamRequestIdExtractor.fromBodyPrefix(attempt.collector.bytes());
+            attempt.providerRequestId.set(id);
+        }
+        return id;
     }
 
     private JsonNode parseQuietly(byte[] body) {
