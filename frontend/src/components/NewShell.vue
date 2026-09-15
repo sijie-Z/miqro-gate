@@ -111,17 +111,18 @@ const isAdmin = computed(() => auth.user?.role === 'SYSTEM_ADMIN');
 
 /** "数据与告警 / Webhook 端点" style trail for the topbar (Vben-like chrome).
  *  Only grouped (admin) pages show a trail; ungrouped regular pages carry
- *  their own page title and a trail would just duplicate it. */
+ *  their own page title and a trail would just duplicate it. Split into
+ *  group/current segments so the two text tones can differ, as on the demo. */
 const breadcrumb = computed(() => {
   const name = route.name as string | undefined;
-  if (!name) return '';
+  if (!name) return null;
   for (const group of navGroups.value) {
     const item = group.items.find((i) => i.name === name);
     if (item) {
-      return group.title ? `${group.title} / ${item.label}` : '';
+      return group.title ? { group: group.title, label: item.label } : null;
     }
   }
-  return '';
+  return null;
 });
 
 const navGroups = computed(() => {
@@ -251,9 +252,11 @@ async function handleLogout() {
     <main class="new-shell__main">
       <header class="new-shell__topbar">
         <div class="new-shell__topbar-left">
-          <span v-if="breadcrumb" class="new-shell__breadcrumb" data-testid="shell-breadcrumb">{{
-            breadcrumb
-          }}</span>
+          <span v-if="breadcrumb" class="new-shell__breadcrumb" data-testid="shell-breadcrumb">
+            <span class="new-shell__breadcrumb-group">{{ breadcrumb.group }}</span>
+            <span class="new-shell__breadcrumb-sep" aria-hidden="true">/</span>
+            <span class="new-shell__breadcrumb-current">{{ breadcrumb.label }}</span>
+          </span>
         </div>
         <div class="new-shell__topbar-right">
           <DropdownMenuRoot>
@@ -542,11 +545,25 @@ async function handleLogout() {
 }
 
 .new-shell__breadcrumb {
-  font-size: var(--ui-font-size-sm);
-  color: var(--ui-foreground-secondary);
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--ui-font-size-base); /* v2.pro live: antd breadcrumb 14px */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.new-shell__breadcrumb-group {
+  color: var(--ui-foreground-secondary);
+}
+
+.new-shell__breadcrumb-sep {
+  margin: 0 8px; /* v2.pro live */
+  color: #999999; /* v2.pro live: antd breadcrumb separator */
+}
+
+.new-shell__breadcrumb-current {
+  color: var(--ui-foreground);
 }
 
 .new-shell__topbar-right {
