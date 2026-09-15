@@ -39,6 +39,8 @@
 2. **指纹 + 模型 + 时间**：真实凭证指纹（本地有）∩ model_id ∩ `occurred_at` 精确秒 ±60s，
    唯一候选即 MATCHED（低置信，报告中标记 `matchedBy: fingerprint+model+time`）。
 3. **Token/状态/费用组合**：input/output（±cache）全等且唯一候选 → MATCHED（标记 level2）。
+   账单行未单列 `cache_read_tokens`（缺省/null）时仅比对 input/output；单列时须与本地缓存读
+   全等（#625：此前 null 与本地 0 恒不等，未单列缓存的账单行三级永不命中）。
 4. **聚合时间窗**：以上均不中的按 `(provider_product_code, occurred_at 的 5 分钟桶)` 聚合，
    与本地同桶汇总比较 → 桶级 PARTIAL（仅报告，不落逐行结论）。
 
