@@ -2,7 +2,7 @@
 
 - 日期：2026-09-15
 - 状态：**Accepted（方向）**——产品负责人（用户）2026-09-15 明确指示"一个人一个虚拟 Key 跨项目使用是肯定要实现的"；本 ADR 修订 CLAUDE.md 第 2 节产品决策条目「一个 Virtual Key 固定绑定一个用户、项目、供应商产品、真实凭证和用途」中的"项目"部分（其余维度不变），落地范围与 UX 细节待 leader 复核。
-- 关联：issue #613；《MiQroKey-Gateway-虚拟密钥与分级用量统计·架构设计报告》§3（单密钥多项目设计来源）；《详细设计》§3.1（V4 DDL 原文）；`ADR-0008`（文件缺失，V4 迁移与缓存决策均引用之；见 feature-backlog D01）；api-contract §7（密钥）；database-schema §virtual_keys/key_project_binding。
+- 关联：issue #613；**完整叙述版（需求/对标/难点全解）：[docs/single-key-multi-project-design.md](../single-key-multi-project-design.md)**；《MiQroKey-Gateway-虚拟密钥与分级用量统计·架构设计报告》§3（单密钥多项目设计来源）；《详细设计》§3.1（V4 DDL 原文）；`ADR-0008`（文件缺失，V4 迁移与缓存决策均引用之；见 feature-backlog D01）；api-contract §7（密钥）；database-schema §virtual_keys/key_project_binding。
 
 ---
 
