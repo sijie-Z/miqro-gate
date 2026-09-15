@@ -17,6 +17,7 @@ import {
 } from 'radix-vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
+import { ccSwitchImportLink, claudeEnvSnippet, claudeSettingsSnippet } from '@/lib/ccswitch';
 import {
   UiButton,
   UiDialog,
@@ -245,10 +246,12 @@ async function createKey() {
       allowedModels: createModels.value,
       cachePolicy: createCachePolicy.value,
     });
+    const createdName = createName.value;
+    const createdModels = [...createModels.value];
     resetForm();
     await load();
     toast.success('虚拟密钥已创建');
-    openReveal(response);
+    openReveal(response, createdName, createdModels);
   } catch (error) {
     if (error instanceof ApiError) {
       formError.value = error.message;
@@ -263,8 +266,10 @@ async function createKey() {
 
 // ---- reveal (secret shown once) ----
 
-function openReveal(response: CreateVirtualKeyResponse) {
+function openReveal(response: CreateVirtualKeyResponse, keyName: string, models: string[]) {
   revealData.value = response;
+  revealKeyName.value = keyName;
+  revealModels.value = [...models];
   revealAcked.value = false;
   revealCopied.value = false;
   revealOpen.value = true;
@@ -291,6 +296,62 @@ async function copySecret() {
   } catch {
     toast.error('复制失败，请手动选择复制');
   }
+}
+
+// ---- CC Switch integration (one-click import + copy-ready snippets) ----
+
+/** Key identity captured at create/rotate time (the secret is only shown here). */
+const revealKeyName = ref('');
+const revealModels = ref<string[]>([]);
+
+/** Row-level「接入 CC Switch」dialog state. */
+const usageOpen = ref(false);
+const usageKey = ref<VirtualKeyView | null>(null);
+const usagePastedSecret = ref('');
+
+function gatewayBaseUrl(): string {
+  return (revealData.value?.baseUrl ?? usageKey.value?.baseUrl ?? '').replace(/\/+$/, '');
+}
+
+/** Template-safe accessor: the dialog only renders with revealData present. */
+function revealSecret(): string {
+  return revealData.value?.secret ?? '';
+}
+
+function importFromReveal() {
+  if (!revealData.value?.secret) return;
+  window.location.href = ccSwitchImportLink(
+    revealData.value.secret,
+    revealKeyName.value,
+    gatewayBaseUrl(),
+    revealModels.value[0],
+  );
+}
+
+function importFromUsage() {
+  const secret = usagePastedSecret.value.trim();
+  if (!secret || !usageKey.value) return;
+  window.location.href = ccSwitchImportLink(
+    secret,
+    usageKey.value.name ?? '',
+    gatewayBaseUrl(),
+    usageKey.value.modelIds?.[0],
+  );
+}
+
+async function copyText(text: string, okMessage: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success(okMessage);
+  } catch {
+    toast.error('复制失败，请手动选择复制');
+  }
+}
+
+function openUsageGuide(key: VirtualKeyView) {
+  usageKey.value = key;
+  usagePastedSecret.value = '';
+  usageOpen.value = true;
 }
 
 // ---- row actions ----
@@ -332,7 +393,7 @@ async function handleRotate(key: VirtualKeyView) {
         // server contract: listed keys always carry their id
         const response = await api.rotateVirtualKey(key.id!);
         await load();
-        openReveal(response);
+        openReveal(response, key.name ?? '', key.modelIds ?? []);
       } catch (error) {
         if (error instanceof ApiError) {
           toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
@@ -674,6 +735,14 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
               <DropdownMenuContent class="ui-menu" :side-offset="4" :align="'end'">
                 <DropdownMenuItem
                   class="ui-menu__item next-keys__menu-item"
+                  @select="openUsageGuide(row as VirtualKeyView)"
+                >
+                  <DropdownMenuItemIndicator class="next-keys__menu-ind" />
+                  接入 CC Switch
+                </DropdownMenuItem>
+                <DropdownMenuSeparator class="next-keys__menu-sep" />
+                <DropdownMenuItem
+                  class="ui-menu__item next-keys__menu-item"
                   :disabled="(row as VirtualKeyView).status !== 'ACTIVE'"
                   @select="handleRotate(row as VirtualKeyView)"
                 >
@@ -737,6 +806,34 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
       <div class="next-keys__secret-box" data-testid="secret-value">
         <code>{{ revealData.secret }}</code>
       </div>
+      <div class="next-keys__import" data-testid="secret-actions">
+        <UiButton variant="primary" data-testid="secret-ccswitch" @click="importFromReveal">
+          导入到 CC Switch
+        </UiButton>
+        <UiButton
+          variant="secondary"
+          data-testid="secret-copy-env"
+          @click="copyText(claudeEnvSnippet(revealSecret(), gatewayBaseUrl()), '环境变量已复制')"
+        >
+          复制环境变量
+        </UiButton>
+        <UiButton
+          variant="secondary"
+          data-testid="secret-copy-settings"
+          @click="
+            copyText(
+              claudeSettingsSnippet(revealSecret(), gatewayBaseUrl()),
+              'settings.json 已复制',
+            )
+          "
+        >
+          复制 settings.json
+        </UiButton>
+      </div>
+      <p class="next-keys__import-hint">
+        「导入到 CC Switch」会打开 CC Switch 的确认框，自动填入网关地址与密钥（Claude Code
+        供应商），无需手动配置。
+      </p>
       <label class="next-keys__ack">
         <input
           v-model="revealAcked"
@@ -768,6 +865,53 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
           @click="revealOpen = false"
         >
           完成
+        </UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- CC Switch access guide (row-level; the plaintext secret is never stored server-side) -->
+    <UiDialog
+      :open="usageOpen"
+      title="接入 CC Switch"
+      description="服务端只保存密钥摘要，明文仅在创建/轮换时展示一次；手头没有明文时可直接轮换生成新密钥并导入。"
+      width="560px"
+      data-testid="usage-dialog"
+      @update:open="usageOpen = $event"
+    >
+      <p class="next-keys__reveal-url">
+        网关地址：<span class="ui-mono">{{ usageKey?.baseUrl }}</span>
+      </p>
+      <pre class="next-keys__snippet" data-testid="usage-env">{{
+        claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl())
+      }}</pre>
+      <div class="next-keys__import">
+        <UiButton
+          variant="secondary"
+          data-testid="usage-copy-env"
+          @click="
+            copyText(claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl()), '环境变量模板已复制')
+          "
+        >
+          复制环境变量模板
+        </UiButton>
+      </div>
+      <div class="ui-field">
+        <span class="ui-field__label">手上还有明文密钥？粘贴后可直接一键导入</span>
+        <UiInput
+          v-model="usagePastedSecret"
+          placeholder="mqk_live_…"
+          data-testid="usage-paste-secret"
+        />
+      </div>
+      <template #footer>
+        <UiButton variant="secondary" @click="usageOpen = false">关闭</UiButton>
+        <UiButton
+          variant="primary"
+          :disabled="!usagePastedSecret.trim()"
+          data-testid="usage-ccswitch"
+          @click="importFromUsage"
+        >
+          导入到 CC Switch
         </UiButton>
       </template>
     </UiDialog>
@@ -1166,5 +1310,29 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
 
 .next-keys__ack:has(.next-keys__ack-input:focus-visible) .next-keys__ack-box {
   box-shadow: var(--ui-shadow-focus);
+}
+
+.next-keys__import {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+  margin-top: var(--ui-space-3);
+}
+
+.next-keys__import-hint {
+  margin: var(--ui-space-2) 0 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-keys__snippet {
+  margin: var(--ui-space-2) 0;
+  padding: var(--ui-space-3);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-muted);
+  font-size: var(--ui-font-size-xs);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>
