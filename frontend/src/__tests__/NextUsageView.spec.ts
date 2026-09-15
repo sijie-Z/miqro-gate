@@ -69,6 +69,7 @@ const records: UsageRecordPage = {
       isComplete: true,
       usageMissing: false,
       virtualKeyId: 'k1',
+      clientIp: '203.0.113.7',
     },
   ],
   page: 1,
@@ -183,6 +184,7 @@ describe('NextUsageView', () => {
 
     expect(wrapper.find('[data-testid="records-table"]').exists()).toBe(true);
     expect(wrapper.text()).toContain('deepseek-v4-flash');
+    expect(wrapper.text()).toContain('203.0.113.7');
     expect(wrapper.text()).toContain('512ms');
     expect(wrapper.text()).toContain('共 1 条 · 第 1 / 1 页');
     const next = wrapper.find('[data-testid="records-next"]');

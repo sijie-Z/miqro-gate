@@ -159,6 +159,7 @@ const recordsColumns = [
   { key: 'output', title: '输出', width: '100px', align: 'right' as const },
   { key: 'latency', title: '延迟', width: '90px', align: 'right' as const },
   { key: 'upstreamStatus', title: '上游状态', width: '100px', align: 'right' as const },
+  { key: 'clientIp', title: '来源 IP', width: '140px' },
   { key: 'providerRequestId', title: '供应商请求 ID', minWidth: '220px' },
 ];
 
@@ -628,6 +629,9 @@ function formatTime(iso?: string): string {
           <template #upstreamStatus="{ row }">{{
             asRecord(row).upstreamStatusCode ?? '—'
           }}</template>
+          <template #clientIp="{ row }">
+            <span class="ui-mono">{{ asRecord(row).clientIp || '—' }}</span>
+          </template>
           <template #providerRequestId="{ row }">
             <span class="ui-mono">{{ asRecord(row).providerRequestId || '—' }}</span>
           </template>

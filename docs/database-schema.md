@@ -216,6 +216,7 @@ Key → 项目绑定（标签路由的鉴权权威），与 `virtual_keys.projec
 - 六类 Token 列（`input/output/cache_creation_input/cache_read/prompt/completion/total/reasoning`），**可为 NULL**：缓存命中无 usage
 - `latency_ms`、`upstream_status_code`、`cache_key bytea`
 - `is_complete boolean`、`usage_missing boolean`（上游未返回 usage 时标记，用量记 0）
+- `client_ip varchar(45)`（V52，#605：调用方地址——传输层对端，或可信代理名单下 `X-Forwarded-For` 最右非可信跳；可为 NULL）
 - `occurred_at`、`created_at`
 
 部分唯一索引 `(tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL`；`virtual_key_id`、`project_id`、`cache_level`、`occurred_at` 索引。正文（prompt、代码、工具、回答）永不写入。

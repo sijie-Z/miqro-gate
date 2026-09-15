@@ -17,6 +17,8 @@ import type { UsageRecord, UsageRecordPage, UsageSummary } from '@/types/generat
 const groupBy = ref<UsageGroupBy>('project');
 const modelId = ref('');
 const projectId = ref('');
+// #605: abuse forensics — filter the whole report down to one calling address.
+const clientIp = ref('');
 const summary = ref<UsageSummary | null>(null);
 const summaryLoading = ref(true);
 const summaryError = ref('');
@@ -108,6 +110,7 @@ const columns = [
   { key: 'cacheLevel', title: '缓存层级', width: '120px' },
   { key: 'upstreamStatusCode', title: '状态码', width: '90px', align: 'right' as const },
   { key: 'usageMissing', title: '用量上报', width: '90px' },
+  { key: 'clientIp', title: '来源 IP', width: '140px' },
   { key: 'gatewayRequestId', title: '请求 ID', minWidth: '230px' },
 ];
 
@@ -134,6 +137,7 @@ async function load() {
     const recordsResult = await api.adminUsageRecords({
       modelId: modelId.value || undefined,
       projectId: projectId.value || undefined,
+      clientIp: clientIp.value.trim() || undefined,
       page: page.value,
       size: pageSize.value,
       ...rangeParams(),
@@ -229,6 +233,12 @@ onMounted(load);
           placeholder="模型 ID（可选）"
           width="200px"
           data-testid="usage-model-id"
+        />
+        <UiInput
+          v-model="clientIp"
+          placeholder="来源 IP（可选）"
+          width="180px"
+          data-testid="usage-client-ip"
         />
         <UiButton
           variant="primary"
@@ -371,6 +381,11 @@ onMounted(load);
             :tone="(row as UsageRecord).usageMissing ? 'warning' : 'success'"
             :label="(row as UsageRecord).usageMissing ? '缺失' : '正常'"
           />
+        </template>
+        <template #clientIp="{ row }">
+          <span class="ui-mono">{{
+            (row as UsageRecord).clientIp || '—'
+          }}</span>
         </template>
         <template #gatewayRequestId="{ row }">
           <span class="ui-mono next-admin-usage__reqid">{{

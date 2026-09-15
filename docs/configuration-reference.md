@@ -131,7 +131,7 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_MAX_CONTROL_BODY_BYTES` | `1MB` | 管理 API body 上限 |
 | `MIQROKEY_MAX_PROXY_BUFFER_BYTES` | `256KB` | 只限制必要解析缓冲，不聚合完整响应 |
 | `MIQROKEY_MAX_CONCURRENT_STREAMS` | `50` | 首版容量目标；不是用户限流策略 |
-| `MIQROKEY_TRUSTED_PROXY_CIDRS` | 空 | （**预留未实现**：数据面无 forwarded-header 消费方，见 F05 的 control-plane 对等配置 `MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES`） |
+| `MIQROKEY_TRUSTED_PROXY_CIDRS` | 空（compose.prod 默认 `172.28.0.0/24`） | 数据面可信反向代理 CIDR（#605，`miqrokey.trusted-proxy.cidrs`）：仅当连接对端命中名单时才消费 `X-Forwarded-For` 记录调用方 IP（从右往左取第一个非可信地址）；空 = 只记录对端地址，请求头永不采信。compose 部署默认信任编排内网段（portal nginx 反代），control-plane 对等配置见 `MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES` |
 | `MIQROKEY_UPSTREAM_ALLOWED_CIDRS` | 空 | SSRF 门控 allowlist（G2.6）：命中这些 CIDR 的目标豁免「非公网地址」与「明文 http」两道拒绝（`127.0.0.0/8, ::1/128` 用于本地自建模型）；空 = 仅接受 https + 公网地址；`userinfo` URL 永不豁免 |
 | `MIQROKEY_UPSTREAM_FOLLOW_REDIRECTS` | `false` | 重定向跟随硬编码禁用（G2.6：防止 30x 把已通过 SSRF 校验的目标重定向到任意地址）；当前版本不可配置 |
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_CONNECT_TIMEOUT` | `10s` | 控制面 → 供应商调用的 TCP 连接超时（G3.1，`ProviderClient`） |

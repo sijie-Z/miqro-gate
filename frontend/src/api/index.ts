@@ -1049,6 +1049,7 @@ export function adminUsageRecords(query: {
   userId?: string;
   projectId?: string;
   modelId?: string;
+  clientIp?: string;
 }): Promise<UsageRecordPage> {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {

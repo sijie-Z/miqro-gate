@@ -127,6 +127,9 @@ services:
       # 留痕 Kafka 出口（ADR-0014 R3，默认关）：空值=no-op publisher。自托管 broker 启用后
       # 设为 redpanda:9092（需 --profile kafka）；腾讯云 CKafka 直接填其接入地址，无需 profile。
       MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS: ${MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS:-}
+      # 调用方 IP 记录（#605）：默认信任本编排内网段（portal nginx 反代），据此消费
+      # X-Forwarded-For 并把真实访客地址记入用量记录；直连场景置空 = 只记对端地址。
+      MIQROKEY_TRUSTED_PROXY_CIDRS: ${MIQROKEY_TRUSTED_PROXY_CIDRS:-172.28.0.0/24}
       # 显式限堆：%-of-limit 在小规格宿主（2G 演示机）上会超卖；大机可用 GATEWAY_JAVA_OPTS 覆盖。
       JAVA_TOOL_OPTIONS: ${GATEWAY_JAVA_OPTS:--Xmx640m -XX:MaxMetaspaceSize=192m -XX:+ExitOnOutOfMemoryError}
     volumes:

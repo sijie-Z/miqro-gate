@@ -218,6 +218,6 @@ class UsageStatsServiceTest {
         return new UsageEvent(UUID.randomUUID(), TENANT, "chatcmpl-123", KEY_A, UUID.randomUUID(), PRODUCT,
                 UUID.randomUUID(), MODEL, CacheLevel.UPSTREAM,
                 new TokenBucket(1_000L, 500L, null, 200L, null, null, 1_700L, null), 42L, 200, new byte[16], true,
-                false, "greq", Instant.now());
+                false, "greq", Instant.now(), null);
     }
 }

@@ -173,6 +173,11 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 conditions.add("ue.model_id = :modelId");
                 params.addValue("modelId", filter.modelId());
             }
+            if (filter.clientIp() != null) {
+                // #605: abuse forensics — "what did this address do through us".
+                conditions.add("ue.client_ip = :clientIp");
+                params.addValue("clientIp", filter.clientIp());
+            }
             return this;
         }
 
@@ -310,7 +315,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                     rs.getObject("reasoning_tokens", Long.class)),
             rs.getObject("latency_ms", Long.class), rs.getObject("upstream_status_code", Integer.class),
             rs.getBytes("cache_key"), rs.getBoolean("is_complete"), rs.getBoolean("usage_missing"),
-            rs.getString("gateway_request_id"), rs.getTimestamp("occurred_at").toInstant());
+            rs.getString("gateway_request_id"), rs.getTimestamp("occurred_at").toInstant(), rs.getString("client_ip"));
 
     @Override
     public List<UsageEvent> findRecords(UsageFilter filter, long offset, int limit) {
