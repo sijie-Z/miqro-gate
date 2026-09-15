@@ -5,16 +5,17 @@ import com.miqroera.miqrokey.spi.ProviderRequest;
 import com.miqroera.miqrokey.spi.ProviderResponse;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import io.netty.handler.timeout.ReadTimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import javax.net.ssl.SSLException;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
-import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -124,7 +125,7 @@ class HttpProviderClientTest {
                 1024);
 
         assertThatThrownBy(() -> client.exchange(ProviderRequest.get("/models")).block())
-                .hasRootCauseInstanceOf(HttpTimeoutException.class);
+                .isInstanceOf(ReadTimeoutException.class);
     }
 
     @Test
@@ -153,35 +154,34 @@ class HttpProviderClientTest {
     }
 
     @Test
-    @DisplayName("pins the connection to the validated address resolved at construction")
-    void pinsConnectionToValidatedAddress() throws Exception {
+    @DisplayName("pins the connection to the validated address while the Host header stays the hostname (#507)")
+    void pinsConnectionToValidatedAddress() {
         // localhost resolves to a loopback family on every platform; both are
         // allowlisted so whichever address comes first is accepted.
         HttpProviderClient client = new HttpProviderClient(URI.create("http://localhost:" + port + "/api"),
                 "Authorization", "Bearer sk-test", new UpstreamTargetValidator(List.of("127.0.0.0/8", "::1/128")),
-                Duration.ofSeconds(2), Duration.ofSeconds(5), 1024);
+                Duration.ofSeconds(2), Duration.ofSeconds(5), 1024 * 1024);
 
-        assertThat(client.pinnedBaseUri().getHost()).isNotEqualTo("localhost");
-        assertThat(InetAddress.getByName(client.pinnedBaseUri().getHost()).isLoopbackAddress()).isTrue();
-        assertThat(client.pinnedBaseUri().getPort()).isEqualTo(port);
-        assertThat(client.pinnedBaseUri().getPath()).isEqualTo("/api");
-        // Plain http: no TLS layer, no SNI parameters.
-        assertThat(client.sslParameters()).isNull();
+        assertThat(client.pinnedAddress().isLoopbackAddress()).isTrue();
+        handler(exchange -> respond(exchange, 200, "{}", Map.of()));
+        ProviderResponse response = client.exchange(ProviderRequest.get("/models")).block();
+        assertThat(response.statusCode()).isEqualTo(200);
+        // The socket went to the pinned IP, but the request identity stayed the
+        // hostname — an IP-literal Host is what upstream WAFs reject with 418.
+        assertThat(lastRequest.get().headers()).containsEntry("host", List.of("localhost:" + port));
     }
 
     @Test
-    @DisplayName("https clients keep endpoint identification active on the pinned IP literal")
-    void keepsEndpointIdentificationForHttps() {
+    @DisplayName("https targets negotiate TLS (no silent plaintext downgrade)")
+    void httpsTargetNegotiatesTls() {
         HttpProviderClient client = new HttpProviderClient(URI.create("https://127.0.0.1:" + port + "/api"),
                 "Authorization", "Bearer sk-test", new UpstreamTargetValidator(List.of("127.0.0.0/8")),
                 Duration.ofSeconds(2), Duration.ofSeconds(5), 1024);
 
-        // An IP-literal host has no SNI name; certificate identity must still
-        // be checked against the literal (HTTPS algorithm).
-        assertThat(client.sslParameters()).isNotNull();
-        assertThat(client.sslParameters().getEndpointIdentificationAlgorithm()).isEqualTo("HTTPS");
-        assertThat(client.sslParameters().getServerNames()).isNullOrEmpty();
-        assertThat(client.pinnedBaseUri().getHost()).isEqualTo("127.0.0.1");
+        // The fixture server speaks plain HTTP; a real TLS handshake must be
+        // attempted and fail at the TLS layer instead of falling back.
+        assertThatThrownBy(() -> client.exchange(ProviderRequest.get("/models")).block())
+                .hasRootCauseInstanceOf(SSLException.class);
     }
 
     private HttpProviderClient client() {
