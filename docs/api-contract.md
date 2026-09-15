@@ -121,18 +121,20 @@
 | `GET /api/v1/me/usage/summary` | 自己的聚合用量和成本 |
 | `GET /api/v1/me/usage/records` | 自己的明细，受分页和最大时间窗限制 |
 
-创建请求：
+创建请求（ADR-0018：一把 Key 可绑定多个项目——`projectIds` 首个为主项目，其授权即 `credentialGrantId`；附加项目由服务端匹配该项目下同产品的最早 ACTIVE 授权，匹配不到则 409 `PROJECT_GRANT_MISSING`。旧字段 `projectId` 仍兼容=单元素）：
 
 ```json
 {
   "name": "claude-code-main",
-  "projectId": "0190...",
+  "projectIds": ["0190...", "0191..."],
   "providerProductId": "0190...",
   "credentialGrantId": "0190...",
   "purpose": "CLAUDE_CODE",
   "allowedModels": ["provider-model-id"]
 }
 ```
+
+响应新增 `boundProjects: [{ projectId, projectTag }]`：打印字符串携带首个项目的标签；对其余已绑定项目，把同一密钥核心段追加各自标签（`mqk_live_<id>_<secret>.<tag>`）即可路由。标签不参与 HMAC、不承载权限；未绑定标签一律 404（防枚举）。项目标签在项目创建时若未填写会自动生成（code slug），且**被绑定引用后不可修改**（409 `PROJECT_TAG_IN_USE`；历史绑定不随轮换解除）。
 
 前置条件：`projectId` 所属项目必须已设置路由标签（`project_tag`，Key 明文后缀嵌入该标签用于路由）；未设置时返回 `409 ROUTING_TAG_MISSING`——普通用户请联系管理员在项目设置中补充后重试（管理员建项目时请勿留空）。
 

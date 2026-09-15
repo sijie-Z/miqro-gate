@@ -2886,3 +2886,19 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - **#193 口径提示条 + 候选文档**：两用量页顶部可关闭提示（本地即时记账 vs 供应商 T+1）;docs/feature-expansion-candidates.md（大厂文档→候选 A-H,裁决反向项停泊）。
 - **#194 设计师登录稿（权威稿接入第一轮）**：素材 other/miqro-gate-auth-ui（LoginView/RegisterView/preview.html + 设计图）;按权威图实现「左暗色网关传送门 hero（provider 卡/状态卡/终端/信任条）+ 右侧白色认证面板（Welcome back 👋 / Sign in / Request an account / Your data is protected）」;TDesign 标签翻译为自绘 Ui（UiInput 增 prefix 槽）;登录文案按设计稿（EN）,注册保留产品自助语义（中文）,测试钩子全部保留。登录稿与设计图仍有逐区差距（3D 体积感/局部排版/密度）——最后一轮对齐排期进行中。
 - **pre-release 评估（leader 询问 2026-09-07）**：代码基线 develop 全绿可出 0.1.0-rc 候选;tag 动作待 owner/leader 授权;真实凭证矩阵与 Q4 https 冒烟仍 WAITING（不阻塞 pre-release,清单如实标注）。
+
+## 2026-09-15 深夜 — Goal #613：单密钥多项目（ADR-0018）标签路由完整形态
+
+**背景**：产品负责人指示"一个人一个虚拟 Key 跨项目使用是肯定要实现的"；核查发现架构设计报告 §3（单密钥多项目）与详细设计 V4 建表注释（"一个密钥可绑多个项目"）均如此设计，但实现收缩为 1:1 绑定 + 后缀等值校验——愿景未落地。见 issue #613 / ADR-0018（本批同时修正 ADR 记录的"成员移除→Key 失效"从未实现一事）。
+
+**交付**（分支 feat/single-key-multi-project-613）：
+
+- V53 迁移：`key_project_binding.grant_id`（回填自 `virtual_keys.grant_id`，存量语义不变）+ 存量项目标签回填（`proj-<uuid12>`）+ 表/列注释修正；
+- 网关：装载器去 `DISTINCT ON`、按 `(keyId, tag)` 复合键装载、grant 改由绑定行自带；`VirtualKeyResolver` 按后缀**选择**绑定；`ModelsController`/`ProxyController` 模型门控改用 `binding.grantId()`；
+- 控制面：创建接受 `projectIds`（首个为主项目；附加项目按"同产品最早 ACTIVE grant"确定性匹配，缺失 409 `PROJECT_GRANT_MISSING`）；轮换复制全部绑定；项目标签自动生成（slug，冲突退 `proj-<uuid12>`）且被引用后不可改（409 `PROJECT_TAG_IN_USE`）；成员移出项目 → 禁用该项目绑定行、无剩余绑定则 Key 置 REVOKED（补上一处从未实现的文档语义）；
+- 契约/产物：`CreateVirtualKeyRequest.projectIds`、`CreateVirtualKeyResponse/VirtualKeyView.boundProjects`；OpenAPI 基线重新导出、`gen:types` 重新生成；
+- 前端：建 Key 表单"同时绑定到其他项目（可选）"多选、Key 列表项目列 `+N` 角标（hover 显示全部标签）。
+
+**验证**：Me 密钥 IT **11/11**（新增：多项目创建+快照双绑定、缺授权 409、轮换镜像全部绑定）；AdminOrg IT **11/11**（新增：标签自动生成/引用守卫 409/改名放行/成员移除→绑定 DISABLED+Key REVOKED）；`VirtualKeyResolverTest` **2/2**（同核心段双后缀→各自项目与凭证；未绑定/篡改/缺头统一拒绝）；OpenAPI 基线导出重建；前端 vitest 全量 + typecheck + 构建立即执行（结果随 PR 记录）。
+
+**演示最小闭环（下一步）**：一把 Key 两个标签（CC Switch 双条目）→ 两项目各自凭证与用量。

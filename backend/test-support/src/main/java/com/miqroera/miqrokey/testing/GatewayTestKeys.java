@@ -188,7 +188,7 @@ public final class GatewayTestKeys {
     private static RouteSnapshot snapshotFull(String baseUrl, Map<String, McpResiliencePolicy> policies,
             Map<String, Integer> upstreamTimeoutsMs, Map<UUID, RetentionConfig> retentionByTenant, KeyFixture... keys) {
         Map<String, RouteSnapshot.KeyRecord> keyMap = new LinkedHashMap<>();
-        Map<UUID, RouteSnapshot.BindingRecord> bindingMap = new LinkedHashMap<>();
+        Map<UUID, Map<String, RouteSnapshot.BindingRecord>> bindingMap = new LinkedHashMap<>();
         Map<UUID, RouteSnapshot.CredentialRecord> credentialMap = new LinkedHashMap<>();
         Map<UUID, Set<String>> modelsMap = new LinkedHashMap<>();
         Map<UUID, Set<String>> grantModelsMap = new LinkedHashMap<>();
@@ -197,7 +197,8 @@ public final class GatewayTestKeys {
         Map<UUID, UUID> providerIdsMap = new LinkedHashMap<>();
         for (KeyFixture key : keys) {
             keyMap.put(key.publicKeyId(), key.keyRecord(TENANT_ID));
-            bindingMap.put(key.keyId(), key.bindingRecord());
+            bindingMap.computeIfAbsent(key.keyId(), k -> new LinkedHashMap<>()).put(key.projectTag(),
+                    key.bindingRecord());
             credentialMap.put(key.credentialId(), key.credentialRecord(baseUrl));
             modelsMap.put(key.keyId(), key.models());
             grantModelsMap.put(key.grantId(), key.grantModels());
@@ -427,7 +428,7 @@ public final class GatewayTestKeys {
         }
 
         public RouteSnapshot.BindingRecord bindingRecord() {
-            return new RouteSnapshot.BindingRecord(keyId, projectId, projectTag, credentialId, productId);
+            return new RouteSnapshot.BindingRecord(keyId, projectId, projectTag, credentialId, productId, grantId);
         }
 
         public RouteSnapshot.CredentialRecord credentialRecord(String baseUrl) {

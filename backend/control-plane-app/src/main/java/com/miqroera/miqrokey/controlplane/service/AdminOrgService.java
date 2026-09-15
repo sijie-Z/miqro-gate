@@ -30,7 +30,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Admin organization operations (G5.2, api-contract §5): users (create /
@@ -253,18 +257,34 @@ public class AdminOrgService {
             throw new ApiException(HttpStatus.CONFLICT, "PROJECT_CODE_TAKEN",
                     "project code is required and must be unique");
         }
-        Project project = new Project(UUID.randomUUID(), tenantId, code, name, name, null, ProjectStatus.ACTIVE,
-                projectTag, 0, Instant.now(), Instant.now());
+        // ADR-0018: an omitted tag is derived from the code — administrators no
+        // longer have to invent a slug; the value only needs tenant uniqueness.
+        String tag = (projectTag == null || projectTag.isBlank()) ? generateProjectTag(tenantId, code) : projectTag;
+        Project project = new Project(UUID.randomUUID(), tenantId, code, name, name, null, ProjectStatus.ACTIVE, tag, 0,
+                Instant.now(), Instant.now());
         projectRepository.insert(project);
         auditService.record(tenantId, adminId, "PROJECT_CREATE", "PROJECT", project.id(),
                 AuditSummaries.summary("code", AuditSummaries.sanitize(code)), null);
         return project;
     }
 
+    @Transactional
     public Project updateProject(UUID tenantId, UUID adminId, UUID projectId, String name, String projectTag,
             ProjectStatus status) {
         requireValidProjectTag(projectTag);
         Project project = requireProject(tenantId, projectId);
+        // ADR-0018: a tag referenced by key bindings is immutable — every issued
+        // key string froze the old label, so changing it would orphan them all.
+        if (projectTag != null && !projectTag.isBlank() && !projectTag.equals(project.projectTag())) {
+            Long bound = jdbc.queryForObject("""
+                    SELECT count(*) FROM key_project_binding
+                    WHERE tenant_id = :tenantId AND project_id = :projectId
+                    """, new MapSqlParameterSource("tenantId", tenantId).addValue("projectId", projectId), Long.class);
+            if (bound != null && bound > 0) {
+                throw new ApiException(HttpStatus.CONFLICT, "PROJECT_TAG_IN_USE",
+                        "该项目路由标签已被 " + bound + " 条密钥绑定引用；历史绑定不随密钥轮换解除，" + "因此标签不可修改。如确需更换标签，请评估密钥迁移方案，或保留当前标签。");
+            }
+        }
         Project updated = new Project(project.id(), project.tenantId(), project.code(),
                 name != null ? name : project.name(), project.description(), project.costCenter(),
                 status != null ? status : project.status(), projectTag != null ? projectTag : project.projectTag(),
@@ -315,8 +335,45 @@ public class AdminOrgService {
     public void removeProjectMember(UUID tenantId, UUID adminId, UUID projectId, UUID userId) {
         requireProject(tenantId, projectId);
         projectMembershipRepository.delete(projectId, userId);
+        // ADR-0018: the member's keys immediately lose THIS project's route
+        // (other bound projects keep working). A key left without any ACTIVE
+        // binding is revoked — the documented "member removed -> the project's
+        // keys stop working" contract, now actually implemented.
+        List<UUID> affectedKeyIds = jdbc.queryForList("""
+                SELECT DISTINCT b.virtual_key_id
+                FROM key_project_binding b
+                JOIN virtual_keys vk ON vk.id = b.virtual_key_id AND vk.tenant_id = b.tenant_id
+                WHERE b.tenant_id = :tenantId AND b.project_id = :projectId AND vk.user_id = :userId
+                  AND b.status = 'ACTIVE' AND vk.status IN ('ACTIVE', 'ROTATING')
+                """, new MapSqlParameterSource("tenantId", tenantId).addValue("projectId", projectId).addValue("userId",
+                userId), UUID.class);
+        int disabled = 0;
+        int revoked = 0;
+        for (UUID keyId : affectedKeyIds) {
+            disabled += jdbc.update("""
+                    UPDATE key_project_binding SET status = 'DISABLED', version = version + 1, updated_at = now()
+                    WHERE tenant_id = :tenantId AND virtual_key_id = :keyId AND project_id = :projectId
+                      AND status = 'ACTIVE'
+                    """, new MapSqlParameterSource("tenantId", tenantId).addValue("keyId", keyId).addValue("projectId",
+                    projectId));
+            Long remaining = jdbc.queryForObject("""
+                    SELECT count(*) FROM key_project_binding
+                    WHERE tenant_id = :tenantId AND virtual_key_id = :keyId AND status = 'ACTIVE'
+                    """, new MapSqlParameterSource("tenantId", tenantId).addValue("keyId", keyId), Long.class);
+            if (remaining != null && remaining == 0) {
+                revoked += jdbc.update("""
+                        UPDATE virtual_keys SET status = 'REVOKED', revoked_at = now(),
+                            version = version + 1
+                        WHERE tenant_id = :tenantId AND id = :keyId AND status IN ('ACTIVE', 'ROTATING')
+                        """, new MapSqlParameterSource("tenantId", tenantId).addValue("keyId", keyId));
+            }
+        }
+        if (!affectedKeyIds.isEmpty()) {
+            routeRefreshPublisher.publishChanged();
+        }
         auditService.record(tenantId, adminId, "PROJECT_MEMBER_REMOVE", "PROJECT", projectId,
-                "{\"userId\":\"" + userId + "\"}", null);
+                "{\"userId\":\"" + userId + "\",\"bindingsDisabled\":" + disabled + ",\"keysRevoked\":" + revoked + "}",
+                null);
     }
 
     // ------------------------------------------------------------------
@@ -469,6 +526,29 @@ public class AdminOrgService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "PROJECT_TAG_INVALID",
                     "projectTag must match [A-Za-z0-9_-]{1,64}");
         }
+    }
+
+    /**
+     * Derives a routing tag for a new project (ADR-0018): slugified code when free,
+     * else a {@code proj-<uuid12>} fallback; unique per tenant.
+     */
+    private String generateProjectTag(UUID tenantId, String code) {
+        Set<String> taken = projectRepository.findAllByTenantId(tenantId).stream().map(Project::projectTag)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        String slug = code.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_-]", "-").replaceAll("^-+|-+$", "");
+        if (slug.length() > 64) {
+            slug = slug.substring(0, 64);
+        }
+        if (!slug.isBlank() && !taken.contains(slug)) {
+            return slug;
+        }
+        for (int attempt = 0; attempt < 5; attempt++) {
+            String candidate = "proj-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+            if (!taken.contains(candidate)) {
+                return candidate;
+            }
+        }
+        return "proj-" + UUID.randomUUID().toString().replace("-", "");
     }
 
     private User requireUser(UUID tenantId, UUID userId) {

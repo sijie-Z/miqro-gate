@@ -79,13 +79,12 @@ public class VirtualKeyResolver {
             if (!matched) {
                 return invalid();
             }
-            RouteSnapshot.BindingRecord binding = snapshot.binding(key.keyId());
+            // ADR-0018: the presented label SELECTS the binding — a key may be
+            // bound to several projects, each with its own grant. A label with
+            // no binding (unbound project, foreign project, forged) is a
+            // uniform invalid key: 404, no enumeration.
+            RouteSnapshot.BindingRecord binding = snapshot.binding(key.keyId(), parsed.projectTag());
             if (binding == null) {
-                return invalid();
-            }
-            if (binding.projectTag() == null || !binding.projectTag().equals(parsed.projectTag())) {
-                // The presented label does not match the binding's tag: the key
-                // is valid but not routable under this label.
                 return invalid();
             }
             Set<String> models = snapshot.models(key.keyId());

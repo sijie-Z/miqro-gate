@@ -247,7 +247,8 @@ public class ProxyController {
             boolean streaming = root != null && root.has("stream") && root.get("stream").asBoolean(false);
 
             java.util.Set<String> allowed = ctx.models();
-            java.util.Set<String> grantModels = ctx.snapshot().grantModels(ctx.key().grantId());
+            // ADR-0018: the request's binding decides the grant (multi-project keys).
+            java.util.Set<String> grantModels = ctx.snapshot().grantModels(ctx.binding().grantId());
             if (grantModels != null) {
                 // Grant is the authorization authority: shrinking the grant's
                 // model scope must revoke the model for every existing key of

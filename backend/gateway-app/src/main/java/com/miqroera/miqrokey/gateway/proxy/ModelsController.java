@@ -92,7 +92,9 @@ public class ModelsController {
             return Set.of();
         }
         Set<String> allowed = new TreeSet<>(ctx.models());
-        allowed.retainAll(snapshot.grantModels(ctx.key().grantId()));
+        // ADR-0018: the REQUEST's binding decides the grant — a key bound to
+        // several projects sees each project's own model scope.
+        allowed.retainAll(snapshot.grantModels(ctx.binding().grantId()));
         allowed.retainAll(snapshot.upstreamModels(ctx.productId()));
         return allowed;
     }

@@ -442,6 +442,87 @@ class AdminOrgApiIntegrationTest {
         return null;
     }
 
+    @Test
+    @DisplayName("project tag lifecycle and member removal over bound keys (ADR-0018)")
+    void projectTagLifecycleAndMemberRemoval() throws Exception {
+        fx.insertProviderAndProductAndCredential();
+
+        // 1) Omitted tag is auto-derived from the code — no administrator input.
+        MvcResult project = mockMvc
+                .perform(post("/api/v1/admin/projects").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("code", "QA Team", "name", "QA"))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.projectTag").value("qa-team")).andReturn();
+        String projectId = objectMapper.readValue(project.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        MvcResult grant = mockMvc
+                .perform(post("/api/v1/admin/grants").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("projectId", projectId, "providerProductId",
+                                fx.productId.toString(), "credentialId", fx.credentialId.toString(), "models",
+                                List.of("model-a", "model-b")))))
+                .andExpect(status().isOk()).andReturn();
+        String grantId = objectMapper.readValue(grant.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        // 2) A member (bob) joins and creates a key bound to the project.
+        MvcResult invited = mockMvc
+                .perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("username", "bob"))))
+                .andExpect(status().isOk()).andReturn();
+        Map<?, ?> inviteBody = objectMapper.readValue(invited.getResponse().getContentAsString(), Map.class);
+        String bobId = ((Map<?, ?>) inviteBody.get("user")).get("id").toString();
+        String bobTemp = (String) inviteBody.get("temporaryPassword");
+        mockMvc.perform(post("/api/v1/admin/projects/" + projectId + "/members").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("userId", bobId)))).andExpect(status().isOk());
+
+        MvcResult bobLogin = mockMvc
+                .perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("bob", bobTemp))))
+                .andExpect(status().isOk()).andReturn();
+        Cookie bobSession = cookie(bobLogin, "MIQROKEY_SESSION");
+        Cookie bobCsrf = cookie(bobLogin, "MIQROKEY_CSRF");
+        mockMvc.perform(post("/api/v1/auth/password").contentType(MediaType.APPLICATION_JSON)
+                .cookie(bobSession, bobCsrf).header("X-CSRF-Token", bobCsrf.getValue())
+                .content(objectMapper.writeValueAsString(new PasswordChangeRequest(bobTemp, "BobSecurePass1!"))))
+                .andExpect(status().isOk());
+
+        MvcResult bobKey = mockMvc
+                .perform(post("/api/v1/me/virtual-keys").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(bobSession, bobCsrf).header("X-CSRF-Token", bobCsrf.getValue())
+                        .content(objectMapper.writeValueAsString(Map.of("name", "bob-key", "projectId", projectId,
+                                "providerProductId", fx.productId.toString(), "credentialGrantId", grantId, "purpose",
+                                "CLAUDE_CODE"))))
+                .andExpect(status().isCreated()).andReturn();
+        String keyId = objectMapper.readValue(bobKey.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        // 3) The tag is now referenced by a binding: changing it is refused …
+        mockMvc.perform(patch("/api/v1/admin/projects/" + projectId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("projectTag", "qa-team-2"))))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("PROJECT_TAG_IN_USE"));
+        // … renaming the project (no tag change) stays allowed.
+        mockMvc.perform(patch("/api/v1/admin/projects/" + projectId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("name", "QA Renamed")))).andExpect(status().isOk());
+
+        // 4) Removing the member disables the (key × project) binding and, since
+        // it was the key's only binding, revokes the key.
+        mockMvc.perform(delete("/api/v1/admin/projects/" + projectId + "/members/" + bobId)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+
+        String bindingStatus = jdbc.queryForObject("SELECT status FROM key_project_binding WHERE virtual_key_id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(keyId)), String.class);
+        String keyStatus = jdbc.queryForObject("SELECT status FROM virtual_keys WHERE id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(keyId)), String.class);
+        assertThat(bindingStatus).isEqualTo("DISABLED");
+        assertThat(keyStatus).isEqualTo("REVOKED");
+    }
+
     private final class Fixture {
         final UUID tenantId = UUID.fromString("00000000-0000-0000-0000-000000000001");
         final UUID providerId = UUID.randomUUID();

@@ -140,7 +140,7 @@ class RouteSnapshotRefreshNotifierTest {
 
             // Unknown project id -> ApiException -> the transaction rolls back.
             assertThatThrownBy(() -> virtualKeyService.create(fx.adminUser(),
-                    new CreateVirtualKeyRequest("notify-key", UUID.randomUUID(), fx.productId, fx.grantId,
+                    new CreateVirtualKeyRequest("notify-key", UUID.randomUUID(), null, fx.productId, fx.grantId,
                             VirtualKeyPurpose.CLAUDE_CODE, null, null),
                     "req-rolled-back")).isInstanceOf(ApiException.class);
 
@@ -228,7 +228,7 @@ class RouteSnapshotRefreshNotifierTest {
         }
 
         CreateVirtualKeyRequest request() {
-            return new CreateVirtualKeyRequest("notify-key", projectId, productId, grantId,
+            return new CreateVirtualKeyRequest("notify-key", projectId, null, productId, grantId,
                     VirtualKeyPurpose.CLAUDE_CODE, null, null);
         }
 

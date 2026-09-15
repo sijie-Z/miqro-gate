@@ -30,6 +30,7 @@ import {
 } from '@/lib/ccswitch';
 import {
   UiButton,
+  UiCheckbox,
   UiDialog,
   UiEmptyState,
   UiInput,
@@ -166,6 +167,21 @@ const grantOptions = computed(
 
 const selectedGrant = computed(() => grantOptions.value.find((g) => g.id === createGrantId.value));
 
+// ADR-0018: one key may serve several projects. The picker above stays the
+// PRIMARY project (its grant is chosen explicitly); these are extra bindings —
+// the server matches each one to that project's own grant of the same product.
+const createExtraProjectIds = ref<string[]>([]);
+
+const extraProjectOptions = computed(() =>
+  projectsForGrant.value.filter((p) => p.id && p.id !== createProjectId.value),
+);
+
+function onExtraProjects(next: boolean | string[] | Set<string>) {
+  if (Array.isArray(next)) {
+    createExtraProjectIds.value = next;
+  }
+}
+
 type GrantOption = NonNullable<MeGrantsResponse['grants']>[number];
 
 /**
@@ -223,6 +239,9 @@ async function load() {
 function onProjectChange() {
   createGrantId.value = '';
   createModels.value = [];
+  createExtraProjectIds.value = createExtraProjectIds.value.filter(
+    (id) => id !== createProjectId.value,
+  );
 }
 
 function onGrantChange() {
@@ -233,6 +252,7 @@ function onGrantChange() {
 function resetForm() {
   createName.value = '';
   createProjectId.value = '';
+  createExtraProjectIds.value = [];
   createGrantId.value = '';
   createPurpose.value = 'CLAUDE_CODE';
   createModels.value = [];
@@ -253,6 +273,7 @@ async function createKey() {
     const response = await api.createVirtualKey({
       name: createName.value.trim(),
       projectId: createProjectId.value,
+      projectIds: [createProjectId.value, ...createExtraProjectIds.value],
       // server contract: grant rows always carry their provider product id
       providerProductId: selectedGrant.value.providerProductId!,
       credentialGrantId: createGrantId.value,
@@ -538,6 +559,28 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             data-testid="create-grant"
             @change="onGrantChange"
           />
+          <div
+            v-if="createProjectId && extraProjectOptions.length"
+            class="next-keys__field"
+            data-testid="create-extra-projects"
+          >
+            <span class="next-keys__field-label">同时绑定到其他项目（可选）</span>
+            <p class="next-keys__field-hint">
+              同一把 Key 加不同项目标签即可切换项目；附加项目需已具备同一供应商产品的授权。
+            </p>
+            <div class="next-keys__extra-projects">
+              <UiCheckbox
+                v-for="p in extraProjectOptions"
+                :key="p.id"
+                :model-value="createExtraProjectIds"
+                :value="p.id!"
+                :data-testid="`create-extra-project-${p.id}`"
+                @update:model-value="onExtraProjects"
+              >
+                {{ p.name }}（{{ p.projectTag }}）
+              </UiCheckbox>
+            </div>
+          </div>
           <div v-if="createGrantId" class="next-keys__field">
             <span class="next-keys__field-label">用途</span>
             <div
@@ -727,6 +770,19 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
           <div class="ui-mono next-keys__models">
             {{ (row as VirtualKeyView).modelIds?.join(', ') ?? '' }}
           </div>
+        </template>
+        <template #projectTag="{ row }">
+          <span>{{ (row as VirtualKeyView).projectTag || '—' }}</span>
+          <span
+            v-if="((row as VirtualKeyView).boundProjects?.length ?? 0) > 1"
+            class="next-keys__extra-badge"
+            :title="
+              ((row as VirtualKeyView).boundProjects ?? []).map((b) => b.projectTag).join('、')
+            "
+            data-testid="key-extra-projects-badge"
+          >
+            +{{ ((row as VirtualKeyView).boundProjects?.length ?? 0) - 1 }}
+          </span>
         </template>
         <template #status="{ row }">
           <UiStatusBadge
@@ -1475,5 +1531,27 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-all;
+}
+.next-keys__extra-projects {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+}
+
+.next-keys__field-hint {
+  margin: 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+  line-height: var(--ui-line-height-sm);
+}
+
+.next-keys__extra-badge {
+  margin-left: var(--ui-space-1);
+  padding: 0 var(--ui-space-1);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-muted);
+  color: var(--ui-foreground-secondary);
+  font-size: var(--ui-font-size-xs);
+  cursor: help;
 }
 </style>

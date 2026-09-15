@@ -145,7 +145,8 @@ class RetentionCaptureTest {
     private AuthContext ctx() {
         RouteSnapshot snapshot = snapshotProvider.current();
         RouteSnapshot.KeyRecord key = snapshot.key(GatewayTestKeys.DEFAULT_KEY.publicKeyId());
-        return new AuthContext(key, snapshot.binding(key.keyId()), snapshot.models(key.keyId()), snapshot);
+        return new AuthContext(key, snapshot.binding(key.keyId(), GatewayTestKeys.PROJECT_TAG),
+                snapshot.models(key.keyId()), snapshot);
     }
 
     private void captureChat() {

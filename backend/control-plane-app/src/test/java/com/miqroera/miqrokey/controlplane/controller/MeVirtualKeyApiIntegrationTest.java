@@ -152,7 +152,7 @@ class MeVirtualKeyApiIntegrationTest {
         // Route snapshot picks up the new key end to end.
         RouteSnapshot snapshot = snapshot();
         assertThat(snapshot.keys()).containsKey(secretPublicKeyId(secret));
-        RouteSnapshot.BindingRecord binding = snapshot.bindings().get(UUID.fromString(id));
+        RouteSnapshot.BindingRecord binding = snapshot.binding(UUID.fromString(id), TAG);
         assertThat(binding).isNotNull();
         assertThat(binding.projectTag()).isEqualTo(TAG);
         assertThat(snapshot.credentials()).containsKey(fx.credentialId);
@@ -356,6 +356,83 @@ class MeVirtualKeyApiIntegrationTest {
     }
 
     /** Direct JDBC fixtures: catalog, project, grant, credential. */
+    // ------------------------------------------------------------------
+    // ADR-0018: single key, multiple projects
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("create with projectIds binds one key to several projects (ADR-0018)")
+    void createBindsMultipleProjects() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        fx.insertSecondProjectWithGrant("qa-tag", "P2");
+
+        MvcResult r = postJson("/api/v1/me/virtual-keys",
+                Map.of("name", "multi-project-key", "projectId", fx.projectId, "projectIds",
+                        List.of(fx.projectId, fx.secondProjectId), "providerProductId", fx.productId,
+                        "credentialGrantId", fx.grantId, "purpose", "CLAUDE_CODE"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.boundProjects.length()").value(2)).andReturn();
+        String keyId = (String) objectMapper.readValue(r.getResponse().getContentAsString(), Map.class).get("id");
+
+        // Both bindings persisted, each with its own grant.
+        Integer bindings = jdbc.queryForObject(
+                "SELECT count(*) FROM key_project_binding WHERE virtual_key_id = :id AND status = 'ACTIVE'",
+                new MapSqlParameterSource("id", UUID.fromString(keyId)), Integer.class);
+        assertThat(bindings).isEqualTo(2);
+
+        // The route snapshot exposes one binding per (key, tag): the presented
+        // label selects the project, credential, product and granted models.
+        RouteSnapshot snapshot = snapshot();
+        RouteSnapshot.BindingRecord primary = snapshot.binding(UUID.fromString(keyId), TAG);
+        RouteSnapshot.BindingRecord secondary = snapshot.binding(UUID.fromString(keyId), "qa-tag");
+        assertThat(primary).isNotNull();
+        assertThat(secondary).isNotNull();
+        assertThat(primary.projectId()).isEqualTo(fx.projectId);
+        assertThat(secondary.projectId()).isEqualTo(fx.secondProjectId);
+        assertThat(secondary.credentialId()).isEqualTo(fx.secondCredentialId);
+        assertThat(secondary.grantId()).isEqualTo(fx.secondGrantId);
+        // An unbound label resolves to nothing (uniform invalid-key path).
+        assertThat(snapshot.binding(UUID.fromString(keyId), "someone-elses-tag")).isNull();
+    }
+
+    @Test
+    @DisplayName("an additional project without a matching grant is refused (ADR-0018)")
+    void additionalProjectWithoutGrantIsRefused() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        fx.insertSecondProjectWithoutGrant("qa-tag", "P2");
+
+        postJson("/api/v1/me/virtual-keys",
+                Map.of("name", "multi-project-key", "projectId", fx.projectId, "projectIds",
+                        List.of(fx.projectId, fx.secondProjectId), "providerProductId", fx.productId,
+                        "credentialGrantId", fx.grantId, "purpose", "CLAUDE_CODE"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("PROJECT_GRANT_MISSING"));
+    }
+
+    @Test
+    @DisplayName("rotation mirrors every project binding (ADR-0018)")
+    void rotateMirrorsAllBindings() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        fx.insertSecondProjectWithGrant("qa-tag", "P2");
+
+        MvcResult created = postJson("/api/v1/me/virtual-keys",
+                Map.of("name", "multi-project-key", "projectId", fx.projectId, "projectIds",
+                        List.of(fx.projectId, fx.secondProjectId), "providerProductId", fx.productId,
+                        "credentialGrantId", fx.grantId, "purpose", "CLAUDE_CODE"))
+                .andExpect(status().isCreated()).andReturn();
+        String keyId = (String) objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id");
+
+        MvcResult rotated = postJson("/api/v1/me/virtual-keys/" + keyId + "/rotate", Map.of())
+                .andExpect(status().isOk()).andReturn();
+        String newKeyId = (String) objectMapper.readValue(rotated.getResponse().getContentAsString(), Map.class)
+                .get("id");
+
+        RouteSnapshot snapshot = snapshot();
+        assertThat(snapshot.binding(UUID.fromString(newKeyId), TAG)).isNotNull();
+        assertThat(snapshot.binding(UUID.fromString(newKeyId), "qa-tag")).isNotNull();
+    }
+
     private final class Fixture {
         final UUID tenantId = UUID.fromString("00000000-0000-0000-0000-000000000001");
         final UUID providerId = UUID.randomUUID();
@@ -365,6 +442,10 @@ class MeVirtualKeyApiIntegrationTest {
         final UUID projectId = UUID.randomUUID();
         final UUID grantId = UUID.randomUUID();
         final UUID adminId = UUID.randomUUID();
+        final UUID secondProjectId = UUID.randomUUID();
+        final UUID secondSubscriptionId = UUID.randomUUID();
+        final UUID secondCredentialId = UUID.randomUUID();
+        final UUID secondGrantId = UUID.randomUUID();
 
         void reset() {
             // Child-first FK order: virtual keys reference grants, credentials,
@@ -427,6 +508,51 @@ class MeVirtualKeyApiIntegrationTest {
                         INSERT INTO project_provider_grant_models (tenant_id, grant_id, model_id)
                         VALUES (:tenantId, :grantId, :model)
                         """, new MapSqlParameterSource("tenantId", tenantId).addValue("grantId", grantId)
+                        .addValue("model", model));
+            }
+        }
+
+        void insertSecondProjectWithGrant(String tag, String code) {
+            insertSecondProject(tag, code, true);
+        }
+
+        void insertSecondProjectWithoutGrant(String tag, String code) {
+            insertSecondProject(tag, code, false);
+        }
+
+        private void insertSecondProject(String tag, String code, boolean withGrant) {
+            MapSqlParameterSource p = new MapSqlParameterSource();
+            p.addValue("tenantId", tenantId).addValue("projectId", secondProjectId)
+                    .addValue("subscriptionId", secondSubscriptionId).addValue("credentialId", secondCredentialId)
+                    .addValue("grantId", secondGrantId).addValue("productId", productId).addValue("tag", tag)
+                    .addValue("code", code).addValue("adminId", adminId);
+            jdbc.update("""
+                    INSERT INTO projects (id, tenant_id, code, name, status, project_tag, version)
+                    VALUES (:projectId, :tenantId, :code, 'Project Two', 'ACTIVE', :tag, 0)
+                    """, p);
+            if (!withGrant) {
+                return;
+            }
+            jdbc.update("""
+                    INSERT INTO upstream_subscriptions
+                        (id, tenant_id, provider_product_id, name, billing_mode, status, version)
+                    VALUES (:subscriptionId, :tenantId, :productId, 'Sub2', 'PAYG', 'ACTIVE', 0)
+                    """, p);
+            jdbc.update("""
+                    INSERT INTO upstream_credentials (id, tenant_id, subscription_id, credential_name, status, version)
+                    VALUES (:credentialId, :tenantId, :subscriptionId, 'Cred2', 'ACTIVE', 0)
+                    """, p);
+            jdbc.update("""
+                    INSERT INTO project_provider_grants
+                        (id, tenant_id, project_id, provider_product_id, upstream_credential_id, status, created_by,
+                         version)
+                    VALUES (:grantId, :tenantId, :projectId, :productId, :credentialId, 'ACTIVE', :adminId, 0)
+                    """, p);
+            for (String model : List.of(MODEL_A, MODEL_B)) {
+                jdbc.update("""
+                        INSERT INTO project_provider_grant_models (tenant_id, grant_id, model_id)
+                        VALUES (:tenantId, :grantId, :model)
+                        """, new MapSqlParameterSource("tenantId", tenantId).addValue("grantId", secondGrantId)
                         .addValue("model", model));
             }
         }
