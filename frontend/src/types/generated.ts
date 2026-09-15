@@ -2898,7 +2898,7 @@ export interface components {
         CreateVirtualKeyRequest: {
             name?: string;
             /** Format: uuid */
-            projectId?: string;
+            projectId: string;
             projectIds?: string[];
             /** Format: uuid */
             providerProductId: string;
@@ -3679,6 +3679,7 @@ export interface components {
             name?: string;
             /** Format: uuid */
             projectId: string;
+            projectIds?: string[];
             /** Format: uuid */
             providerProductId: string;
             /** Format: uuid */

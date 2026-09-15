@@ -15,11 +15,12 @@ import java.util.UUID;
  * = primary).
  *
  * @param projectId
- *            legacy single-project field; used only when {@code projectIds} is
- *            absent/empty
+ *            the primary project (required — kept from the single-project
+ *            contract); its grant is the explicitly chosen
+ *            {@code credentialGrantId}
  * @param projectIds
- *            every project the key may serve; the first one is the primary (its
- *            grant is the explicitly chosen {@code credentialGrantId})
+ *            optional full list of projects the key may serve; when present it
+ *            takes precedence and its first entry is the primary
  * @param allowedModels
  *            model IDs to authorize on the key; empty/absent grants all models
  *            of the credential grant
@@ -27,7 +28,7 @@ import java.util.UUID;
  *            {@code "DISABLED"} (default) or {@code "ENABLED"} (ADR-0008 opt-in
  *            caching)
  */
-public record CreateVirtualKeyRequest(@Size(max = 200) String name, UUID projectId, List<UUID> projectIds,
+public record CreateVirtualKeyRequest(@Size(max = 200) String name, @NotNull UUID projectId, List<UUID> projectIds,
         @NotNull UUID providerProductId, @NotNull UUID credentialGrantId, @NotNull VirtualKeyPurpose purpose,
         List<@Size(max = 128) String> allowedModels, @Pattern(regexp = "DISABLED|ENABLED") String cachePolicy) {
 }

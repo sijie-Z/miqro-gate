@@ -272,6 +272,7 @@ async function createKey() {
   try {
     const response = await api.createVirtualKey({
       name: createName.value.trim(),
+      projectId: createProjectId.value,
       projectIds: [createProjectId.value, ...createExtraProjectIds.value],
       // server contract: grant rows always carry their provider product id
       providerProductId: selectedGrant.value.providerProductId!,

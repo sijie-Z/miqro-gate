@@ -62,7 +62,7 @@ public class OpenAdminVirtualKeysController {
         return virtualKeyService.listForTenantUser(tenantId(request), userId);
     }
 
-    public record DelegatedCreateRequest(@NotNull UUID userId, @Size(max = 200) String name, UUID projectId,
+    public record DelegatedCreateRequest(@NotNull UUID userId, @Size(max = 200) String name, @NotNull UUID projectId,
             List<UUID> projectIds, @NotNull UUID providerProductId, @NotNull UUID credentialGrantId,
             @NotNull VirtualKeyPurpose purpose, List<@Size(max = 128) String> allowedModels,
             @Pattern(regexp = "DISABLED|ENABLED") String cachePolicy) {

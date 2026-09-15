@@ -368,8 +368,9 @@ class MeVirtualKeyApiIntegrationTest {
         fx.insertSecondProjectWithGrant("qa-tag", "P2");
 
         MvcResult r = postJson("/api/v1/me/virtual-keys",
-                Map.of("name", "multi-project-key", "projectIds", List.of(fx.projectId, fx.secondProjectId),
-                        "providerProductId", fx.productId, "credentialGrantId", fx.grantId, "purpose", "CLAUDE_CODE"))
+                Map.of("name", "multi-project-key", "projectId", fx.projectId, "projectIds",
+                        List.of(fx.projectId, fx.secondProjectId), "providerProductId", fx.productId,
+                        "credentialGrantId", fx.grantId, "purpose", "CLAUDE_CODE"))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.boundProjects.length()").value(2)).andReturn();
         String keyId = (String) objectMapper.readValue(r.getResponse().getContentAsString(), Map.class).get("id");
 
@@ -402,8 +403,9 @@ class MeVirtualKeyApiIntegrationTest {
         fx.insertSecondProjectWithoutGrant("qa-tag", "P2");
 
         postJson("/api/v1/me/virtual-keys",
-                Map.of("name", "multi-project-key", "projectIds", List.of(fx.projectId, fx.secondProjectId),
-                        "providerProductId", fx.productId, "credentialGrantId", fx.grantId, "purpose", "CLAUDE_CODE"))
+                Map.of("name", "multi-project-key", "projectId", fx.projectId, "projectIds",
+                        List.of(fx.projectId, fx.secondProjectId), "providerProductId", fx.productId,
+                        "credentialGrantId", fx.grantId, "purpose", "CLAUDE_CODE"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("PROJECT_GRANT_MISSING"));
     }
 
@@ -415,8 +417,9 @@ class MeVirtualKeyApiIntegrationTest {
         fx.insertSecondProjectWithGrant("qa-tag", "P2");
 
         MvcResult created = postJson("/api/v1/me/virtual-keys",
-                Map.of("name", "multi-project-key", "projectIds", List.of(fx.projectId, fx.secondProjectId),
-                        "providerProductId", fx.productId, "credentialGrantId", fx.grantId, "purpose", "CLAUDE_CODE"))
+                Map.of("name", "multi-project-key", "projectId", fx.projectId, "projectIds",
+                        List.of(fx.projectId, fx.secondProjectId), "providerProductId", fx.productId,
+                        "credentialGrantId", fx.grantId, "purpose", "CLAUDE_CODE"))
                 .andExpect(status().isCreated()).andReturn();
         String keyId = (String) objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id");
 

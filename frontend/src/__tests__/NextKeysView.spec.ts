@@ -93,7 +93,6 @@ const grants: MeGrantsResponse = {
       providerProductName: 'Claude API',
       models: ['claude-3-7-sonnet', 'claude-3-5-haiku'],
     },
-    ,
     {
       id: 'g2',
       projectId: 'p2',
@@ -222,9 +221,10 @@ describe('NextKeysView', () => {
     await wrapper.find('[data-testid="create-submit"]').trigger('click');
     await flushPromises();
 
-    const payload = mockApi.createVirtualKey.mock.calls[0][0] as { projectIds?: string[] };
+    const payload = mockApi.createVirtualKey.mock.calls[0]![0] as { projectIds?: string[] };
     expect(payload.projectIds).toEqual(['p1', 'p2']);
   });
+
   it('creates a key through the cascade and reveals the secret once (ack required)', async () => {
     mockApi.myGrants.mockResolvedValue(grants);
     mockApi.createVirtualKey.mockResolvedValue(created);
@@ -261,6 +261,7 @@ describe('NextKeysView', () => {
 
     expect(mockApi.createVirtualKey).toHaveBeenCalledWith({
       name: 'claude-code-main',
+      projectId: 'p1',
       projectIds: ['p1'],
       providerProductId: '0190-product',
       credentialGrantId: 'g1',

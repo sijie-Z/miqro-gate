@@ -161,9 +161,9 @@ class OpenAdminVirtualKeysApiIntegrationTest {
         UUID targetId = fx.insertMemberUser("frank", "USER", "ACTIVE");
         fx.addProjectMembership(fx.secondProjectId, targetId);
 
-        String body = objectMapper.writeValueAsString(Map.of("userId", targetId, "name", "multi-delegate", "projectIds",
-                List.of(fx.projectId, fx.secondProjectId), "providerProductId", fx.productId, "credentialGrantId",
-                fx.grantId, "purpose", "CLAUDE_CODE"));
+        String body = objectMapper.writeValueAsString(Map.of("userId", targetId, "name", "multi-delegate", "projectId",
+                fx.projectId, "projectIds", List.of(fx.projectId, fx.secondProjectId), "providerProductId",
+                fx.productId, "credentialGrantId", fx.grantId, "purpose", "CLAUDE_CODE"));
         MvcResult r = mockMvc
                 .perform(post("/api/v1/admin-api/virtual-keys").header("Authorization", "Bearer " + machineSecret)
                         .contentType(MediaType.APPLICATION_JSON).content(body))
