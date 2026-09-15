@@ -115,7 +115,7 @@ async function load() {
 
 async function createExport() {
   if (!from.value || !to.value || new Date(from.value) >= new Date(to.value)) {
-    formError.value = '时间窗口无效：from 必须早于 to。';
+    formError.value = '时间窗口无效：开始时间必须早于结束时间。';
     return;
   }
   formError.value = '';

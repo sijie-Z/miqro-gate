@@ -115,7 +115,7 @@ describe('NextPlansView', () => {
 
     expect(wrapper.find('[data-testid="subscriptions-table"]').exists()).toBe(true);
     expect(wrapper.text()).toContain('DeepSeek PAYG');
-    expect(wrapper.text()).toContain('团队 Plan');
+    expect(wrapper.text()).toContain('团队套餐');
     expect(wrapper.text()).toContain('100 USD');
     expect(wrapper.text()).toContain('5 小时');
     expect(wrapper.text()).toContain('34%');

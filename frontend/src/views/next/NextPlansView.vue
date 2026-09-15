@@ -27,11 +27,22 @@ const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
 
+const billingModeLabel: Record<string, string> = {
+  FIXED_SUBSCRIPTION: '固定订阅',
+  PAYG: '按量付费',
+};
+
 const columns = [
   { key: 'productName', title: '产品', minWidth: '200px' },
   { key: 'name', title: '名称', minWidth: '160px' },
-  { key: 'billingMode', title: '计费模式', width: '150px' },
-  { key: 'planScope', title: 'Plan 形态', width: '110px' },
+  {
+    key: 'billingMode',
+    title: '计费模式',
+    width: '150px',
+    format: (value: unknown) =>
+      value == null ? '—' : (billingModeLabel[String(value)] ?? String(value)),
+  },
+  { key: 'planScope', title: '套餐形态', width: '110px' },
   { key: 'price', title: '价格', width: '130px', align: 'right' as const },
   { key: 'quota', title: '滚动额度', minWidth: '260px' },
   { key: 'status', title: '状态', width: '100px' },
@@ -66,23 +77,23 @@ const productOptions = computed<UiSelectOption[]>(() =>
 );
 
 const billingOptions: UiSelectOption[] = [
-  { value: 'FIXED_SUBSCRIPTION', label: 'FIXED_SUBSCRIPTION' },
-  { value: 'PAYG', label: 'PAYG' },
+  { value: 'FIXED_SUBSCRIPTION', label: '固定订阅' },
+  { value: 'PAYG', label: '按量付费' },
   { value: 'TOKEN_PACKAGE', label: 'TOKEN_PACKAGE' },
   { value: 'CREDIT_POOL', label: 'CREDIT_POOL' },
 ];
 
 const planOptions: UiSelectOption[] = [
-  { value: 'PERSONAL', label: '个人 Plan' },
-  { value: 'TEAM', label: '团队 Plan' },
-  { value: 'ENTERPRISE', label: '企业 Plan' },
+  { value: 'PERSONAL', label: '个人套餐' },
+  { value: 'TEAM', label: '团队套餐' },
+  { value: 'ENTERPRISE', label: '企业套餐' },
   { value: 'NONE', label: '无' },
 ];
 
 const quotaUnitOptions: UiSelectOption[] = [
-  { value: 'POINTS', label: 'POINTS' },
-  { value: 'TOKENS', label: 'TOKENS' },
-  { value: 'REQUESTS', label: 'REQUESTS' },
+  { value: 'POINTS', label: '积分' },
+  { value: 'TOKENS', label: 'Token' },
+  { value: 'REQUESTS', label: '请求次数' },
 ];
 
 const seatDrawer = ref(false);
@@ -104,11 +115,11 @@ const confirmState = ref<{
 function planLabel(scope?: string): string {
   switch (scope) {
     case 'PERSONAL':
-      return '个人 Plan';
+      return '个人套餐';
     case 'TEAM':
-      return '团队 Plan';
+      return '团队套餐';
     case 'ENTERPRISE':
-      return '企业 Plan';
+      return '企业套餐';
     default:
       return scope ?? '—';
   }
@@ -273,7 +284,7 @@ onMounted(load);
     <header class="ui-page-header">
       <div>
         <h1 class="ui-page-title">订阅</h1>
-        <p class="ui-page-desc">PAYG / 个人 / 团队 / 企业订阅与席位分配。</p>
+        <p class="ui-page-desc">按量付费 / 个人 / 团队 / 企业套餐订阅与席位分配。</p>
       </div>
       <div class="ui-page-actions">
         <UiButton
@@ -446,7 +457,7 @@ onMounted(load);
       @close="seatDrawer = false"
     >
       <p class="next-plans__hint">
-        团队/企业 Plan 按席位分配；每个成员的用量走其专属 Key（上游凭证页管理）。
+        团队/企业套餐按席位分配；每个成员的用量走其专属密钥（上游凭证页管理）。
       </p>
       <div class="next-plans__seat-create">
         <UiInput v-model="seatAssignUser" placeholder="用户 ID" data-testid="seat-assign-user" />

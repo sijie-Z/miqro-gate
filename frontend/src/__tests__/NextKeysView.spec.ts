@@ -171,7 +171,7 @@ describe('NextKeysView', () => {
 
     expect(wrapper.find('[data-testid="onboard-no-project"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="onboard-has-project"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain('还没有 Virtual Key');
+    expect(wrapper.text()).toContain('还没有虚拟密钥');
   });
 
   it('creates a key through the cascade and reveals the secret once (ack required)', async () => {

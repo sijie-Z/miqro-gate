@@ -142,7 +142,7 @@ async function createGrant() {
     });
     creating.value = false;
     form.value = { projectId: '', providerProductId: '', credentialId: '', models: '' };
-    toast.success('Grant 已创建');
+    toast.success('授权已创建');
     await load();
   } catch (error) {
     formError.value = error instanceof ApiError ? error.message : '创建失败，请稍后重试。';
@@ -194,14 +194,14 @@ async function saveModels() {
 
 function requestDisable(grant: Grant) {
   confirmState.value = {
-    title: '禁用 Grant',
-    body: '禁用后该 Grant 不再授权任何 Virtual Key，关联 Key 将无法通过此授权路由。',
+    title: '禁用授权',
+    body: '禁用后该授权不再对任何虚拟密钥生效，关联密钥将无法通过此授权路由。',
     confirmLabel: '禁用',
     tone: 'danger',
     run: async () => {
       try {
         await api.disableGrant(grant.id!); // list rows always carry ids
-        toast.success('Grant 已禁用');
+        toast.success('授权已禁用');
         await load();
       } catch (error) {
         if (error instanceof ApiError) {
@@ -233,7 +233,7 @@ onMounted(async () => {
       </div>
       <div class="ui-page-actions">
         <UiButton variant="primary" data-testid="grant-create-open" @click="creating = !creating">
-          {{ creating ? '收起表单' : '创建 Grant' }}
+          {{ creating ? '收起表单' : '创建授权' }}
         </UiButton>
       </div>
     </header>

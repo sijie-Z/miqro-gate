@@ -43,7 +43,7 @@ function statusTone(status?: ModelApprovalStatus): 'success' | 'warning' | 'dang
 
 const columns = [
   { key: 'requesterName', title: '申请人', width: '96px' },
-  { key: 'keyInfo', title: 'Virtual Key', minWidth: '190px' },
+  { key: 'keyInfo', title: '虚拟密钥', minWidth: '190px' },
   { key: 'modelId', title: '模型', width: '160px' },
   { key: 'reason', title: '申请理由', minWidth: '150px' },
   { key: 'createdAt', title: '提交时间', width: '140px' },
@@ -164,7 +164,7 @@ onMounted(load);
       <div>
         <h1 class="ui-page-title">审批中心</h1>
         <p class="ui-page-desc">
-          用户为 Virtual Key 申请的模型授权；通过后立即写入授权并刷新路由快照。
+          用户为虚拟密钥申请的模型授权；通过后立即写入授权并刷新路由快照。
         </p>
       </div>
     </header>

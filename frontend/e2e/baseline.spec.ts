@@ -1251,7 +1251,7 @@ test('console language switch translates the shell live and persists', async ({ 
 
   // Chinese default: nav label and page title.
   await expect(page.locator('.new-shell__nav-label').first()).toHaveText('总览');
-  await expect(page.locator('.ui-page-title').first()).toHaveText('我的 Key');
+  await expect(page.locator('.ui-page-title').first()).toHaveText('我的密钥');
 
   // Live switch through the user menu (no reload): shell and page copy translate.
   await page.getByTestId('shell-user-menu').click();
@@ -1269,7 +1269,7 @@ test('console language switch translates the shell live and persists', async ({ 
   await page.getByTestId('shell-user-menu').click();
   await page.getByTestId('shell-lang-zh-Hans').click();
   await expect(page.locator('.new-shell__nav-label').first()).toHaveText('总览');
-  await expect(page.locator('.ui-page-title').first()).toHaveText('我的 Key');
+  await expect(page.locator('.ui-page-title').first()).toHaveText('我的密钥');
 });
 
 test('overview page baseline at 1440x900', async ({ page }) => {
@@ -1278,7 +1278,7 @@ test('overview page baseline at 1440x900', async ({ page }) => {
   await page.goto('/app/overview');
   await page.waitForLoadState('networkidle');
   await expect(page.getByTestId('overview-stats')).toBeVisible();
-  await expect(page.getByTestId('overview-stats')).toContainText('Virtual Key');
+  await expect(page.getByTestId('overview-stats')).toContainText('虚拟密钥');
   await expect(page.getByTestId('overview-usage')).toBeVisible();
   await page.screenshot({ path: 'test-results/baseline/overview-1440x900.png', fullPage: true });
 });
@@ -1374,7 +1374,7 @@ const ADMIN_PAGES = [
   { path: '/app/mcp-services', testid: 'mcp-table', expect: 'erp-mcp' },
   { path: '/app/webhooks', testid: 'webhooks-table', expect: 'ops-alerts' },
   { path: '/app/alert-rules', testid: 'rules-table', expect: 'usage-missing' },
-  { path: '/app/audit', testid: 'audit-table', expect: 'LOGIN_SUCCESS' },
+  { path: '/app/audit', testid: 'audit-table', expect: '登录成功' },
   { path: '/app/exports', testid: 'exports-table', expect: 'CSV' },
   { path: '/app/deletions', testid: 'deletions-table', expect: '待确认' },
   { path: '/app/consumers', testid: 'consumers-table', expect: 'billing-sync' },

@@ -224,7 +224,7 @@ async function saveBackendAuth() {
     return;
   }
   if (backendAuthMode.value === 'API_KEY' && !backendAuthSecret.value.trim()) {
-    backendAuthError.value = 'API Key 模式必须填写密钥（每次保存都需要重新填写）。';
+    backendAuthError.value = 'API 密钥模式必须填写密钥（每次保存都需要重新填写）。';
     return;
   }
   backendAuthSaving.value = true;
@@ -1124,11 +1124,11 @@ async function saveRouteRule() {
   }
   for (const [index, header] of form.headers.entries()) {
     if (!header.name.trim()) {
-      routeFormError.value = `第 ${index + 1} 条 Header 条件缺少名称。`;
+      routeFormError.value = `第 ${index + 1} 条请求头条件缺少名称。`;
       return;
     }
     if (!header.value.trim()) {
-      routeFormError.value = `第 ${index + 1} 条 Header 条件缺少匹配值。`;
+      routeFormError.value = `第 ${index + 1} 条请求头条件缺少匹配值。`;
       return;
     }
   }
@@ -1435,7 +1435,7 @@ async function saveResilience() {
         :loading="loading"
         row-key="id"
         empty-title="还没有注册的 MCP 服务"
-        empty-description="注册后网关定期探测健康状态，Agent 可经网关调用其 Tools。"
+        empty-description="注册后网关定期探测健康状态，代理可经网关调用其工具。"
         data-testid="mcp-table"
       >
         <template #name="{ row }">
@@ -1457,7 +1457,7 @@ async function saveResilience() {
             data-testid="mcp-backend-auth-open"
             @click="openBackendAuth(row as McpServiceView)"
           >
-            {{ (row as McpServiceView).backendAuthMode === 'API_KEY' ? 'API Key' : '访客' }}
+            {{ (row as McpServiceView).backendAuthMode === 'API_KEY' ? 'API 密钥' : '访客' }}
           </button>
         </template>
         <template #status="{ row }">
@@ -1620,7 +1620,7 @@ async function saveResilience() {
         <p class="next-mcp__hint">
           {{
             configForm.checkMode === 'JSONRPC_INITIALIZE'
-              ? 'JSON-RPC initialize：POST 服务地址（协议原生探活，适用于无 HTTP 健康路径的标准 MCP 服务；API_KEY 后端自动携带解密凭证）。'
+              ? 'JSON-RPC initialize：POST 服务地址（协议原生探活，适用于无 HTTP 健康路径的标准 MCP 服务；API 密钥模式后端自动携带解密凭证）。'
               : '健康路径：GET 服务地址 + 路径，2xx 视为健康。'
           }}
         </p>
@@ -2712,7 +2712,7 @@ async function saveResilience() {
     v-if="backendAuthService"
     :open="backendAuthVisible"
     :title="`后端鉴权 — ${backendAuthService.name}`"
-    description="控制网关调用该 MCP 服务时向上游携带的凭据：访客模式不携带；API Key 模式由网关注入 Authorization: Bearer <密钥>（密钥只写不读）。"
+    description="控制网关调用该 MCP 服务时向上游携带的凭据：访客模式不携带；API 密钥模式由网关注入 Authorization: Bearer <密钥>（密钥只写不读）。"
     width="540px"
     @update:open="backendAuthVisible = false"
   >
@@ -2733,7 +2733,7 @@ async function saveResilience() {
           value="API_KEY"
           data-testid="mcp-auth-apikey"
         />
-        <span>API Key（网关注入 Bearer 凭据）</span>
+        <span>API 密钥（网关注入 Bearer 凭据）</span>
       </label>
     </div>
     <UiInput

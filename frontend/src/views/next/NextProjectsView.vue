@@ -199,7 +199,7 @@ onMounted(load);
           <UiInput
             v-model="createTag"
             label="路由标签"
-            placeholder="例如 core-ai（Virtual Key 点号后缀）"
+            placeholder="例如 core-ai（虚拟密钥点号后缀）"
             data-testid="project-create-tag"
           />
           <p v-if="formError" class="ui-form-error">{{ formError }}</p>

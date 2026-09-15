@@ -94,7 +94,7 @@ describe('NextAdminServicesView', () => {
     await wrapper.find('[data-testid="service-create-open"]').trigger('click');
     await wrapper.find('[data-testid="service-create-name"]').setValue('billing-api');
     const options = wrapper.findAll('.stub-option');
-    expect(options.map((o) => o.text())).toEqual(['HTTP', 'MCP', 'Other']);
+    expect(options.map((o) => o.text())).toEqual(['HTTP', 'MCP', '其他']);
     await wrapper
       .findAll('.stub-option')
       .find((o) => o.text() === 'MCP')!

@@ -85,10 +85,10 @@ describe('NextOverviewView', () => {
 
     expect(mockApi.usageSummary).toHaveBeenCalledWith('project');
     const stats = wrapper.find('[data-testid="overview-stats"]');
-    expect(stats.text()).toContain('Virtual Key');
+    expect(stats.text()).toContain('虚拟密钥');
     expect(stats.text()).toContain('2');
     expect(stats.text()).toContain('本月请求');
-    expect(stats.text()).toContain('本月 Tokens');
+    expect(stats.text()).toContain('本月 Token');
     expect(stats.text()).toContain('1.7M'); // 1.2M+0.4M+0.1M+0.03M
     expect(stats.text()).toContain('¥3.60');
   });

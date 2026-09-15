@@ -79,7 +79,7 @@ const topConsumer = computed<UsageGroup | null>(() => {
 const activeColumns = computed(() => [
   { key: 'label', title: activeLabelTitle.value, minWidth: '200px' },
   { key: 'requests', title: '请求', width: '100px', align: 'right' as const },
-  { key: 'tokens', title: 'Tokens', width: '140px', align: 'right' as const },
+  { key: 'tokens', title: 'Token 数', width: '140px', align: 'right' as const },
   { key: 'cost', title: '分摊成本', width: '150px', align: 'right' as const },
   { key: 'share', title: '占比', minWidth: '220px' },
 ]);
@@ -180,7 +180,7 @@ function exportCsv() {
     toast.info('当前筛选下没有可导出的数据');
     return;
   }
-  const header = ['分组', '请求', 'Tokens', '分摊成本(CNY)'];
+  const header = ['分组', '请求', 'Token 数', '分摊成本(CNY)'];
   const rows = groups.map((g) => {
     // adminUsageSummary groups are GroupSummary; the group helpers below use
     // the (non-optional) legacy UsageGroup shape — narrow the row here.
@@ -430,7 +430,7 @@ onMounted(async () => {
         <span class="next-cost__stat-hint">到达上游的请求数</span>
       </div>
       <div class="ui-panel next-cost__stat">
-        <span class="next-cost__stat-label">Tokens</span>
+        <span class="next-cost__stat-label">Token</span>
         <span class="next-cost__stat-value ui-num">{{ formatCount(totalTokens) }}</span>
         <span class="next-cost__stat-hint">输入 + 输出</span>
       </div>
@@ -442,7 +442,7 @@ onMounted(async () => {
         <span class="next-cost__stat-hint">命中 {{ formatCount(cacheHits) }} 次 · 未调用上游</span>
       </div>
       <div class="ui-panel next-cost__stat" data-testid="cost-stat-cache-tokens">
-        <span class="next-cost__stat-label">缓存命中 Tokens</span>
+        <span class="next-cost__stat-label">缓存命中 Token</span>
         <span class="next-cost__stat-value ui-num">{{ formatCount(cacheHitTokens) }}</span>
         <span class="next-cost__stat-hint">输入侧命中缓存 · 未计上游费用</span>
       </div>

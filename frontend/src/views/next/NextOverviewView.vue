@@ -53,9 +53,9 @@ const stats = computed<StatCard[]>(() => {
     0,
   );
   return [
-    { label: 'Virtual Key', value: String(keys.value.length), hint: `${active} 个可用`, icon: LockOnIcon, tone: 'blue' },
+    { label: '虚拟密钥', value: String(keys.value.length), hint: `${active} 个可用`, icon: LockOnIcon, tone: 'blue' },
     { label: '本月请求', value: formatCount(totalRequests), hint: '经网关的请求数', icon: ChartBarIcon, tone: 'green' },
-    { label: '本月 Tokens', value: formatCount(totalTokens), hint: '输入+输出', icon: LayersIcon, tone: 'cyan' },
+    { label: '本月 Token', value: formatCount(totalTokens), hint: '输入+输出', icon: LayersIcon, tone: 'cyan' },
     { label: '本月成本', value: Number(totalCost).toFixed(2), prefix: '¥', hint: '按价格快照估算', icon: MoneyIcon, tone: 'gold' },
   ];
 });
@@ -113,13 +113,13 @@ const donutSegments = computed(() => {
 const quickNav = computed(() =>
   isAdmin.value
     ? [
-        { label: '创建 Virtual Key', to: '/app/keys', icon: LockOnIcon },
+        { label: '创建虚拟密钥', to: '/app/keys', icon: LockOnIcon },
         { label: '用量报表', to: '/app/admin-usage', icon: ChartBarIcon },
         { label: '账单对账', to: '/app/reconciliations', icon: FilePasteIcon },
         { label: '审计日志', to: '/app/audit', icon: SecuredIcon },
       ]
     : [
-        { label: '创建 Virtual Key', to: '/app/keys', icon: LockOnIcon },
+        { label: '创建虚拟密钥', to: '/app/keys', icon: LockOnIcon },
         { label: '用量', to: '/app/usage', icon: ChartBarIcon },
         { label: '申请新模型', to: '/app/model-approvals', icon: LayersIcon },
         { label: '资料', to: '/app/profile', icon: UserIcon },
@@ -127,6 +127,27 @@ const quickNav = computed(() =>
 );
 
 const recentKeys = computed(() => keys.value.slice(0, 5));
+
+const PLAN_SCOPE_LABELS: Record<string, string> = {
+  PERSONAL: '个人套餐',
+  TEAM: '团队套餐',
+  ENTERPRISE: '企业套餐',
+};
+
+function planScopeLabel(scope?: string): string {
+  return scope ? (PLAN_SCOPE_LABELS[scope] ?? scope) : '—';
+}
+
+const QUOTA_UNIT_LABELS: Record<string, string> = {
+  POINTS: '积分',
+  TOKENS: 'Token',
+  REQUESTS: '请求次数',
+  CURRENCY: '金额',
+};
+
+function quotaUnitLabel(unit?: string): string {
+  return unit ? (QUOTA_UNIT_LABELS[unit] ?? unit) : '—';
+}
 
 /** Admin: subscription quota ledger (5h/week/month rolling demo fill). */
 const quotaLedger = computed(() =>
@@ -199,7 +220,7 @@ onMounted(load);
           data-testid="overview-create-key"
           @click="$router.push('/app/keys')"
         >
-          创建 Virtual Key
+          创建虚拟密钥
         </UiButton>
       </div>
     </header>
@@ -306,7 +327,7 @@ onMounted(load);
             </div>
           </div>
           <div v-else class="next-overview__recent-empty">
-            <p class="next-overview__empty">还没有 Virtual Key。</p>
+            <p class="next-overview__empty">还没有虚拟密钥。</p>
             <router-link to="/app/keys" class="next-overview__link">创建一个</router-link>
           </div>
         </section>
@@ -360,7 +381,7 @@ onMounted(load);
           <div v-for="row in quotaLedger" :key="row.id" class="next-overview__ledger-row">
             <div class="next-overview__ledger-plan">
               <span class="next-overview__key-name">{{ row.name }}</span>
-              <span class="ui-panel-sub">{{ row.productName }} · {{ row.planScope }}</span>
+              <span class="ui-panel-sub">{{ row.productName }} · {{ planScopeLabel(row.planScope) }}</span>
             </div>
             <div class="next-overview__ledger-band">
               <template v-if="row.quotaTotal">
@@ -383,7 +404,7 @@ onMounted(load);
               <span v-else class="next-overview__ledger-unset">未配置滚动额度</span>
             </div>
             <span class="next-overview__ledger-quota ui-num">{{
-              row.quotaTotal ? `${formatCount(row.quotaTotal)} ${row.quotaUnit}` : '未配置'
+              row.quotaTotal ? `${formatCount(row.quotaTotal)} ${quotaUnitLabel(row.quotaUnit)}` : '未配置'
             }}</span>
           </div>
         </div>
