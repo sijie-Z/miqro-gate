@@ -19,6 +19,15 @@ const router = createRouter({
       redirect: '/login',
     },
     {
+      // #583: transient-backend-outage screen. Shown when the session could
+      // not be restored because the server was unreachable — never bounce a
+      // possibly-valid session to /login for a restart blip.
+      path: '/unavailable',
+      name: 'unavailable',
+      component: () => import('@/views/next/NextUnavailableView.vue'),
+      meta: { public: true, title: '服务不可用' },
+    },
+    {
       path: '/app',
       component: () => import('@/components/NewShell.vue'),
       meta: { requiresAuth: true },
@@ -247,6 +256,12 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore();
   if (!auth.loaded) {
     await auth.fetchMe();
+  }
+
+  // #583: the backend was unreachable during session restore — that is NOT a
+  // logout. Route to the retry screen (keeping the target) instead of /login.
+  if (auth.serviceUnavailable && !auth.isAuthenticated && to.name !== 'unavailable') {
+    return { name: 'unavailable', query: { redirect: to.fullPath } };
   }
 
   if (to.meta.public) {

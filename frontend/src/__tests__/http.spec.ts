@@ -102,4 +102,28 @@ describe('http client', () => {
     expect(error).toBeInstanceOf(ApiError);
     expect(error.code).toBe('NETWORK_ERROR');
   });
+
+  it('aborts a stalled request with a TIMEOUT ApiError after the client cap (#583)', async () => {
+    vi.useFakeTimers();
+    try {
+      stubFetch(
+        (_url, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => {
+              reject(new DOMException('aborted', 'AbortError'));
+            });
+          }),
+      );
+
+      const pending = get('/api/v1/me/usage/summary').catch((e) => e);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      const error = (await pending) as ApiError;
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('TIMEOUT');
+      expect(error.message).toContain('超时');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

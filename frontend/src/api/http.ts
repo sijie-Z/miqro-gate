@@ -15,6 +15,13 @@ import type { ProblemDetails } from '@/types/api';
 
 export const CSRF_COOKIE_NAME = 'MIQROKEY_CSRF';
 
+/**
+ * Client-side cap for JSON API calls, aligned with the nginx 60s read timeout.
+ * Without it a stalled backend (e.g. the control plane restarting) leaves the
+ * UI spinning forever when the page is served without the nginx proxy (#583).
+ */
+const REQUEST_TIMEOUT_MS = 60_000;
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -103,33 +110,47 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     headers['Content-Type'] = 'application/json';
   }
 
-  let response: Response;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
+
   try {
-    response = await fetch(url, {
+    const response = await fetch(url, {
       method,
       headers,
       credentials: 'include',
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
     });
-  } catch {
+
+    if (!response.ok) {
+      throw await parseError(response);
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
     throw new ApiError({
       type: 'about:blank',
-      title: 'Network error',
+      title: timedOut ? 'Request timed out' : 'Network error',
       status: 0,
-      code: 'NETWORK_ERROR',
-      detail: '无法连接到 MiQroGate 服务，请检查网络后重试。',
+      code: timedOut ? 'TIMEOUT' : 'NETWORK_ERROR',
+      detail: timedOut
+        ? `请求超时（${REQUEST_TIMEOUT_MS / 1000} 秒未响应），请稍后重试。`
+        : '无法连接到 MiQroGate 服务，请检查网络后重试。',
       requestId: '',
     });
+  } finally {
+    clearTimeout(timeout);
   }
-
-  if (!response.ok) {
-    throw await parseError(response);
-  }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-  return (await response.json()) as T;
 }
 
 export function get<T>(path: string, query?: RequestOptions['query']): Promise<T> {
