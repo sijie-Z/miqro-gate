@@ -41,7 +41,7 @@ MiQroKey Gateway ──(标准 Kafka 协议)──▶ topic content-retention
 | `gatewayRequestId` | string | 网关内部请求 ID（与 F15 访问日志、usage 记录可关联） |
 | `occurredAt` | string (ISO-8601 UTC) | 事件时间 |
 | `keyVersion` | string | 密文所用密钥版本（如 `v1`），解密方按版本取密钥 |
-| `textCharCount` | int | 明文用户文本字符数（加密前计数，非密文长度） |
+| `textCharCount` | int | 明文用户文本字符数（加密前计数，非密文长度；截断事件计已捕获部分的字符数） |
 | `ciphertext` | string (base64) | AES-GCM 密文（**仅用户 role 文本**：P1 USER_TEXT_ONLY） |
 | `nonce` | string (base64) | AES-GCM IV（12B） |
 

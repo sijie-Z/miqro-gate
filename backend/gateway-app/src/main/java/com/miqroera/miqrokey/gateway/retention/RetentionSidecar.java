@@ -120,10 +120,14 @@ public final class RetentionSidecar {
                     log.warn("retention content truncated {} times (latest tenant {})", truncatedCount.get(), tenantId);
                 }
             }
+            // #518: textCharCount promises characters of the stored plaintext
+            // (retention-consumer.md); plain.length would ship UTF-8 bytes, and
+            // the byte cap value whenever truncation kicked in.
+            int textCharCount = new String(plain, StandardCharsets.UTF_8).length();
             EncryptedSecret secret = provider.encrypt(plain, tenantId, RETENTION_AAD_ID);
             RetentionEnvelope envelope = new RetentionEnvelope(UUID.randomUUID(), tenantId, ctx.key().userId(),
                     ctx.key().keyId(), protocol.name(), gatewayRequestId, Instant.now(clock), secret.keyVersion(),
-                    secret.ciphertext(), secret.nonce(), plain.length, truncated);
+                    secret.ciphertext(), secret.nonce(), textCharCount, truncated);
             if (!offer(envelope)) {
                 countDrop("queue saturated");
             }
