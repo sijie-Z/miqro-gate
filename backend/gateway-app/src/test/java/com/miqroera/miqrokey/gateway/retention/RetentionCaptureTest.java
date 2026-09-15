@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.gateway.retention;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
 import com.miqroera.miqrokey.domain.model.RetentionConfig;
+import com.miqroera.miqrokey.domain.model.RetentionDirection;
 import com.miqroera.miqrokey.domain.model.RetentionEnvelope;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import com.miqroera.miqrokey.gateway.GatewayAuthTestConfig;
@@ -246,5 +247,101 @@ class RetentionCaptureTest {
         assertThat(text.length()).isEqualTo(341);
         assertThat(envelope.textCharCount()).isEqualTo(341).isNotEqualTo(plain.length);
         assertThat(cjk).startsWith(text);
+    }
+
+    // ------------------------------------------------------------------
+    // Output side (ADR-0014 增补, 2026-09-15)
+    // ------------------------------------------------------------------
+
+    private static final String CHAT_RESPONSE = """
+            {"id":"chatcmpl-x","choices":[{"index":0,"message":{"role":"assistant",
+              "content":"the model reply text"},"finish_reason":"stop"}]}""";
+
+    private static final String CHAT_SSE_RESPONSE = "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"the model \"}}]}\n\n"
+            + "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"reply text\"}}]}\n\n"
+            + "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" + "data: [DONE]\n\n";
+
+    private static String decryptText(RetentionEnvelope envelope) {
+        byte[] plain = new FakeCrypto().decrypt(
+                new EncryptedSecret(envelope.ciphertext(), envelope.nonce(), envelope.keyVersion()),
+                envelope.tenantId(), UUID.randomUUID());
+        return new String(plain, StandardCharsets.UTF_8);
+    }
+
+    @Test
+    @DisplayName("model output is captured as a separate OUTPUT envelope (non-streaming)")
+    void capturesModelOutputNonStreaming() {
+        installRetention(true);
+        sidecar.captureOutput("/v1/chat/completions", CHAT_RESPONSE.getBytes(StandardCharsets.UTF_8), false, ctx(),
+                "req-out-1", false);
+        sidecar.flushNow();
+
+        assertThat(publisher.published).hasSize(1);
+        RetentionEnvelope envelope = publisher.published.get(0);
+        assertThat(envelope.direction()).isEqualTo(RetentionDirection.OUTPUT);
+        assertThat(envelope.gatewayRequestId()).isEqualTo("req-out-1");
+        String text = decryptText(envelope);
+        assertThat(text).isEqualTo("the model reply text");
+        assertThat(envelope.textCharCount()).isEqualTo(text.length());
+        assertThat(envelope.truncated()).isFalse();
+        assertThat(sidecar.droppedCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("streaming model output concatenates SSE text deltas")
+    void capturesModelOutputFromSse() {
+        installRetention(true);
+        sidecar.captureOutput("/v1/chat/completions", CHAT_SSE_RESPONSE.getBytes(StandardCharsets.UTF_8), true, ctx(),
+                "req-out-2", false);
+        sidecar.flushNow();
+
+        assertThat(publisher.published).hasSize(1);
+        RetentionEnvelope envelope = publisher.published.get(0);
+        assertThat(envelope.direction()).isEqualTo(RetentionDirection.OUTPUT);
+        assertThat(decryptText(envelope)).isEqualTo("the model reply text");
+    }
+
+    @Test
+    @DisplayName("a reply bounded by the proxy buffer is flagged truncated on the OUTPUT envelope")
+    void outputOverflowFlagsTruncated() {
+        installRetention(true);
+        long truncatedBefore = sidecar.truncatedCount();
+        sidecar.captureOutput("/v1/chat/completions", CHAT_RESPONSE.getBytes(StandardCharsets.UTF_8), false, ctx(),
+                "req-out-3", true);
+        sidecar.flushNow();
+
+        assertThat(publisher.published).hasSize(1);
+        RetentionEnvelope envelope = publisher.published.get(0);
+        assertThat(envelope.truncated()).isTrue();
+        // The sidecar's counter is instance-scoped and monotonic across tests.
+        assertThat(sidecar.truncatedCount()).isEqualTo(truncatedBefore + 1);
+    }
+
+    @Test
+    @DisplayName("output extraction understands Anthropic and Responses shapes")
+    void outputExtractionAcrossProtocols() {
+        RetentionTextExtractor extractor = new RetentionTextExtractor();
+        String anthropic = "{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":["
+                + "{\"type\":\"text\",\"text\":\"anthropic reply\"},"
+                + "{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"x\",\"input\":{}}]}";
+        assertThat(extractor.extractOutput(RetentionTextExtractor.Protocol.ANTHROPIC_MESSAGES,
+                anthropic.getBytes(StandardCharsets.UTF_8), false)).isEqualTo("anthropic reply");
+
+        String responses = "{\"id\":\"resp_1\",\"output\":[{\"type\":\"message\",\"content\":["
+                + "{\"type\":\"output_text\",\"text\":\"responses reply\"}]}]}";
+        assertThat(extractor.extractOutput(RetentionTextExtractor.Protocol.OPENAI_RESPONSES,
+                responses.getBytes(StandardCharsets.UTF_8), false)).isEqualTo("responses reply");
+
+        String anthropicSse = "event: content_block_delta\n"
+                + "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hel\"}}\n\n"
+                + "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"lo\"}}\n\n"
+                + "data: {\"type\":\"message_stop\"}\n\n";
+        assertThat(extractor.extractOutput(RetentionTextExtractor.Protocol.ANTHROPIC_MESSAGES,
+                anthropicSse.getBytes(StandardCharsets.UTF_8), true)).isEqualTo("hello");
+
+        // A truncated tail line must not throw and must not lose earlier deltas.
+        String truncatedSse = CHAT_SSE_RESPONSE + "data: {\"choices\":[{\"delta\":{\"content\":\"par";
+        assertThat(extractor.extractOutput(RetentionTextExtractor.Protocol.OPENAI_CHAT,
+                truncatedSse.getBytes(StandardCharsets.UTF_8), true)).isEqualTo("the model reply text");
     }
 }

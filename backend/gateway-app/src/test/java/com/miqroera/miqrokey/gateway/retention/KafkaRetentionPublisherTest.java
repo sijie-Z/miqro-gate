@@ -36,6 +36,7 @@ class KafkaRetentionPublisherTest {
         assertThat(node.get("gatewayRequestId").asText()).isEqualTo("req-1");
         assertThat(node.get("occurredAt").asText()).isEqualTo("2026-09-06T00:00:00Z");
         assertThat(node.get("keyVersion").asText()).isEqualTo("v1");
+        assertThat(node.get("direction").asText()).isEqualTo("INPUT");
         assertThat(node.get("textCharCount").asInt()).isEqualTo(9);
         // ciphertext stays opaque base64 — plaintext must never be visible
         assertThat(node.get("ciphertext").asText())
@@ -47,7 +48,8 @@ class KafkaRetentionPublisherTest {
         java.util.List<String> names = new java.util.ArrayList<>();
         node.fieldNames().forEachRemaining(names::add);
         assertThat(names).containsExactlyInAnyOrder("eventId", "tenantId", "userId", "virtualKeyId", "wireProtocol",
-                "gatewayRequestId", "occurredAt", "keyVersion", "textCharCount", "truncated", "ciphertext", "nonce");
+                "gatewayRequestId", "occurredAt", "keyVersion", "direction", "textCharCount", "truncated", "ciphertext",
+                "nonce");
     }
 
     @Test

@@ -40,6 +40,124 @@ public final class RetentionTextExtractor {
         }
     }
 
+    /**
+     * Model-reply text (ADR-0014 增补, 2026-09-15): non-streaming JSON bodies parse
+     * the assistant content; SSE bodies concatenate text deltas. Reasoning deltas,
+     * tool payloads and system content stay excluded.
+     *
+     * @return concatenated assistant text, or empty when none is present.
+     */
+    public String extractOutput(Protocol protocol, byte[] body, boolean sse) {
+        if (body == null || body.length == 0) {
+            return "";
+        }
+        try {
+            if (sse) {
+                return sseOutputText(protocol, new String(body, java.nio.charset.StandardCharsets.UTF_8));
+            }
+            JsonNode root = objectMapper.readTree(body);
+            return switch (protocol) {
+                case ANTHROPIC_MESSAGES -> anthropicOutputText(root);
+                case OPENAI_CHAT -> openaiChatOutputText(root);
+                case OPENAI_RESPONSES -> openaiResponsesOutputText(root);
+            };
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private String anthropicOutputText(JsonNode root) {
+        List<String> texts = new ArrayList<>();
+        JsonNode content = root.path("content");
+        if (content.isArray()) {
+            for (JsonNode part : content) {
+                if ("text".equals(part.path("type").asText(""))) {
+                    String text = part.path("text").asText("");
+                    if (!text.isBlank()) {
+                        texts.add(text);
+                    }
+                }
+            }
+        }
+        return join(texts);
+    }
+
+    private String openaiChatOutputText(JsonNode root) {
+        List<String> texts = new ArrayList<>();
+        JsonNode choices = root.path("choices");
+        if (choices.isArray()) {
+            for (JsonNode choice : choices) {
+                collectTextParts(choice.path("message").path("content"), texts);
+            }
+        }
+        return join(texts);
+    }
+
+    private String openaiResponsesOutputText(JsonNode root) {
+        List<String> texts = new ArrayList<>();
+        JsonNode output = root.path("output");
+        if (output.isArray()) {
+            for (JsonNode item : output) {
+                JsonNode content = item.path("content");
+                if (content.isArray()) {
+                    for (JsonNode part : content) {
+                        if ("output_text".equals(part.path("type").asText(""))) {
+                            String text = part.path("text").asText("");
+                            if (!text.isBlank()) {
+                                texts.add(text);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        String direct = root.path("output_text").asText("");
+        if (texts.isEmpty() && !direct.isBlank()) {
+            texts.add(direct);
+        }
+        return join(texts);
+    }
+
+    /**
+     * Concatenates SSE text deltas; malformed or truncated tail lines are skipped.
+     */
+    private String sseOutputText(Protocol protocol, String body) {
+        StringBuilder sb = new StringBuilder();
+        for (String line : body.split("\n")) {
+            String trimmed = line.trim();
+            if (!trimmed.startsWith("data:")) {
+                continue;
+            }
+            String payload = trimmed.substring(5).trim();
+            if (payload.isEmpty() || "[DONE]".equals(payload)) {
+                continue;
+            }
+            try {
+                JsonNode event = objectMapper.readTree(payload);
+                String delta = switch (protocol) {
+                    case ANTHROPIC_MESSAGES -> "content_block_delta".equals(event.path("type").asText(""))
+                            ? event.path("delta").path("text").asText("")
+                            : "";
+                    case OPENAI_CHAT -> {
+                        JsonNode choices = event.path("choices");
+                        yield choices.isArray() && !choices.isEmpty()
+                                ? choices.get(0).path("delta").path("content").asText("")
+                                : "";
+                    }
+                    case OPENAI_RESPONSES -> "response.output_text.delta".equals(event.path("type").asText(""))
+                            ? event.path("delta").asText("")
+                            : "";
+                };
+                if (!delta.isEmpty()) {
+                    sb.append(delta);
+                }
+            } catch (Exception ignored) {
+                // Truncated tail or a non-JSON line: skip.
+            }
+        }
+        return sb.toString();
+    }
+
     private String anthropicUserText(JsonNode root) {
         List<String> texts = new ArrayList<>();
         JsonNode messages = root.path("messages");
