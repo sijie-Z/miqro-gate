@@ -175,7 +175,8 @@ class MeVirtualKeyApiIntegrationTest {
         postJson("/api/v1/me/virtual-keys",
                 Map.of("name", "k", "projectId", fx.projectId, "providerProductId", fx.productId, "credentialGrantId",
                         fx.grantId, "purpose", "CLAUDE_CODE"))
-                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ROUTING_TAG_MISSING"));
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ROUTING_TAG_MISSING"))
+                .andExpect(jsonPath("$.detail", org.hamcrest.Matchers.containsString("路由标签")));
     }
 
     @Test

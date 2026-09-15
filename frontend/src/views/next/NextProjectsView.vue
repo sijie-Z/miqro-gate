@@ -202,6 +202,7 @@ onMounted(load);
             placeholder="例如 core-ai（Virtual Key 点号后缀）"
             data-testid="project-create-tag"
           />
+          <p class="next-projects__hint">留空将导致成员无法创建 Virtual Key（可先创建，稍后在编辑中补充）</p>
           <p v-if="formError" class="ui-form-error">{{ formError }}</p>
           <div class="next-projects__actions">
             <UiButton
@@ -338,6 +339,11 @@ onMounted(load);
 .next-projects__actions {
   display: flex;
   gap: var(--ui-space-2);
+}
+
+.next-projects__hint {
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-faint);
 }
 
 .next-projects__member-name {
