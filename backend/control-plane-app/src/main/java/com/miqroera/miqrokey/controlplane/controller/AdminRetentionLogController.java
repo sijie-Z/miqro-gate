@@ -38,7 +38,7 @@ public class AdminRetentionLogController {
     }
 
     @GetMapping
-    public List<AdminRetentionLogView> list(@RequestParam(required = false) UUID userId,
+    public List<AdminRetentionLogView> listRetentionLogs(@RequestParam(required = false) UUID userId,
             @RequestParam(required = false) String direction, @RequestParam(required = false) String protocol,
             @RequestParam(required = false) String from, @RequestParam(required = false) String to,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
@@ -52,7 +52,7 @@ public class AdminRetentionLogController {
     }
 
     @GetMapping(path = "/export", produces = "text/csv")
-    public void exportCsv(HttpServletResponse response, @RequestParam(required = false) UUID userId,
+    public void exportRetentionLogsCsv(HttpServletResponse response, @RequestParam(required = false) UUID userId,
             @RequestParam(required = false) String direction, @RequestParam(required = false) String protocol,
             @RequestParam(required = false) String from, @RequestParam(required = false) String to) throws IOException {
         var admin = userContext.getUser();

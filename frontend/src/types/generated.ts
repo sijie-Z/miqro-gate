@@ -2539,7 +2539,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_25"];
+        get: operations["listRetentionLogs"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2555,7 +2555,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["exportCsv"];
+        get: operations["exportRetentionLogsCsv"];
         put?: never;
         post?: never;
         delete?: never;
@@ -9041,7 +9041,7 @@ export interface operations {
             };
         };
     };
-    list_25: {
+    listRetentionLogs: {
         parameters: {
             query?: {
                 userId?: string;
@@ -9069,7 +9069,7 @@ export interface operations {
             };
         };
     };
-    exportCsv: {
+    exportRetentionLogsCsv: {
         parameters: {
             query?: {
                 userId?: string;
