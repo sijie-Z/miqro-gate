@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
+import com.miqroera.miqrokey.controlplane.dto.HourlyUsageReport;
 import com.miqroera.miqrokey.controlplane.dto.UsageRecordPage;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminUsageStatsService;
@@ -71,5 +72,21 @@ public class AdminUsageController {
             @RequestParam(required = false) String clientIp) {
         return usageStatsService.records(userContext.getUser(), from, to, page, size, userId, projectId, virtualKeyId,
                 credentialId, subscriptionId, providerProductId, modelId, clientIp);
+    }
+
+    /**
+     * Hourly token table (#634), e.g.
+     * {@code GET /api/v1/admin/usage/hourly?date=2026-09-16&dimension=USER&tzOffsetMinutes=480}.
+     * Always crossed with the project; {@code dimension} adds the user or team
+     * grouping. Only hours with usage are returned; window is 1..7 days ending at
+     * {@code date} (default: today in {@code tzOffsetMinutes}, default UTC).
+     */
+    @GetMapping("/hourly")
+    public HourlyUsageReport hourly(@RequestParam(required = false) String date,
+            @RequestParam(required = false) Integer days, @RequestParam(required = false) String dimension,
+            @RequestParam(required = false) UUID userId, @RequestParam(required = false) UUID projectId,
+            @RequestParam(required = false) Integer tzOffsetMinutes) {
+        return usageStatsService.hourly(userContext.getUser(), date, days, dimension, userId, projectId,
+                tzOffsetMinutes);
     }
 }

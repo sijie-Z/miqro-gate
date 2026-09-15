@@ -226,13 +226,14 @@ class AdminUsageApiIntegrationTest {
         final UUID userId = UUID.randomUUID();
         final UUID otherUserId = UUID.randomUUID();
         final UUID otherKeyId = UUID.randomUUID();
+        final UUID secondProjectId = UUID.randomUUID();
 
         void reset() {
             for (String table : List.of("usage_event", "cache_hit_event", "price_snapshot", "virtual_key_models",
                     "key_project_binding", "model_approval", "virtual_keys", "project_provider_grant_models",
                     "project_provider_grants", "upstream_credential_versions", "upstream_credentials", "plan_seats",
                     "upstream_subscriptions", "project_memberships", "projects", "provider_products", "providers",
-                    "admin_audit_events", "user_sessions", "users")) {
+                    "admin_audit_events", "team_memberships", "teams", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {
@@ -359,6 +360,17 @@ class AdminUsageApiIntegrationTest {
 
         void insertUsage(UUID keyId, String providerRequestId, long input, long output, String model,
                 Instant occurredAt) {
+            insertUsageOnProject(keyId, projectId, providerRequestId, input, output, model, occurredAt);
+        }
+
+        /** Usage on an explicit project (#634 hourly cross-tab tests). */
+        void insertUsageOnProject(UUID keyId, UUID onProjectId, String providerRequestId, long input, long output,
+                Instant occurredAt) {
+            insertUsageOnProject(keyId, onProjectId, providerRequestId, input, output, MODEL, occurredAt);
+        }
+
+        void insertUsageOnProject(UUID keyId, UUID onProjectId, String providerRequestId, long input, long output,
+                String model, Instant occurredAt) {
             jdbc.update("""
                     INSERT INTO usage_event
                         (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
@@ -369,11 +381,93 @@ class AdminUsageApiIntegrationTest {
                     """,
                     new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
                             .addValue("providerRequestId", providerRequestId).addValue("keyId", keyId)
-                            .addValue("projectId", projectId).addValue("productId", productId)
+                            .addValue("projectId", onProjectId).addValue("productId", productId)
                             .addValue("credentialId", credentialId).addValue("model", model).addValue("input", input)
                             .addValue("output", output).addValue("total", input + output)
                             .addValue("occurredAt", Timestamp.from(occurredAt)));
         }
+
+        /** A second project so the hour x project grouping is observable (#634). */
+        void insertSecondProject() {
+            jdbc.update("""
+                    INSERT INTO projects (id, tenant_id, code, name, status, project_tag, version)
+                    VALUES (:id, :tenantId, 'P2', 'Project Two', 'ACTIVE', 'core-ai-2', 0)
+                    """, new MapSqlParameterSource("id", secondProjectId).addValue("tenantId", tenantId));
+        }
+
+        /** Team "Alpha" with both fixture users as members (#634). */
+        void insertTeamForBothUsers() {
+            UUID teamId = UUID.randomUUID();
+            jdbc.update("""
+                    INSERT INTO teams (id, tenant_id, name, status, version)
+                    VALUES (:id, :tenantId, 'Alpha', 'ACTIVE', 0)
+                    """, new MapSqlParameterSource("id", teamId).addValue("tenantId", tenantId));
+            for (UUID member : List.of(userId, otherUserId)) {
+                jdbc.update("""
+                        INSERT INTO team_memberships (tenant_id, team_id, user_id)
+                        VALUES (:tenantId, :teamId, :userId)
+                        """, new MapSqlParameterSource("tenantId", tenantId).addValue("teamId", teamId)
+                        .addValue("userId", member));
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("hourly crosses hours with users and projects in the caller's timezone (#634)")
+    void hourlyCrossTabsUsersProjectsAndTimezone() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertOtherUsersKey();
+        fx.insertSecondProject();
+        fx.insertUsage(ownKey, "chatcmpl-h-1", 1_000L, 100L, MODEL, Instant.parse("2026-09-15T06:10:00Z"));
+        fx.insertUsage(ownKey, "chatcmpl-h-2", 2_000L, 200L, MODEL, Instant.parse("2026-09-15T06:50:00Z"));
+        fx.insertUsageOnProject(ownKey, fx.secondProjectId, "chatcmpl-h-3", 500L, 50L,
+                Instant.parse("2026-09-15T07:05:00Z"));
+        fx.insertUsage(fx.otherKeyId, "chatcmpl-h-4", 7_000L, 700L, MODEL, Instant.parse("2026-09-15T06:20:00Z"));
+
+        // UTC+8: 06:10Z/06:20Z/06:50Z all fall into the 14:00 local hour (06:00Z
+        // bucket).
+        mockMvc.perform(get("/api/v1/admin/usage/hourly").cookie(adminSession).param("date", "2026-09-15")
+                .param("tzOffsetMinutes", "480").param("dimension", "USER")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.date").value("2026-09-15")).andExpect(jsonPath("$.days").value(1))
+                .andExpect(jsonPath("$.dimension").value("USER")).andExpect(jsonPath("$.rows.length()").value(3))
+                .andExpect(jsonPath("$.rows[*].hourStart",
+                        containsInAnyOrder("2026-09-15T06:00:00Z", "2026-09-15T06:00:00Z", "2026-09-15T07:00:00Z")))
+                .andExpect(jsonPath("$.rows[*].dimensionLabel",
+                        containsInAnyOrder("regular_user", "other_user", "regular_user")))
+                .andExpect(jsonPath("$.rows[*].projectLabel",
+                        containsInAnyOrder("Project One", "Project One", "Project Two")))
+                .andExpect(jsonPath("$.rows[*].requests", containsInAnyOrder(2, 1, 1)))
+                .andExpect(jsonPath("$.rows[*].totalTokens", containsInAnyOrder(3_300, 7_700, 550)));
+    }
+
+    @Test
+    @DisplayName("hourly team dimension aggregates all members per hour (#634)")
+    void hourlyTeamDimension() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertOtherUsersKey();
+        fx.insertTeamForBothUsers();
+        fx.insertUsage(ownKey, "chatcmpl-t-1", 1_000L, 100L, MODEL, Instant.parse("2026-09-15T06:10:00Z"));
+        fx.insertUsage(fx.otherKeyId, "chatcmpl-t-2", 7_000L, 700L, MODEL, Instant.parse("2026-09-15T06:20:00Z"));
+        fx.insertUsage(ownKey, "chatcmpl-t-3", 2_000L, 200L, MODEL, Instant.parse("2026-09-15T07:50:00Z"));
+
+        mockMvc.perform(get("/api/v1/admin/usage/hourly").cookie(adminSession).param("date", "2026-09-15")
+                .param("tzOffsetMinutes", "480").param("dimension", "TEAM")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.rows.length()").value(2))
+                .andExpect(jsonPath("$.rows[*].dimensionLabel", containsInAnyOrder("Alpha", "Alpha")))
+                .andExpect(jsonPath("$.rows[*].requests", containsInAnyOrder(2, 1)))
+                .andExpect(jsonPath("$.rows[*].totalTokens", containsInAnyOrder(8_800, 2_200)));
+    }
+
+    @Test
+    @DisplayName("hourly enforces admin-only access and parameter bounds (#634)")
+    void hourlyValidationAndAccess() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/usage/hourly").cookie(userSession)).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/admin/usage/hourly").cookie(adminSession).param("days", "8"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("DAYS_INVALID"));
+        mockMvc.perform(get("/api/v1/admin/usage/hourly").cookie(adminSession).param("dimension", "BOGUS"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("DIMENSION_INVALID"));
     }
 
     static class BootstrapHelper {

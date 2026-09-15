@@ -3,11 +3,17 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextAdminUsageView from '@/views/next/NextAdminUsageView.vue';
 import * as api from '@/api';
-import type { UsageCost, UsageRecordPage, UsageSummary } from '@/types/generated-api';
+import type {
+  UsageCost,
+  UsageRecordPage,
+  UsageSummary,
+  HourlyUsageReport,
+} from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   adminUsageSummary: vi.fn(),
   adminUsageRecords: vi.fn(),
+  adminUsageHourly: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -54,12 +60,35 @@ const page: UsageRecordPage = {
   total: 45,
 };
 
+const hourlyReport: HourlyUsageReport = {
+  date: '2026-09-15',
+  days: 1,
+  dimension: 'USER',
+  tzOffsetMinutes: 480,
+  rows: [
+    {
+      hourStart: '2026-09-15T06:00:00Z',
+      projectId: 'p1',
+      projectLabel: '演示项目',
+      dimensionId: 'u1',
+      dimensionLabel: 'regular_user',
+      requests: 3,
+      inputTokens: 1_000,
+      outputTokens: 200,
+      cacheReadTokens: 50,
+      cacheCreationTokens: 10,
+      totalTokens: 1_260,
+    },
+  ],
+};
+
 describe('NextAdminUsageView', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.resetAllMocks();
     mockApi.adminUsageSummary.mockResolvedValue(summary);
     mockApi.adminUsageRecords.mockResolvedValue(page);
+    mockApi.adminUsageHourly.mockResolvedValue(hourlyReport);
   });
 
   function mountView() {
@@ -74,10 +103,19 @@ describe('NextAdminUsageView', () => {
     await flushPromises();
 
     expect(mockApi.adminUsageSummary).toHaveBeenLastCalledWith(
-      expect.objectContaining({ groupBy: 'project', from: expect.any(String), to: expect.any(String) }),
+      expect.objectContaining({
+        groupBy: 'project',
+        from: expect.any(String),
+        to: expect.any(String),
+      }),
     );
     expect(mockApi.adminUsageRecords).toHaveBeenLastCalledWith(
-      expect.objectContaining({ page: 1, size: 20, from: expect.any(String), to: expect.any(String) }),
+      expect.objectContaining({
+        page: 1,
+        size: 20,
+        from: expect.any(String),
+        to: expect.any(String),
+      }),
     );
   });
 
@@ -132,5 +170,26 @@ describe('NextAdminUsageView', () => {
       page: 1,
       size: 20,
     });
+  });
+
+  it('renders the hourly token table and reloads when the day range changes (#634)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(mockApi.adminUsageHourly).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dimension: 'USER',
+        days: 1,
+        tzOffsetMinutes: expect.any(Number),
+      }),
+    );
+    const table = wrapper.find('[data-testid="usage-hourly-table"]');
+    expect(table.text()).toContain('演示项目');
+    expect(table.text()).toContain('regular_user');
+    expect(table.text()).toContain('1,260');
+
+    await wrapper.find('[data-testid="hourly-days-7"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.adminUsageHourly).toHaveBeenLastCalledWith(expect.objectContaining({ days: 7 }));
   });
 });
