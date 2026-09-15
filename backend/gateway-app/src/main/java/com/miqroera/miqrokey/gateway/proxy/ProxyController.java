@@ -316,7 +316,7 @@ public class ProxyController {
         }
         // Waiter: replay the leader's response byte-identically, or fall back.
         return flight.shared().flatMap(cached -> {
-            publishCoalescedUsage(ctx, cached, cacheKey, requestId);
+            publishCoalescedUsage(ctx, modelName, cached, cacheKey, requestId);
             return sseReplayEngine.replay(cached, exchange.getResponse(), requestId, "coalesced");
         }).onErrorResume(e -> {
             log.debug("Coalescer wait failed (requestId={}); falling back to own upstream call: {}", requestId,
@@ -560,6 +560,16 @@ public class ProxyController {
 
     private void publishUsageEvent(AuthContext ctx, String modelName, CacheKey cacheKey, TokenBucket tokens, int status,
             String providerRequestId, String requestId, long latencyMs, boolean complete, boolean usageMissing) {
+        if (modelName == null) {
+            // usage_event.model_id is NOT NULL: a transparently forwarded body
+            // without a usable "model" field (unparseable JSON, or a protocol
+            // that carries the model in the path) has no billable fact to
+            // record. The lifecycle records still capture the request; a null
+            // model here used to abort — and endlessly re-enqueue — the whole
+            // usage write batch.
+            log.warn("Usage event skipped: no model name in request (requestId={}, status={})", requestId, status);
+            return;
+        }
         try {
             usageEventBus.publish(new UsageEvent(UUID.randomUUID(), ctx.tenantId(), providerRequestId,
                     ctx.key().keyId(), ctx.projectId(), ctx.productId(), ctx.binding().credentialId(), modelName,
@@ -570,10 +580,15 @@ public class ProxyController {
         }
     }
 
-    private void publishCoalescedUsage(AuthContext ctx, CachedResponse cached, CacheKey cacheKey, String requestId) {
+    private void publishCoalescedUsage(AuthContext ctx, String modelName, CachedResponse cached, CacheKey cacheKey,
+            String requestId) {
+        if (modelName == null) {
+            log.warn("Coalesced usage event skipped: no model name in request (requestId={})", requestId);
+            return;
+        }
         try {
             usageEventBus.publish(new UsageEvent(UUID.randomUUID(), ctx.tenantId(), null, ctx.key().keyId(),
-                    ctx.projectId(), ctx.productId(), ctx.binding().credentialId(), null, CacheLevel.COALESCED,
+                    ctx.projectId(), ctx.productId(), ctx.binding().credentialId(), modelName, CacheLevel.COALESCED,
                     cached.usage(), null, null, cacheKey != null ? cacheKey.sha256() : null, true,
                     cached.usage().isEmpty(), requestId, clock.instant()));
         } catch (RuntimeException e) {

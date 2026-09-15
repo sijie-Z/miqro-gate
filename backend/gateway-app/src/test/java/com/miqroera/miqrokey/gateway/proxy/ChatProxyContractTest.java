@@ -1,6 +1,8 @@
 package com.miqroera.miqrokey.gateway.proxy;
 
 import com.miqroera.miqrokey.gateway.GatewayAuthTestConfig;
+import com.miqroera.miqrokey.queue.InMemoryUsageEventBus;
+import com.miqroera.miqrokey.queue.UsageEventBus;
 import com.miqroera.miqrokey.testing.AnthropicMockProvider;
 import com.miqroera.miqrokey.testing.ChatFixtures;
 import com.miqroera.miqrokey.testing.GatewayTestKeys;
@@ -45,6 +47,9 @@ class ChatProxyContractTest {
 
     @Autowired
     private WebTestClient webTestClient;
+
+    @Autowired
+    private UsageEventBus usageEventBus;
 
     @LocalServerPort
     private int gatewayPort;
@@ -493,5 +498,87 @@ class ChatProxyContractTest {
             assertThat(usageObs.getObservations()).hasSize(1);
             assertThat(usageObs.getObservations().toString()).doesNotContain(modelContent);
         }
+    }
+
+    @Nested
+    @DisplayName("Usage fact guard (model-less bodies)")
+    class UsageFactGuard {
+
+        @Test
+        @DisplayName("should forward a body without a model field verbatim but record no usage fact")
+        void shouldForwardModelLessBodyWithoutUsageFact() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+            InMemoryUsageEventBus bus = (InMemoryUsageEventBus) usageEventBus;
+            bus.clear();
+
+            String modelLessBody = "{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}],\"max_tokens\":512}";
+            webTestClient.post().uri("/v1/chat/completions").bodyValue(modelLessBody).exchange().expectStatus().isOk()
+                    .expectBody().returnResult().getResponseBody();
+
+            // Transparent proxy: the body still reaches upstream byte-identically.
+            var captured = mockProvider.getCapturedRequests();
+            assertThat(captured).hasSize(1);
+            assertThat(captured.get(0).bodyBytes).isEqualTo(modelLessBody.getBytes(StandardCharsets.UTF_8));
+            // usage_event.model_id is NOT NULL: no usage fact. Usage is published
+            // before the terminal lifecycle record, so waiting for the record
+            // makes the negative assertion sound. The lifecycle record itself
+            // still captures the request — with a null model.
+            awaitOrFail(() -> !bus.completedEvents().isEmpty(), "the terminal lifecycle record");
+            assertThat(bus.usageEvents()).isEmpty();
+            assertThat(bus.completedEvents().get(0).modelId()).isNull();
+        }
+
+        @Test
+        @DisplayName("should forward an unparseable body verbatim but record no usage fact")
+        void shouldForwardMalformedBodyWithoutUsageFact() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+            InMemoryUsageEventBus bus = (InMemoryUsageEventBus) usageEventBus;
+            bus.clear();
+
+            String malformedBody = "{not json";
+            webTestClient.post().uri("/v1/chat/completions").bodyValue(malformedBody).exchange().expectStatus().isOk()
+                    .expectBody().returnResult().getResponseBody();
+
+            var captured = mockProvider.getCapturedRequests();
+            assertThat(captured).hasSize(1);
+            assertThat(captured.get(0).bodyBytes).isEqualTo(malformedBody.getBytes(StandardCharsets.UTF_8));
+            awaitOrFail(() -> !bus.completedEvents().isEmpty(), "the terminal lifecycle record");
+            assertThat(bus.usageEvents()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should still record the usage fact for a well-formed request (control)")
+        void shouldRecordUsageFactForWellFormedRequest() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(ChatFixtures.RESPONSE_BASIC).build());
+            InMemoryUsageEventBus bus = (InMemoryUsageEventBus) usageEventBus;
+            bus.clear();
+
+            webTestClient.post().uri("/v1/chat/completions").bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange()
+                    .expectStatus().isOk().expectBody().returnResult().getResponseBody();
+
+            awaitOrFail(() -> !bus.usageEvents().isEmpty(), "the usage fact");
+            assertThat(bus.usageEvents()).hasSize(1);
+            assertThat(bus.usageEvents().get(0).modelId()).isEqualTo("gpt-4o-mini");
+        }
+    }
+
+    /** Polls a condition up to 5s; fails loudly instead of racing the writer. */
+    private static void awaitOrFail(java.util.function.BooleanSupplier condition, String what) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (condition.getAsBoolean()) {
+                return;
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while waiting for " + what, e);
+            }
+        }
+        throw new AssertionError("Timed out waiting for " + what);
     }
 }
