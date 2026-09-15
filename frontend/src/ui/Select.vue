@@ -201,7 +201,7 @@ const triggerClasses = computed(() => ({
 }
 
 .ui-select__trigger:hover:not(:disabled):not(:focus-visible) {
-  border-color: var(--ui-border-strong);
+  border-color: var(--ui-control-border-hover);
 }
 
 .ui-select__trigger:focus-visible,
@@ -252,14 +252,18 @@ const triggerClasses = computed(() => ({
    scoped data-v attribute on those two elements, so scoped rules would
    never match. Items below are slot children and keep scoped styling. */
 
+/* antd v5 option metrics (v2.pro live): 32px row, 5px 12px padding, 4px
+   radius, 14px/22px text. */
 .ui-select__item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--ui-space-3);
-  padding: var(--ui-space-2) var(--ui-space-3);
-  border-radius: calc(var(--ui-radius-control) - 2px);
-  font-size: var(--ui-font-size-sm);
+  min-height: 32px;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: var(--ui-font-size-base);
+  line-height: 22px;
   color: var(--ui-foreground);
   cursor: pointer;
   user-select: none;

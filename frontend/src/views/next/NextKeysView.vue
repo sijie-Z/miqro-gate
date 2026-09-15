@@ -654,7 +654,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             <DropdownMenuPortal>
               <DropdownMenuContent class="ui-menu" :side-offset="4" :align="'end'">
                 <DropdownMenuItem
-                  class="next-keys__menu-item"
+                  class="ui-menu__item next-keys__menu-item"
                   :disabled="(row as VirtualKeyView).status !== 'ACTIVE'"
                   @select="handleRotate(row as VirtualKeyView)"
                 >
@@ -663,7 +663,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
                 </DropdownMenuItem>
                 <DropdownMenuSeparator class="next-keys__menu-sep" />
                 <DropdownMenuItem
-                  class="next-keys__menu-item next-keys__menu-item--danger"
+                  class="ui-menu__item next-keys__menu-item next-keys__menu-item--danger"
                   :disabled="!(row as VirtualKeyView).status?.match(/^(ACTIVE|ROTATING)$/)"
                   @select="handleRevoke(row as VirtualKeyView)"
                 >
@@ -1043,27 +1043,8 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
 /* .ui-menu panel chrome lives in styles/design-base.css (the radix popper
    root drops the scoped data-v attribute). Item rules below are slot
    children and stay scoped. */
-.next-keys__menu-item {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-space-2);
-  padding: var(--ui-space-2) var(--ui-space-3);
-  border-radius: calc(var(--ui-radius-control) - 2px);
-  font-size: var(--ui-font-size-sm);
-  color: var(--ui-foreground);
-  cursor: pointer;
-  outline: none;
-}
-
-.next-keys__menu-item[data-highlighted] {
-  background: var(--ui-fill-hover);
-}
-
-.next-keys__menu-item[data-disabled] {
-  color: var(--ui-foreground-faint);
-  cursor: not-allowed;
-}
-
+/* .next-keys__menu-item geometry comes from .ui-menu__item in the global
+   sheet; only the danger variant stays scoped. */
 .next-keys__menu-item--danger {
   color: var(--ui-danger-fg);
 }

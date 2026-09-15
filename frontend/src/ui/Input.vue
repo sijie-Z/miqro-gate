@@ -185,7 +185,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .ui-field__input:hover:not(:disabled):not(:focus) {
-  border-color: var(--ui-border-strong);
+  border-color: var(--ui-control-border-hover);
 }
 
 .ui-field__input:focus {

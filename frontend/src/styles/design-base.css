@@ -257,7 +257,7 @@
 .ui-select__content {
   background: var(--ui-card);
   border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-control);
+  border-radius: var(--ui-radius-panel);
   box-shadow: var(--ui-shadow-popper);
   padding: var(--ui-space-1);
   z-index: 2000;
@@ -271,15 +271,53 @@
   padding: 0;
 }
 
-/* Shared dropdown menu panel (shell user menu + per-view row/kebab menus). */
+/* Shared dropdown menu panel + item chrome (shell user menu + per-view
+   row/kebab menus). The panel is a teleported radix root (no scoped data-v);
+   items are slot children rendered by several different components, so both
+   live here instead of duplicating the same geometry per view. */
+
 .ui-menu {
   min-width: 160px;
   max-height: calc(100vh - 24px);
   overflow-y: auto;
   background: var(--ui-card);
   border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-control);
+  border-radius: var(--ui-radius-panel);
   box-shadow: var(--ui-shadow-popper);
   padding: var(--ui-space-1);
   z-index: 2000;
+}
+
+/* antd v5 menu item metrics (v2.pro live): 32px row, 5px 12px padding,
+   4px radius, 14px/22px text, rgba(0,0,0,.04) hover fill. */
+.ui-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  min-height: 32px;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: var(--ui-font-size-base);
+  line-height: 22px;
+  color: var(--ui-foreground);
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+
+.ui-menu__item[data-highlighted] {
+  background: var(--ui-fill-hover);
+}
+
+.ui-menu__item[data-disabled] {
+  color: var(--ui-foreground-faint);
+  cursor: not-allowed;
+}
+
+.ui-menu__item--danger {
+  color: var(--ui-danger-fg);
+}
+
+.ui-menu__item:focus-visible {
+  box-shadow: var(--ui-shadow-focus);
 }
