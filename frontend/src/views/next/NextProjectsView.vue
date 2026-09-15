@@ -56,6 +56,16 @@ const confirmState = ref<{
   run: () => Promise<void>;
 } | null>(null);
 
+// #617: project edit dialog — the backend PATCH existed but the UI had no
+// entry, so a tagless project could never be fixed after a 409 on key create.
+const editOpen = ref(false);
+const editProject = ref<Project | null>(null);
+const editName = ref('');
+const editTag = ref('');
+const editError = ref('');
+const editRequestId = ref('');
+const editSaving = ref(false);
+
 const columns = [
   { key: 'code', title: '代码', width: '110px' },
   { key: 'name', title: '名称', minWidth: '180px' },
@@ -204,6 +214,56 @@ async function confirmAndRun() {
   await state.run();
 }
 
+// #617: edit name / routing tag (PATCH /admin/projects/{id}).
+function openEdit(project: Project) {
+  editProject.value = project;
+  editName.value = project.name ?? '';
+  editTag.value = project.projectTag ?? '';
+  editError.value = '';
+  editRequestId.value = '';
+  editOpen.value = true;
+}
+
+async function saveEdit() {
+  const project = editProject.value;
+  if (!project) return;
+  const name = editName.value.trim();
+  const tag = editTag.value.trim();
+  if (!name) {
+    editError.value = '请输入项目名称。';
+    return;
+  }
+  if (tag && !/^[A-Za-z0-9_-]{1,64}$/.test(tag)) {
+    editError.value = '路由标签只允许字母、数字、下划线与连字符（1–64 位）。';
+    return;
+  }
+  if (!tag && project.projectTag) {
+    editError.value = '路由标签不能清空——现有 Virtual Key 的路由依赖它。';
+    return;
+  }
+  if (name === (project.name ?? '') && tag === (project.projectTag ?? '')) {
+    editOpen.value = false;
+    return;
+  }
+  editSaving.value = true;
+  editError.value = '';
+  try {
+    await api.updateProject(project.id!, { name, projectTag: tag || undefined });
+    editOpen.value = false;
+    toast.success('项目已更新');
+    await load();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      editError.value = error.message;
+      editRequestId.value = error.requestId ?? '';
+    } else {
+      editError.value = '保存失败，请稍后重试。';
+    }
+  } finally {
+    editSaving.value = false;
+  }
+}
+
 function formatDate(iso?: string): string {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -257,6 +317,9 @@ onMounted(load);
             placeholder="例如 core-ai（虚拟密钥点号后缀）"
             data-testid="project-create-tag"
           />
+          <p class="next-projects__tag-hint" data-testid="project-create-tag-hint">
+            留空将导致成员无法创建 Virtual Key；可稍后在「编辑」中补填。
+          </p>
           <p v-if="formError" class="ui-form-error">{{ formError }}</p>
           <div class="next-projects__actions">
             <UiButton
@@ -305,6 +368,14 @@ onMounted(load);
             @click="openMembers(row as Project)"
           >
             成员
+          </UiButton>
+          <UiButton
+            variant="ghost"
+            size="sm"
+            data-testid="project-edit-open"
+            @click="openEdit(row as Project)"
+          >
+            编辑
           </UiButton>
         </template>
       </UiTable>
@@ -370,6 +441,42 @@ onMounted(load);
       </UiTable>
     </UiDrawer>
 
+    <!-- #617: edit name / routing tag -->
+    <UiDialog
+      :open="editOpen"
+      title="编辑项目"
+      :description="editProject ? `修改「${editProject.name}」的名称与路由标签。` : ''"
+      width="460px"
+      data-testid="project-edit-dialog"
+      @update:open="editOpen = false"
+    >
+      <div class="next-projects__form">
+        <UiInput v-model="editName" label="名称" required data-testid="project-edit-name" />
+        <UiInput
+          v-model="editTag"
+          label="路由标签"
+          placeholder="例如 core-ai（虚拟密钥点号后缀）"
+          data-testid="project-edit-tag"
+        />
+      </div>
+      <p v-if="editError" class="ui-form-error" data-testid="project-edit-error">
+        {{ editError
+        }}<span v-if="editRequestId" class="ui-request-id"> requestId: {{ editRequestId }}</span>
+      </p>
+      <template #footer>
+        <UiButton variant="ghost" data-testid="project-edit-cancel" @click="editOpen = false"
+          >取消</UiButton
+        >
+        <UiButton
+          variant="primary"
+          :loading="editSaving"
+          data-testid="project-edit-save"
+          @click="saveEdit"
+          >保存</UiButton
+        >
+      </template>
+    </UiDialog>
+
     <UiDialog
       v-if="confirmState"
       :open="true"
@@ -421,6 +528,11 @@ onMounted(load);
   gap: var(--ui-space-2);
 }
 
+.next-projects__tag-hint {
+  margin: calc(-1 * var(--ui-space-2)) 0 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-faint);
+}
 
 .next-projects__drawer-title {
   margin: var(--ui-space-1) 0 var(--ui-space-3);
