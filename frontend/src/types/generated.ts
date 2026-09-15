@@ -324,6 +324,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/logout-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["logoutOthers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -772,6 +788,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/prices/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["sync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/models": {
         parameters: {
             query?: never;
@@ -782,6 +814,22 @@ export interface paths {
         get: operations["list_12"];
         put?: never;
         post: operations["add"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/models/test-run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["testRun"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3305,6 +3353,12 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
         };
+        TestRunRequest: {
+            /** Format: uuid */
+            providerProductId: string;
+            modelId: string;
+            prompt?: string;
+        };
         ProbeRequest: {
             /** Format: uuid */
             providerProductId: string;
@@ -3448,11 +3502,9 @@ export interface components {
         ModelsRequest: {
             models?: string[];
         };
-        ExportTask: {
+        ExportTaskView: {
             /** Format: uuid */
             id?: string;
-            /** Format: uuid */
-            tenantId?: string;
             /** Format: uuid */
             createdBy?: string;
             /** @enum {string} */
@@ -3468,8 +3520,6 @@ export interface components {
             rowCount?: number;
             /** Format: int64 */
             byteCount?: number;
-            /** Format: byte */
-            fileBytes?: string;
             errorMessage?: string;
             /** Format: date-time */
             createdAt?: string;
@@ -3614,6 +3664,37 @@ export interface components {
             purpose: "CLAUDE_CODE" | "CLAUDE_DESKTOP" | "CODEX" | "CUSTOM";
             allowedModels?: string[];
             cachePolicy?: string;
+        };
+        ExportTask: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            /** Format: uuid */
+            createdBy?: string;
+            /** @enum {string} */
+            format?: "CSV" | "JSONL";
+            /** Format: date-time */
+            periodFrom?: string;
+            /** Format: date-time */
+            periodTo?: string;
+            /** @enum {string} */
+            status?: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "EXPIRED";
+            sha256?: string;
+            /** Format: int64 */
+            rowCount?: number;
+            /** Format: int64 */
+            byteCount?: number;
+            /** Format: byte */
+            fileBytes?: string;
+            errorMessage?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            finishedAt?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+            reconcileLevel?: string;
         };
         StatusRequest: {
             /** @enum {string} */
@@ -4013,33 +4094,6 @@ export interface components {
             /** Format: int64 */
             chainPosition?: number;
             targetName?: string;
-        };
-        ExportTaskView: {
-            /** Format: uuid */
-            id?: string;
-            /** Format: uuid */
-            createdBy?: string;
-            /** @enum {string} */
-            format?: "CSV" | "JSONL";
-            /** Format: date-time */
-            periodFrom?: string;
-            /** Format: date-time */
-            periodTo?: string;
-            /** @enum {string} */
-            status?: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "EXPIRED";
-            sha256?: string;
-            /** Format: int64 */
-            rowCount?: number;
-            /** Format: int64 */
-            byteCount?: number;
-            errorMessage?: string;
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            finishedAt?: string;
-            /** Format: date-time */
-            expiresAt?: string;
-            reconcileLevel?: string;
         };
     };
     responses: never;
@@ -4793,6 +4847,35 @@ export interface operations {
         responses: {
             /** @description OK */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": Record<string, never>;
+                };
+            };
+        };
+    };
+    logoutOthers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All other sessions of the current user revoked; the calling session stays valid */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": Record<string, never>;
+                };
+            };
+            /** @description Not authenticated */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5757,6 +5840,28 @@ export interface operations {
             };
         };
     };
+    sync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     list_12: {
         parameters: {
             query?: {
@@ -5800,6 +5905,32 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ModelCatalogView"];
+                };
+            };
+        };
+    };
+    testRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestRunRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
@@ -6359,7 +6490,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ExportTask"][];
+                    "*/*": components["schemas"]["ExportTaskView"][];
                 };
             };
         };
@@ -6383,7 +6514,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ExportTask"];
+                    "*/*": components["schemas"]["ExportTaskView"];
                 };
             };
         };
@@ -8458,7 +8589,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ExportTask"];
+                    "*/*": components["schemas"]["ExportTaskView"];
                 };
             };
         };

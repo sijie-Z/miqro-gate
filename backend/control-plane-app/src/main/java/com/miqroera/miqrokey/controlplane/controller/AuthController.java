@@ -166,6 +166,23 @@ public class AuthController {
         }
     }
 
+    /**
+     * Sign out every session except the current one (self-service counterpart of
+     * the admin {@code /admin/users/{id}/revoke-sessions}). The calling session
+     * keeps working; state-changing POST, so CSRF applies as usual.
+     */
+    @PostMapping("/logout-others")
+    @ApiResponse(responseCode = "200", description = "All other sessions of the current user revoked; the calling session stays valid")
+    @ApiResponse(responseCode = "401", description = "Not authenticated")
+    public ResponseEntity<?> logoutOthers(HttpServletRequest httpReq) {
+        if (!userContext.isAuthenticated() || userContext.getSession() == null) {
+            return problemResponse(401, "UNAUTHORIZED", "Not authenticated", null, resolveRequestId(httpReq));
+        }
+        String requestId = resolveRequestId(httpReq);
+        authenticationService.logoutOthers(userContext.getUser(), userContext.getSession().id(), requestId);
+        return ResponseEntity.ok(Map.of("message", "Other sessions have been revoked."));
+    }
+
     @GetMapping("/csrf")
     @ApiResponse(responseCode = "200", description = "CSRF token read from its cookie plus session expiry", content = @Content(mediaType = "application/json", schema = @Schema(implementation = CsrfResponse.class)))
     @ApiResponse(responseCode = "401", description = "Not authenticated")
