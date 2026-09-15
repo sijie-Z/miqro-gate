@@ -4,8 +4,10 @@ import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
 import com.miqroera.miqrokey.spi.ProviderClient;
 import com.miqroera.miqrokey.spi.ProviderRequest;
 import com.miqroera.miqrokey.spi.ProviderResponse;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelOption;
 import io.netty.handler.codec.http.HttpHeaders;
+import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.resolver.AbstractAddressResolver;
 import io.netty.resolver.AddressResolver;
@@ -123,10 +125,20 @@ public final class HttpProviderClient implements ProviderClient {
     public Mono<ProviderResponse> exchange(ProviderRequest request) {
         try {
             URI uri = buildUri(request);
-            return http.headers(headers -> {
+            HttpClient.RequestSender sender = http.headers(headers -> {
                 headers.set(credentialHeader, credentialValue);
-                headers.set("Accept", "application/json");
-            }).get().uri(uri.toString()).response((response, body) -> readBounded(response, body)).single();
+                if (!headers.contains("accept")) {
+                    headers.set("Accept", "application/json");
+                }
+                request.headers().forEach((name, values) -> values.forEach(value -> headers.add(name, value)));
+            }).request(HttpMethod.valueOf(request.method())).uri(uri.toString());
+            byte[] body = request.body();
+            if (body.length > 0) {
+                // reactor-netty takes ownership of sent buffers and releases them.
+                return sender.send(Mono.just(Unpooled.wrappedBuffer(body)))
+                        .response((response, bodyFlux) -> readBounded(response, bodyFlux)).single();
+            }
+            return sender.response((response, bodyFlux) -> readBounded(response, bodyFlux)).single();
         } catch (Exception e) {
             return Mono.error(e);
         }

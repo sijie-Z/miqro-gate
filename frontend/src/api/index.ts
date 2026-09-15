@@ -924,6 +924,32 @@ export function adminModelProbeStatus(providerProductId: string): Promise<ModelP
   return get<ModelProbeStatus>('/api/v1/admin/models/probe-status', { providerProductId });
 }
 
+// ---- Model test-run (#552, console 在线调试) ----
+
+export interface ModelTestRunResult {
+  providerProductId: string;
+  productCode?: string;
+  modelId: string;
+  httpStatus: number;
+  latencyMs: number;
+  content: string;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+}
+
+/**
+ * One real upstream chat call for a credential×model pair. The prompt and the
+ * reply stay transient (never persisted or logged server-side).
+ */
+export function adminTestRunModel(
+  providerProductId: string,
+  modelId: string,
+  prompt?: string,
+): Promise<ModelTestRunResult> {
+  return post<ModelTestRunResult>('/api/v1/admin/models/test-run', { providerProductId, modelId, prompt });
+}
+
 // ---- MCP route rules (F11, Tencent doc 135482) ----
 
 export function adminListMcpRouteRules(serviceId: string): Promise<McpRouteRule[]> {

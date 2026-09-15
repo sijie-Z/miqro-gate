@@ -184,6 +184,29 @@ class HttpProviderClientTest {
                 .hasRootCauseInstanceOf(SSLException.class);
     }
 
+    @Test
+    @DisplayName("POST requests carry the method, body and content-type (#552)")
+    void postsJsonBody() throws Exception {
+        AtomicReference<String> method = new AtomicReference<>();
+        AtomicReference<String> body = new AtomicReference<>();
+        AtomicReference<String> contentType = new AtomicReference<>();
+        handler(exchange -> {
+            method.set(exchange.getRequestMethod());
+            body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            contentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+            respond(exchange, 200, "{\"ok\":true}", Map.of());
+        });
+
+        ProviderResponse response = client()
+                .exchange(ProviderRequest.postJson("/chat/completions", "{\"a\":1}".getBytes(StandardCharsets.UTF_8)))
+                .block();
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(method.get()).isEqualTo("POST");
+        assertThat(body.get()).isEqualTo("{\"a\":1}");
+        assertThat(contentType.get()).contains("application/json");
+    }
+
     private HttpProviderClient client() {
         return new HttpProviderClient(URI.create("http://127.0.0.1:" + port + "/api"), "Authorization",
                 "Bearer sk-test", loopbackValidator(), Duration.ofSeconds(2), Duration.ofSeconds(5), 1024 * 1024);

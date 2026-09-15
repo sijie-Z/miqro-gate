@@ -51,4 +51,9 @@ public record ProviderRequest(String method, String path, String query, Map<Stri
     public static ProviderRequest get(String path, String query) {
         return new ProviderRequest("GET", path, query, Map.of(), new byte[0]);
     }
+
+    /** A JSON POST request (e.g. model test-run chat calls). */
+    public static ProviderRequest postJson(String path, byte[] body) {
+        return new ProviderRequest("POST", path, "", Map.of("content-type", List.of("application/json")), body);
+    }
 }
