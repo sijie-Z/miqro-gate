@@ -91,3 +91,51 @@ export function claudeSettingsSnippet(secret: string, baseUrl: string): string {
     2,
   );
 }
+
+/** Client shapes covered by the「使用密钥」panel (manual setup, no CC Switch). */
+export type UsageClient = 'claude' | 'codex' | 'openai';
+
+export const USAGE_CLIENT_LABEL: Record<UsageClient, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex CLI',
+  openai: '通用 OpenAI 兼容',
+};
+
+/**
+ * Codex CLI `~/.codex/config.toml` fragment. `wire_api = "chat"` matches the
+ * gateway's /v1/chat/completions pass-through (works for every chat-capable
+ * upstream; switch to "responses" only for Responses-native products).
+ */
+export function codexTomlSnippet(secret: string, baseUrl: string, model: string): string {
+  const base = normalizeBaseUrl(baseUrl);
+  return [
+    `model_provider = "miqrokey"`,
+    `model = "${model || '<已授权模型>'}"`,
+    '',
+    '[model_providers.miqrokey]',
+    'name = "MiQroKey"',
+    `base_url = "${base}/v1"`,
+    'env_key = "MIQROKEY_API_KEY"',
+    'wire_api = "chat"',
+    '',
+    `# 然后设置环境变量（Windows CMD 用 set，PowerShell 用 $env:）：`,
+    `#   MIQROKEY_API_KEY=${secret}`,
+  ].join('\n');
+}
+
+/**
+ * Generic OpenAI-compatible client (WorkBuddy 这类自配工具): the tool asks for
+ * a Base URL and an API Key — both shown verbatim, plus a smoke-test curl.
+ */
+export function openaiCompatSnippet(secret: string, baseUrl: string, model: string): string {
+  const base = normalizeBaseUrl(baseUrl);
+  return [
+    `Base URL: ${base}/v1`,
+    `API Key:  ${secret}`,
+    '',
+    '# 连通性自测：',
+    `curl ${base}/v1/chat/completions \\`,
+    `  -H "Authorization: Bearer ${secret}" -H "Content-Type: application/json" \\`,
+    `  -d '{"model":"${model || '<已授权模型>'}","messages":[{"role":"user","content":"hi"}]}'`,
+  ].join('\n');
+}

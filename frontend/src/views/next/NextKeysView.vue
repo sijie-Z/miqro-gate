@@ -21,8 +21,12 @@ import {
   ccSwitchImportLink,
   claudeEnvSnippet,
   claudeSettingsSnippet,
+  codexTomlSnippet,
+  openaiCompatSnippet,
   SHELL_FLAVOR_LABEL,
+  USAGE_CLIENT_LABEL,
   type ShellFlavor,
+  type UsageClient,
 } from '@/lib/ccswitch';
 import {
   UiButton,
@@ -35,8 +39,12 @@ import {
   toast,
 } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type {VirtualKeyPurpose} from '@/types/api';
-import type { CreateVirtualKeyResponse, MeGrantsResponse, VirtualKeyView } from '@/types/generated-api';
+import type { VirtualKeyPurpose } from '@/types/api';
+import type {
+  CreateVirtualKeyResponse,
+  MeGrantsResponse,
+  VirtualKeyView,
+} from '@/types/generated-api';
 
 const keys = ref<VirtualKeyView[]>([]);
 const grants = ref<MeGrantsResponse | null>(null);
@@ -316,6 +324,13 @@ const usageKey = ref<VirtualKeyView | null>(null);
 const usagePastedSecret = ref('');
 const usageShell = ref<ShellFlavor>('posix');
 const SHELL_FLAVORS = Object.keys(SHELL_FLAVOR_LABEL) as ShellFlavor[];
+const usageClient = ref<UsageClient>('claude');
+const USAGE_CLIENTS = Object.keys(USAGE_CLIENT_LABEL) as UsageClient[];
+
+/** First allowed model of the inspected key — seeds the per-client snippets. */
+function usageModel(): string {
+  return usageKey.value?.modelIds?.[0] ?? '';
+}
 
 function gatewayBaseUrl(): string {
   return (revealData.value?.baseUrl ?? usageKey.value?.baseUrl ?? '').replace(/\/+$/, '');
@@ -686,8 +701,20 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
               @click="copyKeyId(row as VirtualKeyView)"
             >
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4" />
-                <path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5" stroke="currentColor" stroke-width="1.4" />
+                <rect
+                  x="5.5"
+                  y="5.5"
+                  width="8"
+                  height="8"
+                  rx="1.5"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                />
+                <path
+                  d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                />
               </svg>
             </button>
           </div>
@@ -888,58 +915,127 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
     >
       <p class="next-keys__reveal-url">
         网关地址：<span class="ui-mono">{{ usageKey?.baseUrl }}</span>
+        <UiButton
+          variant="ghost"
+          data-testid="usage-copy-base"
+          @click="copyText(usageKey?.baseUrl ?? '', '网关地址已复制')"
+        >
+          复制
+        </UiButton>
       </p>
       <div
         class="next-keys__segmented"
         role="radiogroup"
-        aria-label="终端类型"
-        data-testid="usage-shell"
+        aria-label="客户端"
+        data-testid="usage-client"
       >
         <label
-          v-for="flavor in SHELL_FLAVORS"
-          :key="flavor"
+          v-for="client in USAGE_CLIENTS"
+          :key="client"
           class="next-keys__seg"
-          :class="{ 'next-keys__seg--on': usageShell === flavor }"
+          :class="{ 'next-keys__seg--on': usageClient === client }"
         >
           <input
-            v-model="usageShell"
+            v-model="usageClient"
             type="radio"
-            name="usage-shell"
-            :value="flavor"
+            name="usage-client"
+            :value="client"
             class="next-keys__seg-input"
           />
-          <span>{{ SHELL_FLAVOR_LABEL[flavor] }}</span>
+          <span>{{ USAGE_CLIENT_LABEL[client] }}</span>
         </label>
       </div>
-      <pre class="next-keys__snippet" data-testid="usage-env">{{
-        claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageShell)
-      }}</pre>
-      <div class="next-keys__import">
-        <UiButton
-          variant="secondary"
-          data-testid="usage-copy-env"
-          @click="
-            copyText(
-              claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageShell),
-              '环境变量模板已复制',
-            )
-          "
+      <template v-if="usageClient === 'claude'">
+        <div
+          class="next-keys__segmented"
+          role="radiogroup"
+          aria-label="终端类型"
+          data-testid="usage-shell"
         >
-          复制环境变量模板
-        </UiButton>
-        <UiButton
-          variant="secondary"
-          data-testid="usage-copy-settings"
-          @click="
-            copyText(
-              claudeSettingsSnippet('<粘贴你保存的密钥>', gatewayBaseUrl()),
-              'settings.json 模板已复制',
-            )
-          "
-        >
-          复制 settings.json 模板
-        </UiButton>
-      </div>
+          <label
+            v-for="flavor in SHELL_FLAVORS"
+            :key="flavor"
+            class="next-keys__seg"
+            :class="{ 'next-keys__seg--on': usageShell === flavor }"
+          >
+            <input
+              v-model="usageShell"
+              type="radio"
+              name="usage-shell"
+              :value="flavor"
+              class="next-keys__seg-input"
+            />
+            <span>{{ SHELL_FLAVOR_LABEL[flavor] }}</span>
+          </label>
+        </div>
+        <pre class="next-keys__snippet" data-testid="usage-env">{{
+          claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageShell)
+        }}</pre>
+        <div class="next-keys__import">
+          <UiButton
+            variant="secondary"
+            data-testid="usage-copy-env"
+            @click="
+              copyText(
+                claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageShell),
+                '环境变量模板已复制',
+              )
+            "
+          >
+            复制环境变量模板
+          </UiButton>
+          <UiButton
+            variant="secondary"
+            data-testid="usage-copy-settings"
+            @click="
+              copyText(
+                claudeSettingsSnippet('<粘贴你保存的密钥>', gatewayBaseUrl()),
+                'settings.json 模板已复制',
+              )
+            "
+          >
+            复制 settings.json 模板
+          </UiButton>
+        </div>
+      </template>
+      <template v-else-if="usageClient === 'codex'">
+        <pre class="next-keys__snippet" data-testid="usage-codex">{{
+          codexTomlSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageModel())
+        }}</pre>
+        <div class="next-keys__import">
+          <UiButton
+            variant="secondary"
+            data-testid="usage-copy-codex"
+            @click="
+              copyText(
+                codexTomlSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageModel()),
+                'Codex 配置模板已复制',
+              )
+            "
+          >
+            复制 Codex 配置模板
+          </UiButton>
+        </div>
+      </template>
+      <template v-else>
+        <pre class="next-keys__snippet" data-testid="usage-openai">{{
+          openaiCompatSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageModel())
+        }}</pre>
+        <div class="next-keys__import">
+          <UiButton
+            variant="secondary"
+            data-testid="usage-copy-openai"
+            @click="
+              copyText(
+                openaiCompatSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageModel()),
+                'Base URL / Key 模板已复制',
+              )
+            "
+          >
+            复制 Base URL / Key
+          </UiButton>
+        </div>
+      </template>
       <div class="ui-field">
         <span class="ui-field__label">手上还有明文密钥？粘贴后可直接一键导入</span>
         <UiInput

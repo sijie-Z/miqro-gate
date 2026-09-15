@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { ccSwitchImportLink, claudeEnvSnippet, claudeSettingsSnippet } from '@/lib/ccswitch';
+import {
+  ccSwitchImportLink,
+  claudeEnvSnippet,
+  claudeSettingsSnippet,
+  codexTomlSnippet,
+  openaiCompatSnippet,
+} from '@/lib/ccswitch';
 
 describe('ccswitch helpers', () => {
   it('builds a v1 provider-import deep link with endpoint, key and model', () => {
@@ -47,5 +53,19 @@ describe('ccswitch helpers', () => {
     const parsed = JSON.parse(text) as { env: Record<string, string> };
     expect(parsed.env.ANTHROPIC_BASE_URL).toBe('http://localhost:8081');
     expect(parsed.env.ANTHROPIC_AUTH_TOKEN).toBe('mqk_live_s');
+  });
+  it('renders the Codex TOML with chat wire api and env key hint', () => {
+    const toml = codexTomlSnippet('key-1', 'https://gw.example.com/', 'deepseek-flash');
+    expect(toml).toContain('base_url = "https://gw.example.com/v1"');
+    expect(toml).toContain('wire_api = "chat"');
+    expect(toml).toContain('env_key = "MIQROKEY_API_KEY"');
+    expect(toml).toContain('MIQROKEY_API_KEY=key-1');
+  });
+
+  it('renders the generic OpenAI-compatible base URL / key / curl block', () => {
+    const text = openaiCompatSnippet('key-1', 'http://localhost:8081', 'deepseek-chat');
+    expect(text).toContain('Base URL: http://localhost:8081/v1');
+    expect(text).toContain('API Key:  key-1');
+    expect(text).toContain('curl http://localhost:8081/v1/chat/completions');
   });
 });
