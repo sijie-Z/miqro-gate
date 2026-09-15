@@ -84,6 +84,43 @@ const probeStatus = ref<api.ModelProbeStatus | null>(null);
 const probing = ref(false);
 const probeError = ref('');
 
+// #552 model test-run (console 在线调试): one real chat call per credential×model
+const testRunVisible = ref(false);
+const testRunModelId = ref('');
+const testRunPrompt = ref('');
+const testRunning = ref(false);
+const testRunError = ref('');
+const testRunResult = ref<api.ModelTestRunResult | null>(null);
+
+function openTestRun(modelId: string) {
+  testRunModelId.value = modelId;
+  testRunPrompt.value = '';
+  testRunError.value = '';
+  testRunResult.value = null;
+  testRunVisible.value = true;
+}
+
+async function runTestRun() {
+  const product = modelsProduct.value;
+  if (!product || !testRunModelId.value) {
+    return;
+  }
+  testRunning.value = true;
+  testRunError.value = '';
+  testRunResult.value = null;
+  try {
+    testRunResult.value = await api.adminTestRunModel(
+      product.id,
+      testRunModelId.value,
+      testRunPrompt.value.trim() || undefined,
+    );
+  } catch (error) {
+    testRunError.value = error instanceof ApiError ? error.message : '试调失败，请稍后重试。';
+  } finally {
+    testRunning.value = false;
+  }
+}
+
 // #440: request-sequence guard — a slow catalog load for product A must not
 // land after the dialog re-targets product B (manual row actions would then
 // act under the wrong product's header).
@@ -344,6 +381,13 @@ onMounted(load);
             :label="m.source === 'MANUAL' ? '人工' : '官方'"
           />
           <UiButton
+            variant="ghost"
+            size="sm"
+            :data-testid="`product-model-testrun-${m.modelId}`"
+            @click="openTestRun(m.modelId ?? '')"
+            >试调</UiButton
+          >
+          <UiButton
             v-if="m.source === 'MANUAL'"
             variant="ghost"
             size="sm"
@@ -382,6 +426,47 @@ onMounted(load);
       </div>
       <template #footer>
         <UiButton variant="secondary" @click="modelsVisible = false">关闭</UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- #552 model test-run (console 在线调试) -->
+    <UiDialog
+      :open="testRunVisible"
+      :title="`试调 · ${testRunModelId}`"
+      width="620px"
+      data-testid="model-testrun-dialog"
+      @update:open="testRunVisible = false"
+    >
+      <p class="ui-panel-sub">
+        以该产品首个 ACTIVE 凭证向上游发一条真实消息（≤256 token 预算；正文不落库、不入日志，审计仅记元数据）。
+      </p>
+      <UiInput
+        v-model="testRunPrompt"
+        label="消息（留空使用默认「请回复OK」）"
+        data-testid="model-testrun-prompt"
+      />
+      <div v-if="testRunError" class="ui-alert ui-alert--error" data-testid="model-testrun-error">
+        {{ testRunError }}
+      </div>
+      <div v-if="testRunResult" class="next-providers__testrun-result" data-testid="model-testrun-result">
+        <div class="next-providers__testrun-meta">
+          HTTP {{ testRunResult.httpStatus }} · {{ testRunResult.latencyMs }} ms<template
+            v-if="testRunResult.totalTokens != null"
+          >
+            · tokens {{ testRunResult.totalTokens }}</template
+          >
+        </div>
+        <pre class="next-providers__testrun-content">{{ testRunResult.content || '（空回复）' }}</pre>
+      </div>
+      <template #footer>
+        <UiButton variant="secondary" @click="testRunVisible = false">关闭</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="testRunning"
+          data-testid="model-testrun-run"
+          @click="runTestRun"
+          >发送试调</UiButton
+        >
       </template>
     </UiDialog>
   </div>
@@ -462,5 +547,27 @@ onMounted(load);
 .next-providers__probe-status {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
+}
+
+.next-providers__testrun-result {
+  margin-top: var(--ui-space-3);
+}
+
+.next-providers__testrun-meta {
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-faint);
+  margin-bottom: var(--ui-space-2);
+}
+
+.next-providers__testrun-content {
+  margin: 0;
+  padding: var(--ui-space-3);
+  background: var(--ui-surface-sunken, #f6f7f9);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
 }
 </style>

@@ -13,6 +13,7 @@ vi.mock('@/api', () => ({
   adminProbeModels: vi.fn(),
   adminModelProbeStatus: vi.fn(),
   adminDeleteModel: vi.fn(),
+  adminTestRunModel: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -186,5 +187,59 @@ describe('NextProvidersView', () => {
     expect(
       document.querySelector('[data-testid="product-probe-status"]')?.textContent,
     ).toContain('上次探测失败');
+  });
+
+  it('I552: test-runs a model from the catalog and shows reply, latency and tokens', async () => {
+    mockApi.adminListModels.mockResolvedValue([
+      {
+        id: 'mm2',
+        providerProductId: '0190-0000-0000-0020',
+        modelId: 'deepseek-flash',
+        displayName: 'DeepSeek Flash',
+        status: 'ACTIVE',
+        source: 'OFFICIAL',
+        version: 0,
+        updatedAt: '2026-09-15T00:00:00Z',
+      },
+    ]);
+    mockApi.adminModelProbeStatus.mockResolvedValue({
+      status: null,
+      error: null,
+      modelCount: null,
+      probedAt: null,
+    });
+    mockApi.adminTestRunModel.mockResolvedValue({
+      providerProductId: '0190-0000-0000-0020',
+      modelId: 'deepseek-flash',
+      httpStatus: 200,
+      latencyMs: 123,
+      content: '联调OK',
+      promptTokens: 7,
+      completionTokens: 3,
+      totalTokens: 10,
+    });
+    const wrapper = mount(NextProvidersView, { global: { plugins: [createPinia()] } });
+    await flushPromises();
+
+    await wrapper.find('[data-testid="product-models-open"]').trigger('click');
+    await flushPromises();
+    await flushPromises();
+
+    (
+      document.querySelector('[data-testid="product-model-testrun-deepseek-flash"]') as HTMLButtonElement
+    ).click();
+    await flushPromises();
+    expect(document.querySelector('[data-testid="model-testrun-dialog"]')).toBeTruthy();
+
+    (document.querySelector('[data-testid="model-testrun-run"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(mockApi.adminTestRunModel).toHaveBeenCalledWith('0190-0000-0000-0020', 'deepseek-flash', undefined);
+    const result = document.querySelector('[data-testid="model-testrun-result"]');
+    expect(result).toBeTruthy();
+    expect(result!.textContent).toContain('联调OK');
+    expect(result!.textContent).toContain('HTTP 200');
+    expect(result!.textContent).toContain('123 ms');
+    expect(result!.textContent).toContain('tokens 10');
   });
 });

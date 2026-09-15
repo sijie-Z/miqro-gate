@@ -889,6 +889,7 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 |---|---|
 | `POST /api/v1/admin/models/probe` | body `{"providerProductId"}` → 解析适配器与首个 ACTIVE 凭证 → 30s 内抓取官方目录：成功落 `model_catalog`（OFFICIAL）并返回 `{providerProductId, productCode, modelCount, probedAt, models[]}`；失败 `502 MODEL_PROBE_FAILED`（原因脱敏，目录不被触碰） |
 | `GET /api/v1/admin/models/probe-status?providerProductId=` | 最近探测状态 `{status(SUCCEEDED/FAILED/null), error, modelCount, probedAt}`（未探测全空；V43 列） |
+| `POST /api/v1/admin/models/test-run` | 在线调试（#552）：`{providerProductId, modelId, prompt?}`（prompt ≤2000，空=「请回复OK」）→ 以该产品**首个 ACTIVE 凭证**向上游发一条 OpenAI 兼容 chat 调用（`POST {baseUrl}/chat/completions`，max_tokens 256）→ 返回 `{providerProductId, productCode, modelId, httpStatus, latencyMs, content, promptTokens, completionTokens, totalTokens}`。**正文（prompt 与回复）不落库、不入日志**；审计 `MODEL_TEST_RUN`（仅元数据：产品/模型/状态/耗时/token）；失败 502 `MODEL_TEST_RUN_FAILED`（脱敏、含上游状态与截断后的上游错误消息）；无可用凭证 400 `MODEL_TEST_RUN_CREDENTIAL_UNAVAILABLE`；未知产品 404 `MODEL_TEST_RUN_PRODUCT_NOT_FOUND`。SYSTEM_ADMIN-only |
 
 - 语义：探测只是**触发器**；失败沿用「保留最后成功目录」，不覆盖 MANUAL 行、不影响人工配置（doc 05 口径）。
 - 凭证：取该产品订阅下**首个 ACTIVE 凭证**（确定性顺序）；无 ACTIVE 凭证 → `400 MODEL_PROBE_CREDENTIAL_UNAVAILABLE`；无适配器 → `400 MODEL_PROBE_ADAPTER_UNAVAILABLE`；产品缺 base URL → `400 MODEL_PROBE_BASE_URL_MISSING`；产品不存在 → `404 MODEL_PROBE_PRODUCT_NOT_FOUND`。

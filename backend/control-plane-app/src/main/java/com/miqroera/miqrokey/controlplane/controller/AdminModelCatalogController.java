@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.dto.ModelCatalogView;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
+import com.miqroera.miqrokey.controlplane.service.AdminModelTestRunService;
 import com.miqroera.miqrokey.controlplane.service.AuditContext;
 import com.miqroera.miqrokey.controlplane.service.ModelCatalogProbeService;
 import com.miqroera.miqrokey.controlplane.service.ModelCatalogService;
@@ -40,12 +41,14 @@ public class AdminModelCatalogController {
 
     private final ModelCatalogService catalogService;
     private final ModelCatalogProbeService probeService;
+    private final AdminModelTestRunService testRunService;
     private final UserContext userContext;
 
     public AdminModelCatalogController(ModelCatalogService catalogService, ModelCatalogProbeService probeService,
-            UserContext userContext) {
+            AdminModelTestRunService testRunService, UserContext userContext) {
         this.catalogService = catalogService;
         this.probeService = probeService;
+        this.testRunService = testRunService;
         this.userContext = userContext;
     }
 
@@ -82,6 +85,17 @@ public class AdminModelCatalogController {
         return probeService.probeStatus(providerProductId);
     }
 
+    /**
+     * One real chat call for a credential×model pair (#552, console "在线调试"): prompt
+     * & reply stay transient (never persisted/logged); audit records metadata only.
+     */
+    @PostMapping("/test-run")
+    public Map<String, Object> testRun(@Valid @RequestBody TestRunRequest body, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return testRunService.testRun(user.tenantId(), user.id(), body.providerProductId(), body.modelId(),
+                body.prompt(), AuditContext.human(user.id(), requestId(httpReq)));
+    }
+
     /** Removes a MANUAL row only. */
     @DeleteMapping("/{rowId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -96,6 +110,10 @@ public class AdminModelCatalogController {
     }
 
     public record ProbeRequest(@NotNull UUID providerProductId) {
+    }
+
+    public record TestRunRequest(@NotNull UUID providerProductId, @NotBlank @Size(max = 128) String modelId,
+            @Size(max = 2000) String prompt) {
     }
     private static String requestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");
