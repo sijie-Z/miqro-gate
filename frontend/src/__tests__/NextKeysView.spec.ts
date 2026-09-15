@@ -176,6 +176,38 @@ describe('NextKeysView', () => {
     expect(wrapper.text()).toContain('还没有虚拟密钥');
   });
 
+  it('labels purpose as a declarative, non-restrictive tag (#596)', async () => {
+    mockApi.myGrants.mockResolvedValue(grants);
+    mockApi.listVirtualKeys.mockResolvedValue([key()]);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // List header carries the hover explanation.
+    const purposeTh = wrapper.findAll('th').find((th) => th.text().includes('用途'))!;
+    expect(purposeTh.attributes('title')).toContain('不限制客户端');
+
+    // Create form explains the label once the cascade reaches the purpose step.
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await wrapper.find('[data-testid="create-name"]').setValue('miqi-dev');
+    await flushPromises();
+    const projectButton = wrapper
+      .findAll('.stub-option')
+      .find((el) => el.text().includes('Core AI'));
+    await projectButton!.trigger('click');
+    await flushPromises();
+    const grantButton = wrapper
+      .findAll('.stub-option')
+      .find((el) => el.text().includes('Claude API'));
+    await grantButton!.trigger('click');
+    await flushPromises();
+
+    const hint = wrapper.find('[data-testid="create-purpose-hint"]');
+    expect(hint.exists()).toBe(true);
+    expect(hint.text()).toContain('不限制客户端');
+    expect(hint.text()).toContain('允许模型');
+  });
+
   it('creates a key through the cascade and reveals the secret once (ack required)', async () => {
     mockApi.myGrants.mockResolvedValue(grants);
     mockApi.createVirtualKey.mockResolvedValue(created);
