@@ -335,6 +335,43 @@ class ModelApprovalApiIntegrationTest {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("KEY_NOT_ACTIVE"));
     }
 
+    @Test
+    @DisplayName("submit refuses a model missing from the provider catalog (#506)")
+    void submitRefusesUncatalogedModel() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(MODEL_A);
+
+        postJson("/api/v1/me/model-approvals", Map.of("virtualKeyId", keyId.toString(), "modelId", "model-ghost"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MODEL_NOT_IN_CATALOG"));
+        // Nothing was recorded: no request row, nothing reached the admin queue.
+        assertThat(approvalCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("approve re-checks the catalog: a model disabled after submission is refused (#506)")
+    void approveRefusesModelGoneFromCatalog() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(MODEL_A);
+
+        MvcResult submit = postJson("/api/v1/me/model-approvals",
+                Map.of("virtualKeyId", keyId.toString(), "modelId", MODEL_NEW)).andExpect(status().isCreated())
+                .andReturn();
+        UUID approvalId = UUID.fromString(
+                (String) objectMapper.readValue(submit.getResponse().getContentAsString(), Map.class).get("id"));
+        jdbc.update("UPDATE model_catalog SET status = 'DISABLED' WHERE provider_product_id = :p AND model_id = :m",
+                new MapSqlParameterSource("p", fx.productId).addValue("m", MODEL_NEW));
+
+        postJson("/api/v1/admin/model-approvals/" + approvalId + "/approve", Map.of()).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MODEL_NOT_IN_CATALOG"));
+        // The refusal is atomic: neither table gained the model, request stays PENDING.
+        assertThat(keyModelIds(keyId)).containsExactly(MODEL_A);
+        assertThat(grantModelIds()).doesNotContain(MODEL_NEW);
+        mockMvc.perform(get("/api/v1/admin/model-approvals?status=PENDING").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].id").value(approvalId.toString()));
+    }
+
     // ------------------------------------------------------------------
     // queue pagination
     // ------------------------------------------------------------------
@@ -347,6 +384,7 @@ class ModelApprovalApiIntegrationTest {
         UUID keyId = createKey(MODEL_A);
         UUID[] ids = new UUID[5];
         for (int i = 0; i < ids.length; i++) {
+            fx.catalogModel(MODEL_NEW + "-" + i); // #506: catalog precondition
             MvcResult r = postJson("/api/v1/me/model-approvals",
                     Map.of("virtualKeyId", keyId.toString(), "modelId", MODEL_NEW + "-" + i))
                     .andExpect(status().isCreated()).andReturn();
@@ -406,6 +444,10 @@ class ModelApprovalApiIntegrationTest {
                 .header("X-CSRF-Token", adminCsrfToken).content(objectMapper.writeValueAsString(payload)));
     }
 
+    private Long approvalCount() {
+        return jdbc.queryForObject("SELECT count(*) FROM model_approval", new MapSqlParameterSource(), Long.class);
+    }
+
     private List<String> keyModelIds(UUID keyId) {
         return jdbc.query("SELECT model_id FROM virtual_key_models WHERE virtual_key_id = :id ORDER BY model_id",
                 new MapSqlParameterSource("id", keyId), (rs, i) -> rs.getString(1));
@@ -445,7 +487,8 @@ class ModelApprovalApiIntegrationTest {
             for (String table : List.of("virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
                     "project_provider_grant_models", "project_provider_grants", "upstream_credential_versions",
                     "upstream_credentials", "plan_seats", "upstream_subscriptions", "project_memberships", "projects",
-                    "provider_products", "providers", "admin_audit_events", "user_sessions", "users")) {
+                    "model_catalog", "provider_products", "providers", "admin_audit_events", "user_sessions",
+                    "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {
@@ -478,6 +521,18 @@ class ModelApprovalApiIntegrationTest {
                     VALUES (:productId, :providerId, 'test-product', 'Test Product', 'PAYG', 'SINGLE_SHARED',
                             '["messages"]', '[{"url":"https://api.test.example"}]', '{"type":"bearer"}', 'VERIFIED', 0)
                     """, p);
+            // #506: approvals require an ACTIVE model_catalog row for the model.
+            for (String model : List.of(MODEL_A, MODEL_B, MODEL_NEW, MODEL_AUTO)) {
+                catalogModel(model);
+            }
+        }
+
+        void catalogModel(String modelId) {
+            jdbc.update("""
+                    INSERT INTO model_catalog (id, provider_product_id, model_id, status, version)
+                    VALUES (:id, :productId, :modelId, 'ACTIVE', 0)
+                    """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("productId", productId)
+                    .addValue("modelId", modelId));
         }
 
         void insertProjectWithGrant(String tag) {

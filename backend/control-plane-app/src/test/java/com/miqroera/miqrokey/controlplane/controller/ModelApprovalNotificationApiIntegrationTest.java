@@ -328,7 +328,8 @@ class ModelApprovalNotificationApiIntegrationTest {
                     "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
                     "project_provider_grant_models", "project_provider_grants", "upstream_credential_versions",
                     "upstream_credentials", "plan_seats", "upstream_subscriptions", "project_memberships", "projects",
-                    "provider_products", "providers", "admin_audit_events", "user_sessions", "users")) {
+                    "model_catalog", "provider_products", "providers", "admin_audit_events", "user_sessions",
+                    "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {
@@ -351,6 +352,18 @@ class ModelApprovalNotificationApiIntegrationTest {
                     VALUES (:productId, :providerId, 'test-product', 'Test Product', 'PAYG', 'SINGLE_SHARED',
                             '["messages"]', '[{"url":"https://api.test.example"}]', '{"type":"bearer"}', 'VERIFIED', 0)
                     """, p);
+            // #506: approvals require an ACTIVE model_catalog row for the model.
+            for (String model : List.of("model-alpha", MODEL_NEW, "model-gamma", MODEL_AUTO)) {
+                catalogModel(model);
+            }
+        }
+
+        void catalogModel(String modelId) {
+            jdbc.update("""
+                    INSERT INTO model_catalog (id, provider_product_id, model_id, status, version)
+                    VALUES (:id, :productId, :modelId, 'ACTIVE', 0)
+                    """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("productId", productId)
+                    .addValue("modelId", modelId));
         }
 
         void insertProjectWithGrant() {
