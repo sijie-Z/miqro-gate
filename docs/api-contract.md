@@ -529,10 +529,13 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 |---|---|
 | `GET /api/v1/admin/usage/summary` | 全租户聚合汇总 + 成本 |
 | `GET /api/v1/admin/usage/records` | 全租户分页明细，时间倒序 |
+| `GET /api/v1/admin/usage/hourly` | 逐小时 Token 表（#634）：小时 × 项目 ×（用户/团队） |
 
 `summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day` | `user` | `team` | `model` | `month`，默认 `project`；I15 新增后三者；2026-09-15 增 `team`，同用户多团队按团队分别计入）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。
 
 `records` 参数：`from`、`to`、`page`（默认 1）、`size`（默认 50，1–200）及与 `summary` 相同的可选过滤，另支持 `clientIp`（#605，精确匹配调用方地址，用于盗用排查「这个来源都调了什么」）。
+
+`hourly` 参数（#634）：`date`（`YYYY-MM-DD`，默认 `tzOffsetMinutes` 时区下的今天）、`days`（1–7，默认 1，自 `date` 向前连排）、`dimension`（`NONE` | `USER` | `TEAM`，默认 `NONE`；每行 = 小时 × 项目，`USER`/`TEAM` 再乘以所选维度——多团队用户按团队分别计入，口径与 `summary` 的 `team` 维度一致）、`tzOffsetMinutes`（默认 0=UTC；前端传本地偏移，上海=480）、可选过滤 `userId`、`projectId`。返回 `{ date, days, dimension, tzOffsetMinutes, rows: [{ hourStart, projectId, projectLabel, dimensionId, dimensionLabel, requests, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, totalTokens }] }`：`hourStart` 是小时桶边界的 UTC 瞬时（UTC+8 下 14:00 桶 = `06:00Z`，由客户端按本地时区格式化），仅返回有用量的桶，`totalTokens` = 四类 Token 之和（与汇总口径一致）。错误码 `DAYS_INVALID` / `DIMENSION_INVALID` / `DATE_INVALID` / `TZ_OFFSET_INVALID`（400），访问控制与租户隔离同 `summary`/`records`。
 
 过滤语义：
 

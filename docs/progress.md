@@ -2902,3 +2902,17 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **验证**：Me 密钥 IT **11/11**（新增：多项目创建+快照双绑定、缺授权 409、轮换镜像全部绑定）；AdminOrg IT **11/11**（新增：标签自动生成/引用守卫 409/改名放行/成员移除→绑定 DISABLED+Key REVOKED）；`VirtualKeyResolverTest` **2/2**（同核心段双后缀→各自项目与凭证；未绑定/篡改/缺头统一拒绝）；OpenAPI 基线导出重建；前端 vitest 全量 + typecheck + 构建立即执行（结果随 PR 记录）。
 
 **演示最小闭环（下一步）**：一把 Key 两个标签（CC Switch 双条目）→ 两项目各自凭证与用量。
+
+
+## 2026-09-16 凌晨 — Goal #634：用量报表·每小时 Token 表（人×项目 / 组×项目）
+
+**背景**：产品负责人提出"要能够看见每个人每个项目，每天统计使用 token 做一个每个小时的表；还有每个组的每个项目的"。核查：`summary` 的 groupBy 无小时粒度、各维度为单维聚合，无任何逐小时展示——全新实现。
+
+**交付**（分支 feat/hourly-usage-report-634）：
+
+- **API**：`GET /api/v1/admin/usage/hourly`（#634）——按自然日返回逐小时桶：`dimension=NONE`（小时×项目）/ `USER`（×用户）/ `TEAM`（×团队，多团队按归属视图计入）；参数 `date`（默认本地今天）、`days`（1–7）、`tzOffsetMinutes`（默认 UTC，前端传本地偏移）、可选 `userId`/`projectId` 过滤；每行 请求数 + 输入/输出/缓存读/缓存写/合计 Token（合计口径=四类之和）。
+- **实现**：`UsageStatsRepository.aggregateHourly`（纯 SQL 聚合：epoch 位移取整再回移，桶边界对任意服务器时区确定；复用既有 filter 连接器与 `usage_event` Token 口径）；`AdminUsageStatsService.hourly`（参数校验 DAYS/DIMENSION/DATE/TZ_OFFSET）；controller + `HourlyUsageReport`/`HourlyUsageRow` DTO。
+- **前端**：「用量报表」新增「每小时 Token」面板——日期选择 + 当天/近 3 天/近 7 天 + 维度切换（不分组/按用户/按团队）+ 复用项目过滤；表格行=小时桶（本地时间），列=请求/输入/输出/缓存读/缓存写/合计；空态友好；随「查询」一并刷新。
+- **文档**：api-contract §5.2 增端点与参数/错误码说明；OpenAPI 基线重导出（仅新增 `paths`/`schemas`，不触发破坏性检查）。
+
+**验证**：`AdminUsageStatsServiceTest` 13/13（窗口/时区换算/参数校验）；`AdminUsageApiIntegrationTest` 11/11（新增 3 用例：UTC+8 下小时桶与"用户×项目"交叉、团队维度按成员聚合、admin-only 与参数边界）；前端 vitest（NextAdminUsageView 全量 + 新增每小时用例）、typecheck、build。
