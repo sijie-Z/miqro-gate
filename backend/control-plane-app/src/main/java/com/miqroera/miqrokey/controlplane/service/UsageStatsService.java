@@ -155,7 +155,7 @@ public class UsageStatsService {
             return UsageStatsRepository.GroupBy.valueOf(value.trim().toUpperCase());
         } catch (IllegalArgumentException e) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "GROUP_BY_INVALID",
-                    "groupBy must be one of PROJECT, VIRTUAL_KEY, CACHE_LEVEL, DAY");
+                    "groupBy must be one of PROJECT, VIRTUAL_KEY, CACHE_LEVEL, DAY, USER, TEAM, MODEL, MONTH");
         }
     }
 

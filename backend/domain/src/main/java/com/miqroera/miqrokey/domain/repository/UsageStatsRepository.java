@@ -33,7 +33,13 @@ public interface UsageStatsRepository {
         /** I15: per-model dimension (label = model id). */
         MODEL,
         /** I15: calendar-month granularity (label = {@code YYYY-MM}). */
-        MONTH
+        MONTH,
+        /**
+         * Per-team dimension (label = team name, joined through the member's virtual
+         * keys). A user in several teams is counted in each team's total — team totals
+         * are attribution views, not a partition.
+         */
+        TEAM
     }
 
     /**
