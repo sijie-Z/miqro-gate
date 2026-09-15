@@ -89,6 +89,7 @@ public final class KafkaRetentionPublisher implements RetentionPublisher, AutoCl
         node.put("gatewayRequestId", envelope.gatewayRequestId());
         node.put("occurredAt", envelope.occurredAt().toString());
         node.put("keyVersion", envelope.keyVersion());
+        node.put("direction", envelope.direction().name());
         node.put("textCharCount", envelope.textCharCount());
         node.put("truncated", envelope.truncated());
         node.put("ciphertext", envelope.ciphertext());

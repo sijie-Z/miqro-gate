@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.gateway.retention;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
 import com.miqroera.miqrokey.domain.model.RetentionConfig;
+import com.miqroera.miqrokey.domain.model.RetentionDirection;
 import com.miqroera.miqrokey.domain.model.RetentionEnvelope;
 import com.miqroera.miqrokey.gateway.vkey.AuthContext;
 import com.miqroera.miqrokey.route.RouteSnapshotProvider;
@@ -84,6 +85,22 @@ public final class RetentionSidecar {
 
     /** Best-effort capture for one authenticated LLM request; never throws. */
     public void capture(String path, byte[] body, AuthContext ctx, String gatewayRequestId) {
+        captureInternal(path, body, ctx, gatewayRequestId, RetentionDirection.INPUT, false, false);
+    }
+
+    /**
+     * Best-effort capture of the model reply after it was fully written to the
+     * client (ADR-0014 增补, 2026-09-15). SSE bodies concatenate text deltas from the
+     * buffered response bytes; {@code overflow} flags a capture bounded by the
+     * proxy buffer (the reply was longer than the gateway retained).
+     */
+    public void captureOutput(String path, byte[] responseBody, boolean sse, AuthContext ctx, String gatewayRequestId,
+            boolean overflow) {
+        captureInternal(path, responseBody, ctx, gatewayRequestId, RetentionDirection.OUTPUT, sse, overflow);
+    }
+
+    private void captureInternal(String path, byte[] body, AuthContext ctx, String gatewayRequestId,
+            RetentionDirection direction, boolean sse, boolean captureOverflow) {
         try {
             UUID tenantId = ctx.tenantId();
             RetentionConfig config = routeSnapshotProvider.current().retention(tenantId);
@@ -94,7 +111,9 @@ public final class RetentionSidecar {
             if (protocol == null) {
                 return;
             }
-            String text = extractor.extract(protocol, body);
+            String text = direction == RetentionDirection.INPUT
+                    ? extractor.extract(protocol, body)
+                    : extractor.extractOutput(protocol, body, sse);
             if (text.isEmpty()) {
                 return;
             }
@@ -109,12 +128,15 @@ public final class RetentionSidecar {
             }
             byte[] plain = text.getBytes(StandardCharsets.UTF_8);
             // Tenant content cap (#367, I18): oversized payloads are truncated on a
-            // UTF-8 boundary and flagged/counted instead of dropped.
-            boolean truncated = false;
+            // UTF-8 boundary and flagged/counted instead of dropped. A capture that
+            // hit the proxy buffer bound counts as truncated too (appended output).
+            boolean truncated = captureOverflow;
             int cap = config.maxContentBytes();
             if (plain.length > cap) {
                 plain = truncateUtf8(plain, cap);
                 truncated = true;
+            }
+            if (truncated) {
                 truncatedCount.incrementAndGet();
                 if (truncatedCount.get() % DROP_LOG_THROTTLE == 0) {
                     log.warn("retention content truncated {} times (latest tenant {})", truncatedCount.get(), tenantId);
@@ -127,7 +149,7 @@ public final class RetentionSidecar {
             EncryptedSecret secret = provider.encrypt(plain, tenantId, RETENTION_AAD_ID);
             RetentionEnvelope envelope = new RetentionEnvelope(UUID.randomUUID(), tenantId, ctx.key().userId(),
                     ctx.key().keyId(), protocol.name(), gatewayRequestId, Instant.now(clock), secret.keyVersion(),
-                    secret.ciphertext(), secret.nonce(), textCharCount, truncated);
+                    secret.ciphertext(), secret.nonce(), textCharCount, truncated, direction);
             if (!offer(envelope)) {
                 countDrop("queue saturated");
             }

@@ -505,6 +505,11 @@ public class ProxyController {
                         long latencyMs = clock.millis() - startMillis;
                         publishUsageEvent(ctx, modelName, cacheKey, tokens, status, upstreamRequestId, requestId,
                                 latencyMs, true, successful && tokens.isEmpty());
+                        // Retention (ADR-0014 增补): the reply is fully written —
+                        // capture its text on the compliance side channel
+                        // (best-effort; disabled unless the tenant opted in).
+                        retentionSidecar.captureOutput(exchange.getRequest().getURI().getPath(),
+                                attempt.collector.bytes(), isSse, ctx, requestId, attempt.collector.overflow());
 
                         CachedResponse cached = null;
                         boolean cacheableResponse = cacheKey != null && successful && !attempt.collector.overflow()
