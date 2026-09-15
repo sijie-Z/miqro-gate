@@ -164,7 +164,6 @@ class RetentionCaptureTest {
         assertThat(envelope.userId()).isEqualTo(GatewayTestKeys.DEFAULT_KEY.userId());
         assertThat(envelope.virtualKeyId()).isEqualTo(GatewayTestKeys.DEFAULT_KEY.keyId());
         assertThat(envelope.wireProtocol()).isEqualTo("OPENAI_CHAT");
-        assertThat(envelope.textCharCount()).isGreaterThan(0);
         assertThat(envelope.keyVersion()).isEqualTo("v1");
 
         byte[] plain = new FakeCrypto().decrypt(
@@ -172,6 +171,7 @@ class RetentionCaptureTest {
                 envelope.tenantId(), UUID.randomUUID());
         String text = new String(plain, StandardCharsets.UTF_8);
         assertThat(text).isEqualTo("remember this phrase\n---\nand this one");
+        assertThat(envelope.textCharCount()).isEqualTo(text.length());
         assertThat(text).doesNotContain("secret system prompt");
         assertThat(sidecar.droppedCount()).isZero();
     }
@@ -211,16 +211,40 @@ class RetentionCaptureTest {
         assertThat(publisher.published).hasSize(1);
         RetentionEnvelope envelope = publisher.published.get(0);
         assertThat(envelope.truncated()).isTrue();
-        assertThat(envelope.textCharCount()).isLessThanOrEqualTo(1024);
         assertThat(sidecar.truncatedCount()).isEqualTo(1);
 
         byte[] plain = new FakeCrypto().decrypt(
                 new EncryptedSecret(envelope.ciphertext(), envelope.nonce(), envelope.keyVersion()),
                 envelope.tenantId(), UUID.randomUUID());
         String text = new String(plain, StandardCharsets.UTF_8);
-        assertThat(plain.length).isLessThanOrEqualTo(1024);
+        assertThat(plain.length).isEqualTo(1024);
         assertThat(text).startsWith("user-user-");
+        assertThat(envelope.textCharCount()).isEqualTo(text.length());
         assertThat(text).doesNotContain("secret system prompt");
         assertThat(sidecar.droppedCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("textCharCount counts characters of the captured text, not UTF-8 bytes (#518)")
+    void textCharCountCountsCharactersNotBytes() {
+        installRetention(true, 1024);
+        String cjk = "留痕字符数验证".repeat(60); // 420 chars / 1260 bytes, above the 1024-byte cap
+        String body = "{\"messages\":[{\"role\":\"user\",\"content\":\"" + cjk + "\"}]}";
+        sidecar.capture("/v1/chat/completions", body.getBytes(StandardCharsets.UTF_8), ctx(), "req-chars");
+        sidecar.flushNow();
+
+        assertThat(publisher.published).hasSize(1);
+        RetentionEnvelope envelope = publisher.published.get(0);
+        assertThat(envelope.truncated()).isTrue();
+        byte[] plain = new FakeCrypto().decrypt(
+                new EncryptedSecret(envelope.ciphertext(), envelope.nonce(), envelope.keyVersion()),
+                envelope.tenantId(), UUID.randomUUID());
+        String text = new String(plain, StandardCharsets.UTF_8);
+        // The 1024-byte cap backs off to the previous 3-byte character boundary: 1023
+        // bytes / 341 chars.
+        assertThat(plain.length).isEqualTo(1023);
+        assertThat(text.length()).isEqualTo(341);
+        assertThat(envelope.textCharCount()).isEqualTo(341).isNotEqualTo(plain.length);
+        assertThat(cjk).startsWith(text);
     }
 }
