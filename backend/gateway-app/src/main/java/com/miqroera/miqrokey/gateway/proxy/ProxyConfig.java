@@ -14,7 +14,7 @@ import reactor.netty.resources.ConnectionProvider;
 import java.time.Clock;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(ProxyTargetProperties.class)
+@EnableConfigurationProperties({ProxyTargetProperties.class, ClientAddressProperties.class})
 public class ProxyConfig {
 
     @Bean

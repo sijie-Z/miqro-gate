@@ -67,8 +67,9 @@ public class AdminUsageController {
             @RequestParam(required = false, defaultValue = "50") int size, @RequestParam(required = false) UUID userId,
             @RequestParam(required = false) UUID projectId, @RequestParam(required = false) UUID virtualKeyId,
             @RequestParam(required = false) UUID credentialId, @RequestParam(required = false) UUID subscriptionId,
-            @RequestParam(required = false) UUID providerProductId, @RequestParam(required = false) String modelId) {
+            @RequestParam(required = false) UUID providerProductId, @RequestParam(required = false) String modelId,
+            @RequestParam(required = false) String clientIp) {
         return usageStatsService.records(userContext.getUser(), from, to, page, size, userId, projectId, virtualKeyId,
-                credentialId, subscriptionId, providerProductId, modelId);
+                credentialId, subscriptionId, providerProductId, modelId, clientIp);
     }
 }

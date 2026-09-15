@@ -262,7 +262,8 @@
       "gatewayRequestId": "req-abc123",
       "isComplete": true,
       "usageMissing": false,
-      "virtualKeyId": "0190..."
+      "virtualKeyId": "0190...",
+      "clientIp": "203.0.113.7"
     }
   ],
   "page": 1,
@@ -273,6 +274,7 @@
 
 - `cacheLevel` ∈ `UPSTREAM | COALESCED | L1_HIT | L2_HIT`。缓存命中行没有 token 数（NULL → 0）且 `isComplete=false` 时不作为上游用量计入。
 - `usageMissing=true` 表示上游未返回 usage（如异常中断）；该行仍入账但用量为 0，便于排查。
+- `clientIp`（#605）：调用方网络地址——传输层对端；仅当对端命中 `MIQROKEY_TRUSTED_PROXY_CIDRS` 可信代理时才消费 `X-Forwarded-For`（**从右往左**取第一个非可信地址，杜绝最左伪造），非 IP 字面量（主机名/带端口）一律不记录、不解析；无法确定时为 `null`。历史行与直连未配置代理时的对端地址照记。
 - `providerRequestId` 在 tenant 内唯一（幂等写，重复 flush 不双计）。
 
 ### 4.6 模型申请（审批流）`POST/GET /api/v1/me/model-approvals`
@@ -528,7 +530,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 
 `summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day` | `user` | `model` | `month`，默认 `project`；I15 新增后三者）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。
 
-`records` 参数：`from`、`to`、`page`（默认 1）、`size`（默认 50，1–200）及与 `summary` 相同的可选过滤。
+`records` 参数：`from`、`to`、`page`（默认 1）、`size`（默认 50，1–200）及与 `summary` 相同的可选过滤，另支持 `clientIp`（#605，精确匹配调用方地址，用于盗用排查「这个来源都调了什么」）。
 
 过滤语义：
 

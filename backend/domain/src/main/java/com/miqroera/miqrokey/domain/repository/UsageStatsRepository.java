@@ -46,11 +46,11 @@ public interface UsageStatsRepository {
      * query shape.
      */
     record UsageFilter(UUID tenantId, Set<UUID> virtualKeyIds, UUID userId, UUID projectId, UUID credentialId,
-            UUID subscriptionId, UUID providerProductId, String modelId, Instant from, Instant to) {
+            UUID subscriptionId, UUID providerProductId, String modelId, String clientIp, Instant from, Instant to) {
 
         /** Self-service shape: caller-scoped key set, no extra dimensions. */
         public UsageFilter(UUID tenantId, Set<UUID> virtualKeyIds, Instant from, Instant to) {
-            this(tenantId, virtualKeyIds, null, null, null, null, null, null, from, to);
+            this(tenantId, virtualKeyIds, null, null, null, null, null, null, null, from, to);
         }
     }
 

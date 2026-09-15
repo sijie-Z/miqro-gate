@@ -40,6 +40,7 @@ class PostgresUsageEventWriterTest {
 
     private static final Clock CLOCK = Clock.systemUTC();
     private static final UUID TENANT_ID = UUID.fromString("aaaaaaaa-1111-2222-3333-444444444444");
+    private static final String CLIENT_IP = "203.0.113.7";
 
     private static final PostgreSQLContainer<?> POSTGRES;
 
@@ -197,6 +198,11 @@ class PostgresUsageEventWriterTest {
                 new MapSqlParameterSource().addValue("prid", providerRequestId.toString()), Integer.class);
         assertThat(usageRows).isEqualTo(1);
 
+        // #605: the calling-party address round-trips onto the usage fact.
+        String clientIp = jdbc.queryForObject("SELECT client_ip FROM usage_event WHERE provider_request_id = :prid",
+                new MapSqlParameterSource().addValue("prid", providerRequestId.toString()), String.class);
+        assertThat(clientIp).isEqualTo(CLIENT_IP);
+
         Integer hitRows = jdbc.queryForObject("""
                 SELECT count(*) FROM cache_hit_event
                 WHERE tenant_id = :tenantId AND cache_key = :cacheKey
@@ -228,7 +234,7 @@ class PostgresUsageEventWriterTest {
         return new UsageEvent(UUID.randomUUID(), TENANT_ID, providerRequestId.toString(), UUID.randomUUID(),
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "model-x", CacheLevel.UPSTREAM,
                 new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), 42L, 200, null, true, false, "gw-usage",
-                CLOCK.instant());
+                CLOCK.instant(), CLIENT_IP);
     }
 
     private static CacheHitEvent hitEvent(String cacheKey, Instant occurredAt) {

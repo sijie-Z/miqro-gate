@@ -100,7 +100,7 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                     .addValue("latencyMs", e.latencyMs()).addValue("upstreamStatusCode", e.upstreamStatusCode())
                     .addValue("cacheKey", e.cacheKey()).addValue("isComplete", e.isComplete())
                     .addValue("usageMissing", e.usageMissing()).addValue("gatewayRequestId", e.gatewayRequestId())
-                    .addValue("occurredAt", Timestamp.from(e.occurredAt())));
+                    .addValue("clientIp", e.clientIp()).addValue("occurredAt", Timestamp.from(e.occurredAt())));
         }
         if (params.isEmpty()) {
             return;
@@ -111,13 +111,13 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                     input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
                     prompt_tokens, completion_tokens, total_tokens, reasoning_tokens,
                     latency_ms, upstream_status_code, cache_key, is_complete, usage_missing,
-                    gateway_request_id, occurred_at)
+                    gateway_request_id, client_ip, occurred_at)
                 VALUES (:id, :tenantId, :providerRequestId, :virtualKeyId, :projectId, :productId, :credentialId,
                     :modelId, :cacheLevel,
                     :inputTokens, :outputTokens, :cacheCreation, :cacheRead,
                     :promptTokens, :completionTokens, :totalTokens, :reasoningTokens,
                     :latencyMs, :upstreamStatusCode, :cacheKey, :isComplete, :usageMissing,
-                    :gatewayRequestId, :occurredAt)
+                    :gatewayRequestId, :clientIp, :occurredAt)
                 ON CONFLICT (tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL DO NOTHING
                 """, params.toArray(new MapSqlParameterSource[0]));
     }

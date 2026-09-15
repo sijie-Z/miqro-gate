@@ -42,6 +42,7 @@ function recordRow(
     isComplete: i !== 1,
     usageMissing: i === 1,
     virtualKeyId: 'k1',
+    clientIp: i === 1 ? null : '203.0.113.7',
     ...overrides,
   } as NonNullable<UsageRecordPage['items']>[number];
 }
@@ -92,6 +93,8 @@ describe('NextAdminUsageView', () => {
     expect(wrapper.text()).toContain('正常');
     expect(wrapper.text()).toContain('缺失');
     expect(wrapper.text()).toContain('gw-1');
+    // #605: the calling address renders in the records table
+    expect(wrapper.text()).toContain('203.0.113.7');
   });
 
   it('paginates to the next page and disables prev on the first page', async () => {
@@ -118,12 +121,14 @@ describe('NextAdminUsageView', () => {
 
     await wrapper.find('[data-testid="usage-project-id"]').setValue('p1');
     await wrapper.find('[data-testid="usage-model-id"]').setValue('deepseek-v4-flash');
+    await wrapper.find('[data-testid="usage-client-ip"]').setValue('203.0.113.7');
     await wrapper.find('[data-testid="usage-query"]').trigger('click');
     await flushPromises();
 
     expect(mockApi.adminUsageRecords).toHaveBeenLastCalledWith({
       modelId: 'deepseek-v4-flash',
       projectId: 'p1',
+      clientIp: '203.0.113.7',
       page: 1,
       size: 20,
     });

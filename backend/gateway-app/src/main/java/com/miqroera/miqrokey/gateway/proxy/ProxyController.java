@@ -138,6 +138,7 @@ public class ProxyController {
     private final BuiltInAdapterRegistry adapterRegistry;
     private final ProviderCatalog providerCatalog;
     private final RetentionSidecar retentionSidecar;
+    private final ClientAddressResolver clientAddressResolver;
     /** TTFB metric hook (#486): observation per attempt that sees a first byte. */
     private final GatewayTtfbMetrics ttfbMetrics;
 
@@ -148,8 +149,9 @@ public class ProxyController {
             ObjectMapper objectMapper, ProxyTargetProperties properties,
             UpstreamTargetValidator upstreamTargetValidator, Scheduler credentialDecryptScheduler,
             BuiltInAdapterRegistry adapterRegistry, ProviderCatalog providerCatalog, RetentionSidecar retentionSidecar,
-            GatewayTtfbMetrics ttfbMetrics) {
+            GatewayTtfbMetrics ttfbMetrics, ClientAddressResolver clientAddressResolver) {
         this.retentionSidecar = retentionSidecar;
+        this.clientAddressResolver = clientAddressResolver;
         this.ttfbMetrics = ttfbMetrics;
         this.keyResolver = keyResolver;
         this.credentialInjector = credentialInjector;
@@ -316,7 +318,8 @@ public class ProxyController {
         }
         // Waiter: replay the leader's response byte-identically, or fall back.
         return flight.shared().flatMap(cached -> {
-            publishCoalescedUsage(ctx, modelName, cached, cacheKey, requestId);
+            publishCoalescedUsage(ctx, modelName, cached, cacheKey, requestId,
+                    clientAddressResolver.resolve(exchange.getRequest()));
             return sseReplayEngine.replay(cached, exchange.getResponse(), requestId, "coalesced");
         }).onErrorResume(e -> {
             log.debug("Coalescer wait failed (requestId={}); falling back to own upstream call: {}", requestId,
@@ -504,7 +507,8 @@ public class ProxyController {
                         boolean successful = status >= 200 && status < 300;
                         long latencyMs = clock.millis() - startMillis;
                         publishUsageEvent(ctx, modelName, cacheKey, tokens, status, upstreamRequestId, requestId,
-                                latencyMs, true, successful && tokens.isEmpty());
+                                latencyMs, true, successful && tokens.isEmpty(),
+                                clientAddressResolver.resolve(exchange.getRequest()));
                         // Retention (ADR-0014 增补): the reply is fully written —
                         // capture its text on the compliance side channel
                         // (best-effort; disabled unless the tenant opted in).
@@ -580,7 +584,8 @@ public class ProxyController {
     // -------------------------------------------------------------------
 
     private void publishUsageEvent(AuthContext ctx, String modelName, CacheKey cacheKey, TokenBucket tokens, int status,
-            String providerRequestId, String requestId, long latencyMs, boolean complete, boolean usageMissing) {
+            String providerRequestId, String requestId, long latencyMs, boolean complete, boolean usageMissing,
+            String clientIp) {
         if (modelName == null) {
             // usage_event.model_id is NOT NULL: a transparently forwarded body
             // without a usable "model" field (unparseable JSON, or a protocol
@@ -595,14 +600,14 @@ public class ProxyController {
             usageEventBus.publish(new UsageEvent(UUID.randomUUID(), ctx.tenantId(), providerRequestId,
                     ctx.key().keyId(), ctx.projectId(), ctx.productId(), ctx.binding().credentialId(), modelName,
                     CacheLevel.UPSTREAM, tokens, latencyMs, status, cacheKey != null ? cacheKey.sha256() : null,
-                    complete, usageMissing, requestId, clock.instant()));
+                    complete, usageMissing, requestId, clock.instant(), clientIp));
         } catch (RuntimeException e) {
             log.warn("Failed to publish usage event (requestId={}): {}", requestId, e.getMessage());
         }
     }
 
     private void publishCoalescedUsage(AuthContext ctx, String modelName, CachedResponse cached, CacheKey cacheKey,
-            String requestId) {
+            String requestId, String clientIp) {
         if (modelName == null) {
             log.warn("Coalesced usage event skipped: no model name in request (requestId={})", requestId);
             return;
@@ -611,7 +616,7 @@ public class ProxyController {
             usageEventBus.publish(new UsageEvent(UUID.randomUUID(), ctx.tenantId(), null, ctx.key().keyId(),
                     ctx.projectId(), ctx.productId(), ctx.binding().credentialId(), modelName, CacheLevel.COALESCED,
                     cached.usage(), null, null, cacheKey != null ? cacheKey.sha256() : null, true,
-                    cached.usage().isEmpty(), requestId, clock.instant()));
+                    cached.usage().isEmpty(), requestId, clock.instant(), clientIp));
         } catch (RuntimeException e) {
             log.warn("Failed to publish coalesced usage event (requestId={}): {}", requestId, e.getMessage());
         }

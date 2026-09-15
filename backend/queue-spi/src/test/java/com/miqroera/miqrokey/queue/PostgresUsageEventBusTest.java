@@ -224,7 +224,7 @@ class PostgresUsageEventBusTest {
         return new UsageEvent(UUID.randomUUID(), UUID.randomUUID(), providerRequestId, UUID.randomUUID(),
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "model-x", CacheLevel.UPSTREAM,
                 new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), 42L, 200, null, true, false, "gw-1",
-                CLOCK.instant());
+                CLOCK.instant(), null);
     }
 
     private static CacheHitEvent hitEvent() {
