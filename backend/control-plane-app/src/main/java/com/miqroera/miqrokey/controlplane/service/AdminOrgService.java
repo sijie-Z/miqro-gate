@@ -339,8 +339,7 @@ public class AdminOrgService {
         }
         requireCatalogModels(providerProductId, models);
         if (grantRepository.existsByProjectIdAndProductIdAndCredentialId(projectId, providerProductId, credentialId)) {
-            throw new ApiException(HttpStatus.CONFLICT, "GRANT_EXISTS",
-                    "a grant for this project/product/credential already exists");
+            throw new ApiException(HttpStatus.CONFLICT, "GRANT_EXISTS", "该项目已存在相同凭证与产品组合的授权（含已停用），不可重复创建。");
         }
         ProjectProviderGrant grant = new ProjectProviderGrant(UUID.randomUUID(), tenantId, projectId, providerProductId,
                 credentialId, GrantStatus.ACTIVE, adminId, 0, Instant.now(), Instant.now());
