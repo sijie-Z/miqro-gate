@@ -162,6 +162,12 @@ docker compose -f compose.prod.yaml up -d --build
 - **管理门户 IP 白名单**（可选）：`MIQROKEY_CONTROL_ADMIN_IP_ALLOWLIST` 与
   `MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES=172.28.0.0/24`（XFF 仅从反代采纳）。
 - **启动顺序**：postgres healthy → control-plane（Flyway 迁移）/gateway → portal；`docker compose ps` 全 `healthy` 后验收。
+- **留痕 Kafka（可选 profile，#534）**：`docker compose -f compose.prod.yaml --profile kafka up -d` 额外拉起单节点
+  Redpanda（Kafka 协议兼容；512M 内存约束、镜像 digest 固定；官方 `docker.redpanda.com` 大陆不可达——经 Docker
+  Hub 镜像名拉取，2026-09-15 实测）。随后在 `.env` 设 `MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS=redpanda:9092`
+  并 `up -d gateway`；租户留痕开关（默认关）打开后密文信封投递至 `content-retention` 主题（信封与消费协议见
+  `retention-consumer.md`，开关/上限见 configuration-reference §R3）。**腾讯云 CKafka 为等价替代**：不启用本
+  profile，直接把该变量设为 CKafka 接入地址。不带 profile 时服务列表与现状逐服务一致（零行为变化）。
 
 ## 13. 验证与备份容器
 

@@ -124,6 +124,9 @@ services:
       MIQROKEY_CRYPTO_ENABLED: "true"
       MIQROKEY_CRYPTO_ENC_KEY_FILE: /run/secrets/master_key
       MIQROKEY_CRYPTO_HMAC_KEY_FILE: /run/secrets/vk_hmac_key
+      # 留痕 Kafka 出口（ADR-0014 R3，默认关）：空值=no-op publisher。自托管 broker 启用后
+      # 设为 redpanda:9092（需 --profile kafka）；腾讯云 CKafka 直接填其接入地址，无需 profile。
+      MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS: ${MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS:-}
       # 显式限堆：%-of-limit 在小规格宿主（2G 演示机）上会超卖；大机可用 GATEWAY_JAVA_OPTS 覆盖。
       JAVA_TOOL_OPTIONS: ${GATEWAY_JAVA_OPTS:--Xmx640m -XX:MaxMetaspaceSize=192m -XX:+ExitOnOutOfMemoryError}
     volumes:
@@ -194,6 +197,47 @@ services:
           memory: 256m
     networks: [internal]
 
+  # 可选：自托管单节点 Redpanda（Kafka 协议兼容）——留痕出口（ADR-0014 R3）的 broker（#534）。
+  # 启用：docker compose -f compose.prod.yaml --profile kafka up -d，并在 .env 设
+  #   MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS=redpanda:9092（否则留痕保持默认关）。
+  # 不启用该 profile：服务不启动、零资源占用、行为与不带 Kafka 完全一致。
+  # 腾讯云 CKafka 为等价替代：不用本服务，直接把同一变量设为 CKafka 接入地址。
+  # 坑位：官方 docker.redpanda.com 在中国大陆不可达——经 Docker Hub 镜像名（digest 固定）拉取（2026-09-15 实测）。
+  redpanda:
+    image: redpandadata/redpanda:latest@sha256:468bd13a9f2bd24794cb7fddc867c767fb1008b9a07b297b89fde48c564d7d96
+    profiles: ["kafka"]
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 800m
+    networks: [internal]
+
 networks:
   internal:
     ipam:
@@ -204,3 +248,4 @@ volumes:
   pgdata:
   backups:
   secrets-store:
+  redpanda-data:
