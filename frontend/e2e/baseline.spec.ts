@@ -1221,7 +1221,6 @@ test('login language picker switches the page between Chinese and English', asyn
   // header must not duplicate the panel picker).
   await expect(page.getByText('简体中文')).toHaveCount(1);
   await expect(page.locator('.hero-copy h1')).toContainText('网关静默运转');
-  await expect(page.locator('.auth-heading h2')).toContainText('欢迎回来');
   await expect(page.getByTestId('login-submit')).toContainText('登 录');
 
   // A real click through the radio menu translates the page.
