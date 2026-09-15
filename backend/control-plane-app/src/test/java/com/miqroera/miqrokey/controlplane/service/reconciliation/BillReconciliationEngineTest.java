@@ -122,6 +122,34 @@ class BillReconciliationEngineTest {
     }
 
     @Test
+    @DisplayName("level 3: a bill without cache_read_tokens compares on input/output only (#625)")
+    void level3NullCacheComparesInputOutput() {
+        // The bill omits cache_read_tokens entirely (null). Before #625 the
+        // engine compared null against the local 0 and could never match, so
+        // cache-less provider rows always landed UNMATCHED_PROVIDER.
+        BillLine bill = bill(null, T0, "m1", "p1", 50L, 43L, "0.001");
+        LocalUsageRow hit = new LocalUsageRow("l1", null, T0.plusSeconds(5), "m1", "p1", 50L, 43L, 0L, true);
+        LocalUsageRow other = new LocalUsageRow("l2", null, T0.plusSeconds(10), "m1", "p1", 50L, 24L, 0L, true);
+
+        // Two same-model locals inside ±60s defeat the level-2 uniqueness gate;
+        // the cache-less bill row must still match via level 3 on input/output.
+        Report report = run(List.of(bill), List.of(hit, other));
+        assertThat(report.rows().get(0).verdict().name()).isEqualTo("MATCHED");
+        assertThat(report.rows().get(0).localRef()).isEqualTo("l1");
+    }
+
+    @Test
+    @DisplayName("level 3: a bill that lists cache_read_tokens still requires an exact cache match (#625)")
+    void level3CacheStillExact() {
+        BillLine bill = new BillLine(null, T0, "m1", "p1", 50L, 43L, 7L, "0.001", "USD", "success", null);
+        LocalUsageRow zeroCache = new LocalUsageRow("l1", null, T0.plusSeconds(5), "m1", "p1", 50L, 43L, 0L, true);
+        LocalUsageRow other = new LocalUsageRow("l2", null, T0.plusSeconds(10), "m1", "p1", 50L, 24L, 0L, true);
+
+        Report report = run(List.of(bill), List.of(zeroCache, other));
+        assertThat(report.rows().get(0).verdict().name()).isEqualTo("UNMATCHED_PROVIDER");
+    }
+
+    @Test
     @DisplayName("unmatched provider rows accumulate the attribution gap as amountDiff")
     void amountGap() {
         BillLine bill = bill("ghost", T0, "m1", "p1", 10L, 5L, "0.0042");
