@@ -371,7 +371,7 @@ onMounted(load);
 }
 
 .next-teams__member-sub {
-  font-size: 11px;
+  font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-faint);
 }
 </style>

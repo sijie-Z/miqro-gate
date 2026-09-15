@@ -669,7 +669,7 @@ onMounted(load);
 }
 
 .next-quota__scope-tag {
-  font-size: 11px;
+  font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-faint);
 }
 

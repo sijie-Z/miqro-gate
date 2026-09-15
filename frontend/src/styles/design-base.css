@@ -236,6 +236,15 @@
   background: transparent;
 }
 
+/* ---- keyboard focus ---- */
+/* Plain links and tile anchors (router-links) get a visible focus ring;
+   buttons/inputs/selects carry their own component-level focus styles. */
+a:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: 2px;
+  border-radius: var(--ui-radius-control);
+}
+
 /* ---- misc ---- */
 .ui-truncate {
   overflow: hidden;

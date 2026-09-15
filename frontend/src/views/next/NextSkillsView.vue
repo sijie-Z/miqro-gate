@@ -328,6 +328,6 @@ onMounted(load);
   border: 1px solid var(--ui-border-muted);
   color: var(--ui-foreground-secondary);
   font-family: var(--ui-font-mono);
-  font-size: 11px;
+  font-size: var(--ui-font-size-xs);
 }
 </style>
