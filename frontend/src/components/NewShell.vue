@@ -29,6 +29,8 @@ import {
   EditIcon,
   ErrorCircleIcon,
   FilePasteIcon,
+  Fullscreen1Icon,
+  FullscreenExit1Icon,
   FolderOpenIcon,
   LayersIcon,
   LockOnIcon,
@@ -49,6 +51,7 @@ import {
 import { useAuthStore } from '@/stores/auth';
 import { language } from '@/i18n';
 import SettingsDrawer from '@/components/SettingsDrawer.vue';
+import LockScreen from '@/components/LockScreen.vue';
 import { initPreferences, preferences, setPreference } from '@/preferences';
 import type { Component } from 'vue';
 
@@ -115,7 +118,6 @@ const opsNav: NavItem[] = [
   { name: 'alert-rules', label: '告警规则', icon: ErrorCircleIcon },
   { name: 'audit', label: '审计日志', icon: FilePasteIcon },
   { name: 'mcp-access-logs', label: 'MCP 访问日志', icon: FilePasteIcon },
-  { name: 'retention-logs', label: '内容留痕', icon: FilePasteIcon },
 ];
 
 const isAdmin = computed(() => auth.user?.role === 'SYSTEM_ADMIN');
@@ -222,12 +224,30 @@ onMounted(() => {
   window.addEventListener('click', onTabMenuWindowClick);
   window.addEventListener('keydown', onTabMenuKeydown);
   window.addEventListener('scroll', onTabMenuWindowClick, true);
+  // Auto-lock activity tracking: passive listeners, 15s idle check.
+  window.addEventListener('mousemove', noteActivity, { passive: true });
+  window.addEventListener('pointerdown', noteActivity, { passive: true });
+  window.addEventListener('keydown', noteActivity, { passive: true });
+  window.addEventListener('scroll', noteActivity, { passive: true });
+  idleTimer = window.setInterval(() => {
+    const minutes = preferences.lockMinutes;
+    if (minutes > 0 && !locked.value && Date.now() - lastActivity.value > minutes * 60_000) {
+      locked.value = true;
+    }
+  }, 15_000);
+  document.addEventListener('fullscreenchange', onFullscreenChange);
 });
 onUnmounted(() => {
   window.removeEventListener('resize', updateNarrow);
   window.removeEventListener('click', onTabMenuWindowClick);
   window.removeEventListener('keydown', onTabMenuKeydown);
   window.removeEventListener('scroll', onTabMenuWindowClick, true);
+  window.removeEventListener('mousemove', noteActivity);
+  window.removeEventListener('pointerdown', noteActivity);
+  window.removeEventListener('keydown', noteActivity);
+  window.removeEventListener('scroll', noteActivity);
+  window.clearInterval(idleTimer);
+  document.removeEventListener('fullscreenchange', onFullscreenChange);
 });
 
 // ---- tab context menu (right-click, Vben parity) ----
@@ -298,6 +318,37 @@ function onTabMenuWindowClick() {
 
 function onTabMenuKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') closeTabMenu();
+}
+
+// ---- auto lock screen (Vben 自动锁屏) ----
+const locked = ref(false);
+const lastActivity = ref(Date.now());
+let idleTimer: number | undefined;
+
+function noteActivity() {
+  lastActivity.value = Date.now();
+}
+
+function lockNow() {
+  locked.value = true;
+}
+
+// ---- fullscreen toggle (Vben 全屏内容) ----
+const isFullscreen = ref(false);
+function onFullscreenChange() {
+  isFullscreen.value = Boolean(document.fullscreenElement);
+}
+async function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await document.documentElement.requestFullscreen();
+    }
+  } catch {
+    // Browsers may deny fullscreen outside a user gesture; the button state
+    // stays driven by the fullscreenchange event either way.
+  }
 }
 
 // ---- rail menu search (Vben 菜单搜索) ----
@@ -507,6 +558,13 @@ async function handleLogout() {
                 </DropdownMenuRadioGroup>
                 <DropdownMenuSeparator class="new-shell__user-menu-sep" />
                 <DropdownMenuItem
+                  class="ui-menu__item new-shell__user-menu-item"
+                  data-testid="shell-lock"
+                  @select="lockNow"
+                  >锁定屏幕</DropdownMenuItem
+                >
+                <DropdownMenuSeparator class="new-shell__user-menu-sep" />
+                <DropdownMenuItem
                   class="ui-menu__item new-shell__user-menu-item new-shell__user-menu-item--danger"
                   data-testid="shell-logout"
                   @select="handleLogout"
@@ -540,6 +598,17 @@ async function handleLogout() {
           @click="settingsOpen = true"
         >
           <SettingIcon class="new-shell__icon-btn-icon" />
+        </button>
+        <button
+          type="button"
+          class="new-shell__icon-btn"
+          data-testid="shell-fullscreen"
+          :title="isFullscreen ? '退出全屏' : '全屏'"
+          :aria-label="isFullscreen ? '退出全屏' : '全屏'"
+          @click="toggleFullscreen"
+        >
+          <FullscreenExit1Icon v-if="isFullscreen" class="new-shell__icon-btn-icon" />
+          <Fullscreen1Icon v-else class="new-shell__icon-btn-icon" />
         </button>
       </div>
 
@@ -627,6 +696,13 @@ async function handleLogout() {
     </main>
 
     <SettingsDrawer v-model:open="settingsOpen" />
+
+    <LockScreen
+      v-if="locked"
+      :username="auth.user?.username ?? ''"
+      @unlock="locked = false"
+      @logout="handleLogout"
+    />
   </div>
 </template>
 
