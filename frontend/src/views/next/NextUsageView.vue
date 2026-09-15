@@ -9,7 +9,7 @@ import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
-import { UiButton, UiDonut, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
+import { UiButton, UiDonut, UiSelect, UiStatusBadge, UiTable, UiTrendChart, toast } from '@/ui';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import type { UiSelectOption } from '@/ui';
 import type {
@@ -32,6 +32,44 @@ const summaryError = ref('');
 
 const records = ref<UsageRecordPage | null>(null);
 const recordsLoading = ref(true);
+
+// ---- daily trend (aggregated from the loaded records page) ----
+type TrendMetric = 'tokens' | 'requests' | 'latency';
+
+const TREND_TABS: Array<{ value: TrendMetric; label: string }> = [
+  { value: 'tokens', label: 'Token' },
+  { value: 'requests', label: '请求' },
+  { value: 'latency', label: '平均延迟' },
+];
+
+const trendMetric = ref<TrendMetric>('tokens');
+
+const trendPoints = computed(() => {
+  const items = records.value?.items ?? [];
+  const byDay = new Map<string, { sum: number; count: number }>();
+  for (const r of items) {
+    const day = String(r.occurredAt ?? '').slice(0, 10);
+    if (!day) continue;
+    const entry = byDay.get(day) ?? { sum: 0, count: 0 };
+    if (trendMetric.value === 'tokens') {
+      entry.sum += r.totalTokens ?? (r.inputTokens ?? 0) + (r.outputTokens ?? 0);
+    } else if (trendMetric.value === 'requests') {
+      entry.sum += 1;
+    } else {
+      entry.sum += r.latencyMs ?? 0;
+    }
+    entry.count += 1;
+    byDay.set(day, entry);
+  }
+  return [...byDay.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .slice(-14)
+    .map(([day, { sum, count }]) => ({
+      label: day.slice(5),
+      value: trendMetric.value === 'latency' && count > 0 ? Math.round(sum / count) : sum,
+    }));
+});
+
 const recordsError = ref('');
 const page = ref(1);
 const pageSize = ref(20);
@@ -407,6 +445,35 @@ function formatTime(iso?: string): string {
     </section>
 
     <!-- Summary -->
+
+    <section class="ui-panel next-usage__trend" data-testid="usage-trend">
+      <div class="ui-panel-head">
+        <h2 class="ui-panel-title">用量趋势</h2>
+        <div class="next-usage__trend-tabs" role="tablist" aria-label="趋势指标">
+          <button
+            v-for="tab in TREND_TABS"
+            :key="tab.value"
+            type="button"
+            role="tab"
+            class="next-usage__trend-tab"
+            :class="{ 'next-usage__trend-tab--on': trendMetric === tab.value }"
+            :aria-selected="trendMetric === tab.value"
+            :data-testid="`trend-tab-${tab.value}`"
+            @click="trendMetric = tab.value"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
+      </div>
+      <div class="ui-panel-body">
+        <UiTrendChart
+          :points="trendPoints"
+          :value-formatter="formatNumber"
+          data-testid="usage-trend-chart"
+        />
+      </div>
+    </section>
+
     <section class="ui-panel next-usage__panel">
       <div class="ui-panel-head">
         <div class="next-usage__head-inline">
@@ -792,5 +859,35 @@ function formatTime(iso?: string): string {
    totals band; records list keeps a touch of bottom air. */
 .next-usage__records {
   padding-bottom: var(--ui-space-2);
+}
+
+.next-usage__trend {
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-usage__trend-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-muted);
+}
+
+.next-usage__trend-tab {
+  border: 0;
+  padding: 0 12px;
+  height: 24px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ui-foreground-secondary);
+  font-family: inherit;
+  font-size: var(--ui-font-size-xs);
+  cursor: pointer;
+}
+
+.next-usage__trend-tab--on {
+  background: var(--ui-card);
+  color: var(--ui-primary-text);
+  box-shadow: var(--ui-shadow-card);
 }
 </style>
