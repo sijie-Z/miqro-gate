@@ -7,6 +7,7 @@
  */
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
+import { ChartBarIcon, LayersIcon, MoneyIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
 import { UiButton, UiDonut, UiSelect, UiStatusBadge, UiTable, UiTrendChart, toast } from '@/ui';
@@ -43,6 +44,20 @@ const TREND_TABS: Array<{ value: TrendMetric; label: string }> = [
 ];
 
 const trendMetric = ref<TrendMetric>('tokens');
+
+
+/** Vben analysis overview cards: value + right icon + label footer. */
+const summaryStats = computed(() => {
+  const t = summary.value?.totals;
+  const tokens = (t?.tokens?.input ?? 0) + (t?.tokens?.output ?? 0);
+  const requests = t?.requests?.upstream ?? 0;
+  const cost = Number(t?.cost?.upstreamPaid ?? 0);
+  return [
+    { label: 'Token 总量', value: formatNumber(tokens), icon: LayersIcon, tone: 'cyan' },
+    { label: '请求数', value: formatNumber(requests), icon: ChartBarIcon, tone: 'green' },
+    { label: '上游成本', value: `¥${cost.toFixed(2)}`, icon: MoneyIcon, tone: 'gold' },
+  ];
+});
 
 const trendPoints = computed(() => {
   const items = records.value?.items ?? [];
@@ -389,6 +404,22 @@ function formatTime(iso?: string): string {
     <UsageCaliberTip />
 
     <!-- Self-service quota visibility (F04) -->
+    <section class="next-usage__stats" data-testid="usage-stats">
+      <div v-for="item in summaryStats" :key="item.label" class="ui-panel next-usage__stat">
+        <div class="next-usage__stat-main">
+          <span class="next-usage__stat-value ui-num">{{ item.value }}</span>
+          <span
+            class="next-usage__stat-icon"
+            :class="`next-usage__tone--${item.tone}`"
+            aria-hidden="true"
+          >
+            <component :is="item.icon" size="22px" />
+          </span>
+        </div>
+        <span class="next-usage__stat-label">{{ item.label }}</span>
+      </div>
+    </section>
+
     <section class="ui-panel next-usage__panel" data-testid="my-quota-panel">
       <div class="ui-panel-head">
         <div>
@@ -889,5 +920,70 @@ function formatTime(iso?: string): string {
   background: var(--ui-card);
   color: var(--ui-primary-text);
   box-shadow: var(--ui-shadow-card);
+}
+
+/* ---- analysis overview cards (Vben: value + icon, label under) ---- */
+.next-usage__stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ui-space-4);
+  margin-bottom: var(--ui-space-5);
+}
+
+@media (max-width: 900px) {
+  .next-usage__stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+.next-usage__stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-4) var(--ui-space-5);
+}
+
+.next-usage__stat-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+}
+
+.next-usage__stat-value {
+  font-size: 24px;
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+  line-height: 30px;
+}
+
+.next-usage__stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.next-usage__tone--cyan {
+  background: #e0f4f6;
+  color: #0e7490;
+}
+
+.next-usage__tone--green {
+  background: var(--ui-success-bg);
+  color: var(--ui-success-fg);
+}
+
+.next-usage__tone--gold {
+  background: #fdf3e0;
+  color: #a16207;
+}
+
+.next-usage__stat-label {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
 }
 </style>
