@@ -230,7 +230,7 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
   padding: 0 var(--ui-space-3);
   height: var(--ui-row-height);
   border-bottom: 1px solid var(--ui-border);
-  font-size: var(--ui-font-size-sm);
+  font-size: var(--ui-font-size-base);
   font-weight: var(--ui-weight-semibold);
   color: var(--ui-foreground);
   background: var(--ui-muted);
