@@ -7,7 +7,7 @@
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
+import { UiButton, UiCheckbox, UiDialog, UiInput, UiRadio, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { ApiConsumerView } from '@/types/generated-api';
 
 const consumers = ref<ApiConsumerView[]>([]);
@@ -559,24 +559,20 @@ onMounted(load);
       @update:open="scopeTarget = null"
     >
       <div class="next-consumers__scope-mode">
-        <label>
-          <input v-model="scopeMode" type="radio" value="full" data-testid="scope-mode-full" />
-          <span>全量（不裁剪，默认）</span>
-        </label>
-        <label>
-          <input v-model="scopeMode" type="radio" value="custom" data-testid="scope-mode-custom" />
-          <span>自定义通道</span>
-        </label>
+        <UiRadio v-model="scopeMode" value="full" data-testid="scope-mode-full">
+          全量（不裁剪，默认）
+        </UiRadio>
+        <UiRadio v-model="scopeMode" value="custom" data-testid="scope-mode-custom">
+          自定义通道
+        </UiRadio>
       </div>
       <div v-if="scopeMode === 'custom'" class="next-consumers__scope-caps">
-        <label data-testid="scope-cap-billing">
-          <input v-model="scopeBilling" type="checkbox" />
-          <span>计费查询通道（billing:read）</span>
-        </label>
-        <label data-testid="scope-cap-mcp">
-          <input v-model="scopeMcp" type="checkbox" />
-          <span>MCP 数据面通道（mcp:call）</span>
-        </label>
+        <UiCheckbox v-model="scopeBilling" data-testid="scope-cap-billing">
+          计费查询通道（billing:read）
+        </UiCheckbox>
+        <UiCheckbox v-model="scopeMcp" data-testid="scope-cap-mcp">
+          MCP 数据面通道（mcp:call）
+        </UiCheckbox>
         <p class="next-consumers__scope-hint">
           一个都不选 = 无任何通道（该密钥立即无法访问计费接口与 MCP 服务）。
         </p>
@@ -666,15 +662,6 @@ onMounted(load);
   flex-direction: column;
   gap: var(--ui-space-2);
   margin-bottom: var(--ui-space-3);
-}
-
-.next-consumers__scope-mode label,
-.next-consumers__scope-caps label {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-space-2);
-  font-size: var(--ui-font-size-sm);
-  cursor: pointer;
 }
 
 .next-consumers__scope-hint {
