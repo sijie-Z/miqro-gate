@@ -416,10 +416,10 @@ async function handleLogout() {
     <aside class="new-shell__rail" :class="{ 'new-shell__rail--icons': iconOnly }">
       <div v-if="preferences.showLogo" class="new-shell__brand">
         <span class="new-shell__brand-mark" :title="iconOnly ? 'MiQroGate' : undefined">M</span>
-        <span v-if="!iconOnly" class="new-shell__brand-name">MiQroGate</span>
+        <span class="new-shell__brand-name">MiQroGate</span>
       </div>
 
-      <div v-if="!iconOnly" class="new-shell__search">
+      <div class="new-shell__search">
         <SearchIcon class="new-shell__search-icon" />
         <input
           v-model="navQuery"
@@ -438,7 +438,7 @@ async function handleLogout() {
           :key="group.title ?? 'regular'"
           class="new-shell__group"
         >
-          <p v-if="group.title && !iconOnly" class="new-shell__group-title">{{ group.title }}</p>
+          <p v-if="group.title" class="new-shell__group-title">{{ group.title }}</p>
           <router-link
             v-for="item in group.items"
             :key="item.name"
@@ -448,13 +448,13 @@ async function handleLogout() {
             :class="{ 'new-shell__nav-item--active': isActive(item.name) }"
           >
             <component :is="item.icon" class="new-shell__nav-icon" />
-            <span v-if="!iconOnly" class="new-shell__nav-label">{{ item.label }}</span>
+            <span class="new-shell__nav-label">{{ item.label }}</span>
           </router-link>
         </div>
       </nav>
 
       <div class="new-shell__rail-foot">
-        <p v-if="!iconOnly" class="new-shell__version">MiQroGate 0.1</p>
+        <p class="new-shell__version">MiQroGate 0.1</p>
       </div>
     </aside>
 
@@ -859,6 +859,12 @@ async function handleLogout() {
 .new-shell__search {
   position: relative;
   margin: 0 12px 8px;
+  max-height: 40px;
+  overflow: hidden;
+  transition:
+    max-height 200ms var(--ui-ease),
+    opacity 140ms ease,
+    margin 200ms var(--ui-ease);
 }
 
 .new-shell__search-icon {
@@ -921,6 +927,44 @@ async function handleLogout() {
   transition:
     transform 520ms ease-out,
     opacity 80ms ease;
+}
+
+.new-shell__brand-name,
+.new-shell__nav-label {
+  max-width: 180px;
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    max-width 200ms var(--ui-ease),
+    opacity 140ms ease;
+}
+
+.new-shell__rail--icons .new-shell__brand-name,
+.new-shell__rail--icons .new-shell__nav-label {
+  max-width: 0;
+  opacity: 0;
+}
+
+.new-shell__group-title,
+.new-shell__version {
+  overflow: hidden;
+  transition:
+    max-height 200ms var(--ui-ease),
+    opacity 140ms ease;
+  max-height: 32px;
+}
+
+.new-shell__rail--icons .new-shell__group-title,
+.new-shell__rail--icons .new-shell__version {
+  max-height: 0;
+  opacity: 0;
+}
+
+.new-shell__rail--icons .new-shell__search {
+  max-height: 0;
+  opacity: 0;
+  margin-bottom: 0;
+  pointer-events: none;
 }
 
 .new-shell__main {

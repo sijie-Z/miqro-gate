@@ -1111,11 +1111,13 @@ for (const viewport of VIEWPORTS) {
     // grouped nav and page content.
     await expect(page.getByTestId('keys-table')).toBeVisible();
     if (viewport.width < 1080 && viewport.width >= 640) {
-      // Narrow rail: the shell collapses to icons only and intentionally does
-      // not render the brand text (#440 made the initial state honor the actual
-      // width instead of waiting for the first resize event).
+      // Narrow rail: the shell collapses to icons only and the brand text is
+      // CSS-collapsed (transition-driven, so the node stays in the DOM but
+      // must render invisible) — #440 made the initial state honor the
+      // actual width instead of waiting for the first resize event.
       await expect(page.locator('.new-shell__rail--icons')).toBeVisible();
-      await expect(page.getByText('MiQroGate')).toHaveCount(0);
+      await expect(page.locator('.new-shell__brand-name')).toBeHidden();
+      await expect(page.locator('.new-shell__nav-label').first()).toBeHidden();
     } else {
       await expect(page.getByText('MiQroGate').first()).toBeVisible();
     }
