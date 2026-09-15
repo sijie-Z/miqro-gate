@@ -1012,6 +1012,7 @@ export const DICT: Record<string, string> = {
   '缓存读': 'Cache reads',
   '缓存读取': 'Cache reads',
   '编辑': 'Edit',
+  '编辑项目': 'Edit project',
   '编辑配置': 'Edit configuration',
   '编辑配额规则': 'Edit quota rule',
   '网关 · 在线': 'GATEWAY · ONLINE',
@@ -1091,6 +1092,7 @@ export const DICT: Record<string, string> = {
   '请输入团队名称。': 'Enter the team name.',
   '请输入新的密钥。': 'Enter the new secret.',
   '请输入消费者名称。': 'Enter the consumer name.',
+  '请输入项目名称。': 'Enter the project name.',
   '请输入用户名。': 'Enter a username.',
   '请输入用户名（成员 Key 请到上游凭证页关联）。':
     'Enter a username (member keys are bound on the upstream credentials page).',
@@ -1136,6 +1138,13 @@ export const DICT: Record<string, string> = {
   '路由已启用': 'Route enabled',
   '路由已更新': 'Route updated',
   '路由标签': 'Routing tags',
+  '路由标签不能清空——现有 Virtual Key 的路由依赖它。':
+    'The routing tag cannot be cleared — existing Virtual Keys route by it.',
+  '路由标签只允许字母、数字、下划线与连字符（1–64 位）。':
+    'Routing tags allow letters, digits, underscores and hyphens only (1–64 chars).',
+  '留空将导致成员无法创建 Virtual Key；可稍后在「编辑」中补填。':
+    'Leaving it empty blocks members from creating Virtual Keys; add it later via Edit.',
+  '项目已更新': 'Project updated',
   '路由规则': 'Route rules',
   '跳过：': 'Skipped:',
   '轮换': 'Rotate',
@@ -1403,6 +1412,7 @@ export const DICT: Record<string, string> = {
 
 export const PATTERNS: Array<[RegExp, string]> = [
   [/^基于当前 (.+?) 条记录$/, 'Based on the current $1 records'],
+  [/^修改「(.+?)」的名称与路由标签。$/, 'Change the name and routing tag for "$1".'],
   [/^(.+?)\ 个可用$/, '$1 active'],
   [/^(.+?)\ 轮换中$/, '$1 rotating'],
   [/^(.+?)\ 异常$/, '$1 unusual'],
