@@ -218,6 +218,8 @@ F15 MCP 访问日志队列（网关数据面）：`miqrokey.gateway.mcp-log.capa
 
 **R3 Kafka 出口（ADR-0014，默认关）**：`miqrokey.retention.kafka.bootstrap-servers`（默认空=不启用，`MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS`；配置后替换 no-op publisher 为真实投递，topic 默认 `content-retention`）、`miqrokey.retention.kafka.topic`（`MIQROKEY_RETENTION_KAFKA_TOPIC`）、`miqrokey.retention.kafka.client-id`（默认 `miqrokey-gateway-retention`，`MIQROKEY_RETENTION_KAFKA_CLIENT_ID`）。记录键 = SHA-256(tenant/user)，同用户恒落同分区；信封 JSON 携带 AES 密文（base64），明文永不出网关；发送异步、失败节流计数（消费者按 eventId 幂等容忍重放）。
 
+**R4 内置留痕消费端（控制面，ADR-0014 §8，默认关）**：`miqrokey.retention.consumer.enabled`（`MIQROKEY_RETENTION_CONSUMER_ENABLED`）、`miqrokey.retention.consumer.bootstrap-servers`（`MIQROKEY_RETENTION_CONSUMER_BOOTSTRAP_SERVERS`；enabled=true 且非空才启动）、`…consumer.topic`（默认 `content-retention`）、`…consumer.group-id`（默认 `miqrokey-retention-console`）、`…consumer.poll-millis`（默认 500）。消费端把信封**密文原样**写入 `retention_log`（`event_id` 幂等，at-least-once + 手动提交），供管理台「内容留痕」查看与 CSV 导出；broker 断连仅节流告警，不影响请求路径。
+
 ## 7. Webhook 与告警
 
 | 配置 | 默认 | 说明 |
