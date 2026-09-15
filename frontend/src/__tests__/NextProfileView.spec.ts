@@ -120,6 +120,12 @@ describe('NextProfileView', () => {
     expect(snapshot.text()).toContain('3.0k'); // 2400+600 tokens
     expect(snapshot.text()).toContain('12.34');
 
+    // Design pass: every stat renders its tinted icon chip, and each card
+    // head carries its small icon.
+    expect(snapshot.findAll('.next-profile__stat-chip').length).toBe(4);
+    expect(wrapper.find('.next-profile__stat-chip--blue').exists()).toBe(true);
+    expect(wrapper.findAll('.next-profile__card-icon').length).toBe(3);
+
     // Session facts come from the refreshed /auth/me payload.
     expect(wrapper.find('[data-testid="last-login"]').text()).not.toBe('—');
   });

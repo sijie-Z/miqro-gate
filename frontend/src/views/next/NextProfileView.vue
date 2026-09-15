@@ -1,13 +1,21 @@
 <script setup lang="ts">
 /**
  * NextProfileView — /app/profile (#597, GitHub-settings-inspired account page).
- * Identity header + monthly snapshot + account facts + security section
- * (password change, current session, "sign out of other sessions").
- * Behaviour parity with the legacy layout: account facts + password change,
- * forced first-login flow (must-change sessions) included.
+ * Identity header + monthly snapshot (icon-chip stats matching the analysis
+ * cards) + account facts + security section (password change, current session,
+ * "sign out of other sessions"). Behaviour parity with the legacy layout:
+ * account facts + password change, forced first-login flow included.
  */
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import {
+  ChartBarIcon,
+  DesktopIcon,
+  LayersIcon,
+  LockOnIcon,
+  MoneyIcon,
+  UserIcon,
+} from 'tdesign-icons-vue-next';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
@@ -95,28 +103,32 @@ const snapshot = computed(() => {
       label: '可用虚拟密钥',
       value: keys.value ? String(activeKeys) : '—',
       prefix: '',
-      hint: '点此管理',
+      chip: 'blue',
+      icon: LockOnIcon,
       to: '/app/keys',
     },
     {
       label: '本月请求',
       value: summary.value ? formatCount(requests) : '—',
       prefix: '',
-      hint: '经网关的请求数',
+      chip: 'green',
+      icon: ChartBarIcon,
       to: '/app/usage',
     },
     {
       label: '本月 Token',
       value: summary.value ? formatCount(tokens) : '—',
       prefix: '',
-      hint: '输入+输出',
+      chip: 'cyan',
+      icon: LayersIcon,
       to: '/app/usage',
     },
     {
       label: '本月成本',
       value: summary.value ? cost.toFixed(2) : '—',
       prefix: '¥',
-      hint: '按价格快照估算',
+      chip: 'gold',
+      icon: MoneyIcon,
       to: '/app/usage',
     },
   ];
@@ -125,22 +137,10 @@ const snapshot = computed(() => {
 // ---- account facts ----
 
 const accountRows = computed(() => [
-  { label: '用户名', value: auth.user?.username ?? '—', testid: 'account-username', mono: false },
-  { label: '显示名称', value: auth.user?.displayName || '—', testid: undefined, mono: false },
-  { label: '角色', value: roleMeta.value.label, testid: undefined, mono: false },
-  { label: '账号状态', value: statusMeta.value.label, testid: undefined, mono: false },
-  {
-    label: '上次登录',
-    value: formatInstant(auth.user?.lastLoginAt),
-    testid: undefined,
-    mono: true,
-  },
-  {
-    label: '当前会话到期',
-    value: formatInstant(auth.user?.sessionExpiresAt),
-    testid: undefined,
-    mono: true,
-  },
+  { label: '用户名', value: auth.user?.username ?? '—', testid: 'account-username' },
+  { label: '显示名称', value: auth.user?.displayName || '—', testid: undefined },
+  { label: '角色', value: roleMeta.value.label, testid: undefined },
+  { label: '账号状态', value: statusMeta.value.label, testid: undefined },
 ]);
 
 // ---- sign out of other sessions ----
@@ -267,12 +267,20 @@ onMounted(async () => {
         :to="card.to"
         class="next-profile__stat"
       >
-        <span class="next-profile__stat-value ui-num"
-          ><i v-if="card.prefix" class="next-profile__stat-currency">{{ card.prefix }}</i
-          >{{ card.value }}</span
+        <span
+          class="next-profile__stat-chip"
+          :class="`next-profile__stat-chip--${card.chip}`"
+          aria-hidden="true"
         >
-        <span class="next-profile__stat-label">{{ card.label }}</span>
-        <span class="next-profile__stat-hint">{{ card.hint }}</span>
+          <component :is="card.icon" />
+        </span>
+        <span class="next-profile__stat-main">
+          <span class="next-profile__stat-label">{{ card.label }}</span>
+          <span class="next-profile__stat-value ui-num"
+            ><i v-if="card.prefix" class="next-profile__stat-currency">{{ card.prefix }}</i
+            >{{ card.value }}</span
+          >
+        </span>
       </router-link>
     </section>
     <p
@@ -287,13 +295,15 @@ onMounted(async () => {
       <div class="next-profile__col">
         <section v-if="!isForced" class="ui-panel next-profile__panel">
           <div class="ui-panel-head">
-            <h2 class="ui-panel-title">账号</h2>
+            <h2 class="ui-panel-title next-profile__card-title">
+              <UserIcon class="next-profile__card-icon" aria-hidden="true" />账号
+            </h2>
           </div>
           <div class="ui-panel-body">
             <dl class="next-profile__facts">
               <div v-for="row in accountRows" :key="row.label" class="next-profile__fact">
                 <dt>{{ row.label }}</dt>
-                <dd :class="{ 'ui-mono': row.mono }" :data-testid="row.testid">{{ row.value }}</dd>
+                <dd :data-testid="row.testid">{{ row.value }}</dd>
               </div>
             </dl>
           </div>
@@ -301,7 +311,9 @@ onMounted(async () => {
 
         <section class="ui-panel next-profile__panel">
           <div class="ui-panel-head">
-            <h2 class="ui-panel-title">修改密码</h2>
+            <h2 class="ui-panel-title next-profile__card-title">
+              <LockOnIcon class="next-profile__card-icon" aria-hidden="true" />修改密码
+            </h2>
           </div>
           <div class="ui-panel-body">
             <p v-if="!isForced" class="next-profile__note">
@@ -360,7 +372,9 @@ onMounted(async () => {
       <div v-if="!isForced" class="next-profile__col next-profile__col--side">
         <section class="ui-panel next-profile__panel">
           <div class="ui-panel-head">
-            <h2 class="ui-panel-title">当前会话</h2>
+            <h2 class="ui-panel-title next-profile__card-title">
+              <DesktopIcon class="next-profile__card-icon" aria-hidden="true" />当前会话
+            </h2>
           </div>
           <div class="ui-panel-body">
             <dl class="next-profile__facts next-profile__facts--single">
@@ -436,12 +450,12 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   background: var(--ui-primary-soft);
   color: var(--ui-primary-text);
-  font-size: var(--ui-font-size-2xl);
+  font-size: 24px;
   font-weight: var(--ui-weight-semibold);
 }
 
@@ -470,7 +484,7 @@ onMounted(async () => {
   margin-left: auto;
 }
 
-/* ---- monthly snapshot ---- */
+/* ---- monthly snapshot (analysis-card anatomy: tinted icon chip + label/value) ---- */
 
 .next-profile__snapshot {
   display: grid;
@@ -481,9 +495,10 @@ onMounted(async () => {
 
 .next-profile__stat {
   display: flex;
-  flex-direction: column;
-  gap: var(--ui-space-1);
-  padding: var(--ui-space-4) var(--ui-space-6);
+  align-items: center;
+  gap: var(--ui-space-3);
+  min-width: 0;
+  padding: var(--ui-space-4) var(--ui-space-5);
   color: inherit;
 }
 
@@ -495,28 +510,67 @@ onMounted(async () => {
   background: var(--ui-muted);
 }
 
+.next-profile__stat-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+}
+
+.next-profile__stat-chip svg {
+  width: 18px;
+  height: 18px;
+}
+
+.next-profile__stat-chip--blue {
+  background: var(--ui-info-bg);
+  color: var(--ui-info-fg);
+}
+
+.next-profile__stat-chip--green {
+  background: var(--ui-success-bg);
+  color: var(--ui-success-fg);
+}
+
+.next-profile__stat-chip--cyan {
+  background: #e0f4f6;
+  color: #0e7490;
+}
+
+.next-profile__stat-chip--gold {
+  background: #fdf3e0;
+  color: #a16207;
+}
+
+.next-profile__stat-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.next-profile__stat-label {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  white-space: nowrap;
+}
+
 .next-profile__stat-value {
-  font-size: var(--ui-font-size-2xl);
+  font-size: 20px;
   font-weight: var(--ui-weight-semibold);
-  line-height: var(--ui-line-height-lg);
+  letter-spacing: -0.01em;
   color: var(--ui-foreground);
+  white-space: nowrap;
 }
 
 .next-profile__stat-currency {
   font-style: normal;
-  font-size: var(--ui-font-size-base);
+  font-size: var(--ui-font-size-sm);
   font-weight: var(--ui-weight-medium);
   margin-right: 2px;
-}
-
-.next-profile__stat-label {
-  font-size: var(--ui-font-size-sm);
-  color: var(--ui-foreground-secondary);
-}
-
-.next-profile__stat-hint {
-  font-size: var(--ui-font-size-xs);
-  color: var(--ui-foreground-faint);
 }
 
 .next-profile__snapshot-error {
@@ -564,7 +618,18 @@ onMounted(async () => {
   }
 }
 
-/* ---- facts + form ---- */
+/* ---- cards + facts + form ---- */
+
+.next-profile__card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+
+.next-profile__card-icon {
+  font-size: 15px;
+  color: var(--ui-foreground-faint);
+}
 
 .next-profile__facts {
   display: grid;
