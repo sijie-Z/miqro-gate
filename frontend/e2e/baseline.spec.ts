@@ -1220,14 +1220,14 @@ test('login language picker switches the page between Chinese and English', asyn
   // Chinese default — and exactly ONE locale chip on the page (the hero
   // header must not duplicate the panel picker).
   await expect(page.getByText('简体中文')).toHaveCount(1);
-  await expect(page.locator('.hero-art')).toBeVisible();
-  await expect(page.locator('.hero-copy')).toHaveCount(0);
+  await expect(page.locator('.hero-copy h1')).toContainText('网关静默运转');
   await expect(page.locator('.auth-heading h2')).toContainText('欢迎回来');
   await expect(page.getByTestId('login-submit')).toContainText('登 录');
 
   // A real click through the radio menu translates the page.
   await page.getByTestId('login-language').click();
   await page.getByTestId('login-language-en').click();
+  await expect(page.locator('.hero-copy h1')).toContainText('The gateway stays quiet');
   await expect(page.getByTestId('login-submit')).toContainText('Sign in');
   await expect(page.locator('.auth-heading h2')).toContainText('Welcome back');
 
