@@ -3732,6 +3732,8 @@ export interface components {
             /** Format: uuid */
             providerProductId?: string;
             models?: string[];
+            providerProductCode?: string;
+            providerProductName?: string;
         };
         MeGrantsResponse: {
             projects?: components["schemas"]["ProjectOption"][];

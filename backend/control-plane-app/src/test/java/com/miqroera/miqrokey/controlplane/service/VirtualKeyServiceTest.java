@@ -13,6 +13,7 @@ import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.model.ProjectMembership;
 import com.miqroera.miqrokey.domain.model.ProjectProviderGrant;
 import com.miqroera.miqrokey.domain.model.ProjectStatus;
+import com.miqroera.miqrokey.domain.model.ProviderProduct;
 import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.model.UserStatus;
@@ -23,6 +24,7 @@ import com.miqroera.miqrokey.domain.repository.KeyProjectBindingRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectMembershipRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectProviderGrantRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
+import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
 import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
@@ -76,6 +78,8 @@ class VirtualKeyServiceTest {
     @Mock
     private ProjectProviderGrantRepository grantRepository;
     @Mock
+    private ProviderProductRepository productRepository;
+    @Mock
     private ProjectMembershipRepository membershipRepository;
     @Mock
     private UserRepository userRepository;
@@ -95,7 +99,7 @@ class VirtualKeyServiceTest {
         authProperties.setGatewayBaseUrl("https://gateway.example.internal");
         authProperties.setVirtualKeyRotateGrace(Duration.ZERO);
         service = new VirtualKeyService(keyRepository, bindingRepository, projectRepository, grantRepository,
-                membershipRepository, userRepository, keyCrypto, auditService, authProperties,
+                productRepository, membershipRepository, userRepository, keyCrypto, auditService, authProperties,
                 RouteRefreshPublisher.NONE);
         user = user(UserRole.USER);
         admin = user(UserRole.SYSTEM_ADMIN);
@@ -405,6 +409,7 @@ class VirtualKeyServiceTest {
         when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(activeProject(TENANT, TAG)));
         when(grantRepository.findAllByProjectIdAndStatus(PROJECT_ID, "ACTIVE")).thenReturn(List.of(activeGrant()));
         when(grantRepository.findModelIds(GRANT_ID)).thenReturn(Set.of("model-a"));
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(product()));
 
         MeGrantsResponse resp = service.grantOptions(user);
 
@@ -412,7 +417,26 @@ class VirtualKeyServiceTest {
         assertThat(resp.projects().get(0).projectTag()).isEqualTo(TAG);
         assertThat(resp.grants()).hasSize(1);
         assertThat(resp.grants().get(0).models()).containsExactly("model-a");
+        // #528: display identity for the picker, not just a raw product UUID.
+        assertThat(resp.grants().get(0).providerProductCode()).isEqualTo("deepseek-payg-api");
+        assertThat(resp.grants().get(0).providerProductName()).isEqualTo("DeepSeek PAYG");
         assertThat(resp.purposes()).contains(VirtualKeyPurpose.CLAUDE_CODE.name());
+    }
+
+    @Test
+    void grantOptionsTolerateAMissingProductRow() {
+        ProjectMembership membership = new ProjectMembership(TENANT, PROJECT_ID, USER_ID, USER_ID, Instant.now());
+        when(membershipRepository.findAllByUserId(USER_ID)).thenReturn(List.of(membership));
+        when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(activeProject(TENANT, TAG)));
+        when(grantRepository.findAllByProjectIdAndStatus(PROJECT_ID, "ACTIVE")).thenReturn(List.of(activeGrant()));
+        when(grantRepository.findModelIds(GRANT_ID)).thenReturn(Set.of("model-a"));
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.empty());
+
+        MeGrantsResponse resp = service.grantOptions(user);
+
+        assertThat(resp.grants()).hasSize(1);
+        assertThat(resp.grants().get(0).providerProductCode()).isNull();
+        assertThat(resp.grants().get(0).providerProductName()).isNull();
     }
 
     @Test
@@ -449,6 +473,15 @@ class VirtualKeyServiceTest {
     private static ProjectProviderGrant activeGrant() {
         return new ProjectProviderGrant(GRANT_ID, TENANT, PROJECT_ID, PRODUCT_ID, CREDENTIAL_ID, GrantStatus.ACTIVE,
                 USER_ID, 0L, Instant.now(), Instant.now());
+    }
+
+    private static ProviderProduct product() {
+        return new ProviderProduct(PRODUCT_ID, UUID.randomUUID(), "deepseek-payg-api", "DeepSeek PAYG",
+                com.miqroera.miqrokey.domain.model.BillingMode.PAYG, com.miqroera.miqrokey.domain.model.PlanScope.NONE,
+                null, null, "[\"messages\"]", "[{\"url\":\"https://api.deepseek.com\"}]", "bearer", "OFFICIAL_API",
+                "OFFICIAL_API", com.miqroera.miqrokey.domain.model.BalanceAuthority.OFFICIAL_API,
+                com.miqroera.miqrokey.domain.model.ImplementationStatus.IMPLEMENTED, "1", 0, Instant.now(),
+                Instant.now());
     }
 
     private static CreateVirtualKeyRequest request(String name, List<String> models) {

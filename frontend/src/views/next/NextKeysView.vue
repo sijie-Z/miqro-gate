@@ -151,6 +151,25 @@ const grantOptions = computed(
 
 const selectedGrant = computed(() => grantOptions.value.find((g) => g.id === createGrantId.value));
 
+type GrantOption = NonNullable<MeGrantsResponse['grants']>[number];
+
+/**
+ * Entitlement picker label (#528): prefer the provider product's display
+ * identity carried by the API; fall back to the granted model ids for legacy
+ * rows whose product no longer resolves. A raw UUID tells the user nothing.
+ */
+function grantLabel(grant: GrantOption): string {
+  const models = [...(grant.models ?? [])].sort();
+  const modelText =
+    models.length === 0
+      ? '（无可用模型）'
+      : models.length <= 3
+        ? models.join('、')
+        : `${models.slice(0, 2).join('、')} 等 ${models.length} 个模型`;
+  const product = grant.providerProductName || grant.providerProductCode;
+  return product ? `${product} · ${modelText}` : modelText;
+}
+
 const modelOptions = computed(() => selectedGrant.value?.models ?? []);
 
 const canCreate = computed(
@@ -428,7 +447,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             :options="
               grantOptions.map((g) => ({
                 value: g.id ?? '',
-                label: `${g.providerProductId}（${g.models?.length ?? 0} 个模型）`,
+                label: grantLabel(g),
               }))
             "
             width="100%"
@@ -654,7 +673,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             <DropdownMenuPortal>
               <DropdownMenuContent class="ui-menu" :side-offset="4" :align="'end'">
                 <DropdownMenuItem
-                  class="ui-menu__item next-keys__menu-item"
+                  class="next-keys__menu-item"
                   :disabled="(row as VirtualKeyView).status !== 'ACTIVE'"
                   @select="handleRotate(row as VirtualKeyView)"
                 >
@@ -663,7 +682,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
                 </DropdownMenuItem>
                 <DropdownMenuSeparator class="next-keys__menu-sep" />
                 <DropdownMenuItem
-                  class="ui-menu__item next-keys__menu-item next-keys__menu-item--danger"
+                  class="next-keys__menu-item next-keys__menu-item--danger"
                   :disabled="!(row as VirtualKeyView).status?.match(/^(ACTIVE|ROTATING)$/)"
                   @select="handleRevoke(row as VirtualKeyView)"
                 >
@@ -1043,8 +1062,27 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
 /* .ui-menu panel chrome lives in styles/design-base.css (the radix popper
    root drops the scoped data-v attribute). Item rules below are slot
    children and stay scoped. */
-/* .next-keys__menu-item geometry comes from .ui-menu__item in the global
-   sheet; only the danger variant stays scoped. */
+.next-keys__menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border-radius: calc(var(--ui-radius-control) - 2px);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground);
+  cursor: pointer;
+  outline: none;
+}
+
+.next-keys__menu-item[data-highlighted] {
+  background: var(--ui-fill-hover);
+}
+
+.next-keys__menu-item[data-disabled] {
+  color: var(--ui-foreground-faint);
+  cursor: not-allowed;
+}
+
 .next-keys__menu-item--danger {
   color: var(--ui-danger-fg);
 }

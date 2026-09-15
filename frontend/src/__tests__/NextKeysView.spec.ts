@@ -82,6 +82,8 @@ const grants: MeGrantsResponse = {
       id: 'g1',
       projectId: 'p1',
       providerProductId: '0190-product',
+      providerProductCode: 'claude-api',
+      providerProductName: 'Claude API',
       models: ['claude-3-7-sonnet', 'claude-3-5-haiku'],
     },
   ],
@@ -195,7 +197,7 @@ describe('NextKeysView', () => {
 
     const grantButton = wrapper
       .findAll('.stub-option')
-      .find((el) => el.text().includes('0190-product'));
+      .find((el) => el.text().includes('Claude API'));
     expect(grantButton).toBeTruthy();
     await grantButton!.trigger('click');
     await flushPromises();
@@ -255,7 +257,7 @@ describe('NextKeysView', () => {
     await flushPromises();
     await wrapper
       .findAll('.stub-option')
-      .find((el) => el.text().includes('0190-product'))!
+      .find((el) => el.text().includes('Claude API'))!
       .trigger('click');
     await flushPromises();
 

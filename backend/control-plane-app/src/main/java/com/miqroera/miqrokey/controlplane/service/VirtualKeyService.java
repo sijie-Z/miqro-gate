@@ -13,6 +13,7 @@ import com.miqroera.miqrokey.domain.model.KeyProjectBindingStatus;
 import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.model.ProjectProviderGrant;
 import com.miqroera.miqrokey.domain.model.ProjectStatus;
+import com.miqroera.miqrokey.domain.model.ProviderProduct;
 import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.model.UserStatus;
@@ -23,6 +24,7 @@ import com.miqroera.miqrokey.domain.repository.KeyProjectBindingRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectMembershipRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectProviderGrantRepository;
 import com.miqroera.miqrokey.domain.repository.ProjectRepository;
+import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
 import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
@@ -32,8 +34,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -67,6 +71,7 @@ public class VirtualKeyService {
     private final KeyProjectBindingRepository bindingRepository;
     private final ProjectRepository projectRepository;
     private final ProjectProviderGrantRepository grantRepository;
+    private final ProviderProductRepository productRepository;
     private final ProjectMembershipRepository membershipRepository;
     private final UserRepository userRepository;
     private final VirtualKeyCrypto keyCrypto;
@@ -76,12 +81,14 @@ public class VirtualKeyService {
 
     public VirtualKeyService(VirtualKeyRepository keyRepository, KeyProjectBindingRepository bindingRepository,
             ProjectRepository projectRepository, ProjectProviderGrantRepository grantRepository,
-            ProjectMembershipRepository membershipRepository, UserRepository userRepository, VirtualKeyCrypto keyCrypto,
-            AuditService auditService, AuthProperties authProperties, RouteRefreshPublisher routeRefreshPublisher) {
+            ProviderProductRepository productRepository, ProjectMembershipRepository membershipRepository,
+            UserRepository userRepository, VirtualKeyCrypto keyCrypto, AuditService auditService,
+            AuthProperties authProperties, RouteRefreshPublisher routeRefreshPublisher) {
         this.keyRepository = keyRepository;
         this.bindingRepository = bindingRepository;
         this.projectRepository = projectRepository;
         this.grantRepository = grantRepository;
+        this.productRepository = productRepository;
         this.membershipRepository = membershipRepository;
         this.userRepository = userRepository;
         this.keyCrypto = keyCrypto;
@@ -283,6 +290,7 @@ public class VirtualKeyService {
         List<MeGrantsResponse.ProjectOption> projects = new ArrayList<>();
         List<MeGrantsResponse.GrantOption> grants = new ArrayList<>();
         List<UUID> projectIds = new ArrayList<>();
+        Map<UUID, ProviderProduct> productCache = new HashMap<>();
         if (user.role() == UserRole.SYSTEM_ADMIN) {
             for (Project p : projectRepository.findAllByTenantId(user.tenantId())) {
                 if (p.status() == ProjectStatus.ACTIVE) {
@@ -296,10 +304,16 @@ public class VirtualKeyService {
             projectRepository.findById(projectId).filter(p -> p.tenantId().equals(user.tenantId())).ifPresent(p -> {
                 projects.add(new MeGrantsResponse.ProjectOption(p.id(), p.code(), p.name(), p.projectTag()));
                 for (ProjectProviderGrant g : grantRepository.findAllByProjectIdAndStatus(p.id(), "ACTIVE")) {
+                    // Display identity for the picker: a raw product UUID tells
+                    // the user nothing (#528). Null when the product row is gone.
+                    ProviderProduct product = productCache.computeIfAbsent(g.providerProductId(),
+                            id -> productRepository.findById(id).orElse(null));
                     // Deterministic model list (lexicographic) — the underlying
                     // repository returns an unordered Set.
                     grants.add(new MeGrantsResponse.GrantOption(g.id(), g.projectId(), g.providerProductId(),
-                            new TreeSet<>(grantRepository.findModelIds(g.id()))));
+                            new TreeSet<>(grantRepository.findModelIds(g.id())),
+                            product != null ? product.productCode() : null,
+                            product != null ? product.displayName() : null));
                 }
             });
         }
