@@ -22,11 +22,9 @@ import {
 } from 'radix-vue';
 import {
   ArrowRightIcon,
-  ChartBarIcon,
   InternetIcon,
   LockOnIcon,
   SecuredIcon,
-  ServerIcon,
   UserIcon,
 } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
@@ -232,11 +230,6 @@ const languages = [
 
 const t = computed(() => COPY[language.value]);
 
-const CAP_ICONS = [LockOnIcon, SecuredIcon, ChartBarIcon, ServerIcon] as const;
-const capItems = computed(() =>
-  t.value.caps.map((cap, index) => ({ ...cap, icon: CAP_ICONS[index] })),
-);
-
 const mode = ref<Mode>('login');
 const username = ref('');
 const displayName = ref('');
@@ -337,60 +330,10 @@ onMounted(async () => {
   <main class="gate-auth" data-testid="login-panel" data-i18n-ignore>
     <!-- Dark hero: gateway portal scene -->
     <section class="gate-hero">
-      <!-- The entire hero is the reference artwork itself (943x1024),
-           with the text areas blanked out; the headline, copy, capability
-           list and footer below are live bilingual HTML on top. -->
+      <!-- The hero is the reference artwork alone (943x1024) with the text
+           areas blanked out — no live copy is layered on the image. -->
       <img class="hero-art" :src="heroArt" alt="" aria-hidden="true" draggable="false" />
-      <header class="hero-header">
-        <button class="brand" type="button" aria-label="MiQroGate" @click="router.push('/login')">
-          <span class="brand-symbol" aria-hidden="true">
-            <span class="brand-wing brand-wing-left" />
-            <span class="brand-wing brand-wing-right" />
-            <span class="brand-core" />
-          </span>
-          <span class="brand-name">MiQroGate</span>
-          <span class="brand-divider" />
-          <span class="brand-product">{{ t.brandProduct }}</span>
-        </button>
-      </header>
 
-      <div class="hero-content">
-        <div class="hero-copy">
-          <p class="hero-eyebrow">{{ t.heroEyebrow }}</p>
-          <h1>
-            {{ t.heroLine1 }}<br />
-            <span
-              >{{ t.heroLine2Pre }}<em>{{ t.heroLine2Em }}</em
-              >{{ t.heroLine2Post }}</span
-            >
-          </h1>
-          <p class="hero-description">{{ t.heroDesc }}</p>
-        </div>
-
-        <!-- Capability list sits below the copy as its own left-hand column
-             (reference composition: copy on top, capabilities and provider
-             cards stacked underneath it). -->
-        <div class="hero-capabilities">
-          <article v-for="cap in capItems" :key="cap.title" class="capability">
-            <span class="capability-icon"><component :is="cap.icon" size="18px" /></span>
-            <span>
-              <strong>{{ cap.title }}</strong>
-              <small>{{ cap.small }}</small>
-            </span>
-          </article>
-        </div>
-
-      </div>
-
-      <footer class="hero-footer">
-        <div class="footer-trust">
-          <span><LockOnIcon size="13px" /> HTTPS / JWT</span>
-          <span><span class="footer-slash" />{{ t.trustNoPrompt }}</span>
-          <span><span class="footer-slash" />{{ t.trustRouting }}</span>
-          <span><SecuredIcon size="13px" />{{ t.trustAudit }}</span>
-        </div>
-        <span class="hero-footer-version">{{ t.footerVersion }}</span>
-      </footer>
     </section>
 
     <!-- White auth panel -->
@@ -761,44 +704,7 @@ onMounted(async () => {
   z-index: -1;
 }
 
-.hero-header,
-.hero-footer {
-  position: relative;
-  z-index: 5;
-}
-.hero-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
 
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 11px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  padding: 0;
-  font-family: inherit;
-}
-.brand-name {
-  font-size: 17px;
-  font-weight: 800;
-  letter-spacing: -0.035em;
-}
-.brand-divider {
-  width: 1px;
-  height: 18px;
-  margin: 0 4px 0 7px;
-  background: rgba(255, 255, 255, 0.18);
-}
-.brand-product {
-  color: #9aa6c2;
-  font-size: 10px;
-  letter-spacing: 0.08em;
-}
 .brand-symbol {
   position: relative;
   width: 34px;
@@ -834,95 +740,9 @@ onMounted(async () => {
   box-shadow: 0 0 17px rgba(117, 123, 255, 0.75);
 }
 
-.hero-content {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-}
-.hero-copy {
-  position: relative;
-  z-index: 5;
-  /* Top-anchored like the reference (copy occupies the upper third). */
-  align-self: start;
-  max-width: 560px;
-  padding-top: 56px;
-}
-.hero-eyebrow {
-  margin: 0;
-  color: #8e9dff;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-}
-.hero-copy h1 {
-  margin: 24px 0 24px;
-  /* Sized so 密钥由你掌控。 holds one line at every desktop width (the
-     reference image shows the headline as two unbroken lines). */
-  font-size: clamp(40px, 3.9vw, 64px);
-  line-height: 0.99;
-  letter-spacing: -0.07em;
-  font-weight: 760;
-}
-.hero-copy h1 span {
-  color: #eef2ff;
-}
-.hero-copy h1 em {
-  color: #8190ff;
-  font-style: normal;
-  text-shadow: 0 0 34px rgba(94, 105, 255, 0.26);
-}
-.hero-description {
-  max-width: 500px;
-  margin: 0 0 28px;
-  color: #a4afc7;
-  font-size: 13px;
-  line-height: 1.9;
-  letter-spacing: 0.005em;
-}
 
 /* Single-column stack in its own left-hand column (reference measured
    geometry: x ≈ 8–33% of the hero, starting at ~39% viewport height). */
-.hero-capabilities {
-  position: absolute;
-  left: 0;
-  top: 42%;
-  z-index: 5;
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 14px;
-  width: 34%;
-  max-width: 300px;
-}
-.capability {
-  display: grid;
-  grid-template-columns: 34px 1fr;
-  gap: 11px;
-  align-items: start;
-}
-.capability-icon {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(139, 155, 255, 0.14);
-  border-radius: 10px;
-  color: #7c8aff;
-  background: rgba(83, 98, 179, 0.08);
-  box-shadow: inset 0 0 14px rgba(86, 104, 255, 0.04);
-}
-.capability strong {
-  display: block;
-  color: #e7ebf7;
-  font-size: 11px;
-  font-weight: 700;
-}
-.capability small {
-  display: block;
-  margin-top: 4px;
-  color: #7d8aa3;
-  font-size: 9px;
-  line-height: 1.55;
-}
 
 .hero-art {
   position: absolute;
@@ -936,33 +756,6 @@ onMounted(async () => {
 }
 
 
-.hero-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 20px;
-  color: #75829d;
-  font-size: 9px;
-}
-.footer-trust {
-  display: flex;
-  align-items: center;
-  gap: 22px;
-}
-.footer-trust span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.footer-slash {
-  width: 1px;
-  height: 13px;
-  background: rgba(160, 170, 199, 0.15);
-}
-.hero-footer-version {
-  color: #4f5b73;
-  letter-spacing: 0.04em;
-}
 
 /* ---------------- white auth panel ---------------- */
 .auth-panel {
@@ -1391,27 +1184,7 @@ onMounted(async () => {
     padding-left: 36px;
     padding-right: 22px;
   }
-  /* Fractions only: the desktop column minimums would push the scene out of
-     the (narrower) hero in the 920–1180 band. */
-  .hero-content {
-    grid-template-columns: minmax(260px, 1.25fr) minmax(0px, 0.75fr);
-  }
-  .hero-copy h1 {
-    font-size: clamp(40px, 4.6vw, 58px);
-  }
-  .hero-copy {
-    padding-top: 40px;
-  }
-  /* Below the desktop collage the capability list flows under the copy and
-     the provider cards return to positive offsets inside the scene. */
-  .hero-capabilities {
-    position: static;
-    width: auto;
-    max-width: 480px;
-    margin-top: 20px;
-    grid-template-columns: 1fr 1fr;
-  }
-  .auth-content {
+          .auth-content {
     width: min(430px, calc(100% - 88px));
   }
 }
@@ -1427,19 +1200,7 @@ onMounted(async () => {
   .hero-art {
     object-position: 70% 50%;
   }
-  .hero-content {
-    display: block;
-  }
-  .hero-copy {
-    max-width: 490px;
-  }
-  .hero-description {
-    max-width: 430px;
-  }
-  .hero-capabilities {
-    grid-template-columns: 1fr 1fr;
-  }
-  .auth-panel {
+    .auth-panel {
     min-height: 680px;
     border-left: 0;
   }
@@ -1488,33 +1249,7 @@ onMounted(async () => {
     height: auto;
     padding: 24px 20px;
   }
-  .brand-product,
-  .brand-divider,
-  .hero-footer-version {
-    display: none;
-  }
-  .hero-content {
-    min-height: 520px;
-  }
-  .hero-copy {
-    padding-top: 52px;
-  }
-  .hero-copy h1 {
-    font-size: 47px;
-  }
-  .hero-description {
-    font-size: 12px;
-  }
-  .hero-capabilities {
-    position: relative;
-    grid-template-columns: 1fr;
-    gap: 12px;
-    max-width: 300px;
-  }
-  .hero-footer {
-    display: none;
-  }
-  .auth-panel-top {
+      .auth-panel-top {
     padding-left: 18px;
     padding-right: 18px;
   }
