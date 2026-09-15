@@ -546,7 +546,7 @@ function formatDate(iso?: string): string {
             <DropdownMenuPortal>
               <DropdownMenuContent class="ui-menu" :side-offset="4" :align="'end'">
                 <DropdownMenuItem
-                  class="next-users__menu-item"
+                  class="ui-menu__item next-users__menu-item"
                   @select="openProjectMembership(row as AdminUser)"
                 >
                   <DropdownMenuItemIndicator class="next-users__menu-ind" />
@@ -554,7 +554,7 @@ function formatDate(iso?: string): string {
                 </DropdownMenuItem>
                 <DropdownMenuSeparator class="next-users__menu-sep" />
                 <DropdownMenuItem
-                  class="next-users__menu-item"
+                  class="ui-menu__item next-users__menu-item"
                   @select="toggleStatus(row as AdminUser)"
                 >
                   <DropdownMenuItemIndicator class="next-users__menu-ind" />
@@ -564,14 +564,14 @@ function formatDate(iso?: string): string {
                 </DropdownMenuItem>
                 <DropdownMenuSeparator class="next-users__menu-sep" />
                 <DropdownMenuItem
-                  class="next-users__menu-item"
+                  class="ui-menu__item next-users__menu-item"
                   @select="resetPassword(row as AdminUser)"
                 >
                   <DropdownMenuItemIndicator class="next-users__menu-ind" />
                   <span data-testid="user-reset-password">重置密码</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  class="next-users__menu-item"
+                  class="ui-menu__item next-users__menu-item"
                   @select="revokeSessions(row as AdminUser)"
                 >
                   <DropdownMenuItemIndicator class="next-users__menu-ind" />
@@ -835,26 +835,8 @@ function formatDate(iso?: string): string {
 /* .ui-menu panel chrome lives in styles/design-base.css (the radix popper
    root drops the scoped data-v attribute). Item rules below are slot
    children and stay scoped. */
-.next-users__menu-item {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-space-2);
-  padding: var(--ui-space-2) var(--ui-space-3);
-  border-radius: calc(var(--ui-radius-control) - 2px);
-  font-size: var(--ui-font-size-sm);
-  color: var(--ui-foreground);
-  cursor: pointer;
-  outline: none;
-}
-
-.next-users__menu-item[data-highlighted] {
-  background: var(--ui-fill-hover);
-}
-
-.next-users__menu-item[data-disabled] {
-  color: var(--ui-foreground-faint);
-  cursor: not-allowed;
-}
+/* .next-users__menu-item geometry comes from .ui-menu__item in the global
+   sheet (see design-base.css). */
 
 .next-users__menu-ind {
   display: none;

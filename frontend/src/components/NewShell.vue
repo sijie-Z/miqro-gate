@@ -292,7 +292,7 @@ async function handleLogout() {
                     v-for="lang in LANGS"
                     :key="lang.code"
                     :value="lang.code"
-                    class="new-shell__user-menu-item"
+                    class="ui-menu__item new-shell__user-menu-item"
                     :data-testid="`shell-lang-${lang.code}`"
                   >
                     <span>{{ lang.label }}</span>
@@ -317,7 +317,7 @@ async function handleLogout() {
                 </DropdownMenuRadioGroup>
                 <DropdownMenuSeparator class="new-shell__user-menu-sep" />
                 <DropdownMenuItem
-                  class="new-shell__user-menu-item new-shell__user-menu-item--danger"
+                  class="ui-menu__item new-shell__user-menu-item new-shell__user-menu-item--danger"
                   data-testid="shell-logout"
                   @select="handleLogout"
                   >退出登录</DropdownMenuItem
@@ -644,28 +644,10 @@ async function handleLogout() {
   color: var(--ui-primary-text);
 }
 
-.new-shell__user-menu-item {
-  display: flex;
-  align-items: center;
-  padding: var(--ui-space-2) var(--ui-space-3);
-  border-radius: calc(var(--ui-radius-control) - 2px);
-  font-size: var(--ui-font-size-sm);
-  color: var(--ui-foreground);
-  cursor: pointer;
-  outline: none;
-  user-select: none;
-}
-
-.new-shell__user-menu-item[data-highlighted] {
-  background: var(--ui-fill-hover);
-}
-
+/* .new-shell__user-menu-item geometry comes from .ui-menu__item in the
+   global sheet; only the danger variant stays scoped. */
 .new-shell__user-menu-item--danger {
   color: var(--ui-danger-fg);
-}
-
-.new-shell__user-menu-item:focus-visible {
-  box-shadow: var(--ui-shadow-focus);
 }
 
 /* Visited-page tabs — Vben v2 style: a 32px white strip, tabs separated by

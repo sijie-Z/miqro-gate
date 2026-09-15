@@ -554,14 +554,14 @@ onMounted(load);
             <DropdownMenuPortal>
               <DropdownMenuContent class="ui-menu" :side-offset="4" :align="'end'">
                 <DropdownMenuItem
-                  class="next-credentials__menu-item"
+                  class="ui-menu__item next-credentials__menu-item"
                   @select="openValidate(row as CredentialView)"
                 >
                   <DropdownMenuItemIndicator class="next-credentials__menu-ind" />
                   <span data-testid="credential-validate">测试 Secret</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  class="next-credentials__menu-item"
+                  class="ui-menu__item next-credentials__menu-item"
                   :disabled="(row as CredentialView).status === 'DISABLED'"
                   @select="openRotate(row as CredentialView)"
                 >
@@ -569,7 +569,7 @@ onMounted(load);
                   <span data-testid="credential-rotate">轮换</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  class="next-credentials__menu-item"
+                  class="ui-menu__item next-credentials__menu-item"
                   @select="openHistory(row as CredentialView)"
                 >
                   <DropdownMenuItemIndicator class="next-credentials__menu-ind" />
@@ -577,7 +577,7 @@ onMounted(load);
                 </DropdownMenuItem>
                 <DropdownMenuSeparator class="next-credentials__menu-sep" />
                 <DropdownMenuItem
-                  class="next-credentials__menu-item next-credentials__menu-item--danger"
+                  class="ui-menu__item next-credentials__menu-item next-credentials__menu-item--danger"
                   :disabled="(row as CredentialView).status === 'DISABLED'"
                   @select="requestDisable(row as CredentialView)"
                 >
@@ -934,27 +934,8 @@ onMounted(load);
 /* .ui-menu panel chrome lives in styles/design-base.css (the radix popper
    root drops the scoped data-v attribute). Item rules below are slot
    children and stay scoped. */
-.next-credentials__menu-item {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-space-2);
-  padding: var(--ui-space-2) var(--ui-space-3);
-  border-radius: calc(var(--ui-radius-control) - 2px);
-  font-size: var(--ui-font-size-sm);
-  color: var(--ui-foreground);
-  cursor: pointer;
-  outline: none;
-}
-
-.next-credentials__menu-item[data-highlighted] {
-  background: var(--ui-fill-hover);
-}
-
-.next-credentials__menu-item[data-disabled] {
-  color: var(--ui-foreground-faint);
-  cursor: not-allowed;
-}
-
+/* .next-credentials__menu-item geometry comes from .ui-menu__item in the
+   global sheet; only the danger variant stays scoped. */
 .next-credentials__menu-item--danger {
   color: var(--ui-danger-fg);
 }

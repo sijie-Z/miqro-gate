@@ -283,7 +283,7 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
 }
 
 .ui-table__row:hover {
-  background: var(--ui-fill-hover);
+  background: var(--ui-row-hover);
 }
 
 .ui-table__row--striped:nth-child(even) {
@@ -291,7 +291,7 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
 }
 
 .ui-table__row--striped:hover {
-  background: var(--ui-fill-hover);
+  background: var(--ui-row-hover);
 }
 
 .ui-table__cell {
