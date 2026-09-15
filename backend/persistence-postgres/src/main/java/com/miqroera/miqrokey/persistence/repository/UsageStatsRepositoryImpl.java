@@ -67,6 +67,11 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                     "JOIN virtual_keys vk ON vk.id = ue.virtual_key_id AND vk.tenant_id = ue.tenant_id"
                             + " JOIN users u ON u.id = vk.user_id AND u.tenant_id = ue.tenant_id",
                     "vk.user_id, u.username");
+            case TEAM -> new GroupSpec("tm.team_id AS group_key, t.name AS label",
+                    "JOIN virtual_keys vk ON vk.id = ue.virtual_key_id AND vk.tenant_id = ue.tenant_id"
+                            + " JOIN team_memberships tm ON tm.user_id = vk.user_id AND tm.tenant_id = ue.tenant_id"
+                            + " JOIN teams t ON t.id = tm.team_id AND t.tenant_id = ue.tenant_id",
+                    "tm.team_id, t.name");
             case MODEL -> new GroupSpec("ue.model_id AS group_key, ue.model_id AS label", "", "ue.model_id");
             case MONTH -> new GroupSpec(
                     "to_char(date_trunc('month', ue.occurred_at), 'YYYY-MM') AS group_key,"
@@ -94,6 +99,11 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                     "JOIN virtual_keys vk ON vk.id = h.virtual_key_id AND vk.tenant_id = h.tenant_id"
                             + " JOIN users u ON u.id = vk.user_id AND u.tenant_id = h.tenant_id",
                     "vk.user_id, u.username");
+            case TEAM -> new GroupSpec("tm.team_id AS group_key, t.name AS label",
+                    "JOIN virtual_keys vk ON vk.id = h.virtual_key_id AND vk.tenant_id = h.tenant_id"
+                            + " JOIN team_memberships tm ON tm.user_id = vk.user_id AND tm.tenant_id = h.tenant_id"
+                            + " JOIN teams t ON t.id = tm.team_id AND t.tenant_id = h.tenant_id",
+                    "tm.team_id, t.name");
             case MODEL -> new GroupSpec("e.model_id AS group_key, e.model_id AS label", "", "e.model_id");
             case MONTH -> new GroupSpec(
                     "to_char(date_trunc('month', h.occurred_at), 'YYYY-MM') AS group_key,"

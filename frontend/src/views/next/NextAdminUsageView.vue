@@ -92,8 +92,12 @@ function applyRange(value: number) {
 const groupOptions: UiSelectOption[] = [
   { value: 'project', label: '项目' },
   { value: 'virtual_key', label: '虚拟密钥' },
+  { value: 'user', label: '用户' },
+  { value: 'team', label: '团队' },
+  { value: 'model', label: '模型' },
   { value: 'cache_level', label: '缓存层级' },
   { value: 'day', label: '日' },
+  { value: 'month', label: '月' },
 ];
 
 const columns = [
