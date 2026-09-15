@@ -4,10 +4,10 @@
  * Behaviour parity with legacy exports page: create async CSV/JSONL export
  * for a window, poll to completion, download product, list recent tasks.
  */
-import { onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref  } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
+import { UiButton, UiDonut, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { ExportTask } from '@/types/generated-api';
 
 const tasks = ref<ExportTask[]>([]);
@@ -49,6 +49,27 @@ const statusText: Record<NonNullable<ExportTask['status']>, string> = {
   FAILED: '失败',
   EXPIRED: '已过期',
 };
+
+const TONE_COLORS: Record<string, string> = {
+  success: '#389e0d',
+  warning: '#d48806',
+  danger: '#cf1322',
+  info: '#0960bd',
+  neutral: '#8c8c8c',
+};
+
+/** Task status distribution over the loaded list. */
+const statusSegments = computed(() => {
+  const byLabel = new Map<string, { value: number; color: string }>();
+  for (const t of tasks.value) {
+    const label = statusLabelFor(t.status) || '—';
+    const color = TONE_COLORS[statusToneFor(t.status)] ?? '#8c8c8c';
+    const cur = byLabel.get(label);
+    if (cur) cur.value += 1;
+    else byLabel.set(label, { value: 1, color });
+  }
+  return [...byLabel.entries()].map(([label, v]) => ({ label, value: v.value, color: v.color }));
+});
 
 function statusToneFor(
   status: ExportTask['status'],
@@ -221,6 +242,32 @@ onMounted(load);
       </div>
     </section>
 
+    <section
+      v-if="statusSegments.length"
+      class="ui-panel next-exports__summary"
+      data-testid="exports-status-dist"
+    >
+      <div class="ui-panel-head">
+        <div>
+          <h2 class="ui-panel-title">任务状态分布</h2>
+          <span class="ui-panel-sub">基于当前 {{ tasks.length }} 个任务</span>
+        </div>
+      </div>
+      <div class="ui-panel-body next-exports__summary-body">
+        <UiDonut :segments="statusSegments" :center-text="`${tasks.length}`" data-testid="exports-status-donut" />
+        <div class="ui-legend">
+          <div v-for="seg in statusSegments" :key="seg.label" class="ui-legend-row">
+            <span class="ui-legend-dot" :style="{ background: seg.color }" />
+            <span class="ui-legend-label">{{ seg.label }}</span>
+            <span class="ui-legend-pct ui-num"
+              >{{ ((seg.value / Math.max(1, tasks.length)) * 100).toFixed(0) }}%</span
+            >
+            <span class="ui-legend-value ui-num">{{ seg.value }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
         <span class="ui-panel-sub">共 {{ tasks.length }} 个任务</span>
@@ -288,6 +335,17 @@ onMounted(load);
 .ui-alert--error {
   background: var(--ui-danger-bg);
   color: var(--ui-danger-fg);
+}
+
+.next-exports__summary {
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-exports__summary-body {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-6);
+  flex-wrap: wrap;
 }
 
 .next-exports__create {

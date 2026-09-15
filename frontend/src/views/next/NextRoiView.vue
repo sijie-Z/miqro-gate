@@ -4,9 +4,9 @@
  * Behaviour parity with the legacy cache-ROI report: window selector, four
  * total cards, day table and CSV export (BOM for Excel).
  */
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref  } from 'vue';
 import * as api from '@/api';
-import { UiButton, UiTable } from '@/ui';
+import { UiButton, UiDonut, UiTable } from '@/ui';
 import { csvCell } from '@/utils/csv';
 import type { RoiReportView } from '@/types/generated-api';
 
@@ -38,6 +38,16 @@ function pct(value: number): string {
 }
 
 /** UiTable row slots are generic records; narrow to the report's day shape. */
+/** Savings vs paid split for the selected window (donut centre = discount). */
+const savingSegments = computed(() => {
+  const saved = Number(report.value?.totals?.savedCost ?? 0);
+  const paid = Number(report.value?.totals?.paidCost ?? 0);
+  const rows = [];
+  if (saved > 0) rows.push({ label: '缓存节省', value: saved, color: '#389e0d' });
+  if (paid > 0) rows.push({ label: '上游实付', value: paid, color: '#0960bd' });
+  return rows;
+});
+
 function asDay(row: unknown): NonNullable<RoiReportView['byDay']>[number] {
   return row as NonNullable<RoiReportView['byDay']>[number];
 }
@@ -158,6 +168,34 @@ onMounted(load);
       </div>
     </div>
 
+    <section
+      v-if="savingSegments.length"
+      class="ui-panel next-roi__summary"
+      data-testid="roi-saving-dist"
+    >
+      <div class="ui-panel-head">
+        <div>
+          <h2 class="ui-panel-title">缓存收益构成</h2>
+          <span class="ui-panel-sub">缓存节省 vs 上游实付 · 当前窗口</span>
+        </div>
+      </div>
+      <div class="ui-panel-body next-roi__summary-body">
+        <UiDonut
+          :segments="savingSegments"
+          :center-text="pct(report?.totals?.savedPct ?? 0)"
+          data-testid="roi-saving-donut"
+        />
+        <div class="ui-legend">
+          <div v-for="seg in savingSegments" :key="seg.label" class="ui-legend-row">
+            <span class="ui-legend-dot" :style="{ background: seg.color }" />
+            <span class="ui-legend-label">{{ seg.label }}</span>
+            <span class="ui-legend-pct ui-num">{{ Math.round((seg.value / Math.max(0.0001, savingSegments.reduce((x, y) => x + y.value, 0))) * 100) }}%</span>
+            <span class="ui-legend-value ui-num">{{ money(seg.value) }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
         <span class="ui-panel-sub">按日明细</span>
@@ -238,6 +276,17 @@ onMounted(load);
   border: 1px solid var(--ui-border);
   color: var(--ui-primary-text);
   font-weight: var(--ui-weight-semibold);
+}
+
+.next-roi__summary {
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-roi__summary-body {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-6);
+  flex-wrap: wrap;
 }
 
 .next-roi__cards {
