@@ -39,11 +39,18 @@ import java.util.UUID;
  * the admin queue.
  *
  * <h2>Effect of an approval</h2> The gateway's model gate is
- * {@code key.models ∩ grant.models}, so an approval writes the model into both
- * {@code virtual_key_models} (the requesting key only) and, when it is not yet
- * there, {@code project_provider_grant_models} (the key's grant) — then
- * triggers an immediate route-snapshot refresh. Other keys sharing the grant
- * keep their own model snapshot and are unaffected.
+ * {@code key.models ∩ grant.models ∩ catalog(ACTIVE)}, so an approval writes
+ * the model into both {@code virtual_key_models} (the requesting key only) and,
+ * when it is not yet there, {@code project_provider_grant_models} (the key's
+ * grant) — then triggers an immediate route-snapshot refresh. Other keys
+ * sharing the grant keep their own model snapshot and are unaffected.
+ *
+ * <h2>Catalog precondition (#506)</h2> The third gate needs an ACTIVE
+ * {@code model_catalog} row for the key's product; without it an approval is
+ * effective in the two tables yet invisible at {@code /v1/models}. Submission
+ * and review therefore both require the row (fail fast with
+ * {@code MODEL_NOT_IN_CATALOG} and an actionable message) instead of silently
+ * granting a model the gateway will never serve.
  *
  * <h2>Security invariants</h2>
  * <ul>
@@ -106,6 +113,15 @@ public class ModelApprovalService {
         if (pendingDuplicate) {
             throw new ApiException(HttpStatus.CONFLICT, "DUPLICATE_PENDING",
                     "A pending request for this model on this key already exists");
+        }
+        // #506: the /v1/models gate requires the model to be ACTIVE in the
+        // provider's model_catalog — without it an approval could never take
+        // effect. Fail fast instead of silently granting a dead model.
+        ProjectProviderGrant grant = grantRepository.findById(key.grantId()).filter(g -> g.tenantId().equals(tenantId))
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "GRANT_NOT_FOUND", "Grant not found"));
+        if (!catalogModelActive(grant.providerProductId(), modelId)) {
+            throw new ApiException(HttpStatus.CONFLICT, "MODEL_NOT_IN_CATALOG",
+                    "该模型当前不在供应商目录（model_catalog）中，暂时无法申请；" + "请联系管理员在「供应商 → 模型」中录入或探测该模型后再试");
         }
 
         Instant now = Instant.now();
@@ -241,6 +257,13 @@ public class ModelApprovalService {
             throw new ApiException(HttpStatus.CONFLICT, "GRANT_INACTIVE",
                     "The key's grant is disabled; re-enable it before approving model requests");
         }
+        // #506: re-check the catalog at decision time — the model may have been
+        // removed or disabled between submission and review, which would make
+        // the approval silently ineffective at the gateway.
+        if (!catalogModelActive(grant.providerProductId(), approval.modelId())) {
+            throw new ApiException(HttpStatus.CONFLICT, "MODEL_NOT_IN_CATALOG", "模型 '" + approval.modelId()
+                    + "' 当前不在供应商目录（ACTIVE）中，批准后也无法在网关生效；" + "请先在「供应商 → 模型」中录入/启用该模型，再批准本申请");
+        }
         jdbc.update("""
                 INSERT INTO project_provider_grant_models (tenant_id, grant_id, model_id)
                 SELECT tenant_id, :grantId, :modelId FROM project_provider_grants WHERE id = :grantId
@@ -297,6 +320,20 @@ public class ModelApprovalService {
             throw new ApiException(HttpStatus.CONFLICT, "ALREADY_REVIEWED", "This request was already reviewed");
         }
         return approval;
+    }
+
+    /**
+     * True when {@code model_catalog} holds an ACTIVE row for the product — the
+     * same third gate {@code /v1/models} applies. Rows are global (non-tenant), so
+     * the product id is the whole scope.
+     */
+    private boolean catalogModelActive(UUID providerProductId, String modelId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT count(*) FROM model_catalog
+                WHERE provider_product_id = :productId AND model_id = :modelId AND status = 'ACTIVE'
+                """, new MapSqlParameterSource("productId", providerProductId).addValue("modelId", modelId),
+                Integer.class);
+        return count != null && count > 0;
     }
 
     /**

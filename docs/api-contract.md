@@ -279,6 +279,7 @@
 
 - `POST /api/v1/me/model-approvals`：`{ "virtualKeyId", "modelId", "reason"? }` → 201 `ModelApprovalView`。
   - `modelId` 精确匹配（trim、≤ 128、禁控制字符）；理由 ≤ 500。
+  - **目录前置（#506）**：模型必须在 Key 所属产品的 `model_catalog` 中有 ACTIVE 行（即 `/v1/models` 的第三层闸门），否则 `409 MODEL_NOT_IN_CATALOG`——未目录化的模型"批准了也不会在网关生效"，因此在源头拦截并提示管理员先录入/探测。
   - 模型已在 Key 上 → `400 MODEL_ALREADY_AVAILABLE`；同 Key 同模型已有 PENDING → `409 DUPLICATE_PENDING`；Key 非本人/不存在 → 通用 `404 KEY_NOT_FOUND`（防枚举）；Key 非 ACTIVE → `409 KEY_NOT_ACTIVE`。
   - 白名单模型（`miqrokey.approval.whitelist-models`）提交即自动 `APPROVED` 并立即生效，`reviewNote="Auto-approved: model on the approval whitelist"`、`reviewedBy=null`；仍写入 SUBMITTED + APPROVED 两条审计。
 - `GET /api/v1/me/model-approvals`：本人全部申请（时间倒序）。
@@ -860,7 +861,8 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | `POST /api/v1/admin/model-approvals/{id}/reject` | 驳回（`{ "reviewNote"? }`） |
 
 - `status` ∈ `PENDING\|APPROVED\|REJECTED`，缺省返回全部；`size` 默认 20、上限 100；`before` 为上一页 `nextCursor`（不透明，编码 `(created_at, id)`；非法游标 `400 PARAM_INVALID`）。倒序返回 `{ "items": [ModelApprovalView], "nextCursor" }`。
-- **通过语义**：写入 `virtual_key_models`（申请 Key）+ 若模型不在 Grant 中先写入 `project_provider_grant_models`（网关按 `key.models ∩ grant.models` 放行，两处缺一不可），随后**立即**触发路由快照刷新（不等 30s 定时）。同 Grant 其它 Key 不受影响（各自 Key 快照独立）。
+- **通过语义**：写入 `virtual_key_models`（申请 Key）+ 若模型不在 Grant 中先写入 `project_provider_grant_models`（网关按 `key.models ∩ grant.models ∩ model_catalog(ACTIVE)` 三层放行，缺一不可），随后**立即**触发路由快照刷新（不等 30s 定时）。同 Grant 其它 Key 不受影响（各自 Key 快照独立）。
+- **批准前复核目录（#506）**：提交与批准两个时点都校验模型在该产品的 `model_catalog` 中有 ACTIVE 行——提交后模型被移出/停用目录时，批准返回 `409 MODEL_NOT_IN_CATALOG`（否则将"批准成功但网关不可见"）。
 - 仅 PENDING 可审批：重复审批 `409 ALREADY_REVIEWED`（乐观锁，并发评审只有一个成功）；Key 已吊销/停用 → `409 KEY_NOT_ACTIVE`；Grant 已停用 → `409 GRANT_INACTIVE`；不存在 → `404 APPROVAL_NOT_FOUND`。
 - 审批/驳回写 `MODEL_APPROVAL_APPROVED` / `MODEL_APPROVAL_REJECTED` 审计（含 reviewNote 长度 ≤ 500 校验）。
 
