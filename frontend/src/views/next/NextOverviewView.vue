@@ -680,7 +680,7 @@ onMounted(load);
 }
 
 .next-overview__key-mask {
-  font-size: 11px;
+  font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-faint);
   overflow: hidden;
   text-overflow: ellipsis;
