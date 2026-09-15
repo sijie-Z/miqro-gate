@@ -150,8 +150,10 @@ cp .env.prod.example .env && chmod 600 .env       # 域名与 Origin 必填；�
 docker compose -f compose.prod.yaml up -d --build
 ```
 
-- **密钥注入**：Docker secrets（compose v2.23+；per-service `uid/gid/mode: 0400`，满足 `FileSecretProvider`
-  的 0400 强制；`db_password` 另由 postgres 镜像的 `POSTGRES_PASSWORD_FILE` 约定消费）。
+- **密钥注入**：`secrets-init` 一次性容器把 `deploy/secrets/` 同步进命名卷 `secrets-store` 并在 Linux 侧设定属主/权限
+  （master/vk_hmac/bootstrap `0400` 属主 10001；db_password/backup_key `0440` 属主 10001:70——postgres 镜像 uid 70
+  可读）。不用 compose `secrets:`：Docker Desktop（Windows）对宿主文件呈现合成权限且忽略 `uid/gid/mode`（实测
+  0777），无法得到确定的 0400。`db_password` 另由 postgres 镜像的 `POSTGRES_PASSWORD_FILE` 约定消费（指向卷内文件）。
 - **`*_FILE` 约定**：`MIQROKEY_DB_PASSWORD_FILE` / `MIQROKEY_GATEWAY_DB_PASSWORD_FILE` 由两应用各自的
   `SecretFileEnvironmentPostProcessor` 解析为明文变量；备份容器 entrypoint 自行解析同名前缀。
 - **Origin**：`MIQROKEY_ORIGIN_ALLOWLIST` 必须是无路径的 https 裸 origin（`https://your-domain`），
