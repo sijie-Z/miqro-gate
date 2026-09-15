@@ -575,16 +575,16 @@ function formatTime(iso?: string): string {
             :center-text="formatNumber(usageTotalTokens)"
             data-testid="usage-composition-donut"
           />
-          <div class="next-usage__legend">
+          <div class="ui-legend">
             <div
               v-for="seg in compositionSegments.rows"
               :key="seg.label"
-              class="next-usage__legend-row"
+              class="ui-legend-row"
             >
-              <span class="next-usage__legend-dot" :style="{ background: seg.color }" />
-              <span class="next-usage__legend-label" :title="seg.label">{{ seg.label }}</span>
-              <span class="next-usage__legend-pct ui-num">{{ seg.pct.toFixed(0) }}%</span>
-              <span class="next-usage__legend-value ui-num">{{ formatNumber(seg.value) }}</span>
+              <span class="ui-legend-dot" :style="{ background: seg.color }" />
+              <span class="ui-legend-label" :title="seg.label">{{ seg.label }}</span>
+              <span class="ui-legend-pct ui-num">{{ seg.pct.toFixed(0) }}%</span>
+              <span class="ui-legend-value ui-num">{{ formatNumber(seg.value) }}</span>
             </div>
           </div>
         </div>
@@ -769,44 +769,6 @@ function formatTime(iso?: string): string {
   flex-wrap: wrap;
 }
 
-.next-usage__legend {
-  flex: 1;
-  min-width: 220px;
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-space-2);
-}
-
-.next-usage__legend-row {
-  display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) 44px 80px;
-  align-items: center;
-  gap: var(--ui-space-2);
-  font-size: var(--ui-font-size-xs);
-}
-
-.next-usage__legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-}
-
-.next-usage__legend-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ui-foreground-secondary);
-}
-
-.next-usage__legend-pct {
-  text-align: right;
-  color: var(--ui-foreground-secondary);
-}
-
-.next-usage__legend-value {
-  text-align: right;
-  color: var(--ui-foreground);
-}
 
 .next-usage__pager {
   display: flex;

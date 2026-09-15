@@ -5,16 +5,43 @@
  * newest-first, and a report's summary plus its four-state detail rows
  * (verdict filter + cursor paging) are read-only.
  */
-import { onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
+import { UiButton, UiDonut, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { ReconciliationReport, ReconciliationRow, ReconciliationVerdict } from '@/api';
 
 const MAX_UPLOAD_BYTES = 16 * 1024 * 1024;
 const ROWS_PAGE = 100;
 
 const reports = ref<ReconciliationReport[]>([]);
+
+/** Four-state distribution aggregated from each report's row counts. */
+const VERDICT_COLORS: Record<string, string> = {
+  MATCHED: '#389e0d',
+  PARTIAL: '#d48806',
+  UNMATCHED_PROVIDER: '#cf1322',
+  UNMATCHED_LOCAL: '#ff7875',
+};
+
+const verdictSegments = computed(() => {
+  const sums = { MATCHED: 0, PARTIAL: 0, UNMATCHED_PROVIDER: 0, UNMATCHED_LOCAL: 0 };
+  for (const r of reports.value) {
+    sums.MATCHED += r.matched ?? 0;
+    sums.PARTIAL += r.partialBuckets ?? 0;
+    sums.UNMATCHED_PROVIDER += r.unmatchedProvider ?? 0;
+    sums.UNMATCHED_LOCAL += r.unmatchedLocal ?? 0;
+  }
+  return (['MATCHED', 'PARTIAL', 'UNMATCHED_PROVIDER', 'UNMATCHED_LOCAL'] as const)
+    .filter((v) => sums[v] > 0)
+    .map((v) => ({
+      label: verdictText[v],
+      value: sums[v],
+      color: VERDICT_COLORS[v],
+    }));
+});
+
+const verdictTotal = computed(() => verdictSegments.value.reduce((sum, seg) => sum + seg.value, 0));
 const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
@@ -557,6 +584,38 @@ onMounted(load);
       </div>
     </section>
 
+    <section
+      v-if="verdictSegments.length"
+      class="ui-panel next-recon__summary"
+      data-testid="recon-verdict-dist"
+    >
+      <div class="ui-panel-head">
+        <div>
+          <h2 class="ui-panel-title">对账结论分布</h2>
+          <span class="ui-panel-sub"
+            >基于当前 {{ reports.length }} 份报告 · {{ verdictTotal }} 行</span
+          >
+        </div>
+      </div>
+      <div class="ui-panel-body next-recon__summary-body">
+        <UiDonut
+          :segments="verdictSegments"
+          :center-text="`${verdictTotal}`"
+          data-testid="recon-verdict-donut"
+        />
+        <div class="ui-legend">
+          <div v-for="seg in verdictSegments" :key="seg.label" class="ui-legend-row">
+            <span class="ui-legend-dot" :style="{ background: seg.color }" />
+            <span class="ui-legend-label" :title="seg.label">{{ seg.label }}</span>
+            <span class="ui-legend-pct ui-num"
+              >{{ ((seg.value / Math.max(1, verdictTotal)) * 100).toFixed(0) }}%</span
+            >
+            <span class="ui-legend-value ui-num">{{ seg.value }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
         <span class="ui-panel-sub">共 {{ reports.length }} 份报告</span>
@@ -690,6 +749,17 @@ onMounted(load);
 .next-recon__stat-value {
   font-size: var(--ui-font-size-base);
   font-weight: var(--ui-weight-semibold);
+}
+
+.next-recon__summary {
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-recon__summary-body {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-6);
+  flex-wrap: wrap;
 }
 
 .next-recon__filters {
