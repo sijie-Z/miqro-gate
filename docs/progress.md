@@ -2902,3 +2902,17 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **验证**：Me 密钥 IT **11/11**（新增：多项目创建+快照双绑定、缺授权 409、轮换镜像全部绑定）；AdminOrg IT **11/11**（新增：标签自动生成/引用守卫 409/改名放行/成员移除→绑定 DISABLED+Key REVOKED）；`VirtualKeyResolverTest` **2/2**（同核心段双后缀→各自项目与凭证；未绑定/篡改/缺头统一拒绝）；OpenAPI 基线导出重建；前端 vitest 全量 + typecheck + 构建立即执行（结果随 PR 记录）。
 
 **演示最小闭环（下一步）**：一把 Key 两个标签（CC Switch 双条目）→ 两项目各自凭证与用量。
+
+
+## 2026-09-16 凌晨 — Goal #633：CAA 请求上下文管线（Spec v1.1 Phase 4）
+
+**背景**：外部评审对《上下文归属架构》Spec v1 提出 6 项必修（body 历史污染、UNATTRIBUTED 路由、project_id 标识、活动切换迟滞、claims/verified 分离、证据冲突模型）；owner 拍板"赶紧做"。本批交付 **Gateway 侧 Phase 4**：服务端解析阶梯 + 归属落库；客户端 miqro-context（证据采集 / Local Agent / 迟滞切换）为后续批次。
+
+**交付**（分支 feat/caa-phase4-context-pipeline-633）：
+
+- **解析阶梯**（`RequestContextResolver`，Spec v1.1 §4）：`X-Miqro-Project-Id` 声明（不可信，仅当目标是该 Key 的绑定才生效）→ 点号后缀命中绑定 → 唯一绑定兜底；多绑定且无上下文 **400 `CONTEXT_REQUIRED`**（失败关闭，不猜、不静默回落默认项目）；声明无绑定 403 `CONTEXT_NOT_ALLOWED`、声明畸形 400 `CONTEXT_INVALID`；未知/畸形密钥维持统一 404（防枚举收窄到身份层——标签不匹配不再 404，单绑定 Key 的标签视为装饰）。
+- **声明审计化**：`X-Miqro-Claim-Source/Confidence/Status`、`X-Claude-Code-Session-Id` 全部 allowlist + 限长（64）消毒，仅落库审计：不参与授权、不转发上游；入站 `x-miqro-*` 由 HeaderFilters 统一剥离（`X-MiqroKey-*` 同规则）。
+- **归属随用量落库（V54）**：`usage_event` 增 `session_id/activity_id/claimed_project_id/resolution_status/claim_source/claim_confidence`（全可空，存量写入路径零变化）；**V55** 新增 `request_context_evidence`（append-only 证据审计：来源/规范值/置信度/作用域）。
+- **契约修订**：api-contract §4/§7.1（后缀=路由选择器；阶梯与错误码；`usage_event` 归属列）；ADR-0018 与单密钥设计文档加"#633 修订"注；database-schema 增 V54/V55。
+
+**验证**：`RequestContextResolverTest` 8/8（阶梯全矩阵 + 消毒边界）；`VirtualKeyAuthContractTest` 29/29（新增 CaaContext 组：多绑定无上下文失败关闭、声明选绑定且声明头不上行、伪造声明 403）；`HeaderFiltersTest` 10/10；`PostgresUsageEventWriterTest` 7/7（CAA 六列逐字落库）。
