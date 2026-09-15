@@ -147,7 +147,7 @@ public class VirtualKeyService {
         if (memberSubject.role() != UserRole.SYSTEM_ADMIN
                 && !membershipRepository.exists(project.id(), memberSubject.id())) {
             throw new ApiException(HttpStatus.FORBIDDEN, "PROJECT_MEMBERSHIP_REQUIRED",
-                    delegatedTargetId != null ? "目标用户不是该项目成员，不能代其建钥。" : "You are not a member of this project");
+                    delegatedTargetId != null ? "目标用户不是该项目成员，不能代其建钥。" : "你不是该项目的成员，无法创建 Virtual Key。");
         }
 
         ProjectProviderGrant grant = grantRepository.findById(request.credentialGrantId())

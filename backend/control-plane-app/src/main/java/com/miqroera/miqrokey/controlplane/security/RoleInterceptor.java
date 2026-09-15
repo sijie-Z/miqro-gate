@@ -40,8 +40,7 @@ public class RoleInterceptor implements HandlerInterceptor {
                 return false;
             }
             if (userContext.getUser().role() != UserRole.SYSTEM_ADMIN) {
-                sendProblem(response, 403, "FORBIDDEN", "Admin access requires SYSTEM_ADMIN role",
-                        resolveRequestId(request));
+                sendProblem(response, 403, "FORBIDDEN", "该操作需要系统管理员（SYSTEM_ADMIN）权限。", resolveRequestId(request));
                 return false;
             }
             return true;

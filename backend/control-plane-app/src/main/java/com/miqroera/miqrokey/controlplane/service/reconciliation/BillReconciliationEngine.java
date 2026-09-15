@@ -135,9 +135,15 @@ public final class BillReconciliationEngine {
         if (bill.inputTokens() == null && bill.outputTokens() == null) {
             return false;
         }
-        return Objects.equals(bill.inputTokens(), local.inputTokens())
-                && Objects.equals(bill.outputTokens(), local.outputTokens())
-                && Objects.equals(bill.cacheReadTokens(), local.cacheReadTokens());
+        if (!Objects.equals(bill.inputTokens(), local.inputTokens())
+                || !Objects.equals(bill.outputTokens(), local.outputTokens())) {
+            return false;
+        }
+        // The contract compares "input/output（±cache）": a bill that does not
+        // break out cache reads (null) compares on input/output only; a bill
+        // that does (non-null) must match the local cache component exactly
+        // (#625 — null used to be compared against 0 and could never match).
+        return bill.cacheReadTokens() == null || Objects.equals(bill.cacheReadTokens(), local.cacheReadTokens());
     }
 
     private static MatchLevel level(BillLine bill, LocalUsageRow local) {

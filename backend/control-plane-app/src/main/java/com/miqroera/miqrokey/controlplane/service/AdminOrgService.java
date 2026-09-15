@@ -56,13 +56,14 @@ public class AdminOrgService {
     private final AuditService auditService;
     private final AdminQuotaDefaultTemplateService quotaDefaultTemplateService;
     private final NamedParameterJdbcTemplate jdbc;
+    private final RouteRefreshPublisher routeRefreshPublisher;
 
     public AdminOrgService(UserRepository userRepository, TeamRepository teamRepository,
             ProjectRepository projectRepository, ProjectMembershipRepository projectMembershipRepository,
             ProjectProviderGrantRepository grantRepository, UpstreamCredentialRepository credentialRepository,
             ProviderProductRepository productRepository, PasswordHasher passwordHasher, SessionService sessionService,
             AuditService auditService, AdminQuotaDefaultTemplateService quotaDefaultTemplateService,
-            NamedParameterJdbcTemplate jdbc) {
+            NamedParameterJdbcTemplate jdbc, RouteRefreshPublisher routeRefreshPublisher) {
         this.userRepository = userRepository;
         this.teamRepository = teamRepository;
         this.projectRepository = projectRepository;
@@ -75,6 +76,7 @@ public class AdminOrgService {
         this.auditService = auditService;
         this.quotaDefaultTemplateService = quotaDefaultTemplateService;
         this.jdbc = jdbc;
+        this.routeRefreshPublisher = routeRefreshPublisher;
     }
 
     // ------------------------------------------------------------------
@@ -354,8 +356,7 @@ public class AdminOrgService {
         }
         requireCatalogModels(providerProductId, models);
         if (grantRepository.existsByProjectIdAndProductIdAndCredentialId(projectId, providerProductId, credentialId)) {
-            throw new ApiException(HttpStatus.CONFLICT, "GRANT_EXISTS",
-                    "a grant for this project/product/credential already exists");
+            throw new ApiException(HttpStatus.CONFLICT, "GRANT_EXISTS", "该项目已存在相同凭证与产品组合的授权（含已停用），不可重复创建。");
         }
         ProjectProviderGrant grant = new ProjectProviderGrant(UUID.randomUUID(), tenantId, projectId, providerProductId,
                 credentialId, GrantStatus.ACTIVE, adminId, 0, Instant.now(), Instant.now());
@@ -363,6 +364,9 @@ public class AdminOrgService {
         replaceModels(tenantId, grant.id(), models);
         auditService.record(tenantId, adminId, "GRANT_CREATE", "GRANT", grant.id(),
                 "{\"projectId\":\"" + projectId + "\",\"productId\":\"" + providerProductId + "\"}", null);
+        // #619: grants participate in the gateway snapshot — without this the
+        // gateway only picked the change up via its 30s scheduled refresh.
+        routeRefreshPublisher.publishChanged();
         return grant;
     }
 
@@ -372,6 +376,9 @@ public class AdminOrgService {
         requireCatalogModels(grant.providerProductId(), models);
         replaceModels(tenantId, grantId, models);
         auditService.record(tenantId, adminId, "GRANT_MODELS", "GRANT", grantId, "{}", null);
+        // #619: shrinking the scope must revoke the models for existing keys
+        // promptly — the gateway enforces grant ∩ key models at request time.
+        routeRefreshPublisher.publishChanged();
         return grant;
     }
 
@@ -383,6 +390,8 @@ public class AdminOrgService {
                 grant.version() + 1, grant.createdAt(), Instant.now());
         grantRepository.update(updated);
         auditService.record(tenantId, adminId, "GRANT_DISABLE", "GRANT", grantId, "{}", null);
+        // #619: a disabled grant must drop out of the gateway snapshot promptly.
+        routeRefreshPublisher.publishChanged();
     }
 
     /** Models granted to a grant (for the edit view). */
