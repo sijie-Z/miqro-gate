@@ -315,7 +315,24 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                     rs.getObject("reasoning_tokens", Long.class)),
             rs.getObject("latency_ms", Long.class), rs.getObject("upstream_status_code", Integer.class),
             rs.getBytes("cache_key"), rs.getBoolean("is_complete"), rs.getBoolean("usage_missing"),
-            rs.getString("gateway_request_id"), rs.getTimestamp("occurred_at").toInstant(), rs.getString("client_ip"));
+            rs.getString("gateway_request_id"), rs.getTimestamp("occurred_at").toInstant(), rs.getString("client_ip"),
+            attributionOf(rs));
+
+    /** CAA attribution columns (V54); all-null rows predate the feature. */
+    private static UsageEvent.ContextAttribution attributionOf(java.sql.ResultSet rs) throws java.sql.SQLException {
+        String sessionId = rs.getString("session_id");
+        Object activityId = rs.getObject("activity_id");
+        Object claimedProjectId = rs.getObject("claimed_project_id");
+        String resolutionStatus = rs.getString("resolution_status");
+        String claimSource = rs.getString("claim_source");
+        String claimConfidence = rs.getString("claim_confidence");
+        if (sessionId == null && activityId == null && claimedProjectId == null && resolutionStatus == null
+                && claimSource == null && claimConfidence == null) {
+            return null;
+        }
+        return new UsageEvent.ContextAttribution(sessionId, (UUID) activityId, (UUID) claimedProjectId,
+                resolutionStatus, claimSource, claimConfidence);
+    }
 
     @Override
     public List<UsageEvent> findRecords(UsageFilter filter, long offset, int limit) {
