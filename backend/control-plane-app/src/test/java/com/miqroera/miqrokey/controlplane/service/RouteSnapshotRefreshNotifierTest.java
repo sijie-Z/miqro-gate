@@ -61,6 +61,8 @@ class RouteSnapshotRefreshNotifierTest {
     @Autowired
     VirtualKeyService virtualKeyService;
     @Autowired
+    AdminOrgService adminOrgService;
+    @Autowired
     NamedParameterJdbcTemplate jdbc;
 
     private final Fixture fx = new Fixture();
@@ -89,6 +91,41 @@ class RouteSnapshotRefreshNotifierTest {
             PGNotification notification = awaitNotification(pg, 10, TimeUnit.SECONDS);
             assertThat(notification).isNotNull();
             assertThat(notification.getName()).isEqualTo(RouteSnapshotRefreshNotifier.CHANNEL);
+        }
+    }
+
+    @Test
+    @DisplayName("grant scope edits and grant disable publish NOTIFY (#619)")
+    void grantMutationsPublishNotification() throws Exception {
+        fx.seed();
+
+        try (Connection probe = probeConnection(); Statement statement = probe.createStatement()) {
+            statement.execute("LISTEN " + RouteSnapshotRefreshNotifier.CHANNEL);
+            PGConnection pg = probe.unwrap(org.postgresql.PGConnection.class);
+
+            adminOrgService.updateGrantModels(TENANT_ID, fx.adminId, fx.grantId, List.of("claude-3-7-sonnet"));
+            assertThat(awaitNotification(pg, 10, TimeUnit.SECONDS)).as("grant models update must notify").isNotNull();
+
+            adminOrgService.disableGrant(TENANT_ID, fx.adminId, fx.grantId);
+            assertThat(awaitNotification(pg, 10, TimeUnit.SECONDS)).as("grant disable must notify").isNotNull();
+        }
+    }
+
+    @Test
+    @DisplayName("a failed grant edit publishes no NOTIFY (#619)")
+    void failedGrantEditPublishesNothing() throws Exception {
+        fx.seed();
+
+        try (Connection probe = probeConnection(); Statement statement = probe.createStatement()) {
+            statement.execute("LISTEN " + RouteSnapshotRefreshNotifier.CHANNEL);
+            PGConnection pg = probe.unwrap(org.postgresql.PGConnection.class);
+
+            // Unknown grant id -> ApiException -> the transaction rolls back.
+            assertThatThrownBy(() -> adminOrgService.updateGrantModels(TENANT_ID, fx.adminId, UUID.randomUUID(),
+                    List.of("claude-3-7-sonnet"))).isInstanceOf(ApiException.class);
+
+            assertThat(pg.getNotifications(2000)).isNullOrEmpty();
+            assertThat(pg.getNotifications(2000)).isNullOrEmpty();
         }
     }
 

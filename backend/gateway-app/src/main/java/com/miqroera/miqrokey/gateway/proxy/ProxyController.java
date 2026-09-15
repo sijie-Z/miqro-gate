@@ -445,6 +445,13 @@ public class ProxyController {
                     TokenBucket tokens = attempt.observedTokens.get() != null
                             ? attempt.observedTokens.get()
                             : mergeObservations(attempt.usageObserver);
+                    // #623: providers that only carry the request id in the body
+                    // (DeepSeek etc.) — fall back to the staged response prefix
+                    // when the response headers did not provide one.
+                    if (attempt.providerRequestId.get() == null) {
+                        attempt.providerRequestId
+                                .set(UpstreamRequestIdExtractor.fromBodyPrefix(attempt.collector.bytes()));
+                    }
                     publishLifecycleComplete(ctx, modelName, requestId, startedAt, streaming, wireProtocol, signal,
                             attempt.httpStatus.get(), attempt.providerRequestId.get(), attempt.upstreamError.get(),
                             attempt.ttfb, tokens, clientCancelled, attempts.get() - 1);
@@ -750,7 +757,9 @@ public class ProxyController {
     /**
      * The provider's request id (dedup anchor for usage writes): OpenAI exposes
      * {@code x-request-id}, Anthropic {@code request-id}. Truncated to the column
-     * width; null when absent.
+     * width; null when absent. When both headers are missing, the terminal stage
+     * falls back to the response-body id ({@link UpstreamRequestIdExtractor},
+     * #623).
      */
     private static String pickProviderRequestId(
             org.springframework.web.reactive.function.client.ClientResponse response) {
