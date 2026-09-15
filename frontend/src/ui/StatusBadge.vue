@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
  * UiStatusBadge — status indicator. Two render modes:
- *  - 'dot' (default for table cells): colored dot + tinted text on the bare
- *    row background, no pill chrome — the PostHog console pattern.
- *  - 'pill': soft tinted capsule, used on panels/summary rows.
- * Tones map to --ui-<tone>-fg/bg pairs; the dot never carries information
- * alone (label always present).
+ *  - 'pill' (default, matches the Vben/antd console language): rectangle tag
+ *    with tinted fill, coloured text and a hairline border.
+ *  - 'dot': bare coloured dot + tinted text on the row background (denser
+ *    alternative for tight lists).
+ * The label is always present; colour never carries the meaning alone.
  */
 import { computed } from 'vue';
 
@@ -20,7 +20,7 @@ const props = withDefaults(
   {
     tone: 'neutral',
     label: '',
-    variant: 'dot',
+    variant: 'pill',
     dotOnly: false,
   },
 );
