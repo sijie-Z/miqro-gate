@@ -61,6 +61,19 @@ miqrokey:
     request-timeout: ${MIQROKEY_PRICE_SYNC_REQUEST_TIMEOUT:30s}
     max-bytes: ${MIQROKEY_PRICE_SYNC_MAX_BYTES:10485760}
 
+  retention:
+    consumer:
+      # Built-in OPTIONAL Kafka consumer feeding the admin console's retention
+      # log viewer (ADR-0014 §8). Disabled by default; enable together with the
+      # broker address (self-hosted profile or a CKafka-compatible endpoint).
+      # Consumes the same content-retention topic the gateway produces to;
+      # rows stay encrypted at rest.
+      enabled: ${MIQROKEY_RETENTION_CONSUMER_ENABLED:false}
+      bootstrap-servers: ${MIQROKEY_RETENTION_CONSUMER_BOOTSTRAP_SERVERS:}
+      topic: ${MIQROKEY_RETENTION_CONSUMER_TOPIC:content-retention}
+      group-id: ${MIQROKEY_RETENTION_CONSUMER_GROUP_ID:miqrokey-retention-console}
+      poll-millis: ${MIQROKEY_RETENTION_CONSUMER_POLL_MILLIS:500}
+
 # OpenAPI 3.1 generation (F09, api-contract §8): the machine-readable contract
 # served at /v3/api-docs. UI bundle is intentionally not included; the spec is
 # the artifact CI diffs against the committed baseline. Info and security

@@ -50,8 +50,6 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class RetentionSidecar {
 
     private static final Logger log = LoggerFactory.getLogger(RetentionSidecar.class);
-    private static final UUID RETENTION_AAD_ID = UUID
-            .nameUUIDFromBytes("miqro-retention-envelope".getBytes(StandardCharsets.UTF_8));
     private static final long DROP_LOG_THROTTLE = 100;
 
     private final RouteSnapshotProvider routeSnapshotProvider;
@@ -146,7 +144,7 @@ public final class RetentionSidecar {
             // (retention-consumer.md); plain.length would ship UTF-8 bytes, and
             // the byte cap value whenever truncation kicked in.
             int textCharCount = new String(plain, StandardCharsets.UTF_8).length();
-            EncryptedSecret secret = provider.encrypt(plain, tenantId, RETENTION_AAD_ID);
+            EncryptedSecret secret = provider.encrypt(plain, tenantId, RetentionEnvelope.AAD_ID);
             RetentionEnvelope envelope = new RetentionEnvelope(UUID.randomUUID(), tenantId, ctx.key().userId(),
                     ctx.key().keyId(), protocol.name(), gatewayRequestId, Instant.now(clock), secret.keyVersion(),
                     secret.ciphertext(), secret.nonce(), textCharCount, truncated, direction);

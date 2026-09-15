@@ -358,6 +358,13 @@
   CSV 合规导出（对齐腾讯 AI 网关操作记录下载；上限 5 万行、截断以 `X-MiQroKey-Truncated` 声明，
   参数/形状同 §9 机器端点）。
 - `/api/v1/admin/usage-deletions`：双确认后人工删除用量范围。
+- `/api/v1/admin/retention-logs`：内容留痕日志（ADR-0014 §8）——分页解密查看（`userId`/`direction`/
+  `protocol`/`from`/`to` 筛选、`page`/`size`；返回信封元数据 + 解密文本 + `dataMd5`）与
+  `GET /api/v1/admin/retention-logs/export`（CSV 合规导出，形状同审计导出：5 万行上限、截断以
+  `X-MiQroKey-Truncated` 声明）；仅 SYSTEM_ADMIN，每次查看/导出自身进审计
+  （`RETENTION_LOG_VIEW`/`RETENTION_LOG_EXPORT`）。数据由**可选内置消费端**
+  （`miqrokey.retention.consumer.*`，默认关）从 `content-retention` topic 幂等落库（`retention_log`
+  行内保持密文；明文只在控制面解密路径出现，且仅出现在受审计的管理员响应中）。
 
 真实凭证写接口只接受明文输入，响应只返回掩码、指纹、版本和验证状态。凭证测试不得自动把未保存值写入数据库。
 

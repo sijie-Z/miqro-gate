@@ -46,6 +46,13 @@
             <groupId>io.projectreactor.netty</groupId>
             <artifactId>reactor-netty-http</artifactId>
         </dependency>
+
+        <!-- Kafka client for the optional built-in retention-log consumer
+             (ADR-0014 §8; version managed by the Spring Boot BOM) -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+        </dependency>
         <!-- OpenAPI 3.1 generation (F09, api-contract §8): /v3/api-docs without the
              swagger-ui bundle — the spec is the machine-readable contract source. -->
         <dependency>
