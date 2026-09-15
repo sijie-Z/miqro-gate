@@ -3,20 +3,28 @@
  * NextGrantsView — /app/grants v2 admin page (U2 org batch).
  * Behaviour parity with the legacy grants page plus name resolution: rows
  * show project / credential / product display names instead of raw UUID
- * prefixes (same endpoints, no API change). Create form, model-scope drawer
- * (one model per line, replace-all on save) and disable gate included.
+ * prefixes (same endpoints, no API change).
+ *
+ * Issue #571: the create form derives the provider product from the selected
+ * credential's subscription (the backend enforces the same consistency,
+ * #498) instead of offering it as a free "optional" choice, and the model
+ * scope is picked from the product's model catalog (ModelScopePicker) rather
+ * than typed as free text.
  */
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiDrawer, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type { Grant, Project } from '@/types/generated-api';
+import ModelScopePicker from '@/components/ModelScopePicker.vue';
+import ProviderBrandChip from '@/components/ProviderBrandChip.vue';
+import type { Grant, Project, SubscriptionView } from '@/types/generated-api';
 
 interface CredentialOption {
   id: string;
   name: string;
   subscriptionId: string;
+  status?: string;
 }
 
 interface ProductOption {
@@ -24,6 +32,7 @@ interface ProductOption {
   displayName: string;
   productCode: string;
   providerName: string;
+  providerSlug?: string;
 }
 
 const grants = ref<Grant[]>([]);
@@ -34,15 +43,17 @@ const loadRequestId = ref('');
 const projects = ref<Project[]>([]);
 const credentials = ref<CredentialOption[]>([]);
 const products = ref<ProductOption[]>([]);
+const subscriptions = ref<SubscriptionView[]>([]);
 
 const creating = ref(false);
-const form = ref({ projectId: '', providerProductId: '', credentialId: '', models: '' });
+const form = ref({ projectId: '', credentialId: '', models: [] as string[] });
 const formError = ref('');
 const submitting = ref(false);
 
 const modelsOpen = ref(false);
 const modelsGrant = ref<Grant | null>(null);
-const modelsText = ref('');
+const modelsScope = ref<string[]>([]);
+const modelsScopeLoading = ref(false);
 const modelsSaving = ref(false);
 const modelsError = ref('');
 // #440: request-sequence guard — a slow load for grant A must never land in the
@@ -64,15 +75,56 @@ const projectOptions = computed<UiSelectOption[]>(() =>
   projects.value.map((p) => ({ value: p.id!, label: `${p.code} · ${p.name}` })),
 );
 
-const credentialOptions = computed<UiSelectOption[]>(() =>
-  credentials.value.map((c) => ({ value: c.id, label: c.name })),
+const productById = computed(() => new Map(products.value.map((p) => [p.id, p])));
+const productLabel = computed(() => {
+  const map = productById.value;
+  return (productId: string | undefined) => {
+    const product = productId ? map.get(productId) : undefined;
+    return product ? `${product.providerName} · ${product.displayName}` : '';
+  };
+});
+
+/** subscription id → owning provider product id (grants derive the product). */
+const subscriptionProductId = computed(
+  () => new Map(subscriptions.value.map((s) => [s.id!, s.providerProductId!])),
 );
 
-const productOptions = computed<UiSelectOption[]>(() =>
-  products.value.map((p) => ({
-    value: p.id,
-    label: `${p.providerName} · ${p.displayName}（${p.productCode}）`,
-  })),
+/** The product a grant on this credential would carry; '' = not resolvable. */
+const formProductId = computed(() => {
+  const credential = credentials.value.find((c) => c.id === form.value.credentialId);
+  if (!credential) return '';
+  return subscriptionProductId.value.get(credential.subscriptionId) ?? '';
+});
+
+const formProduct = computed(() => productById.value.get(formProductId.value));
+
+const credentialOptions = computed<UiSelectOption[]>(() =>
+  credentials.value.map((c) => {
+    const product = productLabel.value(subscriptionProductId.value.get(c.subscriptionId));
+    const parts = [product || '订阅信息不可用'];
+    if (c.status && c.status !== 'ACTIVE') parts.push('已停用');
+    return { value: c.id, label: c.name, hint: parts.join(' · ') };
+  }),
+);
+
+// The backend answers 409 GRANT_EXISTS for a duplicate triple — even when the
+// existing grant is disabled (the existence check ignores status). Surface it
+// before submitting; the 409 stays as the backstop for stale lists.
+const duplicateGrant = computed(
+  () =>
+    Boolean(form.value.projectId && form.value.credentialId && formProductId.value) &&
+    grants.value.some(
+      (g) =>
+        g.projectId === form.value.projectId &&
+        g.upstreamCredentialId === form.value.credentialId &&
+        g.providerProductId === formProductId.value,
+    ),
+);
+
+const canSubmit = computed(
+  () =>
+    Boolean(form.value.projectId && form.value.credentialId && formProductId.value) &&
+    !duplicateGrant.value,
 );
 
 const nameOf = computed(() => {
@@ -117,31 +169,42 @@ async function load() {
 }
 
 async function loadOptions() {
-  const [projectList, credentialList, productList] = await Promise.all([
+  const [projectList, credentialList, productList, subscriptionList] = await Promise.all([
     api.listProjects(),
     api.listCredentials(),
     api.listProviderProducts(),
+    api.listSubscriptions(),
   ]);
   projects.value = projectList;
   credentials.value = credentialList as CredentialOption[];
   products.value = productList as ProductOption[];
+  subscriptions.value = subscriptionList;
 }
 
 async function createGrant() {
   if (!form.value.projectId || !form.value.credentialId) {
-    formError.value = '请选择项目与凭证。';
+    formError.value = '请选择项目与上游凭证。';
+    return;
+  }
+  if (!formProductId.value) {
+    formError.value = '无法解析该凭证所属的供应商产品（订阅缺失），请检查凭证配置。';
+    return;
+  }
+  if (duplicateGrant.value) {
+    formError.value = '该项目已存在同凭证、同产品的授权。';
     return;
   }
   submitting.value = true;
+  formError.value = '';
   try {
     await api.createGrant({
       projectId: form.value.projectId,
-      providerProductId: form.value.providerProductId,
+      providerProductId: formProductId.value,
       credentialId: form.value.credentialId,
-      models: parseModels(form.value.models),
+      models: form.value.models,
     });
     creating.value = false;
-    form.value = { projectId: '', providerProductId: '', credentialId: '', models: '' };
+    form.value = { projectId: '', credentialId: '', models: [] };
     toast.success('授权已创建');
     await load();
   } catch (error) {
@@ -151,27 +214,27 @@ async function createGrant() {
   }
 }
 
-function parseModels(text: string): string[] {
-  return text
-    .split(/[,，\n]/)
-    .map((m) => m.trim())
-    .filter(Boolean);
-}
-
 async function openModels(grant: Grant) {
   const seq = ++modelsRequestSeq;
   modelsGrant.value = grant;
+  modelsScope.value = [];
   modelsError.value = '';
+  modelsScopeLoading.value = true;
+  modelsOpen.value = true;
   try {
-    const models = (await api.grantModels(grant.id!)).join('\n'); // list rows always carry ids
+    const models = await api.grantModels(grant.id!); // list rows always carry ids
     if (seq !== modelsRequestSeq) {
       return; // a newer drawer target won — this response is stale
     }
-    modelsText.value = models;
-    modelsOpen.value = true;
+    modelsScope.value = models;
   } catch {
     if (seq === modelsRequestSeq) {
+      modelsOpen.value = false;
       toast.error('加载模型范围失败');
+    }
+  } finally {
+    if (seq === modelsRequestSeq) {
+      modelsScopeLoading.value = false;
     }
   }
 }
@@ -182,7 +245,7 @@ async function saveModels() {
   modelsSaving.value = true;
   modelsError.value = '';
   try {
-    await api.updateGrantModels(target.id!, parseModels(modelsText.value)); // drawer row carries id
+    await api.updateGrantModels(target.id!, modelsScope.value); // drawer row carries id
     toast.success('模型范围已更新');
     modelsOpen.value = false;
   } catch (error) {
@@ -258,38 +321,73 @@ onMounted(async () => {
             width="100%"
             data-testid="grant-create-project"
           />
-          <UiSelect
-            v-model="form.credentialId"
-            label="上游凭证"
-            required
-            placeholder="选择凭证"
-            :options="credentialOptions"
-            width="100%"
-            data-testid="grant-create-credential"
-          />
-          <UiSelect
-            v-model="form.providerProductId"
-            label="供应商产品（可选）"
-            placeholder="选择产品实例"
-            :options="productOptions"
-            width="100%"
-            data-testid="grant-create-product"
-          />
-          <div class="ui-field">
-            <span class="ui-field__label">模型范围（每行一个，选填）</span>
-            <textarea
+          <div class="next-grants__field">
+            <UiSelect
+              v-model="form.credentialId"
+              label="上游凭证"
+              required
+              placeholder="选择凭证"
+              :options="credentialOptions"
+              width="100%"
+              data-testid="grant-create-credential"
+            />
+            <p class="next-grants__hint">
+              网关代该项目调用上游时使用的真实供应商 Key（已加密保存，永不回显）。
+            </p>
+          </div>
+          <div v-if="form.credentialId" class="next-grants__field">
+            <span class="next-grants__field-label">供应商产品</span>
+            <div class="next-grants__derived" data-testid="grant-create-product">
+              <template v-if="formProduct">
+                <ProviderBrandChip
+                  :slug="formProduct.providerSlug"
+                  :name="formProduct.providerName"
+                  size="sm"
+                />
+                <span class="next-grants__derived-name">
+                  {{ formProduct.providerName }} · {{ formProduct.displayName }}
+                </span>
+                <span class="ui-mono next-grants__derived-code">{{ formProduct.productCode }}</span>
+              </template>
+              <span v-else class="next-grants__derived-missing">
+                无法解析该凭证所属的供应商产品（订阅缺失）。
+              </span>
+            </div>
+            <p class="next-grants__hint">由所选凭证的订阅自动确定，无需手选。</p>
+          </div>
+          <div v-if="formProductId" class="next-grants__field">
+            <span class="next-grants__field-label">模型范围</span>
+            <p class="next-grants__hint next-grants__hint--lead">
+              该项目通过此授权可调用的模型；默认勾选该产品目录全部模型，可取消收窄。
+            </p>
+            <ModelScopePicker
               v-model="form.models"
-              class="ui-textarea"
-              rows="4"
-              placeholder="例如 claude-3-7-sonnet"
+              :product-id="formProductId"
+              default-all
               data-testid="grant-create-models"
             />
+            <p
+              v-if="!form.models.length"
+              class="next-grants__scope-warning"
+              data-testid="grant-create-models-empty"
+            >
+              未勾选任何模型：该授权暂不含任何模型，经此授权的 Key
+              将无法调用（可由模型审批逐条加入）。
+            </p>
           </div>
+          <p
+            v-if="duplicateGrant"
+            class="next-grants__scope-warning"
+            data-testid="grant-create-duplicate"
+          >
+            该项目已存在同凭证、同产品的授权（含已停用），不可重复创建。
+          </p>
           <p v-if="formError" class="ui-form-error">{{ formError }}</p>
           <div class="next-grants__actions">
             <UiButton
               variant="primary"
               :loading="submitting"
+              :disabled="!canSubmit"
               data-testid="grant-create-submit"
               @click="createGrant"
             >
@@ -314,7 +412,9 @@ onMounted(async () => {
         data-testid="grants-table"
       >
         <template #project="{ row }">
-          <span class="next-grants__name">{{ nameOf.project((row as unknown as Grant).projectId!) }}</span>
+          <span class="next-grants__name">{{
+            nameOf.project((row as unknown as Grant).projectId!)
+          }}</span>
         </template>
         <template #credential="{ row }">
           <span class="next-grants__name">{{
@@ -370,19 +470,25 @@ onMounted(async () => {
       data-testid="grant-models-drawer"
       @close="modelsOpen = false"
     >
-      <p class="next-grants__hint">每行一个模型 ID；保存会整体替换当前范围。</p>
-      <textarea
-        v-model="modelsText"
-        class="ui-textarea next-grants__models-input"
-        rows="14"
-        data-testid="grant-models-input"
-      />
+      <div v-if="modelsScopeLoading" class="next-grants__hint" data-testid="grant-models-loading">
+        正在加载模型范围…
+      </div>
+      <template v-else-if="modelsGrant">
+        <p class="next-grants__hint">勾选该项目可通过此授权使用的模型；保存会整体替换当前范围。</p>
+        <ModelScopePicker
+          :key="modelsGrant.id"
+          v-model="modelsScope"
+          :product-id="modelsGrant.providerProductId ?? ''"
+          data-testid="grant-models-picker"
+        />
+      </template>
       <p v-if="modelsError" class="ui-form-error">{{ modelsError }}</p>
       <template #footer>
         <UiButton variant="ghost" @click="modelsOpen = false">取消</UiButton>
         <UiButton
           variant="primary"
           :loading="modelsSaving"
+          :disabled="modelsScopeLoading"
           data-testid="grant-models-save"
           @click="saveModels"
         >
@@ -437,41 +543,53 @@ onMounted(async () => {
   max-width: 560px;
 }
 
-.ui-field {
+.next-grants__field {
   display: flex;
   flex-direction: column;
   gap: var(--ui-space-1);
 }
 
-.ui-field__label {
+.next-grants__field-label {
   font-size: var(--ui-font-size-xs);
   font-weight: var(--ui-weight-medium);
   color: var(--ui-foreground);
   line-height: var(--ui-line-height-sm);
 }
 
-.ui-textarea {
-  width: 100%;
-  padding: var(--ui-space-2) var(--ui-space-3);
-  border: 1px solid var(--ui-input-border);
+.next-grants__derived {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  min-height: var(--ui-control-height);
+  padding: 0 var(--ui-space-3);
+  border: 1px solid var(--ui-border);
   border-radius: var(--ui-radius-control);
-  background: var(--ui-card);
-  color: var(--ui-foreground);
-  font-family: inherit;
+  background: var(--ui-muted);
+}
+
+.next-grants__derived-name {
   font-size: var(--ui-font-size-sm);
-  line-height: var(--ui-line-height-base);
-  resize: vertical;
+  font-weight: var(--ui-weight-medium);
 }
 
-.ui-textarea:focus {
-  outline: none;
-  border-color: var(--ui-primary);
-  box-shadow: var(--ui-shadow-focus);
-}
-
-.next-grants__models-input {
-  font-family: var(--ui-font-mono);
+.next-grants__derived-code {
   font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.next-grants__derived-missing {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-warning-fg);
+}
+
+.next-grants__scope-warning {
+  margin: 0;
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-warning-bg);
+  color: var(--ui-warning-fg);
+  font-size: var(--ui-font-size-xs);
+  line-height: var(--ui-line-height-sm);
 }
 
 .next-grants__actions {
@@ -490,8 +608,13 @@ onMounted(async () => {
 }
 
 .next-grants__hint {
-  margin: 0 0 var(--ui-space-3);
+  margin: 0;
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
+  line-height: var(--ui-line-height-sm);
+}
+
+.next-grants__hint--lead {
+  margin-bottom: var(--ui-space-1);
 }
 </style>
