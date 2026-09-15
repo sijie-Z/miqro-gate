@@ -432,6 +432,21 @@ export function createPrice(body: {
   return post<PriceSnapshotView>('/api/v1/admin/prices', body);
 }
 
+/** Price-catalog sync report (#585): source quotes → CNY snapshots. */
+export interface PriceSyncReport {
+  source: string;
+  usdCnyRate: string;
+  written: number;
+  unchanged: number;
+  unmatched: Array<{ productCode: string; modelId: string }>;
+  skippedProducts: string[];
+  syncedAt: string;
+}
+
+export function syncPrices(): Promise<PriceSyncReport> {
+  return post<PriceSyncReport>('/api/v1/admin/prices/sync', {});
+}
+
 export function listApiConsumers(): Promise<ApiConsumerView[]> {
   return get<ApiConsumerView[]>('/api/v1/admin/api-consumers');
 }

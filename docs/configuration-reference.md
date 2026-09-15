@@ -137,6 +137,11 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_CONNECT_TIMEOUT` | `10s` | 控制面 → 供应商调用的 TCP 连接超时（G3.1，`ProviderClient`） |
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_REQUEST_TIMEOUT` | `30s` | 控制面 → 供应商单次调用整体截止（G3.1） |
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_MAX_RESPONSE_BYTES` | `1048576` | 控制面 → 供应商单次响应体上限（G3.1）；超限中止交换 |
+| `MIQROKEY_PRICE_SYNC_URL` | `https://openrouter.ai/api/v1/models` | 定价目录同步的公开价格源（#585，`miqrokey.price-sync.url`）：编译期适配器默认 OpenRouter 模型索引；运维可覆盖，不接受请求参数传入；大陆服务器实测 jsDelivr/GitHub raw 不可用（18KB/s/超时），勿改回 |
+| `MIQROKEY_PRICE_SYNC_USD_CNY_RATE` | `7.2` | 价格源 USD→CNY 换算率（#585）：同步时 `USD/token × 1e6 × 汇率` 写入 CNY/1M 快照；汇率变化只影响此后同步写入的数值 |
+| `MIQROKEY_PRICE_SYNC_CONNECT_TIMEOUT` | `10s` | 价格源连接超时（#585） |
+| `MIQROKEY_PRICE_SYNC_REQUEST_TIMEOUT` | `30s` | 价格源单次请求整体截止（#585）；源文件约 700KB，正常 <3s |
+| `MIQROKEY_PRICE_SYNC_MAX_BYTES` | `10485760` | 价格源响应体上限（#585）；超限按失败处理（零写入） |
 | `MIQROKEY_ALERTS_EVALUATION_INTERVAL_MS` | `300000` | 告警规则评估固定延迟（G4.5，`@Scheduled`）；也控制投递重试扫描节奏 |
 | `MIQROKEY_ALERTS_ADMIN_KEY_EXPIRY_INTERVAL_MS` | `21600000` | 管理密钥到期扫描间隔（`miqrokey.alerts.admin-key-expiry-interval-ms`，6 小时）：有启用的 ADMIN_API_KEY_EXPIRING 规则时检查 ≤7 天到期密钥并产生事件（规则 opt-in，默认关） |
 | `MIQROKEY_ALERTS_CONSUMER_KEY_EXPIRY_INTERVAL_MS` | `21600000` | 消费者密钥到期扫描间隔（`miqrokey.alerts.consumer-key-expiry-interval-ms`，6 小时，镜像管理密钥先例）：有启用的 CONSUMER_KEY_EXPIRING 规则时检查 ≤7 天到期消费者并产生事件（规则 opt-in，默认关） |
