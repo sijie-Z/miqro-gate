@@ -1300,4 +1300,21 @@ async function handleLogout() {
   margin-right: var(--ui-space-1);
   align-self: center;
 }
+
+/* Narrow screens (#627): the rail keeps its width, so the content column can
+   get tighter than the topbar's controls — the username cluster used to
+   overflow past the viewport edge and get clipped. Compact the chrome instead
+   of letting it spill: hide the username and breadcrumb, tighten paddings.
+   Verified overflow-free at 375px (acceptance H1). */
+@media (max-width: 640px) {
+  .new-shell__topbar {
+    padding: 0 var(--ui-space-3);
+    gap: var(--ui-space-2);
+  }
+
+  .new-shell__user-name,
+  .new-shell__breadcrumb {
+    display: none;
+  }
+}
 </style>
