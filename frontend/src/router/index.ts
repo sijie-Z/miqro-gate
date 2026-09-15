@@ -211,6 +211,12 @@ const router = createRouter({
           meta: adminMeta('MCP 访问日志'),
         },
         {
+          path: 'retention-logs',
+          name: 'retention-logs',
+          component: () => import('@/views/next/NextAdminRetentionLogsView.vue'),
+          meta: adminMeta('内容留痕'),
+        },
+        {
           path: 'webhooks',
           name: 'webhooks',
           component: () => import('@/views/next/NextAdminWebhooksView.vue'),

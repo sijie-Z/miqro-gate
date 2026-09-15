@@ -40,6 +40,7 @@ export type ValidateCredentialResponse = components['schemas']['ValidateCredenti
 export type SubscriptionView = components['schemas']['SubscriptionView'];
 export type SeatView = components['schemas']['SeatView'];
 export type AuditEventView = components['schemas']['AuditEventView'];
+export type AdminRetentionLogView = components['schemas']['AdminRetentionLogView'];
 export type MeGrantsResponse = components['schemas']['MeGrantsResponse'];
 export type QuotaDefaultTemplateView = components['schemas']['QuotaDefaultTemplateView'];
 export type McpAccessView = components['schemas']['McpAccessView'];
