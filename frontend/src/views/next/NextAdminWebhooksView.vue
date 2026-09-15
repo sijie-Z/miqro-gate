@@ -5,10 +5,10 @@
  * delivery endpoints, enable/disable, one-click signature test, gated delete
  * and a delivery-history drawer (recent 20 attempts per endpoint).
  */
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref  } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiDialog, UiDrawer, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
+import { UiButton, UiDonut, UiDialog, UiDrawer, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { WebhookEndpointView, WebhookDelivery } from '@/types/generated-api';
 
 const webhooks = ref<WebhookEndpointView[]>([]);
@@ -88,6 +88,22 @@ async function loadRates(endpoints: WebhookEndpointView[]) {
     }),
   );
 }
+
+/** Aggregate last-20 delivery outcome across endpoints (donut centre = rate). */
+const deliverySummary = computed(() => {
+  const entries = Object.values(rate.value);
+  const ok = entries.reduce((sum, e) => sum + e.ok, 0);
+  const total = entries.reduce((sum, e) => sum + e.total, 0);
+  return { ok, fail: Math.max(0, total - ok), total };
+});
+
+const deliverySegments = computed(() => {
+  const { ok, fail } = deliverySummary.value;
+  const rows = [];
+  if (ok > 0) rows.push({ label: '成功', value: ok, color: '#389e0d' });
+  if (fail > 0) rows.push({ label: '失败', value: fail, color: '#cf1322' });
+  return rows;
+});
 
 function rateOf(endpoint: WebhookEndpointView): { ok: number; total: number } | null {
   // list rows always carry ids
@@ -347,6 +363,36 @@ onMounted(load);
       </div>
     </section>
 
+    <section
+      v-if="deliverySegments.length"
+      class="ui-panel next-webhooks__summary"
+      data-testid="webhook-rate-dist"
+    >
+      <div class="ui-panel-head">
+        <div>
+          <h2 class="ui-panel-title">投递成功率</h2>
+          <span class="ui-panel-sub">全部端点近 20 次投递聚合</span>
+        </div>
+      </div>
+      <div class="ui-panel-body next-webhooks__summary-body">
+        <UiDonut
+          :segments="deliverySegments"
+          :center-text="`${Math.round((deliverySummary.ok / Math.max(1, deliverySummary.total)) * 100)}%`"
+          data-testid="webhook-rate-donut"
+        />
+        <div class="ui-legend">
+          <div v-for="seg in deliverySegments" :key="seg.label" class="ui-legend-row">
+            <span class="ui-legend-dot" :style="{ background: seg.color }" />
+            <span class="ui-legend-label">{{ seg.label }}</span>
+            <span class="ui-legend-pct ui-num"
+              >{{ ((seg.value / Math.max(1, deliverySummary.total)) * 100).toFixed(0) }}%</span
+            >
+            <span class="ui-legend-value ui-num">{{ seg.value }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
         <span class="ui-panel-sub">共 {{ webhooks.length }} 个端点</span>
@@ -513,6 +559,17 @@ onMounted(load);
 .ui-alert--error {
   background: var(--ui-danger-bg);
   color: var(--ui-danger-fg);
+}
+
+.next-webhooks__summary {
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-webhooks__summary-body {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-6);
+  flex-wrap: wrap;
 }
 
 .next-webhooks__create {

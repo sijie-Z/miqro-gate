@@ -119,6 +119,46 @@
   border-bottom: 1px solid var(--ui-border);
 }
 
+/* ---- chart legend rows (shared by donut panels) ---- */
+.ui-legend {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.ui-legend-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) 44px 80px;
+  align-items: center;
+  gap: var(--ui-space-2);
+  font-size: var(--ui-font-size-xs);
+}
+
+.ui-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.ui-legend-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-foreground-secondary);
+}
+
+.ui-legend-pct {
+  text-align: right;
+  color: var(--ui-foreground-secondary);
+}
+
+.ui-legend-value {
+  text-align: right;
+  color: var(--ui-foreground);
+}
+
 /* ---- numbers & code ---- */
 .ui-num {
   font-variant-numeric: tabular-nums;

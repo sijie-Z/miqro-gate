@@ -330,16 +330,16 @@ onMounted(load);
               data-testid="overview-cost-donut"
             />
           </div>
-          <div class="next-overview__cost-legend">
+          <div class="ui-legend">
             <div
               v-for="seg in donutSegments"
               :key="seg.label"
-              class="next-overview__legend-row"
+              class="ui-legend-row"
             >
-              <span class="next-overview__legend-dot" :style="{ background: seg.color }" />
-              <span class="next-overview__legend-label" :title="seg.label">{{ seg.label }}</span>
-              <span class="next-overview__legend-pct ui-num">{{ seg.pct.toFixed(0) }}%</span>
-              <span class="next-overview__legend-value ui-num">¥{{ seg.cost.toFixed(2) }}</span>
+              <span class="ui-legend-dot" :style="{ background: seg.color }" />
+              <span class="ui-legend-label" :title="seg.label">{{ seg.label }}</span>
+              <span class="ui-legend-pct ui-num">{{ seg.pct.toFixed(0) }}%</span>
+              <span class="ui-legend-value ui-num">¥{{ seg.cost.toFixed(2) }}</span>
             </div>
           </div>
         </div>
@@ -652,45 +652,6 @@ onMounted(load);
   z-index: 1;
   font-size: var(--ui-font-size-sm);
   font-weight: var(--ui-weight-semibold);
-  color: var(--ui-foreground);
-}
-
-.next-overview__cost-legend {
-  flex: 1;
-  min-width: 260px;
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-space-2);
-}
-
-.next-overview__legend-row {
-  display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) 48px 90px;
-  align-items: center;
-  gap: var(--ui-space-3);
-  font-size: var(--ui-font-size-sm);
-}
-
-.next-overview__legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-}
-
-.next-overview__legend-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ui-foreground);
-}
-
-.next-overview__legend-pct {
-  text-align: right;
-  color: var(--ui-foreground-secondary);
-}
-
-.next-overview__legend-value {
-  text-align: right;
   color: var(--ui-foreground);
 }
 
