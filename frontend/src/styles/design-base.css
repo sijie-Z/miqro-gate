@@ -330,3 +330,50 @@ a:focus-visible {
 .ui-menu__item:focus-visible {
   box-shadow: var(--ui-shadow-focus);
 }
+
+/* ---- preference modes ----------------------------------------------------
+   The preferences core (src/preferences) applies dataset attributes on <html>;
+   these rules give each mode its chrome. Append-only block. */
+
+/* Rail ink that follows the rail SURFACE (brand name, hovered nav rows) —
+   unlike --ui-foreground-inverse (always white, kept for the white-on-primary
+   active item). Defaults to the inverse foreground; the light menu theme below
+   re-points it to the light palette. */
+:root {
+  --ui-rail-text-strong: var(--ui-foreground-inverse);
+}
+
+/* Light navigation rail: the shell rail consumes the --ui-rail* tokens, so the
+   token re-point is enough — no layout rules change. Active nav items stay
+   white-on-solid-primary; non-active text flips to #595959. */
+[data-menu-theme='light'] {
+  --ui-rail: #ffffff;
+  --ui-rail-text: #595959;
+  --ui-rail-text-muted: #8c959f;
+  --ui-rail-hover: rgba(0, 0, 0, 0.04);
+  --ui-rail-line: #f0f0f0;
+  --ui-rail-text-strong: #595959;
+}
+
+/* Animations off: no transitions or keyframes anywhere in the console. */
+[data-anim='off'] *,
+[data-anim='off'] *::before,
+[data-anim='off'] *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Color modes — the dataset lands on <html>, so the whole console filters. */
+[data-gray='on'] {
+  filter: grayscale(100%);
+}
+
+[data-color-weak='on'] {
+  filter: invert(80%);
+}
+
+/* Wide content: page bands fill the viewport instead of the 1440px cap
+   ('fixed' keeps the existing --ui-content-max token). */
+[data-compact='wide'] {
+  --ui-content-max: 100%;
+}

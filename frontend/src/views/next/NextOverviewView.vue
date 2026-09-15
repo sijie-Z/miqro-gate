@@ -513,17 +513,18 @@ onMounted(load);
 }
 
 .next-overview__greeting-title {
-  margin: 0;
+  margin: 0 0 9px; /* Vben workbench h1: 9px to the sub line */
   font-size: 18px;
   font-weight: var(--ui-weight-semibold);
   color: var(--ui-foreground);
-  line-height: 26px;
+  line-height: 28px;
 }
 
 .next-overview__greeting-sub {
-  margin: 2px 0 0;
-  font-size: var(--ui-font-size-sm);
+  margin: 0;
+  font-size: var(--ui-font-size-base);
   color: var(--ui-foreground-secondary);
+  line-height: 22px;
 }
 
 .next-overview__greeting-stats {
@@ -714,7 +715,10 @@ onMounted(load);
   flex-direction: column;
   align-items: center;
   gap: var(--ui-space-2);
-  padding: 22px var(--ui-space-2);
+  /* Vben ant-card-grid: 24px vertical padding -> 98px tiles at 3 columns.
+     Horizontal stays 8px so 6-char CJK labels keep one line (Vben's own
+     labels are <=4 chars and survive its 24px horizontal padding). */
+  padding: 24px var(--ui-space-2);
   background: var(--ui-card);
   color: var(--ui-foreground);
   text-decoration: none;
@@ -731,7 +735,8 @@ onMounted(load);
 }
 
 .next-overview__quick-label {
-  font-size: var(--ui-font-size-sm);
+  font-size: var(--ui-font-size-base);
+  line-height: 22px; /* Vben tile label metrics */
   color: var(--ui-foreground-secondary);
   text-align: center;
 }

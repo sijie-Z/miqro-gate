@@ -32,8 +32,10 @@ import {
   FolderOpenIcon,
   LayersIcon,
   LockOnIcon,
+  MenuIcon,
   MoneyIcon,
   NotificationIcon,
+  RefreshIcon,
   RobotIcon,
   SecuredIcon,
   ServerIcon,
@@ -45,11 +47,18 @@ import {
 } from 'tdesign-icons-vue-next';
 import { useAuthStore } from '@/stores/auth';
 import { language } from '@/i18n';
+import SettingsDrawer from '@/components/SettingsDrawer.vue';
+import { initPreferences, preferences, setPreference } from '@/preferences';
 import type { Component } from 'vue';
 
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
+
+// Console preferences drive rail/topbar/tabbar chrome below. The core applies
+// its persisted values (dataset attributes + CSS vars) on init; the call is
+// idempotent, so per-mount invocation is safe.
+initPreferences();
 
 /** Language options shown in the user menu (labels are language-neutral). */
 const LANGS = [
@@ -198,20 +207,36 @@ function closeTab(name: string) {
 }
 
 /** Narrow screens collapse the rail to icons only (>=640 hides the drawer entirely). */
-const iconOnly = ref(false);
-function updateIconOnly() {
-  iconOnly.value = window.innerWidth < 1080 && window.innerWidth >= 640;
+const narrow = ref(false);
+function updateNarrow() {
+  narrow.value = window.innerWidth < 1080 && window.innerWidth >= 640;
 }
 // #440: initialize from the CURRENT width and clean the listener up on unmount
 // (the old top-level addEventListener never fired before the first resize and
 // leaked one listener per login).
 onMounted(() => {
-  updateIconOnly();
-  window.addEventListener('resize', updateIconOnly);
+  updateNarrow();
+  window.addEventListener('resize', updateNarrow);
 });
 onUnmounted(() => {
-  window.removeEventListener('resize', updateIconOnly);
+  window.removeEventListener('resize', updateNarrow);
 });
+
+/** Icon-only rail: the user pinned the collapse (settings drawer) OR the window is narrow. */
+const iconOnly = computed(() => narrow.value || preferences.collapsed);
+
+/** Hamburger toggle — persists through the preferences core. */
+function toggleCollapsed() {
+  setPreference('collapsed', !preferences.collapsed);
+}
+
+// ---- topbar controls ----
+const settingsOpen = ref(false);
+
+/** Visited-tab refresh affordance: reload the console (router.go(0)). */
+function refreshPage() {
+  router.go(0);
+}
 
 async function handleLogout() {
   await auth.logout();
@@ -222,8 +247,8 @@ async function handleLogout() {
 <template>
   <div class="new-shell">
     <aside class="new-shell__rail" :class="{ 'new-shell__rail--icons': iconOnly }">
-      <div class="new-shell__brand">
-        <span class="new-shell__brand-mark">M</span>
+      <div v-if="preferences.showLogo" class="new-shell__brand">
+        <span class="new-shell__brand-mark" :title="iconOnly ? 'MiQroGate' : undefined">M</span>
         <span v-if="!iconOnly" class="new-shell__brand-name">MiQroGate</span>
       </div>
 
@@ -250,15 +275,39 @@ async function handleLogout() {
     </aside>
 
     <main class="new-shell__main">
-      <header class="new-shell__topbar">
+      <header v-if="preferences.showHeader" class="new-shell__topbar">
         <div class="new-shell__topbar-left">
-          <span v-if="breadcrumb" class="new-shell__breadcrumb" data-testid="shell-breadcrumb">
+          <button
+            type="button"
+            class="new-shell__icon-btn"
+            data-testid="shell-collapse"
+            :title="preferences.collapsed ? '展开侧边栏' : '收起侧边栏'"
+            :aria-label="preferences.collapsed ? '展开侧边栏' : '收起侧边栏'"
+            @click="toggleCollapsed"
+          >
+            <MenuIcon class="new-shell__icon-btn-icon" />
+          </button>
+          <span
+            v-if="preferences.showBreadcrumb && breadcrumb"
+            class="new-shell__breadcrumb"
+            data-testid="shell-breadcrumb"
+          >
             <span class="new-shell__breadcrumb-group">{{ breadcrumb.group }}</span>
             <span class="new-shell__breadcrumb-sep" aria-hidden="true">/</span>
             <span class="new-shell__breadcrumb-current">{{ breadcrumb.label }}</span>
           </span>
         </div>
         <div class="new-shell__topbar-right">
+          <button
+            type="button"
+            class="new-shell__icon-btn"
+            data-testid="shell-settings-open"
+            title="系统设置"
+            aria-label="系统设置"
+            @click="settingsOpen = true"
+          >
+            <SettingIcon class="new-shell__icon-btn-icon" />
+          </button>
           <DropdownMenuRoot>
             <DropdownMenuTrigger class="new-shell__user" data-testid="shell-user-menu">
               <span class="new-shell__user-avatar" aria-hidden="true">{{ userInitial }}</span>
@@ -331,7 +380,36 @@ async function handleLogout() {
         </div>
       </header>
 
-      <div v-if="tabs.length" class="new-shell__tabbar" data-testid="shell-tabbar">
+      <!-- Header hidden (showHeader=false): keep a hairline strip with the
+           collapse + settings controls so the console stays usable. -->
+      <div v-else class="new-shell__slim-strip" data-testid="shell-topbar-slim">
+        <button
+          type="button"
+          class="new-shell__icon-btn"
+          data-testid="shell-collapse"
+          :title="preferences.collapsed ? '展开侧边栏' : '收起侧边栏'"
+          :aria-label="preferences.collapsed ? '展开侧边栏' : '收起侧边栏'"
+          @click="toggleCollapsed"
+        >
+          <MenuIcon class="new-shell__icon-btn-icon" />
+        </button>
+        <button
+          type="button"
+          class="new-shell__icon-btn new-shell__slim-strip-end"
+          data-testid="shell-settings-open"
+          title="系统设置"
+          aria-label="系统设置"
+          @click="settingsOpen = true"
+        >
+          <SettingIcon class="new-shell__icon-btn-icon" />
+        </button>
+      </div>
+
+      <div
+        v-if="preferences.showTabs && tabs.length"
+        class="new-shell__tabbar"
+        data-testid="shell-tabbar"
+      >
         <div
           v-for="(tab, i) in tabs"
           :key="tab.name"
@@ -362,12 +440,25 @@ async function handleLogout() {
             </svg>
           </button>
         </div>
+        <button
+          v-if="preferences.showTabRefresh"
+          type="button"
+          class="new-shell__icon-btn new-shell__icon-btn--sm new-shell__tab-refresh"
+          data-testid="shell-tab-refresh"
+          title="刷新当前页"
+          aria-label="刷新当前页"
+          @click="refreshPage"
+        >
+          <RefreshIcon class="new-shell__icon-btn-icon" />
+        </button>
       </div>
 
       <div class="new-shell__content">
         <RouterView />
       </div>
     </main>
+
+    <SettingsDrawer v-model:open="settingsOpen" />
   </div>
 </template>
 
@@ -425,7 +516,9 @@ async function handleLogout() {
   font-size: var(--ui-font-size-base);
   font-weight: var(--ui-weight-semibold);
   letter-spacing: -0.01em;
-  color: var(--ui-foreground-inverse);
+  /* Rail ink that follows the rail surface — re-pointed for the light menu
+     theme in design-base.css (the active item stays white-on-primary). */
+  color: var(--ui-rail-text-strong);
 }
 
 .new-shell__nav {
@@ -474,7 +567,7 @@ async function handleLogout() {
 
 .new-shell__nav-item:hover {
   background: var(--ui-rail-hover);
-  color: var(--ui-foreground-inverse);
+  color: var(--ui-rail-text-strong);
 }
 
 .new-shell__nav-item--active {
@@ -495,9 +588,10 @@ async function handleLogout() {
 }
 
 .new-shell__nav-item:hover .new-shell__nav-icon {
-  color: var(--ui-foreground-inverse);
+  color: var(--ui-rail-text-strong);
 }
 
+/* Active item keeps white-on-primary in both menu themes. */
 .new-shell__nav-item--active .new-shell__nav-icon {
   color: var(--ui-foreground-inverse);
 }
@@ -541,6 +635,7 @@ async function handleLogout() {
 .new-shell__topbar-left {
   display: flex;
   align-items: center;
+  gap: var(--ui-space-2);
   min-width: 0;
 }
 
@@ -757,5 +852,76 @@ async function handleLogout() {
 .new-shell__content {
   flex: 1;
   overflow-y: auto;
+}
+
+/* Icon buttons (rail collapse / settings gear / tab refresh): ghost square,
+   same focus-ring pattern as .ui-btn. position+z-index keeps the slim-strip
+   buttons clickable when they hang over the strip's later siblings. */
+.new-shell__icon-btn {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--ui-radius-control);
+  background: transparent;
+  color: var(--ui-foreground-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background-color var(--ui-ease),
+    color var(--ui-ease);
+}
+
+.new-shell__icon-btn:hover {
+  background: var(--ui-fill-hover);
+  color: var(--ui-foreground);
+}
+
+.new-shell__icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-shadow-focus);
+}
+
+.new-shell__icon-btn--sm {
+  width: 24px;
+  height: 24px;
+}
+
+.new-shell__icon-btn-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.new-shell__icon-btn--sm .new-shell__icon-btn-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* showHeader=false: a hairline strip keeps the collapse + settings controls
+   reachable; the buttons overflow it downward so they stay clickable without
+   restoring the header bar. */
+.new-shell__slim-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ui-space-1);
+  height: 8px;
+  padding: 0 var(--ui-space-2);
+  flex-shrink: 0;
+}
+
+.new-shell__slim-strip-end {
+  margin-left: auto;
+}
+
+/* Tab refresh sits at the right end of the visited-tabs strip. */
+.new-shell__tab-refresh {
+  margin-left: auto;
+  margin-right: var(--ui-space-1);
+  align-self: center;
 }
 </style>
