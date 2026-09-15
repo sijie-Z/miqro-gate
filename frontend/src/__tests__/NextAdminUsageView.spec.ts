@@ -88,9 +88,9 @@ describe('NextAdminUsageView', () => {
     expect(wrapper.find('[data-testid="usage-summary"]').text()).toContain('20,000');
     expect(wrapper.find('[data-testid="usage-records-table"]').exists()).toBe(true);
     expect(wrapper.text()).toContain('deepseek-v4-flash');
-    expect(wrapper.text()).toContain('L1 hit');
-    expect(wrapper.text()).toContain('ok');
-    expect(wrapper.text()).toContain('missing');
+    expect(wrapper.text()).toContain('L1 命中');
+    expect(wrapper.text()).toContain('正常');
+    expect(wrapper.text()).toContain('缺失');
     expect(wrapper.text()).toContain('gw-1');
   });
 

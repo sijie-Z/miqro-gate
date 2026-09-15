@@ -90,7 +90,7 @@ describe('NextAdminAlertRulesView', () => {
 
     expect(wrapper.find('[data-testid="rules-table"]').exists()).toBe(true);
     expect(wrapper.text()).toContain('usage-missing');
-    expect(wrapper.text()).toContain('usage 缺失率');
+    expect(wrapper.text()).toContain('用量缺失率');
     expect(wrapper.text()).toContain('预算水位');
     expect(wrapper.text()).toContain('已启用');
     expect(wrapper.text()).toContain('已停用');

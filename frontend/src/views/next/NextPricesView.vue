@@ -228,7 +228,7 @@ onMounted(load);
           />
           <UiInput
             v-model="form.unitPrice"
-            label="单价（每 1M Tokens）"
+            label="单价（每 1M Token）"
             required
             type="number"
             step="0.0001"

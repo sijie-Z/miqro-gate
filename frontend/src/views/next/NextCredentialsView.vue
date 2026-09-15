@@ -122,7 +122,7 @@ function resetCreateForm() {
 
 async function createCredential() {
   if (!canCreate.value) {
-    formError.value = '名称、订阅与 Secret 必填。';
+    formError.value = '名称、订阅与密钥必填。';
     return;
   }
   creatingLoading.value = true;
@@ -176,7 +176,7 @@ function openValidate(cred: CredentialView) {
 async function runValidate() {
   const target = validateTarget.value;
   if (!target || !candidateSecret.value.trim()) {
-    validateError.value = '请输入要测试的 Secret。';
+    validateError.value = '请输入要测试的密钥。';
     return;
   }
   const seq = ++validateRequestSeq;
@@ -228,7 +228,7 @@ function openRotate(cred: CredentialView) {
 
 async function runRotate() {
   if (!rotateTarget.value || !rotateSecret.value.trim()) {
-    rotateError.value = '请输入新的 Secret。';
+    rotateError.value = '请输入新的密钥。';
     return;
   }
   rotating.value = true;
@@ -296,7 +296,7 @@ const confirmState = ref<{
 function requestDisable(cred: CredentialView) {
   confirmState.value = {
     title: `禁用凭证「${cred.name}」`,
-    body: '禁用后该凭证立即从路由快照移除，使用它的 Virtual Key 将无法完成请求。此操作不可撤销。',
+    body: '禁用后该凭证立即从路由快照移除，使用它的虚拟密钥将无法完成请求。此操作不可撤销。',
     confirmLabel: '禁用',
     tone: 'danger',
     run: async () => {
@@ -359,7 +359,7 @@ onMounted(load);
       <div>
         <h1 class="ui-page-title">上游凭证</h1>
         <p class="ui-page-desc">
-          真实供应商 API Key 的加密托管与版本管理；Secret 明文仅录入时可见一次。
+          真实供应商 API 密钥的加密托管与版本管理；密钥明文仅录入时可见一次。
         </p>
       </div>
       <div class="ui-page-actions">
@@ -409,14 +409,14 @@ onMounted(load);
             label="Secret"
             required
             :type="showCreateSecret ? 'text' : 'password'"
-            placeholder="供应商 API Key（录入后仅显示一次）"
+            placeholder="供应商 API 密钥（录入后仅显示一次）"
             data-testid="credential-create-secret"
           >
             <template #suffix>
               <button
                 type="button"
                 class="next-credentials__eye"
-                :aria-label="showCreateSecret ? '隐藏 Secret' : '显示 Secret'"
+                :aria-label="showCreateSecret ? '隐藏密钥' : '显示密钥'"
                 data-testid="credential-create-secret-toggle"
                 @click="showCreateSecret = !showCreateSecret"
               >
@@ -494,7 +494,7 @@ onMounted(load);
         :loading="loading"
         row-key="id"
         empty-title="还没有上游凭证"
-        empty-description="点击右上角「录入凭证」添加第一家供应商的真实 API Key。"
+        empty-description="点击右上角「录入凭证」添加第一家供应商的真实 API 密钥。"
         data-testid="credentials-table"
       >
         <template #name="{ row }">
@@ -597,7 +597,7 @@ onMounted(load);
       title="测试 Secret"
       :description="
         validateTarget
-          ? `测试候选 Secret 是否与「${validateTarget.name}」当前生效版本一致。纯校验，不写入任何数据。`
+          ? `测试候选密钥是否与「${validateTarget.name}」当前生效版本一致。纯校验，不写入任何数据。`
           : ''
       "
       width="460px"
@@ -614,7 +614,7 @@ onMounted(load);
             <button
               type="button"
               class="next-credentials__eye"
-              :aria-label="showCandidateSecret ? '隐藏 Secret' : '显示 Secret'"
+              :aria-label="showCandidateSecret ? '隐藏密钥' : '显示密钥'"
               data-testid="credential-validate-secret-toggle"
               @click="showCandidateSecret = !showCandidateSecret"
             >
@@ -706,7 +706,7 @@ onMounted(load);
       title="轮换凭证"
       :description="
         rotateTarget
-          ? `为「${rotateTarget.name}」提供新的 Secret。轮换是原子操作：新 Secret 立即生效，旧版本按宽限期退役。`
+          ? `为「${rotateTarget.name}」提供新的密钥。轮换是原子操作：新密钥立即生效，旧版本按宽限期退役。`
           : ''
       "
       width="460px"
@@ -723,7 +723,7 @@ onMounted(load);
             <button
               type="button"
               class="next-credentials__eye"
-              :aria-label="showRotateSecret ? '隐藏 Secret' : '显示 Secret'"
+              :aria-label="showRotateSecret ? '隐藏密钥' : '显示密钥'"
               data-testid="credential-rotate-secret-toggle"
               @click="showRotateSecret = !showRotateSecret"
             >

@@ -196,7 +196,7 @@ async function load() {
       loadError.value = error.message;
       loadRequestId.value = error.requestId ?? '';
     } else {
-      loadError.value = '加载 Virtual Keys 失败。';
+      loadError.value = '加载虚拟密钥失败。';
     }
   } finally {
     loading.value = false;
@@ -247,7 +247,7 @@ async function createKey() {
     });
     resetForm();
     await load();
-    toast.success('Virtual Key 已创建');
+    toast.success('虚拟密钥已创建');
     openReveal(response);
   } catch (error) {
     if (error instanceof ApiError) {
@@ -300,7 +300,7 @@ async function copyKeyId(key: VirtualKeyView) {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
-      toast.success('Key ID 已复制');
+      toast.success('密钥 ID 已复制');
       return;
     }
   } catch {
@@ -315,7 +315,7 @@ async function copyKeyId(key: VirtualKeyView) {
   const ok = document.execCommand('copy');
   area.remove();
   if (ok) {
-    toast.success('Key ID 已复制');
+    toast.success('密钥 ID 已复制');
   } else {
     toast.error('复制失败，请手动选择复制');
   }
@@ -323,8 +323,8 @@ async function copyKeyId(key: VirtualKeyView) {
 
 async function handleRotate(key: VirtualKeyView) {
   confirmState.value = {
-    title: `轮换 Virtual Key「${key.name}」`,
-    body: '轮换后旧 Key 进入宽限期，宽限结束后失效。新 Key 仅在本次弹窗中显示一次。',
+    title: `轮换虚拟密钥「${key.name}」`,
+    body: '轮换后旧密钥进入宽限期，宽限结束后失效。新密钥仅在本次弹窗中显示一次。',
     confirmLabel: '轮换',
     tone: 'primary',
     run: async () => {
@@ -344,14 +344,14 @@ async function handleRotate(key: VirtualKeyView) {
 
 async function handleRevoke(key: VirtualKeyView) {
   confirmState.value = {
-    title: `吊销 Virtual Key「${key.name}」`,
-    body: '吊销后该 Key 立即失效，使用它的客户端将无法继续请求。此操作不可撤销。',
+    title: `吊销虚拟密钥「${key.name}」`,
+    body: '吊销后该密钥立即失效，使用它的客户端将无法继续请求。此操作不可撤销。',
     confirmLabel: '吊销',
     tone: 'danger',
     run: async () => {
       try {
         await api.revokeVirtualKey(key.id!);
-        toast.success('Virtual Key 已吊销');
+        toast.success('虚拟密钥已吊销');
         await load();
       } catch (error) {
         if (error instanceof ApiError) {
@@ -394,12 +394,12 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
   <div class="ui-page next-keys">
     <header class="ui-page-header">
       <div>
-        <h1 class="ui-page-title">我的 Key</h1>
-        <p class="ui-page-desc">通过 CC Switch 使用这些 Key 访问授权模型。</p>
+        <h1 class="ui-page-title">我的密钥</h1>
+        <p class="ui-page-desc">通过 CC Switch 使用这些密钥访问授权模型。</p>
       </div>
       <div class="ui-page-actions">
         <UiButton variant="primary" data-testid="create-key-open" @click="creating = !creating">
-          {{ creating ? '收起表单' : '创建 Virtual Key' }}
+          {{ creating ? '收起表单' : '创建虚拟密钥' }}
         </UiButton>
       </div>
     </header>
@@ -412,7 +412,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
     <!-- Create flow — single-page form, dependent fields expand step by step -->
     <section v-if="creating" class="ui-panel next-keys__create" data-testid="create-form">
       <div class="ui-panel-head">
-        <h2 class="ui-panel-title">创建 Virtual Key</h2>
+        <h2 class="ui-panel-title">创建虚拟密钥</h2>
       </div>
       <div class="ui-panel-body">
         <div class="next-keys__create-grid">
@@ -515,7 +515,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
               </label>
             </div>
             <p class="next-keys__field-hint">
-              开启后网关会缓存该 Key 的响应（需客户端声明 X-MiQroKey-Cacheable:
+              开启后网关会缓存该密钥的响应（需客户端声明 X-MiQroKey-Cacheable:
               1；工具调用永不缓存）。
             </p>
           </div>
@@ -580,7 +580,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
     <section class="ui-panel">
       <div class="ui-panel-head next-keys__list-head">
         <div class="next-keys__list-title">
-          <h2 class="ui-panel-title">Virtual Key</h2>
+          <h2 class="ui-panel-title">虚拟密钥</h2>
           <span class="ui-panel-sub next-keys__summary" data-testid="keys-summary">
             <span
               v-for="part in keySummary"
@@ -602,7 +602,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
         :data="filteredKeys"
         :loading="loading"
         row-key="id"
-        empty-title="还没有 Virtual Key"
+        empty-title="还没有虚拟密钥"
         data-testid="keys-table"
       >
         <template #name="{ row }">
@@ -611,7 +611,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             <button
               type="button"
               class="next-keys__copy"
-              :aria-label="`复制 ${(row as VirtualKeyView).name} 的 Key ID`"
+              :aria-label="`复制 ${(row as VirtualKeyView).name} 的密钥 ID`"
               :title="'复制 Key ID'"
               :data-testid="`key-copy-${(row as VirtualKeyView).id}`"
               @click="copyKeyId(row as VirtualKeyView)"
@@ -673,7 +673,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             <DropdownMenuPortal>
               <DropdownMenuContent class="ui-menu" :side-offset="4" :align="'end'">
                 <DropdownMenuItem
-                  class="next-keys__menu-item"
+                  class="ui-menu__item next-keys__menu-item"
                   :disabled="(row as VirtualKeyView).status !== 'ACTIVE'"
                   @select="handleRotate(row as VirtualKeyView)"
                 >
@@ -682,7 +682,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
                 </DropdownMenuItem>
                 <DropdownMenuSeparator class="next-keys__menu-sep" />
                 <DropdownMenuItem
-                  class="next-keys__menu-item next-keys__menu-item--danger"
+                  class="ui-menu__item next-keys__menu-item next-keys__menu-item--danger"
                   :disabled="!(row as VirtualKeyView).status?.match(/^(ACTIVE|ROTATING)$/)"
                   @select="handleRevoke(row as VirtualKeyView)"
                 >
@@ -710,8 +710,8 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
           </div>
           <div v-else data-testid="onboard-has-project">
             <UiEmptyState
-              title="还没有 Virtual Key"
-              description="点击右上角「创建 Virtual Key」，用已授权的项目与供应商开始调用。"
+              title="还没有虚拟密钥"
+              description="点击右上角「创建虚拟密钥」，用已授权的项目与供应商开始调用。"
             >
               <UiButton variant="primary" @click="creating = true">创建第一个 Key</UiButton>
             </UiEmptyState>
@@ -1062,27 +1062,8 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
 /* .ui-menu panel chrome lives in styles/design-base.css (the radix popper
    root drops the scoped data-v attribute). Item rules below are slot
    children and stay scoped. */
-.next-keys__menu-item {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-space-2);
-  padding: var(--ui-space-2) var(--ui-space-3);
-  border-radius: calc(var(--ui-radius-control) - 2px);
-  font-size: var(--ui-font-size-sm);
-  color: var(--ui-foreground);
-  cursor: pointer;
-  outline: none;
-}
-
-.next-keys__menu-item[data-highlighted] {
-  background: var(--ui-fill-hover);
-}
-
-.next-keys__menu-item[data-disabled] {
-  color: var(--ui-foreground-faint);
-  cursor: not-allowed;
-}
-
+/* .next-keys__menu-item geometry comes from .ui-menu__item in the global
+   sheet; only the danger variant stays scoped. */
 .next-keys__menu-item--danger {
   color: var(--ui-danger-fg);
 }

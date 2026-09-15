@@ -30,7 +30,7 @@ const ruleColumns = [
 ];
 
 const typeOptions = [
-  { value: 'USAGE_MISSING_RATE', label: 'usage 缺失率' },
+  { value: 'USAGE_MISSING_RATE', label: '用量缺失率' },
   { value: 'UPSTREAM_ERROR_RATE', label: '上游错误率' },
   { value: 'BALANCE_UNAVAILABLE', label: '余额不可用' },
   { value: 'USAGE_SURGE', label: '用量激增' },

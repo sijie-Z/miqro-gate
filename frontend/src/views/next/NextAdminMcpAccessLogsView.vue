@@ -34,7 +34,7 @@ const columns = [
   { key: 'rpcMethod', title: '方法', width: '130px' },
   { key: 'toolName', title: '工具', minWidth: '120px' },
   { key: 'status', title: '结果', width: '150px' },
-  { key: 'httpStatus', title: 'HTTP', width: '80px', align: 'center' as const },
+  { key: 'httpStatus', title: 'HTTP 状态', width: '90px', align: 'center' as const },
   { key: 'sessionId', title: '会话', width: '150px' },
   { key: 'ttfbMs', title: '首字节', width: '90px', align: 'right' as const },
   { key: 'gatewayRequestId', title: '网关请求 ID', width: '300px' },

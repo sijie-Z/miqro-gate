@@ -202,7 +202,7 @@ async function createConsumer() {
 async function copyKey() {
   try {
     await navigator.clipboard.writeText(revealKey.value);
-    toast.success('API Key 已复制');
+    toast.success('API 密钥已复制');
   } catch {
     toast.error('复制失败，请手动复制');
   }
@@ -213,7 +213,7 @@ function requestDisable(consumer: ApiConsumerView) {
   // consumer rows always carry the id — the `!` restores the pre-hub contract.
   confirmState.value = {
     title: `吊销消费者「${consumer.name}」`,
-    body: '吊销后该 API Key 立即失效，外部系统将无法再调用计费查询接口。',
+    body: '吊销后该 API 密钥立即失效，外部系统将无法再调用计费查询接口。',
     confirmLabel: '吊销',
     tone: 'danger',
     run: async () => {
@@ -252,7 +252,7 @@ onMounted(load);
     <header class="ui-page-header">
       <div>
         <h1 class="ui-page-title">API 消费者</h1>
-        <p class="ui-page-desc">外部系统专用 Key 访问计费查询接口；Key 仅创建时显示一次。</p>
+        <p class="ui-page-desc">外部系统专用密钥访问计费查询接口；密钥仅创建时显示一次。</p>
       </div>
       <div class="ui-page-actions">
         <UiButton
@@ -392,8 +392,8 @@ onMounted(load);
     <!-- One-shot API key reveal -->
     <UiDialog
       :open="reveal"
-      title="API Key 已生成，仅显示一次"
-      :description="`消费者「${revealName}」的 Key 如下，请立即交付并妥善保存；关闭后无法再次查看。`"
+      title="API 密钥已生成，仅显示一次"
+      :description="`消费者「${revealName}」的密钥如下，请立即交付并妥善保存；关闭后无法再次查看。`"
       width="540px"
       :dismissible="false"
       @update:open="revealAcked && (reveal = $event)"
@@ -419,7 +419,7 @@ onMounted(load);
             />
           </svg>
         </span>
-        <span>我已保存该 Key</span>
+        <span>我已保存该密钥</span>
       </label>
       <template #footer>
         <UiButton variant="secondary" data-testid="consumer-key-copy" @click="copyKey"
@@ -459,7 +459,7 @@ onMounted(load);
       v-if="activityTarget"
       :open="activityVisible"
       :title="'调用概览 — ' + activityTarget.name"
-      description="来自 MCP 访问日志（纯元数据）的窗口聚合；401 未知 Key / 404 未知服务无可信身份，不计入。"
+      description="来自 MCP 访问日志（纯元数据）的窗口聚合；401 未知密钥 / 404 未知服务无可信身份，不计入。"
       width="560px"
       @update:open="activityVisible = false"
     >
@@ -554,7 +554,7 @@ onMounted(load);
       v-if="scopeTarget"
       :open="true"
       :title="`能力作用域 — ${scopeTarget.name}`"
-      description="控制这把消费者 Key 能访问哪些通道；能力不足的调用会被拒绝（403 CONSUMER_SCOPE_DENIED / consumer_scope_denied）。"
+      description="控制这把消费者密钥能访问哪些通道；能力不足的调用会被拒绝（403 CONSUMER_SCOPE_DENIED / consumer_scope_denied）。"
       width="520px"
       @update:open="scopeTarget = null"
     >
@@ -578,7 +578,7 @@ onMounted(load);
           <span>MCP 数据面通道（mcp:call）</span>
         </label>
         <p class="next-consumers__scope-hint">
-          一个都不选 = 无任何通道（该 Key 立即无法访问计费接口与 MCP 服务）。
+          一个都不选 = 无任何通道（该密钥立即无法访问计费接口与 MCP 服务）。
         </p>
       </div>
       <p v-if="scopeError" class="ui-form-error">{{ scopeError }}</p>

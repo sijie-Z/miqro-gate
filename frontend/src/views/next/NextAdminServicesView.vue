@@ -31,7 +31,7 @@ const columns = [
 const kindOptions = [
   { value: 'HTTP', label: 'HTTP' },
   { value: 'MCP', label: 'MCP' },
-  { value: 'OTHER', label: 'Other' },
+  { value: 'OTHER', label: '其他' },
 ];
 
 const creating = ref(false);

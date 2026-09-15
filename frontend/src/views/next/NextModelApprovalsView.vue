@@ -43,7 +43,7 @@ const keyOptions = computed<UiSelectOption[]>(() =>
 );
 
 const columns = [
-  { key: 'keyDisplay', title: 'Virtual Key', minWidth: '200px' },
+  { key: 'keyDisplay', title: '虚拟密钥', minWidth: '200px' },
   { key: 'modelId', title: '模型', width: '200px' },
   { key: 'reason', title: '申请理由', minWidth: '180px' },
   { key: 'status', title: '状态', width: '110px' },
@@ -77,7 +77,7 @@ function openCreate() {
 }
 
 async function submit() {
-  keyError.value = form.value.virtualKeyId ? '' : '请选择 Virtual Key';
+  keyError.value = form.value.virtualKeyId ? '' : '请选择虚拟密钥';
   modelError.value = form.value.modelId.trim() ? '' : '请填写模型 ID';
   if (keyError.value || modelError.value) {
     submitError.value = '';
@@ -120,7 +120,7 @@ onMounted(load);
     <header class="ui-page-header">
       <div>
         <h1 class="ui-page-title">模型申请</h1>
-        <p class="ui-page-desc">给 Virtual Key 申请授权范围外的模型；审批通过后立即生效。</p>
+        <p class="ui-page-desc">给虚拟密钥申请授权范围外的模型；审批通过后立即生效。</p>
       </div>
       <div class="ui-page-actions">
         <UiButton variant="primary" data-testid="model-approval-open" @click="openCreate">
@@ -141,7 +141,7 @@ onMounted(load);
         <div class="next-approvals__form">
           <UiSelect
             v-model="form.virtualKeyId"
-            label="Virtual Key"
+            label="虚拟密钥"
             required
             placeholder="选择要扩展模型的 Key"
             :options="keyOptions"

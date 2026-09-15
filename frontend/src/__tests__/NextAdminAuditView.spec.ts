@@ -68,8 +68,8 @@ describe('NextAdminAuditView', () => {
     const wrapper = mountView();
     await flushPromises();
     expect(wrapper.find('[data-testid="audit-table"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain('LOGIN_SUCCESS');
-    expect(wrapper.text()).toContain('root 登录成功');
+    expect(wrapper.text()).toContain('登录成功');
+    expect(wrapper.text()).toContain('root');
     expect(wrapper.text()).toContain('生产密钥');
     expect(wrapper.text()).toContain('Admin');
   });

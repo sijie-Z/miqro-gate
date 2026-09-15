@@ -29,7 +29,7 @@ const columns = [
   { key: 'provider', title: '供应商', width: '220px' },
   { key: 'product', title: '产品', minWidth: '220px' },
   { key: 'protocols', title: '协议', width: '190px' },
-  { key: 'baseUrl', title: 'Base URL', minWidth: '220px' },
+  { key: 'baseUrl', title: '接入地址', minWidth: '220px' },
   { key: 'implementationStatus', title: '实现状态', width: '130px' },
   { key: 'balanceAuthority', title: '余额来源', width: '120px' },
   { key: 'actions', title: '操作', width: '150px' },
@@ -49,9 +49,12 @@ function implTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' 
 }
 
 const implLabel: Record<string, string> = {
+  DRAFT: '草稿',
+  DOCUMENTED: '已文档化',
   VERIFIED: '已验证',
   IMPLEMENTED: '已实现',
   DEGRADED: '降级',
+  DISABLED: '已停用',
 };
 
 function balanceLabel(authority: string): string {

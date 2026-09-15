@@ -473,7 +473,7 @@ test('keys page lists keys and rotates through the kebab confirm gate', async ({
   // Kebab → 轮换 → confirm → one-shot secret with ack gate.
   await page.getByTestId('key-actions-0190-0000-0000-0002').click();
   await page.getByRole('menuitem', { name: '轮换' }).click();
-  await expect(page.getByText('轮换 Virtual Key「claude-code-main」')).toBeVisible();
+  await expect(page.getByText('轮换虚拟密钥「claude-code-main」')).toBeVisible();
   await page.getByRole('button', { name: '轮换', exact: true }).last().click();
 
   await expect(page.getByTestId('secret-dialog')).toBeVisible();
@@ -497,9 +497,9 @@ test('revoke also walks the confirm gate and reloads the list', async ({ page })
   await page.goto('/app-new/keys');
   await page.getByTestId('key-actions-0190-0000-0000-0003').click();
   await page.getByRole('menuitem', { name: '吊销' }).click();
-  await expect(page.getByText('吊销 Virtual Key「codex-tools」')).toBeVisible();
+  await expect(page.getByText('吊销虚拟密钥「codex-tools」')).toBeVisible();
   await page.getByRole('button', { name: '吊销', exact: true }).last().click();
-  await expect(page.getByText('Virtual Key 已吊销')).toBeVisible();
+  await expect(page.getByText('虚拟密钥已吊销')).toBeVisible();
 });
 
 test('usage page shows quota, summary totals and pages the records', async ({ page }) => {
@@ -524,7 +524,7 @@ test('overview page shows stats, usage bars and recent keys', async ({ page }) =
 
   await page.goto('/app-new/overview');
   await expect(page.getByTestId('overview-stats')).toBeVisible();
-  await expect(page.getByText('本月 Tokens')).toBeVisible();
+  await expect(page.getByText('本月 Token')).toBeVisible();
   await expect(page.getByTestId('overview-usage')).toContainText('用量分布');
   await expect(page.getByTestId('overview-keys')).toContainText('claude-code-main');
   await page.screenshot({
@@ -557,7 +557,7 @@ test('model approvals lists applications and gates the create form', async ({ pa
   await page.getByTestId('model-approval-open').click();
   await expect(page.getByTestId('model-approval-form')).toBeVisible();
   await page.getByTestId('model-approval-submit').click();
-  await expect(page.getByText('请选择 Virtual Key')).toBeVisible();
+  await expect(page.getByText('请选择虚拟密钥')).toBeVisible();
   await page.screenshot({
     path: 'test-results/baseline/next-model-approvals-1440x900.png',
     fullPage: true,

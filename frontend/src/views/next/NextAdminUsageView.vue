@@ -53,7 +53,7 @@ function applyRange(value: number) {
 
 const groupOptions: UiSelectOption[] = [
   { value: 'project', label: '项目' },
-  { value: 'virtual_key', label: 'Virtual Key' },
+  { value: 'virtual_key', label: '虚拟密钥' },
   { value: 'cache_level', label: '缓存层级' },
   { value: 'day', label: '日' },
 ];
@@ -65,8 +65,8 @@ const columns = [
   { key: 'outputTokens', title: '输出', width: '110px', align: 'right' as const },
   { key: 'cacheLevel', title: '缓存层级', width: '120px' },
   { key: 'upstreamStatusCode', title: '状态码', width: '90px', align: 'right' as const },
-  { key: 'usageMissing', title: 'Usage', width: '90px' },
-  { key: 'gatewayRequestId', title: 'Request ID', minWidth: '230px' },
+  { key: 'usageMissing', title: '用量上报', width: '90px' },
+  { key: 'gatewayRequestId', title: '请求 ID', minWidth: '230px' },
 ];
 
 // #440: request-sequence guard — rapid filter/window/page changes must not
@@ -135,10 +135,10 @@ function formatTime(iso?: string): string {
 }
 
 const cacheLabel: Record<string, string> = {
-  UPSTREAM: 'upstream',
-  COALESCED: 'coalesced',
-  L1_HIT: 'L1 hit',
-  L2_HIT: 'L2 hit',
+  UPSTREAM: '上游',
+  COALESCED: '合并',
+  L1_HIT: 'L1 命中',
+  L2_HIT: 'L2 命中',
 };
 
 onMounted(load);
@@ -219,7 +219,7 @@ onMounted(load);
             <DownloadIcon />
           </span>
           <span class="next-admin-usage__stat-main">
-            <span class="next-admin-usage__stat-label">输入 tokens</span>
+            <span class="next-admin-usage__stat-label">输入 Token</span>
             <span class="next-admin-usage__stat-value ui-num">{{
               fmtNum(summary.totals?.tokens?.input)
             }}</span>
@@ -230,7 +230,7 @@ onMounted(load);
             <UploadIcon />
           </span>
           <span class="next-admin-usage__stat-main">
-            <span class="next-admin-usage__stat-label">输出 tokens</span>
+            <span class="next-admin-usage__stat-label">输出 Token</span>
             <span class="next-admin-usage__stat-value ui-num">{{
               fmtNum(summary.totals?.tokens?.output)
             }}</span>
@@ -298,7 +298,7 @@ onMounted(load);
         <template #usageMissing="{ row }">
           <UiStatusBadge
             :tone="(row as UsageRecord).usageMissing ? 'warning' : 'success'"
-            :label="(row as UsageRecord).usageMissing ? 'missing' : 'ok'"
+            :label="(row as UsageRecord).usageMissing ? '缺失' : '正常'"
           />
         </template>
         <template #gatewayRequestId="{ row }">

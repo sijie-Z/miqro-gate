@@ -96,7 +96,7 @@ async function createAgent() {
     });
     creating.value = false;
     form.value = { name: '', description: '', credentialId: '' };
-    toast.success('Agent 已创建');
+    toast.success('代理已创建');
     await load();
   } catch (error) {
     formError.value = error instanceof ApiError ? error.message : '创建失败，请稍后重试。';
@@ -107,14 +107,14 @@ async function createAgent() {
 
 function requestDisable(agent: AgentView) {
   confirmState.value = {
-    title: `禁用 Agent「${agent.name}」`,
-    body: '禁用后该 Agent 不再计为可用，其凭证不受影响。',
+    title: `禁用代理「${agent.name}」`,
+    body: '禁用后该代理不再计为可用，其凭证不受影响。',
     confirmLabel: '禁用',
     tone: 'danger',
     run: async () => {
       try {
         await api.adminDisableAgent(agent.id!);
-        toast.success('Agent 已禁用');
+        toast.success('代理已禁用');
         await load();
       } catch (error) {
         if (error instanceof ApiError) {
@@ -180,7 +180,7 @@ onMounted(load);
       </div>
       <div class="ui-page-actions">
         <UiButton variant="primary" data-testid="agent-create-open" @click="creating = !creating">
-          {{ creating ? '收起表单' : '创建 Agent' }}
+          {{ creating ? '收起表单' : '创建代理' }}
         </UiButton>
       </div>
     </header>
@@ -222,7 +222,7 @@ onMounted(load);
             label="出口凭证"
             required
             :options="credentialOptions"
-            placeholder="选择 ACTIVE 凭证"
+            placeholder="选择可用凭证"
             data-testid="agent-create-credential"
           />
           <p v-if="formError" class="ui-form-error">{{ formError }}</p>
@@ -250,8 +250,8 @@ onMounted(load);
         :data="agents"
         :loading="loading"
         row-key="id"
-        empty-title="还没有 Agent"
-        empty-description="创建 Agent 并绑定出口凭证后，可按 Agent 维度观测用量。"
+        empty-title="还没有代理"
+        empty-description="创建代理并绑定出口凭证后，可按代理维度观测用量。"
         data-testid="agents-table"
       >
         <template #name="{ row }">

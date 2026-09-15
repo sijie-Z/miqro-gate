@@ -20,7 +20,7 @@ const rate = ref<Record<string, { ok: number; total: number }>>({});
 
 const columns = [
   { key: 'name', title: '名称', minWidth: '170px' },
-  { key: 'url', title: 'URL', minWidth: '260px' },
+  { key: 'url', title: '回调地址', minWidth: '260px' },
   { key: 'status', title: '状态', width: '110px' },
   { key: 'rate', title: '近 20 次投递成功率', width: '150px' },
   { key: 'createdAt', title: '创建时间', width: '170px' },
@@ -295,7 +295,7 @@ onMounted(load);
           />
           <UiInput
             v-model="form.url"
-            label="URL"
+            label="回调地址"
             required
             placeholder="https://…"
             data-testid="webhook-create-url"
@@ -312,7 +312,7 @@ onMounted(load);
               <button
                 type="button"
                 class="next-webhooks__reveal"
-                :aria-label="showSecret ? '隐藏 Secret' : '显示 Secret'"
+                :aria-label="showSecret ? '隐藏密钥' : '显示密钥'"
                 data-testid="webhook-secret-toggle"
                 @click="showSecret = !showSecret"
               >

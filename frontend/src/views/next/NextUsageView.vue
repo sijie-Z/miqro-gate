@@ -111,16 +111,16 @@ const recordsColumns = [
 
 const groupByOptions: UiSelectOption[] = [
   { value: 'project', label: '项目' },
-  { value: 'virtual_key', label: 'Virtual Key' },
+  { value: 'virtual_key', label: '虚拟密钥' },
   { value: 'cache_level', label: '缓存级别' },
   { value: 'day', label: '日期' },
 ];
 
 const cacheLevelLabel: Record<string, string> = {
-  UPSTREAM: 'upstream',
-  COALESCED: 'coalesced',
-  L1_HIT: 'L1 hit',
-  L2_HIT: 'L2 hit',
+  UPSTREAM: '上游',
+  COALESCED: '合并',
+  L1_HIT: 'L1 命中',
+  L2_HIT: 'L2 命中',
 };
 
 const PALETTE = ['#0960bd', '#69c0ff', '#13c2c2', '#fa8c16', '#8c8c8c', '#d9d9d9'];
@@ -264,8 +264,8 @@ async function exportRecords() {
     '时间',
     '模型',
     '级别',
-    '输入 tokens',
-    '输出 tokens',
+    '输入 Token',
+    '输出 Token',
     '延迟(ms)',
     '上游状态',
     '供应商请求 ID',

@@ -166,7 +166,7 @@ describe('NextModelApprovalsView', () => {
     await wrapper.find('[data-testid="model-approval-submit"]').trigger('click');
     await flushPromises();
 
-    expect(wrapper.text()).toContain('请选择 Virtual Key');
+    expect(wrapper.text()).toContain('请选择虚拟密钥');
     expect(wrapper.text()).toContain('请填写模型 ID');
     expect(mockApi.submitModelApproval).not.toHaveBeenCalled();
   });

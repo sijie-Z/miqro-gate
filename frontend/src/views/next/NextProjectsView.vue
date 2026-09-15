@@ -199,7 +199,7 @@ onMounted(load);
           <UiInput
             v-model="createTag"
             label="路由标签"
-            placeholder="例如 core-ai（Virtual Key 点号后缀）"
+            placeholder="例如 core-ai（虚拟密钥点号后缀）"
             data-testid="project-create-tag"
           />
           <p class="next-projects__hint">留空将导致成员无法创建 Virtual Key（可先创建，稍后在编辑中补充）</p>

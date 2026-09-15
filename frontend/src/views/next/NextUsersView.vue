@@ -64,8 +64,8 @@ const roleLabel: Record<string, string> = {
 };
 
 const roleOptions = [
-  { value: 'USER', label: '用户（USER）' },
-  { value: 'SYSTEM_ADMIN', label: '系统管理员（SYSTEM_ADMIN）' },
+  { value: 'USER', label: '用户' },
+  { value: 'SYSTEM_ADMIN', label: '系统管理员' },
 ];
 
 const columns = [
