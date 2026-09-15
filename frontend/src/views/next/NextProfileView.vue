@@ -1,14 +1,18 @@
 <script setup lang="ts">
 /**
- * NextProfileView — /app-new/profile pilot page (UI U1, PostHog language).
- * Behaviour parity with legacy ProfileView: account facts + password change
- * (forced flow for must-change sessions included).
+ * NextProfileView — /app/profile (#597, GitHub-settings-inspired account page).
+ * Identity header + monthly snapshot + account facts + security section
+ * (password change, current session, "sign out of other sessions").
+ * Behaviour parity with the legacy layout: account facts + password change,
+ * forced first-login flow (must-change sessions) included.
  */
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
-import { UiButton, UiInput, toast } from '@/ui';
+import { UiButton, UiDialog, UiInput, UiStatusBadge, toast } from '@/ui';
+import type { UsageSummary, VirtualKeyView } from '@/types/generated-api';
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -22,18 +26,147 @@ const errorRequestId = ref('');
 
 const isForced = computed(() => auth.mustChangePassword);
 
+// ---- identity ----
+
+const displayName = computed(() => auth.user?.displayName || auth.user?.username || '—');
+
+const userInitial = computed(() =>
+  (auth.user?.displayName || auth.user?.username || '?').trim().slice(0, 1).toUpperCase(),
+);
+
+const roleMeta = computed(() =>
+  auth.user?.role === 'SYSTEM_ADMIN'
+    ? { label: '系统管理员', tone: 'info' as const }
+    : { label: '普通用户', tone: 'neutral' as const },
+);
+
+const statusMeta = computed(() =>
+  auth.user?.status === 'DISABLED'
+    ? { label: '已禁用', tone: 'danger' as const }
+    : { label: '正常', tone: 'success' as const },
+);
+
+function formatInstant(iso?: string | null): string {
+  return iso ? new Date(iso).toLocaleString() : '—';
+}
+
+// ---- monthly snapshot (caliber: the usage page's totals row) ----
+
+const keys = ref<VirtualKeyView[] | null>(null);
+const summary = ref<UsageSummary | null>(null);
+const snapshotError = ref('');
+
+function formatCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+async function loadSnapshot() {
+  snapshotError.value = '';
+  const [keysResult, summaryResult] = await Promise.allSettled([
+    api.listVirtualKeys(),
+    api.usageSummary('project'),
+  ]);
+  if (keysResult.status === 'fulfilled') keys.value = keysResult.value;
+  if (summaryResult.status === 'fulfilled') summary.value = summaryResult.value;
+  const failed = [keysResult, summaryResult].find((r) => r.status === 'rejected');
+  if (failed?.status === 'rejected') {
+    const error: unknown = failed.reason;
+    snapshotError.value =
+      error instanceof ApiError
+        ? `${error.message}（requestId: ${error.requestId ?? '-'}）`
+        : '用量速览加载失败。';
+  }
+}
+
+const snapshot = computed(() => {
+  const totals = summary.value?.totals;
+  const requests =
+    (totals?.requests?.upstream ?? 0) +
+    (totals?.requests?.coalesced ?? 0) +
+    (totals?.requests?.l1Hit ?? 0) +
+    (totals?.requests?.l2Hit ?? 0);
+  const tokens = (totals?.tokens?.input ?? 0) + (totals?.tokens?.output ?? 0);
+  const cost = Number(totals?.cost?.upstreamPaid ?? 0);
+  const activeKeys = keys.value?.filter((k) => k.status === 'ACTIVE').length;
+  return [
+    {
+      label: '可用虚拟密钥',
+      value: keys.value ? String(activeKeys) : '—',
+      prefix: '',
+      hint: '点此管理',
+      to: '/app/keys',
+    },
+    {
+      label: '本月请求',
+      value: summary.value ? formatCount(requests) : '—',
+      prefix: '',
+      hint: '经网关的请求数',
+      to: '/app/usage',
+    },
+    {
+      label: '本月 Token',
+      value: summary.value ? formatCount(tokens) : '—',
+      prefix: '',
+      hint: '输入+输出',
+      to: '/app/usage',
+    },
+    {
+      label: '本月成本',
+      value: summary.value ? cost.toFixed(2) : '—',
+      prefix: '¥',
+      hint: '按价格快照估算',
+      to: '/app/usage',
+    },
+  ];
+});
+
+// ---- account facts ----
+
 const accountRows = computed(() => [
-  { label: '用户名', value: auth.user?.username ?? '—' },
-  { label: '显示名称', value: auth.user?.displayName || '—' },
-  { label: '角色', value: auth.user?.role === 'SYSTEM_ADMIN' ? '系统管理员' : '普通用户' },
+  { label: '用户名', value: auth.user?.username ?? '—', testid: 'account-username', mono: false },
+  { label: '显示名称', value: auth.user?.displayName || '—', testid: undefined, mono: false },
+  { label: '角色', value: roleMeta.value.label, testid: undefined, mono: false },
+  { label: '账号状态', value: statusMeta.value.label, testid: undefined, mono: false },
   {
-    label: '会话到期',
-    value: auth.user?.sessionExpiresAt
-      ? new Date(auth.user.sessionExpiresAt).toLocaleString()
-      : '—',
+    label: '上次登录',
+    value: formatInstant(auth.user?.lastLoginAt),
+    testid: undefined,
+    mono: true,
+  },
+  {
+    label: '当前会话到期',
+    value: formatInstant(auth.user?.sessionExpiresAt),
+    testid: undefined,
     mono: true,
   },
 ]);
+
+// ---- sign out of other sessions ----
+
+const revokeOpen = ref(false);
+const revoking = ref(false);
+const revokeError = ref('');
+
+async function confirmRevokeOthers() {
+  revoking.value = true;
+  revokeError.value = '';
+  try {
+    await api.logoutOtherSessions();
+    toast.success('已退出其他会话');
+    revokeOpen.value = false;
+  } catch (error) {
+    revokeError.value =
+      error instanceof ApiError
+        ? `${error.message}（requestId: ${error.requestId ?? '-'}）`
+        : '退出其他会话失败，请稍后重试。';
+  } finally {
+    revoking.value = false;
+  }
+}
+
+// ---- password change ----
 
 async function submit() {
   errorMessage.value = '';
@@ -68,6 +201,15 @@ async function submit() {
     submitting.value = false;
   }
 }
+
+onMounted(async () => {
+  // Refresh the profile facts (lastLoginAt / sessionExpiresAt) and the
+  // account snapshot; the store keeps any identity on transient failures.
+  await auth.fetchMe();
+  if (!isForced.value) {
+    await loadSnapshot();
+  }
+});
 </script>
 
 <template>
@@ -94,78 +236,175 @@ async function submit() {
       账号正在使用临时密码，修改后请重新登录确认。
     </div>
 
-    <section class="ui-panel next-profile__panel">
-      <div class="ui-panel-head">
-        <h2 class="ui-panel-title">账号</h2>
+    <!-- Identity header (hidden during the forced first-login flow) -->
+    <section
+      v-if="!isForced"
+      class="ui-panel next-profile__identity"
+      data-testid="profile-identity"
+    >
+      <span class="next-profile__avatar" aria-hidden="true">{{ userInitial }}</span>
+      <div class="next-profile__identity-text">
+        <h2 class="next-profile__identity-name" data-testid="profile-display-name">
+          {{ displayName }}
+        </h2>
+        <p class="next-profile__identity-handle">@{{ auth.user?.username ?? '—' }}</p>
       </div>
-      <div class="ui-panel-body">
-        <dl class="next-profile__grid">
-          <div v-for="row in accountRows" :key="row.label" class="next-profile__fact">
-            <dt>{{ row.label }}</dt>
-            <dd
-              :class="{ 'ui-mono': row.mono }"
-              :data-testid="row.label === '用户名' ? 'account-username' : undefined"
-            >
-              {{ row.value }}
-            </dd>
-          </div>
-        </dl>
+      <div class="next-profile__identity-badges">
+        <UiStatusBadge :tone="roleMeta.tone" :label="roleMeta.label" />
+        <UiStatusBadge :tone="statusMeta.tone" :label="statusMeta.label" />
       </div>
     </section>
 
-    <section class="ui-panel next-profile__panel next-profile__panel--narrow">
-      <div class="ui-panel-head">
-        <h2 class="ui-panel-title">修改密码</h2>
-      </div>
-      <div class="ui-panel-body">
-        <form class="next-profile__form" novalidate @submit.prevent="submit">
-          <UiInput
-            v-model="currentPassword"
-            label="当前密码"
-            large
-            type="password"
-            autocomplete="current-password"
-            data-testid="current-password"
-          />
-          <UiInput
-            v-model="newPassword"
-            label="新密码"
-            large
-            type="password"
-            autocomplete="new-password"
-            hint="至少 8 个字符，包含大小写字母和数字。"
-            data-testid="new-password"
-          />
-          <UiInput
-            v-model="confirmPassword"
-            label="确认新密码"
-            large
-            type="password"
-            autocomplete="new-password"
-            :error="errorMessage || undefined"
-            data-testid="confirm-password"
-          />
-          <p
-            v-if="errorRequestId"
-            class="ui-request-id next-profile__reqid"
-            role="alert"
-            data-testid="password-error-reqid"
-          >
-            requestId: {{ errorRequestId }}
-          </p>
-          <div class="next-profile__actions">
-            <UiButton
-              variant="primary"
-              native-type="submit"
-              :loading="submitting"
-              data-testid="password-submit"
-            >
-              修改密码
-            </UiButton>
-          </div>
-        </form>
-      </div>
+    <!-- Monthly snapshot (same numbers as the usage page totals) -->
+    <section
+      v-if="!isForced"
+      class="ui-panel next-profile__snapshot"
+      data-testid="profile-snapshot"
+    >
+      <router-link
+        v-for="card in snapshot"
+        :key="card.label"
+        :to="card.to"
+        class="next-profile__stat"
+      >
+        <span class="next-profile__stat-value ui-num"
+          ><i v-if="card.prefix" class="next-profile__stat-currency">{{ card.prefix }}</i
+          >{{ card.value }}</span
+        >
+        <span class="next-profile__stat-label">{{ card.label }}</span>
+        <span class="next-profile__stat-hint">{{ card.hint }}</span>
+      </router-link>
     </section>
+    <p
+      v-if="!isForced && snapshotError"
+      class="next-profile__snapshot-error"
+      data-testid="profile-snapshot-error"
+    >
+      {{ snapshotError }}
+    </p>
+
+    <div class="next-profile__grid" :class="{ 'next-profile__grid--forced': isForced }">
+      <div class="next-profile__col">
+        <section v-if="!isForced" class="ui-panel next-profile__panel">
+          <div class="ui-panel-head">
+            <h2 class="ui-panel-title">账号</h2>
+          </div>
+          <div class="ui-panel-body">
+            <dl class="next-profile__facts">
+              <div v-for="row in accountRows" :key="row.label" class="next-profile__fact">
+                <dt>{{ row.label }}</dt>
+                <dd :class="{ 'ui-mono': row.mono }" :data-testid="row.testid">{{ row.value }}</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
+        <section class="ui-panel next-profile__panel">
+          <div class="ui-panel-head">
+            <h2 class="ui-panel-title">修改密码</h2>
+          </div>
+          <div class="ui-panel-body">
+            <p v-if="!isForced" class="next-profile__note">
+              修改密码会同时撤销其他设备上的会话；当前会话保持有效。
+            </p>
+            <form class="next-profile__form" novalidate @submit.prevent="submit">
+              <UiInput
+                v-model="currentPassword"
+                label="当前密码"
+                large
+                type="password"
+                autocomplete="current-password"
+                data-testid="current-password"
+              />
+              <UiInput
+                v-model="newPassword"
+                label="新密码"
+                large
+                type="password"
+                autocomplete="new-password"
+                hint="至少 8 个字符，包含大小写字母和数字。"
+                data-testid="new-password"
+              />
+              <UiInput
+                v-model="confirmPassword"
+                label="确认新密码"
+                large
+                type="password"
+                autocomplete="new-password"
+                :error="errorMessage || undefined"
+                data-testid="confirm-password"
+              />
+              <p
+                v-if="errorRequestId"
+                class="ui-request-id next-profile__reqid"
+                role="alert"
+                data-testid="password-error-reqid"
+              >
+                requestId: {{ errorRequestId }}
+              </p>
+              <div class="next-profile__actions">
+                <UiButton
+                  variant="primary"
+                  native-type="submit"
+                  :loading="submitting"
+                  data-testid="password-submit"
+                >
+                  修改密码
+                </UiButton>
+              </div>
+            </form>
+          </div>
+        </section>
+      </div>
+
+      <div v-if="!isForced" class="next-profile__col next-profile__col--side">
+        <section class="ui-panel next-profile__panel">
+          <div class="ui-panel-head">
+            <h2 class="ui-panel-title">当前会话</h2>
+          </div>
+          <div class="ui-panel-body">
+            <dl class="next-profile__facts next-profile__facts--single">
+              <div class="next-profile__fact">
+                <dt>当前会话到期</dt>
+                <dd class="ui-mono" data-testid="session-expires">
+                  {{ formatInstant(auth.user?.sessionExpiresAt) }}
+                </dd>
+              </div>
+              <div class="next-profile__fact">
+                <dt>上次登录</dt>
+                <dd class="ui-mono" data-testid="last-login">
+                  {{ formatInstant(auth.user?.lastLoginAt) }}
+                </dd>
+              </div>
+            </dl>
+            <p class="next-profile__note">
+              「退出其他会话」将撤销除当前浏览器外的全部登录会话；其他设备需要重新登录。
+            </p>
+            <UiButton data-testid="logout-others" @click="revokeOpen = true">退出其他会话</UiButton>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <UiDialog v-model:open="revokeOpen" title="退出其他会话" width="440px">
+      <p class="next-profile__dialog-text">
+        将撤销当前账号在其他设备（浏览器）上的全部会话；当前会话保持有效，其他设备需要重新登录。
+      </p>
+      <p v-if="revokeError" class="ui-form-error" data-testid="logout-others-error">
+        {{ revokeError }}
+      </p>
+      <template #footer>
+        <UiButton variant="ghost" @click="revokeOpen = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="revoking"
+          data-testid="logout-others-confirm"
+          @click="confirmRevokeOthers"
+        >
+          退出其他会话
+        </UiButton>
+      </template>
+    </UiDialog>
   </div>
 </template>
 
@@ -182,20 +421,160 @@ async function submit() {
   font-size: var(--ui-font-size-sm);
 }
 
-.next-profile__panel {
+/* ---- identity header ---- */
+
+.next-profile__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-5) var(--ui-space-6);
   margin-bottom: var(--ui-space-5);
-  max-width: 760px;
 }
 
-.next-profile__panel--narrow {
-  max-width: 560px;
+.next-profile__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary-text);
+  font-size: var(--ui-font-size-2xl);
+  font-weight: var(--ui-weight-semibold);
 }
+
+.next-profile__identity-text {
+  min-width: 0;
+}
+
+.next-profile__identity-name {
+  margin: 0;
+  font-size: var(--ui-font-size-2xl);
+  font-weight: var(--ui-weight-semibold);
+  line-height: var(--ui-line-height-lg);
+  color: var(--ui-foreground);
+}
+
+.next-profile__identity-handle {
+  margin: var(--ui-space-1) 0 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-profile__identity-badges {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  margin-left: auto;
+}
+
+/* ---- monthly snapshot ---- */
+
+.next-profile__snapshot {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: var(--ui-space-5);
+  overflow: hidden;
+}
+
+.next-profile__stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+  padding: var(--ui-space-4) var(--ui-space-6);
+  color: inherit;
+}
+
+.next-profile__stat + .next-profile__stat {
+  border-left: 1px solid var(--ui-border);
+}
+
+.next-profile__stat:hover {
+  background: var(--ui-muted);
+}
+
+.next-profile__stat-value {
+  font-size: var(--ui-font-size-2xl);
+  font-weight: var(--ui-weight-semibold);
+  line-height: var(--ui-line-height-lg);
+  color: var(--ui-foreground);
+}
+
+.next-profile__stat-currency {
+  font-style: normal;
+  font-size: var(--ui-font-size-base);
+  font-weight: var(--ui-weight-medium);
+  margin-right: 2px;
+}
+
+.next-profile__stat-label {
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-profile__stat-hint {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.next-profile__snapshot-error {
+  margin: calc(-1 * var(--ui-space-4)) 0 var(--ui-space-4);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-danger-fg);
+}
+
+/* ---- two-column body ---- */
 
 .next-profile__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  align-items: start;
+  gap: var(--ui-space-5);
+}
+
+.next-profile__grid--forced {
+  grid-template-columns: minmax(0, 560px);
+}
+
+.next-profile__col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-5);
+  min-width: 0;
+}
+
+@media (max-width: 1024px) {
+  .next-profile__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .next-profile__snapshot {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .next-profile__stat:nth-child(3) {
+    border-left: none;
+    border-top: 1px solid var(--ui-border);
+  }
+
+  .next-profile__stat:nth-child(4) {
+    border-top: 1px solid var(--ui-border);
+  }
+}
+
+/* ---- facts + form ---- */
+
+.next-profile__facts {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--ui-space-4) var(--ui-space-8);
   margin: 0;
+}
+
+.next-profile__facts--single {
+  grid-template-columns: 1fr;
 }
 
 .next-profile__fact {
@@ -203,6 +582,7 @@ async function submit() {
   flex-direction: column;
   gap: var(--ui-space-1);
   padding-bottom: var(--ui-space-2);
+  min-width: 0;
 }
 
 .next-profile__fact dt {
@@ -213,6 +593,14 @@ async function submit() {
 .next-profile__fact dd {
   margin: 0;
   font-size: var(--ui-font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.next-profile__note {
+  margin: 0 0 var(--ui-space-4);
+  font-size: var(--ui-font-size-xs);
+  line-height: var(--ui-line-height-lg);
+  color: var(--ui-foreground-faint);
 }
 
 .next-profile__reqid {
@@ -231,5 +619,12 @@ async function submit() {
 .next-profile__actions {
   display: flex;
   gap: var(--ui-space-2);
+}
+
+.next-profile__dialog-text {
+  margin: 0 0 var(--ui-space-2);
+  font-size: var(--ui-font-size-sm);
+  line-height: var(--ui-line-height-lg);
+  color: var(--ui-foreground-secondary);
 }
 </style>

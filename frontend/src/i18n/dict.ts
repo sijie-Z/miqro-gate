@@ -22,6 +22,20 @@ export const DICT: Record<string, string> = {
   'Agent 的出口凭证必须是 ACTIVE 状态；供应商产品由凭证所属订阅自动派生。':
     "An agent's egress credential must be ACTIVE; the provider product is derived from the credential's subscription.",
   'Docker Compose（单节点私有化）': 'Docker Compose (single-node private deployment)',
+  '上次登录': 'Last sign-in',
+  '可用虚拟密钥': 'Active Virtual Keys',
+  '账号状态': 'Account status',
+  '当前会话': 'Current session',
+  '当前会话到期': 'Current session expires',
+  '已退出其他会话': 'Signed out of other sessions',
+  '将撤销当前账号在其他设备（浏览器）上的全部会话；当前会话保持有效，其他设备需要重新登录。':
+    'This revokes every session of the current account on other devices (browsers); the current session stays valid and the other devices must sign in again.',
+  '修改密码会同时撤销其他设备上的会话；当前会话保持有效。':
+    'Changing the password also revokes sessions on other devices; the current session stays valid.',
+  '退出其他会话': 'Sign out of other sessions',
+  '退出其他会话失败，请稍后重试。': 'Failed to sign out other sessions. Please try again later.',
+  '「退出其他会话」将撤销除当前浏览器外的全部登录会话；其他设备需要重新登录。':
+    '“Sign out of other sessions” revokes every session except this browser; other devices must sign in again.',
   '授权已创建': 'Grant created',
   '授权已禁用': 'Grant disabled',
   'HTTP 方法（全选 = 不限）': 'HTTP methods (all selected = unrestricted)',
