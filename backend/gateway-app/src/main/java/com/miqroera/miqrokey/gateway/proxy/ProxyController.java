@@ -811,8 +811,8 @@ public class ProxyController {
                     } catch (RuntimeException e) {
                         // A broken adapter must never take the relay down: fall
                         // back to the legacy splice and leave a breadcrumb.
-                        log.warn("Adapter target resolution failed (product={}): {}; using single base",
-                                productCode, e.getMessage());
+                        log.warn("Adapter target resolution failed (product={}): {}; using single base", productCode,
+                                e.getMessage());
                     }
                 }
             }
