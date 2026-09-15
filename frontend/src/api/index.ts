@@ -117,6 +117,14 @@ export function changePassword(currentPassword: string, newPassword: string): Pr
   return post<void>('/api/v1/auth/password', { currentPassword, newPassword });
 }
 
+/**
+ * #597: self-service "sign out of other sessions" — revokes every session of
+ * the current user except the calling one. The current session stays valid.
+ */
+export function logoutOtherSessions(): Promise<{ message: string }> {
+  return post<{ message: string }>('/api/v1/auth/logout-others');
+}
+
 // ---- self-service Virtual Keys ----
 
 export function listVirtualKeys(): Promise<VirtualKeyView[]> {

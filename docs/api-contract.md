@@ -46,8 +46,9 @@
 | `POST /api/v1/auth/login` | 用户名/密码登录，创建会话 | 匿名 |
 | `POST /api/v1/auth/register` | 自助注册（F-REG）：创建普通用户并直接登录 | 匿名（开关 `miqrokey.registration-enabled`，默认开） |
 | `POST /api/v1/auth/logout` | 当前会话失效 | 已登录 |
-| `GET /api/v1/auth/me` | 当前用户、角色、会话到期时间 | 已登录 |
+| `GET /api/v1/auth/me` | 当前用户、角色、状态、最近登录与会话到期时间 | 已登录 |
 | `POST /api/v1/auth/password` | 修改自己的密码并撤销其他会话 | 已登录 |
+| `POST /api/v1/auth/logout-others` | 退出其他会话：撤销除当前会话外的全部会话（自助版 `revoke-sessions`；审计 `LOGOUT_OTHERS`；强制改密会话被 `PASSWORD_CHANGE_REQUIRED` 门槛拦截） | 已登录 |
 | `GET /api/v1/auth/csrf` | 获取 CSRF token（从配置名称的 Cookie 读取） | 已登录 |
 
 ### 3.1b 自助注册（F-REG）

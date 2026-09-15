@@ -14,6 +14,8 @@ const REGULAR_USER = {
   displayName: 'Demo 用户',
   role: 'USER',
   mustChangePassword: false,
+  lastLoginAt: '2026-09-14T02:12:00Z',
+  sessionExpiresAt: '2026-09-16T05:01:41Z',
 };
 
 const GRANTS = {
@@ -566,9 +568,12 @@ test('model approvals lists applications and gates the create form', async ({ pa
 
 test('profile page validates the password form', async ({ page }) => {
   await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
 
   await page.goto('/app-new/profile');
   await expect(page.getByTestId('account-username')).toHaveText('demo2_user');
+  await expect(page.getByTestId('profile-identity')).toContainText('@demo2_user');
+  await expect(page.getByTestId('profile-snapshot')).toContainText('本月请求');
   await page.getByTestId('current-password').fill('TempPass2026!');
   await page.getByTestId('new-password').fill('StrongPass2026!');
   await page.getByTestId('confirm-password').fill('Different2026!');
@@ -576,6 +581,24 @@ test('profile page validates the password form', async ({ page }) => {
   await expect(page.getByTestId('field-error')).toContainText('两次输入的新密码不一致');
   await page.screenshot({
     path: 'test-results/baseline/next-profile-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('profile: signs out of other sessions through the confirm dialog', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+  await page.route('**/api/v1/auth/logout-others', (route) =>
+    route.fulfill({ json: { message: 'Other sessions have been revoked.' } }),
+  );
+
+  await page.goto('/app-new/profile');
+  await page.getByTestId('logout-others').click();
+  await expect(page.getByTestId('logout-others-confirm')).toBeVisible();
+  await page.getByTestId('logout-others-confirm').click();
+  await expect(page.getByText('已退出其他会话')).toBeVisible();
+  await page.screenshot({
+    path: 'test-results/baseline/next-profile-sessions-1440x900.png',
     fullPage: true,
   });
 });
