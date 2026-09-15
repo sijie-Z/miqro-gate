@@ -7,9 +7,10 @@
  */
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
+import { ChartBarIcon, LayersIcon, MoneyIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
-import { UiButton, UiDonut, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
+import { UiButton, UiDonut, UiSelect, UiStatusBadge, UiTable, UiTrendChart, toast } from '@/ui';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import type { UiSelectOption } from '@/ui';
 import type {
@@ -32,6 +33,58 @@ const summaryError = ref('');
 
 const records = ref<UsageRecordPage | null>(null);
 const recordsLoading = ref(true);
+
+// ---- daily trend (aggregated from the loaded records page) ----
+type TrendMetric = 'tokens' | 'requests' | 'latency';
+
+const TREND_TABS: Array<{ value: TrendMetric; label: string }> = [
+  { value: 'tokens', label: 'Token' },
+  { value: 'requests', label: '请求' },
+  { value: 'latency', label: '平均延迟' },
+];
+
+const trendMetric = ref<TrendMetric>('tokens');
+
+
+/** Vben analysis overview cards: value + right icon + label footer. */
+const summaryStats = computed(() => {
+  const t = summary.value?.totals;
+  const tokens = (t?.tokens?.input ?? 0) + (t?.tokens?.output ?? 0);
+  const requests = t?.requests?.upstream ?? 0;
+  const cost = Number(t?.cost?.upstreamPaid ?? 0);
+  return [
+    { label: 'Token 总量', value: formatNumber(tokens), icon: LayersIcon, tone: 'cyan' },
+    { label: '请求数', value: formatNumber(requests), icon: ChartBarIcon, tone: 'green' },
+    { label: '上游成本', value: `¥${cost.toFixed(2)}`, icon: MoneyIcon, tone: 'gold' },
+  ];
+});
+
+const trendPoints = computed(() => {
+  const items = records.value?.items ?? [];
+  const byDay = new Map<string, { sum: number; count: number }>();
+  for (const r of items) {
+    const day = String(r.occurredAt ?? '').slice(0, 10);
+    if (!day) continue;
+    const entry = byDay.get(day) ?? { sum: 0, count: 0 };
+    if (trendMetric.value === 'tokens') {
+      entry.sum += r.totalTokens ?? (r.inputTokens ?? 0) + (r.outputTokens ?? 0);
+    } else if (trendMetric.value === 'requests') {
+      entry.sum += 1;
+    } else {
+      entry.sum += r.latencyMs ?? 0;
+    }
+    entry.count += 1;
+    byDay.set(day, entry);
+  }
+  return [...byDay.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .slice(-14)
+    .map(([day, { sum, count }]) => ({
+      label: day.slice(5),
+      value: trendMetric.value === 'latency' && count > 0 ? Math.round(sum / count) : sum,
+    }));
+});
+
 const recordsError = ref('');
 const page = ref(1);
 const pageSize = ref(20);
@@ -351,6 +404,22 @@ function formatTime(iso?: string): string {
     <UsageCaliberTip />
 
     <!-- Self-service quota visibility (F04) -->
+    <section class="next-usage__stats" data-testid="usage-stats">
+      <div v-for="item in summaryStats" :key="item.label" class="ui-panel next-usage__stat">
+        <div class="next-usage__stat-main">
+          <span class="next-usage__stat-value ui-num">{{ item.value }}</span>
+          <span
+            class="next-usage__stat-icon"
+            :class="`next-usage__tone--${item.tone}`"
+            aria-hidden="true"
+          >
+            <component :is="item.icon" size="22px" />
+          </span>
+        </div>
+        <span class="next-usage__stat-label">{{ item.label }}</span>
+      </div>
+    </section>
+
     <section class="ui-panel next-usage__panel" data-testid="my-quota-panel">
       <div class="ui-panel-head">
         <div>
@@ -407,6 +476,35 @@ function formatTime(iso?: string): string {
     </section>
 
     <!-- Summary -->
+
+    <section class="ui-panel next-usage__trend" data-testid="usage-trend">
+      <div class="ui-panel-head">
+        <h2 class="ui-panel-title">用量趋势</h2>
+        <div class="next-usage__trend-tabs" role="tablist" aria-label="趋势指标">
+          <button
+            v-for="tab in TREND_TABS"
+            :key="tab.value"
+            type="button"
+            role="tab"
+            class="next-usage__trend-tab"
+            :class="{ 'next-usage__trend-tab--on': trendMetric === tab.value }"
+            :aria-selected="trendMetric === tab.value"
+            :data-testid="`trend-tab-${tab.value}`"
+            @click="trendMetric = tab.value"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
+      </div>
+      <div class="ui-panel-body">
+        <UiTrendChart
+          :points="trendPoints"
+          :value-formatter="formatNumber"
+          data-testid="usage-trend-chart"
+        />
+      </div>
+    </section>
+
     <section class="ui-panel next-usage__panel">
       <div class="ui-panel-head">
         <div class="next-usage__head-inline">
@@ -792,5 +890,100 @@ function formatTime(iso?: string): string {
    totals band; records list keeps a touch of bottom air. */
 .next-usage__records {
   padding-bottom: var(--ui-space-2);
+}
+
+.next-usage__trend {
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-usage__trend-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-muted);
+}
+
+.next-usage__trend-tab {
+  border: 0;
+  padding: 0 12px;
+  height: 24px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ui-foreground-secondary);
+  font-family: inherit;
+  font-size: var(--ui-font-size-xs);
+  cursor: pointer;
+}
+
+.next-usage__trend-tab--on {
+  background: var(--ui-card);
+  color: var(--ui-primary-text);
+  box-shadow: var(--ui-shadow-card);
+}
+
+/* ---- analysis overview cards (Vben: value + icon, label under) ---- */
+.next-usage__stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ui-space-4);
+  margin-bottom: var(--ui-space-5);
+}
+
+@media (max-width: 900px) {
+  .next-usage__stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+.next-usage__stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-4) var(--ui-space-5);
+}
+
+.next-usage__stat-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+}
+
+.next-usage__stat-value {
+  font-size: 24px;
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+  line-height: 30px;
+}
+
+.next-usage__stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.next-usage__tone--cyan {
+  background: #e0f4f6;
+  color: #0e7490;
+}
+
+.next-usage__tone--green {
+  background: var(--ui-success-bg);
+  color: var(--ui-success-fg);
+}
+
+.next-usage__tone--gold {
+  background: #fdf3e0;
+  color: #a16207;
+}
+
+.next-usage__stat-label {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
 }
 </style>

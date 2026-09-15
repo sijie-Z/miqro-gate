@@ -12,6 +12,8 @@ export { default as UiDialog } from './Dialog.vue';
 export { default as UiDrawer } from './Drawer.vue';
 export { default as UiDonut } from './Donut.vue';
 export type { UiDonutSegment } from './Donut.vue';
+export { default as UiTrendChart } from './TrendChart.vue';
+export type { UiTrendPoint } from './TrendChart.vue';
 export { default as UiStatusBadge } from './StatusBadge.vue';
 export { default as UiEmptyState } from './EmptyState.vue';
 export { default as UiToastHost } from './ToastHost.vue';
