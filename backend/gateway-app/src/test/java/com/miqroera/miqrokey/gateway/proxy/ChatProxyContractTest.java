@@ -538,8 +538,8 @@ class ChatProxyContractTest {
             bus.clear();
 
             String malformedBody = "{not json";
-            webTestClient.post().uri("/v1/chat/completions").bodyValue(malformedBody).exchange().expectStatus()
-                    .isOk().expectBody().returnResult().getResponseBody();
+            webTestClient.post().uri("/v1/chat/completions").bodyValue(malformedBody).exchange().expectStatus().isOk()
+                    .expectBody().returnResult().getResponseBody();
 
             var captured = mockProvider.getCapturedRequests();
             assertThat(captured).hasSize(1);
