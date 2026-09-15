@@ -138,6 +138,14 @@ export const DICT: Record<string, string> = {
   '与当前生效版本一致': 'Matches the active version',
   '与当前生效版本一致。': 'Matches the active version.',
   '与当前生效版本不一致。': 'Does not match the active version.',
+  '上游探测超时': 'Provider probe timed out',
+  '上游调用失败': 'Provider call failed',
+  '只有 ACTIVE 状态的凭证可以轮换。': 'Only ACTIVE credentials can be rotated.',
+  '该操作需要系统管理员（SYSTEM_ADMIN）权限。': 'This action requires the SYSTEM_ADMIN role.',
+  '该项目已存在相同凭证与产品组合的授权（含已停用），不可重复创建。':
+    'A grant for the same credential and product already exists in this project (including disabled ones).',
+  '你不是该项目的成员，无法创建 Virtual Key。':
+    'You are not a member of this project — no Virtual Key can be created.',
   '专用有界队列；容量、指标与告警见运行手册':
     'Dedicated bounded queue; capacity, metrics and alerts in the runbook',
   '丢弃': 'Discard',
@@ -1403,6 +1411,7 @@ export const DICT: Record<string, string> = {
 
 export const PATTERNS: Array<[RegExp, string]> = [
   [/^基于当前 (.+?) 条记录$/, 'Based on the current $1 records'],
+  [/^凭证当前状态为 (.+?)，无需停用。$/, 'The credential is already $1 — nothing to disable.'],
   [/^(.+?)\ 个可用$/, '$1 active'],
   [/^(.+?)\ 轮换中$/, '$1 rotating'],
   [/^(.+?)\ 异常$/, '$1 unusual'],

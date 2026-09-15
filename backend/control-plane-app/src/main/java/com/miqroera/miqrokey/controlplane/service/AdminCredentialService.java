@@ -175,7 +175,7 @@ public class AdminCredentialService {
         UpstreamCredentialVersion active = versionRepository.findActiveByCredentialId(credentialId).orElse(null);
         boolean matchesActive = active != null && MessageDigest.isEqual(active.secretFingerprint(), fingerprint);
         if (!matchesActive) {
-            return new ValidateCredentialResponse(false, "The secret does not match the active version");
+            return new ValidateCredentialResponse(false, "与当前生效版本不一致。");
         }
         // The candidate matches the active version; probe the real provider
         // (G4.x wiring: adapter validateCredential over a credential-scoped
@@ -212,14 +212,14 @@ public class AdminCredentialService {
             var client = clientFactory.create(baseUrl, "Authorization", "Bearer " + secret);
             var check = adapter.validateCredential(client).block(Duration.ofSeconds(10));
             if (check == null) {
-                return new ValidateCredentialResponse(true, null, "UNREACHABLE", "provider timed out", Instant.now());
+                return new ValidateCredentialResponse(true, null, "UNREACHABLE", "上游探测超时", Instant.now());
             }
             if (check.valid()) {
                 return new ValidateCredentialResponse(true, null, "VALID", null, check.checkedAt());
             }
             return new ValidateCredentialResponse(true, null, "REJECTED", check.message(), check.checkedAt());
         } catch (Exception e) {
-            return new ValidateCredentialResponse(true, null, "UNREACHABLE", "provider call failed", Instant.now());
+            return new ValidateCredentialResponse(true, null, "UNREACHABLE", "上游调用失败", Instant.now());
         }
     }
 
@@ -250,8 +250,7 @@ public class AdminCredentialService {
         UUID tenantId = admin.tenantId();
         UpstreamCredential credential = findOwnedForUpdate(credentialId, tenantId);
         if (credential.status() != CredentialStatus.ACTIVE) {
-            throw new ApiException(HttpStatus.CONFLICT, "CREDENTIAL_NOT_ROTATABLE",
-                    "Only ACTIVE credentials can be rotated");
+            throw new ApiException(HttpStatus.CONFLICT, "CREDENTIAL_NOT_ROTATABLE", "只有 ACTIVE 状态的凭证可以轮换。");
         }
         requireValidSecret(request.secret());
 
@@ -293,7 +292,7 @@ public class AdminCredentialService {
         UpstreamCredential credential = findOwnedForUpdate(credentialId, tenantId);
         if (credential.status() == CredentialStatus.DISABLED || credential.status() == CredentialStatus.INVALID) {
             throw new ApiException(HttpStatus.CONFLICT, "CREDENTIAL_NOT_DISABLEABLE",
-                    "Credential is already " + credential.status());
+                    "凭证当前状态为 " + credential.status() + "，无需停用。");
         }
         Instant now = Instant.now();
         retireExpiredVersions(credentialId, now);
