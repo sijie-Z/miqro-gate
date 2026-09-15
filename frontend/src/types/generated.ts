@@ -1393,7 +1393,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch: operations["updateStatus"];
+        patch: operations["update_1"];
         trace?: never;
     };
     "/api/v1/admin/teams/{teamId}": {
@@ -1409,7 +1409,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch: operations["update_1"];
+        patch: operations["update_2"];
         trace?: never;
     };
     "/api/v1/admin/subscriptions/{subscriptionId}": {
@@ -1425,7 +1425,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch: operations["update_2"];
+        patch: operations["update_3"];
         trace?: never;
     };
     "/api/v1/admin/subscriptions/{subscriptionId}/seats/{seatId}": {
@@ -1457,7 +1457,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch: operations["update_3"];
+        patch: operations["update_4"];
         trace?: never;
     };
     "/api/v1/admin/mcp-services/{serviceId}/route-rules/{ruleId}": {
@@ -1473,7 +1473,7 @@ export interface paths {
         delete: operations["delete_2"];
         options?: never;
         head?: never;
-        patch: operations["update_4"];
+        patch: operations["update_5"];
         trace?: never;
     };
     "/api/v1/admin/api-keys/{keyId}/scope": {
@@ -1521,7 +1521,7 @@ export interface paths {
         delete: operations["delete_3"];
         options?: never;
         head?: never;
-        patch: operations["update_5"];
+        patch: operations["update_6"];
         trace?: never;
     };
     "/api/v1/admin-api/webhooks/{endpointId}": {
@@ -1537,7 +1537,7 @@ export interface paths {
         delete: operations["delete_4"];
         options?: never;
         head?: never;
-        patch: operations["update_6"];
+        patch: operations["update_7"];
         trace?: never;
     };
     "/api/v1/admin-api/alert-rules/{ruleId}": {
@@ -1553,7 +1553,7 @@ export interface paths {
         delete: operations["delete_5"];
         options?: never;
         head?: never;
-        patch: operations["update_7"];
+        patch: operations["update_8"];
         trace?: never;
     };
     "/api/v1/test/ownership/{ownerUserId}": {
@@ -3720,7 +3720,8 @@ export interface components {
             expiresAt?: string;
             reconcileLevel?: string;
         };
-        StatusRequest: {
+        UpdateUserRequest: {
+            displayName?: string;
             /** @enum {string} */
             status?: "ACTIVE" | "DISABLED" | "LOCKED";
         };
@@ -7215,7 +7216,7 @@ export interface operations {
             };
         };
     };
-    updateStatus: {
+    update_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -7226,7 +7227,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["StatusRequest"];
+                "application/json": components["schemas"]["UpdateUserRequest"];
             };
         };
         responses: {
@@ -7241,7 +7242,7 @@ export interface operations {
             };
         };
     };
-    update_1: {
+    update_2: {
         parameters: {
             query?: never;
             header?: never;
@@ -7289,7 +7290,7 @@ export interface operations {
             };
         };
     };
-    update_2: {
+    update_3: {
         parameters: {
             query?: never;
             header?: never;
@@ -7342,7 +7343,7 @@ export interface operations {
             };
         };
     };
-    update_3: {
+    update_4: {
         parameters: {
             query?: never;
             header?: never;
@@ -7389,7 +7390,7 @@ export interface operations {
             };
         };
     };
-    update_4: {
+    update_5: {
         parameters: {
             query?: never;
             header?: never;
@@ -7510,7 +7511,7 @@ export interface operations {
             };
         };
     };
-    update_5: {
+    update_6: {
         parameters: {
             query?: never;
             header?: never;
@@ -7578,7 +7579,7 @@ export interface operations {
             };
         };
     };
-    update_6: {
+    update_7: {
         parameters: {
             query?: never;
             header?: never;
@@ -7646,7 +7647,7 @@ export interface operations {
             };
         };
     };
-    update_7: {
+    update_8: {
         parameters: {
             query?: never;
             header?: never;

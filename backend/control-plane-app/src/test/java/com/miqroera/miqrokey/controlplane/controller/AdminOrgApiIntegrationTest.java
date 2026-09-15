@@ -149,6 +149,73 @@ class AdminOrgApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("PATCH /admin/users/{id} edits displayName and rejects empty/blank/overlong bodies (#614)")
+    void updateUserDisplayNameAndValidation() throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("username", "rename-me", "displayName", "Before", "role", "USER"))))
+                .andExpect(status().isOk()).andReturn();
+        Map<?, ?> createdBody = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class);
+        String userId = ((Map<?, ?>) createdBody.get("user")).get("id").toString();
+        String temp2 = createdBody.get("temporaryPassword").toString();
+
+        // displayName-only update persists; status stays untouched.
+        mockMvc.perform(patch("/api/v1/admin/users/" + userId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content("{\"displayName\":\"改名成功\"}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("改名成功")).andExpect(jsonPath("$.status").value("ACTIVE"));
+        String usersBody = mockMvc.perform(get("/api/v1/admin/users").cookie(sessionCookie)).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        JsonNode row = null;
+        for (JsonNode node : objectMapper.readTree(usersBody)) {
+            if ("rename-me".equals(node.path("username").asText())) {
+                row = node;
+            }
+        }
+        assertThat(row).isNotNull();
+        assertThat(row.path("displayName").asText()).isEqualTo("改名成功");
+
+        // #614: an unknown-field-only body used to drop displayName and send a
+        // null status into the NOT NULL column — 500. It must be a 400 now.
+        mockMvc.perform(patch("/api/v1/admin/users/" + userId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content("{\"unknownField\":\"x\"}")).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("USER_UPDATE_EMPTY"));
+        // Empty body and blank display names are rejected.
+        mockMvc.perform(patch("/api/v1/admin/users/" + userId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken).content("{}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("USER_UPDATE_EMPTY"));
+        mockMvc.perform(patch("/api/v1/admin/users/" + userId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content("{\"displayName\":\"   \"}")).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("DISPLAY_NAME_INVALID"));
+        mockMvc.perform(patch("/api/v1/admin/users/" + userId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("displayName", "x".repeat(201)))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("DISPLAY_NAME_INVALID"));
+
+        // Combined displayName + status keeps the status side effects (revoke).
+        MvcResult login = mockMvc
+                .perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("rename-me", temp2))))
+                .andExpect(status().isOk()).andReturn();
+        Cookie renameSession = cookie(login, "MIQROKEY_SESSION");
+        mockMvc.perform(patch("/api/v1/admin/users/" + userId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content("{\"displayName\":\"锁定中\",\"status\":\"LOCKED\"}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("锁定中")).andExpect(jsonPath("$.status").value("LOCKED"));
+        mockMvc.perform(get("/api/v1/auth/me").cookie(renameSession)).andExpect(status().isUnauthorized());
+
+        // Both successful updates are on the unified USER_UPDATE audit trail.
+        Integer auditCount = jdbc.queryForObject(
+                "SELECT count(*) FROM admin_audit_events WHERE action = 'USER_UPDATE' AND target_id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(userId)), Integer.class);
+        assertThat(auditCount).isEqualTo(2);
+    }
+
+    @Test
     @DisplayName("hostile names keep the audit summary valid JSON and cannot forge members (#447)")
     void hostileNamesDoNotBreakAudit() throws Exception {
         // Team name with a quote + newline used to make the ::jsonb cast fail and

@@ -113,24 +113,41 @@ public class AdminOrgService {
         return new UserCreated(AdminUserView.from(user), temporaryPassword);
     }
 
-    public AdminUserView updateUserStatus(UUID tenantId, UUID adminId, UUID userId, UserStatus status) {
+    /**
+     * Updates display name and/or status (#614). An empty update (both null) is a
+     * 400 — before #614 a request carrying only an unknown field such as
+     * displayName reached this method with a null status and surfaced as a 500 (NOT
+     * NULL violation on users.status).
+     */
+    public AdminUserView updateUser(UUID tenantId, UUID adminId, UUID userId, String displayName, UserStatus status) {
+        if (displayName == null && status == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "USER_UPDATE_EMPTY", "请至少提供 displayName 或 status 中的一项。");
+        }
         User user = requireUser(tenantId, userId);
-        if (user.role() == UserRole.SYSTEM_ADMIN && status == UserStatus.DISABLED) {
+        String newDisplayName = user.displayName();
+        if (displayName != null) {
+            if (displayName.isBlank() || displayName.length() > 200) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "DISPLAY_NAME_INVALID", "显示名不能为空白，且长度不超过 200 个字符。");
+            }
+            newDisplayName = displayName;
+        }
+        UserStatus newStatus = status != null ? status : user.status();
+        if (user.role() == UserRole.SYSTEM_ADMIN && newStatus == UserStatus.DISABLED) {
             throw new ApiException(HttpStatus.CONFLICT, "ADMIN_NOT_DISABLEABLE", "system admins cannot be disabled");
         }
         // #445: unlocking clears any stale lock deadline; a manual LOCKED keeps
         // it (null = indefinite — enforced at the session/login gates) and cuts
         // every existing session exactly like DISABLED does.
-        Instant lockedUntil = status == UserStatus.ACTIVE ? null : user.lockedUntil();
-        User updated = new User(user.id(), user.tenantId(), user.username(), user.displayName(), user.passwordHash(),
-                user.role(), status, user.mustChangePassword(), user.failedLoginCount(), lockedUntil,
+        Instant lockedUntil = newStatus == UserStatus.ACTIVE ? null : user.lockedUntil();
+        User updated = new User(user.id(), user.tenantId(), user.username(), newDisplayName, user.passwordHash(),
+                user.role(), newStatus, user.mustChangePassword(), user.failedLoginCount(), lockedUntil,
                 user.lastLoginAt(), user.version() + 1, user.createdAt(), Instant.now());
         userRepository.update(updated);
         if (status == UserStatus.DISABLED || status == UserStatus.LOCKED) {
             sessionService.revokeOtherSessions(userId, null);
         }
-        auditService.record(tenantId, adminId, "USER_STATUS", "USER", userId, "{\"status\":\"" + status.name() + "\"}",
-                null);
+        auditService.record(tenantId, adminId, "USER_UPDATE", "USER", userId, AuditSummaries.summary("displayName",
+                AuditSummaries.sanitize(newDisplayName), "status", newStatus.name()), null);
         return AdminUserView.from(updated);
     }
 
