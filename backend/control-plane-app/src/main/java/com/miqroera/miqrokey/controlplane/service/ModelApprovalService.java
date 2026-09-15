@@ -100,25 +100,25 @@ public class ModelApprovalService {
         UUID tenantId = user.tenantId();
         VirtualKey key = ownedKey(user, request.virtualKeyId());
         if (key.status() != VirtualKeyStatus.ACTIVE) {
-            throw new ApiException(HttpStatus.CONFLICT, "KEY_NOT_ACTIVE", "Only an active key can receive models");
+            throw new ApiException(HttpStatus.CONFLICT, "KEY_NOT_ACTIVE",
+                    "该虚拟密钥当前状态为「" + keyStatusLabel(key.status()) + "」，无法接收新模型；请在状态为「可用」的密钥上提交申请");
         }
         String modelId = validatedModel(request.modelId());
         Set<String> keyModels = keyRepository.findModelIds(key.id());
         if (keyModels.contains(modelId)) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "MODEL_ALREADY_AVAILABLE",
-                    "The model is already available on this key");
+            throw new ApiException(HttpStatus.BAD_REQUEST, "MODEL_ALREADY_AVAILABLE", "该模型已在此密钥的可用范围内，无需重复申请");
         }
         boolean pendingDuplicate = approvalRepository.findAllByVirtualKeyId(key.id()).stream()
                 .anyMatch(a -> a.status() == ModelApprovalStatus.PENDING && a.modelId().equals(modelId));
         if (pendingDuplicate) {
-            throw new ApiException(HttpStatus.CONFLICT, "DUPLICATE_PENDING",
-                    "A pending request for this model on this key already exists");
+            throw new ApiException(HttpStatus.CONFLICT, "DUPLICATE_PENDING", "该模型在此密钥上已有待审批的申请，请等待管理员处理，无需重复提交");
         }
         // #506: the /v1/models gate requires the model to be ACTIVE in the
         // provider's model_catalog — without it an approval could never take
         // effect. Fail fast instead of silently granting a dead model.
         ProjectProviderGrant grant = grantRepository.findById(key.grantId()).filter(g -> g.tenantId().equals(tenantId))
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "GRANT_NOT_FOUND", "Grant not found"));
+                .orElseThrow(
+                        () -> new ApiException(HttpStatus.NOT_FOUND, "GRANT_NOT_FOUND", "该密钥所属授权不存在；请联系管理员检查授权配置"));
         if (!catalogModelActive(grant.providerProductId(), modelId)) {
             throw new ApiException(HttpStatus.CONFLICT, "MODEL_NOT_IN_CATALOG",
                     "该模型当前不在供应商目录（model_catalog）中，暂时无法申请；" + "请联系管理员在「供应商 → 模型」中录入或探测该模型后再试");
@@ -246,16 +246,18 @@ public class ModelApprovalService {
     private ModelApproval review(UUID tenantId, UUID reviewerId, ModelApproval approval, String reviewNote,
             Instant now) {
         VirtualKey key = keyRepository.findById(approval.virtualKeyId()).filter(k -> k.tenantId().equals(tenantId))
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "KEY_NOT_FOUND", "Virtual key not found"));
+                .orElseThrow(
+                        () -> new ApiException(HttpStatus.NOT_FOUND, "KEY_NOT_FOUND", "该申请对应的虚拟密钥不存在，无法批准；请改为「驳回」本申请"));
         if (key.status() != VirtualKeyStatus.ACTIVE) {
             throw new ApiException(HttpStatus.CONFLICT, "KEY_NOT_ACTIVE",
-                    "The key is no longer active; the request cannot take effect");
+                    "该申请对应的虚拟密钥当前状态为「" + keyStatusLabel(key.status()) + "」，批准后无法生效；请改为「驳回」本申请，并请申请人在状态为「可用」的密钥上重新提交");
         }
         ProjectProviderGrant grant = grantRepository.findById(key.grantId()).filter(g -> g.tenantId().equals(tenantId))
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "GRANT_NOT_FOUND", "Grant not found"));
+                .orElseThrow(
+                        () -> new ApiException(HttpStatus.NOT_FOUND, "GRANT_NOT_FOUND", "该密钥所属授权不存在；请联系管理员检查授权配置"));
         if (grant.status() != GrantStatus.ACTIVE) {
             throw new ApiException(HttpStatus.CONFLICT, "GRANT_INACTIVE",
-                    "The key's grant is disabled; re-enable it before approving model requests");
+                    "该密钥所属授权已停用或过期，批准后无法生效；请先在「授权」页启用该授权后再批准，或改为「驳回」本申请");
         }
         // #506: re-check the catalog at decision time — the model may have been
         // removed or disabled between submission and review, which would make
@@ -294,7 +296,7 @@ public class ModelApprovalService {
         } catch (OptimisticLockingFailureException e) {
             // Concurrent review lost the optimistic lock — the request was already
             // decided by someone else.
-            throw new ApiException(HttpStatus.CONFLICT, "ALREADY_REVIEWED", "This request was already reviewed");
+            throw new ApiException(HttpStatus.CONFLICT, "ALREADY_REVIEWED", "该申请已被处理（可能在其他页面或会话中已通过或驳回），请刷新列表查看最新状态");
         }
     }
 
@@ -304,20 +306,19 @@ public class ModelApprovalService {
 
     private VirtualKey ownedKey(User user, UUID keyId) {
         VirtualKey key = keyRepository.findById(keyId).filter(k -> k.tenantId().equals(user.tenantId()))
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "KEY_NOT_FOUND", "Virtual key not found"));
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "KEY_NOT_FOUND", "虚拟密钥不存在"));
         if (user.role() != UserRole.SYSTEM_ADMIN && !key.userId().equals(user.id())) {
             // IDOR guard: another user's key is indistinguishable from a missing one.
-            throw new ApiException(HttpStatus.NOT_FOUND, "KEY_NOT_FOUND", "Virtual key not found");
+            throw new ApiException(HttpStatus.NOT_FOUND, "KEY_NOT_FOUND", "虚拟密钥不存在");
         }
         return key;
     }
 
     private ModelApproval reviewable(UUID tenantId, UUID approvalId) {
         ModelApproval approval = approvalRepository.findById(approvalId).filter(a -> a.tenantId().equals(tenantId))
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "APPROVAL_NOT_FOUND",
-                        "Approval request not found"));
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "APPROVAL_NOT_FOUND", "该申请不存在或已被删除，请刷新列表"));
         if (approval.status() != ModelApprovalStatus.PENDING) {
-            throw new ApiException(HttpStatus.CONFLICT, "ALREADY_REVIEWED", "This request was already reviewed");
+            throw new ApiException(HttpStatus.CONFLICT, "ALREADY_REVIEWED", "该申请已被处理（可能在其他页面或会话中已通过或驳回），请刷新列表查看最新状态");
         }
         return approval;
     }
@@ -344,9 +345,21 @@ public class ModelApprovalService {
         String model = trimmed(modelId);
         if (model == null || model.isBlank() || model.length() > 128
                 || model.codePoints().anyMatch(Character::isISOControl)) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "MODEL_INVALID", "Invalid model id");
+            throw new ApiException(HttpStatus.BAD_REQUEST, "MODEL_INVALID", "模型 ID 无效：不能为空、超过 128 个字符或包含控制字符");
         }
         return model;
+    }
+
+    /**
+     * Admin-facing Chinese label for a key status, matching the keys page badges.
+     */
+    private static String keyStatusLabel(VirtualKeyStatus status) {
+        return switch (status) {
+            case ACTIVE -> "可用";
+            case ROTATING -> "轮换中";
+            case REVOKED -> "已吊销";
+            case DISABLED -> "已停用";
+        };
     }
 
     private static String trimmed(String value) {

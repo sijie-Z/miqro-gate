@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -274,10 +275,12 @@ class ModelApprovalApiIntegrationTest {
 
         // Already available on the key.
         postJson("/api/v1/me/model-approvals", Map.of("virtualKeyId", keyId.toString(), "modelId", MODEL_A))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MODEL_ALREADY_AVAILABLE"));
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MODEL_ALREADY_AVAILABLE"))
+                .andExpect(jsonPath("$.detail", containsString("无需重复申请")));
         // Control characters are not a model id.
         postJson("/api/v1/me/model-approvals", Map.of("virtualKeyId", keyId.toString(), "modelId", "bad\tmodel"))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MODEL_INVALID"));
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MODEL_INVALID"))
+                .andExpect(jsonPath("$.detail", containsString("模型 ID 无效")));
         // Whitespace is trimmed; overlength is rejected by bean validation.
         postJson("/api/v1/me/model-approvals",
                 Map.of("virtualKeyId", keyId.toString(), "modelId", "  " + "x".repeat(200)))
@@ -298,7 +301,8 @@ class ModelApprovalApiIntegrationTest {
         postJson("/api/v1/me/model-approvals", Map.of("virtualKeyId", keyId.toString(), "modelId", MODEL_NEW))
                 .andExpect(status().isCreated());
         postJson("/api/v1/me/model-approvals", Map.of("virtualKeyId", keyId.toString(), "modelId", MODEL_NEW))
-                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("DUPLICATE_PENDING"));
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("DUPLICATE_PENDING"))
+                .andExpect(jsonPath("$.detail", containsString("等待管理员处理")));
     }
 
     @Test
@@ -317,7 +321,9 @@ class ModelApprovalApiIntegrationTest {
                 (String) objectMapper.readValue(submit.getResponse().getContentAsString(), Map.class).get("id"));
         postJson("/api/v1/me/virtual-keys/" + keyId + "/revoke", Map.of()).andExpect(status().isOk());
         postJson("/api/v1/admin/model-approvals/" + approvalId + "/approve", Map.of()).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("KEY_NOT_ACTIVE"));
+                .andExpect(jsonPath("$.code").value("KEY_NOT_ACTIVE"))
+                .andExpect(jsonPath("$.detail", containsString("已吊销")))
+                .andExpect(jsonPath("$.detail", containsString("驳回")));
 
         // Disabled grant also blocks approval for an otherwise healthy key.
         MvcResult submit2 = postJson("/api/v1/me/model-approvals",
@@ -328,11 +334,40 @@ class ModelApprovalApiIntegrationTest {
         jdbc.update("UPDATE project_provider_grants SET status = 'DISABLED' WHERE id = :id",
                 new MapSqlParameterSource("id", fx.grantId));
         postJson("/api/v1/admin/model-approvals/" + approvalId2 + "/approve", Map.of()).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("GRANT_INACTIVE"));
+                .andExpect(jsonPath("$.code").value("GRANT_INACTIVE"))
+                .andExpect(jsonPath("$.detail", containsString("授权已停用")))
+                .andExpect(jsonPath("$.detail", containsString("驳回")));
 
         // A revoked key cannot receive new requests either.
         postJson("/api/v1/me/model-approvals", Map.of("virtualKeyId", keyId.toString(), "modelId", MODEL_B))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("KEY_NOT_ACTIVE"));
+    }
+
+    @Test
+    @DisplayName("approve on a rotated key returns an actionable Chinese message (#574 demo dead-end)")
+    void approveOnRotatedKeyIsActionable() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(MODEL_A);
+
+        MvcResult submit = postJson("/api/v1/me/model-approvals",
+                Map.of("virtualKeyId", keyId.toString(), "modelId", MODEL_NEW)).andExpect(status().isCreated())
+                .andReturn();
+        UUID approvalId = UUID.fromString(
+                (String) objectMapper.readValue(submit.getResponse().getContentAsString(), Map.class).get("id"));
+
+        // Rotation retires the old key (ROTATING); a pending request on it can
+        // never take effect. Approval must explain the dead end and point at the
+        // terminal action instead of returning a bare English error.
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/rotate", Map.of()).andExpect(status().isOk());
+        postJson("/api/v1/admin/model-approvals/" + approvalId + "/approve", Map.of()).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("KEY_NOT_ACTIVE"))
+                .andExpect(jsonPath("$.detail", containsString("轮换中")))
+                .andExpect(jsonPath("$.detail", containsString("驳回")));
+
+        // Reject stays available as the queue's terminal action for such rows.
+        postJson("/api/v1/admin/model-approvals/" + approvalId + "/reject", Map.of()).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"));
     }
 
     @Test
