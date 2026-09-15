@@ -2932,3 +2932,15 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **验证**：`AdminUsageStatsServiceTest` 13/13（窗口/时区换算/参数校验）；`AdminUsageApiIntegrationTest` 11/11（新增 3 用例：UTC+8 下小时桶与"用户×项目"交叉、团队维度按成员聚合、admin-only 与参数边界）；前端 vitest（NextAdminUsageView 全量 + 新增每小时用例）、typecheck、build。
 
+
+
+## 2026-09-16 凌晨 — 演示站部署与验收（#615 + #633 + #634，develop@8cd67a95）
+
+**部署**：tarball 通道（gh api tarball/8cd67a95）→ /opt/miqrokey-dev → 三镜像串行重建（gateway/control-plane/portal）→ compose up -d --no-deps；V54/V55 Flyway 迁移在演示库确认（usage event context columns / request context evidence，均 success）；全栈 healthy。
+
+**验收（47/47 PASS，记录 D:/tmp/miqro-test/acceptance-2026-09-16.json）**：
+
+- **CAA 端到端（真机、真上游 DeepSeek）**：建「CAA验收项目」（tag=caa-acc）+ 成员 + 授权；demo.user 建双绑定 Key（boundProjects=[demo, caa-acc]）；后缀路由 200（RESOLVED_SUFFIX）、`X-Miqro-Project-Id` 声明选绑定 B 200（RESOLVED_HEADER）、多绑定无有效上下文 400 `CONTEXT_REQUIRED`、伪造声明 403 `CONTEXT_NOT_ALLOWED`、畸形声明 400 `CONTEXT_INVALID`；**DB 落库核对**（usage_event）：session=caa-acc-1/2/3 → 三条归属行逐字符合（claimed_project_id 仅声明路径有值；`git_repo` 因不在 allowlist 被正确丢弃、`HIGH` 置信度保留——消毒生效）。
+- **#615 语义真机复核**：被引用标签 PATCH → 409 `PROJECT_TAG_IN_USE`（含中文可行动文案）；轮换复制全部绑定；轮换后新 Key 绑定 B 真实推理 200。
+- **每小时 Token 表**：API（USER/TEAM 维度、UTC+8 桶、days=8 → 400、普通用户 403）全过；**门户 UI**（远程验收通道）「用量报表」面板渲染真实数据（09-16 00:00 桶、admin/演示项目/1068 请求，hourStart 本地化正确）。
+- **回归批次**：门户 4 路由 200；管理端 16 面（用户/团队/项目/授权/审批/供应商产品/订阅/定价/审计/配额/告警/导出/技能/MCP/用量汇总/明细）+ 个人端 4 面（Key/授权/用量）全 200；console 无错误（仅登入前匿名 401，属预期）。
