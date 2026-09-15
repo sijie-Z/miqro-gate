@@ -102,17 +102,17 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_CREDENTIAL_DRAIN_GRACE` | `PT0S` | （当前实现）上游凭证轮换/禁用宽限期（`miqrokey.credential-drain-grace`）：旧凭证版本在 `retiredAt = now + grace` 前保持可解密，请求启动时已解密旧 Secret 的请求可完成；`PT0S` = 快照刷新后旧版本立即退役 |
 | `MIQROKEY_PRODUCTION` | `false` | 生产模式：启用严格 Origin 验证、强制 cookie Secure 标志、拒绝 localhost 来源 |
 | `MIQROKEY_ORIGIN_ALLOWLIST` | `localhost:5173,localhost:8080` | 生产模式下至少需要一个非 localhost 条目 |
-| `MIQROKEY_COOKIE_SECURE` | `false` | Cookie Secure flag；生产模式下自动启用（可手动覆盖，但强制保持 true） |
+| `MIQROKEY_COOKIE_SECURE` | `false` | Cookie Secure flag；生产模式（`miqrokey.production=true`）下必须显式设为 `true`，否则 `ProductionStartupValidator` 拒绝启动（不会自动启用） |
 
 主密钥和 HMAC 密钥不能复用。生产启动时若文件权限过宽、长度错误或使用示例值，必须失败。
 
 ### 4.5 生产模式约束
 
-当 Spring `production` profile 激活或 `miqrokey.production=true` 时，启动时自动执行以下验证：
+当 Spring `production` profile 激活或 `miqrokey.production=true` 时，启动前执行以下验证（`ProductionStartupValidator`，任一不满足即拒绝启动）：
 
-1. **Cookie Secure**：自动启用 `cookieSecure=true`（若未显式设置）。
-2. **Origin Allowlist**：必须包含至少一个非 localhost 条目（如 `https://your-domain.com`）。
-3. **启动失败**：allowlist 为空或仅含默认 localhost 值时，启动直接失败。
+1. **Cookie Secure**：`cookieSecure` 必须为 `true`（显式设置 `MIQROKEY_COOKIE_SECURE=true`；不会自动启用）。
+2. **Origin Allowlist**：必须包含至少一个非 localhost 条目，且每个条目均为带 scheme 的 https 裸 origin（如 `https://your-domain.com`，不得含路径/尾斜杠/query/userinfo）。
+3. **启动失败**：allowlist 为空、仅含 localhost、或任一条目非法时，启动直接失败。
 
 生产模式下，所有缺少/无效/未允许的 Origin 返回 `403 ORIGIN_REJECTED`；Cookie 自动设置 `Secure` flag；开发模式的 localhost 隐式放行被禁用。
 

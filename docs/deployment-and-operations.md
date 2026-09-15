@@ -117,3 +117,59 @@ Micrometer/Prometheus 指标至少包括：
 
 未来迁移 Kubernetes 时，PostgreSQL 可以换成客户托管实例，Gateway 增加副本即可。
 
+## 11. 容器镜像
+
+`deploy/docker/` 四个镜像（一镜像一 Dockerfile），基础镜像全部按 digest 固定，应用运行层非 root：
+
+| 镜像 | Dockerfile | 内容 |
+|---|---|---|
+| miqrokey-gateway / miqrokey-control-plane | `gateway.Dockerfile` / `control-plane.Dockerfile` | 镜像自带 Maven 3.9.9（与 wrapper 锁定同版本）+ Temurin 21 构建 fat jar → Temurin 21-jre-alpine 运行，`USER 10001` |
+| miqrokey-portal | `portal.Dockerfile` | node:22-alpine 构建 Vue SPA → nginx 1.27-alpine 固化静态与 TLS 反代配置 |
+| miqrokey-backup | `backup.Dockerfile` | postgres 17.6-alpine（pg_dump 与库同版本）+ bash/openssl/curl + `deploy/backup` 脚本，`USER postgres` |
+
+在仓库根目录构建（`compose.prod.yaml` 会按需重建；手动构建示例）：
+
+```bash
+docker build -f deploy/docker/gateway.Dockerfile -t miqrokey-gateway .
+docker build -f deploy/docker/control-plane.Dockerfile -t miqrokey-control-plane .
+docker build -f deploy/docker/portal.Dockerfile -t miqrokey-portal .
+docker build -f deploy/docker/backup.Dockerfile -t miqrokey-backup .
+```
+
+构建不声明 `# syntax` 前端镜像（受限网络拉不到 docker/dockerfile）；应用镜像不经容器内 mvnw 自举
+（并行构建共享 m2 缓存时 wrapper 安装发行包存在竞态，实测失败）。
+
+## 12. 生产编排（Docker Compose）
+
+`deploy/compose.prod.yaml`：`portal`（nginx：TLS 终结 + SPA 静态 + `/api` → control-plane + `/v1`、`/mcpservers` → gateway；
+唯一发布 80/443 的服务）+ `control-plane` + `gateway` + `postgres` + `backup`，内部网络 172.28.0.0/24。
+
+```bash
+cd deploy
+cp .env.prod.example .env && chmod 600 .env       # 域名与 Origin 必填；密钥生成见 secrets/README.md
+docker compose -f compose.prod.yaml up -d --build
+```
+
+- **密钥注入**：Docker secrets（compose v2.23+；per-service `uid/gid/mode: 0400`，满足 `FileSecretProvider`
+  的 0400 强制；`db_password` 另由 postgres 镜像的 `POSTGRES_PASSWORD_FILE` 约定消费）。
+- **`*_FILE` 约定**：`MIQROKEY_DB_PASSWORD_FILE` / `MIQROKEY_GATEWAY_DB_PASSWORD_FILE` 由两应用各自的
+  `SecretFileEnvironmentPostProcessor` 解析为明文变量；备份容器 entrypoint 自行解析同名前缀。
+- **Origin**：`MIQROKEY_ORIGIN_ALLOWLIST` 必须是无路径的 https 裸 origin（`https://your-domain`），
+  否则 production 启动校验拒绝启动。
+- **证书**：`deploy/secrets/certs/{fullchain,privkey}.pem`（本机冒烟可用自签）。
+- **bootstrap**：首个管理员创建后删除 `MIQROKEY_BOOTSTRAP_SECRET_FILE` 行与密钥文件；公网部署建议
+  `MIQROKEY_REGISTRATION_ENABLED=false`（示例默认）。
+- **管理门户 IP 白名单**（可选）：`MIQROKEY_CONTROL_ADMIN_IP_ALLOWLIST` 与
+  `MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES=172.28.0.0/24`（XFF 仅从反代采纳）。
+- **启动顺序**：postgres healthy → control-plane（Flyway 迁移）/gateway → portal；`docker compose ps` 全 `healthy` 后验收。
+
+## 13. 验证与备份容器
+
+- `docker compose -f deploy/compose.prod.yaml config` 校验；CI 亦覆盖（含第三方镜像 digest 断言、四镜像构建与非 root 断言）。
+- 反代验收（本机冒烟示例）：`curl -k --resolve miqrokey.local:443:127.0.0.1 https://miqrokey.local/healthz`（反代 200）、
+  `/api/v1/auth/csrf`（控制面路由）、`/v1/models`（网关 401 鉴权语义）、`/`（门户 SPA）。
+- `backup` 容器按日戳调度（每日 02:00，TZ=Asia/Shanghai，重启安全）执行 `miqrokey-backup.sh`
+  （pg_dump → gzip → AES-256-CBC，密钥 `backup_key`），产物落命名卷 `backups`；结果经 `BACKUP_WEBHOOK_URL` 通知。
+- 备份产物需另行同步异地（COS）；恢复演练见 operations-runbook。
+
+

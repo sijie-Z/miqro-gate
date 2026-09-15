@@ -15,9 +15,9 @@
 | §3.2 团队 Plan 真实共享池验证 | ⏳ | 需 MiniMax/智谱/腾讯团队产品真实凭证与真实组织账号 |
 | §4.1 Flyway/升级回滚 | ✅/➖ | 从空库 V1–V21 Testcontainers 全建（CI 每 PR）；真实恢复演练 PASS（G6.2）；「上一正式版本升级」不适用——尚无已发布正式版本，首版发布时建立基线 |
 | §4.2 大表/分区 migration 评估 | ➖ | 单客户私有化、50 并发上限（CLAUDE.md §2），无生产数据量副本可评估；`usage_event` 分区保留策略见 database-schema §6 |
-| §5.5 镜像非 root/固定 digest | ➖/✅ | 当前交付 = 源码 + wrapper + Compose（无应用容器镜像，见 §7）；Compose 依赖镜像已按 digest 固定（postgres 17.6-alpine @sha256…） |
+| §5.5 镜像非 root/固定 digest | ✅ | #479（2026-09-14）：deploy/docker/ 四镜像构建通过（CI images job 防腐烂）；基础镜像全部 @sha256 固定；gateway/control-plane `USER 10001`、backup `USER postgres`；密钥卷只读挂载（0400/0440）；portal nginx 需容器内绑 80/443 属「可行处」例外 |
 | §6.1 告警已测试 | ✅/⏳ | 已测：Webhook 签名投递/去重/指数退避（G4.5）、备份 Webhook（G6.2）、usage 队列饱和 drop warn + 指标（G2.4）、预算水位 BUDGET_THRESHOLD（G8.3）；未实现为告警类型：usage 队列饱和/解析失败/供应商错误/Plan 同步/磁盘（G4.5 已知缺口，接入需数据源接线）→ 正式发布前按需补充 |
-| §7 交付物 | ✅/⏳/➖ | 源码/wrapper/锁文件/Compose/Secret 模板/.env.example/签名目录/文档全齐；OpenAPI 生成物已实现（F09，见下行）；容器镜像/离线包（无镜像构建，源码交付形态不适用）；客户侧构建/恢复演练（无客户，➖） |
+| §7 交付物 | ✅/⏳/➖ | 源码/wrapper/锁文件/Compose（dev + prod）/Secret 模板/.env.prod.example/签名目录/文档全齐；OpenAPI 生成物已实现（F09，见下行）；容器镜像已交付（#479：deploy/docker/ 四镜像 + compose.prod.yaml，基础镜像 digest 固定）；离线包（暂不适用，➖）；客户侧构建/恢复演练（无客户，➖） |
 | §8 Go/No-Go | ⏳ | **0.1.0-rc.1/#202 与 0.1.0-rc.2/#221 已打标并推送（2026-09-07，rc 预发布，含中文 Release 说明）**；正式版本号与 Go/No-Go 仍由发布负责人（项目所有者）在发布节点签署 |
 | OpenAPI 3.1 生成 + CI 破坏性变更检查（api-contract §8 / document-map §3） | ✅ | F09 已实现：springdoc 生成 `GET /v3/api-docs`（3.1.0，无 swagger-ui）+ 鉴权 scheme 建模 + Info 元数据；基线 `docs/openapi/openapi-3.1.json`；CI backend-integration job 跑 `deploy/openapi/check-openapi-breaking.py`（删除 path/op/response/参数、属性变 required 即红）。遗留：前端 TS client 仍手写（codegen 列发布前候选） |
 
@@ -85,7 +85,7 @@
 - [x] 会话 Secure/HttpOnly/SameSite、CSRF、强密码和登录锁定已验证。
 - [x] SBOM、依赖漏洞扫描和镜像扫描完成；高/严重问题已处理。
 - [x] 生产依赖许可证仅为批准的宽松许可证；无 LiteLLM/Bifrost 运行时依赖。
-- [ ] 镜像使用非 root、固定 digest/版本、最小权限和只读挂载（可行处）。
+- [x] 镜像使用非 root、固定 digest/版本、最小权限和只读挂载（可行处）。（#479：基础镜像 @sha256；gateway/control-plane `USER 10001`、backup `USER postgres`，portal nginx 容器内绑 80/443 属例外；secrets-store 只读挂载）
 
 ## 6. 可观测性与运维
 
@@ -98,7 +98,7 @@
 ## 7. 交付物
 
 - [ ] 后端/前端源码、wrapper、锁文件和可重复构建说明。
-- [ ] 带 digest 的容器镜像或离线镜像包。
+- [x] 带 digest 的容器镜像或离线镜像包。（#479：deploy/docker/ 四镜像构建通过；依赖镜像 @sha256 固定，应用镜像由仓库源码构建并由 CI images job 验证非 root）
 - [ ] Docker Compose、示例非敏感配置、Secret 文件模板和目录/价格包。
 - [ ] OpenAPI、数据库 schema/migration 清单、SBOM、许可证和扫描报告。
 - [ ] 管理员手册、用户 Base URL/Key 使用说明、运维 Runbook、备份恢复说明。
