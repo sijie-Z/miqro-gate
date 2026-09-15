@@ -9,6 +9,7 @@ import type { AdminUser, MemberView, Project } from '@/types/generated-api';
 vi.mock('@/api', () => ({
   listProjects: vi.fn(),
   createProject: vi.fn(),
+  updateProject: vi.fn(),
   listProjectMembers: vi.fn(),
   removeProjectMember: vi.fn(),
   addProjectMember: vi.fn(),
@@ -158,5 +159,63 @@ describe('NextProjectsView', () => {
 
     expect(mockApi.addProjectMember).toHaveBeenCalledWith('p1', 'u2');
     expect((mockApi.listProjectMembers as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
+  });
+
+  it('shows the routing-tag hint on the create form (#617)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="project-create-open"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="project-create-tag-hint"]').text()).toContain(
+      '留空将导致成员无法创建 Virtual Key',
+    );
+  });
+
+  it('edits a project name and routing tag (#617)', async () => {
+    mockApi.updateProject.mockResolvedValue(project({ name: '改后名称', projectTag: 'new-tag' }));
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="project-edit-open"]').trigger('click');
+    await flushPromises();
+    expect(document.querySelector('[data-testid="project-edit-dialog"]')).toBeTruthy();
+    const nameInput = document.querySelector(
+      '[data-testid="project-edit-name"]',
+    ) as HTMLInputElement;
+    const tagInput = document.querySelector('[data-testid="project-edit-tag"]') as HTMLInputElement;
+    expect(nameInput.value).toBe('Core AI');
+    expect(tagInput.value).toBe('core-ai');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+
+    // Clearing an existing tag is rejected locally — no API call.
+    setter?.call(tagInput, '');
+    tagInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    (document.querySelector('[data-testid="project-edit-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(document.querySelector('[data-testid="project-edit-error"]')?.textContent).toContain(
+      '不能清空',
+    );
+    expect(mockApi.updateProject).not.toHaveBeenCalled();
+
+    // A real change goes through PATCH and reloads the list.
+    setter?.call(nameInput, '改后名称');
+    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    setter?.call(tagInput, 'new-tag');
+    tagInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    const callsBefore = (mockApi.listProjects as ReturnType<typeof vi.fn>).mock.calls.length;
+    (document.querySelector('[data-testid="project-edit-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(mockApi.updateProject).toHaveBeenCalledWith('p1', {
+      name: '改后名称',
+      projectTag: 'new-tag',
+    });
+    expect((mockApi.listProjects as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(
+      callsBefore,
+    );
   });
 });

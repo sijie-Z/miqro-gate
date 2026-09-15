@@ -250,6 +250,14 @@ export function createProject(body: {
   return post<Project>('/api/v1/admin/projects', body);
 }
 
+/** PATCH /admin/projects/{id} — name / projectTag / status (#617). */
+export function updateProject(
+  id: string,
+  body: { name?: string; projectTag?: string; status?: string },
+): Promise<Project> {
+  return patch<Project>(`/api/v1/admin/projects/${id}`, body);
+}
+
 export function listProjectMembers(projectId: string): Promise<MemberView[]> {
   return get<MemberView[]>(`/api/v1/admin/projects/${projectId}/members`);
 }
