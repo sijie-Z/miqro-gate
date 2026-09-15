@@ -265,7 +265,7 @@ public class AdminOrgService {
                     """, new MapSqlParameterSource("tenantId", tenantId).addValue("projectId", projectId), Long.class);
             if (bound != null && bound > 0) {
                 throw new ApiException(HttpStatus.CONFLICT, "PROJECT_TAG_IN_USE",
-                        "该项目的路由标签已被 " + bound + " 条密钥绑定引用，修改会使这些密钥失效；" + "请先轮换相关密钥，或保留当前标签。");
+                        "该项目路由标签已被 " + bound + " 条密钥绑定引用；历史绑定不随密钥轮换解除，" + "因此标签不可修改。如确需更换标签，请评估密钥迁移方案，或保留当前标签。");
             }
         }
         Project updated = new Project(project.id(), project.tenantId(), project.code(),

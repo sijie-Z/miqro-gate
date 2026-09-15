@@ -153,6 +153,33 @@ class OpenAdminVirtualKeysApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("delegation creates one key bound to several projects (ADR-0018)")
+    void delegateCreatesMultiProjectKey() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        fx.insertSecondProjectWithGrant("ops-tag", "OPS");
+        UUID targetId = fx.insertMemberUser("frank", "USER", "ACTIVE");
+        fx.addProjectMembership(fx.secondProjectId, targetId);
+
+        String body = objectMapper.writeValueAsString(Map.of("userId", targetId, "name", "multi-delegate", "projectIds",
+                List.of(fx.projectId, fx.secondProjectId), "providerProductId", fx.productId, "credentialGrantId",
+                fx.grantId, "purpose", "CLAUDE_CODE"));
+        MvcResult r = mockMvc
+                .perform(post("/api/v1/admin-api/virtual-keys").header("Authorization", "Bearer " + machineSecret)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.boundProjects.length()").value(2)).andReturn();
+        UUID keyId = UUID.fromString(
+                String.valueOf(objectMapper.readValue(r.getResponse().getContentAsString(), Map.class).get("id")));
+        Integer bindings = jdbc.queryForObject(
+                "SELECT count(*) FROM key_project_binding WHERE virtual_key_id = :id AND status = 'ACTIVE'",
+                new MapSqlParameterSource("id", keyId), Integer.class);
+        assertThat(bindings).isEqualTo(2);
+        // Ownership still lands on the target member, not the machine.
+        assertThat(jdbc.queryForObject("SELECT user_id FROM virtual_keys WHERE id = :id",
+                new MapSqlParameterSource("id", keyId), UUID.class)).isEqualTo(targetId);
+    }
+
+    @Test
     @DisplayName("delegation rejects a target who is not a project member (case-1 boundary)")
     void delegateRejectsNonMemberTarget() throws Exception {
         fx.insertProviderCatalog();
@@ -270,6 +297,10 @@ class OpenAdminVirtualKeysApiIntegrationTest {
         final UUID projectId = UUID.randomUUID();
         final UUID grantId = UUID.randomUUID();
         final UUID grantCreatorId = UUID.randomUUID();
+        final UUID secondProjectId = UUID.randomUUID();
+        final UUID secondSubscriptionId = UUID.randomUUID();
+        final UUID secondCredentialId = UUID.randomUUID();
+        final UUID secondGrantId = UUID.randomUUID();
 
         void reset() {
             for (String table : List.of("virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
@@ -333,6 +364,41 @@ class OpenAdminVirtualKeysApiIntegrationTest {
         }
 
         /** Inserts a tenant user and makes them a member of the project. */
+        void insertSecondProjectWithGrant(String tag, String code) {
+            MapSqlParameterSource p = new MapSqlParameterSource();
+            p.addValue("tenantId", tenantId).addValue("projectId", secondProjectId)
+                    .addValue("subscriptionId", secondSubscriptionId).addValue("credentialId", secondCredentialId)
+                    .addValue("grantId", secondGrantId).addValue("productId", productId).addValue("tag", tag)
+                    .addValue("code", code).addValue("adminId", grantCreatorId);
+            jdbc.update("""
+                    INSERT INTO projects (id, tenant_id, code, name, status, project_tag, version)
+                    VALUES (:projectId, :tenantId, :code, 'Project Two', 'ACTIVE', :tag, 0)
+                    """, p);
+            jdbc.update("""
+                    INSERT INTO upstream_subscriptions
+                        (id, tenant_id, provider_product_id, name, billing_mode, status, version)
+                    VALUES (:subscriptionId, :tenantId, :productId, 'Sub2', 'PAYG', 'ACTIVE', 0)
+                    """, p);
+            jdbc.update("""
+                    INSERT INTO upstream_credentials (id, tenant_id, subscription_id, credential_name, status, version)
+                    VALUES (:credentialId, :tenantId, :subscriptionId, 'Cred2', 'ACTIVE', 0)
+                    """, p);
+            jdbc.update("""
+                    INSERT INTO project_provider_grants
+                        (id, tenant_id, project_id, provider_product_id, upstream_credential_id, status, created_by,
+                         version)
+                    VALUES (:grantId, :tenantId, :projectId, :productId, :credentialId, 'ACTIVE', :adminId, 0)
+                    """, p);
+        }
+
+        void addProjectMembership(UUID targetProjectId, UUID userId) {
+            jdbc.update("""
+                    INSERT INTO project_memberships (tenant_id, project_id, user_id)
+                    VALUES (:tenantId, :projectId, :userId)
+                    """, new MapSqlParameterSource("tenantId", tenantId).addValue("projectId", targetProjectId)
+                    .addValue("userId", userId));
+        }
+
         UUID insertMemberUser(String username, String role, String status) {
             UUID userId = insertUser(tenantId, username, role, status);
             jdbc.update("""

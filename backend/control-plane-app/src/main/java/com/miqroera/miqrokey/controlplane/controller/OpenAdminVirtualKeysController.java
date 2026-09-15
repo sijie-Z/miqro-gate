@@ -62,13 +62,16 @@ public class OpenAdminVirtualKeysController {
         return virtualKeyService.listForTenantUser(tenantId(request), userId);
     }
 
-    public record DelegatedCreateRequest(@NotNull UUID userId, @Size(max = 200) String name, @NotNull UUID projectId,
-            @NotNull UUID providerProductId, @NotNull UUID credentialGrantId, @NotNull VirtualKeyPurpose purpose,
-            List<@Size(max = 128) String> allowedModels, @Pattern(regexp = "DISABLED|ENABLED") String cachePolicy) {
+    public record DelegatedCreateRequest(@NotNull UUID userId, @Size(max = 200) String name, UUID projectId,
+            List<UUID> projectIds, @NotNull UUID providerProductId, @NotNull UUID credentialGrantId,
+            @NotNull VirtualKeyPurpose purpose, List<@Size(max = 128) String> allowedModels,
+            @Pattern(regexp = "DISABLED|ENABLED") String cachePolicy) {
 
         CreateVirtualKeyRequest toCreateRequest() {
-            return new CreateVirtualKeyRequest(name, projectId, null, providerProductId, credentialGrantId, purpose,
-                    allowedModels, cachePolicy);
+            // ADR-0018: delegation has the same multi-project surface as
+            // self-service — projectIds first, legacy projectId as fallback.
+            return new CreateVirtualKeyRequest(name, projectId, projectIds, providerProductId, credentialGrantId,
+                    purpose, allowedModels, cachePolicy);
         }
     }
 

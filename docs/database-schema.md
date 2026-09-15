@@ -190,7 +190,7 @@ Key 创建时的授权快照，主键 `(virtual_key_id, model_id)`。实际可�
 Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project_id` 分离，便于绑定状态演化而不重写 Key 行。**ADR-0018：一把 Key 可绑多个项目**（唯一约束为 `(virtual_key_id, project_id)` 对，V4 起即支持多行），网关按 `(密钥, 标签)` 命中一行：
 
 - `virtual_key_id`、`project_id`、`grant_id`（**V53 新增**：该绑定自己的授权——凭证/产品/授权模型的来源；回填自 `virtual_keys.grant_id`，存量语义不变）、`status`（`ACTIVE|DISABLED`）、`version`、时间戳
-- 复合 FK 到 `virtual_keys(tenant_id, id)` 和 `projects(tenant_id, id)`（防跨租户）；FK 到 `project_provider_grants(id)`
+- 复合 FK 到 `virtual_keys(tenant_id, id)` 和 `projects(tenant_id, id)`（防跨租户）；**复合 FK `(grant_id, project_id, tenant_id)` → `project_provider_grants(id, project_id, tenant_id)`**（数据库层保证绑定与授权的项目/租户一致，不再只靠装载器 JOIN 兜底）
 - 成员移出项目 / Key 轮换的行为见 ADR-0018 D4/D7（轮换复制全部绑定；成员移除禁用该项目的绑定行，无剩余绑定的 Key 置 REVOKED）
 - 唯一 `(virtual_key_id, project_id)`；`project_id`、`tenant_id` 索引
 
