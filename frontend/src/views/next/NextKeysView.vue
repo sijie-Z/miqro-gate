@@ -17,7 +17,13 @@ import {
 } from 'radix-vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { ccSwitchImportLink, claudeEnvSnippet, claudeSettingsSnippet } from '@/lib/ccswitch';
+import {
+  ccSwitchImportLink,
+  claudeEnvSnippet,
+  claudeSettingsSnippet,
+  SHELL_FLAVOR_LABEL,
+  type ShellFlavor,
+} from '@/lib/ccswitch';
 import {
   UiButton,
   UiDialog,
@@ -308,6 +314,8 @@ const revealModels = ref<string[]>([]);
 const usageOpen = ref(false);
 const usageKey = ref<VirtualKeyView | null>(null);
 const usagePastedSecret = ref('');
+const usageShell = ref<ShellFlavor>('posix');
+const SHELL_FLAVORS = Object.keys(SHELL_FLAVOR_LABEL) as ShellFlavor[];
 
 function gatewayBaseUrl(): string {
   return (revealData.value?.baseUrl ?? usageKey.value?.baseUrl ?? '').replace(/\/+$/, '');
@@ -881,18 +889,55 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
       <p class="next-keys__reveal-url">
         网关地址：<span class="ui-mono">{{ usageKey?.baseUrl }}</span>
       </p>
+      <div
+        class="next-keys__segmented"
+        role="radiogroup"
+        aria-label="终端类型"
+        data-testid="usage-shell"
+      >
+        <label
+          v-for="flavor in SHELL_FLAVORS"
+          :key="flavor"
+          class="next-keys__seg"
+          :class="{ 'next-keys__seg--on': usageShell === flavor }"
+        >
+          <input
+            v-model="usageShell"
+            type="radio"
+            name="usage-shell"
+            :value="flavor"
+            class="next-keys__seg-input"
+          />
+          <span>{{ SHELL_FLAVOR_LABEL[flavor] }}</span>
+        </label>
+      </div>
       <pre class="next-keys__snippet" data-testid="usage-env">{{
-        claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl())
+        claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageShell)
       }}</pre>
       <div class="next-keys__import">
         <UiButton
           variant="secondary"
           data-testid="usage-copy-env"
           @click="
-            copyText(claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl()), '环境变量模板已复制')
+            copyText(
+              claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageShell),
+              '环境变量模板已复制',
+            )
           "
         >
           复制环境变量模板
+        </UiButton>
+        <UiButton
+          variant="secondary"
+          data-testid="usage-copy-settings"
+          @click="
+            copyText(
+              claudeSettingsSnippet('<粘贴你保存的密钥>', gatewayBaseUrl()),
+              'settings.json 模板已复制',
+            )
+          "
+        >
+          复制 settings.json 模板
         </UiButton>
       </div>
       <div class="ui-field">

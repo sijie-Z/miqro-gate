@@ -33,6 +33,15 @@ describe('ccswitch helpers', () => {
     expect(snippet).toContain('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1');
   });
 
+  it('renders Windows CMD and PowerShell flavors of the env snippet', () => {
+    const cmd = claudeEnvSnippet('k', 'https://gw.example.com', 'cmd');
+    expect(cmd).toContain('set ANTHROPIC_BASE_URL=https://gw.example.com');
+    expect(cmd).toContain('set ANTHROPIC_AUTH_TOKEN=k');
+    const ps = claudeEnvSnippet('k', 'https://gw.example.com', 'powershell');
+    expect(ps).toContain('$env:ANTHROPIC_BASE_URL="https://gw.example.com"');
+    expect(ps).toContain('$env:ANTHROPIC_AUTH_TOKEN="k"');
+  });
+
   it('renders a settings.json fragment parseable as JSON', () => {
     const text = claudeSettingsSnippet('mqk_live_s', 'http://localhost:8081');
     const parsed = JSON.parse(text) as { env: Record<string, string> };

@@ -39,13 +39,42 @@ export function ccSwitchImportLink(
   return `ccswitch://v1/import?${params.toString()}`;
 }
 
-/** Shell env block for Claude Code (matches the gateway's Bearer auth). */
-export function claudeEnvSnippet(secret: string, baseUrl: string): string {
-  return [
-    `export ANTHROPIC_BASE_URL="${normalizeBaseUrl(baseUrl)}"`,
-    `export ANTHROPIC_AUTH_TOKEN="${secret}"`,
-    'export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',
-  ].join('\n');
+/** Terminal flavors for the copy-ready env block. */
+export type ShellFlavor = 'posix' | 'cmd' | 'powershell';
+
+export const SHELL_FLAVOR_LABEL: Record<ShellFlavor, string> = {
+  posix: 'macOS / Linux',
+  cmd: 'Windows CMD',
+  powershell: 'PowerShell',
+};
+
+/** Shell env block for Claude Code, per terminal flavor (Bearer auth). */
+export function claudeEnvSnippet(
+  secret: string,
+  baseUrl: string,
+  flavor: ShellFlavor = 'posix',
+): string {
+  const base = normalizeBaseUrl(baseUrl);
+  switch (flavor) {
+    case 'cmd':
+      return [
+        `set ANTHROPIC_BASE_URL=${base}`,
+        `set ANTHROPIC_AUTH_TOKEN=${secret}`,
+        'set CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',
+      ].join('\n');
+    case 'powershell':
+      return [
+        `$env:ANTHROPIC_BASE_URL="${base}"`,
+        `$env:ANTHROPIC_AUTH_TOKEN="${secret}"`,
+        '$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"',
+      ].join('\n');
+    default:
+      return [
+        `export ANTHROPIC_BASE_URL="${base}"`,
+        `export ANTHROPIC_AUTH_TOKEN="${secret}"`,
+        'export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',
+      ].join('\n');
+  }
 }
 
 /** `~/.claude/settings.json` fragment for the VSCode/JetBrains Claude Code plugin. */
