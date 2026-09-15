@@ -887,14 +887,16 @@ onMounted(async () => {
 /* Single-column stack in its own left-hand column (reference measured
    geometry: x ≈ 8–33% of the hero, starting at ~39% viewport height). */
 .hero-capabilities {
-  position: absolute;
-  left: 0;
-  top: 42%;
+  /* In-flow (was absolutely placed at the artwork's stack zone): English copy
+     is much taller, so a fixed offset made the description and the list
+     overlap. The artwork's left column is blank top to bottom — flow wins. */
+  position: relative;
   z-index: 5;
   display: grid;
   grid-template-columns: 1fr;
   gap: 14px;
-  width: 34%;
+  margin-top: 26px;
+  width: 34cqw;
   max-width: 300px;
 }
 .capability {
