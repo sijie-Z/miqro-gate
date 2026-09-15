@@ -181,9 +181,11 @@ try {
   tabs.value = [];
 }
 
-watch(tabs, (value) => sessionStorage.setItem(TABS_KEY, JSON.stringify(value.slice(-24))), {
-  deep: true,
-});
+watch(
+  tabs,
+  (value) => sessionStorage.setItem(TABS_KEY, JSON.stringify(value.slice(-24))),
+  { deep: true },
+);
 
 watch(
   () => route.name as string | undefined,
@@ -264,9 +266,7 @@ function closeTabMenu() {
   tabMenu.value.open = false;
 }
 
-function tabMenuAction(
-  action: 'reload' | 'close' | 'closeLeft' | 'closeRight' | 'closeOthers' | 'closeAll',
-) {
+function tabMenuAction(action: 'reload' | 'close' | 'closeLeft' | 'closeRight' | 'closeOthers' | 'closeAll') {
   const name = tabMenu.value.name;
   const index = tabs.value.findIndex((t) => t.name === name);
   closeTabMenu();
@@ -667,48 +667,24 @@ async function handleLogout() {
           @click.stop
           @contextmenu.prevent
         >
-          <button
-            type="button"
-            class="ui-menu__item new-shell__tabmenu-item"
-            @click="tabMenuAction('reload')"
-          >
+          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('reload')">
             重新加载
           </button>
-          <button
-            type="button"
-            class="ui-menu__item new-shell__tabmenu-item"
-            @click="tabMenuAction('close')"
-          >
+          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('close')">
             关闭标签页
           </button>
           <div class="new-shell__tabmenu-sep" />
-          <button
-            type="button"
-            class="ui-menu__item new-shell__tabmenu-item"
-            @click="tabMenuAction('closeLeft')"
-          >
+          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeLeft')">
             关闭左侧标签页
           </button>
-          <button
-            type="button"
-            class="ui-menu__item new-shell__tabmenu-item"
-            @click="tabMenuAction('closeRight')"
-          >
+          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeRight')">
             关闭右侧标签页
           </button>
           <div class="new-shell__tabmenu-sep" />
-          <button
-            type="button"
-            class="ui-menu__item new-shell__tabmenu-item"
-            @click="tabMenuAction('closeOthers')"
-          >
+          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeOthers')">
             关闭其它标签页
           </button>
-          <button
-            type="button"
-            class="ui-menu__item new-shell__tabmenu-item"
-            @click="tabMenuAction('closeAll')"
-          >
+          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeAll')">
             关闭全部标签页
           </button>
         </div>
