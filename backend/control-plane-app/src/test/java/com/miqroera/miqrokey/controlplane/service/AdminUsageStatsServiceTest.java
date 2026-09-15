@@ -168,7 +168,7 @@ class AdminUsageStatsServiceTest {
     void recordsPassesFiltersAndPaginates() {
         UsageEvent event = new UsageEvent(UUID.randomUUID(), TENANT, "req-1", KEY_ID, PROJECT_ID, PRODUCT_ID,
                 CREDENTIAL_ID, MODEL, CacheLevel.UPSTREAM, new TokenBucket(10L, 5L, 0L, 0L, null, null, null, null),
-                100L, 200, null, true, false, "gw-1", Instant.now(), "203.0.113.7");
+                100L, 200, null, true, false, "gw-1", Instant.now(), "203.0.113.7", null);
         when(usageStatsRepository.countRecords(any())).thenReturn(1L);
         when(usageStatsRepository.findRecords(any(), eq(0L), eq(50))).thenReturn(List.of(event));
 

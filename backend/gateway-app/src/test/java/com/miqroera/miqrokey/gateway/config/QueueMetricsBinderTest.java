@@ -81,6 +81,6 @@ class QueueMetricsBinderTest {
     private static UsageEvent usageEvent() {
         return new UsageEvent(UUID.randomUUID(), UUID.randomUUID(), "provider-req-1", UUID.randomUUID(),
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "model-x", CacheLevel.UPSTREAM,
-                TokenBucket.EMPTY, 42L, 200, null, true, false, "gw-usage", Instant.now(), null);
+                TokenBucket.EMPTY, 42L, 200, null, true, false, "gw-usage", Instant.now(), null, null);
     }
 }

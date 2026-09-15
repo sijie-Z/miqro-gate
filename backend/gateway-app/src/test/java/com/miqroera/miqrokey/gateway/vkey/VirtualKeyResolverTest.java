@@ -63,7 +63,8 @@ class VirtualKeyResolverTest {
             String presentedB = core + ".tag-b";
 
             RouteSnapshot snapshot = snapshot(crypto, material);
-            VirtualKeyResolver resolver = new VirtualKeyResolver(() -> snapshot, providerOf(crypto));
+            VirtualKeyResolver resolver = new VirtualKeyResolver(() -> snapshot, providerOf(crypto),
+                    new RequestContextResolver());
 
             AuthContext ctxA = resolver.resolve(bearer(presentedA));
             AuthContext ctxB = resolver.resolve(bearer(presentedB));
@@ -87,7 +88,8 @@ class VirtualKeyResolverTest {
         try {
             String core = material.fullDisplayString().substring(0, material.fullDisplayString().lastIndexOf('.'));
             RouteSnapshot snapshot = snapshot(crypto, material);
-            VirtualKeyResolver resolver = new VirtualKeyResolver(() -> snapshot, providerOf(crypto));
+            VirtualKeyResolver resolver = new VirtualKeyResolver(() -> snapshot, providerOf(crypto),
+                    new RequestContextResolver());
 
             assertThatThrownBy(() -> resolver.resolve(bearer(core + ".tag-c")))
                     .isInstanceOf(AuthFailureException.class);
