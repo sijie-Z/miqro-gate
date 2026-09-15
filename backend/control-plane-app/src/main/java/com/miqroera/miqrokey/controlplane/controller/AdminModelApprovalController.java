@@ -56,7 +56,7 @@ public class AdminModelApprovalController {
     public ModelApprovalPage list(@RequestParam(required = false) ModelApprovalStatus status,
             @RequestParam(defaultValue = "" + DEFAULT_SIZE) int size, @RequestParam(required = false) String before) {
         if (size < 1 || size > MAX_SIZE) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "PARAM_INVALID", "size must be between 1 and " + MAX_SIZE);
+            throw new ApiException(HttpStatus.BAD_REQUEST, "PARAM_INVALID", "size 必须在 1 到 " + MAX_SIZE + " 之间");
         }
         Cursor cursor = before == null || before.isBlank() ? Cursor.start() : Cursor.decode(before);
         // Fetch one extra row to learn whether another page exists.
@@ -105,7 +105,7 @@ public class AdminModelApprovalController {
                 return new Cursor(Instant.ofEpochMilli(Long.parseLong(raw.substring(0, sep))),
                         UUID.fromString(raw.substring(sep + 1)));
             } catch (RuntimeException e) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "PARAM_INVALID", "Invalid pagination cursor");
+                throw new ApiException(HttpStatus.BAD_REQUEST, "PARAM_INVALID", "分页游标无效，请刷新列表后重试");
             }
         }
 
