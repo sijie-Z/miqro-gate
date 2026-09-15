@@ -2020,6 +2020,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/retention-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listRetentionLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/retention-logs/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["exportRetentionLogsCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/reconciliations/{reportId}": {
         parameters: {
             query?: never;
@@ -3962,6 +3994,25 @@ export interface components {
             status?: string;
             /** Format: date-time */
             createdAt?: string;
+        };
+        AdminRetentionLogView: {
+            /** Format: uuid */
+            eventId?: string;
+            /** Format: uuid */
+            userId?: string;
+            userName?: string;
+            /** Format: uuid */
+            virtualKeyId?: string;
+            wireProtocol?: string;
+            direction?: string;
+            gatewayRequestId?: string;
+            /** Format: date-time */
+            occurredAt?: string;
+            /** Format: int32 */
+            textCharCount?: number;
+            truncated?: boolean;
+            dataMd5?: string;
+            text?: string;
         };
         ProductView: {
             /** Format: uuid */
@@ -8311,6 +8362,58 @@ export interface operations {
                 content: {
                     "*/*": components["schemas"]["InternalService"];
                 };
+            };
+        };
+    };
+    listRetentionLogs: {
+        parameters: {
+            query?: {
+                userId?: string;
+                direction?: string;
+                protocol?: string;
+                from?: string;
+                to?: string;
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["AdminRetentionLogView"][];
+                };
+            };
+        };
+    };
+    exportRetentionLogsCsv: {
+        parameters: {
+            query?: {
+                userId?: string;
+                direction?: string;
+                protocol?: string;
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

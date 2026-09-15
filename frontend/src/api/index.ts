@@ -67,6 +67,7 @@ import type {
   McpAccessLogEntry,
   McpResiliencePolicy,
   SkillRevisionView,
+  AdminRetentionLogView,
 } from '@/types/generated-api';
 import type { components } from '@/types/generated';
 
@@ -1313,4 +1314,70 @@ export function createReconciliation(
 ): Promise<ReconciliationReport> {
   const qs = new URLSearchParams(params).toString();
   return uploadBytes<ReconciliationReport>(`/api/v1/admin/reconciliations?${qs}`, content);
+}
+
+
+// ---------------------------------------------------------------------------
+// Retention logs (ADR-0014 §8, admin console)
+// ---------------------------------------------------------------------------
+
+export interface RetentionLogQuery {
+  userId?: string;
+  direction?: string;
+  protocol?: string;
+  from?: string;
+  to?: string;
+}
+
+/** Filtered, decrypted page over the retention ledger (SYSTEM_ADMIN). */
+export function retentionLogs(
+  query: RetentionLogQuery & { page?: number; size?: number },
+): Promise<AdminRetentionLogView[]> {
+  const params = new URLSearchParams();
+  if (query.userId) params.set('userId', query.userId);
+  if (query.direction) params.set('direction', query.direction);
+  if (query.protocol) params.set('protocol', query.protocol);
+  if (query.from) params.set('from', query.from);
+  if (query.to) params.set('to', query.to);
+  if (query.page !== undefined) params.set('page', String(query.page));
+  if (query.size !== undefined) params.set('size', String(query.size));
+  return get<AdminRetentionLogView[]>(`/api/v1/admin/retention-logs?${params.toString()}`);
+}
+
+/**
+ * Downloads the filtered retention ledger as a compliance CSV (same shape as
+ * the audit export: 50k-row cap declared via {@code X-MiQroKey-Truncated}).
+ */
+export async function exportRetentionLogsCsv(query: RetentionLogQuery): Promise<AuditCsvExport> {
+  const params = new URLSearchParams();
+  if (query.userId) params.set('userId', query.userId);
+  if (query.direction) params.set('direction', query.direction);
+  if (query.protocol) params.set('protocol', query.protocol);
+  if (query.from) params.set('from', query.from);
+  if (query.to) params.set('to', query.to);
+  const response = await fetch(`/api/v1/admin/retention-logs/export?${params.toString()}`, {
+    headers: { Accept: 'text/csv' },
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    let details:
+      { detail?: string; code?: string; status?: number; requestId?: string } | undefined;
+    try {
+      details = (await response.json()) as typeof details;
+    } catch {
+      // Not JSON — generic error below.
+    }
+    throw new ApiError({
+      type: 'about:blank',
+      title: '导出失败',
+      status: response.status,
+      code: details?.code ?? 'HTTP_ERROR',
+      detail: details?.detail,
+      requestId: details?.requestId ?? '',
+    });
+  }
+  return {
+    csv: await response.text(),
+    truncated: response.headers.get('X-MiQroKey-Truncated') === 'true',
+  };
 }

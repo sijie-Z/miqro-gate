@@ -13,6 +13,14 @@ public record RetentionEnvelope(UUID eventId, UUID tenantId, UUID userId, UUID v
         String gatewayRequestId, Instant occurredAt, String keyVersion, byte[] ciphertext, byte[] nonce,
         int textCharCount, boolean truncated, RetentionDirection direction) {
 
+    /**
+     * Synthetic AAD id binding retention envelopes (ADR-0014): never matches a real
+     * credential; shared by the gateway (encrypt) and the authorized reader
+     * (decrypt) so both sides agree on the AES-GCM binding.
+     */
+    public static final UUID AAD_ID = UUID
+            .nameUUIDFromBytes("miqro-retention-envelope".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
     /** Compatibility constructor: INPUT side, truncated flag explicit. */
     public RetentionEnvelope(UUID eventId, UUID tenantId, UUID userId, UUID virtualKeyId, String wireProtocol,
             String gatewayRequestId, Instant occurredAt, String keyVersion, byte[] ciphertext, byte[] nonce,
