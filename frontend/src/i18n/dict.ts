@@ -1395,6 +1395,10 @@ export const DICT: Record<string, string> = {
   '外部系统专用密钥访问计费查询接口；密钥仅创建时显示一次。': 'Keys for external systems calling the billing API; shown only once at creation.',
   '通过 CC Switch 使用这些密钥访问授权模型。': 'Use these keys through CC Switch to reach authorized models.',
   '缓存命中 Token': 'Cached tokens',
+  '密钥速览': 'Keys at a glance',
+  '全部密钥': 'All keys',
+  '快捷导航': 'Quick nav',
+  '今天也要高效工作。': 'Have a productive day.',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [
@@ -1429,6 +1433,7 @@ export const PATTERNS: Array<[RegExp, string]> = [
   [/^共\ (.+?)\ 个智能体$/, '$1 agents'],
   [/^共\ (.+?)\ 个服务$/, '$1 services'],
   [/^共\ (.+?)\ 个账号$/, '$1 accounts'],
+  [/^你好，(.+?)，欢迎回来！$/, 'Welcome back, $1!'],
   [/^共\ (.+?)\ 条$/, '$1 total'],
   [/^限额\ (.+?)$/, 'Limit $1'],
   [/^本期用量\ (.+?)（(.+?)）$/, 'Period usage $1 ($2)'],
@@ -1532,6 +1537,7 @@ export const PATTERNS: Array<[RegExp, string]> = [
     /^消费者「(.+?)」的\ 密钥\ 如下，请立即交付并妥善保存；关闭后无法再次查看。$/,
     'The key for consumer "$1" follows — deliver and store it securely now; it cannot be viewed again after closing.',
   ],
+  [/^你好，(.+?)，欢迎回来！$/, 'Welcome back, $1!'],
   [/^共\ (.+?)\ 条$/, '$1 total'],
   [/^第\ (.+?)\ 页$/, 'Page $1'],
   [/^第\ (.+?)\ 页$/, 'Page $1'],

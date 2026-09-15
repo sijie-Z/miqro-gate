@@ -1,21 +1,26 @@
 <script setup lang="ts">
 /**
- * NextOverviewView — /app-new/overview pilot page (UI U0/U1, PostHog language).
- * Behaviour parity with the legacy OverviewView: stat band, token usage bars,
- * recent keys, cost-by-project list and (admin only) the subscription quota
- * ledger. APIs untouched; rendering only.
+ * NextOverviewView — /app-new/overview pilot page (UI U0/U1).
+ * Workbench-style layout modelled on v2.vben.pro /dashboard/workbench:
+ * greeting header with inline stats, a 69/31 two-column body (key tiles +
+ * usage bars on the left; quick-nav tile grid, cost donut and the admin
+ * quota ledger on the right). Behaviour parity with the legacy OverviewView:
+ * same APIs, same aggregates, rendering only.
  */
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
 import {
+  AppIcon,
   ChartBarIcon,
   FilePasteIcon,
   LayersIcon,
   LockOnIcon,
   MoneyIcon,
   SecuredIcon,
+  NotificationIcon,
+  ToolsIcon,
   UserIcon,
 } from 'tdesign-icons-vue-next';
 import { UiButton, UiDonut, UiStatusBadge } from '@/ui';
@@ -31,6 +36,14 @@ const loadError = ref('');
 const loadRequestId = ref('');
 
 const isAdmin = computed(() => auth.user?.role === 'SYSTEM_ADMIN');
+
+const userName = computed(() => auth.user?.displayName || auth.user?.username || '');
+
+const userInitial = computed(() => (auth.user?.username ?? '?').slice(0, 1).toUpperCase());
+
+const dateLabel = computed(() =>
+  new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }),
+);
 
 interface StatCard {
   label: string;
@@ -109,24 +122,65 @@ const donutSegments = computed(() => {
   return rows;
 });
 
-/** Quick actions (workbench-style tile row). */
+/** Quick actions (workbench quick-nav tile grid; admins get reporting entries). */
 const quickNav = computed(() =>
   isAdmin.value
     ? [
-        { label: '创建虚拟密钥', to: '/app/keys', icon: LockOnIcon },
-        { label: '用量报表', to: '/app/admin-usage', icon: ChartBarIcon },
-        { label: '账单对账', to: '/app/reconciliations', icon: FilePasteIcon },
-        { label: '审计日志', to: '/app/audit', icon: SecuredIcon },
+        { label: '创建虚拟密钥', to: '/app/keys', icon: LockOnIcon, color: '#0960bd' },
+        { label: '用量报表', to: '/app/admin-usage', icon: ChartBarIcon, color: '#13c2c2' },
+        { label: '成本报表', to: '/app/cost', icon: MoneyIcon, color: '#fa8c16' },
+        { label: '账单对账', to: '/app/reconciliations', icon: FilePasteIcon, color: '#8c8c8c' },
+        { label: '审计日志', to: '/app/audit', icon: SecuredIcon, color: '#2f9e44' },
+        { label: 'Webhook 端点', to: '/app/webhooks', icon: NotificationIcon, color: '#7c3aed' },
       ]
     : [
-        { label: '创建虚拟密钥', to: '/app/keys', icon: LockOnIcon },
-        { label: '用量', to: '/app/usage', icon: ChartBarIcon },
-        { label: '申请新模型', to: '/app/model-approvals', icon: LayersIcon },
-        { label: '资料', to: '/app/profile', icon: UserIcon },
+        { label: '创建虚拟密钥', to: '/app/keys', icon: LockOnIcon, color: '#0960bd' },
+        { label: '我的用量', to: '/app/usage', icon: ChartBarIcon, color: '#13c2c2' },
+        { label: '申请新模型', to: '/app/model-approvals', icon: LayersIcon, color: '#fa8c16' },
+        { label: '技能库', to: '/app/skills', icon: AppIcon, color: '#2f9e44' },
+        { label: '资料', to: '/app/profile', icon: UserIcon, color: '#8c8c8c' },
       ],
 );
 
-const recentKeys = computed(() => keys.value.slice(0, 5));
+const recentKeys = computed(() => keys.value.slice(0, 6));
+
+/** Purpose → icon chip tone, mirroring the Vben project-card tiles. */
+const PURPOSE_META: Record<string, { icon: unknown; tone: string }> = {
+  CLAUDE_CODE: { icon: LockOnIcon, tone: 'blue' },
+  CLAUDE_DESKTOP: { icon: UserIcon, tone: 'cyan' },
+  CODEX: { icon: ToolsIcon, tone: 'green' },
+  CUSTOM: { icon: LayersIcon, tone: 'orange' },
+};
+
+const PURPOSE_LABELS: Record<string, string> = {
+  CLAUDE_CODE: 'Claude Code',
+  CLAUDE_DESKTOP: 'Claude Desktop',
+  CODEX: 'Codex',
+  CUSTOM: '自定义',
+};
+
+const STATUS_META: Record<string, { tone: 'success' | 'warning' | 'danger' | 'neutral'; label: string }> = {
+  ACTIVE: { tone: 'success', label: '可用' },
+  ROTATING: { tone: 'warning', label: '轮换中' },
+  REVOKED: { tone: 'danger', label: '已吊销' },
+  DISABLED: { tone: 'neutral', label: '停用' },
+};
+
+function keyStatusMeta(status?: string): { tone: 'success' | 'warning' | 'danger' | 'neutral'; label: string } {
+  return STATUS_META[status ?? ''] ?? { tone: 'neutral', label: status ?? '—' };
+}
+
+function purposeMeta(purpose?: string): { icon: unknown; tone: string } {
+  return PURPOSE_META[purpose ?? ''] ?? { icon: LayersIcon, tone: 'blue' };
+}
+
+function purposeLabel(purpose?: string): string {
+  return PURPOSE_LABELS[purpose ?? ''] ?? (purpose || '—');
+}
+
+function createdLabel(iso?: string): string {
+  return iso ? String(iso).slice(0, 10) : '—';
+}
 
 const PLAN_SCOPE_LABELS: Record<string, string> = {
   PERSONAL: '个人套餐',
@@ -209,21 +263,31 @@ onMounted(load);
 
 <template>
   <div class="ui-page next-overview">
-    <header class="ui-page-header">
-      <div>
-        <h1 class="ui-page-title">总览</h1>
-        <p class="ui-page-desc">当前环境的凭证、用量与成本概览。</p>
+    <!-- Greeting header with inline stats (Vben workbench page-header) -->
+    <section class="ui-panel next-overview__greeting" data-testid="overview-greeting">
+      <div class="next-overview__greeting-left">
+        <span class="next-overview__greeting-avatar" aria-hidden="true">{{ userInitial }}</span>
+        <div class="next-overview__greeting-text">
+          <h1 class="next-overview__greeting-title">你好，{{ userName }}，欢迎回来！</h1>
+          <p class="next-overview__greeting-sub">{{ dateLabel }} · 今天也要高效工作。</p>
+        </div>
       </div>
-      <div class="ui-page-actions">
-        <UiButton
-          variant="primary"
-          data-testid="overview-create-key"
-          @click="$router.push('/app/keys')"
-        >
-          创建虚拟密钥
-        </UiButton>
+      <div class="next-overview__greeting-stats" data-testid="overview-stats">
+        <div v-for="card in stats" :key="card.label" class="next-overview__stat-chip">
+          <span class="next-overview__stat-chip-value ui-num"
+            ><i v-if="card.prefix" class="next-overview__stat-currency">{{ card.prefix }}</i>{{ card.value }}</span
+          >
+          <span class="next-overview__stat-chip-label" :title="card.hint">{{ card.label }}</span>
+        </div>
       </div>
-    </header>
+      <UiButton
+        variant="primary"
+        data-testid="overview-create-key"
+        @click="$router.push('/app/keys')"
+      >
+        创建虚拟密钥
+      </UiButton>
+    </section>
 
     <div v-if="loadError" class="ui-alert ui-alert--error" data-testid="overview-load-error">
       {{ loadError
@@ -231,187 +295,173 @@ onMounted(load);
     </div>
 
     <template v-if="loading">
-      <div class="next-overview__stat-grid">
-        <div v-for="n in 4" :key="n" class="ui-skeleton next-overview__stat-skeleton" />
+      <div class="next-overview__workbench">
+        <div class="ui-skeleton next-overview__skeleton-block" />
+        <div class="ui-skeleton next-overview__skeleton-block" />
       </div>
     </template>
 
     <template v-else>
-      <!-- Stat band -->
-      <div class="next-overview__stat-grid" data-testid="overview-stats">
-        <section v-for="card in stats" :key="card.label" class="ui-panel next-overview__stat">
-          <div class="next-overview__stat-top">
-            <span class="next-overview__stat-label">{{ card.label }}</span>
-            <span
-              class="next-overview__stat-icon"
-              :class="`next-overview__stat-icon--${card.tone}`"
-              aria-hidden="true"
-            >
-              <component :is="card.icon" />
-            </span>
-          </div>
-          <span class="next-overview__stat-value ui-num"
-            ><i v-if="card.prefix" class="next-overview__stat-currency">{{ card.prefix }}</i>{{ card.value }}</span
-          >
-          <span class="next-overview__stat-hint">{{ card.hint }}</span>
-        </section>
-      </div>
-
-      <!-- Quick actions (workbench-style tiles) -->
-      <nav class="next-overview__quick" data-testid="overview-quicknav" aria-label="快捷入口">
-        <router-link v-for="item in quickNav" :key="item.to" :to="item.to" class="next-overview__quick-tile">
-          <span class="next-overview__quick-icon"><component :is="item.icon" size="16px" /></span>
-          <span class="next-overview__quick-label">{{ item.label }}</span>
-        </router-link>
-      </nav>
-
-      <!-- Usage bars + recent keys -->
-      <div class="next-overview__grid">
-        <section class="ui-panel" data-testid="overview-usage">
-          <div class="ui-panel-head">
-            <h2 class="ui-panel-title">用量分布（按项目）</h2>
-            <router-link to="/app/usage" class="next-overview__link">查看明细</router-link>
-          </div>
-          <div class="ui-panel-body">
-            <div v-if="usageBars.length" class="next-overview__bars">
-              <div v-for="bar in usageBars" :key="bar.label" class="next-overview__bar-row">
-                <span class="next-overview__bar-label" :title="bar.label">{{ bar.label }}</span>
-                <div class="next-overview__bar-track">
-                  <div
-                    class="next-overview__bar-fill"
-                    :style="{ width: bar.width, opacity: bar.alpha }"
+      <div class="next-overview__workbench">
+        <!-- LEFT column: key tiles + usage distribution -->
+        <div class="next-overview__col-main">
+          <section class="ui-panel next-overview__panel" data-testid="overview-keys">
+            <div class="ui-panel-head">
+              <h2 class="ui-panel-title">密钥速览</h2>
+              <router-link to="/app/keys" class="next-overview__link">全部密钥</router-link>
+            </div>
+            <div v-if="recentKeys.length" class="next-overview__key-grid">
+              <router-link
+                v-for="key in recentKeys"
+                :key="key.id"
+                to="/app/keys"
+                class="next-overview__key-tile"
+              >
+                <div class="next-overview__key-tile-top">
+                  <span
+                    class="next-overview__key-icon"
+                    :class="`next-overview__tone--${purposeMeta(key.purpose).tone}`"
+                    aria-hidden="true"
+                  >
+                    <component :is="purposeMeta(key.purpose).icon" />
+                  </span>
+                  <UiStatusBadge
+                    :tone="keyStatusMeta(key.status).tone"
+                    :label="keyStatusMeta(key.status).label"
                   />
                 </div>
-                <span class="next-overview__bar-value ui-num">{{ formatCount(bar.value) }}</span>
-              </div>
-            </div>
-            <div v-else class="next-overview__usage-empty">
-              <p class="next-overview__empty">
-                还没有用量记录。创建 Key 并开始调用后，这里会出现用量分布。
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section class="ui-panel" data-testid="overview-keys">
-          <div class="ui-panel-head">
-            <h2 class="ui-panel-title">最近创建的 Key</h2>
-            <router-link to="/app/keys" class="next-overview__link">全部 Key</router-link>
-          </div>
-          <div v-if="recentKeys.length" class="next-overview__recent">
-            <div v-for="key in recentKeys" :key="key.id" class="next-overview__key-row">
-              <div class="next-overview__key-meta">
-                <span class="next-overview__key-name">{{ key.name }}</span>
+                <span class="next-overview__key-name" :title="key.name">{{ key.name }}</span>
                 <span class="ui-mono next-overview__key-mask">{{ key.display }}</span>
-              </div>
-              <UiStatusBadge
-                :tone="
-                  key.status === 'ACTIVE'
-                    ? 'success'
-                    : key.status === 'REVOKED'
-                      ? 'danger'
-                      : key.status === 'ROTATING'
-                        ? 'warning'
-                        : 'neutral'
-                "
-                :label="
-                  key.status === 'ACTIVE'
-                    ? '可用'
-                    : key.status === 'REVOKED'
-                      ? '已吊销'
-                      : key.status === 'ROTATING'
-                        ? '轮换中'
-                        : '停用'
-                "
-              />
+                <div class="next-overview__key-foot">
+                  <span>{{ purposeLabel(key.purpose) }}</span>
+                  <span class="ui-num">{{ createdLabel(key.createdAt) }}</span>
+                </div>
+              </router-link>
             </div>
-          </div>
-          <div v-else class="next-overview__recent-empty">
-            <p class="next-overview__empty">还没有虚拟密钥。</p>
-            <router-link to="/app/keys" class="next-overview__link">创建一个</router-link>
-          </div>
-        </section>
-      </div>
+            <div v-else class="next-overview__recent-empty">
+              <p class="next-overview__empty">还没有虚拟密钥。</p>
+              <router-link to="/app/keys" class="next-overview__link">创建一个</router-link>
+            </div>
+          </section>
 
-      <!-- Cost distribution (full-width panel; ties usage numbers to money) -->
-      <section
-        v-if="costGroups.length"
-        class="ui-panel next-overview__panel"
-        data-testid="overview-cost"
-      >
-        <div class="ui-panel-head">
-          <h2 class="ui-panel-title">成本分布（按项目）</h2>
-          <span class="ui-panel-sub">上游实付合计 · ¥{{ costTotal.toFixed(2) }}</span>
-        </div>
-        <div v-if="costTotal > 0" class="ui-panel-body next-overview__cost-layout">
-          <div class="next-overview__donut-wrap">
-            <UiDonut
-              :segments="donutSegments.map((s) => ({ label: s.label, value: s.cost, color: s.color }))"
-              :center-text="`¥${costTotal.toFixed(2)}`"
-              data-testid="overview-cost-donut"
-            />
-          </div>
-          <div class="ui-legend">
-            <div
-              v-for="seg in donutSegments"
-              :key="seg.label"
-              class="ui-legend-row"
-            >
-              <span class="ui-legend-dot" :style="{ background: seg.color }" />
-              <span class="ui-legend-label" :title="seg.label">{{ seg.label }}</span>
-              <span class="ui-legend-pct ui-num">{{ seg.pct.toFixed(0) }}%</span>
-              <span class="ui-legend-value ui-num">¥{{ seg.cost.toFixed(2) }}</span>
+          <section class="ui-panel next-overview__panel" data-testid="overview-usage">
+            <div class="ui-panel-head">
+              <h2 class="ui-panel-title">用量分布（按项目）</h2>
+              <router-link to="/app/usage" class="next-overview__link">查看明细</router-link>
             </div>
-          </div>
-        </div>
-        <div v-else class="ui-panel-body">
-          <p class="next-overview__empty">暂无成本记录。</p>
-        </div>
-      </section>
-
-      <!-- Admin quota ledger -->
-      <section v-if="isAdmin" class="ui-panel next-overview__panel" data-testid="overview-ledger">
-        <div class="ui-panel-head">
-          <div>
-            <h2 class="ui-panel-title">额度账本</h2>
-            <span class="ui-panel-sub">5 小时 / 周 / 月滚动窗口；配额数据来自订阅配置</span>
-          </div>
-        </div>
-        <div v-if="quotaLedger.length" class="next-overview__ledger">
-          <div v-for="row in quotaLedger" :key="row.id" class="next-overview__ledger-row">
-            <div class="next-overview__ledger-plan">
-              <span class="next-overview__key-name">{{ row.name }}</span>
-              <span class="ui-panel-sub">{{ row.productName }} · {{ planScopeLabel(row.planScope) }}</span>
-            </div>
-            <div class="next-overview__ledger-band">
-              <template v-if="row.quotaTotal">
-                <div v-for="seg in row.segments" :key="seg.label" class="next-overview__ledger-seg">
-                  <span class="next-overview__ledger-seg-label"
-                    >{{ seg.label }} · {{ Math.round(seg.ratio * 100) }}%</span
-                  >
-                  <div class="next-overview__ledger-track">
+            <div class="ui-panel-body">
+              <div v-if="usageBars.length" class="next-overview__bars">
+                <div v-for="bar in usageBars" :key="bar.label" class="next-overview__bar-row">
+                  <span class="next-overview__bar-label" :title="bar.label">{{ bar.label }}</span>
+                  <div class="next-overview__bar-track">
                     <div
-                      class="next-overview__ledger-fill"
-                      :class="{
-                        'next-overview__ledger-fill--warn': seg.ratio >= 0.6 && seg.ratio < 0.8,
-                        'next-overview__ledger-fill--danger': seg.ratio >= 0.8,
-                      }"
-                      :style="{ width: `${Math.round(seg.ratio * 100)}%` }"
+                      class="next-overview__bar-fill"
+                      :style="{ width: bar.width, opacity: bar.alpha }"
                     />
                   </div>
+                  <span class="next-overview__bar-value ui-num">{{ formatCount(bar.value) }}</span>
                 </div>
-              </template>
-              <span v-else class="next-overview__ledger-unset">未配置滚动额度</span>
+              </div>
+              <div v-else class="next-overview__usage-empty">
+                <p class="next-overview__empty">
+                  还没有用量记录。创建虚拟密钥并开始调用后，这里会出现用量分布。
+                </p>
+              </div>
             </div>
-            <span class="next-overview__ledger-quota ui-num">{{
-              row.quotaTotal ? `${formatCount(row.quotaTotal)} ${quotaUnitLabel(row.quotaUnit)}` : '未配置'
-            }}</span>
-          </div>
+          </section>
         </div>
-        <p v-else class="next-overview__empty">
-          还没有订阅。到「订阅」录入套餐后，这里会显示每套方案的滚动额度。
-        </p>
-      </section>
+
+        <!-- RIGHT column: quick nav, cost donut, (admin) quota ledger -->
+        <div class="next-overview__col-side">
+          <section class="ui-panel next-overview__panel" data-testid="overview-quicknav">
+            <div class="ui-panel-head">
+              <h2 class="ui-panel-title">快捷导航</h2>
+            </div>
+            <nav class="next-overview__quick-grid" aria-label="快捷入口">
+              <router-link v-for="item in quickNav" :key="item.to" :to="item.to" class="next-overview__quick-tile">
+                <span class="next-overview__quick-icon" :style="{ color: item.color }" aria-hidden="true">
+                  <component :is="item.icon" size="20px" />
+                </span>
+                <span class="next-overview__quick-label">{{ item.label }}</span>
+              </router-link>
+            </nav>
+          </section>
+
+          <section
+            v-if="costGroups.length"
+            class="ui-panel next-overview__panel"
+            data-testid="overview-cost"
+          >
+            <div class="ui-panel-head">
+              <h2 class="ui-panel-title">成本分布</h2>
+              <span class="ui-panel-sub">合计 ¥{{ costTotal.toFixed(2) }}</span>
+            </div>
+            <div v-if="costTotal > 0" class="ui-panel-body next-overview__cost-layout">
+              <div class="next-overview__donut-wrap">
+                <UiDonut
+                  :segments="donutSegments.map((s) => ({ label: s.label, value: s.cost, color: s.color }))"
+                  :center-text="`¥${costTotal.toFixed(2)}`"
+                  data-testid="overview-cost-donut"
+                />
+              </div>
+              <div class="ui-legend">
+                <div v-for="seg in donutSegments" :key="seg.label" class="ui-legend-row">
+                  <span class="ui-legend-dot" :style="{ background: seg.color }" />
+                  <span class="ui-legend-label" :title="seg.label">{{ seg.label }}</span>
+                  <span class="ui-legend-pct ui-num">{{ seg.pct.toFixed(0) }}%</span>
+                  <span class="ui-legend-value ui-num">¥{{ seg.cost.toFixed(2) }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-else class="ui-panel-body">
+              <p class="next-overview__empty">暂无成本记录。</p>
+            </div>
+          </section>
+
+          <section v-if="isAdmin" class="ui-panel next-overview__panel" data-testid="overview-ledger">
+            <div class="ui-panel-head">
+              <div>
+                <h2 class="ui-panel-title">额度账本</h2>
+                <span class="ui-panel-sub">5 小时 / 周 / 月滚动窗口</span>
+              </div>
+            </div>
+            <div v-if="quotaLedger.length" class="next-overview__ledger">
+              <div v-for="row in quotaLedger" :key="row.id" class="next-overview__ledger-row">
+                <div class="next-overview__ledger-plan">
+                  <span class="next-overview__key-name">{{ row.name }}</span>
+                  <span class="ui-panel-sub">{{ row.productName }} · {{ planScopeLabel(row.planScope) }}</span>
+                </div>
+                <div class="next-overview__ledger-band">
+                  <template v-if="row.quotaTotal">
+                    <div v-for="seg in row.segments" :key="seg.label" class="next-overview__ledger-seg">
+                      <span class="next-overview__ledger-seg-label"
+                        >{{ seg.label }} · {{ Math.round(seg.ratio * 100) }}%</span
+                      >
+                      <div class="next-overview__ledger-track">
+                        <div
+                          class="next-overview__ledger-fill"
+                          :class="{
+                            'next-overview__ledger-fill--warn': seg.ratio >= 0.6 && seg.ratio < 0.8,
+                            'next-overview__ledger-fill--danger': seg.ratio >= 0.8,
+                          }"
+                          :style="{ width: `${Math.round(seg.ratio * 100)}%` }"
+                        />
+                      </div>
+                    </div>
+                  </template>
+                  <span v-else class="next-overview__ledger-unset">未配置滚动额度</span>
+                </div>
+                <span class="next-overview__ledger-quota ui-num">{{
+                  row.quotaTotal ? `${formatCount(row.quotaTotal)} ${quotaUnitLabel(row.quotaUnit)}` : '未配置'
+                }}</span>
+              </div>
+            </div>
+            <p v-else class="next-overview__empty">
+              还没有订阅。到「订阅」录入套餐后，这里会显示每套方案的滚动额度。
+            </p>
+          </section>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -430,118 +480,114 @@ onMounted(load);
   color: var(--ui-danger-fg);
 }
 
-.next-overview__panel {
-  margin-bottom: var(--ui-space-5);
+/* ---- greeting header (Vben workbench page-header) ---- */
+.next-overview__greeting {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-6);
+  flex-wrap: wrap;
+  padding: var(--ui-space-5) var(--ui-space-6);
+  margin-bottom: var(--ui-space-4);
 }
 
-.next-overview__stat-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+.next-overview__greeting-left {
+  display: flex;
+  align-items: center;
   gap: var(--ui-space-4);
-  margin-bottom: var(--ui-space-5);
+  flex: 1;
+  min-width: 260px;
 }
 
-@media (max-width: 1100px) {
-  .next-overview__stat-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-.next-overview__stat {
-  display: flex;
-  flex-direction: column;
-  padding: var(--ui-space-4) var(--ui-space-4) 0;
-}
-
-.next-overview__stat-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--ui-space-3);
-}
-
-.next-overview__stat-label {
-  font-size: var(--ui-font-size-sm);
-  font-weight: var(--ui-weight-medium);
-  color: var(--ui-foreground-secondary);
-  white-space: nowrap;
-}
-
-.next-overview__stat-value {
-  margin-top: var(--ui-space-2);
-  font-size: 24px;
-  font-weight: var(--ui-weight-regular);
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-}
-
-/* Footer strip inside the stat card (Vben analysis-card pattern). */
-.next-overview__stat-hint {
-  margin: var(--ui-space-3) calc(-1 * var(--ui-space-4)) 0;
-  padding: var(--ui-space-2) var(--ui-space-4);
-  border-top: 1px solid var(--ui-border);
-  font-size: var(--ui-font-size-xs);
-  color: var(--ui-foreground-secondary);
-}
-
-.next-overview__stat-icon {
+.next-overview__greeting-avatar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--ui-primary);
+  color: var(--ui-foreground-inverse);
+  font-size: 20px;
+  font-weight: var(--ui-weight-semibold);
   flex-shrink: 0;
 }
 
-/* Vben workbench style: each stat carries its own tinted icon chip */
-.next-overview__stat-icon--blue {
-  background: var(--ui-info-bg);
-  color: var(--ui-info-fg);
+.next-overview__greeting-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+  line-height: 26px;
 }
 
-.next-overview__stat-icon--green {
-  background: var(--ui-success-bg);
-  color: var(--ui-success-fg);
+.next-overview__greeting-sub {
+  margin: 2px 0 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
 }
 
-.next-overview__stat-icon--orange {
-  background: var(--ui-warning-bg);
-  color: var(--ui-warning-fg);
+.next-overview__greeting-stats {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-6);
+  flex-wrap: wrap;
 }
 
-.next-overview__stat-icon--cyan {
-  background: #e0f4f6;
-  color: #0e7490;
+.next-overview__stat-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.next-overview__stat-icon--gold {
-  background: #fdf3e0;
-  color: #a16207;
+.next-overview__stat-chip-value {
+  font-size: 20px;
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+  line-height: 26px;
+  white-space: nowrap;
 }
 
-.next-overview__stat-icon svg {
-  width: 18px;
-  height: 18px;
+.next-overview__stat-currency {
+  font-style: normal;
+  font-size: 0.78em;
+  margin-right: 1px;
 }
 
-.next-overview__stat-skeleton {
-  height: 112px;
-  border-radius: var(--ui-radius-panel);
+.next-overview__stat-chip-label {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  white-space: nowrap;
 }
 
-.next-overview__grid {
+/* ---- workbench two-column body (69 / 360px) ---- */
+.next-overview__workbench {
   display: grid;
-  grid-template-columns: 3fr 2fr;
-  gap: var(--ui-space-5);
-  margin-bottom: var(--ui-space-5);
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: var(--ui-space-4);
   align-items: start;
 }
 
 @media (max-width: 1100px) {
-  .next-overview__grid {
+  .next-overview__workbench {
     grid-template-columns: 1fr;
   }
+}
+
+.next-overview__col-main,
+.next-overview__col-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+  min-width: 0;
+}
+
+.next-overview__panel {
+  margin: 0;
+}
+
+.next-overview__skeleton-block {
+  height: 260px;
+  border-radius: var(--ui-radius-panel);
 }
 
 .next-overview__link {
@@ -555,11 +601,146 @@ onMounted(load);
   text-decoration: underline;
 }
 
+/* ---- key tiles (Vben project-card grid) ---- */
+.next-overview__key-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1px;
+  background: var(--ui-border);
+  border-radius: 0 0 var(--ui-radius-panel) var(--ui-radius-panel);
+  overflow: hidden;
+}
+
+.next-overview__key-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-5);
+  background: var(--ui-card);
+  color: inherit;
+  text-decoration: none;
+  transition: background-color var(--ui-ease);
+}
+
+.next-overview__key-tile:hover {
+  background: var(--ui-muted);
+}
+
+.next-overview__key-tile-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  margin-bottom: var(--ui-space-1);
+}
+
+.next-overview__key-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.next-overview__key-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* tinted icon chips — Vben workbench tone set */
+.next-overview__tone--blue {
+  background: var(--ui-info-bg);
+  color: var(--ui-info-fg);
+}
+
+.next-overview__tone--green {
+  background: var(--ui-success-bg);
+  color: var(--ui-success-fg);
+}
+
+.next-overview__tone--cyan {
+  background: #e0f4f6;
+  color: #0e7490;
+}
+
+.next-overview__tone--orange {
+  background: var(--ui-warning-bg);
+  color: var(--ui-warning-fg);
+}
+
+.next-overview__key-name {
+  font-size: var(--ui-font-size-base);
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.next-overview__key-mask {
+  font-size: 11px;
+  color: var(--ui-foreground-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.next-overview__key-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  margin-top: var(--ui-space-2);
+  padding-top: var(--ui-space-3);
+  border-top: 1px solid var(--ui-border-muted);
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+/* ---- quick-nav tile grid (Vben card-grid) ---- */
+.next-overview__quick-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--ui-border);
+  border-radius: 0 0 var(--ui-radius-panel) var(--ui-radius-panel);
+  overflow: hidden;
+}
+
+.next-overview__quick-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ui-space-2);
+  padding: 22px var(--ui-space-2);
+  background: var(--ui-card);
+  color: var(--ui-foreground);
+  text-decoration: none;
+  transition: background-color var(--ui-ease);
+}
+
+.next-overview__quick-tile:hover {
+  background: var(--ui-muted);
+}
+
+.next-overview__quick-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.next-overview__quick-label {
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+  text-align: center;
+}
+
+/* ---- usage bars ---- */
 .next-overview__bars {
   display: flex;
   flex-direction: column;
   gap: var(--ui-space-3);
-  margin-bottom: var(--ui-space-6);
 }
 
 .next-overview__bar-row {
@@ -595,198 +776,32 @@ onMounted(load);
   color: var(--ui-foreground);
 }
 
-.next-overview__cost-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--ui-space-3);
-  margin-bottom: var(--ui-space-3);
-}
-
-.next-overview__sub-title {
-  margin: 0;
-  font-size: var(--ui-font-size-sm);
-  font-weight: var(--ui-weight-semibold);
-}
-
-/* Quick actions row — workbench-style tiles. */
-.next-overview__quick {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--ui-space-4);
-  margin-bottom: var(--ui-space-5);
-}
-
-.next-overview__quick-tile {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-space-3);
-  padding: var(--ui-space-4);
-  background: var(--ui-card);
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-panel);
-  color: var(--ui-foreground);
-  text-decoration: none;
-  transition:
-    border-color var(--ui-ease),
-    background-color var(--ui-ease);
-}
-
-.next-overview__quick-tile:hover {
-  border-color: var(--ui-primary);
-  background: var(--ui-primary-soft);
-}
-
-.next-overview__quick-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--ui-radius-control);
-  background: var(--ui-primary-soft);
-  color: var(--ui-primary-text);
-  flex-shrink: 0;
-}
-
-.next-overview__quick-label {
-  font-size: var(--ui-font-size-sm);
-  font-weight: var(--ui-weight-medium);
-}
-
-/* Cost panel: donut + legend (analysis-page 成交占比 pattern). */
+/* ---- cost donut (compact side column) ---- */
 .next-overview__cost-layout {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--ui-space-8);
-  flex-wrap: wrap;
+  gap: var(--ui-space-5);
 }
 
 .next-overview__donut-wrap {
   position: relative;
 }
 
-.next-overview__donut-center {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  z-index: 1;
-  font-size: var(--ui-font-size-sm);
-  font-weight: var(--ui-weight-semibold);
-  color: var(--ui-foreground);
+.next-overview__cost-layout .ui-legend {
+  width: 100%;
 }
 
-.next-overview__cost-grid {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-space-2);
-}
-
-.next-overview__cost-row {
-  display: grid;
-  grid-template-columns: minmax(140px, 200px) 1fr 140px;
-  align-items: center;
-  gap: var(--ui-space-3);
-  font-size: var(--ui-font-size-xs);
-}
-
-.next-overview__cost-label {
-  color: var(--ui-foreground-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.next-overview__cost-track {
-  height: 6px;
-  border-radius: var(--ui-radius-pill);
-  background: var(--ui-muted);
-  overflow: hidden;
-}
-
-.next-overview__cost-fill {
-  height: 100%;
-  border-radius: var(--ui-radius-pill);
-  background: var(--ui-primary);
-  opacity: 0.75;
-}
-
-.next-overview__cost-value {
-  text-align: right;
-  color: var(--ui-foreground-secondary);
-}
-
-.next-overview__recent {
-  display: flex;
-  flex-direction: column;
-}
-
-.next-overview__key-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ui-space-3);
-  padding: var(--ui-space-3) var(--ui-space-5);
-  border-bottom: 1px solid var(--ui-border-muted);
-}
-
-.next-overview__key-row:last-child {
-  border-bottom: none;
-}
-
-.next-overview__key-meta {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.next-overview__key-name {
-  font-weight: var(--ui-weight-medium);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.next-overview__key-mask {
-  font-size: 11px;
-  color: var(--ui-foreground-faint);
-  margin-top: 2px;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.next-overview__ledger-unset {
-  font-size: var(--ui-font-size-xs);
-  color: var(--ui-foreground-faint);
-}
-
-.next-overview__recent-empty {
-  padding: var(--ui-space-8) var(--ui-space-5);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--ui-space-2);
-}
-
-.next-overview__empty {
-  margin: 0;
-  font-size: var(--ui-font-size-sm);
-  color: var(--ui-foreground-secondary);
-  padding: var(--ui-space-2) 0;
-}
-
+/* ---- admin quota ledger (compact side column) ---- */
 .next-overview__ledger {
   display: flex;
   flex-direction: column;
 }
 
 .next-overview__ledger-row {
-  display: grid;
-  grid-template-columns: 220px 1fr 130px;
-  align-items: center;
-  gap: var(--ui-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-3);
   padding: var(--ui-space-4) var(--ui-space-5);
   border-bottom: 1px solid var(--ui-border-muted);
 }
@@ -849,16 +864,13 @@ onMounted(load);
   color: var(--ui-foreground);
 }
 
-.next-overview__stat-grid {
-  margin-top: 2px;
+.next-overview__ledger-unset {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
 }
-.next-overview__stat-currency {
-  font-style: normal;
-  font-size: 0.78em;
-  margin-right: 1px;
-}
-.next-overview__usage-empty,
-.next-overview__recent-empty {
+
+.next-overview__recent-empty,
+.next-overview__usage-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -866,8 +878,16 @@ onMounted(load);
   padding: 26px 0;
   text-align: center;
 }
-.next-overview__usage-empty p,
-.next-overview__recent-empty p {
+
+.next-overview__recent-empty p,
+.next-overview__usage-empty p {
   margin: 0;
+}
+
+.next-overview__empty {
+  margin: 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+  padding: var(--ui-space-2) 0;
 }
 </style>
