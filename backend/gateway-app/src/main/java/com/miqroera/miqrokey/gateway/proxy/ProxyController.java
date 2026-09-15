@@ -374,15 +374,31 @@ public class ProxyController {
             CredentialInjector.InjectedCredential cred, String modelName, CacheKey cacheKey, String requestId,
             long startMillis, boolean streaming) {
         ServerHttpResponse clientResponse = exchange.getResponse();
-        URI upstreamUri = buildUpstreamUri(exchange, cred.baseUrl());
-        HttpHeaders filteredHeaders = HeaderFilters.filterInboundHeaders(exchange.getRequest().getHeaders());
+        // G3.x relay wiring: resolve the target through the product adapter so a
+        // per-protocol base URL applies (/v1/messages may target the provider's
+        // Anthropic entry while chat targets its OpenAI one); products without
+        // an adapter keep the credential's single base and a verbatim splice.
+        String wireProtocol = wireProtocolOf(exchange);
+        ResolvedTarget target = resolveTarget(exchange, ctx, cred, wireProtocol);
+        URI upstreamUri = target.uri();
+        HttpHeaders filteredHeaders;
+        if (target.headers() != null) {
+            // Adapter headers still pass the gateway's single sanitizer: the
+            // adapter-side strip set only removes credential headers, so
+            // hop-by-hop/Host/Content-Length (rebuilt by the client) must be
+            // dropped here or the upstream sees a stale Host (DeepSeek WAF 418).
+            HttpHeaders adapterHeaders = new HttpHeaders();
+            target.headers().forEach(adapterHeaders::set);
+            filteredHeaders = HeaderFilters.filterInboundHeaders(adapterHeaders);
+        } else {
+            filteredHeaders = HeaderFilters.filterInboundHeaders(exchange.getRequest().getHeaders());
+        }
         filteredHeaders.set(cred.headerName(), cred.headerValue());
 
         // Lifecycle start: only requests that actually reach upstream open a
         // record (auth failures and cache hits emit no lifecycle row). The
         // credential is resolved once before any attempt — a retry reuses
         // the same credential (no cross-credential failover).
-        String wireProtocol = wireProtocolOf(exchange);
         Instant startedAt = clock.instant();
         publishLifecycleStart(ctx, modelName, requestId, startedAt, streaming, wireProtocol);
 
@@ -774,19 +790,30 @@ public class ProxyController {
                 ProtocolFamily family = ProtocolFamily.valueOf(wireProtocol);
                 RouteSnapshot.CredentialRecord credential = ctx.snapshot().credential(ctx.binding().credentialId());
                 URI baseUrl = credential != null ? credential.baseUrl(family.name()) : null;
-                if (baseUrl != null) {
-                    var request = exchange.getRequest();
-                    RouteContext route = new RouteContext(ctx.key().tenantId(), ctx.binding().productId(),
-                            ctx.binding().projectId(), family, baseUrl);
-                    InboundRequest inbound = new InboundRequest(request.getMethod().name(), request.getURI().getPath(),
-                            decodeQuery(request.getURI().getRawQuery()), request.getHeaders());
-                    TargetRequest target = adapter.resolve(route, inbound);
-                    StringBuilder sb = new StringBuilder(target.origin().toString());
-                    sb.append(target.path());
-                    if (target.query() != null && !target.query().isEmpty()) {
-                        sb.append('?').append(target.query());
+                // RouteContext enforces https (SPI-level SSRF boundary); plain-http
+                // upstreams (local mocks, allowed-cidrs private deployments) keep
+                // the legacy verbatim splice below.
+                if (baseUrl != null && "https".equalsIgnoreCase(baseUrl.getScheme())) {
+                    try {
+                        var request = exchange.getRequest();
+                        RouteContext route = new RouteContext(ctx.key().tenantId(), ctx.binding().productId(),
+                                ctx.binding().projectId(), family, baseUrl);
+                        InboundRequest inbound = new InboundRequest(request.getMethod().name(),
+                                request.getURI().getPath(), decodeQuery(request.getURI().getRawQuery()),
+                                request.getHeaders());
+                        TargetRequest target = adapter.resolve(route, inbound);
+                        StringBuilder sb = new StringBuilder(target.origin().toString());
+                        sb.append(target.path());
+                        if (target.query() != null && !target.query().isEmpty()) {
+                            sb.append('?').append(target.query());
+                        }
+                        return new ResolvedTarget(URI.create(sb.toString()), target.headers());
+                    } catch (RuntimeException e) {
+                        // A broken adapter must never take the relay down: fall
+                        // back to the legacy splice and leave a breadcrumb.
+                        log.warn("Adapter target resolution failed (product={}): {}; using single base",
+                                productCode, e.getMessage());
                     }
-                    return new ResolvedTarget(URI.create(sb.toString()), target.headers());
                 }
             }
         }
