@@ -181,11 +181,9 @@ try {
   tabs.value = [];
 }
 
-watch(
-  tabs,
-  (value) => sessionStorage.setItem(TABS_KEY, JSON.stringify(value.slice(-24))),
-  { deep: true },
-);
+watch(tabs, (value) => sessionStorage.setItem(TABS_KEY, JSON.stringify(value.slice(-24))), {
+  deep: true,
+});
 
 watch(
   () => route.name as string | undefined,
@@ -266,7 +264,9 @@ function closeTabMenu() {
   tabMenu.value.open = false;
 }
 
-function tabMenuAction(action: 'reload' | 'close' | 'closeLeft' | 'closeRight' | 'closeOthers' | 'closeAll') {
+function tabMenuAction(
+  action: 'reload' | 'close' | 'closeLeft' | 'closeRight' | 'closeOthers' | 'closeAll',
+) {
   const name = tabMenu.value.name;
   const index = tabs.value.findIndex((t) => t.name === name);
   closeTabMenu();
@@ -667,24 +667,48 @@ async function handleLogout() {
           @click.stop
           @contextmenu.prevent
         >
-          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('reload')">
+          <button
+            type="button"
+            class="ui-menu__item new-shell__tabmenu-item"
+            @click="tabMenuAction('reload')"
+          >
             重新加载
           </button>
-          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('close')">
+          <button
+            type="button"
+            class="ui-menu__item new-shell__tabmenu-item"
+            @click="tabMenuAction('close')"
+          >
             关闭标签页
           </button>
           <div class="new-shell__tabmenu-sep" />
-          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeLeft')">
+          <button
+            type="button"
+            class="ui-menu__item new-shell__tabmenu-item"
+            @click="tabMenuAction('closeLeft')"
+          >
             关闭左侧标签页
           </button>
-          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeRight')">
+          <button
+            type="button"
+            class="ui-menu__item new-shell__tabmenu-item"
+            @click="tabMenuAction('closeRight')"
+          >
             关闭右侧标签页
           </button>
           <div class="new-shell__tabmenu-sep" />
-          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeOthers')">
+          <button
+            type="button"
+            class="ui-menu__item new-shell__tabmenu-item"
+            @click="tabMenuAction('closeOthers')"
+          >
             关闭其它标签页
           </button>
-          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeAll')">
+          <button
+            type="button"
+            class="ui-menu__item new-shell__tabmenu-item"
+            @click="tabMenuAction('closeAll')"
+          >
             关闭全部标签页
           </button>
         </div>
@@ -1299,5 +1323,22 @@ async function handleLogout() {
   margin-left: auto;
   margin-right: var(--ui-space-1);
   align-self: center;
+}
+
+/* Narrow screens (#627): the rail keeps its width, so the content column can
+   get tighter than the topbar's controls — the username cluster used to
+   overflow past the viewport edge and get clipped. Compact the chrome instead
+   of letting it spill: hide the username and breadcrumb, tighten paddings.
+   Verified overflow-free at 375px (acceptance H1). */
+@media (max-width: 640px) {
+  .new-shell__topbar {
+    padding: 0 var(--ui-space-3);
+    gap: var(--ui-space-2);
+  }
+
+  .new-shell__user-name,
+  .new-shell__breadcrumb {
+    display: none;
+  }
 }
 </style>
