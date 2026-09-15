@@ -48,8 +48,8 @@ class KafkaRetentionPublisherTest {
         java.util.List<String> names = new java.util.ArrayList<>();
         node.fieldNames().forEachRemaining(names::add);
         assertThat(names).containsExactlyInAnyOrder("eventId", "tenantId", "userId", "virtualKeyId", "wireProtocol",
-                "gatewayRequestId", "occurredAt", "keyVersion", "direction", "textCharCount", "truncated",
-                "ciphertext", "nonce");
+                "gatewayRequestId", "occurredAt", "keyVersion", "direction", "textCharCount", "truncated", "ciphertext",
+                "nonce");
     }
 
     @Test
