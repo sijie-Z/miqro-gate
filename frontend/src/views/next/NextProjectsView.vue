@@ -2,13 +2,23 @@
 /**
  * NextProjectsView — /app/projects v2 admin page (U2 org batch).
  * Behaviour parity with the legacy projects page: create project (code,
- * name, routing tag), member drawer with confirmed removal.
+ * name, routing tag), member drawer with confirmed removal; #556 adds the
+ * member-add picker (mirrors the teams page and users-page quick-join).
  */
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiDialog, UiDrawer, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
-import type { MemberView, Project } from '@/types/generated-api';
+import {
+  UiButton,
+  UiDialog,
+  UiDrawer,
+  UiInput,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  toast,
+} from '@/ui';
+import type { AdminUser, MemberView, Project } from '@/types/generated-api';
 
 const projects = ref<Project[]>([]);
 const loading = ref(true);
@@ -26,6 +36,17 @@ const memberOpen = ref(false);
 const memberProject = ref<Project | null>(null);
 const memberUsers = ref<MemberView[]>([]);
 const memberLoading = ref(false);
+
+// #556: add-member picker (mirrors the teams page and users-page quick-join)
+const allUsers = ref<AdminUser[]>([]);
+const usersLoaded = ref(false);
+const pickUserId = ref('');
+const addingMember = ref(false);
+
+const joinableUsers = computed(() => {
+  const memberIds = new Set(memberUsers.value.map((m) => m.userId));
+  return allUsers.value.filter((u) => u.status === 'ACTIVE' && u.id && !memberIds.has(u.id));
+});
 
 const confirmState = ref<{
   title: string;
@@ -98,6 +119,18 @@ async function openMembers(project: Project) {
   memberProject.value = project;
   memberOpen.value = true;
   memberLoading.value = true;
+  pickUserId.value = '';
+  if (!usersLoaded.value) {
+    api
+      .listUsers()
+      .then((list) => {
+        allUsers.value = list;
+        usersLoaded.value = true;
+      })
+      .catch(() => {
+        allUsers.value = [];
+      });
+  }
   try {
     const rows = await api.listProjectMembers(project.id!); // list rows always carry ids
     if (seq !== membersRequestSeq) {
@@ -113,6 +146,28 @@ async function openMembers(project: Project) {
     if (seq === membersRequestSeq) {
       memberLoading.value = false;
     }
+  }
+}
+
+async function addMember() {
+  const project = memberProject.value;
+  if (!project || !pickUserId.value) return;
+  addingMember.value = true;
+  try {
+    await api.addProjectMember(project.id!, pickUserId.value);
+    pickUserId.value = '';
+    toast.success('成员已添加');
+    const seq = ++membersRequestSeq;
+    const rows = await api.listProjectMembers(project.id!); // list rows always carry ids
+    if (seq === membersRequestSeq) {
+      memberUsers.value = rows;
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      toast.error(error.message);
+    }
+  } finally {
+    addingMember.value = false;
   }
 }
 
@@ -261,6 +316,32 @@ onMounted(load);
       data-testid="project-members-drawer"
       @close="memberOpen = false"
     >
+      <h3 class="next-projects__drawer-title">添加成员</h3>
+      <div class="next-projects__join-row">
+        <UiSelect
+          v-model="pickUserId"
+          :options="
+            joinableUsers.map((u) => ({
+              value: u.id ?? '',
+              label: u.username + ((u.displayName ?? '') ? ' · ' + u.displayName : ''),
+            }))
+          "
+          placeholder="选择用户"
+          data-testid="project-member-pick"
+        />
+        <UiButton
+          variant="primary"
+          :disabled="!pickUserId"
+          :loading="addingMember"
+          data-testid="project-member-add"
+          @click="addMember"
+          >加入</UiButton
+        >
+      </div>
+      <p v-if="usersLoaded && !joinableUsers.length" class="next-projects__join-hint">
+        没有可加入的 ACTIVE 用户。
+      </p>
+
       <UiTable
         :columns="memberColumns"
         :data="memberUsers"
@@ -338,6 +419,28 @@ onMounted(load);
 .next-projects__actions {
   display: flex;
   gap: var(--ui-space-2);
+}
+
+
+.next-projects__drawer-title {
+  margin: var(--ui-space-1) 0 var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+  font-weight: 600;
+  color: var(--ui-foreground-muted, #5b6472);
+}
+
+.next-projects__join-row {
+  display: flex;
+  gap: var(--ui-space-3);
+  align-items: center;
+  max-width: 440px;
+  margin-bottom: var(--ui-space-3);
+}
+
+.next-projects__join-hint {
+  margin: 0 0 var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-faint);
 }
 
 .next-projects__member-name {

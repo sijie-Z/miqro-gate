@@ -2,13 +2,23 @@
 /**
  * NextTeamsView — /app/teams v2 admin page (U2 org batch, PostHog language).
  * Behaviour parity with the legacy teams page: create team, member drawer
- * with confirmed removal. Rendering on the v2 system; APIs untouched.
+ * with confirmed removal; #551 adds the missing member-add picker (mirrors
+ * the users-page quick-join pattern).
  */
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiDialog, UiDrawer, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
-import type { MemberView, Team } from '@/types/generated-api';
+import {
+  UiButton,
+  UiDialog,
+  UiDrawer,
+  UiInput,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  toast,
+} from '@/ui';
+import type { AdminUser, MemberView, Team } from '@/types/generated-api';
 
 const teams = ref<Team[]>([]);
 const loading = ref(true);
@@ -26,6 +36,17 @@ const memberOpen = ref(false);
 const memberTeam = ref<Team | null>(null);
 const memberUsers = ref<MemberView[]>([]);
 const memberLoading = ref(false);
+
+// #551: add-member picker (mirrors the users-page quick-join pattern)
+const allUsers = ref<AdminUser[]>([]);
+const usersLoaded = ref(false);
+const pickUserId = ref('');
+const addingMember = ref(false);
+
+const joinableUsers = computed(() => {
+  const memberIds = new Set(memberUsers.value.map((m) => m.userId));
+  return allUsers.value.filter((u) => u.status === 'ACTIVE' && u.id && !memberIds.has(u.id));
+});
 
 // Confirm gate for member removal
 const confirmState = ref<{
@@ -96,6 +117,18 @@ async function openMembers(team: Team) {
   memberTeam.value = team;
   memberOpen.value = true;
   memberLoading.value = true;
+  pickUserId.value = '';
+  if (!usersLoaded.value) {
+    api
+      .listUsers()
+      .then((list) => {
+        allUsers.value = list;
+        usersLoaded.value = true;
+      })
+      .catch(() => {
+        allUsers.value = [];
+      });
+  }
   try {
     const rows = await api.listTeamMembers(team.id!); // list rows always carry ids
     if (seq !== membersRequestSeq) {
@@ -111,6 +144,28 @@ async function openMembers(team: Team) {
     if (seq === membersRequestSeq) {
       memberLoading.value = false;
     }
+  }
+}
+
+async function addMember() {
+  const team = memberTeam.value;
+  if (!team || !pickUserId.value) return;
+  addingMember.value = true;
+  try {
+    await api.addTeamMember(team.id!, pickUserId.value);
+    pickUserId.value = '';
+    toast.success('成员已添加');
+    const seq = ++membersRequestSeq;
+    const rows = await api.listTeamMembers(team.id!); // list rows always carry ids
+    if (seq === membersRequestSeq) {
+      memberUsers.value = rows;
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      toast.error(error.message);
+    }
+  } finally {
+    addingMember.value = false;
   }
 }
 
@@ -254,6 +309,32 @@ onMounted(load);
       data-testid="team-members-drawer"
       @close="memberOpen = false"
     >
+      <h3 class="next-teams__drawer-title">添加成员</h3>
+      <div class="next-teams__join-row">
+        <UiSelect
+          v-model="pickUserId"
+          :options="
+            joinableUsers.map((u) => ({
+              value: u.id ?? '',
+              label: u.username + ((u.displayName ?? '') ? ' · ' + u.displayName : ''),
+            }))
+          "
+          placeholder="选择用户"
+          data-testid="team-member-pick"
+        />
+        <UiButton
+          variant="primary"
+          :disabled="!pickUserId"
+          :loading="addingMember"
+          data-testid="team-member-add"
+          @click="addMember"
+          >加入</UiButton
+        >
+      </div>
+      <p v-if="usersLoaded && !joinableUsers.length" class="next-teams__member-hint">
+        没有可加入的 ACTIVE 用户。
+      </p>
+
       <UiTable
         :columns="memberColumns"
         :data="memberUsers"
@@ -326,6 +407,27 @@ onMounted(load);
   flex-direction: column;
   gap: var(--ui-space-4);
   max-width: 520px;
+}
+
+.next-teams__drawer-title {
+  margin: var(--ui-space-1) 0 var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+  font-weight: 600;
+  color: var(--ui-foreground-muted, #5b6472);
+}
+
+.next-teams__join-row {
+  display: flex;
+  gap: var(--ui-space-3);
+  align-items: center;
+  max-width: 440px;
+  margin-bottom: var(--ui-space-3);
+}
+
+.next-teams__member-hint {
+  margin: 0 0 var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-faint);
 }
 
 .ui-field {

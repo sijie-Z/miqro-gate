@@ -3,14 +3,17 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextTeamsView from '@/views/next/NextTeamsView.vue';
 import * as api from '@/api';
+import { UiSelect } from '@/ui';
 import { toastState } from '@/ui/toast';
-import type { MemberView, Team } from '@/types/generated-api';
+import type { AdminUser, MemberView, Team } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listTeams: vi.fn(),
   createTeam: vi.fn(),
   listTeamMembers: vi.fn(),
   removeTeamMember: vi.fn(),
+  addTeamMember: vi.fn(),
+  listUsers: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -32,6 +35,15 @@ const member = (overrides: Partial<MemberView> = {}): MemberView => ({
   ...overrides,
 });
 
+const user = (overrides: Partial<AdminUser> = {}): AdminUser => ({
+  id: 'u2',
+  username: 'bob',
+  displayName: 'Bob',
+  role: 'USER',
+  status: 'ACTIVE',
+  ...overrides,
+});
+
 describe('NextTeamsView', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -41,6 +53,7 @@ describe('NextTeamsView', () => {
       team(),
       team({ id: 't2', name: 'qa', status: 'DISABLED' }),
     ]);
+    mockApi.listUsers.mockResolvedValue([]);
     document.body.innerHTML = '';
   });
 
@@ -109,5 +122,32 @@ describe('NextTeamsView', () => {
     await flushPromises();
 
     expect(mockApi.removeTeamMember).toHaveBeenCalledWith('t1', 'u1');
+  });
+
+  it('adds a member from the picker (#551)', async () => {
+    mockApi.listTeamMembers.mockResolvedValue([member()]);
+    mockApi.addTeamMember.mockResolvedValue(undefined);
+    mockApi.listUsers.mockResolvedValue([
+      user({ id: 'u1', username: 'alice', displayName: 'Alice' }),
+      user({ id: 'u2', username: 'bob', displayName: 'Bob' }),
+      user({ id: 'u3', username: 'carol', status: 'DISABLED' }),
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="team-members-open"]').trigger('click');
+    await flushPromises();
+
+    // Only bob is joinable: alice is already a member, carol is disabled.
+    const select = wrapper.findComponent(UiSelect);
+    expect(select.exists()).toBe(true);
+    select.vm.$emit('update:modelValue', 'u2');
+    await flushPromises();
+
+    (document.querySelector('[data-testid="team-member-add"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(mockApi.addTeamMember).toHaveBeenCalledWith('t1', 'u2');
+    expect((mockApi.listTeamMembers as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
   });
 });
