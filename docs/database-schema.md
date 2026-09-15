@@ -218,6 +218,12 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
 - `latency_ms`、`upstream_status_code`、`cache_key bytea`
 - `is_complete boolean`、`usage_missing boolean`（上游未返回 usage 时标记，用量记 0）
 - `client_ip varchar(45)`（V52，#605：调用方地址——传输层对端，或可信代理名单下 `X-Forwarded-For` 最右非可信跳；可为 NULL）
+- `client_ip` 之后的 **CAA 归属列（V54，#633）**，全部可空、存量行 NULL：
+  - `session_id varchar(64)`（Agent 会话标识，源自 `X-Claude-Code-Session-Id`，超长/畸形即丢弃）
+  - `activity_id uuid`（请求上下文解析器生成的本次活动标识）
+  - `claimed_project_id uuid`（Agent **声明**的项目——未经授权校验，仅审计，与裁决列分开）
+  - `resolution_status varchar(32)`（服务端裁决：`RESOLVED_HEADER|RESOLVED_SUFFIX|SOLE_BINDING|POLICY_ROUTED|UNATTRIBUTED|AMBIGUOUS`）
+  - `claim_source varchar(32)`（`prompt_url|tool_path|bash_cwd|system_cwd|git_remote|suffix|none`，白名单外丢弃）、`claim_confidence varchar(16)`（`HIGH|MEDIUM|LOW|NONE`，白名单外丢弃）
 - `occurred_at`、`created_at`
 
 部分唯一索引 `(tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL`；`virtual_key_id`、`project_id`、`cache_level`、`occurred_at` 索引。正文（prompt、代码、工具、回答）永不写入。
@@ -225,6 +231,10 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
 ### `cache_hit_event` (V6)
 
 缓存命中计数（L1/L2 命中不写 `usage_event`，在此去重计数）：`cache_key`、`virtual_key_id`、`project_id`、`provider_product_id`、`level`（`L1_HIT|L2_HIT`）、`occurred_at`、`gateway_request_id`。唯一 `(tenant_id, cache_key, level, occurred_at)`——同一秒内同一 cache_key 只记一次。
+
+### `request_context_evidence` (V55，#633)
+
+CAA 逐请求上下文证据审计（append-only）：`id`、`tenant_id`、`request_id`（gateway request id）、`source`、`value`、`confidence`、`scope`（`turn|session`）、`observed_at`。索引 `(tenant_id, request_id)`、`(tenant_id, observed_at)`。与 `usage_event` 的归属列互为佐证：usage 行回答"记到谁头上"，本表回答"凭什么这么记"。声明内容永不构成授权（Spec v1.1 §4）。
 
 ### `request_usage_records` (V8，当前实现子集)
 

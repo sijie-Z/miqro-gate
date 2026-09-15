@@ -2904,6 +2904,21 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **演示最小闭环（下一步）**：一把 Key 两个标签（CC Switch 双条目）→ 两项目各自凭证与用量。
 
 
+## 2026-09-16 凌晨 — Goal #633：CAA 请求上下文管线（Spec v1.1 Phase 4）
+
+**背景**：外部评审对《上下文归属架构》Spec v1 提出 6 项必修（body 历史污染、UNATTRIBUTED 路由、project_id 标识、活动切换迟滞、claims/verified 分离、证据冲突模型）；owner 拍板"赶紧做"。本批交付 **Gateway 侧 Phase 4**：服务端解析阶梯 + 归属落库；客户端 miqro-context（证据采集 / Local Agent / 迟滞切换）为后续批次。
+
+**交付**（分支 feat/caa-phase4-context-pipeline-633）：
+
+- **解析阶梯**（`RequestContextResolver`，Spec v1.1 §4）：`X-Miqro-Project-Id` 声明（不可信，仅当目标是该 Key 的绑定才生效）→ 点号后缀命中绑定 → 唯一绑定兜底；多绑定且无上下文 **400 `CONTEXT_REQUIRED`**（失败关闭，不猜、不静默回落默认项目）；声明无绑定 403 `CONTEXT_NOT_ALLOWED`、声明畸形 400 `CONTEXT_INVALID`；未知/畸形密钥维持统一 404（防枚举收窄到身份层——标签不匹配不再 404，单绑定 Key 的标签视为装饰）。
+- **声明审计化**：`X-Miqro-Claim-Source/Confidence/Status`、`X-Claude-Code-Session-Id` 全部 allowlist + 限长（64）消毒，仅落库审计：不参与授权、不转发上游；入站 `x-miqro-*` 由 HeaderFilters 统一剥离（`X-MiqroKey-*` 同规则）。
+- **归属随用量落库（V54）**：`usage_event` 增 `session_id/activity_id/claimed_project_id/resolution_status/claim_source/claim_confidence`（全可空，存量写入路径零变化）；**V55** 新增 `request_context_evidence`（append-only 证据审计：来源/规范值/置信度/作用域）。
+- **契约修订**：api-contract §4/§7.1（后缀=路由选择器；阶梯与错误码；`usage_event` 归属列）；ADR-0018 与单密钥设计文档加"#633 修订"注；database-schema 增 V54/V55。
+
+**验证**：`RequestContextResolverTest` 8/8（阶梯全矩阵 + 消毒边界）；`VirtualKeyAuthContractTest` 29/29（新增 CaaContext 组：多绑定无上下文失败关闭、声明选绑定且声明头不上行、伪造声明 403）；`HeaderFiltersTest` 10/10；`PostgresUsageEventWriterTest` 7/7（CAA 六列逐字落库）。
+
+**CI 归因补记**：integration job 首跑 SoakIntegrationTest 失败——探针原以"改标签"（presented()+"x"）冒充无效 Key，新阶梯下该请求被正常解析并打到上游（每次探针都真实代理成功），污染行数断言（5361+18）。修复：探针改为篡改秘钥段首字符（HMAC 失败→统一 404）；本地复跑 1/1 通过。
+
 ## 2026-09-16 凌晨 — Goal #634：用量报表·每小时 Token 表（人×项目 / 组×项目）
 
 **背景**：产品负责人提出"要能够看见每个人每个项目，每天统计使用 token 做一个每个小时的表；还有每个组的每个项目的"。核查：`summary` 的 groupBy 无小时粒度、各维度为单维聚合，无任何逐小时展示——全新实现。
@@ -2916,3 +2931,4 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - **文档**：api-contract §5.2 增端点与参数/错误码说明；OpenAPI 基线重导出（仅新增 `paths`/`schemas`，不触发破坏性检查）。
 
 **验证**：`AdminUsageStatsServiceTest` 13/13（窗口/时区换算/参数校验）；`AdminUsageApiIntegrationTest` 11/11（新增 3 用例：UTC+8 下小时桶与"用户×项目"交叉、团队维度按成员聚合、admin-only 与参数边界）；前端 vitest（NextAdminUsageView 全量 + 新增每小时用例）、typecheck、build。
+

@@ -93,6 +93,39 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         return byTag == null || projectTag == null ? null : byTag.get(projectTag);
     }
 
+    /**
+     * The key's binding for a claimed project id (CAA, Spec v1.1 §4), or null when
+     * the key holds no ACTIVE binding for that project. Bindings per key are few;
+     * the tag map is scanned linearly.
+     */
+    public BindingRecord bindingByProject(UUID keyId, UUID projectId) {
+        Map<String, BindingRecord> byTag = bindings.get(keyId);
+        if (byTag == null || projectId == null) {
+            return null;
+        }
+        for (BindingRecord binding : byTag.values()) {
+            if (projectId.equals(binding.projectId())) {
+                return binding;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The key's only ACTIVE binding when it has exactly one — the SOLE_BINDING
+     * fallback of the CAA resolution ladder; null when none or several exist.
+     */
+    public BindingRecord soleBinding(UUID keyId) {
+        Map<String, BindingRecord> byTag = bindings.get(keyId);
+        return byTag != null && byTag.size() == 1 ? byTag.values().iterator().next() : null;
+    }
+
+    /** Number of ACTIVE bindings of a key (0 when unknown). */
+    public int bindingCount(UUID keyId) {
+        Map<String, BindingRecord> byTag = bindings.get(keyId);
+        return byTag == null ? 0 : byTag.size();
+    }
+
     public CredentialRecord credential(UUID credentialId) {
         return credentials.get(credentialId);
     }

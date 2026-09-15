@@ -605,7 +605,7 @@ public class ProxyController {
             usageEventBus.publish(new UsageEvent(UUID.randomUUID(), ctx.tenantId(), providerRequestId,
                     ctx.key().keyId(), ctx.projectId(), ctx.productId(), ctx.binding().credentialId(), modelName,
                     CacheLevel.UPSTREAM, tokens, latencyMs, status, cacheKey != null ? cacheKey.sha256() : null,
-                    complete, usageMissing, requestId, clock.instant(), clientIp));
+                    complete, usageMissing, requestId, clock.instant(), clientIp, attributionOf(ctx)));
         } catch (RuntimeException e) {
             log.warn("Failed to publish usage event (requestId={}): {}", requestId, e.getMessage());
         }
@@ -621,10 +621,19 @@ public class ProxyController {
             usageEventBus.publish(new UsageEvent(UUID.randomUUID(), ctx.tenantId(), null, ctx.key().keyId(),
                     ctx.projectId(), ctx.productId(), ctx.binding().credentialId(), modelName, CacheLevel.COALESCED,
                     cached.usage(), null, null, cacheKey != null ? cacheKey.sha256() : null, true,
-                    cached.usage().isEmpty(), requestId, clock.instant(), clientIp));
+                    cached.usage().isEmpty(), requestId, clock.instant(), clientIp, attributionOf(ctx)));
         } catch (RuntimeException e) {
             log.warn("Failed to publish coalesced usage event (requestId={}): {}", requestId, e.getMessage());
         }
+    }
+
+    /** CAA attribution snapshot for the usage row; null without context. */
+    private static UsageEvent.ContextAttribution attributionOf(AuthContext ctx) {
+        var c = ctx.context();
+        return c == null
+                ? null
+                : new UsageEvent.ContextAttribution(c.sessionId(), c.activityId(), c.claimedProjectId(),
+                        c.resolutionStatus(), c.claimSource(), c.claimConfidence());
     }
 
     private void publishCacheHit(GatewayResponseCache.LookupLevel level, AuthContext ctx, CacheKey cacheKey,

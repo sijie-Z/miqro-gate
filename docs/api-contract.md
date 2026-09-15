@@ -134,7 +134,7 @@
 }
 ```
 
-响应新增 `boundProjects: [{ projectId, projectTag }]`：打印字符串携带首个项目的标签；对其余已绑定项目，把同一密钥核心段追加各自标签（`mqk_live_<id>_<secret>.<tag>`）即可路由。标签不参与 HMAC、不承载权限；未绑定标签一律 404（防枚举）。项目标签在项目创建时若未填写会自动生成（code slug），且**被绑定引用后不可修改**（409 `PROJECT_TAG_IN_USE`；历史绑定不随轮换解除）。
+响应新增 `boundProjects: [{ projectId, projectTag }]`：打印字符串携带首个项目的标签；对其余已绑定项目，把同一密钥核心段追加各自标签（`mqk_live_<id>_<secret>.<tag>`）即可路由。标签不参与 HMAC、不承载权限；它是**路由选择器**而非授权边界：单绑定 Key 上任意合法标签都路由到该唯一绑定；多绑定 Key 的请求归属按 §7.1 的上下文解析阶梯裁决——无法解析时 `400 CONTEXT_REQUIRED`（失败关闭，不猜不 404）。项目标签在项目创建时若未填写会自动生成（code slug），且**被绑定引用后不可修改**（409 `PROJECT_TAG_IN_USE`；历史绑定不随轮换解除）。
 
 前置条件：`projectId` 所属项目必须已设置路由标签（`project_tag`，Key 明文后缀嵌入该标签用于路由）；未设置时返回 `409 ROUTING_TAG_MISSING`——普通用户请联系管理员在项目设置中补充后重试（管理员建项目时请勿留空）。
 
@@ -1102,10 +1102,19 @@ canonical 账单导入与四态对账报告（契约稿 docs/bill-reconciliation
 ### 7.1 Virtual Key 鉴权与路由
 
 - 客户端必须且只能提供**一个**凭证 Header：`Authorization: Bearer <key>`（或裸值）、`x-api-key`、`api-key`。零个或多个凭证 Header → `401`（错误体不区分具体原因，防枚举）。
-- **凭据值错误的统一语义**：未知 / 畸形 / 路由标签不匹配的 Virtual Key → `404 virtual_key_invalid`——三种场景响应逐字一致、与"未知 Key"不可区分（错误标签视为未知，防枚举；见 `VirtualKeyAuthContractTest`）。注意与 MCP 数据面（消费者 Key/JWT）同场景的 `401 invalid_api_key` 口径不同：`/v1` 用 404、MCP 用 401，均为各通道既定设计。
-- Key 格式 `mqk_live_<publicKeyId>_<secret>[.<projectTag>]`：点号后缀是**路由标签**（明文，仅用于把请求路由到 Key 绑定的项目），鉴权权威是数据库中的 `key_project_binding`，标签本身不决定授权。HMAC 摘要不包含标签。
+- **凭据值错误的统一语义**：未知 / 畸形（含缺失后缀、后缀含点）的 Virtual Key → `404 virtual_key_invalid`——各场景响应逐字一致、与"未知 Key"不可区分（防枚举；见 `VirtualKeyAuthContractTest`）。注意与 MCP 数据面（消费者 Key/JWT）同场景的 `401 invalid_api_key` 口径不同：`/v1` 用 404、MCP 用 401，均为各通道既定设计。
+- Key 格式 `mqk_live_<publicKeyId>_<secret>.<projectTag>`（后缀在解析级必填）：点号后缀是**路由选择器**（明文，用于在 Key 的多个项目绑定间选择），鉴权权威是数据库中的 `key_project_binding`，标签本身不承载权限。HMAC 摘要不包含标签。
+- **请求上下文解析阶梯（CAA，#633）**：身份（Key/HMAC）与归属（本请求计入哪个项目）分离，归属按固定阶梯裁决，首个命中生效：
+  1. `X-Miqro-Project-Id` 声明（**不可信输入**，仅当目标项目确为该 Key 的绑定时生效）→ `RESOLVED_HEADER`；
+  2. 点号后缀标签命中该 Key 的某个绑定 → `RESOLVED_SUFFIX`；
+  3. Key 恰有一个绑定 → `SOLE_BINDING`（任意合法标签视为装饰）；
+  4. 其余（多绑定且上下文无法解析）→ `400 CONTEXT_REQUIRED`——不猜测、不静默回落到默认项目。
+  - 声明项目不是该 Key 的绑定 → `403 CONTEXT_NOT_ALLOWED`（仅当存在有效声明时）；声明不是合法 UUID → `400 CONTEXT_INVALID`。
+  - 审计头（降级为纯审计、绝不参与授权；畸形即丢弃；永不转发上游）：`X-Miqro-Claim-Source`（`prompt_url`/`tool_path`/`bash_cwd`/`system_cwd`/`git_remote`/`suffix`/`none`）、`X-Miqro-Claim-Confidence`（`HIGH`/`MEDIUM`/`LOW`/`NONE`）、`X-Miqro-Claim-Status`（`RESOLVED`/`AMBIGUOUS`/`UNATTRIBUTED`）、`X-Claude-Code-Session-Id`（≤64 字符）。Agent 声明（`claimed_*`）与服务端裁决（`project_id` + `resolution_status`）分开落库，声明永不构成授权。
+  - 归属随用量落库：`usage_event` 的 `session_id`/`activity_id`/`claimed_project_id`/`resolution_status`/`claim_source`/`claim_confidence`；逐请求证据审计于 `request_context_evidence`（V55）。
+  - 规格：`docs/context-attribution-implementation-spec.md` v1.1 §4。
 - Gateway 使用版本化只读路由快照（定时刷新，默认 30s）做校验与路由；热路径不查询数据库。吊销/轮换按快照刷新传播，宽限期由控制面配置。
-- 校验通过后 Gateway 注入该 Key 固定绑定的上游凭证（AES-256-GCM 解密，内存中用完即清零），并把请求转发到该授权对应项目的目标；请求头和体按透明代理规则原样转发。
+- 校验通过后 Gateway 注入本次解析出的绑定（binding）对应的上游凭证（AES-256-GCM 解密，内存中用完即清零），并把请求转发到该授权对应项目的目标；请求头和体按透明代理规则原样转发。
 - 模型预校验：请求体中的模型不在 Key 授权集合内时，不连接上游，直接返回错误（Anthropic/OpenAI 协议兼容的错误体）。代理热路径的预校验只按 **Key 快照**（`virtual_key_models`）判断，与 `GET /v1/models` 的四路交集是两回事——模型目录为空时代理不会拒绝所有流量。
 - `/v1/models` 返回该 Virtual Key 的目录、上游模型、Grant 与 Key 快照的交集；未授权模型不泄漏。四路输入均来自同一版本的路由快照：
   - **目录**：已签名 provider catalog（classpath，Ed25519 校验）。Key 绑定产品的 `product_code` 不在目录中 → 返回空列表（目录是外层授权边界）。
@@ -1118,7 +1127,7 @@ canonical 账单导入与四态对账报告（契约稿 docs/bill-reconciliation
 - 上游目标门控（G2.6 SSRF）：仅转发路由快照提供的 Base URL；`https` 是硬要求（除非目标命中 `MIQROKEY_UPSTREAM_ALLOWED_CIDRS`），URL 携带 `userinfo` 一律拒绝，DNS 解析后的每个地址必须是公网地址（环回、链路本地、RFC1918、CGNAT `100.64/10`、组播、any-local、IPv6 ULA `fc00::/7` 均拒绝，除非命中 allowlist）。被拒绝时返回 `502 route_unavailable`，错误体、日志与审计**不包含目标 URL 或主机名**（`UpstreamTargetValidator` 的拒绝原因只有稳定类别 token）。
 - 路径白名单：数据面只暴露 `POST /v1/messages`、`POST /v1/responses`、`POST /v1/chat/completions`。正确方法之外的请求 → `405 method_not_allowed`；其他 `/v1/**` 路径 → `404 unsupported_path`；两者都不连接上游。嵌入式 `..` 段按字面处理（`/v1/**` 之外不匹配）；`//` 由服务器归一化为规范路径后按正常请求处理，不构成走私。
 - 输入上限：入站 Header 超过 `MIQROKEY_MAX_INBOUND_HEADER_BYTES`（默认 `32KB`）由 Netty 在路由前拒绝 → `431`；请求体超过 `MIQROKEY_MAX_PROXY_BUFFER_BYTES`（默认 `256KB`）→ `413 payload_too_large`。超限请求不连接上游。
-- Header 走私：凭证 Header（`Authorization`/`x-api-key`/`api-key`）出现多个 → `401`，任何凭证都不会转发；`Connection` 提名的 hop-by-hop Header 与 `X-MiQroKey-*` 内部 Header 在转发前剥离；上游只携带 Gateway 注入的真实凭证，客户端 Virtual Key 永不泄漏到上游。
+- Header 走私：凭证 Header（`Authorization`/`x-api-key`/`api-key`）出现多个 → `401`，任何凭证都不会转发；`Connection` 提名的 hop-by-hop Header 与 `X-MiQroKey-*`、`x-miqro-*` 内部 Header 在转发前剥离（上下文声明因此永不到达上游）；上游只携带 Gateway 注入的真实凭证，客户端 Virtual Key 永不泄漏到上游。
 
 Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 ID 都进入用量记录；不得覆盖供应商 request ID Header。
 
