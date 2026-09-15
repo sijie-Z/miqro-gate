@@ -94,22 +94,21 @@ import { toastState, dismissToast } from './toast';
   max-width: min(420px, calc(100vw - 2 * var(--ui-space-6)));
 }
 
+/* antd message geometry (v2.pro live): white surface, 9px 16px padding,
+   8px radius, elevated shadow, semantic icon colors. */
 .ui-toast {
   display: flex;
   align-items: flex-start;
-  gap: var(--ui-space-3);
-  padding: var(--ui-space-3) var(--ui-space-4);
-  border-radius: var(--ui-radius-control);
-  background: #232326;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #f5f5f4;
-  font-size: var(--ui-font-size-sm);
-  line-height: var(--ui-line-height-base);
-  box-shadow: var(--ui-shadow-popper);
-}
-
-.ui-toast--error {
-  border-color: rgba(189, 20, 38, 0.55);
+  gap: var(--ui-space-2);
+  padding: 9px var(--ui-space-4);
+  border-radius: var(--ui-radius-panel);
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-foreground);
+  font-size: var(--ui-font-size-base);
+  line-height: 22px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08), 0 3px 6px -4px rgba(0, 0, 0, 0.12),
+    0 9px 28px 8px rgba(0, 0, 0, 0.05);
 }
 
 .ui-toast__icon {
@@ -121,11 +120,11 @@ import { toastState, dismissToast } from './toast';
 }
 
 .ui-toast--success .ui-toast__icon {
-  color: #7cd992;
+  color: var(--ui-success-fg);
 }
 
 .ui-toast--info .ui-toast__icon {
-  color: #9db4ff;
+  color: var(--ui-info-fg);
 }
 
 .ui-toast--error .ui-toast__icon {

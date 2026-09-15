@@ -131,7 +131,7 @@ const quickNav = computed(() =>
         { label: '成本报表', to: '/app/cost', icon: MoneyIcon, color: '#fa8c16' },
         { label: '账单对账', to: '/app/reconciliations', icon: FilePasteIcon, color: '#8c8c8c' },
         { label: '审计日志', to: '/app/audit', icon: SecuredIcon, color: '#2f9e44' },
-        { label: 'Webhook 端点', to: '/app/webhooks', icon: NotificationIcon, color: '#7c3aed' },
+        { label: 'Webhook 端点', to: '/app/webhooks', icon: NotificationIcon, color: '#d48806' },
       ]
     : [
         { label: '创建虚拟密钥', to: '/app/keys', icon: LockOnIcon, color: '#0960bd' },

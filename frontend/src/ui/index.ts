@@ -3,6 +3,8 @@ export { default as UiButton } from './Button.vue';
 export { default as UiInput } from './Input.vue';
 export { default as UiSelect } from './Select.vue';
 export type { UiSelectOption } from './Select.vue';
+export { default as UiCheckbox } from './Checkbox.vue';
+export { default as UiRadio } from './Radio.vue';
 export { default as UiTable } from './Table.vue';
 export type { UiTableColumn } from './Table.vue';
 export { default as UiDialog } from './Dialog.vue';

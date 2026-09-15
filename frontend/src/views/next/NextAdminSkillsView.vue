@@ -10,7 +10,7 @@
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
+import { UiButton, UiCheckbox, UiDialog, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { Project, SkillRevisionView, SkillView, Team } from '@/types/generated-api';
 
 const skills = ref<SkillView[]>([]);
@@ -429,30 +429,30 @@ onMounted(() => {
             class="next-skills__check-list"
             data-testid="skill-access-projects"
           >
-            <label v-for="p in projects" :key="p.id" class="next-skills__check">
-              <input
-                v-model="accessProjectIds"
-                type="checkbox"
-                :value="p.id"
-                data-testid="skill-access-project"
-              />
-              <span>{{ p.name }}（{{ p.code }}）</span>
-            </label>
+            <UiCheckbox
+              v-for="p in projects"
+              :key="p.id"
+              v-model="accessProjectIds"
+              :value="p.id"
+              data-testid="skill-access-project"
+            >
+              {{ p.name }}（{{ p.code }}）
+            </UiCheckbox>
           </div>
           <p v-else class="ui-field__hint">暂无项目</p>
         </div>
         <div class="ui-field">
           <span class="ui-field__label">授权团队</span>
           <div v-if="teams.length" class="next-skills__check-list" data-testid="skill-access-teams">
-            <label v-for="t in teams" :key="t.id" class="next-skills__check">
-              <input
-                v-model="accessTeamIds"
-                type="checkbox"
-                :value="t.id"
-                data-testid="skill-access-team"
-              />
-              <span>{{ t.name }}</span>
-            </label>
+            <UiCheckbox
+              v-for="t in teams"
+              :key="t.id"
+              v-model="accessTeamIds"
+              :value="t.id"
+              data-testid="skill-access-team"
+            >
+              {{ t.name }}
+            </UiCheckbox>
           </div>
           <p v-else class="ui-field__hint">暂无团队</p>
         </div>
@@ -648,23 +648,4 @@ onMounted(() => {
   padding: var(--ui-space-1);
 }
 
-.next-skills__check {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-space-2);
-  padding: var(--ui-space-1) var(--ui-space-2);
-  border-radius: calc(var(--ui-radius-control) - 2px);
-  font-size: var(--ui-font-size-sm);
-  color: var(--ui-foreground);
-  cursor: pointer;
-}
-
-.next-skills__check:hover {
-  background: var(--ui-fill-hover);
-}
-
-.next-skills__check input {
-  accent-color: var(--ui-primary-text);
-  margin: 0;
-}
 </style>

@@ -13,9 +13,11 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import {
   UiButton,
+  UiCheckbox,
   UiDialog,
   UiDrawer,
   UiInput,
+  UiRadio,
   UiSelect,
   UiStatusBadge,
   UiTable,
@@ -1934,14 +1936,9 @@ async function saveResilience() {
           工具级重试仅覆盖服务级策略的重试字段（熔断保持服务级）；无记录时跟随服务策略。
         </p>
         <div class="next-mcp__dialog-form">
-          <label class="next-mcp__checkbox">
-            <input
-              v-model="toolRetryForm.retryEnabled"
-              type="checkbox"
-              data-testid="mcp-tool-retry-enabled"
-            />
-            <span>启用重试（仅首字节前；默认关闭）</span>
-          </label>
+          <UiCheckbox v-model="toolRetryForm.retryEnabled" data-testid="mcp-tool-retry-enabled">
+            启用重试（仅首字节前；默认关闭）
+          </UiCheckbox>
           <template v-if="toolRetryForm.retryEnabled">
             <div class="next-mcp__row">
               <UiInput
@@ -1952,28 +1949,19 @@ async function saveResilience() {
             </div>
             <div class="next-mcp__resilience-checks">
               <span class="next-mcp__resilience-label">重试条件（至少一项）</span>
-              <label
+              <UiCheckbox
                 v-for="(label, condition) in RETRY_CONDITION_LABELS"
                 :key="condition"
-                class="next-mcp__checkbox"
+                :checked="toolRetryForm.retryConditions.includes(condition)"
+                :data-testid="`mcp-tool-retry-${condition.toLowerCase()}`"
+                @update:model-value="toggleToolRetryCondition(condition)"
               >
-                <input
-                  type="checkbox"
-                  :checked="toolRetryForm.retryConditions.includes(condition)"
-                  :data-testid="`mcp-tool-retry-${condition.toLowerCase()}`"
-                  @change="toggleToolRetryCondition(condition)"
-                />
-                <span>{{ label }}</span>
-              </label>
+                {{ label }}
+              </UiCheckbox>
             </div>
-            <label class="next-mcp__checkbox">
-              <input
-                v-model="toolRetryForm.idempotencyConfirmed"
-                type="checkbox"
-                data-testid="mcp-tool-retry-idempotent"
-              />
-              <span>已确认后端接口幂等（POST/PUT/PATCH 工具可重试）</span>
-            </label>
+            <UiCheckbox v-model="toolRetryForm.idempotencyConfirmed" data-testid="mcp-tool-retry-idempotent">
+              已确认后端接口幂等（POST/PUT/PATCH 工具可重试）
+            </UiCheckbox>
           </template>
         </div>
       </template>
@@ -2137,15 +2125,15 @@ async function saveResilience() {
               >名单（{{ serverMode === 'ALLOW' ? '白名单' : '黑名单' }}）</span
             >
             <div class="next-mcp__check-list" data-testid="mcp-access-server-list">
-              <label v-for="c in consumerOptions" :key="c.id" class="next-mcp__check">
-                <input
-                  v-model="serverIds"
-                  type="checkbox"
-                  :value="c.id"
-                  data-testid="mcp-access-consumer"
-                />
-                <span>{{ c.label }}</span>
-              </label>
+              <UiCheckbox
+                v-for="c in consumerOptions"
+                :key="c.id"
+                v-model="serverIds"
+                :value="c.id"
+                data-testid="mcp-access-consumer"
+              >
+                {{ c.label }}
+              </UiCheckbox>
               <p v-if="!consumerOptions.length" class="ui-field__hint">暂无 API 消费者</p>
             </div>
             <div class="next-mcp__actions">
@@ -2212,22 +2200,16 @@ async function saveResilience() {
                 v-if="accessDraft(tool.toolId)?.mode"
                 class="next-mcp__check-list next-mcp__check-list--nested"
               >
-                <label v-for="c in consumerOptions" :key="c.id" class="next-mcp__check">
-                  <input
-                    :value="c.id"
-                    :checked="accessDraft(tool.toolId)?.ids.includes(c.id ?? '') ?? false"
-                    type="checkbox"
-                    data-testid="mcp-tool-consumer"
-                    @change="
-                      toggleToolConsumer(
-                        tool.toolId,
-                        c.id,
-                        ($event.target as HTMLInputElement).checked,
-                      )
-                    "
-                  />
-                  <span>{{ c.label }}</span>
-                </label>
+                <UiCheckbox
+                  v-for="c in consumerOptions"
+                  :key="c.id"
+                  :value="c.id"
+                  :checked="accessDraft(tool.toolId)?.ids.includes(c.id ?? '') ?? false"
+                  data-testid="mcp-tool-consumer"
+                  @update:model-value="toggleToolConsumer(tool.toolId, c.id, $event as boolean)"
+                >
+                  {{ c.label }}
+                </UiCheckbox>
                 <p v-if="!consumerOptions.length" class="ui-field__hint">暂无 API 消费者</p>
               </div>
               <div class="next-mcp__actions">
@@ -2438,15 +2420,15 @@ async function saveResilience() {
         <div class="ui-field">
           <span class="ui-field__label">HTTP 方法（全选 = 不限）</span>
           <div class="next-mcp__method-chips" data-testid="mcp-route-methods">
-            <label v-for="method in HTTP_METHODS" :key="method" class="next-mcp__check">
-              <input
-                v-model="routeForm.methods"
-                type="checkbox"
-                :value="method"
-                data-testid="mcp-route-method"
-              />
-              <span>{{ method }}</span>
-            </label>
+            <UiCheckbox
+              v-for="method in HTTP_METHODS"
+              :key="method"
+              v-model="routeForm.methods"
+              :value="method"
+              data-testid="mcp-route-method"
+            >
+              {{ method }}
+            </UiCheckbox>
           </div>
         </div>
 
@@ -2555,14 +2537,9 @@ async function saveResilience() {
       <div class="next-mcp__dialog-form">
         <div class="next-mcp__resilience-group">
           <h3 class="next-mcp__resilience-title">重试（F12 · 默认关闭）</h3>
-          <label class="next-mcp__checkbox">
-            <input
-              v-model="rForm.retryEnabled"
-              type="checkbox"
-              data-testid="mcp-res-retry-enabled"
-            />
-            <span>启用重试（仅首字节前；默认关闭）</span>
-          </label>
+          <UiCheckbox v-model="rForm.retryEnabled" data-testid="mcp-res-retry-enabled">
+            启用重试（仅首字节前；默认关闭）
+          </UiCheckbox>
           <template v-if="rForm.retryEnabled">
             <div class="next-mcp__row">
               <UiInput
@@ -2573,41 +2550,27 @@ async function saveResilience() {
             </div>
             <div class="next-mcp__resilience-checks">
               <span class="next-mcp__resilience-label">重试条件（至少一项）</span>
-              <label
+              <UiCheckbox
                 v-for="(label, condition) in RETRY_CONDITION_LABELS"
                 :key="condition"
-                class="next-mcp__checkbox"
+                :checked="rForm.retryConditions.includes(condition)"
+                :data-testid="`mcp-res-retry-${condition.toLowerCase()}`"
+                @update:model-value="toggleRetryCondition(condition)"
               >
-                <input
-                  type="checkbox"
-                  :checked="rForm.retryConditions.includes(condition)"
-                  :data-testid="`mcp-res-retry-${condition.toLowerCase()}`"
-                  @change="toggleRetryCondition(condition)"
-                />
-                <span>{{ label }}</span>
-              </label>
+                {{ label }}
+              </UiCheckbox>
             </div>
-            <label class="next-mcp__checkbox">
-              <input
-                v-model="rForm.idempotencyConfirmed"
-                type="checkbox"
-                data-testid="mcp-res-idempotent"
-              />
-              <span>已确认后端接口幂等（POST/PUT/PATCH 工具可重试）</span>
-            </label>
+            <UiCheckbox v-model="rForm.idempotencyConfirmed" data-testid="mcp-res-idempotent">
+              已确认后端接口幂等（POST/PUT/PATCH 工具可重试）
+            </UiCheckbox>
           </template>
         </div>
 
         <div class="next-mcp__resilience-group">
           <h3 class="next-mcp__resilience-title">熔断（F13 · 默认关闭）</h3>
-          <label class="next-mcp__checkbox">
-            <input
-              v-model="rForm.breakerEnabled"
-              type="checkbox"
-              data-testid="mcp-res-breaker-enabled"
-            />
-            <span>启用熔断（三态状态机；429 需加入下方状态码）</span>
-          </label>
+          <UiCheckbox v-model="rForm.breakerEnabled" data-testid="mcp-res-breaker-enabled">
+            启用熔断（三态状态机；429 需加入下方状态码）
+          </UiCheckbox>
           <template v-if="rForm.breakerEnabled">
             <div class="next-mcp__row">
               <UiInput
@@ -2621,14 +2584,9 @@ async function saveResilience() {
                 data-testid="mcp-res-minreq"
               />
             </div>
-            <label class="next-mcp__checkbox">
-              <input
-                v-model="rForm.breakerErrorEnabled"
-                type="checkbox"
-                data-testid="mcp-res-error-enabled"
-              />
-              <span>错误比例触发</span>
-            </label>
+            <UiCheckbox v-model="rForm.breakerErrorEnabled" data-testid="mcp-res-error-enabled">
+              错误比例触发
+            </UiCheckbox>
             <div class="next-mcp__row">
               <UiInput
                 v-model="rForm.breakerErrorRatio"
@@ -2641,14 +2599,9 @@ async function saveResilience() {
                 data-testid="mcp-res-codes"
               />
             </div>
-            <label class="next-mcp__checkbox">
-              <input
-                v-model="rForm.breakerSlowEnabled"
-                type="checkbox"
-                data-testid="mcp-res-slow-enabled"
-              />
-              <span>慢调用触发</span>
-            </label>
+            <UiCheckbox v-model="rForm.breakerSlowEnabled" data-testid="mcp-res-slow-enabled">
+              慢调用触发
+            </UiCheckbox>
             <div v-if="rForm.breakerSlowEnabled" class="next-mcp__row">
               <UiInput
                 v-model="rForm.breakerSlowCallMs"
@@ -2680,14 +2633,9 @@ async function saveResilience() {
                 data-testid="mcp-res-probe-ok"
               />
             </div>
-            <label class="next-mcp__checkbox">
-              <input
-                v-model="rForm.breakerSkipRetry"
-                type="checkbox"
-                data-testid="mcp-res-skip-retry"
-              />
-              <span>熔断期跳过重试</span>
-            </label>
+            <UiCheckbox v-model="rForm.breakerSkipRetry" data-testid="mcp-res-skip-retry">
+              熔断期跳过重试
+            </UiCheckbox>
           </template>
         </div>
         <p class="next-mcp__resilience-hint">
@@ -2717,24 +2665,12 @@ async function saveResilience() {
     @update:open="backendAuthVisible = false"
   >
     <div class="next-mcp__auth-mode">
-      <label>
-        <input
-          v-model="backendAuthMode"
-          type="radio"
-          value="VISITOR"
-          data-testid="mcp-auth-visitor"
-        />
-        <span>访客（不向上游携带凭据）</span>
-      </label>
-      <label>
-        <input
-          v-model="backendAuthMode"
-          type="radio"
-          value="API_KEY"
-          data-testid="mcp-auth-apikey"
-        />
-        <span>API 密钥（网关注入 Bearer 凭据）</span>
-      </label>
+      <UiRadio v-model="backendAuthMode" value="VISITOR" data-testid="mcp-auth-visitor">
+        访客（不向上游携带凭据）
+      </UiRadio>
+      <UiRadio v-model="backendAuthMode" value="API_KEY" data-testid="mcp-auth-apikey">
+        API 密钥（网关注入 Bearer 凭据）
+      </UiRadio>
     </div>
     <UiInput
       v-if="backendAuthMode === 'API_KEY'"
@@ -3060,26 +2996,6 @@ async function saveResilience() {
   margin-top: var(--ui-space-2);
 }
 
-.next-mcp__check {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-space-2);
-  padding: var(--ui-space-1) var(--ui-space-2);
-  border-radius: calc(var(--ui-radius-control) - 2px);
-  font-size: var(--ui-font-size-sm);
-  color: var(--ui-foreground);
-  cursor: pointer;
-}
-
-.next-mcp__check:hover {
-  background: var(--ui-fill-hover);
-}
-
-.next-mcp__check input {
-  accent-color: var(--ui-primary-text);
-  margin: 0;
-}
-
 .next-mcp__tool-access-list {
   display: flex;
   flex-direction: column;
@@ -3246,13 +3162,6 @@ async function saveResilience() {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
 }
-.next-mcp__checkbox {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--ui-font-size-sm);
-  margin: 4px 0;
-}
 .next-mcp__resilience-hint {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
@@ -3314,14 +3223,6 @@ async function saveResilience() {
   flex-direction: column;
   gap: var(--ui-space-2);
   margin-bottom: var(--ui-space-3);
-}
-
-.next-mcp__auth-mode label {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-space-2);
-  font-size: var(--ui-font-size-sm);
-  cursor: pointer;
 }
 
 .next-mcp__sync-report {
