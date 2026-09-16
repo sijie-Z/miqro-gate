@@ -3157,7 +3157,7 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **背景**：#657（承接上一轮验证线钉到行号的三处缺口）。凭证列表「授权引用」列只读不可跳转、授权列表没有可跳转的过滤入口（`NextGrantsView` 不读 `route.query`）、项目/团队创建表单不写规则（`projects.code/name`、`teams.name` 的宽度与唯一性只在 409 响应体里可见）、`ui/Table.vue` 默认空态不渲染 CTA。范围仅前端：不动后端、不改既有 Flyway 迁移、不动既有 e2e。
 
-**交付**（分支 `feat/list-ia-closeout-657`，5 个源文件 + 7 个 spec，6 个提交）
+**交付**（分支 `feat/list-ia-closeout-657`，5 个源文件 + 7 个 spec，7 个提交）
 - `ui/Table.vue`：新增可选 props `emptyActionLabel` + `emptyActionTo`（`RouteLocationRaw`），二者齐备时默认空态渲染 `router-link.ui-link-action`（`data-testid="table-empty-action"`）；`#empty` 插槽仍优先，`NextKeysView` 的自定义空态不受影响。
 - `next/NextCredentialsView.vue`：计数为 0 时仍是 `<span>`（置灰 `.next-credentials__count-zero`），>0 时渲染 `router-link` 指向 `{ name: 'grants', query: { credentialId } }`；两个分支共用 `data-testid="credential-grant-count"`，测试对旧实现是红的。
 - `next/NextGrantsView.vue`：读 `route.query.credentialId` 做真过滤（按 `upstreamCredentialId` 匹配），工具条显示「共 X 条授权（全部 Y 条）」+ 凭证 chip +「查看全部」清除链接；过滤后列表为空时复用新 CTA 回到全量列表。
@@ -3169,8 +3169,10 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - `next/NextGrantsView.vue`：`?credentialId=a&credentialId=b` 这类重复参数取首个值（原先当作「无过滤」，URL 说过滤、列表却说全量）；空态文案改用 `scopedFilter`，只在数据确实加载成功时才断言「该凭证还没有被任何授权引用」，加载失败时交给错误提示。
 - `i18n/dict.ts`：5 条 DICT + 2 条 PATTERN，英文界面不再回落中文。
 
-**验证**（真实命令与结果，frontend 目录；最后一行命令全部跑在还原 auto-fix 改写后的工作区）
-- `npx vitest run` → exit 0，`Test Files 61 passed (61)` / `Tests 352 passed (352)`，28.95s；`npm run typecheck`（vue-tsc 三工程）→ exit 0；`npx eslint <本批 7 个文件>`（不带 `--fix`）→ exit 0，`0 errors, 4 warnings`（均为 spec 里多组件共存的 `vue/one-component-per-file`）；`npm run build` → exit 0，`built in 25.71s`（仅既有 esbuild CSS 压缩告警）。
+**验证**（真实命令与结果，frontend 目录；全部跑在还原 auto-fix 改写后的工作区，frontend 树 = `ec3459f`——其后只有本节的 `docs/progress.md` 提交，源文件未再变动）
+- `npx vitest run` → exit 0，`Test Files 61 passed (61)` / `Tests 352 passed (352)`，25.29s；`npm run typecheck`（vue-tsc 三工程）→ exit 0；`npm run build` → exit 0，`built in 19.75s`（仅既有 esbuild CSS 压缩告警）。
+- lint 信号按**提交内容**取：13 个改动文件逐个 `git show HEAD:<file> | npx eslint --stdin --stdin-filename <file>` → 逐文件 exit 0，合计 `0 errors, 6 warnings`，全部是 spec 内多组件共存的 `vue/one-component-per-file`（`NextCredentialsView.spec.ts` 2 条、`NextGrantsView.spec.ts` 2 条、`list-ia-deeplink.spec.ts` 2 条）。直接对工作区副本跑 lint 会多出上千条 `Delete ␍`，原因见下条。
+- **EOL 说明（任何人复现上面的 lint 数字前先读这条）**：`.gitattributes` 是 `* text=auto`，Windows 检出的工作区文件默认 CRLF（`frontend/src` 下 37 个文件当前即 `w/crlf`，含本批的 `i18n/dict.ts`、`views/next/NextProjectsView.vue`、`views/next/NextTeamsView.vue`），而 prettier 规则要求 LF，于是对**工作区副本**跑 `npx eslint` 会把它们逐行报 `Delete ␍`（实测 `0 errors, 1110 warnings`）。这不影响提交内容——index 与 HEAD 都是 LF，git 归一后 `git status` 仍干净，`git show HEAD:<file> | npx eslint --stdin --stdin-filename <file>` 对同样三个文件 exit 0、零输出。首轮 `npm run lint` 只报 5 条也是同一机制的另一面：它带 `--fix`，先就地改写 EOL 再统计，代价就是那批无关文件被改写。
 - 首轮 `npm run lint` → exit 0，`0 errors, 5 warnings`（4 条 spec 的 `vue/one-component-per-file`、1 条既有 `NewShell.vue` 的 `vue/no-template-shadow`）。
 - 新增/改 spec 7 个：`UiTable.spec.ts`（CTA 仅在 label+to 齐备时渲染、`#empty` 仍优先）、`NextCredentialsView.spec.ts`（计数 >0 是 `A` 且带 `credentialId`、=0 是 `SPAN`）、`NextGrantsView.spec.ts`（`?credentialId=` 真过滤 + chip + 清除链接 + 过滤后空态 CTA + 重复参数 + 加载失败不冒认空态）、`NextProjectsView.spec.ts` / `NextTeamsView.spec.ts`（hint 文案断言）、`i18n-copy.spec.ts`（新增文案过 `translateText` 锁住，改名不再静默丢译文）、`list-ia-deeplink.spec.ts`（真 router：凭证列表渲染真 `router-link` → 路由跳转 → `router-view` 挂载的授权列表按 query 过滤，链接/路由/过滤三者互证，而非各自对 stub 断言）。
 - 全量测试尾部那条 `Not implemented: navigation (except hash changes)` 是既有 jsdom 噪声——单跑本批 spec 时不出现，且在任一 spec 输出之前打印；非失败。
@@ -3178,4 +3180,4 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **边界与偏差**
 - 未加 `maxlength` 属性：issue 要的是「规则可读」，本次只补文案，不改输入拦截行为。
 - 未动 e2e 与金样；`frontend/dist/` 已被 `.gitignore` 覆盖，构建没有脏化工作区。
-- `frontend/package.json` 的 `lint` 脚本写死 `eslint . --ext .vue,.ts,.tsx --fix`，所以每跑一次都会改写一批与本 issue 无关的文件（含 `types/generated.ts` 的整文件 prettier 重排）——两轮各发生一次，均按路径逐个 `git checkout --` 还原，本批提交 `git show --stat` 只含本批文件。这是仓库既有状态，不是本批引入；收口验证因此改用不带 `--fix` 的 `npx eslint <文件列表>` 取信号。
+- `frontend/package.json` 的 `lint` 脚本写死 `eslint . --ext .vue,.ts,.tsx --fix`，所以每跑一次都会改写一批与本 issue 无关的文件（含 `types/generated.ts` 的整文件 prettier 重排）——两轮各发生一次，均按路径逐个 `git checkout --` 还原，本批提交 `git show --stat` 只含本批文件。这是仓库既有状态，不是本批引入；收口验证因此不再跑 `npm run lint`，改为按上一节的方式对提交内容取信号（`git show HEAD:<file> | npx eslint --stdin`），既不改写工作区，也不受工作区 EOL 影响。
