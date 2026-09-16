@@ -447,8 +447,19 @@ export const DICT: Record<string, string> = {
   '发起删除': 'Request deletion',
   '取消': 'Cancel',
   '变更字段': 'Changed fields',
-  '变更或停用只影响之后新建的用户；已存在（含自动分配）的配额规则保持不变，停用也不会删除它们。':
-    'Changes or disabling affect only newly created users; existing quota rules (including auto-assigned ones) stay as they are — disabling deletes none of them.',
+  '变更或停用只影响之后新建的用户；已存在（含自动分配）的配额规则保持不变，停用也不会删除它们。模板生成的规则为「仅预警」。':
+    'Changes or disabling affect only newly created users; existing quota rules (including auto-assigned ones) stay as they are — disabling deletes none of them. Template-derived rules are alert-only.',
+  '超限动作': 'Exceeded action',
+  '仅预警': 'Alert only',
+  '超限拒绝': 'Reject on exceeded',
+  '仅预警（不阻断）': 'Alert only (never blocks)',
+  '超限拒绝请求（429）': 'Reject requests once exceeded (429)',
+  '用量配额（Token / 请求次数 / 成本 × 日/周/月/年）。「超限拒绝」规则达到 100% 后网关自动拒绝该用户/项目的请求（429），配额重置或提高限额后自动恢复。':
+    'Usage quota (tokens / requests / cost x day / week / month / year). A "reject on exceeded" rule makes the gateway answer 429 for the covered user or project once usage reaches 100%, and traffic resumes when the window resets or the limit is raised.',
+  '先为用户或项目设置用量限额；「超限拒绝」规则达到 100% 后自动拒绝请求。':
+    'Set a usage limit for a user or project first; a "reject on exceeded" rule starts rejecting once usage reaches 100%.',
+  '管理员为你设置的用户级限额；当前窗口用量实时计算。「超限拒绝」的规则达到 100% 后请求会被网关拒绝（429）。':
+    'User-level limits set by an administrator; the current window is computed live. Once a "reject on exceeded" rule reaches 100%, the gateway rejects requests (429).',
   '变更摘要': 'Change summary',
   '变量': 'Variable',
   '只写不读': 'Write-only',

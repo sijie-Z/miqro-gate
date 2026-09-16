@@ -5,6 +5,20 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
 ### 2026-09-16
+- **配额软着陆：REJECT 规则超限拒绝请求（429）（#684，ADR-0020）**：把配额从"只算不管"变成真闸门——
+  规则级超限动作 `action ∈ {ALERT, REJECT}`（默认 ALERT，存量与模板复制零行为变化）；REJECT 规则窗口
+  用量达 100% 后，网关对该用户/项目返回 `429` + `quota_exceeded` 信封（`/v1/models` 同受门）并携带
+  `Retry-After`（秒，= 该作用域最早可自愈的窗口结束时刻），**Key 不失效、不自动禁用**，跨窗口或提高
+  限额即自动恢复（软着陆，对齐腾讯配额管理）。实现走既有链路：
+  控制面 `QuotaEnforcementService`（默认 60s 固定延迟，initialDelay 45s）经共享 `QuotaWatermarks`
+  （与配额页同一份水位计算）把超限作用域整体替换进新表 `quota_enforcement`（V59），判定集变化才
+  `pg_notify` 刷快照——**网关热路径零查询、零计数**，只查快照内两个内存集合（`ADR-0019` 原草案的
+  数据面 `usedSinceLoad` 计数形态经权衡不采纳，见 ADR-0020 §3-D）。近似语义显式承诺：判定不含评估
+  间隔内的新用量，额度可能被超出一个周期的量。API：`UpsertQuotaRuleRequest.action`（可选）/
+  `QuotaRuleView.action`；前端配额页增「超限动作」选择与列、我的配额面板标注动作、EN 词典同步；
+  OpenAPI 基线与前端类型重导出。测试：契约测试（用户/项目判定 → 429、旁路 Key 不受影响、清除判定
+  即恢复 2/2）+ IT（ALERT 永不产生判定 → 改 REJECT 即拦 → 提额即清除）+ 快照回环 IT；后端单测/集成
+  与前端 331/331 全绿。
 - **Virtual Key 停用/启用/重命名（#582）**：控制台补齐参考站盘点的三项缺口——① 可逆「停用」（POST
   `/me/virtual-keys/{id}/disable`）：下一快照刷新即从网关路由移除、请求与未知密钥同形 404，绑定与授权
   保留，「启用」恢复；② 「重命名」（PATCH `/me/virtual-keys/{id}`）：只改展示名（审计 from/to），

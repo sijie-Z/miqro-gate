@@ -58,6 +58,7 @@ const rule = (overrides: Partial<QuotaRuleView> = {}): QuotaRuleView => ({
   scopeTag: 'alice',
   metric: 'TOKENS',
   period: 'MONTHLY',
+  action: 'ALERT',
   limitValue: 1_000_000,
   warnPercent: 80,
   status: 'ACTIVE',
@@ -183,10 +184,39 @@ describe('NextQuotaRulesView', () => {
       scopeId: 'u1',
       metric: 'TOKENS',
       period: 'DAILY',
+      action: 'ALERT',
       limitValue: 2000000,
       warnPercent: 90,
       status: 'ACTIVE',
     });
+  });
+
+  it('renders the exceeded action and creates a REJECT rule (#684)', async () => {
+    mockApi.listQuotaRules.mockResolvedValue([
+      rule({ id: 'r4', action: 'REJECT', limitValue: 5000, used: 6000, usedPct: 120 }),
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.text()).toContain('超限拒绝');
+
+    mockApi.putQuotaRule.mockResolvedValue(rule({ id: 'r9', scopeName: 'alice' }));
+    await wrapper.find('[data-testid="quota-rule-create-open"]').trigger('click');
+    await wrapper
+      .findAll('.stub-option')
+      .find((el) => el.text() === 'alice')!
+      .trigger('click');
+    await wrapper
+      .findAll('.stub-option')
+      .find((el) => el.text() === '超限拒绝请求（429）')!
+      .trigger('click');
+    await wrapper.find('[data-testid="quota-limit"]').setValue('500000');
+    await flushPromises();
+    await wrapper.find('[data-testid="quota-rule-save"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.putQuotaRule).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: 'REJECT', limitValue: 500000 }),
+    );
   });
 
   it('validates limit input', async () => {

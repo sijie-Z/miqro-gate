@@ -3147,9 +3147,11 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 - **文档收口（本批）**：mapping 行 14/15 过时状态更正 + 「2026-09-16 收口批」对位表 + **对位说明 A（协议/Base Path/包体采集）与 B（消费者/消费者组/团队/项目）**；ADR-0019（配额超限拒绝，Proposed）；feature-backlog F51 状态；ai-gateway-comparison MCP 行刷新；CHANGELOG 本批条目。
 
-**待 owner 拍板**：ADR-0019（是否反转「不因预算阻断」提供 REJECT 规则；含 429 信封、5 分钟近似计数与未决问题 3 项）。
+**owner 已拍板（2026-09-16）**：ADR-0019 三个未决问题闭环——① 立项=是（软着陆：拒绝请求，否决自动禁用 Key）；② 首版范围=USER+PROJECT × TOKENS/REQUESTS/COST；③ 状态码=429。落地形态与实现见 **ADR-0020**（不采纳草案的数据面计数形态）。
 
 **未做（记录）**：MCP 服务向导「服务类型/后端类型」枚举（我们固定标准透传形态）、HTTP→MCP 转换、消费者组实体、配额缓存命中「全量计入」档（语义天然等价「不计入」）——均按既有裁决维持，mapping 已注明理由。
+
+- **#684 配额软着陆（超限拒绝 429）→ PR（ADR-0020）**：从「只算不管」到真闸门——规则级 `action ∈ {ALERT, REJECT}`（默认 ALERT，零回归）；REJECT 规则超限后网关对该用户/项目 429 (`quota_exceeded` + `Retry-After` 窗口结束提示，`/v1/models` 同门)，Key 不失效、提额/跨窗口自动恢复。链路：控制面评估器（60s，共享 `QuotaWatermarks`）→ `quota_enforcement`（V59，整体替换）→ 判定集变化才 pg_notify → 快照两集合 → 网关热路径零查询。并行的配额扩维（#683/#686，COST/YEARLY/NEAR_LIMIT）已先行合入，本批在其之上只做执行面，并同步 api-contract §5.19 / database-schema / configuration-reference / ADR-0020 / F51。
 
 ## 2026-09-16 晚 — #629 设计稿口径归位（docs-only：头名与列名对齐 v1.1 已交付契约）
 
