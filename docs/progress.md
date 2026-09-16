@@ -3002,3 +3002,11 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **验证**：客户端单测 42/42（新增 7 例：文件名/默认目录/覆盖目录/三平台内容快照/幂等 enable-disable 往返）；**Windows 沙箱实测**：install --autostart 生成 .cmd（node/cli/日志路径逐字校验）→ uninstall 移除，全程未触碰真实启动文件夹。
 
+
+## 2026-09-16 午后 — 修复 #667：portal 镜像构建改串行，消除 2G 机部署期全站抖动
+
+**背景**：用户报障"无法登录、请求 60s 超时"。与 #663 白屏同属一个事故窗口：12:15–12:32 演示机重建三镜像期间，portal 构建容器内 `npm run build` 并行跑 vue-tsc（545MB）与 vite build（740MB），峰值 ~1.3G 叠加常驻 JVM/Redpanda/Postgres 击穿 1.9G 物理内存，swap 1.9G/1.9G 打满、load 33——control-plane 全面无响应（登录 499/60s 超时），网关对另一用户连续 502（DNS 抖动下 unresolvable）。构建结束约 2 分钟后全站自动恢复。
+
+**交付**（分支 fix/portal-build-sequential-667）：`deploy/docker/portal.Dockerfile` frontend 阶段 `RUN npm run build`（run-p 并行）改为 `npm run build-only && npm run typecheck` 串行——峰值 ≈ max(740, 545) ≈ 740MB；2 vCPU 上并行无吞吐收益，typecheck 质量门保留。
+
+**验证**：本地 docker build 全量构建通过（含 npm ci / vite build / vue-tsc 三配置）；CI images job 随 PR 验证。
