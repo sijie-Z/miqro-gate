@@ -103,7 +103,8 @@ class AdminBudgetApiIntegrationTest {
         for (String table : new String[]{"webhook_delivery_attempts", "alert_events", "alert_rules", "budget",
                 "usage_event", "price_snapshot", "virtual_keys", "project_provider_grant_models",
                 "project_provider_grants", "upstream_credential_versions", "upstream_credentials", "quota_snapshots",
-                "upstream_subscriptions", "project_repositories", "projects", "user_sessions", "users", "admin_audit_events"}) {
+                "upstream_subscriptions", "project_repositories", "projects", "user_sessions", "users",
+                "admin_audit_events"}) {
             try {
                 jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
             } catch (Exception ignored) {

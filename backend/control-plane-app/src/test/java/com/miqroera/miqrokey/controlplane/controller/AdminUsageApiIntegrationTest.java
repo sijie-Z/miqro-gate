@@ -232,8 +232,9 @@ class AdminUsageApiIntegrationTest {
             for (String table : List.of("usage_event", "cache_hit_event", "price_snapshot", "virtual_key_models",
                     "key_project_binding", "model_approval", "virtual_keys", "project_provider_grant_models",
                     "project_provider_grants", "upstream_credential_versions", "upstream_credentials", "plan_seats",
-                    "upstream_subscriptions", "project_memberships", "project_repositories", "projects", "provider_products", "providers",
-                    "admin_audit_events", "team_memberships", "teams", "user_sessions", "users")) {
+                    "upstream_subscriptions", "project_memberships", "project_repositories", "projects",
+                    "provider_products", "providers", "admin_audit_events", "team_memberships", "teams",
+                    "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {

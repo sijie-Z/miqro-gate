@@ -235,8 +235,9 @@ class RouteSnapshotRefreshNotifierTest {
         void reset() {
             for (String table : List.of("virtual_key_models", "key_project_binding", "virtual_keys",
                     "project_provider_grant_models", "project_provider_grants", "upstream_credential_versions",
-                    "upstream_credentials", "upstream_subscriptions", "project_repositories", "projects", "model_catalog", "provider_products",
-                    "providers", "admin_audit_events", "user_sessions", "users")) {
+                    "upstream_credentials", "upstream_subscriptions", "project_repositories", "projects",
+                    "model_catalog", "provider_products", "providers", "admin_audit_events", "user_sessions",
+                    "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {

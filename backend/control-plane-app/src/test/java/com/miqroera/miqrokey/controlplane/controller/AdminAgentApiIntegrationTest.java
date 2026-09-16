@@ -93,7 +93,8 @@ class AdminAgentApiIntegrationTest {
     private void clean() {
         for (String table : new String[]{"agents", "usage_event", "virtual_keys", "project_provider_grant_models",
                 "project_provider_grants", "upstream_credential_versions", "upstream_credentials", "quota_snapshots",
-                "upstream_subscriptions", "project_repositories", "projects", "user_sessions", "users", "admin_audit_events"}) {
+                "upstream_subscriptions", "project_repositories", "projects", "user_sessions", "users",
+                "admin_audit_events"}) {
             try {
                 jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
             } catch (Exception ignored) {
