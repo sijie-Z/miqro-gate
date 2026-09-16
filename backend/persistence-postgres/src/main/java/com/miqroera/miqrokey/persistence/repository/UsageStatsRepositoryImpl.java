@@ -154,6 +154,16 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 conditions.add("crf.subscription_id = :subscriptionId");
                 params.addValue("subscriptionId", filter.subscriptionId());
             }
+            if (filter.teamId() != null) {
+                // Team is an attribution view through the member's keys — an
+                // EXISTS keeps it composable with the other filters and works
+                // unchanged for both usage_event and cache_hit_event aliases.
+                conditions.add("EXISTS (SELECT 1 FROM virtual_keys vkt"
+                        + " JOIN team_memberships tmt ON tmt.user_id = vkt.user_id AND tmt.tenant_id = " + alias
+                        + ".tenant_id" + " WHERE vkt.id = " + alias + ".virtual_key_id AND vkt.tenant_id = " + alias
+                        + ".tenant_id" + " AND tmt.team_id = :teamId)");
+                params.addValue("teamId", filter.teamId());
+            }
             conditions.add(alias + ".occurred_at >= :from AND " + alias + ".occurred_at < :to");
             params.addValue("from", Timestamp.from(filter.from()));
             params.addValue("to", Timestamp.from(filter.to()));
