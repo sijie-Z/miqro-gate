@@ -9,6 +9,7 @@ import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,12 +37,19 @@ class RequestContextResolverTest {
 
     private final RequestContextResolver resolver = new RequestContextResolver();
 
+    private static final UUID BUCKET = UUID.randomUUID();
+
     private RouteSnapshot snapshotWith(Map<String, RouteSnapshot.BindingRecord> bindings) {
+        return snapshotWith(bindings, Map.of());
+    }
+
+    private RouteSnapshot snapshotWith(Map<String, RouteSnapshot.BindingRecord> bindings,
+            Map<UUID, RouteSnapshot.UnattributedPolicyRecord> policies) {
         RouteSnapshot.KeyRecord key = new RouteSnapshot.KeyRecord(KEY_ID, TENANT, USER, "pub-1", new byte[32],
                 "DISABLED", "CLAUDE_CODE", GRANT_A);
         return new RouteSnapshot(1, Instant.EPOCH, Map.of("pub-1", key), Map.of(KEY_ID, bindings),
                 Map.of(CRED_A, credential(CRED_A, PROJECT_A), CRED_B, credential(CRED_B, PROJECT_B)), Map.of(),
-                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), policies);
     }
 
     private static RouteSnapshot.CredentialRecord credential(UUID id, UUID project) {
@@ -155,6 +163,24 @@ class RequestContextResolverTest {
                     assertThat(e.status()).isEqualTo(400);
                     assertThat(e.code()).isEqualTo("CONTEXT_REQUIRED");
                 });
+    }
+
+    @Test
+    @DisplayName("several bindings without context route via the tenant policy (#647 POLICY_ROUTED)")
+    void policyRoutesUnattributed() {
+        RouteSnapshot snapshot = snapshotWith(
+                Map.of("tag-a", binding(PROJECT_A, "tag-a", CRED_A, GRANT_A), "tag-b",
+                        binding(PROJECT_B, "tag-b", CRED_B, GRANT_B)),
+                Map.of(TENANT, new RouteSnapshot.UnattributedPolicyRecord(TENANT, BUCKET, CRED_A, PRODUCT, Set.of())));
+        MockServerHttpRequest request = MockServerHttpRequest.get("/v1/messages").build();
+
+        ResolvedContext context = resolver.resolve(snapshot, keyOf(snapshot), parsedWith("demo"), request);
+
+        assertThat(context.resolutionStatus()).isEqualTo("POLICY_ROUTED");
+        assertThat(context.binding().projectId()).isEqualTo(BUCKET);
+        assertThat(context.binding().credentialId()).isEqualTo(CRED_A);
+        assertThat(context.binding().productId()).isEqualTo(PRODUCT);
+        assertThat(context.binding().grantId()).isNull();
     }
 
     @Test

@@ -247,13 +247,26 @@ public class ProxyController {
             boolean streaming = root != null && root.has("stream") && root.get("stream").asBoolean(false);
 
             java.util.Set<String> allowed = ctx.models();
-            // ADR-0018: the request's binding decides the grant (multi-project keys).
-            java.util.Set<String> grantModels = ctx.snapshot().grantModels(ctx.binding().grantId());
-            if (grantModels != null) {
-                // Grant is the authorization authority: shrinking the grant's
-                // model scope must revoke the model for every existing key of
-                // the project (same semantics as /v1/models).
-                allowed = allowed.stream().filter(grantModels::contains).collect(java.util.stream.Collectors.toSet());
+            if ("POLICY_ROUTED".equals(ctx.context().resolutionStatus())) {
+                // #647: unattributed requests run under the tenant policy's
+                // dedicated credential — never a project grant. Model scope =
+                // policy scope (empty = the product's ACTIVE upstream catalog),
+                // intersected with the key's own allowance (plan Q2).
+                RouteSnapshot.UnattributedPolicyRecord policy = ctx.snapshot().unattributedPolicy(ctx.tenantId());
+                java.util.Set<String> scope = policy != null && !policy.models().isEmpty()
+                        ? policy.models()
+                        : ctx.snapshot().upstreamModels(ctx.binding().productId());
+                allowed = allowed.stream().filter(scope::contains).collect(java.util.stream.Collectors.toSet());
+            } else {
+                // ADR-0018: the request's binding decides the grant (multi-project keys).
+                java.util.Set<String> grantModels = ctx.snapshot().grantModels(ctx.binding().grantId());
+                if (grantModels != null) {
+                    // Grant is the authorization authority: shrinking the grant's
+                    // model scope must revoke the model for every existing key of
+                    // the project (same semantics as /v1/models).
+                    allowed = allowed.stream().filter(grantModels::contains)
+                            .collect(java.util.stream.Collectors.toSet());
+                }
             }
             if (modelName != null && !allowed.contains(modelName)) {
                 return writeError(exchange, new AuthFailureException(HttpStatus.FORBIDDEN, "model_not_allowed",
