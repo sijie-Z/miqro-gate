@@ -452,7 +452,7 @@ class MeVirtualKeyApiIntegrationTest {
             // projects and users; grants reference credentials; etc.
             for (String table : List.of("virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
                     "project_provider_grant_models", "project_provider_grants", "upstream_credential_versions",
-                    "upstream_credentials", "plan_seats", "upstream_subscriptions", "project_memberships", "projects",
+                    "upstream_credentials", "plan_seats", "upstream_subscriptions", "project_memberships", "project_repositories", "projects",
                     "provider_products", "providers", "admin_audit_events", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());

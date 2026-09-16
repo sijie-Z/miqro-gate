@@ -538,7 +538,7 @@ class AdminOrgApiIntegrationTest {
                     "price_snapshot", "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
                     "project_provider_grant_models", "project_provider_grants", "model_catalog",
                     "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
-                    "project_memberships", "team_memberships", "projects", "teams", "provider_products", "providers",
+                    "project_memberships", "team_memberships", "project_repositories", "projects", "teams", "provider_products", "providers",
                     "admin_audit_events", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
