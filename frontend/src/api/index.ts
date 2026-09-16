@@ -94,6 +94,16 @@ export interface OAuthProviderInfo {
   name: string;
 }
 
+export interface RegistrationStatus {
+  enabled: boolean;
+}
+
+/** #550: public read-only self-registration switch state, read before the
+ *  login page renders its register entry (single boolean, no session needed). */
+export function registrationStatus(): Promise<RegistrationStatus> {
+  return get<RegistrationStatus>('/api/v1/auth/registration-status');
+}
+
 export function publicOauthProviders(): Promise<OAuthProviderInfo[]> {
   return get<OAuthProviderInfo[]>('/api/v1/auth/oauth/providers');
 }
