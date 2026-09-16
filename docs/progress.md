@@ -7,10 +7,40 @@
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
 - Current goal: `2026-09-15 并行会话轮` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS（多会话并行推进；已合并进展以 develop git log 为准。在途 PR：#599
-  用途标注、#601 留痕控制台、#602 资料页增强；#596/#597 交付与验证细节见下方 09-15 交接点。
-  此前 rc.19 审查修复波已全量落地并发布）`
-- Last updated: `2026-09-15 CST`
+- Goal status: `IN_PROGRESS（多会话并行推进；已合并进展以 develop git log 为准。在途：分支
+  feat/gateway-context-limit-precheck（#553 网关请求前置预检，见下方 09-16 交接点）、
+  PR #599 用途标注、#601 留痕控制台、#602 资料页增强；#596/#597 交付与验证细节见下方
+  09-15 交接点。此前 rc.19 审查修复波已全量落地并发布）`
+- Last updated: `2026-09-16 CST（#553 网关请求前置预检，分支 feat/gateway-context-limit-precheck）`
+
+## 会话交接点 2026-09-16（网关请求前置预检 #553）
+
+- **#553 已实现并验证**（分支 `feat/gateway-context-limit-precheck`，自 develop `50a9b24`）；
+  提交 `4582d19`（feat）、`e87a46b`（test）、本批文档提交。语义：鉴权 → 模型授权 → **体量预检**
+  → 缓存 → 上游；超限返回 413 `context_limit_exceeded`，**不连接上游**、不进缓存、不记用量。
+- 度量：对**已缓冲的原始字节**按 UTF-8 码点计数（`(b & 0xC0) != 0x80`，零分配），不解析、
+  不重排、不重序列化请求体；码点数为保守上界（码点 ≤ 字节）。
+- 配置（全局）：`miqrokey.gateway.context-limit.enabled`（默认 true）/
+  `.threshold-chars`（默认 200000，非正值回落默认）；对应环境变量
+  `MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED` / `..._THRESHOLD_CHARS`。**逐 Key 阈值为后续项**
+  （issue 文本为「逐 Key 或全局可调」，本版本取全局）。MCP 数据面两条路径本版本不适用该预检，
+  仍只有既有缓冲上限（`payload_too_large`），已在 `docs/api-contract.md` §7.1 显式记录。
+- 观测：零标签计数器 `miqrokey_gateway_context_limit_rejected_total`；拒绝日志仅含
+  requestId / path / 测量字符数 / 阈值，不含正文。
+- **真实验证（`backend/gateway-app`）**：
+  1. `.\mvnw.cmd -B -f backend -pl gateway-app -am test` → BUILD SUCCESS，
+     `Tests run: 341, Failures: 0, Errors: 0, Skipped: 0`，02:18。
+  2. `.\mvnw.cmd -B -f backend -pl gateway-app -am -Pintegration test -Dtest=...`
+     （`ContextLimit*Test` + 三个 ProxyContract + `McpProxyContractTest` +
+     `ContextRegistryIntegrationTest` + `GatewaySecurityHardeningTest`）→ BUILD SUCCESS，
+     `Tests run: 151, Failures: 0, Errors: 0, Skipped: 0`，01:06
+     （Testcontainers PostgreSQL 正常启动）。
+- 五类覆盖对照：① 超限 413 且 mock 上游零请求（三条路径 `/v1/messages`、`/v1/chat/completions`、
+  `/v1/responses`）② 正常/临界请求字节不变转发 ③ 开关关闭行为如旧（`ContextLimitDisabledTest` 3/3）
+  ④ 边界值（`chars <= limit` 放行、+1 拒绝）⑤ 码点计数单测（ASCII/多字节/emoji/空）。
+- 注意：`-pl gateway-app` 不带 `-am` 会从共享 `~/.m2` 取到别条线的旧 `test-support`，
+  导致 surefire「failed to discover tests」；统一加 `-am`。`-Pintegration` 下忽略空 `-Dtest`
+  匹配的属性名是 `-Dsurefire.failIfNoSpecifiedTests=false`。
 
 ## 会话交接点 2026-09-15（资料页增强 #597 + 用途标签澄清 #596）
 
