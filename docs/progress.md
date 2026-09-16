@@ -3155,21 +3155,22 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 ## 2026-09-16 晚间 — #245 F07 告警接线：队列饱和（V60 事实表 + 控制面评估 + 类型注册）
 
-**背景**：F07 三类告警指标里，只有「用量队列饱和」缺数据源——网关侧只有进程内计数与无标签 gauge，没有任何可查事实。issue 原始候选「网关直接写 `alert_events`」被否：`AlertEventDispatcher` 只扫「已有失败投递次数」的行，网关插入的新行永远不会被投递。改为 **网关写事实表 → 控制面 `AlertEvaluator` 评估 → 既有签名/去重/退避/投递链路**。租户承载口径：全局信号固定由默认（seed）租户承载，评估 SQL 按规则自身 `tenant_id` 过滤，**非 seed 租户的同类型规则恒不触发**。
+**背景**：F07 三类告警指标里，只有「用量队列饱和」缺数据源——网关侧只有进程内计数与无标签 gauge，没有任何可查事实。issue 原始候选「网关直接写 `alert_events`」被否：`AlertEventDispatcher` 只扫「已有失败投递次数」的行，网关插入的新行永远不会被投递。改为 **网关写事实表 → 控制面 `AlertEvaluator` 评估 → 既有签名/去重/退避/投递链路**。租户承载口径：全局信号固定由默认（seed）租户承载，评估 SQL 按规则自身 `tenant_id` 过滤，**非 seed 租户的同类型规则在正阈值下恒不触发**（其窗口恒为零行、`COALESCE(SUM(dropped),0)` 恒为 `0`，评估为 `value >= threshold` 才触发）；阈值 `<= 0` 服务端不校验，会在每个去重窗口以 `value = 0` 触发一次——退化行为，但 value 仍是该租户自己的零值，不泄漏平台丢弃数（有专门的固定用例）。
 
 **交付**（分支 `feat/usage-queue-saturation-alert-245`，隔离工作树，base develop@adfb670）：
 
 - **V60__usage_queue_saturation_alert.sql**：① `alert_rules_type_check` DROP 后重加（沿用 V24/V36 模式），新增合法值 `USAGE_QUEUE_SATURATION`；② 新表 `gateway_queue_signal`（只追加事实，`dropped bigint CHECK (dropped > 0)`，索引 `(tenant_id, occurred_at DESC)`，另留 `queued_high_water`/`capacity` 备口径切换）。**未修改任何既有迁移**；issue 里建议的 V59 已被 #684 `quota_enforcement` 占用，故顺延为 V60。
 - **网关**：`QueueSignal` + `QueueSignalWriter` SPI 与 `PostgresQueueSignalWriter`；固定 writer 执行器（有界）；丢弃计数增量在**两处**丢弃点采集；仅 `dropped_delta > 0` 才写；`no-persistence` 模式零 DB 写。**热路径零 JDBC**：`offer()` 只自增计数，写库发生在既有定时慢路径与 writer 调度器上。
 - **控制面**：`AlertEvaluator` 新增 `case "USAGE_QUEUE_SATURATION"`（近 1 小时 `SUM(dropped)`，SQL 带 `tenant_id = :tenantId`）；同批给 4 个周期型指标 SQL 补 `tenant_id` 过滤（口径漂移修正，单租户部署零行为变化）；`AlertRuleService` 类型校验列表与错误文案补齐。
-- **类型注册 4 处** + 前端下拉/列表标签 + `isQueueSaturationType` 的条数型阈值文案；i18n 词典补 1 条 `'队列饱和'`。
+- **类型注册 4 处**（后端 `AlertRuleService.RULE_TYPES`、前端 `types/api.ts` 联合类型、`NextAdminAlertRulesView` 的类型选项、`AlertEvaluator` 的 case 分支；算上 V60 CHECK、服务端错误文案、i18n 词典与 api-contract 描述，实际触及 **8 处**）+ 前端下拉/列表标签 + `isQueueSaturationType` 的条数型阈值文案；i18n 词典补 1 条 `'队列饱和'`。
 - **文档 5 处**：api-contract / configuration-reference / database-schema（§租户级口径写明）/ feature-backlog / operations-runbook。
 
 **验证**：
 
-- 后端全量 `mvnw.cmd -B -f backend -Pintegration verify`：**EXIT=0，BUILD SUCCESS，11 个 reactor 模块全 SUCCESS**；各模块聚合 `Tests run` 全为 `Failures: 0, Errors: 0, Skipped: 0`（Domain 130 / Provider SPI 8 / Provider Adapters 166 / Route Snapshot 5 / Cache SPI 4 / Usage Queue SPI 21 / Control Plane 678 / Test Support 109 / Inference Gateway 357）。关键用例：`UsageQueueSaturationAlertIntegrationTest` **8/8**、`PostgresUsageEventBusTest` **13/13**、`SoakIntegrationTest` 1/1（`dropped == 0` 不变式）。Flyway：`Successfully validated 60 migrations`，控制面与网关两侧日志均出现 `Migrating schema "public" to version "60 - usage queue saturation alert"`。
+- 后端全量 `mvnw.cmd -B -f backend -Pintegration verify`：**EXIT=0，BUILD SUCCESS，11 个 reactor 模块全 SUCCESS**；各模块聚合 `Tests run` 全为 `Failures: 0, Errors: 0, Skipped: 0`（Domain 130 / Provider SPI 8 / Provider Adapters 166 / Route Snapshot 5 / Cache SPI 4 / Usage Queue SPI 21 / Control Plane 679 / Test Support 109 / Inference Gateway 357）。关键用例：`UsageQueueSaturationAlertIntegrationTest` **9/9**、`PostgresUsageEventBusTest` **13/13**、`SoakIntegrationTest` 1/1（`dropped == 0` 不变式）。Flyway：`Successfully validated 60 migrations`，控制面与网关两侧日志均出现 `Migrating schema "public" to version "60 - usage queue saturation alert"`。
 - **变异校验（证明租户过滤是承重的）**：删除该分支 SQL 里的 `tenant_id = :tenantId AND` → 同 IT `Tests run: 2, Failures: 2` BUILD FAILURE；恢复后通过。
-- 前端（冻结树）：`run lint` EXIT=0（0 error；1 条既有 warning `NewShell.vue:809 vue/no-template-shadow`，非本批文件）、`run typecheck` EXIT=0（app/spec/node 三工程）、`run test` **59 files / 331 tests 全过**、`run build` EXIT=0（2634 modules，built in 35.51s；esbuild css minify 对拼接产物的 `<stdin>` 告警为既有，改动前构建日志同样存在）。
+- **变异校验（证明退化阈值用例是承重的）**：把 `otherTenantRuleWithZeroThresholdFiresWithZeroValue` 的阈值 0 改回 1（邻近正阈值用例的取值）→ `Tests run: 1, Failures: 1 ... expected: 1L` BUILD FAILURE；恢复为 0 后 `Tests run: 9, Failures: 0` 通过。该用例确实钉住 `value >= threshold` 边界，不是空跑通过。
+- 前端（冻结树）：`run typecheck` EXIT=0（app/spec/node 三工程）、`run test` **59 files / 332 tests 全过**、`run build` EXIT=0（2634 modules，built in 40.45s；esbuild css minify 对拼接产物的 `<stdin>` 告警为既有，改动前构建日志同样存在）。`run lint` 最后一次改动后未再整树执行（其脚本自带 `--fix`，见下条），改为按文件复核：`npx eslint src/views/next/NextAdminAlertRulesView.vue src/__tests__/NextAdminAlertRulesView.spec.ts` → EXIT=0，**0 error**（260 条全部是本机 CRLF 检出的 `Delete ␍`，与未改动文件同一既有现象，且无一是 error）。
 - `docker compose -f deploy/compose.yaml config` EXIT=0。
 
 **边界**：

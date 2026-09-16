@@ -281,11 +281,11 @@ URL（创建时经控制面 SSRF 门控：默认仅公网 https，`MIQROKEY_CONT
 
 ### `gateway_queue_signal` (V60，F07/#245)
 
-网关用量队列的**丢弃事实**表（只追加，不含正文/密钥）：`tenant_id`（NOT NULL，FK `tenants`）、`occurred_at`、`dropped bigint`（本次上报窗口丢失的事件条数，`CHECK (dropped > 0)`——零丢弃不可表示，健康网关不写行）、`queued_high_water`（该窗口内队列长度采样峰值，可空）、`capacity`、`saturation_mode`（`DROP|WRITE_THROUGH`，可空）、`created_at`。索引 `(tenant_id, occurred_at DESC)`。
+网关用量队列的**丢弃事实**表（只追加，不含正文/密钥）：`tenant_id`（NOT NULL，FK `tenants`）、`occurred_at`、`dropped bigint`（本次上报窗口丢失的事件条数，`CHECK (dropped > 0)`——零丢弃不可表示，健康网关不写行）、`queued_high_water`（**进程生命周期内**单调不减的队列长度高水位，只在丢弃路径上采样、不随窗口重置，可空——同一进程后续每一行都携带同一个值，读单行不能还原「本窗口峰值」）、`capacity`、`saturation_mode`（`DROP|WRITE_THROUGH`，可空）、`created_at`。索引 `(tenant_id, occurred_at DESC)`。
 
 写入方是 Gateway（`queue-spi` 的 `PostgresQueueSignalWriter`）：`PostgresUsageEventBus` 在慢路径定时任务里用 CAS 认领「自上次上报以来新增的丢弃数」，交给既有有界 writer 调度器写一行；写失败/调度被拒时归还 delta 下轮重试——同一批丢失最终**恰好上报一次**。`WRITE_THROUGH` 模式不丢事件（写穿失败回退为计数丢弃，仍会记一行）。热路径 `offer()` 只自增计数、零 JDBC。
 
-承载租户固定为迁移播种的 seed 租户（`code='default'`，V1）——队列是全进程唯一的，信号因此是**平台级**事实；规则侧照常按 `tenant_id` 过滤，故只有 seed 租户的规则能评估到它。评估：`USAGE_QUEUE_SATURATION` 取近 1 小时 `SUM(dropped)`（条数，非比例）。
+承载租户固定为迁移播种的 seed 租户（`code='default'`，V1）——队列是全进程唯一的，信号因此是**平台级**事实；规则侧照常按 `tenant_id` 过滤，故只有 seed 租户的规则能评估到它（其他租户聚合到零行，`COALESCE(SUM(dropped), 0)` 恒为 `0`；评估为「`value >= threshold` 才触发」，故正阈值下恒不触发，也读不到他租户的数字；`threshold <= 0` 不受校验，会每个去重窗口以 `value = 0` 触发一次）。评估：`USAGE_QUEUE_SATURATION` 取近 1 小时 `SUM(dropped)`（条数，非比例）。
 
 ### `reconciliation_reports` / `reconciliation_rows` (V42，F19 端点层)
 

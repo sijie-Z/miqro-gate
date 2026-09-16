@@ -338,7 +338,11 @@ onMounted(() => {
                 data-testid="rule-create-dedupe"
               />
             </div>
-            <p v-if="isQueueSaturationType" class="next-alert-rules__approval-hint">
+            <p
+              v-if="isQueueSaturationType"
+              class="next-alert-rules__approval-hint"
+              data-testid="rule-saturation-hint"
+            >
               网关用量队列写满时丢弃的事件条数（近 1 小时），非比例；网关侧为零丢弃时不写任何数据。
             </p>
           </template>

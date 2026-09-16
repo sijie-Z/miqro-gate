@@ -18,10 +18,16 @@
 --
 -- tenant_id carries the GLOBAL gateway signal under the default (seed) tenant
 -- (00000000-0000-0000-0000-000000000001, V1) because the queue is a process
--- resource, not a per-request one. Evaluation filters alert_rules by
--- tenant_id, so the platform-level signal fires platform-level rules and a
--- rule owned by any other tenant is never triggered by it. In a single-tenant
--- deployment this is strictly equivalent to a global signal.
+-- resource, not a per-request one. Evaluation filters alert_rules by tenant_id,
+-- so the platform-level signal fires platform-level rules and is invisible to
+-- every other tenant: a foreign rule's window aggregates zero rows and
+-- COALESCE(SUM(dropped), 0) evaluates to exactly 0. AlertEvaluator fires on
+-- `value >= threshold`, so such a rule stays quiet for every positive
+-- threshold. A non-positive threshold (nothing in the API, the service or this
+-- schema rejects one) fires once per dedupe window with value 0 - a degenerate
+-- rule, but still never another tenant's number, and the same behaviour every
+-- other count metric already has. In a single-tenant deployment this is
+-- strictly equivalent to a global signal.
 --
 -- Semantics: `dropped` is the number of usage/lifecycle facts the gateway gave
 -- up on since the previous row — a count, not a ratio. It measures LOSS. A

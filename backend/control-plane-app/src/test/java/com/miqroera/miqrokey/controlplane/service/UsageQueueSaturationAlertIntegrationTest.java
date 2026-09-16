@@ -200,7 +200,7 @@ class UsageQueueSaturationAlertIntegrationTest {
     }
 
     @Test
-    @DisplayName("a non-seed tenant's rule never fires on the platform's drop facts")
+    @DisplayName("a non-seed tenant's rule with a positive threshold never fires on the platform's drop facts")
     void otherTenantRuleNeverFires() throws Exception {
         createOtherTenant();
         UUID otherRule = insertRuleFor(OTHER_TENANT, 1.0);
@@ -215,6 +215,32 @@ class UsageQueueSaturationAlertIntegrationTest {
         Long otherTenantEvents = jdbc.queryForObject("SELECT COUNT(*) FROM alert_events WHERE tenant_id = :tenantId",
                 new MapSqlParameterSource("tenantId", OTHER_TENANT), Long.class);
         assertThat(otherTenantEvents).isZero();
+    }
+
+    /**
+     * Pins the one boundary where the tenant scope is <em>not</em> enough to keep a
+     * foreign rule quiet: nothing in the API, the service or the schema rejects a
+     * non-positive threshold, and evaluation fires on {@code value >= threshold},
+     * so a {@code 0} rule clears its bar against an empty window. The event's value
+     * is still the foreign tenant's own (zero) aggregate — the platform's drops are
+     * not observable through it — but the rule does fire, once per dedupe window.
+     * Documented behaviour, not an accident.
+     */
+    @Test
+    @DisplayName("a non-seed tenant's rule with a zero threshold fires with value 0, leaking no platform count")
+    void otherTenantRuleWithZeroThresholdFiresWithZeroValue() throws Exception {
+        createOtherTenant();
+        UUID otherRule = insertRuleFor(OTHER_TENANT, 0.0);
+
+        insertSignal(SEED_TENANT, 9, Instant.now());
+        alertEvaluator.evaluateAll();
+
+        assertThat(countEvents(otherRule.toString())).isEqualTo(1L);
+        // The value is the foreign tenant's own empty-window aggregate, not 9.
+        assertThat(eventValue(otherRule.toString())).isEqualByComparingTo("0");
+        // And it is not a retry storm: the same hour bucket stays deduplicated.
+        alertEvaluator.evaluateAll();
+        assertThat(countEvents(otherRule.toString())).isEqualTo(1L);
     }
 
     // ------------------------------------------------------------------
