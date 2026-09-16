@@ -20,13 +20,25 @@ import java.util.UUID;
  * </ul>
  *
  * <p>
- * Never carries prompt, code, tool payloads, or model content.
+ * Never carries prompt, code, tool payloads, or model content. {@code clientIp}
+ * is the calling-party network address (transport peer, or the rightmost
+ * non-trusted X-Forwarded-For hop behind a configured trusted proxy) — recorded
+ * for abuse forensics, nullable when unresolvable.
  * </p>
  */
 public record UsageEvent(UUID id, UUID tenantId, String providerRequestId, UUID virtualKeyId, UUID projectId,
         UUID providerProductId, UUID credentialId, String modelId, CacheLevel cacheLevel, TokenBucket tokens,
         Long latencyMs, Integer upstreamStatusCode, byte[] cacheKey, boolean isComplete, boolean usageMissing,
-        String gatewayRequestId, Instant occurredAt) {
+        String gatewayRequestId, Instant occurredAt, String clientIp, ContextAttribution attribution) {
+
+    /**
+     * CAA per-request attribution metadata (Spec v1.1 §7.1): the client's CLAIMS
+     * kept for audit plus the server's resolution status. Null when the request
+     * carried no context information.
+     */
+    public record ContextAttribution(String sessionId, UUID activityId, UUID claimedProjectId, String resolutionStatus,
+            String claimSource, String claimConfidence) {
+    }
 
     public UsageEvent {
         cacheKey = cacheKey != null ? cacheKey.clone() : null;

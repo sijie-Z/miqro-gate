@@ -12,6 +12,7 @@ import type {
   McpAclMode,
   ModelApprovalStatus,
   ProviderProductView,
+  UnattributedPolicyView,
   UsageGroupBy,
   UserRole,
   UserStatusValue,
@@ -60,6 +61,7 @@ import type {
   UserProjectMembership,
   UserResponse,
   UsageSummary,
+  HourlyUsageReport,
   ValidateCredentialResponse,
   VirtualKeyView,
   WebhookDelivery,
@@ -67,6 +69,7 @@ import type {
   McpAccessLogEntry,
   McpResiliencePolicy,
   SkillRevisionView,
+  AdminRetentionLogView,
 } from '@/types/generated-api';
 import type { components } from '@/types/generated';
 
@@ -197,8 +200,16 @@ export function createUser(body: {
   return post<UserCreatedResponse>('/api/v1/admin/users', body);
 }
 
+/** PATCH /admin/users/{id} — displayName and/or status (at least one, #614). */
+export function updateUser(
+  id: string,
+  body: { displayName?: string; status?: UserStatusValue },
+): Promise<AdminUser> {
+  return patch<AdminUser>(`/api/v1/admin/users/${id}`, body);
+}
+
 export function updateUserStatus(id: string, status: UserStatusValue): Promise<AdminUser> {
-  return patch<AdminUser>(`/api/v1/admin/users/${id}`, { status });
+  return updateUser(id, { status });
 }
 
 export function resetUserPassword(id: string): Promise<UserCreatedResponse> {
@@ -239,6 +250,14 @@ export function createProject(body: {
   projectTag?: string;
 }): Promise<Project> {
   return post<Project>('/api/v1/admin/projects', body);
+}
+
+/** PATCH /admin/projects/{id} — name / projectTag / status (#617). */
+export function updateProject(
+  id: string,
+  body: { name?: string; projectTag?: string; status?: string },
+): Promise<Project> {
+  return patch<Project>(`/api/v1/admin/projects/${id}`, body);
 }
 
 export function listProjectMembers(projectId: string): Promise<MemberView[]> {
@@ -388,6 +407,23 @@ export function clearMcpAccessGrants(serviceId: string, toolId?: string): Promis
 
 export function listCredentials(): Promise<CredentialView[]> {
   return get<CredentialView[]>('/api/v1/admin/credentials');
+}
+
+// #647: tenant unattributed-request policy (settings page).
+export function getUnattributedPolicy(): Promise<UnattributedPolicyView> {
+  return get<UnattributedPolicyView>('/api/v1/admin/unattributed-policy');
+}
+
+export function putUnattributedPolicy(body: {
+  credentialId: string;
+  providerProductId?: string;
+  models?: string[];
+}): Promise<UnattributedPolicyView> {
+  return put<UnattributedPolicyView>('/api/v1/admin/unattributed-policy', body);
+}
+
+export function deleteUnattributedPolicy(): Promise<void> {
+  return del('/api/v1/admin/unattributed-policy');
 }
 
 export function getCredential(id: string): Promise<CredentialDetailView> {
@@ -582,7 +618,10 @@ export function adminListSkillRevisions(id: string, limit = 20): Promise<SkillRe
   return get<SkillRevisionView[]>(`/api/v1/admin/skills/${id}/revisions?limit=${limit}`);
 }
 
-export function adminActivateSkillRevision(id: string, revision: number): Promise<SkillRevisionView> {
+export function adminActivateSkillRevision(
+  id: string,
+  revision: number,
+): Promise<SkillRevisionView> {
   return post<SkillRevisionView>(`/api/v1/admin/skills/${id}/revisions/${revision}/activate`);
 }
 
@@ -962,7 +1001,11 @@ export function adminTestRunModel(
   modelId: string,
   prompt?: string,
 ): Promise<ModelTestRunResult> {
-  return post<ModelTestRunResult>('/api/v1/admin/models/test-run', { providerProductId, modelId, prompt });
+  return post<ModelTestRunResult>('/api/v1/admin/models/test-run', {
+    providerProductId,
+    modelId,
+    prompt,
+  });
 }
 
 // ---- MCP route rules (F11, Tencent doc 135482) ----
@@ -1048,12 +1091,29 @@ export function adminUsageRecords(query: {
   userId?: string;
   projectId?: string;
   modelId?: string;
+  clientIp?: string;
 }): Promise<UsageRecordPage> {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
     if (value !== undefined && value !== '') params.set(key, String(value));
   }
   return get<UsageRecordPage>(`/api/v1/admin/usage/records?${params.toString()}`);
+}
+
+/** #634: per-hour token table, cross-tabbed by project and user/team. */
+export function adminUsageHourly(query: {
+  date?: string;
+  days?: number;
+  dimension?: string;
+  userId?: string;
+  projectId?: string;
+  tzOffsetMinutes?: number;
+}): Promise<HourlyUsageReport> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  }
+  return get<HourlyUsageReport>(`/api/v1/admin/usage/hourly?${params.toString()}`);
 }
 
 export function createExport(
@@ -1242,10 +1302,7 @@ export async function exportAuditCsv(query: Omit<AuditQuery, 'size'>): Promise<A
 
 export type ReconciliationStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
 export type ReconciliationVerdict =
-  | 'MATCHED'
-  | 'PARTIAL'
-  | 'UNMATCHED_PROVIDER'
-  | 'UNMATCHED_LOCAL';
+  'MATCHED' | 'PARTIAL' | 'UNMATCHED_PROVIDER' | 'UNMATCHED_LOCAL';
 
 /** Report metadata view; identical shape for create, list entries and GET /{id}. */
 export interface ReconciliationReport {
@@ -1305,4 +1362,69 @@ export function createReconciliation(
 ): Promise<ReconciliationReport> {
   const qs = new URLSearchParams(params).toString();
   return uploadBytes<ReconciliationReport>(`/api/v1/admin/reconciliations?${qs}`, content);
+}
+
+// ---------------------------------------------------------------------------
+// Retention logs (ADR-0014 §8, admin console)
+// ---------------------------------------------------------------------------
+
+export interface RetentionLogQuery {
+  userId?: string;
+  direction?: string;
+  protocol?: string;
+  from?: string;
+  to?: string;
+}
+
+/** Filtered, decrypted page over the retention ledger (SYSTEM_ADMIN). */
+export function retentionLogs(
+  query: RetentionLogQuery & { page?: number; size?: number },
+): Promise<AdminRetentionLogView[]> {
+  const params = new URLSearchParams();
+  if (query.userId) params.set('userId', query.userId);
+  if (query.direction) params.set('direction', query.direction);
+  if (query.protocol) params.set('protocol', query.protocol);
+  if (query.from) params.set('from', query.from);
+  if (query.to) params.set('to', query.to);
+  if (query.page !== undefined) params.set('page', String(query.page));
+  if (query.size !== undefined) params.set('size', String(query.size));
+  return get<AdminRetentionLogView[]>(`/api/v1/admin/retention-logs?${params.toString()}`);
+}
+
+/**
+ * Downloads the filtered retention ledger as a compliance CSV (same shape as
+ * the audit export: 50k-row cap declared via {@code X-MiQroKey-Truncated}).
+ */
+export async function exportRetentionLogsCsv(query: RetentionLogQuery): Promise<AuditCsvExport> {
+  const params = new URLSearchParams();
+  if (query.userId) params.set('userId', query.userId);
+  if (query.direction) params.set('direction', query.direction);
+  if (query.protocol) params.set('protocol', query.protocol);
+  if (query.from) params.set('from', query.from);
+  if (query.to) params.set('to', query.to);
+  const response = await fetch(`/api/v1/admin/retention-logs/export?${params.toString()}`, {
+    headers: { Accept: 'text/csv' },
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    let details:
+      { detail?: string; code?: string; status?: number; requestId?: string } | undefined;
+    try {
+      details = (await response.json()) as typeof details;
+    } catch {
+      // Not JSON — generic error below.
+    }
+    throw new ApiError({
+      type: 'about:blank',
+      title: '导出失败',
+      status: response.status,
+      code: details?.code ?? 'HTTP_ERROR',
+      detail: details?.detail,
+      requestId: details?.requestId ?? '',
+    });
+  }
+  return {
+    csv: await response.text(),
+    truncated: response.headers.get('X-MiQroKey-Truncated') === 'true',
+  };
 }

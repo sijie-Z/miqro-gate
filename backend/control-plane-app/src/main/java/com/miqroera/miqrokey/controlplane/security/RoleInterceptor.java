@@ -40,8 +40,7 @@ public class RoleInterceptor implements HandlerInterceptor {
                 return false;
             }
             if (userContext.getUser().role() != UserRole.SYSTEM_ADMIN) {
-                sendProblem(response, 403, "FORBIDDEN", "Admin access requires SYSTEM_ADMIN role",
-                        resolveRequestId(request));
+                sendProblem(response, 403, "FORBIDDEN", "该操作需要系统管理员（SYSTEM_ADMIN）权限。", resolveRequestId(request));
                 return false;
             }
             return true;
@@ -87,6 +86,11 @@ public class RoleInterceptor implements HandlerInterceptor {
         try {
             response.setStatus(status);
             response.setContentType("application/problem+json");
+            // #630: without an explicit charset the servlet writer defaults to
+            // ISO-8859-1 and Chinese titles turn into '?' — the problem+json
+            // main path (GlobalExceptionHandler) already sets UTF-8; this raw
+            // writer is the only bypass.
+            response.setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8.name());
             response.getWriter().write(String.format(
                     "{\"type\":\"about:blank\",\"title\":\"%s\",\"status\":%d,\"code\":\"%s\",\"requestId\":\"%s\"}",
                     escapeJson(title), status, escapeJson(code), escapeJson(requestId)));

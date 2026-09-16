@@ -14,7 +14,7 @@ import {
   DialogRoot,
   DialogTitle,
 } from 'radix-vue';
-import { useAttrs } from 'vue';
+import { onUnmounted, useAttrs } from 'vue';
 
 const props = withDefaults(
   defineProps<{
@@ -39,6 +39,14 @@ const emit = defineEmits<{
 defineOptions({ inheritAttrs: false });
 
 const attrs = useAttrs();
+
+// Radix's modal body scroll/pointer lock can be left behind when a close
+// races the exit path; only clear it once no modal layer is still open.
+onUnmounted(() => {
+  if (!document.querySelector('[role="dialog"][data-state="open"]')) {
+    document.body.style.pointerEvents = '';
+  }
+});
 
 function dismiss() {
   if (!props.dismissible) return;
@@ -91,8 +99,14 @@ function dismiss() {
   position: fixed;
   inset: 0;
   background: rgba(17, 17, 19, 0.42);
-  animation: ui-dialog-fade var(--ui-ease);
   z-index: 1500;
+}
+
+/* Enter-only animations, scoped to the open state: an unconditional
+   animation makes radix treat every close as "wait for the exit animation"
+   and the layer would never unmount. */
+.ui-dialog__overlay[data-state='open'] {
+  animation: ui-dialog-fade 200ms linear;
 }
 
 .ui-dialog__content {
@@ -110,7 +124,10 @@ function dismiss() {
   padding: var(--ui-space-5);
   outline: none;
   z-index: 1501;
-  animation: ui-dialog-rise 160ms ease;
+}
+
+.ui-dialog__content[data-state='open'] {
+  animation: ui-dialog-pop 200ms var(--ui-ease-zoom);
 }
 
 .ui-dialog__head {
@@ -179,10 +196,11 @@ function dismiss() {
   }
 }
 
-@keyframes ui-dialog-rise {
+@keyframes ui-dialog-pop {
   from {
     opacity: 0;
-    transform: translate(-50%, -48%);
+    transform: translate(-50%, -50%) scale(0.9);
   }
 }
+
 </style>

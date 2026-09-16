@@ -100,6 +100,16 @@ public final class GatewayTestKeys {
     public static final KeyFixture OTHER_KEY = KeyFixture.create(OTHER_PROJECT_TAG, OTHER_PROJECT_ID, PRODUCT_ID,
             OTHER_CREDENTIAL_ID, MODELS_ALLOWED);
 
+    /**
+     * #633 CAA: one key core with TWO project bindings (resolution-ladder tests).
+     */
+    public static final KeyFixture MULTI_BOUND_KEY = KeyFixture.create("demo-multi", PROJECT_ID, PRODUCT_ID,
+            CREDENTIAL_ID, MODELS_ALLOWED);
+
+    /** Second binding of {@link #MULTI_BOUND_KEY}: same core, another project. */
+    public static final KeyFixture MULTI_BOUND_KEY_SECOND = MULTI_BOUND_KEY.rebound("demo-multi-2", OTHER_PROJECT_ID,
+            OTHER_CREDENTIAL_ID, UUID.randomUUID());
+
     /** Well-formed key that does NOT exist in the fixture snapshot. */
     public static final KeyFixture UNKNOWN_KEY = KeyFixture.create("ghost-proj", UUID.randomUUID(), PRODUCT_ID,
             UUID.randomUUID(), MODELS_ALLOWED);
@@ -188,7 +198,7 @@ public final class GatewayTestKeys {
     private static RouteSnapshot snapshotFull(String baseUrl, Map<String, McpResiliencePolicy> policies,
             Map<String, Integer> upstreamTimeoutsMs, Map<UUID, RetentionConfig> retentionByTenant, KeyFixture... keys) {
         Map<String, RouteSnapshot.KeyRecord> keyMap = new LinkedHashMap<>();
-        Map<UUID, RouteSnapshot.BindingRecord> bindingMap = new LinkedHashMap<>();
+        Map<UUID, Map<String, RouteSnapshot.BindingRecord>> bindingMap = new LinkedHashMap<>();
         Map<UUID, RouteSnapshot.CredentialRecord> credentialMap = new LinkedHashMap<>();
         Map<UUID, Set<String>> modelsMap = new LinkedHashMap<>();
         Map<UUID, Set<String>> grantModelsMap = new LinkedHashMap<>();
@@ -197,7 +207,8 @@ public final class GatewayTestKeys {
         Map<UUID, UUID> providerIdsMap = new LinkedHashMap<>();
         for (KeyFixture key : keys) {
             keyMap.put(key.publicKeyId(), key.keyRecord(TENANT_ID));
-            bindingMap.put(key.keyId(), key.bindingRecord());
+            bindingMap.computeIfAbsent(key.keyId(), k -> new LinkedHashMap<>()).put(key.projectTag(),
+                    key.bindingRecord());
             credentialMap.put(key.credentialId(), key.credentialRecord(baseUrl));
             modelsMap.put(key.keyId(), key.models());
             grantModelsMap.put(key.grantId(), key.grantModels());
@@ -210,7 +221,7 @@ public final class GatewayTestKeys {
         }
         return new RouteSnapshot(1, Instant.EPOCH, keyMap, bindingMap, credentialMap, modelsMap, grantModelsMap,
                 upstreamModelsMap, productCodesMap, providerIdsMap, mcpConsumers(),
-                mcpServices(baseUrl, policies, upstreamTimeoutsMs), retentionByTenant);
+                mcpServices(baseUrl, policies, upstreamTimeoutsMs), retentionByTenant, Map.of());
     }
 
     // ------------------------------------------------------------------
@@ -427,7 +438,14 @@ public final class GatewayTestKeys {
         }
 
         public RouteSnapshot.BindingRecord bindingRecord() {
-            return new RouteSnapshot.BindingRecord(keyId, projectId, projectTag, credentialId, productId);
+            return new RouteSnapshot.BindingRecord(keyId, projectId, projectTag, credentialId, productId, grantId);
+        }
+
+        /** The same key core re-bound to another project (CAA multi-binding, #633). */
+        public KeyFixture rebound(String tag, UUID reboundProjectId, UUID reboundCredentialId, UUID reboundGrantId) {
+            return new KeyFixture(presented, publicKeyId, rawSecret, digest, keyId, tag, reboundProjectId, productId,
+                    reboundCredentialId, models, reboundGrantId, productCode, grantModels, upstreamModels, userId,
+                    providerId);
         }
 
         public RouteSnapshot.CredentialRecord credentialRecord(String baseUrl) {

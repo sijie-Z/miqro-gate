@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.controlplane.service;
 
 import com.miqroera.miqrokey.controlplane.config.AuthProperties;
+import com.miqroera.miqrokey.controlplane.dto.BoundProjectView;
 import com.miqroera.miqrokey.controlplane.dto.CreateVirtualKeyRequest;
 import com.miqroera.miqrokey.controlplane.dto.CreateVirtualKeyResponse;
 import com.miqroera.miqrokey.controlplane.dto.MeGrantsResponse;
@@ -34,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -135,20 +137,24 @@ public class VirtualKeyService {
 
     private CreateVirtualKeyResponse createKey(UUID tenantId, User memberSubject, UUID ownerUserId,
             CreateVirtualKeyRequest request, String requestId, UUID actorId, UUID delegatedTargetId) {
-        Project project = projectRepository.findById(request.projectId()).filter(p -> p.tenantId().equals(tenantId))
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "PROJECT_NOT_FOUND", "Project not found"));
-        if (project.status() != ProjectStatus.ACTIVE) {
-            throw new ApiException(HttpStatus.CONFLICT, "PROJECT_INACTIVE", "The project is not active");
+        // ADR-0018: one key may serve several projects. `projectIds` is the full
+        // list (first element = primary, which keeps the explicit grant pick);
+        // legacy `projectId` is treated as a single-element list.
+        LinkedHashSet<UUID> requestedIds = new LinkedHashSet<>();
+        if (request.projectIds() != null) {
+            requestedIds.addAll(request.projectIds());
         }
-        if (project.projectTag() == null || project.projectTag().isBlank()) {
-            throw new ApiException(HttpStatus.CONFLICT, "ROUTING_TAG_MISSING",
-                    "项目尚未设置路由标签，无法创建 Virtual Key；请联系管理员在项目设置中补充后重试");
+        if (requestedIds.isEmpty() && request.projectId() != null) {
+            requestedIds.add(request.projectId());
         }
-        if (memberSubject.role() != UserRole.SYSTEM_ADMIN
-                && !membershipRepository.exists(project.id(), memberSubject.id())) {
-            throw new ApiException(HttpStatus.FORBIDDEN, "PROJECT_MEMBERSHIP_REQUIRED",
-                    delegatedTargetId != null ? "目标用户不是该项目成员，不能代其建钥。" : "You are not a member of this project");
+        if (requestedIds.isEmpty()) {
+            // Defense in depth: bean validation requires projectId, so this is
+            // unreachable through the API — the invariant stays documented.
+            throw new ApiException(HttpStatus.BAD_REQUEST, "PROJECT_REQUIRED", "请至少选择一个项目。");
         }
+        List<UUID> projectIds = List.copyOf(requestedIds);
+
+        Project project = requireBindableProject(tenantId, memberSubject, delegatedTargetId, projectIds.get(0));
 
         ProjectProviderGrant grant = grantRepository.findById(request.credentialGrantId())
                 .filter(g -> g.tenantId().equals(tenantId)).filter(g -> g.projectId().equals(project.id()))
@@ -157,6 +163,21 @@ public class VirtualKeyService {
                         "The credential grant does not match the project and provider product"));
         if (grant.status() != GrantStatus.ACTIVE) {
             throw new ApiException(HttpStatus.CONFLICT, "GRANT_INACTIVE", "The credential grant is not active");
+        }
+
+        // Additional projects bind through their own ACTIVE grant of the SAME
+        // product (ADR-0018 MVP rule): the server picks the earliest one —
+        // deterministic and audited; per-project credential choice is a later UX.
+        List<BindingPlan> plannedBindings = new ArrayList<>();
+        plannedBindings.add(new BindingPlan(project.id(), grant.id()));
+        for (UUID extraId : projectIds.subList(1, projectIds.size())) {
+            Project extra = requireBindableProject(tenantId, memberSubject, delegatedTargetId, extraId);
+            ProjectProviderGrant extraGrant = grantRepository.findAllByProjectIdAndStatus(extra.id(), "ACTIVE").stream()
+                    .filter(g -> g.providerProductId().equals(request.providerProductId()))
+                    .min(Comparator.comparing(ProjectProviderGrant::createdAt).thenComparing(ProjectProviderGrant::id))
+                    .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "PROJECT_GRANT_MISSING",
+                            "项目「" + extra.name() + "」下没有该供应商产品的可用授权，无法绑定；" + "请先在该项目创建授权，或取消勾选该项目。"));
+            plannedBindings.add(new BindingPlan(extra.id(), extraGrant.id()));
         }
 
         Set<String> grantModels = grantRepository.findModelIds(grant.id());
@@ -178,21 +199,66 @@ public class VirtualKeyService {
                     grant.upstreamCredentialId(), request.purpose(), request.name(), cachePolicy,
                     VirtualKeyStatus.ACTIVE, now, null, null, null, 0L);
             keyRepository.insert(key);
-            bindingRepository.insert(new KeyProjectBinding(UUID.randomUUID(), tenantId, keyId, project.id(),
-                    KeyProjectBindingStatus.ACTIVE, 0L, now, now));
+            for (BindingPlan planned : plannedBindings) {
+                bindingRepository.insert(new KeyProjectBinding(UUID.randomUUID(), tenantId, keyId, planned.projectId(),
+                        planned.grantId(), KeyProjectBindingStatus.ACTIVE, 0L, now, now));
+            }
             keyRepository.replaceKeyModels(tenantId, keyId, requested);
             auditService.record(tenantId, actorId, "VIRTUAL_KEY_CREATE", "VIRTUAL_KEY", keyId,
                     delegatedTargetId != null
                             ? auditSummary("name", sanitize(request.name()), "purpose", request.purpose(), "models",
-                                    requested.size(), "cachePolicy", cachePolicy, "targetUserId", delegatedTargetId)
+                                    requested.size(), "cachePolicy", cachePolicy, "projects", plannedBindings.size(),
+                                    "targetUserId", delegatedTargetId)
                             : auditSummary("name", sanitize(request.name()), "purpose", request.purpose(), "models",
-                                    requested.size(), "cachePolicy", cachePolicy),
+                                    requested.size(), "cachePolicy", cachePolicy, "projects", plannedBindings.size()),
                     requestId);
             routeRefreshPublisher.publishChanged();
-            return response(keyId, material, now);
+            return response(keyId, material, now, boundProjects(plannedBindings));
         } finally {
             material.destroy();
         }
+    }
+
+    /**
+     * Shared per-project checks for key creation (primary and additional projects
+     * alike): exists in tenant, ACTIVE, has a routing tag, and the member (or the
+     * delegation target) belongs to it.
+     */
+    private Project requireBindableProject(UUID tenantId, User memberSubject, UUID delegatedTargetId, UUID projectId) {
+        Project project = projectRepository.findById(projectId).filter(p -> p.tenantId().equals(tenantId))
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "PROJECT_NOT_FOUND", "Project not found"));
+        if (project.system()) {
+            // #647: the UNATTRIBUTED bucket is an accounting sink, never a key binding.
+            throw new ApiException(HttpStatus.BAD_REQUEST, "PROJECT_NOT_SELECTABLE", "系统项目（未归属桶）不可被选为虚拟密钥的绑定项目。");
+        }
+        if (project.status() != ProjectStatus.ACTIVE) {
+            throw new ApiException(HttpStatus.CONFLICT, "PROJECT_INACTIVE", "The project is not active");
+        }
+        if (project.projectTag() == null || project.projectTag().isBlank()) {
+            throw new ApiException(HttpStatus.CONFLICT, "ROUTING_TAG_MISSING",
+                    "项目尚未设置路由标签，无法创建 Virtual Key；请联系管理员在项目设置中补充后重试");
+        }
+        if (memberSubject.role() != UserRole.SYSTEM_ADMIN
+                && !membershipRepository.exists(project.id(), memberSubject.id())) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "PROJECT_MEMBERSHIP_REQUIRED",
+                    delegatedTargetId != null ? "目标用户不是该项目成员，不能代其建钥。" : "你不是该项目的成员，无法创建 Virtual Key。");
+        }
+        return project;
+    }
+
+    /**
+     * Lightweight (projectId, grantId) carrier for planned/mirrored binding rows.
+     */
+    private record BindingPlan(UUID projectId, UUID grantId) {
+    }
+
+    private List<BoundProjectView> boundProjects(List<BindingPlan> bindings) {
+        List<BoundProjectView> views = new ArrayList<>(bindings.size());
+        for (BindingPlan binding : bindings) {
+            String tag = projectRepository.findById(binding.projectId()).map(Project::projectTag).orElse(null);
+            views.add(new BoundProjectView(binding.projectId(), tag));
+        }
+        return views;
     }
 
     /**
@@ -209,6 +275,10 @@ public class VirtualKeyService {
         Set<String> models = keyRepository.findModelIds(oldKey.id());
         // The replacement keeps the same routing label as the key it replaces.
         String projectTag = projectRepository.findById(oldKey.projectId()).map(Project::projectTag).orElse(null);
+        // ADR-0018: mirror EVERY project binding, not just the primary one.
+        List<BindingPlan> mirrored = bindingRepository.findAllByVirtualKeyId(oldKey.id()).stream()
+                .filter(b -> b.status() == KeyProjectBindingStatus.ACTIVE)
+                .map(b -> new BindingPlan(b.projectId(), b.grantId())).toList();
 
         VirtualKeyMaterial material = keyCrypto.generate(user.tenantId(), projectTag);
         try {
@@ -219,8 +289,10 @@ public class VirtualKeyService {
                     oldKey.projectId(), oldKey.grantId(), oldKey.upstreamCredentialId(), oldKey.purpose(),
                     oldKey.name(), oldKey.cachePolicy(), VirtualKeyStatus.ACTIVE, now, null, null, null, 0L);
             keyRepository.insert(replacement);
-            bindingRepository.insert(new KeyProjectBinding(UUID.randomUUID(), oldKey.tenantId(), newKeyId,
-                    oldKey.projectId(), KeyProjectBindingStatus.ACTIVE, 0L, now, now));
+            for (BindingPlan plan : mirrored) {
+                bindingRepository.insert(new KeyProjectBinding(UUID.randomUUID(), oldKey.tenantId(), newKeyId,
+                        plan.projectId(), plan.grantId(), KeyProjectBindingStatus.ACTIVE, 0L, now, now));
+            }
             keyRepository.replaceKeyModels(oldKey.tenantId(), newKeyId, models);
 
             Instant revokedAt = now.plus(authProperties.getVirtualKeyRotateGrace());
@@ -238,7 +310,7 @@ public class VirtualKeyService {
                             "cachePolicy", oldKey.cachePolicy()),
                     requestId);
             routeRefreshPublisher.publishChanged();
-            return response(newKeyId, material, now);
+            return response(newKeyId, material, now, boundProjects(mirrored));
         } finally {
             material.destroy();
         }
@@ -338,15 +410,19 @@ public class VirtualKeyService {
 
     private VirtualKeyView view(VirtualKey key, UUID tenantId) {
         String projectTag = projectRepository.findById(key.projectId()).map(Project::projectTag).orElse(null);
+        List<BoundProjectView> bound = boundProjects(bindingRepository.findAllByVirtualKeyId(key.id()).stream()
+                .filter(b -> b.status() == KeyProjectBindingStatus.ACTIVE)
+                .map(b -> new BindingPlan(b.projectId(), b.grantId())).toList());
         return new VirtualKeyView(key.id(), key.name(), key.purpose(), key.status(), key.displayPrefix(),
                 key.lastFour(), key.displayPrefix() + "…" + key.lastFour(), keyRepository.findModelIds(key.id()),
-                key.projectId(), projectTag, key.cachePolicy(), authProperties.getGatewayBaseUrl(), key.createdAt(),
-                key.lastUsedAt(), key.revokedAt());
+                key.projectId(), projectTag, bound, key.cachePolicy(), authProperties.getGatewayBaseUrl(),
+                key.createdAt(), key.lastUsedAt(), key.revokedAt());
     }
 
-    private CreateVirtualKeyResponse response(UUID keyId, VirtualKeyMaterial material, Instant now) {
+    private CreateVirtualKeyResponse response(UUID keyId, VirtualKeyMaterial material, Instant now,
+            List<BoundProjectView> boundProjects) {
         return new CreateVirtualKeyResponse(keyId, material.fullDisplayString(), authProperties.getGatewayBaseUrl(),
-                material.displayPrefix() + "…" + material.lastFour(), true, now, 1L);
+                material.displayPrefix() + "…" + material.lastFour(), true, now, 1L, boundProjects);
     }
 
     private static String sanitize(String value) {

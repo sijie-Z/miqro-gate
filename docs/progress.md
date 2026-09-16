@@ -2886,3 +2886,119 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - **#193 口径提示条 + 候选文档**：两用量页顶部可关闭提示（本地即时记账 vs 供应商 T+1）;docs/feature-expansion-candidates.md（大厂文档→候选 A-H,裁决反向项停泊）。
 - **#194 设计师登录稿（权威稿接入第一轮）**：素材 other/miqro-gate-auth-ui（LoginView/RegisterView/preview.html + 设计图）;按权威图实现「左暗色网关传送门 hero（provider 卡/状态卡/终端/信任条）+ 右侧白色认证面板（Welcome back 👋 / Sign in / Request an account / Your data is protected）」;TDesign 标签翻译为自绘 Ui（UiInput 增 prefix 槽）;登录文案按设计稿（EN）,注册保留产品自助语义（中文）,测试钩子全部保留。登录稿与设计图仍有逐区差距（3D 体积感/局部排版/密度）——最后一轮对齐排期进行中。
 - **pre-release 评估（leader 询问 2026-09-07）**：代码基线 develop 全绿可出 0.1.0-rc 候选;tag 动作待 owner/leader 授权;真实凭证矩阵与 Q4 https 冒烟仍 WAITING（不阻塞 pre-release,清单如实标注）。
+
+## 2026-09-15 深夜 — Goal #613：单密钥多项目（ADR-0018）标签路由完整形态
+
+**背景**：产品负责人指示"一个人一个虚拟 Key 跨项目使用是肯定要实现的"；核查发现架构设计报告 §3（单密钥多项目）与详细设计 V4 建表注释（"一个密钥可绑多个项目"）均如此设计，但实现收缩为 1:1 绑定 + 后缀等值校验——愿景未落地。见 issue #613 / ADR-0018（本批同时修正 ADR 记录的"成员移除→Key 失效"从未实现一事）。
+
+**交付**（分支 feat/single-key-multi-project-613）：
+
+- V53 迁移：`key_project_binding.grant_id`（回填自 `virtual_keys.grant_id`，存量语义不变）+ 存量项目标签回填（`proj-<uuid12>`）+ 表/列注释修正；
+- 网关：装载器去 `DISTINCT ON`、按 `(keyId, tag)` 复合键装载、grant 改由绑定行自带；`VirtualKeyResolver` 按后缀**选择**绑定；`ModelsController`/`ProxyController` 模型门控改用 `binding.grantId()`；
+- 控制面：创建接受 `projectIds`（首个为主项目；附加项目按"同产品最早 ACTIVE grant"确定性匹配，缺失 409 `PROJECT_GRANT_MISSING`）；轮换复制全部绑定；项目标签自动生成（slug，冲突退 `proj-<uuid12>`）且被引用后不可改（409 `PROJECT_TAG_IN_USE`）；成员移出项目 → 禁用该项目绑定行、无剩余绑定则 Key 置 REVOKED（补上一处从未实现的文档语义）；
+- 契约/产物：`CreateVirtualKeyRequest.projectIds`、`CreateVirtualKeyResponse/VirtualKeyView.boundProjects`；OpenAPI 基线重新导出、`gen:types` 重新生成；
+- 前端：建 Key 表单"同时绑定到其他项目（可选）"多选、Key 列表项目列 `+N` 角标（hover 显示全部标签）。
+
+**验证**：Me 密钥 IT **11/11**（新增：多项目创建+快照双绑定、缺授权 409、轮换镜像全部绑定）；AdminOrg IT **11/11**（新增：标签自动生成/引用守卫 409/改名放行/成员移除→绑定 DISABLED+Key REVOKED）；`VirtualKeyResolverTest` **2/2**（同核心段双后缀→各自项目与凭证；未绑定/篡改/缺头统一拒绝）；OpenAPI 基线导出重建；前端 vitest 全量 + typecheck + 构建立即执行（结果随 PR 记录）。
+
+**演示最小闭环（下一步）**：一把 Key 两个标签（CC Switch 双条目）→ 两项目各自凭证与用量。
+
+
+## 2026-09-16 凌晨 — Goal #633：CAA 请求上下文管线（Spec v1.1 Phase 4）
+
+**背景**：外部评审对《上下文归属架构》Spec v1 提出 6 项必修（body 历史污染、UNATTRIBUTED 路由、project_id 标识、活动切换迟滞、claims/verified 分离、证据冲突模型）；owner 拍板"赶紧做"。本批交付 **Gateway 侧 Phase 4**：服务端解析阶梯 + 归属落库；客户端 miqro-context（证据采集 / Local Agent / 迟滞切换）为后续批次。
+
+**交付**（分支 feat/caa-phase4-context-pipeline-633）：
+
+- **解析阶梯**（`RequestContextResolver`，Spec v1.1 §4）：`X-Miqro-Project-Id` 声明（不可信，仅当目标是该 Key 的绑定才生效）→ 点号后缀命中绑定 → 唯一绑定兜底；多绑定且无上下文 **400 `CONTEXT_REQUIRED`**（失败关闭，不猜、不静默回落默认项目）；声明无绑定 403 `CONTEXT_NOT_ALLOWED`、声明畸形 400 `CONTEXT_INVALID`；未知/畸形密钥维持统一 404（防枚举收窄到身份层——标签不匹配不再 404，单绑定 Key 的标签视为装饰）。
+- **声明审计化**：`X-Miqro-Claim-Source/Confidence/Status`、`X-Claude-Code-Session-Id` 全部 allowlist + 限长（64）消毒，仅落库审计：不参与授权、不转发上游；入站 `x-miqro-*` 由 HeaderFilters 统一剥离（`X-MiqroKey-*` 同规则）。
+- **归属随用量落库（V54）**：`usage_event` 增 `session_id/activity_id/claimed_project_id/resolution_status/claim_source/claim_confidence`（全可空，存量写入路径零变化）；**V55** 新增 `request_context_evidence`（append-only 证据审计：来源/规范值/置信度/作用域）。
+- **契约修订**：api-contract §4/§7.1（后缀=路由选择器；阶梯与错误码；`usage_event` 归属列）；ADR-0018 与单密钥设计文档加"#633 修订"注；database-schema 增 V54/V55。
+
+**验证**：`RequestContextResolverTest` 8/8（阶梯全矩阵 + 消毒边界）；`VirtualKeyAuthContractTest` 29/29（新增 CaaContext 组：多绑定无上下文失败关闭、声明选绑定且声明头不上行、伪造声明 403）；`HeaderFiltersTest` 10/10；`PostgresUsageEventWriterTest` 7/7（CAA 六列逐字落库）。
+
+**CI 归因补记**：integration job 首跑 SoakIntegrationTest 失败——探针原以"改标签"（presented()+"x"）冒充无效 Key，新阶梯下该请求被正常解析并打到上游（每次探针都真实代理成功），污染行数断言（5361+18）。修复：探针改为篡改秘钥段首字符（HMAC 失败→统一 404）；本地复跑 1/1 通过。
+
+## 2026-09-16 凌晨 — Goal #634：用量报表·每小时 Token 表（人×项目 / 组×项目）
+
+**背景**：产品负责人提出"要能够看见每个人每个项目，每天统计使用 token 做一个每个小时的表；还有每个组的每个项目的"。核查：`summary` 的 groupBy 无小时粒度、各维度为单维聚合，无任何逐小时展示——全新实现。
+
+**交付**（分支 feat/hourly-usage-report-634）：
+
+- **API**：`GET /api/v1/admin/usage/hourly`（#634）——按自然日返回逐小时桶：`dimension=NONE`（小时×项目）/ `USER`（×用户）/ `TEAM`（×团队，多团队按归属视图计入）；参数 `date`（默认本地今天）、`days`（1–7）、`tzOffsetMinutes`（默认 UTC，前端传本地偏移）、可选 `userId`/`projectId` 过滤；每行 请求数 + 输入/输出/缓存读/缓存写/合计 Token（合计口径=四类之和）。
+- **实现**：`UsageStatsRepository.aggregateHourly`（纯 SQL 聚合：epoch 位移取整再回移，桶边界对任意服务器时区确定；复用既有 filter 连接器与 `usage_event` Token 口径）；`AdminUsageStatsService.hourly`（参数校验 DAYS/DIMENSION/DATE/TZ_OFFSET）；controller + `HourlyUsageReport`/`HourlyUsageRow` DTO。
+- **前端**：「用量报表」新增「每小时 Token」面板——日期选择 + 当天/近 3 天/近 7 天 + 维度切换（不分组/按用户/按团队）+ 复用项目过滤；表格行=小时桶（本地时间），列=请求/输入/输出/缓存读/缓存写/合计；空态友好；随「查询」一并刷新。
+- **文档**：api-contract §5.2 增端点与参数/错误码说明；OpenAPI 基线重导出（仅新增 `paths`/`schemas`，不触发破坏性检查）。
+
+**验证**：`AdminUsageStatsServiceTest` 13/13（窗口/时区换算/参数校验）；`AdminUsageApiIntegrationTest` 11/11（新增 3 用例：UTC+8 下小时桶与"用户×项目"交叉、团队维度按成员聚合、admin-only 与参数边界）；前端 vitest（NextAdminUsageView 全量 + 新增每小时用例）、typecheck、build。
+
+
+
+## 2026-09-16 凌晨 — 演示站部署与验收（#615 + #633 + #634，develop@8cd67a95）
+
+**部署**：tarball 通道（gh api tarball/8cd67a95）→ /opt/miqrokey-dev → 三镜像串行重建（gateway/control-plane/portal）→ compose up -d --no-deps；V54/V55 Flyway 迁移在演示库确认（usage event context columns / request context evidence，均 success）；全栈 healthy。
+
+**验收（47/47 PASS，记录 D:/tmp/miqro-test/acceptance-2026-09-16.json）**：
+
+- **CAA 端到端（真机、真上游 DeepSeek）**：建「CAA验收项目」（tag=caa-acc）+ 成员 + 授权；demo.user 建双绑定 Key（boundProjects=[demo, caa-acc]）；后缀路由 200（RESOLVED_SUFFIX）、`X-Miqro-Project-Id` 声明选绑定 B 200（RESOLVED_HEADER）、多绑定无有效上下文 400 `CONTEXT_REQUIRED`、伪造声明 403 `CONTEXT_NOT_ALLOWED`、畸形声明 400 `CONTEXT_INVALID`；**DB 落库核对**（usage_event）：session=caa-acc-1/2/3 → 三条归属行逐字符合（claimed_project_id 仅声明路径有值；`git_repo` 因不在 allowlist 被正确丢弃、`HIGH` 置信度保留——消毒生效）。
+- **#615 语义真机复核**：被引用标签 PATCH → 409 `PROJECT_TAG_IN_USE`（含中文可行动文案）；轮换复制全部绑定；轮换后新 Key 绑定 B 真实推理 200。
+- **每小时 Token 表**：API（USER/TEAM 维度、UTC+8 桶、days=8 → 400、普通用户 403）全过；**门户 UI**（远程验收通道）「用量报表」面板渲染真实数据（09-16 00:00 桶、admin/演示项目/1068 请求，hourStart 本地化正确）。
+- **回归批次**：门户 4 路由 200；管理端 16 面（用户/团队/项目/授权/审批/供应商产品/订阅/定价/审计/配额/告警/导出/技能/MCP/用量汇总/明细）+ 个人端 4 面（Key/授权/用量）全 200；console 无错误（仅登入前匿名 401，属预期）。
+
+
+## 2026-09-16 上午 — Goal #639：miqro-context 客户端（CAA P1–P3）+ Project Registry 最小闭环
+
+**背景**：CAA Spec v1.1 §11 P1–P3（客户端证据采集 + 本地 Agent）+ P5 的 registry 子集；产品目标"CC Switch 一条配置指向 127.0.0.1:8788，Session 内多项目穿插，Key/配置全程不动"。
+
+**交付**（分支 feat/miqro-context-639）：
+
+- **miqro-context（TypeScript / Node ≥ 20，零运行时依赖）**：会话水位线差分（TurnDelta，历史轮永不入本轮证据）；四类证据（prompt_url/tool_path/system_cwd/bash_cwd，含 git remote 解析与 URL→repoKey）；§5.3 作用域+分组+冲突归因（无打分；双 HIGH 组=AMBIGUOUS）；§5.4 ActivitySegment 滞回（HIGH 即时、MEDIUM 连续两轮；同项目内变化不切段）；127.0.0.1 本地代理（注入声明头、剥离伪造 X-Miqro-*、SSE 逐块透传、中断双向传播、body 逐字节）；CLI run/status/doctor/install（install 仅打印接入步骤，不改用户配置）。
+- **服务端**：V56 `project_repositories`（租户内 repo 唯一）；管理端点 `GET/POST/DELETE /api/v1/admin/projects/{id}/repositories`（repoKey 四形态归一化、409 REPO_KEY_TAKEN、审计 REPOSITORY_ADD/REMOVE）；网关 `GET /v1/context-registry`（虚拟 Key 认证，只返回该 Key 绑定项目的映射；无持久化时空表）。
+- **CI**：新增 client job（typecheck + node --test）；changes 过滤器加 miqro-context。
+
+**验证**：客户端 35/35（水位线/R1 历史污染回归 C15/冲突模型 C5-C7/滞回 C16/解析/头注入）；`AdminOrgApiIntegrationTest` 13/13（新增 registry CRUD 用例）；`ContextRegistryIntegrationTest` 3/3（单绑定只见己方、多绑定双向、404/401 统一语义；**踩坑**：GatewayAuthTestConfig 会给 WebTestClient 装默认 Authorization，缺失凭证用例需显式置空头）。
+
+
+## 2026-09-16 上午 — Goal #641：/v1/context-registry 改 identity-only（真机 E2E 挖出的引导死锁）
+
+**背景**：Agent 真机 E2E 首跑：`registry sync failed: HTTP 400`（多绑定 Key 以不匹配后缀呈现 → 端点复用完整 CAA 阶梯 → CONTEXT_REQUIRED），随后所有请求 400——**要读映射先得有可解析上下文、而上下文要靠映射推导**的循环。
+
+**修复**：`VirtualKeyResolver` 拆出 `resolveIdentity()`（凭证抽取/解析/快照/HMAC，无归属阶梯；`resolve()` 与它共享 `authenticate()` 核心，清零纪律保持：invalid parse 在 try 外返回，避免对 null secret 做 wipe 的 NPE）；`ContextRegistryController` 改用 identity-only。IT 增补：多绑定 Key 不匹配后缀仍可读 registry（4/4）。文档：api-contract 注明 identity-only 语义。
+
+**观察（未改，留待评审）**：`/v1/models` 同样依赖 resolve()——多绑定 Key 带不匹配后缀时 400；真实使用中 Claude Code 的 Key 后缀通常匹配绑定，暂不动其语义。
+
+
+## 2026-09-16 中午 — Goal #646：建 Key 默认全选项目（CAA 收口批①，"一把 Key 全项目"成为默认路径）
+
+**背景**：跟踪 issue #645 / 方案 `docs/caa-next-batch-plan.md` §1（方案稿含 ② 无归属策略设计、③ Agent 自启、4 个开放问题，已随 PR #649 立档供评审）。
+
+**改动**（分支 feat/key-default-all-projects-646）：`NextKeysView` 打开表单即应用默认——主项目=第一个可选项目、附加项目全选（可取消）；切换主项目旧值回填为附加项（不静默丢项目）；重置后重新应用；文案「默认全部已选」；契约不变。spec 9/9（新增默认全选/切换回填；级联用例改显式取消勾选）；vue-tsc/eslint 通过。
+
+**验收**（并入主清单，步骤见方案 §1.2）：默认提交 → boundProjects 全量；两项目各一次真实推理 → 用量/每小时表分项目；取消勾选 → 该项目声明 403。
+
+
+## 2026-09-16 中午 — Goal #647：未归属策略 unattributed_policy（CAA 收口批②，Spec §7.3 落地）
+
+**背景**：跟踪 issue #645 / 方案 `docs/caa-next-batch-plan.md` §2。现状"无法归属一律 400"缺合规兜底选项。
+
+**交付**（分支 feat/unattributed-policy-647）：
+- **V57**：`unattributed_policy`（每租户一行：桶项目/凭证/产品/model_scope jsonb）+ `projects.system` 列（系统项目不可被建 Key 选择 → `400 PROJECT_NOT_SELECTABLE`，VirtualKeyService 全入口守卫）。
+- **网关**：快照装载策略（凭证装载范围扩到策略引用）；解析阶梯终态——多绑定无上下文时：有策略 → `POLICY_ROUTED`（合成绑定：桶项目/策略凭证，grant=null）；无策略 → 400 不变。模型门控：策略路径 = Key 模型 ∩（策略范围 或 空=上游目录）；/v1/models 同步处理（不 NPE）。
+- **控制面**：`GET/PUT/DELETE /api/v1/admin/unattributed-policy`（产品缺省从凭证订阅推导；凭证/产品/#498 目录校验；凭证被 grant 引用 → 告警不阻断；首次 PUT 懒建桶项目；审计 SET/CLEARED；变更刷快照）。
+- **前端**：设置页「未归属请求策略」卡片（凭证下拉仅 ACTIVE、模型范围逗号输入、保存/清除、未配置文案、告警展示）。
+- **开放问题按方案默认落定**（§2.9：Q1 告警放行 / Q2 与 Key 模型求交 / Q3 system 标记可见 / Q4 AMBIGUOUS 同走策略）。
+
+**验证**：`RequestContextResolverTest` 9/9（新增 POLICY_ROUTED）；`VirtualKeyServiceTest` 21/21（系统项目拒绝）；`AdminOrgApiIntegrationTest` 14/14（策略全生命周期：懒建桶/system 校验/目录校验/跨产品凭证 400/引用告警/审计/DELETE 后桶保留）；前端 settings spec 3/3；OpenAPI 基线重导出（另修复 #640 遗漏的 repositories 基线；**踩坑**：新控制器嵌套 record 重名 `UpsertRequest` 打乱 springdoc 简单名解析——改名 `UpsertPolicyRequest` 后 diff 干净）；28 个 IT 重置清单再补 `unattributed_policy`。
+
+
+## 2026-09-16 午后 — Goal #648：miqro-context 安装与三平台自启（CAA 收口批③）
+
+**背景**：跟踪 #645 / 方案 §3。现状手动 `run` 关终端即断，"无感"对非开发用户不成立。
+
+**交付**（分支 feat/context-autostart-648）：
+- `src/install/autostart.ts`：三平台用户级自启生成器（纯函数）——Windows 启动文件夹 .cmd（start /b node … run >> agent.log）/ macOS LaunchAgent plist（RunAtLoad）/ Linux systemd user unit（Restart=on-failure）；`MIQRO_CONTEXT_AUTOSTART_DIR` 供测试沙箱；幂等写入与静默移除。
+- CLI：`install [--write-config] [--autostart]`（显式 opt-in；默认仅提示未装）、新增 `uninstall [--autostart]`、`doctor` 增自启状态行；README 更新。
+- **不碰用户系统**：仅显式 `--autostart` 时写入，全部用户级免管理员；真实自启不在开发机自动注册。
+
+**验证**：客户端单测 42/42（新增 7 例：文件名/默认目录/覆盖目录/三平台内容快照/幂等 enable-disable 往返）；**Windows 沙箱实测**：install --autostart 生成 .cmd（node/cli/日志路径逐字校验）→ uninstall 移除，全程未触碰真实启动文件夹。
+

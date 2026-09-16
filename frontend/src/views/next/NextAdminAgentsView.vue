@@ -272,7 +272,7 @@ onMounted(load);
         <template #actions="{ row }">
           <div class="next-agents__actions">
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="agent-usage"
               @click="showUsage(row as AgentView)"
@@ -280,9 +280,8 @@ onMounted(load);
             >
             <UiButton
               v-if="(row as AgentView).status === 'ACTIVE'"
-              variant="ghost"
+              variant="link-danger"
               size="sm"
-              class="next-agents__danger"
               data-testid="agent-disable"
               @click="requestDisable(row as AgentView)"
               >禁用</UiButton
@@ -434,10 +433,6 @@ onMounted(load);
 
 .next-agents__name {
   font-weight: var(--ui-weight-medium);
-}
-
-.next-agents__danger {
-  color: var(--ui-danger-fg);
 }
 
 .next-agents__usage-grid {

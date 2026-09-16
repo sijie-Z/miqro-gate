@@ -69,7 +69,7 @@ public final class JdbcRouteSnapshotLoader {
      */
     public RouteSnapshot load(long version, Instant loadedAt) {
         Map<String, RouteSnapshot.KeyRecord> keys = loadKeys();
-        Map<UUID, RouteSnapshot.BindingRecord> bindings = loadBindings();
+        Map<UUID, Map<String, RouteSnapshot.BindingRecord>> bindings = loadBindings();
         Map<UUID, RouteSnapshot.CredentialRecord> credentials = loadCredentials();
         Map<UUID, Set<String>> models = loadModels();
         Map<UUID, Set<String>> grantModels = loadGrantModels();
@@ -78,8 +78,37 @@ public final class JdbcRouteSnapshotLoader {
         Map<String, RouteSnapshot.ConsumerRecord> consumers = loadConsumers();
         Map<String, RouteSnapshot.McpServerRecord> mcpServices = loadMcpServices();
         Map<UUID, RetentionConfig> retention = loadRetention();
+        Map<UUID, RouteSnapshot.UnattributedPolicyRecord> unattributedPolicies = loadUnattributedPolicies();
         return new RouteSnapshot(version, loadedAt, keys, bindings, credentials, models, grantModels, upstreamModels,
-                productIds.productCodes(), productIds.providerIds(), consumers, mcpServices, retention);
+                productIds.productCodes(), productIds.providerIds(), consumers, mcpServices, retention,
+                unattributedPolicies);
+    }
+
+    /**
+     * Unattributed-request policies per tenant (V57, Spec v1.1 §7.3, #647).
+     * {@code model_scope} is a JSON array; empty means the product's full ACTIVE
+     * upstream catalog at request time.
+     */
+    private Map<UUID, RouteSnapshot.UnattributedPolicyRecord> loadUnattributedPolicies() {
+        Map<UUID, RouteSnapshot.UnattributedPolicyRecord> byTenant = new LinkedHashMap<>();
+        jdbc.query("SELECT tenant_id, project_id, credential_id, provider_product_id, model_scope"
+                + " FROM unattributed_policy", rs -> {
+                    Set<String> models = new java.util.LinkedHashSet<>();
+                    try {
+                        for (JsonNode node : objectMapper.readTree(rs.getString("model_scope"))) {
+                            models.add(node.asText());
+                        }
+                    } catch (Exception e) {
+                        log.warn("unattributed_policy for tenant {} has unreadable model_scope; treating as empty",
+                                rs.getObject("tenant_id"));
+                    }
+                    UUID tenantId = (UUID) rs.getObject("tenant_id");
+                    byTenant.put(tenantId,
+                            new RouteSnapshot.UnattributedPolicyRecord(tenantId, (UUID) rs.getObject("project_id"),
+                                    (UUID) rs.getObject("credential_id"), (UUID) rs.getObject("provider_product_id"),
+                                    models));
+                });
+        return byTenant;
     }
 
     /** Configured retention switches per tenant (V31, ADR-0014). */
@@ -116,30 +145,28 @@ public final class JdbcRouteSnapshotLoader {
         return keys;
     }
 
-    private Map<UUID, RouteSnapshot.BindingRecord> loadBindings() {
-        Map<UUID, RouteSnapshot.BindingRecord> bindings = new HashMap<>();
+    private Map<UUID, Map<String, RouteSnapshot.BindingRecord>> loadBindings() {
+        Map<UUID, Map<String, RouteSnapshot.BindingRecord>> bindings = new HashMap<>();
         jdbc.query("""
-                SELECT DISTINCT ON (b.virtual_key_id)
-                       b.virtual_key_id, b.project_id, p.project_tag, g.upstream_credential_id, g.provider_product_id
+                SELECT b.virtual_key_id, b.project_id, p.project_tag, g.upstream_credential_id, g.provider_product_id,
+                       b.grant_id
                 FROM key_project_binding b
                 JOIN projects p ON p.id = b.project_id AND p.tenant_id = b.tenant_id
-                -- The binding's grant is authoritative: a project may hold
-                -- several ACTIVE grants (different products/credentials), and
-                -- the key must route only to the grant it was authorized for,
-                -- never to a sibling grant of the same project.
-                JOIN virtual_keys vk ON vk.id = b.virtual_key_id AND vk.tenant_id = b.tenant_id
-                JOIN project_provider_grants g ON g.id = vk.grant_id
+                -- The binding's grant is authoritative (ADR-0018): each binding
+                -- row carries its own grant, so one key may route to several
+                -- projects — each through the credential/product it was bound to.
+                JOIN project_provider_grants g ON g.id = b.grant_id
                                               AND g.project_id = b.project_id
                                               AND g.tenant_id = b.tenant_id
                                               AND g.status = 'ACTIVE'
                 WHERE b.status = 'ACTIVE' AND p.status = 'ACTIVE'
-                ORDER BY b.virtual_key_id, b.created_at
                 """, rs -> {
             UUID keyId = (UUID) rs.getObject("virtual_key_id");
             RouteSnapshot.BindingRecord binding = new RouteSnapshot.BindingRecord(keyId,
                     (UUID) rs.getObject("project_id"), rs.getString("project_tag"),
-                    (UUID) rs.getObject("upstream_credential_id"), (UUID) rs.getObject("provider_product_id"));
-            bindings.put(keyId, binding);
+                    (UUID) rs.getObject("upstream_credential_id"), (UUID) rs.getObject("provider_product_id"),
+                    (UUID) rs.getObject("grant_id"));
+            bindings.computeIfAbsent(keyId, k -> new HashMap<>()).put(binding.projectTag(), binding);
         });
         return bindings;
     }
@@ -150,36 +177,39 @@ public final class JdbcRouteSnapshotLoader {
         // path decrypts in memory and never queries the database. The partial
         // unique index uq_credential_versions_one_active guarantees at most one
         // ACTIVE version per credential, so the join cannot duplicate rows.
-        jdbc.query("""
-                SELECT c.id AS credential_id, c.tenant_id, pp.id AS product_id,
-                       pp.base_url_templates, pp.auth_scheme,
-                       v.encrypted_secret, v.nonce, v.encryption_key_version
-                FROM upstream_credentials c
-                JOIN upstream_subscriptions s ON s.tenant_id = c.tenant_id AND s.id = c.subscription_id
-                JOIN provider_products pp ON pp.id = s.provider_product_id
-                LEFT JOIN upstream_credential_versions v
-                       ON v.tenant_id = c.tenant_id AND v.id = c.active_version_id AND v.status = 'ACTIVE'
-                WHERE c.status = 'ACTIVE'
-                  AND c.id IN (SELECT g.upstream_credential_id FROM project_provider_grants g WHERE g.status = 'ACTIVE')
-                """, rs -> {
-            UUID credentialId = (UUID) rs.getObject("credential_id");
-            BaseUrlSet baseUrls = parseBaseUrls(rs.getString("base_url_templates"));
-            if (baseUrls.single() == null && baseUrls.byProtocolUris().isEmpty()) {
-                log.warn("Credential {} has no usable base_url_templates entry; excluded from routing snapshot",
-                        credentialId);
-                return;
-            }
-            EncryptedSecret encryptedSecret = null;
-            byte[] ciphertext = rs.getBytes("encrypted_secret");
-            if (ciphertext != null) {
-                encryptedSecret = new EncryptedSecret(ciphertext, rs.getBytes("nonce"),
-                        rs.getString("encryption_key_version"));
-            }
-            RouteSnapshot.CredentialRecord credential = new RouteSnapshot.CredentialRecord(credentialId,
-                    (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("product_id"), baseUrls.single(),
-                    rs.getString("auth_scheme"), encryptedSecret, baseUrls.byProtocolUris());
-            credentials.put(credentialId, credential);
-        });
+        jdbc.query(
+                """
+                        SELECT c.id AS credential_id, c.tenant_id, pp.id AS product_id,
+                               pp.base_url_templates, pp.auth_scheme,
+                               v.encrypted_secret, v.nonce, v.encryption_key_version
+                        FROM upstream_credentials c
+                        JOIN upstream_subscriptions s ON s.tenant_id = c.tenant_id AND s.id = c.subscription_id
+                        JOIN provider_products pp ON pp.id = s.provider_product_id
+                        LEFT JOIN upstream_credential_versions v
+                               ON v.tenant_id = c.tenant_id AND v.id = c.active_version_id AND v.status = 'ACTIVE'
+                        WHERE c.status = 'ACTIVE'
+                          AND (c.id IN (SELECT g.upstream_credential_id FROM project_provider_grants g WHERE g.status = 'ACTIVE')
+                               OR c.id IN (SELECT p.credential_id FROM unattributed_policy p WHERE p.tenant_id = c.tenant_id))
+                        """,
+                rs -> {
+                    UUID credentialId = (UUID) rs.getObject("credential_id");
+                    BaseUrlSet baseUrls = parseBaseUrls(rs.getString("base_url_templates"));
+                    if (baseUrls.single() == null && baseUrls.byProtocolUris().isEmpty()) {
+                        log.warn("Credential {} has no usable base_url_templates entry; excluded from routing snapshot",
+                                credentialId);
+                        return;
+                    }
+                    EncryptedSecret encryptedSecret = null;
+                    byte[] ciphertext = rs.getBytes("encrypted_secret");
+                    if (ciphertext != null) {
+                        encryptedSecret = new EncryptedSecret(ciphertext, rs.getBytes("nonce"),
+                                rs.getString("encryption_key_version"));
+                    }
+                    RouteSnapshot.CredentialRecord credential = new RouteSnapshot.CredentialRecord(credentialId,
+                            (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("product_id"), baseUrls.single(),
+                            rs.getString("auth_scheme"), encryptedSecret, baseUrls.byProtocolUris());
+                    credentials.put(credentialId, credential);
+                });
         return credentials;
     }
 

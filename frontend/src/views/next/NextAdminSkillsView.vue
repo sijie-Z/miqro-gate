@@ -383,14 +383,14 @@ onMounted(() => {
         <template #actions="{ row }">
           <div class="next-skills__actions">
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="skill-revisions"
               @click="openRevisions(row as SkillView)"
               >版本</UiButton
             >
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="skill-access"
               @click="openAccess(row as SkillView)"
@@ -398,9 +398,8 @@ onMounted(() => {
             >
             <UiButton
               v-if="(row as SkillView).status === 'ACTIVE'"
-              variant="ghost"
+              variant="link-danger"
               size="sm"
-              class="next-skills__danger"
               data-testid="skill-archive"
               @click="requestArchive(row as SkillView)"
               >归档</UiButton
@@ -497,7 +496,9 @@ onMounted(() => {
           <span class="ui-mono">v{{ (row as SkillRevisionView).version }}</span>
         </template>
         <template #size="{ row }">
-          <span class="ui-num">{{ formatBytes((row as SkillRevisionView).contentBytes ?? 0) }}</span>
+          <span class="ui-num">{{
+            formatBytes((row as SkillRevisionView).contentBytes ?? 0)
+          }}</span>
         </template>
         <template #createdAt="{ row }">
           {{ formatTime((row as SkillRevisionView).createdAt) }}
@@ -511,7 +512,7 @@ onMounted(() => {
         <template #actions="{ row }">
           <UiButton
             v-if="!(row as SkillRevisionView).activatedAt"
-            variant="ghost"
+            variant="link"
             size="sm"
             data-testid="skill-rollback"
             @click="requestRollback(row as SkillRevisionView)"
@@ -628,10 +629,6 @@ onMounted(() => {
   color: var(--ui-foreground-secondary);
 }
 
-.next-skills__danger {
-  color: var(--ui-danger-fg);
-}
-
 .next-skills__scope {
   display: flex;
   flex-direction: column;
@@ -647,5 +644,4 @@ onMounted(() => {
   border-radius: var(--ui-radius-control);
   padding: var(--ui-space-1);
 }
-
 </style>

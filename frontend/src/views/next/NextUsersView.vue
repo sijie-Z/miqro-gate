@@ -26,7 +26,7 @@ import {
   UiTable,
   toast,
 } from '@/ui';
-import type {UserRole} from '@/types/api';
+import type { UserRole } from '@/types/api';
 import type { AdminUser, Project, UserProjectMembership } from '@/types/generated-api';
 
 const users = ref<AdminUser[]>([]);
@@ -58,6 +58,14 @@ const confirmState = ref<{
   run: () => Promise<void>;
 } | null>(null);
 
+// #614: display-name edit dialog (displayName is editable after creation).
+const editOpen = ref(false);
+const editTarget = ref<AdminUser | null>(null);
+const editDisplayName = ref('');
+const editError = ref('');
+const editRequestId = ref('');
+const editSaving = ref(false);
+
 const roleLabel: Record<string, string> = {
   SYSTEM_ADMIN: '系统管理员',
   USER: '用户',
@@ -74,7 +82,7 @@ const columns = [
   { key: 'status', title: '状态', width: '110px' },
   { key: 'lastLoginAt', title: '最近登录', width: '150px' },
   { key: 'createdAt', title: '创建时间', width: '180px' },
-  { key: 'actions', title: '操作', width: '80px', align: 'center' as const },
+  { key: 'actions', title: '操作', width: '96px', align: 'center' as const },
 ];
 
 const activeCount = computed(() => users.value.filter((u) => u.status === 'ACTIVE').length);
@@ -110,9 +118,7 @@ const filteredUsers = computed(() => {
   });
 });
 
-const listEmptyTitle = computed(() =>
-  users.value.length ? '没有符合条件的用户' : '还没有用户',
-);
+const listEmptyTitle = computed(() => (users.value.length ? '没有符合条件的用户' : '还没有用户'));
 
 onMounted(load);
 
@@ -358,6 +364,46 @@ async function confirmAndRun() {
   await state.run();
 }
 
+// #614: display-name edit.
+function openEdit(user: AdminUser) {
+  editTarget.value = user;
+  editDisplayName.value = user.displayName ?? '';
+  editError.value = '';
+  editRequestId.value = '';
+  editOpen.value = true;
+}
+
+async function saveEdit() {
+  const target = editTarget.value;
+  if (!target) return;
+  const name = editDisplayName.value.trim();
+  if (!name) {
+    editError.value = '请输入显示名。';
+    return;
+  }
+  if (name === (target.displayName ?? '')) {
+    editOpen.value = false;
+    return;
+  }
+  editSaving.value = true;
+  editError.value = '';
+  try {
+    await api.updateUser(target.id!, { displayName: name });
+    editOpen.value = false;
+    toast.success('显示名已更新');
+    await load();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      editError.value = error.message;
+      editRequestId.value = error.requestId ?? '';
+    } else {
+      editError.value = '保存失败，请稍后重试。';
+    }
+  } finally {
+    editSaving.value = false;
+  }
+}
+
 function statusLabel(status?: string): string {
   switch (status) {
     case 'ACTIVE':
@@ -527,24 +573,31 @@ function formatDate(iso?: string): string {
         <template #actions="{ row }">
           <DropdownMenuRoot>
             <DropdownMenuTrigger
-              class="next-users__kebab"
+              class="next-users__kebab ui-link-action"
               aria-label="操作"
               :data-testid="`user-actions-${(row as AdminUser).id}`"
             >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <circle cx="3" cy="8" r="1.4" />
-                <circle cx="8" cy="8" r="1.4" />
-                <circle cx="13" cy="8" r="1.4" />
+              更多
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="m4 6 4 4 4-4"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
             </DropdownMenuTrigger>
             <DropdownMenuPortal>
               <DropdownMenuContent class="ui-menu" :side-offset="4" :align="'end'">
+                <DropdownMenuItem
+                  class="ui-menu__item next-users__menu-item"
+                  @select="openEdit(row as AdminUser)"
+                >
+                  <DropdownMenuItemIndicator class="next-users__menu-ind" />
+                  <span data-testid="user-edit">编辑</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator class="next-users__menu-sep" />
                 <DropdownMenuItem
                   class="ui-menu__item next-users__menu-item"
                   @select="openProjectMembership(row as AdminUser)"
@@ -626,7 +679,9 @@ function formatDate(iso?: string): string {
       <div class="next-users__join-row">
         <UiSelect
           v-model="pickProjectId"
-          :options="joinableProjects.map((p) => ({ value: p.id ?? '', label: p.code + ' · ' + p.name }))"
+          :options="
+            joinableProjects.map((p) => ({ value: p.id ?? '', label: p.code + ' · ' + p.name }))
+          "
           placeholder="选择项目"
           data-testid="user-project-pick"
         />
@@ -692,6 +747,40 @@ function formatDate(iso?: string): string {
         >
           完成
         </UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- Display-name edit (#614) -->
+    <UiDialog
+      :open="editOpen"
+      title="编辑用户"
+      :description="editTarget ? `修改「${editTarget.username}」的显示名。` : ''"
+      width="460px"
+      data-testid="user-edit-dialog"
+      @update:open="editOpen = false"
+    >
+      <UiInput
+        v-model="editDisplayName"
+        label="显示名"
+        required
+        placeholder="例如 Alice"
+        data-testid="user-edit-display"
+      />
+      <p v-if="editError" class="ui-form-error" data-testid="user-edit-error">
+        {{ editError
+        }}<span v-if="editRequestId" class="ui-request-id"> requestId: {{ editRequestId }}</span>
+      </p>
+      <template #footer>
+        <UiButton variant="ghost" data-testid="user-edit-cancel" @click="editOpen = false"
+          >取消</UiButton
+        >
+        <UiButton
+          variant="primary"
+          :loading="editSaving"
+          data-testid="user-edit-save"
+          @click="saveEdit"
+          >保存</UiButton
+        >
       </template>
     </UiDialog>
 
@@ -806,30 +895,15 @@ function formatDate(iso?: string): string {
 }
 
 .next-users__kebab {
+  /* Layout only — ink and hover come from the shared .ui-link-action row
+     action link style (#651). */
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-control);
-  background: var(--ui-card);
-  color: var(--ui-foreground-secondary);
+  border: none;
+  background: transparent;
+  font: inherit;
   cursor: pointer;
-  transition:
-    border-color var(--ui-ease),
-    color var(--ui-ease),
-    background-color var(--ui-ease);
-}
-
-.next-users__kebab:hover {
-  background: var(--ui-muted);
-  color: var(--ui-foreground);
-}
-
-.next-users__kebab:focus-visible {
-  outline: none;
-  box-shadow: var(--ui-shadow-focus);
 }
 
 /* .ui-menu panel chrome lives in styles/design-base.css (the radix popper

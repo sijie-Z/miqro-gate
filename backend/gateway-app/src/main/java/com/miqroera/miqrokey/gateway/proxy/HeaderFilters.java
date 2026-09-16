@@ -74,7 +74,7 @@ public final class HeaderFilters {
         inbound.forEach((name, values) -> {
             String lower = name.toLowerCase(Locale.ROOT);
             if (!ALL_STRIP_HEADERS.contains(lower) && !connectionHeaders.contains(lower)
-                    && !lower.startsWith("x-miqrokey-")) {
+                    && !lower.startsWith("x-miqrokey-") && !lower.startsWith("x-miqro-")) {
                 filtered.addAll(name, values);
             }
         });

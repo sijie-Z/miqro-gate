@@ -84,6 +84,7 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                         e.gatewayRequestId());
                 continue;
             }
+            UsageEvent.ContextAttribution attr = e.attribution();
             params.add(new MapSqlParameterSource().addValue("id", e.id()).addValue("tenantId", e.tenantId())
                     .addValue("providerRequestId", e.providerRequestId()).addValue("virtualKeyId", e.virtualKeyId())
                     .addValue("projectId", e.projectId()).addValue("productId", e.providerProductId())
@@ -100,7 +101,13 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                     .addValue("latencyMs", e.latencyMs()).addValue("upstreamStatusCode", e.upstreamStatusCode())
                     .addValue("cacheKey", e.cacheKey()).addValue("isComplete", e.isComplete())
                     .addValue("usageMissing", e.usageMissing()).addValue("gatewayRequestId", e.gatewayRequestId())
-                    .addValue("occurredAt", Timestamp.from(e.occurredAt())));
+                    .addValue("clientIp", e.clientIp()).addValue("occurredAt", Timestamp.from(e.occurredAt()))
+                    .addValue("sessionId", attr != null ? attr.sessionId() : null)
+                    .addValue("activityId", attr != null ? attr.activityId() : null)
+                    .addValue("claimedProjectId", attr != null ? attr.claimedProjectId() : null)
+                    .addValue("resolutionStatus", attr != null ? attr.resolutionStatus() : null)
+                    .addValue("claimSource", attr != null ? attr.claimSource() : null)
+                    .addValue("claimConfidence", attr != null ? attr.claimConfidence() : null));
         }
         if (params.isEmpty()) {
             return;
@@ -111,13 +118,15 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                     input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
                     prompt_tokens, completion_tokens, total_tokens, reasoning_tokens,
                     latency_ms, upstream_status_code, cache_key, is_complete, usage_missing,
-                    gateway_request_id, occurred_at)
+                    gateway_request_id, client_ip, occurred_at,
+                    session_id, activity_id, claimed_project_id, resolution_status, claim_source, claim_confidence)
                 VALUES (:id, :tenantId, :providerRequestId, :virtualKeyId, :projectId, :productId, :credentialId,
                     :modelId, :cacheLevel,
                     :inputTokens, :outputTokens, :cacheCreation, :cacheRead,
                     :promptTokens, :completionTokens, :totalTokens, :reasoningTokens,
                     :latencyMs, :upstreamStatusCode, :cacheKey, :isComplete, :usageMissing,
-                    :gatewayRequestId, :occurredAt)
+                    :gatewayRequestId, :clientIp, :occurredAt,
+                    :sessionId, :activityId, :claimedProjectId, :resolutionStatus, :claimSource, :claimConfidence)
                 ON CONFLICT (tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL DO NOTHING
                 """, params.toArray(new MapSqlParameterSource[0]));
     }

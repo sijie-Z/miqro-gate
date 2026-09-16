@@ -17,8 +17,6 @@ export interface UiTableColumn {
   minWidth?: string;
   align?: 'left' | 'right' | 'center';
   sortable?: boolean;
-  /** Optional hover explanation rendered as the header cell's title tooltip. */
-  hint?: string;
   /** Optional value used for sorting when row[key] is not directly comparable. */
   sortValue?: (row: Record<string, unknown>) => number | string;
   /** Optional formatter; takes precedence over stringify, loses to slots. */
@@ -114,7 +112,6 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
               v-for="column in columns"
               :key="column.key"
               :style="{ width: column.width, minWidth: column.minWidth }"
-              :title="column.hint"
               :class="[
                 'ui-table__head',
                 {

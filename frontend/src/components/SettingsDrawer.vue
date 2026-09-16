@@ -48,6 +48,19 @@ const COMPACT_MODES: Array<{ value: ContentCompact; label: string }> = [
   { value: 'fixed', label: '固定' },
 ];
 
+const LOCK_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 0, label: '关闭' },
+  { value: 5, label: '5 分钟' },
+  { value: 15, label: '15 分钟' },
+  { value: 30, label: '30 分钟' },
+];
+
+const SIDEBAR_WIDTHS: Array<{ value: number; label: string }> = [
+  { value: 210, label: '紧凑 210' },
+  { value: 240, label: '标准 240' },
+  { value: 280, label: '宽敞 280' },
+];
+
 function isActiveColor(color: string): boolean {
   return preferences.primaryColor.toLowerCase() === color;
 }
@@ -125,6 +138,42 @@ function isActiveColor(color: string): boolean {
           @click="setPreference('contentCompact', mode.value)"
         >
           {{ mode.label }}
+        </button>
+      </div>
+    </section>
+
+    <section class="settings-drawer__section">
+      <h3 class="settings-drawer__title">自动锁屏</h3>
+      <div class="settings-drawer__segmented" role="group" aria-label="自动锁屏">
+        <button
+          v-for="option in LOCK_OPTIONS"
+          :key="option.value"
+          type="button"
+          class="settings-drawer__segment"
+          :class="{ 'is-active': preferences.lockMinutes === option.value }"
+          :aria-pressed="preferences.lockMinutes === option.value"
+          :data-testid="`settings-lock-${option.value}`"
+          @click="setPreference('lockMinutes', option.value)"
+        >
+          {{ option.label }}
+        </button>
+      </div>
+    </section>
+
+    <section class="settings-drawer__section">
+      <h3 class="settings-drawer__title">菜单展开宽度</h3>
+      <div class="settings-drawer__segmented" role="group" aria-label="菜单展开宽度">
+        <button
+          v-for="option in SIDEBAR_WIDTHS"
+          :key="option.value"
+          type="button"
+          class="settings-drawer__segment"
+          :class="{ 'is-active': preferences.sidebarWidth === option.value }"
+          :aria-pressed="preferences.sidebarWidth === option.value"
+          :data-testid="`settings-width-${option.value}`"
+          @click="setPreference('sidebarWidth', option.value)"
+        >
+          {{ option.label }}
         </button>
       </div>
     </section>

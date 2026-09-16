@@ -206,10 +206,16 @@ class SoakIntegrationTest {
                 long t0 = System.nanoTime();
                 try {
                     // Invalid key: rejected at the gateway before any upstream call —
-                    // a pure event-loop responsiveness probe under load.
-                    webTestClient.post().uri("/v1/messages")
-                            .header(HttpHeaders.AUTHORIZATION,
-                                    "Bearer " + GatewayTestKeys.DEFAULT_KEY.presented() + "x")
+                    // a pure event-loop responsiveness probe under load. The SECRET
+                    // segment (fixed-length format: 9 prefix + 22 public + 1 + 43
+                    // secret) is corrupted so the HMAC check fails; flipping the
+                    // LABEL would probe nothing — since the CAA ladder (#633) a
+                    // non-matching label on a sole-binding key resolves via the sole
+                    // binding and would hit the upstream (creating rows/events).
+                    String presented = GatewayTestKeys.DEFAULT_KEY.presented();
+                    String invalid = presented.substring(0, 32) + (presented.charAt(32) == 'A' ? 'B' : 'A')
+                            + presented.substring(33);
+                    webTestClient.post().uri("/v1/messages").header(HttpHeaders.AUTHORIZATION, "Bearer " + invalid)
                             .contentType(MediaType.APPLICATION_JSON).bodyValue(AnthropicFixtures.REQUEST_STREAMING)
                             .exchange().expectBody().returnResult();
                 } catch (Exception e) {

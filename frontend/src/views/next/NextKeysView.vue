@@ -5,7 +5,7 @@
  * flow + rotate/revoke + one-shot secret), rendered on the v2 component set.
  * APIs and route semantics are untouched.
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import {
   DropdownMenuContent,
   DropdownMenuItem,
@@ -30,12 +30,14 @@ import {
 } from '@/lib/ccswitch';
 import {
   UiButton,
+  UiCheckbox,
   UiDialog,
   UiEmptyState,
   UiInput,
   UiSelect,
   UiStatusBadge,
   UiTable,
+  UiTooltip,
   toast,
 } from '@/ui';
 import type { UiSelectOption } from '@/ui';
@@ -106,13 +108,12 @@ const columns = [
     key: 'purpose',
     title: '用途',
     width: '130px',
-    hint: '声明标签，不限制客户端；可调用范围由所选授权产品与允许模型决定。',
   },
   { key: 'modelIds', title: '允许模型', minWidth: '220px' },
   { key: 'status', title: '状态', width: '110px' },
   { key: 'cachePolicy', title: '缓存', width: '90px' },
   { key: 'createdAt', title: '创建时间', width: '170px', sortable: true },
-  { key: 'actions', title: '操作', width: '80px', align: 'center' as const },
+  { key: 'actions', title: '操作', width: '96px', align: 'center' as const },
 ];
 
 const keyFilter = ref('');
@@ -171,6 +172,53 @@ const grantOptions = computed(
 
 const selectedGrant = computed(() => grantOptions.value.find((g) => g.id === createGrantId.value));
 
+// ADR-0018: one key may serve several projects. The picker above stays the
+// PRIMARY project (its grant is chosen explicitly); these are extra bindings —
+// the server matches each one to that project's own grant of the same product.
+const createExtraProjectIds = ref<string[]>([]);
+
+const extraProjectOptions = computed(() =>
+  projectsForGrant.value.filter((p) => p.id && p.id !== createProjectId.value),
+);
+
+// #646 Default-All: "one key for every project" is the default path — the
+// primary project defaults to the first option and every other project is
+// pre-selected (the user can uncheck). Deselecting is remembered for the
+// current form session; switching the primary backfills the previous primary
+// as an extra so no project is silently dropped.
+const extraDefaultsApplied = ref(false);
+let previousPrimary = '';
+
+function applyProjectDefaults(): void {
+  if (projectsForGrant.value.length === 0) {
+    return;
+  }
+  if (!createProjectId.value && projectsForGrant.value[0]?.id) {
+    createProjectId.value = projectsForGrant.value[0].id;
+  }
+  previousPrimary = createProjectId.value;
+  if (!extraDefaultsApplied.value) {
+    createExtraProjectIds.value = extraProjectOptions.value
+      .map((p) => p.id)
+      .filter((id): id is string => Boolean(id));
+    extraDefaultsApplied.value = true;
+  }
+}
+
+// The create form toggles from several places (header button, empty-state
+// button, cancel) — apply the defaults whenever it opens.
+watch(creating, (open) => {
+  if (open) {
+    applyProjectDefaults();
+  }
+});
+
+function onExtraProjects(next: boolean | string[] | Set<string>) {
+  if (Array.isArray(next)) {
+    createExtraProjectIds.value = next;
+  }
+}
+
 type GrantOption = NonNullable<MeGrantsResponse['grants']>[number];
 
 /**
@@ -226,8 +274,18 @@ async function load() {
 // ---- create ----
 
 function onProjectChange() {
+  const newPrimary = createProjectId.value;
+  // Default-All (#646): switching the primary must not silently drop the old
+  // one — it stays bound as an extra unless already selected.
+  if (previousPrimary && previousPrimary !== newPrimary) {
+    if (!createExtraProjectIds.value.includes(previousPrimary)) {
+      createExtraProjectIds.value = [...createExtraProjectIds.value, previousPrimary];
+    }
+  }
+  previousPrimary = newPrimary;
   createGrantId.value = '';
   createModels.value = [];
+  createExtraProjectIds.value = createExtraProjectIds.value.filter((id) => id !== newPrimary);
 }
 
 function onGrantChange() {
@@ -238,6 +296,9 @@ function onGrantChange() {
 function resetForm() {
   createName.value = '';
   createProjectId.value = '';
+  createExtraProjectIds.value = [];
+  extraDefaultsApplied.value = false;
+  previousPrimary = '';
   createGrantId.value = '';
   createPurpose.value = 'CLAUDE_CODE';
   createModels.value = [];
@@ -258,6 +319,7 @@ async function createKey() {
     const response = await api.createVirtualKey({
       name: createName.value.trim(),
       projectId: createProjectId.value,
+      projectIds: [createProjectId.value, ...createExtraProjectIds.value],
       // server contract: grant rows always carry their provider product id
       providerProductId: selectedGrant.value.providerProductId!,
       credentialGrantId: createGrantId.value,
@@ -543,6 +605,29 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             data-testid="create-grant"
             @change="onGrantChange"
           />
+          <div
+            v-if="createProjectId && extraProjectOptions.length"
+            class="next-keys__field"
+            data-testid="create-extra-projects"
+          >
+            <span class="next-keys__field-label">同时绑定到其他项目（默认全部已选）</span>
+            <p class="next-keys__field-hint">
+              一把 Key
+              全项目可用——默认已勾选全部项目，只需部分项目时可取消勾选；附加项目需已具备同一供应商产品的授权。
+            </p>
+            <div class="next-keys__extra-projects">
+              <UiCheckbox
+                v-for="p in extraProjectOptions"
+                :key="p.id"
+                :model-value="createExtraProjectIds"
+                :value="p.id!"
+                :data-testid="`create-extra-project-${p.id}`"
+                @update:model-value="onExtraProjects"
+              >
+                {{ p.name }}（{{ p.projectTag }}）
+              </UiCheckbox>
+            </div>
+          </div>
           <div v-if="createGrantId" class="next-keys__field">
             <span class="next-keys__field-label">用途</span>
             <div
@@ -728,13 +813,30 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
           </div>
           <div class="ui-mono next-keys__mask">{{ (row as VirtualKeyView).display }}</div>
         </template>
-        <template #purpose="{ row }">{{
-          purposeLabel[(row as VirtualKeyView).purpose!] ?? (row as VirtualKeyView).purpose
-        }}</template>
+        <template #purpose="{ row }">
+          <UiTooltip text="声明标签，不限制客户端；可调用范围由所选授权产品与允许模型决定。">
+            <span>{{
+              purposeLabel[(row as VirtualKeyView).purpose!] ?? (row as VirtualKeyView).purpose
+            }}</span>
+          </UiTooltip>
+        </template>
         <template #modelIds="{ row }">
           <div class="ui-mono next-keys__models">
             {{ (row as VirtualKeyView).modelIds?.join(', ') ?? '' }}
           </div>
+        </template>
+        <template #projectTag="{ row }">
+          <span>{{ (row as VirtualKeyView).projectTag || '—' }}</span>
+          <span
+            v-if="((row as VirtualKeyView).boundProjects?.length ?? 0) > 1"
+            class="next-keys__extra-badge"
+            :title="
+              ((row as VirtualKeyView).boundProjects ?? []).map((b) => b.projectTag).join('、')
+            "
+            data-testid="key-extra-projects-badge"
+          >
+            +{{ ((row as VirtualKeyView).boundProjects?.length ?? 0) - 1 }}
+          </span>
         </template>
         <template #status="{ row }">
           <UiStatusBadge
@@ -758,20 +860,19 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
         <template #actions="{ row }">
           <DropdownMenuRoot>
             <DropdownMenuTrigger
-              class="next-keys__kebab"
+              class="next-keys__kebab ui-link-action"
               aria-label="操作"
               :data-testid="`key-actions-${(row as VirtualKeyView).id}`"
             >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <circle cx="3" cy="8" r="1.4" />
-                <circle cx="8" cy="8" r="1.4" />
-                <circle cx="13" cy="8" r="1.4" />
+              更多
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="m4 6 4 4 4-4"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
             </DropdownMenuTrigger>
             <DropdownMenuPortal>
@@ -1330,26 +1431,15 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
 }
 
 .next-keys__kebab {
+  /* Layout only — ink and hover come from the shared .ui-link-action row
+     action link style (#651). */
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
   border: none;
-  border-radius: var(--ui-radius-control);
   background: transparent;
-  color: var(--ui-foreground-faint);
+  font: inherit;
   cursor: pointer;
-}
-
-.next-keys__kebab:hover {
-  background: var(--ui-fill-hover);
-  color: var(--ui-foreground);
-}
-
-.next-keys__kebab:focus-visible {
-  outline: none;
-  box-shadow: var(--ui-shadow-focus);
 }
 
 /* .ui-menu panel chrome lives in styles/design-base.css (the radix popper
@@ -1483,5 +1573,27 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-all;
+}
+.next-keys__extra-projects {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+}
+
+.next-keys__field-hint {
+  margin: 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+  line-height: var(--ui-line-height-sm);
+}
+
+.next-keys__extra-badge {
+  margin-left: var(--ui-space-1);
+  padding: 0 var(--ui-space-1);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-muted);
+  color: var(--ui-foreground-secondary);
+  font-size: var(--ui-font-size-xs);
+  cursor: help;
 }
 </style>

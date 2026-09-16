@@ -70,3 +70,17 @@ export type AlertRuleType =
   | 'MODEL_APPROVAL_REJECTED'
   | 'ADMIN_API_KEY_EXPIRING'
   | 'CONSUMER_KEY_EXPIRING';
+
+/** #647 未归属请求策略（设置页）。 */
+export type UnattributedPolicyView = {
+  configured?: boolean;
+  projectId?: string;
+  providerProductId?: string;
+  providerProductCode?: string;
+  providerProductName?: string;
+  credentialId?: string;
+  credentialName?: string;
+  models?: string[];
+  updatedAt?: string;
+  warning?: string;
+};

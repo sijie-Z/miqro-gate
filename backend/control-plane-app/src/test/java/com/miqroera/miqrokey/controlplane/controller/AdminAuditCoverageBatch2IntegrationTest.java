@@ -106,8 +106,8 @@ class AdminAuditCoverageBatch2IntegrationTest {
 
     private void clean() {
         for (String table : List.of("admin_api_keys", "webhook_delivery_attempts", "alert_events", "alert_rules",
-                "webhook_endpoints", "model_catalog", "config_entries", "budget", "projects", "usage_event",
-                "admin_audit_events", "user_sessions", "users")) {
+                "webhook_endpoints", "model_catalog", "config_entries", "budget", "unattributed_policy",
+                "project_repositories", "projects", "usage_event", "admin_audit_events", "user_sessions", "users")) {
             try {
                 jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
             } catch (Exception ignored) {

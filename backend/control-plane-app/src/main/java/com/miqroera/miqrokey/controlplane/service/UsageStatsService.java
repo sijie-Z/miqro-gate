@@ -155,7 +155,7 @@ public class UsageStatsService {
             return UsageStatsRepository.GroupBy.valueOf(value.trim().toUpperCase());
         } catch (IllegalArgumentException e) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "GROUP_BY_INVALID",
-                    "groupBy must be one of PROJECT, VIRTUAL_KEY, CACHE_LEVEL, DAY");
+                    "groupBy must be one of PROJECT, VIRTUAL_KEY, CACHE_LEVEL, DAY, USER, TEAM, MODEL, MONTH");
         }
     }
 
@@ -166,7 +166,7 @@ public class UsageStatsService {
         return new UsageRecordPage.UsageRecordView(e.occurredAt(), e.modelId(), e.cacheLevel(), input, output,
                 t != null ? t.cacheReadInputTokens() : null, t != null ? t.cacheCreationInputTokens() : null,
                 t != null ? t.totalTokens() : null, e.latencyMs(), e.upstreamStatusCode(), e.providerRequestId(),
-                e.gatewayRequestId(), e.isComplete(), e.usageMissing(), e.virtualKeyId());
+                e.gatewayRequestId(), e.isComplete(), e.usageMissing(), e.virtualKeyId(), e.clientIp());
     }
 
     /** Primary input/output token, preferring the protocol-specific column. */

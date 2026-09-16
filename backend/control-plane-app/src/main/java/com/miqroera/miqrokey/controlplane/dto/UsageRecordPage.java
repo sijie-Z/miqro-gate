@@ -15,6 +15,6 @@ public record UsageRecordPage(List<UsageRecordView> items, long page, long size,
     public record UsageRecordView(Instant occurredAt, String modelId, CacheLevel cacheLevel, Long inputTokens,
             Long outputTokens, Long cacheReadInputTokens, Long cacheCreationInputTokens, Long totalTokens,
             Long latencyMs, Integer upstreamStatusCode, String providerRequestId, String gatewayRequestId,
-            boolean isComplete, boolean usageMissing, UUID virtualKeyId) {
+            boolean isComplete, boolean usageMissing, UUID virtualKeyId, String clientIp) {
     }
 }

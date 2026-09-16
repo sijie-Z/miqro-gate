@@ -32,6 +32,9 @@ export type ModelApprovalView = components['schemas']['ModelApprovalView'];
 export type ModelApprovalPage = components['schemas']['ModelApprovalPage'];
 export type QuotaRuleView = components['schemas']['QuotaRuleView'];
 export type UsageSummary = components['schemas']['UsageSummary'];
+// #634 hourly usage report (admin)
+export type HourlyUsageReport = components['schemas']['HourlyUsageReport'];
+export type HourlyUsageRow = components['schemas']['HourlyUsageRow'];
 export type PriceSnapshotView = components['schemas']['PriceSnapshotView'];
 export type CredentialView = components['schemas']['CredentialView'];
 export type CredentialVersionView = components['schemas']['CredentialVersionView'];
@@ -40,6 +43,7 @@ export type ValidateCredentialResponse = components['schemas']['ValidateCredenti
 export type SubscriptionView = components['schemas']['SubscriptionView'];
 export type SeatView = components['schemas']['SeatView'];
 export type AuditEventView = components['schemas']['AuditEventView'];
+export type AdminRetentionLogView = components['schemas']['AdminRetentionLogView'];
 export type MeGrantsResponse = components['schemas']['MeGrantsResponse'];
 export type QuotaDefaultTemplateView = components['schemas']['QuotaDefaultTemplateView'];
 export type McpAccessView = components['schemas']['McpAccessView'];

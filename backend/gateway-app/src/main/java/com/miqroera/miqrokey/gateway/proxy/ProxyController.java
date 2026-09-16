@@ -138,6 +138,7 @@ public class ProxyController {
     private final BuiltInAdapterRegistry adapterRegistry;
     private final ProviderCatalog providerCatalog;
     private final RetentionSidecar retentionSidecar;
+    private final ClientAddressResolver clientAddressResolver;
     /** TTFB metric hook (#486): observation per attempt that sees a first byte. */
     private final GatewayTtfbMetrics ttfbMetrics;
 
@@ -148,8 +149,9 @@ public class ProxyController {
             ObjectMapper objectMapper, ProxyTargetProperties properties,
             UpstreamTargetValidator upstreamTargetValidator, Scheduler credentialDecryptScheduler,
             BuiltInAdapterRegistry adapterRegistry, ProviderCatalog providerCatalog, RetentionSidecar retentionSidecar,
-            GatewayTtfbMetrics ttfbMetrics) {
+            GatewayTtfbMetrics ttfbMetrics, ClientAddressResolver clientAddressResolver) {
         this.retentionSidecar = retentionSidecar;
+        this.clientAddressResolver = clientAddressResolver;
         this.ttfbMetrics = ttfbMetrics;
         this.keyResolver = keyResolver;
         this.credentialInjector = credentialInjector;
@@ -245,12 +247,26 @@ public class ProxyController {
             boolean streaming = root != null && root.has("stream") && root.get("stream").asBoolean(false);
 
             java.util.Set<String> allowed = ctx.models();
-            java.util.Set<String> grantModels = ctx.snapshot().grantModels(ctx.key().grantId());
-            if (grantModels != null) {
-                // Grant is the authorization authority: shrinking the grant's
-                // model scope must revoke the model for every existing key of
-                // the project (same semantics as /v1/models).
-                allowed = allowed.stream().filter(grantModels::contains).collect(java.util.stream.Collectors.toSet());
+            if ("POLICY_ROUTED".equals(ctx.context().resolutionStatus())) {
+                // #647: unattributed requests run under the tenant policy's
+                // dedicated credential — never a project grant. Model scope =
+                // policy scope (empty = the product's ACTIVE upstream catalog),
+                // intersected with the key's own allowance (plan Q2).
+                RouteSnapshot.UnattributedPolicyRecord policy = ctx.snapshot().unattributedPolicy(ctx.tenantId());
+                java.util.Set<String> scope = policy != null && !policy.models().isEmpty()
+                        ? policy.models()
+                        : ctx.snapshot().upstreamModels(ctx.binding().productId());
+                allowed = allowed.stream().filter(scope::contains).collect(java.util.stream.Collectors.toSet());
+            } else {
+                // ADR-0018: the request's binding decides the grant (multi-project keys).
+                java.util.Set<String> grantModels = ctx.snapshot().grantModels(ctx.binding().grantId());
+                if (grantModels != null) {
+                    // Grant is the authorization authority: shrinking the grant's
+                    // model scope must revoke the model for every existing key of
+                    // the project (same semantics as /v1/models).
+                    allowed = allowed.stream().filter(grantModels::contains)
+                            .collect(java.util.stream.Collectors.toSet());
+                }
             }
             if (modelName != null && !allowed.contains(modelName)) {
                 return writeError(exchange, new AuthFailureException(HttpStatus.FORBIDDEN, "model_not_allowed",
@@ -316,7 +332,8 @@ public class ProxyController {
         }
         // Waiter: replay the leader's response byte-identically, or fall back.
         return flight.shared().flatMap(cached -> {
-            publishCoalescedUsage(ctx, modelName, cached, cacheKey, requestId);
+            publishCoalescedUsage(ctx, modelName, cached, cacheKey, requestId,
+                    clientAddressResolver.resolve(exchange.getRequest()));
             return sseReplayEngine.replay(cached, exchange.getResponse(), requestId, "coalesced");
         }).onErrorResume(e -> {
             log.debug("Coalescer wait failed (requestId={}); falling back to own upstream call: {}", requestId,
@@ -441,6 +458,10 @@ public class ProxyController {
                     TokenBucket tokens = attempt.observedTokens.get() != null
                             ? attempt.observedTokens.get()
                             : mergeObservations(attempt.usageObserver);
+                    // #623: lifecycle events still need the id when the stream
+                    // ended without the response-completion block (client
+                    // cancels); the usage event path resolves it earlier.
+                    effectiveProviderRequestId(attempt);
                     publishLifecycleComplete(ctx, modelName, requestId, startedAt, streaming, wireProtocol, signal,
                             attempt.httpStatus.get(), attempt.providerRequestId.get(), attempt.upstreamError.get(),
                             attempt.ttfb, tokens, clientCancelled, attempts.get() - 1);
@@ -503,8 +524,14 @@ public class ProxyController {
                         attempt.observedTokens.set(tokens);
                         boolean successful = status >= 200 && status < 300;
                         long latencyMs = clock.millis() - startMillis;
-                        publishUsageEvent(ctx, modelName, cacheKey, tokens, status, upstreamRequestId, requestId,
-                                latencyMs, true, successful && tokens.isEmpty());
+                        publishUsageEvent(ctx, modelName, cacheKey, tokens, status, effectiveProviderRequestId(attempt),
+                                requestId, latencyMs, true, successful && tokens.isEmpty(),
+                                clientAddressResolver.resolve(exchange.getRequest()));
+                        // Retention (ADR-0014 增补): the reply is fully written —
+                        // capture its text on the compliance side channel
+                        // (best-effort; disabled unless the tenant opted in).
+                        retentionSidecar.captureOutput(exchange.getRequest().getURI().getPath(),
+                                attempt.collector.bytes(), isSse, ctx, requestId, attempt.collector.overflow());
 
                         CachedResponse cached = null;
                         boolean cacheableResponse = cacheKey != null && successful && !attempt.collector.overflow()
@@ -575,7 +602,8 @@ public class ProxyController {
     // -------------------------------------------------------------------
 
     private void publishUsageEvent(AuthContext ctx, String modelName, CacheKey cacheKey, TokenBucket tokens, int status,
-            String providerRequestId, String requestId, long latencyMs, boolean complete, boolean usageMissing) {
+            String providerRequestId, String requestId, long latencyMs, boolean complete, boolean usageMissing,
+            String clientIp) {
         if (modelName == null) {
             // usage_event.model_id is NOT NULL: a transparently forwarded body
             // without a usable "model" field (unparseable JSON, or a protocol
@@ -590,14 +618,14 @@ public class ProxyController {
             usageEventBus.publish(new UsageEvent(UUID.randomUUID(), ctx.tenantId(), providerRequestId,
                     ctx.key().keyId(), ctx.projectId(), ctx.productId(), ctx.binding().credentialId(), modelName,
                     CacheLevel.UPSTREAM, tokens, latencyMs, status, cacheKey != null ? cacheKey.sha256() : null,
-                    complete, usageMissing, requestId, clock.instant()));
+                    complete, usageMissing, requestId, clock.instant(), clientIp, attributionOf(ctx)));
         } catch (RuntimeException e) {
             log.warn("Failed to publish usage event (requestId={}): {}", requestId, e.getMessage());
         }
     }
 
     private void publishCoalescedUsage(AuthContext ctx, String modelName, CachedResponse cached, CacheKey cacheKey,
-            String requestId) {
+            String requestId, String clientIp) {
         if (modelName == null) {
             log.warn("Coalesced usage event skipped: no model name in request (requestId={})", requestId);
             return;
@@ -606,10 +634,19 @@ public class ProxyController {
             usageEventBus.publish(new UsageEvent(UUID.randomUUID(), ctx.tenantId(), null, ctx.key().keyId(),
                     ctx.projectId(), ctx.productId(), ctx.binding().credentialId(), modelName, CacheLevel.COALESCED,
                     cached.usage(), null, null, cacheKey != null ? cacheKey.sha256() : null, true,
-                    cached.usage().isEmpty(), requestId, clock.instant()));
+                    cached.usage().isEmpty(), requestId, clock.instant(), clientIp, attributionOf(ctx)));
         } catch (RuntimeException e) {
             log.warn("Failed to publish coalesced usage event (requestId={}): {}", requestId, e.getMessage());
         }
+    }
+
+    /** CAA attribution snapshot for the usage row; null without context. */
+    private static UsageEvent.ContextAttribution attributionOf(AuthContext ctx) {
+        var c = ctx.context();
+        return c == null
+                ? null
+                : new UsageEvent.ContextAttribution(c.sessionId(), c.activityId(), c.claimedProjectId(),
+                        c.resolutionStatus(), c.claimSource(), c.claimConfidence());
     }
 
     private void publishCacheHit(GatewayResponseCache.LookupLevel level, AuthContext ctx, CacheKey cacheKey,
@@ -739,7 +776,9 @@ public class ProxyController {
     /**
      * The provider's request id (dedup anchor for usage writes): OpenAI exposes
      * {@code x-request-id}, Anthropic {@code request-id}. Truncated to the column
-     * width; null when absent.
+     * width; null when absent. When both headers are missing, the terminal stage
+     * falls back to the response-body id ({@link UpstreamRequestIdExtractor},
+     * #623).
      */
     private static String pickProviderRequestId(
             org.springframework.web.reactive.function.client.ClientResponse response) {
@@ -751,6 +790,23 @@ public class ProxyController {
             return null;
         }
         return id.length() > 128 ? id.substring(0, 128) : id;
+    }
+
+    /**
+     * Headers first ({@link #pickProviderRequestId}); when both are absent the
+     * observed response prefix is scanned for the body {@code "id"} (#623 —
+     * DeepSeek and other OpenAI-compatible providers only carry the id in the
+     * body). The first resolution wins for the whole attempt: the usage event is
+     * published at response-completion, before the terminal lifecycle record, so it
+     * must not depend on the later doFinally stage.
+     */
+    private static String effectiveProviderRequestId(UpstreamAttempt attempt) {
+        String id = attempt.providerRequestId.get();
+        if (id == null) {
+            id = UpstreamRequestIdExtractor.fromBodyPrefix(attempt.collector.bytes());
+            attempt.providerRequestId.set(id);
+        }
+        return id;
     }
 
     private JsonNode parseQuietly(byte[] body) {

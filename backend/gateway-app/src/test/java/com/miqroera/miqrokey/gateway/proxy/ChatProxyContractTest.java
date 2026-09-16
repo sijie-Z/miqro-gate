@@ -563,6 +563,46 @@ class ChatProxyContractTest {
             assertThat(bus.usageEvents()).hasSize(1);
             assertThat(bus.usageEvents().get(0).modelId()).isEqualTo("gpt-4o-mini");
         }
+
+        @Test
+        @DisplayName("records the provider request id from the response body when no id header exists (#623)")
+        void shouldRecordProviderRequestIdFromResponseBody() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json")
+                    .body("{\"id\":\"prov-body-42\",\"object\":\"chat.completion\",\"model\":\"gpt-4o-mini\","
+                            + "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"hi\"}}],"
+                            + "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}")
+                    .build());
+            InMemoryUsageEventBus bus = (InMemoryUsageEventBus) usageEventBus;
+            bus.clear();
+
+            webTestClient.post().uri("/v1/chat/completions").bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange()
+                    .expectStatus().isOk().expectBody().returnResult().getResponseBody();
+
+            // The usage fact is published at response completion — an id resolved
+            // only in the terminal doFinally stage would land too late here.
+            awaitOrFail(() -> !bus.usageEvents().isEmpty(), "the usage fact");
+            assertThat(bus.usageEvents().get(0).providerRequestId()).isEqualTo("prov-body-42");
+        }
+
+        @Test
+        @DisplayName("an id response header wins over the body id (#623)")
+        void headerIdWinsOverBodyId() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").header("x-request-id", "hdr-1")
+                    .body("{\"id\":\"prov-body-42\",\"object\":\"chat.completion\",\"model\":\"gpt-4o-mini\","
+                            + "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"hi\"}}],"
+                            + "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}")
+                    .build());
+            InMemoryUsageEventBus bus = (InMemoryUsageEventBus) usageEventBus;
+            bus.clear();
+
+            webTestClient.post().uri("/v1/chat/completions").bodyValue(ChatFixtures.REQUEST_NON_STREAMING).exchange()
+                    .expectStatus().isOk().expectBody().returnResult().getResponseBody();
+
+            awaitOrFail(() -> !bus.usageEvents().isEmpty(), "the usage fact");
+            assertThat(bus.usageEvents().get(0).providerRequestId()).isEqualTo("hdr-1");
+        }
     }
 
     /** Polls a condition up to 5s; fails loudly instead of racing the writer. */

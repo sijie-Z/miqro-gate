@@ -24,6 +24,7 @@ import type {
   UsageRecord,
   UsageRecordPage,
   UsageSummary,
+  VirtualKeyView,
 } from '@/types/generated-api';
 
 const groupBy = ref<UsageGroupBy>('project');
@@ -98,7 +99,19 @@ const windowOptions = [
   { value: 93, label: '近 93 天' },
 ];
 
+// #643: custom window (datetime-local inputs, inclusive range ≤ server's 93d cap).
+const customOpen = ref(false);
+const customFrom = ref('');
+const customTo = ref('');
+const customActive = ref(false);
+
 function windowFromTo(): { from?: string; to?: string } {
+  if (customActive.value && customFrom.value && customTo.value) {
+    return {
+      from: new Date(customFrom.value).toISOString(),
+      to: new Date(customTo.value).toISOString(),
+    };
+  }
   if (!rangeDays.value) return {};
   const to = new Date();
   return {
@@ -109,6 +122,26 @@ function windowFromTo(): { from?: string; to?: string } {
 
 function applyRange(value: number) {
   rangeDays.value = value;
+  customActive.value = false; // a preset wins; the custom window is parked
+  page.value = 1;
+  void loadSummary();
+  void loadRecords();
+}
+
+function applyCustomRange() {
+  if (!customFrom.value || !customTo.value) {
+    toast.info('请选择开始与结束时间。');
+    return;
+  }
+  const from = new Date(customFrom.value);
+  const to = new Date(customTo.value);
+  if (!(from.getTime() < to.getTime())) {
+    toast.info('开始时间必须早于结束时间。');
+    return;
+  }
+  customActive.value = true;
+  rangeDays.value = -1; // nothing in the preset strip stays highlighted
+  page.value = 1;
   void loadSummary();
   void loadRecords();
 }
@@ -153,14 +186,45 @@ const summaryColumns = [
 
 const recordsColumns = [
   { key: 'occurredAt', title: '时间', width: '180px' },
-  { key: 'modelId', title: '模型', minWidth: '180px' },
-  { key: 'cacheLevel', title: '级别', width: '110px' },
-  { key: 'input', title: '输入', width: '100px', align: 'right' as const },
-  { key: 'output', title: '输出', width: '100px', align: 'right' as const },
-  { key: 'latency', title: '延迟', width: '90px', align: 'right' as const },
-  { key: 'upstreamStatus', title: '上游状态', width: '100px', align: 'right' as const },
-  { key: 'providerRequestId', title: '供应商请求 ID', minWidth: '220px' },
+  { key: 'modelId', title: '模型', minWidth: '170px' },
+  { key: 'virtualKey', title: '密钥', minWidth: '150px' },
+  { key: 'cacheLevel', title: '级别', width: '100px' },
+  { key: 'input', title: '输入', width: '90px', align: 'right' as const },
+  { key: 'output', title: '输出', width: '90px', align: 'right' as const },
+  { key: 'cacheRead', title: '缓存读', width: '110px', align: 'right' as const },
+  { key: 'latency', title: '延迟', width: '85px', align: 'right' as const },
+  { key: 'upstreamStatus', title: '上游状态', width: '95px', align: 'right' as const },
+  { key: 'clientIp', title: '来源 IP', width: '140px' },
+  { key: 'providerRequestId', title: '供应商请求 ID', minWidth: '210px' },
 ];
+
+// #643: record rows resolve their virtual key by name for at-a-glance auditing.
+const myKeys = ref<VirtualKeyView[]>([]);
+const keyName = computed(() => {
+  const byId = new Map(myKeys.value.map((k) => [k.id ?? '', k.name ?? k.id ?? '']));
+  return (id?: string) => (id ? (byId.get(id) ?? `${id.slice(0, 8)}…`) : '—');
+});
+
+async function loadKeys() {
+  try {
+    myKeys.value = await api.listVirtualKeys();
+  } catch {
+    // the column degrades to short ids — never blocks the page
+  }
+}
+
+// #643: page-jump input beside prev/next.
+const pageInput = ref('');
+
+function jumpToPage() {
+  const wanted = Number.parseInt(pageInput.value, 10);
+  if (Number.isNaN(wanted)) {
+    pageInput.value = '';
+    return;
+  }
+  pageInput.value = '';
+  gotoPage(Math.min(Math.max(wanted, 1), totalPages.value));
+}
 
 const groupByOptions: UiSelectOption[] = [
   { value: 'project', label: '项目' },
@@ -212,6 +276,7 @@ onMounted(() => {
   void loadSummary();
   void loadRecords();
   void loadQuota();
+  void loadKeys();
 });
 
 async function loadQuota() {
@@ -316,21 +381,27 @@ async function exportRecords() {
   const header = [
     '时间',
     '模型',
+    '密钥',
     '级别',
     '输入 Token',
     '输出 Token',
+    '缓存读 Token',
     '延迟(ms)',
     '上游状态',
+    '来源 IP',
     '供应商请求 ID',
   ];
   const rows = all.map((r) => [
     r.occurredAt,
     r.modelId ?? '',
+    keyName.value(r.virtualKeyId),
     cacheLevelLabel[r.cacheLevel ?? ''] ?? r.cacheLevel,
     String(r.inputTokens ?? ''),
     String(r.outputTokens ?? ''),
+    String(r.cacheReadInputTokens ?? ''),
     String(r.latencyMs ?? ''),
     String(r.upstreamStatusCode ?? ''),
+    r.clientIp ?? '',
     r.providerRequestId ?? '',
   ]);
   const csv = [header, ...rows]
@@ -505,7 +576,10 @@ function formatTime(iso?: string): string {
       </div>
     </section>
 
-    <section class="ui-panel next-usage__panel">
+    <section
+      class="ui-panel next-usage__panel"
+      :class="{ 'next-usage__busy': summaryLoading && summary }"
+    >
       <div class="ui-panel-head">
         <div class="next-usage__head-inline">
           <h2 class="ui-panel-title">用量汇总</h2>
@@ -523,6 +597,15 @@ function formatTime(iso?: string): string {
             >
               {{ w.label }}
             </button>
+            <button
+              type="button"
+              class="next-usage__seg"
+              :class="{ 'next-usage__seg--on': customActive }"
+              data-testid="usage-range-custom"
+              @click="customOpen = !customOpen"
+            >
+              自定义
+            </button>
           </div>
           <div class="next-usage__groupby">
             <span class="next-usage__groupby-label">分组维度</span>
@@ -536,10 +619,34 @@ function formatTime(iso?: string): string {
           </div>
         </div>
       </div>
+      <div v-if="customOpen" class="next-usage__custom-range" data-testid="usage-custom-range">
+        <input
+          v-model="customFrom"
+          type="datetime-local"
+          class="next-usage__datetime"
+          data-testid="usage-custom-from"
+        />
+        <span class="next-usage__custom-sep">至</span>
+        <input
+          v-model="customTo"
+          type="datetime-local"
+          class="next-usage__datetime"
+          data-testid="usage-custom-to"
+        />
+        <UiButton
+          variant="primary"
+          size="sm"
+          data-testid="usage-custom-apply"
+          @click="applyCustomRange"
+        >
+          应用
+        </UiButton>
+        <span class="next-usage__custom-hint">最长 93 天</span>
+      </div>
       <UiTable
         :columns="summaryColumns"
         :data="summary?.groups ?? []"
-        :loading="summaryLoading"
+        :loading="summaryLoading && !summary"
         row-key="groupKey"
         empty-title="当前时间范围内没有用量记录"
         data-testid="summary-table"
@@ -595,14 +702,17 @@ function formatTime(iso?: string): string {
 
     <div class="next-usage__columns">
       <!-- Records -->
-      <section class="ui-panel next-usage__records">
+      <section
+        class="ui-panel next-usage__records"
+        :class="{ 'next-usage__busy': recordsLoading && records }"
+      >
         <div class="ui-panel-head">
           <h2 class="ui-panel-title">最近记录</h2>
         </div>
         <UiTable
           :columns="recordsColumns"
           :data="records?.items ?? []"
-          :loading="recordsLoading"
+          :loading="recordsLoading && !records"
           row-key="gatewayRequestId"
           empty-title="没有用量记录"
           data-testid="records-table"
@@ -611,6 +721,9 @@ function formatTime(iso?: string): string {
           <template #modelId="{ row }">
             <span class="ui-mono">{{ asRecord(row).modelId }}</span>
           </template>
+          <template #virtualKey="{ row }">
+            <span class="next-usage__keyname">{{ keyName(asRecord(row).virtualKeyId) }}</span>
+          </template>
           <template #cacheLevel="{ row }">
             <UiStatusBadge
               :label="cacheLevelLabel[asRecord(row).cacheLevel!] ?? asRecord(row).cacheLevel"
@@ -618,6 +731,9 @@ function formatTime(iso?: string): string {
           </template>
           <template #input="{ row }">{{ formatNumber(asRecord(row).inputTokens) }}</template>
           <template #output="{ row }">{{ formatNumber(asRecord(row).outputTokens) }}</template>
+          <template #cacheRead="{ row }">{{
+            formatNumber(asRecord(row).cacheReadInputTokens)
+          }}</template>
           <template #latency="{ row }">
             {{
               asRecord(row).latencyMs === null || asRecord(row).latencyMs === undefined
@@ -628,15 +744,45 @@ function formatTime(iso?: string): string {
           <template #upstreamStatus="{ row }">{{
             asRecord(row).upstreamStatusCode ?? '—'
           }}</template>
+          <template #clientIp="{ row }">
+            <span class="ui-mono">{{ asRecord(row).clientIp || '—' }}</span>
+          </template>
           <template #providerRequestId="{ row }">
             <span class="ui-mono">{{ asRecord(row).providerRequestId || '—' }}</span>
           </template>
         </UiTable>
         <div v-if="records && (records.total ?? 0) > 0" class="next-usage__pager">
           <span class="next-usage__pager-total ui-num"
-            >共 {{ records.total }} 条 · 第 {{ page }} / {{ totalPages }} 页</span
+            >共 {{ records.total }} 条 · 第 {{ page }} / {{ totalPages }} 页<span
+              v-if="recordsLoading"
+              class="next-usage__busy-hint"
+              data-testid="records-busy"
+            >
+              更新中…</span
+            ></span
           >
           <div class="next-usage__pager-actions">
+            <div class="next-usage__pager-jump">
+              <span>跳至</span>
+              <input
+                v-model="pageInput"
+                class="next-usage__page-input"
+                type="text"
+                inputmode="numeric"
+                :placeholder="String(page)"
+                data-testid="records-page-input"
+                @keydown.enter="jumpToPage"
+              />
+              <span>页</span>
+              <UiButton
+                variant="secondary"
+                size="sm"
+                data-testid="records-page-go"
+                @click="jumpToPage"
+              >
+                跳转
+              </UiButton>
+            </div>
             <UiButton
               variant="secondary"
               :disabled="page <= 1"
@@ -883,7 +1029,84 @@ function formatTime(iso?: string): string {
 
 .next-usage__pager-actions {
   display: flex;
+  align-items: center;
   gap: var(--ui-space-2);
+}
+
+/* #643: page/range changes keep the old data visible with a soft busy dim
+   instead of swapping in skeleton rows (the height jump made the whole
+   column flicker). */
+.next-usage__busy {
+  opacity: 0.65;
+  transition: opacity var(--ui-ease);
+}
+
+.next-usage__busy-hint {
+  margin-left: var(--ui-space-2);
+  color: var(--ui-foreground-faint);
+}
+
+.next-usage__keyname {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-usage__custom-range {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-2) var(--ui-space-5);
+  border-bottom: 1px solid var(--ui-border-muted);
+}
+
+.next-usage__custom-sep,
+.next-usage__custom-hint {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-usage__datetime {
+  height: var(--ui-control-height);
+  padding: 0 var(--ui-space-2);
+  border: 1px solid var(--ui-input-border);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-card);
+  color: var(--ui-foreground);
+  font-family: inherit;
+  font-size: var(--ui-font-size-sm);
+}
+
+.next-usage__datetime:focus {
+  outline: none;
+  border-color: var(--ui-primary);
+  box-shadow: var(--ui-shadow-focus);
+}
+
+.next-usage__pager-jump {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-1);
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-usage__page-input {
+  width: 56px;
+  height: 26px;
+  padding: 0 var(--ui-space-1);
+  border: 1px solid var(--ui-input-border);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-card);
+  color: var(--ui-foreground);
+  font-family: inherit;
+  font-size: var(--ui-font-size-xs);
+  text-align: center;
+}
+
+.next-usage__page-input:focus {
+  outline: none;
+  border-color: var(--ui-primary);
+  box-shadow: var(--ui-shadow-focus);
 }
 
 /* usage micro-polish (issue #261): empty summaries skip the misleading

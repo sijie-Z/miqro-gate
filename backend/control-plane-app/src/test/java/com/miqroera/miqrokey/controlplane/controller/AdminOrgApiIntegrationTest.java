@@ -34,6 +34,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -146,6 +147,73 @@ class AdminOrgApiIntegrationTest {
                 .andExpect(status().isOk());
         mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(new LoginRequest("lockme", temp)))).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("PATCH /admin/users/{id} edits displayName and rejects empty/blank/overlong bodies (#614)")
+    void updateUserDisplayNameAndValidation() throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("username", "rename-me", "displayName", "Before", "role", "USER"))))
+                .andExpect(status().isOk()).andReturn();
+        Map<?, ?> createdBody = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class);
+        String userId = ((Map<?, ?>) createdBody.get("user")).get("id").toString();
+        String temp2 = createdBody.get("temporaryPassword").toString();
+
+        // displayName-only update persists; status stays untouched.
+        mockMvc.perform(patch("/api/v1/admin/users/" + userId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content("{\"displayName\":\"改名成功\"}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("改名成功")).andExpect(jsonPath("$.status").value("ACTIVE"));
+        String usersBody = mockMvc.perform(get("/api/v1/admin/users").cookie(sessionCookie)).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        JsonNode row = null;
+        for (JsonNode node : objectMapper.readTree(usersBody)) {
+            if ("rename-me".equals(node.path("username").asText())) {
+                row = node;
+            }
+        }
+        assertThat(row).isNotNull();
+        assertThat(row.path("displayName").asText()).isEqualTo("改名成功");
+
+        // #614: an unknown-field-only body used to drop displayName and send a
+        // null status into the NOT NULL column — 500. It must be a 400 now.
+        mockMvc.perform(patch("/api/v1/admin/users/" + userId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content("{\"unknownField\":\"x\"}")).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("USER_UPDATE_EMPTY"));
+        // Empty body and blank display names are rejected.
+        mockMvc.perform(patch("/api/v1/admin/users/" + userId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken).content("{}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("USER_UPDATE_EMPTY"));
+        mockMvc.perform(patch("/api/v1/admin/users/" + userId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content("{\"displayName\":\"   \"}")).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("DISPLAY_NAME_INVALID"));
+        mockMvc.perform(patch("/api/v1/admin/users/" + userId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("displayName", "x".repeat(201)))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("DISPLAY_NAME_INVALID"));
+
+        // Combined displayName + status keeps the status side effects (revoke).
+        MvcResult login = mockMvc
+                .perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("rename-me", temp2))))
+                .andExpect(status().isOk()).andReturn();
+        Cookie renameSession = cookie(login, "MIQROKEY_SESSION");
+        mockMvc.perform(patch("/api/v1/admin/users/" + userId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content("{\"displayName\":\"锁定中\",\"status\":\"LOCKED\"}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("锁定中")).andExpect(jsonPath("$.status").value("LOCKED"));
+        mockMvc.perform(get("/api/v1/auth/me").cookie(renameSession)).andExpect(status().isUnauthorized());
+
+        // Both successful updates are on the unified USER_UPDATE audit trail.
+        Integer auditCount = jdbc.queryForObject(
+                "SELECT count(*) FROM admin_audit_events WHERE action = 'USER_UPDATE' AND target_id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(userId)), Integer.class);
+        assertThat(auditCount).isEqualTo(2);
     }
 
     @Test
@@ -375,6 +443,87 @@ class AdminOrgApiIntegrationTest {
         return null;
     }
 
+    @Test
+    @DisplayName("project tag lifecycle and member removal over bound keys (ADR-0018)")
+    void projectTagLifecycleAndMemberRemoval() throws Exception {
+        fx.insertProviderAndProductAndCredential();
+
+        // 1) Omitted tag is auto-derived from the code — no administrator input.
+        MvcResult project = mockMvc
+                .perform(post("/api/v1/admin/projects").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("code", "QA Team", "name", "QA"))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.projectTag").value("qa-team")).andReturn();
+        String projectId = objectMapper.readValue(project.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        MvcResult grant = mockMvc
+                .perform(post("/api/v1/admin/grants").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("projectId", projectId, "providerProductId",
+                                fx.productId.toString(), "credentialId", fx.credentialId.toString(), "models",
+                                List.of("model-a", "model-b")))))
+                .andExpect(status().isOk()).andReturn();
+        String grantId = objectMapper.readValue(grant.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        // 2) A member (bob) joins and creates a key bound to the project.
+        MvcResult invited = mockMvc
+                .perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("username", "bob"))))
+                .andExpect(status().isOk()).andReturn();
+        Map<?, ?> inviteBody = objectMapper.readValue(invited.getResponse().getContentAsString(), Map.class);
+        String bobId = ((Map<?, ?>) inviteBody.get("user")).get("id").toString();
+        String bobTemp = (String) inviteBody.get("temporaryPassword");
+        mockMvc.perform(post("/api/v1/admin/projects/" + projectId + "/members").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("userId", bobId)))).andExpect(status().isOk());
+
+        MvcResult bobLogin = mockMvc
+                .perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("bob", bobTemp))))
+                .andExpect(status().isOk()).andReturn();
+        Cookie bobSession = cookie(bobLogin, "MIQROKEY_SESSION");
+        Cookie bobCsrf = cookie(bobLogin, "MIQROKEY_CSRF");
+        mockMvc.perform(post("/api/v1/auth/password").contentType(MediaType.APPLICATION_JSON)
+                .cookie(bobSession, bobCsrf).header("X-CSRF-Token", bobCsrf.getValue())
+                .content(objectMapper.writeValueAsString(new PasswordChangeRequest(bobTemp, "BobSecurePass1!"))))
+                .andExpect(status().isOk());
+
+        MvcResult bobKey = mockMvc
+                .perform(post("/api/v1/me/virtual-keys").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(bobSession, bobCsrf).header("X-CSRF-Token", bobCsrf.getValue())
+                        .content(objectMapper.writeValueAsString(Map.of("name", "bob-key", "projectId", projectId,
+                                "providerProductId", fx.productId.toString(), "credentialGrantId", grantId, "purpose",
+                                "CLAUDE_CODE"))))
+                .andExpect(status().isCreated()).andReturn();
+        String keyId = objectMapper.readValue(bobKey.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        // 3) The tag is now referenced by a binding: changing it is refused …
+        mockMvc.perform(patch("/api/v1/admin/projects/" + projectId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("projectTag", "qa-team-2"))))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("PROJECT_TAG_IN_USE"));
+        // … renaming the project (no tag change) stays allowed.
+        mockMvc.perform(patch("/api/v1/admin/projects/" + projectId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("name", "QA Renamed")))).andExpect(status().isOk());
+
+        // 4) Removing the member disables the (key × project) binding and, since
+        // it was the key's only binding, revokes the key.
+        mockMvc.perform(delete("/api/v1/admin/projects/" + projectId + "/members/" + bobId)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+
+        String bindingStatus = jdbc.queryForObject("SELECT status FROM key_project_binding WHERE virtual_key_id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(keyId)), String.class);
+        String keyStatus = jdbc.queryForObject("SELECT status FROM virtual_keys WHERE id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(keyId)), String.class);
+        assertThat(bindingStatus).isEqualTo("DISABLED");
+        assertThat(keyStatus).isEqualTo("REVOKED");
+    }
+
     private final class Fixture {
         final UUID tenantId = UUID.fromString("00000000-0000-0000-0000-000000000001");
         final UUID providerId = UUID.randomUUID();
@@ -388,10 +537,10 @@ class AdminOrgApiIntegrationTest {
         void reset() {
             for (String table : List.of("quota_snapshots", "cost_allocations", "usage_event", "cache_hit_event",
                     "price_snapshot", "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
-                    "project_provider_grant_models", "project_provider_grants", "model_catalog",
+                    "project_provider_grant_models", "project_provider_grants", "model_catalog", "unattributed_policy",
                     "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
-                    "project_memberships", "team_memberships", "projects", "teams", "provider_products", "providers",
-                    "admin_audit_events", "user_sessions", "users")) {
+                    "project_memberships", "team_memberships", "project_repositories", "projects", "teams",
+                    "provider_products", "providers", "admin_audit_events", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {
@@ -452,6 +601,120 @@ class AdminOrgApiIntegrationTest {
                     """, new MapSqlParameterSource("id", secondCredentialId).addValue("tenantId", tenantId)
                     .addValue("subscriptionId", secondSubscriptionId));
         }
+    }
+
+    @Test
+    @DisplayName("unattributed policy: lifecycle, bucket project, warnings, validations (#647)")
+    void unattributedPolicyLifecycle() throws Exception {
+        fx.insertProviderAndProductAndCredential();
+
+        mockMvc.perform(get("/api/v1/admin/unattributed-policy").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.configured").value(false));
+
+        // Configure with a catalog model (#498 semantics apply).
+        MvcResult put = mockMvc
+                .perform(put("/api/v1/admin/unattributed-policy").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("credentialId", fx.credentialId.toString(),
+                                "providerProductId", fx.productId.toString(), "models", List.of("model-a")))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.configured").value(true))
+                .andExpect(jsonPath("$.models[0]").value("model-a")).andReturn();
+        String bucketId = objectMapper.readValue(put.getResponse().getContentAsString(), Map.class).get("projectId")
+                .toString();
+
+        // The bucket project is a system project and appears in the list with the flag.
+        Boolean system = jdbc.queryForObject("SELECT system FROM projects WHERE id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(bucketId)), Boolean.class);
+        assertThat(system).isTrue();
+        mockMvc.perform(get("/api/v1/admin/projects").cookie(sessionCookie)).andExpect(status().isOk());
+
+        // A model outside the catalog is rejected.
+        mockMvc.perform(put("/api/v1/admin/unattributed-policy").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("credentialId", fx.credentialId.toString(),
+                        "providerProductId", fx.productId.toString(), "models", List.of("ghost-model-xyz")))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MODEL_NOT_IN_CATALOG"));
+
+        // A credential from a different product's subscription is rejected.
+        mockMvc.perform(put("/api/v1/admin/unattributed-policy").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("credentialId", fx.secondCredentialId.toString(),
+                        "providerProductId", fx.productId.toString(), "models", List.of("model-a")))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("UNAUTH_CREDENTIAL_PRODUCT_MISMATCH"));
+
+        // Once the credential is referenced by a project grant, the view warns
+        // (advisory, plan Q1).
+        String warnProject = createProject("POLW");
+        createGrant(warnProject, List.of("model-a"));
+        mockMvc.perform(get("/api/v1/admin/unattributed-policy").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.warning").isNotEmpty());
+
+        // Audit trail for the setter.
+        Integer audits = jdbc.queryForObject(
+                "SELECT count(*) FROM admin_audit_events WHERE action = 'UNATTRIBUTED_POLICY_SET'",
+                new MapSqlParameterSource(), Integer.class);
+        assertThat(audits).isNotNull();
+        assertThat(audits).isGreaterThanOrEqualTo(1);
+
+        // Clear -> unconfigured; the bucket project row is retained for history.
+        mockMvc.perform(delete("/api/v1/admin/unattributed-policy").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/admin/unattributed-policy").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.configured").value(false));
+        Integer bucketRows = jdbc.queryForObject("SELECT count(*) FROM projects WHERE id = :id AND system",
+                new MapSqlParameterSource("id", UUID.fromString(bucketId)), Integer.class);
+        assertThat(bucketRows).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("CAA project registry: repo mappings normalize, stay tenant-unique, and delete (#639)")
+    void projectRepositoryRegistry() throws Exception {
+        String p1 = createProject("REPOA");
+        String p2 = createProject("REPOB");
+
+        // Full URL form (with .git and mixed case) normalizes to host/owner/repo.
+        MvcResult added = mockMvc
+                .perform(post("/api/v1/admin/projects/" + p1 + "/repositories").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper
+                                .writeValueAsString(Map.of("repoKey", "https://github.com/Acme/Rocket.git"))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.repoKey").value("github.com/acme/rocket"))
+                .andReturn();
+        String mappingId = objectMapper.readValue(added.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        // Bare owner/repo defaults to github.com.
+        mockMvc.perform(post("/api/v1/admin/projects/" + p1 + "/repositories").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("repoKey", "acme/notes")))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.repoKey").value("github.com/acme/notes"));
+
+        mockMvc.perform(get("/api/v1/admin/projects/" + p1 + "/repositories").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
+
+        // Tenant-wide uniqueness: the same repo cannot map to a second project.
+        mockMvc.perform(post("/api/v1/admin/projects/" + p2 + "/repositories").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("repoKey", "github.com/acme/rocket"))))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("REPO_KEY_TAKEN"));
+
+        // Invalid shapes are rejected.
+        mockMvc.perform(post("/api/v1/admin/projects/" + p2 + "/repositories").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("repoKey", "not a repo!"))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("REPO_KEY_INVALID"));
+
+        // Delete, then the same id is gone.
+        mockMvc.perform(delete("/api/v1/admin/projects/" + p1 + "/repositories/" + mappingId)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+        mockMvc.perform(delete("/api/v1/admin/projects/" + p1 + "/repositories/" + mappingId)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("REPOSITORY_NOT_FOUND"));
+
+        // Unknown project stays a 404.
+        mockMvc.perform(get("/api/v1/admin/projects/" + UUID.randomUUID() + "/repositories").cookie(sessionCookie))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("PROJECT_NOT_FOUND"));
     }
 
     private String createProject(String code) throws Exception {

@@ -57,7 +57,8 @@ public class GatewayAuthTestConfig {
         return new InMemoryRouteSnapshotProvider(GatewayTestKeys.snapshot(requiredUpstreamUrl(environment),
                 GatewayTestKeys.DEFAULT_KEY, GatewayTestKeys.OTHER_KEY, GatewayTestKeys.GRANT_LIMITED_KEY,
                 GatewayTestKeys.UPSTREAM_LIMITED_KEY, GatewayTestKeys.NO_UPSTREAM_KEY,
-                GatewayTestKeys.UNKNOWN_PRODUCT_KEY));
+                GatewayTestKeys.UNKNOWN_PRODUCT_KEY, GatewayTestKeys.MULTI_BOUND_KEY,
+                GatewayTestKeys.MULTI_BOUND_KEY_SECOND));
     }
 
     @Bean

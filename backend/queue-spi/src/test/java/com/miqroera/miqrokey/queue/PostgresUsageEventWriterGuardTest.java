@@ -78,7 +78,7 @@ class PostgresUsageEventWriterGuardTest {
         return new UsageEvent(UUID.randomUUID(), UUID.randomUUID(), null, UUID.randomUUID(), UUID.randomUUID(),
                 UUID.randomUUID(), UUID.randomUUID(), modelId, CacheLevel.UPSTREAM,
                 new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), 42L, 200, null, true, false, gatewayRequestId,
-                CLOCK.instant());
+                CLOCK.instant(), null, null);
     }
 
     /** Captures batchUpdate calls; the DataSource is never used. */

@@ -656,7 +656,7 @@ onMounted(load);
         </template>
         <template #actions="{ row }">
           <UiButton
-            variant="ghost"
+            variant="link"
             size="sm"
             data-testid="recon-open"
             @click="selectReport(asReport(row))"

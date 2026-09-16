@@ -27,16 +27,6 @@ describe('UiTable', () => {
     expect(wrapper.text()).toContain('codex-tools');
   });
 
-  it('renders an optional column hint as the header title tooltip', () => {
-    const wrapper = mount(UiTable, {
-      props: {
-        columns: [{ key: 'purpose', title: '用途', hint: '声明标签，不限制客户端' }],
-        data: rows,
-      },
-    });
-    expect(wrapper.findAll('th')[0]!.attributes('title')).toBe('声明标签，不限制客户端');
-  });
-
   it('sorts ascending then descending on click', async () => {
     const wrapper = mount(UiTable, { props: { columns, data: rows } });
     const cells = () => wrapper.findAll('tbody tr').map((row) => row.text());

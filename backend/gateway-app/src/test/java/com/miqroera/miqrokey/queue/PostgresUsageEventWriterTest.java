@@ -40,6 +40,7 @@ class PostgresUsageEventWriterTest {
 
     private static final Clock CLOCK = Clock.systemUTC();
     private static final UUID TENANT_ID = UUID.fromString("aaaaaaaa-1111-2222-3333-444444444444");
+    private static final String CLIENT_IP = "203.0.113.7";
 
     private static final PostgreSQLContainer<?> POSTGRES;
 
@@ -197,6 +198,11 @@ class PostgresUsageEventWriterTest {
                 new MapSqlParameterSource().addValue("prid", providerRequestId.toString()), Integer.class);
         assertThat(usageRows).isEqualTo(1);
 
+        // #605: the calling-party address round-trips onto the usage fact.
+        String clientIp = jdbc.queryForObject("SELECT client_ip FROM usage_event WHERE provider_request_id = :prid",
+                new MapSqlParameterSource().addValue("prid", providerRequestId.toString()), String.class);
+        assertThat(clientIp).isEqualTo(CLIENT_IP);
+
         Integer hitRows = jdbc.queryForObject("""
                 SELECT count(*) FROM cache_hit_event
                 WHERE tenant_id = :tenantId AND cache_key = :cacheKey
@@ -224,11 +230,40 @@ class PostgresUsageEventWriterTest {
                 new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), status == RequestStatus.SUCCEEDED && false, 0);
     }
 
+    @Test
+    @DisplayName("CAA context columns persist verbatim with the usage row (#633)")
+    void contextColumnsPersist() {
+        Instant occurredAt = CLOCK.instant();
+        String gatewayRequestId = "gw-caa-" + UUID.randomUUID().toString().substring(0, 8);
+        UUID activityId = UUID.randomUUID();
+        UUID claimedProjectId = UUID.randomUUID();
+        UsageEvent event = new UsageEvent(UUID.randomUUID(), TENANT_ID, null, UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), UUID.randomUUID(), "model-x", CacheLevel.UPSTREAM,
+                new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), 42L, 200, null, true, false, gatewayRequestId,
+                occurredAt, CLIENT_IP, new UsageEvent.ContextAttribution("sess-1", activityId, claimedProjectId,
+                        "RESOLVED_HEADER", "tool_path", "HIGH"));
+
+        writer.writeBatch(List.of(event), List.of(), List.of(), List.of());
+
+        var rows = jdbc.queryForList("""
+                SELECT session_id, activity_id, claimed_project_id, resolution_status, claim_source, claim_confidence
+                FROM usage_event WHERE gateway_request_id = :gid
+                """, new MapSqlParameterSource().addValue("gid", gatewayRequestId));
+        assertThat(rows).hasSize(1);
+        var row = rows.get(0);
+        assertThat(row).containsEntry("session_id", "sess-1");
+        assertThat(row).containsEntry("activity_id", activityId);
+        assertThat(row).containsEntry("claimed_project_id", claimedProjectId);
+        assertThat(row).containsEntry("resolution_status", "RESOLVED_HEADER");
+        assertThat(row).containsEntry("claim_source", "tool_path");
+        assertThat(row).containsEntry("claim_confidence", "HIGH");
+    }
+
     private static UsageEvent usageEvent(UUID providerRequestId) {
         return new UsageEvent(UUID.randomUUID(), TENANT_ID, providerRequestId.toString(), UUID.randomUUID(),
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "model-x", CacheLevel.UPSTREAM,
                 new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), 42L, 200, null, true, false, "gw-usage",
-                CLOCK.instant());
+                CLOCK.instant(), CLIENT_IP, null);
     }
 
     private static CacheHitEvent hitEvent(String cacheKey, Instant occurredAt) {

@@ -18,7 +18,7 @@ import {
   toast,
 } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type {ProviderProductView} from '@/types/api';
+import type { ProviderProductView } from '@/types/api';
 import type { SubscriptionView, SeatView } from '@/types/generated-api';
 
 const subscriptions = ref<SubscriptionView[]>([]);
@@ -437,7 +437,7 @@ onMounted(load);
         </template>
         <template #actions="{ row }">
           <UiButton
-            variant="ghost"
+            variant="link"
             size="sm"
             data-testid="subscription-seats-open"
             @click="openSeats(row as SubscriptionView)"
