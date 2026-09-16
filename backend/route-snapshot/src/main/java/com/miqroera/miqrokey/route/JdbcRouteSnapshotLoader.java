@@ -79,9 +79,36 @@ public final class JdbcRouteSnapshotLoader {
         Map<String, RouteSnapshot.McpServerRecord> mcpServices = loadMcpServices();
         Map<UUID, RetentionConfig> retention = loadRetention();
         Map<UUID, RouteSnapshot.UnattributedPolicyRecord> unattributedPolicies = loadUnattributedPolicies();
+        BlockedScopes blocked = loadBlockedScopes();
         return new RouteSnapshot(version, loadedAt, keys, bindings, credentials, models, grantModels, upstreamModels,
                 productIds.productCodes(), productIds.providerIds(), consumers, mcpServices, retention,
-                unattributedPolicies);
+                unattributedPolicies, blocked.usersByTenant(), blocked.projectsByTenant());
+    }
+
+    /**
+     * Scopes blocked by an exhausted REJECT quota rule (#684, {@code
+     * quota_enforcement}). Only rows whose window is still open are loaded: the
+     * evaluator deletes the rest, but the deadline is enforced here too so a stale
+     * row can never outlive its period — the block expires by falling out of the
+     * snapshot, never by keeping a credential refused.
+     */
+    private BlockedScopes loadBlockedScopes() {
+        Map<UUID, Set<UUID>> usersByTenant = new LinkedHashMap<>();
+        Map<UUID, Set<UUID>> projectsByTenant = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT tenant_id, scope_type, scope_id
+                FROM quota_enforcement
+                WHERE window_to > now()
+                """, rs -> {
+            UUID tenantId = (UUID) rs.getObject("tenant_id");
+            String scopeType = rs.getString("scope_type");
+            Map<UUID, Set<UUID>> target = "USER".equals(scopeType) ? usersByTenant : projectsByTenant;
+            target.computeIfAbsent(tenantId, id -> new LinkedHashSet<>()).add((UUID) rs.getObject("scope_id"));
+        });
+        return new BlockedScopes(usersByTenant, projectsByTenant);
+    }
+
+    private record BlockedScopes(Map<UUID, Set<UUID>> usersByTenant, Map<UUID, Set<UUID>> projectsByTenant) {
     }
 
     /**

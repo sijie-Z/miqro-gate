@@ -41,6 +41,11 @@ import java.util.UUID;
  * successful official-API fetches, so a failed fetch keeps the last successful
  * catalog). Product codes let the gateway gate products against the signed
  * provider catalog.</li>
+ * <li>Scopes blocked by an exhausted {@code REJECT} quota rule (#684,
+ * {@code quota_enforcement}): per tenant, the blocked user ids and the blocked
+ * project ids. Rows whose window has already closed are NOT loaded — the block
+ * expires by disappearing from the snapshot, so a stale row can never keep a
+ * credential refused.</li>
  * </ul>
  *
  * <h2>Security</h2> {@code secretDigest} is copied defensively. The snapshot
@@ -54,7 +59,8 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         Map<UUID, Set<String>> upstreamModelsByProductId, Map<UUID, String> productCodesByProductId,
         Map<UUID, UUID> providerIdsByProductId, Map<String, ConsumerRecord> consumersByDigest,
         Map<String, McpServerRecord> mcpServicesByName, Map<UUID, RetentionConfig> retentionByTenant,
-        Map<UUID, UnattributedPolicyRecord> unattributedPoliciesByTenant) {
+        Map<UUID, UnattributedPolicyRecord> unattributedPoliciesByTenant, Map<UUID, Set<UUID>> blockedUserIdsByTenant,
+        Map<UUID, Set<UUID>> blockedProjectIdsByTenant) {
 
     /**
      * Tenant-level fallback for requests that cannot be attributed (Spec v1.1 §7.3,
@@ -81,6 +87,25 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         mcpServicesByName = Map.copyOf(mcpServicesByName);
         retentionByTenant = Map.copyOf(retentionByTenant);
         unattributedPoliciesByTenant = Map.copyOf(unattributedPoliciesByTenant);
+        blockedUserIdsByTenant = immutableIdSets(blockedUserIdsByTenant);
+        blockedProjectIdsByTenant = immutableIdSets(blockedProjectIdsByTenant);
+    }
+
+    /**
+     * Snapshot without quota blocks (#684): no scope is refused, which is the
+     * behaviour of every caller that predates the soft-landing feature. Kept as a
+     * convenience constructor for tests and legacy wiring.
+     */
+    public RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecord> keys,
+            Map<UUID, Map<String, BindingRecord>> bindings, Map<UUID, CredentialRecord> credentials,
+            Map<UUID, Set<String>> modelsByKeyId, Map<UUID, Set<String>> grantModelsByGrantId,
+            Map<UUID, Set<String>> upstreamModelsByProductId, Map<UUID, String> productCodesByProductId,
+            Map<UUID, UUID> providerIdsByProductId, Map<String, ConsumerRecord> consumersByDigest,
+            Map<String, McpServerRecord> mcpServicesByName, Map<UUID, RetentionConfig> retentionByTenant,
+            Map<UUID, UnattributedPolicyRecord> unattributedPoliciesByTenant) {
+        this(version, loadedAt, keys, bindings, credentials, modelsByKeyId, grantModelsByGrantId, upstreamModelsByProductId,
+                productCodesByProductId, providerIdsByProductId, consumersByDigest, mcpServicesByName, retentionByTenant,
+                unattributedPoliciesByTenant, Map.of(), Map.of());
     }
 
     private static Map<UUID, Set<String>> immutableSets(Map<UUID, Set<String>> map) {
@@ -88,14 +113,48 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
                 e -> Collections.unmodifiableSet(Set.copyOf(e.getValue()))));
     }
 
+    private static Map<UUID, Set<UUID>> immutableIdSets(Map<UUID, Set<UUID>> map) {
+        return map.entrySet().stream().collect(java.util.stream.Collectors.toUnmodifiableMap(Map.Entry::getKey,
+                e -> Collections.unmodifiableSet(Set.copyOf(e.getValue()))));
+    }
+
     public static RouteSnapshot empty(long version, Instant loadedAt) {
         return new RouteSnapshot(version, loadedAt, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
-                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
     }
 
     /** The tenant's unattributed-request policy, or null when unconfigured. */
     public UnattributedPolicyRecord unattributedPolicy(UUID tenantId) {
         return unattributedPoliciesByTenant.get(tenantId);
+    }
+
+    /** Users of the tenant blocked by an exhausted REJECT quota rule (#684). */
+    public Set<UUID> blockedUsers(UUID tenantId) {
+        return blockedUserIdsByTenant.getOrDefault(tenantId, Set.of());
+    }
+
+    /** Projects of the tenant blocked by an exhausted REJECT quota rule (#684). */
+    public Set<UUID> blockedProjects(UUID tenantId) {
+        return blockedProjectIdsByTenant.getOrDefault(tenantId, Set.of());
+    }
+
+    /** True when the user's own USER-scope rule is over its limit. */
+    public boolean userBlocked(UUID tenantId, UUID userId) {
+        return userId != null && blockedUsers(tenantId).contains(userId);
+    }
+
+    /** True when the project's PROJECT-scope rule is over its limit. */
+    public boolean projectBlocked(UUID tenantId, UUID projectId) {
+        return projectId != null && blockedProjects(tenantId).contains(projectId);
+    }
+
+    /**
+     * True when either scope the request resolves to is over its limit. A key
+     * whose owner is blocked is refused even when its project is not (and vice
+     * versa) — the scopes are independent, one rule each.
+     */
+    public boolean blocked(UUID tenantId, UUID userId, UUID projectId) {
+        return userBlocked(tenantId, userId) || projectBlocked(tenantId, projectId);
     }
 
     public KeyRecord key(String publicKeyId) {
@@ -280,7 +339,10 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
                 + modelsByKeyId.values().stream().mapToInt(Set::size).sum() + ", grantModels="
                 + grantModelsByGrantId.values().stream().mapToInt(Set::size).sum() + ", upstreamModels="
                 + upstreamModelsByProductId.values().stream().mapToInt(Set::size).sum() + ", products="
-                + productCodesByProductId.size() + ", providers=" + providerIdsByProductId.size() + "]";
+                + productCodesByProductId.size() + ", providers=" + providerIdsByProductId.size() + ", blockedScopes="
+                + (blockedUserIdsByTenant.values().stream().mapToInt(Set::size).sum()
+                        + blockedProjectIdsByTenant.values().stream().mapToInt(Set::size).sum())
+                + "]";
     }
 
     // Explicit equals/hashCode that include arrays by content, without leaking
@@ -297,14 +359,16 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
                 && upstreamModelsByProductId.equals(that.upstreamModelsByProductId)
                 && productCodesByProductId.equals(that.productCodesByProductId)
                 && providerIdsByProductId.equals(that.providerIdsByProductId)
-                && retentionByTenant.equals(that.retentionByTenant);
+                && retentionByTenant.equals(that.retentionByTenant)
+                && blockedUserIdsByTenant.equals(that.blockedUserIdsByTenant)
+                && blockedProjectIdsByTenant.equals(that.blockedProjectIdsByTenant);
     }
 
     @Override
     public int hashCode() {
         return java.util.Objects.hash(version, loadedAt, keys, bindings, credentials, modelsByKeyId,
                 grantModelsByGrantId, upstreamModelsByProductId, productCodesByProductId, providerIdsByProductId,
-                retentionByTenant);
+                retentionByTenant, blockedUserIdsByTenant, blockedProjectIdsByTenant);
     }
 
     /** Finds an ACTIVE consumer by its API-key digest (small set, linear scan). */
