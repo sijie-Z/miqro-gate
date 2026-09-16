@@ -51,6 +51,13 @@ miqrokey:
     # Model IDs that skip the review cycle (exact, case-sensitive). A request
     # for a whitelisted model is auto-approved and takes effect immediately.
     whitelist-models: ${MIQROKEY_APPROVAL_WHITELIST_MODELS:}
+  quota:
+    # Quota soft landing (#684 block ①): how often the control plane reconciles
+    # `quota_enforcement` against the current rules and watermarks. A scope that
+    # crossed its limit stops being served within this delay (the gateway reads
+    # the blocked set from its route snapshot), and is released again just as
+    # quickly once the limit is raised or the period rolls over.
+    enforcement-interval-ms: ${MIQROKEY_QUOTA_ENFORCEMENT_INTERVAL_MS:60000}
   # 定价目录动态同步（#585）：从公开价格源（默认 OpenRouter 模型索引，USD/token）
   # 拉取并换算为 CNY/1M tokens 写入价格快照。URL 是编译期适配器默认值，仅允许
   # 运维用环境变量覆盖；汇率在同步时应用。
