@@ -276,6 +276,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/virtual-keys/{id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["enable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/virtual-keys/{id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["disable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me/model-approvals": {
         parameters: {
             query?: never;
@@ -685,7 +717,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["enable"];
+        post: operations["enable_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -701,7 +733,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["disable"];
+        post: operations["disable_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -733,7 +765,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["enable_1"];
+        post: operations["enable_2"];
         delete?: never;
         options?: never;
         head?: never;
@@ -749,7 +781,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["disable_1"];
+        post: operations["disable_2"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1229,7 +1261,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["disable_2"];
+        post: operations["disable_3"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1293,7 +1325,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["disable_3"];
+        post: operations["disable_4"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1341,7 +1373,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["disable_4"];
+        post: operations["disable_5"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1428,7 +1460,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/webhooks/{endpointId}": {
+    "/api/v1/me/virtual-keys/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1436,6 +1468,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["get_4"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["rename"];
+        trace?: never;
+    };
+    "/api/v1/admin/webhooks/{endpointId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_5"];
         put?: never;
         post?: never;
         delete: operations["delete_2"];
@@ -1483,7 +1531,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_5"];
+        get: operations["get_6"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1579,7 +1627,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_6"];
+        get: operations["get_7"];
         put?: never;
         post?: never;
         delete: operations["delete_4"];
@@ -1595,7 +1643,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_7"];
+        get: operations["get_8"];
         put?: never;
         post?: never;
         delete: operations["delete_5"];
@@ -1611,7 +1659,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_8"];
+        get: operations["get_9"];
         put?: never;
         post?: never;
         delete: operations["delete_6"];
@@ -1659,7 +1707,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_9"];
+        get: operations["get_10"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1676,22 +1724,6 @@ export interface paths {
             cookie?: never;
         };
         get: operations["download"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/me/virtual-keys/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_10"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2686,7 +2718,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete: operations["disable_5"];
+        delete: operations["disable_6"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3061,6 +3093,31 @@ export interface components {
             /** Format: int64 */
             version?: number;
             boundProjects?: components["schemas"]["BoundProjectView"][];
+        };
+        VirtualKeyView: {
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+            /** @enum {string} */
+            purpose?: "CLAUDE_CODE" | "CLAUDE_DESKTOP" | "CODEX" | "CUSTOM";
+            /** @enum {string} */
+            status?: "ACTIVE" | "ROTATING" | "REVOKED" | "DISABLED";
+            displayPrefix?: string;
+            lastFour?: string;
+            display?: string;
+            modelIds?: string[];
+            /** Format: uuid */
+            projectId?: string;
+            projectTag?: string;
+            boundProjects?: components["schemas"]["BoundProjectView"][];
+            cachePolicy?: string;
+            baseUrl?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            lastUsedAt?: string;
+            /** Format: date-time */
+            revokedAt?: string;
         };
         SubmitModelApprovalRequest: {
             /** Format: uuid */
@@ -3879,6 +3936,9 @@ export interface components {
             expiresAt?: string;
             reconcileLevel?: string;
         };
+        UpdateVirtualKeyRequest: {
+            name: string;
+        };
         UpdateUserRequest: {
             displayName?: string;
             /** @enum {string} */
@@ -3890,31 +3950,6 @@ export interface components {
             /** @enum {string} */
             status?: "AVAILABLE" | "ASSIGNED" | "DISABLED" | "RELEASED";
             displayName?: string;
-        };
-        VirtualKeyView: {
-            /** Format: uuid */
-            id?: string;
-            name?: string;
-            /** @enum {string} */
-            purpose?: "CLAUDE_CODE" | "CLAUDE_DESKTOP" | "CODEX" | "CUSTOM";
-            /** @enum {string} */
-            status?: "ACTIVE" | "ROTATING" | "REVOKED" | "DISABLED";
-            displayPrefix?: string;
-            lastFour?: string;
-            display?: string;
-            modelIds?: string[];
-            /** Format: uuid */
-            projectId?: string;
-            projectTag?: string;
-            boundProjects?: components["schemas"]["BoundProjectView"][];
-            cachePolicy?: string;
-            baseUrl?: string;
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            lastUsedAt?: string;
-            /** Format: date-time */
-            revokedAt?: string;
         };
         Cost: {
             upstreamPaid?: number;
@@ -5050,6 +5085,50 @@ export interface operations {
             };
         };
     };
+    enable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["VirtualKeyView"];
+                };
+            };
+        };
+    };
+    disable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["VirtualKeyView"];
+                };
+            };
+        };
+    };
     listMine: {
         parameters: {
             query?: never;
@@ -5873,7 +5952,7 @@ export interface operations {
             };
         };
     };
-    enable: {
+    enable_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -5895,7 +5974,7 @@ export interface operations {
             };
         };
     };
-    disable: {
+    disable_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -5972,7 +6051,7 @@ export interface operations {
             };
         };
     };
-    enable_1: {
+    enable_2: {
         parameters: {
             query?: never;
             header?: never;
@@ -5992,7 +6071,7 @@ export interface operations {
             };
         };
     };
-    disable_1: {
+    disable_2: {
         parameters: {
             query?: never;
             header?: never;
@@ -7011,7 +7090,7 @@ export interface operations {
             };
         };
     };
-    disable_2: {
+    disable_3: {
         parameters: {
             query?: never;
             header?: never;
@@ -7149,7 +7228,7 @@ export interface operations {
             };
         };
     };
-    disable_3: {
+    disable_4: {
         parameters: {
             query?: never;
             header?: never;
@@ -7259,7 +7338,7 @@ export interface operations {
             };
         };
     };
-    disable_4: {
+    disable_5: {
         parameters: {
             query?: never;
             header?: never;
@@ -7488,6 +7567,54 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["VirtualKeyView"];
+                };
+            };
+        };
+    };
+    rename: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateVirtualKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["VirtualKeyView"];
+                };
+            };
+        };
+    };
+    get_5: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
                 endpointId: string;
             };
             cookie?: never;
@@ -7627,7 +7754,7 @@ export interface operations {
             };
         };
     };
-    get_5: {
+    get_6: {
         parameters: {
             query?: never;
             header?: never;
@@ -7828,7 +7955,7 @@ export interface operations {
             };
         };
     };
-    get_6: {
+    get_7: {
         parameters: {
             query?: never;
             header?: never;
@@ -7896,7 +8023,7 @@ export interface operations {
             };
         };
     };
-    get_7: {
+    get_8: {
         parameters: {
             query?: never;
             header?: never;
@@ -7964,7 +8091,7 @@ export interface operations {
             };
         };
     };
-    get_8: {
+    get_9: {
         parameters: {
             query?: never;
             header?: never;
@@ -8079,7 +8206,7 @@ export interface operations {
             };
         };
     };
-    get_9: {
+    get_10: {
         parameters: {
             query?: never;
             header?: never;
@@ -8119,28 +8246,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": string;
-                };
-            };
-        };
-    };
-    get_10: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["VirtualKeyView"];
                 };
             };
         };
@@ -9579,7 +9684,7 @@ export interface operations {
             };
         };
     };
-    disable_5: {
+    disable_6: {
         parameters: {
             query?: never;
             header?: never;
