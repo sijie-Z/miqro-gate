@@ -386,6 +386,7 @@
 | `GET/POST /api/v1/admin/teams/{id}/members`、`DELETE /members/{userId}` | 团队成员管理 |
 | `GET/POST /api/v1/admin/projects`、`PATCH /{id}` | 项目列表/创建（`code` 唯一，冲突 → 409 `PROJECT_CODE_TAKEN`）/更新 |
 | `GET/POST /api/v1/admin/projects/{id}/members`、`DELETE /members/{userId}` | 项目成员管理 |
+| `GET/POST /api/v1/admin/projects/{id}/repositories`、`DELETE /{mappingId}` | **CAA Project Registry（V56，#639）**：仓库→项目映射。`repoKey` 接受 `github.com/acme/rocket` / `https://github.com/acme/rocket(.git)` / `git@github.com:acme/rocket.git` / 裸 `acme/rocket`（默认 github.com），统一规范化为小写 `host/owner/repo`；租户内唯一，重复 → `409 REPO_KEY_TAKEN`；格式非法 → `400 REPO_KEY_INVALID`；项目不存在 → `404 PROJECT_NOT_FOUND`；删除不存在 → `404 REPOSITORY_NOT_FOUND`。写操作审计 `REPOSITORY_ADD`/`REPOSITORY_REMOVE`。Agent 经 §7 的 `/v1/context-registry` 消费 |
 | `GET/POST /api/v1/admin/grants` | Grant 列表/创建（`projectId`×`providerProductId`×`credentialId` + `models[]`；重复 → 409 `GRANT_EXISTS`；凭证订阅产品与声明产品不一致 → 400 `GRANT_CREDENTIAL_PRODUCT_MISMATCH`（数据库触发器同约束兜底）；`models[]` 必须存在于该产品 `model_catalog` → 否则 400 `MODEL_NOT_IN_CATALOG`） |
 | `GET/POST /api/v1/admin/grants/{id}/models`、`DELETE /{id}` | 模型范围查询/替换（替换同样校验目录，400 `MODEL_NOT_IN_CATALOG`）；禁用 Grant |
 
@@ -1104,6 +1105,7 @@ canonical 账单导入与四态对账报告（契约稿 docs/bill-reconciliation
 - 客户端必须且只能提供**一个**凭证 Header：`Authorization: Bearer <key>`（或裸值）、`x-api-key`、`api-key`。零个或多个凭证 Header → `401`（错误体不区分具体原因，防枚举）。
 - **凭据值错误的统一语义**：未知 / 畸形（含缺失后缀、后缀含点）的 Virtual Key → `404 virtual_key_invalid`——各场景响应逐字一致、与"未知 Key"不可区分（防枚举；见 `VirtualKeyAuthContractTest`）。注意与 MCP 数据面（消费者 Key/JWT）同场景的 `401 invalid_api_key` 口径不同：`/v1` 用 404、MCP 用 401，均为各通道既定设计。
 - Key 格式 `mqk_live_<publicKeyId>_<secret>.<projectTag>`（后缀在解析级必填）：点号后缀是**路由选择器**（明文，用于在 Key 的多个项目绑定间选择），鉴权权威是数据库中的 `key_project_binding`，标签本身不承载权限。HMAC 摘要不包含标签。
+- `GET /v1/context-registry`（CAA，#639）：本地 Agent 的 repo → 项目映射来源。虚拟 Key 认证（同 `/v1/models` 的统一失败语义）；**只返回该 Key ACTIVE 绑定项目**下的 `project_repositories` 行——`{ entries: [{ repoKey, projectId, projectTag }] }`；无持久化时返回空表。注册表读取发生在 Agent 同步（非热路径），直接查库、不占快照。
 - **请求上下文解析阶梯（CAA，#633）**：身份（Key/HMAC）与归属（本请求计入哪个项目）分离，归属按固定阶梯裁决，首个命中生效：
   1. `X-Miqro-Project-Id` 声明（**不可信输入**，仅当目标项目确为该 Key 的绑定时生效）→ `RESOLVED_HEADER`；
   2. 点号后缀标签命中该 Key 的某个绑定 → `RESOLVED_SUFFIX`；
