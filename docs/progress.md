@@ -3150,3 +3150,19 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **待 owner 拍板**：ADR-0019（是否反转「不因预算阻断」提供 REJECT 规则；含 429 信封、5 分钟近似计数与未决问题 3 项）。
 
 **未做（记录）**：MCP 服务向导「服务类型/后端类型」枚举（我们固定标准透传形态）、HTTP→MCP 转换、消费者组实体、配额缓存命中「全量计入」档（语义天然等价「不计入」）——均按既有裁决维持，mapping 已注明理由。
+
+## 2026-09-16 晚间 — 偏好抽屉补缺 #579：折叠菜单开关 + 内容宽度 1200 + 抽屉内边距
+
+**背景**：issue #579（Vben 偏好设置体系——设置抽屉）复核后定三处差距：抽屉内没有折叠菜单开关；主内容宽度固定 1440px（issue 要求 1200px）；抽屉头部内边距统一 20px（issue 要求上下 16px / 左右 24px）。
+
+**交付**（分支 `feat/settings-drawer-gaps-579`）：
+
+- **折叠菜单开关**：`SettingsDrawer.vue` 新增「折叠菜单」分组 + 「折叠侧边栏」开关（`settings-toggle-collapsed`），走既有 `setPreference('collapsed', …)`。该偏好项此前已存在（`preferences.collapsed`，默认 `false`）并由 `NewShell.vue` 消费（`iconOnly = 窄视口 || collapsed`），只是除顶栏按钮外无第二入口——因此本项是接上既有生效链路，不是新增占位开关。
+- **内容宽度 1440 → 1200**：`design-tokens.css` 的 `--ui-content-max`。**改动前已清点全部消费者**：全仓只有 `design-base.css:25`（`.ui-page { max-width: var(--ui-content-max) }`）与 `design-base.css:520`（`[data-compact='wide']` 覆盖为 `100%`）两处；无页面把 1440 硬编码为内容上限（视图/用例里的 `1440` 均为 e2e viewport 设置）。「流式」由 `[data-compact='wide']` 独立覆盖，与固定上限的取值无关，故流式/固定两种行为都不受影响。
+- **抽屉头部内边距**：`ui/Drawer.vue` 的 `.ui-drawer__head` 由 20px 改为 `var(--ui-space-4) var(--ui-space-6)`（16px / 24px），与该组件族的 Vben/antd 度量注释一致。
+- **测试**：`shell-preferences.spec.ts` 新增抽屉开关用例（开关 → 立即折叠侧栏 + 写穿 `localStorage` + 模拟重载后保持）与 `#579 layout contract` 用例族（jsdom 不跑层叠，故解析随包发出的 CSS 源码：断言 `--ui-content-max` 取值、`.ui-page` 确实消费该 token、`wide` 覆盖仍为 100%、抽屉内边距；`var()` 一律解析回 px 取值，改名 token 无法蒙混通过）；`preferences.spec.ts` 的抽屉用例补同一开关。
+
+**验证**：vitest 全量 **59 文件 / 334 用例 PASS**；`vue-tsc`（app/spec/node 三工程）PASS；`vite build` PASS；eslint 本轮两个改动文件 0 error。
+（说明：仓库在本机为 CRLF 检出而 prettier 期望 LF，`npm run lint` 自带的 `--fix` 会重写全树约 100+ 文件的行尾；本轮验证用等价的 `npx eslint . --ext .vue,.ts,.tsx`（不带 `--fix`），结论 0 error、警告全为 `Delete ␍` 行尾项，属既有基线。）
+
+**边界与影响**：`frontend/e2e/baseline-screenshots/` 为捕获式基线（无像素对比断言），其截图内容宽度仍反映旧的 1440px，本批不重新生成、不影响 CI；`docs/frontend-design.md` 已同步为 1200px；`tokens.css` 的 v1 `--miqrokey-content-max: 1600px` 属旧层，不在本 issue 范围。
