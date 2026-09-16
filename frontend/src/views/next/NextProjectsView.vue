@@ -115,7 +115,11 @@ async function loadMemberCounts(list: Project[]) {
 async function load() {
   loading.value = true;
   try {
-    const [projectList, grantList] = await Promise.all([api.listProjects(), api.listGrants()]);
+    // 项目列表是主数据；授权计数为辅助聚合，失败降级为 0 不阻塞列表（#657）。
+    const [projectList, grantList] = await Promise.all([
+      api.listProjects(),
+      api.listGrants().catch(() => [] as Grant[]),
+    ]);
     projects.value = projectList;
     grants.value = grantList;
     await loadMemberCounts(projectList);

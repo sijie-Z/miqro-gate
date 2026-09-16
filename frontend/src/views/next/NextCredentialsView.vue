@@ -356,10 +356,11 @@ async function load() {
   loading.value = true;
   loadError.value = '';
   try {
+    // 凭证与订阅是主数据；授权计数为辅助聚合，失败降级为 0 不阻塞列表（#657）。
     const [credentialList, subscriptionList, grantList] = await Promise.all([
       api.listCredentials(),
       api.listSubscriptions(),
-      api.listGrants(),
+      api.listGrants().catch(() => [] as Grant[]),
     ]);
     credentials.value = credentialList;
     subscriptions.value = subscriptionList;

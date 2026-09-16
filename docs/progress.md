@@ -3000,3 +3000,5 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **验证**：vitest 289/289（55 文件）；vue-tsc（app/spec/node 三工程）PASS；eslint（仅改动 8 文件，--fix）PASS；vite build PASS。
 
 **边界**：不做点击过滤跳转；探测时间仍在「模型目录」弹窗内（列表只给计数与未探测态）；#393（删除前依赖检查 409+清单）未动。
+
+**补记（同日）**：e2e 抓到真实缺陷——新增的辅助聚合请求（模型目录/授权/订阅）在未被 mock 或上游失败时会把整个 Promise.all 拖失败，主列表整页空态。已修：主数据（产品目录/凭证列表/项目列表）保持强依赖；四个辅助聚合一律 .catch 降级（计数显示 0 / 未探测 / —），列表照常渲染。e2e 两处失败复跑转绿（52/52）。

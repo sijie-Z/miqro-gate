@@ -339,13 +339,15 @@ function grantCountOf(productId: string): number {
 async function load() {
   loading.value = true;
   try {
+    // 产品目录是主数据（失败必须可见）；订阅/凭证/授权/模型目录是依赖与目录
+    // 元数据，任一失败降级为空（计数显示 0 / 未探测），不阻塞列表（#657）。
     const [productList, subscriptionList, credentialList, grantList, modelList] = await Promise.all(
       [
         api.listProviderProducts(),
-        api.listSubscriptions(),
-        api.listCredentials(),
-        api.listGrants(),
-        api.adminListModels(),
+        api.listSubscriptions().catch(() => []),
+        api.listCredentials().catch(() => []),
+        api.listGrants().catch(() => []),
+        api.adminListModels().catch(() => []),
       ],
     );
     products.value = productList;
