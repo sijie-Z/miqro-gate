@@ -1200,6 +1200,8 @@ export const DICT: Record<string, string> = {
   '输出': 'Output',
   '输出 Token': 'Output tokens',
   '输出 Tokens': 'Output tokens',
+  '达到限额的此百分比时进入预警；≥100% 为超限':
+    'Warn at this percentage of the limit; ≥100% counts as over limit',
   '近 1 小时': 'Last hour',
   '近 20 次投递成功率': 'Delivery success rate (last 20)',
   '近 24 小时': 'Last 24 hours',
@@ -1623,16 +1625,32 @@ export const DICT: Record<string, string> = {
   '在「授权」按 项目 × 凭证 圈定模型范围。': 'Scope the models under Grants by project × credential.',
   '成员在「我的密钥」创建虚拟密钥并接入客户端。':
     'Members create Virtual Keys under My Keys and connect their clients.',
-  '达到限额的此百分比时进入预警；≥90% 即将超限；≥100% 为超限':
-    'Warn at this percentage of the limit; ≥90% is near limit, ≥100% counts as over limit',
-  '成本（¥）': 'Cost (¥)',
-  '每年': 'Yearly',
-  '即将超限': 'Near limit',
+  '用量与成本': 'Usage & cost',
+  '全租户用量与费用总览：团队 / 用户 / 项目维度的 Token 与成本、趋势、分解与明细。':
+    'Tenant-wide usage and spend: tokens and cost by team / user / project, with trends, breakdown and records.',
+  '全部团队': 'All teams',
+  '全部用户': 'All users',
+  '全部项目': 'All projects',
+  '按日': 'Daily',
+  '维度分解': 'Dimension breakdown',
+  '下钻筛选': 'Drill filter',
+  '全部清除': 'Clear all',
+  '点击行可下钻到明细': 'Click a row to drill into the records',
+  '缓存读 Token': 'Cache-read tokens',
+  '网关缓存节省': 'Saved by gateway cache',
+  '总成本': 'Total cost',
+  '按官方价目估算': 'est. at official list prices',
+  '该窗口没有用量': 'No usage in this window',
   '采集配置': 'Capture settings',
   '租户级 · 覆盖请求与响应双面': 'Tenant-wide · covers both request and response sides',
   '开启内容留痕': 'Enable content retention',
   '内容上限（字节）': 'Content cap (bytes)',
   '已保存——保存后数秒内生效，无需同步。': 'Saved — effective within seconds, no sync needed.',
+  '达到限额的此百分比时进入预警；≥90% 即将超限；≥100% 为超限':
+    'Warn at this percentage of the limit; ≥90% is near limit, ≥100% counts as over limit',
+  '成本（¥）': 'Cost (¥)',
+  '每年': 'Yearly',
+  '即将超限': 'Near limit',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [

@@ -76,10 +76,17 @@ public class AdminUsageStatsService {
 
     public UsageSummary summary(UUID tenantId, String groupBy, Instant from, Instant to, UUID userId, UUID projectId,
             UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId, String modelId) {
+        return summary(tenantId, groupBy, from, to, userId, projectId, virtualKeyId, credentialId, subscriptionId,
+                providerProductId, modelId, null);
+    }
+
+    public UsageSummary summary(UUID tenantId, String groupBy, Instant from, Instant to, UUID userId, UUID projectId,
+            UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId, String modelId,
+            UUID teamId) {
         UsageStatsRepository.GroupBy dimension = UsageStatsService.parseGroupBy(groupBy);
         UsageStatsService.validateTimeRange(from, to);
         UsageStatsRepository.UsageFilter filter = adminFilter(tenantId, from, to, userId, projectId, virtualKeyId,
-                credentialId, subscriptionId, providerProductId, modelId, null);
+                credentialId, subscriptionId, providerProductId, modelId, null, teamId);
         Map<String, BigDecimal> prices = new LinkedHashMap<>();
         for (PriceSnapshot p : priceSnapshotRepository.findAllLatestAt(Instant.now())) {
             prices.put(p.providerProductId() + ":" + p.modelId() + ":" + p.tokenType().name(), p.unitPrice());
@@ -90,19 +97,10 @@ public class AdminUsageStatsService {
     }
 
     public UsageSummary summary(User admin, String groupBy, Instant from, Instant to, UUID userId, UUID projectId,
-            UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId, String modelId) {
-        UsageStatsRepository.GroupBy dimension = UsageStatsService.parseGroupBy(groupBy);
-        UsageStatsService.validateTimeRange(from, to);
-        UsageStatsRepository.UsageFilter filter = adminFilter(admin.tenantId(), from, to, userId, projectId,
-                virtualKeyId, credentialId, subscriptionId, providerProductId, modelId, null);
-
-        Map<String, BigDecimal> prices = new LinkedHashMap<>();
-        for (PriceSnapshot p : priceSnapshotRepository.findAllLatestAt(Instant.now())) {
-            prices.put(p.providerProductId() + ":" + p.modelId() + ":" + p.tokenType().name(), p.unitPrice());
-        }
-        List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
-        List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
-        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows, prices);
+            UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId, String modelId,
+            UUID teamId) {
+        return summary(admin.tenantId(), groupBy, from, to, userId, projectId, virtualKeyId, credentialId,
+                subscriptionId, providerProductId, modelId, teamId);
     }
 
     /**
@@ -115,7 +113,7 @@ public class AdminUsageStatsService {
             UUID projectId) {
         UsageStatsRepository.GroupBy dimension = UsageStatsService.parseGroupBy(groupBy);
         UsageStatsRepository.UsageFilter filter = new UsageStatsRepository.UsageFilter(tenantId, null, userId,
-                projectId, null, null, null, null, null, from, to);
+                projectId, null, null, null, null, null, null, from, to);
         Map<String, BigDecimal> prices = new LinkedHashMap<>();
         for (PriceSnapshot p : priceSnapshotRepository.findAllLatestAt(Instant.now())) {
             prices.put(p.providerProductId() + ":" + p.modelId() + ":" + p.tokenType().name(), p.unitPrice());
@@ -128,12 +126,19 @@ public class AdminUsageStatsService {
     /** Paged raw usage records over the whole tenant, newest first. */
     /** Tenant-scoped records for the system (billing) channel. */
     public UsageRecordPage records(UUID tenantId, Instant from, Instant to, long page, int size) {
-        return records(tenantId, from, to, page, size, null, null, null, null, null, null, null, null);
+        return records(tenantId, from, to, page, size, null, null, null, null, null, null, null, null, null);
     }
 
     public UsageRecordPage records(UUID tenantId, Instant from, Instant to, long page, int size, UUID userId,
             UUID projectId, UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId,
             String modelId, String clientIp) {
+        return records(tenantId, from, to, page, size, userId, projectId, virtualKeyId, credentialId, subscriptionId,
+                providerProductId, modelId, clientIp, null);
+    }
+
+    public UsageRecordPage records(UUID tenantId, Instant from, Instant to, long page, int size, UUID userId,
+            UUID projectId, UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId,
+            String modelId, String clientIp, UUID teamId) {
         if (page < 1 || page > MAX_PAGE) {
             // #475: an unchecked huge page overflows (page-1)*size into a negative
             // SQL OFFSET; bound it as a client error instead.
@@ -144,24 +149,15 @@ public class AdminUsageStatsService {
                     "size must be between 1 and " + MAX_PAGE_SIZE);
         }
         UsageStatsRepository.UsageFilter filter = adminFilter(tenantId, from, to, userId, projectId, virtualKeyId,
-                credentialId, subscriptionId, providerProductId, modelId, clientIp);
+                credentialId, subscriptionId, providerProductId, modelId, clientIp, teamId);
         return recordsFor(tenantId, filter, page, size);
     }
 
     public UsageRecordPage records(User admin, Instant from, Instant to, long page, int size, UUID userId,
             UUID projectId, UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId,
-            String modelId, String clientIp) {
-        if (page < 1) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "PAGE_INVALID", "page must be >= 1");
-        }
-        if (size < 1 || size > MAX_PAGE_SIZE) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "SIZE_INVALID",
-                    "size must be between 1 and " + MAX_PAGE_SIZE);
-        }
-        UsageStatsService.validateTimeRange(from, to);
-        UsageStatsRepository.UsageFilter filter = adminFilter(admin.tenantId(), from, to, userId, projectId,
-                virtualKeyId, credentialId, subscriptionId, providerProductId, modelId, clientIp);
-        return recordsFor(admin.tenantId(), filter, page, size);
+            String modelId, String clientIp, UUID teamId) {
+        return records(admin.tenantId(), from, to, page, size, userId, projectId, virtualKeyId, credentialId,
+                subscriptionId, providerProductId, modelId, clientIp, teamId);
     }
 
     private UsageRecordPage recordsFor(UUID tenantId, UsageStatsRepository.UsageFilter filter, long page, int size) {
@@ -195,7 +191,7 @@ public class AdminUsageStatsService {
      *            to 0 (UTC)
      */
     public HourlyUsageReport hourly(User admin, String date, Integer days, String dimension, UUID userId,
-            UUID projectId, Integer tzOffsetMinutes) {
+            UUID projectId, Integer tzOffsetMinutes, UUID teamId) {
         int tz = tzOffsetMinutes == null ? 0 : tzOffsetMinutes;
         if (tz < -18 * 60 || tz > 18 * 60) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "TZ_OFFSET_INVALID",
@@ -217,7 +213,7 @@ public class AdminUsageStatsService {
         Instant from = end.minusDays(span - 1L).atStartOfDay(offset).toInstant();
         Instant to = end.plusDays(1).atStartOfDay(offset).toInstant();
         UsageStatsRepository.UsageFilter filter = new UsageStatsRepository.UsageFilter(admin.tenantId(), null, userId,
-                projectId, null, null, null, null, null, from, to);
+                projectId, null, null, null, null, null, teamId, from, to);
         List<UsageStatsRepository.HourlyUsageRow> rows = usageStatsRepository.aggregateHourly(dim, filter, tz);
         List<HourlyUsageRow> items = new ArrayList<>(rows.size());
         for (UsageStatsRepository.HourlyUsageRow r : rows) {
@@ -247,14 +243,14 @@ public class AdminUsageStatsService {
      */
     private static UsageStatsRepository.UsageFilter adminFilter(UUID tenantId, Instant from, Instant to, UUID userId,
             UUID projectId, UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId,
-            String modelId, String clientIp) {
+            String modelId, String clientIp, UUID teamId) {
         UsageStatsService.validateTimeRange(from, to);
         Instant toResolved = to == null ? Instant.now() : to;
         Instant fromResolved = from == null ? toResolved.minus(UsageStatsService.MAX_WINDOW) : from;
         return new UsageStatsRepository.UsageFilter(tenantId, virtualKeyId != null ? Set.of(virtualKeyId) : null,
                 userId, projectId, credentialId, subscriptionId, providerProductId,
                 modelId != null && !modelId.isBlank() ? modelId : null,
-                clientIp != null && !clientIp.isBlank() ? clientIp.trim() : null, fromResolved, toResolved);
+                clientIp != null && !clientIp.isBlank() ? clientIp.trim() : null, teamId, fromResolved, toResolved);
     }
 
     private static UsageRecordPage.UsageRecordView view(UsageEvent e) {

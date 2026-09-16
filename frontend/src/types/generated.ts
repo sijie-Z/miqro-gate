@@ -8510,6 +8510,7 @@ export interface operations {
                 subscriptionId?: string;
                 providerProductId?: string;
                 modelId?: string;
+                teamId?: string;
             };
             header?: never;
             path?: never;
@@ -8566,6 +8567,7 @@ export interface operations {
                 providerProductId?: string;
                 modelId?: string;
                 clientIp?: string;
+                teamId?: string;
             };
             header?: never;
             path?: never;
@@ -8593,6 +8595,7 @@ export interface operations {
                 userId?: string;
                 projectId?: string;
                 tzOffsetMinutes?: number;
+                teamId?: string;
             };
             header?: never;
             path?: never;
