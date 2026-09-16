@@ -8,10 +8,20 @@
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTable, UiTooltip, toast } from '@/ui';
+import {
+  UiButton,
+  UiDialog,
+  UiInput,
+  UiPageGuide,
+  UiStatusBadge,
+  UiTable,
+  UiTooltip,
+  toast,
+} from '@/ui';
 import ProviderBrandChip from '@/components/ProviderBrandChip.vue';
 import type { ProviderProductView } from '@/types/api';
 import type { ModelCatalogRow } from '@/types/generated-api';
+import { PROVIDERS_GUIDE } from '@/content/pageGuides';
 
 const products = ref<ProviderProductView[]>([]);
 const loading = ref(true);
@@ -304,6 +314,8 @@ onMounted(load);
         <p class="ui-page-desc">供应商产品实例：协议、Plan 形态、验证状态与余额来源。</p>
       </div>
     </header>
+
+    <UiPageGuide :guide="PROVIDERS_GUIDE" storage-key="providers" />
 
     <div v-if="loadError" class="ui-alert ui-alert--error">
       {{ loadError

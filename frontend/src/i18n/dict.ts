@@ -1469,6 +1469,89 @@ export const DICT: Record<string, string> = {
   '全部密钥': 'All keys',
   '快捷导航': 'Quick nav',
   '今天也要高效工作。': 'Have a productive day.',
+  // Page guides (#656) — per-page 「使用指引」 cards.
+  '使用指引': 'Guide',
+  '收起': 'Collapse',
+  '展开': 'Expand',
+  "不再显示": "Don't show again",
+  '接入一家新供应商': 'Onboarding a new provider',
+  '三步用起来': 'Three steps to production',
+  '外部系统接入四步': 'Four steps for external systems',
+  '从零到调用四步': 'From zero to your first call',
+  '授权四步': 'Grants in four steps',
+  '项目四步': 'Projects in four steps',
+  '登记订阅': 'Add the subscription',
+  '拉取模型目录': 'Fetch the model catalog',
+  '授权给项目': 'Grant to projects',
+  '被授权引用': 'Referenced by a grant',
+  '轮换与失效处理': 'Rotate and retire',
+  '配置凭证': 'Configure the credential',
+  '划定能力作用域': 'Scope capabilities',
+  '监控与到期': 'Monitor and expiry',
+  '接入客户端': 'Connect a client',
+  '用量与安全': 'Usage and safety',
+  '选定 项目 × 凭证': 'Pick the project × credential',
+  '圈定模型范围': 'Scope the models',
+  '成员建 Key': 'Members create Keys',
+  '变更前看影响': 'Check impact first',
+  '创建项目 + 路由标签': 'Create the project + routing tag',
+  '添加成员': 'Add members',
+  '建立授权': 'Create the grant',
+  '成员开始使用': 'Members start using',
+  '查看接入文档': 'View onboarding docs',
+  '查看平台对接文档': 'View platform integration docs',
+  '查看 Key 生命周期文档': 'View the Key lifecycle doc',
+  '前往「订阅」': 'Go to Subscriptions',
+  '前往「上游凭证」': 'Go to Upstream Credentials',
+  '前往「授权」': 'Go to Grants',
+  '前往「告警规则」': 'Go to Alert Rules',
+  '前往「用量」': 'Go to Usage',
+  '前往「我的密钥」': 'Go to My Keys',
+  '在「订阅」登记你购买的套餐（PAYG / 包月 / 席位）；授权时按 项目 × 产品 × 凭证 引用。':
+    'Record the plan you purchased under Subscriptions (PAYG / monthly / seats); grants reference project × product × credential.',
+  '从供应商控制台获取 API Key，在「上游凭证」录入；加密存储，创建后不可查看明文。':
+    'Get an API Key from the provider console and add it under Upstream Credentials; stored encrypted and never shown again in plaintext.',
+  '用本页「模型目录 → 探测模型」从官方端点拉取模型清单，也可人工录入。':
+    'Use “Model catalog → Probe models” on this page to pull the official model list, or enter models manually.',
+  '在「授权」圈定模型范围后，成员即可创建虚拟密钥；保存后数秒内生效，无需同步。':
+    'Scope the models under Grants and members can create Virtual Keys; changes go live within seconds — no sync needed.',
+  '从供应商控制台获取 API Key 并录入；「测试 Secret」可先不落库做指纹比对验证。':
+    'Add the API Key from the provider console; “Test secret” verifies it against the stored fingerprint without writing anything.',
+  '在「授权」中被引用后开始服务项目；轮换后所有引用方自动使用新版本，无需逐处修改。':
+    'Once referenced by a grant it serves that project; after rotation every referrer uses the new version automatically — nothing to edit in place.',
+  '到期或疑似泄露时点「轮换」原子切换，旧版本按宽限期退役；禁用前先看清引用它的授权。':
+    'Rotate atomically when it nears expiry or looks leaked; the old version retires after the grace period. Check the referencing grants before disabling.',
+  '为外部系统 / 平台创建机器身份；人类用户请走「用户」管理。':
+    'Create a machine identity for an external system / platform; human users are managed under Users.',
+  'API Key 仅创建时展示一次；或配置 JWT——平台自持私钥签发，网关只存公钥验签，可随时轮换。':
+    'The API Key is shown only once at creation; or configure JWT — the platform signs with its own private key, the gateway only stores the public key and can rotate it anytime.',
+  '计费查询（billing:read）与 MCP 调用（mcp:call）按需放开，默认拒绝。':
+    'Grant billing lookup (billing:read) and MCP calls (mcp:call) on demand — denied by default.',
+  '「调用概览」查看近 24 小时 / 7 天转发与被拒情况；启用「消费者密钥·即将到期」告警后，到期前 7 天提醒。':
+    'Check forwards and rejections over the last 24h / 7d under Call overview; with the “consumer key expiring” alert enabled you get a reminder 7 days before expiry.',
+  '等待管理员在「用户 → 项目成员」把你加入项目；项目是授权与用量的治理单元。':
+    'Ask an admin to add you under Users → Project members; the project is the unit of authorization and usage.',
+  '按 项目 → 授权 → 用途 → 模型 级联选择，只会出现你有权限的选项。':
+    'Pick project → grant → purpose → models in the cascading form; only options you are allowed to use ever appear.',
+  '用「接入 CC Switch」一键导入，或复制片段贴进 Claude Code / Codex / 任意 OpenAI 兼容客户端。':
+    'Use “Connect CC Switch” for one-click import, or copy the snippet into Claude Code / Codex / any OpenAI-compatible client.',
+  '用量页实时记账；怀疑泄露先「轮换」换新 Key，确认后再「吊销」（不可逆）。':
+    'Usage is metered live; if you suspect a leak, rotate to a new Key first and revoke (irreversible) once confirmed.',
+  '产品随凭证的订阅自动派生，无需手选。':
+    "The product is derived from the credential's subscription — no manual pick.",
+  '从模型目录勾选允许的模型；范围决定成员建 Key 时可选的模型。':
+    'Tick the allowed models from the catalog; the scope decides what members can pick when creating Keys.',
+  '授权是成员创建虚拟密钥的前提；授权生效后成员即可自助建 Key。':
+    'A grant is the precondition for members to create Virtual Keys; once active, members self-serve their Keys.',
+  '缩减范围或停用会影响存量 Key 的可用模型；删除前需先解除引用。':
+    'Shrinking or disabling affects the models available to existing Keys; remove references before deletion.',
+  '路由标签必填（虚拟密钥寻址用）；没有标签的项目成员无法建 Key。':
+    'The routing tag is required (Virtual Keys address through it); members of a tagless project cannot create Keys.',
+  '在成员抽屉添加；成员身份是建 Key 的前提。':
+    'Add people in the member drawer; membership is the precondition for creating Keys.',
+  '在「授权」按 项目 × 凭证 圈定模型范围。': 'Scope the models under Grants by project × credential.',
+  '成员在「我的密钥」创建虚拟密钥并接入客户端。':
+    'Members create Virtual Keys under My Keys and connect their clients.',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [

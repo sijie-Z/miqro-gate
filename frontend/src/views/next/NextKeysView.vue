@@ -34,12 +34,14 @@ import {
   UiDialog,
   UiEmptyState,
   UiInput,
+  UiPageGuide,
   UiSelect,
   UiStatusBadge,
   UiTable,
   toast,
 } from '@/ui';
 import type { UiSelectOption } from '@/ui';
+import { KEYS_GUIDE } from '@/content/pageGuides';
 import type { VirtualKeyPurpose } from '@/types/api';
 import type {
   CreateVirtualKeyResponse,
@@ -549,6 +551,8 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
         </UiButton>
       </div>
     </header>
+
+    <UiPageGuide :guide="KEYS_GUIDE" storage-key="keys" />
 
     <div v-if="loadError" class="ui-alert ui-alert--error" data-testid="keys-load-error">
       {{ loadError
