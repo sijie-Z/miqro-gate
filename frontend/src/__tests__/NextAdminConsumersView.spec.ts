@@ -9,6 +9,9 @@ vi.mock('@/api', () => ({
   createApiConsumer: vi.fn(),
   disableApiConsumer: vi.fn(),
   adminConsumerActivity: vi.fn(),
+  updateApiConsumerScope: vi.fn(),
+  setConsumerJwtKey: vi.fn(),
+  removeConsumerJwtKey: vi.fn(),
 }));
 const mockApi = vi.mocked(api);
 
@@ -81,7 +84,9 @@ describe('NextAdminConsumersView', () => {
     expect(body?.textContent).toContain('总调用');
   });
   it('discards stale activity responses when the window switches (#399)', async () => {
-    const activityView = (overrides: Partial<api.ApiConsumerActivity> = {}): api.ApiConsumerActivity => ({
+    const activityView = (
+      overrides: Partial<api.ApiConsumerActivity> = {},
+    ): api.ApiConsumerActivity => ({
       consumerId: 'k1',
       windowHours: 24,
       totalCalls: 1,
@@ -143,5 +148,44 @@ describe('NextAdminConsumersView', () => {
     confirm!.click();
     await flushPromises();
     expect(mockApi.disableApiConsumer).toHaveBeenCalledWith('k1');
+  });
+  it('saves the JWT verification key from the paste dialog (ADR-0011)', async () => {
+    mockApi.setConsumerJwtKey.mockResolvedValue({ ...consumer, jwtKeyFingerprint: 'ab12cd34' });
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="consumer-jwt-open"]').trigger('click');
+    await flushPromises();
+    expect(document.body.textContent).toContain('尚未配置 JWT 公钥');
+    const pem = document.querySelector('[data-testid="consumer-jwt-pem"]') as HTMLTextAreaElement;
+    pem.value = '-----BEGIN PUBLIC KEY-----\nMIIBfake\n-----END PUBLIC KEY-----';
+    pem.dispatchEvent(new Event('input', { bubbles: true }));
+    (document.querySelector('[data-testid="consumer-jwt-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(mockApi.setConsumerJwtKey).toHaveBeenCalledWith(
+      'k1',
+      expect.stringContaining('BEGIN PUBLIC KEY'),
+    );
+  });
+  it('removes the JWT key behind a danger confirmation and badges the credential column', async () => {
+    mockApi.listApiConsumers.mockResolvedValue([
+      { ...consumer, jwtKeyFingerprint: 'ab12cd34', jwtKeySetAt: '2026-09-10T00:00:00Z' },
+    ]);
+    mockApi.removeConsumerJwtKey.mockResolvedValue({ ...consumer });
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.find('[data-testid="consumer-jwt-badge"]').exists()).toBe(true);
+    await wrapper.find('[data-testid="consumer-jwt-open"]').trigger('click');
+    await flushPromises();
+    expect(document.body.textContent).toContain('ab12cd34');
+    (document.querySelector('[data-testid="consumer-jwt-remove"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const buttons = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
+    const confirm = buttons.find(
+      (b) => b.textContent?.trim() === '移除公钥' && b.className.includes('ui-btn--danger'),
+    );
+    expect(confirm).toBeTruthy();
+    confirm!.click();
+    await flushPromises();
+    expect(mockApi.removeConsumerJwtKey).toHaveBeenCalledWith('k1');
   });
 });
