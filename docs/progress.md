@@ -2987,3 +2987,19 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - **不碰用户系统**：仅显式 `--autostart` 时写入，全部用户级免管理员；真实自启不在开发机自动注册。
 
 **验证**：客户端单测 42/42（新增 7 例：文件名/默认目录/覆盖目录/三平台内容快照/幂等 enable-disable 往返）；**Windows 沙箱实测**：install --autostart 生成 .cmd（node/cli/日志路径逐字校验）→ uninstall 移除，全程未触碰真实启动文件夹。
+
+## 2026-09-16 午后 — Goal #656：页面级「使用指引」——UiPageGuide + 六个重点管理页（对标腾讯产品指南）
+
+**背景**：跟踪 issue #656（「控制台对标腾讯 AI 网关」P0 第一批；同批 #657 列表依赖计数与表单规则文案、#658 API 消费者 JWT 入口另立）。腾讯控制台每个管理页顶部都有「产品指南/操作指引」，把跨页链路写成 3–4 步卡片；我们此前全站唯一编号引导只在「我的密钥」空态里，链路知识是隐性的。
+
+**交付**（分支 feat/page-guides-656，隔离工作树 D:/tmp/miqro-guides，base develop@807c567c）：
+- 新组件 `frontend/src/ui/PageGuide.vue`（barrel 导出 UiPageGuide）：页头下方「使用指引」卡——3–4 步，每步 = 序号 + 动宾标题 + 一句话 + 「前往『X』」跨页路由链接（可选 GitHub 文档直链，沿用 #651 模式）；「收起」（细条）/「不再显示」按页持久化（localStorage，setup 同步读取避免闪烁；storage 不可用静默降级）。
+- 内容模块 `frontend/src/content/pageGuides.ts`：六页文案——供应商「接入一家新供应商」、上游凭证「三步用起来」、API 消费者「外部系统接入四步」、我的密钥「从零到调用四步」、授权「授权四步」、项目「项目四步」。涉及生效语义的步骤明写「保存后数秒内生效，无需同步」（快照自动刷新，不引入腾讯式手动同步动作）；凭证指引写明「轮换后所有引用方自动使用新版本」。
+- 六页接入 + `ui/index.ts` barrel；EN 词典 +83 条；`frontend-design.md` §6 增补 PageGuide 规范段。
+
+**验证**：
+- vitest 全量 294/294（新增 `PageGuide.spec.ts` 5 例：渲染与链接、收起记忆、隐藏、内容守卫——to 必配 toText、/app 前缀、文档仅 https github；`NextCredentialsView.spec` 增指引断言）。
+- vue-tsc（app/spec/node 三工程）PASS；eslint（仅本轮改动 11 文件，--fix）PASS；vite build PASS。
+- Playwright e2e 52/52 PASS（生产构建 + preview，4 视口；含全部管理页 baseline 与 forbidden-aesthetics 审计；截图 frontend/test-results/baseline/）。
+
+**边界**：不加同步动作/状态列（无实例层）；e2e 用例与金样未动（截图仅捕获，无像素对比）；#657/#658 为同方案后续批。
