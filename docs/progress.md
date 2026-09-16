@@ -3157,18 +3157,25 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **背景**：#657（承接上一轮验证线钉到行号的三处缺口）。凭证列表「授权引用」列只读不可跳转、授权列表没有可跳转的过滤入口（`NextGrantsView` 不读 `route.query`）、项目/团队创建表单不写规则（`projects.code/name`、`teams.name` 的宽度与唯一性只在 409 响应体里可见）、`ui/Table.vue` 默认空态不渲染 CTA。范围仅前端：不动后端、不改既有 Flyway 迁移、不动既有 e2e。
 
-**交付**（分支 `feat/list-ia-closeout-657`，5 个源文件 + 5 个 spec，共 2 个提交）
+**交付**（分支 `feat/list-ia-closeout-657`，5 个源文件 + 7 个 spec，6 个提交）
 - `ui/Table.vue`：新增可选 props `emptyActionLabel` + `emptyActionTo`（`RouteLocationRaw`），二者齐备时默认空态渲染 `router-link.ui-link-action`（`data-testid="table-empty-action"`）；`#empty` 插槽仍优先，`NextKeysView` 的自定义空态不受影响。
 - `next/NextCredentialsView.vue`：计数为 0 时仍是 `<span>`（置灰 `.next-credentials__count-zero`），>0 时渲染 `router-link` 指向 `{ name: 'grants', query: { credentialId } }`；两个分支共用 `data-testid="credential-grant-count"`，测试对旧实现是红的。
 - `next/NextGrantsView.vue`：读 `route.query.credentialId` 做真过滤（按 `upstreamCredentialId` 匹配），工具条显示「共 X 条授权（全部 Y 条）」+ 凭证 chip +「查看全部」清除链接；过滤后列表为空时复用新 CTA 回到全量列表。
 - `next/NextProjectsView.vue` / `next/NextTeamsView.vue`：创建表单用既有 `hint`（`ui-field__hint`）写明后端强制的规则——项目代码「必填，同一租户内唯一，最长 64 个字符。」、项目名「必填，最长 200 个字符。」、团队名「必填，最长 200 个字符。」。逐条对 `AdminOrgService#createProject`/`createTeam` 与 `projects.code/name`、`teams.name` 列宽核对过，无自造约束。
 
-**验证**（真实命令与结果，frontend 目录）
-- `npm run typecheck`（vue-tsc 三工程）PASS；`npm run test` → `Test Files 59 passed (59)` / `Tests 338 passed (338)`，27.7s；`npm run lint` → exit 0，`0 errors, 5 warnings`（4 条是新 spec 里 RouterLinkStub 的 `vue/one-component-per-file`，1 条是既有 `NewShell.vue` 的 `vue/no-template-shadow`）；`npm run build` → exit 0，`built in 26.77s`。
-- 新增/改 spec 5 个：`UiTable.spec.ts`（CTA 仅在 label+to 齐备时渲染、`#empty` 仍优先）、`NextCredentialsView.spec.ts`（计数 >0 是 `A` 且带 `credentialId`、=0 是 `SPAN`）、`NextGrantsView.spec.ts`（`?credentialId=` 真过滤为 1/2 行 + chip + 清除链接目标 + 过滤后空态 CTA）、`NextProjectsView.spec.ts` / `NextTeamsView.spec.ts`（hint 文案断言）。
-- 全量测试尾部那条 `Not implemented: navigation (except hash changes)` 是既有 jsdom 噪声——单跑本批 5 个 spec 时不出现，且在任一 spec 输出之前打印；非失败。
+**收口补强**（第二轮，评审驱动）
+- `ui/Table.vue`：显式 `import { RouterLink }`——靠全局注册时，编译器会把 `<router-link>` 的解析提升到 v-if 之上，于是每个嵌 UiTable 的页面（约 30 个视图）即便不渲染 CTA 也要解析一次；clean run 里 43 条 `Failed to resolve component: router-link` 即由此而来，现在为 0（存量 43 条出自 `PageGuide.vue` 与 `NextOverviewView.vue` 自己的模板，不在本批）。
+- `next/NextCredentialsView.vue`：计数链接加 `.next-credentials__count-link`（`padding: 0`），与同列右对齐的数字对齐。
+- `next/NextGrantsView.vue`：`?credentialId=a&credentialId=b` 这类重复参数取首个值（原先当作「无过滤」，URL 说过滤、列表却说全量）；空态文案改用 `scopedFilter`，只在数据确实加载成功时才断言「该凭证还没有被任何授权引用」，加载失败时交给错误提示。
+- `i18n/dict.ts`：5 条 DICT + 2 条 PATTERN，英文界面不再回落中文。
+
+**验证**（真实命令与结果，frontend 目录；最后一行命令全部跑在还原 auto-fix 改写后的工作区）
+- `npx vitest run` → exit 0，`Test Files 61 passed (61)` / `Tests 352 passed (352)`，28.95s；`npm run typecheck`（vue-tsc 三工程）→ exit 0；`npx eslint <本批 7 个文件>`（不带 `--fix`）→ exit 0，`0 errors, 4 warnings`（均为 spec 里多组件共存的 `vue/one-component-per-file`）；`npm run build` → exit 0，`built in 25.71s`（仅既有 esbuild CSS 压缩告警）。
+- 首轮 `npm run lint` → exit 0，`0 errors, 5 warnings`（4 条 spec 的 `vue/one-component-per-file`、1 条既有 `NewShell.vue` 的 `vue/no-template-shadow`）。
+- 新增/改 spec 7 个：`UiTable.spec.ts`（CTA 仅在 label+to 齐备时渲染、`#empty` 仍优先）、`NextCredentialsView.spec.ts`（计数 >0 是 `A` 且带 `credentialId`、=0 是 `SPAN`）、`NextGrantsView.spec.ts`（`?credentialId=` 真过滤 + chip + 清除链接 + 过滤后空态 CTA + 重复参数 + 加载失败不冒认空态）、`NextProjectsView.spec.ts` / `NextTeamsView.spec.ts`（hint 文案断言）、`i18n-copy.spec.ts`（新增文案过 `translateText` 锁住，改名不再静默丢译文）、`list-ia-deeplink.spec.ts`（真 router：凭证列表渲染真 `router-link` → 路由跳转 → `router-view` 挂载的授权列表按 query 过滤，链接/路由/过滤三者互证，而非各自对 stub 断言）。
+- 全量测试尾部那条 `Not implemented: navigation (except hash changes)` 是既有 jsdom 噪声——单跑本批 spec 时不出现，且在任一 spec 输出之前打印；非失败。
 
 **边界与偏差**
 - 未加 `maxlength` 属性：issue 要的是「规则可读」，本次只补文案，不改输入拦截行为。
 - 未动 e2e 与金样；`frontend/dist/` 已被 `.gitignore` 覆盖，构建没有脏化工作区。
-- 首跑 `npm run lint` 带 `--fix` 时改写了 22 个与本 issue 无关的文件（含 `types/generated.ts` 的整文件 prettier 重排），已按路径逐个 `git checkout --` 还原，最终两个提交 `git show --stat` 只含本批文件。
+- `frontend/package.json` 的 `lint` 脚本写死 `eslint . --ext .vue,.ts,.tsx --fix`，所以每跑一次都会改写一批与本 issue 无关的文件（含 `types/generated.ts` 的整文件 prettier 重排）——两轮各发生一次，均按路径逐个 `git checkout --` 还原，本批提交 `git show --stat` 只含本批文件。这是仓库既有状态，不是本批引入；收口验证因此改用不带 `--fix` 的 `npx eslint <文件列表>` 取信号。
