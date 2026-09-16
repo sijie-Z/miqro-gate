@@ -936,7 +936,7 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 
 ### 5.19 配额规则（用量配额，platform-middleware roadmap「配额管理」步骤）
 
-只预警不阻断的用量配额（对齐腾讯消费者配额 / 阿里消费者配额，alerting-only）：
+用量配额（对齐腾讯消费者配额 / 阿里消费者配额）：**默认只预警**；`action=REJECT` 的规则超限后由网关拒绝请求（#684，ADR-0020）：
 
 | 方法与路径 | 用途 |
 |---|---|
@@ -944,11 +944,13 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | `PUT /api/v1/admin/quota-rules` | 新增/更新规则（`(scopeType, scopeId, metric, period)` 为自然键，重复 PUT 原地编辑） |
 | `DELETE /api/v1/admin/quota-rules/{id}` | 删除规则（`404 QUOTA_RULE_NOT_FOUND`） |
 
-- 请求体 `{ "scopeType": USER\|PROJECT, "scopeId", "metric": TOKENS\|REQUESTS\|COST, "period": DAILY\|WEEKLY\|MONTHLY\|YEARLY, "limitValue"（正整数；COST 口径为整数 CNY）, "warnPercent"?（1–99，默认 80）, "status"?（默认 ACTIVE）}`；scope 不存在 → `404 SCOPE_NOT_FOUND`（防枚举）。COST 指标与 YEARLY 周期为 #683 增（对标腾讯配额管理）。
+- 请求体 `{ "scopeType": USER\|PROJECT, "scopeId", "metric": TOKENS\|REQUESTS\|COST, "period": DAILY\|WEEKLY\|MONTHLY\|YEARLY, "limitValue"（正整数；COST 口径为整数 CNY）, "warnPercent"?（1–99，默认 80）, "status"?（默认 ACTIVE）, "action"?（ALERT\|REJECT，默认 ALERT）}`；scope 不存在 → `404 SCOPE_NOT_FOUND`（防枚举）。COST 指标与 YEARLY 周期为 #683 增（对标腾讯配额管理）；`action` 为 #684 增（ADR-0020）。
 - **水位口径（读时计算，非预聚合）**：TOKENS = 当期窗口 usage 事件全部 token（input+output+cacheRead+cacheCreation，与个人用量 TotalTokens 同口径）；REQUESTS = 当期到达上游的请求数（缓存命中不达上游、不计入，与腾讯「不计入缓存命中」档语义一致）；COST = 当期窗口按价格快照估算的上游实付（与成本报表同口径，缺价记 0）。窗口为 UTC 切片：DAILY=当日 / WEEKLY=周一起 / MONTHLY=当月（与月度预算同约定）/ YEARLY=自然年（1 月 1 日起）。水位计算走内部无上限窗口路径，不受公开查询 93 天窗口约束。
-- `level`：`NORMAL` → `WARNING`（≥ warnPercent）→ `NEAR_LIMIT`（≥ 90%，固定提示档，对标腾讯「即将超限」）→ `EXCEEDED`（≥ 100%），按严重度判定。**规则永不阻断流量**；硬阻断需 ADR。
+- `level`：`NORMAL` → `WARNING`（≥ warnPercent）→ `NEAR_LIMIT`（≥ 90%，固定提示档，对标腾讯「即将超限」）→ `EXCEEDED`（≥ 100%），按严重度判定。
+- **超限动作（#684，ADR-0020）**：`ALERT`（默认）只体现水位、永不阻断；`REJECT` 由控制面评估器（`QuotaEnforcementService`，默认 60s 固定延迟）把超限作用域写入 `quota_enforcement` → 随路由快照下发 → 网关在准入处（Key 解析后、读 body 前）查内存集合，命中即 `429` + 标准错误信封（`type=quota_exceeded`，文案含恢复路径）+ **`Retry-After`**（秒：该作用域最早可自愈的窗口结束时刻；多规则拦同一作用域取最早），`/v1/models` 同受此门。**软着陆语义**：Key 不失效、不自动禁用；**跨入新窗口**或**提高限额/停用规则**后判定自然消失、流量自动恢复。
+- **近似语义（必须知道）**：判定按周期刷新，不含评估间隔内新产生的用量——额度可能被超出一个评估周期内的量；页面水位与网关判定在一个周期内可能不一致。不承诺"恰好卡在 100%"，不做限流（速率语义另议）。
 - DISABLED 规则保留计划并展示水位，页面按停用渲染。
-- 审计：`QUOTA_RULE_CREATE` / `QUOTA_RULE_UPDATE` / `QUOTA_RULE_DELETE`。
+- 审计：`QUOTA_RULE_CREATE` / `QUOTA_RULE_UPDATE` / `QUOTA_RULE_DELETE`（摘要含 `action`）。
 - 视图含 `scopeName`（用户显示名/项目名）与 `scopeTag`（用户名/项目 code）。
 - 错误码补充：body JSON 解析失败（未知枚举/类型错误）统一 `400 PARAM_INVALID`（GlobalExceptionHandler 对 `HttpMessageNotReadableException` 的映射，含字段名提示）。
 

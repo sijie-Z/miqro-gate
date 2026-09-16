@@ -54,7 +54,8 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         Map<UUID, Set<String>> upstreamModelsByProductId, Map<UUID, String> productCodesByProductId,
         Map<UUID, UUID> providerIdsByProductId, Map<String, ConsumerRecord> consumersByDigest,
         Map<String, McpServerRecord> mcpServicesByName, Map<UUID, RetentionConfig> retentionByTenant,
-        Map<UUID, UnattributedPolicyRecord> unattributedPoliciesByTenant) {
+        Map<UUID, UnattributedPolicyRecord> unattributedPoliciesByTenant, Map<UUID, Instant> quotaBlockedUsers,
+        Map<UUID, Instant> quotaBlockedProjects) {
 
     /**
      * Tenant-level fallback for requests that cannot be attributed (Spec v1.1 §7.3,
@@ -75,6 +76,8 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         modelsByKeyId = immutableSets(modelsByKeyId);
         grantModelsByGrantId = immutableSets(grantModelsByGrantId);
         upstreamModelsByProductId = immutableSets(upstreamModelsByProductId);
+        quotaBlockedUsers = Map.copyOf(quotaBlockedUsers);
+        quotaBlockedProjects = Map.copyOf(quotaBlockedProjects);
         productCodesByProductId = Map.copyOf(productCodesByProductId);
         providerIdsByProductId = Map.copyOf(providerIdsByProductId);
         consumersByDigest = Map.copyOf(consumersByDigest);
@@ -90,7 +93,33 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
 
     public static RouteSnapshot empty(long version, Instant loadedAt) {
         return new RouteSnapshot(version, loadedAt, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
-                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+    }
+
+    /**
+     * True when an exceeded REJECT quota rule blocks this user (#684): the
+     * control-plane evaluator computed the verdict; the gateway only reads it.
+     */
+    public boolean quotaBlockedUser(UUID userId) {
+        return userId != null && quotaBlockedUsers.containsKey(userId);
+    }
+
+    /**
+     * When the user's block lifts: the earliest current-window end among the
+     * blocking rules (the 429's Retry-After), or null when not blocked.
+     */
+    public Instant quotaBlockedUserUntil(UUID userId) {
+        return userId == null ? null : quotaBlockedUsers.get(userId);
+    }
+
+    /** Same as {@link #quotaBlockedUser(UUID)} for PROJECT-scope rules. */
+    public boolean quotaBlockedProject(UUID projectId) {
+        return projectId != null && quotaBlockedProjects.containsKey(projectId);
+    }
+
+    /** Same as {@link #quotaBlockedUserUntil(UUID)} for PROJECT-scope rules. */
+    public Instant quotaBlockedProjectUntil(UUID projectId) {
+        return projectId == null ? null : quotaBlockedProjects.get(projectId);
     }
 
     /** The tenant's unattributed-request policy, or null when unconfigured. */

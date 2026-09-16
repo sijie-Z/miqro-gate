@@ -69,6 +69,32 @@
     日志里可见 `/api/v1/auth/registration-status`、`/api/v1/auth/oauth/providers` 代理到 8080 失败
     （本机未起后端），页面按 fail-open 回退，原有用例仍绿——即真实浏览器下探测失败不破坏登录页。
 
+### 并入 develop 新基线（2026-09-16）：merge `adfb670`（#695 / #684 配额软着陆）
+
+- 背景与手法：develop 于本日推进到 `adfb670`，本分支（原基于 `50a9b24`）与基线冲突。用
+  `git merge origin/develop`（**产生合并提交，非 rebase**）把基线并入，本分支改动全部保留。
+- 冲突清单与解法（冲突文件共 **1** 个）：
+  - `docs/openapi/openapi-3.1.json`——两侧改动语义不相交：本分支新增 schema
+    `RegistrationStatusResponse` + path `/api/v1/auth/registration-status`；develop 在既有 schema
+    `UpsertQuotaRuleRequest`、`QuotaRuleView` 上新增 `action` 属性。解法：**以 develop 版为底**，
+    把本分支两段按各自前驱键原位插入（`/api/v1/billing/quota` 之后、`SubscriptionQuotaView` 之后）。
+    注意 springdoc 输出含 `"maximum":100.00` 这类字面量，JS `JSON.parse`→`JSON.stringify` 往返会丢成
+    `100`，故采用 JSON 感知的**文本级**插入，不做往返序列化。合并结果自检：与 develop 版逐成员比对，
+    差异恰为本分支 2 段新增；与本分支版比对，差异恰为 develop 的 2 处 `action`；paths 172 / schemas 137；
+    `100.00` 原样保留；无冲突标记。
+  - 其余重叠文件（`docs/api-contract.md`、`docs/progress.md`、`frontend/src/types/generated.ts`）由 git
+    自动合并；`docs/progress.md` 两侧为不同区域追加，互不覆盖。
+- 合并后派生物一致性：`npx openapi-typescript ../docs/openapi/openapi-3.1.json -o <临时文件>` 与合并后的
+  `frontend/src/types/generated.ts` **逐字节一致**（忽略行尾），即生成物确为合并后契约的忠实渲染，
+  CI 的 `gen:types` 漂移门禁不会因此失败。
+- 复验（2026-09-16，真实命令与结果）：
+  - 后端 `-f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=RegistrationApiIntegrationTest,RegistrationDisabledApiIntegrationTest
+    -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`
+    （`RegistrationApiIntegrationTest` 4 + `RegistrationDisabledApiIntegrationTest` 2）、`BUILD SUCCESS`。
+  - 前端 `npm run typecheck` exit 0；`npm run test` → 59 files / **334** tests 全绿
+    （较上轮 +1，来自 develop 并入的 `NextQuotaRulesView.spec.ts` 新增用例）。
+
 ## 会话交接点 2026-09-15（资料页增强 #597 + 用途标签澄清 #596）
 
 - **#596（PR #599 待合并）**：Virtual Key「用途」语义显性化——创建表单补说明（声明标签、
@@ -3204,6 +3230,8 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 - **文档收口（本批）**：mapping 行 14/15 过时状态更正 + 「2026-09-16 收口批」对位表 + **对位说明 A（协议/Base Path/包体采集）与 B（消费者/消费者组/团队/项目）**；ADR-0019（配额超限拒绝，Proposed）；feature-backlog F51 状态；ai-gateway-comparison MCP 行刷新；CHANGELOG 本批条目。
 
-**待 owner 拍板**：ADR-0019（是否反转「不因预算阻断」提供 REJECT 规则；含 429 信封、5 分钟近似计数与未决问题 3 项）。
+**owner 已拍板（2026-09-16）**：ADR-0019 三个未决问题闭环——① 立项=是（软着陆：拒绝请求，否决自动禁用 Key）；② 首版范围=USER+PROJECT × TOKENS/REQUESTS/COST；③ 状态码=429。落地形态与实现见 **ADR-0020**（不采纳草案的数据面计数形态）。
 
 **未做（记录）**：MCP 服务向导「服务类型/后端类型」枚举（我们固定标准透传形态）、HTTP→MCP 转换、消费者组实体、配额缓存命中「全量计入」档（语义天然等价「不计入」）——均按既有裁决维持，mapping 已注明理由。
+
+- **#684 配额软着陆（超限拒绝 429）→ PR（ADR-0020）**：从「只算不管」到真闸门——规则级 `action ∈ {ALERT, REJECT}`（默认 ALERT，零回归）；REJECT 规则超限后网关对该用户/项目 429 (`quota_exceeded` + `Retry-After` 窗口结束提示，`/v1/models` 同门)，Key 不失效、提额/跨窗口自动恢复。链路：控制面评估器（60s，共享 `QuotaWatermarks`）→ `quota_enforcement`（V59，整体替换）→ 判定集变化才 pg_notify → 快照两集合 → 网关热路径零查询。并行的配额扩维（#683/#686，COST/YEARLY/NEAR_LIMIT）已先行合入，本批在其之上只做执行面，并同步 api-contract §5.19 / database-schema / configuration-reference / ADR-0020 / F51。

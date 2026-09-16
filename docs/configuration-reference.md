@@ -142,6 +142,8 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_PRICE_SYNC_CONNECT_TIMEOUT` | `10s` | 价格源连接超时（#585） |
 | `MIQROKEY_PRICE_SYNC_REQUEST_TIMEOUT` | `30s` | 价格源单次请求整体截止（#585）；源文件约 700KB，正常 <3s |
 | `MIQROKEY_PRICE_SYNC_MAX_BYTES` | `10485760` | 价格源响应体上限（#585）；超限按失败处理（零写入） |
+| `MIQROKEY_QUOTA_ENFORCEMENT_INTERVAL_MS` | `60000` | 配额软着陆判定周期（#684，`miqrokey.quota.enforcement-interval-ms`，控制面 `@Scheduled` 固定延迟）：重算 ACTIVE REJECT 规则的超限判定并整体替换 `quota_enforcement`，判定集变化才发布路由刷新；周期即"额外放行量"的上界（ADR-0020 D5） |
+| `MIQROKEY_QUOTA_ENFORCEMENT_INITIAL_DELAY_MS` | `45000` | 软着陆评估器首轮延迟（#684，`miqrokey.quota.enforcement-initial-delay-ms`）：避开启动期的迁移/种子竞争 |
 | `MIQROKEY_ALERTS_EVALUATION_INTERVAL_MS` | `300000` | 告警规则评估固定延迟（G4.5，`@Scheduled`）；也控制投递重试扫描节奏 |
 | `MIQROKEY_ALERTS_ADMIN_KEY_EXPIRY_INTERVAL_MS` | `21600000` | 管理密钥到期扫描间隔（`miqrokey.alerts.admin-key-expiry-interval-ms`，6 小时）：有启用的 ADMIN_API_KEY_EXPIRING 规则时检查 ≤7 天到期密钥并产生事件（规则 opt-in，默认关） |
 | `MIQROKEY_ALERTS_CONSUMER_KEY_EXPIRY_INTERVAL_MS` | `21600000` | 消费者密钥到期扫描间隔（`miqrokey.alerts.consumer-key-expiry-interval-ms`，6 小时，镜像管理密钥先例）：有启用的 CONSUMER_KEY_EXPIRING 规则时检查 ≤7 天到期消费者并产生事件（规则 opt-in，默认关） |
