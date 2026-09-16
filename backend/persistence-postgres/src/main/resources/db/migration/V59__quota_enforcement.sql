@@ -41,8 +41,10 @@ CREATE TABLE quota_enforcement (
 );
 
 -- The evaluator reconciles one tenant at a time and falls back to the rule when
--- a scope row has to be explained.
-CREATE INDEX idx_quota_enforcement_tenant ON quota_enforcement (tenant_id, scope_type, scope_id);
+-- a scope row has to be explained: those lookups ride the unique constraint's
+-- index (tenant_id, scope_type, scope_id), so no second index repeats it.
+-- PostgreSQL does not index FK columns, hence the explicit rule index; it is
+-- also what makes the ON DELETE CASCADE cheap.
 CREATE INDEX idx_quota_enforcement_rule ON quota_enforcement (rule_id);
 -- Fail-open sweep: rows whose window has closed stop blocking on load.
 CREATE INDEX idx_quota_enforcement_window_to ON quota_enforcement (window_to);
