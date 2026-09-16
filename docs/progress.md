@@ -10,7 +10,28 @@
 - Goal status: `IN_PROGRESS（多会话并行推进；已合并进展以 develop git log 为准。在途 PR：#599
   用途标注、#601 留痕控制台、#602 资料页增强；#596/#597 交付与验证细节见下方 09-15 交接点。
   此前 rc.19 审查修复波已全量落地并发布）`
-- Last updated: `2026-09-15 CST`
+- Last updated: `2026-09-16 CST`
+
+## 会话交接点 2026-09-16（#684 块①：配额软着陆——评估落库 + 快照装载）
+
+- **范围**：仅块①（控制面评估 + 路由快照 blocked scopes）。**块②（网关热路径 429 拒绝）与
+  块③（前端 enforcement 配置）未做**，本分支不开工。
+- **交付**：V59 迁移（`quota_rules.enforcement` + 新表 `quota_enforcement`，已提交
+  `b1fbeea`/`1dd4274`）；`QuotaEnforcementService`（越线作用域投影；重算幂等，仅变更时才
+  `RouteRefreshPublisher.publishChanged`）+ `QuotaEnforcementScheduler`（周期
+  `miqrokey.quota.enforcement-interval-ms`，默认 60s，单租户失败不中断整轮）；
+  `QuotaRuleView`/`UpsertQuotaRuleRequest` 增 `enforcement`（缺省 `ALERT`，省略时保留原值）；
+  `RouteSnapshot` 增 blocked users/projects 集合（保留 14 参旧构造，4 处调用点不破）+
+  `JdbcRouteSnapshotLoader` 只装载 `window_to > now()` 的行（fail-open）。
+- **验证（真实输出）**：`mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration
+  -Dtest=QuotaEnforcementIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` →
+  `Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`，BUILD SUCCESS（Testcontainers PostgreSQL 17.6）。
+  四例：REJECT 越线落库（断言 scope/rule/limit/used/usedPct/窗口边界 + 二次重算幂等）、
+  上调限额与跨窗口后记录被删、ALERT 越线零记录、快照装载含被阻断作用域且不装载已过期窗口的行。
+- **已知偏差（待 owner 裁定，非本块遗漏）**：issue 原文称 COST 限额以「分」存储，而 #683/V58 与
+  `api-contract` §5.19 落地均为**整数 CNY**；本 PR 不改语义，仅在 PR/issue 注明差异。
+- 文档同步：`database-schema.md`（`quota_rules` + 新增 `quota_enforcement` 小节）、
+  `api-contract.md` §5.19、ADR-0019 增「实现进度注记」（状态仍 Proposed，结论未动）。
 
 ## 会话交接点 2026-09-15（资料页增强 #597 + 用途标签澄清 #596）
 

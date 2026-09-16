@@ -330,9 +330,13 @@ alert_rules 类型 CHECK 同步扩展 `CONSUMER_KEY_EXPIRING`（V36 同款模式
 
 月度预算（仅告警，永不阻断）：`project_id`、`period_month`（`YYYY-MM`）、`amount numeric(24,10)`、`currency`、`alert_threshold_pct`、`status`（`ACTIVE|PAUSED`）、`version`。`budget` 唯一 `(tenant_id, project_id, period_month)`；`model_budget` 额外含 `model_id`，唯一 `(tenant_id, project_id, model_id, period_month)`。V7 已建表，告警消费为后续 Goal。
 
-### `quota_rules` (V23，用量配额；V58 扩维)
+### `quota_rules` (V23，用量配额；V58 扩维；V59 增 `enforcement`)
 
-用量配额计划（仅预警永不阻断，roadmap「配额管理」）：`scope_type`（`USER|PROJECT`）、`scope_id`、`metric`（`TOKENS|REQUESTS|COST`，COST 为 V58/#683 增）、`period`（`DAILY|WEEKLY|MONTHLY|YEARLY`，YEARLY 为 V58/#683 增）、`limit_value bigint`（>0；COST 口径为整数 CNY）、`warn_percent`（1–99，默认 80）、`status`（`ACTIVE|DISABLED`）、`created_by`、`version`。唯一 `(tenant_id, scope_type, scope_id, metric, period)`（同 scope 同维同周期仅一条，重复 PUT 原地编辑）。表只存计划；**当前窗口水位在读取时由 usage 事件计算**（UTC 窗口；TOKENS=全部 token 口径，REQUESTS=上游请求数，COST=价格快照估算的上游实付；YEARLY 水位不受公开 API 93 天窗口上限约束），`(tenant_id, scope_type, scope_id, status)` 索引。规则永不阻断流量——硬阻断需 ADR。
+用量配额计划（roadmap「配额管理」）：`scope_type`（`USER|PROJECT`）、`scope_id`、`metric`（`TOKENS|REQUESTS|COST`，COST 为 V58/#683 增）、`period`（`DAILY|WEEKLY|MONTHLY|YEARLY`，YEARLY 为 V58/#683 增）、`limit_value bigint`（>0；COST 口径为整数 CNY）、`warn_percent`（1–99，默认 80）、`status`（`ACTIVE|DISABLED`）、`enforcement`（`ALERT|REJECT`，V59/#684 增，DB 默认 `ALERT` 故存量行语义不变）、`created_by`、`version`。唯一 `(tenant_id, scope_type, scope_id, metric, period)`（同 scope 同维同周期仅一条，重复 PUT 原地编辑）。表只存计划；**当前窗口水位在读取时由 usage 事件计算**（UTC 窗口；TOKENS=全部 token 口径，REQUESTS=上游请求数，COST=价格快照估算的上游实付；YEARLY 水位不受公开 API 93 天窗口上限约束），`(tenant_id, scope_type, scope_id, status)` 索引。`ALERT` 规则只预警、永不阻断；`REJECT` 规则越线后由控制面评估器把该作用域落入 `quota_enforcement`（见下），网关据快照判定。#684 块①交付到「评估落库 + 快照装载」为止，**网关侧实际拒绝（429）与前端配置属后续块，尚未落地**。
+
+### `quota_enforcement` (V59，#684 块①，软着陆阻断投影)
+
+越线作用域的阻断记录，每 `(tenant_id, scope_type, scope_id)` 至多一行：`scope_type`（`USER|PROJECT`）、`scope_id`、`rule_id`（命中作用域的规则，FK→`quota_rules` ON DELETE CASCADE，删规则即解禁）、`metric`、`period`、`limit_value bigint`、`used_value numeric(24,6)`、`used_percent numeric(9,2)`、`window_from` / `window_to`（timestamptz，CHECK `window_to > window_from`）、`created_at` / `updated_at`；`tenant_id` FK→`tenants` ON DELETE RESTRICT。索引 `(tenant_id, scope_type, scope_id)`、`(rule_id)`、`(window_to)`。**它是规则状态的投影、不是第二事实源**：控制面按固定周期重算（`MIQROKEY_QUOTA_ENFORCEMENT_INTERVAL_MS`，默认 60s），限额上调、规则停用/删除或周期滚动后行即被删除；`window_to` 兼作**失效放行期限**（fail-open）——网关快照只装载 `window_to > now()` 的行，评估器停摆也不会造成永久阻断。本表不删除、不停用、不轮换任何 Virtual Key：软着陆只拒绝请求。
 
 ### `quota_default_template` (V26，默认配额模板；V58 扩维)
 
