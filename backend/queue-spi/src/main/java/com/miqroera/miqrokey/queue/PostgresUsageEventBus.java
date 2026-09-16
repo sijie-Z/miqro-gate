@@ -69,9 +69,12 @@ public final class PostgresUsageEventBus implements UsageEventBus {
      * Tenant that owns the platform-level queue signal. The queue is a process
      * resource, not a per-request one, so its fact rows carry the default (seed)
      * tenant seeded by {@code V1__core_tables.sql}. Evaluation filters alert rules
-     * by tenant, so this fires platform-level rules only — a rule owned by any
-     * other tenant is never triggered by it. Single-tenant deployments (the v1
-     * shape) see this as a plain global signal.
+     * by tenant, so this fires platform-level rules only: another tenant's rule
+     * aggregates an always-empty window ({@code COALESCE(SUM(dropped), 0)} = 0) and
+     * therefore stays quiet at any positive threshold. Thresholds are not validated
+     * to be positive, so a rule with {@code threshold <= 0} still fires once per
+     * dedupe window with {@code value = 0} — its own zero, never this count.
+     * Single-tenant deployments (the v1 shape) see this as a plain global signal.
      */
     public static final UUID SIGNAL_TENANT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
