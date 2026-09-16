@@ -78,8 +78,37 @@ public final class JdbcRouteSnapshotLoader {
         Map<String, RouteSnapshot.ConsumerRecord> consumers = loadConsumers();
         Map<String, RouteSnapshot.McpServerRecord> mcpServices = loadMcpServices();
         Map<UUID, RetentionConfig> retention = loadRetention();
+        Map<UUID, RouteSnapshot.UnattributedPolicyRecord> unattributedPolicies = loadUnattributedPolicies();
         return new RouteSnapshot(version, loadedAt, keys, bindings, credentials, models, grantModels, upstreamModels,
-                productIds.productCodes(), productIds.providerIds(), consumers, mcpServices, retention);
+                productIds.productCodes(), productIds.providerIds(), consumers, mcpServices, retention,
+                unattributedPolicies);
+    }
+
+    /**
+     * Unattributed-request policies per tenant (V57, Spec v1.1 §7.3, #647).
+     * {@code model_scope} is a JSON array; empty means the product's full ACTIVE
+     * upstream catalog at request time.
+     */
+    private Map<UUID, RouteSnapshot.UnattributedPolicyRecord> loadUnattributedPolicies() {
+        Map<UUID, RouteSnapshot.UnattributedPolicyRecord> byTenant = new LinkedHashMap<>();
+        jdbc.query("SELECT tenant_id, project_id, credential_id, provider_product_id, model_scope"
+                + " FROM unattributed_policy", rs -> {
+                    Set<String> models = new java.util.LinkedHashSet<>();
+                    try {
+                        for (JsonNode node : objectMapper.readTree(rs.getString("model_scope"))) {
+                            models.add(node.asText());
+                        }
+                    } catch (Exception e) {
+                        log.warn("unattributed_policy for tenant {} has unreadable model_scope; treating as empty",
+                                rs.getObject("tenant_id"));
+                    }
+                    UUID tenantId = (UUID) rs.getObject("tenant_id");
+                    byTenant.put(tenantId,
+                            new RouteSnapshot.UnattributedPolicyRecord(tenantId, (UUID) rs.getObject("project_id"),
+                                    (UUID) rs.getObject("credential_id"), (UUID) rs.getObject("provider_product_id"),
+                                    models));
+                });
+        return byTenant;
     }
 
     /** Configured retention switches per tenant (V31, ADR-0014). */
@@ -148,36 +177,39 @@ public final class JdbcRouteSnapshotLoader {
         // path decrypts in memory and never queries the database. The partial
         // unique index uq_credential_versions_one_active guarantees at most one
         // ACTIVE version per credential, so the join cannot duplicate rows.
-        jdbc.query("""
-                SELECT c.id AS credential_id, c.tenant_id, pp.id AS product_id,
-                       pp.base_url_templates, pp.auth_scheme,
-                       v.encrypted_secret, v.nonce, v.encryption_key_version
-                FROM upstream_credentials c
-                JOIN upstream_subscriptions s ON s.tenant_id = c.tenant_id AND s.id = c.subscription_id
-                JOIN provider_products pp ON pp.id = s.provider_product_id
-                LEFT JOIN upstream_credential_versions v
-                       ON v.tenant_id = c.tenant_id AND v.id = c.active_version_id AND v.status = 'ACTIVE'
-                WHERE c.status = 'ACTIVE'
-                  AND c.id IN (SELECT g.upstream_credential_id FROM project_provider_grants g WHERE g.status = 'ACTIVE')
-                """, rs -> {
-            UUID credentialId = (UUID) rs.getObject("credential_id");
-            BaseUrlSet baseUrls = parseBaseUrls(rs.getString("base_url_templates"));
-            if (baseUrls.single() == null && baseUrls.byProtocolUris().isEmpty()) {
-                log.warn("Credential {} has no usable base_url_templates entry; excluded from routing snapshot",
-                        credentialId);
-                return;
-            }
-            EncryptedSecret encryptedSecret = null;
-            byte[] ciphertext = rs.getBytes("encrypted_secret");
-            if (ciphertext != null) {
-                encryptedSecret = new EncryptedSecret(ciphertext, rs.getBytes("nonce"),
-                        rs.getString("encryption_key_version"));
-            }
-            RouteSnapshot.CredentialRecord credential = new RouteSnapshot.CredentialRecord(credentialId,
-                    (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("product_id"), baseUrls.single(),
-                    rs.getString("auth_scheme"), encryptedSecret, baseUrls.byProtocolUris());
-            credentials.put(credentialId, credential);
-        });
+        jdbc.query(
+                """
+                        SELECT c.id AS credential_id, c.tenant_id, pp.id AS product_id,
+                               pp.base_url_templates, pp.auth_scheme,
+                               v.encrypted_secret, v.nonce, v.encryption_key_version
+                        FROM upstream_credentials c
+                        JOIN upstream_subscriptions s ON s.tenant_id = c.tenant_id AND s.id = c.subscription_id
+                        JOIN provider_products pp ON pp.id = s.provider_product_id
+                        LEFT JOIN upstream_credential_versions v
+                               ON v.tenant_id = c.tenant_id AND v.id = c.active_version_id AND v.status = 'ACTIVE'
+                        WHERE c.status = 'ACTIVE'
+                          AND (c.id IN (SELECT g.upstream_credential_id FROM project_provider_grants g WHERE g.status = 'ACTIVE')
+                               OR c.id IN (SELECT p.credential_id FROM unattributed_policy p WHERE p.tenant_id = c.tenant_id))
+                        """,
+                rs -> {
+                    UUID credentialId = (UUID) rs.getObject("credential_id");
+                    BaseUrlSet baseUrls = parseBaseUrls(rs.getString("base_url_templates"));
+                    if (baseUrls.single() == null && baseUrls.byProtocolUris().isEmpty()) {
+                        log.warn("Credential {} has no usable base_url_templates entry; excluded from routing snapshot",
+                                credentialId);
+                        return;
+                    }
+                    EncryptedSecret encryptedSecret = null;
+                    byte[] ciphertext = rs.getBytes("encrypted_secret");
+                    if (ciphertext != null) {
+                        encryptedSecret = new EncryptedSecret(ciphertext, rs.getBytes("nonce"),
+                                rs.getString("encryption_key_version"));
+                    }
+                    RouteSnapshot.CredentialRecord credential = new RouteSnapshot.CredentialRecord(credentialId,
+                            (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("product_id"), baseUrls.single(),
+                            rs.getString("auth_scheme"), encryptedSecret, baseUrls.byProtocolUris());
+                    credentials.put(credentialId, credential);
+                });
         return credentials;
     }
 

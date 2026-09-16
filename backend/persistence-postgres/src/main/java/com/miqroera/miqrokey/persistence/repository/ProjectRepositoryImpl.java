@@ -23,8 +23,8 @@ public class ProjectRepositoryImpl implements ProjectRepository {
     private static final RowMapper<Project> ROW_MAPPER = (rs, rowNum) -> new Project((UUID) rs.getObject("id"),
             (UUID) rs.getObject("tenant_id"), rs.getString("code"), rs.getString("name"), rs.getString("description"),
             rs.getString("cost_center"), ProjectStatus.valueOf(rs.getString("status")), rs.getString("project_tag"),
-            rs.getLong("version"), rs.getTimestamp("created_at").toInstant(),
-            rs.getTimestamp("updated_at").toInstant());
+            rs.getLong("version"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
+            rs.getBoolean("system"));
 
     private final NamedParameterJdbcTemplate jdbc;
 
