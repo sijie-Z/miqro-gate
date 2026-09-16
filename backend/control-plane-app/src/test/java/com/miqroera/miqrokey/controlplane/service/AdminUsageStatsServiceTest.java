@@ -52,6 +52,7 @@ class AdminUsageStatsServiceTest {
     private static final UUID CREDENTIAL_ID = UUID.randomUUID();
     private static final UUID SUBSCRIPTION_ID = UUID.randomUUID();
     private static final UUID PRODUCT_ID = UUID.randomUUID();
+    private static final UUID TEAM_ID = UUID.randomUUID();
     private static final String MODEL = "model-a";
 
     @Mock
@@ -86,7 +87,7 @@ class AdminUsageStatsServiceTest {
         when(usageStatsRepository.aggregateHits(eq(UsageStatsRepository.GroupBy.DAY), any())).thenReturn(List.of());
 
         service.summary(admin, "day", Instant.now().minus(1, ChronoUnit.DAYS), Instant.now(), USER_ID, PROJECT_ID,
-                KEY_ID, CREDENTIAL_ID, SUBSCRIPTION_ID, PRODUCT_ID, MODEL);
+                KEY_ID, CREDENTIAL_ID, SUBSCRIPTION_ID, PRODUCT_ID, MODEL, TEAM_ID);
 
         ArgumentCaptor<UsageStatsRepository.UsageFilter> captor = ArgumentCaptor
                 .forClass(UsageStatsRepository.UsageFilter.class);
@@ -101,6 +102,7 @@ class AdminUsageStatsServiceTest {
         assertThat(filter.subscriptionId()).isEqualTo(SUBSCRIPTION_ID);
         assertThat(filter.providerProductId()).isEqualTo(PRODUCT_ID);
         assertThat(filter.modelId()).isEqualTo(MODEL);
+        assertThat(filter.teamId()).isEqualTo(TEAM_ID);
     }
 
     @Test
@@ -109,7 +111,7 @@ class AdminUsageStatsServiceTest {
         when(usageStatsRepository.aggregateUsage(any(), any())).thenReturn(List.of());
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
 
-        service.summary(admin, null, null, null, null, null, null, null, null, null, null);
+        service.summary(admin, null, null, null, null, null, null, null, null, null, null, null);
 
         ArgumentCaptor<UsageStatsRepository.UsageFilter> captor = ArgumentCaptor
                 .forClass(UsageStatsRepository.UsageFilter.class);
@@ -137,7 +139,8 @@ class AdminUsageStatsServiceTest {
                 MODEL, CacheLevel.UPSTREAM, 2, new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null))));
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
 
-        UsageSummary summary = service.summary(admin, "project", null, null, null, null, null, null, null, null, null);
+        UsageSummary summary = service.summary(admin, "project", null, null, null, null, null, null, null, null, null,
+                null);
 
         assertThat(summary.groups()).hasSize(1);
         // input 1000 * 1.00/1e6 = 0.001; output 500 * 2.00/1e6 = 0.001
@@ -146,14 +149,16 @@ class AdminUsageStatsServiceTest {
 
     @Test
     void summaryRejectsUnknownGroupBy() {
-        assertThatThrownBy(() -> service.summary(admin, "bogus", null, null, null, null, null, null, null, null, null))
+        assertThatThrownBy(
+                () -> service.summary(admin, "bogus", null, null, null, null, null, null, null, null, null, null))
                 .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("GROUP_BY_INVALID"));
     }
 
     @Test
     void summaryRejectsWindowLongerThan93Days() {
         Instant from = Instant.now().minus(100, ChronoUnit.DAYS);
-        assertThatThrownBy(() -> service.summary(admin, null, from, null, null, null, null, null, null, null, null))
+        assertThatThrownBy(
+                () -> service.summary(admin, null, from, null, null, null, null, null, null, null, null, null))
                 .isInstanceOfSatisfying(ApiException.class,
                         e -> assertThat(e.getCode()).isEqualTo("TIME_RANGE_TOO_WIDE"));
     }
@@ -162,7 +167,7 @@ class AdminUsageStatsServiceTest {
     void summaryRejectsInvertedWindow() {
         Instant now = Instant.now();
         assertThatThrownBy(() -> service.summary(admin, null, now, now.minus(1, ChronoUnit.HOURS), null, null, null,
-                null, null, null, null)).isInstanceOfSatisfying(ApiException.class,
+                null, null, null, null, null)).isInstanceOfSatisfying(ApiException.class,
                         e -> assertThat(e.getCode()).isEqualTo("TIME_RANGE_INVALID"));
     }
 
@@ -175,7 +180,7 @@ class AdminUsageStatsServiceTest {
         when(usageStatsRepository.findRecords(any(), eq(0L), eq(50))).thenReturn(List.of(event));
 
         UsageRecordPage page = service.records(admin, null, null, 1, 50, USER_ID, PROJECT_ID, KEY_ID, CREDENTIAL_ID,
-                SUBSCRIPTION_ID, PRODUCT_ID, MODEL, "203.0.113.7");
+                SUBSCRIPTION_ID, PRODUCT_ID, MODEL, "203.0.113.7", TEAM_ID);
 
         assertThat(page.total()).isEqualTo(1);
         assertThat(page.items()).hasSize(1);
@@ -189,19 +194,20 @@ class AdminUsageStatsServiceTest {
         assertThat(captor.getValue().userId()).isEqualTo(USER_ID);
         assertThat(captor.getValue().modelId()).isEqualTo(MODEL);
         assertThat(captor.getValue().clientIp()).isEqualTo("203.0.113.7");
+        assertThat(captor.getValue().teamId()).isEqualTo(TEAM_ID);
     }
 
     @Test
     void recordsRejectsPageBelowOne() {
         assertThatThrownBy(
-                () -> service.records(admin, null, null, 0, 50, null, null, null, null, null, null, null, null))
+                () -> service.records(admin, null, null, 0, 50, null, null, null, null, null, null, null, null, null))
                 .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("PAGE_INVALID"));
     }
 
     @Test
     void recordsRejectsOversizedPage() {
         assertThatThrownBy(
-                () -> service.records(admin, null, null, 1, 201, null, null, null, null, null, null, null, null))
+                () -> service.records(admin, null, null, 1, 201, null, null, null, null, null, null, null, null, null))
                 .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("SIZE_INVALID"));
     }
 
@@ -218,7 +224,7 @@ class AdminUsageStatsServiceTest {
                 .thenReturn(List.of(new UsageStatsRepository.HourlyUsageRow(hourStart, PROJECT_ID, "Project One",
                         dimensionId, "regular_user", 2L, 100L, 50L, 10L, 5L)));
 
-        HourlyUsageReport report = service.hourly(admin, "2026-09-15", 1, "user", USER_ID, PROJECT_ID, 480);
+        HourlyUsageReport report = service.hourly(admin, "2026-09-15", 1, "user", USER_ID, PROJECT_ID, 480, TEAM_ID);
 
         ArgumentCaptor<UsageStatsRepository.UsageFilter> captor = ArgumentCaptor
                 .forClass(UsageStatsRepository.UsageFilter.class);
@@ -228,6 +234,7 @@ class AdminUsageStatsServiceTest {
         assertThat(filter.tenantId()).isEqualTo(TENANT);
         assertThat(filter.userId()).isEqualTo(USER_ID);
         assertThat(filter.projectId()).isEqualTo(PROJECT_ID);
+        assertThat(filter.teamId()).isEqualTo(TEAM_ID);
         // 2026-09-15 00:00+08:00 .. 2026-09-16 00:00+08:00
         assertThat(filter.from()).isEqualTo(Instant.parse("2026-09-14T16:00:00Z"));
         assertThat(filter.to()).isEqualTo(Instant.parse("2026-09-15T16:00:00Z"));
@@ -252,7 +259,7 @@ class AdminUsageStatsServiceTest {
         when(usageStatsRepository.aggregateHourly(eq(UsageStatsRepository.HourlyDimension.NONE), any(), eq(0)))
                 .thenReturn(List.of());
 
-        HourlyUsageReport report = service.hourly(admin, "2026-09-15", 7, null, null, null, null);
+        HourlyUsageReport report = service.hourly(admin, "2026-09-15", 7, null, null, null, null, null);
 
         ArgumentCaptor<UsageStatsRepository.UsageFilter> captor = ArgumentCaptor
                 .forClass(UsageStatsRepository.UsageFilter.class);
@@ -268,16 +275,16 @@ class AdminUsageStatsServiceTest {
 
     @Test
     void hourlyRejectsOutOfRangeParameters() {
-        assertThatThrownBy(() -> service.hourly(admin, "2026-09-15", 8, null, null, null, null))
+        assertThatThrownBy(() -> service.hourly(admin, "2026-09-15", 8, null, null, null, null, null))
                 .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("DAYS_INVALID"));
-        assertThatThrownBy(() -> service.hourly(admin, "2026-09-15", 0, null, null, null, null))
+        assertThatThrownBy(() -> service.hourly(admin, "2026-09-15", 0, null, null, null, null, null))
                 .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("DAYS_INVALID"));
-        assertThatThrownBy(() -> service.hourly(admin, "2026-09-15", 1, "bogus", null, null, null))
+        assertThatThrownBy(() -> service.hourly(admin, "2026-09-15", 1, "bogus", null, null, null, null))
                 .isInstanceOfSatisfying(ApiException.class,
                         e -> assertThat(e.getCode()).isEqualTo("DIMENSION_INVALID"));
-        assertThatThrownBy(() -> service.hourly(admin, "2026-13-40", 1, null, null, null, null))
+        assertThatThrownBy(() -> service.hourly(admin, "2026-13-40", 1, null, null, null, null, null))
                 .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("DATE_INVALID"));
-        assertThatThrownBy(() -> service.hourly(admin, null, 1, null, null, null, 2000)).isInstanceOfSatisfying(
+        assertThatThrownBy(() -> service.hourly(admin, null, 1, null, null, null, 2000, null)).isInstanceOfSatisfying(
                 ApiException.class, e -> assertThat(e.getCode()).isEqualTo("TZ_OFFSET_INVALID"));
     }
 

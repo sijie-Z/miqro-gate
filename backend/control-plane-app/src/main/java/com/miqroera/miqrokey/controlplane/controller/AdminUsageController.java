@@ -49,9 +49,9 @@ public class AdminUsageController {
             @RequestParam(required = false) UUID userId, @RequestParam(required = false) UUID projectId,
             @RequestParam(required = false) UUID virtualKeyId, @RequestParam(required = false) UUID credentialId,
             @RequestParam(required = false) UUID subscriptionId, @RequestParam(required = false) UUID providerProductId,
-            @RequestParam(required = false) String modelId) {
+            @RequestParam(required = false) String modelId, @RequestParam(required = false) UUID teamId) {
         return usageStatsService.summary(userContext.getUser(), groupBy, from, to, userId, projectId, virtualKeyId,
-                credentialId, subscriptionId, providerProductId, modelId);
+                credentialId, subscriptionId, providerProductId, modelId, teamId);
     }
 
     /**
@@ -69,9 +69,9 @@ public class AdminUsageController {
             @RequestParam(required = false) UUID projectId, @RequestParam(required = false) UUID virtualKeyId,
             @RequestParam(required = false) UUID credentialId, @RequestParam(required = false) UUID subscriptionId,
             @RequestParam(required = false) UUID providerProductId, @RequestParam(required = false) String modelId,
-            @RequestParam(required = false) String clientIp) {
+            @RequestParam(required = false) String clientIp, @RequestParam(required = false) UUID teamId) {
         return usageStatsService.records(userContext.getUser(), from, to, page, size, userId, projectId, virtualKeyId,
-                credentialId, subscriptionId, providerProductId, modelId, clientIp);
+                credentialId, subscriptionId, providerProductId, modelId, clientIp, teamId);
     }
 
     /**
@@ -85,8 +85,8 @@ public class AdminUsageController {
     public HourlyUsageReport hourly(@RequestParam(required = false) String date,
             @RequestParam(required = false) Integer days, @RequestParam(required = false) String dimension,
             @RequestParam(required = false) UUID userId, @RequestParam(required = false) UUID projectId,
-            @RequestParam(required = false) Integer tzOffsetMinutes) {
+            @RequestParam(required = false) Integer tzOffsetMinutes, @RequestParam(required = false) UUID teamId) {
         return usageStatsService.hourly(userContext.getUser(), date, days, dimension, userId, projectId,
-                tzOffsetMinutes);
+                tzOffsetMinutes, teamId);
     }
 }

@@ -396,8 +396,10 @@ class AdminUsageApiIntegrationTest {
                     """, new MapSqlParameterSource("id", secondProjectId).addValue("tenantId", tenantId));
         }
 
-        /** Team "Alpha" with both fixture users as members (#634). */
-        void insertTeamForBothUsers() {
+        /**
+         * Team "Alpha" with both fixture users as members (#634). Returns the team id.
+         */
+        UUID insertTeamForBothUsers() {
             UUID teamId = UUID.randomUUID();
             jdbc.update("""
                     INSERT INTO teams (id, tenant_id, name, status, version)
@@ -410,6 +412,7 @@ class AdminUsageApiIntegrationTest {
                         """, new MapSqlParameterSource("tenantId", tenantId).addValue("teamId", teamId)
                         .addValue("userId", member));
             }
+            return teamId;
         }
     }
 
@@ -459,6 +462,32 @@ class AdminUsageApiIntegrationTest {
                 .andExpect(jsonPath("$.rows[*].dimensionLabel", containsInAnyOrder("Alpha", "Alpha")))
                 .andExpect(jsonPath("$.rows[*].requests", containsInAnyOrder(2, 1)))
                 .andExpect(jsonPath("$.rows[*].totalTokens", containsInAnyOrder(8_800, 2_200)));
+    }
+
+    @Test
+    @DisplayName("summary and records filter by teamId through the members' keys (#681)")
+    void teamFilterScopesSummaryAndRecords() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertOtherUsersKey();
+        UUID teamId = fx.insertTeamForBothUsers();
+        fx.insertUsage(ownKey, "chatcmpl-tf-1", 1_000L, 100L);
+        fx.insertUsage(fx.otherKeyId, "chatcmpl-tf-2", 7_000L, 700L);
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "team").param("teamId", teamId.toString())
+                .cookie(adminSession)).andExpect(status().isOk()).andExpect(jsonPath("$.groups.length()").value(1))
+                .andExpect(jsonPath("$.groups[0].label").value("Alpha"))
+                .andExpect(jsonPath("$.groups[0].requests.upstream").value(2))
+                .andExpect(jsonPath("$.totals.tokens.input").value(8_000));
+        // A team nobody belongs to narrows to nothing.
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "team")
+                .param("teamId", UUID.randomUUID().toString()).cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups.length()").value(0));
+        mockMvc.perform(get("/api/v1/admin/usage/records").param("teamId", teamId.toString()).cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(2));
+        mockMvc.perform(
+                get("/api/v1/admin/usage/records").param("teamId", UUID.randomUUID().toString()).cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(0));
     }
 
     @Test
