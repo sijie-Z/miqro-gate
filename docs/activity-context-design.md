@@ -76,9 +76,9 @@ Usage Event { user_id, session_id, project_id, activity_id?, model,
 - **多绑定 Key 且无任何上下文 → 未配置未归属策略时 400 `CONTEXT_REQUIRED` fail-closed**（配置了租户策略则按策略路由，`resolution_status=POLICY_ROUTED`、用量落未归属桶，Spec v1.1 §6.3）——宁可报错，绝不静默记错账（财务口径底线）；
 - 头声称了未绑定项目 → **403 明确报错**（调用方自知声称了什么，可调试；防枚举的 404 语义只保留给"密钥本身无效"）；
 - 头**不参与 HMAC 鉴权、不转发上游**；绑定校验通过后，凭证/模型/用量链路与 #615 完全一致；
-- `usage_event` 增记**服务端裁定** `resolution_status`（实现产出 `RESOLVED_HEADER` / `RESOLVED_SUFFIX` / `SOLE_BINDING` / `POLICY_ROUTED` 四值；完整值域另含 `UNATTRIBUTED` / `AMBIGUOUS`，见 Spec v1.1 §7.1 与 V54 列注释）与**客户端声明** `claimed_project_id` / `claim_source` / `claim_confidence`（声明=未验证输入、裁定=计费依据，分列依据 Spec v1.1 **R5/P1**；`claim_source` 值域见 `docs/api-contract.md` §7 阶梯条，含 `git_remote` 共 7 项——V54 的列注释未列全，勿以其为值域权威）；另记客户端自带的 `X-Claude-Code-Session-Id` → `session_id`（纯观测、可空、不参与路由/授权）→ 审计可还原每笔归属的判定依据。
+- `usage_event` 增记**服务端裁定** `resolution_status`（实现产出 `RESOLVED_HEADER` / `RESOLVED_SUFFIX` / `SOLE_BINDING` / `POLICY_ROUTED` 四值；Spec v1.1 §7.1 与 V54 列注释另列 `UNATTRIBUTED` / `AMBIGUOUS`，但**当前实现不产出这两值**——它们在实现中只作为客户端声明头 `X-Miqro-Claim-Status` 的取值与"未归属桶"语义出现）与**客户端声明** `claimed_project_id` / `claim_source` / `claim_confidence`（声明=未验证输入、裁定=计费依据，分列依据 Spec v1.1 **R5/P1**；`claim_source` 值域见 `docs/api-contract.md` §7 阶梯条，含 `git_remote` 共 7 项——V54 的列注释未列全，勿以其为值域权威）；另记客户端自带的 `X-Claude-Code-Session-Id` → `session_id`（纯观测、可空、不参与路由/授权）→ 可支持按行审计归属判定依据（**边界**：只有放行并完成的请求才写 `usage_event`；网关侧拒绝——400 `CONTEXT_INVALID`/`CONTEXT_REQUIRED`、403 `CONTEXT_NOT_ALLOWED`、404、429 等——不落行；证据明细表 `request_context_evidence`（`V55`）当前**仅有建表迁移、无写入方**，Spec v1.1 §7.2 的证据审计链路尚未交付）。
 
-> **注记（原"头名敏感词门控"约束的适用范围——保留）**：Claude Code 官方对头名有"敏感词门控"（不能含 `project/key/user/org/token/host/endpoint/…` 等词）。该门控**仅作用于客户端从 settings/env 读取的 `ANTHROPIC_CUSTOM_HEADERS`（静态头降级模式，即 §4.2 通道 A/B）**；CAA 主路径的头由本机 Agent 自行注入，**不受该门控影响**（Spec v1.1 §3.3）。`X-Miqro-Project-Id`（含 `project` 词）在主路径下可放心使用；**若未来启用静态头降级模式，须另选不含 `project/key/…` 的头名（如 `X-Miqro-Target-Id`，据 Spec v1.1 §3.3 可通过门控；本稿 §5 未单独实验该头名）**。
+> **注记（原"头名敏感词门控"约束的适用范围——保留）**：Claude Code 官方对头名有"敏感词门控"（不能含 `project/key/user/org/token/host/endpoint/…` 等词）。该门控**仅作用于客户端从 settings/env 读取的静态头配置（即 `ANTHROPIC_CUSTOM_HEADERS` 这一形态；§4.2 的 A/B/E 三条通道都可能下发它）；由 `apiKeyHelper` 脚本动态输出的 `headers`（通道 C）是否同受门控，本仓无证据、未验证**；CAA 主路径的头由本机 Agent 自行注入，**不受该门控影响**（Spec v1.1 §3.3）。`X-Miqro-Project-Id`（含 `project` 词）在主路径下可放心使用；**若未来启用静态头降级模式，须另选不含 `project/key/…` 的头名（如 `X-Miqro-Target-Id`，据 Spec v1.1 §3.3 可通过门控；本稿 §5 未单独实验该头名）**。
 
 ### 4.2 注入通道（客户端侧——本轮已做真机实验，证据见 §5）
 
@@ -164,7 +164,7 @@ Usage Event { user_id, session_id, project_id, activity_id?, model,
 
 ## 8. 下一步实施计划（问题澄清后立即开工）
 
-> **历史注记（2026-09-16 口径归位时补）**：本计划已成历史——网关侧、客户端参考实现与演示闭环均已交付（Spec v1.1 §11 P1–P5；#633/#639/#641/#645–#648），实施口径以 Spec 与 `docs/caa-next-batch-plan.md` 为准。
+> **历史注记（2026-09-16 口径归位时补）**：本计划已成历史——网关侧与客户端参考实现（#639 `miqro-context`，安装式 Agent）均已交付（Spec v1.1 §11 P1–P5；#633/#639/#641/#645–#648）；但本节 step 1（干净环境复核实验 3/5）与 step 3 原写的客户端形态（`apiKeyHelper` + `PostToolUse` 脚本、接入面板一键生成）未按原样交付（Spec §10-③ 取纯 Agent 线、hooks 留 v2），实施口径以 Spec 与 `docs/caa-next-batch-plan.md` 为准。
 
 1. **干净环境复核实验 3/5**（通道 B/C/D，一天内出结论）；
 2. **网关增量**（小 PR，在 #615 合入之后）：`X-Miqro-Project-Id` 解析 + 失败语义 + `usage_event` 上下文列（`session_id`/`activity_id`/`claimed_project_id`/`resolution_status`/`claim_source`/`claim_confidence`；迁移 **V54**=本批上下文列、**V55**=证据审计表 `request_context_evidence`）+ 契约与测试；
