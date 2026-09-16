@@ -151,6 +151,21 @@ export function revokeVirtualKey(id: string): Promise<{ message: string }> {
   return post<{ message: string }>(`/api/v1/me/virtual-keys/${id}/revoke`);
 }
 
+/** #582: rename (bindings, models and the secret itself are unchanged). */
+export function renameVirtualKey(id: string, name: string): Promise<VirtualKeyView> {
+  return patch<VirtualKeyView>(`/api/v1/me/virtual-keys/${id}`, { name });
+}
+
+/** #582: temporary soft stop — the gateway answers the uniform unknown-key 404. */
+export function disableVirtualKey(id: string): Promise<VirtualKeyView> {
+  return post<VirtualKeyView>(`/api/v1/me/virtual-keys/${id}/disable`);
+}
+
+/** #582: re-enable a disabled key; routing resumes at the next snapshot refresh. */
+export function enableVirtualKey(id: string): Promise<VirtualKeyView> {
+  return post<VirtualKeyView>(`/api/v1/me/virtual-keys/${id}/enable`);
+}
+
 export function myGrants(): Promise<MeGrantsResponse> {
   return get<MeGrantsResponse>('/api/v1/me/grants');
 }
