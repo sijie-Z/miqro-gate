@@ -1641,6 +1641,11 @@ export const DICT: Record<string, string> = {
   '总成本': 'Total cost',
   '按官方价目估算': 'est. at official list prices',
   '该窗口没有用量': 'No usage in this window',
+  '采集配置': 'Capture settings',
+  '租户级 · 覆盖请求与响应双面': 'Tenant-wide · covers both request and response sides',
+  '开启内容留痕': 'Enable content retention',
+  '内容上限（字节）': 'Content cap (bytes)',
+  '已保存——保存后数秒内生效，无需同步。': 'Saved — effective within seconds, no sync needed.',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [

@@ -44,6 +44,8 @@ export type SubscriptionView = components['schemas']['SubscriptionView'];
 export type SeatView = components['schemas']['SeatView'];
 export type AuditEventView = components['schemas']['AuditEventView'];
 export type AdminRetentionLogView = components['schemas']['AdminRetentionLogView'];
+/** ADR-0014: compliance retention switch + content cap (#688). */
+export type RetentionConfigView = components['schemas']['RetentionConfig'];
 export type MeGrantsResponse = components['schemas']['MeGrantsResponse'];
 export type QuotaDefaultTemplateView = components['schemas']['QuotaDefaultTemplateView'];
 export type McpAccessView = components['schemas']['McpAccessView'];
