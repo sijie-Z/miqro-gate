@@ -350,7 +350,8 @@ a:focus-visible {
 }
 
 /* antd v5 menu item metrics (v2.pro live): 32px row, 5px 12px padding,
-   4px radius, 14px/22px text, rgba(0,0,0,.04) hover fill. */
+   4px radius, 14px/22px text, rgba(0,0,0,.04) hover fill. Hover/active get
+   the 0.2s background ease + pressed fill (#655). */
 .ui-menu__item {
   display: flex;
   align-items: center;
@@ -364,10 +365,17 @@ a:focus-visible {
   cursor: pointer;
   outline: none;
   user-select: none;
+  transition:
+    background-color var(--ui-ease),
+    color var(--ui-ease);
 }
 
 .ui-menu__item[data-highlighted] {
   background: var(--ui-fill-hover);
+}
+
+.ui-menu__item:active {
+  background: var(--ui-fill-selected);
 }
 
 .ui-menu__item[data-disabled] {
@@ -486,6 +494,16 @@ a:focus-visible {
 [data-anim='off'] *::after {
   transition: none !important;
   animation: none !important;
+}
+
+/* System reduced motion gets the same blunt kill switch (#655). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
 }
 
 /* Color modes — the dataset lands on <html>, so the whole console filters. */
