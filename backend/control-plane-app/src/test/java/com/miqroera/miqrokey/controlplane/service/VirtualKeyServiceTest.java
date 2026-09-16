@@ -186,6 +186,17 @@ class VirtualKeyServiceTest {
     }
 
     @Test
+    void createRejectsSystemProject() {
+        Project bucket = new Project(PROJECT_ID, TENANT, "UNATTRIBUTED", "未归属（系统）", null, null, ProjectStatus.ACTIVE,
+                TAG, 0L, Instant.now(), Instant.now(), true);
+        when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(bucket));
+
+        assertThatThrownBy(() -> service.create(user, request("k", null), "req")).isInstanceOfSatisfying(
+                ApiException.class, e -> assertThat(e.getCode()).isEqualTo("PROJECT_NOT_SELECTABLE"));
+        verify(keyRepository, never()).insert(any());
+    }
+
+    @Test
     void createRejectsProjectWithoutRoutingTag() {
         when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(activeProject(TENANT, null)));
 

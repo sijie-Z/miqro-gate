@@ -34,6 +34,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -536,7 +537,7 @@ class AdminOrgApiIntegrationTest {
         void reset() {
             for (String table : List.of("quota_snapshots", "cost_allocations", "usage_event", "cache_hit_event",
                     "price_snapshot", "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
-                    "project_provider_grant_models", "project_provider_grants", "model_catalog",
+                    "project_provider_grant_models", "project_provider_grants", "model_catalog", "unattributed_policy",
                     "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
                     "project_memberships", "team_memberships", "project_repositories", "projects", "teams",
                     "provider_products", "providers", "admin_audit_events", "user_sessions", "users")) {
@@ -600,6 +601,70 @@ class AdminOrgApiIntegrationTest {
                     """, new MapSqlParameterSource("id", secondCredentialId).addValue("tenantId", tenantId)
                     .addValue("subscriptionId", secondSubscriptionId));
         }
+    }
+
+    @Test
+    @DisplayName("unattributed policy: lifecycle, bucket project, warnings, validations (#647)")
+    void unattributedPolicyLifecycle() throws Exception {
+        fx.insertProviderAndProductAndCredential();
+
+        mockMvc.perform(get("/api/v1/admin/unattributed-policy").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.configured").value(false));
+
+        // Configure with a catalog model (#498 semantics apply).
+        MvcResult put = mockMvc
+                .perform(put("/api/v1/admin/unattributed-policy").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("credentialId", fx.credentialId.toString(),
+                                "providerProductId", fx.productId.toString(), "models", List.of("model-a")))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.configured").value(true))
+                .andExpect(jsonPath("$.models[0]").value("model-a")).andReturn();
+        String bucketId = objectMapper.readValue(put.getResponse().getContentAsString(), Map.class).get("projectId")
+                .toString();
+
+        // The bucket project is a system project and appears in the list with the flag.
+        Boolean system = jdbc.queryForObject("SELECT system FROM projects WHERE id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(bucketId)), Boolean.class);
+        assertThat(system).isTrue();
+        mockMvc.perform(get("/api/v1/admin/projects").cookie(sessionCookie)).andExpect(status().isOk());
+
+        // A model outside the catalog is rejected.
+        mockMvc.perform(put("/api/v1/admin/unattributed-policy").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("credentialId", fx.credentialId.toString(),
+                        "providerProductId", fx.productId.toString(), "models", List.of("ghost-model-xyz")))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MODEL_NOT_IN_CATALOG"));
+
+        // A credential from a different product's subscription is rejected.
+        mockMvc.perform(put("/api/v1/admin/unattributed-policy").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("credentialId", fx.secondCredentialId.toString(),
+                        "providerProductId", fx.productId.toString(), "models", List.of("model-a")))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("UNAUTH_CREDENTIAL_PRODUCT_MISMATCH"));
+
+        // Once the credential is referenced by a project grant, the view warns
+        // (advisory, plan Q1).
+        String warnProject = createProject("POLW");
+        createGrant(warnProject, List.of("model-a"));
+        mockMvc.perform(get("/api/v1/admin/unattributed-policy").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.warning").isNotEmpty());
+
+        // Audit trail for the setter.
+        Integer audits = jdbc.queryForObject(
+                "SELECT count(*) FROM admin_audit_events WHERE action = 'UNATTRIBUTED_POLICY_SET'",
+                new MapSqlParameterSource(), Integer.class);
+        assertThat(audits).isNotNull();
+        assertThat(audits).isGreaterThanOrEqualTo(1);
+
+        // Clear -> unconfigured; the bucket project row is retained for history.
+        mockMvc.perform(delete("/api/v1/admin/unattributed-policy").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/admin/unattributed-policy").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.configured").value(false));
+        Integer bucketRows = jdbc.queryForObject("SELECT count(*) FROM projects WHERE id = :id AND system",
+                new MapSqlParameterSource("id", UUID.fromString(bucketId)), Integer.class);
+        assertThat(bucketRows).isEqualTo(1);
     }
 
     @Test
