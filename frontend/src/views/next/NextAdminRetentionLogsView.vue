@@ -8,8 +8,8 @@
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiDialog, UiInput, UiSelect, UiTable } from '@/ui';
-import type { AdminRetentionLogView } from '@/types/generated-api';
+import { UiButton, UiDialog, UiInput, UiSelect, UiSwitch, UiTable } from '@/ui';
+import type { AdminRetentionLogView, RetentionConfigView } from '@/types/generated-api';
 
 const rows = ref<AdminRetentionLogView[]>([]);
 const loading = ref(true);
@@ -28,6 +28,62 @@ const exportNotice = ref('');
 const exportIsError = ref(false);
 
 const viewing = ref<AdminRetentionLogView | null>(null);
+
+// ---- #688 采集配置（ADR-0014：租户级单一开关 + 内容上限）----
+const config = ref<RetentionConfigView | null>(null);
+const configLoading = ref(true);
+const configSaving = ref(false);
+const configError = ref('');
+const configNotice = ref('');
+const configEnabled = ref(false);
+const configMaxBytes = ref('262144');
+
+const MIN_MAX_BYTES = 1024;
+const MAX_MAX_BYTES = 4194304;
+
+async function loadConfig() {
+  configLoading.value = true;
+  configError.value = '';
+  try {
+    const view = await api.getRetentionConfig();
+    config.value = view;
+    configEnabled.value = view.enabled ?? false;
+    configMaxBytes.value = String(view.maxContentBytes ?? 262144);
+  } catch (error) {
+    configError.value = configErrorText(error);
+  } finally {
+    configLoading.value = false;
+  }
+}
+
+function configErrorText(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  return '加载采集配置失败，请稍后重试。';
+}
+
+async function saveConfig() {
+  const bytes = Number(configMaxBytes.value);
+  if (!Number.isInteger(bytes) || bytes < MIN_MAX_BYTES || bytes > MAX_MAX_BYTES) {
+    configError.value = `内容上限必须是 ${MIN_MAX_BYTES}–${MAX_MAX_BYTES} 之间的整数（字节）。`;
+    configNotice.value = '';
+    return;
+  }
+  configSaving.value = true;
+  configError.value = '';
+  configNotice.value = '';
+  try {
+    const view = await api.putRetentionConfig({
+      enabled: configEnabled.value,
+      maxContentBytes: bytes,
+    });
+    config.value = view;
+    configNotice.value = '已保存——保存后数秒内生效，无需同步。';
+  } catch (error) {
+    configError.value = error instanceof ApiError ? error.message : '保存失败，请稍后重试。';
+  } finally {
+    configSaving.value = false;
+  }
+}
 
 const directionOptions = [
   { value: '', label: '全部方向' },
@@ -147,7 +203,10 @@ function preview(text?: string | null): string {
   return flat.length > 60 ? `${flat.slice(0, 60)}…` : flat;
 }
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  void loadConfig();
+});
 </script>
 
 <template>
@@ -161,6 +220,50 @@ onMounted(load);
         </p>
       </div>
     </header>
+
+    <!-- #688 采集配置：开关 + 内容上限（对齐腾讯「包体采集」高级设置） -->
+    <section class="ui-panel next-retention__config" data-testid="retention-config-card">
+      <div class="ui-panel-head">
+        <h2 class="ui-panel-title">采集配置</h2>
+        <span class="next-retention__config-scope">租户级 · 覆盖请求与响应双面</span>
+      </div>
+      <div v-if="configLoading" class="next-retention__config-body">正在加载配置…</div>
+      <div v-else class="next-retention__config-body">
+        <UiSwitch v-model="configEnabled" data-testid="retention-config-enabled">
+          开启内容留痕
+        </UiSwitch>
+        <p class="next-retention__config-hint">
+          开启后，请求的用户文本与模型输出将经网关旁路加密落库（AES-GCM），供合规查看；工具调用载荷、系统提示词与推理链仍不采集（ADR-0014）。
+        </p>
+        <UiInput
+          v-model="configMaxBytes"
+          label="内容上限（字节）"
+          type="number"
+          width="220px"
+          hint="超限截断并标记 truncated；范围 1024–4194304（1 KiB–4 MiB）。与腾讯不同：我们无「不截断」档，也没有请求/响应分别开关。"
+          data-testid="retention-config-max-bytes"
+        />
+        <div class="next-retention__config-actions">
+          <UiButton
+            variant="primary"
+            :loading="configSaving"
+            data-testid="retention-config-save"
+            @click="saveConfig"
+          >
+            保存
+          </UiButton>
+          <span
+            v-if="configNotice"
+            class="next-retention__config-notice"
+            data-testid="retention-config-notice"
+            >{{ configNotice }}</span
+          >
+        </div>
+        <p v-if="configError" class="ui-form-error" data-testid="retention-config-error">
+          {{ configError }}
+        </p>
+      </div>
+    </section>
 
     <section class="ui-panel next-retention__filter">
       <div class="next-retention__filters">
@@ -360,5 +463,38 @@ onMounted(load);
 .ui-alert--error {
   background: var(--ui-danger-bg);
   color: var(--ui-danger-fg);
+}
+.next-retention__config {
+  margin-bottom: var(--ui-space-4);
+}
+
+.next-retention__config-scope {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.next-retention__config-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-4) var(--ui-space-5);
+}
+
+.next-retention__config-hint {
+  margin: 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  max-width: 720px;
+}
+
+.next-retention__config-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+}
+
+.next-retention__config-notice {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-success-fg, var(--ui-foreground-secondary));
 }
 </style>

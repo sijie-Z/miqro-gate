@@ -1628,6 +1628,11 @@ export const DICT: Record<string, string> = {
   '成本（¥）': 'Cost (¥)',
   '每年': 'Yearly',
   '即将超限': 'Near limit',
+  '采集配置': 'Capture settings',
+  '租户级 · 覆盖请求与响应双面': 'Tenant-wide · covers both request and response sides',
+  '开启内容留痕': 'Enable content retention',
+  '内容上限（字节）': 'Content cap (bytes)',
+  '已保存——保存后数秒内生效，无需同步。': 'Saved — effective within seconds, no sync needed.',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [
