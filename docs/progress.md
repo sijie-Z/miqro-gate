@@ -3020,6 +3020,23 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **验证**：客户端单测 42/42（新增 7 例：文件名/默认目录/覆盖目录/三平台内容快照/幂等 enable-disable 往返）；**Windows 沙箱实测**：install --autostart 生成 .cmd（node/cli/日志路径逐字校验）→ uninstall 移除，全程未触碰真实启动文件夹。
 
+
+## 2026-09-16 午后 — Goal #582：Virtual Key 停用/启用/重命名 + 行内用量与状态筛选
+
+**背景**：跟踪 issue #582（对照参考站 II 的三项缺口：禁用/启用（软停用）、重命名、行内用量；限流/并发/过期列按产品决策不适用）。设计事实：VirtualKeyStatus 枚举自带 DISABLED；网关快照查询 `status='ACTIVE' OR (ROTATING AND revoked_at>now)`——停用天然落出快照（404 反枚举口径零网关改动）；`/me/usage/summary?groupBy=virtual_key` 现成可做行内用量。
+
+**交付**（分支 feat/vk-disable-rename-582，隔离工作树 D:/tmp/miqro-guides，base develop@ea97638c（含 #652））：
+- 后端：MeVirtualKeyController 增 PATCH /{id}（重命名，UpdateVirtualKeyRequest @NotBlank ≤200）与 POST /{id}/disable|enable；VirtualKeyService 三方法 + withStatus 助手（仅 ACTIVE→DISABLED / DISABLED→ACTIVE，其余 409 KEY_NOT_DISABLEABLE / KEY_NOT_ENABLEABLE）；审计 VIRTUAL_KEY_DISABLE/ENABLE/RENAME（from/to）；停用/启用发布 route refresh，重命名不发布（路由不依赖名称）；VirtualKeyRepositoryImpl.update 增写 name 列——原窄更新只写生命周期列，重命名曾静默不落库（IT 红→绿修正）。
+- 前端：状态筛选（UiSelect）、「用量 · 近 7 天」列（usageSummary 聚合、失败降级「—」）、kebab 菜单 重命名/停用/启用 + 停用确认门 + 重命名弹窗（错误带 requestId）；summary 拆分「停用/已吊销」计数；audit-labels 增 RENAME 动词；EN 词典 +10 条 + 2 pattern。
+- 契约/文档：api-contract §4（3 行 + 2 段语义）、virtual-key-lifecycle §5/§8、CHANGELOG 2026-09-16；OpenAPI 基线经 OpenApiSpecIntegrationTest 重生成（+3 操作 +1 schema，无删改），前端 generated.ts 重生成且 codegen 守卫生效。
+
+**验证**：
+- 后端：MeVirtualKeyApiIntegrationTest 15/15（新增 4 例：停用/启用快照回环、ROTATING 拒绝、重命名审计、未知键统一 404）；全量 `verify -P integration` PASS。
+- 前端：vitest 297/297（keys spec +2：状态筛选、行内用量降级）、vue-tsc 三工程、eslint（改动文件）、vite build。
+- e2e：54/54（新增 2 例：停用确认门流、重命名弹窗流）。
+- spotless：apply 仅触本轮 16 文件（无整树漂移），diffs 为纯格式。
+
+**边界**：管理员面（admin/virtual-keys）未加停用/启用（后续可选）；行内用量窗口固定 7 天。
 ## 2026-09-16 午后 — Goal #658：API 消费者页补 JWT 公钥管理入口（ADR-0011 控制台闭环）
 
 **背景**：跟踪 issue #658。后端 ADR-0011（#340 增补）早已交付消费者 JWT（PUT/DELETE /admin/api-consumers/{id}/jwt-key，RS256 公钥验签、指纹返回），但控制台无入口——平台对接方只能手搓 API。腾讯/阿里控制台都把「消费者密钥（API Key / JWT）」作为一等公民管理。

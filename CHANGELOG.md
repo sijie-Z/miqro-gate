@@ -4,6 +4,15 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 
+### 2026-09-16
+- **Virtual Key 停用/启用/重命名（#582）**：控制台补齐参考站盘点的三项缺口——① 可逆「停用」（POST
+  `/me/virtual-keys/{id}/disable`）：下一快照刷新即从网关路由移除、请求与未知密钥同形 404，绑定与授权
+  保留，「启用」恢复；② 「重命名」（PATCH `/me/virtual-keys/{id}`）：只改展示名（审计 from/to），
+  已吊销密钥不可重命名；③ 「我的密钥」列表新增状态筛选与近 7 天行内用量列（按 Key 归集，失败静默）。
+  状态机限制：停用仅 ACTIVE（ROTATING 拒绝）、启用仅 DISABLED；`VirtualKeyRepositoryImpl.update`
+  增写 `name` 列（同一乐观锁路径）。IT 15/15（新增 4 例：停用/启用快照回环、ROTATING 拒绝、重命名
+  审计与 404 口径）；前端 vitest + e2e 全绿；OpenAPI 基线新增 3 操作 + `UpdateVirtualKeyRequest`。
+
 ### 2026-09-13
 - **主密钥轮换批处理重加密落地（#432）**：规格（security.md / operations-runbook §11 /
   configuration-reference §4.3）承诺「后台分批重新加密旧密文」，但 `reEncrypt()` 只有原语、全库零调用——
