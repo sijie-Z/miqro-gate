@@ -2741,9 +2741,9 @@ export interface components {
             /** Format: uuid */
             scopeId: string;
             /** @enum {string} */
-            metric: "TOKENS" | "REQUESTS";
+            metric: "TOKENS" | "REQUESTS" | "COST";
             /** @enum {string} */
-            period: "DAILY" | "WEEKLY" | "MONTHLY";
+            period: "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
             /** Format: int64 */
             limitValue: number;
             /** Format: int32 */
@@ -2761,16 +2761,15 @@ export interface components {
             scopeName?: string;
             scopeTag?: string;
             /** @enum {string} */
-            metric?: "TOKENS" | "REQUESTS";
+            metric?: "TOKENS" | "REQUESTS" | "COST";
             /** @enum {string} */
-            period?: "DAILY" | "WEEKLY" | "MONTHLY";
+            period?: "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
             /** Format: int64 */
             limitValue?: number;
             /** Format: int32 */
             warnPercent?: number;
             /** @enum {string} */
             status?: "ACTIVE" | "DISABLED";
-            /** Format: int64 */
             used?: number;
             usedPct?: number;
             level?: string;
@@ -2787,18 +2786,18 @@ export interface components {
         };
         ConfigureQuotaDefaultTemplateRequest: {
             /** @enum {string} */
-            metric: "TOKENS" | "REQUESTS";
+            metric: "TOKENS" | "REQUESTS" | "COST";
             /** @enum {string} */
-            period: "DAILY" | "WEEKLY" | "MONTHLY";
+            period: "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
             /** Format: int64 */
             limitValue: number;
         };
         QuotaDefaultTemplateView: {
             enabled?: boolean;
             /** @enum {string} */
-            metric?: "TOKENS" | "REQUESTS";
+            metric?: "TOKENS" | "REQUESTS" | "COST";
             /** @enum {string} */
-            period?: "DAILY" | "WEEKLY" | "MONTHLY";
+            period?: "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
             /** Format: int64 */
             limitValue?: number;
             /** Format: int64 */

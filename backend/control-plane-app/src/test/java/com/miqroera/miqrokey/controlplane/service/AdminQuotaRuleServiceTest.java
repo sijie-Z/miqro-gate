@@ -55,4 +55,17 @@ class AdminQuotaRuleServiceTest {
                 LocalDate.parse("2026-12-15"));
         assertThat(dec.to()).isEqualTo(utc("2027-01-01"));
     }
+
+    @Test
+    @DisplayName("YEARLY window is the UTC calendar year (#683)")
+    void yearlyWindow() {
+        AdminQuotaRuleService.Window w = AdminQuotaRuleService.window(QuotaPeriod.YEARLY,
+                LocalDate.parse("2026-09-02"));
+        assertThat(w.from()).isEqualTo(utc("2026-01-01"));
+        assertThat(w.to()).isEqualTo(utc("2027-01-01"));
+
+        AdminQuotaRuleService.Window janFirst = AdminQuotaRuleService.window(QuotaPeriod.YEARLY,
+                LocalDate.parse("2026-01-01"));
+        assertThat(janFirst.from()).isEqualTo(utc("2026-01-01"));
+    }
 }
