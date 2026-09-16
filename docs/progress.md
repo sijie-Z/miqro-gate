@@ -3020,6 +3020,33 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **验证**：客户端单测 42/42（新增 7 例：文件名/默认目录/覆盖目录/三平台内容快照/幂等 enable-disable 往返）；**Windows 沙箱实测**：install --autostart 生成 .cmd（node/cli/日志路径逐字校验）→ uninstall 移除，全程未触碰真实启动文件夹。
 
+## 2026-09-16 午后 — Goal #658：API 消费者页补 JWT 公钥管理入口（ADR-0011 控制台闭环）
+
+**背景**：跟踪 issue #658。后端 ADR-0011（#340 增补）早已交付消费者 JWT（PUT/DELETE /admin/api-consumers/{id}/jwt-key，RS256 公钥验签、指纹返回），但控制台无入口——平台对接方只能手搓 API。腾讯/阿里控制台都把「消费者密钥（API Key / JWT）」作为一等公民管理。
+
+**交付**（分支 feat/consumer-jwt-658，隔离工作树 D:/tmp/miqro-guides，base develop@807c567c）：
+- api 客户端：setConsumerJwtKey（PUT）/ removeConsumerJwtKey（DELETE），复用既有端点（无契约变更）。
+- 消费者页：新增「凭证」列（API Key / JWT 徽章，指纹存在即亮，data-testid=consumer-jwt-badge）；行操作新增「JWT 公钥」（仅 ACTIVE 消费者）：弹窗显示当前指纹与设置时间，粘贴 PEM 保存/轮换（空值守卫、后端校验文案透传），「移除公钥」走 danger 确认门（文案明示 API Key 通道不受影响）；弹窗描述明示「平台自持私钥签发、网关只存公钥验签」。
+- EN 词典 +15 条 + 2 条动态 pattern。
+- 供应商页「模型目录」列已随 #657 实施（本 issue 范围相应收窄，issue 正文将同步更新）。
+
+**验证**：vitest 291/291（55 文件，新增 2 例：保存 PEM 调用参数、危险确认移除 + 凭证列徽章）；vue-tsc（app/spec/node）PASS；eslint（改动 4 文件，--fix）PASS；vite build PASS；Playwright e2e 52/52 PASS。
+
+**边界**：UI 不发私钥、不做 JWT 内容预览；禁用消费者不出现 JWT 操作（与后端 409 CONSUMER_DISABLED 语义一致）。
+## 2026-09-16 午后 — Goal #657：列表依赖计数 + 表单规则文案 + 空态引导（对标腾讯对象元数据三件套）
+
+**背景**：跟踪 issue #657（「控制台对标腾讯 AI 网关」P0 第二批；#656 使用指引已提 PR #660）。腾讯列表三件套=状态/版本/**依赖计数**，我们缺"被谁依赖"的可见性——删被引用凭证撞 FK 裸 500（#393），管理员在列表上看不到影响面；表单校验规则只存在于后端报错。
+
+**交付**（分支 feat/list-metadata-657，隔离工作树 D:/tmp/miqro-guides，base develop@807c567c）：
+- 上游凭证行新增「授权引用」列（一次 listGrants 聚合）；项目行新增「授权」「成员」列（成员逐项目 Promise.allSettled，失败显示 —）；供应商行新增「模型目录」列（一次 adminListModels 全量聚合：N 个模型 / 未探测）与「依赖」列（凭证 N · 授权 N）。全部只读聚合，无新端点。
+- 表单规则文案与后端逐条核对：凭证 name≤200、Secret 8–512 无控制字符（FormatCredentialValidator）；消费者 name≤200 且唯一（JWT sub 映射键）、到期静默 401（SQL 层过期过滤）；项目标签提示修正为 ADR-0018 现行事实（留空自动从代码派生、被密钥绑定引用后不可修改）。
+- 三个列表空态补「下一步」引导；EN 词典 +12 条 + 2 条动态单元格 pattern；三个视图 spec 增断言，成员/模型调用计数断言按抽屉折算 mockClear。
+
+**验证**：vitest 289/289（55 文件）；vue-tsc（app/spec/node 三工程）PASS；eslint（仅改动 8 文件，--fix）PASS；vite build PASS。
+
+**边界**：不做点击过滤跳转；探测时间仍在「模型目录」弹窗内（列表只给计数与未探测态）；#393（删除前依赖检查 409+清单）未动。
+
+**补记（同日）**：e2e 抓到真实缺陷——新增的辅助聚合请求（模型目录/授权/订阅）在未被 mock 或上游失败时会把整个 Promise.all 拖失败，主列表整页空态。已修：主数据（产品目录/凭证列表/项目列表）保持强依赖；四个辅助聚合一律 .catch 降级（计数显示 0 / 未探测 / —），列表照常渲染。e2e 两处失败复跑转绿（52/52）。
 
 ## 2026-09-16 午后 — 修复 #663：部署换版后懒加载 chunk 404 白屏自愈（/app/providers 实测）
 

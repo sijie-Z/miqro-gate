@@ -22,6 +22,24 @@ export const DICT: Record<string, string> = {
   'Agent 的出口凭证必须是 ACTIVE 状态；供应商产品由凭证所属订阅自动派生。':
     "An agent's egress credential must be ACTIVE; the provider product is derived from the credential's subscription.",
   'Docker Compose（单节点私有化）': 'Docker Compose (single-node private deployment)',
+  '上次登录': 'Last sign-in',
+  '可用虚拟密钥': 'Active Virtual Keys',
+  '账号状态': 'Account status',
+  '当前会话': 'Current session',
+  '当前会话到期': 'Current session expires',
+  '已退出其他会话': 'Signed out of other sessions',
+  '将撤销当前账号在其他设备（浏览器）上的全部会话；当前会话保持有效，其他设备需要重新登录。':
+    'This revokes every session of the current account on other devices (browsers); the current session stays valid and the other devices must sign in again.',
+  '修改密码会同时撤销其他设备上的会话；当前会话保持有效。':
+    'Changing the password also revokes sessions on other devices; the current session stays valid.',
+  '退出其他会话': 'Sign out of other sessions',
+  '退出其他会话失败，请稍后重试。': 'Failed to sign out other sessions. Please try again later.',
+  '「退出其他会话」将撤销除当前浏览器外的全部登录会话；其他设备需要重新登录。':
+    '“Sign out of other sessions” revokes every session except this browser; other devices must sign in again.',
+  '声明标签，不限制客户端；可调用范围由所选授权产品与允许模型决定。':
+    'A declarative label, not a client restriction; the callable scope is set by the selected grant and its allowed models.',
+  '用途是声明性标签（用于展示与审计），不限制客户端：任何兼容协议的客户端都可以使用该密钥；实际可调用范围由所选授权产品与允许模型决定。':
+    'Purpose is a declarative label (display and audit only) and does not restrict clients: any protocol-compatible client may use this key; the callable scope is set by the selected grant and its allowed models.',
   '授权已创建': 'Grant created',
   '授权已禁用': 'Grant disabled',
   'HTTP 方法（全选 = 不限）': 'HTTP methods (all selected = unrestricted)',
@@ -1469,6 +1487,42 @@ export const DICT: Record<string, string> = {
   '全部密钥': 'All keys',
   '快捷导航': 'Quick nav',
   '今天也要高效工作。': 'Have a productive day.',
+  // 消费者 JWT 公钥（#658，ADR-0011）。
+  'JWT 公钥': 'JWT public key',
+  '当前指纹：': 'Fingerprint: ',
+  '尚未配置 JWT 公钥。': 'No JWT public key configured.',
+  '粘贴公钥 PEM': 'Paste the public key PEM',
+  '粘贴新公钥以轮换': 'Paste a new public key to rotate',
+  '保存后旧签名立即失效；仅接受 RSA SubjectPublicKeyInfo PEM。':
+    'Tokens signed with the old key stop verifying immediately; only RSA SubjectPublicKeyInfo PEM is accepted.',
+  '请粘贴平台提供的公钥 PEM。': 'Paste the public key PEM provided by the platform.',
+  '移除公钥': 'Remove key',
+  '保存公钥': 'Save key',
+  '轮换公钥': 'Rotate key',
+  'JWT 公钥已保存': 'JWT public key saved',
+  'JWT 公钥已轮换': 'JWT public key rotated',
+  'JWT 公钥已移除': 'JWT public key removed',
+  '移除后，使用该公钥签发的 JWT 立即失效；API Key 通道不受影响。':
+    'Once removed, JWTs signed with this key stop verifying immediately; the API Key channel is unaffected.',
+  '平台自持私钥签发 RS256 JWT；网关仅保存公钥验签，不接触私钥。':
+    'The platform signs RS256 JWTs with its own private key; the gateway only stores the public key for verification and never touches the private key.',
+  // 列表依赖/目录元数据 + 表单规则文案（#657）。
+  '授权引用': 'Grant references',
+  '依赖': 'Dependencies',
+  '未探测': 'Not probed',
+  '最长 200 个字符。': 'Up to 200 characters.',
+  '8–512 个字符；不能包含控制字符。': '8–512 characters; no control characters.',
+  '最长 200 个字符；名称需唯一（JWT 的 sub 映射键）。':
+    'Up to 200 characters; the name must be unique (maps the JWT sub claim).',
+  '到期后该消费者的请求将静默返回 401。': 'After expiry the consumer requests return a silent 401.',
+  '创建项目并添加成员后，成员即可在「我的密钥」创建虚拟密钥。':
+    'Create the project and add members — they can then create Virtual Keys under My Keys.',
+  '产品目录由签名目录播种；接入从「上游凭证」录入第一把真实密钥开始。':
+    'The product catalogue is seeded from the signed catalogue; onboarding starts by adding the first real key under Upstream Credentials.',
+  '外部系统（平台）对接时再创建；机器身份与人类用户分开管理。':
+    'Create these when an external system (platform) integrates; machine identities are managed separately from human users.',
+  '留空将自动从项目代码派生；已被密钥绑定引用的标签不可修改（1–64 位字母、数字、- 或 _）。':
+    'Leave empty to derive from the project code; a tag referenced by key bindings is immutable (1–64 letters, digits, - or _).',
   // Page guides (#656) — per-page 「使用指引」 cards.
   '使用指引': 'Guide',
   '收起': 'Collapse',
@@ -1734,4 +1788,10 @@ export const PATTERNS: Array<[RegExp, string]> = [
   [/^第\ (.+?)\ 页$/, 'Page $1'],
   [/^第\ (.+?)\ 页$/, 'Page $1'],
   [/^共\ (.+?)\ 个$/, '$1 total'],
+  // #658 动态标签。
+  [/^设置于 (.+?)$/, 'set $1'],
+  [/^移除消费者「(.+?)」的 JWT 公钥$/, 'Remove the JWT public key of consumer "$1"'],
+  // #657 依赖/目录动态单元格。
+  [/^(\d+) 个模型$/, '$1 models'],
+  [/^凭证 (\d+) · 授权 (\d+)$/, 'Credentials $1 · Grants $2'],
 ];
