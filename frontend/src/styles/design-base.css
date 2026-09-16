@@ -383,6 +383,79 @@ a:focus-visible {
   box-shadow: var(--ui-shadow-focus);
 }
 
+/* ---- row action links (cloud-console convention) -------------------------
+   Row operations stay visible as brand-blue text links — Tencent Cloud and
+   Aliyun console tables put every row action in the blue ink, and a
+   chrome-less ghost button instead reads as body copy (#651). UiButton
+   variant="link"/"link-danger" and plain anchors (dropdown triggers, doc
+   links) share this class. Append-only block. */
+.ui-link-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 7px;
+  border: none;
+  background: none;
+  font: inherit;
+  line-height: 22px;
+  color: var(--ui-primary-text);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--ui-ease);
+}
+
+.ui-link-action:hover:not(:disabled) {
+  color: var(--ui-primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.ui-link-action:active:not(:disabled) {
+  color: var(--ui-primary-active);
+}
+
+.ui-link-action:focus-visible {
+  outline: none;
+  border-radius: var(--ui-radius-control);
+  box-shadow: var(--ui-shadow-focus);
+}
+
+.ui-link-action:disabled {
+  color: var(--ui-foreground-faint);
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+.ui-link-action--danger {
+  color: var(--ui-danger-fg);
+}
+
+.ui-link-action--danger:hover:not(:disabled) {
+  color: #9e0f1f;
+}
+
+/* ---- tooltip bubble (status explainers) — dark antd-style bubble ---- */
+.ui-tooltip {
+  z-index: 2200;
+  max-width: 300px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  font-size: var(--ui-font-size-xs);
+  line-height: 20px;
+  box-shadow: var(--ui-shadow-popper);
+}
+
+/* Enter-only, keyed on the open states (same radix close-wait gotcha as the
+   popover motion above). */
+.ui-tooltip[data-state='delayed-open'],
+.ui-tooltip[data-state='instant-open'] {
+  animation: ui-zoom-in 120ms var(--ui-ease-zoom);
+  transform-origin: var(--radix-tooltip-content-transform-origin, center);
+}
+
 /* ---- preference modes ----------------------------------------------------
    The preferences core (src/preferences) applies dataset attributes on <html>;
    these rules give each mode its chrome. Append-only block. */

@@ -4,7 +4,7 @@
  * Behaviour parity with legacy exports page: create async CSV/JSONL export
  * for a window, poll to completion, download product, list recent tasks.
  */
-import { computed, onMounted, onUnmounted, ref  } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDonut, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
@@ -254,7 +254,11 @@ onMounted(load);
         </div>
       </div>
       <div class="ui-panel-body next-exports__summary-body">
-        <UiDonut :segments="statusSegments" :center-text="`${tasks.length}`" data-testid="exports-status-donut" />
+        <UiDonut
+          :segments="statusSegments"
+          :center-text="`${tasks.length}`"
+          data-testid="exports-status-donut"
+        />
         <div class="ui-legend">
           <div v-for="seg in statusSegments" :key="seg.label" class="ui-legend-row">
             <span class="ui-legend-dot" :style="{ background: seg.color }" />
@@ -310,7 +314,7 @@ onMounted(load);
         <template #actions="{ row }">
           <UiButton
             v-if="(row as ExportTask).status === 'SUCCEEDED'"
-            variant="ghost"
+            variant="link"
             size="sm"
             data-testid="export-download"
             @click="download(row as ExportTask)"

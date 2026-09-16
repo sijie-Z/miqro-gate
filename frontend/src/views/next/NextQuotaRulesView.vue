@@ -10,8 +10,13 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type {QuotaLevel, QuotaMetric, QuotaPeriod} from '@/types/api';
-import type { AdminUser, Project, QuotaDefaultTemplateView, QuotaRuleView } from '@/types/generated-api';
+import type { QuotaLevel, QuotaMetric, QuotaPeriod } from '@/types/api';
+import type {
+  AdminUser,
+  Project,
+  QuotaDefaultTemplateView,
+  QuotaRuleView,
+} from '@/types/generated-api';
 
 const rules = ref<QuotaRuleView[]>([]);
 const users = ref<AdminUser[]>([]);
@@ -79,7 +84,10 @@ function levelLabel(level: string | undefined): string {
 const scopeOptions = computed<UiSelectOption[]>(() =>
   form.value.scopeType === 'USER'
     ? users.value.map((u) => ({ value: u.id ?? '', label: u.username ?? '' }))
-    : projects.value.map((p) => ({ value: p.id ?? '', label: `${p.code ?? ''} · ${p.name ?? ''}` })),
+    : projects.value.map((p) => ({
+        value: p.id ?? '',
+        label: `${p.code ?? ''} · ${p.name ?? ''}`,
+      })),
 );
 
 const templateConfigured = computed(
@@ -568,7 +576,7 @@ onMounted(load);
         <template #actions="{ row }">
           <div class="next-quota__row-actions">
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="quota-rule-edit"
               @click="openEdit(row as QuotaRuleView)"
@@ -576,9 +584,8 @@ onMounted(load);
               编辑
             </UiButton>
             <UiButton
-              variant="ghost"
+              variant="link-danger"
               size="sm"
-              class="next-quota__danger"
               data-testid="quota-rule-delete"
               @click="requestRemove(row as QuotaRuleView)"
             >
@@ -701,9 +708,5 @@ onMounted(load);
 .next-quota__row-actions {
   display: inline-flex;
   gap: var(--ui-space-1);
-}
-
-.next-quota__danger {
-  color: var(--ui-danger-fg);
 }
 </style>

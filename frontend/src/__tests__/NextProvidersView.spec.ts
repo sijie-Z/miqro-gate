@@ -105,9 +105,7 @@ describe('NextProvidersView', () => {
         updatedAt: '2026-09-08T00:00:00Z',
       },
     ]);
-    const idInput = document.querySelector(
-      '[data-testid="product-models-id"]',
-    ) as HTMLInputElement;
+    const idInput = document.querySelector('[data-testid="product-models-id"]') as HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
     setter?.call(idInput, 'manual-probe-fallback');
     idInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -184,9 +182,9 @@ describe('NextProvidersView', () => {
     expect(document.querySelector('[data-testid="product-probe-error"]')?.textContent).toContain(
       'HTTP 500',
     );
-    expect(
-      document.querySelector('[data-testid="product-probe-status"]')?.textContent,
-    ).toContain('上次探测失败');
+    expect(document.querySelector('[data-testid="product-probe-status"]')?.textContent).toContain(
+      '上次探测失败',
+    );
   });
 
   it('I552: test-runs a model from the catalog and shows reply, latency and tokens', async () => {
@@ -226,7 +224,9 @@ describe('NextProvidersView', () => {
     await flushPromises();
 
     (
-      document.querySelector('[data-testid="product-model-testrun-deepseek-flash"]') as HTMLButtonElement
+      document.querySelector(
+        '[data-testid="product-model-testrun-deepseek-flash"]',
+      ) as HTMLButtonElement
     ).click();
     await flushPromises();
     expect(document.querySelector('[data-testid="model-testrun-dialog"]')).toBeTruthy();
@@ -234,12 +234,50 @@ describe('NextProvidersView', () => {
     (document.querySelector('[data-testid="model-testrun-run"]') as HTMLButtonElement).click();
     await flushPromises();
 
-    expect(mockApi.adminTestRunModel).toHaveBeenCalledWith('0190-0000-0000-0020', 'deepseek-flash', undefined);
+    expect(mockApi.adminTestRunModel).toHaveBeenCalledWith(
+      '0190-0000-0000-0020',
+      'deepseek-flash',
+      undefined,
+    );
     const result = document.querySelector('[data-testid="model-testrun-result"]');
     expect(result).toBeTruthy();
     expect(result!.textContent).toContain('联调OK');
     expect(result!.textContent).toContain('HTTP 200');
     expect(result!.textContent).toContain('123 ms');
     expect(result!.textContent).toContain('tokens 10');
+  });
+
+  it('#651: row operations are links — model catalog plus a per-provider docs deep link', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="product-models-open"]').classes()).toContain(
+      'ui-link-action',
+    );
+
+    const docLinks = wrapper.findAll('[data-testid="product-doc-open"]');
+    expect(docLinks).toHaveLength(2);
+    const deepseekDoc = docLinks[0]!;
+    const aliyunDoc = docLinks[1]!;
+    expect(deepseekDoc.attributes('href')).toBe(
+      'https://github.com/sijie-Z/miqro-gate/blob/develop/docs/provider-catalog.md#38-deepseek-官方-api',
+    );
+    expect(aliyunDoc.attributes('href')).toBe(
+      'https://github.com/sijie-Z/miqro-gate/blob/develop/docs/provider-catalog.md#32-阿里云百炼-model-studio',
+    );
+    expect(deepseekDoc.attributes('target')).toBe('_blank');
+    expect(deepseekDoc.attributes('rel')).toContain('noopener');
+  });
+
+  it('#651: focusing a status badge reveals the state explainer tooltip', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const anchors = wrapper.findAll('.ui-tooltip__anchor');
+    expect(anchors).toHaveLength(2);
+
+    await anchors[0]!.trigger('focus');
+    await flushPromises();
+    expect(document.querySelector('.ui-tooltip')?.textContent).toContain('真实供应商凭证');
   });
 });

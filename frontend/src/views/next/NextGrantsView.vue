@@ -441,7 +441,7 @@ onMounted(async () => {
         <template #actions="{ row }">
           <div class="next-grants__actions-cell">
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="grant-models-open"
               @click="openModels(row as unknown as Grant)"
@@ -450,9 +450,8 @@ onMounted(async () => {
             </UiButton>
             <UiButton
               v-if="(row as unknown as Grant).status === 'ACTIVE'"
-              variant="ghost"
+              variant="link-danger"
               size="sm"
-              class="next-grants__danger"
               data-testid="grant-disable"
               @click="requestDisable(row as unknown as Grant)"
             >
@@ -601,10 +600,6 @@ onMounted(async () => {
   display: inline-flex;
   gap: var(--ui-space-1);
   justify-content: flex-start;
-}
-
-.next-grants__danger {
-  color: var(--ui-danger-fg);
 }
 
 .next-grants__hint {

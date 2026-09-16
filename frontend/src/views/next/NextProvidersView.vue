@@ -8,7 +8,7 @@
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
+import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTable, UiTooltip, toast } from '@/ui';
 import ProviderBrandChip from '@/components/ProviderBrandChip.vue';
 import type { ProviderProductView } from '@/types/api';
 import type { ModelCatalogRow } from '@/types/generated-api';
@@ -32,7 +32,7 @@ const columns = [
   { key: 'baseUrl', title: '接入地址', minWidth: '220px' },
   { key: 'implementationStatus', title: '实现状态', width: '130px' },
   { key: 'balanceAuthority', title: '余额来源', width: '120px' },
-  { key: 'actions', title: '操作', width: '150px' },
+  { key: 'actions', title: '操作', width: '200px' },
 ];
 
 function implTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
@@ -56,6 +56,42 @@ const implLabel: Record<string, string> = {
   DEGRADED: '降级',
   DISABLED: '已停用',
 };
+
+// Status-badge explainers (#651) — the state ladder as defined in
+// docs/provider-catalog.md §2, so the badge alone is not the whole story.
+const implHint: Record<string, string> = {
+  DRAFT: '产品条目已创建，尚未完成资料整理。',
+  DOCUMENTED: '官方资料已确认设计与接入方式；适配器尚未完成验证。详见「接入文档」。',
+  IMPLEMENTED: '适配器与 Mock 契约测试已完成，等待真实凭证验证。',
+  VERIFIED: '已用真实供应商凭证完成契约测试。',
+  DEGRADED: '部分能力只能本地估算或人工核对，详见接入文档。',
+  DISABLED: '该产品实例已停用，不再用于新建凭证。',
+};
+
+function implHintOf(status: string): string {
+  return implHint[status] ?? '实现状态含义见接入文档。';
+}
+
+// Per-provider docs deep links (#651): docs/provider-catalog.md §3.1–3.8 each
+// cover one provider's endpoints, auth and reference materials. Anchor slugs
+// follow GitHub's heading ids for the Chinese headings; an unknown provider
+// falls back to the doc top.
+const DOC_URL = 'https://github.com/sijie-Z/miqro-gate/blob/develop/docs/provider-catalog.md';
+const DOC_ANCHORS: Record<string, string> = {
+  aliyun: '32-阿里云百炼-model-studio',
+  baidu: '36-百度千帆',
+  deepseek: '38-deepseek-官方-api',
+  minimax: '34-minimax',
+  moonshot: '35-kimi--moonshot',
+  tencent: '31-腾讯云-tokenhub',
+  volcengine: '37-火山引擎方舟',
+  zhipu: '33-智谱-glm',
+};
+
+function docUrl(product: ProviderProductView): string {
+  const anchor = DOC_ANCHORS[product.providerSlug];
+  return anchor ? `${DOC_URL}#${anchor}` : DOC_URL;
+}
 
 function balanceLabel(authority: string): string {
   switch (authority) {
@@ -307,12 +343,15 @@ onMounted(load);
           <span class="ui-mono">{{ productOf(row).baseUrlHost || '—' }}</span>
         </template>
         <template #implementationStatus="{ row }">
-          <UiStatusBadge
-            :tone="implTone(productOf(row).implementationStatus)"
-            :label="
-              implLabel[productOf(row).implementationStatus] ?? productOf(row).implementationStatus
-            "
-          />
+          <UiTooltip :text="implHintOf(productOf(row).implementationStatus)">
+            <UiStatusBadge
+              :tone="implTone(productOf(row).implementationStatus)"
+              :label="
+                implLabel[productOf(row).implementationStatus] ??
+                productOf(row).implementationStatus
+              "
+            />
+          </UiTooltip>
         </template>
         <template #balanceAuthority="{ row }">
           <span class="next-providers__balance">{{
@@ -320,13 +359,43 @@ onMounted(load);
           }}</span>
         </template>
         <template #actions="{ row }">
-          <UiButton
-            variant="ghost"
-            size="sm"
-            data-testid="product-models-open"
-            @click="openModels(productOf(row))"
-            >模型目录</UiButton
-          >
+          <div class="next-providers__actions">
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="product-models-open"
+              @click="openModels(productOf(row))"
+              >模型目录</UiButton
+            >
+            <a
+              class="ui-link-action"
+              :href="docUrl(productOf(row))"
+              target="_blank"
+              rel="noopener"
+              data-testid="product-doc-open"
+              >接入文档<svg
+                width="12"
+                height="12"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M12 9.5V12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h2.5"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M9.5 3H13v3.5M13 3 7.5 8.5"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                /></svg
+            ></a>
+          </div>
         </template>
       </UiTable>
     </section>
@@ -381,7 +450,7 @@ onMounted(load);
             :label="m.source === 'MANUAL' ? '人工' : '官方'"
           />
           <UiButton
-            variant="ghost"
+            variant="link"
             size="sm"
             :data-testid="`product-model-testrun-${m.modelId}`"
             @click="openTestRun(m.modelId ?? '')"
@@ -389,9 +458,8 @@ onMounted(load);
           >
           <UiButton
             v-if="m.source === 'MANUAL'"
-            variant="ghost"
+            variant="link-danger"
             size="sm"
-            class="next-providers__danger"
             :data-testid="`product-model-delete-${m.modelId}`"
             @click="removeManualModel(m)"
             >删除</UiButton
@@ -438,7 +506,8 @@ onMounted(load);
       @update:open="testRunVisible = false"
     >
       <p class="ui-panel-sub">
-        以该产品首个 ACTIVE 凭证向上游发一条真实消息（≤256 token 预算；正文不落库、不入日志，审计仅记元数据）。
+        以该产品首个 ACTIVE 凭证向上游发一条真实消息（≤256 token
+        预算；正文不落库、不入日志，审计仅记元数据）。
       </p>
       <UiInput
         v-model="testRunPrompt"
@@ -448,7 +517,11 @@ onMounted(load);
       <div v-if="testRunError" class="ui-alert ui-alert--error" data-testid="model-testrun-error">
         {{ testRunError }}
       </div>
-      <div v-if="testRunResult" class="next-providers__testrun-result" data-testid="model-testrun-result">
+      <div
+        v-if="testRunResult"
+        class="next-providers__testrun-result"
+        data-testid="model-testrun-result"
+      >
         <div class="next-providers__testrun-meta">
           HTTP {{ testRunResult.httpStatus }} · {{ testRunResult.latencyMs }} ms<template
             v-if="testRunResult.totalTokens != null"
@@ -456,7 +529,9 @@ onMounted(load);
             · tokens {{ testRunResult.totalTokens }}</template
           >
         </div>
-        <pre class="next-providers__testrun-content">{{ testRunResult.content || '（空回复）' }}</pre>
+        <pre class="next-providers__testrun-content">{{
+          testRunResult.content || '（空回复）'
+        }}</pre>
       </div>
       <template #footer>
         <UiButton variant="secondary" @click="testRunVisible = false">关闭</UiButton>
@@ -528,8 +603,10 @@ onMounted(load);
   margin-top: 14px;
   flex-wrap: wrap;
 }
-.next-providers__danger {
-  color: var(--ui-danger-fg);
+.next-providers__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-1);
 }
 .next-providers__empty {
   color: var(--ui-foreground-faint);

@@ -362,7 +362,7 @@ onMounted(load);
         </template>
         <template #actions="{ row }">
           <UiButton
-            variant="ghost"
+            variant="link"
             size="sm"
             data-testid="project-members-open"
             @click="openMembers(row as Project)"
@@ -370,7 +370,7 @@ onMounted(load);
             成员
           </UiButton>
           <UiButton
-            variant="ghost"
+            variant="link"
             size="sm"
             data-testid="project-edit-open"
             @click="openEdit(row as Project)"
@@ -430,7 +430,7 @@ onMounted(load);
         <template #joinedAt="{ row }">{{ formatDate((row as MemberView).createdAt) }}</template>
         <template #actions="{ row }">
           <UiButton
-            variant="ghost"
+            variant="link-danger"
             size="sm"
             data-testid="project-member-remove"
             @click="requestRemove(row as MemberView)"

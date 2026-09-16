@@ -108,7 +108,7 @@ const columns = [
   { key: 'status', title: '状态', width: '110px' },
   { key: 'cachePolicy', title: '缓存', width: '90px' },
   { key: 'createdAt', title: '创建时间', width: '170px', sortable: true },
-  { key: 'actions', title: '操作', width: '80px', align: 'center' as const },
+  { key: 'actions', title: '操作', width: '96px', align: 'center' as const },
 ];
 
 const keyFilter = ref('');
@@ -848,20 +848,19 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
         <template #actions="{ row }">
           <DropdownMenuRoot>
             <DropdownMenuTrigger
-              class="next-keys__kebab"
+              class="next-keys__kebab ui-link-action"
               aria-label="操作"
               :data-testid="`key-actions-${(row as VirtualKeyView).id}`"
             >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <circle cx="3" cy="8" r="1.4" />
-                <circle cx="8" cy="8" r="1.4" />
-                <circle cx="13" cy="8" r="1.4" />
+              更多
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="m4 6 4 4 4-4"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
             </DropdownMenuTrigger>
             <DropdownMenuPortal>
@@ -1420,26 +1419,15 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
 }
 
 .next-keys__kebab {
+  /* Layout only — ink and hover come from the shared .ui-link-action row
+     action link style (#651). */
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
   border: none;
-  border-radius: var(--ui-radius-control);
   background: transparent;
-  color: var(--ui-foreground-faint);
+  font: inherit;
   cursor: pointer;
-}
-
-.next-keys__kebab:hover {
-  background: var(--ui-fill-hover);
-  color: var(--ui-foreground);
-}
-
-.next-keys__kebab:focus-visible {
-  outline: none;
-  box-shadow: var(--ui-shadow-focus);
 }
 
 /* .ui-menu panel chrome lives in styles/design-base.css (the radix popper

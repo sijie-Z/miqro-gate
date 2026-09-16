@@ -211,16 +211,15 @@ onMounted(load);
         <template #actions="{ row }">
           <div class="next-configs__actions">
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="config-edit"
               @click="openEdit(row as ConfigEntryView)"
               >编辑</UiButton
             >
             <UiButton
-              variant="ghost"
+              variant="link-danger"
               size="sm"
-              class="next-configs__danger"
               data-testid="config-delete"
               @click="requestRemove(row as ConfigEntryView)"
               >删除</UiButton
@@ -341,10 +340,6 @@ onMounted(load);
 .next-configs__actions {
   display: inline-flex;
   gap: var(--ui-space-1);
-}
-
-.next-configs__danger {
-  color: var(--ui-danger-fg);
 }
 
 .next-configs__form {

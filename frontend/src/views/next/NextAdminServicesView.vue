@@ -333,7 +333,7 @@ onMounted(load);
         <template #actions="{ row }">
           <UiButton
             v-if="(row as InternalServiceView).status === 'ACTIVE'"
-            variant="ghost"
+            variant="link"
             size="sm"
             data-testid="service-health-config"
             @click="openHealth(row as InternalServiceView)"
@@ -341,16 +341,15 @@ onMounted(load);
           >
           <UiButton
             v-if="(row as InternalServiceView).status === 'ACTIVE'"
-            variant="ghost"
+            variant="link-danger"
             size="sm"
-            class="next-services__danger"
             data-testid="service-disable"
             @click="requestDisable(row as InternalServiceView)"
             >禁用</UiButton
           >
           <UiButton
             v-if="(row as InternalServiceView).status !== 'ACTIVE'"
-            variant="ghost"
+            variant="link"
             size="sm"
             data-testid="service-enable"
             @click="requestEnable(row as InternalServiceView)"
@@ -510,9 +509,6 @@ onMounted(load);
   overflow-wrap: anywhere;
 }
 
-.next-services__danger {
-  color: var(--ui-danger-fg);
-}
 .next-services__health-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -2,7 +2,10 @@
 /**
  * UiButton — v2 design-system button.
  * Variants: primary (solid brand blue) / secondary (white + border) /
- * ghost (text, hover fill) / danger (solid red). Sizes: sm / md / lg.
+ * ghost (text, hover fill) / danger (solid red) / link, link-danger (row
+ * operations rendered as visible text links — Tencent/Aliyun console
+ * convention; the ink comes from the global .ui-link-action class so plain
+ * anchors and radix dropdown triggers can share it). Sizes: sm / md / lg.
  * Renders a native <button>; all extra attrs (data-testid, type, tabindex…)
  * fall through to the element. Native button attrs are merged explicitly so
  * that type="button" is the default (forms never submit accidentally).
@@ -11,7 +14,7 @@ import { computed, useAttrs } from 'vue';
 
 const props = withDefaults(
   defineProps<{
-    variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
+    variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'link' | 'link-danger';
     size?: 'sm' | 'md' | 'lg';
     loading?: boolean;
     disabled?: boolean;
@@ -32,11 +35,17 @@ defineOptions({ inheritAttrs: false });
 
 const attrs = useAttrs();
 
+const isLink = computed(() => props.variant === 'link' || props.variant === 'link-danger');
+
 const classes = computed(() => [
   'ui-btn',
   `ui-btn--${props.variant}`,
   `ui-btn--${props.size}`,
-  { 'ui-btn--block': props.block },
+  {
+    'ui-btn--block': props.block,
+    'ui-link-action': isLink.value,
+    'ui-link-action--danger': props.variant === 'link-danger',
+  },
 ]);
 
 const disabledState = computed(() => props.disabled || props.loading);
