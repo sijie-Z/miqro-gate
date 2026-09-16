@@ -3,7 +3,12 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextUsageView from '@/views/next/NextUsageView.vue';
 import * as api from '@/api';
-import type { QuotaRuleView, UsageCost, UsageRecordPage, UsageSummary } from '@/types/generated-api';
+import type {
+  QuotaRuleView,
+  UsageCost,
+  UsageRecordPage,
+  UsageSummary,
+} from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
   listMyQuotaRules: vi.fn(),
@@ -109,18 +114,29 @@ describe('NextUsageView', () => {
     mockApi.listMyQuotaRules.mockResolvedValue([
       quotaRule({ id: 'qr-1', level: 'EXCEEDED', usedPct: 110, used: 1_100_000 }),
       quotaRule({ id: 'qr-2', status: 'DISABLED', level: 'NORMAL', usedPct: 10, used: 100 }),
+      quotaRule({
+        id: 'qr-3',
+        level: 'NEAR_LIMIT',
+        metric: 'COST',
+        limitValue: 100,
+        used: 92.5,
+        usedPct: 92.5,
+      }),
     ]);
 
     const wrapper = mountView();
     await flushPromises();
 
     const rows = wrapper.findAll('[data-testid="my-quota-row"]');
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(wrapper.text()).toContain('Token 用量 · 每月');
     expect(rows[0]!.text()).toContain('超限');
     expect(rows[1]!.text()).toContain('停用');
     expect(rows[0]!.text()).toContain('限额 1,000,000');
     expect(rows[0]!.text()).toContain('本期用量 1,100,000（110%）');
+    // #683: NEAR_LIMIT label and the COST unit render on the self-service panel.
+    expect(rows[2]!.text()).toContain('即将超限');
+    expect(rows[2]!.text()).toContain('限额 ¥100');
   });
 
   it('shows the empty quota hint when no rules exist', async () => {

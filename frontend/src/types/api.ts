@@ -30,10 +30,10 @@ export type BudgetLevel = 'NORMAL' | 'WARNING' | 'EXCEEDED';
 export type ModelApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 export type QuotaScopeType = 'USER' | 'PROJECT';
-export type QuotaMetric = 'TOKENS' | 'REQUESTS';
-export type QuotaPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY';
+export type QuotaMetric = 'TOKENS' | 'REQUESTS' | 'COST';
+export type QuotaPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 export type QuotaRuleStatus = 'ACTIVE' | 'DISABLED';
-export type QuotaLevel = 'NORMAL' | 'WARNING' | 'EXCEEDED';
+export type QuotaLevel = 'NORMAL' | 'WARNING' | 'NEAR_LIMIT' | 'EXCEEDED';
 
 export type McpAclMode = 'NONE' | 'ALLOW' | 'DENY';
 

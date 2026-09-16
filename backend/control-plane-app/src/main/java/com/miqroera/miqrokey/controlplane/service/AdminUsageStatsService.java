@@ -103,6 +103,26 @@ public class AdminUsageStatsService {
                 subscriptionId, providerProductId, modelId, teamId);
     }
 
+    /**
+     * Quota-watermark read path (#683): the same aggregation without the API's
+     * 93-day window cap — an annual quota window legitimately spans the full
+     * calendar year. Internal callers only; the cap still guards every public usage
+     * endpoint.
+     */
+    public UsageSummary summaryUncapped(UUID tenantId, String groupBy, Instant from, Instant to, UUID userId,
+            UUID projectId) {
+        UsageStatsRepository.GroupBy dimension = UsageStatsService.parseGroupBy(groupBy);
+        UsageStatsRepository.UsageFilter filter = new UsageStatsRepository.UsageFilter(tenantId, null, userId,
+                projectId, null, null, null, null, null, null, from, to);
+        Map<String, BigDecimal> prices = new LinkedHashMap<>();
+        for (PriceSnapshot p : priceSnapshotRepository.findAllLatestAt(Instant.now())) {
+            prices.put(p.providerProductId() + ":" + p.modelId() + ":" + p.tokenType().name(), p.unitPrice());
+        }
+        List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
+        List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
+        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows, prices);
+    }
+
     /** Paged raw usage records over the whole tenant, newest first. */
     /** Tenant-scoped records for the system (billing) channel. */
     public UsageRecordPage records(UUID tenantId, Instant from, Instant to, long page, int size) {
