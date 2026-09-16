@@ -22,6 +22,10 @@ export const DICT: Record<string, string> = {
   'Agent 的出口凭证必须是 ACTIVE 状态；供应商产品由凭证所属订阅自动派生。':
     "An agent's egress credential must be ACTIVE; the provider product is derived from the credential's subscription.",
   'Docker Compose（单节点私有化）': 'Docker Compose (single-node private deployment)',
+  '声明标签，不限制客户端；可调用范围由所选授权产品与允许模型决定。':
+    'A declarative label, not a client restriction; the callable scope is set by the selected grant and its allowed models.',
+  '用途是声明性标签（用于展示与审计），不限制客户端：任何兼容协议的客户端都可以使用该密钥；实际可调用范围由所选授权产品与允许模型决定。':
+    'Purpose is a declarative label (display and audit only) and does not restrict clients: any protocol-compatible client may use this key; the callable scope is set by the selected grant and its allowed models.',
   '授权已创建': 'Grant created',
   '授权已禁用': 'Grant disabled',
   'HTTP 方法（全选 = 不限）': 'HTTP methods (all selected = unrestricted)',
