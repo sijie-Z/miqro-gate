@@ -1799,3 +1799,34 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - 适配器注册（G3.x）之前 `model_catalog` 恒空，`/v1/models` 返回空列表——严格交集是刻意的安全边界。
 - 30s 定时刷新仍为 NOTIFY 丢失兜底；单节点单监听者范围不变。
 - 真实供应商凭证未提供：`refreshProduct` 只经 Mock/契约测试，真实抓取 `WAITING_FOR_CREDENTIAL`。
+
+## fix/sessionfilter-order-main-backport — SessionFilter 顺序修复 backport 到 main（Refs #693，DONE）
+
+### Outcome
+
+- main（默认分支）存在真实容器缺陷：`SessionFilter` 注册在 `Ordered.HIGHEST_PRECEDENCE`（`Integer.MIN_VALUE`），早于 Spring Boot `OrderedRequestContextFilter`（order `-105`）把请求绑定到当前线程，而 `UserContext` 是 `@RequestScope` bean。结果是**任何携带 session cookie 的真实请求都在 `SessionFilter.doFilter` 的 `userContext.setUser(user)` 抛 `ScopeNotActiveException` 并返回 500**。MockMvc 自带请求上下文，因此既有测试全部为绿，缺陷只在真实 servlet 容器上暴露。
+- 本 Goal 把 develop 提交 `fc3ad86` 的修复 backport 到 main，**只搬两处**：
+  1. `SecurityConfig.sessionFilterRegistration`：`registration.setOrder(Ordered.HIGHEST_PRECEDENCE)` → `registration.setOrder(-100)`，并加注释说明必须晚于 `RequestContextFilter`（顺带删除因此变为未使用的 `import org.springframework.core.Ordered;`；spotless 配置了 `removeUnusedImports`，develop 同一提交也已删除该 import）。
+  2. 新增回归测试 `AuthenticatedRequestIntegrationTest`：真实 HTTP 端口 + 真实 session cookie 驱动 bootstrap → 改密 → `GET /api/v1/auth/me`。
+- 未搬运 develop 专有内容（`ApiKeyAuthFilter` / `AdminIpAllowlistFilter` / `IpCidrMatcher` 等），未整文件 checkout。
+
+### Verification
+
+- 红（测试在、修复不在）：`mvnw.cmd -B -f backend -pl control-plane-app test -Pintegration -Dtest=AuthenticatedRequestIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` — **BUILD FAILURE：Tests run: 1, Failures: 1, Errors: 0, Skipped: 0**
+  - 栈：`ScopeNotActiveException ... scopedTarget.userContext` → `SessionFilter.doFilter(SessionFilter.java:138)`，根因 `IllegalStateException: No thread-bound request found`；断言：`expected 200 but got 500 INTERNAL_SERVER_ERROR`（`path=/api/v1/auth/me`）。
+  - 无需补 `@Import(TestCryptoConfig.class)`：main 的测试装配足以启动上下文，缺陷原样复现。
+- 绿（同一命令，修复已上）：相同命令 — **BUILD SUCCESS：Tests run: 1, Failures: 0, Errors: 0, Skipped: 0**。
+- 全量（仓库 DoD）：`mvnw.cmd -B -f backend verify -Pintegration` — **BUILD SUCCESS**，4 个模块外的全部模块 SUCCESS（Testcontainers 实跑）：
+  - **Tests run: 861, Failures: 0, Errors: 0, Skipped: 0**
+  - 分模块：Domain 102、Provider SPI 8、Provider Adapters 166、Route Snapshot 5、Usage Queue SPI 11、Test Support 109、Inference Gateway 196、**Control Plane 264（含本次新增 `AuthenticatedRequestIntegrationTest`）**；Persistence/Cache SPI 无测试类。
+- 范围核对：`git diff --stat` / `git status --short` 仅含上述两处源码 + `CHANGELOG.md` / `docs/progress.md`。
+
+### Files changed
+
+- `backend/control-plane-app/src/main/java/com/miqroera/miqrokey/controlplane/config/SecurityConfig.java` — 过滤器 order `-100` + 说明注释 + 删除未使用 import
+- `backend/control-plane-app/src/test/java/com/miqroera/miqrokey/controlplane/config/AuthenticatedRequestIntegrationTest.java` — 新增（来自 develop `fc3ad86`）
+- `CHANGELOG.md`、`docs/progress.md`
+
+### Remaining risks
+
+- 无（与 develop 为同一修复；未改 API/DB/协议/前端）。
