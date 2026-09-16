@@ -1622,6 +1622,13 @@ export const DICT: Record<string, string> = {
   '开启内容留痕': 'Enable content retention',
   '内容上限（字节）': 'Content cap (bytes)',
   '已保存——保存后数秒内生效，无需同步。': 'Saved — effective within seconds, no sync needed.',
+  '总请求': 'Total calls',
+  '失败率': 'Failure rate',
+  '调用详情': 'Call detail',
+  '受理': 'Received',
+  '上游首包': 'First upstream byte',
+  '窗口内口径': 'Window-scope',
+  '仅元数据——工具参数与响应正文永不落库。': 'Metadata only — tool arguments and response bodies are never stored.',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [
