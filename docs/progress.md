@@ -3152,3 +3152,29 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **未做（记录）**：MCP 服务向导「服务类型/后端类型」枚举（我们固定标准透传形态）、HTTP→MCP 转换、消费者组实体、配额缓存命中「全量计入」档（语义天然等价「不计入」）——均按既有裁决维持，mapping 已注明理由。
 
 - **#684 配额软着陆（超限拒绝 429）→ PR（ADR-0020）**：从「只算不管」到真闸门——规则级 `action ∈ {ALERT, REJECT}`（默认 ALERT，零回归）；REJECT 规则超限后网关对该用户/项目 429 (`quota_exceeded` + `Retry-After` 窗口结束提示，`/v1/models` 同门)，Key 不失效、提额/跨窗口自动恢复。链路：控制面评估器（60s，共享 `QuotaWatermarks`）→ `quota_enforcement`（V59，整体替换）→ 判定集变化才 pg_notify → 快照两集合 → 网关热路径零查询。并行的配额扩维（#683/#686，COST/YEARLY/NEAR_LIMIT）已先行合入，本批在其之上只做执行面，并同步 api-contract §5.19 / database-schema / configuration-reference / ADR-0020 / F51。
+
+## 2026-09-16 晚间 — #245 F07 告警接线：队列饱和（V60 事实表 + 控制面评估 + 类型注册）
+
+**背景**：F07 三类告警指标里，只有「用量队列饱和」缺数据源——网关侧只有进程内计数与无标签 gauge，没有任何可查事实。issue 原始候选「网关直接写 `alert_events`」被否：`AlertEventDispatcher` 只扫「已有失败投递次数」的行，网关插入的新行永远不会被投递。改为 **网关写事实表 → 控制面 `AlertEvaluator` 评估 → 既有签名/去重/退避/投递链路**。租户承载口径：全局信号固定由默认（seed）租户承载，评估 SQL 按规则自身 `tenant_id` 过滤，**非 seed 租户的同类型规则恒不触发**。
+
+**交付**（分支 `feat/usage-queue-saturation-alert-245`，隔离工作树，base develop@adfb670）：
+
+- **V60__usage_queue_saturation_alert.sql**：① `alert_rules_type_check` DROP 后重加（沿用 V24/V36 模式），新增合法值 `USAGE_QUEUE_SATURATION`；② 新表 `gateway_queue_signal`（只追加事实，`dropped bigint CHECK (dropped > 0)`，索引 `(tenant_id, occurred_at DESC)`，另留 `queued_high_water`/`capacity` 备口径切换）。**未修改任何既有迁移**；issue 里建议的 V59 已被 #684 `quota_enforcement` 占用，故顺延为 V60。
+- **网关**：`QueueSignal` + `QueueSignalWriter` SPI 与 `PostgresQueueSignalWriter`；固定 writer 执行器（有界）；丢弃计数增量在**两处**丢弃点采集；仅 `dropped_delta > 0` 才写；`no-persistence` 模式零 DB 写。**热路径零 JDBC**：`offer()` 只自增计数，写库发生在既有定时慢路径与 writer 调度器上。
+- **控制面**：`AlertEvaluator` 新增 `case "USAGE_QUEUE_SATURATION"`（近 1 小时 `SUM(dropped)`，SQL 带 `tenant_id = :tenantId`）；同批给 4 个周期型指标 SQL 补 `tenant_id` 过滤（口径漂移修正，单租户部署零行为变化）；`AlertRuleService` 类型校验列表与错误文案补齐。
+- **类型注册 4 处** + 前端下拉/列表标签 + `isQueueSaturationType` 的条数型阈值文案；i18n 词典补 1 条 `'队列饱和'`。
+- **文档 5 处**：api-contract / configuration-reference / database-schema（§租户级口径写明）/ feature-backlog / operations-runbook。
+
+**验证**：
+
+- 后端全量 `mvnw.cmd -B -f backend -Pintegration verify`：**EXIT=0，BUILD SUCCESS，11 个 reactor 模块全 SUCCESS**；各模块聚合 `Tests run` 全为 `Failures: 0, Errors: 0, Skipped: 0`（Domain 130 / Provider SPI 8 / Provider Adapters 166 / Route Snapshot 5 / Cache SPI 4 / Usage Queue SPI 21 / Control Plane 678 / Test Support 109 / Inference Gateway 357）。关键用例：`UsageQueueSaturationAlertIntegrationTest` **8/8**、`PostgresUsageEventBusTest` **13/13**、`SoakIntegrationTest` 1/1（`dropped == 0` 不变式）。Flyway：`Successfully validated 60 migrations`，控制面与网关两侧日志均出现 `Migrating schema "public" to version "60 - usage queue saturation alert"`。
+- **变异校验（证明租户过滤是承重的）**：删除该分支 SQL 里的 `tenant_id = :tenantId AND` → 同 IT `Tests run: 2, Failures: 2` BUILD FAILURE；恢复后通过。
+- 前端（冻结树）：`run lint` EXIT=0（0 error；1 条既有 warning `NewShell.vue:809 vue/no-template-shadow`，非本批文件）、`run typecheck` EXIT=0（app/spec/node 三工程）、`run test` **59 files / 331 tests 全过**、`run build` EXIT=0（2634 modules，built in 35.51s；esbuild css minify 对拼接产物的 `<stdin>` 告警为既有，改动前构建日志同样存在）。
+- `docker compose -f deploy/compose.yaml config` EXIT=0。
+
+**边界**：
+
+- 两处丢弃点都被计数（上游决策记录只标了 `offer()`；`flushChunk()` 的重入队失败路径同样计丢弃）。
+- V60 的 `CHECK (dropped > 0)` 使「零丢弃行」不可表示，因此零值边界用例的诚实等价物是「窗口内无行 → `SUM=0` → 不触发」，另加断言证明 schema 拒绝零丢弃行。
+- 阈值口径（窗口内丢弃条数）**未由 owner 确认**；`WRITE_THROUGH` 模式不产生该告警（饱和表现为发布线程停滞而非丢弃）；「解析失败」仍未与「上游 200 无 usage 字段」区分（沿用 `USAGE_MISSING_RATE`）；F07 其余类型（Plan 同步、磁盘）仍 SCAFFOLD。
+- 前端 `lint` 脚本自带 `--fix`，在本机 CRLF 检出下会改写约 145 个非本批文件的换行（其中约 23 个存在真实规范化差异，含 `types/generated.ts` 全文重排）；已整树备份到仓库外后 `git checkout -- .` 还原，只保留本批两文件的规范化改动。仓库既有属性，非本批引入。
