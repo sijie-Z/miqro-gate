@@ -1,8 +1,12 @@
 <script setup lang="ts">
 /**
- * NextAdminUsageView — /app/admin-usage v2 admin page (U2 platform batch).
- * Behaviour parity with the legacy tenant-wide usage report: filter bar
- * (grouping + project/model id), summary strip, records table and pager.
+ * NextAdminUsageView — /app/admin-usage 管理端「用量与成本总览」(#681)。
+ *
+ * cc-switch 式总览 + 腾讯成本分析式分解：
+ * - KPI 卡带：请求 / 输入 / 输出 / 缓存读（命中率）/ 缓存节省 / 总成本；
+ * - 服务端时间趋势：Token 与成本双序列（按日/按月，不再用记录页拼数据）；
+ * - 维度分解表：团队 / 个人 / 项目 / 模型 / 虚拟密钥，含成本占比，行点击下钻；
+ * - 每小时 Token 表（#634）与明细记录沿用。
  */
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
@@ -10,9 +14,13 @@ import { ChartBarIcon, DownloadIcon, MoneyIcon, UploadIcon } from 'tdesign-icons
 import { ApiError } from '@/api/http';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import { UiButton, UiInput, UiSelect, UiStatusBadge, UiTable, UiTrendChart } from '@/ui';
-import type { UiSelectOption } from '@/ui';
+import type { UiSelectOption, UiTrendSeries } from '@/ui';
 import type { UsageGroupBy } from '@/types/api';
 import type {
+  AdminUser,
+  Project,
+  Team,
+  UsageGroup,
   UsageRecord,
   UsageRecordPage,
   UsageSummary,
@@ -23,6 +31,8 @@ import type {
 const groupBy = ref<UsageGroupBy>('project');
 const modelId = ref('');
 const projectId = ref('');
+const teamId = ref('');
+const userId = ref('');
 // #605: abuse forensics — filter the whole report down to one calling address.
 const clientIp = ref('');
 const summary = ref<UsageSummary | null>(null);
@@ -33,42 +43,225 @@ const summaryRequestId = ref('');
 const records = ref<UsageRecordPage | null>(null);
 const recordsLoading = ref(true);
 
-// ---- daily trend (aggregated from the loaded records page) ----
-type TrendMetric = 'tokens' | 'requests' | 'latency';
+// ---- pickers: teams / users / projects (loaded once, non-blocking) ----
+const teams = ref<Team[]>([]);
+const users = ref<AdminUser[]>([]);
+const projects = ref<Project[]>([]);
 
-const TREND_TABS: Array<{ value: TrendMetric; label: string }> = [
-  { value: 'tokens', label: 'Token' },
-  { value: 'requests', label: '请求' },
-  { value: 'latency', label: '平均延迟' },
+const teamOptions = computed<UiSelectOption[]>(() => [
+  { value: '', label: '全部团队' },
+  ...teams.value.map((t) => ({ value: t.id ?? '', label: t.name ?? t.id ?? '' })),
+]);
+const userOptions = computed<UiSelectOption[]>(() => [
+  { value: '', label: '全部用户' },
+  ...users.value.map((u) => ({ value: u.id ?? '', label: u.username ?? u.id ?? '' })),
+]);
+const projectOptions = computed<UiSelectOption[]>(() => [
+  { value: '', label: '全部项目' },
+  ...projects.value.map((p) => ({ value: p.id ?? '', label: p.name ?? p.code ?? p.id ?? '' })),
+]);
+
+async function loadPickers() {
+  try {
+    const [teamList, userList, projectList] = await Promise.all([
+      api.listTeams(),
+      api.listUsers(),
+      api.listProjects(),
+    ]);
+    teams.value = teamList;
+    users.value = userList;
+    projects.value = projectList;
+  } catch {
+    // pickers degrade to "全部" — the report itself still works
+  }
+}
+
+// ---- server time series for the trend chart (Token + cost, day|month) ----
+const seriesDim = ref<'day' | 'month'>('day');
+const series = ref<UsageSummary | null>(null);
+
+const seriesOptions: Array<{ value: 'day' | 'month'; label: string }> = [
+  { value: 'day', label: '按日' },
+  { value: 'month', label: '按月' },
 ];
 
-const trendMetric = ref<TrendMetric>('tokens');
+function tokenTotal(g: UsageGroup | undefined): number {
+  const t = g?.tokens;
+  return (t?.input ?? 0) + (t?.output ?? 0) + (t?.cacheRead ?? 0) + (t?.cacheCreation ?? 0);
+}
 
-const trendPoints = computed(() => {
-  const items = records.value?.items ?? [];
-  const byDay = new Map<string, { sum: number; count: number }>();
-  for (const r of items) {
-    const day = String(r.occurredAt ?? '').slice(0, 10);
-    if (!day) continue;
-    const entry = byDay.get(day) ?? { sum: 0, count: 0 };
-    if (trendMetric.value === 'tokens') {
-      entry.sum += r.totalTokens ?? (r.inputTokens ?? 0) + (r.outputTokens ?? 0);
-    } else if (trendMetric.value === 'requests') {
-      entry.sum += 1;
-    } else {
-      entry.sum += r.latencyMs ?? 0;
-    }
-    entry.count += 1;
-    byDay.set(day, entry);
-  }
-  return [...byDay.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .slice(-14)
-    .map(([day, { sum, count }]) => ({
-      label: day.slice(5),
-      value: trendMetric.value === 'latency' && count > 0 ? Math.round(sum / count) : sum,
-    }));
+const trendSeries = computed<UiTrendSeries[]>(() => {
+  const groups = [...(series.value?.groups ?? [])].sort((a, b) =>
+    String(a.groupKey ?? '').localeCompare(String(b.groupKey ?? '')),
+  );
+  const label = (key?: string) =>
+    seriesDim.value === 'month' ? String(key ?? '') : String(key ?? '').slice(5);
+  return [
+    {
+      name: 'Token',
+      color: 'var(--ui-primary)',
+      kind: 'area',
+      points: groups.map((g) => ({ label: label(g.groupKey), value: tokenTotal(g) })),
+    },
+    {
+      name: '成本 ¥',
+      color: '#fa8c16',
+      kind: 'line',
+      points: groups.map((g) => ({
+        label: label(g.groupKey),
+        value: Number(g.cost?.upstreamPaid ?? 0),
+      })),
+    },
+  ];
 });
+
+// ---- KPI cards from summary.totals ----
+const totals = computed(() => summary.value?.totals);
+const upstreamRequests = computed(() => Number(totals.value?.requests?.upstream ?? 0));
+const coalescedRequests = computed(() => Number(totals.value?.requests?.coalesced ?? 0));
+const hitRequests = computed(
+  () => Number(totals.value?.requests?.l1Hit ?? 0) + Number(totals.value?.requests?.l2Hit ?? 0),
+);
+const hitRatePct = computed(() => {
+  const denom = upstreamRequests.value + coalescedRequests.value + hitRequests.value;
+  return denom > 0 ? ((hitRequests.value / denom) * 100).toFixed(1) + '%' : '—';
+});
+
+// ---- dimension breakdown (summary.groups) ----
+const GROUP_LABELS: Record<string, string> = {
+  project: '项目',
+  user: '用户',
+  team: '团队',
+  model: '模型',
+  virtual_key: '虚拟密钥',
+  cache_level: '缓存层级',
+  day: '日',
+  month: '月',
+};
+
+interface BreakdownRow {
+  key: string;
+  label: string;
+  requests: number;
+  tokens: number;
+  cost: number;
+  share: number;
+}
+
+const breakdownRows = computed<BreakdownRow[]>(() => {
+  const groups = summary.value?.groups ?? [];
+  const totalCost = Number(summary.value?.totals?.cost?.upstreamPaid ?? 0);
+  const totalTokens = tokenTotal(summary.value?.totals);
+  const useCost = totalCost > 0;
+  const shareBase = useCost ? totalCost : totalTokens;
+  return groups
+    .map((g) => {
+      const cost = Number(g.cost?.upstreamPaid ?? 0);
+      const tokens = tokenTotal(g);
+      return {
+        key: String(g.groupKey ?? g.label ?? ''),
+        label: g.label ?? String(g.groupKey ?? '—'),
+        requests: Number(g.requests?.upstream ?? 0),
+        tokens,
+        cost,
+        share: shareBase > 0 ? ((useCost ? cost : tokens) / shareBase) * 100 : 0,
+      };
+    })
+    .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens);
+});
+
+const breakdownColumns = computed(() => [
+  { key: 'label', title: GROUP_LABELS[groupBy.value] ?? '分组', minWidth: '180px' },
+  { key: 'requests', title: '请求', width: '110px', align: 'right' as const, sortable: true },
+  { key: 'tokens', title: 'Token', width: '130px', align: 'right' as const, sortable: true },
+  { key: 'cost', title: '成本 ¥', width: '130px', align: 'right' as const, sortable: true },
+  { key: 'share', title: '占比', width: '170px' },
+]);
+
+const drillable = computed(() => ['team', 'user', 'project', 'model'].includes(groupBy.value));
+
+function onBreakdownRow(row: unknown) {
+  const key = (row as unknown as BreakdownRow).key;
+  if (!key) return;
+  switch (groupBy.value) {
+    case 'team':
+      teamId.value = key;
+      break;
+    case 'user':
+      userId.value = key;
+      break;
+    case 'project':
+      projectId.value = key;
+      break;
+    case 'model':
+      modelId.value = key;
+      break;
+    default:
+      return;
+  }
+  page.value = 1;
+  void load();
+  void loadHourly();
+}
+
+// ---- active drill chips ----
+const drillChips = computed(() => {
+  const chips: Array<{ kind: string; label: string }> = [];
+  if (teamId.value) {
+    const t = teamOptions.value.find((o) => o.value === teamId.value);
+    chips.push({ kind: '团队', label: t?.label ?? teamId.value });
+  }
+  if (userId.value) {
+    const u = userOptions.value.find((o) => o.value === userId.value);
+    chips.push({ kind: '用户', label: u?.label ?? userId.value });
+  }
+  if (projectId.value) {
+    const p = projectOptions.value.find((o) => o.value === projectId.value);
+    chips.push({ kind: '项目', label: p?.label ?? projectId.value });
+  }
+  if (modelId.value.trim()) {
+    chips.push({ kind: '模型', label: modelId.value.trim() });
+  }
+  return chips;
+});
+
+function clearDrill(kind: string) {
+  if (kind === '团队') teamId.value = '';
+  else if (kind === '用户') userId.value = '';
+  else if (kind === '项目') projectId.value = '';
+  else if (kind === '模型') modelId.value = '';
+  page.value = 1;
+  void load();
+  void loadHourly();
+}
+
+function clearAllDrill() {
+  teamId.value = '';
+  userId.value = '';
+  projectId.value = '';
+  modelId.value = '';
+  page.value = 1;
+  void load();
+  void loadHourly();
+}
+
+// ---- CSV export of the breakdown table ----
+function exportBreakdownCsv() {
+  const rows = breakdownRows.value;
+  if (!rows.length) return;
+  const header = '分组,请求,Token,成本(CNY),占比(%)';
+  const body = rows.map((r) =>
+    [r.label, r.requests, r.tokens, r.cost.toFixed(4), r.share.toFixed(2)].join(','),
+  );
+  const csv = '﻿' + [header, ...body].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `usage-${groupBy.value}-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 const page = ref(1);
 const pageSize = ref(20);
@@ -149,6 +342,8 @@ async function loadHourly() {
       days: hourlyDays.value,
       dimension: hourlyDimension.value,
       projectId: projectId.value || undefined,
+      userId: userId.value || undefined,
+      teamId: teamId.value || undefined,
       tzOffsetMinutes: -new Date().getTimezoneOffset(),
     });
   } catch (error) {
@@ -216,33 +411,39 @@ const columns = [
 // let an older summary+records pair land after a newer one.
 let loadRequestSeq = 0;
 
+function summaryFilters() {
+  return {
+    userId: userId.value || undefined,
+    projectId: projectId.value || undefined,
+    teamId: teamId.value || undefined,
+    modelId: modelId.value.trim() || undefined,
+  };
+}
+
 async function load() {
   const seq = ++loadRequestSeq;
   summaryLoading.value = true;
   recordsLoading.value = true;
   summaryError.value = '';
+  const summaryFiltersNow = summaryFilters();
+  const range = rangeParams();
   try {
-    const summaryResult = await api.adminUsageSummary({
-      groupBy: groupBy.value,
-      modelId: modelId.value || undefined,
-      projectId: projectId.value || undefined,
-      ...rangeParams(),
-    });
+    const [summaryResult, seriesResult, recordsResult] = await Promise.all([
+      api.adminUsageSummary({ groupBy: groupBy.value, ...summaryFiltersNow, ...range }),
+      api.adminUsageSummary({ groupBy: seriesDim.value, ...summaryFiltersNow, ...range }),
+      api.adminUsageRecords({
+        ...summaryFiltersNow,
+        clientIp: clientIp.value.trim() || undefined,
+        page: page.value,
+        size: pageSize.value,
+        ...range,
+      }),
+    ]);
     if (seq !== loadRequestSeq) {
       return; // a newer request won — this response is stale
     }
     summary.value = summaryResult;
-    const recordsResult = await api.adminUsageRecords({
-      modelId: modelId.value || undefined,
-      projectId: projectId.value || undefined,
-      clientIp: clientIp.value.trim() || undefined,
-      page: page.value,
-      size: pageSize.value,
-      ...rangeParams(),
-    });
-    if (seq !== loadRequestSeq) {
-      return;
-    }
+    series.value = seriesResult;
     records.value = recordsResult;
   } catch (error) {
     if (seq === loadRequestSeq && error instanceof ApiError) {
@@ -255,6 +456,33 @@ async function load() {
       recordsLoading.value = false;
     }
   }
+}
+
+async function loadSeries() {
+  const seq = loadRequestSeq;
+  try {
+    const result = await api.adminUsageSummary({
+      groupBy: seriesDim.value,
+      ...summaryFilters(),
+      ...rangeParams(),
+    });
+    if (seq === loadRequestSeq) {
+      series.value = result;
+    }
+  } catch {
+    // the trend chart keeps its previous data on failure
+  }
+}
+
+function applySeriesDim(value: 'day' | 'month') {
+  seriesDim.value = value;
+  void loadSeries();
+}
+
+function runQuery() {
+  page.value = 1;
+  void load();
+  void loadHourly();
 }
 
 function gotoPage(next: number) {
@@ -288,6 +516,7 @@ const cacheLabel: Record<string, string> = {
 onMounted(() => {
   void load();
   void loadHourly();
+  void loadPickers();
 });
 </script>
 
@@ -295,8 +524,10 @@ onMounted(() => {
   <div class="ui-page next-admin-usage">
     <header class="ui-page-header">
       <div>
-        <h1 class="ui-page-title">用量报表</h1>
-        <p class="ui-page-desc">全租户用量：筛选条件 → 汇总 → 明细表。</p>
+        <h1 class="ui-page-title">用量与成本</h1>
+        <p class="ui-page-desc">
+          全租户用量与费用总览：团队 / 用户 / 项目维度的 Token 与成本、趋势、分解与明细。
+        </p>
       </div>
     </header>
 
@@ -318,39 +549,67 @@ onMounted(() => {
           </button>
         </div>
         <UiSelect
+          v-model="teamId"
+          :options="teamOptions"
+          width="160px"
+          data-testid="usage-team-filter"
+          @change="runQuery"
+        />
+        <UiSelect
+          v-model="userId"
+          :options="userOptions"
+          width="160px"
+          data-testid="usage-user-filter"
+          @change="runQuery"
+        />
+        <UiSelect
+          v-model="projectId"
+          :options="projectOptions"
+          width="180px"
+          data-testid="usage-project-id"
+          @change="runQuery"
+        />
+        <UiSelect
           v-model="groupBy"
           :options="groupOptions"
           data-testid="usage-group-by"
           @change="load"
         />
         <UiInput
-          v-model="projectId"
-          placeholder="项目 ID（可选）"
-          width="200px"
-          data-testid="usage-project-id"
-        />
-        <UiInput
           v-model="modelId"
           placeholder="模型 ID（可选）"
-          width="200px"
+          width="180px"
           data-testid="usage-model-id"
         />
         <UiInput
           v-model="clientIp"
           placeholder="来源 IP（可选）"
-          width="180px"
+          width="160px"
           data-testid="usage-client-ip"
         />
-        <UiButton
-          variant="primary"
-          data-testid="usage-query"
-          @click="
-            page = 1;
-            load();
-            loadHourly();
-          "
-          >查询</UiButton
+        <UiButton variant="primary" data-testid="usage-query" @click="runQuery">查询</UiButton>
+      </div>
+      <div v-if="drillChips.length" class="next-admin-usage__drill" data-testid="usage-drill-chips">
+        <span class="next-admin-usage__drill-label">下钻筛选：</span>
+        <button
+          v-for="chip in drillChips"
+          :key="chip.kind"
+          type="button"
+          class="next-admin-usage__drill-chip"
+          :data-testid="`usage-drill-${chip.kind}`"
+          @click="clearDrill(chip.kind)"
         >
+          {{ chip.kind }}：{{ chip.label }} ✕
+        </button>
+        <button
+          v-if="drillChips.length > 1"
+          type="button"
+          class="next-admin-usage__drill-clear"
+          data-testid="usage-drill-clear"
+          @click="clearAllDrill"
+        >
+          全部清除
+        </button>
       </div>
       <div
         v-if="summary && !summaryLoading"
@@ -363,9 +622,10 @@ onMounted(() => {
           </span>
           <span class="next-admin-usage__stat-main">
             <span class="next-admin-usage__stat-label">请求</span>
-            <span class="next-admin-usage__stat-value ui-num">{{
-              fmtNum(summary.totals?.requests?.upstream)
-            }}</span>
+            <span class="next-admin-usage__stat-value ui-num">{{ fmtNum(upstreamRequests) }}</span>
+            <span class="next-admin-usage__stat-sub"
+              >合并 {{ fmtNum(coalescedRequests) }} · 缓存命中 {{ fmtNum(hitRequests) }}</span
+            >
           </span>
         </div>
         <div class="next-admin-usage__stat">
@@ -375,7 +635,7 @@ onMounted(() => {
           <span class="next-admin-usage__stat-main">
             <span class="next-admin-usage__stat-label">输入 Token</span>
             <span class="next-admin-usage__stat-value ui-num">{{
-              fmtNum(summary.totals?.tokens?.input)
+              fmtNum(totals?.tokens?.input)
             }}</span>
           </span>
         </div>
@@ -386,8 +646,20 @@ onMounted(() => {
           <span class="next-admin-usage__stat-main">
             <span class="next-admin-usage__stat-label">输出 Token</span>
             <span class="next-admin-usage__stat-value ui-num">{{
-              fmtNum(summary.totals?.tokens?.output)
+              fmtNum(totals?.tokens?.output)
             }}</span>
+          </span>
+        </div>
+        <div class="next-admin-usage__stat">
+          <span class="next-admin-usage__stat-icon next-admin-usage__stat-icon--violet">
+            <DownloadIcon />
+          </span>
+          <span class="next-admin-usage__stat-main">
+            <span class="next-admin-usage__stat-label">缓存读 Token</span>
+            <span class="next-admin-usage__stat-value ui-num">{{
+              fmtNum(totals?.tokens?.cacheRead)
+            }}</span>
+            <span class="next-admin-usage__stat-sub">命中率 {{ hitRatePct }}</span>
           </span>
         </div>
         <div class="next-admin-usage__stat">
@@ -395,10 +667,22 @@ onMounted(() => {
             <MoneyIcon />
           </span>
           <span class="next-admin-usage__stat-main">
-            <span class="next-admin-usage__stat-label">上游成本</span>
+            <span class="next-admin-usage__stat-label">网关缓存节省</span>
             <span class="next-admin-usage__stat-value ui-num"
-              >¥{{ fmtMoney(summary.totals?.cost?.upstreamPaid) }}</span
+              >¥{{ fmtMoney(totals?.cost?.savedByGatewayCache) }}</span
             >
+          </span>
+        </div>
+        <div class="next-admin-usage__stat">
+          <span class="next-admin-usage__stat-icon next-admin-usage__stat-icon--gold">
+            <MoneyIcon />
+          </span>
+          <span class="next-admin-usage__stat-main">
+            <span class="next-admin-usage__stat-label">总成本</span>
+            <span class="next-admin-usage__stat-value ui-num"
+              >¥{{ fmtMoney(totals?.cost?.upstreamPaid) }}</span
+            >
+            <span class="next-admin-usage__stat-sub">按官方价目估算</span>
           </span>
         </div>
       </div>
@@ -413,30 +697,81 @@ onMounted(() => {
 
     <section class="ui-panel next-usage__trend" data-testid="usage-trend">
       <div class="ui-panel-head">
-        <h2 class="ui-panel-title">用量趋势</h2>
-        <div class="next-usage__trend-tabs" role="tablist" aria-label="趋势指标">
+        <h2 class="ui-panel-title">用量与成本趋势</h2>
+        <div class="next-usage__trend-tabs" role="tablist" aria-label="趋势粒度">
           <button
-            v-for="tab in TREND_TABS"
-            :key="tab.value"
+            v-for="opt in seriesOptions"
+            :key="opt.value"
             type="button"
             role="tab"
             class="next-usage__trend-tab"
-            :class="{ 'next-usage__trend-tab--on': trendMetric === tab.value }"
-            :aria-selected="trendMetric === tab.value"
-            :data-testid="`trend-tab-${tab.value}`"
-            @click="trendMetric = tab.value"
+            :class="{ 'next-usage__trend-tab--on': seriesDim === opt.value }"
+            :aria-selected="seriesDim === opt.value"
+            :data-testid="`trend-dim-${opt.value}`"
+            @click="applySeriesDim(opt.value)"
           >
-            {{ tab.label }}
+            {{ opt.label }}
           </button>
         </div>
       </div>
       <div class="ui-panel-body">
-        <UiTrendChart
-          :points="trendPoints"
-          :value-formatter="fmtNum"
-          data-testid="usage-trend-chart"
-        />
+        <UiTrendChart :series="trendSeries" data-testid="usage-trend-chart" />
       </div>
+    </section>
+
+    <section class="ui-panel next-admin-usage__breakdown" data-testid="usage-breakdown">
+      <div class="ui-panel-head">
+        <h2 class="ui-panel-title">维度分解 · {{ GROUP_LABELS[groupBy] ?? groupBy }}</h2>
+        <div class="next-admin-usage__breakdown-actions">
+          <span v-if="drillable" class="next-admin-usage__hint">点击行可下钻到明细</span>
+          <UiButton
+            variant="secondary"
+            data-testid="usage-breakdown-export"
+            @click="exportBreakdownCsv"
+          >
+            导出 CSV
+          </UiButton>
+        </div>
+      </div>
+      <UiTable
+        :columns="breakdownColumns"
+        :data="breakdownRows"
+        row-key="key"
+        :loading="summaryLoading"
+        empty-title="该窗口没有用量"
+        data-testid="usage-breakdown-table"
+        @row-click="onBreakdownRow"
+      >
+        <template #label="{ row }">
+          <span class="next-admin-usage__breakdown-label">{{
+            (row as unknown as BreakdownRow).label
+          }}</span>
+        </template>
+        <template #requests="{ row }">
+          <span class="ui-num">{{ fmtNum((row as unknown as BreakdownRow).requests) }}</span>
+        </template>
+        <template #tokens="{ row }">
+          <span class="ui-num">{{ fmtNum((row as unknown as BreakdownRow).tokens) }}</span>
+        </template>
+        <template #cost="{ row }">
+          <span class="ui-num">¥{{ fmtMoney((row as unknown as BreakdownRow).cost) }}</span>
+        </template>
+        <template #share="{ row }">
+          <span class="next-admin-usage__share">
+            <span class="next-admin-usage__share-bar">
+              <span
+                class="next-admin-usage__share-fill"
+                :style="{
+                  width: `${Math.min(100, (row as unknown as BreakdownRow).share).toFixed(1)}%`,
+                }"
+              />
+            </span>
+            <span class="ui-num next-admin-usage__share-pct"
+              >{{ (row as unknown as BreakdownRow).share.toFixed(1) }}%</span
+            >
+          </span>
+        </template>
+      </UiTable>
     </section>
 
     <section class="ui-panel next-admin-usage__hourly" data-testid="usage-hourly">
@@ -475,9 +810,9 @@ onMounted(() => {
       <UiTable
         :columns="hourlyColumns"
         :data="hourlyRows"
-        :loading="hourlyLoading"
         row-key="key"
-        empty-title="该时间窗没有用量"
+        :loading="hourlyLoading"
+        empty-title="该窗口没有按小时数据"
         data-testid="usage-hourly-table"
       >
         <template #hourStart="{ row }">{{
@@ -486,9 +821,9 @@ onMounted(() => {
         <template #dimensionLabel="{ row }">
           <span class="ui-mono">{{ (row as HourlyUsageRow).dimensionLabel ?? '—' }}</span>
         </template>
-        <template #projectLabel="{ row }">{{
-          (row as HourlyUsageRow).projectLabel ?? '—'
-        }}</template>
+        <template #projectLabel="{ row }">
+          <span class="ui-mono">{{ (row as HourlyUsageRow).projectLabel ?? '—' }}</span>
+        </template>
         <template #requests="{ row }">
           <span class="ui-num">{{ fmtNum((row as HourlyUsageRow).requests) }}</span>
         </template>
@@ -627,6 +962,45 @@ onMounted(() => {
   justify-content: flex-start;
 }
 
+.next-admin-usage__drill {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  flex-wrap: wrap;
+  padding: var(--ui-space-2) var(--ui-space-5) 0;
+}
+
+.next-admin-usage__drill-label {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-admin-usage__drill-chip {
+  border: 1px solid var(--ui-border);
+  background: var(--ui-muted);
+  color: var(--ui-primary-text);
+  border-radius: 999px;
+  height: 24px;
+  padding: 0 10px;
+  font-size: var(--ui-font-size-xs);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.next-admin-usage__drill-chip:hover {
+  border-color: var(--ui-primary);
+}
+
+.next-admin-usage__drill-clear {
+  border: 0;
+  background: transparent;
+  color: var(--ui-foreground-secondary);
+  font-size: var(--ui-font-size-xs);
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .next-admin-usage__summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
@@ -671,6 +1045,11 @@ onMounted(() => {
   color: #0e7490;
 }
 
+.next-admin-usage__stat-icon--violet {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
 .next-admin-usage__stat-icon--gold {
   background: #fdf3e0;
   color: #a16207;
@@ -695,6 +1074,60 @@ onMounted(() => {
   color: var(--ui-foreground);
   letter-spacing: -0.01em;
   white-space: nowrap;
+}
+
+.next-admin-usage__stat-sub {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+  white-space: nowrap;
+}
+
+.next-admin-usage__breakdown {
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-admin-usage__breakdown-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+}
+
+.next-admin-usage__hint {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.next-admin-usage__breakdown-label {
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-admin-usage__share {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  width: 100%;
+}
+
+.next-admin-usage__share-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--ui-muted);
+  overflow: hidden;
+}
+
+.next-admin-usage__share-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--ui-primary);
+}
+
+.next-admin-usage__share-pct {
+  min-width: 44px;
+  text-align: right;
+  color: var(--ui-foreground-secondary);
+  font-size: var(--ui-font-size-xs);
 }
 
 .next-admin-usage__reqid {

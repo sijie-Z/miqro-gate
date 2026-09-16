@@ -1075,6 +1075,7 @@ export function adminUsageSummary(query: {
   subscriptionId?: string;
   providerProductId?: string;
   modelId?: string;
+  teamId?: string;
 }): Promise<UsageSummary> {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
@@ -1092,6 +1093,7 @@ export function adminUsageRecords(query: {
   projectId?: string;
   modelId?: string;
   clientIp?: string;
+  teamId?: string;
 }): Promise<UsageRecordPage> {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
@@ -1108,6 +1110,7 @@ export function adminUsageHourly(query: {
   userId?: string;
   projectId?: string;
   tzOffsetMinutes?: number;
+  teamId?: string;
 }): Promise<HourlyUsageReport> {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {

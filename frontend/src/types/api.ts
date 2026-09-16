@@ -22,7 +22,8 @@ export type UserStatus = 'ACTIVE' | 'DISABLED' | 'LOCKED';
 export type VirtualKeyStatus = 'ACTIVE' | 'ROTATING' | 'REVOKED' | 'DISABLED';
 export type VirtualKeyPurpose = 'CLAUDE_CODE' | 'CLAUDE_DESKTOP' | 'CODEX' | 'CUSTOM';
 export type CacheLevel = 'UPSTREAM' | 'COALESCED' | 'L1_HIT' | 'L2_HIT';
-export type UsageGroupBy = 'project' | 'virtual_key' | 'cache_level' | 'day';
+export type UsageGroupBy =
+  'project' | 'virtual_key' | 'cache_level' | 'day' | 'user' | 'team' | 'model' | 'month';
 
 export type BudgetLevel = 'NORMAL' | 'WARNING' | 'EXCEEDED';
 

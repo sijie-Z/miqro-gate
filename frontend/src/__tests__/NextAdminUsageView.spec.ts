@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import { defineComponent } from 'vue';
 import NextAdminUsageView from '@/views/next/NextAdminUsageView.vue';
 import * as api from '@/api';
 import type {
-  UsageCost,
+  UsageGroup,
   UsageRecordPage,
   UsageSummary,
   HourlyUsageReport,
@@ -14,21 +15,90 @@ vi.mock('@/api', () => ({
   adminUsageSummary: vi.fn(),
   adminUsageRecords: vi.fn(),
   adminUsageHourly: vi.fn(),
+  listTeams: vi.fn(),
+  listUsers: vi.fn(),
+  listProjects: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
 
-const summary: UsageSummary = {
-  groupBy: 'project',
-  groups: [],
-  totals: {
-    groupKey: '__totals__',
-    label: '合计',
-    requests: { upstream: 14, coalesced: 1, l1Hit: 2, l2Hit: 0 },
-    tokens: { input: 20_000, output: 5_000, cacheRead: 300, cacheCreation: 800 },
-    cost: { upstreamPaid: '¥0.0300', gatewayObserved: '0.000100' } as unknown as UsageCost,
+const SelectStub = defineComponent({
+  name: 'UiSelect',
+  props: {
+    modelValue: { type: String, default: '' },
+    options: { type: Array, default: () => [] },
+    label: { type: String, default: '' },
   },
-};
+  emits: ['update:modelValue', 'change'],
+  setup(props, { emit }) {
+    function pick(value: unknown) {
+      emit('update:modelValue', value);
+      emit('change', value);
+    }
+    return { pick, props };
+  },
+  template: `
+    <div class="ui-select-stub">
+      <button
+        v-for="opt in props.options"
+        :key="opt.value"
+        type="button"
+        class="stub-option"
+        :data-option="opt.value"
+        @click="pick(opt.value)"
+      >
+        {{ opt.label }}
+      </button>
+    </div>
+  `,
+});
+
+function group(
+  key: string,
+  label: string,
+  requests: number,
+  input: number,
+  output: number,
+  cost: number,
+): UsageGroup {
+  return {
+    groupKey: key,
+    label,
+    requests: { upstream: requests, coalesced: 1, l1Hit: 2, l2Hit: 0 },
+    tokens: { input, output, cacheRead: 300, cacheCreation: 800 },
+    cost: {
+      upstreamPaid: cost,
+      gatewayObserved: cost,
+      projectAllocated: cost,
+      savedByGatewayCache: 0.001,
+    },
+  };
+}
+
+function summaryFor(groupBy: string): UsageSummary {
+  if (groupBy === 'team') {
+    return {
+      groupBy,
+      groups: [group('t1', '平台组', 30, 40_000, 8_000, 0.05)],
+      totals: group('__totals__', '合计', 30, 40_000, 8_000, 0.05),
+    };
+  }
+  if (groupBy === 'day' || groupBy === 'month') {
+    return {
+      groupBy,
+      groups: [
+        group('2026-09-15', '2026-09-15', 9, 12_000, 3_000, 0.02),
+        group('2026-09-16', '2026-09-16', 5, 8_000, 2_000, 0.01),
+      ],
+      totals: group('__totals__', '合计', 14, 20_000, 5_000, 0.03),
+    };
+  }
+  return {
+    groupBy,
+    groups: [group('p1', '演示项目', 14, 20_000, 5_000, 0.03)],
+    totals: group('__totals__', '合计', 14, 20_000, 5_000, 0.03),
+  };
+}
 
 function recordRow(
   i: number,
@@ -82,29 +152,49 @@ const hourlyReport: HourlyUsageReport = {
   ],
 };
 
+function summaryCalls() {
+  return mockApi.adminUsageSummary.mock.calls.map(([query]) => query);
+}
+
 describe('NextAdminUsageView', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.resetAllMocks();
-    mockApi.adminUsageSummary.mockResolvedValue(summary);
+    mockApi.adminUsageSummary.mockImplementation(async (query) =>
+      summaryFor(String(query?.groupBy ?? 'project')),
+    );
     mockApi.adminUsageRecords.mockResolvedValue(page);
     mockApi.adminUsageHourly.mockResolvedValue(hourlyReport);
+    mockApi.listTeams.mockResolvedValue([{ id: 't1', name: '平台组', status: 'ACTIVE' }] as never);
+    mockApi.listUsers.mockResolvedValue([] as never);
+    mockApi.listProjects.mockResolvedValue([
+      { id: 'p1', name: '演示项目', code: 'demo', status: 'ACTIVE' },
+    ] as never);
   });
 
   function mountView() {
-    return mount(NextAdminUsageView, { global: { plugins: [createPinia()] } });
+    return mount(NextAdminUsageView, {
+      global: { plugins: [createPinia()], stubs: { UiSelect: SelectStub } },
+    });
   }
 
-  it('passes a picked time range to the summary and records APIs', async () => {
+  it('passes a picked time range to the summary, series and records APIs', async () => {
     const wrapper = mountView();
     await flushPromises();
 
     await wrapper.find('[data-testid="admin-usage-range-30"]').trigger('click');
     await flushPromises();
 
-    expect(mockApi.adminUsageSummary).toHaveBeenLastCalledWith(
+    expect(summaryCalls()).toContainEqual(
       expect.objectContaining({
         groupBy: 'project',
+        from: expect.any(String),
+        to: expect.any(String),
+      }),
+    );
+    expect(summaryCalls()).toContainEqual(
+      expect.objectContaining({
+        groupBy: 'day',
         from: expect.any(String),
         to: expect.any(String),
       }),
@@ -119,12 +209,16 @@ describe('NextAdminUsageView', () => {
     );
   });
 
-  it('renders the tenant summary strip and records with usage badges', async () => {
+  it('renders the KPI strip with tokens, hit rate and cost', async () => {
     const wrapper = mountView();
     await flushPromises();
 
-    expect(wrapper.find('[data-testid="usage-summary"]').text()).toContain('14');
-    expect(wrapper.find('[data-testid="usage-summary"]').text()).toContain('20,000');
+    const strip = wrapper.find('[data-testid="usage-summary"]').text();
+    expect(strip).toContain('14');
+    expect(strip).toContain('20,000');
+    expect(strip).toContain('5,000');
+    expect(strip).toContain('命中率');
+    expect(strip).toContain('0.0300');
     expect(wrapper.find('[data-testid="usage-records-table"]').exists()).toBe(true);
     expect(wrapper.text()).toContain('deepseek-v4-flash');
     expect(wrapper.text()).toContain('L1 命中');
@@ -133,6 +227,22 @@ describe('NextAdminUsageView', () => {
     expect(wrapper.text()).toContain('gw-1');
     // #605: the calling address renders in the records table
     expect(wrapper.text()).toContain('203.0.113.7');
+  });
+
+  it('renders the dimension breakdown with cost share and a server-backed trend', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const breakdown = wrapper.find('[data-testid="usage-breakdown-table"]').text();
+    expect(breakdown).toContain('演示项目');
+    expect(breakdown).toContain('¥0.0300');
+    expect(breakdown).toContain('100.0%');
+
+    // the trend is fed by the server (groupBy=day), not by the records page
+    expect(summaryCalls()).toContainEqual(expect.objectContaining({ groupBy: 'day' }));
+    await wrapper.find('[data-testid="trend-dim-month"]').trigger('click');
+    await flushPromises();
+    expect(summaryCalls()).toContainEqual(expect.objectContaining({ groupBy: 'month' }));
   });
 
   it('paginates to the next page and disables prev on the first page', async () => {
@@ -144,32 +254,65 @@ describe('NextAdminUsageView', () => {
     await wrapper.find('[data-testid="usage-next"]').trigger('click');
     await flushPromises();
 
-    expect(mockApi.adminUsageRecords).toHaveBeenLastCalledWith({
-      modelId: undefined,
-      projectId: undefined,
-      page: 2,
-      size: 20,
-    });
+    expect(mockApi.adminUsageRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2, size: 20 }),
+    );
     expect(wrapper.find('[data-testid="usage-prev"]').attributes('disabled')).toBeUndefined();
   });
 
-  it('passes filter inputs to the query', async () => {
+  it('passes filter inputs (model, client IP) and the project picker to the query', async () => {
     const wrapper = mountView();
     await flushPromises();
 
-    await wrapper.find('[data-testid="usage-project-id"]').setValue('p1');
+    await wrapper.find('[data-testid="usage-project-id"] [data-option="p1"]').trigger('click');
     await wrapper.find('[data-testid="usage-model-id"]').setValue('deepseek-v4-flash');
     await wrapper.find('[data-testid="usage-client-ip"]').setValue('203.0.113.7');
     await wrapper.find('[data-testid="usage-query"]').trigger('click');
     await flushPromises();
 
-    expect(mockApi.adminUsageRecords).toHaveBeenLastCalledWith({
-      modelId: 'deepseek-v4-flash',
-      projectId: 'p1',
-      clientIp: '203.0.113.7',
-      page: 1,
-      size: 20,
-    });
+    expect(mockApi.adminUsageRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        modelId: 'deepseek-v4-flash',
+        projectId: 'p1',
+        clientIp: '203.0.113.7',
+        page: 1,
+        size: 20,
+      }),
+    );
+    expect(summaryCalls()).toContainEqual(
+      expect.objectContaining({ groupBy: 'project', projectId: 'p1' }),
+    );
+  });
+
+  it('drills down from a team row into the records filter and clears it (#681)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    // switch the breakdown dimension to teams
+    await wrapper.find('[data-testid="usage-group-by"] [data-option="team"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="usage-breakdown-table"]').text()).toContain('平台组');
+
+    // click the team row → records/summary get teamId, a chip appears
+    await wrapper.find('[data-testid="usage-breakdown-table"] tbody tr').trigger('click');
+    await flushPromises();
+    expect(mockApi.adminUsageRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({ teamId: 't1' }),
+    );
+    expect(summaryCalls()).toContainEqual(
+      expect.objectContaining({ groupBy: 'team', teamId: 't1' }),
+    );
+    const chip = wrapper.find('[data-testid="usage-drill-团队"]');
+    expect(chip.exists()).toBe(true);
+    expect(chip.text()).toContain('平台组');
+
+    // clearing the chip drops the filter
+    await chip.trigger('click');
+    await flushPromises();
+    expect(mockApi.adminUsageRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({ teamId: undefined }),
+    );
+    expect(wrapper.find('[data-testid="usage-drill-团队"]').exists()).toBe(false);
   });
 
   it('renders the hourly token table and reloads when the day range changes (#634)', async () => {

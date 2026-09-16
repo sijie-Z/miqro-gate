@@ -1552,6 +1552,22 @@ export const DICT: Record<string, string> = {
   '在「授权」按 项目 × 凭证 圈定模型范围。': 'Scope the models under Grants by project × credential.',
   '成员在「我的密钥」创建虚拟密钥并接入客户端。':
     'Members create Virtual Keys under My Keys and connect their clients.',
+  '用量与成本': 'Usage & cost',
+  '全租户用量与费用总览：团队 / 用户 / 项目维度的 Token 与成本、趋势、分解与明细。':
+    'Tenant-wide usage and spend: tokens and cost by team / user / project, with trends, breakdown and records.',
+  '全部团队': 'All teams',
+  '全部用户': 'All users',
+  '全部项目': 'All projects',
+  '按日': 'Daily',
+  '维度分解': 'Dimension breakdown',
+  '下钻筛选': 'Drill filter',
+  '全部清除': 'Clear all',
+  '点击行可下钻到明细': 'Click a row to drill into the records',
+  '缓存读 Token': 'Cache-read tokens',
+  '网关缓存节省': 'Saved by gateway cache',
+  '总成本': 'Total cost',
+  '按官方价目估算': 'est. at official list prices',
+  '该窗口没有用量': 'No usage in this window',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [
