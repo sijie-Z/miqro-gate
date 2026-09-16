@@ -221,7 +221,7 @@ public final class GatewayTestKeys {
         }
         return new RouteSnapshot(1, Instant.EPOCH, keyMap, bindingMap, credentialMap, modelsMap, grantModelsMap,
                 upstreamModelsMap, productCodesMap, providerIdsMap, mcpConsumers(),
-                mcpServices(baseUrl, policies, upstreamTimeoutsMs), retentionByTenant);
+                mcpServices(baseUrl, policies, upstreamTimeoutsMs), retentionByTenant, Map.of());
     }
 
     // ------------------------------------------------------------------
