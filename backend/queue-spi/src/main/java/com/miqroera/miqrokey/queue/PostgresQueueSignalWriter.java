@@ -42,9 +42,9 @@ public final class PostgresQueueSignalWriter implements QueueSignalWriter {
                         capacity, saturation_mode)
                     VALUES (:id, :tenantId, :occurredAt, :dropped, :queuedHighWater, :capacity, :saturationMode)
                     """, new MapSqlParameterSource().addValue("id", UUID.randomUUID())
-                    .addValue("tenantId", signal.tenantId())
-                    .addValue("occurredAt", Timestamp.from(signal.occurredAt())).addValue("dropped", signal.dropped())
-                    .addValue("queuedHighWater", signal.queuedHighWater()).addValue("capacity", signal.capacity())
+                    .addValue("tenantId", signal.tenantId()).addValue("occurredAt", Timestamp.from(signal.occurredAt()))
+                    .addValue("dropped", signal.dropped()).addValue("queuedHighWater", signal.queuedHighWater())
+                    .addValue("capacity", signal.capacity())
                     .addValue("saturationMode", signal.saturationMode().name())));
         } catch (Exception e) {
             log.warn("Queue saturation signal write failed (dropped={}, occurredAt={})", signal.dropped(),

@@ -114,7 +114,10 @@ public class AlertRuleService {
                 context.requestId());
     }
 
-    /** Rule types accepted by the API; mirrors the {@code alert_rules_type_check} constraint. */
+    /**
+     * Rule types accepted by the API; mirrors the {@code alert_rules_type_check}
+     * constraint.
+     */
     private static final List<String> RULE_TYPES = List.of("USAGE_MISSING_RATE", "UPSTREAM_ERROR_RATE",
             "BALANCE_UNAVAILABLE", "USAGE_SURGE", "BUDGET_THRESHOLD", "QUOTA_THRESHOLD", "MODEL_APPROVAL_SUBMITTED",
             "MODEL_APPROVAL_APPROVED", "MODEL_APPROVAL_REJECTED", "ADMIN_API_KEY_EXPIRING", "CONSUMER_KEY_EXPIRING",

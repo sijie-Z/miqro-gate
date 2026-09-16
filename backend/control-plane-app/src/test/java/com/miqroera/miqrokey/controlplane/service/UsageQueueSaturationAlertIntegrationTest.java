@@ -76,7 +76,9 @@ class UsageQueueSaturationAlertIntegrationTest {
 
     /** The migration-seeded platform tenant; the gateway reports under this one. */
     private static final UUID SEED_TENANT = UUID.fromString("00000000-0000-0000-0000-000000000001");
-    /** A second tenant that owns no gateway, so no drop fact is ever written for it. */
+    /**
+     * A second tenant that owns no gateway, so no drop fact is ever written for it.
+     */
     private static final UUID OTHER_TENANT = UUID.fromString("00000000-0000-0000-0000-00000000f017");
     private static final String OTHER_TENANT_CODE = "tenant-b";
 
@@ -287,7 +289,10 @@ class UsageQueueSaturationAlertIntegrationTest {
         return objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
     }
 
-    /** Creates a rule for the authenticated (platform) tenant through the public API. */
+    /**
+     * Creates a rule for the authenticated (platform) tenant through the public
+     * API.
+     */
     private String createRule(String type, double threshold, String endpointId) throws Exception {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("name", "queue-saturation-" + UUID.randomUUID().toString().substring(0, 8));
@@ -297,11 +302,9 @@ class UsageQueueSaturationAlertIntegrationTest {
         if (endpointId != null) {
             body.put("webhookEndpointId", endpointId);
         }
-        MvcResult result = mockMvc
-                .perform(post("/api/v1/admin/alert-rules").contentType(MediaType.APPLICATION_JSON)
-                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                        .content(objectMapper.writeValueAsString(body)))
-                .andExpect(status().isOk()).andReturn();
+        MvcResult result = mockMvc.perform(post("/api/v1/admin/alert-rules").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(body))).andExpect(status().isOk()).andReturn();
         return objectMapper.readValue(result.getResponse().getContentAsString(), Map.class).get("id").toString();
     }
 
@@ -313,7 +316,9 @@ class UsageQueueSaturationAlertIntegrationTest {
                 """, new MapSqlParameterSource("id", OTHER_TENANT).addValue("code", OTHER_TENANT_CODE));
     }
 
-    /** A rule the API cannot create for us: no session exists for a foreign tenant. */
+    /**
+     * A rule the API cannot create for us: no session exists for a foreign tenant.
+     */
     private UUID insertRuleFor(UUID tenantId, double threshold) {
         UUID ruleId = UUID.randomUUID();
         jdbc.update("""
@@ -359,8 +364,8 @@ class UsageQueueSaturationAlertIntegrationTest {
     }
 
     private long countDeliveryAttempts() {
-        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM webhook_delivery_attempts",
-                new MapSqlParameterSource(), Long.class);
+        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM webhook_delivery_attempts", new MapSqlParameterSource(),
+                Long.class);
         return count != null ? count : 0L;
     }
 

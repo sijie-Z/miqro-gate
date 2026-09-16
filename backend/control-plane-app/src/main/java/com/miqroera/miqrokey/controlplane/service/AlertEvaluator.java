@@ -115,11 +115,10 @@ public class AlertEvaluator {
      *
      * <p>
      * Every metric is scoped to the rule's own tenant. The fact tables carry a
-     * {@code tenant_id} (V1 convention), so a rule must never read another
-     * tenant's rows: a tenant-owned rule alerting on the platform aggregate
-     * would fire on data its operator cannot see, and cannot silence.
-     * Single-tenant deployments (the v1 shape) are unaffected — every fact row
-     * carries the one seed tenant.
+     * {@code tenant_id} (V1 convention), so a rule must never read another tenant's
+     * rows: a tenant-owned rule alerting on the platform aggregate would fire on
+     * data its operator cannot see, and cannot silence. Single-tenant deployments
+     * (the v1 shape) are unaffected — every fact row carries the one seed tenant.
      * </p>
      */
     BigDecimal metric(String type, UUID tenantId, String scopeJson) {
@@ -232,12 +231,9 @@ public class AlertEvaluator {
                 "SELECT COUNT(*) FROM usage_event"
                         + " WHERE tenant_id = :tenantId AND occurred_at >= now() - interval '1 hour'",
                 params, Long.class);
-        Long previous = jdbc
-                .queryForObject(
-                        "SELECT COUNT(*) FROM usage_event WHERE tenant_id = :tenantId"
-                                + " AND occurred_at >= now() - interval '2 hours'"
-                                + " AND occurred_at < now() - interval '1 hour'",
-                        params, Long.class);
+        Long previous = jdbc.queryForObject("SELECT COUNT(*) FROM usage_event WHERE tenant_id = :tenantId"
+                + " AND occurred_at >= now() - interval '2 hours'" + " AND occurred_at < now() - interval '1 hour'",
+                params, Long.class);
         if (previous == null || previous == 0) {
             return current != null && current > 0 ? BigDecimal.valueOf(100) : BigDecimal.ZERO;
         }

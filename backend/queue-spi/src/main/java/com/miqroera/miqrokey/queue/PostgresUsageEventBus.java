@@ -67,11 +67,11 @@ public final class PostgresUsageEventBus implements UsageEventBus {
 
     /**
      * Tenant that owns the platform-level queue signal. The queue is a process
-     * resource, not a per-request one, so its fact rows carry the default
-     * (seed) tenant seeded by {@code V1__core_tables.sql}. Evaluation filters
-     * alert rules by tenant, so this fires platform-level rules only — a rule
-     * owned by any other tenant is never triggered by it. Single-tenant
-     * deployments (the v1 shape) see this as a plain global signal.
+     * resource, not a per-request one, so its fact rows carry the default (seed)
+     * tenant seeded by {@code V1__core_tables.sql}. Evaluation filters alert rules
+     * by tenant, so this fires platform-level rules only — a rule owned by any
+     * other tenant is never triggered by it. Single-tenant deployments (the v1
+     * shape) see this as a plain global signal.
      */
     public static final UUID SIGNAL_TENANT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
@@ -141,8 +141,8 @@ public final class PostgresUsageEventBus implements UsageEventBus {
     }
 
     /**
-     * Records the deepest the queue got while it was losing events. Sampled only
-     * on the drop paths — the healthy path pays nothing, and the only moment the
+     * Records the deepest the queue got while it was losing events. Sampled only on
+     * the drop paths — the healthy path pays nothing, and the only moment the
      * high-water mark is interesting is the moment it overflowed.
      */
     private void sampleHighWater() {
@@ -226,8 +226,8 @@ public final class PostgresUsageEventBus implements UsageEventBus {
      * dedicated writer scheduler — the scheduling thread never runs JDBC.
      *
      * <p>
-     * A delta of zero returns immediately, so a healthy gateway writes no rows
-     * at all rather than a heartbeat per interval.
+     * A delta of zero returns immediately, so a healthy gateway writes no rows at
+     * all rather than a heartbeat per interval.
      * </p>
      */
     @Scheduled(fixedDelayString = "${miqrokey.gateway.queue.flush-interval:1s}")
@@ -250,7 +250,9 @@ public final class PostgresUsageEventBus implements UsageEventBus {
         }
     }
 
-    /** Writes one drop-delta fact on the writer executor; restores it on failure. */
+    /**
+     * Writes one drop-delta fact on the writer executor; restores it on failure.
+     */
     private void reportSignal(long delta) {
         try {
             signalWriter.writeSignal(new QueueSignal(SIGNAL_TENANT_ID, clock.instant(), delta, queuedHighWater.get(),

@@ -35,7 +35,9 @@ class PostgresUsageEventBusTest {
 
     private static final Clock CLOCK = Clock.systemUTC();
 
-    /** Drop reporting has its own tests; the reliability tests only need the seam. */
+    /**
+     * Drop reporting has its own tests; the reliability tests only need the seam.
+     */
     private static final QueueSignalWriter NO_SIGNALS = signal -> {
     };
 
