@@ -10,6 +10,8 @@ import { toastState } from '@/ui/toast';
 
 vi.mock('@/api', () => ({
   adminListMcpServices: vi.fn(),
+  adminMcpServiceAccess: vi.fn(),
+  adminMcpServiceVerify: vi.fn(),
   adminCreateMcpService: vi.fn(),
   adminSetMcpServiceUpstreamTimeout: vi.fn(),
   adminSetMcpStatus: vi.fn(),
@@ -1123,5 +1125,82 @@ describe('NextAdminMcpServicesView', () => {
     await wrapper.find('[data-testid="mcp-guide-create"]').trigger('click');
     expect(wrapper.find('[data-testid="mcp-create-form"]').exists()).toBe(true);
     localStorage.clear();
+  });
+
+  it('shows the gateway access URLs and copies them (#685)', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminMcpServiceAccess.mockResolvedValue({
+      serviceId: 'm1',
+      name: 'erp-mcp',
+      mcpUrl: 'http://gw.test/mcpservers/erp-mcp/mcp',
+      sseUrl: 'http://gw.test/mcpservers/erp-mcp/sse',
+      authHint: '认证：Authorization: Bearer <消费者 API Key 或 JWT>（需 mcp:call 作用域）',
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="mcp-access-info"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.adminMcpServiceAccess).toHaveBeenCalledWith('m1');
+    const dialog = document.querySelector('[data-testid="mcp-access-info-dialog"]');
+    expect(dialog, 'access dialog should render').toBeTruthy();
+    expect(dialog!.textContent).toContain('http://gw.test/mcpservers/erp-mcp/mcp');
+    expect(dialog!.textContent).toContain('http://gw.test/mcpservers/erp-mcp/sse');
+    expect(dialog!.textContent).toContain('mcp:call');
+
+    (document.querySelector('[data-testid="mcp-copy-mcp-url"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith('http://gw.test/mcpservers/erp-mcp/mcp');
+  });
+
+  it('runs the on-demand probe and shows the result (#685)', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminMcpServiceVerify.mockResolvedValue({
+      serviceId: 'm1',
+      reachable: true,
+      checkMode: 'JSONRPC_INITIALIZE',
+      latencyMs: 42,
+      detail: 'JSON-RPC initialize 通过（HTTP 200）',
+      checkedAt: '2026-09-16T00:00:00Z',
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="mcp-verify"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.adminMcpServiceVerify).toHaveBeenCalledWith('m1');
+    const result = document.querySelector('[data-testid="mcp-verify-result"]');
+    expect(result, 'verify result should render').toBeTruthy();
+    expect(result!.textContent).toContain('可达');
+    expect(result!.textContent).toContain('JSON-RPC initialize 通过（HTTP 200）');
+
+    (document.querySelector('[data-testid="mcp-verify-rerun"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(mockApi.adminMcpServiceVerify).toHaveBeenCalledTimes(2);
+  });
+
+  it('renders the verify failure detail without touching row state (#685)', async () => {
+    mockApi.adminListMcpServices.mockResolvedValue([service()]);
+    mockApi.adminMcpServiceVerify.mockResolvedValue({
+      serviceId: 'm1',
+      reachable: false,
+      checkMode: 'HEALTH_PATH',
+      latencyMs: 8,
+      detail: '连接失败：Connection refused',
+      checkedAt: '2026-09-16T00:00:00Z',
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="mcp-verify"]').trigger('click');
+    await flushPromises();
+
+    const result = document.querySelector('[data-testid="mcp-verify-result"]');
+    expect(result!.textContent).toContain('不可达');
+    expect(result!.textContent).toContain('连接失败');
   });
 });

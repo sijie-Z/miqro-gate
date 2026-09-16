@@ -1606,6 +1606,17 @@ export const DICT: Record<string, string> = {
   '在「授权」按 项目 × 凭证 圈定模型范围。': 'Scope the models under Grants by project × credential.',
   '成员在「我的密钥」创建虚拟密钥并接入客户端。':
     'Members create Virtual Keys under My Keys and connect their clients.',
+  '接入信息': 'Access info',
+  '验证连通': 'Verify connectivity',
+  '可达': 'Reachable',
+  '不可达': 'Unreachable',
+  '正在探测上游…': 'Probing the upstream…',
+  '正在加载接入信息…': 'Loading access info…',
+  '加载接入信息失败，请稍后重试。': 'Failed to load access info. Please try again later.',
+  '接入地址已复制': 'Access URL copied',
+  '复制失败，请手动选择复制。': 'Copy failed — select and copy manually.',
+  '重新验证': 'Verify again',
+  '模式': 'Mode',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [

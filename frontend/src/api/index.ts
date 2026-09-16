@@ -70,6 +70,8 @@ import type {
   McpResiliencePolicy,
   SkillRevisionView,
   AdminRetentionLogView,
+  McpServiceAccessView,
+  McpServiceVerifyView,
 } from '@/types/generated-api';
 import type { components } from '@/types/generated';
 
@@ -763,6 +765,16 @@ export function adminSetMcpServiceUpstreamTimeout(
 
 export function adminSetMcpStatus(id: string, status: string): Promise<McpServiceView> {
   return post<McpServiceView>(`/api/v1/admin/mcp-services/${id}/status?status=${status}`);
+}
+
+/** #685: gateway access URLs (console counterpart of /mcpservers/{name}/mcp). */
+export function adminMcpServiceAccess(id: string): Promise<McpServiceAccessView> {
+  return get<McpServiceAccessView>(`/api/v1/admin/mcp-services/${id}/connection`);
+}
+
+/** #685「调用验证」: one immediate, read-only upstream probe. */
+export function adminMcpServiceVerify(id: string): Promise<McpServiceVerifyView> {
+  return post<McpServiceVerifyView>(`/api/v1/admin/mcp-services/${id}/verify`);
 }
 
 export interface McpResilienceDraft {
