@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -237,6 +238,27 @@ class QuotaEnforcementIntegrationTest {
         seedClosedWindowRow(userRuleId, UUID.randomUUID());
         RouteSnapshot reloaded = new JdbcRouteSnapshotLoader(jdbc, objectMapper).load(2L, Instant.now());
         assertThat(reloaded.blockedUsers(TENANT_ID)).containsExactly(adminUserId);
+    }
+
+    // ------------------------------------------------------------------
+    // ⑤ an unknown enforcement value never reaches the database
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("an unknown enforcement value is refused with 400 PARAM_INVALID and stores nothing")
+    void unknownEnforcementIsRefused() throws Exception {
+        // The enum is the only way to opt into blocking, so a typo must fail
+        // loudly instead of silently degrading a REJECT intent to ALERT.
+        putQuota(quotaBody("USER", adminUserId, "TOKENS", "DAILY", 500, 80, "BLOCK"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.code").value("PARAM_INVALID"))
+                .andExpect(jsonPath("$.detail").value(containsString("enforcement")));
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM quota_rules WHERE tenant_id = :tenantId",
+                new MapSqlParameterSource("tenantId", TENANT_ID), Long.class)).isZero();
+        assertThat(enforcementService.reconcile(TENANT_ID)).isFalse();
+        assertThat(countBlockRows()).isZero();
     }
 
     // ------------------------------------------------------------------
