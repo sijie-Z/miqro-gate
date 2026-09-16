@@ -1360,6 +1360,31 @@ export const DICT: Record<string, string> = {
   '按服务请求总数计算': 'Share of all served requests',
   '当前窗口': 'Current window',
   '等效折扣': 'Effective discount',
+  'MCP 服务接入指引': 'MCP service onboarding',
+  '从注册后端服务到客户端接入，三步完成。':
+    'From registering a backend service to client onboarding, in three steps.',
+  '填写接入地址与传输类型（Streamable HTTP / SSE），网关即时代理。':
+    'Fill in the endpoint and transport (Streamable HTTP / SSE) — the gateway proxies immediately.',
+  '注册 Tools 与访问控制': 'Register tools and access control',
+  '同步、手动或导入工具清单并逐项启停；服务级模式叠加单工具覆盖两级收敛。':
+    'Sync, add or import the tool list and toggle each one; a service-level mode plus per-tool overrides bound the surface.',
+  '客户端接入验证': 'Verify from a client',
+  '用 MCP 客户端连接网关端点，调用一个工具确认链路。':
+    'Point an MCP client at the gateway endpoint and call one tool to confirm the route.',
+  '接入已有 MCP Server': 'Connect an existing MCP server',
+  '后端已实现 MCP 协议时，填写接入地址即可透传代理；健康检查默认每 30 秒探测 /health。':
+    'When the backend speaks MCP, just fill in the endpoint; health probes hit /health every 30s by default.',
+  '适合：已有 MCP Server 的团队': 'Best for teams that already run an MCP server',
+  '工具与访问控制': 'Tools and access control',
+  '工具清单支持同步、手动与导入三种来源，逐个启停；访问控制按服务级模式 + 单工具覆盖两级收敛。':
+    'The tool list accepts synced, manual and imported entries, each toggleable; access control narrows in two levels.',
+  '适合：需要收敛可调用工具面的生产接入':
+    'Best for production rollouts that need to bound the callable tool surface',
+  '观测与韧性': 'Observability and resilience',
+  'MCP 访问日志逐条可查；每个服务可单独配置健康检查与韧性策略。':
+    'MCP access logs are queryable per call; each service gets its own health checks and resilience policy.',
+  '适合：上线后的日常运维': 'Best for day-2 operations',
+  '收起不再显示': 'Dismiss',
   '缺失': 'Missing',
   '已文档化': 'Documented',
   '产品条目已创建，尚未完成资料整理。':
