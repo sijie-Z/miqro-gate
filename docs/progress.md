@@ -10,7 +10,31 @@
 - Goal status: `IN_PROGRESS（多会话并行推进；已合并进展以 develop git log 为准。在途 PR：#599
   用途标注、#601 留痕控制台、#602 资料页增强；#596/#597 交付与验证细节见下方 09-15 交接点。
   此前 rc.19 审查修复波已全量落地并发布）`
-- Last updated: `2026-09-15 CST`
+- Last updated: `2026-09-16 CST`
+
+## 会话交接点 2026-09-16（自助注册关闭态前置体现 #550）
+
+- **#550（PR 待开，分支 `fix/registration-disabled-gating`，基于 50a9b24）**：部署关闭自助注册时，
+  登录页仍展示可提交的注册入口，用户填完表单才吃 403。新增公开只读端点
+  `GET /api/v1/auth/registration-status`（匿名，仅回一个布尔 `{enabled}`；加入
+  `SessionFilter.PUBLIC_PATHS` 精确匹配白名单；GET 不在 CSRF 拦截器范围内）——判定与 `/register`
+  的 403 分支**同源**（`AuthProperties.registrationEnabled`，`@ConfigurationProperties` 启动期绑定、
+  无 `@RefreshScope`）。前端登录页 `onMounted` 预取该状态；关闭态下注册入口**保留可见**（承载说明
+  文案）但不可点/不可提交（`disabled` + `aria-disabled` + `request-access--off` 样式），探测失败一律
+  fail-open 维持原行为。该端点只是 UX 前置提示，**不是鉴权点**：服务端 403 仍是唯一闸门，且端点只
+  暴露一个布尔，不泄漏部署配置其他信息。
+- 验证（真实命令与结果）：
+  - 后端 `-f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=RegistrationApiIntegrationTest,RegistrationDisabledApiIntegrationTest
+    -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`，
+    `BUILD SUCCESS`（Testcontainers PostgreSQL）。
+  - 前端 `npm ci`（added 395 packages, 0 vulnerabilities）、`npm run test` → 59 files / 331 tests 全绿、
+    `npm run typecheck` / `npm run lint`（0 error、1 条既有 `NewShell.vue` 警告）/ `npm run build` 全部 exit 0。
+  - OpenAPI 基线重生成（`OpenApiSpecIntegrationTest` → `docs/openapi/openapi-3.1.json`，与旧基线比
+    纯新增两段：schema `RegistrationStatusResponse` + path `/api/v1/auth/registration-status`），
+    前端类型 `npm run gen:types` 同步重生成（`src/types/generated.ts` 纯新增 39 行，二次运行幂等）。
+- 反空跑：把前端新用例的 mock 临时改成 `{ enabled: true }`，该用例即 FAIL
+  （`expected undefined to be defined`），证明断言非空跑。
 
 ## 会话交接点 2026-09-15（资料页增强 #597 + 用途标签澄清 #596）
 

@@ -45,6 +45,7 @@
 | `POST /api/v1/auth/bootstrap` | 一次性创建首个 SYSTEM_ADMIN 管理员 | 匿名（需 bootstrap secret） |
 | `POST /api/v1/auth/login` | 用户名/密码登录，创建会话 | 匿名 |
 | `POST /api/v1/auth/register` | 自助注册（F-REG）：创建普通用户并直接登录 | 匿名（开关 `miqrokey.registration-enabled`，默认开） |
+| `GET /api/v1/auth/registration-status` | 自助注册开关的公开只读状态（#550，登录页入口闸门） | 匿名 |
 | `POST /api/v1/auth/logout` | 当前会话失效 | 已登录 |
 | `GET /api/v1/auth/me` | 当前用户、角色、状态、最近登录与会话到期时间 | 已登录 |
 | `POST /api/v1/auth/password` | 修改自己的密码并撤销其他会话 | 已登录 |
@@ -60,6 +61,14 @@
 - 开关 `miqrokey.registration-enabled`（`MIQROKEY_REGISTRATION_ENABLED`，默认 `true`）为 `false` 时 → `403 REGISTRATION_DISABLED`；登录、bootstrap 不受影响。私有化部署需要"仅邀请"时可关闭。
 - 公开端点：与 login/bootstrap 一样无会话、无 CSRF 要求；审计事件 `REGISTER`。
 - 防滥用注记：单租户内部/试用规模未加频率限制；对外公网部署建议在网络层加速率限制（记录于配置参考）。
+
+**`GET /api/v1/auth/registration-status`（#550）**：同一开关的公开只读视图，供登录页在渲染注册入口**之前**查询，避免"填完表单提交才拿到 `403`"。
+
+- 访问：匿名（`SessionFilter.PUBLIC_PATHS` 白名单）；`GET` 不经 CSRF 拦截器；无会话、无 CSRF token 要求。
+- 响应 `200 application/json`：`{ "enabled": true | false }`——**仅此一个布尔字段**，不回显配置来源、开关名称或任何部署信息（集成测试断言响应体恰好 1 个字段）。
+- 判定同源：与 `/register` 的 `403` 分支读同一个已绑定属性（`AuthProperties.registrationEnabled`，`@ConfigurationProperties` 启动期绑定、无 `@RefreshScope`），故同一进程内两者不可能给出不同答案。
+- 错误：正常路径无业务错误码；`5xx` 仅来自通用异常处理器。前端对此端点**失败即放行**（默认按"开"渲染，仍由 `/register` 的 `403 REGISTRATION_DISABLED` 强制），因此该端点是 UX 前置提示而**非**权限判定点。
+- 与 `/register` 一样不产生审计事件（只读查询）。
 
 ### 3.1c 平台 OIDC 登录（P0a，ADR-0017，2026-09-08）
 
