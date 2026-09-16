@@ -13,11 +13,7 @@ import { csvCell } from '@/utils/csv';
 import { UiButton, UiDonut, UiSelect, UiStatusBadge, UiTable, UiTrendChart, toast } from '@/ui';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import type { UiSelectOption } from '@/ui';
-import type {
-  QuotaMetric,
-  QuotaPeriod,
-  UsageGroupBy,
-} from '@/types/api';
+import type { QuotaMetric, QuotaPeriod, UsageGroupBy } from '@/types/api';
 import type {
   QuotaRuleView,
   UsageGroup,
@@ -45,7 +41,6 @@ const TREND_TABS: Array<{ value: TrendMetric; label: string }> = [
 ];
 
 const trendMetric = ref<TrendMetric>('tokens');
-
 
 /** Vben analysis overview cards: value + right icon + label footer. */
 const summaryStats = computed(() => {
@@ -151,16 +146,22 @@ function applyCustomRange() {
 const myQuotaRules = ref<QuotaRuleView[]>([]);
 const quotaLoading = ref(true);
 
-const quotaMetricText: Record<QuotaMetric, string> = { TOKENS: 'Token 用量', REQUESTS: '请求次数' };
+const quotaMetricText: Record<QuotaMetric, string> = {
+  TOKENS: 'Token 用量',
+  REQUESTS: '请求次数',
+  COST: '成本（¥）',
+};
 const quotaPeriodText: Record<QuotaPeriod, string> = {
   DAILY: '每日',
   WEEKLY: '每周',
   MONTHLY: '每月',
+  YEARLY: '每年',
 };
 // hub schema types level as a plain string, so keep the label map string-keyed
 const quotaLevelText: Record<string, string> = {
   NORMAL: '正常',
   WARNING: '预警',
+  NEAR_LIMIT: '即将超限',
   EXCEEDED: '超限',
 };
 
@@ -169,7 +170,7 @@ function quotaLevelTone(
   status: QuotaRuleView['status'],
 ): 'success' | 'warning' | 'danger' | 'neutral' {
   if (status === 'DISABLED') return 'neutral';
-  if (level === 'EXCEEDED') return 'danger';
+  if (level === 'EXCEEDED' || level === 'NEAR_LIMIT') return 'danger';
   if (level === 'WARNING') return 'warning';
   return 'success';
 }
@@ -404,9 +405,7 @@ async function exportRecords() {
     r.clientIp ?? '',
     r.providerRequestId ?? '',
   ]);
-  const csv = [header, ...rows]
-    .map((row) => row.map(csvCell).join(','))
-    .join('\n');
+  const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -522,8 +521,10 @@ function formatTime(iso?: string): string {
           </div>
           <div class="next-usage__quota-body">
             <span class="next-usage__quota-nums ui-num"
-              >限额 {{ formatNumber(rule.limitValue) }} · 本期用量
-              {{ formatNumber(rule.used) }}（{{ rule.usedPct }}%）</span
+              >限额 {{ rule.metric === 'COST' ? '¥' : '' }}{{ formatNumber(rule.limitValue) }} ·
+              本期用量 {{ rule.metric === 'COST' ? '¥' : '' }}{{ formatNumber(rule.used) }}（{{
+                rule.usedPct
+              }}%）</span
             >
             <div
               class="next-usage__quota-bar"
@@ -658,9 +659,15 @@ function formatTime(iso?: string): string {
           (asGroup(row).requests?.l1Hit ?? 0) +
           (asGroup(row).requests?.l2Hit ?? 0)
         }}</template>
-        <template #inputTokens="{ row }">{{ formatNumber(asGroup(row).tokens?.input ?? 0) }}</template>
-        <template #outputTokens="{ row }">{{ formatNumber(asGroup(row).tokens?.output ?? 0) }}</template>
-        <template #cacheRead="{ row }">{{ formatNumber(asGroup(row).tokens?.cacheRead ?? 0) }}</template>
+        <template #inputTokens="{ row }">{{
+          formatNumber(asGroup(row).tokens?.input ?? 0)
+        }}</template>
+        <template #outputTokens="{ row }">{{
+          formatNumber(asGroup(row).tokens?.output ?? 0)
+        }}</template>
+        <template #cacheRead="{ row }">{{
+          formatNumber(asGroup(row).tokens?.cacheRead ?? 0)
+        }}</template>
         <template #upstreamCost="{ row }">{{
           formatCost(asGroup(row).cost?.upstreamPaid)
         }}</template>
@@ -804,7 +811,11 @@ function formatTime(iso?: string): string {
       </section>
 
       <!-- Distribution -->
-      <aside v-if="compositionSegments.rows.length" class="ui-panel next-usage__aside" data-testid="usage-chart">
+      <aside
+        v-if="compositionSegments.rows.length"
+        class="ui-panel next-usage__aside"
+        data-testid="usage-chart"
+      >
         <div class="ui-panel-head">
           <div>
             <h2 class="ui-panel-title">用量分布</h2>
@@ -814,17 +825,17 @@ function formatTime(iso?: string): string {
         <div class="ui-panel-body next-usage__composition">
           <UiDonut
             :segments="
-              compositionSegments.rows.map((r) => ({ label: r.label, value: r.value, color: r.color }))
+              compositionSegments.rows.map((r) => ({
+                label: r.label,
+                value: r.value,
+                color: r.color,
+              }))
             "
             :center-text="formatNumber(usageTotalTokens)"
             data-testid="usage-composition-donut"
           />
           <div class="ui-legend">
-            <div
-              v-for="seg in compositionSegments.rows"
-              :key="seg.label"
-              class="ui-legend-row"
-            >
+            <div v-for="seg in compositionSegments.rows" :key="seg.label" class="ui-legend-row">
               <span class="ui-legend-dot" :style="{ background: seg.color }" />
               <span class="ui-legend-label" :title="seg.label">{{ seg.label }}</span>
               <span class="ui-legend-pct ui-num">{{ seg.pct.toFixed(0) }}%</span>
@@ -1012,7 +1023,6 @@ function formatTime(iso?: string): string {
   gap: var(--ui-space-6);
   flex-wrap: wrap;
 }
-
 
 .next-usage__pager {
   display: flex;

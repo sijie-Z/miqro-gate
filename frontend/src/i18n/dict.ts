@@ -1200,8 +1200,8 @@ export const DICT: Record<string, string> = {
   '输出': 'Output',
   '输出 Token': 'Output tokens',
   '输出 Tokens': 'Output tokens',
-  '达到限额的此百分比时进入预警；≥100% 为超限':
-    'Warn at this percentage of the limit; ≥100% counts as over limit',
+  '达到限额的此百分比时进入预警；≥90% 即将超限；≥100% 为超限':
+    'Warn at this percentage of the limit; ≥90% is near limit, ≥100% counts as over limit',
   '近 1 小时': 'Last hour',
   '近 20 次投递成功率': 'Delivery success rate (last 20)',
   '近 24 小时': 'Last 24 hours',
@@ -1587,6 +1587,9 @@ export const DICT: Record<string, string> = {
   '在「授权」按 项目 × 凭证 圈定模型范围。': 'Scope the models under Grants by project × credential.',
   '成员在「我的密钥」创建虚拟密钥并接入客户端。':
     'Members create Virtual Keys under My Keys and connect their clients.',
+  '成本（¥）': 'Cost (¥)',
+  '每年': 'Yearly',
+  '即将超限': 'Near limit',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [
