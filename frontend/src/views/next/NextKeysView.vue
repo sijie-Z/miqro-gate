@@ -5,7 +5,7 @@
  * flow + rotate/revoke + one-shot secret), rendered on the v2 component set.
  * APIs and route semantics are untouched.
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import {
   DropdownMenuContent,
   DropdownMenuItem,
@@ -176,6 +176,38 @@ const extraProjectOptions = computed(() =>
   projectsForGrant.value.filter((p) => p.id && p.id !== createProjectId.value),
 );
 
+// #646 Default-All: "one key for every project" is the default path — the
+// primary project defaults to the first option and every other project is
+// pre-selected (the user can uncheck). Deselecting is remembered for the
+// current form session; switching the primary backfills the previous primary
+// as an extra so no project is silently dropped.
+const extraDefaultsApplied = ref(false);
+let previousPrimary = '';
+
+function applyProjectDefaults(): void {
+  if (projectsForGrant.value.length === 0) {
+    return;
+  }
+  if (!createProjectId.value && projectsForGrant.value[0]?.id) {
+    createProjectId.value = projectsForGrant.value[0].id;
+  }
+  previousPrimary = createProjectId.value;
+  if (!extraDefaultsApplied.value) {
+    createExtraProjectIds.value = extraProjectOptions.value
+      .map((p) => p.id)
+      .filter((id): id is string => Boolean(id));
+    extraDefaultsApplied.value = true;
+  }
+}
+
+// The create form toggles from several places (header button, empty-state
+// button, cancel) — apply the defaults whenever it opens.
+watch(creating, (open) => {
+  if (open) {
+    applyProjectDefaults();
+  }
+});
+
 function onExtraProjects(next: boolean | string[] | Set<string>) {
   if (Array.isArray(next)) {
     createExtraProjectIds.value = next;
@@ -237,11 +269,18 @@ async function load() {
 // ---- create ----
 
 function onProjectChange() {
+  const newPrimary = createProjectId.value;
+  // Default-All (#646): switching the primary must not silently drop the old
+  // one — it stays bound as an extra unless already selected.
+  if (previousPrimary && previousPrimary !== newPrimary) {
+    if (!createExtraProjectIds.value.includes(previousPrimary)) {
+      createExtraProjectIds.value = [...createExtraProjectIds.value, previousPrimary];
+    }
+  }
+  previousPrimary = newPrimary;
   createGrantId.value = '';
   createModels.value = [];
-  createExtraProjectIds.value = createExtraProjectIds.value.filter(
-    (id) => id !== createProjectId.value,
-  );
+  createExtraProjectIds.value = createExtraProjectIds.value.filter((id) => id !== newPrimary);
 }
 
 function onGrantChange() {
@@ -253,6 +292,8 @@ function resetForm() {
   createName.value = '';
   createProjectId.value = '';
   createExtraProjectIds.value = [];
+  extraDefaultsApplied.value = false;
+  previousPrimary = '';
   createGrantId.value = '';
   createPurpose.value = 'CLAUDE_CODE';
   createModels.value = [];
@@ -564,9 +605,10 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             class="next-keys__field"
             data-testid="create-extra-projects"
           >
-            <span class="next-keys__field-label">同时绑定到其他项目（可选）</span>
+            <span class="next-keys__field-label">同时绑定到其他项目（默认全部已选）</span>
             <p class="next-keys__field-hint">
-              同一把 Key 加不同项目标签即可切换项目；附加项目需已具备同一供应商产品的授权。
+              一把 Key
+              全项目可用——默认已勾选全部项目，只需部分项目时可取消勾选；附加项目需已具备同一供应商产品的授权。
             </p>
             <div class="next-keys__extra-projects">
               <UiCheckbox

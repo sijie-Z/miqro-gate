@@ -2966,3 +2966,12 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **修复**：`VirtualKeyResolver` 拆出 `resolveIdentity()`（凭证抽取/解析/快照/HMAC，无归属阶梯；`resolve()` 与它共享 `authenticate()` 核心，清零纪律保持：invalid parse 在 try 外返回，避免对 null secret 做 wipe 的 NPE）；`ContextRegistryController` 改用 identity-only。IT 增补：多绑定 Key 不匹配后缀仍可读 registry（4/4）。文档：api-contract 注明 identity-only 语义。
 
 **观察（未改，留待评审）**：`/v1/models` 同样依赖 resolve()——多绑定 Key 带不匹配后缀时 400；真实使用中 Claude Code 的 Key 后缀通常匹配绑定，暂不动其语义。
+
+
+## 2026-09-16 中午 — Goal #646：建 Key 默认全选项目（CAA 收口批①，"一把 Key 全项目"成为默认路径）
+
+**背景**：跟踪 issue #645 / 方案 `docs/caa-next-batch-plan.md` §1（方案稿含 ② 无归属策略设计、③ Agent 自启、4 个开放问题，已随 PR #649 立档供评审）。
+
+**改动**（分支 feat/key-default-all-projects-646）：`NextKeysView` 打开表单即应用默认——主项目=第一个可选项目、附加项目全选（可取消）；切换主项目旧值回填为附加项（不静默丢项目）；重置后重新应用；文案「默认全部已选」；契约不变。spec 9/9（新增默认全选/切换回填；级联用例改显式取消勾选）；vue-tsc/eslint 通过。
+
+**验收**（并入主清单，步骤见方案 §1.2）：默认提交 → boundProjects 全量；两项目各一次真实推理 → 用量/每小时表分项目；取消勾选 → 该项目声明 403。
