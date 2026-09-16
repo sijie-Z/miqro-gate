@@ -19,14 +19,15 @@ const StubView = defineComponent({ name: 'StubView', template: '<div />' });
 
 /** Regular-nav route names, in the order the shell renders them. */
 const NAV = ['overview', 'keys', 'usage', 'skills', 'model-approvals', 'profile'] as const;
+type NavName = (typeof NAV)[number];
 
-function makeLoaders(): Record<string, ReturnType<typeof vi.fn>> {
-  const loaders: Record<string, ReturnType<typeof vi.fn>> = {};
-  for (const name of NAV) loaders[name] = vi.fn(() => Promise.resolve(StubView));
-  return loaders;
+function makeLoaders(): Record<NavName, ReturnType<typeof vi.fn>> {
+  return Object.fromEntries(
+    NAV.map((name) => [name, vi.fn(() => Promise.resolve(StubView))]),
+  ) as Record<NavName, ReturnType<typeof vi.fn>>;
 }
 
-async function mountShell(loaders: Record<string, ReturnType<typeof vi.fn>>) {
+async function mountShell(loaders: Record<NavName, ReturnType<typeof vi.fn>>) {
   const pinia = createPinia();
   setActivePinia(pinia);
   const auth = useAuthStore();
@@ -53,9 +54,10 @@ async function mountShell(loaders: Record<string, ReturnType<typeof vi.fn>>) {
   return { wrapper, router };
 }
 
-function navItem(wrapper: ReturnType<typeof mount>, name: (typeof NAV)[number]) {
-  const items = wrapper.findAll('.new-shell__nav-item');
-  return items[NAV.indexOf(name)];
+function navItem(wrapper: ReturnType<typeof mount>, name: NavName) {
+  const item = wrapper.findAll('.new-shell__nav-item')[NAV.indexOf(name)];
+  if (!item) throw new Error(`nav item not rendered: ${name}`);
+  return item;
 }
 
 describe('instant route switching (#668)', () => {
