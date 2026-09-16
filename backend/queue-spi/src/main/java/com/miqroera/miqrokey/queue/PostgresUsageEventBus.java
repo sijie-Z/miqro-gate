@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -50,15 +51,36 @@ import java.util.concurrent.atomic.AtomicLong;
  * unavailable), the drained events are re-enqueued in order for the next flush
  * and the failure is logged — usage is never silently lost. Writes are
  * idempotent, so a retried batch cannot double-count.
+ *
+ * <h2>Drop reporting (F07, #245)</h2> A dropped fact used to exist only as an
+ * in-process counter no operator could query. The bus now also persists the
+ * drop delta as a {@link QueueSignal} fact row, which the control plane
+ * evaluates like any other metric alert. The reporting rides the same scheduled
+ * writer executor as the flush — the hot path still only increments a counter,
+ * never schedules work and never touches JDBC. The delta is claimed atomically
+ * and given back if the write did not land, so a signal is eventually reported
+ * exactly once and a healthy gateway (no drops) writes nothing.
  */
 public final class PostgresUsageEventBus implements UsageEventBus {
 
     private static final Logger log = LoggerFactory.getLogger(PostgresUsageEventBus.class);
 
+    /**
+     * Tenant that owns the platform-level queue signal. The queue is a process
+     * resource, not a per-request one, so its fact rows carry the default
+     * (seed) tenant seeded by {@code V1__core_tables.sql}. Evaluation filters
+     * alert rules by tenant, so this fires platform-level rules only — a rule
+     * owned by any other tenant is never triggered by it. Single-tenant
+     * deployments (the v1 shape) see this as a plain global signal.
+     */
+    public static final UUID SIGNAL_TENANT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+
     private final BlockingQueue<Object> queue;
     private final UsageEventWriter writer;
+    private final QueueSignalWriter signalWriter;
     private final Scheduler writerScheduler;
     private final Clock clock;
+    private final int capacity;
     private final int flushThreshold;
     private final SaturationMode saturationMode;
     private final Duration writeThroughTimeout;
@@ -66,15 +88,19 @@ public final class PostgresUsageEventBus implements UsageEventBus {
     private final AtomicLong totalPublished = new AtomicLong();
     private final AtomicLong totalPersisted = new AtomicLong();
     private final AtomicLong totalDropped = new AtomicLong();
+    private final AtomicLong reportedDropped = new AtomicLong();
+    private final AtomicLong queuedHighWater = new AtomicLong();
     private final AtomicLong flushCount = new AtomicLong();
     private volatile Duration lastFlushDuration = Duration.ZERO;
     private volatile Instant lastFlushAt;
 
     public PostgresUsageEventBus(int capacity, int flushThreshold, UsageEventWriter writer, Scheduler writerScheduler,
-            Clock clock, SaturationMode saturationMode, Duration writeThroughTimeout) {
+            Clock clock, SaturationMode saturationMode, Duration writeThroughTimeout, QueueSignalWriter signalWriter) {
         this.queue = new ArrayBlockingQueue<>(capacity);
+        this.capacity = capacity;
         this.flushThreshold = flushThreshold;
         this.writer = writer;
+        this.signalWriter = signalWriter;
         this.writerScheduler = writerScheduler;
         this.clock = clock;
         this.saturationMode = saturationMode;
@@ -110,7 +136,17 @@ public final class PostgresUsageEventBus implements UsageEventBus {
             return;
         }
         totalDropped.incrementAndGet();
+        sampleHighWater();
         log.warn("Usage event bus saturated; event dropped. queued={} mode={}", queue.size(), saturationMode);
+    }
+
+    /**
+     * Records the deepest the queue got while it was losing events. Sampled only
+     * on the drop paths — the healthy path pays nothing, and the only moment the
+     * high-water mark is interesting is the moment it overflowed.
+     */
+    private void sampleHighWater() {
+        queuedHighWater.accumulateAndGet(queue.size(), Math::max);
     }
 
     /**
@@ -183,6 +219,50 @@ public final class PostgresUsageEventBus implements UsageEventBus {
         }
     }
 
+    /**
+     * Scheduled drop report, on the same cadence as the flush
+     * ({@code miqrokey.gateway.queue.flush-interval}). Claims the drop delta
+     * accumulated since the last reported signal and submits the write to the
+     * dedicated writer scheduler — the scheduling thread never runs JDBC.
+     *
+     * <p>
+     * A delta of zero returns immediately, so a healthy gateway writes no rows
+     * at all rather than a heartbeat per interval.
+     * </p>
+     */
+    @Scheduled(fixedDelayString = "${miqrokey.gateway.queue.flush-interval:1s}")
+    public void scheduledSignalReport() {
+        long observed = totalDropped.get();
+        long claimed = reportedDropped.get();
+        long delta = observed - claimed;
+        if (delta <= 0 || !reportedDropped.compareAndSet(claimed, observed)) {
+            return; // nothing was lost, or a concurrent report already claimed it
+        }
+        try {
+            writerScheduler.schedule(() -> reportSignal(delta));
+        } catch (RuntimeException e) {
+            // Rejected scheduling (writer queue saturated or scheduler
+            // disposed) must not swallow the loss: hand the delta back so the
+            // next cycle reports it. There is no in-flight guard to reset here,
+            // so the recovered failure is logged rather than rethrown.
+            reportedDropped.addAndGet(-delta);
+            log.warn("Queue saturation signal could not be scheduled; {} dropped events stay pending", delta, e);
+        }
+    }
+
+    /** Writes one drop-delta fact on the writer executor; restores it on failure. */
+    private void reportSignal(long delta) {
+        try {
+            signalWriter.writeSignal(new QueueSignal(SIGNAL_TENANT_ID, clock.instant(), delta, queuedHighWater.get(),
+                    capacity, saturationMode));
+        } catch (Exception e) {
+            // Claimed but not persisted: put the delta back so the next cycle
+            // reports it together with anything dropped since.
+            reportedDropped.addAndGet(-delta);
+            log.warn("Queue saturation signal write failed; {} dropped events stay pending", delta, e);
+        }
+    }
+
     @Override
     public void flush() {
         // #417: drain the queue COMPLETELY, in flushThreshold-sized chunks per
@@ -235,6 +315,7 @@ public final class PostgresUsageEventBus implements UsageEventBus {
             for (Object item : drained) {
                 if (!queue.offer(item)) {
                     totalDropped.incrementAndGet();
+                    sampleHighWater();
                 }
             }
             log.warn("Usage flush failed; {} events re-enqueued", drained.size());
