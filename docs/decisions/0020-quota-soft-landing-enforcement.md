@@ -61,6 +61,17 @@ CLAUDE.md §2 原文为「**不限流、不因预算阻断，只做 Webhook 告�
 
 CLAUDE.md §2 的措辞修订本身**尚未落盘**（该文件属项目级指令，改动需 owner 确认）；本 ADR 作为决策记录先行，修订文本以上表为准。
 
+若 owner 确认修订，需一并复核/更新的措辞落点（本 ADR 不改动它们，以免越过 owner 授权）：
+
+| 落点 | 现值 | 处置 |
+|---|---|---|
+| `CLAUDE.md` §2 | 「不限流、不因预算阻断，只做 Webhook 告警」 | 待 owner 确认后按上表修订 |
+| `README.md` 产品边界 | 「不限流、不因预算阻断请求；通过 Webhook 告警」 | 同上 |
+| `docs/session-handover.md` | 「不限流不因预算阻断（硬阻断需 ADR）」 | 同上 |
+| `docs/platform-middleware-roadmap.md` F51 段 | 「硬阻断（超限拒绝）需 ADR 反转决策」 | 同上（ADR 已反转，措辞待更新） |
+| `api-contract.md` §项目预算 | 「只预警不阻断」 | **不改**：该句描述的是**项目预算**口径，本 ADR 只对**配额规则**开放 `REJECT`，预算阻断仍不在范围内 |
+| `docs/progress.md` 历史条目 | 各批次当时的判断 | **不改**：历史记录保持原样，由本条与 §4 记录现状 |
+
 ## 4. 已落地形态（#684 块①，2026-09-16）
 
 - **迁移 V59**（追加，不改既有迁移）：`quota_rules.enforcement varchar(16) NOT NULL DEFAULT 'ALERT'` + `CHECK (enforcement IN ('ALERT','REJECT'))`；新表 `quota_enforcement`（`(tenant_id, scope_type, scope_id)` 唯一约束、`rule_id … ON DELETE CASCADE`、`metric`/`period` CHECK、`window_to > window_from` CHECK、`rule_id` 索引与 `window_to` 索引）。
