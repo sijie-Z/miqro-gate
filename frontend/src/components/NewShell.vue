@@ -32,6 +32,7 @@ import {
   Fullscreen1Icon,
   FullscreenExit1Icon,
   FolderOpenIcon,
+  InfoCircleIcon,
   LayersIcon,
   LockOnIcon,
   MenuIcon,
@@ -86,44 +87,62 @@ const regularNav: NavItem[] = [
   { name: 'profile', label: '资料', icon: UserIcon },
 ];
 
-const orgNav: NavItem[] = [
+// Admin navigation mirrors the Tencent AI-gateway instance-level structure
+// (#675): 模型管理 / 访问与授权(≈消费者管理) / 用量与配额 / 成本管理 /
+// 可观测性 / 安全与配置 / 集成管理. Grouping IS the architecture — keep the
+// seven groups readable against docs/tencent-ai-gateway-mapping.md §IA 对齐.
+const modelNav: NavItem[] = [
+  { name: 'providers', label: '供应商', icon: ShopIcon },
+  { name: 'plans', label: '订阅', icon: LayersIcon },
+  { name: 'credentials', label: '上游凭证', icon: SecuredIcon },
+];
+
+const accessNav: NavItem[] = [
   { name: 'users', label: '用户', icon: UserIcon },
   { name: 'teams', label: '团队', icon: UsergroupCircleIcon },
   { name: 'projects', label: '项目', icon: FolderOpenIcon },
   { name: 'grants', label: '授权', icon: LockOnIcon },
   { name: 'approval-center', label: '审批中心', icon: CheckCircleIcon },
+  { name: 'consumers', label: 'API 消费者', icon: SecuredIcon },
 ];
 
-const providerNav: NavItem[] = [
-  { name: 'providers', label: '供应商', icon: ShopIcon },
-  { name: 'plans', label: '订阅', icon: LayersIcon },
-  { name: 'credentials', label: '上游凭证', icon: SecuredIcon },
+const usageQuotaNav: NavItem[] = [
+  { name: 'admin-usage', label: '用量报表', icon: ChartBarIcon },
+  { name: 'quota-rules', label: '配额规则', icon: ErrorCircleIcon },
+  { name: 'exports', label: '导出任务', icon: DownloadIcon },
+  { name: 'deletions', label: '用量删除', icon: DeleteIcon },
+];
+
+const costNav: NavItem[] = [
+  { name: 'cost', label: '成本报表', icon: MoneyIcon },
+  { name: 'reconciliations', label: '账单对账', icon: FilePasteIcon },
+  { name: 'roi', label: '缓存收益', icon: ChartBarIcon },
   { name: 'prices', label: '定价', icon: MoneyIcon },
 ];
 
-const opsNav: NavItem[] = [
-  { name: 'admin-usage', label: '用量报表', icon: ChartBarIcon },
-  { name: 'cost', label: '成本报表', icon: MoneyIcon },
-  { name: 'quota-rules', label: '配额规则', icon: ErrorCircleIcon },
-  { name: 'roi', label: '缓存收益', icon: DownloadIcon },
-  { name: 'exports', label: '导出任务', icon: DownloadIcon },
-  { name: 'reconciliations', label: '账单对账', icon: FilePasteIcon },
-  { name: 'deletions', label: '用量删除', icon: DeleteIcon },
-  { name: 'webhooks', label: 'Webhook 端点', icon: NotificationIcon },
-  { name: 'consumers', label: 'API 消费者', icon: SecuredIcon },
-  { name: 'skillhub', label: '技能库管理', icon: AppIcon },
-  { name: 'agents', label: '智能体', icon: RobotIcon },
-  { name: 'services', label: '服务管理', icon: ServerIcon },
-  { name: 'configs', label: '全局配置', icon: SettingIcon },
-  { name: 'mcp-services', label: 'MCP 服务', icon: ToolsIcon },
-  { name: 'alert-rules', label: '告警规则', icon: ErrorCircleIcon },
+const observabilityNav: NavItem[] = [
   { name: 'audit', label: '审计日志', icon: FilePasteIcon },
   { name: 'mcp-access-logs', label: 'MCP 访问日志', icon: FilePasteIcon },
+  { name: 'retention-logs', label: '内容留痕', icon: FilePasteIcon },
+];
+
+const securityConfigNav: NavItem[] = [
+  { name: 'configs', label: '全局配置', icon: SettingIcon },
+  { name: 'alert-rules', label: '告警规则', icon: ErrorCircleIcon },
+  { name: 'webhooks', label: 'Webhook 端点', icon: NotificationIcon },
+  { name: 'settings', label: '部署信息', icon: InfoCircleIcon },
+];
+
+const integrationNav: NavItem[] = [
+  { name: 'mcp-services', label: 'MCP 服务', icon: ToolsIcon },
+  { name: 'agents', label: '智能体', icon: RobotIcon },
+  { name: 'services', label: '服务管理', icon: ServerIcon },
+  { name: 'skillhub', label: '技能库管理', icon: AppIcon },
 ];
 
 const isAdmin = computed(() => auth.user?.role === 'SYSTEM_ADMIN');
 
-/** "数据与告警 / Webhook 端点" style trail for the topbar (Vben-like chrome).
+/** "安全与配置 / Webhook 端点" style trail for the topbar (Vben-like chrome).
  *  Only grouped (admin) pages show a trail; ungrouped regular pages carry
  *  their own page title and a trail would just duplicate it. Split into
  *  group/current segments so the two text tones can differ, as on the demo. */
@@ -143,9 +162,13 @@ const navGroups = computed(() => {
   const groups: { title?: string; items: NavItem[] }[] = [{ items: regularNav }];
   if (isAdmin.value) {
     groups.push(
-      { title: '组织', items: orgNav },
-      { title: '供应商', items: providerNav },
-      { title: '数据与告警', items: opsNav },
+      { title: '模型管理', items: modelNav },
+      { title: '访问与授权', items: accessNav },
+      { title: '用量与配额', items: usageQuotaNav },
+      { title: '成本管理', items: costNav },
+      { title: '可观测性', items: observabilityNav },
+      { title: '安全与配置', items: securityConfigNav },
+      { title: '集成管理', items: integrationNav },
     );
   }
   return groups;
