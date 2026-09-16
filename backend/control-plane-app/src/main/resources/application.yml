@@ -60,6 +60,11 @@ miqrokey:
     connect-timeout: ${MIQROKEY_PRICE_SYNC_CONNECT_TIMEOUT:10s}
     request-timeout: ${MIQROKEY_PRICE_SYNC_REQUEST_TIMEOUT:30s}
     max-bytes: ${MIQROKEY_PRICE_SYNC_MAX_BYTES:10485760}
+  # 配额软着陆（#684，ADR-0020）：REJECT 规则超限判定周期（fixedDelay——上一轮
+  # 结束后计时）；判定变化时发布路由刷新，网关在一个快照周期内开始 429。
+  quota:
+    enforcement-interval-ms: ${MIQROKEY_QUOTA_ENFORCEMENT_INTERVAL_MS:60000}
+    enforcement-initial-delay-ms: ${MIQROKEY_QUOTA_ENFORCEMENT_INITIAL_DELAY_MS:45000}
 
   retention:
     consumer:

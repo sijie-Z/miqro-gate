@@ -181,22 +181,48 @@ public final class GatewayTestKeys {
     }
 
     /**
+     * Fixture snapshot with exceeded-quota verdicts injected (#684 gateway contract
+     * tests): the user/project ids land in the snapshot's block maps, each blocked
+     * scope carrying the window end that feeds the 429's Retry-After.
+     */
+    public static RouteSnapshot snapshotWithQuotaBlocks(String baseUrl, Set<UUID> blockedUserIds,
+            Set<UUID> blockedProjectIds, KeyFixture... keys) {
+        return snapshotWithQuotaBlocks(baseUrl, untilByScope(blockedUserIds), untilByScope(blockedProjectIds), keys);
+    }
+
+    /** Same fixture with explicit window ends ("until" per blocked scope). */
+    public static RouteSnapshot snapshotWithQuotaBlocks(String baseUrl, Map<UUID, Instant> blockedUsers,
+            Map<UUID, Instant> blockedProjects, KeyFixture... keys) {
+        return snapshotFull(baseUrl, Map.of(), Map.of(), Map.of(), blockedUsers, blockedProjects, keys);
+    }
+
+    /** Default fixture window end: one hour out, i.e. a plausible Retry-After. */
+    public static Map<UUID, Instant> untilByScope(Set<UUID> scopeIds) {
+        Map<UUID, Instant> until = new LinkedHashMap<>();
+        for (UUID id : scopeIds) {
+            until.put(id, Instant.now().plusSeconds(3600));
+        }
+        return until;
+    }
+
+    /**
      * Fixture snapshot with per-service upstream budgets (I20, doc 135906 "超时时间")
      * keyed by service name; absent services keep the 60s default.
      */
     public static RouteSnapshot snapshotWithTimeouts(String baseUrl, Map<String, McpResiliencePolicy> policies,
             Map<String, Integer> upstreamTimeoutsMs, KeyFixture... keys) {
-        return snapshotFull(baseUrl, policies, upstreamTimeoutsMs, Map.of(), keys);
+        return snapshotFull(baseUrl, policies, upstreamTimeoutsMs, Map.of(), Map.of(), Map.of(), keys);
     }
 
     /** Fixture snapshot with a retention switch (ADR-0014) keyed by tenant. */
     public static RouteSnapshot snapshotWithRetention(String baseUrl, Map<String, McpResiliencePolicy> policies,
             Map<UUID, RetentionConfig> retentionByTenant, KeyFixture... keys) {
-        return snapshotFull(baseUrl, policies, Map.of(), retentionByTenant, keys);
+        return snapshotFull(baseUrl, policies, Map.of(), retentionByTenant, Map.of(), Map.of(), keys);
     }
 
     private static RouteSnapshot snapshotFull(String baseUrl, Map<String, McpResiliencePolicy> policies,
-            Map<String, Integer> upstreamTimeoutsMs, Map<UUID, RetentionConfig> retentionByTenant, KeyFixture... keys) {
+            Map<String, Integer> upstreamTimeoutsMs, Map<UUID, RetentionConfig> retentionByTenant,
+            Map<UUID, Instant> quotaBlockedUsers, Map<UUID, Instant> quotaBlockedProjects, KeyFixture... keys) {
         Map<String, RouteSnapshot.KeyRecord> keyMap = new LinkedHashMap<>();
         Map<UUID, Map<String, RouteSnapshot.BindingRecord>> bindingMap = new LinkedHashMap<>();
         Map<UUID, RouteSnapshot.CredentialRecord> credentialMap = new LinkedHashMap<>();
@@ -221,7 +247,8 @@ public final class GatewayTestKeys {
         }
         return new RouteSnapshot(1, Instant.EPOCH, keyMap, bindingMap, credentialMap, modelsMap, grantModelsMap,
                 upstreamModelsMap, productCodesMap, providerIdsMap, mcpConsumers(),
-                mcpServices(baseUrl, policies, upstreamTimeoutsMs), retentionByTenant, Map.of());
+                mcpServices(baseUrl, policies, upstreamTimeoutsMs), retentionByTenant, Map.of(), quotaBlockedUsers,
+                quotaBlockedProjects);
     }
 
     // ------------------------------------------------------------------

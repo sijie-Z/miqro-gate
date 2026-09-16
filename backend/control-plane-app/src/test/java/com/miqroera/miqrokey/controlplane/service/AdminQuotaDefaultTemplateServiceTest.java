@@ -4,6 +4,7 @@ import com.miqroera.miqrokey.controlplane.dto.ConfigureQuotaDefaultTemplateReque
 import com.miqroera.miqrokey.domain.model.QuotaDefaultTemplate;
 import com.miqroera.miqrokey.domain.model.QuotaMetric;
 import com.miqroera.miqrokey.domain.model.QuotaPeriod;
+import com.miqroera.miqrokey.domain.model.QuotaAction;
 import com.miqroera.miqrokey.domain.model.QuotaRule;
 import com.miqroera.miqrokey.domain.model.QuotaRuleStatus;
 import com.miqroera.miqrokey.domain.model.QuotaScopeType;
@@ -67,8 +68,8 @@ class AdminQuotaDefaultTemplateServiceTest {
     void enabledTemplateCopiesSnapshot() {
         when(templates.find(tenantId)).thenReturn(Optional.of(template(true)));
         QuotaRule inserted = new QuotaRule(UUID.randomUUID(), tenantId, QuotaScopeType.USER, newUserId,
-                QuotaMetric.TOKENS, QuotaPeriod.MONTHLY, 1_000_000, 80, QuotaRuleStatus.ACTIVE, adminId, 0,
-                Instant.now(), Instant.now());
+                QuotaMetric.TOKENS, QuotaPeriod.MONTHLY, QuotaAction.ALERT, 1_000_000, 80, QuotaRuleStatus.ACTIVE,
+                adminId, 0, Instant.now(), Instant.now());
         when(rules.insertIfAbsent(any())).thenReturn(Optional.of(inserted));
 
         assertThat(service.applyToNewUser(tenantId, adminId, newUserId)).contains(inserted);

@@ -33,6 +33,7 @@ export type QuotaScopeType = 'USER' | 'PROJECT';
 export type QuotaMetric = 'TOKENS' | 'REQUESTS' | 'COST';
 export type QuotaPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 export type QuotaRuleStatus = 'ACTIVE' | 'DISABLED';
+export type QuotaAction = 'ALERT' | 'REJECT';
 export type QuotaLevel = 'NORMAL' | 'WARNING' | 'NEAR_LIMIT' | 'EXCEEDED';
 
 export type McpAclMode = 'NONE' | 'ALLOW' | 'DENY';
