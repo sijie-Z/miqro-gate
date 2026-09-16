@@ -27,10 +27,16 @@ const mockApi = vi.mocked(api);
 
 // #657: the credentials list deep-links here with ?credentialId=…; the view
 // turns the query into a real filter, so the query must be swappable per test.
-const { routeQuery } = vi.hoisted(() => ({ routeQuery: { value: {} as Record<string, string> } }));
+const { routeQuery } = vi.hoisted(() => ({ routeQuery: { value: {} as Record<string, unknown> } }));
 
-vi.mock('vue-router', () => ({
+// Partial mock: UiTable imports `RouterLink` itself (#657), so replacing the
+// whole module would leave that import undefined and break the empty state.
+// useRouter is here too — a child that navigates would otherwise blow up as
+// "useRouter is not a function" and take all the tests in this file with it.
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
   useRoute: () => ({ query: routeQuery.value }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), resolve: vi.fn() }),
 }));
 
 const SelectStub = defineComponent({
@@ -234,9 +240,10 @@ describe('NextGrantsView', () => {
     return JSON.parse(raw as string);
   }
 
-  /** Data rows only — the empty state renders a <tr> without this class. */
+  /** Data rows only — skeleton rows share the class while loading. */
   function rowCount(wrapper: ReturnType<typeof mountView>): number {
-    return wrapper.findAll('.ui-table__row').length;
+    return wrapper.findAll('.ui-table__row').filter((row) => !row.find('.ui-skeleton').exists())
+      .length;
   }
 
   async function pickOption(wrapper: ReturnType<typeof mountView>, label: string) {
@@ -557,6 +564,17 @@ describe('NextGrantsView', () => {
     expect(routeTarget(wrapper, '[data-testid="grants-filter-clear"]')).toEqual({ name: 'grants' });
   });
 
+  it('still filters when the query parameter is duplicated (#657)', async () => {
+    // ?credentialId=c2&credentialId=c1 reaches the view as an array; treating
+    // it as "no filter" would show the full list under a URL that says otherwise.
+    routeQuery.value = { credentialId: ['c2', 'c1'] };
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(rowCount(wrapper)).toBe(1);
+    expect(wrapper.find('[data-testid="grants-filter"]').text()).toContain('moonshot-main');
+  });
+
   it('lists everything when no credential is selected (#657)', async () => {
     routeQuery.value = {};
     const wrapper = mountView();
@@ -578,5 +596,26 @@ describe('NextGrantsView', () => {
     const action = wrapper.find('[data-testid="table-empty-action"]');
     expect(action.text()).toBe('查看全部授权');
     expect(routeTarget(wrapper, '[data-testid="table-empty-action"]')).toEqual({ name: 'grants' });
+  });
+
+  it('does not claim the credential has no grants when the load failed (#657)', async () => {
+    routeQuery.value = { credentialId: 'c1' };
+    mockApi.listGrants.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: 'boom',
+        status: 500,
+        code: 'INTERNAL',
+        requestId: 'req-1',
+      }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    // A failed fetch leaves the table empty, but "this credential has no
+    // grants" would be a claim about data we never received.
+    expect(wrapper.find('.ui-alert--error').exists()).toBe(true);
+    expect(wrapper.text()).not.toContain('该凭证还没有被任何授权引用');
+    expect(wrapper.find('[data-testid="table-empty-action"]').exists()).toBe(false);
   });
 });
