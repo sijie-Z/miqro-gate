@@ -16,8 +16,10 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.sql.Timestamp;
 import java.nio.file.Path;
 import java.security.SecureRandom;
+import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -111,6 +113,44 @@ class RouteSnapshotRefreshIntegrationTest {
         assertThat(snapshot.upstreamModels(seeded.productId())).containsExactly("upstream-model-a");
         assertThat(snapshot.productCode(seeded.productId())).isEqualTo("deepseek-payg-api");
         assertThat(snapshot.providerId(seeded.productId())).isEqualTo(seeded.providerId());
+    }
+
+    @Test
+    @DisplayName("quota enforcement verdicts reach the snapshot via the same refresh (#684)")
+    void quotaEnforcementVerdictsReachSnapshot() throws Exception {
+        await(() -> holder.current().version() >= 1);
+        long before = holder.current().version();
+        UUID blockedUser = UUID.randomUUID();
+        UUID blockedProject = UUID.randomUUID();
+        Instant userWindowEnd = Instant.now().plusSeconds(7200);
+        Instant projectWindowEnd = Instant.now().plusSeconds(3600);
+        // The default tenant is seeded by V1, so the FK is satisfied without
+        // seeding a key of this class' own fixture.
+        jdbc.update("""
+                INSERT INTO quota_enforcement (rule_id, tenant_id, scope_type, scope_id, metric, period, window_end)
+                VALUES (:r1, :tenant, 'USER', :user, 'TOKENS', 'DAILY', :userEnd),
+                       (:r2, :tenant, 'PROJECT', :project, 'REQUESTS', 'MONTHLY', :projectEnd)
+                """,
+                new MapSqlParameterSource("r1", UUID.randomUUID()).addValue("r2", UUID.randomUUID())
+                        .addValue("tenant", TENANT_ID).addValue("user", blockedUser).addValue("project", blockedProject)
+                        .addValue("userEnd", Timestamp.from(userWindowEnd))
+                        .addValue("projectEnd", Timestamp.from(projectWindowEnd)));
+        jdbc.getJdbcTemplate().execute("SELECT pg_notify('" + CHANNEL + "', '')");
+
+        await(() -> holder.current().version() > before);
+        RouteSnapshot snapshot = holder.current();
+        assertThat(snapshot.quotaBlockedUser(blockedUser)).isTrue();
+        assertThat(snapshot.quotaBlockedProject(blockedProject)).isTrue();
+        assertThat(snapshot.quotaBlockedUser(UUID.randomUUID())).isFalse();
+        assertThat(snapshot.quotaBlockedProject(null)).isFalse();
+        // The window end travels with the verdict (429 -> Retry-After).
+        assertThat(snapshot.quotaBlockedUserUntil(blockedUser)).isAfter(Instant.now().plusSeconds(7000))
+                .isBefore(Instant.now().plusSeconds(7300));
+        assertThat(snapshot.quotaBlockedProjectUntil(blockedProject)).isAfter(Instant.now().plusSeconds(3500))
+                .isBefore(Instant.now().plusSeconds(3700));
+        assertThat(snapshot.quotaBlockedUserUntil(UUID.randomUUID())).isNull();
+
+        jdbc.update("DELETE FROM quota_enforcement", new MapSqlParameterSource());
     }
 
     private static final UUID GRANT_ID = UUID.fromString("dddddddd-0000-0000-0000-000000000001");

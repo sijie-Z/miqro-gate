@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.service;
 import com.miqroera.miqrokey.controlplane.dto.QuotaRuleView;
 import com.miqroera.miqrokey.controlplane.dto.UpsertQuotaRuleRequest;
 import com.miqroera.miqrokey.domain.model.Project;
+import com.miqroera.miqrokey.domain.model.QuotaAction;
 import com.miqroera.miqrokey.domain.model.QuotaPeriod;
 import com.miqroera.miqrokey.domain.model.QuotaRule;
 import com.miqroera.miqrokey.domain.model.QuotaRuleStatus;
@@ -12,13 +13,10 @@ import com.miqroera.miqrokey.domain.repository.ProjectRepository;
 import com.miqroera.miqrokey.domain.repository.QuotaRuleRepository;
 import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
-import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -33,30 +31,28 @@ import java.util.UUID;
  * (TOKENS | REQUESTS | COST) per UTC period (DAILY | WEEKLY | MONTHLY | YEARLY)
  * with a warn threshold. The current-period watermark is computed at read time
  * from usage events through the shared aggregator; the derived level follows
- * the Tencent consumer-quota states (NORMAL / WARNING / NEAR_LIMIT / EXCEEDED).
- * A rule never blocks traffic — this plan is the alerting-only half of quota
- * governance; hard blocking and webhook alerting are separate ADR/extension
- * steps.
+ * the Tencent consumer-quota states (NORMAL / WARNING / NEAR_LIMIT / EXCEEDED)
+ * and comes from the shared {@link QuotaWatermarks}. An exceeded rule acts
+ * according to its {@code action}: ALERT only reports (default), REJECT blocks
+ * the covered scope at the gateway (#684/ADR-0020).
  */
 @Service
 public class AdminQuotaRuleService {
 
     private static final int DEFAULT_WARN_PERCENT = 80;
-    /** Fixed guidance tier (#683): Tencent's "即将超限" state sits at 90%. */
-    private static final int NEAR_LIMIT_PERCENT = 90;
 
     private final QuotaRuleRepository quotaRuleRepository;
     private final UserRepository userRepository;
     private final ProjectRepository projectRepository;
-    private final AdminUsageStatsService usageStatsService;
+    private final QuotaWatermarks watermarks;
     private final AuditService auditService;
 
     public AdminQuotaRuleService(QuotaRuleRepository quotaRuleRepository, UserRepository userRepository,
-            ProjectRepository projectRepository, AdminUsageStatsService usageStatsService, AuditService auditService) {
+            ProjectRepository projectRepository, QuotaWatermarks watermarks, AuditService auditService) {
         this.quotaRuleRepository = quotaRuleRepository;
         this.userRepository = userRepository;
         this.projectRepository = projectRepository;
-        this.usageStatsService = usageStatsService;
+        this.watermarks = watermarks;
         this.auditService = auditService;
     }
 
@@ -85,19 +81,23 @@ public class AdminQuotaRuleService {
         requireScope(tenantId, request.scopeType(), request.scopeId());
         QuotaRuleStatus status = request.status() == null ? QuotaRuleStatus.ACTIVE : request.status();
         int warnPercent = request.warnPercent() == null ? DEFAULT_WARN_PERCENT : request.warnPercent();
+        // Soft landing (#684): an omitted action keeps the alerting-only behaviour.
+        QuotaAction exceededAction = request.action() == null ? QuotaAction.ALERT : request.action();
         QuotaRule existing = quotaRuleRepository
                 .findByKey(tenantId, request.scopeType(), request.scopeId(), request.metric(), request.period())
                 .orElse(null);
         Instant now = Instant.now();
         QuotaRule plan = new QuotaRule(existing == null ? UUID.randomUUID() : existing.id(), tenantId,
-                request.scopeType(), request.scopeId(), request.metric(), request.period(), request.limitValue(),
-                warnPercent, status, adminId, existing == null ? 0 : existing.version(), now, now);
+                request.scopeType(), request.scopeId(), request.metric(), request.period(), exceededAction,
+                request.limitValue(), warnPercent, status, adminId, existing == null ? 0 : existing.version(), now,
+                now);
         QuotaRule stored = quotaRuleRepository.upsert(plan);
         String action = existing == null ? "QUOTA_RULE_CREATE" : "QUOTA_RULE_UPDATE";
         auditService.record(tenantId, adminId, action, "QUOTA_RULE", stored.id(),
                 auditSummary("scopeType", stored.scopeType().name(), "scopeId", stored.scopeId(), "metric",
-                        stored.metric().name(), "period", stored.period().name(), "limit", stored.limitValue(),
-                        "warnPercent", stored.warnPercent(), "status", stored.status().name()),
+                        stored.metric().name(), "period", stored.period().name(), "action", stored.action().name(),
+                        "limit", stored.limitValue(), "warnPercent", stored.warnPercent(), "status",
+                        stored.status().name()),
                 requestId);
         return view(tenantId, stored);
     }
@@ -127,31 +127,18 @@ public class AdminQuotaRuleService {
         }
     }
 
-    /** Live watermark: usage of the current UTC window of the rule's period. */
+    /**
+     * Live watermark of the current UTC window — delegated to the shared
+     * {@link QuotaWatermarks} so the page and the enforcement gate can never
+     * disagree on the level (#684).
+     */
     private QuotaRuleView view(UUID tenantId, QuotaRule rule) {
-        Window window = window(rule.period());
-        // Uncapped variant (#683): a YEARLY window spans 365 days, beyond the
-        // 93-day guard on the public usage API.
-        UsageSummary summary = usageStatsService.summaryUncapped(tenantId, "project", window.from(), window.to(),
-                rule.scopeType() == QuotaScopeType.USER ? rule.scopeId() : null,
-                rule.scopeType() == QuotaScopeType.PROJECT ? rule.scopeId() : null);
-        BigDecimal used = switch (rule.metric()) {
-            case TOKENS -> BigDecimal.valueOf(summary.totals().tokens().total());
-            case REQUESTS -> BigDecimal.valueOf(summary.totals().requests().upstream());
-            case COST -> summary.totals().cost().upstreamPaid();
-        };
-        BigDecimal usedPct = used.multiply(BigDecimal.valueOf(100)).divide(BigDecimal.valueOf(rule.limitValue()), 2,
-                RoundingMode.HALF_UP);
-        // Severity order: full > fixed 90% guidance tier > the rule's own warn.
-        String level = usedPct.compareTo(BigDecimal.valueOf(100)) >= 0
-                ? "EXCEEDED"
-                : usedPct.compareTo(BigDecimal.valueOf(NEAR_LIMIT_PERCENT)) >= 0
-                        ? "NEAR_LIMIT"
-                        : usedPct.compareTo(BigDecimal.valueOf(rule.warnPercent())) >= 0 ? "WARNING" : "NORMAL";
+        QuotaWatermarks.Watermark watermark = watermarks.evaluate(tenantId, rule);
         ScopeInfo scope = scopeInfo(tenantId, rule.scopeType(), rule.scopeId());
         return new QuotaRuleView(rule.id(), rule.scopeType(), rule.scopeId(), scope.name(), scope.tag(), rule.metric(),
-                rule.period(), rule.limitValue(), rule.warnPercent(), rule.status(), used, usedPct, level,
-                window.from(), window.to(), rule.createdAt(), rule.updatedAt(), rule.version());
+                rule.period(), rule.action(), rule.limitValue(), rule.warnPercent(), rule.status(), watermark.used(),
+                watermark.usedPct(), watermark.level(), watermark.from(), watermark.to(), rule.createdAt(),
+                rule.updatedAt(), rule.version());
     }
 
     private ScopeInfo scopeInfo(UUID tenantId, QuotaScopeType scopeType, UUID scopeId) {

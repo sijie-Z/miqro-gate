@@ -3147,9 +3147,11 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 - **文档收口（本批）**：mapping 行 14/15 过时状态更正 + 「2026-09-16 收口批」对位表 + **对位说明 A（协议/Base Path/包体采集）与 B（消费者/消费者组/团队/项目）**；ADR-0019（配额超限拒绝，Proposed）；feature-backlog F51 状态；ai-gateway-comparison MCP 行刷新；CHANGELOG 本批条目。
 
-**待 owner 拍板**：ADR-0019（是否反转「不因预算阻断」提供 REJECT 规则；含 429 信封、5 分钟近似计数与未决问题 3 项）。
+**owner 已拍板（2026-09-16）**：ADR-0019 三个未决问题闭环——① 立项=是（软着陆：拒绝请求，否决自动禁用 Key）；② 首版范围=USER+PROJECT × TOKENS/REQUESTS/COST；③ 状态码=429。落地形态与实现见 **ADR-0020**（不采纳草案的数据面计数形态）。
 
 **未做（记录）**：MCP 服务向导「服务类型/后端类型」枚举（我们固定标准透传形态）、HTTP→MCP 转换、消费者组实体、配额缓存命中「全量计入」档（语义天然等价「不计入」）——均按既有裁决维持，mapping 已注明理由。
+
+- **#684 配额软着陆（超限拒绝 429）→ PR（ADR-0020）**：从「只算不管」到真闸门——规则级 `action ∈ {ALERT, REJECT}`（默认 ALERT，零回归）；REJECT 规则超限后网关对该用户/项目 429 (`quota_exceeded` + `Retry-After` 窗口结束提示，`/v1/models` 同门)，Key 不失效、提额/跨窗口自动恢复。链路：控制面评估器（60s，共享 `QuotaWatermarks`）→ `quota_enforcement`（V59，整体替换）→ 判定集变化才 pg_notify → 快照两集合 → 网关热路径零查询。并行的配额扩维（#683/#686，COST/YEARLY/NEAR_LIMIT）已先行合入，本批在其之上只做执行面，并同步 api-contract §5.19 / database-schema / configuration-reference / ADR-0020 / F51。
 
 ## 2026-09-16 晚间 — 偏好抽屉补缺 #579：折叠菜单开关 + 内容宽度 1200 + 抽屉内边距
 
@@ -3166,3 +3168,25 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 （说明：上述 516 条警告全部来自 `prettier/prettier` 的行尾项——515 条 `Delete ␍` 与 1 条 `Delete ␍⏎␍`。本机为 CRLF 检出而 prettier 期望 LF，`npm run lint` 自带的 `--fix` 会重写全树约 100+ 文件的行尾，故本轮验证改用等价的、不带 `--fix` 的 `npx eslint`。该行尾基线在 `develop` 的 HEAD 上同样成立：未改动的 `src/ui/Button.vue` 单跑亦为 `201 problems (0 errors, 201 warnings)`。）
 
 **边界与影响**：`frontend/e2e/baseline-screenshots/` 为捕获式基线（无像素对比断言），其截图内容宽度仍反映旧的 1440px，本批不重新生成、不影响 CI；`docs/frontend-design.md` 已同步为 1200px；`tokens.css` 的 v1 `--miqrokey-content-max: 1600px` 属旧层，不在本 issue 范围。
+
+### 并入 develop 新基线（2026-09-16）：merge `adfb670`（#695 / #684 配额软着陆）
+
+- 背景与手法：develop 于本日推进到 `adfb670`，本分支（原基于 `50a9b24`）与其冲突。用
+  `git merge origin/develop`（**产生合并提交，非 rebase**）并入基线，本分支改动全部保留。
+- 冲突清单与解法（冲突文件共 **1** 个）：
+  - `docs/progress.md`——两侧都在文件末尾追加：develop 追加 `#684` 小节，本分支追加「2026-09-16 晚间 #579」段。
+    解法：**两边都保留**，develop 段在前、本分支段在后（本分支段逐字未改）。
+    自检：合并结果与 develop 版逐字节比对，差异恰为本分支那 16 行新增段（sha256 `cab4e443…`）；本分支相对
+    merge-base 的自身改动为 `16 insertions / 0 deletions`，确认未丢内容。
+  - 同一区域另有 develop 单侧改动（`待 owner 拍板` → `owner 已拍板（2026-09-16）`）由 git 自动合并——
+    本分支从未改过该行。
+  - 预期中的 `design-tokens.css` / `design-base.css` **未冲突**：develop 的配额执行面改动未触及这两个文件。
+- 复验（2026-09-16，真实命令与结果）：
+  - `npm run typecheck`（vue-tsc app/spec/node 三工程）→ 退出码 0，无错误输出。
+  - `npm run test` → **59 files / 335 tests passed**（较合并前 +1，来自 develop 并入的
+    `NextQuotaRulesView.spec.ts`）。
+  - lint：`npm run lint` 定义为 `eslint . --ext .vue,.ts,.tsx --fix`；本轮以**同一脚本加 `--no-fix`** 运行
+    （`npm run lint -- --no-fix`）→ 退出码 0、`59204 problems (0 errors, 59204 warnings)`，警告全部为
+    `prettier/prettier` 行尾项（CRLF 检出基线）。不用 `--fix` 的原因已实测：`--fix-dry-run` 对未改动的
+    `src/ui/Button.vue` 给出 CR 数 201 → 0 的修复输出（该文件单跑 0 errors），即 `--fix` 会静默重写全树行尾；
+    执行前后 `git status --porcelain` 均为 42 项，确认无文件被写入。

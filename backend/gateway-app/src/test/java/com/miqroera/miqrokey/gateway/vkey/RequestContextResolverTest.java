@@ -49,7 +49,8 @@ class RequestContextResolverTest {
                 "DISABLED", "CLAUDE_CODE", GRANT_A);
         return new RouteSnapshot(1, Instant.EPOCH, Map.of("pub-1", key), Map.of(KEY_ID, bindings),
                 Map.of(CRED_A, credential(CRED_A, PROJECT_A), CRED_B, credential(CRED_B, PROJECT_B)), Map.of(),
-                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), policies);
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), policies, java.util.Map.of(),
+                java.util.Map.of());
     }
 
     private static RouteSnapshot.CredentialRecord credential(UUID id, UUID project) {

@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.service;
 import com.miqroera.miqrokey.controlplane.dto.ConfigureQuotaDefaultTemplateRequest;
 import com.miqroera.miqrokey.controlplane.dto.QuotaDefaultTemplateView;
 import com.miqroera.miqrokey.domain.model.QuotaDefaultTemplate;
+import com.miqroera.miqrokey.domain.model.QuotaAction;
 import com.miqroera.miqrokey.domain.model.QuotaRule;
 import com.miqroera.miqrokey.domain.model.QuotaRuleStatus;
 import com.miqroera.miqrokey.domain.model.QuotaScopeType;
@@ -103,7 +104,7 @@ public class AdminQuotaDefaultTemplateService {
         }
         Instant now = Instant.now();
         QuotaRule snapshot = new QuotaRule(UUID.randomUUID(), tenantId, QuotaScopeType.USER, newUserId,
-                template.metric(), template.period(), template.limitValue(), SNAPSHOT_WARN_PERCENT,
+                template.metric(), template.period(), QuotaAction.ALERT, template.limitValue(), SNAPSHOT_WARN_PERCENT,
                 QuotaRuleStatus.ACTIVE, adminId, 0, now, now);
         Optional<QuotaRule> inserted = quotaRuleRepository.insertIfAbsent(snapshot);
         if (inserted.isPresent()) {

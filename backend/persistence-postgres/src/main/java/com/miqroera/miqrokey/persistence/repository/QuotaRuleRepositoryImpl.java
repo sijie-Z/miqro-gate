@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.persistence.repository;
 
+import com.miqroera.miqrokey.domain.model.QuotaAction;
 import com.miqroera.miqrokey.domain.model.QuotaMetric;
 import com.miqroera.miqrokey.domain.model.QuotaPeriod;
 import com.miqroera.miqrokey.domain.model.QuotaRule;
@@ -22,15 +23,16 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class QuotaRuleRepositoryImpl implements QuotaRuleRepository {
 
-    private static final String COLS = "id, tenant_id, scope_type, scope_id, metric, period, limit_value,"
+    private static final String COLS = "id, tenant_id, scope_type, scope_id, metric, period, action, limit_value,"
             + " warn_percent, status, created_by, version, created_at, updated_at";
 
     private static final RowMapper<QuotaRule> ROW_MAPPER = (rs, rowNum) -> new QuotaRule((UUID) rs.getObject("id"),
             (UUID) rs.getObject("tenant_id"), QuotaScopeType.valueOf(rs.getString("scope_type")),
             (UUID) rs.getObject("scope_id"), QuotaMetric.valueOf(rs.getString("metric")),
-            QuotaPeriod.valueOf(rs.getString("period")), rs.getLong("limit_value"), rs.getInt("warn_percent"),
-            QuotaRuleStatus.valueOf(rs.getString("status")), (UUID) rs.getObject("created_by"), rs.getLong("version"),
-            rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
+            QuotaPeriod.valueOf(rs.getString("period")), QuotaAction.valueOf(rs.getString("action")),
+            rs.getLong("limit_value"), rs.getInt("warn_percent"), QuotaRuleStatus.valueOf(rs.getString("status")),
+            (UUID) rs.getObject("created_by"), rs.getLong("version"), rs.getTimestamp("created_at").toInstant(),
+            rs.getTimestamp("updated_at").toInstant());
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -42,11 +44,12 @@ public class QuotaRuleRepositoryImpl implements QuotaRuleRepository {
     @Transactional
     public QuotaRule upsert(QuotaRule rule) {
         return jdbc.queryForObject("""
-                INSERT INTO quota_rules (id, tenant_id, scope_type, scope_id, metric, period, limit_value,
+                INSERT INTO quota_rules (id, tenant_id, scope_type, scope_id, metric, period, action, limit_value,
                     warn_percent, status, created_by, version, created_at, updated_at)
-                VALUES (:id, :tenantId, :scopeType, :scopeId, :metric, :period, :limitValue,
+                VALUES (:id, :tenantId, :scopeType, :scopeId, :metric, :period, :action, :limitValue,
                     :warnPercent, :status, :createdBy, 0, :createdAt, :updatedAt)
                 ON CONFLICT (tenant_id, scope_type, scope_id, metric, period) DO UPDATE SET
+                    action = EXCLUDED.action,
                     limit_value = EXCLUDED.limit_value,
                     warn_percent = EXCLUDED.warn_percent,
                     status = EXCLUDED.status,
@@ -57,9 +60,9 @@ public class QuotaRuleRepositoryImpl implements QuotaRuleRepository {
                 new MapSqlParameterSource().addValue("id", rule.id()).addValue("tenantId", rule.tenantId())
                         .addValue("scopeType", rule.scopeType().name()).addValue("scopeId", rule.scopeId())
                         .addValue("metric", rule.metric().name()).addValue("period", rule.period().name())
-                        .addValue("limitValue", rule.limitValue()).addValue("warnPercent", rule.warnPercent())
-                        .addValue("status", rule.status().name()).addValue("createdBy", rule.createdBy())
-                        .addValue("createdAt", Timestamp.from(rule.createdAt()))
+                        .addValue("action", rule.action().name()).addValue("limitValue", rule.limitValue())
+                        .addValue("warnPercent", rule.warnPercent()).addValue("status", rule.status().name())
+                        .addValue("createdBy", rule.createdBy()).addValue("createdAt", Timestamp.from(rule.createdAt()))
                         .addValue("updatedAt", Timestamp.from(rule.updatedAt())),
                 ROW_MAPPER);
     }
@@ -69,9 +72,9 @@ public class QuotaRuleRepositoryImpl implements QuotaRuleRepository {
     public Optional<QuotaRule> insertIfAbsent(QuotaRule rule) {
         try {
             return Optional.ofNullable(jdbc.queryForObject("""
-                    INSERT INTO quota_rules (id, tenant_id, scope_type, scope_id, metric, period, limit_value,
-                        warn_percent, status, created_by, version, created_at, updated_at)
-                    VALUES (:id, :tenantId, :scopeType, :scopeId, :metric, :period, :limitValue,
+                    INSERT INTO quota_rules (id, tenant_id, scope_type, scope_id, metric, period, action,
+                        limit_value, warn_percent, status, created_by, version, created_at, updated_at)
+                    VALUES (:id, :tenantId, :scopeType, :scopeId, :metric, :period, :action, :limitValue,
                         :warnPercent, :status, :createdBy, 0, :createdAt, :updatedAt)
                     ON CONFLICT (tenant_id, scope_type, scope_id, metric, period) DO NOTHING
                     RETURNING
@@ -79,8 +82,9 @@ public class QuotaRuleRepositoryImpl implements QuotaRuleRepository {
                     new MapSqlParameterSource().addValue("id", rule.id()).addValue("tenantId", rule.tenantId())
                             .addValue("scopeType", rule.scopeType().name()).addValue("scopeId", rule.scopeId())
                             .addValue("metric", rule.metric().name()).addValue("period", rule.period().name())
-                            .addValue("limitValue", rule.limitValue()).addValue("warnPercent", rule.warnPercent())
-                            .addValue("status", rule.status().name()).addValue("createdBy", rule.createdBy())
+                            .addValue("action", rule.action().name()).addValue("limitValue", rule.limitValue())
+                            .addValue("warnPercent", rule.warnPercent()).addValue("status", rule.status().name())
+                            .addValue("createdBy", rule.createdBy())
                             .addValue("createdAt", Timestamp.from(rule.createdAt()))
                             .addValue("updatedAt", Timestamp.from(rule.updatedAt())),
                     ROW_MAPPER));
@@ -130,5 +134,13 @@ public class QuotaRuleRepositoryImpl implements QuotaRuleRepository {
     public boolean delete(UUID tenantId, UUID id) {
         return jdbc.update("DELETE FROM quota_rules WHERE tenant_id = :tenantId AND id = :id",
                 new MapSqlParameterSource("tenantId", tenantId).addValue("id", id)) == 1;
+    }
+
+    @Override
+    public List<QuotaRule> findAllActiveReject() {
+        return jdbc.query(
+                "SELECT " + COLS + " FROM quota_rules"
+                        + " WHERE status = 'ACTIVE' AND action = 'REJECT' ORDER BY created_at",
+                new MapSqlParameterSource(), ROW_MAPPER);
     }
 }

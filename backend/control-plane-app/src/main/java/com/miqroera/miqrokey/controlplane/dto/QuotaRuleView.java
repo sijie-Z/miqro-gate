@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.dto;
 
+import com.miqroera.miqrokey.domain.model.QuotaAction;
 import com.miqroera.miqrokey.domain.model.QuotaMetric;
 import com.miqroera.miqrokey.domain.model.QuotaPeriod;
 import com.miqroera.miqrokey.domain.model.QuotaRuleStatus;
@@ -14,11 +15,12 @@ import java.util.UUID;
  * the alert state derived at read time: NORMAL / WARNING (≥ warnPercent) /
  * NEAR_LIMIT (≥ 90%, fixed guidance tier) / EXCEEDED (≥ 100% of the limit),
  * judged in that severity order. {@code used} is an integral count for
- * TOKENS/REQUESTS and the priced CNY cost for COST (#683). A rule never blocks
- * — the view is the consumer's visibility into the plan.
+ * TOKENS/REQUESTS and the priced CNY cost for COST (#683). {@code action} is
+ * what an exceeded rule does: ALERT (watermark only) or REJECT (the gateway
+ * answers 429 for the covered scope; #684/ADR-0020).
  */
 public record QuotaRuleView(UUID id, QuotaScopeType scopeType, UUID scopeId, String scopeName, String scopeTag,
-        QuotaMetric metric, QuotaPeriod period, long limitValue, int warnPercent, QuotaRuleStatus status,
-        BigDecimal used, BigDecimal usedPct, String level, Instant windowFrom, Instant windowTo, Instant createdAt,
-        Instant updatedAt, long version) {
+        QuotaMetric metric, QuotaPeriod period, QuotaAction action, long limitValue, int warnPercent,
+        QuotaRuleStatus status, BigDecimal used, BigDecimal usedPct, String level, Instant windowFrom, Instant windowTo,
+        Instant createdAt, Instant updatedAt, long version) {
 }

@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.dto;
 
+import com.miqroera.miqrokey.domain.model.QuotaAction;
 import com.miqroera.miqrokey.domain.model.QuotaMetric;
 import com.miqroera.miqrokey.domain.model.QuotaPeriod;
 import com.miqroera.miqrokey.domain.model.QuotaRuleStatus;
@@ -14,9 +15,10 @@ import java.util.UUID;
 /**
  * Quota-rule plan upsert (api-contract §5.19). The tuple (scopeType, scopeId,
  * metric, period) is the natural key — re-PUTting the same tuple edits the plan
- * in place. Missing optional fields fall back to defaults (warn 80%, ACTIVE).
+ * in place. Missing optional fields fall back to defaults (warn 80%, ACTIVE,
+ * action ALERT). COST limits are entered in cents (分, #684).
  */
 public record UpsertQuotaRuleRequest(@NotNull QuotaScopeType scopeType, @NotNull UUID scopeId,
         @NotNull QuotaMetric metric, @NotNull QuotaPeriod period, @NotNull @Positive Long limitValue,
-        @Min(1) @Max(99) Integer warnPercent, QuotaRuleStatus status) {
+        @Min(1) @Max(99) Integer warnPercent, QuotaRuleStatus status, QuotaAction action) {
 }

@@ -26,6 +26,7 @@ import com.miqroera.miqrokey.spi.RouteContext;
 import com.miqroera.miqrokey.spi.TargetRequest;
 
 import com.miqroera.miqrokey.gateway.vkey.AuthFailureException;
+import com.miqroera.miqrokey.gateway.vkey.QuotaGate;
 import com.miqroera.miqrokey.gateway.vkey.VirtualKeyResolver;
 import com.miqroera.miqrokey.queue.RequestCoalescer;
 import com.miqroera.miqrokey.queue.UsageEventBus;
@@ -227,6 +228,7 @@ public class ProxyController {
         long startMillis = clock.millis();
         try {
             AuthContext ctx = keyResolver.resolve(exchange.getRequest());
+            QuotaGate.requireNotExceeded(ctx); // #684: 429 before any body work
             return handleAuthenticated(exchange, ctx, requestId, startMillis);
         } catch (AuthFailureException e) {
             return writeError(exchange, e);
@@ -825,6 +827,9 @@ public class ProxyController {
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(HttpStatusCode.valueOf(e.status()));
         response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
+        if (e.retryAfterSeconds() != null) {
+            response.getHeaders().set(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSeconds()));
+        }
         byte[] bytes = ErrorEnvelopes.body(e, exchange.getRequest().getURI().getPath())
                 .getBytes(StandardCharsets.UTF_8);
         return response.writeWith(Mono.just(response.bufferFactory().wrap(bytes)));

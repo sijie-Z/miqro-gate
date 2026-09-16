@@ -330,9 +330,13 @@ alert_rules 类型 CHECK 同步扩展 `CONSUMER_KEY_EXPIRING`（V36 同款模式
 
 月度预算（仅告警，永不阻断）：`project_id`、`period_month`（`YYYY-MM`）、`amount numeric(24,10)`、`currency`、`alert_threshold_pct`、`status`（`ACTIVE|PAUSED`）、`version`。`budget` 唯一 `(tenant_id, project_id, period_month)`；`model_budget` 额外含 `model_id`，唯一 `(tenant_id, project_id, model_id, period_month)`。V7 已建表，告警消费为后续 Goal。
 
-### `quota_rules` (V23，用量配额；V58 扩维)
+### `quota_rules` (V23，用量配额；V58/V59 扩维)
 
-用量配额计划（仅预警永不阻断，roadmap「配额管理」）：`scope_type`（`USER|PROJECT`）、`scope_id`、`metric`（`TOKENS|REQUESTS|COST`，COST 为 V58/#683 增）、`period`（`DAILY|WEEKLY|MONTHLY|YEARLY`，YEARLY 为 V58/#683 增）、`limit_value bigint`（>0；COST 口径为整数 CNY）、`warn_percent`（1–99，默认 80）、`status`（`ACTIVE|DISABLED`）、`created_by`、`version`。唯一 `(tenant_id, scope_type, scope_id, metric, period)`（同 scope 同维同周期仅一条，重复 PUT 原地编辑）。表只存计划；**当前窗口水位在读取时由 usage 事件计算**（UTC 窗口；TOKENS=全部 token 口径，REQUESTS=上游请求数，COST=价格快照估算的上游实付；YEARLY 水位不受公开 API 93 天窗口上限约束），`(tenant_id, scope_type, scope_id, status)` 索引。规则永不阻断流量——硬阻断需 ADR。
+用量配额计划（roadmap「配额管理」）：`scope_type`（`USER|PROJECT`）、`scope_id`、`metric`（`TOKENS|REQUESTS|COST`，COST 为 V58/#683 增）、`period`（`DAILY|WEEKLY|MONTHLY|YEARLY`，YEARLY 为 V58/#683 增）、`action`（`ALERT|REJECT`，默认 `ALERT`，V59/#684：REJECT 规则超限后由网关拒绝该 scope 的请求，ADR-0020）、`limit_value bigint`（>0；COST 口径为整数 CNY）、`warn_percent`（1–99，默认 80）、`status`（`ACTIVE|DISABLED`）、`created_by`、`version`。唯一 `(tenant_id, scope_type, scope_id, metric, period)`（同 scope 同维同周期仅一条，重复 PUT 原地编辑）。表只存计划；**当前窗口水位在读取时由 usage 事件计算**（UTC 窗口；TOKENS=全部 token 口径，REQUESTS=上游请求数，COST=价格快照估算的上游实付；YEARLY 水位不受公开 API 93 天窗口上限约束），`(tenant_id, scope_type, scope_id, status)` 索引。ALERT 规则永不阻断；REJECT 的超限判定见 `quota_enforcement`。
+
+### `quota_enforcement` (V59，#684，配额软着陆判定集)
+
+配额软着陆的**判定集**（ADR-0020）：每个当前判定为「超限」的 ACTIVE REJECT 规则一行——`rule_id`（PK）、`tenant_id`（FK → tenants，CASCADE）、`scope_type`（`USER|PROJECT`）、`scope_id`、`metric`、`period`（存档用，便于运维看清"被什么卡的"）、`blocked_at`。控制面 `QuotaEnforcementService` 每轮（默认 60s）**整体替换**该表：遍历 ACTIVE REJECT 规则 → 经共享 `QuotaWatermarks` 计算当期水位 → EXCEEDED 者入围；判定集变化才 `pg_notify` 路由刷新。网关热路径只读快照里的 `quotaBlockedUserIds`/`quotaBlockedProjectIds`，**不查此表**。本表是**可重建的派生数据**：清空只会让下一轮评估按当前用量重新写入；提高限额/跨窗口/停用规则都会让对应行在下一轮消失。`(scope_type, scope_id)` 索引。
 
 ### `quota_default_template` (V26，默认配额模板；V58 扩维)
 
