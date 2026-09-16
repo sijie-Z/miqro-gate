@@ -3117,3 +3117,25 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - 留痕消费端（`MIQROKEY_RETENTION_CONSUMER_*`）与响应缓存（`MIQROKEY_CACHE_ENABLED`）开关环境变量化（默认关）——消除服务器手改 compose 的漂移来源，仓库默认行为不变。
 
 **验证**：`docker compose -f deploy/compose.prod.yaml config` 通过（本机 v5.1.4；渲染的 JAVA_TOOL_OPTIONS/shared_buffers 与服务器实测目标逐字一致）。服务器侧（2G 演示机）已按目标态运行并验证：swap 899→85MB、dockerd RSS 317→97MB、控制台常驻口径 85%→~60%、全栈 healthy、登录 `/api/v1/auth/login` 200、PSI=0、零 OOM；服务器 `.env` 已补齐对应开关值（cache / 留痕消费端 / COMPOSE_PROFILES）。
+
+## 2026-09-16 傍晚 — 腾讯对标收口批（#681/#683/#685/#554/#688 + ADR-0019 草案）
+
+**背景**：owner 以腾讯控制台样本（模型 API / 配额管理 / MCP 服务接入指引 / 消费者）指示「把我们的方案和他们的界面内容和设定相对照……改代码」。范围声明：**往他们的架构靠**（沿既有裁决），红线不动（不限流、不硬阻断、不做协议转换）。五条交付线 + 文档收口一次成批。
+
+**交付**（隔离工作树，全部按 gitflow：issue → 分支 → PR → CI）：
+
+- **#681 用量与成本总览 → PR #682**：`NextAdminUsageView` 升级（KPI 卡带 ×6 / 服务端 Token+成本双序列趋势（日/月）/ 维度分解表（团队/个人/项目/模型/密钥，占比条 + 行下钻 + chip 清除 + CSV）/ 团队与用户与项目下拉筛选）；后端 `/admin/usage/{summary,records,hourly}` 增 `teamId`（virtual_keys→team_memberships EXISTS，ue/h 双别名；「归属视图非分区」口径沿用 #606）；UiTrendChart 增多序列模式（按各自峰值缩放 + 图例，向后兼容）；UiTable 增 rowClick。测试：后端单测 13 + IT 12（含新 team filter 正/负例），前端 314/314，e2e 41/41（含 admin-usage 页基线），spotless 收敛。**首跑即修复**：develop 合并后 openapi 单行 JSON 冲突 → 本地合并 develop + 从合并后代码重生成基线（唯一可靠解法）。
+
+- **#683 配额管理扩维 → PR #686**：metric+COST、period+YEARLY、level+NEAR_LIMIT（固定 90%）；V58 扩两张表 CHECK；`QuotaRuleView.used` long→BigDecimal；YEARLY 水位绕公开 93 天窗口（新增 `summaryUncapped` 内部通道——**首跑被 93 天校验打回 400，为该修复的动机**）；模板表 CHECK 遗漏由模板 IT 409 暴露后一并扩。测试：4 类 23/23（COST 水位/年度窗口/四档边界/模板校验），前端 317/317。
+
+- **#685 MCP 接入闭环 → PR #687**：`GET …/{id}/connection`（接入地址生成 + path segment 编码 + 凭据形态提示；**首跑撞 ACL 面 `/{id}/access` → 落 `/{id}/connection`，IT 固定**）+ `POST …/{id}/verify`（probeOnce：与健康巡检同源探针，脱敏中文结论，只读不改遥测）；前端行操作「接入信息」「验证连通」。测试：Onboarding IT 3/3 + Checker 8/8 + Service IT 8/8 回归，前端 spec 28/28。
+
+- **#554 MCP 监控 → PR #689**：访问日志页窗口指标卡带（失败率 = 失败/(转发+失败)，口径注记）+ 单次调用详情抽屉（受理→上游首包(+ttfb)→结论 时间线 + 元数据清单）；零后端改动（字段已齐 V29+V45）。UiTable rowClick 同款最小改动随行（与 #682 逐字一致，合并顺序无关）。
+
+- **#688 内容留痕采集配置**：「内容留痕」页新增「采集配置」卡（开关 + 内容上限 1 KiB–4 MiB + 合规提示 + 即时生效文案）；此前 PUT /admin/retention-config 无前端入口。测试：spec 6/6。
+
+- **文档收口（本批）**：mapping 行 14/15 过时状态更正 + 「2026-09-16 收口批」对位表 + **对位说明 A（协议/Base Path/包体采集）与 B（消费者/消费者组/团队/项目）**；ADR-0019（配额超限拒绝，Proposed）；feature-backlog F51 状态；ai-gateway-comparison MCP 行刷新；CHANGELOG 本批条目。
+
+**待 owner 拍板**：ADR-0019（是否反转「不因预算阻断」提供 REJECT 规则；含 429 信封、5 分钟近似计数与未决问题 3 项）。
+
+**未做（记录）**：MCP 服务向导「服务类型/后端类型」枚举（我们固定标准透传形态）、HTTP→MCP 转换、消费者组实体、配额缓存命中「全量计入」档（语义天然等价「不计入」）——均按既有裁决维持，mapping 已注明理由。
