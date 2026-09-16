@@ -495,7 +495,8 @@ function formatTime(iso?: string): string {
         <div>
           <h2 class="ui-panel-title">我的配额</h2>
           <span class="ui-panel-sub"
-            >管理员为你设置的用户级限额；当前窗口用量实时计算，超限仅提示不阻断。</span
+            >管理员为你设置的用户级限额；当前窗口用量实时计算。「超限拒绝」的规则达到 100%
+            后请求会被网关拒绝（429）。</span
           >
         </div>
       </div>
@@ -511,7 +512,8 @@ function formatTime(iso?: string): string {
         >
           <div class="next-usage__quota-head">
             <span class="next-usage__quota-dim"
-              >{{ quotaMetricText[rule.metric!] }} · {{ quotaPeriodText[rule.period!] }}</span
+              >{{ quotaMetricText[rule.metric!] }} · {{ quotaPeriodText[rule.period!] }} ·
+              {{ rule.action === 'REJECT' ? '超限拒绝' : '仅预警' }}</span
             >
             <UiStatusBadge
               variant="pill"

@@ -35,6 +35,11 @@ public interface QuotaRuleRepository {
             QuotaPeriod period);
 
     List<QuotaRule> findAllByTenant(UUID tenantId);
+    /**
+     * ACTIVE rules whose exceeded action is REJECT across all tenants — the
+     * enforcement evaluator's input (#684).
+     */
+    List<QuotaRule> findAllActiveReject();
 
     /** True when a row was removed. */
     boolean delete(UUID tenantId, UUID id);

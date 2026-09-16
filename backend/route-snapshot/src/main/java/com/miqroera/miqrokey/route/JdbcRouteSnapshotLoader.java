@@ -79,9 +79,32 @@ public final class JdbcRouteSnapshotLoader {
         Map<String, RouteSnapshot.McpServerRecord> mcpServices = loadMcpServices();
         Map<UUID, RetentionConfig> retention = loadRetention();
         Map<UUID, RouteSnapshot.UnattributedPolicyRecord> unattributedPolicies = loadUnattributedPolicies();
+        QuotaEnforcement enforcement = loadQuotaEnforcement();
         return new RouteSnapshot(version, loadedAt, keys, bindings, credentials, models, grantModels, upstreamModels,
                 productIds.productCodes(), productIds.providerIds(), consumers, mcpServices, retention,
-                unattributedPolicies);
+                unattributedPolicies, enforcement.users(), enforcement.projects());
+    }
+
+    /**
+     * Exceeded REJECT quota-rule verdicts per scope (#684, {@code
+     * quota_enforcement}): the control-plane evaluator replaces the rows each
+     * cycle, so the snapshot only ever carries the current block list — mapped to
+     * the earliest window end among the rules blocking that scope (the moment the
+     * verdict can lift on its own; feeds the 429's Retry-After).
+     */
+    private QuotaEnforcement loadQuotaEnforcement() {
+        Map<UUID, Instant> users = new java.util.HashMap<>();
+        Map<UUID, Instant> projects = new java.util.HashMap<>();
+        jdbc.query("SELECT scope_type, scope_id, window_end FROM quota_enforcement", rs -> {
+            UUID scopeId = (UUID) rs.getObject("scope_id");
+            Instant until = rs.getObject("window_end", java.time.OffsetDateTime.class).toInstant();
+            Map<UUID, Instant> target = "USER".equals(rs.getString("scope_type")) ? users : projects;
+            target.merge(scopeId, until, (a, b) -> a.isBefore(b) ? a : b);
+        });
+        return new QuotaEnforcement(Map.copyOf(users), Map.copyOf(projects));
+    }
+
+    private record QuotaEnforcement(Map<UUID, Instant> users, Map<UUID, Instant> projects) {
     }
 
     /**

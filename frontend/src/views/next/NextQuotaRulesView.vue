@@ -10,7 +10,7 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type { QuotaLevel, QuotaMetric, QuotaPeriod } from '@/types/api';
+import type { QuotaAction, QuotaLevel, QuotaMetric, QuotaPeriod } from '@/types/api';
 import type {
   AdminUser,
   Project,
@@ -34,6 +34,7 @@ const form = ref({
   scopeId: '',
   metric: 'TOKENS' as QuotaMetric,
   period: 'DAILY' as QuotaPeriod,
+  action: 'ALERT' as QuotaAction,
   limitValue: '',
   warnPercent: '80',
   status: 'ACTIVE' as 'ACTIVE' | 'DISABLED',
@@ -59,12 +60,18 @@ const periodText: Record<QuotaPeriod, string> = {
   MONTHLY: '每月',
   YEARLY: '每年',
 };
+const actionText: Record<QuotaAction, string> = { ALERT: '仅预警', REJECT: '超限拒绝' };
 const levelText: Record<QuotaLevel, string> = {
   NORMAL: '正常',
   WARNING: '预警',
   NEAR_LIMIT: '即将超限',
   EXCEEDED: '超限',
 };
+
+const actionOptions: UiSelectOption[] = [
+  { value: 'ALERT', label: '仅预警（不阻断）' },
+  { value: 'REJECT', label: '超限拒绝请求（429）' },
+];
 
 const levelTone: Record<QuotaLevel, 'success' | 'warning' | 'danger' | 'neutral'> = {
   NORMAL: 'success',
@@ -140,6 +147,7 @@ const columns = [
   { key: 'scope', title: '配额对象', minWidth: '220px' },
   { key: 'metric', title: '维度', width: '130px' },
   { key: 'period', title: '周期', width: '100px' },
+  { key: 'action', title: '超限动作', width: '110px' },
   { key: 'limitValue', title: '限额', width: '130px', align: 'right' as const },
   { key: 'watermark', title: '本期用量', minWidth: '240px' },
   { key: 'level', title: '状态', width: '110px' },
@@ -177,6 +185,7 @@ function openCreate() {
     scopeId: '',
     metric: 'TOKENS',
     period: 'DAILY',
+    action: 'ALERT',
     limitValue: '',
     warnPercent: '80',
     status: 'ACTIVE',
@@ -194,6 +203,7 @@ function openEdit(row: QuotaRuleView) {
     scopeId: row.scopeId!,
     metric: row.metric!,
     period: row.period!,
+    action: (row.action ?? 'ALERT') as QuotaAction,
     limitValue: String(row.limitValue!),
     warnPercent: String(row.warnPercent!),
     status: row.status!,
@@ -230,6 +240,7 @@ async function save() {
       scopeId: form.value.scopeId,
       metric: form.value.metric,
       period: form.value.period,
+      action: form.value.action,
       limitValue,
       warnPercent,
       status: form.value.status,
@@ -354,7 +365,8 @@ onMounted(load);
       <div>
         <h1 class="ui-page-title">配额规则</h1>
         <p class="ui-page-desc">
-          用量配额（Token / 请求次数 × 日/周/月）。只预警不阻断——超限不拦截流量。
+          用量配额（Token / 请求次数 / 成本 × 日/周/月/年）。「超限拒绝」规则达到 100%
+          后网关自动拒绝该用户/项目的请求（429），配额重置或提高限额后自动恢复。
         </p>
       </div>
       <div class="ui-page-actions">
@@ -404,7 +416,7 @@ onMounted(load);
         </div>
       </div>
       <p class="next-quota__template-hint" data-testid="quota-template-hint">
-        变更或停用只影响之后新建的用户；已存在（含自动分配）的配额规则保持不变，停用也不会删除它们。
+        变更或停用只影响之后新建的用户；已存在（含自动分配）的配额规则保持不变，停用也不会删除它们。模板生成的规则为「仅预警」。
       </p>
       <div v-if="configuring" class="ui-panel-body">
         <div class="next-quota__template-form">
@@ -498,6 +510,12 @@ onMounted(load);
             ]"
             data-testid="quota-period"
           />
+          <UiSelect
+            v-model="form.action"
+            label="超限动作"
+            :options="actionOptions"
+            data-testid="quota-action"
+          />
           <UiInput
             v-model="form.limitValue"
             label="限额"
@@ -548,7 +566,7 @@ onMounted(load);
         :loading="loading"
         row-key="id"
         empty-title="暂无配额规则"
-        empty-description="先为用户或项目设置用量限额，超限仅预警不阻断。"
+        empty-description="先为用户或项目设置用量限额；「超限拒绝」规则达到 100% 后自动拒绝请求。"
         data-testid="quota-rules-table"
       >
         <template #scope="{ row }">
@@ -559,6 +577,12 @@ onMounted(load);
         </template>
         <template #metric="{ row }">{{ metricLabel((row as QuotaRuleView).metric) }}</template>
         <template #period="{ row }">{{ periodLabel((row as QuotaRuleView).period) }}</template>
+        <template #action="{ row }">
+          <UiStatusBadge
+            :tone="(row as QuotaRuleView).action === 'REJECT' ? 'danger' : 'neutral'"
+            :label="actionText[(row as QuotaRuleView).action ?? 'ALERT']"
+          />
+        </template>
         <template #limitValue="{ row }">
           <span class="ui-num"
             >{{ (row as QuotaRuleView).metric === 'COST' ? '¥' : ''

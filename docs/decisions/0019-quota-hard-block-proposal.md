@@ -1,6 +1,6 @@
 # ADR-0019：配额硬阻断（超限拒绝）— 草案
 
-- 状态：**Proposed（2026-09-16）**——**尚未实现**；本草案用于反转锁定决策前的 owner 拍板。任何实现以本 ADR 转 Accepted + owner 明确同意为前提（CLAUDE.md §2：「改变上述决策前必须新增 ADR，并获得用户明确同意」）。
+- 状态：**Superseded（2026-09-16，由 [ADR-0020](0020-quota-soft-landing.md) 采纳并落地）**——owner 2026-09-16 拍板「软着陆：拒绝请求」，采纳本草案**决策点 1 的选项 B（规则级 opt-in REJECT）**与决策点 2 的挂点；**不采纳**草案的数据面 `usedSinceLoad` 计数形态（改为控制面判定集 + 快照，见 ADR-0020 D4/§3-D）。三个未决问题的答案记录在 ADR-0020 §1.3。本文件保留为提案原文。
 - 日期：2026-09-16
 - 关联：[CLAUDE.md](../../CLAUDE.md) §2「不限流、不因预算阻断，只做 Webhook 告警」；[feature-backlog F51](../feature-backlog.md)（配额硬阻断，状态 ADR）；[api-contract §5.19](../api-contract.md)（配额规则，alerting-only）；#683（COST/YEARLY/NEAR_LIMIT 交付）；腾讯 AI 网关「配额管理：超限处理=拒绝请求」（owner 2026-09-16 样本）；[ADR-0005](0005-no-redis-v1.md)（不引 Redis）；[ADR-0002](0002-transparent-proxy.md)（透明代理红线——本议题不触碰请求内容，仅准入判定）
 

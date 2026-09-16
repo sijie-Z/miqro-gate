@@ -2814,6 +2814,8 @@ export interface components {
             warnPercent?: number;
             /** @enum {string} */
             status?: "ACTIVE" | "DISABLED";
+            /** @enum {string} */
+            action?: "ALERT" | "REJECT";
         };
         QuotaRuleView: {
             /** Format: uuid */
@@ -2828,6 +2830,8 @@ export interface components {
             metric?: "TOKENS" | "REQUESTS" | "COST";
             /** @enum {string} */
             period?: "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
+            /** @enum {string} */
+            action?: "ALERT" | "REJECT";
             /** Format: int64 */
             limitValue?: number;
             /** Format: int32 */
