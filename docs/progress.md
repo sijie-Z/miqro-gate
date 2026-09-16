@@ -3157,7 +3157,7 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **背景**：#629 的定性是**设计稿未跟随 v1.1 评审修订**（不是实现漂移）。`docs/activity-context-design.md`（设计稿 v0.1）停在评审前口径——头名 `X-Miqro-Tag`、用量列 `attribution_source`——而实现侧（V54/V55 迁移 + RequestContextResolver）早已按 Spec v1.1 的 R3/R5 落地 `X-Miqro-Project-Id` 与 `resolution_status`/`claimed_*`。设计稿与实现级 Spec 长期并存而 `document-map.md` 对两者**零引用**（本轮已补索引），是该分歧得以存活的土壤。处置取「改文档齐实现」：**零迁移 / 零代码 / 零前端**。
 
-**交付**（分支 docs/activity-context-design-realigned-629，隔离工作树，base develop@50a9b245）：
+**交付**（分支 docs/activity-context-design-realigned-629，隔离工作树，base develop@50a9b245）——**本段与「验证」段引用的 `:NNN` 为交付时点 `6db7f33` 的行号，「修复轮」各条为修复后的 HEAD 行号；两套基准不同，同一编号可能指向不同内容（如 `:79`：交付时点为门控注记、HEAD 为值域行）**：
 - `docs/activity-context-design.md`：`:4` 状态改 **历史件 / historical** 并链到实现级 Spec；`:46-48` Usage Event 字段表 `attribution_source` → `claimed_project_id`/`resolution_status`/`claim_source`/`claim_confidence`；`:72` 头名 → `X-Miqro-Project-Id: <project-uuid>`（值域为 project UUID，非法值 400 fail-closed，依据 R3/P1）；`:77` 列名与值域对齐 **V54 迁移注释**，声明（未验证输入）与裁定（计费依据）分列（R5/P1），`session_id` 注明纯观测/可空/不参与路由授权；`:106`/`:147`/`:164` 同步改名，迁移注记扩为 **V54 + V55**；`:156` Q3 行改为裁定/声明记录口径。
 - **原「头名敏感词门控」论证降为 `:79` 注记并保留**：适用范围仅限客户端从 settings/env 读取的 `ANTHROPIC_CUSTOM_HEADERS`（静态头降级模式），CAA 主路径的头由本机 Agent 注入、不受门控；若未来启用静态头降级须另选不含 `project/key` 的头名（如 `X-Miqro-Target-Id`）。该约束是未来形态的既有需求，不删。
 - **§5 真机实验记录不回改**：`:117` 实验 1 保留当时真实观测到的 `X-Miqro-Tag: miqi`，仅在结果列追加「（实验用头名；正式契约见 §4.1 → `X-Miqro-Project-Id`）」。
@@ -3206,8 +3206,10 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - `:167` 「客户端参考实现与演示闭环均已交付」收窄为实际交付形态（#639 `miqro-context` 安装式 Agent），并点明 step 1（干净环境复核实验 3/5）与 step 3（`apiKeyHelper`+`PostToolUse` 脚本、接入面板）未按原样交付——`接入面板` 从未交付（设计稿内共 2 处：step 3 原计划行 `:171` 与本注记 `:167`；其余命中均为 `progress.md` 内本审计条目对它的转述；无实现或设施引用）。
 - `document-map.md:34` 限定 Spec 的权威面：列取值域/物理形态归 `database-schema.md`/`api-contract.md`（Spec §7.1 `claim_source` 清单缺 `git_remote`，滞后于实现）。
 - 本条目的**全仓计数口径**自洽化：`:3171` 原文「全仓其余命中均在既有实现/契约件（…）」未列本条目自身的叙述性命中，已补入（与本节「边界」段一致）。
-- **不在本 PR 范围的既有遗留**（均已逐行核对，未改）：① `context-attribution-implementation-spec.md:115` 称 `X-Miqro-Target-Id`「已实证可通过门控」，本仓无对应实验件（设计稿 §5 未单独实验该头名），该文件本轮禁改；② `miqro-context/README.md:113` 把设计稿列为并列规格、无历史件标注（该目录本轮禁改）；③ `decisions/0018-single-key-multi-project.md:62`/`:95` 的「后缀 = 唯一选择器、零猜测」与 Spec v1.1 **R3**（头名优先、后缀兜底）口径反转，该 ADR 仅 `:112` 有 #633 的枚举探测修订、D2/D8 无指向 R3 的修订注记——属 ADR 治理事项，建议由 owner 另开。
+- **不在本 PR 范围的既有遗留**（均已逐行核对，未改）：① `context-attribution-implementation-spec.md:115` 称 `X-Miqro-Target-Id`「已实证可通过门控」，本仓无对应实验件（设计稿 §5 未单独实验该头名），该文件本轮禁改；② `miqro-context/README.md:113` 把设计稿列为并列规格、无历史件标注（该目录本轮禁改）；③ `decisions/0018-single-key-multi-project.md:62`/`:95` 的「后缀 = 唯一选择器、零猜测」与 Spec v1.1 **R3**（头名优先、后缀兜底）口径反转，该 ADR 仅 `:112` 有 #633 的枚举探测修订、D2/D8 无指向 R3 的修订注记——属 ADR 治理事项，建议由 owner 另开；④ `V55__request_context_evidence.sql:5` 头部注释称「网关在 Context 解析时写入；供审计与事后重分类」，而该表在 Java 侧零引用（`git grep -n "request_context_evidence" -- "*.java"` 无输出，既无写入方也无读取方），注释与实现不符——该迁移文件本轮禁改，建议随 ①–③ 一并开 follow-up。
 
 - **第五轮修复（2026-09-16，收尾交叉核对驱动 · 与主交付同 PR）**：① 前述修复轮条目中两处**注记行号漂移**按 HEAD 校正（`:151`→`:153`、`:165`→`:167`，与 `:3199`/`:3206` 对同一注记的引用对齐）；② `:3171` 全仓计数枚举补 `progress.md` 既有条目（`:2931`/`:2961`）；③ `:3206` 的「`接入面板` 全仓仅此一处提及」纠正为按文件枚举的实际分布（设计稿内 2 处：step 3 原计划行 `:171`、`§8` 注记 `:167`；其余命中均为 `progress.md` 内本审计条目的转述）。以上均为**行数不变**的就地替换，本条目其余行号引用不受影响。
 
 - **第六轮修复（2026-09-16，自查驱动 · 与主交付同 PR）**：重生成收口证据、逐条读原始输出时发现一处**自伤计数**——第五轮把 `:3206` 改写为「全仓命中 3 处」并在同一次提交追加了含该词的注记，而该注记自身就是第 4 处命中，故「3 处」在其写入的提交（`a39caa1`）里即已为假。两处（`:3206` 与第五轮注记第 ③ 条）改为**按文件枚举分布**（设计稿内 2 处：step 3 原计划行 `:171`、`§8` 注记 `:167`；其余命中均为本审计条目的转述），自指命中无法再使其失真。仍为行数不变的就地替换。
+
+- **第七轮修复（2026-09-16，独立主评审回执驱动 · 与主交付同 PR）**：独立主评审（全新上下文、逐条复跑命令、结论 **0 blocker / 3 minor**）与本地自查在同一点会合——① **行号基准混用**（评审 M2）：本条目「交付」「验证」段引用的是交付时点 `6db7f33` 的行号，「修复轮」各条引用的是修复后 HEAD 的行号，同一编号在两套基准下可能指向不同内容（`:79` 在交付时点是门控注记、在 HEAD 是值域行），已在交付段头部就地声明两套基准；② 评审 M1：`docs/document-map.md:35` 的「关键处已加「历史注记」」收敛为按处枚举（状态行、Q0、Q 表、§8 计划处）；③ 评审 M3：边界段补登记第 ④ 项既有遗留（`V55__request_context_evidence.sql:5` 头部注释称「网关在 Context 解析时写入」，而该表在 Java 侧零引用）。评审另两条记录性说明（hunk 形状与任务书预期不符系多轮就地编辑所致；前轮计数自洽问题已在第五/六轮闭环）无需动作。①②③ 均为行数不变的就地替换。
