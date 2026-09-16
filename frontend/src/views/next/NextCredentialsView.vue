@@ -23,12 +23,14 @@ import {
   UiDialog,
   UiDrawer,
   UiInput,
+  UiPageGuide,
   UiSelect,
   UiStatusBadge,
   UiTable,
   toast,
 } from '@/ui';
 import type { UiSelectOption } from '@/ui';
+import { CREDENTIALS_GUIDE } from '@/content/pageGuides';
 import type {
   CredentialDetailView,
   CredentialVersionView,
@@ -399,6 +401,8 @@ onMounted(load);
         </UiButton>
       </div>
     </header>
+
+    <UiPageGuide :guide="CREDENTIALS_GUIDE" storage-key="credentials" />
 
     <div v-if="loadError" class="ui-alert ui-alert--error" data-testid="credentials-load-error">
       {{ loadError

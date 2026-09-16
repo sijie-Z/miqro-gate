@@ -232,6 +232,10 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
 
 缓存命中计数（L1/L2 命中不写 `usage_event`，在此去重计数）：`cache_key`、`virtual_key_id`、`project_id`、`provider_product_id`、`level`（`L1_HIT|L2_HIT`）、`occurred_at`、`gateway_request_id`。唯一 `(tenant_id, cache_key, level, occurred_at)`——同一秒内同一 cache_key 只记一次。
 
+### `unattributed_policy` (V57，#647)
+
+CAA 未归属策略（Spec v1.1 §7.3，每租户至多一行）：`tenant_id`（PK）、`project_id`（未归属桶项目，复合 FK → projects；该系统项目 `projects.system=true`）、`credential_id`（复合 FK → upstream_credentials）、`provider_product_id`（FK → provider_products）、`model_scope jsonb`（空数组 = 产品上游目录全部 ACTIVE 模型）、`updated_by`、`updated_at`。V57 同时给 `projects` 增 `system boolean NOT NULL DEFAULT false`（系统项目不可被建 Key 选择）。
+
 ### `project_repositories` (V56，#639)
 
 CAA Project Registry（Spec v1.1 §7.4）：`id`、`tenant_id`、`project_id`（复合 FK → `projects(tenant_id, id)`）、`repo_key`（规范化小写 `host/owner/repo`，varchar(200)）、`created_by`、时间戳；唯一 `(tenant_id, repo_key)`（租户内一个仓库只能属于一个项目）、索引 `(project_id)`。Agent 经网关 `GET /v1/context-registry` 消费（按 Key 绑定项目过滤）。

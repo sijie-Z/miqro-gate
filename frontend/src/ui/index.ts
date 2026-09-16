@@ -17,5 +17,6 @@ export type { UiTrendPoint } from './TrendChart.vue';
 export { default as UiStatusBadge } from './StatusBadge.vue';
 export { default as UiTooltip } from './Tooltip.vue';
 export { default as UiEmptyState } from './EmptyState.vue';
+export { default as UiPageGuide } from './PageGuide.vue';
 export { default as UiToastHost } from './ToastHost.vue';
 export { toast } from './toast';

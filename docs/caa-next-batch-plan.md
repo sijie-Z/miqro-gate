@@ -177,10 +177,11 @@ miqro-context doctor        # 增：自启状态检查
 
 | 序 | 内容 | issue | PR 约定 |
 |---|---|---|---|
-| 1 | 本方案 MD | tracking issue | docs PR（本文） |
-| 2 | ① 默认全选 | issue A | 前端 + spec + 验收清单增补 |
-| 3 | ② 未归属策略 | issue B | V57+快照+网关+控制面+前端+IT（一个 PR，附测试证据） |
+| 1 | 本方案 MD | #645（tracking） | docs PR（#649，已合） |
+| 2 | ① 默认全选 | #646 | 前端 + spec + 验收清单增补（PR #650） |
+| 3 | ② 未归属策略 | #647 | **已实现**（V57+快照+网关+控制面+设置页卡片+IT；开放问题按 §2.9 默认落定：Q1 告警放行 / Q2 与 Key 模型求交 / Q3 列表带 system 标记 / Q4 AMBIGUOUS 同走策略，如需翻转均为小改） |
 | 4 | ③ 安装/自启 | #648 | **已实现**（`install --autostart` / `uninstall --autostart` / doctor 状态；三平台生成器单测 + Windows 沙箱实测） |
-| 5 | ④ /v1/models 核对 | issue D（视核对结果）| 独立小 PR 或关闭为"维持现状" |
+| 5 | ④ /v1/models 核对 | 追踪 #645 | **已完成核对**：`allowedModels` 依赖 binding.grantId（多绑定语义未定义）——现状保留；`POLICY_ROUTED` 路径已做不借 grant 的等价门控（#647 内） |
+
 
 - 每个 PR：issue 模板逐节填写；CI 全绿合并；progress.md 记录；演示站部署并复验；`usage_event`/审计可复算。

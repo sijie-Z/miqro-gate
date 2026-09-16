@@ -12,12 +12,14 @@ import {
   UiCheckbox,
   UiDialog,
   UiInput,
+  UiPageGuide,
   UiRadio,
   UiStatusBadge,
   UiTable,
   toast,
 } from '@/ui';
 import type { ApiConsumerView } from '@/types/generated-api';
+import { CONSUMERS_GUIDE } from '@/content/pageGuides';
 
 const consumers = ref<ApiConsumerView[]>([]);
 const loading = ref(true);
@@ -273,6 +275,8 @@ onMounted(load);
         </UiButton>
       </div>
     </header>
+
+    <UiPageGuide :guide="CONSUMERS_GUIDE" storage-key="consumers" />
 
     <div v-if="loadError" class="ui-alert ui-alert--error" data-testid="consumers-load-error">
       {{ loadError

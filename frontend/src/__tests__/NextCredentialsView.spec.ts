@@ -129,6 +129,8 @@ describe('NextCredentialsView', () => {
     const firstRow = wrapper.findAll('[data-testid="credential-grant-count"]');
     expect(firstRow.length).toBeGreaterThan(0);
     expect(firstRow[0]!.text()).toBe('2');
+    expect(wrapper.find('[data-testid="page-guide"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('三步用起来');
     expect(wrapper.text()).toContain('deepseek-main');
     expect(wrapper.text()).toContain('sk-a1b2c3d4e5f6');
     expect(wrapper.text()).toContain('DeepSeek PAYG · Main');

@@ -253,7 +253,8 @@ const triggerClasses = computed(() => ({
    never match. Items below are slot children and keep scoped styling. */
 
 /* antd v5 option metrics (v2.pro live): 32px row, 5px 12px padding, 4px
-   radius, 14px/22px text. */
+   radius, 14px/22px text. Hover/active get the 0.2s background ease +
+   pressed fill (#655). */
 .ui-select__item {
   display: flex;
   align-items: center;
@@ -268,10 +269,17 @@ const triggerClasses = computed(() => ({
   cursor: pointer;
   user-select: none;
   outline: none;
+  transition:
+    background-color var(--ui-ease),
+    color var(--ui-ease);
 }
 
 .ui-select__item[data-highlighted] {
   background: var(--ui-fill-hover);
+}
+
+.ui-select__item:active {
+  background: var(--ui-fill-selected);
 }
 
 .ui-select__item[data-disabled] {

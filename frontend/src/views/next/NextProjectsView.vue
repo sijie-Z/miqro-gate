@@ -13,12 +13,14 @@ import {
   UiDialog,
   UiDrawer,
   UiInput,
+  UiPageGuide,
   UiSelect,
   UiStatusBadge,
   UiTable,
   toast,
 } from '@/ui';
 import type { AdminUser, Grant, MemberView, Project } from '@/types/generated-api';
+import { PROJECTS_GUIDE } from '@/content/pageGuides';
 
 const projects = ref<Project[]>([]);
 const loading = ref(true);
@@ -326,6 +328,8 @@ onMounted(load);
         </UiButton>
       </div>
     </header>
+
+    <UiPageGuide :guide="PROJECTS_GUIDE" storage-key="projects" />
 
     <div v-if="loadError" class="ui-alert ui-alert--error">
       {{ loadError
