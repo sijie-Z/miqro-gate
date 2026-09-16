@@ -141,7 +141,10 @@ public class ProxyController {
     private final ClientAddressResolver clientAddressResolver;
     /** TTFB metric hook (#486): observation per attempt that sees a first byte. */
     private final GatewayTtfbMetrics ttfbMetrics;
-    /** Context-limit pre-check (#553): rejects oversized bodies before the upstream call. */
+    /**
+     * Context-limit pre-check (#553): rejects oversized bodies before the upstream
+     * call.
+     */
     private final ContextLimitGuard contextLimitGuard;
 
     public ProxyController(VirtualKeyResolver keyResolver, CredentialInjector credentialInjector,
@@ -282,8 +285,8 @@ public class ProxyController {
             // it may not use) and before the cache lookup and the upstream call, so
             // an oversized context can never reach a provider. Read-only: the
             // accepted body is forwarded byte-identically.
-            AuthFailureException contextLimit = contextLimitGuard.check(body,
-                    exchange.getRequest().getURI().getPath(), requestId);
+            AuthFailureException contextLimit = contextLimitGuard.check(body, exchange.getRequest().getURI().getPath(),
+                    requestId);
             if (contextLimit != null) {
                 return writeError(exchange, contextLimit);
             }

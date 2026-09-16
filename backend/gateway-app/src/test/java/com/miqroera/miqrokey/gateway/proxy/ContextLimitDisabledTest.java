@@ -24,10 +24,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>
  * The threshold is set far below the size of the fixtures on purpose: if
- * {@code enabled=false} were ignored, every request below would be rejected with
- * 413 and these tests would fail. Passing therefore proves the switch — not the
- * threshold — decided the outcome, and that turning the guard off restores
- * byte-for-byte today's behaviour.
+ * {@code enabled=false} were ignored, every request below would be rejected
+ * with 413 and these tests would fail. Passing therefore proves the switch —
+ * not the threshold — decided the outcome, and that turning the guard off
+ * restores byte-for-byte today's behaviour.
  * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {

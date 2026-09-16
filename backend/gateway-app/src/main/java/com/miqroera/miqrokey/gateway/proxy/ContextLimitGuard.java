@@ -20,11 +20,13 @@ import org.springframework.stereotype.Component;
  * </p>
  *
  * <p>
- * The measurement is an upper bound on the conversation size — the whole
- * serialized body is counted, so JSON structure, tool schemas and any inline
- * base64 content are included. That is deliberate: over-counting can only make
- * the gateway reject slightly earlier than the provider would, while
- * under-counting would let the gateway promise a request it cannot deliver.
+ * The measurement never under-counts: the whole serialized body is counted, so
+ * JSON structure, tool schemas and any inline base64 content are included, and
+ * a body that is not well-formed UTF-8 is measured in bytes rather than code
+ * points (see {@link #characters(byte[])}). That is deliberate: over-counting
+ * can only make the gateway reject slightly earlier than the provider would,
+ * while under-counting would let the gateway promise a request it cannot
+ * deliver.
  * </p>
  *
  * <p>
@@ -51,12 +53,15 @@ public class ContextLimitGuard {
     }
 
     /**
-     * @param body the buffered request body
-     * @param path the inbound request path ({@code /v1/messages} etc.), used for
-     * the log line and — downstream — for the protocol-compatible envelope
-     * @param requestId the gateway request id
-     * @return the rejection to write, or {@code null} when the request may
-     * proceed to the upstream
+     * @param body
+     *            the buffered request body
+     * @param path
+     *            the inbound request path ({@code /v1/messages} etc.), used for the
+     *            log line and — downstream — for the protocol-compatible envelope
+     * @param requestId
+     *            the gateway request id
+     * @return the rejection to write, or {@code null} when the request may proceed
+     *         to the upstream
      */
     public AuthFailureException check(byte[] body, String path, String requestId) {
         if (!properties.enabled()) {
@@ -75,21 +80,86 @@ public class ContextLimitGuard {
     }
 
     /**
-     * Number of Unicode code points in a UTF-8 byte sequence.
+     * Size of a request body in characters, never under-counted.
      *
      * <p>
-     * Allocation-free — this runs on the hot path. A byte that is not a
-     * continuation byte ({@code 10xxxxxx}) starts a new code point, so the count
-     * is exact for well-formed UTF-8. Bodies with invalid encoding still yield a
-     * stable, monotonically increasing count, which is all the guard needs.
+     * For well-formed UTF-8 this is the exact Unicode code point count. A body that
+     * is <em>not</em> well-formed UTF-8 — a stray continuation byte, a truncated
+     * sequence, an overlong encoding, a surrogate — falls back to its byte length.
+     * That fallback is deliberately pessimistic: a lenient decoder emits at most
+     * one replacement character per byte, so the byte length is an upper bound on
+     * the character count of <em>any</em> decoder, and the measured value can never
+     * be smaller than what the provider will see. A malformed body is not valid
+     * JSON and would be rejected upstream anyway; the fallback only keeps a broken
+     * client from walking past the threshold.
+     * </p>
+     *
+     * <p>
+     * Allocation-free — this runs on the hot path on the already-buffered bytes,
+     * single pass, no decoding.
      * </p>
      */
     static int characters(byte[] body) {
+        int codePoints = strictCodePointCount(body);
+        return codePoints >= 0 ? codePoints : body.length;
+    }
+
+    /**
+     * Code points in a strictly well-formed UTF-8 sequence, or {@code -1} when the
+     * sequence is malformed. Mirrors the well-formedness rules of
+     * {@code StandardCharsets.UTF_8.newDecoder()} with
+     * {@link java.nio.charset.CodingErrorAction#REPORT}: overlong encodings
+     * ({@code C0}, {@code C1}, {@code E0 80}, {@code F0 80}), UTF-16 surrogates
+     * ({@code ED A0}–{@code ED BF}) and code points above {@code U+10FFFF}
+     * ({@code F4 90}–{@code F4 BF}, {@code F5}–{@code FF}) are all rejected.
+     */
+    private static int strictCodePointCount(byte[] body) {
         int count = 0;
-        for (byte b : body) {
-            if ((b & 0xC0) != 0x80) {
+        int i = 0;
+        while (i < body.length) {
+            int lead = body[i] & 0xFF;
+            if (lead < 0x80) {
                 count++;
+                i++;
+                continue;
             }
+            int trailing;
+            int low = 0x80;
+            int high = 0xBF;
+            if (lead >= 0xC2 && lead <= 0xDF) {
+                trailing = 1;
+            } else if (lead >= 0xE0 && lead <= 0xEF) {
+                trailing = 2;
+                if (lead == 0xE0) {
+                    low = 0xA0;
+                } else if (lead == 0xED) {
+                    high = 0x9F;
+                }
+            } else if (lead >= 0xF0 && lead <= 0xF4) {
+                trailing = 3;
+                if (lead == 0xF0) {
+                    low = 0x90;
+                } else if (lead == 0xF4) {
+                    high = 0x8F;
+                }
+            } else {
+                return -1;
+            }
+            if (i + trailing >= body.length) {
+                return -1;
+            }
+            int second = body[i + 1] & 0xFF;
+            if (second < low || second > high) {
+                return -1;
+            }
+            for (int k = 2; k <= trailing; k++) {
+                int next = body[i + k] & 0xFF;
+                if (next < 0x80 || next > 0xBF) {
+                    return -1;
+                }
+            }
+            count++;
+            i += trailing + 1;
         }
         return count;
     }

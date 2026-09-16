@@ -33,9 +33,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * </p>
  *
  * <p>
- * Precedence is part of the contract: authentication and model authorization are
- * evaluated first, so an oversized body can never turn an auth error into a size
- * oracle.
+ * Precedence is part of the contract: authentication and model authorization
+ * are evaluated first, so an oversized body can never turn an auth error into a
+ * size oracle.
  * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
@@ -84,10 +84,13 @@ class ContextLimitPrecheckTest {
     @DisplayName("rejects an oversized Anthropic request with 413 and never contacts the upstream")
     void rejectsOversizedAnthropicRequest() throws Exception {
         byte[] response = webTestClient.post().uri("/v1/messages").bodyValue(anthropicBodyOfLength(THRESHOLD + 1))
-                .exchange().expectStatus().isEqualTo(413).expectHeader()
-                .contentTypeCompatibleWith("application/json").expectBody().returnResult().getResponseBody();
+                .exchange().expectStatus().isEqualTo(413).expectHeader().contentTypeCompatibleWith("application/json")
+                .expectBody().returnResult().getResponseBody();
 
         assertThat(errorType(response)).isEqualTo("context_limit_exceeded");
+        // Anthropic envelope: top-level "type":"error" discriminator, exactly as
+        // on the gateway's other /v1/messages error paths.
+        assertThat(OBJECT_MAPPER.readTree(response).path("type").asText()).isEqualTo("error");
         assertThat(mockProvider.getCapturedRequests()).isEmpty();
     }
 
@@ -131,13 +134,17 @@ class ContextLimitPrecheckTest {
 
     @Test
     @DisplayName("accepts a request exactly at the limit and forwards it byte-identically")
-    void acceptsBodyAtTheLimit() {
+    void acceptsBodyAtTheLimit() throws Exception {
         mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
                 .contentType("application/json").body(AnthropicFixtures.RESPONSE_BASIC).build());
         String body = anthropicBodyOfLength(THRESHOLD);
 
-        webTestClient.post().uri("/v1/messages").bodyValue(body).exchange().expectStatus().isOk();
+        byte[] response = webTestClient.post().uri("/v1/messages").bodyValue(body).exchange().expectStatus().isOk()
+                .expectBody().returnResult().getResponseBody();
 
+        // A request at the limit is a pass-through: the downstream payload is the
+        // provider's, not the Anthropic-shaped 413 error envelope.
+        assertThat(OBJECT_MAPPER.readTree(response).path("type").asText()).isNotEqualTo("error");
         var captured = mockProvider.getCapturedRequests();
         assertThat(captured).hasSize(1);
         assertThat(captured.get(0).bodyBytes).isEqualTo(body.getBytes(StandardCharsets.UTF_8));
@@ -149,9 +156,8 @@ class ContextLimitPrecheckTest {
         mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
                 .contentType("application/json").body(AnthropicFixtures.RESPONSE_BASIC).build());
 
-        byte[] response = webTestClient.post().uri("/v1/messages")
-                .bodyValue(AnthropicFixtures.REQUEST_NON_STREAMING).exchange().expectStatus().isOk().expectBody()
-                .returnResult().getResponseBody();
+        byte[] response = webTestClient.post().uri("/v1/messages").bodyValue(AnthropicFixtures.REQUEST_NON_STREAMING)
+                .exchange().expectStatus().isOk().expectBody().returnResult().getResponseBody();
 
         assertThat(response).isEqualTo(AnthropicFixtures.RESPONSE_BASIC.getBytes(StandardCharsets.UTF_8));
         var captured = mockProvider.getCapturedRequests();
@@ -232,21 +238,30 @@ class ContextLimitPrecheckTest {
         return "\"}]}";
     }
 
-    /** An ASCII-only Anthropic body whose serialized length is exactly {@code chars}. */
+    /**
+     * An ASCII-only Anthropic body whose serialized length is exactly
+     * {@code chars}.
+     */
     private static String anthropicBodyOfLength(int chars) {
         int filler = chars - anthropicBodyPrefix().length() - anthropicBodySuffix().length();
         assertThat(filler).isPositive();
         return anthropicBodyPrefix() + "x".repeat(filler) + anthropicBodySuffix();
     }
 
-    /** An ASCII-only Chat Completions body whose serialized length is exactly {@code chars}. */
+    /**
+     * An ASCII-only Chat Completions body whose serialized length is exactly
+     * {@code chars}.
+     */
     private static String chatBodyOfLength(int chars) {
         String prefix = "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"";
         String suffix = "\"}]}";
         return prefix + "x".repeat(chars - prefix.length() - suffix.length()) + suffix;
     }
 
-    /** An ASCII-only Responses body whose serialized length is exactly {@code chars}. */
+    /**
+     * An ASCII-only Responses body whose serialized length is exactly
+     * {@code chars}.
+     */
     private static String responsesBodyOfLength(int chars) {
         String prefix = "{\"model\":\"gpt-4o-mini\",\"input\":\"";
         String suffix = "\"}";

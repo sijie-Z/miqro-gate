@@ -15,10 +15,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * <p>
  * The default threshold is deliberately generous — it is a safety valve against
- * runaway contexts, not a quota. It is an upper bound on the context character
- * count: the measurement covers the whole serialized body (JSON structure, tool
- * schemas and inline base64 payloads included), so it over-counts rather than
- * under-counts. A threshold above
+ * runaway contexts, not a quota. For well-formed UTF-8 it is an upper bound on
+ * the context character count: the measurement covers the whole serialized body
+ * (JSON structure, tool schemas and inline base64 payloads included), so it
+ * over-counts rather than under-counts. A body that is not well-formed UTF-8 is
+ * measured in bytes, which is also an over-count — the measure never reports
+ * fewer characters than a lenient decoder would produce (see
+ * {@link ContextLimitGuard#characters(byte[])}). A threshold above
  * {@code miqrokey.gateway.upstream.max-proxy-buffer} never fires — the buffer
  * bound rejects first with {@code payload_too_large}. See
  * configuration-reference §5.
@@ -30,9 +33,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * follow-up to #553.
  * </p>
  *
- * @param enabled whether the pre-check runs at all; {@code null} means true
- * @param thresholdChars body character budget; {@code null} or non-positive
- * means {@value #DEFAULT_THRESHOLD_CHARS}
+ * @param enabled
+ *            whether the pre-check runs at all; {@code null} means true
+ * @param thresholdChars
+ *            body character budget; {@code null} or non-positive means
+ *            {@value #DEFAULT_THRESHOLD_CHARS}
  */
 @ConfigurationProperties(prefix = "miqrokey.gateway.context-limit")
 public record ContextLimitProperties(Boolean enabled, Integer thresholdChars) {
