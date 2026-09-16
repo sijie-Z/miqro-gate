@@ -10,8 +10,13 @@
  * #498) instead of offering it as a free "optional" choice, and the model
  * scope is picked from the product's model catalog (ModelScopePicker) rather
  * than typed as free text.
+ *
+ * Issue #657: the credentials list deep-links here with `?credentialId=…`;
+ * the query is a real filter (not a decorative parameter), is announced in
+ * the toolbar and is one click away from being cleared.
  */
 import { computed, onMounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import {
@@ -44,6 +49,8 @@ interface ProductOption {
   providerName: string;
   providerSlug?: string;
 }
+
+const route = useRoute();
 
 const grants = ref<Grant[]>([]);
 const loading = ref(true);
@@ -163,6 +170,18 @@ const columns = [
   { key: 'status', title: '状态', width: '110px' },
   { key: 'actions', title: '操作', width: '150px' },
 ];
+
+/** #657: credential id arriving from the credentials list' dependency count. */
+const credentialFilter = computed(() => {
+  const raw = route.query.credentialId;
+  return typeof raw === 'string' ? raw : '';
+});
+
+const filteredGrants = computed(() =>
+  credentialFilter.value
+    ? grants.value.filter((g) => g.upstreamCredentialId === credentialFilter.value)
+    : grants.value,
+);
 
 async function load() {
   loading.value = true;
@@ -413,14 +432,30 @@ onMounted(async () => {
 
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
-        <span class="ui-panel-sub">共 {{ grants.length }} 条授权</span>
+        <span class="ui-panel-sub">
+          共 {{ filteredGrants.length }} 条授权<template v-if="credentialFilter"
+            >（全部 {{ grants.length }} 条）</template
+          >
+        </span>
+        <span v-if="credentialFilter" class="next-grants__filter" data-testid="grants-filter">
+          仅看凭证「{{ nameOf.credential(credentialFilter) }}」
+          <router-link
+            class="ui-link-action"
+            :to="{ name: 'grants' }"
+            data-testid="grants-filter-clear"
+          >
+            查看全部
+          </router-link>
+        </span>
       </div>
       <UiTable
         :columns="columns"
-        :data="grants"
+        :data="filteredGrants"
         :loading="loading"
         row-key="id"
-        empty-title="还没有授权"
+        :empty-title="credentialFilter ? '该凭证还没有被任何授权引用' : '还没有授权'"
+        :empty-action-label="credentialFilter ? '查看全部授权' : ''"
+        :empty-action-to="{ name: 'grants' }"
         data-testid="grants-table"
       >
         <template #project="{ row }">
@@ -623,5 +658,14 @@ onMounted(async () => {
 
 .next-grants__hint--lead {
   margin-bottom: var(--ui-space-1);
+}
+
+/* #657 filter chip: the count stays left, the active filter sits right. */
+.next-grants__filter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-1);
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
 }
 </style>

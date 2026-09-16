@@ -7,8 +7,14 @@
  * cells get .ui-table__cell--num (tabular) via `align: 'right'`.
  * Sortable columns toggle asc → desc → none; sorting happens inside the
  * table on a copy of the data (client-side, fine for console scale lists).
+ *
+ * #657: the default empty state can carry a link CTA (`emptyActionLabel` +
+ * `emptyActionTo`) so a list says where to go next instead of leaving the
+ * user at a dead end. Pages whose call-to-action opens an in-page form keep
+ * overriding the `#empty` slot (see NextKeysView).
  */
 import { computed, ref, useAttrs } from 'vue';
+import type { RouteLocationRaw } from 'vue-router';
 
 export interface UiTableColumn {
   key: string;
@@ -34,6 +40,9 @@ const props = withDefaults(
     loading?: boolean;
     emptyTitle?: string;
     emptyDescription?: string;
+    /** Empty-state link CTA; rendered only when both label and target are set. */
+    emptyActionLabel?: string;
+    emptyActionTo?: RouteLocationRaw;
     skeletonRows?: number;
     /** Striped zebra for wide reference lists; hover stays on both. */
     striped?: boolean;
@@ -43,6 +52,8 @@ const props = withDefaults(
     loading: false,
     emptyTitle: '暂无数据',
     emptyDescription: '',
+    emptyActionLabel: '',
+    emptyActionTo: '',
     skeletonRows: 5,
     striped: false,
   },
@@ -214,6 +225,14 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
                   </span>
                   <p class="ui-table__empty-title">{{ emptyTitle }}</p>
                   <p v-if="emptyDescription" class="ui-table__empty-desc">{{ emptyDescription }}</p>
+                  <router-link
+                    v-if="emptyActionLabel && emptyActionTo"
+                    class="ui-link-action ui-table__empty-action"
+                    :to="emptyActionTo"
+                    data-testid="table-empty-action"
+                  >
+                    {{ emptyActionLabel }}
+                  </router-link>
                 </div>
               </slot>
             </td>
@@ -369,5 +388,9 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
   margin: var(--ui-space-1) 0 0;
   font-size: var(--ui-font-size-sm);
   color: var(--ui-foreground-secondary);
+}
+
+.ui-table__empty-action {
+  margin-top: var(--ui-space-2);
 }
 </style>

@@ -237,11 +237,13 @@ onMounted(load);
       </div>
       <div class="ui-panel-body">
         <div class="next-teams__form">
+          <!-- #657: the name field states its rule up front (teams.name width). -->
           <UiInput
             v-model="createName"
             label="名称"
             required
             placeholder="例如 platform-sre"
+            hint="必填，最长 200 个字符。"
             data-testid="team-create-name"
           />
           <div class="ui-field">
