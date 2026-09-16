@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.persistence.repository;
 import com.miqroera.miqrokey.domain.model.QuotaMetric;
 import com.miqroera.miqrokey.domain.model.QuotaPeriod;
 import com.miqroera.miqrokey.domain.model.QuotaRule;
+import com.miqroera.miqrokey.domain.model.QuotaRuleEnforcement;
 import com.miqroera.miqrokey.domain.model.QuotaRuleStatus;
 import com.miqroera.miqrokey.domain.model.QuotaScopeType;
 import com.miqroera.miqrokey.domain.repository.QuotaRuleRepository;
@@ -23,14 +24,15 @@ import java.util.UUID;
 public class QuotaRuleRepositoryImpl implements QuotaRuleRepository {
 
     private static final String COLS = "id, tenant_id, scope_type, scope_id, metric, period, limit_value,"
-            + " warn_percent, status, created_by, version, created_at, updated_at";
+            + " warn_percent, enforcement, status, created_by, version, created_at, updated_at";
 
     private static final RowMapper<QuotaRule> ROW_MAPPER = (rs, rowNum) -> new QuotaRule((UUID) rs.getObject("id"),
             (UUID) rs.getObject("tenant_id"), QuotaScopeType.valueOf(rs.getString("scope_type")),
             (UUID) rs.getObject("scope_id"), QuotaMetric.valueOf(rs.getString("metric")),
             QuotaPeriod.valueOf(rs.getString("period")), rs.getLong("limit_value"), rs.getInt("warn_percent"),
-            QuotaRuleStatus.valueOf(rs.getString("status")), (UUID) rs.getObject("created_by"), rs.getLong("version"),
-            rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
+            QuotaRuleEnforcement.valueOf(rs.getString("enforcement")), QuotaRuleStatus.valueOf(rs.getString("status")),
+            (UUID) rs.getObject("created_by"), rs.getLong("version"), rs.getTimestamp("created_at").toInstant(),
+            rs.getTimestamp("updated_at").toInstant());
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -43,12 +45,13 @@ public class QuotaRuleRepositoryImpl implements QuotaRuleRepository {
     public QuotaRule upsert(QuotaRule rule) {
         return jdbc.queryForObject("""
                 INSERT INTO quota_rules (id, tenant_id, scope_type, scope_id, metric, period, limit_value,
-                    warn_percent, status, created_by, version, created_at, updated_at)
+                    warn_percent, enforcement, status, created_by, version, created_at, updated_at)
                 VALUES (:id, :tenantId, :scopeType, :scopeId, :metric, :period, :limitValue,
-                    :warnPercent, :status, :createdBy, 0, :createdAt, :updatedAt)
+                    :warnPercent, :enforcement, :status, :createdBy, 0, :createdAt, :updatedAt)
                 ON CONFLICT (tenant_id, scope_type, scope_id, metric, period) DO UPDATE SET
                     limit_value = EXCLUDED.limit_value,
                     warn_percent = EXCLUDED.warn_percent,
+                    enforcement = EXCLUDED.enforcement,
                     status = EXCLUDED.status,
                     version = quota_rules.version + 1,
                     updated_at = EXCLUDED.updated_at
@@ -58,8 +61,8 @@ public class QuotaRuleRepositoryImpl implements QuotaRuleRepository {
                         .addValue("scopeType", rule.scopeType().name()).addValue("scopeId", rule.scopeId())
                         .addValue("metric", rule.metric().name()).addValue("period", rule.period().name())
                         .addValue("limitValue", rule.limitValue()).addValue("warnPercent", rule.warnPercent())
-                        .addValue("status", rule.status().name()).addValue("createdBy", rule.createdBy())
-                        .addValue("createdAt", Timestamp.from(rule.createdAt()))
+                        .addValue("enforcement", rule.enforcement().name()).addValue("status", rule.status().name())
+                        .addValue("createdBy", rule.createdBy()).addValue("createdAt", Timestamp.from(rule.createdAt()))
                         .addValue("updatedAt", Timestamp.from(rule.updatedAt())),
                 ROW_MAPPER);
     }
@@ -70,9 +73,9 @@ public class QuotaRuleRepositoryImpl implements QuotaRuleRepository {
         try {
             return Optional.ofNullable(jdbc.queryForObject("""
                     INSERT INTO quota_rules (id, tenant_id, scope_type, scope_id, metric, period, limit_value,
-                        warn_percent, status, created_by, version, created_at, updated_at)
+                        warn_percent, enforcement, status, created_by, version, created_at, updated_at)
                     VALUES (:id, :tenantId, :scopeType, :scopeId, :metric, :period, :limitValue,
-                        :warnPercent, :status, :createdBy, 0, :createdAt, :updatedAt)
+                        :warnPercent, :enforcement, :status, :createdBy, 0, :createdAt, :updatedAt)
                     ON CONFLICT (tenant_id, scope_type, scope_id, metric, period) DO NOTHING
                     RETURNING
                     """ + COLS,
@@ -80,7 +83,8 @@ public class QuotaRuleRepositoryImpl implements QuotaRuleRepository {
                             .addValue("scopeType", rule.scopeType().name()).addValue("scopeId", rule.scopeId())
                             .addValue("metric", rule.metric().name()).addValue("period", rule.period().name())
                             .addValue("limitValue", rule.limitValue()).addValue("warnPercent", rule.warnPercent())
-                            .addValue("status", rule.status().name()).addValue("createdBy", rule.createdBy())
+                            .addValue("enforcement", rule.enforcement().name()).addValue("status", rule.status().name())
+                            .addValue("createdBy", rule.createdBy())
                             .addValue("createdAt", Timestamp.from(rule.createdAt()))
                             .addValue("updatedAt", Timestamp.from(rule.updatedAt())),
                     ROW_MAPPER));
