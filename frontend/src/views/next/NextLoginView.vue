@@ -349,26 +349,36 @@ function startOauth() {
   window.location.assign('/api/v1/auth/oauth/start');
 }
 
-onMounted(async () => {
+onMounted(() => {
   // #550: ask the deployment whether self-service registration is open before
-  // the user can pick the register tab. Own try/catch: a failing probe must not
-  // disturb provider discovery, and the default stays "enabled" (fail open).
-  try {
-    const status = await api.registrationStatus();
-    registrationEnabled.value = status.enabled !== false;
-    if (!registrationEnabled.value && mode.value === 'register') {
-      switchMode('login');
-      errorMessage.value = t.value.errRegisterOff;
-    }
-  } catch {
-    registrationEnabled.value = true;
-  }
-  try {
-    oauthProviders.value = await api.publicOauthProviders();
-  } catch {
-    // provider discovery is best-effort on the login page
-    oauthProviders.value = [];
-  }
+  // the user can pick the register tab. Each probe publishes its own result as
+  // soon as it settles, so a status call that hangs until the HTTP timeout
+  // cannot hold back the OAuth button of the independent provider probe.
+  // Failures keep per-probe fallbacks: a failed status probe leaves the entry
+  // "enabled" (fail open — the backend 403 REGISTRATION_DISABLED remains the
+  // enforcement point), a failed provider probe renders no OAuth button.
+  api
+    .registrationStatus()
+    .then((status) => {
+      if (status.enabled !== false) return;
+      registrationEnabled.value = false;
+      if (mode.value === 'register') {
+        switchMode('login');
+        errorMessage.value = t.value.errRegisterOff;
+      }
+    })
+    .catch(() => {
+      registrationEnabled.value = true;
+    });
+
+  api
+    .publicOauthProviders()
+    .then((providers) => {
+      oauthProviders.value = providers;
+    })
+    .catch(() => {
+      oauthProviders.value = [];
+    });
 });
 </script>
 

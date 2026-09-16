@@ -15,6 +15,7 @@ vi.mock('@/api', () => ({
   login: vi.fn(),
   register: vi.fn(),
   registrationStatus: vi.fn(),
+  publicOauthProviders: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -29,6 +30,7 @@ describe('NextLoginView', () => {
     // Default deployment: self-registration open, so the register entry is live.
     // Individual tests flip this to model an invite-only deployment (#550).
     mockApi.registrationStatus.mockResolvedValue({ enabled: true });
+    mockApi.publicOauthProviders.mockResolvedValue([]);
   });
 
   function mountView() {
@@ -76,6 +78,39 @@ describe('NextLoginView', () => {
     expect(wrapper.find('[data-testid="register-display-name"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="register-confirm"]').exists()).toBe(false);
     expect(mockApi.register).not.toHaveBeenCalled();
+  });
+
+  it('fails open when the status probe fails or omits the field (#550)', async () => {
+    mockApi.registrationStatus.mockRejectedValue(new Error('probe unavailable'));
+
+    const failed = mountView();
+    await flushPromises();
+    expect(failed.find('[data-testid="tab-register"]').attributes('disabled')).toBeUndefined();
+
+    // The generated schema leaves `enabled` optional; only an explicit `false`
+    // may close the entry, never an absent field.
+    mockApi.registrationStatus.mockResolvedValue({});
+    const blank = mountView();
+    await flushPromises();
+
+    const entry = blank.find('[data-testid="tab-register"]');
+    expect(entry.attributes('disabled')).toBeUndefined();
+    await entry.trigger('click');
+    await flushPromises();
+    expect(blank.find('[data-testid="register-display-name"]').exists()).toBe(true);
+    expect(blank.find('[data-testid="register-confirm"]').exists()).toBe(true);
+  });
+
+  it('renders the oauth button while the status probe is still pending (#550)', async () => {
+    // A status endpoint that never answers (e.g. blackholed behind a proxy) must
+    // not hold the provider probe's result hostage.
+    mockApi.registrationStatus.mockReturnValue(new Promise(() => {}));
+    mockApi.publicOauthProviders.mockResolvedValue([{ code: 'github', name: 'GitHub' }]);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="oauth-login"]').text()).toContain('GitHub');
   });
 
   it('requires both fields on login', async () => {

@@ -64,11 +64,11 @@
 
 **`GET /api/v1/auth/registration-status`（#550）**：同一开关的公开只读视图，供登录页在渲染注册入口**之前**查询，避免"填完表单提交才拿到 `403`"。
 
-- 访问：匿名（`SessionFilter.PUBLIC_PATHS` 白名单）；`GET` 不经 CSRF 拦截器；无会话、无 CSRF token 要求。
+- 访问：匿名（`SessionFilter.PUBLIC_PATHS` 精确匹配白名单）；无会话要求。CSRF 拦截器虽注册在 `/api/**` 全方法上（`SecurityConfig#addInterceptors`），但 `CsrfInterceptor#preHandle` 对非状态变更方法直接短路放行，故 `GET` 不需要 CSRF token，也无需加入 `CSRF_EXEMPT`。
 - 响应 `200 application/json`：`{ "enabled": true | false }`——**仅此一个布尔字段**，不回显配置来源、开关名称或任何部署信息（集成测试断言响应体恰好 1 个字段）。
 - 判定同源：与 `/register` 的 `403` 分支读同一个已绑定属性（`AuthProperties.registrationEnabled`，`@ConfigurationProperties` 启动期绑定、无 `@RefreshScope`），故同一进程内两者不可能给出不同答案。
 - 错误：正常路径无业务错误码；`5xx` 仅来自通用异常处理器。前端对此端点**失败即放行**（默认按"开"渲染，仍由 `/register` 的 `403 REGISTRATION_DISABLED` 强制），因此该端点是 UX 前置提示而**非**权限判定点。
-- 与 `/register` 一样不产生审计事件（只读查询）。
+- 审计：本端点为纯只读查询，**不写审计事件**。注意与 `/register` 不同：成功注册会写 `REGISTER` 事件，两者在审计面上不等价。
 
 ### 3.1c 平台 OIDC 登录（P0a，ADR-0017，2026-09-08）
 

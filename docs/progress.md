@@ -17,7 +17,8 @@
 - **#550（PR 待开，分支 `fix/registration-disabled-gating`，基于 50a9b24）**：部署关闭自助注册时，
   登录页仍展示可提交的注册入口，用户填完表单才吃 403。新增公开只读端点
   `GET /api/v1/auth/registration-status`（匿名，仅回一个布尔 `{enabled}`；加入
-  `SessionFilter.PUBLIC_PATHS` 精确匹配白名单；GET 不在 CSRF 拦截器范围内）——判定与 `/register`
+  `SessionFilter.PUBLIC_PATHS` 精确匹配白名单；CSRF 拦截器虽覆盖 `/api/**` 全方法，但对非状态变更
+  方法直接短路，GET 无需 token）——判定与 `/register`
   的 403 分支**同源**（`AuthProperties.registrationEnabled`，`@ConfigurationProperties` 启动期绑定、
   无 `@RefreshScope`）。前端登录页 `onMounted` 预取该状态；关闭态下注册入口**保留可见**（承载说明
   文案）但不可点/不可提交（`disabled` + `aria-disabled` + `request-access--off` 样式），探测失败一律
@@ -35,6 +36,38 @@
     前端类型 `npm run gen:types` 同步重生成（`src/types/generated.ts` 纯新增 39 行，二次运行幂等）。
 - 反空跑：把前端新用例的 mock 临时改成 `{ enabled: true }`，该用例即 FAIL
   （`expected undefined to be defined`），证明断言非空跑。
+
+### 收尾轮 2（2026-09-16 晚）：对抗评审修复 + 复验
+
+- 评审后修复 4 项（均已落盘）：
+  1. 审计面误述：`docs/api-contract.md` 曾把本端点与 `/register` 类比，但本端点是纯只读查询、
+     **不写审计事件**，只有成功注册才写 `REGISTER` → 已改为显式声明「不写审计」并注明两者不等价。
+  2. CSRF 机制描述不准：`SecurityConfig#addInterceptors` 确实把 `csrfInterceptor` 注册在 `/api/**`
+     **全方法**上；GET 免 token 的原因是 `CsrfInterceptor#preHandle` 对非状态变更方法直接短路，
+     而不是「GET 不在拦截范围内」。`api-contract.md` 与本文档已按真实机制改写，且确认**无需**把
+     本端点加入 `CSRF_EXEMPT`。
+  3. 前端类型重复定义：手写 `RegistrationStatus` 与生成 schema 重复，且把 `enabled` 声明为必填
+     （schema 中为可选）→ 改为 `generated-api.ts` 里的别名 `RegistrationStatusResponse`，
+     调用方统一按 `=== false` 判定。
+  4. 探测串行化：原实现先 `await` 状态探测再请求 OAuth 供应商，状态端点卡住（HTTP 客户端 60s 超时）
+     会连带延迟 OAuth 登录按钮 → 改为两个探测各自 `.then/.catch` 独立回填状态，互不阻塞。
+- 新增前端用例 2 条（`NextLoginView.spec.ts`）：状态探测 reject / 字段缺失时 fail-open（入口仍可用、
+  表单仍可达）；状态探测悬挂时 OAuth 按钮仍渲染。反空跑依据：两条新旧用例互为反例——关闭态要求
+  `disabled` **存在**、失败态要求**不存在**，二者同时通过即证明闸门由探测值驱动，而非恒真/恒假断言。
+- 复验（2026-09-16，真实命令与结果）：
+  - 后端 `-f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=RegistrationApiIntegrationTest,RegistrationDisabledApiIntegrationTest
+    -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`、
+    `BUILD SUCCESS`（Windows 需 `mvnw.cmd` 且 `JAVA_HOME` 指向 Temurin 21）。
+  - 前端 `npm run typecheck` exit 0；`npm run test` → 59 files / **333** tests 全绿（较上轮 +2，即上述新增用例）。
+  - 改动文件 `npx eslint <4 个文件>`（**不带 `--fix`**，避免误改工作区）exit 0。
+  - CI 的 `gen:types` 漂移门禁本地预演：`npx openapi-typescript ../docs/openapi/openapi-3.1.json -o <临时文件>`
+    与 `git show HEAD:frontend/src/types/generated.ts` **逐字节一致**（忽略行尾），故该门禁不会因本分支失败。
+  - 端到端 `npx playwright test --grep "new login page"` → `2 passed (42.5s)`、exit 0；
+    新增用例 `new login page closes the register entry when self-registration is off (#550)`
+    通过路由拦截返回 `{"enabled":false}`，断言注册入口 `disabled` 且注册表单两个字段均不渲染。
+    日志里可见 `/api/v1/auth/registration-status`、`/api/v1/auth/oauth/providers` 代理到 8080 失败
+    （本机未起后端），页面按 fail-open 回退，原有用例仍绿——即真实浏览器下探测失败不破坏登录页。
 
 ## 会话交接点 2026-09-15（资料页增强 #597 + 用途标签澄清 #596）
 
