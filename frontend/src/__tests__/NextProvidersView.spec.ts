@@ -8,6 +8,9 @@ import type { ProviderProductView } from '@/types/api';
 
 vi.mock('@/api', () => ({
   listProviderProducts: vi.fn(),
+  listSubscriptions: vi.fn(),
+  listCredentials: vi.fn(),
+  listGrants: vi.fn(),
   adminListModels: vi.fn(),
   adminCreateModel: vi.fn(),
   adminProbeModels: vi.fn(),
@@ -50,6 +53,11 @@ describe('NextProvidersView', () => {
         balanceAuthority: 'UNAVAILABLE',
       }),
     ]);
+    // #657 dependency/catalog columns: defaults are empty, individual tests override.
+    mockApi.listSubscriptions.mockResolvedValue([]);
+    mockApi.listCredentials.mockResolvedValue([]);
+    mockApi.listGrants.mockResolvedValue([]);
+    mockApi.adminListModels.mockResolvedValue([]);
   });
 
   function mountView() {
@@ -57,6 +65,10 @@ describe('NextProvidersView', () => {
   }
 
   it('renders the provider catalogue with status and balance labels', async () => {
+    // #657: one catalogue row for the DeepSeek product → counted in the 模型目录 column.
+    mockApi.adminListModels.mockResolvedValue([
+      { id: 'm1', providerProductId: '0190-0000-0000-0020', modelId: 'deepseek-chat' },
+    ]);
     const wrapper = mountView();
     await flushPromises();
 
@@ -68,6 +80,11 @@ describe('NextProvidersView', () => {
     expect(wrapper.text()).toContain('已实现');
     expect(wrapper.text()).toContain('不可用');
     expect(wrapper.text()).toContain('api.deepseek.com');
+    expect(wrapper.text()).toContain('模型目录');
+    const catalog = wrapper.findAll('[data-testid="product-catalog-count"]');
+    expect(catalog[0]!.text()).toContain('1 个模型');
+    expect(catalog[1]!.text()).toContain('未探测');
+    expect(wrapper.find('[data-testid="product-deps"]').text()).toMatch(/凭证\s*0\s*·\s*授权\s*0/);
   });
 
   it('F18: opens the model catalog drawer and adds a manual model', async () => {
@@ -139,6 +156,8 @@ describe('NextProvidersView', () => {
     });
     const wrapper = mountView();
     await flushPromises();
+    // #657: load() also fetches the full catalog once — count only the dialog's calls.
+    mockApi.adminListModels.mockClear();
     await wrapper.find('[data-testid="product-models-open"]').trigger('click');
     await flushPromises();
 

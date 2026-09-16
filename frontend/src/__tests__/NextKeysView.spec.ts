@@ -17,6 +17,10 @@ vi.mock('@/api', () => ({
   createVirtualKey: vi.fn(),
   rotateVirtualKey: vi.fn(),
   revokeVirtualKey: vi.fn(),
+  renameVirtualKey: vi.fn(),
+  disableVirtualKey: vi.fn(),
+  enableVirtualKey: vi.fn(),
+  usageSummary: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -120,6 +124,7 @@ describe('NextKeysView', () => {
     setActivePinia(createPinia());
     vi.resetAllMocks();
     mockApi.listVirtualKeys.mockResolvedValue([]);
+    mockApi.usageSummary.mockResolvedValue({ groupBy: 'virtual_key', groups: [], totals: {} });
     document.body.innerHTML = '';
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
   });
@@ -189,6 +194,38 @@ describe('NextKeysView', () => {
     expect(wrapper.find('[data-testid="onboard-no-project"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="onboard-has-project"]').exists()).toBe(true);
     expect(wrapper.text()).toContain('还没有虚拟密钥');
+  });
+
+  it('labels purpose as a declarative, non-restrictive tag (#596)', async () => {
+    mockApi.myGrants.mockResolvedValue(grants);
+    mockApi.listVirtualKeys.mockResolvedValue([key()]);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Every purpose value explains the label semantics through the shared
+    // hover-bubble pattern (#651).
+    expect(wrapper.findAll('.ui-tooltip__anchor').length).toBeGreaterThan(0);
+
+    // Create form explains the label once the cascade reaches the purpose step.
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await wrapper.find('[data-testid="create-name"]').setValue('miqi-dev');
+    await flushPromises();
+    const projectButton = wrapper
+      .findAll('.stub-option')
+      .find((el) => el.text().includes('Core AI'));
+    await projectButton!.trigger('click');
+    await flushPromises();
+    const grantButton = wrapper
+      .findAll('.stub-option')
+      .find((el) => el.text().includes('Claude API'));
+    await grantButton!.trigger('click');
+    await flushPromises();
+
+    const hint = wrapper.find('[data-testid="create-purpose-hint"]');
+    expect(hint.exists()).toBe(true);
+    expect(hint.text()).toContain('不限制客户端');
+    expect(hint.text()).toContain('允许模型');
   });
 
   it('binds additional projects through the optional checkboxes (ADR-0018)', async () => {
@@ -388,5 +425,51 @@ describe('NextKeysView', () => {
 
     expect(wrapper.find('[data-testid="create-error"]').text()).toContain('models are not granted');
     expect(wrapper.find('[data-testid="create-error"]').text()).toContain('req-123');
+  });
+
+  it('#582: the status filter narrows the list to one lifecycle state', async () => {
+    mockApi.listVirtualKeys.mockResolvedValue([
+      key(),
+      key({ id: 'k-off', name: 'paused-key', status: 'DISABLED' }),
+      key({ id: 'k-dead', name: 'old-key', status: 'REVOKED' }),
+    ]);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const offOption = wrapper.findAll('.stub-option').find((el) => el.text().trim() === '停用');
+    await offOption!.trigger('click');
+    await flushPromises();
+
+    const tableText = wrapper.find('[data-testid="keys-table"]').text();
+    expect(tableText).toContain('paused-key');
+    expect(tableText).not.toContain('claude-code-main');
+    expect(tableText).not.toContain('old-key');
+  });
+
+  it('#582: shows per-key 7-day usage inline and degrades to — for unused keys', async () => {
+    mockApi.listVirtualKeys.mockResolvedValue([key(), key({ id: 'k-idle', name: 'idle-key' })]);
+    mockApi.usageSummary.mockResolvedValue({
+      groupBy: 'virtual_key',
+      groups: [
+        {
+          groupKey: '0190-0001',
+          label: 'claude-code-main',
+          requests: { upstream: 3 },
+          tokens: { input: 1000, output: 500 },
+        },
+      ],
+      totals: {},
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const usageCells = wrapper.findAll('[data-testid="key-usage-inline"]');
+    expect(usageCells).toHaveLength(1);
+    expect(usageCells[0]!.text()).toContain('3 次');
+    expect(usageCells[0]!.text()).toContain('1.5K tok');
+    // The unused key renders the muted dash placeholder.
+    expect(wrapper.findAll('.next-keys__usage--empty').length).toBe(1);
   });
 });

@@ -413,6 +413,63 @@ onUnmounted(() => {
   window.clearTimeout(progressTimer);
 });
 
+// ---- instant route switching (#668) ----
+// Two halves: (1) the content scroller resets to the top on every page
+// change — without it the next page inherits the previous page's scroll
+// offset (long page → short page lands mid/bottom); (2) route chunks are
+// prefetched on menu hover/focus plus one idle pass, so a click resolves
+// from the module cache instead of waiting on a network roundtrip.
+const contentEl = ref<HTMLElement | null>(null);
+
+watch(
+  () => route.path,
+  () => {
+    if (contentEl.value) contentEl.value.scrollTop = 0;
+  },
+);
+
+const prefetchedRoutes = new Set<string>();
+
+function prefetchRoute(name: string): void {
+  if (!name || prefetchedRoutes.has(name)) return;
+  prefetchedRoutes.add(name);
+  try {
+    for (const record of router.resolve({ name }).matched) {
+      for (const loader of Object.values(record.components ?? {})) {
+        if (typeof loader === 'function') {
+          void Promise.resolve((loader as () => unknown)()).catch(() => {
+            /* Best effort; the real navigation surfaces load errors (#663). */
+          });
+        }
+      }
+    }
+  } catch {
+    /* Unknown route name — regular navigation will report the real error. */
+  }
+}
+
+// Idle fallback: once the first screen has settled, quietly warm the visible
+// menu's chunks one by one so keyboard navigation is instant too.
+const PREFETCH_IDLE_DELAY_MS = 1500;
+const PREFETCH_STEP_MS = 120;
+let prefetchTimer: number | undefined;
+
+onMounted(() => {
+  prefetchTimer = window.setTimeout(() => {
+    const names = navGroups.value.flatMap((group) => group.items.map((item) => item.name));
+    void (async () => {
+      for (const name of names) {
+        prefetchRoute(name);
+        await new Promise((resolve) => setTimeout(resolve, PREFETCH_STEP_MS));
+      }
+    })();
+  }, PREFETCH_IDLE_DELAY_MS);
+});
+
+onUnmounted(() => {
+  window.clearTimeout(prefetchTimer);
+});
+
 /** Icon-only rail: the user pinned the collapse (settings drawer) OR the window is narrow. */
 const iconOnly = computed(() => narrow.value || preferences.collapsed);
 
@@ -477,6 +534,8 @@ async function handleLogout() {
               :to="{ name: item.name }"
               class="new-shell__nav-item"
               :class="{ 'new-shell__nav-item--active': isActive(item.name) }"
+              @mouseenter="prefetchRoute(item.name)"
+              @focus="prefetchRoute(item.name)"
             >
               <component :is="item.icon" class="new-shell__nav-icon" />
               <span class="new-shell__nav-label">{{ item.label }}</span>
@@ -746,7 +805,7 @@ async function handleLogout() {
         </div>
       </Teleport>
 
-      <div class="new-shell__content">
+      <div ref="contentEl" class="new-shell__content">
         <RouterView v-slot="{ Component }">
           <Transition name="shell-page" mode="out-in">
             <component :is="Component" />

@@ -46,8 +46,9 @@
 | `POST /api/v1/auth/login` | 用户名/密码登录，创建会话 | 匿名 |
 | `POST /api/v1/auth/register` | 自助注册（F-REG）：创建普通用户并直接登录 | 匿名（开关 `miqrokey.registration-enabled`，默认开） |
 | `POST /api/v1/auth/logout` | 当前会话失效 | 已登录 |
-| `GET /api/v1/auth/me` | 当前用户、角色、会话到期时间 | 已登录 |
+| `GET /api/v1/auth/me` | 当前用户、角色、状态、最近登录与会话到期时间 | 已登录 |
 | `POST /api/v1/auth/password` | 修改自己的密码并撤销其他会话 | 已登录 |
+| `POST /api/v1/auth/logout-others` | 退出其他会话：撤销除当前会话外的全部会话（自助版 `revoke-sessions`；审计 `LOGOUT_OTHERS`；强制改密会话被 `PASSWORD_CHANGE_REQUIRED` 门槛拦截） | 已登录 |
 | `GET /api/v1/auth/csrf` | 获取 CSRF token（从配置名称的 Cookie 读取） | 已登录 |
 
 ### 3.1b 自助注册（F-REG）
@@ -118,6 +119,9 @@
 | `GET /api/v1/me/virtual-keys/{id}` | 自己的 Key 元数据和 Base URL |
 | `POST /api/v1/me/virtual-keys/{id}/rotate` | 原子轮换；旧 Key 按配置宽限后失效 |
 | `POST /api/v1/me/virtual-keys/{id}/revoke` | 立即吊销 |
+| `PATCH /api/v1/me/virtual-keys/{id}` | 重命名（#582；绑定/模型/密钥不变，审计 from/to） |
+| `POST /api/v1/me/virtual-keys/{id}/disable` | 临时停用（#582；网关按未知密钥 404，可恢复） |
+| `POST /api/v1/me/virtual-keys/{id}/enable` | 恢复已停用密钥的路由（#582） |
 | `GET /api/v1/me/usage/summary` | 自己的聚合用量和成本 |
 | `GET /api/v1/me/usage/records` | 自己的明细，受分页和最大时间窗限制 |
 
@@ -212,6 +216,10 @@
 ```
 
 轮换/吊销只允许 `ACTIVE`（吊销额外允许 `ROTATING`）；冲突返回 `409 KEY_NOT_ROTATABLE` / `409 KEY_NOT_REVOCABLE`。操作写审计事件，审计日志不含 Secret 明文。
+
+`PATCH /api/v1/me/virtual-keys/{id}`（#582）重命名：body `{ "name": "..." }`（必填，≤200 字符）；仅改展示名，绑定、模型与密钥本身不变，审计记录 from/to；已吊销（`REVOKED`）的密钥不可重命名（`409 KEY_NOT_RENAMEABLE`），且不触发路由快照刷新（路由不依赖名称）。
+
+`POST /api/v1/me/virtual-keys/{id}/disable` 与 `.../enable`（#582）为可逆软停用：停用后该 Key 在下一次路由快照刷新时被移除，请求得到与未知密钥一致的 404（反枚举口径不变）；启用后恢复路由，绑定与授权原样保留。停用仅允许 `ACTIVE`（`409 KEY_NOT_DISABLEABLE`，含 `ROTATING` 拒绝），启用仅允许 `DISABLED`（`409 KEY_NOT_ENABLEABLE`）。两者写审计（`VIRTUAL_KEY_DISABLE` / `VIRTUAL_KEY_ENABLE`）并发布路由快照刷新。
 
 ### 4.4 用量汇总 `GET /api/v1/me/usage/summary`
 

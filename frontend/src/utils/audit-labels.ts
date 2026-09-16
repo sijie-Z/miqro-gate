@@ -47,6 +47,7 @@ const ACTION_LABELS: Record<string, string> = {
   LOGIN_FAILED: '登录失败',
   LOGIN: '登录',
   LOGOUT: '登出',
+  LOGOUT_OTHERS: '退出其他会话',
   REGISTER: '注册',
 };
 
@@ -122,6 +123,7 @@ const ACTION_VERBS: Record<string, string> = {
   IMPORT: '导入',
   REJECT: '驳回',
   REMOVE: '移除',
+  RENAME: '重命名',
   REVOKE: '吊销',
   ROLLBACK: '回滚',
   ROTATE: '轮换',

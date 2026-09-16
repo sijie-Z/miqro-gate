@@ -14,6 +14,8 @@ const REGULAR_USER = {
   displayName: 'Demo 用户',
   role: 'USER',
   mustChangePassword: false,
+  lastLoginAt: '2026-09-14T02:12:00Z',
+  sessionExpiresAt: '2026-09-16T05:01:41Z',
 };
 
 const GRANTS = {
@@ -502,6 +504,48 @@ test('revoke also walks the confirm gate and reloads the list', async ({ page })
   await expect(page.getByText('虚拟密钥已吊销')).toBeVisible();
 });
 
+test('keys page disables through the kebab menu and confirm gate (#582)', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+  await page.route('**/api/v1/me/virtual-keys/0190-0000-0000-0002/disable', (route) =>
+    route.fulfill({
+      json: { id: '0190-0000-0000-0002', name: 'claude-code-main', status: 'DISABLED' },
+    }),
+  );
+
+  await page.goto('/app-new/keys');
+  await expect(page.getByTestId('keys-table')).toBeVisible();
+
+  await page.getByTestId('key-actions-0190-0000-0000-0002').click();
+  await page.getByRole('menuitem', { name: '停用' }).click();
+  await expect(page.getByText('停用虚拟密钥「claude-code-main」')).toBeVisible();
+  await page.getByRole('button', { name: '停用', exact: true }).last().click();
+  await expect(page.getByText('虚拟密钥已停用')).toBeVisible();
+});
+
+test('keys page renames through the kebab menu (#582)', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+  await page.route('**/api/v1/me/virtual-keys/0190-0000-0000-0002', (route) => {
+    if (route.request().method() === 'PATCH') {
+      return route.fulfill({
+        json: { id: '0190-0000-0000-0002', name: 'renamed-in-e2e', status: 'ACTIVE' },
+      });
+    }
+    return route.fallback();
+  });
+
+  await page.goto('/app-new/keys');
+  await expect(page.getByTestId('keys-table')).toBeVisible();
+
+  await page.getByTestId('key-actions-0190-0000-0000-0002').click();
+  await page.getByRole('menuitem', { name: '重命名' }).click();
+  await expect(page.getByText('重命名虚拟密钥')).toBeVisible();
+  await page.getByTestId('key-rename-name').fill('renamed-in-e2e');
+  await page.getByTestId('key-rename-save').click();
+  await expect(page.getByText('虚拟密钥已重命名')).toBeVisible();
+});
+
 test('usage page shows quota, summary totals and pages the records', async ({ page }) => {
   await mockSession(page, REGULAR_USER);
   await mockPilotApi(page);
@@ -566,9 +610,12 @@ test('model approvals lists applications and gates the create form', async ({ pa
 
 test('profile page validates the password form', async ({ page }) => {
   await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
 
   await page.goto('/app-new/profile');
   await expect(page.getByTestId('account-username')).toHaveText('demo2_user');
+  await expect(page.getByTestId('profile-identity')).toContainText('@demo2_user');
+  await expect(page.getByTestId('profile-snapshot')).toContainText('本月请求');
   await page.getByTestId('current-password').fill('TempPass2026!');
   await page.getByTestId('new-password').fill('StrongPass2026!');
   await page.getByTestId('confirm-password').fill('Different2026!');
@@ -576,6 +623,24 @@ test('profile page validates the password form', async ({ page }) => {
   await expect(page.getByTestId('field-error')).toContainText('两次输入的新密码不一致');
   await page.screenshot({
     path: 'test-results/baseline/next-profile-1440x900.png',
+    fullPage: true,
+  });
+});
+
+test('profile: signs out of other sessions through the confirm dialog', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+  await page.route('**/api/v1/auth/logout-others', (route) =>
+    route.fulfill({ json: { message: 'Other sessions have been revoked.' } }),
+  );
+
+  await page.goto('/app-new/profile');
+  await page.getByTestId('logout-others').click();
+  await expect(page.getByTestId('logout-others-confirm')).toBeVisible();
+  await page.getByTestId('logout-others-confirm').click();
+  await expect(page.getByText('已退出其他会话')).toBeVisible();
+  await page.screenshot({
+    path: 'test-results/baseline/next-profile-sessions-1440x900.png',
     fullPage: true,
   });
 });

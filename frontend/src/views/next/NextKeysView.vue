@@ -34,16 +34,20 @@ import {
   UiDialog,
   UiEmptyState,
   UiInput,
+  UiPageGuide,
   UiSelect,
   UiStatusBadge,
   UiTable,
+  UiTooltip,
   toast,
 } from '@/ui';
 import type { UiSelectOption } from '@/ui';
+import { KEYS_GUIDE } from '@/content/pageGuides';
 import type { VirtualKeyPurpose } from '@/types/api';
 import type {
   CreateVirtualKeyResponse,
   MeGrantsResponse,
+  UsageSummary,
   VirtualKeyView,
 } from '@/types/generated-api';
 
@@ -103,20 +107,49 @@ const purposeOptions = computed<UiSelectOption[]>(() => {
 const columns = [
   { key: 'name', title: '名称', minWidth: '220px', sortable: true },
   { key: 'projectTag', title: '项目', width: '120px' },
-  { key: 'purpose', title: '用途', width: '130px' },
+  {
+    key: 'purpose',
+    title: '用途',
+    width: '130px',
+  },
   { key: 'modelIds', title: '允许模型', minWidth: '220px' },
   { key: 'status', title: '状态', width: '110px' },
   { key: 'cachePolicy', title: '缓存', width: '90px' },
+  { key: 'usage', title: '用量 · 近 7 天', width: '150px' },
   { key: 'createdAt', title: '创建时间', width: '170px', sortable: true },
   { key: 'actions', title: '操作', width: '96px', align: 'center' as const },
 ];
 
 const keyFilter = ref('');
 
+// #582: status filter + inline 7-day usage + rename dialog.
+const statusFilter = ref<'ALL' | 'ACTIVE' | 'DISABLED' | 'ROTATING' | 'REVOKED'>('ALL');
+const statusFilterOptions: UiSelectOption[] = [
+  { value: 'ALL', label: '全部' },
+  { value: 'ACTIVE', label: '可用' },
+  { value: 'DISABLED', label: '停用' },
+  { value: 'ROTATING', label: '轮换中' },
+  { value: 'REVOKED', label: '已吊销' },
+];
+
+// 近 7 天行内用量（按 Key 归集；拉取失败静默为「—」，不阻塞列表）。
+const USAGE_WINDOW_DAYS = 7;
+const usageByKey = ref<Record<string, { requests: number; tokens: number }>>({});
+
+const renameTarget = ref<VirtualKeyView | null>(null);
+const renameName = ref('');
+const renameSaving = ref(false);
+const renameError = ref('');
+const renameRequestId = ref('');
+
 const filteredKeys = computed(() => {
+  const byStatus =
+    statusFilter.value === 'ALL'
+      ? keys.value
+      : keys.value.filter((k) => k.status === statusFilter.value);
   const q = keyFilter.value.trim().toLowerCase();
-  if (!q) return keys.value;
-  return keys.value.filter(
+  if (!q) return byStatus;
+  return byStatus.filter(
     (k) =>
       (k.name ?? '').toLowerCase().includes(q) ||
       (k.projectTag ?? '').toLowerCase().includes(q) ||
@@ -128,15 +161,15 @@ const keySummary = computed<{ text: string; tone: 'plain' | 'success' | 'warning
   () => {
     const active = keys.value.filter((k) => k.status === 'ACTIVE').length;
     const rotating = keys.value.filter((k) => k.status === 'ROTATING').length;
-    const unusual = keys.value.filter(
-      (k) => k.status === 'REVOKED' || k.status === 'DISABLED',
-    ).length;
+    const disabled = keys.value.filter((k) => k.status === 'DISABLED').length;
+    const revoked = keys.value.filter((k) => k.status === 'REVOKED').length;
     const parts: { text: string; tone: 'plain' | 'success' | 'warning' | 'danger' }[] = [
       { text: `共 ${keys.value.length} 个`, tone: 'plain' },
     ];
     if (active) parts.push({ text: `${active} 可用`, tone: 'success' as const });
     if (rotating) parts.push({ text: `${rotating} 轮换中`, tone: 'warning' as const });
-    if (unusual) parts.push({ text: `${unusual} 异常`, tone: 'danger' as const });
+    if (disabled) parts.push({ text: `${disabled} 停用`, tone: 'plain' });
+    if (revoked) parts.push({ text: `${revoked} 已吊销`, tone: 'danger' as const });
     return parts;
   },
 );
@@ -247,13 +280,40 @@ const canCreate = computed(
 
 onMounted(load);
 
+/** Group the window summary into a per-key {requests, tokens} lookup (#582). */
+function summarizeUsage(
+  summary: UsageSummary | null,
+): Record<string, { requests: number; tokens: number }> {
+  const map: Record<string, { requests: number; tokens: number }> = {};
+  for (const group of summary?.groups ?? []) {
+    if (!group.groupKey) continue;
+    const r = group.requests;
+    const requests = (r?.upstream ?? 0) + (r?.coalesced ?? 0) + (r?.l1Hit ?? 0) + (r?.l2Hit ?? 0);
+    const tokens = (group.tokens?.input ?? 0) + (group.tokens?.output ?? 0);
+    map[group.groupKey] = { requests, tokens };
+  }
+  return map;
+}
+
+function compactNumber(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(value);
+}
+
 async function load() {
   loading.value = true;
   loadError.value = '';
   try {
-    const [keyList, grantList] = await Promise.all([api.listVirtualKeys(), api.myGrants()]);
+    const from = new Date(Date.now() - USAGE_WINDOW_DAYS * 86400000).toISOString();
+    const [keyList, grantList, usage] = await Promise.all([
+      api.listVirtualKeys(),
+      api.myGrants(),
+      api.usageSummary('virtual_key', from, new Date().toISOString()).catch(() => null),
+    ]);
     keys.value = keyList;
     grants.value = grantList;
+    usageByKey.value = summarizeUsage(usage);
   } catch (error) {
     if (error instanceof ApiError) {
       loadError.value = error.message;
@@ -515,6 +575,74 @@ async function confirmAndRun() {
   await state.run();
 }
 
+/** #582: temporary soft stop — reversible via 启用, unlike 吊销. */
+async function handleDisable(key: VirtualKeyView) {
+  confirmState.value = {
+    title: `停用虚拟密钥「${key.name}」`,
+    body: '停用后该密钥立即失效（客户端将收到 404，与未知密钥不可区分）；可随时「启用」恢复，绑定与授权不变。',
+    confirmLabel: '停用',
+    tone: 'primary',
+    run: async () => {
+      try {
+        await api.disableVirtualKey(key.id!);
+        toast.success('虚拟密钥已停用');
+        await load();
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+        }
+      }
+    },
+  };
+}
+
+async function handleEnable(key: VirtualKeyView) {
+  try {
+    await api.enableVirtualKey(key.id!);
+    toast.success('虚拟密钥已启用');
+    await load();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+    }
+  }
+}
+
+function openRename(key: VirtualKeyView) {
+  renameTarget.value = key;
+  renameName.value = key.name ?? '';
+  renameError.value = '';
+  renameRequestId.value = '';
+}
+
+async function saveRename() {
+  const target = renameTarget.value;
+  if (!target) return;
+  const name = renameName.value.trim();
+  if (!name || name.length > 200) {
+    renameError.value = '名称必填，最长 200 个字符。';
+    return;
+  }
+  renameSaving.value = true;
+  renameError.value = '';
+  renameRequestId.value = '';
+  try {
+    await api.renameVirtualKey(target.id!, name);
+    toast.success('虚拟密钥已重命名');
+    renameTarget.value = null;
+    await load();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      renameError.value = error.message;
+      renameRequestId.value = error.requestId ?? '';
+    } else {
+      renameError.value = '重命名失败';
+    }
+  } finally {
+    renameSaving.value = false;
+  }
+}
+
 function formatDate(iso?: string): string {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -549,6 +677,8 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
         </UiButton>
       </div>
     </header>
+
+    <UiPageGuide :guide="KEYS_GUIDE" storage-key="keys" />
 
     <div v-if="loadError" class="ui-alert ui-alert--error" data-testid="keys-load-error">
       {{ loadError
@@ -647,6 +777,9 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
                 <span>{{ option.label }}</span>
               </label>
             </div>
+            <p class="next-keys__field-hint" data-testid="create-purpose-hint">
+              用途是声明性标签（用于展示与审计），不限制客户端：任何兼容协议的客户端都可以使用该密钥；实际可调用范围由所选授权产品与允许模型决定。
+            </p>
           </div>
           <div v-if="createGrantId" class="next-keys__field">
             <span class="next-keys__field-label">缓存策略</span>
@@ -759,12 +892,20 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             >
           </span>
         </div>
-        <UiInput
-          v-model="keyFilter"
-          placeholder="按名称、项目或 Key 前缀过滤"
-          width="240px"
-          data-testid="keys-filter"
-        />
+        <div class="next-keys__list-tools">
+          <UiSelect
+            v-model="statusFilter"
+            :options="statusFilterOptions"
+            width="130px"
+            data-testid="keys-status-filter"
+          />
+          <UiInput
+            v-model="keyFilter"
+            placeholder="按名称、项目或 Key 前缀过滤"
+            width="240px"
+            data-testid="keys-filter"
+          />
+        </div>
       </div>
       <UiTable
         :columns="tableColumns"
@@ -805,9 +946,13 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
           </div>
           <div class="ui-mono next-keys__mask">{{ (row as VirtualKeyView).display }}</div>
         </template>
-        <template #purpose="{ row }">{{
-          purposeLabel[(row as VirtualKeyView).purpose!] ?? (row as VirtualKeyView).purpose
-        }}</template>
+        <template #purpose="{ row }">
+          <UiTooltip text="声明标签，不限制客户端；可调用范围由所选授权产品与允许模型决定。">
+            <span>{{
+              purposeLabel[(row as VirtualKeyView).purpose!] ?? (row as VirtualKeyView).purpose
+            }}</span>
+          </UiTooltip>
+        </template>
         <template #modelIds="{ row }">
           <div class="ui-mono next-keys__models">
             {{ (row as VirtualKeyView).modelIds?.join(', ') ?? '' }}
@@ -841,6 +986,17 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             "
             >{{ (row as VirtualKeyView).cachePolicy === 'ENABLED' ? '开启' : '关闭' }}</span
           >
+        </template>
+        <template #usage="{ row }">
+          <span
+            v-if="usageByKey[(row as VirtualKeyView).id!]"
+            class="ui-num next-keys__usage"
+            data-testid="key-usage-inline"
+          >
+            {{ usageByKey[(row as VirtualKeyView).id!]!.requests }} 次 ·
+            {{ compactNumber(usageByKey[(row as VirtualKeyView).id!]!.tokens) }} tok
+          </span>
+          <span v-else class="next-keys__usage next-keys__usage--empty">—</span>
         </template>
         <template #createdAt="{ row }">{{
           formatDate((row as VirtualKeyView).createdAt)
@@ -883,6 +1039,31 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
                 </DropdownMenuItem>
                 <DropdownMenuSeparator class="next-keys__menu-sep" />
                 <DropdownMenuItem
+                  class="ui-menu__item next-keys__menu-item"
+                  :disabled="(row as VirtualKeyView).status === 'REVOKED'"
+                  @select="openRename(row as VirtualKeyView)"
+                >
+                  <DropdownMenuItemIndicator class="next-keys__menu-ind" />
+                  重命名
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  v-if="(row as VirtualKeyView).status === 'ACTIVE'"
+                  class="ui-menu__item next-keys__menu-item"
+                  @select="handleDisable(row as VirtualKeyView)"
+                >
+                  <DropdownMenuItemIndicator class="next-keys__menu-ind" />
+                  停用
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  v-if="(row as VirtualKeyView).status === 'DISABLED'"
+                  class="ui-menu__item next-keys__menu-item"
+                  @select="handleEnable(row as VirtualKeyView)"
+                >
+                  <DropdownMenuItemIndicator class="next-keys__menu-ind" />
+                  启用
+                </DropdownMenuItem>
+                <DropdownMenuSeparator class="next-keys__menu-sep" />
+                <DropdownMenuItem
                   class="ui-menu__item next-keys__menu-item next-keys__menu-item--danger"
                   :disabled="!(row as VirtualKeyView).status?.match(/^(ACTIVE|ROTATING)$/)"
                   @select="handleRevoke(row as VirtualKeyView)"
@@ -920,6 +1101,35 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
         </template>
       </UiTable>
     </section>
+
+    <!-- #582 rename dialog -->
+    <UiDialog
+      v-if="renameTarget"
+      :open="true"
+      title="重命名虚拟密钥"
+      :description="`修改「${renameTarget.name}」的名称；绑定、模型与密钥本身不变。`"
+      width="460px"
+      @update:open="renameTarget = null"
+    >
+      <UiInput v-model="renameName" label="名称" required data-testid="key-rename-name" />
+      <p v-if="renameError" class="ui-form-error" data-testid="key-rename-error">
+        {{ renameError
+        }}<span v-if="renameRequestId" class="ui-request-id">
+          requestId: {{ renameRequestId }}</span
+        >
+      </p>
+      <template #footer>
+        <UiButton variant="ghost" @click="renameTarget = null">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="renameSaving"
+          data-testid="key-rename-save"
+          @click="saveRename"
+        >
+          保存
+        </UiButton>
+      </template>
+    </UiDialog>
 
     <!-- One-shot secret reveal -->
     <UiDialog
@@ -1220,6 +1430,16 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-faint);
   line-height: var(--ui-line-height-base);
+}
+
+.next-keys__list-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+
+.next-keys__usage--empty {
+  color: var(--ui-foreground-faint);
 }
 
 .next-keys__segmented {

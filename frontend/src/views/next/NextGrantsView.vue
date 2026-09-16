@@ -14,10 +14,20 @@
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiDialog, UiDrawer, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
+import {
+  UiButton,
+  UiDialog,
+  UiDrawer,
+  UiPageGuide,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  toast,
+} from '@/ui';
 import type { UiSelectOption } from '@/ui';
 import ModelScopePicker from '@/components/ModelScopePicker.vue';
 import ProviderBrandChip from '@/components/ProviderBrandChip.vue';
+import { GRANTS_GUIDE } from '@/content/pageGuides';
 import type { Grant, Project, SubscriptionView } from '@/types/generated-api';
 
 interface CredentialOption {
@@ -300,6 +310,8 @@ onMounted(async () => {
         </UiButton>
       </div>
     </header>
+
+    <UiPageGuide :guide="GRANTS_GUIDE" storage-key="grants" />
 
     <div v-if="loadError" class="ui-alert ui-alert--error">
       {{ loadError
