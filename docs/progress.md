@@ -2975,3 +2975,15 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **改动**（分支 feat/key-default-all-projects-646）：`NextKeysView` 打开表单即应用默认——主项目=第一个可选项目、附加项目全选（可取消）；切换主项目旧值回填为附加项（不静默丢项目）；重置后重新应用；文案「默认全部已选」；契约不变。spec 9/9（新增默认全选/切换回填；级联用例改显式取消勾选）；vue-tsc/eslint 通过。
 
 **验收**（并入主清单，步骤见方案 §1.2）：默认提交 → boundProjects 全量；两项目各一次真实推理 → 用量/每小时表分项目；取消勾选 → 该项目声明 403。
+
+
+## 2026-09-16 午后 — Goal #648：miqro-context 安装与三平台自启（CAA 收口批③）
+
+**背景**：跟踪 #645 / 方案 §3。现状手动 `run` 关终端即断，"无感"对非开发用户不成立。
+
+**交付**（分支 feat/context-autostart-648）：
+- `src/install/autostart.ts`：三平台用户级自启生成器（纯函数）——Windows 启动文件夹 .cmd（start /b node … run >> agent.log）/ macOS LaunchAgent plist（RunAtLoad）/ Linux systemd user unit（Restart=on-failure）；`MIQRO_CONTEXT_AUTOSTART_DIR` 供测试沙箱；幂等写入与静默移除。
+- CLI：`install [--write-config] [--autostart]`（显式 opt-in；默认仅提示未装）、新增 `uninstall [--autostart]`、`doctor` 增自启状态行；README 更新。
+- **不碰用户系统**：仅显式 `--autostart` 时写入，全部用户级免管理员；真实自启不在开发机自动注册。
+
+**验证**：客户端单测 42/42（新增 7 例：文件名/默认目录/覆盖目录/三平台内容快照/幂等 enable-disable 往返）；**Windows 沙箱实测**：install --autostart 生成 .cmd（node/cli/日志路径逐字校验）→ uninstall 移除，全程未触碰真实启动文件夹。

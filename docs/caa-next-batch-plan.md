@@ -180,7 +180,7 @@ miqro-context doctor        # 增：自启状态检查
 | 1 | 本方案 MD | tracking issue | docs PR（本文） |
 | 2 | ① 默认全选 | issue A | 前端 + spec + 验收清单增补 |
 | 3 | ② 未归属策略 | issue B | V57+快照+网关+控制面+前端+IT（一个 PR，附测试证据） |
-| 4 | ③ 安装/自启 | issue C | client 包 + CI job 复用 |
+| 4 | ③ 安装/自启 | #648 | **已实现**（`install --autostart` / `uninstall --autostart` / doctor 状态；三平台生成器单测 + Windows 沙箱实测） |
 | 5 | ④ /v1/models 核对 | issue D（视核对结果）| 独立小 PR 或关闭为"维持现状" |
 
 - 每个 PR：issue 模板逐节填写；CI 全绿合并；progress.md 记录；演示站部署并复验；`usage_event`/审计可复算。
