@@ -65,9 +65,10 @@ class ContextRegistryIntegrationTest {
             java.nio.file.Files.writeString(file, java.util.Base64.getEncoder().encodeToString(key));
             try {
                 java.nio.file.Files.setPosixFilePermissions(file,
-                        java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+                        java.nio.file.attribute.PosixFilePermissions.fromString("r--------"));
             } catch (UnsupportedOperationException ignored) {
-                // Windows: POSIX permissions not enforced (mirrors the soak test).
+                // 0400: Linux CI enforces owner-read-only on crypto key files
+                // (FileSecretProvider CRYPTO_CONFIG_008). Windows does not enforce it.
             }
             return file;
         } catch (Exception e) {
