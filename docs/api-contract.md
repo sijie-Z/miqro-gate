@@ -386,6 +386,7 @@
 | `GET/POST /api/v1/admin/teams/{id}/members`、`DELETE /members/{userId}` | 团队成员管理 |
 | `GET/POST /api/v1/admin/projects`、`PATCH /{id}` | 项目列表/创建（`code` 唯一，冲突 → 409 `PROJECT_CODE_TAKEN`）/更新 |
 | `GET/POST /api/v1/admin/projects/{id}/members`、`DELETE /members/{userId}` | 项目成员管理 |
+| `GET/PUT/DELETE /api/v1/admin/unattributed-policy` | **未归属策略（V57，#647，Spec §7.3）**：`PUT {credentialId, providerProductId?, models?}`（产品缺省从凭证订阅推导；凭证须 ACTIVE，不匹配 → `400 UNAUTH_CREDENTIAL_PRODUCT_MISMATCH`；模型按 #498 目录语义校验 → `400 MODEL_NOT_IN_CATALOG`；凭证不存在/停用 → `404 CREDENTIAL_NOT_FOUND`）。首次配置懒建「未归属」系统项目（`projects.system=true`，不可被建 Key 选择 → `400 PROJECT_NOT_SELECTABLE`）。凭证被项目授权引用时响应带 `warning`（建议专用凭证，不阻断）。`DELETE` 仅删策略（桶项目保留供历史用量引用）。GET 未配置返回 `{configured:false}`。审计 `UNATTRIBUTED_POLICY_SET/CLEARED`，变更即刷快照。 |
 | `GET/POST /api/v1/admin/projects/{id}/repositories`、`DELETE /{mappingId}` | **CAA Project Registry（V56，#639）**：仓库→项目映射。`repoKey` 接受 `github.com/acme/rocket` / `https://github.com/acme/rocket(.git)` / `git@github.com:acme/rocket.git` / 裸 `acme/rocket`（默认 github.com），统一规范化为小写 `host/owner/repo`；租户内唯一，重复 → `409 REPO_KEY_TAKEN`；格式非法 → `400 REPO_KEY_INVALID`；项目不存在 → `404 PROJECT_NOT_FOUND`；删除不存在 → `404 REPOSITORY_NOT_FOUND`。写操作审计 `REPOSITORY_ADD`/`REPOSITORY_REMOVE`。Agent 经 §7 的 `/v1/context-registry` 消费 |
 | `GET/POST /api/v1/admin/grants` | Grant 列表/创建（`projectId`×`providerProductId`×`credentialId` + `models[]`；重复 → 409 `GRANT_EXISTS`；凭证订阅产品与声明产品不一致 → 400 `GRANT_CREDENTIAL_PRODUCT_MISMATCH`（数据库触发器同约束兜底）；`models[]` 必须存在于该产品 `model_catalog` → 否则 400 `MODEL_NOT_IN_CATALOG`） |
 | `GET/POST /api/v1/admin/grants/{id}/models`、`DELETE /{id}` | 模型范围查询/替换（替换同样校验目录，400 `MODEL_NOT_IN_CATALOG`）；禁用 Grant |
@@ -1110,7 +1111,7 @@ canonical 账单导入与四态对账报告（契约稿 docs/bill-reconciliation
   1. `X-Miqro-Project-Id` 声明（**不可信输入**，仅当目标项目确为该 Key 的绑定时生效）→ `RESOLVED_HEADER`；
   2. 点号后缀标签命中该 Key 的某个绑定 → `RESOLVED_SUFFIX`；
   3. Key 恰有一个绑定 → `SOLE_BINDING`（任意合法标签视为装饰）；
-  4. 其余（多绑定且上下文无法解析）→ `400 CONTEXT_REQUIRED`——不猜测、不静默回落到默认项目。
+  4. 其余（多绑定且上下文无法解析）→ 租户配置了未归属策略（§5 admin）时以策略的凭证/产品/模型范围路由，usage 记「未归属」桶项目（`resolution_status=POLICY_ROUTED`，claimed_* 照常留档）；未配置策略 → `400 CONTEXT_REQUIRED`——不猜测、不静默回落到默认项目。
   - 声明项目不是该 Key 的绑定 → `403 CONTEXT_NOT_ALLOWED`（仅当存在有效声明时）；声明不是合法 UUID → `400 CONTEXT_INVALID`。
   - 审计头（降级为纯审计、绝不参与授权；畸形即丢弃；永不转发上游）：`X-Miqro-Claim-Source`（`prompt_url`/`tool_path`/`bash_cwd`/`system_cwd`/`git_remote`/`suffix`/`none`）、`X-Miqro-Claim-Confidence`（`HIGH`/`MEDIUM`/`LOW`/`NONE`）、`X-Miqro-Claim-Status`（`RESOLVED`/`AMBIGUOUS`/`UNATTRIBUTED`）、`X-Claude-Code-Session-Id`（≤64 字符）。Agent 声明（`claimed_*`）与服务端裁决（`project_id` + `resolution_status`）分开落库，声明永不构成授权。
   - 归属随用量落库：`usage_event` 的 `session_id`/`activity_id`/`claimed_project_id`/`resolution_status`/`claim_source`/`claim_confidence`；逐请求证据审计于 `request_context_evidence`（V55）。

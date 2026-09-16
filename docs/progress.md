@@ -2966,3 +2966,17 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **修复**：`VirtualKeyResolver` 拆出 `resolveIdentity()`（凭证抽取/解析/快照/HMAC，无归属阶梯；`resolve()` 与它共享 `authenticate()` 核心，清零纪律保持：invalid parse 在 try 外返回，避免对 null secret 做 wipe 的 NPE）；`ContextRegistryController` 改用 identity-only。IT 增补：多绑定 Key 不匹配后缀仍可读 registry（4/4）。文档：api-contract 注明 identity-only 语义。
 
 **观察（未改，留待评审）**：`/v1/models` 同样依赖 resolve()——多绑定 Key 带不匹配后缀时 400；真实使用中 Claude Code 的 Key 后缀通常匹配绑定，暂不动其语义。
+
+
+## 2026-09-16 中午 — Goal #647：未归属策略 unattributed_policy（CAA 收口批②，Spec §7.3 落地）
+
+**背景**：跟踪 issue #645 / 方案 `docs/caa-next-batch-plan.md` §2。现状"无法归属一律 400"缺合规兜底选项。
+
+**交付**（分支 feat/unattributed-policy-647）：
+- **V57**：`unattributed_policy`（每租户一行：桶项目/凭证/产品/model_scope jsonb）+ `projects.system` 列（系统项目不可被建 Key 选择 → `400 PROJECT_NOT_SELECTABLE`，VirtualKeyService 全入口守卫）。
+- **网关**：快照装载策略（凭证装载范围扩到策略引用）；解析阶梯终态——多绑定无上下文时：有策略 → `POLICY_ROUTED`（合成绑定：桶项目/策略凭证，grant=null）；无策略 → 400 不变。模型门控：策略路径 = Key 模型 ∩（策略范围 或 空=上游目录）；/v1/models 同步处理（不 NPE）。
+- **控制面**：`GET/PUT/DELETE /api/v1/admin/unattributed-policy`（产品缺省从凭证订阅推导；凭证/产品/#498 目录校验；凭证被 grant 引用 → 告警不阻断；首次 PUT 懒建桶项目；审计 SET/CLEARED；变更刷快照）。
+- **前端**：设置页「未归属请求策略」卡片（凭证下拉仅 ACTIVE、模型范围逗号输入、保存/清除、未配置文案、告警展示）。
+- **开放问题按方案默认落定**（§2.9：Q1 告警放行 / Q2 与 Key 模型求交 / Q3 system 标记可见 / Q4 AMBIGUOUS 同走策略）。
+
+**验证**：`RequestContextResolverTest` 9/9（新增 POLICY_ROUTED）；`VirtualKeyServiceTest` 21/21（系统项目拒绝）；`AdminOrgApiIntegrationTest` 14/14（策略全生命周期：懒建桶/system 校验/目录校验/跨产品凭证 400/引用告警/审计/DELETE 后桶保留）；前端 settings spec 3/3；OpenAPI 基线重导出（另修复 #640 遗漏的 repositories 基线；**踩坑**：新控制器嵌套 record 重名 `UpsertRequest` 打乱 springdoc 简单名解析——改名 `UpsertPolicyRequest` 后 diff 干净）；28 个 IT 重置清单再补 `unattributed_policy`。
