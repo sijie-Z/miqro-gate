@@ -12,12 +12,14 @@ import {
   UiCheckbox,
   UiDialog,
   UiInput,
+  UiPageGuide,
   UiRadio,
   UiStatusBadge,
   UiTable,
   toast,
 } from '@/ui';
 import type { ApiConsumerView } from '@/types/generated-api';
+import { CONSUMERS_GUIDE } from '@/content/pageGuides';
 
 const consumers = ref<ApiConsumerView[]>([]);
 const loading = ref(true);
@@ -330,6 +332,8 @@ onMounted(load);
       </div>
     </header>
 
+    <UiPageGuide :guide="CONSUMERS_GUIDE" storage-key="consumers" />
+
     <div v-if="loadError" class="ui-alert ui-alert--error" data-testid="consumers-load-error">
       {{ loadError
       }}<span v-if="loadRequestId" class="ui-request-id"> requestId: {{ loadRequestId }}</span>
@@ -349,6 +353,7 @@ onMounted(load);
             v-model="createName"
             label="名称"
             required
+            hint="最长 200 个字符；名称需唯一（JWT 的 sub 映射键）。"
             placeholder="例如 billing-sync"
             data-testid="consumer-create-name"
           />
@@ -356,6 +361,7 @@ onMounted(load);
             v-model="createExpiresAt"
             type="datetime-local"
             label="到期时间（可选，留空 = 永不过期）"
+            hint="到期后该消费者的请求将静默返回 401。"
             data-testid="consumer-create-expires"
           />
           <p v-if="formError" class="ui-form-error">{{ formError }}</p>
@@ -384,6 +390,7 @@ onMounted(load);
         :loading="loading"
         row-key="id"
         empty-title="还没有 API 消费者"
+        empty-description="外部系统（平台）对接时再创建；机器身份与人类用户分开管理。"
         data-testid="consumers-table"
       >
         <template #name="{ row }">

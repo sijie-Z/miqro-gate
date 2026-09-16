@@ -12,6 +12,7 @@ import type {
   McpAclMode,
   ModelApprovalStatus,
   ProviderProductView,
+  UnattributedPolicyView,
   UsageGroupBy,
   UserRole,
   UserStatusValue,
@@ -406,6 +407,23 @@ export function clearMcpAccessGrants(serviceId: string, toolId?: string): Promis
 
 export function listCredentials(): Promise<CredentialView[]> {
   return get<CredentialView[]>('/api/v1/admin/credentials');
+}
+
+// #647: tenant unattributed-request policy (settings page).
+export function getUnattributedPolicy(): Promise<UnattributedPolicyView> {
+  return get<UnattributedPolicyView>('/api/v1/admin/unattributed-policy');
+}
+
+export function putUnattributedPolicy(body: {
+  credentialId: string;
+  providerProductId?: string;
+  models?: string[];
+}): Promise<UnattributedPolicyView> {
+  return put<UnattributedPolicyView>('/api/v1/admin/unattributed-policy', body);
+}
+
+export function deleteUnattributedPolicy(): Promise<void> {
+  return del('/api/v1/admin/unattributed-policy');
 }
 
 export function getCredential(id: string): Promise<CredentialDetailView> {

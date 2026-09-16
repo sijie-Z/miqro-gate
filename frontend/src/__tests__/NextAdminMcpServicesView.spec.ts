@@ -309,7 +309,9 @@ describe('NextAdminMcpServicesView', () => {
 
   it('discards stale traffic responses and fetches once per reopen (#399)', async () => {
     mockApi.adminListMcpServices.mockResolvedValue([service()]);
-    const trafficView = (overrides: Partial<api.McpServiceTraffic> = {}): api.McpServiceTraffic => ({
+    const trafficView = (
+      overrides: Partial<api.McpServiceTraffic> = {},
+    ): api.McpServiceTraffic => ({
       serviceId: 'm1',
       serviceName: 'erp-mcp',
       windowHours: 24,
@@ -501,7 +503,12 @@ describe('NextAdminMcpServicesView', () => {
         mode: 'NONE',
         serverConsumers: [],
         tools: [
-          { toolId: 't1', toolName: 'query_order', mode: null as unknown as 'NONE' | 'ALLOW' | 'DENY', consumers: [] },
+          {
+            toolId: 't1',
+            toolName: 'query_order',
+            mode: null as unknown as 'NONE' | 'ALLOW' | 'DENY',
+            consumers: [],
+          },
         ],
       }),
     );
@@ -687,7 +694,14 @@ describe('NextAdminMcpServicesView', () => {
       createdAt: '2026-09-02T00:00:00Z',
     };
     mockApi.adminListMcpRouteRules.mockResolvedValue([
-      { ...custom, id: 'd1', name: 'default', priority: 0, methods: null as unknown as string, status: 'ENABLED' },
+      {
+        ...custom,
+        id: 'd1',
+        name: 'default',
+        priority: 0,
+        methods: null as unknown as string,
+        status: 'ENABLED',
+      },
       custom,
     ]);
     mockApi.adminSetMcpRouteStatus.mockResolvedValue({ ...custom, status: 'DISABLED' });
@@ -907,7 +921,10 @@ describe('NextAdminMcpServicesView', () => {
     expect(dialog, 'edit dialog should open').toBeTruthy();
     const setEdit = (testid: string, value: string) => {
       const el = document.querySelector(`[data-testid="${testid}"]`) as HTMLInputElement;
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set;
       setter?.call(el, value);
       el.dispatchEvent(new Event('input', { bubbles: true }));
     };
@@ -979,9 +996,9 @@ describe('NextAdminMcpServicesView', () => {
     expect(mockApi.getMcpToolRetryPolicy).toHaveBeenCalledWith('m1', 't1');
     const dialog = document.querySelector('[data-testid="mcp-tool-retry-dialog"]');
     expect(dialog, 'retry dialog should render').toBeTruthy();
-    expect((document.querySelector('[data-testid="mcp-tool-retry-max"]') as HTMLInputElement).value).toBe(
-      '2',
-    );
+    expect(
+      (document.querySelector('[data-testid="mcp-tool-retry-max"]') as HTMLInputElement).value,
+    ).toBe('2');
 
     (document.querySelector('[data-testid="mcp-tool-retry-timeout"]') as HTMLInputElement).click();
     await flushPromises();
@@ -1047,10 +1064,7 @@ describe('NextAdminMcpServicesView', () => {
     expect(input).toBeTruthy();
     expect(input.value).toBe('60000');
 
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      'value',
-    )?.set;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
     setter?.call(input, '20000');
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await flushPromises();
@@ -1068,10 +1082,7 @@ describe('NextAdminMcpServicesView', () => {
     await wrapper.find('[data-testid="mcp-upstream-timeout"]').trigger('click');
     await flushPromises();
     const input = document.querySelector('[data-testid="mcp-timeout-input"]') as HTMLInputElement;
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      'value',
-    )?.set;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
     setter?.call(input, '500');
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await flushPromises();
@@ -1080,5 +1091,37 @@ describe('NextAdminMcpServicesView', () => {
 
     expect(mockApi.adminSetMcpServiceUpstreamTimeout).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('1000–600000');
+  });
+
+  it('#674: shows the onboarding guide until dismissed (persisted)', async () => {
+    localStorage.clear();
+    const wrapper = mountView();
+    await flushPromises();
+
+    const guide = wrapper.find('[data-testid="mcp-guide"]');
+    expect(guide.exists()).toBe(true);
+    expect(guide.text()).toContain('MCP 服务接入指引');
+    expect(guide.text()).toContain('适合：已有 MCP Server 的团队');
+
+    await wrapper.find('[data-testid="mcp-guide-dismiss"]').trigger('click');
+    expect(wrapper.find('[data-testid="mcp-guide"]').exists()).toBe(false);
+    expect(localStorage.getItem('miqrogate.mcp-guide.hidden')).toBe('1');
+
+    // A remount keeps the guide dismissed.
+    const wrapper2 = mountView();
+    await flushPromises();
+    expect(wrapper2.find('[data-testid="mcp-guide"]').exists()).toBe(false);
+    localStorage.clear();
+  });
+
+  it('#674: the guide CTA opens the register form', async () => {
+    localStorage.clear();
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="mcp-create-form"]').exists()).toBe(false);
+    await wrapper.find('[data-testid="mcp-guide-create"]').trigger('click');
+    expect(wrapper.find('[data-testid="mcp-create-form"]').exists()).toBe(true);
+    localStorage.clear();
   });
 });

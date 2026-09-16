@@ -53,7 +53,19 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         Map<UUID, Set<String>> modelsByKeyId, Map<UUID, Set<String>> grantModelsByGrantId,
         Map<UUID, Set<String>> upstreamModelsByProductId, Map<UUID, String> productCodesByProductId,
         Map<UUID, UUID> providerIdsByProductId, Map<String, ConsumerRecord> consumersByDigest,
-        Map<String, McpServerRecord> mcpServicesByName, Map<UUID, RetentionConfig> retentionByTenant) {
+        Map<String, McpServerRecord> mcpServicesByName, Map<UUID, RetentionConfig> retentionByTenant,
+        Map<UUID, UnattributedPolicyRecord> unattributedPoliciesByTenant) {
+
+    /**
+     * Tenant-level fallback for requests that cannot be attributed (Spec v1.1 §7.3,
+     * #647): route with this credential/product/model scope and account to
+     * {@code projectId} (the per-tenant UNATTRIBUTED bucket, a system project). An
+     * empty {@code models} set means "every ACTIVE model of the product's upstream
+     * catalog".
+     */
+    public record UnattributedPolicyRecord(UUID tenantId, UUID projectId, UUID credentialId, UUID productId,
+            Set<String> models) {
+    }
 
     public RouteSnapshot {
         keys = Map.copyOf(keys);
@@ -68,6 +80,7 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         consumersByDigest = Map.copyOf(consumersByDigest);
         mcpServicesByName = Map.copyOf(mcpServicesByName);
         retentionByTenant = Map.copyOf(retentionByTenant);
+        unattributedPoliciesByTenant = Map.copyOf(unattributedPoliciesByTenant);
     }
 
     private static Map<UUID, Set<String>> immutableSets(Map<UUID, Set<String>> map) {
@@ -77,7 +90,12 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
 
     public static RouteSnapshot empty(long version, Instant loadedAt) {
         return new RouteSnapshot(version, loadedAt, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
-                Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+    }
+
+    /** The tenant's unattributed-request policy, or null when unconfigured. */
+    public UnattributedPolicyRecord unattributedPolicy(UUID tenantId) {
+        return unattributedPoliciesByTenant.get(tenantId);
     }
 
     public KeyRecord key(String publicKeyId) {

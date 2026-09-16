@@ -227,6 +227,10 @@ public class VirtualKeyService {
     private Project requireBindableProject(UUID tenantId, User memberSubject, UUID delegatedTargetId, UUID projectId) {
         Project project = projectRepository.findById(projectId).filter(p -> p.tenantId().equals(tenantId))
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "PROJECT_NOT_FOUND", "Project not found"));
+        if (project.system()) {
+            // #647: the UNATTRIBUTED bucket is an accounting sink, never a key binding.
+            throw new ApiException(HttpStatus.BAD_REQUEST, "PROJECT_NOT_SELECTABLE", "系统项目（未归属桶）不可被选为虚拟密钥的绑定项目。");
+        }
         if (project.status() != ProjectStatus.ACTIVE) {
             throw new ApiException(HttpStatus.CONFLICT, "PROJECT_INACTIVE", "The project is not active");
         }
