@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { defineComponent } from 'vue';
+import { computed, defineComponent, h } from 'vue';
 import NextCredentialsView from '@/views/next/NextCredentialsView.vue';
 import * as api from '@/api';
 import type { CredentialView, SubscriptionView } from '@/types/generated-api';
@@ -47,6 +47,19 @@ const SelectStub = defineComponent({
       </button>
     </div>
   `,
+});
+
+/** RouterLink stub that publishes its target so tests can assert jump targets. */
+const RouterLinkStub = defineComponent({
+  name: 'RouterLink',
+  inheritAttrs: false,
+  props: { to: { type: [String, Object], default: '' } },
+  setup(props, { slots, attrs }) {
+    const target = computed(() =>
+      typeof props.to === 'string' ? props.to : JSON.stringify(props.to),
+    );
+    return () => h('a', { ...attrs, 'data-router-to': target.value }, slots.default?.());
+  },
 });
 
 const subscription: SubscriptionView = {
@@ -115,7 +128,10 @@ describe('NextCredentialsView', () => {
 
   function mountView() {
     return mount(NextCredentialsView, {
-      global: { plugins: [createPinia()], stubs: { UiSelect: SelectStub } },
+      global: {
+        plugins: [createPinia()],
+        stubs: { UiSelect: SelectStub, RouterLink: RouterLinkStub },
+      },
     });
   }
 
@@ -185,5 +201,25 @@ describe('NextCredentialsView', () => {
     await wrapper.find('[data-testid="credential-create-submit"]').trigger('click');
     await flushPromises();
     expect(mockApi.createCredential).not.toHaveBeenCalled();
+  });
+
+  it('deep-links a referenced credential to its grants and keeps 0 plain (#657)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const counts = wrapper.findAll('[data-testid="credential-grant-count"]');
+    expect(counts.length).toBe(2);
+
+    // Referenced twice → the count is the entry point into the filtered grants list.
+    expect(counts[0]!.element.tagName).toBe('A');
+    expect(counts[0]!.text()).toBe('2');
+    expect(JSON.parse(counts[0]!.attributes('data-router-to') as string)).toEqual({
+      name: 'grants',
+      query: { credentialId: '0190-0000-0000-0030' },
+    });
+
+    // Nothing to look at → a 0 must not look like a door.
+    expect(counts[1]!.element.tagName).toBe('SPAN');
+    expect(counts[1]!.text()).toBe('0');
   });
 });

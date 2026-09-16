@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { defineComponent } from 'vue';
+import { computed, defineComponent, h } from 'vue';
 import NextGrantsView from '@/views/next/NextGrantsView.vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
@@ -24,6 +24,14 @@ vi.mock('@/api', () => ({
 }));
 
 const mockApi = vi.mocked(api);
+
+// #657: the credentials list deep-links here with ?credentialId=…; the view
+// turns the query into a real filter, so the query must be swappable per test.
+const { routeQuery } = vi.hoisted(() => ({ routeQuery: { value: {} as Record<string, string> } }));
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: routeQuery.value }),
+}));
 
 const SelectStub = defineComponent({
   name: 'UiSelect',
@@ -57,6 +65,19 @@ const SelectStub = defineComponent({
   `,
 });
 
+/** RouterLink stub that publishes its target so tests can assert jump targets. */
+const RouterLinkStub = defineComponent({
+  name: 'RouterLink',
+  inheritAttrs: false,
+  props: { to: { type: [String, Object], default: '' } },
+  setup(props, { slots, attrs }) {
+    const target = computed(() =>
+      typeof props.to === 'string' ? props.to : JSON.stringify(props.to),
+    );
+    return () => h('a', { ...attrs, 'data-router-to': target.value }, slots.default?.());
+  },
+});
+
 const catalogRow = (modelId: string, overrides: Record<string, unknown> = {}) => ({
   id: `row-${modelId}`,
   providerProductId: 'pr1',
@@ -83,6 +104,7 @@ describe('NextGrantsView', () => {
     vi.resetAllMocks();
     toastState.items.splice(0);
     document.body.innerHTML = '';
+    routeQuery.value = {};
     mockApi.listGrants.mockResolvedValue([
       grant(),
       grant({
@@ -198,8 +220,23 @@ describe('NextGrantsView', () => {
 
   function mountView() {
     return mount(NextGrantsView, {
-      global: { plugins: [createPinia()], stubs: { UiSelect: SelectStub } },
+      global: {
+        plugins: [createPinia()],
+        stubs: { UiSelect: SelectStub, RouterLink: RouterLinkStub },
+      },
     });
+  }
+
+  /** Reads the target a stubbed <router-link> would navigate to. */
+  function routeTarget(wrapper: ReturnType<typeof mountView>, selector: string) {
+    const raw = wrapper.find(selector).attributes('data-router-to');
+    expect(raw, `${selector} should render a router-link`).toBeTruthy();
+    return JSON.parse(raw as string);
+  }
+
+  /** Data rows only — the empty state renders a <tr> without this class. */
+  function rowCount(wrapper: ReturnType<typeof mountView>): number {
+    return wrapper.findAll('.ui-table__row').length;
   }
 
   async function pickOption(wrapper: ReturnType<typeof mountView>, label: string) {
@@ -502,5 +539,44 @@ describe('NextGrantsView', () => {
     await flushPromises();
 
     expect(mockApi.disableGrant).toHaveBeenCalledWith('g1');
+  });
+
+  it('filters the list to the credential named in the query (#657)', async () => {
+    routeQuery.value = { credentialId: 'c2' };
+    const wrapper = mountView();
+    await flushPromises();
+
+    // The jump from the credentials list must land on a filtered list, not a
+    // page that silently ignores the parameter.
+    expect(rowCount(wrapper)).toBe(1);
+    expect(wrapper.text()).toContain('moonshot-main');
+    expect(wrapper.text()).not.toContain('deepseek-main');
+    expect(wrapper.find('[data-testid="grants-filter"]').text()).toContain('moonshot-main');
+    // Both numbers, so the filter never looks like data loss.
+    expect(wrapper.find('.ui-panel-sub').text()).toContain('共 1 条授权（全部 2 条）');
+    expect(routeTarget(wrapper, '[data-testid="grants-filter-clear"]')).toEqual({ name: 'grants' });
+  });
+
+  it('lists everything when no credential is selected (#657)', async () => {
+    routeQuery.value = {};
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(rowCount(wrapper)).toBe(2);
+    expect(wrapper.find('[data-testid="grants-filter"]').exists()).toBe(false);
+    expect(wrapper.find('.ui-panel-sub').text()).toContain('共 2 条授权');
+    expect(wrapper.find('.ui-panel-sub').text()).not.toContain('全部');
+  });
+
+  it('offers the way back when the selected credential has no grants (#657)', async () => {
+    routeQuery.value = { credentialId: 'c9' };
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(rowCount(wrapper)).toBe(0);
+    expect(wrapper.text()).toContain('该凭证还没有被任何授权引用');
+    const action = wrapper.find('[data-testid="table-empty-action"]');
+    expect(action.text()).toBe('查看全部授权');
+    expect(routeTarget(wrapper, '[data-testid="table-empty-action"]')).toEqual({ name: 'grants' });
   });
 });
