@@ -88,7 +88,7 @@
 **功能形态对照（映射/不采纳）**：
 | 阿里云形态 | 我们对应/裁决 |
 |---|---|
-| AI 网关 FinOps：消费者 Token/Credits 配额，周期=日/周/月/年 + 自定义 + 时区 + 水位监控；消费者组 + API 授权；模型资产 Credits 配额管控 | 对应我们配额规则（USER/PROJECT 作用域、TOKENS/REQUESTS、DAILY/WEEKLY/MONTHLY、水位+告警不阻断）。**不采纳**：Credits 归一化单位（跨供应商换算引入估算语义）、年/自定义周期（内部 50 账号无此需求）、消费者组（无组实体）、配额硬阻断（锁定决策：只告警） |
+| AI 网关 FinOps：消费者 Token/Credits 配额，周期=日/周/月/年 + 自定义 + 时区 + 水位监控；消费者组 + API 授权；模型资产 Credits 配额管控 | 对应我们配额规则（USER/PROJECT 作用域、TOKENS/REQUESTS/**COST**、DAILY/WEEKLY/MONTHLY/**YEARLY**、水位+告警**+即将超限档**不阻断，#683 已补齐 COST/YEARLY/NEAR_LIMIT）。**不采纳**：Credits 归一化单位（跨供应商换算引入估算语义）、自定义周期（内部 50 账号无此需求）、消费者组（无组实体）、配额硬阻断（锁定决策：只告警） |
 | Higress 语义缓存（Embedding+向量库，宣称省 40-60%） | 与 ADR-0009 方向一致但**刻意不采纳向量库形态**（零中间件 + 不引正文特征化）；我们语义键=末条 user 消息哈希（腾讯/阿里精确缓存同源思路的轻量版） |
 | Higress 多 Key 均衡/Key 池轮询 | **刻意不采纳**（1:1 固定绑定；Key 池轮询破坏审计映射） |
 | Higress 模型 Fallback/降级链 | 刻意不采纳（不自动故障切换） |

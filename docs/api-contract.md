@@ -926,9 +926,9 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 | `PUT /api/v1/admin/quota-rules` | 新增/更新规则（`(scopeType, scopeId, metric, period)` 为自然键，重复 PUT 原地编辑） |
 | `DELETE /api/v1/admin/quota-rules/{id}` | 删除规则（`404 QUOTA_RULE_NOT_FOUND`） |
 
-- 请求体 `{ "scopeType": USER\|PROJECT, "scopeId", "metric": TOKENS\|REQUESTS, "period": DAILY\|WEEKLY\|MONTHLY, "limitValue"（正整数）, "warnPercent"?（1–99，默认 80）, "status"?（默认 ACTIVE）}`；scope 不存在 → `404 SCOPE_NOT_FOUND`（防枚举）。
-- **水位口径（读时计算，非预聚合）**：TOKENS = 当期窗口 usage 事件全部 token（input+output+cacheRead+cacheCreation，与个人用量 TotalTokens 同口径）；REQUESTS = 当期到达上游的请求数（缓存命中不计）。窗口为 UTC 切片：DAILY=当日 / WEEKLY=周一起 / MONTHLY=当月（与月度预算同约定）。
-- `level`：`NORMAL` → `WARNING`（≥ warnPercent）→ `EXCEEDED`（≥ 100%）。**规则永不阻断流量**；硬阻断需 ADR。
+- 请求体 `{ "scopeType": USER\|PROJECT, "scopeId", "metric": TOKENS\|REQUESTS\|COST, "period": DAILY\|WEEKLY\|MONTHLY\|YEARLY, "limitValue"（正整数；COST 口径为整数 CNY）, "warnPercent"?（1–99，默认 80）, "status"?（默认 ACTIVE）}`；scope 不存在 → `404 SCOPE_NOT_FOUND`（防枚举）。COST 指标与 YEARLY 周期为 #683 增（对标腾讯配额管理）。
+- **水位口径（读时计算，非预聚合）**：TOKENS = 当期窗口 usage 事件全部 token（input+output+cacheRead+cacheCreation，与个人用量 TotalTokens 同口径）；REQUESTS = 当期到达上游的请求数（缓存命中不达上游、不计入，与腾讯「不计入缓存命中」档语义一致）；COST = 当期窗口按价格快照估算的上游实付（与成本报表同口径，缺价记 0）。窗口为 UTC 切片：DAILY=当日 / WEEKLY=周一起 / MONTHLY=当月（与月度预算同约定）/ YEARLY=自然年（1 月 1 日起）。水位计算走内部无上限窗口路径，不受公开查询 93 天窗口约束。
+- `level`：`NORMAL` → `WARNING`（≥ warnPercent）→ `NEAR_LIMIT`（≥ 90%，固定提示档，对标腾讯「即将超限」）→ `EXCEEDED`（≥ 100%），按严重度判定。**规则永不阻断流量**；硬阻断需 ADR。
 - DISABLED 规则保留计划并展示水位，页面按停用渲染。
 - 审计：`QUOTA_RULE_CREATE` / `QUOTA_RULE_UPDATE` / `QUOTA_RULE_DELETE`。
 - 视图含 `scopeName`（用户显示名/项目名）与 `scopeTag`（用户名/项目 code）。
