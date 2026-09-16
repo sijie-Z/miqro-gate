@@ -41,6 +41,11 @@ ANTHROPIC_AUTH_TOKEN=<你的 mqk_live_... 虚拟 Key>
 ```
 
 `miqro-context install` 会打印这两步（**不会**改动你的任何配置文件）。
+`miqro-context install --autostart` 额外注册**登录自启**（用户级、免管理员；
+显式 opt-in）：Windows 写入 Start Menu 的启动文件夹、macOS 写 LaunchAgent、
+Linux 写 systemd user unit——各平台激活提示由命令输出；
+`miqro-context uninstall --autostart` 移除；`doctor` 会显示自启状态。
+自启模式日志在 `~/.miqro/agent.log`。
 
 ## 归属是怎么判定的（Spec §5.3：作用域+分组+冲突，无打分）
 

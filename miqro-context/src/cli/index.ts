@@ -10,14 +10,16 @@ import { runCommand } from "./run.js";
 import { statusCommand } from "./status.js";
 import { doctorCommand } from "./doctor.js";
 import { installCommand } from "./install.js";
+import { uninstallCommand } from "./uninstall.js";
 
 const USAGE = `miqro-context <command>
 
 Commands:
-  run       Start the local context agent (127.0.0.1:8788 by default)
-  status    Show the running agent's recent attribution decisions
-  doctor    Self-check config, gateway reachability, key, registry, git
-  install   Print the Claude Code setup steps (does not modify your files)
+  run        Start the local context agent (127.0.0.1:8788 by default)
+  status     Show the running agent's recent attribution decisions
+  doctor     Self-check config, gateway reachability, key, registry, git
+  install    Print the Claude Code setup steps (--write-config, --autostart)
+  uninstall  Remove the login autostart entry (--autostart)
 
 Config: ~/.miqro/context.json (or MIQRO_CONTEXT_CONFIG)
 Env:    MIQRO_CONTEXT_GATEWAY_URL, MIQRO_CONTEXT_PORT, MIQRO_CONTEXT_VIRTUAL_KEY
@@ -37,6 +39,9 @@ async function main(): Promise<void> {
       return;
     case "install":
       await installCommand();
+      return;
+    case "uninstall":
+      await uninstallCommand();
       return;
     case "--help":
     case "-h":
