@@ -3047,3 +3047,14 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - mount 后 1.5s 起对当前角色全部菜单项序贯静默预取（120ms 步进；卸载清定时器）。
 
 **验证**：单测 4/4（悬停一次去重/聚焦/空闲全量/滚动重置与 query 豁免）；全量 **299/299**；typecheck 三配置 + 改动文件 eslint 干净。**浏览器实测**（mock 控制面 + dev 服务器）：滚动 500→0 且滚动能力保留；挂载后 1.5s 空闲窗口内悬停 → 700ms 内目标 chunk 抵达（资源计时 2 条=模块+样式）；未交互页面（资料）被空闲预取自动加载。
+
+## 2026-09-16 午后 — 部署件固化 #677：2G 演示机 JVM/内存调优回流 compose.prod.yaml
+
+**背景**：演示机控制台内存告警 95%+（同日 #663/#667/#668 事故窗口定性：12:15–12:32 构建峰值 97.5%、日常常驻 ~85%）。午后完成实测瘦身，但改动只落在服务器 compose（配置漂移，整树刷新即回退）。瘦身时开启 GC 日志实测：control-plane 堆存活仅 ~69MB、gateway ~24MB——原 512m/640m 默认值与镜像 ENTRYPOINT 兜底的 `-XX:MaxRAMPercentage=75`（768m）均严重超配；JVM RSS 大头是 metaspace（86MB）+ code cache + 线程（Spring Boot 固有）。附带实证：`-Xmx` 优先于 `-XX:MaxRAMPercentage`（MaxHeapSize 非默认则百分比分支跳过），二者不竞争。
+
+**交付**（分支 chore/compose-prod-tuning-677，仅 `deploy/compose.prod.yaml`）：
+- control-plane `-Xmx512m→448m`、gateway `-Xmx640m→384m`，均加 `-XX:+UseSerialGC` 与 `-Xlog:gc*:file=/tmp/gc.log:time,uptime:filecount=2,filesize=5m`；
+- postgres `shared_buffers` 默认 64MB（`POSTGRES_SHARED_BUFFERS` 覆盖；共享内存不可回收，调小后余量转为可回收内核页缓存）；
+- 留痕消费端（`MIQROKEY_RETENTION_CONSUMER_*`）与响应缓存（`MIQROKEY_CACHE_ENABLED`）开关环境变量化（默认关）——消除服务器手改 compose 的漂移来源，仓库默认行为不变。
+
+**验证**：`docker compose -f deploy/compose.prod.yaml config` 通过（本机 v5.1.4；渲染的 JAVA_TOOL_OPTIONS/shared_buffers 与服务器实测目标逐字一致）。服务器侧（2G 演示机）已按目标态运行并验证：swap 899→85MB、dockerd RSS 317→97MB、控制台常驻口径 85%→~60%、全栈 healthy、登录 `/api/v1/auth/login` 200、PSI=0、零 OOM；服务器 `.env` 已补齐对应开关值（cache / 留痕消费端 / COMPOSE_PROFILES）。
