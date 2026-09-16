@@ -3163,6 +3163,6 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - **测试**：`shell-preferences.spec.ts` 新增抽屉开关用例（开关 → 立即折叠侧栏 + 写穿 `localStorage` + 模拟重载后保持）与 `#579 layout contract` 用例族（jsdom 不跑层叠，故解析随包发出的 CSS 源码：断言 `--ui-content-max` 取值、`.ui-page` 确实消费该 token、`wide` 覆盖仍为 100%、抽屉内边距；`var()` 一律解析回 px 取值，改名 token 无法蒙混通过）；`preferences.spec.ts` 的抽屉用例补同一开关。
 
 **验证**：vitest 全量 **59 文件 / 334 用例 PASS**；`vue-tsc`（app/spec/node 三工程）PASS；`vite build` PASS；对本轮 4 个可 lint 的改动文件（`SettingsDrawer.vue`、`ui/Drawer.vue`、`preferences.spec.ts`、`shell-preferences.spec.ts`）跑 `npx eslint <4 files> --ext .vue,.ts` → 退出码 0，`516 problems (0 errors, 516 warnings)`。
-（说明：上述 516 条警告全为 `Delete ␍` 行尾项。仓库在本机为 CRLF 检出而 prettier 期望 LF，`npm run lint` 自带的 `--fix` 会重写全树约 100+ 文件的行尾；故验证用等价的 `npx eslint …`（不带 `--fix`）。该行尾基线在 `develop` 的 HEAD 上同样成立——未改动文件如 `src/ui/Button.vue` 单跑亦得 `201 problems (0 errors, 201 warnings)`，全部同类。）
+（说明：上述 516 条警告全部来自 `prettier/prettier` 的行尾项——515 条 `Delete ␍` 与 1 条 `Delete ␍⏎␍`。本机为 CRLF 检出而 prettier 期望 LF，`npm run lint` 自带的 `--fix` 会重写全树约 100+ 文件的行尾，故本轮验证改用等价的、不带 `--fix` 的 `npx eslint`。该行尾基线在 `develop` 的 HEAD 上同样成立：未改动的 `src/ui/Button.vue` 单跑亦为 `201 problems (0 errors, 201 warnings)`。）
 
 **边界与影响**：`frontend/e2e/baseline-screenshots/` 为捕获式基线（无像素对比断言），其截图内容宽度仍反映旧的 1440px，本批不重新生成、不影响 CI；`docs/frontend-design.md` 已同步为 1200px；`tokens.css` 的 v1 `--miqrokey-content-max: 1600px` 属旧层，不在本 issue 范围。
