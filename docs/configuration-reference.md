@@ -175,9 +175,9 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 | `MIQROKEY_GATEWAY_ROUTE_NOTIFY_CHANNEL` | `miqrokey_route_refresh` | PostgreSQL `LISTEN/NOTIFY` 通道名；控制面在变更事务提交后（AFTER_COMMIT）向该通道发布通知，Gateway 专用连接监听并立即重载快照 |
 | `MIQROKEY_GATEWAY_QUEUE_CAPACITY` | `50000` | 用量写入有界队列容量（#424：吸收负载下写入端多秒级停顿的红线突发） |
 | `MIQROKEY_GATEWAY_QUEUE_FLUSH_THRESHOLD` | `100` | 单次批量写入条数（#417：每次 flush **全量排空**队列、按此值分块调用 writer；此前误作「每次 flush 排空上限」，把稳态吞吐钉死在 threshold/interval = 20 事件/秒） |
-| `MIQROKEY_GATEWAY_QUEUE_FLUSH_INTERVAL` | `1s` | 批量 flush 周期（#424：5s 使红线档突发在一个周期内超容量触发 DROP；1s 下单周期突发 ≈2400 ≪ 容量 10000） |
+| `MIQROKEY_GATEWAY_QUEUE_FLUSH_INTERVAL` | `1s` | 批量 flush 周期（#424：5s 使红线档突发在一个周期内超容量触发 DROP；1s 下单周期突发 ≈2400 ≪ 容量 10000）。**同一周期也驱动丢弃事实上报**（F07/#245）：每个周期把「自上次上报以来新增的丢弃数」写一行 `gateway_queue_signal`（0 条则不写），无独立配置项 |
 | `MIQROKEY_GATEWAY_QUEUE_WRITER_THREADS` | `4` | 专用有界 writer 执行器线程数（G2.4） |
-| `MIQROKEY_GATEWAY_QUEUE_SATURATION_MODE` | `DROP` | 队列饱和策略（F35）：`DROP` = 保持热路径不阻塞、事件计数丢弃（默认）；`WRITE_THROUGH` = 应急直写——单事件经专用 writer 执行器幂等写入并**有界等待**（见下），审计完整性优先、发布线程短暂停滞可接受 |
+| `MIQROKEY_GATEWAY_QUEUE_SATURATION_MODE` | `DROP` | 队列饱和策略（F35）：`DROP` = 保持热路径不阻塞、事件计数丢弃（默认）；`WRITE_THROUGH` = 应急直写——单事件经专用 writer 执行器幂等写入并**有界等待**（见下），审计完整性优先、发布线程短暂停滞可接受。只有 `DROP` 造成的丢失会写 `gateway_queue_signal` 事实行（写穿失败回退为计数丢弃时同样记行） |
 | `MIQROKEY_GATEWAY_QUEUE_WRITE_THROUGH_TIMEOUT` | `5s` | WRITE_THROUGH 单事件直写的等待上限；超时/失败仍按 drop 计数兜底，发布线程永不无限阻塞 |
 | `MIQROKEY_GATEWAY_COALESCER_ENABLED` | `false` | 请求合并（single-flight）：默认关闭（ADR-0008） |
 | `MIQROKEY_GATEWAY_COALESCER_WAIT_TIMEOUT` | `2s` | 合并等待窗口 |
