@@ -152,6 +152,14 @@ export const DICT: Record<string, string> = {
   '与当前生效版本一致': 'Matches the active version',
   '与当前生效版本一致。': 'Matches the active version.',
   '与当前生效版本不一致。': 'Does not match the active version.',
+  '上游探测超时': 'Provider probe timed out',
+  '上游调用失败': 'Provider call failed',
+  '只有 ACTIVE 状态的凭证可以轮换。': 'Only ACTIVE credentials can be rotated.',
+  '该操作需要系统管理员（SYSTEM_ADMIN）权限。': 'This action requires the SYSTEM_ADMIN role.',
+  '该项目已存在相同凭证与产品组合的授权（含已停用），不可重复创建。':
+    'A grant for the same credential and product already exists in this project (including disabled ones).',
+  '你不是该项目的成员，无法创建 Virtual Key。':
+    'You are not a member of this project — no Virtual Key can be created.',
   '专用有界队列；容量、指标与告警见运行手册':
     'Dedicated bounded queue; capacity, metrics and alerts in the runbook',
   '丢弃': 'Discard',
@@ -742,6 +750,7 @@ export const DICT: Record<string, string> = {
   '显示名': 'Display name',
   '显示名称': 'Display name',
   '显示名（可选）': 'Display name (optional)',
+  '显示名已更新': 'Display name updated',
   '显示密码': 'Show password',
   '普通用户': 'Regular user',
   '智能体': 'Agents',
@@ -801,6 +810,7 @@ export const DICT: Record<string, string> = {
   '未配置配额': 'No quota configured',
   '未配置；新建用户时自动复制快照': 'Not configured; new users receive a snapshot automatically',
   '本周': 'This week',
+  '今天': 'Today',
   '本地估算': 'Local estimate',
   '本地化部署，数据不出环境': 'Runs in your environment, data never leaves',
   '本地口径': 'Local basis',
@@ -837,6 +847,10 @@ export const DICT: Record<string, string> = {
   '模型审批 · 驳回': 'Model approval · rejected',
   '模型申请': 'Model Requests',
   '模型目录': 'Model catalog',
+  '接入文档': 'API docs',
+  '更多': 'More',
+  '试调': 'Test run',
+  '发送试调': 'Send test run',
   '模型范围': 'Model scope',
   '模型范围已更新': 'Model scope updated',
   '模型范围（每行一个，选填）': 'Model scope (one per line, optional)',
@@ -1026,6 +1040,8 @@ export const DICT: Record<string, string> = {
   '缓存读': 'Cache reads',
   '缓存读取': 'Cache reads',
   '编辑': 'Edit',
+  '编辑用户': 'Edit user',
+  '编辑项目': 'Edit project',
   '编辑配置': 'Edit configuration',
   '编辑配额规则': 'Edit quota rule',
   '网关 · 在线': 'GATEWAY · ONLINE',
@@ -1105,6 +1121,8 @@ export const DICT: Record<string, string> = {
   '请输入团队名称。': 'Enter the team name.',
   '请输入新的密钥。': 'Enter the new secret.',
   '请输入消费者名称。': 'Enter the consumer name.',
+  '请输入显示名。': 'Enter a display name.',
+  '请输入项目名称。': 'Enter the project name.',
   '请输入用户名。': 'Enter a username.',
   '请输入用户名（成员 Key 请到上游凭证页关联）。':
     'Enter a username (member keys are bound on the upstream credentials page).',
@@ -1150,6 +1168,13 @@ export const DICT: Record<string, string> = {
   '路由已启用': 'Route enabled',
   '路由已更新': 'Route updated',
   '路由标签': 'Routing tags',
+  '路由标签不能清空——现有 Virtual Key 的路由依赖它。':
+    'The routing tag cannot be cleared — existing Virtual Keys route by it.',
+  '路由标签只允许字母、数字、下划线与连字符（1–64 位）。':
+    'Routing tags allow letters, digits, underscores and hyphens only (1–64 chars).',
+  '留空将导致成员无法创建 Virtual Key；可稍后在「编辑」中补填。':
+    'Leaving it empty blocks members from creating Virtual Keys; add it later via Edit.',
+  '项目已更新': 'Project updated',
   '路由规则': 'Route rules',
   '跳过：': 'Skipped:',
   '轮换': 'Rotate',
@@ -1340,8 +1365,28 @@ export const DICT: Record<string, string> = {
   '合并': 'Coalesced',
   'L1 命中': 'L1 hit',
   'L2 命中': 'L2 hit',
+  'L1+L2 命中': 'L1+L2 hits',
+  '合并命中': 'Coalesced hits',
+  '上游未命中': 'Upstream misses',
+  '总请求次数': 'Total requests',
+  '网关缓存命中率': 'Gateway cache hit rate',
+  '缓存命中构成': 'Cache hit composition',
+  '按服务请求总数计算': 'Share of all served requests',
+  '当前窗口': 'Current window',
+  '等效折扣': 'Effective discount',
   '缺失': 'Missing',
   '已文档化': 'Documented',
+  '产品条目已创建，尚未完成资料整理。':
+    'The product entry exists; documentation is still being compiled.',
+  '官方资料已确认设计与接入方式；适配器尚未完成验证。详见「接入文档」。':
+    'Official docs confirm the design and endpoints; the adapter is not yet verified. See the API docs for details.',
+  '适配器与 Mock 契约测试已完成，等待真实凭证验证。':
+    'Adapter and mock contract tests are done; real-credential verification is pending.',
+  '已用真实供应商凭证完成契约测试。': 'Contract-tested with a real provider credential.',
+  '部分能力只能本地估算或人工核对，详见接入文档。':
+    'Some capabilities are estimate-only or checked manually — see the API docs.',
+  '该产品实例已停用，不再用于新建凭证。':
+    'This product instance is disabled and no longer used for new credentials.',
   '草稿': 'Draft',
   '管理 API 密钥': 'Admin API key',
   '删除任务': 'Deletion task',
@@ -1417,6 +1462,9 @@ export const DICT: Record<string, string> = {
 
 export const PATTERNS: Array<[RegExp, string]> = [
   [/^基于当前 (.+?) 条记录$/, 'Based on the current $1 records'],
+  [/^修改「(.+?)」的显示名。$/, 'Change the display name for "$1".'],
+  [/^凭证当前状态为 (.+?)，无需停用。$/, 'The credential is already $1 — nothing to disable.'],
+  [/^修改「(.+?)」的名称与路由标签。$/, 'Change the name and routing tag for "$1".'],
   [/^(.+?)\ 个可用$/, '$1 active'],
   [/^(.+?)\ 轮换中$/, '$1 rotating'],
   [/^(.+?)\ 异常$/, '$1 unusual'],

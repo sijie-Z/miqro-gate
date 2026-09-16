@@ -182,15 +182,16 @@ Key 创建时的授权快照，主键 `(virtual_key_id, model_id)`。实际可�
 
 ### `projects.project_tag` / `virtual_keys.cache_policy` (V4)
 
-- `projects.project_tag varchar(64) nullable`：路由标签，唯一 `(tenant_id, project_tag)`（部分索引，非 NULL 才唯一）。格式 `^[A-Za-z0-9_-]{1,64}$`。标签明文嵌入 Key 后缀（`mqk_live_<id>_<secret>.<projectTag>`）用于路由；鉴权权威是 `key_project_binding`。
+- `projects.project_tag varchar(64) nullable`：路由标签，唯一 `(tenant_id, project_tag)`（部分索引，非 NULL 才唯一）。格式 `^[A-Za-z0-9_-]{1,64}$`。标签明文嵌入 Key 后缀（`mqk_live_<id>_<secret>.<projectTag>`）用于路由；鉴权权威是 `key_project_binding`。**ADR-0018**：创建项目未填标签时自动生成（code 的 slug，冲突退 `proj-<uuid>`）；V53 回填存量 NULL；标签**被任一绑定引用后不可修改**（服务层 409 `PROJECT_TAG_IN_USE`）。
 - `virtual_keys.cache_policy varchar(32) NOT NULL DEFAULT 'DISABLED'`，取值 `DISABLED|ENABLED`：显式开启才可能参与响应缓存（缓存子系统默认关闭，ADR-0008）。
 
 ### `key_project_binding` (V4)
 
-Key → 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project_id` 分离，便于绑定状态演化而不重写 Key 行：
+Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project_id` 分离，便于绑定状态演化而不重写 Key 行。**ADR-0018：一把 Key 可绑多个项目**（唯一约束为 `(virtual_key_id, project_id)` 对，V4 起即支持多行），网关按 `(密钥, 标签)` 命中一行：
 
-- `virtual_key_id`、`project_id`、`status`（`ACTIVE|DISABLED`）、`version`、时间戳
-- 复合 FK 到 `virtual_keys(tenant_id, id)` 和 `projects(tenant_id, id)`（防跨租户）
+- `virtual_key_id`、`project_id`、`grant_id`（**V53 新增**：该绑定自己的授权——凭证/产品/授权模型的来源；回填自 `virtual_keys.grant_id`，存量语义不变）、`status`（`ACTIVE|DISABLED`）、`version`、时间戳
+- 复合 FK 到 `virtual_keys(tenant_id, id)` 和 `projects(tenant_id, id)`（防跨租户）；**复合 FK `(grant_id, project_id, tenant_id)` → `project_provider_grants(id, project_id, tenant_id)`**（数据库层保证绑定与授权的项目/租户一致，不再只靠装载器 JOIN 兜底）
+- 成员移出项目 / Key 轮换的行为见 ADR-0018 D4/D7（轮换复制全部绑定；成员移除禁用该项目的绑定行，无剩余绑定的 Key 置 REVOKED）
 - 唯一 `(virtual_key_id, project_id)`；`project_id`、`tenant_id` 索引
 
 ### `model_approval` (V4 + V22)
@@ -216,6 +217,13 @@ Key → 项目绑定（标签路由的鉴权权威），与 `virtual_keys.projec
 - 六类 Token 列（`input/output/cache_creation_input/cache_read/prompt/completion/total/reasoning`），**可为 NULL**：缓存命中无 usage
 - `latency_ms`、`upstream_status_code`、`cache_key bytea`
 - `is_complete boolean`、`usage_missing boolean`（上游未返回 usage 时标记，用量记 0）
+- `client_ip varchar(45)`（V52，#605：调用方地址——传输层对端，或可信代理名单下 `X-Forwarded-For` 最右非可信跳；可为 NULL）
+- `client_ip` 之后的 **CAA 归属列（V54，#633）**，全部可空、存量行 NULL：
+  - `session_id varchar(64)`（Agent 会话标识，源自 `X-Claude-Code-Session-Id`，超长/畸形即丢弃）
+  - `activity_id uuid`（请求上下文解析器生成的本次活动标识）
+  - `claimed_project_id uuid`（Agent **声明**的项目——未经授权校验，仅审计，与裁决列分开）
+  - `resolution_status varchar(32)`（服务端裁决：`RESOLVED_HEADER|RESOLVED_SUFFIX|SOLE_BINDING|POLICY_ROUTED|UNATTRIBUTED|AMBIGUOUS`）
+  - `claim_source varchar(32)`（`prompt_url|tool_path|bash_cwd|system_cwd|git_remote|suffix|none`，白名单外丢弃）、`claim_confidence varchar(16)`（`HIGH|MEDIUM|LOW|NONE`，白名单外丢弃）
 - `occurred_at`、`created_at`
 
 部分唯一索引 `(tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL`；`virtual_key_id`、`project_id`、`cache_level`、`occurred_at` 索引。正文（prompt、代码、工具、回答）永不写入。
@@ -223,6 +231,18 @@ Key → 项目绑定（标签路由的鉴权权威），与 `virtual_keys.projec
 ### `cache_hit_event` (V6)
 
 缓存命中计数（L1/L2 命中不写 `usage_event`，在此去重计数）：`cache_key`、`virtual_key_id`、`project_id`、`provider_product_id`、`level`（`L1_HIT|L2_HIT`）、`occurred_at`、`gateway_request_id`。唯一 `(tenant_id, cache_key, level, occurred_at)`——同一秒内同一 cache_key 只记一次。
+
+### `unattributed_policy` (V57，#647)
+
+CAA 未归属策略（Spec v1.1 §7.3，每租户至多一行）：`tenant_id`（PK）、`project_id`（未归属桶项目，复合 FK → projects；该系统项目 `projects.system=true`）、`credential_id`（复合 FK → upstream_credentials）、`provider_product_id`（FK → provider_products）、`model_scope jsonb`（空数组 = 产品上游目录全部 ACTIVE 模型）、`updated_by`、`updated_at`。V57 同时给 `projects` 增 `system boolean NOT NULL DEFAULT false`（系统项目不可被建 Key 选择）。
+
+### `project_repositories` (V56，#639)
+
+CAA Project Registry（Spec v1.1 §7.4）：`id`、`tenant_id`、`project_id`（复合 FK → `projects(tenant_id, id)`）、`repo_key`（规范化小写 `host/owner/repo`，varchar(200)）、`created_by`、时间戳；唯一 `(tenant_id, repo_key)`（租户内一个仓库只能属于一个项目）、索引 `(project_id)`。Agent 经网关 `GET /v1/context-registry` 消费（按 Key 绑定项目过滤）。
+
+### `request_context_evidence` (V55，#633)
+
+CAA 逐请求上下文证据审计（append-only）：`id`、`tenant_id`、`request_id`（gateway request id）、`source`、`value`、`confidence`、`scope`（`turn|session`）、`observed_at`。索引 `(tenant_id, request_id)`、`(tenant_id, observed_at)`。与 `usage_event` 的归属列互为佐证：usage 行回答"记到谁头上"，本表回答"凭什么这么记"。声明内容永不构成授权（Spec v1.1 §4）。
 
 ### `request_usage_records` (V8，当前实现子集)
 

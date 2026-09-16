@@ -26,6 +26,8 @@ export interface Preferences {
   collapsed: boolean; // default false (rail collapsed to icons)
   contentCompact: ContentCompact; // default 'fixed'
   animations: boolean; // default true
+  lockMinutes: number; // auto-lock idle timeout in minutes (0 = off), default 0
+  sidebarWidth: number; // expanded rail width in px, default 210
 }
 
 const STORAGE_KEY = 'miqrolegate.prefs';
@@ -43,6 +45,8 @@ const DEFAULT_PREFERENCES: Preferences = {
   collapsed: false,
   contentCompact: 'fixed',
   animations: true,
+  lockMinutes: 0,
+  sidebarWidth: 210,
 };
 
 export const preferences = reactive<Preferences>({ ...DEFAULT_PREFERENCES });
@@ -81,6 +85,8 @@ export function applyPreferences(): void {
   root.dataset.gray = preferences.grayMode ? 'on' : 'off';
   root.dataset.colorWeak = preferences.colorWeakMode ? 'on' : 'off';
   root.dataset.anim = preferences.animations ? 'on' : 'off';
+  const width = Math.min(320, Math.max(180, Math.round(preferences.sidebarWidth) || 210));
+  root.style.setProperty('--ui-sidebar-width', `${width}px`);
   writeStored();
 }
 
@@ -195,6 +201,12 @@ function readStored(): Partial<Preferences> {
   for (const key of BOOLEAN_KEYS) {
     const value = data[key];
     if (typeof value === 'boolean') merged[key] = value;
+  }
+  if (typeof data.lockMinutes === 'number' && Number.isFinite(data.lockMinutes)) {
+    merged.lockMinutes = Math.min(240, Math.max(0, Math.round(data.lockMinutes)));
+  }
+  if (typeof data.sidebarWidth === 'number' && Number.isFinite(data.sidebarWidth)) {
+    merged.sidebarWidth = Math.min(320, Math.max(180, Math.round(data.sidebarWidth)));
   }
   return merged;
 }

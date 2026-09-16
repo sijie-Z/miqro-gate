@@ -61,6 +61,8 @@ class RouteSnapshotRefreshNotifierTest {
     @Autowired
     VirtualKeyService virtualKeyService;
     @Autowired
+    AdminOrgService adminOrgService;
+    @Autowired
     NamedParameterJdbcTemplate jdbc;
 
     private final Fixture fx = new Fixture();
@@ -93,6 +95,41 @@ class RouteSnapshotRefreshNotifierTest {
     }
 
     @Test
+    @DisplayName("grant scope edits and grant disable publish NOTIFY (#619)")
+    void grantMutationsPublishNotification() throws Exception {
+        fx.seed();
+
+        try (Connection probe = probeConnection(); Statement statement = probe.createStatement()) {
+            statement.execute("LISTEN " + RouteSnapshotRefreshNotifier.CHANNEL);
+            PGConnection pg = probe.unwrap(org.postgresql.PGConnection.class);
+
+            adminOrgService.updateGrantModels(TENANT_ID, fx.adminId, fx.grantId, List.of("claude-3-7-sonnet"));
+            assertThat(awaitNotification(pg, 10, TimeUnit.SECONDS)).as("grant models update must notify").isNotNull();
+
+            adminOrgService.disableGrant(TENANT_ID, fx.adminId, fx.grantId);
+            assertThat(awaitNotification(pg, 10, TimeUnit.SECONDS)).as("grant disable must notify").isNotNull();
+        }
+    }
+
+    @Test
+    @DisplayName("a failed grant edit publishes no NOTIFY (#619)")
+    void failedGrantEditPublishesNothing() throws Exception {
+        fx.seed();
+
+        try (Connection probe = probeConnection(); Statement statement = probe.createStatement()) {
+            statement.execute("LISTEN " + RouteSnapshotRefreshNotifier.CHANNEL);
+            PGConnection pg = probe.unwrap(org.postgresql.PGConnection.class);
+
+            // Unknown grant id -> ApiException -> the transaction rolls back.
+            assertThatThrownBy(() -> adminOrgService.updateGrantModels(TENANT_ID, fx.adminId, UUID.randomUUID(),
+                    List.of("claude-3-7-sonnet"))).isInstanceOf(ApiException.class);
+
+            assertThat(pg.getNotifications(2000)).isNullOrEmpty();
+            assertThat(pg.getNotifications(2000)).isNullOrEmpty();
+        }
+    }
+
+    @Test
     @DisplayName("a rolled-back create publishes no NOTIFY")
     void rolledBackCreatePublishesNothing() throws Exception {
         fx.seed();
@@ -103,7 +140,7 @@ class RouteSnapshotRefreshNotifierTest {
 
             // Unknown project id -> ApiException -> the transaction rolls back.
             assertThatThrownBy(() -> virtualKeyService.create(fx.adminUser(),
-                    new CreateVirtualKeyRequest("notify-key", UUID.randomUUID(), fx.productId, fx.grantId,
+                    new CreateVirtualKeyRequest("notify-key", UUID.randomUUID(), null, fx.productId, fx.grantId,
                             VirtualKeyPurpose.CLAUDE_CODE, null, null),
                     "req-rolled-back")).isInstanceOf(ApiException.class);
 
@@ -191,15 +228,16 @@ class RouteSnapshotRefreshNotifierTest {
         }
 
         CreateVirtualKeyRequest request() {
-            return new CreateVirtualKeyRequest("notify-key", projectId, productId, grantId,
+            return new CreateVirtualKeyRequest("notify-key", projectId, null, productId, grantId,
                     VirtualKeyPurpose.CLAUDE_CODE, null, null);
         }
 
         void reset() {
             for (String table : List.of("virtual_key_models", "key_project_binding", "virtual_keys",
-                    "project_provider_grant_models", "project_provider_grants", "upstream_credential_versions",
-                    "upstream_credentials", "upstream_subscriptions", "projects", "model_catalog", "provider_products",
-                    "providers", "admin_audit_events", "user_sessions", "users")) {
+                    "project_provider_grant_models", "project_provider_grants", "unattributed_policy",
+                    "upstream_credential_versions", "upstream_credentials", "upstream_subscriptions",
+                    "project_repositories", "projects", "model_catalog", "provider_products", "providers",
+                    "admin_audit_events", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {

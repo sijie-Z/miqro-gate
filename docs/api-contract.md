@@ -122,18 +122,20 @@
 | `GET /api/v1/me/usage/summary` | 自己的聚合用量和成本 |
 | `GET /api/v1/me/usage/records` | 自己的明细，受分页和最大时间窗限制 |
 
-创建请求：
+创建请求（ADR-0018：一把 Key 可绑定多个项目——`projectIds` 首个为主项目，其授权即 `credentialGrantId`；附加项目由服务端匹配该项目下同产品的最早 ACTIVE 授权，匹配不到则 409 `PROJECT_GRANT_MISSING`。旧字段 `projectId` 仍兼容=单元素）：
 
 ```json
 {
   "name": "claude-code-main",
-  "projectId": "0190...",
+  "projectIds": ["0190...", "0191..."],
   "providerProductId": "0190...",
   "credentialGrantId": "0190...",
   "purpose": "CLAUDE_CODE",
   "allowedModels": ["provider-model-id"]
 }
 ```
+
+响应新增 `boundProjects: [{ projectId, projectTag }]`：打印字符串携带首个项目的标签；对其余已绑定项目，把同一密钥核心段追加各自标签（`mqk_live_<id>_<secret>.<tag>`）即可路由。标签不参与 HMAC、不承载权限；它是**路由选择器**而非授权边界：单绑定 Key 上任意合法标签都路由到该唯一绑定；多绑定 Key 的请求归属按 §7.1 的上下文解析阶梯裁决——无法解析时 `400 CONTEXT_REQUIRED`（失败关闭，不猜不 404）。项目标签在项目创建时若未填写会自动生成（code slug），且**被绑定引用后不可修改**（409 `PROJECT_TAG_IN_USE`；历史绑定不随轮换解除）。
 
 前置条件：`projectId` 所属项目必须已设置路由标签（`project_tag`，Key 明文后缀嵌入该标签用于路由）；未设置时返回 `409 ROUTING_TAG_MISSING`——普通用户请联系管理员在项目设置中补充后重试（管理员建项目时请勿留空）。
 
@@ -214,7 +216,7 @@
 
 ### 4.4 用量汇总 `GET /api/v1/me/usage/summary`
 
-参数：`groupBy`（`project | virtual_key | cache_level | day | user | model | month`，默认 `project`；**I15**：`user`=调用方（label=用户名）、`model`=模型、`month`=自然月 `YYYY-MM`）、`from`、`to`（ISO-8601，默认最近 93 天窗口；`from` 必须在 `to` 之前，窗口超过 93 天拒绝）。
+参数：`groupBy`（`project | virtual_key | cache_level | day | user | team | model | month`，默认 `project`；**I15**：`user`=调用方（label=用户名）、`model`=模型、`month`=自然月 `YYYY-MM`；**2026-09-15**：`team`=团队成员归属（label=团队名，经成员的 Virtual Key 归集；同一用户属多团队时在各团队分别计入——归属视图非分割口径））、`from`、`to`（ISO-8601，默认最近 93 天窗口；`from` 必须在 `to` 之前，窗口超过 93 天拒绝）。
 
 ```json
 {
@@ -263,7 +265,8 @@
       "gatewayRequestId": "req-abc123",
       "isComplete": true,
       "usageMissing": false,
-      "virtualKeyId": "0190..."
+      "virtualKeyId": "0190...",
+      "clientIp": "203.0.113.7"
     }
   ],
   "page": 1,
@@ -274,6 +277,7 @@
 
 - `cacheLevel` ∈ `UPSTREAM | COALESCED | L1_HIT | L2_HIT`。缓存命中行没有 token 数（NULL → 0）且 `isComplete=false` 时不作为上游用量计入。
 - `usageMissing=true` 表示上游未返回 usage（如异常中断）；该行仍入账但用量为 0，便于排查。
+- `clientIp`（#605）：调用方网络地址——传输层对端；仅当对端命中 `MIQROKEY_TRUSTED_PROXY_CIDRS` 可信代理时才消费 `X-Forwarded-For`（**从右往左**取第一个非可信地址，杜绝最左伪造），非 IP 字面量（主机名/带端口）一律不记录、不解析；无法确定时为 `null`。历史行与直连未配置代理时的对端地址照记。
 - `providerRequestId` 在 tenant 内唯一（幂等写，重复 flush 不双计）。
 
 ### 4.6 模型申请（审批流）`POST/GET /api/v1/me/model-approvals`
@@ -375,7 +379,7 @@
 |---|---|
 | `GET /api/v1/admin/users` | 用户列表（**永不返回 passwordHash**，Jackson mixin 全局排除） |
 | `POST /api/v1/admin/users` | 创建用户（`username`/`displayName`/`role`）；返回一次性临时密码（仅本次出现） |
-| `PATCH /api/v1/admin/users/{id}` | 更新状态（`status`：ACTIVE/DISABLED；禁用即撤销全部会话；SYSTEM_ADMIN 不可禁用 → 409 `ADMIN_NOT_DISABLEABLE`） |
+| `PATCH /api/v1/admin/users/{id}` | 更新显示名与/或状态（`displayName` 非空白 ≤200；`status`：ACTIVE/DISABLED/LOCKED；至少一项，空请求 → 400 `USER_UPDATE_EMPTY`，显示名非法 → 400 `DISPLAY_NAME_INVALID`；禁用/锁定即撤销全部会话；SYSTEM_ADMIN 不可禁用 → 409 `ADMIN_NOT_DISABLEABLE`；#614） |
 | `POST /api/v1/admin/users/{id}/reset-password` | 重置密码 + 撤销全部会话；返回新临时密码（仅本次） |
 | `POST /api/v1/admin/users/{id}/revoke-sessions` | 撤销该用户全部会话 |
 | `GET /api/v1/admin/users/{id}/project-memberships` | 用户所属项目列表（`[{projectId, projectCode, projectName, projectStatus, joinedAt}]`，按 code 排序）——管理员「加入项目」快捷入口数据面（F-REG 闭环）；用户不存在 `404 USER_NOT_FOUND` |
@@ -383,10 +387,12 @@
 | `GET/POST /api/v1/admin/teams/{id}/members`、`DELETE /members/{userId}` | 团队成员管理 |
 | `GET/POST /api/v1/admin/projects`、`PATCH /{id}` | 项目列表/创建（`code` 唯一，冲突 → 409 `PROJECT_CODE_TAKEN`）/更新 |
 | `GET/POST /api/v1/admin/projects/{id}/members`、`DELETE /members/{userId}` | 项目成员管理 |
+| `GET/PUT/DELETE /api/v1/admin/unattributed-policy` | **未归属策略（V57，#647，Spec §7.3）**：`PUT {credentialId, providerProductId?, models?}`（产品缺省从凭证订阅推导；凭证须 ACTIVE，不匹配 → `400 UNAUTH_CREDENTIAL_PRODUCT_MISMATCH`；模型按 #498 目录语义校验 → `400 MODEL_NOT_IN_CATALOG`；凭证不存在/停用 → `404 CREDENTIAL_NOT_FOUND`）。首次配置懒建「未归属」系统项目（`projects.system=true`，不可被建 Key 选择 → `400 PROJECT_NOT_SELECTABLE`）。凭证被项目授权引用时响应带 `warning`（建议专用凭证，不阻断）。`DELETE` 仅删策略（桶项目保留供历史用量引用）。GET 未配置返回 `{configured:false}`。审计 `UNATTRIBUTED_POLICY_SET/CLEARED`，变更即刷快照。 |
+| `GET/POST /api/v1/admin/projects/{id}/repositories`、`DELETE /{mappingId}` | **CAA Project Registry（V56，#639）**：仓库→项目映射。`repoKey` 接受 `github.com/acme/rocket` / `https://github.com/acme/rocket(.git)` / `git@github.com:acme/rocket.git` / 裸 `acme/rocket`（默认 github.com），统一规范化为小写 `host/owner/repo`；租户内唯一，重复 → `409 REPO_KEY_TAKEN`；格式非法 → `400 REPO_KEY_INVALID`；项目不存在 → `404 PROJECT_NOT_FOUND`；删除不存在 → `404 REPOSITORY_NOT_FOUND`。写操作审计 `REPOSITORY_ADD`/`REPOSITORY_REMOVE`。Agent 经 §7 的 `/v1/context-registry` 消费 |
 | `GET/POST /api/v1/admin/grants` | Grant 列表/创建（`projectId`×`providerProductId`×`credentialId` + `models[]`；重复 → 409 `GRANT_EXISTS`；凭证订阅产品与声明产品不一致 → 400 `GRANT_CREDENTIAL_PRODUCT_MISMATCH`（数据库触发器同约束兜底）；`models[]` 必须存在于该产品 `model_catalog` → 否则 400 `MODEL_NOT_IN_CATALOG`） |
 | `GET/POST /api/v1/admin/grants/{id}/models`、`DELETE /{id}` | 模型范围查询/替换（替换同样校验目录，400 `MODEL_NOT_IN_CATALOG`）；禁用 Grant |
 
-错误码：`USER_NOT_FOUND`/`TEAM_NOT_FOUND`/`PROJECT_NOT_FOUND`/`GRANT_NOT_FOUND`（404）、`USERNAME_TAKEN`/`PROJECT_CODE_TAKEN`/`GRANT_EXISTS`（409）、`USERNAME_INVALID`（400）、`ADMIN_NOT_DISABLEABLE`（409）。所有写操作写审计事件（`USER_CREATE`/`USER_STATUS`/`USER_PASSWORD_RESET`/`USER_SESSIONS_REVOKED`/`TEAM_*`/`PROJECT_*`/`GRANT_*`）。
+错误码：`USER_NOT_FOUND`/`TEAM_NOT_FOUND`/`PROJECT_NOT_FOUND`/`GRANT_NOT_FOUND`（404）、`USERNAME_TAKEN`/`PROJECT_CODE_TAKEN`/`GRANT_EXISTS`（409）、`USERNAME_INVALID`/`USER_UPDATE_EMPTY`/`DISPLAY_NAME_INVALID`（400）、`ADMIN_NOT_DISABLEABLE`（409）。所有写操作写审计事件（`USER_CREATE`/`USER_UPDATE`/`USER_PASSWORD_RESET`/`USER_SESSIONS_REVOKED`/`TEAM_*`/`PROJECT_*`/`GRANT_*`）。
 
 服务与集成族写操作（#315，对齐腾讯操作记录资源类型）：`CONSUMER_CREATE/DISABLE/JWT_KEY_SET/JWT_KEY_REMOVED`、
 `AGENT_CREATE/DISABLE`、`SERVICE_CREATE/DISABLE`、`MCP_SERVICE_CREATE/STATUS/HEALTH_UPDATE`、
@@ -526,10 +532,13 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 |---|---|
 | `GET /api/v1/admin/usage/summary` | 全租户聚合汇总 + 成本 |
 | `GET /api/v1/admin/usage/records` | 全租户分页明细，时间倒序 |
+| `GET /api/v1/admin/usage/hourly` | 逐小时 Token 表（#634）：小时 × 项目 ×（用户/团队） |
 
-`summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day` | `user` | `model` | `month`，默认 `project`；I15 新增后三者）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。
+`summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day` | `user` | `team` | `model` | `month`，默认 `project`；I15 新增后三者；2026-09-15 增 `team`，同用户多团队按团队分别计入）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。
 
-`records` 参数：`from`、`to`、`page`（默认 1）、`size`（默认 50，1–200）及与 `summary` 相同的可选过滤。
+`records` 参数：`from`、`to`、`page`（默认 1）、`size`（默认 50，1–200）及与 `summary` 相同的可选过滤，另支持 `clientIp`（#605，精确匹配调用方地址，用于盗用排查「这个来源都调了什么」）。
+
+`hourly` 参数（#634）：`date`（`YYYY-MM-DD`，默认 `tzOffsetMinutes` 时区下的今天）、`days`（1–7，默认 1，自 `date` 向前连排）、`dimension`（`NONE` | `USER` | `TEAM`，默认 `NONE`；每行 = 小时 × 项目，`USER`/`TEAM` 再乘以所选维度——多团队用户按团队分别计入，口径与 `summary` 的 `team` 维度一致）、`tzOffsetMinutes`（默认 0=UTC；前端传本地偏移，上海=480）、可选过滤 `userId`、`projectId`。返回 `{ date, days, dimension, tzOffsetMinutes, rows: [{ hourStart, projectId, projectLabel, dimensionId, dimensionLabel, requests, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, totalTokens }] }`：`hourStart` 是小时桶边界的 UTC 瞬时（UTC+8 下 14:00 桶 = `06:00Z`，由客户端按本地时区格式化），仅返回有用量的桶，`totalTokens` = 四类 Token 之和（与汇总口径一致）。错误码 `DAYS_INVALID` / `DIMENSION_INVALID` / `DATE_INVALID` / `TZ_OFFSET_INVALID`（400），访问控制与租户隔离同 `summary`/`records`。
 
 过滤语义：
 
@@ -1096,10 +1105,20 @@ canonical 账单导入与四态对账报告（契约稿 docs/bill-reconciliation
 ### 7.1 Virtual Key 鉴权与路由
 
 - 客户端必须且只能提供**一个**凭证 Header：`Authorization: Bearer <key>`（或裸值）、`x-api-key`、`api-key`。零个或多个凭证 Header → `401`（错误体不区分具体原因，防枚举）。
-- **凭据值错误的统一语义**：未知 / 畸形 / 路由标签不匹配的 Virtual Key → `404 virtual_key_invalid`——三种场景响应逐字一致、与"未知 Key"不可区分（错误标签视为未知，防枚举；见 `VirtualKeyAuthContractTest`）。注意与 MCP 数据面（消费者 Key/JWT）同场景的 `401 invalid_api_key` 口径不同：`/v1` 用 404、MCP 用 401，均为各通道既定设计。
-- Key 格式 `mqk_live_<publicKeyId>_<secret>[.<projectTag>]`：点号后缀是**路由标签**（明文，仅用于把请求路由到 Key 绑定的项目），鉴权权威是数据库中的 `key_project_binding`，标签本身不决定授权。HMAC 摘要不包含标签。
+- **凭据值错误的统一语义**：未知 / 畸形（含缺失后缀、后缀含点）的 Virtual Key → `404 virtual_key_invalid`——各场景响应逐字一致、与"未知 Key"不可区分（防枚举；见 `VirtualKeyAuthContractTest`）。注意与 MCP 数据面（消费者 Key/JWT）同场景的 `401 invalid_api_key` 口径不同：`/v1` 用 404、MCP 用 401，均为各通道既定设计。
+- Key 格式 `mqk_live_<publicKeyId>_<secret>.<projectTag>`（后缀在解析级必填）：点号后缀是**路由选择器**（明文，用于在 Key 的多个项目绑定间选择），鉴权权威是数据库中的 `key_project_binding`，标签本身不承载权限。HMAC 摘要不包含标签。
+- `GET /v1/context-registry`（CAA，#639）：本地 Agent 的 repo → 项目映射来源。虚拟 Key 认证（**identity-only**，#641：只做凭证抽取/解析/HMAC，不走归属阶梯——多绑定 Key 带任意（含不匹配）后缀都可读取；统一 404/401 失败语义）；**只返回该 Key ACTIVE 绑定项目**下的 `project_repositories` 行——`{ entries: [{ repoKey, projectId, projectTag }] }`；无持久化时返回空表。注册表读取发生在 Agent 同步（非热路径），直接查库、不占快照。
+- **请求上下文解析阶梯（CAA，#633）**：身份（Key/HMAC）与归属（本请求计入哪个项目）分离，归属按固定阶梯裁决，首个命中生效：
+  1. `X-Miqro-Project-Id` 声明（**不可信输入**，仅当目标项目确为该 Key 的绑定时生效）→ `RESOLVED_HEADER`；
+  2. 点号后缀标签命中该 Key 的某个绑定 → `RESOLVED_SUFFIX`；
+  3. Key 恰有一个绑定 → `SOLE_BINDING`（任意合法标签视为装饰）；
+  4. 其余（多绑定且上下文无法解析）→ 租户配置了未归属策略（§5 admin）时以策略的凭证/产品/模型范围路由，usage 记「未归属」桶项目（`resolution_status=POLICY_ROUTED`，claimed_* 照常留档）；未配置策略 → `400 CONTEXT_REQUIRED`——不猜测、不静默回落到默认项目。
+  - 声明项目不是该 Key 的绑定 → `403 CONTEXT_NOT_ALLOWED`（仅当存在有效声明时）；声明不是合法 UUID → `400 CONTEXT_INVALID`。
+  - 审计头（降级为纯审计、绝不参与授权；畸形即丢弃；永不转发上游）：`X-Miqro-Claim-Source`（`prompt_url`/`tool_path`/`bash_cwd`/`system_cwd`/`git_remote`/`suffix`/`none`）、`X-Miqro-Claim-Confidence`（`HIGH`/`MEDIUM`/`LOW`/`NONE`）、`X-Miqro-Claim-Status`（`RESOLVED`/`AMBIGUOUS`/`UNATTRIBUTED`）、`X-Claude-Code-Session-Id`（≤64 字符）。Agent 声明（`claimed_*`）与服务端裁决（`project_id` + `resolution_status`）分开落库，声明永不构成授权。
+  - 归属随用量落库：`usage_event` 的 `session_id`/`activity_id`/`claimed_project_id`/`resolution_status`/`claim_source`/`claim_confidence`；逐请求证据审计于 `request_context_evidence`（V55）。
+  - 规格：`docs/context-attribution-implementation-spec.md` v1.1 §4。
 - Gateway 使用版本化只读路由快照（定时刷新，默认 30s）做校验与路由；热路径不查询数据库。吊销/轮换按快照刷新传播，宽限期由控制面配置。
-- 校验通过后 Gateway 注入该 Key 固定绑定的上游凭证（AES-256-GCM 解密，内存中用完即清零），并把请求转发到该授权对应项目的目标；请求头和体按透明代理规则原样转发。
+- 校验通过后 Gateway 注入本次解析出的绑定（binding）对应的上游凭证（AES-256-GCM 解密，内存中用完即清零），并把请求转发到该授权对应项目的目标；请求头和体按透明代理规则原样转发。
 - 模型预校验：请求体中的模型不在 Key 授权集合内时，不连接上游，直接返回错误（Anthropic/OpenAI 协议兼容的错误体）。代理热路径的预校验只按 **Key 快照**（`virtual_key_models`）判断，与 `GET /v1/models` 的四路交集是两回事——模型目录为空时代理不会拒绝所有流量。
 - `/v1/models` 返回该 Virtual Key 的目录、上游模型、Grant 与 Key 快照的交集；未授权模型不泄漏。四路输入均来自同一版本的路由快照：
   - **目录**：已签名 provider catalog（classpath，Ed25519 校验）。Key 绑定产品的 `product_code` 不在目录中 → 返回空列表（目录是外层授权边界）。
@@ -1112,7 +1131,7 @@ canonical 账单导入与四态对账报告（契约稿 docs/bill-reconciliation
 - 上游目标门控（G2.6 SSRF）：仅转发路由快照提供的 Base URL；`https` 是硬要求（除非目标命中 `MIQROKEY_UPSTREAM_ALLOWED_CIDRS`），URL 携带 `userinfo` 一律拒绝，DNS 解析后的每个地址必须是公网地址（环回、链路本地、RFC1918、CGNAT `100.64/10`、组播、any-local、IPv6 ULA `fc00::/7` 均拒绝，除非命中 allowlist）。被拒绝时返回 `502 route_unavailable`，错误体、日志与审计**不包含目标 URL 或主机名**（`UpstreamTargetValidator` 的拒绝原因只有稳定类别 token）。
 - 路径白名单：数据面只暴露 `POST /v1/messages`、`POST /v1/responses`、`POST /v1/chat/completions`。正确方法之外的请求 → `405 method_not_allowed`；其他 `/v1/**` 路径 → `404 unsupported_path`；两者都不连接上游。嵌入式 `..` 段按字面处理（`/v1/**` 之外不匹配）；`//` 由服务器归一化为规范路径后按正常请求处理，不构成走私。
 - 输入上限：入站 Header 超过 `MIQROKEY_MAX_INBOUND_HEADER_BYTES`（默认 `32KB`）由 Netty 在路由前拒绝 → `431`；请求体超过 `MIQROKEY_MAX_PROXY_BUFFER_BYTES`（默认 `256KB`）→ `413 payload_too_large`。超限请求不连接上游。
-- Header 走私：凭证 Header（`Authorization`/`x-api-key`/`api-key`）出现多个 → `401`，任何凭证都不会转发；`Connection` 提名的 hop-by-hop Header 与 `X-MiQroKey-*` 内部 Header 在转发前剥离；上游只携带 Gateway 注入的真实凭证，客户端 Virtual Key 永不泄漏到上游。
+- Header 走私：凭证 Header（`Authorization`/`x-api-key`/`api-key`）出现多个 → `401`，任何凭证都不会转发；`Connection` 提名的 hop-by-hop Header 与 `X-MiQroKey-*`、`x-miqro-*` 内部 Header 在转发前剥离（上下文声明因此永不到达上游）；上游只携带 Gateway 注入的真实凭证，客户端 Virtual Key 永不泄漏到上游。
 
 Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 ID 都进入用量记录；不得覆盖供应商 request ID Header。
 

@@ -29,7 +29,13 @@ import {
   toast,
 } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type { CredentialDetailView, CredentialVersionView, CredentialView, SubscriptionView, ValidateCredentialResponse } from '@/types/generated-api';
+import type {
+  CredentialDetailView,
+  CredentialVersionView,
+  CredentialView,
+  SubscriptionView,
+  ValidateCredentialResponse,
+} from '@/types/generated-api';
 
 const credentials = ref<CredentialView[]>([]);
 const subscriptions = ref<SubscriptionView[]>([]);
@@ -83,7 +89,7 @@ const columns = [
   { key: 'status', title: '状态', width: '110px' },
   { key: 'lastValidated', title: '最近验证', minWidth: '170px' },
   { key: 'version', title: '版本', width: '80px', align: 'right' as const },
-  { key: 'actions', title: '操作', width: '70px', align: 'center' as const },
+  { key: 'actions', title: '操作', width: '96px', align: 'center' as const },
 ];
 
 const versionColumns = [
@@ -535,20 +541,19 @@ onMounted(load);
         <template #actions="{ row }">
           <DropdownMenuRoot>
             <DropdownMenuTrigger
-              class="next-credentials__kebab"
+              class="next-credentials__kebab ui-link-action"
               aria-label="操作"
               :data-testid="`credential-actions-${(row as CredentialView).id}`"
             >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <circle cx="3" cy="8" r="1.4" />
-                <circle cx="8" cy="8" r="1.4" />
-                <circle cx="13" cy="8" r="1.4" />
+              更多
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="m4 6 4 4 4-4"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
             </DropdownMenuTrigger>
             <DropdownMenuPortal>
@@ -909,26 +914,15 @@ onMounted(load);
 }
 
 .next-credentials__kebab {
+  /* Layout only — ink and hover come from the shared .ui-link-action row
+     action link style (#651). */
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
   border: none;
-  border-radius: var(--ui-radius-control);
   background: transparent;
-  color: var(--ui-foreground-faint);
+  font: inherit;
   cursor: pointer;
-}
-
-.next-credentials__kebab:hover {
-  background: var(--ui-fill-hover);
-  color: var(--ui-foreground);
-}
-
-.next-credentials__kebab:focus-visible {
-  outline: none;
-  box-shadow: var(--ui-shadow-focus);
 }
 
 /* .ui-menu panel chrome lives in styles/design-base.css (the radix popper

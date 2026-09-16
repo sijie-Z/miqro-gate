@@ -7,6 +7,7 @@ import type { QuotaRuleView, UsageCost, UsageRecordPage, UsageSummary } from '@/
 
 vi.mock('@/api', () => ({
   listMyQuotaRules: vi.fn(),
+  listVirtualKeys: vi.fn(),
   usageSummary: vi.fn(),
   usageRecords: vi.fn(),
 }));
@@ -61,6 +62,7 @@ const records: UsageRecordPage = {
       cacheLevel: 'UPSTREAM',
       inputTokens: 10,
       outputTokens: 20,
+      cacheReadInputTokens: 5000,
       totalTokens: 30,
       latencyMs: 512,
       upstreamStatusCode: 200,
@@ -69,6 +71,7 @@ const records: UsageRecordPage = {
       isComplete: true,
       usageMissing: false,
       virtualKeyId: 'k1',
+      clientIp: '203.0.113.7',
     },
   ],
   page: 1,
@@ -81,6 +84,7 @@ describe('NextUsageView', () => {
     setActivePinia(createPinia());
     vi.resetAllMocks();
     mockApi.listMyQuotaRules.mockResolvedValue([]);
+    mockApi.listVirtualKeys.mockResolvedValue([{ id: 'k1', name: '开发钥匙' } as never]);
     mockApi.usageSummary.mockResolvedValue(summary);
     mockApi.usageRecords.mockResolvedValue(records);
   });
@@ -183,6 +187,10 @@ describe('NextUsageView', () => {
 
     expect(wrapper.find('[data-testid="records-table"]').exists()).toBe(true);
     expect(wrapper.text()).toContain('deepseek-v4-flash');
+    // #643: key name and cache-read tokens are visible at a glance
+    expect(wrapper.text()).toContain('开发钥匙');
+    expect(wrapper.text()).toContain('5,000');
+    expect(wrapper.text()).toContain('203.0.113.7');
     expect(wrapper.text()).toContain('512ms');
     expect(wrapper.text()).toContain('共 1 条 · 第 1 / 1 页');
     const next = wrapper.find('[data-testid="records-next"]');
@@ -197,5 +205,69 @@ describe('NextUsageView', () => {
 
     expect(wrapper.text()).toContain('没有用量记录');
     expect(wrapper.find('[data-testid="records-next"]').exists()).toBe(false);
+  });
+
+  it('jumps to a specific page and clamps out-of-range input (#643)', async () => {
+    mockApi.usageRecords.mockResolvedValue({ ...records, total: 45 }); // 3 pages of 20
+    const wrapper = mountView();
+    await flushPromises();
+
+    const input = wrapper.find('[data-testid="records-page-input"]');
+    await input.setValue('2');
+    await wrapper.find('[data-testid="records-page-go"]').trigger('click');
+    await flushPromises();
+    expect(mockApi.usageRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2, size: 20 }),
+    );
+
+    await input.setValue('99');
+    await input.trigger('keydown.enter');
+    await flushPromises();
+    expect(mockApi.usageRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 3, size: 20 }),
+    );
+  });
+
+  it('applies a custom time window to summary and records (#643)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="usage-range-custom"]').trigger('click');
+    await wrapper.find('[data-testid="usage-custom-from"]').setValue('2026-09-01T08:00');
+    await wrapper.find('[data-testid="usage-custom-to"]').setValue('2026-09-10T08:00');
+    await wrapper.find('[data-testid="usage-custom-apply"]').trigger('click');
+    await flushPromises();
+
+    const expectedFrom = new Date('2026-09-01T08:00').toISOString();
+    const expectedTo = new Date('2026-09-10T08:00').toISOString();
+    expect(mockApi.usageRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({ from: expectedFrom, to: expectedTo, page: 1 }),
+    );
+    expect(mockApi.usageSummary).toHaveBeenLastCalledWith('project', expectedFrom, expectedTo);
+  });
+
+  it('keeps the previous rows while a page change is in flight (#643)', async () => {
+    let release: (page: UsageRecordPage) => void = () => {};
+    // total > pageSize keeps the next button enabled for the pending click
+    mockApi.usageRecords.mockResolvedValue({ ...records, total: 45 });
+    const wrapper = mountView();
+    await flushPromises();
+
+    mockApi.usageRecords.mockImplementationOnce(
+      () =>
+        new Promise<UsageRecordPage>((resolve) => {
+          release = resolve;
+        }),
+    );
+    await wrapper.find('[data-testid="records-next"]').trigger('click');
+    await flushPromises();
+
+    // The old rows stay rendered (no skeleton swap) and the pager shows busy.
+    expect(wrapper.text()).toContain('deepseek-v4-flash');
+    expect(wrapper.find('[data-testid="records-busy"]').exists()).toBe(true);
+
+    release({ ...records, page: 2, total: 45 });
+    await flushPromises();
+    expect(wrapper.find('[data-testid="records-busy"]').exists()).toBe(false);
   });
 });

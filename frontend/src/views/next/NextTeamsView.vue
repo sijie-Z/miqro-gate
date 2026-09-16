@@ -291,7 +291,7 @@ onMounted(load);
         </template>
         <template #actions="{ row }">
           <UiButton
-            variant="ghost"
+            variant="link"
             size="sm"
             data-testid="team-members-open"
             @click="openMembers(row as Team)"
@@ -352,7 +352,7 @@ onMounted(load);
         <template #joinedAt="{ row }">{{ formatDate((row as MemberView).createdAt) }}</template>
         <template #actions="{ row }">
           <UiButton
-            variant="ghost"
+            variant="link-danger"
             size="sm"
             data-testid="team-member-remove"
             @click="requestRemove(row as MemberView)"

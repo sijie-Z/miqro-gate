@@ -24,6 +24,8 @@ const DEFAULTS = {
   collapsed: false,
   contentCompact: 'fixed',
   animations: true,
+  lockMinutes: 0,
+  sidebarWidth: 210,
 };
 
 describe('preferences defaults', () => {
@@ -163,6 +165,17 @@ describe('initPreferences', () => {
     localStorage.setItem(STORAGE_KEY, '{not-json');
     initPreferences();
     expect({ ...preferences }).toEqual(DEFAULTS);
+  });
+
+  it('clamps the numeric preferences (lock minutes / sidebar width)', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ lockMinutes: 999, sidebarWidth: 42 }),
+    );
+    initPreferences();
+    expect(preferences.lockMinutes).toBe(240);
+    expect(preferences.sidebarWidth).toBe(180);
+    expect(document.documentElement.style.getPropertyValue('--ui-sidebar-width')).toBe('180px');
   });
 
   it('drops stored values with the wrong shape', () => {

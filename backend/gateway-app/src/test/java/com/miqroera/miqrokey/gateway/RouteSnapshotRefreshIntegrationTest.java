@@ -101,7 +101,7 @@ class RouteSnapshotRefreshIntegrationTest {
         assertThat(snapshot.keys()).containsKey("mqk_test_public_key_id");
         RouteSnapshot.KeyRecord key = snapshot.keys().get("mqk_test_public_key_id");
         assertThat(key.userId()).isEqualTo(USER_ID);
-        RouteSnapshot.BindingRecord binding = snapshot.bindings().get(KEY_ID);
+        RouteSnapshot.BindingRecord binding = snapshot.binding(KEY_ID, "notify-proj");
         assertThat(binding).isNotNull();
         assertThat(binding.projectTag()).isEqualTo("notify-proj");
         // The /v1/models authorization layers arrive with the snapshot too:
@@ -169,8 +169,8 @@ class RouteSnapshotRefreshIntegrationTest {
                         :userId, :projectId, :grantId, :credentialId, 'CLAUDE_CODE', 'notify-key', 'ACTIVE', 0)
                 """, p.addValue("digest", new byte[32]));
         jdbc.update("""
-                INSERT INTO key_project_binding (id, tenant_id, virtual_key_id, project_id, status, version)
-                VALUES (:bindingId, :tenantId, :keyId, :projectId, 'ACTIVE', 0)
+                INSERT INTO key_project_binding (id, tenant_id, virtual_key_id, project_id, grant_id, status, version)
+                VALUES (:bindingId, :tenantId, :keyId, :projectId, :grantId, 'ACTIVE', 0)
                 """, p.addValue("bindingId", UUID.randomUUID()));
         // /v1/models authorization layers: one grant model and one ACTIVE
         // upstream model, so the reloaded snapshot carries them.

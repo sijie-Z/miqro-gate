@@ -103,7 +103,10 @@ class AuthorizationIntegrationTest {
         jdbc.update("UPDATE users SET role = 'USER' WHERE id = :id", new MapSqlParameterSource("id", ps.userId));
 
         mockMvc.perform(get("/api/v1/admin/test").cookie(ps.session)).andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("FORBIDDEN")).andExpect(jsonPath("$.status").value(403));
+                .andExpect(jsonPath("$.code").value("FORBIDDEN")).andExpect(jsonPath("$.status").value(403))
+                // #630: the raw writer must declare UTF-8 — the Chinese title
+                // used to be lossily rewritten to '?' on the wire.
+                .andExpect(jsonPath("$.title").value("该操作需要系统管理员（SYSTEM_ADMIN）权限。"));
     }
 
     @Test

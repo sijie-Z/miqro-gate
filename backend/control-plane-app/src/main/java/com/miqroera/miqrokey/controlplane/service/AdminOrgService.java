@@ -30,7 +30,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Admin organization operations (G5.2, api-contract §5): users (create /
@@ -56,13 +60,14 @@ public class AdminOrgService {
     private final AuditService auditService;
     private final AdminQuotaDefaultTemplateService quotaDefaultTemplateService;
     private final NamedParameterJdbcTemplate jdbc;
+    private final RouteRefreshPublisher routeRefreshPublisher;
 
     public AdminOrgService(UserRepository userRepository, TeamRepository teamRepository,
             ProjectRepository projectRepository, ProjectMembershipRepository projectMembershipRepository,
             ProjectProviderGrantRepository grantRepository, UpstreamCredentialRepository credentialRepository,
             ProviderProductRepository productRepository, PasswordHasher passwordHasher, SessionService sessionService,
             AuditService auditService, AdminQuotaDefaultTemplateService quotaDefaultTemplateService,
-            NamedParameterJdbcTemplate jdbc) {
+            NamedParameterJdbcTemplate jdbc, RouteRefreshPublisher routeRefreshPublisher) {
         this.userRepository = userRepository;
         this.teamRepository = teamRepository;
         this.projectRepository = projectRepository;
@@ -75,6 +80,7 @@ public class AdminOrgService {
         this.auditService = auditService;
         this.quotaDefaultTemplateService = quotaDefaultTemplateService;
         this.jdbc = jdbc;
+        this.routeRefreshPublisher = routeRefreshPublisher;
     }
 
     // ------------------------------------------------------------------
@@ -107,24 +113,41 @@ public class AdminOrgService {
         return new UserCreated(AdminUserView.from(user), temporaryPassword);
     }
 
-    public AdminUserView updateUserStatus(UUID tenantId, UUID adminId, UUID userId, UserStatus status) {
+    /**
+     * Updates display name and/or status (#614). An empty update (both null) is a
+     * 400 — before #614 a request carrying only an unknown field such as
+     * displayName reached this method with a null status and surfaced as a 500 (NOT
+     * NULL violation on users.status).
+     */
+    public AdminUserView updateUser(UUID tenantId, UUID adminId, UUID userId, String displayName, UserStatus status) {
+        if (displayName == null && status == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "USER_UPDATE_EMPTY", "请至少提供 displayName 或 status 中的一项。");
+        }
         User user = requireUser(tenantId, userId);
-        if (user.role() == UserRole.SYSTEM_ADMIN && status == UserStatus.DISABLED) {
+        String newDisplayName = user.displayName();
+        if (displayName != null) {
+            if (displayName.isBlank() || displayName.length() > 200) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "DISPLAY_NAME_INVALID", "显示名不能为空白，且长度不超过 200 个字符。");
+            }
+            newDisplayName = displayName;
+        }
+        UserStatus newStatus = status != null ? status : user.status();
+        if (user.role() == UserRole.SYSTEM_ADMIN && newStatus == UserStatus.DISABLED) {
             throw new ApiException(HttpStatus.CONFLICT, "ADMIN_NOT_DISABLEABLE", "system admins cannot be disabled");
         }
         // #445: unlocking clears any stale lock deadline; a manual LOCKED keeps
         // it (null = indefinite — enforced at the session/login gates) and cuts
         // every existing session exactly like DISABLED does.
-        Instant lockedUntil = status == UserStatus.ACTIVE ? null : user.lockedUntil();
-        User updated = new User(user.id(), user.tenantId(), user.username(), user.displayName(), user.passwordHash(),
-                user.role(), status, user.mustChangePassword(), user.failedLoginCount(), lockedUntil,
+        Instant lockedUntil = newStatus == UserStatus.ACTIVE ? null : user.lockedUntil();
+        User updated = new User(user.id(), user.tenantId(), user.username(), newDisplayName, user.passwordHash(),
+                user.role(), newStatus, user.mustChangePassword(), user.failedLoginCount(), lockedUntil,
                 user.lastLoginAt(), user.version() + 1, user.createdAt(), Instant.now());
         userRepository.update(updated);
         if (status == UserStatus.DISABLED || status == UserStatus.LOCKED) {
             sessionService.revokeOtherSessions(userId, null);
         }
-        auditService.record(tenantId, adminId, "USER_STATUS", "USER", userId, "{\"status\":\"" + status.name() + "\"}",
-                null);
+        auditService.record(tenantId, adminId, "USER_UPDATE", "USER", userId, AuditSummaries.summary("displayName",
+                AuditSummaries.sanitize(newDisplayName), "status", newStatus.name()), null);
         return AdminUserView.from(updated);
     }
 
@@ -234,18 +257,34 @@ public class AdminOrgService {
             throw new ApiException(HttpStatus.CONFLICT, "PROJECT_CODE_TAKEN",
                     "project code is required and must be unique");
         }
-        Project project = new Project(UUID.randomUUID(), tenantId, code, name, name, null, ProjectStatus.ACTIVE,
-                projectTag, 0, Instant.now(), Instant.now());
+        // ADR-0018: an omitted tag is derived from the code — administrators no
+        // longer have to invent a slug; the value only needs tenant uniqueness.
+        String tag = (projectTag == null || projectTag.isBlank()) ? generateProjectTag(tenantId, code) : projectTag;
+        Project project = new Project(UUID.randomUUID(), tenantId, code, name, name, null, ProjectStatus.ACTIVE, tag, 0,
+                Instant.now(), Instant.now());
         projectRepository.insert(project);
         auditService.record(tenantId, adminId, "PROJECT_CREATE", "PROJECT", project.id(),
                 AuditSummaries.summary("code", AuditSummaries.sanitize(code)), null);
         return project;
     }
 
+    @Transactional
     public Project updateProject(UUID tenantId, UUID adminId, UUID projectId, String name, String projectTag,
             ProjectStatus status) {
         requireValidProjectTag(projectTag);
         Project project = requireProject(tenantId, projectId);
+        // ADR-0018: a tag referenced by key bindings is immutable — every issued
+        // key string froze the old label, so changing it would orphan them all.
+        if (projectTag != null && !projectTag.isBlank() && !projectTag.equals(project.projectTag())) {
+            Long bound = jdbc.queryForObject("""
+                    SELECT count(*) FROM key_project_binding
+                    WHERE tenant_id = :tenantId AND project_id = :projectId
+                    """, new MapSqlParameterSource("tenantId", tenantId).addValue("projectId", projectId), Long.class);
+            if (bound != null && bound > 0) {
+                throw new ApiException(HttpStatus.CONFLICT, "PROJECT_TAG_IN_USE",
+                        "该项目路由标签已被 " + bound + " 条密钥绑定引用；历史绑定不随密钥轮换解除，" + "因此标签不可修改。如确需更换标签，请评估密钥迁移方案，或保留当前标签。");
+            }
+        }
         Project updated = new Project(project.id(), project.tenantId(), project.code(),
                 name != null ? name : project.name(), project.description(), project.costCenter(),
                 status != null ? status : project.status(), projectTag != null ? projectTag : project.projectTag(),
@@ -296,8 +335,45 @@ public class AdminOrgService {
     public void removeProjectMember(UUID tenantId, UUID adminId, UUID projectId, UUID userId) {
         requireProject(tenantId, projectId);
         projectMembershipRepository.delete(projectId, userId);
+        // ADR-0018: the member's keys immediately lose THIS project's route
+        // (other bound projects keep working). A key left without any ACTIVE
+        // binding is revoked — the documented "member removed -> the project's
+        // keys stop working" contract, now actually implemented.
+        List<UUID> affectedKeyIds = jdbc.queryForList("""
+                SELECT DISTINCT b.virtual_key_id
+                FROM key_project_binding b
+                JOIN virtual_keys vk ON vk.id = b.virtual_key_id AND vk.tenant_id = b.tenant_id
+                WHERE b.tenant_id = :tenantId AND b.project_id = :projectId AND vk.user_id = :userId
+                  AND b.status = 'ACTIVE' AND vk.status IN ('ACTIVE', 'ROTATING')
+                """, new MapSqlParameterSource("tenantId", tenantId).addValue("projectId", projectId).addValue("userId",
+                userId), UUID.class);
+        int disabled = 0;
+        int revoked = 0;
+        for (UUID keyId : affectedKeyIds) {
+            disabled += jdbc.update("""
+                    UPDATE key_project_binding SET status = 'DISABLED', version = version + 1, updated_at = now()
+                    WHERE tenant_id = :tenantId AND virtual_key_id = :keyId AND project_id = :projectId
+                      AND status = 'ACTIVE'
+                    """, new MapSqlParameterSource("tenantId", tenantId).addValue("keyId", keyId).addValue("projectId",
+                    projectId));
+            Long remaining = jdbc.queryForObject("""
+                    SELECT count(*) FROM key_project_binding
+                    WHERE tenant_id = :tenantId AND virtual_key_id = :keyId AND status = 'ACTIVE'
+                    """, new MapSqlParameterSource("tenantId", tenantId).addValue("keyId", keyId), Long.class);
+            if (remaining != null && remaining == 0) {
+                revoked += jdbc.update("""
+                        UPDATE virtual_keys SET status = 'REVOKED', revoked_at = now(),
+                            version = version + 1
+                        WHERE tenant_id = :tenantId AND id = :keyId AND status IN ('ACTIVE', 'ROTATING')
+                        """, new MapSqlParameterSource("tenantId", tenantId).addValue("keyId", keyId));
+            }
+        }
+        if (!affectedKeyIds.isEmpty()) {
+            routeRefreshPublisher.publishChanged();
+        }
         auditService.record(tenantId, adminId, "PROJECT_MEMBER_REMOVE", "PROJECT", projectId,
-                "{\"userId\":\"" + userId + "\"}", null);
+                "{\"userId\":\"" + userId + "\",\"bindingsDisabled\":" + disabled + ",\"keysRevoked\":" + revoked + "}",
+                null);
     }
 
     // ------------------------------------------------------------------
@@ -337,8 +413,7 @@ public class AdminOrgService {
         }
         requireCatalogModels(providerProductId, models);
         if (grantRepository.existsByProjectIdAndProductIdAndCredentialId(projectId, providerProductId, credentialId)) {
-            throw new ApiException(HttpStatus.CONFLICT, "GRANT_EXISTS",
-                    "a grant for this project/product/credential already exists");
+            throw new ApiException(HttpStatus.CONFLICT, "GRANT_EXISTS", "该项目已存在相同凭证与产品组合的授权（含已停用），不可重复创建。");
         }
         ProjectProviderGrant grant = new ProjectProviderGrant(UUID.randomUUID(), tenantId, projectId, providerProductId,
                 credentialId, GrantStatus.ACTIVE, adminId, 0, Instant.now(), Instant.now());
@@ -346,6 +421,9 @@ public class AdminOrgService {
         replaceModels(tenantId, grant.id(), models);
         auditService.record(tenantId, adminId, "GRANT_CREATE", "GRANT", grant.id(),
                 "{\"projectId\":\"" + projectId + "\",\"productId\":\"" + providerProductId + "\"}", null);
+        // #619: grants participate in the gateway snapshot — without this the
+        // gateway only picked the change up via its 30s scheduled refresh.
+        routeRefreshPublisher.publishChanged();
         return grant;
     }
 
@@ -355,6 +433,9 @@ public class AdminOrgService {
         requireCatalogModels(grant.providerProductId(), models);
         replaceModels(tenantId, grantId, models);
         auditService.record(tenantId, adminId, "GRANT_MODELS", "GRANT", grantId, "{}", null);
+        // #619: shrinking the scope must revoke the models for existing keys
+        // promptly — the gateway enforces grant ∩ key models at request time.
+        routeRefreshPublisher.publishChanged();
         return grant;
     }
 
@@ -366,6 +447,8 @@ public class AdminOrgService {
                 grant.version() + 1, grant.createdAt(), Instant.now());
         grantRepository.update(updated);
         auditService.record(tenantId, adminId, "GRANT_DISABLE", "GRANT", grantId, "{}", null);
+        // #619: a disabled grant must drop out of the gateway snapshot promptly.
+        routeRefreshPublisher.publishChanged();
     }
 
     /** Models granted to a grant (for the edit view). */
@@ -445,6 +528,29 @@ public class AdminOrgService {
         }
     }
 
+    /**
+     * Derives a routing tag for a new project (ADR-0018): slugified code when free,
+     * else a {@code proj-<uuid12>} fallback; unique per tenant.
+     */
+    private String generateProjectTag(UUID tenantId, String code) {
+        Set<String> taken = projectRepository.findAllByTenantId(tenantId).stream().map(Project::projectTag)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        String slug = code.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_-]", "-").replaceAll("^-+|-+$", "");
+        if (slug.length() > 64) {
+            slug = slug.substring(0, 64);
+        }
+        if (!slug.isBlank() && !taken.contains(slug)) {
+            return slug;
+        }
+        for (int attempt = 0; attempt < 5; attempt++) {
+            String candidate = "proj-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+            if (!taken.contains(candidate)) {
+                return candidate;
+            }
+        }
+        return "proj-" + UUID.randomUUID().toString().replace("-", "");
+    }
+
     private User requireUser(UUID tenantId, UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "User not found"));
@@ -470,6 +576,89 @@ public class AdminOrgService {
             throw new ApiException(HttpStatus.NOT_FOUND, "PROJECT_NOT_FOUND", "Project not found");
         }
         return project;
+    }
+
+    // -------------------------------------------------------------------
+    // CAA Project Registry (V56, Spec v1.1 §7.4): repo → project mappings
+    // -------------------------------------------------------------------
+
+    /** Canonical repo key shape: host/owner/repo, lowercase. */
+    private static final java.util.regex.Pattern REPO_KEY_PATTERN = java.util.regex.Pattern
+            .compile("^[a-z0-9][a-z0-9.-]*\\.[a-z]{2,}/[a-z0-9_.-]+/[a-z0-9_.-]+$");
+
+    public record ProjectRepoMappingView(UUID id, UUID projectId, String repoKey, Instant createdAt) {
+    }
+
+    /**
+     * Normalize a submitted repository reference: accepts
+     * {@code github.com/owner/repo}, {@code https://github.com/owner/repo},
+     * {@code git@github.com:owner/repo.git} and bare {@code owner/repo} (host
+     * defaults to github.com); everything becomes lowercase
+     * {@code host/owner/repo}.
+     */
+    static String normalizeRepoKey(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "REPO_KEY_INVALID",
+                    "repoKey 不能为空（示例：github.com/acme/rocket）");
+        }
+        String key = raw.trim().toLowerCase(Locale.ROOT);
+        key = key.replaceFirst("^https?://", "");
+        key = key.replaceFirst("^git@([^:/]+):", "$1/");
+        key = key.replaceFirst("\\.git$", "");
+        key = key.replaceFirst("/+$", "");
+        if (!key.contains("/") || key.split("/").length == 2) {
+            key = "github.com/" + key;
+        }
+        if (!REPO_KEY_PATTERN.matcher(key).matches()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "REPO_KEY_INVALID",
+                    "repoKey 格式无效：应为 host/owner/repo（示例：github.com/acme/rocket）");
+        }
+        return key;
+    }
+
+    public List<ProjectRepoMappingView> projectRepositories(UUID tenantId, UUID projectId) {
+        requireProject(tenantId, projectId);
+        return jdbc.query("""
+                SELECT id, project_id, repo_key, created_at FROM project_repositories
+                WHERE tenant_id = :tenantId AND project_id = :projectId
+                ORDER BY repo_key
+                """, new MapSqlParameterSource("tenantId", tenantId).addValue("projectId", projectId),
+                (rs, rowNum) -> new ProjectRepoMappingView((UUID) rs.getObject("id"), (UUID) rs.getObject("project_id"),
+                        rs.getString("repo_key"), rs.getTimestamp("created_at").toInstant()));
+    }
+
+    public ProjectRepoMappingView addProjectRepository(UUID tenantId, UUID adminId, UUID projectId, String rawRepoKey) {
+        requireProject(tenantId, projectId);
+        String repoKey = normalizeRepoKey(rawRepoKey);
+        UUID id = UUID.randomUUID();
+        try {
+            jdbc.update("""
+                    INSERT INTO project_repositories (id, tenant_id, project_id, repo_key, created_by)
+                    VALUES (:id, :tenantId, :projectId, :repoKey, :createdBy)
+                    """, new MapSqlParameterSource("id", id).addValue("tenantId", tenantId)
+                    .addValue("projectId", projectId).addValue("repoKey", repoKey).addValue("createdBy", adminId));
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            throw new ApiException(HttpStatus.CONFLICT, "REPO_KEY_TAKEN", "该仓库已映射到本租户的某个项目（含其他项目）；请先解除原映射");
+        }
+        auditService.record(tenantId, adminId, "REPOSITORY_ADD", "PROJECT", projectId,
+                AuditSummaries.summary("repoKey", AuditSummaries.sanitize(repoKey)), null);
+        return new ProjectRepoMappingView(id, projectId, repoKey, Instant.now());
+    }
+
+    public void removeProjectRepository(UUID tenantId, UUID adminId, UUID projectId, UUID mappingId) {
+        requireProject(tenantId, projectId);
+        String repoKey = jdbc.query("""
+                SELECT repo_key FROM project_repositories
+                WHERE id = :id AND tenant_id = :tenantId AND project_id = :projectId
+                """, new MapSqlParameterSource("id", mappingId).addValue("tenantId", tenantId).addValue("projectId",
+                projectId), rs -> rs.next() ? rs.getString("repo_key") : null);
+        if (repoKey == null) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "REPOSITORY_NOT_FOUND", "映射不存在或不属于该项目");
+        }
+        jdbc.update("DELETE FROM project_repositories WHERE id = :id AND tenant_id = :tenantId",
+                new MapSqlParameterSource("id", mappingId).addValue("tenantId", tenantId));
+        auditService.record(tenantId, adminId, "REPOSITORY_REMOVE", "PROJECT", projectId,
+                AuditSummaries.summary("repoKey", AuditSummaries.sanitize(repoKey)), null);
     }
 
     private ProjectProviderGrant requireGrant(UUID tenantId, UUID grantId) {

@@ -29,6 +29,8 @@ import {
   EditIcon,
   ErrorCircleIcon,
   FilePasteIcon,
+  Fullscreen1Icon,
+  FullscreenExit1Icon,
   FolderOpenIcon,
   LayersIcon,
   LockOnIcon,
@@ -49,6 +51,8 @@ import {
 import { useAuthStore } from '@/stores/auth';
 import { language } from '@/i18n';
 import SettingsDrawer from '@/components/SettingsDrawer.vue';
+import LockScreen from '@/components/LockScreen.vue';
+import { UiTooltip } from '@/ui';
 import { initPreferences, preferences, setPreference } from '@/preferences';
 import type { Component } from 'vue';
 
@@ -115,7 +119,6 @@ const opsNav: NavItem[] = [
   { name: 'alert-rules', label: '告警规则', icon: ErrorCircleIcon },
   { name: 'audit', label: '审计日志', icon: FilePasteIcon },
   { name: 'mcp-access-logs', label: 'MCP 访问日志', icon: FilePasteIcon },
-  { name: 'retention-logs', label: '内容留痕', icon: FilePasteIcon },
 ];
 
 const isAdmin = computed(() => auth.user?.role === 'SYSTEM_ADMIN');
@@ -179,11 +182,9 @@ try {
   tabs.value = [];
 }
 
-watch(
-  tabs,
-  (value) => sessionStorage.setItem(TABS_KEY, JSON.stringify(value.slice(-24))),
-  { deep: true },
-);
+watch(tabs, (value) => sessionStorage.setItem(TABS_KEY, JSON.stringify(value.slice(-24))), {
+  deep: true,
+});
 
 watch(
   () => route.name as string | undefined,
@@ -222,12 +223,30 @@ onMounted(() => {
   window.addEventListener('click', onTabMenuWindowClick);
   window.addEventListener('keydown', onTabMenuKeydown);
   window.addEventListener('scroll', onTabMenuWindowClick, true);
+  // Auto-lock activity tracking: passive listeners, 15s idle check.
+  window.addEventListener('mousemove', noteActivity, { passive: true });
+  window.addEventListener('pointerdown', noteActivity, { passive: true });
+  window.addEventListener('keydown', noteActivity, { passive: true });
+  window.addEventListener('scroll', noteActivity, { passive: true });
+  idleTimer = window.setInterval(() => {
+    const minutes = preferences.lockMinutes;
+    if (minutes > 0 && !locked.value && Date.now() - lastActivity.value > minutes * 60_000) {
+      locked.value = true;
+    }
+  }, 15_000);
+  document.addEventListener('fullscreenchange', onFullscreenChange);
 });
 onUnmounted(() => {
   window.removeEventListener('resize', updateNarrow);
   window.removeEventListener('click', onTabMenuWindowClick);
   window.removeEventListener('keydown', onTabMenuKeydown);
   window.removeEventListener('scroll', onTabMenuWindowClick, true);
+  window.removeEventListener('mousemove', noteActivity);
+  window.removeEventListener('pointerdown', noteActivity);
+  window.removeEventListener('keydown', noteActivity);
+  window.removeEventListener('scroll', noteActivity);
+  window.clearInterval(idleTimer);
+  document.removeEventListener('fullscreenchange', onFullscreenChange);
 });
 
 // ---- tab context menu (right-click, Vben parity) ----
@@ -246,7 +265,9 @@ function closeTabMenu() {
   tabMenu.value.open = false;
 }
 
-function tabMenuAction(action: 'reload' | 'close' | 'closeLeft' | 'closeRight' | 'closeOthers' | 'closeAll') {
+function tabMenuAction(
+  action: 'reload' | 'close' | 'closeLeft' | 'closeRight' | 'closeOthers' | 'closeAll',
+) {
   const name = tabMenu.value.name;
   const index = tabs.value.findIndex((t) => t.name === name);
   closeTabMenu();
@@ -300,6 +321,37 @@ function onTabMenuKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') closeTabMenu();
 }
 
+// ---- auto lock screen (Vben 自动锁屏) ----
+const locked = ref(false);
+const lastActivity = ref(Date.now());
+let idleTimer: number | undefined;
+
+function noteActivity() {
+  lastActivity.value = Date.now();
+}
+
+function lockNow() {
+  locked.value = true;
+}
+
+// ---- fullscreen toggle (Vben 全屏内容) ----
+const isFullscreen = ref(false);
+function onFullscreenChange() {
+  isFullscreen.value = Boolean(document.fullscreenElement);
+}
+async function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await document.documentElement.requestFullscreen();
+    }
+  } catch {
+    // Browsers may deny fullscreen outside a user gesture; the button state
+    // stays driven by the fullscreenchange event either way.
+  }
+}
+
 // ---- rail menu search (Vben 菜单搜索) ----
 const navQuery = ref('');
 
@@ -338,6 +390,63 @@ onUnmounted(() => {
   window.clearTimeout(progressTimer);
 });
 
+// ---- instant route switching (#668) ----
+// Two halves: (1) the content scroller resets to the top on every page
+// change — without it the next page inherits the previous page's scroll
+// offset (long page → short page lands mid/bottom); (2) route chunks are
+// prefetched on menu hover/focus plus one idle pass, so a click resolves
+// from the module cache instead of waiting on a network roundtrip.
+const contentEl = ref<HTMLElement | null>(null);
+
+watch(
+  () => route.path,
+  () => {
+    if (contentEl.value) contentEl.value.scrollTop = 0;
+  },
+);
+
+const prefetchedRoutes = new Set<string>();
+
+function prefetchRoute(name: string): void {
+  if (!name || prefetchedRoutes.has(name)) return;
+  prefetchedRoutes.add(name);
+  try {
+    for (const record of router.resolve({ name }).matched) {
+      for (const loader of Object.values(record.components ?? {})) {
+        if (typeof loader === 'function') {
+          void Promise.resolve((loader as () => unknown)()).catch(() => {
+            /* Best effort; the real navigation surfaces load errors (#663). */
+          });
+        }
+      }
+    }
+  } catch {
+    /* Unknown route name — regular navigation will report the real error. */
+  }
+}
+
+// Idle fallback: once the first screen has settled, quietly warm the visible
+// menu's chunks one by one so keyboard navigation is instant too.
+const PREFETCH_IDLE_DELAY_MS = 1500;
+const PREFETCH_STEP_MS = 120;
+let prefetchTimer: number | undefined;
+
+onMounted(() => {
+  prefetchTimer = window.setTimeout(() => {
+    const names = navGroups.value.flatMap((group) => group.items.map((item) => item.name));
+    void (async () => {
+      for (const name of names) {
+        prefetchRoute(name);
+        await new Promise((resolve) => setTimeout(resolve, PREFETCH_STEP_MS));
+      }
+    })();
+  }, PREFETCH_IDLE_DELAY_MS);
+});
+
+onUnmounted(() => {
+  window.clearTimeout(prefetchTimer);
+});
+
 /** Icon-only rail: the user pinned the collapse (settings drawer) OR the window is narrow. */
 const iconOnly = computed(() => narrow.value || preferences.collapsed);
 
@@ -364,11 +473,13 @@ async function handleLogout() {
   <div class="new-shell">
     <aside class="new-shell__rail" :class="{ 'new-shell__rail--icons': iconOnly }">
       <div v-if="preferences.showLogo" class="new-shell__brand">
-        <span class="new-shell__brand-mark" :title="iconOnly ? 'MiQroGate' : undefined">M</span>
-        <span v-if="!iconOnly" class="new-shell__brand-name">MiQroGate</span>
+        <UiTooltip text="MiQroGate" side="right" as-child :disabled="!iconOnly">
+          <span class="new-shell__brand-mark">M</span>
+        </UiTooltip>
+        <span class="new-shell__brand-name">MiQroGate</span>
       </div>
 
-      <div v-if="!iconOnly" class="new-shell__search">
+      <div class="new-shell__search">
         <SearchIcon class="new-shell__search-icon" />
         <input
           v-model="navQuery"
@@ -387,23 +498,31 @@ async function handleLogout() {
           :key="group.title ?? 'regular'"
           class="new-shell__group"
         >
-          <p v-if="group.title && !iconOnly" class="new-shell__group-title">{{ group.title }}</p>
-          <router-link
+          <p v-if="group.title" class="new-shell__group-title">{{ group.title }}</p>
+          <UiTooltip
             v-for="item in group.items"
             :key="item.name"
-            :to="{ name: item.name }"
-            class="new-shell__nav-item"
-            :title="iconOnly ? item.label : undefined"
-            :class="{ 'new-shell__nav-item--active': isActive(item.name) }"
+            :text="item.label"
+            side="right"
+            as-child
+            :disabled="!iconOnly"
           >
-            <component :is="item.icon" class="new-shell__nav-icon" />
-            <span v-if="!iconOnly" class="new-shell__nav-label">{{ item.label }}</span>
-          </router-link>
+            <router-link
+              :to="{ name: item.name }"
+              class="new-shell__nav-item"
+              :class="{ 'new-shell__nav-item--active': isActive(item.name) }"
+              @mouseenter="prefetchRoute(item.name)"
+              @focus="prefetchRoute(item.name)"
+            >
+              <component :is="item.icon" class="new-shell__nav-icon" />
+              <span class="new-shell__nav-label">{{ item.label }}</span>
+            </router-link>
+          </UiTooltip>
         </div>
       </nav>
 
       <div class="new-shell__rail-foot">
-        <p v-if="!iconOnly" class="new-shell__version">MiQroGate 0.1</p>
+        <p class="new-shell__version">MiQroGate 0.1</p>
       </div>
     </aside>
 
@@ -507,6 +626,13 @@ async function handleLogout() {
                 </DropdownMenuRadioGroup>
                 <DropdownMenuSeparator class="new-shell__user-menu-sep" />
                 <DropdownMenuItem
+                  class="ui-menu__item new-shell__user-menu-item"
+                  data-testid="shell-lock"
+                  @select="lockNow"
+                  >锁定屏幕</DropdownMenuItem
+                >
+                <DropdownMenuSeparator class="new-shell__user-menu-sep" />
+                <DropdownMenuItem
                   class="ui-menu__item new-shell__user-menu-item new-shell__user-menu-item--danger"
                   data-testid="shell-logout"
                   @select="handleLogout"
@@ -540,6 +666,17 @@ async function handleLogout() {
           @click="settingsOpen = true"
         >
           <SettingIcon class="new-shell__icon-btn-icon" />
+        </button>
+        <button
+          type="button"
+          class="new-shell__icon-btn"
+          data-testid="shell-fullscreen"
+          :title="isFullscreen ? '退出全屏' : '全屏'"
+          :aria-label="isFullscreen ? '退出全屏' : '全屏'"
+          @click="toggleFullscreen"
+        >
+          <FullscreenExit1Icon v-if="isFullscreen" class="new-shell__icon-btn-icon" />
+          <Fullscreen1Icon v-else class="new-shell__icon-btn-icon" />
         </button>
       </div>
 
@@ -598,35 +735,70 @@ async function handleLogout() {
           @click.stop
           @contextmenu.prevent
         >
-          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('reload')">
+          <button
+            type="button"
+            class="ui-menu__item new-shell__tabmenu-item"
+            @click="tabMenuAction('reload')"
+          >
             重新加载
           </button>
-          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('close')">
+          <button
+            type="button"
+            class="ui-menu__item new-shell__tabmenu-item"
+            @click="tabMenuAction('close')"
+          >
             关闭标签页
           </button>
           <div class="new-shell__tabmenu-sep" />
-          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeLeft')">
+          <button
+            type="button"
+            class="ui-menu__item new-shell__tabmenu-item"
+            @click="tabMenuAction('closeLeft')"
+          >
             关闭左侧标签页
           </button>
-          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeRight')">
+          <button
+            type="button"
+            class="ui-menu__item new-shell__tabmenu-item"
+            @click="tabMenuAction('closeRight')"
+          >
             关闭右侧标签页
           </button>
           <div class="new-shell__tabmenu-sep" />
-          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeOthers')">
+          <button
+            type="button"
+            class="ui-menu__item new-shell__tabmenu-item"
+            @click="tabMenuAction('closeOthers')"
+          >
             关闭其它标签页
           </button>
-          <button type="button" class="ui-menu__item new-shell__tabmenu-item" @click="tabMenuAction('closeAll')">
+          <button
+            type="button"
+            class="ui-menu__item new-shell__tabmenu-item"
+            @click="tabMenuAction('closeAll')"
+          >
             关闭全部标签页
           </button>
         </div>
       </Teleport>
 
-      <div class="new-shell__content">
-        <RouterView />
+      <div ref="contentEl" class="new-shell__content">
+        <RouterView v-slot="{ Component }">
+          <Transition name="shell-page" mode="out-in">
+            <component :is="Component" />
+          </Transition>
+        </RouterView>
       </div>
     </main>
 
     <SettingsDrawer v-model:open="settingsOpen" />
+
+    <LockScreen
+      v-if="locked"
+      :username="auth.user?.username ?? ''"
+      @unlock="locked = false"
+      @logout="handleLogout"
+    />
   </div>
 </template>
 
@@ -783,6 +955,12 @@ async function handleLogout() {
 .new-shell__search {
   position: relative;
   margin: 0 12px 8px;
+  max-height: 40px;
+  overflow: hidden;
+  transition:
+    max-height 200ms var(--ui-ease),
+    opacity 140ms ease,
+    margin 200ms var(--ui-ease);
 }
 
 .new-shell__search-icon {
@@ -845,6 +1023,44 @@ async function handleLogout() {
   transition:
     transform 520ms ease-out,
     opacity 80ms ease;
+}
+
+.new-shell__brand-name,
+.new-shell__nav-label {
+  max-width: 180px;
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    max-width 200ms var(--ui-ease),
+    opacity 140ms ease;
+}
+
+.new-shell__rail--icons .new-shell__brand-name,
+.new-shell__rail--icons .new-shell__nav-label {
+  max-width: 0;
+  opacity: 0;
+}
+
+.new-shell__group-title,
+.new-shell__version {
+  overflow: hidden;
+  transition:
+    max-height 200ms var(--ui-ease),
+    opacity 140ms ease;
+  max-height: 32px;
+}
+
+.new-shell__rail--icons .new-shell__group-title,
+.new-shell__rail--icons .new-shell__version {
+  max-height: 0;
+  opacity: 0;
+}
+
+.new-shell__rail--icons .new-shell__search {
+  max-height: 0;
+  opacity: 0;
+  margin-bottom: 0;
+  pointer-events: none;
 }
 
 .new-shell__main {
@@ -1179,5 +1395,38 @@ async function handleLogout() {
   margin-left: auto;
   margin-right: var(--ui-space-1);
   align-self: center;
+}
+
+/* Page content fades in with a 4px settle when the route changes (#655) —
+   vben/antd page-transition feel. Enter-only: the old page unmounts
+   instantly (mode="out-in" pairs with no leave classes on purpose), so
+   navigation never waits on an exit animation. Killed by the animations-off
+   preference / reduced-motion through the global rules. */
+.shell-page-enter-active {
+  animation: shell-page-in 200ms var(--ui-ease-enter);
+}
+
+@keyframes shell-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Narrow screens (#627): the rail keeps its width, so the content column can
+   get tighter than the topbar's controls — the username cluster used to
+   overflow past the viewport edge and get clipped. Compact the chrome instead
+   of letting it spill: hide the username and breadcrumb, tighten paddings.
+   Verified overflow-free at 375px (acceptance H1). */
+@media (max-width: 640px) {
+  .new-shell__topbar {
+    padding: 0 var(--ui-space-3);
+    gap: var(--ui-space-2);
+  }
+
+  .new-shell__user-name,
+  .new-shell__breadcrumb {
+    display: none;
+  }
 }
 </style>

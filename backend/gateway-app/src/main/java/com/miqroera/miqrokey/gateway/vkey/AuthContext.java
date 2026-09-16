@@ -13,7 +13,13 @@ import java.util.UUID;
  * consistent snapshot. Immutable; safe to share across the reactive chain.
  */
 public record AuthContext(RouteSnapshot.KeyRecord key, RouteSnapshot.BindingRecord binding, Set<String> models,
-        RouteSnapshot snapshot) {
+        RouteSnapshot snapshot, ResolvedContext context) {
+
+    /** Legacy shape (fixtures, suffix-only clients): no CAA context attached. */
+    public AuthContext(RouteSnapshot.KeyRecord key, RouteSnapshot.BindingRecord binding, Set<String> models,
+            RouteSnapshot snapshot) {
+        this(key, binding, models, snapshot, null);
+    }
 
     public UUID tenantId() {
         return key.tenantId();

@@ -92,7 +92,19 @@ public class ModelsController {
             return Set.of();
         }
         Set<String> allowed = new TreeSet<>(ctx.models());
-        allowed.retainAll(snapshot.grantModels(ctx.key().grantId()));
+        // ADR-0018: the REQUEST's binding decides the grant — a key bound to
+        // several projects sees each project's own model scope. #647: under the
+        // unattributed policy there is no project grant — the policy's scope
+        // (empty = the product's ACTIVE upstream catalog) applies instead.
+        if ("POLICY_ROUTED".equals(ctx.context().resolutionStatus())) {
+            RouteSnapshot.UnattributedPolicyRecord policy = snapshot.unattributedPolicy(ctx.tenantId());
+            Set<String> scope = policy != null && !policy.models().isEmpty()
+                    ? policy.models()
+                    : snapshot.upstreamModels(ctx.productId());
+            allowed.retainAll(scope);
+        } else {
+            allowed.retainAll(snapshot.grantModels(ctx.binding().grantId()));
+        }
         allowed.retainAll(snapshot.upstreamModels(ctx.productId()));
         return allowed;
     }

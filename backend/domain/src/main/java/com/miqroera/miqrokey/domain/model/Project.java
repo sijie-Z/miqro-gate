@@ -15,5 +15,12 @@ import java.util.UUID;
  * </p>
  */
 public record Project(UUID id, UUID tenantId, String code, String name, String description, String costCenter,
-        ProjectStatus status, String projectTag, long version, Instant createdAt, Instant updatedAt) {
+        ProjectStatus status, String projectTag, long version, Instant createdAt, Instant updatedAt, boolean system) {
+
+    /** Regular (non-system) project — the common shape at call sites. */
+    public Project(UUID id, UUID tenantId, String code, String name, String description, String costCenter,
+            ProjectStatus status, String projectTag, long version, Instant createdAt, Instant updatedAt) {
+        this(id, tenantId, code, name, description, costCenter, status, projectTag, version, createdAt, updatedAt,
+                false);
+    }
 }

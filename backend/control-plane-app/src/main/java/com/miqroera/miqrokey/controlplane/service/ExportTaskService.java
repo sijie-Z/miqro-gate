@@ -171,7 +171,7 @@ public class ExportTaskService {
                        COALESCE(output_tokens, completion_tokens) AS output_tokens,
                        cache_read_input_tokens, cache_creation_input_tokens, total_tokens, latency_ms,
                        upstream_status_code, provider_request_id, gateway_request_id, is_complete, usage_missing,
-                       virtual_key_id, project_id, provider_product_id, credential_id
+                       virtual_key_id, project_id, provider_product_id, credential_id, client_ip
                 FROM usage_event
                 WHERE tenant_id = :tenantId AND occurred_at >= :from AND occurred_at < :to
                 ORDER BY occurred_at
@@ -193,6 +193,7 @@ public class ExportTaskService {
                     row.put("upstreamStatusCode", rs.getObject("upstream_status_code"));
                     row.put("providerRequestId", rs.getString("provider_request_id"));
                     row.put("gatewayRequestId", rs.getString("gateway_request_id"));
+                    row.put("clientIp", rs.getString("client_ip"));
                     row.put("isComplete", rs.getBoolean("is_complete"));
                     row.put("usageMissing", rs.getBoolean("usage_missing"));
                     row.put("virtualKeyId", String.valueOf(rs.getObject("virtual_key_id")));

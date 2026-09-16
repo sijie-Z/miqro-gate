@@ -67,6 +67,11 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                     "JOIN virtual_keys vk ON vk.id = ue.virtual_key_id AND vk.tenant_id = ue.tenant_id"
                             + " JOIN users u ON u.id = vk.user_id AND u.tenant_id = ue.tenant_id",
                     "vk.user_id, u.username");
+            case TEAM -> new GroupSpec("tm.team_id AS group_key, t.name AS label",
+                    "JOIN virtual_keys vk ON vk.id = ue.virtual_key_id AND vk.tenant_id = ue.tenant_id"
+                            + " JOIN team_memberships tm ON tm.user_id = vk.user_id AND tm.tenant_id = ue.tenant_id"
+                            + " JOIN teams t ON t.id = tm.team_id AND t.tenant_id = ue.tenant_id",
+                    "tm.team_id, t.name");
             case MODEL -> new GroupSpec("ue.model_id AS group_key, ue.model_id AS label", "", "ue.model_id");
             case MONTH -> new GroupSpec(
                     "to_char(date_trunc('month', ue.occurred_at), 'YYYY-MM') AS group_key,"
@@ -94,6 +99,11 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                     "JOIN virtual_keys vk ON vk.id = h.virtual_key_id AND vk.tenant_id = h.tenant_id"
                             + " JOIN users u ON u.id = vk.user_id AND u.tenant_id = h.tenant_id",
                     "vk.user_id, u.username");
+            case TEAM -> new GroupSpec("tm.team_id AS group_key, t.name AS label",
+                    "JOIN virtual_keys vk ON vk.id = h.virtual_key_id AND vk.tenant_id = h.tenant_id"
+                            + " JOIN team_memberships tm ON tm.user_id = vk.user_id AND tm.tenant_id = h.tenant_id"
+                            + " JOIN teams t ON t.id = tm.team_id AND t.tenant_id = h.tenant_id",
+                    "tm.team_id, t.name");
             case MODEL -> new GroupSpec("e.model_id AS group_key, e.model_id AS label", "", "e.model_id");
             case MONTH -> new GroupSpec(
                     "to_char(date_trunc('month', h.occurred_at), 'YYYY-MM') AS group_key,"
@@ -162,6 +172,11 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             if (filter.modelId() != null) {
                 conditions.add("ue.model_id = :modelId");
                 params.addValue("modelId", filter.modelId());
+            }
+            if (filter.clientIp() != null) {
+                // #605: abuse forensics — "what did this address do through us".
+                conditions.add("ue.client_ip = :clientIp");
+                params.addValue("clientIp", filter.clientIp());
             }
             return this;
         }
@@ -279,6 +294,69 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
     }
 
     @Override
+    public List<UsageStatsRepository.HourlyUsageRow> aggregateHourly(UsageStatsRepository.HourlyDimension dimension,
+            UsageFilter filter, int tzOffsetMinutes) {
+        WhereBuilder wb = new WhereBuilder(filter, "ue").usageEventColumns();
+        String dimSelect;
+        String dimJoin;
+        String dimGroup;
+        switch (dimension) {
+            case NONE -> {
+                dimSelect = "CAST(NULL AS uuid) AS dimension_id, CAST(NULL AS text) AS dimension_label";
+                dimJoin = "";
+                dimGroup = "";
+            }
+            case USER -> {
+                dimSelect = "vk.user_id AS dimension_id, u.username AS dimension_label";
+                dimJoin = " JOIN virtual_keys vk ON vk.id = ue.virtual_key_id AND vk.tenant_id = ue.tenant_id"
+                        + " JOIN users u ON u.id = vk.user_id AND u.tenant_id = ue.tenant_id";
+                dimGroup = ", vk.user_id, u.username";
+            }
+            case TEAM -> {
+                dimSelect = "tm.team_id AS dimension_id, t.name AS dimension_label";
+                dimJoin = " JOIN virtual_keys vk ON vk.id = ue.virtual_key_id AND vk.tenant_id = ue.tenant_id"
+                        + " JOIN team_memberships tm ON tm.user_id = vk.user_id AND tm.tenant_id = ue.tenant_id"
+                        + " JOIN teams t ON t.id = tm.team_id AND t.tenant_id = ue.tenant_id";
+                dimGroup = ", tm.team_id, t.name";
+            }
+            default -> throw new IllegalStateException("unhandled hourly dimension: " + dimension);
+        }
+        // Buckets are aligned to the caller's timezone: shift the instant by the
+        // offset, floor to the hour, then shift back so hourStart is the UTC
+        // instant of the LOCAL hour boundary (a UTC+8 bucketing of 06:10Z yields
+        // 06:00Z == 14:00 local). Epoch arithmetic is session-timezone
+        // independent, so the result is deterministic on any server.
+        String sql = """
+                SELECT %s,
+                       to_timestamp(floor((extract(epoch FROM ue.occurred_at) + :tzOffsetMinutes * 60) / 3600.0)
+                           * 3600.0 - :tzOffsetMinutes * 60) AS hour_start,
+                       ue.project_id AS project_id, p.name AS project_label,
+                       COUNT(*) AS requests,
+                       COALESCE(SUM(COALESCE(ue.input_tokens, ue.prompt_tokens)), 0) AS input_tokens,
+                       COALESCE(SUM(COALESCE(ue.output_tokens, ue.completion_tokens)), 0) AS output_tokens,
+                       COALESCE(SUM(ue.cache_read_input_tokens), 0) AS cache_read_tokens,
+                       COALESCE(SUM(ue.cache_creation_input_tokens), 0) AS cache_creation_tokens
+                FROM usage_event ue
+                JOIN projects p ON p.id = ue.project_id AND p.tenant_id = ue.tenant_id
+                %s%s
+                %s
+                GROUP BY hour_start, ue.project_id, p.name%s
+                ORDER BY hour_start, project_label%s
+                """.formatted(dimSelect, dimJoin, wb.joins(), wb.where(), dimGroup,
+                dimension == UsageStatsRepository.HourlyDimension.NONE ? "" : ", dimension_label");
+        MapSqlParameterSource params = wb.params().addValue("tzOffsetMinutes", tzOffsetMinutes);
+        List<UsageStatsRepository.HourlyUsageRow> rows = new ArrayList<>();
+        jdbc.query(sql, params, rs -> {
+            rows.add(new UsageStatsRepository.HourlyUsageRow(rs.getTimestamp("hour_start").toInstant(),
+                    (UUID) rs.getObject("project_id"), rs.getString("project_label"),
+                    (UUID) rs.getObject("dimension_id"), rs.getString("dimension_label"), rs.getLong("requests"),
+                    rs.getLong("input_tokens"), rs.getLong("output_tokens"), rs.getLong("cache_read_tokens"),
+                    rs.getLong("cache_creation_tokens")));
+        });
+        return rows;
+    }
+
+    @Override
     public long countRecords(UsageFilter filter) {
         WhereBuilder wb = new WhereBuilder(filter, "ue").usageEventColumns();
         Long count = jdbc.queryForObject("""
@@ -300,7 +378,24 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                     rs.getObject("reasoning_tokens", Long.class)),
             rs.getObject("latency_ms", Long.class), rs.getObject("upstream_status_code", Integer.class),
             rs.getBytes("cache_key"), rs.getBoolean("is_complete"), rs.getBoolean("usage_missing"),
-            rs.getString("gateway_request_id"), rs.getTimestamp("occurred_at").toInstant());
+            rs.getString("gateway_request_id"), rs.getTimestamp("occurred_at").toInstant(), rs.getString("client_ip"),
+            attributionOf(rs));
+
+    /** CAA attribution columns (V54); all-null rows predate the feature. */
+    private static UsageEvent.ContextAttribution attributionOf(java.sql.ResultSet rs) throws java.sql.SQLException {
+        String sessionId = rs.getString("session_id");
+        Object activityId = rs.getObject("activity_id");
+        Object claimedProjectId = rs.getObject("claimed_project_id");
+        String resolutionStatus = rs.getString("resolution_status");
+        String claimSource = rs.getString("claim_source");
+        String claimConfidence = rs.getString("claim_confidence");
+        if (sessionId == null && activityId == null && claimedProjectId == null && resolutionStatus == null
+                && claimSource == null && claimConfidence == null) {
+            return null;
+        }
+        return new UsageEvent.ContextAttribution(sessionId, (UUID) activityId, (UUID) claimedProjectId,
+                resolutionStatus, claimSource, claimConfidence);
+    }
 
     @Override
     public List<UsageEvent> findRecords(UsageFilter filter, long offset, int limit) {
