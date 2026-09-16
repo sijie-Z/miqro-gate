@@ -8,6 +8,8 @@ import * as api from '@/api';
 vi.mock('@/api', () => ({
   retentionLogs: vi.fn(),
   exportRetentionLogsCsv: vi.fn(),
+  getRetentionConfig: vi.fn(),
+  putRetentionConfig: vi.fn(),
 }));
 const mockApi = vi.mocked(api);
 
@@ -57,6 +59,8 @@ describe('NextAdminRetentionLogsView', () => {
     setActivePinia(createPinia());
     vi.resetAllMocks();
     mockApi.retentionLogs.mockResolvedValue([row]);
+    mockApi.getRetentionConfig.mockResolvedValue({ enabled: true, maxContentBytes: 524288 });
+    mockApi.putRetentionConfig.mockResolvedValue({ enabled: true, maxContentBytes: 524288 });
     Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() });
     document.body.innerHTML = '';
   });
@@ -118,5 +122,41 @@ describe('NextAdminRetentionLogsView', () => {
 
     expect(wrapper.find('[data-testid="retention-user-error"]').text()).toContain('UUID');
     expect(mockApi.retentionLogs).not.toHaveBeenCalled();
+  });
+
+  it('renders the capture settings and saves via PUT (#688)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const card = wrapper.find('[data-testid="retention-config-card"]');
+    expect(card.exists()).toBe(true);
+    const toggle = wrapper.find('[data-testid="retention-config-enabled"]');
+    expect((toggle.element as HTMLInputElement).checked).toBe(true);
+    const cap = wrapper.find('[data-testid="retention-config-max-bytes"]');
+    expect((cap.element as HTMLInputElement).value).toBe('524288');
+    expect(card.text()).toContain('工具调用载荷、系统提示词与推理链仍不采集');
+
+    await toggle.setValue(false);
+    await cap.setValue('1048576');
+    await wrapper.find('[data-testid="retention-config-save"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.putRetentionConfig).toHaveBeenCalledWith({
+      enabled: false,
+      maxContentBytes: 1048576,
+    });
+    expect(wrapper.find('[data-testid="retention-config-notice"]').text()).toContain('已保存');
+  });
+
+  it('rejects an out-of-range cap before calling the API (#688)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="retention-config-max-bytes"]').setValue('100');
+    await wrapper.find('[data-testid="retention-config-save"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.putRetentionConfig).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="retention-config-error"]').text()).toContain('1024');
   });
 });

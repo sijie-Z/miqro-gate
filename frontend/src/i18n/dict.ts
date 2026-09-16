@@ -1636,6 +1636,11 @@ export const DICT: Record<string, string> = {
   '复制失败，请手动选择复制。': 'Copy failed — select and copy manually.',
   '重新验证': 'Verify again',
   '模式': 'Mode',
+  '采集配置': 'Capture settings',
+  '租户级 · 覆盖请求与响应双面': 'Tenant-wide · covers both request and response sides',
+  '开启内容留痕': 'Enable content retention',
+  '内容上限（字节）': 'Content cap (bytes)',
+  '已保存——保存后数秒内生效，无需同步。': 'Saved — effective within seconds, no sync needed.',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [

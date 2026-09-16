@@ -112,7 +112,8 @@ describe('NextAdminMcpAccessLogsView', () => {
     await wrapper.find('[data-testid="mcp-logs-reset"]').trigger('click');
     await flushPromises();
     expect(mockApi.listMcpAccessLogs).toHaveBeenLastCalledWith({ limit: 200 });
-    const input = wrapper.find('[data-testid="mcp-logs-service-filter"]').element as HTMLInputElement;
+    const input = wrapper.find('[data-testid="mcp-logs-service-filter"]')
+      .element as HTMLInputElement;
     expect(input.value).toBe('');
   });
   it('renders time-range and limit controls', async () => {
@@ -161,5 +162,43 @@ describe('NextAdminMcpAccessLogsView', () => {
     expect(mockApi.listMcpAccessLogs).toHaveBeenLastCalledWith({ limit: 200 });
     const from = wrapper.find('[data-testid="mcp-logs-from"]').element as HTMLInputElement;
     expect(from.value).toBe('');
+  });
+
+  it('aggregates the window into the KPI band (#554)', async () => {
+    mockApi.listMcpAccessLogs.mockResolvedValue(rows);
+    const wrapper = mount(NextAdminMcpAccessLogsView, {
+      global: { plugins: [createPinia()], stubs: { UiSelect: SelectStub } },
+    });
+    await flushPromises();
+
+    const band = wrapper.find('[data-testid="mcp-logs-summary"]');
+    expect(band.exists()).toBe(true);
+    expect(band.find('[data-testid="mcp-logs-total"]').text()).toBe('2');
+    expect(band.text()).toContain('已转发');
+    expect(band.text()).toContain('被拒');
+    // failed = 0 of (forwarded 1 + failed 0) → 0.0%
+    expect(band.find('[data-testid="mcp-logs-failure-rate"]').text()).toBe('0.0%');
+  });
+
+  it('opens the per-call detail drawer with the metadata timeline (#554)', async () => {
+    mockApi.listMcpAccessLogs.mockResolvedValue(rows);
+    const wrapper = mount(NextAdminMcpAccessLogsView, {
+      global: { plugins: [createPinia()], stubs: { UiSelect: SelectStub } },
+    });
+    await flushPromises();
+
+    await wrapper.find('[data-testid="mcp-logs-table"] tbody tr').trigger('click');
+    await flushPromises();
+
+    const drawer = document.querySelector('[data-testid="mcp-logs-detail-drawer"]');
+    expect(drawer, 'detail drawer should render').toBeTruthy();
+    const timeline = document.querySelector('[data-testid="mcp-logs-timeline"]');
+    expect(timeline!.textContent).toContain('受理');
+    expect(timeline!.textContent).toContain('上游首包');
+    expect(timeline!.textContent).toContain('+42 ms');
+    expect(timeline!.textContent).toContain('结论');
+    expect(drawer!.textContent).toContain('weather-mcp');
+    expect(drawer!.textContent).toContain('drill-allowed');
+    expect(drawer!.textContent).toContain('req-0001');
   });
 });

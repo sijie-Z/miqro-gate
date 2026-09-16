@@ -72,6 +72,7 @@ import type {
   AdminRetentionLogView,
   McpServiceAccessView,
   McpServiceVerifyView,
+  RetentionConfigView,
 } from '@/types/generated-api';
 import type { components } from '@/types/generated';
 
@@ -1419,6 +1420,18 @@ export interface RetentionLogQuery {
   protocol?: string;
   from?: string;
   to?: string;
+}
+
+/** ADR-0014 (#688): tenant retention switch + content cap. */
+export function getRetentionConfig(): Promise<RetentionConfigView> {
+  return get<RetentionConfigView>('/api/v1/admin/retention-config');
+}
+
+export function putRetentionConfig(body: {
+  enabled: boolean;
+  maxContentBytes?: number;
+}): Promise<RetentionConfigView> {
+  return put<RetentionConfigView>('/api/v1/admin/retention-config', body);
 }
 
 /** Filtered, decrypted page over the retention ledger (SYSTEM_ADMIN). */
