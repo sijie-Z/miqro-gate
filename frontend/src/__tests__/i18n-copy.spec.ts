@@ -24,7 +24,9 @@ describe('EN dictionary covers the #657 copy', () => {
 
   it('translates both halves of the filtered grants count line', () => {
     // 共 N 条授权 and （全部 M 条） are two adjacent text nodes: the template
-    // v-if splits them, so each is looked up separately.
+    // v-if splits them, so each is looked up separately. The count rule predates
+    // this batch and the i18n layer has no plural forms, so "1 grants" is pinned
+    // here as what that existing rule yields — not as preferred English.
     expect(translateText('共 1 条授权')).toBe('1 grants');
     expect(translateText('（全部 2 条）')).toBe(' (2 total)');
   });

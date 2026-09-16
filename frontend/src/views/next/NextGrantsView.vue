@@ -187,8 +187,9 @@ const filteredGrants = computed(() =>
     : grants.value,
 );
 
-/** #657: the credential-scoped empty copy is a claim about loaded data. When the
- *  fetch failed there is nothing to claim — the error alert owns the screen. */
+/** #657: the credential-scoped empty copy is a claim about loaded data. After a
+ *  failed fetch there is nothing to claim, so the generic title stays; the failure
+ *  is reported by its own alert, and this table still renders below it. */
 const scopedFilter = computed(() => Boolean(credentialFilter.value) && !loadError.value);
 
 async function load() {
