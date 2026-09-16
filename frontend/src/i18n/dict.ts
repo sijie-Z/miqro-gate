@@ -1487,14 +1487,6 @@ export const DICT: Record<string, string> = {
   '全部密钥': 'All keys',
   '快捷导航': 'Quick nav',
   '今天也要高效工作。': 'Have a productive day.',
-  // 导航分组（#675，对齐腾讯实例层架构）。
-  '模型管理': 'Model Management',
-  '访问与授权': 'Access & Authorization',
-  '用量与配额': 'Usage & Quota',
-  '成本管理': 'Cost Management',
-  '可观测性': 'Observability',
-  '安全与配置': 'Security & Configuration',
-  '集成管理': 'Integrations',
   // Virtual Key 停用/启用/重命名 + 行内用量（#582）。
   '重命名': 'Rename',
   '用量 · 近 7 天': 'Usage · last 7 days',
@@ -1625,6 +1617,11 @@ export const DICT: Record<string, string> = {
   '在「授权」按 项目 × 凭证 圈定模型范围。': 'Scope the models under Grants by project × credential.',
   '成员在「我的密钥」创建虚拟密钥并接入客户端。':
     'Members create Virtual Keys under My Keys and connect their clients.',
+  '采集配置': 'Capture settings',
+  '租户级 · 覆盖请求与响应双面': 'Tenant-wide · covers both request and response sides',
+  '开启内容留痕': 'Enable content retention',
+  '内容上限（字节）': 'Content cap (bytes)',
+  '已保存——保存后数秒内生效，无需同步。': 'Saved — effective within seconds, no sync needed.',
   '总请求': 'Total calls',
   '失败率': 'Failure rate',
   '调用详情': 'Call detail',
