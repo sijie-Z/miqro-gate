@@ -151,6 +151,21 @@ export function revokeVirtualKey(id: string): Promise<{ message: string }> {
   return post<{ message: string }>(`/api/v1/me/virtual-keys/${id}/revoke`);
 }
 
+/** #582: rename (bindings, models and the secret itself are unchanged). */
+export function renameVirtualKey(id: string, name: string): Promise<VirtualKeyView> {
+  return patch<VirtualKeyView>(`/api/v1/me/virtual-keys/${id}`, { name });
+}
+
+/** #582: temporary soft stop — the gateway answers the uniform unknown-key 404. */
+export function disableVirtualKey(id: string): Promise<VirtualKeyView> {
+  return post<VirtualKeyView>(`/api/v1/me/virtual-keys/${id}/disable`);
+}
+
+/** #582: re-enable a disabled key; routing resumes at the next snapshot refresh. */
+export function enableVirtualKey(id: string): Promise<VirtualKeyView> {
+  return post<VirtualKeyView>(`/api/v1/me/virtual-keys/${id}/enable`);
+}
+
 export function myGrants(): Promise<MeGrantsResponse> {
   return get<MeGrantsResponse>('/api/v1/me/grants');
 }
@@ -504,6 +519,16 @@ export function createApiConsumer(
 
 export function disableApiConsumer(id: string): Promise<ApiConsumerView> {
   return post<ApiConsumerView>(`/api/v1/admin/api-consumers/${id}/disable`);
+}
+
+/** ADR-0011: set/rotate the consumer's RS256 JWT verification key (public PEM only). */
+export function setConsumerJwtKey(id: string, publicKeyPem: string): Promise<ApiConsumerView> {
+  return put<ApiConsumerView>(`/api/v1/admin/api-consumers/${id}/jwt-key`, { publicKeyPem });
+}
+
+/** ADR-0011: remove the JWT verification key — tokens signed by it stop verifying. */
+export function removeConsumerJwtKey(id: string): Promise<ApiConsumerView> {
+  return del<ApiConsumerView>(`/api/v1/admin/api-consumers/${id}/jwt-key`);
 }
 
 /** Issue #338 (I5): per-consumer MCP call overview from the access log. */

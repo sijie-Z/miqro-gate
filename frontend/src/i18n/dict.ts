@@ -1200,8 +1200,6 @@ export const DICT: Record<string, string> = {
   '输出': 'Output',
   '输出 Token': 'Output tokens',
   '输出 Tokens': 'Output tokens',
-  '达到限额的此百分比时进入预警；≥90% 即将超限；≥100% 为超限':
-    'Warn at this percentage of the limit; ≥90% is near limit, ≥100% counts as over limit',
   '近 1 小时': 'Last hour',
   '近 20 次投递成功率': 'Delivery success rate (last 20)',
   '近 24 小时': 'Last 24 hours',
@@ -1487,6 +1485,44 @@ export const DICT: Record<string, string> = {
   '全部密钥': 'All keys',
   '快捷导航': 'Quick nav',
   '今天也要高效工作。': 'Have a productive day.',
+  // 导航分组（#675，对齐腾讯实例层架构）。
+  '模型管理': 'Model Management',
+  '访问与授权': 'Access & Authorization',
+  '用量与配额': 'Usage & Quota',
+  '成本管理': 'Cost Management',
+  '可观测性': 'Observability',
+  '安全与配置': 'Security & Configuration',
+  '集成管理': 'Integrations',
+  // Virtual Key 停用/启用/重命名 + 行内用量（#582）。
+  '重命名': 'Rename',
+  '用量 · 近 7 天': 'Usage · last 7 days',
+  '重命名虚拟密钥': 'Rename Virtual Key',
+  '虚拟密钥已停用': 'Virtual Key disabled',
+  '虚拟密钥已启用': 'Virtual Key enabled',
+  '虚拟密钥已重命名': 'Virtual Key renamed',
+  '名称必填，最长 200 个字符。': 'A name is required (up to 200 characters).',
+  '重命名失败': 'Rename failed',
+  '停用后该密钥立即失效（客户端将收到 404，与未知密钥不可区分）；可随时「启用」恢复，绑定与授权不变。':
+    'Once disabled the key stops working immediately (clients see a 404, indistinguishable from an unknown key); enable it again anytime — bindings and grants are untouched.',
+  // 消费者 JWT 公钥（#658，ADR-0011）。
+  'JWT 公钥': 'JWT public key',
+  '当前指纹：': 'Fingerprint: ',
+  '尚未配置 JWT 公钥。': 'No JWT public key configured.',
+  '粘贴公钥 PEM': 'Paste the public key PEM',
+  '粘贴新公钥以轮换': 'Paste a new public key to rotate',
+  '保存后旧签名立即失效；仅接受 RSA SubjectPublicKeyInfo PEM。':
+    'Tokens signed with the old key stop verifying immediately; only RSA SubjectPublicKeyInfo PEM is accepted.',
+  '请粘贴平台提供的公钥 PEM。': 'Paste the public key PEM provided by the platform.',
+  '移除公钥': 'Remove key',
+  '保存公钥': 'Save key',
+  '轮换公钥': 'Rotate key',
+  'JWT 公钥已保存': 'JWT public key saved',
+  'JWT 公钥已轮换': 'JWT public key rotated',
+  'JWT 公钥已移除': 'JWT public key removed',
+  '移除后，使用该公钥签发的 JWT 立即失效；API Key 通道不受影响。':
+    'Once removed, JWTs signed with this key stop verifying immediately; the API Key channel is unaffected.',
+  '平台自持私钥签发 RS256 JWT；网关仅保存公钥验签，不接触私钥。':
+    'The platform signs RS256 JWTs with its own private key; the gateway only stores the public key for verification and never touches the private key.',
   // 列表依赖/目录元数据 + 表单规则文案（#657）。
   '授权引用': 'Grant references',
   '依赖': 'Dependencies',
@@ -1587,6 +1623,8 @@ export const DICT: Record<string, string> = {
   '在「授权」按 项目 × 凭证 圈定模型范围。': 'Scope the models under Grants by project × credential.',
   '成员在「我的密钥」创建虚拟密钥并接入客户端。':
     'Members create Virtual Keys under My Keys and connect their clients.',
+  '达到限额的此百分比时进入预警；≥90% 即将超限；≥100% 为超限':
+    'Warn at this percentage of the limit; ≥90% is near limit, ≥100% counts as over limit',
   '成本（¥）': 'Cost (¥)',
   '每年': 'Yearly',
   '即将超限': 'Near limit',
@@ -1756,6 +1794,12 @@ export const PATTERNS: Array<[RegExp, string]> = [
   [/^第\ (.+?)\ 页$/, 'Page $1'],
   [/^第\ (.+?)\ 页$/, 'Page $1'],
   [/^共\ (.+?)\ 个$/, '$1 total'],
+  // #582 动态标签。
+  [/^停用虚拟密钥「(.+?)」$/, 'Disable Virtual Key "$1"'],
+  [/^修改「(.+?)」的名称；绑定、模型与密钥本身不变。$/, 'Rename "$1"; bindings, models and the key itself stay unchanged.'],
+  // #658 动态标签。
+  [/^设置于 (.+?)$/, 'set $1'],
+  [/^移除消费者「(.+?)」的 JWT 公钥$/, 'Remove the JWT public key of consumer "$1"'],
   // #657 依赖/目录动态单元格。
   [/^(\d+) 个模型$/, '$1 models'],
   [/^凭证 (\d+) · 授权 (\d+)$/, 'Credentials $1 · Grants $2'],

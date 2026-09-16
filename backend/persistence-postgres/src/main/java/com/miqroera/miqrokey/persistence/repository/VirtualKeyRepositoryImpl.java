@@ -131,7 +131,7 @@ public class VirtualKeyRepositoryImpl implements VirtualKeyRepository {
         long expectedVersion = key.version() - 1;
         var params = toParams(key).addValue("expectedVersion", expectedVersion);
         int rows = jdbc.update("""
-                UPDATE virtual_keys SET status = :status, last_used_at = :lastUsedAt,
+                UPDATE virtual_keys SET name = :name, status = :status, last_used_at = :lastUsedAt,
                     revoked_at = :revokedAt, replaced_by_key_id = :replacedByKeyId,
                     version = version + 1
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion

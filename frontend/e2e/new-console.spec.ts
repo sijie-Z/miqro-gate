@@ -504,6 +504,48 @@ test('revoke also walks the confirm gate and reloads the list', async ({ page })
   await expect(page.getByText('虚拟密钥已吊销')).toBeVisible();
 });
 
+test('keys page disables through the kebab menu and confirm gate (#582)', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+  await page.route('**/api/v1/me/virtual-keys/0190-0000-0000-0002/disable', (route) =>
+    route.fulfill({
+      json: { id: '0190-0000-0000-0002', name: 'claude-code-main', status: 'DISABLED' },
+    }),
+  );
+
+  await page.goto('/app-new/keys');
+  await expect(page.getByTestId('keys-table')).toBeVisible();
+
+  await page.getByTestId('key-actions-0190-0000-0000-0002').click();
+  await page.getByRole('menuitem', { name: '停用' }).click();
+  await expect(page.getByText('停用虚拟密钥「claude-code-main」')).toBeVisible();
+  await page.getByRole('button', { name: '停用', exact: true }).last().click();
+  await expect(page.getByText('虚拟密钥已停用')).toBeVisible();
+});
+
+test('keys page renames through the kebab menu (#582)', async ({ page }) => {
+  await mockSession(page, REGULAR_USER);
+  await mockPilotApi(page);
+  await page.route('**/api/v1/me/virtual-keys/0190-0000-0000-0002', (route) => {
+    if (route.request().method() === 'PATCH') {
+      return route.fulfill({
+        json: { id: '0190-0000-0000-0002', name: 'renamed-in-e2e', status: 'ACTIVE' },
+      });
+    }
+    return route.fallback();
+  });
+
+  await page.goto('/app-new/keys');
+  await expect(page.getByTestId('keys-table')).toBeVisible();
+
+  await page.getByTestId('key-actions-0190-0000-0000-0002').click();
+  await page.getByRole('menuitem', { name: '重命名' }).click();
+  await expect(page.getByText('重命名虚拟密钥')).toBeVisible();
+  await page.getByTestId('key-rename-name').fill('renamed-in-e2e');
+  await page.getByTestId('key-rename-save').click();
+  await expect(page.getByText('虚拟密钥已重命名')).toBeVisible();
+});
+
 test('usage page shows quota, summary totals and pages the records', async ({ page }) => {
   await mockSession(page, REGULAR_USER);
   await mockPilotApi(page);
