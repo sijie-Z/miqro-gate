@@ -6,12 +6,30 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-13 自主轮（rc.19 发布记录）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS（develop @ abd13a9；rc.18 已发布；**sub-agent 全量审查（7 路）完成，约 70 条
-  发现**——已交付 #441（HIGH×2 抢修，等 CodeQL 平台恢复合并）、#440（前端守卫二批，本地绿待推）、
-  #444（网关缓存，本 PR）；队列：控制面锁定/XFF、转义族、导出泄漏、并发族、shutdown flush、语料矩阵
-  刷新；注：CodeQL 自 09:01Z 起平台侧上传故障（GitHub 事件），非代码问题`
-- Last updated: `2026-09-13 CST`
+- Current goal: `2026-09-15 并行会话轮` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS（多会话并行推进；已合并进展以 develop git log 为准。在途 PR：#599
+  用途标注、#601 留痕控制台、#602 资料页增强；#596/#597 交付与验证细节见下方 09-15 交接点。
+  此前 rc.19 审查修复波已全量落地并发布）`
+- Last updated: `2026-09-15 CST`
+
+## 会话交接点 2026-09-15（资料页增强 #597 + 用途标签澄清 #596）
+
+- **#596（PR #599 待合并）**：Virtual Key「用途」语义显性化——创建表单补说明（声明标签、
+  不限制客户端、可调用范围由授权产品与允许模型决定）+ 列表「用途」列头悬停提示；
+  `UiTable` 列配置新增可选 `hint`（渲染 `th[title]`，向后兼容）；中英文案入 i18n。
+  语义核对：数据面全量检索 `purpose` 唯一消费点是缓存键派生（`CacheKeyFactory` 区分位），
+  不参与任何放行/拒绝（product-requirements §5.1「一个用途标签」、F60「不设 purpose 白名单」）。
+  验证：定向 vitest 14/14、全量 257/257、typecheck/build、改动文件 eslint 全绿。
+- **#597（PR #602 待合并）**：资料页增强（对齐 GitHub 安全设置）+ 自助「退出其他会话」——
+  新端点 `POST /api/v1/auth/logout-others`（复用 `SessionService.revokeOtherSessions`，
+  审计 `LOGOUT_OTHERS`，强制改密会话被 `PASSWORD_CHANGE_REQUIRED` 门槛拦截）+ 前端重排
+  （身份头/用量速览/账号与安全/当前会话；速览口径=用量页合计行，失败降级「—」）。
+  验证：后端全模块单测 BUILD SUCCESS + `AuthIntegrationTest` 22/22（新增 3 例）与
+  `OpenApiSpecIntegrationTest` 1/1（PostgreSQL Testcontainers）；前端 263/263 单测 +
+  e2e 53/53（含资料页 2 例与 forbidden-aesthetics）；OpenAPI 基线整体刷新到当前 develop
+  （一并纳入 #587/#552 尚未刷新的增量）+ 前端类型重生成。
+- 两 PR 均自 develop 出发，合并顺序无依赖；`ui-specification.md` §Virtual Keys/§Profile
+  表述已随本批文档更新。
 
 ## 会话交接点 2026-09-13（rc.19 发布：审查修复波全量落地）
 
