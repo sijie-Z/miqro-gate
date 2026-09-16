@@ -34,12 +34,15 @@ import {
   UiDialog,
   UiEmptyState,
   UiInput,
+  UiPageGuide,
   UiSelect,
   UiStatusBadge,
   UiTable,
+  UiTooltip,
   toast,
 } from '@/ui';
 import type { UiSelectOption } from '@/ui';
+import { KEYS_GUIDE } from '@/content/pageGuides';
 import type { VirtualKeyPurpose } from '@/types/api';
 import type {
   CreateVirtualKeyResponse,
@@ -104,7 +107,11 @@ const purposeOptions = computed<UiSelectOption[]>(() => {
 const columns = [
   { key: 'name', title: '名称', minWidth: '220px', sortable: true },
   { key: 'projectTag', title: '项目', width: '120px' },
-  { key: 'purpose', title: '用途', width: '130px' },
+  {
+    key: 'purpose',
+    title: '用途',
+    width: '130px',
+  },
   { key: 'modelIds', title: '允许模型', minWidth: '220px' },
   { key: 'status', title: '状态', width: '110px' },
   { key: 'cachePolicy', title: '缓存', width: '90px' },
@@ -671,6 +678,8 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
       </div>
     </header>
 
+    <UiPageGuide :guide="KEYS_GUIDE" storage-key="keys" />
+
     <div v-if="loadError" class="ui-alert ui-alert--error" data-testid="keys-load-error">
       {{ loadError
       }}<span v-if="loadRequestId" class="ui-request-id"> requestId: {{ loadRequestId }}</span>
@@ -768,6 +777,9 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
                 <span>{{ option.label }}</span>
               </label>
             </div>
+            <p class="next-keys__field-hint" data-testid="create-purpose-hint">
+              用途是声明性标签（用于展示与审计），不限制客户端：任何兼容协议的客户端都可以使用该密钥；实际可调用范围由所选授权产品与允许模型决定。
+            </p>
           </div>
           <div v-if="createGrantId" class="next-keys__field">
             <span class="next-keys__field-label">缓存策略</span>
@@ -934,9 +946,13 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
           </div>
           <div class="ui-mono next-keys__mask">{{ (row as VirtualKeyView).display }}</div>
         </template>
-        <template #purpose="{ row }">{{
-          purposeLabel[(row as VirtualKeyView).purpose!] ?? (row as VirtualKeyView).purpose
-        }}</template>
+        <template #purpose="{ row }">
+          <UiTooltip text="声明标签，不限制客户端；可调用范围由所选授权产品与允许模型决定。">
+            <span>{{
+              purposeLabel[(row as VirtualKeyView).purpose!] ?? (row as VirtualKeyView).purpose
+            }}</span>
+          </UiTooltip>
+        </template>
         <template #modelIds="{ row }">
           <div class="ui-mono next-keys__models">
             {{ (row as VirtualKeyView).modelIds?.join(', ') ?? '' }}

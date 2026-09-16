@@ -1,10 +1,13 @@
 <script setup lang="ts">
 /**
  * NextRoiView — /app/roi v2 admin page (U2 platform batch).
- * Behaviour parity with the legacy cache-ROI report: window selector, four
- * total cards, day table and CSV export (BOM for Excel).
+ * Behaviour parity with the legacy cache-ROI report, aligned with the
+ * Tencent AI-gateway "cache hit statistics" reference (#661): calendar-aware
+ * windows with an explicit range readout, a stat strip whose cards carry
+ * sub-metric lines, and a hit-composition panel fed by the RoiTotals
+ * breakdown (upstream / coalesced / L1 / L2). Day table and CSV export kept.
  */
-import { computed, onMounted, ref  } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { UiButton, UiDonut, UiTable } from '@/ui';
 import { csvCell } from '@/utils/csv';
@@ -13,13 +16,35 @@ import type { RoiReportView } from '@/types/generated-api';
 const report = ref<RoiReportView | null>(null);
 const loading = ref(true);
 const loadError = ref('');
-const days = ref(30);
 
-const WINDOWS = [
-  { label: '近 7 天', value: 7 },
-  { label: '近 30 天', value: 30 },
-  { label: '近 93 天', value: 93 },
+type WindowKey = 'today' | 'week' | 'month' | '7' | '30' | '93';
+
+const WINDOWS: { key: WindowKey; label: string }[] = [
+  { key: 'today', label: '今天' },
+  { key: 'week', label: '本周' },
+  { key: 'month', label: '本月' },
+  { key: '7', label: '近 7 天' },
+  { key: '30', label: '近 30 天' },
+  { key: '93', label: '近 93 天' },
 ];
+
+const windowKey = ref<WindowKey>('30');
+
+/** Calendar windows start at local midnight (week on Monday, month on the 1st). */
+function windowRange(key: WindowKey): { from: Date; to: Date } {
+  const to = new Date();
+  if (key === 'today' || key === 'week' || key === 'month') {
+    const from = new Date(to);
+    from.setHours(0, 0, 0, 0);
+    if (key === 'week') {
+      from.setDate(from.getDate() - ((from.getDay() + 6) % 7));
+    } else if (key === 'month') {
+      from.setDate(1);
+    }
+    return { from, to };
+  }
+  return { from: new Date(to.getTime() - Number(key) * 24 * 3600 * 1000), to };
+}
 
 const columns = [
   { key: 'date', title: '日期', width: '140px' },
@@ -37,7 +62,93 @@ function pct(value: number): string {
   return `${value.toFixed(2)}%`;
 }
 
-/** UiTable row slots are generic records; narrow to the report's day shape. */
+function pad(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+function fmtTime(dt: Date): string {
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+}
+
+/** Explicit query window shown next to the chips (Tencent-style readout). */
+const rangeLabel = computed(() => {
+  const from = report.value?.from ? new Date(report.value.from) : null;
+  const to = report.value?.to ? new Date(report.value.to) : null;
+  return from && to ? `${fmtTime(from)} ~ ${fmtTime(to)}` : '';
+});
+
+interface TotalNumbers {
+  upstream: number;
+  coalesced: number;
+  l1: number;
+  l2: number;
+  served: number;
+}
+
+const totalsOf = computed<TotalNumbers>(() => {
+  const t = report.value?.totals;
+  const upstream = Number(t?.upstreamRequests ?? 0);
+  const coalesced = Number(t?.coalescedRequests ?? 0);
+  const l1 = Number(t?.l1Hits ?? 0);
+  const l2 = Number(t?.l2Hits ?? 0);
+  return { upstream, coalesced, l1, l2, served: upstream + coalesced + l1 + l2 };
+});
+
+/** Tencent-style stat strip: big value plus a sub-metric line per card. */
+interface RoiCard {
+  label: string;
+  value: string;
+  sub: { k: string; v: string }[];
+  accent?: boolean;
+}
+
+const cards = computed<RoiCard[]>(() => {
+  const t = report.value?.totals;
+  const { upstream, coalesced, l1, l2, served } = totalsOf.value;
+  const rate = (n: number) => pct(served ? (n / served) * 100 : 0);
+  return [
+    {
+      label: '总请求次数',
+      value: String(served),
+      sub: [
+        { k: '上游', v: String(upstream) },
+        { k: '合并', v: String(coalesced) },
+      ],
+    },
+    { label: 'L1 命中', value: String(l1), sub: [{ k: '命中率', v: rate(l1) }] },
+    { label: 'L2 命中', value: String(l2), sub: [{ k: '命中率', v: rate(l2) }] },
+    {
+      label: '网关缓存命中率',
+      value: pct(Number(t?.hitRatePct ?? 0)),
+      sub: [{ k: 'L1+L2 命中', v: String(l1 + l2) }],
+    },
+    {
+      label: '缓存节省',
+      value: money(Number(t?.savedCost ?? 0)),
+      sub: [
+        { k: '上游实付', v: money(Number(t?.paidCost ?? 0)) },
+        { k: '等效折扣', v: pct(Number(t?.savedPct ?? 0)) },
+      ],
+      accent: true,
+    },
+  ];
+});
+
+/** Hit composition (the data-backed analogue of Tencent's similarity
+ *  distribution): how every served request resolved, largest share first. */
+const composition = computed(() => {
+  const { upstream, coalesced, l1, l2, served } = totalsOf.value;
+  const total = Math.max(1, served);
+  return [
+    { label: 'L1 命中', value: l1, color: '#389e0d' },
+    { label: 'L2 命中', value: l2, color: '#0960bd' },
+    { label: '合并命中', value: coalesced, color: '#d48806' },
+    { label: '上游未命中', value: upstream, color: '#bfbfbf' },
+  ]
+    .map((row) => ({ ...row, pct: (row.value / total) * 100 }))
+    .sort((a, b) => b.value - a.value);
+});
+
 /** Savings vs paid split for the selected window (donut centre = discount). */
 const savingSegments = computed(() => {
   const saved = Number(report.value?.totals?.savedCost ?? 0);
@@ -61,8 +172,7 @@ async function load() {
   loading.value = true;
   loadError.value = '';
   try {
-    const to = new Date();
-    const from = new Date(to.getTime() - days.value * 24 * 3600 * 1000);
+    const { from, to } = windowRange(windowKey.value);
     const result = await api.getRoiReport(from.toISOString(), to.toISOString());
     if (seq !== loadRequestSeq) {
       return; // a newer window won — this response is stale
@@ -129,72 +239,103 @@ onMounted(load);
       <div class="next-roi__segmented" role="tablist" aria-label="窗口">
         <button
           v-for="w in WINDOWS"
-          :key="w.value"
+          :key="w.key"
           type="button"
           class="next-roi__seg"
-          :class="{ 'next-roi__seg--on': days === w.value }"
-          :data-testid="`roi-window-${w.value}`"
+          :class="{ 'next-roi__seg--on': windowKey === w.key }"
+          :data-testid="`roi-window-${w.key}`"
           @click="
-            days = w.value;
+            windowKey = w.key;
             load();
           "
         >
           {{ w.label }}
         </button>
       </div>
-      <UiButton variant="ghost" size="sm" :loading="loading" @click="load">刷新</UiButton>
+      <div class="next-roi__toolbar-right">
+        <span v-if="rangeLabel" class="next-roi__range ui-num" data-testid="roi-range">
+          {{ rangeLabel }}
+        </span>
+        <UiButton variant="ghost" size="sm" :loading="loading" @click="load">刷新</UiButton>
+      </div>
     </div>
 
     <div v-if="loadError" class="ui-alert ui-alert--error">{{ loadError }}</div>
 
     <div v-if="report" class="next-roi__cards" data-testid="roi-report">
-      <div class="ui-panel next-roi__card">
-        <span class="next-roi__value next-roi__value--accent ui-num">{{
-          money(report.totals?.savedCost ?? 0)
+      <div v-for="card in cards" :key="card.label" class="ui-panel next-roi__card">
+        <span class="next-roi__label">{{ card.label }}</span>
+        <span class="next-roi__value ui-num" :class="{ 'next-roi__value--accent': card.accent }">{{
+          card.value
         }}</span>
-        <span class="next-roi__label">缓存节省（无缓存时需多付）</span>
-      </div>
-      <div class="ui-panel next-roi__card">
-        <span class="next-roi__value ui-num">{{ money(report.totals?.paidCost ?? 0) }}</span>
-        <span class="next-roi__label">上游实付</span>
-      </div>
-      <div class="ui-panel next-roi__card">
-        <span class="next-roi__value ui-num">{{ pct(report.totals?.savedPct ?? 0) }}</span>
-        <span class="next-roi__label">等效折扣（节省 / 实付+节省）</span>
-      </div>
-      <div class="ui-panel next-roi__card">
-        <span class="next-roi__value ui-num">{{ pct(report.totals?.hitRatePct ?? 0) }}</span>
-        <span class="next-roi__label">请求命中率（L1+L2）</span>
+        <span class="next-roi__sub">
+          <template v-for="(part, i) in card.sub" :key="part.k">
+            <span v-if="i > 0" class="next-roi__sub-sep" aria-hidden="true">·</span>
+            <span>{{ part.k }}</span>
+            <span class="ui-num">{{ part.v }}</span>
+          </template>
+        </span>
       </div>
     </div>
 
-    <section
-      v-if="savingSegments.length"
-      class="ui-panel next-roi__summary"
-      data-testid="roi-saving-dist"
-    >
-      <div class="ui-panel-head">
-        <div>
-          <h2 class="ui-panel-title">缓存收益构成</h2>
-          <span class="ui-panel-sub">缓存节省 vs 上游实付 · 当前窗口</span>
-        </div>
-      </div>
-      <div class="ui-panel-body next-roi__summary-body">
-        <UiDonut
-          :segments="savingSegments"
-          :center-text="pct(report?.totals?.savedPct ?? 0)"
-          data-testid="roi-saving-donut"
-        />
-        <div class="ui-legend">
-          <div v-for="seg in savingSegments" :key="seg.label" class="ui-legend-row">
-            <span class="ui-legend-dot" :style="{ background: seg.color }" />
-            <span class="ui-legend-label">{{ seg.label }}</span>
-            <span class="ui-legend-pct ui-num">{{ Math.round((seg.value / Math.max(0.0001, savingSegments.reduce((x, y) => x + y.value, 0))) * 100) }}%</span>
-            <span class="ui-legend-value ui-num">{{ money(seg.value) }}</span>
+    <div class="next-roi__panels">
+      <section v-if="savingSegments.length" class="ui-panel" data-testid="roi-saving-dist">
+        <div class="ui-panel-head">
+          <div>
+            <h2 class="ui-panel-title">缓存收益构成</h2>
+            <span class="ui-panel-sub">缓存节省 vs 上游实付 · 当前窗口</span>
           </div>
         </div>
-      </div>
-    </section>
+        <div class="ui-panel-body next-roi__summary-body">
+          <UiDonut
+            :segments="savingSegments"
+            :center-text="pct(report?.totals?.savedPct ?? 0)"
+            data-testid="roi-saving-donut"
+          />
+          <div class="ui-legend">
+            <div v-for="seg in savingSegments" :key="seg.label" class="ui-legend-row">
+              <span class="ui-legend-dot" :style="{ background: seg.color }" />
+              <span class="ui-legend-label">{{ seg.label }}</span>
+              <span class="ui-legend-pct ui-num"
+                >{{
+                  Math.round(
+                    (seg.value /
+                      Math.max(
+                        0.0001,
+                        savingSegments.reduce((x, y) => x + y.value, 0),
+                      )) *
+                      100,
+                  )
+                }}%</span
+              >
+              <span class="ui-legend-value ui-num">{{ money(seg.value) }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section v-if="report" class="ui-panel" data-testid="roi-composition">
+        <div class="ui-panel-head">
+          <div>
+            <h2 class="ui-panel-title">缓存命中构成</h2>
+            <span class="ui-panel-sub">按服务请求总数计算 · 当前窗口</span>
+          </div>
+        </div>
+        <div class="ui-panel-body next-roi__comp">
+          <div v-for="row in composition" :key="row.label" class="next-roi__comp-row">
+            <span class="next-roi__comp-label">{{ row.label }}</span>
+            <span class="next-roi__comp-track" aria-hidden="true">
+              <span
+                class="next-roi__comp-fill"
+                :style="{ width: `${row.pct.toFixed(2)}%`, background: row.color }"
+              />
+            </span>
+            <span class="next-roi__comp-count ui-num">{{ row.value }}</span>
+            <span class="next-roi__comp-pct ui-num">{{ pct(row.pct) }}</span>
+          </div>
+        </div>
+      </section>
+    </div>
 
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
@@ -212,15 +353,9 @@ onMounted(load);
           {{ asDay(row).upstreamRequests }} /
           {{ asDay(row).hitRequests }}
         </template>
-        <template #hitRatePct="{ row }">{{
-          pct(asDay(row).hitRatePct ?? 0)
-        }}</template>
-        <template #paidCost="{ row }">{{
-          money(asDay(row).paidCost ?? 0)
-        }}</template>
-        <template #savedCost="{ row }">{{
-          money(asDay(row).savedCost ?? 0)
-        }}</template>
+        <template #hitRatePct="{ row }">{{ pct(asDay(row).hitRatePct ?? 0) }}</template>
+        <template #paidCost="{ row }">{{ money(asDay(row).paidCost ?? 0) }}</template>
+        <template #savedCost="{ row }">{{ money(asDay(row).savedCost ?? 0) }}</template>
       </UiTable>
     </section>
   </div>
@@ -243,6 +378,8 @@ onMounted(load);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--ui-space-3);
+  flex-wrap: wrap;
   margin-bottom: var(--ui-space-5);
 }
 
@@ -265,6 +402,9 @@ onMounted(load);
   font-size: var(--ui-font-size-sm);
   font-weight: var(--ui-weight-medium);
   cursor: pointer;
+  transition:
+    background-color var(--ui-ease),
+    color var(--ui-ease);
 }
 
 .next-roi__seg:hover {
@@ -278,8 +418,28 @@ onMounted(load);
   font-weight: var(--ui-weight-semibold);
 }
 
-.next-roi__summary {
+.next-roi__toolbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+}
+
+.next-roi__range {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.next-roi__panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-space-4);
   margin-bottom: var(--ui-space-5);
+}
+
+@media (max-width: 1100px) {
+  .next-roi__panels {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .next-roi__summary-body {
@@ -289,14 +449,61 @@ onMounted(load);
   flex-wrap: wrap;
 }
 
+.next-roi__comp {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+}
+
+.next-roi__comp-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) 56px 64px;
+  align-items: center;
+  gap: var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+}
+
+.next-roi__comp-label {
+  color: var(--ui-foreground-secondary);
+}
+
+.next-roi__comp-track {
+  height: 8px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-muted);
+  overflow: hidden;
+}
+
+.next-roi__comp-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--ui-radius-pill);
+}
+
+.next-roi__comp-count {
+  text-align: right;
+  color: var(--ui-foreground);
+}
+
+.next-roi__comp-pct {
+  text-align: right;
+  color: var(--ui-foreground-secondary);
+}
+
 .next-roi__cards {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: var(--ui-space-4);
   margin-bottom: var(--ui-space-5);
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1280px) {
+  .next-roi__cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
   .next-roi__cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -305,8 +512,8 @@ onMounted(load);
 .next-roi__card {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-space-2);
-  padding: var(--ui-space-5);
+  gap: var(--ui-space-1);
+  padding: var(--ui-space-4) var(--ui-space-5);
 }
 
 .next-roi__value {
@@ -322,5 +529,18 @@ onMounted(load);
 .next-roi__label {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
+}
+
+.next-roi__sub {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.next-roi__sub-sep {
+  color: var(--ui-border);
 }
 </style>

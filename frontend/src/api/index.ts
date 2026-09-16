@@ -119,6 +119,14 @@ export function changePassword(currentPassword: string, newPassword: string): Pr
   return post<void>('/api/v1/auth/password', { currentPassword, newPassword });
 }
 
+/**
+ * #597: self-service "sign out of other sessions" — revokes every session of
+ * the current user except the calling one. The current session stays valid.
+ */
+export function logoutOtherSessions(): Promise<{ message: string }> {
+  return post<{ message: string }>('/api/v1/auth/logout-others');
+}
+
 // ---- self-service Virtual Keys ----
 
 export function listVirtualKeys(): Promise<VirtualKeyView[]> {
@@ -511,6 +519,16 @@ export function createApiConsumer(
 
 export function disableApiConsumer(id: string): Promise<ApiConsumerView> {
   return post<ApiConsumerView>(`/api/v1/admin/api-consumers/${id}/disable`);
+}
+
+/** ADR-0011: set/rotate the consumer's RS256 JWT verification key (public PEM only). */
+export function setConsumerJwtKey(id: string, publicKeyPem: string): Promise<ApiConsumerView> {
+  return put<ApiConsumerView>(`/api/v1/admin/api-consumers/${id}/jwt-key`, { publicKeyPem });
+}
+
+/** ADR-0011: remove the JWT verification key — tokens signed by it stop verifying. */
+export function removeConsumerJwtKey(id: string): Promise<ApiConsumerView> {
+  return del<ApiConsumerView>(`/api/v1/admin/api-consumers/${id}/jwt-key`);
 }
 
 /** Issue #338 (I5): per-consumer MCP call overview from the access log. */

@@ -23,22 +23,26 @@ import {
   UiDialog,
   UiDrawer,
   UiInput,
+  UiPageGuide,
   UiSelect,
   UiStatusBadge,
   UiTable,
   toast,
 } from '@/ui';
 import type { UiSelectOption } from '@/ui';
+import { CREDENTIALS_GUIDE } from '@/content/pageGuides';
 import type {
   CredentialDetailView,
   CredentialVersionView,
   CredentialView,
+  Grant,
   SubscriptionView,
   ValidateCredentialResponse,
 } from '@/types/generated-api';
 
 const credentials = ref<CredentialView[]>([]);
 const subscriptions = ref<SubscriptionView[]>([]);
+const grants = ref<Grant[]>([]);
 const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
@@ -58,6 +62,21 @@ const subscriptionOptions = computed<UiSelectOption[]>(() =>
     label: `${s.productName ?? ''} · ${s.name ?? ''}`,
   })),
 );
+
+// 依赖可见性（#657）：删除/禁用一把凭证前，先在列表上看到它被多少条授权引用。
+const grantCountByCredential = computed(() => {
+  const counts = new Map<string, number>();
+  for (const g of grants.value) {
+    if (g.upstreamCredentialId) {
+      counts.set(g.upstreamCredentialId, (counts.get(g.upstreamCredentialId) ?? 0) + 1);
+    }
+  }
+  return counts;
+});
+
+function grantCountOf(credentialId: string | undefined): number {
+  return credentialId ? (grantCountByCredential.value.get(credentialId) ?? 0) : 0;
+}
 
 const providerStatusLabel: Record<string, string> = {
   VALID: '有效（供应商已接受）',
@@ -86,6 +105,7 @@ function statusTone(status: string | undefined): 'success' | 'warning' | 'danger
 const columns = [
   { key: 'name', title: '名称', minWidth: '220px' },
   { key: 'product', title: '供应商产品', minWidth: '220px' },
+  { key: 'grants', title: '授权引用', width: '100px', align: 'right' as const },
   { key: 'status', title: '状态', width: '110px' },
   { key: 'lastValidated', title: '最近验证', minWidth: '170px' },
   { key: 'version', title: '版本', width: '80px', align: 'right' as const },
@@ -338,12 +358,15 @@ async function load() {
   loading.value = true;
   loadError.value = '';
   try {
-    const [credentialList, subscriptionList] = await Promise.all([
+    // 凭证与订阅是主数据；授权计数为辅助聚合，失败降级为 0 不阻塞列表（#657）。
+    const [credentialList, subscriptionList, grantList] = await Promise.all([
       api.listCredentials(),
       api.listSubscriptions(),
+      api.listGrants().catch(() => [] as Grant[]),
     ]);
     credentials.value = credentialList;
     subscriptions.value = subscriptionList;
+    grants.value = grantList;
   } catch (error) {
     if (error instanceof ApiError) {
       loadError.value = error.message;
@@ -379,6 +402,8 @@ onMounted(load);
       </div>
     </header>
 
+    <UiPageGuide :guide="CREDENTIALS_GUIDE" storage-key="credentials" />
+
     <div v-if="loadError" class="ui-alert ui-alert--error" data-testid="credentials-load-error">
       {{ loadError
       }}<span v-if="loadRequestId" class="ui-request-id"> requestId: {{ loadRequestId }}</span>
@@ -398,6 +423,7 @@ onMounted(load);
             v-model="createName"
             label="名称"
             required
+            hint="最长 200 个字符。"
             placeholder="例如 deepseek-main"
             data-testid="credential-create-name"
           />
@@ -414,6 +440,7 @@ onMounted(load);
             v-model="createSecret"
             label="Secret"
             required
+            hint="8–512 个字符；不能包含控制字符。"
             :type="showCreateSecret ? 'text' : 'password'"
             placeholder="供应商 API 密钥（录入后仅显示一次）"
             data-testid="credential-create-secret"
@@ -512,6 +539,11 @@ onMounted(load);
         <template #product="{ row }">{{
           productName((row as CredentialView).subscriptionId)
         }}</template>
+        <template #grants="{ row }">
+          <span class="ui-num" data-testid="credential-grant-count">{{
+            grantCountOf((row as CredentialView).id)
+          }}</span>
+        </template>
         <template #status="{ row }">
           <UiStatusBadge
             :tone="statusTone((row as CredentialView).status)"

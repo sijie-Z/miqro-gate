@@ -6,12 +6,30 @@
 
 - Project phase: `PHASE_1`
 - Current executor: `Claude Code`
-- Current goal: `2026-09-13 自主轮（rc.19 发布记录）` — `IN_PROGRESS`
-- Goal status: `IN_PROGRESS（develop @ abd13a9；rc.18 已发布；**sub-agent 全量审查（7 路）完成，约 70 条
-  发现**——已交付 #441（HIGH×2 抢修，等 CodeQL 平台恢复合并）、#440（前端守卫二批，本地绿待推）、
-  #444（网关缓存，本 PR）；队列：控制面锁定/XFF、转义族、导出泄漏、并发族、shutdown flush、语料矩阵
-  刷新；注：CodeQL 自 09:01Z 起平台侧上传故障（GitHub 事件），非代码问题`
-- Last updated: `2026-09-13 CST`
+- Current goal: `2026-09-15 并行会话轮` — `IN_PROGRESS`
+- Goal status: `IN_PROGRESS（多会话并行推进；已合并进展以 develop git log 为准。在途 PR：#599
+  用途标注、#601 留痕控制台、#602 资料页增强；#596/#597 交付与验证细节见下方 09-15 交接点。
+  此前 rc.19 审查修复波已全量落地并发布）`
+- Last updated: `2026-09-15 CST`
+
+## 会话交接点 2026-09-15（资料页增强 #597 + 用途标签澄清 #596）
+
+- **#596（PR #599 待合并）**：Virtual Key「用途」语义显性化——创建表单补说明（声明标签、
+  不限制客户端、可调用范围由授权产品与允许模型决定）+ 列表「用途」列头悬停提示；
+  `UiTable` 列配置新增可选 `hint`（渲染 `th[title]`，向后兼容）；中英文案入 i18n。
+  语义核对：数据面全量检索 `purpose` 唯一消费点是缓存键派生（`CacheKeyFactory` 区分位），
+  不参与任何放行/拒绝（product-requirements §5.1「一个用途标签」、F60「不设 purpose 白名单」）。
+  验证：定向 vitest 14/14、全量 257/257、typecheck/build、改动文件 eslint 全绿。
+- **#597（PR #602 待合并）**：资料页增强（对齐 GitHub 安全设置）+ 自助「退出其他会话」——
+  新端点 `POST /api/v1/auth/logout-others`（复用 `SessionService.revokeOtherSessions`，
+  审计 `LOGOUT_OTHERS`，强制改密会话被 `PASSWORD_CHANGE_REQUIRED` 门槛拦截）+ 前端重排
+  （身份头/用量速览/账号与安全/当前会话；速览口径=用量页合计行，失败降级「—」）。
+  验证：后端全模块单测 BUILD SUCCESS + `AuthIntegrationTest` 22/22（新增 3 例）与
+  `OpenApiSpecIntegrationTest` 1/1（PostgreSQL Testcontainers）；前端 263/263 单测 +
+  e2e 53/53（含资料页 2 例与 forbidden-aesthetics）；OpenAPI 基线整体刷新到当前 develop
+  （一并纳入 #587/#552 尚未刷新的增量）+ 前端类型重生成。
+- 两 PR 均自 develop 出发，合并顺序无依赖；`ui-specification.md` §Virtual Keys/§Profile
+  表述已随本批文档更新。
 
 ## 会话交接点 2026-09-13（rc.19 发布：审查修复波全量落地）
 
@@ -3019,3 +3037,83 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - spotless：apply 仅触本轮 16 文件（无整树漂移），diffs 为纯格式。
 
 **边界**：管理员面（admin/virtual-keys）未加停用/启用（后续可选）；行内用量窗口固定 7 天。
+## 2026-09-16 午后 — Goal #658：API 消费者页补 JWT 公钥管理入口（ADR-0011 控制台闭环）
+
+**背景**：跟踪 issue #658。后端 ADR-0011（#340 增补）早已交付消费者 JWT（PUT/DELETE /admin/api-consumers/{id}/jwt-key，RS256 公钥验签、指纹返回），但控制台无入口——平台对接方只能手搓 API。腾讯/阿里控制台都把「消费者密钥（API Key / JWT）」作为一等公民管理。
+
+**交付**（分支 feat/consumer-jwt-658，隔离工作树 D:/tmp/miqro-guides，base develop@807c567c）：
+- api 客户端：setConsumerJwtKey（PUT）/ removeConsumerJwtKey（DELETE），复用既有端点（无契约变更）。
+- 消费者页：新增「凭证」列（API Key / JWT 徽章，指纹存在即亮，data-testid=consumer-jwt-badge）；行操作新增「JWT 公钥」（仅 ACTIVE 消费者）：弹窗显示当前指纹与设置时间，粘贴 PEM 保存/轮换（空值守卫、后端校验文案透传），「移除公钥」走 danger 确认门（文案明示 API Key 通道不受影响）；弹窗描述明示「平台自持私钥签发、网关只存公钥验签」。
+- EN 词典 +15 条 + 2 条动态 pattern。
+- 供应商页「模型目录」列已随 #657 实施（本 issue 范围相应收窄，issue 正文将同步更新）。
+
+**验证**：vitest 291/291（55 文件，新增 2 例：保存 PEM 调用参数、危险确认移除 + 凭证列徽章）；vue-tsc（app/spec/node）PASS；eslint（改动 4 文件，--fix）PASS；vite build PASS；Playwright e2e 52/52 PASS。
+
+**边界**：UI 不发私钥、不做 JWT 内容预览；禁用消费者不出现 JWT 操作（与后端 409 CONSUMER_DISABLED 语义一致）。
+## 2026-09-16 午后 — Goal #657：列表依赖计数 + 表单规则文案 + 空态引导（对标腾讯对象元数据三件套）
+
+**背景**：跟踪 issue #657（「控制台对标腾讯 AI 网关」P0 第二批；#656 使用指引已提 PR #660）。腾讯列表三件套=状态/版本/**依赖计数**，我们缺"被谁依赖"的可见性——删被引用凭证撞 FK 裸 500（#393），管理员在列表上看不到影响面；表单校验规则只存在于后端报错。
+
+**交付**（分支 feat/list-metadata-657，隔离工作树 D:/tmp/miqro-guides，base develop@807c567c）：
+- 上游凭证行新增「授权引用」列（一次 listGrants 聚合）；项目行新增「授权」「成员」列（成员逐项目 Promise.allSettled，失败显示 —）；供应商行新增「模型目录」列（一次 adminListModels 全量聚合：N 个模型 / 未探测）与「依赖」列（凭证 N · 授权 N）。全部只读聚合，无新端点。
+- 表单规则文案与后端逐条核对：凭证 name≤200、Secret 8–512 无控制字符（FormatCredentialValidator）；消费者 name≤200 且唯一（JWT sub 映射键）、到期静默 401（SQL 层过期过滤）；项目标签提示修正为 ADR-0018 现行事实（留空自动从代码派生、被密钥绑定引用后不可修改）。
+- 三个列表空态补「下一步」引导；EN 词典 +12 条 + 2 条动态单元格 pattern；三个视图 spec 增断言，成员/模型调用计数断言按抽屉折算 mockClear。
+
+**验证**：vitest 289/289（55 文件）；vue-tsc（app/spec/node 三工程）PASS；eslint（仅改动 8 文件，--fix）PASS；vite build PASS。
+
+**边界**：不做点击过滤跳转；探测时间仍在「模型目录」弹窗内（列表只给计数与未探测态）；#393（删除前依赖检查 409+清单）未动。
+
+**补记（同日）**：e2e 抓到真实缺陷——新增的辅助聚合请求（模型目录/授权/订阅）在未被 mock 或上游失败时会把整个 Promise.all 拖失败，主列表整页空态。已修：主数据（产品目录/凭证列表/项目列表）保持强依赖；四个辅助聚合一律 .catch 降级（计数显示 0 / 未探测 / —），列表照常渲染。e2e 两处失败复跑转绿（52/52）。
+
+## 2026-09-16 午后 — 修复 #663：部署换版后懒加载 chunk 404 白屏自愈（/app/providers 实测）
+
+**背景**：用户报障 /app/providers 白屏。nginx 日志实锤两条旧 chunk 404（NextProvidersView-CpEUA9cA.js / NextApprovalCenterView-DvVCRa6q.js，真实用户浏览器，发生在 10:52 portal 部署后 5 分钟）——旧标签页仍在运行上一版 bundle，部署整体替换哈希文件名后按旧哈希请求懒加载 chunk → 404 → 动态 import 失败 → Vue Router 导航中断 → 白屏且无自愈，仅手动 F5 可恢复。
+
+**交付**（分支 fix/chunk-load-reload-663）：`utils/chunk-reload.ts`——`vite:preloadError` 事件 + `router.onError` 双通道识别动态 import 失败（覆盖 Chromium/Firefox/Safari 三种文案）→ `location.reload()` 一次拾取新 index.html；`sessionStorage` 时间戳 10s 冷却防刷新风暴；storage 不可用时放弃自动刷新（白屏优于死循环）；`main.ts` 装配，冷却期外错误照常上抛控制台。
+
+**验证**：单测 4/4（识别矩阵/冷却窗口/storage 兜底/事件抑制与默认放行）；全量 299/299；vue-tsc 三配置与改动文件 eslint 干净。
+
+## 2026-09-16 午后 — 修复 #667：portal 镜像构建改串行，消除 2G 机部署期全站抖动
+
+**背景**：用户报障"无法登录、请求 60s 超时"。与 #663 白屏同属一个事故窗口：12:15–12:32 演示机重建三镜像期间，portal 构建容器内 `npm run build` 并行跑 vue-tsc（545MB）与 vite build（740MB），峰值 ~1.3G 叠加常驻 JVM/Redpanda/Postgres 击穿 1.9G 物理内存，swap 1.9G/1.9G 打满、load 33——control-plane 全面无响应（登录 499/60s 超时），网关对另一用户连续 502（DNS 抖动下 unresolvable）。构建结束约 2 分钟后全站自动恢复。
+
+**交付**（分支 fix/portal-build-sequential-667）：`deploy/docker/portal.Dockerfile` frontend 阶段 `RUN npm run build`（run-p 并行）改为 `npm run build-only && npm run typecheck` 串行——峰值 ≈ max(740, 545) ≈ 740MB；2 vCPU 上并行无吞吐收益，typecheck 质量门保留。
+
+**验证**：本地 docker build 全量构建通过（含 npm ci / vite build / vue-tsc 三配置）；CI images job 随 PR 验证。
+
+## 2026-09-16 午后 — 需求 #668：路由切换无感化（滚动位置重置 + 悬停/空闲预取 chunk）
+
+**背景**：用户报障"切换页面无法无感路由——会先看到上一个/下面滚动位置的内容再到下一个界面"。定位三处缺口：① `.new-shell__content`（跨路由复用的滚动容器）无任何 scrollTop 重置，长页滚一半切短页直接停在底部；② 全部约 35 条路由懒加载且无预取，点击后等 chunk 网络往返才提交导航；③ #655 的 out-in+仅 enter 过渡已正确，无需改动。
+
+**交付**（分支 fix/route-feel-668，仅 NewShell.vue）：
+- `watch(route.path)` → `contentEl.scrollTop = 0`（query-only 变化不重置，保留页内筛选用例）；
+- 菜单 `@mouseenter/@focus` → `prefetchRoute(name)`：`router.resolve` 后逐 record 调 `components` 内的 loader 函数（typeof 守卫；模块缓存命中后点击即达）；`prefetchedRoutes` Set 去重，每路由至多一次；
+- mount 后 1.5s 起对当前角色全部菜单项序贯静默预取（120ms 步进；卸载清定时器）。
+
+**验证**：单测 4/4（悬停一次去重/聚焦/空闲全量/滚动重置与 query 豁免）；全量 **299/299**；typecheck 三配置 + 改动文件 eslint 干净。**浏览器实测**（mock 控制面 + dev 服务器）：滚动 500→0 且滚动能力保留；挂载后 1.5s 空闲窗口内悬停 → 700ms 内目标 chunk 抵达（资源计时 2 条=模块+样式）；未交互页面（资料）被空闲预取自动加载。
+## 2026-09-16 午后 — Goal #656：页面级「使用指引」——UiPageGuide + 六个重点管理页（对标腾讯产品指南）
+
+**背景**：跟踪 issue #656（「控制台对标腾讯 AI 网关」P0 第一批；同批 #657 列表依赖计数与表单规则文案、#658 API 消费者 JWT 入口另立）。腾讯控制台每个管理页顶部都有「产品指南/操作指引」，把跨页链路写成 3–4 步卡片；我们此前全站唯一编号引导只在「我的密钥」空态里，链路知识是隐性的。
+
+**交付**（分支 feat/page-guides-656，隔离工作树 D:/tmp/miqro-guides，base develop@807c567c）：
+- 新组件 `frontend/src/ui/PageGuide.vue`（barrel 导出 UiPageGuide）：页头下方「使用指引」卡——3–4 步，每步 = 序号 + 动宾标题 + 一句话 + 「前往『X』」跨页路由链接（可选 GitHub 文档直链，沿用 #651 模式）；「收起」（细条）/「不再显示」按页持久化（localStorage，setup 同步读取避免闪烁；storage 不可用静默降级）。
+- 内容模块 `frontend/src/content/pageGuides.ts`：六页文案——供应商「接入一家新供应商」、上游凭证「三步用起来」、API 消费者「外部系统接入四步」、我的密钥「从零到调用四步」、授权「授权四步」、项目「项目四步」。涉及生效语义的步骤明写「保存后数秒内生效，无需同步」（快照自动刷新，不引入腾讯式手动同步动作）；凭证指引写明「轮换后所有引用方自动使用新版本」。
+- 六页接入 + `ui/index.ts` barrel；EN 词典 +83 条；`frontend-design.md` §6 增补 PageGuide 规范段。
+
+**验证**：
+- vitest 全量 294/294（新增 `PageGuide.spec.ts` 5 例：渲染与链接、收起记忆、隐藏、内容守卫——to 必配 toText、/app 前缀、文档仅 https github；`NextCredentialsView.spec` 增指引断言）。
+- vue-tsc（app/spec/node 三工程）PASS；eslint（仅本轮改动 11 文件，--fix）PASS；vite build PASS。
+- Playwright e2e 52/52 PASS（生产构建 + preview，4 视口；含全部管理页 baseline 与 forbidden-aesthetics 审计；截图 frontend/test-results/baseline/）。
+
+**边界**：不加同步动作/状态列（无实例层）；e2e 用例与金样未动（截图仅捕获，无像素对比）；#657/#658 为同方案后续批。
+
+## 2026-09-16 午后 — 部署件固化 #677：2G 演示机 JVM/内存调优回流 compose.prod.yaml
+
+**背景**：演示机控制台内存告警 95%+（同日 #663/#667/#668 事故窗口定性：12:15–12:32 构建峰值 97.5%、日常常驻 ~85%）。午后完成实测瘦身，但改动只落在服务器 compose（配置漂移，整树刷新即回退）。瘦身时开启 GC 日志实测：control-plane 堆存活仅 ~69MB、gateway ~24MB——原 512m/640m 默认值与镜像 ENTRYPOINT 兜底的 `-XX:MaxRAMPercentage=75`（768m）均严重超配；JVM RSS 大头是 metaspace（86MB）+ code cache + 线程（Spring Boot 固有）。附带实证：`-Xmx` 优先于 `-XX:MaxRAMPercentage`（MaxHeapSize 非默认则百分比分支跳过），二者不竞争。
+
+**交付**（分支 chore/compose-prod-tuning-677，仅 `deploy/compose.prod.yaml`）：
+- control-plane `-Xmx512m→448m`、gateway `-Xmx640m→384m`，均加 `-XX:+UseSerialGC` 与 `-Xlog:gc*:file=/tmp/gc.log:time,uptime:filecount=2,filesize=5m`；
+- postgres `shared_buffers` 默认 64MB（`POSTGRES_SHARED_BUFFERS` 覆盖；共享内存不可回收，调小后余量转为可回收内核页缓存）；
+- 留痕消费端（`MIQROKEY_RETENTION_CONSUMER_*`）与响应缓存（`MIQROKEY_CACHE_ENABLED`）开关环境变量化（默认关）——消除服务器手改 compose 的漂移来源，仓库默认行为不变。
+
+**验证**：`docker compose -f deploy/compose.prod.yaml config` 通过（本机 v5.1.4；渲染的 JAVA_TOOL_OPTIONS/shared_buffers 与服务器实测目标逐字一致）。服务器侧（2G 演示机）已按目标态运行并验证：swap 899→85MB、dockerd RSS 317→97MB、控制台常驻口径 85%→~60%、全栈 healthy、登录 `/api/v1/auth/login` 200、PSI=0、零 OOM；服务器 `.env` 已补齐对应开关值（cache / 留痕消费端 / COMPOSE_PROFILES）。

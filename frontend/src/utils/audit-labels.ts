@@ -47,6 +47,7 @@ const ACTION_LABELS: Record<string, string> = {
   LOGIN_FAILED: '登录失败',
   LOGIN: '登录',
   LOGOUT: '登出',
+  LOGOUT_OTHERS: '退出其他会话',
   REGISTER: '注册',
 };
 

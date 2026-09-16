@@ -61,6 +61,8 @@ import java.util.UUID;
  * atomic.</li>
  * <li>{@link #logout(User, UUID, String)} — no outer transaction; session
  * revocation and LOGOUT audit each start their own transaction.</li>
+ * <li>{@link #logoutOthers(User, UUID, String)} — no outer transaction; session
+ * revocation and LOGOUT_OTHERS audit each start their own transaction.</li>
  * </ul>
  */
 @Service
@@ -369,6 +371,19 @@ public class AuthenticationService {
         auditService.record(user.tenantId(), user.id(), "LOGOUT", "SESSION", sessionId, buildSummary(user.username()),
                 requestId);
         LOG.info("User {} logged out", user.username());
+    }
+
+    /**
+     * Self-service "sign out of other sessions": revoke every session of the
+     * current user except the calling one (the same revocation the change-password
+     * flow performs internally). The current session stays valid, so the caller
+     * keeps working without re-authenticating.
+     */
+    public void logoutOthers(User currentUser, UUID currentSessionId, String requestId) {
+        sessionService.revokeOtherSessions(currentUser.id(), currentSessionId);
+        auditService.record(currentUser.tenantId(), currentUser.id(), "LOGOUT_OTHERS", "USER", currentUser.id(),
+                buildSummary(currentUser.username()), requestId);
+        LOG.info("User {} revoked other sessions", currentUser.username());
     }
 
     // -----------------------------------------------------------------------
