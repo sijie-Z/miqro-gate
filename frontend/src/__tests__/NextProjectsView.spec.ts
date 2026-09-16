@@ -14,6 +14,7 @@ vi.mock('@/api', () => ({
   removeProjectMember: vi.fn(),
   addProjectMember: vi.fn(),
   listUsers: vi.fn(),
+  listGrants: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -54,6 +55,17 @@ describe('NextProjectsView', () => {
       project({ id: 'p2', code: 'QA', name: 'QA 回归', projectTag: undefined, status: 'DISABLED' }),
     ]);
     mockApi.listUsers.mockResolvedValue([]);
+    // #657: one grant on p1, one member roster for every project.
+    mockApi.listGrants.mockResolvedValue([
+      {
+        id: 'g1',
+        projectId: 'p1',
+        providerProductId: 'pp1',
+        upstreamCredentialId: 'c1',
+        status: 'ACTIVE',
+      },
+    ]);
+    mockApi.listProjectMembers.mockResolvedValue([member()]);
     document.body.innerHTML = '';
   });
 
@@ -70,6 +82,12 @@ describe('NextProjectsView', () => {
     expect(wrapper.text()).toContain('core-ai');
     expect(wrapper.text()).toContain('正常');
     expect(wrapper.text()).toContain('停用');
+    // #657 dependency columns: p1 has one grant; every project shows its roster size.
+    const grantCounts = wrapper.findAll('[data-testid="project-grant-count"]');
+    expect(grantCounts[0]!.text()).toBe('1');
+    expect(grantCounts[1]!.text()).toBe('0');
+    const memberCounts = wrapper.findAll('[data-testid="project-member-count"]');
+    expect(memberCounts[0]!.text()).toBe('1');
   });
 
   it('creates a project and reloads', async () => {
@@ -144,6 +162,8 @@ describe('NextProjectsView', () => {
     ]);
     const wrapper = mountView();
     await flushPromises();
+    // #657: load() also counts members per project — count only the drawer's calls below.
+    mockApi.listProjectMembers.mockClear();
 
     await wrapper.find('[data-testid="project-members-open"]').trigger('click');
     await flushPromises();
@@ -169,7 +189,7 @@ describe('NextProjectsView', () => {
     await flushPromises();
 
     expect(wrapper.find('[data-testid="project-create-tag-hint"]').text()).toContain(
-      '留空将导致成员无法创建 Virtual Key',
+      '留空将自动从项目代码派生',
     );
   });
 

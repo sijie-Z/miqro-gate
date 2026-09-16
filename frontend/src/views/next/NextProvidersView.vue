@@ -5,18 +5,29 @@
  * product instances with protocol / base host / implementation / balance
  * source columns.
  */
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTable, UiTooltip, toast } from '@/ui';
 import ProviderBrandChip from '@/components/ProviderBrandChip.vue';
 import type { ProviderProductView } from '@/types/api';
-import type { ModelCatalogRow } from '@/types/generated-api';
+import type {
+  CredentialView,
+  Grant,
+  ModelCatalogRow,
+  SubscriptionView,
+} from '@/types/generated-api';
 
 const products = ref<ProviderProductView[]>([]);
 const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
+// 依赖与目录元数据（#657）：一次并行取订阅/凭证/授权/全量模型目录，聚合成
+// 列表上的「模型数 / 凭证数 / 授权数」——删除或停用前的轻量影响面。
+const subscriptions = ref<SubscriptionView[]>([]);
+const credentials = ref<CredentialView[]>([]);
+const grants = ref<Grant[]>([]);
+const catalogModels = ref<ModelCatalogRow[]>([]);
 
 // UiTable slot rows arrive as loose Records; the catalogue list always returns
 // complete product rows, so cast back to the handwritten view type (which is
@@ -30,8 +41,10 @@ const columns = [
   { key: 'product', title: '产品', minWidth: '220px' },
   { key: 'protocols', title: '协议', width: '190px' },
   { key: 'baseUrl', title: '接入地址', minWidth: '220px' },
+  { key: 'catalog', title: '模型目录', width: '110px' },
   { key: 'implementationStatus', title: '实现状态', width: '130px' },
   { key: 'balanceAuthority', title: '余额来源', width: '120px' },
+  { key: 'deps', title: '依赖', width: '150px' },
   { key: 'actions', title: '操作', width: '200px' },
 ];
 
@@ -279,10 +292,67 @@ async function removeManualModel(row: ModelCatalogRow) {
   }
 }
 
+const catalogCountByProduct = computed(() => {
+  const counts = new Map<string, number>();
+  for (const row of catalogModels.value) {
+    if (row.providerProductId) {
+      counts.set(row.providerProductId, (counts.get(row.providerProductId) ?? 0) + 1);
+    }
+  }
+  return counts;
+});
+
+const credentialCountByProduct = computed(() => {
+  const productBySubscription = new Map(
+    subscriptions.value.map((s) => [s.id, s.providerProductId]),
+  );
+  const counts = new Map<string, number>();
+  for (const c of credentials.value) {
+    const productId = c.subscriptionId ? productBySubscription.get(c.subscriptionId) : undefined;
+    if (productId) counts.set(productId, (counts.get(productId) ?? 0) + 1);
+  }
+  return counts;
+});
+
+const grantCountByProduct = computed(() => {
+  const counts = new Map<string, number>();
+  for (const g of grants.value) {
+    if (g.providerProductId) {
+      counts.set(g.providerProductId, (counts.get(g.providerProductId) ?? 0) + 1);
+    }
+  }
+  return counts;
+});
+
+function catalogCountOf(productId: string): number {
+  return catalogCountByProduct.value.get(productId) ?? 0;
+}
+
+function credentialCountOf(productId: string): number {
+  return credentialCountByProduct.value.get(productId) ?? 0;
+}
+
+function grantCountOf(productId: string): number {
+  return grantCountByProduct.value.get(productId) ?? 0;
+}
+
 async function load() {
   loading.value = true;
   try {
-    products.value = await api.listProviderProducts();
+    const [productList, subscriptionList, credentialList, grantList, modelList] = await Promise.all(
+      [
+        api.listProviderProducts(),
+        api.listSubscriptions(),
+        api.listCredentials(),
+        api.listGrants(),
+        api.adminListModels(),
+      ],
+    );
+    products.value = productList;
+    subscriptions.value = subscriptionList;
+    credentials.value = credentialList;
+    grants.value = grantList;
+    catalogModels.value = modelList;
   } catch (error) {
     if (error instanceof ApiError) {
       loadError.value = error.message;
@@ -320,6 +390,7 @@ onMounted(load);
         :loading="loading"
         row-key="id"
         empty-title="暂无产品实例"
+        empty-description="产品目录由签名目录播种；接入从「上游凭证」录入第一把真实密钥开始。"
         data-testid="products-table"
       >
         <template #provider="{ row }">
@@ -342,6 +413,17 @@ onMounted(load);
         <template #baseUrl="{ row }">
           <span class="ui-mono">{{ productOf(row).baseUrlHost || '—' }}</span>
         </template>
+        <template #catalog="{ row }">
+          <span
+            v-if="catalogCountOf(productOf(row).id)"
+            class="ui-num"
+            data-testid="product-catalog-count"
+            >{{ catalogCountOf(productOf(row).id) }} 个模型</span
+          >
+          <span v-else class="next-providers__muted" data-testid="product-catalog-count"
+            >未探测</span
+          >
+        </template>
         <template #implementationStatus="{ row }">
           <UiTooltip :text="implHintOf(productOf(row).implementationStatus)">
             <UiStatusBadge
@@ -357,6 +439,12 @@ onMounted(load);
           <span class="next-providers__balance">{{
             balanceLabel(productOf(row).balanceAuthority)
           }}</span>
+        </template>
+        <template #deps="{ row }">
+          <span class="ui-num" data-testid="product-deps"
+            >凭证 {{ credentialCountOf(productOf(row).id) }} · 授权
+            {{ grantCountOf(productOf(row).id) }}</span
+          >
         </template>
         <template #actions="{ row }">
           <div class="next-providers__actions">
@@ -558,6 +646,10 @@ onMounted(load);
 .ui-alert--error {
   background: var(--ui-danger-bg);
   color: var(--ui-danger-fg);
+}
+
+.next-providers__muted {
+  color: var(--ui-foreground-faint);
 }
 
 .next-providers__provider {

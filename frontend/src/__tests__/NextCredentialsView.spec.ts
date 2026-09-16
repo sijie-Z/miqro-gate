@@ -9,6 +9,7 @@ import type { CredentialView, SubscriptionView } from '@/types/generated-api';
 vi.mock('@/api', () => ({
   listCredentials: vi.fn(),
   listSubscriptions: vi.fn(),
+  listGrants: vi.fn(),
   createCredential: vi.fn(),
   validateCredential: vi.fn(),
   rotateCredential: vi.fn(),
@@ -94,6 +95,22 @@ describe('NextCredentialsView', () => {
       }),
     ]);
     mockApi.listSubscriptions.mockResolvedValue([subscription]);
+    mockApi.listGrants.mockResolvedValue([
+      {
+        id: 'g1',
+        projectId: 'p1',
+        providerProductId: subscription.providerProductId,
+        upstreamCredentialId: credential().id,
+        status: 'ACTIVE',
+      },
+      {
+        id: 'g2',
+        projectId: 'p2',
+        providerProductId: subscription.providerProductId,
+        upstreamCredentialId: credential().id,
+        status: 'ACTIVE',
+      },
+    ]);
   });
 
   function mountView() {
@@ -107,6 +124,11 @@ describe('NextCredentialsView', () => {
     await flushPromises();
 
     expect(wrapper.find('[data-testid="credentials-table"]').exists()).toBe(true);
+    // #657 dependency column: the first credential is referenced by two grants.
+    expect(wrapper.text()).toContain('授权引用');
+    const firstRow = wrapper.findAll('[data-testid="credential-grant-count"]');
+    expect(firstRow.length).toBeGreaterThan(0);
+    expect(firstRow[0]!.text()).toBe('2');
     expect(wrapper.text()).toContain('deepseek-main');
     expect(wrapper.text()).toContain('sk-a1b2c3d4e5f6');
     expect(wrapper.text()).toContain('DeepSeek PAYG · Main');

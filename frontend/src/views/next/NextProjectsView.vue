@@ -18,12 +18,15 @@ import {
   UiTable,
   toast,
 } from '@/ui';
-import type { AdminUser, MemberView, Project } from '@/types/generated-api';
+import type { AdminUser, Grant, MemberView, Project } from '@/types/generated-api';
 
 const projects = ref<Project[]>([]);
 const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
+const grants = ref<Grant[]>([]);
+// 依赖元数据（#657）：成员数按项目并行取，失败静默（列显示 —），不阻塞列表。
+const memberCounts = ref<Record<string, number>>({});
 
 const creating = ref(false);
 const createCode = ref('');
@@ -70,6 +73,8 @@ const columns = [
   { key: 'code', title: '代码', width: '110px' },
   { key: 'name', title: '名称', minWidth: '180px' },
   { key: 'projectTag', title: '路由标签', width: '150px' },
+  { key: 'grants', title: '授权', width: '80px', align: 'right' as const },
+  { key: 'members', title: '成员', width: '80px', align: 'right' as const },
   { key: 'status', title: '状态', width: '110px' },
   { key: 'actions', title: '操作', width: '100px', align: 'center' as const },
 ];
@@ -80,10 +85,40 @@ const memberColumns = [
   { key: 'actions', title: '', width: '80px', align: 'center' as const },
 ];
 
+// 依赖可见性（#657）：授权数来自一次全量 grants；成员数逐项目并行取。
+const grantCountByProject = computed(() => {
+  const counts = new Map<string, number>();
+  for (const g of grants.value) {
+    if (g.projectId) {
+      counts.set(g.projectId, (counts.get(g.projectId) ?? 0) + 1);
+    }
+  }
+  return counts;
+});
+
+function grantCountOf(projectId: string | undefined): number {
+  return projectId ? (grantCountByProject.value.get(projectId) ?? 0) : 0;
+}
+
+async function loadMemberCounts(list: Project[]) {
+  const results = await Promise.allSettled(list.map((p) => api.listProjectMembers(p.id!)));
+  const counts: Record<string, number> = {};
+  list.forEach((p, index) => {
+    const result = results[index];
+    if (result && result.status === 'fulfilled' && Array.isArray(result.value)) {
+      counts[p.id!] = result.value.length;
+    }
+  });
+  memberCounts.value = counts;
+}
+
 async function load() {
   loading.value = true;
   try {
-    projects.value = await api.listProjects();
+    const [projectList, grantList] = await Promise.all([api.listProjects(), api.listGrants()]);
+    projects.value = projectList;
+    grants.value = grantList;
+    await loadMemberCounts(projectList);
   } catch (error) {
     if (error instanceof ApiError) {
       loadError.value = error.message;
@@ -318,7 +353,7 @@ onMounted(load);
             data-testid="project-create-tag"
           />
           <p class="next-projects__tag-hint" data-testid="project-create-tag-hint">
-            留空将导致成员无法创建 Virtual Key；可稍后在「编辑」中补填。
+            留空将自动从项目代码派生；已被密钥绑定引用的标签不可修改（1–64 位字母、数字、- 或 _）。
           </p>
           <p v-if="formError" class="ui-form-error">{{ formError }}</p>
           <div class="next-projects__actions">
@@ -346,6 +381,7 @@ onMounted(load);
         :loading="loading"
         row-key="id"
         empty-title="还没有项目"
+        empty-description="创建项目并添加成员后，成员即可在「我的密钥」创建虚拟密钥。"
         data-testid="projects-table"
       >
         <template #projectTag="{ row }">
@@ -353,6 +389,16 @@ onMounted(load);
             (row as Project).projectTag
           }}</span>
           <span v-else>—</span>
+        </template>
+        <template #grants="{ row }">
+          <span class="ui-num" data-testid="project-grant-count">{{
+            grantCountOf((row as Project).id)
+          }}</span>
+        </template>
+        <template #members="{ row }">
+          <span class="ui-num" data-testid="project-member-count">{{
+            memberCounts[(row as Project).id!] ?? '—'
+          }}</span>
         </template>
         <template #status="{ row }">
           <UiStatusBadge

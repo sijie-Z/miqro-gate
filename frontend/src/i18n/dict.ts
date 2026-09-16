@@ -1434,6 +1434,23 @@ export const DICT: Record<string, string> = {
   '全部密钥': 'All keys',
   '快捷导航': 'Quick nav',
   '今天也要高效工作。': 'Have a productive day.',
+  // 列表依赖/目录元数据 + 表单规则文案（#657）。
+  '授权引用': 'Grant references',
+  '依赖': 'Dependencies',
+  '未探测': 'Not probed',
+  '最长 200 个字符。': 'Up to 200 characters.',
+  '8–512 个字符；不能包含控制字符。': '8–512 characters; no control characters.',
+  '最长 200 个字符；名称需唯一（JWT 的 sub 映射键）。':
+    'Up to 200 characters; the name must be unique (maps the JWT sub claim).',
+  '到期后该消费者的请求将静默返回 401。': 'After expiry the consumer requests return a silent 401.',
+  '创建项目并添加成员后，成员即可在「我的密钥」创建虚拟密钥。':
+    'Create the project and add members — they can then create Virtual Keys under My Keys.',
+  '产品目录由签名目录播种；接入从「上游凭证」录入第一把真实密钥开始。':
+    'The product catalogue is seeded from the signed catalogue; onboarding starts by adding the first real key under Upstream Credentials.',
+  '外部系统（平台）对接时再创建；机器身份与人类用户分开管理。':
+    'Create these when an external system (platform) integrates; machine identities are managed separately from human users.',
+  '留空将自动从项目代码派生；已被密钥绑定引用的标签不可修改（1–64 位字母、数字、- 或 _）。':
+    'Leave empty to derive from the project code; a tag referenced by key bindings is immutable (1–64 letters, digits, - or _).',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [
@@ -1600,4 +1617,7 @@ export const PATTERNS: Array<[RegExp, string]> = [
   [/^第\ (.+?)\ 页$/, 'Page $1'],
   [/^第\ (.+?)\ 页$/, 'Page $1'],
   [/^共\ (.+?)\ 个$/, '$1 total'],
+  // #657 依赖/目录动态单元格。
+  [/^(\d+) 个模型$/, '$1 models'],
+  [/^凭证 (\d+) · 授权 (\d+)$/, 'Credentials $1 · Grants $2'],
 ];
