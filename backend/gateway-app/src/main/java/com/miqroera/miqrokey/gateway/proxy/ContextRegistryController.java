@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
-import com.miqroera.miqrokey.gateway.vkey.AuthContext;
 import com.miqroera.miqrokey.gateway.vkey.AuthFailureException;
 import com.miqroera.miqrokey.gateway.vkey.VirtualKeyResolver;
 import org.springframework.beans.factory.ObjectProvider;
@@ -54,8 +53,11 @@ public class ContextRegistryController {
     @GetMapping("/v1/context-registry")
     public Mono<Void> registry(ServerWebExchange exchange) {
         try {
-            AuthContext ctx = keyResolver.resolve(exchange.getRequest());
-            String body = buildBody(ctx);
+            // Identity-only (#641): registry reads must not require a resolved
+            // request context — for a multi-bound key that would be circular
+            // (the agent needs the registry to produce the context).
+            VirtualKeyResolver.Identity identity = keyResolver.resolveIdentity(exchange.getRequest());
+            String body = buildBody(identity);
             exchange.getResponse().setStatusCode(HttpStatus.OK);
             exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
             return exchange.getResponse().writeWith(
@@ -69,9 +71,9 @@ public class ContextRegistryController {
         }
     }
 
-    private String buildBody(AuthContext ctx) {
+    private String buildBody(VirtualKeyResolver.Identity identity) {
         Map<UUID, String> tagByProject = new HashMap<>();
-        for (RouteSnapshot.BindingRecord binding : ctx.snapshot().bindingsOf(ctx.key().keyId())) {
+        for (RouteSnapshot.BindingRecord binding : identity.snapshot().bindingsOf(identity.key().keyId())) {
             tagByProject.putIfAbsent(binding.projectId(), binding.projectTag());
         }
         Set<UUID> projectIds = new LinkedHashSet<>(tagByProject.keySet());
@@ -84,7 +86,8 @@ public class ContextRegistryController {
                     SELECT project_id, repo_key FROM project_repositories
                     WHERE tenant_id = :tenantId AND project_id IN (:projectIds)
                     ORDER BY repo_key
-                    """, new MapSqlParameterSource("tenantId", ctx.tenantId()).addValue("projectIds", projectIds),
+                    """,
+                    new MapSqlParameterSource("tenantId", identity.key().tenantId()).addValue("projectIds", projectIds),
                     (rs, rowNum) -> Map.entry(rs.getObject("project_id", UUID.class), rs.getString("repo_key")));
             for (var row : rows) {
                 ObjectNode entry = entries.addObject();
