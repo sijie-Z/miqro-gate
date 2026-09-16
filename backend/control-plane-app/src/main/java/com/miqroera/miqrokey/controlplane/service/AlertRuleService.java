@@ -114,14 +114,19 @@ public class AlertRuleService {
                 context.requestId());
     }
 
+    /** Rule types accepted by the API; mirrors the {@code alert_rules_type_check} constraint. */
+    private static final List<String> RULE_TYPES = List.of("USAGE_MISSING_RATE", "UPSTREAM_ERROR_RATE",
+            "BALANCE_UNAVAILABLE", "USAGE_SURGE", "BUDGET_THRESHOLD", "QUOTA_THRESHOLD", "MODEL_APPROVAL_SUBMITTED",
+            "MODEL_APPROVAL_APPROVED", "MODEL_APPROVAL_REJECTED", "ADMIN_API_KEY_EXPIRING", "CONSUMER_KEY_EXPIRING",
+            "USAGE_QUEUE_SATURATION");
+
     private static void validateType(String type) {
-        if (!List.of("USAGE_MISSING_RATE", "UPSTREAM_ERROR_RATE", "BALANCE_UNAVAILABLE", "USAGE_SURGE",
-                "BUDGET_THRESHOLD", "QUOTA_THRESHOLD", "MODEL_APPROVAL_SUBMITTED", "MODEL_APPROVAL_APPROVED",
-                "MODEL_APPROVAL_REJECTED", "ADMIN_API_KEY_EXPIRING", "CONSUMER_KEY_EXPIRING").contains(type)) {
+        if (!RULE_TYPES.contains(type)) {
+            // The message lists the list itself: it used to drift (the two key-expiry
+            // types were accepted but undocumented in the error), so an operator was
+            // told their valid input was invalid.
             throw new ApiException(HttpStatus.BAD_REQUEST, "ALERT_TYPE_INVALID",
-                    "type must be one of USAGE_MISSING_RATE, UPSTREAM_ERROR_RATE, BALANCE_UNAVAILABLE, "
-                            + "USAGE_SURGE, BUDGET_THRESHOLD, QUOTA_THRESHOLD, MODEL_APPROVAL_SUBMITTED, "
-                            + "MODEL_APPROVAL_APPROVED, MODEL_APPROVAL_REJECTED");
+                    "type must be one of " + String.join(", ", RULE_TYPES));
         }
     }
 

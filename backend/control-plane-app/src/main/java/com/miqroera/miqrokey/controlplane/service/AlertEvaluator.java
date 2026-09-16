@@ -29,7 +29,7 @@ import java.util.UUID;
  * same dispatcher.
  *
  * <p>
- * Metrics (all over the last rolling hour, tenant-wide):
+ * Metrics (all over the last rolling hour, scoped to the rule's own tenant):
  * <ul>
  * <li>{@code USAGE_MISSING_RATE}: share of events with
  * {@code usage_missing}.</li>
@@ -37,6 +37,10 @@ import java.util.UUID;
  * <li>{@code BALANCE_UNAVAILABLE}: count of UNAVAILABLE quota snapshots synced
  * in the hour (threshold is the alerting count).</li>
  * <li>{@code USAGE_SURGE}: event count ratio current hour / previous hour.</li>
+ * <li>{@code USAGE_QUEUE_SATURATION} (F07, #245): usage events the gateway LOST
+ * to a saturated bounded queue in the hour — written by the gateway as
+ * {@code gateway_queue_signal} fact rows under the platform tenant, never
+ * queried from the gateway hot path.</li>
  * </ul>
  * </p>
  */
@@ -106,23 +110,47 @@ public class AlertEvaluator {
         dispatcher.deliverEvent(rule.tenantId(), eventId, rule, value, now);
     }
 
-    /** Metric over the last rolling hour; ratio in 0..1, surge as a ratio. */
+    /**
+     * Metric over the last rolling hour; ratio in 0..1, surge as a ratio.
+     *
+     * <p>
+     * Every metric is scoped to the rule's own tenant. The fact tables carry a
+     * {@code tenant_id} (V1 convention), so a rule must never read another
+     * tenant's rows: a tenant-owned rule alerting on the platform aggregate
+     * would fire on data its operator cannot see, and cannot silence.
+     * Single-tenant deployments (the v1 shape) are unaffected — every fact row
+     * carries the one seed tenant.
+     * </p>
+     */
     BigDecimal metric(String type, UUID tenantId, String scopeJson) {
+        MapSqlParameterSource tenant = new MapSqlParameterSource("tenantId", tenantId);
         return switch (type) {
             case "USAGE_MISSING_RATE" -> ratio("""
                     SELECT COUNT(*) FILTER (WHERE usage_missing)::float / NULLIF(COUNT(*), 0)
-                    FROM usage_event WHERE occurred_at >= now() - interval '1 hour'
-                    """);
+                    FROM usage_event
+                    WHERE tenant_id = :tenantId AND occurred_at >= now() - interval '1 hour'
+                    """, tenant);
             case "UPSTREAM_ERROR_RATE" -> ratio("""
                     SELECT COUNT(*) FILTER (WHERE upstream_status_code IS NOT NULL
                             AND upstream_status_code NOT BETWEEN 200 AND 299)::float / NULLIF(COUNT(*), 0)
-                    FROM usage_event WHERE occurred_at >= now() - interval '1 hour'
-                    """);
+                    FROM usage_event
+                    WHERE tenant_id = :tenantId AND occurred_at >= now() - interval '1 hour'
+                    """, tenant);
             case "BALANCE_UNAVAILABLE" -> count("""
                     SELECT COUNT(*) FROM quota_snapshots
-                    WHERE source = 'UNAVAILABLE' AND synced_at >= now() - interval '1 hour'
-                    """);
-            case "USAGE_SURGE" -> surge();
+                    WHERE tenant_id = :tenantId AND source = 'UNAVAILABLE'
+                            AND synced_at >= now() - interval '1 hour'
+                    """, tenant);
+            case "USAGE_SURGE" -> surge(tenantId);
+            // F07 (#245): the gateway writes one drop fact per saturated report
+            // window under the platform (seed) tenant; the metric is the number
+            // of LOST usage events in the hour, not a ratio. A gateway that lost
+            // nothing writes no rows, so the sum is zero and a rule with a
+            // positive threshold stays quiet.
+            case "USAGE_QUEUE_SATURATION" -> count("""
+                    SELECT COALESCE(SUM(dropped), 0) FROM gateway_queue_signal
+                    WHERE tenant_id = :tenantId AND occurred_at >= now() - interval '1 hour'
+                    """, tenant);
             case "BUDGET_THRESHOLD" -> budgetWatermark(tenantId, scopeJson);
             case "QUOTA_THRESHOLD" -> quotaWatermark(tenantId, scopeJson);
             default -> null; // event-driven notification types fire outside the scheduler
@@ -185,28 +213,31 @@ public class AlertEvaluator {
         }
     }
 
-    private BigDecimal ratio(String sql) {
-        Double value = jdbc.queryForObject(sql, new MapSqlParameterSource(), Double.class);
+    private BigDecimal ratio(String sql, MapSqlParameterSource params) {
+        Double value = jdbc.queryForObject(sql, params, Double.class);
         if (value == null || value.isNaN()) {
             return null;
         }
         return BigDecimal.valueOf(value).setScale(4, RoundingMode.HALF_UP);
     }
 
-    private BigDecimal count(String sql) {
-        Long value = jdbc.queryForObject(sql, new MapSqlParameterSource(), Long.class);
+    private BigDecimal count(String sql, MapSqlParameterSource params) {
+        Long value = jdbc.queryForObject(sql, params, Long.class);
         return value != null ? BigDecimal.valueOf(value) : BigDecimal.ZERO;
     }
 
-    private BigDecimal surge() {
+    private BigDecimal surge(UUID tenantId) {
+        MapSqlParameterSource params = new MapSqlParameterSource("tenantId", tenantId);
         Long current = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM usage_event WHERE occurred_at >= now() - interval '1 hour'",
-                new MapSqlParameterSource(), Long.class);
+                "SELECT COUNT(*) FROM usage_event"
+                        + " WHERE tenant_id = :tenantId AND occurred_at >= now() - interval '1 hour'",
+                params, Long.class);
         Long previous = jdbc
                 .queryForObject(
-                        "SELECT COUNT(*) FROM usage_event WHERE occurred_at >= now() - interval '2 hours'"
+                        "SELECT COUNT(*) FROM usage_event WHERE tenant_id = :tenantId"
+                                + " AND occurred_at >= now() - interval '2 hours'"
                                 + " AND occurred_at < now() - interval '1 hour'",
-                        new MapSqlParameterSource(), Long.class);
+                        params, Long.class);
         if (previous == null || previous == 0) {
             return current != null && current > 0 ? BigDecimal.valueOf(100) : BigDecimal.ZERO;
         }
