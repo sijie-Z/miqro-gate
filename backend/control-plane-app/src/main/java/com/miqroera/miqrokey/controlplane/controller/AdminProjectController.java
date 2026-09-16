@@ -65,6 +65,28 @@ public class AdminProjectController {
         orgService.removeProjectMember(admin.tenantId(), admin.id(), projectId, userId);
     }
 
+    // -------------------------------------------------------------------
+    // CAA Project Registry (V56, Spec v1.1 §7.4)
+    // -------------------------------------------------------------------
+
+    @GetMapping("/{projectId}/repositories")
+    public List<AdminOrgService.ProjectRepoMappingView> repositories(@PathVariable UUID projectId) {
+        return orgService.projectRepositories(userContext.getUser().tenantId(), projectId);
+    }
+
+    @PostMapping("/{projectId}/repositories")
+    public AdminOrgService.ProjectRepoMappingView addRepository(@PathVariable UUID projectId,
+            @RequestBody RepoKeyRequest body) {
+        var admin = userContext.getUser();
+        return orgService.addProjectRepository(admin.tenantId(), admin.id(), projectId, body.repoKey());
+    }
+
+    @DeleteMapping("/{projectId}/repositories/{mappingId}")
+    public void removeRepository(@PathVariable UUID projectId, @PathVariable UUID mappingId) {
+        var admin = userContext.getUser();
+        orgService.removeProjectRepository(admin.tenantId(), admin.id(), projectId, mappingId);
+    }
+
     public record CreateRequest(String code, String name, String projectTag) {
     }
 
@@ -72,5 +94,8 @@ public class AdminProjectController {
     }
 
     public record MemberRequest(UUID userId) {
+    }
+
+    public record RepoKeyRequest(String repoKey) {
     }
 }

@@ -126,6 +126,15 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
         return byTag == null ? 0 : byTag.size();
     }
 
+    /**
+     * All ACTIVE bindings of a key (empty when unknown). Used by the CAA
+     * context-registry endpoint to scope repo mappings to the key's projects.
+     */
+    public java.util.Collection<BindingRecord> bindingsOf(UUID keyId) {
+        Map<String, BindingRecord> byTag = bindings.get(keyId);
+        return byTag == null ? java.util.List.of() : byTag.values();
+    }
+
     public CredentialRecord credential(UUID credentialId) {
         return credentials.get(credentialId);
     }
