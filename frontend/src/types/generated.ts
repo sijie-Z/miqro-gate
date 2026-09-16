@@ -4,6 +4,22 @@
  */
 
 export interface paths {
+    "/api/v1/admin/unattributed-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get"];
+        put: operations["put"];
+        post?: never;
+        delete: operations["delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/skills/{skillId}/access": {
         parameters: {
             query?: never;
@@ -27,8 +43,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get"];
-        put: operations["put"];
+        get: operations["get_1"];
+        put: operations["put_1"];
         post?: never;
         delete?: never;
         options?: never;
@@ -44,7 +60,7 @@ export interface paths {
             cookie?: never;
         };
         get: operations["list"];
-        put: operations["put_1"];
+        put: operations["put_2"];
         post?: never;
         delete?: never;
         options?: never;
@@ -59,7 +75,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_1"];
+        get: operations["get_2"];
         put: operations["configure"];
         post?: never;
         delete?: never;
@@ -76,9 +92,9 @@ export interface paths {
             cookie?: never;
         };
         get: operations["view"];
-        put: operations["put_2"];
+        put: operations["put_3"];
         post?: never;
-        delete: operations["delete"];
+        delete: operations["delete_1"];
         options?: never;
         head?: never;
         patch?: never;
@@ -123,8 +139,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_2"];
-        put: operations["put_3"];
+        get: operations["get_3"];
+        put: operations["put_4"];
         post?: never;
         delete?: never;
         options?: never;
@@ -188,7 +204,7 @@ export interface paths {
             cookie?: never;
         };
         get: operations["list_1"];
-        put: operations["put_4"];
+        put: operations["put_5"];
         post?: never;
         delete?: never;
         options?: never;
@@ -734,6 +750,22 @@ export interface paths {
         get: operations["list_10"];
         put?: never;
         post: operations["create_8"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/projects/{projectId}/repositories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["repositories"];
+        put?: never;
+        post: operations["addRepository"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1371,10 +1403,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_3"];
+        get: operations["get_4"];
         put?: never;
         post?: never;
-        delete: operations["delete_1"];
+        delete: operations["delete_2"];
         options?: never;
         head?: never;
         patch: operations["update"];
@@ -1419,7 +1451,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_4"];
+        get: operations["get_5"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1470,7 +1502,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete: operations["delete_2"];
+        delete: operations["delete_3"];
         options?: never;
         head?: never;
         patch: operations["update_5"];
@@ -1515,10 +1547,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_5"];
+        get: operations["get_6"];
         put?: never;
         post?: never;
-        delete: operations["delete_3"];
+        delete: operations["delete_4"];
         options?: never;
         head?: never;
         patch: operations["update_6"];
@@ -1531,10 +1563,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_6"];
+        get: operations["get_7"];
         put?: never;
         post?: never;
-        delete: operations["delete_4"];
+        delete: operations["delete_5"];
         options?: never;
         head?: never;
         patch: operations["update_7"];
@@ -1547,10 +1579,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_7"];
+        get: operations["get_8"];
         put?: never;
         post?: never;
-        delete: operations["delete_5"];
+        delete: operations["delete_6"];
         options?: never;
         head?: never;
         patch: operations["update_8"];
@@ -1595,7 +1627,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_8"];
+        get: operations["get_9"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1627,7 +1659,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_9"];
+        get: operations["get_10"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2011,7 +2043,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_10"];
+        get: operations["get_11"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2059,7 +2091,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_11"];
+        get: operations["get_12"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2107,7 +2139,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_12"];
+        get: operations["get_13"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2171,7 +2203,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_13"];
+        get: operations["get_14"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2267,7 +2299,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_14"];
+        get: operations["get_15"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2347,7 +2379,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_15"];
+        get: operations["get_16"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2542,7 +2574,23 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete: operations["delete_6"];
+        delete: operations["delete_7"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/projects/{projectId}/repositories/{mappingId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["removeRepository"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2606,7 +2654,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete: operations["delete_7"];
+        delete: operations["delete_8"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2616,6 +2664,29 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        UpsertPolicyRequest: {
+            /** Format: uuid */
+            credentialId?: string;
+            /** Format: uuid */
+            providerProductId?: string;
+            models?: string[];
+        };
+        PolicyView: {
+            configured?: boolean;
+            /** Format: uuid */
+            projectId?: string;
+            /** Format: uuid */
+            providerProductId?: string;
+            providerProductCode?: string;
+            providerProductName?: string;
+            /** Format: uuid */
+            credentialId?: string;
+            credentialName?: string;
+            models?: string[];
+            /** Format: date-time */
+            updatedAt?: string;
+            warning?: string;
+        };
         ScopeRequest: {
             scopeType: string;
             /** Format: uuid */
@@ -3346,6 +3417,19 @@ export interface components {
             createdAt?: string;
             /** Format: date-time */
             updatedAt?: string;
+            system?: boolean;
+        };
+        RepoKeyRequest: {
+            repoKey?: string;
+        };
+        ProjectRepoMappingView: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            projectId?: string;
+            repoKey?: string;
+            /** Format: date-time */
+            createdAt?: string;
         };
         PriceSnapshotView: {
             /** Format: uuid */
@@ -4197,6 +4281,68 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PolicyView"];
+                };
+            };
+        };
+    };
+    put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PolicyView"];
+                };
+            };
+        };
+    };
+    delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     setAccess: {
         parameters: {
             query?: never;
@@ -4223,7 +4369,7 @@ export interface operations {
             };
         };
     };
-    get: {
+    get_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -4243,7 +4389,7 @@ export interface operations {
             };
         };
     };
-    put: {
+    put_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -4287,7 +4433,7 @@ export interface operations {
             };
         };
     };
-    put_1: {
+    put_2: {
         parameters: {
             query?: never;
             header?: never;
@@ -4311,7 +4457,7 @@ export interface operations {
             };
         };
     };
-    get_1: {
+    get_2: {
         parameters: {
             query?: never;
             header?: never;
@@ -4379,7 +4525,7 @@ export interface operations {
             };
         };
     };
-    put_2: {
+    put_3: {
         parameters: {
             query?: never;
             header?: never;
@@ -4405,7 +4551,7 @@ export interface operations {
             };
         };
     };
-    delete: {
+    delete_1: {
         parameters: {
             query?: {
                 month?: string;
@@ -4503,7 +4649,7 @@ export interface operations {
             };
         };
     };
-    get_2: {
+    get_3: {
         parameters: {
             query?: never;
             header?: never;
@@ -4525,7 +4671,7 @@ export interface operations {
             };
         };
     };
-    put_3: {
+    put_4: {
         parameters: {
             query?: never;
             header?: never;
@@ -4675,7 +4821,7 @@ export interface operations {
             };
         };
     };
-    put_4: {
+    put_5: {
         parameters: {
             query?: never;
             header?: never;
@@ -5810,6 +5956,54 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["Project"];
+                };
+            };
+        };
+    };
+    repositories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ProjectRepoMappingView"][];
+                };
+            };
+        };
+    };
+    addRepository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepoKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ProjectRepoMappingView"];
                 };
             };
         };
@@ -7171,7 +7365,7 @@ export interface operations {
             };
         };
     };
-    get_3: {
+    get_4: {
         parameters: {
             query?: never;
             header?: never;
@@ -7193,7 +7387,7 @@ export interface operations {
             };
         };
     };
-    delete_1: {
+    delete_2: {
         parameters: {
             query?: never;
             header?: never;
@@ -7315,7 +7509,7 @@ export interface operations {
             };
         };
     };
-    get_4: {
+    get_5: {
         parameters: {
             query?: never;
             header?: never;
@@ -7416,7 +7610,7 @@ export interface operations {
             };
         };
     };
-    delete_2: {
+    delete_3: {
         parameters: {
             query?: never;
             header?: never;
@@ -7516,7 +7710,7 @@ export interface operations {
             };
         };
     };
-    get_5: {
+    get_6: {
         parameters: {
             query?: never;
             header?: never;
@@ -7538,7 +7732,7 @@ export interface operations {
             };
         };
     };
-    delete_3: {
+    delete_4: {
         parameters: {
             query?: never;
             header?: never;
@@ -7584,7 +7778,7 @@ export interface operations {
             };
         };
     };
-    get_6: {
+    get_7: {
         parameters: {
             query?: never;
             header?: never;
@@ -7606,7 +7800,7 @@ export interface operations {
             };
         };
     };
-    delete_4: {
+    delete_5: {
         parameters: {
             query?: never;
             header?: never;
@@ -7652,7 +7846,7 @@ export interface operations {
             };
         };
     };
-    get_7: {
+    get_8: {
         parameters: {
             query?: never;
             header?: never;
@@ -7674,7 +7868,7 @@ export interface operations {
             };
         };
     };
-    delete_5: {
+    delete_6: {
         parameters: {
             query?: never;
             header?: never;
@@ -7767,7 +7961,7 @@ export interface operations {
             };
         };
     };
-    get_8: {
+    get_9: {
         parameters: {
             query?: never;
             header?: never;
@@ -7811,7 +8005,7 @@ export interface operations {
             };
         };
     };
-    get_9: {
+    get_10: {
         parameters: {
             query?: never;
             header?: never;
@@ -8384,7 +8578,7 @@ export interface operations {
             };
         };
     };
-    get_10: {
+    get_11: {
         parameters: {
             query?: never;
             header?: never;
@@ -8458,7 +8652,7 @@ export interface operations {
             };
         };
     };
-    get_11: {
+    get_12: {
         parameters: {
             query?: never;
             header?: never;
@@ -8530,7 +8724,7 @@ export interface operations {
             };
         };
     };
-    get_12: {
+    get_13: {
         parameters: {
             query?: never;
             header?: never;
@@ -8620,7 +8814,7 @@ export interface operations {
             };
         };
     };
-    get_13: {
+    get_14: {
         parameters: {
             query?: never;
             header?: never;
@@ -8760,7 +8954,7 @@ export interface operations {
             };
         };
     };
-    get_14: {
+    get_15: {
         parameters: {
             query?: never;
             header?: never;
@@ -8882,7 +9076,7 @@ export interface operations {
             };
         };
     };
-    get_15: {
+    get_16: {
         parameters: {
             query?: never;
             header?: never;
@@ -9163,7 +9357,7 @@ export interface operations {
             };
         };
     };
-    delete_6: {
+    delete_7: {
         parameters: {
             query?: never;
             header?: never;
@@ -9176,6 +9370,27 @@ export interface operations {
         responses: {
             /** @description No Content */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    removeRepository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+                mappingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9244,7 +9459,7 @@ export interface operations {
             };
         };
     };
-    delete_7: {
+    delete_8: {
         parameters: {
             query?: never;
             header?: never;

@@ -101,9 +101,19 @@ public class RequestContextResolver {
         }
 
         // 4) No binding at all → invalid key; several bindings without context →
-        // fail closed rather than borrow any project's grant.
+        // fail closed rather than borrow any project's grant (#647): when the
+        // tenant configured an unattributed policy, route via its dedicated
+        // credential/product/model scope and account to the UNATTRIBUTED
+        // bucket; otherwise keep the hard CONTEXT_REQUIRED baseline.
         if (snapshot.bindingCount(key.keyId()) == 0) {
             throw new AuthFailureException(HttpStatus.NOT_FOUND, "virtual_key_invalid", "Unknown virtual key");
+        }
+        RouteSnapshot.UnattributedPolicyRecord policy = snapshot.unattributedPolicy(key.tenantId());
+        if (policy != null) {
+            RouteSnapshot.BindingRecord synthesized = new RouteSnapshot.BindingRecord(key.keyId(), policy.projectId(),
+                    null, policy.credentialId(), policy.productId(), null);
+            return new ResolvedContext(synthesized, null, "POLICY_ROUTED", claimSource, claimConfidence, claimStatus,
+                    activityId, sessionId);
         }
         throw new AuthFailureException(HttpStatus.BAD_REQUEST, "CONTEXT_REQUIRED",
                 "This key is bound to several projects; provide X-Miqro-Project-Id");

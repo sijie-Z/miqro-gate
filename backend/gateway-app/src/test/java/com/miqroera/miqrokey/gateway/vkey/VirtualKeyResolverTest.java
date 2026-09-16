@@ -116,7 +116,7 @@ class VirtualKeyResolverTest {
         RouteSnapshot.CredentialRecord credB = credential(CRED_B);
         return new RouteSnapshot(1, Instant.EPOCH, Map.of(material.publicKeyId(), key),
                 Map.of(KEY_ID, Map.of("tag-a", bindingA, "tag-b", bindingB)), Map.of(CRED_A, credA, CRED_B, credB),
-                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
     }
 
     private static RouteSnapshot.CredentialRecord credential(UUID id) {
