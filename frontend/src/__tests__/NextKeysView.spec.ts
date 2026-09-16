@@ -225,6 +225,66 @@ describe('NextKeysView', () => {
     expect(payload.projectIds).toEqual(['p1', 'p2']);
   });
 
+  it('#646: defaults to ALL projects — primary = first, every other project pre-selected', async () => {
+    mockApi.myGrants.mockResolvedValue(grants);
+    mockApi.createVirtualKey.mockResolvedValue(created);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="create-name"]').setValue('default-all');
+
+    // No project interaction at all: pick the grant for the default primary.
+    const grantButton = wrapper
+      .findAll('.stub-option')
+      .find((el) => el.text().includes('Claude API'));
+    await grantButton!.trigger('click');
+    await flushPromises();
+
+    await wrapper.find('[data-testid="create-submit"]').trigger('click');
+    await flushPromises();
+
+    const payload = mockApi.createVirtualKey.mock.calls[0]![0] as {
+      projectId?: string;
+      projectIds?: string[];
+    };
+    expect(payload.projectId).toBe('p1');
+    expect(payload.projectIds).toEqual(['p1', 'p2']);
+  });
+
+  it('#646: switching the primary keeps the previous project as an extra (no silent drop)', async () => {
+    mockApi.myGrants.mockResolvedValue(grants);
+    mockApi.createVirtualKey.mockResolvedValue(created);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="create-name"]').setValue('switch-primary');
+
+    const qaButton = wrapper.findAll('.stub-option').find((el) => el.text().includes('QA Team'));
+    await qaButton!.trigger('click');
+    await flushPromises();
+
+    // The previous primary (Core AI / p1) stays bound as an extra.
+    expect(wrapper.find('[data-testid="create-extra-project-p1"]').exists()).toBe(true);
+
+    const grantButton = wrapper
+      .findAll('.stub-option')
+      .find((el) => el.text().includes('Claude API'));
+    await grantButton!.trigger('click');
+    await flushPromises();
+
+    await wrapper.find('[data-testid="create-submit"]').trigger('click');
+    await flushPromises();
+
+    const payload = mockApi.createVirtualKey.mock.calls[0]![0] as { projectIds?: string[] };
+    expect(payload.projectIds).toEqual(['p2', 'p1']);
+  });
+
   it('creates a key through the cascade and reveals the secret once (ack required)', async () => {
     mockApi.myGrants.mockResolvedValue(grants);
     mockApi.createVirtualKey.mockResolvedValue(created);
@@ -249,6 +309,13 @@ describe('NextKeysView', () => {
       .find((el) => el.text().includes('Claude API'));
     expect(grantButton).toBeTruthy();
     await grantButton!.trigger('click');
+    await flushPromises();
+
+    // #646: extras default to ALL projects — deselect to keep this single-
+    // project cascade under test (and prove unchecking works).
+    const extraP2 = wrapper.find('[data-testid="create-extra-project-p2"]');
+    expect(extraP2.exists()).toBe(true);
+    await extraP2.setValue(false);
     await flushPromises();
 
     const submitBtn = wrapper.find('[data-testid="create-submit"]');

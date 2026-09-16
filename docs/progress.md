@@ -2968,6 +2968,15 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **观察（未改，留待评审）**：`/v1/models` 同样依赖 resolve()——多绑定 Key 带不匹配后缀时 400；真实使用中 Claude Code 的 Key 后缀通常匹配绑定，暂不动其语义。
 
 
+## 2026-09-16 中午 — Goal #646：建 Key 默认全选项目（CAA 收口批①，"一把 Key 全项目"成为默认路径）
+
+**背景**：跟踪 issue #645 / 方案 `docs/caa-next-batch-plan.md` §1（方案稿含 ② 无归属策略设计、③ Agent 自启、4 个开放问题，已随 PR #649 立档供评审）。
+
+**改动**（分支 feat/key-default-all-projects-646）：`NextKeysView` 打开表单即应用默认——主项目=第一个可选项目、附加项目全选（可取消）；切换主项目旧值回填为附加项（不静默丢项目）；重置后重新应用；文案「默认全部已选」；契约不变。spec 9/9（新增默认全选/切换回填；级联用例改显式取消勾选）；vue-tsc/eslint 通过。
+
+**验收**（并入主清单，步骤见方案 §1.2）：默认提交 → boundProjects 全量；两项目各一次真实推理 → 用量/每小时表分项目；取消勾选 → 该项目声明 403。
+
+
 ## 2026-09-16 中午 — Goal #647：未归属策略 unattributed_policy（CAA 收口批②，Spec §7.3 落地）
 
 **背景**：跟踪 issue #645 / 方案 `docs/caa-next-batch-plan.md` §2。现状"无法归属一律 400"缺合规兜底选项。
@@ -2980,3 +2989,16 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - **开放问题按方案默认落定**（§2.9：Q1 告警放行 / Q2 与 Key 模型求交 / Q3 system 标记可见 / Q4 AMBIGUOUS 同走策略）。
 
 **验证**：`RequestContextResolverTest` 9/9（新增 POLICY_ROUTED）；`VirtualKeyServiceTest` 21/21（系统项目拒绝）；`AdminOrgApiIntegrationTest` 14/14（策略全生命周期：懒建桶/system 校验/目录校验/跨产品凭证 400/引用告警/审计/DELETE 后桶保留）；前端 settings spec 3/3；OpenAPI 基线重导出（另修复 #640 遗漏的 repositories 基线；**踩坑**：新控制器嵌套 record 重名 `UpsertRequest` 打乱 springdoc 简单名解析——改名 `UpsertPolicyRequest` 后 diff 干净）；28 个 IT 重置清单再补 `unattributed_policy`。
+
+
+## 2026-09-16 午后 — Goal #648：miqro-context 安装与三平台自启（CAA 收口批③）
+
+**背景**：跟踪 #645 / 方案 §3。现状手动 `run` 关终端即断，"无感"对非开发用户不成立。
+
+**交付**（分支 feat/context-autostart-648）：
+- `src/install/autostart.ts`：三平台用户级自启生成器（纯函数）——Windows 启动文件夹 .cmd（start /b node … run >> agent.log）/ macOS LaunchAgent plist（RunAtLoad）/ Linux systemd user unit（Restart=on-failure）；`MIQRO_CONTEXT_AUTOSTART_DIR` 供测试沙箱；幂等写入与静默移除。
+- CLI：`install [--write-config] [--autostart]`（显式 opt-in；默认仅提示未装）、新增 `uninstall [--autostart]`、`doctor` 增自启状态行；README 更新。
+- **不碰用户系统**：仅显式 `--autostart` 时写入，全部用户级免管理员；真实自启不在开发机自动注册。
+
+**验证**：客户端单测 42/42（新增 7 例：文件名/默认目录/覆盖目录/三平台内容快照/幂等 enable-disable 往返）；**Windows 沙箱实测**：install --autostart 生成 .cmd（node/cli/日志路径逐字校验）→ uninstall 移除，全程未触碰真实启动文件夹。
+

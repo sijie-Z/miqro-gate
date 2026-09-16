@@ -12,6 +12,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { loadConfig } from "../config.js";
 import { Registry } from "../resolver/registry.js";
+import { autostartInstalled, autostartPaths } from "../install/autostart.js";
 
 const run = promisify(execFile);
 
@@ -53,6 +54,15 @@ export async function doctorCommand(): Promise<void> {
   } catch {
     checks.push({ name: "agent", ok: "warn", detail: "not running (start with: miqro-context run)" });
   }
+
+  // Login autostart (#648) — informational.
+  checks.push({
+    name: "autostart",
+    ok: autostartInstalled(process.platform) ? true : "warn",
+    detail: autostartInstalled(process.platform)
+      ? `installed (${autostartPaths(process.platform).filePath})`
+      : "not installed (miqro-context install --autostart)",
+  });
 
   // Gateway reachability + key validity + registry sync.
   const key = config.virtualKey;

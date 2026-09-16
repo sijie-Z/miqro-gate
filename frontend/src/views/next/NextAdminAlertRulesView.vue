@@ -392,16 +392,15 @@ onMounted(() => {
         <template #actions="{ row }">
           <div class="next-alert-rules__actions">
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="rule-toggle"
               @click="toggle(row as AlertRule)"
               >{{ (row as AlertRule).enabled ? '停用' : '启用' }}</UiButton
             >
             <UiButton
-              variant="ghost"
+              variant="link-danger"
               size="sm"
-              class="next-alert-rules__danger"
               data-testid="rule-delete"
               @click="requestRemove(row as AlertRule)"
               >删除</UiButton
@@ -486,9 +485,5 @@ onMounted(() => {
 .next-alert-rules__scope {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-faint);
-}
-
-.next-alert-rules__danger {
-  color: var(--ui-danger-fg);
 }
 </style>

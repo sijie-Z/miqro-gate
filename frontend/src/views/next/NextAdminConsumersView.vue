@@ -7,7 +7,16 @@
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiCheckbox, UiDialog, UiInput, UiRadio, UiStatusBadge, UiTable, toast } from '@/ui';
+import {
+  UiButton,
+  UiCheckbox,
+  UiDialog,
+  UiInput,
+  UiRadio,
+  UiStatusBadge,
+  UiTable,
+  toast,
+} from '@/ui';
 import type { ApiConsumerView } from '@/types/generated-api';
 
 const consumers = ref<ApiConsumerView[]>([]);
@@ -358,7 +367,7 @@ onMounted(load);
         }}</template>
         <template #actions="{ row }">
           <UiButton
-            variant="ghost"
+            variant="link"
             size="sm"
             data-testid="consumer-activity"
             @click="openActivity(row as ApiConsumerView)"
@@ -367,7 +376,7 @@ onMounted(load);
           </UiButton>
           <UiButton
             v-if="(row as ApiConsumerView).status === 'ACTIVE'"
-            variant="ghost"
+            variant="link"
             size="sm"
             data-testid="consumer-scope"
             @click="openScope(row as ApiConsumerView)"
@@ -376,9 +385,8 @@ onMounted(load);
           </UiButton>
           <UiButton
             v-if="(row as ApiConsumerView).status === 'ACTIVE'"
-            variant="ghost"
+            variant="link-danger"
             size="sm"
-            class="next-consumers__danger"
             data-testid="consumer-disable"
             @click="requestDisable(row as ApiConsumerView)"
           >
@@ -625,10 +633,6 @@ onMounted(load);
 
 .next-consumers__name {
   font-weight: var(--ui-weight-medium);
-}
-
-.next-consumers__danger {
-  color: var(--ui-danger-fg);
 }
 
 .next-consumers__caps {

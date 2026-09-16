@@ -3,6 +3,10 @@
  * NON-invasive: it never edits your Claude Code settings; it shows exactly
  * what to set and optionally writes the agent's own config file.
  */
+import path from "node:path";
+import os from "node:os";
+import { fileURLToPath } from "node:url";
+import { buildAutostartEntry, enableAutostart, autostartInstalled } from "../install/autostart.js";
 import { loadConfig, writeConfig, type ContextConfig } from "../config.js";
 
 export async function installCommand(): Promise<void> {
@@ -59,6 +63,33 @@ Config file: ${source}
     );
   }
   void writeConfigIfRequested(config);
+  if (process.argv.includes("--autostart")) {
+    handleAutostart();
+  } else if (autostartInstalled(process.platform)) {
+    process.stdout.write("\nautostart: already installed (miqro-context uninstall --autostart removes it)\n");
+  } else {
+    process.stdout.write("\nautostart: not installed (add --autostart to install it, opt-in)\n");
+  }
+}
+
+/**
+ * #648: user-level login autostart (no admin rights). Windows registers
+ * through the Startup folder, macOS through a LaunchAgent, Linux through a
+ * systemd user unit; activation hints are printed platform by platform.
+ */
+function handleAutostart(): void {
+  const cliPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "index.js");
+  const logPath = path.join(os.homedir(), ".miqro", "agent.log");
+  const entry = buildAutostartEntry({
+    platform: process.platform,
+    nodePath: process.execPath,
+    cliPath,
+    logPath,
+  });
+  enableAutostart(entry);
+  process.stdout.write(
+    `\nautostart installed: ${entry.filePath}\n  activate: ${entry.activateHint}\n  remove:   ${entry.deactivateHint}\n`,
+  );
 }
 
 async function writeConfigIfRequested(config: ContextConfig): Promise<void> {
