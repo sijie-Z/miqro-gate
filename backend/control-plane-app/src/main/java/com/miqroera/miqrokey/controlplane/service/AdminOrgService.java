@@ -578,6 +578,89 @@ public class AdminOrgService {
         return project;
     }
 
+    // -------------------------------------------------------------------
+    // CAA Project Registry (V56, Spec v1.1 §7.4): repo → project mappings
+    // -------------------------------------------------------------------
+
+    /** Canonical repo key shape: host/owner/repo, lowercase. */
+    private static final java.util.regex.Pattern REPO_KEY_PATTERN = java.util.regex.Pattern
+            .compile("^[a-z0-9][a-z0-9.-]*\\.[a-z]{2,}/[a-z0-9_.-]+/[a-z0-9_.-]+$");
+
+    public record ProjectRepoMappingView(UUID id, UUID projectId, String repoKey, Instant createdAt) {
+    }
+
+    /**
+     * Normalize a submitted repository reference: accepts
+     * {@code github.com/owner/repo}, {@code https://github.com/owner/repo},
+     * {@code git@github.com:owner/repo.git} and bare {@code owner/repo} (host
+     * defaults to github.com); everything becomes lowercase
+     * {@code host/owner/repo}.
+     */
+    static String normalizeRepoKey(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "REPO_KEY_INVALID",
+                    "repoKey 不能为空（示例：github.com/acme/rocket）");
+        }
+        String key = raw.trim().toLowerCase(Locale.ROOT);
+        key = key.replaceFirst("^https?://", "");
+        key = key.replaceFirst("^git@([^:/]+):", "$1/");
+        key = key.replaceFirst("\\.git$", "");
+        key = key.replaceFirst("/+$", "");
+        if (!key.contains("/") || key.split("/").length == 2) {
+            key = "github.com/" + key;
+        }
+        if (!REPO_KEY_PATTERN.matcher(key).matches()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "REPO_KEY_INVALID",
+                    "repoKey 格式无效：应为 host/owner/repo（示例：github.com/acme/rocket）");
+        }
+        return key;
+    }
+
+    public List<ProjectRepoMappingView> projectRepositories(UUID tenantId, UUID projectId) {
+        requireProject(tenantId, projectId);
+        return jdbc.query("""
+                SELECT id, project_id, repo_key, created_at FROM project_repositories
+                WHERE tenant_id = :tenantId AND project_id = :projectId
+                ORDER BY repo_key
+                """, new MapSqlParameterSource("tenantId", tenantId).addValue("projectId", projectId),
+                (rs, rowNum) -> new ProjectRepoMappingView((UUID) rs.getObject("id"), (UUID) rs.getObject("project_id"),
+                        rs.getString("repo_key"), rs.getTimestamp("created_at").toInstant()));
+    }
+
+    public ProjectRepoMappingView addProjectRepository(UUID tenantId, UUID adminId, UUID projectId, String rawRepoKey) {
+        requireProject(tenantId, projectId);
+        String repoKey = normalizeRepoKey(rawRepoKey);
+        UUID id = UUID.randomUUID();
+        try {
+            jdbc.update("""
+                    INSERT INTO project_repositories (id, tenant_id, project_id, repo_key, created_by)
+                    VALUES (:id, :tenantId, :projectId, :repoKey, :createdBy)
+                    """, new MapSqlParameterSource("id", id).addValue("tenantId", tenantId)
+                    .addValue("projectId", projectId).addValue("repoKey", repoKey).addValue("createdBy", adminId));
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            throw new ApiException(HttpStatus.CONFLICT, "REPO_KEY_TAKEN", "该仓库已映射到本租户的某个项目（含其他项目）；请先解除原映射");
+        }
+        auditService.record(tenantId, adminId, "REPOSITORY_ADD", "PROJECT", projectId,
+                AuditSummaries.summary("repoKey", AuditSummaries.sanitize(repoKey)), null);
+        return new ProjectRepoMappingView(id, projectId, repoKey, Instant.now());
+    }
+
+    public void removeProjectRepository(UUID tenantId, UUID adminId, UUID projectId, UUID mappingId) {
+        requireProject(tenantId, projectId);
+        String repoKey = jdbc.query("""
+                SELECT repo_key FROM project_repositories
+                WHERE id = :id AND tenant_id = :tenantId AND project_id = :projectId
+                """, new MapSqlParameterSource("id", mappingId).addValue("tenantId", tenantId).addValue("projectId",
+                projectId), rs -> rs.next() ? rs.getString("repo_key") : null);
+        if (repoKey == null) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "REPOSITORY_NOT_FOUND", "映射不存在或不属于该项目");
+        }
+        jdbc.update("DELETE FROM project_repositories WHERE id = :id AND tenant_id = :tenantId",
+                new MapSqlParameterSource("id", mappingId).addValue("tenantId", tenantId));
+        auditService.record(tenantId, adminId, "REPOSITORY_REMOVE", "PROJECT", projectId,
+                AuditSummaries.summary("repoKey", AuditSummaries.sanitize(repoKey)), null);
+    }
+
     private ProjectProviderGrant requireGrant(UUID tenantId, UUID grantId) {
         ProjectProviderGrant grant = grantRepository.findById(grantId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "GRANT_NOT_FOUND", "Grant not found"));

@@ -146,9 +146,10 @@ class UsageSubscriptionFilterIntegrationTest {
             for (String table : List.of("cache_hit_event", "cache_entry", "usage_event", "virtual_key_models",
                     "key_project_binding", "model_approval", "virtual_keys", "project_provider_grant_models",
                     "project_provider_grants", "upstream_credential_versions", "upstream_credentials", "plan_seats",
-                    "upstream_subscriptions", "project_memberships", "projects", "price_snapshot", "provider_products",
-                    "providers", "mcp_resilience_policy", "mcp_service_access", "mcp_access_grants", "mcp_tools",
-                    "mcp_route_rule", "mcp_services", "admin_audit_events", "user_sessions", "users")) {
+                    "upstream_subscriptions", "project_memberships", "project_repositories", "projects",
+                    "price_snapshot", "provider_products", "providers", "mcp_resilience_policy", "mcp_service_access",
+                    "mcp_access_grants", "mcp_tools", "mcp_route_rule", "mcp_services", "admin_audit_events",
+                    "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {

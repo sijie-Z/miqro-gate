@@ -333,7 +333,9 @@ project_repositories (id, tenant_id, project_id FK, repo_key, created_at, update
 | P1 | Context 数据模型（Evidence/TurnDelta/AttributionDecision/Status/Confidence） | miqro-context |
 | P2 | Collector（delta 水位线 + 四类证据 + git 解析） | miqro-context |
 | P3 | Local Agent（localhost 端点 + claim 注入 + SSE 透传 + install/doctor/degraded 文档） | miqro-context |
-| P4 | Gateway（RequestContextResolver + 校验阶梯 + 策略路由 + 头剥离 + 管线） | gateway-app（叠 #615） |
+| P4 | Gateway（RequestContextResolver + 校验阶梯 + 策略路由 + 头剥离 + 管线） | gateway-app（叠 #615）—— **已交付**（#633/PR #635，V54/V55） |
 | P5 | Usage/Billing（V54/V55 + UNATTRIBUTED 项目与策略 + registry/重分类 API） | control-plane + route-snapshot + domain |
 
 每 Phase 出口 = §9 对应用例自动化通过 + 文档同步。
+
+**实施状态（2026-09-16）**：P4 已交付（#633）；P1–P3 客户端 `miqro-context` + Project Registry（§7.4/§8 子集：V56 + 管理端点 + `/v1/context-registry`）见 #639；§7.3 unattributed_policy、§8 的 `/me/context-registry` 与重分类 API 待后续批次。

@@ -21,6 +21,7 @@ jobs:
     outputs:
       backend: ${{ steps.force.outputs.backend || steps.filter.outputs.backend }}
       frontend: ${{ steps.force.outputs.frontend || steps.filter.outputs.frontend }}
+      client: ${{ steps.force.outputs.client || steps.filter.outputs.client }}
       compose: ${{ steps.force.outputs.compose || steps.filter.outputs.compose }}
       docs: ${{ steps.force.outputs.docs || steps.filter.outputs.docs }}
     steps:
@@ -30,6 +31,7 @@ jobs:
         run: |
           echo "backend=true" >> "$GITHUB_OUTPUT"
           echo "frontend=true" >> "$GITHUB_OUTPUT"
+          echo "client=true" >> "$GITHUB_OUTPUT"
           echo "compose=true" >> "$GITHUB_OUTPUT"
           echo "docs=true" >> "$GITHUB_OUTPUT"
       - if: github.event_name != 'workflow_dispatch'
@@ -43,6 +45,9 @@ jobs:
               - '.github/dependabot.yml'
             frontend:
               - 'frontend/**'
+              - '.github/workflows/ci.yml'
+            client:
+              - 'miqro-context/**'
               - '.github/workflows/ci.yml'
             compose:
               - 'deploy/**'
@@ -136,6 +141,30 @@ jobs:
         if: ${{ needs.changes.outputs.backend == 'true' }}
 
   # Frontend static checks + unit tests + production build.
+  client:
+    name: Client (miqro-context typecheck / test)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.client == 'true' }}
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: miqro-context
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: miqro-context/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+
   frontend:
     name: Frontend (lint / typecheck / test / build)
     needs: [changes]

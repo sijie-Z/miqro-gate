@@ -131,7 +131,7 @@ class SkillApiIntegrationTest {
 
     private void clean() {
         for (String table : new String[]{"skill_access", "skills", "project_memberships", "team_memberships", "teams",
-                "projects", "user_sessions", "users", "admin_audit_events"}) {
+                "project_repositories", "projects", "user_sessions", "users", "admin_audit_events"}) {
             try {
                 jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
             } catch (Exception ignored) {

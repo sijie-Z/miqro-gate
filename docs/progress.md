@@ -2944,3 +2944,16 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - **#615 语义真机复核**：被引用标签 PATCH → 409 `PROJECT_TAG_IN_USE`（含中文可行动文案）；轮换复制全部绑定；轮换后新 Key 绑定 B 真实推理 200。
 - **每小时 Token 表**：API（USER/TEAM 维度、UTC+8 桶、days=8 → 400、普通用户 403）全过；**门户 UI**（远程验收通道）「用量报表」面板渲染真实数据（09-16 00:00 桶、admin/演示项目/1068 请求，hourStart 本地化正确）。
 - **回归批次**：门户 4 路由 200；管理端 16 面（用户/团队/项目/授权/审批/供应商产品/订阅/定价/审计/配额/告警/导出/技能/MCP/用量汇总/明细）+ 个人端 4 面（Key/授权/用量）全 200；console 无错误（仅登入前匿名 401，属预期）。
+
+
+## 2026-09-16 上午 — Goal #639：miqro-context 客户端（CAA P1–P3）+ Project Registry 最小闭环
+
+**背景**：CAA Spec v1.1 §11 P1–P3（客户端证据采集 + 本地 Agent）+ P5 的 registry 子集；产品目标"CC Switch 一条配置指向 127.0.0.1:8788，Session 内多项目穿插，Key/配置全程不动"。
+
+**交付**（分支 feat/miqro-context-639）：
+
+- **miqro-context（TypeScript / Node ≥ 20，零运行时依赖）**：会话水位线差分（TurnDelta，历史轮永不入本轮证据）；四类证据（prompt_url/tool_path/system_cwd/bash_cwd，含 git remote 解析与 URL→repoKey）；§5.3 作用域+分组+冲突归因（无打分；双 HIGH 组=AMBIGUOUS）；§5.4 ActivitySegment 滞回（HIGH 即时、MEDIUM 连续两轮；同项目内变化不切段）；127.0.0.1 本地代理（注入声明头、剥离伪造 X-Miqro-*、SSE 逐块透传、中断双向传播、body 逐字节）；CLI run/status/doctor/install（install 仅打印接入步骤，不改用户配置）。
+- **服务端**：V56 `project_repositories`（租户内 repo 唯一）；管理端点 `GET/POST/DELETE /api/v1/admin/projects/{id}/repositories`（repoKey 四形态归一化、409 REPO_KEY_TAKEN、审计 REPOSITORY_ADD/REMOVE）；网关 `GET /v1/context-registry`（虚拟 Key 认证，只返回该 Key 绑定项目的映射；无持久化时空表）。
+- **CI**：新增 client job（typecheck + node --test）；changes 过滤器加 miqro-context。
+
+**验证**：客户端 35/35（水位线/R1 历史污染回归 C15/冲突模型 C5-C7/滞回 C16/解析/头注入）；`AdminOrgApiIntegrationTest` 13/13（新增 registry CRUD 用例）；`ContextRegistryIntegrationTest` 3/3（单绑定只见己方、多绑定双向、404/401 统一语义；**踩坑**：GatewayAuthTestConfig 会给 WebTestClient 装默认 Authorization，缺失凭证用例需显式置空头）。

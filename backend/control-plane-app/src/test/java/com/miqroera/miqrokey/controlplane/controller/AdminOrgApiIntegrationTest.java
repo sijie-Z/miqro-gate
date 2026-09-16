@@ -538,8 +538,8 @@ class AdminOrgApiIntegrationTest {
                     "price_snapshot", "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
                     "project_provider_grant_models", "project_provider_grants", "model_catalog",
                     "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
-                    "project_memberships", "team_memberships", "projects", "teams", "provider_products", "providers",
-                    "admin_audit_events", "user_sessions", "users")) {
+                    "project_memberships", "team_memberships", "project_repositories", "projects", "teams",
+                    "provider_products", "providers", "admin_audit_events", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {
@@ -600,6 +600,56 @@ class AdminOrgApiIntegrationTest {
                     """, new MapSqlParameterSource("id", secondCredentialId).addValue("tenantId", tenantId)
                     .addValue("subscriptionId", secondSubscriptionId));
         }
+    }
+
+    @Test
+    @DisplayName("CAA project registry: repo mappings normalize, stay tenant-unique, and delete (#639)")
+    void projectRepositoryRegistry() throws Exception {
+        String p1 = createProject("REPOA");
+        String p2 = createProject("REPOB");
+
+        // Full URL form (with .git and mixed case) normalizes to host/owner/repo.
+        MvcResult added = mockMvc
+                .perform(post("/api/v1/admin/projects/" + p1 + "/repositories").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper
+                                .writeValueAsString(Map.of("repoKey", "https://github.com/Acme/Rocket.git"))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.repoKey").value("github.com/acme/rocket"))
+                .andReturn();
+        String mappingId = objectMapper.readValue(added.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        // Bare owner/repo defaults to github.com.
+        mockMvc.perform(post("/api/v1/admin/projects/" + p1 + "/repositories").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("repoKey", "acme/notes")))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.repoKey").value("github.com/acme/notes"));
+
+        mockMvc.perform(get("/api/v1/admin/projects/" + p1 + "/repositories").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
+
+        // Tenant-wide uniqueness: the same repo cannot map to a second project.
+        mockMvc.perform(post("/api/v1/admin/projects/" + p2 + "/repositories").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("repoKey", "github.com/acme/rocket"))))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("REPO_KEY_TAKEN"));
+
+        // Invalid shapes are rejected.
+        mockMvc.perform(post("/api/v1/admin/projects/" + p2 + "/repositories").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("repoKey", "not a repo!"))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("REPO_KEY_INVALID"));
+
+        // Delete, then the same id is gone.
+        mockMvc.perform(delete("/api/v1/admin/projects/" + p1 + "/repositories/" + mappingId)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+        mockMvc.perform(delete("/api/v1/admin/projects/" + p1 + "/repositories/" + mappingId)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("REPOSITORY_NOT_FOUND"));
+
+        // Unknown project stays a 404.
+        mockMvc.perform(get("/api/v1/admin/projects/" + UUID.randomUUID() + "/repositories").cookie(sessionCookie))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("PROJECT_NOT_FOUND"));
     }
 
     private String createProject(String code) throws Exception {

@@ -232,6 +232,10 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
 
 缓存命中计数（L1/L2 命中不写 `usage_event`，在此去重计数）：`cache_key`、`virtual_key_id`、`project_id`、`provider_product_id`、`level`（`L1_HIT|L2_HIT`）、`occurred_at`、`gateway_request_id`。唯一 `(tenant_id, cache_key, level, occurred_at)`——同一秒内同一 cache_key 只记一次。
 
+### `project_repositories` (V56，#639)
+
+CAA Project Registry（Spec v1.1 §7.4）：`id`、`tenant_id`、`project_id`（复合 FK → `projects(tenant_id, id)`）、`repo_key`（规范化小写 `host/owner/repo`，varchar(200)）、`created_by`、时间戳；唯一 `(tenant_id, repo_key)`（租户内一个仓库只能属于一个项目）、索引 `(project_id)`。Agent 经网关 `GET /v1/context-registry` 消费（按 Key 绑定项目过滤）。
+
 ### `request_context_evidence` (V55，#633)
 
 CAA 逐请求上下文证据审计（append-only）：`id`、`tenant_id`、`request_id`（gateway request id）、`source`、`value`、`confidence`、`scope`（`turn|session`）、`observed_at`。索引 `(tenant_id, request_id)`、`(tenant_id, observed_at)`。与 `usage_event` 的归属列互为佐证：usage 行回答"记到谁头上"，本表回答"凭什么这么记"。声明内容永不构成授权（Spec v1.1 §4）。
