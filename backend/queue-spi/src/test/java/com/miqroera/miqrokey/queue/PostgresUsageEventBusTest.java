@@ -232,6 +232,12 @@ class PostgresUsageEventBusTest {
         assertThat(signals.signals).hasSize(1);
         QueueSignal signal = signals.signals.get(0);
         assertThat(signal.dropped()).isEqualTo(3);
+        // Pinned to the migration-seeded tenant, not to the constant: the control
+        // plane evaluates the fact table under this literal and cannot import it
+        // (the control plane does not depend on queue-spi), so the two sides agree
+        // only if both name the same uuid.
+        assertThat(PostgresUsageEventBus.SIGNAL_TENANT_ID)
+                .isEqualTo(UUID.fromString("00000000-0000-0000-0000-000000000001"));
         assertThat(signal.tenantId()).isEqualTo(PostgresUsageEventBus.SIGNAL_TENANT_ID);
         assertThat(signal.capacity()).isEqualTo(2);
         assertThat(signal.saturationMode()).isEqualTo(SaturationMode.DROP);
