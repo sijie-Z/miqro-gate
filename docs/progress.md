@@ -3002,3 +3002,11 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **验证**：客户端单测 42/42（新增 7 例：文件名/默认目录/覆盖目录/三平台内容快照/幂等 enable-disable 往返）；**Windows 沙箱实测**：install --autostart 生成 .cmd（node/cli/日志路径逐字校验）→ uninstall 移除，全程未触碰真实启动文件夹。
 
+
+## 2026-09-16 午后 — 修复 #663：部署换版后懒加载 chunk 404 白屏自愈（/app/providers 实测）
+
+**背景**：用户报障 /app/providers 白屏。nginx 日志实锤两条旧 chunk 404（NextProvidersView-CpEUA9cA.js / NextApprovalCenterView-DvVCRa6q.js，真实用户浏览器，发生在 10:52 portal 部署后 5 分钟）——旧标签页仍在运行上一版 bundle，部署整体替换哈希文件名后按旧哈希请求懒加载 chunk → 404 → 动态 import 失败 → Vue Router 导航中断 → 白屏且无自愈，仅手动 F5 可恢复。
+
+**交付**（分支 fix/chunk-load-reload-663）：`utils/chunk-reload.ts`——`vite:preloadError` 事件 + `router.onError` 双通道识别动态 import 失败（覆盖 Chromium/Firefox/Safari 三种文案）→ `location.reload()` 一次拾取新 index.html；`sessionStorage` 时间戳 10s 冷却防刷新风暴；storage 不可用时放弃自动刷新（白屏优于死循环）；`main.ts` 装配，冷却期外错误照常上抛控制台。
+
+**验证**：单测 4/4（识别矩阵/冷却窗口/storage 兜底/事件抑制与默认放行）；全量 299/299；vue-tsc 三配置与改动文件 eslint 干净。
