@@ -321,7 +321,13 @@ onMounted(() => {
             <div class="next-alert-rules__row">
               <UiInput
                 v-model="form.threshold"
-                :label="isWatermarkType ? '阈值（水位 %）' : isQueueSaturationType ? '阈值（丢弃条数）' : '阈值'"
+                :label="
+                  isWatermarkType
+                    ? '阈值（水位 %）'
+                    : isQueueSaturationType
+                      ? '阈值（丢弃条数）'
+                      : '阈值'
+                "
                 :placeholder="isQueueSaturationType ? '例如 1' : '例如 0.5'"
                 data-testid="rule-create-threshold"
               />
