@@ -52,6 +52,61 @@ const scopeMcp = ref(true);
 const scopeSaving = ref(false);
 const scopeError = ref('');
 
+// ADR-0011: consumer JWT verification key. The platform signs with its own
+// private key; this console only ever holds the public PEM (rotate/remove).
+const jwtTarget = ref<ApiConsumerView | null>(null);
+const jwtPem = ref('');
+const jwtSaving = ref(false);
+const jwtError = ref('');
+
+function openJwt(consumer: ApiConsumerView) {
+  jwtTarget.value = consumer;
+  jwtPem.value = '';
+  jwtError.value = '';
+}
+
+async function saveJwt() {
+  const target = jwtTarget.value;
+  if (!target) return;
+  if (!jwtPem.value.trim()) {
+    jwtError.value = '请粘贴平台提供的公钥 PEM。';
+    return;
+  }
+  jwtSaving.value = true;
+  jwtError.value = '';
+  try {
+    await api.setConsumerJwtKey(target.id!, jwtPem.value.trim());
+    toast.success(target.jwtKeyFingerprint ? 'JWT 公钥已轮换' : 'JWT 公钥已保存');
+    jwtTarget.value = null;
+    await load();
+  } catch (error) {
+    jwtError.value = error instanceof ApiError ? error.message : '保存失败';
+  } finally {
+    jwtSaving.value = false;
+  }
+}
+
+function requestRemoveJwt(consumer: ApiConsumerView) {
+  confirmState.value = {
+    title: `移除消费者「${consumer.name}」的 JWT 公钥`,
+    body: '移除后，使用该公钥签发的 JWT 立即失效；API Key 通道不受影响。',
+    confirmLabel: '移除公钥',
+    tone: 'danger',
+    run: async () => {
+      try {
+        await api.removeConsumerJwtKey(consumer.id!);
+        toast.success('JWT 公钥已移除');
+        jwtTarget.value = null;
+        await load();
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(error.message);
+        }
+      }
+    },
+  };
+}
+
 // #338 call overview dialog.
 const activityTarget = ref<ApiConsumerView | null>(null);
 const activityVisible = ref(false);
@@ -161,11 +216,12 @@ async function saveScope() {
 const columns = [
   { key: 'name', title: '名称', minWidth: '200px' },
   { key: 'keyPrefix', title: 'Key 前缀', width: '160px' },
+  { key: 'credential', title: '凭证', width: '150px' },
   { key: 'capabilities', title: '能力作用域', minWidth: '150px' },
   { key: 'expiresAt', title: '到期', width: '150px' },
   { key: 'status', title: '状态', width: '100px' },
   { key: 'createdAt', title: '创建时间', width: '170px' },
-  { key: 'actions', title: '操作', width: '200px', align: 'center' as const },
+  { key: 'actions', title: '操作', width: '260px', align: 'center' as const },
 ];
 
 async function load() {
@@ -343,6 +399,17 @@ onMounted(load);
         <template #keyPrefix="{ row }">
           <span class="ui-mono">{{ (row as ApiConsumerView).keyPrefix }}</span>
         </template>
+        <template #credential="{ row }">
+          <span class="next-consumers__credentials">
+            <UiStatusBadge tone="neutral" label="API Key" />
+            <UiStatusBadge
+              v-if="(row as ApiConsumerView).jwtKeyFingerprint"
+              tone="info"
+              label="JWT"
+              data-testid="consumer-jwt-badge"
+            />
+          </span>
+        </template>
         <template #capabilities="{ row }">
           <span
             class="next-consumers__caps"
@@ -380,6 +447,15 @@ onMounted(load);
             @click="openActivity(row as ApiConsumerView)"
           >
             调用概览
+          </UiButton>
+          <UiButton
+            v-if="(row as ApiConsumerView).status === 'ACTIVE'"
+            variant="link"
+            size="sm"
+            data-testid="consumer-jwt-open"
+            @click="openJwt(row as ApiConsumerView)"
+          >
+            JWT 公钥
           </UiButton>
           <UiButton
             v-if="(row as ApiConsumerView).status === 'ACTIVE'"
@@ -469,6 +545,63 @@ onMounted(load);
         </UiButton>
       </template>
     </UiDialog>
+    <!-- Consumer JWT verification key (ADR-0011) -->
+    <UiDialog
+      v-if="jwtTarget"
+      :open="true"
+      :title="`JWT 公钥 — ${jwtTarget.name}`"
+      description="平台自持私钥签发 RS256 JWT；网关仅保存公钥验签，不接触私钥。"
+      width="540px"
+      @update:open="jwtTarget = null"
+    >
+      <div
+        v-if="jwtTarget.jwtKeyFingerprint"
+        class="next-consumers__jwt-state"
+        data-testid="consumer-jwt-state"
+      >
+        <p>
+          当前指纹：<span class="ui-mono">{{ jwtTarget.jwtKeyFingerprint }}</span>
+        </p>
+        <p>设置于 {{ formatTime(jwtTarget.jwtKeySetAt) }}</p>
+      </div>
+      <p v-else class="next-consumers__jwt-state" data-testid="consumer-jwt-state">
+        尚未配置 JWT 公钥。
+      </p>
+      <label class="next-consumers__jwt-field">
+        <span>{{ jwtTarget.jwtKeyFingerprint ? '粘贴新公钥以轮换' : '粘贴公钥 PEM' }}</span>
+        <textarea
+          v-model="jwtPem"
+          class="ui-textarea next-consumers__jwt-input"
+          rows="6"
+          placeholder="-----BEGIN PUBLIC KEY-----"
+          data-testid="consumer-jwt-pem"
+        ></textarea>
+      </label>
+      <p class="next-consumers__jwt-hint">
+        保存后旧签名立即失效；仅接受 RSA SubjectPublicKeyInfo PEM。
+      </p>
+      <p v-if="jwtError" class="ui-form-error" data-testid="consumer-jwt-error">{{ jwtError }}</p>
+      <template #footer>
+        <UiButton
+          v-if="jwtTarget.jwtKeyFingerprint"
+          variant="link-danger"
+          data-testid="consumer-jwt-remove"
+          @click="requestRemoveJwt(jwtTarget)"
+        >
+          移除公钥
+        </UiButton>
+        <UiButton variant="ghost" @click="jwtTarget = null">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="jwtSaving"
+          data-testid="consumer-jwt-save"
+          @click="saveJwt"
+        >
+          {{ jwtTarget.jwtKeyFingerprint ? '轮换公钥' : '保存公钥' }}
+        </UiButton>
+      </template>
+    </UiDialog>
+
     <!-- Call overview (issue #338 / I5) -->
     <UiDialog
       v-if="activityTarget"
@@ -640,6 +773,42 @@ onMounted(load);
 
 .next-consumers__name {
   font-weight: var(--ui-weight-medium);
+}
+
+.next-consumers__credentials {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-1);
+}
+
+.next-consumers__jwt-state {
+  margin: 0 0 var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-consumers__jwt-state p {
+  margin: 0 0 var(--ui-space-1);
+}
+
+.next-consumers__jwt-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground);
+}
+
+.next-consumers__jwt-input {
+  width: 100%;
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-font-size-xs);
+}
+
+.next-consumers__jwt-hint {
+  margin: var(--ui-space-2) 0 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
 }
 
 .next-consumers__caps {

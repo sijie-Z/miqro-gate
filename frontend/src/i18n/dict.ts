@@ -1487,6 +1487,25 @@ export const DICT: Record<string, string> = {
   '全部密钥': 'All keys',
   '快捷导航': 'Quick nav',
   '今天也要高效工作。': 'Have a productive day.',
+  // 消费者 JWT 公钥（#658，ADR-0011）。
+  'JWT 公钥': 'JWT public key',
+  '当前指纹：': 'Fingerprint: ',
+  '尚未配置 JWT 公钥。': 'No JWT public key configured.',
+  '粘贴公钥 PEM': 'Paste the public key PEM',
+  '粘贴新公钥以轮换': 'Paste a new public key to rotate',
+  '保存后旧签名立即失效；仅接受 RSA SubjectPublicKeyInfo PEM。':
+    'Tokens signed with the old key stop verifying immediately; only RSA SubjectPublicKeyInfo PEM is accepted.',
+  '请粘贴平台提供的公钥 PEM。': 'Paste the public key PEM provided by the platform.',
+  '移除公钥': 'Remove key',
+  '保存公钥': 'Save key',
+  '轮换公钥': 'Rotate key',
+  'JWT 公钥已保存': 'JWT public key saved',
+  'JWT 公钥已轮换': 'JWT public key rotated',
+  'JWT 公钥已移除': 'JWT public key removed',
+  '移除后，使用该公钥签发的 JWT 立即失效；API Key 通道不受影响。':
+    'Once removed, JWTs signed with this key stop verifying immediately; the API Key channel is unaffected.',
+  '平台自持私钥签发 RS256 JWT；网关仅保存公钥验签，不接触私钥。':
+    'The platform signs RS256 JWTs with its own private key; the gateway only stores the public key for verification and never touches the private key.',
   // 列表依赖/目录元数据 + 表单规则文案（#657）。
   '授权引用': 'Grant references',
   '依赖': 'Dependencies',
@@ -1753,6 +1772,9 @@ export const PATTERNS: Array<[RegExp, string]> = [
   [/^第\ (.+?)\ 页$/, 'Page $1'],
   [/^第\ (.+?)\ 页$/, 'Page $1'],
   [/^共\ (.+?)\ 个$/, '$1 total'],
+  // #658 动态标签。
+  [/^设置于 (.+?)$/, 'set $1'],
+  [/^移除消费者「(.+?)」的 JWT 公钥$/, 'Remove the JWT public key of consumer "$1"'],
   // #657 依赖/目录动态单元格。
   [/^(\d+) 个模型$/, '$1 models'],
   [/^凭证 (\d+) · 授权 (\d+)$/, 'Credentials $1 · Grants $2'],
