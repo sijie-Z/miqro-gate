@@ -99,6 +99,17 @@ describe('NextQuotaRulesView', () => {
         usedPct: 85,
         status: 'DISABLED',
       }),
+      rule({
+        id: 'r3',
+        scopeName: 'bob',
+        scopeTag: 'bob',
+        metric: 'COST',
+        period: 'YEARLY',
+        limitValue: 100,
+        used: 92.5,
+        usedPct: 92.5,
+        level: 'NEAR_LIMIT',
+      }),
     ]);
     mockApi.listUsers.mockResolvedValue([
       {
@@ -141,6 +152,11 @@ describe('NextQuotaRulesView', () => {
     expect(wrapper.find('[data-testid="quota-template-hint"]').text()).toContain('停用也不会删除');
     expect(wrapper.text()).toContain('超限');
     expect(wrapper.text()).toContain('预警');
+    // #683: the fixed 90% tier and the COST metric render distinctly.
+    expect(wrapper.text()).toContain('即将超限');
+    expect(wrapper.text()).toContain('成本（¥）');
+    expect(wrapper.text()).toContain('每年');
+    expect(wrapper.text()).toContain('¥92.5 / ¥100');
     expect(wrapper.text()).toContain('已停用');
     expect(wrapper.text()).toContain('1,100,000');
   });

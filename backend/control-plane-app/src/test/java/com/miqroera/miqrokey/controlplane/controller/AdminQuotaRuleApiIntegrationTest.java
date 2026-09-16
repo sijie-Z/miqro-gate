@@ -25,6 +25,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -143,7 +144,7 @@ class AdminQuotaRuleApiIntegrationTest {
     }
 
     @Test
-    @DisplayName("watermark derives token usage of the current window into NORMAL/WARNING/EXCEEDED")
+    @DisplayName("watermark derives token usage into NORMAL/WARNING/NEAR_LIMIT/EXCEEDED")
     void tokenWatermarkLevels() throws Exception {
         fx.insertProviderCatalog();
         fx.insertProjectWithGrant();
@@ -154,8 +155,13 @@ class AdminQuotaRuleApiIntegrationTest {
         putQuota(quotaBody("USER", adminUserId, "TOKENS", "DAILY", 10000, 80)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.used").value(1000)).andExpect(jsonPath("$.usedPct").value(10.0))
                 .andExpect(jsonPath("$.level").value("NORMAL"));
-        putQuota(quotaBody("USER", adminUserId, "TOKENS", "WEEKLY", 1100, 80)).andExpect(status().isOk())
+        // 90.91% crosses the fixed 90% guidance tier (#683) even below a 99% warn.
+        putQuota(quotaBody("USER", adminUserId, "TOKENS", "WEEKLY", 1100, 99)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.used").value(1000)).andExpect(jsonPath("$.usedPct").value(90.91))
+                .andExpect(jsonPath("$.level").value("NEAR_LIMIT"));
+        // 50% of the request limit crosses the rule's own warn threshold.
+        putQuota(quotaBody("USER", adminUserId, "REQUESTS", "DAILY", 2, 40)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.used").value(1)).andExpect(jsonPath("$.usedPct").value(50.0))
                 .andExpect(jsonPath("$.level").value("WARNING"));
         putQuota(quotaBody("USER", adminUserId, "TOKENS", "MONTHLY", 1000, 80)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.used").value(1000)).andExpect(jsonPath("$.usedPct").value(100.0))
@@ -184,6 +190,41 @@ class AdminQuotaRuleApiIntegrationTest {
         // An unknown project scope is a 404.
         putQuota(quotaBody("PROJECT", UUID.randomUUID(), "REQUESTS", "DAILY", 5, 80)).andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("SCOPE_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("COST metric watermarks the priced upstream cost of the window (#683)")
+    void costMetricWatermarkLevels() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant();
+        UUID keyId = fx.createKeyViaAdmin();
+        fx.insertUsage(keyId, 1_000_000L, 500_000L); // 1M input + 0.5M output
+        fx.insertPrices(new BigDecimal("1.00"), new BigDecimal("2.00")); // => 1.00 + 1.00 = CNY 2.00
+
+        putQuota(quotaBody("USER", adminUserId, "COST", "MONTHLY", 2, 80)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.used").value(2.00)).andExpect(jsonPath("$.usedPct").value(100.0))
+                .andExpect(jsonPath("$.level").value("EXCEEDED"));
+        putQuota(quotaBody("USER", adminUserId, "COST", "DAILY", 4, 40)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.used").value(2.00)).andExpect(jsonPath("$.usedPct").value(50.0))
+                .andExpect(jsonPath("$.level").value("WARNING"));
+    }
+
+    @Test
+    @DisplayName("YEARLY period watermarks against the UTC calendar year (#683)")
+    void yearlyPeriodWatermark() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant();
+        UUID keyId = fx.createKeyViaAdmin();
+        fx.insertUsage(keyId, 500L, 500L);
+
+        MvcResult put = putQuota(quotaBody("USER", adminUserId, "TOKENS", "YEARLY", 1000, 80))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.used").value(1000))
+                .andExpect(jsonPath("$.usedPct").value(100.0)).andExpect(jsonPath("$.level").value("EXCEEDED"))
+                .andReturn();
+        String windowFrom = (String) objectMapper.readValue(put.getResponse().getContentAsString(), Map.class)
+                .get("windowFrom");
+        String year = String.valueOf(java.time.LocalDate.now(java.time.ZoneOffset.UTC).getYear());
+        org.assertj.core.api.Assertions.assertThat(windowFrom).startsWith(year + "-01-01");
     }
 
     // ------------------------------------------------------------------
@@ -429,6 +470,17 @@ class AdminQuotaRuleApiIntegrationTest {
             keyId = UUID.fromString(
                     (String) objectMapper.readValue(r.getResponse().getContentAsString(), Map.class).get("id"));
             return keyId;
+        }
+
+        void insertPrices(BigDecimal input, BigDecimal output) {
+            for (Map.Entry<String, BigDecimal> e : List.of(Map.entry("INPUT", input), Map.entry("OUTPUT", output))) {
+                jdbc.update("""
+                        INSERT INTO price_snapshot (id, provider_product_id, model_id, token_type, currency,
+                                                    unit_price, effective_from, source)
+                        VALUES (gen_random_uuid(), :productId, 'model-alpha', :type, 'CNY', :price, now(), 'MANUAL')
+                        """, new MapSqlParameterSource("productId", productId).addValue("type", e.getKey())
+                        .addValue("price", e.getValue()));
+            }
         }
 
         void insertUsage(UUID keyId, long input, long output) {

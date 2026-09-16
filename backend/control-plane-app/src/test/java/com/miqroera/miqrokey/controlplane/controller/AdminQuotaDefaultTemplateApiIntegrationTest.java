@@ -164,7 +164,7 @@ class AdminQuotaDefaultTemplateApiIntegrationTest {
     @DisplayName("definition validation rejects bad enums and non-positive limits")
     void validation() throws Exception {
         configure("BAD_METRIC", "MONTHLY", 100).andExpect(status().isBadRequest());
-        configure("TOKENS", "YEARLY", 100).andExpect(status().isBadRequest());
+        configure("TOKENS", "QUARTERLY", 100).andExpect(status().isBadRequest());
         configure("TOKENS", "MONTHLY", 0).andExpect(status().isBadRequest());
         configure("TOKENS", "MONTHLY", -1).andExpect(status().isBadRequest());
         mockMvc.perform(put("/api/v1/admin/quota-default-template").cookie(adminSession, adminCsrf)

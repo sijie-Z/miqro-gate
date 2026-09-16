@@ -1641,6 +1641,11 @@ export const DICT: Record<string, string> = {
   '开启内容留痕': 'Enable content retention',
   '内容上限（字节）': 'Content cap (bytes)',
   '已保存——保存后数秒内生效，无需同步。': 'Saved — effective within seconds, no sync needed.',
+  '达到限额的此百分比时进入预警；≥90% 即将超限；≥100% 为超限':
+    'Warn at this percentage of the limit; ≥90% is near limit, ≥100% counts as over limit',
+  '成本（¥）': 'Cost (¥)',
+  '每年': 'Yearly',
+  '即将超限': 'Near limit',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [
