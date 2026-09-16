@@ -77,18 +77,28 @@ describe('aesthetic audit', () => {
 
   it('keeps shadows limited to dropdown/popover/modal (cards may cast the hairline shadow)', () => {
     // TDesign (t-) and legacy (el-) names both sanctioned; the v2 teleported
-    // popper surfaces (.ui-select__content / .ui-menu) live in the global
-    // sheet because radix's popper root drops the scoped data-v attribute.
-    // Hairline card shadow (0 1px 2px, or the --ui-shadow-card token) is the
-    // sanctioned card depth; anything else must stay on popper/dropdown/dialog.
+    // popper surfaces (.ui-select__content / .ui-menu / .ui-tooltip) live in
+    // the global sheet because radix's popper root drops the scoped data-v
+    // attribute. Hairline card shadow (0 1px 2px, or the --ui-shadow-card
+    // token) is the sanctioned card depth; the focus ring token
+    // (--ui-shadow-focus = 0 0 0 2px ring) is sanctioned by name; anything
+    // else must stay on popper/dropdown/dialog.
     const shadowBlocks = css.match(/[^{}]*\{[^}]*box-shadow:[^}]*\}/g) ?? [];
     for (const block of shadowBlocks) {
       const hairlineCard =
         /\.mk-card|\.mk-stat-card|\.ui-panel/.test(block) &&
-        (/0 1px 2px/.test(block) || /var\(--miqrokey-shadow-card\)/.test(block) ||
-            /var\(--ui-shadow-card\)/.test(block));
-      const popperSurface = /(?:el|t)-(?:popper|dropdown|dialog|popup)|\.ui-select__content|\.ui-menu/.test(block);
-      if (!hairlineCard && !popperSurface && !/box-shadow:\s*none/.test(block) && !/0 0 0 2px/.test(block)) {
+        (/0 1px 2px/.test(block) ||
+          /var\(--miqrokey-shadow-card\)/.test(block) ||
+          /var\(--ui-shadow-card\)/.test(block));
+      const popperSurface =
+        /(?:el|t)-(?:popper|dropdown|dialog|popup)|\.ui-select__content|\.ui-menu|\.ui-tooltip/.test(
+          block,
+        );
+      const focusRing =
+        /box-shadow:\s*none/.test(block) ||
+        /0 0 0 2px/.test(block) ||
+        /var\(--ui-shadow-focus\)/.test(block);
+      if (!hairlineCard && !popperSurface && !focusRing) {
         expect(block).toMatch(/(?:el|t)-(?:popper|dropdown|dialog|popup)/);
       }
     }

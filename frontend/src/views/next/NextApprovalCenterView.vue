@@ -7,7 +7,7 @@
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { UiButton, UiStatusBadge, UiTable, toast } from '@/ui';
-import type {ModelApprovalStatus} from '@/types/api';
+import type { ModelApprovalStatus } from '@/types/api';
 import type { ModelApprovalView } from '@/types/generated-api';
 
 const items = ref<ModelApprovalView[]>([]);
@@ -163,9 +163,7 @@ onMounted(load);
     <header class="ui-page-header">
       <div>
         <h1 class="ui-page-title">审批中心</h1>
-        <p class="ui-page-desc">
-          用户为虚拟密钥申请的模型授权；通过后立即写入授权并刷新路由快照。
-        </p>
+        <p class="ui-page-desc">用户为虚拟密钥申请的模型授权；通过后立即写入授权并刷新路由快照。</p>
       </div>
     </header>
 
@@ -273,7 +271,8 @@ onMounted(load);
             variant="pill"
             :tone="statusTone((row as ModelApprovalView).status)"
             :label="
-              statusText[(row as ModelApprovalView).status ?? ''] ?? (row as ModelApprovalView).status
+              statusText[(row as ModelApprovalView).status ?? ''] ??
+              (row as ModelApprovalView).status
             "
           />
         </template>
@@ -289,7 +288,7 @@ onMounted(load);
             class="next-approvals-center__actions"
           >
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="approve-open"
               @click="openReview('approve', row as ModelApprovalView)"
@@ -297,9 +296,8 @@ onMounted(load);
               通过
             </UiButton>
             <UiButton
-              variant="ghost"
+              variant="link-danger"
               size="sm"
-              class="next-approvals-center__danger"
               data-testid="reject-open"
               @click="openReview('reject', row as ModelApprovalView)"
             >
@@ -450,10 +448,6 @@ onMounted(load);
 .next-approvals-center__actions {
   display: inline-flex;
   gap: var(--ui-space-1);
-}
-
-.next-approvals-center__danger {
-  color: var(--ui-danger-fg);
 }
 
 .next-approvals-center__more {

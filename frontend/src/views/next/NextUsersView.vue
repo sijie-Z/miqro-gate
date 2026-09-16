@@ -82,7 +82,7 @@ const columns = [
   { key: 'status', title: '状态', width: '110px' },
   { key: 'lastLoginAt', title: '最近登录', width: '150px' },
   { key: 'createdAt', title: '创建时间', width: '180px' },
-  { key: 'actions', title: '操作', width: '80px', align: 'center' as const },
+  { key: 'actions', title: '操作', width: '96px', align: 'center' as const },
 ];
 
 const activeCount = computed(() => users.value.filter((u) => u.status === 'ACTIVE').length);
@@ -573,20 +573,19 @@ function formatDate(iso?: string): string {
         <template #actions="{ row }">
           <DropdownMenuRoot>
             <DropdownMenuTrigger
-              class="next-users__kebab"
+              class="next-users__kebab ui-link-action"
               aria-label="操作"
               :data-testid="`user-actions-${(row as AdminUser).id}`"
             >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <circle cx="3" cy="8" r="1.4" />
-                <circle cx="8" cy="8" r="1.4" />
-                <circle cx="13" cy="8" r="1.4" />
+              更多
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="m4 6 4 4 4-4"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
             </DropdownMenuTrigger>
             <DropdownMenuPortal>
@@ -896,30 +895,15 @@ function formatDate(iso?: string): string {
 }
 
 .next-users__kebab {
+  /* Layout only — ink and hover come from the shared .ui-link-action row
+     action link style (#651). */
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-control);
-  background: var(--ui-card);
-  color: var(--ui-foreground-secondary);
+  border: none;
+  background: transparent;
+  font: inherit;
   cursor: pointer;
-  transition:
-    border-color var(--ui-ease),
-    color var(--ui-ease),
-    background-color var(--ui-ease);
-}
-
-.next-users__kebab:hover {
-  background: var(--ui-muted);
-  color: var(--ui-foreground);
-}
-
-.next-users__kebab:focus-visible {
-  outline: none;
-  box-shadow: var(--ui-shadow-focus);
 }
 
 /* .ui-menu panel chrome lives in styles/design-base.css (the radix popper

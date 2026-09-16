@@ -5,10 +5,19 @@
  * delivery endpoints, enable/disable, one-click signature test, gated delete
  * and a delivery-history drawer (recent 20 attempts per endpoint).
  */
-import { computed, onMounted, ref  } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiDonut, UiDialog, UiDrawer, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
+import {
+  UiButton,
+  UiDonut,
+  UiDialog,
+  UiDrawer,
+  UiInput,
+  UiStatusBadge,
+  UiTable,
+  toast,
+} from '@/ui';
 import type { WebhookEndpointView, WebhookDelivery } from '@/types/generated-api';
 
 const webhooks = ref<WebhookEndpointView[]>([]);
@@ -80,7 +89,9 @@ async function loadRates(endpoints: WebhookEndpointView[]) {
         // list rows always carry ids
         const deliveries = await api.webhookDeliveries(endpoint.id!);
         if (!deliveries || deliveries.length === 0) return;
-        const ok = deliveries.filter((d) => (d.httpStatus ?? 0) >= 200 && d.httpStatus! < 300).length;
+        const ok = deliveries.filter(
+          (d) => (d.httpStatus ?? 0) >= 200 && d.httpStatus! < 300,
+        ).length;
         rate.value[endpoint.id!] = { ok, total: deliveries.length };
       } catch {
         // rate stays absent when the history call fails; the table shows '—'
@@ -436,26 +447,25 @@ onMounted(load);
         <template #actions="{ row }">
           <div class="next-webhooks__actions">
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="webhook-test"
               @click="test(row as WebhookEndpointView)"
               >测试</UiButton
             >
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="webhook-deliveries"
               @click="openDeliveries(row as WebhookEndpointView)"
               >投递</UiButton
             >
-            <UiButton variant="ghost" size="sm" @click="toggle(row as WebhookEndpointView)">{{
+            <UiButton variant="link" size="sm" @click="toggle(row as WebhookEndpointView)">{{
               (row as WebhookEndpointView).enabled ? '停用' : '启用'
             }}</UiButton>
             <UiButton
-              variant="ghost"
+              variant="link-danger"
               size="sm"
-              class="next-webhooks__danger"
               data-testid="webhook-delete"
               @click="requestRemove(row as WebhookEndpointView)"
               >删除</UiButton
@@ -526,7 +536,11 @@ onMounted(load);
       data-testid="webhook-in-use-dialog"
       @update:open="inUseState = null"
     >
-      <ul v-if="inUseState.dependencies.length" class="next-webhooks__deps" data-testid="webhook-in-use-deps">
+      <ul
+        v-if="inUseState.dependencies.length"
+        class="next-webhooks__deps"
+        data-testid="webhook-in-use-deps"
+      >
         <li v-for="dep in inUseState.dependencies" :key="dep.id">
           <span class="ui-mono">{{ dep.type }}</span> · {{ dep.name ?? dep.id }}
           <span v-if="dep.detail">（{{ dep.detail }}）</span>
@@ -598,10 +612,6 @@ onMounted(load);
 .next-webhooks__url {
   font-size: var(--ui-font-size-xs);
   overflow-wrap: anywhere;
-}
-
-.next-webhooks__danger {
-  color: var(--ui-danger-fg);
 }
 
 .next-webhooks__reveal {

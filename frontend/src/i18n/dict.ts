@@ -832,6 +832,10 @@ export const DICT: Record<string, string> = {
   '模型审批 · 驳回': 'Model approval · rejected',
   '模型申请': 'Model Requests',
   '模型目录': 'Model catalog',
+  '接入文档': 'API docs',
+  '更多': 'More',
+  '试调': 'Test run',
+  '发送试调': 'Send test run',
   '模型范围': 'Model scope',
   '模型范围已更新': 'Model scope updated',
   '模型范围（每行一个，选填）': 'Model scope (one per line, optional)',
@@ -1348,6 +1352,17 @@ export const DICT: Record<string, string> = {
   'L2 命中': 'L2 hit',
   '缺失': 'Missing',
   '已文档化': 'Documented',
+  '产品条目已创建，尚未完成资料整理。':
+    'The product entry exists; documentation is still being compiled.',
+  '官方资料已确认设计与接入方式；适配器尚未完成验证。详见「接入文档」。':
+    'Official docs confirm the design and endpoints; the adapter is not yet verified. See the API docs for details.',
+  '适配器与 Mock 契约测试已完成，等待真实凭证验证。':
+    'Adapter and mock contract tests are done; real-credential verification is pending.',
+  '已用真实供应商凭证完成契约测试。': 'Contract-tested with a real provider credential.',
+  '部分能力只能本地估算或人工核对，详见接入文档。':
+    'Some capabilities are estimate-only or checked manually — see the API docs.',
+  '该产品实例已停用，不再用于新建凭证。':
+    'This product instance is disabled and no longer used for new credentials.',
   '草稿': 'Draft',
   '管理 API 密钥': 'Admin API key',
   '删除任务': 'Deletion task',

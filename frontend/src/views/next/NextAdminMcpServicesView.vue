@@ -1480,42 +1480,42 @@ async function saveResilience() {
         <template #actions="{ row }">
           <div class="next-mcp__row-actions">
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="mcp-tools"
               @click="openTools(row as McpServiceView)"
               >Tools</UiButton
             >
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="mcp-access"
               @click="openAccess(row as McpServiceView)"
               >访问控制</UiButton
             >
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="mcp-routes"
               @click="openRoutes(row as McpServiceView)"
               >路由规则</UiButton
             >
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="mcp-upstream-timeout"
               @click="openTimeout(row as McpServiceView)"
               >预算</UiButton
             >
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="mcp-health-config"
               @click="openConfig(row as McpServiceView)"
               >健康检查</UiButton
             >
             <UiButton
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="mcp-resilience"
               @click="openResilience(row as McpServiceView)"
@@ -1523,16 +1523,15 @@ async function saveResilience() {
             >
             <UiButton
               v-if="(row as McpServiceView).status === 'ONLINE'"
-              variant="ghost"
+              variant="link-danger"
               size="sm"
-              class="next-mcp__danger"
               data-testid="mcp-offline"
               @click="requestStatusChange(row as McpServiceView, 'OFFLINE')"
               >下线</UiButton
             >
             <UiButton
               v-else
-              variant="ghost"
+              variant="link"
               size="sm"
               data-testid="mcp-online"
               @click="requestStatusChange(row as McpServiceView, 'ONLINE')"
@@ -1552,7 +1551,8 @@ async function saveResilience() {
       @update:open="timeoutVisible = false"
     >
       <p class="next-mcp__hint">
-        数据面每次上游尝试的超时（毫秒）。预算耗尽将返回 504 mcp_upstream_timeout；启用慢调用熔断时，预算须高于慢调用阈值。
+        数据面每次上游尝试的超时（毫秒）。预算耗尽将返回 504
+        mcp_upstream_timeout；启用慢调用熔断时，预算须高于慢调用阈值。
       </p>
       <UiInput
         v-model="timeoutForm.upstreamTimeoutMs"
@@ -1813,8 +1813,8 @@ async function saveResilience() {
         </div>
         <div v-if="syncReport" class="next-mcp__sync-report" data-testid="mcp-tool-sync-report">
           <p class="ui-panel-sub">
-            上游 {{ syncReport.upstreamToolCount }} 个工具 · 新增 {{ syncReport.added.length }} · 更新
-            {{ syncReport.updated.length }} · 未变 {{ syncReport.unchanged
+            上游 {{ syncReport.upstreamToolCount }} 个工具 · 新增 {{ syncReport.added.length }} ·
+            更新 {{ syncReport.updated.length }} · 未变 {{ syncReport.unchanged
             }}<template v-if="syncReport.dryRun">（预览，未写入）</template>
           </p>
           <p v-if="syncReport.added.length" class="next-mcp__sync-line">
@@ -1824,11 +1824,15 @@ async function saveResilience() {
             更新（描述）：<span class="ui-mono">{{ syncReport.updated.join('、') }}</span>
           </p>
           <p v-if="syncReport.absentUpstream.length" class="next-mcp__sync-line">
-            上游未返回（未改动）：<span class="ui-mono">{{ syncReport.absentUpstream.join('、') }}</span>
+            上游未返回（未改动）：<span class="ui-mono">{{
+              syncReport.absentUpstream.join('、')
+            }}</span>
           </p>
           <p v-if="syncReport.skipped.length" class="next-mcp__sync-line">
             跳过：<span class="ui-mono">{{
-              syncReport.skipped.map((entry) => `${entry.toolName || '—'}（${entry.reason}）`).join('；')
+              syncReport.skipped
+                .map((entry) => `${entry.toolName || '—'}（${entry.reason}）`)
+                .join('；')
             }}</span>
           </p>
           <div
@@ -1884,7 +1888,11 @@ async function saveResilience() {
                 class="next-mcp__rev-diff"
                 :data-testid="`mcp-rev-diff-${rev.revision}`"
               >
-                <span v-for="field in rev.changedFields" :key="field" class="next-mcp__rev-diff-chip">
+                <span
+                  v-for="field in rev.changedFields"
+                  :key="field"
+                  class="next-mcp__rev-diff-chip"
+                >
                   {{ REVISION_FIELD_LABELS[field] ?? field }}
                 </span>
               </span>
@@ -1925,7 +1933,11 @@ async function saveResilience() {
       data-testid="mcp-tool-retry-dialog"
       @update:open="toolRetryVisible = false"
     >
-      <div v-if="toolRetryError" class="ui-alert ui-alert--error" data-testid="mcp-tool-retry-error">
+      <div
+        v-if="toolRetryError"
+        class="ui-alert ui-alert--error"
+        data-testid="mcp-tool-retry-error"
+      >
         {{ toolRetryError }}
       </div>
       <div v-if="toolRetryLoading" class="next-mcp__tools-loading">
@@ -1959,7 +1971,10 @@ async function saveResilience() {
                 {{ label }}
               </UiCheckbox>
             </div>
-            <UiCheckbox v-model="toolRetryForm.idempotencyConfirmed" data-testid="mcp-tool-retry-idempotent">
+            <UiCheckbox
+              v-model="toolRetryForm.idempotencyConfirmed"
+              data-testid="mcp-tool-retry-idempotent"
+            >
               已确认后端接口幂等（POST/PUT/PATCH 工具可重试）
             </UiCheckbox>
           </template>
