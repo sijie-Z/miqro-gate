@@ -3,7 +3,6 @@ package com.miqroera.miqrokey.controlplane.service;
 import com.miqroera.miqrokey.controlplane.dto.QuotaRuleView;
 import com.miqroera.miqrokey.controlplane.dto.UpsertQuotaRuleRequest;
 import com.miqroera.miqrokey.domain.model.Project;
-import com.miqroera.miqrokey.domain.model.QuotaMetric;
 import com.miqroera.miqrokey.domain.model.QuotaPeriod;
 import com.miqroera.miqrokey.domain.model.QuotaRule;
 import com.miqroera.miqrokey.domain.model.QuotaRuleStatus;
@@ -29,19 +28,22 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Usage quota plans (V23, {@code quota_rules}, platform-middleware roadmap
+ * Usage quota plans (V23/V58, {@code quota_rules}, platform-middleware roadmap
  * "quota management" step): per scope (USER | PROJECT) limits of a metric
- * (TOKENS | REQUESTS) per UTC period (DAILY | WEEKLY | MONTHLY) with a warn
- * threshold. The current-period watermark is computed at read time from usage
- * events through the shared aggregator; the derived level follows the Tencent
- * consumer-quota states (NORMAL / WARNING / EXCEEDED). A rule never blocks
- * traffic — this plan is the alerting-only half of quota governance; hard
- * blocking and webhook alerting are separate ADR/extension steps.
+ * (TOKENS | REQUESTS | COST) per UTC period (DAILY | WEEKLY | MONTHLY | YEARLY)
+ * with a warn threshold. The current-period watermark is computed at read time
+ * from usage events through the shared aggregator; the derived level follows
+ * the Tencent consumer-quota states (NORMAL / WARNING / NEAR_LIMIT / EXCEEDED).
+ * A rule never blocks traffic — this plan is the alerting-only half of quota
+ * governance; hard blocking and webhook alerting are separate ADR/extension
+ * steps.
  */
 @Service
 public class AdminQuotaRuleService {
 
     private static final int DEFAULT_WARN_PERCENT = 80;
+    /** Fixed guidance tier (#683): Tencent's "即将超限" state sits at 90%. */
+    private static final int NEAR_LIMIT_PERCENT = 90;
 
     private final QuotaRuleRepository quotaRuleRepository;
     private final UserRepository userRepository;
@@ -128,17 +130,24 @@ public class AdminQuotaRuleService {
     /** Live watermark: usage of the current UTC window of the rule's period. */
     private QuotaRuleView view(UUID tenantId, QuotaRule rule) {
         Window window = window(rule.period());
-        UsageSummary summary = usageStatsService.summary(tenantId, "project", window.from(), window.to(),
+        // Uncapped variant (#683): a YEARLY window spans 365 days, beyond the
+        // 93-day guard on the public usage API.
+        UsageSummary summary = usageStatsService.summaryUncapped(tenantId, "project", window.from(), window.to(),
                 rule.scopeType() == QuotaScopeType.USER ? rule.scopeId() : null,
-                rule.scopeType() == QuotaScopeType.PROJECT ? rule.scopeId() : null, null, null, null, null, null);
-        long used = rule.metric() == QuotaMetric.TOKENS
-                ? summary.totals().tokens().total()
-                : summary.totals().requests().upstream();
-        BigDecimal usedPct = BigDecimal.valueOf(used).multiply(BigDecimal.valueOf(100))
-                .divide(BigDecimal.valueOf(rule.limitValue()), 2, RoundingMode.HALF_UP);
+                rule.scopeType() == QuotaScopeType.PROJECT ? rule.scopeId() : null);
+        BigDecimal used = switch (rule.metric()) {
+            case TOKENS -> BigDecimal.valueOf(summary.totals().tokens().total());
+            case REQUESTS -> BigDecimal.valueOf(summary.totals().requests().upstream());
+            case COST -> summary.totals().cost().upstreamPaid();
+        };
+        BigDecimal usedPct = used.multiply(BigDecimal.valueOf(100)).divide(BigDecimal.valueOf(rule.limitValue()), 2,
+                RoundingMode.HALF_UP);
+        // Severity order: full > fixed 90% guidance tier > the rule's own warn.
         String level = usedPct.compareTo(BigDecimal.valueOf(100)) >= 0
                 ? "EXCEEDED"
-                : usedPct.compareTo(BigDecimal.valueOf(rule.warnPercent())) >= 0 ? "WARNING" : "NORMAL";
+                : usedPct.compareTo(BigDecimal.valueOf(NEAR_LIMIT_PERCENT)) >= 0
+                        ? "NEAR_LIMIT"
+                        : usedPct.compareTo(BigDecimal.valueOf(rule.warnPercent())) >= 0 ? "WARNING" : "NORMAL";
         ScopeInfo scope = scopeInfo(tenantId, rule.scopeType(), rule.scopeId());
         return new QuotaRuleView(rule.id(), rule.scopeType(), rule.scopeId(), scope.name(), scope.tag(), rule.metric(),
                 rule.period(), rule.limitValue(), rule.warnPercent(), rule.status(), used, usedPct, level,
@@ -157,7 +166,7 @@ public class AdminQuotaRuleService {
     private record ScopeInfo(String name, String tag) {
     }
 
-    /** UTC calendar slice for the period: day / week (Mon-start) / month. */
+    /** UTC calendar slice for the period: day / week (Mon-start) / month / year. */
     static Window window(QuotaPeriod period) {
         return window(period, LocalDate.now(ZoneOffset.UTC));
     }
@@ -167,11 +176,13 @@ public class AdminQuotaRuleService {
             case DAILY -> today;
             case WEEKLY -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
             case MONTHLY -> today.withDayOfMonth(1);
+            case YEARLY -> today.withDayOfYear(1);
         };
         LocalDate toDate = switch (period) {
             case DAILY -> fromDate.plusDays(1);
             case WEEKLY -> fromDate.plusWeeks(1);
             case MONTHLY -> fromDate.plusMonths(1);
+            case YEARLY -> fromDate.plusYears(1);
         };
         return new Window(fromDate.atStartOfDay(ZoneOffset.UTC).toInstant(),
                 toDate.atStartOfDay(ZoneOffset.UTC).toInstant());

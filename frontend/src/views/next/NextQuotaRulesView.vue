@@ -48,13 +48,28 @@ const templateForm = ref({
   limitValue: '',
 });
 
-const metricText: Record<QuotaMetric, string> = { TOKENS: 'Token 用量', REQUESTS: '请求次数' };
-const periodText: Record<QuotaPeriod, string> = { DAILY: '每日', WEEKLY: '每周', MONTHLY: '每月' };
-const levelText: Record<QuotaLevel, string> = { NORMAL: '正常', WARNING: '预警', EXCEEDED: '超限' };
+const metricText: Record<QuotaMetric, string> = {
+  TOKENS: 'Token 用量',
+  REQUESTS: '请求次数',
+  COST: '成本（¥）',
+};
+const periodText: Record<QuotaPeriod, string> = {
+  DAILY: '每日',
+  WEEKLY: '每周',
+  MONTHLY: '每月',
+  YEARLY: '每年',
+};
+const levelText: Record<QuotaLevel, string> = {
+  NORMAL: '正常',
+  WARNING: '预警',
+  NEAR_LIMIT: '即将超限',
+  EXCEEDED: '超限',
+};
 
 const levelTone: Record<QuotaLevel, 'success' | 'warning' | 'danger' | 'neutral'> = {
   NORMAL: 'success',
   WARNING: 'warning',
+  NEAR_LIMIT: 'danger',
   EXCEEDED: 'danger',
 };
 
@@ -325,7 +340,7 @@ async function toggleTemplate() {
 }
 
 function levelFill(level: string | undefined): string {
-  if (level === 'EXCEEDED') return 'var(--ui-danger-fg)';
+  if (level === 'EXCEEDED' || level === 'NEAR_LIMIT') return 'var(--ui-danger-fg)';
   if (level === 'WARNING') return 'var(--ui-warning-fg)';
   return 'var(--ui-primary)';
 }
@@ -399,6 +414,7 @@ onMounted(load);
             :options="[
               { value: 'TOKENS', label: 'Token 用量' },
               { value: 'REQUESTS', label: '请求次数' },
+              { value: 'COST', label: '成本（¥）' },
             ]"
             data-testid="template-metric"
           />
@@ -409,6 +425,7 @@ onMounted(load);
               { value: 'DAILY', label: '每日' },
               { value: 'WEEKLY', label: '每周' },
               { value: 'MONTHLY', label: '每月' },
+              { value: 'YEARLY', label: '每年' },
             ]"
             data-testid="template-period"
           />
@@ -466,6 +483,7 @@ onMounted(load);
             :options="[
               { value: 'TOKENS', label: 'Token 用量' },
               { value: 'REQUESTS', label: '请求次数' },
+              { value: 'COST', label: '成本（¥）' },
             ]"
             data-testid="quota-metric"
           />
@@ -476,6 +494,7 @@ onMounted(load);
               { value: 'DAILY', label: '每日' },
               { value: 'WEEKLY', label: '每周' },
               { value: 'MONTHLY', label: '每月' },
+              { value: 'YEARLY', label: '每年' },
             ]"
             data-testid="quota-period"
           />
@@ -490,7 +509,7 @@ onMounted(load);
             v-model="form.warnPercent"
             label="预警阈值（%）"
             type="number"
-            hint="达到限额的此百分比时进入预警；≥100% 为超限"
+            hint="达到限额的此百分比时进入预警；≥90% 即将超限；≥100% 为超限"
             data-testid="quota-warn"
           />
           <UiSelect
@@ -541,13 +560,18 @@ onMounted(load);
         <template #metric="{ row }">{{ metricLabel((row as QuotaRuleView).metric) }}</template>
         <template #period="{ row }">{{ periodLabel((row as QuotaRuleView).period) }}</template>
         <template #limitValue="{ row }">
-          <span class="ui-num">{{ numText((row as QuotaRuleView).limitValue) }}</span>
+          <span class="ui-num"
+            >{{ (row as QuotaRuleView).metric === 'COST' ? '¥' : ''
+            }}{{ numText((row as QuotaRuleView).limitValue) }}</span
+          >
         </template>
         <template #watermark="{ row }">
           <div class="next-quota__bar-row">
             <span class="ui-num next-quota__bar-nums"
-              >{{ numText((row as QuotaRuleView).used) }} /
-              {{ numText((row as QuotaRuleView).limitValue) }}</span
+              >{{ (row as QuotaRuleView).metric === 'COST' ? '¥' : ''
+              }}{{ numText((row as QuotaRuleView).used) }} /
+              {{ (row as QuotaRuleView).metric === 'COST' ? '¥' : ''
+              }}{{ numText((row as QuotaRuleView).limitValue) }}</span
             >
             <div class="next-quota__bar-track">
               <div

@@ -330,13 +330,13 @@ alert_rules 类型 CHECK 同步扩展 `CONSUMER_KEY_EXPIRING`（V36 同款模式
 
 月度预算（仅告警，永不阻断）：`project_id`、`period_month`（`YYYY-MM`）、`amount numeric(24,10)`、`currency`、`alert_threshold_pct`、`status`（`ACTIVE|PAUSED`）、`version`。`budget` 唯一 `(tenant_id, project_id, period_month)`；`model_budget` 额外含 `model_id`，唯一 `(tenant_id, project_id, model_id, period_month)`。V7 已建表，告警消费为后续 Goal。
 
-### `quota_rules` (V23，用量配额)
+### `quota_rules` (V23，用量配额；V58 扩维)
 
-用量配额计划（仅预警永不阻断，roadmap「配额管理」）：`scope_type`（`USER|PROJECT`）、`scope_id`、`metric`（`TOKENS|REQUESTS`）、`period`（`DAILY|WEEKLY|MONTHLY`）、`limit_value bigint`（>0）、`warn_percent`（1–99，默认 80）、`status`（`ACTIVE|DISABLED`）、`created_by`、`version`。唯一 `(tenant_id, scope_type, scope_id, metric, period)`（同 scope 同维同周期仅一条，重复 PUT 原地编辑）。表只存计划；**当前窗口水位在读取时由 usage 事件计算**（UTC 窗口；TOKENS=全部 token 口径，REQUESTS=上游请求数），`(tenant_id, scope_type, scope_id, status)` 索引。规则永不阻断流量——硬阻断需 ADR。
+用量配额计划（仅预警永不阻断，roadmap「配额管理」）：`scope_type`（`USER|PROJECT`）、`scope_id`、`metric`（`TOKENS|REQUESTS|COST`，COST 为 V58/#683 增）、`period`（`DAILY|WEEKLY|MONTHLY|YEARLY`，YEARLY 为 V58/#683 增）、`limit_value bigint`（>0；COST 口径为整数 CNY）、`warn_percent`（1–99，默认 80）、`status`（`ACTIVE|DISABLED`）、`created_by`、`version`。唯一 `(tenant_id, scope_type, scope_id, metric, period)`（同 scope 同维同周期仅一条，重复 PUT 原地编辑）。表只存计划；**当前窗口水位在读取时由 usage 事件计算**（UTC 窗口；TOKENS=全部 token 口径，REQUESTS=上游请求数，COST=价格快照估算的上游实付；YEARLY 水位不受公开 API 93 天窗口上限约束），`(tenant_id, scope_type, scope_id, status)` 索引。规则永不阻断流量——硬阻断需 ADR。
 
-### `quota_default_template` (V26，默认配额模板)
+### `quota_default_template` (V26，默认配额模板；V58 扩维)
 
-全局默认配额策略（腾讯 doc 135489，`AdminQuotaDefaultTemplateService`）：**每租户一行**（`tenant_id` PK）——`enabled`、`metric`（`TOKENS|REQUESTS`）、`period`（`DAILY|WEEKLY|MONTHLY`）、`limit_value bigint`（>0）、`updated_by`（`(tenant_id, updated_by)` 引用 users）、`version`。行仅在管理员首次配置定义后存在（GET 未配置 = 空态视图）。**创建时快照复制**：启用状态下 `AdminOrgService.createUser` 同事务内按模板复制一条 `quota_rules` 行（USER 作用域、warn 80、ACTIVE、insert-if-absent）——改模板不惊动存量、停用不删已分配、手动规则优先。启用开关独立于定义（enable/disable 端点只翻 `enabled`）。
+全局默认配额策略（腾讯 doc 135489，`AdminQuotaDefaultTemplateService`）：**每租户一行**（`tenant_id` PK）——`enabled`、`metric`（`TOKENS|REQUESTS|COST`）、`period`（`DAILY|WEEKLY|MONTHLY|YEARLY`）、`limit_value bigint`（>0）、`updated_by`（`(tenant_id, updated_by)` 引用 users）、`version`。行仅在管理员首次配置定义后存在（GET 未配置 = 空态视图）。**创建时快照复制**：启用状态下 `AdminOrgService.createUser` 同事务内按模板复制一条 `quota_rules` 行（USER 作用域、warn 80、ACTIVE、insert-if-absent）——改模板不惊动存量、停用不删已分配、手动规则优先。启用开关独立于定义（enable/disable 端点只翻 `enabled`）。
 
 ### `skills` / `skill_access` (V16，P2.2 SkillHub)
 
