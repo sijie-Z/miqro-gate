@@ -49,13 +49,16 @@ export class ContextAgent {
   constructor(private readonly now: () => number = Date.now) {}
 
   /** Remember the bearer token the client uses (for registry sync only). */
-  captureAuthorization(header: string | string[] | undefined): void {
+  captureAuthorization(header: string | string[] | undefined): boolean {
     const value = Array.isArray(header) ? header[0] : header;
-    if (!value) return;
+    if (!value) return false;
     const m = /^Bearer\s+(mqk_live_\S+)$/i.exec(value.trim());
     if (m?.[1]) {
+      const learned = this.virtualKey === null;
       this.virtualKey = m[1];
+      return learned;
     }
+    return false;
   }
 
   /** The virtual key seen so far (config value wins when provided). */

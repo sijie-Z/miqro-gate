@@ -23,6 +23,8 @@ export type ServerDeps = {
   agent: ContextAgent;
   log?: (line: string) => void;
   startedAt?: number;
+  /** Fired once when the client's virtual key is first learned from traffic. */
+  onKeyLearned?: () => Promise<void> | void;
 };
 
 export function createAgentServer(deps: ServerDeps): http.Server {
@@ -58,8 +60,11 @@ export function createAgentServer(deps: ServerDeps): http.Server {
     const body = await readBody(req, res);
     if (body === null) return; // 413 already written
 
-    // The key for registry sync rides the client's own Authorization.
-    agent.captureAuthorization(req.headers["authorization"]);
+    // The key for registry sync rides the client's own Authorization; sync as
+    // soon as it is first learned (the periodic timer covers the rest).
+    if (agent.captureAuthorization(req.headers["authorization"]) && deps.onKeyLearned) {
+      void deps.onKeyLearned();
+    }
 
     const headers = stripMiqroHeaders(req.headers);
     let claims: Record<string, string> = {};

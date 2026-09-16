@@ -19,6 +19,7 @@ export async function runCommand(): Promise<void> {
     config,
     agent,
     log: (line) => process.stdout.write(`${line}\n`),
+    onKeyLearned: () => syncRegistry(),
   });
 
   const syncRegistry = async () => {
