@@ -3010,3 +3010,11 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **交付**（分支 fix/chunk-load-reload-663）：`utils/chunk-reload.ts`——`vite:preloadError` 事件 + `router.onError` 双通道识别动态 import 失败（覆盖 Chromium/Firefox/Safari 三种文案）→ `location.reload()` 一次拾取新 index.html；`sessionStorage` 时间戳 10s 冷却防刷新风暴；storage 不可用时放弃自动刷新（白屏优于死循环）；`main.ts` 装配，冷却期外错误照常上抛控制台。
 
 **验证**：单测 4/4（识别矩阵/冷却窗口/storage 兜底/事件抑制与默认放行）；全量 299/299；vue-tsc 三配置与改动文件 eslint 干净。
+
+## 2026-09-16 午后 — 修复 #667：portal 镜像构建改串行，消除 2G 机部署期全站抖动
+
+**背景**：用户报障"无法登录、请求 60s 超时"。与 #663 白屏同属一个事故窗口：12:15–12:32 演示机重建三镜像期间，portal 构建容器内 `npm run build` 并行跑 vue-tsc（545MB）与 vite build（740MB），峰值 ~1.3G 叠加常驻 JVM/Redpanda/Postgres 击穿 1.9G 物理内存，swap 1.9G/1.9G 打满、load 33——control-plane 全面无响应（登录 499/60s 超时），网关对另一用户连续 502（DNS 抖动下 unresolvable）。构建结束约 2 分钟后全站自动恢复。
+
+**交付**（分支 fix/portal-build-sequential-667）：`deploy/docker/portal.Dockerfile` frontend 阶段 `RUN npm run build`（run-p 并行）改为 `npm run build-only && npm run typecheck` 串行——峰值 ≈ max(740, 545) ≈ 740MB；2 vCPU 上并行无吞吐收益，typecheck 质量门保留。
+
+**验证**：本地 docker build 全量构建通过（含 npm ci / vite build / vue-tsc 三配置）；CI images job 随 PR 验证。
