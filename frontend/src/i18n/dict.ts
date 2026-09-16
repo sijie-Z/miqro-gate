@@ -1487,6 +1487,14 @@ export const DICT: Record<string, string> = {
   '全部密钥': 'All keys',
   '快捷导航': 'Quick nav',
   '今天也要高效工作。': 'Have a productive day.',
+  // 导航分组（#675，对齐腾讯实例层架构）。
+  '模型管理': 'Model Management',
+  '访问与授权': 'Access & Authorization',
+  '用量与配额': 'Usage & Quota',
+  '成本管理': 'Cost Management',
+  '可观测性': 'Observability',
+  '安全与配置': 'Security & Configuration',
+  '集成管理': 'Integrations',
   // Virtual Key 停用/启用/重命名 + 行内用量（#582）。
   '重命名': 'Rename',
   '用量 · 近 7 天': 'Usage · last 7 days',
