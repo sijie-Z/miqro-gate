@@ -10,7 +10,24 @@
 - Goal status: `IN_PROGRESS（多会话并行推进；已合并进展以 develop git log 为准。在途 PR：#599
   用途标注、#601 留痕控制台、#602 资料页增强；#596/#597 交付与验证细节见下方 09-15 交接点。
   此前 rc.19 审查修复波已全量落地并发布）`
-- Last updated: `2026-09-15 CST`
+- Last updated: `2026-09-16 CST`
+
+## 会话交接点 2026-09-16（#588 留痕查看/导出审计断言补强）
+
+- **#588 验收补强（PR 待提交）**：`RETENTION_LOG_VIEW` / `RETENTION_LOG_EXPORT` 此前**零自动化断言**
+  （此前只出现在 `AdminRetentionLogController`、`docs/api-contract.md` 与前端视图注释中，仓库内无任何测试引用）。新增 `AdminRetentionLogAuditIntegrationTest`
+  （8 例，PostgreSQL Testcontainers）：列表/导出各写且只写一条事件、actor=调用管理员、事件落在调用方
+  tenant、`change_summary` 的 `rows`/`truncated` 口径正确；跨 tenant 行既不下发也不计数；USER 角色 403
+  与匿名 401 均不产生事件；并断言保留正文只出现在响应、绝不出现在审计链（导入真实
+  `KeyEncryptionProvider`，否则该断言真空成立）。
+- 验证：`mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration
+  -Dtest=AdminRetentionLogAuditIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` →
+  `Tests run: 8, Failures: 0, Errors: 0` / BUILD SUCCESS。
+- **附带发现（未修，属产品缺陷，超出本 Goal 范围）**：`GET /api/v1/admin/retention-logs?direction=<非法值>`
+  返回 **500 `INTERNAL_ERROR`** 而非 400。成因：`AdminRetentionLogService` 抛 `ResponseStatusException`，
+  而 `GlobalExceptionHandler` 无该类型 handler，被兜底 `Exception` 分支吞成 500 + ERROR 级日志；同族
+  `MethodArgumentTypeMismatchException` 的 javadoc 明确要求「invalid filter values are rejected, never treated as
+  internal errors」，`DateTimeParseException` 分支同样映射为 400（#475），语义应一致。
 
 ## 会话交接点 2026-09-15（资料页增强 #597 + 用途标签澄清 #596）
 
