@@ -67,6 +67,21 @@
   导致 surefire「failed to discover tests」；统一加 `-am`。`-Pintegration` 下忽略空 `-Dtest`
   匹配的属性名是 `-Dsurefire.failIfNoSpecifiedTests=false`。
 
+### 2026-09-16 收尾轮（#553 收口：N1 修复 + 并入新基线）
+
+- 并入 develop 新基线：`git merge origin/develop`（`adfb670`，#695 配额软着陆）→ 合并提交
+  `b8bd715`；无冲突（本分支只改 ContextLimit* 与文档，与配额改动不重叠）。Flyway `V59`
+  归 develop 的配额软着陆，**本分支不新增 migration**。
+- N1 修复提交 `dc6f91e`（`fix(gateway): count malformed UTF-8 bodies as bytes (#553)`）：
+  非法 UTF-8 整段回退字节长度，消除「全续字节 body 计 0 字符」的 fail-open。
+- 验证（合并后真实输出）：`./mvnw -B -f backend -pl gateway-app -am test -Dtest=ContextLimitGuardTest,ContextLimitPrecheckTest,ContextLimitDisabledTest -Dsurefire.failIfNoSpecifiedTests=false`
+  → `Tests run: 29, Failures: 0, Errors: 0, Skipped: 0`（Guard 16 / Precheck 10 / Disabled 3），
+  BUILD SUCCESS，总耗时 37.0 s。
+- 独立 delta 评审（新上下文，只审 `ea3d5cd..dc6f91e` 增量）：**0 BLOCKER，Consensus: APPROVE**；
+  `ProxyController.java` 在该提交内仅 javadoc 与折行（`git diff -w` 只剩注释与参数折行），无逻辑变化。
+  残留编辑性意见：astral 字符按码点计 1、按 UTF-16 码元计 2 属既有口径（文档统一按码点表述），
+  记为后续可选跟进，不阻塞。
+
 ## 会话交接点 2026-09-15（资料页增强 #597 + 用途标签澄清 #596）
 
 - **#596（PR #599 待合并）**：Virtual Key「用途」语义显性化——创建表单补说明（声明标签、
