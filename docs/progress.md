@@ -3002,3 +3002,14 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **验证**：客户端单测 42/42（新增 7 例：文件名/默认目录/覆盖目录/三平台内容快照/幂等 enable-disable 往返）；**Windows 沙箱实测**：install --autostart 生成 .cmd（node/cli/日志路径逐字校验）→ uninstall 移除，全程未触碰真实启动文件夹。
 
+
+## 2026-09-16 午后 — 需求 #668：路由切换无感化（滚动位置重置 + 悬停/空闲预取 chunk）
+
+**背景**：用户报障"切换页面无法无感路由——会先看到上一个/下面滚动位置的内容再到下一个界面"。定位三处缺口：① `.new-shell__content`（跨路由复用的滚动容器）无任何 scrollTop 重置，长页滚一半切短页直接停在底部；② 全部约 35 条路由懒加载且无预取，点击后等 chunk 网络往返才提交导航；③ #655 的 out-in+仅 enter 过渡已正确，无需改动。
+
+**交付**（分支 fix/route-feel-668，仅 NewShell.vue）：
+- `watch(route.path)` → `contentEl.scrollTop = 0`（query-only 变化不重置，保留页内筛选用例）；
+- 菜单 `@mouseenter/@focus` → `prefetchRoute(name)`：`router.resolve` 后逐 record 调 `components` 内的 loader 函数（typeof 守卫；模块缓存命中后点击即达）；`prefetchedRoutes` Set 去重，每路由至多一次；
+- mount 后 1.5s 起对当前角色全部菜单项序贯静默预取（120ms 步进；卸载清定时器）。
+
+**验证**：单测 4/4（悬停一次去重/聚焦/空闲全量/滚动重置与 query 豁免）；全量 **299/299**；typecheck 三配置 + 改动文件 eslint 干净。**浏览器实测**（mock 控制面 + dev 服务器）：滚动 500→0 且滚动能力保留；挂载后 1.5s 空闲窗口内悬停 → 700ms 内目标 chunk 抵达（资源计时 2 条=模块+样式）；未交互页面（资料）被空闲预取自动加载。
