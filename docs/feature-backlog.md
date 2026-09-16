@@ -111,7 +111,7 @@
 | F48 | 协议转换（HTTP↔Anthropic/OpenAI/MCP） | comparison | DECLINED | CC Switch 职责 |
 | F49 | 参数改写/流量镜像/数据脱敏转发/日志包体采集 | study B（06/07/08/26） | ADR | 与「不读正文/不改写」冲突；合规需求出现时再评估（B 类四件套登记为反面清单） |
 | F50 | Virtual Key 多服务绑定/Header 分流路由 | mapping 表行 11 | ADR | 与「1:1 固定绑定、不负载均衡」冲突 |
-| F51 | 配额硬阻断（超限拒绝） | middleware 配额 | ADR | 需反转「不因预算阻断」；现有规则/水位/预警闭环。**ADR-0019 草案已立（2026-09-16，Proposed，待 owner 拍板；含 429 信封与 5 分钟近似计数方案）** |
+| F51 | 配额硬阻断（超限拒绝） | middleware 配额 | ADR | 需反转「不因预算阻断」；现有规则/水位/预警闭环。**ADR-0020 已 Accepted（2026-09-16，采纳 ADR-0019 方案 B 规则级 opt-in 拒绝，软着陆不失效 Key）**；#684 块①（V59 `enforcement` + `quota_enforcement` 投影 + 快照装载）已交付，**块②（网关 429）与块③（前端）未实现** |
 | F52 | Credits 归一化度量（阿里 FinOps） | middleware 配额 | ADR/评估 | 先单价后预算；涉硬拦截需 ADR |
 
 ## H 组 · 实测与收尾（非功能）

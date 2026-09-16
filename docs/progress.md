@@ -34,12 +34,22 @@
   五例：REJECT 越线落库（断言 scope/rule/limit/used/usedPct/窗口边界 + 二次重算幂等）、
   上调限额与跨窗口后记录被删、ALERT 越线零记录、快照装载含被阻断作用域且不装载已过期窗口的行、
   非法 `enforcement` 值 → 400 `PARAM_INVALID` 且零写入。
-- **已知偏差（待 owner 裁定，非本块遗漏）**：issue 原文称 COST 限额以「分」存储，而 #683/V58 与
-  `api-contract` §5.19 落地均为**整数 CNY**；本 PR 不改语义，仅在 PR/issue 注明差异。
+- **COST 口径核对（更正上一轮交接的记录）**：上一轮交接曾写「issue 原文称 COST 限额以『分』存储」。
+  本轮逐字复核 `gh issue view 684` 正文，**该正文并未出现「分」「CREDIT」等计量单位字样**
+  （仅「固定分档」）；仓库既有口径（#683 / V58 / `api-contract` §5.19 / `database-schema.md`）
+  一致为**整数 CNY**，**不存在需要 owner 裁定的单位冲突**。本 PR 不改语义，仅在 PR/issue 注明
+  口径以备考（见「以代码/仓库为准」原则）。
+- **ADR 补缺（本轮）**：新增 `docs/decisions/0020-quota-soft-landing-enforcement.md`（**Accepted**，
+  取代 ADR-0019 并采纳其决策点 1 的方案 B「规则级 opt-in 拒绝」）；ADR-0019 状态行改标
+  **Superseded by ADR-0020**（原状态行与既有注记**保留原文**）；`decisions/README.md` 索引与
+  `feature-backlog.md` F51 行同步。ADR-0020 明确记录：**块①已落地，块②（网关 429）与块③（前端）
+  未实现，网关当前不拒绝任何请求**。CLAUDE.md §2 措辞修订**尚未落盘**（需 owner 确认），
+  修订文本以 ADR-0020 §3 为准。
 - 文档同步：`database-schema.md`（`quota_rules` + 新增 `quota_enforcement` 小节）、
   `api-contract.md` §5.19、`configuration-reference.md`（新增
   `MIQROKEY_QUOTA_ENFORCEMENT_INTERVAL_MS` 行 + 调度池容量注记）、ADR-0019 增「实现进度注记」
-  （状态仍 Proposed，结论未动）、`docs/openapi/openapi-3.1.json` 基线随
+  （该注记写作时状态仍 Proposed；本轮起状态改标 Superseded by ADR-0020）、
+  `docs/openapi/openapi-3.1.json` 基线随
   `enforcement` 字段再生（新增属性 2 处，无其他结构差异）。
 - **内部对抗评审（2026-09-16）**：全新上下文评审员按「只认现场文件与命令输出」复核 8 条声明，
   阻断项 2（B1 OpenAPI 基线滞后 → 已再生基线闭合；B2 ADR-0019 仍 Proposed 而块①先落地 →
@@ -47,6 +57,10 @@
   次要项 8（已修：配置参考缺行、api-contract 解除时延措辞、progress 刷新口径、冗余索引、
   调度池容量注记、非法 enforcement 测试；已书面反驳：`loadBlockedScopes` 防御性 else 分支、
   多实例无分布式锁）。详见 `_orchestrate/reports/L3F_review.md`。
+  第二轮复核（2026-09-16）：共识结论 **approve（可开 PR）**，B1（OpenAPI 基线滞后）已闭合，
+  8 条次要项全部处置完毕；**唯一残留的可验证缺口 = ADR-0020 不存在**，已在本轮补齐。
+  未闭合残留：前端 `src/types/generated.ts` 与刷新后的 OpenAPI 基线漂移，须在**块③** 重跑
+  `npm run gen:types`（CI codegen drift check 会在下一个触碰 `frontend/**` 的 PR 校验）。
 
 ## 会话交接点 2026-09-15（资料页增强 #597 + 用途标签澄清 #596）
 

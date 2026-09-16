@@ -14,4 +14,5 @@
 - [ADR-0016：开放管理 API 机器执行器](0016-open-admin-api-machine-executor.md)
 - [ADR-0017：平台 OIDC 登录（P0a）](0017-platform-oidc-login.md)
 - [ADR-0018：单密钥多项目——key×project 多绑定与标签选择](0018-single-key-multi-project.md)
-- [ADR-0019：配额硬阻断（超限拒绝）— 草案（Proposed，待所有者拍板）](0019-quota-hard-block-proposal.md)
+- [ADR-0019：配额硬阻断（超限拒绝）— 草案（**Superseded by ADR-0020**，提案原文保留）](0019-quota-hard-block-proposal.md)
+- [ADR-0020：配额软着陆——规则级 opt-in 超限拒绝（Accepted；块①已落地，网关拒绝属块②未实现）](0020-quota-soft-landing-enforcement.md)
