@@ -43,7 +43,7 @@ Session X
 │ Grant         模型/凭证/权限 │  “我在这个项目里被允许用什么”
 └────────────────────────────┘
                 ↓
-Usage Event { user_id, session_id, project_id, activity?, model,
+Usage Event { user_id, session_id, project_id, activity_id?, model,
               input_tokens, output_tokens, cost, ts,
               claimed_project_id, resolution_status, claim_source, claim_confidence }
 ```
@@ -103,7 +103,7 @@ Usage Event { user_id, session_id, project_id, activity?, model,
 ├─ PR / issue URL          github.com/…/MiqroForge/pull/1083
 └─ MCP / 工具目标           workspace / repository / ticket
 
-          ↓ 规则表（路径前缀、git remote → 项目标签；可从仓库注册表自动生成）
+          ↓ 规则表（路径前缀、git remote → 项目 UUID；可从仓库注册表自动生成）
 
    Context Resolver  →  X-Miqro-Project-Id: <project-uuid>（确定性映射）
 ```
@@ -164,7 +164,7 @@ Usage Event { user_id, session_id, project_id, activity?, model,
 
 ## 8. 下一步实施计划（问题澄清后立即开工）
 
-> **历史注记（2026-09-16 口径归位时补）**：本计划已成历史——网关侧、客户端参考实现与演示闭环均已交付（Spec v1.1 §11 P1–P5；#633/#639/#645–#648），实施口径以 Spec 与 `docs/caa-next-batch-plan.md` 为准。
+> **历史注记（2026-09-16 口径归位时补）**：本计划已成历史——网关侧、客户端参考实现与演示闭环均已交付（Spec v1.1 §11 P1–P5；#633/#639/#641/#645–#648），实施口径以 Spec 与 `docs/caa-next-batch-plan.md` 为准。
 
 1. **干净环境复核实验 3/5**（通道 B/C/D，一天内出结论）；
 2. **网关增量**（小 PR，在 #615 合入之后）：`X-Miqro-Project-Id` 解析 + 失败语义 + `usage_event` 上下文列（`session_id`/`activity_id`/`claimed_project_id`/`resolution_status`/`claim_source`/`claim_confidence`；迁移 **V54**=本批上下文列、**V55**=证据审计表 `request_context_evidence`）+ 契约与测试；

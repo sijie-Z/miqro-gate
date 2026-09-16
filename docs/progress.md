@@ -3191,3 +3191,9 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - grep 计数口径收紧为**被检文件内**计数（原文未说明是否含本条目自身叙述性提及，易生歧义）。
 
 **修复轮后验证**：`git grep -n "X-Miqro-Tag" -- docs/activity-context-design.md` → **1 命中**（`:119` §5 实验记录，附「实验用头名」注记）；`git grep -n "attribution_source" -- docs/activity-context-design.md` → **0 命中**（exit 1）；`git grep -n "X-Miqro-Project-Id" -- docs/activity-context-design.md` → **7 命中**（`:74`/`:81`/`:108`/`:112`/`:119`/`:149`/`:170`）；`git diff --check` exit 0。
+
+**第二轮修复（2026-09-16，口径归位 · 与主交付同 PR）**：
+
+- `activity-context-design.md:46` 概念结构体补 `activity_id?`——V54 实列（`V54:12`）且同文件 `:170` 已列，此前 6 个上下文列里独缺此列。
+- `:106` 规则表产出「项目标签」→「项目 UUID」——与紧邻 `:108` 的 `X-Miqro-Project-Id: <project-uuid>` 及 `:74` 的 UUID 值域一致（原文按字面实现会产出非 UUID，触发 400 `CONTEXT_INVALID`）。
+- `:167` 交付枚举补 `#641`——与 `:4` 的 `#633 / #639 / #641 / #645–#648` 对齐（同一文档内两处枚举不一致）。
