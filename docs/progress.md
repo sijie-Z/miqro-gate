@@ -3152,3 +3152,23 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **未做（记录）**：MCP 服务向导「服务类型/后端类型」枚举（我们固定标准透传形态）、HTTP→MCP 转换、消费者组实体、配额缓存命中「全量计入」档（语义天然等价「不计入」）——均按既有裁决维持，mapping 已注明理由。
 
 - **#684 配额软着陆（超限拒绝 429）→ PR（ADR-0020）**：从「只算不管」到真闸门——规则级 `action ∈ {ALERT, REJECT}`（默认 ALERT，零回归）；REJECT 规则超限后网关对该用户/项目 429 (`quota_exceeded` + `Retry-After` 窗口结束提示，`/v1/models` 同门)，Key 不失效、提额/跨窗口自动恢复。链路：控制面评估器（60s，共享 `QuotaWatermarks`）→ `quota_enforcement`（V59，整体替换）→ 判定集变化才 pg_notify → 快照两集合 → 网关热路径零查询。并行的配额扩维（#683/#686，COST/YEARLY/NEAR_LIMIT）已先行合入，本批在其之上只做执行面，并同步 api-contract §5.19 / database-schema / configuration-reference / ADR-0020 / F51。
+
+## 2026-09-16 夜 — 列表信息架构收口 #657：依赖计数列可点击 + 表单规则文案 + 空态 CTA
+
+**背景**：#657（承接上一轮验证线钉到行号的三处缺口）。凭证列表「授权引用」列只读不可跳转、授权列表没有可跳转的过滤入口（`NextGrantsView` 不读 `route.query`）、项目/团队创建表单不写规则（`projects.code/name`、`teams.name` 的宽度与唯一性只在 409 响应体里可见）、`ui/Table.vue` 默认空态不渲染 CTA。范围仅前端：不动后端、不改既有 Flyway 迁移、不动既有 e2e。
+
+**交付**（分支 `feat/list-ia-closeout-657`，5 个源文件 + 5 个 spec，共 2 个提交）
+- `ui/Table.vue`：新增可选 props `emptyActionLabel` + `emptyActionTo`（`RouteLocationRaw`），二者齐备时默认空态渲染 `router-link.ui-link-action`（`data-testid="table-empty-action"`）；`#empty` 插槽仍优先，`NextKeysView` 的自定义空态不受影响。
+- `next/NextCredentialsView.vue`：计数为 0 时仍是 `<span>`（置灰 `.next-credentials__count-zero`），>0 时渲染 `router-link` 指向 `{ name: 'grants', query: { credentialId } }`；两个分支共用 `data-testid="credential-grant-count"`，测试对旧实现是红的。
+- `next/NextGrantsView.vue`：读 `route.query.credentialId` 做真过滤（按 `upstreamCredentialId` 匹配），工具条显示「共 X 条授权（全部 Y 条）」+ 凭证 chip +「查看全部」清除链接；过滤后列表为空时复用新 CTA 回到全量列表。
+- `next/NextProjectsView.vue` / `next/NextTeamsView.vue`：创建表单用既有 `hint`（`ui-field__hint`）写明后端强制的规则——项目代码「必填，同一租户内唯一，最长 64 个字符。」、项目名「必填，最长 200 个字符。」、团队名「必填，最长 200 个字符。」。逐条对 `AdminOrgService#createProject`/`createTeam` 与 `projects.code/name`、`teams.name` 列宽核对过，无自造约束。
+
+**验证**（真实命令与结果，frontend 目录）
+- `npm run typecheck`（vue-tsc 三工程）PASS；`npm run test` → `Test Files 59 passed (59)` / `Tests 338 passed (338)`，27.7s；`npm run lint` → exit 0，`0 errors, 5 warnings`（4 条是新 spec 里 RouterLinkStub 的 `vue/one-component-per-file`，1 条是既有 `NewShell.vue` 的 `vue/no-template-shadow`）；`npm run build` → exit 0，`built in 26.77s`。
+- 新增/改 spec 5 个：`UiTable.spec.ts`（CTA 仅在 label+to 齐备时渲染、`#empty` 仍优先）、`NextCredentialsView.spec.ts`（计数 >0 是 `A` 且带 `credentialId`、=0 是 `SPAN`）、`NextGrantsView.spec.ts`（`?credentialId=` 真过滤为 1/2 行 + chip + 清除链接目标 + 过滤后空态 CTA）、`NextProjectsView.spec.ts` / `NextTeamsView.spec.ts`（hint 文案断言）。
+- 全量测试尾部那条 `Not implemented: navigation (except hash changes)` 是既有 jsdom 噪声——单跑本批 5 个 spec 时不出现，且在任一 spec 输出之前打印；非失败。
+
+**边界与偏差**
+- 未加 `maxlength` 属性：issue 要的是「规则可读」，本次只补文案，不改输入拦截行为。
+- 未动 e2e 与金样；`frontend/dist/` 已被 `.gitignore` 覆盖，构建没有脏化工作区。
+- 首跑 `npm run lint` 带 `--fix` 时改写了 22 个与本 issue 无关的文件（含 `types/generated.ts` 的整文件 prettier 重排），已按路径逐个 `git checkout --` 还原，最终两个提交 `git show --stat` 只含本批文件。
