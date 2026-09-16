@@ -50,6 +50,8 @@ const props = withDefaults(
 
 const attrs = useAttrs();
 
+const emit = defineEmits<{ (e: 'rowClick', row: unknown): void }>();
+
 const sortKey = ref<string | null>(null);
 const sortOrder = ref<SortOrder>('asc');
 
@@ -164,7 +166,11 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
               v-for="row in sortedData"
               :key="row[rowKey] as string"
               class="ui-table__row"
-              :class="{ 'ui-table__row--striped': striped }"
+              :class="{
+                'ui-table__row--striped': striped,
+                'ui-table__row--clickable': !!attrs.onRowClick,
+              }"
+              @click="emit('rowClick', row)"
             >
               <td
                 v-for="column in columns"
@@ -189,10 +195,21 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
                 <div class="ui-table__empty-body">
                   <span class="ui-table__empty-mark" aria-hidden="true">
                     <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
-                      <rect x="4" y="5" width="16" height="14" rx="2.5" stroke="currentColor"
-                        stroke-width="1.6" />
-                      <path d="M4 10.5h16M9 14.5h6" stroke="currentColor" stroke-width="1.6"
-                        stroke-linecap="round" />
+                      <rect
+                        x="4"
+                        y="5"
+                        width="16"
+                        height="14"
+                        rx="2.5"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                      />
+                      <path
+                        d="M4 10.5h16M9 14.5h6"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                      />
                     </svg>
                   </span>
                   <p class="ui-table__empty-title">{{ emptyTitle }}</p>
@@ -292,6 +309,10 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
 
 .ui-table__row--striped:hover {
   background: var(--ui-row-hover);
+}
+
+.ui-table__row--clickable {
+  cursor: pointer;
 }
 
 .ui-table__cell {
