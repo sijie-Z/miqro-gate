@@ -337,6 +337,73 @@ public class VirtualKeyService {
         routeRefreshPublisher.publishChanged();
     }
 
+    /**
+     * Temporarily disables an ACTIVE key (#582): the route snapshot drops it at the
+     * next refresh (its requests become the uniform unknown-key 404), and
+     * {@link #enable} restores it with every binding intact. Distinct from revoke,
+     * which is irreversible.
+     */
+    @Transactional
+    public VirtualKeyView disable(User user, UUID keyId, String requestId) {
+        VirtualKey key = ownedKey(user, keyId);
+        if (key.status() != VirtualKeyStatus.ACTIVE) {
+            throw new ApiException(HttpStatus.CONFLICT, "KEY_NOT_DISABLEABLE", "只有可用状态的密钥可以停用");
+        }
+        VirtualKey disabled = withStatus(key, VirtualKeyStatus.DISABLED);
+        keyRepository.update(disabled);
+        auditService.record(key.tenantId(), user.id(), "VIRTUAL_KEY_DISABLE", "VIRTUAL_KEY", key.id(),
+                auditSummary("status", "DISABLED"), requestId);
+        routeRefreshPublisher.publishChanged();
+        return view(disabled, user.tenantId());
+    }
+
+    /**
+     * Re-enables a DISABLED key (#582); routing resumes at the next snapshot
+     * refresh.
+     */
+    @Transactional
+    public VirtualKeyView enable(User user, UUID keyId, String requestId) {
+        VirtualKey key = ownedKey(user, keyId);
+        if (key.status() != VirtualKeyStatus.DISABLED) {
+            throw new ApiException(HttpStatus.CONFLICT, "KEY_NOT_ENABLEABLE", "只有已停用的密钥可以启用");
+        }
+        VirtualKey enabled = withStatus(key, VirtualKeyStatus.ACTIVE);
+        keyRepository.update(enabled);
+        auditService.record(key.tenantId(), user.id(), "VIRTUAL_KEY_ENABLE", "VIRTUAL_KEY", key.id(),
+                auditSummary("status", "ACTIVE"), requestId);
+        routeRefreshPublisher.publishChanged();
+        return view(enabled, user.tenantId());
+    }
+
+    /**
+     * Renames a key (#582). Routing does not depend on the name, so no snapshot
+     * refresh is published; revoked tombstones stay immutable.
+     */
+    @Transactional
+    public VirtualKeyView rename(User user, UUID keyId, String name, String requestId) {
+        VirtualKey key = ownedKey(user, keyId);
+        if (key.status() == VirtualKeyStatus.REVOKED) {
+            throw new ApiException(HttpStatus.CONFLICT, "KEY_NOT_RENAMEABLE", "已吊销的密钥不可重命名");
+        }
+        String newName = name.trim();
+        VirtualKey renamed = new VirtualKey(key.id(), key.tenantId(), key.publicKeyId(), key.secretDigest(),
+                key.displayPrefix(), key.lastFour(), key.userId(), key.projectId(), key.grantId(),
+                key.upstreamCredentialId(), key.purpose(), newName, key.cachePolicy(), key.status(), key.createdAt(),
+                key.lastUsedAt(), key.revokedAt(), key.replacedByKeyId(), key.version() + 1);
+        keyRepository.update(renamed);
+        auditService.record(key.tenantId(), user.id(), "VIRTUAL_KEY_RENAME", "VIRTUAL_KEY", key.id(),
+                auditSummary("from", sanitize(key.name()), "to", sanitize(newName)), requestId);
+        return view(renamed, user.tenantId());
+    }
+
+    /** Status-only transition preserving every other field (#582). */
+    private VirtualKey withStatus(VirtualKey key, VirtualKeyStatus status) {
+        return new VirtualKey(key.id(), key.tenantId(), key.publicKeyId(), key.secretDigest(), key.displayPrefix(),
+                key.lastFour(), key.userId(), key.projectId(), key.grantId(), key.upstreamCredentialId(), key.purpose(),
+                key.name(), key.cachePolicy(), status, key.createdAt(), key.lastUsedAt(), key.revokedAt(),
+                key.replacedByKeyId(), key.version() + 1);
+    }
+
     /** Lists the caller's own keys with safe metadata (no secrets). */
     public List<VirtualKeyView> list(User user) {
         List<VirtualKey> keys = keyRepository.findAllByUserId(user.id());

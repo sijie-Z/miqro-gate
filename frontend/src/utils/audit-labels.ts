@@ -122,6 +122,7 @@ const ACTION_VERBS: Record<string, string> = {
   IMPORT: '导入',
   REJECT: '驳回',
   REMOVE: '移除',
+  RENAME: '重命名',
   REVOKE: '吊销',
   ROLLBACK: '回滚',
   ROTATE: '轮换',

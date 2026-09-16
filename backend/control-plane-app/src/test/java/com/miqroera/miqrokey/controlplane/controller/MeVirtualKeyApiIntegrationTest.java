@@ -31,6 +31,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -288,6 +289,94 @@ class MeVirtualKeyApiIntegrationTest {
     }
 
     // ------------------------------------------------------------------
+    // disable / enable / rename (#582)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("disable drops the key from the route snapshot; enable restores it intact")
+    void disableAndEnableRoundTrip() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(TAG);
+
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/disable", Map.of()).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DISABLED"));
+        assertThat(jdbc.queryForObject("SELECT status FROM virtual_keys WHERE id = :id",
+                new MapSqlParameterSource("id", keyId), String.class)).isEqualTo("DISABLED");
+
+        // The snapshot drops the disabled key: downstream this is the uniform
+        // unknown-key 404 (anti-enumeration), and bindings/models survive.
+        RouteSnapshot snapshot = snapshot();
+        assertThat(snapshot.keys().values()).extracting(RouteSnapshot.KeyRecord::publicKeyId)
+                .doesNotContain(fx.publicKeyId(keyId));
+        assertThat(jdbc.queryForObject(
+                "SELECT count(*) FROM key_project_binding WHERE virtual_key_id = :id AND status = 'ACTIVE'",
+                new MapSqlParameterSource("id", keyId), Integer.class)).isEqualTo(1);
+
+        // Double disable is a conflict; enable restores routing.
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/disable", Map.of()).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("KEY_NOT_DISABLEABLE"));
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/enable", Map.of()).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+        RouteSnapshot restored = snapshot();
+        assertThat(restored.keys()).containsKey(fx.publicKeyId(keyId));
+        assertThat(restored.binding(keyId, TAG)).isNotNull();
+
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/enable", Map.of()).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("KEY_NOT_ENABLEABLE"));
+    }
+
+    @Test
+    @DisplayName("disable is rejected for a ROTATING key")
+    void disableRejectsRotatingKey() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(TAG);
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/rotate", Map.of()).andExpect(status().isOk());
+
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/disable", Map.of()).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("KEY_NOT_DISABLEABLE"));
+    }
+
+    @Test
+    @DisplayName("rename updates the name, audits from/to, and keeps the key routable")
+    void renameFlows() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(TAG);
+
+        patchJson("/api/v1/me/virtual-keys/" + keyId, Map.of("name", "renamed-key")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("renamed-key"));
+        assertThat(jdbc.queryForObject("SELECT name FROM virtual_keys WHERE id = :id",
+                new MapSqlParameterSource("id", keyId), String.class)).isEqualTo("renamed-key");
+        // Audited with both endpoints; routing does not depend on the name.
+        String summary = jdbc.queryForObject(
+                "SELECT change_summary::text FROM admin_audit_events WHERE action = 'VIRTUAL_KEY_RENAME' "
+                        + "AND target_id = :id",
+                new MapSqlParameterSource("id", keyId), String.class);
+        assertThat(summary).contains("claude-code-main").contains("renamed-key");
+        assertThat(snapshot().keys()).containsKey(fx.publicKeyId(keyId));
+
+        // Blank names are rejected by bean validation.
+        patchJson("/api/v1/me/virtual-keys/" + keyId, Map.of("name", "  ")).andExpect(status().isBadRequest());
+
+        // Revoked tombstones cannot be renamed.
+        postJson("/api/v1/me/virtual-keys/" + keyId + "/revoke", Map.of()).andExpect(status().isOk());
+        patchJson("/api/v1/me/virtual-keys/" + keyId, Map.of("name", "too-late")).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("KEY_NOT_RENAMEABLE"));
+    }
+
+    @Test
+    @DisplayName("disable/rename on an unknown key is a uniform 404")
+    void disableAndRenameUnknownKeyAre404() throws Exception {
+        UUID unknown = UUID.randomUUID();
+        postJson("/api/v1/me/virtual-keys/" + unknown + "/disable", Map.of()).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("KEY_NOT_FOUND"));
+        patchJson("/api/v1/me/virtual-keys/" + unknown, Map.of("name", "x")).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("KEY_NOT_FOUND"));
+    }
+
+    // ------------------------------------------------------------------
     // grants endpoint
     // ------------------------------------------------------------------
 
@@ -329,6 +418,11 @@ class MeVirtualKeyApiIntegrationTest {
 
     private ResultActions postJson(String path, Object payload) throws Exception {
         return mockMvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).content(objectMapper.writeValueAsString(payload)));
+    }
+
+    private ResultActions patchJson(String path, Object payload) throws Exception {
+        return mockMvc.perform(patch(path).contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
                 .header("X-CSRF-Token", csrfToken).content(objectMapper.writeValueAsString(payload)));
     }
 
