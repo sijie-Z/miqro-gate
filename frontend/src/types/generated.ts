@@ -932,6 +932,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/mcp-services/{serviceId}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/mcp-services/{serviceId}/tools": {
         parameters: {
             query?: never;
@@ -2244,6 +2260,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/mcp-services/{serviceId}/connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["access"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/mcp-services/{id}/access": {
         parameters: {
             query?: never;
@@ -3505,6 +3537,17 @@ export interface components {
         ReviewModelApprovalRequest: {
             reviewNote?: string;
         };
+        McpServiceVerifyView: {
+            /** Format: uuid */
+            serviceId?: string;
+            reachable?: boolean;
+            checkMode?: string;
+            /** Format: int64 */
+            latencyMs?: number;
+            detail?: string;
+            /** Format: date-time */
+            checkedAt?: string;
+        };
         McpTool: {
             /** Format: uuid */
             id?: string;
@@ -4229,6 +4272,14 @@ export interface components {
         ModelApprovalPage: {
             items?: components["schemas"]["ModelApprovalView"][];
             nextCursor?: string;
+        };
+        McpServiceAccessView: {
+            /** Format: uuid */
+            serviceId?: string;
+            name?: string;
+            mcpUrl?: string;
+            sseUrl?: string;
+            authHint?: string;
         };
         McpAccessLogEntry: {
             /** Format: uuid */
@@ -6356,6 +6407,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["McpService"];
+                };
+            };
+        };
+    };
+    verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["McpServiceVerifyView"];
                 };
             };
         };
@@ -8903,6 +8976,28 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    access: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["McpServiceAccessView"];
                 };
             };
         };

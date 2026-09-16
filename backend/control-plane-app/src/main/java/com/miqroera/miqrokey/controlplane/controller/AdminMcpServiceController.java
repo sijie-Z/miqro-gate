@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminMcpService;
+import com.miqroera.miqrokey.controlplane.service.McpOnboardingService;
 import com.miqroera.miqrokey.controlplane.service.McpServiceTrafficService;
 import com.miqroera.miqrokey.domain.model.McpService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -33,12 +34,14 @@ public class AdminMcpServiceController {
 
     private final AdminMcpService mcpService;
     private final McpServiceTrafficService trafficService;
+    private final McpOnboardingService onboardingService;
     private final UserContext userContext;
 
     public AdminMcpServiceController(AdminMcpService mcpService, McpServiceTrafficService trafficService,
-            UserContext userContext) {
+            McpOnboardingService onboardingService, UserContext userContext) {
         this.mcpService = mcpService;
         this.trafficService = trafficService;
+        this.onboardingService = onboardingService;
         this.userContext = userContext;
     }
 
@@ -118,6 +121,26 @@ public class AdminMcpServiceController {
     public java.util.Map<String, Object> traffic(@PathVariable UUID serviceId,
             @RequestParam(defaultValue = "24") int hours) {
         return trafficService.traffic(userContext.getUser().tenantId(), serviceId, hours);
+    }
+
+    /**
+     * Gateway access URLs for this service (#685): the console counterpart of the
+     * data-plane {@code /mcpservers/{name}/mcp} route. NOTE: the ACL surface owns
+     * {@code /{id}/access} — this one lives at {@code /connection}.
+     */
+    @GetMapping("/{serviceId}/connection")
+    public com.miqroera.miqrokey.controlplane.dto.McpServiceAccessView access(@PathVariable UUID serviceId) {
+        return onboardingService.access(userContext.getUser().tenantId(), serviceId);
+    }
+
+    /**
+     * On-demand connectivity probe (#685「调用验证」): one immediate probe of the
+     * upstream using the service's check mode. Read-only — stored health state is
+     * untouched (the scheduled checker owns telemetry).
+     */
+    @PostMapping("/{serviceId}/verify")
+    public com.miqroera.miqrokey.controlplane.dto.McpServiceVerifyView verify(@PathVariable UUID serviceId) {
+        return onboardingService.verify(userContext.getUser().tenantId(), serviceId);
     }
 
     public record CreateRequest(@NotBlank @Size(max = 200) String name, @Size(max = 2000) String description,

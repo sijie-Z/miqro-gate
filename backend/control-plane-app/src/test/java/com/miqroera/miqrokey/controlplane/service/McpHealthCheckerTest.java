@@ -214,6 +214,21 @@ class McpHealthCheckerTest {
                 service.version(), service.createdBy(), service.createdAt(), service.updatedAt());
     }
 
+    @Test
+    @DisplayName("probeOnce carries an admin-readable detail without touching telemetry (#685)")
+    void probeOnceCarriesDetail() {
+        server.createContext("/health", exchange -> {
+            exchange.sendResponseHeaders(503, -1);
+            exchange.close();
+        });
+        McpService service = service("http://127.0.0.1:" + port, 200, 3, 1);
+
+        McpHealthChecker.ProbeResult result = new McpHealthChecker(null, null).probeOnce(service);
+
+        assertThat(result.healthy()).isFalse();
+        assertThat(result.detail()).isEqualTo("HTTP 503");
+    }
+
     private static McpService service(String endpoint, int timeout, int failThreshold, int recoverThreshold) {
         return new McpService(UUID.randomUUID(), UUID.fromString("00000000-0000-0000-0000-000000000001"), "mcp-test",
                 null, endpoint, "STREAMABLE_HTTP", "ONLINE", "UNKNOWN", null, 0, 0, 30, timeout, failThreshold,
