@@ -14,7 +14,13 @@
  * overriding the `#empty` slot (see NextKeysView).
  */
 import { computed, ref, useAttrs } from 'vue';
-import type { RouteLocationRaw } from 'vue-router';
+// Imported rather than left to the global registration: a `<router-link>` in a
+// UiTable would otherwise make every mount of this component (and of the ~30
+// views embedding it) resolve a component it never needed, and the compiler
+// hoists that resolution above the v-if — so every test that mounts a UiTable
+// without a RouterLink stub logs "Failed to resolve component" even when no
+// CTA is rendered.
+import { RouterLink, type RouteLocationRaw } from 'vue-router';
 
 export interface UiTableColumn {
   key: string;

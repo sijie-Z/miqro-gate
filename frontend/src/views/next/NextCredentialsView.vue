@@ -544,7 +544,7 @@ onMounted(load);
                a 0 stays plain ink — there is nothing to look at. -->
           <router-link
             v-if="grantCountOf((row as CredentialView).id) > 0"
-            class="ui-link-action"
+            class="ui-link-action next-credentials__count-link"
             :to="{
               name: 'grants',
               query: { credentialId: (row as CredentialView).id },
@@ -961,6 +961,12 @@ onMounted(load);
    eye lands on the linked counts. */
 .next-credentials__count-zero {
   color: var(--ui-foreground-faint);
+}
+
+/* ... and the linked count sits flush with the other right-aligned numeric
+   cells instead of being inset by .ui-link-action's 7px action padding. */
+.next-credentials__count-link {
+  padding: 0;
 }
 
 .next-credentials__error {

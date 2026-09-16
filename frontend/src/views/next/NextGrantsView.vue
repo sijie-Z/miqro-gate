@@ -174,7 +174,11 @@ const columns = [
 /** #657: credential id arriving from the credentials list' dependency count. */
 const credentialFilter = computed(() => {
   const raw = route.query.credentialId;
-  return typeof raw === 'string' ? raw : '';
+  // A duplicated query param (`?credentialId=a&credentialId=b`) arrives as an
+  // array; treating that as "no filter" would show the full list while the URL
+  // still advertises one, so take the first value the URL asked for.
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return typeof value === 'string' ? value : '';
 });
 
 const filteredGrants = computed(() =>
@@ -182,6 +186,10 @@ const filteredGrants = computed(() =>
     ? grants.value.filter((g) => g.upstreamCredentialId === credentialFilter.value)
     : grants.value,
 );
+
+/** #657: the credential-scoped empty copy is a claim about loaded data. When the
+ *  fetch failed there is nothing to claim — the error alert owns the screen. */
+const scopedFilter = computed(() => Boolean(credentialFilter.value) && !loadError.value);
 
 async function load() {
   loading.value = true;
@@ -453,8 +461,8 @@ onMounted(async () => {
         :data="filteredGrants"
         :loading="loading"
         row-key="id"
-        :empty-title="credentialFilter ? '该凭证还没有被任何授权引用' : '还没有授权'"
-        :empty-action-label="credentialFilter ? '查看全部授权' : ''"
+        :empty-title="scopedFilter ? '该凭证还没有被任何授权引用' : '还没有授权'"
+        :empty-action-label="scopedFilter ? '查看全部授权' : ''"
         :empty-action-to="{ name: 'grants' }"
         data-testid="grants-table"
       >
