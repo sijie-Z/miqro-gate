@@ -3176,8 +3176,10 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - 冲突清单与解法（冲突文件共 **1** 个）：
   - `docs/progress.md`——两侧都在文件末尾追加：develop 追加 `#684` 小节，本分支追加「2026-09-16 晚间 #579」段。
     解法：**两边都保留**，develop 段在前、本分支段在后（本分支段逐字未改）。
-    自检：合并结果与 develop 版逐字节比对，差异恰为本分支那 16 行新增段（sha256 `cab4e443…`）；本分支相对
-    merge-base 的自身改动为 `16 insertions / 0 deletions`，确认未丢内容。
+    自检（**本条记录写入之前**的解冲突结果）：该结果与 develop 版逐字节比对，差异恰为本分支那 16 行新增段
+    （sha256 `cab4e443…`）；本分支相对 merge-base 的自身改动为 `16 insertions / 0 deletions`，确认未丢内容。
+    本条记录（22 行）写入后，`git diff --numstat adfb670 5d14828 -- docs/progress.md` 为 `38 0` = 16 行本分支段 +
+    22 行本条记录，仍为纯增量；本条记录此后的修订由新提交承载，不计入该数。
   - 同一区域另有 develop 单侧改动（`待 owner 拍板` → `owner 已拍板（2026-09-16）`）由 git 自动合并——
     本分支从未改过该行。
   - 预期中的 `design-tokens.css` / `design-base.css` **未冲突**：develop 的配额执行面改动未触及这两个文件。
@@ -3186,7 +3188,9 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
   - `npm run test` → **59 files / 335 tests passed**（较合并前 +1，来自 develop 并入的
     `NextQuotaRulesView.spec.ts`）。
   - lint：`npm run lint` 定义为 `eslint . --ext .vue,.ts,.tsx --fix`；本轮以**同一脚本加 `--no-fix`** 运行
-    （`npm run lint -- --no-fix`）→ 退出码 0、`59204 problems (0 errors, 59204 warnings)`，警告全部为
-    `prettier/prettier` 行尾项（CRLF 检出基线）。不用 `--fix` 的原因已实测：`--fix-dry-run` 对未改动的
+    （`npm run lint -- --no-fix`）→ 退出码 0、`59204 problems (0 errors, 59204 warnings)`：其中 59203 项为
+    `prettier/prettier` 行尾项（CRLF 检出基线），另 1 项为 `vue/no-template-shadow`（`src/components/NewShell.vue:809`
+    的 `Component` 遮蔽；该文件自 merge-base `50a9b24` 至合并结果未改动，属既有告警且不可自动修复）。
+    不用 `--fix` 的原因已实测：`--fix-dry-run` 对未改动的
     `src/ui/Button.vue` 给出 CR 数 201 → 0 的修复输出（该文件单跑 0 errors），即 `--fix` 会静默重写全树行尾；
-    执行前后 `git status --porcelain` 均为 42 项，确认无文件被写入。
+    该命令执行前后（提交前）`git status --porcelain` 均为 42 项，确认无文件被写入（合并提交后工作区为 0 项）。
