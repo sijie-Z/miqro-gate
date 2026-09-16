@@ -1617,6 +1617,13 @@ export const DICT: Record<string, string> = {
   '在「授权」按 项目 × 凭证 圈定模型范围。': 'Scope the models under Grants by project × credential.',
   '成员在「我的密钥」创建虚拟密钥并接入客户端。':
     'Members create Virtual Keys under My Keys and connect their clients.',
+  '总请求': 'Total calls',
+  '失败率': 'Failure rate',
+  '调用详情': 'Call detail',
+  '受理': 'Received',
+  '上游首包': 'First upstream byte',
+  '窗口内口径': 'Window-scope',
+  '仅元数据——工具参数与响应正文永不落库。': 'Metadata only — tool arguments and response bodies are never stored.',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [
