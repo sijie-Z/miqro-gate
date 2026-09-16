@@ -2957,3 +2957,12 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - **CI**：新增 client job（typecheck + node --test）；changes 过滤器加 miqro-context。
 
 **验证**：客户端 35/35（水位线/R1 历史污染回归 C15/冲突模型 C5-C7/滞回 C16/解析/头注入）；`AdminOrgApiIntegrationTest` 13/13（新增 registry CRUD 用例）；`ContextRegistryIntegrationTest` 3/3（单绑定只见己方、多绑定双向、404/401 统一语义；**踩坑**：GatewayAuthTestConfig 会给 WebTestClient 装默认 Authorization，缺失凭证用例需显式置空头）。
+
+
+## 2026-09-16 上午 — Goal #641：/v1/context-registry 改 identity-only（真机 E2E 挖出的引导死锁）
+
+**背景**：Agent 真机 E2E 首跑：`registry sync failed: HTTP 400`（多绑定 Key 以不匹配后缀呈现 → 端点复用完整 CAA 阶梯 → CONTEXT_REQUIRED），随后所有请求 400——**要读映射先得有可解析上下文、而上下文要靠映射推导**的循环。
+
+**修复**：`VirtualKeyResolver` 拆出 `resolveIdentity()`（凭证抽取/解析/快照/HMAC，无归属阶梯；`resolve()` 与它共享 `authenticate()` 核心，清零纪律保持：invalid parse 在 try 外返回，避免对 null secret 做 wipe 的 NPE）；`ContextRegistryController` 改用 identity-only。IT 增补：多绑定 Key 不匹配后缀仍可读 registry（4/4）。文档：api-contract 注明 identity-only 语义。
+
+**观察（未改，留待评审）**：`/v1/models` 同样依赖 resolve()——多绑定 Key 带不匹配后缀时 400；真实使用中 Claude Code 的 Key 后缀通常匹配绑定，暂不动其语义。

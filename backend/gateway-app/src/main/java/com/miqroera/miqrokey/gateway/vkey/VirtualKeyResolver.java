@@ -28,9 +28,11 @@ import java.util.Set;
  * unknown.</li>
  * <li>Constant-time HMAC validation against the stored digest (all key versions
  * traversed, no early exit) → 404 on mismatch.</li>
- * <li>Resolve the key's single ACTIVE label binding; the presented label must
- * equal the binding's tag → 404 on mismatch (the binding is the authorization
- * authority, the label only routes).</li>
+ * <li>Resolve the key's binding for this request via the CAA ladder (#633):
+ * project-id claim → legacy suffix tag → sole binding; several bindings without
+ * context fail closed (400 CONTEXT_REQUIRED). The label only routes; the
+ * binding is the authorization authority. Identity-only endpoints (context
+ * registry, #641) skip this step.</li>
  * </ol>
  *
  * <p>
@@ -55,6 +57,16 @@ public class VirtualKeyResolver {
     }
 
     /**
+     * Identity of a presented key (CAA #641): credential extraction, format parse,
+     * snapshot lookup and constant-time HMAC validation — WITHOUT the
+     * context-attribution ladder. Endpoints that only need "who is this key" (e.g.
+     * {@code GET /v1/context-registry}) must not require a resolvable request
+     * context: for a multi-bound key that would be circular.
+     */
+    public record Identity(RouteSnapshot.KeyRecord key, RouteSnapshot snapshot) {
+    }
+
+    /**
      * Resolves the presented key to an authenticated context, or throws
      * {@link AuthFailureException}. The raw secret is zero-filled on every exit
      * path.
@@ -63,35 +75,64 @@ public class VirtualKeyResolver {
         String presented = extractCredential(request);
         VirtualKeyParseResult parsed = VirtualKeyParser.parse(presented);
         if (!parsed.valid()) {
+            // No raw secret exists on an invalid parse — reject before any wipe.
             return invalid();
         }
         try {
-            RouteSnapshot snapshot = routeSnapshotProvider.current();
-            RouteSnapshot.KeyRecord key = snapshot.key(parsed.publicKeyId());
-            if (key == null) {
-                return invalid();
-            }
-            VirtualKeyCrypto crypto = virtualKeyCrypto.getIfAvailable();
-            if (crypto == null) {
-                // Crypto subsystem unavailable (persistence disabled): fail closed.
-                return invalid();
-            }
-            boolean matched = crypto.validateConstantTime(parsed.publicKeyId(), parsed.rawSecret(), key.secretDigest(),
-                    key.tenantId());
-            if (!matched) {
-                return invalid();
-            }
+            Identity identity = authenticate(parsed);
             // CAA (Spec v1.1 §4): the request context selects WHICH of the
             // key's bindings the request runs under — project-id claim (header)
             // → legacy suffix tag → sole binding; several bindings without any
             // context fail closed (400 CONTEXT_REQUIRED). Identity/HMAC above
             // remains the security boundary.
-            ResolvedContext context = requestContextResolver.resolve(snapshot, key, parsed, request);
-            Set<String> models = snapshot.models(key.keyId());
-            return new AuthContext(key, context.binding(), models, snapshot, context);
+            ResolvedContext context = requestContextResolver.resolve(identity.snapshot(), identity.key(), parsed,
+                    request);
+            Set<String> models = identity.snapshot().models(identity.key().keyId());
+            return new AuthContext(identity.key(), context.binding(), models, identity.snapshot(), context);
         } finally {
             SecretWiping.clearArray(parsed.rawSecret());
         }
+    }
+
+    /**
+     * Identity-only resolution (CAA #641) — no context ladder. Endpoints that only
+     * need "who is this key" (e.g. {@code GET /v1/context-registry}) use this:
+     * requiring a resolvable context from a multi-bound key would be circular. Same
+     * uniform failure semantics (404 unknown/malformed/forged, 401 missing
+     * credential).
+     */
+    public Identity resolveIdentity(ServerHttpRequest request) {
+        String presented = extractCredential(request);
+        VirtualKeyParseResult parsed = VirtualKeyParser.parse(presented);
+        if (!parsed.valid()) {
+            // No raw secret exists on an invalid parse — reject before any wipe.
+            return invalid();
+        }
+        try {
+            return authenticate(parsed);
+        } finally {
+            SecretWiping.clearArray(parsed.rawSecret());
+        }
+    }
+
+    /** Snapshot lookup + constant-time HMAC; the parse is already validated. */
+    private Identity authenticate(VirtualKeyParseResult parsed) {
+        RouteSnapshot snapshot = routeSnapshotProvider.current();
+        RouteSnapshot.KeyRecord key = snapshot.key(parsed.publicKeyId());
+        if (key == null) {
+            return invalid();
+        }
+        VirtualKeyCrypto crypto = virtualKeyCrypto.getIfAvailable();
+        if (crypto == null) {
+            // Crypto subsystem unavailable (persistence disabled): fail closed.
+            return invalid();
+        }
+        boolean matched = crypto.validateConstantTime(parsed.publicKeyId(), parsed.rawSecret(), key.secretDigest(),
+                key.tenantId());
+        if (!matched) {
+            return invalid();
+        }
+        return new Identity(key, snapshot);
     }
 
     /**
@@ -137,7 +178,11 @@ public class VirtualKeyResolver {
         return value;
     }
 
-    private AuthContext invalid() {
+    /**
+     * Uniform failure for every identity failure; generic so both the identity-only
+     * and the full-context entry points can `return invalid()`.
+     */
+    private <T> T invalid() {
         throw new AuthFailureException(HttpStatus.NOT_FOUND, "virtual_key_invalid", "Unknown virtual key");
     }
 }

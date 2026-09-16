@@ -144,6 +144,14 @@ class ContextRegistryIntegrationTest {
     }
 
     @Test
+    @DisplayName("#641: a multi-bound key with a NON-matching suffix still reads the registry (identity-only)")
+    void multiBoundKeyWithUnmatchedSuffix() {
+        String presented = GatewayTestKeys.MULTI_BOUND_KEY.presented().replace("demo-multi", "zzz-none");
+        List<Map<String, Object>> entries = fetchEntries(presented);
+        assertThat(entries).hasSize(2);
+    }
+
+    @Test
     @DisplayName("unknown keys and missing auth keep the uniform failure semantics")
     void unknownKeyAndMissingAuth() {
         webTestClient.get().uri("/v1/context-registry")
