@@ -17,21 +17,36 @@
 - **范围**：仅块①（控制面评估 + 路由快照 blocked scopes）。**块②（网关热路径 429 拒绝）与
   块③（前端 enforcement 配置）未做**，本分支不开工。
 - **交付**：V59 迁移（`quota_rules.enforcement` + 新表 `quota_enforcement`，已提交
-  `b1fbeea`/`1dd4274`）；`QuotaEnforcementService`（越线作用域投影；重算幂等，仅变更时才
+  `b1fbeea`/`1dd4274`）；`QuotaEnforcementService`（越线作用域投影；重算幂等——同一投影二次
+  重算不写库，仅当投影行新增/删除或字段（rule/metric/period/limit/window）变化时才
   `RouteRefreshPublisher.publishChanged`）+ `QuotaEnforcementScheduler`（周期
   `miqrokey.quota.enforcement-interval-ms`，默认 60s，单租户失败不中断整轮）；
   `QuotaRuleView`/`UpsertQuotaRuleRequest` 增 `enforcement`（缺省 `ALERT`，省略时保留原值）；
   `RouteSnapshot` 增 blocked users/projects 集合（保留 14 参旧构造，4 处调用点不破）+
   `JdbcRouteSnapshotLoader` 只装载 `window_to > now()` 的行（fail-open）。
-- **验证（真实输出）**：`mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration
-  -Dtest=QuotaEnforcementIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` →
-  `Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`，BUILD SUCCESS（Testcontainers PostgreSQL 17.6）。
-  四例：REJECT 越线落库（断言 scope/rule/limit/used/usedPct/窗口边界 + 二次重算幂等）、
-  上调限额与跨窗口后记录被删、ALERT 越线零记录、快照装载含被阻断作用域且不装载已过期窗口的行。
+- **验证（真实输出，2026-09-16）**：`.\mvnw.cmd -B -f backend -pl
+  control-plane-app,route-snapshot,domain,persistence-postgres -am test -Pintegration` →
+  `BUILD SUCCESS`（总耗时 9:39，Testcontainers PostgreSQL 17.6）。各模块 `Tests run`
+  聚合：Domain 130、Provider SPI 8、Provider Adapters 166、Persistence PostgreSQL 118
+  （Skipped 5 = 仅 POSIX 权限用例，Windows 跳过）、Route Snapshot 5、Control Plane 674，
+  Failures/Errors 全 0。本轮新增用例所在 `QuotaEnforcementIntegrationTest` →
+  `Tests run: 5, Failures: 0, Errors: 0, Skipped: 0`。
+  五例：REJECT 越线落库（断言 scope/rule/limit/used/usedPct/窗口边界 + 二次重算幂等）、
+  上调限额与跨窗口后记录被删、ALERT 越线零记录、快照装载含被阻断作用域且不装载已过期窗口的行、
+  非法 `enforcement` 值 → 400 `PARAM_INVALID` 且零写入。
 - **已知偏差（待 owner 裁定，非本块遗漏）**：issue 原文称 COST 限额以「分」存储，而 #683/V58 与
   `api-contract` §5.19 落地均为**整数 CNY**；本 PR 不改语义，仅在 PR/issue 注明差异。
 - 文档同步：`database-schema.md`（`quota_rules` + 新增 `quota_enforcement` 小节）、
-  `api-contract.md` §5.19、ADR-0019 增「实现进度注记」（状态仍 Proposed，结论未动）。
+  `api-contract.md` §5.19、`configuration-reference.md`（新增
+  `MIQROKEY_QUOTA_ENFORCEMENT_INTERVAL_MS` 行 + 调度池容量注记）、ADR-0019 增「实现进度注记」
+  （状态仍 Proposed，结论未动）、`docs/openapi/openapi-3.1.json` 基线随
+  `enforcement` 字段再生（新增属性 2 处，无其他结构差异）。
+- **内部对抗评审（2026-09-16）**：全新上下文评审员按「只认现场文件与命令输出」复核 8 条声明，
+  阻断项 2（B1 OpenAPI 基线滞后 → 已再生基线闭合；B2 ADR-0019 仍 Proposed 而块①先落地 →
+  治理前置条件，非代码缺陷，本 PR 交 owner 拍板，块②不得在 ADR 转 Accepted 前实现）、
+  次要项 8（已修：配置参考缺行、api-contract 解除时延措辞、progress 刷新口径、冗余索引、
+  调度池容量注记、非法 enforcement 测试；已书面反驳：`loadBlockedScopes` 防御性 else 分支、
+  多实例无分布式锁）。详见 `_orchestrate/reports/L3F_review.md`。
 
 ## 会话交接点 2026-09-15（资料页增强 #597 + 用途标签澄清 #596）
 

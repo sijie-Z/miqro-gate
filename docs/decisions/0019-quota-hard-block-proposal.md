@@ -1,7 +1,7 @@
 # ADR-0019：配额硬阻断（超限拒绝）— 草案
 
 - 状态：**Proposed（2026-09-16）**——**尚未实现**；本草案用于反转锁定决策前的 owner 拍板。任何实现以本 ADR 转 Accepted + owner 明确同意为前提（CLAUDE.md §2：「改变上述决策前必须新增 ADR，并获得用户明确同意」）。
-- 实现进度注记（2026-09-16，#684 块①）：草案中**不含数据面准入判定**的那部分已按分块计划先行落地——`quota_rules.enforcement`（V59，落地枚举名 `ALERT`/`REJECT`，即下表方案 B 的 `ALERT_ONLY`/`REJECT`；DB 默认 `ALERT`，存量行为不变）、`quota_enforcement` 阻断投影表、控制面定时评估器、网关路由快照的 blocked-scope 装载。**网关热路径的实际拒绝（429 信封）与前端配置界面尚未实现**，见 #684 块②③。本注记不改变本 ADR 的状态与结论：仍为 Proposed，待 owner 拍板。
+- 实现进度注记（2026-09-16，#684 块①）：草案中**不含数据面准入判定**的那部分已按分块计划先行落地——`quota_rules.enforcement`（V59，落地枚举名 `ALERT`/`REJECT`，即下表方案 B 的 `ALERT_ONLY`/`REJECT`；DB 默认 `ALERT`，存量行为不变）、`quota_enforcement` 阻断投影表、控制面定时评估器、网关路由快照的 blocked-scope 装载。**网关热路径的实际拒绝（429 信封）与前端配置界面尚未实现**，见 #684 块②③——因此本批落地**对运行时行为零影响**：`RouteSnapshot` 的 blocked-scope 投影目前没有任何生产消费点，网关不会因它拒绝或改动任何请求。本注记不改变本 ADR 的状态与结论：仍为 Proposed，待 owner 拍板；块②的准入判定必须在 ADR 转 Accepted 且 owner 明确同意后才能实现。
 - 日期：2026-09-16
 - 关联：[CLAUDE.md](../../CLAUDE.md) §2「不限流、不因预算阻断，只做 Webhook 告警」；[feature-backlog F51](../feature-backlog.md)（配额硬阻断，状态 ADR）；[api-contract §5.19](../api-contract.md)（配额规则，alerting-only）；#683（COST/YEARLY/NEAR_LIMIT 交付）；腾讯 AI 网关「配额管理：超限处理=拒绝请求」（owner 2026-09-16 样本）；[ADR-0005](0005-no-redis-v1.md)（不引 Redis）；[ADR-0002](0002-transparent-proxy.md)（透明代理红线——本议题不触碰请求内容，仅准入判定）
 
