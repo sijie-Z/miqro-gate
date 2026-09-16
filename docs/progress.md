@@ -3168,7 +3168,7 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **验证**（**以下为修复前时点（commit `6db7f33`）**；worktree 内 `git grep -n`，原文入交付报告；计数按**设计稿文件内**口径——本条目自身的叙述性提及不计；修复轮后的行号与计数见本节末）：
 - `git grep -n "X-Miqro-Tag" -- docs/activity-context-design.md` → **1 命中**（`:117` §5 实验记录，附「实验用头名；正式契约见 §4.1」注记），exit 0；
 - `git grep -n "attribution_source" -- docs/activity-context-design.md` → **0 命中**（exit 1）；全仓排除本条目后同为 0 命中——代码/契约/Spec 均无该名；
-- `git grep -n "X-Miqro-Project-Id" -- docs/activity-context-design.md` → **6 命中**（`:72`/`:79`/`:106`/`:117`/`:147`/`:164`）；全仓其余命中均在既有实现/契约件（`RequestContextResolver.java`、`ResolvedContext.java`、契约与测试、`miqro-context/**`、Spec v1.1，另含本条目自身的叙述性提及），**无新文件被引入**。
+- `git grep -n "X-Miqro-Project-Id" -- docs/activity-context-design.md` → **6 命中**（`:72`/`:79`/`:106`/`:117`/`:147`/`:164`）；全仓其余命中均在既有实现/契约件（`RequestContextResolver.java`、`ResolvedContext.java`、契约与测试、`miqro-context/**`、Spec v1.1），另含 `progress.md` 的叙述性提及（本条目自身与既有条目 `:2931`/`:2961`），**无新文件被引入**。
 
 **边界**：仅 `docs/` 下三份文件（设计稿 / document-map / 本条目）。不动 `V54__usage_event_context_columns.sql`、`V55__request_context_evidence.sql`、`RequestContextResolver.java`、`ResolvedContext.java`、`api-contract.md`、`database-schema.md`、`miqro-context/**`、`context-attribution-implementation-spec.md`。设计稿内残余 1 处 `X-Miqro-Tag` 是**实验记录**（非"未改完"），本条目自身的叙述性提及亦计入全仓 grep 命中；§5 记录的时间点事实按实验记录原则保持原样。issue #629 正文自身仍用旧列名，建议由 owner 更新措辞后再关闭。
 
@@ -3183,9 +3183,9 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - `:81` 门控注记补证据边界：`X-Miqro-Target-Id` 的结论出处为 Spec v1.1 §3.3，**本稿 §5 未单独实验该头名**（原文「已实证」不可兑现）；注记本身**保留未删**；
 - `:112` 无证据分支精确化：**不注入 `X-Miqro-Project-Id`**（客户端 `miqro-context/src/proxy/inject.ts` 仅 RESOLVED 时注入），只发 `X-Miqro-Claim-Status: UNATTRIBUTED`；网关侧策略桶 / 未配置则 400；
 - `:143` §6 处置现状补历史注记：**#615 已 MERGED（`f057fd5`）**，Q0 按 A 线落地，本节「建议 B / 建议关闭 #615」描述过期；
-- `:151` §7 补历史注记：Q0 已定，Q1–Q5 已在 Spec/实现落地，**Q6（per-turn 钩子 / transcript 兜底）未交付**；
+- `:153` §7 补历史注记：Q0 已定，Q1–Q5 已在 Spec/实现落地，**Q6（per-turn 钩子 / transcript 兜底）未交付**；
 - `:160` Q3 行：`activity_id` **已随 `V54` 落库**（客户端发 `X-Miqro-Activity` 且为合法 UUID 时写入），非「仅预留」——`PostgresUsageEventWriter` 已写入该列；
-- `:165` §8 补历史注记（计划已成历史；实施口径见 Spec §11 与 `docs/caa-next-batch-plan.md`）；
+- `:167` §8 补历史注记（计划已成历史；实施口径见 Spec §11 与 `docs/caa-next-batch-plan.md`）；
 - `:170` 迁移口径拆开：**V54 = `usage_event` 上下文列；V55 = 证据审计表 `request_context_evidence`**（原文把 V55 并入「上下文列」）；
 - `docs/document-map.md:35` 去掉「上一行 Spec」位置指针 → 改写成文件名；「仅补实验证据」→「仅补实验证据与历史注记」；
 - grep 计数口径收紧为**被检文件内**计数（原文未说明是否含本条目自身叙述性提及，易生歧义）。
@@ -3203,7 +3203,9 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - `activity-context-design.md:79` 「完整值域另含 `UNATTRIBUTED`/`AMBIGUOUS`」补实现边界：V54 列注释（`V54:24-25`）与 Spec §7.1（`:253`）各列 6 值，而 `RequestContextResolver` 只产出 4 值，两值在实现中仅作 `X-Miqro-Claim-Status` 声明头取值/未归属桶语义。
 - `:79` 「审计可还原每笔归属的判定依据」原文过宽：`publishUsageEvent` 只在放行且完成的路径调用（`ProxyController.java:529`），网关侧拒绝不落 `usage_event` 行；`request_context_evidence`（`V55`）全仓无 Java 写入方/读取方 → 已就地标明边界。
 - `:81` 门控适用范围由「通道 A/B」改为按**机制**表述（`ANTHROPIC_CUSTOM_HEADERS` 形态）：§4.2 的 E（企业 managed 下发）同样下发客户端读的静态头，原枚举自相矛盾；C（`apiKeyHelper` 动态 `headers`）是否有门控本仓无证据，明写「未验证」。
-- `:167` 「客户端参考实现与演示闭环均已交付」收窄为实际交付形态（#639 `miqro-context` 安装式 Agent），并点明 step 1（干净环境复核实验 3/5）与 step 3（`apiKeyHelper`+`PostToolUse` 脚本、接入面板）未按原样交付——`接入面板` 全仓仅此一处提及，从未交付。
+- `:167` 「客户端参考实现与演示闭环均已交付」收窄为实际交付形态（#639 `miqro-context` 安装式 Agent），并点明 step 1（干净环境复核实验 3/5）与 step 3（`apiKeyHelper`+`PostToolUse` 脚本、接入面板）未按原样交付——`接入面板` 从未交付（全仓命中 3 处：step 3 原计划行 `:171`、本注记 `:167`、本条目自身；无实现或设施引用）。
 - `document-map.md:34` 限定 Spec 的权威面：列取值域/物理形态归 `database-schema.md`/`api-contract.md`（Spec §7.1 `claim_source` 清单缺 `git_remote`，滞后于实现）。
 - 本条目的**全仓计数口径**自洽化：`:3171` 原文「全仓其余命中均在既有实现/契约件（…）」未列本条目自身的叙述性命中，已补入（与本节「边界」段一致）。
 - **不在本 PR 范围的既有遗留**（均已逐行核对，未改）：① `context-attribution-implementation-spec.md:115` 称 `X-Miqro-Target-Id`「已实证可通过门控」，本仓无对应实验件（设计稿 §5 未单独实验该头名），该文件本轮禁改；② `miqro-context/README.md:113` 把设计稿列为并列规格、无历史件标注（该目录本轮禁改）；③ `decisions/0018-single-key-multi-project.md:62`/`:95` 的「后缀 = 唯一选择器、零猜测」与 Spec v1.1 **R3**（头名优先、后缀兜底）口径反转，该 ADR 仅 `:112` 有 #633 的枚举探测修订、D2/D8 无指向 R3 的修订注记——属 ADR 治理事项，建议由 owner 另开。
+
+- **第五轮修复（2026-09-16，收尾交叉核对驱动 · 与主交付同 PR）**：① 前述修复轮条目中两处**注记行号漂移**按 HEAD 校正（`:151`→`:153`、`:165`→`:167`，与 `:3199`/`:3206` 对同一注记的引用对齐）；② `:3171` 全仓计数枚举补 `progress.md` 既有条目（`:2931`/`:2961`）；③ `:3206` 的「`接入面板` 全仓仅此一处提及」纠正为实际 3 处（step 3 原计划行 `:171`、`§8` 注记 `:167`、本条目自身）。以上均为**行数不变**的就地替换，本条目其余行号引用不受影响。
