@@ -1625,6 +1625,27 @@ export const DICT: Record<string, string> = {
   '在「授权」按 项目 × 凭证 圈定模型范围。': 'Scope the models under Grants by project × credential.',
   '成员在「我的密钥」创建虚拟密钥并接入客户端。':
     'Members create Virtual Keys under My Keys and connect their clients.',
+  '接入信息': 'Access info',
+  '验证连通': 'Verify connectivity',
+  '可达': 'Reachable',
+  '不可达': 'Unreachable',
+  '正在探测上游…': 'Probing the upstream…',
+  '正在加载接入信息…': 'Loading access info…',
+  '加载接入信息失败，请稍后重试。': 'Failed to load access info. Please try again later.',
+  '接入地址已复制': 'Access URL copied',
+  '复制失败，请手动选择复制。': 'Copy failed — select and copy manually.',
+  '重新验证': 'Verify again',
+  '模式': 'Mode',
+  '采集配置': 'Capture settings',
+  '租户级 · 覆盖请求与响应双面': 'Tenant-wide · covers both request and response sides',
+  '开启内容留痕': 'Enable content retention',
+  '内容上限（字节）': 'Content cap (bytes)',
+  '已保存——保存后数秒内生效，无需同步。': 'Saved — effective within seconds, no sync needed.',
+  '达到限额的此百分比时进入预警；≥90% 即将超限；≥100% 为超限':
+    'Warn at this percentage of the limit; ≥90% is near limit, ≥100% counts as over limit',
+  '成本（¥）': 'Cost (¥)',
+  '每年': 'Yearly',
+  '即将超限': 'Near limit',
   '用量与成本': 'Usage & cost',
   '全租户用量与费用总览：团队 / 用户 / 项目维度的 Token 与成本、趋势、分解与明细。':
     'Tenant-wide usage and spend: tokens and cost by team / user / project, with trends, breakdown and records.',
@@ -1641,16 +1662,6 @@ export const DICT: Record<string, string> = {
   '总成本': 'Total cost',
   '按官方价目估算': 'est. at official list prices',
   '该窗口没有用量': 'No usage in this window',
-  '采集配置': 'Capture settings',
-  '租户级 · 覆盖请求与响应双面': 'Tenant-wide · covers both request and response sides',
-  '开启内容留痕': 'Enable content retention',
-  '内容上限（字节）': 'Content cap (bytes)',
-  '已保存——保存后数秒内生效，无需同步。': 'Saved — effective within seconds, no sync needed.',
-  '达到限额的此百分比时进入预警；≥90% 即将超限；≥100% 为超限':
-    'Warn at this percentage of the limit; ≥90% is near limit, ≥100% counts as over limit',
-  '成本（¥）': 'Cost (¥)',
-  '每年': 'Yearly',
-  '即将超限': 'Near limit',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [

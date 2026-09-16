@@ -33,7 +33,9 @@ import type {
 import type {
   ApiConsumerView,
   McpAccessView,
+  McpServiceAccessView,
   McpServiceView,
+  McpServiceVerifyView,
   McpToolView,
   McpResiliencePolicy,
 } from '@/types/generated-api';
@@ -176,6 +178,85 @@ async function loadTraffic() {
 function onTrafficHoursChange(value: string) {
   trafficHours.value = value;
   void loadTraffic();
+}
+
+// #685 onboarding closure: gateway access URLs + on-demand probe ("调用验证").
+const accessInfoService = ref<McpServiceView | null>(null);
+const accessInfoVisible = ref(false);
+const accessInfoLoading = ref(false);
+const accessInfo = ref<McpServiceAccessView | null>(null);
+const accessInfoError = ref('');
+
+async function openAccessInfo(service: McpServiceView) {
+  accessInfoService.value = service;
+  accessInfo.value = null;
+  accessInfoError.value = '';
+  accessInfoVisible.value = true;
+  accessInfoLoading.value = true;
+  try {
+    accessInfo.value = await api.adminMcpServiceAccess(service.id!);
+  } catch (error) {
+    accessInfoError.value = errorText(error, '加载接入信息失败，请稍后重试。');
+  } finally {
+    accessInfoLoading.value = false;
+  }
+}
+
+async function copyAccessUrl(text?: string) {
+  if (!text) {
+    return;
+  }
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      toast.success('接入地址已复制');
+      return;
+    }
+  } catch {
+    // fall through to the legacy path
+  }
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.appendChild(area);
+  area.select();
+  const ok = document.execCommand('copy');
+  area.remove();
+  if (ok) {
+    toast.success('接入地址已复制');
+  } else {
+    toast.error('复制失败，请手动选择复制。');
+  }
+}
+
+const verifyService = ref<McpServiceView | null>(null);
+const verifyVisible = ref(false);
+const verifyRunning = ref(false);
+const verifyResult = ref<McpServiceVerifyView | null>(null);
+const verifyError = ref('');
+
+async function openVerify(service: McpServiceView) {
+  verifyService.value = service;
+  verifyResult.value = null;
+  verifyError.value = '';
+  verifyVisible.value = true;
+  await runVerify();
+}
+
+async function runVerify() {
+  if (!verifyService.value) {
+    return;
+  }
+  verifyRunning.value = true;
+  verifyError.value = '';
+  try {
+    verifyResult.value = await api.adminMcpServiceVerify(verifyService.value.id!);
+  } catch (error) {
+    verifyError.value = errorText(error, '验证失败，请稍后重试。');
+  } finally {
+    verifyRunning.value = false;
+  }
 }
 
 // I20 follow-up: per-service data-plane upstream budget (doc 135906 超时时间).
@@ -1608,6 +1689,20 @@ async function saveResilience() {
               >韧性配置</UiButton
             >
             <UiButton
+              variant="link"
+              size="sm"
+              data-testid="mcp-access-info"
+              @click="openAccessInfo(row as McpServiceView)"
+              >接入信息</UiButton
+            >
+            <UiButton
+              variant="link"
+              size="sm"
+              data-testid="mcp-verify"
+              @click="openVerify(row as McpServiceView)"
+              >验证连通</UiButton
+            >
+            <UiButton
               v-if="(row as McpServiceView).status === 'ONLINE'"
               variant="link-danger"
               size="sm"
@@ -1627,6 +1722,77 @@ async function saveResilience() {
         </template>
       </UiTable>
     </section>
+
+    <!-- #685 onboarding closure: gateway access URLs + on-demand probe -->
+    <UiDialog
+      :open="accessInfoVisible"
+      :title="accessInfoService ? `接入信息 · ${accessInfoService.name}` : '接入信息'"
+      width="600px"
+      data-testid="mcp-access-info-dialog"
+      @update:open="accessInfoVisible = false"
+    >
+      <div v-if="accessInfoLoading" class="next-mcp__hint">正在加载接入信息…</div>
+      <div v-else-if="accessInfoError" class="ui-alert ui-alert--error">{{ accessInfoError }}</div>
+      <div v-else-if="accessInfo" class="next-mcp__access-info">
+        <div class="next-mcp__access-row">
+          <span class="next-mcp__access-label">Streamable HTTP</span>
+          <code class="next-mcp__access-url">{{ accessInfo.mcpUrl }}</code>
+          <UiButton
+            variant="secondary"
+            size="sm"
+            data-testid="mcp-copy-mcp-url"
+            @click="copyAccessUrl(accessInfo?.mcpUrl)"
+            >复制</UiButton
+          >
+        </div>
+        <div class="next-mcp__access-row">
+          <span class="next-mcp__access-label">SSE</span>
+          <code class="next-mcp__access-url">{{ accessInfo.sseUrl }}</code>
+          <UiButton
+            variant="secondary"
+            size="sm"
+            data-testid="mcp-copy-sse-url"
+            @click="copyAccessUrl(accessInfo?.sseUrl)"
+            >复制</UiButton
+          >
+        </div>
+        <p class="next-mcp__hint">{{ accessInfo.authHint }}</p>
+      </div>
+    </UiDialog>
+
+    <UiDialog
+      :open="verifyVisible"
+      :title="verifyService ? `验证连通 · ${verifyService.name}` : '验证连通'"
+      width="480px"
+      data-testid="mcp-verify-dialog"
+      @update:open="verifyVisible = false"
+    >
+      <div v-if="verifyRunning" class="next-mcp__hint" data-testid="mcp-verify-running">
+        正在探测上游…
+      </div>
+      <div v-else-if="verifyError" class="ui-alert ui-alert--error">{{ verifyError }}</div>
+      <div v-else-if="verifyResult" class="next-mcp__verify-result" data-testid="mcp-verify-result">
+        <UiStatusBadge
+          variant="pill"
+          :tone="verifyResult.reachable ? 'success' : 'danger'"
+          :label="verifyResult.reachable ? '可达' : '不可达'"
+        />
+        <span class="next-mcp__verify-detail">{{ verifyResult.detail }}</span>
+        <span class="next-mcp__hint"
+          >模式 {{ verifyResult.checkMode }} · {{ verifyResult.latencyMs }} ms</span
+        >
+      </div>
+      <template #footer>
+        <UiButton variant="ghost" @click="verifyVisible = false">关闭</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="verifyRunning"
+          data-testid="mcp-verify-rerun"
+          @click="runVerify"
+          >重新验证</UiButton
+        >
+      </template>
+    </UiDialog>
 
     <!-- Upstream budget (I20): the data-plane per-attempt timeout -->
     <UiDialog
@@ -3499,5 +3665,48 @@ async function saveResilience() {
   .next-mcp__guide-cards {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.next-mcp__access-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-3);
+}
+
+.next-mcp__access-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+}
+
+.next-mcp__access-label {
+  flex: 0 0 120px;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__access-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ui-font-mono, monospace);
+  font-size: var(--ui-font-size-xs);
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border-muted);
+  border-radius: var(--ui-radius-control);
+  padding: 4px 8px;
+}
+
+.next-mcp__verify-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  align-items: flex-start;
+}
+
+.next-mcp__verify-detail {
+  font-size: var(--ui-font-size-sm);
 }
 </style>

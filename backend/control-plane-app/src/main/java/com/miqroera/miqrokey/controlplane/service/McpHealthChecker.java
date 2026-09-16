@@ -110,22 +110,41 @@ public class McpHealthChecker {
     record HealthState(String healthStatus, int failures, int successes) {
     }
 
+    /**
+     * On-demand probe outcome (#685): healthy + a sanitized admin-readable note.
+     */
+    public record ProbeResult(boolean healthy, String detail) {
+    }
+
     boolean isHealthy(McpService service) {
+        return probeOnce(service).healthy();
+    }
+
+    /**
+     * On-demand probe (#685「调用验证」): one synchronous probe of the given service
+     * using the same probe shapes as the checker cycle, carrying a sanitized note
+     * (Chinese, admin-visible) for display. Read-only — the caller decides whether
+     * to touch health telemetry.
+     */
+    public ProbeResult probeOnce(McpService service) {
         if (McpService.CHECK_MODE_JSONRPC.equals(service.checkMode())) {
-            return jsonRpcHealthy(service);
+            return jsonRpcProbe(service);
         }
-        return healthPathHealthy(service);
+        return healthPathProbe(service);
     }
 
     /** GET {@code endpoint + checkPath}; 2xx counts as healthy. */
-    private boolean healthPathHealthy(McpService service) {
+    private ProbeResult healthPathProbe(McpService service) {
         try {
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(service.endpoint() + service.checkPath()))
                     .timeout(Duration.ofSeconds(service.checkTimeoutSeconds())).GET().build();
             HttpResponse<Void> response = http.send(request, HttpResponse.BodyHandlers.discarding());
-            return response.statusCode() >= 200 && response.statusCode() < 300;
+            int code = response.statusCode();
+            return new ProbeResult(code >= 200 && code < 300, "HTTP " + code);
+        } catch (java.net.http.HttpTimeoutException e) {
+            return new ProbeResult(false, "响应超时（" + service.checkTimeoutSeconds() + "s）");
         } catch (Exception e) {
-            return false;
+            return new ProbeResult(false, "连接失败：" + sanitize(e));
         }
     }
 
@@ -136,7 +155,7 @@ public class McpHealthChecker {
      * rather than a JSON parse. API_KEY backends get the decrypted bearer; an
      * unavailable credential fails closed.
      */
-    private boolean jsonRpcHealthy(McpService service) {
+    private ProbeResult jsonRpcProbe(McpService service) {
         try {
             HttpRequest.Builder builder = HttpRequest.newBuilder().uri(URI.create(service.endpoint()))
                     .timeout(Duration.ofSeconds(service.checkTimeoutSeconds()))
@@ -145,15 +164,22 @@ public class McpHealthChecker {
             if ("API_KEY".equals(service.backendAuthMode())) {
                 String bearer = backendBearer(service);
                 if (bearer == null) {
-                    return false;
+                    return new ProbeResult(false, "后端凭证不可用");
                 }
                 builder.header("Authorization", "Bearer " + bearer);
             }
             HttpResponse<String> response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-            return response.statusCode() >= 200 && response.statusCode() < 300 && response.body() != null
-                    && response.body().contains("\"jsonrpc\"");
+            int code = response.statusCode();
+            if (code < 200 || code >= 300) {
+                return new ProbeResult(false, "HTTP " + code);
+            }
+            boolean framed = response.body() != null && response.body().contains("\"jsonrpc\"");
+            return new ProbeResult(framed,
+                    framed ? "JSON-RPC initialize 通过（HTTP " + code + "）" : "HTTP 2xx 但响应不含 JSON-RPC 报文");
+        } catch (java.net.http.HttpTimeoutException e) {
+            return new ProbeResult(false, "响应超时（" + service.checkTimeoutSeconds() + "s）");
         } catch (Exception e) {
-            return false;
+            return new ProbeResult(false, "连接失败：" + sanitize(e));
         }
     }
 
