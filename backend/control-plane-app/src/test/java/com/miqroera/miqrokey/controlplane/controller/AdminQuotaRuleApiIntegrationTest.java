@@ -7,6 +7,7 @@ import com.miqroera.miqrokey.controlplane.dto.LoginRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import com.miqroera.miqrokey.domain.service.PasswordHasher;
 import com.miqroera.miqrokey.controlplane.service.AlertEvaluator;
+import com.miqroera.miqrokey.controlplane.service.QuotaEnforcementService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,7 +42,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Quota rules (V23, roadmap "quota management" step): plan CRUD keyed on
  * (scope, metric, period) with live watermarks derived from usage events —
- * TOKENS totals and upstream REQUESTS per UTC window, alerting-only levels.
+ * TOKENS totals and upstream REQUESTS per UTC window. Rules with action ALERT
+ * only report; REJECT rules feed the soft-landing evaluator (#684).
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
@@ -69,6 +71,8 @@ class AdminQuotaRuleApiIntegrationTest {
     PasswordHasher passwordHasher;
     @Autowired
     AlertEvaluator alertEvaluator;
+    @Autowired
+    QuotaEnforcementService quotaEnforcementService;
 
     private Cookie adminSession;
     private Cookie adminCsrf;
@@ -227,6 +231,43 @@ class AdminQuotaRuleApiIntegrationTest {
         org.assertj.core.api.Assertions.assertThat(windowFrom).startsWith(year + "-01-01");
     }
 
+    @Test
+    @DisplayName("soft landing (#684): an exceeded REJECT rule blocks its scope until the limit is raised")
+    void softLandingEnforcementSet() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant();
+        UUID keyId = fx.createKeyViaAdmin();
+        fx.insertUsage(keyId, 600L, 400L); // 1000 tokens today
+
+        // ALERT rules never produce a verdict, however far past the limit.
+        putQuota(quotaBody("USER", adminUserId, "TOKENS", "DAILY", 100, 80)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.action").value("ALERT")).andExpect(jsonPath("$.level").value("EXCEEDED"));
+        quotaEnforcementService.evaluate();
+        assertThat(enforcementRows("USER", adminUserId)).isZero();
+
+        // The same tuple re-PUT as REJECT blocks the scope on the next cycle.
+        putQuota(quotaBody("USER", adminUserId, "TOKENS", "DAILY", 100, 80, null, "REJECT")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.action").value("REJECT"));
+        quotaEnforcementService.evaluate();
+        assertThat(enforcementRows("USER", adminUserId)).isEqualTo(1);
+        // A second cycle over an unchanged verdict set is a no-op.
+        quotaEnforcementService.evaluate();
+        assertThat(enforcementRows("USER", adminUserId)).isEqualTo(1);
+
+        // Raising the limit clears the verdict on the next cycle.
+        putQuota(quotaBody("USER", adminUserId, "TOKENS", "DAILY", 10_000, 80, null, "REJECT"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.level").value("NORMAL"));
+        quotaEnforcementService.evaluate();
+        assertThat(enforcementRows("USER", adminUserId)).isZero();
+    }
+
+    private int enforcementRows(String scopeType, UUID scopeId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT count(*) FROM quota_enforcement WHERE scope_type = :scopeType AND scope_id = :scopeId
+                """, new MapSqlParameterSource("scopeType", scopeType).addValue("scopeId", scopeId), Integer.class);
+        return count == null ? 0 : count;
+    }
+
     // ------------------------------------------------------------------
     // validation & permissions
     // ------------------------------------------------------------------
@@ -355,6 +396,12 @@ class AdminQuotaRuleApiIntegrationTest {
 
     private String quotaBody(String scopeType, UUID scopeId, String metric, String period, long limitValue,
             Integer warnPercent, String status) {
+        return quotaBody(scopeType, scopeId, metric, period, limitValue, warnPercent, status, null);
+    }
+
+    /** #684: same body plus the exceeded action (ALERT | REJECT). */
+    private String quotaBody(String scopeType, UUID scopeId, String metric, String period, long limitValue,
+            Integer warnPercent, String status, String action) {
         StringBuilder sb = new StringBuilder("{\"scopeType\":\"").append(scopeType).append("\",\"scopeId\":\"")
                 .append(scopeId).append("\",\"metric\":\"").append(metric).append("\",\"period\":\"").append(period)
                 .append("\",\"limitValue\":").append(limitValue);
@@ -363,6 +410,9 @@ class AdminQuotaRuleApiIntegrationTest {
         }
         if (status != null) {
             sb.append(",\"status\":\"").append(status).append('"');
+        }
+        if (action != null) {
+            sb.append(",\"action\":\"").append(action).append('"');
         }
         return sb.append('}').toString();
     }
@@ -391,11 +441,11 @@ class AdminQuotaRuleApiIntegrationTest {
 
         void reset() {
             for (String table : List.of("webhook_delivery_attempts", "alert_events", "alert_rules", "usage_event",
-                    "price_snapshot", "quota_rules", "virtual_key_models", "key_project_binding", "model_approval",
-                    "virtual_keys", "project_provider_grant_models", "project_provider_grants", "unattributed_policy",
-                    "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
-                    "project_memberships", "project_repositories", "projects", "provider_products", "providers",
-                    "admin_audit_events", "user_sessions", "users")) {
+                    "price_snapshot", "quota_enforcement", "quota_rules", "virtual_key_models", "key_project_binding",
+                    "model_approval", "virtual_keys", "project_provider_grant_models", "project_provider_grants",
+                    "unattributed_policy", "upstream_credential_versions", "upstream_credentials", "plan_seats",
+                    "upstream_subscriptions", "project_memberships", "project_repositories", "projects",
+                    "provider_products", "providers", "admin_audit_events", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {
