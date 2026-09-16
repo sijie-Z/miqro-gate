@@ -3163,9 +3163,29 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - `docs/document-map.md` §2 增两行索引：实现级 Spec = 权威实现契约 / 设计稿 = 历史设计稿（无契约效力）。
 - **未改**任何代码、迁移、前端、契约文件。
 
-**验证**（worktree 内 `git grep -n`，原文入交付报告；计数按**设计稿文件内**口径——本条目自身的叙述性提及不计）：
+**验证**（**以下为修复前时点（commit `6db7f33`）**；worktree 内 `git grep -n`，原文入交付报告；计数按**设计稿文件内**口径——本条目自身的叙述性提及不计；修复轮后的行号与计数见本节末）：
 - `git grep -n "X-Miqro-Tag" -- docs/activity-context-design.md` → **1 命中**（`:117` §5 实验记录，附「实验用头名；正式契约见 §4.1」注记），exit 0；
 - `git grep -n "attribution_source" -- docs/activity-context-design.md` → **0 命中**（exit 1）；全仓排除本条目后同为 0 命中——代码/契约/Spec 均无该名；
 - `git grep -n "X-Miqro-Project-Id" -- docs/activity-context-design.md` → **6 命中**（`:72`/`:79`/`:106`/`:117`/`:147`/`:164`）；全仓其余命中均在既有实现/契约件（`RequestContextResolver.java`、`ResolvedContext.java`、契约与测试、`miqro-context/**`、Spec v1.1），**无新文件被引入**。
 
 **边界**：仅 `docs/` 下三份文件（设计稿 / document-map / 本条目）。不动 `V54__usage_event_context_columns.sql`、`V55__request_context_evidence.sql`、`RequestContextResolver.java`、`ResolvedContext.java`、`api-contract.md`、`database-schema.md`、`miqro-context/**`、`context-attribution-implementation-spec.md`。设计稿内残余 1 处 `X-Miqro-Tag` 是**实验记录**（非"未改完"），本条目自身的叙述性提及亦计入全仓 grep 命中；§5 记录的时间点事实按实验记录原则保持原样。issue #629 正文自身仍用旧列名，建议由 owner 更新措辞后再关闭。
+
+**修复轮（评审后）**：对上述交付做了一轮独立对抗性评审（评审只看工作树文件与命令原文，不采信作者结论）。逐条回源码/迁移/`gh` 远端复核后，修复 15 处**事实性**问题（仍全部落在 `docs/`）：
+
+- `:4` 交付枚举补 **#641**（`gh` 核实 #633/#639/#641/#645–#648 均已交付）；
+- `:7` 实验脚本指针加注「本机临时路径，未随仓库归档；证据以 §5 表格记录为准」（本机无 D: 盘、仓库内零副本，原文「（可复现）」不可兑现）；
+- `:51` §2 概念字段表后补「上图为概念模型，实现列见 §4.1 与 Spec v1.1 §7.1」（`user_id`/`model`/`cost`/`ts` 并非 `usage_event` 实现列）；
+- `:74` 失败语义精确化：**非 UUID 且在长度域内 → 400 `CONTEXT_INVALID`**；空值/超 64 字符按「未携带」处理（`RequestContextResolver.bounded()` 语义），原文「非法值 400」过宽；
+- `:76` 400 加条件：**未配置未归属策略时 400 `CONTEXT_REQUIRED`**；配置后按策略路由（`POLICY_ROUTED`、落未归属桶，Spec v1.1 §6.3）；
+- `:79` `resolution_status` 值域改为「实现产出 `RESOLVED_HEADER`/`RESOLVED_SUFFIX`/`SOLE_BINDING`/`POLICY_ROUTED` 四值；完整值域另含 `UNATTRIBUTED`/`AMBIGUOUS`」；**不再把 V54 列注释当 `claim_source` 值域权威**（该注释只列 6 值、漏 `git_remote`；权威为 `api-contract.md` §7 阶梯条，共 7 项）；
+- `:81` 门控注记补证据边界：`X-Miqro-Target-Id` 的结论出处为 Spec v1.1 §3.3，**本稿 §5 未单独实验该头名**（原文「已实证」不可兑现）；注记本身**保留未删**；
+- `:112` 无证据分支精确化：**不注入 `X-Miqro-Project-Id`**（客户端 `miqro-context/src/proxy/inject.ts` 仅 RESOLVED 时注入），只发 `X-Miqro-Claim-Status: UNATTRIBUTED`；网关侧策略桶 / 未配置则 400；
+- `:143` §6 处置现状补历史注记：**#615 已 MERGED（`f057fd5`）**，Q0 按 A 线落地，本节「建议 B / 建议关闭 #615」描述过期；
+- `:151` §7 补历史注记：Q0 已定，Q1–Q5 已在 Spec/实现落地，**Q6（per-turn 钩子 / transcript 兜底）未交付**；
+- `:160` Q3 行：`activity_id` **已随 `V54` 落库**（客户端发 `X-Miqro-Activity` 且为合法 UUID 时写入），非「仅预留」——`PostgresUsageEventWriter` 已写入该列；
+- `:165` §8 补历史注记（计划已成历史；实施口径见 Spec §11 与 `docs/caa-next-batch-plan.md`）；
+- `:170` 迁移口径拆开：**V54 = `usage_event` 上下文列；V55 = 证据审计表 `request_context_evidence`**（原文把 V55 并入「上下文列」）；
+- `docs/document-map.md:35` 去掉「上一行 Spec」位置指针 → 改写成文件名；「仅补实验证据」→「仅补实验证据与历史注记」；
+- grep 计数口径收紧为**被检文件内**计数（原文未说明是否含本条目自身叙述性提及，易生歧义）。
+
+**修复轮后验证**：`git grep -n "X-Miqro-Tag" -- docs/activity-context-design.md` → **1 命中**（`:119` §5 实验记录，附「实验用头名」注记）；`git grep -n "attribution_source" -- docs/activity-context-design.md` → **0 命中**（exit 1）；`git grep -n "X-Miqro-Project-Id" -- docs/activity-context-design.md` → **7 命中**（`:74`/`:81`/`:108`/`:112`/`:119`/`:149`/`:170`）；`git diff --check` exit 0。
