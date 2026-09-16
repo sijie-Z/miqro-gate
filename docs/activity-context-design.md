@@ -1,9 +1,9 @@
 # MiQroKey Activity Context —— 请求级归属设计（含真机实验证据与待决问题）
 
 - 日期：2026-09-16
-- 状态：**设计稿 v0.1（待评审——请 ChatGPT / leader 过目，问题清单见 §7）**
+- 状态：**设计稿 v0.1（历史件 / historical）——命名与契约以 [实现级 Spec v1.1](context-attribution-implementation-spec.md) 为准（已交付 #633 / #639 / #645–#648）；本文只存档设计推演与真机实验证据，头名与列名不再代表实现，勿据本文开工。**
 - 关系：PR #615（单密钥多项目·标签路由）已实现 **Identity→Project 的地基**；本文定义其上的更高层问题——**Identity ≠ Workload ≠ Request**，即"请求级归属（Request / Activity Attribution）"的完整方案。
-- **实现级 Spec（AI 可直接开工）：[docs/context-attribution-implementation-spec.md](../context-attribution-implementation-spec.md)**
+- **实现级 Spec（AI 可直接开工）：[docs/context-attribution-implementation-spec.md](context-attribution-implementation-spec.md)**
 - 实验脚本与原始记录：`D:/tmp/ctx-hook.py`、`ctx-helper.py`、`ctx-fake-model.py`、`ctx-capture.log`（可复现）
 
 ---
@@ -44,7 +44,8 @@ Session X
 └────────────────────────────┘
                 ↓
 Usage Event { user_id, session_id, project_id, activity?, model,
-              input_tokens, output_tokens, cost, ts, attribution_source }
+              input_tokens, output_tokens, cost, ts,
+              claimed_project_id, resolution_status, claim_source, claim_confidence }
 ```
 
 三个原则：
@@ -68,12 +69,14 @@ Usage Event { user_id, session_id, project_id, activity?, model,
 
 ### 4.1 传输契约（Gateway 侧——与 PR #615 地基完全复用）
 
-- 每请求携带 `X-Miqro-Tag: <project-tag>` 头（**头名已按 Claude Code 官方"敏感词门控"逐 token 核过**：不能含 `project/key/user/org/token/host/endpoint/…` 等词，`X-Miqro-Tag` 可通过）；
+- 每请求携带 `X-Miqro-Project-Id: <project-uuid>` 头（值为 project UUID，非法值 400 fail-closed；头名改写依据 Spec v1.1 **R3/P1**；"敏感词门控"约束见本节末注记）；
 - 解析顺序：**头部（工作区自动注入，优先）→ 密钥后缀（兼容回退）→ 单绑定兜底**；
 - **多绑定 Key 且无任何上下文 → 400 fail-closed**——宁可报错，绝不静默记错账（财务口径底线）；
 - 头声称了未绑定项目 → **403 明确报错**（调用方自知声称了什么，可调试；防枚举的 404 语义只保留给"密钥本身无效"）；
 - 头**不参与 HMAC 鉴权、不转发上游**；绑定校验通过后，凭证/模型/用量链路与 #615 完全一致；
-- `usage_event` 增记 `attribution_source`（HEADER / SUFFIX / FALLBACK / UNATTRIBUTED）与客户端自带的 `X-Claude-Code-Session-Id` → 审计可还原每笔归属的判定依据。
+- `usage_event` 增记**服务端裁定** `resolution_status`（`RESOLVED_HEADER` / `RESOLVED_SUFFIX` / `SOLE_BINDING` / `POLICY_ROUTED` / `UNATTRIBUTED` / `AMBIGUOUS`，值域以 V54 迁移注释为准）与**客户端声明** `claimed_project_id` / `claim_source` / `claim_confidence`——声明（未验证输入）与裁定（计费依据）分列，依据 Spec v1.1 **R5/P1**；另记客户端自带的 `X-Claude-Code-Session-Id` → `session_id`（纯观测、可空、不参与路由/授权）→ 审计可还原每笔归属的判定依据。
+
+> **注记（原"头名敏感词门控"约束的适用范围——保留）**：Claude Code 官方对头名有"敏感词门控"（不能含 `project/key/user/org/token/host/endpoint/…` 等词）。该门控**仅作用于客户端从 settings/env 读取的 `ANTHROPIC_CUSTOM_HEADERS`（静态头降级模式，即 §4.2 通道 A/B）**；CAA 主路径的头由本机 Agent 自行注入，**不受该门控影响**（Spec v1.1 §3.3）。`X-Miqro-Project-Id`（含 `project` 词）在主路径下可放心使用；**若未来启用静态头降级模式，须另选不含 `project/key/…` 的头名（如 `X-Miqro-Target-Id`，已实证可通过门控）**。
 
 ### 4.2 注入通道（客户端侧——本轮已做真机实验，证据见 §5）
 
@@ -100,7 +103,7 @@ Usage Event { user_id, session_id, project_id, activity?, model,
 
           ↓ 规则表（路径前缀、git remote → 项目标签；可从仓库注册表自动生成）
 
-   Context Resolver  →  X-Miqro-Tag: miqi（确定性映射）
+   Context Resolver  →  X-Miqro-Project-Id: <project-uuid>（确定性映射）
 ```
 
 - **高置信度（结构化证据命中规则表）→ 自动归属**；
@@ -111,7 +114,7 @@ Usage Event { user_id, session_id, project_id, activity?, model,
 
 | # | 实验 | 方法 | 结果 |
 |---|---|---|---|
-| 1 | **自定义头随每个请求到达** | shell env 设 `ANTHROPIC_CUSTOM_HEADERS="X-Miqro-Tag: miqi"` + 固定 Key，指向自建端点 | ✅ **通过**：真实请求 `POST /v1/messages` 同时携带 `Authorization: Bearer <固定Key>` 与 `X-Miqro-Tag: miqi`；另发现客户端自带 `X-Claude-Code-Session-Id`（可作审计维度） |
+| 1 | **自定义头随每个请求到达** | shell env 设 `ANTHROPIC_CUSTOM_HEADERS="X-Miqro-Tag: miqi"` + 固定 Key，指向自建端点 | ✅ **通过**：真实请求 `POST /v1/messages` 同时携带 `Authorization: Bearer <固定Key>` 与 `X-Miqro-Tag: miqi`（**实验用头名；正式契约见 §4.1 → `X-Miqro-Project-Id`**）；另发现客户端自带 `X-Claude-Code-Session-Id`（可作审计维度） |
 | 2 | settings 是否被加载 | `--settings` 文件里放 `model` 字段，看请求体 | ✅ 通过：请求体 `model=claude-sonnet-4-5` 生效 → **settings 加载链路正常** |
 | 3 | settings 提供的 `env.ANTHROPIC_CUSTOM_HEADERS` / `hooks` / `apiKeyHelper` | 同一 settings 文件 | ❌ **本机未生效**（同一文件的 `model` 生效、这三项静默被弃）——与官方 changelog「敏感设置（凭据/路由/代码执行类）需审批」的机制吻合；疑为本机桌面版（claude-desktop-3p 环境）的额外限制。→ **待干净 CLI 环境 / managed settings 复核**（§7 Q1） |
 | 4 | 假模型服务器驱动真实工具调用 | 自建 SSE 端点：第一轮返回 `tool_use(Read)` → Claude Code 真执行 Read → 第二轮带 `tool_result` | ✅ 通过：第二轮请求 `body_has_tool_result=true` —— **hooks 链路的先决条件（真实工具调用）成立** |
@@ -141,7 +144,7 @@ Usage Event { user_id, session_id, project_id, activity?, model,
 
 - 若 Q0=B（建议）：#615 的 binding 产品面废弃；实现按"header → 用户×项目授权 → 项目 grant"重建（比 binding 线更简单）；
 - 若 Q0=A：**复用** #615 的 `(keyId, tag) → binding → grant → 凭证/模型 → 用量` 全链路；后缀降为 fallback；
-- 两种情况下共同的**增量**：选择器扩展（`X-Miqro-Tag` 头部优先）+ `attribution_source`/`session_id` 落库 + 未归属策略 + 客户端参考实现（helper/hook 脚本）。
+- 两种情况下共同的**增量**：选择器扩展（`X-Miqro-Project-Id` 头部优先）+ `resolution_status` / `claimed_*` / `claim_*` / `session_id` 落库 + 未归属策略 + 客户端参考实现（helper/hook 脚本）。
 
 ## 7. 待决问题（请评审 / 拍板）
 
@@ -150,7 +153,7 @@ Usage Event { user_id, session_id, project_id, activity?, model,
 | **Q0** | **授权粒度**：Key×项目（现状 #615）vs **用户×项目**（建议）——决定 #615 去留与实现形态 | **用户×项目**（见 §6）；请 leader/ChatGPT 拍板 |
 | **Q1** | 注入通道主推哪条？A（wrapper 环境）/ B（项目 settings）/ C（apiKeyHelper）/ D（hooks 证据）/ E（企业 managed）——需在干净 CLI 环境复核 3/5 号实验后定 | 演示用 **A+D 组合**；生产推 **C/D + 企业 managed 下发**（E） |
 | **Q2** | 未归属桶策略：落到主绑定的项目 / 独立"未归属"虚拟项目 / 截停轻确认 | **独立"未归属"桶 + 支持事后重分类**（财务账纯净、可解释） |
-| **Q3** | 是否引入 Activity 一级概念（task/activity_id），还是先只做 project 级 + attribution_source | 先 project 级 + source 记录；activity_id 预留字段、二期 |
+| **Q3** | 是否引入 Activity 一级概念（task/activity_id），还是先只做 project 级 + 归属裁定/声明记录 | 先 project 级 + `resolution_status` / `claim_*` 记录；`activity_id` 已随 V54 预留（可空），二期 |
 | **Q4** | `session_id` 落库的隐私评估（X-Claude-Code-Session-Id 属元数据） | 建议落（审计价值大，无正文）——请复核 |
 | **Q5** | 多绑定 Key 无上下文 → 400 fail-closed 是否接受 | **坚持**（不静默归属是财务底线） |
 | **Q6** | "同 session 内真 per-turn 切换"的终局：等 Claude Code 开放请求钩子（官方 open feature request #21531）vs 本地代理读会话 transcript 兜底（涉及本机读会话文件，需评审隐私与稳定性） | 先交付"工作区锚定"形态；transcript 兜底作为可选增强，请评审 |
@@ -158,6 +161,6 @@ Usage Event { user_id, session_id, project_id, activity?, model,
 ## 8. 下一步实施计划（问题澄清后立即开工）
 
 1. **干净环境复核实验 3/5**（通道 B/C/D，一天内出结论）；
-2. **网关增量**（小 PR，在 #615 合入之后）：`X-Miqro-Tag` 解析 + 失败语义 + `usage_event.attribution_source`/`session_id`（V54 迁移）+ 契约与测试；
+2. **网关增量**（小 PR，在 #615 合入之后）：`X-Miqro-Project-Id` 解析 + 失败语义 + `usage_event` 上下文列（`session_id`/`activity_id`/`claimed_project_id`/`resolution_status`/`claim_source`/`claim_confidence`；迁移 **V54 + V55**）+ 契约与测试；
 3. **客户端参考实现**：`apiKeyHelper` + `PostToolUse` 证据脚本（含规则表模板），进「接入面板」供一键生成；
 4. **演示闭环升级**：一把 Key + 两个项目目录各跑一次 Claude Code → 用量按"请求级项目"自动分账（全程零切换）。

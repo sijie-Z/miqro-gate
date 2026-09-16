@@ -3150,3 +3150,22 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **待 owner 拍板**：ADR-0019（是否反转「不因预算阻断」提供 REJECT 规则；含 429 信封、5 分钟近似计数与未决问题 3 项）。
 
 **未做（记录）**：MCP 服务向导「服务类型/后端类型」枚举（我们固定标准透传形态）、HTTP→MCP 转换、消费者组实体、配额缓存命中「全量计入」档（语义天然等价「不计入」）——均按既有裁决维持，mapping 已注明理由。
+
+## 2026-09-16 晚 — #629 设计稿口径归位（docs-only：头名与列名对齐 v1.1 已交付契约）
+
+**背景**：#629 的定性是**设计稿未跟随 v1.1 评审修订**（不是实现漂移）。`docs/activity-context-design.md`（设计稿 v0.1）停在评审前口径——头名 `X-Miqro-Tag`、用量列 `attribution_source`——而实现侧（V54/V55 迁移 + RequestContextResolver）早已按 Spec v1.1 的 R3/R5 落地 `X-Miqro-Project-Id` 与 `resolution_status`/`claimed_*`。设计稿与实现级 Spec 长期并存而 `document-map.md` 对两者**零引用**，是该分歧得以存活的土壤。处置取「改文档齐实现」：**零迁移 / 零代码 / 零前端**。
+
+**交付**（分支 docs/activity-context-design-realigned-629，隔离工作树，base develop@50a9b245）：
+- `docs/activity-context-design.md`：`:4` 状态改 **历史件 / historical** 并链到实现级 Spec；`:46-48` Usage Event 字段表 `attribution_source` → `claimed_project_id`/`resolution_status`/`claim_source`/`claim_confidence`；`:72` 头名 → `X-Miqro-Project-Id: <project-uuid>`（值域为 project UUID，非法值 400 fail-closed，依据 R3/P1）；`:77` 列名与值域对齐 **V54 迁移注释**，声明（未验证输入）与裁定（计费依据）分列（R5/P1），`session_id` 注明纯观测/可空/不参与路由授权；`:106`/`:147`/`:164` 同步改名，迁移注记扩为 **V54 + V55**；`:156` Q3 行改为裁定/声明记录口径。
+- **原「头名敏感词门控」论证降为 `:79` 注记并保留**：适用范围仅限客户端从 settings/env 读取的 `ANTHROPIC_CUSTOM_HEADERS`（静态头降级模式），CAA 主路径的头由本机 Agent 注入、不受门控；若未来启用静态头降级须另选不含 `project/key` 的头名（如 `X-Miqro-Target-Id`）。该约束是未来形态的既有需求，不删。
+- **§5 真机实验记录不回改**：`:117` 实验 1 保留当时真实观测到的 `X-Miqro-Tag: miqi`，仅在结果列追加「（实验用头名；正式契约见 §4.1 → `X-Miqro-Project-Id`）」。
+- 顺带修复 `:6` 既有坏链：`../context-attribution-implementation-spec.md` → `context-attribution-implementation-spec.md`（仓库同级相对链风格，同 `ai-gateway-comparison.md:3`）。
+- `docs/document-map.md` §2 增两行索引：实现级 Spec = 权威实现契约 / 设计稿 = 历史设计稿（无契约效力）。
+- **未改**任何代码、迁移、前端、契约文件。
+
+**验证**（worktree 内 `git grep -n`，原文入交付报告）：
+- `X-Miqro-Tag` → **1 命中**，仅 `docs/activity-context-design.md:117`（§5 实验记录，附「实验用头名」注记），其余零命中；
+- `attribution_source` → **0 命中**（grep exit 1）；
+- `X-Miqro-Project-Id` → 命中均在既有实现/契约件（`RequestContextResolver.java`、`ResolvedContext.java`、契约与测试、`miqro-context/**`、Spec v1.1、本 progress）加本设计稿新改 5 处；无新文件被引入。
+
+**边界**：仅 `docs/` 下三份文件（设计稿 / document-map / 本条目）。不动 `V54__usage_event_context_columns.sql`、`V55__request_context_evidence.sql`、`RequestContextResolver.java`、`ResolvedContext.java`、`api-contract.md`、`database-schema.md`、`miqro-context/**`、`context-attribution-implementation-spec.md`。残余 1 处 `X-Miqro-Tag` 是**实验记录**（非"未改完"）；§5 记录的时间点事实按实验记录原则保持原样。issue #629 正文自身仍用旧列名，建议由 owner 更新措辞后再关闭。

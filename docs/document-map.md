@@ -31,6 +31,8 @@
 | `database-schema.md` | 物理表、约束、索引和迁移 | 数据库变化 |
 | `api-contract.md` | 管理 API 与推理入口契约 | API 变化 |
 | `proxy-and-cc-switch.md` | 透明代理、协议和 CC Switch 边界 | 数据面行为变化 |
+| `context-attribution-implementation-spec.md` | 请求级归属（CAA）的**权威实现契约**：头名、usage_event 上下文列、裁定/声明模型、Spec v1.1 R1–R8 | 归属实现契约变化 |
+| `activity-context-design.md` | 请求级归属的**历史设计稿**——设计推演与 2026-09-16 真机实验证据；头名/列名**不具契约效力** | 仅补实验证据；命名与契约一律以上一行 Spec 为准 |
 | `protocol-agents.md` | Agent/模型协议全景（入站协议、客户端矩阵、上游协议声明、红线） | 协议面变化 |
 | `provider-catalog.md` | 支持的供应商产品及证据 | 产品目录变化 |
 | `provider-adapter-contract.md` | Java SPI 与适配器验收 | SPI/fixture 变化 |
