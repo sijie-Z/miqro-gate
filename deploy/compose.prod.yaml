@@ -37,6 +37,9 @@ services:
   postgres:
     image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
     restart: unless-stopped
+    # 小规格宿主实测（2026-09-16 2G 演示机）：库小（~135MB）时 64M 足够；共享内存不可回收，
+    # 调小后余量转为可回收内核页缓存。大库用 POSTGRES_SHARED_BUFFERS 放大。
+    command: ["postgres", "-c", "shared_buffers=${POSTGRES_SHARED_BUFFERS:-64MB}"]
     depends_on:
       secrets-init:
         condition: service_completed_successfully
@@ -79,6 +82,11 @@ services:
       MIQROKEY_GATEWAY_BASE_URL: ${MIQROKEY_GATEWAY_BASE_URL:-https://localhost}
       MIQROKEY_ORIGIN_ALLOWLIST: ${MIQROKEY_ORIGIN_ALLOWLIST:-https://miqrokey.example.com}
       MIQROKEY_REGISTRATION_ENABLED: ${MIQROKEY_REGISTRATION_ENABLED:-true}
+      # 留痕查看器（ADR-0014 §8）：控制面内置消费端接入 Kafka/Redpanda，把留痕信封
+      # 密文落库供「内容留痕」页查看/导出。默认关；启用需同时设 broker 地址
+      # （自托管走 --profile kafka → redpanda:9092，或填 CKafka 接入地址）。
+      MIQROKEY_RETENTION_CONSUMER_ENABLED: ${MIQROKEY_RETENTION_CONSUMER_ENABLED:-false}
+      MIQROKEY_RETENTION_CONSUMER_BOOTSTRAP_SERVERS: ${MIQROKEY_RETENTION_CONSUMER_BOOTSTRAP_SERVERS:-}
       MIQROKEY_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-miqrokey}
       MIQROKEY_DB_USERNAME: ${POSTGRES_USER:-miqrokey}
       MIQROKEY_DB_PASSWORD_FILE: /run/secrets/db_password
@@ -88,8 +96,9 @@ services:
       MIQROKEY_CRYPTO_HMAC_ACTIVE_VERSION: v1
       MIQROKEY_CRYPTO_HMAC_VERSIONS_V1: /run/secrets/vk_hmac_key
       MIQROKEY_BOOTSTRAP_SECRET_FILE: /run/secrets/bootstrap_secret
-      # 显式限堆（同 gateway 注释）；管理面无高并发，512m 足够。
-      JAVA_TOOL_OPTIONS: ${CONTROL_PLANE_JAVA_OPTS:--Xmx512m -XX:MaxMetaspaceSize=192m -XX:+ExitOnOutOfMemoryError}
+      # 显式限堆（同 gateway 注释）；管理面无高并发。2G 演示机 GC 实测堆存活 ~69MB，
+      # 448m 余量充足；SerialGC 小堆更省内存，GC 日志 2×5MB 循环可查。
+      JAVA_TOOL_OPTIONS: "${CONTROL_PLANE_JAVA_OPTS:--Xmx448m -XX:MaxMetaspaceSize=192m -XX:+UseSerialGC -Xlog:gc*:file=/tmp/gc.log:time,uptime:filecount=2,filesize=5m -XX:+ExitOnOutOfMemoryError}"
       MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES: ${MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES:-172.28.0.0/24}
       MIQROKEY_CONTROL_ADMIN_IP_ALLOWLIST: ${MIQROKEY_CONTROL_ADMIN_IP_ALLOWLIST:-}
     volumes:
@@ -124,6 +133,8 @@ services:
       MIQROKEY_CRYPTO_ENABLED: "true"
       MIQROKEY_CRYPTO_ENC_KEY_FILE: /run/secrets/master_key
       MIQROKEY_CRYPTO_HMAC_KEY_FILE: /run/secrets/vk_hmac_key
+      # 响应缓存（L1 进程内 + L2 Postgres；#509 全链路实测）：默认关，按需开启。
+      MIQROKEY_CACHE_ENABLED: ${MIQROKEY_CACHE_ENABLED:-false}
       # 留痕 Kafka 出口（ADR-0014 R3，默认关）：空值=no-op publisher。自托管 broker 启用后
       # 设为 redpanda:9092（需 --profile kafka）；腾讯云 CKafka 直接填其接入地址，无需 profile。
       MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS: ${MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS:-}
@@ -131,7 +142,9 @@ services:
       # X-Forwarded-For 并把真实访客地址记入用量记录；直连场景置空 = 只记对端地址。
       MIQROKEY_TRUSTED_PROXY_CIDRS: ${MIQROKEY_TRUSTED_PROXY_CIDRS:-172.28.0.0/24}
       # 显式限堆：%-of-limit 在小规格宿主（2G 演示机）上会超卖；大机可用 GATEWAY_JAVA_OPTS 覆盖。
-      JAVA_TOOL_OPTIONS: ${GATEWAY_JAVA_OPTS:--Xmx640m -XX:MaxMetaspaceSize=192m -XX:+ExitOnOutOfMemoryError}
+      # 2G 演示机 GC 实测堆存活 ~24MB（原 640m 严重超配，2026-09-16 调低）；SerialGC + GC 日志同控制面。
+      # 注：镜像 ENTRYPOINT 的 -XX:MaxRAMPercentage=75 仅在未设 JAVA_TOOL_OPTIONS 时兜底（-Xmx 优先）。
+      JAVA_TOOL_OPTIONS: "${GATEWAY_JAVA_OPTS:--Xmx384m -XX:MaxMetaspaceSize=192m -XX:+UseSerialGC -Xlog:gc*:file=/tmp/gc.log:time,uptime:filecount=2,filesize=5m -XX:+ExitOnOutOfMemoryError}"
     volumes:
       - secrets-store:/run/secrets:ro
     healthcheck:

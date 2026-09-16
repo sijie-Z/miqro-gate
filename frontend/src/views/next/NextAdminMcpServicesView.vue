@@ -74,6 +74,17 @@ const modeOptions: { value: string; label: string }[] = [
   { value: 'DENY', label: '名单内禁止' },
 ];
 
+// #674 onboarding guide: visible until dismissed (per-page localStorage
+// memory); mirrors the Tencent MCP guide-card pattern with our own
+// capabilities only.
+const MCP_GUIDE_KEY = 'miqrogate.mcp-guide.hidden';
+const guideOpen = ref(localStorage.getItem(MCP_GUIDE_KEY) !== '1');
+
+function dismissGuide() {
+  guideOpen.value = false;
+  localStorage.setItem(MCP_GUIDE_KEY, '1');
+}
+
 const registering = ref(false);
 const form = ref({
   name: '',
@@ -1363,6 +1374,81 @@ async function saveResilience() {
         </UiButton>
       </div>
     </header>
+
+    <section v-if="guideOpen" class="ui-panel next-mcp__guide" data-testid="mcp-guide">
+      <div class="next-mcp__guide-head">
+        <div>
+          <h2 class="ui-panel-title">MCP 服务接入指引</h2>
+          <p class="next-mcp__guide-sub">从注册后端服务到客户端接入，三步完成。</p>
+        </div>
+        <div class="next-mcp__guide-head-actions">
+          <UiButton
+            variant="primary"
+            size="sm"
+            data-testid="mcp-guide-create"
+            @click="registering = true"
+            >注册 MCP 服务</UiButton
+          >
+          <button
+            type="button"
+            class="next-mcp__guide-dismiss"
+            data-testid="mcp-guide-dismiss"
+            @click="dismissGuide"
+          >
+            收起不再显示
+          </button>
+        </div>
+      </div>
+      <div class="ui-panel-body next-mcp__guide-body">
+        <ol class="next-mcp__steps">
+          <li class="next-mcp__step">
+            <span class="next-mcp__step-no" aria-hidden="true">1</span>
+            <span class="next-mcp__step-title">注册 MCP 服务</span>
+            <span class="next-mcp__step-desc"
+              >填写接入地址与传输类型（Streamable HTTP / SSE），网关即时代理。</span
+            >
+          </li>
+          <li class="next-mcp__step">
+            <span class="next-mcp__step-no" aria-hidden="true">2</span>
+            <span class="next-mcp__step-title">注册 Tools 与访问控制</span>
+            <span class="next-mcp__step-desc"
+              >同步、手动或导入工具清单并逐项启停；服务级模式叠加单工具覆盖两级收敛。</span
+            >
+          </li>
+          <li class="next-mcp__step">
+            <span class="next-mcp__step-no" aria-hidden="true">3</span>
+            <span class="next-mcp__step-title">客户端接入验证</span>
+            <span class="next-mcp__step-desc"
+              >用 MCP 客户端连接网关端点，调用一个工具确认链路。</span
+            >
+          </li>
+        </ol>
+        <div class="next-mcp__guide-cards">
+          <div class="next-mcp__guide-card">
+            <h3 class="next-mcp__guide-card-title">接入已有 MCP Server</h3>
+            <p class="next-mcp__guide-card-desc">
+              后端已实现 MCP 协议时，填写接入地址即可透传代理；健康检查默认每 30 秒探测 /health。
+            </p>
+            <span class="next-mcp__guide-card-fit">适合：已有 MCP Server 的团队</span>
+          </div>
+          <div class="next-mcp__guide-card">
+            <h3 class="next-mcp__guide-card-title">工具与访问控制</h3>
+            <p class="next-mcp__guide-card-desc">
+              工具清单支持同步、手动与导入三种来源，逐个启停；访问控制按服务级模式 +
+              单工具覆盖两级收敛。
+            </p>
+            <span class="next-mcp__guide-card-fit">适合：需要收敛可调用工具面的生产接入</span>
+          </div>
+          <div class="next-mcp__guide-card">
+            <h3 class="next-mcp__guide-card-title">观测与韧性</h3>
+            <p class="next-mcp__guide-card-desc">
+              MCP 访问日志逐条可查；每个服务可单独配置健康检查与韧性策略。
+            </p>
+            <span class="next-mcp__guide-card-fit">适合：上线后的日常运维</span>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <div v-if="loadError" class="ui-alert ui-alert--error">
       {{ loadError
@@ -3278,5 +3364,140 @@ async function saveResilience() {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-faint);
   overflow-wrap: anywhere;
+}
+
+/* ---- onboarding guide (#674) ---- */
+.next-mcp__guide {
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-mcp__guide-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-4) var(--ui-space-6) 0;
+}
+
+.next-mcp__guide-sub {
+  margin: 4px 0 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__guide-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  flex-shrink: 0;
+}
+
+.next-mcp__guide-dismiss {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--ui-foreground-faint);
+  font-size: var(--ui-font-size-xs);
+  cursor: pointer;
+  transition: color var(--ui-ease);
+}
+
+.next-mcp__guide-dismiss:hover {
+  color: var(--ui-foreground-secondary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.next-mcp__guide-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+}
+
+.next-mcp__steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ui-space-4);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.next-mcp__step {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  column-gap: var(--ui-space-2);
+}
+
+.next-mcp__step-no {
+  grid-row: 1 / span 2;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary-text);
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-semibold);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.next-mcp__step-title {
+  font-size: var(--ui-font-size-sm);
+  font-weight: var(--ui-weight-medium);
+  color: var(--ui-foreground);
+}
+
+.next-mcp__step-desc {
+  font-size: var(--ui-font-size-xs);
+  line-height: 20px;
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__guide-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ui-space-3);
+}
+
+.next-mcp__guide-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-4);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-panel);
+}
+
+.next-mcp__guide-card-title {
+  margin: 0;
+  font-size: var(--ui-font-size-sm);
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+}
+
+.next-mcp__guide-card-desc {
+  margin: 0;
+  flex: 1;
+  font-size: var(--ui-font-size-xs);
+  line-height: 20px;
+  color: var(--ui-foreground-secondary);
+}
+
+.next-mcp__guide-card-fit {
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary-text);
+  font-size: var(--ui-font-size-xs);
+}
+
+@media (max-width: 1100px) {
+  .next-mcp__steps,
+  .next-mcp__guide-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>
