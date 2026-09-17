@@ -500,6 +500,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/usage-price-backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["backfill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/usage-deletions": {
         parameters: {
             query?: never;
@@ -3295,6 +3311,16 @@ export interface components {
             user?: components["schemas"]["AdminUserView"];
             temporaryPassword?: string;
         };
+        UsagePriceBackfillResult: {
+            /** Format: int64 */
+            scanned?: number;
+            /** Format: int64 */
+            complete?: number;
+            /** Format: int64 */
+            partial?: number;
+            /** Format: int64 */
+            unavailable?: number;
+        };
         DeletionRequest: {
             /** Format: uuid */
             id?: string;
@@ -5639,6 +5665,29 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["UserPasswordReset"];
+                };
+            };
+        };
+    };
+    backfill: {
+        parameters: {
+            query: {
+                from: string;
+                to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["UsagePriceBackfillResult"];
                 };
             };
         };
