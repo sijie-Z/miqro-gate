@@ -40,7 +40,8 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.net.URI;
@@ -48,6 +49,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -90,13 +92,21 @@ public class QuotaSnapshotService {
     private final ObjectMapper objectMapper;
     private final Counter providerCalls;
     private final Counter refreshTotal;
+    /**
+     * Short write transaction for the collected snapshot rows (#728). Rows are
+     * gathered first (the provider fetches are blocking HTTP and must never run
+     * inside a transaction) and inserted here in one unit of work — the same path
+     * serves the admin trigger and the scheduled walk.
+     */
+    private final TransactionTemplate transactionTemplate;
 
     public QuotaSnapshotService(UpstreamSubscriptionRepository subscriptionRepository,
             ProviderProductRepository productRepository, UpstreamCredentialRepository credentialRepository,
             UpstreamCredentialVersionRepository versionRepository, QuotaSnapshotRepository snapshotRepository,
             AdapterRegistry adapterRegistry, ProviderClientFactory clientFactory,
             KeyEncryptionProvider keyEncryptionProvider, NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry, PlatformTransactionManager transactionManager) {
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.subscriptionRepository = subscriptionRepository;
         this.productRepository = productRepository;
         this.credentialRepository = credentialRepository;
@@ -141,8 +151,17 @@ public class QuotaSnapshotService {
      * when no credential can be checked, and a {@code LOCAL_ESTIMATE} row when
      * {@code quota_total} + period are known. Always appends; readers take the
      * latest per scope.
+     *
+     * <p>
+     * #728: the provider fetches are blocking HTTP calls and deliberately run
+     * <em>outside</em> any database transaction — a slow upstream must never pin a
+     * pooled connection (previously this method was {@code @Transactional} and held
+     * one for up to N×20s). The snapshot rows are collected first and written in
+     * one short transaction, so the admin trigger and the scheduled walk take the
+     * identical path (the scheduled self-invocation used to silently skip the
+     * transaction annotation).
+     * </p>
      */
-    @Transactional
     public void refresh(UUID tenantId, UUID subscriptionId) {
         UpstreamSubscription subscription = subscriptionRepository.findById(subscriptionId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "SUBSCRIPTION_NOT_FOUND",
@@ -159,17 +178,19 @@ public class QuotaSnapshotService {
 
         List<UpstreamCredential> credentials = credentialRepository.findAllBySubscriptionId(subscriptionId).stream()
                 .filter(c -> c.status() == CredentialStatus.ACTIVE).toList();
+        List<QuotaSnapshot> rows = new ArrayList<>();
         if (adapter != null) {
             for (UpstreamCredential credential : credentials) {
-                fetchAndStore(adapter, subscription, product, credential, now);
+                rows.add(fetch(adapter, subscription, product, credential, now));
             }
         }
         if (credentials.isEmpty() || adapter == null) {
-            snapshotRepository.insert(unavailable(subscription, null, null, now, "no ACTIVE credential or adapter"));
+            rows.add(unavailable(subscription, null, null, now, "no ACTIVE credential or adapter"));
         }
         if (subscription.quotaTotal() != null && subscription.periodStart() != null) {
-            snapshotRepository.insert(estimate(subscription, now));
+            rows.add(estimate(subscription, now));
         }
+        transactionTemplate.executeWithoutResult(status -> rows.forEach(snapshotRepository::insert));
     }
 
     /** Latest snapshot per scope for the subscription (admin view). */
@@ -210,7 +231,12 @@ public class QuotaSnapshotService {
 
     // -------------------------------------------------------------------
 
-    private void fetchAndStore(ProviderProductAdapter adapter, UpstreamSubscription subscription,
+    /**
+     * Fetches one credential's official plan status and maps it to a snapshot row
+     * (never throws: failures become an honest {@code UNAVAILABLE} row). Blocking
+     * HTTP — the caller guarantees no transaction is active (#728).
+     */
+    private QuotaSnapshot fetch(ProviderProductAdapter adapter, UpstreamSubscription subscription,
             ProviderProduct product, UpstreamCredential credential, Instant now) {
         byte[] secret = null;
         try {
@@ -221,9 +247,7 @@ public class QuotaSnapshotService {
                     subscription.tenantId(), credential.id());
             URI baseUrl = firstBaseUrl(product.baseUrlTemplates());
             if (baseUrl == null) {
-                snapshotRepository.insert(unavailable(subscription, credential.id(), credential.seatId(), now,
-                        "product has no base URL"));
-                return;
+                return unavailable(subscription, credential.id(), credential.seatId(), now, "product has no base URL");
             }
             ProviderClient client = clientFactory.create(baseUrl, "Authorization",
                     "Bearer " + new String(secret, StandardCharsets.UTF_8));
@@ -231,12 +255,11 @@ public class QuotaSnapshotService {
             PlanSnapshot plan = adapter
                     .fetchPlanStatus(client, new SubscriptionContext(subscription.id(), kind(subscription), null))
                     .block(FETCH_TIMEOUT);
-            snapshotRepository.insert(fromPlan(plan, subscription, credential, now));
             refreshTotal.increment();
+            return fromPlan(plan, subscription, credential, now);
         } catch (Exception e) {
             LOG.warn("Quota refresh failed for credential {}; recording UNAVAILABLE", credential.id());
-            snapshotRepository.insert(
-                    unavailable(subscription, credential.id(), credential.seatId(), now, sanitize(e.getMessage())));
+            return unavailable(subscription, credential.id(), credential.seatId(), now, sanitize(e.getMessage()));
         } finally {
             if (secret != null) {
                 SecretWiping.clearArray(secret);
