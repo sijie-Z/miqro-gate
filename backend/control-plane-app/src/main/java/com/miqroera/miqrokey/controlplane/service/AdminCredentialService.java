@@ -162,8 +162,14 @@ public class AdminCredentialService {
      * Validates a candidate secret against an existing credential without writing
      * anything. A well-formed secret is compared by SHA-256 fingerprint with the
      * currently active version (no decryption, no plaintext exposure).
+     *
+     * <p>
+     * Deliberately <em>not</em> transactional (#728): the final step probes the
+     * real provider (blocking HTTP, up to 10s) and a transaction would pin a pooled
+     * connection for its duration. Every step is a point read over unchanging
+     * inputs, so no consistency window is lost.
+     * </p>
      */
-    @Transactional(readOnly = true)
     public ValidateCredentialResponse validate(User admin, UUID credentialId, ValidateCredentialRequest request,
             String requestId) {
         findOwned(credentialId, admin.tenantId());

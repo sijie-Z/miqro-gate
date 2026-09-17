@@ -115,7 +115,7 @@ onMounted(() => {
             <td class="next-settings__value">{{ row.value }}</td>
           </tr>
           <tr class="next-settings__row">
-            <th class="next-settings__label" scope="row">门户启动时间</th>
+            <th class="next-settings__label" scope="row">页面载入时间</th>
             <td class="next-settings__value ui-num">{{ startedAt ?? '—' }}</td>
           </tr>
         </tbody>

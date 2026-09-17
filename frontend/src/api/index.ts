@@ -38,7 +38,6 @@ import type {
   ModelApprovalView,
   PriceSnapshotView,
   Project,
-  Provider,
   QuotaDefaultTemplateView,
   QuotaRuleView,
   RoiReportView,
@@ -145,10 +144,6 @@ export function logoutOtherSessions(): Promise<{ message: string }> {
 
 export function listVirtualKeys(): Promise<VirtualKeyView[]> {
   return get<VirtualKeyView[]>('/api/v1/me/virtual-keys');
-}
-
-export function getVirtualKey(id: string): Promise<VirtualKeyView> {
-  return get<VirtualKeyView>(`/api/v1/me/virtual-keys/${id}`);
 }
 
 export function createVirtualKey(
@@ -576,10 +571,6 @@ export function listProviderProducts(): Promise<ProviderProductView[]> {
   return get<ProviderProductView[]>('/api/v1/admin/provider-products');
 }
 
-export function listProviders(): Promise<Provider[]> {
-  return get<Provider[]>('/api/v1/admin/provider-products/providers');
-}
-
 export function listSubscriptions(): Promise<SubscriptionView[]> {
   return get<SubscriptionView[]>('/api/v1/admin/subscriptions');
 }
@@ -630,10 +621,6 @@ function skillQuery(q?: string, tags?: string[]): string {
   for (const tag of tags ?? []) params.append('tags', tag);
   const qs = params.toString();
   return qs ? `?${qs}` : '';
-}
-
-export function getSkill(id: string): Promise<SkillView> {
-  return get<SkillView>(`/api/v1/skills/${id}`);
 }
 
 /** Downloads the skill package; throws ApiError (403 SKILL_DOWNLOAD_FORBIDDEN). */

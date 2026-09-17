@@ -97,6 +97,7 @@ class QuotaSnapshotServiceTest {
 
     private QuotaSnapshotService service;
     private final java.util.List<QuotaSnapshot> stored = new java.util.ArrayList<>();
+    private final RecordingTransactionManager transactions = new RecordingTransactionManager();
     private ProviderProductAdapter adapter;
 
     @BeforeEach
@@ -104,7 +105,7 @@ class QuotaSnapshotServiceTest {
         service = new QuotaSnapshotService(subscriptionRepository, productRepository, credentialRepository,
                 versionRepository, snapshotRepository, adapterRegistry, clientFactory, keyEncryptionProvider, jdbc,
                 new com.fasterxml.jackson.databind.ObjectMapper(),
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), transactions);
         lenient().when(snapshotRepository.insert(any())).thenAnswer(inv -> {
             stored.add(inv.getArgument(0));
             return inv.getArgument(0);
@@ -205,6 +206,86 @@ class QuotaSnapshotServiceTest {
         verify(snapshotRepository).findLatestPerScope(TENANT, SUBSCRIPTION_ID);
     }
 
+    // ------------------------------------------------------------------
+    // #728: transaction discipline — fetch outside, one write transaction,
+    // identical on the admin path and the scheduled path.
+    // ------------------------------------------------------------------
+
+    @Test
+    void providerFetchRunsOutsideAnyTransactionAndRowsAreWrittenInOneTransaction() {
+        java.util.concurrent.atomic.AtomicBoolean txActiveDuringFetch = new java.util.concurrent.atomic.AtomicBoolean(
+                true);
+        ProviderProductAdapter probingAdapter = new FakeAdapter() {
+            @Override
+            public reactor.core.publisher.Mono<PlanSnapshot> fetchPlanStatus(ProviderClient client,
+                    SubscriptionContext subscription) {
+                txActiveDuringFetch.set(org.springframework.transaction.support.TransactionSynchronizationManager
+                        .isActualTransactionActive());
+                return super.fetchPlanStatus(client, subscription);
+            }
+        };
+        when(subscriptionRepository.findById(SUBSCRIPTION_ID)).thenReturn(Optional.of(subscription()));
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(product()));
+        when(adapterRegistry.findById(PRODUCT_CODE)).thenReturn(Optional.of(probingAdapter));
+        when(credentialRepository.findAllBySubscriptionId(SUBSCRIPTION_ID)).thenReturn(List.of(credential()));
+        when(versionRepository.findActiveByCredentialId(CREDENTIAL_ID)).thenReturn(Optional.of(version()));
+        when(keyEncryptionProvider.decrypt(any(), eq(TENANT), eq(CREDENTIAL_ID)))
+                .thenReturn("sk-test-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(clientFactory.create(any(), any(), any())).thenReturn(stubClient());
+
+        service.refresh(TENANT, SUBSCRIPTION_ID);
+
+        // The blocking provider call must never sit inside a transaction (#728)…
+        assertThat(txActiveDuringFetch).isFalse();
+        // …and the collected rows are written in exactly one committed transaction.
+        assertThat(stored).isNotEmpty();
+        assertThat(transactions.begins).hasValue(1);
+        assertThat(transactions.commits).hasValue(1);
+        assertThat(transactions.rollbacks).hasValue(0);
+    }
+
+    @Test
+    void theScheduledWalkWritesThroughTheSameTransactionPathAsTheAdminTrigger() {
+        java.util.UUID seedTenant = java.util.UUID.fromString("00000000-0000-0000-0000-000000000001");
+        when(subscriptionRepository.findAllByTenantId(seedTenant))
+                .thenReturn(List.of(subscriptionForTenant(seedTenant)));
+        when(subscriptionRepository.findById(SUBSCRIPTION_ID))
+                .thenReturn(Optional.of(subscriptionForTenant(seedTenant)));
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(product()));
+        when(adapterRegistry.findById(PRODUCT_CODE)).thenReturn(Optional.of(adapter));
+        when(credentialRepository.findAllBySubscriptionId(SUBSCRIPTION_ID)).thenReturn(List.of(credential()));
+        when(versionRepository.findActiveByCredentialId(CREDENTIAL_ID)).thenReturn(Optional.of(version()));
+        when(keyEncryptionProvider.decrypt(any(), any(), eq(CREDENTIAL_ID)))
+                .thenReturn("sk-test-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(clientFactory.create(any(), any(), any())).thenReturn(stubClient());
+
+        service.refreshAllScheduled();
+
+        // Pre-#728 the self-invocation silently skipped the annotation; the walk
+        // now commits once, exactly like the controller path.
+        assertThat(stored).isNotEmpty();
+        assertThat(transactions.commits).hasValue(1);
+        assertThat(transactions.rollbacks).hasValue(0);
+    }
+
+    @Test
+    void aWriteFailureRollsBackTheWholeBatch() {
+        when(subscriptionRepository.findById(SUBSCRIPTION_ID)).thenReturn(Optional.of(subscription()));
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(product()));
+        when(adapterRegistry.findById(PRODUCT_CODE)).thenReturn(Optional.of(adapter));
+        when(credentialRepository.findAllBySubscriptionId(SUBSCRIPTION_ID)).thenReturn(List.of(credential()));
+        when(versionRepository.findActiveByCredentialId(CREDENTIAL_ID)).thenReturn(Optional.of(version()));
+        when(keyEncryptionProvider.decrypt(any(), eq(TENANT), eq(CREDENTIAL_ID)))
+                .thenReturn("sk-test-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(clientFactory.create(any(), any(), any())).thenReturn(stubClient());
+        when(snapshotRepository.insert(any())).thenThrow(new RuntimeException("db down"));
+
+        assertThatThrownBy(() -> service.refresh(TENANT, SUBSCRIPTION_ID)).isInstanceOf(RuntimeException.class);
+
+        assertThat(transactions.commits).hasValue(0);
+        assertThat(transactions.rollbacks).hasValue(1);
+    }
+
     @Test
     void otherTenantCannotSeeOrRefreshTheSubscription() {
         when(subscriptionRepository.findById(SUBSCRIPTION_ID)).thenReturn(Optional.of(subscription()));
@@ -225,6 +306,50 @@ class QuotaSnapshotServiceTest {
                 Instant.parse("2026-09-01T00:00:00Z"), null, 1000L, "TOKENS",
                 com.miqroera.miqrokey.domain.model.SubscriptionStatus.ACTIVE, null,
                 com.miqroera.miqrokey.domain.model.StatusSource.MANUAL_UNKNOWN, 0, Instant.now(), Instant.now());
+    }
+
+    /**
+     * The same subscription under an explicit tenant (scheduled walk uses the
+     * seed).
+     */
+    private UpstreamSubscription subscriptionForTenant(UUID tenant) {
+        return new UpstreamSubscription(SUBSCRIPTION_ID, tenant, PRODUCT_ID, "Sub", null, BillingMode.PAYG,
+                PlanScope.NONE, null, null, Instant.parse("2026-08-01T00:00:00Z"),
+                Instant.parse("2026-09-01T00:00:00Z"), null, 1000L, "TOKENS",
+                com.miqroera.miqrokey.domain.model.SubscriptionStatus.ACTIVE, null,
+                com.miqroera.miqrokey.domain.model.StatusSource.MANUAL_UNKNOWN, 0, Instant.now(), Instant.now());
+    }
+
+    /**
+     * Minimal in-memory PlatformTransactionManager that records lifecycle calls.
+     */
+    private static final class RecordingTransactionManager
+            extends
+                org.springframework.transaction.support.AbstractPlatformTransactionManager {
+        private static final Object TX = new Object();
+        final java.util.concurrent.atomic.AtomicInteger begins = new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.atomic.AtomicInteger commits = new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.atomic.AtomicInteger rollbacks = new java.util.concurrent.atomic.AtomicInteger();
+
+        @Override
+        protected Object doGetTransaction() {
+            return TX;
+        }
+
+        @Override
+        protected void doBegin(Object transaction, org.springframework.transaction.TransactionDefinition definition) {
+            begins.incrementAndGet();
+        }
+
+        @Override
+        protected void doCommit(org.springframework.transaction.support.DefaultTransactionStatus status) {
+            commits.incrementAndGet();
+        }
+
+        @Override
+        protected void doRollback(org.springframework.transaction.support.DefaultTransactionStatus status) {
+            rollbacks.incrementAndGet();
+        }
     }
 
     private ProviderProduct product() {

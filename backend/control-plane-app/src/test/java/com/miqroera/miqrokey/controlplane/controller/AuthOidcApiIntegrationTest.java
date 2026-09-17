@@ -199,6 +199,31 @@ class AuthOidcApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("#730: a locked linked account gets no session and a clear redirect code")
+    void lockedLinkedAccountGetsNoSession() throws Exception {
+        // Provision + link the account through the real flow first.
+        MvcResult started = mockMvc.perform(get("/api/v1/auth/oauth/start")).andExpect(status().is3xxRedirection())
+                .andReturn();
+        String state = extractCookie(started, "MIQROKEY_OAUTH_STATE").getValue();
+        mockMvc.perform(get("/api/v1/auth/oauth/callback").param("code", "c1").param("state", state)
+                .cookie(new Cookie("MIQROKEY_OAUTH_STATE", state))).andExpect(status().is3xxRedirection());
+
+        // Admin locks the account indefinitely (mirrors the manual-lock semantics).
+        jdbc.update("UPDATE users SET status = 'LOCKED', locked_until = NULL WHERE username = 'forge_user'",
+                new MapSqlParameterSource());
+
+        MvcResult again = mockMvc.perform(get("/api/v1/auth/oauth/start")).andExpect(status().is3xxRedirection())
+                .andReturn();
+        String state2 = extractCookie(again, "MIQROKEY_OAUTH_STATE").getValue();
+        mockMvc.perform(get("/api/v1/auth/oauth/callback")
+                .param("code", "c2").param("state", state2).cookie(new Cookie("MIQROKEY_OAUTH_STATE", state2)))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(
+                        header().string("Location", org.hamcrest.Matchers.endsWith("oauth_error=ACCOUNT_UNAVAILABLE")))
+                .andExpect(cookie().doesNotExist("MIQROKEY_SESSION"));
+    }
+
+    @Test
     @DisplayName("second login reuses the linked account instead of provisioning another")
     void secondLoginReusesLink() throws Exception {
         MvcResult first = mockMvc.perform(get("/api/v1/auth/oauth/start")).andExpect(status().is3xxRedirection())
