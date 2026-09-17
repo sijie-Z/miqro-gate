@@ -3490,6 +3490,28 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - 阈值口径（窗口内丢弃条数）**未由 owner 确认**；`WRITE_THROUGH` 模式不产生该告警（饱和表现为发布线程停滞而非丢弃）；「解析失败」仍未与「上游 200 无 usage 字段」区分（沿用 `USAGE_MISSING_RATE`）；F07 其余类型（Plan 同步、磁盘）仍 SCAFFOLD。
 - 前端 `lint` 脚本自带 `--fix`，在本机 CRLF 检出下会改写约 145 个非本批文件的换行（其中约 23 个存在真实规范化差异，含 `types/generated.ts` 全文重排）；已整树备份到仓库外后 `git checkout -- .` 还原，只保留本批两文件的规范化改动。仓库既有属性，非本批引入。
 
+## 2026-09-17 — #708 官方价格 24h 自动同步（source=OFFICIAL 自动化，F08）
+
+**背景**：定价页已支持人工录入（`MANUAL`）与手动一键同步（#585，`POST /api/v1/admin/prices/sync`），但 `source=OFFICIAL` 一直依赖人工触发——供应商调价后目录不会自动跟上。feature-backlog F08 原状态 `SCAFFOLD`，验收口径＝24h 定时拉取 → 增量写入 `source=OFFICIAL`（与 `MANUAL` 并存，同模型同 token 类型冲突时**保留 MANUAL 并提示**）；失败留日志、不静默。
+
+**交付**（分支 feat/price-auto-sync-708，隔离工作树 `D:/tmp/miqro-price-auto-sync`，base `origin/develop@81f91997`）：
+- `PriceSyncScheduler`（control-plane，新增）：`@Scheduled(fixedDelayString=${miqrokey.price-sync.auto.cycle-ms:86400000}, initialDelayString=${miqrokey.price-sync.auto.initial-delay-ms:60000})` 复用 #585 同步管道——默认 24h；fixedDelay 即上一轮结束后计时，慢价源不叠加；`@ConditionalOnProperty(prefix=miqrokey.price-sync.auto, name=enabled, havingValue=true)` **默认关**（保守默认，与 `ModelCatalogReprobeScheduler` 同形）。以种子租户 + 空 actor 记录审计（`requestId=scheduled-price-sync`，写入快照 `createdBy=null`）。
+- `AdminPriceSyncService`：抽出 `run(..., ConflictPolicy, trigger)` 单管道，两条触发路径共用——`sync()`＝人工端点（`OVERWRITE`，保持 api-contract §5.9 既有「覆盖同键人工价」契约与既有断言 `written=6`）；`syncPreservingManual()`＝定时路径（`KEEP_MANUAL`：同键最新为 `MANUAL` 且价格不同则**不写入**、计入 `conflicts`）。报告新增 `trigger` 与 `conflicts:[{productCode, modelId, tokenType, manualPrice, officialPrice}]`，审计摘要新增 `trigger`/`conflicts` 计数（「提示」的落点：报告 + 审计 + 日志 + 指标）。
+- 可观测（失败不静默）：`PRICE_SYNC_FAILED` 审计（既有）+ 调度器 `ERROR` 日志 + `miqrokey_control_price_sync_auto_total{result=success|failure}` Micrometer 计数（`monitoring` profile 经 `/actuator/prometheus` 暴露）；本轮异常被吞掉，保证下一轮照常触发。
+- 配置：`application.yml` 增 `miqrokey.price-sync.auto.{enabled,cycle-ms,initial-delay-ms}`（`${ENV:default}` 形式）；`configuration-reference.md` 补 `MIQROKEY_PRICE_SYNC_AUTO_ENABLED|CYCLE_MS|INITIAL_DELAY_MS` 三行（含指标名）；`api-contract.md` §5.9 补「自动同步（#708）」段并更新报告形状；`feature-backlog.md` F08 → **DONE（2026-09-17，#708）**。
+
+**测试**：
+- `AdminPriceSyncServiceTest`（新增，单测 4 例）：① 定时路径保留 `MANUAL` 并报冲突（零 insert + 审计摘要含 `"conflicts":"1"`）；② 人工端点保留覆盖语义（`written=1`、`conflicts` 空）；③ unchanged 不重复写（零 insert）；④ 源失败 → `PRICE_SYNC_FAILED`（`ApiException` + 审计），零写入。
+- `PriceSyncSchedulerTest`（新增，单测 2 例）：成功轮次 INFO + `result=success` 计数；失败轮次 ERROR 日志 + `result=failure` 计数 + 不外抛。
+- `PriceSyncApiIntegrationTest`（扩展，Testcontainers/PostgreSQL）：预置 `MANUAL` 快照后跑定时管道 → `written=5` / `conflicts=1`，人工价仍为该键生效价且该键仅 1 行，其余报价仍落 `OFFICIAL`。
+
+**验证**：
+- `bash miqro-local/mvnw21.sh -f backend/pom.xml verify`（无 integration profile：全模块单测 + `spotless:check`）→ **BUILD SUCCESS**；
+- `bash miqro-local/mvnw21.sh -f backend/pom.xml -pl control-plane-app -am test -Pintegration -Dtest=PriceSyncApiIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` → **Tests run: 5, Failures: 0, Errors: 0**；
+- 新增单测 6/6 通过（`AdminPriceSyncServiceTest` 4 + `PriceSyncSchedulerTest` 2）；
+- 本地提交，**未 push、未开 PR**（由主会话统一协调）。
+
+**边界**：仅改 control-plane 同步管道 + 其配置/契约/backlog/本条目；零迁移（`price_snapshot.source` 值域 `MANUAL/OFFICIAL/ESTIMATED` 与查询索引均已存在）、不改数据库/数据面/前端。定价页 UI 未加冲突提示文案（提示落在报告/审计/日志/指标四处）；如需页面显性提示另开前端项。
 
 ## 2026-09-17 下午 — 模型调用链路时间线 #705（后端）+ #707（前端）+ 独立审查修复
 

@@ -40,6 +40,20 @@ import java.util.UUID;
  * so re-syncing stays cheap. Source quotes are USD per token and are converted
  * to CNY per 1M tokens with the configured rate.
  * </p>
+ *
+ * <p>
+ * Conflict policy against human input (issue #708). Two trigger paths share
+ * this pipeline and differ only in what happens when a differing quote meets an
+ * existing {@code MANUAL} snapshot for the same (product, model, token type):
+ * </p>
+ * <ul>
+ * <li>{@link #sync} — admin-triggered. The official quote replaces the manual
+ * snapshot, as documented in api-contract §5.9: an explicit click is
+ * authoritative.</li>
+ * <li>{@link #syncPreservingManual} — scheduled (#708). The manual snapshot is
+ * <em>kept</em> and the quote is reported as a conflict, so an unattended job
+ * can never silently overwrite a price a human curated.</li>
+ * </ul>
  */
 @Service
 public class AdminPriceSyncService {
@@ -47,6 +61,18 @@ public class AdminPriceSyncService {
     private static final BigDecimal TOKENS_PER_UNIT = new BigDecimal("1000000");
     private static final String CURRENCY_CNY = "CNY";
     static final String SOURCE_LABEL = "OFFICIAL";
+    static final String MANUAL_LABEL = "MANUAL";
+
+    /**
+     * What a differing quote does to an existing {@code MANUAL} snapshot (see the
+     * class javadoc).
+     */
+    enum ConflictPolicy {
+        /** Admin-triggered: the official quote wins. */
+        OVERWRITE,
+        /** Scheduled (#708): the manual entry wins, the quote is reported instead. */
+        KEEP_MANUAL
+    }
 
     private final PriceSourceClient priceSourceClient;
     private final PriceSyncProperties properties;
@@ -68,8 +94,28 @@ public class AdminPriceSyncService {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
-    /** Runs one sync and returns the report (written/unchanged/unmatched). */
+    /**
+     * Runs one admin-triggered sync and returns the report
+     * (written/unchanged/conflicts/unmatched). A differing quote replaces an
+     * existing MANUAL snapshot (api-contract §5.9).
+     */
     public Map<String, Object> sync(UUID tenantId, UUID adminId, AuditContext context) {
+        return run(tenantId, adminId, context, ConflictPolicy.OVERWRITE, "manual");
+    }
+
+    /**
+     * Runs one scheduled sync (issue #708): identical to {@link #sync} except that
+     * a differing quote never replaces a MANUAL snapshot — it is reported under
+     * {@code conflicts} and the human entry stays the effective price. The run is
+     * attributed to no human actor ({@code created_by} stays null on the written
+     * snapshots).
+     */
+    public Map<String, Object> syncPreservingManual(UUID tenantId, AuditContext context) {
+        return run(tenantId, null, context, ConflictPolicy.KEEP_MANUAL, "scheduled");
+    }
+
+    private Map<String, Object> run(UUID tenantId, UUID adminId, AuditContext context, ConflictPolicy policy,
+            String trigger) {
         List<SourceModelPrice> quotes = fetchQuotes(tenantId, adminId, context);
         Instant now = Instant.now();
         Map<String, PriceSnapshot> latest = new LinkedHashMap<>();
@@ -79,6 +125,7 @@ public class AdminPriceSyncService {
 
         List<PriceSnapshot> toWrite = new ArrayList<>();
         List<Map<String, Object>> unmatched = new ArrayList<>();
+        List<Map<String, Object>> conflicts = new ArrayList<>();
         List<String> skippedProducts = new ArrayList<>();
         int unchanged = 0;
         int syncedProducts = 0;
@@ -109,6 +156,15 @@ public class AdminPriceSyncService {
                         unchanged++;
                         continue;
                     }
+                    if (existing != null && policy == ConflictPolicy.KEEP_MANUAL
+                            && MANUAL_LABEL.equals(existing.source())) {
+                        // Never let the unattended job overwrite a human price (#708):
+                        // keep the manual snapshot and surface the conflict instead.
+                        conflicts.add(Map.of("productCode", product.productCode(), "modelId", modelId, "tokenType",
+                                entry.getKey().name(), "manualPrice", existing.unitPrice(), "officialPrice",
+                                cnyPerMillion));
+                        continue;
+                    }
                     toWrite.add(new PriceSnapshot(UUID.randomUUID(), product.id(), modelId, entry.getKey(),
                             CURRENCY_CNY, cnyPerMillion, now, SOURCE_LABEL, adminId, now));
                 }
@@ -117,10 +173,10 @@ public class AdminPriceSyncService {
 
         transactionTemplate.executeWithoutResult(status -> toWrite.forEach(priceRepository::insert));
         auditService.record(tenantId, adminId, "PRICE_SYNC", "PRICE_SNAPSHOT", null,
-                AuditSummaries.summary(context, "written", toWrite.size(), "unchanged", unchanged, "unmatched",
-                        unmatched.size(), "syncedProducts", syncedProducts),
+                AuditSummaries.summary(context, "trigger", trigger, "written", toWrite.size(), "unchanged", unchanged,
+                        "conflicts", conflicts.size(), "unmatched", unmatched.size(), "syncedProducts", syncedProducts),
                 context.requestId());
-        return report(rate, toWrite.size(), unchanged, unmatched, skippedProducts);
+        return report(rate, trigger, toWrite.size(), unchanged, conflicts, unmatched, skippedProducts);
     }
 
     private List<SourceModelPrice> fetchQuotes(UUID tenantId, UUID adminId, AuditContext context) {
@@ -160,13 +216,16 @@ public class AdminPriceSyncService {
         return productId + "|" + modelId.toLowerCase(Locale.ROOT) + "|" + type;
     }
 
-    private static Map<String, Object> report(BigDecimal rate, int written, int unchanged,
-            List<Map<String, Object>> unmatched, List<String> skippedProducts) {
+    private static Map<String, Object> report(BigDecimal rate, String trigger, int written, int unchanged,
+            List<Map<String, Object>> conflicts, List<Map<String, Object>> unmatched, List<String> skippedProducts) {
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("source", "openrouter");
+        report.put("trigger", trigger);
         report.put("usdCnyRate", rate);
         report.put("written", written);
         report.put("unchanged", unchanged);
+        // Quotes skipped because a MANUAL snapshot owns the key (scheduled runs only).
+        report.put("conflicts", conflicts);
         report.put("unmatched", unmatched);
         report.put("skippedProducts", skippedProducts);
         report.put("syncedAt", Instant.now().toString());
