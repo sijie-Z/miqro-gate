@@ -144,6 +144,9 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_PRICE_SYNC_CONNECT_TIMEOUT` | `10s` | 价格源连接超时（#585） |
 | `MIQROKEY_PRICE_SYNC_REQUEST_TIMEOUT` | `30s` | 价格源单次请求整体截止（#585）；源文件约 700KB，正常 <3s |
 | `MIQROKEY_PRICE_SYNC_MAX_BYTES` | `10485760` | 价格源响应体上限（#585）；超限按失败处理（零写入） |
+| `MIQROKEY_PRICE_SYNC_AUTO_ENABLED` | `false` | 官方价格 24h 自动同步开关（#708，F08，`miqrokey.price-sync.auto.enabled`）：true 时 `PriceSyncScheduler` 按周期拉取同一价源并按 24h 增量写入 `source=OFFICIAL` 快照；默认关（无人值守改价影响成本口径，先由运维显式开启）。可观测：`monitoring` profile 下 `miqrokey_control_price_sync_auto_total{result=success|failure}` 计数 + 失败 `PRICE_SYNC_FAILED` 审计 + ERROR 日志 |
+| `MIQROKEY_PRICE_SYNC_AUTO_CYCLE_MS` | `86400000` | 自动同步周期（#708，`miqrokey.price-sync.auto.cycle-ms`，fixedDelay——上一轮结束后计时，慢价源不叠加）；默认 24 小时 |
+| `MIQROKEY_PRICE_SYNC_AUTO_INITIAL_DELAY_MS` | `60000` | 自动同步首轮延迟（#708，`miqrokey.price-sync.auto.initial-delay-ms`）：避开启动期的迁移/种子竞争 |
 | `MIQROKEY_QUOTA_ENFORCEMENT_INTERVAL_MS` | `60000` | 配额软着陆判定周期（#684，`miqrokey.quota.enforcement-interval-ms`，控制面 `@Scheduled` 固定延迟）：重算 ACTIVE REJECT 规则的超限判定并整体替换 `quota_enforcement`，判定集变化才发布路由刷新；周期即"额外放行量"的上界（ADR-0020 D5） |
 | `MIQROKEY_QUOTA_ENFORCEMENT_INITIAL_DELAY_MS` | `45000` | 软着陆评估器首轮延迟（#684，`miqrokey.quota.enforcement-initial-delay-ms`）：避开启动期的迁移/种子竞争 |
 | `MIQROKEY_ALERTS_EVALUATION_INTERVAL_MS` | `300000` | 告警规则评估固定延迟（G4.5，`@Scheduled`）；也控制投递重试扫描节奏 |
