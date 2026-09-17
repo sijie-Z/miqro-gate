@@ -73,6 +73,13 @@ describe('NextProjectsView', () => {
     return mount(NextProjectsView, { global: { plugins: [createPinia()] } });
   }
 
+  /** Hint under a UiInput — the testid falls through to the <input> itself. */
+  function hintOf(wrapper: ReturnType<typeof mountView>, testid: string): string {
+    const field = wrapper.find(`[data-testid="${testid}"]`).element.closest('.ui-field');
+    expect(field, `${testid} should sit inside a field`).toBeTruthy();
+    return field!.querySelector('.ui-field__hint')?.textContent?.trim() ?? '';
+  }
+
   it('renders projects with tags and Chinese statuses', async () => {
     const wrapper = mountView();
     await flushPromises();
@@ -191,6 +198,21 @@ describe('NextProjectsView', () => {
     expect(wrapper.find('[data-testid="project-create-tag-hint"]').text()).toContain(
       '留空将自动从项目代码派生',
     );
+  });
+
+  it('states the project code and name rules on the create form (#657)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="project-create-open"]').trigger('click');
+    await flushPromises();
+
+    // Rules the backend enforces (AdminOrgService#createProject, projects.code
+    // / projects.name widths) must be readable before submitting, not only in
+    // the 409 body.
+    expect(hintOf(wrapper, 'project-create-code')).toContain('同一租户内唯一');
+    expect(hintOf(wrapper, 'project-create-code')).toContain('最长 64 个字符');
+    expect(hintOf(wrapper, 'project-create-name')).toContain('最长 200 个字符');
   });
 
   it('edits a project name and routing tag (#617)', async () => {

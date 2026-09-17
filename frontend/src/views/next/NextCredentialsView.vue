@@ -540,9 +540,26 @@ onMounted(load);
           productName((row as CredentialView).subscriptionId)
         }}</template>
         <template #grants="{ row }">
-          <span class="ui-num" data-testid="credential-grant-count">{{
-            grantCountOf((row as CredentialView).id)
-          }}</span>
+          <!-- #657: a referenced credential links to its grants (pre-filtered);
+               a 0 stays plain ink — there is nothing to look at. -->
+          <router-link
+            v-if="grantCountOf((row as CredentialView).id) > 0"
+            class="ui-link-action next-credentials__count-link"
+            :to="{
+              name: 'grants',
+              query: { credentialId: (row as CredentialView).id },
+            }"
+            data-testid="credential-grant-count"
+          >
+            {{ grantCountOf((row as CredentialView).id) }}
+          </router-link>
+          <span
+            v-else
+            class="ui-num next-credentials__count-zero"
+            data-testid="credential-grant-count"
+          >
+            0
+          </span>
         </template>
         <template #status="{ row }">
           <UiStatusBadge
@@ -938,6 +955,18 @@ onMounted(load);
 .next-credentials__time {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
+}
+
+/* #657: an unreferenced credential is a dead end — keep the 0 quiet so the
+   eye lands on the linked counts. */
+.next-credentials__count-zero {
+  color: var(--ui-foreground-faint);
+}
+
+/* ... and the linked count sits flush with the other right-aligned numeric
+   cells instead of being inset by .ui-link-action's 7px action padding. */
+.next-credentials__count-link {
+  padding: 0;
 }
 
 .next-credentials__error {

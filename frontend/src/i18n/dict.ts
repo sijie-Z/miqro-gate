@@ -1553,6 +1553,11 @@ export const DICT: Record<string, string> = {
     'Create these when an external system (platform) integrates; machine identities are managed separately from human users.',
   '留空将自动从项目代码派生；已被密钥绑定引用的标签不可修改（1–64 位字母、数字、- 或 _）。':
     'Leave empty to derive from the project code; a tag referenced by key bindings is immutable (1–64 letters, digits, - or _).',
+  '必填，同一租户内唯一，最长 64 个字符。': 'Required, unique within the tenant, up to 64 characters.',
+  '必填，最长 200 个字符。': 'Required, up to 200 characters.',
+  '查看全部': 'View all',
+  '查看全部授权': 'View all grants',
+  '该凭证还没有被任何授权引用': 'No grant references this credential yet',
   // Page guides (#656) — per-page 「使用指引」 cards.
   '使用指引': 'Guide',
   '收起': 'Collapse',
@@ -1696,6 +1701,9 @@ export const PATTERNS: Array<[RegExp, string]> = [
   [/^共\ (.+?)\ 个团队$/, '$1 teams'],
   [/^共\ (.+?)\ 个项目$/, '$1 projects'],
   [/^共\ (.+?)\ 条授权$/, '$1 grants'],
+  // #657：授权列表的凭证过滤摘要；总数与「共 N 条」是两个相邻文本节点，各译各的。
+  [/^（全部\ (.+?)\ 条）$/, ' ($1 total)'],
+  [/^仅看凭证「(.+?)」$/, 'Credential "$1" only'],
   [/^共\ (.+?)\ 个产品实例$/, '$1 product instances'],
   [/^共\ (.+?)\ 个订阅$/, '$1 subscriptions'],
   [/^共\ (.+?)\ 条凭证$/, '$1 credentials'],

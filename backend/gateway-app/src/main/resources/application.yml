@@ -63,6 +63,12 @@ miqrokey:
       # are non-public (loopback/link-local/private) or plain http. Empty =
       # https-only, public-address-only targets.
       allowed-cidrs: ${MIQROKEY_UPSTREAM_ALLOWED_CIDRS:}
+    # #553 请求前置预检：按体量（UTF-8 码点）拒绝超大 context，超限不连接上游。
+    # 阈值是最保守的上界（整个序列化 body 都计入），高于 max-proxy-buffer 时
+    # 由缓冲上限先拒绝（payload_too_large）。默认宽松，是安全阀而非配额。
+    context-limit:
+      enabled: ${MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED:true}
+      threshold-chars: ${MIQROKEY_GATEWAY_CONTEXT_LIMIT_THRESHOLD_CHARS:200000}
 
   cache:
     # Response cache (L1 Caffeine + L2 PostgreSQL): DISABLED by default.

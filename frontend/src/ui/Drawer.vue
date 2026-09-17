@@ -145,7 +145,8 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: var(--ui-space-4);
-  padding: var(--ui-space-5);
+  /* Vben/antd drawer header metrics: 16px block, 24px inline (issue #579). */
+  padding: var(--ui-space-4) var(--ui-space-6);
   border-bottom: 1px solid var(--ui-border);
   flex-shrink: 0;
 }
