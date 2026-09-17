@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
+import com.miqroera.miqrokey.controlplane.dto.LoginRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
@@ -120,6 +121,39 @@ class BillingApiIntegrationTest {
         mockMvc.perform(get("/api/v1/billing/summary")).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/billing/records")).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/billing/quota")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("#724: a plain USER session is forbidden on every billing endpoint")
+    void userSessionIsForbiddenOnBilling() throws Exception {
+        // Provision a USER with a fully usable session (temp password changed).
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("username", "billing_user", "displayName", "Billing User", "role", "USER"))))
+                .andExpect(status().isOk()).andReturn();
+        String temp = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class)
+                .get("temporaryPassword").toString();
+        MvcResult login = mockMvc
+                .perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("billing_user", temp))))
+                .andExpect(status().isOk()).andReturn();
+        Cookie userSession = cookie(login, "MIQROKEY_SESSION");
+        Cookie userCsrf = cookie(login, "MIQROKEY_CSRF");
+        mockMvc.perform(post("/api/v1/auth/password").contentType(MediaType.APPLICATION_JSON)
+                .cookie(userSession, userCsrf).header("X-CSRF-Token", userCsrf.getValue())
+                .content(objectMapper.writeValueAsString(new PasswordChangeRequest(temp, "UserSecurePass1!"))))
+                .andExpect(status().isOk());
+
+        // The channel is admin-or-credential: a USER session is forbidden, never
+        // silently scoped to its own tenant's data.
+        mockMvc.perform(get("/api/v1/billing/records").cookie(userSession)).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/billing/summary").cookie(userSession)).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/billing/quota").cookie(userSession)).andExpect(status().isForbidden());
+
+        // The admin session keeps working (no over-blocking).
+        mockMvc.perform(get("/api/v1/billing/summary").cookie(sessionCookie)).andExpect(status().isOk());
     }
 
     @Test
