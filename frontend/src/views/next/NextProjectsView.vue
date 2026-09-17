@@ -346,14 +346,23 @@ onMounted(load);
       </div>
       <div class="ui-panel-body">
         <div class="next-projects__form">
+          <!-- #657: rules live next to the field instead of only in a 409 body
+               (AdminOrgService#createProject + projects.code/name width). -->
           <UiInput
             v-model="createCode"
             label="项目代码"
             required
             placeholder="例如 CORE"
+            hint="必填，同一租户内唯一，最长 64 个字符。"
             data-testid="project-create-code"
           />
-          <UiInput v-model="createName" label="名称" required data-testid="project-create-name" />
+          <UiInput
+            v-model="createName"
+            label="名称"
+            required
+            hint="必填，最长 200 个字符。"
+            data-testid="project-create-name"
+          />
           <UiInput
             v-model="createTag"
             label="路由标签"

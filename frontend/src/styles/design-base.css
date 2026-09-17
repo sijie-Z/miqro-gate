@@ -515,7 +515,7 @@ a:focus-visible {
   filter: invert(80%);
 }
 
-/* Wide content: page bands fill the viewport instead of the 1440px cap
+/* Wide content: page bands fill the viewport instead of the 1200px cap
    ('fixed' keeps the existing --ui-content-max token). */
 [data-compact='wide'] {
   --ui-content-max: 100%;

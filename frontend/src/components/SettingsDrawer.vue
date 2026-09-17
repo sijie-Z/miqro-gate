@@ -3,7 +3,7 @@
  * SettingsDrawer — console preferences panel (界面设置), modelled on the Vben
  * Admin v2 preference drawer: a 330px right slide-over of hairline sections.
  * Sections: 主题色 swatches, 菜单主题 / 内容区域宽度 segmented controls,
- * 界面显示 switch rows and 过渡动画. Every control writes through
+ * 界面显示 / 折叠菜单 switch rows and 过渡动画. Every control writes through
  * `setPreference`, which persists and re-applies the document side effects.
  */
 import type { ContentCompact, MenuTheme, Preferences } from '@/preferences';
@@ -120,6 +120,18 @@ function isActiveColor(color: string): boolean {
           :model-value="preferences[toggle.key]"
           :data-testid="`settings-toggle-${toggle.key}`"
           @update:model-value="setPreference(toggle.key, $event)"
+        />
+      </div>
+    </section>
+
+    <section class="settings-drawer__section">
+      <h3 class="settings-drawer__title">折叠菜单</h3>
+      <div class="settings-drawer__row">
+        <span class="settings-drawer__row-label">折叠侧边栏</span>
+        <UiSwitch
+          :model-value="preferences.collapsed"
+          data-testid="settings-toggle-collapsed"
+          @update:model-value="setPreference('collapsed', $event)"
         />
       </div>
     </section>
