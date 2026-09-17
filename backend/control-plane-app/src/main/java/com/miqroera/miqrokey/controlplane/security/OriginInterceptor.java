@@ -50,7 +50,7 @@ public class OriginInterceptor implements HandlerInterceptor {
         if (!STATE_CHANGING_METHODS.contains(method)) {
             return true;
         }
-        String path = request.getRequestURI();
+        String path = RequestPaths.lookupPath(request);
         if (!path.startsWith("/api/")) {
             return true;
         }

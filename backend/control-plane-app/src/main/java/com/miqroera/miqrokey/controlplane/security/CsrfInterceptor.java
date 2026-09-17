@@ -41,7 +41,7 @@ public class CsrfInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
             throws Exception {
-        String path = request.getRequestURI();
+        String path = RequestPaths.lookupPath(request);
         String method = request.getMethod();
 
         // Only check state-changing methods on API paths
