@@ -8,7 +8,7 @@ package com.miqroera.miqrokey.domain.usage;
  * tokens we recorded disagree with the provider's bill. {@code COST}
  * corrections move money without moving tokens (price difference, FX, discount,
  * tiered pricing, minimum charge). The {@code COST} vocabulary exists in the
- * V62 table so that adding it later does not require a schema change, but it is
+ * V63 table so that adding it later does not require a schema change, but it is
  * deliberately not open for writing yet.
  * </p>
  *

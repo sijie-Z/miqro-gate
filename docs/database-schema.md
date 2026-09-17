@@ -228,7 +228,7 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
 
 部分唯一索引 `(tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL`；`virtual_key_id`、`project_id`、`cache_level`、`occurred_at` 索引。正文（prompt、代码、工具、回答）永不写入。
 
-### `usage_adjustments` (V62，#709 / F20)
+### `usage_adjustments` (V63，#709 / F20)
 
 **追加型用量调整台账**——对账确认差异后修正用量，**绝不覆盖 `usage_event` 原始事实**（审计可信的前提）。它把"用量"拆成四层，这是本表最要紧的语义约定：
 
