@@ -3567,6 +3567,19 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **备注**：交叉印证——并行会话在空闲机器上同样连跑 5 次全绿，与"负载相关调度 flake"的结构判断一致。
 
+## 会话交接点 2026-09-17（安全审计第二批：中危五项 + 文档两项，已合并并部署）
+
+- **背景**：承接同日上午审计（P0 #723/#724 已上线并复验）。本批为审计登记的中危项与文档一致性批，全部当日闭环。
+- **修复并上线（6 PR）**：
+  - **#728（PR #743）**配额刷新两阶段事务——`refresh()` 的阻塞上游调用移出事务（原一连接被占最多 N×20s），`refreshAllScheduled` self-invocation 静默丢事务一并修复（改 `TransactionTemplate`，双入口同语义）；`AdminCredentialService.validate` 摘除 readOnly 事务（10s 探测不再钉连接）。单测 10/10（含无事务断言/定时同路径/失败整体回滚三回归）+ IT 3/3。
+  - **#727（PR #746）**MCP SSE 聚合以上限（`max-proxy-buffer`，超限发 `mcp_sse_response_too_large` error 事件而非截断）+ 熔断桶键收敛为「工具名｜固定 13 信封方法｜envelope」（原客户端可控 `method` 字符串可无限增长注册表）；单测 4/4 + 契约 44/44。
+  - **#729（PR #744）**V62 复合索引 `usage_event(virtual_key_id, occurred_at DESC)`——密钥 last_used 聚合改走 index-only（原全表增长线性拖慢管理端）。
+  - **#730（PR #745）**OIDC 会话创建前校验 DISABLED/LOCKED（与本地登录同语义，拒发会话）+ 并发首登返回 link 归属者而非孤儿；IT 5/5。
+  - **#736（PR #747）**孤儿批：三个前端死绑定摘除（listProviders/getVirtualKey/getSkill，零引用核实）；ADR-0009 头名更正 `X-MiQroKey-Cache-Hit`→`X-MiQroKey-Cache` + 契约补记；schema 标注修正（model_access 未消费；budget **已消费**——审计代理"零引用"系误报，model_budget 才是孤儿）；Settings 页「门户启动时间」→「页面载入时间」。**产品名 MiQroGate 系审计误报**（2026-08-27 品牌已改名，晚于 ADR-0007），已在 issue 评论区更正。
+  - **#733（PR #748）**配置参考与实现对账 9 项：冲突默认值修正（webhook 6→3 次、签名头去 `-256`、导出 93 天/24h）、预留键如实标注（含 §2 汇总 12 键）、补真实旋钮（`quota.refresh-interval-ms`/`model-catalog.reprobe.*`）、§6 持久化默认值矛盾修正、§10 启动校验改写为现实（仅 Cookie Secure + originAllowlist 两项）。
+- **部署与复验**：develop 终态 **1f9e8e7f** 三镜像部署（20:43）；Flyway **V62** 应用成功、`idx_usage_event_virtual_key_occurred` 实测在建、portal `index-DbxL6qtj.js`；复验 7/7（#723/#724 安全回归 + #728 配额刷新实测 200 且快照落库）+ 完整安全套件 15/15 零回归。
+- **待拍板（未动）**：#734（Idempotency-Key/If-Match 契约 vs 实现，倾向先标注预留）、#735（适配器 VERIFIED 门控，需产品口径）。
+- **审计误报两则（已更正）**：① Settings 产品名（品牌已改名）；② `budget` 表零引用（实际预算管理与 BUDGET_THRESHOLD 水位均在消费）——教训：跨时间点的"事实"必须核对最新状态（ADR 可能被后续决策覆盖）。
 ## 2026-09-17 用量调整台账（#709 / F20）——追加型修正，不覆盖原始事实
 
 **范围**：只落 schema + 追加/查询接口。V63 `usage_adjustments`（token 增减可负 + 预留 COST 金额维度 + 原因 + 引用原始行 + 反向行纠错 + 幂等键）；`POST/GET /api/v1/admin/usage-adjustments`（仅 SYSTEM_ADMIN）。明细净额列、导出/审计标记、对账"含调整"维度为后续增量（F23 依赖）。

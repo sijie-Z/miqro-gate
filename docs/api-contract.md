@@ -9,8 +9,8 @@
 - JSON 字段使用 `camelCase`，数据库字段使用 `snake_case`，时间为 UTC RFC 3339。
 - 资源 ID 使用不可枚举的 UUIDv7；金额以最小货币单位或 `decimal string + currency` 表示，不使用浮点数。
 - 列表默认按 `createdAt DESC, id DESC`，使用不透明 cursor，禁止 offset 深分页。
-- 写请求支持 `Idempotency-Key`；重复键和不同请求体返回 `409 IDEMPOTENCY_CONFLICT`。
-- 可更新资源返回 `version`，更新时提交 `If-Match`；版本冲突返回 `412 VERSION_CONFLICT`。
+- 写请求支持 `Idempotency-Key`；重复键和不同请求体返回 `409 IDEMPOTENCY_CONFLICT`。（**预留：当前版本未实现**，#734——重复提交目前会重复创建；幂等语义的实现/移除随对应功能变更另行立项。）
+- 可更新资源返回 `version`，更新时提交 `If-Match`；版本冲突返回 `412 VERSION_CONFLICT`。（**#734 更正为实现现状**：`version` 为**请求体字段**、随写请求提交；并发冲突由服务端乐观锁检出并映射为 `409` + 端点级错误码（如 `SERVICE_STATE_CONFLICT`「并发状态变更，请刷新后重试」）。`If-Match` 请求头与 `412 VERSION_CONFLICT` 为**预留，当前版本未实现**。）
 - 管理写接口校验 `Origin` 和 CSRF token。推理入口不使用浏览器 Cookie，不做 CSRF。
 - `/api/v1/**` 不接受供应商 API Key 或 Virtual Key 作为门户身份。
 
