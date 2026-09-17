@@ -15,13 +15,16 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeoutException;
 
 /**
  * {@code GET /v1/context-registry} (CAA Spec v1.1 §8): the repo → project
@@ -31,44 +34,66 @@ import java.util.UUID;
  * <p>
  * Scope is deliberately tight: only mappings of projects the presented virtual
  * key holds an ACTIVE binding for are returned, so the agent can only ever
- * claim projects this key may use. Registry reads are infrequent (agent sync,
- * not the request hot path), hence the direct database read; without
- * persistence enabled the registry is empty.
+ * claim projects this key may use. The registry read is JDBC, so it runs on the
+ * shared blocking-work scheduler with a bounded timeout (#726) — never on the
+ * Reactor event loop; without persistence enabled the registry is empty.
  * </p>
  */
 @RestController
 public class ContextRegistryController {
 
+    /** Upper bound on the blocking registry read (#726). */
+    private static final Duration REGISTRY_TIMEOUT = Duration.ofSeconds(10);
+
     private final VirtualKeyResolver keyResolver;
     private final ObjectProvider<NamedParameterJdbcTemplate> jdbcProvider;
     private final ObjectMapper objectMapper;
+    private final Scheduler jdbcScheduler;
 
     public ContextRegistryController(VirtualKeyResolver keyResolver,
-            ObjectProvider<NamedParameterJdbcTemplate> jdbcProvider, ObjectMapper objectMapper) {
+            ObjectProvider<NamedParameterJdbcTemplate> jdbcProvider, ObjectMapper objectMapper,
+            Scheduler credentialDecryptScheduler) {
         this.keyResolver = keyResolver;
         this.jdbcProvider = jdbcProvider;
         this.objectMapper = objectMapper;
+        this.jdbcScheduler = credentialDecryptScheduler;
     }
 
     @GetMapping("/v1/context-registry")
     public Mono<Void> registry(ServerWebExchange exchange) {
+        VirtualKeyResolver.Identity identity;
         try {
             // Identity-only (#641): registry reads must not require a resolved
             // request context — for a multi-bound key that would be circular
             // (the agent needs the registry to produce the context).
-            VirtualKeyResolver.Identity identity = keyResolver.resolveIdentity(exchange.getRequest());
-            String body = buildBody(identity);
-            exchange.getResponse().setStatusCode(HttpStatus.OK);
-            exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
-            return exchange.getResponse().writeWith(
-                    Mono.just(exchange.getResponse().bufferFactory().wrap(body.getBytes(StandardCharsets.UTF_8))));
+            identity = keyResolver.resolveIdentity(exchange.getRequest());
         } catch (AuthFailureException e) {
+            return writeError(exchange, e);
+        }
+        // #726: buildBody hits JDBC — run it on the shared blocking-work
+        // scheduler (never the event loop) under a bounded timeout, so a stalled
+        // database read cannot park the transport that also carries LLM traffic.
+        return Mono.fromCallable(() -> buildBody(identity)).subscribeOn(jdbcScheduler).timeout(REGISTRY_TIMEOUT)
+                .flatMap(body -> writeJson(exchange, HttpStatus.OK, body)).onErrorResume(TimeoutException.class,
+                        e -> writeError(exchange, new AuthFailureException(HttpStatus.SERVICE_UNAVAILABLE,
+                                "context_registry_unavailable", "The context registry read timed out")));
+    }
+
+    private Mono<Void> writeJson(ServerWebExchange exchange, HttpStatus status, String body) {
+        exchange.getResponse().setStatusCode(status);
+        exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
+        return exchange.getResponse().writeWith(
+                Mono.just(exchange.getResponse().bufferFactory().wrap(body.getBytes(StandardCharsets.UTF_8))));
+    }
+
+    private Mono<Void> writeError(ServerWebExchange exchange, AuthFailureException e) {
+        if (!exchange.getResponse().isCommitted()) {
             exchange.getResponse().setStatusCode(HttpStatus.valueOf(e.status()));
             exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
-            byte[] bytes = ErrorEnvelopes.body(e, exchange.getRequest().getURI().getPath())
-                    .getBytes(StandardCharsets.UTF_8);
-            return exchange.getResponse().writeWith(Mono.just(exchange.getResponse().bufferFactory().wrap(bytes)));
         }
+        byte[] bytes = ErrorEnvelopes.body(e, exchange.getRequest().getURI().getPath())
+                .getBytes(StandardCharsets.UTF_8);
+        return exchange.getResponse().writeWith(Mono.just(exchange.getResponse().bufferFactory().wrap(bytes)));
     }
 
     private String buildBody(VirtualKeyResolver.Identity identity) {
