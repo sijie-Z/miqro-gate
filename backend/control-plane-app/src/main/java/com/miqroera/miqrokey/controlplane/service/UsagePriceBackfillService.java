@@ -114,6 +114,24 @@ public class UsagePriceBackfillService {
                                   ORDER BY ps.effective_from DESC, ps.id DESC LIMIT 1) cc ON TRUE
             """;
 
+    /**
+     * The four priced dimensions, as (price column key, token column key) pairs.
+     *
+     * <p>
+     * One list, used by both the status decision and the base-cost sum, because the
+     * rule it encodes is easy to get subtly wrong in two places at once: <b>a
+     * dimension takes part only if the event actually carries tokens for it.</b> An
+     * event with no cache_creation tokens is COMPLETE even though we hold no
+     * cache_creation price — that dimension never entered the calculation. Judging
+     * by price availability alone (which this used to do) marked almost every row
+     * PARTIAL on a catalogue that simply has no cache_creation price, including
+     * rows that never touched that dimension.
+     * </p>
+     */
+    private static final List<Map.Entry<String, String>> DIMENSIONS = List.of(Map.entry("input", "inputTokens"),
+            Map.entry("output", "outputTokens"), Map.entry("cacheRead", "cacheReadTokens"),
+            Map.entry("cacheCreation", "cacheCreationTokens"));
+
     private static final String UPDATE_ROW = """
             UPDATE usage_event
                SET price_input = :input, price_output = :output, price_cache_read = :cacheRead,
@@ -203,16 +221,27 @@ public class UsagePriceBackfillService {
      * </p>
      */
     private static String classify(Map<String, Object> row) {
+        int participating = 0;
         int priced = 0;
-        for (String key : List.of("input", "output", "cacheRead", "cacheCreation")) {
-            if (row.get(key) != null) {
+        for (Map.Entry<String, String> dimension : DIMENSIONS) {
+            if (!carriesTokens(row, dimension.getValue())) {
+                continue;
+            }
+            participating++;
+            if (row.get(dimension.getKey()) != null) {
                 priced++;
             }
         }
-        if (priced == 4) {
+        // Nothing to price, or everything that took part was priced.
+        if (participating == 0 || priced == participating) {
             return "COMPLETE";
         }
         return priced == 0 ? "UNAVAILABLE" : "PARTIAL";
+    }
+
+    private static boolean carriesTokens(Map<String, Object> row, String tokenKey) {
+        Object tokens = row.get(tokenKey);
+        return tokens instanceof Long value && value != 0L;
     }
 
     /**
@@ -230,16 +259,14 @@ public class UsagePriceBackfillService {
     private static BigDecimal baseCost(Map<String, Object> row) {
         BigDecimal undivided = BigDecimal.ZERO;
         boolean anyPriced = false;
-        for (Map.Entry<String, String> d : List.of(Map.entry("input", "inputTokens"),
-                Map.entry("output", "outputTokens"), Map.entry("cacheRead", "cacheReadTokens"),
-                Map.entry("cacheCreation", "cacheCreationTokens"))) {
-            Object price = row.get(d.getKey());
-            Object tokens = row.get(d.getValue());
-            if (price == null || tokens == null) {
+        for (Map.Entry<String, String> dimension : DIMENSIONS) {
+            Object price = row.get(dimension.getKey());
+            if (price == null || !carriesTokens(row, dimension.getValue())) {
                 continue;
             }
             anyPriced = true;
-            undivided = undivided.add(BigDecimal.valueOf((Long) tokens).multiply((BigDecimal) price));
+            undivided = undivided
+                    .add(BigDecimal.valueOf((Long) row.get(dimension.getValue())).multiply((BigDecimal) price));
         }
         return anyPriced ? UsageStatsAggregator.dividePerMillion(undivided) : null;
     }
