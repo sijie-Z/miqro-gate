@@ -653,6 +653,30 @@ class McpProxyContractTest {
         }
 
         @Test
+        @DisplayName("#727: an upstream body beyond the aggregation limit becomes an error event, never an unbounded message")
+        void oversizedUpstreamBodyYieldsErrorEvent() throws Exception {
+            // 300KB > the 256KB max-proxy-buffer the aggregation is capped at.
+            String huge = "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"blob\":\"" + "x".repeat(300_000) + "\"}}";
+            mockServer.setResponse(huge, 200);
+            BlockingQueue<ServerSentEvent<String>> events = new LinkedBlockingQueue<>();
+            Disposable subscription = openStream(GatewayTestKeys.MCP_OPEN_SERVICE, GatewayTestKeys.MCP_OUTSIDER)
+                    .subscribe(events::add);
+            try {
+                String sessionId = sessionIdOf(poll(events, Duration.ofSeconds(5)));
+
+                postMessage(GatewayTestKeys.MCP_OPEN_SERVICE, sessionId, GatewayTestKeys.MCP_OUTSIDER,
+                        envelope("tools/list", null)).expectStatus().isAccepted();
+
+                ServerSentEvent<String> event = poll(events, Duration.ofSeconds(5));
+                assertThat(event).isNotNull();
+                assertThat(event.event()).isEqualTo("error");
+                assertThat(event.data()).contains("mcp_sse_response_too_large");
+            } finally {
+                subscription.dispose();
+            }
+        }
+
+        @Test
         @DisplayName("should deliver ACL denials as error events, with no upstream call")
         void shouldDeliverDenialsAsErrorEvents() throws Exception {
             BlockingQueue<ServerSentEvent<String>> events = new LinkedBlockingQueue<>();
