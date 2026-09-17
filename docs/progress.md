@@ -3152,3 +3152,45 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **未做（记录）**：MCP 服务向导「服务类型/后端类型」枚举（我们固定标准透传形态）、HTTP→MCP 转换、消费者组实体、配额缓存命中「全量计入」档（语义天然等价「不计入」）——均按既有裁决维持，mapping 已注明理由。
 
 - **#684 配额软着陆（超限拒绝 429）→ PR（ADR-0020）**：从「只算不管」到真闸门——规则级 `action ∈ {ALERT, REJECT}`（默认 ALERT，零回归）；REJECT 规则超限后网关对该用户/项目 429 (`quota_exceeded` + `Retry-After` 窗口结束提示，`/v1/models` 同门)，Key 不失效、提额/跨窗口自动恢复。链路：控制面评估器（60s，共享 `QuotaWatermarks`）→ `quota_enforcement`（V59，整体替换）→ 判定集变化才 pg_notify → 快照两集合 → 网关热路径零查询。并行的配额扩维（#683/#686，COST/YEARLY/NEAR_LIMIT）已先行合入，本批在其之上只做执行面，并同步 api-contract §5.19 / database-schema / configuration-reference / ADR-0020 / F51。
+
+## 2026-09-16 晚间 — 偏好抽屉补缺 #579：折叠菜单开关 + 内容宽度 1200 + 抽屉内边距
+
+**背景**：issue #579（Vben 偏好设置体系——设置抽屉）复核后定三处差距：抽屉内没有折叠菜单开关；主内容宽度固定 1440px（issue 要求 1200px）；抽屉头部内边距统一 20px（issue 要求上下 16px / 左右 24px）。
+
+**交付**（分支 `feat/settings-drawer-gaps-579`）：
+
+- **折叠菜单开关**：`SettingsDrawer.vue` 新增「折叠菜单」分组 + 「折叠侧边栏」开关（`settings-toggle-collapsed`），走既有 `setPreference('collapsed', …)`。该偏好项此前已存在（`preferences.collapsed`，默认 `false`）并由 `NewShell.vue` 消费（`iconOnly = 窄视口 || collapsed`），只是除顶栏按钮外无第二入口——因此本项是接上既有生效链路，不是新增占位开关。
+- **内容宽度 1440 → 1200**：`design-tokens.css` 的 `--ui-content-max`。**改动前已清点全部消费者**：全仓只有 `design-base.css:25`（`.ui-page { max-width: var(--ui-content-max) }`）与 `design-base.css:520`（`[data-compact='wide']` 覆盖为 `100%`）两处；无页面把 1440 硬编码为内容上限（视图/用例里的 `1440` 均为 e2e viewport 设置）。「流式」由 `[data-compact='wide']` 独立覆盖，与固定上限的取值无关，故流式/固定两种行为都不受影响。
+- **抽屉头部内边距**：`ui/Drawer.vue` 的 `.ui-drawer__head` 由 20px 改为 `var(--ui-space-4) var(--ui-space-6)`（16px / 24px），与该组件族的 Vben/antd 度量注释一致。
+- **测试**：`shell-preferences.spec.ts` 新增抽屉开关用例（开关 → 立即折叠侧栏 + 写穿 `localStorage` + 模拟重载后保持）与 `#579 layout contract` 用例族（jsdom 不跑层叠，故解析随包发出的 CSS 源码：断言 `--ui-content-max` 取值、`.ui-page` 确实消费该 token、`wide` 覆盖仍为 100%、抽屉内边距；`var()` 一律解析回 px 取值，改名 token 无法蒙混通过）；`preferences.spec.ts` 的抽屉用例补同一开关。
+
+**验证**：vitest 全量 **59 文件 / 334 用例 PASS**；`vue-tsc`（app/spec/node 三工程）PASS；`vite build` PASS；对本轮 4 个可 lint 的改动文件（`SettingsDrawer.vue`、`ui/Drawer.vue`、`preferences.spec.ts`、`shell-preferences.spec.ts`）跑 `npx eslint <4 files> --ext .vue,.ts` → 退出码 0，`516 problems (0 errors, 516 warnings)`。
+（说明：上述 516 条警告全部来自 `prettier/prettier` 的行尾项——515 条 `Delete ␍` 与 1 条 `Delete ␍⏎␍`。本机为 CRLF 检出而 prettier 期望 LF，`npm run lint` 自带的 `--fix` 会重写全树约 100+ 文件的行尾，故本轮验证改用等价的、不带 `--fix` 的 `npx eslint`。该行尾基线在 `develop` 的 HEAD 上同样成立：未改动的 `src/ui/Button.vue` 单跑亦为 `201 problems (0 errors, 201 warnings)`。）
+
+**边界与影响**：`frontend/e2e/baseline-screenshots/` 为捕获式基线（无像素对比断言），其截图内容宽度仍反映旧的 1440px，本批不重新生成、不影响 CI；`docs/frontend-design.md` 已同步为 1200px；`tokens.css` 的 v1 `--miqrokey-content-max: 1600px` 属旧层，不在本 issue 范围。
+
+### 并入 develop 新基线（2026-09-16）：merge `adfb670`（#695 / #684 配额软着陆）
+
+- 背景与手法：develop 于本日推进到 `adfb670`，本分支（原基于 `50a9b24`）与其冲突。用
+  `git merge origin/develop`（**产生合并提交，非 rebase**）并入基线，本分支改动全部保留。
+- 冲突清单与解法（冲突文件共 **1** 个）：
+  - `docs/progress.md`——两侧都在文件末尾追加：develop 追加 `#684` 小节，本分支追加「2026-09-16 晚间 #579」段。
+    解法：**两边都保留**，develop 段在前、本分支段在后（本分支段逐字未改）。
+    自检（**本条记录写入之前**的解冲突结果）：该结果与 develop 版逐字节比对，差异恰为本分支那 16 行新增段
+    （sha256 `cab4e443…`）；本分支相对 merge-base 的自身改动为 `16 insertions / 0 deletions`，确认未丢内容。
+    本条记录（22 行）写入后，`git diff --numstat adfb670 5d14828 -- docs/progress.md` 为 `38 0` = 16 行本分支段 +
+    22 行本条记录，仍为纯增量；本条记录此后的修订由新提交承载，不计入该数。
+  - 同一区域另有 develop 单侧改动（`待 owner 拍板` → `owner 已拍板（2026-09-16）`）由 git 自动合并——
+    本分支从未改过该行。
+  - 预期中的 `design-tokens.css` / `design-base.css` **未冲突**：develop 的配额执行面改动未触及这两个文件。
+- 复验（2026-09-16，真实命令与结果）：
+  - `npm run typecheck`（vue-tsc app/spec/node 三工程）→ 退出码 0，无错误输出。
+  - `npm run test` → **59 files / 335 tests passed**（较合并前 +1，来自 develop 并入的
+    `NextQuotaRulesView.spec.ts`）。
+  - lint：`npm run lint` 定义为 `eslint . --ext .vue,.ts,.tsx --fix`；本轮以**同一脚本加 `--no-fix`** 运行
+    （`npm run lint -- --no-fix`）→ 退出码 0、`59204 problems (0 errors, 59204 warnings)`：其中 59203 项为
+    `prettier/prettier` 行尾项（CRLF 检出基线），另 1 项为 `vue/no-template-shadow`（`src/components/NewShell.vue:809`
+    的 `Component` 遮蔽；该文件自 merge-base `50a9b24` 至合并结果未改动，属既有告警且不可自动修复）。
+    不用 `--fix` 的原因已实测：`--fix-dry-run` 对未改动的
+    `src/ui/Button.vue` 给出 CR 数 201 → 0 的修复输出（该文件单跑 0 errors），即 `--fix` 会静默重写全树行尾；
+    该命令执行前后（提交前）`git status --porcelain` 均为 42 项，确认无文件被写入（合并提交后工作区为 0 项）。
