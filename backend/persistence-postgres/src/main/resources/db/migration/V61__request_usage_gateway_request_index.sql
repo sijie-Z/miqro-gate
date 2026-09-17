@@ -1,5 +1,5 @@
 -- ============================================================================
--- 60. request_usage_records: index for single-call lookup (#705).
+-- 61. request_usage_records: index for single-call lookup (#705).
 --
 --     The model-call timeline resolves one call by
 --     (tenant_id, gateway_request_id) — the same triple the writer uses as its
