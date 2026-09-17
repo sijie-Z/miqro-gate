@@ -151,6 +151,19 @@ class AdminPathNormalizationIntegrationTest {
     }
 
     @Test
+    @DisplayName("an encoded open-surface prefix never reaches the controller on a USER session")
+    void userCannotReachOpenSurfaceThroughEncodedPrefix() throws Exception {
+        // MockMvc's router resolves %2D to no handler (404); the real container
+        // maps it to the open-surface controller, where the normalized filter
+        // forbids a USER session (403) and rejects an anonymous caller (401) —
+        // that container contract is pinned against real HTTP in
+        // AdminApiKeyScopeIntegrationTest. Either way the USER never gets data.
+        mockMvc.perform(get("/api/v1/admin%2Dapi/usage/summary").cookie(userSession))
+                .andExpect(status().is4xxClientError());
+        mockMvc.perform(get("/api/v1/admin%2Dapi/usage/summary")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @DisplayName("an anonymous request on the semicolon variant stays unauthorized")
     void anonymousSemicolonPathIsUnauthorized() throws Exception {
         mockMvc.perform(get("/api/v1/admin;x/users")).andExpect(status().isUnauthorized());

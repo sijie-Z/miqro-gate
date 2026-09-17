@@ -249,9 +249,17 @@ class AdminApiKeyScopeIntegrationTest {
                 .as("encoded slashes are container-rejected").isEqualTo(400);
         assertThat(probeStatus("/api/v1/admin-api/usage/../alert-rules", secret))
                 .as("plain dot-segments never fold into a controller mapping").isEqualTo(404);
+        // #723: the filters now normalize the same way the router does, so an
+        // encoded prefix (%2D = '-') no longer skips the open-surface filter.
+        // The encoded spelling is the same endpoint as the plain one: the same
+        // scoped credential is required and honored, and a caller without one is
+        // rejected before any handler runs.
+        assertThat(probeStatus("/api/v1/admin-api/usage/summary?groupBy=project", secret))
+                .as("plain spelling: the scoped key is accepted").isEqualTo(200);
         assertThat(probeStatus("/api/v1/admin%2Dapi/usage/summary?groupBy=project", secret))
-                .as("an encoded prefix skipping the open-surface filter is caught by session deny-by-default")
-                .isEqualTo(401);
+                .as("encoded spelling: same endpoint, same credential, same outcome").isEqualTo(200);
+        assertThat(probeStatusAnonymous("/api/v1/admin%2Dapi/usage/summary?groupBy=project"))
+                .as("encoded spelling without a credential is rejected before any handler").isEqualTo(401);
     }
 
     /**
@@ -261,6 +269,14 @@ class AdminApiKeyScopeIntegrationTest {
         java.net.http.HttpRequest request = java.net.http.HttpRequest
                 .newBuilder(java.net.URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", "Bearer " + secret).GET().build();
+        return java.net.http.HttpClient.newHttpClient()
+                .send(request, java.net.http.HttpResponse.BodyHandlers.ofString()).statusCode();
+    }
+
+    /** Real-HTTP status for one path without any credential. */
+    private int probeStatusAnonymous(String path) throws Exception {
+        java.net.http.HttpRequest request = java.net.http.HttpRequest
+                .newBuilder(java.net.URI.create("http://127.0.0.1:" + port + path)).GET().build();
         return java.net.http.HttpClient.newHttpClient()
                 .send(request, java.net.http.HttpResponse.BodyHandlers.ofString()).statusCode();
     }
