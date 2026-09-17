@@ -3566,3 +3566,20 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **验证**：`-Dtest=SnapshotRefreshListenerTest` 连跑 **5/5 全绿**（Tests run: 3, Failures: 0, Errors: 0）；spotless 通过。
 
 **备注**：交叉印证——并行会话在空闲机器上同样连跑 5 次全绿，与"负载相关调度 flake"的结构判断一致。
+
+## 2026-09-17 用量调整台账（#709 / F20）——追加型修正，不覆盖原始事实
+
+**范围**：只落 schema + 追加/查询接口。V63 `usage_adjustments`（token 增减可负 + 预留 COST 金额维度 + 原因 + 引用原始行 + 反向行纠错 + 幂等键）；`POST/GET /api/v1/admin/usage-adjustments`（仅 SYSTEM_ADMIN）。明细净额列、导出/审计标记、对账"含调整"维度为后续增量（F23 依赖）。
+
+**四层语义**（本轮定下的核心约定）：`usage_event`=不变的观察事实 → `usage_adjustments`=追加的修正 → `AdjustedUsage`(observed + Σ调整)=财务/报告口径 → **配额判定仍只读 `usage_event`**。财务更正不得追溯改写运行时控制的历史结果——否则一笔补录会把已超额的 Key 重新判成未超额，等于改写历史策略。
+
+**两处由既有表决定的外键取舍**：① `usage_event_id` 取 `ON DELETE CASCADE`——`usage_event` 可被 `UsageDeletionService` 按窗口硬删（带确认令牌 + 审计），底层事实被抹去时其修正随之失效；② `reconciliation_row_id` **刻意不建外键**——对账报告按窗口幂等替换，硬外键会挡住替换。
+
+**迁移号事故（V60 重演）**：本迁移最初占 V62，但 #729（PR #744）先合入 develop 并占了 V62，两支合并后启动即 `Found more than one migration with version 62`。已让号为 **V63**。**教训**：定迁移号要同时看 develop 树**和 open issue 里已登记的号**——#729 的 issue 正文明确写了"下一可用号为 V62"，我只看树所以漏了。另删除 `target/classes` 下残留的 V62 副本（Maven 拷贝资源不删已移除文件，不清理会打进 jar——V60 事故的直接成因）。
+
+**验证**：单测 14 + 集成测试 5（幂等与净额非负两条只在真实 SQL 里成立，故必须有 IT）；`SchemaMigrationTest` 12/12；全量 `clean verify -P integration` PASS；OpenAPI 基线重生成（无破坏性变更）+ 前端 `gen:types` 幂等。spotless 首轮 4 个新文件未过，已 `spotless:apply` 收敛（仅新文件被改，无历史文件漂移）。
+
+**测试抓到的真 bug**：`isZero(null)` 返回 false →「增减量全为 0」的校验在任一字段为 null 时失效，全零调整会被当成有效修正写进只追加的台账。已合并为单个 `anyNonZeroDelta` 判断。
+
+**配额**：按 B′ 分层**零代码改动**——隔离本身就是"不动它"，未为配额花任何成本。
+
