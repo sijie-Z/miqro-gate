@@ -15,6 +15,7 @@ import com.miqroera.miqrokey.domain.usage.PriceSnapshot;
 import com.miqroera.miqrokey.domain.usage.PriceTokenType;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
+import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageAggRow;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
 import org.junit.jupiter.api.BeforeEach;
@@ -73,7 +74,8 @@ class UsageStatsServiceTest {
         when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.VIRTUAL_KEY), any()))
                 .thenReturn(List.of(new UsageAggRow("key-" + KEY_A, "k-a", PRODUCT, MODEL, CacheLevel.UPSTREAM, 2L,
                         new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null), new BigDecimal("1000"),
-                        new BigDecimal("1000"), BigDecimal.ZERO, BigDecimal.ZERO)));
+                        new BigDecimal("1000"), BigDecimal.ZERO, BigDecimal.ZERO,
+                        UsageStatsAggregator.PricingGap.NONE)));
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
 
         UsageSummary summary = service.summary(user, "virtual_key", null, null);

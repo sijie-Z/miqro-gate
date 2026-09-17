@@ -527,7 +527,8 @@ class AdminQuotaRuleApiIntegrationTest {
                 jdbc.update("""
                         INSERT INTO price_snapshot (id, provider_product_id, model_id, token_type, currency,
                                                     unit_price, effective_from, source)
-                        VALUES (gen_random_uuid(), :productId, 'model-alpha', :type, 'CNY', :price, now(), 'MANUAL')
+                        VALUES (gen_random_uuid(), :productId, 'model-alpha', :type, 'CNY', :price,
+                                now() - interval '1 hour', 'MANUAL')
                         """, new MapSqlParameterSource("productId", productId).addValue("type", e.getKey())
                         .addValue("price", e.getValue()));
             }
