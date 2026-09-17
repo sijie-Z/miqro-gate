@@ -42,7 +42,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Price-catalog sync (issue #585) against a loopback price source and real
  * PostgreSQL: prefix/alias mapping writes CNY snapshots (USD×rate), unchanged
  * values are skipped on re-sync, unmapped models are reported, and a source
- * failure is a sanitized 502 that writes nothing.
+ * failure is a sanitized 502 that writes nothing. The scheduled variant (issue
+ * #708) additionally never replaces a MANUAL snapshot.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
@@ -52,6 +53,8 @@ class PriceSyncApiIntegrationTest {
     static {
         AbstractControlPlaneIntegrationTest.POSTGRES.getJdbcUrl();
     }
+
+    private static final UUID SEED_TENANT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
     private static final String FIXTURE = """
             {"data":[
@@ -103,6 +106,8 @@ class PriceSyncApiIntegrationTest {
     ObjectMapper objectMapper;
     @Autowired
     NamedParameterJdbcTemplate jdbc;
+    @Autowired
+    com.miqroera.miqrokey.controlplane.service.AdminPriceSyncService priceSyncService;
 
     private Cookie sessionCookie;
     private Cookie csrfCookie;
@@ -191,6 +196,41 @@ class PriceSyncApiIntegrationTest {
     @DisplayName("anonymous requests are rejected")
     void anonymousRejected() throws Exception {
         mockMvc.perform(post("/api/v1/admin/prices/sync")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("the scheduled run keeps a MANUAL snapshot and reports the conflict (#708)")
+    void scheduledRunPreservesManualPrice() throws Exception {
+        // A human-curated price already owns (deepseek-flash, INPUT).
+        jdbc.update(
+                """
+                        INSERT INTO price_snapshot (id, provider_product_id, model_id, token_type, currency, unit_price,
+                            effective_from, source, created_by, created_at)
+                        VALUES (gen_random_uuid(), :productId, 'deepseek-flash', 'INPUT', 'CNY', 9.99, now(), 'MANUAL', NULL, now())
+                        """,
+                new MapSqlParameterSource("productId", fx.paygProductId));
+
+        Map<String, Object> report = priceSyncService.syncPreservingManual(SEED_TENANT_ID,
+                com.miqroera.miqrokey.controlplane.service.AuditContext.human(null, "scheduled-price-sync"));
+
+        // The 6-quote fixture loses exactly one row to the manual owner.
+        assertThat(report.get("written")).isEqualTo(5);
+        assertThat(report.get("unchanged")).isEqualTo(0);
+        List<Map<String, Object>> conflicts = (List<Map<String, Object>>) report.get("conflicts");
+        assertThat(conflicts).hasSize(1);
+        assertThat(conflicts.get(0).get("modelId")).isEqualTo("deepseek-flash");
+        assertThat(conflicts.get(0).get("tokenType")).isEqualTo("INPUT");
+
+        // The manual entry is untouched and still the effective price for the key.
+        assertThat(priceOf(listPrices(), "deepseek-flash", "INPUT")).isEqualByComparingTo("9.99");
+        Integer manualRows = jdbc.queryForObject("""
+                SELECT count(*) FROM price_snapshot WHERE model_id = 'deepseek-flash' AND token_type = 'INPUT'
+                """, new MapSqlParameterSource(), Integer.class);
+        assertThat(manualRows).isEqualTo(1);
+        // The other quotes still landed as OFFICIAL.
+        assertThat(priceOf(listPrices(), "deepseek-flash", "OUTPUT")).isEqualByComparingTo("8.400000");
+        assertThat(countAudit("PRICE_SYNC")).isEqualTo(1);
     }
 
     private List<Map<String, Object>> listPrices() throws Exception {
