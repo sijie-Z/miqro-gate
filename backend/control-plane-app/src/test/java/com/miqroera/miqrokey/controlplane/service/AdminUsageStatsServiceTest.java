@@ -6,7 +6,6 @@ import com.miqroera.miqrokey.controlplane.dto.UsageRecordPage;
 import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.model.UserStatus;
-import com.miqroera.miqrokey.domain.repository.PriceSnapshotRepository;
 import com.miqroera.miqrokey.domain.repository.UsageStatsRepository;
 import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
 import com.miqroera.miqrokey.domain.usage.CacheLevel;
@@ -58,15 +57,13 @@ class AdminUsageStatsServiceTest {
 
     @Mock
     private UsageStatsRepository usageStatsRepository;
-    @Mock
-    private PriceSnapshotRepository priceSnapshotRepository;
 
     private AdminUsageStatsService service;
     private User admin;
 
     @BeforeEach
     void setUp() {
-        service = new AdminUsageStatsService(usageStatsRepository, priceSnapshotRepository);
+        service = new AdminUsageStatsService(usageStatsRepository);
         admin = new User(ADMIN_ID, TENANT, "root", "Root Admin", new byte[32], UserRole.SYSTEM_ADMIN, UserStatus.ACTIVE,
                 false, 0, null, null, 0L, Instant.now(), Instant.now());
     }
@@ -83,7 +80,6 @@ class AdminUsageStatsServiceTest {
 
     @Test
     void summaryPassesEveryOptionalDimensionAsFilter() {
-        when(priceSnapshotRepository.findAllLatestAt(any(Instant.class))).thenReturn(List.of());
         when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.DAY), any())).thenReturn(List.of());
         when(usageStatsRepository.aggregateHits(eq(UsageStatsRepository.GroupBy.DAY), any())).thenReturn(List.of());
 
@@ -108,7 +104,6 @@ class AdminUsageStatsServiceTest {
 
     @Test
     void summaryWithoutFiltersScopesToTenantOnly() {
-        when(priceSnapshotRepository.findAllLatestAt(any(Instant.class))).thenReturn(List.of());
         when(usageStatsRepository.aggregateUsage(any(), any())).thenReturn(List.of());
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
 
@@ -133,11 +128,9 @@ class AdminUsageStatsServiceTest {
 
     @Test
     void summaryComputesCostFromPriceSnapshot() {
-        when(priceSnapshotRepository.findAllLatestAt(any(Instant.class)))
-                .thenReturn(List.of(price(PriceTokenType.INPUT, new BigDecimal("1.00")),
-                        price(PriceTokenType.OUTPUT, new BigDecimal("2.00"))));
         when(usageStatsRepository.aggregateUsage(any(), any())).thenReturn(List.of(new UsageAggRow("g", "G", PRODUCT_ID,
-                MODEL, CacheLevel.UPSTREAM, 2, new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null))));
+                MODEL, CacheLevel.UPSTREAM, 2, new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null),
+                new BigDecimal("1000"), new BigDecimal("1000"), BigDecimal.ZERO, BigDecimal.ZERO)));
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
 
         UsageSummary summary = service.summary(admin, "project", null, null, null, null, null, null, null, null, null,

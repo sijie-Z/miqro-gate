@@ -3,11 +3,9 @@ package com.miqroera.miqrokey.controlplane.service;
 import com.miqroera.miqrokey.controlplane.dto.UsageRecordPage;
 import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.VirtualKey;
-import com.miqroera.miqrokey.domain.repository.PriceSnapshotRepository;
 import com.miqroera.miqrokey.domain.repository.UsageStatsRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
 import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
-import com.miqroera.miqrokey.domain.usage.PriceSnapshot;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator;
@@ -17,14 +15,11 @@ import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -48,13 +43,10 @@ public class UsageStatsService {
 
     private final VirtualKeyRepository keyRepository;
     private final UsageStatsRepository usageStatsRepository;
-    private final PriceSnapshotRepository priceSnapshotRepository;
 
-    public UsageStatsService(VirtualKeyRepository keyRepository, UsageStatsRepository usageStatsRepository,
-            PriceSnapshotRepository priceSnapshotRepository) {
+    public UsageStatsService(VirtualKeyRepository keyRepository, UsageStatsRepository usageStatsRepository) {
         this.keyRepository = keyRepository;
         this.usageStatsRepository = usageStatsRepository;
-        this.priceSnapshotRepository = priceSnapshotRepository;
     }
 
     /**
@@ -75,18 +67,13 @@ public class UsageStatsService {
         if (keyIds.isEmpty()) {
             // No keys to aggregate — return a zeroed summary without touching the
             // usage tables.
-            return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), List.of(), List.of(),
-                    new LinkedHashMap<>());
+            return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), List.of(), List.of());
         }
         UsageStatsRepository.UsageFilter filter = filter(user, keyIds, from, to);
 
-        Map<String, BigDecimal> prices = new LinkedHashMap<>();
-        for (PriceSnapshot p : priceSnapshotRepository.findAllLatestAt(Instant.now())) {
-            prices.put(p.providerProductId() + ":" + p.modelId() + ":" + p.tokenType().name(), p.unitPrice());
-        }
         List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
         List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
-        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows, prices);
+        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows);
     }
 
     /** Paged raw usage records for the caller's own keys, newest first. */
