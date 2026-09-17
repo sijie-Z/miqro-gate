@@ -146,6 +146,38 @@ class UsageLifecycleIntegrationTest {
     // -------------------------------------------------------------------
 
     @Test
+    @Order(0)
+    @DisplayName("a context-limit rejection (413) never reaches upstream and writes no lifecycle row")
+    void contextLimitRejectionWritesNoLifecycleRow() throws Exception {
+        // Runs before @Order(6), which closes the mock provider for the rest of
+        // the class. Control request first: the same context does open a row for
+        // a request that reaches upstream, so the zero-row assertion below cannot
+        // pass vacuously.
+        mockProvider.configure(
+                AnthropicMockProvider.ResponseConfig.builder().statusCode(200).contentType("application/json")
+                        .header("x-request-id", "req-lifecycle-000").body(AnthropicFixtures.RESPONSE_BASIC).build());
+        webTestClient.post().uri("/v1/messages").bodyValue(AnthropicFixtures.REQUEST_NON_STREAMING).exchange()
+                .expectStatus().isOk().expectBody().returnResult().getResponseBody();
+        assertThat(awaitLatestLifecycleRow()).containsEntry("request_status", "SUCCEEDED");
+
+        mockProvider.reset();
+        long mark = System.currentTimeMillis();
+
+        // 200001 ASCII characters: over the shipped context-limit default
+        // (200000) yet well inside the 256KB body buffer, so only the pre-check
+        // can reject it (#553).
+        webTestClient.post().uri("/v1/messages").bodyValue(anthropicBodyOfLength(200_001)).exchange().expectStatus()
+                .isEqualTo(413).expectBody().returnResult().getResponseBody();
+
+        usageEventBus.flush();
+        Thread.sleep(500); // a row opened by mistake would be written asynchronously
+        usageEventBus.flush();
+
+        assertThat(countLifecycleRowsSince(mark)).isZero();
+        assertThat(mockProvider.getCapturedRequests()).isEmpty();
+    }
+
+    @Test
     @Order(1)
     @DisplayName("non-streaming 200 finalizes a SUCCEEDED record with parsed usage")
     void nonStreamingSuccessFinalizesSucceededRow() throws Exception {
@@ -302,6 +334,26 @@ class UsageLifecycleIntegrationTest {
             Thread.sleep(100);
         }
         throw new AssertionError("No lifecycle row appeared within 15s");
+    }
+
+    /** Counts fixture-tenant lifecycle rows that started at or after the mark. */
+    private int countLifecycleRowsSince(long mark) {
+        Integer rows = jdbc.queryForObject("""
+                SELECT count(*) FROM request_usage_records
+                WHERE tenant_id = :tenantId AND started_at >= :since
+                """, new MapSqlParameterSource().addValue("tenantId", GatewayTestKeys.TENANT_ID).addValue("since",
+                new java.sql.Timestamp(mark)), Integer.class);
+        return rows == null ? 0 : rows;
+    }
+
+    /** Builds an Anthropic body of exactly {@code chars} ASCII characters. */
+    private static String anthropicBodyOfLength(int chars) {
+        String prefix = "{\"model\":\"claude-sonnet-5-20250915\",\"max_tokens\":1024,"
+                + "\"messages\":[{\"role\":\"user\",\"content\":\"";
+        String suffix = "\"}]}";
+        int filler = chars - prefix.length() - suffix.length();
+        assertThat(filler).isPositive();
+        return prefix + "x".repeat(filler) + suffix;
     }
 
     /** Writes a fresh random 32-byte key file (base64) for the crypto config. */

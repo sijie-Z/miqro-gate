@@ -2,6 +2,75 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-16（网关请求前置预检 #553）
+
+- **#553 已实现并验证**（分支 `feat/gateway-context-limit-precheck`，自 develop `50a9b24`）；
+  提交 `4582d19`（feat）、`e87a46b`（test）、本批文档提交。语义：鉴权 → 模型授权 → **体量预检**
+  → 缓存 → 上游；超限返回 413 `context_limit_exceeded`，**不连接上游**、不进缓存、不记用量。
+- 度量：对**已缓冲的原始字节**按 UTF-8 码点计数（零分配、单遍、不解析、不重排、不重序列化），
+  合法 UTF-8 下整个序列化 body（含 JSON 结构、工具 schema、base64）都计入，是该 body 的
+  **字符上界**（字符数 ≠ token 数）。**非法 UTF-8（严格校验不通过：孤立续字节、截断、
+  超长编码 C0/C1 与 E0 80、代理项 ED A0、超出 U+10FFFF 的 F4 90/F5…FF）整段回退为字节长度**，
+  字符数不会超过字节数，故计数**整体不低估**——不会低于任何宽松解码器解出的字符数。
+  这类 body 本身不是合法 JSON，且仍受 256KB 缓冲上限约束。该口径由 1–2 字节全穷举
+  （65792 个 body）＋定种子模糊测试（5000 个随机 body）与
+  `250000 × 0x80 字节在默认阈值下必须被拒` 一条边界测试固定。
+- 配置（全局）：`miqrokey.gateway.context-limit.enabled`（默认 true）/
+  `.threshold-chars`（默认 200000，非正值回落默认）；对应环境变量
+  `MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED` / `..._THRESHOLD_CHARS`。**逐 Key 阈值为后续项**
+  （issue 文本为「逐 Key 或全局可调」，本版本取全局）。MCP 数据面两条路径本版本不适用该预检，
+  仍只有既有缓冲上限（`payload_too_large`），已在 `docs/api-contract.md` §7.1 显式记录。
+- 观测：零标签计数器 `miqrokey_gateway_context_limit_rejected_total`；拒绝日志仅含
+  requestId / path / 测量字符数 / 阈值，不含正文。
+- **真实验证（`backend/gateway-app`）**（评审答复轮后重跑；含本轮新增 3 条测试：
+  MCP 大 body 原样直通、413 不写生命周期行、默认阈值下非法 UTF-8 必拒）：
+  1. `.\mvnw.cmd -B -f backend -pl gateway-app -am spotless:check` → BUILD SUCCESS，
+     `Spotless.Java is keeping 105 files clean - 0 needs changes to be clean`。
+  2. `.\mvnw.cmd -B -f backend -pl gateway-app -am test` → BUILD SUCCESS，
+     `Tests run: 348, Failures: 0, Errors: 0, Skipped: 0`，02:36
+     （`ContextLimitPrecheckTest` 10、`ContextLimitGuardTest` 16 = Characters 6 / Threshold 4 /
+     SwitchAndMetric 4 / Defaults 2、`ContextLimitDisabledTest` 3）。
+  3. `.\mvnw.cmd -B -f backend -pl gateway-app -am -Pintegration test -Dtest=ContextLimit*Test,*ProxyContractTest,VirtualKeyAuthContractTest,ContextRegistryIntegrationTest,UsageLifecycleIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false`
+     → BUILD SUCCESS，`Tests run: 184, Failures: 0, Errors: 0, Skipped: 0`，01:23
+     （Testcontainers PostgreSQL 17.6 正常启动；`UsageLifecycleIntegrationTest` 7 含新增
+     「413 不触上游、不写生命周期行」；`McpProxyContractTest$FailureSemantics` 9 含新增
+     「200001 字符 MCP 报文原样转发」；`ContextRegistryIntegrationTest` 4/4）。
+- 五类覆盖对照：① 超限 413 且 mock 上游零请求（三条路径 `/v1/messages`、`/v1/chat/completions`、
+  `/v1/responses`；Anthropic 路径并断言错误信封顶层 `"type":"error"`）② 正常/临界请求字节不变转发
+  ③ 开关关闭行为如旧（`ContextLimitDisabledTest` 3/3）
+  ④ 边界值（`chars <= limit` 放行、+1 拒绝；另含默认阈值 200000 放行 / 200001 拒绝）
+  ⑤ 码点计数单测（ASCII/多字节/emoji/空/非法 UTF-8 回退字节数/永不低估性质测试）；拒绝日志
+  单测断言只含 sizes、不含正文哨兵；⑥ 413 **不触上游且不写生命周期行**（Testcontainers 实测
+  `request_usage_records`：同上下文先有一行成功记录作对照，413 后按标记时间窗内新增 0 行）；
+  ⑦ MCP 数据面 200001 字符报文原样转发（预检只作用于 LLM 数据面）。
+- 行为收紧如实记录：启用后 **200001–262144 字符**（仍在上限 256KB 内）的请求由「缓冲上限放行」
+  变为 `413`——刻意收紧，会同时挡掉同尺寸但上游本可接受的合法请求；已写入
+  `docs/api-contract.md` §7.1、`docs/configuration-reference.md` §5、`docs/security.md`。
+  另记：合规留存旁路（ADR-0014，默认关闭）在预检**之前**捕获 body，故开启留存时被 413 的请求
+  仍可能已按留存策略入库（预检自身不写持久化）；已在 api-contract §7.1 记录。
+- F15 边界如实记录：issue 文本提到「命中记 F15 日志与审计元数据」，本版本以 1 条 WARN
+  （requestId/path/字符数/阈值）+ 零标签计数器替代，**不新增审计元数据记录**——本仓库 F15 为
+  MCP 专用 `mcp_access_log`（V29），LLM 数据面无同等设施，且「不保存正文」红线限制可落库字段。
+  如需「可查询的拒绝审计」，另立后续项，不在本 PR 范围内。
+- 注意：`-pl gateway-app` 不带 `-am` 会从共享 `~/.m2` 取到别条线的旧 `test-support`，
+  导致 surefire「failed to discover tests」；统一加 `-am`。`-Pintegration` 下忽略空 `-Dtest`
+  匹配的属性名是 `-Dsurefire.failIfNoSpecifiedTests=false`。
+
+### 2026-09-16 收尾轮（#553 收口：N1 修复 + 并入新基线）
+
+- 并入 develop 新基线：`git merge origin/develop`（`adfb670`，#695 配额软着陆）→ 合并提交
+  `b8bd715`；无冲突（本分支只改 ContextLimit* 与文档，与配额改动不重叠）。Flyway `V59`
+  归 develop 的配额软着陆，**本分支不新增 migration**。
+- N1 修复提交 `dc6f91e`（`fix(gateway): count malformed UTF-8 bodies as bytes (#553)`）：
+  非法 UTF-8 整段回退字节长度，消除「全续字节 body 计 0 字符」的 fail-open。
+- 验证（合并后真实输出）：`./mvnw -B -f backend -pl gateway-app -am test -Dtest=ContextLimitGuardTest,ContextLimitPrecheckTest,ContextLimitDisabledTest -Dsurefire.failIfNoSpecifiedTests=false`
+  → `Tests run: 29, Failures: 0, Errors: 0, Skipped: 0`（Guard 16 / Precheck 10 / Disabled 3），
+  BUILD SUCCESS，总耗时 37.0 s。
+- 独立 delta 评审（新上下文，只审 `ea3d5cd..dc6f91e` 增量）：**0 BLOCKER，Consensus: APPROVE**；
+  `ProxyController.java` 在该提交内仅 javadoc 与折行（`git diff -w` 只剩注释与参数折行），无逻辑变化。
+  残留编辑性意见：astral 字符按码点计 1、按 UTF-16 码元计 2 属既有口径（文档统一按码点表述），
+  记为后续可选跟进，不阻塞。
+
 ## Current State
 
 - Project phase: `PHASE_1`

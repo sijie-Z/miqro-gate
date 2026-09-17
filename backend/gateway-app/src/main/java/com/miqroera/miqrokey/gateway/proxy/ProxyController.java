@@ -142,6 +142,11 @@ public class ProxyController {
     private final ClientAddressResolver clientAddressResolver;
     /** TTFB metric hook (#486): observation per attempt that sees a first byte. */
     private final GatewayTtfbMetrics ttfbMetrics;
+    /**
+     * Context-limit pre-check (#553): rejects oversized bodies before the upstream
+     * call.
+     */
+    private final ContextLimitGuard contextLimitGuard;
 
     public ProxyController(VirtualKeyResolver keyResolver, CredentialInjector credentialInjector,
             GatewayResponseCache responseCache, ObjectProvider<RequestCoalescer> coalescerProvider,
@@ -150,10 +155,12 @@ public class ProxyController {
             ObjectMapper objectMapper, ProxyTargetProperties properties,
             UpstreamTargetValidator upstreamTargetValidator, Scheduler credentialDecryptScheduler,
             BuiltInAdapterRegistry adapterRegistry, ProviderCatalog providerCatalog, RetentionSidecar retentionSidecar,
-            GatewayTtfbMetrics ttfbMetrics, ClientAddressResolver clientAddressResolver) {
+            GatewayTtfbMetrics ttfbMetrics, ClientAddressResolver clientAddressResolver,
+            ContextLimitGuard contextLimitGuard) {
         this.retentionSidecar = retentionSidecar;
         this.clientAddressResolver = clientAddressResolver;
         this.ttfbMetrics = ttfbMetrics;
+        this.contextLimitGuard = contextLimitGuard;
         this.keyResolver = keyResolver;
         this.credentialInjector = credentialInjector;
         this.responseCache = responseCache;
@@ -273,6 +280,17 @@ public class ProxyController {
             if (modelName != null && !allowed.contains(modelName)) {
                 return writeError(exchange, new AuthFailureException(HttpStatus.FORBIDDEN, "model_not_allowed",
                         "Model '" + modelName + "' is not allowed for this virtual key"));
+            }
+
+            // #553: context-limit pre-check. Runs after authentication and model
+            // authorization (a caller never learns the size verdict for a resource
+            // it may not use) and before the cache lookup and the upstream call, so
+            // an oversized context can never reach a provider. Read-only: the
+            // accepted body is forwarded byte-identically.
+            AuthFailureException contextLimit = contextLimitGuard.check(body, exchange.getRequest().getURI().getPath(),
+                    requestId);
+            if (contextLimit != null) {
+                return writeError(exchange, contextLimit);
             }
 
             boolean cacheable = CacheEligibility.isCacheable(ctx,

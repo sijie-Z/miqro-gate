@@ -161,6 +161,26 @@ class McpProxyContractTest {
         }
 
         @Test
+        @DisplayName("should forward a body inside the LLM context-limit band verbatim (#553)")
+        void shouldForwardBodyInsideTheLlmContextLimitBand() {
+            // 200001 characters is over the default LLM context-limit threshold
+            // but well inside the 256KB proxy buffer: rejected as
+            // context_limit_exceeded on /v1/messages, forwarded byte-for-byte
+            // here — the pre-check is an LLM data-plane rule only.
+            int target = 200_001;
+            String prefix = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{\"pad\":\"";
+            String suffix = "\"}}";
+            String big = prefix + "x".repeat(target - prefix.length() - suffix.length()) + suffix;
+
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_ALLOWED)).bodyValue(big).exchange()
+                    .expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+            assertThat(mockServer.capturedRequests().get(0).body()).isEqualTo(big.getBytes(StandardCharsets.UTF_8));
+        }
+
+        @Test
         @DisplayName("should reject an unknown MCP service name")
         void shouldRejectUnknownService() {
             byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", "no-such-service")
