@@ -61,6 +61,13 @@ describe('NextTeamsView', () => {
     return mount(NextTeamsView, { global: { plugins: [createPinia()] } });
   }
 
+  /** Hint under a UiInput — the testid falls through to the <input> itself. */
+  function hintOf(wrapper: ReturnType<typeof mountView>, testid: string): string {
+    const field = wrapper.find(`[data-testid="${testid}"]`).element.closest('.ui-field');
+    expect(field, `${testid} should sit inside a field`).toBeTruthy();
+    return field!.querySelector('.ui-field__hint')?.textContent?.trim() ?? '';
+  }
+
   it('renders teams with Chinese statuses and member action', async () => {
     const wrapper = mountView();
     await flushPromises();
@@ -90,6 +97,18 @@ describe('NextTeamsView', () => {
     expect((mockApi.listTeams as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(
       callsBefore,
     );
+  });
+
+  it('states the team name rule on the create form (#657)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="team-create-open"]').trigger('click');
+    await flushPromises();
+
+    // teams.name is varchar(200) NOT NULL — the rule belongs next to the field.
+    expect(hintOf(wrapper, 'team-create-name')).toContain('必填');
+    expect(hintOf(wrapper, 'team-create-name')).toContain('最长 200 个字符');
   });
 
   it('opens the member drawer and removes a member after confirmation', async () => {

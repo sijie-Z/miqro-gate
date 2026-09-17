@@ -130,6 +130,8 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_MAX_INBOUND_HEADER_BYTES` | `32KB` | 入站 Header 上限（G2.6）；Netty 在路由前拒绝超限请求 → `431` |
 | `MIQROKEY_MAX_CONTROL_BODY_BYTES` | `1MB` | 管理 API body 上限 |
 | `MIQROKEY_MAX_PROXY_BUFFER_BYTES` | `256KB` | 只限制必要解析缓冲，不聚合完整响应 |
+| `MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED` | `true` | 请求前置预检开关（#553，`miqrokey.gateway.context-limit.enabled`）：关闭后热路径行为与引入该预检前完全一致 |
+| `MIQROKEY_GATEWAY_CONTEXT_LIMIT_THRESHOLD_CHARS` | `200000` | 请求前置预检阈值（#553，`miqrokey.gateway.context-limit.threshold-chars`，非正值回落默认）：按 UTF-8 码点统计**整个已缓冲 body**（含 JSON 结构、工具 schema、base64），超限 → `413 context_limit_exceeded`，不连接上游。字符数不是 token 数：合法 UTF-8 下是整个 body 的字符上界，**非法 UTF-8 按字节长度计**（严格 UTF-8 校验不通过即整段回退字节数），计数整体不低估（仍受缓冲上限约束）；它不是余额/配额，且会把 200001–262144 字符的请求从「缓冲上限放行」改为 413（刻意收紧，可用 `enabled` / `threshold-chars` 调整）：默认 200000 字符约合 5 万 token 量级，**可能拒绝上游本可接受的请求**，规模更大的工作负载请提高阈值或设 `MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED=false`。只读不重写（转发字节不变）。阈值高于 `MIQROKEY_MAX_PROXY_BUFFER_BYTES` 时由缓冲上限先拒绝（`payload_too_large`）。每 Key 可配置为 #553 的后续项，本版本只支持全局配置 |
 | `MIQROKEY_MAX_CONCURRENT_STREAMS` | `50` | 首版容量目标；不是用户限流策略 |
 | `MIQROKEY_TRUSTED_PROXY_CIDRS` | 空（compose.prod 默认 `172.28.0.0/24`） | 数据面可信反向代理 CIDR（#605，`miqrokey.trusted-proxy.cidrs`）：仅当连接对端命中名单时才消费 `X-Forwarded-For` 记录调用方 IP（从右往左取第一个非可信地址）；空 = 只记录对端地址，请求头永不采信。compose 部署默认信任编排内网段（portal nginx 反代），control-plane 对等配置见 `MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES` |
 | `MIQROKEY_UPSTREAM_ALLOWED_CIDRS` | 空 | SSRF 门控 allowlist（G2.6）：命中这些 CIDR 的目标豁免「非公网地址」与「明文 http」两道拒绝（`127.0.0.0/8, ::1/128` 用于本地自建模型）；空 = 仅接受 https + 公网地址；`userinfo` URL 永不豁免 |
@@ -252,6 +254,8 @@ F15 MCP 访问日志队列（网关数据面）：`miqrokey.gateway.mcp-log.capa
 管理面 OpenAPI（F09）：Control Plane 固定暴露 `GET /v3/api-docs`（OpenAPI 3.1，springdoc，无 swagger-ui）。该端点只读、无需鉴权（文档消费）；基线 `docs/openapi/openapi-3.1.json` 与 CI 破坏性 diff 见 api-contract §8。如生产不希望暴露可后续加 `springdoc.api-docs.enabled=false` 环境开关（本版本未暴露为 `MIQROKEY_` 变量）。
 
 指标标签不得使用用户 ID、完整模型输入、Key、request body 或供应商错误正文等高基数/敏感值。
+
+请求前置预检（#553）在拒绝时计数 `miqrokey_gateway_context_limit_rejected_total`（零标签 counter，与 `miqrokey_gateway_requests_total` 同规矩）；命中日志只含 requestId、路径、实测字符数与阈值，不含 body 内容。
 
 ## 9. Cache（ADR-0009 已启用）
 

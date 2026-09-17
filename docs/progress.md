@@ -2,6 +2,75 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-16（网关请求前置预检 #553）
+
+- **#553 已实现并验证**（分支 `feat/gateway-context-limit-precheck`，自 develop `50a9b24`）；
+  提交 `4582d19`（feat）、`e87a46b`（test）、本批文档提交。语义：鉴权 → 模型授权 → **体量预检**
+  → 缓存 → 上游；超限返回 413 `context_limit_exceeded`，**不连接上游**、不进缓存、不记用量。
+- 度量：对**已缓冲的原始字节**按 UTF-8 码点计数（零分配、单遍、不解析、不重排、不重序列化），
+  合法 UTF-8 下整个序列化 body（含 JSON 结构、工具 schema、base64）都计入，是该 body 的
+  **字符上界**（字符数 ≠ token 数）。**非法 UTF-8（严格校验不通过：孤立续字节、截断、
+  超长编码 C0/C1 与 E0 80、代理项 ED A0、超出 U+10FFFF 的 F4 90/F5…FF）整段回退为字节长度**，
+  字符数不会超过字节数，故计数**整体不低估**——不会低于任何宽松解码器解出的字符数。
+  这类 body 本身不是合法 JSON，且仍受 256KB 缓冲上限约束。该口径由 1–2 字节全穷举
+  （65792 个 body）＋定种子模糊测试（5000 个随机 body）与
+  `250000 × 0x80 字节在默认阈值下必须被拒` 一条边界测试固定。
+- 配置（全局）：`miqrokey.gateway.context-limit.enabled`（默认 true）/
+  `.threshold-chars`（默认 200000，非正值回落默认）；对应环境变量
+  `MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED` / `..._THRESHOLD_CHARS`。**逐 Key 阈值为后续项**
+  （issue 文本为「逐 Key 或全局可调」，本版本取全局）。MCP 数据面两条路径本版本不适用该预检，
+  仍只有既有缓冲上限（`payload_too_large`），已在 `docs/api-contract.md` §7.1 显式记录。
+- 观测：零标签计数器 `miqrokey_gateway_context_limit_rejected_total`；拒绝日志仅含
+  requestId / path / 测量字符数 / 阈值，不含正文。
+- **真实验证（`backend/gateway-app`）**（评审答复轮后重跑；含本轮新增 3 条测试：
+  MCP 大 body 原样直通、413 不写生命周期行、默认阈值下非法 UTF-8 必拒）：
+  1. `.\mvnw.cmd -B -f backend -pl gateway-app -am spotless:check` → BUILD SUCCESS，
+     `Spotless.Java is keeping 105 files clean - 0 needs changes to be clean`。
+  2. `.\mvnw.cmd -B -f backend -pl gateway-app -am test` → BUILD SUCCESS，
+     `Tests run: 348, Failures: 0, Errors: 0, Skipped: 0`，02:36
+     （`ContextLimitPrecheckTest` 10、`ContextLimitGuardTest` 16 = Characters 6 / Threshold 4 /
+     SwitchAndMetric 4 / Defaults 2、`ContextLimitDisabledTest` 3）。
+  3. `.\mvnw.cmd -B -f backend -pl gateway-app -am -Pintegration test -Dtest=ContextLimit*Test,*ProxyContractTest,VirtualKeyAuthContractTest,ContextRegistryIntegrationTest,UsageLifecycleIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false`
+     → BUILD SUCCESS，`Tests run: 184, Failures: 0, Errors: 0, Skipped: 0`，01:23
+     （Testcontainers PostgreSQL 17.6 正常启动；`UsageLifecycleIntegrationTest` 7 含新增
+     「413 不触上游、不写生命周期行」；`McpProxyContractTest$FailureSemantics` 9 含新增
+     「200001 字符 MCP 报文原样转发」；`ContextRegistryIntegrationTest` 4/4）。
+- 五类覆盖对照：① 超限 413 且 mock 上游零请求（三条路径 `/v1/messages`、`/v1/chat/completions`、
+  `/v1/responses`；Anthropic 路径并断言错误信封顶层 `"type":"error"`）② 正常/临界请求字节不变转发
+  ③ 开关关闭行为如旧（`ContextLimitDisabledTest` 3/3）
+  ④ 边界值（`chars <= limit` 放行、+1 拒绝；另含默认阈值 200000 放行 / 200001 拒绝）
+  ⑤ 码点计数单测（ASCII/多字节/emoji/空/非法 UTF-8 回退字节数/永不低估性质测试）；拒绝日志
+  单测断言只含 sizes、不含正文哨兵；⑥ 413 **不触上游且不写生命周期行**（Testcontainers 实测
+  `request_usage_records`：同上下文先有一行成功记录作对照，413 后按标记时间窗内新增 0 行）；
+  ⑦ MCP 数据面 200001 字符报文原样转发（预检只作用于 LLM 数据面）。
+- 行为收紧如实记录：启用后 **200001–262144 字符**（仍在上限 256KB 内）的请求由「缓冲上限放行」
+  变为 `413`——刻意收紧，会同时挡掉同尺寸但上游本可接受的合法请求；已写入
+  `docs/api-contract.md` §7.1、`docs/configuration-reference.md` §5、`docs/security.md`。
+  另记：合规留存旁路（ADR-0014，默认关闭）在预检**之前**捕获 body，故开启留存时被 413 的请求
+  仍可能已按留存策略入库（预检自身不写持久化）；已在 api-contract §7.1 记录。
+- F15 边界如实记录：issue 文本提到「命中记 F15 日志与审计元数据」，本版本以 1 条 WARN
+  （requestId/path/字符数/阈值）+ 零标签计数器替代，**不新增审计元数据记录**——本仓库 F15 为
+  MCP 专用 `mcp_access_log`（V29），LLM 数据面无同等设施，且「不保存正文」红线限制可落库字段。
+  如需「可查询的拒绝审计」，另立后续项，不在本 PR 范围内。
+- 注意：`-pl gateway-app` 不带 `-am` 会从共享 `~/.m2` 取到别条线的旧 `test-support`，
+  导致 surefire「failed to discover tests」；统一加 `-am`。`-Pintegration` 下忽略空 `-Dtest`
+  匹配的属性名是 `-Dsurefire.failIfNoSpecifiedTests=false`。
+
+### 2026-09-16 收尾轮（#553 收口：N1 修复 + 并入新基线）
+
+- 并入 develop 新基线：`git merge origin/develop`（`adfb670`，#695 配额软着陆）→ 合并提交
+  `b8bd715`；无冲突（本分支只改 ContextLimit* 与文档，与配额改动不重叠）。Flyway `V59`
+  归 develop 的配额软着陆，**本分支不新增 migration**。
+- N1 修复提交 `dc6f91e`（`fix(gateway): count malformed UTF-8 bodies as bytes (#553)`）：
+  非法 UTF-8 整段回退字节长度，消除「全续字节 body 计 0 字符」的 fail-open。
+- 验证（合并后真实输出）：`./mvnw -B -f backend -pl gateway-app -am test -Dtest=ContextLimitGuardTest,ContextLimitPrecheckTest,ContextLimitDisabledTest -Dsurefire.failIfNoSpecifiedTests=false`
+  → `Tests run: 29, Failures: 0, Errors: 0, Skipped: 0`（Guard 16 / Precheck 10 / Disabled 3），
+  BUILD SUCCESS，总耗时 37.0 s。
+- 独立 delta 评审（新上下文，只审 `ea3d5cd..dc6f91e` 增量）：**0 BLOCKER，Consensus: APPROVE**；
+  `ProxyController.java` 在该提交内仅 javadoc 与折行（`git diff -w` 只剩注释与参数折行），无逻辑变化。
+  残留编辑性意见：astral 字符按码点计 1、按 UTF-16 码元计 2 属既有口径（文档统一按码点表述），
+  记为后续可选跟进，不阻塞。
+
 ## Current State
 
 - Project phase: `PHASE_1`
@@ -10,7 +79,24 @@
 - Goal status: `IN_PROGRESS（多会话并行推进；已合并进展以 develop git log 为准。在途 PR：#599
   用途标注、#601 留痕控制台、#602 资料页增强；#596/#597 交付与验证细节见下方 09-15 交接点。
   此前 rc.19 审查修复波已全量落地并发布）`
-- Last updated: `2026-09-15 CST`
+- Last updated: `2026-09-16 CST`
+
+## 会话交接点 2026-09-16（#588 留痕查看/导出审计断言补强）
+
+- **#588 验收补强（PR 待提交）**：`RETENTION_LOG_VIEW` / `RETENTION_LOG_EXPORT` 此前**零自动化断言**
+  （此前只出现在 `AdminRetentionLogController`、`docs/api-contract.md` 与前端视图注释中，仓库内无任何测试引用）。新增 `AdminRetentionLogAuditIntegrationTest`
+  （8 例，PostgreSQL Testcontainers）：列表/导出各写且只写一条事件、actor=调用管理员、事件落在调用方
+  tenant、`change_summary` 的 `rows`/`truncated` 口径正确；跨 tenant 行既不下发也不计数；USER 角色 403
+  与匿名 401 均不产生事件；并断言保留正文只出现在响应、绝不出现在审计链（导入真实
+  `KeyEncryptionProvider`，否则该断言真空成立）。
+- 验证：`mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration
+  -Dtest=AdminRetentionLogAuditIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` →
+  `Tests run: 8, Failures: 0, Errors: 0` / BUILD SUCCESS。
+- **附带发现（未修，属产品缺陷，超出本 Goal 范围）**：`GET /api/v1/admin/retention-logs?direction=<非法值>`
+  返回 **500 `INTERNAL_ERROR`** 而非 400。成因：`AdminRetentionLogService` 抛 `ResponseStatusException`，
+  而 `GlobalExceptionHandler` 无该类型 handler，被兜底 `Exception` 分支吞成 500 + ERROR 级日志；同族
+  `MethodArgumentTypeMismatchException` 的 javadoc 明确要求「invalid filter values are rejected, never treated as
+  internal errors」，`DateTimeParseException` 分支同样映射为 400（#475），语义应一致。
 
 ## 会话交接点 2026-09-15（资料页增强 #597 + 用途标签澄清 #596）
 
@@ -3153,6 +3239,147 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 - **#684 配额软着陆（超限拒绝 429）→ PR（ADR-0020）**：从「只算不管」到真闸门——规则级 `action ∈ {ALERT, REJECT}`（默认 ALERT，零回归）；REJECT 规则超限后网关对该用户/项目 429 (`quota_exceeded` + `Retry-After` 窗口结束提示，`/v1/models` 同门)，Key 不失效、提额/跨窗口自动恢复。链路：控制面评估器（60s，共享 `QuotaWatermarks`）→ `quota_enforcement`（V59，整体替换）→ 判定集变化才 pg_notify → 快照两集合 → 网关热路径零查询。并行的配额扩维（#683/#686，COST/YEARLY/NEAR_LIMIT）已先行合入，本批在其之上只做执行面，并同步 api-contract §5.19 / database-schema / configuration-reference / ADR-0020 / F51。
 
+## 2026-09-16 晚间 — 偏好抽屉补缺 #579：折叠菜单开关 + 内容宽度 1200 + 抽屉内边距
+
+**背景**：issue #579（Vben 偏好设置体系——设置抽屉）复核后定三处差距：抽屉内没有折叠菜单开关；主内容宽度固定 1440px（issue 要求 1200px）；抽屉头部内边距统一 20px（issue 要求上下 16px / 左右 24px）。
+
+**交付**（分支 `feat/settings-drawer-gaps-579`）：
+
+- **折叠菜单开关**：`SettingsDrawer.vue` 新增「折叠菜单」分组 + 「折叠侧边栏」开关（`settings-toggle-collapsed`），走既有 `setPreference('collapsed', …)`。该偏好项此前已存在（`preferences.collapsed`，默认 `false`）并由 `NewShell.vue` 消费（`iconOnly = 窄视口 || collapsed`），只是除顶栏按钮外无第二入口——因此本项是接上既有生效链路，不是新增占位开关。
+- **内容宽度 1440 → 1200**：`design-tokens.css` 的 `--ui-content-max`。**改动前已清点全部消费者**：全仓只有 `design-base.css:25`（`.ui-page { max-width: var(--ui-content-max) }`）与 `design-base.css:520`（`[data-compact='wide']` 覆盖为 `100%`）两处；无页面把 1440 硬编码为内容上限（视图/用例里的 `1440` 均为 e2e viewport 设置）。「流式」由 `[data-compact='wide']` 独立覆盖，与固定上限的取值无关，故流式/固定两种行为都不受影响。
+- **抽屉头部内边距**：`ui/Drawer.vue` 的 `.ui-drawer__head` 由 20px 改为 `var(--ui-space-4) var(--ui-space-6)`（16px / 24px），与该组件族的 Vben/antd 度量注释一致。
+- **测试**：`shell-preferences.spec.ts` 新增抽屉开关用例（开关 → 立即折叠侧栏 + 写穿 `localStorage` + 模拟重载后保持）与 `#579 layout contract` 用例族（jsdom 不跑层叠，故解析随包发出的 CSS 源码：断言 `--ui-content-max` 取值、`.ui-page` 确实消费该 token、`wide` 覆盖仍为 100%、抽屉内边距；`var()` 一律解析回 px 取值，改名 token 无法蒙混通过）；`preferences.spec.ts` 的抽屉用例补同一开关。
+
+**验证**：vitest 全量 **59 文件 / 334 用例 PASS**；`vue-tsc`（app/spec/node 三工程）PASS；`vite build` PASS；对本轮 4 个可 lint 的改动文件（`SettingsDrawer.vue`、`ui/Drawer.vue`、`preferences.spec.ts`、`shell-preferences.spec.ts`）跑 `npx eslint <4 files> --ext .vue,.ts` → 退出码 0，`516 problems (0 errors, 516 warnings)`。
+（说明：上述 516 条警告全部来自 `prettier/prettier` 的行尾项——515 条 `Delete ␍` 与 1 条 `Delete ␍⏎␍`。本机为 CRLF 检出而 prettier 期望 LF，`npm run lint` 自带的 `--fix` 会重写全树约 100+ 文件的行尾，故本轮验证改用等价的、不带 `--fix` 的 `npx eslint`。该行尾基线在 `develop` 的 HEAD 上同样成立：未改动的 `src/ui/Button.vue` 单跑亦为 `201 problems (0 errors, 201 warnings)`。）
+
+**边界与影响**：`frontend/e2e/baseline-screenshots/` 为捕获式基线（无像素对比断言），其截图内容宽度仍反映旧的 1440px，本批不重新生成、不影响 CI；`docs/frontend-design.md` 已同步为 1200px；`tokens.css` 的 v1 `--miqrokey-content-max: 1600px` 属旧层，不在本 issue 范围。
+
+### 并入 develop 新基线（2026-09-16）：merge `adfb670`（#695 / #684 配额软着陆）
+
+- 背景与手法：develop 于本日推进到 `adfb670`，本分支（原基于 `50a9b24`）与其冲突。用
+  `git merge origin/develop`（**产生合并提交，非 rebase**）并入基线，本分支改动全部保留。
+- 冲突清单与解法（冲突文件共 **1** 个）：
+  - `docs/progress.md`——两侧都在文件末尾追加：develop 追加 `#684` 小节，本分支追加「2026-09-16 晚间 #579」段。
+    解法：**两边都保留**，develop 段在前、本分支段在后（本分支段逐字未改）。
+    自检（**本条记录写入之前**的解冲突结果）：该结果与 develop 版逐字节比对，差异恰为本分支那 16 行新增段
+    （sha256 `cab4e443…`）；本分支相对 merge-base 的自身改动为 `16 insertions / 0 deletions`，确认未丢内容。
+    本条记录（22 行）写入后，`git diff --numstat adfb670 5d14828 -- docs/progress.md` 为 `38 0` = 16 行本分支段 +
+    22 行本条记录，仍为纯增量；本条记录此后的修订由新提交承载，不计入该数。
+  - 同一区域另有 develop 单侧改动（`待 owner 拍板` → `owner 已拍板（2026-09-16）`）由 git 自动合并——
+    本分支从未改过该行。
+  - 预期中的 `design-tokens.css` / `design-base.css` **未冲突**：develop 的配额执行面改动未触及这两个文件。
+- 复验（2026-09-16，真实命令与结果）：
+  - `npm run typecheck`（vue-tsc app/spec/node 三工程）→ 退出码 0，无错误输出。
+  - `npm run test` → **59 files / 335 tests passed**（较合并前 +1，来自 develop 并入的
+    `NextQuotaRulesView.spec.ts`）。
+  - lint：`npm run lint` 定义为 `eslint . --ext .vue,.ts,.tsx --fix`；本轮以**同一脚本加 `--no-fix`** 运行
+    （`npm run lint -- --no-fix`）→ 退出码 0、`59204 problems (0 errors, 59204 warnings)`：其中 59203 项为
+    `prettier/prettier` 行尾项（CRLF 检出基线），另 1 项为 `vue/no-template-shadow`（`src/components/NewShell.vue:809`
+    的 `Component` 遮蔽；该文件自 merge-base `50a9b24` 至合并结果未改动，属既有告警且不可自动修复）。
+    不用 `--fix` 的原因已实测：`--fix-dry-run` 对未改动的
+    `src/ui/Button.vue` 给出 CR 数 201 → 0 的修复输出（该文件单跑 0 errors），即 `--fix` 会静默重写全树行尾；
+    该命令执行前后（提交前）`git status --porcelain` 均为 42 项，确认无文件被写入（合并提交后工作区为 0 项）。
+
+## 2026-09-16 夜 — 列表信息架构收口 #657：依赖计数列可点击 + 表单规则文案 + 空态 CTA
+
+**背景**：#657（承接上一轮验证线钉到行号的三处缺口）。凭证列表「授权引用」列只读不可跳转、授权列表没有可跳转的过滤入口（`NextGrantsView` 不读 `route.query`）、项目/团队创建表单不写规则（`projects.code/name`、`teams.name` 的宽度与唯一性只在 409 响应体里可见）、`ui/Table.vue` 默认空态不渲染 CTA。范围仅前端：不动后端、不改既有 Flyway 迁移、不动既有 e2e。
+
+**交付**（分支 `feat/list-ia-closeout-657`，5 个源文件 + 7 个 spec，8 个提交）
+- `ui/Table.vue`：新增可选 props `emptyActionLabel` + `emptyActionTo`（`RouteLocationRaw`），二者齐备时默认空态渲染 `router-link.ui-link-action`（`data-testid="table-empty-action"`）；`#empty` 插槽仍优先，`NextKeysView` 的自定义空态不受影响。
+- `next/NextCredentialsView.vue`：计数为 0 时仍是 `<span>`（置灰 `.next-credentials__count-zero`），>0 时渲染 `router-link` 指向 `{ name: 'grants', query: { credentialId } }`；两个分支共用 `data-testid="credential-grant-count"`（该 testid 早于本批存在，断言因此落在同一格上）。旧实现该列恒为 `<span>`，所以「>0 渲染成 `A` 且带 `credentialId`」这条对旧实现是红的；「=0 仍是 `SPAN`」在旧实现上也成立，属回归护栏而非判别式。
+- `next/NextGrantsView.vue`：读 `route.query.credentialId` 做真过滤（按 `upstreamCredentialId` 匹配），工具条显示「共 X 条授权（全部 Y 条）」+ 凭证 chip +「查看全部」清除链接；过滤后列表为空时复用新 CTA 回到全量列表。
+- `next/NextProjectsView.vue` / `next/NextTeamsView.vue`：创建表单用既有 `hint`（`ui-field__hint`）写明后端强制的规则——项目代码「必填，同一租户内唯一，最长 64 个字符。」、项目名「必填，最长 200 个字符。」、团队名「必填，最长 200 个字符。」。逐条对 `AdminOrgService#createProject`/`createTeam` 与 `projects.code/name`、`teams.name` 列宽核对过，无自造约束。
+
+**收口补强**（第二轮，评审驱动）
+- `ui/Table.vue`：显式 `import { RouterLink }`——靠全局注册时，编译器会把 `<router-link>` 的解析提升到 v-if 之上，于是每个嵌 UiTable 的页面（约 30 个视图）即便不渲染 CTA 也要解析一次；clean run 里 43 条 `Failed to resolve component: router-link` 即由此而来，现在为 0（存量 43 条出自 `PageGuide.vue` 与 `NextOverviewView.vue` 自己的模板，不在本批）。
+- `next/NextCredentialsView.vue`：计数链接加 `.next-credentials__count-link`（`padding: 0`），与同列右对齐的数字对齐。
+- `next/NextGrantsView.vue`：`?credentialId=a&credentialId=b` 这类重复参数取首个值（原先当作「无过滤」，URL 说过滤、列表却说全量）；空态文案改用 `scopedFilter`，只在数据确实加载成功时才断言「该凭证还没有被任何授权引用」，加载失败时交给错误提示。
+- `i18n/dict.ts`：5 条 DICT + 2 条 PATTERN，英文界面不再回落中文。
+
+**验证**（真实命令与结果，frontend 目录；均在**最后一次源文件改动之后**重跑过——评审收口轮改了 `next/NextGrantsView.vue` 的注释与 `i18n-copy.spec.ts` 的注释，随后三个命令全部重跑；工作区已还原 lint auto-fix 的改写）
+- `npx vitest run` → exit 0，`Test Files 61 passed (61)` / `Tests 352 passed (352)`，25.29s；`npm run typecheck`（vue-tsc 三工程）→ exit 0；`npm run build` → exit 0，`built in 19.75s`（仅既有 esbuild CSS 压缩告警）。
+- lint 信号按**提交内容**取：13 个改动文件逐个 `git show HEAD:<file> | npx eslint --stdin --stdin-filename <file>` → 逐文件 exit 0，合计 `0 errors, 6 warnings`，全部是 spec 内多组件共存的 `vue/one-component-per-file`（`NextCredentialsView.spec.ts` 2 条、`NextGrantsView.spec.ts` 2 条、`list-ia-deeplink.spec.ts` 2 条）。直接对工作区副本跑 lint 会多出上千条 `Delete ␍`，原因见下条。
+- **EOL 说明（任何人复现上面的 lint 数字前先读这条）**：`.gitattributes` 是 `* text=auto`，Windows 检出的工作区文件默认 CRLF（`frontend/src` 下 37 个文件当前即 `w/crlf`，含本批的 `i18n/dict.ts`、`views/next/NextProjectsView.vue`、`views/next/NextTeamsView.vue`），而 prettier 规则要求 LF，于是对**工作区副本**跑 `npx eslint` 会把它们逐行报 `Delete ␍`（实测 `0 errors, 1110 warnings`）。这不影响提交内容——index 与 HEAD 都是 LF，git 归一后 `git status` 仍干净，`git show HEAD:<file> | npx eslint --stdin --stdin-filename <file>` 对同样三个文件 exit 0、零输出。首轮 `npm run lint` 只报 5 条是同一机制的另一面：脚本带 `--fix`，报出来的数字是自动修复之后的残余（首轮这 5 条都不可自动修）。代价是那批无关文件被**真正改写**，而且不止改 EOL——对**提交内容**跑 `git show HEAD:frontend/src/types/generated.ts | npx eslint --stdin --stdin-filename frontend/src/types/generated.ts` 报 `0 errors, 9721 warnings`（引号风格与缩进），即该文件本就不符合 prettier 规则，`--fix` 必然把它整文件重排。工作区 CRLF 与 autocrlf 无关：本机 `git config core.autocrlf` 为 `false`，CRLF 来自 `.gitattributes` 的 `* text=auto` 在 Windows 上的检出行为。
+- 首轮 `npm run lint` → exit 0，`0 errors, 5 warnings`（4 条 spec 的 `vue/one-component-per-file`、1 条既有 `NewShell.vue` 的 `vue/no-template-shadow`）。
+- 新增/改 spec 7 个：`UiTable.spec.ts`（CTA 仅在 label+to 齐备时渲染、`#empty` 仍优先）、`NextCredentialsView.spec.ts`（计数 >0 是 `A` 且带 `credentialId`、=0 是 `SPAN`）、`NextGrantsView.spec.ts`（`?credentialId=` 真过滤 + chip + 清除链接 + 过滤后空态 CTA + 重复参数 + 加载失败不冒认空态）、`NextProjectsView.spec.ts` / `NextTeamsView.spec.ts`（hint 文案断言）、`i18n-copy.spec.ts`（新增文案过 `translateText` 锁住，改名不再静默丢译文）、`list-ia-deeplink.spec.ts`（真 router：凭证列表渲染真 `router-link` → 路由跳转 → `router-view` 挂载的授权列表按 query 过滤，链接/路由/过滤三者互证，而非各自对 stub 断言）。
+- 全量测试尾部那条 `Not implemented: navigation (except hash changes)` 是既有 jsdom 噪声——单跑本批 spec 时不出现，且在任一 spec 输出之前打印；非失败。
+
+**评审收口（对抗评审轮，交付前）**：独立上下文的评审员只认现场文件与命令输出，结论 **无 blocker、APPROVE**（评审报告不随本批提交，落在仓库外）。6 条 minor 当轮处置：3 修 3 反驳，各自带证据。
+- 修 `next/NextGrantsView.vue` 注释：原写加载失败时错误提示「占据整屏」，实际错误提示是独立的 `ui-alert`、表格仍在下方渲染，改为如实描述。
+- 修本节计数列的判别力描述（原写「测试对旧实现是红的」）：`credential-grant-count` 这个 testid 早于本批存在（`git show origin/develop:frontend/src/views/next/NextCredentialsView.vue` 可见旧列已是带该 testid 的 `<span>`），因此 `=0` 分支在旧实现上同样成立、属回归护栏；判别式是「>0 变链接且带 `credentialId`」与授权列表的过滤/CTA 断言（评审员变异实验：把 `:data` 改回未过滤的 `grants`，`Test Files 6 failed (6)` / `Tests 10 failed | 35 passed (45)`，exit 1）。
+- 修 lint churn 归因，见上一条 EOL 说明。
+- 反驳三条：陈旧基线（评审 diff 取了过期基线，该基线不在交付物内）；`emptyActionTo` 默认值 `''`（`''` 属 `RouteLocationRaw` 的字符串分支，且 CTA 由 label+to 双重 `v-if` 把关，运行时不可达）；英文 `1 grants`（词典规则 `共 N 条授权 → $1 grants` 在 develop 上已存在，i18n 层无复数能力，本批只是在 spec 里锁定既有行为——spec 注释已写明这不是对措辞的背书）。
+- 收口改动后复跑：`npx vitest run` → `Test Files 61 passed (61)` / `Tests 352 passed (352)`；`npm run typecheck` → exit 0；`npm run build` → exit 0，`built in 16.22s`。
+
+**边界与偏差**
+- 未加 `maxlength` 属性：issue 要的是「规则可读」，本次只补文案，不改输入拦截行为。
+- 未动 e2e 与金样；`frontend/dist/` 已被 `.gitignore` 覆盖，构建没有脏化工作区。
+- `frontend/package.json` 的 `lint` 脚本写死 `eslint . --ext .vue,.ts,.tsx --fix`，所以每跑一次都会改写一批与本 issue 无关的文件（含 `types/generated.ts` 的整文件 prettier 重排）——两轮各发生一次，均按路径逐个 `git checkout --` 还原，本批提交 `git show --stat` 只含本批文件。这是仓库既有状态，不是本批引入；收口验证因此不再跑 `npm run lint`，改为按上一节的方式对提交内容取信号（`git show HEAD:<file> | npx eslint --stdin`），既不改写工作区，也不受工作区 EOL 影响。
+
+## 2026-09-16 晚 — #629 设计稿口径归位（docs-only：头名与列名对齐 v1.1 已交付契约）
+
+**背景**：#629 的定性是**设计稿未跟随 v1.1 评审修订**（不是实现漂移）。`docs/activity-context-design.md`（设计稿 v0.1）停在评审前口径——头名 `X-Miqro-Tag`、用量列 `attribution_source`——而实现侧（V54/V55 迁移 + RequestContextResolver）早已按 Spec v1.1 的 R3/R5 落地 `X-Miqro-Project-Id` 与 `resolution_status`/`claimed_*`。设计稿与实现级 Spec 长期并存而 `document-map.md` 对两者**零引用**（本轮已补索引），是该分歧得以存活的土壤。处置取「改文档齐实现」：**零迁移 / 零代码 / 零前端**。
+
+**交付**（分支 docs/activity-context-design-realigned-629，隔离工作树，base（fork 点）develop@50a9b245，收口轮合入 develop@adfb670（合并 `d15b2d5`））——**本段与「验证」段引用的 `:NNN` 为交付时点 `6db7f33` 的行号，「修复轮」各条为修复后的 HEAD 行号；两套基准不同，同一编号可能指向不同内容（如 `:79`：交付时点为门控注记、HEAD 为值域行）**：
+- `docs/activity-context-design.md`：`:4` 状态改 **历史件 / historical** 并链到实现级 Spec；`:46-48` Usage Event 字段表 `attribution_source` → `claimed_project_id`/`resolution_status`/`claim_source`/`claim_confidence`；`:72` 头名 → `X-Miqro-Project-Id: <project-uuid>`（值域为 project UUID，非法值 400 fail-closed，依据 R3/P1）；`:77` 列名与值域对齐 **V54 迁移注释**，声明（未验证输入）与裁定（计费依据）分列（R5/P1），`session_id` 注明纯观测/可空/不参与路由授权；`:106`/`:147`/`:164` 同步改名，迁移注记扩为 **V54 + V55**；`:156` Q3 行改为裁定/声明记录口径。
+- **原「头名敏感词门控」论证降为 `:79` 注记并保留**：适用范围仅限客户端从 settings/env 读取的 `ANTHROPIC_CUSTOM_HEADERS`（静态头降级模式），CAA 主路径的头由本机 Agent 注入、不受门控；若未来启用静态头降级须另选不含 `project/key` 的头名（如 `X-Miqro-Target-Id`）。该约束是未来形态的既有需求，不删。
+- **§5 真机实验记录不回改**：`:117` 实验 1 保留当时真实观测到的 `X-Miqro-Tag: miqi`，仅在结果列追加「（实验用头名；正式契约见 §4.1 → `X-Miqro-Project-Id`）」。
+- 顺带修复 `:6` 既有坏链：`../context-attribution-implementation-spec.md` → `context-attribution-implementation-spec.md`（仓库同级相对链风格，同 `ai-gateway-comparison.md:3`）。
+- `docs/document-map.md` §2 增两行索引：实现级 Spec = 权威实现契约 / 设计稿 = 历史设计稿（无契约效力）。
+- **未改**任何代码、迁移、前端、契约文件。
+
+**验证**（**以下为修复前时点（commit `6db7f33`）**；worktree 内 `git grep -n`，原文入交付报告；计数按**设计稿文件内**口径——本条目自身的叙述性提及不计；修复轮后的行号与计数见本节末）：
+- `git grep -n "X-Miqro-Tag" -- docs/activity-context-design.md` → **1 命中**（`:117` §5 实验记录，附「实验用头名；正式契约见 §4.1」注记），exit 0；
+- `git grep -n "attribution_source" -- docs/activity-context-design.md` → **0 命中**（exit 1）；全仓排除本条目后同为 0 命中——代码/契约/Spec 均无该名；
+- `git grep -n "X-Miqro-Project-Id" -- docs/activity-context-design.md` → **6 命中**（`:72`/`:79`/`:106`/`:117`/`:147`/`:164`）；全仓其余命中均在既有实现/契约件（`RequestContextResolver.java`、`ResolvedContext.java`、契约与测试、`miqro-context/**`、Spec v1.1），另含 `progress.md` 的叙述性提及（本条目自身与既有条目 `:2931`/`:2961`），**无新文件被引入**。
+
+**边界**：仅 `docs/` 下三份文件（设计稿 / document-map / 本条目）。不动 `V54__usage_event_context_columns.sql`、`V55__request_context_evidence.sql`、`RequestContextResolver.java`、`ResolvedContext.java`、`api-contract.md`、`database-schema.md`、`miqro-context/**`、`context-attribution-implementation-spec.md`。设计稿内残余 1 处 `X-Miqro-Tag` 是**实验记录**（非"未改完"），本条目自身的叙述性提及亦计入全仓 grep 命中；§5 记录的时间点事实按实验记录原则保持原样。issue #629 正文自身仍用旧列名，建议由 owner 更新措辞后再关闭。
+
+**修复轮（评审后）**：对上述交付做了一轮独立对抗性评审（评审只看工作树文件与命令原文，不采信作者结论）。逐条回源码/迁移/`gh` 远端复核后，修复 15 处**事实性**问题（仍全部落在 `docs/`）：
+
+- `:4` 交付枚举补 **#641**（`gh` 核实 #633/#639/#641/#645–#648 均已交付）；
+- `:7` 实验脚本指针加注「本机临时路径，未随仓库归档；证据以 §5 表格记录为准」（本机无 D: 盘、仓库内零副本，原文「（可复现）」不可兑现）；
+- `:51` §2 概念字段表后补「上图为概念模型，实现列见 §4.1 与 Spec v1.1 §7.1」（`user_id`/`model`/`cost`/`ts` 并非 `usage_event` 实现列）；
+- `:74` 失败语义精确化：**非 UUID 且在长度域内 → 400 `CONTEXT_INVALID`**；空值/超 64 字符按「未携带」处理（`RequestContextResolver.bounded()` 语义），原文「非法值 400」过宽；
+- `:76` 400 加条件：**未配置未归属策略时 400 `CONTEXT_REQUIRED`**；配置后按策略路由（`POLICY_ROUTED`、落未归属桶，Spec v1.1 §6.3）；
+- `:79` `resolution_status` 值域改为「实现产出 `RESOLVED_HEADER`/`RESOLVED_SUFFIX`/`SOLE_BINDING`/`POLICY_ROUTED` 四值；完整值域另含 `UNATTRIBUTED`/`AMBIGUOUS`」；**不再把 V54 列注释当 `claim_source` 值域权威**（该注释只列 6 值、漏 `git_remote`；权威为 `api-contract.md` §7 阶梯条，共 7 项）；
+- `:81` 门控注记补证据边界：`X-Miqro-Target-Id` 的结论出处为 Spec v1.1 §3.3，**本稿 §5 未单独实验该头名**（原文「已实证」不可兑现）；注记本身**保留未删**；
+- `:112` 无证据分支精确化：**不注入 `X-Miqro-Project-Id`**（客户端 `miqro-context/src/proxy/inject.ts` 仅 RESOLVED 时注入），只发 `X-Miqro-Claim-Status: UNATTRIBUTED`；网关侧策略桶 / 未配置则 400；
+- `:143` §6 处置现状补历史注记：**#615 已 MERGED（`f057fd5`）**，Q0 按 A 线落地，本节「建议 B / 建议关闭 #615」描述过期；
+- `:153` §7 补历史注记：Q0 已定，Q1–Q5 已在 Spec/实现落地，**Q6（per-turn 钩子 / transcript 兜底）未交付**；
+- `:160` Q3 行：`activity_id` **已随 `V54` 落库**（客户端发 `X-Miqro-Activity` 且为合法 UUID 时写入），非「仅预留」——`PostgresUsageEventWriter` 已写入该列；
+- `:167` §8 补历史注记（计划已成历史；实施口径见 Spec §11 与 `docs/caa-next-batch-plan.md`）；
+- `:170` 迁移口径拆开：**V54 = `usage_event` 上下文列；V55 = 证据审计表 `request_context_evidence`**（原文把 V55 并入「上下文列」）；
+- `docs/document-map.md:35` 去掉「上一行 Spec」位置指针 → 改写成文件名；「仅补实验证据」→「仅补实验证据与历史注记」；
+- grep 计数口径收紧为**被检文件内**计数（原文未说明是否含本条目自身叙述性提及，易生歧义）。
+
+**修复轮后验证**：`git grep -n "X-Miqro-Tag" -- docs/activity-context-design.md` → **1 命中**（`:119` §5 实验记录，附「实验用头名」注记）；`git grep -n "attribution_source" -- docs/activity-context-design.md` → **0 命中**（exit 1）；`git grep -n "X-Miqro-Project-Id" -- docs/activity-context-design.md` → **7 命中**（`:74`/`:81`/`:108`/`:112`/`:119`/`:149`/`:170`）；`git diff --check` exit 0。
+
+**第二轮修复（2026-09-16，口径归位 · 与主交付同 PR）**：
+
+- `activity-context-design.md:46` 概念结构体补 `activity_id?`——V54 实列（`V54:12`）且同文件 `:170` 已列，此前 6 个上下文列里独缺此列。
+- `:106` 规则表产出「项目标签」→「项目 UUID」——与下一行 `:108` 的 `X-Miqro-Project-Id: <project-uuid>` 及 `:74` 的 UUID 值域一致（原文按字面实现会产出非 UUID，触发 400 `CONTEXT_INVALID`）。
+- `:167` 交付枚举补 `#641`——与 `:4` 的 `#633 / #639 / #641 / #645–#648` 对齐（同一文档内两处枚举不一致）。
+
+**第三轮修复（2026-09-16，对抗性复核驱动 · 与主交付同 PR）**：
+
+- `activity-context-design.md:79` 「完整值域另含 `UNATTRIBUTED`/`AMBIGUOUS`」补实现边界：V54 列注释（`V54:24-25`）与 Spec §7.1（`:253`）各列 6 值，而 `RequestContextResolver` 只产出 4 值，两值在实现中仅作 `X-Miqro-Claim-Status` 声明头取值/未归属桶语义。
+- `:79` 「审计可还原每笔归属的判定依据」原文过宽：`publishUsageEvent` 只在放行且完成的路径调用（`ProxyController.java:529`），网关侧拒绝不落 `usage_event` 行；`request_context_evidence`（`V55`）全仓无 Java 写入方/读取方 → 已就地标明边界。
+- `:81` 门控适用范围由「通道 A/B」改为按**机制**表述（`ANTHROPIC_CUSTOM_HEADERS` 形态）：§4.2 的 E（企业 managed 下发）同样下发客户端读的静态头，原枚举自相矛盾；C（`apiKeyHelper` 动态 `headers`）是否有门控本仓无证据，明写「未验证」。
+- `:167` 「客户端参考实现与演示闭环均已交付」收窄为实际交付形态（#639 `miqro-context` 安装式 Agent），并点明 step 1（干净环境复核实验 3/5）与 step 3（`apiKeyHelper`+`PostToolUse` 脚本、接入面板）未按原样交付——`接入面板` 从未交付（设计稿内共 2 处：step 3 原计划行 `:171` 与本注记 `:167`；其余命中均为 `progress.md` 内本审计条目对它的转述；无实现或设施引用）。
+- `document-map.md:34` 限定 Spec 的权威面：列取值域/物理形态归 `database-schema.md`/`api-contract.md`（Spec §7.1 `claim_source` 清单缺 `git_remote`，滞后于实现）。
+- 本条目的**全仓计数口径**自洽化：`:3171` 原文「全仓其余命中均在既有实现/契约件（…）」未列本条目自身的叙述性命中，已补入（与本节「边界」段一致）。
+- **不在本 PR 范围的既有遗留**（均已逐行核对，未改）：① `context-attribution-implementation-spec.md:115` 称 `X-Miqro-Target-Id`「已实证可通过门控」，本仓无对应实验件（设计稿 §5 未单独实验该头名），该文件本轮禁改；② `miqro-context/README.md:113` 把设计稿列为并列规格、无历史件标注（该目录本轮禁改）；③ `decisions/0018-single-key-multi-project.md:62`/`:95` 的「后缀 = 唯一选择器、零猜测」与 Spec v1.1 **R3**（头名优先、后缀兜底）口径反转，该 ADR 仅 `:112` 有 #633 的枚举探测修订、D2/D8 无指向 R3 的修订注记——属 ADR 治理事项，建议由 owner 另开；④ `V55__request_context_evidence.sql:5` 头部注释称「网关在 Context 解析时写入；供审计与事后重分类」，而该表在 Java 侧零引用（`git grep -n "request_context_evidence" -- "*.java"` 无输出，既无写入方也无读取方），注释与实现不符——该迁移文件本轮禁改，建议随 ①–③ 一并开 follow-up。
+
+- **第五轮修复（2026-09-16，收尾交叉核对驱动 · 与主交付同 PR）**：① 前述修复轮条目中两处**注记行号漂移**按 HEAD 校正（`:151`→`:153`、`:165`→`:167`，与 `:3199`/`:3206` 对同一注记的引用对齐）；② `:3171` 全仓计数枚举补 `progress.md` 既有条目（`:2931`/`:2961`）；③ `:3206` 的「`接入面板` 全仓仅此一处提及」纠正为按文件枚举的实际分布（设计稿内 2 处：step 3 原计划行 `:171`、`§8` 注记 `:167`；其余命中均为 `progress.md` 内本审计条目的转述）。以上均为**行数不变**的就地替换，本条目其余行号引用不受影响。
+
+- **第六轮修复（2026-09-16，自查驱动 · 与主交付同 PR）**：重生成收口证据、逐条读原始输出时发现一处**自伤计数**——第五轮把 `:3206` 改写为「全仓命中 3 处」并在同一次提交追加了含该词的注记，而该注记自身就是第 4 处命中，故「3 处」在其写入的提交（`a39caa1`）里即已为假。两处（`:3206` 与第五轮注记第 ③ 条）改为**按文件枚举分布**（设计稿内 2 处：step 3 原计划行 `:171`、`§8` 注记 `:167`；其余命中均为本审计条目的转述），自指命中无法再使其失真。仍为行数不变的就地替换。
+
+- **第七轮修复（2026-09-16，独立主评审回执驱动 · 与主交付同 PR）**：独立主评审（全新上下文、逐条复跑命令、结论 **0 blocker / 3 minor**）与本地自查在同一点会合——① **行号基准混用**（评审 M2）：本条目「交付」「验证」段引用的是交付时点 `6db7f33` 的行号，「修复轮」各条引用的是修复后 HEAD 的行号，同一编号在两套基准下可能指向不同内容（`:79` 在交付时点是门控注记、在 HEAD 是值域行），已在交付段头部就地声明两套基准；② 评审 M1：`docs/document-map.md:35` 的「关键处已加「历史注记」」收敛为按处枚举（状态行、Q0、Q 表、§8 计划处）；③ 评审 M3：边界段补登记第 ④ 项既有遗留（`V55__request_context_evidence.sql:5` 头部注释称「网关在 Context 解析时写入」，而该表在 Java 侧零引用）。评审另两条记录性说明（hunk 形状与任务书预期不符系多轮就地编辑所致；前轮计数自洽问题已在第五/六轮闭环）无需动作。①②③ 均为行数不变的就地替换。
+
+- **第八轮修复（2026-09-16，增量复核回执驱动 · 与主交付同 PR）**：增量独立复核（对象为第七轮前的 HEAD `c71187c`，结论 **通过 / 0 blocker / 2 minor**）两条编辑性建议均已按原文采纳——① m1：交付段「base develop@50a9b245」补记为「base（fork 点）develop@50a9b245，收口轮合入 develop@adfb670（合并 `d15b2d5`）」，两套口径并存（`git merge-base origin/develop 6db7f33` 为 fork 点、`git merge-base origin/develop HEAD` 为收口基准）；② m2：第二轮修复条目「`:106` 与紧邻 `:108`」改为「与下一行 `:108`」（`:107` 为空行，实测复核一致）。两条均为行数不变的就地替换。
+
 ## 2026-09-16 晚间 — #245 F07 告警接线：队列饱和（V60 事实表 + 控制面评估 + 类型注册）
 
 **背景**：F07 三类告警指标里，只有「用量队列饱和」缺数据源——网关侧只有进程内计数与无标签 gauge，没有任何可查事实。issue 原始候选「网关直接写 `alert_events`」被否：`AlertEventDispatcher` 只扫「已有失败投递次数」的行，网关插入的新行永远不会被投递。改为 **网关写事实表 → 控制面 `AlertEvaluator` 评估 → 既有签名/去重/退避/投递链路**。租户承载口径：全局信号固定由默认（seed）租户承载，评估 SQL 按规则自身 `tenant_id` 过滤，**非 seed 租户的同类型规则在正阈值下恒不触发**（其窗口恒为零行、`COALESCE(SUM(dropped),0)` 恒为 `0`，评估为 `value >= threshold` 才触发）；阈值 `<= 0` 服务端不校验，会在每个去重窗口以 `value = 0` 触发一次——退化行为，但 value 仍是该租户自己的零值，不泄漏平台丢弃数（有专门的固定用例）。
@@ -3179,3 +3406,4 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - V60 的 `CHECK (dropped > 0)` 使「零丢弃行」不可表示，因此零值边界用例的诚实等价物是「窗口内无行 → `SUM=0` → 不触发」，另加断言证明 schema 拒绝零丢弃行。
 - 阈值口径（窗口内丢弃条数）**未由 owner 确认**；`WRITE_THROUGH` 模式不产生该告警（饱和表现为发布线程停滞而非丢弃）；「解析失败」仍未与「上游 200 无 usage 字段」区分（沿用 `USAGE_MISSING_RATE`）；F07 其余类型（Plan 同步、磁盘）仍 SCAFFOLD。
 - 前端 `lint` 脚本自带 `--fix`，在本机 CRLF 检出下会改写约 145 个非本批文件的换行（其中约 23 个存在真实规范化差异，含 `types/generated.ts` 全文重排）；已整树备份到仓库外后 `git checkout -- .` 还原，只保留本批两文件的规范化改动。仓库既有属性，非本批引入。
+
