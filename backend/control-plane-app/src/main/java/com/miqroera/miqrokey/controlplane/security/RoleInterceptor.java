@@ -31,7 +31,9 @@ public class RoleInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
             throws Exception {
-        String path = request.getRequestURI();
+        // #723: decide on the same normalized path the handler matcher routed on —
+        // the raw URI keeps semicolon content and would skip this gate.
+        String path = RequestPaths.lookupPath(request);
 
         // Deny-by-default: all /api/v1/admin/** require SYSTEM_ADMIN
         if (path.startsWith("/api/v1/admin/")) {

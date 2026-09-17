@@ -65,7 +65,7 @@ public class SessionFilter implements Filter {
             throws IOException, ServletException {
         HttpServletRequest httpReq = (HttpServletRequest) request;
         HttpServletResponse httpRes = (HttpServletResponse) response;
-        String path = httpReq.getRequestURI();
+        String path = RequestPaths.lookupPath(httpReq);
 
         // Skip public paths
         if (isPublicPath(path)) {
@@ -85,8 +85,7 @@ public class SessionFilter implements Filter {
             // channel (/api/v1/billing) via ApiKeyAuthFilter and the open admin
             // surface (/api/v1/admin-api, ADR-0015) via AdminApiKeyAuthFilter —
             // let both through here, they enforce their own credentials.
-            if (httpReq.getRequestURI().startsWith(ApiKeyAuthFilter.BILLING_PATH)
-                    || httpReq.getRequestURI().startsWith(AdminApiKeyAuthFilter.OPEN_PATH)) {
+            if (path.startsWith(ApiKeyAuthFilter.BILLING_PATH) || path.startsWith(AdminApiKeyAuthFilter.OPEN_PATH)) {
                 chain.doFilter(httpReq, httpRes);
                 return;
             }

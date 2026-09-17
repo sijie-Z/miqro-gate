@@ -64,7 +64,7 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        String path = request.getRequestURI();
+        String path = RequestPaths.lookupPath(request);
         if (!path.startsWith(OPEN_PATH)) {
             chain.doFilter(request, response);
             return;
@@ -122,7 +122,7 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
         if (capabilities == null) {
             return true;
         }
-        String required = capabilityFor(request.getRequestURI());
+        String required = capabilityFor(RequestPaths.lookupPath(request));
         return required != null && capabilities.contains(required);
     }
 
@@ -153,7 +153,7 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
             return;
         }
         auditService.record((UUID) tenantId, (UUID) issuer, "ADMIN_API_KEY_SCOPE_DENIED", "ADMIN_API_KEY", (UUID) keyId,
-                "{\"path\":\"" + safeJson(request.getRequestURI()) + "\"}", null);
+                "{\"path\":\"" + safeJson(RequestPaths.lookupPath(request)) + "\"}", null);
     }
 
     private static String safeJson(String value) {

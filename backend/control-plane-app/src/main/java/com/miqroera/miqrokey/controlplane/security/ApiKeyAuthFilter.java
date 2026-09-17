@@ -48,7 +48,7 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        String path = request.getRequestURI();
+        String path = RequestPaths.lookupPath(request);
         if (!path.startsWith(BILLING_PATH)) {
             chain.doFilter(request, response);
             return;
