@@ -14,9 +14,17 @@ import java.util.UUID;
  * Pure cost/usage aggregation for the tiered statistics model.
  *
  * <p>
- * This class performs NO I/O — the caller supplies aggregated rows and a price
- * lookup, and receives a ready-to-serialize summary. All cost math is
- * deterministic and unit-testable without a database.
+ * This class performs NO I/O — the caller supplies aggregated rows (each
+ * already carrying the cost its own frozen prices produce) and receives a
+ * ready-to-serialize summary. All cost math is deterministic and unit-testable
+ * without a database.
+ * </p>
+ *
+ * <p>
+ * It no longer takes a price table: a group's rows can hold different prices,
+ * so its cost cannot be recomputed from the group's token totals. What it does
+ * instead is keep "could not be priced" visible — see {@link PricingStatus} and
+ * {@link PricingGap}.
  * </p>
  *
  * <h2>Cost accounting (口径)</h2>
@@ -28,7 +36,8 @@ import java.util.UUID;
  * <li>{@code projectAllocated} — v1 simplification: equals
  * {@code gatewayObserved} (分摊 to the binding project of each request).</li>
  * <li>{@code savedByGatewayCache} — tokens served from cache (hit count × the
- * cached response's original usage) valued at the same price table.</li>
+ * cached response's original usage), valued at the price in force when those
+ * hits happened.</li>
  * </ul>
  *
  * <h2>Token mapping</h2> Protocol-agnostic: input = primary input tokens
@@ -37,15 +46,77 @@ import java.util.UUID;
  * breakpoints map to {@code CACHE_READ} / {@code CACHE_CREATION} rates.
  *
  * <h2>Pricing</h2> {@code unitPrice} is per 1,000,000 tokens; cost is
- * {@code tokens × unitPrice / 1e6}. Prices are keyed
- * {@code productId:modelId:TOKEN_TYPE}.
+ * {@code tokens × unitPrice / 1e6} (see {@link #dividePerMillion}). Each row is
+ * valued at the price in force when it happened, which the SQL layer resolves.
  */
 public final class UsageStatsAggregator {
 
     private static final BigDecimal PER_MILLION = new BigDecimal("1000000");
     private static final MathContext MC = MathContext.DECIMAL128;
 
+    /**
+     * Undivided {@code tokens × unit_price} → money, at the one rounding every cost
+     * path uses.
+     *
+     * <p>
+     * Public so the price-basis backfill divides identically. Two copies of this
+     * arithmetic would eventually disagree in the last digits, and a stored
+     * {@code base_cost_amount} that disagrees with the amount a summary computes is
+     * worse than either alone.
+     * </p>
+     */
+    public static BigDecimal dividePerMillion(BigDecimal undivided) {
+        return undivided == null ? BigDecimal.ZERO : undivided.divide(PER_MILLION, MC);
+    }
+
     private UsageStatsAggregator() {
+    }
+
+    /**
+     * How completely a group's usage could be priced (#710).
+     *
+     * <p>
+     * This is the field that makes a cost of zero unambiguous. {@code COMPLETE}
+     * with a zero cost means the price genuinely was zero; {@code UNAVAILABLE} with
+     * a zero cost means nothing could be priced at all. Collapsing the two is how
+     * "unknown" starts reading as "free".
+     * </p>
+     */
+    public enum PricingStatus {
+        /** Every token dimension that took part in the calculation had a price. */
+        COMPLETE,
+        /** Some dimensions priced, at least one not. */
+        PARTIAL,
+        /** Nothing could be priced — no price was in force when the usage happened. */
+        UNAVAILABLE
+    }
+
+    /**
+     * Tokens a group could <b>not</b> price, plus how many events that touched
+     * (#710).
+     *
+     * <p>
+     * Reported alongside the known cost rather than folded into it: an amount that
+     * omits unpriced usage is not a total, and presenting it as one would overstate
+     * how much of the window is actually accounted for. Token counts are per
+     * dimension because that is where the gaps are — in the reference window the
+     * shortfall sat almost entirely in {@code cache_read}.
+     * </p>
+     */
+    public record PricingGap(long inputTokens, long outputTokens, long cacheReadTokens, long cacheCreationTokens,
+            long unpricedEvents, long unavailableEvents) {
+
+        public static final PricingGap NONE = new PricingGap(0, 0, 0, 0, 0, 0);
+
+        public PricingGap plus(PricingGap other) {
+            return new PricingGap(inputTokens + other.inputTokens, outputTokens + other.outputTokens,
+                    cacheReadTokens + other.cacheReadTokens, cacheCreationTokens + other.cacheCreationTokens,
+                    unpricedEvents + other.unpricedEvents, unavailableEvents + other.unavailableEvents);
+        }
+
+        public boolean isEmpty() {
+            return unpricedEvents == 0;
+        }
     }
 
     /**
@@ -63,7 +134,7 @@ public final class UsageStatsAggregator {
      */
     public record UsageAggRow(String groupKey, String label, UUID productId, String modelId, CacheLevel cacheLevel,
             long requests, TokenBucket tokens, BigDecimal inputCost, BigDecimal outputCost, BigDecimal cacheReadCost,
-            BigDecimal cacheCreationCost) {
+            BigDecimal cacheCreationCost, PricingGap pricingGap) {
     }
 
     /**
@@ -85,8 +156,17 @@ public final class UsageStatsAggregator {
             BigDecimal cacheReadCost, BigDecimal cacheCreationCost) {
     }
 
-    /** Group-level aggregate. */
-    public record GroupSummary(String groupKey, String label, Requests requests, Tokens tokens, Cost cost) {
+    /**
+     * Group-level aggregate.
+     *
+     * <p>
+     * {@code cost} holds only what the price basis supports — see
+     * {@link #pricingStatus} and {@link #unpriced}. When the status is not
+     * {@code COMPLETE} this amount is <b>not</b> a total.
+     * </p>
+     */
+    public record GroupSummary(String groupKey, String label, Requests requests, Tokens tokens, Cost cost,
+            PricingStatus pricingStatus, PricingGap unpriced) {
     }
 
     public record Requests(long upstream, long coalesced, long l1Hit, long l2Hit) {
@@ -157,6 +237,7 @@ public final class UsageStatsAggregator {
         private BigDecimal upstreamPaid = BigDecimal.ZERO;
         private BigDecimal gatewayObserved = BigDecimal.ZERO;
         private BigDecimal savedByGatewayCache = BigDecimal.ZERO;
+        private PricingGap unpriced = PricingGap.NONE;
 
         private GroupAccumulator(String groupKey, String label) {
             this.groupKey = groupKey;
@@ -193,6 +274,7 @@ public final class UsageStatsAggregator {
             cacheReadTokens += cacheRead;
             cacheCreationTokens += cacheCreation;
 
+            unpriced = unpriced.plus(row.pricingGap());
             BigDecimal rowCost = toCost(row.inputCost()).add(toCost(row.outputCost())).add(toCost(row.cacheReadCost()))
                     .add(toCost(row.cacheCreationCost()));
             gatewayObserved = gatewayObserved.add(rowCost);
@@ -223,17 +305,37 @@ public final class UsageStatsAggregator {
 
         /**
          * Undivided {@code tokens × unit_price} → money. Absent means the row carried
-         * no price, which has always been charged as zero ("no price snapshot — 0 cost
-         * until priced").
+         * no price, which contributes nothing to <b>known</b> cost — the tokens are
+         * reported as unpriced instead, see {@link PricingGap}.
          */
         private static BigDecimal toCost(BigDecimal undivided) {
-            return undivided == null ? BigDecimal.ZERO : undivided.divide(PER_MILLION, MC);
+            return dividePerMillion(undivided);
         }
 
         GroupSummary toSummary() {
             return new GroupSummary(groupKey, label, new Requests(upstream, coalesced, l1Hit, l2Hit),
                     new Tokens(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens),
-                    new Cost(upstreamPaid, gatewayObserved, gatewayObserved, savedByGatewayCache));
+                    new Cost(upstreamPaid, gatewayObserved, gatewayObserved, savedByGatewayCache), pricingStatus(),
+                    unpriced);
+        }
+
+        /**
+         * Whether {@link #upstreamPaid} / {@link #gatewayObserved} are totals or only
+         * partial.
+         *
+         * <p>
+         * Only usage rows are judged here; cache-hit rows are valued separately and are
+         * not yet covered by the gap counter (follow-up).
+         * </p>
+         */
+        private PricingStatus pricingStatus() {
+            if (unpriced.isEmpty()) {
+                return PricingStatus.COMPLETE;
+            }
+            long counted = upstream + coalesced;
+            return counted > 0 && unpriced.unavailableEvents() >= counted
+                    ? PricingStatus.UNAVAILABLE
+                    : PricingStatus.PARTIAL;
         }
 
         void mergeFrom(GroupAccumulator other) {
@@ -248,6 +350,7 @@ public final class UsageStatsAggregator {
             upstreamPaid = upstreamPaid.add(other.upstreamPaid);
             gatewayObserved = gatewayObserved.add(other.gatewayObserved);
             savedByGatewayCache = savedByGatewayCache.add(other.savedByGatewayCache);
+            unpriced = unpriced.plus(other.unpriced);
         }
     }
 
