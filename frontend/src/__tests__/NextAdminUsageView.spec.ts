@@ -4,7 +4,9 @@ import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextAdminUsageView from '@/views/next/NextAdminUsageView.vue';
 import * as api from '@/api';
+import { ApiError } from '@/api/http';
 import type {
+  ModelCallTimeline,
   UsageGroup,
   UsageRecordPage,
   UsageSummary,
@@ -15,6 +17,7 @@ vi.mock('@/api', () => ({
   adminUsageSummary: vi.fn(),
   adminUsageRecords: vi.fn(),
   adminUsageHourly: vi.fn(),
+  adminUsageTimeline: vi.fn(),
   listTeams: vi.fn(),
   listUsers: vi.fn(),
   listProjects: vi.fn(),
@@ -154,6 +157,61 @@ const hourlyReport: HourlyUsageReport = {
 
 function summaryCalls() {
   return mockApi.adminUsageSummary.mock.calls.map(([query]) => query);
+}
+
+// --- #707 model-call timeline fixtures -------------------------------------
+
+/** A fully observed, successful call: all three milestones, a TTFB, no retry. */
+function timelineFor(
+  status: string,
+  overrides: Partial<ModelCallTimeline> = {},
+): ModelCallTimeline {
+  return {
+    gatewayRequestId: 'gw-3',
+    upstreamRequestId: 'upstream-9f2',
+    modelId: 'deepseek-v4-flash',
+    wireProtocol: 'OPENAI_CHAT',
+    streaming: true,
+    status,
+    httpStatus: 200,
+    clientCancelled: false,
+    partialResponse: false,
+    retryCount: 0,
+    startedAt: '2026-09-03T08:03:00Z',
+    firstByteAt: '2026-09-03T08:03:00.820Z',
+    completedAt: '2026-09-03T08:03:02.140Z',
+    durationMs: 2140,
+    timeToFirstByteMs: 820,
+    tokens: { input: 512, output: 128, cacheRead: 300, cacheCreation: 800 },
+    attribution: {
+      userId: '11111111-1111-1111-1111-111111111111',
+      projectId: '22222222-2222-2222-2222-222222222222',
+      virtualKeyId: '33333333-3333-3333-3333-333333333333',
+      providerId: '44444444-4444-4444-4444-444444444444',
+      providerProductId: '55555555-5555-5555-5555-555555555555',
+      credentialId: '66666666-6666-6666-6666-666666666666',
+    },
+    phases: [
+      { key: 'ACCEPTED', label: '受理', at: '2026-09-03T08:03:00Z', elapsedMs: 0 },
+      { key: 'FIRST_BYTE', label: '上游首字节', at: '2026-09-03T08:03:00.820Z', elapsedMs: 820 },
+      { key: 'COMPLETED', label: '完成', at: '2026-09-03T08:03:02.140Z', elapsedMs: 2140 },
+    ],
+    ...overrides,
+  };
+}
+
+/** Mirrors the view's local-time rendering, so a fixture timestamp assertion
+ * does not depend on the machine's timezone. */
+function localStamp(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function drawerEl(testid: string): Element | null {
+  return document.querySelector(`[data-testid="${testid}"]`);
 }
 
 describe('NextAdminUsageView', () => {
@@ -334,5 +392,149 @@ describe('NextAdminUsageView', () => {
     await wrapper.find('[data-testid="hourly-days-7"]').trigger('click');
     await flushPromises();
     expect(mockApi.adminUsageHourly).toHaveBeenLastCalledWith(expect.objectContaining({ days: 7 }));
+  });
+
+  it('opens the call timeline drawer from the request ID column (#707)', async () => {
+    mockApi.adminUsageTimeline.mockResolvedValue(timelineFor('SUCCEEDED'));
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="usage-timeline-gw-3"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.adminUsageTimeline).toHaveBeenCalledWith('gw-3');
+    const drawer = drawerEl('usage-timeline-drawer');
+    expect(drawer, 'timeline drawer should render').toBeTruthy();
+
+    // tier 1: terminal badge, total duration, and the "where it stopped" line
+    const hero = drawerEl('usage-timeline-hero')!;
+    expect(hero.textContent).toContain('成功');
+    expect(hero.textContent).toContain('2.14 s');
+    expect(hero.textContent).toContain('三个阶段齐备');
+
+    // every phase carries the timestamp and the elapsed delta of the payload
+    const phases = drawerEl('usage-timeline-phases')!;
+    expect(phases.textContent).toContain('受理');
+    expect(phases.textContent).toContain('上游首字节');
+    expect(phases.textContent).toContain('完成');
+    expect(phases.textContent).toContain(localStamp('2026-09-03T08:03:00Z'));
+    expect(phases.textContent).toContain('起点');
+    expect(phases.textContent).toContain('+820 ms');
+    expect(phases.textContent).toContain('+2.14 s');
+    expect(phases.textContent).not.toContain('缺失');
+
+    // tier 2: TTFB / retries / partial response / HTTP status
+    expect(drawerEl('usage-timeline-metrics')).toBeTruthy();
+    expect(drawerEl('usage-timeline-ttfb')!.textContent).toContain('820 ms');
+    expect(drawerEl('usage-timeline-retries')!.textContent).toContain('0 次');
+    expect(drawerEl('usage-timeline-partial')!.textContent).toContain('否');
+    expect(drawerEl('usage-timeline-http')!.textContent).toContain('200');
+
+    // tier 3 is collapsed by default; its content is still readable on demand
+    const details = drawerEl('usage-timeline-details') as HTMLDetailsElement | null;
+    expect(details).toBeTruthy();
+    expect(details!.open).toBe(false);
+    expect(details!.textContent).toContain('upstream-9f2');
+    expect(details!.textContent).toContain('11111111');
+    expect(details!.textContent).toContain('OPENAI_CHAT');
+    expect(details!.textContent).toContain('流式');
+    expect(details!.textContent).toContain('512');
+    expect(details!.textContent).toContain('800');
+
+    // metadata only — no payload ever reaches the drawer
+    expect(drawer!.textContent).toContain('仅元数据');
+
+    wrapper.unmount();
+  });
+
+  it('marks unobserved phases as missing instead of inventing timestamps (#707)', async () => {
+    mockApi.adminUsageTimeline.mockResolvedValue(
+      timelineFor('CLIENT_CANCELLED', {
+        firstByteAt: undefined,
+        completedAt: undefined,
+        durationMs: undefined,
+        timeToFirstByteMs: undefined,
+        partialResponse: true,
+        phases: [{ key: 'ACCEPTED', label: '受理', at: '2026-09-03T08:03:00Z', elapsedMs: 0 }],
+      }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="usage-timeline-gw-3"]').trigger('click');
+    await flushPromises();
+
+    // a cancelled call recorded only 受理 — the absence is the diagnosis
+    const firstByte = drawerEl('usage-timeline-phase-FIRST_BYTE')!;
+    expect(firstByte.textContent).toContain('缺失');
+    expect(firstByte.textContent).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+    expect(drawerEl('usage-timeline-phase-COMPLETED')!.textContent).toContain('缺失');
+
+    const accepted = drawerEl('usage-timeline-phase-ACCEPTED')!;
+    expect(accepted.textContent).toContain('起点');
+    expect(accepted.textContent).toContain(localStamp('2026-09-03T08:03:00Z'));
+
+    // the headline states the terminal and where the call stopped
+    const hero = drawerEl('usage-timeline-hero')!;
+    expect(hero.textContent).toContain('客户端取消');
+    expect(hero.textContent).toContain('调用方在响应写完前断开');
+    // un-measured values stay blank rather than being faked as 0
+    expect(drawerEl('usage-timeline-duration')!.textContent).toContain('—');
+    expect(drawerEl('usage-timeline-ttfb')!.textContent).toContain('—');
+    expect(drawerEl('usage-timeline-partial')!.textContent).toContain('是');
+
+    wrapper.unmount();
+  });
+
+  it('explains a 404 as "nothing to replay" instead of raising an error (#707)', async () => {
+    mockApi.adminUsageTimeline.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: '未找到该请求的调用记录。',
+        status: 404,
+        code: 'REQUEST_NOT_FOUND',
+        detail: '未找到该请求的调用记录。',
+        requestId: 'req-404',
+      }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="usage-timeline-gw-5"]').trigger('click');
+    await flushPromises();
+
+    const note = drawerEl('usage-timeline-missing');
+    expect(note, 'the 404 hint should render').toBeTruthy();
+    expect(note!.textContent).toContain('没有可回放的调用留痕');
+    expect(note!.textContent).toContain('缓存命中');
+    // a missing lifecycle row is an explanation, never an error banner
+    expect(drawerEl('usage-timeline-error')).toBeNull();
+    expect(drawerEl('usage-timeline-hero')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('renders every lifecycle terminal plus the un-finalized state (#707)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const terminals: Array<[string, string]> = [
+      ['SUCCEEDED', '成功'],
+      ['CLIENT_CANCELLED', '客户端取消'],
+      ['STREAM_INTERRUPTED', '流中断'],
+      ['TIMEOUT_BEFORE_FIRST_BYTE', '首字节前超时'],
+      ['UPSTREAM_REJECTED', '上游拒绝'],
+      ['UPSTREAM_UNAVAILABLE', '上游不可用'],
+      ['IN_FLIGHT', '未结算'],
+    ];
+
+    for (const [status, label] of terminals) {
+      mockApi.adminUsageTimeline.mockResolvedValue(timelineFor(status));
+      await wrapper.find('[data-testid="usage-timeline-gw-3"]').trigger('click');
+      await flushPromises();
+      expect(drawerEl('usage-timeline-status')!.textContent, status).toContain(label);
+    }
+
+    wrapper.unmount();
   });
 });

@@ -62,6 +62,7 @@ import type {
   UserResponse,
   UsageSummary,
   HourlyUsageReport,
+  ModelCallTimeline,
   ValidateCredentialResponse,
   VirtualKeyView,
   WebhookDelivery,
@@ -1163,6 +1164,17 @@ export function adminUsageHourly(query: {
     if (value !== undefined && value !== '') params.set(key, String(value));
   }
   return get<HourlyUsageReport>(`/api/v1/admin/usage/hourly?${params.toString()}`);
+}
+
+/**
+ * #707: one model call's lifecycle timeline, keyed by the gateway request ID
+ * (#705). 404 means there is nothing to replay for that id — the lifecycle
+ * table only covers calls that actually reached upstream, so coalesced and
+ * cache-hit requests are expected to miss. Callers render that as a hint, not
+ * an error.
+ */
+export function adminUsageTimeline(gatewayRequestId: string): Promise<ModelCallTimeline> {
+  return get<ModelCallTimeline>('/api/v1/admin/usage/timeline', { gatewayRequestId });
 }
 
 export function createExport(
