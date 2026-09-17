@@ -13,11 +13,13 @@ import * as api from '@/api';
 import { ChartBarIcon, DownloadIcon, MoneyIcon, UploadIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
-import { UiButton, UiInput, UiSelect, UiStatusBadge, UiTable, UiTrendChart } from '@/ui';
+import { UiButton, UiDrawer, UiInput, UiSelect, UiStatusBadge, UiTable, UiTrendChart } from '@/ui';
 import type { UiSelectOption, UiTrendSeries } from '@/ui';
 import type { UsageGroupBy } from '@/types/api';
 import type {
   AdminUser,
+  ModelCallTimeline,
+  ModelCallTimelinePhase,
   Project,
   Team,
   UsageGroup,
@@ -513,6 +515,192 @@ const cacheLabel: Record<string, string> = {
   L2_HIT: 'L2 命中',
 };
 
+// ---------------------------------------------------------------------------
+// #707: per-call timeline drawer, opened from the 请求 ID column.
+//
+// The model side carries far more state than the MCP log does, so the drawer is
+// read in three tiers instead of one flat list:
+//   1. terminal badge + total duration + "where it stopped" (one glance);
+//   2. TTFB / retries / partial response / HTTP status (on follow-up);
+//   3. attribution chain, identifiers and the token split (rarely).
+// Metadata only — the endpoint never returns prompt or response content.
+// ---------------------------------------------------------------------------
+
+/** The three milestones the gateway records, in order. A call that never got
+ * past 受理 simply has fewer phases — that absence is the diagnosis, so the
+ * drawer renders every slot and marks the unobserved ones as missing rather
+ * than inventing a placeholder timestamp. */
+const PHASE_SLOTS = [
+  { key: 'ACCEPTED', label: '受理' },
+  { key: 'FIRST_BYTE', label: '上游首字节' },
+  { key: 'COMPLETED', label: '完成' },
+] as const;
+
+type BadgeTone = 'success' | 'warning' | 'danger' | 'neutral' | 'info';
+
+/** All 7 lifecycle terminals plus the un-finalized IN_FLIGHT row (#705 keeps
+ * stale rows visible instead of hiding them). `stalled` answers "卡在哪一段"
+ * in the operator's words. */
+const TERMINAL_META: Record<string, { label: string; tone: BadgeTone; stalled: string }> = {
+  SUCCEEDED: { label: '成功', tone: 'success', stalled: '三个阶段齐备，调用完整走完。' },
+  CLIENT_CANCELLED: {
+    label: '客户端取消',
+    tone: 'warning',
+    stalled: '调用方在响应写完前断开——阶段越少，说明断开得越早。',
+  },
+  STREAM_INTERRUPTED: {
+    label: '流中断',
+    tone: 'danger',
+    stalled: '上游首字节已返回，流在写完之前中断。',
+  },
+  TIMEOUT_BEFORE_FIRST_BYTE: {
+    label: '首字节前超时',
+    tone: 'danger',
+    stalled: '卡在「受理」之后、「上游首字节」之前——上游超时未回包。',
+  },
+  UPSTREAM_REJECTED: {
+    label: '上游拒绝',
+    tone: 'danger',
+    stalled: '调用走完，但上游返回非 2xx（正文原样回给调用方）。',
+  },
+  UPSTREAM_UNAVAILABLE: {
+    label: '上游不可用',
+    tone: 'danger',
+    stalled: '未拿到上游响应——上游不可达，或凭证无法路由。',
+  },
+  IN_FLIGHT: {
+    label: '未结算',
+    tone: 'warning',
+    stalled: '记录未结算：网关重启后的滞留行，或调用仍在进行。',
+  },
+  AUTH_REJECTED: { label: '鉴权被拒', tone: 'danger', stalled: '请求在虚拟密钥鉴权阶段被拒。' },
+  MODEL_NOT_ALLOWED: {
+    label: '模型未准入',
+    tone: 'danger',
+    stalled: '请求的模型不在该密钥的准入集合内。',
+  },
+  USAGE_PARSE_FAILED: {
+    label: '用量解析失败',
+    tone: 'warning',
+    stalled: '上游响应完整，但用量解析失败。',
+  },
+};
+
+const timelineOpen = ref(false);
+const timelineLoading = ref(false);
+const timeline = ref<ModelCallTimeline | null>(null);
+const timelineGatewayRequestId = ref('');
+const timelineError = ref('');
+/** 404 is not a failure: it means the id has no lifecycle row at all. */
+const timelineMissing = ref(false);
+
+async function openTimeline(gatewayRequestId?: string) {
+  if (!gatewayRequestId) return;
+  timelineGatewayRequestId.value = gatewayRequestId;
+  timelineOpen.value = true;
+  timeline.value = null;
+  timelineError.value = '';
+  timelineMissing.value = false;
+  timelineLoading.value = true;
+  try {
+    timeline.value = await api.adminUsageTimeline(gatewayRequestId);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      timelineMissing.value = true;
+    } else if (error instanceof ApiError) {
+      timelineError.value = error.message;
+    } else {
+      timelineError.value = '加载调用时间线失败，请稍后重试。';
+    }
+  } finally {
+    timelineLoading.value = false;
+  }
+}
+
+const timelineStatus = computed(() => String(timeline.value?.status ?? ''));
+const timelineStatusMeta = computed(
+  () =>
+    TERMINAL_META[timelineStatus.value] ?? {
+      label: timelineStatus.value || '未知终态',
+      tone: 'neutral' as BadgeTone,
+      stalled: '',
+    },
+);
+
+function phaseOf(key: string): ModelCallTimelinePhase | undefined {
+  return (timeline.value?.phases ?? []).find((phase) => phase.key === key);
+}
+
+interface PhaseSlot {
+  key: string;
+  label: string;
+  at?: string;
+  elapsedMs?: number | null;
+  present: boolean;
+}
+
+/** All three canonical slots, each marked present or missing — never inventing
+ * a timestamp for a milestone the gateway did not record. */
+const phaseRows = computed<PhaseSlot[]>(() =>
+  PHASE_SLOTS.map((slot) => {
+    const phase = phaseOf(slot.key);
+    return {
+      key: slot.key,
+      label: phase?.label ?? slot.label,
+      at: phase?.at,
+      elapsedMs: phase?.elapsedMs,
+      present: Boolean(phase),
+    };
+  }),
+);
+
+/** The last milestone actually observed — the drawer's headline conclusion. */
+const furthestPhaseKey = computed(() => {
+  const present = new Set((timeline.value?.phases ?? []).map((phase) => phase.key));
+  return [...PHASE_SLOTS].reverse().find((slot) => present.has(slot.key))?.key ?? '';
+});
+
+const stalledText = computed(() => {
+  const known = timelineStatusMeta.value.stalled;
+  if (known) return known;
+  switch (furthestPhaseKey.value) {
+    case 'COMPLETED':
+      return '三个阶段齐备，调用完整走完。';
+    case 'FIRST_BYTE':
+      return '停在「上游首字节」与「完成」之间——上游已回包，响应在写回过程中中断。';
+    case 'ACCEPTED':
+      return '只记录到「受理」——网关未收到上游首字节。';
+    default:
+      return '没有可回放的阶段。';
+  }
+});
+
+/** ms with unit; long calls switch to seconds so the headline stays readable. */
+function formatDuration(ms?: number | null): string {
+  if (ms === null || ms === undefined) return '—';
+  if (ms >= 1000) return `${(ms / 1000).toFixed(2)} s`;
+  return `${ms} ms`;
+}
+
+function formatNumber(value?: number | null): string {
+  if (value === null || value === undefined) return '—';
+  return value.toLocaleString();
+}
+
+function formatInstant(iso?: string): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(
+    d.getMinutes(),
+  )}:${pad(d.getSeconds())}`;
+}
+
+/** Short form for the attribution chain; the full UUID stays in the tooltip. */
+function shortId(id?: string): string {
+  return id ? id.slice(0, 8) : '—';
+}
+
 onMounted(() => {
   void load();
   void loadHourly();
@@ -884,9 +1072,17 @@ onMounted(() => {
           <span class="ui-mono">{{ (row as UsageRecord).clientIp || '—' }}</span>
         </template>
         <template #gatewayRequestId="{ row }">
-          <span class="ui-mono next-admin-usage__reqid">{{
-            (row as UsageRecord).gatewayRequestId
-          }}</span>
+          <button
+            v-if="(row as UsageRecord).gatewayRequestId"
+            type="button"
+            class="ui-link-action next-admin-usage__reqid"
+            :title="(row as UsageRecord).gatewayRequestId"
+            :data-testid="`usage-timeline-${(row as UsageRecord).gatewayRequestId}`"
+            @click="openTimeline((row as UsageRecord).gatewayRequestId)"
+          >
+            {{ (row as UsageRecord).gatewayRequestId }}
+          </button>
+          <span v-else class="ui-muted">—</span>
         </template>
       </UiTable>
     </section>
@@ -913,6 +1109,206 @@ onMounted(() => {
         下一页
       </UiButton>
     </div>
+
+    <!-- #707: per-call timeline, opened from the 请求 ID column -->
+    <UiDrawer
+      :open="timelineOpen"
+      :title="timeline?.modelId ? `调用时间线 · ${timeline.modelId}` : '调用时间线'"
+      width="620px"
+      data-testid="usage-timeline-drawer"
+      @update:open="timelineOpen = false"
+    >
+      <div class="next-admin-usage__tl">
+        <p class="next-admin-usage__tl-reqid ui-mono" data-testid="usage-timeline-reqid">
+          {{ timelineGatewayRequestId }}
+        </p>
+
+        <p v-if="timelineLoading" class="next-admin-usage__tl-loading">正在读取调用留痕…</p>
+
+        <!-- 404 is an expected answer, not a failure: nothing was ever written
+             for calls that never reached upstream. Explain, do not alarm. -->
+        <div
+          v-else-if="timelineMissing"
+          class="next-admin-usage__tl-note"
+          data-testid="usage-timeline-missing"
+        >
+          <p class="next-admin-usage__tl-note-title">这条请求没有可回放的调用留痕</p>
+          <p class="next-admin-usage__tl-note-body">
+            调用时间线只覆盖<strong>实际转发到上游</strong>的请求。网关缓存命中与合并（coalesced）请求不写入该表，
+            因此查不到属于预期，并不代表这次调用失败了。
+          </p>
+        </div>
+
+        <div
+          v-else-if="timelineError"
+          class="ui-alert ui-alert--error"
+          data-testid="usage-timeline-error"
+        >
+          {{ timelineError }}
+        </div>
+
+        <template v-else-if="timeline">
+          <!-- 第一层：一眼看懂 —— 终态 / 总耗时 / 卡在哪一段 -->
+          <section class="next-admin-usage__tl-hero" data-testid="usage-timeline-hero">
+            <div class="next-admin-usage__tl-hero-top">
+              <span data-testid="usage-timeline-status">
+                <UiStatusBadge :tone="timelineStatusMeta.tone" :label="timelineStatusMeta.label" />
+              </span>
+              <span
+                class="next-admin-usage__tl-duration ui-num"
+                data-testid="usage-timeline-duration"
+                >{{ formatDuration(timeline.durationMs) }}</span
+              >
+              <span class="next-admin-usage__tl-duration-label">总耗时</span>
+            </div>
+            <p class="next-admin-usage__tl-stalled" data-testid="usage-timeline-stalled">
+              {{ stalledText }}
+            </p>
+          </section>
+
+          <ol class="next-admin-usage__tl-phases" data-testid="usage-timeline-phases">
+            <li
+              v-for="slot in phaseRows"
+              :key="slot.key"
+              class="next-admin-usage__tl-phase"
+              :class="{ 'next-admin-usage__tl-phase--missing': !slot.present }"
+              :data-testid="`usage-timeline-phase-${slot.key}`"
+            >
+              <span class="next-admin-usage__tl-dot" />
+              <span class="next-admin-usage__tl-phase-label">{{ slot.label }}</span>
+              <template v-if="slot.present">
+                <span class="ui-mono">{{ formatInstant(slot.at) }}</span>
+                <span class="ui-num next-admin-usage__tl-delta">{{
+                  slot.elapsedMs ? `+${formatDuration(slot.elapsedMs)}` : '起点'
+                }}</span>
+              </template>
+              <span v-else class="next-admin-usage__tl-absent">缺失 · 未记录</span>
+            </li>
+          </ol>
+          <p class="next-admin-usage__tl-hint">耗时均为距「受理」的增量；缺失的阶段不补零。</p>
+
+          <!-- 第二层：追问才看 —— TTFB / 重试 / 部分响应 / HTTP -->
+          <dl class="next-admin-usage__tl-metrics" data-testid="usage-timeline-metrics">
+            <div class="next-admin-usage__tl-metric">
+              <dt>上游首字节</dt>
+              <dd class="ui-num" data-testid="usage-timeline-ttfb">
+                {{ formatDuration(timeline.timeToFirstByteMs) }}
+              </dd>
+            </div>
+            <div class="next-admin-usage__tl-metric">
+              <dt>重试次数</dt>
+              <dd class="ui-num" data-testid="usage-timeline-retries">
+                {{ timeline.retryCount ?? 0 }} 次
+              </dd>
+            </div>
+            <div class="next-admin-usage__tl-metric">
+              <dt>部分响应</dt>
+              <dd data-testid="usage-timeline-partial">
+                <UiStatusBadge
+                  :tone="timeline.partialResponse ? 'warning' : 'success'"
+                  :label="timeline.partialResponse ? '是' : '否'"
+                  :title="
+                    timeline.partialResponse
+                      ? '上游已交付部分内容，流未读完'
+                      : '未出现截断的部分响应'
+                  "
+                />
+              </dd>
+            </div>
+            <div class="next-admin-usage__tl-metric">
+              <dt>HTTP 状态</dt>
+              <dd class="ui-num" data-testid="usage-timeline-http">
+                {{ timeline.httpStatus ?? '—' }}
+              </dd>
+            </div>
+          </dl>
+
+          <!-- 第三层：很少看 —— 归属链、标识与 Token 明细 -->
+          <details class="next-admin-usage__tl-more" data-testid="usage-timeline-details">
+            <summary>归属链与令牌明细</summary>
+            <div class="next-admin-usage__tl-more-body">
+              <h4 class="next-admin-usage__tl-sub">标识</h4>
+              <dl class="next-admin-usage__tl-meta">
+                <div class="next-admin-usage__tl-meta-row">
+                  <dt>上游请求 ID</dt>
+                  <dd class="ui-mono">{{ timeline.upstreamRequestId ?? '—' }}</dd>
+                </div>
+                <div class="next-admin-usage__tl-meta-row">
+                  <dt>线协议</dt>
+                  <dd class="ui-mono">{{ timeline.wireProtocol ?? '—' }}</dd>
+                </div>
+                <div class="next-admin-usage__tl-meta-row">
+                  <dt>传输</dt>
+                  <dd>{{ timeline.streaming ? '流式' : '非流式' }}</dd>
+                </div>
+              </dl>
+
+              <h4 class="next-admin-usage__tl-sub">归属链</h4>
+              <dl class="next-admin-usage__tl-meta">
+                <div class="next-admin-usage__tl-meta-row">
+                  <dt>用户</dt>
+                  <dd class="ui-mono" :title="timeline.attribution?.userId">
+                    {{ shortId(timeline.attribution?.userId) }}
+                  </dd>
+                </div>
+                <div class="next-admin-usage__tl-meta-row">
+                  <dt>项目</dt>
+                  <dd class="ui-mono" :title="timeline.attribution?.projectId">
+                    {{ shortId(timeline.attribution?.projectId) }}
+                  </dd>
+                </div>
+                <div class="next-admin-usage__tl-meta-row">
+                  <dt>虚拟密钥</dt>
+                  <dd class="ui-mono" :title="timeline.attribution?.virtualKeyId">
+                    {{ shortId(timeline.attribution?.virtualKeyId) }}
+                  </dd>
+                </div>
+                <div class="next-admin-usage__tl-meta-row">
+                  <dt>供应商</dt>
+                  <dd class="ui-mono" :title="timeline.attribution?.providerId">
+                    {{ shortId(timeline.attribution?.providerId) }}
+                  </dd>
+                </div>
+                <div class="next-admin-usage__tl-meta-row">
+                  <dt>供应商产品</dt>
+                  <dd class="ui-mono" :title="timeline.attribution?.providerProductId">
+                    {{ shortId(timeline.attribution?.providerProductId) }}
+                  </dd>
+                </div>
+                <div class="next-admin-usage__tl-meta-row">
+                  <dt>凭证</dt>
+                  <dd class="ui-mono" :title="timeline.attribution?.credentialId">
+                    {{ shortId(timeline.attribution?.credentialId) }}
+                  </dd>
+                </div>
+              </dl>
+
+              <h4 class="next-admin-usage__tl-sub">Token</h4>
+              <dl class="next-admin-usage__tl-meta">
+                <div class="next-admin-usage__tl-meta-row">
+                  <dt>输入</dt>
+                  <dd class="ui-num">{{ formatNumber(timeline.tokens?.input) }}</dd>
+                </div>
+                <div class="next-admin-usage__tl-meta-row">
+                  <dt>输出</dt>
+                  <dd class="ui-num">{{ formatNumber(timeline.tokens?.output) }}</dd>
+                </div>
+                <div class="next-admin-usage__tl-meta-row">
+                  <dt>缓存读</dt>
+                  <dd class="ui-num">{{ formatNumber(timeline.tokens?.cacheRead) }}</dd>
+                </div>
+                <div class="next-admin-usage__tl-meta-row">
+                  <dt>缓存写</dt>
+                  <dd class="ui-num">{{ formatNumber(timeline.tokens?.cacheCreation) }}</dd>
+                </div>
+              </dl>
+            </div>
+          </details>
+
+          <p class="next-admin-usage__tl-footnote">仅元数据——请求与响应正文永不落库。</p>
+        </template>
+      </div>
+    </UiDrawer>
   </div>
 </template>
 
@@ -1208,5 +1604,214 @@ onMounted(() => {
   background: var(--ui-card);
   color: var(--ui-primary-text);
   box-shadow: var(--ui-shadow-card);
+}
+
+/* ---- #707 per-call timeline drawer (three information tiers) ---- */
+
+.next-admin-usage__tl {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+}
+
+.next-admin-usage__tl-reqid {
+  margin: 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+  word-break: break-all;
+}
+
+.next-admin-usage__tl-loading {
+  margin: 0;
+  color: var(--ui-foreground-secondary);
+}
+
+.next-admin-usage__tl-note {
+  padding: var(--ui-space-4);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-panel);
+  background: var(--ui-muted);
+}
+
+.next-admin-usage__tl-note-title {
+  margin: 0;
+  font-weight: var(--ui-weight-semibold);
+}
+
+.next-admin-usage__tl-note-body {
+  margin: var(--ui-space-2) 0 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+  line-height: var(--ui-line-height-base);
+}
+
+/* tier 1 — terminal state, total duration, where it stopped */
+.next-admin-usage__tl-hero {
+  padding: var(--ui-space-4);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-panel);
+  background: var(--ui-muted);
+}
+
+.next-admin-usage__tl-hero-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ui-space-3);
+  flex-wrap: wrap;
+}
+
+.next-admin-usage__tl-duration {
+  font-size: 24px;
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+  letter-spacing: -0.01em;
+}
+
+.next-admin-usage__tl-duration-label {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-admin-usage__tl-stalled {
+  margin: var(--ui-space-3) 0 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-admin-usage__tl-phases {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-3);
+}
+
+.next-admin-usage__tl-phase {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+}
+
+.next-admin-usage__tl-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ui-primary);
+  flex-shrink: 0;
+}
+
+/* a milestone the gateway never recorded — dashed hollow dot, no timestamp */
+.next-admin-usage__tl-phase--missing .next-admin-usage__tl-dot {
+  background: transparent;
+  border: 1px dashed var(--ui-border);
+}
+
+.next-admin-usage__tl-phase-label {
+  width: 84px;
+  color: var(--ui-foreground-secondary);
+}
+
+.next-admin-usage__tl-phase--missing .next-admin-usage__tl-phase-label {
+  color: var(--ui-foreground-faint);
+}
+
+.next-admin-usage__tl-delta {
+  color: var(--ui-foreground-secondary);
+  font-size: var(--ui-font-size-xs);
+}
+
+.next-admin-usage__tl-absent {
+  color: var(--ui-foreground-faint);
+  font-size: var(--ui-font-size-xs);
+}
+
+.next-admin-usage__tl-hint {
+  margin: calc(-1 * var(--ui-space-2)) 0 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+/* tier 2 — TTFB, retries, partial response, HTTP status */
+.next-admin-usage__tl-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-space-3) var(--ui-space-4);
+  margin: 0;
+  padding: var(--ui-space-4);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-panel);
+}
+
+.next-admin-usage__tl-metric {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+}
+
+.next-admin-usage__tl-metric dt {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-admin-usage__tl-metric dd {
+  margin: 0;
+  font-weight: var(--ui-weight-medium);
+}
+
+/* tier 3 — collapsed by default: attribution chain, ids, token split */
+.next-admin-usage__tl-more {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-panel);
+}
+
+.next-admin-usage__tl-more > summary {
+  padding: var(--ui-space-3) var(--ui-space-4);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+  cursor: pointer;
+}
+
+.next-admin-usage__tl-more-body {
+  padding: 0 var(--ui-space-4) var(--ui-space-4);
+}
+
+.next-admin-usage__tl-sub {
+  margin: var(--ui-space-3) 0 var(--ui-space-2);
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground-faint);
+}
+
+.next-admin-usage__tl-meta {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.next-admin-usage__tl-meta-row {
+  display: flex;
+  gap: var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+}
+
+.next-admin-usage__tl-meta-row dt {
+  width: 96px;
+  flex-shrink: 0;
+  color: var(--ui-foreground-secondary);
+}
+
+.next-admin-usage__tl-meta-row dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+.next-admin-usage__tl-footnote {
+  margin: 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
 }
 </style>

@@ -35,6 +35,15 @@ export type UsageSummary = components['schemas']['UsageSummary'];
 // #634 hourly usage report (admin)
 export type HourlyUsageReport = components['schemas']['HourlyUsageReport'];
 export type HourlyUsageRow = components['schemas']['HourlyUsageRow'];
+// #707 model-side call timeline (#705 endpoint): the phases actually observed
+// for one forwarded call, its terminal state, token split and attribution
+// chain. `phases` is deliberately partial — a cancelled call records only
+// ACCEPTED, and the missing milestones are themselves the diagnosis.
+export type ModelCallTimeline = components['schemas']['ModelCallTimelineView'];
+export type ModelCallTimelinePhase = components['schemas']['Phase'];
+export type ModelCallTimelineAttribution = components['schemas']['Attribution'];
+/** The timeline's token block shares the usage-summary `Tokens` schema. */
+export type ModelCallTimelineTokens = components['schemas']['Tokens'];
 export type PriceSnapshotView = components['schemas']['PriceSnapshotView'];
 export type CredentialView = components['schemas']['CredentialView'];
 export type CredentialVersionView = components['schemas']['CredentialVersionView'];
