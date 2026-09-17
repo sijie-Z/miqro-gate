@@ -303,7 +303,7 @@
 - `usageMissing=true` 表示上游未返回 usage（如异常中断）；该行仍入账但用量为 0，便于排查。
 - `clientIp`（#605）：调用方网络地址——传输层对端；仅当对端命中 `MIQROKEY_TRUSTED_PROXY_CIDRS` 可信代理时才消费 `X-Forwarded-For`（**从右往左**取第一个非可信地址，杜绝最左伪造），非 IP 字面量（主机名/带端口）一律不记录、不解析；无法确定时为 `null`。历史行与直连未配置代理时的对端地址照记。
 - `providerProductName` / `ttfbMs` / `wireProtocol` / `requestStatus`（#758）：供应商产品显示名与生命周期富集列，来自 `request_usage_records` 按 gateway request id 的左连接；合并请求无生命周期行时三者均为 `null`（首字对无首字节的失败请求同样为 `null`）。
-- `cost` / `priced`（#758）：单行成本估计，用与汇总相同的价目快照与算法（`tokens × 单价 / 1e6` 逐 token 类型求和）；`priced=false` 表示存在尚无价目快照的非零 token 类型，前端显示「未定价」，此时 `cost` 不可信。
+- `cost` / `priced`（#758）：单行成本估计，用与汇总相同的价目快照与算法（`tokens × 单价 / 1e6` 逐 token 类型求和）；`priced=false` 表示**非零的输入/输出 token 缺少价目快照**（前端显示「未定价」，此时 `cost` 不可信）；缓存读/写缺价与聚合口径一致按 0 计，不触发该标记（真实供应商常不单列缓存写费率）。
 - `providerRequestId` 在 tenant 内唯一（幂等写，重复 flush 不双计）。
 
 ### 4.6 模型申请（审批流）`POST/GET /api/v1/me/model-approvals`

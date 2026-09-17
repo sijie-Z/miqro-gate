@@ -109,7 +109,7 @@ class UsageStatsAggregatorTest {
         }
 
         @Test
-        @DisplayName("reports unpriced when a non-zero token type has no snapshot")
+        @DisplayName("reports unpriced when a non-zero input/output type has no snapshot")
         void unpricedWhenAnyTypeMissing() {
             Map<String, BigDecimal> prices = prices("INPUT", "1.00");
             UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(prices, PRODUCT, MODEL, 1_000L,
@@ -117,6 +117,22 @@ class UsageStatsAggregatorTest {
 
             assertThat(priced.priced()).isFalse();
             assertThat(priced.cost()).isEqualByComparingTo("0");
+        }
+
+        @Test
+        @DisplayName("a missing cache rate stays priced — priced at 0 like the aggregates do")
+        void missingCacheRateStaysPriced() {
+            // Real vendors often publish no cache-write tariff (deepseek-flash on
+            // the demo station is exactly this shape); the aggregate values the
+            // missing type at 0, so the row must not flip to 未定价.
+            Map<String, BigDecimal> prices = new LinkedHashMap<>();
+            prices.put(PRODUCT + ":" + MODEL + ":INPUT", new BigDecimal("2.00"));
+            prices.put(PRODUCT + ":" + MODEL + ":OUTPUT", new BigDecimal("8.00"));
+            UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(prices, PRODUCT, MODEL, 1_000L,
+                    500L, 0L, 37L);
+
+            assertThat(priced.priced()).isTrue();
+            assertThat(priced.cost()).isEqualByComparingTo("0.006"); // creation priced at 0
         }
 
         @Test
