@@ -137,6 +137,13 @@ public class PlatformOidcAuthService {
         }
         User user = userRepository.findById(internalUserId)
                 .orElseThrow(() -> new OAuthFlowException("ACCOUNT_UNLINKED"));
+        // #730: mirror the local-login semantics (AuthenticationService.login and
+        // the per-request SessionFilter): a DISABLED account, or a LOCKED account
+        // whose lock has not expired, must not silently receive a session here.
+        if (user.status() == UserStatus.DISABLED || (user.status() == UserStatus.LOCKED
+                && (user.lockedUntil() == null || Instant.now().isBefore(user.lockedUntil())))) {
+            throw new OAuthFlowException("ACCOUNT_UNAVAILABLE");
+        }
         SessionToken tokens = sessionService.createSession(user);
         Instant sessionExpires = Instant.now().plus(authProperties.getSessionAbsoluteTimeout());
         sessionService.setCookies(response, tokens, sessionExpires);
@@ -266,11 +273,14 @@ public class PlatformOidcAuthService {
         try {
             insertLink(tenantId, user.id(), identity.sub());
         } catch (DuplicateKeyException e) {
-            // Concurrent first login for the same sub: reuse the winner's link.
+            // Concurrent first login for the same sub: reuse the winner's link —
+            // #730: the session must go to the link's owner, not to this request's
+            // (unlinked, unusable) just-inserted row.
             UUID existing = findLinkedUser(tenantId, identity.sub()).orElse(null);
             if (existing == null) {
                 throw e;
             }
+            return existing;
         }
         return user.id();
     }
