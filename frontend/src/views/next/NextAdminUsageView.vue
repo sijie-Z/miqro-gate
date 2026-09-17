@@ -288,7 +288,9 @@ const breakdownRows = computed<BreakdownRow[]>(() => {
 });
 
 const breakdownColumns = computed(() => [
-  { key: 'label', title: GROUP_LABELS[groupBy.value] ?? '分组', minWidth: '180px' },
+  // The header names the ACTIVE dimension (供应商统计 / 模型统计 preset it), not
+  // merely the breakdown selector's value.
+  { key: 'label', title: GROUP_LABELS[breakdownGroupBy.value] ?? '分组', minWidth: '180px' },
   { key: 'requests', title: '请求', width: '100px', align: 'right' as const, sortable: true },
   { key: 'tokens', title: 'Token', width: '120px', align: 'right' as const, sortable: true },
   { key: 'cost', title: '成本 ¥', width: '120px', align: 'right' as const, sortable: true },
@@ -525,7 +527,7 @@ const columns = [
   { key: 'occurredAt', title: '时间', width: '150px' },
   { key: 'providerProductName', title: '供应商', minWidth: '150px' },
   { key: 'modelId', title: '模型', minWidth: '170px' },
-  { key: 'inputTokens', title: '输入', minWidth: '130px', align: 'right' as const },
+  { key: 'inputTokens', title: '输入', minWidth: '150px', align: 'right' as const },
   { key: 'outputTokens', title: '输出', width: '100px', align: 'right' as const },
   { key: 'cost', title: '成本', width: '110px', align: 'right' as const },
   { key: 'latencyMs', title: '用时 / 首字', width: '130px', align: 'right' as const },
@@ -1888,6 +1890,7 @@ onMounted(() => {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-faint);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .next-admin-usage__protocol {
