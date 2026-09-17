@@ -4083,6 +4083,24 @@ export interface components {
             requests?: components["schemas"]["Requests"];
             tokens?: components["schemas"]["Tokens"];
             cost?: components["schemas"]["Cost"];
+            /** @enum {string} */
+            pricingStatus?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+            unpriced?: components["schemas"]["PricingGap"];
+        };
+        PricingGap: {
+            /** Format: int64 */
+            inputTokens?: number;
+            /** Format: int64 */
+            outputTokens?: number;
+            /** Format: int64 */
+            cacheReadTokens?: number;
+            /** Format: int64 */
+            cacheCreationTokens?: number;
+            /** Format: int64 */
+            unpricedEvents?: number;
+            /** Format: int64 */
+            unavailableEvents?: number;
+            empty?: boolean;
         };
         Requests: {
             /** Format: int64 */

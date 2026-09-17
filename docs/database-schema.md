@@ -231,6 +231,8 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
   - **`UNAVAILABLE` 不等于单价 0**：查不到价格时价格列保持 NULL。"价格未知"与"免费"是不同的审计事实，静默写 0 会低估历史支出
   - 取值口径：`price_snapshot` 中 `effective_from <= 本行 occurred_at` 的最新一行（同 `effective_from` 由 `id DESC` 做确定性 tie-break）；回填按 `occurred_at`，**不是按回填时刻**。动机：成本原先是查询时按**当前**价目现算的，所以改一次价目，历史报表金额跟着变
   - **读取方**：明细/汇总/计费/配额水位（`UsageStatsAggregator` 链路）已改读此基座（#710 F21-A 第二刀）；成本分摊 `cost_allocations` 仍用"分配时刻最新快照"，未切换
+  - `base_cost_amount numeric(24,10)`（V65，可空不可变）——事件时刻依据当时价目算出的**基础成本**，与 `price_currency` 配对。**NOW 就冻**的理由：`单价 × 数量` 只在费率平坦时成立，引入阶梯价/免费额度后不成立（AWS CUR 因此同时给出 rate 与 line-item cost）。`COMPLETE` 时有值（可为 0，即确实免费）；`PARTIAL` 时只含已定价维度；`UNAVAILABLE` 时 **NULL——不是 0**
+  - **读取方**：`UsageStatsAggregator` 链路同时给出 `pricingStatus` 与 `unpriced.*`：已知金额与未计价用量**分开披露**，`pricingStatus != COMPLETE` 时已知金额**不是总额**。口径见 usage-accounting §6
 - `occurred_at`、`created_at`
 
 部分唯一索引 `(tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL`；`virtual_key_id`、`project_id`、`cache_level`、`occurred_at` 索引。正文（prompt、代码、工具、回答）永不写入。
