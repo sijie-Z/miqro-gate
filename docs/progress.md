@@ -3317,3 +3317,66 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - 未动 e2e 与金样；`frontend/dist/` 已被 `.gitignore` 覆盖，构建没有脏化工作区。
 - `frontend/package.json` 的 `lint` 脚本写死 `eslint . --ext .vue,.ts,.tsx --fix`，所以每跑一次都会改写一批与本 issue 无关的文件（含 `types/generated.ts` 的整文件 prettier 重排）——两轮各发生一次，均按路径逐个 `git checkout --` 还原，本批提交 `git show --stat` 只含本批文件。这是仓库既有状态，不是本批引入；收口验证因此不再跑 `npm run lint`，改为按上一节的方式对提交内容取信号（`git show HEAD:<file> | npx eslint --stdin`），既不改写工作区，也不受工作区 EOL 影响。
 
+## 2026-09-16 晚 — #629 设计稿口径归位（docs-only：头名与列名对齐 v1.1 已交付契约）
+
+**背景**：#629 的定性是**设计稿未跟随 v1.1 评审修订**（不是实现漂移）。`docs/activity-context-design.md`（设计稿 v0.1）停在评审前口径——头名 `X-Miqro-Tag`、用量列 `attribution_source`——而实现侧（V54/V55 迁移 + RequestContextResolver）早已按 Spec v1.1 的 R3/R5 落地 `X-Miqro-Project-Id` 与 `resolution_status`/`claimed_*`。设计稿与实现级 Spec 长期并存而 `document-map.md` 对两者**零引用**（本轮已补索引），是该分歧得以存活的土壤。处置取「改文档齐实现」：**零迁移 / 零代码 / 零前端**。
+
+**交付**（分支 docs/activity-context-design-realigned-629，隔离工作树，base（fork 点）develop@50a9b245，收口轮合入 develop@adfb670（合并 `d15b2d5`））——**本段与「验证」段引用的 `:NNN` 为交付时点 `6db7f33` 的行号，「修复轮」各条为修复后的 HEAD 行号；两套基准不同，同一编号可能指向不同内容（如 `:79`：交付时点为门控注记、HEAD 为值域行）**：
+- `docs/activity-context-design.md`：`:4` 状态改 **历史件 / historical** 并链到实现级 Spec；`:46-48` Usage Event 字段表 `attribution_source` → `claimed_project_id`/`resolution_status`/`claim_source`/`claim_confidence`；`:72` 头名 → `X-Miqro-Project-Id: <project-uuid>`（值域为 project UUID，非法值 400 fail-closed，依据 R3/P1）；`:77` 列名与值域对齐 **V54 迁移注释**，声明（未验证输入）与裁定（计费依据）分列（R5/P1），`session_id` 注明纯观测/可空/不参与路由授权；`:106`/`:147`/`:164` 同步改名，迁移注记扩为 **V54 + V55**；`:156` Q3 行改为裁定/声明记录口径。
+- **原「头名敏感词门控」论证降为 `:79` 注记并保留**：适用范围仅限客户端从 settings/env 读取的 `ANTHROPIC_CUSTOM_HEADERS`（静态头降级模式），CAA 主路径的头由本机 Agent 注入、不受门控；若未来启用静态头降级须另选不含 `project/key` 的头名（如 `X-Miqro-Target-Id`）。该约束是未来形态的既有需求，不删。
+- **§5 真机实验记录不回改**：`:117` 实验 1 保留当时真实观测到的 `X-Miqro-Tag: miqi`，仅在结果列追加「（实验用头名；正式契约见 §4.1 → `X-Miqro-Project-Id`）」。
+- 顺带修复 `:6` 既有坏链：`../context-attribution-implementation-spec.md` → `context-attribution-implementation-spec.md`（仓库同级相对链风格，同 `ai-gateway-comparison.md:3`）。
+- `docs/document-map.md` §2 增两行索引：实现级 Spec = 权威实现契约 / 设计稿 = 历史设计稿（无契约效力）。
+- **未改**任何代码、迁移、前端、契约文件。
+
+**验证**（**以下为修复前时点（commit `6db7f33`）**；worktree 内 `git grep -n`，原文入交付报告；计数按**设计稿文件内**口径——本条目自身的叙述性提及不计；修复轮后的行号与计数见本节末）：
+- `git grep -n "X-Miqro-Tag" -- docs/activity-context-design.md` → **1 命中**（`:117` §5 实验记录，附「实验用头名；正式契约见 §4.1」注记），exit 0；
+- `git grep -n "attribution_source" -- docs/activity-context-design.md` → **0 命中**（exit 1）；全仓排除本条目后同为 0 命中——代码/契约/Spec 均无该名；
+- `git grep -n "X-Miqro-Project-Id" -- docs/activity-context-design.md` → **6 命中**（`:72`/`:79`/`:106`/`:117`/`:147`/`:164`）；全仓其余命中均在既有实现/契约件（`RequestContextResolver.java`、`ResolvedContext.java`、契约与测试、`miqro-context/**`、Spec v1.1），另含 `progress.md` 的叙述性提及（本条目自身与既有条目 `:2931`/`:2961`），**无新文件被引入**。
+
+**边界**：仅 `docs/` 下三份文件（设计稿 / document-map / 本条目）。不动 `V54__usage_event_context_columns.sql`、`V55__request_context_evidence.sql`、`RequestContextResolver.java`、`ResolvedContext.java`、`api-contract.md`、`database-schema.md`、`miqro-context/**`、`context-attribution-implementation-spec.md`。设计稿内残余 1 处 `X-Miqro-Tag` 是**实验记录**（非"未改完"），本条目自身的叙述性提及亦计入全仓 grep 命中；§5 记录的时间点事实按实验记录原则保持原样。issue #629 正文自身仍用旧列名，建议由 owner 更新措辞后再关闭。
+
+**修复轮（评审后）**：对上述交付做了一轮独立对抗性评审（评审只看工作树文件与命令原文，不采信作者结论）。逐条回源码/迁移/`gh` 远端复核后，修复 15 处**事实性**问题（仍全部落在 `docs/`）：
+
+- `:4` 交付枚举补 **#641**（`gh` 核实 #633/#639/#641/#645–#648 均已交付）；
+- `:7` 实验脚本指针加注「本机临时路径，未随仓库归档；证据以 §5 表格记录为准」（本机无 D: 盘、仓库内零副本，原文「（可复现）」不可兑现）；
+- `:51` §2 概念字段表后补「上图为概念模型，实现列见 §4.1 与 Spec v1.1 §7.1」（`user_id`/`model`/`cost`/`ts` 并非 `usage_event` 实现列）；
+- `:74` 失败语义精确化：**非 UUID 且在长度域内 → 400 `CONTEXT_INVALID`**；空值/超 64 字符按「未携带」处理（`RequestContextResolver.bounded()` 语义），原文「非法值 400」过宽；
+- `:76` 400 加条件：**未配置未归属策略时 400 `CONTEXT_REQUIRED`**；配置后按策略路由（`POLICY_ROUTED`、落未归属桶，Spec v1.1 §6.3）；
+- `:79` `resolution_status` 值域改为「实现产出 `RESOLVED_HEADER`/`RESOLVED_SUFFIX`/`SOLE_BINDING`/`POLICY_ROUTED` 四值；完整值域另含 `UNATTRIBUTED`/`AMBIGUOUS`」；**不再把 V54 列注释当 `claim_source` 值域权威**（该注释只列 6 值、漏 `git_remote`；权威为 `api-contract.md` §7 阶梯条，共 7 项）；
+- `:81` 门控注记补证据边界：`X-Miqro-Target-Id` 的结论出处为 Spec v1.1 §3.3，**本稿 §5 未单独实验该头名**（原文「已实证」不可兑现）；注记本身**保留未删**；
+- `:112` 无证据分支精确化：**不注入 `X-Miqro-Project-Id`**（客户端 `miqro-context/src/proxy/inject.ts` 仅 RESOLVED 时注入），只发 `X-Miqro-Claim-Status: UNATTRIBUTED`；网关侧策略桶 / 未配置则 400；
+- `:143` §6 处置现状补历史注记：**#615 已 MERGED（`f057fd5`）**，Q0 按 A 线落地，本节「建议 B / 建议关闭 #615」描述过期；
+- `:153` §7 补历史注记：Q0 已定，Q1–Q5 已在 Spec/实现落地，**Q6（per-turn 钩子 / transcript 兜底）未交付**；
+- `:160` Q3 行：`activity_id` **已随 `V54` 落库**（客户端发 `X-Miqro-Activity` 且为合法 UUID 时写入），非「仅预留」——`PostgresUsageEventWriter` 已写入该列；
+- `:167` §8 补历史注记（计划已成历史；实施口径见 Spec §11 与 `docs/caa-next-batch-plan.md`）；
+- `:170` 迁移口径拆开：**V54 = `usage_event` 上下文列；V55 = 证据审计表 `request_context_evidence`**（原文把 V55 并入「上下文列」）；
+- `docs/document-map.md:35` 去掉「上一行 Spec」位置指针 → 改写成文件名；「仅补实验证据」→「仅补实验证据与历史注记」；
+- grep 计数口径收紧为**被检文件内**计数（原文未说明是否含本条目自身叙述性提及，易生歧义）。
+
+**修复轮后验证**：`git grep -n "X-Miqro-Tag" -- docs/activity-context-design.md` → **1 命中**（`:119` §5 实验记录，附「实验用头名」注记）；`git grep -n "attribution_source" -- docs/activity-context-design.md` → **0 命中**（exit 1）；`git grep -n "X-Miqro-Project-Id" -- docs/activity-context-design.md` → **7 命中**（`:74`/`:81`/`:108`/`:112`/`:119`/`:149`/`:170`）；`git diff --check` exit 0。
+
+**第二轮修复（2026-09-16，口径归位 · 与主交付同 PR）**：
+
+- `activity-context-design.md:46` 概念结构体补 `activity_id?`——V54 实列（`V54:12`）且同文件 `:170` 已列，此前 6 个上下文列里独缺此列。
+- `:106` 规则表产出「项目标签」→「项目 UUID」——与下一行 `:108` 的 `X-Miqro-Project-Id: <project-uuid>` 及 `:74` 的 UUID 值域一致（原文按字面实现会产出非 UUID，触发 400 `CONTEXT_INVALID`）。
+- `:167` 交付枚举补 `#641`——与 `:4` 的 `#633 / #639 / #641 / #645–#648` 对齐（同一文档内两处枚举不一致）。
+
+**第三轮修复（2026-09-16，对抗性复核驱动 · 与主交付同 PR）**：
+
+- `activity-context-design.md:79` 「完整值域另含 `UNATTRIBUTED`/`AMBIGUOUS`」补实现边界：V54 列注释（`V54:24-25`）与 Spec §7.1（`:253`）各列 6 值，而 `RequestContextResolver` 只产出 4 值，两值在实现中仅作 `X-Miqro-Claim-Status` 声明头取值/未归属桶语义。
+- `:79` 「审计可还原每笔归属的判定依据」原文过宽：`publishUsageEvent` 只在放行且完成的路径调用（`ProxyController.java:529`），网关侧拒绝不落 `usage_event` 行；`request_context_evidence`（`V55`）全仓无 Java 写入方/读取方 → 已就地标明边界。
+- `:81` 门控适用范围由「通道 A/B」改为按**机制**表述（`ANTHROPIC_CUSTOM_HEADERS` 形态）：§4.2 的 E（企业 managed 下发）同样下发客户端读的静态头，原枚举自相矛盾；C（`apiKeyHelper` 动态 `headers`）是否有门控本仓无证据，明写「未验证」。
+- `:167` 「客户端参考实现与演示闭环均已交付」收窄为实际交付形态（#639 `miqro-context` 安装式 Agent），并点明 step 1（干净环境复核实验 3/5）与 step 3（`apiKeyHelper`+`PostToolUse` 脚本、接入面板）未按原样交付——`接入面板` 从未交付（设计稿内共 2 处：step 3 原计划行 `:171` 与本注记 `:167`；其余命中均为 `progress.md` 内本审计条目对它的转述；无实现或设施引用）。
+- `document-map.md:34` 限定 Spec 的权威面：列取值域/物理形态归 `database-schema.md`/`api-contract.md`（Spec §7.1 `claim_source` 清单缺 `git_remote`，滞后于实现）。
+- 本条目的**全仓计数口径**自洽化：`:3171` 原文「全仓其余命中均在既有实现/契约件（…）」未列本条目自身的叙述性命中，已补入（与本节「边界」段一致）。
+- **不在本 PR 范围的既有遗留**（均已逐行核对，未改）：① `context-attribution-implementation-spec.md:115` 称 `X-Miqro-Target-Id`「已实证可通过门控」，本仓无对应实验件（设计稿 §5 未单独实验该头名），该文件本轮禁改；② `miqro-context/README.md:113` 把设计稿列为并列规格、无历史件标注（该目录本轮禁改）；③ `decisions/0018-single-key-multi-project.md:62`/`:95` 的「后缀 = 唯一选择器、零猜测」与 Spec v1.1 **R3**（头名优先、后缀兜底）口径反转，该 ADR 仅 `:112` 有 #633 的枚举探测修订、D2/D8 无指向 R3 的修订注记——属 ADR 治理事项，建议由 owner 另开；④ `V55__request_context_evidence.sql:5` 头部注释称「网关在 Context 解析时写入；供审计与事后重分类」，而该表在 Java 侧零引用（`git grep -n "request_context_evidence" -- "*.java"` 无输出，既无写入方也无读取方），注释与实现不符——该迁移文件本轮禁改，建议随 ①–③ 一并开 follow-up。
+
+- **第五轮修复（2026-09-16，收尾交叉核对驱动 · 与主交付同 PR）**：① 前述修复轮条目中两处**注记行号漂移**按 HEAD 校正（`:151`→`:153`、`:165`→`:167`，与 `:3199`/`:3206` 对同一注记的引用对齐）；② `:3171` 全仓计数枚举补 `progress.md` 既有条目（`:2931`/`:2961`）；③ `:3206` 的「`接入面板` 全仓仅此一处提及」纠正为按文件枚举的实际分布（设计稿内 2 处：step 3 原计划行 `:171`、`§8` 注记 `:167`；其余命中均为 `progress.md` 内本审计条目的转述）。以上均为**行数不变**的就地替换，本条目其余行号引用不受影响。
+
+- **第六轮修复（2026-09-16，自查驱动 · 与主交付同 PR）**：重生成收口证据、逐条读原始输出时发现一处**自伤计数**——第五轮把 `:3206` 改写为「全仓命中 3 处」并在同一次提交追加了含该词的注记，而该注记自身就是第 4 处命中，故「3 处」在其写入的提交（`a39caa1`）里即已为假。两处（`:3206` 与第五轮注记第 ③ 条）改为**按文件枚举分布**（设计稿内 2 处：step 3 原计划行 `:171`、`§8` 注记 `:167`；其余命中均为本审计条目的转述），自指命中无法再使其失真。仍为行数不变的就地替换。
+
+- **第七轮修复（2026-09-16，独立主评审回执驱动 · 与主交付同 PR）**：独立主评审（全新上下文、逐条复跑命令、结论 **0 blocker / 3 minor**）与本地自查在同一点会合——① **行号基准混用**（评审 M2）：本条目「交付」「验证」段引用的是交付时点 `6db7f33` 的行号，「修复轮」各条引用的是修复后 HEAD 的行号，同一编号在两套基准下可能指向不同内容（`:79` 在交付时点是门控注记、在 HEAD 是值域行），已在交付段头部就地声明两套基准；② 评审 M1：`docs/document-map.md:35` 的「关键处已加「历史注记」」收敛为按处枚举（状态行、Q0、Q 表、§8 计划处）；③ 评审 M3：边界段补登记第 ④ 项既有遗留（`V55__request_context_evidence.sql:5` 头部注释称「网关在 Context 解析时写入」，而该表在 Java 侧零引用）。评审另两条记录性说明（hunk 形状与任务书预期不符系多轮就地编辑所致；前轮计数自洽问题已在第五/六轮闭环）无需动作。①②③ 均为行数不变的就地替换。
+
+- **第八轮修复（2026-09-16，增量复核回执驱动 · 与主交付同 PR）**：增量独立复核（对象为第七轮前的 HEAD `c71187c`，结论 **通过 / 0 blocker / 2 minor**）两条编辑性建议均已按原文采纳——① m1：交付段「base develop@50a9b245」补记为「base（fork 点）develop@50a9b245，收口轮合入 develop@adfb670（合并 `d15b2d5`）」，两套口径并存（`git merge-base origin/develop 6db7f33` 为 fork 点、`git merge-base origin/develop HEAD` 为收口基准）；② m2：第二轮修复条目「`:106` 与紧邻 `:108`」改为「与下一行 `:108`」（`:107` 为空行，实测复核一致）。两条均为行数不变的就地替换。
+
