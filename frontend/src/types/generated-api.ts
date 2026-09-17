@@ -93,3 +93,6 @@ export type UsageRequests = components['schemas']['Requests'];
 export type UsageTokens = components['schemas']['Tokens'];
 export type UsageGroup = components['schemas']['GroupSummary'];
 export type CreateApiConsumerResponse = components['schemas']['CreateApiConsumerResponse'];
+// #550 public self-registration switch state (single boolean, anonymous).
+// `enabled` is optional in the schema, so consumers compare against `false`.
+export type RegistrationStatusResponse = components['schemas']['RegistrationStatusResponse'];

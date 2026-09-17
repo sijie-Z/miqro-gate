@@ -87,6 +87,9 @@ interface LoginCopy {
   requestDesc: string;
   backTitle: string;
   backDesc: string;
+  inviteOnlyTitle: string;
+  inviteOnlyDesc: string;
+  errRegisterOff: string;
   privacyTitle: string;
   privacyDesc: string;
   footerCopy: string;
@@ -147,6 +150,9 @@ const COPY: Record<'zh-Hans' | 'en', LoginCopy> = {
     requestDesc: '需要访问 MiQroGate？自助注册开启时可创建账号，或联系你的管理员。',
     backTitle: '返回登录',
     backDesc: '已有门户账号？回到登录页。',
+    inviteOnlyTitle: '仅邀请注册',
+    inviteOnlyDesc: '本部署已关闭自助注册，请联系管理员开通账号。',
+    errRegisterOff: '本部署已关闭自助注册，请联系管理员开通账号。',
     privacyTitle: '你的数据受到保护',
     privacyDesc: 'MiQroGate 运行在你的私有环境，绝不存储你的提示词与敏感数据。',
     footerCopy: '© MiQroGate · 私有 AI 基础设施',
@@ -208,6 +214,11 @@ const COPY: Record<'zh-Hans' | 'en', LoginCopy> = {
       'Need access to MiQroGate? Create an account when self-registration is enabled, or contact your administrator.',
     backTitle: 'Back to sign in',
     backDesc: 'Already have a portal account? Return to the sign-in page.',
+    inviteOnlyTitle: 'Invite only',
+    inviteOnlyDesc:
+      'Self-service registration is disabled on this deployment. Ask your administrator for an account.',
+    errRegisterOff:
+      'Self-service registration is disabled on this deployment. Ask your administrator for an account.',
     privacyTitle: 'Your data is protected',
     privacyDesc:
       'MiQroGate runs in your private environment. We never store your prompts or sensitive data.',
@@ -245,10 +256,21 @@ const confirmPassword = ref('');
 const showPassword = ref(false);
 const loading = ref(false);
 const oauthProviders = ref<Array<{ code: string; name: string }>>([]);
+// #550: the deployment may run with self-registration switched off. Fail open
+// (true) so a failed status probe never hides a form that would have worked —
+// the backend 403 REGISTRATION_DISABLED remains the enforcement.
+const registrationEnabled = ref(true);
 const errorMessage = ref('');
 const errorRequestId = ref('');
 
+/** The register entry is only ever offered from the login pane. */
+const registerEntryDisabled = computed(() => mode.value === 'login' && !registrationEnabled.value);
+
 function switchMode(next: Mode) {
+  if (next === 'register' && !registrationEnabled.value) {
+    errorMessage.value = t.value.errRegisterOff;
+    return;
+  }
   mode.value = next;
   errorMessage.value = '';
   errorRequestId.value = '';
@@ -282,6 +304,10 @@ async function submit() {
   }
 
   // register (self-service)
+  if (!registrationEnabled.value) {
+    errorMessage.value = t.value.errRegisterOff;
+    return;
+  }
   if (!username.value || !password.value || !confirmPassword.value) {
     errorMessage.value = t.value.errFill;
     return;
@@ -323,13 +349,36 @@ function startOauth() {
   window.location.assign('/api/v1/auth/oauth/start');
 }
 
-onMounted(async () => {
-  try {
-    oauthProviders.value = await api.publicOauthProviders();
-  } catch {
-    // provider discovery is best-effort on the login page
-    oauthProviders.value = [];
-  }
+onMounted(() => {
+  // #550: ask the deployment whether self-service registration is open before
+  // the user can pick the register tab. Each probe publishes its own result as
+  // soon as it settles, so a status call that hangs until the HTTP timeout
+  // cannot hold back the OAuth button of the independent provider probe.
+  // Failures keep per-probe fallbacks: a failed status probe leaves the entry
+  // "enabled" (fail open — the backend 403 REGISTRATION_DISABLED remains the
+  // enforcement point), a failed provider probe renders no OAuth button.
+  api
+    .registrationStatus()
+    .then((status) => {
+      if (status.enabled !== false) return;
+      registrationEnabled.value = false;
+      if (mode.value === 'register') {
+        switchMode('login');
+        errorMessage.value = t.value.errRegisterOff;
+      }
+    })
+    .catch(() => {
+      registrationEnabled.value = true;
+    });
+
+  api
+    .publicOauthProviders()
+    .then((providers) => {
+      oauthProviders.value = providers;
+    })
+    .catch(() => {
+      oauthProviders.value = [];
+    });
 });
 </script>
 
@@ -379,7 +428,6 @@ onMounted(async () => {
             </span>
           </article>
         </div>
-
       </div>
 
       <footer class="hero-footer">
@@ -646,14 +694,17 @@ onMounted(async () => {
         <button
           type="button"
           class="request-access"
+          :class="{ 'request-access--off': registerEntryDisabled }"
           :data-testid="mode === 'login' ? 'tab-register' : 'tab-login'"
+          :disabled="registerEntryDisabled"
+          :aria-disabled="registerEntryDisabled || undefined"
           @click="switchMode(mode === 'login' ? 'register' : 'login')"
         >
           <span class="request-access-icon"><UserIcon size="20px" /></span>
           <span class="request-access-copy">
             <template v-if="mode === 'login'">
-              <strong>{{ t.requestTitle }}</strong>
-              <small>{{ t.requestDesc }}</small>
+              <strong>{{ registrationEnabled ? t.requestTitle : t.inviteOnlyTitle }}</strong>
+              <small>{{ registrationEnabled ? t.requestDesc : t.inviteOnlyDesc }}</small>
             </template>
             <template v-else>
               <strong>{{ t.backTitle }}</strong>
@@ -940,7 +991,6 @@ onMounted(async () => {
   pointer-events: none;
   user-select: none;
 }
-
 
 .hero-footer {
   display: flex;
@@ -1316,6 +1366,21 @@ onMounted(async () => {
   transform: translateY(-1px);
   border-color: #cbd5e6;
   background: #f9fbff;
+}
+/* #550: invite-only deployment — the register entry stays visible (it carries
+   the explanation) but reads as unavailable and no longer lifts on hover. */
+.request-access--off,
+.request-access--off:hover {
+  transform: none;
+  border-color: #e4e9f2;
+  background: #f2f4f9;
+  color: #7d8a9f;
+  cursor: not-allowed;
+}
+.request-access--off .request-access-icon {
+  color: #9aa5b8;
+  background: #eceff5;
+  border-color: #e4e9f2;
 }
 .request-access-icon {
   width: 42px;

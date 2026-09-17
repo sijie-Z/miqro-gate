@@ -450,6 +450,21 @@ test('new login page renders login and register modes', async ({ page }) => {
   await page.screenshot({ path: 'test-results/baseline/next-login-1440x900.png', fullPage: true });
 });
 
+test('new login page closes the register entry when self-registration is off (#550)', async ({
+  page,
+}) => {
+  await page.route('**/api/v1/auth/me', (route) => route.fulfill({ status: 401, json: {} }));
+  await page.route('**/api/v1/auth/registration-status', (route) =>
+    route.fulfill({ json: { enabled: false } }),
+  );
+  await page.goto('/login-new');
+
+  await expect(page.getByTestId('login-panel')).toBeVisible();
+  await expect(page.getByTestId('tab-register')).toBeDisabled();
+  await expect(page.getByTestId('register-display-name')).toHaveCount(0);
+  await expect(page.getByTestId('register-confirm')).toHaveCount(0);
+});
+
 test('keys page lists keys and rotates through the kebab confirm gate', async ({ page }) => {
   await mockSession(page, REGULAR_USER);
   await mockPilotApi(page);
