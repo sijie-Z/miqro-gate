@@ -159,6 +159,50 @@ class UsageAdjustmentApiIntegrationTest {
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("USAGE_EVENT_NOT_FOUND"));
     }
 
+    @Test
+    @DisplayName("an adjustment moves the net column and the summary, and leaves the observed counts alone")
+    void adjustmentMovesNetButNotObserved() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/usage/records").cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].inputTokens").value(1_000))
+                .andExpect(jsonPath("$.items[0].netInputTokens").value(1_000))
+                .andExpect(jsonPath("$.items[0].adjusted").value(false));
+
+        append("{\"gatewayRequestId\":\"" + REQUEST_ID + "\",\"outputTokensDelta\":-200," + "\"reason\":\"上游账单修正\"}")
+                .andExpect(status().isCreated());
+
+        // Observed is exactly what the gateway recorded and never moves; net carries
+        // the
+        // correction. Both are exposed so a reader cannot mistake one for the other.
+        mockMvc.perform(get("/api/v1/admin/usage/records").cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].inputTokens").value(1_000))
+                .andExpect(jsonPath("$.items[0].outputTokens").value(500))
+                .andExpect(jsonPath("$.items[0].netInputTokens").value(1_000))
+                .andExpect(jsonPath("$.items[0].netOutputTokens").value(300))
+                .andExpect(jsonPath("$.items[0].adjusted").value(true));
+    }
+
+    @Test
+    @DisplayName("reversing an adjustment returns the row to its observed totals")
+    void reversalRestoresObservedTotals() throws Exception {
+        MvcResult created = append(
+                "{\"gatewayRequestId\":\"" + REQUEST_ID + "\",\"outputTokensDelta\":-200," + "\"reason\":\"上游账单修正\"}")
+                .andExpect(status().isCreated()).andReturn();
+        Map<?, ?> original = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class);
+
+        mockMvc.perform(get("/api/v1/admin/usage/records").cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].netOutputTokens").value(300));
+
+        append("{\"gatewayRequestId\":\"" + REQUEST_ID + "\",\"reason\":\"撤销前次调整\",\"reversalOfId\":\""
+                + original.get("id") + "\"}").andExpect(status().isCreated());
+
+        // The deltas net back to zero, so the row is no longer flagged as adjusted and
+        // the net returns to the observed count.
+        mockMvc.perform(get("/api/v1/admin/usage/records").cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].adjusted").value(false))
+                .andExpect(jsonPath("$.items[0].netOutputTokens").value(500))
+                .andExpect(jsonPath("$.items[0].outputTokens").value(500));
+    }
+
     private org.springframework.test.web.servlet.ResultActions append(String body) throws Exception {
         return mockMvc.perform(post("/api/v1/admin/usage-adjustments").contentType(MediaType.APPLICATION_JSON)
                 .cookie(adminSession, csrfCookie).header("X-CSRF-Token", csrfToken).content(body));

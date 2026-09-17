@@ -6,6 +6,7 @@ import com.miqroera.miqrokey.domain.model.VirtualKey;
 import com.miqroera.miqrokey.domain.repository.PriceSnapshotRepository;
 import com.miqroera.miqrokey.domain.repository.UsageStatsRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
+import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
 import com.miqroera.miqrokey.domain.usage.PriceSnapshot;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
@@ -105,10 +106,10 @@ public class UsageStatsService {
         UsageStatsRepository.UsageFilter filter = filter(user, keyIds, from, to);
 
         long total = usageStatsRepository.countRecords(filter);
-        List<UsageEvent> events = usageStatsRepository.findRecords(filter, (page - 1) * size, size);
+        List<AdjustedUsageRow> events = usageStatsRepository.findRecords(filter, (page - 1) * size, size);
         List<UsageRecordPage.UsageRecordView> items = new ArrayList<>(events.size());
-        for (UsageEvent e : events) {
-            items.add(view(e));
+        for (AdjustedUsageRow row : events) {
+            items.add(view(row));
         }
         return new UsageRecordPage(items, page, size, total);
     }
@@ -159,14 +160,23 @@ public class UsageStatsService {
         }
     }
 
-    private static UsageRecordPage.UsageRecordView view(UsageEvent e) {
+    /**
+     * Maps one row to the wire shape. The observed counts stay exactly the fact the
+     * gateway recorded; the net counts and the {@code adjusted} marker ride
+     * alongside so a reader can always tell a corrected row from an untouched one
+     * (#709).
+     */
+    private static UsageRecordPage.UsageRecordView view(AdjustedUsageRow row) {
+        UsageEvent e = row.observed();
         TokenBucket t = e.tokens();
         Long input = orNull(t != null ? t.inputTokens() : null, t != null ? t.promptTokens() : null);
         Long output = orNull(t != null ? t.outputTokens() : null, t != null ? t.completionTokens() : null);
         return new UsageRecordPage.UsageRecordView(e.occurredAt(), e.modelId(), e.cacheLevel(), input, output,
                 t != null ? t.cacheReadInputTokens() : null, t != null ? t.cacheCreationInputTokens() : null,
                 t != null ? t.totalTokens() : null, e.latencyMs(), e.upstreamStatusCode(), e.providerRequestId(),
-                e.gatewayRequestId(), e.isComplete(), e.usageMissing(), e.virtualKeyId(), e.clientIp());
+                e.gatewayRequestId(), e.isComplete(), e.usageMissing(), e.virtualKeyId(), e.clientIp(),
+                row.netInputTokens(), row.netOutputTokens(), row.netCacheReadInputTokens(),
+                row.netCacheCreationInputTokens(), row.adjusted());
     }
 
     /** Primary input/output token, preferring the protocol-specific column. */

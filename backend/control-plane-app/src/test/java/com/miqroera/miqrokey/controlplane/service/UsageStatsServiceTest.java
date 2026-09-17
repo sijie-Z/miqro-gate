@@ -10,6 +10,7 @@ import com.miqroera.miqrokey.domain.model.VirtualKeyStatus;
 import com.miqroera.miqrokey.domain.repository.PriceSnapshotRepository;
 import com.miqroera.miqrokey.domain.repository.UsageStatsRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
+import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
 import com.miqroera.miqrokey.domain.usage.CacheLevel;
 import com.miqroera.miqrokey.domain.usage.PriceSnapshot;
 import com.miqroera.miqrokey.domain.usage.PriceTokenType;
@@ -153,7 +154,7 @@ class UsageStatsServiceTest {
         Instant from = Instant.now().minusSeconds(3600);
         Instant to = Instant.now();
         when(usageStatsRepository.countRecords(any())).thenReturn(1L);
-        when(usageStatsRepository.findRecords(any(), eq(0L), eq(50))).thenReturn(List.of(event()));
+        when(usageStatsRepository.findRecords(any(), eq(0L), eq(50))).thenReturn(List.of(unadjusted(event())));
 
         UsageRecordPage page = service.records(user, from, to, 1, 50);
 
@@ -220,4 +221,16 @@ class UsageStatsServiceTest {
                 new TokenBucket(1_000L, 500L, null, 200L, null, null, 1_700L, null), 42L, 200, new byte[16], true,
                 false, "greq", Instant.now(), null, null);
     }
+
+    /**
+     * An unadjusted row — net equals observed, which is what makes the existing
+     * assertions in this class double as the "no adjustment, no change" regression
+     * guard for the net wiring (#709).
+     */
+    private static AdjustedUsageRow unadjusted(UsageEvent e) {
+        TokenBucket t = e.tokens();
+        return new AdjustedUsageRow(e, t.inputTokens(), t.outputTokens(), t.cacheReadInputTokens(),
+                t.cacheCreationInputTokens(), false);
+    }
+
 }
