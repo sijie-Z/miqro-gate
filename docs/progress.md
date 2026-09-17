@@ -3248,3 +3248,30 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - 未动 e2e 与金样；`frontend/dist/` 已被 `.gitignore` 覆盖，构建没有脏化工作区。
 - `frontend/package.json` 的 `lint` 脚本写死 `eslint . --ext .vue,.ts,.tsx --fix`，所以每跑一次都会改写一批与本 issue 无关的文件（含 `types/generated.ts` 的整文件 prettier 重排）——两轮各发生一次，均按路径逐个 `git checkout --` 还原，本批提交 `git show --stat` 只含本批文件。这是仓库既有状态，不是本批引入；收口验证因此不再跑 `npm run lint`，改为按上一节的方式对提交内容取信号（`git show HEAD:<file> | npx eslint --stdin`），既不改写工作区，也不受工作区 EOL 影响。
 
+
+## 2026-09-17 下午 — 模型调用链路时间线 #705（后端）+ #707（前端）+ 独立审查修复
+
+**目标与交付**
+- #705 后端：新增 `request_usage_records` 的**首个读取路径**（此前该表只有写入方，控制面无查询入口——这正是模型侧一直没有"按请求排查"能力的根因）。端点 `GET /api/v1/admin/usage/timeline?gatewayRequestId=...` 返回单次调用的阶段时间线（受理 → 上游首字节 → 完成）+ TTFB/耗时/终态/重试/部分响应/Token 四分类/归属链；**零新增采集**。V60 为 `(tenant_id, gateway_request_id)` 建索引——EXPLAIN 实测此前走 Seq Scan（表按月分区且既有索引均不以该列起头）。
+- #707 前端：用量明细「请求 ID」列改可点击 + 三层信息抽屉（终态徽章 + "卡在哪一段" / TTFB·重试·HTTP / 折叠的归属链与 Token）。未记录的阶段如实标「缺失 · 未记录」而不补零；404 呈现为说明块而非错误横幅。OpenAPI 基线重导 + `gen:types` 重生成。
+
+**独立审查（对抗性、实测驱动）发现并修复三处缺陷**
+- **D1（高）相位耗时不同源**：`time_to_first_byte_ms` 自**网关入口**起算（鉴权/配额/读 body/缓存查找/凭证解密之前），而 `started_at` 在其后取值，二者被混入同一相位列表 → 演示库实测 **56 行出现"上游首字节晚于完成"**（如 ttfb 8422ms > duration 6275ms）。现改为相位耗时一律取时间戳差值（单一原点、构造上单调），实测值作独立字段透出并在 DTO 注明原点。
+- **D2（中）token 缺回退**：列表页用 `COALESCE(input_tokens, prompt_tokens)`，时间线直读原列 → 实测 **70/4650 行**"列表有数、详情空白"（OpenAI Chat 协议行）。已在 SQL 层统一归一化，两处数字不再打架。
+- **D3（中）OpenAPI 基线未重导** → 会阻塞 #707 的类型生成。已重跑 `OpenApiSpecIntegrationTest` 覆盖，破坏性检查 exit 0（仅新增 path + 3 schema）。
+- 审查同时**确认无问题**：分区表索引有效（PG 17.6 `pg_index` 实测，父表建索引自动落到所有分区并被未来分区继承）、租户隔离成立、鉴权级别恰当、RowMapper 27 字段逐位正确、时区处理无 bug、`LIMIT 1` 语义正确。
+- 附带发现：目前**所有行都落在 DEFAULT 分区**（月度分区尚未发生）→「按 DROP PARTITION 做留存」当前无法实施。
+
+**验证**
+- 后端：`ModelCallTimelineServiceTest` **9/9 PASS**（含两条新回归用例：用真实倒序数据断言相位单调；`httpStatus`/`tokens` 全 null 不炸）。原夹具令 `measured == delta`，恰好掩盖 D1，已修正。
+- 前端：`npx vitest run` → `Test Files 61 passed (61)` / `Tests 360 passed (360)`；`npm run typecheck` → exit 0。
+- OpenAPI：`OpenApiSpecIntegrationTest` PASS；`check-openapi-breaking.py` → exit 0；head 对基线全路径比对 **removed 0 / changed 0 / added 55**。
+- Spotless 通过。
+
+**边界与偏差**
+- **未做浏览器实机验收**：两个分支均未部署，演示栈仍停在 develop；#707 的 UI 只有单测证据，无真机截图——待合并部署后补。
+- #707 分支基于**修复前**的 #705 建立，直接合并会覆盖 D1/D2；已 rebase 到修复后基础并复跑全绿。
+- 集成测试**必须带 `-Pintegration`**：不带该 profile 跑 `-Dtest=OpenApiSpecIntegrationTest` 会静默「Tests run: 0」且 BUILD SUCCESS（本轮踩过一次，记此为鉴）。
+- 前端空值类型不精确（后端未配 `default-property-inclusion`，运行时 `null` 而 codegen 出 `| undefined`）——仓库既有特征，非本轮引入。
+- 遗留建议（非缺陷）：透出 `usage_missing` 标记；`Phase.label` 中文文案是否移交前端。
+- 开发自审衍生的架构缺口（三类调用缺少单一事实源）另立 #719，不阻塞本批。
