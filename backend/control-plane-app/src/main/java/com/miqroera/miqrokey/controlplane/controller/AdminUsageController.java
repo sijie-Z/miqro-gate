@@ -1,9 +1,11 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.dto.HourlyUsageReport;
+import com.miqroera.miqrokey.controlplane.dto.ModelCallTimelineView;
 import com.miqroera.miqrokey.controlplane.dto.UsageRecordPage;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminUsageStatsService;
+import com.miqroera.miqrokey.controlplane.service.ModelCallTimelineService;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,11 +29,30 @@ import java.util.UUID;
 public class AdminUsageController {
 
     private final AdminUsageStatsService usageStatsService;
+    private final ModelCallTimelineService modelCallTimelineService;
     private final UserContext userContext;
 
-    public AdminUsageController(AdminUsageStatsService usageStatsService, UserContext userContext) {
+    public AdminUsageController(AdminUsageStatsService usageStatsService,
+            ModelCallTimelineService modelCallTimelineService, UserContext userContext) {
         this.usageStatsService = usageStatsService;
+        this.modelCallTimelineService = modelCallTimelineService;
         this.userContext = userContext;
+    }
+
+    /**
+     * One model call's lifecycle timeline (#705), e.g.
+     * {@code GET /api/v1/admin/usage/timeline?gatewayRequestId=...}.
+     *
+     * <p>
+     * Replays the phases the gateway already records (受理 → 上游首字节 → 完成) for a single
+     * call, so "这次调用卡在哪一步" is answerable from the console. Calls that never reached
+     * upstream (cache hits, auth/model rejections) are not written to the lifecycle
+     * table and return 404.
+     * </p>
+     */
+    @GetMapping("/timeline")
+    public ModelCallTimelineView timeline(@RequestParam(required = false) String gatewayRequestId) {
+        return modelCallTimelineService.timeline(userContext.getUser(), gatewayRequestId);
     }
 
     /**
