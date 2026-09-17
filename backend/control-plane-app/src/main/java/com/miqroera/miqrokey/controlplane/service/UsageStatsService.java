@@ -107,9 +107,10 @@ public class UsageStatsService {
 
         long total = usageStatsRepository.countRecords(filter);
         List<AdjustedUsageRow> events = usageStatsRepository.findRecords(filter, (page - 1) * size, size);
+        Map<String, BigDecimal> prices = priceMap();
         List<UsageRecordPage.UsageRecordView> items = new ArrayList<>(events.size());
         for (AdjustedUsageRow row : events) {
-            items.add(view(row));
+            items.add(view(row, prices));
         }
         return new UsageRecordPage(items, page, size, total);
     }
@@ -156,27 +157,47 @@ public class UsageStatsService {
             return UsageStatsRepository.GroupBy.valueOf(value.trim().toUpperCase());
         } catch (IllegalArgumentException e) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "GROUP_BY_INVALID",
-                    "groupBy must be one of PROJECT, VIRTUAL_KEY, CACHE_LEVEL, DAY, USER, TEAM, MODEL, MONTH");
+                    "groupBy must be one of PROJECT, VIRTUAL_KEY, CACHE_LEVEL, DAY, USER, TEAM, MODEL, MONTH, PRODUCT");
         }
+    }
+
+    /**
+     * Latest price snapshot keyed {@code productId:modelId:TOKEN_TYPE} — the same
+     * map the aggregates price with.
+     */
+    private Map<String, BigDecimal> priceMap() {
+        Map<String, BigDecimal> prices = new LinkedHashMap<>();
+        for (PriceSnapshot p : priceSnapshotRepository.findAllLatestAt(Instant.now())) {
+            prices.put(p.providerProductId() + ":" + p.modelId() + ":" + p.tokenType().name(), p.unitPrice());
+        }
+        return prices;
     }
 
     /**
      * Maps one row to the wire shape. The observed counts stay exactly the fact the
      * gateway recorded; the net counts and the {@code adjusted} marker ride
      * alongside so a reader can always tell a corrected row from an untouched one
-     * (#709).
+     * (#709). The per-row cost is priced with the same snapshot map as the
+     * aggregates (#758) and flagged {@code priced=false} when the model is not
+     * (fully) priced.
      */
-    private static UsageRecordPage.UsageRecordView view(AdjustedUsageRow row) {
+    private static UsageRecordPage.UsageRecordView view(AdjustedUsageRow row, Map<String, BigDecimal> prices) {
         UsageEvent e = row.observed();
         TokenBucket t = e.tokens();
         Long input = orNull(t != null ? t.inputTokens() : null, t != null ? t.promptTokens() : null);
         Long output = orNull(t != null ? t.outputTokens() : null, t != null ? t.completionTokens() : null);
+        Long cacheRead = t != null ? t.cacheReadInputTokens() : null;
+        Long cacheCreation = t != null ? t.cacheCreationInputTokens() : null;
+        UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(prices, e.providerProductId(),
+                e.modelId(), input, output, cacheRead, cacheCreation);
         return new UsageRecordPage.UsageRecordView(e.occurredAt(), e.modelId(), e.cacheLevel(), input, output,
-                t != null ? t.cacheReadInputTokens() : null, t != null ? t.cacheCreationInputTokens() : null,
-                t != null ? t.totalTokens() : null, e.latencyMs(), e.upstreamStatusCode(), e.providerRequestId(),
-                e.gatewayRequestId(), e.isComplete(), e.usageMissing(), e.virtualKeyId(), e.clientIp(),
-                row.netInputTokens(), row.netOutputTokens(), row.netCacheReadInputTokens(),
-                row.netCacheCreationInputTokens(), row.adjusted());
+                cacheRead, cacheCreation, t != null ? t.totalTokens() : null, e.latencyMs(), e.upstreamStatusCode(),
+                e.providerRequestId(), e.gatewayRequestId(), e.isComplete(), e.usageMissing(), e.virtualKeyId(),
+                e.clientIp(), row.netInputTokens(), row.netOutputTokens(), row.netCacheReadInputTokens(),
+                row.netCacheCreationInputTokens(), row.adjusted(), row.providerProductName(),
+                row.lifecycle() != null ? row.lifecycle().timeToFirstByteMs() : null,
+                row.lifecycle() != null ? row.lifecycle().wireProtocol() : null,
+                row.lifecycle() != null ? row.lifecycle().requestStatus() : null, priced.cost(), priced.priced());
     }
 
     /** Primary input/output token, preferring the protocol-specific column. */

@@ -53,7 +53,18 @@ public final class UsageStatsAggregator {
      * group/product/model/cache-level combination).
      */
     public record UsageAggRow(String groupKey, String label, UUID productId, String modelId, CacheLevel cacheLevel,
-            long requests, TokenBucket tokens) {
+            long requests, TokenBucket tokens, Outcome outcome) {
+
+        /**
+         * Per-row lifecycle outcome aggregates joined from
+         * {@code request_usage_records} (#758). Rows without a lifecycle join
+         * (coalesced requests never have one) report all zeros.
+         */
+        public record Outcome(long failed, long cancelled, long durationSumMs, long durationCount, long ttfbSumMs,
+                long ttfbCount) {
+
+            public static final Outcome NONE = new Outcome(0, 0, 0, 0, 0, 0);
+        }
     }
 
     /**
@@ -66,7 +77,18 @@ public final class UsageStatsAggregator {
     }
 
     /** Group-level aggregate. */
-    public record GroupSummary(String groupKey, String label, Requests requests, Tokens tokens, Cost cost) {
+    public record GroupSummary(String groupKey, String label, Requests requests, Tokens tokens, Cost cost,
+            Outcomes outcomes) {
+    }
+
+    /**
+     * Lifecycle outcomes of a group (#758): success rate and latency come from the
+     * {@code request_usage_records} lifecycle join, so they cover the
+     * forwarded/coalesced calls only — cache hits carry no lifecycle. A client
+     * cancellation is neither a success nor a failure (excluded from both sides);
+     * averaged fields are null when nothing observed them.
+     */
+    public record Outcomes(long succeeded, long failed, long cancelled, Long avgDurationMs, Long avgTtfbMs) {
     }
 
     public record Requests(long upstream, long coalesced, long l1Hit, long l2Hit) {
@@ -141,6 +163,12 @@ public final class UsageStatsAggregator {
         private BigDecimal upstreamPaid = BigDecimal.ZERO;
         private BigDecimal gatewayObserved = BigDecimal.ZERO;
         private BigDecimal savedByGatewayCache = BigDecimal.ZERO;
+        private long failedRequests;
+        private long cancelledRequests;
+        private long durationSumMs;
+        private long durationCount;
+        private long ttfbSumMs;
+        private long ttfbCount;
 
         private GroupAccumulator(String groupKey, String label) {
             this.groupKey = groupKey;
@@ -155,6 +183,14 @@ public final class UsageStatsAggregator {
                     // L1_HIT/L2_HIT usage rows are not expected; counted in addHit
                 }
             }
+            if (row.outcome() != null) {
+                failedRequests += row.outcome().failed();
+                cancelledRequests += row.outcome().cancelled();
+                durationSumMs += row.outcome().durationSumMs();
+                durationCount += row.outcome().durationCount();
+                ttfbSumMs += row.outcome().ttfbSumMs();
+                ttfbCount += row.outcome().ttfbCount();
+            }
             TokenBucket t = row.tokens();
             if (t == null || t.isEmpty()) {
                 return;
@@ -168,10 +204,11 @@ public final class UsageStatsAggregator {
             cacheReadTokens += cacheRead;
             cacheCreationTokens += cacheCreation;
 
-            BigDecimal rowCost = price(prices, row.productId(), row.modelId(), PriceTokenType.INPUT, input)
-                    .add(price(prices, row.productId(), row.modelId(), PriceTokenType.OUTPUT, output))
-                    .add(price(prices, row.productId(), row.modelId(), PriceTokenType.CACHE_READ, cacheRead))
-                    .add(price(prices, row.productId(), row.modelId(), PriceTokenType.CACHE_CREATION, cacheCreation));
+            BigDecimal rowCost = pricedOrZero(prices, row.productId(), row.modelId(), PriceTokenType.INPUT, input)
+                    .add(pricedOrZero(prices, row.productId(), row.modelId(), PriceTokenType.OUTPUT, output))
+                    .add(pricedOrZero(prices, row.productId(), row.modelId(), PriceTokenType.CACHE_READ, cacheRead))
+                    .add(pricedOrZero(prices, row.productId(), row.modelId(), PriceTokenType.CACHE_CREATION,
+                            cacheCreation));
             gatewayObserved = gatewayObserved.add(rowCost);
             if (row.cacheLevel() == CacheLevel.UPSTREAM) {
                 upstreamPaid = upstreamPaid.add(rowCost);
@@ -193,30 +230,27 @@ public final class UsageStatsAggregator {
             long output = orZero(t.outputTokens() != null ? t.outputTokens() : t.completionTokens());
             long cacheRead = orZero(t.cacheReadInputTokens());
             long cacheCreation = orZero(t.cacheCreationInputTokens());
-            BigDecimal saved = price(prices, row.productId(), row.modelId(), PriceTokenType.INPUT, input * hits)
-                    .add(price(prices, row.productId(), row.modelId(), PriceTokenType.OUTPUT, output * hits))
-                    .add(price(prices, row.productId(), row.modelId(), PriceTokenType.CACHE_READ, cacheRead * hits))
-                    .add(price(prices, row.productId(), row.modelId(), PriceTokenType.CACHE_CREATION,
+            BigDecimal saved = pricedOrZero(prices, row.productId(), row.modelId(), PriceTokenType.INPUT, input * hits)
+                    .add(pricedOrZero(prices, row.productId(), row.modelId(), PriceTokenType.OUTPUT, output * hits))
+                    .add(pricedOrZero(prices, row.productId(), row.modelId(), PriceTokenType.CACHE_READ,
+                            cacheRead * hits))
+                    .add(pricedOrZero(prices, row.productId(), row.modelId(), PriceTokenType.CACHE_CREATION,
                             cacheCreation * hits));
             savedByGatewayCache = savedByGatewayCache.add(saved);
         }
 
-        private static BigDecimal price(Map<String, BigDecimal> prices, UUID productId, String modelId,
-                PriceTokenType type, long tokens) {
-            if (tokens == 0) {
-                return BigDecimal.ZERO;
-            }
-            BigDecimal unitPrice = prices.get(priceKey(productId, modelId, type));
-            if (unitPrice == null) {
-                return BigDecimal.ZERO; // no price snapshot — 0 cost until priced
-            }
-            return BigDecimal.valueOf(tokens).multiply(unitPrice, MC).divide(PER_MILLION, MC);
-        }
-
         GroupSummary toSummary(Map<String, BigDecimal> prices) {
+            // Success rate reads the forwarded/coalesced calls only; cache hits
+            // (l1Hit/l2Hit) carry no lifecycle. A cancelled client is on
+            // neither side of the rate — walking away is not a gateway failure.
+            long forwarded = upstream + coalesced;
+            long succeeded = Math.max(0, forwarded - failedRequests - cancelledRequests);
+            Long avgDurationMs = durationCount > 0 ? durationSumMs / durationCount : null;
+            Long avgTtfbMs = ttfbCount > 0 ? ttfbSumMs / ttfbCount : null;
             return new GroupSummary(groupKey, label, new Requests(upstream, coalesced, l1Hit, l2Hit),
                     new Tokens(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens),
-                    new Cost(upstreamPaid, gatewayObserved, gatewayObserved, savedByGatewayCache));
+                    new Cost(upstreamPaid, gatewayObserved, gatewayObserved, savedByGatewayCache),
+                    new Outcomes(succeeded, failedRequests, cancelledRequests, avgDurationMs, avgTtfbMs));
         }
 
         void mergeFrom(GroupAccumulator other) {
@@ -231,7 +265,62 @@ public final class UsageStatsAggregator {
             upstreamPaid = upstreamPaid.add(other.upstreamPaid);
             gatewayObserved = gatewayObserved.add(other.gatewayObserved);
             savedByGatewayCache = savedByGatewayCache.add(other.savedByGatewayCache);
+            failedRequests += other.failedRequests;
+            cancelledRequests += other.cancelledRequests;
+            durationSumMs += other.durationSumMs;
+            durationCount += other.durationCount;
+            ttfbSumMs += other.ttfbSumMs;
+            ttfbCount += other.ttfbCount;
         }
+    }
+
+    /**
+     * A per-row cost estimate plus whether every non-zero token type was priced.
+     */
+    public record PricedCost(BigDecimal cost, boolean priced) {
+    }
+
+    /**
+     * Prices one usage row with the same table and math as the aggregates:
+     * {@code tokens × unitPrice / 1e6} per token type, summed. {@code priced} is
+     * false when any non-zero token type has no snapshot — the caller shows 未定价
+     * rather than a misleading 0 (#758).
+     */
+    public static PricedCost pricedCost(Map<String, BigDecimal> prices, UUID productId, String modelId, Long input,
+            Long output, Long cacheRead, Long cacheCreation) {
+        long in = orZero(input);
+        long out = orZero(output);
+        long read = orZero(cacheRead);
+        long creation = orZero(cacheCreation);
+        boolean priced = (in == 0 || hasPrice(prices, productId, modelId, PriceTokenType.INPUT))
+                && (out == 0 || hasPrice(prices, productId, modelId, PriceTokenType.OUTPUT))
+                && (read == 0 || hasPrice(prices, productId, modelId, PriceTokenType.CACHE_READ))
+                && (creation == 0 || hasPrice(prices, productId, modelId, PriceTokenType.CACHE_CREATION));
+        if (!priced) {
+            return new PricedCost(BigDecimal.ZERO, false);
+        }
+        BigDecimal cost = pricedOrZero(prices, productId, modelId, PriceTokenType.INPUT, in)
+                .add(pricedOrZero(prices, productId, modelId, PriceTokenType.OUTPUT, out))
+                .add(pricedOrZero(prices, productId, modelId, PriceTokenType.CACHE_READ, read))
+                .add(pricedOrZero(prices, productId, modelId, PriceTokenType.CACHE_CREATION, creation));
+        return new PricedCost(cost, true);
+    }
+
+    private static boolean hasPrice(Map<String, BigDecimal> prices, UUID productId, String modelId,
+            PriceTokenType type) {
+        return prices.containsKey(priceKey(productId, modelId, type));
+    }
+
+    private static BigDecimal pricedOrZero(Map<String, BigDecimal> prices, UUID productId, String modelId,
+            PriceTokenType type, long tokens) {
+        if (tokens == 0) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal unitPrice = prices.get(priceKey(productId, modelId, type));
+        if (unitPrice == null) {
+            return BigDecimal.ZERO;
+        }
+        return BigDecimal.valueOf(tokens).multiply(unitPrice, MC).divide(PER_MILLION, MC);
     }
 
     private static long orZero(Long v) {

@@ -232,7 +232,7 @@
 
 ### 4.4 用量汇总 `GET /api/v1/me/usage/summary`
 
-参数：`groupBy`（`project | virtual_key | cache_level | day | user | team | model | month`，默认 `project`；**I15**：`user`=调用方（label=用户名）、`model`=模型、`month`=自然月 `YYYY-MM`；**2026-09-15**：`team`=团队成员归属（label=团队名，经成员的 Virtual Key 归集；同一用户属多团队时在各团队分别计入——归属视图非分割口径））、`from`、`to`（ISO-8601，默认最近 93 天窗口；`from` 必须在 `to` 之前，窗口超过 93 天拒绝）。
+参数：`groupBy`（`project | virtual_key | cache_level | day | user | team | model | month | product`，默认 `project`；**I15**：`user`=调用方（label=用户名）、`model`=模型、`month`=自然月 `YYYY-MM`；**2026-09-15**：`team`=团队成员归属（label=团队名，经成员的 Virtual Key 归集；同一用户属多团队时在各团队分别计入——归属视图非分割口径）；**#758**：`product`=供应商产品（label=产品显示名））、`from`、`to`（ISO-8601，默认最近 93 天窗口；`from` 必须在 `to` 之前，窗口超过 93 天拒绝）。
 
 ```json
 {
@@ -248,16 +248,18 @@
         "gatewayObserved": 0.0128,
         "projectAllocated": 0.0128,
         "savedByGatewayCache": 0.0
-      }
+      },
+      "outcomes": { "succeeded": 11, "failed": 1, "cancelled": 0, "avgDurationMs": 4200, "avgTtfbMs": 1800 }
     }
   ],
-  "totals": { "requests": { "upstream": 12, "coalesced": 0, "l1Hit": 0, "l2Hit": 0 }, "tokens": { "input": 1200, "output": 800, "cacheRead": 0, "cacheCreation": 0 }, "cost": { "upstreamPaid": 0.0128, "gatewayObserved": 0.0128, "projectAllocated": 0.0128, "savedByGatewayCache": 0.0 } }
+  "totals": { "requests": { "upstream": 12, "coalesced": 0, "l1Hit": 0, "l2Hit": 0 }, "tokens": { "input": 1200, "output": 800, "cacheRead": 0, "cacheCreation": 0 }, "cost": { "upstreamPaid": 0.0128, "gatewayObserved": 0.0128, "projectAllocated": 0.0128, "savedByGatewayCache": 0.0 }, "outcomes": { "succeeded": 11, "failed": 1, "cancelled": 0, "avgDurationMs": 4200, "avgTtfbMs": 1800 } }
 }
 ```
 
 - 用量明细只包含自己的 Key 产生的记录；他人的 Key 不出现也不可区分（统一 404）。
 - `upstreamPaid` 按 `price_snapshot`（每百万 token 单价，来源 `MANUAL|OFFICIAL|ESTIMATED`）计算；无价格快照的模型按 `0` 计。
 - 缓存命中产生的成本节省记入 `savedByGatewayCache`，不计入 `projectAllocated`。
+- `outcomes`（#758）：生命周期终态来自 `request_usage_records`（按 gateway request id 一对一对齐）；`succeeded = 转发+合并 − failed − cancelled`——**客户端取消不计入成功率两侧**（`CLIENT_CANCELLED` 既不算成功也不算失败），无生命周期行的合并请求计成功侧；`avgDurationMs` / `avgTtfbMs` 仅在实际观测到取值的行上平均，无观测为 `null`。缓存命中（`cache_hit_event`）不参与成功率。
 
 ### 4.5 用量明细 `GET /api/v1/me/usage/records`
 
@@ -282,7 +284,13 @@
       "isComplete": true,
       "usageMissing": false,
       "virtualKeyId": "0190...",
-      "clientIp": "203.0.113.7"
+      "clientIp": "203.0.113.7",
+      "providerProductName": "DeepSeek 官方按量 API",
+      "ttfbMs": 2100,
+      "wireProtocol": "ANTHROPIC_MESSAGES",
+      "requestStatus": "SUCCEEDED",
+      "cost": 0.0128,
+      "priced": true
     }
   ],
   "page": 1,
@@ -294,6 +302,8 @@
 - `cacheLevel` ∈ `UPSTREAM | COALESCED | L1_HIT | L2_HIT`。缓存命中行没有 token 数（NULL → 0）且 `isComplete=false` 时不作为上游用量计入。
 - `usageMissing=true` 表示上游未返回 usage（如异常中断）；该行仍入账但用量为 0，便于排查。
 - `clientIp`（#605）：调用方网络地址——传输层对端；仅当对端命中 `MIQROKEY_TRUSTED_PROXY_CIDRS` 可信代理时才消费 `X-Forwarded-For`（**从右往左**取第一个非可信地址，杜绝最左伪造），非 IP 字面量（主机名/带端口）一律不记录、不解析；无法确定时为 `null`。历史行与直连未配置代理时的对端地址照记。
+- `providerProductName` / `ttfbMs` / `wireProtocol` / `requestStatus`（#758）：供应商产品显示名与生命周期富集列，来自 `request_usage_records` 按 gateway request id 的左连接；合并请求无生命周期行时三者均为 `null`（首字对无首字节的失败请求同样为 `null`）。
+- `cost` / `priced`（#758）：单行成本估计，用与汇总相同的价目快照与算法（`tokens × 单价 / 1e6` 逐 token 类型求和）；`priced=false` 表示存在尚无价目快照的非零 token 类型，前端显示「未定价」，此时 `cost` 不可信。
 - `providerRequestId` 在 tenant 内唯一（幂等写，重复 flush 不双计）。
 
 ### 4.6 模型申请（审批流）`POST/GET /api/v1/me/model-approvals`
@@ -550,7 +560,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/usage/records` | 全租户分页明细，时间倒序 |
 | `GET /api/v1/admin/usage/hourly` | 逐小时 Token 表（#634）：小时 × 项目 ×（用户/团队） |
 
-`summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day` | `user` | `team` | `model` | `month`，默认 `project`；I15 新增后三者；2026-09-15 增 `team`，同用户多团队按团队分别计入）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。
+`summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day` | `user` | `team` | `model` | `month` | `product`，默认 `project`；I15 新增后三者；2026-09-15 增 `team`，同用户多团队按团队分别计入；#758 增 `product`=供应商产品，label=产品显示名）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。明细与汇总的响应结构、`outcomes`（成功率/平均延迟/平均首字）与富集列口径同 §4.4/§4.5（#758）。
 
 `records` 参数：`from`、`to`、`page`（默认 1）、`size`（默认 50，1–200）及与 `summary` 相同的可选过滤，另支持 `clientIp`（#605，精确匹配调用方地址，用于盗用排查「这个来源都调了什么」）。
 

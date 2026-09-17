@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
@@ -7,6 +8,7 @@ import com.miqroera.miqrokey.controlplane.dto.LoginRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import com.miqroera.miqrokey.domain.service.PasswordHasher;
 import jakarta.servlet.http.Cookie;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -179,6 +181,75 @@ class AdminUsageApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("records carry provider name, per-row cost, first byte and protocol (#758)")
+    void recordsCarryLifecycleEnrichment() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertPrices();
+        Instant pricedAt = Instant.now().minusSeconds(120);
+        Instant unpricedAt = Instant.now().minusSeconds(60);
+        // Priced row: 1000×1.00/1e6 + 500×2.00/1e6 = 0.002 USD; priced and fully wired.
+        fx.insertUsageWithGatewayId(ownKey, "chatcmpl-enr-1", "greq-enr-1", 1_000L, 500L, MODEL, pricedAt);
+        fx.insertLifecycle(ownKey, "greq-enr-1", "SUCCEEDED", 210L, 4_900L, pricedAt);
+        // Unpriced model (no snapshot): priced=false; failure terminal without a first
+        // byte.
+        fx.insertUsageWithGatewayId(ownKey, "chatcmpl-enr-2", "greq-enr-2", 7_000L, 3_000L, OTHER_MODEL, unpricedAt);
+        fx.insertLifecycle(ownKey, "greq-enr-2", "UPSTREAM_REJECTED", null, 1_200L, unpricedAt);
+
+        MvcResult r = mockMvc.perform(get("/api/v1/admin/usage/records").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(2)).andReturn();
+        // Newest first: unpriced OTHER_MODEL row, then the priced MODEL row.
+        JsonNode items = objectMapper.readTree(r.getResponse().getContentAsString()).path("items");
+        JsonNode unpriced = items.get(0);
+        JsonNode priced = items.get(1);
+
+        Assertions.assertThat(unpriced.path("modelId").asText()).isEqualTo(OTHER_MODEL);
+        Assertions.assertThat(unpriced.path("providerProductName").asText()).isEqualTo("Test Product");
+        Assertions.assertThat(unpriced.path("priced").asBoolean()).isFalse();
+        Assertions.assertThat(unpriced.path("requestStatus").asText()).isEqualTo("UPSTREAM_REJECTED");
+        Assertions.assertThat(unpriced.path("ttfbMs").isNull()).isTrue();
+
+        Assertions.assertThat(priced.path("modelId").asText()).isEqualTo(MODEL);
+        Assertions.assertThat(priced.path("priced").asBoolean()).isTrue();
+        Assertions.assertThat(priced.path("cost").decimalValue()).isEqualByComparingTo("0.002");
+        Assertions.assertThat(priced.path("ttfbMs").asLong()).isEqualTo(210L);
+        Assertions.assertThat(priced.path("wireProtocol").asText()).isEqualTo("ANTHROPIC_MESSAGES");
+        Assertions.assertThat(priced.path("requestStatus").asText()).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    @DisplayName("groupBy=PRODUCT carries success rate and average latency from the lifecycle (#758)")
+    void productGroupByCarriesOutcomes() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        Instant t = Instant.now().minusSeconds(300);
+        // Four forwarded calls: two succeeded (ttfb 1s / 2s), one upstream failure, one
+        // client cancel.
+        fx.insertUsageWithGatewayId(ownKey, "chatcmpl-out-1", "greq-out-1", 100L, 10L, MODEL, t);
+        fx.insertLifecycle(ownKey, "greq-out-1", "SUCCEEDED", 1_000L, 3_000L, t);
+        fx.insertUsageWithGatewayId(ownKey, "chatcmpl-out-2", "greq-out-2", 100L, 10L, MODEL, t);
+        fx.insertLifecycle(ownKey, "greq-out-2", "SUCCEEDED", 2_000L, 5_000L, t);
+        fx.insertUsageWithGatewayId(ownKey, "chatcmpl-out-3", "greq-out-3", 100L, 10L, MODEL, t);
+        fx.insertLifecycle(ownKey, "greq-out-3", "UPSTREAM_REJECTED", null, 7_000L, t);
+        fx.insertUsageWithGatewayId(ownKey, "chatcmpl-out-4", "greq-out-4", 100L, 10L, MODEL, t);
+        fx.insertLifecycle(ownKey, "greq-out-4", "CLIENT_CANCELLED", null, 1_000L, t);
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "PRODUCT").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.groups.length()").value(1))
+                .andExpect(jsonPath("$.groups[0].label").value("Test Product"))
+                .andExpect(jsonPath("$.groups[0].requests.upstream").value(4))
+                // succeeded = forwarded − failed − cancelled = 4 − 1 − 1
+                .andExpect(jsonPath("$.groups[0].outcomes.succeeded").value(2))
+                .andExpect(jsonPath("$.groups[0].outcomes.failed").value(1))
+                .andExpect(jsonPath("$.groups[0].outcomes.cancelled").value(1))
+                // avg over the four durations (3000+5000+7000+1000)/4 = 4000
+                .andExpect(jsonPath("$.groups[0].outcomes.avgDurationMs").value(4_000))
+                // ttfb averaged over the two rows that observed it: (1000+2000)/2 = 1500
+                .andExpect(jsonPath("$.groups[0].outcomes.avgTtfbMs").value(1_500))
+                .andExpect(jsonPath("$.totals.outcomes.succeeded").value(2));
+    }
+
+    @Test
     @DisplayName("regular users are forbidden from admin usage endpoints")
     void nonAdminForbidden() throws Exception {
         mockMvc.perform(get("/api/v1/admin/usage/summary").cookie(userSession)).andExpect(status().isForbidden());
@@ -229,12 +300,12 @@ class AdminUsageApiIntegrationTest {
         final UUID secondProjectId = UUID.randomUUID();
 
         void reset() {
-            for (String table : List.of("usage_event", "cache_hit_event", "price_snapshot", "virtual_key_models",
-                    "key_project_binding", "model_approval", "virtual_keys", "project_provider_grant_models",
-                    "project_provider_grants", "unattributed_policy", "upstream_credential_versions",
-                    "upstream_credentials", "plan_seats", "upstream_subscriptions", "project_memberships",
-                    "project_repositories", "projects", "provider_products", "providers", "admin_audit_events",
-                    "team_memberships", "teams", "user_sessions", "users")) {
+            for (String table : List.of("usage_event", "cache_hit_event", "request_usage_records", "price_snapshot",
+                    "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
+                    "project_provider_grant_models", "project_provider_grants", "unattributed_policy",
+                    "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
+                    "project_memberships", "project_repositories", "projects", "provider_products", "providers",
+                    "admin_audit_events", "team_memberships", "teams", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {
@@ -394,6 +465,54 @@ class AdminUsageApiIntegrationTest {
                     INSERT INTO projects (id, tenant_id, code, name, status, project_tag, version)
                     VALUES (:id, :tenantId, 'P2', 'Project Two', 'ACTIVE', 'core-ai-2', 0)
                     """, new MapSqlParameterSource("id", secondProjectId).addValue("tenantId", tenantId));
+        }
+
+        /**
+         * A usage fact row with an explicit gateway request id so a lifecycle row can
+         * be wired to it (#758).
+         */
+        void insertUsageWithGatewayId(UUID keyId, String providerRequestId, String gatewayRequestId, long input,
+                long output, String model, Instant occurredAt) {
+            jdbc.update("""
+                    INSERT INTO usage_event
+                        (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
+                         credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
+                         upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at)
+                    VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :productId, :credentialId, :model,
+                            'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, :greq, :occurredAt)
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("providerRequestId", providerRequestId).addValue("greq", gatewayRequestId)
+                            .addValue("keyId", keyId).addValue("projectId", projectId).addValue("productId", productId)
+                            .addValue("credentialId", credentialId).addValue("model", model).addValue("input", input)
+                            .addValue("output", output).addValue("total", input + output)
+                            .addValue("occurredAt", Timestamp.from(occurredAt)));
+        }
+
+        /**
+         * The lifecycle trail row of one forwarded call (#758): what the stats read
+         * enriches by gateway request id — protocol, first byte, terminal status.
+         */
+        void insertLifecycle(UUID keyId, String gatewayRequestId, String requestStatus, Long ttfbMs, Long durationMs,
+                Instant startedAt) {
+            Instant firstByteAt = ttfbMs == null ? null : startedAt.plusMillis(ttfbMs);
+            Instant completedAt = durationMs == null ? null : startedAt.plusMillis(durationMs);
+            jdbc.update("""
+                    INSERT INTO request_usage_records
+                        (started_at, id, gateway_request_id, tenant_id, user_id, project_id, virtual_key_id,
+                         provider_id, provider_product_id, credential_id, model_id, wire_protocol, streaming,
+                         request_status, first_byte_at, completed_at, duration_ms, time_to_first_byte_ms, http_status)
+                    VALUES (:startedAt, :id, :greq, :tenantId, :userId, :projectId, :keyId, :providerId, :productId,
+                            :credentialId, :model, 'ANTHROPIC_MESSAGES', FALSE, :status, :firstByteAt, :completedAt,
+                            :durationMs, :ttfbMs, 200)
+                    """, new MapSqlParameterSource("startedAt", Timestamp.from(startedAt))
+                    .addValue("id", UUID.randomUUID()).addValue("greq", gatewayRequestId).addValue("tenantId", tenantId)
+                    .addValue("userId", userId).addValue("projectId", projectId).addValue("keyId", keyId)
+                    .addValue("providerId", providerId).addValue("productId", productId)
+                    .addValue("credentialId", credentialId).addValue("model", MODEL).addValue("status", requestStatus)
+                    .addValue("firstByteAt", firstByteAt == null ? null : Timestamp.from(firstByteAt))
+                    .addValue("completedAt", completedAt == null ? null : Timestamp.from(completedAt))
+                    .addValue("durationMs", durationMs).addValue("ttfbMs", ttfbMs));
         }
 
         /**
