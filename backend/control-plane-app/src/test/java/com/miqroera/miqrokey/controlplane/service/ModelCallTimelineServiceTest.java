@@ -17,6 +17,7 @@ import com.miqroera.miqrokey.domain.repository.RequestUsageRecordRepository;
 import com.miqroera.miqrokey.domain.usage.ModelCallRecord;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
@@ -55,6 +56,45 @@ class ModelCallTimelineServiceTest {
         assertThat(view.phases()).extracting(ModelCallTimelineView.Phase::elapsedMs).containsExactly(0L, 120L, 1710L);
         assertThat(view.timeToFirstByteMs()).isEqualTo(120L);
         assertThat(view.durationMs()).isEqualTo(1710L);
+    }
+
+    @Test
+    @DisplayName("phase offsets stay monotonic when the gateway's own TTFB exceeds the lifecycle span")
+    void phaseOffsetsStayMonotonicAcrossDifferentOrigins() {
+        // Real shape from the demo database: time_to_first_byte_ms is measured from
+        // *gateway entry* (before auth/quota/body/cache/decrypt) while started_at is
+        // taken later, so the measured TTFB can exceed the completed-at delta. Taking
+        // the measured value as a phase offset produced a first byte *after*
+        // completion — this is the regression guard for that.
+        Instant firstByte = STARTED.plus(6253, ChronoUnit.MILLIS);
+        Instant completed = STARTED.plus(6275, ChronoUnit.MILLIS);
+        when(repository.findByGatewayRequestId(TENANT, REQUEST_ID))
+                .thenReturn(Optional.of(record("SUCCEEDED", STARTED, firstByte, completed, 6275L, 8422L)));
+
+        ModelCallTimelineView view = service.timeline(user(TENANT), REQUEST_ID);
+
+        List<Long> offsets = view.phases().stream().map(ModelCallTimelineView.Phase::elapsedMs).toList();
+        assertThat(offsets).containsExactly(0L, 6253L, 6275L);
+        assertThat(offsets).isSorted();
+        // the raw measured values are still exposed for callers that want them
+        assertThat(view.timeToFirstByteMs()).isEqualTo(8422L);
+        assertThat(view.durationMs()).isEqualTo(6275L);
+    }
+
+    @Test
+    @DisplayName("a missing http status (unfinalized row) is tolerated, not fatal")
+    void nullHttpStatusIsTolerated() {
+        when(repository.findByGatewayRequestId(TENANT, REQUEST_ID))
+                .thenReturn(Optional.of(new ModelCallRecord(UUID.randomUUID(), REQUEST_ID, null, TENANT,
+                        UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                        UUID.randomUUID(), "deepseek-flash", "OPENAI_CHAT_COMPLETIONS", false, "IN_FLIGHT", STARTED,
+                        null, null, null, null, null, false, false, 0, null, null, null, null)));
+
+        ModelCallTimelineView view = service.timeline(user(TENANT), REQUEST_ID);
+
+        assertThat(view.httpStatus()).isNull();
+        assertThat(view.tokens().input()).isNull();
+        assertThat(view.phases()).extracting(ModelCallTimelineView.Phase::key).containsExactly("ACCEPTED");
     }
 
     @Test

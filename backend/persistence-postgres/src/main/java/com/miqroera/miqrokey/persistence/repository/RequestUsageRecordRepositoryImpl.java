@@ -34,10 +34,16 @@ import org.springframework.transaction.annotation.Transactional;
 public class RequestUsageRecordRepositoryImpl implements RequestUsageRecordRepository {
 
     private static final String SELECT_BY_GATEWAY_REQUEST_ID = """
+            -- input/output token columns are normalized the same way the admin usage
+            -- list does it (COALESCE over the protocol-specific fallbacks), so the
+            -- timeline detail and the row the user clicked never disagree: ~1.5% of
+            -- rows (OpenAI Chat protocol) carry only prompt/completion.
             SELECT id, gateway_request_id, upstream_request_id, tenant_id, user_id, project_id, virtual_key_id,
                    provider_id, provider_product_id, credential_id, model_id, wire_protocol, streaming,
                    request_status, started_at, first_byte_at, completed_at, duration_ms, time_to_first_byte_ms,
-                   http_status, client_cancelled, partial_response, retry_count, input_tokens, output_tokens,
+                   http_status, client_cancelled, partial_response, retry_count,
+                   COALESCE(input_tokens, prompt_tokens) AS input_tokens,
+                   COALESCE(output_tokens, completion_tokens) AS output_tokens,
                    cache_read_input_tokens, cache_creation_input_tokens
               FROM request_usage_records
              WHERE tenant_id = :tenantId

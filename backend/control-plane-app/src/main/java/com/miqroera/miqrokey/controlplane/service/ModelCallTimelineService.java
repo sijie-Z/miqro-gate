@@ -81,23 +81,30 @@ public class ModelCallTimelineService {
 
         if (record.firstByteAt() != null) {
             phases.add(new ModelCallTimelineView.Phase(KEY_FIRST_BYTE, "上游首字节", record.firstByteAt(),
-                    elapsedMs(startedAt, record.firstByteAt(), record.timeToFirstByteMs())));
+                    elapsedMs(startedAt, record.firstByteAt())));
         }
         if (record.completedAt() != null) {
             phases.add(new ModelCallTimelineView.Phase(KEY_COMPLETED, "完成", record.completedAt(),
-                    elapsedMs(startedAt, record.completedAt(), record.durationMs())));
+                    elapsedMs(startedAt, record.completedAt())));
         }
         return phases;
     }
 
     /**
-     * Prefers the gateway's own measurement; falls back to the timestamp delta when
-     * a value is missing (e.g. rows written before a metric existed).
+     * Milliseconds from {@code startedAt} to {@code at}. Every phase offset on the
+     * timeline shares this one origin, so the phases are monotonic by construction.
+     *
+     * <p>
+     * Deliberately does <em>not</em> prefer the gateway's own measured fields.
+     * {@code time_to_first_byte_ms} is measured from <b>gateway entry</b> (before
+     * authentication, quota, body read, cache lookup and credential decryption),
+     * whereas the lifecycle {@code startedAt} is taken later — mixing the two
+     * origins in one phase list produced non-monotonic timelines (56 rows in the
+     * demo database reported a first byte <em>after</em> completion). Those
+     * measured values are still exposed as their own top-level fields.
+     * </p>
      */
-    private static Long elapsedMs(Instant startedAt, Instant at, Long measured) {
-        if (measured != null) {
-            return measured;
-        }
+    private static Long elapsedMs(Instant startedAt, Instant at) {
         if (startedAt == null || at == null) {
             return null;
         }

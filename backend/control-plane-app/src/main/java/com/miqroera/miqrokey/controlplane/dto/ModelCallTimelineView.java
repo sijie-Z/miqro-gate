@@ -19,6 +19,15 @@ import java.util.UUID;
  *            lifecycle terminal; {@code IN_FLIGHT} means the record was never
  *            finalized (a stale row after a gateway restart, or a call still
  *            running) — surfaced as-is rather than hidden
+ * @param durationMs
+ *            the gateway's own total duration measurement; may be null on rows
+ *            written before the metric existed
+ * @param timeToFirstByteMs
+ *            the gateway's own TTFB measurement — measured from <b>gateway
+ *            entry</b> (before authentication, quota, body read, cache lookup
+ *            and credential decryption), so it is <em>not</em> comparable with
+ *            the {@code phases} offsets and may exceed {@code durationMs}.
+ *            Phase offsets deliberately come from the timestamps instead.
  * @param phases
  *            the ordered milestones actually observed for this call; a
  *            cancelled or timed-out call simply has fewer phases
