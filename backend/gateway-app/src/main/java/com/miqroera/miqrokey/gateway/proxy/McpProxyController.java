@@ -43,8 +43,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * MCP invocation proxy (F01, Tencent AI gateway doc 135906 wiring shape):
@@ -385,7 +387,7 @@ public class McpProxyController {
             // consumed at the gateway and never forwarded.
             headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + upstreamBearer);
         }
-        String bucket = toolName != null ? toolName : (rpcMethod == null ? "envelope" : rpcMethod);
+        String bucket = bucketFor(toolName, rpcMethod);
         McpCircuitBreaker breaker = policy.breakerEnabled()
                 ? circuitRegistry.get(context.service.id(), bucket, policy).breaker()
                 : null;
@@ -623,6 +625,29 @@ public class McpProxyController {
     }
 
     /**
+     * MCP envelope methods the circuit breaker may key a bucket on (#727): a fixed
+     * set from the specification — never a client-invented string.
+     */
+    private static final Set<String> ENVELOPE_METHODS = Set.of("initialize", "ping", "tools/list", "tools/call",
+            "prompts/list", "prompts/get", "resources/list", "resources/read", "resources/subscribe",
+            "resources/templates/list", "resources/unsubscribe", "completion/complete", "logging/setLevel");
+
+    /**
+     * Breaker bucket for one call (#727): a known tool name, a protocol method from
+     * the fixed envelope set, or the shared {@code envelope} bucket for everything
+     * else. Previously any client-supplied {@code method} string became its own
+     * never-evicted bucket, so the registry could grow without bound; the
+     * registry's "bounded by services × tools + methods" claim now holds because
+     * the method side is a fixed set.
+     */
+    static String bucketFor(String toolName, String rpcMethod) {
+        if (toolName != null) {
+            return toolName;
+        }
+        return rpcMethod != null && ENVELOPE_METHODS.contains(rpcMethod) ? rpcMethod : "envelope";
+    }
+
+    /**
      * Where a call's outcome is delivered: the HTTP exchange (direct POST) or an
      * SSE session stream.
      */
@@ -674,7 +699,23 @@ public class McpProxyController {
 
         @Override
         public Mono<Void> complete(int status, HttpHeaders headers, Flux<byte[]> body) {
-            return body.collectList().doOnNext(chunks -> session.emit(SseFrames.event("message", join(chunks)))).then();
+            // #727: bounded aggregation. This path relays one message event
+            // carrying the whole upstream body (the direct path streams through
+            // untouched), so an unbounded response would pin heap — and `join`
+            // plus the SSE encoder add their own copies on top. Past the cap the
+            // session gets an explicit error event; silently truncating would
+            // corrupt the JSON-RPC reply the caller is waiting for.
+            AtomicLong total = new AtomicLong();
+            return body.takeWhile(chunk -> total.addAndGet(chunk.length) <= maxMcpBodyBytes).collectList()
+                    .doOnNext(chunks -> {
+                        if (total.get() > maxMcpBodyBytes) {
+                            log.warn("aigw.mcp.sse_response_too_large bytes>{}", maxMcpBodyBytes);
+                            session.emit(SseFrames.event("error", problemJson("mcp_sse_response_too_large",
+                                    "Upstream response exceeds the SSE aggregation limit")));
+                        } else {
+                            session.emit(SseFrames.event("message", join(chunks)));
+                        }
+                    }).then();
         }
 
         @Override
