@@ -218,6 +218,20 @@ class AdminUsageApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("records survive a product missing from the catalog (LEFT JOIN, never inner) (#758)")
+    void recordsSurviveMissingCatalogProduct() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertUsageWithOrphanProduct(ownKey, "chatcmpl-orphan", "greq-orphan", 100L, 50L, Instant.now());
+
+        MvcResult r = mockMvc.perform(get("/api/v1/admin/usage/records").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1)).andReturn();
+        JsonNode item = objectMapper.readTree(r.getResponse().getContentAsString()).path("items").get(0);
+        Assertions.assertThat(item.path("inputTokens").asLong()).isEqualTo(100L);
+        Assertions.assertThat(item.path("providerProductName").isNull()).isTrue();
+    }
+
+    @Test
     @DisplayName("groupBy=PRODUCT carries success rate and average latency from the lifecycle (#758)")
     void productGroupByCarriesOutcomes() throws Exception {
         fx.insertCatalogAndGrant();
@@ -487,6 +501,29 @@ class AdminUsageApiIntegrationTest {
                             .addValue("credentialId", credentialId).addValue("model", model).addValue("input", input)
                             .addValue("output", output).addValue("total", input + output)
                             .addValue("occurredAt", Timestamp.from(occurredAt)));
+        }
+
+        /**
+         * Usage on a product with no catalog row — {@code usage_event} carries no FK on
+         * {@code provider_product_id}, and #709's fixtures seed exactly this shape. The
+         * read side must keep such rows (LEFT JOIN, never inner) (#758).
+         */
+        void insertUsageWithOrphanProduct(UUID keyId, String providerRequestId, String gatewayRequestId, long input,
+                long output, Instant occurredAt) {
+            jdbc.update("""
+                    INSERT INTO usage_event
+                        (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
+                         credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
+                         upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at)
+                    VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :orphanProductId, :credentialId,
+                            :model, 'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, :greq, :occurredAt)
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("providerRequestId", providerRequestId).addValue("greq", gatewayRequestId)
+                            .addValue("keyId", keyId).addValue("projectId", projectId)
+                            .addValue("orphanProductId", UUID.randomUUID()).addValue("credentialId", credentialId)
+                            .addValue("model", MODEL).addValue("input", input).addValue("output", output)
+                            .addValue("total", input + output).addValue("occurredAt", Timestamp.from(occurredAt)));
         }
 
         /**

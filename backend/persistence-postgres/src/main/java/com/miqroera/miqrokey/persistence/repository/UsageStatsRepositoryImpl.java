@@ -99,9 +99,10 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                     "tm.team_id, t.name");
             case MODEL -> new GroupSpec("ue.model_id AS group_key, ue.model_id AS label", "", "ue.model_id");
             case PRODUCT -> new GroupSpec(
-                    "ue.provider_product_id AS group_key, COALESCE(pp.display_name, pp.product_code) AS label",
-                    "JOIN provider_products pp ON pp.id = ue.provider_product_id",
-                    "ue.provider_product_id, COALESCE(pp.display_name, pp.product_code)");
+                    "ue.provider_product_id AS group_key,"
+                            + " COALESCE(pp.display_name, pp.product_code, ue.provider_product_id::text) AS label",
+                    "LEFT JOIN provider_products pp ON pp.id = ue.provider_product_id", "ue.provider_product_id,"
+                            + " COALESCE(pp.display_name, pp.product_code, ue.provider_product_id::text)");
             case MONTH -> new GroupSpec(
                     "to_char(date_trunc('month', ue.occurred_at), 'YYYY-MM') AS group_key,"
                             + " to_char(date_trunc('month', ue.occurred_at), 'YYYY-MM') AS label",
@@ -134,10 +135,11 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                             + " JOIN teams t ON t.id = tm.team_id AND t.tenant_id = h.tenant_id",
                     "tm.team_id, t.name");
             case MODEL -> new GroupSpec("e.model_id AS group_key, e.model_id AS label", "", "e.model_id");
-            case PRODUCT ->
-                new GroupSpec("e.provider_product_id AS group_key, COALESCE(pp.display_name, pp.product_code) AS label",
-                        "JOIN provider_products pp ON pp.id = e.provider_product_id",
-                        "e.provider_product_id, COALESCE(pp.display_name, pp.product_code)");
+            case PRODUCT -> new GroupSpec(
+                    "e.provider_product_id AS group_key,"
+                            + " COALESCE(pp.display_name, pp.product_code, e.provider_product_id::text) AS label",
+                    "LEFT JOIN provider_products pp ON pp.id = e.provider_product_id", "e.provider_product_id,"
+                            + " COALESCE(pp.display_name, pp.product_code, e.provider_product_id::text)");
             case MONTH -> new GroupSpec(
                     "to_char(date_trunc('month', h.occurred_at), 'YYYY-MM') AS group_key,"
                             + " to_char(date_trunc('month', h.occurred_at), 'YYYY-MM') AS label",
@@ -501,7 +503,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                        rur.time_to_first_byte_ms,
                        rur.request_status
                   FROM usage_event ue
-                  JOIN provider_products pp ON pp.id = ue.provider_product_id%s%s
+                  LEFT JOIN provider_products pp ON pp.id = ue.provider_product_id%s%s
                 %s
                 %s
                 ORDER BY ue.occurred_at DESC
