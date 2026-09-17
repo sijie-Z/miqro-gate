@@ -1,5 +1,5 @@
 -- ============================================================================
--- V64 (#758): composite index for the usage-stats lifecycle join.
+-- V65 (#758): composite index for the usage-stats lifecycle join.
 --
 -- The usage statistics read path enriches fact rows (`usage_event`) with the
 -- per-request lifecycle trail (`request_usage_records`: wire protocol, first

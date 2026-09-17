@@ -3632,3 +3632,23 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **未做**：前端（用量表净额列、审计页 action 标签）——本地无 node_modules 跑不了 vitest；且调整目前只能经 API 录入，前端不一致**无用户可碰到**。已记为待办。
 
+## 2026-09-18 价格快照基座（#710 / F21-A）——冻结「这笔 token 当时依据什么价格算」
+
+**范围（经评审收敛）**：原 F21 清单混了三类性质不同的东西，本轮**只落逐事件价格快照**。
+
+**V64**：`usage_event` 加冻结价格列——`price_input/output/cache_read/cache_creation`（每百万 token 单价）+ `price_currency` / `price_effective_from` / `price_source` / `price_status`。**不引入** `price_catalog_version`（现无「版本化价目目录」实体，凭空加版本号是假装它存在），改为存**实际采用的单价**，SQL 可直接 `token × unit_price`。
+
+**三态语义**：`NULL`=尚未评估 ｜ `COMPLETE` ｜ `PARTIAL` ｜ `UNAVAILABLE`。**`UNAVAILABLE` 的价格列保持 NULL，绝不写 0**——"价格未知"与"免费"是不同的审计事实，静默写 0 会低估历史支出。回填按 `occurred_at` 而非回填时刻，否则会造出「看起来是历史快照、实际是延迟快照」的假象。
+
+**确定性 tie-break（既有缺陷）**：`findLatestAt` 是 `ORDER BY effective_from DESC` 单键；`findAllLatestAt` 用 `MAX(effective_from)` 回连，**同刻多行会返回多行**，而调用方循环 `put` → 赢家取决于数据库行序。这会让**历史回填本身不可重复**。已改为 `(effective_from DESC, id DESC)`，并把 MAX-join 改写为"不存在更严格更大的候选"（保持 H2 可移植，沿用原作者的约束）。**新测试已验证会红**：临时换回旧写法，`findAllLatestAtReturnsOneRowPerTriple` 如期失败。
+
+**回填端点**：`POST /api/v1/admin/usage-price-backfill?from&to`，幂等（只处理 `price_status IS NULL`），**已定状态的行永不重评**——重跑不能改写已作出的决定。写审计含四项计数。测试 6/6。
+
+**两处实现同一规则 + 一条交叉校验**：tie-break 同时存在于仓储与回填 SQL 两处。与其写注释要求后人小心，不如让 `agreesWithTheRepositoryLookup` 用例**逐行比对两者结论**——测试才是真正的单一事实源。
+
+**本轮不改变任何上报数字**：只**建立**基座，尚无读取方。成本改走基座是 F21-A 的下一增量（会改金额，需单独验证）。
+
+**其余拆分**：F21-B 归属快照（网关写入时拿不到 team/subscription/window，且"先加列再回填"会把**延迟归属**伪装成**冻结归属**——前置是先定「事件时刻归属」语义）/ F21-C 上游 usage 原文（现状是刻意不保留，存它=改保留边界，独立合规立项）/ F21-D 派生元数据（`error_category` 可由现有字段派生，物化后口径一变历史列整体失真，故不加）。
+
+**迁移号**：V62/V63 均已被占，本项用 **V64**。
+
