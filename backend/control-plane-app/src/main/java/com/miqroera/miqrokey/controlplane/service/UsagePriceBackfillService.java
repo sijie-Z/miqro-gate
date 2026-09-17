@@ -2,6 +2,8 @@ package com.miqroera.miqrokey.controlplane.service;
 
 import com.miqroera.miqrokey.controlplane.dto.UsagePriceBackfillResult;
 import com.miqroera.miqrokey.domain.service.AuditService;
+import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator;
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -64,7 +66,10 @@ public class UsagePriceBackfillService {
      */
     private static final String SELECT_BATCH = """
             WITH targets AS (
-                SELECT ue.id, ue.provider_product_id, ue.model_id, ue.occurred_at
+                SELECT ue.id, ue.provider_product_id, ue.model_id, ue.occurred_at,
+                       COALESCE(ue.input_tokens, ue.prompt_tokens) AS input_tokens,
+                       COALESCE(ue.output_tokens, ue.completion_tokens) AS output_tokens,
+                       ue.cache_read_input_tokens, ue.cache_creation_input_tokens
                   FROM usage_event ue
                  WHERE ue.tenant_id = :tenantId
                    AND ue.occurred_at >= :from AND ue.occurred_at < :to
@@ -73,6 +78,7 @@ public class UsagePriceBackfillService {
                  LIMIT :limit
             )
             SELECT t.id,
+                   t.input_tokens, t.output_tokens, t.cache_read_input_tokens, t.cache_creation_input_tokens,
                    i.unit_price  AS price_input,
                    o.unit_price  AS price_output,
                    cr.unit_price AS price_cache_read,
@@ -112,7 +118,8 @@ public class UsagePriceBackfillService {
             UPDATE usage_event
                SET price_input = :input, price_output = :output, price_cache_read = :cacheRead,
                    price_cache_creation = :cacheCreation, price_currency = :currency,
-                   price_effective_from = :effectiveFrom, price_source = :source, price_status = :status
+                   price_effective_from = :effectiveFrom, price_source = :source, price_status = :status,
+                   base_cost_amount = :baseCost
              WHERE id = :id AND tenant_id = :tenantId AND price_status IS NULL
             """;
 
@@ -153,6 +160,10 @@ public class UsagePriceBackfillService {
                         row.put("currency", rs.getString("price_currency"));
                         row.put("source", rs.getString("price_source"));
                         row.put("effectiveFrom", rs.getTimestamp("price_effective_from"));
+                        row.put("inputTokens", rs.getObject("input_tokens", Long.class));
+                        row.put("outputTokens", rs.getObject("output_tokens", Long.class));
+                        row.put("cacheReadTokens", rs.getObject("cache_read_input_tokens", Long.class));
+                        row.put("cacheCreationTokens", rs.getObject("cache_creation_input_tokens", Long.class));
                         return row;
                     });
             if (batch.isEmpty()) {
@@ -204,6 +215,35 @@ public class UsagePriceBackfillService {
         return priced == 0 ? "UNAVAILABLE" : "PARTIAL";
     }
 
+    /**
+     * The event's base cost: the sum of its <b>priced</b> dimensions, or NULL when
+     * nothing could be priced.
+     *
+     * <p>
+     * The NULL is load-bearing and is not zero. {@code UNAVAILABLE} means no price
+     * was in force when this happened, which is a different fact from "the price
+     * was 0" — and a stored 0 would later read as "free". The division goes through
+     * the aggregator's {@code dividePerMillion} so the stored amount and the amount
+     * a summary computes cannot drift apart.
+     * </p>
+     */
+    private static BigDecimal baseCost(Map<String, Object> row) {
+        BigDecimal undivided = BigDecimal.ZERO;
+        boolean anyPriced = false;
+        for (Map.Entry<String, String> d : List.of(Map.entry("input", "inputTokens"),
+                Map.entry("output", "outputTokens"), Map.entry("cacheRead", "cacheReadTokens"),
+                Map.entry("cacheCreation", "cacheCreationTokens"))) {
+            Object price = row.get(d.getKey());
+            Object tokens = row.get(d.getValue());
+            if (price == null || tokens == null) {
+                continue;
+            }
+            anyPriced = true;
+            undivided = undivided.add(BigDecimal.valueOf((Long) tokens).multiply((BigDecimal) price));
+        }
+        return anyPriced ? UsageStatsAggregator.dividePerMillion(undivided) : null;
+    }
+
     private void stamp(UUID tenantId, Map<String, Object> row, String status) {
         Object effectiveFrom = row.get("effectiveFrom");
         jdbc.update(UPDATE_ROW,
@@ -211,7 +251,8 @@ public class UsagePriceBackfillService {
                         .addValue("cacheRead", row.get("cacheRead")).addValue("cacheCreation", row.get("cacheCreation"))
                         .addValue("currency", row.get("currency")).addValue("source", row.get("source"))
                         .addValue("effectiveFrom", effectiveFrom == null ? null : (Timestamp) effectiveFrom)
-                        .addValue("status", status).addValue("id", row.get("id")).addValue("tenantId", tenantId));
+                        .addValue("status", status).addValue("baseCost", baseCost(row)).addValue("id", row.get("id"))
+                        .addValue("tenantId", tenantId));
     }
 
     private static void validateWindow(Instant from, Instant to) {

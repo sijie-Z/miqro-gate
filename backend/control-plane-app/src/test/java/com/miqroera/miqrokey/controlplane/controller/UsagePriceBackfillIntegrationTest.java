@@ -214,6 +214,23 @@ class UsagePriceBackfillIntegrationTest {
         assertThat(row.get("price_input")).isNull();
     }
 
+    @Test
+    @DisplayName("the base cost is frozen, and an unpriced event stays NULL rather than becoming 0")
+    void baseCostIsFrozenAndNeverFaked() throws Exception {
+        seedEvent(MODEL, EVENT_AT);
+        seedEvent(OTHER_MODEL, EVENT_AT);
+        priceAllDimensions(MODEL, PRICE_BEFORE_EVENT, "1.00", "4.00", "0.10", "0.20");
+
+        backfill();
+
+        // (1000 x 1.00 + 500 x 4.00) / 1e6
+        assertThat(priceColumnsOf(MODEL).get("base_cost_amount")).isEqualTo(new BigDecimal("0.0030000000"));
+        // The unpriced event must NOT be recorded as free: NULL is the fact "we could
+        // not price
+        // this", and a 0 here would be indistinguishable from a genuine zero price.
+        assertThat(priceColumnsOf(OTHER_MODEL).get("base_cost_amount")).isNull();
+    }
+
     // -------------------------------------------------------------------
 
     private Map<String, Object> backfill() throws Exception {
@@ -259,7 +276,7 @@ class UsagePriceBackfillIntegrationTest {
 
     private Map<String, Object> priceColumnsOf(String model) {
         return jdbc.queryForMap("""
-                SELECT price_input, price_output, price_status, price_effective_from
+                SELECT price_input, price_output, price_status, price_effective_from, base_cost_amount
                   FROM usage_event WHERE tenant_id = :tenantId AND model_id = :modelId
                 """, new MapSqlParameterSource("tenantId", TENANT).addValue("modelId", model));
     }
