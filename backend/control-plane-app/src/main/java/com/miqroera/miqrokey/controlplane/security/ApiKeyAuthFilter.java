@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.security;
 
 import com.miqroera.miqrokey.domain.crypto.ConsumerJwtVerifier;
 import com.miqroera.miqrokey.domain.model.ApiConsumer;
+import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.repository.ApiConsumerRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -16,7 +17,7 @@ import java.security.MessageDigest;
 
 /**
  * Authentication for the external-system channel (ADR-0010/0011), protecting
- * {@code /api/v1/billing/**}. A valid session (portal admin) also passes;
+ * {@code /api/v1/billing/**}. A valid SYSTEM_ADMIN session also passes (#724);
  * otherwise the presented credential is either an API key (SHA-256 digest match
  * against an ACTIVE consumer) or an RS256 JWT (verified against the consumer's
  * configured public key, {@code sub} = consumer name). The consumer identity is
@@ -52,8 +53,10 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
-        // Portal admin session passes through.
-        if (userContext.isAuthenticated()) {
+        // Portal sessions pass through only as SYSTEM_ADMIN (#724): the billing
+        // channel is admin-session OR consumer credential — never "any logged-in
+        // user", which would leak tenant-wide billing data to a plain USER.
+        if (userContext.isAuthenticated() && userContext.getUser().role() == UserRole.SYSTEM_ADMIN) {
             chain.doFilter(request, response);
             return;
         }
@@ -81,6 +84,13 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
                 chain.doFilter(request, response);
                 return;
             }
+        }
+        // #724: an authenticated non-admin without a usable consumer credential
+        // is forbidden (not unauthenticated) — and never falls back to the
+        // session's tenant.
+        if (userContext.isAuthenticated()) {
+            forbidden(response);
+            return;
         }
         unauthorized(response);
     }
