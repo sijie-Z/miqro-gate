@@ -12,9 +12,11 @@
 
 | 配置 | 默认 | 说明 |
 |---|---:|---|
-| `MIQROKEY_ENVIRONMENT` | `development` | `development/test/production` |
-| `MIQROKEY_PUBLIC_BASE_URL` | 无 | 门户公开 URL，生产必填 |
+| `MIQROKEY_ENVIRONMENT` | `development` | `development/test/production`（**预留：当前版本未读取**，#733） |
+| `MIQROKEY_PUBLIC_BASE_URL` | 无 | 门户公开 URL（**预留：当前版本未读取**；#733 更正——生产启动校验现仅含 Cookie Secure 与 originAllowlist，§10） |
 | `MIQROKEY_GATEWAY_BASE_URL` | 无 | 展示给用户的 Gateway Base URL，生产必填 |
+
+> **预留配置（文档登记、当前版本未读取，#733）**：`MIQROKEY_TIME_ZONE`、`MIQROKEY_INSTANCE_ID`、`MIQROKEY_CATALOG_PATH`、`MIQROKEY_DATA_PATH`、`MIQROKEY_TEMP_PATH`、`MIQROKEY_DB_CONNECT_TIMEOUT`、`MIQROKEY_DB_STATEMENT_TIMEOUT`、`MIQROKEY_MAX_CONTROL_BODY_BYTES`、`MIQROKEY_METRICS_ENABLED`、`MIQROKEY_METRICS_PATH`、`MIQROKEY_BACKUP_SCHEDULE`、`MIQROKEY_VK_ROTATION_GRACE`。这些键当前不改变任何行为；实现它们或从文档移除，随对应功能的变更一并处理。
 | `MIQROKEY_TIME_ZONE` | `UTC` | 后台调度时区；存储仍为 UTC |
 | `MIQROKEY_INSTANCE_ID` | 自动 | 审计和任务锁实例标识 |
 | `MIQROKEY_CATALOG_PATH` | `/etc/miqrokey/catalog` | 只读供应商目录目录 |
@@ -132,7 +134,7 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_MAX_PROXY_BUFFER_BYTES` | `256KB` | 只限制必要解析缓冲，不聚合完整响应 |
 | `MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED` | `true` | 请求前置预检开关（#553，`miqrokey.gateway.context-limit.enabled`）：关闭后热路径行为与引入该预检前完全一致 |
 | `MIQROKEY_GATEWAY_CONTEXT_LIMIT_THRESHOLD_CHARS` | `200000` | 请求前置预检阈值（#553，`miqrokey.gateway.context-limit.threshold-chars`，非正值回落默认）：按 UTF-8 码点统计**整个已缓冲 body**（含 JSON 结构、工具 schema、base64），超限 → `413 context_limit_exceeded`，不连接上游。字符数不是 token 数：合法 UTF-8 下是整个 body 的字符上界，**非法 UTF-8 按字节长度计**（严格 UTF-8 校验不通过即整段回退字节数），计数整体不低估（仍受缓冲上限约束）；它不是余额/配额，且会把 200001–262144 字符的请求从「缓冲上限放行」改为 413（刻意收紧，可用 `enabled` / `threshold-chars` 调整）：默认 200000 字符约合 5 万 token 量级，**可能拒绝上游本可接受的请求**，规模更大的工作负载请提高阈值或设 `MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED=false`。只读不重写（转发字节不变）。阈值高于 `MIQROKEY_MAX_PROXY_BUFFER_BYTES` 时由缓冲上限先拒绝（`payload_too_large`）。每 Key 可配置为 #553 的后续项，本版本只支持全局配置 |
-| `MIQROKEY_MAX_CONCURRENT_STREAMS` | `50` | 首版容量目标；不是用户限流策略 |
+| `MIQROKEY_MAX_CONCURRENT_STREAMS` | `50` | 首版容量目标（**预留：当前版本未实现**——无并发闸与对应 503 语义，#733）；不是用户限流策略 |
 | `MIQROKEY_TRUSTED_PROXY_CIDRS` | 空（compose.prod 默认 `172.28.0.0/24`） | 数据面可信反向代理 CIDR（#605，`miqrokey.trusted-proxy.cidrs`）：仅当连接对端命中名单时才消费 `X-Forwarded-For` 记录调用方 IP（从右往左取第一个非可信地址）；空 = 只记录对端地址，请求头永不采信。compose 部署默认信任编排内网段（portal nginx 反代），control-plane 对等配置见 `MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES` |
 | `MIQROKEY_UPSTREAM_ALLOWED_CIDRS` | 空 | SSRF 门控 allowlist（G2.6）：命中这些 CIDR 的目标豁免「非公网地址」与「明文 http」两道拒绝（`127.0.0.0/8, ::1/128` 用于本地自建模型）；空 = 仅接受 https + 公网地址；`userinfo` URL 永不豁免 |
 | `MIQROKEY_UPSTREAM_FOLLOW_REDIRECTS` | `false` | 重定向跟随硬编码禁用（G2.6：防止 30x 把已通过 SSRF 校验的目标重定向到任意地址）；当前版本不可配置 |
@@ -163,7 +165,7 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_CONTROL_ADMIN_IP_ALLOWLIST` | 空 | 管理门户来源 IP 白名单（F05，security §6，CIDR 逗号分隔如 `10.0.0.0/8,203.0.113.0/24`）：空 = 不限制（历史行为）；配置后门户面仅名单内来源可达（403 IP_NOT_ALLOWED），billing 通道与 bootstrap 豁免；非法 CIDR 启动失败 |
 | `MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES` | 空 | 受信反向代理 CIDR（F05）：只有来自这些代理的 `X-Forwarded-For` 被采纳为真实客户端地址——直连来源无法伪造头绕过白名单 |
 
-`MIQROKEY_MAX_CONCURRENT_STREAMS` 是保护实例稳定性的容量边界，不是按用户/团队配额。达到物理上限时返回明确的 `503 CAPACITY_EXHAUSTED` 并告警。
+`MIQROKEY_MAX_CONCURRENT_STREAMS` 是保护实例稳定性的容量目标，不是按用户/团队配额。（#733 更正：**当前版本未实现该并发闸与 `503 CAPACITY_EXHAUSTED`**；容量过载的现行为是上游超时/缓冲上限的自然背压。）
 
 ### 5.1 Gateway 数据库模式（当前实现）
 
@@ -198,16 +200,18 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 
 | 配置 | 默认 | 说明 |
 |---|---:|---|
-| `MIQROKEY_USAGE_RETENTION_MODE` | `MANUAL_ONLY` | 首版永久保留直到人工删除 |
-| `MIQROKEY_PLAN_SYNC_INTERVAL` | `PT15M` | 余额/周期同步 |
-| `MIQROKEY_MODEL_SYNC_INTERVAL` | `PT6H` | 模型目录同步 |
+| `MIQROKEY_USAGE_RETENTION_MODE` | `MANUAL_ONLY` | 首版永久保留直到人工删除（**预留：当前版本未读取**，#733） |
+| `MIQROKEY_PLAN_SYNC_INTERVAL` | `PT15M` | 余额/周期同步（**预留：当前版本未读取**——真实旋钮为 `miqrokey.quota.refresh-interval-ms`，默认 900000ms，见下） |
+| `MIQROKEY_MODEL_SYNC_INTERVAL` | `PT6H` | 模型目录同步（**预留：当前版本未读取**——真实旋钮为 `miqrokey.model-catalog.reprobe.*`） |
+| `miqrokey.quota.refresh-interval-ms` | `900000` | **实际生效**：配额/余额快照定时刷新周期（`QuotaSnapshotService` @Scheduled，毫秒） |
+| `miqrokey.model-catalog.reprobe.*` | 默认关 | **实际生效**：模型目录定期重探（#350 交付；enabled/interval 等子键） |
 | `MIQROKEY_PRICE_CATALOG_PATH` | `/etc/miqrokey/prices` | 版本化价格目录 |
-| `MIQROKEY_EXPORT_MAX_RANGE` | `P366D` | 单次导出最大时间窗 |
-| `MIQROKEY_EXPORT_LINK_TTL` | `PT1H` | 下载链接到期 |
+| `MIQROKEY_EXPORT_MAX_RANGE` | `P93D` | 单次导出最大时间窗（**预留：当前版本未读取**——实现硬编码 93 天，与 api-contract 一致；#733 更正，原文档误写 `P366D` 且不可配） |
+| `MIQROKEY_EXPORT_LINK_TTL` | `PT24H` | 下载链接到期（**预留：当前版本未读取**——实现硬编码 24 小时；#733 更正，原文档误写 `PT1H` 且不可配） |
 
 队列达到高水位必须告警；队列满不能静默丢弃。G2.4 实现语义：写失败把整批**按序重入队**并记 `warn`（幂等写入保证重试不双计），饱和 drop 按高优先级 `warn` 计数——均不静默；`miqrokey.usage.queue.*` 无标签 gauge（深度/发布/持久化/drop/flush）供告警。
 
-F15 MCP 访问日志队列（网关数据面）：`miqrokey.gateway.mcp-log.capacity`（默认 4096，`MIQROKEY_GATEWAY_MCP_LOG_CAPACITY`）、`miqrokey.gateway.mcp-log.flush-interval-ms`（默认 1000，`MIQROKEY_GATEWAY_MCP_LOG_FLUSH_INTERVAL_MS`）。语义同 usage 队列：饱和 drop+WARN 计数、批量写失败整批重入队（`(tenant_id, gateway_request_id)` 幂等保证重试不双写）；`miqrokey.gateway.persistence.enabled=false`（默认）时日志为 no-op（不产行），与 usage 持久化同一开关。
+F15 MCP 访问日志队列（网关数据面）：`miqrokey.gateway.mcp-log.capacity`（默认 4096，`MIQROKEY_GATEWAY_MCP_LOG_CAPACITY`）、`miqrokey.gateway.mcp-log.flush-interval-ms`（默认 1000，`MIQROKEY_GATEWAY_MCP_LOG_FLUSH_INTERVAL_MS`）。语义同 usage 队列：饱和 drop+WARN 计数、批量写失败整批重入队（`(tenant_id, gateway_request_id)` 幂等保证重试不双写）；`MIQROKEY_GATEWAY_PERSISTENCE_ENABLED`；`false` 时日志为 no-op（不产行），与 usage 持久化同一开关（**注意：网关 persistence 默认开启（`true`）**，#733 更正——原文误写"（默认）"。另见 §5.1）。
 
 **I19 外部投递**（同开关组 `miqrokey.gateway.mcp-log.forward.*`，默认全关）：批次**落库成功后**扇出到已配置 sink
 （重入队批次不重复投递；sink 失败仅节流 WARN，不重试、不阻断数据面）。webhook：`…forward.webhook-url`
@@ -231,12 +235,12 @@ F15 MCP 访问日志队列（网关数据面）：`miqrokey.gateway.mcp-log.capa
 
 | 配置 | 默认 | 说明 |
 |---|---:|---|
-| `MIQROKEY_WEBHOOK_ENABLED` | `true` | 全局开关 |
-| `MIQROKEY_WEBHOOK_CONNECT_TIMEOUT` | `PT5S` | 连接超时 |
-| `MIQROKEY_WEBHOOK_REQUEST_TIMEOUT` | `PT10S` | 请求超时 |
-| `MIQROKEY_WEBHOOK_MAX_ATTEMPTS` | `6` | 指数退避次数 |
-| `MIQROKEY_WEBHOOK_MAX_AGE` | `P1D` | 最长重试窗口 |
-| `MIQROKEY_WEBHOOK_SIGNATURE_HEADER` | `X-MiQroKey-Signature-256` | HMAC-SHA256 签名 Header |
+| `MIQROKEY_WEBHOOK_ENABLED` | `true` | 全局开关（**预留：当前版本未读取**——开关为每端点 `enabled`；#733） |
+| `MIQROKEY_WEBHOOK_CONNECT_TIMEOUT` | `PT5S` | 连接超时（**预留：当前版本未读取**——超时为每端点 `timeout_ms` 列） |
+| `MIQROKEY_WEBHOOK_REQUEST_TIMEOUT` | `PT10S` | 请求超时（同上：按每端点 `timeout_ms`） |
+| `MIQROKEY_WEBHOOK_MAX_ATTEMPTS` | `3` | 指数退避次数（**与实现一致**：#733 更正——`AlertEventDispatcher` 上限 3 次、退避 2^attempt×60s；原文档误写 6） |
+| `MIQROKEY_WEBHOOK_MAX_AGE` | `P1D` | 最长重试窗口（**预留：当前版本未读取**——实现无重试年龄上限） |
+| `MIQROKEY_WEBHOOK_SIGNATURE_HEADER` | `X-MiQroKey-Signature` | HMAC-SHA256 签名 Header（**与实现一致**：#733 更正——实际头名为 `X-MiQroKey-Signature`，载荷 `sha256=<hex>`；原文档误写 `-256` 后缀） |
 
 目标 URL 和 Secret 由管理员在数据库配置；Secret 加密保存。发送器必须实施 SSRF 校验，并禁止重定向逃逸。
 
@@ -275,4 +279,6 @@ Gateway 必须透明保留供应商自己的 Prompt Cache Header/字段，并单
 
 ## 10. 生产启动校验
 
-生产 profile 在以下情况拒绝启动：缺少公开 URL、DB password/master/HMAC key 文件；默认/弱密钥；Cookie 非 Secure；数据库不是受支持版本；目录签名失败；导出或备份目录不可写；上游 Base URL 使用不允许的 scheme；开启响应缓存；Flyway 校验失败。
+生产 profile **当前实现**的拒绝启动项（`ProductionStartupValidator`）：**Cookie 非 Secure**、**originAllowlist 未配置或不合规**。
+
+（#733 更正：本节此前列出的其余九项——缺少公开 URL、缺失密钥文件、默认/弱密钥、数据库版本、目录签名、导出或备份目录不可写、上游 scheme、开启响应缓存、Flyway 校验——**均未实现为启动门禁**；其中密钥文件缺失与 Flyway 失败会在使用点自然失败而非启动预检，其余为预留设计。）
