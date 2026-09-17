@@ -3652,3 +3652,18 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **迁移号**：V62/V63 均已被占，本项用 **V64**。
 
+## 2026-09-18 接入器参考实现（#742 第②片）——配置注入可执行化：打印 / 写入 / 验证
+
+**范围**：把指南矩阵（第①片）的三类接入姿势做成可执行工具 `scripts/onboarding/miqro-onboard.sh`（POSIX sh）：`print` 六种形态（env×3 shell / claude-settings / codex / openai / curl / mcp）、`apply` 三种配置文件形态（env 与 dotenv 走**托管块**替换、claude-settings 走 jq JSON 合并）、`verify` 对 `/v1/models` 按 200/404/401 归因。
+
+**校验前置=把事故写进工具**：凭据平面不通用（用错统一 401）、虚拟密钥必须带 `.label`（裸 `mqk_live_` 语法上不成立即统一 404 `virtual_key_invalid`）、网关地址须为 origin（尾随 `/v1` 带提示剥离）——三条全部照抄运维 Runbook §14.1，不是发明。
+
+**幂等语义**：托管块（`# >>> miqro-onboard (managed) >>>`）只替换块内；内容无变化**不写盘、不产生备份**；改动前 `\<file\>.bak-\<UTC 时间戳\>`。`--dry-run` 只打印结果。
+
+**测试先于收工再获一例**：45 条断言、纯 sh、无网络（`verify` 用 PATH 假 curl 打桩）。开发中**测试抓到两个真 bug**：① 托管块追加路径不带标记 → 二次执行不幂等、键行翻倍；② `--dry-run` 参数没接线 → 照样写盘。两条都已修，且各留一条断言钉住（{{assert-by-name-not-substring 同族}}：收工前先证明它会红）。
+
+**边界**：CC Switch 深链维持控制台既有实现（不在本工具）；网络层劫持明确不做；`claude-settings` 合并依赖 jq，无 jq 时拒写并提示改用 `print` 粘贴。snippet 形态以控制台「使用密钥」面板为准（源头 `frontend/src/lib/ccswitch.ts`），双侧改动需同步。
+
+**CI**：`scripts/**` 新增路径过滤器 + `scripts-check` 作业（跑 test-onboard.sh，5 分钟超时）。
+
+**待补**：第③片（封闭客户端 MCP 层实测）需要真实封闭工具环境，形态确认后另起。
