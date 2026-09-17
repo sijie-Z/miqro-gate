@@ -34,15 +34,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Regression coverage for #723: path-based security decisions must see the same
  * normalized path the handler matcher routed on. Before the fix, a semicolon
- * path parameter ({@code /api/v1/admin;x/users}) reached the admin handler while
- * the deny-by-default gate compared the raw URI and skipped the role check —
- * live-proven against the demo deployment.
+ * path parameter ({@code /api/v1/admin;x/users}) reached the admin handler
+ * while the deny-by-default gate compared the raw URI and skipped the role
+ * check — live-proven against the demo deployment.
  *
  * <p>
- * The success-path assertions (admin reaches the endpoint, plain path unchanged)
- * also pin that the normalization does not over-block. Lifecycle is per-class:
- * bootstrap succeeds once per database, so the admin session is created once and
- * each test provisions its own USER.
+ * The success-path assertions (admin reaches the endpoint, plain path
+ * unchanged) also pin that the normalization does not over-block. Lifecycle is
+ * per-class: bootstrap succeeds once per database, so the admin session is
+ * created once and each test provisions its own USER.
  * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
