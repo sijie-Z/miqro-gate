@@ -1,0 +1,35 @@
+package com.miqroera.miqrokey.domain.usage;
+
+/**
+ * One usage event together with its adjusted (net) token counts — the financial
+ * reading of the row, used by the usage detail list (#709 / backlog F20).
+ *
+ * <p>
+ * {@code observed} stays exactly the fact the gateway recorded; the net counts
+ * are that fact plus every adjustment booked against it. Both are carried so a
+ * reader can always tell the two apart, and {@code adjusted} says whether
+ * anything was corrected at all — a row whose net happens to equal its observed
+ * counts is not necessarily unadjusted.
+ * </p>
+ *
+ * <p>
+ * This is the reporting reading only. Quota enforcement deliberately keeps
+ * reading {@code observed} usage: a financial correction must not retroactively
+ * rewrite what the runtime already decided.
+ * </p>
+ *
+ * @param netInputTokens
+ *            normalized the same way the aggregates normalize it
+ *            ({@code COALESCE(input_tokens, prompt_tokens)}), plus the booked
+ *            deltas. Null when the row has neither an observed nor an adjusted
+ *            value — "no data" is not the same as zero tokens
+ */
+public record AdjustedUsageRow(UsageEvent observed, Long netInputTokens, Long netOutputTokens,
+        Long netCacheReadInputTokens, Long netCacheCreationInputTokens, boolean adjusted) {
+
+    public AdjustedUsageRow {
+        if (observed == null) {
+            throw new IllegalArgumentException("observed must not be null");
+        }
+    }
+}
