@@ -9,6 +9,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,13 +33,16 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
  * therefore returned <em>every</em> row sharing the max timestamp; the caller
  * folds them into a map, so the winner was whatever the database returned last.
  * </p>
+ *
+ * <p>
+ * Rows are namespaced by a per-instance UUID and cleaned up by id rather than
+ * by truncating shared tables: a whole-table DELETE reached into state other
+ * test classes own and, in the full suite, tripped their foreign keys.
+ * </p>
  */
 @DisplayName("Price snapshot lookup determinism (#710)")
 class PriceSnapshotDeterminismTest extends AbstractPostgresTest {
 
-    private static final UUID TENANT = UUID.fromString("00000000-0000-0000-0000-000000000001");
-    private static final UUID PROVIDER = UUID.fromString("00000000-0000-0000-0000-0000000000f1");
-    private static final UUID PRODUCT = UUID.fromString("00000000-0000-0000-0000-0000000000f2");
     private static final String MODEL = "determinism-model";
 
     /** Same instant for both rows — the whole point of this test. */
@@ -48,6 +52,13 @@ class PriceSnapshotDeterminismTest extends AbstractPostgresTest {
     private static final UUID LOWER_ID = UUID.fromString("00000000-0000-0000-0000-0000000000a1");
     private static final UUID HIGHER_ID = UUID.fromString("00000000-0000-0000-0000-0000000000a2");
 
+    /**
+     * Fresh per test instance (JUnit builds one per method), so this class can only
+     * ever collide with its own rows.
+     */
+    private final UUID provider = UUID.randomUUID();
+    private final UUID product = UUID.randomUUID();
+
     @Autowired
     PriceSnapshotRepository repository;
     @Autowired
@@ -55,18 +66,18 @@ class PriceSnapshotDeterminismTest extends AbstractPostgresTest {
 
     @BeforeEach
     void seed() {
-        clean();
         jdbc.update("""
                 INSERT INTO providers (id, slug, display_name, status, version)
-                VALUES (:id, 'determinism-provider', 'Determinism Provider', 'ACTIVE', 0)
-                """, new MapSqlParameterSource("id", PROVIDER));
+                VALUES (:id, :slug, 'Determinism Provider', 'ACTIVE', 0)
+                """, new MapSqlParameterSource("id", provider).addValue("slug", "det-" + provider));
         jdbc.update("""
                 INSERT INTO provider_products
                     (id, provider_id, product_code, display_name, billing_mode, credential_topology,
                      supported_wire_protocols, base_url_templates, auth_scheme, implementation_status, version)
-                VALUES (:id, :providerId, 'determinism-product', 'Determinism Product', 'PAYG', 'SINGLE_SHARED',
+                VALUES (:id, :providerId, :code, 'Determinism Product', 'PAYG', 'SINGLE_SHARED',
                         '["messages"]', '[{"url":"https://api.test.example"}]', '{"type":"bearer"}', 'VERIFIED', 0)
-                """, new MapSqlParameterSource("id", PRODUCT).addValue("providerId", PROVIDER));
+                """, new MapSqlParameterSource("id", product).addValue("providerId", provider).addValue("code",
+                "det-" + product));
 
         // Two rows, identical (product, model, token_type, effective_from) — only the
         // id differs.
@@ -74,17 +85,26 @@ class PriceSnapshotDeterminismTest extends AbstractPostgresTest {
         insertPrice(HIGHER_ID, "2.00");
     }
 
+    @AfterEach
+    void clean() {
+        // Child-first, and scoped to this instance's own rows.
+        jdbc.update("DELETE FROM price_snapshot WHERE provider_product_id = :id",
+                new MapSqlParameterSource("id", product));
+        jdbc.update("DELETE FROM provider_products WHERE id = :id", new MapSqlParameterSource("id", product));
+        jdbc.update("DELETE FROM providers WHERE id = :id", new MapSqlParameterSource("id", provider));
+    }
+
     @Test
     @DisplayName("findLatestAt picks the same row every time when effective_from ties")
     void findLatestAtIsDeterministicOnTies() {
         Instant queryAt = SAME_EFFECTIVE_FROM.plusSeconds(60);
 
-        BigDecimal first = repository.findLatestAt(PRODUCT, MODEL, PriceTokenType.INPUT, queryAt)
+        BigDecimal first = repository.findLatestAt(product, MODEL, PriceTokenType.INPUT, queryAt)
                 .map(PriceSnapshot::unitPrice).orElseThrow();
 
         // Repeat: with effective_from alone the winner was left to the database.
         for (int i = 0; i < 5; i++) {
-            BigDecimal again = repository.findLatestAt(PRODUCT, MODEL, PriceTokenType.INPUT, queryAt)
+            BigDecimal again = repository.findLatestAt(product, MODEL, PriceTokenType.INPUT, queryAt)
                     .map(PriceSnapshot::unitPrice).orElseThrow();
             assertThat(again).as("repeat %d must not flip", i).isEqualByComparingTo(first);
         }
@@ -96,7 +116,7 @@ class PriceSnapshotDeterminismTest extends AbstractPostgresTest {
     void findAllLatestAtReturnsOneRowPerTriple() {
         List<PriceSnapshot> rows = repository.findAllLatestAt(SAME_EFFECTIVE_FROM.plusSeconds(60));
 
-        List<PriceSnapshot> forThisTriple = rows.stream().filter(p -> PRODUCT.equals(p.providerProductId())
+        List<PriceSnapshot> forThisTriple = rows.stream().filter(p -> product.equals(p.providerProductId())
                 && MODEL.equals(p.modelId()) && p.tokenType() == PriceTokenType.INPUT).toList();
 
         // The old MAX(effective_from) join returned both; the caller's map put() then
@@ -113,7 +133,7 @@ class PriceSnapshotDeterminismTest extends AbstractPostgresTest {
                 SAME_EFFECTIVE_FROM.plusSeconds(3600));
 
         BigDecimal price = repository
-                .findLatestAt(PRODUCT, MODEL, PriceTokenType.INPUT, SAME_EFFECTIVE_FROM.plusSeconds(7200))
+                .findLatestAt(product, MODEL, PriceTokenType.INPUT, SAME_EFFECTIVE_FROM.plusSeconds(7200))
                 .map(PriceSnapshot::unitPrice).orElseThrow();
 
         assertThat(price).isEqualByComparingTo(new BigDecimal("3.00"));
@@ -127,7 +147,7 @@ class PriceSnapshotDeterminismTest extends AbstractPostgresTest {
 
         // Query between the tie and the later row: the tie rows are the latest visible.
         BigDecimal price = repository
-                .findLatestAt(PRODUCT, MODEL, PriceTokenType.INPUT, SAME_EFFECTIVE_FROM.plusSeconds(60))
+                .findLatestAt(product, MODEL, PriceTokenType.INPUT, SAME_EFFECTIVE_FROM.plusSeconds(60))
                 .map(PriceSnapshot::unitPrice).orElseThrow();
 
         assertThat(price).isEqualByComparingTo(new BigDecimal("2.00"));
@@ -143,14 +163,8 @@ class PriceSnapshotDeterminismTest extends AbstractPostgresTest {
                     (id, provider_product_id, model_id, token_type, currency, unit_price, effective_from, source)
                 VALUES (:id, :productId, :modelId, 'INPUT', 'CNY', :unitPrice, :effectiveFrom, 'MANUAL')
                 """,
-                new MapSqlParameterSource("id", id).addValue("productId", PRODUCT).addValue("modelId", MODEL)
+                new MapSqlParameterSource("id", id).addValue("productId", product).addValue("modelId", MODEL)
                         .addValue("unitPrice", new BigDecimal(unitPrice))
                         .addValue("effectiveFrom", java.sql.Timestamp.from(effectiveFrom)));
-    }
-
-    private void clean() {
-        jdbc.update("DELETE FROM price_snapshot", new MapSqlParameterSource());
-        jdbc.update("DELETE FROM provider_products", new MapSqlParameterSource());
-        jdbc.update("DELETE FROM providers", new MapSqlParameterSource());
     }
 }
