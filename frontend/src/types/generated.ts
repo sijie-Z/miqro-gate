@@ -1956,6 +1956,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/usage/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["timeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/usage/summary": {
         parameters: {
             query?: never;
@@ -4124,6 +4140,55 @@ export interface components {
             projectStatus?: string;
             /** Format: date-time */
             joinedAt?: string;
+        };
+        Attribution: {
+            /** Format: uuid */
+            userId?: string;
+            /** Format: uuid */
+            projectId?: string;
+            /** Format: uuid */
+            virtualKeyId?: string;
+            /** Format: uuid */
+            providerId?: string;
+            /** Format: uuid */
+            providerProductId?: string;
+            /** Format: uuid */
+            credentialId?: string;
+        };
+        ModelCallTimelineView: {
+            gatewayRequestId?: string;
+            upstreamRequestId?: string;
+            modelId?: string;
+            wireProtocol?: string;
+            streaming?: boolean;
+            status?: string;
+            /** Format: int32 */
+            httpStatus?: number;
+            clientCancelled?: boolean;
+            partialResponse?: boolean;
+            /** Format: int32 */
+            retryCount?: number;
+            /** Format: date-time */
+            startedAt?: string;
+            /** Format: date-time */
+            firstByteAt?: string;
+            /** Format: date-time */
+            completedAt?: string;
+            /** Format: int64 */
+            durationMs?: number;
+            /** Format: int64 */
+            timeToFirstByteMs?: number;
+            tokens?: components["schemas"]["Tokens"];
+            attribution?: components["schemas"]["Attribution"];
+            phases?: components["schemas"]["Phase"][];
+        };
+        Phase: {
+            key?: string;
+            label?: string;
+            /** Format: date-time */
+            at?: string;
+            /** Format: int64 */
+            elapsedMs?: number;
         };
         RoiDay: {
             date?: string;
@@ -8570,6 +8635,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["UserProjectMembershipView"][];
+                };
+            };
+        };
+    };
+    timeline: {
+        parameters: {
+            query?: {
+                gatewayRequestId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ModelCallTimelineView"];
                 };
             };
         };
