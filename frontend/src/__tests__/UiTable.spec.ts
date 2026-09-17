@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { computed, defineComponent, h } from 'vue';
 import UiTable from '@/ui/Table.vue';
+
+/** RouterLink stub that publishes its target so tests can assert jump targets. */
+const RouterLinkStub = defineComponent({
+  name: 'RouterLink',
+  inheritAttrs: false,
+  props: { to: { type: [String, Object], default: '' } },
+  setup(props, { slots, attrs }) {
+    const target = computed(() =>
+      typeof props.to === 'string' ? props.to : JSON.stringify(props.to),
+    );
+    return () => h('a', { ...attrs, 'data-router-to': target.value }, slots.default?.());
+  },
+});
 
 const columns = [
   { key: 'name', title: '名称', sortable: true },
@@ -57,6 +71,43 @@ describe('UiTable', () => {
       props: { columns, data: rows, loading: true, skeletonRows: 3 },
     });
     expect(wrapper.findAll('.ui-skeleton').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('renders the empty-state CTA only when a label and a target are given (#657)', () => {
+    const plain = mount(UiTable, {
+      props: { columns, data: [], emptyTitle: '还没有授权' },
+    });
+    expect(plain.find('[data-testid="table-empty-action"]').exists()).toBe(false);
+
+    const wrapper = mount(UiTable, {
+      props: {
+        columns,
+        data: [],
+        emptyTitle: '该凭证还没有被任何授权引用',
+        emptyActionLabel: '查看全部授权',
+        emptyActionTo: { name: 'grants' },
+      },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+    });
+    const cta = wrapper.find('[data-testid="table-empty-action"]');
+    expect(cta.text()).toBe('查看全部授权');
+    expect(cta.classes()).toContain('ui-link-action');
+    expect(JSON.parse(cta.attributes('data-router-to') as string)).toEqual({ name: 'grants' });
+  });
+
+  it('keeps the #empty slot authoritative for pages with their own empty state', () => {
+    const wrapper = mount(UiTable, {
+      props: {
+        columns,
+        data: [],
+        emptyActionLabel: '查看全部授权',
+        emptyActionTo: { name: 'grants' },
+      },
+      slots: { empty: '<p class="own-empty">自己写空态</p>' },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+    });
+    expect(wrapper.find('.own-empty').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="table-empty-action"]').exists()).toBe(false);
   });
 
   it('formats nullish cell values as an em dash', () => {

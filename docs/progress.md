@@ -3211,3 +3211,40 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
     不用 `--fix` 的原因已实测：`--fix-dry-run` 对未改动的
     `src/ui/Button.vue` 给出 CR 数 201 → 0 的修复输出（该文件单跑 0 errors），即 `--fix` 会静默重写全树行尾；
     该命令执行前后（提交前）`git status --porcelain` 均为 42 项，确认无文件被写入（合并提交后工作区为 0 项）。
+
+## 2026-09-16 夜 — 列表信息架构收口 #657：依赖计数列可点击 + 表单规则文案 + 空态 CTA
+
+**背景**：#657（承接上一轮验证线钉到行号的三处缺口）。凭证列表「授权引用」列只读不可跳转、授权列表没有可跳转的过滤入口（`NextGrantsView` 不读 `route.query`）、项目/团队创建表单不写规则（`projects.code/name`、`teams.name` 的宽度与唯一性只在 409 响应体里可见）、`ui/Table.vue` 默认空态不渲染 CTA。范围仅前端：不动后端、不改既有 Flyway 迁移、不动既有 e2e。
+
+**交付**（分支 `feat/list-ia-closeout-657`，5 个源文件 + 7 个 spec，8 个提交）
+- `ui/Table.vue`：新增可选 props `emptyActionLabel` + `emptyActionTo`（`RouteLocationRaw`），二者齐备时默认空态渲染 `router-link.ui-link-action`（`data-testid="table-empty-action"`）；`#empty` 插槽仍优先，`NextKeysView` 的自定义空态不受影响。
+- `next/NextCredentialsView.vue`：计数为 0 时仍是 `<span>`（置灰 `.next-credentials__count-zero`），>0 时渲染 `router-link` 指向 `{ name: 'grants', query: { credentialId } }`；两个分支共用 `data-testid="credential-grant-count"`（该 testid 早于本批存在，断言因此落在同一格上）。旧实现该列恒为 `<span>`，所以「>0 渲染成 `A` 且带 `credentialId`」这条对旧实现是红的；「=0 仍是 `SPAN`」在旧实现上也成立，属回归护栏而非判别式。
+- `next/NextGrantsView.vue`：读 `route.query.credentialId` 做真过滤（按 `upstreamCredentialId` 匹配），工具条显示「共 X 条授权（全部 Y 条）」+ 凭证 chip +「查看全部」清除链接；过滤后列表为空时复用新 CTA 回到全量列表。
+- `next/NextProjectsView.vue` / `next/NextTeamsView.vue`：创建表单用既有 `hint`（`ui-field__hint`）写明后端强制的规则——项目代码「必填，同一租户内唯一，最长 64 个字符。」、项目名「必填，最长 200 个字符。」、团队名「必填，最长 200 个字符。」。逐条对 `AdminOrgService#createProject`/`createTeam` 与 `projects.code/name`、`teams.name` 列宽核对过，无自造约束。
+
+**收口补强**（第二轮，评审驱动）
+- `ui/Table.vue`：显式 `import { RouterLink }`——靠全局注册时，编译器会把 `<router-link>` 的解析提升到 v-if 之上，于是每个嵌 UiTable 的页面（约 30 个视图）即便不渲染 CTA 也要解析一次；clean run 里 43 条 `Failed to resolve component: router-link` 即由此而来，现在为 0（存量 43 条出自 `PageGuide.vue` 与 `NextOverviewView.vue` 自己的模板，不在本批）。
+- `next/NextCredentialsView.vue`：计数链接加 `.next-credentials__count-link`（`padding: 0`），与同列右对齐的数字对齐。
+- `next/NextGrantsView.vue`：`?credentialId=a&credentialId=b` 这类重复参数取首个值（原先当作「无过滤」，URL 说过滤、列表却说全量）；空态文案改用 `scopedFilter`，只在数据确实加载成功时才断言「该凭证还没有被任何授权引用」，加载失败时交给错误提示。
+- `i18n/dict.ts`：5 条 DICT + 2 条 PATTERN，英文界面不再回落中文。
+
+**验证**（真实命令与结果，frontend 目录；均在**最后一次源文件改动之后**重跑过——评审收口轮改了 `next/NextGrantsView.vue` 的注释与 `i18n-copy.spec.ts` 的注释，随后三个命令全部重跑；工作区已还原 lint auto-fix 的改写）
+- `npx vitest run` → exit 0，`Test Files 61 passed (61)` / `Tests 352 passed (352)`，25.29s；`npm run typecheck`（vue-tsc 三工程）→ exit 0；`npm run build` → exit 0，`built in 19.75s`（仅既有 esbuild CSS 压缩告警）。
+- lint 信号按**提交内容**取：13 个改动文件逐个 `git show HEAD:<file> | npx eslint --stdin --stdin-filename <file>` → 逐文件 exit 0，合计 `0 errors, 6 warnings`，全部是 spec 内多组件共存的 `vue/one-component-per-file`（`NextCredentialsView.spec.ts` 2 条、`NextGrantsView.spec.ts` 2 条、`list-ia-deeplink.spec.ts` 2 条）。直接对工作区副本跑 lint 会多出上千条 `Delete ␍`，原因见下条。
+- **EOL 说明（任何人复现上面的 lint 数字前先读这条）**：`.gitattributes` 是 `* text=auto`，Windows 检出的工作区文件默认 CRLF（`frontend/src` 下 37 个文件当前即 `w/crlf`，含本批的 `i18n/dict.ts`、`views/next/NextProjectsView.vue`、`views/next/NextTeamsView.vue`），而 prettier 规则要求 LF，于是对**工作区副本**跑 `npx eslint` 会把它们逐行报 `Delete ␍`（实测 `0 errors, 1110 warnings`）。这不影响提交内容——index 与 HEAD 都是 LF，git 归一后 `git status` 仍干净，`git show HEAD:<file> | npx eslint --stdin --stdin-filename <file>` 对同样三个文件 exit 0、零输出。首轮 `npm run lint` 只报 5 条是同一机制的另一面：脚本带 `--fix`，报出来的数字是自动修复之后的残余（首轮这 5 条都不可自动修）。代价是那批无关文件被**真正改写**，而且不止改 EOL——对**提交内容**跑 `git show HEAD:frontend/src/types/generated.ts | npx eslint --stdin --stdin-filename frontend/src/types/generated.ts` 报 `0 errors, 9721 warnings`（引号风格与缩进），即该文件本就不符合 prettier 规则，`--fix` 必然把它整文件重排。工作区 CRLF 与 autocrlf 无关：本机 `git config core.autocrlf` 为 `false`，CRLF 来自 `.gitattributes` 的 `* text=auto` 在 Windows 上的检出行为。
+- 首轮 `npm run lint` → exit 0，`0 errors, 5 warnings`（4 条 spec 的 `vue/one-component-per-file`、1 条既有 `NewShell.vue` 的 `vue/no-template-shadow`）。
+- 新增/改 spec 7 个：`UiTable.spec.ts`（CTA 仅在 label+to 齐备时渲染、`#empty` 仍优先）、`NextCredentialsView.spec.ts`（计数 >0 是 `A` 且带 `credentialId`、=0 是 `SPAN`）、`NextGrantsView.spec.ts`（`?credentialId=` 真过滤 + chip + 清除链接 + 过滤后空态 CTA + 重复参数 + 加载失败不冒认空态）、`NextProjectsView.spec.ts` / `NextTeamsView.spec.ts`（hint 文案断言）、`i18n-copy.spec.ts`（新增文案过 `translateText` 锁住，改名不再静默丢译文）、`list-ia-deeplink.spec.ts`（真 router：凭证列表渲染真 `router-link` → 路由跳转 → `router-view` 挂载的授权列表按 query 过滤，链接/路由/过滤三者互证，而非各自对 stub 断言）。
+- 全量测试尾部那条 `Not implemented: navigation (except hash changes)` 是既有 jsdom 噪声——单跑本批 spec 时不出现，且在任一 spec 输出之前打印；非失败。
+
+**评审收口（对抗评审轮，交付前）**：独立上下文的评审员只认现场文件与命令输出，结论 **无 blocker、APPROVE**（评审报告不随本批提交，落在仓库外）。6 条 minor 当轮处置：3 修 3 反驳，各自带证据。
+- 修 `next/NextGrantsView.vue` 注释：原写加载失败时错误提示「占据整屏」，实际错误提示是独立的 `ui-alert`、表格仍在下方渲染，改为如实描述。
+- 修本节计数列的判别力描述（原写「测试对旧实现是红的」）：`credential-grant-count` 这个 testid 早于本批存在（`git show origin/develop:frontend/src/views/next/NextCredentialsView.vue` 可见旧列已是带该 testid 的 `<span>`），因此 `=0` 分支在旧实现上同样成立、属回归护栏；判别式是「>0 变链接且带 `credentialId`」与授权列表的过滤/CTA 断言（评审员变异实验：把 `:data` 改回未过滤的 `grants`，`Test Files 6 failed (6)` / `Tests 10 failed | 35 passed (45)`，exit 1）。
+- 修 lint churn 归因，见上一条 EOL 说明。
+- 反驳三条：陈旧基线（评审 diff 取了过期基线，该基线不在交付物内）；`emptyActionTo` 默认值 `''`（`''` 属 `RouteLocationRaw` 的字符串分支，且 CTA 由 label+to 双重 `v-if` 把关，运行时不可达）；英文 `1 grants`（词典规则 `共 N 条授权 → $1 grants` 在 develop 上已存在，i18n 层无复数能力，本批只是在 spec 里锁定既有行为——spec 注释已写明这不是对措辞的背书）。
+- 收口改动后复跑：`npx vitest run` → `Test Files 61 passed (61)` / `Tests 352 passed (352)`；`npm run typecheck` → exit 0；`npm run build` → exit 0，`built in 16.22s`。
+
+**边界与偏差**
+- 未加 `maxlength` 属性：issue 要的是「规则可读」，本次只补文案，不改输入拦截行为。
+- 未动 e2e 与金样；`frontend/dist/` 已被 `.gitignore` 覆盖，构建没有脏化工作区。
+- `frontend/package.json` 的 `lint` 脚本写死 `eslint . --ext .vue,.ts,.tsx --fix`，所以每跑一次都会改写一批与本 issue 无关的文件（含 `types/generated.ts` 的整文件 prettier 重排）——两轮各发生一次，均按路径逐个 `git checkout --` 还原，本批提交 `git show --stat` 只含本批文件。这是仓库既有状态，不是本批引入；收口验证因此不再跑 `npm run lint`，改为按上一节的方式对提交内容取信号（`git show HEAD:<file> | npx eslint --stdin`），既不改写工作区，也不受工作区 EOL 影响。
+
