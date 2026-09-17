@@ -31,6 +31,7 @@
 | `database-schema.md` | 物理表、约束、索引和迁移 | 数据库变化 |
 | `api-contract.md` | 管理 API 与推理入口契约 | API 变化 |
 | `proxy-and-cc-switch.md` | 透明代理、协议和 CC Switch 边界 | 数据面行为变化 |
+| `client-onboarding.md` | 客户端与存量系统接入指南（#742）：三类接入姿势矩阵、可复制示例、MCP 层接入、明确不做的边界 | 接入方式/边界变化 |
 | `context-attribution-implementation-spec.md` | 请求级归属（CAA）的**权威实现契约**：头名、裁定/声明模型、分阶段实施、Spec v1.1 R1–R8（`usage_event` 上下文列的**取值域与物理形态**以 `database-schema.md`/`api-contract.md` 为准——Spec §7.1 的 `claim_source` 清单滞后于实现） | 归属实现契约变化 |
 | `activity-context-design.md` | 请求级归属的**历史设计稿**——设计推演与 2026-09-16 真机实验证据；头名/列名及部分现状陈述**不具契约效力**（状态行、Q0、Q 表、§8 计划处已加「历史注记」） | 仅补实验证据与历史注记；命名与契约一律以 `context-attribution-implementation-spec.md` 为准 |
 | `protocol-agents.md` | Agent/模型协议全景（入站协议、客户端矩阵、上游协议声明、红线） | 协议面变化 |
