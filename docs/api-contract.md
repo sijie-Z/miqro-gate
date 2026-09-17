@@ -1158,6 +1158,8 @@ canonical 账单导入与四态对账报告（契约稿 docs/bill-reconciliation
 
 Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 ID 都进入用量记录；不得覆盖供应商 request ID Header。
 
+响应缓存（ADR-0009，默认关）：命中转发时响应头 `X-MiQroKey-Cache` 标注命中级别（`L1`/`L2`）；缓存开启但未命中时为 `miss`。客户端以请求头 `X-MiQroKey-Cacheable: 1` 显式参与缓存（双重 opt-in，见 ADR-0009）。
+
 ## 8. OpenAPI 与兼容性
 
 - Control Plane 生成 **OpenAPI 3.1**（F09 已实现）：`GET /v3/api-docs`（springdoc，无 swagger-ui；`springdoc.api-docs.version=OPENAPI_3_1`）。机器可读基线提交于 `docs/openapi/openapi-3.1.json`；CI（backend-integration job）对每次生成结果跑破坏性 diff（`deploy/openapi/check-openapi-breaking.py`：删除 path/operation/response code/参数、属性变 required 即失败）。本文仍是业务语义事实源；生成物是机器可读镜像，OpenAPI 不得改变本文语义。

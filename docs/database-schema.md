@@ -107,7 +107,7 @@ V1 migration 可以创建首批核心表；后续 Goal 只能追加 migration。
 - 消费方：网关按产品读取 ACTIVE 模型做 `/v1/models` 交集（route-snapshot `loadUpstreamModels`）；官方抓取仅写成功（失败保留上次成功目录）。
 - **F18（V34）**：`OFFICIAL` 行由官方抓取全权管理（抓取刷新只删/写 OFFICIAL，遇同名模型 ID 用 `ON CONFLICT DO NOTHING` 保留 MANUAL 行）；`MANUAL` 行为管理员人工兜底录入（探测失败回退入口），可单独删除，官方刷新永不覆盖。
 
-### `model_access` (V7，当前实现)
+### `model_access` (V7，未消费——历史保留)
 
 租户/项目级模型放行规则：`project_id`、`model_id`、`status`（`ACTIVE|DISABLED`）、`created_by`、`version`。唯一 `(tenant_id, project_id, model_id)`。V7 已建表，当前无应用代码消费；Virtual Key 的实际模型权限由 Grant 模型与 Key 快照求交集决定。
 
@@ -334,9 +334,9 @@ alert_rules 类型 CHECK 同步扩展 `CONSUMER_KEY_EXPIRING`（V36 同款模式
 
 每百万 token 单价快照，**不租户隔离**（价格属于全局产品目录）：`provider_product_id`、`model_id`、`token_type`（`INPUT|OUTPUT|CACHE_READ|CACHE_CREATION`）、`currency`（默认 CNY）、`unit_price numeric(24,10)`、`effective_from`、`source`（`MANUAL|OFFICIAL|ESTIMATED`）、`created_by`。查询索引 `(provider_product_id, model_id, token_type, effective_from DESC)`。控制面用量汇总按此计算成本；无快照的模型成本记 0。
 
-### `budget` / `model_budget` (V7，当前实现)
+### `budget` / `model_budget` (V7)
 
-月度预算（仅告警，永不阻断）：`project_id`、`period_month`（`YYYY-MM`）、`amount numeric(24,10)`、`currency`、`alert_threshold_pct`、`status`（`ACTIVE|PAUSED`）、`version`。`budget` 唯一 `(tenant_id, project_id, period_month)`；`model_budget` 额外含 `model_id`，唯一 `(tenant_id, project_id, model_id, period_month)`。V7 已建表，告警消费为后续 Goal。
+月度预算（仅告警，永不阻断）：`project_id`、`period_month`（`YYYY-MM`）、`amount numeric(24,10)`、`currency`、`alert_threshold_pct`、`status`（`ACTIVE|PAUSED`）、`version`。`budget` 唯一 `(tenant_id, project_id, period_month)`；`model_budget` 额外含 `model_id`，唯一 `(tenant_id, project_id, model_id, period_month)`。`budget` 已消费（预算管理 + `BUDGET_THRESHOLD` 告警水位）；`model_budget` 建表未消费（按模型粒度的预算为后续 Goal）。
 
 ### `quota_rules` (V23，用量配额；V58/V59 扩维)
 
