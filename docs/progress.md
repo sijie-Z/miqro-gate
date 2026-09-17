@@ -3652,3 +3652,24 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **迁移号**：V62/V63 均已被占，本项用 **V64**。
 
+## 2026-09-18 成本读取切冻结价格基座（#710 / F21-A 第二刀）——「改一次价目，历史金额跟着变」终止
+
+**这一刀会改变金额**，而且是**纠正性的**：`docs/usage-accounting.md` §6 原文一直写着"使用**事件发生时**的价格快照计算"，而实现用的是**查询时刻的最新价目**——代码此前不符合它自己的规格。本刀让二者一致。
+
+**三条定价路径，实测后分两类处理**：
+- **计费路径**（`upstreamPaid` / `gatewayObserved`）：改读行内冻结值，缺失回退到该行 `occurred_at` 时刻的价目
+- **缓存节省路径**（`savedByGatewayCache`）：命中行**没有**用量事件，因而没有冻结列。按**该组命中中最晚一次的时刻**取价目。**这是近似**——一个 cache_key 的命中若横跨改价，整组按较晚价计价。已在 `usage-accounting.md` §6 明写
+- **成本分摊**（`CostAllocationService`）**未切换**：它把结果持久化、按 `algorithm_version` 幂等覆盖，改读冻结基座会牵动"同版本重跑是否覆盖历史"的语义，属独立决策
+
+**结构**：新增 `PriceSnapshotSql` 做 as-of 规则的**单一定义**（此前已在仓储与回填 SQL 各有一份，再加一处会失控）；`UsageAggRow` / `HitAggRow` 改带**未除的** `tokens × unit_price` 求和，除法仍在 domain 用原 `MathContext` 完成——保证切换不扰动舍入。三个服务里的"塞当前价目表"整块删除，连已无人使用的 `priceSnapshotRepository` 注入一并清掉。
+
+**回归护栏（如预期成立）**：价格没变时冻结价 == 当前价，因此**既有 39 项成本/用量断言原样通过**——证明切换没有悄悄改数。
+
+**新测试分开验两件强度不同的事**（`PriceBasisCostStabilityIntegrationTest`）：
+1. 新增更晚的价目 → 历史不动（用户能感知的承诺）
+2. **改写历史价目行 → 已冻结的历史不动** ——**只有冻结列扛得住它**（as-of 查询会照收），所以它证明冻结基座真的在被使用，而不是一个碰巧看着对的回退
+
+**一次自查：那两条测试起初是空洞的**。首次运行只有精确值断言失败（`expected 0.002 but was 0`）——成本为 0 是因为 fixture 用了随机 `project_id`，而 summary 默认按项目分组会 `JOIN projects` 丢掉该行。**这意味着当时那两条"历史不动"的测试比较的是 `0 == 0`，绿灯但什么都没证明。** 修 fixture 后给两条都加了**基线必须非零**的前置断言。
+
+**未做**：导出/对账侧的成本口径、`cost_allocations` 切换、前端展示。
+

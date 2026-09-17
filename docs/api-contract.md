@@ -600,7 +600,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 
 - 固定成本仅 Plan 订阅（非 PAYG）有值，按各项目 Token 权重分摊；无用量时不产出任何行。
 - 重复分配同一周期 = 幂等覆盖（唯一键含算法版本）；算法升级另起版本历史。
-- 价格取分配时刻最新快照（逐事件价格快照为延后列）；`currency` 取订阅币种（缺省 USD）。
+- 价格取**分配时刻**的最新快照；`currency` 取订阅币种（缺省 USD）。**注意**：按量成本（§5.2 汇总等）自 #710 F21-A 起改读行内冻结价格（`usage_event.price_*`），与本端点的分摊口径不同——分摊切换会牵动"同版本重跑覆盖历史"，属独立决策。
 - 错误码：`SUBSCRIPTION_NOT_FOUND`（404）、`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400，窗口 ≤ 93 天）。
 
 ### 5.5 原始记录导出（G4.4）
