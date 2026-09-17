@@ -72,7 +72,7 @@
 
 - [ ] Flyway 校验通过；从上一正式版本升级和回滚策略已演练。
 - [ ] 大表/分区 migration 在生产数据量副本评估锁和时长。
-- [ ] 原始 usage、adjustment、导出和对账 schema 版本已固定。
+- [x] 原始 usage、adjustment、导出和对账 schema 版本已固定。（adjustment = V63，`usage_adjustments`，#709/F20）
 - [x] 发布前备份成功且完成隔离恢复验证。
 - [x] 永久保留/人工删除行为符合文档。
 

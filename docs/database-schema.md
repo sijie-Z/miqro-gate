@@ -228,6 +228,33 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
 
 部分唯一索引 `(tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL`；`virtual_key_id`、`project_id`、`cache_level`、`occurred_at` 索引。正文（prompt、代码、工具、回答）永不写入。
 
+### `usage_adjustments` (V63，#709 / F20)
+
+**追加型用量调整台账**——对账确认差异后修正用量，**绝不覆盖 `usage_event` 原始事实**（审计可信的前提）。它把"用量"拆成四层，这是本表最要紧的语义约定：
+
+| 层 | 含义 | 谁读 |
+|---|---|---|
+| `usage_event` | 原始观察事实（observed），永不 UPDATE / DELETE | 全部 |
+| `usage_adjustments` | 追加型修正（本表） | 财务 / 报告口径 |
+| AdjustedUsage = observed + Σ调整 | 明细、汇总、计费、导出 | **不含配额** |
+| 配额判定 | 仍只读 `usage_event` | 财务更正不得追溯改写运行时控制的历史结果——否则一笔补录会让已超额的 Key 被重新判成未超额 |
+
+关键列：
+
+- `usage_event_id`——修正指向的原始事实。外键 `ON DELETE CASCADE`：`usage_event` 可被 `UsageDeletionService` 按窗口硬删（带确认令牌 + 审计），底层事实被有意抹去时其修正随之失效
+- `adjustment_type`（`USAGE|COST`，默认 `USAGE`）——**token 增减与金额增减是互斥语义**，表级 CHECK 不允许一笔同时改两者（否则审计时说不清"在修正用量还是修正金额"）
+- 四个 token 增减列（`input/output/cache_read/cache_creation`，**可负**）
+- 预留列 `amount_delta numeric(24,10)` + `currency_code`——**COST 维度表结构已备但不开放写入**，避免以后为纯价格差异 / 汇率 / 折扣 / 阶梯价再改一次表
+- `reason`（必填）、`reason_code`
+- `reconciliation_row_id`——溯源到对账发现。**刻意不建外键**：对账报告按窗口幂等替换，硬外键会挡住替换
+- `reversal_of_id`——纠错靠**反向行**，不设可变 `status`；服务层禁止"反向的反向"，让本表自身也保持 append-only
+- `created_by`、`created_at`（录入时间）。事件发生时间取被引用行的 `occurred_at`，故无需 `effective_at`；**入账期间**属财务政策问题，本期不落列
+- `idempotency_key`——可空自然键，部分唯一索引 `(tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL`，重试不双记
+
+服务层规则：净额不得为负，配合 `pg_advisory_xact_lock`（按 `usage_event_id` 串行化）执行，避免两个并发提交各自看到健康净额却共同越界。正文永不写入。
+
+**当前范围**：本期只落 schema + 追加/查询接口（`POST|GET /api/v1/admin/usage-adjustments`，仅 SYSTEM_ADMIN）。**明细净额列、导出/审计调整标记、对账"含调整"维度尚未接入**——调整目前可记录、可查看，但还不改变任何上报数字。
+
 ### `cache_hit_event` (V6)
 
 缓存命中计数（L1/L2 命中不写 `usage_event`，在此去重计数）：`cache_key`、`virtual_key_id`、`project_id`、`provider_product_id`、`level`（`L1_HIT|L2_HIT`）、`occurred_at`、`gateway_request_id`。唯一 `(tenant_id, cache_key, level, occurred_at)`——同一秒内同一 cache_key 只记一次。

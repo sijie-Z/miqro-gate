@@ -637,6 +637,21 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 - **GC（F06）**：定时物理清理过期删除请求（同调度属性）——`PENDING_CONFIRMATION`/`CONFIRMED`/`EXPIRED` 且超过 `expires_at` 的行被删除；`EXECUTED` 行**永久保留**（执行审计，与 G4.4「请求本身与审计链保留」一致）。
 - 窗口 ≤ 93 天；`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400）。
 
+### 5.6b 用量调整（#709 / F20）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/admin/usage-adjustments` | 追加一笔调整（修正或反向行）；`201` + 记录 |
+| `GET /api/v1/admin/usage-adjustments?gatewayRequestId` | 某笔用量记录的调整台账，按录入时间正序 |
+
+- **追加型，绝不覆盖原始事实**：`usage_event` 永不被改写；修正以新行追加，纠错以**反向行**（`reversalOfId`）追加，且不允许"反向的反向"。
+- 请求体：`gatewayRequestId`（目标用量记录的请求 ID）+ 至少一个非 0 的 `inputTokensDelta` / `outputTokensDelta` / `cacheReadTokensDelta` / `cacheCreationTokensDelta`（可负）+ `reason`（必填）。带 `reversalOfId` 时按被撤销行取反并**忽略**请求里的增减量，使撤销不可能与被撤销内容不一致。
+- **幂等**：请求体可选 `idempotencyKey`，落在 `(tenant_id, idempotency_key)` 部分唯一索引上——重试返回已记录的行，不重复入账。**这与 §1 中"预留、当前未实现"的 `Idempotency-Key` 请求头是两套东西**：该请求头仍未实现，本端点用的是请求体内的自然键。
+- 错误码：`ADJUSTMENT_EMPTY`（400，未给或全零）、`ADJUSTMENT_WOULD_GO_NEGATIVE`（400，调整后某维度为负）、`ADJUSTMENT_TARGET_HAS_NO_USAGE`（400，缓存命中行不承载用量）、`REVERSAL_TARGET_MISMATCH` / `REVERSAL_OF_REVERSAL`（400）、`USAGE_EVENT_NOT_FOUND` / `ADJUSTMENT_NOT_FOUND`（404，租户内不可区分他租户）。
+- **口径**：调整计入**财务/报告口径**（明细、汇总、计费、导出）；**配额判定仍只读 `usage_event`**——财务更正不得追溯改写运行时控制的历史结果。四层语义见 database-schema §6。
+- **当前范围**：读取路径（明细净额列、导出/审计标记、对账"含调整"维度）尚未接入，故调整目前可记录、可查看，但**不改变任何上报数字**；`amount_delta` 金额维度表结构已备但未开放写入。
+- 写 `USAGE_ADJUSTMENT_CREATED` / `USAGE_ADJUSTMENT_REVERSED` 审计（操作人填写的原因文本按 JSON 转义）。
+
 ### 5.7 Webhook 端点（G4.5）
 
 | 方法与路径 | 用途 |
