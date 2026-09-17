@@ -2,6 +2,89 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-16（自助注册关闭态前置体现 #550）
+
+- **#550（PR 待开，分支 `fix/registration-disabled-gating`，基于 50a9b24）**：部署关闭自助注册时，
+  登录页仍展示可提交的注册入口，用户填完表单才吃 403。新增公开只读端点
+  `GET /api/v1/auth/registration-status`（匿名，仅回一个布尔 `{enabled}`；加入
+  `SessionFilter.PUBLIC_PATHS` 精确匹配白名单；CSRF 拦截器虽覆盖 `/api/**` 全方法，但对非状态变更
+  方法直接短路，GET 无需 token）——判定与 `/register`
+  的 403 分支**同源**（`AuthProperties.registrationEnabled`，`@ConfigurationProperties` 启动期绑定、
+  无 `@RefreshScope`）。前端登录页 `onMounted` 预取该状态；关闭态下注册入口**保留可见**（承载说明
+  文案）但不可点/不可提交（`disabled` + `aria-disabled` + `request-access--off` 样式），探测失败一律
+  fail-open 维持原行为。该端点只是 UX 前置提示，**不是鉴权点**：服务端 403 仍是唯一闸门，且端点只
+  暴露一个布尔，不泄漏部署配置其他信息。
+- 验证（真实命令与结果）：
+  - 后端 `-f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=RegistrationApiIntegrationTest,RegistrationDisabledApiIntegrationTest
+    -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`，
+    `BUILD SUCCESS`（Testcontainers PostgreSQL）。
+  - 前端 `npm ci`（added 395 packages, 0 vulnerabilities）、`npm run test` → 59 files / 331 tests 全绿、
+    `npm run typecheck` / `npm run lint`（0 error、1 条既有 `NewShell.vue` 警告）/ `npm run build` 全部 exit 0。
+  - OpenAPI 基线重生成（`OpenApiSpecIntegrationTest` → `docs/openapi/openapi-3.1.json`，与旧基线比
+    纯新增两段：schema `RegistrationStatusResponse` + path `/api/v1/auth/registration-status`），
+    前端类型 `npm run gen:types` 同步重生成（`src/types/generated.ts` 纯新增 39 行，二次运行幂等）。
+- 反空跑：把前端新用例的 mock 临时改成 `{ enabled: true }`，该用例即 FAIL
+  （`expected undefined to be defined`），证明断言非空跑。
+
+### 收尾轮 2（2026-09-16 晚）：对抗评审修复 + 复验
+
+- 评审后修复 4 项（均已落盘）：
+  1. 审计面误述：`docs/api-contract.md` 曾把本端点与 `/register` 类比，但本端点是纯只读查询、
+     **不写审计事件**，只有成功注册才写 `REGISTER` → 已改为显式声明「不写审计」并注明两者不等价。
+  2. CSRF 机制描述不准：`SecurityConfig#addInterceptors` 确实把 `csrfInterceptor` 注册在 `/api/**`
+     **全方法**上；GET 免 token 的原因是 `CsrfInterceptor#preHandle` 对非状态变更方法直接短路，
+     而不是「GET 不在拦截范围内」。`api-contract.md` 与本文档已按真实机制改写，且确认**无需**把
+     本端点加入 `CSRF_EXEMPT`。
+  3. 前端类型重复定义：手写 `RegistrationStatus` 与生成 schema 重复，且把 `enabled` 声明为必填
+     （schema 中为可选）→ 改为 `generated-api.ts` 里的别名 `RegistrationStatusResponse`，
+     调用方统一按 `=== false` 判定。
+  4. 探测串行化：原实现先 `await` 状态探测再请求 OAuth 供应商，状态端点卡住（HTTP 客户端 60s 超时）
+     会连带延迟 OAuth 登录按钮 → 改为两个探测各自 `.then/.catch` 独立回填状态，互不阻塞。
+- 新增前端用例 2 条（`NextLoginView.spec.ts`）：状态探测 reject / 字段缺失时 fail-open（入口仍可用、
+  表单仍可达）；状态探测悬挂时 OAuth 按钮仍渲染。反空跑依据：两条新旧用例互为反例——关闭态要求
+  `disabled` **存在**、失败态要求**不存在**，二者同时通过即证明闸门由探测值驱动，而非恒真/恒假断言。
+- 复验（2026-09-16，真实命令与结果）：
+  - 后端 `-f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=RegistrationApiIntegrationTest,RegistrationDisabledApiIntegrationTest
+    -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`、
+    `BUILD SUCCESS`（Windows 需 `mvnw.cmd` 且 `JAVA_HOME` 指向 Temurin 21）。
+  - 前端 `npm run typecheck` exit 0；`npm run test` → 59 files / **333** tests 全绿（较上轮 +2，即上述新增用例）。
+  - 改动文件 `npx eslint <4 个文件>`（**不带 `--fix`**，避免误改工作区）exit 0。
+  - CI 的 `gen:types` 漂移门禁本地预演：`npx openapi-typescript ../docs/openapi/openapi-3.1.json -o <临时文件>`
+    与 `git show HEAD:frontend/src/types/generated.ts` **逐字节一致**（忽略行尾），故该门禁不会因本分支失败。
+  - 端到端 `npx playwright test --grep "new login page"` → `2 passed (42.5s)`、exit 0；
+    新增用例 `new login page closes the register entry when self-registration is off (#550)`
+    通过路由拦截返回 `{"enabled":false}`，断言注册入口 `disabled` 且注册表单两个字段均不渲染。
+    日志里可见 `/api/v1/auth/registration-status`、`/api/v1/auth/oauth/providers` 代理到 8080 失败
+    （本机未起后端），页面按 fail-open 回退，原有用例仍绿——即真实浏览器下探测失败不破坏登录页。
+
+### 并入 develop 新基线（2026-09-16）：merge `adfb670`（#695 / #684 配额软着陆）
+
+- 背景与手法：develop 于本日推进到 `adfb670`，本分支（原基于 `50a9b24`）与基线冲突。用
+  `git merge origin/develop`（**产生合并提交，非 rebase**）把基线并入，本分支改动全部保留。
+- 冲突清单与解法（冲突文件共 **1** 个）：
+  - `docs/openapi/openapi-3.1.json`——两侧改动语义不相交：本分支新增 schema
+    `RegistrationStatusResponse` + path `/api/v1/auth/registration-status`；develop 在既有 schema
+    `UpsertQuotaRuleRequest`、`QuotaRuleView` 上新增 `action` 属性。解法：**以 develop 版为底**，
+    把本分支两段按各自前驱键原位插入（`/api/v1/billing/quota` 之后、`SubscriptionQuotaView` 之后）。
+    注意 springdoc 输出含 `"maximum":100.00` 这类字面量，JS `JSON.parse`→`JSON.stringify` 往返会丢成
+    `100`，故采用 JSON 感知的**文本级**插入，不做往返序列化。合并结果自检：与 develop 版逐成员比对，
+    差异恰为本分支 2 段新增；与本分支版比对，差异恰为 develop 的 2 处 `action`；paths 172 / schemas 137；
+    `100.00` 原样保留；无冲突标记。
+  - 其余重叠文件（`docs/api-contract.md`、`docs/progress.md`、`frontend/src/types/generated.ts`）由 git
+    自动合并；`docs/progress.md` 两侧为不同区域追加，互不覆盖。
+- 合并后派生物一致性：`npx openapi-typescript ../docs/openapi/openapi-3.1.json -o <临时文件>` 与合并后的
+  `frontend/src/types/generated.ts` **逐字节一致**（忽略行尾），即生成物确为合并后契约的忠实渲染，
+  CI 的 `gen:types` 漂移门禁不会因此失败。
+- 复验（2026-09-16，真实命令与结果）：
+  - 后端 `-f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=RegistrationApiIntegrationTest,RegistrationDisabledApiIntegrationTest
+    -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`
+    （`RegistrationApiIntegrationTest` 4 + `RegistrationDisabledApiIntegrationTest` 2）、`BUILD SUCCESS`。
+  - 前端 `npm run typecheck` exit 0；`npm run test` → 59 files / **334** tests 全绿
+    （较上轮 +1，来自 develop 并入的 `NextQuotaRulesView.spec.ts` 新增用例）。
+
 ## 会话交接点 2026-09-16（网关请求前置预检 #553）
 
 - **#553 已实现并验证**（分支 `feat/gateway-context-limit-precheck`，自 develop `50a9b24`）；

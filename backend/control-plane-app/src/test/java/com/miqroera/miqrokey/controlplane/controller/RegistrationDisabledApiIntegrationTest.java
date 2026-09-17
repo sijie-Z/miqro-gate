@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import org.junit.jupiter.api.DisplayName;
@@ -12,9 +13,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -53,5 +57,14 @@ class RegistrationDisabledApiIntegrationTest {
         mockMvc.perform(post("/api/v1/auth/register").contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of("username", "solo", "password", "StrongPass2026!"))))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("REGISTRATION_DISABLED"));
+    }
+
+    @Test
+    @DisplayName("registration status is public and reports the switch off (200, not 401)")
+    void registrationStatusIsPublicWhenDisabled() throws Exception {
+        MvcResult r = mockMvc.perform(get("/api/v1/auth/registration-status")).andExpect(status().isOk()).andReturn();
+        JsonNode body = objectMapper.readTree(r.getResponse().getContentAsByteArray());
+        assertThat(body.size()).isEqualTo(1);
+        assertThat(body.path("enabled").asBoolean()).isFalse();
     }
 }

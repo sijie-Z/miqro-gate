@@ -6,6 +6,7 @@ import com.miqroera.miqrokey.controlplane.dto.BootstrapResponse;
 import com.miqroera.miqrokey.controlplane.dto.CsrfResponse;
 import com.miqroera.miqrokey.controlplane.dto.LoginRequest;
 import com.miqroera.miqrokey.controlplane.dto.RegisterRequest;
+import com.miqroera.miqrokey.controlplane.dto.RegistrationStatusResponse;
 import com.miqroera.miqrokey.controlplane.dto.LoginResponse;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import com.miqroera.miqrokey.controlplane.dto.UserResponse;
@@ -205,6 +206,20 @@ public class AuthController {
 
         CsrfResponse resp = new CsrfResponse(csrfToken, userContext.getSession().expiresAt());
         return ResponseEntity.ok(resp);
+    }
+
+    /**
+     * Anonymous read-only view of the self-registration switch
+     * ({@code miqrokey.registration-enabled}). The login page calls this before
+     * rendering so a closed deployment never shows a form whose submit would fail
+     * with {@code 403 REGISTRATION_DISABLED}. Public path: no session and no CSRF
+     * token required; the body carries the single boolean and nothing else about
+     * the deployment.
+     */
+    @GetMapping("/registration-status")
+    @ApiResponse(responseCode = "200", description = "Self-registration switch state (single boolean, anonymous)", content = @Content(mediaType = "application/json", schema = @Schema(implementation = RegistrationStatusResponse.class)))
+    public ResponseEntity<RegistrationStatusResponse> registrationStatus() {
+        return ResponseEntity.ok(new RegistrationStatusResponse(authProperties.isRegistrationEnabled()));
     }
 
     // -----------------------------------------------------------------------
