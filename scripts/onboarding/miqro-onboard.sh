@@ -156,6 +156,20 @@ mcp_block() { # MCP_URL KEY
 
 # ---------- file injection ----------
 
+# backup_file FILE -> path
+# Timestamped backup; a second change within the same second must not
+# silently overwrite the previous generation, so the name disambiguates.
+backup_file() {
+    _b=$1.bak-$(date -u +%Y%m%dT%H%M%SZ)
+    _n=1
+    while [ -e "$_b" ]; do
+        _n=$((_n + 1))
+        _b=$1.bak-$(date -u +%Y%m%dT%H%M%SZ)-$_n
+    done
+    cp "$1" "$_b"
+    printf '%s' "$_b"
+}
+
 # apply_managed_block FILE BLOCK_STRING LABEL
 # Replaces the block between the managed markers, or appends it.
 # Backup before write; reports "unchanged" when the result is identical.
@@ -205,9 +219,7 @@ apply_managed_block() {
     _dir=$(dirname "$_f")
     [ -d "$_dir" ] || mkdir -p "$_dir"
     if [ -f "$_f" ]; then
-        _bak="$_f.bak-$(date -u +%Y%m%dT%H%M%SZ)"
-        cp "$_f" "$_bak"
-        printf 'backup: %s\n' "$_bak"
+        printf 'backup: %s\n' "$(backup_file "$_f")"
     fi
     mv "$_new" "$_f"
     printf 'wrote: %s\n' "$_f"
@@ -244,9 +256,7 @@ apply_claude_settings() {
     _dir=$(dirname "$_f")
     [ -d "$_dir" ] || mkdir -p "$_dir"
     if [ -f "$_f" ]; then
-        _bak="$_f.bak-$(date -u +%Y%m%dT%H%M%SZ)"
-        cp "$_f" "$_bak"
-        printf 'backup: %s\n' "$_bak"
+        printf 'backup: %s\n' "$(backup_file "$_f")"
     fi
     mv "$_tmp" "$_f"
     printf 'wrote: %s\n' "$_f"
