@@ -69,6 +69,21 @@ miqrokey:
     context-limit:
       enabled: ${MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED:true}
       threshold-chars: ${MIQROKEY_GATEWAY_CONTEXT_LIMIT_THRESHOLD_CHARS:200000}
+    # #741 LLM 侧熔断（默认关）：按（产品 × 凭证）隔离，连败超阈值后快速失败
+    # 503 circuit_open，超时后半开探活自动恢复。默认阈值对齐 MCP F13（腾讯口径）。
+    # 关闭时零行为变化：不查、不建桶、计数恒零。
+    circuit-breaker:
+      enabled: ${MIQROKEY_GATEWAY_CIRCUIT_BREAKER_ENABLED:false}
+      window-seconds: ${MIQROKEY_GATEWAY_CIRCUIT_BREAKER_WINDOW_SECONDS:10}
+      min-requests: ${MIQROKEY_GATEWAY_CIRCUIT_BREAKER_MIN_REQUESTS:10}
+      error-ratio: ${MIQROKEY_GATEWAY_CIRCUIT_BREAKER_ERROR_RATIO:50}
+      error-status-codes: ${MIQROKEY_GATEWAY_CIRCUIT_BREAKER_ERROR_STATUS_CODES:500,502,503,504}
+      open-seconds: ${MIQROKEY_GATEWAY_CIRCUIT_BREAKER_OPEN_SECONDS:30}
+      probe-count: ${MIQROKEY_GATEWAY_CIRCUIT_BREAKER_PROBE_COUNT:3}
+      probe-success: ${MIQROKEY_GATEWAY_CIRCUIT_BREAKER_PROBE_SUCCESS:2}
+      slow-enabled: ${MIQROKEY_GATEWAY_CIRCUIT_BREAKER_SLOW_ENABLED:false}
+      slow-call-ms: ${MIQROKEY_GATEWAY_CIRCUIT_BREAKER_SLOW_CALL_MS:3000}
+      slow-ratio: ${MIQROKEY_GATEWAY_CIRCUIT_BREAKER_SLOW_RATIO:80}
 
   cache:
     # Response cache (L1 Caffeine + L2 PostgreSQL): DISABLED by default.

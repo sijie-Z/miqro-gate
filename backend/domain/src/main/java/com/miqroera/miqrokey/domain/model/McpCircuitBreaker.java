@@ -27,6 +27,13 @@ import java.util.Deque;
  * (service, tool bucket) lives in the gateway's registry, replaced whenever the
  * policy changes.
  * </p>
+ *
+ * <p>
+ * The machine is shared: the F13 tool-call path supplies an
+ * {@link McpResiliencePolicy}, and the LLM data plane (#741) builds a
+ * {@link CircuitBreakerPolicy} from gateway configuration — the class name is
+ * historical, the state machine is protocol-agnostic.
+ * </p>
  */
 public final class McpCircuitBreaker {
 
@@ -41,7 +48,7 @@ public final class McpCircuitBreaker {
     private record Sample(Instant at, boolean ok, long durationMs) {
     }
 
-    private final McpResiliencePolicy policy;
+    private final CircuitBreakerPolicy policy;
     private final Clock clock;
     private final Deque<Sample> window = new ArrayDeque<>();
     private State state = State.CLOSED;
@@ -50,7 +57,7 @@ public final class McpCircuitBreaker {
     private int probeSlots;
     private int probeSuccesses;
 
-    public McpCircuitBreaker(McpResiliencePolicy policy, Clock clock) {
+    public McpCircuitBreaker(CircuitBreakerPolicy policy, Clock clock) {
         if (!policy.breakerEnabled()) {
             throw new IllegalArgumentException("breaker policy must be enabled");
         }

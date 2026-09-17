@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.cache.CachedResponse;
 import com.miqroera.miqrokey.cache.GatewayResponseCache;
 import com.miqroera.miqrokey.domain.cache.CacheKey;
+import com.miqroera.miqrokey.domain.model.McpCircuitBreaker;
 import com.miqroera.miqrokey.domain.usage.CacheHitEvent;
 import com.miqroera.miqrokey.domain.usage.CacheLevel;
 import com.miqroera.miqrokey.domain.usage.RequestCompletedEvent;
@@ -147,6 +148,11 @@ public class ProxyController {
      * call.
      */
     private final ContextLimitGuard contextLimitGuard;
+    /**
+     * LLM-side circuit breaker (#741, default off): per (product × credential)
+     * fast-fail while an upstream keeps failing.
+     */
+    private final LlmCircuitBreakerRegistry circuitBreaker;
 
     public ProxyController(VirtualKeyResolver keyResolver, CredentialInjector credentialInjector,
             GatewayResponseCache responseCache, ObjectProvider<RequestCoalescer> coalescerProvider,
@@ -156,11 +162,12 @@ public class ProxyController {
             UpstreamTargetValidator upstreamTargetValidator, Scheduler credentialDecryptScheduler,
             BuiltInAdapterRegistry adapterRegistry, ProviderCatalog providerCatalog, RetentionSidecar retentionSidecar,
             GatewayTtfbMetrics ttfbMetrics, ClientAddressResolver clientAddressResolver,
-            ContextLimitGuard contextLimitGuard) {
+            ContextLimitGuard contextLimitGuard, LlmCircuitBreakerRegistry circuitBreaker) {
         this.retentionSidecar = retentionSidecar;
         this.clientAddressResolver = clientAddressResolver;
         this.ttfbMetrics = ttfbMetrics;
         this.contextLimitGuard = contextLimitGuard;
+        this.circuitBreaker = circuitBreaker;
         this.keyResolver = keyResolver;
         this.credentialInjector = credentialInjector;
         this.responseCache = responseCache;
@@ -432,6 +439,15 @@ public class ProxyController {
         }
         filteredHeaders.set(cred.headerName(), cred.headerValue());
 
+        // #741 LLM-side circuit breaker (default off): a rejected call fails
+        // fast and never opens a lifecycle row — the same accounting rule as
+        // every other gateway rejection; the upstream is never contacted.
+        if (circuitBreaker.beforeCall(ctx.productId(), ctx.binding().credentialId(),
+                requestId) == McpCircuitBreaker.Decision.REJECTED) {
+            return Mono.error(new AuthFailureException(HttpStatus.SERVICE_UNAVAILABLE, "circuit_open",
+                    "Upstream failure rate is too high; calls are rejected until it recovers"));
+        }
+
         // Lifecycle start: only requests that actually reach upstream open a
         // record (auth failures and cache hits emit no lifecycle row). The
         // credential is resolved once before any attempt — a retry reuses
@@ -478,6 +494,14 @@ public class ProxyController {
                     TokenBucket tokens = attempt.observedTokens.get() != null
                             ? attempt.observedTokens.get()
                             : mergeObservations(attempt.usageObserver);
+                    // #741: the single terminal point feeds the LLM breaker —
+                    // one outcome per gateway request (retried attempts are not
+                    // separately counted), client cancels skipped.
+                    if (!clientCancelled) {
+                        circuitBreaker.afterCall(ctx.productId(), ctx.binding().credentialId(),
+                                attempt.httpStatus.get(), attempt.upstreamError.get() != null,
+                                clock.millis() - startMillis);
+                    }
                     // #623: lifecycle events still need the id when the stream
                     // ended without the response-completion block (client
                     // cancels); the usage event path resolves it earlier.

@@ -15,7 +15,7 @@ import java.time.Clock;
 
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties({ProxyTargetProperties.class, ClientAddressProperties.class,
-        ContextLimitProperties.class})
+        ContextLimitProperties.class, LlmCircuitBreakerProperties.class})
 public class ProxyConfig {
 
     @Bean
