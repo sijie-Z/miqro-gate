@@ -39,10 +39,19 @@ import static org.mockito.Mockito.when;
 @DisplayName("RouteSnapshotRefreshListener")
 class SnapshotRefreshListenerTest {
 
+    /**
+     * Outer timeout is deliberately generous relative to the inner budgets. The
+     * awaits below total 5s + 5s (and the close test adds two more 5s verifies), so
+     * a 10s outer limit had <em>zero</em> headroom and flaked whenever the thread
+     * scheduler stalled — observed on a loaded windows-latest runner with the
+     * backend suite running in parallel. The inner awaits still bound how long the
+     * test can actually wait for a signal; this only stops a scheduling pause from
+     * being reported as a product failure.
+     */
     private static final String CHANNEL = "miqrokey_route_refresh";
 
     @Test
-    @Timeout(10)
+    @Timeout(30)
     @DisplayName("a notification on the channel triggers a snapshot refresh")
     void notificationTriggersRefresh() throws Exception {
         Harness h = new Harness();
@@ -59,7 +68,7 @@ class SnapshotRefreshListenerTest {
     }
 
     @Test
-    @Timeout(10)
+    @Timeout(30)
     @DisplayName("close stops the thread and closes the dedicated connection")
     void closeStopsListener() throws Exception {
         Harness h = new Harness();
@@ -76,7 +85,7 @@ class SnapshotRefreshListenerTest {
     }
 
     @Test
-    @Timeout(10)
+    @Timeout(30)
     @DisplayName("a failed connection is retried with backoff until it succeeds")
     void reconnectsAfterFailure() throws Exception {
         AtomicInteger attempts = new AtomicInteger();

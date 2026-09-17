@@ -3549,3 +3549,20 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - **部署与复验**：三修复全部合入 develop（**e6b5e4f6**）并部署演示站（三镜像，Flyway V61=#705 索引迁移，portal `index-BFuWMBpd.js`）；线上复验 **15/15 PASS**（分号/编码分号/写路径/匿名/billing 全拒，管理员与 context-registry 不误伤）——漏洞窗口关闭。
 - **其余登记（未修）**：#727 MCP SSE 响应无上限聚合 + 熔断桶无界；#728 事务内阻塞上游调用 + 定时刷新 self-invocation 丢事务；#729 usage_event 热查询缺复合索引（迁移号 V62）；#730 OIDC 登录不校验账号状态；#733 配置参考 9 项不一致（PUBLIC_BASE_URL 零读取/MAX_CONCURRENT_STREAMS 不存在等）；#734 Idempotency-Key/If-Match 契约零实现；#735 适配器 VERIFIED 门控未落地；#736 孤儿表/孤儿端点/ADR 头名/Settings 硬编码产品名。
 - **教训**：① 路径型安全判定必须与框架路由同语义（getRequestURI ≠ lookup path），且要覆盖 `;x`/编码分号/`//` 变体；② 过滤器注释写 "admin session" 不代替角色校验（本批两洞均属"注释与实现不一致"）；③ 新增/改动文件在最后一次编辑后必须重跑 `spotless:apply`（CI 两次因此红）；④ MockMvc 对 `%2D` 路由 404 而真容器映射成功——安全断言用 4xx 类，容器精确行为放真实 HTTP 探针测试；⑤ CI 基建：GitHub runner 到 Eclipse JDT formatter 下载源 09:52 起全网抖动，所有 Java job 在 spotless 阶段速挂（与代码无关），冷却重跑即可——新分支冷缓存时必现。
+
+## 2026-09-17 傍晚 — #738 修复 SnapshotRefreshListenerTest 零余量超时 flake
+
+**背景**：PR #720 的 `Backend unit (Java 21 / windows-latest)` 曾因 `closeStopsListener() timed out after 10 seconds` 失败，同一提交重跑即过。并行会话（部署线）读代码给出结构诊断，本会话据此修复。
+
+**根因：外层 @Timeout 与内层预算零余量**（该测试是纯 Mockito 单测，无容器/无 DB，排除环境依赖）：
+- 用例 1：`awaitListen`(5s) + `awaitRefresh`(5s) = 最坏**正好 10s**
+- 用例 2：`awaitListen`(5s) + `verify(timeout 5s)` ×2 = 最坏 **15s，已超上限**
+- 外层一律 `@Timeout(10)`
+
+即理论最坏情况已等于或超过上限，windows-latest 上与后端全套件并行时任何一次线程调度停顿都会顶穿。**既有 flake，与触发它的 PR 无关**（该 PR 只改 domain/persistence/control-plane，未碰 route-snapshot）。
+
+**修复**：三处 `@Timeout(10)` → `@Timeout(30)`，并补 javadoc 说明取舍——内层 await 仍界定实际等待上限，外层余量只为区分"调度停顿"与"产品缺陷"。不改任何断言语义。
+
+**验证**：`-Dtest=SnapshotRefreshListenerTest` 连跑 **5/5 全绿**（Tests run: 3, Failures: 0, Errors: 0）；spotless 通过。
+
+**备注**：交叉印证——并行会话在空闲机器上同样连跑 5 次全绿，与"负载相关调度 flake"的结构判断一致。
