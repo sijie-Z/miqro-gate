@@ -3660,7 +3660,7 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **幂等语义**：托管块（`# >>> miqro-onboard (managed) >>>`）只替换块内；内容无变化**不写盘、不产生备份**；改动前 `\<file\>.bak-\<UTC 时间戳\>`。`--dry-run` 只打印结果。
 
-**测试先于收工再获一例**：45 条断言、纯 sh、无网络（`verify` 用 PATH 假 curl 打桩）。开发中**测试抓到两个真 bug**：① 托管块追加路径不带标记 → 二次执行不幂等、键行翻倍；② `--dry-run` 参数没接线 → 照样写盘。两条都已修，且各留一条断言钉住（{{assert-by-name-not-substring 同族}}：收工前先证明它会红）。
+**测试先于收工再获一例**：45 条断言、纯 sh、无网络（`verify` 用 PATH 假 curl 打桩）。开发中**测试抓到两个真 bug**：① 托管块追加路径不带标记 → 二次执行不幂等、键行翻倍；② `--dry-run` 参数没接线 → 照样写盘。两条都已修，且各留一条断言钉住（同族先例 #754：收工前先证明它会红）。
 
 **边界**：CC Switch 深链维持控制台既有实现（不在本工具）；网络层劫持明确不做；`claude-settings` 合并依赖 jq，无 jq 时拒写并提示改用 `print` 粘贴。snippet 形态以控制台「使用密钥」面板为准（源头 `frontend/src/lib/ccswitch.ts`），双侧改动需同步。
 
