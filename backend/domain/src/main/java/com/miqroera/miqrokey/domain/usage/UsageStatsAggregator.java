@@ -275,7 +275,10 @@ public final class UsageStatsAggregator {
     }
 
     /**
-     * A per-row cost estimate plus whether every non-zero token type was priced.
+     * A per-row cost estimate plus whether the row is fully priced for display.
+     * Only the mandatory input/output pair gates the flag — a missing cache rate is
+     * valued at 0 by the aggregates too (real vendors commonly publish no separate
+     * cache-write tariff), so it must not flip every row to 未定价.
      */
     public record PricedCost(BigDecimal cost, boolean priced) {
     }
@@ -283,8 +286,8 @@ public final class UsageStatsAggregator {
     /**
      * Prices one usage row with the same table and math as the aggregates:
      * {@code tokens × unitPrice / 1e6} per token type, summed. {@code priced} is
-     * false when any non-zero token type has no snapshot — the caller shows 未定价
-     * rather than a misleading 0 (#758).
+     * false when a non-zero input/output count has no snapshot — the caller shows
+     * 未定价 rather than a misleading 0 (#758).
      */
     public static PricedCost pricedCost(Map<String, BigDecimal> prices, UUID productId, String modelId, Long input,
             Long output, Long cacheRead, Long cacheCreation) {
@@ -293,9 +296,7 @@ public final class UsageStatsAggregator {
         long read = orZero(cacheRead);
         long creation = orZero(cacheCreation);
         boolean priced = (in == 0 || hasPrice(prices, productId, modelId, PriceTokenType.INPUT))
-                && (out == 0 || hasPrice(prices, productId, modelId, PriceTokenType.OUTPUT))
-                && (read == 0 || hasPrice(prices, productId, modelId, PriceTokenType.CACHE_READ))
-                && (creation == 0 || hasPrice(prices, productId, modelId, PriceTokenType.CACHE_CREATION));
+                && (out == 0 || hasPrice(prices, productId, modelId, PriceTokenType.OUTPUT));
         if (!priced) {
             return new PricedCost(BigDecimal.ZERO, false);
         }
