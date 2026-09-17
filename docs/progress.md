@@ -3517,3 +3517,13 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - 前端空值类型不精确（后端未配 `default-property-inclusion`，运行时 `null` 而 codegen 出 `| undefined`）——仓库既有特征，非本轮引入。
 - 遗留建议（非缺陷）：透出 `usage_missing` 标记；`Phase.label` 中文文案是否移交前端。
 - 开发自审衍生的架构缺口（三类调用缺少单一事实源）另立 #719，不阻塞本批。
+
+## 会话交接点 2026-09-17（安全审计轮：#723/#724/#726 修复，已合并并部署）
+
+- **背景**：用户指令「独立审计代码/架构找漏洞」。两路并行审计（后端安全/健壮性；文档承诺 vs 代码实现），共立 11 个 issue（#726–#736），其中两个 P0 越权在演示站**真机验证后当日修复并上线**。
+- **#723 分号路径绕过管理员门禁（P0）**：7 处安全过滤器/拦截器用原始 `getRequestURI()` 判定路径，与 Spring 的去分号 lookup path 不一致——`/api/v1/admin;x/users`（普通 USER）实测 200 返回全量用户列表、`POST /api/v1/admin;x/teams` 实际落库。**修复（PR #725）**：新增 `RequestPaths.lookupPath()`（UrlPathHelper 语义 + 解码后再去分号 + 折叠重复斜杠），替换全部 7 处；评审轮另发现并关闭相邻洞——`/api/v1/admin%2Dapi/...` 编码前缀原可**整个跳过 open-surface 过滤器**（匿名碰巧 401、USER 会话可直达控制器），既有 `AdminApiKeyScopeIntegrationTest` 第 4 断言已按新语义强化（明文/编码 200、匿名 401），`AdminPathNormalizationIntegrationTest` 补 USER 会话用例；单测 6 + IT 6。
+- **#724 billing 会话越权（P0）**：`ApiKeyAuthFilter` 会话直通只查 `isAuthenticated()`（注释写的是 admin），普通用户实测可读全租户计费三端点。**修复（PR #731）**：会话直通收紧为 `SYSTEM_ADMIN`；已登录非管理员无消费方凭证 → 403；IT 9/9。
+- **#726 context-registry 阻塞 JDBC（中危）**：`/v1/context-registry` 在 Reactor event loop 同步跑 JDBC 且无超时。**修复（PR #732）**：复用 credential-decrypt scheduler + 10s 超时 → 503 `context_registry_unavailable`；IT 4/4。
+- **部署与复验**：三修复全部合入 develop（**e6b5e4f6**）并部署演示站（三镜像，Flyway V61=#705 索引迁移，portal `index-BFuWMBpd.js`）；线上复验 **15/15 PASS**（分号/编码分号/写路径/匿名/billing 全拒，管理员与 context-registry 不误伤）——漏洞窗口关闭。
+- **其余登记（未修）**：#727 MCP SSE 响应无上限聚合 + 熔断桶无界；#728 事务内阻塞上游调用 + 定时刷新 self-invocation 丢事务；#729 usage_event 热查询缺复合索引（迁移号 V62）；#730 OIDC 登录不校验账号状态；#733 配置参考 9 项不一致（PUBLIC_BASE_URL 零读取/MAX_CONCURRENT_STREAMS 不存在等）；#734 Idempotency-Key/If-Match 契约零实现；#735 适配器 VERIFIED 门控未落地；#736 孤儿表/孤儿端点/ADR 头名/Settings 硬编码产品名。
+- **教训**：① 路径型安全判定必须与框架路由同语义（getRequestURI ≠ lookup path），且要覆盖 `;x`/编码分号/`//` 变体；② 过滤器注释写 "admin session" 不代替角色校验（本批两洞均属"注释与实现不一致"）；③ 新增/改动文件在最后一次编辑后必须重跑 `spotless:apply`（CI 两次因此红）；④ MockMvc 对 `%2D` 路由 404 而真容器映射成功——安全断言用 4xx 类，容器精确行为放真实 HTTP 探针测试；⑤ CI 基建：GitHub runner 到 Eclipse JDT formatter 下载源 09:52 起全网抖动，所有 Java job 在 spotless 阶段速挂（与代码无关），冷却重跑即可——新分支冷缓存时必现。
