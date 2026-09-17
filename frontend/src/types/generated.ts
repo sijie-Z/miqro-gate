@@ -4083,6 +4083,19 @@ export interface components {
             requests?: components["schemas"]["Requests"];
             tokens?: components["schemas"]["Tokens"];
             cost?: components["schemas"]["Cost"];
+            outcomes?: components["schemas"]["Outcomes"];
+        };
+        Outcomes: {
+            /** Format: int64 */
+            succeeded?: number;
+            /** Format: int64 */
+            failed?: number;
+            /** Format: int64 */
+            cancelled?: number;
+            /** Format: int64 */
+            avgDurationMs?: number;
+            /** Format: int64 */
+            avgTtfbMs?: number;
         };
         Requests: {
             /** Format: int64 */
@@ -4154,6 +4167,13 @@ export interface components {
             /** Format: int64 */
             netCacheCreationInputTokens?: number;
             adjusted?: boolean;
+            providerProductName?: string;
+            /** Format: int64 */
+            ttfbMs?: number;
+            wireProtocol?: string;
+            requestStatus?: string;
+            cost?: number;
+            priced?: boolean;
         };
         GrantOption: {
             /** Format: uuid */

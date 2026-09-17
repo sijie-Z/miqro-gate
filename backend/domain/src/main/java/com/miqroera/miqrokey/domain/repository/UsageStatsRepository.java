@@ -39,7 +39,12 @@ public interface UsageStatsRepository {
          * keys). A user in several teams is counted in each team's total — team totals
          * are attribution views, not a partition.
          */
-        TEAM
+        TEAM,
+        /**
+         * Per-provider-product dimension (#758, label = product display name) — the
+         * "供应商统计" view: one row per product instance the tenant actually routed to.
+         */
+        PRODUCT
     }
 
     /**

@@ -188,12 +188,14 @@ const summaryColumns = [
 const recordsColumns = [
   { key: 'occurredAt', title: '时间', width: '180px' },
   { key: 'modelId', title: '模型', minWidth: '170px' },
+  { key: 'provider', title: '供应商', minWidth: '150px' },
   { key: 'virtualKey', title: '密钥', minWidth: '150px' },
   { key: 'cacheLevel', title: '级别', width: '100px' },
   { key: 'input', title: '输入', width: '90px', align: 'right' as const },
   { key: 'output', title: '输出', width: '90px', align: 'right' as const },
   { key: 'cacheRead', title: '缓存读', width: '110px', align: 'right' as const },
-  { key: 'latency', title: '延迟', width: '85px', align: 'right' as const },
+  { key: 'cost', title: '成本', width: '110px', align: 'right' as const },
+  { key: 'latency', title: '用时 / 首字', width: '140px', align: 'right' as const },
   { key: 'upstreamStatus', title: '上游状态', width: '95px', align: 'right' as const },
   { key: 'clientIp', title: '来源 IP', width: '140px' },
   { key: 'providerRequestId', title: '供应商请求 ID', minWidth: '210px' },
@@ -730,6 +732,9 @@ function formatTime(iso?: string): string {
           <template #modelId="{ row }">
             <span class="ui-mono">{{ asRecord(row).modelId }}</span>
           </template>
+          <template #provider="{ row }">
+            <span class="next-usage__provider">{{ asRecord(row).providerProductName || '—' }}</span>
+          </template>
           <template #virtualKey="{ row }">
             <span class="next-usage__keyname">{{ keyName(asRecord(row).virtualKeyId) }}</span>
           </template>
@@ -743,11 +748,23 @@ function formatTime(iso?: string): string {
           <template #cacheRead="{ row }">{{
             formatNumber(asRecord(row).cacheReadInputTokens)
           }}</template>
+          <template #cost="{ row }">
+            <span v-if="asRecord(row).priced !== false" class="ui-num"
+              >¥{{ formatCost(asRecord(row).cost) }}</span
+            >
+            <span v-else class="next-usage__unpriced">未定价</span>
+          </template>
           <template #latency="{ row }">
             {{
               asRecord(row).latencyMs === null || asRecord(row).latencyMs === undefined
                 ? '—'
                 : `${asRecord(row).latencyMs}ms`
+            }}
+            /
+            {{
+              asRecord(row).ttfbMs === null || asRecord(row).ttfbMs === undefined
+                ? '—'
+                : `${asRecord(row).ttfbMs}ms`
             }}
           </template>
           <template #upstreamStatus="{ row }">{{
@@ -1061,6 +1078,18 @@ function formatTime(iso?: string): string {
 .next-usage__keyname {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
+}
+
+.next-usage__provider {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.next-usage__unpriced {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-warning-fg);
 }
 
 .next-usage__custom-range {

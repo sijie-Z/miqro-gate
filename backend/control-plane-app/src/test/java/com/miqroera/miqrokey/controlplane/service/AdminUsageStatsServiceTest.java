@@ -137,7 +137,8 @@ class AdminUsageStatsServiceTest {
                 .thenReturn(List.of(price(PriceTokenType.INPUT, new BigDecimal("1.00")),
                         price(PriceTokenType.OUTPUT, new BigDecimal("2.00"))));
         when(usageStatsRepository.aggregateUsage(any(), any())).thenReturn(List.of(new UsageAggRow("g", "G", PRODUCT_ID,
-                MODEL, CacheLevel.UPSTREAM, 2, new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null))));
+                MODEL, CacheLevel.UPSTREAM, 2, new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null),
+                UsageAggRow.Outcome.NONE)));
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
 
         UsageSummary summary = service.summary(admin, "project", null, null, null, null, null, null, null, null, null,
@@ -302,7 +303,7 @@ class AdminUsageStatsServiceTest {
     private static AdjustedUsageRow unadjusted(UsageEvent e) {
         TokenBucket t = e.tokens();
         return new AdjustedUsageRow(e, t.inputTokens(), t.outputTokens(), t.cacheReadInputTokens(),
-                t.cacheCreationInputTokens(), false);
+                t.cacheCreationInputTokens(), false, null, null);
     }
 
 }

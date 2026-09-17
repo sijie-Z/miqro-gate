@@ -1,5 +1,6 @@
 /* eslint-disable */
 export const DICT: Record<string, string> = {
+  '供应商统计': 'Provider stats',
   "动作分布": "Action distribution",
   '+ 添加条件': '+ Add condition',
   '1000 条': '1,000 rows',
@@ -24,6 +25,20 @@ export const DICT: Record<string, string> = {
   'Docker Compose（单节点私有化）': 'Docker Compose (single-node private deployment)',
   '上次登录': 'Last sign-in',
   '可用虚拟密钥': 'Active Virtual Keys',
+  '平均延迟': 'Average latency',
+  '总请求数': 'Total requests',
+  '成功率': 'Success rate',
+  '新增输入': 'Fresh input',
+  '未定价': 'Unpriced',
+  '模型统计': 'Model stats',
+  '用时 / 首字': 'Duration / first byte',
+  '真实消耗 Tokens': 'Tokens consumed (actual)',
+  '缓存命中率': 'Cache hit rate',
+  '缓存创建': 'Cache write',
+  '缓存命中': 'Cache hits',
+  '缓存命中率（Token 口径）= 缓存读取 ÷（缓存读取 + 新增输入）': 'Cache hit rate (by tokens) = cache reads ÷ (cache reads + fresh input)',
+  '该模型尚无价目快照——在「定价」页录入单价后自动入账': 'No price snapshot for this model yet — it starts accruing once a unit price is saved on the Pricing page',
+  '请求日志': 'Request log',
   '账号状态': 'Account status',
   '当前会话': 'Current session',
   '当前会话到期': 'Current session expires',
@@ -32,6 +47,9 @@ export const DICT: Record<string, string> = {
     'This revokes every session of the current account on other devices (browsers); the current session stays valid and the other devices must sign in again.',
   '修改密码会同时撤销其他设备上的会话；当前会话保持有效。':
     'Changing the password also revokes sessions on other devices; the current session stays valid.',
+  '跳至': 'Go to',
+  '跳转': 'Go',
+  '转发': 'Forwarded',
   '退出其他会话': 'Sign out of other sessions',
   '退出其他会话失败，请稍后重试。': 'Failed to sign out other sessions. Please try again later.',
   '「退出其他会话」将撤销除当前浏览器外的全部登录会话；其他设备需要重新登录。':
