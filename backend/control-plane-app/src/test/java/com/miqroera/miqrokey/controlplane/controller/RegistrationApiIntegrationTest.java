@@ -119,8 +119,7 @@ class RegistrationApiIntegrationTest {
     @Test
     @DisplayName("registration status is public, reports the switch state and leaks nothing else")
     void registrationStatusIsPublic() throws Exception {
-        MvcResult r = mockMvc.perform(get("/api/v1/auth/registration-status")).andExpect(status().isOk())
-                .andReturn();
+        MvcResult r = mockMvc.perform(get("/api/v1/auth/registration-status")).andExpect(status().isOk()).andReturn();
         JsonNode body = objectMapper.readTree(r.getResponse().getContentAsByteArray());
         // Anonymous call: no session cookie was sent and the answer is not a 401.
         assertThat(r.getResponse().getStatus()).isEqualTo(200);
