@@ -19,7 +19,8 @@ public record McpResiliencePolicy(boolean retryEnabled, int retryMax, Set<RetryC
         boolean idempotencyConfirmed, boolean breakerEnabled, int breakerWindowSeconds, int breakerMinRequests,
         boolean breakerErrorEnabled, int breakerErrorRatio, Set<Integer> breakerErrorStatusCodes,
         boolean breakerSlowEnabled, int breakerSlowCallMs, int breakerSlowRatio, int breakerOpenSeconds,
-        int breakerProbeCount, int breakerProbeSuccess, boolean breakerSkipRetry, long version) {
+        int breakerProbeCount, int breakerProbeSuccess, boolean breakerSkipRetry,
+        long version) implements CircuitBreakerPolicy {
 
     public enum RetryCondition {
         SERVER_5XX, CONNECTION_FAILURE, TIMEOUT
