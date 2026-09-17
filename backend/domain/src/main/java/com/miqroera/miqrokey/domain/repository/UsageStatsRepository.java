@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.domain.repository;
 
-import com.miqroera.miqrokey.domain.usage.UsageEvent;
+import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator;
 import java.time.Instant;
 import java.util.List;
@@ -122,5 +122,5 @@ public interface UsageStatsRepository {
      * Raw usage-event rows for the filter, newest first, paged. Never exposes
      * prompt, code, or model content — only counts and metadata.
      */
-    List<UsageEvent> findRecords(UsageFilter filter, long offset, int limit);
+    List<AdjustedUsageRow> findRecords(UsageFilter filter, long offset, int limit);
 }

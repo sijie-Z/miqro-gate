@@ -3596,3 +3596,23 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **配额**：按 B′ 分层**零代码改动**——隔离本身就是"不动它"，未为配额花任何成本。
 
+## 2026-09-17 用量调整②：净额读取（#709 / F20）——调整开始影响上报数字
+
+**范围**：把已记入的调整接进财务/报告口径。明细与汇总各接一个**相关 LATERAL** 子查询取按事件合计的调整量；净额 = 归一化观察值 + delta，在 SQL 里算，明细与汇总**共用同一表达式**，避免两处算法漂移。
+
+**接口变化**：`UsageRecordView` 增 `netInputTokens` / `netOutputTokens` / `netCacheReadInputTokens` / `netCacheCreationInputTokens` + `adjusted`，与既有观察值字段**并存而非覆盖**。改既有字段的含义是 OpenAPI 破坏性检查**抓不到**的语义破坏（类型没变），客户端会静默拿到不同数字。明细与 /me 自助共用该 DTO，故两边同时生效。
+
+**两处设计取舍**：① **LATERAL 而非直连 `usage_adjustments`**——一个事件可挂多条调整，直连会把 `usage_event` 行乘开、把每个 SUM 算大；② `requests` 计数不动——调整修正的是某次调用的用量，不新增调用。
+
+**测试抓到的两个真 bug**：
+1. SQL 片段拼接——前一段不以换行结尾，粘出 `ue.tenant_idleft`，8 个集成测试报 500；
+2. **`SUM(bigint)` 在 PostgreSQL 返回 numeric**，`rs.getObject(col, Long.class)` 抛异常，被 `DataIntegrityViolationException` → 409 `RESOURCE_CONFLICT` 接住——**一个只读 GET 返回 409，且 detail 是"数据约束冲突"，看起来完全不像查询类型错误**。修法是 SQL 里 `CAST(... AS bigint)`。诊断 409 要看 body 的 `code` 而非状态码（详见记忆条目）。
+
+**回归护栏**：`usage_adjustments` 是空表，故既有 39 项用量/计费断言**原样通过**——本改动在有人记入调整之前**行为完全不变**。另补 2 个用例证明净额真的生效（调整后净额变、观察值不变；反向行把净额还原）。
+
+**验证**：全量 `clean verify -P integration` BUILD SUCCESS（11:03 min，0 失败）；OpenAPI 基线重生成（无破坏性变更）+ 前端 `gen:types`。
+
+**未做**：前端表格列——本地该工作树无 node_modules，跑不了 vitest；**改表格却不验证等于把风险推给 CI**，且调整目前只能经 API 录入，界面与汇总的不一致在当下无用户可碰到。留作后续小 PR。
+
+**配额**：按 B′ 仍**零代码改动**，只读观察值。
+

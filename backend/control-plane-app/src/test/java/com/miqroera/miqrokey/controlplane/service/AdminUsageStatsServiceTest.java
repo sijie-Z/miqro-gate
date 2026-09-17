@@ -8,6 +8,7 @@ import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.model.UserStatus;
 import com.miqroera.miqrokey.domain.repository.PriceSnapshotRepository;
 import com.miqroera.miqrokey.domain.repository.UsageStatsRepository;
+import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
 import com.miqroera.miqrokey.domain.usage.CacheLevel;
 import com.miqroera.miqrokey.domain.usage.PriceSnapshot;
 import com.miqroera.miqrokey.domain.usage.PriceTokenType;
@@ -177,7 +178,7 @@ class AdminUsageStatsServiceTest {
                 CREDENTIAL_ID, MODEL, CacheLevel.UPSTREAM, new TokenBucket(10L, 5L, 0L, 0L, null, null, null, null),
                 100L, 200, null, true, false, "gw-1", Instant.now(), "203.0.113.7", null);
         when(usageStatsRepository.countRecords(any())).thenReturn(1L);
-        when(usageStatsRepository.findRecords(any(), eq(0L), eq(50))).thenReturn(List.of(event));
+        when(usageStatsRepository.findRecords(any(), eq(0L), eq(50))).thenReturn(List.of(unadjusted(event)));
 
         UsageRecordPage page = service.records(admin, null, null, 1, 50, USER_ID, PROJECT_ID, KEY_ID, CREDENTIAL_ID,
                 SUBSCRIPTION_ID, PRODUCT_ID, MODEL, "203.0.113.7", TEAM_ID);
@@ -292,4 +293,16 @@ class AdminUsageStatsServiceTest {
         return new PriceSnapshot(UUID.randomUUID(), PRODUCT_ID, MODEL, type, "USD", unitPrice, Instant.now(), "TEST",
                 null, Instant.now());
     }
+
+    /**
+     * An unadjusted row — net equals observed, which is what makes the existing
+     * assertions in this class double as the "no adjustment, no change" regression
+     * guard for the net wiring (#709).
+     */
+    private static AdjustedUsageRow unadjusted(UsageEvent e) {
+        TokenBucket t = e.tokens();
+        return new AdjustedUsageRow(e, t.inputTokens(), t.outputTokens(), t.cacheReadInputTokens(),
+                t.cacheCreationInputTokens(), false);
+    }
+
 }

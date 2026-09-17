@@ -4119,6 +4119,15 @@ export interface components {
             /** Format: uuid */
             virtualKeyId?: string;
             clientIp?: string;
+            /** Format: int64 */
+            netInputTokens?: number;
+            /** Format: int64 */
+            netOutputTokens?: number;
+            /** Format: int64 */
+            netCacheReadInputTokens?: number;
+            /** Format: int64 */
+            netCacheCreationInputTokens?: number;
+            adjusted?: boolean;
         };
         GrantOption: {
             /** Format: uuid */
