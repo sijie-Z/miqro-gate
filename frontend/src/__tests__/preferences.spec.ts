@@ -168,10 +168,7 @@ describe('initPreferences', () => {
   });
 
   it('clamps the numeric preferences (lock minutes / sidebar width)', () => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ lockMinutes: 999, sidebarWidth: 42 }),
-    );
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ lockMinutes: 999, sidebarWidth: 42 }));
     initPreferences();
     expect(preferences.lockMinutes).toBe(240);
     expect(preferences.sidebarWidth).toBe(180);
@@ -257,6 +254,14 @@ describe('SettingsDrawer wiring', () => {
 
     expect(document.documentElement.dataset.menuTheme).toBe('light');
     expect(document.documentElement.dataset.compact).toBe('wide');
+
+    // #579: the collapse switch lives in the drawer too (the shell wires the
+    // same flag into the rail's icon-only mode).
+    const collapsed = findByTestId('settings-toggle-collapsed') as HTMLInputElement;
+    expect(collapsed.checked).toBe(false);
+    collapsed.checked = true;
+    collapsed.dispatchEvent(new Event('change'));
+    expect(preferences.collapsed).toBe(true);
 
     wrapper.unmount();
   });
