@@ -660,6 +660,21 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 - **当前范围**：读取路径（明细净额列、导出/审计标记、对账"含调整"维度）尚未接入，故调整目前可记录、可查看，但**不改变任何上报数字**；`amount_delta` 金额维度表结构已备但未开放写入。
 - 写 `USAGE_ADJUSTMENT_CREATED` / `USAGE_ADJUSTMENT_REVERSED` 审计（操作人填写的原因文本按 JSON 转义）。
 
+### 5.6c 用量价格基座回填（#710 / F21-A）
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/admin/usage-price-backfill?from&to` | 按各行**自己的 occurred_at** 的价目盖章；返回各结果计数 |
+
+- **动机**：成本原先按**查询时刻**的最新价目现算，所以改一次价目，历史报表金额跟着变。本端点把「这笔 token 当时依据什么价格计算」冻结到行上。
+- 取值：`price_snapshot` 中 `effective_from <= 该行 occurred_at` 的最新一行（同 `effective_from` 由 `id DESC` 做确定性 tie-break）。**不是按回填时刻**——否则会造出「看起来是历史快照、实际是延迟快照」的假象。
+- 返回 `{scanned, complete, partial, unavailable}`：`COMPLETE`=四维齐全、`PARTIAL`=部分维度有价、`UNAVAILABLE`=已评估但事件发生时无可查价格。
+- **`UNAVAILABLE` 的行价格列保持 NULL，不写 0**——「价格未知」与「免费」是不同的审计事实；静默写 0 会低估历史支出。
+- **幂等**：只处理 `price_status IS NULL`（尚未评估）的行；已定状态的行（含 `UNAVAILABLE`）**永不重评**——重跑不能改写已作出的决定。窗口 ≤ 93 天，大范围可分次覆盖。
+- 写 `USAGE_PRICE_BACKFILL` 审计（含四项计数）。
+- 错误码：`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400）。
+- **当前范围**：本端点只**建立**价格基座。成本读取改走该基座是后续增量——在此之前历史成本仍按旧逻辑计算，因此**本端点单独上线不改变任何上报数字**。
+
 ### 5.7 Webhook 端点（G4.5）
 
 | 方法与路径 | 用途 |

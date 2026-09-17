@@ -224,6 +224,12 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
   - `claimed_project_id uuid`（Agent **声明**的项目——未经授权校验，仅审计，与裁决列分开）
   - `resolution_status varchar(32)`（服务端裁决：`RESOLVED_HEADER|RESOLVED_SUFFIX|SOLE_BINDING|POLICY_ROUTED|UNATTRIBUTED|AMBIGUOUS`）
   - `claim_source varchar(32)`（`prompt_url|tool_path|bash_cwd|system_cwd|git_remote|suffix|none`，白名单外丢弃）、`claim_confidence varchar(16)`（`HIGH|MEDIUM|LOW|NONE`，白名单外丢弃）
+- **价格基座列（V64，#710 / F21-A）**，全部可空：
+  - `price_input` / `price_output` / `price_cache_read` / `price_cache_creation numeric(24,10)`——**该事件发生时实际生效的单价**（每百万 token，与 `price_snapshot.unit_price` 同量纲）
+  - `price_currency varchar(3)`、`price_effective_from timestamptz`（所采用价目行的生效时刻，**不是**事件时刻）、`price_source varchar(32)`（`MANUAL|OFFICIAL|ESTIMATED`）
+  - `price_status varchar(16)`：`NULL`=尚未评估 ｜ `COMPLETE`=四维齐全 ｜ `PARTIAL`=部分维度有价 ｜ `UNAVAILABLE`=已评估但事件发生时无可查价格
+  - **`UNAVAILABLE` 不等于单价 0**：查不到价格时价格列保持 NULL。"价格未知"与"免费"是不同的审计事实，静默写 0 会低估历史支出
+  - 取值口径：`price_snapshot` 中 `effective_from <= 本行 occurred_at` 的最新一行（同 `effective_from` 由 `id DESC` 做确定性 tie-break）；回填按 `occurred_at`，**不是按回填时刻**。动机：成本原先是查询时按**当前**价目现算的，所以改一次价目，历史报表金额跟着变
 - `occurred_at`、`created_at`
 
 部分唯一索引 `(tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL`；`virtual_key_id`、`project_id`、`cache_level`、`occurred_at` 索引。正文（prompt、代码、工具、回答）永不写入。
@@ -290,7 +296,14 @@ CAA 逐请求上下文证据审计（append-only）：`id`、`tenant_id`、`requ
 
 主键含分区键：`primary key (started_at, id)`；幂等键唯一 `(started_at, gateway_request_id)`。常用索引：`(tenant_id, started_at desc)`、`(virtual_key_id, started_at desc)` 等。
 
-**延后列（后续 Goal）**：`team_id`、`subscription_id`、相关名称/指纹快照、`error_category`、每类 token authority、`provider_usage_json jsonb`、`price_catalog_version`、`price_snapshot_json`、成本列、`plan_window_ref`、`usage_integrity`。
+**延后列（后续 Goal）**：`team_id`、`subscription_id`、相关名称/指纹快照、`error_category`、每类 token authority、`provider_usage_json jsonb`、成本列、`plan_window_ref`、`usage_integrity`。
+
+> **2026-09-18 收敛（#710 评审）**：原清单混了三类性质不同的东西，本轮**只落逐事件价格快照**（见上方 V64 价格基座列）。
+> - **已落**：价格快照——但**不引入** `price_catalog_version` / `price_snapshot_json`：现无「版本化价目目录」实体，凭空加版本号是假装它存在；改为存**实际采用的单价**（4 个数值列 + 元数据），SQL 可直接 `token × unit_price`，无需 JSON 抽取
+> - **不加**：成本列——与 #709 调整层冲突，最终模型是 `raw tokens` + `immutable price snapshot` + `adjustments` → **historical cost = derived**
+> - **不加**：`error_category`——可由 `upstream_status_code` + `usage_missing` 派生；物化后口径一变历史列整体失真
+> - **延后**：`team_id` / `subscription_id` / `plan_window_ref` / 名称快照——网关写入时**拿不到**这些值（在控制面 Key/凭证/订阅后面），且"先加列再回填"会把**延迟归属**伪装成**冻结归属**（9/1 的事件在 9/20 回填出 9/20 的团队）。前置是先定义「事件时刻归属」语义
+> - **单独合规立项**：`provider_usage_json`——现状是**刻意不保留**上游 usage 原文，存它=改既定的数据保留边界
 
 正文、完整 Header 和 Secret 不得存在（G2.4 起写入路径不含任何正文内容）。
 
