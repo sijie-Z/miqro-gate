@@ -41,6 +41,7 @@ const typeOptions = [
   { value: 'MODEL_APPROVAL_REJECTED', label: '模型审批 · 驳回' },
   { value: 'ADMIN_API_KEY_EXPIRING', label: '管理密钥 · 即将到期' },
   { value: 'CONSUMER_KEY_EXPIRING', label: '消费者密钥 · 即将到期' },
+  { value: 'USAGE_QUEUE_SATURATION', label: '队列饱和' },
 ];
 
 const creating = ref(false);
@@ -67,6 +68,8 @@ const confirmState = ref<{
 const isBudgetType = computed(() => form.value.type === 'BUDGET_THRESHOLD');
 const isQuotaType = computed(() => form.value.type === 'QUOTA_THRESHOLD');
 const isWatermarkType = computed(() => isBudgetType.value || isQuotaType.value);
+/** F07 (#245): the metric is a COUNT of lost usage events, not a ratio. */
+const isQueueSaturationType = computed(() => form.value.type === 'USAGE_QUEUE_SATURATION');
 /** Event-driven rule types (F03): fired by the workflow itself, no threshold. */
 const isApprovalType = computed(
   () =>
@@ -318,8 +321,14 @@ onMounted(() => {
             <div class="next-alert-rules__row">
               <UiInput
                 v-model="form.threshold"
-                :label="isWatermarkType ? '阈值（水位 %）' : '阈值'"
-                placeholder="例如 0.5"
+                :label="
+                  isWatermarkType
+                    ? '阈值（水位 %）'
+                    : isQueueSaturationType
+                      ? '阈值（丢弃条数）'
+                      : '阈值'
+                "
+                :placeholder="isQueueSaturationType ? '例如 1' : '例如 0.5'"
                 data-testid="rule-create-threshold"
               />
               <UiInput
@@ -329,6 +338,13 @@ onMounted(() => {
                 data-testid="rule-create-dedupe"
               />
             </div>
+            <p
+              v-if="isQueueSaturationType"
+              class="next-alert-rules__approval-hint"
+              data-testid="rule-saturation-hint"
+            >
+              网关用量队列写满时丢弃的事件条数（近 1 小时），非比例；网关侧为零丢弃时不写任何数据。
+            </p>
           </template>
           <p v-else class="next-alert-rules__approval-hint" data-testid="rule-approval-hint">
             事件型规则：模型审批发生时立即通知（无阈值/去重窗口）。

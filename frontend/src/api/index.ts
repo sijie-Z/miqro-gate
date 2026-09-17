@@ -74,6 +74,7 @@ import type {
   McpServiceAccessView,
   McpServiceVerifyView,
   RetentionConfigView,
+  RegistrationStatusResponse,
 } from '@/types/generated-api';
 import type { components } from '@/types/generated';
 
@@ -93,6 +94,15 @@ type CreateVirtualKeyRequest = components['schemas']['CreateVirtualKeyRequest'];
 export interface OAuthProviderInfo {
   code: string;
   name: string;
+}
+
+/** #550: public read-only self-registration switch state, read before the
+ *  login page renders its register entry (single boolean, no session needed).
+ *  Aliases the generated schema rather than a handwritten duplicate, so the
+ *  contract cannot drift; `enabled` stays optional (springdoc omits `required`
+ *  for response records), hence callers compare against `false`. */
+export function registrationStatus(): Promise<RegistrationStatusResponse> {
+  return get<RegistrationStatusResponse>('/api/v1/auth/registration-status');
 }
 
 export function publicOauthProviders(): Promise<OAuthProviderInfo[]> {

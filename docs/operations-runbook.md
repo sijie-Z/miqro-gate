@@ -118,6 +118,16 @@
 
 检查数据库延迟、锁、连接池和磁盘。先恢复写入能力，不无限扩大内存。队列满导致的请求失败/背压必须告警并统计；根据本地 request ID 和供应商明细补偿，不允许静默丢记录。
 
+**告警规则**（F07/#245）：在默认（seed）租户下建 `USAGE_QUEUE_SATURATION` 规则，阈值 = 近 1 小时可接受的丢弃条数——填 `1` 表示「丢 1 条即告警」，不要按比例理解。网关每个 flush 周期（`MIQROKEY_GATEWAY_QUEUE_FLUSH_INTERVAL`，默认 1s）把新增丢弃数写一行 `gateway_queue_signal`；零丢弃的网关不写任何行，规则安静。该事实是**平台级**的（队列全进程唯一），只有 seed 租户的规则能评估到；其他租户的规则读到的是空窗口（`SUM = 0`），在正阈值下恒不触发、也看不到任何别的租户的数字。阈值填 `0` 或负数会让这类规则每个去重窗口都以 `value = 0` 触发一次（服务端不校验，属误配），排查时先看规则的 `threshold`。
+
+**定位与补偿**：
+
+1. 查事实行：`SELECT occurred_at, dropped, queued_high_water, capacity, saturation_mode FROM gateway_queue_signal WHERE tenant_id = '<seed 租户 id>' AND occurred_at >= now() - interval '1 hour' ORDER BY occurred_at DESC;`——`queued_high_water` 是**进程生命周期内**的单调高水位（只在丢弃发生的那一刻采样，不随窗口重置），因此要按进程启动以来的**最大值**解读：贴近 `capacity` 说明该进程确实打满过队列，远低于容量则优先怀疑写端停顿（数据库锁/慢查询/连接池耗尽）；同一进程后续行的该值不会回落，不要拿相邻两行的差值当「本窗口峰值」。
+2. 查事件本身的丢失范围：同一时间窗内 `usage_event` 是否断档；`saturation_mode = WRITE_THROUGH` 的行对应「应急直写也失败」的兜底丢弃，通常同时伴随数据库不可用。
+3. 定位写入端：网关日志中 `Queue saturation signal write failed` / `... could not be scheduled` 表示事实行本身也没写进去（delta 会保留并下轮重试，不丢），结合 `UsageEventBus` 指标（`totalDropped`/`queuedCount`/`flushCount`）确认。
+4. 补偿：按运行窗口内本地 request ID + 供应商明细补录，不覆盖原始事实（追加 adjustment），不允许静默丢记录。
+5. 恢复后确认新事实行归零、规则不再触发；若容量确实不足，先评估 `MIQROKEY_GATEWAY_QUEUE_CAPACITY` 与 flush 周期的关系，再决定是否调整，不要无限扩大内存。
+
 ### 本地与官方账单不一致
 
 按供应商 request ID 匹配，再检查时区、计费周期、模型别名、cache token、失败请求收费、价格版本和供应商延迟。导出本地原始 JSONL/CSV 与官方文件，保留 manifest 和 SHA-256。差异修正使用追加 adjustment，不覆盖原始事实。

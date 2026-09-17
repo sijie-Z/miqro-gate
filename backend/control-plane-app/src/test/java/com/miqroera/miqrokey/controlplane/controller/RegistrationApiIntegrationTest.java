@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
@@ -113,6 +114,17 @@ class RegistrationApiIntegrationTest {
     void registerIsPublic() throws Exception {
         mockMvc.perform(post("/api/v1/auth/register").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"username\":\"solo\",\"password\":\"StrongPass2026!\"}")).andExpect(status().isCreated());
+    }
+
+    @Test
+    @DisplayName("registration status is public, reports the switch state and leaks nothing else")
+    void registrationStatusIsPublic() throws Exception {
+        MvcResult r = mockMvc.perform(get("/api/v1/auth/registration-status")).andExpect(status().isOk()).andReturn();
+        JsonNode body = objectMapper.readTree(r.getResponse().getContentAsByteArray());
+        // Anonymous call: no session cookie was sent and the answer is not a 401.
+        assertThat(r.getResponse().getStatus()).isEqualTo(200);
+        assertThat(body.size()).isEqualTo(1);
+        assertThat(body.path("enabled").asBoolean()).isTrue();
     }
 
     private void resetDb() {

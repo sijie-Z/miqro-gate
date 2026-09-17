@@ -2,6 +2,158 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-16（自助注册关闭态前置体现 #550）
+
+- **#550（PR 待开，分支 `fix/registration-disabled-gating`，基于 50a9b24）**：部署关闭自助注册时，
+  登录页仍展示可提交的注册入口，用户填完表单才吃 403。新增公开只读端点
+  `GET /api/v1/auth/registration-status`（匿名，仅回一个布尔 `{enabled}`；加入
+  `SessionFilter.PUBLIC_PATHS` 精确匹配白名单；CSRF 拦截器虽覆盖 `/api/**` 全方法，但对非状态变更
+  方法直接短路，GET 无需 token）——判定与 `/register`
+  的 403 分支**同源**（`AuthProperties.registrationEnabled`，`@ConfigurationProperties` 启动期绑定、
+  无 `@RefreshScope`）。前端登录页 `onMounted` 预取该状态；关闭态下注册入口**保留可见**（承载说明
+  文案）但不可点/不可提交（`disabled` + `aria-disabled` + `request-access--off` 样式），探测失败一律
+  fail-open 维持原行为。该端点只是 UX 前置提示，**不是鉴权点**：服务端 403 仍是唯一闸门，且端点只
+  暴露一个布尔，不泄漏部署配置其他信息。
+- 验证（真实命令与结果）：
+  - 后端 `-f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=RegistrationApiIntegrationTest,RegistrationDisabledApiIntegrationTest
+    -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`，
+    `BUILD SUCCESS`（Testcontainers PostgreSQL）。
+  - 前端 `npm ci`（added 395 packages, 0 vulnerabilities）、`npm run test` → 59 files / 331 tests 全绿、
+    `npm run typecheck` / `npm run lint`（0 error、1 条既有 `NewShell.vue` 警告）/ `npm run build` 全部 exit 0。
+  - OpenAPI 基线重生成（`OpenApiSpecIntegrationTest` → `docs/openapi/openapi-3.1.json`，与旧基线比
+    纯新增两段：schema `RegistrationStatusResponse` + path `/api/v1/auth/registration-status`），
+    前端类型 `npm run gen:types` 同步重生成（`src/types/generated.ts` 纯新增 39 行，二次运行幂等）。
+- 反空跑：把前端新用例的 mock 临时改成 `{ enabled: true }`，该用例即 FAIL
+  （`expected undefined to be defined`），证明断言非空跑。
+
+### 收尾轮 2（2026-09-16 晚）：对抗评审修复 + 复验
+
+- 评审后修复 4 项（均已落盘）：
+  1. 审计面误述：`docs/api-contract.md` 曾把本端点与 `/register` 类比，但本端点是纯只读查询、
+     **不写审计事件**，只有成功注册才写 `REGISTER` → 已改为显式声明「不写审计」并注明两者不等价。
+  2. CSRF 机制描述不准：`SecurityConfig#addInterceptors` 确实把 `csrfInterceptor` 注册在 `/api/**`
+     **全方法**上；GET 免 token 的原因是 `CsrfInterceptor#preHandle` 对非状态变更方法直接短路，
+     而不是「GET 不在拦截范围内」。`api-contract.md` 与本文档已按真实机制改写，且确认**无需**把
+     本端点加入 `CSRF_EXEMPT`。
+  3. 前端类型重复定义：手写 `RegistrationStatus` 与生成 schema 重复，且把 `enabled` 声明为必填
+     （schema 中为可选）→ 改为 `generated-api.ts` 里的别名 `RegistrationStatusResponse`，
+     调用方统一按 `=== false` 判定。
+  4. 探测串行化：原实现先 `await` 状态探测再请求 OAuth 供应商，状态端点卡住（HTTP 客户端 60s 超时）
+     会连带延迟 OAuth 登录按钮 → 改为两个探测各自 `.then/.catch` 独立回填状态，互不阻塞。
+- 新增前端用例 2 条（`NextLoginView.spec.ts`）：状态探测 reject / 字段缺失时 fail-open（入口仍可用、
+  表单仍可达）；状态探测悬挂时 OAuth 按钮仍渲染。反空跑依据：两条新旧用例互为反例——关闭态要求
+  `disabled` **存在**、失败态要求**不存在**，二者同时通过即证明闸门由探测值驱动，而非恒真/恒假断言。
+- 复验（2026-09-16，真实命令与结果）：
+  - 后端 `-f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=RegistrationApiIntegrationTest,RegistrationDisabledApiIntegrationTest
+    -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`、
+    `BUILD SUCCESS`（Windows 需 `mvnw.cmd` 且 `JAVA_HOME` 指向 Temurin 21）。
+  - 前端 `npm run typecheck` exit 0；`npm run test` → 59 files / **333** tests 全绿（较上轮 +2，即上述新增用例）。
+  - 改动文件 `npx eslint <4 个文件>`（**不带 `--fix`**，避免误改工作区）exit 0。
+  - CI 的 `gen:types` 漂移门禁本地预演：`npx openapi-typescript ../docs/openapi/openapi-3.1.json -o <临时文件>`
+    与 `git show HEAD:frontend/src/types/generated.ts` **逐字节一致**（忽略行尾），故该门禁不会因本分支失败。
+  - 端到端 `npx playwright test --grep "new login page"` → `2 passed (42.5s)`、exit 0；
+    新增用例 `new login page closes the register entry when self-registration is off (#550)`
+    通过路由拦截返回 `{"enabled":false}`，断言注册入口 `disabled` 且注册表单两个字段均不渲染。
+    日志里可见 `/api/v1/auth/registration-status`、`/api/v1/auth/oauth/providers` 代理到 8080 失败
+    （本机未起后端），页面按 fail-open 回退，原有用例仍绿——即真实浏览器下探测失败不破坏登录页。
+
+### 并入 develop 新基线（2026-09-16）：merge `adfb670`（#695 / #684 配额软着陆）
+
+- 背景与手法：develop 于本日推进到 `adfb670`，本分支（原基于 `50a9b24`）与基线冲突。用
+  `git merge origin/develop`（**产生合并提交，非 rebase**）把基线并入，本分支改动全部保留。
+- 冲突清单与解法（冲突文件共 **1** 个）：
+  - `docs/openapi/openapi-3.1.json`——两侧改动语义不相交：本分支新增 schema
+    `RegistrationStatusResponse` + path `/api/v1/auth/registration-status`；develop 在既有 schema
+    `UpsertQuotaRuleRequest`、`QuotaRuleView` 上新增 `action` 属性。解法：**以 develop 版为底**，
+    把本分支两段按各自前驱键原位插入（`/api/v1/billing/quota` 之后、`SubscriptionQuotaView` 之后）。
+    注意 springdoc 输出含 `"maximum":100.00` 这类字面量，JS `JSON.parse`→`JSON.stringify` 往返会丢成
+    `100`，故采用 JSON 感知的**文本级**插入，不做往返序列化。合并结果自检：与 develop 版逐成员比对，
+    差异恰为本分支 2 段新增；与本分支版比对，差异恰为 develop 的 2 处 `action`；paths 172 / schemas 137；
+    `100.00` 原样保留；无冲突标记。
+  - 其余重叠文件（`docs/api-contract.md`、`docs/progress.md`、`frontend/src/types/generated.ts`）由 git
+    自动合并；`docs/progress.md` 两侧为不同区域追加，互不覆盖。
+- 合并后派生物一致性：`npx openapi-typescript ../docs/openapi/openapi-3.1.json -o <临时文件>` 与合并后的
+  `frontend/src/types/generated.ts` **逐字节一致**（忽略行尾），即生成物确为合并后契约的忠实渲染，
+  CI 的 `gen:types` 漂移门禁不会因此失败。
+- 复验（2026-09-16，真实命令与结果）：
+  - 后端 `-f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=RegistrationApiIntegrationTest,RegistrationDisabledApiIntegrationTest
+    -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`
+    （`RegistrationApiIntegrationTest` 4 + `RegistrationDisabledApiIntegrationTest` 2）、`BUILD SUCCESS`。
+  - 前端 `npm run typecheck` exit 0；`npm run test` → 59 files / **334** tests 全绿
+    （较上轮 +1，来自 develop 并入的 `NextQuotaRulesView.spec.ts` 新增用例）。
+
+## 会话交接点 2026-09-16（网关请求前置预检 #553）
+
+- **#553 已实现并验证**（分支 `feat/gateway-context-limit-precheck`，自 develop `50a9b24`）；
+  提交 `4582d19`（feat）、`e87a46b`（test）、本批文档提交。语义：鉴权 → 模型授权 → **体量预检**
+  → 缓存 → 上游；超限返回 413 `context_limit_exceeded`，**不连接上游**、不进缓存、不记用量。
+- 度量：对**已缓冲的原始字节**按 UTF-8 码点计数（零分配、单遍、不解析、不重排、不重序列化），
+  合法 UTF-8 下整个序列化 body（含 JSON 结构、工具 schema、base64）都计入，是该 body 的
+  **字符上界**（字符数 ≠ token 数）。**非法 UTF-8（严格校验不通过：孤立续字节、截断、
+  超长编码 C0/C1 与 E0 80、代理项 ED A0、超出 U+10FFFF 的 F4 90/F5…FF）整段回退为字节长度**，
+  字符数不会超过字节数，故计数**整体不低估**——不会低于任何宽松解码器解出的字符数。
+  这类 body 本身不是合法 JSON，且仍受 256KB 缓冲上限约束。该口径由 1–2 字节全穷举
+  （65792 个 body）＋定种子模糊测试（5000 个随机 body）与
+  `250000 × 0x80 字节在默认阈值下必须被拒` 一条边界测试固定。
+- 配置（全局）：`miqrokey.gateway.context-limit.enabled`（默认 true）/
+  `.threshold-chars`（默认 200000，非正值回落默认）；对应环境变量
+  `MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED` / `..._THRESHOLD_CHARS`。**逐 Key 阈值为后续项**
+  （issue 文本为「逐 Key 或全局可调」，本版本取全局）。MCP 数据面两条路径本版本不适用该预检，
+  仍只有既有缓冲上限（`payload_too_large`），已在 `docs/api-contract.md` §7.1 显式记录。
+- 观测：零标签计数器 `miqrokey_gateway_context_limit_rejected_total`；拒绝日志仅含
+  requestId / path / 测量字符数 / 阈值，不含正文。
+- **真实验证（`backend/gateway-app`）**（评审答复轮后重跑；含本轮新增 3 条测试：
+  MCP 大 body 原样直通、413 不写生命周期行、默认阈值下非法 UTF-8 必拒）：
+  1. `.\mvnw.cmd -B -f backend -pl gateway-app -am spotless:check` → BUILD SUCCESS，
+     `Spotless.Java is keeping 105 files clean - 0 needs changes to be clean`。
+  2. `.\mvnw.cmd -B -f backend -pl gateway-app -am test` → BUILD SUCCESS，
+     `Tests run: 348, Failures: 0, Errors: 0, Skipped: 0`，02:36
+     （`ContextLimitPrecheckTest` 10、`ContextLimitGuardTest` 16 = Characters 6 / Threshold 4 /
+     SwitchAndMetric 4 / Defaults 2、`ContextLimitDisabledTest` 3）。
+  3. `.\mvnw.cmd -B -f backend -pl gateway-app -am -Pintegration test -Dtest=ContextLimit*Test,*ProxyContractTest,VirtualKeyAuthContractTest,ContextRegistryIntegrationTest,UsageLifecycleIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false`
+     → BUILD SUCCESS，`Tests run: 184, Failures: 0, Errors: 0, Skipped: 0`，01:23
+     （Testcontainers PostgreSQL 17.6 正常启动；`UsageLifecycleIntegrationTest` 7 含新增
+     「413 不触上游、不写生命周期行」；`McpProxyContractTest$FailureSemantics` 9 含新增
+     「200001 字符 MCP 报文原样转发」；`ContextRegistryIntegrationTest` 4/4）。
+- 五类覆盖对照：① 超限 413 且 mock 上游零请求（三条路径 `/v1/messages`、`/v1/chat/completions`、
+  `/v1/responses`；Anthropic 路径并断言错误信封顶层 `"type":"error"`）② 正常/临界请求字节不变转发
+  ③ 开关关闭行为如旧（`ContextLimitDisabledTest` 3/3）
+  ④ 边界值（`chars <= limit` 放行、+1 拒绝；另含默认阈值 200000 放行 / 200001 拒绝）
+  ⑤ 码点计数单测（ASCII/多字节/emoji/空/非法 UTF-8 回退字节数/永不低估性质测试）；拒绝日志
+  单测断言只含 sizes、不含正文哨兵；⑥ 413 **不触上游且不写生命周期行**（Testcontainers 实测
+  `request_usage_records`：同上下文先有一行成功记录作对照，413 后按标记时间窗内新增 0 行）；
+  ⑦ MCP 数据面 200001 字符报文原样转发（预检只作用于 LLM 数据面）。
+- 行为收紧如实记录：启用后 **200001–262144 字符**（仍在上限 256KB 内）的请求由「缓冲上限放行」
+  变为 `413`——刻意收紧，会同时挡掉同尺寸但上游本可接受的合法请求；已写入
+  `docs/api-contract.md` §7.1、`docs/configuration-reference.md` §5、`docs/security.md`。
+  另记：合规留存旁路（ADR-0014，默认关闭）在预检**之前**捕获 body，故开启留存时被 413 的请求
+  仍可能已按留存策略入库（预检自身不写持久化）；已在 api-contract §7.1 记录。
+- F15 边界如实记录：issue 文本提到「命中记 F15 日志与审计元数据」，本版本以 1 条 WARN
+  （requestId/path/字符数/阈值）+ 零标签计数器替代，**不新增审计元数据记录**——本仓库 F15 为
+  MCP 专用 `mcp_access_log`（V29），LLM 数据面无同等设施，且「不保存正文」红线限制可落库字段。
+  如需「可查询的拒绝审计」，另立后续项，不在本 PR 范围内。
+- 注意：`-pl gateway-app` 不带 `-am` 会从共享 `~/.m2` 取到别条线的旧 `test-support`，
+  导致 surefire「failed to discover tests」；统一加 `-am`。`-Pintegration` 下忽略空 `-Dtest`
+  匹配的属性名是 `-Dsurefire.failIfNoSpecifiedTests=false`。
+
+### 2026-09-16 收尾轮（#553 收口：N1 修复 + 并入新基线）
+
+- 并入 develop 新基线：`git merge origin/develop`（`adfb670`，#695 配额软着陆）→ 合并提交
+  `b8bd715`；无冲突（本分支只改 ContextLimit* 与文档，与配额改动不重叠）。Flyway `V59`
+  归 develop 的配额软着陆，**本分支不新增 migration**。
+- N1 修复提交 `dc6f91e`（`fix(gateway): count malformed UTF-8 bodies as bytes (#553)`）：
+  非法 UTF-8 整段回退字节长度，消除「全续字节 body 计 0 字符」的 fail-open。
+- 验证（合并后真实输出）：`./mvnw -B -f backend -pl gateway-app -am test -Dtest=ContextLimitGuardTest,ContextLimitPrecheckTest,ContextLimitDisabledTest -Dsurefire.failIfNoSpecifiedTests=false`
+  → `Tests run: 29, Failures: 0, Errors: 0, Skipped: 0`（Guard 16 / Precheck 10 / Disabled 3），
+  BUILD SUCCESS，总耗时 37.0 s。
+- 独立 delta 评审（新上下文，只审 `ea3d5cd..dc6f91e` 增量）：**0 BLOCKER，Consensus: APPROVE**；
+  `ProxyController.java` 在该提交内仅 javadoc 与折行（`git diff -w` 只剩注释与参数折行），无逻辑变化。
+  残留编辑性意见：astral 字符按码点计 1、按 UTF-16 码元计 2 属既有口径（文档统一按码点表述），
+  记为后续可选跟进，不阻塞。
+
 ## Current State
 
 - Project phase: `PHASE_1`
@@ -3248,3 +3400,120 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - 未动 e2e 与金样；`frontend/dist/` 已被 `.gitignore` 覆盖，构建没有脏化工作区。
 - `frontend/package.json` 的 `lint` 脚本写死 `eslint . --ext .vue,.ts,.tsx --fix`，所以每跑一次都会改写一批与本 issue 无关的文件（含 `types/generated.ts` 的整文件 prettier 重排）——两轮各发生一次，均按路径逐个 `git checkout --` 还原，本批提交 `git show --stat` 只含本批文件。这是仓库既有状态，不是本批引入；收口验证因此不再跑 `npm run lint`，改为按上一节的方式对提交内容取信号（`git show HEAD:<file> | npx eslint --stdin`），既不改写工作区，也不受工作区 EOL 影响。
 
+## 2026-09-16 晚 — #629 设计稿口径归位（docs-only：头名与列名对齐 v1.1 已交付契约）
+
+**背景**：#629 的定性是**设计稿未跟随 v1.1 评审修订**（不是实现漂移）。`docs/activity-context-design.md`（设计稿 v0.1）停在评审前口径——头名 `X-Miqro-Tag`、用量列 `attribution_source`——而实现侧（V54/V55 迁移 + RequestContextResolver）早已按 Spec v1.1 的 R3/R5 落地 `X-Miqro-Project-Id` 与 `resolution_status`/`claimed_*`。设计稿与实现级 Spec 长期并存而 `document-map.md` 对两者**零引用**（本轮已补索引），是该分歧得以存活的土壤。处置取「改文档齐实现」：**零迁移 / 零代码 / 零前端**。
+
+**交付**（分支 docs/activity-context-design-realigned-629，隔离工作树，base（fork 点）develop@50a9b245，收口轮合入 develop@adfb670（合并 `d15b2d5`））——**本段与「验证」段引用的 `:NNN` 为交付时点 `6db7f33` 的行号，「修复轮」各条为修复后的 HEAD 行号；两套基准不同，同一编号可能指向不同内容（如 `:79`：交付时点为门控注记、HEAD 为值域行）**：
+- `docs/activity-context-design.md`：`:4` 状态改 **历史件 / historical** 并链到实现级 Spec；`:46-48` Usage Event 字段表 `attribution_source` → `claimed_project_id`/`resolution_status`/`claim_source`/`claim_confidence`；`:72` 头名 → `X-Miqro-Project-Id: <project-uuid>`（值域为 project UUID，非法值 400 fail-closed，依据 R3/P1）；`:77` 列名与值域对齐 **V54 迁移注释**，声明（未验证输入）与裁定（计费依据）分列（R5/P1），`session_id` 注明纯观测/可空/不参与路由授权；`:106`/`:147`/`:164` 同步改名，迁移注记扩为 **V54 + V55**；`:156` Q3 行改为裁定/声明记录口径。
+- **原「头名敏感词门控」论证降为 `:79` 注记并保留**：适用范围仅限客户端从 settings/env 读取的 `ANTHROPIC_CUSTOM_HEADERS`（静态头降级模式），CAA 主路径的头由本机 Agent 注入、不受门控；若未来启用静态头降级须另选不含 `project/key` 的头名（如 `X-Miqro-Target-Id`）。该约束是未来形态的既有需求，不删。
+- **§5 真机实验记录不回改**：`:117` 实验 1 保留当时真实观测到的 `X-Miqro-Tag: miqi`，仅在结果列追加「（实验用头名；正式契约见 §4.1 → `X-Miqro-Project-Id`）」。
+- 顺带修复 `:6` 既有坏链：`../context-attribution-implementation-spec.md` → `context-attribution-implementation-spec.md`（仓库同级相对链风格，同 `ai-gateway-comparison.md:3`）。
+- `docs/document-map.md` §2 增两行索引：实现级 Spec = 权威实现契约 / 设计稿 = 历史设计稿（无契约效力）。
+- **未改**任何代码、迁移、前端、契约文件。
+
+**验证**（**以下为修复前时点（commit `6db7f33`）**；worktree 内 `git grep -n`，原文入交付报告；计数按**设计稿文件内**口径——本条目自身的叙述性提及不计；修复轮后的行号与计数见本节末）：
+- `git grep -n "X-Miqro-Tag" -- docs/activity-context-design.md` → **1 命中**（`:117` §5 实验记录，附「实验用头名；正式契约见 §4.1」注记），exit 0；
+- `git grep -n "attribution_source" -- docs/activity-context-design.md` → **0 命中**（exit 1）；全仓排除本条目后同为 0 命中——代码/契约/Spec 均无该名；
+- `git grep -n "X-Miqro-Project-Id" -- docs/activity-context-design.md` → **6 命中**（`:72`/`:79`/`:106`/`:117`/`:147`/`:164`）；全仓其余命中均在既有实现/契约件（`RequestContextResolver.java`、`ResolvedContext.java`、契约与测试、`miqro-context/**`、Spec v1.1），另含 `progress.md` 的叙述性提及（本条目自身与既有条目 `:2931`/`:2961`），**无新文件被引入**。
+
+**边界**：仅 `docs/` 下三份文件（设计稿 / document-map / 本条目）。不动 `V54__usage_event_context_columns.sql`、`V55__request_context_evidence.sql`、`RequestContextResolver.java`、`ResolvedContext.java`、`api-contract.md`、`database-schema.md`、`miqro-context/**`、`context-attribution-implementation-spec.md`。设计稿内残余 1 处 `X-Miqro-Tag` 是**实验记录**（非"未改完"），本条目自身的叙述性提及亦计入全仓 grep 命中；§5 记录的时间点事实按实验记录原则保持原样。issue #629 正文自身仍用旧列名，建议由 owner 更新措辞后再关闭。
+
+**修复轮（评审后）**：对上述交付做了一轮独立对抗性评审（评审只看工作树文件与命令原文，不采信作者结论）。逐条回源码/迁移/`gh` 远端复核后，修复 15 处**事实性**问题（仍全部落在 `docs/`）：
+
+- `:4` 交付枚举补 **#641**（`gh` 核实 #633/#639/#641/#645–#648 均已交付）；
+- `:7` 实验脚本指针加注「本机临时路径，未随仓库归档；证据以 §5 表格记录为准」（本机无 D: 盘、仓库内零副本，原文「（可复现）」不可兑现）；
+- `:51` §2 概念字段表后补「上图为概念模型，实现列见 §4.1 与 Spec v1.1 §7.1」（`user_id`/`model`/`cost`/`ts` 并非 `usage_event` 实现列）；
+- `:74` 失败语义精确化：**非 UUID 且在长度域内 → 400 `CONTEXT_INVALID`**；空值/超 64 字符按「未携带」处理（`RequestContextResolver.bounded()` 语义），原文「非法值 400」过宽；
+- `:76` 400 加条件：**未配置未归属策略时 400 `CONTEXT_REQUIRED`**；配置后按策略路由（`POLICY_ROUTED`、落未归属桶，Spec v1.1 §6.3）；
+- `:79` `resolution_status` 值域改为「实现产出 `RESOLVED_HEADER`/`RESOLVED_SUFFIX`/`SOLE_BINDING`/`POLICY_ROUTED` 四值；完整值域另含 `UNATTRIBUTED`/`AMBIGUOUS`」；**不再把 V54 列注释当 `claim_source` 值域权威**（该注释只列 6 值、漏 `git_remote`；权威为 `api-contract.md` §7 阶梯条，共 7 项）；
+- `:81` 门控注记补证据边界：`X-Miqro-Target-Id` 的结论出处为 Spec v1.1 §3.3，**本稿 §5 未单独实验该头名**（原文「已实证」不可兑现）；注记本身**保留未删**；
+- `:112` 无证据分支精确化：**不注入 `X-Miqro-Project-Id`**（客户端 `miqro-context/src/proxy/inject.ts` 仅 RESOLVED 时注入），只发 `X-Miqro-Claim-Status: UNATTRIBUTED`；网关侧策略桶 / 未配置则 400；
+- `:143` §6 处置现状补历史注记：**#615 已 MERGED（`f057fd5`）**，Q0 按 A 线落地，本节「建议 B / 建议关闭 #615」描述过期；
+- `:153` §7 补历史注记：Q0 已定，Q1–Q5 已在 Spec/实现落地，**Q6（per-turn 钩子 / transcript 兜底）未交付**；
+- `:160` Q3 行：`activity_id` **已随 `V54` 落库**（客户端发 `X-Miqro-Activity` 且为合法 UUID 时写入），非「仅预留」——`PostgresUsageEventWriter` 已写入该列；
+- `:167` §8 补历史注记（计划已成历史；实施口径见 Spec §11 与 `docs/caa-next-batch-plan.md`）；
+- `:170` 迁移口径拆开：**V54 = `usage_event` 上下文列；V55 = 证据审计表 `request_context_evidence`**（原文把 V55 并入「上下文列」）；
+- `docs/document-map.md:35` 去掉「上一行 Spec」位置指针 → 改写成文件名；「仅补实验证据」→「仅补实验证据与历史注记」；
+- grep 计数口径收紧为**被检文件内**计数（原文未说明是否含本条目自身叙述性提及，易生歧义）。
+
+**修复轮后验证**：`git grep -n "X-Miqro-Tag" -- docs/activity-context-design.md` → **1 命中**（`:119` §5 实验记录，附「实验用头名」注记）；`git grep -n "attribution_source" -- docs/activity-context-design.md` → **0 命中**（exit 1）；`git grep -n "X-Miqro-Project-Id" -- docs/activity-context-design.md` → **7 命中**（`:74`/`:81`/`:108`/`:112`/`:119`/`:149`/`:170`）；`git diff --check` exit 0。
+
+**第二轮修复（2026-09-16，口径归位 · 与主交付同 PR）**：
+
+- `activity-context-design.md:46` 概念结构体补 `activity_id?`——V54 实列（`V54:12`）且同文件 `:170` 已列，此前 6 个上下文列里独缺此列。
+- `:106` 规则表产出「项目标签」→「项目 UUID」——与下一行 `:108` 的 `X-Miqro-Project-Id: <project-uuid>` 及 `:74` 的 UUID 值域一致（原文按字面实现会产出非 UUID，触发 400 `CONTEXT_INVALID`）。
+- `:167` 交付枚举补 `#641`——与 `:4` 的 `#633 / #639 / #641 / #645–#648` 对齐（同一文档内两处枚举不一致）。
+
+**第三轮修复（2026-09-16，对抗性复核驱动 · 与主交付同 PR）**：
+
+- `activity-context-design.md:79` 「完整值域另含 `UNATTRIBUTED`/`AMBIGUOUS`」补实现边界：V54 列注释（`V54:24-25`）与 Spec §7.1（`:253`）各列 6 值，而 `RequestContextResolver` 只产出 4 值，两值在实现中仅作 `X-Miqro-Claim-Status` 声明头取值/未归属桶语义。
+- `:79` 「审计可还原每笔归属的判定依据」原文过宽：`publishUsageEvent` 只在放行且完成的路径调用（`ProxyController.java:529`），网关侧拒绝不落 `usage_event` 行；`request_context_evidence`（`V55`）全仓无 Java 写入方/读取方 → 已就地标明边界。
+- `:81` 门控适用范围由「通道 A/B」改为按**机制**表述（`ANTHROPIC_CUSTOM_HEADERS` 形态）：§4.2 的 E（企业 managed 下发）同样下发客户端读的静态头，原枚举自相矛盾；C（`apiKeyHelper` 动态 `headers`）是否有门控本仓无证据，明写「未验证」。
+- `:167` 「客户端参考实现与演示闭环均已交付」收窄为实际交付形态（#639 `miqro-context` 安装式 Agent），并点明 step 1（干净环境复核实验 3/5）与 step 3（`apiKeyHelper`+`PostToolUse` 脚本、接入面板）未按原样交付——`接入面板` 从未交付（设计稿内共 2 处：step 3 原计划行 `:171` 与本注记 `:167`；其余命中均为 `progress.md` 内本审计条目对它的转述；无实现或设施引用）。
+- `document-map.md:34` 限定 Spec 的权威面：列取值域/物理形态归 `database-schema.md`/`api-contract.md`（Spec §7.1 `claim_source` 清单缺 `git_remote`，滞后于实现）。
+- 本条目的**全仓计数口径**自洽化：`:3171` 原文「全仓其余命中均在既有实现/契约件（…）」未列本条目自身的叙述性命中，已补入（与本节「边界」段一致）。
+- **不在本 PR 范围的既有遗留**（均已逐行核对，未改）：① `context-attribution-implementation-spec.md:115` 称 `X-Miqro-Target-Id`「已实证可通过门控」，本仓无对应实验件（设计稿 §5 未单独实验该头名），该文件本轮禁改；② `miqro-context/README.md:113` 把设计稿列为并列规格、无历史件标注（该目录本轮禁改）；③ `decisions/0018-single-key-multi-project.md:62`/`:95` 的「后缀 = 唯一选择器、零猜测」与 Spec v1.1 **R3**（头名优先、后缀兜底）口径反转，该 ADR 仅 `:112` 有 #633 的枚举探测修订、D2/D8 无指向 R3 的修订注记——属 ADR 治理事项，建议由 owner 另开；④ `V55__request_context_evidence.sql:5` 头部注释称「网关在 Context 解析时写入；供审计与事后重分类」，而该表在 Java 侧零引用（`git grep -n "request_context_evidence" -- "*.java"` 无输出，既无写入方也无读取方），注释与实现不符——该迁移文件本轮禁改，建议随 ①–③ 一并开 follow-up。
+
+- **第五轮修复（2026-09-16，收尾交叉核对驱动 · 与主交付同 PR）**：① 前述修复轮条目中两处**注记行号漂移**按 HEAD 校正（`:151`→`:153`、`:165`→`:167`，与 `:3199`/`:3206` 对同一注记的引用对齐）；② `:3171` 全仓计数枚举补 `progress.md` 既有条目（`:2931`/`:2961`）；③ `:3206` 的「`接入面板` 全仓仅此一处提及」纠正为按文件枚举的实际分布（设计稿内 2 处：step 3 原计划行 `:171`、`§8` 注记 `:167`；其余命中均为 `progress.md` 内本审计条目的转述）。以上均为**行数不变**的就地替换，本条目其余行号引用不受影响。
+
+- **第六轮修复（2026-09-16，自查驱动 · 与主交付同 PR）**：重生成收口证据、逐条读原始输出时发现一处**自伤计数**——第五轮把 `:3206` 改写为「全仓命中 3 处」并在同一次提交追加了含该词的注记，而该注记自身就是第 4 处命中，故「3 处」在其写入的提交（`a39caa1`）里即已为假。两处（`:3206` 与第五轮注记第 ③ 条）改为**按文件枚举分布**（设计稿内 2 处：step 3 原计划行 `:171`、`§8` 注记 `:167`；其余命中均为本审计条目的转述），自指命中无法再使其失真。仍为行数不变的就地替换。
+
+- **第七轮修复（2026-09-16，独立主评审回执驱动 · 与主交付同 PR）**：独立主评审（全新上下文、逐条复跑命令、结论 **0 blocker / 3 minor**）与本地自查在同一点会合——① **行号基准混用**（评审 M2）：本条目「交付」「验证」段引用的是交付时点 `6db7f33` 的行号，「修复轮」各条引用的是修复后 HEAD 的行号，同一编号在两套基准下可能指向不同内容（`:79` 在交付时点是门控注记、在 HEAD 是值域行），已在交付段头部就地声明两套基准；② 评审 M1：`docs/document-map.md:35` 的「关键处已加「历史注记」」收敛为按处枚举（状态行、Q0、Q 表、§8 计划处）；③ 评审 M3：边界段补登记第 ④ 项既有遗留（`V55__request_context_evidence.sql:5` 头部注释称「网关在 Context 解析时写入」，而该表在 Java 侧零引用）。评审另两条记录性说明（hunk 形状与任务书预期不符系多轮就地编辑所致；前轮计数自洽问题已在第五/六轮闭环）无需动作。①②③ 均为行数不变的就地替换。
+
+- **第八轮修复（2026-09-16，增量复核回执驱动 · 与主交付同 PR）**：增量独立复核（对象为第七轮前的 HEAD `c71187c`，结论 **通过 / 0 blocker / 2 minor**）两条编辑性建议均已按原文采纳——① m1：交付段「base develop@50a9b245」补记为「base（fork 点）develop@50a9b245，收口轮合入 develop@adfb670（合并 `d15b2d5`）」，两套口径并存（`git merge-base origin/develop 6db7f33` 为 fork 点、`git merge-base origin/develop HEAD` 为收口基准）；② m2：第二轮修复条目「`:106` 与紧邻 `:108`」改为「与下一行 `:108`」（`:107` 为空行，实测复核一致）。两条均为行数不变的就地替换。
+
+## 2026-09-16 晚间 — #245 F07 告警接线：队列饱和（V60 事实表 + 控制面评估 + 类型注册）
+
+**背景**：F07 三类告警指标里，只有「用量队列饱和」缺数据源——网关侧只有进程内计数与无标签 gauge，没有任何可查事实。issue 原始候选「网关直接写 `alert_events`」被否：`AlertEventDispatcher` 只扫「已有失败投递次数」的行，网关插入的新行永远不会被投递。改为 **网关写事实表 → 控制面 `AlertEvaluator` 评估 → 既有签名/去重/退避/投递链路**。租户承载口径：全局信号固定由默认（seed）租户承载，评估 SQL 按规则自身 `tenant_id` 过滤，**非 seed 租户的同类型规则在正阈值下恒不触发**（其窗口恒为零行、`COALESCE(SUM(dropped),0)` 恒为 `0`，评估为 `value >= threshold` 才触发）；阈值 `<= 0` 服务端不校验，会在每个去重窗口以 `value = 0` 触发一次——退化行为，但 value 仍是该租户自己的零值，不泄漏平台丢弃数（有专门的固定用例）。
+
+**交付**（分支 `feat/usage-queue-saturation-alert-245`，隔离工作树，base develop@adfb670）：
+
+- **V60__usage_queue_saturation_alert.sql**：① `alert_rules_type_check` DROP 后重加（沿用 V24/V36 模式），新增合法值 `USAGE_QUEUE_SATURATION`；② 新表 `gateway_queue_signal`（只追加事实，`dropped bigint CHECK (dropped > 0)`，索引 `(tenant_id, occurred_at DESC)`，另留 `queued_high_water`/`capacity` 备口径切换）。**未修改任何既有迁移**；issue 里建议的 V59 已被 #684 `quota_enforcement` 占用，故顺延为 V60。
+- **网关**：`QueueSignal` + `QueueSignalWriter` SPI 与 `PostgresQueueSignalWriter`；固定 writer 执行器（有界）；丢弃计数增量在**两处**丢弃点采集；仅 `dropped_delta > 0` 才写；`no-persistence` 模式零 DB 写。**热路径零 JDBC**：`offer()` 只自增计数，写库发生在既有定时慢路径与 writer 调度器上。
+- **控制面**：`AlertEvaluator` 新增 `case "USAGE_QUEUE_SATURATION"`（近 1 小时 `SUM(dropped)`，SQL 带 `tenant_id = :tenantId`）；同批给 4 个周期型指标 SQL 补 `tenant_id` 过滤（口径漂移修正，单租户部署零行为变化）；`AlertRuleService` 类型校验列表与错误文案补齐。
+- **类型注册 4 处**（后端 `AlertRuleService.RULE_TYPES`、前端 `types/api.ts` 联合类型、`NextAdminAlertRulesView` 的类型选项、`AlertEvaluator` 的 case 分支；算上 V60 CHECK、服务端错误文案、i18n 词典与 api-contract 描述，实际触及 **8 处**）+ 前端下拉/列表标签 + `isQueueSaturationType` 的条数型阈值文案；i18n 词典补 1 条 `'队列饱和'`。
+- **文档 5 处**：api-contract / configuration-reference / database-schema（§租户级口径写明）/ feature-backlog / operations-runbook。
+
+**验证**：
+
+- 后端全量 `mvnw.cmd -B -f backend -Pintegration verify`：**EXIT=0，BUILD SUCCESS，11 个 reactor 模块全 SUCCESS**；各模块聚合 `Tests run` 全为 `Failures: 0, Errors: 0, Skipped: 0`（Domain 130 / Provider SPI 8 / Provider Adapters 166 / Route Snapshot 5 / Cache SPI 4 / Usage Queue SPI 21 / Control Plane 679 / Test Support 109 / Inference Gateway 357）。关键用例：`UsageQueueSaturationAlertIntegrationTest` **9/9**、`PostgresUsageEventBusTest` **13/13**、`SoakIntegrationTest` 1/1（`dropped == 0` 不变式）。Flyway：`Successfully validated 60 migrations`，控制面与网关两侧日志均出现 `Migrating schema "public" to version "60 - usage queue saturation alert"`。
+- **变异校验（证明租户过滤是承重的）**：删除该分支 SQL 里的 `tenant_id = :tenantId AND` → 同 IT `Tests run: 2, Failures: 2` BUILD FAILURE；恢复后通过。
+- **变异校验（证明退化阈值用例是承重的）**：把 `otherTenantRuleWithZeroThresholdFiresWithZeroValue` 的阈值 0 改回 1（邻近正阈值用例的取值）→ `Tests run: 1, Failures: 1 ... expected: 1L` BUILD FAILURE；恢复为 0 后 `Tests run: 9, Failures: 0` 通过。该用例确实钉住 `value >= threshold` 边界，不是空跑通过。
+- 前端（冻结树）：`run typecheck` EXIT=0（app/spec/node 三工程）、`run test` **59 files / 332 tests 全过**、`run build` EXIT=0（2634 modules，built in 40.45s；esbuild css minify 对拼接产物的 `<stdin>` 告警为既有，改动前构建日志同样存在）。`run lint` 最后一次改动后未再整树执行（其脚本自带 `--fix`，见下条），改为按文件复核：`npx eslint src/views/next/NextAdminAlertRulesView.vue src/__tests__/NextAdminAlertRulesView.spec.ts` → EXIT=0，**0 error**（260 条全部是本机 CRLF 检出的 `Delete ␍`，与未改动文件同一既有现象，且无一是 error）。
+- `docker compose -f deploy/compose.yaml config` EXIT=0。
+
+**边界**：
+
+- 两处丢弃点都被计数（上游决策记录只标了 `offer()`；`flushChunk()` 的重入队失败路径同样计丢弃）。
+- V60 的 `CHECK (dropped > 0)` 使「零丢弃行」不可表示，因此零值边界用例的诚实等价物是「窗口内无行 → `SUM=0` → 不触发」，另加断言证明 schema 拒绝零丢弃行。
+- 阈值口径（窗口内丢弃条数）**未由 owner 确认**；`WRITE_THROUGH` 模式不产生该告警（饱和表现为发布线程停滞而非丢弃）；「解析失败」仍未与「上游 200 无 usage 字段」区分（沿用 `USAGE_MISSING_RATE`）；F07 其余类型（Plan 同步、磁盘）仍 SCAFFOLD。
+- 前端 `lint` 脚本自带 `--fix`，在本机 CRLF 检出下会改写约 145 个非本批文件的换行（其中约 23 个存在真实规范化差异，含 `types/generated.ts` 全文重排）；已整树备份到仓库外后 `git checkout -- .` 还原，只保留本批两文件的规范化改动。仓库既有属性，非本批引入。
+
+
+## 2026-09-17 下午 — 模型调用链路时间线 #705（后端）+ #707（前端）+ 独立审查修复
+
+**目标与交付**
+- #705 后端：新增 `request_usage_records` 的**首个读取路径**（此前该表只有写入方，控制面无查询入口——这正是模型侧一直没有"按请求排查"能力的根因）。端点 `GET /api/v1/admin/usage/timeline?gatewayRequestId=...` 返回单次调用的阶段时间线（受理 → 上游首字节 → 完成）+ TTFB/耗时/终态/重试/部分响应/Token 四分类/归属链；**零新增采集**。V60 为 `(tenant_id, gateway_request_id)` 建索引——EXPLAIN 实测此前走 Seq Scan（表按月分区且既有索引均不以该列起头）。
+- #707 前端：用量明细「请求 ID」列改可点击 + 三层信息抽屉（终态徽章 + "卡在哪一段" / TTFB·重试·HTTP / 折叠的归属链与 Token）。未记录的阶段如实标「缺失 · 未记录」而不补零；404 呈现为说明块而非错误横幅。OpenAPI 基线重导 + `gen:types` 重生成。
+
+**独立审查（对抗性、实测驱动）发现并修复三处缺陷**
+- **D1（高）相位耗时不同源**：`time_to_first_byte_ms` 自**网关入口**起算（鉴权/配额/读 body/缓存查找/凭证解密之前），而 `started_at` 在其后取值，二者被混入同一相位列表 → 演示库实测 **56 行出现"上游首字节晚于完成"**（如 ttfb 8422ms > duration 6275ms）。现改为相位耗时一律取时间戳差值（单一原点、构造上单调），实测值作独立字段透出并在 DTO 注明原点。
+- **D2（中）token 缺回退**：列表页用 `COALESCE(input_tokens, prompt_tokens)`，时间线直读原列 → 实测 **70/4650 行**"列表有数、详情空白"（OpenAI Chat 协议行）。已在 SQL 层统一归一化，两处数字不再打架。
+- **D3（中）OpenAPI 基线未重导** → 会阻塞 #707 的类型生成。已重跑 `OpenApiSpecIntegrationTest` 覆盖，破坏性检查 exit 0（仅新增 path + 3 schema）。
+- 审查同时**确认无问题**：分区表索引有效（PG 17.6 `pg_index` 实测，父表建索引自动落到所有分区并被未来分区继承）、租户隔离成立、鉴权级别恰当、RowMapper 27 字段逐位正确、时区处理无 bug、`LIMIT 1` 语义正确。
+- 附带发现：目前**所有行都落在 DEFAULT 分区**（月度分区尚未发生）→「按 DROP PARTITION 做留存」当前无法实施。
+
+**验证**
+- 后端：`ModelCallTimelineServiceTest` **9/9 PASS**（含两条新回归用例：用真实倒序数据断言相位单调；`httpStatus`/`tokens` 全 null 不炸）。原夹具令 `measured == delta`，恰好掩盖 D1，已修正。
+- 前端：`npx vitest run` → `Test Files 61 passed (61)` / `Tests 360 passed (360)`；`npm run typecheck` → exit 0。
+- OpenAPI：`OpenApiSpecIntegrationTest` PASS；`check-openapi-breaking.py` → exit 0；head 对基线全路径比对 **removed 0 / changed 0 / added 55**。
+- Spotless 通过。
+
+**边界与偏差**
+- **未做浏览器实机验收**：两个分支均未部署，演示栈仍停在 develop；#707 的 UI 只有单测证据，无真机截图——待合并部署后补。
+- #707 分支基于**修复前**的 #705 建立，直接合并会覆盖 D1/D2；已 rebase 到修复后基础并复跑全绿。
+- 集成测试**必须带 `-Pintegration`**：不带该 profile 跑 `-Dtest=OpenApiSpecIntegrationTest` 会静默「Tests run: 0」且 BUILD SUCCESS（本轮踩过一次，记此为鉴）。
+- 前端空值类型不精确（后端未配 `default-property-inclusion`，运行时 `null` 而 codegen 出 `| undefined`）——仓库既有特征，非本轮引入。
+- 遗留建议（非缺陷）：透出 `usage_missing` 标记；`Phase.label` 中文文案是否移交前端。
+- 开发自审衍生的架构缺口（三类调用缺少单一事实源）另立 #719，不阻塞本批。

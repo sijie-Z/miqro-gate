@@ -45,6 +45,7 @@
 | `POST /api/v1/auth/bootstrap` | 一次性创建首个 SYSTEM_ADMIN 管理员 | 匿名（需 bootstrap secret） |
 | `POST /api/v1/auth/login` | 用户名/密码登录，创建会话 | 匿名 |
 | `POST /api/v1/auth/register` | 自助注册（F-REG）：创建普通用户并直接登录 | 匿名（开关 `miqrokey.registration-enabled`，默认开） |
+| `GET /api/v1/auth/registration-status` | 自助注册开关的公开只读状态（#550，登录页入口闸门） | 匿名 |
 | `POST /api/v1/auth/logout` | 当前会话失效 | 已登录 |
 | `GET /api/v1/auth/me` | 当前用户、角色、状态、最近登录与会话到期时间 | 已登录 |
 | `POST /api/v1/auth/password` | 修改自己的密码并撤销其他会话 | 已登录 |
@@ -60,6 +61,14 @@
 - 开关 `miqrokey.registration-enabled`（`MIQROKEY_REGISTRATION_ENABLED`，默认 `true`）为 `false` 时 → `403 REGISTRATION_DISABLED`；登录、bootstrap 不受影响。私有化部署需要"仅邀请"时可关闭。
 - 公开端点：与 login/bootstrap 一样无会话、无 CSRF 要求；审计事件 `REGISTER`。
 - 防滥用注记：单租户内部/试用规模未加频率限制；对外公网部署建议在网络层加速率限制（记录于配置参考）。
+
+**`GET /api/v1/auth/registration-status`（#550）**：同一开关的公开只读视图，供登录页在渲染注册入口**之前**查询，避免"填完表单提交才拿到 `403`"。
+
+- 访问：匿名（`SessionFilter.PUBLIC_PATHS` 精确匹配白名单）；无会话要求。CSRF 拦截器虽注册在 `/api/**` 全方法上（`SecurityConfig#addInterceptors`），但 `CsrfInterceptor#preHandle` 对非状态变更方法直接短路放行，故 `GET` 不需要 CSRF token，也无需加入 `CSRF_EXEMPT`。
+- 响应 `200 application/json`：`{ "enabled": true | false }`——**仅此一个布尔字段**，不回显配置来源、开关名称或任何部署信息（集成测试断言响应体恰好 1 个字段）。
+- 判定同源：与 `/register` 的 `403` 分支读同一个已绑定属性（`AuthProperties.registrationEnabled`，`@ConfigurationProperties` 启动期绑定、无 `@RefreshScope`），故同一进程内两者不可能给出不同答案。
+- 错误：正常路径无业务错误码；`5xx` 仅来自通用异常处理器。前端对此端点**失败即放行**（默认按"开"渲染，仍由 `/register` 的 `403 REGISTRATION_DISABLED` 强制），因此该端点是 UX 前置提示而**非**权限判定点。
+- 审计：本端点为纯只读查询，**不写审计事件**。注意与 `/register` 不同：成功注册会写 `REGISTER` 事件，两者在审计面上不等价。
 
 ### 3.1c 平台 OIDC 登录（P0a，ADR-0017，2026-09-08）
 
@@ -650,7 +659,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `PATCH /api/v1/admin/alert-rules/{id}` | 更新（含 enabled、scopeJson） |
 | `DELETE /api/v1/admin/alert-rules/{id}` | 删除 |
 
-规则类型：`USAGE_MISSING_RATE`（1h 内 usage_missing 占比）、`UPSTREAM_ERROR_RATE`（1h 内非 2xx 占比）、`BALANCE_UNAVAILABLE`（1h 内 UNAVAILABLE 配额快照数）、`USAGE_SURGE`（当前 1h 事件数 / 前一 1h 比率）、**`BUDGET_THRESHOLD`**（项目当月预算水位 %，`scopeJson: {"projectId": "…"}` 必填且项目需存在，否则 `400 SCOPE_INVALID`）、**`QUOTA_THRESHOLD`**（配额规则当前窗口水位 %，`scopeJson: {"quotaRuleId": "…"}` 必填且配额规则需存在，否则 `400 SCOPE_INVALID`；规则停用即不评估）。评估周期 `miqrokey.alerts.evaluation-interval-ms`（默认 5min）；密钥到期事件型 `ADMIN_API_KEY_EXPIRING`（默认关——需管理员建规则；按 key + 日期去重；检查周期 `miqrokey.alerts.admin-key-expiry-interval-ms` 默认 6h）；`BUDGET_THRESHOLD` 按（规则 × 月份）、`QUOTA_THRESHOLD` 按（规则 × 配额重置窗口，日/周/月随规则周期）去重（同窗口仅告警一次），其余按（规则 × 小时桶）去重；仅首个事件触发投递；投递失败指数退避重试最多 3 次。错误码：`ALERT_RULE_NOT_FOUND`（404）、`ALERT_TYPE_INVALID`（400）、`SCOPE_INVALID`（400）。
+规则类型：`USAGE_MISSING_RATE`（1h 内 usage_missing 占比）、`UPSTREAM_ERROR_RATE`（1h 内非 2xx 占比）、`BALANCE_UNAVAILABLE`（1h 内 UNAVAILABLE 配额快照数）、`USAGE_SURGE`（当前 1h 事件数 / 前一 1h 比率）、**`USAGE_QUEUE_SATURATION`**（F07/#245，V60：网关用量队列近 1h **丢失的事件条数**——绝对值计数，不是比例。事实由网关在队列饱和丢弃时按窗口写 `gateway_queue_signal`（仅 `dropped > 0` 才写行，零丢弃不写行也不触发）；队列是全进程唯一的，故事实固定承载于默认 seed 租户，**只有该租户的规则能评估到**：其他租户的规则聚合到零行，`COALESCE(SUM(dropped), 0)` 恒为 `0`，而评估为「`value >= threshold` 才触发」，故其他租户的规则在**正阈值**下恒不触发，也读不到任何其他租户的数字；阈值 `<= 0`（服务端目前不校验）会在每个去重窗口以 `value = 0` 触发一次，属退化配置，与其余计数型指标行为一致。阈值示例：`1` = 1 小时内丢 1 条即告警）、**`BUDGET_THRESHOLD`**（项目当月预算水位 %，`scopeJson: {"projectId": "…"}` 必填且项目需存在，否则 `400 SCOPE_INVALID`）、**`QUOTA_THRESHOLD`**（配额规则当前窗口水位 %，`scopeJson: {"quotaRuleId": "…"}` 必填且配额规则需存在，否则 `400 SCOPE_INVALID`；规则停用即不评估）。评估周期 `miqrokey.alerts.evaluation-interval-ms`（默认 5min）；密钥到期事件型 `ADMIN_API_KEY_EXPIRING`（默认关——需管理员建规则；按 key + 日期去重；检查周期 `miqrokey.alerts.admin-key-expiry-interval-ms` 默认 6h）；`BUDGET_THRESHOLD` 按（规则 × 月份）、`QUOTA_THRESHOLD` 按（规则 × 配额重置窗口，日/周/月随规则周期）去重（同窗口仅告警一次），其余按（规则 × 小时桶）去重；仅首个事件触发投递；投递失败指数退避重试最多 3 次。错误码：`ALERT_RULE_NOT_FOUND`（404）、`ALERT_TYPE_INVALID`（400）、`SCOPE_INVALID`（400）。
 
 **事件驱动类型（F03，V27）**：`MODEL_APPROVAL_SUBMITTED` / `MODEL_APPROVAL_APPROVED` / `MODEL_APPROVAL_REJECTED` ——模型审批流的即时通知（提交→订阅方、通过/驳回→申请人侧），**不参与周期评估**：审批工作流在状态迁移瞬间直接触发（`AlertEventDispatcher` 复用同一投递/签名/退避重试机制）。语义：
 - 阈值/scope 不适用（创建阈值恒发送 `1`，服务端事件 value 固定为 1 = 一次发生；无需 scopeJson）。
@@ -1142,6 +1151,7 @@ canonical 账单导入与四态对账报告（契约稿 docs/bill-reconciliation
 - 上游目标门控（G2.6 SSRF）：仅转发路由快照提供的 Base URL；`https` 是硬要求（除非目标命中 `MIQROKEY_UPSTREAM_ALLOWED_CIDRS`），URL 携带 `userinfo` 一律拒绝，DNS 解析后的每个地址必须是公网地址（环回、链路本地、RFC1918、CGNAT `100.64/10`、组播、any-local、IPv6 ULA `fc00::/7` 均拒绝，除非命中 allowlist）。被拒绝时返回 `502 route_unavailable`，错误体、日志与审计**不包含目标 URL 或主机名**（`UpstreamTargetValidator` 的拒绝原因只有稳定类别 token）。
 - 路径白名单：数据面只暴露 `POST /v1/messages`、`POST /v1/responses`、`POST /v1/chat/completions`。正确方法之外的请求 → `405 method_not_allowed`；其他 `/v1/**` 路径 → `404 unsupported_path`；两者都不连接上游。嵌入式 `..` 段按字面处理（`/v1/**` 之外不匹配）；`//` 由服务器归一化为规范路径后按正常请求处理，不构成走私。
 - 输入上限：入站 Header 超过 `MIQROKEY_MAX_INBOUND_HEADER_BYTES`（默认 `32KB`）由 Netty 在路由前拒绝 → `431`；请求体超过 `MIQROKEY_MAX_PROXY_BUFFER_BYTES`（默认 `256KB`）→ `413 payload_too_large`。超限请求不连接上游。
+- 请求前置预检（#553）：鉴权与模型授权通过后、缓存查询与上游调用之前，按 **UTF-8 码点**统计整个已缓冲 body（含 JSON 结构、工具 schema、base64）的字符数；超过 `MIQROKEY_GATEWAY_CONTEXT_LIMIT_THRESHOLD_CHARS`（默认 `200000`）→ `413`，错误码 `context_limit_exceeded`（Anthropic/OpenAI 各自协议兼容的错误体，`message` 只回报实测字符数与阈值，**不含请求内容**）。该预检**只读**：通过时转发字节与无预检时完全一致，不 tokenize、不重排、不补写；拒绝时不连接上游、不查缓存、不产生用量与生命周期记录。`MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED=false` 时完全关闭（行为与引入前一致）。裁决顺序为 鉴权 → 模型授权 → 体量预检，因此超限 body 不构成绕过或探测手段。阈值是**字符数**而非 token 数：对合法 UTF-8，整个序列化 body（含 JSON 结构与 base64 膨胀）都计入，是该 body 的字符上界；**非法 UTF-8 字节序列按字节长度计**（严格 UTF-8 校验不通过即整段回退为字节数），字符数不会超过字节数，因此计数**整体不低估**——不会低于任何宽松解码器解出的字符数（已有 1–2 字节穷举与定种子模糊测试固定）。这类 body 本身不是合法 JSON，且仍受缓冲上限约束。由此引入本预检后，**200001–262144 字符的请求由「缓冲上限放行」变为 413**（256KB 缓冲上限可容纳约 262144 字节）——这是刻意收紧，会同时挡掉同尺寸但上游本可接受的合法请求，运维可用 `enabled` / `threshold-chars` 调整。阈值高于缓冲上限时后者先拒绝；每 Key 阈值不在本版本范围内。覆盖范围限于 LLM 数据面三个 `/v1/**` 路径；MCP 数据面（`/mcpservers/{service}/mcp`、`/mcpservers/{service}/message`）本版本仍只有既有缓冲上限（`payload_too_large`），套用同一预检为后续项。合规留存旁路（ADR-0014，默认关闭）在预检**之前**捕获入站 body，因此开启留存时被 413 拒绝的请求仍可能已按留存策略入库；预检自身不写任何持久化。
 - Header 走私：凭证 Header（`Authorization`/`x-api-key`/`api-key`）出现多个 → `401`，任何凭证都不会转发；`Connection` 提名的 hop-by-hop Header 与 `X-MiQroKey-*`、`x-miqro-*` 内部 Header 在转发前剥离（上下文声明因此永不到达上游）；上游只携带 Gateway 注入的真实凭证，客户端 Virtual Key 永不泄漏到上游。
 
 Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 ID 都进入用量记录；不得覆盖供应商 request ID Header。

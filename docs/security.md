@@ -70,6 +70,7 @@
   - 非公网目标或明文 http 仅在命中 `MIQROKEY_UPSTREAM_ALLOWED_CIDRS` 时放行（受信任自建模型的显式逃生口，生产默认空 = 全拒）。
   - 校验在专用调度器上执行（DNS 为阻塞调用，不占事件循环）；拒绝原因只有稳定类别 token（`non-https`/`non-public-address`/`userinfo-forbidden` 等），错误响应、日志与审计永不出现目标 URL。
 - 入站防护（G2.6）：Header 超过 `32KB` 由 Netty 在路由前拒绝（`431`）；请求体超过 `256KB` 缓冲上限 → `413`；数据面仅暴露三个 `POST` 路径，其余 `/v1/**` → `404`，错误方法 → `405`，均不触达上游。
+- 请求前置预检（#553）：鉴权与模型授权通过后、缓存查询与上游调用之前，按 UTF-8 码点统计整个已缓冲 body 的字符数（合法 UTF-8 下为字符上界；非法 UTF-8 序列整段按字节长度计，计数整体不低估，且仍受 256KB 缓冲上限约束），超过 `MIQROKEY_GATEWAY_CONTEXT_LIMIT_THRESHOLD_CHARS`（默认 `200000`）→ `413 context_limit_exceeded`，不连接上游（阈值是防失控上下文的安全阀、不是配额；启用后 200001–262144 字符的请求由「缓冲上限放行」变为 413，属刻意收紧）。该判定只读字节、不解析/不重写 body（转发字节不变），日志与错误体只出现字符数与阈值，不含请求内容；命中计数 `miqrokey_gateway_context_limit_rejected_total`（零标签）。`MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED=false` 可整体关闭。
 - 错误脱敏（G2.6）：数据面错误体不含目标 URL、主机名、真实凭证或 Virtual Key；未知路径与鉴权失败不区分原因，防枚举。
 
 ## 7. 日志与隐私
