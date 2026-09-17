@@ -947,6 +947,7 @@ export const DICT: Record<string, string> = {
   '用量报表': 'Usage Reports',
   '用量汇总': 'Usage summary',
   '用量激增': 'Usage surge',
+  '队列饱和': 'Queue saturation',
   '用量记录已删除（删除请求与审计链保留）':
     'Usage records deleted (the deletion request and audit chain are kept)',
   '用量配额（Token / 请求次数 × 日/周/月）。只预警不阻断——超限不拦截流量。':

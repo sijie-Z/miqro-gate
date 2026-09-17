@@ -215,6 +215,30 @@ describe('NextAdminAlertRulesView', () => {
     );
   });
 
+  it('offers the queue-saturation type and switches the threshold to a drop count', async () => {
+    mockApi.createAlertRule.mockResolvedValue(rule({ type: 'USAGE_QUEUE_SATURATION' }));
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="rule-create-open"]').trigger('click');
+    const typeStub = wrapper.findAll('.ui-select-stub')[0]!;
+    const saturationOption = typeStub.findAll('.stub-option').find((o) => o.text() === '队列饱和');
+    expect(saturationOption, 'queue-saturation type option should be offered').toBeTruthy();
+    await saturationOption!.trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="rule-saturation-hint"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('阈值（丢弃条数）');
+    await wrapper.find('[data-testid="rule-create-name"]').setValue('queue-saturation');
+    await wrapper.find('[data-testid="rule-create-threshold"]').setValue('1');
+    await wrapper.find('[data-testid="rule-create-submit"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.createAlertRule).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'USAGE_QUEUE_SATURATION', threshold: 1 }),
+    );
+  });
+
   it('deletes a rule through the confirm gate', async () => {
     mockApi.listAlertRules.mockResolvedValue([rule()]);
     mockApi.deleteAlertRule.mockResolvedValue(undefined);

@@ -3380,3 +3380,30 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 - **第八轮修复（2026-09-16，增量复核回执驱动 · 与主交付同 PR）**：增量独立复核（对象为第七轮前的 HEAD `c71187c`，结论 **通过 / 0 blocker / 2 minor**）两条编辑性建议均已按原文采纳——① m1：交付段「base develop@50a9b245」补记为「base（fork 点）develop@50a9b245，收口轮合入 develop@adfb670（合并 `d15b2d5`）」，两套口径并存（`git merge-base origin/develop 6db7f33` 为 fork 点、`git merge-base origin/develop HEAD` 为收口基准）；② m2：第二轮修复条目「`:106` 与紧邻 `:108`」改为「与下一行 `:108`」（`:107` 为空行，实测复核一致）。两条均为行数不变的就地替换。
 
+## 2026-09-16 晚间 — #245 F07 告警接线：队列饱和（V60 事实表 + 控制面评估 + 类型注册）
+
+**背景**：F07 三类告警指标里，只有「用量队列饱和」缺数据源——网关侧只有进程内计数与无标签 gauge，没有任何可查事实。issue 原始候选「网关直接写 `alert_events`」被否：`AlertEventDispatcher` 只扫「已有失败投递次数」的行，网关插入的新行永远不会被投递。改为 **网关写事实表 → 控制面 `AlertEvaluator` 评估 → 既有签名/去重/退避/投递链路**。租户承载口径：全局信号固定由默认（seed）租户承载，评估 SQL 按规则自身 `tenant_id` 过滤，**非 seed 租户的同类型规则在正阈值下恒不触发**（其窗口恒为零行、`COALESCE(SUM(dropped),0)` 恒为 `0`，评估为 `value >= threshold` 才触发）；阈值 `<= 0` 服务端不校验，会在每个去重窗口以 `value = 0` 触发一次——退化行为，但 value 仍是该租户自己的零值，不泄漏平台丢弃数（有专门的固定用例）。
+
+**交付**（分支 `feat/usage-queue-saturation-alert-245`，隔离工作树，base develop@adfb670）：
+
+- **V60__usage_queue_saturation_alert.sql**：① `alert_rules_type_check` DROP 后重加（沿用 V24/V36 模式），新增合法值 `USAGE_QUEUE_SATURATION`；② 新表 `gateway_queue_signal`（只追加事实，`dropped bigint CHECK (dropped > 0)`，索引 `(tenant_id, occurred_at DESC)`，另留 `queued_high_water`/`capacity` 备口径切换）。**未修改任何既有迁移**；issue 里建议的 V59 已被 #684 `quota_enforcement` 占用，故顺延为 V60。
+- **网关**：`QueueSignal` + `QueueSignalWriter` SPI 与 `PostgresQueueSignalWriter`；固定 writer 执行器（有界）；丢弃计数增量在**两处**丢弃点采集；仅 `dropped_delta > 0` 才写；`no-persistence` 模式零 DB 写。**热路径零 JDBC**：`offer()` 只自增计数，写库发生在既有定时慢路径与 writer 调度器上。
+- **控制面**：`AlertEvaluator` 新增 `case "USAGE_QUEUE_SATURATION"`（近 1 小时 `SUM(dropped)`，SQL 带 `tenant_id = :tenantId`）；同批给 4 个周期型指标 SQL 补 `tenant_id` 过滤（口径漂移修正，单租户部署零行为变化）；`AlertRuleService` 类型校验列表与错误文案补齐。
+- **类型注册 4 处**（后端 `AlertRuleService.RULE_TYPES`、前端 `types/api.ts` 联合类型、`NextAdminAlertRulesView` 的类型选项、`AlertEvaluator` 的 case 分支；算上 V60 CHECK、服务端错误文案、i18n 词典与 api-contract 描述，实际触及 **8 处**）+ 前端下拉/列表标签 + `isQueueSaturationType` 的条数型阈值文案；i18n 词典补 1 条 `'队列饱和'`。
+- **文档 5 处**：api-contract / configuration-reference / database-schema（§租户级口径写明）/ feature-backlog / operations-runbook。
+
+**验证**：
+
+- 后端全量 `mvnw.cmd -B -f backend -Pintegration verify`：**EXIT=0，BUILD SUCCESS，11 个 reactor 模块全 SUCCESS**；各模块聚合 `Tests run` 全为 `Failures: 0, Errors: 0, Skipped: 0`（Domain 130 / Provider SPI 8 / Provider Adapters 166 / Route Snapshot 5 / Cache SPI 4 / Usage Queue SPI 21 / Control Plane 679 / Test Support 109 / Inference Gateway 357）。关键用例：`UsageQueueSaturationAlertIntegrationTest` **9/9**、`PostgresUsageEventBusTest` **13/13**、`SoakIntegrationTest` 1/1（`dropped == 0` 不变式）。Flyway：`Successfully validated 60 migrations`，控制面与网关两侧日志均出现 `Migrating schema "public" to version "60 - usage queue saturation alert"`。
+- **变异校验（证明租户过滤是承重的）**：删除该分支 SQL 里的 `tenant_id = :tenantId AND` → 同 IT `Tests run: 2, Failures: 2` BUILD FAILURE；恢复后通过。
+- **变异校验（证明退化阈值用例是承重的）**：把 `otherTenantRuleWithZeroThresholdFiresWithZeroValue` 的阈值 0 改回 1（邻近正阈值用例的取值）→ `Tests run: 1, Failures: 1 ... expected: 1L` BUILD FAILURE；恢复为 0 后 `Tests run: 9, Failures: 0` 通过。该用例确实钉住 `value >= threshold` 边界，不是空跑通过。
+- 前端（冻结树）：`run typecheck` EXIT=0（app/spec/node 三工程）、`run test` **59 files / 332 tests 全过**、`run build` EXIT=0（2634 modules，built in 40.45s；esbuild css minify 对拼接产物的 `<stdin>` 告警为既有，改动前构建日志同样存在）。`run lint` 最后一次改动后未再整树执行（其脚本自带 `--fix`，见下条），改为按文件复核：`npx eslint src/views/next/NextAdminAlertRulesView.vue src/__tests__/NextAdminAlertRulesView.spec.ts` → EXIT=0，**0 error**（260 条全部是本机 CRLF 检出的 `Delete ␍`，与未改动文件同一既有现象，且无一是 error）。
+- `docker compose -f deploy/compose.yaml config` EXIT=0。
+
+**边界**：
+
+- 两处丢弃点都被计数（上游决策记录只标了 `offer()`；`flushChunk()` 的重入队失败路径同样计丢弃）。
+- V60 的 `CHECK (dropped > 0)` 使「零丢弃行」不可表示，因此零值边界用例的诚实等价物是「窗口内无行 → `SUM=0` → 不触发」，另加断言证明 schema 拒绝零丢弃行。
+- 阈值口径（窗口内丢弃条数）**未由 owner 确认**；`WRITE_THROUGH` 模式不产生该告警（饱和表现为发布线程停滞而非丢弃）；「解析失败」仍未与「上游 200 无 usage 字段」区分（沿用 `USAGE_MISSING_RATE`）；F07 其余类型（Plan 同步、磁盘）仍 SCAFFOLD。
+- 前端 `lint` 脚本自带 `--fix`，在本机 CRLF 检出下会改写约 145 个非本批文件的换行（其中约 23 个存在真实规范化差异，含 `types/generated.ts` 全文重排）；已整树备份到仓库外后 `git checkout -- .` 还原，只保留本批两文件的规范化改动。仓库既有属性，非本批引入。
+

@@ -15,6 +15,8 @@ import reactor.core.scheduler.Schedulers;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -33,6 +35,12 @@ class PostgresUsageEventBusTest {
 
     private static final Clock CLOCK = Clock.systemUTC();
 
+    /**
+     * Drop reporting has its own tests; the reliability tests only need the seam.
+     */
+    private static final QueueSignalWriter NO_SIGNALS = signal -> {
+    };
+
     private Scheduler scheduler;
 
     @AfterEach
@@ -47,7 +55,7 @@ class PostgresUsageEventBusTest {
     void failedFlushReenqueuesForNextFlush() {
         RecordingWriter writer = new RecordingWriter();
         PostgresUsageEventBus bus = new PostgresUsageEventBus(100, 100, writer, Schedulers.immediate(), CLOCK,
-                SaturationMode.DROP, Duration.ofSeconds(5));
+                SaturationMode.DROP, Duration.ofSeconds(5), NO_SIGNALS);
         UsageEvent usage = usageEvent("u1");
         CacheHitEvent hit = hitEvent();
         RequestStartedEvent start = startedEvent();
@@ -79,7 +87,7 @@ class PostgresUsageEventBusTest {
     void saturationDropsAndCounts() {
         RecordingWriter writer = new RecordingWriter();
         PostgresUsageEventBus bus = new PostgresUsageEventBus(2, 100, writer, Schedulers.immediate(), CLOCK,
-                SaturationMode.DROP, Duration.ofSeconds(5));
+                SaturationMode.DROP, Duration.ofSeconds(5), NO_SIGNALS);
         for (int i = 0; i < 5; i++) {
             bus.publish(usageEvent("u" + i));
         }
@@ -97,7 +105,7 @@ class PostgresUsageEventBusTest {
     void flushDrainsAllInChunks() {
         RecordingWriter writer = new RecordingWriter();
         PostgresUsageEventBus bus = new PostgresUsageEventBus(100, 2, writer, Schedulers.immediate(), CLOCK,
-                SaturationMode.DROP, Duration.ofSeconds(5));
+                SaturationMode.DROP, Duration.ofSeconds(5), NO_SIGNALS);
         for (int i = 0; i < 5; i++) {
             bus.publish(usageEvent("u" + i));
         }
@@ -122,7 +130,7 @@ class PostgresUsageEventBusTest {
         BlockingWriter writer = new BlockingWriter();
         scheduler = Schedulers.newSingle("writer-test");
         PostgresUsageEventBus bus = new PostgresUsageEventBus(10, 10, writer, scheduler, CLOCK, SaturationMode.DROP,
-                Duration.ofSeconds(5));
+                Duration.ofSeconds(5), NO_SIGNALS);
         bus.publish(usageEvent("u1"));
 
         bus.scheduledFlush();
@@ -141,7 +149,7 @@ class PostgresUsageEventBusTest {
     void emptyFlushIsNoop() {
         RecordingWriter writer = new RecordingWriter();
         PostgresUsageEventBus bus = new PostgresUsageEventBus(10, 10, writer, Schedulers.immediate(), CLOCK,
-                SaturationMode.DROP, Duration.ofSeconds(5));
+                SaturationMode.DROP, Duration.ofSeconds(5), NO_SIGNALS);
         bus.flush();
         assertThat(writer.callCount.get()).isZero();
     }
@@ -151,7 +159,7 @@ class PostgresUsageEventBusTest {
     void writeThroughPersistsOnSaturation() {
         RecordingWriter writer = new RecordingWriter();
         PostgresUsageEventBus bus = new PostgresUsageEventBus(1, 100, writer, Schedulers.immediate(), CLOCK,
-                SaturationMode.WRITE_THROUGH, Duration.ofSeconds(5));
+                SaturationMode.WRITE_THROUGH, Duration.ofSeconds(5), NO_SIGNALS);
         bus.publish(usageEvent("queued")); // fills the only slot
         UsageEvent spill = usageEvent("spill");
 
@@ -174,7 +182,7 @@ class PostgresUsageEventBusTest {
     void writeThroughFailureCountsDrop() {
         RecordingWriter writer = new RecordingWriter();
         PostgresUsageEventBus bus = new PostgresUsageEventBus(1, 100, writer, Schedulers.immediate(), CLOCK,
-                SaturationMode.WRITE_THROUGH, Duration.ofSeconds(5));
+                SaturationMode.WRITE_THROUGH, Duration.ofSeconds(5), NO_SIGNALS);
         bus.publish(usageEvent("queued"));
         writer.failNextCall = true;
 
@@ -191,7 +199,7 @@ class PostgresUsageEventBusTest {
         BlockingWriter writer = new BlockingWriter();
         scheduler = Schedulers.newSingle("writer-test");
         PostgresUsageEventBus bus = new PostgresUsageEventBus(1, 100, writer, scheduler, CLOCK,
-                SaturationMode.WRITE_THROUGH, Duration.ofMillis(50));
+                SaturationMode.WRITE_THROUGH, Duration.ofMillis(50), NO_SIGNALS);
         bus.publish(usageEvent("queued"));
 
         long started = System.nanoTime();
@@ -205,6 +213,109 @@ class PostgresUsageEventBusTest {
 
         writer.release.countDown();
         writer.done.await(5, TimeUnit.SECONDS);
+    }
+
+    // -------------------------------------------------------------------
+    // F07 / #245: drop facts are reported to the control plane
+    // -------------------------------------------------------------------
+
+    @Test
+    @DisplayName("dropped events become ONE signal carrying the delta and the queue context")
+    void droppedEventsAreReportedAsOneSignal() {
+        RecordingSignalWriter signals = new RecordingSignalWriter();
+        PostgresUsageEventBus bus = new PostgresUsageEventBus(2, 100, new RecordingWriter(), Schedulers.immediate(),
+                CLOCK, SaturationMode.DROP, Duration.ofSeconds(5), signals);
+        for (int i = 0; i < 5; i++) {
+            bus.publish(usageEvent("u" + i));
+        }
+
+        bus.scheduledSignalReport();
+
+        assertThat(signals.signals).hasSize(1);
+        QueueSignal signal = signals.signals.get(0);
+        assertThat(signal.dropped()).isEqualTo(3);
+        // Pinned to the migration-seeded tenant, not to the constant: the control
+        // plane evaluates the fact table under this literal and cannot import it
+        // (the control plane does not depend on queue-spi), so the two sides agree
+        // only if both name the same uuid.
+        assertThat(PostgresUsageEventBus.SIGNAL_TENANT_ID)
+                .isEqualTo(UUID.fromString("00000000-0000-0000-0000-000000000001"));
+        assertThat(signal.tenantId()).isEqualTo(PostgresUsageEventBus.SIGNAL_TENANT_ID);
+        assertThat(signal.capacity()).isEqualTo(2);
+        assertThat(signal.saturationMode()).isEqualTo(SaturationMode.DROP);
+        assertThat(signal.queuedHighWater()).isEqualTo(2);
+        assertThat(signal.occurredAt()).isNotNull();
+
+        // The delta was claimed: the same loss is never reported twice.
+        bus.scheduledSignalReport();
+        assertThat(signals.signals).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("a bus that lost nothing writes no signal at all")
+    void healthyBusReportsNoSignal() {
+        RecordingSignalWriter signals = new RecordingSignalWriter();
+        PostgresUsageEventBus bus = new PostgresUsageEventBus(10, 10, new RecordingWriter(), Schedulers.immediate(),
+                CLOCK, SaturationMode.DROP, Duration.ofSeconds(5), signals);
+        bus.publish(usageEvent("u1"));
+
+        bus.scheduledSignalReport();
+
+        assertThat(signals.signals).isEmpty();
+    }
+
+    @Test
+    @DisplayName("WRITE_THROUGH saturation persists instead of dropping, so it reports nothing")
+    void writeThroughReportsNoSignal() {
+        RecordingSignalWriter signals = new RecordingSignalWriter();
+        PostgresUsageEventBus bus = new PostgresUsageEventBus(1, 100, new RecordingWriter(), Schedulers.immediate(),
+                CLOCK, SaturationMode.WRITE_THROUGH, Duration.ofSeconds(5), signals);
+        bus.publish(usageEvent("queued"));
+        bus.publish(usageEvent("spill")); // full queue -> emergency write, no drop
+
+        bus.scheduledSignalReport();
+
+        assertThat(bus.metrics().totalDropped()).isZero();
+        assertThat(signals.signals).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a signal write that fails is retried with the full delta, never lost")
+    void failedSignalWriteIsRetried() {
+        RecordingSignalWriter signals = new RecordingSignalWriter();
+        signals.failNextCall = true;
+        PostgresUsageEventBus bus = new PostgresUsageEventBus(1, 100, new RecordingWriter(), Schedulers.immediate(),
+                CLOCK, SaturationMode.DROP, Duration.ofSeconds(5), signals);
+        for (int i = 0; i < 3; i++) {
+            bus.publish(usageEvent("u" + i));
+        }
+
+        bus.scheduledSignalReport();
+        assertThat(signals.signals).isEmpty();
+
+        bus.scheduledSignalReport();
+        assertThat(signals.signals).hasSize(1);
+        assertThat(signals.signals.get(0).dropped()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("a later report carries only the drops that happened since the last one")
+    void laterReportCarriesOnlyTheNewDelta() {
+        RecordingSignalWriter signals = new RecordingSignalWriter();
+        PostgresUsageEventBus bus = new PostgresUsageEventBus(2, 100, new RecordingWriter(), Schedulers.immediate(),
+                CLOCK, SaturationMode.DROP, Duration.ofSeconds(5), signals);
+        for (int i = 0; i < 4; i++) {
+            bus.publish(usageEvent("first" + i)); // 2 queued, 2 dropped
+        }
+        bus.scheduledSignalReport();
+        bus.flush(); // queue empty again
+
+        for (int i = 0; i < 3; i++) {
+            bus.publish(usageEvent("second" + i)); // 2 queued, 1 dropped
+        }
+        bus.scheduledSignalReport();
+
+        assertThat(signals.signals).extracting(QueueSignal::dropped).containsExactly(2L, 1L);
     }
 
     /** Polls until the flush counter reaches the target (writer thread lag). */
@@ -290,6 +401,21 @@ class PostgresUsageEventBusTest {
                 Thread.currentThread().interrupt();
             }
             done.countDown();
+        }
+    }
+
+    private static final class RecordingSignalWriter implements QueueSignalWriter {
+
+        final List<QueueSignal> signals = Collections.synchronizedList(new ArrayList<>());
+        volatile boolean failNextCall;
+
+        @Override
+        public void writeSignal(QueueSignal signal) {
+            if (failNextCall) {
+                failNextCall = false;
+                throw new IllegalStateException("simulated database outage");
+            }
+            signals.add(signal);
         }
     }
 }

@@ -62,6 +62,13 @@ public class QueueConfig {
             return new PostgresUsageEventWriter(jdbc, queueTransactionTemplate);
         }
 
+        /** Drop facts (F07, #245) — same connection pool, same transaction wiring. */
+        @Bean
+        QueueSignalWriter queueSignalWriter(NamedParameterJdbcTemplate jdbc,
+                TransactionTemplate queueTransactionTemplate) {
+            return new PostgresQueueSignalWriter(jdbc, queueTransactionTemplate);
+        }
+
         /**
          * Dedicated bounded writer executor (CLAUDE.md: usage persistence is written in
          * a dedicated bounded executor). Flushes run here, never on the shared
@@ -79,10 +86,11 @@ public class QueueConfig {
          * (and never counted as dropped).
          */
         @Bean(destroyMethod = "flush")
-        UsageEventBus usageEventBus(UsageEventWriter usageEventWriter, QueueProperties props, Clock clock,
-                Scheduler usageWriterScheduler) {
+        UsageEventBus usageEventBus(UsageEventWriter usageEventWriter, QueueSignalWriter queueSignalWriter,
+                QueueProperties props, Clock clock, Scheduler usageWriterScheduler) {
             return new PostgresUsageEventBus(props.capacity(), props.flushThreshold(), usageEventWriter,
-                    usageWriterScheduler, clock, props.saturationMode(), props.writeThroughTimeout());
+                    usageWriterScheduler, clock, props.saturationMode(), props.writeThroughTimeout(),
+                    queueSignalWriter);
         }
     }
 
