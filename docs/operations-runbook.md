@@ -214,6 +214,9 @@ Master key 丢失无法从数据库恢复真实凭证；使用受保护备份恢
   `/v1/**` 白名单外路径 → `unsupported_path`；管理面未知路由 → `NOT_FOUND`。
   **跨面提醒**：MCP 数据面对未知消费者密钥是 **401 `invalid_api_key`**（与 `/v1` 的 404 口径不同，
   均为既定设计，见 api-contract §7.1）。
+- **同一个根因也会落进不同的桶**（共建方复核补充）：拼接型 SQL 语法错落 `500 INTERNAL_ERROR`，
+  而类型转换错（`SUM(bigint)`→numeric 再取 `Long`）落 `409 RESOURCE_CONFLICT`——`code` 不仅区分
+  语义，**更不能靠状态码反推根因**。
 
 ### 15.2 泛化兜底会藏起真实类别：去"症状所指的那层之外"找信号
 
