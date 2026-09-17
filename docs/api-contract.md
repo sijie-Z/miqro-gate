@@ -619,6 +619,14 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
   （全无）；空窗口/历史任务为 null。任务元数据（§5.5 列表与详情、§9 机器面 export-tasks）均带该字段；
   文件内同步：`local_caliber_note` 扩展为 `local-instant;reconcile=provider-id|mixed|local-only`（前缀向后兼容）。
   净额/含调整等级随 F20（adjustment 机制）扩展。
+- **调整标记（#709）**：CSV 与 JSONL 每行新增 `netInputTokens` / `netOutputTokens` /
+  `netCacheReadInputTokens` / `netCacheCreationInputTokens` 与 `adjusted`。既有观察值列**保持原样**，
+  净额另列给出；`adjusted` 表示该行是否存在非零修正。净额口径与明细、汇总**共用同一段 SQL 定义**
+  （`UsageAdjustmentSql`），避免三处算法漂移。
+- **表头对齐修复（#754）**：CSV 表头此前漏了 `clientIp` 一列——数据行 19 个值而表头只有 18 个名，
+  导致**自 `isComplete` 起每一列错位一格**：按列名解析该文件的消费者会拿到错误的值，且不会报错。
+  现表头与数据行均由同一份声明的列顺序派生，双份真相已消除；补了**按列名取值**的回归测试
+  （旧测试只断言某字符串存在，故长期未发现）。
 - 产物保存 24 小时后 `EXPIRED`，下载返回 `410 EXPORT_EXPIRED`；未完成/不存在 → `404 EXPORT_NOT_FOUND`。
 - **GC（F06）**：定时回收过窗产物（`miqrokey.cleanup.expired-sweep-ms`，默认 1h）——`SUCCEEDED` 且超过 `expires_at` 的行连同 `file_bytes` 物理删除；清理后下载返回 `404 EXPORT_NOT_FOUND`（410 语义仅在清理前可观测）。`FAILED`/`PENDING` 行保留供运维查看。
 - 错误码：`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400）。

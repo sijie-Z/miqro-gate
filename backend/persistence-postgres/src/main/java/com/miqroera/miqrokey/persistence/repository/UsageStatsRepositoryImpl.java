@@ -245,7 +245,8 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 %s%s%s
                 %s
                 GROUP BY %s, ue.provider_product_id, ue.model_id, ue.cache_level
-                """.formatted(spec.select(), spec.join(), wb.joins(), ADJUSTMENT_LATERAL, wb.where(), spec.groupBy());
+                """.formatted(spec.select(), spec.join(), wb.joins(), UsageAdjustmentSql.ADJUSTMENT_LATERAL, wb.where(),
+                spec.groupBy());
         MapSqlParameterSource params = wb.params();
         List<UsageStatsAggregator.UsageAggRow> rows = new ArrayList<>();
         jdbc.query(sql, params, rs -> {
@@ -401,59 +402,6 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             rs.getString("gateway_request_id"), rs.getTimestamp("occurred_at").toInstant(), rs.getString("client_ip"),
             attributionOf(rs));
 
-    /**
-     * Pre-aggregated per-event adjustment totals (#709), joined as a correlated
-     * LATERAL so the pairing stays 1:1.
-     *
-     * <p>
-     * Deliberately <b>not</b> {@code JOIN usage_adjustments} directly: one event
-     * can carry many adjustments, so a plain join multiplies the
-     * {@code usage_event} row and inflates every {@code SUM} in whichever query
-     * carries it. The correlation also rides
-     * {@code idx_usage_adjustments_usage_event (tenant_id, usage_event_id)}.
-     * </p>
-     *
-     * <p>
-     * An aggregate with no GROUP BY returns exactly one row, so an event with no
-     * adjustments yields zeros instead of dropping out of the join.
-     * </p>
-     */
-    private static final String ADJUSTMENT_LATERAL = "\n" + """
-            LEFT JOIN LATERAL (
-                SELECT COALESCE(SUM(a.input_tokens_delta), 0) AS input_delta,
-                       COALESCE(SUM(a.output_tokens_delta), 0) AS output_delta,
-                       COALESCE(SUM(a.cache_read_tokens_delta), 0) AS cache_read_delta,
-                       COALESCE(SUM(a.cache_creation_tokens_delta), 0) AS cache_creation_delta
-                  FROM usage_adjustments a
-                 WHERE a.tenant_id = ue.tenant_id AND a.usage_event_id = ue.id
-            ) adj ON TRUE
-            """;
-
-    /** True when the event carries any non-zero correction. */
-    private static final String ADJUSTED_FLAG = """
-            (COALESCE(adj.input_delta, 0) <> 0 OR COALESCE(adj.output_delta, 0) <> 0
-             OR COALESCE(adj.cache_read_delta, 0) <> 0 OR COALESCE(adj.cache_creation_delta, 0) <> 0)
-            """;
-
-    /**
-     * net = normalized observed + delta, computed in SQL so the detail rows and the
-     * aggregates cannot drift apart on how a correction is applied.
-     *
-     * <p>
-     * Stays NULL when the row has neither an observed nor an adjusted value: "no
-     * data" must not read as "zero tokens".
-     * </p>
-     */
-    private static String netExpr(String observed, String delta) {
-        // CAST to bigint is required: SUM(bigint) yields numeric in PostgreSQL, and the
-        // driver refuses to hand a numeric back as a Long ("conversion to class
-        // java.lang.Long from numeric not supported"). That failure reaches the client
-        // as a 409, because GlobalExceptionHandler maps DataIntegrityViolationException
-        // to RESOURCE_CONFLICT — so it does not read like a query bug.
-        return "CAST(CASE WHEN " + observed + " IS NULL AND COALESCE(" + delta + ", 0) = 0 THEN NULL ELSE COALESCE("
-                + observed + ", 0) + COALESCE(" + delta + ", 0) END AS bigint)";
-    }
-
     private static final RowMapper<AdjustedUsageRow> ADJUSTED_ROW_MAPPER = (rs, rowNum) -> new AdjustedUsageRow(
             EVENT_ROW_MAPPER.mapRow(rs, rowNum), rs.getObject("net_input_tokens", Long.class),
             rs.getObject("net_output_tokens", Long.class), rs.getObject("net_cache_read_tokens", Long.class),
@@ -479,10 +427,10 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
     public List<AdjustedUsageRow> findRecords(UsageFilter filter, long offset, int limit) {
         WhereBuilder wb = new WhereBuilder(filter, "ue").usageEventColumns();
         MapSqlParameterSource params = wb.params().addValue("offset", offset).addValue("limit", limit);
-        String netInput = netExpr("COALESCE(ue.input_tokens, ue.prompt_tokens)", "adj.input_delta");
-        String netOutput = netExpr("COALESCE(ue.output_tokens, ue.completion_tokens)", "adj.output_delta");
-        String netCacheRead = netExpr("ue.cache_read_input_tokens", "adj.cache_read_delta");
-        String netCacheCreation = netExpr("ue.cache_creation_input_tokens", "adj.cache_creation_delta");
+        String netInput = UsageAdjustmentSql.netInput();
+        String netOutput = UsageAdjustmentSql.netOutput();
+        String netCacheRead = UsageAdjustmentSql.netCacheRead();
+        String netCacheCreation = UsageAdjustmentSql.netCacheCreation();
         return jdbc.query("""
                 SELECT ue.*,
                        %s AS net_input_tokens,
@@ -494,8 +442,8 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 %s
                 ORDER BY ue.occurred_at DESC
                 LIMIT :limit OFFSET :offset
-                """.formatted(netInput, netOutput, netCacheRead, netCacheCreation, ADJUSTED_FLAG, wb.joins(),
-                ADJUSTMENT_LATERAL, wb.where()), params, ADJUSTED_ROW_MAPPER);
+                """.formatted(netInput, netOutput, netCacheRead, netCacheCreation, UsageAdjustmentSql.ADJUSTED_FLAG,
+                wb.joins(), UsageAdjustmentSql.ADJUSTMENT_LATERAL, wb.where()), params, ADJUSTED_ROW_MAPPER);
     }
 
     private TokenBucket parseUsage(String metaJson) {

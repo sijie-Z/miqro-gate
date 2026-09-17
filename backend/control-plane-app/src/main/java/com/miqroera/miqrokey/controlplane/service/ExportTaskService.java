@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.controlplane.dto.ExportTaskView;
 import com.miqroera.miqrokey.domain.usage.ExportFormat;
 import com.miqroera.miqrokey.domain.usage.ExportStatus;
 import com.miqroera.miqrokey.domain.usage.ExportTask;
+import com.miqroera.miqrokey.persistence.repository.UsageAdjustmentSql;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -166,16 +167,27 @@ public class ExportTaskService {
 
     private List<Map<String, Object>> readRows(ExportTask task) {
         return jdbc.query("""
-                SELECT occurred_at, model_id, cache_level,
-                       COALESCE(input_tokens, prompt_tokens) AS input_tokens,
-                       COALESCE(output_tokens, completion_tokens) AS output_tokens,
-                       cache_read_input_tokens, cache_creation_input_tokens, total_tokens, latency_ms,
-                       upstream_status_code, provider_request_id, gateway_request_id, is_complete, usage_missing,
-                       virtual_key_id, project_id, provider_product_id, credential_id, client_ip
-                FROM usage_event
-                WHERE tenant_id = :tenantId AND occurred_at >= :from AND occurred_at < :to
-                ORDER BY occurred_at
-                """,
+                SELECT ue.occurred_at, ue.model_id, ue.cache_level,
+                       COALESCE(ue.input_tokens, ue.prompt_tokens) AS input_tokens,
+                       COALESCE(ue.output_tokens, ue.completion_tokens) AS output_tokens,
+                       ue.cache_read_input_tokens, ue.cache_creation_input_tokens, ue.total_tokens, ue.latency_ms,
+                       ue.upstream_status_code, ue.provider_request_id, ue.gateway_request_id, ue.is_complete,
+                       ue.usage_missing, ue.virtual_key_id, ue.project_id, ue.provider_product_id, ue.credential_id,
+                       ue.client_ip,
+                       -- Adjusted (net) counts alongside the observed ones (#709). The export is a
+                       -- financial artefact, so it must carry the same netting the detail list and the
+                       -- aggregates do — hence the shared fragments rather than a local copy.
+                       %s AS net_input_tokens,
+                       %s AS net_output_tokens,
+                       %s AS net_cache_read_tokens,
+                       %s AS net_cache_creation_tokens,
+                       %s AS adjusted
+                FROM usage_event ue%s
+                WHERE ue.tenant_id = :tenantId AND ue.occurred_at >= :from AND ue.occurred_at < :to
+                ORDER BY ue.occurred_at
+                """.formatted(UsageAdjustmentSql.netInput(), UsageAdjustmentSql.netOutput(),
+                UsageAdjustmentSql.netCacheRead(), UsageAdjustmentSql.netCacheCreation(),
+                UsageAdjustmentSql.ADJUSTED_FLAG, UsageAdjustmentSql.ADJUSTMENT_LATERAL),
                 new MapSqlParameterSource("tenantId", task.tenantId())
                         .addValue("from", java.sql.Timestamp.from(task.periodFrom()))
                         .addValue("to", java.sql.Timestamp.from(task.periodTo())),
@@ -203,9 +215,37 @@ public class ExportTaskService {
                             rs.getObject("credential_id") != null
                                     ? String.valueOf(rs.getObject("credential_id"))
                                     : null);
+                    row.put("netInputTokens", rs.getObject("net_input_tokens"));
+                    row.put("netOutputTokens", rs.getObject("net_output_tokens"));
+                    row.put("netCacheReadInputTokens", rs.getObject("net_cache_read_tokens"));
+                    row.put("netCacheCreationInputTokens", rs.getObject("net_cache_creation_tokens"));
+                    row.put("adjusted", rs.getBoolean("adjusted"));
                     return row;
                 });
     }
+
+    /**
+     * The CSV's column order, declared once.
+     *
+     * <p>
+     * Both the header and every data row are built from this list, so the two
+     * cannot disagree. They used to be independent — a hand-written header literal
+     * plus the row map's insertion order — and they silently drifted when
+     * {@code client_ip} was added (V52/#605): the header kept 18 data columns while
+     * each row carried 19, shifting {@code isComplete} and everything after it one
+     * position. A misaligned export does not fail loudly; it just hands consumers
+     * the wrong values under the right names (#754).
+     * </p>
+     *
+     * <p>
+     * JSONL needs no such list: it serialises the row map directly.
+     * </p>
+     */
+    private static final List<String> CSV_COLUMN_ORDER = List.of("occurredAt", "modelId", "cacheLevel", "inputTokens",
+            "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "totalTokens", "latencyMs",
+            "upstreamStatusCode", "providerRequestId", "gatewayRequestId", "clientIp", "isComplete", "usageMissing",
+            "virtualKeyId", "projectId", "providerProductId", "credentialId", "netInputTokens", "netOutputTokens",
+            "netCacheReadInputTokens", "netCacheCreationInputTokens", "adjusted");
 
     /**
      * Issue #330: provider-request-id coverage determines the task's reconcile
@@ -244,15 +284,12 @@ public class ExportTaskService {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (GZIPOutputStream gzip = new GZIPOutputStream(out)) {
             if (format == ExportFormat.CSV) {
-                gzip.write("occurredAt,modelId,cacheLevel,inputTokens,outputTokens,cacheReadInputTokens,"
+                gzip.write((String.join(",", CSV_COLUMN_ORDER) + ",local_caliber_note\n")
                         .getBytes(StandardCharsets.UTF_8));
-                gzip.write("cacheCreationInputTokens,totalTokens,latencyMs,upstreamStatusCode,providerRequestId,"
-                        .getBytes(StandardCharsets.UTF_8));
-                gzip.write("gatewayRequestId,isComplete,usageMissing,virtualKeyId,projectId,providerProductId,"
-                        .getBytes(StandardCharsets.UTF_8));
-                gzip.write("credentialId,local_caliber_note\n".getBytes(StandardCharsets.UTF_8));
                 for (Map<String, Object> row : rows) {
-                    gzip.write(join(row.values()).getBytes(StandardCharsets.UTF_8));
+                    // Read in the declared order, never the map's insertion order, so a
+                    // reordering of the map can no longer silently shift the columns.
+                    gzip.write(join(CSV_COLUMN_ORDER.stream().map(row::get).toList()).getBytes(StandardCharsets.UTF_8));
                     gzip.write(("," + note + "\n").getBytes(StandardCharsets.UTF_8));
                 }
             } else {

@@ -3616,3 +3616,19 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **配额**：按 B′ 仍**零代码改动**，只读观察值。
 
+## 2026-09-17 用量调整③：导出调整标记（#709 / F20）+ 顺带修复 CSV 表头错位（#754）
+
+**范围**：CSV 与 JSONL 的用量导出行新增 `netInputTokens` / `netOutputTokens` / `netCacheReadInputTokens` / `netCacheCreationInputTokens` 与 `adjusted`；**观察值列保持原样**，净额另列给出。至此 #709 的四条验收标准全部达成。
+
+**顺带修掉一个既有缺陷（#754）**：CSV 表头漏了 `clientIp` 一列——数据行 19 个值、表头 18 个名，**自 `isComplete` 起每一列错位一格**。任何按列名解析该导出文件的消费者都拿到**错误的值且不会报错**，真实的 `local_caliber_note` 变成无人认领的第 20 个字段。`client_ip` 是 V52（#605）引入的，疑为该次加列漏改表头；既有测试只断言 `csv.contains("local_caliber_note")`——字段**存在**即通过，故长期未被发现。
+
+**修法不止补一列**：表头与数据行原本是**两份独立真相**（手写字符串 vs map 插入顺序）。已改为**两者都由同一份声明的列顺序 `CSV_COLUMN_ORDER` 派生**，一并去掉"下次加列还会再错"的可能性。
+
+**测试的可信度**：新回归测试**按列名取值**而非搜字符串，并在实现里临时删掉 `clientIp` **验证过它确实会变红**——有过"会通过"和"会失败"两种观察，不是一条永远绿的摆设。
+
+**共享而非复制**：净额 SQL 抽成 `UsageAdjustmentSql`（`persistence-postgres`），明细、汇总、导出三处共用。若各处各抄一份，正是当初选择"净额在 SQL 里算"要避免的漂移。该类因此提为 public——控制面本来就在直写 `usage_event` 的 SQL，那条边界早已跨过，共享优于复制。
+
+**一处刻意不改**：`join()` 用 `sb.length() > 0` 判分隔符，首列为空串时会吞掉逗号——但首列是 `occurredAt`（NOT NULL），**构造不出触发用例**，故不动。没有失败用例就不改，避免"修一段无法证明的代码"。
+
+**未做**：前端（用量表净额列、审计页 action 标签）——本地无 node_modules 跑不了 vitest；且调整目前只能经 API 录入，前端不一致**无用户可碰到**。已记为待办。
+
