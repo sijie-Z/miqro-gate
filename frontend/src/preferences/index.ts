@@ -24,7 +24,8 @@ export interface Preferences {
   grayMode: boolean; // default false
   colorWeakMode: boolean; // default false
   collapsed: boolean; // default false (rail collapsed to icons)
-  contentCompact: ContentCompact; // default 'fixed'
+  contentCompact: ContentCompact; // default 'wide' (fluid — vben v5 fills the viewport; 'fixed' caps at 1200px)
+  showPageDesc: boolean; // page-header description line, default true (a click on any page title toggles it too)
   animations: boolean; // default true
   lockMinutes: number; // auto-lock idle timeout in minutes (0 = off), default 0
   sidebarWidth: number; // expanded rail width in px, default 210
@@ -43,7 +44,8 @@ const DEFAULT_PREFERENCES: Preferences = {
   grayMode: false,
   colorWeakMode: false,
   collapsed: false,
-  contentCompact: 'fixed',
+  contentCompact: 'wide',
+  showPageDesc: true,
   animations: true,
   lockMinutes: 0,
   sidebarWidth: 210,
@@ -82,6 +84,7 @@ export function applyPreferences(): void {
   }
   root.dataset.menuTheme = preferences.menuTheme;
   root.dataset.compact = preferences.contentCompact;
+  root.dataset.pageDesc = preferences.showPageDesc ? 'show' : 'hide';
   root.dataset.gray = preferences.grayMode ? 'on' : 'off';
   root.dataset.colorWeak = preferences.colorWeakMode ? 'on' : 'off';
   root.dataset.anim = preferences.animations ? 'on' : 'off';
@@ -121,6 +124,7 @@ const BOOLEAN_KEYS: readonly BooleanPreferenceKey[] = [
   'showHeader',
   'showLogo',
   'showTabRefresh',
+  'showPageDesc',
   'grayMode',
   'colorWeakMode',
   'collapsed',

@@ -50,6 +50,7 @@ import {
   UsergroupCircleIcon,
 } from 'tdesign-icons-vue-next';
 import { useAuthStore } from '@/stores/auth';
+import { installPageDescToggle } from '@/utils/page-desc-toggle';
 import { language } from '@/i18n';
 import SettingsDrawer from '@/components/SettingsDrawer.vue';
 import LockScreen from '@/components/LockScreen.vue';
@@ -240,6 +241,11 @@ function updateNarrow() {
 // #440: initialize from the CURRENT width and clean the listener up on unmount
 // (the old top-level addEventListener never fired before the first resize and
 // leaked one listener per login).
+// #830: clicking any page title collapses/expands the description line under
+// it (delegated, installed once — headers are hand-rolled across 30+ views,
+// and the 界面设置 drawer carries the same preference for discoverability).
+installPageDescToggle();
+
 onMounted(() => {
   updateNarrow();
   window.addEventListener('resize', updateNarrow);

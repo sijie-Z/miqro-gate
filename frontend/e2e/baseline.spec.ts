@@ -1414,7 +1414,8 @@ test('model approval request page baseline at 1440x900', async ({ page }) => {
   });
 });
 
-test('forbidden aesthetics are absent from the rendered shell', async ({ page }) => {  await page.setViewportSize({ width: 1440, height: 900 });
+test('forbidden aesthetics are absent from the rendered shell', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   await mockApi(page, true);
   await page.goto('/app/keys');
   await page.waitForLoadState('networkidle');
@@ -1524,4 +1525,47 @@ test('the built stylesheet keeps html-attribute rules at top level (brace-slip g
     .locator('.new-shell__brand-name')
     .evaluate((el) => getComputedStyle(el).color);
   expect(brandColor).toBe('rgb(255, 255, 255)');
+});
+
+test('#830: a large viewport gets a fluid band, the fixed cap centers, and titles collapse the description', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1920, height: 1000 });
+  await mockApi(page, true);
+  await page.goto('/app/keys');
+  await page.waitForLoadState('networkidle');
+
+  // Default = fluid: the band spans the viewport minus the rail (vben v5
+  // fills the viewport — measured at 1920 on their workbench, 1677px cards).
+  const fluid = await page.locator('.ui-page').boundingBox();
+  expect(fluid).not.toBeNull();
+  expect(Math.round(fluid!.width)).toBeGreaterThan(1600);
+
+  // 'fixed 1200' caps AND centers the band instead of hugging the rail.
+  await page.evaluate(() => {
+    const prefs = JSON.parse(localStorage.getItem('miqrolegate.prefs') ?? '{}') as Record<
+      string,
+      unknown
+    >;
+    localStorage.setItem(
+      'miqrolegate.prefs',
+      JSON.stringify({ ...prefs, contentCompact: 'fixed' }),
+    );
+  });
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  const fixed = await page.locator('.ui-page').boundingBox();
+  expect(Math.round(fixed!.width)).toBeGreaterThan(1190);
+  expect(Math.round(fixed!.width)).toBeLessThan(1210);
+  expect(Math.round(fixed!.x)).toBeGreaterThan(300);
+
+  // Clicking the page title collapses the description line, and the choice
+  // survives a reload (showPageDesc preference).
+  const desc = page.locator('.ui-page-desc').first();
+  await expect(desc).toBeVisible();
+  await page.locator('.ui-page-title').first().click();
+  await expect(desc).toBeHidden();
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.ui-page-desc').first()).toBeHidden();
 });
