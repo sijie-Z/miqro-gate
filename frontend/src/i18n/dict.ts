@@ -1720,6 +1720,66 @@ export const DICT: Record<string, string> = {
   '总成本': 'Total cost',
   '按官方价目估算': 'est. at official list prices',
   '该窗口没有用量': 'No usage in this window',
+  '接入指引':
+    'Access guide',
+  '或 · 手动配置':
+    'or · manual setup',
+  '导入目标应用':
+    'Import target app',
+  '导入到 CC Switch':
+    'Import to CC Switch',
+  '复制导入链接':
+    'Copy import link',
+  '已发送…':
+    'Sent…',
+  '重新发送导入请求':
+    'Resend the import request',
+  '正在唤起 CC Switch…':
+    'Opening CC Switch…',
+  '已唤起 CC Switch ✓':
+    'CC Switch opened ✓',
+  '未检测到 CC Switch 被唤起':
+    'CC Switch was not detected opening',
+  '在 CC Switch 弹出的「导入确认」窗中点确认（密钥显示为掩码属正常）。':
+    'Confirm in the CC Switch “import” dialog (a masked key is normal).',
+  '若列表没出现，完全退出并重开 CC Switch 再看。':
+    'If the entry is missing, fully quit and reopen CC Switch.',
+  '可能未安装 CC Switch，或浏览器拦截了 ccswitch:// 跳转。':
+    'CC Switch may not be installed, or the browser blocked the ccswitch:// jump.',
+  '可点「复制导入链接」，粘贴到浏览器地址栏手动触发。':
+    'Use “Copy import link” and paste it into the browser address bar to trigger manually.',
+  '或直接使用下方「手动配置」，把片段贴进对应客户端配置文件。':
+    'Or use the manual setup below and paste the snippet into the client config file.',
+  '每确认一次导入会在 CC Switch 中新增一条供应商记录，请勿重复点击。':
+    'Every confirmed import adds one provider entry in CC Switch — avoid repeated clicks.',
+  '将导入为 CC Switch 的「Claude Code」供应商，网关地址与密钥自动填入，无需手抄。':
+    'Imports a CC Switch “Claude Code” provider with the gateway URL and key filled in.',
+  '将导入为 CC Switch 的「Codex」供应商（CC Switch 固定生成 wire_api = "responses" 形态）——适用于上游产品支持 OpenAI Responses 的场景；若你的产品仅支持 Chat Completions，请改用下方手动配置的 Codex 片段。':
+    'Imports a CC Switch “Codex” provider (CC Switch always generates wire_api = "responses") — use it when the upstream product supports OpenAI Responses; for Chat-Completions-only products use the manual Codex snippet below.',
+  '明文密钥':
+    'Plaintext key',
+  '模型（用于片段与导入的默认模型）':
+    'Model (used in snippets and as the import default)',
+  '默认模型':
+    'Default model',
+  '只能调用该密钥已授权的模型；未授权模型会被网关直接拒绝（不会静默降级）。':
+    'Only models granted to this key are callable; anything else is rejected by the gateway (no silent downgrade).',
+  '终端环境变量（当前终端生效）':
+    'Terminal environment variables (this terminal only)',
+  'VSCode / JetBrains 插件（Claude Code 扩展）读取此文件。':
+    'The VSCode / JetBrains plugin (Claude Code extension) reads this file.',
+  'auth.json 方式':
+    'auth.json mode',
+  '环境变量方式':
+    'Environment-variable mode',
+  'auth.json 含明文密钥，请勿提交到版本库、分享或粘贴到公开工单。':
+    'auth.json holds the plaintext key — never commit, share, or paste it into a public ticket.',
+  '环境变量方式：密钥不写进配置文件，按上方 config.toml 注释设置 MIQROKEY_API_KEY 即可（Windows CMD 用 set，PowerShell 用 $env:）。':
+    'Environment-variable mode: the key stays out of the config file — set MIQROKEY_API_KEY as the config.toml comment shows (set on Windows CMD, $env: on PowerShell).',
+  'Base URL / API Key（含连通性自测）':
+    'Base URL / API key (with a connectivity smoke test)',
+  '导入目标可选 Claude Code / Codex，自动填入网关地址与密钥、不会改动你当前启用的供应商； CC Switch 弹出确认窗、点击确认后即完成。':
+    'Choose Claude Code or Codex as the target: the gateway URL and key are filled in, and your currently active CC Switch provider is left untouched; confirm in the CC Switch dialog to finish.',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [
@@ -1912,4 +1972,5 @@ export const PATTERNS: Array<[RegExp, string]> = [
     /^共\ (\d+)\ 个产品实例当前不是\ VERIFIED。$/,
     '$1 product instances are not currently VERIFIED.',
   ],
+  [/^打开 CC Switch 的「(.+?)」分组，即可看到新增的「MiQroKey · (.+?)」。$/, 'Open the “$1” group in CC Switch — the new “MiQroKey · $2” entry is right there.'],
 ];

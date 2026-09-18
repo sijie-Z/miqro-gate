@@ -389,6 +389,14 @@ describe('NextKeysView', () => {
     expect(document.querySelector('[data-testid="secret-ccswitch"]')).toBeTruthy();
     expect(document.querySelector('[data-testid="secret-copy-env"]')).toBeTruthy();
     expect(document.querySelector('[data-testid="secret-copy-settings"]')).toBeTruthy();
+    // #839: the import panel offers both targets, defaulting from the purpose
+    // (this key is CLAUDE_CODE) — Codex stays one click away.
+    expect(document.querySelector('[data-testid="secret-ccswitch-app-claude"]')).toBeTruthy();
+    const codexTarget = document.querySelector(
+      '[data-testid="secret-ccswitch-app-codex"]',
+    ) as HTMLInputElement;
+    expect(codexTarget).toBeTruthy();
+    expect(codexTarget.checked).toBe(false);
   });
 
   it('surfaces API errors with request ids in the create form', async () => {

@@ -17,14 +17,21 @@ import {
 } from 'radix-vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
+import CcSwitchImport from '@/components/CcSwitchImport.vue';
 import {
-  ccSwitchImportLink,
   claudeEnvSnippet,
+  claudeSettingsPath,
   claudeSettingsSnippet,
+  codexAuthJsonModeTomlSnippet,
+  codexAuthJsonSnippet,
+  codexAuthPath,
+  codexConfigPath,
   codexTomlSnippet,
+  defaultAppForPurpose,
   openaiCompatSnippet,
   SHELL_FLAVOR_LABEL,
   USAGE_CLIENT_LABEL,
+  type CodexAuthMode,
   type ShellFlavor,
   type UsageClient,
 } from '@/lib/ccswitch';
@@ -387,7 +394,7 @@ async function createKey() {
     resetForm();
     await load();
     toast.success('虚拟密钥已创建');
-    openReveal(response, createdName, createdModels);
+    openReveal(response, createdName, createdModels, createPurpose.value);
   } catch (error) {
     if (error instanceof ApiError) {
       formError.value = error.message;
@@ -402,10 +409,16 @@ async function createKey() {
 
 // ---- reveal (secret shown once) ----
 
-function openReveal(response: CreateVirtualKeyResponse, keyName: string, models: string[]) {
+function openReveal(
+  response: CreateVirtualKeyResponse,
+  keyName: string,
+  models: string[],
+  purpose?: string,
+) {
   revealData.value = response;
   revealKeyName.value = keyName;
   revealModels.value = [...models];
+  revealPurpose.value = purpose;
   revealAcked.value = false;
   revealCopied.value = false;
   revealOpen.value = true;
@@ -439,6 +452,8 @@ async function copySecret() {
 /** Key identity captured at create/rotate time (the secret is only shown here). */
 const revealKeyName = ref('');
 const revealModels = ref<string[]>([]);
+/** Declarative purpose of the revealed key — seeds the import target app. */
+const revealPurpose = ref<string | undefined>(undefined);
 
 /** Row-level「接入 CC Switch」dialog state. */
 const usageOpen = ref(false);
@@ -448,10 +463,26 @@ const usageShell = ref<ShellFlavor>('posix');
 const SHELL_FLAVORS = Object.keys(SHELL_FLAVOR_LABEL) as ShellFlavor[];
 const usageClient = ref<UsageClient>('claude');
 const USAGE_CLIENTS = Object.keys(USAGE_CLIENT_LABEL) as UsageClient[];
+/** Manual-model selection feeding the snippets and the import deep link. */
+const usageSelectedModel = ref('');
+/** Codex credential placement for the manual-config section (#839). */
+const usageCodexAuth = ref<CodexAuthMode>('auth-json');
+const CODEX_AUTH_MODES: CodexAuthMode[] = ['auth-json', 'env'];
+const CODEX_AUTH_LABEL: Record<CodexAuthMode, string> = {
+  'auth-json': 'auth.json 方式',
+  env: '环境变量方式',
+};
 
-/** First allowed model of the inspected key — seeds the per-client snippets. */
+/** Selected (or first granted) model of the inspected key — seeds the snippets. */
 function usageModel(): string {
-  return usageKey.value?.modelIds?.[0] ?? '';
+  return usageSelectedModel.value;
+}
+
+/** Codex config.toml variant matching the chosen credential placement. */
+function codexConfigSnippet(): string {
+  return usageCodexAuth.value === 'auth-json'
+    ? codexAuthJsonModeTomlSnippet(gatewayBaseUrl(), usageModel())
+    : codexTomlSnippet(gatewayBaseUrl(), usageModel());
 }
 
 function gatewayBaseUrl(): string {
@@ -461,27 +492,6 @@ function gatewayBaseUrl(): string {
 /** Template-safe accessor: the dialog only renders with revealData present. */
 function revealSecret(): string {
   return revealData.value?.secret ?? '';
-}
-
-function importFromReveal() {
-  if (!revealData.value?.secret) return;
-  window.location.href = ccSwitchImportLink(
-    revealData.value.secret,
-    revealKeyName.value,
-    gatewayBaseUrl(),
-    revealModels.value[0],
-  );
-}
-
-function importFromUsage() {
-  const secret = usagePastedSecret.value.trim();
-  if (!secret || !usageKey.value) return;
-  window.location.href = ccSwitchImportLink(
-    secret,
-    usageKey.value.name ?? '',
-    gatewayBaseUrl(),
-    usageKey.value.modelIds?.[0],
-  );
 }
 
 async function copyText(text: string, okMessage: string) {
@@ -496,6 +506,9 @@ async function copyText(text: string, okMessage: string) {
 function openUsageGuide(key: VirtualKeyView) {
   usageKey.value = key;
   usagePastedSecret.value = '';
+  usageSelectedModel.value = key.modelIds?.[0] ?? '';
+  usageClient.value = 'claude';
+  usageCodexAuth.value = 'auth-json';
   usageOpen.value = true;
 }
 
@@ -538,7 +551,7 @@ async function handleRotate(key: VirtualKeyView) {
         // server contract: listed keys always carry their id
         const response = await api.rotateVirtualKey(key.id!);
         await load();
-        openReveal(response, key.name ?? '', key.modelIds ?? []);
+        openReveal(response, key.name ?? '', key.modelIds ?? [], key.purpose);
       } catch (error) {
         if (error instanceof ApiError) {
           toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
@@ -1148,10 +1161,16 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
       <div class="next-keys__secret-box" data-testid="secret-value">
         <code>{{ revealData.secret }}</code>
       </div>
+      <CcSwitchImport
+        :secret="revealSecret()"
+        :key-name="revealKeyName"
+        :base-url="gatewayBaseUrl()"
+        :model="revealModels[0] ?? ''"
+        :default-app="defaultAppForPurpose(revealPurpose)"
+        :show-secret-input="false"
+        import-test-id="secret-ccswitch"
+      />
       <div class="next-keys__import" data-testid="secret-actions">
-        <UiButton variant="primary" data-testid="secret-ccswitch" @click="importFromReveal">
-          导入到 CC Switch
-        </UiButton>
         <UiButton
           variant="secondary"
           data-testid="secret-copy-env"
@@ -1173,8 +1192,8 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
         </UiButton>
       </div>
       <p class="next-keys__import-hint">
-        「导入到 CC Switch」会打开 CC Switch 的确认框，自动填入网关地址与密钥（Claude Code
-        供应商），无需手动配置。
+        导入目标可选 Claude Code / Codex，自动填入网关地址与密钥、不会改动你当前启用的供应商； CC
+        Switch 弹出确认窗、点击确认后即完成。
       </p>
       <label class="next-keys__ack">
         <input
@@ -1211,12 +1230,12 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
       </template>
     </UiDialog>
 
-    <!-- CC Switch access guide (row-level; the plaintext secret is never stored server-side) -->
+    <!-- 接入指引：一键导入（目标应用 + 反馈闭环）与手动配置（行级；服务端不存明文） -->
     <UiDialog
       :open="usageOpen"
-      title="接入 CC Switch"
-      description="服务端只保存密钥摘要，明文仅在创建/轮换时展示一次；手头没有明文时可直接轮换生成新密钥并导入。"
-      width="560px"
+      title="接入指引"
+      description="服务端只保存密钥摘要，明文仅在创建/轮换时展示一次；手头没有明文时可直接轮换生成新密钥再导入。"
+      width="640px"
       data-testid="usage-dialog"
       @update:open="usageOpen = $event"
     >
@@ -1230,6 +1249,19 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
           复制
         </UiButton>
       </p>
+      <CcSwitchImport
+        v-model:secret="usagePastedSecret"
+        :key-name="usageKey?.name ?? ''"
+        :base-url="gatewayBaseUrl()"
+        :model="usageSelectedModel"
+        :default-app="defaultAppForPurpose(usageKey?.purpose)"
+        import-test-id="usage-ccswitch"
+      />
+
+      <div class="next-keys__divider" role="separator" data-testid="usage-manual-divider">
+        <span>或 · 手动配置</span>
+      </div>
+
       <div
         class="next-keys__segmented"
         role="radiogroup"
@@ -1252,6 +1284,27 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
           <span>{{ USAGE_CLIENT_LABEL[client] }}</span>
         </label>
       </div>
+
+      <div v-if="(usageKey?.modelIds ?? []).length" class="ui-field" data-testid="usage-models">
+        <span class="ui-field__label">模型（用于片段与导入的默认模型）</span>
+        <div class="next-keys__model-chips" role="radiogroup" aria-label="默认模型">
+          <button
+            v-for="model in usageKey?.modelIds ?? []"
+            :key="model"
+            type="button"
+            class="next-keys__model-chip"
+            :class="{ 'next-keys__model-chip--on': usageSelectedModel === model }"
+            :data-testid="`usage-model-${model}`"
+            @click="usageSelectedModel = model"
+          >
+            {{ model }}
+          </button>
+        </div>
+        <p class="next-keys__field-hint">
+          只能调用该密钥已授权的模型；未授权模型会被网关直接拒绝（不会静默降级）。
+        </p>
+      </div>
+
       <template v-if="usageClient === 'claude'">
         <div
           class="next-keys__segmented"
@@ -1275,92 +1328,137 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             <span>{{ SHELL_FLAVOR_LABEL[flavor] }}</span>
           </label>
         </div>
-        <pre class="next-keys__snippet" data-testid="usage-env">{{
-          claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageShell)
-        }}</pre>
-        <div class="next-keys__import">
-          <UiButton
-            variant="secondary"
-            data-testid="usage-copy-env"
-            @click="
-              copyText(
-                claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageShell),
-                '环境变量模板已复制',
-              )
-            "
-          >
-            复制环境变量模板
-          </UiButton>
-          <UiButton
-            variant="secondary"
-            data-testid="usage-copy-settings"
-            @click="
-              copyText(
-                claudeSettingsSnippet('<粘贴你保存的密钥>', gatewayBaseUrl()),
-                'settings.json 模板已复制',
-              )
-            "
-          >
-            复制 settings.json 模板
-          </UiButton>
+        <div class="next-keys__cfg">
+          <div class="next-keys__cfg-head">
+            <span class="next-keys__cfg-title">终端环境变量（当前终端生效）</span>
+            <UiButton
+              variant="secondary"
+              size="sm"
+              data-testid="usage-copy-env"
+              @click="
+                copyText(
+                  claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageShell),
+                  '环境变量模板已复制',
+                )
+              "
+            >
+              复制
+            </UiButton>
+          </div>
+          <pre class="next-keys__snippet" data-testid="usage-env">{{
+            claudeEnvSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageShell)
+          }}</pre>
+        </div>
+        <div class="next-keys__cfg">
+          <div class="next-keys__cfg-head">
+            <span class="next-keys__cfg-title ui-mono">{{ claudeSettingsPath(usageShell) }}</span>
+            <UiButton
+              variant="secondary"
+              size="sm"
+              data-testid="usage-copy-settings"
+              @click="
+                copyText(
+                  claudeSettingsSnippet('<粘贴你保存的密钥>', gatewayBaseUrl()),
+                  'settings.json 模板已复制',
+                )
+              "
+            >
+              复制
+            </UiButton>
+          </div>
+          <p class="next-keys__cfg-note">VSCode / JetBrains 插件（Claude Code 扩展）读取此文件。</p>
+          <pre class="next-keys__snippet" data-testid="usage-settings">{{
+            claudeSettingsSnippet('<粘贴你保存的密钥>', gatewayBaseUrl())
+          }}</pre>
         </div>
       </template>
       <template v-else-if="usageClient === 'codex'">
-        <pre class="next-keys__snippet" data-testid="usage-codex">{{
-          codexTomlSnippet(gatewayBaseUrl(), usageModel())
-        }}</pre>
-        <div class="next-keys__import">
-          <UiButton
-            variant="secondary"
-            data-testid="usage-copy-codex"
-            @click="
-              copyText(
-                codexTomlSnippet(gatewayBaseUrl(), usageModel()),
-                'Codex 配置模板已复制',
-              )
-            "
+        <div
+          class="next-keys__segmented"
+          role="radiogroup"
+          aria-label="认证方式"
+          data-testid="usage-codex-auth"
+        >
+          <label
+            v-for="mode in CODEX_AUTH_MODES"
+            :key="mode"
+            class="next-keys__seg"
+            :class="{ 'next-keys__seg--on': usageCodexAuth === mode }"
           >
-            复制 Codex 配置模板
-          </UiButton>
+            <input
+              v-model="usageCodexAuth"
+              type="radio"
+              name="usage-codex-auth"
+              :value="mode"
+              class="next-keys__seg-input"
+            />
+            <span>{{ CODEX_AUTH_LABEL[mode] }}</span>
+          </label>
         </div>
+        <div class="next-keys__cfg">
+          <div class="next-keys__cfg-head">
+            <span class="next-keys__cfg-title ui-mono">{{ codexConfigPath(usageShell) }}</span>
+            <UiButton
+              variant="secondary"
+              size="sm"
+              data-testid="usage-copy-codex"
+              @click="copyText(codexConfigSnippet(), 'Codex 配置模板已复制')"
+            >
+              复制
+            </UiButton>
+          </div>
+          <pre class="next-keys__snippet" data-testid="usage-codex">{{ codexConfigSnippet() }}</pre>
+        </div>
+        <div v-if="usageCodexAuth === 'auth-json'" class="next-keys__cfg">
+          <div class="next-keys__cfg-head">
+            <span class="next-keys__cfg-title ui-mono">{{ codexAuthPath(usageShell) }}</span>
+            <UiButton
+              variant="secondary"
+              size="sm"
+              data-testid="usage-copy-codex-auth"
+              @click="copyText(codexAuthJsonSnippet(), 'auth.json 模板已复制')"
+            >
+              复制
+            </UiButton>
+          </div>
+          <p class="next-keys__cfg-note">
+            auth.json 含明文密钥，请勿提交到版本库、分享或粘贴到公开工单。
+          </p>
+          <pre class="next-keys__snippet" data-testid="usage-codex-auth">{{
+            codexAuthJsonSnippet()
+          }}</pre>
+        </div>
+        <p v-else class="next-keys__cfg-note">
+          环境变量方式：密钥不写进配置文件，按上方 config.toml 注释设置 MIQROKEY_API_KEY
+          即可（Windows CMD 用 set，PowerShell 用 $env:）。
+        </p>
       </template>
       <template v-else>
-        <pre class="next-keys__snippet" data-testid="usage-openai">{{
-          openaiCompatSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageModel())
-        }}</pre>
-        <div class="next-keys__import">
-          <UiButton
-            variant="secondary"
-            data-testid="usage-copy-openai"
-            @click="
-              copyText(
-                openaiCompatSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageModel()),
-                'Base URL / Key 模板已复制',
-              )
-            "
-          >
-            复制 Base URL / Key
-          </UiButton>
+        <div class="next-keys__cfg">
+          <div class="next-keys__cfg-head">
+            <span class="next-keys__cfg-title">Base URL / API Key（含连通性自测）</span>
+            <UiButton
+              variant="secondary"
+              size="sm"
+              data-testid="usage-copy-openai"
+              @click="
+                copyText(
+                  openaiCompatSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageModel()),
+                  'Base URL / Key 模板已复制',
+                )
+              "
+            >
+              复制
+            </UiButton>
+          </div>
+          <pre class="next-keys__snippet" data-testid="usage-openai">{{
+            openaiCompatSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageModel())
+          }}</pre>
         </div>
       </template>
-      <div class="ui-field">
-        <span class="ui-field__label">手上还有明文密钥？粘贴后可直接一键导入</span>
-        <UiInput
-          v-model="usagePastedSecret"
-          placeholder="mqk_live_…"
-          data-testid="usage-paste-secret"
-        />
-      </div>
+
       <template #footer>
         <UiButton variant="secondary" @click="usageOpen = false">关闭</UiButton>
-        <UiButton
-          variant="primary"
-          :disabled="!usagePastedSecret.trim()"
-          data-testid="usage-ccswitch"
-          @click="importFromUsage"
-        >
-          导入到 CC Switch
-        </UiButton>
       </template>
     </UiDialog>
 
@@ -1781,6 +1879,80 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-all;
+}
+.next-keys__divider {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  margin: var(--ui-space-1) 0;
+  color: var(--ui-foreground-faint);
+  font-size: var(--ui-font-size-xs);
+}
+
+.next-keys__divider::before,
+.next-keys__divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--ui-border-muted);
+}
+
+.next-keys__cfg {
+  margin-top: var(--ui-space-3);
+}
+
+.next-keys__cfg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+}
+
+.next-keys__cfg-title {
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-medium);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-keys__cfg-note {
+  margin: var(--ui-space-1) 0 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+  line-height: var(--ui-line-height-base);
+}
+
+.next-keys__model-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+  margin-top: var(--ui-space-2);
+}
+
+.next-keys__model-chip {
+  border: 1px solid var(--ui-input-border);
+  background: var(--ui-card);
+  color: var(--ui-foreground-secondary);
+  border-radius: 999px;
+  height: 26px;
+  padding: 0 var(--ui-space-3);
+  font-size: var(--ui-font-size-xs);
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    border-color var(--ui-ease),
+    color var(--ui-ease),
+    background-color var(--ui-ease);
+}
+
+.next-keys__model-chip:hover {
+  border-color: var(--ui-primary);
+  color: var(--ui-foreground);
+}
+
+.next-keys__model-chip--on {
+  background: var(--ui-primary-soft);
+  border-color: var(--ui-primary);
+  color: var(--ui-primary-text);
+  font-weight: var(--ui-weight-medium);
 }
 .next-keys__extra-projects {
   display: flex;
