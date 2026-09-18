@@ -678,14 +678,19 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 
 - **动机**：成本原先按**查询时刻**的最新价目现算，所以改一次价目，历史报表金额跟着变。本端点把「这笔 token 当时依据什么价格计算」冻结到行上。
 - 取值：`price_snapshot` 中 `effective_from <= 该行 occurred_at` 的最新一行（同 `effective_from` 由 `id DESC` 做确定性 tie-break）。**不是按回填时刻**——否则会造出「看起来是历史快照、实际是延迟快照」的假象。
-- 返回 `{scanned, complete, partial, unavailable, baseCostFilled}`：`COMPLETE`=四维齐全、`PARTIAL`=部分维度有价、`UNAVAILABLE`=已评估但事件发生时无可查价格。
+- 返回 `{scanned, complete, partial, unavailable, baseCostFilled, reclassified}`：`COMPLETE`=四维齐全、`PARTIAL`=部分维度有价、`UNAVAILABLE`=已评估但事件发生时无可查价格。
 - **`UNAVAILABLE` 的行价格列保持 NULL，不写 0**——「价格未知」与「免费」是不同的审计事实；静默写 0 会低估历史支出。
-- **幂等**：只处理 `price_status IS NULL`（尚未评估）的行；已定状态的行（含 `UNAVAILABLE`）**永不重评**——重跑不能改写已作出的决定。窗口 ≤ 93 天，大范围可分次覆盖。
+- **盖章幂等**：盖章只处理 `price_status IS NULL`（尚未评估）的行。**价格列与金额永不改写**——对已评估的行，重跑不会重新定价。窗口 ≤ 93 天，大范围可分次覆盖。
 - **同时补写 `base_cost_amount`（#771）**：`baseCostFilled` = 本次为「已盖章但缺冻结金额」的行补上的条数（V66 之前完成回填的库，其历史行金额全为 NULL，而盖章通道不会重选它们）。
-  补写**只从该行已冻结的 `price_*` 列派生**——不查价目、不改 `price_status`、不动金额，因此同样只能**补全**、不能**修订**。
-- 写 `USAGE_PRICE_BACKFILL` 审计（含五项计数）。
+  补写**只从该行已冻结的 `price_*` 列派生**——不查价目、不改 `price_status`、不动金额，因此只能**补全**、不能**修订**。
+- **同时重算派生标签（#777）**：`reclassified` = 本次把「按现行判据已过时」的 `price_status` 纠正过来的条数。
+  判据会演进（#765 把「按价格是否可得」改成「按该行是否**用到**该维度」），而旧章会一直留在行上——那批行既不是"另一种口径"，也不带判据版本，读者无从分辨，**就是错数据**。
+  本趟从该行**已冻结的 `price_*` 列**重算，**不改价格列、不动金额**：**标签是派生、金额是事实**，这是它与上一条只做"补全"的分界。
+  > 本条**取代**此前那句无条件的「已定状态的行永不重评」。被保护的不变式是**不重估价格、不移动金额**，不是「标签不可纠正」。
+- **定时收敛**：`miqrokey.usage-price-reconcile.enabled`（默认关）开启后每 `cycle-ms` 扫最近 48 小时，让上述两条无需人工记得跑端点。
+- 写 `USAGE_PRICE_BACKFILL` 审计（含各项计数）；定时通道以**无操作人**（系统发起）记同一条目。
 - 错误码：`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400）。
-- **当前范围**：本端点只**建立**价格基座。成本读取改走该基座是后续增量——在此之前历史成本仍按旧逻辑计算，因此**本端点单独上线不改变任何上报数字**。
+- **不改变任何上报数字**：读取路径走自己的 as-of 判定，这三趟只补齐/纠正**存储列**，不重估价格、不动金额。
 
 ### 5.7 Webhook 端点（G4.5）
 
