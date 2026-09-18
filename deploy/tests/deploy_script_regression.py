@@ -227,6 +227,23 @@ def prepare_base() -> None:
     subprocess.run(["docker", "tag", BASE_IMAGE, BASE_LOCAL], check=True, capture_output=True)
 
 
+def require_docker() -> None:
+    """Say plainly when the environment, not the code, is what is missing.
+
+    This gate drives real containers, so it cannot run without a daemon. Failing
+    with a clear sentence keeps a missing prerequisite from being read as a broken
+    deploy script — the two need different responses from whoever sees it red.
+    """
+    if shutil.which("docker") is None:
+        raise SystemExit("docker is not available: this gate drives real containers, so it "
+                         "cannot run here. That is an environment gap, not a finding about "
+                         "deploy/deploy.sh.")
+    probe = subprocess.run(["docker", "info"], capture_output=True)
+    if probe.returncode != 0:
+        raise SystemExit("the docker daemon is not reachable: this gate drives real "
+                         "containers. Environment gap, not a finding about deploy/deploy.sh.")
+
+
 def flock_shim(root: str) -> str | None:
     """A no-op flock for platforms without util-linux (Windows, Git Bash).
 
@@ -258,6 +275,7 @@ def main() -> int:
         print("cannot find %s" % args.script, file=sys.stderr)
         return 2
 
+    require_docker()
     prepare_base()
     root = tempfile.mkdtemp(prefix="deploy-regression-")
     shim = flock_shim(root)
