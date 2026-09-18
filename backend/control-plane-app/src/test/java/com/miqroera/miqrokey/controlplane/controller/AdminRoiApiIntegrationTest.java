@@ -151,8 +151,7 @@ class AdminRoiApiIntegrationTest {
         fx.insertUsage(1000L, 500L);
 
         mockMvc.perform(get("/api/v1/admin/usage/roi").cookie(sessionCookie)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.totals.paidCost").value(0))
-                .andExpect(jsonPath("$.totals.savedCost").value(0))
+                .andExpect(jsonPath("$.totals.paidCost").value(0)).andExpect(jsonPath("$.totals.savedCost").value(0))
                 .andExpect(jsonPath("$.totals.savedPct").value(nullValue()))
                 .andExpect(jsonPath("$.totals.pricingStatus").value("UNAVAILABLE"))
                 .andExpect(jsonPath("$.totals.unpriced.unavailableEvents").value(1));

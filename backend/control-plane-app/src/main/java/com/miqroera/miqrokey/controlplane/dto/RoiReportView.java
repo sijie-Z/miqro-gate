@@ -22,12 +22,14 @@ import java.util.List;
 public record RoiReportView(Instant from, Instant to, RoiTotals totals, List<RoiDay> byDay) {
 
     /**
-     * @param pricingStatus whether every token dimension that took part had a price;
-     *            anything but {@code COMPLETE} means {@code paidCost} / {@code savedCost}
+     * @param pricingStatus
+     *            whether every token dimension that took part had a price; anything
+     *            but {@code COMPLETE} means {@code paidCost} / {@code savedCost}
      *            are short of the whole (see {@code unpriced}).
-     * @param savedPct {@code savedCost} as a share of the hypothetical spend; <b>null</b>
-     *            when there is no cost basis at all, because that share is then
-     *            undefined rather than zero.
+     * @param savedPct
+     *            {@code savedCost} as a share of the hypothetical spend;
+     *            <b>null</b> when there is no cost basis at all, because that share
+     *            is then undefined rather than zero.
      */
     public record RoiTotals(long upstreamRequests, long coalescedRequests, long l1Hits, long l2Hits,
             BigDecimal hitRatePct, BigDecimal paidCost, BigDecimal savedCost, BigDecimal savedPct,
