@@ -3930,3 +3930,21 @@ EXIT=2
 顺带加了 `--verify-only`：**部署线明确说要"部署前后各查一次"，而一个不能单独跑的检查不会被跑**。流水里两个身份都记，是为了事后能分辨"tag 被人重建了"与"当初就没换过去"。
 
 **分工**：脚本+文档进仓库（可评审），**装到服务器由部署线负责**。锁选**机器层**而不是"打卡制"——打卡依赖自觉，而我们已经知道至少有一个动作方不打招呼，荣誉制只会让守规矩的人排队。
+
+## 2026-09-18 部署脚本的 project directory 指错一层，把演示站打成「证书缺失 + 来源白名单默认值」（#802）
+
+**事故**：#794 的单入口部署脚本首次真机使用（13:11:39Z；两次调用相隔 13 秒——对端一次、我一次，都由脚本执行）之后演示站**全站不可用**。第一层症状是 portal 崩溃重启循环：`nginx: [emerg] cannot load certificate "/etc/nginx/certs/fullchain.pem" (No such file or directory)`；把挂载修好后第二层才露出来：登录一律 `403 ORIGIN_REJECTED`，容器 env 实证 `MIQROKEY_ORIGIN_ALLOWLIST=https://miqrokey.example.com`（yml 默认值），而 `deploy/.env` 写的是演示站域名。
+
+**根因**：脚本把 compose 的 `--project-directory` 钉在 `$LIVE_DIR`（`/opt/miqrokey`），而 compose 文件在 `$LIVE_DIR/deploy/`。project directory 决定两件事，两件都随之错位：**`.env` 从哪读**（读不到 → 全部 `${VAR:-default}` 落回默认值）与**相对挂载锚在哪**（`./secrets/certs` → 指向不存在的路径，而 **Docker 会把缺失的 bind 源创建成空目录**）。`up` 全程零报错、容器照报 `healthy`——脚本第 4 步"运行中的镜像 ID == 刚构建的 tag"照不到这两层，因为它俩都不改镜像 ID。
+
+**修法**：project directory 改取 `$(dirname "$COMPOSE")`；并把收尾断言从"发的是刚构建的"扩成"发的是配置正确的"——
+
+1. `.env` 里的 `MIQROKEY_ORIGIN_ALLOWLIST` 必须出现在容器的 `env` 里（不匹配即失败并指出是 env 未读取）；
+2. 宿主机有证书时，portal 容器内必须能看到 `fullchain.pem`（指向相对挂载解析错位）；
+3. **功能冒烟**（对端建议，采纳）：带正确 `Origin` 空体 `POST /api/v1/auth/login`，期望 `400`——`403`=白名单没进容器、`502/000`=nginx 够不到刚被换掉的上游；一条同时盖住两层，且对以后任何配置类回归都有效。
+
+**验证（演示站真机）**：**先证红**——用 project directory 指回 `$LIVE_DIR` 的变体跑一次，新断言如实报
+`ASSERT FAILED control-plane: MIQROKEY_ORIGIN_ALLOWLIST='https://miqrokey.example.com' but /opt/miqrokey/deploy/.env says 'https://124.220.165.175'`；
+换修好的脚本再跑，四条断言全绿（含 `verified smoke: API answers 400 to the configured Origin`），站点 HTTPS 200 / admin 登录 200。
+
+**现场处置**：`/opt/miqrokey/secrets`（Docker 创建的空目录）已换成指向 `deploy/secrets` 的软链（临时），并用正确 project directory 重建 cp+portal；修复脚本上线后可撤软链。
