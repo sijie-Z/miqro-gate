@@ -48,6 +48,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * the frozen column is actually being used rather than merely a fallback that
  * happens to look right.</li>
  * </ol>
+ *
+ * <p>
+ * Both are asserted on the aggregate <em>and</em> on the per-row detail list:
+ * the two read the same price expression (#710), so a cost that moves on one and
+ * not the other would be a bug in itself, and the agreement is asserted directly
+ * rather than assumed.
+ * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
@@ -166,6 +173,44 @@ class PriceBasisCostStabilityIntegrationTest {
         assertThat(cost()).isEqualByComparingTo("0.002");
     }
 
+    @Test
+    @DisplayName("a later price does not re-price the detail row either")
+    void laterPriceDoesNotMoveTheDetailRow() throws Exception {
+        BigDecimal before = detailCost();
+        assertThat(before).as("baseline must be priced, or this test proves nothing").isGreaterThan(BigDecimal.ZERO);
+
+        price("INPUT", PRICE_LATER, "99.00");
+        price("OUTPUT", PRICE_LATER, "99.00");
+
+        assertThat(detailCost()).as("the detail list must not follow a later price").isEqualByComparingTo(before);
+    }
+
+    @Test
+    @DisplayName("rewriting the historical price row does not move the detail row")
+    void rewritingTheHistoricalPriceRowDoesNotMoveTheDetailRow() throws Exception {
+        BigDecimal before = detailCost();
+        assertThat(before).as("baseline must be priced, or this test proves nothing").isGreaterThan(BigDecimal.ZERO);
+
+        jdbc.update("""
+                UPDATE price_snapshot SET unit_price = 77.00
+                 WHERE provider_product_id = :productId AND model_id = :modelId AND token_type = 'INPUT'
+                """, new MapSqlParameterSource("productId", product).addValue("modelId", MODEL));
+
+        assertThat(detailCost()).as("the detail row is priced from what the event carries")
+                .isEqualByComparingTo(before);
+    }
+
+    @Test
+    @DisplayName("the detail row and the aggregate read the same basis and agree (#710)")
+    void detailRowAndAggregateAgree() throws Exception {
+        Map<?, ?> row = detailRow();
+        BigDecimal detail = new BigDecimal(String.valueOf(row.get("cost")));
+
+        assertThat(detail).as("1000/1e6 * 1.00 + 500/1e6 * 2.00").isEqualByComparingTo("0.002");
+        assertThat(row.get("priced")).as("a fully priced row must say so").isEqualTo(true);
+        assertThat(detail).as("detail and summary must not disagree").isEqualByComparingTo(cost());
+    }
+
     // -------------------------------------------------------------------
 
     private BigDecimal cost() throws Exception {
@@ -177,6 +222,21 @@ class PriceBasisCostStabilityIntegrationTest {
         Map<?, ?> totals = (Map<?, ?>) body.get("totals");
         Map<?, ?> cost = (Map<?, ?>) totals.get("cost");
         return new BigDecimal(String.valueOf(cost.get("upstreamPaid")));
+    }
+
+    /** The one seeded event as the detail endpoint reports it. */
+    private Map<?, ?> detailRow() throws Exception {
+        MvcResult res = mockMvc.perform(get("/api/v1/admin/usage/records").param("size", "10")
+                .cookie(sessionCookie, csrfCookie)).andExpect(status().isOk()).andReturn();
+        Map<?, ?> body = objectMapper.readValue(res.getResponse().getContentAsString(StandardCharsets.UTF_8),
+                Map.class);
+        List<?> items = (List<?>) body.get("items");
+        assertThat(items).as("the seeded event must be listed, or a cost comparison is vacuous").hasSize(1);
+        return (Map<?, ?>) items.get(0);
+    }
+
+    private BigDecimal detailCost() throws Exception {
+        return new BigDecimal(String.valueOf(detailRow().get("cost")));
     }
 
     private void backfill() throws Exception {
