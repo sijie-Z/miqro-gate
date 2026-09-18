@@ -10,10 +10,20 @@ import * as api from '@/api';
 import { ChartBarIcon, LayersIcon, MoneyIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
-import { UiButton, UiDonut, UiSelect, UiStatusBadge, UiTable, UiTrendChart, toast } from '@/ui';
+import {
+  UiButton,
+  UiDonut,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  UiTooltip,
+  UiTrendChart,
+  toast,
+} from '@/ui';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import UsageAdjustChip from '@/components/UsageAdjustChip.vue';
 import { netTokens } from '@/lib/usage-net';
+import { costGapNote } from '@/lib/usage-pricing';
 import type { UiSelectOption } from '@/ui';
 import type { QuotaMetric, QuotaPeriod, UsageGroupBy } from '@/types/api';
 import type {
@@ -27,6 +37,13 @@ import type {
 
 const groupBy = ref<UsageGroupBy>('project');
 const summary = ref<UsageSummary | null>(null);
+
+/**
+ * #801: the totals' cost is not a total while this is non-null — some of the
+ * period's usage had no price in force when it happened. The API has said so since
+ * #766; the page just never showed it.
+ */
+const costCaveat = computed(() => costGapNote(summary.value?.totals));
 const summaryLoading = ref(true);
 const summaryError = ref('');
 
@@ -714,6 +731,9 @@ function formatTime(iso?: string): string {
         <span class="ui-num next-usage__totals-col">{{
           formatCost(summary.totals?.cost?.gatewayObserved)
         }}</span>
+        <UiTooltip v-if="costCaveat" :text="costCaveat">
+          <span class="next-usage__unpriced" data-testid="cost-unpriced">未定价</span>
+        </UiTooltip>
       </div>
     </section>
 
