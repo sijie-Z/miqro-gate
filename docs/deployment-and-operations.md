@@ -107,8 +107,10 @@ deploy/deploy.sh --context /opt/miqrokey-dev --commit <sha> --services "control-
 
 **它能证明什么、不能证明什么**——这条比上面三条都值得记住：第 1、2 条是**发布动作**的正确性（换没换、换的是不是那份），**不涉及功能是否正确**。一次配置回归可以让一个容器"镜像 ID 完全正确、healthy、并且拒绝所有登录"。所以：
 
-- `--smoke-url` 让本次运行去问运行中的栈要一个**真实客户端会要的东西**，状态码不匹配即失败（`--smoke-expect` 默认 `2??`，可给 `case` 模式如 `'200|401'`）
-- `--smoke-origin` 带上 Origin 头——**证一个依赖配置的行为，比证一个与配置无关的 200 有价值**：origin allowlist 本身就是配置
+- `--smoke-url` 让本次运行去问运行中的栈要一个**真实客户端会要的东西**，状态码不匹配即失败（`--smoke-expect` 用 `|` 分隔可选项如 `'200|401'`；默认取决于目标是谁选的——脚本自己推的 `'2??|400|401'`，运维给的 URL 是 `2??`）
+- `--smoke-method` / `--smoke-data`：方法与 JSON 请求体。**默认目标是按"这个请求能不能看见失败"选的**：`OriginInterceptor` 只守状态变更方法（`POST/PUT/PATCH/DELETE`），而且它是 `HandlerInterceptor`——在 handler mapping **之后**运行，所以 GET 既不进检查，打到只收 POST 的路由还会被 mapping 先回 405。**因此默认目标是 `POST <origin>/api/v1/auth/login` + 空 JSON 体**：它正是 #794 打坏的那个端点（登录全 403），它 CSRF 豁免（否则"少了 CSRF 的 403"与"错 origin 的 403"就分不出来），空体校验回 400——**400 恰恰证明请求到达了处理器，也就是 origin 被接受了**。403 判死
+- `--smoke-origin` 带上 Origin 头——**证一个依赖配置的行为，比证一个与配置无关的 200 有价值**：origin allowlist 本身就是配置。默认目标会带上 allowlist 的第一项（即正确 origin），所以配置没加载时拿到的就是 403，**会被判死**而不是被当成 200 放过去
+- **运维显式给了 `--smoke-url` 时方法仍是 GET**：对不是自己挑的目标强加 POST，就是又一条"比它检查的东西更严"的假阳性（#807 的教训）
 - **不传 `--smoke-url` 时脚本会明说"什么都没查"**，收尾语也只说 `deployed; image identity verified`，不说 "verified"——**那个词曾经盖过了它实际没查的东西**
 
 四条既有教训也编在里面，免得再踩：

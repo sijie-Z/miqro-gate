@@ -19,7 +19,8 @@
 #
 # Usage:
 #   deploy.sh --context DIR [--services "a b"] [--commit SHA] [--caller LABEL]
-#             [--smoke-url URL] [--smoke-origin ORIGIN] [--smoke-expect PATTERN]
+#             [--smoke-url URL] [--smoke-method METHOD] [--smoke-data BODY]
+#             [--smoke-origin ORIGIN] [--smoke-expect PATTERN]
 #             [--dry-run] [--verify-only]
 #
 #   --context      build tree (the one holding backend/ frontend/ deploy/): the
@@ -28,7 +29,14 @@
 #                  run fails unless it answers as expected. The image assertions
 #                  cannot tell a correct deployment from a healthy-looking wrong
 #                  one, and this is what can.
-#   --smoke-expect status pattern for that URL (default 2??, e.g. '200|401')
+#   --smoke-method HTTP method to use (default GET; the derived default target
+#                  below is a POST, because the origin check guards only
+#                  state-changing methods and a GET cannot observe a rejection)
+#   --smoke-data   request body, sent as JSON (default none; the derived target
+#                  sends {} so the request reaches the login route's validation)
+#   --smoke-expect status pattern for that URL. '|' separates alternatives. The
+#                  default depends on who chose the target: '2??|400|401' for the
+#                  derived one, '2??' for a URL given here
 #                  (--smoke-url defaults to the first MIQROKEY_ORIGIN_ALLOWLIST
 #                   entry in the env file; pass an empty value to opt out)
 #   --smoke-origin Origin header to send (the allowlist is config, so a request
@@ -62,7 +70,11 @@ PROJECT="${MIQROKEY_COMPOSE_PROJECT:-miqrokey}"
 # "auto" (the default) derives the target from the env file's allowlist below;
 # an explicit value is used as given; an explicit empty one opts out.
 SMOKE_URL="${MIQROKEY_DEPLOY_SMOKE_URL:-auto}"
-SMOKE_EXPECT="${MIQROKEY_DEPLOY_SMOKE_EXPECT:-2??}"
+# Left empty on purpose: the default differs by who chose the target, and the
+# derived value below is only known after the allowlist has been read.
+SMOKE_EXPECT="${MIQROKEY_DEPLOY_SMOKE_EXPECT:-}"
+SMOKE_METHOD="${MIQROKEY_DEPLOY_SMOKE_METHOD:-}"
+SMOKE_DATA="${MIQROKEY_DEPLOY_SMOKE_DATA:-}"
 SMOKE_ORIGIN="${MIQROKEY_DEPLOY_SMOKE_ORIGIN:-}"
 SMOKE_TIMEOUT="${MIQROKEY_DEPLOY_SMOKE_TIMEOUT:-20}"
 # The project directory is the compose file's own directory, and the env file is
@@ -89,6 +101,8 @@ while [ $# -gt 0 ]; do
         --commit) COMMIT="${2:?--commit needs a value}"; shift 2 ;;
         --caller) CALLER="${2:?--caller needs a value}"; shift 2 ;;
         --smoke-url) SMOKE_URL="${2-}"; shift 2 ;;
+        --smoke-method) SMOKE_METHOD="${2:?--smoke-method needs a method}"; shift 2 ;;
+        --smoke-data) SMOKE_DATA="${2-}"; shift 2 ;;
         --smoke-expect) SMOKE_EXPECT="${2:?--smoke-expect needs a pattern}"; shift 2 ;;
         --smoke-origin) SMOKE_ORIGIN="${2:?--smoke-origin needs an origin}"; shift 2 ;;
         --dry-run) DRY=1; shift ;;
@@ -240,41 +254,95 @@ if [ "$DRY" = 0 ]; then
     done <"$ENV_FILE"
 fi
 
+# `|` alternation is split here rather than handed to `case`: a bar that arrives
+# by expansion is a literal character in a case pattern — the separator is syntax
+# only when it is in the script text — so a pattern like '200|405' previously
+# matched nothing at all, and a 405 the operator had allowed still failed (#809).
+smoke_code_matches() {
+    smoke_pattern="$1"
+    smoke_seen="$2"
+    while [ -n "$smoke_pattern" ]; do
+        smoke_alt="${smoke_pattern%%|*}"
+        if [ "$smoke_alt" = "$smoke_pattern" ]; then
+            smoke_pattern=""
+        else
+            smoke_pattern="${smoke_pattern#*|}"
+        fi
+        [ -n "$smoke_alt" ] || continue
+        # Unquoted on purpose, and safe here: each alternative is a glob so that
+        # `2??` keeps meaning "three digits" — quoting it would match the literal
+        # text, and rewriting the whole pattern as an ERE would turn `2??` into
+        # "an optional 2" (grep -E reads `?` as a quantifier). The bar is already
+        # consumed above, so the trap SC2254 warns about cannot reach this line.
+        # shellcheck disable=SC2254
+        case "$smoke_seen" in
+            $smoke_alt) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# One request, described the same way wherever it is printed.
+smoke_curl() {
+    set -- -sS -o /dev/null -w '%{http_code}' --max-time "$SMOKE_TIMEOUT" -X "$SMOKE_METHOD"
+    if [ -n "$SMOKE_ORIGIN" ]; then
+        set -- "$@" -H "Origin: $SMOKE_ORIGIN"
+    fi
+    if [ -n "$SMOKE_DATA" ]; then
+        set -- "$@" -H 'Content-Type: application/json' -d "$SMOKE_DATA"
+    fi
+    curl "$@" "$SMOKE_URL" 2>/dev/null || true
+}
+
 # ---- 6. smoke: can a real client actually use it? ----------------------------
 # Sections 4 and 5 prove the right image is running. They say nothing about
 # whether it is *correct*: a container can be healthy, on exactly the right image,
 # and still reject its own origin with 403 because its .env was never loaded and
 # every variable fell back to a compose default. Only asking the stack to serve a
 # request catches that, so this step exists and does not pretend to be optional.
-# The derived default is the stack's own public origin: it is the one URL this
-# deployment exists for, it comes out of the very file whose absence caused the
-# outage, and a request carrying the allowlisted Origin exercises *config* rather
-# than liveness. Measured on the demo box, the host reaches its own origin in ~20ms
-# (hairpin works), so this is a real check rather than a hope.
+# The derived default has to be a request that *can* observe the failure this
+# step exists for, and the obvious one cannot. OriginInterceptor exempts every
+# method outside POST/PUT/PATCH/DELETE outright, and it is a HandlerInterceptor —
+# it therefore runs after handler mapping, so a GET aimed at a POST-only route is
+# answered 405 before the interceptor is consulted at all. An earlier revision
+# defaulted to `GET $origin/`; measured on the demo box, that returns 200 even
+# with a deliberately wrong Origin, which is to say the default target could never
+# have reported ORIGIN_REJECTED (#809).
+#
+# So the derived default is a POST to the login route: it is the endpoint the #794
+# outage actually broke (logins all 403), it is CSRF-exempt so nothing answers
+# before the origin check, and an empty JSON body earns a 400 from validation — a
+# code that proves the request reached the handler, i.e. that the origin was
+# accepted. Measured on the demo box, the host reaches its own origin in ~20ms
+# (hairpin works), so this stays a real check rather than a hope.
 if [ "$SMOKE_URL" = "auto" ]; then
     SMOKE_URL=""
     auto_origin="$(sed -n 's/^MIQROKEY_ORIGIN_ALLOWLIST=//p' "$ENV_FILE" 2>/dev/null | head -n 1 | cut -d, -f1)"
     case "$auto_origin" in
         http*)
-            SMOKE_URL="${auto_origin%/}/"
+            SMOKE_URL="${auto_origin%/}/api/v1/auth/login"
             : "${SMOKE_ORIGIN:=${auto_origin%/}}"
-            echo "smoke: defaulted to the allowlisted origin ($SMOKE_URL)"
+            [ -n "$SMOKE_METHOD" ] || SMOKE_METHOD=POST
+            [ -n "$SMOKE_DATA" ] || SMOKE_DATA='{}'
+            [ -n "$SMOKE_EXPECT" ] || SMOKE_EXPECT='2??|400|401'
+            echo "smoke: defaulted to $SMOKE_METHOD $SMOKE_URL (a GET cannot observe the origin check)"
             ;;
     esac
 fi
+# A target chosen by the operator keeps GET and '2??': pointing this script at an
+# arbitrary URL and then insisting it accept a POST is precisely how a check ends
+# up stricter than the thing it checks — the mistake #807 just fixed.
+[ -n "$SMOKE_METHOD" ] || SMOKE_METHOD=GET
+[ -n "$SMOKE_EXPECT" ] || SMOKE_EXPECT='2??'
+
 if [ -z "$SMOKE_URL" ]; then
     echo "note: no smoke target given, and none could be derived from $ENV_FILE —" \
         "nothing here checked that the stack serves requests" >&2
 elif [ "$DRY" = 1 ]; then
-    echo "DRY  curl ${SMOKE_ORIGIN:+(-H Origin: $SMOKE_ORIGIN) }$SMOKE_URL  (expect ${SMOKE_EXPECT})"
+    echo "DRY  curl -X $SMOKE_METHOD${SMOKE_ORIGIN:+ -H 'Origin: $SMOKE_ORIGIN'}"\
+"${SMOKE_DATA:+ -H 'Content-Type: application/json' -d '$SMOKE_DATA'} $SMOKE_URL (expect $SMOKE_EXPECT)"
 else
-    if [ -n "$SMOKE_ORIGIN" ]; then
-        smoke_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$SMOKE_TIMEOUT" \
-            -H "Origin: $SMOKE_ORIGIN" "$SMOKE_URL" 2>/dev/null || true)"
-    else
-        smoke_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$SMOKE_TIMEOUT" \
-            "$SMOKE_URL" 2>/dev/null || true)"
-    fi
+    smoke_code="$(smoke_curl)"
     # curl prints the code even when it fails, and a hard failure can leave it
     # empty: anything that is not a three-digit code means "it did not answer".
     case "$smoke_code" in
@@ -286,18 +354,15 @@ else
     # and are kept apart: the first is the incident #794 caused (a stack rejecting
     # its own origin), the second is weather — the box's route to its own public
     # origin. Failing the deploy on the second would dilute the first.
-    # shellcheck disable=SC2254
-    case "$smoke_code" in
-        ${SMOKE_EXPECT}) echo "smoke ok: $SMOKE_URL -> $smoke_code" ;;
-        000 | "")
-            echo "smoke WARNING: $SMOKE_URL unreachable — not a failure, but nothing here" \
-                "checked that the stack serves requests" >&2
-            ;;
-        *)
-            echo "SMOKE FAILED: $SMOKE_URL -> $smoke_code (expected $SMOKE_EXPECT)" >&2
-            failed=1
-            ;;
-    esac
+    if smoke_code_matches "$SMOKE_EXPECT" "$smoke_code"; then
+        echo "smoke ok: $SMOKE_METHOD $SMOKE_URL -> $smoke_code"
+    elif [ "$smoke_code" = "000" ]; then
+        echo "smoke WARNING: $SMOKE_URL unreachable — not a failure, but nothing here" \
+            "checked that the stack serves requests" >&2
+    else
+        echo "SMOKE FAILED: $SMOKE_METHOD $SMOKE_URL -> $smoke_code (expected $SMOKE_EXPECT)" >&2
+        failed=1
+    fi
 fi
 
 # ---- 6. leave a durable trace ------------------------------------------------
