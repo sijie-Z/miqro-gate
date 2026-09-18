@@ -639,32 +639,34 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
         String basisCacheCreation = PriceSnapshotSql.frozenOrAsOf("ue.price_cache_creation",
                 PriceTokenType.CACHE_CREATION, "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
-        return jdbc.query("""
-                SELECT ue.*,
-                       %s AS net_input_tokens,
-                       %s AS net_output_tokens,
-                       %s AS net_cache_read_tokens,
-                       %s AS net_cache_creation_tokens,
-                       %s AS adjusted,
-                       %s AS basis_price_input,
-                       %s AS basis_price_output,
-                       %s AS basis_price_cache_read,
-                       %s AS basis_price_cache_creation,
-                       -- Enrichment (#758): the provider product's display name for the
-                       -- 供应商 column, plus the lifecycle trail for 首字/协议/终态.
-                       COALESCE(pp.display_name, pp.product_code) AS provider_product_name,
-                       rur.wire_protocol,
-                       rur.time_to_first_byte_ms,
-                       rur.request_status
-                  FROM usage_event ue
-                  LEFT JOIN provider_products pp ON pp.id = ue.provider_product_id%s%s
-                %s
-                %s
-                ORDER BY ue.occurred_at DESC
-                LIMIT :limit OFFSET :offset
-                """.formatted(netInput, netOutput, netCacheRead, netCacheCreation, UsageAdjustmentSql.ADJUSTED_FLAG,
-                basisInput, basisOutput, basisCacheRead, basisCacheCreation, wb.joins(),
-                UsageAdjustmentSql.ADJUSTMENT_LATERAL, LIFECYCLE_JOIN, wb.where()), params, ADJUSTED_ROW_MAPPER);
+        return jdbc.query(
+                """
+                        SELECT ue.*,
+                               %s AS net_input_tokens,
+                               %s AS net_output_tokens,
+                               %s AS net_cache_read_tokens,
+                               %s AS net_cache_creation_tokens,
+                               %s AS adjusted,
+                               %s AS basis_price_input,
+                               %s AS basis_price_output,
+                               %s AS basis_price_cache_read,
+                               %s AS basis_price_cache_creation,
+                               -- Enrichment (#758): the provider product's display name for the
+                               -- 供应商 column, plus the lifecycle trail for 首字/协议/终态.
+                               COALESCE(pp.display_name, pp.product_code) AS provider_product_name,
+                               rur.wire_protocol,
+                               rur.time_to_first_byte_ms,
+                               rur.request_status
+                          FROM usage_event ue
+                          LEFT JOIN provider_products pp ON pp.id = ue.provider_product_id%s%s
+                        %s
+                        %s
+                        ORDER BY ue.occurred_at DESC
+                        LIMIT :limit OFFSET :offset
+                        """.formatted(netInput, netOutput, netCacheRead, netCacheCreation,
+                        UsageAdjustmentSql.ADJUSTED_FLAG, basisInput, basisOutput, basisCacheRead, basisCacheCreation,
+                        wb.joins(), UsageAdjustmentSql.ADJUSTMENT_LATERAL, LIFECYCLE_JOIN, wb.where()),
+                params, ADJUSTED_ROW_MAPPER);
     }
 
     private TokenBucket parseUsage(String metaJson) {
