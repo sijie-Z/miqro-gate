@@ -623,12 +623,17 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/exports?limit` | 最近任务列表 |
 
 - 窗口 ≤ 93 天；产物只含计数与元数据列（见 database-schema `export_tasks`），绝不包含 prompt、代码、Secret 或 Virtual Key 明文。
-- **口径标注（2026-09-07）**：CSV 末列 `local_caliber_note` / JSONL 同名字段 = `local-instant`（本地即时记账口径；供应商官方账单通常 T+1 滞后，对账勿以官方值直接核对本地明细）。
+- **口径标注（2026-09-07）**：CSV 末列 `local_caliber_note` / JSONL 同名字段 = `local-instant`（本地即时记账口径；供应商官方账单通常 T+1 滞后，对账勿以官方值直接核对本地明细），其后按已知的声明追加 token。
 - **可对账等级（#330，V41，usage-accounting §11）**：任务完成时按 `provider_request_id` 覆盖度声明
   `reconcileLevel`——`PROVIDER_ID_BACKED`（全行可按 request ID 对账）/ `PARTIAL`（混合）/ `LOCAL_ONLY`
   （全无）；空窗口/历史任务为 null。任务元数据（§5.5 列表与详情、§9 机器面 export-tasks）均带该字段；
-  文件内同步：`local_caliber_note` 扩展为 `local-instant;reconcile=provider-id|mixed|local-only`（前缀向后兼容）。
-  净额/含调整等级随 F20（adjustment 机制）扩展。
+  文件内同步：`local-instant;reconcile=provider-id|mixed|local-only`（前缀向后兼容）。
+- **含调整等级（#716，V67）**：另一条轴的声明——**这份文件的数字里是否含修正**。`PRESENT`（至少一行被修正过，
+  故 `net*` 列才是应对账的那一套）/ `NONE`（没有任何行被改过，`net*` 只是重复观察值）；空窗口/历史任务为 null。
+  文件内同步：`;adjustments=present|none`。
+  **为什么与 `reconcileLevel` 分开**：两者是互相独立的问题——"能不能按请求 ID 对上账单"与"数字里含不含修正"。
+  合进一个枚举就得为每种组合造一个值（`PROVIDER_ID_BACKED_AND_ADJUSTED`…），读起来两边都不是。
+  它**按任务声明**而非只在行上标注，是因为消费者希望在读文件**之前**（或只看任务列表时）就知道 `net*` 列要不要看。
 - **调整标记（#709）**：CSV 与 JSONL 每行新增 `netInputTokens` / `netOutputTokens` /
   `netCacheReadInputTokens` / `netCacheCreationInputTokens` 与 `adjusted`。既有观察值列**保持原样**，
   净额另列给出；`adjusted` 表示该行**是否存在过修正**——按行数判定，故一笔修正被冲销后
@@ -668,7 +673,8 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 - **幂等**：请求体可选 `idempotencyKey`，落在 `(tenant_id, idempotency_key)` 部分唯一索引上——重试返回已记录的行，不重复入账。**这与 §1 中"预留、当前未实现"的 `Idempotency-Key` 请求头是两套东西**：该请求头仍未实现，本端点用的是请求体内的自然键。
 - 错误码：`ADJUSTMENT_EMPTY`（400，未给或全零）、`ADJUSTMENT_WOULD_GO_NEGATIVE`（400，调整后某维度为负）、`ADJUSTMENT_TARGET_HAS_NO_USAGE`（400，缓存命中行不承载用量）、`REVERSAL_TARGET_MISMATCH` / `REVERSAL_OF_REVERSAL`（400）、`USAGE_EVENT_NOT_FOUND` / `ADJUSTMENT_NOT_FOUND`（404，租户内不可区分他租户）。
 - **口径**：调整计入**财务/报告口径**（明细、汇总、计费、导出）；**配额判定仍只读 `usage_event`**——财务更正不得追溯改写运行时控制的历史结果。四层语义见 database-schema §6。
-- **当前范围**：读取路径（明细净额列、导出/审计标记、对账"含调整"维度）尚未接入，故调整目前可记录、可查看，但**不改变任何上报数字**；`amount_delta` 金额维度表结构已备但未开放写入。
+- **当前范围**：读取路径**已接入**——明细净额列与汇总口径（#753）、导出净额列与行级 `adjusted`（#755）、以净额为准的控制台记录表（#773）；
+  本节的"含调整"在导出侧另由**任务级`adjustmentLevel`**声明（#716）。`amount_delta` 金额维度表结构已备但**未开放写入**——目前可调整的只有 token 维度。
 - 写 `USAGE_ADJUSTMENT_CREATED` / `USAGE_ADJUSTMENT_REVERSED` 审计（操作人填写的原因文本按 JSON 转义）。
 
 ### 5.6c 用量价格基座回填（#710 / F21-A）
