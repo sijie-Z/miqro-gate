@@ -26,6 +26,7 @@ const columns = [
   { key: 'period', title: '窗口', minWidth: '260px' },
   { key: 'status', title: '状态', width: '120px' },
   { key: 'reconcileLevel', title: '可对账等级', width: '130px' },
+  { key: 'adjustmentLevel', title: '含调整', width: '110px' },
   { key: 'rowCount', title: '行数', width: '110px', align: 'right' as const },
   { key: 'createdAt', title: '创建时间', width: '180px' },
   { key: 'actions', title: '操作', width: '100px', align: 'center' as const },
@@ -91,6 +92,18 @@ function reconcileBadge(
     default:
       return null;
   }
+}
+
+/**
+ * #716: the other axis — whether the file's numbers include corrections.
+ *
+ * Only PRESENT gets a chip. An untouched export says NONE, and marking that with
+ * a chip too would put a badge on nearly every row and drown the one that
+ * matters; the column reads "—" instead, which is how this table marks "nothing
+ * to say" everywhere else.
+ */
+function adjustmentBadge(level?: string | null): { tone: 'info'; label: string } | null {
+  return level === 'PRESENT' ? { tone: 'info', label: '含调整' } : null;
 }
 
 function statusLabelFor(status: ExportTask['status']): string {
@@ -304,6 +317,16 @@ onMounted(load);
             :tone="reconcileBadge((row as ExportTask).reconcileLevel)!.tone"
             :label="reconcileBadge((row as ExportTask).reconcileLevel)!.label"
             data-testid="export-reconcile-level"
+          />
+          <span v-else>—</span>
+        </template>
+        <template #adjustmentLevel="{ row }">
+          <UiStatusBadge
+            v-if="adjustmentBadge((row as ExportTask).adjustmentLevel)"
+            variant="pill"
+            :tone="adjustmentBadge((row as ExportTask).adjustmentLevel)!.tone"
+            :label="adjustmentBadge((row as ExportTask).adjustmentLevel)!.label"
+            data-testid="export-adjustment-level"
           />
           <span v-else>—</span>
         </template>

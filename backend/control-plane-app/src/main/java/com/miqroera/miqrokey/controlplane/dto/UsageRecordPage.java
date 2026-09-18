@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.controlplane.dto;
 
 import com.miqroera.miqrokey.domain.usage.CacheLevel;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -19,15 +20,29 @@ public record UsageRecordPage(List<UsageRecordView> items, long page, long size,
      * The {@code *Tokens} fields are the <b>observed</b> counts — what the gateway
      * actually recorded. The {@code net*} fields are those counts plus every
      * adjustment booked against the row (#709), i.e. the financial/reporting
-     * reading; {@code adjusted} says whether any correction exists at all. Both are
-     * carried rather than the observed fields being overwritten, so the change is
-     * additive and a reader never has to guess which one they hold.
+     * reading; {@code adjusted} says whether any correction exists at all, so a
+     * correction that has since been reversed keeps it true while the net counts
+     * return to the observed ones (#774). Both are carried rather than the observed
+     * fields being overwritten, so the change is additive and a reader never has to
+     * guess which one they hold.
+     * </p>
+     *
+     * <p>
+     * Enrichment columns (#758): {@code providerProductName} is the 供应商 column;
+     * {@code ttfbMs} / {@code wireProtocol} / {@code requestStatus} come from the
+     * lifecycle trail and are null for rows without one (coalesced requests);
+     * {@code cost} is the per-row figure priced from that row's own price basis
+     * (#710) — the same expression the aggregates use — and {@code priced=false}
+     * means "未定价" — at least one non-zero token type has no price, so the cost
+     * number must not be trusted as 0.
      * </p>
      */
     public record UsageRecordView(Instant occurredAt, String modelId, CacheLevel cacheLevel, Long inputTokens,
             Long outputTokens, Long cacheReadInputTokens, Long cacheCreationInputTokens, Long totalTokens,
             Long latencyMs, Integer upstreamStatusCode, String providerRequestId, String gatewayRequestId,
             boolean isComplete, boolean usageMissing, UUID virtualKeyId, String clientIp, Long netInputTokens,
-            Long netOutputTokens, Long netCacheReadInputTokens, Long netCacheCreationInputTokens, boolean adjusted) {
+            Long netOutputTokens, Long netCacheReadInputTokens, Long netCacheCreationInputTokens, boolean adjusted,
+            String providerProductName, Long ttfbMs, String wireProtocol, String requestStatus, BigDecimal cost,
+            boolean priced) {
     }
 }

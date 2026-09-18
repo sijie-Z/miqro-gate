@@ -10,8 +10,20 @@ import * as api from '@/api';
 import { ChartBarIcon, LayersIcon, MoneyIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
-import { UiButton, UiDonut, UiSelect, UiStatusBadge, UiTable, UiTrendChart, toast } from '@/ui';
+import {
+  UiButton,
+  UiDonut,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  UiTooltip,
+  UiTrendChart,
+  toast,
+} from '@/ui';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
+import UsageAdjustChip from '@/components/UsageAdjustChip.vue';
+import { netTokens } from '@/lib/usage-net';
+import { costGapNote } from '@/lib/usage-pricing';
 import type { UiSelectOption } from '@/ui';
 import type { QuotaMetric, QuotaPeriod, UsageGroupBy } from '@/types/api';
 import type {
@@ -25,6 +37,13 @@ import type {
 
 const groupBy = ref<UsageGroupBy>('project');
 const summary = ref<UsageSummary | null>(null);
+
+/**
+ * #801: the totals' cost is not a total while this is non-null — some of the
+ * period's usage had no price in force when it happened. The API has said so since
+ * #766; the page just never showed it.
+ */
+const costCaveat = computed(() => costGapNote(summary.value?.totals));
 const summaryLoading = ref(true);
 const summaryError = ref('');
 
@@ -185,15 +204,21 @@ const summaryColumns = [
   { key: 'gatewayCost', title: '网关观测成本', width: '150px', align: 'right' as const },
 ];
 
+// #773: the token columns report the *net* counts (observed + adjustments), so
+// their cells add up to the summary printed above them. The observed counts
+// stay reachable through the 调整 chip's bubble.
 const recordsColumns = [
   { key: 'occurredAt', title: '时间', width: '180px' },
   { key: 'modelId', title: '模型', minWidth: '170px' },
+  { key: 'provider', title: '供应商', minWidth: '150px' },
   { key: 'virtualKey', title: '密钥', minWidth: '150px' },
   { key: 'cacheLevel', title: '级别', width: '100px' },
   { key: 'input', title: '输入', width: '90px', align: 'right' as const },
   { key: 'output', title: '输出', width: '90px', align: 'right' as const },
   { key: 'cacheRead', title: '缓存读', width: '110px', align: 'right' as const },
-  { key: 'latency', title: '延迟', width: '85px', align: 'right' as const },
+  { key: 'adjust', title: '调整', width: '100px' },
+  { key: 'cost', title: '成本', width: '110px', align: 'right' as const },
+  { key: 'latency', title: '用时 / 首字', width: '140px', align: 'right' as const },
   { key: 'upstreamStatus', title: '上游状态', width: '95px', align: 'right' as const },
   { key: 'clientIp', title: '来源 IP', width: '140px' },
   { key: 'providerRequestId', title: '供应商请求 ID', minWidth: '210px' },
@@ -442,10 +467,10 @@ function formatCost(value?: string | number): string {
   if (value === undefined || value === null) return '—';
   const num = Number(value);
   if (Number.isNaN(num)) return String(value);
-  return `$${num.toFixed(4)}`;
+  return `¥${num.toFixed(4)}`;
 }
 
-function formatNumber(value?: number): string {
+function formatNumber(value?: number | null): string {
   return value === undefined || value === null ? '—' : value.toLocaleString();
 }
 
@@ -706,6 +731,9 @@ function formatTime(iso?: string): string {
         <span class="ui-num next-usage__totals-col">{{
           formatCost(summary.totals?.cost?.gatewayObserved)
         }}</span>
+        <UiTooltip v-if="costCaveat" :text="costCaveat">
+          <span class="next-usage__unpriced" data-testid="cost-unpriced">未定价</span>
+        </UiTooltip>
       </div>
     </section>
 
@@ -730,6 +758,9 @@ function formatTime(iso?: string): string {
           <template #modelId="{ row }">
             <span class="ui-mono">{{ asRecord(row).modelId }}</span>
           </template>
+          <template #provider="{ row }">
+            <span class="next-usage__provider">{{ asRecord(row).providerProductName || '—' }}</span>
+          </template>
           <template #virtualKey="{ row }">
             <span class="next-usage__keyname">{{ keyName(asRecord(row).virtualKeyId) }}</span>
           </template>
@@ -738,16 +769,31 @@ function formatTime(iso?: string): string {
               :label="cacheLevelLabel[asRecord(row).cacheLevel!] ?? asRecord(row).cacheLevel"
             />
           </template>
-          <template #input="{ row }">{{ formatNumber(asRecord(row).inputTokens) }}</template>
-          <template #output="{ row }">{{ formatNumber(asRecord(row).outputTokens) }}</template>
+          <template #input="{ row }">{{ formatNumber(netTokens(asRecord(row)).input) }}</template>
+          <template #output="{ row }">{{ formatNumber(netTokens(asRecord(row)).output) }}</template>
           <template #cacheRead="{ row }">{{
-            formatNumber(asRecord(row).cacheReadInputTokens)
+            formatNumber(netTokens(asRecord(row)).cacheRead)
           }}</template>
+          <template #adjust="{ row }">
+            <UsageAdjustChip :record="asRecord(row)" />
+          </template>
+          <template #cost="{ row }">
+            <span v-if="asRecord(row).priced !== false" class="ui-num">{{
+              formatCost(asRecord(row).cost)
+            }}</span>
+            <span v-else class="next-usage__unpriced">未定价</span>
+          </template>
           <template #latency="{ row }">
             {{
               asRecord(row).latencyMs === null || asRecord(row).latencyMs === undefined
                 ? '—'
                 : `${asRecord(row).latencyMs}ms`
+            }}
+            /
+            {{
+              asRecord(row).ttfbMs === null || asRecord(row).ttfbMs === undefined
+                ? '—'
+                : `${asRecord(row).ttfbMs}ms`
             }}
           </template>
           <template #upstreamStatus="{ row }">{{
@@ -1061,6 +1107,18 @@ function formatTime(iso?: string): string {
 .next-usage__keyname {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
+}
+
+.next-usage__provider {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.next-usage__unpriced {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-warning-fg);
 }
 
 .next-usage__custom-range {

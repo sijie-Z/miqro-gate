@@ -70,6 +70,8 @@ export ANTHROPIC_AUTH_TOKEN="mqk_live_…"
 3. **在封闭工具里改 MCP 配置**：把 MCP 服务器地址换为第 1 步的地址、凭据换为第 2 步的消费者 Key。
 4. **验证**：MCP 服务页「立即验证」确认连通；真实调用后在「MCP 访问日志」按服务/消费者查看调用记录（含工具名、TTFB、结论）。
 
+> **实测样章**：真实封闭客户端（WorkBuddy）按本姿势的完整接入记录、证据与踩坑（配置路径/信任门/工具放行）见 [`workbuddy-mcp-onboarding-sample.md`](workbuddy-mcp-onboarding-sample.md)。
+
 边界：本姿势**只覆盖该工具的工具生态**——它的模型对话本身仍走平台通道，不进网关账本。
 
 ## 5. 归属：接入后这笔账记给谁

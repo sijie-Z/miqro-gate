@@ -25,6 +25,7 @@ jobs:
       compose: ${{ steps.force.outputs.compose || steps.filter.outputs.compose }}
       docs: ${{ steps.force.outputs.docs || steps.filter.outputs.docs }}
       scripts: ${{ steps.force.outputs.scripts || steps.filter.outputs.scripts }}
+      shell: ${{ steps.force.outputs.shell || steps.filter.outputs.shell }}
     steps:
       # Manual dispatches always run every job (no path filtering).
       - id: force
@@ -36,6 +37,7 @@ jobs:
           echo "compose=true" >> "$GITHUB_OUTPUT"
           echo "docs=true" >> "$GITHUB_OUTPUT"
           echo "scripts=true" >> "$GITHUB_OUTPUT"
+          echo "shell=true" >> "$GITHUB_OUTPUT"
       - if: github.event_name != 'workflow_dispatch'
         uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
         id: filter
@@ -64,6 +66,9 @@ jobs:
               - 'AGENTS.md'
               - 'CONTRIBUTING.md'
               - '.github/**'
+            shell:
+              - '**/*.sh'
+              - '.github/workflows/ci.yml'
 
   # Cheap gate for docs-only PRs: no code job needs to run.
   docs:
@@ -92,6 +97,48 @@ jobs:
       - name: Run injector tests
         run: sh scripts/onboarding/test-onboard.sh
 
+  # Static analysis for the shell entry points. `deploy/deploy.sh` is the only path
+  # to a single-machine deploy, and every incident it has had is of the class
+  # ShellCheck reports: an expansion in a `case` pattern whose `|` was literal
+  # (SC2254), sitting behind a `# shellcheck disable`, silently broke the documented
+  # '200|401' syntax for as long as it existed (#809). Deploy scripts are the
+  # densest source of incidents in this repo and the only ones with no static check.
+  shellcheck:
+    name: ShellCheck
+    needs: [changes]
+    if: ${{ needs.changes.outputs.shell == 'true' }}
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # -S warning, not the default: the info level reports SC2016 (single quotes do
+      # not expand), which is sometimes deliberate — printing a literal quoted flag,
+      # for instance. Enabling it first would mostly generate more `disable`
+      # comments, and a `disable` is exactly what hid the bug this job exists for.
+      - name: ShellCheck
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq shellcheck
+          fi
+          shellcheck --version
+          git ls-files -z '*.sh' | xargs -0 shellcheck -S warning
+
+  # Whether what the deploy script CONCLUDES is right — the question ShellCheck
+  # cannot ask. Each scenario builds a stack whose only defect is the one under
+  # test, so passing on a healthy stack proves nothing; the harness is built to
+  # fail on the broken one. Reverse-verified: reverting any of the three fixes
+  # makes it exit non-zero.
+  deploy-script:
+    name: Deploy script (behavioural)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.compose == 'true' }}
+    timeout-minutes: 12
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Regression scenarios
+        run: python3 deploy/tests/deploy_script_regression.py
   # Fast unit-only backend verification on both OSes (no Docker).
   backend-unit:
     name: Backend unit (Java 21 / ${{ matrix.os }})

@@ -228,8 +228,16 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
   - `price_input` / `price_output` / `price_cache_read` / `price_cache_creation numeric(24,10)`——**该事件发生时实际生效的单价**（每百万 token，与 `price_snapshot.unit_price` 同量纲）
   - `price_currency varchar(3)`、`price_effective_from timestamptz`（所采用价目行的生效时刻，**不是**事件时刻）、`price_source varchar(32)`（`MANUAL|OFFICIAL|ESTIMATED`）
   - `price_status varchar(16)`：`NULL`=尚未评估 ｜ `COMPLETE`=四维齐全 ｜ `PARTIAL`=部分维度有价 ｜ `UNAVAILABLE`=已评估但事件发生时无可查价格
+  - **它是派生列，不是事实**：判据只看"该行**用到**的维度里哪些有冻结价"，因此可由 `price_*` + token 列唯一重算——**标签可纠正，价格与金额不可改写**（#777）。
+    判据本身会演进（#765 就改过一次），而盖章通道只往前看，故旧章会留在行上；回填端点的重算趟 + 定时通道（`miqrokey.usage-price-reconcile.enabled`）负责把它拉回现行判据。
+    **查这一列前先确认重算跑过**——陈旧标签不含判据版本，读起来与新鲜标签无法区分
   - **`UNAVAILABLE` 不等于单价 0**：查不到价格时价格列保持 NULL。"价格未知"与"免费"是不同的审计事实，静默写 0 会低估历史支出
   - 取值口径：`price_snapshot` 中 `effective_from <= 本行 occurred_at` 的最新一行（同 `effective_from` 由 `id DESC` 做确定性 tie-break）；回填按 `occurred_at`，**不是按回填时刻**。动机：成本原先是查询时按**当前**价目现算的，所以改一次价目，历史报表金额跟着变
+  - **读取方**：汇总/计费/配额水位（`UsageStatsAggregator` 链路）读冻结基座；**明细行也读同一个表达式**（同 `PriceSnapshotSql.frozenOrAsOf`，经 `RowPriceBasis` 随行带出，不再自查价目表）——两处口径一致是**被断言的**，不是约定：一次改价若只动其中一处即为缺陷（`PriceBasisCostStabilityIntegrationTest`）
+  - **仍未切换**：成本分摊 `cost_allocations` 用"分配时刻最新快照"（`CostAllocationService`）；网关写事件时**不写任何价格列**，四列与 `base_cost_amount` 都由控制面回填通道盖章——即"冻结"落在事后回填而非写入时刻。两者都要口径决策，见 #710 待办
+  - `base_cost_amount numeric(24,10)`（V66，可空）——事件时刻依据当时价目算出的**基础成本**，与 `price_currency` 配对。**NOW 就冻**的理由：`单价 × 数量` 只在费率平坦时成立，引入阶梯价/免费额度后不成立（AWS CUR 因此同时给出 rate 与 line-item cost）。`COMPLETE` 时有值（可为 0，即确实免费）；`PARTIAL` 时只含已定价维度；`UNAVAILABLE` 时 **NULL——不是 0**
+  - 不变式：**一旦有值即不再改写**（"可空"是暂态，不是可变）。V66 之前盖章的历史行金额为 NULL，而盖章通道只选 `price_status IS NULL`，永不重选它们——由回填端点的**补写通道**（#771）从该行已冻结的 `price_*` 列派生填入；它不查价目、不改 `price_status`
+  - **读取方**：`UsageStatsAggregator` 链路同时给出 `pricingStatus` 与 `unpriced.*`：已知金额与未计价用量**分开披露**，`pricingStatus != COMPLETE` 时已知金额**不是总额**。口径见 usage-accounting §6
 - `occurred_at`、`created_at`
 
 部分唯一索引 `(tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL`；`virtual_key_id`、`project_id`、`cache_level`、`occurred_at` 索引。正文（prompt、代码、工具、回答）永不写入。
@@ -346,7 +354,7 @@ URL（创建时经控制面 SSRF 门控：默认仅公网 https，`MIQROKEY_CONT
 
 ### `cost_allocations` (V10，G4.3 实现)
 
-按 Subscription 周期、项目对象记录：`fixed_cost`（Plan 订阅价按窗口/订阅周期天数比例折算）、`usage_cost`（本地 usage × 最新价格快照，每百万 token 单价）、`weight_tokens`（权重 Token = 输入+输出）、`allocated_amount`（= usage + fixed 份额）、`currency`、`algorithm_version`（当前 `1`；唯一键含版本，重跑同版本幂等覆盖、新算法另起历史行）、`generated_at`。唯一 `(subscription_id, period_start, period_end, target_type, target_id, algorithm_version)`。写入路径：`CostAllocationService.allocate`（管理端触发）——固定成本按 Token 权重在项目间分摊（无用量不产出行）；PAYG 订阅无固定成本。价格取分配时刻最新快照（usage 行上的逐事件价格快照为延后列，见 §6 延后列清单）。
+按 Subscription 周期、项目对象记录：`fixed_cost`（Plan 订阅价按窗口/订阅周期天数比例折算）、`usage_cost`（本地 usage × 最新价格快照，每百万 token 单价）、`weight_tokens`（权重 Token = 输入+输出）、`allocated_amount`（= usage + fixed 份额）、`currency`、`algorithm_version`（当前 `1`；唯一键含版本，重跑同版本幂等覆盖、新算法另起历史行）、`generated_at`。唯一 `(subscription_id, period_start, period_end, target_type, target_id, algorithm_version)`。写入路径：`CostAllocationService.allocate`（管理端触发）——固定成本按 Token 权重在项目间分摊（无用量不产出行）；PAYG 订阅无固定成本。价格取**分配时刻**的最新快照。注意这与按量成本的口径不同——后者自 #710 F21-A 起读行内冻结价格（见 §6）。分摊改读冻结基座会牵动"同版本重跑覆盖历史"的语义，属独立决策，尚未切换。
 
 ### `cache_entry` (V5，当前实现)
 

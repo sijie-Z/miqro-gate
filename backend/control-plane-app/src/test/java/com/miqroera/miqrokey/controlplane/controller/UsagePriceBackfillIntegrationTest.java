@@ -58,6 +58,12 @@ class UsagePriceBackfillIntegrationTest {
     private static final UUID PRODUCT = UUID.fromString("00000000-0000-0000-0000-0000000000e2");
     private static final String MODEL = "backfill-model";
     private static final String OTHER_MODEL = "backfill-unpriced-model";
+    private static final String ZERO_TOKEN_MODEL = "backfill-zero-token-model";
+
+    /**
+     * Bulk rows for the scan test, kept apart so per-model lookups stay single-row.
+     */
+    private static final String SCAN_MODEL = "backfill-scan-model";
 
     /** Event happened two hours ago. */
     private static final Instant EVENT_AT = Instant.now().minusSeconds(2 * 3600);
@@ -214,6 +220,201 @@ class UsagePriceBackfillIntegrationTest {
         assertThat(row.get("price_input")).isNull();
     }
 
+    @Test
+    @DisplayName("the base cost is frozen, and an unpriced event stays NULL rather than becoming 0")
+    void baseCostIsFrozenAndNeverFaked() throws Exception {
+        seedEvent(MODEL, EVENT_AT);
+        seedEvent(OTHER_MODEL, EVENT_AT);
+        priceAllDimensions(MODEL, PRICE_BEFORE_EVENT, "1.00", "4.00", "0.10", "0.20");
+
+        backfill();
+
+        // (1000 x 1.00 + 500 x 4.00) / 1e6
+        assertThat(priceColumnsOf(MODEL).get("base_cost_amount")).isEqualTo(new BigDecimal("0.0030000000"));
+        // The unpriced event must NOT be recorded as free: NULL is the fact "we could
+        // not price
+        // this", and a 0 here would be indistinguishable from a genuine zero price.
+        assertThat(priceColumnsOf(OTHER_MODEL).get("base_cost_amount")).isNull();
+    }
+
+    @Test
+    @DisplayName("a dimension the event never used does not make it partial")
+    void unusedDimensionDoesNotMakeRowPartial() throws Exception {
+        // The shape every event has on a catalogue that simply has no cache_creation
+        // price:
+        // input/output priced, and no cache tokens at all. Judging by price
+        // availability alone
+        // called this PARTIAL — and flagged a dimension that never took part in the
+        // sum.
+        seedEvent(MODEL, EVENT_AT);
+        price(MODEL, "INPUT", PRICE_BEFORE_EVENT, "1.00");
+        price(MODEL, "OUTPUT", PRICE_BEFORE_EVENT, "4.00");
+
+        backfill();
+
+        Map<String, Object> row = priceColumnsOf(MODEL);
+        assertThat(row.get("price_status")).isEqualTo("COMPLETE");
+        // And the base cost covers both priced dimensions.
+        assertThat(row.get("base_cost_amount")).isEqualTo(new BigDecimal("0.0030000000"));
+    }
+
+    @Test
+    @DisplayName("a dimension the event DID use, but has no price, makes it partial")
+    void usedButUnpricedDimensionMakesRowPartial() throws Exception {
+        jdbc.update("""
+                INSERT INTO usage_event (id, tenant_id, virtual_key_id, project_id, provider_product_id, model_id,
+                    gateway_request_id, input_tokens, output_tokens, cache_creation_input_tokens,
+                    is_complete, usage_missing, occurred_at)
+                VALUES (:id, :tenantId, :keyId, :projectId, :productId, :modelId,
+                    'gw-cache-create', 1000, 500, 200, TRUE, FALSE, :occurredAt)
+                """,
+                new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", TENANT)
+                        .addValue("keyId", UUID.randomUUID()).addValue("projectId", UUID.randomUUID())
+                        .addValue("productId", PRODUCT).addValue("modelId", MODEL)
+                        .addValue("occurredAt", java.sql.Timestamp.from(EVENT_AT)));
+        price(MODEL, "INPUT", PRICE_BEFORE_EVENT, "1.00");
+        price(MODEL, "OUTPUT", PRICE_BEFORE_EVENT, "4.00");
+
+        backfill();
+
+        // cache_creation tokens exist and have no price, so this one really is short.
+        assertThat(priceColumnsOf(MODEL).get("price_status")).isEqualTo("PARTIAL");
+    }
+
+    // -------------------------------------------------------------------
+    // #771: rows stamped before base_cost_amount existed
+
+    @Test
+    @DisplayName("completes the base cost of rows stamped before the column existed (#771)")
+    void completesBaseCostOfRowsStampedBeforeTheColumnExisted() throws Exception {
+        seedStampedEvent(MODEL, "COMPLETE", 1000L, 500L, "1.00", "4.00");
+
+        Map<String, Object> result = backfill();
+
+        // Nothing was re-evaluated — there was no decision left to make, only an
+        // amount left to write.
+        assertThat(result.get("scanned")).isEqualTo(0);
+        assertThat(result.get("baseCostFilled")).isEqualTo(1);
+        Map<String, Object> row = priceColumnsOf(MODEL);
+        // (1000 x 1.00 + 500 x 4.00) / 1e6
+        assertThat(row.get("base_cost_amount")).isEqualTo(new BigDecimal("0.0030000000"));
+        // Completing the record must not revise it.
+        assertThat(row.get("price_status")).isEqualTo("COMPLETE");
+        assertThat(row.get("price_input")).isEqualTo(new BigDecimal("1.0000000000"));
+    }
+
+    @Test
+    @DisplayName("the completion derives from the row's frozen prices, not from the catalogue")
+    void completionDerivesFromFrozenPricesNotTheCatalogue() throws Exception {
+        seedStampedEvent(MODEL, "COMPLETE", 1000L, 500L, "1.00", "4.00");
+        // Published only now: re-deriving from the catalogue would pick this up and
+        // silently inflate an amount whose whole point is to be frozen.
+        priceAllDimensions(MODEL, PRICE_AFTER_EVENT, "9.99", "9.99", "9.99", "9.99");
+
+        backfill();
+
+        assertThat(priceColumnsOf(MODEL).get("base_cost_amount")).isEqualTo(new BigDecimal("0.0030000000"));
+    }
+
+    @Test
+    @DisplayName("rows that cannot be priced keep NULL — the completion never invents a zero")
+    void completionLeavesUnpriceableRowsNull() throws Exception {
+        // UNAVAILABLE: its NULL records that no price was in force.
+        seedStampedEvent(OTHER_MODEL, "UNAVAILABLE", 1000L, 500L, null, null);
+        // COMPLETE with no tokens at all: nothing to sum, so nothing derivable — and
+        // it must not be re-selected for ever.
+        seedStampedEvent(ZERO_TOKEN_MODEL, "COMPLETE", null, null, null, null);
+
+        Map<String, Object> result = backfill();
+
+        assertThat(result.get("baseCostFilled")).isEqualTo(0);
+        assertThat(priceColumnsOf(OTHER_MODEL).get("base_cost_amount")).isNull();
+        assertThat(priceColumnsOf(ZERO_TOKEN_MODEL).get("base_cost_amount")).isNull();
+    }
+
+    @Test
+    @DisplayName("the completion is idempotent: a second pass has nothing left to do")
+    void completionIsIdempotent() throws Exception {
+        seedStampedEvent(MODEL, "COMPLETE", 1000L, 500L, "1.00", "4.00");
+
+        assertThat(backfill().get("baseCostFilled")).isEqualTo(1);
+        assertThat(backfill().get("baseCostFilled")).isEqualTo(0);
+    }
+
+    // -------------------------------------------------------------------
+    // #777: verdicts left behind by a rule that has since moved
+
+    @Test
+    @DisplayName("a verdict the current rule disagrees with is recomputed (#777)")
+    void staleVerdictIsRecomputed() throws Exception {
+        // PARTIAL was stamped by a rule that asked whether a price existed for a
+        // dimension, not whether the event used it. This event carries no cache tokens
+        // at all, so under the rule in force today it is COMPLETE.
+        seedStampedEvent(MODEL, "PARTIAL", 1000L, 500L, "1.00", "4.00");
+
+        Map<String, Object> result = backfill();
+
+        assertThat(result.get("scanned")).isEqualTo(0);
+        assertThat(result.get("reclassified")).isEqualTo(1);
+        Map<String, Object> row = priceColumnsOf(MODEL);
+        assertThat(row.get("price_status")).isEqualTo("COMPLETE");
+        // Only the verdict moves: the frozen basis and the amount are facts.
+        assertThat(row.get("price_input")).isEqualTo(new BigDecimal("1.0000000000"));
+        assertThat(row.get("base_cost_amount")).isEqualTo(new BigDecimal("0.0030000000"));
+    }
+
+    @Test
+    @DisplayName("recomputing is idempotent: a second pass changes nothing")
+    void reclassifyIsIdempotent() throws Exception {
+        seedStampedEvent(MODEL, "PARTIAL", 1000L, 500L, "1.00", "4.00");
+
+        assertThat(backfill().get("reclassified")).isEqualTo(1);
+        assertThat(backfill().get("reclassified")).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("a row with no tokens at all becomes COMPLETE, and still gets no invented amount")
+    void zeroTokenRowBecomesCompleteWithoutAnAmount() throws Exception {
+        seedStampedEvent(OTHER_MODEL, "UNAVAILABLE", null, null, null, null);
+
+        backfill();
+
+        Map<String, Object> row = priceColumnsOf(OTHER_MODEL);
+        // No dimension took part in any calculation, so the row is trivially priced —
+        // and the amount stays NULL, because there is nothing to sum. That is the same
+        // NULL a summary reads for it, so the two agree.
+        assertThat(row.get("price_status")).isEqualTo("COMPLETE");
+        assertThat(row.get("base_cost_amount")).isNull();
+    }
+
+    @Test
+    @DisplayName("the scan reaches past a full batch of rows the rule already agrees with")
+    void scanDoesNotStopAtAFullBatchOfCorrectRows() throws Exception {
+        // A full batch (500+) of rows the current rule is happy with, laid down
+        // first...
+        jdbc.update("""
+                INSERT INTO usage_event (id, tenant_id, virtual_key_id, project_id, provider_product_id, model_id,
+                    gateway_request_id, input_tokens, output_tokens, is_complete, usage_missing, occurred_at,
+                    price_input, price_output, price_currency, price_source, price_status)
+                SELECT gen_random_uuid(), :tenantId, :keyId, :projectId, :productId, :modelId,
+                    'gw-scan-' || g, 1000, 500, TRUE, FALSE, :occurredAt, 1.00, 4.00, 'CNY', 'MANUAL', 'COMPLETE'
+                  FROM generate_series(1, 501) g
+                """,
+                new MapSqlParameterSource("tenantId", TENANT).addValue("keyId", UUID.randomUUID())
+                        .addValue("projectId", UUID.randomUUID()).addValue("productId", PRODUCT)
+                        .addValue("modelId", SCAN_MODEL).addValue("occurredAt", java.sql.Timestamp.from(EVENT_AT)));
+
+        // ...and one stale row behind them. A pass that re-queried "the rows that need
+        // work" would take a full page of already-correct rows, change nothing, and
+        // stop — leaving this one stranded for good. The keyset scan walks past them.
+        seedStampedEventAt(MODEL, "PARTIAL", 1000L, 500L, "1.00", "4.00", EVENT_AT.plusSeconds(60));
+
+        Map<String, Object> result = backfill();
+
+        assertThat(result.get("reclassified")).isEqualTo(1);
+        assertThat(priceColumnsOf(MODEL).get("price_status")).isEqualTo("COMPLETE");
+    }
+
     // -------------------------------------------------------------------
 
     private Map<String, Object> backfill() throws Exception {
@@ -259,9 +460,42 @@ class UsagePriceBackfillIntegrationTest {
 
     private Map<String, Object> priceColumnsOf(String model) {
         return jdbc.queryForMap("""
-                SELECT price_input, price_output, price_status, price_effective_from
+                SELECT price_input, price_output, price_status, price_effective_from, base_cost_amount
                   FROM usage_event WHERE tenant_id = :tenantId AND model_id = :modelId
                 """, new MapSqlParameterSource("tenantId", TENANT).addValue("modelId", model));
+    }
+
+    /**
+     * A row in the state #771 leaves behind: the price basis was frozen, but the
+     * frozen <em>amount</em> is missing because the column did not exist yet.
+     */
+    private void seedStampedEvent(String model, String status, Long inputTokens, Long outputTokens, String priceInput,
+            String priceOutput) {
+        seedStampedEventAt(model, status, inputTokens, outputTokens, priceInput, priceOutput, EVENT_AT);
+    }
+
+    /**
+     * As {@link #seedStampedEvent}, at a chosen instant — lets a test order the
+     * scan.
+     */
+    private void seedStampedEventAt(String model, String status, Long inputTokens, Long outputTokens, String priceInput,
+            String priceOutput, Instant occurredAt) {
+        jdbc.update("""
+                INSERT INTO usage_event (id, tenant_id, virtual_key_id, project_id, provider_product_id, model_id,
+                    gateway_request_id, input_tokens, output_tokens, is_complete, usage_missing, occurred_at,
+                    price_input, price_output, price_currency, price_effective_from, price_source, price_status)
+                VALUES (:id, :tenantId, :keyId, :projectId, :productId, :modelId,
+                    :requestId, :inputTokens, :outputTokens, TRUE, FALSE, :occurredAt,
+                    :priceInput, :priceOutput, 'CNY', :occurredAt, 'MANUAL', :status)
+                """,
+                new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", TENANT)
+                        .addValue("keyId", UUID.randomUUID()).addValue("projectId", UUID.randomUUID())
+                        .addValue("productId", PRODUCT).addValue("modelId", model).addValue("requestId", "gw-" + model)
+                        .addValue("inputTokens", inputTokens).addValue("outputTokens", outputTokens)
+                        .addValue("occurredAt", java.sql.Timestamp.from(occurredAt))
+                        .addValue("priceInput", priceInput == null ? null : new BigDecimal(priceInput))
+                        .addValue("priceOutput", priceOutput == null ? null : new BigDecimal(priceOutput))
+                        .addValue("status", status));
     }
 
     /** Child-first; usage rows precede the price rows they reference. */

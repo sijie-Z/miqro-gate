@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miqroera.miqrokey.domain.repository.PriceSnapshotRepository;
+import com.miqroera.miqrokey.persistence.repository.PriceSnapshotSql;
 import com.miqroera.miqrokey.domain.usage.PriceSnapshot;
 import com.miqroera.miqrokey.domain.usage.PriceTokenType;
 import java.math.BigDecimal;
@@ -151,6 +152,27 @@ class PriceSnapshotDeterminismTest extends AbstractPostgresTest {
                 .map(PriceSnapshot::unitPrice).orElseThrow();
 
         assertThat(price).isEqualByComparingTo(new BigDecimal("2.00"));
+    }
+
+    @Test
+    @DisplayName("the shared as-of helper agrees with the repository's point lookup")
+    void asOfHelperAgreesWithRepository() {
+        // PriceSnapshotSql is a second expression of the same rule the repository
+        // implements,
+        // and the cost aggregates depend on it. This is what keeps the two honest — a
+        // comment
+        // asking future readers to be careful would not.
+        String sql = "SELECT " + PriceSnapshotSql.asOfUnitPrice(PriceTokenType.INPUT, ":productId", ":modelId", ":at")
+                + " AS unit_price";
+        Instant at = SAME_EFFECTIVE_FROM.plusSeconds(60);
+        BigDecimal viaSql = jdbc.queryForObject(sql, new MapSqlParameterSource("productId", product)
+                .addValue("modelId", MODEL).addValue("at", java.sql.Timestamp.from(at)), BigDecimal.class);
+
+        BigDecimal viaRepository = repository.findLatestAt(product, MODEL, PriceTokenType.INPUT, at)
+                .map(PriceSnapshot::unitPrice).orElseThrow();
+
+        assertThat(viaSql).isEqualByComparingTo(viaRepository);
+        assertThat(viaSql).isEqualByComparingTo(new BigDecimal("2.00"));
     }
 
     private void insertPrice(UUID id, String unitPrice) {

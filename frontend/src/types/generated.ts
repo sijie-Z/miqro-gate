@@ -3320,6 +3320,10 @@ export interface components {
             partial?: number;
             /** Format: int64 */
             unavailable?: number;
+            /** Format: int64 */
+            baseCostFilled?: number;
+            /** Format: int64 */
+            reclassified?: number;
         };
         DeletionRequest: {
             /** Format: uuid */
@@ -3887,6 +3891,7 @@ export interface components {
             /** Format: date-time */
             expiresAt?: string;
             reconcileLevel?: string;
+            adjustmentLevel?: string;
         };
         CryptoReencryptReport: {
             activeKeyVersion?: string;
@@ -4055,6 +4060,7 @@ export interface components {
             /** Format: date-time */
             expiresAt?: string;
             reconcileLevel?: string;
+            adjustmentLevel?: string;
         };
         UpdateVirtualKeyRequest: {
             name: string;
@@ -4083,6 +4089,39 @@ export interface components {
             requests?: components["schemas"]["Requests"];
             tokens?: components["schemas"]["Tokens"];
             cost?: components["schemas"]["Cost"];
+            /** @enum {string} */
+            pricingStatus?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+            unpriced?: components["schemas"]["PricingGap"];
+            outcomes?: components["schemas"]["Outcomes"];
+        };
+        Outcomes: {
+            /** Format: int64 */
+            succeeded?: number;
+            /** Format: int64 */
+            failed?: number;
+            /** Format: int64 */
+            cancelled?: number;
+            /** Format: int64 */
+            avgDurationMs?: number;
+            /** Format: int64 */
+            avgTtfbMs?: number;
+        };
+        PricingGap: {
+            /** Format: int64 */
+            inputTokens?: number;
+            /** Format: int64 */
+            outputTokens?: number;
+            /** Format: int64 */
+            cacheReadTokens?: number;
+            /** Format: int64 */
+            cacheCreationTokens?: number;
+            /** Format: int64 */
+            unpricedEvents?: number;
+            /** Format: int64 */
+            unavailableEvents?: number;
+            /** Format: int64 */
+            unpricedHitEvents?: number;
+            empty?: boolean;
         };
         Requests: {
             /** Format: int64 */
@@ -4154,6 +4193,13 @@ export interface components {
             /** Format: int64 */
             netCacheCreationInputTokens?: number;
             adjusted?: boolean;
+            providerProductName?: string;
+            /** Format: int64 */
+            ttfbMs?: number;
+            wireProtocol?: string;
+            requestStatus?: string;
+            cost?: number;
+            priced?: boolean;
         };
         GrantOption: {
             /** Format: uuid */

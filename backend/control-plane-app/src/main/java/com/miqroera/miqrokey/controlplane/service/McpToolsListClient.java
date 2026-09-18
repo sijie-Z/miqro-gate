@@ -58,7 +58,10 @@ public class McpToolsListClient {
     public List<UpstreamTool> fetchTools(String endpoint, String bearer) {
         try {
             HttpRequest.Builder builder = HttpRequest.newBuilder().uri(URI.create(endpoint)).timeout(requestTimeout)
-                    .header("Content-Type", "application/json").header("Accept", "application/json")
+                    .header("Content-Type", "application/json")
+                    // Streamable HTTP requires BOTH media types in Accept; strict
+                    // upstreams answer 406 when text/event-stream is missing (#779).
+                    .header("Accept", "application/json, text/event-stream")
                     .POST(HttpRequest.BodyPublishers.ofString(REQUEST_BODY, StandardCharsets.UTF_8));
             if (bearer != null) {
                 builder.header("Authorization", bearer);
@@ -71,7 +74,7 @@ public class McpToolsListClient {
             if (body.length > MAX_BODY_BYTES) {
                 throw upstream("上游响应超过 2MB 上限。");
             }
-            JsonNode root = objectMapper.readTree(body);
+            JsonNode root = objectMapper.readTree(jsonPayload(response, body));
             if (root == null) {
                 throw upstream("上游响应不是合法 JSON。");
             }
@@ -99,6 +102,32 @@ public class McpToolsListClient {
         } catch (Exception e) {
             throw upstream("上游 tools/list 调用失败：" + truncate(String.valueOf(e.getMessage()), 200));
         }
+    }
+
+    /**
+     * Streamable HTTP servers may answer either in raw JSON or in an SSE frame
+     * ({@code text/event-stream}); the SSE payload is the JSON-RPC message carried
+     * on {@code data:} lines (#779). Pick that payload; any other content type is
+     * parsed as-is.
+     */
+    private static byte[] jsonPayload(HttpResponse<byte[]> response, byte[] body) {
+        String contentType = response.headers().firstValue("Content-Type").orElse("");
+        if (!contentType.toLowerCase().contains("text/event-stream")) {
+            return body;
+        }
+        StringBuilder data = new StringBuilder();
+        for (String line : new String(body, StandardCharsets.UTF_8).split("\r?\n")) {
+            if (line.startsWith("data:")) {
+                if (data.length() > 0) {
+                    data.append('\n'); // SSE: multi-line data joins on newlines
+                }
+                data.append(line.substring("data:".length()).stripLeading());
+            }
+        }
+        if (data.length() == 0) {
+            throw upstream("上游 SSE 响应中没有 data 载荷。");
+        }
+        return data.toString().getBytes(StandardCharsets.UTF_8);
     }
 
     private static ApiException upstream(String message) {

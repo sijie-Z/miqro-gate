@@ -6,14 +6,13 @@ import com.miqroera.miqrokey.controlplane.dto.UsageRecordPage;
 import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.model.UserStatus;
-import com.miqroera.miqrokey.domain.repository.PriceSnapshotRepository;
 import com.miqroera.miqrokey.domain.repository.UsageStatsRepository;
 import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
 import com.miqroera.miqrokey.domain.usage.CacheLevel;
-import com.miqroera.miqrokey.domain.usage.PriceSnapshot;
-import com.miqroera.miqrokey.domain.usage.PriceTokenType;
+import com.miqroera.miqrokey.domain.usage.RowPriceBasis;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
+import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageAggRow;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
 import org.junit.jupiter.api.DisplayName;
@@ -58,15 +57,13 @@ class AdminUsageStatsServiceTest {
 
     @Mock
     private UsageStatsRepository usageStatsRepository;
-    @Mock
-    private PriceSnapshotRepository priceSnapshotRepository;
 
     private AdminUsageStatsService service;
     private User admin;
 
     @BeforeEach
     void setUp() {
-        service = new AdminUsageStatsService(usageStatsRepository, priceSnapshotRepository);
+        service = new AdminUsageStatsService(usageStatsRepository);
         admin = new User(ADMIN_ID, TENANT, "root", "Root Admin", new byte[32], UserRole.SYSTEM_ADMIN, UserStatus.ACTIVE,
                 false, 0, null, null, 0L, Instant.now(), Instant.now());
     }
@@ -83,7 +80,6 @@ class AdminUsageStatsServiceTest {
 
     @Test
     void summaryPassesEveryOptionalDimensionAsFilter() {
-        when(priceSnapshotRepository.findAllLatestAt(any(Instant.class))).thenReturn(List.of());
         when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.DAY), any())).thenReturn(List.of());
         when(usageStatsRepository.aggregateHits(eq(UsageStatsRepository.GroupBy.DAY), any())).thenReturn(List.of());
 
@@ -108,7 +104,6 @@ class AdminUsageStatsServiceTest {
 
     @Test
     void summaryWithoutFiltersScopesToTenantOnly() {
-        when(priceSnapshotRepository.findAllLatestAt(any(Instant.class))).thenReturn(List.of());
         when(usageStatsRepository.aggregateUsage(any(), any())).thenReturn(List.of());
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
 
@@ -132,12 +127,11 @@ class AdminUsageStatsServiceTest {
     }
 
     @Test
-    void summaryComputesCostFromPriceSnapshot() {
-        when(priceSnapshotRepository.findAllLatestAt(any(Instant.class)))
-                .thenReturn(List.of(price(PriceTokenType.INPUT, new BigDecimal("1.00")),
-                        price(PriceTokenType.OUTPUT, new BigDecimal("2.00"))));
+    void summaryCostComesFromTheRowsFrozenPrices() {
         when(usageStatsRepository.aggregateUsage(any(), any())).thenReturn(List.of(new UsageAggRow("g", "G", PRODUCT_ID,
-                MODEL, CacheLevel.UPSTREAM, 2, new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null))));
+                MODEL, CacheLevel.UPSTREAM, 2, new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null),
+                new java.math.BigDecimal("1000"), new java.math.BigDecimal("1000"), java.math.BigDecimal.ZERO,
+                java.math.BigDecimal.ZERO, UsageStatsAggregator.PricingGap.NONE, UsageAggRow.Outcome.NONE)));
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
 
         UsageSummary summary = service.summary(admin, "project", null, null, null, null, null, null, null, null, null,
@@ -196,6 +190,27 @@ class AdminUsageStatsServiceTest {
         assertThat(captor.getValue().modelId()).isEqualTo(MODEL);
         assertThat(captor.getValue().clientIp()).isEqualTo("203.0.113.7");
         assertThat(captor.getValue().teamId()).isEqualTo(TEAM_ID);
+    }
+
+    @Test
+    @DisplayName("a detail row is priced from its own price basis, like the aggregates (#710)")
+    void recordCostComesFromTheRowsOwnPriceBasis() {
+        // The billing channel reads the same basis as the summary: the prices the
+        // repository resolved for that row, never a table consulted now.
+        UsageEvent event = new UsageEvent(UUID.randomUUID(), TENANT, "req-2", KEY_ID, PROJECT_ID, PRODUCT_ID,
+                CREDENTIAL_ID, MODEL, CacheLevel.UPSTREAM,
+                new TokenBucket(1_000L, 500L, null, null, null, null, null, null), 100L, 200, null, true, false, "gw-2",
+                Instant.now(), null, null);
+        when(usageStatsRepository.countRecords(any())).thenReturn(1L);
+        RowPriceBasis basis = new RowPriceBasis(new BigDecimal("1.00"), new BigDecimal("2.00"), null, null);
+        when(usageStatsRepository.findRecords(any(), eq(0L), eq(50))).thenReturn(List.of(unadjusted(event, basis)));
+
+        UsageRecordPage page = service.records(admin, null, null, 1, 50, null, null, null, null, null, null, null, null,
+                null);
+
+        // input 1000 × 1.00/1e6 + output 500 × 2.00/1e6 = 0.002
+        assertThat(page.items().get(0).cost()).isEqualByComparingTo("0.002");
+        assertThat(page.items().get(0).priced()).isTrue();
     }
 
     @Test
@@ -289,20 +304,19 @@ class AdminUsageStatsServiceTest {
                 ApiException.class, e -> assertThat(e.getCode()).isEqualTo("TZ_OFFSET_INVALID"));
     }
 
-    private static PriceSnapshot price(PriceTokenType type, BigDecimal unitPrice) {
-        return new PriceSnapshot(UUID.randomUUID(), PRODUCT_ID, MODEL, type, "USD", unitPrice, Instant.now(), "TEST",
-                null, Instant.now());
-    }
-
     /**
      * An unadjusted row — net equals observed, which is what makes the existing
      * assertions in this class double as the "no adjustment, no change" regression
      * guard for the net wiring (#709).
      */
     private static AdjustedUsageRow unadjusted(UsageEvent e) {
+        return unadjusted(e, RowPriceBasis.UNKNOWN);
+    }
+
+    private static AdjustedUsageRow unadjusted(UsageEvent e, RowPriceBasis basis) {
         TokenBucket t = e.tokens();
         return new AdjustedUsageRow(e, t.inputTokens(), t.outputTokens(), t.cacheReadInputTokens(),
-                t.cacheCreationInputTokens(), false);
+                t.cacheCreationInputTokens(), false, null, null, basis);
     }
 
 }
