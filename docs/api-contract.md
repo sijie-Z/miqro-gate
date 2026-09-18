@@ -502,6 +502,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 - 轮换是单事务原子操作：持有凭证行锁（`SELECT ... FOR UPDATE` 串行化并发生命周期变更），先把当前 ACTIVE 版本降级为 DRAINING（`retiredAt = now + miqrokey.credential-drain-grace`，默认 `PT0S`），再插入新 ACTIVE 版本——部分唯一索引 `uq_credential_versions_one_active` 保证任意时刻每个凭证至多一个 ACTIVE 版本。新 Secret 校验失败时整个操作回滚，当前版本不受影响。
 - 已降级版本在 `retiredAt` 前保持可解密：请求启动时已解密旧 Secret 的请求可完成（“旧请求可完成”）；路由快照刷新后新请求使用新版本。`PT0S` = 快照刷新后旧版本立即退役。
 - `disable` 把凭证置为 `DISABLED` 并降级当前 ACTIVE 版本；网关路由快照只加载 `status = 'ACTIVE'` 的凭证，刷新后该凭证不可路由，新请求干净失败。
+- **被 Agent 引用即不可变（#714）**：只要存在 `status = 'ACTIVE'` 的 Agent 绑定该凭证，`rotate` 与 `disable`（本产品没有凭证 DELETE 端点，`disable` 即生命周期终止操作）都被拒绝为 `409 CREDENTIAL_REFERENCED_BY_AGENT`，文案含阻塞的 Agent 名。解除引用的唯一路径是 `POST /api/v1/admin/agents/{id}/disable`；已禁用的 Agent 保留历史绑定（用量归属不变）但不再钉住凭证。检查在行锁与既有状态守卫之后、任何写入之前执行，被拒时数据库与审计均无写入。
 - 审计事件 `CREDENTIAL_CREATE` / `CREDENTIAL_ROTATE` / `CREDENTIAL_DISABLE` 只记变更摘要，永不包含明文或完整指纹。
 
 错误码：
@@ -513,6 +514,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `CREDENTIAL_INVALID` | 400 | Secret 格式非法（过短/过长/含控制字符） |
 | `CREDENTIAL_NOT_ROTATABLE` | 409 | 仅 ACTIVE 可轮换 |
 | `CREDENTIAL_NOT_DISABLEABLE` | 409 | 已 DISABLED/INVALID 的凭证不可再禁用 |
+| `CREDENTIAL_REFERENCED_BY_AGENT` | 409 | 凭证被 ACTIVE Agent 引用：不可轮换、不可停用（#714）；文案为 `凭证已被 Agent「<name>」引用，不能轮换\|停用；请先停用该 Agent。` |
 
 ### 5.1b 加密密钥轮换（主密钥批量重加密，#432）
 
@@ -877,6 +879,8 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 
 **响应 `AgentView`**：`name`/`description`/`credentialId`/`credentialName`/`providerProductId`/`providerProductName`（派生）/`status`/`createdAt`。
 
+**反向绑定约束（#714）**：创建时对凭证行加锁（`SELECT ... FOR UPDATE`），与 `rotate`/`disable` 的凭证行锁互斥，避免「校验 ACTIVE 通过 → 并发停用」竞态留下绑定到不可路由凭证的 Agent。绑定期间该凭证不可轮换、不可停用（`409 CREDENTIAL_REFERENCED_BY_AGENT`，见 §5）；因此 `disable` 同时是**解除引用**操作，禁用后该凭证恢复可改写。1:1 唯一索引 `uq_agents_tenant_credential` 在任意状态下都生效。
+
 **错误码**：`AGENT_NOT_FOUND`（404）、`AGENT_NAME_TAKEN`（409）、`AGENT_CREDENTIAL_TAKEN`（409）、`AGENT_ALREADY_DISABLED`（409）、`CREDENTIAL_NOT_FOUND`（400）。
 
 ### 5.14 内部服务注册表（P3.2）
@@ -1206,7 +1210,7 @@ detail_currency, detail_occurred_at, detail_status, detail_bucket_key, detail_pr
   4. 其余（多绑定且上下文无法解析）→ 租户配置了未归属策略（§5 admin）时以策略的凭证/产品/模型范围路由，usage 记「未归属」桶项目（`resolution_status=POLICY_ROUTED`，claimed_* 照常留档）；未配置策略 → `400 CONTEXT_REQUIRED`——不猜测、不静默回落到默认项目。
   - 声明项目不是该 Key 的绑定 → `403 CONTEXT_NOT_ALLOWED`（仅当存在有效声明时）；声明不是合法 UUID → `400 CONTEXT_INVALID`。
   - 审计头（降级为纯审计、绝不参与授权；畸形即丢弃；永不转发上游）：`X-Miqro-Claim-Source`（`prompt_url`/`tool_path`/`bash_cwd`/`system_cwd`/`git_remote`/`suffix`/`none`）、`X-Miqro-Claim-Confidence`（`HIGH`/`MEDIUM`/`LOW`/`NONE`）、`X-Miqro-Claim-Status`（`RESOLVED`/`AMBIGUOUS`/`UNATTRIBUTED`）、`X-Claude-Code-Session-Id`（≤64 字符）。Agent 声明（`claimed_*`）与服务端裁决（`project_id` + `resolution_status`）分开落库，声明永不构成授权。
-  - 归属随用量落库：`usage_event` 的 `session_id`/`activity_id`/`claimed_project_id`/`resolution_status`/`claim_source`/`claim_confidence`；逐请求证据审计于 `request_context_evidence`（V55）。
+  - 归属随用量落库：`usage_event` 的 `session_id`/`activity_id`/`claimed_project_id`/`resolution_status`/`claim_source`/`claim_confidence`；逐请求证据审计于 `request_context_evidence`（V55，#629）——**只对使用了外部选择器的裁定写行**：`RESOLVED_HEADER` → `source='header'`、`value=` 声明项目 id；`RESOLVED_SUFFIX` → `source='suffix'`、`value=` Key 中呈现的 tag。`SOLE_BINDING`/`POLICY_ROUTED` 没有线索来源，其解释即 `resolution_status` 本身，故不写证据行。行 `id` = 该笔 `usage_event` 的 `id`，随用量同批同事务写入、`ON CONFLICT (id) DO NOTHING`（就本表而言重放不产生重复证据行，与用量行可按 `id` join；`usage_event` 侧对 `provider_request_id` 为空的事件无冲突保护，属既有边界）。**读取该证据的查询 API 尚未交付。**
   - 规格：`docs/context-attribution-implementation-spec.md` v1.1 §4。
 - Gateway 使用版本化只读路由快照（定时刷新，默认 30s）做校验与路由；热路径不查询数据库。吊销/轮换按快照刷新传播，宽限期由控制面配置。
 - 校验通过后 Gateway 注入本次解析出的绑定（binding）对应的上游凭证（AES-256-GCM 解密，内存中用完即清零），并把请求转发到该授权对应项目的目标；请求头和体按透明代理规则原样转发。

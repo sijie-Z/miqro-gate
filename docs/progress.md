@@ -3872,6 +3872,65 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 ### 一处 tooling 假绿（本批第二次遇到同类）
 
 `-Dtest=A+B` **不是 surefire 的选择器语法**（应为逗号），会**空跑并返回 0**；又一次"构建成功"掩盖了"根本没跑测试"。加上前一批那次"调用了别的工作树的 mvnw21.sh"，这是两天内**第二次**由命令层而非代码层造成的假绿——收口前要核的是**跑了几条测试**，不是"退出码是不是 0"。
+## 2026-09-18 Agent 引用后凭证禁改禁删（#714 / F1 前半）——把"被引用"变成真的锁
+
+**背景**：Agent 创建时已做绑定级联，但"被引用即不可变"这半从未实现——`rotate` / `disable` 只看凭证自身状态，不看有没有 Agent 正在用它。于是可以"先建 Agent、再轮换凭证"：网关拿新密钥打上游，而 Agent 记录里"用的是哪个凭证版本"这层语义悬空。规格侧 F28（Skill 快照）仍是 SCAFFOLD，issue 明确"独立于 F27 的绑定约束可先行"，本批只做这半。
+
+**实现**（`7fac8001`）：
+
+- `AgentRepository#findActiveByCredentialId(tenantId, credentialId)`：只认 `status = 'ACTIVE'` 的绑定
+- `AdminCredentialService.rotate` / `disable`：在凭证行锁与既有状态守卫**之后**、任何写入**之前**调用引用守卫；命中抛 `409 CREDENTIAL_REFERENCED_BY_AGENT`，文案 `凭证已被 Agent「<name>」引用，不能轮换|停用；请先停用该 Agent。`
+- `AdminAgentService.create`：改为对凭证行 `findByIdForUpdate` 取锁 → 与 rotate/disable 的同一把锁互斥，堵住"校验 ACTIVE 通过 → 并发停用 → 插入 Agent"的 TOCTOU（单行先取锁，无死锁反转）
+
+**三条边界判定（已写进 `api-contract.md`）**：
+
+1. 本产品**没有凭证 DELETE 端点**，V17 的 `ON DELETE RESTRICT` 也禁止硬删 —— 所以"禁删"落在 `disable`（生命周期终止操作）上，不为对齐 issue 措辞而造一个假删除端点
+2. **已禁用的 Agent 不再钉住凭证**：历史绑定保留（用量仍归属该凭证），但守卫看不见它 —— 否则一次误绑会永久锁死凭证，且没有任何解锁路径
+3. 跨租户引用返回 **404 `CREDENTIAL_NOT_FOUND`** 而非 409：租户过滤在守卫之前（`findOwnedForUpdate`），不给出越权者探测他租户 Agent 名的能力
+
+**前端**：`frontend/src/i18n/dict.ts` 加两条 `PATTERNS`，把 409 的 `detail` 译成英文（Agent 名回填），保证英文界面下不是中文原文。
+
+**验证（真实输出）**：
+
+- 新增 `AdminCredentialAgentBindingIntegrationTest`（Testcontainers + MockMvc）：`Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 42.85 s`，`BUILD SUCCESS`（7 个模块全 SUCCESS）。用例：引用后 rotate 被拒 / 引用后 disable 被拒（两条都断言**数据库与审计零写入**：status、version、ACTIVE 版本指纹、审计动作列表均不变）/ 停用 Agent 后该凭证恢复可改可删、同时另一条仍被钉 / 已禁用 Agent 不钉 / 跨租户 404 且他租户凭证未被触碰 / 匿名 401 与 USER 角色 403
+- `AdminCredentialServiceTest` 补 3 条单测：`Tests run: 20, Failures: 0`
+- 全量受影响模块：`.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration` → `Tests run: 779, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`（7 模块全 SUCCESS，13:54 min）；其中本项新增类 6/6、`AdminCredentialServiceTest` 20/20
+- 前端：`npm --prefix frontend run typecheck` 通过；`npm test` 63 文件 / 380 用例全绿；`npm run build` 通过（24.33 s）；`npx eslint . --ext .vue,.ts,.tsx`（**不带 `--fix`**）0 error —— 62k 条 `Delete ␍` 告警是 Windows 检出 CRLF 的固有噪声（CI 为 LF），非本次引入
+- 评审后定向复跑：`.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration -Dtest=AdminCredentialServiceTest,AdminCredentialAgentBindingIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 26, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`（IT 6/6 42.45 s、单测 20/20 1.271 s）；前端 `npm test` 63 文件 / 384 用例全绿、`typecheck` 通过、`eslint`（不带 `--fix`）0 error
+
+**对抗评审后修复（4 条，均在本 Goal 范围内）**：
+- M1（唯一被证伪的对外声明）"停用 409 文案英文界面仍为中文"：`NextCredentialsView.vue` 把 message 与 requestId 拼成单节点 `…（requestId: xxx）`，全仓 20 处同样写法，均不匹配 `PATTERNS`。修在引擎层：`translateOne` 先剥离 `（requestId: …）` 后缀 → 翻译消息头 → 原样拼回；`i18n-copy.spec.ts` 加 3 组断言（两条真实文案 + 带后缀的轮换/停用串 + 未覆盖文案保持中文不半翻译）
+- M2 `disableProceedsWhenTheBindingAgentIsDisabled` 无判别力：补 `verify(agentRepository).findActiveByCredentialId(TENANT, credential.id())`，证明守卫被调用而非被跳过
+- M3 `i18n-copy.spec.ts` 未收录 #714 文案：已收录（含 Agent 名插值 `客服助手`）
+- M4 跨租户用例未锁定"响应体不含他租户 Agent 名"：已断言 rotate 的 404 body 不含 `foreign-agent` / `foreign-key`；收口轮补上 **disable 响应体**同样断言（此前只覆盖 rotate，而停用恰是 M1 暴露问题的路径）
+
+**未修复（2 条，理由如下）**：
+- M5 `docs/progress.md` 提交含 122 行纯行尾改写：该文件索引本身即 CRLF（`git ls-files --eol` → `i/crlf w/crlf`），提交把 122 行历史 LF 行归一为文件既有 CRLF；`git diff --numstat --ignore-cr-at-eol 7fac8001^..b5f31a5b -- docs/progress.md` 为 `28 0`（实质新增 28 行），`docs/api-contract.md` 为 `4 0`（无行尾改动）。不单独造 EOL 提交
+- M6（pre-existing）`findByIdForUpdate` 先加行锁、后做租户过滤，外租户 id 会短暂持有他租户凭证行锁；本批让 `AdminAgentService.create` 也走这条路径。影响仅为统一 404、不泄露存在性、无锁序环（评审 A4 已核）；修正需要改领域仓库锁 API 语义（`UpstreamCredentialRepository#findByIdForUpdate`），超出本 Goal 边界，留作后续独立变更
+
+**未做（如实记录）**：**Skill 快照语义（按引用版本固定）未实现**。理由：仓库里没有 Agent↔Skill 数据模型（无表、无迁移、无端点），F27/F28 仍是 SCAFFOLD；落地它要新表 + 新迁移 + 新的写入/读取语义，属于"需要新数据模型且风险大"，按 issue 边界**先停下报告**，不硬塞进本 PR。该项仍留在 F28 待办。
+
+**工具坑**：`npm run lint` 的脚本带 `--fix`，在 Windows 检出（CRLF）上重写了 151 个无关前端文件（其中 21 个是真实内容改动，其余只是行尾/stat 脏）。已用 `git checkout -- <paths>` 逐个回退，最终只保留 `docs/api-contract.md` 与 `frontend/src/i18n/dict.ts` 两处改动。后续在该仓库跑前端 lint 时避免整树带 `--fix`。
+
+### 收口轮（F1b）：M2–M6 逐条处置 + 定向复跑
+
+开轮核对：worktree 干净（`git status --short` 空输出，**上一轮评审提到的 `docs/progress.md` 残留改动已在 `566d5a86` 落盘**，无夹带文件）；远端无该分支、无 PR。
+
+| 项 | 处置 | 依据 |
+| --- | --- | --- |
+| M1 | 已修（`7a55eaf7`） | 引擎层剥离 `（requestId: …）` 后缀后翻译消息头再拼回 |
+| M2 | 已修（`abd2b5fb`） | `verify(agentRepository).findActiveByCredentialId(TENANT, credential.id())` 钉"守卫被调用"；SQL 层判别力由 `anAlreadyDisabledAgentDoesNotPinTheCredential` 集成用例承担 |
+| M3 | 已修（`7a55eaf7`） | `i18n-copy.spec.ts` 新增 `#714` describe：两条真实文案 + 带后缀的轮换/停用串 + 未覆盖文案不半翻译 |
+| M4 | 本轮补齐 | 原只断言 rotate 响应体，现 disable 响应体一并断言 |
+| M5 | 不改（理由见上） | 回退需重写已推送历史，属禁止操作；文件现已统一 CRLF，后续 diff 不再放大 |
+| M6 | 不改，建议另开 issue | pre-existing 锁语义问题，修正要改领域仓库锁 API，超出本批边界 |
+
+定向复跑（收口轮改 M4 断言后）：
+
+- `.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration -Dtest=AdminCredentialAgentBindingIntegrationTest,AdminCredentialServiceTest -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 26, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`（IT 6/6 34.42 s、单测 20/20 1.512 s；7 模块全 SUCCESS，50.7 s）
+- 前端 `npm --prefix frontend run typecheck` 通过（无输出即无错）；`npm --prefix frontend run test` → `Test Files 63 passed (63)` / `Tests 384 passed (384)`，24.22 s
+
+
 ## 2026-09-18 MCP tools/sync 兼容性修复（#779）——真实封闭客户端实测暴露
 
 **来源**：#742 第③片（WorkBuddy → 网关 MCP 数据面 → 公开 DeepWiki MCP）真机实测中，工具同步对严格 Streamable HTTP 上游 502（上游 406）——`McpToolsListClient` 只发 `Accept: application/json`，缺规范要求的 `text/event-stream`（同文件注释还自述"无 initialize 握手"，有状态上游为后续项）。触发面：一切严格校验 Accept 的上游 tools/sync 不可用 → 工具只能手工登记。
@@ -3899,7 +3958,6 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **一处 UI 取舍**：只为 `PRESENT` 出 chip，`NONE` 走 `—`。给"没有修正"也挂个徽标等于几乎每行都有徽标，反而把真正要看的那行淹掉；而这张表本来就用 `—` 表示"无话可说"。
 
 **另记**：迁移号按纪律取「develop 树最高号（66）∪ open issue 登记号」之后的下一个 = **V67**；定号前也扫了 open PR 的正文。
-
 ## 2026-09-18 适配器状态「持续警告」前端实现（#735 前端部分）——准入门控刻意不动
 
 **先复核现状**：`docs/provider-adapter-contract.md:120` 承诺「生产默认目录只启用 `VERIFIED` 产品；管理员可以显式启用 `IMPLEMENTED`，**页面必须持续警告**」。实现侧对得上「持续警告」的只有「徽标 + hover 提示」这一层：
@@ -3948,6 +4006,21 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - `npm --prefix frontend run build` → exit 0（`✓ built in 24.02s`）
 
 **首跑失败与最小修复（如实记录）**：新加的 DISABLED 用例第一次跑是**失败**的——它在 `document.body` 里收集 `.ui-tooltip` 文本，拿到的是同文件早先用例遗留的「已用真实供应商凭证完成契约测试。」（tooltip 只在锚点聚焦后才挂载，且从不卸载）。修复只加两行：`await wrapper.find('.ui-tooltip__anchor').trigger('focus');` + `await flushPromises();`，断言口径不变；修后该文件 12/12 通过。
+## 2026-09-18 WorkBuddy MCP 层接入实测样章（#742 第③片收口）
+
+**交付**：`docs/workbuddy-mcp-onboarding-sample.md`——真实封闭客户端（WorkBuddy，腾讯 CodeBuddy 系）按指南 §4 接入网关 MCP 数据面的完整样章：拓扑、五步照抄（注册服务→消费者裁 `mcp:call`→`~/.workbuddy/mcp.json`（**无点号**；带点的是应用自管文件，写错不生效）→过信任门（`mcp_approvals` 键=sha256(url origin)::name）→同步并放行工具）；证据表；两条踩坑（自管配置陷阱；`HEALTH_PATH` 对 SPA 兜底页的假 HEALTHY——应选 `JSONRPC_INITIALIZE`）。
+
+**实测证据链**：应用日志 `[MCP-Connect] ok … tools=3`；`mcp_access_log` 6 行 `TOOL_UNAVAILABLE`（放行前，toolName 完整）+ `FORWARDED | read_wiki_structure | 617ms`（放行后）。**实测暴露真缺陷 #779**（`tools/sync` Accept 缺 `text/event-stream` → 严格上游 406）——修复 PR #781 已合并（先证红两条回归）。
+## 2026-09-18 MCP tools/sync 修复之二：SSE 响应体解帧（#779 收口）
+
+**背景**：PR #781（Accept 兼发双媒体类型）上线后，对严格上游的失败**只前进了一步**——406 消失，但上游按规范合法改发 **SSE 帧**（`event: message` + `data: {...}`），同步客户端仍按裸 JSON 解析 → `502 TOOLS_SYNC_UPSTREAM_FAILED / Unrecognized token 'event'`。真机（演示站 deepwiki 服务）复现，错误逐字同型。
+
+**修复**：`McpToolsListClient` 判 `Content-Type: text/event-stream` 时按 SSE 规范取 `data:` 行（多行按换行拼接）再解析；无 data 载荷 fail-closed（"上游 SSE 响应中没有 data 载荷"）。
+
+**测试**：两条新用例**先证红**（SSE 解帧 / 无 data 拒绝），修复后 `McpToolsListClientTest` **11/11 绿**。
+
+**部署教训（本轮踩到，含一次自我纠正）**：compose.prod.yaml 的 cp 服务带 `build:` 段（context=`..`=演示树 `/opt/miqrokey`，与真正构建用的 `/opt/miqrokey-dev` 不同）——漏 `--no-build` 有**用旧树产出镜像**的风险（触发条件：该 tag 本地无镜像时 `up` 才会构建）。本轮曾观测"容器镜像 ID ≠ tag 镜像 ID 但 compose 显示 Running"，最初归因为"compose 按镜像引用名判等"——**该归因已被直接观测否定**：同 tag 下 `up` 不加 `--force-recreate` 亦会 `Recreate/Recreated`，compose 按解析出的镜像 ID 判等；更可能的成因是**多会话并发构建同一 tag 的竞态**（本轮时间线：自建镜像 11:11:03 完成，容器 11:11:07 从另一镜像创建）。**落为收尾断言**：部署后必须核 `container.Image == tag.Id`（"Up N seconds + healthy"不算数）——它正是抓这类竞态的检查；**跨会话纪律：同一 tag 不并发构建、部署串行**。
+
 ## 2026-09-18 WorkBuddy MCP 层接入实测样章（#742 第③片收口）
 
 **交付**：`docs/workbuddy-mcp-onboarding-sample.md`——真实封闭客户端（WorkBuddy，腾讯 CodeBuddy 系）按指南 §4 接入网关 MCP 数据面的完整样章：拓扑、五步照抄（注册服务→消费者裁 `mcp:call`→`~/.workbuddy/mcp.json`（**无点号**；带点的是应用自管文件，写错不生效）→过信任门（`mcp_approvals` 键=sha256(url origin)::name）→同步并放行工具）；证据表；两条踩坑（自管配置陷阱；`HEALTH_PATH` 对 SPA 兜底页的假 HEALTHY——应选 `JSONRPC_INITIALIZE`）。
@@ -4343,6 +4416,45 @@ job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
 - 本线用例：同形命令换 `-Dtest=PriceBasisCostStabilityIntegrationTest,UsageStatsAggregatorTest,UsageStatsServiceTest,AdminUsageStatsServiceTest` → **BUILD SUCCESS**，`Tests run: 8, Failures: 0, Errors: 0`（domain）+ `Tests run: 32, Failures: 0, Errors: 0`（control-plane）。
 
 **未做**：本线实现未重写、未 `stash`；"事件生成时携带价格快照"（标准 1）与 `CostAllocationService` 取价口径属**口径决策**，已交 owner（2026-09-18 04:00 的 #710 决策材料评论），本轮不动。
+## 2026-09-18 Runbook §15 定稿：两层结构（运维速查 + 工程陷阱），owner 已裁定收录
+
+**外部评审（owner 转来）结论：收录，但改成两层。** 已按此重排（commit 见下）：
+
+- **`operations-runbook.md` §15**：只留运维侧——总原则一行（"先问这个观察到底证明了什么"）+ 15.1 状态码语义 / 15.2 泛化兜底（仅 SQL→500 行）/ 15.3 未验证输入 / 15.4「命令返回了≠服务就绪了」/ 15.5 不可见字符 / 15.6 宽容失败语；**新增核实基线**（`verified-against: develop@…` + last-verified + re-check triggers）；15.4 的 nginx 措辞**降级为"本部署模板的事实"**（不再写成 nginx 普遍规律）；全文**无行号**。
+- **新增 `docs/debugging-traps.md`**：工程侧——CI JDT 速挂 / Maven 静默卡死（含"卡死持有部署锁"真机补充）/ 「全绿≠验过」（测试隔离 + 空基线 + #819 行为闸门的反向验证）/ 读已合并 revision / 「缺口判断先查权威表述」/ 「没牙的检查 vs 误报的检查」/ 完整事故证据引用链（#802→#819、#754、#816/#817、#710/#780）。§15 顶部互相指路，document-map 已登记。
+- 评审指出的"四族"描述过时：重排后按**两类形状**陈述（症状指向错误的层 / 证据强度被高估），工程侧（执行上下文族）随文档拆分另述。
+
+**来源**：owner 2026-09-18 转来的外部评审（原 PR #759 为"提案·待 owner 认可"，本条即该认可与改后的落地记录）。
+
+## 2026-09-18 CAA 证据审计链路补写入方（#629）——V55 建了表，没有任何人写
+
+**起因**：#629 指出 `request_context_evidence`（V55）在 Java/Kotlin/XML/YAML 中零命中——表建好了，既无写入方也无读取方，Spec v1.1 §7.2 的"为什么这么判"审计链路是断的。复核 `git grep -n "request_context_evidence" -- "*.java" "*.kt" "*.xml" "*.yml" "*.yaml"` 无输出（rc=1），与判断一致。
+
+**先判该不该有**：Spec v1.1 §7.2 把 V55 列为交付物（无"预留/未启用"字样）、§9 C13 是验收项、§11 P5 与 `database-schema.md`/`api-contract.md` 都按"已存在"描述；V55 表注释自带的 `source` 值域 `prompt_url|tool_path|bash_cwd|system_cwd|git_remote|header|suffix` 正是"外部选择器类别"。结论：**该层应当存在，本次补写入方**。读取方（查询 API）在 `api-contract.md` 无契约、Spec §11 把 §8 的增量排到后续批次 → 明确不在本次范围（不改前端：没有契约可展示）。
+
+**交付**：
+
+- `PostgresUsageEventWriter`：证据行随 `usage_event` **同批同事务**写入，行 `id` = 该笔 usage 事件 id，`ON CONFLICT (id) DO NOTHING`（重放不重复，两表可直接 join）。只对使用了外部选择器的裁定写行：`RESOLVED_HEADER` → `source='header'`、`value=` 客户端声明的 project id；`RESOLVED_SUFFIX` → `source='suffix'`、`value=` Key 中呈现的 tag。
+- `SOLE_BINDING`/`POLICY_ROUTED` **刻意不写行**：V55 的 `source` 值域没有对应"线索类别"的诚实取值，而 `value` 是 `NOT NULL` 且承载全部审计值——硬编一个值等于伪造证据。这两种裁定的解释本来就是 `usage_event.resolution_status`（C13 的 "+" 是"证据表**加**裁定列"，不是"每一行都必须有证据行"）。
+- 唯一缺的数据是"Key 后缀里呈现的 tag"：绑定索引本就按 projectTag 建（`JdbcRouteSnapshotLoader` 的 `bindings...put(binding.projectTag(), binding)`），故 `ContextAttribution` 增第 7 个分量 `bindingTag` 承载它。**未动阶梯与未归属策略的行为**——`RequestContextResolver`/`ResolvedContext` 一行未改。
+- 无新迁移：V55 的 PK 就是幂等键。
+
+**验证**（真实命令与输出）：
+
+- 先证明断言有判题力：把 `writeContextEvidence(...)` 调用临时关掉跑同一份测试，新用例红、红的正是"证据行数 0 而不是 1"——
+  `Tests run: 9, Failures: 2, Errors: 0` / `contextEvidenceRecordsObservedSelector:244 Expected size: 1 but was: 0 in: []` /
+  `droppedUsageEventLeavesNoEvidenceRow:284 Expected size: 1 but was: 0`；恢复该行后同一份测试 `Tests run: 9, Failures: 0, Errors: 0` + `BUILD SUCCESS`。
+- 四类对照：有 claim 头 / 有后缀 / 唯一绑定 / 未归属策略各一条请求，断言证据行数 **1/1/0/0**，且四条 `usage_event` 都在（证明"无证据行"是裁定，不是整批丢掉）；重放同一批 → 行数不变（幂等）。
+- 另测孤儿行：`model_id` 为空而被丢弃的 usage 事件不得留下证据行，同批健康事件照常落行 + 落证据。
+- 命令（Windows，JDK 21）：`mvnw.cmd -B -f backend -pl gateway-app -am test -Pintegration -Dtest=PostgresUsageEventWriterTest -Dsurefire.failIfNoSpecifiedTests=false`。
+
+### 一个测试暴露的既有边界（未改）
+
+重放一批 `provider_request_id` 为空的 `usage_event` 会撞 `usage_event_pkey`——写入器的幂等只覆盖 `(tenant_id, provider_request_id)` 那条部分唯一索引，这是**既有**行为（与本次改动无关，证据表的 `ON CONFLICT (id)` 没有再添失败面）；Bus 失败重投同一条无上游 id 的事件才会走到。测试夹具因此用带上游请求 id 的事件（真实 UPSTREAM 路径即如此）。是否要为 `COALESCED`（`provider_request_id` 为空）补一条以 `id` 为冲突目标的路径，属独立问题，未在本 PR 夹带。
+
+**文档**：`database-schema.md`（补写入方/幂等键/不写行的理由，并修正 `(tenant_id, observed_at)` 这个与实际索引 `(observed_at DESC)` 不符的描述）、`api-contract.md` §7.1 归属条、`activity-context-design.md` 的"无写入方"表述。
+
+**边界与遗留**：① 读取方（查询 API）未交付，Spec §7.2 只完成写入侧；② `V55__request_context_evidence.sql:5` 注释"网关在 Context 解析时写入"与实现时机（随用量批量写）不符——迁移本轮禁改，建议 follow-up；③ issue #629 正文的列名表述与 V55 实际 DDL 不一致（原文未在本次核对范围内），措辞更新属 owner 侧事项。
 
 ## 2026-09-18 缓存节省是没有标记的下界——补上最后一个"未知被当成 0"的洞（#790）
 

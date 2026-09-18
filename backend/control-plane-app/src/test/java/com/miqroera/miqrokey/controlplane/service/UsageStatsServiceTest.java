@@ -189,8 +189,7 @@ class UsageStatsServiceTest {
         // event() fixture above uses 200 cache-read tokens and no cache-creation ones.
         RowPriceBasis basis = new RowPriceBasis(new BigDecimal("1.00"), new BigDecimal("2.00"), new BigDecimal("0.50"),
                 null);
-        when(usageStatsRepository.findRecords(any(), eq(0L), eq(50)))
-                .thenReturn(List.of(unadjusted(event(), basis)));
+        when(usageStatsRepository.findRecords(any(), eq(0L), eq(50))).thenReturn(List.of(unadjusted(event(), basis)));
 
         UsageRecordPage page = service.records(user, null, null, 1, 50);
 
