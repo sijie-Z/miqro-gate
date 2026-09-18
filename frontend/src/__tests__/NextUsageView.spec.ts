@@ -152,6 +152,31 @@ describe('NextUsageView', () => {
     );
   });
 
+  it('#801: marks the totals cost as not-a-total when a gap exists', async () => {
+    mockApi.usageSummary.mockResolvedValue({
+      ...summary,
+      totals: {
+        ...summary.totals,
+        pricingStatus: 'PARTIAL',
+        unpriced: { unpricedEvents: 617, unavailableEvents: 565 },
+      },
+    } as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const marker = wrapper.find('[data-testid="cost-unpriced"]');
+    expect(marker.exists()).toBe(true);
+    expect(marker.text()).toContain('未定价');
+  });
+
+  it('#801: leaves a fully priced cost unmarked', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="cost-unpriced"]').exists()).toBe(false);
+  });
+
   it('renders the dimension summary table, totals row and requests math', async () => {
     const wrapper = mountView();
     await flushPromises();
