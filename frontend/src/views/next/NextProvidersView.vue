@@ -90,6 +90,19 @@ function implHintOf(status: string): string {
   return implHint[status] ?? '实现状态含义见接入文档。';
 }
 
+// Adapter-status persistent warning (#735). docs/provider-adapter-contract.md
+// promises "生产默认目录只启用 VERIFIED 产品 … 页面必须持续警告": a badge plus
+// a hover tooltip is not persistent, so every product whose status is not
+// VERIFIED carries a visible warning in the list and in its detail surface.
+// Display only — this never changes which products are enabled or usable.
+function isUnverified(status: string): boolean {
+  return status !== 'VERIFIED';
+}
+
+const unverifiedCount = computed(
+  () => products.value.filter((product) => isUnverified(product.implementationStatus)).length,
+);
+
 // Per-provider docs deep links (#651): docs/provider-catalog.md §3.1–3.8 each
 // cover one provider's endpoints, auth and reference materials. Anchor slugs
 // follow GitHub's heading ids for the Chinese headings; an unknown provider
@@ -389,6 +402,20 @@ onMounted(load);
       }}<span v-if="loadRequestId" class="ui-request-id"> requestId: {{ loadRequestId }}</span>
     </div>
 
+    <!-- #735 adapter-status persistent warning: stays on the page for as long
+         as any listed product is not VERIFIED (hover tooltips can be missed). -->
+    <div
+      v-if="unverifiedCount"
+      class="ui-alert ui-alert--warning"
+      data-testid="adapter-warning-banner"
+    >
+      <div class="next-providers__warning-title">目录中存在未处于「已验证」状态的产品</div>
+      <div>共 {{ unverifiedCount }} 个产品实例当前不是 VERIFIED。</div>
+      <div>
+        未验证或已降级的产品可用于联调与试用，但不应承载生产流量；本提示不改变产品的启用与可用行为。
+      </div>
+    </div>
+
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
         <span class="ui-panel-sub">共 {{ products.length }} 个产品实例</span>
@@ -443,6 +470,12 @@ onMounted(load);
               "
             />
           </UiTooltip>
+          <span
+            v-if="isUnverified(productOf(row).implementationStatus)"
+            class="next-providers__warning-inline"
+            data-testid="adapter-warning-row"
+            >⚠ 未验证</span
+          >
         </template>
         <template #balanceAuthority="{ row }">
           <span class="next-providers__balance">{{
@@ -505,6 +538,19 @@ onMounted(load);
       data-testid="product-models-dialog"
       @update:open="modelsVisible = false"
     >
+      <!-- #735: the per-product detail surface repeats the persistent warning,
+           so the state is visible without hovering the row badge. -->
+      <div
+        v-if="modelsProduct && isUnverified(modelsProduct.implementationStatus)"
+        class="ui-alert ui-alert--warning"
+        data-testid="product-models-adapter-warning"
+      >
+        <div class="next-providers__warning-title">该产品未处于「已验证」状态</div>
+        <div class="next-providers__warning-status">
+          {{ implLabel[modelsProduct.implementationStatus] ?? modelsProduct.implementationStatus }}
+        </div>
+        <div>{{ implHintOf(modelsProduct.implementationStatus) }}</div>
+      </div>
       <div v-if="modelsError" class="ui-alert ui-alert--error">{{ modelsError }}</div>
       <div class="next-providers__probe">
         <UiButton
@@ -655,6 +701,27 @@ onMounted(load);
 .ui-alert--error {
   background: var(--ui-danger-bg);
   color: var(--ui-danger-fg);
+}
+
+.ui-alert--warning {
+  background: var(--ui-warning-bg);
+  color: var(--ui-warning-fg);
+}
+
+.next-providers__warning-title {
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-providers__warning-status {
+  font-weight: var(--ui-weight-medium);
+}
+
+/* Row-level marker (#735): persistent, not a hover affordance. */
+.next-providers__warning-inline {
+  display: block;
+  margin-top: var(--ui-space-1);
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-warning-fg);
 }
 
 .next-providers__muted {

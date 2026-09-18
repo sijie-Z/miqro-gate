@@ -3833,3 +3833,33 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **一处 UI 取舍**：只为 `PRESENT` 出 chip，`NONE` 走 `—`。给"没有修正"也挂个徽标等于几乎每行都有徽标，反而把真正要看的那行淹掉；而这张表本来就用 `—` 表示"无话可说"。
 
 **另记**：迁移号按纪律取「develop 树最高号（66）∪ open issue 登记号」之后的下一个 = **V67**；定号前也扫了 open PR 的正文。
+
+## 2026-09-18 适配器状态「持续警告」前端实现（#735 前端部分）——准入门控刻意不动
+
+**先复核现状**：`docs/provider-adapter-contract.md:120` 承诺「生产默认目录只启用 `VERIFIED` 产品；管理员可以显式启用 `IMPLEMENTED`，**页面必须持续警告**」。实现侧对得上「持续警告」的只有「徽标 + hover 提示」这一层：
+
+- `AdapterStatus` 的唯一生产使用点是 `CatalogManifestValidator.java:123` 的**解析**（`requireEnum(product, "status", …)`），解析完不做任何准入判断
+- `ImplementationStatus` 没有任何准入分支
+- `CatalogSeedService.java:101` 把种子一律写成 `'DOCUMENTED'`
+- 目录量化：`provider-catalog.json` 共 **23** 个产品，状态计数 `{"DOCUMENTED":23}`——**0 个 IMPLEMENTED、0 个 VERIFIED**
+
+**因此只实现承诺里可验证的那半句——「页面必须持续警告」，准入行为一个字不改。** 照字面实现「只启用 VERIFIED」会让当前 23 个产品全部不可用，属产品决策，只出决策材料（已发 #735 评论），不在本批动代码。
+
+**改动**（`frontend/src/views/next/NextProvidersView.vue`，另 `frontend/src/i18n/dict.ts` 补双语文案）：
+
+- 页级常驻警示条 `data-testid="adapter-warning-banner"`：只要有任一产品状态不是 `VERIFIED` 就一直在页上（hover 提示会被漏看）
+- 行级常驻标记 `data-testid="adapter-warning-row"`（`⚠ 未验证`）：刻意用纯 `<span>`，因为既有断言把 `.ui-tooltip__anchor` 钉成 2 个，再加 Tooltip 会破既有测试
+- 产品详情面（模型目录对话框）内重复一次 `data-testid="product-models-adapter-warning"`，带该状态的解释文案
+- 判据就是状态字段本身：`status !== 'VERIFIED'`，`VERIFIED` 不出任何警告；DRAFT/DOCUMENTED/IMPLEMENTED/DEGRADED/DISABLED 全覆盖
+- 文案进 EN 词典：4 条 DICT + 1 条 PATTERN（计数行被 Vue 合并成单个文本节点，只能走 PATTERN）
+
+**一处实现取舍**：仓库没有独立的「供应商详情页」，唯一的产品详情面是模型目录对话框，所以「详情页警示块」落在它顶部。
+
+**验证（先证明断言有区分力）**：把 `isUnverified` 打成两个变异体——`return false` 与 `return true`——各挂 3 条测试（`3 failed | 8 passed`），恢复后全绿，并用 grep 确认无变异体残留。之后：
+
+- `npm --prefix frontend run test -- --run` → **63 files / 390 tests passed**
+- `npm --prefix frontend run typecheck` → exit 0
+- `npm --prefix frontend run build` → exit 0（built in 23.96s）
+- `npx eslint <4 个改动文件>`（不带 `--fix`）→ 0 errors（1 条 prettier 警告落在既有 import 行，非本批引入）
+
+**一处 tooling 陷阱（本批实录）**：本仓 `npm run lint` 的脚本是 `eslint . --ext .vue,.ts,.tsx --fix`——**它会改写整个前端**。本次跑完 lint 后 `git status` 出现 148 个与本改动无关的文件（含 `types/generated.ts` 整体重排），已逐个 `git checkout --` 还原，只留 4 个改动文件；随后改用不带 `--fix` 的 `npx eslint` 复核。后续批次别把 `npm run lint` 当成只读检查。

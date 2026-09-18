@@ -1449,6 +1449,13 @@ export const DICT: Record<string, string> = {
     'Some capabilities are estimate-only or checked manually — see the API docs.',
   '该产品实例已停用，不再用于新建凭证。':
     'This product instance is disabled and no longer used for new credentials.',
+  // #735 adapter-status persistent warning (non-VERIFIED products).
+  '⚠ 未验证': '⚠ Unverified',
+  '目录中存在未处于「已验证」状态的产品':
+    'Some catalogue products are not in the "VERIFIED" state',
+  '该产品未处于「已验证」状态': 'This product is not in the "VERIFIED" state',
+  '未验证或已降级的产品可用于联调与试用，但不应承载生产流量；本提示不改变产品的启用与可用行为。':
+    'Products that are not verified — or that have degraded — are fine for integration testing and trials, but must not carry production traffic. This notice does not change which products are enabled or usable.',
   '草稿': 'Draft',
   '管理 API 密钥': 'Admin API key',
   '删除任务': 'Deletion task',
@@ -1878,4 +1885,9 @@ export const PATTERNS: Array<[RegExp, string]> = [
   // #657 依赖/目录动态单元格。
   [/^(\d+) 个模型$/, '$1 models'],
   [/^凭证 (\d+) · 授权 (\d+)$/, 'Credentials $1 · Grants $2'],
+  // #735 adapter-status warning count.
+  [
+    /^共\ (\d+)\ 个产品实例当前不是\ VERIFIED。$/,
+    '$1 product instances are not currently VERIFIED.',
+  ],
 ];

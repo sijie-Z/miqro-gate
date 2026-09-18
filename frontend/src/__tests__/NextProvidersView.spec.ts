@@ -299,4 +299,101 @@ describe('NextProvidersView', () => {
     await flushPromises();
     expect(document.querySelector('.ui-tooltip')?.textContent).toContain('真实供应商凭证');
   });
+
+  // #735: docs/provider-adapter-contract.md promises a *persistent* warning for
+  // products that are not VERIFIED. Every test below is written so that the
+  // same query flips between "present" and "absent" across statuses — a bare
+  // "element exists" assertion would also pass if the warning were rendered
+  // unconditionally.
+  describe('#735 adapter-status persistent warning', () => {
+    /** DeepSeek VERIFIED + 阿里云 IMPLEMENTED + 腾讯云 DOCUMENTED. */
+    function threeStatuses() {
+      mockApi.listProviderProducts.mockResolvedValue([
+        product(),
+        product({
+          id: '0021',
+          providerSlug: 'aliyun',
+          providerName: '阿里云',
+          productCode: 'bailian-coding-plan',
+          displayName: '百炼 Coding Plan',
+          implementationStatus: 'IMPLEMENTED',
+        }),
+        product({
+          id: '0022',
+          providerSlug: 'tencent',
+          providerName: '腾讯云',
+          productCode: 'tencent-coding-plan',
+          displayName: '腾讯云 Coding Plan',
+          implementationStatus: 'DOCUMENTED',
+        }),
+      ]);
+    }
+
+    it('warns on the page and per row for non-VERIFIED products only', async () => {
+      threeStatuses();
+      const wrapper = mountView();
+      await flushPromises();
+
+      const inline = wrapper.findAll('[data-testid="adapter-warning-row"]');
+      expect(inline).toHaveLength(2);
+      expect(inline.map((n) => n.text())).toEqual(['⚠ 未验证', '⚠ 未验证']);
+
+      const banner = wrapper.find('[data-testid="adapter-warning-banner"]');
+      expect(banner.exists()).toBe(true);
+      expect(banner.text()).toContain('共 2 个产品实例当前不是 VERIFIED');
+      expect(banner.text()).toContain('本提示不改变产品的启用与可用行为');
+    });
+
+    it('renders no warning at all when every product is VERIFIED', async () => {
+      // Discriminating power: the per-row query is the same one that returned 2
+      // above, so it is the status — not the markup — that drives the count.
+      mockApi.listProviderProducts.mockResolvedValue([
+        product(),
+        product({ id: '0021', displayName: 'DeepSeek PAYG (2)', providerSlug: 'deepseek' }),
+      ]);
+      const wrapper = mountView();
+      await flushPromises();
+
+      expect(wrapper.findAll('[data-testid="adapter-warning-row"]')).toHaveLength(0);
+      expect(wrapper.find('[data-testid="adapter-warning-banner"]').exists()).toBe(false);
+    });
+
+    it('marks DEGRADED and DRAFT products too, and drops out once VERIFIED', async () => {
+      mockApi.listProviderProducts.mockResolvedValue([
+        product({ id: '0021', displayName: '降级产品', implementationStatus: 'DEGRADED' }),
+        product({ id: '0022', displayName: '草稿产品', implementationStatus: 'DRAFT' }),
+      ]);
+      const wrapper = mountView();
+      await flushPromises();
+
+      expect(wrapper.findAll('[data-testid="adapter-warning-row"]')).toHaveLength(2);
+      expect(wrapper.find('[data-testid="adapter-warning-banner"]').text()).toContain(
+        '共 2 个产品实例当前不是 VERIFIED',
+      );
+    });
+
+    it('repeats the warning inside the product detail surface', async () => {
+      threeStatuses();
+      const wrapper = mountView();
+      await flushPromises();
+
+      const opens = wrapper.findAll('[data-testid="product-models-open"]');
+
+      // Row 1 is the VERIFIED DeepSeek product: no warning block.
+      await opens[0]!.trigger('click');
+      await flushPromises();
+      expect(document.querySelector('[data-testid="product-models-dialog"]')).toBeTruthy();
+      expect(document.querySelector('[data-testid="product-models-adapter-warning"]')).toBeNull();
+
+      // Row 3 is DOCUMENTED: the same query now finds the block, which explains
+      // the state in place instead of only on hover.
+      await opens[2]!.trigger('click');
+      await flushPromises();
+      const block = document.querySelector('[data-testid="product-models-adapter-warning"]');
+      expect(block, 'DOCUMENTED product should warn in its detail dialog').toBeTruthy();
+      expect(block!.textContent).toContain('该产品未处于「已验证」状态');
+      expect(block!.textContent).toContain('已文档化');
+      expect(block!.textContent).toContain('适配器尚未完成验证');
+    });
+  });
 });
