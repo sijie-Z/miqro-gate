@@ -3739,3 +3739,4 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **现状证据**：两份 ADR 中每处「现状」断言均带 `file:line`（`ProxyController` / `CacheKeyFactory` / `ContextLimitGuard` / `CacheEligibility` / `SseReplayEngine` / `LlmCircuitBreakerRegistry` / `application.yml` / `V4`·`V8` 迁移 / `RequestStatus.java` / `architecture.md` / `testing-and-acceptance.md` / `provider-adapter-contract.md` / `feature-backlog.md` / `live-integration-guide.md`），并逐条在工作区核对；外部实现（cc-switch、AWS Bedrock）一律标注为 **issue 转述、本仓未复核**，不作论据。
 
 **提交**：`73f9efe5`（ADR-0023）、`1a694784`（ADR-0024）、索引与本节同一提交。
+**行尾修正**：本条目首次追加时曾把文件内 122 处既有 LF 行尾归一化为 CRLF，产生纯空白 diff；已按 `origin/develop` 原始字节恢复，本次仅新增本条目。
