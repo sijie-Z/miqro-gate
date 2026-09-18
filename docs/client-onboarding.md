@@ -80,13 +80,32 @@ export ANTHROPIC_AUTH_TOKEN="mqk_live_…"
 - 一把 Key 多项目：客户端可带声明头（`X-Miqro-Project-Id`），或安装本机 `miqro-context` Agent 零动作自动归属（按工作目录/仓库映射自动判定，判定权在网关）；
 - 无论哪种，判不出来时**拒绝或落未归属桶，绝不猜**（`context-attribution-implementation-spec.md`）。
 
-## 6. 明确不做的边界
+## 6. 接入器（参考实现）
+
+`scripts/onboarding/miqro-onboard.sh`：把上面各姿势的配置变成一条命令——**打印**可复制片段、
+**写入**文件形式（幂等 + 时间戳备份 + 托管块）、**验证**凭据是否真被数据面接受。
+
+```bash
+S=scripts/onboarding/miqro-onboard.sh; GW=https://<网关地址>
+sh $S print env --gateway $GW --key mqk_live_…                     # Claude Code（--shell posix|cmd|powershell）
+sh $S apply claude-settings --gateway $GW --key mqk_live_… --file ~/.claude/settings.json
+sh $S apply dotenv --gateway $GW --key mqk_live_… --flavor openai --file ./.env
+sh $S print mcp --gateway $GW --key mqk_api_… --mcp-url <streamableHttpUrl>
+sh $S verify --gateway $GW --key mqk_live_…                        # 200/404/401 按 §14.1 归因
+```
+
+工具在写盘前做与本文一致的**校验**：凭据平面不通用（用错一律 401）、虚拟密钥必须带 `.label`
+后缀（裸钥统一 404 `virtual_key_invalid`）、网关地址须为 origin（尾随 `/v1` 带提示剥离）。
+完整用法与设计边界（含为什么 `claude-settings` 依赖 jq、为什么 CC Switch 深链不在本工具内）
+见 `scripts/onboarding/README.md`；输出形状以控制台「使用密钥」面板为准
+（源头 `frontend/src/lib/ccswitch.ts`，改动需双侧同步）。
+
+## 7. 明确不做的边界
 
 - **网络层劫持**（hosts + 本地代理 + 自签证书）撬开封闭客户端：理论可行但成本高、有 TLS 与合规风险——**不做，也不建议**；
 - **协议转换**：网关保持协议透明，转换归客户端侧（ADR-0002）；
 - 需要"更顺的接入"时，做**接入器**（像 CC Switch 那样的配置注入器）比撬开网关爱更有意义。
 
-## 7. 待补（#742 第②③片）
+## 8. 待补（#742 第③片）
 
-- **接入器参考实现**：CC Switch 深链生成器已在 Key 页交付（"配置注入器"形态的最小实现）；面向更多客户端的接入器（环境变量/配置文件注入模板生成）按需扩展。
 - **封闭客户端实测**：选定一个真实封闭工具（如 WorkBuddy 类）完成 MCP 层接入端到端实测，并回填为本文样例。
