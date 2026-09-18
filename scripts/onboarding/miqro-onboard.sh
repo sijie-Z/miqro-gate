@@ -167,7 +167,21 @@ backup_file() {
         _b=$1.bak-$(date -u +%Y%m%dT%H%M%SZ)-$_n
     done
     cp "$1" "$_b"
+    chmod 600 "$_b" 2>/dev/null || true # backups hold the credential too
     printf '%s' "$_b"
+}
+
+# harden_and_warn FILE
+# Every target we write embeds a credential: restrict permissions, and warn
+# when the file sits in a git work tree without being ignored (mis-commit).
+harden_and_warn() {
+    chmod 600 "$1" 2>/dev/null || true
+    _d=$(dirname "$1")
+    if command -v git >/dev/null 2>&1 && git -C "$_d" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        if ! git -C "$_d" check-ignore -q "$(basename "$1")" 2>/dev/null; then
+            warn "$1 is inside a git work tree and not ignored — it now holds a credential; add it to .gitignore before committing"
+        fi
+    fi
 }
 
 # apply_managed_block FILE BLOCK_STRING LABEL
@@ -222,6 +236,7 @@ apply_managed_block() {
         printf 'backup: %s\n' "$(backup_file "$_f")"
     fi
     mv "$_new" "$_f"
+    harden_and_warn "$_f"
     printf 'wrote: %s\n' "$_f"
     rm -f "$_blkfile"
 }
@@ -259,6 +274,7 @@ apply_claude_settings() {
         printf 'backup: %s\n' "$(backup_file "$_f")"
     fi
     mv "$_tmp" "$_f"
+    harden_and_warn "$_f"
     printf 'wrote: %s\n' "$_f"
 }
 

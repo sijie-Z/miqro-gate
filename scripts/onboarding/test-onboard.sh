@@ -134,6 +134,41 @@ run sh "$SCRIPT" apply dotenv --gateway "$GW" --key "$VK" --flavor openai --file
 assert_status 0 "dry-run exits 0"
 assert_contains "dry-run, not written" "dry-run announces itself"
 
+# ---------- secret hygiene ----------
+
+case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+        # NTFS carries no POSIX modes; the chmod guard is a no-op there (ACLs rule).
+        printf 'SKIP file-mode assertions (Windows filesystem does not carry POSIX modes)\n'
+        ;;
+    *)
+        case "$(stat -c %a "$ENVF" 2>/dev/null)" in
+            600) ok "written file is chmod 600 (it holds a credential)" ;;
+            *) bad "written file is chmod 600 (got: $(stat -c %a "$ENVF" 2>/dev/null))" ;;
+        esac
+        BAK=$(ls "$ENVF".bak-* 2>/dev/null | head -1)
+        case "$(stat -c %a "$BAK" 2>/dev/null)" in
+            600) ok "backup file is chmod 600" ;;
+            *) bad "backup file is chmod 600 (got: $(stat -c %a "$BAK" 2>/dev/null))" ;;
+        esac
+        ;;
+esac
+
+if command -v git >/dev/null 2>&1; then
+    GREPO="$TMP/gitrepo"
+    mkdir -p "$GREPO"
+    (cd "$GREPO" && git init -q .)
+    run sh "$SCRIPT" apply dotenv --gateway "$GW" --key "$VK" --flavor openai --file "$GREPO/.env"
+    assert_status 0 "apply inside a git work tree exits 0"
+    assert_contains "not ignored" "un-ignored secret file triggers a warning"
+    printf '.env\n' >"$GREPO/.gitignore"
+    run sh "$SCRIPT" apply dotenv --gateway "$GW" --key "$VK" --flavor openai --file "$GREPO/.env"
+    assert_status 0 "second apply (now ignored) exits 0"
+    assert_not_contains "not ignored" "ignored secret file stays quiet"
+else
+    printf 'SKIP git-ignore warning tests (git not installed)\n'
+fi
+
 # ---------- apply claude-settings ----------
 
 if command -v jq >/dev/null 2>&1; then
