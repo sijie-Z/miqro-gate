@@ -422,46 +422,42 @@ public final class UsageStatsAggregator {
     }
 
     /**
-     * Prices one usage row with the same table and math as the aggregates:
+     * Prices one usage row with the same math as the aggregates:
      * {@code tokens × unitPrice / 1e6} per token type, summed. {@code priced} is
-     * false when a non-zero input/output count has no snapshot — the caller shows
+     * false when a dimension the row actually used has no price — the caller shows
      * 未定价 rather than a misleading 0 (#758).
+     *
+     * <p>
+     * The prices come from the row's own {@link RowPriceBasis}, never from a table
+     * looked up now: that is what keeps a detail row's cost from moving when the
+     * price list changes (#710).
+     * </p>
      */
-    public static PricedCost pricedCost(Map<String, BigDecimal> prices, UUID productId, String modelId, Long input,
-            Long output, Long cacheRead, Long cacheCreation) {
+    public static PricedCost pricedCost(RowPriceBasis basis, Long input, Long output, Long cacheRead,
+            Long cacheCreation) {
         long in = orZero(input);
         long out = orZero(output);
         long read = orZero(cacheRead);
         long creation = orZero(cacheCreation);
-        boolean priced = (in == 0 || hasPrice(prices, productId, modelId, PriceTokenType.INPUT))
-                && (out == 0 || hasPrice(prices, productId, modelId, PriceTokenType.OUTPUT))
-                && (read == 0 || hasPrice(prices, productId, modelId, PriceTokenType.CACHE_READ))
-                && (creation == 0 || hasPrice(prices, productId, modelId, PriceTokenType.CACHE_CREATION));
+        boolean priced = (in == 0 || basis.unitPrice(PriceTokenType.INPUT) != null)
+                && (out == 0 || basis.unitPrice(PriceTokenType.OUTPUT) != null)
+                && (read == 0 || basis.unitPrice(PriceTokenType.CACHE_READ) != null)
+                && (creation == 0 || basis.unitPrice(PriceTokenType.CACHE_CREATION) != null);
         if (!priced) {
             return new PricedCost(BigDecimal.ZERO, false);
         }
-        BigDecimal cost = pricedOrZero(prices, productId, modelId, PriceTokenType.INPUT, in)
-                .add(pricedOrZero(prices, productId, modelId, PriceTokenType.OUTPUT, out))
-                .add(pricedOrZero(prices, productId, modelId, PriceTokenType.CACHE_READ, read))
-                .add(pricedOrZero(prices, productId, modelId, PriceTokenType.CACHE_CREATION, creation));
+        BigDecimal cost = pricedOrZero(basis, PriceTokenType.INPUT, in)
+                .add(pricedOrZero(basis, PriceTokenType.OUTPUT, out))
+                .add(pricedOrZero(basis, PriceTokenType.CACHE_READ, read))
+                .add(pricedOrZero(basis, PriceTokenType.CACHE_CREATION, creation));
         return new PricedCost(cost, true);
     }
 
-    private static String priceKey(UUID productId, String modelId, PriceTokenType type) {
-        return productId + ":" + modelId + ":" + type.name();
-    }
-
-    private static boolean hasPrice(Map<String, BigDecimal> prices, UUID productId, String modelId,
-            PriceTokenType type) {
-        return prices.containsKey(priceKey(productId, modelId, type));
-    }
-
-    private static BigDecimal pricedOrZero(Map<String, BigDecimal> prices, UUID productId, String modelId,
-            PriceTokenType type, long tokens) {
+    private static BigDecimal pricedOrZero(RowPriceBasis basis, PriceTokenType type, long tokens) {
         if (tokens == 0) {
             return BigDecimal.ZERO;
         }
-        BigDecimal unitPrice = prices.get(priceKey(productId, modelId, type));
+        BigDecimal unitPrice = basis.unitPrice(type);
         if (unitPrice == null) {
             return BigDecimal.ZERO;
         }
