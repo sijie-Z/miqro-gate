@@ -33,20 +33,26 @@ import java.util.concurrent.atomic.AtomicLong;
  * That case is classified separately: it logs a WARN naming the real cause and
  * retries on a short, backed-off ticker
  * ({@code miqrokey.gateway.route-snapshot.retry-check-interval}, default 2s,
- * backoff 2→4→8→16→30s) instead of waiting out the full refresh interval.
- * Every other failure keeps the historical ERROR log. Compose also orders the
- * gateway after control-plane health; this retry is the belt for paths where
- * ordering cannot help (gateway pointed at a database nobody migrated yet).
+ * backoff 2→4→8→16→30s) instead of waiting out the full refresh interval. Every
+ * other failure keeps the historical ERROR log. Compose also orders the gateway
+ * after control-plane health; this retry is the belt for paths where ordering
+ * cannot help (gateway pointed at a database nobody migrated yet).
  * </p>
  */
 public final class RouteSnapshotRefresher {
 
     private static final Logger log = LoggerFactory.getLogger(RouteSnapshotRefresher.class);
 
-    /** PostgreSQL SQLState for {@code undefined_table} ("relation … does not exist"). */
+    /**
+     * PostgreSQL SQLState for {@code undefined_table} ("relation … does not
+     * exist").
+     */
     private static final String UNDEFINED_TABLE = "42P01";
 
-    /** Backoff cap for the not-ready retry ticker — never slower than the normal refresh. */
+    /**
+     * Backoff cap for the not-ready retry ticker — never slower than the normal
+     * refresh.
+     */
     private static final long MAX_RETRY_BACKOFF_SECONDS = 30;
 
     private final JdbcRouteSnapshotLoader loader;
@@ -54,7 +60,9 @@ public final class RouteSnapshotRefresher {
     private final Clock clock;
     private final AtomicLong versionCounter = new AtomicLong(0);
 
-    /** Last failure was "schema not built yet" — the short ticker keeps retrying. */
+    /**
+     * Last failure was "schema not built yet" — the short ticker keeps retrying.
+     */
     private final AtomicBoolean schemaNotReady = new AtomicBoolean(false);
     private final AtomicInteger notReadyAttempts = new AtomicInteger(0);
     private volatile Instant nextAttemptAt = Instant.EPOCH;
@@ -102,11 +110,9 @@ public final class RouteSnapshotRefresher {
         long backoff = retryBackoffSeconds(attempt);
         nextAttemptAt = clock.instant().plusSeconds(backoff);
         schemaNotReady.set(true);
-        log.warn(
-                "Route snapshot refresh deferred: database schema not initialised yet "
-                        + "(control-plane migrations still running; attempt {}); keeping previous snapshot; "
-                        + "retrying in ~{}s",
-                attempt, backoff);
+        log.warn("Route snapshot refresh deferred: database schema not initialised yet "
+                + "(control-plane migrations still running; attempt {}); keeping previous snapshot; "
+                + "retrying in ~{}s", attempt, backoff);
         if (log.isDebugEnabled()) {
             log.debug("schema-not-ready cause", e);
         }
@@ -126,10 +132,10 @@ public final class RouteSnapshotRefresher {
     }
 
     /**
-     * True when the failure chain bottoms out in PostgreSQL
-     * {@code undefined_table} — "migrations have not run here yet", as opposed
-     * to a real SQL defect. Walked over the cause chain because the JDBC layer
-     * wraps {@link SQLException} in Spring's DataAccessException.
+     * True when the failure chain bottoms out in PostgreSQL {@code undefined_table}
+     * — "migrations have not run here yet", as opposed to a real SQL defect. Walked
+     * over the cause chain because the JDBC layer wraps {@link SQLException} in
+     * Spring's DataAccessException.
      */
     static boolean isSchemaNotReady(Throwable failure) {
         for (Throwable t = failure; t != null; t = t.getCause()) {

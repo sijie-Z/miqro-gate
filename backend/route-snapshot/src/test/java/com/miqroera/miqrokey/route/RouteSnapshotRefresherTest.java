@@ -22,11 +22,11 @@ import static org.mockito.Mockito.when;
 
 /**
  * #846: a fresh deployment let the gateway boot before the control plane's
- * Flyway run, so the first refresh failed with PostgreSQL {@code undefined_table}
- * — logged as ERROR and retried only on the next 30s tick. These tests pin the
- * replacement behavior: that failure is classified as "schema not ready",
- * deferred with a WARN, retried on a backed-off short ticker, and every other
- * failure keeps the historical ERROR path.
+ * Flyway run, so the first refresh failed with PostgreSQL
+ * {@code undefined_table} — logged as ERROR and retried only on the next 30s
+ * tick. These tests pin the replacement behavior: that failure is classified as
+ * "schema not ready", deferred with a WARN, retried on a backed-off short
+ * ticker, and every other failure keeps the historical ERROR path.
  */
 class RouteSnapshotRefresherTest {
 
@@ -69,8 +69,8 @@ class RouteSnapshotRefresherTest {
     void classifiesUndefinedTable() {
         assertThat(RouteSnapshotRefresher.isSchemaNotReady(undefinedTable())).isTrue();
         // Wrapped one extra layer (JdbcTemplate -> DAO -> refresher) still counts.
-        assertThat(RouteSnapshotRefresher
-                .isSchemaNotReady(new IllegalStateException("load failed", undefinedTable()))).isTrue();
+        assertThat(RouteSnapshotRefresher.isSchemaNotReady(new IllegalStateException("load failed", undefinedTable())))
+                .isTrue();
         assertThat(RouteSnapshotRefresher.isSchemaNotReady(new SQLException("down", "08006"))).isFalse();
         assertThat(RouteSnapshotRefresher.isSchemaNotReady(new RuntimeException("boom"))).isFalse();
         assertThat(RouteSnapshotRefresher.isSchemaNotReady(undefinedTable().getCause().getCause())).isFalse();
