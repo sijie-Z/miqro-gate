@@ -12,7 +12,16 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
 import { costGapNote } from '@/lib/usage-pricing';
-import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, UiTooltip, toast } from '@/ui';
+import {
+  UiButton,
+  UiDialog,
+  UiInput,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  UiTooltip,
+  toast,
+} from '@/ui';
 import type { UiSelectOption } from '@/ui';
 import type { BudgetView, Project, UsageGroup, UsageSummary } from '@/types/generated-api';
 
@@ -66,7 +75,9 @@ const cacheSaved = computed(() => projectSummary.value?.totals?.cost?.savedByGat
  * any remain, the saving is a lower bound — the card says so rather than letting a
  * small number read as "the cache saved almost nothing".
  */
-const unpricedHits = computed(() => Number(projectSummary.value?.totals?.unpriced?.unpricedHitEvents ?? 0));
+const unpricedHits = computed(() =>
+  Number(projectSummary.value?.totals?.unpriced?.unpricedHitEvents ?? 0),
+);
 /**
  * #801: the cost cards are not totals while this is non-null. Same promise the API
  * has kept since #766, which the console never showed.
@@ -204,9 +215,7 @@ function exportCsv() {
       costOf(row).toFixed(4),
     ];
   });
-  const csv = [header, ...rows]
-    .map((row) => row.map(csvCell).join(','))
-    .join('\n');
+  const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -532,7 +541,9 @@ onMounted(async () => {
             <span class="ui-mono next-cost__budget-code">{{ b.projectCode }}</span>
           </div>
           <div class="next-cost__budget-figures">
-            <span class="ui-num">{{ formatCost(b.spent ?? 0) }} / {{ formatCost(b.amount ?? 0) }}</span>
+            <span class="ui-num"
+              >{{ formatCost(b.spent ?? 0) }} / {{ formatCost(b.amount ?? 0) }}</span
+            >
             <UiStatusBadge
               variant="pill"
               :tone="budgetLevelTone[b.level ?? ''] ?? 'neutral'"

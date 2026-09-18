@@ -26,6 +26,8 @@ describe('UiDonut', () => {
 
   it('falls back to a flat muted ring without segments', () => {
     const wrapper = mount(UiDonut, { props: { segments: [] } });
-    expect((wrapper.get('.ui-donut').element as HTMLElement).style.background).toContain('var(--ui-muted)');
+    expect((wrapper.get('.ui-donut').element as HTMLElement).style.background).toContain(
+      'var(--ui-muted)',
+    );
   });
 });

@@ -53,9 +53,7 @@ function goOverview() {
       <pre class="error-boundary__detail ui-mono">{{ error.message }}</pre>
       <div class="error-boundary__actions">
         <UiButton variant="primary" data-testid="error-retry" @click="retry">重试</UiButton>
-        <UiButton variant="secondary" data-testid="error-reload" @click="reload"
-          >重新加载</UiButton
-        >
+        <UiButton variant="secondary" data-testid="error-reload" @click="reload">重新加载</UiButton>
         <UiButton variant="ghost" data-testid="error-overview" @click="goOverview"
           >返回总览</UiButton
         >

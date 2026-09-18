@@ -829,6 +829,9 @@ async function handleLogout() {
         <!-- #833: page crashes keep the shell (nav stays usable); the card
              offers retry/reload/overview and clears on navigation. -->
         <ErrorBoundary>
+          <!-- The canonical RouterView + Transition pattern: `Component` here IS
+               the slot binding, not a shadow of anything in this component's scope. -->
+          <!-- eslint-disable-next-line vue/no-template-shadow -->
           <RouterView v-slot="{ Component }">
             <Transition name="shell-page" mode="out-in">
               <component :is="Component" />

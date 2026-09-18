@@ -67,10 +67,35 @@ const stats = computed<StatCard[]>(() => {
     0,
   );
   return [
-    { label: '虚拟密钥', value: String(keys.value.length), hint: `${active} 个可用`, icon: LockOnIcon, tone: 'blue' },
-    { label: '本月请求', value: formatCount(totalRequests), hint: '经网关的请求数', icon: ChartBarIcon, tone: 'green' },
-    { label: '本月 Token', value: formatCount(totalTokens), hint: '输入+输出', icon: LayersIcon, tone: 'cyan' },
-    { label: '本月成本', value: Number(totalCost).toFixed(2), prefix: '¥', hint: '按价格快照估算', icon: MoneyIcon, tone: 'gold' },
+    {
+      label: '虚拟密钥',
+      value: String(keys.value.length),
+      hint: `${active} 个可用`,
+      icon: LockOnIcon,
+      tone: 'blue',
+    },
+    {
+      label: '本月请求',
+      value: formatCount(totalRequests),
+      hint: '经网关的请求数',
+      icon: ChartBarIcon,
+      tone: 'green',
+    },
+    {
+      label: '本月 Token',
+      value: formatCount(totalTokens),
+      hint: '输入+输出',
+      icon: LayersIcon,
+      tone: 'cyan',
+    },
+    {
+      label: '本月成本',
+      value: Number(totalCost).toFixed(2),
+      prefix: '¥',
+      hint: '按价格快照估算',
+      icon: MoneyIcon,
+      tone: 'gold',
+    },
   ];
 });
 
@@ -119,7 +144,13 @@ const donutSegments = computed(() => {
     pct: (g.cost / total) * 100,
     color: DONUT_COLORS[i]!,
   }));
-  if (restCost > 0) rows.push({ label: '其他', cost: restCost, pct: (restCost / total) * 100, color: DONUT_COLORS[5]! });
+  if (restCost > 0)
+    rows.push({
+      label: '其他',
+      cost: restCost,
+      pct: (restCost / total) * 100,
+      color: DONUT_COLORS[5]!,
+    });
   return rows;
 });
 
@@ -162,14 +193,20 @@ const PURPOSE_LABELS: Record<string, string> = {
   CUSTOM: '自定义',
 };
 
-const STATUS_META: Record<string, { tone: 'success' | 'warning' | 'danger' | 'neutral'; label: string }> = {
+const STATUS_META: Record<
+  string,
+  { tone: 'success' | 'warning' | 'danger' | 'neutral'; label: string }
+> = {
   ACTIVE: { tone: 'success', label: '可用' },
   ROTATING: { tone: 'warning', label: '轮换中' },
   REVOKED: { tone: 'danger', label: '已吊销' },
   DISABLED: { tone: 'neutral', label: '停用' },
 };
 
-function keyStatusMeta(status?: string): { tone: 'success' | 'warning' | 'danger' | 'neutral'; label: string } {
+function keyStatusMeta(status?: string): {
+  tone: 'success' | 'warning' | 'danger' | 'neutral';
+  label: string;
+} {
   return STATUS_META[status ?? ''] ?? { tone: 'neutral', label: status ?? '—' };
 }
 
@@ -231,10 +268,11 @@ async function loadFeed() {
         ...approvals.slice(0, 4).map((a) => ({
           ts: a.createdAt ?? '',
           text: `申请模型 ${a.modelId ?? '—'}（${APPROVAL_STATUS_LABELS[a.status ?? ''] ?? a.status ?? '—'}）`,
-          tone: (a.status === 'APPROVED' ? 'success' : a.status === 'REJECTED' ? 'warning' : 'info') as
-            | 'success'
-            | 'info'
-            | 'warning',
+          tone: (a.status === 'APPROVED'
+            ? 'success'
+            : a.status === 'REJECTED'
+              ? 'warning'
+              : 'info') as 'success' | 'info' | 'warning',
         })),
       ]
         .sort((x, y) => String(y.ts).localeCompare(String(x.ts)))
@@ -348,7 +386,8 @@ onMounted(load);
       <div class="next-overview__greeting-stats" data-testid="overview-stats">
         <div v-for="card in stats" :key="card.label" class="next-overview__stat-chip">
           <span class="next-overview__stat-chip-value ui-num"
-            ><i v-if="card.prefix" class="next-overview__stat-currency">{{ card.prefix }}</i>{{ card.value }}</span
+            ><i v-if="card.prefix" class="next-overview__stat-currency">{{ card.prefix }}</i
+            >{{ card.value }}</span
           >
           <span class="next-overview__stat-chip-label" :title="card.hint">{{ card.label }}</span>
         </div>
@@ -405,7 +444,8 @@ onMounted(load);
                 </div>
                 <span class="next-overview__key-name" :title="key.name">{{ key.name }}</span>
                 <span class="next-overview__key-desc">
-                  {{ purposeLabel(key.purpose) }}<template v-if="(key.modelIds ?? []).length">
+                  {{ purposeLabel(key.purpose)
+                  }}<template v-if="(key.modelIds ?? []).length">
                     · {{ (key.modelIds ?? []).length }} 个模型</template
                   >
                 </span>
@@ -477,8 +517,17 @@ onMounted(load);
               <h2 class="ui-panel-title">快捷导航</h2>
             </div>
             <nav class="next-overview__quick-grid" aria-label="快捷入口">
-              <router-link v-for="item in quickNav" :key="item.to" :to="item.to" class="next-overview__quick-tile">
-                <span class="next-overview__quick-icon" :style="{ color: item.color }" aria-hidden="true">
+              <router-link
+                v-for="item in quickNav"
+                :key="item.to"
+                :to="item.to"
+                class="next-overview__quick-tile"
+              >
+                <span
+                  class="next-overview__quick-icon"
+                  :style="{ color: item.color }"
+                  aria-hidden="true"
+                >
                   <component :is="item.icon" size="20px" />
                 </span>
                 <span class="next-overview__quick-label">{{ item.label }}</span>
@@ -498,7 +547,9 @@ onMounted(load);
             <div v-if="costTotal > 0" class="ui-panel-body next-overview__cost-layout">
               <div class="next-overview__donut-wrap">
                 <UiDonut
-                  :segments="donutSegments.map((s) => ({ label: s.label, value: s.cost, color: s.color }))"
+                  :segments="
+                    donutSegments.map((s) => ({ label: s.label, value: s.cost, color: s.color }))
+                  "
                   :center-text="`¥${costTotal.toFixed(2)}`"
                   data-testid="overview-cost-donut"
                 />
@@ -517,7 +568,11 @@ onMounted(load);
             </div>
           </section>
 
-          <section v-if="isAdmin" class="ui-panel next-overview__panel" data-testid="overview-ledger">
+          <section
+            v-if="isAdmin"
+            class="ui-panel next-overview__panel"
+            data-testid="overview-ledger"
+          >
             <div class="ui-panel-head">
               <div>
                 <h2 class="ui-panel-title">额度账本</h2>
@@ -528,11 +583,17 @@ onMounted(load);
               <div v-for="row in quotaLedger" :key="row.id" class="next-overview__ledger-row">
                 <div class="next-overview__ledger-plan">
                   <span class="next-overview__key-name">{{ row.name }}</span>
-                  <span class="ui-panel-sub">{{ row.productName }} · {{ planScopeLabel(row.planScope) }}</span>
+                  <span class="ui-panel-sub"
+                    >{{ row.productName }} · {{ planScopeLabel(row.planScope) }}</span
+                  >
                 </div>
                 <div class="next-overview__ledger-band">
                   <template v-if="row.quotaTotal">
-                    <div v-for="seg in row.segments" :key="seg.label" class="next-overview__ledger-seg">
+                    <div
+                      v-for="seg in row.segments"
+                      :key="seg.label"
+                      class="next-overview__ledger-seg"
+                    >
                       <span class="next-overview__ledger-seg-label"
                         >{{ seg.label }} · {{ Math.round(seg.ratio * 100) }}%</span
                       >
@@ -551,7 +612,9 @@ onMounted(load);
                   <span v-else class="next-overview__ledger-unset">未配置滚动额度</span>
                 </div>
                 <span class="next-overview__ledger-quota ui-num">{{
-                  row.quotaTotal ? `${formatCount(row.quotaTotal)} ${quotaUnitLabel(row.quotaUnit)}` : '未配置'
+                  row.quotaTotal
+                    ? `${formatCount(row.quotaTotal)} ${quotaUnitLabel(row.quotaUnit)}`
+                    : '未配置'
                 }}</span>
               </div>
             </div>

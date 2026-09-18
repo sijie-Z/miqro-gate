@@ -256,6 +256,10 @@ jobs:
         # checked-in generated types differ (feature backlog 功能 4 stage 1).
         run: npm run gen:types && git diff --exit-code -- src/types/generated.ts
       - name: Lint
+        # `lint` is check-only and runs with --max-warnings 0: every rule that can
+        # rewrite a file (prettier, the vue stylistic set) reports as a warning, so
+        # without the flag this step was green over trees it would have rewritten
+        # (#822). Use `npm run lint:fix` locally to apply the changes.
         run: npm run lint
       - name: Typecheck
         run: npm run typecheck

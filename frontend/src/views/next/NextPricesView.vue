@@ -9,7 +9,7 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiInput, UiSelect, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type {ProviderProductView} from '@/types/api';
+import type { ProviderProductView } from '@/types/api';
 import type { PriceSnapshotView } from '@/types/generated-api';
 
 const prices = ref<PriceSnapshotView[]>([]);

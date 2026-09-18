@@ -54,7 +54,9 @@ function onChange(event: Event) {
       @change="onChange"
     />
     <span class="ui-radio__dot" aria-hidden="true" />
-    <span v-if="label || $slots.default" class="ui-radio__label"><slot>{{ label }}</slot></span>
+    <span v-if="label || $slots.default" class="ui-radio__label"
+      ><slot>{{ label }}</slot></span
+    >
   </label>
 </template>
 

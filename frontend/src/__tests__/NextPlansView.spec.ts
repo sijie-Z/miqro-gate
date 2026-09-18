@@ -5,7 +5,7 @@ import { defineComponent } from 'vue';
 import NextPlansView from '@/views/next/NextPlansView.vue';
 import * as api from '@/api';
 import { toastState } from '@/ui/toast';
-import type {ProviderProductView} from '@/types/api';
+import type { ProviderProductView } from '@/types/api';
 import type { SubscriptionView, SeatView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({

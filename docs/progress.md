@@ -4664,3 +4664,60 @@ MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS: ${MIQROKEY_RETENTION_KAFKA_BOOTSTRAP
 - **"变量存在但为空"是部署里极常见的形态，应用必须把它当成"未配置"**。`@ConditionalOnProperty` 的默认语义在这点上与直觉相反（空串 ≠ 关闭）。
 - **只构建镜像的 CI 会被读成"部署能起来"。** `images` job 证明的是"镜像可构建"，而它被当成了更强的东西——又一次"检查与它检查的东西没对齐"。
 - 我此前所有部署验证都走演示站或脚本断言，**没有一次真的把默认栈拉起来过**。这次是"自己做完整套模拟"的直接产物。
+
+## 2026-09-18 lint 门禁从来不会红：它带 --fix，且 CI 不看结果（#822）
+
+在做完整套模拟时发现：干净检出上跑 CI 的那条 lint 命令，**重写了 21 个已提交文件**（内容真变了；另有 132 个只是 stat-dirty）——而 CI 看不出来，因为它跑的是 `eslint . --ext .vue,.ts,.tsx --fix`，**带 `--fix` 且跑完不检查**。于是它区分不了「本来就干净」和「我刚替你改干净」。
+
+最大的受害者是 `src/types/generated.ts`：被整份从 4 空格重排成 2 空格（diff 20,809 行）。而 CI 里另一步是
+
+```yaml
+run: npm run gen:types && git diff --exit-code -- src/types/generated.ts
+```
+
+**它跑在 lint 之前**，此刻文件还是提交时的形态、重生成本一致 → 通过；紧接着 lint 把它改掉，**没人再看**。也就是说「生成物必须与基线一致」和「代码必须符合 lint」这两个要求，对**同一份文件**给出两种互斥答案，CI 对两者都说 OK。
+
+### 修法
+
+1. **`lint` 改成检查模式**（不带 `--fix`），新增 `lint:fix` 供本地改写
+2. **`--max-warnings 0`**：这一步是必需的——今天所有违规（prettier、vue 风格集）**都是 warning**，而 eslint 只有 warning 时仍然 exit 0。**只改检查模式不加这个标志，门禁照样不会红**，是我第一版做完差点收工的地方
+3. **`generated.ts` 加进 eslint ignores**：它是机器产物（文件头写着"不要直接改"），形态由 openapi-typescript 决定。让 lint 对它有意见，就是把上面那对矛盾焊死
+4. 把既有 22 个手写文件的格式漂移**一次性**修掉（否则第 1 条落地当天就红）
+
+### 零告警不是靠关规则凑的
+
+`--max-warnings 0` 要求先把既有 7 条告警正当处理掉，两条都不是靠"关掉规则"了事：
+
+- **6 条 `vue/one-component-per-file` 全在测试文件里**（`src/__tests__/**`、`e2e/**`）——内联桩组件正是那些测试的写法，规则的意图是"一个*交付*文件一个组件"，所以**只在这两个 scope 关掉**
+- **1 条 `vue/no-template-shadow` 是误报**：`<RouterView v-slot="{ Component }"><component :is="Component"/></RouterView>` 是 Vue 官方的规范写法，`Component` 就是那个 slot 绑定，没有遮蔽任何东西。给了**单行、带理由的豁免**，而不是全局关规则
+
+### 红证明
+
+| 场景 | 结果 |
+|---|---|
+| 干净树上 `npm run lint` | **exit 0** |
+| 注入一处格式偏差（`const   badlyFormatted =    1`） | **exit 1**（`prettier/prettier` warning → `--max-warnings 0` 拦下）|
+| `npm run gen:types` 之后紧跟 lint | **两者同时通过**（矛盾解除）|
+
+改完回归：typecheck exit 0、**419 tests / 64 files 全绿**、build exit 0——22 个文件重排没有破坏任何东西。
+
+### 教训
+
+- **"带 --fix 的检查"不是检查**。它把"发现问题"和"掩盖问题"合成一步，还顺手给出一个绿信号。同类形态在本仓已经出现过三次（#807 过严、#809 过松、#812 没有），这次是 **"会自己动手的检查"**。
+- **改检查模式不等于检查会红**——还要问一句"违规是 error 还是 warning"。我第一版只做了前者，跑红证明时才发现仍然 exit 0。
+- 顺带记一条旧账：progress.md 里早有记录说 `npm run lint` 会把 CRLF 文件整批重写成 LF（EOL-only M）。那是 `--fix` 的副作用；检查模式不再有，`lint:fix` 仍有——所以本地跑 `lint:fix` 后仍要区分内容 diff 与 EOL diff。
+
+### 补记：`--max-warnings 0` 一加上，Windows 检出就红了 47,968 条——以及那桩旧账的真相
+
+加完 `--max-warnings 0`、合并 develop 之后再跑，lint 报 **47,968 条**，形态统一：`Delete ␍`。
+
+根因：`.prettierrc.json` 写的是 **`endOfLine: "lf"`**，而 autocrlf 让工作区是 CRLF——**prettier 对每一行都报行尾不对**。不先处理这个，新门禁在任何 Windows 检出上**永远红**。我此前那次"干净树 exit 0"是假象：我自己的 `lint:fix` 早已把工作区写成了 LF，我拿被改过的树当了干净树。
+
+**顺带把一桩旧账对上了**：本仓长期记着"`npm run lint` 会 `--fix` 重写 80+ 个历史漂移文件"。真成因就是这个——`--fix` 一直在把 CRLF 归一成 LF，那批 EOL-only 的 ` M`（`git diff` 为空）全由它而来。**那不是"代码漂移"，是被工具逼出来的行尾改写**；于是记忆里那条"只对本轮改动文件跑 eslint"的规避建议，其实是在绕开一个配置问题。
+
+修法：`endOfLine: "auto"`（跟随文件自身行尾）。**提交形态仍是 LF**（`text=auto` 在 add 时归一化），格式仍照样强制（缩进/引号/宽度/逗号），只是不再把"检出的平台"当成格式问题。
+
+### 教训追加
+
+- **"干净树"要问是谁把它弄干净的**。我上一轮跑红的证明前，`lint:fix` 已经把工作区整成 LF，于是"检查模式 exit 0"测的是**被静默改写过的树**——正是这条 issue 要治的东西，我自己先踩了一次。
+- **一个只在某个平台成立的绿，不是绿**。CI 在 Linux（LF）上一直是绿的，所以这个问题在 CI 里永远看不见；它是 Windows 检出的产物。与 #807/#809/#812 同族：**检查与它运行的环境没对齐**，只不过这次"环境"是操作系统。
