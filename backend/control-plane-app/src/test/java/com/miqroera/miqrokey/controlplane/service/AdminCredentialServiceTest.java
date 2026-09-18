@@ -12,7 +12,9 @@ import com.miqroera.miqrokey.controlplane.service.credential.FormatCredentialVal
 import com.miqroera.miqrokey.domain.crypto.CredentialFingerprint;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
+import com.miqroera.miqrokey.domain.repository.AgentRepository;
 import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
+import com.miqroera.miqrokey.domain.model.Agent;
 import com.miqroera.miqrokey.domain.model.BillingMode;
 import com.miqroera.miqrokey.spi.AdapterRegistry;
 import com.miqroera.miqrokey.spi.CredentialCheck;
@@ -42,6 +44,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -94,6 +97,8 @@ class AdminCredentialServiceTest {
     @Mock
     private ProviderProductRepository productRepository;
     @Mock
+    private AgentRepository agentRepository;
+    @Mock
     private org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate jdbc;
 
     private final AuthProperties authProperties = new AuthProperties();
@@ -104,7 +109,7 @@ class AdminCredentialServiceTest {
     void setUp() {
         service = new AdminCredentialService(credentialRepository, versionRepository, subscriptionRepository,
                 keyEncryptionProvider, new FormatCredentialValidator(), auditService, authProperties,
-                RouteRefreshPublisher.NONE, adapterRegistry, clientFactory, productRepository, jdbc);
+                RouteRefreshPublisher.NONE, adapterRegistry, clientFactory, productRepository, jdbc, agentRepository);
         admin = new User(UUID.randomUUID(), TENANT, "admin", "Admin", new byte[32], UserRole.SYSTEM_ADMIN,
                 UserStatus.ACTIVE, false, 0, null, null, 0L, Instant.now(), Instant.now());
     }
@@ -289,6 +294,25 @@ class AdminCredentialServiceTest {
     }
 
     @Test
+    void rotateRejectsCredentialBoundToActiveAgent() {
+        UpstreamCredential credential = credential();
+        when(credentialRepository.findByIdForUpdate(credential.id())).thenReturn(Optional.of(credential));
+        when(agentRepository.findActiveByCredentialId(TENANT, credential.id()))
+                .thenReturn(Optional.of(agent("客服助手", credential.id(), "ACTIVE")));
+
+        assertThatThrownBy(() -> service.rotate(admin, credential.id(), new RotateCredentialRequest(SECRET), "req-1"))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(e.getCode()).isEqualTo("CREDENTIAL_REFERENCED_BY_AGENT");
+                    assertThat(e.getMessage()).contains("客服助手").contains("不能轮换");
+                });
+        verify(versionRepository, never()).update(any());
+        verify(versionRepository, never()).insert(any());
+        verify(credentialRepository, never()).update(any());
+        verifyNoInteractions(keyEncryptionProvider, auditService);
+    }
+
+    @Test
     void rotateRejectsForeignTenantCredential() {
         when(credentialRepository.findByIdForUpdate(any())).thenReturn(Optional.of(credentialOfTenant(OTHER_TENANT)));
 
@@ -328,6 +352,37 @@ class AdminCredentialServiceTest {
                 ApiException.class, e -> assertThat(e.getCode()).isEqualTo("CREDENTIAL_NOT_DISABLEABLE"));
         verify(versionRepository, never()).update(any());
         verify(credentialRepository, never()).update(any());
+    }
+
+    @Test
+    void disableRejectsCredentialBoundToActiveAgent() {
+        UpstreamCredential credential = credential();
+        when(credentialRepository.findByIdForUpdate(credential.id())).thenReturn(Optional.of(credential));
+        when(agentRepository.findActiveByCredentialId(TENANT, credential.id()))
+                .thenReturn(Optional.of(agent("客服助手", credential.id(), "ACTIVE")));
+
+        assertThatThrownBy(() -> service.disable(admin, credential.id(), "req-1"))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(e.getCode()).isEqualTo("CREDENTIAL_REFERENCED_BY_AGENT");
+                    assertThat(e.getMessage()).contains("客服助手").contains("不能停用");
+                });
+        verify(versionRepository, never()).update(any());
+        verify(credentialRepository, never()).update(any());
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void disableProceedsWhenTheBindingAgentIsDisabled() {
+        UpstreamCredential credential = credential();
+        when(credentialRepository.findByIdForUpdate(credential.id())).thenReturn(Optional.of(credential));
+        // findActiveByCredentialId filters status = ACTIVE, so a disabled binding
+        // agent yields empty and the credential is mutable again.
+        when(agentRepository.findActiveByCredentialId(TENANT, credential.id())).thenReturn(Optional.empty());
+
+        service.disable(admin, credential.id(), "req-1");
+
+        verify(credentialRepository).update(argThat(u -> u.status() == CredentialStatus.DISABLED));
     }
 
     // ------------------------------------------------------------------
@@ -385,6 +440,11 @@ class AdminCredentialServiceTest {
         return new UpstreamCredential(UUID.randomUUID(), TENANT, SUBSCRIPTION, null, "prod-key",
                 CredentialFingerprint.sha256(SECRET), status, UUID.randomUUID(), Instant.now(), null, 3L, Instant.now(),
                 Instant.now());
+    }
+
+    private static Agent agent(String name, UUID credentialId, String status) {
+        return new Agent(UUID.randomUUID(), TENANT, name, null, credentialId, status, 0L, UUID.randomUUID(),
+                Instant.now(), Instant.now());
     }
 
     private static UpstreamCredentialVersion version(CredentialVersionStatus status, byte[] fingerprint,
