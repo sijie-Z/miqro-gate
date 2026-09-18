@@ -23,7 +23,8 @@ import {
   ToolsIcon,
   UserIcon,
 } from 'tdesign-icons-vue-next';
-import { UiButton, UiDonut, UiStatusBadge } from '@/ui';
+import { UiButton, UiDonut, UiStatusBadge, UiTooltip } from '@/ui';
+import { costGapNote, type PricingGapFields } from '@/lib/usage-pricing';
 import type { SubscriptionView, UsageGroup, VirtualKeyView } from '@/types/generated-api';
 import { actionLabel } from '@/utils/audit-labels';
 
@@ -53,7 +54,18 @@ interface StatCard {
   hint: string;
   icon: unknown;
   tone: string;
+  /** Set when the displayed figure is known to fall short of the whole (#801). */
+  caveat?: string;
 }
+
+/** The server's own aggregate, which carries the pricing status the UI must honour. */
+type OverviewTotals = PricingGapFields & {
+  cost?: { upstreamPaid?: number | string | null } | null;
+};
+
+// The server's totals, not a client-side sum: only they carry `pricingStatus`,
+// and they are the authoritative figure the groups merely partition.
+const totals = ref<OverviewTotals | null>(null);
 
 const stats = computed<StatCard[]>(() => {
   const active = keys.value.filter((k) => k.status === 'ACTIVE').length;
@@ -62,10 +74,7 @@ const stats = computed<StatCard[]>(() => {
     0,
   );
   const totalRequests = usageGroups.value.reduce((sum, g) => sum + (g.requests?.upstream ?? 0), 0);
-  const totalCost = usageGroups.value.reduce(
-    (sum, g) => sum + Number(g.cost?.upstreamPaid ?? 0),
-    0,
-  );
+  const costCaveat = costGapNote(totals.value);
   return [
     {
       label: '虚拟密钥',
@@ -90,9 +99,12 @@ const stats = computed<StatCard[]>(() => {
     },
     {
       label: '本月成本',
-      value: Number(totalCost).toFixed(2),
+      value: Number(totals.value?.cost?.upstreamPaid ?? 0).toFixed(2),
       prefix: '¥',
-      hint: '按价格快照估算',
+      // A figure that is missing unpriced usage is not a total; say so where it
+      // is shown rather than letting it read as one (#801).
+      caveat: costCaveat ?? undefined,
+      hint: costCaveat ?? '按价格快照估算',
       icon: MoneyIcon,
       tone: 'gold',
     },
@@ -355,6 +367,7 @@ async function load() {
     // adminUsageSummary groups are the optional-field hub GroupSummary rows;
     // the stats helpers below read the legacy UsageGroup shape — narrow here.
     usageGroups.value = (summary.groups ?? []) as unknown as UsageGroup[];
+    totals.value = (summary.totals ?? null) as unknown as OverviewTotals | null;
     if (isAdmin.value) {
       subscriptions.value = await api.listSubscriptions();
     }
@@ -387,7 +400,12 @@ onMounted(load);
         <div v-for="card in stats" :key="card.label" class="next-overview__stat-chip">
           <span class="next-overview__stat-chip-value ui-num"
             ><i v-if="card.prefix" class="next-overview__stat-currency">{{ card.prefix }}</i
-            >{{ card.value }}</span
+            >{{ card.value
+            }}<UiTooltip v-if="card.caveat" :text="card.caveat"
+              ><span class="next-overview__stat-caveat" data-testid="overview-cost-caveat"
+                >未定价</span
+              ></UiTooltip
+            ></span
           >
           <span class="next-overview__stat-chip-label" :title="card.hint">{{ card.label }}</span>
         </div>
@@ -689,6 +707,16 @@ onMounted(load);
   line-height: 22px;
 }
 
+.next-overview__stat-caveat {
+  /* line-height:1 keeps the chip from stretching the value's line box, so the
+     cost card stays exactly as tall as the three beside it. */
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-medium);
+  line-height: 1;
+  color: var(--ui-warning-fg);
+  white-space: nowrap;
+}
+
 .next-overview__greeting-stats {
   display: flex;
   align-items: center;
@@ -703,6 +731,10 @@ onMounted(load);
 }
 
 .next-overview__stat-chip-value {
+  /* One line: the caveat rides alongside the figure rather than widening the card. */
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ui-space-1);
   font-size: 20px;
   font-weight: var(--ui-weight-semibold);
   color: var(--ui-foreground);

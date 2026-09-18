@@ -4721,3 +4721,55 @@ run: npm run gen:types && git diff --exit-code -- src/types/generated.ts
 
 - **"干净树"要问是谁把它弄干净的**。我上一轮跑红的证明前，`lint:fix` 已经把工作区整成 LF，于是"检查模式 exit 0"测的是**被静默改写过的树**——正是这条 issue 要治的东西，我自己先踩了一次。
 - **一个只在某个平台成立的绿，不是绿**。CI 在 Linux（LF）上一直是绿的，所以这个问题在 CI 里永远看不见；它是 Windows 检出的产物。与 #807/#809/#812 同族：**检查与它运行的环境没对齐**，只不过这次"环境"是操作系统。
+
+## 2026-09-18 首页把「未定价」的用量显示成平静的 ¥0.00（#849）
+
+**这一条是"代入用户视角"跑出来的**——不再读代码猜，而是起真栈、真登录、真看首页。
+
+### 实测（本机真实生产栈）
+
+走完整业务链（建项目→订阅→凭证→模型→授权→签发虚拟密钥→真实推理）后登录门户：
+
+- 首页显示 **`18 本月 Token`** 与 **`¥0.00 本月成本`**，成本卡上**没有任何提示**
+- 同一时刻问 API：
+
+```json
+totals.pricingStatus = "UNAVAILABLE"
+totals.unpriced = { "inputTokens": 11, "outputTokens": 7, "unpricedEvents": 1, "unavailableEvents": 1 }
+```
+
+**服务端明确说了"这些用量在发生时都没有生效价目、金额无从得知"，首页把它显示成一个平静的 ¥0.00。**
+
+### 根因：同一个承诺在四个 surface 上只落实了三个
+
+`costGapNote`（#801/#803 加的标记）只被 `NextUsageView` / `NextAdminUsageView` / `NextCostView` 使用，**漏了 `NextOverviewView`——用户登录后第一眼看到的那一页**。
+
+顺带发现这张卡还在**客户端自行求和**：
+
+```js
+const totalCost = usageGroups.value.reduce((sum, g) => sum + Number(g.cost?.upstreamPaid ?? 0), 0);
+```
+
+既拿不到 `totals` 携带的 `pricingStatus`，显示的也不是服务端权威合计而是分组重算值（`?? 0` 把缺失当 0）。改为直接取 `totals`。
+
+### 我自己引入又自己抓到的回归
+
+第一版把「未定价」chip 放成 value 的**兄弟节点**，而这个卡片是 `flex-direction: column`——于是成本卡变成 **72px 高**（其余三张 48px），数字还被顶高了 **12px**：
+
+```
+三张无标记卡: height 48, value y=212
+成本卡      : height 72, value y=200
+```
+
+**这是在真机上看出来的，不是想出来的。** 改成与数字同行（`inline-flex` + `baseline`）后：48 vs 50，数字差 1px。残余 2px 未再追（1px 基线差在 20px 字号下不可感知），已在 PR 的 Remaining risks 写明。
+
+### 验证
+
+- 单元：**先证明会红**——回退组件后新增 3 例中 **2 例失败**（第 3 例是"COMPLETE 时不得出现标记"的过度标注守卫，两个状态下都该过，如实说明）
+- 三例覆盖：UNAVAILABLE 有标记 / COMPLETE 无标记 / **分组和 ≠ 合计时取合计**（fixture 故意让两者不等：分组 3.60、合计 9.99）
+- 真机：重建 portal 镜像后首页读作 `18 本月 Token | ¥ 0.00 未定价 | 本月成本`，chip 几何 36×20、amber、在数字右侧同行
+- 全量：lint 0（含 `--max-warnings 0`）、**439 tests / 66 files**、build 0
+
+### 教训
+
+**前三个我怀疑的点逐一被证伪**：`MIQROKEY_UPSTREAM_ALLOWED_CIDRS` 其实有文档（configuration-reference §150）、「忘记密码」点击有 toast 且 `/admin/users/{id}/reset-password` 确实存在、网关的上游门控是**按设计的 SSRF 防护**且有文档化逃生口。**只有"用户第一眼看到的那个数字"站住了。** 读代码猜问题，命中率比我以为的低；起栈真看，命中率立刻不一样。

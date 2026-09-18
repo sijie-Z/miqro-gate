@@ -97,6 +97,47 @@ describe('NextOverviewView', () => {
     expect(stats.text()).toContain('¥3.60');
   });
 
+  it('marks the cost as short of a total when unpriced usage is reported (#849)', async () => {
+    mockApi.usageSummary.mockResolvedValue({
+      ...summary,
+      totals: {
+        ...summary.totals,
+        pricingStatus: 'UNAVAILABLE',
+        unpriced: { inputTokens: 11, outputTokens: 7, unpricedEvents: 1, unavailableEvents: 1 },
+      },
+    } as unknown as UsageSummary);
+    const wrapper = mountView();
+    await flushPromises();
+
+    const chip = wrapper.find('[data-testid="overview-cost-caveat"]');
+    expect(chip.exists()).toBe(true);
+    expect(chip.text()).toBe('未定价');
+  });
+
+  it('leaves the cost unmarked when every event was priced', async () => {
+    mockApi.usageSummary.mockResolvedValue({
+      ...summary,
+      totals: { ...summary.totals, pricingStatus: 'COMPLETE' },
+    } as unknown as UsageSummary);
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="overview-cost-caveat"]').exists()).toBe(false);
+  });
+
+  it("takes the cost from the server's totals, not a sum of the groups", async () => {
+    // The groups and the total deliberately disagree: a client-side sum would
+    // report 3.60 while the authoritative figure is 9.99.
+    mockApi.usageSummary.mockResolvedValue({
+      ...summary,
+      totals: { ...summary.totals, cost: { upstreamPaid: '9.990000' } },
+    } as unknown as UsageSummary);
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="overview-stats"]').text()).toContain('¥9.99');
+  });
+
   it('renders usage bars and the recent keys panel with Chinese statuses', async () => {
     const wrapper = mountView();
     await flushPromises();
