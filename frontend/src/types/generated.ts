@@ -4119,6 +4119,8 @@ export interface components {
             unpricedEvents?: number;
             /** Format: int64 */
             unavailableEvents?: number;
+            /** Format: int64 */
+            unpricedHitEvents?: number;
             empty?: boolean;
         };
         Requests: {
