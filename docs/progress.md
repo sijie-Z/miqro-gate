@@ -3723,3 +3723,17 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **修法**：符号单点决定——`formatCost()` 统一输出 `¥`（与 NextCostView / NextRoiView 同款），模板不再补符号；同页汇总 / 明细 / 合计三处口径随之统一。**全站符号审计**：模板字面量 `$${...}` 模式全仓仅此一处；其余视图（Cost / Roi / Overview / Profile / Agents / QuotaRules / AdminUsage 的「成本 ¥」列 / Prices 按币种分支）本就只用 ¥，CSV 导出保持纯数字。
 
 **验证**：先证明会红——把视图实现撤回 develop 状态后，新测试如实报出渲染文本 `¥$0.1234`（连同被改正的汇总断言共 2 条红）；恢复后 `NextUsageView.spec.ts` 12/12 绿，全量 61 文件 / 369 条绿，`npm run build`（含 typecheck）通过，改动文件 eslint 0 error。
+
+## 2026-09-18 ADR-0021 草案：同产品凭证回退 ×「每笔唯一归属」的兼容设计（#717）
+
+**性质**：**文档线，不含任何产品代码**；ADR 状态 **Proposed**（决策权在 owner；#717 明示「不做也是有效产出」，故 §3 保留「维持现状」为并列选项）。交付：新增 `docs/decisions/0021-same-product-credential-failover.md` + `docs/decisions/README.md` 索引行。
+
+- **编号核查**：`git ls-tree -r --name-only origin/develop -- docs/decisions` 最高为 `0020-quota-soft-landing.md` → 本线用 **0021**，未顺延。
+- **核心发现（此前未被写下）**：唯一性不是注释里的约定，而是被三层结构分别钉死——授权 `V1__core_tables.sql:359`（grant 携带单数 `upstream_credential_id`）、快照 `RouteSnapshot.java:251`（`BindingRecord` 单 `credentialId`）、账本 `V8__request_usage_records.sql:39`（`credential_id` NOT NULL）＋`:69`（一请求一行唯一键）。热路径 `ProxyController.java:454`/`:632` 的两处 `no cross-credential failover` 注释只是这三层的实现说明，**不是被修订的决策本身**。
+- **可行性关键**：`V1__core_tables.sql:373-374` 的唯一约束是 **(project, product, credential) 三元组**，且 `upstream_credentials` 上**没有**「一产品一凭证」约束（`:309` 仅 `UNIQUE (tenant_id, id)`；订阅 `:207` 一产品可多条）——**多凭证候选集在数据模型上已经存在，不需要任何 schema 变更**。禁止切换的是**请求期的单 binding 选择规则**，不是数据结构。
+- **红线**：`architecture.md:161`「禁止跨供应商或跨真实凭证故障切换」**显式点名「跨真实凭证」**，是本议题唯一无法靠解释绕开的冲突（`CLAUDE.md:36` 同）。而 `product-requirements.md:27` 的限定词是「供应商**之间**」，同产品内凭证回退不在其字面范围——这条区分写进了 ADR §1.4 的关系表。
+- **先例复用**：`ai-gateway-comparison.md:94` 否决 Key 池轮询的理由是「**Key 池轮询破坏审计映射**」——否决对象是**无触发条件、无固定顺序**的轮询；本 ADR 的推荐方案要求「按显式有序配置、只在首字节前按 `:632` 既有 TTFB 判据推进」，给定请求与配置即可重建「用了哪把、为什么」，与该先例的分界写在 §3（并注明：owner 若不接受该区分，答案回到维持现状）。
+- **反向发现**：全仓 `docs/*.md` 检索 `唯一归因|唯一身份|一笔一|每笔绑定|可归因` **零命中**——#704 当作一等约束的不变式，此前只存在于代码与 DDL，本 ADR 是它第一次被写成文字。
+- **本 ADR 自行补的安全边界**：**INV-3**——候选集必须限定在该 `(project, product)` 已有的 ACTIVE grant 之内。否则「换一把凭证」字面上等于「换一个授权」，回退会变成权限提升通道（其依据是既有不变量 `V57__unattributed_policy.sql:8`「归属未知永不借用具体项目的 grant/凭证」）。
+- **未决项**：6 条待 owner 拍板 + 4 条需 owner 补充的事实；其中第 7 条是**能力是否可用的前提**——若生产不存在「同一产品、不同 subscription、两把以上 ACTIVE 凭证」，则候选集为空，应先解决凭证供给而非实现回退。§2-Q7 另记一条实操警告：**同账号内多把凭证回退不缓解账号级 429，反而可能加速封禁**。
+- **验证**：本线为纯文档改动，无代码/测试可跑。已执行的核查命令：编号核查（上述）、`README` 索引行与文件名一致性、以及**全部引用坐标逐条 grep 复核**（V1/V4/V6/V8/V9/V53/V57/V66 + `ProxyController` + `RouteSnapshot` + `AuthContext` + 全仓红线），未使用任何未命中的行号。
