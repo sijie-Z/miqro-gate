@@ -3322,6 +3322,8 @@ export interface components {
             unavailable?: number;
             /** Format: int64 */
             baseCostFilled?: number;
+            /** Format: int64 */
+            reclassified?: number;
         };
         DeletionRequest: {
             /** Format: uuid */
