@@ -3,7 +3,7 @@
 - 日期：2026-09-18
 - 状态：**Proposed（待所有者拍板）**——本 ADR 只给出决策点、选项、代价与建议，**不含任何已实施的代码**。文中的「建议」「推荐」均为**待 owner 裁决的提案**，不是既成结论。本文件若被 owner 否决，记录的价值等同：issue #717 允许「不做」也是有效产出。
 - 效力（仅在被 Accepted 后生效）：将修订 [CLAUDE.md](../../CLAUDE.md) §2「不自动故障切换」与 [architecture.md](../architecture.md) 的「禁止跨供应商或跨真实凭证故障切换」。**修订范围严格限定为：同一供应商产品内、首字节前、凭证级的显式回退**。跨供应商/跨产品的自动路由与故障切换维持红线不变（feature-backlog F46 维持 DECLINED）。
-- 关联：issue #717（本 ADR 的提出）、issue #704（实现跟踪，**ADR 先行**）；[ADR-0002](0002-transparent-proxy.md)（透明代理——本议题不改写请求内容）；[ADR-0018](0018-single-key-multi-project.md)（key×project 多绑定，`grant_id` 的来源）；[ADR-0020](0020-quota-soft-landing.md)（opt-in + 默认关闭的取舍风格、配额判定集）；feature-backlog F46（跨供应商切换，DECLINED）/ F50（多服务绑定，ADR）；[ai-gateway-comparison](../ai-gateway-comparison.md) §「多 Key 均衡/Key 池轮询」；[operations-runbook](../operations-runbook.md) §5（供应商故障处置）；[bill-reconciliation-contract](../bill-reconciliation-contract.md)（F19 对账）；V1/V6/V8/V57（见 §1.3）、V9/V64/V66（见 §2-Q4、§2-Q2 与 §4）。
+- 关联：issue #717（本 ADR 的提出）、issue #704（实现跟踪，**ADR 先行**）；[ADR-0002](0002-transparent-proxy.md)（透明代理——本议题不改写请求内容）；[ADR-0018](0018-single-key-multi-project.md)（key×project 多绑定，`grant_id` 的来源）；[ADR-0020](0020-quota-soft-landing.md)（opt-in + 默认关闭的取舍风格、配额判定集）；feature-backlog F46（跨供应商切换，DECLINED）/ F50（多服务绑定，ADR）；[ai-gateway-comparison](../ai-gateway-comparison.md) §「多 Key 均衡/Key 池轮询」；[operations-runbook](../operations-runbook.md) §5（供应商故障处置）；[bill-reconciliation-contract](../bill-reconciliation-contract.md)（F19 对账）；V1/V6/V8/V57（见 §1.3）、V9/V64/V67（见 §2-Q4、§2-Q2 与 §4）。
 
 ---
 
@@ -139,7 +139,7 @@
 
 ### Q4 与配额执行（ADR-0020）的关系
 
-**现状**：ADR-0020 的判定集按 **scope**（USER / PROJECT）而非按 Key 或凭证（`0020` §D3）；网关在**准入处**（`ProxyController` 入口、Key 解析后、读 body 前）查内存集合，命中即 429（`api-contract.md:1008`，§5.19「超限动作（#684，ADR-0020）」）。
+**现状**：ADR-0020 的判定集按 **scope**（USER / PROJECT）而非按 Key 或凭证（`0020` §D3）；网关在**准入处**（`ProxyController` 入口、Key 解析后、读 body 前）查内存集合，命中即 429（`api-contract.md:1014`，§5.19「超限动作（#684，ADR-0020）」）。
 
 **建议结论**：**回退发生在配额门之后，与配额判定无交集**——配额判定按 `(user, project)` 作用域，与**用哪把凭证**无关；回退既不改变作用域，也**不能**绕过判定（判定在任何上游尝试之前完成）。因此：**切换后用量仍记在原本的 user/project 作用域下，配额语义零变化。**
 
@@ -252,7 +252,7 @@
 
 **控制面**：产品级回退候选集的配置接口与校验（含 INV-3 的 grant 校验）；审计事件（沿用 `CREDENTIAL_*` / `UPSTREAM_CREDENTIAL` 命名，`AdminCredentialService.java:151`）；配置变更时的快照刷新沿用既有 `RouteRefreshPublisher` 通道（ADR-0020 §D4 同一形态）。
 
-**数据库**：候选集需要新的存储（当前最高 migration 为 `V66__usage_event_base_cost.sql`，新增自 **V67** 起）；若采纳 Q1 的尝试明细表，同批次新增。**不修改任何已进入共享环境的 migration**（`CLAUDE.md` §7）。
+**数据库**：候选集需要新的存储（落盘时 develop 最高为 `V66__usage_event_base_cost.sql`；其后 #783 已占用 `V67__export_adjustment_level.sql`，故实现批次按**开工时 develop 树的最高号 +1** 取定，不在本 ADR 中预占号）；若采纳 Q1 的尝试明细表，同批次新增。**不修改任何已进入共享环境的 migration**（`CLAUDE.md` §7）。
 
 **API/前端**：凭证详情/产品配置页增回退组与顺序编辑；用量明细页若展示尝试轨迹，需与阶段 3 一起交付；自助侧**默认不可见**（默认关闭，无人受影响）。
 
