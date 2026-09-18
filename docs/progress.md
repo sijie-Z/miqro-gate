@@ -3847,3 +3847,16 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **测试**：两条新用例**先证红**（SSE 解帧 / 无 data 拒绝），修复后 `McpToolsListClientTest` **11/11 绿**。
 
 **部署教训（本轮踩到，含一次自我纠正）**：compose.prod.yaml 的 cp 服务带 `build:` 段（context=`..`=演示树 `/opt/miqrokey`，与真正构建用的 `/opt/miqrokey-dev` 不同）——漏 `--no-build` 有**用旧树产出镜像**的风险（触发条件：该 tag 本地无镜像时 `up` 才会构建）。本轮曾观测"容器镜像 ID ≠ tag 镜像 ID 但 compose 显示 Running"，最初归因为"compose 按镜像引用名判等"——**该归因已被直接观测否定**：同 tag 下 `up` 不加 `--force-recreate` 亦会 `Recreate/Recreated`，compose 按解析出的镜像 ID 判等；更可能的成因是**多会话并发构建同一 tag 的竞态**（本轮时间线：自建镜像 11:11:03 完成，容器 11:11:07 从另一镜像创建）。**落为收尾断言**：部署后必须核 `container.Image == tag.Id`（"Up N seconds + healthy"不算数）——它正是抓这类竞态的检查；**跨会话纪律：同一 tag 不并发构建、部署串行**。
+## 2026-09-18 速率限流（TPM/RPM）评估与决策留档——ADR-0025（#706）
+
+**缺口**：「不做限流」此前只存在于 ADR-0020 D6 的一行注记（`docs/decisions/0020-quota-soft-landing.md:81`），无独立评估；对外表述「避免误伤长任务」，被追问「什么条件下开启」时无据可依。**本项只做评估与选项留档，不动任何代码**，也不替 owner 定结论。
+
+**交付**：`docs/decisions/0025-rate-limiting-evaluation.md`（状态 **Proposed，待 owner 拍板**）+ `docs/decisions/README.md` 索引一行。编号取 0025：`origin/develop` 树最高 0020，未合并分支已占 0021–0024（`git log --all --diff-filter=A -- 'docs/decisions/00*.md'` 全 refs 复核），故用 0025。
+
+**内容骨架**：①现状（配额 vs 速率两轴对照，「配额 ≠ 速率」= 窗口累计量 vs 单位时间强度；已交付额度能力与 60s 快照近似语义；速率侧完全空白）②不做的理由与代价（「避免误伤长任务」拆成四条可检验机制 + 四项代价 + 与 P95 30ms 红线的张力）③四个选项（令牌桶 TPM/RPM / 并发闸 / 排队背压 / 只告警），每个按落点、P95 影响、配置粒度、**与既有 429 `quota_exceeded` 信封的错误码区分**、可回退性五维评估，另附建议 ④触发条件（五条信号 × 今天能否观测 + 建议门槛）⑤owner 五问各带推荐答案。
+
+**所有「现状」断言带 `文件:行号`**（如 `QuotaGate.java:32`、`ProxyController.java:245`、`AlertEvaluator.java:67/132-137/149-152`、`GatewayMetricsFilter.java:15-20`、`architecture.md:148`、`configuration-reference.md:179`、`V1__core_tables.sql:445`）。复核命令：`grep -rn "MIQROKEY_MAX_CONCURRENT_STREAMS" backend/ deploy/` **零命中** → #733「并发闸未实现」在代码侧复核成立。
+
+**行业对标不编造**：issue 内的厂商描述逐条与本仓既有记录比对并标核实状态——腾讯 TPM/QPM、阿里 TPM/RPM 有仓内第二手记录（`docs/ai-gateway-comparison.md:34/86`）；**腾讯「并发多维多档」、阿里「服务端排队」、AWS「令牌桶 + 日周月配额」本仓无记录且本线未独立核实**（对 base `e83d44ea` 的 docs/ 树，`git grep -n "排队" e83d44ea -- docs/` 与 `git grep -n "多档" e83d44ea -- docs/` 均零命中；当前树含本文自身措辞，属自引用，不作证据），ADR 内逐条标「未核实」，结论不依赖未核实细节。
+
+**顺带发现两处文档漂移（只登记不改，避免与在飞文档线冲突）**：`docs/operations-runbook.md:191`「429 只可能来自上游…网关卡本身不产生 429」在 #684 后已不成立；`docs/feature-backlog.md:110` F47 行末「容量 503」当前并不存在（#733）。
