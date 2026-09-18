@@ -3713,3 +3713,13 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - **同一规则出现两处，靠测试钉住**（沿用本仓库对 as-of 规则的既有做法）：测试证过"把实现撤掉，只有新增的 4 条会红"。
 
 **另记（不可改的坑）**：`V66__usage_event_base_cost.sql` 文件头注释仍写作 `-- V65:`（改号时漏改），但**不能直接改**——V66 已在演示站应用，改文件内容会改 Flyway 校验和，下次启动直接 `checksum mismatch` 起不来。改在 docs：`database-schema.md` / `usage-accounting.md` 的 V65 → V66，并把不变式措辞精确化（"可空不可变" → "可空；一旦有值不再改写"）。
+
+## 2026-09-18 自助用量页金额渲染成 ¥$——两处各自决定货币符号（#775）
+
+**现象**：`/app/usage`（NextUsageView）记录表成本列渲染成 `¥$0.1234`；同页汇总列又是裸 `$145.2013`——**同一页里两种符号，且都不是本系统的币种**（全仓计价为 CNY）。
+
+**根因**：符号被两处各自决定——`formatCost()` 的返回值里写死 `$`，模板又在外层补 `¥`。既有单测把 `$0.0020` 钉成了期望值：**它断言了符号，只是断言错了那一个**，于是"两个符号叠在一起"长期无人发现（与 #754 同型：断言了"有"，没断言"对"）。
+
+**修法**：符号单点决定——`formatCost()` 统一输出 `¥`（与 NextCostView / NextRoiView 同款），模板不再补符号；同页汇总 / 明细 / 合计三处口径随之统一。**全站符号审计**：模板字面量 `$${...}` 模式全仓仅此一处；其余视图（Cost / Roi / Overview / Profile / Agents / QuotaRules / AdminUsage 的「成本 ¥」列 / Prices 按币种分支）本就只用 ¥，CSV 导出保持纯数字。
+
+**验证**：先证明会红——把视图实现撤回 develop 状态后，新测试如实报出渲染文本 `¥$0.1234`（连同被改正的汇总断言共 2 条红）；恢复后 `NextUsageView.spec.ts` 12/12 绿，全量 61 文件 / 369 条绿，`npm run build`（含 typecheck）通过，改动文件 eslint 0 error。

@@ -77,6 +77,8 @@ const records: UsageRecordPage = {
       usageMissing: false,
       virtualKeyId: 'k1',
       clientIp: '203.0.113.7',
+      cost: 0.1234,
+      priced: true,
     },
   ],
   page: 1,
@@ -161,8 +163,25 @@ describe('NextUsageView', () => {
     const totals = wrapper.find('[data-testid="summary-totals"]').text();
     expect(totals).toContain('合计');
     expect(totals).toContain('19'); // all requests incl. cache hits, matches the 请求 column
-    expect(totals).toContain('$0.0020');
-    expect(totals).toContain('$0.0004');
+    expect(totals).toContain('¥0.0020');
+    expect(totals).toContain('¥0.0004');
+  });
+
+  // #775: money renders in CNY — the symbol is decided in one place, and it is
+  // asserted on the rendered text rather than on the number alone.
+  it('renders every money cell with a single ¥ (no ¥$ and no bare $)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const records = wrapper.find('[data-testid="records-table"]').text();
+    expect(records).toContain('¥0.1234');
+    expect(records).not.toContain('$');
+
+    const summary = wrapper.find('[data-testid="summary-table"]').text();
+    expect(summary).toContain('¥0.0020');
+    expect(summary).toContain('¥0.0004');
+    expect(summary).not.toContain('$');
+    expect(wrapper.find('[data-testid="summary-totals"]').text()).not.toContain('$');
   });
 
   it('passes the picked time range to summary and records', async () => {
