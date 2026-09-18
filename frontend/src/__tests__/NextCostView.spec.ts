@@ -167,6 +167,35 @@ describe('NextCostView', () => {
     expect(wrapper.find('[data-testid="budget-row"]').text()).toContain('预警');
   });
 
+  it('#801: marks both cost cards as not-a-total when a gap exists', async () => {
+    mockApi.adminUsageSummary.mockImplementation(async (q: { groupBy?: string }) => {
+      const base = q.groupBy === 'day' ? summary(false) : summary(true);
+      return {
+        ...base,
+        groupBy: q.groupBy ?? 'project',
+        totals: {
+          ...base.totals,
+          pricingStatus: 'PARTIAL',
+          unpriced: { unpricedEvents: 617, unavailableEvents: 565 },
+        },
+      } as never;
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="cost-unpriced-total"]').text()).toContain('未定价');
+    expect(wrapper.find('[data-testid="cost-unpriced-upstream"]').text()).toContain('未定价');
+  });
+
+  it('#801: leaves fully priced costs unmarked', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="cost-unpriced-total"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="cost-unpriced-upstream"]').exists()).toBe(false);
+  });
+
   it('#790: says the saving is a lower bound when hits could not be priced', async () => {
     mockApi.adminUsageSummary.mockImplementation(async (q: { groupBy?: string }) => {
       const base = q.groupBy === 'day' ? summary(false) : summary(true);
