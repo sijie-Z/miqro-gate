@@ -4574,3 +4574,35 @@ EXIT=2
 - **P1**：临时文件落目标目录（原子 rename）/ chmod 失败即报错 / verify 判 `200 且 models-list 体` + `--connect-timeout 5 --max-time 20` / 失败默认只打 code（`--verbose` 才打体）/ 托管块残缺或重复**拒绝**而非猜 / symlink 目标拒绝 / `${2:?}` 缺值消息 / 测试 `stat` 双写法。
 - **测试 45 → 85 条**，新增恶意输入组与转义函数直测（`MIQRO_ONBOARD_SOURCE_ONLY` seam）；**三条旗舰断言对修复前脚本先证红**（引号 key 被放行、codex 输出含 key、代理错误页 200 判成功）。
 - 暂缓：前端/脚本双实现的 golden-fixture 契约（评审同意不做）。
+
+## 2026-09-18 冒烟在自签证书的部署上什么都证明不了（#826）
+
+做完整套端到端模拟时的**最后一个失败项**：真实生产栈起来了、`deploy.sh` 的镜像身份 / 环境变量回声 / 证书进容器三条断言全过，**只有冒烟报"够不到"**——而目标其实好好地在答。
+
+查下来：冒烟的 curl **不传 `-k`**，自签证书在 TLS 阶段就被拒 → `000` → 按设计只判 WARNING。
+
+```
+$ curl -sS -o /dev/null -w '%{http_code}' -X POST … https://127.0.0.1:9443/api/v1/auth/login
+000                                   # 证书校验失败
+$ curl -sk -o /dev/null -w '%{http_code}' -X POST …   # 同一个请求
+403                                   # 真的答了
+```
+
+### 为什么值得修（而不是"生产有真证书"）
+
+1. **仓库自己就把自签当正常形态**：`secrets/README.md` 与 `compose.prod.yaml` 都写"本机冒烟可用自签"，`deployment-and-operations.md` 的验收示例也用 `curl -k`。**文档用 `-k`、脚本不用**——同一套流程两种默认。
+2. **每台 staging / 内网自建部署都在这个集合里**，而那些恰好最需要"部署完验一下"。
+3. 症状是**假绿**：不报错、不红，而是"WARNING + 部署成功"。与本项目反复治的形态同族——**检查在它自称覆盖的那一层没有牙**。
+
+### 修法
+
+- 新增 `--smoke-insecure`（env `MIQROKEY_DEPLOY_SMOKE_INSECURE`）：打开时给 curl 加 `-k`。**默认关**——生产不该默认跳过证书校验
+- 打开后 `000` 的措辞跟着变：不再"证书可能有问题"，而是**"够不到就是够不到"**（`-k was in effect: this is connectivity, not certificate trust`）
+- `--dry-run` 打印里能看出用没用 `-k`
+- shellcheck 仍 exit 0
+
+### 顺带修掉一个既有的 `--help` 截断
+
+`usage()` 原本是 `sed -n '2,25p'`——**硬编码行号**。它在我插入 6 行选项说明之前就已经不覆盖选项列表了：`--help` 只打印说明与用法行，**一条选项说明都不打印**。改成 `sed -n '2,/^set -eu$/p' | sed '$d'`，跟着文件走，不再会漂。
+
+**教训**：`--help` 从来没人跑，所以它坏了也没人知道——**与 #823 同源：一条没人走过的路径**。这次是"自己做完整套模拟"顺手撞上的。

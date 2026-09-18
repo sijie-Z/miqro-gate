@@ -29,6 +29,12 @@
 #                  run fails unless it answers as expected. The image assertions
 #                  cannot tell a correct deployment from a healthy-looking wrong
 #                  one, and this is what can.
+#   --smoke-insecure allow the smoke's request to skip certificate verification.
+#                  Needed by any stack serving a self-signed certificate (staging,
+#                  self-hosted, the local smoke in secrets/README.md) — without it
+#                  the request fails at the TLS step, the code is 000, and 000 is
+#                  classified as weather, so the smoke silently proves nothing.
+#                  Off by default: production should not skip verification.
 #   --smoke-method HTTP method to use (default GET; the derived default target
 #                  below is a POST, because the origin check guards only
 #                  state-changing methods and a GET cannot observe a rejection)
@@ -58,7 +64,10 @@ MSYS_NO_PATHCONV=1
 export MSYS_NO_PATHCONV
 
 usage() {
-    sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+    # Everything from line 2 down to `set -eu`, minus that last line. A fixed line
+    # range was here before and silently truncated the help: it stopped before the
+    # option list, so `--help` printed the synopsis and none of the flags.
+    sed -n '2,/^set -eu$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
     exit 1
 }
 
@@ -83,6 +92,7 @@ SMOKE_URL="${MIQROKEY_DEPLOY_SMOKE_URL:-auto}"
 SMOKE_EXPECT="${MIQROKEY_DEPLOY_SMOKE_EXPECT:-}"
 SMOKE_METHOD="${MIQROKEY_DEPLOY_SMOKE_METHOD:-}"
 SMOKE_DATA="${MIQROKEY_DEPLOY_SMOKE_DATA:-}"
+SMOKE_INSECURE="${MIQROKEY_DEPLOY_SMOKE_INSECURE:-0}"
 SMOKE_ORIGIN="${MIQROKEY_DEPLOY_SMOKE_ORIGIN:-}"
 SMOKE_TIMEOUT="${MIQROKEY_DEPLOY_SMOKE_TIMEOUT:-20}"
 # The project directory is the compose file's own directory, and the env file is
@@ -111,6 +121,7 @@ while [ $# -gt 0 ]; do
         --smoke-url) SMOKE_URL="${2-}"; shift 2 ;;
         --smoke-method) SMOKE_METHOD="${2:?--smoke-method needs a method}"; shift 2 ;;
         --smoke-data) SMOKE_DATA="${2-}"; shift 2 ;;
+        --smoke-insecure) SMOKE_INSECURE=1; shift ;;
         --smoke-expect) SMOKE_EXPECT="${2:?--smoke-expect needs a pattern}"; shift 2 ;;
         --smoke-origin) SMOKE_ORIGIN="${2:?--smoke-origin needs an origin}"; shift 2 ;;
         --dry-run) DRY=1; shift ;;
@@ -392,6 +403,9 @@ smoke_code_matches() {
 # One request, described the same way wherever it is printed.
 smoke_curl() {
     set -- -sS -o /dev/null -w '%{http_code}' --max-time "$SMOKE_TIMEOUT" -X "$SMOKE_METHOD"
+    if [ "$SMOKE_INSECURE" = 1 ]; then
+        set -- "$@" -k
+    fi
     if [ -n "$SMOKE_ORIGIN" ]; then
         set -- "$@" -H "Origin: $SMOKE_ORIGIN"
     fi
@@ -447,6 +461,7 @@ if [ -z "$SMOKE_URL" ]; then
         "nothing here checked that the stack serves requests" >&2
 elif [ "$DRY" = 1 ]; then
     smoke_desc="-X $SMOKE_METHOD"
+    [ "$SMOKE_INSECURE" = 1 ] && smoke_desc="$smoke_desc -k"
     if [ -n "$SMOKE_ORIGIN" ]; then
         smoke_desc="$smoke_desc -H 'Origin: $SMOKE_ORIGIN'"
     fi
@@ -472,6 +487,11 @@ else
     elif [ "$smoke_code" = "000" ]; then
         echo "smoke WARNING: $SMOKE_URL unreachable — not a failure, but nothing here" \
             "checked that the stack serves requests" >&2
+        if [ "$SMOKE_INSECURE" = 1 ]; then
+            # With -k in effect a TLS-trust failure can no longer masquerade as
+            # unreachability, so say which finding this is.
+            echo "  (-k was in effect: this is connectivity, not certificate trust)" >&2
+        fi
     else
         echo "SMOKE FAILED: $SMOKE_METHOD $SMOKE_URL -> $smoke_code (expected $SMOKE_EXPECT)" >&2
         failed=1
