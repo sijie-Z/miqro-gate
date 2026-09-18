@@ -14,6 +14,7 @@ import com.miqroera.miqrokey.domain.usage.PriceSnapshot;
 import com.miqroera.miqrokey.domain.usage.PriceTokenType;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
+import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageAggRow;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
 import org.junit.jupiter.api.DisplayName;
@@ -83,7 +84,6 @@ class AdminUsageStatsServiceTest {
 
     @Test
     void summaryPassesEveryOptionalDimensionAsFilter() {
-        when(priceSnapshotRepository.findAllLatestAt(any(Instant.class))).thenReturn(List.of());
         when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.DAY), any())).thenReturn(List.of());
         when(usageStatsRepository.aggregateHits(eq(UsageStatsRepository.GroupBy.DAY), any())).thenReturn(List.of());
 
@@ -108,7 +108,6 @@ class AdminUsageStatsServiceTest {
 
     @Test
     void summaryWithoutFiltersScopesToTenantOnly() {
-        when(priceSnapshotRepository.findAllLatestAt(any(Instant.class))).thenReturn(List.of());
         when(usageStatsRepository.aggregateUsage(any(), any())).thenReturn(List.of());
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
 
@@ -132,13 +131,11 @@ class AdminUsageStatsServiceTest {
     }
 
     @Test
-    void summaryComputesCostFromPriceSnapshot() {
-        when(priceSnapshotRepository.findAllLatestAt(any(Instant.class)))
-                .thenReturn(List.of(price(PriceTokenType.INPUT, new BigDecimal("1.00")),
-                        price(PriceTokenType.OUTPUT, new BigDecimal("2.00"))));
+    void summaryCostComesFromTheRowsFrozenPrices() {
         when(usageStatsRepository.aggregateUsage(any(), any())).thenReturn(List.of(new UsageAggRow("g", "G", PRODUCT_ID,
                 MODEL, CacheLevel.UPSTREAM, 2, new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null),
-                UsageAggRow.Outcome.NONE)));
+                new java.math.BigDecimal("1000"), new java.math.BigDecimal("1000"), java.math.BigDecimal.ZERO,
+                java.math.BigDecimal.ZERO, UsageStatsAggregator.PricingGap.NONE, UsageAggRow.Outcome.NONE)));
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
 
         UsageSummary summary = service.summary(admin, "project", null, null, null, null, null, null, null, null, null,

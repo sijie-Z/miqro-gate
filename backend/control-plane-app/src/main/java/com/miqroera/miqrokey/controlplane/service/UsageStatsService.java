@@ -75,8 +75,7 @@ public class UsageStatsService {
         if (keyIds.isEmpty()) {
             // No keys to aggregate — return a zeroed summary without touching the
             // usage tables.
-            return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), List.of(), List.of(),
-                    new LinkedHashMap<>());
+            return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), List.of(), List.of());
         }
         UsageStatsRepository.UsageFilter filter = filter(user, keyIds, from, to);
 
@@ -86,7 +85,7 @@ public class UsageStatsService {
         }
         List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
         List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
-        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows, prices);
+        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows);
     }
 
     /** Paged raw usage records for the caller's own keys, newest first. */
@@ -107,10 +106,9 @@ public class UsageStatsService {
 
         long total = usageStatsRepository.countRecords(filter);
         List<AdjustedUsageRow> events = usageStatsRepository.findRecords(filter, (page - 1) * size, size);
-        Map<String, BigDecimal> prices = priceMap();
         List<UsageRecordPage.UsageRecordView> items = new ArrayList<>(events.size());
         for (AdjustedUsageRow row : events) {
-            items.add(view(row, prices));
+            items.add(view(row, priceMap()));
         }
         return new UsageRecordPage(items, page, size, total);
     }

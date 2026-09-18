@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.repository.UsageStatsRepository;
 import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
 import com.miqroera.miqrokey.domain.usage.CacheLevel;
+import com.miqroera.miqrokey.domain.usage.PriceTokenType;
 import com.miqroera.miqrokey.domain.usage.LifecycleInfo;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
@@ -15,6 +16,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -255,10 +257,85 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
         }
     }
 
+    /**
+     * Contributes nothing to <b>known</b> cost when a dimension is unpriced.
+     *
+     * <p>
+     * That is not the same as the usage being free. The tokens that could not be
+     * priced are reported separately (see {@link #unpricedColumns}) and the group
+     * carries a pricing status, so a reader can always tell which of the two a zero
+     * means.
+     * </p>
+     */
+    private static String zeroIfUnpriced(String priceExpr) {
+        return "COALESCE(" + priceExpr + ", 0)";
+    }
+
+    /**
+     * Extra SELECT columns describing what could <b>not</b> be priced (#710).
+     *
+     * <p>
+     * A dimension counts as unpriced only when the row actually carries tokens for
+     * it: an event with no cache tokens is fully priced even when no cache price
+     * exists, because that dimension never entered the calculation.
+     * </p>
+     *
+     * <p>
+     * These exist so that a zero is always explainable. Without them a group whose
+     * price basis is missing reports a cost of 0 with nothing saying whether that
+     * means "free" or "we cannot price this" — the ambiguity AWS avoids by typing
+     * its zero-cost line items ({@code LineItemType = Discounted Usage}).
+     * </p>
+     */
+    private static String unpricedColumns(String inputTokens, String inputPrice, String outputTokens,
+            String outputPrice, String cacheReadTokens, String cacheReadPrice, String cacheCreationTokens,
+            String cacheCreationPrice) {
+        String unpricedInput = "(COALESCE(" + inputTokens + ", 0) > 0 AND " + inputPrice + " IS NULL)";
+        String unpricedOutput = "(COALESCE(" + outputTokens + ", 0) > 0 AND " + outputPrice + " IS NULL)";
+        String unpricedCacheRead = "(COALESCE(" + cacheReadTokens + ", 0) > 0 AND " + cacheReadPrice + " IS NULL)";
+        String unpricedCacheCreation = "(COALESCE(" + cacheCreationTokens + ", 0) > 0 AND " + cacheCreationPrice
+                + " IS NULL)";
+        String anyUnpriced = "(" + unpricedInput + " OR " + unpricedOutput + " OR " + unpricedCacheRead + " OR "
+                + unpricedCacheCreation + ")";
+        String anyPriced = "((COALESCE(" + inputTokens + ", 0) > 0 AND " + inputPrice + " IS NOT NULL)"
+                + " OR (COALESCE(" + outputTokens + ", 0) > 0 AND " + outputPrice + " IS NOT NULL)" + " OR (COALESCE("
+                + cacheReadTokens + ", 0) > 0 AND " + cacheReadPrice + " IS NOT NULL)" + " OR (COALESCE("
+                + cacheCreationTokens + ", 0) > 0 AND " + cacheCreationPrice + " IS NOT NULL))";
+        return """
+                       , COALESCE(SUM(CASE WHEN %s THEN COALESCE(%s, 0) ELSE 0 END), 0) AS unpriced_input_tokens
+                       , COALESCE(SUM(CASE WHEN %s THEN COALESCE(%s, 0) ELSE 0 END), 0) AS unpriced_output_tokens
+                       , COALESCE(SUM(CASE WHEN %s THEN COALESCE(%s, 0) ELSE 0 END), 0) AS unpriced_cache_read_tokens
+                       , COALESCE(SUM(CASE WHEN %s THEN COALESCE(%s, 0) ELSE 0 END), 0)
+                           AS unpriced_cache_creation_tokens
+                       , COUNT(*) FILTER (WHERE %s) AS unpriced_events
+                       , COUNT(*) FILTER (WHERE %s AND NOT %s) AS unavailable_events
+                """.formatted(unpricedInput, inputTokens, unpricedOutput, outputTokens, unpricedCacheRead,
+                cacheReadTokens, unpricedCacheCreation, cacheCreationTokens, anyUnpriced, anyUnpriced, anyPriced);
+    }
+
     @Override
     public List<UsageStatsAggregator.UsageAggRow> aggregateUsage(GroupBy groupBy, UsageFilter filter) {
         GroupSpec spec = spec(groupBy);
         WhereBuilder wb = new WhereBuilder(filter, "ue").usageEventColumns();
+        // Per-row price basis (#710): a group's cost is the SUM of each row valued at
+        // its own
+        // price, because rows in one group can legitimately carry different frozen
+        // prices.
+        // Pricing the aggregated token count (what this used to do) cannot express
+        // that, and
+        // made history move whenever the price table changed.
+        String inputTokens = "COALESCE(ue.input_tokens, ue.prompt_tokens)";
+        String outputTokens = "COALESCE(ue.output_tokens, ue.completion_tokens)";
+        String cacheReadTokens = "ue.cache_read_input_tokens";
+        String cacheCreationTokens = "ue.cache_creation_input_tokens";
+        String inputPrice = PriceSnapshotSql.frozenOrAsOf("ue.price_input", PriceTokenType.INPUT,
+                "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
+        String outputPrice = PriceSnapshotSql.frozenOrAsOf("ue.price_output", PriceTokenType.OUTPUT,
+                "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
+        String cacheReadPrice = PriceSnapshotSql.frozenOrAsOf("ue.price_cache_read", PriceTokenType.CACHE_READ,
+                "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
+        String cacheCreationPrice = PriceSnapshotSql.frozenOrAsOf("ue.price_cache_creation",
+                PriceTokenType.CACHE_CREATION, "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
         String sql = """
                 SELECT %s, ue.provider_product_id AS product_id, ue.model_id, ue.cache_level AS cache_level,
                        -- requests counts observed calls; an adjustment corrects a call's usage, it
@@ -275,6 +352,16 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                            + COALESCE(SUM(adj.cache_read_delta), 0) AS cache_read_tokens,
                        COALESCE(SUM(ue.cache_creation_input_tokens), 0)
                            + COALESCE(SUM(adj.cache_creation_delta), 0) AS cache_creation_tokens,
+                       -- Costs are returned un-divided (tokens x unit_price); the aggregator does
+                       -- the /PER_MILLION with the same MathContext it always used, so this switch
+                       -- does not perturb rounding.
+                       COALESCE(SUM(COALESCE(COALESCE(ue.input_tokens, ue.prompt_tokens), 0) * %s), 0)
+                           AS input_cost,
+                       COALESCE(SUM(COALESCE(COALESCE(ue.output_tokens, ue.completion_tokens), 0) * %s), 0)
+                           AS output_cost,
+                       COALESCE(SUM(COALESCE(ue.cache_read_input_tokens, 0) * %s), 0) AS cache_read_cost,
+                       COALESCE(SUM(COALESCE(ue.cache_creation_input_tokens, 0) * %s), 0) AS cache_creation_cost
+                %s,
                        -- Lifecycle outcomes (#758): terminal status and timing come from the
                        -- per-request trail; rows without one (coalesced) contribute zeros.
                        SUM(CASE WHEN rur.request_status IN (%s) THEN 1 ELSE 0 END) AS failed_requests,
@@ -288,8 +375,12 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 %s
                 %s
                 GROUP BY %s, ue.provider_product_id, ue.model_id, ue.cache_level
-                """.formatted(spec.select(), FAILED_STATUS_SQL, spec.join(), wb.joins(),
-                UsageAdjustmentSql.ADJUSTMENT_LATERAL, LIFECYCLE_JOIN, wb.where(), spec.groupBy());
+                """.formatted(spec.select(), zeroIfUnpriced(inputPrice), zeroIfUnpriced(outputPrice),
+                zeroIfUnpriced(cacheReadPrice), zeroIfUnpriced(cacheCreationPrice),
+                unpricedColumns(inputTokens, inputPrice, outputTokens, outputPrice, cacheReadTokens, cacheReadPrice,
+                        cacheCreationTokens, cacheCreationPrice),
+                FAILED_STATUS_SQL, spec.join(), wb.joins(), UsageAdjustmentSql.ADJUSTMENT_LATERAL, LIFECYCLE_JOIN,
+                wb.where(), spec.groupBy());
         MapSqlParameterSource params = wb.params();
         List<UsageStatsAggregator.UsageAggRow> rows = new ArrayList<>();
         jdbc.query(sql, params, rs -> {
@@ -301,11 +392,16 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             long requests = rs.getLong("requests");
             TokenBucket tokens = new TokenBucket(rs.getLong("input_tokens"), rs.getLong("output_tokens"),
                     rs.getLong("cache_creation_tokens"), rs.getLong("cache_read_tokens"), null, null, null, null);
+            var gap = new UsageStatsAggregator.PricingGap(rs.getLong("unpriced_input_tokens"),
+                    rs.getLong("unpriced_output_tokens"), rs.getLong("unpriced_cache_read_tokens"),
+                    rs.getLong("unpriced_cache_creation_tokens"), rs.getLong("unpriced_events"),
+                    rs.getLong("unavailable_events"));
             UsageStatsAggregator.UsageAggRow.Outcome outcome = new UsageStatsAggregator.UsageAggRow.Outcome(
                     rs.getLong("failed_requests"), rs.getLong("cancelled_requests"), rs.getLong("duration_sum_ms"),
                     rs.getLong("duration_count"), rs.getLong("ttfb_sum_ms"), rs.getLong("ttfb_count"));
             rows.add(new UsageStatsAggregator.UsageAggRow(groupKey, label, productId, modelId, level, requests, tokens,
-                    outcome));
+                    rs.getBigDecimal("input_cost"), rs.getBigDecimal("output_cost"),
+                    rs.getBigDecimal("cache_read_cost"), rs.getBigDecimal("cache_creation_cost"), gap, outcome));
         });
         return rows;
     }
@@ -314,16 +410,45 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
     public List<UsageStatsAggregator.HitAggRow> aggregateHits(GroupBy groupBy, UsageFilter filter) {
         GroupSpec spec = hitsSpec(groupBy);
         WhereBuilder wb = new WhereBuilder(filter, "h").cacheHitColumns();
+        // Hits are valued from the price in force at the hit (#710), not the current
+        // price —
+        // otherwise "what the cache saved" silently changes every time a price is
+        // edited.
+        //
+        // Grouping folds hits of one cache key across time, so a single instant has to
+        // stand
+        // for the whole group: the LATEST hit is used. That is an approximation (a
+        // group
+        // straddling a price change is valued entirely at the later price); it is
+        // stated on
+        // HitAggRow, and it is still far better than tracking the current table.
+        String priceInput = PriceSnapshotSql.asOfUnitPrice(PriceTokenType.INPUT, "x.product_id", "x.model_id",
+                "x.price_at");
+        String priceOutput = PriceSnapshotSql.asOfUnitPrice(PriceTokenType.OUTPUT, "x.product_id", "x.model_id",
+                "x.price_at");
+        String priceCacheRead = PriceSnapshotSql.asOfUnitPrice(PriceTokenType.CACHE_READ, "x.product_id", "x.model_id",
+                "x.price_at");
+        String priceCacheCreation = PriceSnapshotSql.asOfUnitPrice(PriceTokenType.CACHE_CREATION, "x.product_id",
+                "x.model_id", "x.price_at");
         String sql = """
-                SELECT %s, e.provider_product_id AS product_id, e.model_id, e.cache_key, e.meta_json,
-                       SUM(CASE WHEN h.level = 'L1_HIT' THEN 1 ELSE 0 END) AS l1,
-                       SUM(CASE WHEN h.level = 'L2_HIT' THEN 1 ELSE 0 END) AS l2
-                FROM cache_hit_event h
-                JOIN cache_entry e ON e.tenant_id = h.tenant_id AND e.cache_key = h.cache_key
-                %s%s
-                %s
-                GROUP BY %s, e.provider_product_id, e.model_id, e.cache_key, e.meta_json
-                """.formatted(spec.select(), spec.join(), wb.joins(), wb.where(), spec.groupBy());
+                SELECT x.*,
+                       %s AS price_input,
+                       %s AS price_output,
+                       %s AS price_cache_read,
+                       %s AS price_cache_creation
+                  FROM (
+                    SELECT %s, e.provider_product_id AS product_id, e.model_id, e.cache_key, e.meta_json,
+                           SUM(CASE WHEN h.level = 'L1_HIT' THEN 1 ELSE 0 END) AS l1,
+                           SUM(CASE WHEN h.level = 'L2_HIT' THEN 1 ELSE 0 END) AS l2,
+                           MAX(h.occurred_at) AS price_at
+                    FROM cache_hit_event h
+                    JOIN cache_entry e ON e.tenant_id = h.tenant_id AND e.cache_key = h.cache_key
+                    %s%s
+                    %s
+                    GROUP BY %s, e.provider_product_id, e.model_id, e.cache_key, e.meta_json
+                  ) x
+                """.formatted(priceInput, priceOutput, priceCacheRead, priceCacheCreation, spec.select(), spec.join(),
+                wb.joins(), wb.where(), spec.groupBy());
         MapSqlParameterSource params = wb.params();
 
         // Fold per-cache-key rows into per (group, product, model) rows.
@@ -337,19 +462,28 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             long l2 = rs.getLong("l2");
             TokenBucket cached = parseUsage(rs.getString("meta_json"));
             long hits = l1 + l2;
+            BigDecimal rowPriceInput = rs.getBigDecimal("price_input");
+            BigDecimal rowPriceOutput = rs.getBigDecimal("price_output");
+            BigDecimal rowPriceCacheRead = rs.getBigDecimal("price_cache_read");
+            BigDecimal rowPriceCacheCreation = rs.getBigDecimal("price_cache_creation");
 
             if (groupBy == GroupBy.CACHE_LEVEL) {
                 if (l1 > 0) {
                     acc.computeIfAbsent(key("L1_HIT", productId, modelId),
-                            k -> new HitAccumulator("L1_HIT", "L1_HIT", productId, modelId)).add(l1, 0, cached, hits);
+                            k -> new HitAccumulator("L1_HIT", "L1_HIT", productId, modelId)).add(l1, 0, cached, hits,
+                                    rs.getBigDecimal("price_input"), rs.getBigDecimal("price_output"),
+                                    rs.getBigDecimal("price_cache_read"), rs.getBigDecimal("price_cache_creation"));
                 }
                 if (l2 > 0) {
                     acc.computeIfAbsent(key("L2_HIT", productId, modelId),
-                            k -> new HitAccumulator("L2_HIT", "L2_HIT", productId, modelId)).add(0, l2, cached, hits);
+                            k -> new HitAccumulator("L2_HIT", "L2_HIT", productId, modelId)).add(0, l2, cached, hits,
+                                    rs.getBigDecimal("price_input"), rs.getBigDecimal("price_output"),
+                                    rs.getBigDecimal("price_cache_read"), rs.getBigDecimal("price_cache_creation"));
                 }
             } else {
                 acc.computeIfAbsent(key(groupKey, productId, modelId),
-                        k -> new HitAccumulator(groupKey, label, productId, modelId)).add(l1, l2, cached, hits);
+                        k -> new HitAccumulator(groupKey, label, productId, modelId)).add(l1, l2, cached, hits,
+                                rowPriceInput, rowPriceOutput, rowPriceCacheRead, rowPriceCacheCreation);
             }
         });
 
@@ -556,6 +690,13 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
         private long weightedCacheRead;
         private long weightedCacheCreation;
         private long totalHits;
+        // Undivided sums of (cached tokens x hit count x unit price). Kept undivided so
+        // the
+        // only rounding happens in the aggregator, with the same MathContext as before.
+        private BigDecimal inputCost = BigDecimal.ZERO;
+        private BigDecimal outputCost = BigDecimal.ZERO;
+        private BigDecimal cacheReadCost = BigDecimal.ZERO;
+        private BigDecimal cacheCreationCost = BigDecimal.ZERO;
 
         private HitAccumulator(String groupKey, String label, UUID productId, String modelId) {
             this.groupKey = groupKey;
@@ -564,7 +705,8 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             this.modelId = modelId;
         }
 
-        void add(long addL1, long addL2, TokenBucket cached, long hits) {
+        void add(long addL1, long addL2, TokenBucket cached, long hits, BigDecimal priceInput, BigDecimal priceOutput,
+                BigDecimal priceCacheRead, BigDecimal priceCacheCreation) {
             l1 += addL1;
             l2 += addL2;
             if (hits <= 0) {
@@ -587,13 +729,26 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             weightedCacheRead += cacheRead * hits;
             weightedCacheCreation += cacheCreation * hits;
             totalHits += hits;
+            inputCost = inputCost.add(weighted(input, hits, priceInput));
+            outputCost = outputCost.add(weighted(output, hits, priceOutput));
+            cacheReadCost = cacheReadCost.add(weighted(cacheRead, hits, priceCacheRead));
+            cacheCreationCost = cacheCreationCost.add(weighted(cacheCreation, hits, priceCacheCreation));
+        }
+
+        /**
+         * {@code tokens x hits x unitPrice}, undivided; a null price contributes
+         * nothing.
+         */
+        private static BigDecimal weighted(long tokens, long hits, BigDecimal unitPrice) {
+            return unitPrice == null ? BigDecimal.ZERO : BigDecimal.valueOf(tokens * hits).multiply(unitPrice);
         }
 
         UsageStatsAggregator.HitAggRow toRow() {
             long hits = Math.max(totalHits, 1);
             TokenBucket mean = new TokenBucket(weightedInput / hits, weightedOutput / hits,
                     weightedCacheCreation / hits, weightedCacheRead / hits, null, null, null, null);
-            return new UsageStatsAggregator.HitAggRow(groupKey, label, productId, modelId, l1, l2, mean);
+            return new UsageStatsAggregator.HitAggRow(groupKey, label, productId, modelId, l1, l2, mean, inputCost,
+                    outputCost, cacheReadCost, cacheCreationCost);
         }
     }
 }

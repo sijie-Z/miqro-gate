@@ -13,15 +13,27 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Contract tests for the pure cost/outcome aggregation (#758 additions
- * included): lifecycle outcomes (success rate, average latency / first byte)
- * and the per-row cost estimate behind the records list.
+ * Contract tests for the pure cost/outcome aggregation: lifecycle outcomes
+ * (#758) and the per-row cost estimate behind the records list.
+ *
+ * <p>
+ * Rows now carry the cost their own frozen prices produce (#710), so the
+ * aggregate takes no price table — the {@code *Cost} arguments below are the
+ * undivided {@code tokens × unit_price} sums the SQL layer would produce.
+ * </p>
  */
 @DisplayName("UsageStatsAggregator")
 class UsageStatsAggregatorTest {
 
     private static final UUID PRODUCT = UUID.randomUUID();
     private static final String MODEL = "claude-3-7-sonnet";
+
+    /**
+     * Input priced at 1.00/M, output at 2.00/M: 1000/1e6×1 + 500/1e6×2 → 2000
+     * undivided.
+     */
+    private static final BigDecimal INPUT_COST = new BigDecimal("1000");
+    private static final BigDecimal OUTPUT_COST = new BigDecimal("1000");
 
     private static Map<String, BigDecimal> prices(String tokenType, String unitPrice) {
         Map<String, BigDecimal> prices = new LinkedHashMap<>();
@@ -32,7 +44,8 @@ class UsageStatsAggregatorTest {
     private static UsageStatsAggregator.UsageAggRow row(CacheLevel level, long requests,
             UsageStatsAggregator.UsageAggRow.Outcome outcome) {
         return new UsageStatsAggregator.UsageAggRow("g", "G", PRODUCT, MODEL, level, requests,
-                new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null), outcome);
+                new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null), INPUT_COST, OUTPUT_COST,
+                BigDecimal.ZERO, BigDecimal.ZERO, UsageStatsAggregator.PricingGap.NONE, outcome);
     }
 
     @Nested
@@ -45,7 +58,7 @@ class UsageStatsAggregatorTest {
             UsageStatsAggregator.UsageAggRow.Outcome outcome = new UsageStatsAggregator.UsageAggRow.Outcome(1, 1,
                     10_000, 4, 3_000, 2);
             UsageStatsAggregator.UsageSummary summary = UsageStatsAggregator.aggregate("model",
-                    List.of(row(CacheLevel.UPSTREAM, 4, outcome)), List.of(), Map.of());
+                    List.of(row(CacheLevel.UPSTREAM, 4, outcome)), List.of());
 
             UsageStatsAggregator.Outcomes o = summary.totals().outcomes();
             assertThat(o.succeeded()).isEqualTo(2);
@@ -58,10 +71,11 @@ class UsageStatsAggregatorTest {
         @Test
         @DisplayName("averages are null when nothing observed them, and rows without a lifecycle count as success")
         void nullAveragesWhenUnobserved() {
-            UsageStatsAggregator.UsageSummary summary = UsageStatsAggregator.aggregate("model",
-                    List.of(row(CacheLevel.UPSTREAM, 2, UsageStatsAggregator.UsageAggRow.Outcome.NONE),
-                            row(CacheLevel.COALESCED, 1, UsageStatsAggregator.UsageAggRow.Outcome.NONE)),
-                    List.of(), Map.of());
+            UsageStatsAggregator.UsageSummary summary = UsageStatsAggregator
+                    .aggregate("model",
+                            List.of(row(CacheLevel.UPSTREAM, 2, UsageStatsAggregator.UsageAggRow.Outcome.NONE),
+                                    row(CacheLevel.COALESCED, 1, UsageStatsAggregator.UsageAggRow.Outcome.NONE)),
+                            List.of());
 
             UsageStatsAggregator.Outcomes o = summary.totals().outcomes();
             assertThat(o.succeeded()).isEqualTo(3);
@@ -78,10 +92,14 @@ class UsageStatsAggregatorTest {
                     1_000, 1);
             UsageStatsAggregator.UsageAggRow.Outcome b = new UsageStatsAggregator.UsageAggRow.Outcome(1, 0, 4_000, 2,
                     5_000, 1);
-            UsageStatsAggregator.UsageSummary summary = UsageStatsAggregator.aggregate("model", List.of(
-                    new UsageStatsAggregator.UsageAggRow("a", "A", PRODUCT, MODEL, CacheLevel.UPSTREAM, 2, null, a),
-                    new UsageStatsAggregator.UsageAggRow("b", "B", PRODUCT, MODEL, CacheLevel.UPSTREAM, 1, null, b)),
-                    List.of(), Map.of());
+            UsageStatsAggregator.UsageSummary summary = UsageStatsAggregator.aggregate("model",
+                    List.of(new UsageStatsAggregator.UsageAggRow("a", "A", PRODUCT, MODEL, CacheLevel.UPSTREAM, 2, null,
+                            INPUT_COST, OUTPUT_COST, BigDecimal.ZERO, BigDecimal.ZERO,
+                            UsageStatsAggregator.PricingGap.NONE, a),
+                            new UsageStatsAggregator.UsageAggRow("b", "B", PRODUCT, MODEL, CacheLevel.UPSTREAM, 1, null,
+                                    INPUT_COST, OUTPUT_COST, BigDecimal.ZERO, BigDecimal.ZERO,
+                                    UsageStatsAggregator.PricingGap.NONE, b)),
+                    List.of());
 
             UsageStatsAggregator.Outcomes totals = summary.totals().outcomes();
             assertThat(totals.succeeded()).isEqualTo(2);
@@ -92,7 +110,7 @@ class UsageStatsAggregatorTest {
     }
 
     @Nested
-    @DisplayName("Per-row price estimate (#758)")
+    @DisplayName("Per-row price estimate (#758) — one rule, token-aware (#710)")
     class PricedCost {
 
         @Test
@@ -120,19 +138,35 @@ class UsageStatsAggregatorTest {
         }
 
         @Test
-        @DisplayName("a missing cache rate stays priced — priced at 0 like the aggregates do")
-        void missingCacheRateStaysPriced() {
-            // Real vendors often publish no cache-write tariff (deepseek-flash on
-            // the demo station is exactly this shape); the aggregate values the
-            // missing type at 0, so the row must not flip to 未定价.
+        @DisplayName("a cache dimension the row never used does not make it unpriced")
+        void unusedCacheDimensionStaysPriced() {
+            // Real vendors often publish no cache-write tariff (deepseek-flash on the demo
+            // station is exactly this shape). A row with NO cache-creation tokens is still
+            // fully priced: that dimension never took part in the calculation.
+            Map<String, BigDecimal> prices = new LinkedHashMap<>();
+            prices.put(PRODUCT + ":" + MODEL + ":INPUT", new BigDecimal("2.00"));
+            prices.put(PRODUCT + ":" + MODEL + ":OUTPUT", new BigDecimal("8.00"));
+            UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(prices, PRODUCT, MODEL, 1_000L,
+                    500L, 0L, 0L);
+
+            assertThat(priced.priced()).isTrue();
+            assertThat(priced.cost()).isEqualByComparingTo("0.006");
+        }
+
+        @Test
+        @DisplayName("a cache dimension the row DID use, with no tariff, reports unpriced")
+        void usedCacheDimensionWithoutTariffIsUnpriced() {
+            // The other side of the same boundary, and the reason the rule is token-aware
+            // rather than "cache dimensions do not count": 37 cache-creation tokens really
+            // could not be priced, so saying "priced" would report an unknown as if it were
+            // free — the summary flags it, and the detail row must agree (#710 vs #765).
             Map<String, BigDecimal> prices = new LinkedHashMap<>();
             prices.put(PRODUCT + ":" + MODEL + ":INPUT", new BigDecimal("2.00"));
             prices.put(PRODUCT + ":" + MODEL + ":OUTPUT", new BigDecimal("8.00"));
             UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(prices, PRODUCT, MODEL, 1_000L,
                     500L, 0L, 37L);
 
-            assertThat(priced.priced()).isTrue();
-            assertThat(priced.cost()).isEqualByComparingTo("0.006"); // creation priced at 0
+            assertThat(priced.priced()).isFalse();
         }
 
         @Test

@@ -225,8 +225,12 @@ class AdminRoiApiIntegrationTest {
 
         void insertPrice(String tokenType, String unitPrice) {
             jdbc.update("""
-                    INSERT INTO price_snapshot (id, provider_product_id, model_id, token_type, currency, unit_price)
-                    VALUES (:id, :productId, 'model-a', :tokenType, 'CNY', :unitPrice)
+                    -- effective_from predates the seeded usage and hits: a price must be in force *before* the
+                    -- usage it prices, otherwise the event-time basis correctly reports it as unpriced.
+                    INSERT INTO price_snapshot (id, provider_product_id, model_id, token_type, currency, unit_price,
+                                                effective_from, source)
+                    VALUES (:id, :productId, 'model-a', :tokenType, 'CNY', :unitPrice,
+                            now() - interval '1 hour', 'MANUAL')
                     """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("productId", productId)
                     .addValue("tokenType", tokenType).addValue("unitPrice", new java.math.BigDecimal(unitPrice)));
         }

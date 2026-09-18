@@ -88,10 +88,9 @@ public class AdminUsageStatsService {
         UsageStatsService.validateTimeRange(from, to);
         UsageStatsRepository.UsageFilter filter = adminFilter(tenantId, from, to, userId, projectId, virtualKeyId,
                 credentialId, subscriptionId, providerProductId, modelId, null, teamId);
-        Map<String, BigDecimal> prices = priceMap();
         List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
         List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
-        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows, prices);
+        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows);
     }
 
     public UsageSummary summary(User admin, String groupBy, Instant from, Instant to, UUID userId, UUID projectId,
@@ -112,10 +111,9 @@ public class AdminUsageStatsService {
         UsageStatsRepository.GroupBy dimension = UsageStatsService.parseGroupBy(groupBy);
         UsageStatsRepository.UsageFilter filter = new UsageStatsRepository.UsageFilter(tenantId, null, userId,
                 projectId, null, null, null, null, null, null, from, to);
-        Map<String, BigDecimal> prices = priceMap();
         List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
         List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
-        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows, prices);
+        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows);
     }
 
     /**
@@ -170,10 +168,9 @@ public class AdminUsageStatsService {
     private UsageRecordPage recordsFor(UUID tenantId, UsageStatsRepository.UsageFilter filter, long page, int size) {
         long total = usageStatsRepository.countRecords(filter);
         List<AdjustedUsageRow> events = usageStatsRepository.findRecords(filter, (page - 1) * size, size);
-        Map<String, BigDecimal> prices = priceMap();
         List<UsageRecordPage.UsageRecordView> items = new ArrayList<>(events.size());
         for (AdjustedUsageRow row : events) {
-            items.add(view(row, prices));
+            items.add(view(row, priceMap()));
         }
         return new UsageRecordPage(items, page, size, total);
     }

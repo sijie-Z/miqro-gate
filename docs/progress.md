@@ -3652,3 +3652,44 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **迁移号**：V62/V63 均已被占，本项用 **V64**。
 
+## 2026-09-18 成本读取切冻结价格基座（#710 / F21-A 第二刀）——「改一次价目，历史金额跟着变」终止
+
+**这一刀会改变金额**，而且是**纠正性的**：`docs/usage-accounting.md` §6 原文一直写着"使用**事件发生时**的价格快照计算"，而实现用的是**查询时刻的最新价目**——代码此前不符合它自己的规格。本刀让二者一致。
+
+**三条定价路径，实测后分两类处理**：
+- **计费路径**（`upstreamPaid` / `gatewayObserved`）：改读行内冻结值，缺失回退到该行 `occurred_at` 时刻的价目
+- **缓存节省路径**（`savedByGatewayCache`）：命中行**没有**用量事件，因而没有冻结列。按**该组命中中最晚一次的时刻**取价目。**这是近似**——一个 cache_key 的命中若横跨改价，整组按较晚价计价。已在 `usage-accounting.md` §6 明写
+- **成本分摊**（`CostAllocationService`）**未切换**：它把结果持久化、按 `algorithm_version` 幂等覆盖，改读冻结基座会牵动"同版本重跑是否覆盖历史"的语义，属独立决策
+
+**结构**：新增 `PriceSnapshotSql` 做 as-of 规则的**单一定义**（此前已在仓储与回填 SQL 各有一份，再加一处会失控）；`UsageAggRow` / `HitAggRow` 改带**未除的** `tokens × unit_price` 求和，除法仍在 domain 用原 `MathContext` 完成——保证切换不扰动舍入。三个服务里的"塞当前价目表"整块删除，连已无人使用的 `priceSnapshotRepository` 注入一并清掉。
+
+**回归护栏（如预期成立）**：价格没变时冻结价 == 当前价，因此**既有 39 项成本/用量断言原样通过**——证明切换没有悄悄改数。
+
+**新测试分开验两件强度不同的事**（`PriceBasisCostStabilityIntegrationTest`）：
+1. 新增更晚的价目 → 历史不动（用户能感知的承诺）
+2. **改写历史价目行 → 已冻结的历史不动** ——**只有冻结列扛得住它**（as-of 查询会照收），所以它证明冻结基座真的在被使用，而不是一个碰巧看着对的回退
+
+**一次自查：那两条测试起初是空洞的**。首次运行只有精确值断言失败（`expected 0.002 but was 0`）——成本为 0 是因为 fixture 用了随机 `project_id`，而 summary 默认按项目分组会 `JOIN projects` 丢掉该行。**这意味着当时那两条"历史不动"的测试比较的是 `0 == 0`，绿灯但什么都没证明。** 修 fixture 后给两条都加了**基线必须非零**的前置断言。
+
+**未做**：导出/对账侧的成本口径、`cost_allocations` 切换、前端展示。
+
+## 2026-09-18 未定价用量：把「未知」提升为正式计价状态（#710 / F21-A 第三刀）
+
+**起因**：成本切到「事件时刻价格」后，检测到 **571 行事件发生在任何价目之前**（带 49.1M cache_read token），会被算成 **¥0**，全窗口成本下降约 **11.4%**。
+
+**问题不是"571 行为什么是 0"，而是**：系统已经有了**用量事实**，但其中一部分**没有合法的价格事实**——这两者在财务语义上必须分开。而实现里 `COALESCE(..., 0)` 把"未知"塌成了"免费"，**与存储层自己写的"未知 ≠ 免费"直接冲突**。
+
+**本轮（B+）**：`UNKNOWN` 成为**正式财务状态**，未计价金额不进入"总成本"。
+
+- 汇总同时给出 **`pricingStatus`（COMPLETE/PARTIAL/UNAVAILABLE）+ 四维 `unpriced` token + 未计价事件数**；`pricingStatus != COMPLETE` 时已知金额**不是总额**
+- 数学定义写进 usage-accounting §6：PARTIAL 的已知金额**只含已定价维度**，不是"未定价维度记 0"
+- **判据固化成测试**：`unavailableNeverMapsToZeroCost`（0 由 gap 解释）与 `completeWithZeroPriceRemainsLegitimateZeroCost`——**金额同为 0、含义相反**
+- **V65**：现在就冻 `base_cost_amount`（可空不可变），不等阶梯价——届时"单价×数量"不成立
+- 事后补价走**追加式**金额调整，**不修改原行、不把 UNAVAILABLE 改成 COMPLETE**
+
+**大厂依据（已抓取原文）**：AWS 的 `pricing/publicOnDemandRate` 证明"每条用量行携带自己当时的单价"；Troubleshooting 文档专有一节解释"为什么有些行成本是 0"（`LineItemType = Discounted Usage`）——**即大厂的每一个 0 都是可解释的**。我们此前那 571 行的 0 无从解释，正是 AWS 明确避免的状态。
+
+**顺带修掉两条"依赖旧行为"的测试**：配额 COST 水位（先插用量后插价目）与 ROI 节省（**价目比命中晚 2~3 秒生效**）——它们此前能过，纯粹因为旧实现拿当前价倒推，**测试套件把缺陷固化了**。修法是让 fixture 显式声明价格基准（价目早于消费），而非回退实现。
+
+**另记一条操作教训**：`mvn test-compile` **不 clean 时会给假绿**（增量编译未重编测试），清 `target/test-classes` 后才发现真实的编译错误。
+
