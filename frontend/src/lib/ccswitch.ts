@@ -105,8 +105,13 @@ export const USAGE_CLIENT_LABEL: Record<UsageClient, string> = {
  * Codex CLI `~/.codex/config.toml` fragment. `wire_api = "chat"` matches the
  * gateway's /v1/chat/completions pass-through (works for every chat-capable
  * upstream; switch to "responses" only for Responses-native products).
+ *
+ * The credential is deliberately NOT a parameter: the snippet ends up in a
+ * config file that gets grepped, indexed, backed up and attached to tickets,
+ * so a real value here would ride along every time. The env var named by
+ * `env_key` is set separately (mirrors scripts/onboarding/miqro-onboard.sh).
  */
-export function codexTomlSnippet(secret: string, baseUrl: string, model: string): string {
+export function codexTomlSnippet(baseUrl: string, model: string): string {
   const base = normalizeBaseUrl(baseUrl);
   return [
     `model_provider = "miqrokey"`,
@@ -119,7 +124,7 @@ export function codexTomlSnippet(secret: string, baseUrl: string, model: string)
     'wire_api = "chat"',
     '',
     `# 然后设置环境变量（Windows CMD 用 set，PowerShell 用 $env:）：`,
-    `#   MIQROKEY_API_KEY=${secret}`,
+    `#   MIQROKEY_API_KEY=<粘贴你保存的密钥；不要写进本文件>`,
   ].join('\n');
 }
 

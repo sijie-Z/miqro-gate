@@ -55,11 +55,18 @@ describe('ccswitch helpers', () => {
     expect(parsed.env.ANTHROPIC_AUTH_TOKEN).toBe('mqk_live_s');
   });
   it('renders the Codex TOML with chat wire api and env key hint', () => {
-    const toml = codexTomlSnippet('key-1', 'https://gw.example.com/', 'deepseek-flash');
+    const toml = codexTomlSnippet('https://gw.example.com/', 'deepseek-flash');
     expect(toml).toContain('base_url = "https://gw.example.com/v1"');
     expect(toml).toContain('wire_api = "chat"');
     expect(toml).toContain('env_key = "MIQROKEY_API_KEY"');
-    expect(toml).toContain('MIQROKEY_API_KEY=key-1');
+  });
+
+  it('never embeds a credential in the Codex snippet (#821)', () => {
+    // The credential is not even a parameter: a value in the TOML comment would
+    // be grepped, indexed, backed up and attached to tickets along with the file.
+    const toml = codexTomlSnippet('https://gw.example.com/', 'deepseek-flash');
+    expect(toml).toContain('MIQROKEY_API_KEY=<粘贴你保存的密钥；不要写进本文件>');
+    expect(toml).not.toMatch(/MIQROKEY_API_KEY=mqk_/);
   });
 
   it('renders the generic OpenAI-compatible base URL / key / curl block', () => {
