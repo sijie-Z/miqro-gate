@@ -110,7 +110,7 @@ public class ExportTaskService {
     public List<ExportTaskView> recentMeta(UUID tenantId, int limit) {
         return jdbc.query("""
                 SELECT id, created_by, format, period_from, period_to, status, sha256, row_count, byte_count,
-                       error_message, created_at, finished_at, expires_at, reconcile_level
+                       error_message, created_at, finished_at, expires_at, reconcile_level, adjustment_level
                 FROM export_tasks WHERE tenant_id = :tenantId
                 ORDER BY created_at DESC LIMIT :limit
                 """,
@@ -122,7 +122,7 @@ public class ExportTaskService {
     public ExportTaskView taskMeta(UUID tenantId, UUID taskId) {
         List<ExportTaskView> found = jdbc.query("""
                 SELECT id, created_by, format, period_from, period_to, status, sha256, row_count, byte_count,
-                       error_message, created_at, finished_at, expires_at, reconcile_level
+                       error_message, created_at, finished_at, expires_at, reconcile_level, adjustment_level
                 FROM export_tasks WHERE id = :id AND tenant_id = :tenantId
                 """, new MapSqlParameterSource("id", taskId).addValue("tenantId", tenantId), EXPORT_META_MAPPER);
         if (found.isEmpty()) {
@@ -138,19 +138,23 @@ public class ExportTaskService {
         try {
             List<Map<String, Object>> rows = readRows(task);
             String reconcileLevel = reconcileLevelOf(rows);
-            byte[] gzip = render(task.format(), rows, reconcileLevel);
+            String adjustmentLevel = adjustmentLevelOf(rows);
+            byte[] gzip = render(task.format(), rows, reconcileLevel, adjustmentLevel);
             String sha256 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(gzip));
             jdbc.update("""
                     UPDATE export_tasks
                     SET status = 'SUCCEEDED', sha256 = :sha256, row_count = :rows, byte_count = :bytes,
                         file_bytes = :file, error_message = NULL, finished_at = :finishedAt,
-                        expires_at = :expiresAt, reconcile_level = :reconcileLevel
+                        expires_at = :expiresAt, reconcile_level = :reconcileLevel,
+                        adjustment_level = :adjustmentLevel
                     WHERE id = :id
-                    """, new MapSqlParameterSource("sha256", sha256).addValue("rows", rows.size())
-                    .addValue("bytes", gzip.length).addValue("file", gzip).addValue("reconcileLevel", reconcileLevel)
-                    .addValue("finishedAt", java.sql.Timestamp.from(Instant.now()))
-                    .addValue("expiresAt", java.sql.Timestamp.from(Instant.now().plus(DOWNLOAD_TTL)))
-                    .addValue("id", task.id()));
+                    """,
+                    new MapSqlParameterSource("sha256", sha256).addValue("rows", rows.size())
+                            .addValue("bytes", gzip.length).addValue("file", gzip)
+                            .addValue("reconcileLevel", reconcileLevel).addValue("adjustmentLevel", adjustmentLevel)
+                            .addValue("finishedAt", java.sql.Timestamp.from(Instant.now()))
+                            .addValue("expiresAt", java.sql.Timestamp.from(Instant.now().plus(DOWNLOAD_TTL)))
+                            .addValue("id", task.id()));
         } catch (Exception e) {
             LOG.warn("Export task {} failed", task.id(), e);
             mark(task.id(), ExportStatus.FAILED, truncate(e.getMessage()));
@@ -263,24 +267,50 @@ public class ExportTaskService {
     }
 
     /**
-     * Note suffix for the file's local_caliber_note column (backwards compatible
-     * prefix).
+     * Issue #716: whether the file's numbers include corrections — the axis V41
+     * left room for, stated per task so a consumer knows before reading the rows
+     * whether the {@code net*} columns matter. An empty window has nothing to
+     * declare (null).
+     *
+     * <p>
+     * Reads the same per-row marker the file carries ({@code adjusted}, #709), so
+     * the task-level declaration and the file cannot disagree.
+     * </p>
      */
-    private static String caliberNote(String reconcileLevel) {
-        if (reconcileLevel == null) {
+    static String adjustmentLevelOf(List<Map<String, Object>> rows) {
+        if (rows.isEmpty()) {
+            return null;
+        }
+        return rows.stream().anyMatch(r -> Boolean.TRUE.equals(r.get("adjusted"))) ? "PRESENT" : "NONE";
+    }
+
+    /**
+     * Note suffix for the file's local_caliber_note column (backwards compatible
+     * prefix: {@code local-instant} always leads, and the tokens after it are
+     * appended).
+     */
+    private static String caliberNote(String reconcileLevel, String adjustmentLevel) {
+        if (reconcileLevel == null && adjustmentLevel == null) {
             return "local-instant";
         }
-        String suffix = switch (reconcileLevel) {
-            case "PROVIDER_ID_BACKED" -> "provider-id";
-            case "PARTIAL" -> "mixed";
-            default -> "local-only";
-        };
-        return "local-instant;reconcile=" + suffix;
+        StringBuilder note = new StringBuilder("local-instant");
+        if (reconcileLevel != null) {
+            note.append(";reconcile=").append(switch (reconcileLevel) {
+                case "PROVIDER_ID_BACKED" -> "provider-id";
+                case "PARTIAL" -> "mixed";
+                default -> "local-only";
+            });
+        }
+        if (adjustmentLevel != null) {
+            note.append(";adjustments=").append("PRESENT".equals(adjustmentLevel) ? "present" : "none");
+        }
+        return note.toString();
     }
 
     /** Renders rows into the requested format and gzips the result. */
-    private byte[] render(ExportFormat format, List<Map<String, Object>> rows, String reconcileLevel) throws Exception {
-        String note = caliberNote(reconcileLevel);
+    private byte[] render(ExportFormat format, List<Map<String, Object>> rows, String reconcileLevel,
+            String adjustmentLevel) throws Exception {
+        String note = caliberNote(reconcileLevel, adjustmentLevel);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (GZIPOutputStream gzip = new GZIPOutputStream(out)) {
             if (format == ExportFormat.CSV) {
@@ -362,7 +392,7 @@ public class ExportTaskService {
             rs.getBytes("file_bytes"), rs.getString("error_message"), rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("finished_at") != null ? rs.getTimestamp("finished_at").toInstant() : null,
             rs.getTimestamp("expires_at") != null ? rs.getTimestamp("expires_at").toInstant() : null,
-            rs.getString("reconcile_level"));
+            rs.getString("reconcile_level"), rs.getString("adjustment_level"));
 
     /** Metadata row mapper shared by the open-surface queries (no file_bytes). */
     private static final RowMapper<ExportTaskView> EXPORT_META_MAPPER = (rs, rowNum) -> new ExportTaskView(
@@ -373,5 +403,5 @@ public class ExportTaskService {
             rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("finished_at") != null ? rs.getTimestamp("finished_at").toInstant() : null,
             rs.getTimestamp("expires_at") != null ? rs.getTimestamp("expires_at").toInstant() : null,
-            rs.getString("reconcile_level"));
+            rs.getString("reconcile_level"), rs.getString("adjustment_level"));
 }

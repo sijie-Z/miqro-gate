@@ -23,7 +23,12 @@ package com.miqroera.miqrokey.controlplane.dto;
  *            rows that already held a price basis but no frozen amount, and
  *            whose amount this pass completed (#771). Counted apart from
  *            {@code scanned} because nothing was re-evaluated for them
+ * @param reclassified
+ *            rows whose stored verdict the rule in force now disagrees with
+ *            (#777). Also separate from {@code scanned}: the verdict was
+ *            recomputed from the prices the row already froze, so no decision
+ *            was revised — only a label brought up to date
  */
-public record UsagePriceBackfillResult(long scanned, long complete, long partial, long unavailable,
-        long baseCostFilled) {
+public record UsagePriceBackfillResult(long scanned, long complete, long partial, long unavailable, long baseCostFilled,
+        long reclassified) {
 }

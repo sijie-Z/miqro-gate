@@ -228,6 +228,9 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
   - `price_input` / `price_output` / `price_cache_read` / `price_cache_creation numeric(24,10)`——**该事件发生时实际生效的单价**（每百万 token，与 `price_snapshot.unit_price` 同量纲）
   - `price_currency varchar(3)`、`price_effective_from timestamptz`（所采用价目行的生效时刻，**不是**事件时刻）、`price_source varchar(32)`（`MANUAL|OFFICIAL|ESTIMATED`）
   - `price_status varchar(16)`：`NULL`=尚未评估 ｜ `COMPLETE`=四维齐全 ｜ `PARTIAL`=部分维度有价 ｜ `UNAVAILABLE`=已评估但事件发生时无可查价格
+  - **它是派生列，不是事实**：判据只看"该行**用到**的维度里哪些有冻结价"，因此可由 `price_*` + token 列唯一重算——**标签可纠正，价格与金额不可改写**（#777）。
+    判据本身会演进（#765 就改过一次），而盖章通道只往前看，故旧章会留在行上；回填端点的重算趟 + 定时通道（`miqrokey.usage-price-reconcile.enabled`）负责把它拉回现行判据。
+    **查这一列前先确认重算跑过**——陈旧标签不含判据版本，读起来与新鲜标签无法区分
   - **`UNAVAILABLE` 不等于单价 0**：查不到价格时价格列保持 NULL。"价格未知"与"免费"是不同的审计事实，静默写 0 会低估历史支出
   - 取值口径：`price_snapshot` 中 `effective_from <= 本行 occurred_at` 的最新一行（同 `effective_from` 由 `id DESC` 做确定性 tie-break）；回填按 `occurred_at`，**不是按回填时刻**。动机：成本原先是查询时按**当前**价目现算的，所以改一次价目，历史报表金额跟着变
   - **读取方**：明细/汇总/计费/配额水位（`UsageStatsAggregator` 链路）已改读此基座（#710 F21-A 第二刀）；成本分摊 `cost_allocations` 仍用"分配时刻最新快照"，未切换

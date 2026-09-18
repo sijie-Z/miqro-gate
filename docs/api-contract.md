@@ -623,16 +623,22 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/exports?limit` | 最近任务列表 |
 
 - 窗口 ≤ 93 天；产物只含计数与元数据列（见 database-schema `export_tasks`），绝不包含 prompt、代码、Secret 或 Virtual Key 明文。
-- **口径标注（2026-09-07）**：CSV 末列 `local_caliber_note` / JSONL 同名字段 = `local-instant`（本地即时记账口径；供应商官方账单通常 T+1 滞后，对账勿以官方值直接核对本地明细）。
+- **口径标注（2026-09-07）**：CSV 末列 `local_caliber_note` / JSONL 同名字段 = `local-instant`（本地即时记账口径；供应商官方账单通常 T+1 滞后，对账勿以官方值直接核对本地明细），其后按已知的声明追加 token。
 - **可对账等级（#330，V41，usage-accounting §11）**：任务完成时按 `provider_request_id` 覆盖度声明
   `reconcileLevel`——`PROVIDER_ID_BACKED`（全行可按 request ID 对账）/ `PARTIAL`（混合）/ `LOCAL_ONLY`
   （全无）；空窗口/历史任务为 null。任务元数据（§5.5 列表与详情、§9 机器面 export-tasks）均带该字段；
-  文件内同步：`local_caliber_note` 扩展为 `local-instant;reconcile=provider-id|mixed|local-only`（前缀向后兼容）。
-  净额/含调整等级随 F20（adjustment 机制）扩展。
+  文件内同步：`local-instant;reconcile=provider-id|mixed|local-only`（前缀向后兼容）。
+- **含调整等级（#716，V67）**：另一条轴的声明——**这份文件的数字里是否含修正**。`PRESENT`（至少一行被修正过，
+  故 `net*` 列才是应对账的那一套）/ `NONE`（没有任何行被改过，`net*` 只是重复观察值）；空窗口/历史任务为 null。
+  文件内同步：`;adjustments=present|none`。
+  **为什么与 `reconcileLevel` 分开**：两者是互相独立的问题——"能不能按请求 ID 对上账单"与"数字里含不含修正"。
+  合进一个枚举就得为每种组合造一个值（`PROVIDER_ID_BACKED_AND_ADJUSTED`…），读起来两边都不是。
+  它**按任务声明**而非只在行上标注，是因为消费者希望在读文件**之前**（或只看任务列表时）就知道 `net*` 列要不要看。
 - **调整标记（#709）**：CSV 与 JSONL 每行新增 `netInputTokens` / `netOutputTokens` /
   `netCacheReadInputTokens` / `netCacheCreationInputTokens` 与 `adjusted`。既有观察值列**保持原样**，
-  净额另列给出；`adjusted` 表示该行是否存在非零修正。净额口径与明细、汇总**共用同一段 SQL 定义**
-  （`UsageAdjustmentSql`），避免三处算法漂移。
+  净额另列给出；`adjusted` 表示该行**是否存在过修正**——按行数判定，故一笔修正被冲销后
+  仍为真（此时净额等于观察值，`adjusted` 是该行唯一还能说明"被改过"的痕迹，#774）。
+  净额口径与明细、汇总**共用同一段 SQL 定义**（`UsageAdjustmentSql`），避免三处算法漂移。
 - **表头对齐修复（#754）**：CSV 表头此前漏了 `clientIp` 一列——数据行 19 个值而表头只有 18 个名，
   导致**自 `isComplete` 起每一列错位一格**：按列名解析该文件的消费者会拿到错误的值，且不会报错。
   现表头与数据行均由同一份声明的列顺序派生，双份真相已消除；补了**按列名取值**的回归测试
@@ -667,7 +673,8 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 - **幂等**：请求体可选 `idempotencyKey`，落在 `(tenant_id, idempotency_key)` 部分唯一索引上——重试返回已记录的行，不重复入账。**这与 §1 中"预留、当前未实现"的 `Idempotency-Key` 请求头是两套东西**：该请求头仍未实现，本端点用的是请求体内的自然键。
 - 错误码：`ADJUSTMENT_EMPTY`（400，未给或全零）、`ADJUSTMENT_WOULD_GO_NEGATIVE`（400，调整后某维度为负）、`ADJUSTMENT_TARGET_HAS_NO_USAGE`（400，缓存命中行不承载用量）、`REVERSAL_TARGET_MISMATCH` / `REVERSAL_OF_REVERSAL`（400）、`USAGE_EVENT_NOT_FOUND` / `ADJUSTMENT_NOT_FOUND`（404，租户内不可区分他租户）。
 - **口径**：调整计入**财务/报告口径**（明细、汇总、计费、导出）；**配额判定仍只读 `usage_event`**——财务更正不得追溯改写运行时控制的历史结果。四层语义见 database-schema §6。
-- **当前范围**：读取路径（明细净额列、导出/审计标记、对账"含调整"维度）尚未接入，故调整目前可记录、可查看，但**不改变任何上报数字**；`amount_delta` 金额维度表结构已备但未开放写入。
+- **当前范围**：读取路径**已接入**——明细净额列与汇总口径（#753）、导出净额列与行级 `adjusted`（#755）、以净额为准的控制台记录表（#773）；
+  本节的"含调整"在导出侧另由**任务级`adjustmentLevel`**声明（#716）。`amount_delta` 金额维度表结构已备但**未开放写入**——目前可调整的只有 token 维度。
 - 写 `USAGE_ADJUSTMENT_CREATED` / `USAGE_ADJUSTMENT_REVERSED` 审计（操作人填写的原因文本按 JSON 转义）。
 
 ### 5.6c 用量价格基座回填（#710 / F21-A）
@@ -678,14 +685,19 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 
 - **动机**：成本原先按**查询时刻**的最新价目现算，所以改一次价目，历史报表金额跟着变。本端点把「这笔 token 当时依据什么价格计算」冻结到行上。
 - 取值：`price_snapshot` 中 `effective_from <= 该行 occurred_at` 的最新一行（同 `effective_from` 由 `id DESC` 做确定性 tie-break）。**不是按回填时刻**——否则会造出「看起来是历史快照、实际是延迟快照」的假象。
-- 返回 `{scanned, complete, partial, unavailable, baseCostFilled}`：`COMPLETE`=四维齐全、`PARTIAL`=部分维度有价、`UNAVAILABLE`=已评估但事件发生时无可查价格。
+- 返回 `{scanned, complete, partial, unavailable, baseCostFilled, reclassified}`：`COMPLETE`=四维齐全、`PARTIAL`=部分维度有价、`UNAVAILABLE`=已评估但事件发生时无可查价格。
 - **`UNAVAILABLE` 的行价格列保持 NULL，不写 0**——「价格未知」与「免费」是不同的审计事实；静默写 0 会低估历史支出。
-- **幂等**：只处理 `price_status IS NULL`（尚未评估）的行；已定状态的行（含 `UNAVAILABLE`）**永不重评**——重跑不能改写已作出的决定。窗口 ≤ 93 天，大范围可分次覆盖。
+- **盖章幂等**：盖章只处理 `price_status IS NULL`（尚未评估）的行。**价格列与金额永不改写**——对已评估的行，重跑不会重新定价。窗口 ≤ 93 天，大范围可分次覆盖。
 - **同时补写 `base_cost_amount`（#771）**：`baseCostFilled` = 本次为「已盖章但缺冻结金额」的行补上的条数（V66 之前完成回填的库，其历史行金额全为 NULL，而盖章通道不会重选它们）。
-  补写**只从该行已冻结的 `price_*` 列派生**——不查价目、不改 `price_status`、不动金额，因此同样只能**补全**、不能**修订**。
-- 写 `USAGE_PRICE_BACKFILL` 审计（含五项计数）。
+  补写**只从该行已冻结的 `price_*` 列派生**——不查价目、不改 `price_status`、不动金额，因此只能**补全**、不能**修订**。
+- **同时重算派生标签（#777）**：`reclassified` = 本次把「按现行判据已过时」的 `price_status` 纠正过来的条数。
+  判据会演进（#765 把「按价格是否可得」改成「按该行是否**用到**该维度」），而旧章会一直留在行上——那批行既不是"另一种口径"，也不带判据版本，读者无从分辨，**就是错数据**。
+  本趟从该行**已冻结的 `price_*` 列**重算，**不改价格列、不动金额**：**标签是派生、金额是事实**，这是它与上一条只做"补全"的分界。
+  > 本条**取代**此前那句无条件的「已定状态的行永不重评」。被保护的不变式是**不重估价格、不移动金额**，不是「标签不可纠正」。
+- **定时收敛**：`miqrokey.usage-price-reconcile.enabled`（默认关）开启后每 `cycle-ms` 扫最近 48 小时，让上述两条无需人工记得跑端点。
+- 写 `USAGE_PRICE_BACKFILL` 审计（含各项计数）；定时通道以**无操作人**（系统发起）记同一条目。
 - 错误码：`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400）。
-- **当前范围**：本端点只**建立**价格基座。成本读取改走该基座是后续增量——在此之前历史成本仍按旧逻辑计算，因此**本端点单独上线不改变任何上报数字**。
+- **不改变任何上报数字**：读取路径走自己的 as-of 判定，这三趟只补齐/纠正**存储列**，不重估价格、不动金额。
 
 ### 5.7 Webhook 端点（G4.5）
 

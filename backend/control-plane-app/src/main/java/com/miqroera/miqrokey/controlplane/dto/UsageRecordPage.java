@@ -20,9 +20,11 @@ public record UsageRecordPage(List<UsageRecordView> items, long page, long size,
      * The {@code *Tokens} fields are the <b>observed</b> counts — what the gateway
      * actually recorded. The {@code net*} fields are those counts plus every
      * adjustment booked against the row (#709), i.e. the financial/reporting
-     * reading; {@code adjusted} says whether any correction exists at all. Both are
-     * carried rather than the observed fields being overwritten, so the change is
-     * additive and a reader never has to guess which one they hold.
+     * reading; {@code adjusted} says whether any correction exists at all, so a
+     * correction that has since been reversed keeps it true while the net counts
+     * return to the observed ones (#774). Both are carried rather than the observed
+     * fields being overwritten, so the change is additive and a reader never has to
+     * guess which one they hold.
      * </p>
      *
      * <p>
