@@ -29,12 +29,25 @@ function dismiss() {
 
 <template>
   <div v-if="visible" class="ui-caliber-tip" data-testid="usage-caliber-tip" role="note">
-    <svg class="ui-caliber-tip__icon" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <svg
+      class="ui-caliber-tip__icon"
+      width="15"
+      height="15"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+    >
       <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4" />
-      <path d="M8 7.4v3.4M8 5.2v.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+      <path
+        d="M8 7.4v3.4M8 5.2v.1"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+      />
     </svg>
     <p class="ui-caliber-tip__text">
-      本地用量按 Key 即时记账；供应商官方控制台/账单约 T+1 更新——对账看到数字差异属正常窗口，以本页明细为准。
+      本地用量按 Key 即时记账；供应商官方控制台/账单约 T+1
+      更新——对账看到数字差异属正常窗口，以本页明细为准。
     </p>
     <button
       type="button"
@@ -44,7 +57,12 @@ function dismiss() {
       @click="dismiss"
     >
       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <path d="m4 4 8 8m0-8-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        <path
+          d="m4 4 8 8m0-8-8 8"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+        />
       </svg>
     </button>
   </div>

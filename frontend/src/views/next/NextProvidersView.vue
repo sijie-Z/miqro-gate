@@ -20,7 +20,12 @@ import {
 } from '@/ui';
 import ProviderBrandChip from '@/components/ProviderBrandChip.vue';
 import type { ProviderProductView } from '@/types/api';
-import type { CredentialView, Grant, ModelCatalogRow, SubscriptionView } from '@/types/generated-api';
+import type {
+  CredentialView,
+  Grant,
+  ModelCatalogRow,
+  SubscriptionView,
+} from '@/types/generated-api';
 import { PROVIDERS_GUIDE } from '@/content/pageGuides';
 
 const products = ref<ProviderProductView[]>([]);

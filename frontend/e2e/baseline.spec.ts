@@ -1414,7 +1414,8 @@ test('model approval request page baseline at 1440x900', async ({ page }) => {
   });
 });
 
-test('forbidden aesthetics are absent from the rendered shell', async ({ page }) => {  await page.setViewportSize({ width: 1440, height: 900 });
+test('forbidden aesthetics are absent from the rendered shell', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   await mockApi(page, true);
   await page.goto('/app/keys');
   await page.waitForLoadState('networkidle');

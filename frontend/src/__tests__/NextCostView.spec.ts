@@ -101,20 +101,21 @@ const summary = (project: boolean): UsageSummary => ({
   },
 });
 
-const budget = (overrides: Partial<BudgetView> = {}): BudgetView => ({
-  projectId: 'p1',
-  projectCode: 'CORE',
-  projectName: 'Core AI',
-  month: '2026-09',
-  amount: '1000',
-  currency: 'CNY',
-  alertThresholdPct: '80',
-  status: 'ACTIVE',
-  spent: '900',
-  spentPct: '90',
-  level: 'WARNING',
-  ...overrides,
-} as unknown as BudgetView);
+const budget = (overrides: Partial<BudgetView> = {}): BudgetView =>
+  ({
+    projectId: 'p1',
+    projectCode: 'CORE',
+    projectName: 'Core AI',
+    month: '2026-09',
+    amount: '1000',
+    currency: 'CNY',
+    alertThresholdPct: '80',
+    status: 'ACTIVE',
+    spent: '900',
+    spentPct: '90',
+    level: 'WARNING',
+    ...overrides,
+  }) as unknown as BudgetView;
 
 describe('NextCostView', () => {
   beforeEach(() => {
@@ -123,9 +124,7 @@ describe('NextCostView', () => {
     toastState.items.splice(0);
     document.body.innerHTML = '';
     mockApi.adminUsageSummary.mockImplementation(async (q: { groupBy?: string }) =>
-      q.groupBy === 'day'
-        ? summary(false)
-        : { ...summary(true), groupBy: q.groupBy ?? 'project' },
+      q.groupBy === 'day' ? summary(false) : { ...summary(true), groupBy: q.groupBy ?? 'project' },
     );
     mockApi.adminBudgets.mockResolvedValue([budget()]);
     mockApi.listProjects.mockResolvedValue([

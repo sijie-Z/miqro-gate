@@ -1314,10 +1314,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             variant="secondary"
             data-testid="usage-copy-codex"
             @click="
-              copyText(
-                codexTomlSnippet(gatewayBaseUrl(), usageModel()),
-                'Codex 配置模板已复制',
-              )
+              copyText(codexTomlSnippet(gatewayBaseUrl(), usageModel()), 'Codex 配置模板已复制')
             "
           >
             复制 Codex 配置模板

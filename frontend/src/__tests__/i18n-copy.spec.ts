@@ -84,7 +84,9 @@ describe('EN dictionary covers the #714 binding-immutability copy', () => {
   it('keeps the interpolated requestId when the toast is one text node', () => {
     // What NextCredentialsView.vue:336 actually renders on a failed disable.
     expect(
-      translateText('凭证已被 Agent「客服助手」引用，不能停用；请先停用该 Agent。（requestId: 5d1c0a）'),
+      translateText(
+        '凭证已被 Agent「客服助手」引用，不能停用；请先停用该 Agent。（requestId: 5d1c0a）',
+      ),
     ).toBe(
       'The credential is referenced by agent "客服助手" and cannot be disabled — disable that agent first.（requestId: 5d1c0a）',
     );

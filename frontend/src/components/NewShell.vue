@@ -806,6 +806,9 @@ async function handleLogout() {
       </Teleport>
 
       <div ref="contentEl" class="new-shell__content">
+        <!-- The canonical RouterView + Transition pattern: `Component` here IS the
+             slot binding, not a shadow of anything in this component's scope. -->
+        <!-- eslint-disable-next-line vue/no-template-shadow -->
         <RouterView v-slot="{ Component }">
           <Transition name="shell-page" mode="out-in">
             <component :is="Component" />

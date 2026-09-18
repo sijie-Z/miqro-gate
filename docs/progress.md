@@ -4664,3 +4664,45 @@ MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS: ${MIQROKEY_RETENTION_KAFKA_BOOTSTRAP
 - **"变量存在但为空"是部署里极常见的形态，应用必须把它当成"未配置"**。`@ConditionalOnProperty` 的默认语义在这点上与直觉相反（空串 ≠ 关闭）。
 - **只构建镜像的 CI 会被读成"部署能起来"。** `images` job 证明的是"镜像可构建"，而它被当成了更强的东西——又一次"检查与它检查的东西没对齐"。
 - 我此前所有部署验证都走演示站或脚本断言，**没有一次真的把默认栈拉起来过**。这次是"自己做完整套模拟"的直接产物。
+
+## 2026-09-18 lint 门禁从来不会红：它带 --fix，且 CI 不看结果（#822）
+
+在做完整套模拟时发现：干净检出上跑 CI 的那条 lint 命令，**重写了 21 个已提交文件**（内容真变了；另有 132 个只是 stat-dirty）——而 CI 看不出来，因为它跑的是 `eslint . --ext .vue,.ts,.tsx --fix`，**带 `--fix` 且跑完不检查**。于是它区分不了「本来就干净」和「我刚替你改干净」。
+
+最大的受害者是 `src/types/generated.ts`：被整份从 4 空格重排成 2 空格（diff 20,809 行）。而 CI 里另一步是
+
+```yaml
+run: npm run gen:types && git diff --exit-code -- src/types/generated.ts
+```
+
+**它跑在 lint 之前**，此刻文件还是提交时的形态、重生成本一致 → 通过；紧接着 lint 把它改掉，**没人再看**。也就是说「生成物必须与基线一致」和「代码必须符合 lint」这两个要求，对**同一份文件**给出两种互斥答案，CI 对两者都说 OK。
+
+### 修法
+
+1. **`lint` 改成检查模式**（不带 `--fix`），新增 `lint:fix` 供本地改写
+2. **`--max-warnings 0`**：这一步是必需的——今天所有违规（prettier、vue 风格集）**都是 warning**，而 eslint 只有 warning 时仍然 exit 0。**只改检查模式不加这个标志，门禁照样不会红**，是我第一版做完差点收工的地方
+3. **`generated.ts` 加进 eslint ignores**：它是机器产物（文件头写着"不要直接改"），形态由 openapi-typescript 决定。让 lint 对它有意见，就是把上面那对矛盾焊死
+4. 把既有 22 个手写文件的格式漂移**一次性**修掉（否则第 1 条落地当天就红）
+
+### 零告警不是靠关规则凑的
+
+`--max-warnings 0` 要求先把既有 7 条告警正当处理掉，两条都不是靠"关掉规则"了事：
+
+- **6 条 `vue/one-component-per-file` 全在测试文件里**（`src/__tests__/**`、`e2e/**`）——内联桩组件正是那些测试的写法，规则的意图是"一个*交付*文件一个组件"，所以**只在这两个 scope 关掉**
+- **1 条 `vue/no-template-shadow` 是误报**：`<RouterView v-slot="{ Component }"><component :is="Component"/></RouterView>` 是 Vue 官方的规范写法，`Component` 就是那个 slot 绑定，没有遮蔽任何东西。给了**单行、带理由的豁免**，而不是全局关规则
+
+### 红证明
+
+| 场景 | 结果 |
+|---|---|
+| 干净树上 `npm run lint` | **exit 0** |
+| 注入一处格式偏差（`const   badlyFormatted =    1`） | **exit 1**（`prettier/prettier` warning → `--max-warnings 0` 拦下）|
+| `npm run gen:types` 之后紧跟 lint | **两者同时通过**（矛盾解除）|
+
+改完回归：typecheck exit 0、**419 tests / 64 files 全绿**、build exit 0——22 个文件重排没有破坏任何东西。
+
+### 教训
+
+- **"带 --fix 的检查"不是检查**。它把"发现问题"和"掩盖问题"合成一步，还顺手给出一个绿信号。同类形态在本仓已经出现过三次（#807 过严、#809 过松、#812 没有），这次是 **"会自己动手的检查"**。
+- **改检查模式不等于检查会红**——还要问一句"违规是 error 还是 warning"。我第一版只做了前者，跑红证明时才发现仍然 exit 0。
+- 顺带记一条旧账：progress.md 里早有记录说 `npm run lint` 会把 CRLF 文件整批重写成 LF（EOL-only M）。那是 `--fix` 的副作用；检查模式不再有，`lint:fix` 仍有——所以本地跑 `lint:fix` 后仍要区分内容 diff 与 EOL diff。
