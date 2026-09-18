@@ -4176,7 +4176,6 @@ if (!STATE_CHANGING_METHODS.contains(method)) return true;   // GET 直接放行
 仍加了 2 行守卫（`MSYS_NO_PATHCONV=1; export`）并在注释里写明理由：Linux 上是空操作，而 Windows 开发机上省下的是一次**恰好属于本脚本要消灭的那一类**的假报警。**又一次是同族**：不是检查写错，是检查与它所运行的环境没对齐。
 
 另：顺手把三个都编号为「6」的小节改成 5–9（本就在我要插入的位置）。
-<<<<<<< HEAD
 
 ## 2026-09-18 部署脚本补上静态检查：shellcheck 进 CI（#814）
 
@@ -4215,5 +4214,3 @@ red.sh:7: SC2254 (warning): Quote expansions in case patterns to match literally
 选 `-S warning` 而非默认：`info` 级会报 SC2016（单引号不展开）这类**有时是有意为之**的写法（我 dry-run 那行就是故意打印字面引号）。一上来全开只会逼出更多 disable——**而 disable 正是这次要治的东西**。先卡 warning，需要再收紧。
 
 job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
-=======
->>>>>>> origin/develop
