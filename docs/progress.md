@@ -3942,3 +3942,15 @@ EXIT=2
 **验证**：`mvnw.cmd -B -f backend -pl control-plane-app,persistence-postgres -am test -Pintegration -Dtest=UsageStatsAggregatorTest,UsageStatsServiceTest,AdminUsageStatsServiceTest,PriceBasisCostStabilityIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` → **BUILD SUCCESS**，`Tests run: 8`（domain）+ `Tests run: 32`（control-plane），0 失败。集成侧 6 条含三条新增：改价后明细行不动、**改写历史价目行**后明细行不动、明细与汇总金额一致。（首跑曾红一条：我自己测试夹具把 `RowPriceBasis` 的 cacheRead/cacheCreation 两位写反 → `expected 0.0021 but was 0`，改夹具后复跑全绿。）
 
 **顺带修文档漂移**：`database-schema.md` 的原句"明细/汇总/计费/配额水位已改读此基座"在当时对**明细**并不成立（这正是本轮补上的那部分）；改成分别陈述读取方，并把"网关写事件时不写任何价格列、四列全由控制面回填通道盖章"写明。
+
+## 2026-09-18 分支收口：把 develop 并回 #710 分支并复核
+
+**合并**：本分支停在 `06252299`，develop 已到 `e29715ba`（单入口部署脚本 #793），二者 merge-base 为 `e83d44ea`。执行 `git merge origin/develop`，**唯一冲突 `docs/progress.md`**。两侧对该文件都是**文件末尾纯追加**（对 merge-base 的 `git diff --numstat` 分别为 `12 0` 与 `83 0`，`-U0` hunk 都落在第 3849 行之后），所以按"develop 段在前、本线段在后"拼接即可两段都不丢。做法是先由 stage blob（`:1:`/`:2:`/`:3:`）重建文件再 `git add`，**不手改带标记的工作区副本**——工作区那份的 `<<<<<<<` 行已被上一轮删掉，按行号硬改正是会出错的地方。
+
+**两个共同修改的 Java 文件走的是自动合并，已逐一核对没丢东西**：`UsageStatsAggregator.java` 「合并结果相对本线 `06252299`」的差异，与 develop 自 merge-base `e83d44ea` 起的差异**逐字节相同**（剔除 `index` 行后 `cmp` 一致）；`UsageStatsRepositoryImpl.java` 的两份差异**只有 3 处 hunk 行号偏移**，内容 hunk 完全一致——develop 的 `unpricedHits`（命中路径未定价计数）与本线的 `RowPriceBasis`（明细行冻结基座）各自在列，互不覆盖。develop 单独带来的文件（`deploy/deploy.sh`、`docs/deployment-and-operations.md`、`docs/openapi/openapi-3.1.json`、`docs/usage-accounting.md`、`AdminRoiApiIntegrationTest.java`、`UsageStatsPricingStatusTest.java`、前端 6 个）用 blob 哈希确认与 `MERGE_HEAD` **完全相同**，一个字没动。
+
+**合并后验证**（均在合并提交 `8fa34296` 上）：
+- develop 侧用例：`mvnw.cmd -B -f backend -pl control-plane-app,persistence-postgres,domain -am test -Pintegration -Dtest=UsageStatsPricingStatusTest,AdminRoiApiIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` → **BUILD SUCCESS**，`Tests run: 6, Failures: 0, Errors: 0`（domain）+ `Tests run: 4, Failures: 0, Errors: 0`（control-plane，22.49 s）。
+- 本线用例：同形命令换 `-Dtest=PriceBasisCostStabilityIntegrationTest,UsageStatsAggregatorTest,UsageStatsServiceTest,AdminUsageStatsServiceTest` → **BUILD SUCCESS**，`Tests run: 8, Failures: 0, Errors: 0`（domain）+ `Tests run: 32, Failures: 0, Errors: 0`（control-plane）。
+
+**未做**：本线实现未重写、未 `stash`；"事件生成时携带价格快照"（标准 1）与 `CostAllocationService` 取价口径属**口径决策**，已交 owner（2026-09-18 04:00 的 #710 决策材料评论），本轮不动。
