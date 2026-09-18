@@ -16,6 +16,8 @@ import * as api from '@/api';
 import { ChartBarIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
+import UsageAdjustChip from '@/components/UsageAdjustChip.vue';
+import { netTokens } from '@/lib/usage-net';
 import {
   UiButton,
   UiDrawer,
@@ -523,12 +525,16 @@ const groupOptions: UiSelectOption[] = [
   { value: 'month', label: '月' },
 ];
 
+// #773: the token columns report the *net* counts (observed + adjustments), so
+// their cells add up to the summary printed above them. The observed counts
+// stay reachable through the 调整 chip's bubble.
 const columns = [
   { key: 'occurredAt', title: '时间', width: '150px' },
   { key: 'providerProductName', title: '供应商', minWidth: '150px' },
   { key: 'modelId', title: '模型', minWidth: '170px' },
   { key: 'inputTokens', title: '输入', minWidth: '150px', align: 'right' as const },
   { key: 'outputTokens', title: '输出', width: '100px', align: 'right' as const },
+  { key: 'adjust', title: '调整', width: '100px' },
   { key: 'cost', title: '成本', width: '110px', align: 'right' as const },
   { key: 'latencyMs', title: '用时 / 首字', width: '130px', align: 'right' as const },
   { key: 'upstreamStatusCode', title: '状态码', width: '90px', align: 'right' as const },
@@ -711,7 +717,7 @@ function gotoPage(next: number) {
   void load();
 }
 
-function fmtNum(value: number | undefined): string {
+function fmtNum(value: number | null | undefined): string {
   return (value ?? 0).toLocaleString();
 }
 
@@ -1167,19 +1173,21 @@ onMounted(() => {
           <span class="ui-mono">{{ (row as UsageRecord).modelId }}</span>
         </template>
         <template #inputTokens="{ row }">
-          <span class="ui-num">{{ fmtNum((row as UsageRecord).inputTokens) }}</span>
+          <span class="ui-num">{{ fmtNum(netTokens(row as UsageRecord).input) }}</span>
           <span
             v-if="
-              (row as UsageRecord).cacheReadInputTokens ||
-              (row as UsageRecord).cacheCreationInputTokens
+              netTokens(row as UsageRecord).cacheRead || netTokens(row as UsageRecord).cacheCreation
             "
             class="next-admin-usage__cell-sub"
-            >读 {{ fmtNum((row as UsageRecord).cacheReadInputTokens) }} · 写
-            {{ fmtNum((row as UsageRecord).cacheCreationInputTokens) }}</span
+            >读 {{ fmtNum(netTokens(row as UsageRecord).cacheRead) }} · 写
+            {{ fmtNum(netTokens(row as UsageRecord).cacheCreation) }}</span
           >
         </template>
         <template #outputTokens="{ row }">
-          <span class="ui-num">{{ fmtNum((row as UsageRecord).outputTokens) }}</span>
+          <span class="ui-num">{{ fmtNum(netTokens(row as UsageRecord).output) }}</span>
+        </template>
+        <template #adjust="{ row }">
+          <UsageAdjustChip :record="row as UsageRecord" />
         </template>
         <template #cost="{ row }">
           <span v-if="(row as UsageRecord).priced !== false" class="ui-num"

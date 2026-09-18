@@ -30,6 +30,8 @@ export const DICT: Record<string, string> = {
   '成功率': 'Success rate',
   '新增输入': 'Fresh input',
   '未定价': 'Unpriced',
+  '调整': 'Adjustment',
+  '已调整': 'Adjusted',
   '模型统计': 'Model stats',
   '用时 / 首字': 'Duration / first byte',
   '真实消耗 Tokens': 'Tokens consumed (actual)',

@@ -631,8 +631,9 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
   净额/含调整等级随 F20（adjustment 机制）扩展。
 - **调整标记（#709）**：CSV 与 JSONL 每行新增 `netInputTokens` / `netOutputTokens` /
   `netCacheReadInputTokens` / `netCacheCreationInputTokens` 与 `adjusted`。既有观察值列**保持原样**，
-  净额另列给出；`adjusted` 表示该行是否存在非零修正。净额口径与明细、汇总**共用同一段 SQL 定义**
-  （`UsageAdjustmentSql`），避免三处算法漂移。
+  净额另列给出；`adjusted` 表示该行**是否存在过修正**——按行数判定，故一笔修正被冲销后
+  仍为真（此时净额等于观察值，`adjusted` 是该行唯一还能说明"被改过"的痕迹，#774）。
+  净额口径与明细、汇总**共用同一段 SQL 定义**（`UsageAdjustmentSql`），避免三处算法漂移。
 - **表头对齐修复（#754）**：CSV 表头此前漏了 `clientIp` 一列——数据行 19 个值而表头只有 18 个名，
   导致**自 `isComplete` 起每一列错位一格**：按列名解析该文件的消费者会拿到错误的值，且不会报错。
   现表头与数据行均由同一份声明的列顺序派生，双份真相已消除；补了**按列名取值**的回归测试
