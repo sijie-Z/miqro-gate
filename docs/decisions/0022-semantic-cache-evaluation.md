@@ -38,9 +38,9 @@
 ## 2. Q1 收益：预计命中率与成本节省
 
 - **本系统无实测数据，且现在也拿不到。** 精确缓存已有命中率观测（`cache_hit_event` 表 + 用量汇总 `savedByGatewayCache`，成本报表页展示），但那是**精确缓存**的收益；语义增量收益 = 「精确键未命中、但语义上等价」的请求占比，而这一部分**恰恰需要看到正文才能判定**——本系统不保存正文（`CLAUDE.md:39`），因此无法离线回放估算。这是本议题的鸡生蛋问题，必须如实记录，不能用行业数字代替。
-- 可用的**下界**（现有数据即可读出，零新增合规面）：`cache_hit_event` 的命中率 + `purpose=CHAT` 的重复率。但它只给出「精确缓存已覆盖多少」，不给出「语义还能多覆盖多少」。
+- 可用的**下界**（现有数据即可读出，零新增合规面）：`cache_hit_event` 的命中率，与 `usage_event.cache_key` 的重复度分布。前者可按 `virtual_key_id` / `project_id` / `provider_product_id` / `level` 切分（列见 `V6__usage_events.sql:61-73`，`level ∈ {L1_HIT, L2_HIT}`）；若需按 model / purpose 切分，**不需要新增列**——`cache_key` 是含 `model`、`purpose`、`stream` 维度的 SHA-256 摘要（`CacheKeyFactory.compute():71-74`），按 key 分组即可间接切分。`purpose` 的真实取值只有四个：`CLAUDE_CODE / CLAUDE_DESKTOP / CODEX / CUSTOM`（`backend/domain/src/main/java/com/miqroera/miqrokey/domain/model/VirtualKeyPurpose.java:5`）。但它只给出「精确缓存已覆盖多少」，不给出「语义还能多覆盖多少」。
 - 行业侧只有厂商标称，无独立验证：Higress 语义缓存宣称省 40-60%（转引见 `docs/ai-gateway-comparison.md:92`）；腾讯侧文档只有 L1 精确缓存口径（`docs/tencent-ai-gateway-mapping.md:21`「缓存策略 (134822)」行、`:68`「腾讯 L1 方案本土化」）。**这些数字不构成本系统收益的估计。**
-- 关键反证：本系统主要场景是编码 Agent（Claude Code / CC Switch 形态，`docs/tencent-ai-gateway-mapping.md:58`），上下文高度多变；ADR-0003 已记录「Coding Agent 流量缓存收益存疑」，G7.4 复盘同样标记该风险（`docs/progress.md:1314`）。这与 §5 的流式约束叠加，使预期收益进一步收窄。
+- 关键反证：本系统主要场景是编码 Agent（Claude Code / CC Switch 形态，`docs/tencent-ai-gateway-mapping.md:58`），上下文高度多变；ADR-0003 记录的理由是「Coding Agent 请求包含持续变化的代码上下文、工具状态和副作用。缓存完整回答容易返回过期内容或重复工具调用」（`docs/decisions/0003-no-response-cache.md:12`），G7.4 复盘同样标记该风险（`docs/progress.md:1314`）。这与 §5 的流式约束叠加，使预期收益进一步收窄。
 
 **结论**：收益当前**不可估**。任何要求「先证明收益」的拍板，都必须先选一条测量路径（见 §4 与 §10-3）。
 
@@ -66,27 +66,29 @@
 可评估的不出网关路径：
 
 - **路径 B（网关内向量化）**：在网关进程内跑本地小模型生成向量 + 本进程内/PostgreSQL 扩展内建索引（如 pgvector），正文不出进程、不出网。技术上可行，但代价：新增运行时依赖与模型分发物（需逐个核查许可证与体积）、CPU 预算与热路径零阻塞约束的冲突（须另有界线程池）、**以及对 token 级差异（`A 文件` vs `B 文件`）的区分力弱于云端大模型 → 误命中风险高于 §5 的行业阈值实况**。
-- **路径 影子测量（本 ADR 建议的零风险前置步）**：只对既有 `semanticScope` 做归一化指纹统计（不缓存、不外发、不落正文），得到「同 scope 重复度」的真实分布，用来估计上界。不改缓存行为，合规面为零。
+- **路径 影子测量（本 ADR 建议的零风险前置步）**：只对既有 `semanticScope` 做归一化指纹统计（不缓存、不外发、不落正文），得到「同 scope 重复度」的真实分布，用来估计上界。不改缓存行为，合规面为零——因为记录的就是既有 `cache_key`（已入 `usage_event` / `cache_hit_event`，见 `V6__usage_events.sql:38,61-73`），不新增任何正文留存。**采样口径注意（否则会得到一个有偏甚至为空的样本）**：`semanticScope` 只在 `CacheEligibility` 通过后才被调用——`ProxyController.java:303-306` 先算 `cacheable`，再 `cacheable ? cacheKeyFactory.compute(...) : null`，而 `miqrokey.cache.enabled` 默认 `false`（`application.yml:88-96`）。因此纯影子模式必须在**资格判定之前**独立计算，并明确它是「全部流量」还是「仅 `cachePolicy=ENABLED` 的 Key」口径；两种口径给出的上界含义不同，需在报告里写明。
 
 ## 5. Q4 行业事实核对
 
 本次直接核对官方文档（2026-09-18）：
 
-- **Azure API Management `llm-semantic-cache-lookup`**（learn.microsoft.com，页内 `ms.date` 2026-08-18）：语义缓存是**显式 policy**，须与 `llm-semantic-cache-store` 配对；参数 `score-threshold`（0.0–1.0，值越小要求相似度越高，示例 0.05）、`embeddings-backend-id`、`embeddings-backend-auth`（必须 `system-assigned`）、`ignore-system-messages`、`max-message-count`；`<vary-by>` 元素支持按 `context.Subscription.Id` 做跨用户分区。**官方 Usage notes 明示「Score threshold above 0.2 may lead to cache mismatch」**；官方免责声明要求评估者自行承担「返回不正确、过时或对本请求不安全内容」的风险；文档要求在 lookup 之后配限流以免绕过后端限流。
-- 同页确认 embeddings 后端是**独立的 Azure OpenAI embeddings 部署**（运行时 URL 形如 `.../openai/deployments/<deployment>/embeddings`）→ **正文被送到另一个服务**，与 §3 的判断一致。
-- **Azure 启用步骤页**（azure-openai-enable-semantic-caching，`ms.date` 2026-08-24）：前置 = 独立 Embeddings API 部署 + **Azure Managed Redis 且须启用 RediSearch 模块**（只能在新建 cache 时开启）+ managed identity；语义缓存按 API 施加 policy，非默认行为。
+- **Azure API Management `llm-semantic-cache-lookup`**（learn.microsoft.com，页内 `ms.date` 2026-08-18）：语义缓存是**显式 policy**，须与 `llm-semantic-cache-store` 配对；参数 `score-threshold`（0.0–1.0，值越小要求相似度越高，示例 0.05）、`embeddings-backend-id`、`embeddings-backend-auth`（必须 `system-assigned`）、`ignore-system-messages`、`max-message-count`；`<vary-by>` 元素支持按 `context.Subscription.Id` 做跨用户分区。**官方 Usage notes 明示「Score threshold above 0.2 may lead to cache mismatch」**；官方免责声明要求评估者自行承担「返回不正确、过时或对本请求不安全内容」的风险；文档要求在 lookup 之后配限流以免绕过后端限流。**Supported model APIs** 列明支持 **OpenAI Chat Completions / Responses、Anthropic Messages（v2 tier）、Google Vertex AI**——即**多协议**，而非仅 Chat Completions。
+- **Azure enable 步骤页**（azure-openai-enable-semantic-caching，`ms.date` 2026-08-24）：前置 = 独立 Embeddings API 部署 + **Azure Managed Redis 且须启用 RediSearch 模块**（该模块只能在新建 cache 时开启）+ managed identity；步骤「Create a backend for embeddings API」要求填 **Runtime URL**，形如 `https://<instance>.openai.azure.com/openai/deployments/<deployment>/embeddings` → **正文被送到另一个服务**，与 §3 的判断一致。语义缓存按 API 施加 policy，非默认行为。（坐标说明：该 URL 出自**本 enable 页**；lookup 页只给 `embeddings-backend-id` 参数，不给 URL 形态。）
 - **流式兼容性（来源强弱必须标注）**：issue 转述「Azure 文档明确与流式响应不兼容」。本次实拉的三个现行 Learn 页面（lookup / store / enable）正文中**均未见**该限制段落；命中该说法的是 Microsoft 发布的 `azure-skills` 仓库 AI Gateway policies 参考文档（**次要来源**），原文为「Semantic caching is NOT compatible with streaming responses」。**请 owner 以原始出处复核**——该事实直接决定本议题的收益上限（见 §7）。
-- **阿里云 ai-cache 插件（Higress 内核）**：存储 Redis 必填，向量库（DashVector）+ embedding（text-embedding-v4，1024 维，Cosine）可选；缓存键用 GJSON 从请求体提取（默认 `messages.@reverse.0.content`，即最后一条消息），`cacheKeyStrategy ∈ {lastQuestion(默认), allQuestions, disabled}`；**相似度阈值推荐 0.8–0.9，文档明示低于 0.8 可能把无关查询误判为命中（假阳性）**；语义缓存**仅支持 Chat Completions 格式**，其他协议绕过；默认行为是缓存（`x-higress-skip-ai-cache` 跳过），与本系统默认不缓存方向相反。
+- **阿里云 AI 网关「缓存」**（`https://help.aliyun.com/zh/api-gateway/ai-gateway/user-guide/ai-cache-1`，2026-09-18 拉取）：页面把两条路径**分开配置**——**精确缓存**用 Redis（服务地址/端口/访问方式/账号密码/缓存时长默认 1800s）；**语义缓存**用「缓存键策略 + 文本向量化（AI 服务/模型/超时默认 5000ms）+ 向量数据库（DashVector/Collection/API Key/相似度阈值/超时默认 3000ms）+ 距离度量（文档指导选 Cosine）」。即**语义缓存路径的必需件是向量化服务 + 向量库，而不是 Redis**。（更正：早期草稿把此处写成「Redis 必填、向量库与 embedding 可选」，方向写反，本次修订已改正。）缓存键用 GJSON 从请求体提取（默认 `messages.@reverse.0.content`，即最后一条消息），`cacheKeyStrategy ∈ {lastQuestion(默认), allQuestions, disabled}`；**相似度阈值建议 0.8–0.9，文档明示不建议低于 0.8（否则可能把无关查询误判为命中）**；启用需在控制台**手动打开缓存开关**。文档中的 `text-embedding-v4`（1024 维）与示例阈值 0.85 是**示例配置**，不是该产品的固定属性。
+- **Higress OSS `ai-cache` 插件（自建形态）**（`https://github.com/alibaba/higress/blob/main/plugins/wasm-go/extensions/ai-cache/README.md`，2026-09-18 拉取）：插件要求「向量数据库(vector) 和 缓存数据库(cache) **不能同时为空**」——至少配置其一；语义模式需要 vector（DashVector 只是可选 provider 之一）；`cacheKeyStrategy ∈ {lastQuestion(默认), allQuestions, disabled}`；配置了 vector provider 后语义缓存自动开启（未配置则不提供缓存服务）；README 明示其缓存**支持流式与非流式**响应；命中后可用 `x-higress-skip-ai-cache` 跳过（**opt-out 形态**：配好后默认参与缓存、显式跳过，与本系统的双重 opt-in 方向相反）。**以上两处具名来源均未出现「仅支持 Chat Completions」或「其他协议绕过」的表述**——此前草稿中的该加粗断言无具名来源，已删除。
 
-两家共同点：**都不是默认行为**（Azure 需显式 policy、阿里需装插件且 Redis 必填）；都要求引入本系统按 ADR-0005 刻意不引入的 Redis 或等价外部存储；都需要一个独立的 embedding 服务。**结论：行业事实支持「按需插件、默认关」，但不支持「零成本接入」。**
+两家共同点：**都不是默认行为**（Azure 需显式 policy，阿里云需手动打开缓存开关，Higress OSS 需装插件且至少配置 vector 或 cache 之一）；**都要引入本系统按 ADR-0005 刻意不引入的额外存储**（Azure 必配 Azure Managed Redis + RediSearch 模块；阿里云语义路径必配向量库 DashVector 或等价物）；**都需要一个独立的 embedding 服务**（Azure 是独立的 embeddings 部署，阿里云语义路径必配向量化服务，正文都会到达网关之外的组件）。**结论：行业事实支持「按需插件、默认关」，但不支持「零成本接入」。**
 
-本系统的主要流量形态是流式（`CLAUDE.md:31` 的并发流模型；`CacheKeyFactory` 特地为 `stream` 维度分键，`docs/decisions/0009` 记录 `#444`）。若流式不兼容属实，语义缓存将在主场景上失效，仅对非流式请求有价值——这会把 Q1 的收益预期压到很低。
+本系统的主要流量形态是流式：`CacheKeyFactory` 特地为 `stream` 维度分键（`docs/decisions/0009` 记录 `#444`）；而 `CLAUDE.md:31` 的「最多 50 条并发流」是**并发上限**，不能当作流量形态的证据。若流式不兼容属实，语义缓存将在主场景上失效，仅对非流式请求有价值——这会把 Q1 的收益预期压到很低。**反向证据（削弱该说法，非推翻）**：Higress OSS README 明示其缓存支持流式与非流式响应；Azure 三个官方页面则对兼容性完全未置可否。即「语义缓存与流式天然不兼容」**不是行业普遍事实**，需 owner 以原始出处确认后，才能用作收益上限的依据。
 
 ## 6. Q5 误命中风险与兜底
 
 - 风险性质：「相似 ≠ 相同」。#718 的例子（「改 A 文件的 bug」vs「改 B 文件的 bug」）在向量空间上距离极近，而正确响应完全不同——缓存的错误答案是**看起来合理但指向错误对象**的答案，比明确的报错更有害，且用户无法从响应本身察觉命中了缓存。
 - 行业阈值实况印证该风险：Azure 官方说阈值 >0.2 就可能误命中（建议从 0.05 起调）；阿里官方说 <0.8 就可能假阳性——两家在相反方向上都承认阈值调不好就会错配。
 - 本系统已有的兜底（若未来启用，均需保留）：双重 opt-in（`CacheEligibility.java:29-33`）；工具调用永不缓存；TTL 300s 量级（`application.yml:88-96`）；响应头 `X-MiQroKey-Cache` 标注命中；键含 tenant/project/keyId/product/model，天然按用户隔离；命中计数与节省入 `cache_hit_event` + `savedByGatewayCache` 可观测。
+- **既有键的「故意忽略中间轮次」是一个已存在的误命中面（登记，非新增风险）**：`CacheKeyFactory` 类注释原文「Earlier conversation turns do not change the key, so a repeated question inside different histories still hits the cache」（`:31-32`）——设计如此（对齐末条 user 消息策略）。它不等于语义近似召回，但说明本系统**已经**在用「相似即同一」的判据换取命中率；若未来引入向量近似，误命中面是在这个既有面上继续放大，而不是从零开始。评估时应把这一条算进基线，避免把「当前命中都是安全的」当作前提。
+- **行业兜底参数（可对标的现成旋钮）**：Azure 官方给了 `ignore-system-messages`（默认 `false`，官方**建议置 `true`**）、`max-message-count`、`<vary-by>`（按 `context.Subscription.Id` 做跨用户分区）；阿里云给了 `cacheKeyStrategy=disabled`（关掉语义键、只用精确键）与阈值下限（不建议低于 0.8）；Higress 给了 `x-higress-skip-ai-cache`。**若启用，这些维度在我们的方案里都要有对应物**，否则等于把行业已经踩过的坑重新踩一遍。
 - **若语义缓存启用，必须追加的兜底（当前不存在）**：命中时在响应头区分「精确命中」与「近似命中」（现有 `L1`/`L2` 值不足以表达，且语义命中不得复用 `L2` 值以免与 PostgreSQL 命中混淆）；近似命中的审计与开关粒度；以及**当相似度落在阈值附近时的处置策略**（放行还是回退上游）——这些都要在启用前定，不能留到实现时。
 
 ## 7. Q6 结论与选项
@@ -98,7 +100,7 @@
 | **A. 维持不启用（推荐）** | 零代码改动；本 ADR 落 `Proposed` | 无新增风险；收益机会成本不可估（§2） | 默认选项。适用于：收益无法测量、主场景为流式、以及不愿为性能优化动合规承诺的情形 |
 | **B. 启用但向量化在网关内**（正文不出进程） | 新依赖（本地 embedding 模型 + 索引）、新线程池与内存预算、`CacheKeyFactory`/`CacheEligibility` 扩展、许可证与镜像体积核查 | 不破正文红线，但破「热路径零阻塞」的整洁性；中小模型对 token 级差异区分力弱 → **误命中风险高于云端方案**（§6）；模型分发与版本管理成本 | 仅当 §2 的测量显示上界显著（例如同 scope 重复度仍高）、且 owner 接受本地模型质量与资源开销时，才值得做可行性验证 |
 | **C. 启用且允许正文出网关** | 新 embedding 服务 + 向量库 + 新 ADR + 承诺文本修订（`CLAUDE.md:39`、`docs/security.md:78-84`、登录页文案）+ 新增审计面 | **放宽一条合规红线**（同 ADR-0014 性质，但更重：ADR-0014 是密文信封且已获三个放宽点授权，本项是明文送 embedding）；若用云服务则「数据不出环境」承诺不成立；§3 补偿措施必须全部落地 | 仅当 owner 明确愿意改写对外承诺，且**自建内网 embedding**（而非云 API）时。**不建议**以云 embedding 形态做 |
-| **D. 折中（按范围开放）** | 依赖既有 `cachePolicy` 维度或按端点/协议开关 | 需注意：本产品为**单客户私有化部署**（`CLAUDE.md:31`），「仅对特定租户开放」在此形态下等于整个客户开放；真正可用的粒度是 **per-Key**（已有）或 **per-端点/协议**（对齐阿里「语义缓存仅支持 Chat Completions」） | 仅当 B 或 C 已确定要做、需要一个更小的首版范围时，作为其范围裁剪方式，不单独构成一条路径 |
+| **D. 折中（按范围开放）** | 依赖既有 `cachePolicy` 维度或按端点/协议开关 | 需注意：本产品为**单客户私有化部署**（`CLAUDE.md:31`），「仅对特定租户开放」在此形态下等于整个客户开放；真正可用的粒度是 **per-Key**（已有）或 **per-端点/协议**——本系统只有三条代理路由，天然可作粒度：`/v1/messages`、`/v1/responses`、`/v1/chat/completions`（`ProxyController.java:194,199,204`；白名单同见 `:107`） | 仅当 B 或 C 已确定要做、需要一个更小的首版范围时，作为其范围裁剪方式，不单独构成一条路径 |
 
 **推荐：A（维持不启用）+ 补一个零合规面的测量前置。** 理由：本系统已经把语义缓存最常被引用的收益来源（多轮对话的键稳定性）用 `semanticScope` 在网关内拿到（§4）；剩余增量收益（措辞等价的近似召回）正是唯一需要正文出网关的部分，而它在流式主场景上可能整体失效（§5），且当前**无法测量**（§2）。在这种「代价明确、收益未知且可能为零」的组合下，放宽红线的证据不足。
 
