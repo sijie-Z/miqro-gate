@@ -201,6 +201,13 @@ const tokenHitRate = computed<number | null>(() => {
 const tokenHitRatePct = computed(() =>
   tokenHitRate.value === null ? '—' : tokenHitRate.value.toFixed(1) + '%',
 );
+/**
+ * #790: hits the gateway could not value, because no price was in force when they
+ * happened. While any remain, the saving above is a lower bound — without this the
+ * number reads as "the cache saved almost nothing" rather than "we cannot say".
+ */
+const unpricedHits = computed(() => Number(totals.value?.unpriced?.unpricedHitEvents ?? 0));
+
 const heroSub = computed(() => {
   const t = totals.value?.tokens;
   return [
@@ -1089,6 +1096,12 @@ onMounted(() => {
           <span class="next-admin-usage__hero-sub-value ui-num"
             >¥{{ fmtMoney(totals?.cost?.savedByGatewayCache) }}</span
           >
+          <UiTooltip
+            v-if="unpricedHits > 0"
+            :text="`${unpricedHits} 次命中在发生时没有生效价目，无法计价——节省额只是下界，不是全部`"
+          >
+            <span class="next-admin-usage__unpriced" data-testid="savings-unpriced">下界</span>
+          </UiTooltip>
         </div>
       </div>
     </section>

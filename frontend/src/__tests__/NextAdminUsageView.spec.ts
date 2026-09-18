@@ -251,6 +251,32 @@ describe('NextAdminUsageView', () => {
     });
   }
 
+  it('#790: marks the saving as a lower bound when hits could not be priced', async () => {
+    mockApi.adminUsageSummary.mockImplementation(async (query) => {
+      const summary = summaryFor(String(query?.groupBy ?? 'project'));
+      return {
+        ...summary,
+        totals: { ...summary.totals, unpriced: { unpricedHitEvents: 3 } },
+      } as never;
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const marker = wrapper.find('[data-testid="savings-unpriced"]');
+    expect(marker.exists()).toBe(true);
+    // A bare small amount would read as "the cache saved almost nothing"; the marker
+    // is the difference between that and "we had no price to say" (#790).
+    expect(marker.text()).toContain('下界');
+  });
+
+  it('#790: leaves a fully priced saving unmarked', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="savings-unpriced"]').exists()).toBe(false);
+  });
+
   it('passes a picked time range to the summary, series and records APIs', async () => {
     const wrapper = mountView();
     await flushPromises();
