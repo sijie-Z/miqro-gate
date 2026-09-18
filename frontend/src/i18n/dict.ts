@@ -1319,6 +1319,11 @@ export const DICT: Record<string, string> = {
   '重置失败': 'Reset failed',
   '重置密码': 'Reset password',
   '重试': 'Retry',
+  '重新加载': 'Reload',
+  '返回总览': 'Back to overview',
+  '页面出错了': 'This page hit an error',
+  '页面渲染时遇到问题。可以先重试；若反复出现，请把下方信息反馈给管理员。':
+    'Something went wrong while rendering this page. Try again first; if it keeps happening, report the details below to your administrator.',
   '重试条件（至少一项）': 'Retry conditions (at least one)',
   '重试次数（1–5）': 'Retry attempts (1–5)',
   '重试（F12 · 默认关闭）': 'Retry (F12 · off by default)',
