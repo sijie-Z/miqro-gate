@@ -179,9 +179,9 @@ done
 assert_env_matches_file() {
     svc="$1"
     var="$2"
-    [ -f "$COMPOSE_DIR/.env" ] || return 0
+    [ -f "$COMPOSE_DIR/.env" ] || { echo "skipped $svc: no $COMPOSE_DIR/.env"; return 0; }
     want="$(grep -E "^$var=" "$COMPOSE_DIR/.env" | head -n 1 | cut -d= -f2-)"
-    [ -n "$want" ] || return 0
+    [ -n "$want" ] || { echo "skipped $svc: $var not set in $COMPOSE_DIR/.env"; return 0; }
     got="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$(container_of "$svc")" 2>/dev/null \
         | grep -E "^$var=" | head -n 1 | cut -d= -f2-)"
     if [ "$got" != "$want" ]; then
@@ -197,7 +197,7 @@ assert_mount_landed() {
     svc="$1"
     host_path="$2"
     container_path="$3"
-    [ -s "$host_path" ] || return 0
+    [ -s "$host_path" ] || { echo "skipped $svc: no $host_path on the host"; return 0; }
     if ! docker exec "$(container_of "$svc")" test -s "$container_path" 2>/dev/null; then
         echo "ASSERT FAILED $svc: $host_path exists but $container_path is missing in the container" >&2
         echo "  -> a relative mount resolved somewhere else (Docker creates missing bind sources empty)" >&2
@@ -220,16 +220,22 @@ fi
 # proving it was configured right, and the two silent failures above are exactly
 # that kind — configuration, invisible to an image id.
 #
+# Unlike 4b, this one goes THROUGH the portal, so it must run after the upstream
+# restart below: nginx resolves the service names once at start, and a backend
+# recreated a moment ago answers 502 until the portal is restarted. Run it earlier
+# and a perfectly good deploy fails its own smoke — the fix for the ordering is
+# what makes the check trustworthy rather than flaky (review on #804).
+#
 # One request discriminates: `POST /api/v1/auth/login` with an empty body and the
 # configured Origin answers 400 when everything is in place, 403 when the container
 # holds a different allowlist, and 502/000 when nginx cannot reach the upstream it
 # just had swapped underneath it. Nothing is authenticated and no credential is
 # sent — the body is deliberately empty.
 smoke_api_origin() {
-    [ -f "$COMPOSE_DIR/.env" ] || return 0
+    [ -f "$COMPOSE_DIR/.env" ] || { echo "skipped smoke: no $COMPOSE_DIR/.env"; return 0; }
     origin="$(grep -E '^MIQROKEY_ORIGIN_ALLOWLIST=' "$COMPOSE_DIR/.env" | head -n 1 | cut -d= -f2- | cut -d, -f1)"
-    [ -n "$origin" ] || return 0
-    command -v curl >/dev/null 2>&1 || return 0
+    [ -n "$origin" ] || { echo "skipped smoke: no MIQROKEY_ORIGIN_ALLOWLIST in .env"; return 0; }
+    command -v curl >/dev/null 2>&1 || { echo "skipped smoke: no curl"; return 0; }
     code="$(curl -s -k -o /dev/null -w '%{http_code}' --max-time 10 -X POST \
         -H "Origin: $origin" -H 'Content-Type: application/json' -d '{}' \
         https://127.0.0.1/api/v1/auth/login || true)"
@@ -250,12 +256,6 @@ smoke_api_origin() {
     esac
 }
 
-if [ "$DRY" = 0 ]; then
-    case " $SERVICES " in
-        *" control-plane "* | *" portal "*) smoke_api_origin ;;
-    esac
-fi
-
 # ---- 5. a swapped backend invalidates the portal's resolved upstream ---------
 # nginx resolves the upstream names once, at start: after a backend container is
 # replaced its address changes and every /api call answers 502 until nginx is
@@ -265,6 +265,15 @@ if [ "$VERIFY_ONLY" = 0 ]; then
         *" control-plane "* | *" gateway "*)
             run compose restart portal
             ;;
+    esac
+fi
+
+# ---- 5b. the smoke is the last assertion, and the only one that goes through the
+# portal: until the restart above, nginx may still hold the previous upstream
+# address, so running it earlier would blame a good build for a stale proxy.
+if [ "$DRY" = 0 ]; then
+    case " $SERVICES " in
+        *" control-plane "* | *" portal "*) smoke_api_origin ;;
     esac
 fi
 
