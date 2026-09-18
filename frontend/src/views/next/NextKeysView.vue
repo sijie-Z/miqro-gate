@@ -1307,7 +1307,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
       </template>
       <template v-else-if="usageClient === 'codex'">
         <pre class="next-keys__snippet" data-testid="usage-codex">{{
-          codexTomlSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageModel())
+          codexTomlSnippet(gatewayBaseUrl(), usageModel())
         }}</pre>
         <div class="next-keys__import">
           <UiButton
@@ -1315,7 +1315,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             data-testid="usage-copy-codex"
             @click="
               copyText(
-                codexTomlSnippet('<粘贴你保存的密钥>', gatewayBaseUrl(), usageModel()),
+                codexTomlSnippet(gatewayBaseUrl(), usageModel()),
                 'Codex 配置模板已复制',
               )
             "
