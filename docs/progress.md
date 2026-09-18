@@ -3864,3 +3864,89 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 - `.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration -Dtest=AdminCredentialAgentBindingIntegrationTest,AdminCredentialServiceTest -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 26, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`（IT 6/6 34.42 s、单测 20/20 1.512 s；7 模块全 SUCCESS，50.7 s）
 - 前端 `npm --prefix frontend run typecheck` 通过（无输出即无错）；`npm --prefix frontend run test` → `Test Files 63 passed (63)` / `Tests 384 passed (384)`，24.22 s
+## 2026-09-18 MCP tools/sync 兼容性修复（#779）——真实封闭客户端实测暴露
+
+**来源**：#742 第③片（WorkBuddy → 网关 MCP 数据面 → 公开 DeepWiki MCP）真机实测中，工具同步对严格 Streamable HTTP 上游 502（上游 406）——`McpToolsListClient` 只发 `Accept: application/json`，缺规范要求的 `text/event-stream`（同文件注释还自述"无 initialize 握手"，有状态上游为后续项）。触发面：一切严格校验 Accept 的上游 tools/sync 不可用 → 工具只能手工登记。
+
+**修复**：Accept 改为 `application/json, text/event-stream`；**两条回归测试先证红**（Accept 双媒体类型断言 + 严格上游 406 夹具），修复后 `McpToolsListClientTest` 9/9 绿。
+
+**绕行（修复前已在演示站完成，数据面健康性佐证）**：手工登记（官方占位 `method=POST path="/"`）+ ENABLED 后，以消费者凭据经网关 `tools/call read_wiki_structure` → 200 返回真实内容，`mcp_access_log`：`FORWARDED | read_wiki_structure | ttfb 617ms`。
+
+## 2026-09-18 导出任务补「含调整」等级——V41 预留的那条轴（#716）
+
+**先界定缺口，别重复做**：本项的验收里"净额维度在导出中可用""含调整维度可标记"**已被 #755 逐行覆盖**（CSV/JSONL 的 `net*`×4 + 行级 `adjusted`）。真正剩下的是 V41 注释预留的那半句——"净额/含调整等级随 F20 扩展"——即**任务级**的声明；以及两处**已过期的文档**（api-contract 还写着"待扩展"、§5.6b 还写着"读取路径尚未接入"）。
+
+**为什么另起一条轴，而不是往 `reconcileLevel` 里加成员**：两者是**互相独立**的问题——"能不能按请求 ID 对上账单"与"数字里含不含修正"。合进一个枚举就得为每种组合造一个值（`PROVIDER_ID_BACKED_AND_ADJUSTED`…），读起来两边都不是。V41 的注释当初把它们写在一起，这是**把它拆开**而不是照它实现。
+
+**为什么是任务级而不只是行级**：消费者希望在**读文件之前**（或只看任务列表时）就知道 `net*` 列要不要看。所以：
+
+- `adjustmentLevel` = `PRESENT`（至少一行被修正过 → `net*` 才是应对账的那套）/ `NONE`（没有任何行被改过 → `net*` 只是重复观察值）；空窗口/历史任务为 null
+- 文件内同步：`local_caliber_note` 追加 `;adjustments=present|none`（`local-instant` 前缀与 `reconcile=` 位置都不动）
+- 它读的正是文件里那个**行级标记**（`adjusted`），所以任务级声明与文件内容**不可能不一致**
+
+**顺带修掉两处文档漂移**（本仓的老毛病，双向都会漂）：`api-contract` §5.5 的"净额/含调整等级随 F20 扩展"已兑现；§5.6b 的"读取路径尚未接入"其实早已不成立（#753/#755/#773 都上了）。
+
+**验证**：先证明会红——撤掉实现但**保留迁移**（否则退化成"列不存在"的粗红），7 跑 **3 失败、恰好是新增那三条**（`expected "PRESENT" but was null`），既有 4 条全过；恢复后 7/7 绿。三条断言分别钉住：未修正= NONE 且文件里写着 `adjustments=none`、有修正= PRESENT 且文件里写着 `present`、**冲销之后仍是 PRESENT**（数字回到观察值，只有这条声明还说得清文件来自被改过的行——与 #774 同一条规则）。
+
+**一处 UI 取舍**：只为 `PRESENT` 出 chip，`NONE` 走 `—`。给"没有修正"也挂个徽标等于几乎每行都有徽标，反而把真正要看的那行淹掉；而这张表本来就用 `—` 表示"无话可说"。
+
+**另记**：迁移号按纪律取「develop 树最高号（66）∪ open issue 登记号」之后的下一个 = **V67**；定号前也扫了 open PR 的正文。
+## 2026-09-18 WorkBuddy MCP 层接入实测样章（#742 第③片收口）
+
+**交付**：`docs/workbuddy-mcp-onboarding-sample.md`——真实封闭客户端（WorkBuddy，腾讯 CodeBuddy 系）按指南 §4 接入网关 MCP 数据面的完整样章：拓扑、五步照抄（注册服务→消费者裁 `mcp:call`→`~/.workbuddy/mcp.json`（**无点号**；带点的是应用自管文件，写错不生效）→过信任门（`mcp_approvals` 键=sha256(url origin)::name）→同步并放行工具）；证据表；两条踩坑（自管配置陷阱；`HEALTH_PATH` 对 SPA 兜底页的假 HEALTHY——应选 `JSONRPC_INITIALIZE`）。
+
+**实测证据链**：应用日志 `[MCP-Connect] ok … tools=3`；`mcp_access_log` 6 行 `TOOL_UNAVAILABLE`（放行前，toolName 完整）+ `FORWARDED | read_wiki_structure | 617ms`（放行后）。**实测暴露真缺陷 #779**（`tools/sync` Accept 缺 `text/event-stream` → 严格上游 406）——修复 PR #781 已合并（先证红两条回归）。
+## 2026-09-18 MCP tools/sync 修复之二：SSE 响应体解帧（#779 收口）
+
+**背景**：PR #781（Accept 兼发双媒体类型）上线后，对严格上游的失败**只前进了一步**——406 消失，但上游按规范合法改发 **SSE 帧**（`event: message` + `data: {...}`），同步客户端仍按裸 JSON 解析 → `502 TOOLS_SYNC_UPSTREAM_FAILED / Unrecognized token 'event'`。真机（演示站 deepwiki 服务）复现，错误逐字同型。
+
+**修复**：`McpToolsListClient` 判 `Content-Type: text/event-stream` 时按 SSE 规范取 `data:` 行（多行按换行拼接）再解析；无 data 载荷 fail-closed（"上游 SSE 响应中没有 data 载荷"）。
+
+**测试**：两条新用例**先证红**（SSE 解帧 / 无 data 拒绝），修复后 `McpToolsListClientTest` **11/11 绿**。
+
+**部署教训（本轮踩到，含一次自我纠正）**：compose.prod.yaml 的 cp 服务带 `build:` 段（context=`..`=演示树 `/opt/miqrokey`，与真正构建用的 `/opt/miqrokey-dev` 不同）——漏 `--no-build` 有**用旧树产出镜像**的风险（触发条件：该 tag 本地无镜像时 `up` 才会构建）。本轮曾观测"容器镜像 ID ≠ tag 镜像 ID 但 compose 显示 Running"，最初归因为"compose 按镜像引用名判等"——**该归因已被直接观测否定**：同 tag 下 `up` 不加 `--force-recreate` 亦会 `Recreate/Recreated`，compose 按解析出的镜像 ID 判等；更可能的成因是**多会话并发构建同一 tag 的竞态**（本轮时间线：自建镜像 11:11:03 完成，容器 11:11:07 从另一镜像创建）。**落为收尾断言**：部署后必须核 `container.Image == tag.Id`（"Up N seconds + healthy"不算数）——它正是抓这类竞态的检查；**跨会话纪律：同一 tag 不并发构建、部署串行**。
+
+## 2026-09-18 缓存节省是没有标记的下界——补上最后一个"未知被当成 0"的洞（#790）
+
+**我先前的判断是错的，被一次实测推翻。** 我在 #766 的 PR 里把"命中路径无 gap 计数器"列为 follow-up，但随后自己评价它"**收益低**"（理由：演示站的节省额只有 ¥0.001 量级）。动手前顺手查了一下可达性，用的是与代码**同一套 as-of 规则**：
+
+```
+hit_groups | groups_without_input_price_at_hit_time | first_hit | last_hit
+         5 |                                      3 | 09-14     | 09-16
+```
+
+**5 个命中组里 3 个**在命中时刻没有任何生效的 input 价。也就是说这台站上的缓存节省数字**对 60% 的命中组静默偏低**——不是理论情形，是正在发生。**"收益低"是只看演示站的金额量级得出的，而缺陷的类别才是量尺**：`savedByGatewayCache` 是控制台首屏的招牌数字，而"未知被当成 0"正是 B+ 分层要消灭的那一类。
+
+**缺陷的原文**（`UsageStatsRepositoryImpl`）：
+
+```java
+/**
+ * {@code tokens x hits x unitPrice}, undivided; a null price contributes nothing.
+ */
+private static BigDecimal weighted(long tokens, long hits, BigDecimal unitPrice) {
+    return unitPrice == null ? BigDecimal.ZERO : BigDecimal.valueOf(tokens * hits).multiply(unitPrice);
+}
+```
+
+注释把这件事写得像无害的默认值。而 `addHit` 当时**完全不碰** `unpriced`。
+
+### 一处设计取舍：把两个问题分成两个名字
+
+给 `PricingGap` 加 `unpricedHitEvents` 时，`isEmpty()` 原本**驱动 `pricingStatus`**——直接加字段会让"节省侧有缺口"把**成本**判成 PARTIAL，即"让一个从没被它碰过的数字显得不可信"。所以拆成两个名字：
+
+- `hasCostGap()`（= `unpricedEvents > 0`）驱动成本状态：**成本完不完整与节省完不完整是两个问题**
+- `isEmpty()` 表示"**完全没有缺口**"（成本 ∪ 节省），名字与含义一致
+
+这两条各有一条测试钉住（域测试 144/144）。
+
+### 前端：不标注就等于没修
+
+两个展示节省额的地方同时加标记，否则 UI 层重复同一个缺陷：管理端概览的「网关缓存节省」加「下界」徽标（复用既有未定价样式 + UiTooltip 说明次数），成本页的「缓存节省」卡片在提示行里追加「下界：N 次命中在发生时无生效价目」。
+
+### 验证
+
+- **先证明会红**：只关掉仓库侧的计数（域侧保持，否则退化成编译错而非行为红）→ `AdminRoiApiIntegrationTest` **4 跑 1 失败、恰好是新增那一条**（`expected 2 but was 0`），其余 3 条照常通过；恢复后 4/4 绿
+- 新增 IT 用的是**能分辨的那个 fixture**：价目生效时间设在"命中之后、用量行之前"（`now() - interval '1 second'`）——于是同一次运行里**成本 COMPLETE 而节省是下界**，正是要钉住的那条不变式
+- 前端 25/25（含 4 条新增）＋ typecheck；OpenAPI/前端类型差异仅 `unpricedHitEvents`
+
+**教训（与本会话其他几次同族）**：我凭**金额量级**判定一件事"不值得做"，而判据应该是**缺陷的类别**；一次五分钟的实测就把它推翻了。与"自验只覆盖自己以为的范围"是同一种盲区——只是这次盲在**优先级**上，而不是盲在正确性上。

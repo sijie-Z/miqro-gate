@@ -3891,6 +3891,7 @@ export interface components {
             /** Format: date-time */
             expiresAt?: string;
             reconcileLevel?: string;
+            adjustmentLevel?: string;
         };
         CryptoReencryptReport: {
             activeKeyVersion?: string;
@@ -4059,6 +4060,7 @@ export interface components {
             /** Format: date-time */
             expiresAt?: string;
             reconcileLevel?: string;
+            adjustmentLevel?: string;
         };
         UpdateVirtualKeyRequest: {
             name: string;
@@ -4117,6 +4119,8 @@ export interface components {
             unpricedEvents?: number;
             /** Format: int64 */
             unavailableEvents?: number;
+            /** Format: int64 */
+            unpricedHitEvents?: number;
             empty?: boolean;
         };
         Requests: {
