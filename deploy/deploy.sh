@@ -261,7 +261,12 @@ if [ -s "$cert_dir/fullchain.pem" ] && [ -s "$cert_dir/privkey.pem" ]; then
             fi
             svc_ok=1
             for f in fullchain.pem privkey.pem; do
-                want_sum="$(sha256sum "$cert_dir/$f" | cut -d' ' -f1)"
+                # Read the host file on stdin rather than passing its name: given a
+                # name, coreutils escapes the whole output line — a leading
+                # backslash, doubled separators — whenever the path contains a
+                # backslash or a newline, and the hash cut out of that line is then
+                # wrong. Passing no name at all removes the question.
+                want_sum="$(sha256sum < "$cert_dir/$f" | cut -d' ' -f1)"
                 got_sum="$(docker exec "$cid" sha256sum "$dest/$f" 2>/dev/null | cut -d' ' -f1 || true)"
                 if [ -z "$got_sum" ]; then
                     # Covers both "missing/empty inside" and "cannot be read at
@@ -441,8 +446,14 @@ if [ -z "$SMOKE_URL" ]; then
     echo "note: no smoke target given, and none could be derived from $ENV_FILE —" \
         "nothing here checked that the stack serves requests" >&2
 elif [ "$DRY" = 1 ]; then
-    echo "DRY  curl -X $SMOKE_METHOD${SMOKE_ORIGIN:+ -H 'Origin: $SMOKE_ORIGIN'}"\
-"${SMOKE_DATA:+ -H 'Content-Type: application/json' -d '$SMOKE_DATA'} $SMOKE_URL (expect $SMOKE_EXPECT)"
+    smoke_desc="-X $SMOKE_METHOD"
+    if [ -n "$SMOKE_ORIGIN" ]; then
+        smoke_desc="$smoke_desc -H 'Origin: $SMOKE_ORIGIN'"
+    fi
+    if [ -n "$SMOKE_DATA" ]; then
+        smoke_desc="$smoke_desc -H 'Content-Type: application/json' -d '$SMOKE_DATA'"
+    fi
+    echo "DRY  curl $smoke_desc $SMOKE_URL  (expect $SMOKE_EXPECT)"
 else
     smoke_code="$(smoke_curl)"
     # curl prints the code even when it fails, and a hard failure can leave it
