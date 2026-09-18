@@ -49,10 +49,11 @@ import org.springframework.transaction.annotation.Transactional;
  * </p>
  *
  * <p>
- * A second pass completes rows that were stamped <em>before</em>
- * {@code base_cost_amount} existed (#771): it derives the amount from the
- * prices those rows already froze and writes only that column. Same rule — it
- * completes a record, it never revises one.
+ * Two further passes bring already-stamped rows up to date, because the
+ * stamping pass can never revisit one: one completes a {@code base_cost_amount}
+ * that was never written (#771), the other brings a verdict the rule has since
+ * moved past back in line (#777). Both derive from the prices the row already
+ * froze — no price lookup, no amount rewritten.
  * </p>
  */
 @Service
@@ -208,6 +209,61 @@ public class UsagePriceBackfillService {
              WHERE id = :id AND tenant_id = :tenantId AND base_cost_amount IS NULL
             """;
 
+    /**
+     * Already-stamped rows in the window, walked with a keyset cursor (#777).
+     *
+     * <p>
+     * This pass is a <b>scan</b>, not a work queue. Whether a row's stored verdict
+     * is stale depends on the rule in force <em>now</em>, which only
+     * {@link #classify} knows — so the pass has to look at every stamped row rather
+     * than ask SQL for "the ones that need work". That rules out the
+     * select-work/re-query shape the other two passes use: with a {@code LIMIT} and
+     * no cursor, a page of already-correct rows ends the scan and strands the stale
+     * ones behind them — the same trap #771 hit, one level up.
+     * </p>
+     *
+     * <p>
+     * The stored verdict is selected alongside the frozen basis because the
+     * comparison needs both; the decision itself is still made in Java, so the rule
+     * stays in exactly one place.
+     * </p>
+     */
+    private static final String RECLASSIFY_BATCH = """
+            SELECT ue.id,
+                   COALESCE(ue.input_tokens, ue.prompt_tokens)      AS input_tokens,
+                   COALESCE(ue.output_tokens, ue.completion_tokens) AS output_tokens,
+                   ue.cache_read_input_tokens, ue.cache_creation_input_tokens,
+                   ue.price_input, ue.price_output, ue.price_cache_read, ue.price_cache_creation,
+                   ue.price_currency, ue.price_source, ue.price_effective_from,
+                   ue.price_status, ue.occurred_at
+              FROM usage_event ue
+             WHERE ue.tenant_id = :tenantId
+               AND ue.occurred_at >= :from AND ue.occurred_at < :to
+               AND ue.price_status IS NOT NULL
+               AND (ue.occurred_at > :cursorAt OR (ue.occurred_at = :cursorAt AND ue.id > :cursorId))
+             ORDER BY ue.occurred_at, ue.id
+             LIMIT :limit
+            """;
+
+    /**
+     * Rewrites one stored verdict (#777).
+     *
+     * <p>
+     * It sets <b>only</b> {@code price_status}. The frozen prices and
+     * {@code base_cost_amount} are facts about the event and stay untouched: a
+     * verdict is a <em>derivation</em> from those facts, which is the whole reason
+     * it can be recomputed — whereas the amount is a fact that only ever gets
+     * <em>filled</em>, never rewritten (#771). {@code IS DISTINCT FROM} keeps the
+     * statement idempotent and stops it churning rows the current rule already
+     * agrees with.
+     * </p>
+     */
+    private static final String RECLASSIFY_ROW = """
+            UPDATE usage_event
+               SET price_status = :status
+             WHERE id = :id AND tenant_id = :tenantId AND price_status IS DISTINCT FROM :status
+            """;
+
     private final NamedParameterJdbcTemplate jdbc;
     private final AuditService auditService;
 
@@ -249,19 +305,73 @@ public class UsagePriceBackfillService {
                 scanned++;
             }
         }
+        long reclassified = reclassifyStampedRows(tenantId, from, to);
         long baseCostFilled = fillBaseCost(tenantId, from, to);
 
         UsagePriceBackfillResult result = new UsagePriceBackfillResult(scanned, complete, partial, unavailable,
-                baseCostFilled);
-        LOG.info("Usage price backfill {}..{}: scanned={} complete={} partial={} unavailable={} baseCostFilled={}",
+                baseCostFilled, reclassified);
+        LOG.info(
+                "Usage price backfill {}..{}: scanned={} complete={} partial={} unavailable={} baseCostFilled={} "
+                        + "reclassified={}",
                 from, to, result.scanned(), result.complete(), result.partial(), result.unavailable(),
-                result.baseCostFilled());
+                result.baseCostFilled(), result.reclassified());
         auditService.record(tenantId, adminId, "USAGE_PRICE_BACKFILL", "USAGE_EVENT", null,
                 "{\"from\":\"" + from + "\",\"to\":\"" + to + "\",\"scanned\":" + result.scanned() + ",\"complete\":"
                         + result.complete() + ",\"partial\":" + result.partial() + ",\"unavailable\":"
-                        + result.unavailable() + ",\"baseCostFilled\":" + result.baseCostFilled() + "}",
+                        + result.unavailable() + ",\"baseCostFilled\":" + result.baseCostFilled() + ",\"reclassified\":"
+                        + result.reclassified() + "}",
                 requestId);
         return result;
+    }
+
+    /**
+     * Brings the stored verdicts of already-stamped rows back in line with the rule
+     * that is in force now (#777).
+     *
+     * <p>
+     * The stamping pass only ever selects rows that have not been evaluated, so a
+     * row stamped under an older rule keeps that verdict for good. One deployment
+     * was left with 4027 rows saying {@code PARTIAL} long after the rule had
+     * stopped meaning that — and a reader querying the column cannot tell such a
+     * row from a freshly stamped one, so the stale label is simply wrong data, not
+     * a second calibre.
+     * </p>
+     *
+     * <p>
+     * Only the verdict moves. The frozen prices and the amount are facts about the
+     * event; the verdict is derived from them, which is why recomputing it revises
+     * no decision that ever moved money.
+     * </p>
+     *
+     * @return how many rows carried a verdict the current rule disagrees with
+     */
+    private long reclassifyStampedRows(UUID tenantId, Instant from, Instant to) {
+        long reclassified = 0;
+        Instant cursorAt = Instant.EPOCH;
+        UUID cursorId = new UUID(0L, 0L);
+        while (true) {
+            List<Map<String, Object>> batch = jdbc.query(RECLASSIFY_BATCH,
+                    new MapSqlParameterSource("tenantId", tenantId).addValue("from", Timestamp.from(from))
+                            .addValue("to", Timestamp.from(to)).addValue("limit", BATCH)
+                            .addValue("cursorAt", Timestamp.from(cursorAt)).addValue("cursorId", cursorId),
+                    UsagePriceBackfillService::stampedRow);
+            if (batch.isEmpty()) {
+                break;
+            }
+            for (Map<String, Object> row : batch) {
+                String status = classify(row);
+                if (!status.equals(row.get("storedStatus"))) {
+                    reclassified += jdbc.update(RECLASSIFY_ROW, new MapSqlParameterSource("status", status)
+                            .addValue("id", row.get("id")).addValue("tenantId", tenantId));
+                }
+                cursorAt = (Instant) row.get("occurredAt");
+                cursorId = (UUID) row.get("id");
+            }
+            if (batch.size() < BATCH) {
+                break;
+            }
+        }
+        return reclassified;
     }
 
     /**
@@ -336,6 +446,17 @@ public class UsagePriceBackfillService {
         row.put("outputTokens", rs.getObject("output_tokens", Long.class));
         row.put("cacheReadTokens", rs.getObject("cache_read_input_tokens", Long.class));
         row.put("cacheCreationTokens", rs.getObject("cache_creation_input_tokens", Long.class));
+        return row;
+    }
+
+    /**
+     * {@link #priceRow} plus the two fields only the scan needs (#777): the verdict
+     * already on the row, and the position the keyset cursor advances to.
+     */
+    private static Map<String, Object> stampedRow(ResultSet rs, int rowNum) throws SQLException {
+        Map<String, Object> row = priceRow(rs, rowNum);
+        row.put("storedStatus", rs.getString("price_status"));
+        row.put("occurredAt", rs.getTimestamp("occurred_at").toInstant());
         return row;
     }
 

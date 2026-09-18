@@ -60,6 +60,11 @@ class UsagePriceBackfillIntegrationTest {
     private static final String OTHER_MODEL = "backfill-unpriced-model";
     private static final String ZERO_TOKEN_MODEL = "backfill-zero-token-model";
 
+    /**
+     * Bulk rows for the scan test, kept apart so per-model lookups stay single-row.
+     */
+    private static final String SCAN_MODEL = "backfill-scan-model";
+
     /** Event happened two hours ago. */
     private static final Instant EVENT_AT = Instant.now().minusSeconds(2 * 3600);
     /** Price in force at the event: three hours ago. */
@@ -337,6 +342,80 @@ class UsagePriceBackfillIntegrationTest {
     }
 
     // -------------------------------------------------------------------
+    // #777: verdicts left behind by a rule that has since moved
+
+    @Test
+    @DisplayName("a verdict the current rule disagrees with is recomputed (#777)")
+    void staleVerdictIsRecomputed() throws Exception {
+        // PARTIAL was stamped by a rule that asked whether a price existed for a
+        // dimension, not whether the event used it. This event carries no cache tokens
+        // at all, so under the rule in force today it is COMPLETE.
+        seedStampedEvent(MODEL, "PARTIAL", 1000L, 500L, "1.00", "4.00");
+
+        Map<String, Object> result = backfill();
+
+        assertThat(result.get("scanned")).isEqualTo(0);
+        assertThat(result.get("reclassified")).isEqualTo(1);
+        Map<String, Object> row = priceColumnsOf(MODEL);
+        assertThat(row.get("price_status")).isEqualTo("COMPLETE");
+        // Only the verdict moves: the frozen basis and the amount are facts.
+        assertThat(row.get("price_input")).isEqualTo(new BigDecimal("1.0000000000"));
+        assertThat(row.get("base_cost_amount")).isEqualTo(new BigDecimal("0.0030000000"));
+    }
+
+    @Test
+    @DisplayName("recomputing is idempotent: a second pass changes nothing")
+    void reclassifyIsIdempotent() throws Exception {
+        seedStampedEvent(MODEL, "PARTIAL", 1000L, 500L, "1.00", "4.00");
+
+        assertThat(backfill().get("reclassified")).isEqualTo(1);
+        assertThat(backfill().get("reclassified")).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("a row with no tokens at all becomes COMPLETE, and still gets no invented amount")
+    void zeroTokenRowBecomesCompleteWithoutAnAmount() throws Exception {
+        seedStampedEvent(OTHER_MODEL, "UNAVAILABLE", null, null, null, null);
+
+        backfill();
+
+        Map<String, Object> row = priceColumnsOf(OTHER_MODEL);
+        // No dimension took part in any calculation, so the row is trivially priced —
+        // and the amount stays NULL, because there is nothing to sum. That is the same
+        // NULL a summary reads for it, so the two agree.
+        assertThat(row.get("price_status")).isEqualTo("COMPLETE");
+        assertThat(row.get("base_cost_amount")).isNull();
+    }
+
+    @Test
+    @DisplayName("the scan reaches past a full batch of rows the rule already agrees with")
+    void scanDoesNotStopAtAFullBatchOfCorrectRows() throws Exception {
+        // A full batch (500+) of rows the current rule is happy with, laid down
+        // first...
+        jdbc.update("""
+                INSERT INTO usage_event (id, tenant_id, virtual_key_id, project_id, provider_product_id, model_id,
+                    gateway_request_id, input_tokens, output_tokens, is_complete, usage_missing, occurred_at,
+                    price_input, price_output, price_currency, price_source, price_status)
+                SELECT gen_random_uuid(), :tenantId, :keyId, :projectId, :productId, :modelId,
+                    'gw-scan-' || g, 1000, 500, TRUE, FALSE, :occurredAt, 1.00, 4.00, 'CNY', 'MANUAL', 'COMPLETE'
+                  FROM generate_series(1, 501) g
+                """,
+                new MapSqlParameterSource("tenantId", TENANT).addValue("keyId", UUID.randomUUID())
+                        .addValue("projectId", UUID.randomUUID()).addValue("productId", PRODUCT)
+                        .addValue("modelId", SCAN_MODEL).addValue("occurredAt", java.sql.Timestamp.from(EVENT_AT)));
+
+        // ...and one stale row behind them. A pass that re-queried "the rows that need
+        // work" would take a full page of already-correct rows, change nothing, and
+        // stop — leaving this one stranded for good. The keyset scan walks past them.
+        seedStampedEventAt(MODEL, "PARTIAL", 1000L, 500L, "1.00", "4.00", EVENT_AT.plusSeconds(60));
+
+        Map<String, Object> result = backfill();
+
+        assertThat(result.get("reclassified")).isEqualTo(1);
+        assertThat(priceColumnsOf(MODEL).get("price_status")).isEqualTo("COMPLETE");
+    }
+
+    // -------------------------------------------------------------------
 
     private Map<String, Object> backfill() throws Exception {
         MvcResult res = mockMvc.perform(post("/api/v1/admin/usage-price-backfill")
@@ -392,6 +471,15 @@ class UsagePriceBackfillIntegrationTest {
      */
     private void seedStampedEvent(String model, String status, Long inputTokens, Long outputTokens, String priceInput,
             String priceOutput) {
+        seedStampedEventAt(model, status, inputTokens, outputTokens, priceInput, priceOutput, EVENT_AT);
+    }
+
+    /**
+     * As {@link #seedStampedEvent}, at a chosen instant — lets a test order the
+     * scan.
+     */
+    private void seedStampedEventAt(String model, String status, Long inputTokens, Long outputTokens, String priceInput,
+            String priceOutput, Instant occurredAt) {
         jdbc.update("""
                 INSERT INTO usage_event (id, tenant_id, virtual_key_id, project_id, provider_product_id, model_id,
                     gateway_request_id, input_tokens, output_tokens, is_complete, usage_missing, occurred_at,
@@ -404,7 +492,7 @@ class UsagePriceBackfillIntegrationTest {
                         .addValue("keyId", UUID.randomUUID()).addValue("projectId", UUID.randomUUID())
                         .addValue("productId", PRODUCT).addValue("modelId", model).addValue("requestId", "gw-" + model)
                         .addValue("inputTokens", inputTokens).addValue("outputTokens", outputTokens)
-                        .addValue("occurredAt", java.sql.Timestamp.from(EVENT_AT))
+                        .addValue("occurredAt", java.sql.Timestamp.from(occurredAt))
                         .addValue("priceInput", priceInput == null ? null : new BigDecimal(priceInput))
                         .addValue("priceOutput", priceOutput == null ? null : new BigDecimal(priceOutput))
                         .addValue("status", status));
