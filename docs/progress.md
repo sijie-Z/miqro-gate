@@ -3813,3 +3813,8 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **修复**：Accept 改为 `application/json, text/event-stream`；**两条回归测试先证红**（Accept 双媒体类型断言 + 严格上游 406 夹具），修复后 `McpToolsListClientTest` 9/9 绿。
 
 **绕行（修复前已在演示站完成，数据面健康性佐证）**：手工登记（官方占位 `method=POST path="/"`）+ ENABLED 后，以消费者凭据经网关 `tools/call read_wiki_structure` → 200 返回真实内容，`mcp_access_log`：`FORWARDED | read_wiki_structure | ttfb 617ms`。
+## 2026-09-18 WorkBuddy MCP 层接入实测样章（#742 第③片收口）
+
+**交付**：`docs/workbuddy-mcp-onboarding-sample.md`——真实封闭客户端（WorkBuddy，腾讯 CodeBuddy 系）按指南 §4 接入网关 MCP 数据面的完整样章：拓扑、五步照抄（注册服务→消费者裁 `mcp:call`→`~/.workbuddy/mcp.json`（**无点号**；带点的是应用自管文件，写错不生效）→过信任门（`mcp_approvals` 键=sha256(url origin)::name）→同步并放行工具）；证据表；两条踩坑（自管配置陷阱；`HEALTH_PATH` 对 SPA 兜底页的假 HEALTHY——应选 `JSONRPC_INITIALIZE`）。
+
+**实测证据链**：应用日志 `[MCP-Connect] ok … tools=3`；`mcp_access_log` 6 行 `TOOL_UNAVAILABLE`（放行前，toolName 完整）+ `FORWARDED | read_wiki_structure | 617ms`（放行后）。**实测暴露真缺陷 #779**（`tools/sync` Accept 缺 `text/event-stream` → 严格上游 406）——修复 PR #781 已合并（先证红两条回归）。
