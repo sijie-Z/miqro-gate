@@ -12,6 +12,8 @@ import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
 import { UiButton, UiDonut, UiSelect, UiStatusBadge, UiTable, UiTrendChart, toast } from '@/ui';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
+import UsageAdjustChip from '@/components/UsageAdjustChip.vue';
+import { netTokens } from '@/lib/usage-net';
 import type { UiSelectOption } from '@/ui';
 import type { QuotaMetric, QuotaPeriod, UsageGroupBy } from '@/types/api';
 import type {
@@ -185,6 +187,9 @@ const summaryColumns = [
   { key: 'gatewayCost', title: '网关观测成本', width: '150px', align: 'right' as const },
 ];
 
+// #773: the token columns report the *net* counts (observed + adjustments), so
+// their cells add up to the summary printed above them. The observed counts
+// stay reachable through the 调整 chip's bubble.
 const recordsColumns = [
   { key: 'occurredAt', title: '时间', width: '180px' },
   { key: 'modelId', title: '模型', minWidth: '170px' },
@@ -194,6 +199,7 @@ const recordsColumns = [
   { key: 'input', title: '输入', width: '90px', align: 'right' as const },
   { key: 'output', title: '输出', width: '90px', align: 'right' as const },
   { key: 'cacheRead', title: '缓存读', width: '110px', align: 'right' as const },
+  { key: 'adjust', title: '调整', width: '100px' },
   { key: 'cost', title: '成本', width: '110px', align: 'right' as const },
   { key: 'latency', title: '用时 / 首字', width: '140px', align: 'right' as const },
   { key: 'upstreamStatus', title: '上游状态', width: '95px', align: 'right' as const },
@@ -447,7 +453,7 @@ function formatCost(value?: string | number): string {
   return `$${num.toFixed(4)}`;
 }
 
-function formatNumber(value?: number): string {
+function formatNumber(value?: number | null): string {
   return value === undefined || value === null ? '—' : value.toLocaleString();
 }
 
@@ -743,11 +749,14 @@ function formatTime(iso?: string): string {
               :label="cacheLevelLabel[asRecord(row).cacheLevel!] ?? asRecord(row).cacheLevel"
             />
           </template>
-          <template #input="{ row }">{{ formatNumber(asRecord(row).inputTokens) }}</template>
-          <template #output="{ row }">{{ formatNumber(asRecord(row).outputTokens) }}</template>
+          <template #input="{ row }">{{ formatNumber(netTokens(asRecord(row)).input) }}</template>
+          <template #output="{ row }">{{ formatNumber(netTokens(asRecord(row)).output) }}</template>
           <template #cacheRead="{ row }">{{
-            formatNumber(asRecord(row).cacheReadInputTokens)
+            formatNumber(netTokens(asRecord(row)).cacheRead)
           }}</template>
+          <template #adjust="{ row }">
+            <UsageAdjustChip :record="asRecord(row)" />
+          </template>
           <template #cost="{ row }">
             <span v-if="asRecord(row).priced !== false" class="ui-num"
               >¥{{ formatCost(asRecord(row).cost) }}</span
