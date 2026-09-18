@@ -76,7 +76,13 @@ function group(
       savedByGatewayCache: 0.001,
     },
     // #758 lifecycle outcomes: all succeeded, deterministic latencies.
-    outcomes: { succeeded: requests, failed: 0, cancelled: 0, avgDurationMs: 4_200, avgTtfbMs: 1_800 },
+    outcomes: {
+      succeeded: requests,
+      failed: 0,
+      cancelled: 0,
+      avgDurationMs: 4_200,
+      avgTtfbMs: 1_800,
+    },
   };
 }
 
@@ -335,6 +341,51 @@ describe('NextAdminUsageView', () => {
     expect(table).toContain('未定价');
     expect(table).toContain('120ms / 210ms'); // 用时 / 首字
     expect(table).toContain('Anthropic');
+  });
+
+  /** Column headers of a rendered UiTable, in column order. */
+  function headerTitles(wrapper: ReturnType<typeof mount>, testid: string): string[] {
+    return wrapper.findAll(`[data-testid="${testid}"] thead th`).map((th) => th.text());
+  }
+
+  /** One cell of a records row, located by the column's own header. */
+  function cellOf(
+    wrapper: ReturnType<typeof mount>,
+    testid: string,
+    rowIndex: number,
+    title: string,
+  ): string {
+    const index = headerTitles(wrapper, testid).indexOf(title);
+    expect(index).toBeGreaterThanOrEqual(0);
+    return wrapper
+      .findAll(`[data-testid="${testid}"] tbody tr`)
+      [rowIndex]!.findAll('td')
+      [index]!.text();
+  }
+
+  it('drops the 调整 column while no row on the page carries an adjustment (#773)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(headerTitles(wrapper, 'usage-records-table')).not.toContain('调整');
+    // The rows themselves are untouched — the column went, the table did not.
+    expect(wrapper.findAll('[data-testid="usage-records-table"] tbody tr')).toHaveLength(20);
+  });
+
+  it('keeps the 调整 column and its per-row state while a row is adjusted (#773)', async () => {
+    mockApi.adminUsageRecords.mockResolvedValue({
+      items: [recordRow(0, { adjusted: true, netOutputTokens: 160 }), recordRow(2)],
+      page: 1,
+      size: 20,
+      total: 2,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    // The adjusted row declares itself; the untouched one keeps the placeholder
+    // the column always rendered.
+    expect(cellOf(wrapper, 'usage-records-table', 0, '调整')).toContain('已调整');
+    expect(cellOf(wrapper, 'usage-records-table', 1, '调整')).toBe('—');
   });
 
   it('switches 供应商统计 / 模型统计 tabs onto the product and model dimensions (#758)', async () => {

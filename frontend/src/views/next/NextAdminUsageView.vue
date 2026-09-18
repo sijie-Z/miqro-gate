@@ -545,6 +545,19 @@ const columns = [
   { key: 'gatewayRequestId', title: '请求 ID', minWidth: '230px' },
 ];
 
+/**
+ * #773: the 调整 column says what the net counts were derived from, so it earns
+ * its 100px only while the rows on screen actually carry an adjustment. With
+ * none in sight the whole column is dashes, which is the extra column and the
+ * visual noise the acceptance criterion rules out — same treatment as the
+ * single-project column in NextKeysView.
+ */
+const visibleColumns = computed(() =>
+  (records.value?.items ?? []).some((row) => row.adjusted === true)
+    ? columns
+    : columns.filter((column) => column.key !== 'adjust'),
+);
+
 /** 用时/首字 cell: "4.9s / 2.1s"; sub-second values stay in ms. */
 function fmtDuration(ms?: number | null): string {
   if (ms === null || ms === undefined) return '—';
@@ -1156,7 +1169,7 @@ onMounted(() => {
       <!-- 请求日志 -->
       <UiTable
         v-if="activeTab === 'records'"
-        :columns="columns"
+        :columns="visibleColumns"
         :data="records?.items ?? []"
         :loading="recordsLoading"
         row-key="gatewayRequestId"
