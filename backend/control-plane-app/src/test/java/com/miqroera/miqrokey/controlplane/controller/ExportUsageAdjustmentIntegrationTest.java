@@ -143,7 +143,7 @@ class ExportUsageAdjustmentIntegrationTest {
     }
 
     @Test
-    @DisplayName("a reversal returns the export to the observed counts")
+    @DisplayName("a reversal returns the export to the observed counts but keeps the marker")
     void exportAfterReversal() throws Exception {
         MvcResult created = append(
                 "{\"gatewayRequestId\":\"" + REQUEST_ID + "\",\"outputTokensDelta\":-200," + "\"reason\":\"上游账单修正\"}")
@@ -155,7 +155,50 @@ class ExportUsageAdjustmentIntegrationTest {
 
         Map<String, String> row = firstRow(exportCsv());
         assertThat(row.get("netOutputTokens")).isEqualTo("500");
-        assertThat(row.get("adjusted")).isEqualTo("false");
+        // Same rule as the records list (#774): the export must not report a
+        // corrected-then-reversed row as one nobody ever touched.
+        assertThat(row.get("adjusted")).isEqualTo("true");
+    }
+
+    // -------------------------------------------------------------------
+    // #716: the task-level declaration of whether the numbers were corrected
+
+    @Test
+    @DisplayName("an untouched export declares NONE, and says so inside the file")
+    void untouchedExportDeclaresNone() throws Exception {
+        UUID taskId = runExport();
+
+        assertThat(adjustmentLevelOf(taskId)).isEqualTo("NONE");
+        // Stated in the file too, so a consumer that only has the artifact knows
+        // whether the net columns are worth reading.
+        assertThat(firstRow(decompress(taskId)).get("local_caliber_note")).contains("adjustments=none");
+    }
+
+    @Test
+    @DisplayName("a corrected export declares PRESENT, and says so inside the file")
+    void correctedExportDeclaresPresent() throws Exception {
+        append("{\"gatewayRequestId\":\"" + REQUEST_ID + "\",\"outputTokensDelta\":-200," + "\"reason\":\"上游账单修正\"}")
+                .andExpect(status().isCreated());
+
+        UUID taskId = runExport();
+
+        assertThat(adjustmentLevelOf(taskId)).isEqualTo("PRESENT");
+        assertThat(firstRow(decompress(taskId)).get("local_caliber_note")).contains("adjustments=present");
+    }
+
+    @Test
+    @DisplayName("a reversed correction still declares PRESENT: the rows were touched")
+    void reversedCorrectionStillDeclaresPresent() throws Exception {
+        MvcResult created = append(
+                "{\"gatewayRequestId\":\"" + REQUEST_ID + "\",\"outputTokensDelta\":-200," + "\"reason\":\"上游账单修正\"}")
+                .andExpect(status().isCreated()).andReturn();
+        Map<?, ?> original = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class);
+        append("{\"gatewayRequestId\":\"" + REQUEST_ID + "\",\"reason\":\"撤销前次调整\",\"reversalOfId\":\""
+                + original.get("id") + "\"}").andExpect(status().isCreated());
+
+        // The net counts are back to the observed ones, so only this declaration
+        // still tells the consumer the file came from corrected rows (#774).
+        assertThat(adjustmentLevelOf(runExport())).isEqualTo("PRESENT");
     }
 
     // -------------------------------------------------------------------
@@ -200,6 +243,11 @@ class ExportUsageAdjustmentIntegrationTest {
     }
 
     private String exportCsv() throws Exception {
+        return decompress(runExport());
+    }
+
+    /** Runs an export to completion and hands back its task id. */
+    private UUID runExport() throws Exception {
         String from = java.time.Instant.now().minusSeconds(2 * 86400).toString();
         String to = java.time.Instant.now().toString();
         MvcResult created = mockMvc
@@ -212,7 +260,7 @@ class ExportUsageAdjustmentIntegrationTest {
             String state = jdbc.queryForObject("SELECT status FROM export_tasks WHERE id = :id",
                     new MapSqlParameterSource("id", taskId), String.class);
             if ("SUCCEEDED".equals(state)) {
-                return decompress(taskId);
+                return taskId;
             }
             if ("FAILED".equals(state)) {
                 throw new AssertionError("export failed");
@@ -220,6 +268,12 @@ class ExportUsageAdjustmentIntegrationTest {
             Thread.sleep(250);
         }
         throw new AssertionError("export did not finish in time");
+    }
+
+    /** The task-level adjustment declaration (#716). */
+    private String adjustmentLevelOf(UUID taskId) {
+        return jdbc.queryForObject("SELECT adjustment_level FROM export_tasks WHERE id = :id",
+                new MapSqlParameterSource("id", taskId), String.class);
     }
 
     private String decompress(UUID taskId) throws Exception {

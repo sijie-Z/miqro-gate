@@ -3322,6 +3322,8 @@ export interface components {
             unavailable?: number;
             /** Format: int64 */
             baseCostFilled?: number;
+            /** Format: int64 */
+            reclassified?: number;
         };
         DeletionRequest: {
             /** Format: uuid */
@@ -3889,6 +3891,7 @@ export interface components {
             /** Format: date-time */
             expiresAt?: string;
             reconcileLevel?: string;
+            adjustmentLevel?: string;
         };
         CryptoReencryptReport: {
             activeKeyVersion?: string;
@@ -4057,6 +4060,7 @@ export interface components {
             /** Format: date-time */
             expiresAt?: string;
             reconcileLevel?: string;
+            adjustmentLevel?: string;
         };
         UpdateVirtualKeyRequest: {
             name: string;

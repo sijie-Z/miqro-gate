@@ -26,9 +26,15 @@ class McpToolsListClientTest {
     private int port;
     private volatile int status = 200;
     private volatile String body = "{}";
+    /**
+     * Strict Streamable HTTP upstreams answer 406 unless the client advertises both
+     * media types (#779).
+     */
+    private volatile boolean enforceStreamableAccept = false;
     private final AtomicReference<String> lastAuth = new AtomicReference<>();
     private final AtomicReference<String> lastBody = new AtomicReference<>();
     private final AtomicReference<String> lastMethod = new AtomicReference<>();
+    private final AtomicReference<String> lastAccept = new AtomicReference<>();
 
     private final McpToolsListClient client = new McpToolsListClient(new ObjectMapper());
 
@@ -38,7 +44,13 @@ class McpToolsListClientTest {
         server.createContext("/mcp", exchange -> {
             lastMethod.set(exchange.getRequestMethod());
             lastAuth.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            lastAccept.set(exchange.getRequestHeaders().getFirst("Accept"));
             lastBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            if (enforceStreamableAccept && !String.valueOf(lastAccept.get()).contains("text/event-stream")) {
+                exchange.sendResponseHeaders(406, -1);
+                exchange.close();
+                return;
+            }
             byte[] out = body.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(status, out.length);
@@ -77,6 +89,27 @@ class McpToolsListClientTest {
         assertThat(lastMethod.get()).isEqualTo("POST");
         assertThat(lastBody.get()).isEqualTo(McpToolsListClient.REQUEST_BODY);
         assertThat(lastAuth.get()).isEqualTo("Bearer sk-test");
+    }
+
+    @Test
+    @DisplayName("advertises both Streamable HTTP media types in Accept (#779)")
+    void advertisesBothMediaTypes() {
+        body = "{\"result\":{\"tools\":[]}}";
+
+        client.fetchTools(url(), null);
+
+        assertThat(lastAccept.get()).contains("application/json").contains("text/event-stream");
+    }
+
+    @Test
+    @DisplayName("strict upstream that answers 406 without text/event-stream is accepted (#779)")
+    void strictAcceptUpstreamIsAccepted() {
+        enforceStreamableAccept = true;
+        body = "{\"result\":{\"tools\":[{\"name\":\"read_wiki_structure\",\"description\":\"wiki\"}]}}";
+
+        List<McpToolsListClient.UpstreamTool> tools = client.fetchTools(url(), null);
+
+        assertThat(tools).containsExactly(new McpToolsListClient.UpstreamTool("read_wiki_structure", "wiki"));
     }
 
     @Test
