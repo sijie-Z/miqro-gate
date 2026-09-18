@@ -31,6 +31,11 @@ class McpToolsListClientTest {
      * media types (#779).
      */
     private volatile boolean enforceStreamableAccept = false;
+    /**
+     * When set, the stub answers in an SSE frame (Content-Type text/event-stream)
+     * instead of raw JSON.
+     */
+    private volatile boolean sseResponse = false;
     private final AtomicReference<String> lastAuth = new AtomicReference<>();
     private final AtomicReference<String> lastBody = new AtomicReference<>();
     private final AtomicReference<String> lastMethod = new AtomicReference<>();
@@ -52,7 +57,7 @@ class McpToolsListClientTest {
                 return;
             }
             byte[] out = body.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.getResponseHeaders().set("Content-Type", sseResponse ? "text/event-stream" : "application/json");
             exchange.sendResponseHeaders(status, out.length);
             exchange.getResponseBody().write(out);
             exchange.close();
@@ -110,6 +115,28 @@ class McpToolsListClientTest {
         List<McpToolsListClient.UpstreamTool> tools = client.fetchTools(url(), null);
 
         assertThat(tools).containsExactly(new McpToolsListClient.UpstreamTool("read_wiki_structure", "wiki"));
+    }
+
+    @Test
+    @DisplayName("SSE-framed upstream response is unwrapped before parsing (#779)")
+    void sseFramedResponseIsUnwrapped() {
+        sseResponse = true;
+        body = "event: message\n"
+                + "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[{\"name\":\"read_wiki_structure\"}]}}\n"
+                + "\n";
+
+        List<McpToolsListClient.UpstreamTool> tools = client.fetchTools(url(), null);
+
+        assertThat(tools).containsExactly(new McpToolsListClient.UpstreamTool("read_wiki_structure", null));
+    }
+
+    @Test
+    @DisplayName("an SSE frame without any data payload fails closed (#779)")
+    void sseWithoutDataFailsClosed() {
+        sseResponse = true;
+        body = "event: ping\n\n";
+
+        assertThatThrownBy(() -> client.fetchTools(url(), null)).hasMessageContaining("data");
     }
 
     @Test
