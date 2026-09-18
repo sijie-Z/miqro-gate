@@ -4818,3 +4818,47 @@ function shareOf(group) {
 ### 教训
 
 **这一条来自"把同一类问题在不同页面上逐个对照"**：#849 是"未定价的量被当成总额"，这条是"未定义的比例被当成零"——**换了页面，同一个陷阱换了一件衣服**。只在改动面附近看，两次都发现不了。
+
+## 2026-09-18 对账上传的 `providerCode` 实际取 product_code——只有 UI 标签说清了（#855）
+
+用户视角审计的第三条，也是**最小的一条**。
+
+照 `docs/api-contract.md` §5.27 写上传请求，传 `providerCode=tencent`（provider slug），得到：
+
+```json
+{"status":400,"code":"RECONCILIATION_PROVIDER_UNKNOWN",
+ "detail":"供应商目录中不存在该 product_code。"}
+```
+
+改传 `tencent-coding-plan` 即成功——**它要的是 `provider_products.product_code`（供应商*产品*码）**，不是 `providers.slug`。
+
+### 哪一层说清了、哪一层没说
+
+| 层 | 取值域 |
+|---|---|
+| 前端上传对话框标签 | ✅ 「**供应商 product_code \***」 |
+| 400 报错 detail | ⚠️ 说了 `product_code`，但**要先错一次**才看得到 |
+| `docs/api-contract.md` | ❌ 只说"须在供应商目录"——读起来就是 `providers` 表 |
+| `docs/bill-reconciliation-contract.md` | ❌ 未提该参数 |
+
+**唯一写清取值域的地方是 UI 的表单标签**，走 API 的接入方没有等价说明。两处文档各补一句（不改接口、不动 OpenAPI 基线）。
+
+### 同一次审计里，这个 surface 本身是好的
+
+顺带把账单对账**真跑了一遍**（这是本轮的额外收获，不只是读代码）：
+
+- 造了一份两行的 canonical 账单（一行对得上本地事件、一行只存在于账单），上传成功
+- 报告：`totalRows 2 / matched 1 / unmatchedProvider 1 / unmatchedLocal 0 / lineErrorCount 0 / amountDiff 0.00050000`——**金额差恰为账单独有那行的 0.000500**，逐项正确
+- 明细页：`匹配级别` 列给出 **`REQUEST_ID`**，并列出「账单行/本地记录」双向 id（`row-1/1374a37f-…`），差异行匹配级别为 `—`
+- UI 数字与 API 逐项一致；四态筛选页签、导出 CSV 俱在
+
+**这套东西是能用的。** 本条只关于"那个参数该怎么填"。
+
+### 一条自我校准
+
+本轮我读代码提出过 **6 个**"怀疑是这样"，**全部被证伪**（
+`MIQROKEY_UPSTREAM_ALLOWED_CIDRS` 有文档、忘记密码有 toast、管理员能重置密码、网关上游门控是按设计、
+`input_tokens` NULL 是刻意的 `COALESCE` 双列设计、对账匹配器也用了同一个 coalesce）。
+**真问题全部来自"把产品跑起来、逐页对照服务端"**（#849/#853），以及这次"照文档真发一个请求"。
+
+**读代码猜问题的命中率，比我以为的低得多。** 与"检查必须与它的主语对齐"同族：**我的判断主语是"代码看起来对不对"，而用户的问题域是"用起来对不对"。**

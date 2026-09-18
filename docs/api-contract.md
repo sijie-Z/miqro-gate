@@ -1166,9 +1166,10 @@ detail_currency, detail_occurred_at, detail_status, detail_bucket_key, detail_pr
 
 - **幂等**：同 (providerCode, window, currency, uploadSha256) 重复导入返回既有报告（不重复执行）；`FAILED` 除外（可重试）。
 - 上传上限：16MB（解压 64MB / 100,000 行）；超限或 gzip 损坏 `400 RECONCILIATION_UPLOAD_INVALID`。
-- 校验：窗口 ≤31 天且 from<to（`RECONCILIATION_WINDOW_INVALID`）；providerCode 须在供应商目录
-  （`RECONCILIATION_PROVIDER_UNKNOWN`）；currency ISO-4217（`RECONCILIATION_PARAM_INVALID`）；报告不存在
-  `RECONCILIATION_NOT_FOUND`（404）。
+- 校验：窗口 ≤31 天且 from<to（`RECONCILIATION_WINDOW_INVALID`）；**`providerCode` 取的是
+  `provider_products.product_code`（供应商*产品*码，如 `tencent-coding-plan`），不是 `providers.slug`**
+  ——传成 slug 会得到 `RECONCILIATION_PROVIDER_UNKNOWN`，而报错正文说的是 `product_code`；
+  currency ISO-4217（`RECONCILIATION_PARAM_INVALID`）；报告不存在 `RECONCILIATION_NOT_FOUND`（404）。
 - 审计：`RECONCILIATION_CREATED/SUCCEEDED/FAILED`（摘要含上传 sha 与计数，**不存正文**；RUNNING 为瞬时态不入审计）；
   导出记 `RECONCILIATION_EXPORT`（`targetType=RECONCILIATION`，摘要 `{rows, truncated}`，其中 `rows` 为**截断后**实际导出的行数，与 `X-MiQroKey-Rows` 同值）；参数非法或报告不存在时在 `record` 前失败，不产生审计行。
 - 语义口径：无 ID 账单行若未匹配计入 `UNMATCHED_PROVIDER` 行、同时按（productCode, 5 分钟桶）计入
