@@ -3814,6 +3814,26 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **绕行（修复前已在演示站完成，数据面健康性佐证）**：手工登记（官方占位 `method=POST path="/"`）+ ENABLED 后，以消费者凭据经网关 `tools/call read_wiki_structure` → 200 返回真实内容，`mcp_access_log`：`FORWARDED | read_wiki_structure | ttfb 617ms`。
 
+## 2026-09-18 导出任务补「含调整」等级——V41 预留的那条轴（#716）
+
+**先界定缺口，别重复做**：本项的验收里"净额维度在导出中可用""含调整维度可标记"**已被 #755 逐行覆盖**（CSV/JSONL 的 `net*`×4 + 行级 `adjusted`）。真正剩下的是 V41 注释预留的那半句——"净额/含调整等级随 F20 扩展"——即**任务级**的声明；以及两处**已过期的文档**（api-contract 还写着"待扩展"、§5.6b 还写着"读取路径尚未接入"）。
+
+**为什么另起一条轴，而不是往 `reconcileLevel` 里加成员**：两者是**互相独立**的问题——"能不能按请求 ID 对上账单"与"数字里含不含修正"。合进一个枚举就得为每种组合造一个值（`PROVIDER_ID_BACKED_AND_ADJUSTED`…），读起来两边都不是。V41 的注释当初把它们写在一起，这是**把它拆开**而不是照它实现。
+
+**为什么是任务级而不只是行级**：消费者希望在**读文件之前**（或只看任务列表时）就知道 `net*` 列要不要看。所以：
+
+- `adjustmentLevel` = `PRESENT`（至少一行被修正过 → `net*` 才是应对账的那套）/ `NONE`（没有任何行被改过 → `net*` 只是重复观察值）；空窗口/历史任务为 null
+- 文件内同步：`local_caliber_note` 追加 `;adjustments=present|none`（`local-instant` 前缀与 `reconcile=` 位置都不动）
+- 它读的正是文件里那个**行级标记**（`adjusted`），所以任务级声明与文件内容**不可能不一致**
+
+**顺带修掉两处文档漂移**（本仓的老毛病，双向都会漂）：`api-contract` §5.5 的"净额/含调整等级随 F20 扩展"已兑现；§5.6b 的"读取路径尚未接入"其实早已不成立（#753/#755/#773 都上了）。
+
+**验证**：先证明会红——撤掉实现但**保留迁移**（否则退化成"列不存在"的粗红），7 跑 **3 失败、恰好是新增那三条**（`expected "PRESENT" but was null`），既有 4 条全过；恢复后 7/7 绿。三条断言分别钉住：未修正= NONE 且文件里写着 `adjustments=none`、有修正= PRESENT 且文件里写着 `present`、**冲销之后仍是 PRESENT**（数字回到观察值，只有这条声明还说得清文件来自被改过的行——与 #774 同一条规则）。
+
+**一处 UI 取舍**：只为 `PRESENT` 出 chip，`NONE` 走 `—`。给"没有修正"也挂个徽标等于几乎每行都有徽标，反而把真正要看的那行淹掉；而这张表本来就用 `—` 表示"无话可说"。
+
+**另记**：迁移号按纪律取「develop 树最高号（66）∪ open issue 登记号」之后的下一个 = **V67**；定号前也扫了 open PR 的正文。
+
 ## 2026-09-18 ADR-0021 草案：同产品凭证回退 ×「每笔唯一归属」的兼容设计（#717）
 
 **性质**：**文档线，不含任何产品代码**；ADR 状态 **Proposed**（决策权在 owner；#717 明示「不做也是有效产出」，故 §3 保留「维持现状」为并列选项）。交付：新增 `docs/decisions/0021-same-product-credential-failover.md` + `docs/decisions/README.md` 索引行。
