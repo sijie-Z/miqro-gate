@@ -190,7 +190,6 @@ Gateway 使用版本化只读路由快照 + 有界用量写入队列（G2.2/G2.4
 | `MIQROKEY_GATEWAY_DB_PASSWORD` | 空 | 数据面密码（生产用 `_FILE` 约定或 Secret 挂载） |
 | `MIQROKEY_GATEWAY_DB_POOL_SIZE` | `5` | 数据面连接池；热路径不执行阻塞查询，快照刷新在专用调度器 |
 | `MIQROKEY_GATEWAY_ROUTE_REFRESH_INTERVAL` | `30s` | 路由快照刷新周期——兜底机制；正常路径由 `pg_notify` 事件即时刷新，通知丢失时按此周期自愈（宽限期配置见 4.5） |
-| `MIQROKEY_GATEWAY_ROUTE_RETRY_CHECK_INTERVAL` | `2s` | 快照「schema 尚未就绪」快速重试的滴答周期（#846）：全新部署时网关可能先于控制面 Flyway 起跑，此时刷新失败若为 PostgreSQL `42P01`（表不存在=还没建到）按 2→4→8→16→30s 退避快速重试并打 WARN（区别于其它 SQL 错误的 ERROR）；就绪后该滴答只做一次原子检查。编排侧另已让 gateway 等 control-plane `service_healthy`（compose.prod.yaml），此旋钮兜底"网关指向未迁移库"的旁路 |
 | `MIQROKEY_GATEWAY_ROUTE_NOTIFY_CHANNEL` | `miqrokey_route_refresh` | PostgreSQL `LISTEN/NOTIFY` 通道名；控制面在变更事务提交后（AFTER_COMMIT）向该通道发布通知，Gateway 专用连接监听并立即重载快照 |
 | `MIQROKEY_GATEWAY_QUEUE_CAPACITY` | `50000` | 用量写入有界队列容量（#424：吸收负载下写入端多秒级停顿的红线突发） |
 | `MIQROKEY_GATEWAY_QUEUE_FLUSH_THRESHOLD` | `100` | 单次批量写入条数（#417：每次 flush **全量排空**队列、按此值分块调用 writer；此前误作「每次 flush 排空上限」，把稳态吞吐钉死在 threshold/interval = 20 事件/秒） |
