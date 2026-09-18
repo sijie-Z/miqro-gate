@@ -3838,6 +3838,15 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **交付**：`docs/workbuddy-mcp-onboarding-sample.md`——真实封闭客户端（WorkBuddy，腾讯 CodeBuddy 系）按指南 §4 接入网关 MCP 数据面的完整样章：拓扑、五步照抄（注册服务→消费者裁 `mcp:call`→`~/.workbuddy/mcp.json`（**无点号**；带点的是应用自管文件，写错不生效）→过信任门（`mcp_approvals` 键=sha256(url origin)::name）→同步并放行工具）；证据表；两条踩坑（自管配置陷阱；`HEALTH_PATH` 对 SPA 兜底页的假 HEALTHY——应选 `JSONRPC_INITIALIZE`）。
 
 **实测证据链**：应用日志 `[MCP-Connect] ok … tools=3`；`mcp_access_log` 6 行 `TOOL_UNAVAILABLE`（放行前，toolName 完整）+ `FORWARDED | read_wiki_structure | 617ms`（放行后）。**实测暴露真缺陷 #779**（`tools/sync` Accept 缺 `text/event-stream` → 严格上游 406）——修复 PR #781 已合并（先证红两条回归）。
+## 2026-09-18 MCP tools/sync 修复之二：SSE 响应体解帧（#779 收口）
+
+**背景**：PR #781（Accept 兼发双媒体类型）上线后，对严格上游的失败**只前进了一步**——406 消失，但上游按规范合法改发 **SSE 帧**（`event: message` + `data: {...}`），同步客户端仍按裸 JSON 解析 → `502 TOOLS_SYNC_UPSTREAM_FAILED / Unrecognized token 'event'`。真机（演示站 deepwiki 服务）复现，错误逐字同型。
+
+**修复**：`McpToolsListClient` 判 `Content-Type: text/event-stream` 时按 SSE 规范取 `data:` 行（多行按换行拼接）再解析；无 data 载荷 fail-closed（"上游 SSE 响应中没有 data 载荷"）。
+
+**测试**：两条新用例**先证红**（SSE 解帧 / 无 data 拒绝），修复后 `McpToolsListClientTest` **11/11 绿**。
+
+**部署教训（本轮踩到，含一次自我纠正）**：compose.prod.yaml 的 cp 服务带 `build:` 段（context=`..`=演示树 `/opt/miqrokey`，与真正构建用的 `/opt/miqrokey-dev` 不同）——漏 `--no-build` 有**用旧树产出镜像**的风险（触发条件：该 tag 本地无镜像时 `up` 才会构建）。本轮曾观测"容器镜像 ID ≠ tag 镜像 ID 但 compose 显示 Running"，最初归因为"compose 按镜像引用名判等"——**该归因已被直接观测否定**：同 tag 下 `up` 不加 `--force-recreate` 亦会 `Recreate/Recreated`，compose 按解析出的镜像 ID 判等；更可能的成因是**多会话并发构建同一 tag 的竞态**（本轮时间线：自建镜像 11:11:03 完成，容器 11:11:07 从另一镜像创建）。**落为收尾断言**：部署后必须核 `container.Image == tag.Id`（"Up N seconds + healthy"不算数）——它正是抓这类竞态的检查；**跨会话纪律：同一 tag 不并发构建、部署串行**。
 
 ## 2026-09-18 ADR-0021 草案：同产品凭证回退 ×「每笔唯一归属」的兼容设计（#717）
 
