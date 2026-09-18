@@ -4176,3 +4176,41 @@ if (!STATE_CHANGING_METHODS.contains(method)) return true;   // GET 直接放行
 仍加了 2 行守卫（`MSYS_NO_PATHCONV=1; export`）并在注释里写明理由：Linux 上是空操作，而 Windows 开发机上省下的是一次**恰好属于本脚本要消灭的那一类**的假报警。**又一次是同族**：不是检查写错，是检查与它所运行的环境没对齐。
 
 另：顺手把三个都编号为「6」的小节改成 5–9（本就在我要插入的位置）。
+
+## 2026-09-18 部署脚本补上静态检查：shellcheck 进 CI（#814）
+
+仓库 17 个 shell 脚本，`deploy/deploy.sh` 是**单机部署的唯一入口**，却**完全没有 lint**——CI 里 `deploy/` 只受 `compose` job 的 `docker compose config` 覆盖，而那只看 compose 文件、不看脚本。
+
+### 为什么这条特别值
+
+#809 那条 `case "$smoke_code" in ${SMOKE_EXPECT})`——**经展开到达 case 的 `|` 是字面字符**，文档示例 `'200|401'` 因此永远匹配不上。**SC2254 讲的正是这一行**，而它原本就挂着：
+
+```sh
+# shellcheck disable=SC2254
+case "$smoke_code" in ${SMOKE_EXPECT})
+```
+
+**为消一个告警而写的 disable，遮住的恰是真 bug。** 而这条链的前提是**先有检查**——没有 shellcheck 的仓库里，这行连告警都不会有，bug 会一直安静地待着。
+
+同一文件同一天还犯了另外两处（#807 断言比 compose 更严、#812 的 MSYS 路径改写导致挂载正确也报缺失）：**部署脚本是本项目事故密度最高的一块，却也是唯一没有任何静态检查的一块。**
+
+### 现状几乎干净，所以没开豁免清单
+
+`koalaman/shellcheck:stable -S warning` 对全部 17 个脚本**只报 1 条**（`deploy/backup/test-restore.sh` 的未用循环变量），改成 `i`→`_` 即可；`deploy.sh` 在修掉我自己那行 dry-run 拼接（SC2140）之后 **exit 0**。**零豁免清单**——不给自己留"下次再说"的地方。
+
+### 红证明
+
+把 #809 那个形状（`case "$code" in ${PAT})`）放回一个脚本：
+
+```
+red.sh:7: SC2254 (warning): Quote expansions in case patterns to match literally…
+=== exit 1 ===
+```
+
+**但它给的修法是"加引号"，而这里加引号是错的方向**——`2??` 需要 glob 语义，加了引号就变成匹配字面 `2??`。**SC2254 的价值是把这一行拎出来让人看，不是照它说的改**；实际修法是拆开 `|`、各分支仍走 glob。**照抄 linter 的建议会把默认模式静默改松**——同一种"检查与主语没对齐"的陷阱，只是这次检查自己也会说错话。
+
+### 口径
+
+选 `-S warning` 而非默认：`info` 级会报 SC2016（单引号不展开）这类**有时是有意为之**的写法（我 dry-run 那行就是故意打印字面引号）。一上来全开只会逼出更多 disable——**而 disable 正是这次要治的东西**。先卡 warning，需要再收紧。
+
+job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
