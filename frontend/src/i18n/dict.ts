@@ -1705,6 +1705,15 @@ export const PATTERNS: Array<[RegExp, string]> = [
   [/^基于当前 (.+?) 条记录$/, 'Based on the current $1 records'],
   [/^修改「(.+?)」的显示名。$/, 'Change the display name for "$1".'],
   [/^凭证当前状态为 (.+?)，无需停用。$/, 'The credential is already $1 — nothing to disable.'],
+  // #714：被 Agent 引用的凭证不可轮换/停用（409 CREDENTIAL_REFERENCED_BY_AGENT）。
+  [
+    /^凭证已被 Agent「(.+?)」引用，不能轮换；请先停用该 Agent。$/,
+    'The credential is referenced by agent "$1" and cannot be rotated — disable that agent first.',
+  ],
+  [
+    /^凭证已被 Agent「(.+?)」引用，不能停用；请先停用该 Agent。$/,
+    'The credential is referenced by agent "$1" and cannot be disabled — disable that agent first.',
+  ],
   [/^修改「(.+?)」的名称与路由标签。$/, 'Change the name and routing tag for "$1".'],
   [/^(.+?)\ 个可用$/, '$1 active'],
   [/^(.+?)\ 轮换中$/, '$1 rotating'],
