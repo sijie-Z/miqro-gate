@@ -29,6 +29,8 @@
 #                  cannot tell a correct deployment from a healthy-looking wrong
 #                  one, and this is what can.
 #   --smoke-expect status pattern for that URL (default 2??, e.g. '200|401')
+#                  (--smoke-url defaults to the first MIQROKEY_ORIGIN_ALLOWLIST
+#                   entry in the env file; pass an empty value to opt out)
 #   --smoke-origin Origin header to send (the allowlist is config, so a request
 #                  that exercises it is worth more than one that does not)
 #   --dry-run      print every command instead of running it; do this first on an
@@ -57,7 +59,9 @@ TAG="${MIQROKEY_IMAGE_TAG:-local}"
 # containers next to the live ones instead of replacing them. Pinned here, along
 # with the project directory, so the script is cwd-independent.
 PROJECT="${MIQROKEY_COMPOSE_PROJECT:-miqrokey}"
-SMOKE_URL="${MIQROKEY_DEPLOY_SMOKE_URL:-}"
+# "auto" (the default) derives the target from the env file's allowlist below;
+# an explicit value is used as given; an explicit empty one opts out.
+SMOKE_URL="${MIQROKEY_DEPLOY_SMOKE_URL:-auto}"
 SMOKE_EXPECT="${MIQROKEY_DEPLOY_SMOKE_EXPECT:-2??}"
 SMOKE_ORIGIN="${MIQROKEY_DEPLOY_SMOKE_ORIGIN:-}"
 SMOKE_TIMEOUT="${MIQROKEY_DEPLOY_SMOKE_TIMEOUT:-20}"
@@ -84,7 +88,7 @@ while [ $# -gt 0 ]; do
         --services) SERVICES="${2:?--services needs a list}"; shift 2 ;;
         --commit) COMMIT="${2:?--commit needs a value}"; shift 2 ;;
         --caller) CALLER="${2:?--caller needs a value}"; shift 2 ;;
-        --smoke-url) SMOKE_URL="${2:?--smoke-url needs a URL}"; shift 2 ;;
+        --smoke-url) SMOKE_URL="${2-}"; shift 2 ;;
         --smoke-expect) SMOKE_EXPECT="${2:?--smoke-expect needs a pattern}"; shift 2 ;;
         --smoke-origin) SMOKE_ORIGIN="${2:?--smoke-origin needs an origin}"; shift 2 ;;
         --dry-run) DRY=1; shift ;;
@@ -206,28 +210,89 @@ if [ "$VERIFY_ONLY" = 0 ]; then
     esac
 fi
 
+# ---- 6. assert the container received the .env's values ------------------------
+# The image assertions cannot see this either, and it is how #794 shipped a stack
+# whose origin allowlist had silently fallen back to the compose default. Comparing
+# the container against `compose config` would prove nothing (both read the same
+# file, and so are wrong together); comparing it against what the file *says* does.
+# Only keys the container already carries are checked: a variable the compose file
+# does not pass to a service is legitimately absent from it.
+if [ "$DRY" = 0 ]; then
+    while IFS= read -r env_line; do
+        case "$env_line" in
+            '' | '#'*) continue ;;
+        esac
+        env_line="${env_line#export }"
+        env_key="${env_line%%=*}"
+        env_want="${env_line#*=}"
+        [ "$env_key" != "$env_line" ] || continue
+        # shellcheck disable=SC2086
+        for svc in $SERVICES; do
+            cid="$(container_of "$svc")"
+            [ -n "$cid" ] || continue
+            env_got="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null \
+                | sed -n "s/^${env_key}=//p" | head -n 1)"
+            if [ -n "$env_got" ] && [ "$env_got" != "$env_want" ]; then
+                echo "ASSERT FAILED $svc: $env_key='$env_got' but $ENV_FILE says '$env_want'" >&2
+                failed=1
+            fi
+        done
+    done <"$ENV_FILE"
+fi
+
 # ---- 6. smoke: can a real client actually use it? ----------------------------
 # Sections 4 and 5 prove the right image is running. They say nothing about
 # whether it is *correct*: a container can be healthy, on exactly the right image,
 # and still reject its own origin with 403 because its .env was never loaded and
 # every variable fell back to a compose default. Only asking the stack to serve a
 # request catches that, so this step exists and does not pretend to be optional.
+# The derived default is the stack's own public origin: it is the one URL this
+# deployment exists for, it comes out of the very file whose absence caused the
+# outage, and a request carrying the allowlisted Origin exercises *config* rather
+# than liveness. Measured on the demo box, the host reaches its own origin in ~20ms
+# (hairpin works), so this is a real check rather than a hope.
+if [ "$SMOKE_URL" = "auto" ]; then
+    SMOKE_URL=""
+    auto_origin="$(sed -n 's/^MIQROKEY_ORIGIN_ALLOWLIST=//p' "$ENV_FILE" 2>/dev/null | head -n 1 | cut -d, -f1)"
+    case "$auto_origin" in
+        http*)
+            SMOKE_URL="${auto_origin%/}/"
+            : "${SMOKE_ORIGIN:=${auto_origin%/}}"
+            echo "smoke: defaulted to the allowlisted origin ($SMOKE_URL)"
+            ;;
+    esac
+fi
 if [ -z "$SMOKE_URL" ]; then
-    echo "note: no --smoke-url given — nothing here checked that the stack serves requests" >&2
+    echo "note: no smoke target given, and none could be derived from $ENV_FILE —" \
+        "nothing here checked that the stack serves requests" >&2
 elif [ "$DRY" = 1 ]; then
     echo "DRY  curl ${SMOKE_ORIGIN:+(-H Origin: $SMOKE_ORIGIN) }$SMOKE_URL  (expect ${SMOKE_EXPECT})"
 else
     if [ -n "$SMOKE_ORIGIN" ]; then
         smoke_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$SMOKE_TIMEOUT" \
-            -H "Origin: $SMOKE_ORIGIN" "$SMOKE_URL" 2>/dev/null || echo 000)"
+            -H "Origin: $SMOKE_ORIGIN" "$SMOKE_URL" 2>/dev/null || true)"
     else
         smoke_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$SMOKE_TIMEOUT" \
-            "$SMOKE_URL" 2>/dev/null || echo 000)"
+            "$SMOKE_URL" 2>/dev/null || true)"
     fi
-    # The expectation is a case pattern, not a literal list.
+    # curl prints the code even when it fails, and a hard failure can leave it
+    # empty: anything that is not a three-digit code means "it did not answer".
+    case "$smoke_code" in
+        [0-9][0-9][0-9]) : ;;
+        *) smoke_code=000 ;;
+    esac
+
+    # "Answered the wrong thing" and "could not be reached" are different findings
+    # and are kept apart: the first is the incident #794 caused (a stack rejecting
+    # its own origin), the second is weather — the box's route to its own public
+    # origin. Failing the deploy on the second would dilute the first.
     # shellcheck disable=SC2254
     case "$smoke_code" in
         ${SMOKE_EXPECT}) echo "smoke ok: $SMOKE_URL -> $smoke_code" ;;
+        000 | "")
+            echo "smoke WARNING: $SMOKE_URL unreachable — not a failure, but nothing here" \
+                "checked that the stack serves requests" >&2
+            ;;
         *)
             echo "SMOKE FAILED: $SMOKE_URL -> $smoke_code (expected $SMOKE_EXPECT)" >&2
             failed=1
