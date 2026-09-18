@@ -277,6 +277,34 @@ describe('NextAdminUsageView', () => {
     expect(wrapper.find('[data-testid="savings-unpriced"]').exists()).toBe(false);
   });
 
+  it('#801: marks the total cost as not-a-total when a gap exists', async () => {
+    mockApi.adminUsageSummary.mockImplementation(async (query) => {
+      const summary = summaryFor(String(query?.groupBy ?? 'project'));
+      return {
+        ...summary,
+        totals: {
+          ...summary.totals,
+          pricingStatus: 'PARTIAL',
+          unpriced: { unpricedEvents: 617, unavailableEvents: 565 },
+        },
+      } as never;
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const marker = wrapper.find('[data-testid="cost-unpriced"]');
+    expect(marker.exists()).toBe(true);
+    expect(marker.text()).toContain('未定价');
+  });
+
+  it('#801: leaves a fully priced cost unmarked', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="cost-unpriced"]').exists()).toBe(false);
+  });
+
   it('passes a picked time range to the summary, series and records APIs', async () => {
     const wrapper = mountView();
     await flushPromises();

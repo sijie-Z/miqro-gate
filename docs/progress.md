@@ -3833,6 +3833,55 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **一处 UI 取舍**：只为 `PRESENT` 出 chip，`NONE` 走 `—`。给"没有修正"也挂个徽标等于几乎每行都有徽标，反而把真正要看的那行淹掉；而这张表本来就用 `—` 表示"无话可说"。
 
 **另记**：迁移号按纪律取「develop 树最高号（66）∪ open issue 登记号」之后的下一个 = **V67**；定号前也扫了 open PR 的正文。
+
+## 2026-09-18 适配器状态「持续警告」前端实现（#735 前端部分）——准入门控刻意不动
+
+**先复核现状**：`docs/provider-adapter-contract.md:120` 承诺「生产默认目录只启用 `VERIFIED` 产品；管理员可以显式启用 `IMPLEMENTED`，**页面必须持续警告**」。实现侧对得上「持续警告」的只有「徽标 + hover 提示」这一层：
+
+- `AdapterStatus` 的唯一生产使用点是 `CatalogManifestValidator.java:123` 的**解析**（`requireEnum(product, "status", …)`），解析完不做任何准入判断
+- `ImplementationStatus` 没有任何准入分支
+- `CatalogSeedService.java:101` 把种子一律写成 `'DOCUMENTED'`
+- 目录量化：`provider-catalog.json` 共 **23** 个产品，状态计数 `{"DOCUMENTED":23}`——**0 个 IMPLEMENTED、0 个 VERIFIED**
+
+**因此只实现承诺里可验证的那半句——「页面必须持续警告」，准入行为一个字不改。** 照字面实现「只启用 VERIFIED」会让当前 23 个产品全部不可用，属产品决策，只出决策材料（已发 #735 评论），不在本批动代码。
+
+**改动**（`frontend/src/views/next/NextProvidersView.vue`，另 `frontend/src/i18n/dict.ts` 补双语文案）：
+
+- 页级常驻警示条 `data-testid="adapter-warning-banner"`：只要有任一产品状态不是 `VERIFIED` 就一直在页上（hover 提示会被漏看）
+- 行级常驻标记 `data-testid="adapter-warning-row"`（`⚠ 未验证`）：刻意用纯 `<span>`，因为既有断言把 `.ui-tooltip__anchor` 钉成 2 个，再加 Tooltip 会破既有测试
+- 产品详情面（模型目录对话框）内重复一次 `data-testid="product-models-adapter-warning"`，带该状态的解释文案
+- 判据就是状态字段本身：`status !== 'VERIFIED'`，`VERIFIED` 不出任何警告；DRAFT/DOCUMENTED/IMPLEMENTED/DEGRADED/DISABLED 全覆盖
+- 文案进 EN 词典：4 条 DICT + 1 条 PATTERN（计数行被 Vue 合并成单个文本节点，只能走 PATTERN）
+
+**一处实现取舍**：仓库没有独立的「供应商详情页」，唯一的产品详情面是模型目录对话框，所以「详情页警示块」落在它顶部。
+
+**验证（先证明断言有区分力）**：把 `isUnverified` 打成两个变异体——`return false` 与 `return true`——各挂 3 条测试（`3 failed | 8 passed`），恢复后全绿，并用 grep 确认无变异体残留。之后：
+
+- `npm --prefix frontend run test -- --run` → **63 files / 390 tests passed**
+- `npm --prefix frontend run typecheck` → exit 0
+- `npm --prefix frontend run build` → exit 0（built in 23.96s）
+- `npx eslint <4 个改动文件>`（不带 `--fix`）→ 0 errors（1 条 prettier 警告落在既有 import 行，非本批引入）
+
+**一处 tooling 陷阱（本批实录）**：本仓 `npm run lint` 的脚本是 `eslint . --ext .vue,.ts,.tsx --fix`——**它会改写整个前端**。本次跑完 lint 后 `git status` 出现 148 个与本改动无关的文件（含 `types/generated.ts` 整体重排），已逐个 `git checkout --` 还原，只留 4 个改动文件；随后改用不带 `--fix` 的 `npx eslint` 复核。后续批次别把 `npm run lint` 当成只读检查。
+
+## 2026-09-18 评审响应对（#735 前端部分）——只收敛 minor，不动准入门控
+
+**评审结论**：0 blocker。准入红线被独立复核确认为「未触碰」：`git show --numstat bdc4b9e4` 5 文件、**0 删除行**；`grep -rn "\.status()" backend/provider-adapters/src/main backend/provider-spi/src/main` **0 命中**（目录里的 status 解析后从不被读取）；路由快照 SQL 无任何状态过滤。5 条 minor 的逐条处置：
+
+- **M2（`已停用` 无 EN 词条）→ 已修**：`frontend/src/i18n/dict.ts` 补 `'已停用': 'Disabled'`——六个状态标签里唯一缺词条的一条（独立词条；`规则已停用` 这类带前缀的串另有条目）。新详情弹窗警告块会把该标签渲染进英文界面，属本次新增的暴露面。
+- **M3（文案只覆盖「未验证/已降级」）→ 已修**：警示条第三行改为「未处于「已验证」状态的产品仍按当前配置可用（已停用的除外），但不应承载生产流量；本提示不改变产品的启用与可用行为。」，行内标记 `⚠ 未验证` → `⚠ 非已验证`。措辞与判据 `status !== 'VERIFIED'` 对齐，并顺带消掉 M1 的用户可见症状（警告不再指向一个不存在的「启用」开关）。
+- **M1（`docs/provider-adapter-contract.md:120` 仍承诺门控）→ 不改，转决策材料**：该句正是 #735 待 owner 拍板的争点，本批改文档等于替 owner 预设定论；M3 的改写已让页面不再宣称存在启用开关。拍板后按选定口径一并更新文档与种子状态。
+- **M4（banner 无 `role="status"` / `aria-live`）→ 不改**：同文件既有 `ui-alert--error`（400 行）同样没有，只给新 banner 加会让同类告警行为不一致；评审人也已自降为 nit。若要统一，应作为独立 a11y 批覆盖全部 `ui-alert`。
+- **M5（视觉基线 `admin-providers-1440x900.png` 陈旧）→ 本批不重生成**：基线是捕获式、无像素断言（`docs/progress.md` 有先例），重生成需起 Playwright + `preview` 并重建产物，不改变 CI 结论。已在 PR「Remaining risks」登记。
+
+**评审响应改动的验证（真实输出）**：
+
+- `npm --prefix frontend run typecheck` → exit 0
+- `npm --prefix frontend run test` → **63 files / 392 tests passed**（基线 390：新增 1 条 DISABLED 用例 + 更新既有断言）
+- `npx eslint . --ext .vue,.ts,.tsx`（在 `frontend/` 下、**不带 `--fix`**）→ **0 errors**；62337 warnings 全为工作区既有的 CRLF `Delete ␍`，非本批引入
+- `npm --prefix frontend run build` → exit 0（`✓ built in 24.02s`）
+
+**首跑失败与最小修复（如实记录）**：新加的 DISABLED 用例第一次跑是**失败**的——它在 `document.body` 里收集 `.ui-tooltip` 文本，拿到的是同文件早先用例遗留的「已用真实供应商凭证完成契约测试。」（tooltip 只在锚点聚焦后才挂载，且从不卸载）。修复只加两行：`await wrapper.find('.ui-tooltip__anchor').trigger('focus');` + `await flushPromises();`，断言口径不变；修后该文件 12/12 通过。
 ## 2026-09-18 WorkBuddy MCP 层接入实测样章（#742 第③片收口）
 
 **交付**：`docs/workbuddy-mcp-onboarding-sample.md`——真实封闭客户端（WorkBuddy，腾讯 CodeBuddy 系）按指南 §4 接入网关 MCP 数据面的完整样章：拓扑、五步照抄（注册服务→消费者裁 `mcp:call`→`~/.workbuddy/mcp.json`（**无点号**；带点的是应用自管文件，写错不生效）→过信任门（`mcp_approvals` 键=sha256(url origin)::name）→同步并放行工具）；证据表；两条踩坑（自管配置陷阱；`HEALTH_PATH` 对 SPA 兜底页的假 HEALTHY——应选 `JSONRPC_INITIALIZE`）。
@@ -3930,6 +3979,40 @@ EXIT=2
 顺带加了 `--verify-only`：**部署线明确说要"部署前后各查一次"，而一个不能单独跑的检查不会被跑**。流水里两个身份都记，是为了事后能分辨"tag 被人重建了"与"当初就没换过去"。
 
 **分工**：脚本+文档进仓库（可评审），**装到服务器由部署线负责**。锁选**机器层**而不是"打卡制"——打卡依赖自觉，而我们已经知道至少有一个动作方不打招呼，荣誉制只会让守规矩的人排队。
+
+## 2026-09-18 计价状态在控制台不可见——汇总层的成本被当成总额（#801）
+
+**发现方式**：修完 #790（节省侧的下界标记）后我想确认自己有没有踩到消费方，于是查了 `pricingStatus` 与 `unpriced` 的**消费方**。结果是：
+
+```
+frontend/src 中除 generated.ts 外，对 pricingStatus 的引用：0 处
+frontend/src 中除 generated.ts 外，对 unpriced 的引用：仅 #790 新增的 unpricedHits
+```
+
+也就是说 **#766 建立的 B+ 状态在控制台一处都没渲染**。控制台里唯一的「未定价」在**记录行**级（由 `row.priced` 驱动）；**分组/汇总级**——那个被当作**总额**展示的成本——没有任何标注。
+
+而 `usage-accounting` §6 早就写下了对外承诺：**`pricingStatus != COMPLETE` 时已知金额不是总额**。演示站当前就是这个状态（汇总 `PARTIAL`、`unpricedEvents=617`、`unavailableEvents=565`）：页面上那个 ¥89.9 明确不是总额，而没有任何东西说明这一点。
+
+**这与 #790 是同一类，而且更重**——成本是主要财务数字，节省是次要的。我一个小时前刚在节省侧修过同一件事，成本侧却还开着。
+
+### 实现
+
+- 新增 `frontend/src/lib/usage-pricing.ts` 的 `costGapNote()`：只为**明确知道**的缺口出声——`PARTIAL` / `UNAVAILABLE` 给文案，其余（含字段缺失）一律返回 null。**给不确定的情形加标注，等于给没有问题的数字也挂上警告。**
+- 三个视图各加一个「未定价」标记 + 气泡：管理端用量概览（总成本）、自助用量页（合计行）、成本页（两张成本卡）。**`COMPLETE` 时不加任何标记**，与 #790 同一取舍。
+- 记录行级的 `priced` 标注本就有，本次补的是**它上面那一层**。
+
+### 顺带查出一处**我自己留下的过期文案**
+
+成本页「上游已付成本」的提示写着"**按最新单价**估算"——而读侧从 #766 起就改成"**事件发生时**的冻结价"了。即我在后端改了口径，界面上那句话没跟着改。已改为「按事件发生时的价目估算」。**这类漂移不报错、只是静静地说错话**，和本会话反复遇到的"存了但没人看"是同一个家族。
+
+### 验证
+
+- **先证明会红**：把 `costGapNote` 改成恒返回 null → **恰好 5 条失败**（3 个视图 + 2 个 lib 文案断言），其余 42 条（含三条"`COMPLETE` 时无标记"）照常通过
+- 前端 47/47（相关 4 个 spec）+ typecheck；全套与 build 结果见 PR
+
+### 一条贯穿今天三次改动的观察
+
+`#766`（成本状态）、`#790`（节省下界）、`#801`（界面呈现）是**同一个缺口的三次显形**：**API 暴露了的事，界面不显示就等于没交付**。前两次我都是先在后端把事实建好，然后（这次才）发现控制台看不到。往后凡是"把某个事实提升为一等公民"的改动，**验收标准里应该直接写出界面上的形态**，否则很容易停在 API 层就以为完成了。
 
 ## 2026-09-18 「调整」列在无调整行时隐藏——补 #773 验收第 3 条（#773）
 

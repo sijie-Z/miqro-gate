@@ -18,6 +18,7 @@ import { ApiError } from '@/api/http';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import UsageAdjustChip from '@/components/UsageAdjustChip.vue';
 import { netTokens } from '@/lib/usage-net';
+import { costGapNote } from '@/lib/usage-pricing';
 import {
   UiButton,
   UiDrawer,
@@ -207,6 +208,13 @@ const tokenHitRatePct = computed(() =>
  * number reads as "the cache saved almost nothing" rather than "we cannot say".
  */
 const unpricedHits = computed(() => Number(totals.value?.unpriced?.unpricedHitEvents ?? 0));
+
+/**
+ * #801: the cost figure above is not a total while this is non-null. The API has
+ * said so since #766 (`pricingStatus` + `unpriced`); the console just never showed
+ * it, so an incomplete amount read as a complete one.
+ */
+const costCaveat = computed(() => costGapNote(totals.value));
 
 const heroSub = computed(() => {
   const t = totals.value?.tokens;
@@ -1069,6 +1077,9 @@ onMounted(() => {
               >¥{{ fmtMoney(totals?.cost?.upstreamPaid) }}</span
             >
             <span class="next-admin-usage__hero-mini-sub">按官方价目估算</span>
+            <UiTooltip v-if="costCaveat" :text="costCaveat">
+              <span class="next-admin-usage__unpriced" data-testid="cost-unpriced">未定价</span>
+            </UiTooltip>
           </div>
         </div>
       </div>
