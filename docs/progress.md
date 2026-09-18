@@ -3806,3 +3806,10 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 ### 一处 tooling 假绿（本批第二次遇到同类）
 
 `-Dtest=A+B` **不是 surefire 的选择器语法**（应为逗号），会**空跑并返回 0**；又一次"构建成功"掩盖了"根本没跑测试"。加上前一批那次"调用了别的工作树的 mvnw21.sh"，这是两天内**第二次**由命令层而非代码层造成的假绿——收口前要核的是**跑了几条测试**，不是"退出码是不是 0"。
+## 2026-09-18 MCP tools/sync 兼容性修复（#779）——真实封闭客户端实测暴露
+
+**来源**：#742 第③片（WorkBuddy → 网关 MCP 数据面 → 公开 DeepWiki MCP）真机实测中，工具同步对严格 Streamable HTTP 上游 502（上游 406）——`McpToolsListClient` 只发 `Accept: application/json`，缺规范要求的 `text/event-stream`（同文件注释还自述"无 initialize 握手"，有状态上游为后续项）。触发面：一切严格校验 Accept 的上游 tools/sync 不可用 → 工具只能手工登记。
+
+**修复**：Accept 改为 `application/json, text/event-stream`；**两条回归测试先证红**（Accept 双媒体类型断言 + 严格上游 406 夹具），修复后 `McpToolsListClientTest` 9/9 绿。
+
+**绕行（修复前已在演示站完成，数据面健康性佐证）**：手工登记（官方占位 `method=POST path="/"`）+ ENABLED 后，以消费者凭据经网关 `tools/call read_wiki_structure` → 200 返回真实内容，`mcp_access_log`：`FORWARDED | read_wiki_structure | ttfb 617ms`。
