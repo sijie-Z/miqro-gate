@@ -124,10 +124,28 @@ function asGroup(row: unknown): UsageGroup {
   return row as UsageGroup;
 }
 
-function shareOf(group: UsageGroup): number {
+/**
+ * Share of the total cost, or null when there is no total to take a share of.
+ *
+ * A zero total makes every share 0/0 — undefined. Reporting 0.0% reads as "this
+ * group accounts for none of the spend" and makes the column sum to 0% instead of
+ * 100%; the honest answer is that the share cannot be computed yet (which happens
+ * whenever no usage has been priced, the same case the unpriced markers cover).
+ */
+function shareOf(group: UsageGroup): number | null {
   const total = costNumber(totalCost.value);
-  if (!total) return 0;
+  if (!total) return null;
   return (costOf(group) / total) * 100;
+}
+
+function shareWidth(group: UsageGroup): number {
+  const share = shareOf(group);
+  return share === null ? 0 : Math.min(100, share);
+}
+
+function shareLabel(group: UsageGroup): string {
+  const share = shareOf(group);
+  return share === null ? '—' : `${share.toFixed(1)}%`;
 }
 
 function formatCost(value: string | number): string {
@@ -618,10 +636,20 @@ onMounted(async () => {
             <div class="next-cost__share-track">
               <div
                 class="next-cost__share-fill"
-                :style="{ width: `${Math.min(100, shareOf(asGroup(row)))}%` }"
+                :style="{ width: `${shareWidth(asGroup(row))}%` }"
               />
             </div>
-            <span class="ui-num">{{ shareOf(asGroup(row)).toFixed(1) }}%</span>
+            <!-- A dash has to explain itself, or it just replaces one puzzle with
+                 another: say why no share can be taken. -->
+            <UiTooltip
+              v-if="shareOf(asGroup(row)) === null"
+              text="总成本为 0，没有可分摊的基数——占比无从计算"
+            >
+              <span class="ui-num next-cost__share-undefined" data-testid="cost-share-undefined">{{
+                shareLabel(asGroup(row))
+              }}</span>
+            </UiTooltip>
+            <span v-else class="ui-num">{{ shareLabel(asGroup(row)) }}</span>
           </div>
         </template>
       </UiTable>
@@ -900,6 +928,10 @@ onMounted(async () => {
   border-radius: var(--ui-radius-pill);
   background: var(--ui-muted);
   overflow: hidden;
+}
+
+.next-cost__share-undefined {
+  color: var(--ui-foreground-secondary);
 }
 
 .next-cost__share-fill {

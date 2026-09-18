@@ -166,6 +166,59 @@ describe('NextCostView', () => {
     expect(wrapper.find('[data-testid="budget-row"]').text()).toContain('预警');
   });
 
+  it('shows a dash, not 0.0%, when there is no total to take a share of (#853)', async () => {
+    // Every row unpriced: the total is 0, so 0/0 — the share cannot be computed.
+    // Printing 0.0% would read as "this project accounts for none of the spend",
+    // and the column would sum to 0% instead of 100%.
+    const unpriced = summary(true);
+    unpriced.groups = unpriced.groups!.map((g) => ({
+      ...g,
+      cost: {
+        upstreamPaid: '0',
+        projectAllocated: '0',
+        gatewayObserved: '0',
+      } as unknown as UsageCost,
+    }));
+    unpriced.totals!.cost = {
+      upstreamPaid: '0',
+      projectAllocated: '0',
+      gatewayObserved: '0',
+    } as unknown as UsageCost;
+    mockApi.adminUsageSummary.mockImplementation(async (q: { groupBy?: string }) => ({
+      ...unpriced,
+      groupBy: q.groupBy ?? 'project',
+    }));
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="cost-table"]').text()).not.toContain('0.0%');
+    const dashes = wrapper.findAll('[data-testid="cost-share-undefined"]');
+    expect(dashes.length).toBe(2);
+    expect(dashes[0]?.text()).toBe('—');
+  });
+
+  it('still reports a genuine zero share when the total is non-zero', async () => {
+    // The guard must not swallow a real zero: QA 回归 costs nothing while the
+    // total is 1.5, and that is a true 0%, not an unknown.
+    const mixed = summary(true);
+    mixed.groups![1]!.cost = {
+      upstreamPaid: '0',
+      projectAllocated: '0',
+      gatewayObserved: '0',
+    } as unknown as UsageCost;
+    mockApi.adminUsageSummary.mockImplementation(async (q: { groupBy?: string }) => ({
+      ...mixed,
+      groupBy: q.groupBy ?? 'project',
+    }));
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="cost-table"]').text()).toContain('0.0%');
+    expect(wrapper.findAll('[data-testid="cost-share-undefined"]').length).toBe(0);
+  });
+
   it('#801: marks both cost cards as not-a-total when a gap exists', async () => {
     mockApi.adminUsageSummary.mockImplementation(async (q: { groupBy?: string }) => {
       const base = q.groupBy === 'day' ? summary(false) : summary(true);
