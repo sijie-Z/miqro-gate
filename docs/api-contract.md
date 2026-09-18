@@ -502,6 +502,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 - 轮换是单事务原子操作：持有凭证行锁（`SELECT ... FOR UPDATE` 串行化并发生命周期变更），先把当前 ACTIVE 版本降级为 DRAINING（`retiredAt = now + miqrokey.credential-drain-grace`，默认 `PT0S`），再插入新 ACTIVE 版本——部分唯一索引 `uq_credential_versions_one_active` 保证任意时刻每个凭证至多一个 ACTIVE 版本。新 Secret 校验失败时整个操作回滚，当前版本不受影响。
 - 已降级版本在 `retiredAt` 前保持可解密：请求启动时已解密旧 Secret 的请求可完成（“旧请求可完成”）；路由快照刷新后新请求使用新版本。`PT0S` = 快照刷新后旧版本立即退役。
 - `disable` 把凭证置为 `DISABLED` 并降级当前 ACTIVE 版本；网关路由快照只加载 `status = 'ACTIVE'` 的凭证，刷新后该凭证不可路由，新请求干净失败。
+- **被 Agent 引用即不可变（#714）**：只要存在 `status = 'ACTIVE'` 的 Agent 绑定该凭证，`rotate` 与 `disable`（本产品没有凭证 DELETE 端点，`disable` 即生命周期终止操作）都被拒绝为 `409 CREDENTIAL_REFERENCED_BY_AGENT`，文案含阻塞的 Agent 名。解除引用的唯一路径是 `POST /api/v1/admin/agents/{id}/disable`；已禁用的 Agent 保留历史绑定（用量归属不变）但不再钉住凭证。检查在行锁与既有状态守卫之后、任何写入之前执行，被拒时数据库与审计均无写入。
 - 审计事件 `CREDENTIAL_CREATE` / `CREDENTIAL_ROTATE` / `CREDENTIAL_DISABLE` 只记变更摘要，永不包含明文或完整指纹。
 
 错误码：
@@ -513,6 +514,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `CREDENTIAL_INVALID` | 400 | Secret 格式非法（过短/过长/含控制字符） |
 | `CREDENTIAL_NOT_ROTATABLE` | 409 | 仅 ACTIVE 可轮换 |
 | `CREDENTIAL_NOT_DISABLEABLE` | 409 | 已 DISABLED/INVALID 的凭证不可再禁用 |
+| `CREDENTIAL_REFERENCED_BY_AGENT` | 409 | 凭证被 ACTIVE Agent 引用：不可轮换、不可停用（#714）；文案为 `凭证已被 Agent「<name>」引用，不能轮换\|停用；请先停用该 Agent。` |
 
 ### 5.1b 加密密钥轮换（主密钥批量重加密，#432）
 
@@ -876,6 +878,8 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/agents/{id}/usage?from&to` | 按绑定凭证的用量汇总（请求/Token/成本，默认近 93 天） |
 
 **响应 `AgentView`**：`name`/`description`/`credentialId`/`credentialName`/`providerProductId`/`providerProductName`（派生）/`status`/`createdAt`。
+
+**反向绑定约束（#714）**：创建时对凭证行加锁（`SELECT ... FOR UPDATE`），与 `rotate`/`disable` 的凭证行锁互斥，避免「校验 ACTIVE 通过 → 并发停用」竞态留下绑定到不可路由凭证的 Agent。绑定期间该凭证不可轮换、不可停用（`409 CREDENTIAL_REFERENCED_BY_AGENT`，见 §5）；因此 `disable` 同时是**解除引用**操作，禁用后该凭证恢复可改写。1:1 唯一索引 `uq_agents_tenant_credential` 在任意状态下都生效。
 
 **错误码**：`AGENT_NOT_FOUND`（404）、`AGENT_NAME_TAKEN`（409）、`AGENT_CREDENTIAL_TAKEN`（409）、`AGENT_ALREADY_DISABLED`（409）、`CREDENTIAL_NOT_FOUND`（400）。
 
