@@ -3959,4 +3959,4 @@ EXIT=2
 
 **文档**：`database-schema.md`（补写入方/幂等键/不写行的理由，并修正 `(tenant_id, observed_at)` 这个与实际索引 `(observed_at DESC)` 不符的描述）、`api-contract.md` §7.1 归属条、`activity-context-design.md` 的"无写入方"表述。
 
-**边界与遗留**：① 读取方（查询 API）未交付，Spec §7.2 只完成写入侧；② `V55__request_context_evidence.sql:5` 注释"网关在 Context 解析时写入"与实现时机（随用量批量写）不符——迁移本轮禁改，建议 follow-up；③ issue #629 正文自身仍用旧列名，措辞由 owner 更新后再关闭。
+**边界与遗留**：① 读取方（查询 API）未交付，Spec §7.2 只完成写入侧；② `V55__request_context_evidence.sql:5` 注释"网关在 Context 解析时写入"与实现时机（随用量批量写）不符——迁移本轮禁改，建议 follow-up；③ issue #629 正文的列名表述与 V55 实际 DDL 不一致（原文未在本次核对范围内），措辞更新属 owner 侧事项。
