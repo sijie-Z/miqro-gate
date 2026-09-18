@@ -4549,3 +4549,61 @@ EXIT=2
 顺带加了 `--verify-only`：**部署线明确说要"部署前后各查一次"，而一个不能单独跑的检查不会被跑**。流水里两个身份都记，是为了事后能分辨"tag 被人重建了"与"当初就没换过去"。
 
 **分工**：脚本+文档进仓库（可评审），**装到服务器由部署线负责**。锁选**机器层**而不是"打卡制"——打卡依赖自觉，而我们已经知道至少有一个动作方不打招呼，荣誉制只会让守规矩的人排队。
+
+## 2026-09-18 默认生产部署下网关起不来：空串被当成「已配置」（#823）
+
+**这是我自己做完整套端到端模拟时跑出来的**——不是 CI，也不是演示站。按 `deploy/compose.prod.yaml` 起真实生产栈（不带 `--profile kafka`），网关进入**重启循环**，`/v1/*` 全 502：
+
+```
+BeanInstantiationException: Failed to instantiate [RetentionPublisher]:
+  Factory method 'kafkaRetentionPublisher' threw exception with message:
+  miqrokey.retention.kafka.bootstrap-servers must be set
+Caused by: java.lang.IllegalArgumentException: ... must be set
+```
+
+### 根因
+
+`KafkaRetentionConfig` 用的是
+
+```java
+@ConditionalOnProperty(prefix = "miqrokey.retention.kafka", name = "bootstrap-servers")
+```
+
+**不带 `havingValue` 时它的语义是「属性存在且 ≠ "false"」——空串算"存在"**。而 compose 恰恰把它设成空串：
+
+```yaml
+# deploy/compose.prod.yaml:140
+MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS: ${MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS:-}
+```
+
+容器内实测 `MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS=`（存在、为空）→ 条件成立 → 建 bean → 构造函数对 blank 抛异常 → **进程死循环**。注释写着"留痕默认关"，实际是"网关根本起不来"。
+
+### 为什么一直没被发现（两个覆盖缺口叠加）
+
+1. **演示站恰好不踩**：`.env` 里设了真实值 + `COMPOSE_PROFILES=kafka` → 条件成立但值非空 → 正常。
+2. **CI 只构建镜像、从不启动整套**：`images` job 做 `docker build` + 非 root 断言，`compose` job 只做 `config`。**「默认生产栈能否启动」从来没有被执行过。**
+
+被文档推荐的那条部署路径，是**唯一一条没人跑过**的路径。
+
+### 修法
+
+新增 `KafkaRetentionConfigured`（`Condition`）：**去空白后非空**才算配置。换掉 `@ConditionalOnProperty`——它表达不了"非空白"。空白/缺失/纯空格 → 不装配 → 侧车用既有的 fail-closed no-op publisher。
+
+### 红证明
+
+`KafkaRetentionConfiguredTest`（`ApplicationContextRunner`，4 例）：
+
+| 场景 | 修复前 | 修复后 |
+|---|---|---|
+| 属性缺失 | 不装配 ✓ | 不装配 ✓ |
+| **属性存在但为空**（= 默认 compose 传的） | **上下文创建失败**，抛 `... must be set` ✗ | 不装配 ✓ |
+| 属性为纯空格 | **同上失败** ✗ | 不装配 ✓ |
+| 属性为真实地址 | 装配 Kafka publisher ✓ | 装配 Kafka publisher ✓ |
+
+把注解回退成 `@ConditionalOnProperty` 实跑：**4 例中 2 例失败，异常与线上崩溃逐字相同**。修复后 4/4 绿。
+
+### 教训
+
+- **"变量存在但为空"是部署里极常见的形态，应用必须把它当成"未配置"**。`@ConditionalOnProperty` 的默认语义在这点上与直觉相反（空串 ≠ 关闭）。
+- **只构建镜像的 CI 会被读成"部署能起来"。** `images` job 证明的是"镜像可构建"，而它被当成了更强的东西——又一次"检查与它检查的东西没对齐"。
+- 我此前所有部署验证都走演示站或脚本断言，**没有一次真的把默认栈拉起来过**。这次是"自己做完整套模拟"的直接产物。
