@@ -3821,4 +3821,4 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **测试**：两条新用例**先证红**（SSE 解帧 / 无 data 拒绝），修复后 `McpToolsListClientTest` **11/11 绿**。
 
-**部署教训（本轮踩到）**：compose.prod.yaml 的 cp 服务带 `build:` 段（context=`..` 即演示树）且 compose 按**镜像引用名**判等——漏 `--no-build` 不会重建镜像，而**只 `up` 不 `--force-recreate` 也不会把容器换到新 tag 上**（容器镜像 ID ≠ tag 镜像 ID 时仍显示 Running）。规范动作：`docker build -t miqrokey-control-plane:local <release-tree>` → `compose up -d --no-build --force-recreate --no-deps control-plane` → `restart portal`。
+**部署教训（本轮踩到，含一次自我纠正）**：compose.prod.yaml 的 cp 服务带 `build:` 段（context=`..`=演示树 `/opt/miqrokey`，与真正构建用的 `/opt/miqrokey-dev` 不同）——漏 `--no-build` 有**用旧树产出镜像**的风险（触发条件：该 tag 本地无镜像时 `up` 才会构建）。本轮曾观测"容器镜像 ID ≠ tag 镜像 ID 但 compose 显示 Running"，最初归因为"compose 按镜像引用名判等"——**该归因已被直接观测否定**：同 tag 下 `up` 不加 `--force-recreate` 亦会 `Recreate/Recreated`，compose 按解析出的镜像 ID 判等；更可能的成因是**多会话并发构建同一 tag 的竞态**（本轮时间线：自建镜像 11:11:03 完成，容器 11:11:07 从另一镜像创建）。**落为收尾断言**：部署后必须核 `container.Image == tag.Id`（"Up N seconds + healthy"不算数）——它正是抓这类竞态的检查；**跨会话纪律：同一 tag 不并发构建、部署串行**。
