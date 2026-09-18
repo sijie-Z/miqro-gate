@@ -4254,7 +4254,6 @@ job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
 ### 顺带更正一个「缺口」判断
 
 对方提议把 `deploy/backup/test-*.sh` 从未被 workflow 引用一事单列为「文档承诺了测试但没接线」。**核了 `docs/operations-runbook.md`：它把这几个写成季度人工演练**（"每季度至少一次 `test-restore.sh`"），**没有承诺自动化**——所以那不是失约。真正的瑕疵只是措辞容易让人误读，已在 runbook 里补一句写明「人工演练、未接 CI，别把『已验证 PASS』读成『每次提交都跑』」。
-
 ## 2026-09-18 明细成本改读冻结基座——#710 的可实现剩余部分
 
 **先重核，再动手**：在 develop（`e83d44ea`）上逐条复核 #710 的 8 条验收，结论 **5 条已达成、3 条未达成**（旧结论 6/2 已过期：develop 期间合并了 #766/#772/#780/#783 等价目相关系列）。未达成的三条里，**两条同源**——明细读取路径仍在按查询时刻的**当前**价目给每一行定价（`UsageStatsService`/`AdminUsageStatsService` 各自注入 `PriceSnapshotRepository` 调 `findAllLatestAt(Instant.now())`）。这属于"照既有口径补齐"，可直接实现；另两条（`gateway-app` 事件生成时冻结价格；`CostAllocationService` 切冻结基座）属**口径决策**，不在本轮自行拍板（见 #710 决策材料评论）。
@@ -4287,3 +4286,33 @@ job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
 - 评审指出的"四族"描述过时：重排后按**两类形状**陈述（症状指向错误的层 / 证据强度被高估），工程侧（执行上下文族）随文档拆分另述。
 
 **来源**：owner 2026-09-18 转来的外部评审（原 PR #759 为"提案·待 owner 认可"，本条即该认可与改后的落地记录）。
+
+## 2026-09-18 CAA 证据审计链路补写入方（#629）——V55 建了表，没有任何人写
+
+**起因**：#629 指出 `request_context_evidence`（V55）在 Java/Kotlin/XML/YAML 中零命中——表建好了，既无写入方也无读取方，Spec v1.1 §7.2 的"为什么这么判"审计链路是断的。复核 `git grep -n "request_context_evidence" -- "*.java" "*.kt" "*.xml" "*.yml" "*.yaml"` 无输出（rc=1），与判断一致。
+
+**先判该不该有**：Spec v1.1 §7.2 把 V55 列为交付物（无"预留/未启用"字样）、§9 C13 是验收项、§11 P5 与 `database-schema.md`/`api-contract.md` 都按"已存在"描述；V55 表注释自带的 `source` 值域 `prompt_url|tool_path|bash_cwd|system_cwd|git_remote|header|suffix` 正是"外部选择器类别"。结论：**该层应当存在，本次补写入方**。读取方（查询 API）在 `api-contract.md` 无契约、Spec §11 把 §8 的增量排到后续批次 → 明确不在本次范围（不改前端：没有契约可展示）。
+
+**交付**：
+
+- `PostgresUsageEventWriter`：证据行随 `usage_event` **同批同事务**写入，行 `id` = 该笔 usage 事件 id，`ON CONFLICT (id) DO NOTHING`（重放不重复，两表可直接 join）。只对使用了外部选择器的裁定写行：`RESOLVED_HEADER` → `source='header'`、`value=` 客户端声明的 project id；`RESOLVED_SUFFIX` → `source='suffix'`、`value=` Key 中呈现的 tag。
+- `SOLE_BINDING`/`POLICY_ROUTED` **刻意不写行**：V55 的 `source` 值域没有对应"线索类别"的诚实取值，而 `value` 是 `NOT NULL` 且承载全部审计值——硬编一个值等于伪造证据。这两种裁定的解释本来就是 `usage_event.resolution_status`（C13 的 "+" 是"证据表**加**裁定列"，不是"每一行都必须有证据行"）。
+- 唯一缺的数据是"Key 后缀里呈现的 tag"：绑定索引本就按 projectTag 建（`JdbcRouteSnapshotLoader` 的 `bindings...put(binding.projectTag(), binding)`），故 `ContextAttribution` 增第 7 个分量 `bindingTag` 承载它。**未动阶梯与未归属策略的行为**——`RequestContextResolver`/`ResolvedContext` 一行未改。
+- 无新迁移：V55 的 PK 就是幂等键。
+
+**验证**（真实命令与输出）：
+
+- 先证明断言有判题力：把 `writeContextEvidence(...)` 调用临时关掉跑同一份测试，新用例红、红的正是"证据行数 0 而不是 1"——
+  `Tests run: 9, Failures: 2, Errors: 0` / `contextEvidenceRecordsObservedSelector:244 Expected size: 1 but was: 0 in: []` /
+  `droppedUsageEventLeavesNoEvidenceRow:284 Expected size: 1 but was: 0`；恢复该行后同一份测试 `Tests run: 9, Failures: 0, Errors: 0` + `BUILD SUCCESS`。
+- 四类对照：有 claim 头 / 有后缀 / 唯一绑定 / 未归属策略各一条请求，断言证据行数 **1/1/0/0**，且四条 `usage_event` 都在（证明"无证据行"是裁定，不是整批丢掉）；重放同一批 → 行数不变（幂等）。
+- 另测孤儿行：`model_id` 为空而被丢弃的 usage 事件不得留下证据行，同批健康事件照常落行 + 落证据。
+- 命令（Windows，JDK 21）：`mvnw.cmd -B -f backend -pl gateway-app -am test -Pintegration -Dtest=PostgresUsageEventWriterTest -Dsurefire.failIfNoSpecifiedTests=false`。
+
+### 一个测试暴露的既有边界（未改）
+
+重放一批 `provider_request_id` 为空的 `usage_event` 会撞 `usage_event_pkey`——写入器的幂等只覆盖 `(tenant_id, provider_request_id)` 那条部分唯一索引，这是**既有**行为（与本次改动无关，证据表的 `ON CONFLICT (id)` 没有再添失败面）；Bus 失败重投同一条无上游 id 的事件才会走到。测试夹具因此用带上游请求 id 的事件（真实 UPSTREAM 路径即如此）。是否要为 `COALESCED`（`provider_request_id` 为空）补一条以 `id` 为冲突目标的路径，属独立问题，未在本 PR 夹带。
+
+**文档**：`database-schema.md`（补写入方/幂等键/不写行的理由，并修正 `(tenant_id, observed_at)` 这个与实际索引 `(observed_at DESC)` 不符的描述）、`api-contract.md` §7.1 归属条、`activity-context-design.md` 的"无写入方"表述。
+
+**边界与遗留**：① 读取方（查询 API）未交付，Spec §7.2 只完成写入侧；② `V55__request_context_evidence.sql:5` 注释"网关在 Context 解析时写入"与实现时机（随用量批量写）不符——迁移本轮禁改，建议 follow-up；③ issue #629 正文的列名表述与 V55 实际 DDL 不一致（原文未在本次核对范围内），措辞更新属 owner 侧事项。
