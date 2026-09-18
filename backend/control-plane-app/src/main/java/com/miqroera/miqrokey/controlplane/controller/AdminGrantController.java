@@ -36,7 +36,7 @@ public class AdminGrantController {
     }
 
     @PostMapping
-    public ProjectProviderGrant create(@RequestBody CreateRequest body) {
+    public ProjectProviderGrant create(@RequestBody GrantCreateRequest body) {
         var admin = userContext.getUser();
         return orgService.createGrant(admin.tenantId(), admin.id(), body.projectId(), body.providerProductId(),
                 body.credentialId(), body.models());
@@ -59,7 +59,7 @@ public class AdminGrantController {
         orgService.disableGrant(admin.tenantId(), admin.id(), grantId);
     }
 
-    public record CreateRequest(UUID projectId, UUID providerProductId, UUID credentialId, List<String> models) {
+    public record GrantCreateRequest(UUID projectId, UUID providerProductId, UUID credentialId, List<String> models) {
     }
 
     public record ModelsRequest(List<String> models) {

@@ -53,7 +53,7 @@ public class AdminMcpResilienceService {
     }
 
     @Transactional
-    public McpResiliencePolicy configure(UUID tenantId, UUID adminId, UUID serviceId, RequestedPolicy requested,
+    public McpResiliencePolicy configure(UUID tenantId, UUID adminId, UUID serviceId, ResiliencePolicyRequest requested,
             String requestId) {
         var service = requireService(tenantId, serviceId);
         McpResiliencePolicy policy = build(tenantId, requested, service.upstreamTimeoutMs());
@@ -68,7 +68,7 @@ public class AdminMcpResilienceService {
     }
 
     /** Raw request shape (all defaults = the disabled policy). */
-    public record RequestedPolicy(Boolean retryEnabled, Integer retryMax, Set<String> retryConditions,
+    public record ResiliencePolicyRequest(Boolean retryEnabled, Integer retryMax, Set<String> retryConditions,
             Boolean idempotencyConfirmed, Boolean breakerEnabled, Integer breakerWindowSeconds,
             Integer breakerMinRequests, Boolean breakerErrorEnabled, Integer breakerErrorRatio,
             Set<Integer> breakerErrorStatusCodes, Boolean breakerSlowEnabled, Integer breakerSlowCallMs,
@@ -76,7 +76,7 @@ public class AdminMcpResilienceService {
             Integer breakerProbeSuccess, Boolean breakerSkipRetry) {
     }
 
-    private McpResiliencePolicy build(UUID tenantId, RequestedPolicy r, int upstreamTimeoutMs) {
+    private McpResiliencePolicy build(UUID tenantId, ResiliencePolicyRequest r, int upstreamTimeoutMs) {
         McpResiliencePolicy defaults = McpResiliencePolicy.disabled();
         boolean retryEnabled = r.retryEnabled() != null ? r.retryEnabled() : defaults.retryEnabled();
         boolean breakerEnabled = r.breakerEnabled() != null ? r.breakerEnabled() : defaults.breakerEnabled();

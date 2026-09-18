@@ -36,13 +36,13 @@ public class AdminTeamController {
     }
 
     @PostMapping
-    public Team create(@RequestBody CreateRequest body) {
+    public Team create(@RequestBody TeamCreateRequest body) {
         var admin = userContext.getUser();
         return orgService.createTeam(admin.tenantId(), admin.id(), body.name(), body.description());
     }
 
     @PatchMapping("/{teamId}")
-    public Team update(@PathVariable UUID teamId, @RequestBody UpdateRequest body) {
+    public Team update(@PathVariable UUID teamId, @RequestBody TeamUpdateRequest body) {
         var admin = userContext.getUser();
         return orgService.updateTeam(admin.tenantId(), admin.id(), teamId, body.name(), body.description(),
                 body.status());
@@ -54,7 +54,7 @@ public class AdminTeamController {
     }
 
     @PostMapping("/{teamId}/members")
-    public void addMember(@PathVariable UUID teamId, @RequestBody MemberRequest body) {
+    public void addMember(@PathVariable UUID teamId, @RequestBody TeamMemberRequest body) {
         var admin = userContext.getUser();
         orgService.addTeamMember(admin.tenantId(), admin.id(), teamId, body.userId());
     }
@@ -65,12 +65,12 @@ public class AdminTeamController {
         orgService.removeTeamMember(admin.tenantId(), admin.id(), teamId, userId);
     }
 
-    public record CreateRequest(String name, String description) {
+    public record TeamCreateRequest(String name, String description) {
     }
 
-    public record UpdateRequest(String name, String description, TeamStatus status) {
+    public record TeamUpdateRequest(String name, String description, TeamStatus status) {
     }
 
-    public record MemberRequest(UUID userId) {
+    public record TeamMemberRequest(UUID userId) {
     }
 }

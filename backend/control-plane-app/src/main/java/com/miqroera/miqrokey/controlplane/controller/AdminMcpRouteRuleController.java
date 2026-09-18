@@ -46,7 +46,7 @@ public class AdminMcpRouteRuleController {
     }
 
     @PostMapping
-    public McpRouteRule create(@PathVariable UUID serviceId, @Valid @RequestBody UpsertRequest body) {
+    public McpRouteRule create(@PathVariable UUID serviceId, @Valid @RequestBody McpRouteRuleUpsertRequest body) {
         var user = userContext.getUser();
         return routeRules.create(user.tenantId(), user.id(), serviceId, body.name(), body.description(),
                 body.priority(), body.pathMode(), body.pathValue(), body.hostMode(), body.hostValue(), body.methods(),
@@ -56,7 +56,7 @@ public class AdminMcpRouteRuleController {
     /** Full replace of the editable fields (see service javadoc for semantics). */
     @PatchMapping("/{ruleId}")
     public McpRouteRule update(@PathVariable UUID serviceId, @PathVariable UUID ruleId,
-            @Valid @RequestBody UpsertRequest body) {
+            @Valid @RequestBody McpRouteRuleUpsertRequest body) {
         var user = userContext.getUser();
         return routeRules.update(user.tenantId(), user.id(), serviceId, ruleId, body.name(), body.description(),
                 body.priority(), body.pathMode(), body.pathValue(), body.hostMode(), body.hostValue(), body.methods(),
@@ -79,7 +79,7 @@ public class AdminMcpRouteRuleController {
             @Size(max = 256) String value) {
     }
 
-    public record UpsertRequest(@NotBlank @Size(max = 64) String name, @Size(max = 200) String description,
+    public record McpRouteRuleUpsertRequest(@NotBlank @Size(max = 64) String name, @Size(max = 200) String description,
             @Min(1) @Max(65535) Integer priority, String pathMode, @Size(max = 256) String pathValue, String hostMode,
             @Size(max = 256) String hostValue, List<String> methods, List<HeaderConditionRequest> headers) {
 

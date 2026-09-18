@@ -134,14 +134,14 @@ public class SkillService {
      * teams/projects tables. Empty list = public.
      */
     @Transactional
-    public List<SkillAccess> setAccess(UUID tenantId, UUID adminId, UUID skillId, List<ScopeRequest> scopes,
+    public List<SkillAccess> setAccess(UUID tenantId, UUID adminId, UUID skillId, List<SkillAccessScopeRequest> scopes,
             String requestId) {
         Skill skill = find(tenantId, skillId);
         List<SkillAccess> existing = skillRepository.findAccess(tenantId, skillId);
         for (SkillAccess access : existing) {
             skillRepository.deleteAccess(tenantId, skillId, access.scopeType(), access.scopeId());
         }
-        for (ScopeRequest scope : scopes) {
+        for (SkillAccessScopeRequest scope : scopes) {
             validateScope(tenantId, scope);
             skillRepository.insertAccess(new SkillAccess(UUID.randomUUID(), tenantId, skill.id(), scope.scopeType(),
                     scope.scopeId(), Instant.now()));
@@ -153,7 +153,7 @@ public class SkillService {
         return access;
     }
 
-    private void validateScope(UUID tenantId, ScopeRequest scope) {
+    private void validateScope(UUID tenantId, SkillAccessScopeRequest scope) {
         if (scope.scopeId() == null || scope.scopeType() == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "SCOPE_INVALID", "授权范围格式无效。");
         }
@@ -217,7 +217,7 @@ public class SkillService {
         }
     }
 
-    public record ScopeRequest(@jakarta.validation.constraints.NotBlank String scopeType,
+    public record SkillAccessScopeRequest(@jakarta.validation.constraints.NotBlank String scopeType,
             @jakarta.validation.constraints.NotNull UUID scopeId) {
     }
 }
