@@ -80,6 +80,6 @@ public class AdminExportController {
     private static ExportTaskView toView(ExportTask task) {
         return new ExportTaskView(task.id(), task.createdBy(), task.format(), task.periodFrom(), task.periodTo(),
                 task.status(), task.sha256(), task.rowCount(), task.byteCount(), task.errorMessage(), task.createdAt(),
-                task.finishedAt(), task.expiresAt(), task.reconcileLevel());
+                task.finishedAt(), task.expiresAt(), task.reconcileLevel(), task.adjustmentLevel());
     }
 }
