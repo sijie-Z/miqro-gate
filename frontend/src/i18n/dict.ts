@@ -12,6 +12,8 @@ export const DICT: Record<string, string> = {
   '8080（管理 API）': '8080 (Management API)',
   '8081（推理流量）': '8081 (Inference traffic)',
   'AI 凭证控制平台': 'AI Credential Control Plane',
+  'API 密钥': 'API key',
+  '粘贴新的密钥': 'Paste the new key',
   'API 密钥 已复制': 'API key copied',
   'API 密钥 已生成，仅显示一次': 'API key generated — shown only once',
   'API 密钥 模式必须填写密钥（每次保存都需要重新填写）。':
@@ -92,7 +94,7 @@ export const DICT: Record<string, string> = {
   '套餐形态': 'Plan type',
   'PostgreSQL 17（AES-256-GCM 加密凭证存储）':
     'PostgreSQL 17 (AES-256-GCM encrypted credential storage)',
-  'Secret 已生成，仅显示一次': 'Secret generated — shown only once',
+  '密钥已生成，仅显示一次': 'Key generated — shown only once',
   'Token 用量': 'Token usage',
   'Token 类型': 'Token type',
   'Tokens 输入 + 输出 · Top 8': 'Tokens (input + output) · Top 8',
@@ -676,7 +678,6 @@ export const DICT: Record<string, string> = {
   '成本报表': 'Cost Reports',
   '成本明细': 'Cost details',
   '我已保存': 'I have saved it',
-  '我已保存该 Secret': 'I have saved this secret',
   '我的密钥': 'My Keys',
   '我的申请': 'My requests',
   '我的配额': 'My quota',
@@ -922,7 +923,7 @@ export const DICT: Record<string, string> = {
   '注册并进入': 'Create account',
   '注册服务': 'Register service',
   '测试': 'Test',
-  '测试 Secret': 'Test secret',
+  '测试密钥': 'Test secret',
   '消费者': 'Consumers',
   '消费者名': 'Consumer name',
   '消费者密钥 · 即将到期': 'Consumer key · expiring soon',
@@ -1028,7 +1029,7 @@ export const DICT: Record<string, string> = {
   '端点创建后的投递尝试会出现在这里。': 'Delivery attempts appear here once an endpoint exists.',
   '等待管理员开通': 'Waiting for administrator provisioning',
   '等效折扣（节省 / 实付+节省）': 'Effective discount (saved / paid + saved)',
-  '签名 Secret': 'Signing secret',
+  '签名密钥': 'Signing secret',
   '签名目录': 'Signed catalog',
   '简介': 'Summary',
   '简体中文': '简体中文',
@@ -1228,7 +1229,7 @@ export const DICT: Record<string, string> = {
   '输入+输出': 'Input + output',
   '输入侧命中缓存 · 未计上游费用': 'Served from cache · no upstream cost',
   '输入密码': 'Enter your password',
-  '输入待测试的密钥': 'Enter the secret to test',
+  '粘贴要测试的密钥': 'Paste the key to test',
   '输入新的密钥': 'Enter the new secret',
   '输入账号或邮箱': 'Enter your email or username',
   '输出': 'Output',
@@ -1644,7 +1645,7 @@ export const DICT: Record<string, string> = {
     'Use “Model catalog → Probe models” on this page to pull the official model list, or enter models manually.',
   '在「授权」圈定模型范围后，成员即可创建虚拟密钥；保存后数秒内生效，无需同步。':
     'Scope the models under Grants and members can create Virtual Keys; changes go live within seconds — no sync needed.',
-  '从供应商控制台获取 API Key 并录入；「测试 Secret」可先不落库做指纹比对验证。':
+  '从供应商控制台获取 API Key 并录入；「测试密钥」可先不落库做指纹比对验证。':
     'Add the API Key from the provider console; “Test secret” verifies it against the stored fingerprint without writing anything.',
   '在「授权」中被引用后开始服务项目；轮换后所有引用方自动使用新版本，无需逐处修改。':
     'Once referenced by a grant it serves that project; after rotation every referrer uses the new version automatically — nothing to edit in place.',
