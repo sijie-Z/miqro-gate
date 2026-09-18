@@ -210,6 +210,17 @@ if [ "$VERIFY_ONLY" = 0 ]; then
     esac
 fi
 
+# What compose's dotenv would hand the container, rather than the file's raw bytes:
+# a trailing CR, surrounding whitespace and one layer of quotes all disappear on
+# the way in, so a comparison that keeps them is stricter than the system it checks.
+# The demo box's mixed-EOL .env made exactly that mistake visible: `false\r` vs
+# `false`, printed identically (#805).
+norm_env_value() {
+    printf '%s' "$1" | tr -d '\r' \
+        | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+              -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/"
+}
+
 # ---- 6. assert the container received the .env's values ------------------------
 # The image assertions cannot see this either, and it is how #794 shipped a stack
 # whose origin allowlist had silently fallen back to the compose default. Comparing
@@ -232,10 +243,24 @@ if [ "$DRY" = 0 ]; then
             [ -n "$cid" ] || continue
             env_got="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null \
                 | sed -n "s/^${env_key}=//p" | head -n 1)"
-            if [ -n "$env_got" ] && [ "$env_got" != "$env_want" ]; then
-                echo "ASSERT FAILED $svc: $env_key='$env_got' but $ENV_FILE says '$env_want'" >&2
-                failed=1
+            [ -n "$env_got" ] || continue
+            got_n="$(norm_env_value "$env_got")"
+            want_n="$(norm_env_value "$env_want")"
+            [ "$got_n" != "$want_n" ] || continue
+            echo "ASSERT FAILED $svc: $env_key differs from $ENV_FILE" >&2
+            echo "  container: '$got_n' (len ${#got_n})" >&2
+            echo "  env file : '$want_n' (len ${#want_n})" >&2
+            if [ "${#got_n}" = "${#want_n}" ]; then
+                # Same length: the two print alike closely enough to be unreadable, so
+                # show the bytes. The difference may be invisible (a CR) or merely easy
+                # to miss (F vs f) — either way the dump settles it.
+                echo "  (same length — the bytes below are where they differ)" >&2
+                printf '  container: ' >&2
+                printf '%s' "$got_n" | od -c | head -n 2 >&2
+                printf '  env file : ' >&2
+                printf '%s' "$want_n" | od -c | head -n 2 >&2
             fi
+            failed=1
         done
     done <"$ENV_FILE"
 fi

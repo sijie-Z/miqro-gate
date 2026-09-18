@@ -111,6 +111,8 @@ deploy/deploy.sh --context /opt/miqrokey-dev --commit <sha> --services "control-
 - `--smoke-origin` 带上 Origin 头——**证一个依赖配置的行为，比证一个与配置无关的 200 有价值**：origin allowlist 本身就是配置
 - **不传 `--smoke-url` 时脚本会明说"什么都没查"**，收尾语也只说 `deployed; image identity verified`，不说 "verified"——**那个词曾经盖过了它实际没查的东西**
 
+除了冒烟，脚本还会**逐条核对输入是否到达**：`.env` 里每个 `KEY=VALUE`，只要某个服务的容器里也有该 KEY，值就必须一致——不一致就**指名变量**（无需网络，也不需要"服务能应答"）。比的是**按 compose 的 dotenv 语义归一化后**的值：CR、首尾空白、一层引号都去掉。**这一层容错是必须的**——断言若比 compose 更严，它报的就是文件的行尾是否干净，而不是部署对不对（#807 那条假阳性正是如此：混合行尾的 `.env` 让两边打印出一模一样的字符串）。报错也会给出长度与字节转储，好让"看起来一样"的差异自己说清楚。
+
 四条既有教训也编在里面，免得再踩：
 
 - `up` 一律带 `--no-build`：`compose.prod.yaml` 的 control-plane 服务带 `build:` 段，且其 context 指向**线上树**——漏了它，compose 可能构建出不是本次要发的代码
