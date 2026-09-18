@@ -3837,7 +3837,7 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - M1（唯一被证伪的对外声明）"停用 409 文案英文界面仍为中文"：`NextCredentialsView.vue` 把 message 与 requestId 拼成单节点 `…（requestId: xxx）`，全仓 20 处同样写法，均不匹配 `PATTERNS`。修在引擎层：`translateOne` 先剥离 `（requestId: …）` 后缀 → 翻译消息头 → 原样拼回；`i18n-copy.spec.ts` 加 3 组断言（两条真实文案 + 带后缀的轮换/停用串 + 未覆盖文案保持中文不半翻译）
 - M2 `disableProceedsWhenTheBindingAgentIsDisabled` 无判别力：补 `verify(agentRepository).findActiveByCredentialId(TENANT, credential.id())`，证明守卫被调用而非被跳过
 - M3 `i18n-copy.spec.ts` 未收录 #714 文案：已收录（含 Agent 名插值 `客服助手`）
-- M4 跨租户用例未锁定"响应体不含他租户 Agent 名"：已断言 404 body 不含 `foreign-agent` / `foreign-key`
+- M4 跨租户用例未锁定"响应体不含他租户 Agent 名"：已断言 rotate 的 404 body 不含 `foreign-agent` / `foreign-key`；收口轮补上 **disable 响应体**同样断言（此前只覆盖 rotate，而停用恰是 M1 暴露问题的路径）
 
 **未修复（2 条，理由如下）**：
 - M5 `docs/progress.md` 提交含 122 行纯行尾改写：该文件索引本身即 CRLF（`git ls-files --eol` → `i/crlf w/crlf`），提交把 122 行历史 LF 行归一为文件既有 CRLF；`git diff --numstat --ignore-cr-at-eol 7fac8001^..b5f31a5b -- docs/progress.md` 为 `28 0`（实质新增 28 行），`docs/api-contract.md` 为 `4 0`（无行尾改动）。不单独造 EOL 提交
@@ -3846,3 +3846,21 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **未做（如实记录）**：**Skill 快照语义（按引用版本固定）未实现**。理由：仓库里没有 Agent↔Skill 数据模型（无表、无迁移、无端点），F27/F28 仍是 SCAFFOLD；落地它要新表 + 新迁移 + 新的写入/读取语义，属于"需要新数据模型且风险大"，按 issue 边界**先停下报告**，不硬塞进本 PR。该项仍留在 F28 待办。
 
 **工具坑**：`npm run lint` 的脚本带 `--fix`，在 Windows 检出（CRLF）上重写了 151 个无关前端文件（其中 21 个是真实内容改动，其余只是行尾/stat 脏）。已用 `git checkout -- <paths>` 逐个回退，最终只保留 `docs/api-contract.md` 与 `frontend/src/i18n/dict.ts` 两处改动。后续在该仓库跑前端 lint 时避免整树带 `--fix`。
+
+### 收口轮（F1b）：M2–M6 逐条处置 + 定向复跑
+
+开轮核对：worktree 干净（`git status --short` 空输出，**上一轮评审提到的 `docs/progress.md` 残留改动已在 `566d5a86` 落盘**，无夹带文件）；远端无该分支、无 PR。
+
+| 项 | 处置 | 依据 |
+| --- | --- | --- |
+| M1 | 已修（`7a55eaf7`） | 引擎层剥离 `（requestId: …）` 后缀后翻译消息头再拼回 |
+| M2 | 已修（`abd2b5fb`） | `verify(agentRepository).findActiveByCredentialId(TENANT, credential.id())` 钉"守卫被调用"；SQL 层判别力由 `anAlreadyDisabledAgentDoesNotPinTheCredential` 集成用例承担 |
+| M3 | 已修（`7a55eaf7`） | `i18n-copy.spec.ts` 新增 `#714` describe：两条真实文案 + 带后缀的轮换/停用串 + 未覆盖文案不半翻译 |
+| M4 | 本轮补齐 | 原只断言 rotate 响应体，现 disable 响应体一并断言 |
+| M5 | 不改（理由见上） | 回退需重写已推送历史，属禁止操作；文件现已统一 CRLF，后续 diff 不再放大 |
+| M6 | 不改，建议另开 issue | pre-existing 锁语义问题，修正要改领域仓库锁 API，超出本批边界 |
+
+定向复跑（收口轮改 M4 断言后）：
+
+- `.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration -Dtest=AdminCredentialAgentBindingIntegrationTest,AdminCredentialServiceTest -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 26, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`（IT 6/6 34.42 s、单测 20/20 1.512 s；7 模块全 SUCCESS，50.7 s）
+- 前端 `npm --prefix frontend run typecheck` 通过（无输出即无错）；`npm --prefix frontend run test` → `Test Files 63 passed (63)` / `Tests 384 passed (384)`，24.22 s
