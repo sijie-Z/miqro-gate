@@ -35,9 +35,19 @@ public record UsageEvent(UUID id, UUID tenantId, String providerRequestId, UUID 
      * CAA per-request attribution metadata (Spec v1.1 §7.1): the client's CLAIMS
      * kept for audit plus the server's resolution status. Null when the request
      * carried no context information.
+     *
+     * <p>
+     * {@code bindingTag} is the resolved binding's project tag. It has no
+     * {@code usage_event} column: it is carried here for the audit evidence row
+     * ({@code request_context_evidence}, Spec v1.1 §7.2), which records it as the
+     * {@code suffix} evidence value when {@code resolutionStatus} is
+     * {@code RESOLVED_SUFFIX} — the binding index is keyed by project tag, so for
+     * that status it is exactly the tag the client presented in the key. Null for
+     * the policy-synthesized binding.
+     * </p>
      */
     public record ContextAttribution(String sessionId, UUID activityId, UUID claimedProjectId, String resolutionStatus,
-            String claimSource, String claimConfidence) {
+            String claimSource, String claimConfidence, String bindingTag) {
     }
 
     public UsageEvent {

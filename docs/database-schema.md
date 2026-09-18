@@ -283,7 +283,9 @@ CAA Project Registry（Spec v1.1 §7.4）：`id`、`tenant_id`、`project_id`（
 
 ### `request_context_evidence` (V55，#633)
 
-CAA 逐请求上下文证据审计（append-only）：`id`、`tenant_id`、`request_id`（gateway request id）、`source`、`value`、`confidence`、`scope`（`turn|session`）、`observed_at`。索引 `(tenant_id, request_id)`、`(tenant_id, observed_at)`。与 `usage_event` 的归属列互为佐证：usage 行回答"记到谁头上"，本表回答"凭什么这么记"。声明内容永不构成授权（Spec v1.1 §4）。
+CAA 逐请求上下文证据审计（append-only）：`id`、`tenant_id`、`request_id`（gateway request id）、`source`（`prompt_url|tool_path|bash_cwd|system_cwd|git_remote|header|suffix`）、`value`（规范化证据值：repo key/绝对路径/tag）、`confidence`、`scope`（`turn|session`，默认 `turn`）、`observed_at`（默认 `now()`）。索引 `(tenant_id, request_id)`、`(observed_at DESC)`。与 `usage_event` 的归属列互为佐证：usage 行回答"记到谁头上"，本表回答"凭什么这么记"。声明内容永不构成授权（Spec v1.1 §4）。
+
+**写入方（`V55` 建表时缺、#629 补齐）**：网关用量写入器 `PostgresUsageEventWriter` 与 `usage_event` 同批同事务写入；行 `id` = 该笔 usage 事件的 `id`，插入为 `ON CONFLICT (id) DO NOTHING`——本表主键即幂等键，同批重放不产生重复证据行，两表可按 `id` join。该幂等只覆盖本表：`usage_event` 的冲突目标是部分唯一索引 `(tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL`，`provider_request_id` 为空的事件（合并路径）重放会撞 `usage_event_pkey`，属既有边界，非本次引入。只对使用了外部选择器的裁定写行：`RESOLVED_HEADER` → `source='header'`、`value=` 客户端声明的 project id；`RESOLVED_SUFFIX` → `source='suffix'`、`value=` Key 中呈现的 tag。`SOLE_BINDING`/`POLICY_ROUTED` 未使用任何外部线索（`source` 值域无诚实取值），其解释即 `usage_event.resolution_status`，故不写行。`scope`/`observed_at` 保持默认（网关观察不到客户端侧作用域）。**读取方（查询 API）尚未交付**。注：`V55__request_context_evidence.sql` 头部注释写"网关在 Context 解析时写入"，实际写入时机是随用量落库（同批同事务）；迁移已冻结不改，以本节与实际实现为准。
 
 ### `request_usage_records` (V8，当前实现子集)
 

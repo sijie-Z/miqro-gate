@@ -614,8 +614,10 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 && claimSource == null && claimConfidence == null) {
             return null;
         }
+        // bindingTag has no usage_event column (it feeds the evidence table, V55);
+        // rows read back from here never carry it.
         return new UsageEvent.ContextAttribution(sessionId, (UUID) activityId, (UUID) claimedProjectId,
-                resolutionStatus, claimSource, claimConfidence);
+                resolutionStatus, claimSource, claimConfidence, null);
     }
 
     @Override
