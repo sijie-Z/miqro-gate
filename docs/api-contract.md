@@ -232,7 +232,7 @@
 
 ### 4.4 用量汇总 `GET /api/v1/me/usage/summary`
 
-参数：`groupBy`（`project | virtual_key | cache_level | day | user | team | model | month`，默认 `project`；**I15**：`user`=调用方（label=用户名）、`model`=模型、`month`=自然月 `YYYY-MM`；**2026-09-15**：`team`=团队成员归属（label=团队名，经成员的 Virtual Key 归集；同一用户属多团队时在各团队分别计入——归属视图非分割口径））、`from`、`to`（ISO-8601，默认最近 93 天窗口；`from` 必须在 `to` 之前，窗口超过 93 天拒绝）。
+参数：`groupBy`（`project | virtual_key | cache_level | day | user | team | model | month | product`，默认 `project`；**I15**：`user`=调用方（label=用户名）、`model`=模型、`month`=自然月 `YYYY-MM`；**2026-09-15**：`team`=团队成员归属（label=团队名，经成员的 Virtual Key 归集；同一用户属多团队时在各团队分别计入——归属视图非分割口径）；**#758**：`product`=供应商产品（label=产品显示名））、`from`、`to`（ISO-8601，默认最近 93 天窗口；`from` 必须在 `to` 之前，窗口超过 93 天拒绝）。
 
 ```json
 {
@@ -248,16 +248,18 @@
         "gatewayObserved": 0.0128,
         "projectAllocated": 0.0128,
         "savedByGatewayCache": 0.0
-      }
+      },
+      "outcomes": { "succeeded": 11, "failed": 1, "cancelled": 0, "avgDurationMs": 4200, "avgTtfbMs": 1800 }
     }
   ],
-  "totals": { "requests": { "upstream": 12, "coalesced": 0, "l1Hit": 0, "l2Hit": 0 }, "tokens": { "input": 1200, "output": 800, "cacheRead": 0, "cacheCreation": 0 }, "cost": { "upstreamPaid": 0.0128, "gatewayObserved": 0.0128, "projectAllocated": 0.0128, "savedByGatewayCache": 0.0 } }
+  "totals": { "requests": { "upstream": 12, "coalesced": 0, "l1Hit": 0, "l2Hit": 0 }, "tokens": { "input": 1200, "output": 800, "cacheRead": 0, "cacheCreation": 0 }, "cost": { "upstreamPaid": 0.0128, "gatewayObserved": 0.0128, "projectAllocated": 0.0128, "savedByGatewayCache": 0.0 }, "outcomes": { "succeeded": 11, "failed": 1, "cancelled": 0, "avgDurationMs": 4200, "avgTtfbMs": 1800 } }
 }
 ```
 
 - 用量明细只包含自己的 Key 产生的记录；他人的 Key 不出现也不可区分（统一 404）。
 - `upstreamPaid` 按 `price_snapshot`（每百万 token 单价，来源 `MANUAL|OFFICIAL|ESTIMATED`）计算；无价格快照的模型按 `0` 计。
 - 缓存命中产生的成本节省记入 `savedByGatewayCache`，不计入 `projectAllocated`。
+- `outcomes`（#758）：生命周期终态来自 `request_usage_records`（按 gateway request id 一对一对齐）；`succeeded = 转发+合并 − failed − cancelled`——**客户端取消不计入成功率两侧**（`CLIENT_CANCELLED` 既不算成功也不算失败），无生命周期行的合并请求计成功侧；`avgDurationMs` / `avgTtfbMs` 仅在实际观测到取值的行上平均，无观测为 `null`。缓存命中（`cache_hit_event`）不参与成功率。
 
 ### 4.5 用量明细 `GET /api/v1/me/usage/records`
 
@@ -282,7 +284,13 @@
       "isComplete": true,
       "usageMissing": false,
       "virtualKeyId": "0190...",
-      "clientIp": "203.0.113.7"
+      "clientIp": "203.0.113.7",
+      "providerProductName": "DeepSeek 官方按量 API",
+      "ttfbMs": 2100,
+      "wireProtocol": "ANTHROPIC_MESSAGES",
+      "requestStatus": "SUCCEEDED",
+      "cost": 0.0128,
+      "priced": true
     }
   ],
   "page": 1,
@@ -294,6 +302,8 @@
 - `cacheLevel` ∈ `UPSTREAM | COALESCED | L1_HIT | L2_HIT`。缓存命中行没有 token 数（NULL → 0）且 `isComplete=false` 时不作为上游用量计入。
 - `usageMissing=true` 表示上游未返回 usage（如异常中断）；该行仍入账但用量为 0，便于排查。
 - `clientIp`（#605）：调用方网络地址——传输层对端；仅当对端命中 `MIQROKEY_TRUSTED_PROXY_CIDRS` 可信代理时才消费 `X-Forwarded-For`（**从右往左**取第一个非可信地址，杜绝最左伪造），非 IP 字面量（主机名/带端口）一律不记录、不解析；无法确定时为 `null`。历史行与直连未配置代理时的对端地址照记。
+- `providerProductName` / `ttfbMs` / `wireProtocol` / `requestStatus`（#758）：供应商产品显示名与生命周期富集列，来自 `request_usage_records` 按 gateway request id 的左连接；合并请求无生命周期行时三者均为 `null`（首字对无首字节的失败请求同样为 `null`）。
+- `cost` / `priced`（#758）：单行成本估计，用与汇总相同的价目快照与算法（`tokens × 单价 / 1e6` 逐 token 类型求和）；`priced=false` 表示**非零的输入/输出 token 缺少价目快照**（前端显示「未定价」，此时 `cost` 不可信）；缓存读/写缺价与聚合口径一致按 0 计，不触发该标记（真实供应商常不单列缓存写费率）。
 - `providerRequestId` 在 tenant 内唯一（幂等写，重复 flush 不双计）。
 
 ### 4.6 模型申请（审批流）`POST/GET /api/v1/me/model-approvals`
@@ -550,7 +560,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/usage/records` | 全租户分页明细，时间倒序 |
 | `GET /api/v1/admin/usage/hourly` | 逐小时 Token 表（#634）：小时 × 项目 ×（用户/团队） |
 
-`summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day` | `user` | `team` | `model` | `month`，默认 `project`；I15 新增后三者；2026-09-15 增 `team`，同用户多团队按团队分别计入）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。
+`summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day` | `user` | `team` | `model` | `month` | `product`，默认 `project`；I15 新增后三者；2026-09-15 增 `team`，同用户多团队按团队分别计入；#758 增 `product`=供应商产品，label=产品显示名）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。明细与汇总的响应结构、`outcomes`（成功率/平均延迟/平均首字）与富集列口径同 §4.4/§4.5（#758）。
 
 `records` 参数：`from`、`to`、`page`（默认 1）、`size`（默认 50，1–200）及与 `summary` 相同的可选过滤，另支持 `clientIp`（#605，精确匹配调用方地址，用于盗用排查「这个来源都调了什么」）。
 
@@ -1192,6 +1202,7 @@ canonical 账单导入与四态对账报告（契约稿 docs/bill-reconciliation
 - 路径白名单：数据面只暴露 `POST /v1/messages`、`POST /v1/responses`、`POST /v1/chat/completions`。正确方法之外的请求 → `405 method_not_allowed`；其他 `/v1/**` 路径 → `404 unsupported_path`；两者都不连接上游。嵌入式 `..` 段按字面处理（`/v1/**` 之外不匹配）；`//` 由服务器归一化为规范路径后按正常请求处理，不构成走私。
 - 输入上限：入站 Header 超过 `MIQROKEY_MAX_INBOUND_HEADER_BYTES`（默认 `32KB`）由 Netty 在路由前拒绝 → `431`；请求体超过 `MIQROKEY_MAX_PROXY_BUFFER_BYTES`（默认 `256KB`）→ `413 payload_too_large`。超限请求不连接上游。
 - 请求前置预检（#553）：鉴权与模型授权通过后、缓存查询与上游调用之前，按 **UTF-8 码点**统计整个已缓冲 body（含 JSON 结构、工具 schema、base64）的字符数；超过 `MIQROKEY_GATEWAY_CONTEXT_LIMIT_THRESHOLD_CHARS`（默认 `200000`）→ `413`，错误码 `context_limit_exceeded`（Anthropic/OpenAI 各自协议兼容的错误体，`message` 只回报实测字符数与阈值，**不含请求内容**）。该预检**只读**：通过时转发字节与无预检时完全一致，不 tokenize、不重排、不补写；拒绝时不连接上游、不查缓存、不产生用量与生命周期记录。`MIQROKEY_GATEWAY_CONTEXT_LIMIT_ENABLED=false` 时完全关闭（行为与引入前一致）。裁决顺序为 鉴权 → 模型授权 → 体量预检，因此超限 body 不构成绕过或探测手段。阈值是**字符数**而非 token 数：对合法 UTF-8，整个序列化 body（含 JSON 结构与 base64 膨胀）都计入，是该 body 的字符上界；**非法 UTF-8 字节序列按字节长度计**（严格 UTF-8 校验不通过即整段回退为字节数），字符数不会超过字节数，因此计数**整体不低估**——不会低于任何宽松解码器解出的字符数（已有 1–2 字节穷举与定种子模糊测试固定）。这类 body 本身不是合法 JSON，且仍受缓冲上限约束。由此引入本预检后，**200001–262144 字符的请求由「缓冲上限放行」变为 413**（256KB 缓冲上限可容纳约 262144 字节）——这是刻意收紧，会同时挡掉同尺寸但上游本可接受的合法请求，运维可用 `enabled` / `threshold-chars` 调整。阈值高于缓冲上限时后者先拒绝；每 Key 阈值不在本版本范围内。覆盖范围限于 LLM 数据面三个 `/v1/**` 路径；MCP 数据面（`/mcpservers/{service}/mcp`、`/mcpservers/{service}/message`）本版本仍只有既有缓冲上限（`payload_too_large`），套用同一预检为后续项。合规留存旁路（ADR-0014，默认关闭）在预检**之前**捕获入站 body，因此开启留存时被 413 拒绝的请求仍可能已按留存策略入库；预检自身不写任何持久化。
+- 模型侧熔断（#741，**默认关**）：`MIQROKEY_GATEWAY_CIRCUIT_BREAKER_ENABLED=true` 时，按 **（供应商产品 × 上游凭证）** 滑窗统计错误（上游状态 ∈ 配置集合，默认 500/502/503/504；传输错误恒计入；客户端取消不计）；达到最小样本数与错误率阈值后打开熔断，期间的请求**不连接上游**、直接返回 `503`，错误码 `circuit_open`（Anthropic/OpenAI 各自协议兼容信封），并计入零标签指标 `miqrokey_gateway_circuit_rejected_total`。打开窗口到期放行探活（数量与连续成功数可配），探活成功自动封闭、任一失败立即重开。被拒请求**不写用量与生命周期记录**（与拒绝类一致）；关闭时零行为变化。阈值口径与 MCP 侧 F13 对齐。
 - Header 走私：凭证 Header（`Authorization`/`x-api-key`/`api-key`）出现多个 → `401`，任何凭证都不会转发；`Connection` 提名的 hop-by-hop Header 与 `X-MiQroKey-*`、`x-miqro-*` 内部 Header 在转发前剥离（上下文声明因此永不到达上游）；上游只携带 Gateway 注入的真实凭证，客户端 Virtual Key 永不泄漏到上游。
 
 Gateway 生成 `X-MiQroKey-Request-Id`。若供应商已有 request ID，两个 ID 都进入用量记录；不得覆盖供应商 request ID Header。

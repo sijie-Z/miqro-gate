@@ -134,7 +134,18 @@ public final class UsageStatsAggregator {
      */
     public record UsageAggRow(String groupKey, String label, UUID productId, String modelId, CacheLevel cacheLevel,
             long requests, TokenBucket tokens, BigDecimal inputCost, BigDecimal outputCost, BigDecimal cacheReadCost,
-            BigDecimal cacheCreationCost, PricingGap pricingGap) {
+            BigDecimal cacheCreationCost, PricingGap pricingGap, Outcome outcome) {
+
+        /**
+         * Per-row lifecycle outcome aggregates joined from
+         * {@code request_usage_records} (#758). Rows without a lifecycle join
+         * (coalesced requests never have one) report all zeros.
+         */
+        public record Outcome(long failed, long cancelled, long durationSumMs, long durationCount, long ttfbSumMs,
+                long ttfbCount) {
+
+            public static final Outcome NONE = new Outcome(0, 0, 0, 0, 0, 0);
+        }
     }
 
     /**
@@ -156,17 +167,19 @@ public final class UsageStatsAggregator {
             BigDecimal cacheReadCost, BigDecimal cacheCreationCost) {
     }
 
-    /**
-     * Group-level aggregate.
-     *
-     * <p>
-     * {@code cost} holds only what the price basis supports — see
-     * {@link #pricingStatus} and {@link #unpriced}. When the status is not
-     * {@code COMPLETE} this amount is <b>not</b> a total.
-     * </p>
-     */
+    /** Group-level aggregate. */
     public record GroupSummary(String groupKey, String label, Requests requests, Tokens tokens, Cost cost,
-            PricingStatus pricingStatus, PricingGap unpriced) {
+            PricingStatus pricingStatus, PricingGap unpriced, Outcomes outcomes) {
+    }
+
+    /**
+     * Lifecycle outcomes of a group (#758): success rate and latency come from the
+     * {@code request_usage_records} lifecycle join, so they cover the
+     * forwarded/coalesced calls only — cache hits carry no lifecycle. A client
+     * cancellation is neither a success nor a failure (excluded from both sides);
+     * averaged fields are null when nothing observed them.
+     */
+    public record Outcomes(long succeeded, long failed, long cancelled, Long avgDurationMs, Long avgTtfbMs) {
     }
 
     public record Requests(long upstream, long coalesced, long l1Hit, long l2Hit) {
@@ -238,6 +251,12 @@ public final class UsageStatsAggregator {
         private BigDecimal gatewayObserved = BigDecimal.ZERO;
         private BigDecimal savedByGatewayCache = BigDecimal.ZERO;
         private PricingGap unpriced = PricingGap.NONE;
+        private long failedRequests;
+        private long cancelledRequests;
+        private long durationSumMs;
+        private long durationCount;
+        private long ttfbSumMs;
+        private long ttfbCount;
 
         private GroupAccumulator(String groupKey, String label) {
             this.groupKey = groupKey;
@@ -260,6 +279,14 @@ public final class UsageStatsAggregator {
                 default -> {
                     // L1_HIT/L2_HIT usage rows are not expected; counted in addHit
                 }
+            }
+            if (row.outcome() != null) {
+                failedRequests += row.outcome().failed();
+                cancelledRequests += row.outcome().cancelled();
+                durationSumMs += row.outcome().durationSumMs();
+                durationCount += row.outcome().durationCount();
+                ttfbSumMs += row.outcome().ttfbSumMs();
+                ttfbCount += row.outcome().ttfbCount();
             }
             TokenBucket t = row.tokens();
             if (t == null || t.isEmpty()) {
@@ -316,7 +343,7 @@ public final class UsageStatsAggregator {
             return new GroupSummary(groupKey, label, new Requests(upstream, coalesced, l1Hit, l2Hit),
                     new Tokens(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens),
                     new Cost(upstreamPaid, gatewayObserved, gatewayObserved, savedByGatewayCache), pricingStatus(),
-                    unpriced);
+                    unpriced, outcomes());
         }
 
         /**
@@ -338,6 +365,23 @@ public final class UsageStatsAggregator {
                     : PricingStatus.PARTIAL;
         }
 
+        /**
+         * Lifecycle outcomes from the {@code request_usage_records} join (#758).
+         *
+         * <p>
+         * The success rate reads the forwarded/coalesced calls only — cache hits carry no
+         * lifecycle — and a client cancellation sits on neither side of it: walking away is
+         * not a gateway failure.
+         * </p>
+         */
+        private Outcomes outcomes() {
+            long forwarded = upstream + coalesced;
+            long succeeded = Math.max(0, forwarded - failedRequests - cancelledRequests);
+            Long avgDurationMs = durationCount > 0 ? durationSumMs / durationCount : null;
+            Long avgTtfbMs = ttfbCount > 0 ? ttfbSumMs / ttfbCount : null;
+            return new Outcomes(succeeded, failedRequests, cancelledRequests, avgDurationMs, avgTtfbMs);
+        }
+
         void mergeFrom(GroupAccumulator other) {
             upstream += other.upstream;
             coalesced += other.coalesced;
@@ -351,7 +395,76 @@ public final class UsageStatsAggregator {
             gatewayObserved = gatewayObserved.add(other.gatewayObserved);
             savedByGatewayCache = savedByGatewayCache.add(other.savedByGatewayCache);
             unpriced = unpriced.plus(other.unpriced);
+            failedRequests += other.failedRequests;
+            cancelledRequests += other.cancelledRequests;
+            durationSumMs += other.durationSumMs;
+            durationCount += other.durationCount;
+            ttfbSumMs += other.ttfbSumMs;
+            ttfbCount += other.ttfbCount;
         }
+    }
+
+    /**
+     * A per-row cost estimate plus whether the row is fully priced for display.
+     *
+     * <p>
+     * <b>One rule, and it is token-aware:</b> a dimension gates the flag only when the row
+     * carries tokens for it. Cache rates are therefore not excluded wholesale — the earlier
+     * "input/output only" form was written to stop rows that never touched a cache
+     * dimension from being flagged, but that is already handled by the token test. Excluding
+     * cache dimensions outright also hid the genuine case (cache tokens present, no cache
+     * rate), which the summary reports as unpriced; excluding it here would have made the
+     * detail row and the aggregate disagree.
+     * </p>
+     */
+    public record PricedCost(BigDecimal cost, boolean priced) {
+    }
+
+    /**
+     * Prices one usage row with the same table and math as the aggregates:
+     * {@code tokens × unitPrice / 1e6} per token type, summed. {@code priced} is
+     * false when a non-zero input/output count has no snapshot — the caller shows
+     * 未定价 rather than a misleading 0 (#758).
+     */
+    public static PricedCost pricedCost(Map<String, BigDecimal> prices, UUID productId, String modelId, Long input,
+            Long output, Long cacheRead, Long cacheCreation) {
+        long in = orZero(input);
+        long out = orZero(output);
+        long read = orZero(cacheRead);
+        long creation = orZero(cacheCreation);
+        boolean priced = (in == 0 || hasPrice(prices, productId, modelId, PriceTokenType.INPUT))
+                && (out == 0 || hasPrice(prices, productId, modelId, PriceTokenType.OUTPUT))
+                && (read == 0 || hasPrice(prices, productId, modelId, PriceTokenType.CACHE_READ))
+                && (creation == 0 || hasPrice(prices, productId, modelId, PriceTokenType.CACHE_CREATION));
+        if (!priced) {
+            return new PricedCost(BigDecimal.ZERO, false);
+        }
+        BigDecimal cost = pricedOrZero(prices, productId, modelId, PriceTokenType.INPUT, in)
+                .add(pricedOrZero(prices, productId, modelId, PriceTokenType.OUTPUT, out))
+                .add(pricedOrZero(prices, productId, modelId, PriceTokenType.CACHE_READ, read))
+                .add(pricedOrZero(prices, productId, modelId, PriceTokenType.CACHE_CREATION, creation));
+        return new PricedCost(cost, true);
+    }
+
+    private static String priceKey(UUID productId, String modelId, PriceTokenType type) {
+        return productId + ":" + modelId + ":" + type.name();
+    }
+
+    private static boolean hasPrice(Map<String, BigDecimal> prices, UUID productId, String modelId,
+            PriceTokenType type) {
+        return prices.containsKey(priceKey(productId, modelId, type));
+    }
+
+    private static BigDecimal pricedOrZero(Map<String, BigDecimal> prices, UUID productId, String modelId,
+            PriceTokenType type, long tokens) {
+        if (tokens == 0) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal unitPrice = prices.get(priceKey(productId, modelId, type));
+        if (unitPrice == null) {
+            return BigDecimal.ZERO;
+        }
+        return BigDecimal.valueOf(tokens).multiply(unitPrice, MC).divide(PER_MILLION, MC);
     }
 
     private static long orZero(Long v) {

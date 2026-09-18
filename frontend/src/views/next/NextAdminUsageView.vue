@@ -1,19 +1,31 @@
 <script setup lang="ts">
 /**
- * NextAdminUsageView — /app/admin-usage 管理端「用量与成本总览」(#681)。
+ * NextAdminUsageView — /app/admin-usage 管理端「用量与成本总览」(#681/#758)。
  *
  * cc-switch 式总览 + 腾讯成本分析式分解：
- * - KPI 卡带：请求 / 输入 / 输出 / 缓存读（命中率）/ 缓存节省 / 总成本；
- * - 服务端时间趋势：Token 与成本双序列（按日/按月，不再用记录页拼数据）；
- * - 维度分解表：团队 / 个人 / 项目 / 模型 / 虚拟密钥，含成本占比，行点击下钻；
- * - 每小时 Token 表（#634）与明细记录沿用。
+ * - Hero 总览卡：真实消耗 Tokens 大数（≈中文单位）+ 总请求/总成本 + 子指标行
+ *   （输入/输出/缓存创建/缓存读取 + 缓存命中率进度条 + 网关缓存节省）；
+ * - 服务端时间趋势：输入/输出/缓存读取/缓存创建 4 条 Token 序列 + 成本线；
+ * - 报表页签（#758）：请求日志 / 供应商统计 / 模型统计 / 维度分解——统计页签
+ *   带成功率与平均延迟（生命周期口径）；请求日志富列：供应商/成本(未定价)/
+ *   用时·首字/协议；
+ * - 每小时 Token 表（#634）沿用。
  */
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
-import { ChartBarIcon, DownloadIcon, MoneyIcon, UploadIcon } from 'tdesign-icons-vue-next';
+import { ChartBarIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
-import { UiButton, UiDrawer, UiInput, UiSelect, UiStatusBadge, UiTable, UiTrendChart } from '@/ui';
+import {
+  UiButton,
+  UiDrawer,
+  UiInput,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  UiTooltip,
+  UiTrendChart,
+} from '@/ui';
 import type { UiSelectOption, UiTrendSeries } from '@/ui';
 import type { UsageGroupBy } from '@/types/api';
 import type {
@@ -92,27 +104,60 @@ function tokenTotal(g: UsageGroup | undefined): number {
   return (t?.input ?? 0) + (t?.output ?? 0) + (t?.cacheRead ?? 0) + (t?.cacheCreation ?? 0);
 }
 
+/**
+ * Trend palette (frontend-design §4: blue / cyan / orange / gray only).
+ * Cache series ride the grays — they are the secondary reading; IO keeps the
+ * brand blues and cost keeps the established orange.
+ */
+const TREND_COLORS = {
+  input: '#0960bd',
+  output: '#13c2c2',
+  cacheRead: '#8c8c8c',
+  cacheCreation: '#bfbfbf',
+  cost: '#fa8c16',
+};
+
+// #758: the token series splits into the four billed dimensions (input /
+// output / cache read / cache write) plus the cost line — the cc-switch
+// anatomy, all four token series independently scaled by the chart.
 const trendSeries = computed<UiTrendSeries[]>(() => {
   const groups = [...(series.value?.groups ?? [])].sort((a, b) =>
     String(a.groupKey ?? '').localeCompare(String(b.groupKey ?? '')),
   );
   const label = (key?: string) =>
     seriesDim.value === 'month' ? String(key ?? '') : String(key ?? '').slice(5);
+  const pointsOf = (pick: (g: UsageGroup) => number) =>
+    groups.map((g) => ({ label: label(g.groupKey), value: pick(g) }));
   return [
     {
-      name: 'Token',
-      color: 'var(--ui-primary)',
+      name: '输入',
+      color: TREND_COLORS.input,
       kind: 'area',
-      points: groups.map((g) => ({ label: label(g.groupKey), value: tokenTotal(g) })),
+      points: pointsOf((g) => Number(g.tokens?.input ?? 0)),
+    },
+    {
+      name: '输出',
+      color: TREND_COLORS.output,
+      kind: 'line',
+      points: pointsOf((g) => Number(g.tokens?.output ?? 0)),
+    },
+    {
+      name: '缓存读取',
+      color: TREND_COLORS.cacheRead,
+      kind: 'line',
+      points: pointsOf((g) => Number(g.tokens?.cacheRead ?? 0)),
+    },
+    {
+      name: '缓存创建',
+      color: TREND_COLORS.cacheCreation,
+      kind: 'line',
+      points: pointsOf((g) => Number(g.tokens?.cacheCreation ?? 0)),
     },
     {
       name: '成本 ¥',
-      color: '#fa8c16',
+      color: TREND_COLORS.cost,
       kind: 'line',
-      points: groups.map((g) => ({
-        label: label(g.groupKey),
-        value: Number(g.cost?.upstreamPaid ?? 0),
-      })),
+      points: pointsOf((g) => Number(g.cost?.upstreamPaid ?? 0)),
     },
   ];
 });
@@ -129,6 +174,67 @@ const hitRatePct = computed(() => {
   return denom > 0 ? ((hitRequests.value / denom) * 100).toFixed(1) + '%' : '—';
 });
 
+// ---- Hero overview card (#758, cc-switch anatomy) ----
+const totalRequests = computed(
+  () => upstreamRequests.value + coalescedRequests.value + hitRequests.value,
+);
+const totalTokensAll = computed(() => tokenTotal(totals.value));
+/** Chinese-unit companion label for the big number (≈ 72.17 亿 / 5,807.2 万). */
+const totalTokensCn = computed(() => {
+  const v = totalTokensAll.value;
+  if (v >= 100_000_000) return `${(v / 100_000_000).toFixed(2)} 亿`;
+  if (v >= 10_000) return `${(v / 10_000).toFixed(1)} 万`;
+  return String(v);
+});
+/**
+ * 缓存命中率（Token 口径）= 缓存读取 ÷（缓存读取 + 新增输入）—— the prompt-cache
+ * share the provider bills at the read rate; null when nothing was read or sent.
+ */
+const tokenHitRate = computed<number | null>(() => {
+  const read = Number(totals.value?.tokens?.cacheRead ?? 0);
+  const fresh = Number(totals.value?.tokens?.input ?? 0);
+  const denom = read + fresh;
+  return denom > 0 ? (read / denom) * 100 : null;
+});
+const tokenHitRatePct = computed(() =>
+  tokenHitRate.value === null ? '—' : tokenHitRate.value.toFixed(1) + '%',
+);
+const heroSub = computed(() => {
+  const t = totals.value?.tokens;
+  return [
+    { key: 'input', label: '新增输入', value: Number(t?.input ?? 0) },
+    { key: 'output', label: '输出', value: Number(t?.output ?? 0) },
+    { key: 'creation', label: '缓存创建', value: Number(t?.cacheCreation ?? 0) },
+    { key: 'read', label: '缓存读取', value: Number(t?.cacheRead ?? 0) },
+  ];
+});
+
+// ---- report tabs (#758): 请求日志 / 供应商统计 / 模型统计 / 维度分解 ----
+type ReportTab = 'records' | 'provider' | 'model' | 'breakdown';
+const activeTab = ref<ReportTab>('records');
+const tabOptions: Array<{ value: ReportTab; label: string; hint: string }> = [
+  { value: 'records', label: '请求日志', hint: '逐条调用明细' },
+  { value: 'provider', label: '供应商统计', hint: '按供应商产品聚合' },
+  { value: 'model', label: '模型统计', hint: '按模型聚合' },
+  { value: 'breakdown', label: '维度分解', hint: '自选维度与导出' },
+];
+
+/** The aggregation dimension behind the active tab. */
+const breakdownGroupBy = computed(() =>
+  activeTab.value === 'provider'
+    ? 'product'
+    : activeTab.value === 'model'
+      ? 'model'
+      : groupBy.value,
+);
+
+function toggleTab(tab: ReportTab) {
+  activeTab.value = tab;
+  if (tab !== 'records') {
+    void loadBreakdown();
+  }
+}
+
 // ---- dimension breakdown (summary.groups) ----
 const GROUP_LABELS: Record<string, string> = {
   project: '项目',
@@ -139,6 +245,7 @@ const GROUP_LABELS: Record<string, string> = {
   cache_level: '缓存层级',
   day: '日',
   month: '月',
+  product: '供应商产品',
 };
 
 interface BreakdownRow {
@@ -147,6 +254,9 @@ interface BreakdownRow {
   requests: number;
   tokens: number;
   cost: number;
+  /** Percent (0–100) over decided calls; null when nothing was decided yet. */
+  successRate: number | null;
+  avgLatencyMs: number | null;
   share: number;
 }
 
@@ -160,12 +270,17 @@ const breakdownRows = computed<BreakdownRow[]>(() => {
     .map((g) => {
       const cost = Number(g.cost?.upstreamPaid ?? 0);
       const tokens = tokenTotal(g);
+      const succeeded = Number(g.outcomes?.succeeded ?? 0);
+      const failed = Number(g.outcomes?.failed ?? 0);
+      const decided = succeeded + failed;
       return {
         key: String(g.groupKey ?? g.label ?? ''),
         label: g.label ?? String(g.groupKey ?? '—'),
         requests: Number(g.requests?.upstream ?? 0),
         tokens,
         cost,
+        successRate: decided > 0 ? (succeeded / decided) * 100 : null,
+        avgLatencyMs: g.outcomes?.avgDurationMs ?? null,
         share: shareBase > 0 ? ((useCost ? cost : tokens) / shareBase) * 100 : 0,
       };
     })
@@ -173,11 +288,21 @@ const breakdownRows = computed<BreakdownRow[]>(() => {
 });
 
 const breakdownColumns = computed(() => [
-  { key: 'label', title: GROUP_LABELS[groupBy.value] ?? '分组', minWidth: '180px' },
-  { key: 'requests', title: '请求', width: '110px', align: 'right' as const, sortable: true },
-  { key: 'tokens', title: 'Token', width: '130px', align: 'right' as const, sortable: true },
-  { key: 'cost', title: '成本 ¥', width: '130px', align: 'right' as const, sortable: true },
-  { key: 'share', title: '占比', width: '170px' },
+  // The header names the ACTIVE dimension (供应商统计 / 模型统计 preset it), not
+  // merely the breakdown selector's value.
+  { key: 'label', title: GROUP_LABELS[breakdownGroupBy.value] ?? '分组', minWidth: '180px' },
+  { key: 'requests', title: '请求', width: '100px', align: 'right' as const, sortable: true },
+  { key: 'tokens', title: 'Token', width: '120px', align: 'right' as const, sortable: true },
+  { key: 'cost', title: '成本 ¥', width: '120px', align: 'right' as const, sortable: true },
+  { key: 'successRate', title: '成功率', width: '90px', align: 'right' as const, sortable: true },
+  {
+    key: 'avgLatencyMs',
+    title: '平均延迟',
+    width: '100px',
+    align: 'right' as const,
+    sortable: true,
+  },
+  { key: 'share', title: '占比', width: '160px' },
 ]);
 
 const drillable = computed(() => ['team', 'user', 'project', 'model'].includes(groupBy.value));
@@ -392,22 +517,70 @@ const groupOptions: UiSelectOption[] = [
   { value: 'user', label: '用户' },
   { value: 'team', label: '团队' },
   { value: 'model', label: '模型' },
+  { value: 'product', label: '供应商产品' },
   { value: 'cache_level', label: '缓存层级' },
   { value: 'day', label: '日' },
   { value: 'month', label: '月' },
 ];
 
 const columns = [
-  { key: 'occurredAt', title: '时间', width: '180px' },
+  { key: 'occurredAt', title: '时间', width: '150px' },
+  { key: 'providerProductName', title: '供应商', minWidth: '150px' },
   { key: 'modelId', title: '模型', minWidth: '170px' },
-  { key: 'inputTokens', title: '输入', width: '110px', align: 'right' as const },
-  { key: 'outputTokens', title: '输出', width: '110px', align: 'right' as const },
-  { key: 'cacheLevel', title: '缓存层级', width: '120px' },
+  { key: 'inputTokens', title: '输入', minWidth: '150px', align: 'right' as const },
+  { key: 'outputTokens', title: '输出', width: '100px', align: 'right' as const },
+  { key: 'cost', title: '成本', width: '110px', align: 'right' as const },
+  { key: 'latencyMs', title: '用时 / 首字', width: '130px', align: 'right' as const },
   { key: 'upstreamStatusCode', title: '状态码', width: '90px', align: 'right' as const },
+  { key: 'wireProtocol', title: '协议', width: '120px' },
+  { key: 'cacheLevel', title: '缓存层级', width: '110px' },
   { key: 'usageMissing', title: '用量上报', width: '90px' },
   { key: 'clientIp', title: '来源 IP', width: '140px' },
   { key: 'gatewayRequestId', title: '请求 ID', minWidth: '230px' },
 ];
+
+/** 用时/首字 cell: "4.9s / 2.1s"; sub-second values stay in ms. */
+function fmtDuration(ms?: number | null): string {
+  if (ms === null || ms === undefined) return '—';
+  return ms >= 1_000 ? `${(ms / 1_000).toFixed(1)}s` : `${ms}ms`;
+}
+
+/** Inbound protocol families the gateway records (ProtocolFamily names). */
+const protocolLabel: Record<string, string> = {
+  ANTHROPIC_MESSAGES: 'Anthropic',
+  OPENAI_RESPONSES: 'OAI Responses',
+  OPENAI_CHAT_COMPLETIONS: 'OAI Chat',
+};
+
+function protocolOf(value?: string | null): string {
+  if (!value) return '—';
+  return protocolLabel[value] ?? value;
+}
+
+/** Success-rate cell: over decided calls (succeeded + failed); '—' when undecided. */
+function rateText(row: BreakdownRow): string {
+  return row.successRate === null ? '—' : row.successRate.toFixed(1) + '%';
+}
+
+/** Terminal lifecycle statuses recorded by the gateway (RequestStatus names). */
+const lifecycleLabel: Record<string, string> = {
+  SUCCEEDED: '成功',
+  UPSTREAM_REJECTED: '上游拒绝',
+  UPSTREAM_UNAVAILABLE: '上游不可达',
+  CLIENT_CANCELLED: '客户端取消',
+  TIMEOUT_BEFORE_FIRST_BYTE: '首字节超时',
+  STREAM_INTERRUPTED: '流中断',
+  AUTH_REJECTED: '鉴权拒绝',
+  MODEL_NOT_ALLOWED: '模型未授权',
+  USAGE_PARSE_FAILED: '用量解析失败',
+  IN_FLIGHT: '进行中',
+};
+
+function statusHintOf(row: UsageRecord): string {
+  const status = row.requestStatus ?? '';
+  const label = lifecycleLabel[status] ?? status;
+  return `终态：${label}${row.isComplete ? '' : '（未完成）'}`;
+}
 
 // #440: request-sequence guard — rapid filter/window/page changes must not
 // let an older summary+records pair land after a newer one.
@@ -431,7 +604,7 @@ async function load() {
   const range = rangeParams();
   try {
     const [summaryResult, seriesResult, recordsResult] = await Promise.all([
-      api.adminUsageSummary({ groupBy: groupBy.value, ...summaryFiltersNow, ...range }),
+      api.adminUsageSummary({ groupBy: breakdownGroupBy.value, ...summaryFiltersNow, ...range }),
       api.adminUsageSummary({ groupBy: seriesDim.value, ...summaryFiltersNow, ...range }),
       api.adminUsageRecords({
         ...summaryFiltersNow,
@@ -474,6 +647,51 @@ async function loadSeries() {
   } catch {
     // the trend chart keeps its previous data on failure
   }
+}
+
+// #758: switching report tabs only re-runs the aggregation behind the tab.
+let breakdownRequestSeq = 0;
+
+async function loadBreakdown() {
+  const seq = ++breakdownRequestSeq;
+  summaryLoading.value = true;
+  summaryError.value = '';
+  try {
+    const result = await api.adminUsageSummary({
+      groupBy: breakdownGroupBy.value,
+      ...summaryFilters(),
+      ...rangeParams(),
+    });
+    if (seq !== breakdownRequestSeq) {
+      return; // a newer request won — this response is stale
+    }
+    summary.value = result;
+  } catch (error) {
+    if (seq === breakdownRequestSeq && error instanceof ApiError) {
+      summaryError.value = error.message;
+      summaryRequestId.value = error.requestId ?? '';
+    }
+  } finally {
+    if (seq === breakdownRequestSeq) {
+      summaryLoading.value = false;
+    }
+  }
+}
+
+// #758: page-jump input beside prev/next (same pattern as #643 on 我的用量).
+const pageInput = ref('');
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil((records.value?.total ?? 0) / pageSize.value)),
+);
+
+function jumpToPage() {
+  const wanted = Number.parseInt(pageInput.value, 10);
+  if (Number.isNaN(wanted)) {
+    pageInput.value = '';
+    return;
+  }
+  pageInput.value = '';
+  gotoPage(Math.min(Math.max(wanted, 1), totalPages.value));
 }
 
 function applySeriesDim(value: 'day' | 'month') {
@@ -757,12 +975,6 @@ onMounted(() => {
           data-testid="usage-project-id"
           @change="runQuery"
         />
-        <UiSelect
-          v-model="groupBy"
-          :options="groupOptions"
-          data-testid="usage-group-by"
-          @change="load"
-        />
         <UiInput
           v-model="modelId"
           placeholder="模型 ID（可选）"
@@ -799,79 +1011,65 @@ onMounted(() => {
           全部清除
         </button>
       </div>
-      <div
-        v-if="summary && !summaryLoading"
-        class="next-admin-usage__summary"
-        data-testid="usage-summary"
-      >
-        <div class="next-admin-usage__stat">
-          <span class="next-admin-usage__stat-icon next-admin-usage__stat-icon--blue">
-            <ChartBarIcon />
-          </span>
-          <span class="next-admin-usage__stat-main">
-            <span class="next-admin-usage__stat-label">请求</span>
-            <span class="next-admin-usage__stat-value ui-num">{{ fmtNum(upstreamRequests) }}</span>
-            <span class="next-admin-usage__stat-sub"
-              >合并 {{ fmtNum(coalescedRequests) }} · 缓存命中 {{ fmtNum(hitRequests) }}</span
+    </section>
+
+    <!-- Hero 总览卡（#758，cc-switch 解剖：一个大数 + 总请求 / 总成本 + 子指标行） -->
+    <section
+      v-if="summary && !summaryLoading"
+      class="ui-panel next-admin-usage__hero"
+      data-testid="usage-summary"
+    >
+      <div class="next-admin-usage__hero-main">
+        <span class="next-admin-usage__hero-chip" aria-hidden="true"><ChartBarIcon /></span>
+        <div class="next-admin-usage__hero-number">
+          <span class="next-admin-usage__hero-label">真实消耗 Tokens</span>
+          <span class="next-admin-usage__hero-value ui-num">{{ fmtNum(totalTokensAll) }}</span>
+          <span class="next-admin-usage__hero-cn">≈ {{ totalTokensCn }}</span>
+        </div>
+        <div class="next-admin-usage__hero-aside">
+          <div class="next-admin-usage__hero-mini">
+            <span class="next-admin-usage__hero-mini-label">总请求数</span>
+            <span class="next-admin-usage__hero-mini-value ui-num">{{
+              fmtNum(totalRequests)
+            }}</span>
+            <span class="next-admin-usage__hero-mini-sub"
+              >转发 {{ fmtNum(upstreamRequests) }} · 合并 {{ fmtNum(coalescedRequests) }} · 缓存命中
+              {{ fmtNum(hitRequests) }}（{{ hitRatePct }}）</span
             >
-          </span>
-        </div>
-        <div class="next-admin-usage__stat">
-          <span class="next-admin-usage__stat-icon next-admin-usage__stat-icon--green">
-            <DownloadIcon />
-          </span>
-          <span class="next-admin-usage__stat-main">
-            <span class="next-admin-usage__stat-label">输入 Token</span>
-            <span class="next-admin-usage__stat-value ui-num">{{
-              fmtNum(totals?.tokens?.input)
-            }}</span>
-          </span>
-        </div>
-        <div class="next-admin-usage__stat">
-          <span class="next-admin-usage__stat-icon next-admin-usage__stat-icon--cyan">
-            <UploadIcon />
-          </span>
-          <span class="next-admin-usage__stat-main">
-            <span class="next-admin-usage__stat-label">输出 Token</span>
-            <span class="next-admin-usage__stat-value ui-num">{{
-              fmtNum(totals?.tokens?.output)
-            }}</span>
-          </span>
-        </div>
-        <div class="next-admin-usage__stat">
-          <span class="next-admin-usage__stat-icon next-admin-usage__stat-icon--violet">
-            <DownloadIcon />
-          </span>
-          <span class="next-admin-usage__stat-main">
-            <span class="next-admin-usage__stat-label">缓存读 Token</span>
-            <span class="next-admin-usage__stat-value ui-num">{{
-              fmtNum(totals?.tokens?.cacheRead)
-            }}</span>
-            <span class="next-admin-usage__stat-sub">命中率 {{ hitRatePct }}</span>
-          </span>
-        </div>
-        <div class="next-admin-usage__stat">
-          <span class="next-admin-usage__stat-icon next-admin-usage__stat-icon--gold">
-            <MoneyIcon />
-          </span>
-          <span class="next-admin-usage__stat-main">
-            <span class="next-admin-usage__stat-label">网关缓存节省</span>
-            <span class="next-admin-usage__stat-value ui-num"
-              >¥{{ fmtMoney(totals?.cost?.savedByGatewayCache) }}</span
-            >
-          </span>
-        </div>
-        <div class="next-admin-usage__stat">
-          <span class="next-admin-usage__stat-icon next-admin-usage__stat-icon--gold">
-            <MoneyIcon />
-          </span>
-          <span class="next-admin-usage__stat-main">
-            <span class="next-admin-usage__stat-label">总成本</span>
-            <span class="next-admin-usage__stat-value ui-num"
+          </div>
+          <div class="next-admin-usage__hero-mini">
+            <span class="next-admin-usage__hero-mini-label">总成本</span>
+            <span class="next-admin-usage__hero-mini-value ui-num"
               >¥{{ fmtMoney(totals?.cost?.upstreamPaid) }}</span
             >
-            <span class="next-admin-usage__stat-sub">按官方价目估算</span>
+            <span class="next-admin-usage__hero-mini-sub">按官方价目估算</span>
+          </div>
+        </div>
+      </div>
+      <div class="next-admin-usage__hero-subs">
+        <div v-for="item in heroSub" :key="item.key" class="next-admin-usage__hero-sub">
+          <span class="next-admin-usage__hero-sub-label">{{ item.label }}</span>
+          <span class="next-admin-usage__hero-sub-value ui-num">{{ fmtNum(item.value) }}</span>
+        </div>
+        <div class="next-admin-usage__hero-sub next-admin-usage__hero-sub--rate">
+          <span class="next-admin-usage__hero-sub-label">
+            <UiTooltip text="缓存命中率（Token 口径）= 缓存读取 ÷（缓存读取 + 新增输入）">
+              <span>缓存命中率</span>
+            </UiTooltip>
           </span>
+          <span class="next-admin-usage__hero-sub-value ui-num">{{ tokenHitRatePct }}</span>
+          <span class="next-admin-usage__hero-bar" aria-hidden="true">
+            <span
+              class="next-admin-usage__hero-bar-fill"
+              :style="{ width: `${Math.min(100, tokenHitRate ?? 0).toFixed(1)}%` }"
+            />
+          </span>
+        </div>
+        <div class="next-admin-usage__hero-sub">
+          <span class="next-admin-usage__hero-sub-label">网关缓存节省</span>
+          <span class="next-admin-usage__hero-sub-value ui-num"
+            >¥{{ fmtMoney(totals?.cost?.savedByGatewayCache) }}</span
+          >
         </div>
       </div>
     </section>
@@ -907,12 +1105,39 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="ui-panel next-admin-usage__breakdown" data-testid="usage-breakdown">
-      <div class="ui-panel-head">
-        <h2 class="ui-panel-title">维度分解 · {{ GROUP_LABELS[groupBy] ?? groupBy }}</h2>
-        <div class="next-admin-usage__breakdown-actions">
-          <span v-if="drillable" class="next-admin-usage__hint">点击行可下钻到明细</span>
+    <!-- #758: 报表页签 —— 请求日志 / 供应商统计 / 模型统计 / 维度分解 -->
+    <section class="ui-panel next-admin-usage__report" data-testid="usage-report">
+      <div class="ui-panel-head next-admin-usage__report-head">
+        <div class="next-admin-usage__tabs" role="tablist" aria-label="用量视图">
+          <button
+            v-for="tab in tabOptions"
+            :key="tab.value"
+            type="button"
+            role="tab"
+            class="next-admin-usage__tab"
+            :class="{ 'next-admin-usage__tab--on': activeTab === tab.value }"
+            :aria-selected="activeTab === tab.value"
+            :title="tab.hint"
+            :data-testid="`usage-tab-${tab.value}`"
+            @click="toggleTab(tab.value)"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
+        <div class="next-admin-usage__report-actions">
+          <UiSelect
+            v-if="activeTab === 'breakdown'"
+            v-model="groupBy"
+            :options="groupOptions"
+            width="150px"
+            data-testid="usage-group-by"
+            @change="loadBreakdown"
+          />
+          <span v-if="activeTab === 'breakdown' && drillable" class="next-admin-usage__hint"
+            >点击行可下钻到明细</span
+          >
           <UiButton
+            v-if="activeTab === 'breakdown'"
             variant="secondary"
             data-testid="usage-breakdown-export"
             @click="exportBreakdownCsv"
@@ -921,7 +1146,103 @@ onMounted(() => {
           </UiButton>
         </div>
       </div>
+
+      <!-- 请求日志 -->
       <UiTable
+        v-if="activeTab === 'records'"
+        :columns="columns"
+        :data="records?.items ?? []"
+        :loading="recordsLoading"
+        row-key="gatewayRequestId"
+        empty-title="没有用量记录"
+        data-testid="usage-records-table"
+      >
+        <template #occurredAt="{ row }">{{ formatTime((row as UsageRecord).occurredAt) }}</template>
+        <template #providerProductName="{ row }">
+          <span class="next-admin-usage__provider">{{
+            (row as UsageRecord).providerProductName || '—'
+          }}</span>
+        </template>
+        <template #modelId="{ row }">
+          <span class="ui-mono">{{ (row as UsageRecord).modelId }}</span>
+        </template>
+        <template #inputTokens="{ row }">
+          <span class="ui-num">{{ fmtNum((row as UsageRecord).inputTokens) }}</span>
+          <span
+            v-if="
+              (row as UsageRecord).cacheReadInputTokens ||
+              (row as UsageRecord).cacheCreationInputTokens
+            "
+            class="next-admin-usage__cell-sub"
+            >读 {{ fmtNum((row as UsageRecord).cacheReadInputTokens) }} · 写
+            {{ fmtNum((row as UsageRecord).cacheCreationInputTokens) }}</span
+          >
+        </template>
+        <template #outputTokens="{ row }">
+          <span class="ui-num">{{ fmtNum((row as UsageRecord).outputTokens) }}</span>
+        </template>
+        <template #cost="{ row }">
+          <span v-if="(row as UsageRecord).priced !== false" class="ui-num"
+            >¥{{ fmtMoney((row as UsageRecord).cost) }}</span
+          >
+          <UiTooltip v-else text="该模型尚无价目快照——在「定价」页录入单价后自动入账">
+            <span class="next-admin-usage__unpriced">未定价</span>
+          </UiTooltip>
+        </template>
+        <template #latencyMs="{ row }">
+          <span class="ui-num"
+            >{{ fmtDuration((row as UsageRecord).latencyMs) }} /
+            {{ fmtDuration((row as UsageRecord).ttfbMs) }}</span
+          >
+        </template>
+        <template #upstreamStatusCode="{ row }">
+          <UiTooltip
+            v-if="(row as UsageRecord).requestStatus"
+            :text="statusHintOf(row as UsageRecord)"
+          >
+            <span class="ui-num">{{ (row as UsageRecord).upstreamStatusCode ?? '—' }}</span>
+          </UiTooltip>
+          <span v-else class="ui-num">{{ (row as UsageRecord).upstreamStatusCode ?? '—' }}</span>
+        </template>
+        <template #wireProtocol="{ row }">
+          <span class="next-admin-usage__protocol">{{
+            protocolOf((row as UsageRecord).wireProtocol)
+          }}</span>
+        </template>
+        <template #cacheLevel="{ row }">
+          <UiStatusBadge
+            :label="
+              cacheLabel[(row as UsageRecord).cacheLevel ?? ''] ?? (row as UsageRecord).cacheLevel
+            "
+          />
+        </template>
+        <template #usageMissing="{ row }">
+          <UiStatusBadge
+            :tone="(row as UsageRecord).usageMissing ? 'warning' : 'success'"
+            :label="(row as UsageRecord).usageMissing ? '缺失' : '正常'"
+          />
+        </template>
+        <template #clientIp="{ row }">
+          <span class="ui-mono">{{ (row as UsageRecord).clientIp || '—' }}</span>
+        </template>
+        <template #gatewayRequestId="{ row }">
+          <button
+            v-if="(row as UsageRecord).gatewayRequestId"
+            type="button"
+            class="ui-link-action next-admin-usage__reqid"
+            :title="(row as UsageRecord).gatewayRequestId"
+            :data-testid="`usage-timeline-${(row as UsageRecord).gatewayRequestId}`"
+            @click="openTimeline((row as UsageRecord).gatewayRequestId)"
+          >
+            {{ (row as UsageRecord).gatewayRequestId }}
+          </button>
+          <span v-else class="ui-muted">—</span>
+        </template>
+      </UiTable>
+
+      <!-- 供应商统计 / 模型统计 / 维度分解（同表，维度随页签） -->
+      <UiTable
+        v-else
         :columns="breakdownColumns"
         :data="breakdownRows"
         row-key="key"
@@ -944,6 +1265,14 @@ onMounted(() => {
         <template #cost="{ row }">
           <span class="ui-num">¥{{ fmtMoney((row as unknown as BreakdownRow).cost) }}</span>
         </template>
+        <template #successRate="{ row }">
+          <span class="ui-num">{{ rateText(row as unknown as BreakdownRow) }}</span>
+        </template>
+        <template #avgLatencyMs="{ row }">
+          <span class="ui-num">{{
+            fmtDuration((row as unknown as BreakdownRow).avgLatencyMs)
+          }}</span>
+        </template>
         <template #share="{ row }">
           <span class="next-admin-usage__share">
             <span class="next-admin-usage__share-bar">
@@ -960,6 +1289,45 @@ onMounted(() => {
           </span>
         </template>
       </UiTable>
+
+      <div v-if="activeTab === 'records'" class="next-admin-usage__pager" data-testid="usage-pager">
+        <span class="next-admin-usage__pager-text">共 {{ records?.total ?? 0 }} 条</span>
+        <div class="next-admin-usage__pager-jump">
+          <span>跳至</span>
+          <input
+            v-model="pageInput"
+            class="next-admin-usage__page-input"
+            type="text"
+            inputmode="numeric"
+            :placeholder="String(page)"
+            data-testid="usage-page-input"
+            @keydown.enter="jumpToPage"
+          />
+          <span>页</span>
+          <UiButton variant="secondary" size="sm" data-testid="usage-page-go" @click="jumpToPage">
+            跳转
+          </UiButton>
+        </div>
+        <UiButton
+          variant="secondary"
+          :disabled="page <= 1"
+          data-testid="usage-prev"
+          @click="gotoPage(page - 1)"
+        >
+          上一页
+        </UiButton>
+        <span class="next-admin-usage__pager-text next-admin-usage__pager-current"
+          >第 {{ page }} 页 / {{ totalPages }}</span
+        >
+        <UiButton
+          variant="secondary"
+          :disabled="page >= totalPages"
+          data-testid="usage-next"
+          @click="gotoPage(page + 1)"
+        >
+          下一页
+        </UiButton>
+      </div>
     </section>
 
     <section class="ui-panel next-admin-usage__hourly" data-testid="usage-hourly">
@@ -1032,83 +1400,6 @@ onMounted(() => {
         </template>
       </UiTable>
     </section>
-
-    <section class="ui-panel">
-      <UiTable
-        :columns="columns"
-        :data="records?.items ?? []"
-        :loading="recordsLoading"
-        row-key="gatewayRequestId"
-        empty-title="没有用量记录"
-        data-testid="usage-records-table"
-      >
-        <template #occurredAt="{ row }">{{ formatTime((row as UsageRecord).occurredAt) }}</template>
-        <template #modelId="{ row }">
-          <span class="ui-mono">{{ (row as UsageRecord).modelId }}</span>
-        </template>
-        <template #inputTokens="{ row }">
-          <span class="ui-num">{{ (row as UsageRecord).inputTokens ?? 0 }}</span>
-        </template>
-        <template #outputTokens="{ row }">
-          <span class="ui-num">{{ (row as UsageRecord).outputTokens ?? 0 }}</span>
-        </template>
-        <template #cacheLevel="{ row }">
-          <UiStatusBadge
-            :label="
-              cacheLabel[(row as UsageRecord).cacheLevel ?? ''] ?? (row as UsageRecord).cacheLevel
-            "
-          />
-        </template>
-        <template #upstreamStatusCode="{ row }">
-          <span class="ui-num">{{ (row as UsageRecord).upstreamStatusCode ?? '—' }}</span>
-        </template>
-        <template #usageMissing="{ row }">
-          <UiStatusBadge
-            :tone="(row as UsageRecord).usageMissing ? 'warning' : 'success'"
-            :label="(row as UsageRecord).usageMissing ? '缺失' : '正常'"
-          />
-        </template>
-        <template #clientIp="{ row }">
-          <span class="ui-mono">{{ (row as UsageRecord).clientIp || '—' }}</span>
-        </template>
-        <template #gatewayRequestId="{ row }">
-          <button
-            v-if="(row as UsageRecord).gatewayRequestId"
-            type="button"
-            class="ui-link-action next-admin-usage__reqid"
-            :title="(row as UsageRecord).gatewayRequestId"
-            :data-testid="`usage-timeline-${(row as UsageRecord).gatewayRequestId}`"
-            @click="openTimeline((row as UsageRecord).gatewayRequestId)"
-          >
-            {{ (row as UsageRecord).gatewayRequestId }}
-          </button>
-          <span v-else class="ui-muted">—</span>
-        </template>
-      </UiTable>
-    </section>
-
-    <div class="next-admin-usage__pager">
-      <span class="next-admin-usage__pager-text">共 {{ records?.total ?? 0 }} 条</span>
-      <UiButton
-        variant="secondary"
-        :disabled="page <= 1"
-        data-testid="usage-prev"
-        @click="gotoPage(page - 1)"
-      >
-        上一页
-      </UiButton>
-      <span class="next-admin-usage__pager-text next-admin-usage__pager-current"
-        >第 {{ page }} 页</span
-      >
-      <UiButton
-        variant="secondary"
-        :disabled="(records?.items ?? []).length < pageSize"
-        data-testid="usage-next"
-        @click="gotoPage(page + 1)"
-      >
-        下一页
-      </UiButton>
-    </div>
 
     <!-- #707: per-call timeline, opened from the 请求 ID column -->
     <UiDrawer
@@ -1397,95 +1688,246 @@ onMounted(() => {
   text-decoration: underline;
 }
 
-.next-admin-usage__summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: var(--ui-space-4);
-  padding: var(--ui-space-4) var(--ui-space-5);
-  border-top: 1px solid var(--ui-border-muted);
+/* ---- Hero 总览卡 (#758) ---- */
+.next-admin-usage__hero {
+  margin-bottom: var(--ui-space-5);
 }
 
-.next-admin-usage__stat {
+.next-admin-usage__hero-main {
   display: flex;
   align-items: center;
-  gap: var(--ui-space-3);
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-5) var(--ui-space-6) var(--ui-space-4);
 }
 
-.next-admin-usage__stat-icon {
+.next-admin-usage__hero-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
   flex-shrink: 0;
-}
-
-.next-admin-usage__stat-icon svg {
-  width: 18px;
-  height: 18px;
-}
-
-.next-admin-usage__stat-icon--blue {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--ui-radius-panel);
   background: var(--ui-info-bg);
   color: var(--ui-info-fg);
 }
 
-.next-admin-usage__stat-icon--green {
-  background: var(--ui-success-bg);
-  color: var(--ui-success-fg);
+.next-admin-usage__hero-chip svg {
+  width: 22px;
+  height: 22px;
 }
 
-.next-admin-usage__stat-icon--cyan {
-  background: #e0f4f6;
-  color: #0e7490;
-}
-
-.next-admin-usage__stat-icon--violet {
-  background: #ede9fe;
-  color: #6d28d9;
-}
-
-.next-admin-usage__stat-icon--gold {
-  background: #fdf3e0;
-  color: #a16207;
-}
-
-.next-admin-usage__stat-main {
+.next-admin-usage__hero-number {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
 }
 
-.next-admin-usage__stat-label {
+.next-admin-usage__hero-label {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
+}
+
+.next-admin-usage__hero-value {
+  font-size: 32px;
+  font-weight: var(--ui-weight-semibold);
+  letter-spacing: -0.02em;
+  line-height: var(--ui-line-height-lg);
+  color: var(--ui-foreground);
   white-space: nowrap;
 }
 
-.next-admin-usage__stat-value {
-  font-size: 20px;
+.next-admin-usage__hero-cn {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.next-admin-usage__hero-aside {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-8);
+  margin-left: auto;
+}
+
+.next-admin-usage__hero-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.next-admin-usage__hero-mini-label {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-admin-usage__hero-mini-value {
+  font-size: var(--ui-font-size-xl);
   font-weight: var(--ui-weight-semibold);
   color: var(--ui-foreground);
-  letter-spacing: -0.01em;
-  white-space: nowrap;
 }
 
-.next-admin-usage__stat-sub {
+.next-admin-usage__hero-mini-sub {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-faint);
   white-space: nowrap;
 }
 
-.next-admin-usage__breakdown {
+.next-admin-usage__hero-subs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ui-space-8);
+  padding: var(--ui-space-3) var(--ui-space-6) var(--ui-space-4);
+  border-top: 1px solid var(--ui-border-muted);
+}
+
+.next-admin-usage__hero-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.next-admin-usage__hero-sub-label {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-admin-usage__hero-sub-value {
+  font-size: var(--ui-font-size-lg);
+  font-weight: var(--ui-weight-medium);
+  color: var(--ui-foreground);
+}
+
+.next-admin-usage__hero-sub--rate {
+  min-width: 180px;
+}
+
+.next-admin-usage__hero-bar {
+  margin-top: 2px;
+  height: 6px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-muted);
+  overflow: hidden;
+}
+
+.next-admin-usage__hero-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-success-fg);
+}
+
+/* ---- report tabs (#758) ---- */
+.next-admin-usage__report {
   margin-bottom: var(--ui-space-5);
 }
 
-.next-admin-usage__breakdown-actions {
-  display: inline-flex;
+.next-admin-usage__report-head {
+  gap: var(--ui-space-4);
+}
+
+.next-admin-usage__tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-5);
+}
+
+.next-admin-usage__tab {
+  position: relative;
+  padding: 4px 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--ui-font-size-base);
+  color: var(--ui-foreground-secondary);
+  cursor: pointer;
+}
+
+.next-admin-usage__tab:hover {
+  color: var(--ui-foreground);
+}
+
+.next-admin-usage__tab--on {
+  color: var(--ui-primary-text);
+  font-weight: var(--ui-weight-semibold);
+}
+
+.next-admin-usage__tab--on::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ui-primary);
+}
+
+.next-admin-usage__tab:focus-visible {
+  outline: none;
+  border-radius: var(--ui-radius-control);
+  box-shadow: var(--ui-shadow-focus);
+}
+
+.next-admin-usage__report-actions {
+  display: flex;
   align-items: center;
   gap: var(--ui-space-3);
+}
+
+/* ---- records cells (#758) ---- */
+.next-admin-usage__provider {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.next-admin-usage__cell-sub {
+  display: block;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.next-admin-usage__protocol {
+  color: var(--ui-foreground-secondary);
+}
+
+.next-admin-usage__unpriced {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-warning-fg);
+  cursor: help;
+}
+
+.next-admin-usage__pager-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-admin-usage__page-input {
+  width: 56px;
+  height: var(--ui-control-height);
+  padding: 0 var(--ui-space-2);
+  border: 1px solid var(--ui-input-border);
+  border-radius: var(--ui-radius-control);
+  font: inherit;
+  font-size: var(--ui-font-size-sm);
+  text-align: center;
+  color: var(--ui-foreground);
+  background: var(--ui-card);
+}
+
+.next-admin-usage__page-input:focus-visible {
+  outline: none;
+  border-color: var(--ui-primary);
+  box-shadow: var(--ui-shadow-focus);
 }
 
 .next-admin-usage__hint {

@@ -23,9 +23,16 @@ package com.miqroera.miqrokey.domain.usage;
  *            ({@code COALESCE(input_tokens, prompt_tokens)}), plus the booked
  *            deltas. Null when the row has neither an observed nor an adjusted
  *            value — "no data" is not the same as zero tokens
+ * @param providerProductName
+ *            display name of the provider product the row routed to (#758)
+ * @param lifecycle
+ *            lifecycle facts joined from {@code request_usage_records}
+ *            (protocol / first-byte time / terminal status); null when the call
+ *            has no lifecycle row (coalesced requests never do)
  */
 public record AdjustedUsageRow(UsageEvent observed, Long netInputTokens, Long netOutputTokens,
-        Long netCacheReadInputTokens, Long netCacheCreationInputTokens, boolean adjusted) {
+        Long netCacheReadInputTokens, Long netCacheCreationInputTokens, boolean adjusted, String providerProductName,
+        LifecycleInfo lifecycle) {
 
     public AdjustedUsageRow {
         if (observed == null) {

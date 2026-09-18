@@ -6,6 +6,7 @@ import com.miqroera.miqrokey.domain.repository.UsageStatsRepository;
 import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
 import com.miqroera.miqrokey.domain.usage.CacheLevel;
 import com.miqroera.miqrokey.domain.usage.PriceTokenType;
+import com.miqroera.miqrokey.domain.usage.LifecycleInfo;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator;
@@ -53,6 +54,29 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
     private record GroupSpec(String select, String join, String groupBy) {
     }
 
+    /**
+     * Lifecycle enrichment join (#758): fact rows carry the gateway request id; the
+     * lifecycle trail ({@code request_usage_records}) is unique per
+     * {@code (started_at, gateway_request_id)}. The window condition on
+     * {@code started_at} keeps PostgreSQL partition pruning effective — without it
+     * every partition would be probed for each fact row.
+     */
+    private static final String LIFECYCLE_JOIN = """
+            LEFT JOIN request_usage_records rur
+                   ON rur.tenant_id = ue.tenant_id
+                  AND rur.gateway_request_id = ue.gateway_request_id
+                  AND rur.started_at >= :from AND rur.started_at < :to""";
+
+    /**
+     * Terminal statuses that count as a gateway-side failure for the success rate
+     * (#758). A client cancellation is deliberately NOT in this set — the product
+     * walking away is not a failure — and is excluded from the rate on both sides
+     * instead.
+     */
+    private static final String FAILED_STATUS_SQL = "'UPSTREAM_REJECTED', 'UPSTREAM_UNAVAILABLE',"
+            + " 'TIMEOUT_BEFORE_FIRST_BYTE', 'STREAM_INTERRUPTED', 'AUTH_REJECTED', 'MODEL_NOT_ALLOWED',"
+            + " 'USAGE_PARSE_FAILED'";
+
     private GroupSpec spec(GroupBy groupBy) {
         return switch (groupBy) {
             case PROJECT -> new GroupSpec("ue.project_id AS group_key, p.name AS label",
@@ -76,6 +100,11 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                             + " JOIN teams t ON t.id = tm.team_id AND t.tenant_id = ue.tenant_id",
                     "tm.team_id, t.name");
             case MODEL -> new GroupSpec("ue.model_id AS group_key, ue.model_id AS label", "", "ue.model_id");
+            case PRODUCT -> new GroupSpec(
+                    "ue.provider_product_id AS group_key,"
+                            + " COALESCE(pp.display_name, pp.product_code, ue.provider_product_id::text) AS label",
+                    "LEFT JOIN provider_products pp ON pp.id = ue.provider_product_id", "ue.provider_product_id,"
+                            + " COALESCE(pp.display_name, pp.product_code, ue.provider_product_id::text)");
             case MONTH -> new GroupSpec(
                     "to_char(date_trunc('month', ue.occurred_at), 'YYYY-MM') AS group_key,"
                             + " to_char(date_trunc('month', ue.occurred_at), 'YYYY-MM') AS label",
@@ -108,6 +137,11 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                             + " JOIN teams t ON t.id = tm.team_id AND t.tenant_id = h.tenant_id",
                     "tm.team_id, t.name");
             case MODEL -> new GroupSpec("e.model_id AS group_key, e.model_id AS label", "", "e.model_id");
+            case PRODUCT -> new GroupSpec(
+                    "e.provider_product_id AS group_key,"
+                            + " COALESCE(pp.display_name, pp.product_code, e.provider_product_id::text) AS label",
+                    "LEFT JOIN provider_products pp ON pp.id = e.provider_product_id", "e.provider_product_id,"
+                            + " COALESCE(pp.display_name, pp.product_code, e.provider_product_id::text)");
             case MONTH -> new GroupSpec(
                     "to_char(date_trunc('month', h.occurred_at), 'YYYY-MM') AS group_key,"
                             + " to_char(date_trunc('month', h.occurred_at), 'YYYY-MM') AS label",
@@ -327,16 +361,26 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                            AS output_cost,
                        COALESCE(SUM(COALESCE(ue.cache_read_input_tokens, 0) * %s), 0) AS cache_read_cost,
                        COALESCE(SUM(COALESCE(ue.cache_creation_input_tokens, 0) * %s), 0) AS cache_creation_cost
-                %s
+                %s,
+                       -- Lifecycle outcomes (#758): terminal status and timing come from the
+                       -- per-request trail; rows without one (coalesced) contribute zeros.
+                       SUM(CASE WHEN rur.request_status IN (%s) THEN 1 ELSE 0 END) AS failed_requests,
+                       SUM(CASE WHEN rur.request_status = 'CLIENT_CANCELLED' THEN 1 ELSE 0 END) AS cancelled_requests,
+                       COALESCE(SUM(rur.duration_ms), 0) AS duration_sum_ms,
+                       COUNT(rur.duration_ms) AS duration_count,
+                       COALESCE(SUM(rur.time_to_first_byte_ms), 0) AS ttfb_sum_ms,
+                       COUNT(rur.time_to_first_byte_ms) AS ttfb_count
                 FROM usage_event ue
                 %s%s%s
+                %s
                 %s
                 GROUP BY %s, ue.provider_product_id, ue.model_id, ue.cache_level
                 """.formatted(spec.select(), zeroIfUnpriced(inputPrice), zeroIfUnpriced(outputPrice),
                 zeroIfUnpriced(cacheReadPrice), zeroIfUnpriced(cacheCreationPrice),
                 unpricedColumns(inputTokens, inputPrice, outputTokens, outputPrice, cacheReadTokens, cacheReadPrice,
                         cacheCreationTokens, cacheCreationPrice),
-                spec.join(), wb.joins(), UsageAdjustmentSql.ADJUSTMENT_LATERAL, wb.where(), spec.groupBy());
+                FAILED_STATUS_SQL, spec.join(), wb.joins(), UsageAdjustmentSql.ADJUSTMENT_LATERAL, LIFECYCLE_JOIN,
+                wb.where(), spec.groupBy());
         MapSqlParameterSource params = wb.params();
         List<UsageStatsAggregator.UsageAggRow> rows = new ArrayList<>();
         jdbc.query(sql, params, rs -> {
@@ -352,9 +396,12 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                     rs.getLong("unpriced_output_tokens"), rs.getLong("unpriced_cache_read_tokens"),
                     rs.getLong("unpriced_cache_creation_tokens"), rs.getLong("unpriced_events"),
                     rs.getLong("unavailable_events"));
+            UsageStatsAggregator.UsageAggRow.Outcome outcome = new UsageStatsAggregator.UsageAggRow.Outcome(
+                    rs.getLong("failed_requests"), rs.getLong("cancelled_requests"), rs.getLong("duration_sum_ms"),
+                    rs.getLong("duration_count"), rs.getLong("ttfb_sum_ms"), rs.getLong("ttfb_count"));
             rows.add(new UsageStatsAggregator.UsageAggRow(groupKey, label, productId, modelId, level, requests, tokens,
                     rs.getBigDecimal("input_cost"), rs.getBigDecimal("output_cost"),
-                    rs.getBigDecimal("cache_read_cost"), rs.getBigDecimal("cache_creation_cost"), gap));
+                    rs.getBigDecimal("cache_read_cost"), rs.getBigDecimal("cache_creation_cost"), gap, outcome));
         });
         return rows;
     }
@@ -538,7 +585,19 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
     private static final RowMapper<AdjustedUsageRow> ADJUSTED_ROW_MAPPER = (rs, rowNum) -> new AdjustedUsageRow(
             EVENT_ROW_MAPPER.mapRow(rs, rowNum), rs.getObject("net_input_tokens", Long.class),
             rs.getObject("net_output_tokens", Long.class), rs.getObject("net_cache_read_tokens", Long.class),
-            rs.getObject("net_cache_creation_tokens", Long.class), rs.getBoolean("adjusted"));
+            rs.getObject("net_cache_creation_tokens", Long.class), rs.getBoolean("adjusted"),
+            rs.getString("provider_product_name"), lifecycleOf(rs));
+
+    /** Lifecycle columns (#758); all null when the call has no lifecycle row. */
+    private static LifecycleInfo lifecycleOf(java.sql.ResultSet rs) throws java.sql.SQLException {
+        String wireProtocol = rs.getString("wire_protocol");
+        Long timeToFirstByteMs = rs.getObject("time_to_first_byte_ms", Long.class);
+        String requestStatus = rs.getString("request_status");
+        if (wireProtocol == null && timeToFirstByteMs == null && requestStatus == null) {
+            return null;
+        }
+        return new LifecycleInfo(wireProtocol, timeToFirstByteMs, requestStatus);
+    }
 
     /** CAA attribution columns (V54); all-null rows predate the feature. */
     private static UsageEvent.ContextAttribution attributionOf(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -570,13 +629,22 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                        %s AS net_output_tokens,
                        %s AS net_cache_read_tokens,
                        %s AS net_cache_creation_tokens,
-                       %s AS adjusted
-                  FROM usage_event ue%s%s
+                       %s AS adjusted,
+                       -- Enrichment (#758): the provider product's display name for the
+                       -- 供应商 column, plus the lifecycle trail for 首字/协议/终态.
+                       COALESCE(pp.display_name, pp.product_code) AS provider_product_name,
+                       rur.wire_protocol,
+                       rur.time_to_first_byte_ms,
+                       rur.request_status
+                  FROM usage_event ue
+                  LEFT JOIN provider_products pp ON pp.id = ue.provider_product_id%s%s
+                %s
                 %s
                 ORDER BY ue.occurred_at DESC
                 LIMIT :limit OFFSET :offset
                 """.formatted(netInput, netOutput, netCacheRead, netCacheCreation, UsageAdjustmentSql.ADJUSTED_FLAG,
-                wb.joins(), UsageAdjustmentSql.ADJUSTMENT_LATERAL, wb.where()), params, ADJUSTED_ROW_MAPPER);
+                wb.joins(), UsageAdjustmentSql.ADJUSTMENT_LATERAL, LIFECYCLE_JOIN, wb.where()), params,
+                ADJUSTED_ROW_MAPPER);
     }
 
     private TokenBucket parseUsage(String metaJson) {

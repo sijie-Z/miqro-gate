@@ -96,6 +96,6 @@ class UsageStatsPricingStatusTest {
             PricingGap gap) {
         return new UsageAggRow("g", "G", PRODUCT, MODEL, CacheLevel.UPSTREAM, 1,
                 new TokenBucket(input, output, null, null, null, null, null, null), inputCost, outputCost,
-                BigDecimal.ZERO, BigDecimal.ZERO, gap);
+                BigDecimal.ZERO, BigDecimal.ZERO, gap, UsageStatsAggregator.UsageAggRow.Outcome.NONE);
     }
 }

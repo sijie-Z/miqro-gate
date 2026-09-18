@@ -4086,6 +4086,19 @@ export interface components {
             /** @enum {string} */
             pricingStatus?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
             unpriced?: components["schemas"]["PricingGap"];
+            outcomes?: components["schemas"]["Outcomes"];
+        };
+        Outcomes: {
+            /** Format: int64 */
+            succeeded?: number;
+            /** Format: int64 */
+            failed?: number;
+            /** Format: int64 */
+            cancelled?: number;
+            /** Format: int64 */
+            avgDurationMs?: number;
+            /** Format: int64 */
+            avgTtfbMs?: number;
         };
         PricingGap: {
             /** Format: int64 */
@@ -4172,6 +4185,13 @@ export interface components {
             /** Format: int64 */
             netCacheCreationInputTokens?: number;
             adjusted?: boolean;
+            providerProductName?: string;
+            /** Format: int64 */
+            ttfbMs?: number;
+            wireProtocol?: string;
+            requestStatus?: string;
+            cost?: number;
+            priced?: boolean;
         };
         GrantOption: {
             /** Format: uuid */

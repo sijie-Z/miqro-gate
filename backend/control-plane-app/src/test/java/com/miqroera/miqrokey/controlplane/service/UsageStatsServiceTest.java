@@ -7,6 +7,7 @@ import com.miqroera.miqrokey.domain.model.UserStatus;
 import com.miqroera.miqrokey.domain.model.VirtualKey;
 import com.miqroera.miqrokey.domain.model.VirtualKeyPurpose;
 import com.miqroera.miqrokey.domain.model.VirtualKeyStatus;
+import com.miqroera.miqrokey.domain.repository.PriceSnapshotRepository;
 import com.miqroera.miqrokey.domain.repository.UsageStatsRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
 import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
@@ -57,13 +58,15 @@ class UsageStatsServiceTest {
     private VirtualKeyRepository keyRepository;
     @Mock
     private UsageStatsRepository usageStatsRepository;
+    @Mock
+    private PriceSnapshotRepository priceSnapshotRepository;
 
     private UsageStatsService service;
     private User user;
 
     @BeforeEach
     void setUp() {
-        service = new UsageStatsService(keyRepository, usageStatsRepository);
+        service = new UsageStatsService(keyRepository, usageStatsRepository, priceSnapshotRepository);
         user = new User(USER_ID, TENANT, "u", "U", new byte[32], UserRole.USER, UserStatus.ACTIVE, false, 0, null, null,
                 0L, Instant.now(), Instant.now());
     }
@@ -71,11 +74,14 @@ class UsageStatsServiceTest {
     @Test
     void summaryComputesCostFromPriceSnapshot() {
         when(keyRepository.findAllByUserId(USER_ID)).thenReturn(List.of(key(KEY_A), key(KEY_B)));
+        when(priceSnapshotRepository.findAllLatestAt(any(Instant.class)))
+                .thenReturn(List.of(price(PriceTokenType.INPUT, new BigDecimal("1.00")),
+                        price(PriceTokenType.OUTPUT, new BigDecimal("2.00"))));
         when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.VIRTUAL_KEY), any()))
                 .thenReturn(List.of(new UsageAggRow("key-" + KEY_A, "k-a", PRODUCT, MODEL, CacheLevel.UPSTREAM, 2L,
-                        new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null), new BigDecimal("1000"),
-                        new BigDecimal("1000"), BigDecimal.ZERO, BigDecimal.ZERO,
-                        UsageStatsAggregator.PricingGap.NONE)));
+                        new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null),
+                        new java.math.BigDecimal("1000"), new java.math.BigDecimal("1000"), java.math.BigDecimal.ZERO,
+                        java.math.BigDecimal.ZERO, UsageStatsAggregator.PricingGap.NONE, UsageAggRow.Outcome.NONE)));
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
 
         UsageSummary summary = service.summary(user, "virtual_key", null, null);
@@ -107,6 +113,7 @@ class UsageStatsServiceTest {
     @Test
     void summaryDefaultsGroupByToProject() {
         when(keyRepository.findAllByUserId(USER_ID)).thenReturn(List.of(key(KEY_A)));
+        when(priceSnapshotRepository.findAllLatestAt(any(Instant.class))).thenReturn(List.of());
         when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.PROJECT), any()))
                 .thenReturn(List.of());
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
@@ -226,7 +233,7 @@ class UsageStatsServiceTest {
     private static AdjustedUsageRow unadjusted(UsageEvent e) {
         TokenBucket t = e.tokens();
         return new AdjustedUsageRow(e, t.inputTokens(), t.outputTokens(), t.cacheReadInputTokens(),
-                t.cacheCreationInputTokens(), false);
+                t.cacheCreationInputTokens(), false, null, null);
     }
 
 }
