@@ -4,9 +4,12 @@ import com.miqroera.miqrokey.controlplane.dto.UsagePriceBackfillResult;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator;
 import java.math.BigDecimal;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -43,6 +46,13 @@ import org.springframework.transaction.annotation.Transactional;
  * finds nothing to do. It deliberately does <em>not</em> re-price rows that
  * already carry a status, including {@code UNAVAILABLE} ones — re-running must
  * not be able to revise a decision that was already made.
+ * </p>
+ *
+ * <p>
+ * A second pass completes rows that were stamped <em>before</em>
+ * {@code base_cost_amount} existed (#771): it derives the amount from the
+ * prices those rows already froze and writes only that column. Same rule — it
+ * completes a record, it never revises one.
  * </p>
  */
 @Service
@@ -141,6 +151,63 @@ public class UsagePriceBackfillService {
              WHERE id = :id AND tenant_id = :tenantId AND price_status IS NULL
             """;
 
+    /**
+     * Rows that were stamped before {@code base_cost_amount} existed (#771).
+     *
+     * <p>
+     * V66 added the column, but the stamping pass only selects rows with
+     * {@code price_status IS NULL} — so everything evaluated earlier kept a NULL
+     * base cost, and no number of re-runs could repair it. Those rows are exactly
+     * what this pass targets: already stamped, still missing their amount.
+     * </p>
+     *
+     * <p>
+     * The predicate mirrors {@link #baseCost} on purpose, and has to: a row is
+     * derivable exactly when some dimension both carries tokens and holds a frozen
+     * price. An over-inclusive selection would be <em>unsound</em> rather than
+     * merely wasteful — {@code LIMIT} plus {@code ORDER BY} would let underivable
+     * rows fill a batch, and the pass would stop with derivable rows still stranded
+     * behind them. {@code UNAVAILABLE} rows are excluded by status rather than by a
+     * sentinel: their NULL is a recorded fact, not an omission.
+     * </p>
+     */
+    private static final String SELECT_BASE_COST_BATCH = """
+            SELECT ue.id,
+                   COALESCE(ue.input_tokens, ue.prompt_tokens)      AS input_tokens,
+                   COALESCE(ue.output_tokens, ue.completion_tokens) AS output_tokens,
+                   ue.cache_read_input_tokens, ue.cache_creation_input_tokens,
+                   ue.price_input, ue.price_output, ue.price_cache_read, ue.price_cache_creation,
+                   ue.price_currency, ue.price_source, ue.price_effective_from
+              FROM usage_event ue
+             WHERE ue.tenant_id = :tenantId
+               AND ue.occurred_at >= :from AND ue.occurred_at < :to
+               AND ue.price_status IN ('COMPLETE', 'PARTIAL')
+               AND ue.base_cost_amount IS NULL
+               AND ((COALESCE(ue.input_tokens, ue.prompt_tokens, 0) <> 0 AND ue.price_input IS NOT NULL)
+                    OR (COALESCE(ue.output_tokens, ue.completion_tokens, 0) <> 0 AND ue.price_output IS NOT NULL)
+                    OR (COALESCE(ue.cache_read_input_tokens, 0) <> 0 AND ue.price_cache_read IS NOT NULL)
+                    OR (COALESCE(ue.cache_creation_input_tokens, 0) <> 0 AND ue.price_cache_creation IS NOT NULL))
+             ORDER BY ue.occurred_at, ue.id
+             LIMIT :limit
+            """;
+
+    /**
+     * Completes the base cost of an already-evaluated row (#771).
+     *
+     * <p>
+     * It writes <b>only</b> {@code base_cost_amount}. The frozen prices and the
+     * status are a decision already on the record, and this pass must not be able
+     * to revise one — it exists because the column was added after those decisions
+     * were made. {@code base_cost_amount IS NULL} in the predicate is what keeps
+     * the statement idempotent.
+     * </p>
+     */
+    private static final String FILL_BASE_COST = """
+            UPDATE usage_event
+               SET base_cost_amount = :baseCost
+             WHERE id = :id AND tenant_id = :tenantId AND base_cost_amount IS NULL
+            """;
+
     private final NamedParameterJdbcTemplate jdbc;
     private final AuditService auditService;
 
@@ -164,26 +231,8 @@ public class UsagePriceBackfillService {
         long scanned = 0;
 
         while (true) {
-            List<Map<String, Object>> batch = jdbc.query(SELECT_BATCH, new MapSqlParameterSource("tenantId", tenantId)
-                    .addValue("from", Timestamp.from(from)).addValue("to", Timestamp.from(to)).addValue("limit", BATCH),
-                    (rs, rowNum) -> {
-                        // A plain map, not Map.of: unpriced dimensions are legitimately null,
-                        // and Map.of rejects null values outright.
-                        Map<String, Object> row = new java.util.LinkedHashMap<>();
-                        row.put("id", rs.getObject("id", UUID.class));
-                        row.put("input", rs.getObject("price_input"));
-                        row.put("output", rs.getObject("price_output"));
-                        row.put("cacheRead", rs.getObject("price_cache_read"));
-                        row.put("cacheCreation", rs.getObject("price_cache_creation"));
-                        row.put("currency", rs.getString("price_currency"));
-                        row.put("source", rs.getString("price_source"));
-                        row.put("effectiveFrom", rs.getTimestamp("price_effective_from"));
-                        row.put("inputTokens", rs.getObject("input_tokens", Long.class));
-                        row.put("outputTokens", rs.getObject("output_tokens", Long.class));
-                        row.put("cacheReadTokens", rs.getObject("cache_read_input_tokens", Long.class));
-                        row.put("cacheCreationTokens", rs.getObject("cache_creation_input_tokens", Long.class));
-                        return row;
-                    });
+            List<Map<String, Object>> batch = jdbc.query(SELECT_BATCH, window(tenantId, from, to),
+                    UsagePriceBackfillService::priceRow);
             if (batch.isEmpty()) {
                 break;
             }
@@ -200,16 +249,94 @@ public class UsagePriceBackfillService {
                 scanned++;
             }
         }
+        long baseCostFilled = fillBaseCost(tenantId, from, to);
 
-        UsagePriceBackfillResult result = new UsagePriceBackfillResult(scanned, complete, partial, unavailable);
-        LOG.info("Usage price backfill {}..{}: scanned={} complete={} partial={} unavailable={}", from, to,
-                result.scanned(), result.complete(), result.partial(), result.unavailable());
+        UsagePriceBackfillResult result = new UsagePriceBackfillResult(scanned, complete, partial, unavailable,
+                baseCostFilled);
+        LOG.info("Usage price backfill {}..{}: scanned={} complete={} partial={} unavailable={} baseCostFilled={}",
+                from, to, result.scanned(), result.complete(), result.partial(), result.unavailable(),
+                result.baseCostFilled());
         auditService.record(tenantId, adminId, "USAGE_PRICE_BACKFILL", "USAGE_EVENT", null,
                 "{\"from\":\"" + from + "\",\"to\":\"" + to + "\",\"scanned\":" + result.scanned() + ",\"complete\":"
                         + result.complete() + ",\"partial\":" + result.partial() + ",\"unavailable\":"
-                        + result.unavailable() + "}",
+                        + result.unavailable() + ",\"baseCostFilled\":" + result.baseCostFilled() + "}",
                 requestId);
         return result;
+    }
+
+    /**
+     * Fills in {@code base_cost_amount} on rows stamped before the column existed
+     * (#771).
+     *
+     * <p>
+     * Derives the amount from the prices the row <em>already froze</em> — no price
+     * lookup, no status change — so it can only complete a record, never revise
+     * one. Re-running is a no-op.
+     * </p>
+     *
+     * <p>
+     * Each pass either fills at least one row, which strictly shrinks the candidate
+     * set, or it stops. That is what bounds the loop: a row that derived to NULL
+     * would stay a candidate forever, so the selection is written to admit exactly
+     * the rows {@link #baseCost} can price, and the "no progress" exit guards the
+     * invariant if the two ever drift apart.
+     * </p>
+     *
+     * @return how many rows were filled
+     */
+    private long fillBaseCost(UUID tenantId, Instant from, Instant to) {
+        long filled = 0;
+        while (true) {
+            List<Map<String, Object>> batch = jdbc.query(SELECT_BASE_COST_BATCH, window(tenantId, from, to),
+                    UsagePriceBackfillService::priceRow);
+            if (batch.isEmpty()) {
+                break;
+            }
+            long updated = 0;
+            for (Map<String, Object> row : batch) {
+                BigDecimal baseCost = baseCost(row);
+                if (baseCost == null) {
+                    continue;
+                }
+                updated += jdbc.update(FILL_BASE_COST, new MapSqlParameterSource("baseCost", baseCost)
+                        .addValue("id", row.get("id")).addValue("tenantId", tenantId));
+            }
+            filled += updated;
+            if (updated == 0) {
+                break;
+            }
+        }
+        return filled;
+    }
+
+    private static MapSqlParameterSource window(UUID tenantId, Instant from, Instant to) {
+        return new MapSqlParameterSource("tenantId", tenantId).addValue("from", Timestamp.from(from))
+                .addValue("to", Timestamp.from(to)).addValue("limit", BATCH);
+    }
+
+    /**
+     * The row shape both passes read, under names {@link #DIMENSIONS} already uses.
+     *
+     * <p>
+     * A plain map, not {@code Map.of}: an unpriced dimension is legitimately null,
+     * and {@code Map.of} rejects null values outright.
+     * </p>
+     */
+    private static Map<String, Object> priceRow(ResultSet rs, int rowNum) throws SQLException {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", rs.getObject("id", UUID.class));
+        row.put("input", rs.getObject("price_input"));
+        row.put("output", rs.getObject("price_output"));
+        row.put("cacheRead", rs.getObject("price_cache_read"));
+        row.put("cacheCreation", rs.getObject("price_cache_creation"));
+        row.put("currency", rs.getString("price_currency"));
+        row.put("source", rs.getString("price_source"));
+        row.put("effectiveFrom", rs.getTimestamp("price_effective_from"));
+        row.put("inputTokens", rs.getObject("input_tokens", Long.class));
+        row.put("outputTokens", rs.getObject("output_tokens", Long.class));
+        row.put("cacheReadTokens", rs.getObject("cache_read_input_tokens", Long.class));
+        row.put("cacheCreationTokens", rs.getObject("cache_creation_input_tokens", Long.class));
+        return row;
     }
 
     /**

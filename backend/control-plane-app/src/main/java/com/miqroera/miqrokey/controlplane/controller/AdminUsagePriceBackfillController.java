@@ -21,6 +21,13 @@ import org.springframework.web.bind.annotation.RestController;
  * basis has never been evaluated — so an operator can safely re-run it over a
  * window, and a wide backfill can be done in successive narrower windows.
  * </p>
+ *
+ * <p>
+ * A pass also completes the {@code base_cost_amount} of rows that were stamped
+ * before that column existed (#771), deriving it from the prices they already
+ * froze. So re-running is the repair path for a deployment upgraded past V66,
+ * not just a no-op.
+ * </p>
  */
 @RestController
 @RequestMapping("/api/v1/admin/usage-price-backfill")

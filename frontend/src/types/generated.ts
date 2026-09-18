@@ -3320,6 +3320,8 @@ export interface components {
             partial?: number;
             /** Format: int64 */
             unavailable?: number;
+            /** Format: int64 */
+            baseCostFilled?: number;
         };
         DeletionRequest: {
             /** Format: uuid */

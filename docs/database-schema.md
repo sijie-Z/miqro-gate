@@ -231,7 +231,8 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
   - **`UNAVAILABLE` 不等于单价 0**：查不到价格时价格列保持 NULL。"价格未知"与"免费"是不同的审计事实，静默写 0 会低估历史支出
   - 取值口径：`price_snapshot` 中 `effective_from <= 本行 occurred_at` 的最新一行（同 `effective_from` 由 `id DESC` 做确定性 tie-break）；回填按 `occurred_at`，**不是按回填时刻**。动机：成本原先是查询时按**当前**价目现算的，所以改一次价目，历史报表金额跟着变
   - **读取方**：明细/汇总/计费/配额水位（`UsageStatsAggregator` 链路）已改读此基座（#710 F21-A 第二刀）；成本分摊 `cost_allocations` 仍用"分配时刻最新快照"，未切换
-  - `base_cost_amount numeric(24,10)`（V65，可空不可变）——事件时刻依据当时价目算出的**基础成本**，与 `price_currency` 配对。**NOW 就冻**的理由：`单价 × 数量` 只在费率平坦时成立，引入阶梯价/免费额度后不成立（AWS CUR 因此同时给出 rate 与 line-item cost）。`COMPLETE` 时有值（可为 0，即确实免费）；`PARTIAL` 时只含已定价维度；`UNAVAILABLE` 时 **NULL——不是 0**
+  - `base_cost_amount numeric(24,10)`（V66，可空）——事件时刻依据当时价目算出的**基础成本**，与 `price_currency` 配对。**NOW 就冻**的理由：`单价 × 数量` 只在费率平坦时成立，引入阶梯价/免费额度后不成立（AWS CUR 因此同时给出 rate 与 line-item cost）。`COMPLETE` 时有值（可为 0，即确实免费）；`PARTIAL` 时只含已定价维度；`UNAVAILABLE` 时 **NULL——不是 0**
+  - 不变式：**一旦有值即不再改写**（"可空"是暂态，不是可变）。V66 之前盖章的历史行金额为 NULL，而盖章通道只选 `price_status IS NULL`，永不重选它们——由回填端点的**补写通道**（#771）从该行已冻结的 `price_*` 列派生填入；它不查价目、不改 `price_status`
   - **读取方**：`UsageStatsAggregator` 链路同时给出 `pricingStatus` 与 `unpriced.*`：已知金额与未计价用量**分开披露**，`pricingStatus != COMPLETE` 时已知金额**不是总额**。口径见 usage-accounting §6
 - `occurred_at`、`created_at`
 
