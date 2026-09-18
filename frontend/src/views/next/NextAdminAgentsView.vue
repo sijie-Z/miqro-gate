@@ -8,7 +8,17 @@
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
+import {
+  UiButton,
+  UiDialog,
+  UiInput,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  UiTooltip,
+  toast,
+} from '@/ui';
+import { costGapNote } from '@/lib/usage-pricing';
 import type { AgentView, CredentialView, UsageSummary } from '@/types/generated-api';
 
 const agents = ref<AgentView[]>([]);
@@ -39,6 +49,10 @@ const usageVisible = ref(false);
 const usageLoading = ref(false);
 const usageError = ref('');
 const usageSummary = ref<UsageSummary | null>(null);
+
+// The tile below prints a cost that may be short of the whole; say so where it is
+// shown rather than letting an unpriced figure read as a paid amount (#801/#857).
+const costCaveat = computed(() => costGapNote(usageSummary.value?.totals));
 
 const confirmState = ref<{
   title: string;
@@ -330,7 +344,12 @@ onMounted(load);
         <div class="next-agents__usage-tile">
           <span class="next-agents__usage-label">分摊成本</span>
           <span class="next-agents__usage-value ui-num"
-            >¥{{ Number(usageSummary.totals?.cost?.projectAllocated ?? 0).toFixed(4) }}</span
+            >¥{{ Number(usageSummary.totals?.cost?.projectAllocated ?? 0).toFixed(4)
+            }}<UiTooltip v-if="costCaveat" :text="costCaveat"
+              ><span class="next-agents__usage-caveat" data-testid="agent-cost-caveat"
+                >未定价</span
+              ></UiTooltip
+            ></span
           >
         </div>
       </div>
@@ -453,6 +472,14 @@ onMounted(load);
 .next-agents__usage-label {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
+}
+
+.next-agents__usage-caveat {
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-medium);
+  color: var(--ui-warning-fg);
+  white-space: nowrap;
+  margin-left: var(--ui-space-1);
 }
 
 .next-agents__usage-value {
