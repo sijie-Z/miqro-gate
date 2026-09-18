@@ -207,8 +207,14 @@ class AdminCredentialAgentBindingIntegrationTest {
     void aCredentialReferencedInAnotherTenantIsNotFound() throws Exception {
         UUID foreign = seedForeignTenantReferencedCredential();
 
-        rotate(foreign).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("CREDENTIAL_NOT_FOUND"));
+        String rotateBody = rotate(foreign).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("CREDENTIAL_NOT_FOUND"))
+                .andReturn().getResponse().getContentAsString();
         disable(foreign).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("CREDENTIAL_NOT_FOUND"));
+
+        // A cross-tenant reference must read as "not found": the body may not name
+        // the foreign agent or credential, which would confirm they exist elsewhere.
+        assertThat(rotateBody).doesNotContain("foreign-agent").doesNotContain("foreign-key");
 
         // The foreign credential is untouched and still pinned by its own agent.
         assertThat(row("SELECT * FROM upstream_credentials WHERE id = :id", foreign).get("status")).isEqualTo("ACTIVE");

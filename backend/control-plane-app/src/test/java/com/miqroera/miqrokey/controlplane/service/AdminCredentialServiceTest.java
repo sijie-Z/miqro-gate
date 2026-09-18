@@ -382,6 +382,9 @@ class AdminCredentialServiceTest {
 
         service.disable(admin, credential.id(), "req-1");
 
+        // The guard is consulted (empty result, not skipped) and the credential
+        // still goes through the normal disable path.
+        verify(agentRepository).findActiveByCredentialId(TENANT, credential.id());
         verify(credentialRepository).update(argThat(u -> u.status() == CredentialStatus.DISABLED));
     }
 
