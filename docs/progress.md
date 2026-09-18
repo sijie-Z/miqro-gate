@@ -3757,3 +3757,10 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - `-Dtest=A+B` 不是 surefire 的选择器语法（是逗号），**空跑返回 0**——"构建成功"掩盖了"根本没跑测试"
 - 调用了**别的工作树**的 `mvnw21.sh`（它会 `cd` 到自己那棵树），于是构建与测试都落在演示树上；两次假绿后才从日志里的路径发现
 - 前端：`prettier --write` 会把 `src/i18n/dict.ts` **重排半个文件**（该文件从未被格式化过，CI 也不查它）——按本仓既有教训，格式化只跑本轮改动文件，且 dict.ts 单独用最小改动追加
+## 2026-09-18 MCP tools/sync 兼容性修复（#779）——真实封闭客户端实测暴露
+
+**来源**：#742 第③片（WorkBuddy → 网关 MCP 数据面 → 公开 DeepWiki MCP）真机实测中，工具同步对严格 Streamable HTTP 上游 502（上游 406）——`McpToolsListClient` 只发 `Accept: application/json`，缺规范要求的 `text/event-stream`（同文件注释还自述"无 initialize 握手"，有状态上游为后续项）。触发面：一切严格校验 Accept 的上游 tools/sync 不可用 → 工具只能手工登记。
+
+**修复**：Accept 改为 `application/json, text/event-stream`；**两条回归测试先证红**（Accept 双媒体类型断言 + 严格上游 406 夹具），修复后 `McpToolsListClientTest` 9/9 绿。
+
+**绕行（修复前已在演示站完成，数据面健康性佐证）**：手工登记（官方占位 `method=POST path="/"`）+ ENABLED 后，以消费者凭据经网关 `tools/call read_wiki_structure` → 200 返回真实内容，`mcp_access_log`：`FORWARDED | read_wiki_structure | ttfb 617ms`。

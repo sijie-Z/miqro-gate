@@ -58,7 +58,10 @@ public class McpToolsListClient {
     public List<UpstreamTool> fetchTools(String endpoint, String bearer) {
         try {
             HttpRequest.Builder builder = HttpRequest.newBuilder().uri(URI.create(endpoint)).timeout(requestTimeout)
-                    .header("Content-Type", "application/json").header("Accept", "application/json")
+                    .header("Content-Type", "application/json")
+                    // Streamable HTTP requires BOTH media types in Accept; strict
+                    // upstreams answer 406 when text/event-stream is missing (#779).
+                    .header("Accept", "application/json, text/event-stream")
                     .POST(HttpRequest.BodyPublishers.ofString(REQUEST_BODY, StandardCharsets.UTF_8));
             if (bearer != null) {
                 builder.header("Authorization", bearer);
