@@ -203,4 +203,79 @@ class CacheKeyFactoryTest {
             assertThat(factory.compute(ctx, "gpt-4o-mini", a)).isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", b));
         }
     }
+
+    /**
+     * Key-identity hardening (2026-09-18, external review of the semantic-cache
+     * evaluation): the chat path keeps only the conversation scope, so
+     * output-shaping generation parameters and the Anthropic/Responses top-level
+     * system prompt must be explicit key dimensions — otherwise two requests with
+     * different sampling or system prompts would replay each other's responses.
+     */
+    @Nested
+    @DisplayName("Key identity hardening")
+    class IdentityHardening {
+
+        private static final String BASE = "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\","
+                + "\"content\":\"hi\"}]}";
+
+        @Test
+        @DisplayName("generation parameters are a key dimension (temperature / token budget)")
+        void generationParametersSplit() {
+            byte[] warm = json("{\"model\":\"gpt-4o-mini\",\"temperature\":0.9,\"max_tokens\":256,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] cold = json("{\"model\":\"gpt-4o-mini\",\"temperature\":0.1,\"max_tokens\":256,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] budget = json("{\"model\":\"gpt-4o-mini\",\"temperature\":0.9,\"max_tokens\":1024,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+            assertThat(factory.compute(ctx, "gpt-4o-mini", warm))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", cold));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", warm))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", budget));
+            // Identical parameters (any field order) stay a stable hit.
+            byte[] warmAgain = json("{\"max_tokens\":256,\"temperature\":0.9,\"model\":\"gpt-4o-mini\","
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            assertThat(factory.compute(ctx, "gpt-4o-mini", warm))
+                    .isEqualTo(factory.compute(ctx, "gpt-4o-mini", warmAgain));
+            // Absent parameters keep the pre-existing key shape (both absent = equal).
+            assertThat(factory.compute(ctx, "gpt-4o-mini", json(BASE)))
+                    .isEqualTo(factory.compute(ctx, "gpt-4o-mini", json(BASE)));
+        }
+
+        @Test
+        @DisplayName("thinking budget is a key dimension (Anthropic)")
+        void thinkingBudgetSplits() {
+            byte[] small = json("{\"model\":\"claude-3-7-sonnet\",\"thinking\":{\"type\":\"enabled\","
+                    + "\"budget_tokens\":1024},\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] large = json("{\"model\":\"claude-3-7-sonnet\",\"thinking\":{\"type\":\"enabled\","
+                    + "\"budget_tokens\":16384},\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", small))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", large));
+        }
+
+        @Test
+        @DisplayName("Anthropic top-level system prompt is part of the scope")
+        void anthropicTopLevelSystemMatters() {
+            byte[] a = json("{\"model\":\"claude-3-7-sonnet\",\"system\":\"You are terse.\","
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] b = json("{\"model\":\"claude-3-7-sonnet\",\"system\":\"You are verbose.\","
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            byte[] sameAsA = json("{\"model\":\"claude-3-7-sonnet\",\"system\":[{\"type\":\"text\","
+                    + "\"text\":\"You are terse.\"}],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", a))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", b));
+            // Array-form system parts flatten identically to the plain string.
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", a))
+                    .isEqualTo(factory.compute(ctx, "claude-3-7-sonnet", sameAsA));
+        }
+
+        @Test
+        @DisplayName("OpenAI Responses instructions field is part of the scope")
+        void responsesInstructionsMatter() {
+            byte[] a = json("{\"model\":\"gpt-5.2\",\"instructions\":\"answer briefly\",\"input\":[\"hi\"]}");
+            byte[] b = json("{\"model\":\"gpt-5.2\",\"instructions\":\"answer verbosely\",\"input\":[\"hi\"]}");
+            assertThat(factory.compute(ctx, "gpt-5.2", a)).isNotEqualTo(factory.compute(ctx, "gpt-5.2", b));
+        }
+    }
 }
