@@ -1,6 +1,7 @@
 #!/bin/sh
-# Tests for scripts/onboarding/miqro-onboard.sh (issue #742, slice 2).
-# Pure POSIX sh, no network: `verify` runs against a fake curl on PATH.
+# Tests for scripts/onboarding/miqro-onboard.sh (issue #742, slice 2; review of #763).
+# Pure POSIX sh, no network: `verify` runs against a fake curl on PATH, and the
+# escaping/validation helpers are sourced directly via MIQRO_ONBOARD_SOURCE_ONLY.
 set -u
 
 DIR=$(cd "$(dirname "$0")" && pwd)
@@ -21,8 +22,11 @@ bad() {
     printf 'FAIL %s\n' "$1"
 }
 
-# run <expected-status-nonzero?-> : capture OUT/ST
-# assert_status NAME EXPECTED
+# portable file mode (GNU stat, then BSD/macOS stat)
+file_mode() {
+    stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null || printf '?'
+}
+
 assert_status() {
     if [ "$ST" = "$1" ]; then ok "$2"; else bad "$2 (status=$ST, expected $1)"; fi
 }
@@ -48,12 +52,43 @@ run() {
 GW=https://gw.example.com
 VK='mqk_live_AbCdEfGhIjKlMnOpQrStUv_XXXXXXXX.demo'
 
-# ---------- print ----------
+# ============ escaping helpers (sourced seam) ============
+
+export MIQRO_ONBOARD_SOURCE_ONLY=1
+# shellcheck disable=SC1090
+. "$SCRIPT"
+
+OUT=$(sq_posix "a'b")
+case "$OUT" in
+    "'a'\\''b'") ok "sq_posix escapes embedded single quotes" ;;
+    *) bad "sq_posix escapes embedded single quotes (got: $OUT)" ;;
+esac
+OUT=$(sq_posix 'plain-value')
+case "$OUT" in
+    "'plain-value'") ok "sq_posix wraps in single quotes" ;;
+    *) bad "sq_posix wraps in single quotes (got: $OUT)" ;;
+esac
+OUT=$(dq_ps 'a$b"c`d')
+case "$OUT" in
+    '"a`$b`"c``d"') ok "dq_ps escapes \$ \" and backtick for PowerShell" ;;
+    *) bad "dq_ps escapes for PowerShell (got: $OUT)" ;;
+esac
+OUT=$(esc_json 'a\b"c')
+case "$OUT" in
+    'a\\b\"c') ok "esc_json escapes backslash and quote" ;;
+    *) bad "esc_json escapes backslash and quote (got: $OUT)" ;;
+esac
+if OUT=$(validate_cmd_safe 'a&b' 2>&1); then ST=0; else ST=$?; fi
+assert_status 1 "validate_cmd_safe rejects cmd metacharacters"
+assert_contains "cmd.exe" "the cmd limitation is explained"
+unset MIQRO_ONBOARD_SOURCE_ONLY
+
+# ============ print ============
 
 run sh "$SCRIPT" print env --gateway "$GW" --key "$VK"
 assert_status 0 "print env (posix) exits 0"
-assert_contains 'export ANTHROPIC_BASE_URL="https://gw.example.com"' "print env emits base URL"
-assert_contains "export ANTHROPIC_AUTH_TOKEN=\"$VK\"" "print env emits key"
+assert_contains "export ANTHROPIC_BASE_URL='https://gw.example.com'" "print env emits base URL (single-quoted)"
+assert_contains "export ANTHROPIC_AUTH_TOKEN='$VK'" "print env emits key (single-quoted)"
 assert_contains "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" "print env disables nonessential traffic"
 
 run sh "$SCRIPT" print env --gateway "$GW" --key "$VK" --shell cmd
@@ -67,8 +102,19 @@ assert_contains '$env:OPENAI_BASE_URL="https://gw.example.com/v1"' "openai power
 run sh "$SCRIPT" print curl --gateway "$GW" --key "$VK" --model deepseek-flash
 assert_status 0 "print curl exits 0"
 assert_contains "curl https://gw.example.com/v1/chat/completions" "curl targets chat completions"
-assert_contains "Bearer $VK" "curl carries the key"
+assert_contains 'Bearer $MIQROKEY_API_KEY' "curl references the key through an env var (not inline)"
+assert_not_contains "Bearer $VK" "curl no longer embeds the raw key in the command"
 assert_contains '"model":"deepseek-flash"' "curl seeds the model"
+
+run sh "$SCRIPT" print codex --gateway "$GW" --key "$VK" --model deepseek-flash
+assert_status 0 "print codex exits 0"
+assert_not_contains "$VK" "codex snippet does NOT contain the key (comment removed)"
+assert_contains 'env_key = "MIQROKEY_API_KEY"' "codex keeps the env_key indirection"
+assert_contains "不要写进本文件" "codex tells the user where the key belongs"
+
+run sh "$SCRIPT" print claude-settings --gateway "$GW" --key "$VK"
+assert_status 0 "print claude-settings exits 0"
+assert_contains '"ANTHROPIC_AUTH_TOKEN"' "settings snippet carries the token field"
 
 run sh "$SCRIPT" print mcp --gateway "$GW" --key "$VK" --mcp-url https://gw.example.com/mcpservers/demo/mcp
 assert_status 1 "print mcp refuses a virtual key (wrong plane)"
@@ -79,20 +125,54 @@ assert_status 0 "print mcp accepts a consumer key"
 assert_contains '"url": "https://gw.example.com/mcpservers/demo/mcp"' "mcp emits the streamable URL"
 assert_contains 'Bearer mqk_api_ZZZ' "mcp emits the consumer credential"
 
-# ---------- validation ----------
+# ============ validation (malicious / malformed input) ============
 
 run sh "$SCRIPT" print curl --gateway "$GW" --key 'mqk_live_bareKeyWithoutLabel'
 assert_status 1 "bare virtual key (no .label) is refused"
 assert_contains ".label" "the .label trap is named"
 
-run sh "$SCRIPT" print curl --gateway http://example.com --key "$VK"
+run sh "$SCRIPT" print env --gateway "$GW" --key 'mqk_live_ok.OK"evil'
+assert_status 1 "key containing a double quote is refused"
+assert_contains "allowed set" "the charset rule is named"
+
+run sh "$SCRIPT" print env --gateway "$GW" --key "mqk_live_ok.OK'evil"
+assert_status 1 "key containing a single quote is refused"
+
+run sh "$SCRIPT" print env --gateway "$GW" --key 'mqk_live_ok.OK$(evil)'
+assert_status 1 "key containing command substitution is refused"
+
+run sh "$SCRIPT" print curl --gateway "$GW" --key "$VK" --model 'x;rm -rf /'
+assert_status 1 "model containing a shell metacharacter is refused"
+assert_contains "--model" "the offending option is named"
+
+run sh "$SCRIPT" print curl --gateway https://user@host --key "$VK"
+assert_status 1 "gateway with userinfo is refused"
+
+run sh "$SCRIPT" print curl --gateway 'https://gw.example.com?x=1' --key "$VK"
+assert_status 1 "gateway with a query is refused"
+
+run sh "$SCRIPT" print mcp --gateway "$GW" --key 'mqk_api_X' --mcp-url 'https://gw.example.com/mcp"x'
+assert_status 1 "mcp-url containing a quote is refused"
+
+run sh "$SCRIPT" print env --gateway http://example.com --key "$VK"
 assert_status 1 "plain http to a non-local host is refused"
 
 run sh "$SCRIPT" print env --gateway https://gw.example.com/v1/ --key "$VK"
 assert_status 0 "trailing /v1/ is normalized"
-assert_contains 'https://gw.example.com"' "normalized origin is used"
+assert_contains "export ANTHROPIC_BASE_URL='https://gw.example.com'" "normalized origin is used"
 
-# ---------- apply dotenv ----------
+run sh "$SCRIPT" print env --gateway
+assert_status 1 "missing option value is refused with a message"
+assert_contains "--gateway needs a value" "the missing value is named"
+
+# key via stdin (keeps it out of argv / shell history)
+OUT=$(printf '%s\n' "$VK" | sh "$SCRIPT" print env --gateway "$GW" --key - 2>&1)
+case "$OUT" in
+    *"$VK"*) ok "--key - reads the credential from stdin" ;;
+    *) bad "--key - reads the credential from stdin (got: $OUT)" ;;
+esac
+
+# ============ apply dotenv ============
 
 ENVF="$TMP/.env"
 printf 'SOME_OTHER=1\n' >"$ENVF"
@@ -134,7 +214,38 @@ run sh "$SCRIPT" apply dotenv --gateway "$GW" --key "$VK" --flavor openai --file
 assert_status 0 "dry-run exits 0"
 assert_contains "dry-run, not written" "dry-run announces itself"
 
-# ---------- secret hygiene ----------
+# ============ managed-block policy ============
+
+DAMAGED="$TMP/damaged.env"
+printf '# >>> miqro-onboard (managed) >>>\nOPENAI_API_KEY=stale\n' >"$DAMAGED"
+run sh "$SCRIPT" apply dotenv --gateway "$GW" --key "$VK" --flavor openai --file "$DAMAGED"
+assert_status 1 "an unmatched managed marker is refused"
+assert_contains "damaged managed-block markers" "the damaged marker is named"
+
+DOUBLE="$TMP/double.env"
+printf '# >>> miqro-onboard (managed) >>>\nA=1\n# <<< miqro-onboard (managed) <<<\n# >>> miqro-onboard (managed) >>>\nA=2\n# <<< miqro-onboard (managed) <<<\n' >"$DOUBLE"
+run sh "$SCRIPT" apply dotenv --gateway "$GW" --key "$VK" --flavor openai --file "$DOUBLE"
+assert_status 1 "duplicated managed blocks are refused"
+
+# ============ symlink target ============
+
+REAL="$TMP/real.env"
+printf 'X=1\n' >"$REAL"
+LINK="$TMP/link.env"
+ln -s "$REAL" "$LINK" 2>/dev/null
+if [ -L "$LINK" ]; then
+    run sh "$SCRIPT" apply dotenv --gateway "$GW" --key "$VK" --flavor openai --file "$LINK"
+    assert_status 1 "a symlinked target is refused"
+    assert_contains "symlink" "the symlink refusal is explained"
+    case "$(cat "$REAL")" in
+        'X=1') ok "the symlink target was left untouched" ;;
+        *) bad "the symlink target was left untouched" ;;
+    esac
+else
+    printf 'SKIP symlink tests (ln -s unavailable)\n'
+fi
+
+# ============ secret hygiene ============
 
 case "$(uname -s)" in
     MINGW* | MSYS* | CYGWIN*)
@@ -142,14 +253,14 @@ case "$(uname -s)" in
         printf 'SKIP file-mode assertions (Windows filesystem does not carry POSIX modes)\n'
         ;;
     *)
-        case "$(stat -c %a "$ENVF" 2>/dev/null)" in
+        case "$(file_mode "$ENVF")" in
             600) ok "written file is chmod 600 (it holds a credential)" ;;
-            *) bad "written file is chmod 600 (got: $(stat -c %a "$ENVF" 2>/dev/null))" ;;
+            *) bad "written file is chmod 600 (got: $(file_mode "$ENVF"))" ;;
         esac
         BAK=$(ls "$ENVF".bak-* 2>/dev/null | head -1)
-        case "$(stat -c %a "$BAK" 2>/dev/null)" in
+        case "$(file_mode "$BAK")" in
             600) ok "backup file is chmod 600" ;;
-            *) bad "backup file is chmod 600 (got: $(stat -c %a "$BAK" 2>/dev/null))" ;;
+            *) bad "backup file is chmod 600 (got: $(file_mode "$BAK"))" ;;
         esac
         ;;
 esac
@@ -169,10 +280,9 @@ else
     printf 'SKIP git-ignore warning tests (git not installed)\n'
 fi
 
-# ---------- apply claude-settings ----------
+# ============ apply claude-settings ============
 
 if command -v jq >/dev/null 2>&1; then
-    SET="\"$TMP/settings.json\""
     printf '{\n  "model": "keep-me",\n  "env": {"EXISTING": "1"}\n}\n' >"$TMP/settings.json"
     run sh "$SCRIPT" apply claude-settings --gateway "$GW" --key "$VK" --file "$TMP/settings.json"
     assert_status 0 "apply claude-settings exits 0"
@@ -209,12 +319,13 @@ fi
 run sh "$SCRIPT" apply claude-settings --gateway "$GW" --key "$VK"
 assert_status 1 "apply claude-settings without --file is refused"
 
-# ---------- verify (fake curl) ----------
+# ============ verify (fake curl) ============
 
 mkdir -p "$TMP/bin"
 cat >"$TMP/bin/curl" <<'FAKE'
 #!/bin/sh
 out=/dev/null
+printf '%s\n' "$*" >>"${FAKE_CURL_LOG:-/dev/null}"
 while [ $# -gt 0 ]; do
     case "$1" in
         -o) out=$2; shift 2 ;;
@@ -227,13 +338,31 @@ FAKE
 chmod +x "$TMP/bin/curl"
 PATH="$TMP/bin:$PATH"
 export PATH
+export FAKE_CURL_LOG="$TMP/curl.log"
 
 FAKE_CODE=200
-FAKE_BODY='{"data":[]}'
+FAKE_BODY='{"object":"list","data":[{"id":"deepseek-flash"}]}'
+export FAKE_CODE FAKE_BODY
+: >"$FAKE_CURL_LOG"
+run sh "$SCRIPT" verify --gateway "$GW" --key "$VK"
+assert_status 0 "verify accepts 200 with a models-list body"
+assert_contains "OK: HTTP 200" "verify reports the accepted credential"
+CLOG=$(cat "$FAKE_CURL_LOG")
+case "$CLOG" in
+    *"--max-time 20"*) ok "verify bounds the request with a timeout" ;;
+    *) bad "verify bounds the request with a timeout (curl args: $CLOG)" ;;
+esac
+case "$CLOG" in
+    *"--connect-timeout 5"*) ok "verify bounds the connect phase" ;;
+    *) bad "verify bounds the connect phase (curl args: $CLOG)" ;;
+esac
+
+FAKE_CODE=200
+FAKE_BODY='<html>proxy error page</html>'
 export FAKE_CODE FAKE_BODY
 run sh "$SCRIPT" verify --gateway "$GW" --key "$VK"
-assert_status 0 "verify accepts 200"
-assert_contains "OK: HTTP 200" "verify reports the accepted credential"
+assert_status 1 "verify rejects a 200 that is not the models list"
+assert_contains "not a models list" "the structural failure is explained"
 
 FAKE_CODE=404
 FAKE_BODY='{"code":"virtual_key_invalid"}'
@@ -241,6 +370,8 @@ export FAKE_CODE FAKE_BODY
 run sh "$SCRIPT" verify --gateway "$GW" --key "$VK"
 assert_status 1 "verify fails on 404"
 assert_contains "virtual_key_invalid" "verify names the uniform 404"
+assert_contains "code: virtual_key_invalid" "the failure prints the parsed code, not the body"
+assert_not_contains '"code":"virtual_key_invalid"' "the raw body is not dumped by default"
 
 FAKE_CODE=401
 FAKE_BODY='{"code":"invalid_api_key"}'
@@ -248,6 +379,13 @@ export FAKE_CODE FAKE_BODY
 run sh "$SCRIPT" verify --gateway "$GW" --key "$VK"
 assert_status 1 "verify fails on 401"
 assert_contains "wrong credential plane" "verify explains 401 attribution"
+
+FAKE_CODE=404
+FAKE_BODY='{"code":"virtual_key_invalid"}'
+export FAKE_CODE FAKE_BODY
+run sh "$SCRIPT" verify --gateway "$GW" --key "$VK" --verbose
+assert_status 1 "verify --verbose still fails on 404"
+assert_contains "body: " "verbose prints the body for diagnosis"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" = 0 ]
