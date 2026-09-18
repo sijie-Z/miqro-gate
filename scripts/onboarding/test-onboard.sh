@@ -332,7 +332,7 @@ while [ $# -gt 0 ]; do
         *) shift ;;
     esac
 done
-printf '%s' "${FAKE_BODY:-}" >"$out"
+if [ -n "${FAKE_BODY_FILE:-}" ]; then cat "$FAKE_BODY_FILE" >"$out"; fi
 printf '%s' "${FAKE_CODE:-200}"
 FAKE
 chmod +x "$TMP/bin/curl"
@@ -341,7 +341,8 @@ export PATH
 export FAKE_CURL_LOG="$TMP/curl.log"
 
 export FAKE_CODE=200
-export FAKE_BODY='{"object":"list","data":[{"id":"deepseek-flash"}]}'
+printf '%s' '{"object":"list","data":[{"id":"deepseek-flash"}]}' >"$TMP/body.json"
+export FAKE_BODY_FILE="$TMP/body.json"
 : >"$FAKE_CURL_LOG"
 run sh "$SCRIPT" verify --gateway "$GW" --key "$VK"
 assert_status 0 "verify accepts 200 with a models-list body"
@@ -357,13 +358,15 @@ case "$CLOG" in
 esac
 
 export FAKE_CODE=200
-export FAKE_BODY='<html>proxy error page</html>'
+printf '%s' '<html>proxy error page</html>' >"$TMP/body.json"
+export FAKE_BODY_FILE="$TMP/body.json"
 run sh "$SCRIPT" verify --gateway "$GW" --key "$VK"
 assert_status 1 "verify rejects a 200 that is not the models list"
 assert_contains "not a models list" "the structural failure is explained"
 
 export FAKE_CODE=404
-export FAKE_BODY='{"code":"virtual_key_invalid"}'
+printf '%s' '{"code":"virtual_key_invalid"}' >"$TMP/body.json"
+export FAKE_BODY_FILE="$TMP/body.json"
 run sh "$SCRIPT" verify --gateway "$GW" --key "$VK"
 assert_status 1 "verify fails on 404"
 assert_contains "virtual_key_invalid" "verify names the uniform 404"
@@ -371,13 +374,15 @@ assert_contains "code: virtual_key_invalid" "the failure prints the parsed code,
 assert_not_contains '"code":"virtual_key_invalid"' "the raw body is not dumped by default"
 
 export FAKE_CODE=401
-export FAKE_BODY='{"code":"invalid_api_key"}'
+printf '%s' '{"code":"invalid_api_key"}' >"$TMP/body.json"
+export FAKE_BODY_FILE="$TMP/body.json"
 run sh "$SCRIPT" verify --gateway "$GW" --key "$VK"
 assert_status 1 "verify fails on 401"
 assert_contains "wrong credential plane" "verify explains 401 attribution"
 
 export FAKE_CODE=404
-export FAKE_BODY='{"code":"virtual_key_invalid"}'
+printf '%s' '{"code":"virtual_key_invalid"}' >"$TMP/body.json"
+export FAKE_BODY_FILE="$TMP/body.json"
 run sh "$SCRIPT" verify --gateway "$GW" --key "$VK" --verbose
 assert_status 1 "verify --verbose still fails on 404"
 assert_contains "body: " "verbose prints the body for diagnosis"
