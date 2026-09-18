@@ -16,3 +16,5 @@
 - [ADR-0018：单密钥多项目——key×project 多绑定与标签选择](0018-single-key-multi-project.md)
 - [ADR-0019：配额硬阻断（超限拒绝）— 草案（Proposed；已由 ADR-0020 采纳并落地）](0019-quota-hard-block-proposal.md)
 - [ADR-0020：配额软着陆——REJECT 规则超限拒绝请求（429）](0020-quota-soft-landing.md)
+- [ADR-0023：请求侧可选改造①——prompt 缓存断点自动注入（草案，待所有者拍板）](0023-request-side-cache-breakpoint-injection.md)
+- [ADR-0024：请求侧可选改造②——错误驱动的整流重试（草案，待所有者拍板）](0024-request-side-rectification-retry.md)

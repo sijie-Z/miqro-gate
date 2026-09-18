@@ -3723,3 +3723,19 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **修法**：符号单点决定——`formatCost()` 统一输出 `¥`（与 NextCostView / NextRoiView 同款），模板不再补符号；同页汇总 / 明细 / 合计三处口径随之统一。**全站符号审计**：模板字面量 `$${...}` 模式全仓仅此一处；其余视图（Cost / Roi / Overview / Profile / Agents / QuotaRules / AdminUsage 的「成本 ¥」列 / Prices 按币种分支）本就只用 ¥，CSV 导出保持纯数字。
 
 **验证**：先证明会红——把视图实现撤回 develop 状态后，新测试如实报出渲染文本 `¥$0.1234`（连同被改正的汇总断言共 2 条红）；恢复后 `NextUsageView.spec.ts` 12/12 绿，全量 61 文件 / 369 条绿，`npm run build`（含 typecheck）通过，改动文件 eslint 0 error。
+
+## 2026-09-18 请求侧可选改造 ADR 姊妹篇（#769 / #770，均 Proposed）
+
+**背景**：两个 issue 提出请求侧改体能力——① `cache_control` 断点自动注入（对齐 cc-switch `cache_injector.rs`）；② 错误驱动的整流重试（thinking 签名/预算，对齐 `thinking_rectifier.rs`）。两者都与 `CLAUDE.md:55`「透明代理不得重排、标准化或补写推理请求 JSON」正面冲突，issue 自身要求 ADR 先行、默认关、opt-in。**本轮只写决策文档，无产品代码改动。**
+
+**产出（状态均为 `Proposed`，未替所有者拍板）**：
+
+- `docs/decisions/0023-request-side-cache-breakpoint-injection.md`（#769）：逐条回答 issue 的 Q1–Q7；红线冲突按「补写」的**字面违例**处理，给出 E1–E7 例外边界与三处必改文本（`CLAUDE.md:55`、`testing-and-acceptance.md:52`、`architecture.md:166-169`）；选项 A–D（推荐 **B：Key 级 opt-in、默认关**）；字节策略给出 B1 定点插入 / B2 重序列化两档；明确「逐请求审计」在网关侧**当前不可行**（`gateway-app` 无 `persistence-postgres` 依赖、无 `AuditService` 引用），改为「指标 + 生命周期列 + 响应头」举证。
+- `docs/decisions/0024-request-side-rectification-retry.md`（#770）：整流重试属「**删除/改写**」，指出现有红线枚举词（重排/标准化/补写/注入）**未字面覆盖删除**，需把红线改写成可判定断言；给出 E1–E9 边界；重试预算给出 R1（共享既有 ≤1，**推荐**）/ R2（独立预算，需二次修订红线）供拍板；澄清 **#544（HTTP 200 且 content 为空）不在错误驱动整流射程内**；选项 A / B（只检测不重试的观察档）/ C（推荐目标档）/ D / E（预算类整流，二期）。
+- `docs/decisions/README.md`：追加两行索引。
+
+**编号裁定**：任务书预分配 0023 / 0024。`git ls-tree origin/develop -- docs/decisions` 核对 origin/develop 现最大编号为 **0020**，0021–0024 均未被占用，**未顺延**。
+
+**现状证据**：两份 ADR 中每处「现状」断言均带 `file:line`（`ProxyController` / `CacheKeyFactory` / `ContextLimitGuard` / `CacheEligibility` / `SseReplayEngine` / `LlmCircuitBreakerRegistry` / `application.yml` / `V4`·`V8` 迁移 / `RequestStatus.java` / `architecture.md` / `testing-and-acceptance.md` / `provider-adapter-contract.md` / `feature-backlog.md` / `live-integration-guide.md`），并逐条在工作区核对；外部实现（cc-switch、AWS Bedrock）一律标注为 **issue 转述、本仓未复核**，不作论据。
+
+**提交**：`73f9efe5`（ADR-0023）、`1a694784`（ADR-0024）、索引与本节同一提交。
