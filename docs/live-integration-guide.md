@@ -56,7 +56,10 @@ MIQROKEY_CRYPTO_HMAC_KEY_FILE=<hmac-key.bin>
 
 **已验证的关键行为**：
 - 创建 VK 后 **NOTIFY 即时刷新 ~4s 生效**（无需等 30s 定时）
-- 用量解析精确：DeepSeek `prompt_cache_miss_tokens` → `cacheCreation` 正确映射
+- 用量解析精确：DeepSeek 扁平 `prompt_cache_hit_tokens` 与 OpenAI 嵌套
+  `*_tokens_details.cached_tokens` 均正确采集（hit → `cacheRead`）；**miss 属普通输入**
+  （留在 input 桶、按输入价计费），不映射为 `cacheCreation`（#767 口径修正——原
+  miss→creation 映射会把未命中 token 记到错误的费率桶，且与 prompt 计数双重入账）
 - 成本按单价快照精确：¥0.000128 = 16×2/1M + 8×8/1M + 16×2/1M
 
 ## 3. 踩坑记录（按坑排序）
