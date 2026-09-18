@@ -93,6 +93,33 @@ describe('NextAdminAgentsView', () => {
     });
   }
 
+  it('marks the allocated cost as partial when pricing is incomplete (#857)', async () => {
+    mockApi.adminListAgents.mockResolvedValue([agent()]);
+    mockApi.adminAgentUsage.mockResolvedValue(
+      summary({ pricingStatus: 'UNAVAILABLE', unpriced: { unpricedEvents: 1 } } as never),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="agent-usage"]').trigger('click');
+    await flushPromises();
+
+    const chip = document.querySelector('[data-testid="agent-cost-caveat"]');
+    expect(chip, 'caveat chip should render').toBeTruthy();
+    expect(chip!.textContent).toContain('未定价');
+  });
+
+  it('leaves the allocated cost unmarked when every event was priced', async () => {
+    mockApi.adminListAgents.mockResolvedValue([agent()]);
+    mockApi.adminAgentUsage.mockResolvedValue(summary({ pricingStatus: 'COMPLETE' } as never));
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="agent-usage"]').trigger('click');
+    await flushPromises();
+
+    expect(document.querySelector('[data-testid="agent-cost-caveat"]')).toBeNull();
+  });
   it('renders agents with Chinese statuses', async () => {
     mockApi.adminListAgents.mockResolvedValue([
       agent(),

@@ -95,6 +95,31 @@ describe('NextProfileView', () => {
     await flushPromises();
   }
 
+  it('marks the monthly cost as a partial figure when pricing is incomplete (#857)', async () => {
+    mockApi.usageSummary.mockResolvedValue({
+      ...summary,
+      totals: { ...summary.totals, pricingStatus: 'UNAVAILABLE', unpriced: { unpricedEvents: 1 } },
+    } as unknown as UsageSummary);
+    const wrapper = mountView();
+    await flushPromises();
+
+    const chip = wrapper.find('[data-testid="profile-cost-caveat"]');
+    expect(chip.exists()).toBe(true);
+    expect(chip.text()).toBe('未定价');
+    wrapper.unmount();
+  });
+
+  it('leaves the monthly cost unmarked when every event was priced', async () => {
+    mockApi.usageSummary.mockResolvedValue({
+      ...summary,
+      totals: { ...summary.totals, pricingStatus: 'COMPLETE' },
+    } as unknown as UsageSummary);
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="profile-cost-caveat"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
   it('renders account facts and password form', async () => {
     const wrapper = mountView();
     await flushPromises();
