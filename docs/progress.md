@@ -4176,7 +4176,6 @@ if (!STATE_CHANGING_METHODS.contains(method)) return true;   // GET 直接放行
 仍加了 2 行守卫（`MSYS_NO_PATHCONV=1; export`）并在注释里写明理由：Linux 上是空操作，而 Windows 开发机上省下的是一次**恰好属于本脚本要消灭的那一类**的假报警。**又一次是同族**：不是检查写错，是检查与它所运行的环境没对齐。
 
 另：顺手把三个都编号为「6」的小节改成 5–9（本就在我要插入的位置）。
-
 ## 2026-09-18 部署脚本补上静态检查：shellcheck 进 CI（#814）
 
 仓库 17 个 shell 脚本，`deploy/deploy.sh` 是**单机部署的唯一入口**，却**完全没有 lint**——CI 里 `deploy/` 只受 `compose` job 的 `docker compose config` 覆盖，而那只看 compose 文件、不看脚本。
@@ -4221,6 +4220,64 @@ job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
 **修复**：`ExportTaskService` 新增包内可见 `quote(Object)`，语义与两个兄弟路径一致（RFC 4180 + `= + - @ TAB CR` 前缀 `'`；`Number` 原样输出——负数金额不被加上 `'`，与 #798 的数值豁免同理）。`join()` 改走 `quote()`。**不做**三份 `quote()` 的合并（#798 在飞，避免与其文件冲突；合并后可另行收口）。
 
 **先证红**：新增 `UsageExportCsvEscapeTest` 3 例（公式前缀/结构字符/数值与 null）；把 `quote()` 临时换回旧行为 → **2/3 红**（公式防护与结构引号），恢复后 **3/3 绿** + 兄弟 `AuditExportQuoteTest` 2/2 绿。
+
+## 2026-09-18 三条行为断言进 CI——这条链只「机器化了一半」的更正（#818）
+
+对方在收档时写「从事故到机器化防住最完整的一条」。**这个说法我核了，是错的**：`ShellCheck`（#814）机器守住的是**语法那一类**；**回声 / 冒烟 / 证书三条行为断言的 CI 覆盖是零**——它们的红证明全在 `D:/tmp` 的一次性脚本里，仓库里没有。
+
+**具体后果**：明天有人把冒烟默认目标改回 `GET $origin/`，shellcheck 全绿、部署照常、**而 #794 的那颗牙又没了**。语法没病不代表行为还对。已向对方更正，并把正确的收档写法给了它。
+
+### 做了什么
+
+`deploy/tests/deploy_script_regression.py`：**每个场景造一个「只有那一个缺陷」的栈**，再问脚本有没有发现它。**在健康栈上通过不算证据，要在坏栈上失败才算**——这是本链反复用到的那条纪律，这次用在了 harness 自己身上。
+
+12 项检查覆盖：CRLF 行尾不误报 / 同长度不同字节仍失败且能自证 / 坏 origin 必红 / 健康栈通过 / **派生目标确实是带 Origin 的 POST** / `'a|b'` 选择支生效 / 运维 URL 仍发 GET / 不可达只是 WARNING / 挂载锚错必红 / 正确挂载被验证 / 宿主无证书只提示。
+
+### 反向验证（这条是 harness 存在的前提）
+
+把三条修复分别改回去，harness **必须红**：
+
+| 变异 | 结果 |
+|---|---|
+| 冒烟默认目标改回门户根 GET | **10/12**，2 项失败 ✓ |
+| 去掉回声归一化 | **11/12**，1 项失败 ✓ |
+| 去掉证书断言 | **10/12**，2 项失败 ✓ |
+
+**只见过绿的闸门不是证据。**
+
+### 过程中修掉的三处
+
+1. **夹具基础镜像按 digest 写进 `FROM` 会让每次构建花 1m26s**（BuildKit 每次都回源解析 digest），本机标记只需 1.4s——十余次构建就是十几分钟加一个硬网络依赖，**正是我自己给这条闸门划的「先去风险再进 CI」红线**。改为 harness 里 pull 一次再打本地标签，pin 保留、回源消失。
+2. **`sha256sum <文件>` 的解析在路径含反斜杠时会错**：coreutils 会把整行转义（行首一个 `\`、分隔符翻倍），`cut -d' ' -f1` 取出的哈希就是错的。**这是我写的断言里的一处真脆弱性**，改成 `sha256sum < "$file"`（不给文件名）——顺带让 harness 在 Windows 上也能跑。
+3. 合并 `progress.md` 时我把**冲突标记提交了进去**：解析脚本对「新增块以 CRLF 开头」下的断言是错的（那个 CRLF 是本文件各条目之间本来就有的空行），脚本在写盘前中止，而我把命令里的分隔符从 `&&` 换成了 `;`，于是 `git add` 把**仍然冲突的文件**暂存了。已后续提交修正。**教训：解析脚本失败不能靠 `;` 继续往下走——失败要停。**
+
+### 顺带更正一个「缺口」判断
+
+对方提议把 `deploy/backup/test-*.sh` 从未被 workflow 引用一事单列为「文档承诺了测试但没接线」。**核了 `docs/operations-runbook.md`：它把这几个写成季度人工演练**（"每季度至少一次 `test-restore.sh`"），**没有承诺自动化**——所以那不是失约。真正的瑕疵只是措辞容易让人误读，已在 runbook 里补一句写明「人工演练、未接 CI，别把『已验证 PASS』读成『每次提交都跑』」。
+
+## 2026-09-18 明细成本改读冻结基座——#710 的可实现剩余部分
+
+**先重核，再动手**：在 develop（`e83d44ea`）上逐条复核 #710 的 8 条验收，结论 **5 条已达成、3 条未达成**（旧结论 6/2 已过期：develop 期间合并了 #766/#772/#780/#783 等价目相关系列）。未达成的三条里，**两条同源**——明细读取路径仍在按查询时刻的**当前**价目给每一行定价（`UsageStatsService`/`AdminUsageStatsService` 各自注入 `PriceSnapshotRepository` 调 `findAllLatestAt(Instant.now())`）。这属于"照既有口径补齐"，可直接实现；另两条（`gateway-app` 事件生成时冻结价格；`CostAllocationService` 切冻结基座）属**口径决策**，不在本轮自行拍板（见 #710 决策材料评论）。
+
+**改动**：新增 `RowPriceBasis`（`domain/usage`）承载"这一行该用哪四个单价"，由 `AdjustedUsageRow` 随行带出；`UsageStatsRepositoryImpl.findRecords` 的投影里加上与汇总**同一表达式** `PriceSnapshotSql.frozenOrAsOf(...)`（别名 `basis_price_*`，与 `ue.price_*` 原始列区分开；`COALESCE` 短路，未回填行才走 as-of 子查询）；两个 Service 改用行内基座定价，删除各自注入的 `PriceSnapshotRepository` 与 `priceMap()`。口径不变：某维度**用到**却没有价 → `priced=false` / 未定价，**不写 0**（usage-accounting §6.2）。
+
+**关键取舍**：明细与汇总现在读**同一个 SQL 表达式**，所以两者不可能各自漂移；这条一致性在集成测试里**被直接断言**，而不是靠约定。
+
+**验证**：`mvnw.cmd -B -f backend -pl control-plane-app,persistence-postgres -am test -Pintegration -Dtest=UsageStatsAggregatorTest,UsageStatsServiceTest,AdminUsageStatsServiceTest,PriceBasisCostStabilityIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` → **BUILD SUCCESS**，`Tests run: 8`（domain）+ `Tests run: 32`（control-plane），0 失败。集成侧 6 条含三条新增：改价后明细行不动、**改写历史价目行**后明细行不动、明细与汇总金额一致。（首跑曾红一条：我自己测试夹具把 `RowPriceBasis` 的 cacheRead/cacheCreation 两位写反 → `expected 0.0021 but was 0`，改夹具后复跑全绿。）
+
+**顺带修文档漂移**：`database-schema.md` 的原句"明细/汇总/计费/配额水位已改读此基座"在当时对**明细**并不成立（这正是本轮补上的那部分）；改成分别陈述读取方，并把"网关写事件时不写任何价格列、四列全由控制面回填通道盖章"写明。
+
+## 2026-09-18 分支收口：把 develop 并回 #710 分支并复核
+
+**合并**：本分支停在 `06252299`，develop 已到 `e29715ba`（单入口部署脚本 #793），二者 merge-base 为 `e83d44ea`。执行 `git merge origin/develop`，**唯一冲突 `docs/progress.md`**。两侧对该文件都是**文件末尾纯追加**（对 merge-base 的 `git diff --numstat` 分别为 `12 0` 与 `83 0`，`-U0` hunk 都落在第 3849 行之后），所以按"develop 段在前、本线段在后"拼接即可两段都不丢。做法是先由 stage blob（`:1:`/`:2:`/`:3:`）重建文件再 `git add`，**不手改带标记的工作区副本**——工作区那份的 `<<<<<<<` 行已被上一轮删掉，按行号硬改正是会出错的地方。
+
+**两个共同修改的 Java 文件走的是自动合并，已逐一核对没丢东西**：`UsageStatsAggregator.java` 「合并结果相对本线 `06252299`」的差异，与 develop 自 merge-base `e83d44ea` 起的差异**逐字节相同**（剔除 `index` 行后 `cmp` 一致）；`UsageStatsRepositoryImpl.java` 的两份差异**只有 3 处 hunk 行号偏移**，内容 hunk 完全一致——develop 的 `unpricedHits`（命中路径未定价计数）与本线的 `RowPriceBasis`（明细行冻结基座）各自在列，互不覆盖。develop 单独带来的文件（`deploy/deploy.sh`、`docs/deployment-and-operations.md`、`docs/openapi/openapi-3.1.json`、`docs/usage-accounting.md`、`AdminRoiApiIntegrationTest.java`、`UsageStatsPricingStatusTest.java`、前端 6 个）用 blob 哈希确认与 `MERGE_HEAD` **完全相同**，一个字没动。
+
+**合并后验证**（均在合并提交 `8fa34296` 上）：
+- develop 侧用例：`mvnw.cmd -B -f backend -pl control-plane-app,persistence-postgres,domain -am test -Pintegration -Dtest=UsageStatsPricingStatusTest,AdminRoiApiIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` → **BUILD SUCCESS**，`Tests run: 6, Failures: 0, Errors: 0`（domain）+ `Tests run: 4, Failures: 0, Errors: 0`（control-plane，22.49 s）。
+- 本线用例：同形命令换 `-Dtest=PriceBasisCostStabilityIntegrationTest,UsageStatsAggregatorTest,UsageStatsServiceTest,AdminUsageStatsServiceTest` → **BUILD SUCCESS**，`Tests run: 8, Failures: 0, Errors: 0`（domain）+ `Tests run: 32, Failures: 0, Errors: 0`（control-plane）。
+
+**未做**：本线实现未重写、未 `stash`；"事件生成时携带价格快照"（标准 1）与 `CostAllocationService` 取价口径属**口径决策**，已交 owner（2026-09-18 04:00 的 #710 决策材料评论），本轮不动。
 ## 2026-09-18 Runbook §15 定稿：两层结构（运维速查 + 工程陷阱），owner 已裁定收录
 
 **外部评审（owner 转来）结论：收录，但改成两层。** 已按此重排（commit 见下）：

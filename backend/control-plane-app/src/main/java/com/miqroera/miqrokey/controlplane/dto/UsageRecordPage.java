@@ -31,9 +31,10 @@ public record UsageRecordPage(List<UsageRecordView> items, long page, long size,
      * Enrichment columns (#758): {@code providerProductName} is the 供应商 column;
      * {@code ttfbMs} / {@code wireProtocol} / {@code requestStatus} come from the
      * lifecycle trail and are null for rows without one (coalesced requests);
-     * {@code cost} is the per-row estimate priced with the same table as the
-     * aggregates, and {@code priced=false} means "未定价" — at least one non-zero
-     * token type has no snapshot, so the cost number must not be trusted as 0.
+     * {@code cost} is the per-row figure priced from that row's own price basis
+     * (#710) — the same expression the aggregates use — and {@code priced=false}
+     * means "未定价" — at least one non-zero token type has no price, so the cost
+     * number must not be trusted as 0.
      * </p>
      */
     public record UsageRecordView(Instant occurredAt, String modelId, CacheLevel cacheLevel, Long inputTokens,

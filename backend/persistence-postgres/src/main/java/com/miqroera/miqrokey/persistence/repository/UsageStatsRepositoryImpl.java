@@ -7,6 +7,7 @@ import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
 import com.miqroera.miqrokey.domain.usage.CacheLevel;
 import com.miqroera.miqrokey.domain.usage.PriceTokenType;
 import com.miqroera.miqrokey.domain.usage.LifecycleInfo;
+import com.miqroera.miqrokey.domain.usage.RowPriceBasis;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator;
@@ -586,7 +587,9 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             EVENT_ROW_MAPPER.mapRow(rs, rowNum), rs.getObject("net_input_tokens", Long.class),
             rs.getObject("net_output_tokens", Long.class), rs.getObject("net_cache_read_tokens", Long.class),
             rs.getObject("net_cache_creation_tokens", Long.class), rs.getBoolean("adjusted"),
-            rs.getString("provider_product_name"), lifecycleOf(rs));
+            rs.getString("provider_product_name"), lifecycleOf(rs),
+            new RowPriceBasis(rs.getBigDecimal("basis_price_input"), rs.getBigDecimal("basis_price_output"),
+                    rs.getBigDecimal("basis_price_cache_read"), rs.getBigDecimal("basis_price_cache_creation")));
 
     /** Lifecycle columns (#758); all null when the call has no lifecycle row. */
     private static LifecycleInfo lifecycleOf(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -623,28 +626,47 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
         String netOutput = UsageAdjustmentSql.netOutput();
         String netCacheRead = UsageAdjustmentSql.netCacheRead();
         String netCacheCreation = UsageAdjustmentSql.netCacheCreation();
-        return jdbc.query("""
-                SELECT ue.*,
-                       %s AS net_input_tokens,
-                       %s AS net_output_tokens,
-                       %s AS net_cache_read_tokens,
-                       %s AS net_cache_creation_tokens,
-                       %s AS adjusted,
-                       -- Enrichment (#758): the provider product's display name for the
-                       -- 供应商 column, plus the lifecycle trail for 首字/协议/终态.
-                       COALESCE(pp.display_name, pp.product_code) AS provider_product_name,
-                       rur.wire_protocol,
-                       rur.time_to_first_byte_ms,
-                       rur.request_status
-                  FROM usage_event ue
-                  LEFT JOIN provider_products pp ON pp.id = ue.provider_product_id%s%s
-                %s
-                %s
-                ORDER BY ue.occurred_at DESC
-                LIMIT :limit OFFSET :offset
-                """.formatted(netInput, netOutput, netCacheRead, netCacheCreation, UsageAdjustmentSql.ADJUSTED_FLAG,
-                wb.joins(), UsageAdjustmentSql.ADJUSTMENT_LATERAL, LIFECYCLE_JOIN, wb.where()), params,
-                ADJUSTED_ROW_MAPPER);
+        // Per-row price basis (#710): the same expression the aggregates price with,
+        // so a detail row and the group it belongs to cannot disagree. Aliased apart
+        // from ue.* — the raw ue.price_* columns are already in the projection and a
+        // duplicate name would silently win. COALESCE short-circuits, so the as-of
+        // subquery only runs for rows the backfill has not stamped yet.
+        String basisInput = PriceSnapshotSql.frozenOrAsOf("ue.price_input", PriceTokenType.INPUT,
+                "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
+        String basisOutput = PriceSnapshotSql.frozenOrAsOf("ue.price_output", PriceTokenType.OUTPUT,
+                "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
+        String basisCacheRead = PriceSnapshotSql.frozenOrAsOf("ue.price_cache_read", PriceTokenType.CACHE_READ,
+                "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
+        String basisCacheCreation = PriceSnapshotSql.frozenOrAsOf("ue.price_cache_creation",
+                PriceTokenType.CACHE_CREATION, "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
+        return jdbc.query(
+                """
+                        SELECT ue.*,
+                               %s AS net_input_tokens,
+                               %s AS net_output_tokens,
+                               %s AS net_cache_read_tokens,
+                               %s AS net_cache_creation_tokens,
+                               %s AS adjusted,
+                               %s AS basis_price_input,
+                               %s AS basis_price_output,
+                               %s AS basis_price_cache_read,
+                               %s AS basis_price_cache_creation,
+                               -- Enrichment (#758): the provider product's display name for the
+                               -- 供应商 column, plus the lifecycle trail for 首字/协议/终态.
+                               COALESCE(pp.display_name, pp.product_code) AS provider_product_name,
+                               rur.wire_protocol,
+                               rur.time_to_first_byte_ms,
+                               rur.request_status
+                          FROM usage_event ue
+                          LEFT JOIN provider_products pp ON pp.id = ue.provider_product_id%s%s
+                        %s
+                        %s
+                        ORDER BY ue.occurred_at DESC
+                        LIMIT :limit OFFSET :offset
+                        """.formatted(netInput, netOutput, netCacheRead, netCacheCreation,
+                        UsageAdjustmentSql.ADJUSTED_FLAG, basisInput, basisOutput, basisCacheRead, basisCacheCreation,
+                        wb.joins(), UsageAdjustmentSql.ADJUSTMENT_LATERAL, LIFECYCLE_JOIN, wb.where()),
+                params, ADJUSTED_ROW_MAPPER);
     }
 
     private TokenBucket parseUsage(String metaJson) {
