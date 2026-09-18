@@ -4254,6 +4254,38 @@ job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
 ### 顺带更正一个「缺口」判断
 
 对方提议把 `deploy/backup/test-*.sh` 从未被 workflow 引用一事单列为「文档承诺了测试但没接线」。**核了 `docs/operations-runbook.md`：它把这几个写成季度人工演练**（"每季度至少一次 `test-restore.sh`"），**没有承诺自动化**——所以那不是失约。真正的瑕疵只是措辞容易让人误读，已在 runbook 里补一句写明「人工演练、未接 CI，别把『已验证 PASS』读成『每次提交都跑』」。
+## 2026-09-18 明细成本改读冻结基座——#710 的可实现剩余部分
+
+**先重核，再动手**：在 develop（`e83d44ea`）上逐条复核 #710 的 8 条验收，结论 **5 条已达成、3 条未达成**（旧结论 6/2 已过期：develop 期间合并了 #766/#772/#780/#783 等价目相关系列）。未达成的三条里，**两条同源**——明细读取路径仍在按查询时刻的**当前**价目给每一行定价（`UsageStatsService`/`AdminUsageStatsService` 各自注入 `PriceSnapshotRepository` 调 `findAllLatestAt(Instant.now())`）。这属于"照既有口径补齐"，可直接实现；另两条（`gateway-app` 事件生成时冻结价格；`CostAllocationService` 切冻结基座）属**口径决策**，不在本轮自行拍板（见 #710 决策材料评论）。
+
+**改动**：新增 `RowPriceBasis`（`domain/usage`）承载"这一行该用哪四个单价"，由 `AdjustedUsageRow` 随行带出；`UsageStatsRepositoryImpl.findRecords` 的投影里加上与汇总**同一表达式** `PriceSnapshotSql.frozenOrAsOf(...)`（别名 `basis_price_*`，与 `ue.price_*` 原始列区分开；`COALESCE` 短路，未回填行才走 as-of 子查询）；两个 Service 改用行内基座定价，删除各自注入的 `PriceSnapshotRepository` 与 `priceMap()`。口径不变：某维度**用到**却没有价 → `priced=false` / 未定价，**不写 0**（usage-accounting §6.2）。
+
+**关键取舍**：明细与汇总现在读**同一个 SQL 表达式**，所以两者不可能各自漂移；这条一致性在集成测试里**被直接断言**，而不是靠约定。
+
+**验证**：`mvnw.cmd -B -f backend -pl control-plane-app,persistence-postgres -am test -Pintegration -Dtest=UsageStatsAggregatorTest,UsageStatsServiceTest,AdminUsageStatsServiceTest,PriceBasisCostStabilityIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` → **BUILD SUCCESS**，`Tests run: 8`（domain）+ `Tests run: 32`（control-plane），0 失败。集成侧 6 条含三条新增：改价后明细行不动、**改写历史价目行**后明细行不动、明细与汇总金额一致。（首跑曾红一条：我自己测试夹具把 `RowPriceBasis` 的 cacheRead/cacheCreation 两位写反 → `expected 0.0021 but was 0`，改夹具后复跑全绿。）
+
+**顺带修文档漂移**：`database-schema.md` 的原句"明细/汇总/计费/配额水位已改读此基座"在当时对**明细**并不成立（这正是本轮补上的那部分）；改成分别陈述读取方，并把"网关写事件时不写任何价格列、四列全由控制面回填通道盖章"写明。
+
+## 2026-09-18 分支收口：把 develop 并回 #710 分支并复核
+
+**合并**：本分支停在 `06252299`，develop 已到 `e29715ba`（单入口部署脚本 #793），二者 merge-base 为 `e83d44ea`。执行 `git merge origin/develop`，**唯一冲突 `docs/progress.md`**。两侧对该文件都是**文件末尾纯追加**（对 merge-base 的 `git diff --numstat` 分别为 `12 0` 与 `83 0`，`-U0` hunk 都落在第 3849 行之后），所以按"develop 段在前、本线段在后"拼接即可两段都不丢。做法是先由 stage blob（`:1:`/`:2:`/`:3:`）重建文件再 `git add`，**不手改带标记的工作区副本**——工作区那份的 `<<<<<<<` 行已被上一轮删掉，按行号硬改正是会出错的地方。
+
+**两个共同修改的 Java 文件走的是自动合并，已逐一核对没丢东西**：`UsageStatsAggregator.java` 「合并结果相对本线 `06252299`」的差异，与 develop 自 merge-base `e83d44ea` 起的差异**逐字节相同**（剔除 `index` 行后 `cmp` 一致）；`UsageStatsRepositoryImpl.java` 的两份差异**只有 3 处 hunk 行号偏移**，内容 hunk 完全一致——develop 的 `unpricedHits`（命中路径未定价计数）与本线的 `RowPriceBasis`（明细行冻结基座）各自在列，互不覆盖。develop 单独带来的文件（`deploy/deploy.sh`、`docs/deployment-and-operations.md`、`docs/openapi/openapi-3.1.json`、`docs/usage-accounting.md`、`AdminRoiApiIntegrationTest.java`、`UsageStatsPricingStatusTest.java`、前端 6 个）用 blob 哈希确认与 `MERGE_HEAD` **完全相同**，一个字没动。
+
+**合并后验证**（均在合并提交 `8fa34296` 上）：
+- develop 侧用例：`mvnw.cmd -B -f backend -pl control-plane-app,persistence-postgres,domain -am test -Pintegration -Dtest=UsageStatsPricingStatusTest,AdminRoiApiIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` → **BUILD SUCCESS**，`Tests run: 6, Failures: 0, Errors: 0`（domain）+ `Tests run: 4, Failures: 0, Errors: 0`（control-plane，22.49 s）。
+- 本线用例：同形命令换 `-Dtest=PriceBasisCostStabilityIntegrationTest,UsageStatsAggregatorTest,UsageStatsServiceTest,AdminUsageStatsServiceTest` → **BUILD SUCCESS**，`Tests run: 8, Failures: 0, Errors: 0`（domain）+ `Tests run: 32, Failures: 0, Errors: 0`（control-plane）。
+
+**未做**：本线实现未重写、未 `stash`；"事件生成时携带价格快照"（标准 1）与 `CostAllocationService` 取价口径属**口径决策**，已交 owner（2026-09-18 04:00 的 #710 决策材料评论），本轮不动。
+## 2026-09-18 Runbook §15 定稿：两层结构（运维速查 + 工程陷阱），owner 已裁定收录
+
+**外部评审（owner 转来）结论：收录，但改成两层。** 已按此重排（commit 见下）：
+
+- **`operations-runbook.md` §15**：只留运维侧——总原则一行（"先问这个观察到底证明了什么"）+ 15.1 状态码语义 / 15.2 泛化兜底（仅 SQL→500 行）/ 15.3 未验证输入 / 15.4「命令返回了≠服务就绪了」/ 15.5 不可见字符 / 15.6 宽容失败语；**新增核实基线**（`verified-against: develop@…` + last-verified + re-check triggers）；15.4 的 nginx 措辞**降级为"本部署模板的事实"**（不再写成 nginx 普遍规律）；全文**无行号**。
+- **新增 `docs/debugging-traps.md`**：工程侧——CI JDT 速挂 / Maven 静默卡死（含"卡死持有部署锁"真机补充）/ 「全绿≠验过」（测试隔离 + 空基线 + #819 行为闸门的反向验证）/ 读已合并 revision / 「缺口判断先查权威表述」/ 「没牙的检查 vs 误报的检查」/ 完整事故证据引用链（#802→#819、#754、#816/#817、#710/#780）。§15 顶部互相指路，document-map 已登记。
+- 评审指出的"四族"描述过时：重排后按**两类形状**陈述（症状指向错误的层 / 证据强度被高估），工程侧（执行上下文族）随文档拆分另述。
+
+**来源**：owner 2026-09-18 转来的外部评审（原 PR #759 为"提案·待 owner 认可"，本条即该认可与改后的落地记录）。
 
 ## 2026-09-18 CAA 证据审计链路补写入方（#629）——V55 建了表，没有任何人写
 
