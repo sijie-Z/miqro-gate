@@ -3813,3 +3813,16 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **修复**：Accept 改为 `application/json, text/event-stream`；**两条回归测试先证红**（Accept 双媒体类型断言 + 严格上游 406 夹具），修复后 `McpToolsListClientTest` 9/9 绿。
 
 **绕行（修复前已在演示站完成，数据面健康性佐证）**：手工登记（官方占位 `method=POST path="/"`）+ ENABLED 后，以消费者凭据经网关 `tools/call read_wiki_structure` → 200 返回真实内容，`mcp_access_log`：`FORWARDED | read_wiki_structure | ttfb 617ms`。
+
+
+## 2026-09-18 MCP tools/sync 对以 SSE 应答的上游不可用——#781 只修了请求头（#786）
+
+**发现路径**：对 #781（请求侧 Accept 头）做真机验收时，同一个 `dryRun` 的报错文本**变了**——从"上游返回 HTTP 406"变成 `Unrecognized token 'event'`。修对了请求侧，正好把响应侧露出来。
+
+**对照实验**（同机、同样的双媒体类型 Accept，裸 curl）：上游回 `content-type: text/event-stream`，`data:` 行里就是完整的 `tools/list` 结果；而客户端对响应体做 `objectMapper.readTree(body)`，把 SSE 帧当 JSON 解析 → 在 `event` 这个词上炸。
+
+**为什么既有测试看不见**：`McpToolsListClientTest` 的夹具固定返回裸 JSON；#781 的真机对照是**裸 curl 看到 200**——两者都跳过了"响应体如何解析"这一步。**CI 全绿与线上 502 可以并存**。
+
+**修法**：新增 `SseJsonRpc`（包内小件，与网关侧 `SseFrames` 对称）——按 SSE 线格式读帧：多行 `data:` 拼接、注释 `:` 忽略、`event:`/`id:`/`retry:` 不带载荷、取第一条含 `result` 或 `error` 的消息（可解析但无 result/error 的帧只作兜底）。客户端按**响应体**判帧型（`data:`/`event:`/`:` 开头的首行只可能是 SSE 帧，JSON 文档不可能这样开头），是则 SSE 解析、否则走原 JSON 路径——**以体为准而非 `Content-Type`**，因为帧型是响应体的性质，且这样连漏写/写错头的上游也兼容（旧行为本就忽略该头）。
+
+**验证（本地）**：先证红——新加的 4 条用例（SSE 帧解析 / SSE 内的 JSON-RPC error / 缺头仍是 SSE / 注释与前导帧跳过）在实现前是 **1 失败 + 3 错误**，报错文本正是线上那句 `Unrecognized token 'event'`；实现后 `McpToolsListClientTest` **13/13 绿**（含既有 9 条）。真机对 `https://mcp.deepwiki.com/mcp` 的 dryRun/apply 验收在 issue #786 记录。
