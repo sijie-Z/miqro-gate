@@ -3829,7 +3829,19 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 - 新增 `AdminCredentialAgentBindingIntegrationTest`（Testcontainers + MockMvc）：`Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 42.85 s`，`BUILD SUCCESS`（7 个模块全 SUCCESS）。用例：引用后 rotate 被拒 / 引用后 disable 被拒（两条都断言**数据库与审计零写入**：status、version、ACTIVE 版本指纹、审计动作列表均不变）/ 停用 Agent 后该凭证恢复可改可删、同时另一条仍被钉 / 已禁用 Agent 不钉 / 跨租户 404 且他租户凭证未被触碰 / 匿名 401 与 USER 角色 403
 - `AdminCredentialServiceTest` 补 3 条单测：`Tests run: 20, Failures: 0`
-- 前端：`npm run lint` 0 error / 7 warning（均为既有）、`npm run typecheck` 通过、`npm test` 63 文件 / 380 用例全绿
+- 全量受影响模块：`.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration` → `Tests run: 779, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`（7 模块全 SUCCESS，13:54 min）；其中本项新增类 6/6、`AdminCredentialServiceTest` 20/20
+- 前端：`npm --prefix frontend run typecheck` 通过；`npm test` 63 文件 / 380 用例全绿；`npm run build` 通过（24.33 s）；`npx eslint . --ext .vue,.ts,.tsx`（**不带 `--fix`**）0 error —— 62k 条 `Delete ␍` 告警是 Windows 检出 CRLF 的固有噪声（CI 为 LF），非本次引入
+- 评审后定向复跑：`.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration -Dtest=AdminCredentialServiceTest,AdminCredentialAgentBindingIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 26, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`（IT 6/6 42.45 s、单测 20/20 1.271 s）；前端 `npm test` 63 文件 / 384 用例全绿、`typecheck` 通过、`eslint`（不带 `--fix`）0 error
+
+**对抗评审后修复（4 条，均在本 Goal 范围内）**：
+- M1（唯一被证伪的对外声明）"停用 409 文案英文界面仍为中文"：`NextCredentialsView.vue` 把 message 与 requestId 拼成单节点 `…（requestId: xxx）`，全仓 20 处同样写法，均不匹配 `PATTERNS`。修在引擎层：`translateOne` 先剥离 `（requestId: …）` 后缀 → 翻译消息头 → 原样拼回；`i18n-copy.spec.ts` 加 3 组断言（两条真实文案 + 带后缀的轮换/停用串 + 未覆盖文案保持中文不半翻译）
+- M2 `disableProceedsWhenTheBindingAgentIsDisabled` 无判别力：补 `verify(agentRepository).findActiveByCredentialId(TENANT, credential.id())`，证明守卫被调用而非被跳过
+- M3 `i18n-copy.spec.ts` 未收录 #714 文案：已收录（含 Agent 名插值 `客服助手`）
+- M4 跨租户用例未锁定"响应体不含他租户 Agent 名"：已断言 404 body 不含 `foreign-agent` / `foreign-key`
+
+**未修复（2 条，理由如下）**：
+- M5 `docs/progress.md` 提交含 122 行纯行尾改写：该文件索引本身即 CRLF（`git ls-files --eol` → `i/crlf w/crlf`），提交把 122 行历史 LF 行归一为文件既有 CRLF；`git diff --numstat --ignore-cr-at-eol 7fac8001^..b5f31a5b -- docs/progress.md` 为 `28 0`（实质新增 28 行），`docs/api-contract.md` 为 `4 0`（无行尾改动）。不单独造 EOL 提交
+- M6（pre-existing）`findByIdForUpdate` 先加行锁、后做租户过滤，外租户 id 会短暂持有他租户凭证行锁；本批让 `AdminAgentService.create` 也走这条路径。影响仅为统一 404、不泄露存在性、无锁序环（评审 A4 已核）；修正需要改领域仓库锁 API 语义（`UpstreamCredentialRepository#findByIdForUpdate`），超出本 Goal 边界，留作后续独立变更
 
 **未做（如实记录）**：**Skill 快照语义（按引用版本固定）未实现**。理由：仓库里没有 Agent↔Skill 数据模型（无表、无迁移、无端点），F27/F28 仍是 SCAFFOLD；落地它要新表 + 新迁移 + 新的写入/读取语义，属于"需要新数据模型且风险大"，按 issue 边界**先停下报告**，不硬塞进本 PR。该项仍留在 F28 待办。
 
