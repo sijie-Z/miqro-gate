@@ -138,9 +138,9 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
     }
 
     /**
-     * CAA evidence rows (Spec v1.1 §7.2, {@code request_context_evidence}):
-     * "why was it attributed this way". Written in the usage transaction, keyed by
-     * the usage event id, so a retried flush is a no-op
+     * CAA evidence rows (Spec v1.1 §7.2, {@code request_context_evidence}): "why
+     * was it attributed this way". Written in the usage transaction, keyed by the
+     * usage event id, so a retried flush is a no-op
      * ({@code ON CONFLICT (id) DO NOTHING}) and the rows join.
      *
      * <p>
@@ -163,9 +163,9 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
 
     /**
      * Evidence row for one usage event, or null when the ladder used no external
-     * selector. {@code source} is the selector class the gateway actually
-     * observed, not the client's declared {@code X-Miqro-Claim-Source} (that claim
-     * is already kept in {@code usage_event.claim_source}):
+     * selector. {@code source} is the selector class the gateway actually observed,
+     * not the client's declared {@code X-Miqro-Claim-Source} (that claim is already
+     * kept in {@code usage_event.claim_source}):
      * <ul>
      * <li>{@code RESOLVED_HEADER} → {@code header}, value = the claimed project id
      * the request was validated against;</li>
