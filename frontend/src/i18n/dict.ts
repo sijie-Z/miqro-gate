@@ -32,6 +32,7 @@ export const DICT: Record<string, string> = {
   '未定价': 'Unpriced',
   '调整': 'Adjustment',
   '已调整': 'Adjusted',
+  '含调整': 'Adjustments',
   '模型统计': 'Model stats',
   '用时 / 首字': 'Duration / first byte',
   '真实消耗 Tokens': 'Tokens consumed (actual)',

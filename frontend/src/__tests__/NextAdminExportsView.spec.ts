@@ -55,6 +55,21 @@ describe('NextAdminExportsView', () => {
     expect(wrapper.text()).toContain('120');
   });
 
+  it('#716: marks a file that contains corrections, and leaves an untouched one unmarked', async () => {
+    mockApi.exportRecent.mockResolvedValue([
+      task({ id: 'a1', adjustmentLevel: 'PRESENT' }),
+      task({ id: 'a2', adjustmentLevel: 'NONE' }),
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    const rows = wrapper.findAll('tbody tr');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.find('[data-testid="export-adjustment-level"]').text()).toContain('含调整');
+    // NONE gets no chip: a badge on nearly every row would drown the one that matters.
+    expect(rows[1]!.find('[data-testid="export-adjustment-level"]').exists()).toBe(false);
+  });
+
   it('creates an export and polls to completion', async () => {
     mockApi.createExport.mockResolvedValue(task({ id: 'e9', status: 'PENDING' }));
     mockApi.exportStatus.mockResolvedValue(task({ id: 'e9', status: 'SUCCEEDED', rowCount: 5 }));
