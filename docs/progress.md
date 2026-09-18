@@ -39,6 +39,34 @@
 - **缺口①（供应商私有账单解析器）不在本次范围**：仍需真实账单样本，本分支不含。
 - 工作区卫生：本次只提交上述 6 个改动文件 + 1 个新增单测 + 本文件；工作区另存的 21 个与本议题
   无关的改动文件（`types/generated.ts` 重生成、若干 `ui/*` 与视图改动）保持原样未提交。
+- **内部对抗评审轮（同日追加）**：评审提出阻断项 —— `csvCell` 的公式注入防护对所有列一视同仁，
+  于是 `detail_amount` 的合法负值（退款/调整行）被导出为 `'-12.34`，既与页面显示的 `-12.34`
+  不一致，又让金额列在表格中退化为文本。可达性已复核：`CanonicalBillParser` 只校验 `amount` 非空，
+  `BillReconciliationEngine` 的 `new BigDecimal` 接受负值。
+  - **修复落在导出层**（未触碰解析器/匹配逻辑，即缺口① 范围）：整格匹配裸十进制字面量
+    `[+-]?\d+(\.\d+)?([eE][+-]?\d+)?` 时豁免防护单引号；`-1+1`、`+cmd|' /C calc'!A0` 这类
+    仅「形似数字」的串仍按公式处理。`= + @ TAB CR` 前导一律不变。
+  - **回归测试**：`ReconciliationExportCsvTest` 新增 `signedDecimalsAreNotGuarded`，并把 `+1` /
+    `-1.50` 从「应加引号」用例移入该用例；`ReconciliationApiIntegrationTest` 新增
+    `exportCsvSignedAmount`（`-12.34` 与 `+3.00` 两条账单行的独立 fixture，逐格比对页面明细
+    并断言单元格 `BigDecimal` 等值）。
+  - 复跑：`.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=ReconciliationApiIntegrationTest,ReconciliationExportCsvTest
+    -Dsurefire.failIfNoSpecifiedTests=false` →
+    `Tests run: 11, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`，`Total time: 48.105 s`。
+  - 格式（`mvn test` 不跑 spotless，`verify` 才跑，所以裸测绿不代表 CI 绿）：`spotless:check`
+    在整改前报 `.../AdminReconciliationController.java`、`.../ReconciliationService.java`、
+    `.../ReconciliationApiIntegrationTest.java`、`.../ReconciliationExportCsvTest.java` 违规，
+    已用 `.\mvnw.cmd -B -f backend -pl control-plane-app -am spotless:apply` 修好（纯 javadoc/换行
+    重排；`AdminReconciliationController.java` 因此从「已提交」变为「本次再提交一次注释重排」），
+    随后 `spotless:check` → `BUILD SUCCESS`。
+  - 格式修复后复跑（分别执行）：`ReconciliationApiIntegrationTest` →
+    `Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`，`Total time: 51.523 s`；
+    `ReconciliationExportCsvTest` → `Tests run: 5, Failures: 0, Errors: 0, Skipped: 0`，
+    `BUILD SUCCESS`，`Total time: 4.386 s`。前端 `npm run typecheck` exit 0、`npm run test` →
+    63 files / 384 tests 全绿、`npm run lint` → `0 errors, 7 warnings`。
+  - 文档：`docs/api-contract.md` 补「裸十进制字面量原样输出、不加防护单引号」与「审计 `rows`
+    为截断后实际行数」两处口径。
 
 ## 会话交接点 2026-09-16（自助注册关闭态前置体现 #550）
 

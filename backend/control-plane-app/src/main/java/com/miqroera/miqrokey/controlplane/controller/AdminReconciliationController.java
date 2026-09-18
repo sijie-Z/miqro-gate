@@ -78,10 +78,10 @@ public class AdminReconciliationController {
 
     /**
      * Four-state detail rows of one report as CSV (api-contract §5.27), with the
-     * same synchronous download shape as the audit and retention-log exports:
-     * 5 万行 cap declared through {@code X-MiQroKey-Truncated}, exact row count
-     * through {@code X-MiQroKey-Rows}. Exports are audited before the body is
-     * written, so a truncated or failed response still leaves a trace.
+     * same synchronous download shape as the audit and retention-log exports: 5 万行
+     * cap declared through {@code X-MiQroKey-Truncated}, exact row count through
+     * {@code X-MiQroKey-Rows}. Exports are audited before the body is written, so a
+     * truncated or failed response still leaves a trace.
      */
     @GetMapping(path = "/{reportId}/export", produces = "text/csv")
     public void exportRowsCsv(@PathVariable UUID reportId, @RequestParam(required = false) String state,

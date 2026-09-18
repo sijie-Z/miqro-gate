@@ -24,10 +24,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.io.ByteArrayOutputStream;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -361,15 +363,14 @@ class ReconciliationApiIntegrationTest {
         // fixture yields six detail rows — the metadata totals in
         // fourStateReport() (matched 1 / partial 1 / unmatchedLocal 1 /
         // unmatchedProvider 3) are the four-state summary, not the row count.
-        JsonNode pageRows = objectMapper
-                .readTree(mockMvc.perform(get("/api/v1/admin/reconciliations/" + reportId + "/rows")
-                        .cookie(sessionCookie, csrfCookie)).andExpect(status().isOk()).andReturn().getResponse()
-                        .getContentAsString(StandardCharsets.UTF_8))
+        JsonNode pageRows = objectMapper.readTree(mockMvc
+                .perform(get("/api/v1/admin/reconciliations/" + reportId + "/rows").cookie(sessionCookie, csrfCookie))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8))
                 .get("rows");
         List<String> verdicts = new ArrayList<>();
         pageRows.forEach(row -> verdicts.add(row.get("verdict").asText()));
-        assertThat(verdicts).containsExactlyInAnyOrder("MATCHED", "PARTIAL", "UNMATCHED_LOCAL",
-                "UNMATCHED_PROVIDER", "UNMATCHED_PROVIDER", "UNMATCHED_PROVIDER");
+        assertThat(verdicts).containsExactlyInAnyOrder("MATCHED", "PARTIAL", "UNMATCHED_LOCAL", "UNMATCHED_PROVIDER",
+                "UNMATCHED_PROVIDER", "UNMATCHED_PROVIDER");
         int expectedRows = pageRows.size();
 
         MvcResult export = performExport(reportId, null);
@@ -395,8 +396,7 @@ class ReconciliationApiIntegrationTest {
         // state narrows the export exactly like the page filter, and the declared
         // row count follows the filtered result (header row excluded).
         MvcResult partialExport = performExport(reportId, "PARTIAL");
-        List<List<String>> partial = parseCsv(partialExport.getResponse()
-                .getContentAsString(StandardCharsets.UTF_8));
+        List<List<String>> partial = parseCsv(partialExport.getResponse().getContentAsString(StandardCharsets.UTF_8));
         assertThat(partial).hasSize(2);
         assertThat(partial.get(1).get(3)).isEqualTo("PARTIAL");
         assertThat(partial.get(1).get(12)).startsWith(productCode + "@");
@@ -406,10 +406,9 @@ class ReconciliationApiIntegrationTest {
         // Every download is audited with its own exported row count, before the
         // body: the unfiltered export (every detail row) and the PARTIAL one.
         assertThat(eventCount("RECONCILIATION_EXPORT")).isEqualTo(2);
-        List<Map<String, Object>> audits = jdbc.queryForList(
-                "SELECT target_type, target_id, change_summary::text FROM admin_audit_events"
-                        + " WHERE action = 'RECONCILIATION_EXPORT'",
-                new MapSqlParameterSource());
+        List<Map<String, Object>> audits = jdbc
+                .queryForList("SELECT target_type, target_id, change_summary::text FROM admin_audit_events"
+                        + " WHERE action = 'RECONCILIATION_EXPORT'", new MapSqlParameterSource());
         assertThat(audits).hasSize(2);
         List<Integer> auditedRows = new ArrayList<>();
         for (Map<String, Object> audit : audits) {
@@ -423,6 +422,49 @@ class ReconciliationApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("export CSV: a signed amount exports as the number the page shows, not guarded text")
+    void exportCsvSignedAmount() throws Exception {
+        seedUsage("req-1", "m-1", occurred, 10L, 5L);
+
+        // Refund/adjustment lines: the canonical parser accepts any non-empty
+        // amount, so a leading sign reaches the detail JSON verbatim. The export
+        // must reproduce it as-is — a spreadsheet-guarded "'-12.34" would both
+        // disagree with the page and turn the amount column into text.
+        String bill = "{\"provider_request_id\":\"req-1\",\"occurred_at\":\"" + occurred + "\",\"model_id\":\"m-1\","
+                + "\"amount\":\"-12.34\",\"currency\":\"USD\",\"provider_row_ref\":\"bill-1\"}\n"
+                + "{\"provider_request_id\":\"req-ghost\",\"occurred_at\":\"" + occurred + "\",\"model_id\":\"ghost\","
+                + "\"amount\":\"+3.00\",\"currency\":\"USD\",\"provider_row_ref\":\"bill-2\"}\n";
+        MvcResult created = postReport(bill.getBytes(StandardCharsets.UTF_8));
+        assertThat(created.getResponse().getStatus()).isEqualTo(202);
+        String reportId = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asText();
+        awaitSucceeded(reportId);
+
+        JsonNode pageRows = objectMapper.readTree(mockMvc
+                .perform(get("/api/v1/admin/reconciliations/" + reportId + "/rows").cookie(sessionCookie, csrfCookie))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8))
+                .get("rows");
+        // One detail row per bill line, no bucket line (both lines carry an id)
+        // and no unmatched local (the seeded usage matched).
+        assertThat(pageRows).hasSize(2);
+
+        List<List<String>> csv = parseCsv(
+                performExport(reportId, null).getResponse().getContentAsString(StandardCharsets.UTF_8));
+        assertThat(csv).hasSize(3);
+        Map<String, String> amountByVerdict = new HashMap<>();
+        for (int i = 0; i < pageRows.size(); i++) {
+            List<String> cells = csv.get(i + 1);
+            assertThat(cells).as("export row %s mirrors detail row %s", i + 1, i + 1)
+                    .containsExactlyElementsOf(expectedCells(reportId, pageRows.get(i)));
+            amountByVerdict.put(pageRows.get(i).get("verdict").asText(), cells.get(8)); // detail_amount
+        }
+        assertThat(amountByVerdict.get("MATCHED")).isEqualTo("-12.34");
+        assertThat(amountByVerdict.get("UNMATCHED_PROVIDER")).isEqualTo("+3.00");
+        // A plain decimal literal: no apostrophe, no quoting, equal to the value.
+        assertThat(new BigDecimal(amountByVerdict.get("MATCHED"))).isEqualByComparingTo("-12.34");
+        assertThat(new BigDecimal(amountByVerdict.get("UNMATCHED_PROVIDER"))).isEqualByComparingTo("3.00");
+    }
+
+    @Test
     @DisplayName("export CSV: empty result, unknown state, 5 万行 cap, cross-tenant 404")
     void exportEdges() throws Exception {
         seedUsage("req-1", "m-1", occurred, 10L, 5L);
@@ -433,7 +475,8 @@ class ReconciliationApiIntegrationTest {
         String reportId = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asText();
         awaitSucceeded(reportId);
 
-        // No matching rows is an explicit empty export: header only, 0 rows, no cap flag.
+        // No matching rows is an explicit empty export: header only, 0 rows, no cap
+        // flag.
         MvcResult empty = performExport(reportId, "UNMATCHED_LOCAL");
         assertThat(empty.getResponse().getHeader("X-MiQroKey-Rows")).isEqualTo("0");
         assertThat(empty.getResponse().getHeader("X-MiQroKey-Truncated")).isNull();
@@ -451,8 +494,9 @@ class ReconciliationApiIntegrationTest {
         // A foreign tenant's report is not exportable: same 404 as an unknown id.
         UUID foreignTenant = UUID.randomUUID();
         UUID adminId = jdbc.queryForObject("SELECT id FROM users LIMIT 1", new MapSqlParameterSource(), UUID.class);
-        jdbc.update("INSERT INTO tenants (id, code, name) VALUES (:id, :code, 'Export IT B')", new MapSqlParameterSource(
-                "id", foreignTenant).addValue("code", "export-it-" + foreignTenant.toString().substring(0, 8)));
+        jdbc.update("INSERT INTO tenants (id, code, name) VALUES (:id, :code, 'Export IT B')",
+                new MapSqlParameterSource("id", foreignTenant).addValue("code",
+                        "export-it-" + foreignTenant.toString().substring(0, 8)));
         try {
             UUID foreignReport = UUID.randomUUID();
             jdbc.update("""
@@ -464,23 +508,23 @@ class ReconciliationApiIntegrationTest {
                             .addValue("createdBy", adminId).addValue("code", productCode)
                             .addValue("from", java.sql.Timestamp.from(windowFrom))
                             .addValue("to", java.sql.Timestamp.from(windowTo)).addValue("sha", "0".repeat(64)));
-            mockMvc.perform(get("/api/v1/admin/reconciliations/" + foreignReport + "/export")
-                    .cookie(sessionCookie, csrfCookie)).andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.code").value("RECONCILIATION_NOT_FOUND"));
+            mockMvc.perform(
+                    get("/api/v1/admin/reconciliations/" + foreignReport + "/export").cookie(sessionCookie, csrfCookie))
+                    .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("RECONCILIATION_NOT_FOUND"));
         } finally {
             jdbc.update("DELETE FROM reconciliation_reports WHERE tenant_id = :tenantId",
                     new MapSqlParameterSource("tenantId", foreignTenant));
             jdbc.update("DELETE FROM tenants WHERE id = :id", new MapSqlParameterSource("id", foreignTenant));
         }
 
-        // 5 万行 cap: one row past it truncates and says so (rows stay the lowest row_no).
+        // 5 万行 cap: one row past it truncates and says so (rows stay the lowest
+        // row_no).
         jdbc.update("""
                 INSERT INTO reconciliation_rows (id, report_id, tenant_id, row_no, verdict, provider_row_ref, detail)
                 SELECT gen_random_uuid(), :reportId, :tenantId, 100000 + g, 'UNMATCHED_PROVIDER', 'bulk-' || g,
                     '{"modelId":"m-bulk"}'::jsonb
                 FROM generate_series(1, 50010) AS g
-                """,
-                new MapSqlParameterSource("reportId", UUID.fromString(reportId)).addValue("tenantId", TENANT_ID));
+                """, new MapSqlParameterSource("reportId", UUID.fromString(reportId)).addValue("tenantId", TENANT_ID));
         MvcResult capped = performExport(reportId, null);
         assertThat(capped.getResponse().getHeader("X-MiQroKey-Rows")).isEqualTo("50000");
         assertThat(capped.getResponse().getHeader("X-MiQroKey-Truncated")).isEqualTo("true");
@@ -500,14 +544,15 @@ class ReconciliationApiIntegrationTest {
         return mockMvc.perform(request).andExpect(status().isOk()).andReturn();
     }
 
-    /** Detail-row values in declared export order, read from the API the page uses. */
+    /**
+     * Detail-row values in declared export order, read from the API the page uses.
+     */
     private List<String> expectedCells(String reportId, JsonNode row) {
         JsonNode detail = row.path("detail");
         return List.of(reportId, productCode, row.get("rowNo").asText(), row.get("verdict").asText(),
-                text(row, "matchedBy"), text(row, "providerRowRef"), text(row, "localRef"),
-                text(detail, "modelId"), text(detail, "amount"), text(detail, "currency"),
-                text(detail, "occurredAt"), text(detail, "status"), text(detail, "bucketKey"),
-                text(detail, "providerCount"), text(detail, "localCount"));
+                text(row, "matchedBy"), text(row, "providerRowRef"), text(row, "localRef"), text(detail, "modelId"),
+                text(detail, "amount"), text(detail, "currency"), text(detail, "occurredAt"), text(detail, "status"),
+                text(detail, "bucketKey"), text(detail, "providerCount"), text(detail, "localCount"));
     }
 
     private static String text(JsonNode node, String field) {
@@ -515,7 +560,10 @@ class ReconciliationApiIntegrationTest {
         return value == null || value.isNull() ? "" : value.asText();
     }
 
-    /** Minimal RFC 4180 reader for the subset csvCell emits (BOM, quoting, "" doubling). */
+    /**
+     * Minimal RFC 4180 reader for the subset csvCell emits (BOM, quoting, ""
+     * doubling).
+     */
     private static List<List<String>> parseCsv(String csv) {
         List<List<String>> lines = new ArrayList<>();
         List<String> line = new ArrayList<>();

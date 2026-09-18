@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 
 /**
@@ -60,26 +61,26 @@ public class ReconciliationService {
     static final int EXPORT_MAX_ROWS = 50_000;
 
     /**
-     * Declared export column order — header and every data row are built from
-     * this one list (#754): a misaligned export does not fail loudly, it hands
-     * consumers the wrong values under the right names.
+     * Declared export column order — header and every data row are built from this
+     * one list (#754): a misaligned export does not fail loudly, it hands consumers
+     * the wrong values under the right names.
      *
-     * <p>{@code detail_*} columns flatten the heterogeneous per-verdict
-     * {@code detail} JSON ({@code modelId/amount/currency/occurredAt/status} for
-     * bill rows, {@code bucketKey/providerCount/localCount} for PARTIAL,
+     * <p>
+     * {@code detail_*} columns flatten the heterogeneous per-verdict {@code detail}
+     * JSON ({@code modelId/amount/currency/occurredAt/status} for bill rows,
+     * {@code bucketKey/providerCount/localCount} for PARTIAL,
      * {@code occurredAt/modelId} for UNMATCHED_LOCAL); cells a verdict does not
      * carry stay empty rather than shifting columns.
      */
     static final List<String> EXPORT_COLUMNS = List.of("report_id", "provider_code", "row_no", "verdict", "matched_by",
             "provider_row_ref", "local_ref", "detail_model_id", "detail_amount", "detail_currency",
-            "detail_occurred_at", "detail_status", "detail_bucket_key", "detail_provider_count",
-            "detail_local_count");
+            "detail_occurred_at", "detail_status", "detail_bucket_key", "detail_provider_count", "detail_local_count");
 
     private static final String DETAIL_PREFIX = "detail_";
 
     /**
-     * {@code detail_*} column → the key it reads from the stored detail JSON.
-     * The header is snake_case like the other admin exports while the JSON is
+     * {@code detail_*} column → the key it reads from the stored detail JSON. The
+     * header is snake_case like the other admin exports while the JSON is
      * camelCase, so the two cannot be derived from each other: a column must be
      * spelled out here, and {@code ReconciliationExportCsvTest} fails if the
      * declared columns and these keys ever drift apart.
@@ -253,23 +254,25 @@ public class ReconciliationService {
     /**
      * Four-state detail rows as a downloadable CSV (api-contract §5.27).
      *
-     * <p>Dialect: the synchronous admin-download convention of
-     * {@code AdminAuditController} / {@code AdminRetentionLogController} —
-     * UTF-8 BOM, RFC 4180 quoting with the #430 formula-injection guard, one
-     * trailing {@code X-MiQroKey-Truncated} declaration at
-     * {@link #EXPORT_MAX_ROWS}. The async artifact dialect
-     * ({@code ExportTaskService}: gzip, camelCase, {@code \,} escaping) is for
-     * queued jobs, not for a bounded download derived from one report.
+     * <p>
+     * Dialect: the synchronous admin-download convention of
+     * {@code AdminAuditController} / {@code AdminRetentionLogController} — UTF-8
+     * BOM, RFC 4180 quoting with the #430 formula-injection guard, one trailing
+     * {@code X-MiQroKey-Truncated} declaration at {@link #EXPORT_MAX_ROWS}. The
+     * async artifact dialect ({@code ExportTaskService}: gzip, camelCase,
+     * {@code \,} escaping) is for queued jobs, not for a bounded download derived
+     * from one report.
      *
-     * <p>{@code state} narrows the export exactly like the console's verdict
-     * filter (same validation as {@link #rows}); an empty result is a
-     * header-only CSV, never an error.
+     * <p>
+     * {@code state} narrows the export exactly like the console's verdict filter
+     * (same validation as {@link #rows}); an empty result is a header-only CSV,
+     * never an error.
      */
     public CsvExport exportCsv(UUID tenantId, UUID reportId, String state) {
         Map<String, Object> report = get(tenantId, reportId); // existence + tenant check
         String verdict = normalizeVerdict(state);
-        MapSqlParameterSource params = new MapSqlParameterSource("reportId", reportId)
-                .addValue("limit", EXPORT_MAX_ROWS + 1);
+        MapSqlParameterSource params = new MapSqlParameterSource("reportId", reportId).addValue("limit",
+                EXPORT_MAX_ROWS + 1);
         String filter = "";
         if (verdict != null) {
             filter = " AND verdict = :verdict ";
@@ -305,7 +308,10 @@ public class ReconciliationService {
     public record CsvExport(String csv, int rows, boolean truncated) {
     }
 
-    /** Verdict filter shared by the paged view and the export (both reject junk the same way). */
+    /**
+     * Verdict filter shared by the paged view and the export (both reject junk the
+     * same way).
+     */
     private static String normalizeVerdict(String state) {
         if (state == null || state.isBlank()) {
             return null;
@@ -319,9 +325,9 @@ public class ReconciliationService {
     }
 
     /**
-     * One declared column of one row. {@code detail_*} reads its declared key
-     * from the per-verdict detail JSON; a verdict that does not carry the key
-     * yields an empty cell.
+     * One declared column of one row. {@code detail_*} reads its declared key from
+     * the per-verdict detail JSON; a verdict that does not carry the key yields an
+     * empty cell.
      */
     static String exportCell(Map<String, Object> row, Map<String, Object> report, String column) {
         if (column.startsWith(DETAIL_PREFIX)) {
@@ -350,18 +356,34 @@ public class ReconciliationService {
     }
 
     /**
+     * A bare decimal literal — digits with at most one sign, point and exponent.
+     * Nothing else; this decides whether a cell needs the formula guard at all.
+     */
+    private static final Pattern NUMERIC_LITERAL = Pattern.compile("[+-]?\\d+(\\.\\d+)?([eE][+-]?\\d+)?");
+
+    /**
      * RFC 4180 cell with the #430 spreadsheet formula-injection guard, mirroring
      * {@code AuditEventReadService.quote}: a cell starting with {@code = + - @
-     * TAB CR} is prefixed with an apostrophe (displayed text unchanged,
-     * execution neutralised). Bill refs and detail fields carry provider-file
-     * text, so the guard applies here too. Package-private for the unit test.
+     * TAB CR} is prefixed with an apostrophe (execution neutralised). Bill refs and
+     * detail fields carry provider-file text, so the guard applies here too.
+     *
+     * <p>
+     * A cell that is *only* a decimal literal is exempt: {@code -12.34} is a
+     * number, not a formula, and {@code CanonicalBillParser} accepts any non-empty
+     * {@code amount}, so refund/adjustment lines legitimately carry a negative one.
+     * Prefixing those would export {@code '-12.34} where the page renders
+     * {@code -12.34}, and the amount column would reach the spreadsheet as text
+     * that {@code SUM} ignores. Anything that merely starts like a number
+     * ({@code -1+1}, {@code +cmd|' /C calc'!A0}) is still guarded. Package-private
+     * for the unit test.
      */
     static String csvCell(String value) {
         if (value == null) {
             return "";
         }
         String guarded = value;
-        if (!guarded.isEmpty() && "=+-@\t\r".indexOf(guarded.charAt(0)) >= 0) {
+        if (!guarded.isEmpty() && !NUMERIC_LITERAL.matcher(guarded).matches()
+                && "=+-@\t\r".indexOf(guarded.charAt(0)) >= 0) {
             guarded = "'" + guarded;
         }
         if (guarded.indexOf(',') < 0 && guarded.indexOf('"') < 0 && guarded.indexOf('\n') < 0
@@ -372,8 +394,8 @@ public class ReconciliationService {
     }
 
     /**
-     * Shared row projection: one SELECT column set, one mapping, so the paged
-     * view and the export cannot drift apart (both read the same keys).
+     * Shared row projection: one SELECT column set, one mapping, so the paged view
+     * and the export cannot drift apart (both read the same keys).
      */
     private final RowMapper<Map<String, Object>> rowMapper = (rs, n) -> {
         Map<String, Object> row = new LinkedHashMap<>();
