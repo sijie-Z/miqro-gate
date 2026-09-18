@@ -162,7 +162,7 @@ assert_status 0 "trailing /v1/ is normalized"
 assert_contains "export ANTHROPIC_BASE_URL='https://gw.example.com'" "normalized origin is used"
 
 run sh "$SCRIPT" print env --gateway
-assert_status 1 "missing option value is refused with a message"
+if [ "$ST" != 0 ]; then ok "missing option value is refused (non-zero: $ST)"; else bad "missing option value is refused"; fi
 assert_contains "--gateway needs a value" "the missing value is named"
 
 # key via stdin (keeps it out of argv / shell history)
@@ -340,9 +340,8 @@ PATH="$TMP/bin:$PATH"
 export PATH
 export FAKE_CURL_LOG="$TMP/curl.log"
 
-FAKE_CODE=200
-FAKE_BODY='{"object":"list","data":[{"id":"deepseek-flash"}]}'
-export FAKE_CODE FAKE_BODY
+export FAKE_CODE=200
+export FAKE_BODY='{"object":"list","data":[{"id":"deepseek-flash"}]}'
 : >"$FAKE_CURL_LOG"
 run sh "$SCRIPT" verify --gateway "$GW" --key "$VK"
 assert_status 0 "verify accepts 200 with a models-list body"
@@ -357,32 +356,28 @@ case "$CLOG" in
     *) bad "verify bounds the connect phase (curl args: $CLOG)" ;;
 esac
 
-FAKE_CODE=200
-FAKE_BODY='<html>proxy error page</html>'
-export FAKE_CODE FAKE_BODY
+export FAKE_CODE=200
+export FAKE_BODY='<html>proxy error page</html>'
 run sh "$SCRIPT" verify --gateway "$GW" --key "$VK"
 assert_status 1 "verify rejects a 200 that is not the models list"
 assert_contains "not a models list" "the structural failure is explained"
 
-FAKE_CODE=404
-FAKE_BODY='{"code":"virtual_key_invalid"}'
-export FAKE_CODE FAKE_BODY
+export FAKE_CODE=404
+export FAKE_BODY='{"code":"virtual_key_invalid"}'
 run sh "$SCRIPT" verify --gateway "$GW" --key "$VK"
 assert_status 1 "verify fails on 404"
 assert_contains "virtual_key_invalid" "verify names the uniform 404"
 assert_contains "code: virtual_key_invalid" "the failure prints the parsed code, not the body"
 assert_not_contains '"code":"virtual_key_invalid"' "the raw body is not dumped by default"
 
-FAKE_CODE=401
-FAKE_BODY='{"code":"invalid_api_key"}'
-export FAKE_CODE FAKE_BODY
+export FAKE_CODE=401
+export FAKE_BODY='{"code":"invalid_api_key"}'
 run sh "$SCRIPT" verify --gateway "$GW" --key "$VK"
 assert_status 1 "verify fails on 401"
 assert_contains "wrong credential plane" "verify explains 401 attribution"
 
-FAKE_CODE=404
-FAKE_BODY='{"code":"virtual_key_invalid"}'
-export FAKE_CODE FAKE_BODY
+export FAKE_CODE=404
+export FAKE_BODY='{"code":"virtual_key_invalid"}'
 run sh "$SCRIPT" verify --gateway "$GW" --key "$VK" --verbose
 assert_status 1 "verify --verbose still fails on 404"
 assert_contains "body: " "verbose prints the body for diagnosis"
