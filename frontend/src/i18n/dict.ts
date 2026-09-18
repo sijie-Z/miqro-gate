@@ -1321,6 +1321,7 @@ export const DICT: Record<string, string> = {
   '重置密码': 'Reset password',
   '重试': 'Retry',
   '重新加载': 'Reload',
+  '使用手册': 'User guide',
   '返回总览': 'Back to overview',
   '页面出错了': 'This page hit an error',
   '页面渲染时遇到问题。可以先重试；若反复出现，请把下方信息反馈给管理员。':
