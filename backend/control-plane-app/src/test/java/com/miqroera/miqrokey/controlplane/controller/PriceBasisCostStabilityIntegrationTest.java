@@ -51,9 +51,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>
  * Both are asserted on the aggregate <em>and</em> on the per-row detail list:
- * the two read the same price expression (#710), so a cost that moves on one and
- * not the other would be a bug in itself, and the agreement is asserted directly
- * rather than assumed.
+ * the two read the same price expression (#710), so a cost that moves on one
+ * and not the other would be a bug in itself, and the agreement is asserted
+ * directly rather than assumed.
  * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -226,8 +226,9 @@ class PriceBasisCostStabilityIntegrationTest {
 
     /** The one seeded event as the detail endpoint reports it. */
     private Map<?, ?> detailRow() throws Exception {
-        MvcResult res = mockMvc.perform(get("/api/v1/admin/usage/records").param("size", "10")
-                .cookie(sessionCookie, csrfCookie)).andExpect(status().isOk()).andReturn();
+        MvcResult res = mockMvc
+                .perform(get("/api/v1/admin/usage/records").param("size", "10").cookie(sessionCookie, csrfCookie))
+                .andExpect(status().isOk()).andReturn();
         Map<?, ?> body = objectMapper.readValue(res.getResponse().getContentAsString(StandardCharsets.UTF_8),
                 Map.class);
         List<?> items = (List<?>) body.get("items");

@@ -4277,6 +4277,15 @@ job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
 - 本线用例：同形命令换 `-Dtest=PriceBasisCostStabilityIntegrationTest,UsageStatsAggregatorTest,UsageStatsServiceTest,AdminUsageStatsServiceTest` → **BUILD SUCCESS**，`Tests run: 8, Failures: 0, Errors: 0`（domain）+ `Tests run: 32, Failures: 0, Errors: 0`（control-plane）。
 
 **未做**：本线实现未重写、未 `stash`；"事件生成时携带价格快照"（标准 1）与 `CostAllocationService` 取价口径属**口径决策**，已交 owner（2026-09-18 04:00 的 #710 决策材料评论），本轮不动。
+## 2026-09-18 Runbook §15 定稿：两层结构（运维速查 + 工程陷阱），owner 已裁定收录
+
+**外部评审（owner 转来）结论：收录，但改成两层。** 已按此重排（commit 见下）：
+
+- **`operations-runbook.md` §15**：只留运维侧——总原则一行（"先问这个观察到底证明了什么"）+ 15.1 状态码语义 / 15.2 泛化兜底（仅 SQL→500 行）/ 15.3 未验证输入 / 15.4「命令返回了≠服务就绪了」/ 15.5 不可见字符 / 15.6 宽容失败语；**新增核实基线**（`verified-against: develop@…` + last-verified + re-check triggers）；15.4 的 nginx 措辞**降级为"本部署模板的事实"**（不再写成 nginx 普遍规律）；全文**无行号**。
+- **新增 `docs/debugging-traps.md`**：工程侧——CI JDT 速挂 / Maven 静默卡死（含"卡死持有部署锁"真机补充）/ 「全绿≠验过」（测试隔离 + 空基线 + #819 行为闸门的反向验证）/ 读已合并 revision / 「缺口判断先查权威表述」/ 「没牙的检查 vs 误报的检查」/ 完整事故证据引用链（#802→#819、#754、#816/#817、#710/#780）。§15 顶部互相指路，document-map 已登记。
+- 评审指出的"四族"描述过时：重排后按**两类形状**陈述（症状指向错误的层 / 证据强度被高估），工程侧（执行上下文族）随文档拆分另述。
+
+**来源**：owner 2026-09-18 转来的外部评审（原 PR #759 为"提案·待 owner 认可"，本条即该认可与改后的落地记录）。
 
 ## 2026-09-18 「调整」列在无调整行时隐藏——补 #773 验收第 3 条（#773）
 

@@ -47,7 +47,8 @@
 | `testing-and-acceptance.md` | 总体验收策略 | 验收变化 |
 | `test-fixtures.md` | Mock/fixture 格式和覆盖 | 测试协议变化 |
 | `deployment-and-operations.md` | 部署拓扑和基础运维 | 部署变化 |
-| `operations-runbook.md` | 日常故障和恢复步骤 | 运维流程变化 |
+| `operations-runbook.md` | 日常故障和恢复步骤（§15 诊断陷阱速查：运维侧归因方法） | 运维流程变化 |
+| `debugging-traps.md` | 工程调试陷阱（§15 的工程侧姊妹篇：CI/构建/测试方法/源码 revision） | 工程排障方法变化 |
 | `implementation-plan.md` | 可执行 Goal 及依赖 | Goal 调整 |
 | `open-admin-api-plan.md` | 管理开放 API（F60）三批拆解与状态 | 该专项计划变化 |
 | `feature-expansion-candidates.md` | 大厂文档→功能候选池与核对记录 | 研究出新候选/裁决 |
