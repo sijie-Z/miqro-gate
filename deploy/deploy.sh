@@ -49,6 +49,14 @@
 # failed (something did not move), 3 = another deploy held the lock.
 set -eu
 
+# Under Git Bash, MSYS rewrites arguments that look like absolute paths into `C:\...`
+# before they reach docker. An in-container path such as /etc/nginx/certs would then
+# be handed to the daemon as a Windows host path, and the assertions below would
+# report a missing certificate that is really there — a false alarm of exactly the
+# kind this script is supposed to eliminate. No effect on Linux.
+MSYS_NO_PATHCONV=1
+export MSYS_NO_PATHCONV
+
 usage() {
     sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
@@ -212,7 +220,76 @@ for svc in $SERVICES; do
     fi
 done
 
-# ---- 5. a swapped backend invalidates the portal's resolved upstream ---------
+# ---- 5. the certificates must be inside the container that serves them --------
+# This is layer two of the #794 incident, and it is not about the .env at all: the
+# relative `./secrets/certs` mount resolved against the wrong project directory, so
+# Docker created an EMPTY directory at the host path and nginx crash-looped on a
+# missing certificate — while `up` reported success and compose still called the
+# container "created". Each other check misses it for its own reason: the image is
+# correct (so section 4 is satisfied), certificates are not environment variables
+# (so the .env echo never looks at them), and a portal that cannot start answers the
+# smoke with 000, which is deliberately classified as weather rather than incident.
+# So it needs its own assertion, offline and deterministic: whatever the host holds,
+# the container that mounts it must hold the same bytes.
+cert_dir="$COMPOSE_DIR/secrets/certs"
+if [ -s "$cert_dir/fullchain.pem" ] && [ -s "$cert_dir/privkey.pem" ]; then
+    cert_host="$(cd "$cert_dir" 2>/dev/null && pwd -P)"
+    for svc in $SERVICES; do
+        if [ "$DRY" = 1 ]; then
+            echo "DRY  assert $svc sees $cert_dir inside the container"
+            continue
+        fi
+        cid="$(container_of "$svc")"
+        [ -n "$cid" ] || continue
+        # Destination is read from the container rather than assumed: where the
+        # certificates land is the compose file's decision, not this script's.
+        cert_mounts="$(docker inspect -f '{{range .Mounts}}{{.Source}}>{{.Destination}}{{"\n"}}{{end}}' "$cid" 2>/dev/null || true)"
+        while IFS= read -r m; do
+            [ -n "$m" ] || continue
+            src="${m%%>*}"
+            dest="${m##*>}"
+            case "$dest" in
+                */certs) : ;;
+                *) continue ;;
+            esac
+            src_real="$(cd "$src" 2>/dev/null && pwd -P || true)"
+            if [ "$src_real" != "$cert_host" ]; then
+                echo "ASSERT FAILED $svc: certificates mounted from '$src_real', not '$cert_host'" >&2
+                echo "  (a relative mount that resolved elsewhere is how #794 lost them)" >&2
+                failed=1
+                continue
+            fi
+            svc_ok=1
+            for f in fullchain.pem privkey.pem; do
+                want_sum="$(sha256sum "$cert_dir/$f" | cut -d' ' -f1)"
+                got_sum="$(docker exec "$cid" sha256sum "$dest/$f" 2>/dev/null | cut -d' ' -f1 || true)"
+                if [ -z "$got_sum" ]; then
+                    # Covers both "missing/empty inside" and "cannot be read at
+                    # all", which is what a crash-looping container looks like.
+                    echo "ASSERT FAILED $svc: cannot read $dest/$f inside the container" >&2
+                    failed=1
+                    svc_ok=0
+                elif [ "$got_sum" != "$want_sum" ]; then
+                    echo "ASSERT FAILED $svc: $dest/$f differs from $cert_dir/$f" >&2
+                    echo "  container: $got_sum" >&2
+                    echo "  host     : $want_sum" >&2
+                    failed=1
+                    svc_ok=0
+                fi
+            done
+            if [ "$svc_ok" = 1 ]; then
+                echo "verified $svc: certificates present inside the container"
+            fi
+        done <<EOF
+$cert_mounts
+EOF
+    done
+else
+    echo "note: $cert_dir has no certificates — nothing here checked that the stack" \
+        "can terminate TLS" >&2
+fi
+
+# ---- 6. a swapped backend invalidates the portal's resolved upstream ---------
 # nginx resolves the upstream names once, at start: after a backend container is
 # replaced its address changes and every /api call answers 502 until nginx is
 # restarted. Cheap here, expensive to rediscover.
@@ -235,7 +312,7 @@ norm_env_value() {
               -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/"
 }
 
-# ---- 6. assert the container received the .env's values ------------------------
+# ---- 7. assert the container received the .env's values ------------------------
 # The image assertions cannot see this either, and it is how #794 shipped a stack
 # whose origin allowlist had silently fallen back to the compose default. Comparing
 # the container against `compose config` would prove nothing (both read the same
@@ -319,7 +396,7 @@ smoke_curl() {
     curl "$@" "$SMOKE_URL" 2>/dev/null || true
 }
 
-# ---- 6. smoke: can a real client actually use it? ----------------------------
+# ---- 8. smoke: can a real client actually use it? ----------------------------
 # Sections 4 and 5 prove the right image is running. They say nothing about
 # whether it is *correct*: a container can be healthy, on exactly the right image,
 # and still reject its own origin with 403 because its .env was never loaded and
@@ -390,7 +467,7 @@ else
     fi
 fi
 
-# ---- 6. leave a durable trace ------------------------------------------------
+# ---- 9. leave a durable trace ------------------------------------------------
 # By the time anyone asks "what was live at 11:39", the container's image may be
 # gone from `docker image ls` — a concurrent rebuild untags it and a prune can
 # remove it. So this line, written while the answer is still knowable, is the only
