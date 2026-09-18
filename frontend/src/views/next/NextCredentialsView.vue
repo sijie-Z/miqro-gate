@@ -438,9 +438,9 @@ onMounted(load);
           />
           <UiInput
             v-model="createSecret"
-            label="Secret"
+            label="API 密钥"
             required
-            hint="8–512 个字符；不能包含控制字符。"
+            hint="从供应商控制台复制（如 DeepSeek 的 sk-…）；加密保存、不回显明文。8–512 个字符，不能包含控制字符。"
             :type="showCreateSecret ? 'text' : 'password'"
             placeholder="供应商 API 密钥（录入后仅显示一次）"
             data-testid="credential-create-secret"
@@ -612,7 +612,7 @@ onMounted(load);
                   @select="openValidate(row as CredentialView)"
                 >
                   <DropdownMenuItemIndicator class="next-credentials__menu-ind" />
-                  <span data-testid="credential-validate">测试 Secret</span>
+                  <span data-testid="credential-validate">测试密钥</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   class="ui-menu__item next-credentials__menu-item"
@@ -648,7 +648,7 @@ onMounted(load);
     <!-- Validate dialog -->
     <UiDialog
       :open="validateTarget !== null"
-      title="测试 Secret"
+      title="测试密钥"
       :description="
         validateTarget
           ? `测试候选密钥是否与「${validateTarget.name}」当前生效版本一致。纯校验，不写入任何数据。`
@@ -661,7 +661,7 @@ onMounted(load);
         <UiInput
           v-model="candidateSecret"
           :type="showCandidateSecret ? 'text' : 'password'"
-          placeholder="输入待测试的 Secret"
+          placeholder="粘贴要测试的密钥"
           data-testid="credential-validate-secret"
         >
           <template #suffix>
@@ -770,7 +770,7 @@ onMounted(load);
         <UiInput
           v-model="rotateSecret"
           :type="showRotateSecret ? 'text' : 'password'"
-          placeholder="输入新的 Secret"
+          placeholder="粘贴新的密钥"
           data-testid="credential-rotate-secret"
         >
           <template #suffix>
