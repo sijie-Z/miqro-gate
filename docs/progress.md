@@ -3749,4 +3749,6 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **独立复核与修正（第二、三轮）**：第一轮修订后复核结论为 APPROVE，同时提出 3 项**非阻断**项（N1–N3），已全部采纳：① `0023` 里项目级粒度的绑定行坐标由 `JdbcRouteSnapshotLoader.java:157,164` 改为 `JdbcRouteSnapshotLoader.loadBindings()` 的 `:171-194`（该方法直接查 `key_project_binding`，先前坐标落在 Key 装载段）；② `0024` 未决项 6 的括注补齐错误体的全部消费点（`ProxyController.java:566`、`:578`、`:850`，均不按内容分类）；③ 本条目的提交登记补齐第二笔起的 sha（见下）。
 
 **提交**：`73f9efe5`（ADR-0023）、`1a694784`（ADR-0024）、`24679cc4`（`docs/decisions/README.md` 索引与本节）、`f49027dc`（`docs/progress.md` 行尾恢复）、`215943af`（依第一轮复核修正两份 ADR 的失效断言与引用坐标）、以及本次提交（依第二、三轮复核修正 N1–N3；sha 见 `git log --oneline`）。
+**交付回读**：分支 `docs/adr-request-side-transforms-769-770` 已推送，远端 sha = 本地 HEAD；PR https://github.com/sijie-Z/miqro-gate/pull/782 （base `develop`，状态 OPEN，diff 仅 4 个文档文件、纯新增无删除）；issue 评论 https://github.com/sijie-Z/miqro-gate/issues/769#issuecomment-5724478199 与 https://github.com/sijie-Z/miqro-gate/issues/770#issuecomment-5724478426 ；两个 issue 均保持 **OPEN**，PR 正文不写 `Closes`。
+
 **行尾修正**：本条目追加过程中曾多次把文件内 122 处既有 LF 行尾归一化为 CRLF、产生纯空白 diff；每次均已按 `origin/develop` 原始字节恢复（对 merge-base 的 `git diff --numstat` 为纯新增），现有内容为净新增。
