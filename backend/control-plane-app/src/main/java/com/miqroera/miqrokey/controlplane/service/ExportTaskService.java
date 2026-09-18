@@ -333,13 +333,45 @@ public class ExportTaskService {
         return out.toByteArray();
     }
 
+    /**
+     * One CSV cell. RFC 4180 quoting plus the #430 spreadsheet formula-injection
+     * guard — the same semantics as {@code AuditEventReadService.quote} and
+     * {@code ReconciliationService.quote}, because this export also ships
+     * provider-controlled text ({@code providerRequestId} comes straight from the
+     * upstream response) and gets opened in spreadsheets (#816).
+     *
+     * <p>
+     * Numbers stay numbers: a negative amount renders as {@code -12.34}, not
+     * {@code '-12.34} (which a spreadsheet would read as text and skip in SUM).
+     * Package-private for the unit test, like its two siblings.
+     * </p>
+     */
+    static String quote(Object value) {
+        if (value == null) {
+            return "";
+        }
+        String text = String.valueOf(value);
+        if (value instanceof Number) {
+            return text;
+        }
+        String guarded = text;
+        if (!guarded.isEmpty() && "=+-@\t\r".indexOf(guarded.charAt(0)) >= 0) {
+            guarded = "'" + guarded;
+        }
+        if (guarded.indexOf(',') < 0 && guarded.indexOf('"') < 0 && guarded.indexOf('\n') < 0
+                && guarded.indexOf('\r') < 0) {
+            return guarded;
+        }
+        return '"' + guarded.replace("\"", "\"\"") + '"';
+    }
+
     private static String join(Iterable<Object> values) {
         StringBuilder sb = new StringBuilder();
         for (Object v : values) {
             if (sb.length() > 0) {
                 sb.append(',');
             }
-            sb.append(v == null ? "" : String.valueOf(v).replace(",", "\\,"));
+            sb.append(quote(v));
         }
         return sb.toString();
     }
