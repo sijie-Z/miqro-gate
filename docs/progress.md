@@ -3813,3 +3813,12 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **修复**：Accept 改为 `application/json, text/event-stream`；**两条回归测试先证红**（Accept 双媒体类型断言 + 严格上游 406 夹具），修复后 `McpToolsListClientTest` 9/9 绿。
 
 **绕行（修复前已在演示站完成，数据面健康性佐证）**：手工登记（官方占位 `method=POST path="/"`）+ ENABLED 后，以消费者凭据经网关 `tools/call read_wiki_structure` → 200 返回真实内容，`mcp_access_log`：`FORWARDED | read_wiki_structure | ttfb 617ms`。
+## 2026-09-18 MCP tools/sync 修复之二：SSE 响应体解帧（#779 收口）
+
+**背景**：PR #781（Accept 兼发双媒体类型）上线后，对严格上游的失败**只前进了一步**——406 消失，但上游按规范合法改发 **SSE 帧**（`event: message` + `data: {...}`），同步客户端仍按裸 JSON 解析 → `502 TOOLS_SYNC_UPSTREAM_FAILED / Unrecognized token 'event'`。真机（演示站 deepwiki 服务）复现，错误逐字同型。
+
+**修复**：`McpToolsListClient` 判 `Content-Type: text/event-stream` 时按 SSE 规范取 `data:` 行（多行按换行拼接）再解析；无 data 载荷 fail-closed（"上游 SSE 响应中没有 data 载荷"）。
+
+**测试**：两条新用例**先证红**（SSE 解帧 / 无 data 拒绝），修复后 `McpToolsListClientTest` **11/11 绿**。
+
+**部署教训（本轮踩到）**：compose.prod.yaml 的 cp 服务带 `build:` 段（context=`..` 即演示树）且 compose 按**镜像引用名**判等——漏 `--no-build` 不会重建镜像，而**只 `up` 不 `--force-recreate` 也不会把容器换到新 tag 上**（容器镜像 ID ≠ tag 镜像 ID 时仍显示 Running）。规范动作：`docker build -t miqrokey-control-plane:local <release-tree>` → `compose up -d --no-build --force-recreate --no-deps control-plane` → `restart portal`。
