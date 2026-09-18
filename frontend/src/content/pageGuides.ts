@@ -62,7 +62,7 @@ export const CREDENTIALS_GUIDE: PageGuideContent = {
   steps: [
     {
       title: '录入凭证',
-      desc: '从供应商控制台获取 API Key 并录入；「测试 Secret」可先不落库做指纹比对验证。',
+      desc: '从供应商控制台获取 API Key 并录入；「测试密钥」可先不落库做指纹比对验证。',
     },
     {
       title: '被授权引用',

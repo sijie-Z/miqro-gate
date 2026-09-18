@@ -1135,7 +1135,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
     <UiDialog
       v-if="revealData"
       :open="revealOpen"
-      title="Secret 已生成，仅显示一次"
+      title="密钥已生成，仅显示一次"
       description="请立即复制并保存到 CC Switch；关闭后无法再次查看明文。"
       width="520px"
       :dismissible="false"
@@ -1194,7 +1194,7 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             />
           </svg>
         </span>
-        <span>我已保存该 Secret</span>
+        <span>我已保存该密钥</span>
       </label>
       <template #footer>
         <UiButton variant="secondary" data-testid="secret-copy" @click="copySecret">

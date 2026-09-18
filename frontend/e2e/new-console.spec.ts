@@ -736,7 +736,7 @@ test('admin credentials: kebab flows run validate, rotate and history', async ({
   await expect(page.getByTestId('credentials-table')).toBeVisible();
 
   await page.getByTestId('credential-actions-0190-0000-0000-00g2').click();
-  await page.getByRole('menuitem', { name: '测试 Secret' }).click();
+  await page.getByRole('menuitem', { name: '测试密钥' }).click();
   await page.getByTestId('credential-validate-secret').fill('sk-candidate');
   await page.getByTestId('credential-validate-run').click();
   await expect(page.getByTestId('credential-validate-result')).toContainText('与当前生效版本一致');
