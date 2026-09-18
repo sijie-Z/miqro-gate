@@ -3891,6 +3891,69 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **一处 UI 取舍**：只为 `PRESENT` 出 chip，`NONE` 走 `—`。给"没有修正"也挂个徽标等于几乎每行都有徽标，反而把真正要看的那行淹掉；而这张表本来就用 `—` 表示"无话可说"。
 
 **另记**：迁移号按纪律取「develop 树最高号（66）∪ open issue 登记号」之后的下一个 = **V67**；定号前也扫了 open PR 的正文。
+## 2026-09-18 适配器状态「持续警告」前端实现（#735 前端部分）——准入门控刻意不动
+
+**先复核现状**：`docs/provider-adapter-contract.md:120` 承诺「生产默认目录只启用 `VERIFIED` 产品；管理员可以显式启用 `IMPLEMENTED`，**页面必须持续警告**」。实现侧对得上「持续警告」的只有「徽标 + hover 提示」这一层：
+
+- `AdapterStatus` 的唯一生产使用点是 `CatalogManifestValidator.java:123` 的**解析**（`requireEnum(product, "status", …)`），解析完不做任何准入判断
+- `ImplementationStatus` 没有任何准入分支
+- `CatalogSeedService.java:101` 把种子一律写成 `'DOCUMENTED'`
+- 目录量化：`provider-catalog.json` 共 **23** 个产品，状态计数 `{"DOCUMENTED":23}`——**0 个 IMPLEMENTED、0 个 VERIFIED**
+
+**因此只实现承诺里可验证的那半句——「页面必须持续警告」，准入行为一个字不改。** 照字面实现「只启用 VERIFIED」会让当前 23 个产品全部不可用，属产品决策，只出决策材料（已发 #735 评论），不在本批动代码。
+
+**改动**（`frontend/src/views/next/NextProvidersView.vue`，另 `frontend/src/i18n/dict.ts` 补双语文案）：
+
+- 页级常驻警示条 `data-testid="adapter-warning-banner"`：只要有任一产品状态不是 `VERIFIED` 就一直在页上（hover 提示会被漏看）
+- 行级常驻标记 `data-testid="adapter-warning-row"`（`⚠ 未验证`）：刻意用纯 `<span>`，因为既有断言把 `.ui-tooltip__anchor` 钉成 2 个，再加 Tooltip 会破既有测试
+- 产品详情面（模型目录对话框）内重复一次 `data-testid="product-models-adapter-warning"`，带该状态的解释文案
+- 判据就是状态字段本身：`status !== 'VERIFIED'`，`VERIFIED` 不出任何警告；DRAFT/DOCUMENTED/IMPLEMENTED/DEGRADED/DISABLED 全覆盖
+- 文案进 EN 词典：4 条 DICT + 1 条 PATTERN（计数行被 Vue 合并成单个文本节点，只能走 PATTERN）
+
+**一处实现取舍**：仓库没有独立的「供应商详情页」，唯一的产品详情面是模型目录对话框，所以「详情页警示块」落在它顶部。
+
+**验证（先证明断言有区分力）**：把 `isUnverified` 打成两个变异体——`return false` 与 `return true`——各挂 3 条测试（`3 failed | 8 passed`），恢复后全绿，并用 grep 确认无变异体残留。之后：
+
+- `npm --prefix frontend run test -- --run` → **63 files / 390 tests passed**
+- `npm --prefix frontend run typecheck` → exit 0
+- `npm --prefix frontend run build` → exit 0（built in 23.96s）
+- `npx eslint <4 个改动文件>`（不带 `--fix`）→ 0 errors（1 条 prettier 警告落在既有 import 行，非本批引入）
+
+**一处 tooling 陷阱（本批实录）**：本仓 `npm run lint` 的脚本是 `eslint . --ext .vue,.ts,.tsx --fix`——**它会改写整个前端**。本次跑完 lint 后 `git status` 出现 148 个与本改动无关的文件（含 `types/generated.ts` 整体重排），已逐个 `git checkout --` 还原，只留 4 个改动文件；随后改用不带 `--fix` 的 `npx eslint` 复核。后续批次别把 `npm run lint` 当成只读检查。
+
+## 2026-09-18 评审响应对（#735 前端部分）——只收敛 minor，不动准入门控
+
+**评审结论**：0 blocker。准入红线被独立复核确认为「未触碰」：`git show --numstat bdc4b9e4` 5 文件、**0 删除行**；`grep -rn "\.status()" backend/provider-adapters/src/main backend/provider-spi/src/main` **0 命中**（目录里的 status 解析后从不被读取）；路由快照 SQL 无任何状态过滤。5 条 minor 的逐条处置：
+
+- **M2（`已停用` 无 EN 词条）→ 已修**：`frontend/src/i18n/dict.ts` 补 `'已停用': 'Disabled'`——六个状态标签里唯一缺词条的一条（独立词条；`规则已停用` 这类带前缀的串另有条目）。新详情弹窗警告块会把该标签渲染进英文界面，属本次新增的暴露面。
+- **M3（文案只覆盖「未验证/已降级」）→ 已修**：警示条第三行改为「未处于「已验证」状态的产品仍按当前配置可用（已停用的除外），但不应承载生产流量；本提示不改变产品的启用与可用行为。」，行内标记 `⚠ 未验证` → `⚠ 非已验证`。措辞与判据 `status !== 'VERIFIED'` 对齐，并顺带消掉 M1 的用户可见症状（警告不再指向一个不存在的「启用」开关）。
+- **M1（`docs/provider-adapter-contract.md:120` 仍承诺门控）→ 不改，转决策材料**：该句正是 #735 待 owner 拍板的争点，本批改文档等于替 owner 预设定论；M3 的改写已让页面不再宣称存在启用开关。拍板后按选定口径一并更新文档与种子状态。
+- **M4（banner 无 `role="status"` / `aria-live`）→ 不改**：同文件既有 `ui-alert--error`（400 行）同样没有，只给新 banner 加会让同类告警行为不一致；评审人也已自降为 nit。若要统一，应作为独立 a11y 批覆盖全部 `ui-alert`。
+- **M5（视觉基线 `admin-providers-1440x900.png` 陈旧）→ 本批不重生成**：基线是捕获式、无像素断言（`docs/progress.md` 有先例），重生成需起 Playwright + `preview` 并重建产物，不改变 CI 结论。已在 PR「Remaining risks」登记。
+
+**评审响应改动的验证（真实输出）**：
+
+- `npm --prefix frontend run typecheck` → exit 0
+- `npm --prefix frontend run test` → **63 files / 392 tests passed**（基线 390：新增 1 条 DISABLED 用例 + 更新既有断言）
+- `npx eslint . --ext .vue,.ts,.tsx`（在 `frontend/` 下、**不带 `--fix`**）→ **0 errors**；62337 warnings 全为工作区既有的 CRLF `Delete ␍`，非本批引入
+- `npm --prefix frontend run build` → exit 0（`✓ built in 24.02s`）
+
+**首跑失败与最小修复（如实记录）**：新加的 DISABLED 用例第一次跑是**失败**的——它在 `document.body` 里收集 `.ui-tooltip` 文本，拿到的是同文件早先用例遗留的「已用真实供应商凭证完成契约测试。」（tooltip 只在锚点聚焦后才挂载，且从不卸载）。修复只加两行：`await wrapper.find('.ui-tooltip__anchor').trigger('focus');` + `await flushPromises();`，断言口径不变；修后该文件 12/12 通过。
+## 2026-09-18 WorkBuddy MCP 层接入实测样章（#742 第③片收口）
+
+**交付**：`docs/workbuddy-mcp-onboarding-sample.md`——真实封闭客户端（WorkBuddy，腾讯 CodeBuddy 系）按指南 §4 接入网关 MCP 数据面的完整样章：拓扑、五步照抄（注册服务→消费者裁 `mcp:call`→`~/.workbuddy/mcp.json`（**无点号**；带点的是应用自管文件，写错不生效）→过信任门（`mcp_approvals` 键=sha256(url origin)::name）→同步并放行工具）；证据表；两条踩坑（自管配置陷阱；`HEALTH_PATH` 对 SPA 兜底页的假 HEALTHY——应选 `JSONRPC_INITIALIZE`）。
+
+**实测证据链**：应用日志 `[MCP-Connect] ok … tools=3`；`mcp_access_log` 6 行 `TOOL_UNAVAILABLE`（放行前，toolName 完整）+ `FORWARDED | read_wiki_structure | 617ms`（放行后）。**实测暴露真缺陷 #779**（`tools/sync` Accept 缺 `text/event-stream` → 严格上游 406）——修复 PR #781 已合并（先证红两条回归）。
+## 2026-09-18 MCP tools/sync 修复之二：SSE 响应体解帧（#779 收口）
+
+**背景**：PR #781（Accept 兼发双媒体类型）上线后，对严格上游的失败**只前进了一步**——406 消失，但上游按规范合法改发 **SSE 帧**（`event: message` + `data: {...}`），同步客户端仍按裸 JSON 解析 → `502 TOOLS_SYNC_UPSTREAM_FAILED / Unrecognized token 'event'`。真机（演示站 deepwiki 服务）复现，错误逐字同型。
+
+**修复**：`McpToolsListClient` 判 `Content-Type: text/event-stream` 时按 SSE 规范取 `data:` 行（多行按换行拼接）再解析；无 data 载荷 fail-closed（"上游 SSE 响应中没有 data 载荷"）。
+
+**测试**：两条新用例**先证红**（SSE 解帧 / 无 data 拒绝），修复后 `McpToolsListClientTest` **11/11 绿**。
+
+**部署教训（本轮踩到，含一次自我纠正）**：compose.prod.yaml 的 cp 服务带 `build:` 段（context=`..`=演示树 `/opt/miqrokey`，与真正构建用的 `/opt/miqrokey-dev` 不同）——漏 `--no-build` 有**用旧树产出镜像**的风险（触发条件：该 tag 本地无镜像时 `up` 才会构建）。本轮曾观测"容器镜像 ID ≠ tag 镜像 ID 但 compose 显示 Running"，最初归因为"compose 按镜像引用名判等"——**该归因已被直接观测否定**：同 tag 下 `up` 不加 `--force-recreate` 亦会 `Recreate/Recreated`，compose 按解析出的镜像 ID 判等；更可能的成因是**多会话并发构建同一 tag 的竞态**（本轮时间线：自建镜像 11:11:03 完成，容器 11:11:07 从另一镜像创建）。**落为收尾断言**：部署后必须核 `container.Image == tag.Id`（"Up N seconds + healthy"不算数）——它正是抓这类竞态的检查；**跨会话纪律：同一 tag 不并发构建、部署串行**。
+
 ## 2026-09-18 WorkBuddy MCP 层接入实测样章（#742 第③片收口）
 
 **交付**：`docs/workbuddy-mcp-onboarding-sample.md`——真实封闭客户端（WorkBuddy，腾讯 CodeBuddy 系）按指南 §4 接入网关 MCP 数据面的完整样章：拓扑、五步照抄（注册服务→消费者裁 `mcp:call`→`~/.workbuddy/mcp.json`（**无点号**；带点的是应用自管文件，写错不生效）→过信任门（`mcp_approvals` 键=sha256(url origin)::name）→同步并放行工具）；证据表；两条踩坑（自管配置陷阱；`HEALTH_PATH` 对 SPA 兜底页的假 HEALTHY——应选 `JSONRPC_INITIALIZE`）。
@@ -3950,3 +4013,317 @@ private static BigDecimal weighted(long tokens, long hits, BigDecimal unitPrice)
 - 前端 25/25（含 4 条新增）＋ typecheck；OpenAPI/前端类型差异仅 `unpricedHitEvents`
 
 **教训（与本会话其他几次同族）**：我凭**金额量级**判定一件事"不值得做"，而判据应该是**缺陷的类别**；一次五分钟的实测就把它推翻了。与"自验只覆盖自己以为的范围"是同一种盲区——只是这次盲在**优先级**上，而不是盲在正确性上。
+
+## 2026-09-18 部署序列化与归因——单入口脚本（#793）
+
+**起因**：演示栈由多条会话共用，而部署是各写各的命令。两天里两次同类事故：① 10:5x 两次构建交错，**事后再怎么查都无法从机器状态回答"当时跑的是哪一份"**；② 中午 `--no-build --force-recreate` 双保险之下，容器镜像 ID 仍不等于 tag 的 ID，且容器那张镜像在本地列表里已不存在。
+
+**②一度被读成"至少还有第三条会话在动部署"——该结论被推翻**：容器跑的**就是该会话自建的镜像**（它自己的构建日志为证），tag 是被另一个**并发构建**改指的。所以问题不是"多了谁"，而是**并发构建无人拦** + **"谁上的线"没有持久记录**（等有人问起，镜像可能已经不在了）。
+
+**交付**：`deploy/deploy.sh` —— 单入口，一次做三件事：
+
+1. **`flock` 序列化**（构建与 `up` 都在锁内）：交错真正伤人的地方是**构建**，不是 `up`
+2. **收尾断言"正在跑的就是刚构建的"**：逐个比 `docker inspect <容器>.Image` 与 `docker image inspect <tag>.Id`。`Up N seconds (healthy)` **不是证据**——容器没换过去时机器显示的状态一模一样
+3. **每次追加一行 `deploy.log`**：时间/模式/提交/调用方/**运行中的镜像 ID 与当时的 tag ID**
+
+三条既有教训也编进流程：`up` 带 `--no-build`（compose 的 cp 服务 `build:` 段 context 指向**线上树**）、后端容器换掉后自动 `restart portal`（nginx upstream 启动时解析）、**显式钉住 compose 项目名**。
+
+### 干跑抓出我自己三个 bug
+
+写完先跑 `--dry-run`，立刻暴露三处：
+
+1. **干跑声称了它没做过的验证**——断言步没被 `--dry-run` 罩住，真跑了 `docker inspect` 并对我本机镜像打印 "verified"。**干跑最不能做的就是断言它没验证过的东西。**
+2. **硬编码容器名 `miqrokey-<svc>-1`**——隐含假设 compose 项目名=miqrokey。改成向 compose 问（`compose ps -q`）。
+3. **最要紧**：**compose 的项目名取决于调用时的目录**（服务器上靠 `cd /opt/miqrokey` 才得到 `miqrokey-*` 容器名）。换个目录跑，脚本会**另起一套容器**而不是更新线上那套。已 `-p` 钉住。
+
+### 真跑一遍，并证明断言会红
+
+用一次性夹具（**独立 tag 与独立项目名——避免覆盖本机既有的 `miqrokey-*:local`，那是别的会话的本地栈**）：构建→换容器→断言→restart portal→写流水，exit 0。
+
+再**故意把 tag 指向另一张镜像**，跑 `--verify-only`：
+
+```
+ASSERT FAILED control-plane: running image 'sha256:97ff…' != tag image 'sha256:974b…'
+verified portal: sha256:ff21…            ← 未动的服务仍通过
+EXIT=2
+```
+
+顺带加了 `--verify-only`：**部署线明确说要"部署前后各查一次"，而一个不能单独跑的检查不会被跑**。流水里两个身份都记，是为了事后能分辨"tag 被人重建了"与"当初就没换过去"。
+
+**分工**：脚本+文档进仓库（可评审），**装到服务器由部署线负责**。锁选**机器层**而不是"打卡制"——打卡依赖自觉，而我们已经知道至少有一个动作方不打招呼，荣誉制只会让守规矩的人排队。
+
+## 2026-09-18 计价状态在控制台不可见——汇总层的成本被当成总额（#801）
+
+**发现方式**：修完 #790（节省侧的下界标记）后我想确认自己有没有踩到消费方，于是查了 `pricingStatus` 与 `unpriced` 的**消费方**。结果是：
+
+```
+frontend/src 中除 generated.ts 外，对 pricingStatus 的引用：0 处
+frontend/src 中除 generated.ts 外，对 unpriced 的引用：仅 #790 新增的 unpricedHits
+```
+
+也就是说 **#766 建立的 B+ 状态在控制台一处都没渲染**。控制台里唯一的「未定价」在**记录行**级（由 `row.priced` 驱动）；**分组/汇总级**——那个被当作**总额**展示的成本——没有任何标注。
+
+而 `usage-accounting` §6 早就写下了对外承诺：**`pricingStatus != COMPLETE` 时已知金额不是总额**。演示站当前就是这个状态（汇总 `PARTIAL`、`unpricedEvents=617`、`unavailableEvents=565`）：页面上那个 ¥89.9 明确不是总额，而没有任何东西说明这一点。
+
+**这与 #790 是同一类，而且更重**——成本是主要财务数字，节省是次要的。我一个小时前刚在节省侧修过同一件事，成本侧却还开着。
+
+### 实现
+
+- 新增 `frontend/src/lib/usage-pricing.ts` 的 `costGapNote()`：只为**明确知道**的缺口出声——`PARTIAL` / `UNAVAILABLE` 给文案，其余（含字段缺失）一律返回 null。**给不确定的情形加标注，等于给没有问题的数字也挂上警告。**
+- 三个视图各加一个「未定价」标记 + 气泡：管理端用量概览（总成本）、自助用量页（合计行）、成本页（两张成本卡）。**`COMPLETE` 时不加任何标记**，与 #790 同一取舍。
+- 记录行级的 `priced` 标注本就有，本次补的是**它上面那一层**。
+
+### 顺带查出一处**我自己留下的过期文案**
+
+成本页「上游已付成本」的提示写着"**按最新单价**估算"——而读侧从 #766 起就改成"**事件发生时**的冻结价"了。即我在后端改了口径，界面上那句话没跟着改。已改为「按事件发生时的价目估算」。**这类漂移不报错、只是静静地说错话**，和本会话反复遇到的"存了但没人看"是同一个家族。
+
+### 验证
+
+- **先证明会红**：把 `costGapNote` 改成恒返回 null → **恰好 5 条失败**（3 个视图 + 2 个 lib 文案断言），其余 42 条（含三条"`COMPLETE` 时无标记"）照常通过
+- 前端 47/47（相关 4 个 spec）+ typecheck；全套与 build 结果见 PR
+
+### 一条贯穿今天三次改动的观察
+
+`#766`（成本状态）、`#790`（节省下界）、`#801`（界面呈现）是**同一个缺口的三次显形**：**API 暴露了的事，界面不显示就等于没交付**。前两次我都是先在后端把事实建好，然后（这次才）发现控制台看不到。往后凡是"把某个事实提升为一等公民"的改动，**验收标准里应该直接写出界面上的形态**，否则很容易停在 API 层就以为完成了。
+
+## 2026-09-18 我写的部署脚本在演示站引入了一次真回归——并把"verified"这个词管住（#802）
+
+**症状**（部署线报的）：脚本部署后，演示站自己 origin 的登录全 403 `ORIGIN_REJECTED`，cp 日志 `Origin not in allowlist: https://124.220.165.175`。
+
+**根因是我**：#793 里我把 compose 的 `--project-directory` 钉到 `$LIVE_DIR`（`/opt/miqrokey`），而 **compose 从*项目目录*读 `.env`**，演示站的 `.env` 实际在 **`/opt/miqrokey/deploy/.env`**。目录错位 → `.env` 没被加载 → `${MIQROKEY_ORIGIN_ALLOWLIST:-https://miqrokey.example.com}` 回落默认值 → 登录被拦。**丢的不止 ORIGIN 一个变量**，`.env` 里那一组全没了。
+
+**两条会话同时中招**，相隔 13 秒（流水正好记下：`05:11:39` 与 `05:11:54`）。**"流水"上线第一天就派上用场**——没有那两行，这事又要归因半天。
+
+### 修法
+
+1. `--project-directory` 改为 **compose 文件所在目录**（`$LIVE_DIR/deploy`）✓
+2. `.env` 改为 **显式 `--env-file`** 指定，且**缺失即失败**（`1`）——留一个"没找到就静默回落默认值"的口子，等于把这次的故障留在原处
+3. **加一步功能冒烟**：`--smoke-url` / `--smoke-origin` / `--smoke-expect`（默认 `2??`，可给 `case` 模式），状态码不符即 `2`
+
+### 更要紧的是第三条背后的那句话（部署线提的，我认）
+
+> "verified" 只证**镜像身份**。这次它把配置全丢的容器标了 `deployed and verified`——**`Up healthy` 不是证据，`镜像ID相等` 也只是"发的是刚构建的"，不是"发对了"。**
+
+即：我写的断言覆盖的是**我想到的那个失败模式**（没换过去），而回归来自**另一个**（换过去了、配置没跟上）。这是本会话反复出现的同一件事——**自验只覆盖自己以为的范围**——这次发生在**验证工具本身**里。
+
+所以除了冒烟，还改了两处**措辞**：不传 `--smoke-url` 时脚本**明说"什么都没查"**，收尾语从 `deployed and verified` 改成 `deployed; image identity verified`。**"verified" 这个词曾经盖过了它实际没查的东西——一个会过度声称的通过语，比没有通过语更危险。**
+
+### 本机回归测试（先证明会红）
+
+用带 `.env` 的夹具，探针变量在 compose 里配 `"${PROBE_VAR:-fellback}"`、在 `.env` 里给 `from-env`：
+
+| 用例 | 结果 |
+|---|---|
+| 修好的脚本 + 有 `.env` | exit **0**、容器 `PROBE=from-env`、`smoke ok -> 200` |
+| 冒烟打到 403 | exit **2** + `SMOKE FAILED: … -> 403 (expected 2??)` |
+| **旧调用（复现 bug）** | 容器 `PROBE=fellback`，**而脚本 exit 0** |
+
+第三行正是那次事故的形状：**它高高兴兴报成功，同时发的是配置全丢的容器**。流水现在也带上 `env_file=` 与 `smoke=<code>/<url>`。
+
+### 两条我自己的操作教训
+
+- **我又违反了本会话自己记过的规矩**：补丁写成内联 heredoc → 续行符被吃掉（`sh -n` 查不出来，因为合成长行仍合法）。**补丁一律写成 `D:/tmp/*.py` 文件**——这条记忆是我自己写的，写的时候还热着
+- 测试脚本里用了 MSYS 风格的 `/d/tmp/...` 给 **Windows python** 用 → 夹具被写到 `D:\d\tmp\...`。python 侧一律用 `D:/tmp/...`（MSYS 两种都认，Windows python 只认后者）
+
+## 2026-09-18 回声断言比 compose 更严——真机第一次跑就假阳性（#807）
+
+**触发**：部署线第一次 `--verify-only` 就报出来（我正是请它"有误报直接说"）：
+
+```
+ASSERT FAILED control-plane: MIQROKEY_REGISTRATION_ENABLED='false' but …/.env says 'false'
+ASSERT FAILED control-plane: MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES='172.28.0.0/24' but …/.env says '172.28.0.0/24'
+```
+
+**报错里两边一模一样**——不查字节看不出差异。
+
+**根因**：演示站 `.env` 是**混合行尾**（`file` 实测 CRLF+LF），那两行以 CRLF 结尾。我用 `cut -d= -f2-` 取的是**文件原始字节**，拿到 `false\r`；容器里是 compose 解析后的 `false`。**compose 的 dotenv 容忍 CR、trim 空白、剥一层引号，而我的断言不容。**
+
+### 这是同一个错误的另一半
+
+在**同一个 PR** 里我先犯了一次"过度声称"（`deployed and verified` 盖过了它没查的东西），紧接着又犯了一次"过度严格"（把文件行尾报告成部署故障）。**一个检查必须与它检查的系统校准**：松了会把问题放过去（那次），紧了会一直误报——**而误报的检查最终会被所有人无视，等于没有检查**。这次它报的是"文件的行尾是否干净"，不是"部署对不对"。
+
+### 修法
+
+1. **判前按 compose 的 dotenv 语义归一化**（CR、首尾空白、一层引号）——"文件脏但部署对"是正常形态，不是故障
+2. **报错要能自证差异**：先给两侧的长度；长度相同时**打印字节转储**（`od -c`），让"看起来一样"的差异自己说清楚
+
+### 验证（先证明会红）
+
+同一夹具（一行 CRLF、一行 LF 的 `.env`）跑三次：
+
+| 用例 | 结果 |
+|---|---|
+| **修复前的脚本（develop）+ `--verify-only`** | exit **2** + 复现那条假阳性 |
+| 修复后 + `--verify-only` | exit **0**（CR 被容忍） |
+| 长度相同但字节不同 | exit **2** + `container: 'false' (len 5)` / `env file : 'FALSE' (len 5)` + 字节转储 |
+
+**这条我本机不可能发现**：我的夹具一直是 LF，只有它**真的在真机上跑**才暴露。与今天其余几次同源——**自验只覆盖自己造的场景**。
+
+另：部署线现场处置得当（先备份 `.env.bak-<UTC>` 再归一化，语义不变——compose 本就容忍 CR），随后 `--verify-only` 全绿、默认冒烟 200、收尾语如实。
+
+## 2026-09-18 功能冒烟：设计要覆盖的那一层是空的（#809）
+
+部署线按四条路径实测后报出三处缺陷。我**逐条在代码里复核确认**，不是只采信结论。
+
+### ① `case` 里展开出来的 `|` 是字面字符
+
+```sh
+case "$smoke_code" in ${SMOKE_EXPECT})   # SMOKE_EXPECT='200|405'
+```
+
+选择支的 `|` **只在源码里**才是语法；经展开到达的只是一个普通字符。所以文档里的示例 `'200|401'` **永远匹配不上**。本机 `sh` 实测：405 在 `'200|405'` 下不匹配；`grep -E` 才匹配。
+
+**那行还挂着 `# shellcheck disable=SC2254`**——为消一个告警而写的 disable，遮住的正是这一类的真 bug。
+
+修法：自己按 `|` 拆开逐个匹配，**保住 `2??` 的 glob 语义**——所以不能用 `grep -E`：那里 `?` 是量词，`2??` 会退化成"匹配 `2`"。
+
+### ② 默认目标在结构上测不到 origin 层
+
+默认目标是 `${origin}/`，即**门户根的裸 GET**。而
+
+```java
+if (!STATE_CHANGING_METHODS.contains(method)) return true;   // GET 直接放行
+```
+
+**GET 在设计上就不经过 origin 检查**；又由于 `OriginInterceptor` 是 `HandlerInterceptor`（在 handler mapping 之后），GET 打到只收 POST 的路由会被 mapping 先回 405，检查根本跑不到。实测：错 origin 打 `GET $origin/` 也是 **200**。
+
+**红证明**（桩：登录端点对**正确** origin 也回 403，`/` 回 200）：
+
+| 用例 | 修复前 | 修复后 |
+|---|---|---|
+| 坏 origin 检查 + 默认目标 | **exit 0（假阴性）** | **exit 2** |
+| 健康栈 + 默认目标 | — | exit 0，`POST .../auth/login -> 400` |
+| `'200|405'` 打 405 路由 | exit 2（缺陷①） | exit 0 |
+| 运维给的 `--smoke-url` | — | 仍发 GET（不新增严格性假阳性） |
+| 目标不可达（000） | — | WARNING + exit 0 |
+
+修法：默认目标改 `POST <origin>/api/v1/auth/login` + `{}` + `'2??|400|401'`。选它的理由：**正是 #794 打坏的端点**（登录全 403）、**CSRF 豁免**（否则"少 CSRF 的 403"与"错 origin 的 403"不可区分）、空体校验回 400——**400 证明请求到达了处理器，即 origin 被接受**。403 判死。
+
+### 教训：注释声称的性质，恰恰是代码结构上不成立的那个
+
+那段注释原本写着默认目标 "exercises *config* rather than liveness"。这已是同一形态的第三次：
+
+- **断言"存在"≠断言"正确"**（#754 表头错位近一年没被发现）
+- **检查比被测系统更严**（#807 把文件行尾报成部署故障）
+- **检查比被测系统更松，且松在它自称覆盖的那一层**（本次）
+
+**补一句准确性**：#794 那次回归本身**会**被同一 PR 的环境变量回声断言抓到（#807 修的就是它），所以不能说"会放过事故"。问题是**功能网在它自称覆盖的那一层是空的**，而那个"自称"写在注释和文档里——**一个没牙的检查比没有检查更坏，因为它会被当成有牙的**。
+
+另：`--smoke-expect` 的文档原本说"可给 `case` 模式"，那句既是错的（不匹配）又已过时（实现自己拆），一并改正。
+
+## 2026-09-18 证书没进容器 = 「部署成功」：#794 的第二层补上断言（#812）
+
+部署线两次提出的既有残余（#805 评论第二次）。第一次我以「#804 的 `assert_mount_landed` 是撞车 PR 的独有增量、不折入 #806」为由**有意留出**——理由是尊重撞车处理的边界。**那个理由现在不成立了**：#804 已关闭，而这一层现场真的发生过。**留一个已知的、有事故先例的洞，比折入一条断言糟得多。**
+
+### 为什么三层现成检查都看不见它
+
+#794 的第二层不是 `.env`：相对挂载 `./secrets/certs` 锚到了错误的项目目录 → Docker 在错误路径**现建一个空目录** → nginx 证书缺失 → **崩溃重启循环**。而 `up` 零报错。
+
+| 检查 | 为什么看不见 |
+|---|---|
+| 镜像身份（§4） | 镜像是**对的**——坏的是挂载 |
+| 环境变量回声（§7） | 证书**不是环境变量**，不在比对集合里 |
+| 功能冒烟（§8） | portal 崩溃 → 冒烟拿到 `000` → 按设计**只判 WARNING**（"够不到"是天气） |
+
+**唯一的症状恰好落在脚本有意不判死的那一类里**，于是收尾语替它宣称了安全。
+
+### 修法与红证明
+
+新增 §5：宿主有证书 ⇒ 容器必须看得见**同样的字节**（sha256 对比），且挂载源解析后必须等于宿主 certs 目录（`pwd -P` 两侧归一化，软链也对）。容器内路径从 `docker inspect .Mounts` 读，不硬编码。
+
+| 用例 | 修复前 | 修复后 |
+|---|---|---|
+| 挂载锚到别处（`./elsewhere/certs`，Docker 现建空目录） | **exit 0（静默接受）** | **exit 2**，报出两侧路径 |
+| 挂载正确 | — | exit 0，`certificates present inside the container` |
+| **portal 崩溃循环**（`restarting=true`） | — | **exit 2**（镜像身份**通过**，是本条断言抓到的） |
+| 宿主无证书 | — | 提示，不判死 |
+| portal 已停 | — | exit 2（但**是 §4 抓的**：运行镜像为空——本条断言并非唯一防线，如实记下） |
+
+崩溃循环那一行是关键：**只有这条断言能看见它**。
+
+### 顺带修掉一个我自己的假阳性
+
+第一次跑，**挂载正确**的用例也报了 `cannot read … inside the container`。真因是 **MSYS 路径改写**：Git Bash 会把看起来像绝对路径的参数改写成 `C:\...` 再交给 docker，于是容器内路径 `/etc/nginx/certs/fullchain.pem` 变成了宿主路径。拿 `MSYS_NO_PATHCONV=1` 对照后哈希逐字相同——**脚本在 Linux 上本来就是对的，是我的测试环境在撒谎**。
+
+仍加了 2 行守卫（`MSYS_NO_PATHCONV=1; export`）并在注释里写明理由：Linux 上是空操作，而 Windows 开发机上省下的是一次**恰好属于本脚本要消灭的那一类**的假报警。**又一次是同族**：不是检查写错，是检查与它所运行的环境没对齐。
+
+另：顺手把三个都编号为「6」的小节改成 5–9（本就在我要插入的位置）。
+
+## 2026-09-18 部署脚本补上静态检查：shellcheck 进 CI（#814）
+
+仓库 17 个 shell 脚本，`deploy/deploy.sh` 是**单机部署的唯一入口**，却**完全没有 lint**——CI 里 `deploy/` 只受 `compose` job 的 `docker compose config` 覆盖，而那只看 compose 文件、不看脚本。
+
+### 为什么这条特别值
+
+#809 那条 `case "$smoke_code" in ${SMOKE_EXPECT})`——**经展开到达 case 的 `|` 是字面字符**，文档示例 `'200|401'` 因此永远匹配不上。**SC2254 讲的正是这一行**，而它原本就挂着：
+
+```sh
+# shellcheck disable=SC2254
+case "$smoke_code" in ${SMOKE_EXPECT})
+```
+
+**为消一个告警而写的 disable，遮住的恰是真 bug。** 而这条链的前提是**先有检查**——没有 shellcheck 的仓库里，这行连告警都不会有，bug 会一直安静地待着。
+
+同一文件同一天还犯了另外两处（#807 断言比 compose 更严、#812 的 MSYS 路径改写导致挂载正确也报缺失）：**部署脚本是本项目事故密度最高的一块，却也是唯一没有任何静态检查的一块。**
+
+### 现状几乎干净，所以没开豁免清单
+
+`koalaman/shellcheck:stable -S warning` 对全部 17 个脚本**只报 1 条**（`deploy/backup/test-restore.sh` 的未用循环变量），改成 `i`→`_` 即可；`deploy.sh` 在修掉我自己那行 dry-run 拼接（SC2140）之后 **exit 0**。**零豁免清单**——不给自己留"下次再说"的地方。
+
+### 红证明
+
+把 #809 那个形状（`case "$code" in ${PAT})`）放回一个脚本：
+
+```
+red.sh:7: SC2254 (warning): Quote expansions in case patterns to match literally…
+=== exit 1 ===
+```
+
+**但它给的修法是"加引号"，而这里加引号是错的方向**——`2??` 需要 glob 语义，加了引号就变成匹配字面 `2??`。**SC2254 的价值是把这一行拎出来让人看，不是照它说的改**；实际修法是拆开 `|`、各分支仍走 glob。**照抄 linter 的建议会把默认模式静默改松**——同一种"检查与主语没对齐"的陷阱，只是这次检查自己也会说错话。
+
+### 口径
+
+选 `-S warning` 而非默认：`info` 级会报 SC2016（单引号不展开）这类**有时是有意为之**的写法（我 dry-run 那行就是故意打印字面引号）。一上来全开只会逼出更多 disable——**而 disable 正是这次要治的东西**。先卡 warning，需要再收紧。
+
+job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
+## 2026-09-18 用量导出 CSV 转义收口（#816）——补上三写入器里唯一漏掉的公式防护
+
+**发现**（独立审计）：仓库三个 CSV 写入器中，审计导出（#430）与在建的对账导出（#798）都带 **RFC 4180 引号 + 公式注入前缀防护**，唯独**用量导出** `ExportTaskService.join()` 只做 `replace(",", "\,")`（非标准引号）。该导出的 `providerRequestId` **直接来自上游响应**（半可信来源），与 #798 注释里"provider-file text 需要防护"的判据完全同类；`clientIp`/`modelId` 亦为外部/管理输入。附带：引号与换行未处理（值内换行可劈断行、损坏列结构），且全树测试**未固化**任何旧转义行为。
+
+**修复**：`ExportTaskService` 新增包内可见 `quote(Object)`，语义与两个兄弟路径一致（RFC 4180 + `= + - @ TAB CR` 前缀 `'`；`Number` 原样输出——负数金额不被加上 `'`，与 #798 的数值豁免同理）。`join()` 改走 `quote()`。**不做**三份 `quote()` 的合并（#798 在飞，避免与其文件冲突；合并后可另行收口）。
+
+**先证红**：新增 `UsageExportCsvEscapeTest` 3 例（公式前缀/结构字符/数值与 null）；把 `quote()` 临时换回旧行为 → **2/3 红**（公式防护与结构引号），恢复后 **3/3 绿** + 兄弟 `AuditExportQuoteTest` 2/2 绿。
+
+## 2026-09-18 三条行为断言进 CI——这条链只「机器化了一半」的更正（#818）
+
+对方在收档时写「从事故到机器化防住最完整的一条」。**这个说法我核了，是错的**：`ShellCheck`（#814）机器守住的是**语法那一类**；**回声 / 冒烟 / 证书三条行为断言的 CI 覆盖是零**——它们的红证明全在 `D:/tmp` 的一次性脚本里，仓库里没有。
+
+**具体后果**：明天有人把冒烟默认目标改回 `GET $origin/`，shellcheck 全绿、部署照常、**而 #794 的那颗牙又没了**。语法没病不代表行为还对。已向对方更正，并把正确的收档写法给了它。
+
+### 做了什么
+
+`deploy/tests/deploy_script_regression.py`：**每个场景造一个「只有那一个缺陷」的栈**，再问脚本有没有发现它。**在健康栈上通过不算证据，要在坏栈上失败才算**——这是本链反复用到的那条纪律，这次用在了 harness 自己身上。
+
+12 项检查覆盖：CRLF 行尾不误报 / 同长度不同字节仍失败且能自证 / 坏 origin 必红 / 健康栈通过 / **派生目标确实是带 Origin 的 POST** / `'a|b'` 选择支生效 / 运维 URL 仍发 GET / 不可达只是 WARNING / 挂载锚错必红 / 正确挂载被验证 / 宿主无证书只提示。
+
+### 反向验证（这条是 harness 存在的前提）
+
+把三条修复分别改回去，harness **必须红**：
+
+| 变异 | 结果 |
+|---|---|
+| 冒烟默认目标改回门户根 GET | **10/12**，2 项失败 ✓ |
+| 去掉回声归一化 | **11/12**，1 项失败 ✓ |
+| 去掉证书断言 | **10/12**，2 项失败 ✓ |
+
+**只见过绿的闸门不是证据。**
+
+### 过程中修掉的三处
+
+1. **夹具基础镜像按 digest 写进 `FROM` 会让每次构建花 1m26s**（BuildKit 每次都回源解析 digest），本机标记只需 1.4s——十余次构建就是十几分钟加一个硬网络依赖，**正是我自己给这条闸门划的「先去风险再进 CI」红线**。改为 harness 里 pull 一次再打本地标签，pin 保留、回源消失。
+2. **`sha256sum <文件>` 的解析在路径含反斜杠时会错**：coreutils 会把整行转义（行首一个 `\`、分隔符翻倍），`cut -d' ' -f1` 取出的哈希就是错的。**这是我写的断言里的一处真脆弱性**，改成 `sha256sum < "$file"`（不给文件名）——顺带让 harness 在 Windows 上也能跑。
+3. 合并 `progress.md` 时我把**冲突标记提交了进去**：解析脚本对「新增块以 CRLF 开头」下的断言是错的（那个 CRLF 是本文件各条目之间本来就有的空行），脚本在写盘前中止，而我把命令里的分隔符从 `&&` 换成了 `;`，于是 `git add` 把**仍然冲突的文件**暂存了。已后续提交修正。**教训：解析脚本失败不能靠 `;` 继续往下走——失败要停。**
+
+### 顺带更正一个「缺口」判断
+
+对方提议把 `deploy/backup/test-*.sh` 从未被 workflow 引用一事单列为「文档承诺了测试但没接线」。**核了 `docs/operations-runbook.md`：它把这几个写成季度人工演练**（"每季度至少一次 `test-restore.sh`"），**没有承诺自动化**——所以那不是失约。真正的瑕疵只是措辞容易让人误读，已在 runbook 里补一句写明「人工演练、未接 CI，别把『已验证 PASS』读成『每次提交都跑』」。
