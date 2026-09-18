@@ -444,7 +444,7 @@ function formatCost(value?: string | number): string {
   if (value === undefined || value === null) return '—';
   const num = Number(value);
   if (Number.isNaN(num)) return String(value);
-  return `$${num.toFixed(4)}`;
+  return `¥${num.toFixed(4)}`;
 }
 
 function formatNumber(value?: number): string {
@@ -749,9 +749,9 @@ function formatTime(iso?: string): string {
             formatNumber(asRecord(row).cacheReadInputTokens)
           }}</template>
           <template #cost="{ row }">
-            <span v-if="asRecord(row).priced !== false" class="ui-num"
-              >¥{{ formatCost(asRecord(row).cost) }}</span
-            >
+            <span v-if="asRecord(row).priced !== false" class="ui-num">{{
+              formatCost(asRecord(row).cost)
+            }}</span>
             <span v-else class="next-usage__unpriced">未定价</span>
           </template>
           <template #latency="{ row }">
