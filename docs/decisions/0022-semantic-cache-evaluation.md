@@ -11,7 +11,7 @@
 
 | 出处 | `L1` | `L2` |
 |---|---|---|
-| 代码 | Caffeine 进程内缓存（`backend/gateway-app/.../proxy/CacheConfig.java:37-50`；`cache-spi/.../CaffeineCacheProvider.java:28`，maximumSize 1000） | **PostgreSQL `cache_entry` 精确缓存**（`cache-spi/.../PostgresCacheProvider.java:19-21`「Stores raw response bytes and replays them byte-identically」；`:69` 返回 `LookupLevel.L2_HIT`） |
+| 代码 | Caffeine 进程内缓存（`backend/cache-spi/.../cache/CacheConfig.java:37-50`；`cache-spi/.../CaffeineCacheProvider.java:28`，maximumSize 1000） | **PostgreSQL `cache_entry` 精确缓存**（`cache-spi/.../PostgresCacheProvider.java:19-21`「Stores raw response bytes and replays them byte-identically」；`:69` 返回 `LookupLevel.L2_HIT`） |
 | 文档 | ADR-0009:13 把 PostgreSQL 表记作「L1」 | `docs/configuration-reference.md:287`「语义缓存（L2 向量）不启用」 |
 
 - `X-MiQroKey-Cache` 响应头的 `L2` 取值 = **PostgreSQL 精确缓存命中**，不是语义命中（`ProxyController.java:696-711`：`L1_HIT -> "L1"`，其余 -> `"L2"`）。
@@ -22,7 +22,7 @@
 - **语义缓存无任何实现**：`backend/` 主源码中不存在 embedding 调用、向量库客户端或 ANN 索引（`grep -rniE "pgvector|embedding|vector store|faiss|milvus|qdrant" backend/*/src/main` 零命中；`semantic` 在 `*/src/main` 的命中除英文单词 semantics 的普通注释外，只剩下述语义 scope 键构造）。网关同时**不代理 embeddings 端点**：`/v1/embeddings` 返回 404 并有测试固化（`GatewaySecurityHardeningTest.java:188,223`）。语义缓存只以「接口预留」登记在 `docs/decisions/0009-enable-response-cache.md:13,38`、`docs/feature-backlog.md:99`（F41）、`docs/configuration-reference.md:287`。
 - **精确缓存已启用且默认关**：总开关 `miqrokey.cache.enabled` 默认 `false`（`backend/gateway-app/src/main/resources/application.yml:88-96`）；L1/L2 子开关默认 `true`、TTL 默认 300s。启用后仍须**双重 opt-in**：Key `cachePolicy=ENABLED` **且** 请求头 `X-MiQroKey-Cacheable: 1`，且无工具字段、body 非空（`CacheEligibility.java:24,29-33`）。工具调用永不缓存。
 - **缓存键已经含「语义」成分，且完全在网关内完成**：`CacheKeyFactory.compute()`（`:68-76`）对 chat 形态请求使用 `semanticScope(body)`（`:102-142`）——取 system 消息 + **最后一条 user 消息**拼接后参与 SHA-256；无 user 消息时回落到全 body 归一化哈希。键还含 tenant/project/keyId/product/model/purpose/stream 维度。这正是 `docs/ai-gateway-comparison.md:92` 记录的「我们语义键=末条 user 消息哈希」。
-- **正文当前不出网关**：缓存条目只存响应字节、按字节重放；「缓存内容不解读、不进日志与审计」（`docs/configuration-reference.md:287`、`docs/decisions/0009-enable-response-cache.md:23`）。响应在 SSE 场景下同样字节重放（`SseReplayEngine.java:22,50`）。
+- **正文当前不出网关**：缓存条目只存响应字节、按字节重放；「缓存内容不解读、不进日志与审计」（`docs/configuration-reference.md:287`、`docs/decisions/0009-enable-response-cache.md:23`）。响应在 SSE 场景下同样字节重放（`SseReplayEngine.java:12-17,51-52`：类注释「Replays a cached response byte-identically … including SSE streams, whose byte sequence must be preserved」，实现为 `writeWith(Flux.just(bufferFactory().wrap(cached.body())))`）。
 - **唯一既有的正文出网关通道是 ADR-0014 的合规留痕**：默认关闭、租户 opt-in、AES-256-GCM 密文信封、Kafka topic 上永无明文（`RetentionSidecar.java`、`KafkaRetentionPublisher.java`，实现与测试在库）。
 
 ### 1.3 核心矛盾
@@ -39,7 +39,7 @@
 
 - **本系统无实测数据，且现在也拿不到。** 精确缓存已有命中率观测（`cache_hit_event` 表 + 用量汇总 `savedByGatewayCache`，成本报表页展示），但那是**精确缓存**的收益；语义增量收益 = 「精确键未命中、但语义上等价」的请求占比，而这一部分**恰恰需要看到正文才能判定**——本系统不保存正文（`CLAUDE.md:39`），因此无法离线回放估算。这是本议题的鸡生蛋问题，必须如实记录，不能用行业数字代替。
 - 可用的**下界**（现有数据即可读出，零新增合规面）：`cache_hit_event` 的命中率 + `purpose=CHAT` 的重复率。但它只给出「精确缓存已覆盖多少」，不给出「语义还能多覆盖多少」。
-- 行业侧只有厂商标称，无独立验证：Higress 语义缓存宣称省 40-60%（转引见 `docs/ai-gateway-comparison.md:92`）；腾讯只提供 L1 精确缓存口径（`docs/tencent-ai-gateway-mapping.md:12,21`）。**这些数字不构成本系统收益的估计。**
+- 行业侧只有厂商标称，无独立验证：Higress 语义缓存宣称省 40-60%（转引见 `docs/ai-gateway-comparison.md:92`）；腾讯侧文档只有 L1 精确缓存口径（`docs/tencent-ai-gateway-mapping.md:21`「缓存策略 (134822)」行、`:68`「腾讯 L1 方案本土化」）。**这些数字不构成本系统收益的估计。**
 - 关键反证：本系统主要场景是编码 Agent（Claude Code / CC Switch 形态，`docs/tencent-ai-gateway-mapping.md:58`），上下文高度多变；ADR-0003 已记录「Coding Agent 流量缓存收益存疑」，G7.4 复盘同样标记该风险（`docs/progress.md:1314`）。这与 §5 的流式约束叠加，使预期收益进一步收窄。
 
 **结论**：收益当前**不可估**。任何要求「先证明收益」的拍板，都必须先选一条测量路径（见 §4 与 §10-3）。
