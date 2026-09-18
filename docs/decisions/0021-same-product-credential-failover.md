@@ -3,7 +3,7 @@
 - 日期：2026-09-18
 - 状态：**Proposed（待所有者拍板）**——本 ADR 只给出决策点、选项、代价与建议，**不含任何已实施的代码**。文中的「建议」「推荐」均为**待 owner 裁决的提案**，不是既成结论。本文件若被 owner 否决，记录的价值等同：issue #717 允许「不做」也是有效产出。
 - 效力（仅在被 Accepted 后生效）：将修订 [CLAUDE.md](../../CLAUDE.md) §2「不自动故障切换」与 [architecture.md](../architecture.md) 的「禁止跨供应商或跨真实凭证故障切换」。**修订范围严格限定为：同一供应商产品内、首字节前、凭证级的显式回退**。跨供应商/跨产品的自动路由与故障切换维持红线不变（feature-backlog F46 维持 DECLINED）。
-- 关联：issue [#717](https://github.com/14790897/miqro-gate/issues/717)（本 ADR 的提出）、issue [#704](https://github.com/14790897/miqro-gate/issues/704)（实现跟踪，**ADR 先行**）；[ADR-0002](0002-transparent-proxy.md)（透明代理——本议题不改写请求内容）；[ADR-0018](0018-single-key-multi-project.md)（key×project 多绑定，`grant_id` 的来源）；[ADR-0020](0020-quota-soft-landing.md)（opt-in + 默认关闭的取舍风格、配额判定集）；feature-backlog F46（跨供应商切换，DECLINED）/ F50（多服务绑定，ADR）；[ai-gateway-comparison](../ai-gateway-comparison.md) §「多 Key 均衡/Key 池轮询」；[operations-runbook](../operations-runbook.md) §5（供应商故障处置）；[bill-reconciliation-contract](../bill-reconciliation-contract.md)（F19 对账）；V1/V6/V8/V57（见 §1.3）、V9/V64/V66（见 §2-Q4、§2-Q2 与 §4）。
+- 关联：issue #717（本 ADR 的提出）、issue #704（实现跟踪，**ADR 先行**）；[ADR-0002](0002-transparent-proxy.md)（透明代理——本议题不改写请求内容）；[ADR-0018](0018-single-key-multi-project.md)（key×project 多绑定，`grant_id` 的来源）；[ADR-0020](0020-quota-soft-landing.md)（opt-in + 默认关闭的取舍风格、配额判定集）；feature-backlog F46（跨供应商切换，DECLINED）/ F50（多服务绑定，ADR）；[ai-gateway-comparison](../ai-gateway-comparison.md) §「多 Key 均衡/Key 池轮询」；[operations-runbook](../operations-runbook.md) §5（供应商故障处置）；[bill-reconciliation-contract](../bill-reconciliation-contract.md)（F19 对账）；V1/V6/V8/V57（见 §1.3）、V9/V64/V66（见 §2-Q4、§2-Q2 与 §4）。
 
 ---
 
