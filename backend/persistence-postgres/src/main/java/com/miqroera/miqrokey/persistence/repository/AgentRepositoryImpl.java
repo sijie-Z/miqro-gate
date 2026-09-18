@@ -65,6 +65,21 @@ public class AgentRepositoryImpl implements AgentRepository {
     }
 
     @Override
+    public Optional<Agent> findActiveByCredentialId(UUID tenantId, UUID credentialId) {
+        // uq_agents_tenant_credential bounds the result to one row regardless of
+        // status.
+        try {
+            return Optional.ofNullable(jdbc.queryForObject("""
+                    SELECT * FROM agents
+                    WHERE tenant_id = :tenantId AND upstream_credential_id = :credentialId AND status = 'ACTIVE'
+                    """, new MapSqlParameterSource("tenantId", tenantId).addValue("credentialId", credentialId),
+                    ROW_MAPPER));
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            return Optional.empty();
+        }
+    }
+
+    @Override
     public List<Agent> findAllByTenantId(UUID tenantId) {
         return jdbc.query("SELECT * FROM agents WHERE tenant_id = :tenantId ORDER BY created_at",
                 new MapSqlParameterSource("tenantId", tenantId), ROW_MAPPER);

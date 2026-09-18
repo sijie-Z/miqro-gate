@@ -61,3 +61,43 @@ describe('EN dictionary covers the #735 adapter-status warning copy', () => {
     );
   });
 });
+
+/** #714: a credential referenced by an ACTIVE agent answers 409 on rotate/disable.
+ *  Views render those errors as `${message}（requestId: …）` in a single text
+ *  node, so the dictionary has to cover the bare message and the toast wrapper. */
+describe('EN dictionary covers the #714 binding-immutability copy', () => {
+  const copies: Array<[string, string]> = [
+    [
+      '凭证已被 Agent「客服助手」引用，不能轮换；请先停用该 Agent。',
+      'The credential is referenced by agent "客服助手" and cannot be rotated — disable that agent first.',
+    ],
+    [
+      '凭证已被 Agent「客服助手」引用，不能停用；请先停用该 Agent。',
+      'The credential is referenced by agent "客服助手" and cannot be disabled — disable that agent first.',
+    ],
+  ];
+
+  it.each(copies)('%s → %s', (zh, en) => {
+    expect(translateText(zh)).toBe(en);
+  });
+
+  it('keeps the interpolated requestId when the toast is one text node', () => {
+    // What NextCredentialsView.vue:336 actually renders on a failed disable.
+    expect(
+      translateText('凭证已被 Agent「客服助手」引用，不能停用；请先停用该 Agent。（requestId: 5d1c0a）'),
+    ).toBe(
+      'The credential is referenced by agent "客服助手" and cannot be disabled — disable that agent first.（requestId: 5d1c0a）',
+    );
+    // requestId absent → the view falls back to "-".
+    expect(
+      translateText('凭证已被 Agent「客服助手」引用，不能轮换；请先停用该 Agent。（requestId: -）'),
+    ).toBe(
+      'The credential is referenced by agent "客服助手" and cannot be rotated — disable that agent first.（requestId: -）',
+    );
+  });
+
+  it('leaves an uncovered message with a requestId suffix untranslated', () => {
+    // Half-translated error copy would be worse than falling back to Chinese.
+    expect(translateText('凭证已被别的什么引用（requestId: 5d1c0a）')).toBeNull();
+  });
+});
