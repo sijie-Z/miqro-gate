@@ -31,6 +31,7 @@
 | `database-schema.md` | 物理表、约束、索引和迁移 | 数据库变化 |
 | `api-contract.md` | 管理 API 与推理入口契约 | API 变化 |
 | `proxy-and-cc-switch.md` | 透明代理、协议和 CC Switch 边界 | 数据面行为变化 |
+| `user-guide/` | **面向使用者的手册**（README 索引 · quickstart 快速上手 · user-guide 普通用户 · admin-guide 管理员 · developer-guide 开发接入 · faq 症状速查）；控制台用户菜单「使用手册」直达 README | 控制台功能/操作路径/接入方式变化时同步（与规格文档分工：规格讲「是什么」，手册讲「怎么用」） |
 | `client-onboarding.md` | 客户端与存量系统接入指南（#742）：三类接入姿势矩阵、可复制示例、MCP 层接入、接入器（参考实现，`scripts/onboarding/`）、明确不做的边界 | 接入方式/边界变化 |
 | `workbuddy-mcp-onboarding-sample.md` | 样章：封闭客户端（WorkBuddy）MCP 层接入实测（#742 第③片）——拓扑、照抄步骤、证据、踩坑（配置路径/信任门/工具放行） | 封闭客户端接入实践变化 |
 | `context-attribution-implementation-spec.md` | 请求级归属（CAA）的**权威实现契约**：头名、裁定/声明模型、分阶段实施、Spec v1.1 R1–R8（`usage_event` 上下文列的**取值域与物理形态**以 `database-schema.md`/`api-contract.md` 为准——Spec §7.1 的 `claim_source` 清单滞后于实现） | 归属实现契约变化 |
