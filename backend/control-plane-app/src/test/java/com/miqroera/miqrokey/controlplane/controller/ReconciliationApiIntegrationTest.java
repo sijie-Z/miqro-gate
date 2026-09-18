@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.controller.AdminProviderApiIntegrationTest.BootstrapHelper;
@@ -26,6 +27,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -341,6 +343,216 @@ class ReconciliationApiIntegrationTest {
                     new MapSqlParameterSource("tenantId", foreignTenant));
             jdbc.update("DELETE FROM tenants WHERE id = :id", new MapSqlParameterSource("id", foreignTenant));
         }
+    }
+
+    @Test
+    @DisplayName("export CSV: declared column order, values equal to the page detail, state filter, audit")
+    void exportCsv() throws Exception {
+        seedUsage("req-1", "m-1", occurred, 10L, 5L);
+        seedUsage("req-local-only", "m-2", occurred, 7L, 3L);
+        seedUsage(null, "m-3", occurred.plusSeconds(60), 2L, 2L);
+
+        MvcResult created = postReport(billJsonl().getBytes(StandardCharsets.UTF_8));
+        assertThat(created.getResponse().getStatus()).isEqualTo(202);
+        String reportId = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asText();
+        awaitSucceeded(reportId);
+
+        // Source of truth for the export: the detail rows the page renders. The
+        // fixture yields six detail rows — the metadata totals in
+        // fourStateReport() (matched 1 / partial 1 / unmatchedLocal 1 /
+        // unmatchedProvider 3) are the four-state summary, not the row count.
+        JsonNode pageRows = objectMapper
+                .readTree(mockMvc.perform(get("/api/v1/admin/reconciliations/" + reportId + "/rows")
+                        .cookie(sessionCookie, csrfCookie)).andExpect(status().isOk()).andReturn().getResponse()
+                        .getContentAsString(StandardCharsets.UTF_8))
+                .get("rows");
+        List<String> verdicts = new ArrayList<>();
+        pageRows.forEach(row -> verdicts.add(row.get("verdict").asText()));
+        assertThat(verdicts).containsExactlyInAnyOrder("MATCHED", "PARTIAL", "UNMATCHED_LOCAL",
+                "UNMATCHED_PROVIDER", "UNMATCHED_PROVIDER", "UNMATCHED_PROVIDER");
+        int expectedRows = pageRows.size();
+
+        MvcResult export = performExport(reportId, null);
+        assertThat(export.getResponse().getContentType()).startsWith("text/csv");
+        assertThat(export.getResponse().getHeader("Content-Disposition"))
+                .startsWith("attachment; filename=\"reconciliation-" + reportId);
+        assertThat(export.getResponse().getHeader("X-MiQroKey-Rows")).isEqualTo(Integer.toString(expectedRows));
+        assertThat(export.getResponse().getHeader("X-MiQroKey-Truncated")).isNull();
+
+        // Column order is pinned literally: a reorder in the service fails here.
+        List<List<String>> csv = parseCsv(export.getResponse().getContentAsString(StandardCharsets.UTF_8));
+        assertThat(csv.get(0)).containsExactly("report_id", "provider_code", "row_no", "verdict", "matched_by",
+                "provider_row_ref", "local_ref", "detail_model_id", "detail_amount", "detail_currency",
+                "detail_occurred_at", "detail_status", "detail_bucket_key", "detail_provider_count",
+                "detail_local_count");
+        // One CSV row per detail row, cell for cell, same row_no order.
+        assertThat(csv).hasSize(pageRows.size() + 1);
+        for (int i = 0; i < pageRows.size(); i++) {
+            assertThat(csv.get(i + 1)).as("export row %s mirrors detail row %s", i + 1, i + 1)
+                    .containsExactlyElementsOf(expectedCells(reportId, pageRows.get(i)));
+        }
+
+        // state narrows the export exactly like the page filter, and the declared
+        // row count follows the filtered result (header row excluded).
+        MvcResult partialExport = performExport(reportId, "PARTIAL");
+        List<List<String>> partial = parseCsv(partialExport.getResponse()
+                .getContentAsString(StandardCharsets.UTF_8));
+        assertThat(partial).hasSize(2);
+        assertThat(partial.get(1).get(3)).isEqualTo("PARTIAL");
+        assertThat(partial.get(1).get(12)).startsWith(productCode + "@");
+        assertThat(partialExport.getResponse().getHeader("X-MiQroKey-Rows"))
+                .isEqualTo(Integer.toString(partial.size() - 1));
+
+        // Every download is audited with its own exported row count, before the
+        // body: the unfiltered export (every detail row) and the PARTIAL one.
+        assertThat(eventCount("RECONCILIATION_EXPORT")).isEqualTo(2);
+        List<Map<String, Object>> audits = jdbc.queryForList(
+                "SELECT target_type, target_id, change_summary::text FROM admin_audit_events"
+                        + " WHERE action = 'RECONCILIATION_EXPORT'",
+                new MapSqlParameterSource());
+        assertThat(audits).hasSize(2);
+        List<Integer> auditedRows = new ArrayList<>();
+        for (Map<String, Object> audit : audits) {
+            assertThat(audit.get("target_type")).isEqualTo("RECONCILIATION");
+            assertThat(audit.get("target_id").toString()).isEqualTo(reportId);
+            JsonNode summary = objectMapper.readTree((String) audit.get("change_summary"));
+            assertThat(summary.get("truncated").asBoolean()).isFalse();
+            auditedRows.add(summary.get("rows").asInt());
+        }
+        assertThat(auditedRows).containsExactlyInAnyOrder(expectedRows, partial.size() - 1);
+    }
+
+    @Test
+    @DisplayName("export CSV: empty result, unknown state, 5 万行 cap, cross-tenant 404")
+    void exportEdges() throws Exception {
+        seedUsage("req-1", "m-1", occurred, 10L, 5L);
+        // One MATCHED row, so a state filter has a truthful empty answer.
+        String oneLine = "{\"provider_request_id\":\"req-1\",\"occurred_at\":\"" + occurred
+                + "\",\"model_id\":\"m-1\",\"amount\":\"1.00\",\"currency\":\"USD\",\"provider_row_ref\":\"bill-1\"}\n";
+        MvcResult created = postReport(oneLine.getBytes(StandardCharsets.UTF_8));
+        String reportId = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asText();
+        awaitSucceeded(reportId);
+
+        // No matching rows is an explicit empty export: header only, 0 rows, no cap flag.
+        MvcResult empty = performExport(reportId, "UNMATCHED_LOCAL");
+        assertThat(empty.getResponse().getHeader("X-MiQroKey-Rows")).isEqualTo("0");
+        assertThat(empty.getResponse().getHeader("X-MiQroKey-Truncated")).isNull();
+        List<List<String>> emptyCsv = parseCsv(empty.getResponse().getContentAsString(StandardCharsets.UTF_8));
+        assertThat(emptyCsv).hasSize(1);
+        assertThat(emptyCsv.get(0).get(0)).isEqualTo("report_id");
+
+        // An unknown state fails before any row or audit write: still the single
+        // event from the empty export above.
+        mockMvc.perform(get("/api/v1/admin/reconciliations/" + reportId + "/export").param("state", "MATCHEDX")
+                .cookie(sessionCookie, csrfCookie)).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("RECONCILIATION_PARAM_INVALID"));
+        assertThat(eventCount("RECONCILIATION_EXPORT")).isEqualTo(1);
+
+        // A foreign tenant's report is not exportable: same 404 as an unknown id.
+        UUID foreignTenant = UUID.randomUUID();
+        UUID adminId = jdbc.queryForObject("SELECT id FROM users LIMIT 1", new MapSqlParameterSource(), UUID.class);
+        jdbc.update("INSERT INTO tenants (id, code, name) VALUES (:id, :code, 'Export IT B')", new MapSqlParameterSource(
+                "id", foreignTenant).addValue("code", "export-it-" + foreignTenant.toString().substring(0, 8)));
+        try {
+            UUID foreignReport = UUID.randomUUID();
+            jdbc.update("""
+                    INSERT INTO reconciliation_reports (id, tenant_id, created_by, provider_code, currency,
+                        window_from, window_to, status, upload_sha256, upload_bytes, created_at)
+                    VALUES (:id, :tenantId, :createdBy, :code, 'USD', :from, :to, 'PENDING', :sha, 1, now())
+                    """,
+                    new MapSqlParameterSource("id", foreignReport).addValue("tenantId", foreignTenant)
+                            .addValue("createdBy", adminId).addValue("code", productCode)
+                            .addValue("from", java.sql.Timestamp.from(windowFrom))
+                            .addValue("to", java.sql.Timestamp.from(windowTo)).addValue("sha", "0".repeat(64)));
+            mockMvc.perform(get("/api/v1/admin/reconciliations/" + foreignReport + "/export")
+                    .cookie(sessionCookie, csrfCookie)).andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value("RECONCILIATION_NOT_FOUND"));
+        } finally {
+            jdbc.update("DELETE FROM reconciliation_reports WHERE tenant_id = :tenantId",
+                    new MapSqlParameterSource("tenantId", foreignTenant));
+            jdbc.update("DELETE FROM tenants WHERE id = :id", new MapSqlParameterSource("id", foreignTenant));
+        }
+
+        // 5 万行 cap: one row past it truncates and says so (rows stay the lowest row_no).
+        jdbc.update("""
+                INSERT INTO reconciliation_rows (id, report_id, tenant_id, row_no, verdict, provider_row_ref, detail)
+                SELECT gen_random_uuid(), :reportId, :tenantId, 100000 + g, 'UNMATCHED_PROVIDER', 'bulk-' || g,
+                    '{"modelId":"m-bulk"}'::jsonb
+                FROM generate_series(1, 50010) AS g
+                """,
+                new MapSqlParameterSource("reportId", UUID.fromString(reportId)).addValue("tenantId", TENANT_ID));
+        MvcResult capped = performExport(reportId, null);
+        assertThat(capped.getResponse().getHeader("X-MiQroKey-Rows")).isEqualTo("50000");
+        assertThat(capped.getResponse().getHeader("X-MiQroKey-Truncated")).isEqualTo("true");
+        String body = capped.getResponse().getContentAsString(StandardCharsets.UTF_8);
+        // Header + exactly the cap, ending on the last row inside it.
+        assertThat(body.chars().filter(c -> c == '\n').count()).isEqualTo(50_001);
+        String lastLine = body.stripTrailing();
+        lastLine = lastLine.substring(lastLine.lastIndexOf('\n') + 1);
+        assertThat(lastLine.split(",")[2]).isEqualTo("149999");
+    }
+
+    private MvcResult performExport(String reportId, String state) throws Exception {
+        var request = get("/api/v1/admin/reconciliations/" + reportId + "/export").cookie(sessionCookie, csrfCookie);
+        if (state != null) {
+            request = request.param("state", state);
+        }
+        return mockMvc.perform(request).andExpect(status().isOk()).andReturn();
+    }
+
+    /** Detail-row values in declared export order, read from the API the page uses. */
+    private List<String> expectedCells(String reportId, JsonNode row) {
+        JsonNode detail = row.path("detail");
+        return List.of(reportId, productCode, row.get("rowNo").asText(), row.get("verdict").asText(),
+                text(row, "matchedBy"), text(row, "providerRowRef"), text(row, "localRef"),
+                text(detail, "modelId"), text(detail, "amount"), text(detail, "currency"),
+                text(detail, "occurredAt"), text(detail, "status"), text(detail, "bucketKey"),
+                text(detail, "providerCount"), text(detail, "localCount"));
+    }
+
+    private static String text(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        return value == null || value.isNull() ? "" : value.asText();
+    }
+
+    /** Minimal RFC 4180 reader for the subset csvCell emits (BOM, quoting, "" doubling). */
+    private static List<List<String>> parseCsv(String csv) {
+        List<List<String>> lines = new ArrayList<>();
+        List<String> line = new ArrayList<>();
+        StringBuilder cell = new StringBuilder();
+        boolean quoted = false;
+        for (int i = 0; i < csv.length(); i++) {
+            char c = csv.charAt(i);
+            if (i == 0 && c == '﻿') {
+                continue;
+            }
+            if (quoted) {
+                if (c == '"' && i + 1 < csv.length() && csv.charAt(i + 1) == '"') {
+                    cell.append('"');
+                    i++;
+                } else if (c == '"') {
+                    quoted = false;
+                } else {
+                    cell.append(c);
+                }
+            } else if (c == '"') {
+                quoted = true;
+            } else if (c == ',' || c == '\n') {
+                line.add(cell.toString());
+                cell.setLength(0);
+                if (c == '\n') {
+                    lines.add(line);
+                    line = new ArrayList<>();
+                }
+            } else if (c != '\r') {
+                cell.append(c);
+            }
+        }
+        if (!line.isEmpty() || cell.length() > 0) {
+            line.add(cell.toString());
+            lines.add(line);
+        }
+        return lines;
     }
 
     /** Poll an audit count (async run writes status and audit separately). */

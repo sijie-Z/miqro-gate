@@ -1153,13 +1153,20 @@ canonical 账单导入与四态对账报告（契约稿 docs/bill-reconciliation
 | `GET /api/v1/admin/reconciliations?limit=` | 租户报告列表（新→旧，`created_at DESC`，limit 1..100 默认 20；越界 `400 RECONCILIATION_PARAM_INVALID`；空列表 `[]`） |
 | `GET /api/v1/admin/reconciliations/{id}` | 元数据 + 汇总：`totalRows/matched/partialBuckets/unmatchedProvider/unmatchedLocal/lineErrorCount/amountDiff` + `uploadSha256/uploadBytes` + `status(PENDING/RUNNING/SUCCEEDED/FAILED)` |
 | `GET /api/v1/admin/reconciliations/{id}/rows?state=&cursor=&limit=` | 四态明细行（`state` ∈ MATCHED/PARTIAL/UNMATCHED_PROVIDER/UNMATCHED_LOCAL；`row_no` 游标，limit ≤500，`nextCursor`） |
+| `GET /api/v1/admin/reconciliations/{id}/export?state=` | 该报告四态明细行的 CSV 合规导出（#715）：形状同审计/留痕导出（§5.0 前段）——UTF-8 BOM、RFC 4180 + 公式注入防护、5 万行上限、截断以 `X-MiQroKey-Truncated: true` 声明、`Content-Disposition: attachment`。`state` 语义与 `/rows` 完全一致（同一校验、同一 400），空结果返回仅表头的 CSV（不是错误） |
+
+CSV 导出列（**声明式单列表**，表头与每一行同源，避免错位；`detail_*` 为按判决展开的 detail JSON，未携带的键留空不挪列）：
+`report_id, provider_code, row_no, verdict, matched_by, provider_row_ref, local_ref, detail_model_id, detail_amount,
+detail_currency, detail_occurred_at, detail_status, detail_bucket_key, detail_provider_count, detail_local_count`。
+行数经 `X-MiQroKey-Rows` 精确返回（明细正文本可含换行，逐行计数不可靠）。
 
 - **幂等**：同 (providerCode, window, currency, uploadSha256) 重复导入返回既有报告（不重复执行）；`FAILED` 除外（可重试）。
 - 上传上限：16MB（解压 64MB / 100,000 行）；超限或 gzip 损坏 `400 RECONCILIATION_UPLOAD_INVALID`。
 - 校验：窗口 ≤31 天且 from<to（`RECONCILIATION_WINDOW_INVALID`）；providerCode 须在供应商目录
   （`RECONCILIATION_PROVIDER_UNKNOWN`）；currency ISO-4217（`RECONCILIATION_PARAM_INVALID`）；报告不存在
   `RECONCILIATION_NOT_FOUND`（404）。
-- 审计：`RECONCILIATION_CREATED/SUCCEEDED/FAILED`（摘要含上传 sha 与计数，**不存正文**；RUNNING 为瞬时态不入审计）。
+- 审计：`RECONCILIATION_CREATED/SUCCEEDED/FAILED`（摘要含上传 sha 与计数，**不存正文**；RUNNING 为瞬时态不入审计）；
+  导出记 `RECONCILIATION_EXPORT`（`targetType=RECONCILIATION`，摘要 `{rows, truncated}`）；参数非法或报告不存在时在 `record` 前失败，不产生审计行。
 - 语义口径：无 ID 账单行若未匹配计入 `UNMATCHED_PROVIDER` 行、同时按（productCode, 5 分钟桶）计入
   `PARTIAL` 桶差；`UNMATCHED_LOCAL` 为行级（本地有 provider_request_id 且未被账单消费）。
 - 前端页随 coverage-matrix I2 交付（报告列表 / 上传 / 四态明细，2026-09-10）；导出链路接 #330 reconcile-level。

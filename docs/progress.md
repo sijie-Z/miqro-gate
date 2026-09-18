@@ -2,6 +2,44 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-18（#715 缺口②：对账差异报告导出）
+
+- **#715 缺口②（分支 `feat/reconciliation-export-715`，基于 c931e8df，HEAD 再提交本次收尾）**：
+  对账报告的四态明细行支持 CSV 合规导出 `GET /api/v1/admin/reconciliations/{id}/export?state=`。
+  SYSTEM_ADMIN-only，沿用 `AdminReconciliationController` 与 `/api/v1/admin/**` 默认拒绝拦截器，
+  未新开鉴权面。
+  - **方言按「同步管理端下载」惯例**（与 `AdminAuditController` / `AdminRetentionLogController`
+    的审计/留痕导出同形）：UTF-8 BOM、RFC 4180 引用、`= + - @ TAB CR` 公式注入防护（前置单引号）、
+    snake_case 表头、5 万行上限、`Content-Disposition: attachment`。**故意不混用**
+    `ExportTaskService` 的异步产物方言（gzip + `\,` 转义 + 可选 JSONL）——两者是不同的下载约定，
+    本端点不产生排队任务、不入 `export_tasks`。
+  - **列与页面明细同源**：单一声明列清单 `EXPORT_COLUMNS` + `DETAIL_KEYS`（snake_case 表头 ↔ 存储的
+    camelCase JSON 键）；页面 `rows()` 与导出共用同一 `rowMapper` 投影与同一 `LIMIT` 语义，
+    两处不会各自漂移。未声明的 detail 列直接抛 `IllegalStateException`，宁可失败也不错位。
+  - **租户隔离与审计**：导出前先走 `get(tenantId, reportId)`（SQL 带 `AND tenant_id = :tenantId`），
+    他人报告一律 404 `RECONCILIATION_NOT_FOUND`（不泄漏存在性）；`state` 非法 400
+    `RECONCILIATION_PARAM_INVALID`，且与报告不存在一样在写审计**之前**失败，不留孤儿审计行。
+    成功导出记 `RECONCILIATION_EXPORT`（`targetType=RECONCILIATION`，摘要 `{rows, truncated}`）。
+  - `state` 语义与 `/rows` 完全一致（同一校验函数、同一 400）；**空结果是仅表头的 CSV，不是错误**。
+  - `X-MiQroKey-Rows` 返回精确数据行数：单元格内的换行是合法 CSV，按物理行计数会少报。
+- 验证（真实命令与结果，Windows + JDK 21 + Testcontainers PostgreSQL）：
+  - 后端 `.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=ReconciliationApiIntegrationTest,ReconciliationExportCsvTest
+    -Dsurefire.failIfNoSpecifiedTests=false` →
+    `Tests run: 9, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`，`Total time: 57.323 s`。
+  - 前端 `npm ci`（0 vulnerabilities）、`npm run typecheck` exit 0、`npm run test` →
+    63 test files / 384 tests 全绿、`npm run lint` → `0 errors, 7 warnings`（7 条均为既有告警，
+    不含本次改动文件）。
+- 覆盖的边界（真实用例，非空跑）：空报表（仅表头 + `X-MiQroKey-Rows: 0`，无截断头）、未知 state
+  （400 且不新增审计行）、跨租户（404，租户 try/finally 自建自删）、5 万行上限（插入 50010 行 →
+  返回 50000 行 + `X-MiQroKey-Truncated: true`）、公式注入各前导字符与 RFC 4180 引用、
+  声明列唯一性/顺序、detail 键与声明列不漂移、导出与页面逐格一致、`state` 收窄与页面筛选一致。
+- i18n：`frontend/src/i18n/dict.ts` 已有 `导出 CSV` / `导出失败` / `已导出 N 行 CSV。` /
+  截断提示的中英映射（与审计导出一致），本次**无需新增词条**。
+- **缺口①（供应商私有账单解析器）不在本次范围**：仍需真实账单样本，本分支不含。
+- 工作区卫生：本次只提交上述 6 个改动文件 + 1 个新增单测 + 本文件；工作区另存的 21 个与本议题
+  无关的改动文件（`types/generated.ts` 重生成、若干 `ui/*` 与视图改动）保持原样未提交。
+
 ## 会话交接点 2026-09-16（自助注册关闭态前置体现 #550）
 
 - **#550（PR 待开，分支 `fix/registration-disabled-gating`，基于 50a9b24）**：部署关闭自助注册时，

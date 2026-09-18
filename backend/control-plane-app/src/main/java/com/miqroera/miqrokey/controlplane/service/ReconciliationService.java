@@ -77,6 +77,18 @@ public class ReconciliationService {
 
     private static final String DETAIL_PREFIX = "detail_";
 
+    /**
+     * {@code detail_*} column → the key it reads from the stored detail JSON.
+     * The header is snake_case like the other admin exports while the JSON is
+     * camelCase, so the two cannot be derived from each other: a column must be
+     * spelled out here, and {@code ReconciliationExportCsvTest} fails if the
+     * declared columns and these keys ever drift apart.
+     */
+    static final Map<String, String> DETAIL_KEYS = Map.of("detail_model_id", "modelId", "detail_amount", "amount",
+            "detail_currency", "currency", "detail_occurred_at", "occurredAt", "detail_status", "status",
+            "detail_bucket_key", "bucketKey", "detail_provider_count", "providerCount", "detail_local_count",
+            "localCount");
+
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final AuditService auditService;
@@ -307,14 +319,18 @@ public class ReconciliationService {
     }
 
     /**
-     * One declared column of one row. {@code detail_*} reads the same-named key
+     * One declared column of one row. {@code detail_*} reads its declared key
      * from the per-verdict detail JSON; a verdict that does not carry the key
      * yields an empty cell.
      */
-    private static String exportCell(Map<String, Object> row, Map<String, Object> report, String column) {
+    static String exportCell(Map<String, Object> row, Map<String, Object> report, String column) {
         if (column.startsWith(DETAIL_PREFIX)) {
+            String key = DETAIL_KEYS.get(column);
+            if (key == null) {
+                throw new IllegalStateException("未声明的导出列: " + column);
+            }
             JsonNode detail = (JsonNode) row.get("detail");
-            JsonNode value = detail == null ? null : detail.get(column.substring(DETAIL_PREFIX.length()));
+            JsonNode value = detail == null ? null : detail.get(key);
             return value == null || value.isNull() ? "" : value.asText();
         }
         return switch (column) {
