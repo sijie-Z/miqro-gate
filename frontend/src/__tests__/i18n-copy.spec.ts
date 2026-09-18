@@ -36,15 +36,18 @@ describe('EN dictionary covers the #657 copy', () => {
  *  banner's three lines and the row/dialog markers are separate text nodes. */
 describe('EN dictionary covers the #735 adapter-status warning copy', () => {
   const copies: Array<[string, string]> = [
-    ['⚠ 未验证', '⚠ Unverified'],
+    ['⚠ 非已验证', '⚠ Not validated'],
+    // The DISABLED label has no other dictionary entry; the persistent-warning
+    // dialog now renders it next to an English sentence.
+    ['已停用', 'Disabled'],
     [
       '目录中存在未处于「已验证」状态的产品',
       'Some catalogue products are not in the "VERIFIED" state',
     ],
     ['该产品未处于「已验证」状态', 'This product is not in the "VERIFIED" state'],
     [
-      '未验证或已降级的产品可用于联调与试用，但不应承载生产流量；本提示不改变产品的启用与可用行为。',
-      'Products that are not verified — or that have degraded — are fine for integration testing and trials, but must not carry production traffic. This notice does not change which products are enabled or usable.',
+      '未处于「已验证」状态的产品仍按当前配置可用（已停用的除外），但不应承载生产流量；本提示不改变产品的启用与可用行为。',
+      'Products that are not in the "VERIFIED" state stay usable under their current configuration — except disabled ones — but must not carry production traffic. This notice does not change which products are enabled or usable.',
     ],
   ];
 

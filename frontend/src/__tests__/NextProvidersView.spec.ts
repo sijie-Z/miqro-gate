@@ -336,7 +336,7 @@ describe('NextProvidersView', () => {
 
       const inline = wrapper.findAll('[data-testid="adapter-warning-row"]');
       expect(inline).toHaveLength(2);
-      expect(inline.map((n) => n.text())).toEqual(['⚠ 未验证', '⚠ 未验证']);
+      expect(inline.map((n) => n.text())).toEqual(['⚠ 非已验证', '⚠ 非已验证']);
 
       const banner = wrapper.find('[data-testid="adapter-warning-banner"]');
       expect(banner.exists()).toBe(true);
@@ -370,6 +370,31 @@ describe('NextProvidersView', () => {
       expect(wrapper.find('[data-testid="adapter-warning-banner"]').text()).toContain(
         '共 2 个产品实例当前不是 VERIFIED',
       );
+    });
+
+    it('flags DISABLED rows with the state label, not the plain "unverified" wording', async () => {
+      // DISABLED also is not VERIFIED, so it carries the marker; the badge and
+      // the hint next to it are what separate "disabled" from "not yet
+      // verified". The marker wording is deliberately status-agnostic.
+      mockApi.listProviderProducts.mockResolvedValue([
+        product({ id: '0021', displayName: '停用产品', implementationStatus: 'DISABLED' }),
+      ]);
+      const wrapper = mountView();
+      await flushPromises();
+
+      const row = wrapper.find('[data-testid="adapter-warning-row"]');
+      expect(row.exists()).toBe(true);
+      expect(row.text()).toBe('⚠ 非已验证');
+      expect(wrapper.text()).toContain('已停用');
+      // The hint lives in the badge tooltip, which renders outside the wrapper
+      // and only mounts once the anchor is focused; earlier mounts in the same
+      // file leave their own tooltips behind, so read the union of all of them.
+      await wrapper.find('.ui-tooltip__anchor').trigger('focus');
+      await flushPromises();
+      const hints = Array.from(document.querySelectorAll('.ui-tooltip')).map(
+        (node) => node.textContent ?? '',
+      );
+      expect(hints.join(' ')).toContain('该产品实例已停用，不再用于新建凭证。');
     });
 
     it('repeats the warning inside the product detail surface', async () => {

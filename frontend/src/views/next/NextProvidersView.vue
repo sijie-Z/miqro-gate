@@ -412,7 +412,7 @@ onMounted(load);
       <div class="next-providers__warning-title">目录中存在未处于「已验证」状态的产品</div>
       <div>共 {{ unverifiedCount }} 个产品实例当前不是 VERIFIED。</div>
       <div>
-        未验证或已降级的产品可用于联调与试用，但不应承载生产流量；本提示不改变产品的启用与可用行为。
+        未处于「已验证」状态的产品仍按当前配置可用（已停用的除外），但不应承载生产流量；本提示不改变产品的启用与可用行为。
       </div>
     </div>
 
@@ -474,7 +474,7 @@ onMounted(load);
             v-if="isUnverified(productOf(row).implementationStatus)"
             class="next-providers__warning-inline"
             data-testid="adapter-warning-row"
-            >⚠ 未验证</span
+            >⚠ 非已验证</span
           >
         </template>
         <template #balanceAuthority="{ row }">

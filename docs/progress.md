@@ -3863,3 +3863,22 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 - `npx eslint <4 个改动文件>`（不带 `--fix`）→ 0 errors（1 条 prettier 警告落在既有 import 行，非本批引入）
 
 **一处 tooling 陷阱（本批实录）**：本仓 `npm run lint` 的脚本是 `eslint . --ext .vue,.ts,.tsx --fix`——**它会改写整个前端**。本次跑完 lint 后 `git status` 出现 148 个与本改动无关的文件（含 `types/generated.ts` 整体重排），已逐个 `git checkout --` 还原，只留 4 个改动文件；随后改用不带 `--fix` 的 `npx eslint` 复核。后续批次别把 `npm run lint` 当成只读检查。
+
+## 2026-09-18 评审响应对（#735 前端部分）——只收敛 minor，不动准入门控
+
+**评审结论**：0 blocker。准入红线被独立复核确认为「未触碰」：`git show --numstat bdc4b9e4` 5 文件、**0 删除行**；`grep -rn "\.status()" backend/provider-adapters/src/main backend/provider-spi/src/main` **0 命中**（目录里的 status 解析后从不被读取）；路由快照 SQL 无任何状态过滤。5 条 minor 的逐条处置：
+
+- **M2（`已停用` 无 EN 词条）→ 已修**：`frontend/src/i18n/dict.ts` 补 `'已停用': 'Disabled'`——六个状态标签里唯一缺词条的一条（独立词条；`规则已停用` 这类带前缀的串另有条目）。新详情弹窗警告块会把该标签渲染进英文界面，属本次新增的暴露面。
+- **M3（文案只覆盖「未验证/已降级」）→ 已修**：警示条第三行改为「未处于「已验证」状态的产品仍按当前配置可用（已停用的除外），但不应承载生产流量；本提示不改变产品的启用与可用行为。」，行内标记 `⚠ 未验证` → `⚠ 非已验证`。措辞与判据 `status !== 'VERIFIED'` 对齐，并顺带消掉 M1 的用户可见症状（警告不再指向一个不存在的「启用」开关）。
+- **M1（`docs/provider-adapter-contract.md:120` 仍承诺门控）→ 不改，转决策材料**：该句正是 #735 待 owner 拍板的争点，本批改文档等于替 owner 预设定论；M3 的改写已让页面不再宣称存在启用开关。拍板后按选定口径一并更新文档与种子状态。
+- **M4（banner 无 `role="status"` / `aria-live`）→ 不改**：同文件既有 `ui-alert--error`（400 行）同样没有，只给新 banner 加会让同类告警行为不一致；评审人也已自降为 nit。若要统一，应作为独立 a11y 批覆盖全部 `ui-alert`。
+- **M5（视觉基线 `admin-providers-1440x900.png` 陈旧）→ 本批不重生成**：基线是捕获式、无像素断言（`docs/progress.md` 有先例），重生成需起 Playwright + `preview` 并重建产物，不改变 CI 结论。已在 PR「Remaining risks」登记。
+
+**评审响应改动的验证（真实输出）**：
+
+- `npm --prefix frontend run typecheck` → exit 0
+- `npm --prefix frontend run test` → **63 files / 392 tests passed**（基线 390：新增 1 条 DISABLED 用例 + 更新既有断言）
+- `npx eslint . --ext .vue,.ts,.tsx`（在 `frontend/` 下、**不带 `--fix`**）→ **0 errors**；62337 warnings 全为工作区既有的 CRLF `Delete ␍`，非本批引入
+- `npm --prefix frontend run build` → exit 0（`✓ built in 24.02s`）
+
+**首跑失败与最小修复（如实记录）**：新加的 DISABLED 用例第一次跑是**失败**的——它在 `document.body` 里收集 `.ui-tooltip` 文本，拿到的是同文件早先用例遗留的「已用真实供应商凭证完成契约测试。」（tooltip 只在锚点聚焦后才挂载，且从不卸载）。修复只加两行：`await wrapper.find('.ui-tooltip__anchor').trigger('focus');` + `await flushPromises();`，断言口径不变；修后该文件 12/12 通过。
