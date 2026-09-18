@@ -73,6 +73,7 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
 
     private void writeUsage(List<UsageEvent> events) {
         List<MapSqlParameterSource> params = new ArrayList<>(events.size());
+        List<MapSqlParameterSource> evidenceParams = new ArrayList<>();
         for (UsageEvent e : events) {
             if (e.modelId() == null) {
                 // usage_event.model_id is NOT NULL. A single unrepresentable
@@ -108,6 +109,10 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                     .addValue("resolutionStatus", attr != null ? attr.resolutionStatus() : null)
                     .addValue("claimSource", attr != null ? attr.claimSource() : null)
                     .addValue("claimConfidence", attr != null ? attr.claimConfidence() : null));
+            MapSqlParameterSource evidence = evidenceOf(e);
+            if (evidence != null) {
+                evidenceParams.add(evidence);
+            }
         }
         if (params.isEmpty()) {
             return;
@@ -129,6 +134,73 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                     :sessionId, :activityId, :claimedProjectId, :resolutionStatus, :claimSource, :claimConfidence)
                 ON CONFLICT (tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL DO NOTHING
                 """, params.toArray(new MapSqlParameterSource[0]));
+        writeContextEvidence(evidenceParams);
+    }
+
+    /**
+     * CAA evidence rows (Spec v1.1 §7.2, {@code request_context_evidence}):
+     * "why was it attributed this way". Written in the usage transaction, keyed by
+     * the usage event id, so a retried flush is a no-op
+     * ({@code ON CONFLICT (id) DO NOTHING}) and the rows join.
+     *
+     * <p>
+     * Metadata only — the selector class and its normalized value, never a prompt,
+     * path, or body. {@code scope} / {@code observed_at} keep the V55 defaults
+     * ({@code turn} / {@code now()}): the gateway cannot observe the client-side
+     * scope of an inference.
+     * </p>
+     */
+    private void writeContextEvidence(List<MapSqlParameterSource> params) {
+        if (params.isEmpty()) {
+            return;
+        }
+        jdbc.batchUpdate("""
+                INSERT INTO request_context_evidence (id, tenant_id, request_id, source, value, confidence)
+                VALUES (:id, :tenantId, :requestId, :source, :value, :confidence)
+                ON CONFLICT (id) DO NOTHING
+                """, params.toArray(new MapSqlParameterSource[0]));
+    }
+
+    /**
+     * Evidence row for one usage event, or null when the ladder used no external
+     * selector. {@code source} is the selector class the gateway actually
+     * observed, not the client's declared {@code X-Miqro-Claim-Source} (that claim
+     * is already kept in {@code usage_event.claim_source}):
+     * <ul>
+     * <li>{@code RESOLVED_HEADER} → {@code header}, value = the claimed project id
+     * the request was validated against;</li>
+     * <li>{@code RESOLVED_SUFFIX} → {@code suffix}, value = the tag presented in
+     * the key (the binding index is keyed by project tag).</li>
+     * </ul>
+     * {@code SOLE_BINDING} / {@code POLICY_ROUTED} resolve without any external
+     * signal — V55's source vocabulary has no honest value for them, and their
+     * explanation is {@code usage_event.resolution_status} itself (Spec §9 C13).
+     */
+    private static MapSqlParameterSource evidenceOf(UsageEvent e) {
+        UsageEvent.ContextAttribution attr = e.attribution();
+        if (attr == null) {
+            return null;
+        }
+        String source;
+        String value;
+        if ("RESOLVED_HEADER".equals(attr.resolutionStatus())) {
+            source = "header";
+            value = attr.claimedProjectId() != null ? attr.claimedProjectId().toString() : null;
+        } else if ("RESOLVED_SUFFIX".equals(attr.resolutionStatus())) {
+            source = "suffix";
+            value = attr.bindingTag();
+        } else {
+            return null;
+        }
+        if (value == null) {
+            // value is NOT NULL and carries the whole audit value: never write a
+            // half row — and never abort (and endlessly retry) the batch for it.
+            log.warn("Dropping context evidence without a value (id={}, status={})", e.id(), attr.resolutionStatus());
+            return null;
+        }
+        return new MapSqlParameterSource().addValue("id", e.id()).addValue("tenantId", e.tenantId())
+                .addValue("requestId", e.gatewayRequestId()).addValue("source", source).addValue("value", value)
+                .addValue("confidence", attr.claimConfidence() != null ? attr.claimConfidence() : "NONE");
     }
 
     private void writeHits(List<CacheHitEvent> events) {
