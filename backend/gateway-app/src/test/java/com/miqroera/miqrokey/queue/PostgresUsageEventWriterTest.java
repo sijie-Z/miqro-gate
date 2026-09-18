@@ -223,12 +223,14 @@ class PostgresUsageEventWriterTest {
         // 1) Agent-declared project id: the header claim is the evidence.
         UsageEvent claimed = caaEvent("gw-evi-header-" + suffix, new UsageEvent.ContextAttribution("sess-1",
                 UUID.randomUUID(), claimedProjectId, "RESOLVED_HEADER", "git_remote", "HIGH", "miqro-web"));
-        // 2) legacy suffix selector: the tag in the key is the evidence, no declared confidence.
-        UsageEvent bySuffix = caaEvent("gw-evi-suffix-" + suffix, new UsageEvent.ContextAttribution(null, null, null,
-                "RESOLVED_SUFFIX", null, null, "miqro-web"));
-        // 3) sole binding / 4) unattributed policy: resolved without any external signal.
-        UsageEvent sole = caaEvent("gw-evi-sole-" + suffix, new UsageEvent.ContextAttribution(null, null, null,
-                "SOLE_BINDING", null, "MEDIUM", "miqro-web"));
+        // 2) legacy suffix selector: the tag in the key is the evidence, no declared
+        // confidence.
+        UsageEvent bySuffix = caaEvent("gw-evi-suffix-" + suffix,
+                new UsageEvent.ContextAttribution(null, null, null, "RESOLVED_SUFFIX", null, null, "miqro-web"));
+        // 3) sole binding / 4) unattributed policy: resolved without any external
+        // signal.
+        UsageEvent sole = caaEvent("gw-evi-sole-" + suffix,
+                new UsageEvent.ContextAttribution(null, null, null, "SOLE_BINDING", null, "MEDIUM", "miqro-web"));
         UsageEvent policy = caaEvent("gw-evi-policy-" + suffix,
                 new UsageEvent.ContextAttribution(null, null, null, "POLICY_ROUTED", null, "NONE", null));
 
@@ -270,8 +272,8 @@ class PostgresUsageEventWriterTest {
                 new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), 42L, 200, null, true, false,
                 "gw-evi-drop-" + suffix, CLOCK.instant(), CLIENT_IP, new UsageEvent.ContextAttribution(null, null,
                         UUID.randomUUID(), "RESOLVED_HEADER", null, "LOW", "miqro-web"));
-        UsageEvent healthy = caaEvent("gw-evi-mate-" + suffix, new UsageEvent.ContextAttribution(null, null, null,
-                "RESOLVED_SUFFIX", null, null, "miqro-web"));
+        UsageEvent healthy = caaEvent("gw-evi-mate-" + suffix,
+                new UsageEvent.ContextAttribution(null, null, null, "RESOLVED_SUFFIX", null, null, "miqro-web"));
 
         writer.writeBatch(List.of(dropped, healthy), List.of(), List.of(), List.of());
 
@@ -290,8 +292,8 @@ class PostgresUsageEventWriterTest {
 
     /**
      * CAA event with an upstream request id: the gateway only writes attribution
-     * for requests it actually sent, and it makes a replayed flush a real no-op
-     * on both tables (usage dedupes on {@code provider_request_id}, evidence on
+     * for requests it actually sent, and it makes a replayed flush a real no-op on
+     * both tables (usage dedupes on {@code provider_request_id}, evidence on
      * {@code id}).
      */
     private static UsageEvent caaEvent(String gatewayRequestId, UsageEvent.ContextAttribution attribution) {
