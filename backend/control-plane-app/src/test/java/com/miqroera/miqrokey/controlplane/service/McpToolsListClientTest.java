@@ -26,6 +26,8 @@ class McpToolsListClientTest {
     private int port;
     private volatile int status = 200;
     private volatile String body = "{}";
+    /** Null omits the header, the way a sloppy upstream would. */
+    private volatile String contentType = "application/json";
     /**
      * Strict Streamable HTTP upstreams answer 406 unless the client advertises both
      * media types (#779).
@@ -52,7 +54,9 @@ class McpToolsListClientTest {
                 return;
             }
             byte[] out = body.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            if (contentType != null) {
+                exchange.getResponseHeaders().set("Content-Type", contentType);
+            }
             exchange.sendResponseHeaders(status, out.length);
             exchange.getResponseBody().write(out);
             exchange.close();
@@ -175,5 +179,68 @@ class McpToolsListClientTest {
         body = "{\"result\":{\"tools\":[" + tools + "]}}";
 
         assertThatThrownBy(() -> client.fetchTools(url(), null)).hasMessageContaining("1000");
+    }
+
+    // ------------------------------------------------------------------
+    // #786: the server picks the framing — both media types must parse
+
+    @Test
+    @DisplayName("parses tools from a text/event-stream response (#786)")
+    void parsesToolsFramedAsEventStream() {
+        contentType = "text/event-stream; charset=utf-8";
+        body = """
+                event: message
+                data: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"read_wiki_structure","description":"wiki"},{"name":"ask_question","description":"ask"}]}}
+
+                """;
+
+        List<McpToolsListClient.UpstreamTool> tools = client.fetchTools(url(), null);
+
+        assertThat(tools).containsExactly(new McpToolsListClient.UpstreamTool("read_wiki_structure", "wiki"),
+                new McpToolsListClient.UpstreamTool("ask_question", "ask"));
+    }
+
+    @Test
+    @DisplayName("an SSE-framed JSON-RPC error still surfaces the upstream message (#786)")
+    void eventStreamErrorSurfaces() {
+        contentType = "text/event-stream";
+        body = """
+                event: message
+                data: {"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}
+
+                """;
+
+        assertThatThrownBy(() -> client.fetchTools(url(), null)).hasMessageContaining("method not found");
+    }
+
+    @Test
+    @DisplayName("an SSE body parses even when the header went missing (#786)")
+    void eventStreamWithoutContentTypeIsParsed() {
+        contentType = null;
+        body = """
+                data: {"result":{"tools":[{"name":"only_one"}]}}
+
+                """;
+
+        assertThat(client.fetchTools(url(), null))
+                .containsExactly(new McpToolsListClient.UpstreamTool("only_one", null));
+    }
+
+    @Test
+    @DisplayName("frames before the result are skipped and comments ignored (#786)")
+    void eventStreamSkipsEarlierFrames() {
+        contentType = "text/event-stream";
+        body = """
+                : keep-alive
+
+                event: message
+                data: {"jsonrpc":"2.0","method":"notifications/progress"}
+
+                event: message
+                data: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"late"}]}}
+
+                """;
+
+        assertThat(client.fetchTools(url(), null)).containsExactly(new McpToolsListClient.UpstreamTool("late", null));
     }
 }

@@ -74,9 +74,13 @@ public class McpToolsListClient {
             if (body.length > MAX_BODY_BYTES) {
                 throw upstream("上游响应超过 2MB 上限。");
             }
-            JsonNode root = objectMapper.readTree(body);
+            // The server picks the framing of its reply, so both media types have
+            // to parse — a stream-framed answer carries the message on `data:`
+            // lines, not as a bare JSON document (#786).
+            boolean streamFramed = SseJsonRpc.looksFramed(body);
+            JsonNode root = streamFramed ? SseJsonRpc.firstMessage(body, objectMapper) : objectMapper.readTree(body);
             if (root == null) {
-                throw upstream("上游响应不是合法 JSON。");
+                throw upstream(streamFramed ? "上游 SSE 响应中未找到 JSON-RPC 消息。" : "上游响应不是合法 JSON。");
             }
             JsonNode error = root.path("error");
             if (!error.isMissingNode() && !error.isNull()) {
