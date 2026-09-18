@@ -87,30 +87,40 @@ Micrometer/Prometheus 指标至少包括：
 
 ### 8.1 单机升级的执行方式：`deploy/deploy.sh`
 
-单机（Docker Compose）升级**只有一条入口**：`deploy/deploy.sh`。它把三件容易各做各的事收进一个脚本：
+单机（Docker Compose）升级**只有一条入口**：`deploy/deploy.sh`。
 
 ```sh
-deploy/deploy.sh --context /opt/miqrokey-dev --commit <sha> --services "control-plane portal" --caller <会话名>
+deploy/deploy.sh --context /opt/miqrokey-dev --commit <sha> --services "control-plane portal" \
+                 --caller <会话名> --smoke-url https://<origin>/ --smoke-origin https://<origin>
 ```
 
 - `--context`：本次要部署的**构建树**（持有 `backend/` `frontend/` `deploy/` 的那一份），**不是**线上树
 - `--dry-run`：只打印计划、不执行任何命令——**在陌生机器上先跑这个**
-- `--verify-only`：不构建也不换容器，只做下面第 2 条的断言。部署前问"我要动的是什么"、部署后问"还是不是当初那份"，都用它
+- `--verify-only`：不构建也不换容器，只做断言与冒烟。部署前问"我要动的是什么"、部署后问"还是不是当初那份"，都用它
+- `--smoke-url` / `--smoke-origin` / `--smoke-expect`：见下"它能证明什么"
 
-它保证的两条不变式：
+**它保证的三件事：**
 
 1. **同一时刻只有一次部署**（`flock`），构建与 `up` 都在锁内。交错真正伤人的地方是**构建**：同一 tag 被并发构建两次之后，事后无法从机器状态回答"当时跑的是哪一份"。
-2. **收尾断言"正在跑的就是刚构建的"**：逐个比较 `docker inspect <容器>.Image` 与 `docker image inspect <tag>.Id`。`Up N seconds (healthy)` **不是证据**——容器没换过去时，机器显示的是一模一样的状态。
+2. **正在跑的就是刚构建的**：逐个比较 `docker inspect <容器>.Image` 与 `docker image inspect <tag>.Id`。`Up N seconds (healthy)` **不是证据**——容器没换过去时，机器显示的是一模一样的状态。
+3. **配置确实加载了**：compose 的项目目录钉在 **compose 文件所在目录**（`$LIVE_DIR/deploy`），且 `.env` 以 `--env-file` **显式**指定、**缺失即失败**。compose 从*项目目录*读 `.env`；把它指到上一层（#794 这么干过）会让变量全部回落到 compose 里的默认值——容器起来是健康的、镜像是对的，**却在拒绝自己的 origin（403）**。
 
-三条既有教训也编在里面，免得再踩：
+**它能证明什么、不能证明什么**——这条比上面三条都值得记住：第 1、2 条是**发布动作**的正确性（换没换、换的是不是那份），**不涉及功能是否正确**。一次配置回归可以让一个容器"镜像 ID 完全正确、healthy、并且拒绝所有登录"。所以：
+
+- `--smoke-url` 让本次运行去问运行中的栈要一个**真实客户端会要的东西**，状态码不匹配即失败（`--smoke-expect` 默认 `2??`，可给 `case` 模式如 `'200|401'`）
+- `--smoke-origin` 带上 Origin 头——**证一个依赖配置的行为，比证一个与配置无关的 200 有价值**：origin allowlist 本身就是配置
+- **不传 `--smoke-url` 时脚本会明说"什么都没查"**，收尾语也只说 `deployed; image identity verified`，不说 "verified"——**那个词曾经盖过了它实际没查的东西**
+
+四条既有教训也编在里面，免得再踩：
 
 - `up` 一律带 `--no-build`：`compose.prod.yaml` 的 control-plane 服务带 `build:` 段，且其 context 指向**线上树**——漏了它，compose 可能构建出不是本次要发的代码
 - 替换 control-plane / gateway 之后**自动 `restart portal`**：nginx 的 upstream 是启动时解析的，后端容器换掉后地址变化，不重启则 `/api` 全 502
 - **显式钉住 compose 项目名**（`-p`）：项目名取决于调用时的目录，从别处跑会**另起一套容器**而不是更新线上那套
+- **`.env` 必需，且就在 compose 文件旁**（即上面第 3 条）
 
-**每次执行追加一行到 `deploy.log`**（时间 / 模式 / 目标提交 / 调用方 / 每个服务**运行中的镜像 ID 与当时的 tag ID**）。这一行是唯一的持久记录：等有人问"11:39 线上跑的是什么"，那张镜像可能早已被并发重建解除标签并从列表里清掉，届时只有这行还能回答。**两个身份都记**，是为了事后能分辨"tag 被人重建了"与"当初就没换过去"。
+**每次执行追加一行到 `deploy.log`**（时间 / 模式 / 目标提交 / 调用方 / **env 文件路径** / **冒烟结果** / 每个服务**运行中的镜像 ID 与当时的 tag ID**）。这一行是唯一的持久记录：等有人问"11:39 线上跑的是什么"，那张镜像可能早已被并发重建解除标签并从列表里清掉，届时只有这行还能回答。**两个身份都记**，是为了事后能分辨"tag 被人重建了"与"当初就没换过去"；`env_file=` 与 `smoke=` 则回答"当时用的是哪份配置、有没有查过功能"。
 
-退出码：`0` 已部署并验证 ｜ `1` 用法/环境 ｜ `2` 断言失败（有东西没换过去）｜ `3` 锁被占用（另一次部署在跑）。
+退出码：`0` 已部署、且断言与冒烟都通过 ｜ `1` 用法/环境（含 `.env` 缺失）｜ `2` 断言或冒烟失败 ｜ `3` 锁被占用（另一次部署在跑）。
 
 ## 9. Windows 开发
 
