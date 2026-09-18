@@ -143,7 +143,7 @@ class ExportUsageAdjustmentIntegrationTest {
     }
 
     @Test
-    @DisplayName("a reversal returns the export to the observed counts")
+    @DisplayName("a reversal returns the export to the observed counts but keeps the marker")
     void exportAfterReversal() throws Exception {
         MvcResult created = append(
                 "{\"gatewayRequestId\":\"" + REQUEST_ID + "\",\"outputTokensDelta\":-200," + "\"reason\":\"上游账单修正\"}")
@@ -155,7 +155,9 @@ class ExportUsageAdjustmentIntegrationTest {
 
         Map<String, String> row = firstRow(exportCsv());
         assertThat(row.get("netOutputTokens")).isEqualTo("500");
-        assertThat(row.get("adjusted")).isEqualTo("false");
+        // Same rule as the records list (#774): the export must not report a
+        // corrected-then-reversed row as one nobody ever touched.
+        assertThat(row.get("adjusted")).isEqualTo("true");
     }
 
     // -------------------------------------------------------------------
