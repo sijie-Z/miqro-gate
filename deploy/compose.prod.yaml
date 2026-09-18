@@ -126,15 +126,6 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
-      # #846: the gateway's first snapshot refresh must not race the control
-      # plane's Flyway run. Postgres is "healthy" on an empty database too, so
-      # without this the gateway booted, refreshed, and logged
-      # `relation "virtual_keys" does not exist` ~1.7s BEFORE migrations
-      # finished — a corrupt-looking error on every fresh deployment. Waiting
-      # for control-plane health means migrations are done; no cycle is added
-      # (control-plane does not depend on the gateway).
-      control-plane:
-        condition: service_healthy
     environment:
       MIQROKEY_GATEWAY_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-miqrokey}
       MIQROKEY_GATEWAY_DB_USERNAME: ${POSTGRES_USER:-miqrokey}

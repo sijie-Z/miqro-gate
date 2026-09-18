@@ -43,11 +43,6 @@ miqrokey:
       pool-size: ${MIQROKEY_GATEWAY_DB_POOL_SIZE:5}
     route-snapshot:
       refresh-interval: ${MIQROKEY_GATEWAY_ROUTE_REFRESH_INTERVAL:30s}
-      # #846: while the last refresh failed with "schema not built yet"
-      # (PostgreSQL 42P01 — Flyway has not finished on a fresh deployment),
-      # this short ticker retries with 2→4→8→16→30s backoff instead of waiting
-      # out refresh-interval. Idle cost when the schema is ready: one atomic check.
-      retry-check-interval: ${MIQROKEY_GATEWAY_ROUTE_RETRY_CHECK_INTERVAL:2s}
       notify-channel: ${MIQROKEY_GATEWAY_ROUTE_NOTIFY_CHANNEL:miqrokey_route_refresh}
     queue:
       capacity: ${MIQROKEY_GATEWAY_QUEUE_CAPACITY:50000}
