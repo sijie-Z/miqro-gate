@@ -85,6 +85,33 @@ Micrometer/Prometheus 指标至少包括：
 - Gateway 和 Control Plane 可分别滚动升级；Docker Compose 首版允许短暂控制面维护，但尽量不影响在途推理。
 - 供应商签名目录可独立更新和回滚。
 
+### 8.1 单机升级的执行方式：`deploy/deploy.sh`
+
+单机（Docker Compose）升级**只有一条入口**：`deploy/deploy.sh`。它把三件容易各做各的事收进一个脚本：
+
+```sh
+deploy/deploy.sh --context /opt/miqrokey-dev --commit <sha> --services "control-plane portal" --caller <会话名>
+```
+
+- `--context`：本次要部署的**构建树**（持有 `backend/` `frontend/` `deploy/` 的那一份），**不是**线上树
+- `--dry-run`：只打印计划、不执行任何命令——**在陌生机器上先跑这个**
+- `--verify-only`：不构建也不换容器，只做下面第 2 条的断言。部署前问"我要动的是什么"、部署后问"还是不是当初那份"，都用它
+
+它保证的两条不变式：
+
+1. **同一时刻只有一次部署**（`flock`），构建与 `up` 都在锁内。交错真正伤人的地方是**构建**：同一 tag 被并发构建两次之后，事后无法从机器状态回答"当时跑的是哪一份"。
+2. **收尾断言"正在跑的就是刚构建的"**：逐个比较 `docker inspect <容器>.Image` 与 `docker image inspect <tag>.Id`。`Up N seconds (healthy)` **不是证据**——容器没换过去时，机器显示的是一模一样的状态。
+
+三条既有教训也编在里面，免得再踩：
+
+- `up` 一律带 `--no-build`：`compose.prod.yaml` 的 control-plane 服务带 `build:` 段，且其 context 指向**线上树**——漏了它，compose 可能构建出不是本次要发的代码
+- 替换 control-plane / gateway 之后**自动 `restart portal`**：nginx 的 upstream 是启动时解析的，后端容器换掉后地址变化，不重启则 `/api` 全 502
+- **显式钉住 compose 项目名**（`-p`）：项目名取决于调用时的目录，从别处跑会**另起一套容器**而不是更新线上那套
+
+**每次执行追加一行到 `deploy.log`**（时间 / 模式 / 目标提交 / 调用方 / 每个服务**运行中的镜像 ID 与当时的 tag ID**）。这一行是唯一的持久记录：等有人问"11:39 线上跑的是什么"，那张镜像可能早已被并发重建解除标签并从列表里清掉，届时只有这行还能回答。**两个身份都记**，是为了事后能分辨"tag 被人重建了"与"当初就没换过去"。
+
+退出码：`0` 已部署并验证 ｜ `1` 用法/环境 ｜ `2` 断言失败（有东西没换过去）｜ `3` 锁被占用（另一次部署在跑）。
+
 ## 9. Windows 开发
 
 开发者环境：

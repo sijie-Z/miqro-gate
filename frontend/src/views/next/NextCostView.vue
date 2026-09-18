@@ -60,6 +60,12 @@ const totalTokens = computed(
     (projectSummary.value?.totals?.tokens?.output ?? 0),
 );
 const cacheSaved = computed(() => projectSummary.value?.totals?.cost?.savedByGatewayCache ?? 0);
+/**
+ * #790: hits that happened before any price was in force for their model. While
+ * any remain, the saving is a lower bound — the card says so rather than letting a
+ * small number read as "the cache saved almost nothing".
+ */
+const unpricedHits = computed(() => Number(projectSummary.value?.totals?.unpriced?.unpricedHitEvents ?? 0));
 const cacheHits = computed(() => {
   const t = projectSummary.value?.totals;
   return t ? (t.requests?.l1Hit ?? 0) + (t.requests?.l2Hit ?? 0) : 0;
@@ -434,12 +440,16 @@ onMounted(async () => {
         <span class="next-cost__stat-value ui-num">{{ formatCount(totalTokens) }}</span>
         <span class="next-cost__stat-hint">输入 + 输出</span>
       </div>
-      <div class="ui-panel next-cost__stat">
+      <div class="ui-panel next-cost__stat" data-testid="cost-stat-cache-saved">
         <span class="next-cost__stat-label">缓存节省</span>
         <span class="next-cost__stat-value next-cost__stat-value--accent ui-num">{{
           formatCost(cacheSaved)
         }}</span>
-        <span class="next-cost__stat-hint">命中 {{ formatCount(cacheHits) }} 次 · 未调用上游</span>
+        <span class="next-cost__stat-hint"
+          >命中 {{ formatCount(cacheHits) }} 次 · 未调用上游<template v-if="unpricedHits > 0"
+            >（下界：{{ unpricedHits }} 次命中在发生时无生效价目）</template
+          ></span
+        >
       </div>
       <div class="ui-panel next-cost__stat" data-testid="cost-stat-cache-tokens">
         <span class="next-cost__stat-label">缓存命中 Token</span>
