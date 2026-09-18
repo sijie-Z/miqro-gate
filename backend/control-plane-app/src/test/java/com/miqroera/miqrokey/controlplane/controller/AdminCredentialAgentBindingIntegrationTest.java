@@ -108,8 +108,7 @@ class AdminCredentialAgentBindingIntegrationTest {
 
         rotate(credentialId).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("CREDENTIAL_REFERENCED_BY_AGENT"))
-                .andExpect(jsonPath("$.detail")
-                        .value(allOf(containsString("客服助手"), containsString("不能轮换"))));
+                .andExpect(jsonPath("$.detail").value(allOf(containsString("客服助手"), containsString("不能轮换"))));
 
         // Nothing was written: creation left the credential at version 1 with a single
         // ACTIVE version, and the rejected rotate moved neither.
@@ -120,8 +119,7 @@ class AdminCredentialAgentBindingIntegrationTest {
                 "SELECT * FROM upstream_credential_versions WHERE credential_id = :id", credentialId);
         assertThat(versions).hasSize(1);
         assertThat(versions.get(0).get("status")).isEqualTo("ACTIVE");
-        assertThat((byte[]) versions.get(0).get("secret_fingerprint"))
-                .isEqualTo(CredentialFingerprint.sha256(SECRET));
+        assertThat((byte[]) versions.get(0).get("secret_fingerprint")).isEqualTo(CredentialFingerprint.sha256(SECRET));
         assertThat(actionsFor(credentialId)).containsExactly("CREDENTIAL_CREATE");
     }
 
@@ -137,8 +135,7 @@ class AdminCredentialAgentBindingIntegrationTest {
 
         disable(credentialId).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("CREDENTIAL_REFERENCED_BY_AGENT"))
-                .andExpect(jsonPath("$.detail")
-                        .value(allOf(containsString("客服助手"), containsString("不能停用"))));
+                .andExpect(jsonPath("$.detail").value(allOf(containsString("客服助手"), containsString("不能停用"))));
 
         Map<String, Object> credential = row("SELECT * FROM upstream_credentials WHERE id = :id", credentialId);
         assertThat(credential.get("status")).isEqualTo("ACTIVE");
@@ -166,8 +163,7 @@ class AdminCredentialAgentBindingIntegrationTest {
         // The released credential rotates again; the other binding is unaffected.
         rotate(released).andExpect(status().isOk());
         Map<String, Object> active = row(
-                "SELECT * FROM upstream_credential_versions WHERE credential_id = :id AND status = 'ACTIVE'",
-                released);
+                "SELECT * FROM upstream_credential_versions WHERE credential_id = :id AND status = 'ACTIVE'", released);
         assertThat((byte[]) active.get("secret_fingerprint")).isEqualTo(CredentialFingerprint.sha256(SECRET_2));
         rotate(stillBound).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("CREDENTIAL_REFERENCED_BY_AGENT"));
@@ -208,11 +204,11 @@ class AdminCredentialAgentBindingIntegrationTest {
         UUID foreign = seedForeignTenantReferencedCredential();
 
         String rotateBody = rotate(foreign).andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("CREDENTIAL_NOT_FOUND"))
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(jsonPath("$.code").value("CREDENTIAL_NOT_FOUND")).andReturn().getResponse()
+                .getContentAsString();
         String disableBody = disable(foreign).andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("CREDENTIAL_NOT_FOUND"))
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(jsonPath("$.code").value("CREDENTIAL_NOT_FOUND")).andReturn().getResponse()
+                .getContentAsString();
 
         // A cross-tenant reference must read as "not found": the body may not name
         // the foreign agent or credential, which would confirm they exist elsewhere.
@@ -230,9 +226,9 @@ class AdminCredentialAgentBindingIntegrationTest {
         UUID credentialId = fx.createCredential("prod-key", SECRET);
         bindAgent("客服助手", credentialId);
 
-        mockMvc.perform(post("/api/v1/admin/credentials/{id}/rotate", credentialId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(Map.of("secret", SECRET_2))))
+        mockMvc.perform(
+                post("/api/v1/admin/credentials/{id}/rotate", credentialId).contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("secret", SECRET_2))))
                 .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
         mockMvc.perform(post("/api/v1/admin/credentials/{id}/disable", credentialId))
                 .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
@@ -252,15 +248,15 @@ class AdminCredentialAgentBindingIntegrationTest {
     // ------------------------------------------------------------------
 
     private org.springframework.test.web.servlet.ResultActions rotate(UUID credentialId) throws Exception {
-        return mockMvc.perform(post("/api/v1/admin/credentials/{id}/rotate", credentialId)
-                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(Map.of("secret", SECRET_2))));
+        return mockMvc
+                .perform(post("/api/v1/admin/credentials/{id}/rotate", credentialId).cookie(sessionCookie, csrfCookie)
+                        .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("secret", SECRET_2))));
     }
 
     private org.springframework.test.web.servlet.ResultActions disable(UUID credentialId) throws Exception {
-        return mockMvc.perform(post("/api/v1/admin/credentials/{id}/disable", credentialId).cookie(sessionCookie,
-                csrfCookie).header("X-CSRF-Token", csrfToken));
+        return mockMvc.perform(post("/api/v1/admin/credentials/{id}/disable", credentialId)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken));
     }
 
     private UUID bindAgent(String name, UUID credentialId) throws Exception {
@@ -269,8 +265,8 @@ class AdminCredentialAgentBindingIntegrationTest {
                         .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"" + name + "\",\"credentialId\":\"" + credentialId + "\"}"))
                 .andExpect(status().isOk()).andReturn();
-        return UUID.fromString((String) objectMapper.readValue(result.getResponse().getContentAsString(), Map.class)
-                .get("id"));
+        return UUID.fromString(
+                (String) objectMapper.readValue(result.getResponse().getContentAsString(), Map.class).get("id"));
     }
 
     private void disableAgent(UUID agentId) throws Exception {
@@ -282,7 +278,9 @@ class AdminCredentialAgentBindingIntegrationTest {
     // seeding / assertions
     // ------------------------------------------------------------------
 
-    /** Another tenant whose credential is pinned by one of its own ACTIVE agents. */
+    /**
+     * Another tenant whose credential is pinned by one of its own ACTIVE agents.
+     */
     private UUID seedForeignTenantReferencedCredential() {
         UUID tenantId = UUID.randomUUID();
         UUID userId = UUID.randomUUID();
@@ -292,14 +290,14 @@ class AdminCredentialAgentBindingIntegrationTest {
         jdbc.update("""
                 INSERT INTO tenants (id, code, name, status, version)
                 VALUES (:id, :code, 'Foreign Tenant', 'ACTIVE', 0)
-                """, new MapSqlParameterSource("id", tenantId).addValue("code", "t-" + tenantId.toString().substring(0, 8)));
+                """,
+                new MapSqlParameterSource("id", tenantId).addValue("code", "t-" + tenantId.toString().substring(0, 8)));
         jdbc.update("""
                 INSERT INTO users (id, tenant_id, username, display_name, password_hash, role, status,
                                    must_change_password, failed_login_count, version)
                 VALUES (:id, :tenantId, :username, 'Foreign Admin', :hash, 'SYSTEM_ADMIN', 'ACTIVE', FALSE, 0, 0)
                 """, new MapSqlParameterSource("id", userId).addValue("tenantId", tenantId)
-                .addValue("username", "foreign_" + userId.toString().substring(0, 8))
-                .addValue("hash", new byte[]{0}));
+                .addValue("username", "foreign_" + userId.toString().substring(0, 8)).addValue("hash", new byte[]{0}));
         jdbc.update("""
                 INSERT INTO upstream_subscriptions
                     (id, tenant_id, provider_product_id, name, billing_mode, status, version)
@@ -369,8 +367,7 @@ class AdminCredentialAgentBindingIntegrationTest {
                 }
             }
             try {
-                jdbc.update("DELETE FROM tenants WHERE id <> :seed",
-                        new MapSqlParameterSource("seed", tenantId));
+                jdbc.update("DELETE FROM tenants WHERE id <> :seed", new MapSqlParameterSource("seed", tenantId));
             } catch (Exception ignored) {
                 // The seed tenant is never deleted.
             }

@@ -66,7 +66,8 @@ public class AgentRepositoryImpl implements AgentRepository {
 
     @Override
     public Optional<Agent> findActiveByCredentialId(UUID tenantId, UUID credentialId) {
-        // uq_agents_tenant_credential bounds the result to one row regardless of status.
+        // uq_agents_tenant_credential bounds the result to one row regardless of
+        // status.
         try {
             return Optional.ofNullable(jdbc.queryForObject("""
                     SELECT * FROM agents
