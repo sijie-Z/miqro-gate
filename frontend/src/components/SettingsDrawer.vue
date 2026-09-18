@@ -24,6 +24,7 @@ type DisplayToggleKey = Extract<
   | 'showHeader'
   | 'showLogo'
   | 'showTabRefresh'
+  | 'showPageDesc'
   | 'grayMode'
   | 'colorWeakMode'
 >;
@@ -34,6 +35,7 @@ const DISPLAY_TOGGLES: Array<{ key: DisplayToggleKey; label: string }> = [
   { key: 'showHeader', label: '顶栏' },
   { key: 'showLogo', label: 'Logo' },
   { key: 'showTabRefresh', label: '标签页刷新按钮' },
+  { key: 'showPageDesc', label: '页面说明' },
   { key: 'grayMode', label: '灰色模式' },
   { key: 'colorWeakMode', label: '色弱模式' },
 ];
@@ -45,7 +47,7 @@ const MENU_THEMES: Array<{ value: MenuTheme; label: string }> = [
 
 const COMPACT_MODES: Array<{ value: ContentCompact; label: string }> = [
   { value: 'wide', label: '流式' },
-  { value: 'fixed', label: '固定' },
+  { value: 'fixed', label: '固定 1200' },
 ];
 
 const LOCK_OPTIONS: Array<{ value: number; label: string }> = [
