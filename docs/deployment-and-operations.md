@@ -112,6 +112,7 @@ deploy/deploy.sh --context /opt/miqrokey-dev --commit <sha> --services "control-
 - `--smoke-method` / `--smoke-data`：方法与 JSON 请求体。**默认目标是按"这个请求能不能看见失败"选的**：`OriginInterceptor` 只守状态变更方法（`POST/PUT/PATCH/DELETE`），而且它是 `HandlerInterceptor`——在 handler mapping **之后**运行，所以 GET 既不进检查，打到只收 POST 的路由还会被 mapping 先回 405。**因此默认目标是 `POST <origin>/api/v1/auth/login` + 空 JSON 体**：它正是 #794 打坏的那个端点（登录全 403），它 CSRF 豁免（否则"少了 CSRF 的 403"与"错 origin 的 403"就分不出来），空体校验回 400——**400 恰恰证明请求到达了处理器，也就是 origin 被接受了**。403 判死
 - `--smoke-origin` 带上 Origin 头——**证一个依赖配置的行为，比证一个与配置无关的 200 有价值**：origin allowlist 本身就是配置。默认目标会带上 allowlist 的第一项（即正确 origin），所以配置没加载时拿到的就是 403，**会被判死**而不是被当成 200 放过去
 - **这些断言自身由 `deploy/tests/deploy_script_regression.py` 守着**（#818）：每个场景造一个**只有那一个缺陷**的栈，再问脚本有没有发现它——**在健康栈上通过不算证据，要在坏栈上失败才算**。CI 里是 `Deploy script (behavioural)` job。它做过**反向验证**：把三条修复分别改回去，harness 必须红（实测三次全部命中）。
+- **自签证书的栈要加 `--smoke-insecure`**：冒烟的 curl 默认校验证书，自签时请求在 TLS 阶段就失败、状态码是 `000`，而 `000` 按设计只判 WARNING——**于是冒烟在这些部署上什么都证明不了，收尾语却照常是成功**。开关默认关（生产不该默认跳过校验）；打开后 `000` 的含义也跟着变清楚：不再是「证书可能有问题」，而就是「够不到」。文档里本机冒烟示例一直用 `curl -k`，脚本此前没有对应开关，属于两种默认不一致。
 - **运维显式给了 `--smoke-url` 时方法仍是 GET**：对不是自己挑的目标强加 POST，就是又一条"比它检查的东西更严"的假阳性（#807 的教训）
 - **不传 `--smoke-url` 时脚本会明说"什么都没查"**，收尾语也只说 `deployed; image identity verified`，不说 "verified"——**那个词曾经盖过了它实际没查的东西**
 
