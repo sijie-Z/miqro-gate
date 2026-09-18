@@ -4214,3 +4214,10 @@ red.sh:7: SC2254 (warning): Quote expansions in case patterns to match literally
 选 `-S warning` 而非默认：`info` 级会报 SC2016（单引号不展开）这类**有时是有意为之**的写法（我 dry-run 那行就是故意打印字面引号）。一上来全开只会逼出更多 disable——**而 disable 正是这次要治的东西**。先卡 warning，需要再收紧。
 
 job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
+## 2026-09-18 用量导出 CSV 转义收口（#816）——补上三写入器里唯一漏掉的公式防护
+
+**发现**（独立审计）：仓库三个 CSV 写入器中，审计导出（#430）与在建的对账导出（#798）都带 **RFC 4180 引号 + 公式注入前缀防护**，唯独**用量导出** `ExportTaskService.join()` 只做 `replace(",", "\,")`（非标准引号）。该导出的 `providerRequestId` **直接来自上游响应**（半可信来源），与 #798 注释里"provider-file text 需要防护"的判据完全同类；`clientIp`/`modelId` 亦为外部/管理输入。附带：引号与换行未处理（值内换行可劈断行、损坏列结构），且全树测试**未固化**任何旧转义行为。
+
+**修复**：`ExportTaskService` 新增包内可见 `quote(Object)`，语义与两个兄弟路径一致（RFC 4180 + `= + - @ TAB CR` 前缀 `'`；`Number` 原样输出——负数金额不被加上 `'`，与 #798 的数值豁免同理）。`join()` 改走 `quote()`。**不做**三份 `quote()` 的合并（#798 在飞，避免与其文件冲突；合并后可另行收口）。
+
+**先证红**：新增 `UsageExportCsvEscapeTest` 3 例（公式前缀/结构字符/数值与 null）；把 `quote()` 临时换回旧行为 → **2/3 红**（公式防护与结构引号），恢复后 **3/3 绿** + 兄弟 `AuditExportQuoteTest` 2/2 绿。
