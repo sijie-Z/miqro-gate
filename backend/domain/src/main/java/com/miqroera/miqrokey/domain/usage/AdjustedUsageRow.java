@@ -31,9 +31,9 @@ package com.miqroera.miqrokey.domain.usage;
  *            has no lifecycle row (coalesced requests never do)
  * @param priceBasis
  *            the unit prices this row is costed with — its own frozen prices,
- *            else the prices in force at its {@code occurred_at} (#710). Carried
- *            on the row, not looked up by the reader, so a price published later
- *            cannot change what this row costs
+ *            else the prices in force at its {@code occurred_at} (#710).
+ *            Carried on the row, not looked up by the reader, so a price
+ *            published later cannot change what this row costs
  */
 public record AdjustedUsageRow(UsageEvent observed, Long netInputTokens, Long netOutputTokens,
         Long netCacheReadInputTokens, Long netCacheCreationInputTokens, boolean adjusted, String providerProductName,

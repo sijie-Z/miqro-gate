@@ -6,8 +6,8 @@ import java.math.BigDecimal;
  * The unit prices one usage row is priced with (#710 / F21-A).
  *
  * <p>
- * The basis is <b>the row's own frozen price, falling back to the price in force
- * at that row's {@code occurred_at}</b> — the single rule stated in
+ * The basis is <b>the row's own frozen price, falling back to the price in
+ * force at that row's {@code occurred_at}</b> — the single rule stated in
  * {@code docs/usage-accounting.md} §6. The repository materialises it as
  * {@code COALESCE(usage_event.price_*, <as-of price_snapshot>)} via
  * {@code PriceSnapshotSql}, which is what keeps the detail list and the
