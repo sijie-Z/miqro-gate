@@ -68,6 +68,16 @@ miqrokey:
       enabled: ${MIQROKEY_PRICE_SYNC_AUTO_ENABLED:false}
       cycle-ms: ${MIQROKEY_PRICE_SYNC_AUTO_CYCLE_MS:86400000}
       initial-delay-ms: ${MIQROKEY_PRICE_SYNC_AUTO_INITIAL_DELAY_MS:60000}
+  # 用量价格基座派生列的调和（#777）：盖章通道只往前看——未评估的行会被盖章，已盖章
+  # 的行永不重访。于是新事件的 price_status 会一直停在 NULL（除非人工跑端点），而判据
+  # 变更后旧章也留在行上（某次部署有 4027 行仍写着 PARTIAL）。
+  # 本周期用同一个服务扫最近 48 小时的已盖章行，把派生列收敛到与读取一致：只重算标签
+  # 与补缺失金额，不重查价目、不改价格列、不动金额。默认关：扫描有成本，且读取侧本就
+  # 有 as-of 兜底、不受其影响。
+  usage-price-reconcile:
+    enabled: ${MIQROKEY_USAGE_PRICE_RECONCILE_ENABLED:false}
+    cycle-ms: ${MIQROKEY_USAGE_PRICE_RECONCILE_CYCLE_MS:900000}
+    initial-delay-ms: ${MIQROKEY_USAGE_PRICE_RECONCILE_INITIAL_DELAY_MS:120000}
   # 配额软着陆（#684，ADR-0020）：REJECT 规则超限判定周期（fixedDelay——上一轮
   # 结束后计时）；判定变化时发布路由刷新，网关在一个快照周期内开始 429。
   quota:
