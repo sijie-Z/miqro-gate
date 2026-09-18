@@ -17,10 +17,10 @@ export type UsageRecordPage = components['schemas']['UsageRecordPage'];
 export type RoiReportView = components['schemas']['RoiReportView'];
 // webhook deliveries: the backend service record is named DeliveryAttempt
 export type WebhookDelivery = components['schemas']['DeliveryAttempt'];
-// route rules (F11): the schema names the nested controller record
-// 'UpsertRequest'; the alias keeps the domain name the consumers use.
+// route rules (F11): #838 gave the nested controller record a unique schema
+// name ('McpRouteRuleUpsertRequest'); the alias keeps the domain name consumers use.
 export type McpRouteRule = components['schemas']['McpRouteRule'];
-export type UpsertMcpRouteRuleRequest = components['schemas']['UpsertRequest'];
+export type UpsertMcpRouteRuleRequest = components['schemas']['McpRouteRuleUpsertRequest'];
 export type SkillView = components['schemas']['SkillView'];
 // skill version management (I14): revision history view (metadata only)
 export type SkillRevisionView = components['schemas']['SkillRevisionView'];

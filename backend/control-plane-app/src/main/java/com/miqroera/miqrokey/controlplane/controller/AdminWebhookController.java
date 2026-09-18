@@ -39,7 +39,7 @@ public class AdminWebhookController {
     }
 
     @PostMapping
-    public WebhookEndpointView create(@RequestBody CreateRequest body, HttpServletRequest httpReq) {
+    public WebhookEndpointView create(@RequestBody WebhookCreateRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return endpointService.create(user.tenantId(), body.name(), body.url(), body.secret(),
                 body.timeoutMs() != null ? body.timeoutMs() : 5000, AuditContext.human(user.id(), requestId(httpReq)));
@@ -56,7 +56,7 @@ public class AdminWebhookController {
     }
 
     @PatchMapping("/{endpointId}")
-    public WebhookEndpointView update(@PathVariable UUID endpointId, @RequestBody UpdateRequest body,
+    public WebhookEndpointView update(@PathVariable UUID endpointId, @RequestBody WebhookUpdateRequest body,
             HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return endpointService.updateView(user.tenantId(), endpointId, body.name(), body.enabled(), body.timeoutMs(),
@@ -82,10 +82,10 @@ public class AdminWebhookController {
         return endpointService.deliveries(userContext.getUser().tenantId(), endpointId, limit);
     }
 
-    public record CreateRequest(String name, String url, String secret, Integer timeoutMs) {
+    public record WebhookCreateRequest(String name, String url, String secret, Integer timeoutMs) {
     }
 
-    public record UpdateRequest(String name, Boolean enabled, Integer timeoutMs) {
+    public record WebhookUpdateRequest(String name, Boolean enabled, Integer timeoutMs) {
     }
     private static String requestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");

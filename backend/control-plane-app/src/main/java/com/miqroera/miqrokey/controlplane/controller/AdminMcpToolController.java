@@ -58,7 +58,7 @@ public class AdminMcpToolController {
     }
 
     @PostMapping
-    public McpTool create(@PathVariable UUID serviceId, @Valid @RequestBody CreateRequest body,
+    public McpTool create(@PathVariable UUID serviceId, @Valid @RequestBody McpToolCreateRequest body,
             HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return toolService.create(user.tenantId(), user.id(), serviceId, body.toolName(), body.description(),
@@ -107,7 +107,7 @@ public class AdminMcpToolController {
      */
     @PutMapping("/{toolId}/retry-policy")
     public com.miqroera.miqrokey.domain.model.McpToolRetryPolicy configureRetryPolicy(@PathVariable UUID serviceId,
-            @PathVariable UUID toolId, @RequestBody AdminMcpToolRetryService.RequestedPolicy body,
+            @PathVariable UUID toolId, @RequestBody AdminMcpToolRetryService.ToolRetryPolicyRequest body,
             HttpServletRequest httpReq) {
         var user = userContext.getUser();
         String requestId = httpReq.getHeader("X-Request-Id");
@@ -156,7 +156,7 @@ public class AdminMcpToolController {
         return revisionService.activate(user.tenantId(), user.id(), toolId, revision, requestId(httpReq));
     }
 
-    public record CreateRequest(@NotBlank @Size(max = 128) String toolName, @Size(max = 2000) String description,
+    public record McpToolCreateRequest(@NotBlank @Size(max = 128) String toolName, @Size(max = 2000) String description,
             @Pattern(regexp = "GET|POST|PUT|DELETE|PATCH", message = "method must be GET, POST, PUT, DELETE or PATCH") String method,
             @NotBlank @Size(max = 512) String path) {
     }
