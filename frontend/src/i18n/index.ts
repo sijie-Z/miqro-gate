@@ -46,6 +46,16 @@ export function translateText(collapsed: string): string | null {
 function translateOne(collapsed: string): string | null {
   const direct = DICT[collapsed];
   if (direct !== undefined) return direct;
+  // Error toasts append the request id to the message ("…不能停用；请先停用该 Agent。（requestId: 123）",
+  // NextCredentialsView and friends). The suffix is not copy: strip it, translate
+  // the head, and put it back verbatim so the toast stays one text node.
+  const suffixed = /^([\s\S]+)（requestId: ([^）]*)）$/.exec(collapsed);
+  const head = suffixed?.[1];
+  const requestId = suffixed?.[2];
+  if (head !== undefined && requestId !== undefined) {
+    const translated = translateOne(head);
+    if (translated !== null) return `${translated}（requestId: ${requestId}）`;
+  }
   for (const [re, replacement] of PATTERNS) {
     if (re.test(collapsed)) {
       return collapsed.replace(re, replacement);
