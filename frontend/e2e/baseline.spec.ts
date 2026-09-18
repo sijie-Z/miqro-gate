@@ -1414,8 +1414,7 @@ test('model approval request page baseline at 1440x900', async ({ page }) => {
   });
 });
 
-test('forbidden aesthetics are absent from the rendered shell', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
+test('forbidden aesthetics are absent from the rendered shell', async ({ page }) => {  await page.setViewportSize({ width: 1440, height: 900 });
   await mockApi(page, true);
   await page.goto('/app/keys');
   await page.waitForLoadState('networkidle');
@@ -1435,10 +1434,18 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
     });
     const own = sheet.filter((r) => {
       const selector = (r as CSSStyleRule).selectorText ?? '';
-      // Brand icon chips (.mk-brand-chip) and the cost donut (.mk-donut) carry
-      // the only permitted gradients under the 2026-08-27 direction
-      // (frontend-design.md §4.1); surfaces stay flat.
-      if (selector.includes('.mk-brand-chip') || selector.includes('.mk-donut')) {
+      // Brand identity chips — .mk-brand-chip, the provider family
+      // (.mk-chip-<provider>) — and the cost donut (.mk-donut) carry the only
+      // permitted gradients under the 2026-08-27 direction
+      // (frontend-design.md §4.1/§9); surfaces stay flat. The provider chips
+      // shipped gradients since the palette landed, but this filter named only
+      // .mk-brand-chip — harmless until the `sanitized.join` repair below gave
+      // the audit teeth (2026-09-18).
+      if (
+        selector.includes('.mk-brand-chip') ||
+        selector.includes('.mk-chip-') ||
+        selector.includes('.mk-donut')
+      ) {
         return false;
       }
       return (
@@ -1461,7 +1468,10 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
       }
       return r.cssText;
     });
-    const text = sanitized.join;
+    // NB: `sanitized.join` (missing call) used to sit here — the regex then
+    // tested the stringified Function and both assertions below were toothless
+    // (2026-09-18, found while adding the brace-slip guard). Always invoke.
+    const text = sanitized.join('');
     return {
       gradients: /linear-gradient|radial-gradient|conic-gradient/.test(text),
       purple: /#7c3aed|#8b5cf6|#a855f7|#6d28d9|#9333ea|purple/i.test(text),
@@ -1472,4 +1482,46 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
   // may only appear on .mk-brand-chip and .mk-donut, never on surfaces.
   expect(violations.gradients).toBe(false);
   expect(violations.purple).toBe(false);
+});
+
+test('the built stylesheet keeps html-attribute rules at top level (brace-slip guard)', async ({
+  page,
+}) => {
+  // 2026-09-18 incident: an unclosed `:root {` in design-tokens.css made the
+  // build nest design-base.css inside it — every selector shipped as
+  // `:root .x`, and html-attribute preference rules (`[data-menu-theme=…]`,
+  // `[data-anim=off]`, …) became `:root [data-…]`, matching nothing. The rail
+  // ink token then fell back to body text color and "MiQroGate" vanished on
+  // the navy rail. Typecheck/tests/build were all green, so the guard lives
+  // here against the real bundle: no `:root :root` / `:root [data-` selectors,
+  // and the brand ink must actually resolve to white on the dark rail.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/keys');
+  await page.waitForLoadState('networkidle');
+
+  const mangles = await page.evaluate(() => {
+    const bad: string[] = [];
+    for (const sheet of [...document.styleSheets]) {
+      let rules: CSSRule[];
+      try {
+        rules = [...sheet.cssRules];
+      } catch {
+        continue;
+      }
+      for (const rule of rules) {
+        const selector = (rule as CSSStyleRule).selectorText ?? '';
+        if (selector.includes(':root :root') || selector.includes(':root [data-')) {
+          bad.push(selector);
+        }
+      }
+    }
+    return bad;
+  });
+  expect(mangles).toEqual([]);
+
+  const brandColor = await page
+    .locator('.new-shell__brand-name')
+    .evaluate((el) => getComputedStyle(el).color);
+  expect(brandColor).toBe('rgb(255, 255, 255)');
 });
