@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.domain.usage;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.Cost;
+import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.HitAggRow;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.PricingGap;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.PricingStatus;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageAggRow;
@@ -35,8 +36,8 @@ class UsageStatsPricingStatusTest {
         // 1M input tokens, no price anywhere — the shape of an event that predates
         // every
         // price row we hold.
-        UsageSummary summary = aggregate(
-                row(1_000_000L, 0L, BigDecimal.ZERO, BigDecimal.ZERO, new PricingGap(1_000_000L, 0L, 0L, 0L, 1, 1)));
+        UsageSummary summary = aggregate(row(1_000_000L, 0L, BigDecimal.ZERO, BigDecimal.ZERO,
+                new PricingGap(1_000_000L, 0L, 0L, 0L, 1, 1, 0L)));
 
         Cost cost = summary.totals().cost();
         assertThat(cost.upstreamPaid()).isEqualByComparingTo("0");
@@ -63,7 +64,7 @@ class UsageStatsPricingStatusTest {
     void partialCountsOnlyPricedDimensions() {
         // Input priced (1.00/M applied to 1M = 1.0), output has tokens but no price.
         UsageSummary summary = aggregate(row(1_000_000L, 500_000L, new BigDecimal("1000000"), BigDecimal.ZERO,
-                new PricingGap(0L, 500_000L, 0L, 0L, 1, 0)));
+                new PricingGap(0L, 500_000L, 0L, 0L, 1, 0, 0L)));
 
         assertThat(summary.totals().pricingStatus()).isEqualTo(PricingStatus.PARTIAL);
         assertThat(summary.totals().cost().upstreamPaid()).as("known cost covers only the priced dimensions")
@@ -81,10 +82,50 @@ class UsageStatsPricingStatusTest {
         assertThat(summary.totals().cost().upstreamPaid()).isEqualByComparingTo("1");
     }
 
+    @Test
+    @DisplayName("a hit we could not price makes the saving a lower bound, and leaves the cost status alone")
+    void unpricedHitMakesTheSavingALowerBound() {
+        // Every usage row is fully priced, so the *cost* is complete; the hit could not
+        // be valued, so the *saving* is a lower bound. Two different figures, and only
+        // one of them is short (#790).
+        UsageSummary summary = UsageStatsAggregator.aggregate("model",
+                List.of(row(1_000_000L, 0L, new BigDecimal("1000000"), BigDecimal.ZERO, PricingGap.NONE)),
+                List.of(hitRow(3L, 2L, 5L)));
+
+        assertThat(summary.totals().pricingStatus()).as("a savings gap does not make the cost incomplete")
+                .isEqualTo(PricingStatus.COMPLETE);
+        assertThat(summary.totals().unpriced().hasCostGap()).isFalse();
+        assertThat(summary.totals().unpriced().unpricedHitEvents()).isEqualTo(5L);
+        // ...and the group is still not gap-free: saying so is the whole point.
+        assertThat(summary.totals().unpriced().isEmpty()).isFalse();
+    }
+
+    @Test
+    @DisplayName("a hit that could be priced leaves no gap behind it")
+    void pricedHitLeavesNoGap() {
+        UsageSummary summary = UsageStatsAggregator.aggregate("model",
+                List.of(row(1_000_000L, 0L, new BigDecimal("1000000"), BigDecimal.ZERO, PricingGap.NONE)),
+                List.of(hitRow(2L, 1L, 0L)));
+
+        assertThat(summary.totals().unpriced().isEmpty()).isTrue();
+        assertThat(summary.totals().cost().savedByGatewayCache()).isEqualByComparingTo("0");
+    }
+
     // -------------------------------------------------------------------
 
     private static UsageSummary aggregate(UsageAggRow row) {
         return UsageStatsAggregator.aggregate("model", List.of(row), List.of());
+    }
+
+    /**
+     * One hit group. {@code unpricedHits} is how many of its hits carried tokens
+     * with no price in force — the count the repository derives from the same
+     * token-aware rule the usage side uses.
+     */
+    private static HitAggRow hitRow(long l1, long l2, long unpricedHits) {
+        return new HitAggRow("g", "G", PRODUCT, MODEL, l1, l2,
+                new TokenBucket(1_000L, 500L, null, null, null, null, null, null), BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO, BigDecimal.ZERO, unpricedHits);
     }
 
     /**
