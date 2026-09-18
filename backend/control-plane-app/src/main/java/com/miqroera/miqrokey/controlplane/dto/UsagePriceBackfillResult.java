@@ -19,6 +19,11 @@ package com.miqroera.miqrokey.controlplane.dto;
  * @param unavailable
  *            no dimension could be priced — the event predates any price we
  *            hold
+ * @param baseCostFilled
+ *            rows that already held a price basis but no frozen amount, and
+ *            whose amount this pass completed (#771). Counted apart from
+ *            {@code scanned} because nothing was re-evaluated for them
  */
-public record UsagePriceBackfillResult(long scanned, long complete, long partial, long unavailable) {
+public record UsagePriceBackfillResult(long scanned, long complete, long partial, long unavailable,
+        long baseCostFilled) {
 }

@@ -58,6 +58,7 @@ class UsagePriceBackfillIntegrationTest {
     private static final UUID PRODUCT = UUID.fromString("00000000-0000-0000-0000-0000000000e2");
     private static final String MODEL = "backfill-model";
     private static final String OTHER_MODEL = "backfill-unpriced-model";
+    private static final String ZERO_TOKEN_MODEL = "backfill-zero-token-model";
 
     /** Event happened two hours ago. */
     private static final Instant EVENT_AT = Instant.now().minusSeconds(2 * 3600);
@@ -276,6 +277,66 @@ class UsagePriceBackfillIntegrationTest {
     }
 
     // -------------------------------------------------------------------
+    // #771: rows stamped before base_cost_amount existed
+
+    @Test
+    @DisplayName("completes the base cost of rows stamped before the column existed (#771)")
+    void completesBaseCostOfRowsStampedBeforeTheColumnExisted() throws Exception {
+        seedStampedEvent(MODEL, "COMPLETE", 1000L, 500L, "1.00", "4.00");
+
+        Map<String, Object> result = backfill();
+
+        // Nothing was re-evaluated — there was no decision left to make, only an
+        // amount left to write.
+        assertThat(result.get("scanned")).isEqualTo(0);
+        assertThat(result.get("baseCostFilled")).isEqualTo(1);
+        Map<String, Object> row = priceColumnsOf(MODEL);
+        // (1000 x 1.00 + 500 x 4.00) / 1e6
+        assertThat(row.get("base_cost_amount")).isEqualTo(new BigDecimal("0.0030000000"));
+        // Completing the record must not revise it.
+        assertThat(row.get("price_status")).isEqualTo("COMPLETE");
+        assertThat(row.get("price_input")).isEqualTo(new BigDecimal("1.0000000000"));
+    }
+
+    @Test
+    @DisplayName("the completion derives from the row's frozen prices, not from the catalogue")
+    void completionDerivesFromFrozenPricesNotTheCatalogue() throws Exception {
+        seedStampedEvent(MODEL, "COMPLETE", 1000L, 500L, "1.00", "4.00");
+        // Published only now: re-deriving from the catalogue would pick this up and
+        // silently inflate an amount whose whole point is to be frozen.
+        priceAllDimensions(MODEL, PRICE_AFTER_EVENT, "9.99", "9.99", "9.99", "9.99");
+
+        backfill();
+
+        assertThat(priceColumnsOf(MODEL).get("base_cost_amount")).isEqualTo(new BigDecimal("0.0030000000"));
+    }
+
+    @Test
+    @DisplayName("rows that cannot be priced keep NULL — the completion never invents a zero")
+    void completionLeavesUnpriceableRowsNull() throws Exception {
+        // UNAVAILABLE: its NULL records that no price was in force.
+        seedStampedEvent(OTHER_MODEL, "UNAVAILABLE", 1000L, 500L, null, null);
+        // COMPLETE with no tokens at all: nothing to sum, so nothing derivable — and
+        // it must not be re-selected for ever.
+        seedStampedEvent(ZERO_TOKEN_MODEL, "COMPLETE", null, null, null, null);
+
+        Map<String, Object> result = backfill();
+
+        assertThat(result.get("baseCostFilled")).isEqualTo(0);
+        assertThat(priceColumnsOf(OTHER_MODEL).get("base_cost_amount")).isNull();
+        assertThat(priceColumnsOf(ZERO_TOKEN_MODEL).get("base_cost_amount")).isNull();
+    }
+
+    @Test
+    @DisplayName("the completion is idempotent: a second pass has nothing left to do")
+    void completionIsIdempotent() throws Exception {
+        seedStampedEvent(MODEL, "COMPLETE", 1000L, 500L, "1.00", "4.00");
+
+        assertThat(backfill().get("baseCostFilled")).isEqualTo(1);
+        assertThat(backfill().get("baseCostFilled")).isEqualTo(0);
+    }
+
+    // -------------------------------------------------------------------
 
     private Map<String, Object> backfill() throws Exception {
         MvcResult res = mockMvc.perform(post("/api/v1/admin/usage-price-backfill")
@@ -323,6 +384,30 @@ class UsagePriceBackfillIntegrationTest {
                 SELECT price_input, price_output, price_status, price_effective_from, base_cost_amount
                   FROM usage_event WHERE tenant_id = :tenantId AND model_id = :modelId
                 """, new MapSqlParameterSource("tenantId", TENANT).addValue("modelId", model));
+    }
+
+    /**
+     * A row in the state #771 leaves behind: the price basis was frozen, but the
+     * frozen <em>amount</em> is missing because the column did not exist yet.
+     */
+    private void seedStampedEvent(String model, String status, Long inputTokens, Long outputTokens, String priceInput,
+            String priceOutput) {
+        jdbc.update("""
+                INSERT INTO usage_event (id, tenant_id, virtual_key_id, project_id, provider_product_id, model_id,
+                    gateway_request_id, input_tokens, output_tokens, is_complete, usage_missing, occurred_at,
+                    price_input, price_output, price_currency, price_effective_from, price_source, price_status)
+                VALUES (:id, :tenantId, :keyId, :projectId, :productId, :modelId,
+                    :requestId, :inputTokens, :outputTokens, TRUE, FALSE, :occurredAt,
+                    :priceInput, :priceOutput, 'CNY', :occurredAt, 'MANUAL', :status)
+                """,
+                new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", TENANT)
+                        .addValue("keyId", UUID.randomUUID()).addValue("projectId", UUID.randomUUID())
+                        .addValue("productId", PRODUCT).addValue("modelId", model).addValue("requestId", "gw-" + model)
+                        .addValue("inputTokens", inputTokens).addValue("outputTokens", outputTokens)
+                        .addValue("occurredAt", java.sql.Timestamp.from(EVENT_AT))
+                        .addValue("priceInput", priceInput == null ? null : new BigDecimal(priceInput))
+                        .addValue("priceOutput", priceOutput == null ? null : new BigDecimal(priceOutput))
+                        .addValue("status", status));
     }
 
     /** Child-first; usage rows precede the price rows they reference. */
