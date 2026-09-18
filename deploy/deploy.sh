@@ -236,9 +236,20 @@ smoke_api_origin() {
     origin="$(grep -E '^MIQROKEY_ORIGIN_ALLOWLIST=' "$COMPOSE_DIR/.env" | head -n 1 | cut -d= -f2- | cut -d, -f1)"
     [ -n "$origin" ] || { echo "skipped smoke: no MIQROKEY_ORIGIN_ALLOWLIST in .env"; return 0; }
     command -v curl >/dev/null 2>&1 || { echo "skipped smoke: no curl"; return 0; }
-    code="$(curl -s -k -o /dev/null -w '%{http_code}' --max-time 10 -X POST \
-        -H "Origin: $origin" -H 'Content-Type: application/json' -d '{}' \
-        https://127.0.0.1/api/v1/auth/login || true)"
+    # The portal has just been restarted, so nginx needs a moment to listen and to
+    # re-resolve: retry only the answers that mean "not up yet" (000, 5xx). A 403 is
+    # a verdict, not a timing artifact, and is reported at once.
+    attempt=1
+    while [ "$attempt" -le 15 ]; do
+        code="$(curl -s -k -o /dev/null -w '%{http_code}' --max-time 10 -X POST \
+            -H "Origin: $origin" -H 'Content-Type: application/json' -d '{}' \
+            https://127.0.0.1/api/v1/auth/login || true)"
+        case "${code:-000}" in
+            000 | 5*) sleep 2 ;;
+            *) break ;;
+        esac
+        attempt=$((attempt + 1))
+    done
     case "${code:-000}" in
         403)
             echo "ASSERT FAILED smoke: API answers 403 to the configured Origin '$origin'" >&2
@@ -246,7 +257,7 @@ smoke_api_origin() {
             failed=1
             ;;
         000 | 5*)
-            echo "ASSERT FAILED smoke: API through the portal answered '${code:-000}'" >&2
+            echo "ASSERT FAILED smoke: API through the portal answered '${code:-000}' after 15 tries" >&2
             echo "  -> nginx cannot reach the upstream it was restarted against" >&2
             failed=1
             ;;
