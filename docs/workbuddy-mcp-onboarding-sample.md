@@ -60,8 +60,9 @@ WorkBuddy（封闭客户端）
 
 1. **`tools/sync` 对严格 Streamable HTTP 上游 406**（issue #779 / PR #781）：同步客户端此前只发
    `Accept: application/json`，缺规范要求的 `text/event-stream` —— 对 DeepWiki 这类严格上游，
-   "一键同步工具"不可用（错误面是 `502 TOOLS_SYNC_UPSTREAM_FAILED`，上游 406）。修复后 Accept
-   兼发双媒体类型；修复前已用对照实验定位（同上游裸 `tools/list`：双媒体类型 200 / 单类型 406）。
+   "一键同步工具"不可用（错误面是 `502 TOOLS_SYNC_UPSTREAM_FAILED`，上游 406）。两步修复：Accept
+   兼发双媒体类型（PR #781）+ SSE 响应帧解帧（PR #788）；修复前已用对照实验定位（同上游裸 `tools/list`：
+   双媒体类型 200 / 单类型 406），修复后真机复现又暴露第二半（406 消失但上游改发 SSE 帧仍 502）。
    > 修复部署前的手工绕行：`POST …/tools`（MCP 原生工具用官方占位 `method=POST, path="/"`）+
    > `POST …/tools/{id}/status?status=ENABLED`。
 2. **健康检查模式选择**：对真 MCP 上游用 `HEALTH_PATH` 会误判——若 checkPath 恰好落在会返回
