@@ -11,7 +11,8 @@ import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
-import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
+import { costGapNote } from '@/lib/usage-pricing';
+import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, UiTooltip, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
 import type { BudgetView, Project, UsageGroup, UsageSummary } from '@/types/generated-api';
 
@@ -66,6 +67,11 @@ const cacheSaved = computed(() => projectSummary.value?.totals?.cost?.savedByGat
  * small number read as "the cache saved almost nothing".
  */
 const unpricedHits = computed(() => Number(projectSummary.value?.totals?.unpriced?.unpricedHitEvents ?? 0));
+/**
+ * #801: the cost cards are not totals while this is non-null. Same promise the API
+ * has kept since #766, which the console never showed.
+ */
+const costCaveat = computed(() => costGapNote(projectSummary.value?.totals));
 const cacheHits = computed(() => {
   const t = projectSummary.value?.totals;
   return t ? (t.requests?.l1Hit ?? 0) + (t.requests?.l2Hit ?? 0) : 0;
@@ -420,15 +426,23 @@ onMounted(async () => {
     </div>
 
     <div class="next-cost__stats" data-testid="cost-stats">
-      <div class="ui-panel next-cost__stat">
+      <div class="ui-panel next-cost__stat" data-testid="cost-stat-total">
         <span class="next-cost__stat-label">分摊总成本</span>
         <span class="next-cost__stat-value ui-num">{{ formatCost(totalCost) }}</span>
         <span class="next-cost__stat-hint">按项目分摊口径</span>
+        <UiTooltip v-if="costCaveat" :text="costCaveat">
+          <span class="next-cost__stat-caveat" data-testid="cost-unpriced-total">未定价</span>
+        </UiTooltip>
       </div>
-      <div class="ui-panel next-cost__stat">
+      <div class="ui-panel next-cost__stat" data-testid="cost-stat-upstream">
         <span class="next-cost__stat-label">上游已付成本</span>
         <span class="next-cost__stat-value ui-num">{{ formatCost(upstreamCost) }}</span>
-        <span class="next-cost__stat-hint">按最新单价估算</span>
+        <!-- #801: this said "按最新单价估算" long after the read path stopped using
+             the latest price (#766): the cost is each event's own frozen price. -->
+        <span class="next-cost__stat-hint">按事件发生时的价目估算</span>
+        <UiTooltip v-if="costCaveat" :text="costCaveat">
+          <span class="next-cost__stat-caveat" data-testid="cost-unpriced-upstream">未定价</span>
+        </UiTooltip>
       </div>
       <div class="ui-panel next-cost__stat">
         <span class="next-cost__stat-label">请求</span>
@@ -737,6 +751,11 @@ onMounted(async () => {
   flex-direction: column;
   gap: var(--ui-space-1);
   padding: var(--ui-space-4);
+}
+
+.next-cost__stat-caveat {
+  color: var(--ui-color-warning, #8a4b00);
+  font-size: 12px;
 }
 
 .next-cost__stat-label {
