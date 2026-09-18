@@ -33,14 +33,14 @@
 
 ### 1.4 对外口径需要 owner 补事实
 
-#718 转述「对外口径是语义缓存『接口预留、默认不开；要开需拍板 + 新 ADR』」。**该措辞在仓库内无逐字来源**；等价转述见 `docs/decisions/0009-enable-response-cache.md:13,38`、`docs/feature-backlog.md:99`、`docs/configuration-reference.md:287`、`docs/progress.md:1284,1289`。若确已向客户/领导报告过该口径，需 owner 提供原话或材料——因为「维持禁用」与「要开需拍板」是两种不同强度的承诺，决定了本次结论能否直接对外复用。
+#718 转述「对外口径是语义缓存『接口预留、默认不开；要开需拍板 + 新 ADR』」。**该措辞在仓库内无逐字来源**；等价转述见 `docs/decisions/0009-enable-response-cache.md:13,38`、`docs/feature-backlog.md:99`、`docs/configuration-reference.md:287`、`docs/progress.md:1309,1314`。若确已向客户/领导报告过该口径，需 owner 提供原话或材料——因为「维持禁用」与「要开需拍板」是两种不同强度的承诺，决定了本次结论能否直接对外复用。
 
 ## 2. Q1 收益：预计命中率与成本节省
 
 - **本系统无实测数据，且现在也拿不到。** 精确缓存已有命中率观测（`cache_hit_event` 表 + 用量汇总 `savedByGatewayCache`，成本报表页展示），但那是**精确缓存**的收益；语义增量收益 = 「精确键未命中、但语义上等价」的请求占比，而这一部分**恰恰需要看到正文才能判定**——本系统不保存正文（`CLAUDE.md:39`），因此无法离线回放估算。这是本议题的鸡生蛋问题，必须如实记录，不能用行业数字代替。
 - 可用的**下界**（现有数据即可读出，零新增合规面）：`cache_hit_event` 的命中率 + `purpose=CHAT` 的重复率。但它只给出「精确缓存已覆盖多少」，不给出「语义还能多覆盖多少」。
 - 行业侧只有厂商标称，无独立验证：Higress 语义缓存宣称省 40-60%（转引见 `docs/ai-gateway-comparison.md:92`）；腾讯只提供 L1 精确缓存口径（`docs/tencent-ai-gateway-mapping.md:12,21`）。**这些数字不构成本系统收益的估计。**
-- 关键反证：本系统主要场景是编码 Agent（Claude Code / CC Switch 形态，`docs/tencent-ai-gateway-mapping.md:58`），上下文高度多变；ADR-0003 已记录「Coding Agent 流量缓存收益存疑」，G7.4 复盘同样标记该风险（`docs/progress.md:1289`）。这与 §5 的流式约束叠加，使预期收益进一步收窄。
+- 关键反证：本系统主要场景是编码 Agent（Claude Code / CC Switch 形态，`docs/tencent-ai-gateway-mapping.md:58`），上下文高度多变；ADR-0003 已记录「Coding Agent 流量缓存收益存疑」，G7.4 复盘同样标记该风险（`docs/progress.md:1314`）。这与 §5 的流式约束叠加，使预期收益进一步收窄。
 
 **结论**：收益当前**不可估**。任何要求「先证明收益」的拍板，都必须先选一条测量路径（见 §4 与 §10-3）。
 
