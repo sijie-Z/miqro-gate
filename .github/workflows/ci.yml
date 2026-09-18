@@ -205,6 +205,13 @@ jobs:
       - name: OpenAPI breaking-change diff vs committed baseline
         run: python3 deploy/openapi/check-openapi-breaking.py docs/openapi/openapi-3.1.json backend/control-plane-app/target/openapi-spec.json
         if: ${{ needs.changes.outputs.backend == 'true' }}
+      # #838: no bare-name component schemas. springdoc merges same-simple-name
+      # nested DTOs (`record CreateRequest` in fifteen controllers) into one
+      # schema, which documents every endpoint but one with the wrong body; the
+      # guard fails the moment such a name comes back.
+      - name: OpenAPI bare-name schema guard
+        run: python3 deploy/openapi/check-openapi-schema-names.py backend/control-plane-app/target/openapi-spec.json
+        if: ${{ needs.changes.outputs.backend == 'true' }}
 
   # Frontend static checks + unit tests + production build.
   client:
