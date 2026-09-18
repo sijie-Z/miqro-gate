@@ -88,13 +88,9 @@ public class AdminUsageStatsService {
         UsageStatsService.validateTimeRange(from, to);
         UsageStatsRepository.UsageFilter filter = adminFilter(tenantId, from, to, userId, projectId, virtualKeyId,
                 credentialId, subscriptionId, providerProductId, modelId, null, teamId);
-        Map<String, BigDecimal> prices = new LinkedHashMap<>();
-        for (PriceSnapshot p : priceSnapshotRepository.findAllLatestAt(Instant.now())) {
-            prices.put(p.providerProductId() + ":" + p.modelId() + ":" + p.tokenType().name(), p.unitPrice());
-        }
         List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
         List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
-        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows, prices);
+        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows);
     }
 
     public UsageSummary summary(User admin, String groupBy, Instant from, Instant to, UUID userId, UUID projectId,
@@ -115,13 +111,21 @@ public class AdminUsageStatsService {
         UsageStatsRepository.GroupBy dimension = UsageStatsService.parseGroupBy(groupBy);
         UsageStatsRepository.UsageFilter filter = new UsageStatsRepository.UsageFilter(tenantId, null, userId,
                 projectId, null, null, null, null, null, null, from, to);
+        List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
+        List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
+        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows);
+    }
+
+    /**
+     * Latest price snapshot keyed {@code productId:modelId:TOKEN_TYPE} — the same
+     * map the aggregates price with.
+     */
+    private Map<String, BigDecimal> priceMap() {
         Map<String, BigDecimal> prices = new LinkedHashMap<>();
         for (PriceSnapshot p : priceSnapshotRepository.findAllLatestAt(Instant.now())) {
             prices.put(p.providerProductId() + ":" + p.modelId() + ":" + p.tokenType().name(), p.unitPrice());
         }
-        List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
-        List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
-        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows, prices);
+        return prices;
     }
 
     /** Paged raw usage records over the whole tenant, newest first. */
@@ -166,7 +170,7 @@ public class AdminUsageStatsService {
         List<AdjustedUsageRow> events = usageStatsRepository.findRecords(filter, (page - 1) * size, size);
         List<UsageRecordPage.UsageRecordView> items = new ArrayList<>(events.size());
         for (AdjustedUsageRow row : events) {
-            items.add(view(row));
+            items.add(view(row, priceMap()));
         }
         return new UsageRecordPage(items, page, size, total);
     }
@@ -258,19 +262,27 @@ public class AdminUsageStatsService {
      * Maps one row to the wire shape. The observed counts stay exactly the fact the
      * gateway recorded; the net counts and the {@code adjusted} marker ride
      * alongside so a reader can always tell a corrected row from an untouched one
-     * (#709).
+     * (#709). The per-row cost is priced with the same snapshot map as the
+     * aggregates (#758) and flagged {@code priced=false} when the model is not
+     * (fully) priced.
      */
-    private static UsageRecordPage.UsageRecordView view(AdjustedUsageRow row) {
+    private static UsageRecordPage.UsageRecordView view(AdjustedUsageRow row, Map<String, BigDecimal> prices) {
         UsageEvent e = row.observed();
         TokenBucket t = e.tokens();
         Long input = orNull(t != null ? t.inputTokens() : null, t != null ? t.promptTokens() : null);
         Long output = orNull(t != null ? t.outputTokens() : null, t != null ? t.completionTokens() : null);
+        Long cacheRead = t != null ? t.cacheReadInputTokens() : null;
+        Long cacheCreation = t != null ? t.cacheCreationInputTokens() : null;
+        UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(prices, e.providerProductId(),
+                e.modelId(), input, output, cacheRead, cacheCreation);
         return new UsageRecordPage.UsageRecordView(e.occurredAt(), e.modelId(), e.cacheLevel(), input, output,
-                t != null ? t.cacheReadInputTokens() : null, t != null ? t.cacheCreationInputTokens() : null,
-                t != null ? t.totalTokens() : null, e.latencyMs(), e.upstreamStatusCode(), e.providerRequestId(),
-                e.gatewayRequestId(), e.isComplete(), e.usageMissing(), e.virtualKeyId(), e.clientIp(),
-                row.netInputTokens(), row.netOutputTokens(), row.netCacheReadInputTokens(),
-                row.netCacheCreationInputTokens(), row.adjusted());
+                cacheRead, cacheCreation, t != null ? t.totalTokens() : null, e.latencyMs(), e.upstreamStatusCode(),
+                e.providerRequestId(), e.gatewayRequestId(), e.isComplete(), e.usageMissing(), e.virtualKeyId(),
+                e.clientIp(), row.netInputTokens(), row.netOutputTokens(), row.netCacheReadInputTokens(),
+                row.netCacheCreationInputTokens(), row.adjusted(), row.providerProductName(),
+                row.lifecycle() != null ? row.lifecycle().timeToFirstByteMs() : null,
+                row.lifecycle() != null ? row.lifecycle().wireProtocol() : null,
+                row.lifecycle() != null ? row.lifecycle().requestStatus() : null, priced.cost(), priced.priced());
     }
 
     /** Primary input/output token, preferring the protocol-specific column. */

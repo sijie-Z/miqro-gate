@@ -26,9 +26,20 @@ class McpToolsListClientTest {
     private int port;
     private volatile int status = 200;
     private volatile String body = "{}";
+    /**
+     * Strict Streamable HTTP upstreams answer 406 unless the client advertises both
+     * media types (#779).
+     */
+    private volatile boolean enforceStreamableAccept = false;
+    /**
+     * When set, the stub answers in an SSE frame (Content-Type text/event-stream)
+     * instead of raw JSON.
+     */
+    private volatile boolean sseResponse = false;
     private final AtomicReference<String> lastAuth = new AtomicReference<>();
     private final AtomicReference<String> lastBody = new AtomicReference<>();
     private final AtomicReference<String> lastMethod = new AtomicReference<>();
+    private final AtomicReference<String> lastAccept = new AtomicReference<>();
 
     private final McpToolsListClient client = new McpToolsListClient(new ObjectMapper());
 
@@ -38,9 +49,15 @@ class McpToolsListClientTest {
         server.createContext("/mcp", exchange -> {
             lastMethod.set(exchange.getRequestMethod());
             lastAuth.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            lastAccept.set(exchange.getRequestHeaders().getFirst("Accept"));
             lastBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            if (enforceStreamableAccept && !String.valueOf(lastAccept.get()).contains("text/event-stream")) {
+                exchange.sendResponseHeaders(406, -1);
+                exchange.close();
+                return;
+            }
             byte[] out = body.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.getResponseHeaders().set("Content-Type", sseResponse ? "text/event-stream" : "application/json");
             exchange.sendResponseHeaders(status, out.length);
             exchange.getResponseBody().write(out);
             exchange.close();
@@ -77,6 +94,49 @@ class McpToolsListClientTest {
         assertThat(lastMethod.get()).isEqualTo("POST");
         assertThat(lastBody.get()).isEqualTo(McpToolsListClient.REQUEST_BODY);
         assertThat(lastAuth.get()).isEqualTo("Bearer sk-test");
+    }
+
+    @Test
+    @DisplayName("advertises both Streamable HTTP media types in Accept (#779)")
+    void advertisesBothMediaTypes() {
+        body = "{\"result\":{\"tools\":[]}}";
+
+        client.fetchTools(url(), null);
+
+        assertThat(lastAccept.get()).contains("application/json").contains("text/event-stream");
+    }
+
+    @Test
+    @DisplayName("strict upstream that answers 406 without text/event-stream is accepted (#779)")
+    void strictAcceptUpstreamIsAccepted() {
+        enforceStreamableAccept = true;
+        body = "{\"result\":{\"tools\":[{\"name\":\"read_wiki_structure\",\"description\":\"wiki\"}]}}";
+
+        List<McpToolsListClient.UpstreamTool> tools = client.fetchTools(url(), null);
+
+        assertThat(tools).containsExactly(new McpToolsListClient.UpstreamTool("read_wiki_structure", "wiki"));
+    }
+
+    @Test
+    @DisplayName("SSE-framed upstream response is unwrapped before parsing (#779)")
+    void sseFramedResponseIsUnwrapped() {
+        sseResponse = true;
+        body = "event: message\n"
+                + "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[{\"name\":\"read_wiki_structure\"}]}}\n"
+                + "\n";
+
+        List<McpToolsListClient.UpstreamTool> tools = client.fetchTools(url(), null);
+
+        assertThat(tools).containsExactly(new McpToolsListClient.UpstreamTool("read_wiki_structure", null));
+    }
+
+    @Test
+    @DisplayName("an SSE frame without any data payload fails closed (#779)")
+    void sseWithoutDataFailsClosed() {
+        sseResponse = true;
+        body = "event: ping\n\n";
+
+        assertThatThrownBy(() -> client.fetchTools(url(), null)).hasMessageContaining("data");
     }
 
     @Test

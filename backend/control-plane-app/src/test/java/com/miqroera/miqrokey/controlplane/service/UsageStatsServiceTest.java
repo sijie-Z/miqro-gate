@@ -16,6 +16,7 @@ import com.miqroera.miqrokey.domain.usage.PriceSnapshot;
 import com.miqroera.miqrokey.domain.usage.PriceTokenType;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
+import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageAggRow;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
 import org.junit.jupiter.api.BeforeEach;
@@ -78,7 +79,9 @@ class UsageStatsServiceTest {
                         price(PriceTokenType.OUTPUT, new BigDecimal("2.00"))));
         when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.VIRTUAL_KEY), any()))
                 .thenReturn(List.of(new UsageAggRow("key-" + KEY_A, "k-a", PRODUCT, MODEL, CacheLevel.UPSTREAM, 2L,
-                        new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null))));
+                        new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null),
+                        new java.math.BigDecimal("1000"), new java.math.BigDecimal("1000"), java.math.BigDecimal.ZERO,
+                        java.math.BigDecimal.ZERO, UsageStatsAggregator.PricingGap.NONE, UsageAggRow.Outcome.NONE)));
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
 
         UsageSummary summary = service.summary(user, "virtual_key", null, null);
@@ -230,7 +233,7 @@ class UsageStatsServiceTest {
     private static AdjustedUsageRow unadjusted(UsageEvent e) {
         TokenBucket t = e.tokens();
         return new AdjustedUsageRow(e, t.inputTokens(), t.outputTokens(), t.cacheReadInputTokens(),
-                t.cacheCreationInputTokens(), false);
+                t.cacheCreationInputTokens(), false, null, null);
     }
 
 }

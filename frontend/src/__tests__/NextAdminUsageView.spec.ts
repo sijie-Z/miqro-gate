@@ -75,6 +75,8 @@ function group(
       projectAllocated: cost,
       savedByGatewayCache: 0.001,
     },
+    // #758 lifecycle outcomes: all succeeded, deterministic latencies.
+    outcomes: { succeeded: requests, failed: 0, cancelled: 0, avgDurationMs: 4_200, avgTtfbMs: 1_800 },
   };
 }
 
@@ -122,6 +124,13 @@ function recordRow(
     usageMissing: i === 1,
     virtualKeyId: 'k1',
     clientIp: i === 1 ? null : '203.0.113.7',
+    // #758 enrichment columns.
+    providerProductName: 'DeepSeek 官方按量 API',
+    cost: 0.0012,
+    priced: true,
+    ttfbMs: i === 1 ? null : 210,
+    wireProtocol: 'ANTHROPIC_MESSAGES',
+    requestStatus: i === 1 ? 'UPSTREAM_REJECTED' : 'SUCCEEDED',
     ...overrides,
   } as NonNullable<UsageRecordPage['items']>[number];
 }
@@ -236,6 +245,60 @@ describe('NextAdminUsageView', () => {
     });
   }
 
+  it('#790: marks the saving as a lower bound when hits could not be priced', async () => {
+    mockApi.adminUsageSummary.mockImplementation(async (query) => {
+      const summary = summaryFor(String(query?.groupBy ?? 'project'));
+      return {
+        ...summary,
+        totals: { ...summary.totals, unpriced: { unpricedHitEvents: 3 } },
+      } as never;
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const marker = wrapper.find('[data-testid="savings-unpriced"]');
+    expect(marker.exists()).toBe(true);
+    // A bare small amount would read as "the cache saved almost nothing"; the marker
+    // is the difference between that and "we had no price to say" (#790).
+    expect(marker.text()).toContain('下界');
+  });
+
+  it('#790: leaves a fully priced saving unmarked', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="savings-unpriced"]').exists()).toBe(false);
+  });
+
+  it('#801: marks the total cost as not-a-total when a gap exists', async () => {
+    mockApi.adminUsageSummary.mockImplementation(async (query) => {
+      const summary = summaryFor(String(query?.groupBy ?? 'project'));
+      return {
+        ...summary,
+        totals: {
+          ...summary.totals,
+          pricingStatus: 'PARTIAL',
+          unpriced: { unpricedEvents: 617, unavailableEvents: 565 },
+        },
+      } as never;
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const marker = wrapper.find('[data-testid="cost-unpriced"]');
+    expect(marker.exists()).toBe(true);
+    expect(marker.text()).toContain('未定价');
+  });
+
+  it('#801: leaves a fully priced cost unmarked', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="cost-unpriced"]').exists()).toBe(false);
+  });
+
   it('passes a picked time range to the summary, series and records APIs', async () => {
     const wrapper = mountView();
     await flushPromises();
@@ -287,8 +350,84 @@ describe('NextAdminUsageView', () => {
     expect(wrapper.text()).toContain('203.0.113.7');
   });
 
+  it('renders the hero card with the 万 unit, sub metrics and the token hit-rate bar (#758)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const hero = wrapper.find('[data-testid="usage-summary"]');
+    expect(hero.text()).toContain('真实消耗 Tokens');
+    expect(hero.text()).toContain('26,100'); // 20,000 + 5,000 + 300 + 800
+    expect(hero.text()).toContain('≈ 2.6 万');
+    expect(hero.text()).toContain('总请求数');
+    expect(hero.text()).toContain('总成本');
+    expect(hero.text()).toContain('新增输入');
+    expect(hero.text()).toContain('缓存创建');
+    expect(hero.text()).toContain('缓存读取');
+    expect(hero.text()).toContain('网关缓存节省');
+    // token-level hit rate = 300 / (300 + 20,000) ≈ 1.5%
+    expect(hero.text()).toContain('1.5%');
+    expect(hero.find('.next-admin-usage__hero-bar-fill').attributes('style')).toContain(
+      'width: 1.5%',
+    );
+    // request-level rate rides the 总请求数 sub line: 2 / (14 + 1 + 2) = 11.8%
+    expect(hero.text()).toContain('11.8%');
+  });
+
+  it('enriches the request log with 供应商 / 成本 / 用时·首字 / 协议 columns (#758)', async () => {
+    mockApi.adminUsageRecords.mockResolvedValue({
+      items: [recordRow(0), recordRow(1), recordRow(2, { priced: false, cost: null })],
+      page: 1,
+      size: 20,
+      total: 3,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    const table = wrapper.find('[data-testid="usage-records-table"]').text();
+    expect(table).toContain('DeepSeek 官方按量 API');
+    expect(table).toContain('¥0.0012');
+    expect(table).toContain('未定价');
+    expect(table).toContain('120ms / 210ms'); // 用时 / 首字
+    expect(table).toContain('Anthropic');
+  });
+
+  it('switches 供应商统计 / 模型统计 tabs onto the product and model dimensions (#758)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="usage-tab-provider"]').trigger('click');
+    await flushPromises();
+    expect(summaryCalls()).toContainEqual(expect.objectContaining({ groupBy: 'product' }));
+    const providerTable = wrapper.find('[data-testid="usage-breakdown-table"]').text();
+    expect(providerTable).toContain('成功率');
+    expect(providerTable).toContain('平均延迟');
+    expect(providerTable).toContain('100.0%');
+    expect(providerTable).toContain('4.2s'); // avgDurationMs 4200
+
+    await wrapper.find('[data-testid="usage-tab-model"]').trigger('click');
+    await flushPromises();
+    expect(summaryCalls()).toContainEqual(expect.objectContaining({ groupBy: 'model' }));
+  });
+
+  it('jumps to an explicit page through the pager input (#758)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="usage-page-input"]').setValue('3');
+    await wrapper.find('[data-testid="usage-page-go"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.adminUsageRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 3, size: 20 }),
+    );
+  });
+
   it('renders the dimension breakdown with cost share and a server-backed trend', async () => {
     const wrapper = mountView();
+    await flushPromises();
+
+    // #758: the breakdown lives behind its own tab now.
+    await wrapper.find('[data-testid="usage-tab-breakdown"]').trigger('click');
     await flushPromises();
 
     const breakdown = wrapper.find('[data-testid="usage-breakdown-table"]').text();
@@ -344,6 +483,10 @@ describe('NextAdminUsageView', () => {
 
   it('drills down from a team row into the records filter and clears it (#681)', async () => {
     const wrapper = mountView();
+    await flushPromises();
+
+    // #758: the breakdown tab hosts the dimension picker and the table.
+    await wrapper.find('[data-testid="usage-tab-breakdown"]').trigger('click');
     await flushPromises();
 
     // switch the breakdown dimension to teams

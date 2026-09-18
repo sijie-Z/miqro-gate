@@ -500,6 +500,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/usage-price-backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["backfill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/usage-deletions": {
         parameters: {
             query?: never;
@@ -3295,6 +3311,20 @@ export interface components {
             user?: components["schemas"]["AdminUserView"];
             temporaryPassword?: string;
         };
+        UsagePriceBackfillResult: {
+            /** Format: int64 */
+            scanned?: number;
+            /** Format: int64 */
+            complete?: number;
+            /** Format: int64 */
+            partial?: number;
+            /** Format: int64 */
+            unavailable?: number;
+            /** Format: int64 */
+            baseCostFilled?: number;
+            /** Format: int64 */
+            reclassified?: number;
+        };
         DeletionRequest: {
             /** Format: uuid */
             id?: string;
@@ -3861,6 +3891,7 @@ export interface components {
             /** Format: date-time */
             expiresAt?: string;
             reconcileLevel?: string;
+            adjustmentLevel?: string;
         };
         CryptoReencryptReport: {
             activeKeyVersion?: string;
@@ -4029,6 +4060,7 @@ export interface components {
             /** Format: date-time */
             expiresAt?: string;
             reconcileLevel?: string;
+            adjustmentLevel?: string;
         };
         UpdateVirtualKeyRequest: {
             name: string;
@@ -4057,6 +4089,39 @@ export interface components {
             requests?: components["schemas"]["Requests"];
             tokens?: components["schemas"]["Tokens"];
             cost?: components["schemas"]["Cost"];
+            /** @enum {string} */
+            pricingStatus?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+            unpriced?: components["schemas"]["PricingGap"];
+            outcomes?: components["schemas"]["Outcomes"];
+        };
+        Outcomes: {
+            /** Format: int64 */
+            succeeded?: number;
+            /** Format: int64 */
+            failed?: number;
+            /** Format: int64 */
+            cancelled?: number;
+            /** Format: int64 */
+            avgDurationMs?: number;
+            /** Format: int64 */
+            avgTtfbMs?: number;
+        };
+        PricingGap: {
+            /** Format: int64 */
+            inputTokens?: number;
+            /** Format: int64 */
+            outputTokens?: number;
+            /** Format: int64 */
+            cacheReadTokens?: number;
+            /** Format: int64 */
+            cacheCreationTokens?: number;
+            /** Format: int64 */
+            unpricedEvents?: number;
+            /** Format: int64 */
+            unavailableEvents?: number;
+            /** Format: int64 */
+            unpricedHitEvents?: number;
+            empty?: boolean;
         };
         Requests: {
             /** Format: int64 */
@@ -4128,6 +4193,13 @@ export interface components {
             /** Format: int64 */
             netCacheCreationInputTokens?: number;
             adjusted?: boolean;
+            providerProductName?: string;
+            /** Format: int64 */
+            ttfbMs?: number;
+            wireProtocol?: string;
+            requestStatus?: string;
+            cost?: number;
+            priced?: boolean;
         };
         GrantOption: {
             /** Format: uuid */
@@ -5639,6 +5711,29 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["UserPasswordReset"];
+                };
+            };
+        };
+    };
+    backfill: {
+        parameters: {
+            query: {
+                from: string;
+                to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["UsagePriceBackfillResult"];
                 };
             };
         };
