@@ -112,7 +112,7 @@
 
 Key 级字段（建议名 `cacheInjectionPolicy ∈ {OFF, BREAKPOINTS}`，默认 `OFF`），承载与 `cache_policy` 同形：迁移（新版本号，追加不回改）→ `VirtualKey` 记录 → `RouteSnapshot.KeyRecord` → 网关快照读取。控制面创建/编辑 Key 时暴露该字段并回显；前端 Key 列表增列（同 `NextKeysView.vue:117,980-987` 的既有形态）。
 
-**项目级粒度（本 ADR 新增的待议点，不预设答案）**：ADR-0018 已确立 key×project 多绑定——一把 Key 可授权用于多个项目（`docs/decisions/0018-single-key-multi-project.md` D1），而 prompt 前缀与缓存复用率是**项目相关**的，同一把 Key 在不同项目下的最优策略可能不同。因此粒度问题实际有三档：纯 Key 级（本 ADR 推荐的最小面）、Key 级 + 项目绑定级覆盖（`key_project_binding` 行上再加一列/BREAKPOINTS 白名单）、服务级默认 + Key 覆盖（选项 C，已不推荐）。本 ADR 不替所有者选档，列入 §6；若选项目级覆盖，改动面需在 `RouteSnapshot` 的绑定行上扩展（`JdbcRouteSnapshotLoader.java:157,164` 一带），成本高于纯 Key 级。
+**项目级粒度（本 ADR 新增的待议点，不预设答案）**：ADR-0018 已确立 key×project 多绑定——一把 Key 可授权用于多个项目（`docs/decisions/0018-single-key-multi-project.md` D1），而 prompt 前缀与缓存复用率是**项目相关**的，同一把 Key 在不同项目下的最优策略可能不同。因此粒度问题实际有三档：纯 Key 级（本 ADR 推荐的最小面）、Key 级 + 项目绑定级覆盖（`key_project_binding` 行上再加一列/BREAKPOINTS 白名单）、服务级默认 + Key 覆盖（选项 C，已不推荐）。本 ADR 不替所有者选档，列入 §6；若选项目级覆盖，改动面需在 `RouteSnapshot` 的绑定行上扩展（`JdbcRouteSnapshotLoader.loadBindings()`，`:171-194`，其 SQL 直接查 `key_project_binding`），成本高于纯 Key 级。
 
 ### 4.5 失败与回退
 
