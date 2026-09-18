@@ -3,7 +3,7 @@
 - 日期：2026-09-18
 - 状态：**Proposed（待所有者拍板）**——本 ADR 只给出决策点、选项、代价与建议，**不含任何已实施的代码**。文中的「建议」「推荐」均为**待 owner 裁决的提案**，不是既成结论。本文件若被 owner 否决，记录的价值等同：issue #717 允许「不做」也是有效产出。
 - 效力（仅在被 Accepted 后生效）：将修订 [CLAUDE.md](../../CLAUDE.md) §2「不自动故障切换」与 [architecture.md](../architecture.md) 的「禁止跨供应商或跨真实凭证故障切换」。**修订范围严格限定为：同一供应商产品内、首字节前、凭证级的显式回退**。跨供应商/跨产品的自动路由与故障切换维持红线不变（feature-backlog F46 维持 DECLINED）。
-- 关联：issue [#717](https://github.com/14790897/miqro-gate/issues/717)（本 ADR 的提出）、issue [#704](https://github.com/14790897/miqro-gate/issues/704)（实现跟踪，**ADR 先行**）；[ADR-0002](0002-transparent-proxy.md)（透明代理——本议题不改写请求内容）；[ADR-0018](0018-single-key-multi-project.md)（key×project 多绑定，`grant_id` 的来源）；[ADR-0020](0020-quota-soft-landing.md)（opt-in + 默认关闭的取舍风格、配额判定集）；feature-backlog F46（跨供应商切换，DECLINED）/ F50（多服务绑定，ADR）；[ai-gateway-comparison](../ai-gateway-comparison.md) §「多 Key 均衡/Key 池轮询」；[operations-runbook](../operations-runbook.md) §5（供应商故障处置）；[bill-reconciliation-contract](../bill-reconciliation-contract.md)（F19 对账）；V1/V4/V6/V8/V57（见 §1.3）。
+- 关联：issue [#717](https://github.com/14790897/miqro-gate/issues/717)（本 ADR 的提出）、issue [#704](https://github.com/14790897/miqro-gate/issues/704)（实现跟踪，**ADR 先行**）；[ADR-0002](0002-transparent-proxy.md)（透明代理——本议题不改写请求内容）；[ADR-0018](0018-single-key-multi-project.md)（key×project 多绑定，`grant_id` 的来源）；[ADR-0020](0020-quota-soft-landing.md)（opt-in + 默认关闭的取舍风格、配额判定集）；feature-backlog F46（跨供应商切换，DECLINED）/ F50（多服务绑定，ADR）；[ai-gateway-comparison](../ai-gateway-comparison.md) §「多 Key 均衡/Key 池轮询」；[operations-runbook](../operations-runbook.md) §5（供应商故障处置）；[bill-reconciliation-contract](../bill-reconciliation-contract.md)（F19 对账）；V1/V6/V8/V57（见 §1.3）、V9/V64/V66（见 §2-Q4、§2-Q2 与 §4）。
 
 ---
 
@@ -16,7 +16,7 @@
 - `CLAUDE.md:35`：「一个 Virtual Key 固定绑定一个用户、项目、供应商产品、**真实凭证**和用途；不跨供应商，不负载均衡。」
 - `CLAUDE.md:36`：「**不自动故障切换**；首字节前最多安全重试一次，流开始后不重试。」
 
-配套的落地表述散落在四处：[architecture.md:161](../architecture.md)「禁止跨供应商或跨真实凭证故障切换」、[product-requirements.md:27](../product-requirements.md)「不做供应商之间的自动路由、负载均衡或故障切换」、[provider-adapter-contract.md:127-128](../provider-adapter-contract.md)「上游业务错误原样返回，不跨凭证/产品自动重试」「供应商故障不自动切换」、[ai-gateway-comparison.md:33](../ai-gateway-comparison.md)「**不自动故障切换**（首字节前最多安全重试一次）| 刻意差异」。
+配套的落地表述散落在四处：[architecture.md:161](../architecture.md)「禁止跨供应商或跨真实凭证故障切换」、[product-requirements.md:27](../product-requirements.md)「不做供应商之间的自动路由、负载均衡或故障切换」、[provider-adapter-contract.md:126](../provider-adapter-contract.md)「上游业务错误原样返回，不跨凭证/产品自动重试」与 [provider-adapter-contract.md:128](../provider-adapter-contract.md)「供应商故障不自动切换」、[ai-gateway-comparison.md:33](../ai-gateway-comparison.md)「**不自动故障切换**（首字节前最多安全重试一次）| 刻意差异」。
 
 这个决定的语境是首版：单租户私有化、50 个账号、单人运营，且**一个产品通常只有一把凭证**——「切换」在当时不是一个可执行的动作。当时的替代方案被明确记录为运维流程而非数据面能力：[operations-runbook.md:99](../operations-runbook.md)「系统不自动跨供应商切换」+ 用户自行在 CC Switch 换一个已配置项；[provider-adapter-contract.md:128](../provider-adapter-contract.md) 同义。
 
@@ -38,7 +38,7 @@
 | 快照 | `AuthContext.java`（record 定义） | 请求上下文持有**一个** `binding`；`credentialId()` 经 `binding` 取得，全链路无第二个候选 |
 | 路由 | `ProxyController.java:454` | `// the same credential (no cross-credential failover).`——凭证在任何尝试之前解析一次 |
 | 路由 | `ProxyController.java:632` | `* resolved once for all attempts (no cross-credential failover).`——重试规则显式声明复用同一凭证 |
-| 路由 | `ProxyController.java:471` | `Retry.max(1)`，filter 为 `retryableConnectionFailure`；后者要求 `attempt.ttfb.firstByteMillisRaw() == 0`（`:632`） |
+| 路由 | `ProxyController.java:471` | `Retry.max(1)`，filter 为 `retryableConnectionFailure`；后者要求 `attempt.ttfb.firstByteMillisRaw() == 0`（判据在 `ProxyController.java:634-635`；`:632` 是它的 javadoc，两处坐标勿混用） |
 | 熔断 | `ProxyController.java:445` / `:501` | 熔断按 `(productId, credentialId)` 键控——**凭证已经是熔断的最小单位** |
 | 账本 | `V8__request_usage_records.sql:39` | `credential_id uuid NOT NULL`（单数、非空） |
 | 账本 | `V8__request_usage_records.sql:55` | `retry_count integer NOT NULL DEFAULT 0`——**重试已在同一行内计数，从未拆成多行** |
@@ -53,18 +53,24 @@
 
 **反向证据（同样是发现）**：`docs/*.md` 全文检索 `唯一归因|唯一身份|一笔一|每笔绑定|可归因` **零命中**。这条被 #704 当作一等约束的不变式，目前**只存在于代码与 DDL 中，没有任何散文表述**——本 ADR 是它第一次被写成文字。
 
+> 检索口径：**除本段自身与本 ADR 落盘后的 `docs/progress.md` 记录之外**，全仓无第二处来源。两处命中都源于本 ADR，属自指，不构成「既有表述」。
+
 ### 1.4 与既有决策/红线的关系（逐条）
 
 | 既有决策 | 坐标 | 本议题与之的关系 |
 |---|---|---|
 | 「不自动故障切换」 | `CLAUDE.md:36` | **直接冲突**，是全篇唯一需要 owner 明确同意才可动的红线 |
 | 「禁止跨供应商或跨真实凭证故障切换」 | `architecture.md:161` | **直接冲突**：该句显式点名「跨真实凭证」，无法靠解释绕开，必须修订 |
+| 「首字节前最多重试一次……**真实凭证只在第一次尝试前解析一次，重试复用同一凭证**」 | `architecture.md:159` | **直接冲突（第二条被遗漏的红线）**：该句字面规定了「重试复用同一凭证」，正是本 ADR 要改的语义。它与 `:161` 是**并列的两条**，owner 只看 `:161` 不足以覆盖本条 |
 | 「不做供应商之间的自动路由、负载均衡或故障切换」 | `product-requirements.md:27` | **不冲突**：限定词是「供应商**之间**」。同产品内凭证回退不在其字面范围内 |
-| 「上游业务错误原样返回，不跨凭证/产品自动重试」 | `provider-adapter-contract.md:127` | **冲突**，需修订为「不跨产品；是否跨凭证由本 ADR 决定」 |
+| 「上游业务错误原样返回，不跨凭证/产品自动重试」 | `provider-adapter-contract.md:126` | **冲突**，需修订为「不跨产品；是否跨凭证由本 ADR 决定」 |
+| 「网络连接建立前且请求体尚未发送时，可按统一策略进行一次安全重试；流式开始或非幂等请求发送后禁止重试」 | `provider-adapter-contract.md:127` | **支持本 ADR 的一条授权基础**：回退正是「请求体已发送前」的安全重试在同一产品内的有序扩展。**本 ADR 明确不动这一行**——它与 `architecture.md:159` 的幂等性论证是同一来源 |
 | 「供应商故障不自动切换」 | `provider-adapter-contract.md:128`、`operations-runbook.md:99` | **不冲突**：两者都指**跨供应商**；同产品回退是另一层 |
 | 「Adapter 的后台失败只标记能力陈旧，**不自动吊销凭证**」 | `provider-adapter-contract.md:125` | **支持本 ADR 的一条约束**：切换不得伴随自动吊销/自动禁用凭证 |
-| 「Higress 多 Key 均衡/Key 池轮询——刻意不采纳（1:1 固定绑定；**Key 池轮询破坏审计映射**）」 | `ai-gateway-comparison.md:94` | **本 ADR 必须正面回答的反对理由**。注意其否决对象是**轮询/均衡**（无差别的选择），而回退是**有明确触发条件与固定顺序**的选择——§3 的选项 C 正是对它的正面复用 |
-| 「模型多服务路由/负载均衡/灰度：红线」 | `ai-gateway-comparison.md:123` | **不冲突**：红线对象是负载均衡与灰度，不含失败回退 |
+| 「Higress 多 Key 均衡/Key 池轮询——**刻意不采纳**（1:1 固定绑定；**Key 池轮询破坏审计映射**）」 | `ai-gateway-comparison.md:93` | **必须正面回答的反对理由之一**。注意其否决对象是**轮询/均衡**（无差别的选择），而回退是**有明确触发条件与固定顺序**的选择——§3 的「方案 C 的正面复用说明」正是对它的正面回答 |
+| 「Higress 模型 Fallback/降级链——**刻意不采纳**（不自动故障切换）」 | `ai-gateway-comparison.md:94` | **必须正面回答的反对理由之二，且是字面上最接近本议题的一条**（该行不含「轮询/均衡」限定，字面可读作否决一切 fallback）。§3 末尾「与 `ai-gateway-comparison.md:94` 的分界」逐字回应它 |
+| 「**降级/Fallback**：触发条件多选 + 备用服务按序 / Fallback 按序兜底 / **不自动故障切换**（首字节前最多安全重试一次）/ 刻意差异」 | `ai-gateway-comparison.md:33` | **冲突**：这是把「不自动故障切换」写成对标结论的一行，与 `CLAUDE.md:36` 同级。若 Accepted，本行需补注「同产品凭证回退除外」 |
+| 「模型多服务路由/负载均衡/灰度：红线」 | `ai-gateway-comparison.md:123` | **不冲突**：红线对象是负载均衡与灰度，不含失败回退。若 Accepted 仅需补注，不改变其红线地位 |
 | 腾讯「降级策略（服务异常/超时/429 触发，按序 Fallback）」 | `tencent-ai-gateway-mapping.md:22`（第 13 行） | 状态记为「**冲突**」。本 ADR 处理该冲突；注意腾讯的「按序 Fallback」本就是**跨服务/跨产品**，本 ADR 只采纳其「按序」形态并**收窄到同产品内** |
 | F46「智能路由/自动选模型；降级 Fallback；跨供应商故障切换」= DECLINED | `feature-backlog.md:109` | **不推翻**。F46 的红线是「不负载均衡/不跨供应商/不读正文」；本 ADR 同产品内有序回退三条都不触碰。F46 保持 DECLINED |
 | F50「Virtual Key 多服务绑定/Header 分流路由」 | `feature-backlog.md:113` | **不冲突**：F50 动的是 **Virtual Key → 服务** 的绑定（本 ADR 不动），本 ADR 动的是 **grant → 凭证** 的选择 |
@@ -95,9 +101,20 @@
 
 ### Q2 计费语义：失败的那次调用是否产生费用？
 
-**现状**：`usage_event`（`V6`）是计费事实表，金额来自响应中解析出的 token 与价目快照（`V64__usage_event_price_snapshot.sql` 存在）。**连接阶段失败没有响应体，解析不出 token，因此今天就不产生 `usage_event`**——即失败尝试在本系统内**零计费**。
+**现状（必须分成两种失败分别陈述，二者今天的行为并不相同）**：`usage_event`（`V6`）是计费事实表，金额来自响应中解析出的 token 与价目快照（`V64__usage_event_price_snapshot.sql` 存在）。
 
-**建议结论**：**沿用现状**——只有产生 usage 的那次尝试进入 `usage_event`；失败尝试**不生成** `usage_event`、**不生成**成本行。**明确不承诺**「上游也没计费」：上游对本系统不可观测；确需核对的差额走既有的 F19 对账契约（`docs/bill-reconciliation-contract.md`，按 `provider_request_id` 等四级匹配），**本 ADR 不新造对账机制**。
+- **连接阶段失败**：没有响应体，解析不出 token，且这类失败走的是 `Retry` 的错误通道，从不进入响应管线。今天的**唯一发布点在响应管线内**（`ProxyController.java:571`，由 `:559` 的 `writeWith(...).then(...)` 触发），错误路径不调用它——因此连接阶段的失败尝试今天确实不产生 `usage_event`，**在本系统内零计费**。
+- **响应阶段的失败（429 / 401 / 403 / 5xx）**：这些是 `exchangeToMono` 的**正常返回**（`ProxyController.java:526-530` 对所有状态码统一进入该分支，无 `onStatus` 过滤），**今天会照常走到 `:571` 并写出一行 `usage_event`**（`upstream_status_code` = 429 等、token 为空）。`request_usage_records` 同样落行（写入器 `PostgresUsageEventWriter.java:181` 的 guarded upsert；测试 `PostgresUsageEventWriterTest.java:137-147` 用 `UPSTREAM_REJECTED / 429` 明确覆盖这一形态）。**发布点唯一的门槛是 `modelName != null`（`ProxyController.java:649-661`），与状态码无关。**
+
+**这两类失败恰好都出现在 Q7 的回退触发表里**——所以「失败尝试的计费语义」**不是沿用现状就能满足的**。
+
+**建议结论（规范性要求，含明确改动点）**：**只有产生终态的**那次尝试进入 `usage_event`；**非终态尝试**（被回退跳过的那些）**不生成** `usage_event`、**不生成**成本行。落到实现上，这是一处**必须的改动**，而不是现状：
+
+1. `ProxyController.java:571` 的发布须按「**仅终态尝试**」门控——否则第一次尝试的 429 会先落一行，回退成功后再落一行；
+2. `ProxyController.java:663` 的凭证来源须由 `ctx.binding().credentialId()`（**绑定的凭证**）改为**实际产生终态的尝试所用凭证**——这是 INV-2 的直接要求，不改则账本会记在「被跳过的那把」上；
+3. `request_usage_records` 同理：其 `credential_id` 是 NOT NULL 单值（`V8__request_usage_records.sql:39`），`retry_count`（`:55`）已经承担了「重试了几次」的表达（`:69` 的 `UNIQUE (started_at, gateway_request_id)` 钉死「一请求一行」），因此**不新增行**，只改行的取值来源。
+
+**明确不承诺**「上游也没计费」：上游对本系统不可观测；确需核对的差额走既有的 F19 对账契约（`docs/bill-reconciliation-contract.md`，按 `provider_request_id` 等四级匹配），**本 ADR 不新造对账机制**。
 
 **理由**：
 - #717 的原话是「上游可能已计费但未返回」——这个可能性**无法在网关侧消除**，只能被**观测**。任何在网关内「为失败尝试也记一笔」的做法都会凭空创造一笔未经证实的成本，反而污染账本。
@@ -128,7 +145,7 @@
 
 **理由**：这是纯粹的顺序论证——配额门在 `Key 解析后、读 body 前`，回退在**上游调用时**，二者不同阶段，回退没有机会影响配额。ADR-0020 的判定集也不含凭证维度（其 `quota_enforcement` 表按 `scope_type/scope_id`），所以「换了凭证」在配额侧**不可观测**。这条同时也是对 #717 第 4 问的答案：**切换不能、也不会成为绕过配额的手段。**
 
-**一处需要 owner 知情的细节**：`quota_snapshots`（`V9__quota_snapshots.sql:16`）确实带 `credential_id`，但那是**上游 Plan/余额快照**（来源 `OFFICIAL_API / LOCAL_ESTIMATE / UNAVAILABLE`），与 ADR-0020 的**我方配额规则**是两套东西。回退会改变「哪把凭证的上游余额被消耗」，因此**凭证维度的上游余额视图会在切换后归因到实际使用的那把**——这是期望行为，但报表口径需在实现时明确（记为 §6 未决项）。
+**一处需要 owner 知情的细节**：`quota_snapshots`（`V9__quota_snapshots.sql:16`）确实带 `credential_id`，但那是**上游 Plan/余额快照**（来源 `OFFICIAL_API / LOCAL_ESTIMATE / UNAVAILABLE`），与 ADR-0020 的**我方配额规则**是两套东西。回退会改变「哪把凭证的上游余额被消耗」，因此**凭证维度的上游余额视图会在切换后归因到实际使用的那把**——这是期望行为，但报表口径需在实现时明确（记为 §5 未决项）。
 
 ### Q5 开关与默认
 
@@ -145,11 +162,11 @@
 
 ### Q6 失败打开还是失败关闭
 
-**建议结论**：**快速失败（fail-closed）**。全部候选凭证都不可用时：**返回最后一次尝试的上游错误语义**（状态码与错误体语义原样，符合 `provider-adapter-contract.md:127`「上游业务错误原样返回」），**不伪装成其他模型或其他供应商**（`operations-runbook.md` §5 第 3 条）。**不**做「乐观放行」，**不**做错误聚合后的自造 status。
+**建议结论**：**快速失败（fail-closed）**。全部候选凭证都不可用时：**返回最后一次尝试的上游错误语义**（状态码与错误体语义原样，符合 `provider-adapter-contract.md:126`「上游业务错误原样返回」），**不伪装成其他模型或其他供应商**（`operations-runbook.md` §5 第 3 条）。**不**做「乐观放行」，**不**做错误聚合后的自造 status。
 
 **理由**：「失败打开」在本场景没有可定义的语义——不存在「忽略错误继续转发」的选项，唯一真实的岔路是「返回哪个错误」。返回**最后一次**尝试的错误，语义最接近「我们试过了，最后是这个结果」，且与既有单次重试的终态行为一致（现有实现 retry 耗尽后也返回最后一次失败）。
 
-**关于向客户端暴露多少**：建议**只暴露尝试次数，不暴露凭证标识**。具体地，可复用既有的 `X-MiQroKey-*` 响应头命名空间（`SseReplayEngine.java:21-22`）但**必须同步加入 `ProxyController.java:97` 的伪造头剥离列表**——否则客户端可以自带同名头，形成注入面。凭证级的尝试轨迹只进账本/审计，**永不进响应**。
+**关于向客户端暴露多少**：建议**只暴露尝试次数，不暴露凭证标识**。具体地，可复用既有的 `X-MiQroKey-*` 响应头命名空间（`SseReplayEngine.java:21-22`）。**伪造头剥离不需要任何同步动作**：入站剥离是**命名空间前缀**规则而非清单——`HeaderFilters.java:77` 的 `!lower.startsWith("x-miqrokey-") && !lower.startsWith("x-miqro-")` 让任何新增的 `X-MiQroKey-*` 头**自动**被剥离（`ProxyController.java:95-97` 只是描述该事实的 javadoc，不是剥离清单；实际实现全部在 `HeaderFilters.filterInboundHeaders`）。实现时应**用一条测试锁定该前缀判定**，而不是去登记一个不存在的列表。凭证级的尝试轨迹只进账本/审计，**永不进响应**。
 
 **理由（安全）**：向调用方暴露「你的供应商产品下有几把凭证、分别是谁」是**不必要的信息泄露**，且会诱导客户端针对凭证做规避性重试。审计诉求由服务端账本满足。
 
@@ -159,13 +176,17 @@
 
 | 触发条件 | 是否回退 | 依据 |
 |---|---|---|
-| 连接阶段失败（`WebClientRequestException`，未出首字节） | **是** | 现有 `retryableConnectionFailure`（`ProxyController.java:632`）已定义该判据，回退只是把「复用同一凭证」换成「取下一把候选」 |
+| 连接阶段失败（`WebClientRequestException`，未出首字节） | **是** | 现有 `retryableConnectionFailure`（判据 `ProxyController.java:634-635`）已定义该判据，回退只是把「复用同一凭证」换成「取下一把候选」 |
 | 上游 429（限流） | **是** | #704 明确列为触发条件；请求在推理前被拒，通常不计费 |
 | 上游 401/403（凭证鉴权失败） | **建议是**，但**只回退、不自动吊销凭证** | `provider-adapter-contract.md:125`「不自动吊销凭证」；凭证可能只是过期/被临时封，自动吊销会造成不可逆误伤 |
-| 上游 5xx（服务端错误） | **建议是** | #704 的「连续 5xx」；「连续」的计数语义见 §6 未决项 |
+| 上游 5xx（服务端错误） | **建议是** | #704 的「连续 5xx」；「连续」的计数语义见 §5 未决项 |
 | 任何超时（含首包等待 120s） | **否** | `architecture.md:155-157`：超时按 deadline 语义处理，**永不重试**——这条是既有决策，本 ADR 不动 |
 | 任意首字节之后的失败（含流中断、流式空闲超时） | **否** | `architecture.md:160`「流式响应一旦开始，禁止重试」；客户端已收到部分内容，重放会产生重复内容 |
 | 客户端已断开 | **否** | 已有取消语义，重试无意义 |
+
+**实现层的一条既有事实（决定「触发信号」怎么定义，不可跳过）**：429 / 401 / 403 / 5xx **今天不走 Reactor 的错误通道**——`ProxyController.java:526-530` 的 `exchangeToMono` 对**所有**状态码统一进入正常回调，**没有任何 `onStatus` 过滤**。因此现有 `Retry.max(1)`（`:471`）的 filter（`retryableConnectionFailure`，判据 `:634-635`）**永远看不到这些状态码**，「复用既有判据」这句话只对**连接阶段失败**成立。要实现本表的「上游 429/401/403/5xx → 回退」，必须**新造一个可重试信号**（把可回退的响应码提升为错误通道，或引入独立的尝试推进逻辑），**不是复用现有 filter 就能得到**。这属于阶段 2 的实现细节，但必须在此写明，否则「沿用既有判据」会被误读为「此处零改动」。
+
+**两种 429 必须区分**：**我方配额拒绝的 429**（ADR-0020 的 `quota_enforcement`）发生在**准入处、请求转发之前**，**根本不产生上游尝试**，因此**不进入回退路径**；只有**上游返回的 429** 才可能触发回退。两者状态码相同、语义完全不同，实现与测试都不得混淆（测试用例也必须分别覆盖）。
 
 **幂等性**：不新增论证负担。今天已经允许「首字节前失败 → 重试一次」（`architecture.md:159`），其安全性论证就是「**首字节未到 ⇒ 上游没有产出可观测结果 ⇒ 重放不产生副作用**」。本 ADR 的边界与它**逐条相同**——只是把「同一把凭证再试一次」扩为「按序取下一把凭证试一次」。**不引入任何今天不存在的重放窗口。**
 
@@ -183,7 +204,7 @@
 
 - 这两处注释是当前规则的**实现说明**（分别说明「凭证在任何尝试前解析一次」与「所有尝试复用同一凭证」）。它们**描述**了 `CLAUDE.md:36`，不构成独立决策，因此不产生「是否推翻既有 ADR」的问题。
 - 若本 ADR 被接受并实现，这两处注释将变成**错误陈述**，必须同步改写为「未启用回退时复用同一凭证；启用时按候选顺序取下一把」。
-- 真正的红线是 `architecture.md:161` 与 `CLAUDE.md:36`——**只有这两处需要 owner 显式同意才能改**。注释随实现走。
+- 真正的红线是 `architecture.md:159`、`architecture.md:161` 与 `CLAUDE.md:36`——**这三处需要 owner 显式同意才能改**。其中 `:159`（「重试复用同一凭证」）与 `:161`（「禁止跨真实凭证故障切换」）是**并列的两句**：只改 `:161` 会让 `architecture.md` 内部自相矛盾（一句允许、一句禁止）。注释随实现走。
 
 ### Q9 与 #704 的推荐推进顺序
 
@@ -193,7 +214,7 @@
 |---|---|---|
 | 0 | 本 ADR 由 owner 裁决 | — |
 | 1 | **数据模型与授权**：回退候选集与顺序的配置载体（产品级）、与 grant 的校验规则（INV-3）、管理面审计事件（沿用 `auditService.record(... "CREDENTIAL_*", "UPSTREAM_CREDENTIAL", ...)` 命名，`AdminCredentialService.java:151/284/315`）、快照扩展 | ADR Accepted |
-| 2 | **数据面**：`ProxyController` 的尝试序列（扩展 `:471` 的 `Retry.max(1)` 与 `:632` 的 filter）、账本锚点（Q1）、不变式 INV-1/2 的测试 | 阶段 1 |
+| 2 | **数据面**：`ProxyController` 的尝试序列（扩展 `:471` 的 `Retry.max(1)` 与判据 `:634-635`；注意 Q7 的「需新造可重试信号」）、账本锚点（Q1）、不变式 INV-1/2 的测试 | 阶段 1 |
 | 3 | **审计与视图**：尝试明细的查询/展示、凭证维度报表口径确认（Q4 末段） | 阶段 2 |
 | B | **质量阈值路由**（按响应质量选择/重试模型） | 单独评估，#704 备注已建议「先做 A」 |
 
@@ -209,11 +230,19 @@
 |---|---|---|---|
 | **A. 维持现状（不做）** | 零改动 | 单凭证限流/失效仍等于整条路断；缓解仍是人工（`operations-runbook.md` §5：告警 + 用户在 CC Switch 换配置项） | **有效产出**（#717 明示）。若凭证供给不足以支撑候选集（Q7），这是**更诚实**的选择 |
 | **B. 同产品内、首字节前、按显式顺序的凭证回退**（本 ADR 提案） | 快照增候选列表；`ProxyController` 尝试序列扩展；候选集配置 + 审计事件；账本语义明确（Q1）；尝试明细表 | 热路径新增一次凭证选择（纯内存查表）；误伤面 = 配置错顺序；需 owner 同意改红线 | **推荐（若 owner 决定立项）** |
-| **C. 同产品内凭证池轮询 / 负载均衡** | 同 B 再加选择策略 | **否决**：`ai-gateway-comparison.md:94` 已判定「Key 池轮询破坏审计映射」；且轮询把「哪把凭证」变成不可从请求推断的状态，Q1 的账本锚点将失去确定性；同时是 `ai-gateway-comparison.md:123` 与 F46 明确点名的红线 | **否决** |
+| **C. 同产品内凭证池轮询 / 负载均衡** | 同 B 再加选择策略 | **否决**：`ai-gateway-comparison.md:93` 已判定「Key 池轮询破坏审计映射」；且轮询把「哪把凭证」变成不可从请求推断的状态，Q1 的账本锚点将失去确定性；同时是 `ai-gateway-comparison.md:123` 与 F46 明确点名的红线 | **否决** |
 | **D. 跨供应商回退** | 需跨产品语义 | **否决**：F46 DECLINED（`feature-backlog.md:109`）；`CLAUDE.md:35` 不跨供应商；`product-requirements.md:27` | **否决** |
 | **E. 只做运维编排**（管理员在告警后手工把 grant 换到备用凭证） | 控制面小改 + 运维流程 | 切换期间请求仍然失败（需人工）；但**零热路径风险、零红线变更**，且完全复用既有 grant 机制 | **次选**：若 owner 不愿改红线，E 能覆盖大部分收益。**建议与 A 一并作为「不改红线」时的答案** |
 
-**方案 C 的正面复用说明**：`ai-gateway-comparison.md:94` 否决的是**轮询/均衡**（无触发条件、无固定顺序、纯粹为了分散负载），其理由是「破坏审计映射」。方案 B 与它的区别是**可判定性**：B 的选择完全由「第几次尝试」与「一份显式有序配置」决定，**不依赖运行期负载状态**，因此给定请求与配置即可重建「用了哪把凭证、为什么」——审计映射保持可重建。**这是 B 与 C 的分界，也是本 ADR 认为 B 不违反该先例的理由**；若 owner 不接受这个区分，则 B 与 C 同被否决，答案回到 A/E。
+**方案 C 的正面复用说明**：`ai-gateway-comparison.md:93` 否决的是**轮询/均衡**（无触发条件、无固定顺序、纯粹为了分散负载），其理由是「破坏审计映射」。方案 B 与它的区别是**可判定性**：B 的选择完全由「第几次尝试」与「一份显式有序配置」决定，**不依赖运行期负载状态**，因此给定请求与配置即可重建「用了哪把凭证、为什么」——审计映射保持可重建。**这是 B 与 C 的分界，也是本 ADR 认为 B 不违反该先例的理由**；若 owner 不接受这个区分，则 B 与 C 同被否决，答案回到 A/E。
+
+**与 `ai-gateway-comparison.md:94` 的分界（字面上最接近本议题的反对先例）**：该行原文是「Higress 模型 Fallback/降级链 | **刻意不采纳**（不自动故障切换）」。它与 `:93` 不同——**没有「轮询/均衡」这个限定词**，字面上可读作「否决一切 fallback」，因此本 ADR 必须正面回应，而不能靠坐标错位绕过：
+
+- **该行的对象是「模型 Fallback/降级链」**——即请求失败后换一个**模型**（或换一个**服务/供应商**）重试，属于 `ai-gateway-comparison.md:33` 同组的「备用服务按序兜底」。本 ADR 的方案 B **不换模型、不换产品、不换供应商**（INV-1 明文钉死 `provider_product_id` 不变），只换同一产品内的一把凭证。二者不是同一个动作。
+- **该行的理由只有四个字「不自动故障切换」**，其完整语境是 `CLAUDE.md:36` 与 `architecture.md:161`。本 ADR 的效力条**显式修订的正是这两条的这一句**，并把修订范围限定在「同产品、首字节前、凭证级」。换句话说：B 不是绕过 `:94`，而是**先取得对 `:94` 母句的修订授权，再据此收窄实施**；若 owner 不批准该修订，B 同样被否决——`:94` 与 A/E 之外的选项**同生共死**。
+- **可行的边界情况**：若 owner 认为 `:94` 的「不自动」是对**任何**自动切换的否决（即只接受 E 的人工编排），则本 ADR 的答案收敛到 §3 的 A/E，`:94` 无需任何修改。这是 owner 可选的、代价最低的裁决路径，本 ADR 不预设它错误。
+
+**一处会削弱上述分界的未决点**：若启用回退后，**熔断 OPEN 的凭证会被跳过候选序**（或反之），则「B 的选择不依赖运行期状态」这一论据会被削弱——因为熔断状态是运行期的。本 ADR 未对此作出规定，已列入 §5 未决项第 15 条，**在 owner 决定前不应把该论据当作已成立**。
 
 ---
 
@@ -227,7 +256,11 @@
 
 **API/前端**：凭证详情/产品配置页增回退组与顺序编辑；用量明细页若展示尝试轨迹，需与阶段 3 一起交付；自助侧**默认不可见**（默认关闭，无人受影响）。
 
-**文档（若 Accepted）**：`CLAUDE.md:36`、`architecture.md:161`、`provider-adapter-contract.md:127`、`ai-gateway-comparison.md:33/94/123`、`tencent-ai-gateway-mapping.md:22`（第 13 行状态由「冲突」改为记录本 ADR 结论）、`feature-backlog.md:109`（F46 维持 DECLINED，但补注「同产品凭证回退已由 ADR-0021 单独裁决」）、`operations-runbook.md` §5、`api-contract.md`、`configuration-reference.md`。
+**文档（若 Accepted）——按「必须改写」与「仅需补注」分开，避免误改授权基础**：
+
+- **必须改写（红线/冲突句，需 owner 逐字同意）**：`CLAUDE.md:36`、`architecture.md:159`、`architecture.md:161`（**三处并列，缺一处即内部自相矛盾**）、`provider-adapter-contract.md:126`（「不跨凭证/产品自动重试」）、`ai-gateway-comparison.md:33`（对标表结论行）。
+- **仅需补注（不改结论）**：`ai-gateway-comparison.md:93/94/123`（补「已由 ADR-0021 收窄到同产品凭证级」）、`tencent-ai-gateway-mapping.md:22`（第 13 行状态由「冲突」改为记录本 ADR 结论）、`feature-backlog.md:109`（F46 维持 DECLINED，补注「同产品凭证回退已由 ADR-0021 单独裁决」）、`operations-runbook.md` §5、`api-contract.md`、`configuration-reference.md`。
+- **明确不改**：`provider-adapter-contract.md:127`（首字节前安全重试——本 ADR 的**授权基础**）、`:128`、`:125`、`product-requirements.md:27`、`product-requirements.md:33`、`CLAUDE.md:35`。**把 `:127` 列入「必须改写」是错误**：它约束的正是本 ADR 想扩展的那条安全重试，改写它反而会削弱授权基础。
 
 **风险与缓解**：
 
@@ -263,3 +296,4 @@
 12. **F50 多服务绑定 / Header 分流路由**——动的是 Virtual Key → 服务的绑定，与本 ADR 的 grant → 凭证选择不是同一层。
 13. **跨供应商故障切换（F46）**——维持 DECLINED；若未来重启，需**独立 ADR**，不得援引本 ADR 为先例（本 ADR 的效力条已为此设界）。
 14. Azure API Management「后端池 + 优先级」的**预留/按量混合**计费形态——#717 列为参考；本 ADR 只采纳其「有序优先级」形态，未评估其计费建模。
+15. **熔断（`McpCircuitBreaker`，键 `(productId, credentialId)`，`ProxyController.java:445`）与候选序的交互**——三个子问题本 ADR 均未规定：① 处于 `OPEN` 的候选凭证是**跳过**还是**仍然尝试**？② 一次回退失败是否**计入该凭证的熔断计数**？③ 回退本身是否算「一次调用」，从而更快把整个产品推入 `OPEN`？**若选择「跳过 OPEN 凭证」，则 §3 中「方案 B 的选择不依赖运行期状态」这一论据会被削弱**（熔断状态是运行期的），该论据在 owner 决定前不应被当作已成立。需要 owner 在实现前给出裁决。
