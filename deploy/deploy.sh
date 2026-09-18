@@ -40,6 +40,13 @@ TAG="${MIQROKEY_IMAGE_TAG:-local}"
 # happens to stand: run it from elsewhere and `up` would create a SECOND set of
 # containers next to the live ones instead of replacing them. Pinned here, along
 # with the project directory, so the script is cwd-independent.
+#
+# The project directory is the COMPOSE FILE's directory — and that is load-bearing,
+# not cosmetic: it is where `.env` is read from and where relative bind mounts
+# (`./secrets/certs`) are anchored. Pinning it one level up swaps BOTH silently:
+# every `${VAR:-default}` falls back to its default and the mounts point at
+# directories Docker happily creates empty. The site then comes up on the wrong
+# origin with no TLS certificate, and `up` still reports success (#802).
 PROJECT="${MIQROKEY_COMPOSE_PROJECT:-miqrokey}"
 
 CONTEXT=""
@@ -74,6 +81,9 @@ done
 [ -d "$CONTEXT" ] || { echo "build context not found: $CONTEXT" >&2; exit 1; }
 COMPOSE="$LIVE_DIR/deploy/compose.prod.yaml"
 [ -f "$COMPOSE" ] || { echo "compose file not found: $COMPOSE" >&2; exit 1; }
+# The compose file's own directory, never its parent: `.env` is read from here and
+# relative bind mounts are anchored here (see PROJECT above, and #802).
+COMPOSE_DIR="$(dirname "$COMPOSE")"
 
 run() {
     if [ "$DRY" = 1 ]; then
@@ -87,7 +97,7 @@ run() {
 # Every compose call goes through here so the project and its directory are pinned
 # in one place (see PROJECT above).
 compose() {
-    docker compose -p "$PROJECT" --project-directory "$LIVE_DIR" -f "$COMPOSE" "$@"
+    docker compose -p "$PROJECT" --project-directory "$COMPOSE_DIR" -f "$COMPOSE" "$@"
 }
 
 # The container a service is actually running, asked of compose rather than
@@ -156,6 +166,95 @@ for svc in $SERVICES; do
         echo "verified $svc: $got"
     fi
 done
+
+# ---- 4b. assert the project directory actually took effect -------------------
+# The image-identity check above cannot see a project directory that resolved to
+# the wrong place: that swaps which `.env` is read and where the relative mounts
+# point while every image stays exactly the one that was built. Both halves are
+# asserted here, because both were silently wrong on the demo box once (#802).
+#
+# Skipped when the file it compares against does not exist: a box without certs or
+# without an `.env` entry is a legitimate shape, and the assertion is about the
+# value drifting away from the file — not about the file being mandatory.
+assert_env_matches_file() {
+    svc="$1"
+    var="$2"
+    [ -f "$COMPOSE_DIR/.env" ] || return 0
+    want="$(grep -E "^$var=" "$COMPOSE_DIR/.env" | head -n 1 | cut -d= -f2-)"
+    [ -n "$want" ] || return 0
+    got="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$(container_of "$svc")" 2>/dev/null \
+        | grep -E "^$var=" | head -n 1 | cut -d= -f2-)"
+    if [ "$got" != "$want" ]; then
+        echo "ASSERT FAILED $svc: $var='$got' but $COMPOSE_DIR/.env says '$want'" >&2
+        echo "  -> the project directory is not the compose file's directory; .env was not read" >&2
+        failed=1
+    else
+        echo "verified $svc: $var taken from $COMPOSE_DIR/.env"
+    fi
+}
+
+assert_mount_landed() {
+    svc="$1"
+    host_path="$2"
+    container_path="$3"
+    [ -s "$host_path" ] || return 0
+    if ! docker exec "$(container_of "$svc")" test -s "$container_path" 2>/dev/null; then
+        echo "ASSERT FAILED $svc: $host_path exists but $container_path is missing in the container" >&2
+        echo "  -> a relative mount resolved somewhere else (Docker creates missing bind sources empty)" >&2
+        failed=1
+    else
+        echo "verified $svc: $container_path"
+    fi
+}
+
+if [ "$DRY" = 0 ]; then
+    for svc in $SERVICES; do
+        case "$svc" in
+            control-plane) assert_env_matches_file control-plane MIQROKEY_ORIGIN_ALLOWLIST ;;
+            portal) assert_mount_landed portal "$COMPOSE_DIR/secrets/certs/fullchain.pem" /etc/nginx/certs/fullchain.pem ;;
+        esac
+    done
+fi
+
+# ---- 4c. functional smoke: proving the build is the right one is not the same as
+# proving it was configured right, and the two silent failures above are exactly
+# that kind — configuration, invisible to an image id.
+#
+# One request discriminates: `POST /api/v1/auth/login` with an empty body and the
+# configured Origin answers 400 when everything is in place, 403 when the container
+# holds a different allowlist, and 502/000 when nginx cannot reach the upstream it
+# just had swapped underneath it. Nothing is authenticated and no credential is
+# sent — the body is deliberately empty.
+smoke_api_origin() {
+    [ -f "$COMPOSE_DIR/.env" ] || return 0
+    origin="$(grep -E '^MIQROKEY_ORIGIN_ALLOWLIST=' "$COMPOSE_DIR/.env" | head -n 1 | cut -d= -f2- | cut -d, -f1)"
+    [ -n "$origin" ] || return 0
+    command -v curl >/dev/null 2>&1 || return 0
+    code="$(curl -s -k -o /dev/null -w '%{http_code}' --max-time 10 -X POST \
+        -H "Origin: $origin" -H 'Content-Type: application/json' -d '{}' \
+        https://127.0.0.1/api/v1/auth/login || true)"
+    case "${code:-000}" in
+        403)
+            echo "ASSERT FAILED smoke: API answers 403 to the configured Origin '$origin'" >&2
+            echo "  -> the container's allowlist is not the one in $COMPOSE_DIR/.env" >&2
+            failed=1
+            ;;
+        000 | 5*)
+            echo "ASSERT FAILED smoke: API through the portal answered '${code:-000}'" >&2
+            echo "  -> nginx cannot reach the upstream it was restarted against" >&2
+            failed=1
+            ;;
+        *)
+            echo "verified smoke: API answers $code to the configured Origin"
+            ;;
+    esac
+}
+
+if [ "$DRY" = 0 ]; then
+    case " $SERVICES " in
+        *" control-plane "* | *" portal "*) smoke_api_origin ;;
+    esac
+fi
 
 # ---- 5. a swapped backend invalidates the portal's resolved upstream ---------
 # nginx resolves the upstream names once, at start: after a backend container is
