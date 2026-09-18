@@ -21,6 +21,7 @@ const report: RoiReportView = {
     paidCost: 2.5,
     savedPct: 33.05,
     hitRatePct: 40.1,
+    pricingStatus: 'COMPLETE',
   },
   byDay: [
     {
@@ -57,6 +58,40 @@ describe('NextRoiView', () => {
   function mountView() {
     return mount(NextRoiView, { global: { plugins: [createPinia()] } });
   }
+
+  it('caveats the money and shows a dash for the discount when nothing was priced (#858)', async () => {
+    mockApi.getRoiReport.mockResolvedValue({
+      ...report,
+      totals: {
+        ...report.totals,
+        savedCost: 0,
+        paidCost: 0,
+        savedPct: null,
+        pricingStatus: 'UNAVAILABLE',
+        unpriced: { unavailableEvents: 1 },
+      },
+    } as unknown as RoiReportView);
+    const wrapper = mountView();
+    await flushPromises();
+
+    const chip = wrapper.find('[data-testid="roi-cost-caveat"]');
+    expect(chip.exists()).toBe(true);
+    expect(chip.text()).toBe('未定价');
+    // 0/0 is undefined; "0.00%" here would read as "caching saved nothing" on the
+    // page whose purpose is deciding whether caching pays.
+    expect(wrapper.text()).toContain('等效折扣');
+    expect(wrapper.text()).toContain('—');
+    wrapper.unmount();
+  });
+
+  it('leaves the money unmarked and keeps a real discount when everything was priced', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="roi-cost-caveat"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain('33.05%');
+    wrapper.unmount();
+  });
 
   it('renders the stat strip (value + sub-metric) and per-day rows', async () => {
     const wrapper = mountView();

@@ -4613,6 +4613,9 @@ export interface components {
             paidCost?: number;
             savedCost?: number;
             savedPct?: number;
+            /** @enum {string} */
+            pricingStatus?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+            unpriced?: components["schemas"]["PricingGap"];
         };
         HourlyUsageReport: {
             date?: string;

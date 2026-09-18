@@ -9,7 +9,8 @@
  */
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
-import { UiButton, UiDonut, UiTable } from '@/ui';
+import { UiButton, UiDonut, UiTable, UiTooltip } from '@/ui';
+import { costGapNote } from '@/lib/usage-pricing';
 import { csvCell } from '@/utils/csv';
 import type { RoiReportView } from '@/types/generated-api';
 
@@ -100,11 +101,17 @@ interface RoiCard {
   value: string;
   sub: { k: string; v: string }[];
   accent?: boolean;
+  /** Set when a figure on this card is known to fall short of the whole (#801). */
+  caveat?: string;
 }
 
 const cards = computed<RoiCard[]>(() => {
   const t = report.value?.totals;
   const { upstream, coalesced, l1, l2, served } = totalsOf.value;
+  // The money below is short of the whole whenever a token dimension had no price.
+  const costCaveat = costGapNote(t) ?? undefined;
+  // A 0/0 discount is undefined, not zero: the API sends null for exactly this case.
+  const discount = t?.savedPct == null ? '—' : pct(Number(t.savedPct));
   const rate = (n: number) => pct(served ? (n / served) * 100 : 0);
   return [
     {
@@ -125,9 +132,10 @@ const cards = computed<RoiCard[]>(() => {
     {
       label: '缓存节省',
       value: money(Number(t?.savedCost ?? 0)),
+      caveat: costCaveat,
       sub: [
         { k: '上游实付', v: money(Number(t?.paidCost ?? 0)) },
-        { k: '等效折扣', v: pct(Number(t?.savedPct ?? 0)) },
+        { k: '等效折扣', v: discount },
       ],
       accent: true,
     },
@@ -265,9 +273,12 @@ onMounted(load);
     <div v-if="report" class="next-roi__cards" data-testid="roi-report">
       <div v-for="card in cards" :key="card.label" class="ui-panel next-roi__card">
         <span class="next-roi__label">{{ card.label }}</span>
-        <span class="next-roi__value ui-num" :class="{ 'next-roi__value--accent': card.accent }">{{
-          card.value
-        }}</span>
+        <span class="next-roi__value ui-num" :class="{ 'next-roi__value--accent': card.accent }"
+          >{{ card.value
+          }}<UiTooltip v-if="card.caveat" :text="card.caveat"
+            ><span class="next-roi__caveat" data-testid="roi-cost-caveat">未定价</span></UiTooltip
+          ></span
+        >
         <span class="next-roi__sub">
           <template v-for="(part, i) in card.sub" :key="part.k">
             <span v-if="i > 0" class="next-roi__sub-sep" aria-hidden="true">·</span>
@@ -529,6 +540,14 @@ onMounted(load);
 .next-roi__label {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
+}
+
+.next-roi__caveat {
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-medium);
+  color: var(--ui-warning-fg);
+  white-space: nowrap;
+  margin-left: var(--ui-space-1);
 }
 
 .next-roi__sub {

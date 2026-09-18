@@ -1,5 +1,8 @@
 package com.miqroera.miqrokey.controlplane.dto;
 
+import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.PricingGap;
+import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.PricingStatus;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -18,8 +21,17 @@ import java.util.List;
  */
 public record RoiReportView(Instant from, Instant to, RoiTotals totals, List<RoiDay> byDay) {
 
+    /**
+     * @param pricingStatus whether every token dimension that took part had a price;
+     *            anything but {@code COMPLETE} means {@code paidCost} / {@code savedCost}
+     *            are short of the whole (see {@code unpriced}).
+     * @param savedPct {@code savedCost} as a share of the hypothetical spend; <b>null</b>
+     *            when there is no cost basis at all, because that share is then
+     *            undefined rather than zero.
+     */
     public record RoiTotals(long upstreamRequests, long coalescedRequests, long l1Hits, long l2Hits,
-            BigDecimal hitRatePct, BigDecimal paidCost, BigDecimal savedCost, BigDecimal savedPct) {
+            BigDecimal hitRatePct, BigDecimal paidCost, BigDecimal savedCost, BigDecimal savedPct,
+            PricingStatus pricingStatus, PricingGap unpriced) {
     }
 
     public record RoiDay(String date, long upstreamRequests, long hitRequests, BigDecimal hitRatePct,

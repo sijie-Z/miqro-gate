@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -137,6 +138,24 @@ class AdminRoiApiIntegrationTest {
                 // ...and yet the group is not gap-free, and says so.
                 .andExpect(jsonPath("$.totals.unpriced.unpricedHitEvents").value(2))
                 .andExpect(jsonPath("$.totals.unpriced.empty").value(false));
+    }
+
+    @Test
+    @DisplayName("with nothing priced the discount is undefined, not zero (#858)")
+    void unpricedWindowReportsNoDiscount() throws Exception {
+        fx.insertCatalog();
+        // No price is put in force, so paid and saved are both 0 and the share is 0/0.
+        // Reporting 0.00 there reads as "caching saved nothing" on a page whose whole
+        // purpose is deciding whether caching pays; the honest answer is that it cannot
+        // be computed.
+        fx.insertUsage(1000L, 500L);
+
+        mockMvc.perform(get("/api/v1/admin/usage/roi").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.paidCost").value(0))
+                .andExpect(jsonPath("$.totals.savedCost").value(0))
+                .andExpect(jsonPath("$.totals.savedPct").value(nullValue()))
+                .andExpect(jsonPath("$.totals.pricingStatus").value("UNAVAILABLE"))
+                .andExpect(jsonPath("$.totals.unpriced.unavailableEvents").value(1));
     }
 
     @Test
