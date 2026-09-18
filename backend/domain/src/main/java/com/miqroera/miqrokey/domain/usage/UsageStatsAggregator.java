@@ -104,18 +104,45 @@ public final class UsageStatsAggregator {
      * </p>
      */
     public record PricingGap(long inputTokens, long outputTokens, long cacheReadTokens, long cacheCreationTokens,
-            long unpricedEvents, long unavailableEvents) {
+            long unpricedEvents, long unavailableEvents, long unpricedHitEvents) {
 
-        public static final PricingGap NONE = new PricingGap(0, 0, 0, 0, 0, 0);
+        public static final PricingGap NONE = new PricingGap(0, 0, 0, 0, 0, 0, 0);
 
         public PricingGap plus(PricingGap other) {
             return new PricingGap(inputTokens + other.inputTokens, outputTokens + other.outputTokens,
                     cacheReadTokens + other.cacheReadTokens, cacheCreationTokens + other.cacheCreationTokens,
-                    unpricedEvents + other.unpricedEvents, unavailableEvents + other.unavailableEvents);
+                    unpricedEvents + other.unpricedEvents, unavailableEvents + other.unavailableEvents,
+                    unpricedHitEvents + other.unpricedHitEvents);
         }
 
+        /**
+         * True when the group's <b>cost</b> could not be fully priced — the condition
+         * {@link PricingStatus} describes (#766).
+         *
+         * <p>
+         * Named separately from {@link #isEmpty()} because the two answer different
+         * questions: a group whose usage is fully priced but whose <em>cache hits</em>
+         * were not still has a complete cost. Folding the hit gap into the cost's
+         * status would report a cost figure as incomplete for a reason that never
+         * touched it.
+         * </p>
+         */
+        public boolean hasCostGap() {
+            return unpricedEvents > 0;
+        }
+
+        /**
+         * True when nothing in the group could be priced — cost {@code or} savings.
+         *
+         * <p>
+         * {@code unpricedHitEvents} counts the hits that {@code savedByGatewayCache}
+         * could not value (#790): a hit whose tokens are real but whose price was not
+         * in force when it happened contributes 0 to the saving. The saving is then a
+         * <b>lower bound</b>, and this is the count that says so.
+         * </p>
+         */
         public boolean isEmpty() {
-            return unpricedEvents == 0;
+            return unpricedEvents == 0 && unpricedHitEvents == 0;
         }
     }
 
@@ -164,7 +191,7 @@ public final class UsageStatsAggregator {
      */
     public record HitAggRow(String groupKey, String label, UUID productId, String modelId, long hitCountL1,
             long hitCountL2, TokenBucket cachedTokens, BigDecimal inputCost, BigDecimal outputCost,
-            BigDecimal cacheReadCost, BigDecimal cacheCreationCost) {
+            BigDecimal cacheReadCost, BigDecimal cacheCreationCost, long unpricedHits) {
     }
 
     /** Group-level aggregate. */
@@ -328,6 +355,10 @@ public final class UsageStatsAggregator {
             }
             savedByGatewayCache = savedByGatewayCache.add(toCost(row.inputCost())).add(toCost(row.outputCost()))
                     .add(toCost(row.cacheReadCost())).add(toCost(row.cacheCreationCost()));
+            // A hit we could not price contributes nothing above, so the saving is a
+            // lower bound. Count it, or the reader cannot tell "the cache saved almost
+            // nothing" from "we had no price to say what it saved" (#790).
+            unpriced = unpriced.plus(new PricingGap(0, 0, 0, 0, 0, 0, row.unpricedHits()));
         }
 
         /**
@@ -356,7 +387,9 @@ public final class UsageStatsAggregator {
          * </p>
          */
         private PricingStatus pricingStatus() {
-            if (unpriced.isEmpty()) {
+            // The cost's status, and only the cost's: an unpriced *hit* leaves this
+            // figure complete and makes the saving a lower bound instead (#790).
+            if (!unpriced.hasCostGap()) {
                 return PricingStatus.COMPLETE;
             }
             long counted = upstream + coalesced;

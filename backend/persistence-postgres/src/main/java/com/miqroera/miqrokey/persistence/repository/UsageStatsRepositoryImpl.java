@@ -396,7 +396,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             var gap = new UsageStatsAggregator.PricingGap(rs.getLong("unpriced_input_tokens"),
                     rs.getLong("unpriced_output_tokens"), rs.getLong("unpriced_cache_read_tokens"),
                     rs.getLong("unpriced_cache_creation_tokens"), rs.getLong("unpriced_events"),
-                    rs.getLong("unavailable_events"));
+                    rs.getLong("unavailable_events"), 0L);
             UsageStatsAggregator.UsageAggRow.Outcome outcome = new UsageStatsAggregator.UsageAggRow.Outcome(
                     rs.getLong("failed_requests"), rs.getLong("cancelled_requests"), rs.getLong("duration_sum_ms"),
                     rs.getLong("duration_count"), rs.getLong("ttfb_sum_ms"), rs.getLong("ttfb_count"));
@@ -710,6 +710,11 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
         private long weightedCacheRead;
         private long weightedCacheCreation;
         private long totalHits;
+        /**
+         * Hits whose tokens carried no price in force — the saving is a lower bound
+         * (#790).
+         */
+        private long unpricedHits;
         // Undivided sums of (cached tokens x hit count x unit price). Kept undivided so
         // the
         // only rounding happens in the aggregator, with the same MathContext as before.
@@ -753,14 +758,30 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             outputCost = outputCost.add(weighted(output, hits, priceOutput));
             cacheReadCost = cacheReadCost.add(weighted(cacheRead, hits, priceCacheRead));
             cacheCreationCost = cacheCreationCost.add(weighted(cacheCreation, hits, priceCacheCreation));
+            if (unpriced(input, hits, priceInput) || unpriced(output, hits, priceOutput)
+                    || unpriced(cacheRead, hits, priceCacheRead) || unpriced(cacheCreation, hits, priceCacheCreation)) {
+                unpricedHits += hits;
+            }
         }
 
         /**
          * {@code tokens x hits x unitPrice}, undivided; a null price contributes
          * nothing.
+         *
+         * <p>
+         * "Nothing" is the honest answer for this sum and the wrong answer for the
+         * report: the tokens are real and only the price is missing, so the caller also
+         * counts the hit as unpriced (#790). Otherwise a hit we could not value is
+         * indistinguishable from a hit that saved nothing.
+         * </p>
          */
         private static BigDecimal weighted(long tokens, long hits, BigDecimal unitPrice) {
             return unitPrice == null ? BigDecimal.ZERO : BigDecimal.valueOf(tokens * hits).multiply(unitPrice);
+        }
+
+        /** A dimension that carried tokens while no price was in force for it. */
+        private static boolean unpriced(long tokens, long hits, BigDecimal unitPrice) {
+            return tokens > 0 && hits > 0 && unitPrice == null;
         }
 
         UsageStatsAggregator.HitAggRow toRow() {
@@ -768,7 +789,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             TokenBucket mean = new TokenBucket(weightedInput / hits, weightedOutput / hits,
                     weightedCacheCreation / hits, weightedCacheRead / hits, null, null, null, null);
             return new UsageStatsAggregator.HitAggRow(groupKey, label, productId, modelId, l1, l2, mean, inputCost,
-                    outputCost, cacheReadCost, cacheCreationCost);
+                    outputCost, cacheReadCost, cacheCreationCost, unpricedHits);
         }
     }
 }
