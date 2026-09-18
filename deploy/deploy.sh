@@ -261,7 +261,12 @@ if [ -s "$cert_dir/fullchain.pem" ] && [ -s "$cert_dir/privkey.pem" ]; then
             fi
             svc_ok=1
             for f in fullchain.pem privkey.pem; do
-                want_sum="$(sha256sum "$cert_dir/$f" | cut -d' ' -f1)"
+                # Read the host file on stdin rather than passing its name: given a
+                # name, coreutils escapes the whole output line — a leading
+                # backslash, doubled separators — whenever the path contains a
+                # backslash or a newline, and the hash cut out of that line is then
+                # wrong. Passing no name at all removes the question.
+                want_sum="$(sha256sum < "$cert_dir/$f" | cut -d' ' -f1)"
                 got_sum="$(docker exec "$cid" sha256sum "$dest/$f" 2>/dev/null | cut -d' ' -f1 || true)"
                 if [ -z "$got_sum" ]; then
                     # Covers both "missing/empty inside" and "cannot be read at

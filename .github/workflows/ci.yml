@@ -104,6 +104,21 @@ jobs:
           fi
           shellcheck --version
           git ls-files -z '*.sh' | xargs -0 shellcheck -S warning
+  # Whether what the deploy script CONCLUDES is right — the question ShellCheck
+  # cannot ask. Each scenario builds a stack whose only defect is the one under
+  # test, so passing on a healthy stack proves nothing; the harness is built to
+  # fail on the broken one. Reverse-verified: reverting any of the three fixes
+  # makes it exit non-zero.
+  deploy-script:
+    name: Deploy script (behavioural)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.compose == 'true' }}
+    timeout-minutes: 12
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Regression scenarios
+        run: python3 deploy/tests/deploy_script_regression.py
   # Fast unit-only backend verification on both OSes (no Docker).
   backend-unit:
     name: Backend unit (Java 21 / ${{ matrix.os }})
