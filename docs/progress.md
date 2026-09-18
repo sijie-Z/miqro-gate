@@ -2,6 +2,72 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-18（#715 缺口②：对账差异报告导出）
+
+- **#715 缺口②（分支 `feat/reconciliation-export-715`，基于 c931e8df，HEAD 再提交本次收尾）**：
+  对账报告的四态明细行支持 CSV 合规导出 `GET /api/v1/admin/reconciliations/{id}/export?state=`。
+  SYSTEM_ADMIN-only，沿用 `AdminReconciliationController` 与 `/api/v1/admin/**` 默认拒绝拦截器，
+  未新开鉴权面。
+  - **方言按「同步管理端下载」惯例**（与 `AdminAuditController` / `AdminRetentionLogController`
+    的审计/留痕导出同形）：UTF-8 BOM、RFC 4180 引用、`= + - @ TAB CR` 公式注入防护（前置单引号）、
+    snake_case 表头、5 万行上限、`Content-Disposition: attachment`。**故意不混用**
+    `ExportTaskService` 的异步产物方言（gzip + `\,` 转义 + 可选 JSONL）——两者是不同的下载约定，
+    本端点不产生排队任务、不入 `export_tasks`。
+  - **列与页面明细同源**：单一声明列清单 `EXPORT_COLUMNS` + `DETAIL_KEYS`（snake_case 表头 ↔ 存储的
+    camelCase JSON 键）；页面 `rows()` 与导出共用同一 `rowMapper` 投影与同一 `LIMIT` 语义，
+    两处不会各自漂移。未声明的 detail 列直接抛 `IllegalStateException`，宁可失败也不错位。
+  - **租户隔离与审计**：导出前先走 `get(tenantId, reportId)`（SQL 带 `AND tenant_id = :tenantId`），
+    他人报告一律 404 `RECONCILIATION_NOT_FOUND`（不泄漏存在性）；`state` 非法 400
+    `RECONCILIATION_PARAM_INVALID`，且与报告不存在一样在写审计**之前**失败，不留孤儿审计行。
+    成功导出记 `RECONCILIATION_EXPORT`（`targetType=RECONCILIATION`，摘要 `{rows, truncated}`）。
+  - `state` 语义与 `/rows` 完全一致（同一校验函数、同一 400）；**空结果是仅表头的 CSV，不是错误**。
+  - `X-MiQroKey-Rows` 返回精确数据行数：单元格内的换行是合法 CSV，按物理行计数会少报。
+- 验证（真实命令与结果，Windows + JDK 21 + Testcontainers PostgreSQL）：
+  - 后端 `.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=ReconciliationApiIntegrationTest,ReconciliationExportCsvTest
+    -Dsurefire.failIfNoSpecifiedTests=false` →
+    `Tests run: 9, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`，`Total time: 57.323 s`。
+  - 前端 `npm ci`（0 vulnerabilities）、`npm run typecheck` exit 0、`npm run test` →
+    63 test files / 384 tests 全绿、`npm run lint` → `0 errors, 7 warnings`（7 条均为既有告警，
+    不含本次改动文件）。
+- 覆盖的边界（真实用例，非空跑）：空报表（仅表头 + `X-MiQroKey-Rows: 0`，无截断头）、未知 state
+  （400 且不新增审计行）、跨租户（404，租户 try/finally 自建自删）、5 万行上限（插入 50010 行 →
+  返回 50000 行 + `X-MiQroKey-Truncated: true`）、公式注入各前导字符与 RFC 4180 引用、
+  声明列唯一性/顺序、detail 键与声明列不漂移、导出与页面逐格一致、`state` 收窄与页面筛选一致。
+- i18n：`frontend/src/i18n/dict.ts` 已有 `导出 CSV` / `导出失败` / `已导出 N 行 CSV。` /
+  截断提示的中英映射（与审计导出一致），本次**无需新增词条**。
+- **缺口①（供应商私有账单解析器）不在本次范围**：仍需真实账单样本，本分支不含。
+- 工作区卫生：本次只提交上述 6 个改动文件 + 1 个新增单测 + 本文件；工作区另存的 21 个与本议题
+  无关的改动文件（`types/generated.ts` 重生成、若干 `ui/*` 与视图改动）保持原样未提交。
+- **内部对抗评审轮（同日追加）**：评审提出阻断项 —— `csvCell` 的公式注入防护对所有列一视同仁，
+  于是 `detail_amount` 的合法负值（退款/调整行）被导出为 `'-12.34`，既与页面显示的 `-12.34`
+  不一致，又让金额列在表格中退化为文本。可达性已复核：`CanonicalBillParser` 只校验 `amount` 非空，
+  `BillReconciliationEngine` 的 `new BigDecimal` 接受负值。
+  - **修复落在导出层**（未触碰解析器/匹配逻辑，即缺口① 范围）：整格匹配裸十进制字面量
+    `[+-]?\d+(\.\d+)?([eE][+-]?\d+)?` 时豁免防护单引号；`-1+1`、`+cmd|' /C calc'!A0` 这类
+    仅「形似数字」的串仍按公式处理。`= + @ TAB CR` 前导一律不变。
+  - **回归测试**：`ReconciliationExportCsvTest` 新增 `signedDecimalsAreNotGuarded`，并把 `+1` /
+    `-1.50` 从「应加引号」用例移入该用例；`ReconciliationApiIntegrationTest` 新增
+    `exportCsvSignedAmount`（`-12.34` 与 `+3.00` 两条账单行的独立 fixture，逐格比对页面明细
+    并断言单元格 `BigDecimal` 等值）。
+  - 复跑：`.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=ReconciliationApiIntegrationTest,ReconciliationExportCsvTest
+    -Dsurefire.failIfNoSpecifiedTests=false` →
+    `Tests run: 11, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`，`Total time: 48.105 s`。
+  - 格式（`mvn test` 不跑 spotless，`verify` 才跑，所以裸测绿不代表 CI 绿）：`spotless:check`
+    在整改前报 `.../AdminReconciliationController.java`、`.../ReconciliationService.java`、
+    `.../ReconciliationApiIntegrationTest.java`、`.../ReconciliationExportCsvTest.java` 违规，
+    已用 `.\mvnw.cmd -B -f backend -pl control-plane-app -am spotless:apply` 修好（纯 javadoc/换行
+    重排；`AdminReconciliationController.java` 因此从「已提交」变为「本次再提交一次注释重排」），
+    随后 `spotless:check` → `BUILD SUCCESS`。
+  - 格式修复后复跑（分别执行）：`ReconciliationApiIntegrationTest` →
+    `Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`，`Total time: 51.523 s`；
+    `ReconciliationExportCsvTest` → `Tests run: 5, Failures: 0, Errors: 0, Skipped: 0`，
+    `BUILD SUCCESS`，`Total time: 4.386 s`。前端 `npm run typecheck` exit 0、`npm run test` →
+    63 files / 384 tests 全绿、`npm run lint` → `0 errors, 7 warnings`。
+  - 文档：`docs/api-contract.md` 补「裸十进制字面量原样输出、不加防护单引号」与「审计 `rows`
+    为截断后实际行数」两处口径。
+
 ## 会话交接点 2026-09-16（自助注册关闭态前置体现 #550）
 
 - **#550（PR 待开，分支 `fix/registration-disabled-gating`，基于 50a9b24）**：部署关闭自助注册时，
@@ -3806,7 +3872,6 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 ### 一处 tooling 假绿（本批第二次遇到同类）
 
 `-Dtest=A+B` **不是 surefire 的选择器语法**（应为逗号），会**空跑并返回 0**；又一次"构建成功"掩盖了"根本没跑测试"。加上前一批那次"调用了别的工作树的 mvnw21.sh"，这是两天内**第二次**由命令层而非代码层造成的假绿——收口前要核的是**跑了几条测试**，不是"退出码是不是 0"。
-
 ## 2026-09-18 Agent 引用后凭证禁改禁删（#714 / F1 前半）——把"被引用"变成真的锁
 
 **背景**：Agent 创建时已做绑定级联，但"被引用即不可变"这半从未实现——`rotate` / `disable` 只看凭证自身状态，不看有没有 Agent 正在用它。于是可以"先建 Agent、再轮换凭证"：网关拿新密钥打上游，而 Agent 记录里"用的是哪个凭证版本"这层语义悬空。规格侧 F28（Skill 快照）仍是 SCAFFOLD，issue 明确"独立于 F27 的绑定约束可先行"，本批只做这半。
@@ -3864,6 +3929,8 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 - `.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration -Dtest=AdminCredentialAgentBindingIntegrationTest,AdminCredentialServiceTest -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 26, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`（IT 6/6 34.42 s、单测 20/20 1.512 s；7 模块全 SUCCESS，50.7 s）
 - 前端 `npm --prefix frontend run typecheck` 通过（无输出即无错）；`npm --prefix frontend run test` → `Test Files 63 passed (63)` / `Tests 384 passed (384)`，24.22 s
+
+
 ## 2026-09-18 MCP tools/sync 兼容性修复（#779）——真实封闭客户端实测暴露
 
 **来源**：#742 第③片（WorkBuddy → 网关 MCP 数据面 → 公开 DeepWiki MCP）真机实测中，工具同步对严格 Streamable HTTP 上游 502（上游 406）——`McpToolsListClient` 只发 `Accept: application/json`，缺规范要求的 `text/event-stream`（同文件注释还自述"无 initialize 握手"，有状态上游为后续项）。触发面：一切严格校验 Accept 的上游 tools/sync 不可用 → 工具只能手工登记。
@@ -4358,7 +4425,6 @@ job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
 - 评审指出的"四族"描述过时：重排后按**两类形状**陈述（症状指向错误的层 / 证据强度被高估），工程侧（执行上下文族）随文档拆分另述。
 
 **来源**：owner 2026-09-18 转来的外部评审（原 PR #759 为"提案·待 owner 认可"，本条即该认可与改后的落地记录）。
-
 ## 2026-09-18 CAA 证据审计链路补写入方（#629）——V55 建了表，没有任何人写
 
 **起因**：#629 指出 `request_context_evidence`（V55）在 Java/Kotlin/XML/YAML 中零命中——表建好了，既无写入方也无读取方，Spec v1.1 §7.2 的"为什么这么判"审计链路是断的。复核 `git grep -n "request_context_evidence" -- "*.java" "*.kt" "*.xml" "*.yml" "*.yaml"` 无输出（rc=1），与判断一致。
@@ -4388,6 +4454,101 @@ job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
 **文档**：`database-schema.md`（补写入方/幂等键/不写行的理由，并修正 `(tenant_id, observed_at)` 这个与实际索引 `(observed_at DESC)` 不符的描述）、`api-contract.md` §7.1 归属条、`activity-context-design.md` 的"无写入方"表述。
 
 **边界与遗留**：① 读取方（查询 API）未交付，Spec §7.2 只完成写入侧；② `V55__request_context_evidence.sql:5` 注释"网关在 Context 解析时写入"与实现时机（随用量批量写）不符——迁移本轮禁改，建议 follow-up；③ issue #629 正文的列名表述与 V55 实际 DDL 不一致（原文未在本次核对范围内），措辞更新属 owner 侧事项。
+## 2026-09-18 「调整」列在无调整行时隐藏——补 #773 验收第 3 条（#773）
+
+**起因**：#773 的验收第 3 条写的是"**无调整时表格呈现与现在一致（不引入视觉噪音与额外列宽）**"，当时**没做到**。`NextUsageView.vue` / `NextAdminUsageView.vue` 把 `{ key: 'adjust', title: '调整', width: '100px' }` 写成普通 `const` 数组里的固定成员，`Table.vue` 又无条件遍历 `columns`（`UiTableColumn` 没有可见性字段）——于是**任何时刻**都多出这一列、多占这 100px，未调整的行**逐行渲染 `—`**。第 3 条描述的正是这种"一列破折号"的噪音。
+
+**修法**：照抄本仓**已有的范式**——`NextKeysView.vue` 在"所有密钥同属一个项目"时用 `columns.filter(...)` 把 `projectTag` 列摘掉。两页各自加一个 `computed`，`rows.some((row) => row.adjusted === true)` 为真才保留「调整」列；**不动** `usage-net.ts`、`UsageAdjustChip.vue`、后端，**不动**其它列，**不扩展** `UiTableColumn`、**不改** `Table.vue`（无需要扩展的字段，就不扩）。
+
+**口径：本页，不是全表**。判据取自**当前页渲染出来的行**，而不是整个结果集。理由是**全表口径没有可用的信号**：`UsageSummary.tokens` 只暴露一套（净额）计数，没有"观测 vs 净额"配对，服务端也没有"结果集里是否含调整"的字段——要判全表就得**新增 API/聚合**，这超出本项范围也超出红线。反过来，"**正在渲染的这张表里有没有一行是调整过的**"完全由行数据决定，而"一列破折号"的噪音恰恰是它造成的：**去掉这一列的条件，就是这一列在这一屏上没有任何一行在说事**。翻页后若出现调整行，列**当页即刻回来**，行级标记与气泡**一字未改**。
+
+**验证**（先在旧实现上证明断言有判别力）：
+- **红**：把两个视图文件还原到 `origin/develop`（用 `git checkout origin/develop -- <file>`，随后 `git checkout HEAD -- <file>` 还原；**没用** `git stash` 系列），跑两条 spec——**31 跑 2 失败**，恰好是两条"无调整时应隐藏"的断言（`expected [ '时间', '模型', … ] to not include '调整'`）。**判别力的边界要说清**：同一批里"有调整时应保留"的两条在旧实现上**也是绿的**（旧实现永远显示该列）——它们钉的不是旧缺陷，而是**反向**回归（防止修成"永远隐藏"或顺手删掉行级标记），两条断言合起来才是完整的约束。
+- **绿**：同一命令恢复实现后 **31/31 通过**
+- `npm --prefix frontend run typecheck` 退出 0；`run lint` 退出 0（0 error / 7 warning，**全部落在本轮未触碰的文件**）；`run test` **63 文件 384/384 通过**；`run build` 退出 0（24.96s）
+
+## 2026-09-18 缓存节省是没有标记的下界——补上最后一个"未知被当成 0"的洞（#790）
+
+**我先前的判断是错的，被一次实测推翻。** 我在 #766 的 PR 里把"命中路径无 gap 计数器"列为 follow-up，但随后自己评价它"**收益低**"（理由：演示站的节省额只有 ¥0.001 量级）。动手前顺手查了一下可达性，用的是与代码**同一套 as-of 规则**：
+
+```
+hit_groups | groups_without_input_price_at_hit_time | first_hit | last_hit
+         5 |                                      3 | 09-14     | 09-16
+```
+
+**5 个命中组里 3 个**在命中时刻没有任何生效的 input 价。也就是说这台站上的缓存节省数字**对 60% 的命中组静默偏低**——不是理论情形，是正在发生。**"收益低"是只看演示站的金额量级得出的，而缺陷的类别才是量尺**：`savedByGatewayCache` 是控制台首屏的招牌数字，而"未知被当成 0"正是 B+ 分层要消灭的那一类。
+
+**缺陷的原文**（`UsageStatsRepositoryImpl`）：
+
+```java
+/**
+ * {@code tokens x hits x unitPrice}, undivided; a null price contributes nothing.
+ */
+private static BigDecimal weighted(long tokens, long hits, BigDecimal unitPrice) {
+    return unitPrice == null ? BigDecimal.ZERO : BigDecimal.valueOf(tokens * hits).multiply(unitPrice);
+}
+```
+
+注释把这件事写得像无害的默认值。而 `addHit` 当时**完全不碰** `unpriced`。
+
+### 一处设计取舍：把两个问题分成两个名字
+
+给 `PricingGap` 加 `unpricedHitEvents` 时，`isEmpty()` 原本**驱动 `pricingStatus`**——直接加字段会让"节省侧有缺口"把**成本**判成 PARTIAL，即"让一个从没被它碰过的数字显得不可信"。所以拆成两个名字：
+
+- `hasCostGap()`（= `unpricedEvents > 0`）驱动成本状态：**成本完不完整与节省完不完整是两个问题**
+- `isEmpty()` 表示"**完全没有缺口**"（成本 ∪ 节省），名字与含义一致
+
+这两条各有一条测试钉住（域测试 144/144）。
+
+### 前端：不标注就等于没修
+
+两个展示节省额的地方同时加标记，否则 UI 层重复同一个缺陷：管理端概览的「网关缓存节省」加「下界」徽标（复用既有未定价样式 + UiTooltip 说明次数），成本页的「缓存节省」卡片在提示行里追加「下界：N 次命中在发生时无生效价目」。
+
+### 验证
+
+- **先证明会红**：只关掉仓库侧的计数（域侧保持，否则退化成编译错而非行为红）→ `AdminRoiApiIntegrationTest` **4 跑 1 失败、恰好是新增那一条**（`expected 2 but was 0`），其余 3 条照常通过；恢复后 4/4 绿
+- 新增 IT 用的是**能分辨的那个 fixture**：价目生效时间设在"命中之后、用量行之前"（`now() - interval '1 second'`）——于是同一次运行里**成本 COMPLETE 而节省是下界**，正是要钉住的那条不变式
+- 前端 25/25（含 4 条新增）＋ typecheck；OpenAPI/前端类型差异仅 `unpricedHitEvents`
+
+**教训（与本会话其他几次同族）**：我凭**金额量级**判定一件事"不值得做"，而判据应该是**缺陷的类别**；一次五分钟的实测就把它推翻了。与"自验只覆盖自己以为的范围"是同一种盲区——只是这次盲在**优先级**上，而不是盲在正确性上。
+
+## 2026-09-18 部署序列化与归因——单入口脚本（#793）
+
+**起因**：演示栈由多条会话共用，而部署是各写各的命令。两天里两次同类事故：① 10:5x 两次构建交错，**事后再怎么查都无法从机器状态回答"当时跑的是哪一份"**；② 中午 `--no-build --force-recreate` 双保险之下，容器镜像 ID 仍不等于 tag 的 ID，且容器那张镜像在本地列表里已不存在。
+
+**②一度被读成"至少还有第三条会话在动部署"——该结论被推翻**：容器跑的**就是该会话自建的镜像**（它自己的构建日志为证），tag 是被另一个**并发构建**改指的。所以问题不是"多了谁"，而是**并发构建无人拦** + **"谁上的线"没有持久记录**（等有人问起，镜像可能已经不在了）。
+
+**交付**：`deploy/deploy.sh` —— 单入口，一次做三件事：
+
+1. **`flock` 序列化**（构建与 `up` 都在锁内）：交错真正伤人的地方是**构建**，不是 `up`
+2. **收尾断言"正在跑的就是刚构建的"**：逐个比 `docker inspect <容器>.Image` 与 `docker image inspect <tag>.Id`。`Up N seconds (healthy)` **不是证据**——容器没换过去时机器显示的状态一模一样
+3. **每次追加一行 `deploy.log`**：时间/模式/提交/调用方/**运行中的镜像 ID 与当时的 tag ID**
+
+三条既有教训也编进流程：`up` 带 `--no-build`（compose 的 cp 服务 `build:` 段 context 指向**线上树**）、后端容器换掉后自动 `restart portal`（nginx upstream 启动时解析）、**显式钉住 compose 项目名**。
+
+### 干跑抓出我自己三个 bug
+
+写完先跑 `--dry-run`，立刻暴露三处：
+
+1. **干跑声称了它没做过的验证**——断言步没被 `--dry-run` 罩住，真跑了 `docker inspect` 并对我本机镜像打印 "verified"。**干跑最不能做的就是断言它没验证过的东西。**
+2. **硬编码容器名 `miqrokey-<svc>-1`**——隐含假设 compose 项目名=miqrokey。改成向 compose 问（`compose ps -q`）。
+3. **最要紧**：**compose 的项目名取决于调用时的目录**（服务器上靠 `cd /opt/miqrokey` 才得到 `miqrokey-*` 容器名）。换个目录跑，脚本会**另起一套容器**而不是更新线上那套。已 `-p` 钉住。
+
+### 真跑一遍，并证明断言会红
+
+用一次性夹具（**独立 tag 与独立项目名——避免覆盖本机既有的 `miqrokey-*:local`，那是别的会话的本地栈**）：构建→换容器→断言→restart portal→写流水，exit 0。
+
+再**故意把 tag 指向另一张镜像**，跑 `--verify-only`：
+
+```
+ASSERT FAILED control-plane: running image 'sha256:97ff…' != tag image 'sha256:974b…'
+verified portal: sha256:ff21…            ← 未动的服务仍通过
+EXIT=2
+```
+
+顺带加了 `--verify-only`：**部署线明确说要"部署前后各查一次"，而一个不能单独跑的检查不会被跑**。流水里两个身份都记，是为了事后能分辨"tag 被人重建了"与"当初就没换过去"。
+
+**分工**：脚本+文档进仓库（可评审），**装到服务器由部署线负责**。锁选**机器层**而不是"打卡制"——打卡依赖自觉，而我们已经知道至少有一个动作方不打招呼，荣誉制只会让守规矩的人排队。
 ## 2026-09-18 接入器参考实现（#742 第②片）——配置注入可执行化：打印 / 写入 / 验证
 
 **范围**：把指南矩阵（第①片）的三类接入姿势做成可执行工具 `scripts/onboarding/miqro-onboard.sh`（POSIX sh）：`print` 六种形态（env×3 shell / claude-settings / codex / openai / curl / mcp）、`apply` 三种配置文件形态（env 与 dotenv 走**托管块**替换、claude-settings 走 jq JSON 合并）、`verify` 对 `/v1/models` 按 200/404/401 归因。

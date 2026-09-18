@@ -224,6 +224,19 @@ const recordsColumns = [
   { key: 'providerRequestId', title: '供应商请求 ID', minWidth: '210px' },
 ];
 
+/**
+ * #773: the 调整 column says what the net counts were derived from, so it earns
+ * its 100px only while the rows on screen actually carry an adjustment. With
+ * none in sight the whole column is dashes, which is the extra column and the
+ * visual noise the acceptance criterion rules out — same treatment as the
+ * single-project column in NextKeysView.
+ */
+const visibleRecordsColumns = computed(() =>
+  (records.value?.items ?? []).some((row) => row.adjusted === true)
+    ? recordsColumns
+    : recordsColumns.filter((column) => column.key !== 'adjust'),
+);
+
 // #643: record rows resolve their virtual key by name for at-a-glance auditing.
 const myKeys = ref<VirtualKeyView[]>([]);
 const keyName = computed(() => {
@@ -747,7 +760,7 @@ function formatTime(iso?: string): string {
           <h2 class="ui-panel-title">最近记录</h2>
         </div>
         <UiTable
-          :columns="recordsColumns"
+          :columns="visibleRecordsColumns"
           :data="records?.items ?? []"
           :loading="recordsLoading && !records"
           row-key="gatewayRequestId"

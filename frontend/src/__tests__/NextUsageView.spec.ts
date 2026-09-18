@@ -257,6 +257,54 @@ describe('NextUsageView', () => {
     expect(next.attributes('disabled')).toBeDefined();
   });
 
+  /** Column headers of a rendered UiTable, in column order. */
+  function headerTitles(wrapper: ReturnType<typeof mount>, testid: string): string[] {
+    return wrapper.findAll(`[data-testid="${testid}"] thead th`).map((th) => th.text());
+  }
+
+  /** One cell of a records row, located by the column's own header. */
+  function cellOf(
+    wrapper: ReturnType<typeof mount>,
+    testid: string,
+    rowIndex: number,
+    title: string,
+  ): string {
+    const index = headerTitles(wrapper, testid).indexOf(title);
+    expect(index).toBeGreaterThanOrEqual(0);
+    return wrapper
+      .findAll(`[data-testid="${testid}"] tbody tr`)
+      [rowIndex]!.findAll('td')
+      [index]!.text();
+  }
+
+  it('drops the 调整 column while no row on the page carries an adjustment (#773)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(headerTitles(wrapper, 'records-table')).not.toContain('调整');
+    // The rows themselves are untouched — the column went, the table did not.
+    expect(wrapper.text()).toContain('deepseek-v4-flash');
+    expect(wrapper.findAll('[data-testid="records-table"] tbody tr')).toHaveLength(1);
+  });
+
+  it('keeps the 调整 column and its per-row state while a row is adjusted (#773)', async () => {
+    mockApi.usageRecords.mockResolvedValue({
+      ...records,
+      items: [
+        { ...records.items![0]!, adjusted: true, netOutputTokens: 25 },
+        { ...records.items![0]!, gatewayRequestId: 'gw-2' },
+      ],
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // The adjusted row declares itself; the untouched one keeps the placeholder
+    // the column always rendered.
+    expect(cellOf(wrapper, 'records-table', 0, '调整')).toContain('已调整');
+    expect(cellOf(wrapper, 'records-table', 1, '调整')).toBe('—');
+  });
+
   it('shows the empty state when no records exist', async () => {
     mockApi.usageRecords.mockResolvedValue({ items: [], page: 1, size: 20, total: 0 });
 
