@@ -313,7 +313,7 @@ onMounted(load);
           />
           <UiInput
             v-model="form.secret"
-            label="签名 Secret"
+            label="签名密钥"
             required
             :type="showSecret ? 'text' : 'password'"
             placeholder="用于校验 X-Signature 的共享密钥"

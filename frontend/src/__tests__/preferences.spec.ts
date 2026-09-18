@@ -22,7 +22,8 @@ const DEFAULTS = {
   grayMode: false,
   colorWeakMode: false,
   collapsed: false,
-  contentCompact: 'fixed',
+  contentCompact: 'wide',
+  showPageDesc: true,
   animations: true,
   lockMinutes: 0,
   sidebarWidth: 210,
@@ -82,19 +83,22 @@ describe('applyPreferences', () => {
   it('mirrors mode flags as data attributes', () => {
     const root = document.documentElement;
     expect(root.dataset.menuTheme).toBe('dark');
-    expect(root.dataset.compact).toBe('fixed');
+    expect(root.dataset.compact).toBe('wide');
+    expect(root.dataset.pageDesc).toBe('show');
     expect(root.dataset.gray).toBe('off');
     expect(root.dataset.colorWeak).toBe('off');
     expect(root.dataset.anim).toBe('on');
 
     setPreference('menuTheme', 'light');
-    setPreference('contentCompact', 'wide');
+    setPreference('contentCompact', 'fixed');
+    setPreference('showPageDesc', false);
     setPreference('grayMode', true);
     setPreference('colorWeakMode', true);
     setPreference('animations', false);
 
     expect(root.dataset.menuTheme).toBe('light');
-    expect(root.dataset.compact).toBe('wide');
+    expect(root.dataset.compact).toBe('fixed');
+    expect(root.dataset.pageDesc).toBe('hide');
     expect(root.dataset.gray).toBe('on');
     expect(root.dataset.colorWeak).toBe('on');
     expect(root.dataset.anim).toBe('off');
@@ -249,11 +253,19 @@ describe('SettingsDrawer wiring', () => {
     findByTestId('settings-menu-theme-light').click();
     expect(preferences.menuTheme).toBe('light');
 
-    findByTestId('settings-compact-wide').click();
-    expect(preferences.contentCompact).toBe('wide');
+    findByTestId('settings-compact-fixed').click();
+    expect(preferences.contentCompact).toBe('fixed');
 
     expect(document.documentElement.dataset.menuTheme).toBe('light');
-    expect(document.documentElement.dataset.compact).toBe('wide');
+    expect(document.documentElement.dataset.compact).toBe('fixed');
+
+    // #830: 页面说明 toggle rides the same switch row pattern.
+    const pageDesc = findByTestId('settings-toggle-showPageDesc') as HTMLInputElement;
+    expect(pageDesc.checked).toBe(true);
+    pageDesc.checked = false;
+    pageDesc.dispatchEvent(new Event('change'));
+    expect(preferences.showPageDesc).toBe(false);
+    expect(document.documentElement.dataset.pageDesc).toBe('hide');
 
     // #579: the collapse switch lives in the drawer too (the shell wires the
     // same flag into the rail's icon-only mode).

@@ -50,9 +50,11 @@ import {
   UsergroupCircleIcon,
 } from 'tdesign-icons-vue-next';
 import { useAuthStore } from '@/stores/auth';
+import { installPageDescToggle } from '@/utils/page-desc-toggle';
 import { language } from '@/i18n';
 import SettingsDrawer from '@/components/SettingsDrawer.vue';
 import LockScreen from '@/components/LockScreen.vue';
+import ErrorBoundary from '@/components/ErrorBoundary.vue';
 import { UiTooltip } from '@/ui';
 import { initPreferences, preferences, setPreference } from '@/preferences';
 import type { Component } from 'vue';
@@ -240,6 +242,11 @@ function updateNarrow() {
 // #440: initialize from the CURRENT width and clean the listener up on unmount
 // (the old top-level addEventListener never fired before the first resize and
 // leaked one listener per login).
+// #830: clicking any page title collapses/expands the description line under
+// it (delegated, installed once — headers are hand-rolled across 30+ views,
+// and the 界面设置 drawer carries the same preference for discoverability).
+installPageDescToggle();
+
 onMounted(() => {
   updateNarrow();
   window.addEventListener('resize', updateNarrow);
@@ -806,14 +813,18 @@ async function handleLogout() {
       </Teleport>
 
       <div ref="contentEl" class="new-shell__content">
-        <!-- The canonical RouterView + Transition pattern: `Component` here IS the
-             slot binding, not a shadow of anything in this component's scope. -->
-        <!-- eslint-disable-next-line vue/no-template-shadow -->
-        <RouterView v-slot="{ Component }">
-          <Transition name="shell-page" mode="out-in">
-            <component :is="Component" />
-          </Transition>
-        </RouterView>
+        <!-- #833: page crashes keep the shell (nav stays usable); the card
+             offers retry/reload/overview and clears on navigation. -->
+        <ErrorBoundary>
+          <!-- The canonical RouterView + Transition pattern: `Component` here IS
+               the slot binding, not a shadow of anything in this component's scope. -->
+          <!-- eslint-disable-next-line vue/no-template-shadow -->
+          <RouterView v-slot="{ Component }">
+            <Transition name="shell-page" mode="out-in">
+              <component :is="Component" />
+            </Transition>
+          </RouterView>
+        </ErrorBoundary>
       </div>
     </main>
 

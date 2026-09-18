@@ -5,7 +5,7 @@
  * product instances with protocol / base host / implementation / balance
  * source columns.
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import {
@@ -151,6 +151,13 @@ const modelsError = ref('');
 const modelForm = ref({ modelId: '', displayName: '' });
 const modelSaving = ref(false);
 const modelError = ref('');
+const modelIdError = ref('');
+watch(
+  () => modelForm.value.modelId,
+  () => {
+    if (modelIdError.value) modelIdError.value = '';
+  },
+);
 // Model probe (#346, I4): admin-triggered official catalog fetch
 const probeStatus = ref<api.ModelProbeStatus | null>(null);
 const probing = ref(false);
@@ -205,6 +212,7 @@ async function openModels(product: ProviderProductView) {
   modelsError.value = '';
   modelForm.value = { modelId: '', displayName: '' };
   modelError.value = '';
+  modelIdError.value = '';
   modelsVisible.value = true;
   modelsLoading.value = true;
   probeError.value = '';
@@ -271,11 +279,12 @@ async function addManualModel() {
   }
   const modelId = modelForm.value.modelId.trim();
   if (!modelId) {
-    modelError.value = '模型 ID 必填。';
+    modelIdError.value = '请填写模型 ID——与上游 API 的 model 名完全一致。';
     return;
   }
   modelSaving.value = true;
   modelError.value = '';
+  modelIdError.value = '';
   try {
     await api.adminCreateModel(target.id, {
       modelId,
@@ -550,11 +559,15 @@ onMounted(load);
         class="ui-alert ui-alert--warning"
         data-testid="product-models-adapter-warning"
       >
-        <div class="next-providers__warning-title">该产品未处于「已验证」状态</div>
-        <div class="next-providers__warning-status">
-          {{ implLabel[modelsProduct.implementationStatus] ?? modelsProduct.implementationStatus }}
+        <div class="next-providers__warning-title">
+          当前状态「{{
+            implLabel[modelsProduct.implementationStatus] ?? modelsProduct.implementationStatus
+          }}」：适配器尚未完成验证
         </div>
-        <div>{{ implHintOf(modelsProduct.implementationStatus) }}</div>
+        <div>
+          {{ implHintOf(modelsProduct.implementationStatus) }}
+          模型目录仍可查看与补录；用于生产流量前，请先在上游凭证页用真实凭证完成验证。
+        </div>
       </div>
       <div v-if="modelsError" class="ui-alert ui-alert--error">{{ modelsError }}</div>
       <div class="next-providers__probe">
@@ -614,7 +627,8 @@ onMounted(load);
           >
         </div>
         <p v-if="!models.length" class="next-providers__empty">
-          暂无目录模型。探测失败时可在此手工补录。
+          暂无目录模型。点上方「探测模型」可从供应商官方拉取全部模型；若该产品没有公开的模型列表接口（探测失败），
+          可在下方按上游真实的模型名手工补录。
         </p>
       </div>
       <div class="next-providers__model-form" data-testid="product-models-form">
@@ -623,12 +637,15 @@ onMounted(load);
           <UiInput
             v-model="modelForm.modelId"
             label="模型 ID"
-            placeholder="manual-fallback-model"
+            placeholder="deepseek-chat"
+            hint="必须与上游 API 的 model 名完全一致（客户端请求按此名路由）。"
+            :error="modelIdError"
             data-testid="product-models-id"
           />
           <UiInput
             v-model="modelForm.displayName"
             label="显示名（可选）"
+            hint="仅控制台展示用；留空则显示模型 ID。"
             data-testid="product-models-name"
           />
           <UiButton
