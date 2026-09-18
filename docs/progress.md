@@ -3730,13 +3730,21 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **产出（状态均为 `Proposed`，未替所有者拍板）**：
 
-- `docs/decisions/0023-request-side-cache-breakpoint-injection.md`（#769）：逐条回答 issue 的 Q1–Q7；红线冲突按「补写」的**字面违例**处理，给出 E1–E7 例外边界与三处必改文本（`CLAUDE.md:55`、`testing-and-acceptance.md:52`、`architecture.md:166-169`）；选项 A–D（推荐 **B：Key 级 opt-in、默认关**）；字节策略给出 B1 定点插入 / B2 重序列化两档；明确「逐请求审计」在网关侧**当前不可行**（`gateway-app` 无 `persistence-postgres` 依赖、无 `AuditService` 引用），改为「指标 + 生命周期列 + 响应头」举证。
+- `docs/decisions/0023-request-side-cache-breakpoint-injection.md`（#769）：逐条回答 issue 的 Q1–Q7；红线冲突按「补写」的**字面违例**处理，给出 E1–E7 例外边界与三处必改文本（`CLAUDE.md:55`、`testing-and-acceptance.md:52`、`architecture.md:166-169`）；选项 A–D（推荐 **B：Key 级 opt-in、默认关**）；字节策略给出 B1 定点插入 / B2 重序列化两档；明确「逐请求审计（`admin_audit_events`）」在网关侧**没有既有通道**（该表的写入者在控制面 `AuditServiceImpl.java:86-137`），逐请求事实改走网关**已有**的 `request_usage_records` 写入通道（`gateway-app/pom.xml:37` → `GatewayFeatureConfig.java:43` → `QueueConfig.java:62` → `PostgresUsageEventWriter.java:181,230`），即「指标 + 生命周期列 + 响应头」举证。
 - `docs/decisions/0024-request-side-rectification-retry.md`（#770）：整流重试属「**删除/改写**」，指出现有红线枚举词（重排/标准化/补写/注入）**未字面覆盖删除**，需把红线改写成可判定断言；给出 E1–E9 边界；重试预算给出 R1（共享既有 ≤1，**推荐**）/ R2（独立预算，需二次修订红线）供拍板；澄清 **#544（HTTP 200 且 content 为空）不在错误驱动整流射程内**；选项 A / B（只检测不重试的观察档）/ C（推荐目标档）/ D / E（预算类整流，二期）。
 - `docs/decisions/README.md`：追加两行索引。
 
-**编号裁定**：任务书预分配 0023 / 0024。`git ls-tree origin/develop -- docs/decisions` 核对 origin/develop 现最大编号为 **0020**，0021–0024 均未被占用，**未顺延**。
+**编号裁定**：任务书预分配 0023 / 0024。`git ls-tree -r --name-only origin/develop -- docs/decisions` 核对 origin/develop 现最大编号为 **0020**，0021–0024 均未被占用，**未顺延**。
 
-**现状证据**：两份 ADR 中每处「现状」断言均带 `file:line`（`ProxyController` / `CacheKeyFactory` / `ContextLimitGuard` / `CacheEligibility` / `SseReplayEngine` / `LlmCircuitBreakerRegistry` / `application.yml` / `V4`·`V8` 迁移 / `RequestStatus.java` / `architecture.md` / `testing-and-acceptance.md` / `provider-adapter-contract.md` / `feature-backlog.md` / `live-integration-guide.md`），并逐条在工作区核对；外部实现（cc-switch、AWS Bedrock）一律标注为 **issue 转述、本仓未复核**，不作论据。
+**现状证据**：两份 ADR 中每处「现状」断言均带 `file:line`，坐标取自 `ProxyController` / `CacheKeyFactory` / `ContextLimitGuard` / `CacheEligibility` / `SseReplayEngine` / `LlmCircuitBreakerRegistry` / `V4`·`V8` 迁移 / `RequestStatus.java` / `VirtualKey.java` / `QueueConfig.java` / `PostgresUsageEventWriter.java` / `architecture.md` / `testing-and-acceptance.md` / `provider-adapter-contract.md` / `feature-backlog.md` / `live-integration-guide.md`，写入时以 `grep -n` 或行区间读取取得；外部实现（cc-switch、AWS Bedrock）一律标注为 **issue 转述、本仓未复核**，不作论据。
+
+**独立复核与修正（第一轮）**：两份 ADR 在 push 前经独立复核，结论为 BLOCK；下列问题已逐条修正，修订后无未决分歧：
+
+- **失效的现状断言（3 处）**：① 「网关进程没有数据库/审计写入通道」不成立——`gateway-app/pom.xml:37` 以 compile scope 依赖 `queue-spi`，`GatewayFeatureConfig.java:43` 装载队列，`QueueConfig.java:62` 构造 `PostgresUsageEventWriter`（`INSERT INTO request_usage_records`，`:181`、`:230`），另有 `PostgresMcpAccessLogWriter.java:44`；正确的表述是「**已有用量/生命周期写入通道、没有 `admin_audit_events` 通道**」，两份 ADR 的 §1.2 与相关小节已按此拆分改写。② 「网关完全不读上游错误体」不成立——`ProxyController.java:548` 对**所有**上游响应（含错误）逐块缓冲，只是只用于 `:566` 用量解析 / `:578` 保留策略 / `:850` 取上游请求 id，**没有任何错误内容分类**；表述已改为「缓冲但不分类」。③ 迁移列号误引 `V8:64-65` / `V8:44-48`，已改为 `V8:58-59`（cache token 两列）与 `V8:43-47`（`request_status` 及其 CHECK 枚举）。
+- **改动面低报**：`request_usage_records` 的写入是显式列名写法且同一语句出现两处，新增列须同步改两处列清单、参数映射、域事件与发射点；两份 ADR 的「后果」段已如实展开，不再写成「一次性追加迁移」。
+- **待议点缺项**：开关粒度原先只写到 Key 级，未覆盖 ADR-0018 的 key×project 多绑定；两份 ADR 的开关粒度小节与未决项清单已补「是否允许项目级覆盖」。
+- **口径措辞**：把「全部采纳」等结论性措辞改为「建议……（待所有者拍板）」，避免代所有者拍板。
+- **本节自身的修正**：编号核对命令补 `-r --name-only`；证据清单删去两份 ADR 实际未引用的 `application.yml`；「并逐条在工作区核对」改为可复现的取证方式描述。
 
 **提交**：`73f9efe5`（ADR-0023）、`1a694784`（ADR-0024）、索引与本节同一提交。
-**行尾修正**：本条目首次追加时曾把文件内 122 处既有 LF 行尾归一化为 CRLF，产生纯空白 diff；已按 `origin/develop` 原始字节恢复，本次仅新增本条目。
+**行尾修正**：本条目追加过程中曾两次把文件内 122 处既有 LF 行尾归一化为 CRLF、产生纯空白 diff；最终已按 `origin/develop` 原始字节恢复（对 merge-base 的 `git diff --numstat` 为纯新增），本次仅新增本节内容。

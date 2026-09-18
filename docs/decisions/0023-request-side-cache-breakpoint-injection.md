@@ -34,7 +34,8 @@
 | 逐请求证据的既有承载形态 | `V8__request_usage_records.sql:55`（`retry_count integer NOT NULL DEFAULT 0`）；响应头先例 `SseReplayEngine.java:22,50`、`ProxyController.java:540`（`X-MiQroKey-Cache`） |
 | 指标形态 | `GatewayMetricsFilter.java:30`、`GatewayTtfbMetrics.java:24`、`ContextLimitGuard.java:51`、`LlmCircuitBreakerRegistry.java:49`（统一 `miqrokey*` 前缀，开关关闭时计数恒零） |
 | 上游错误/成功判定只看状态码，不读响应体 | `ProxyController.java:779`；错误体在响应发出前不被读取：`:529-540`（先 `setStatusCode` + 复制响应头，再流式写 body） |
-| **网关进程没有数据库与审计写入通道** | `gateway-app/pom.xml` 不依赖 `persistence-postgres`；`gateway-app/src/main/java` 下 grep `AuditService|admin_audit_events` 无命中；审计实现只在控制面（`AuditServiceImpl.java:86-137`），网关落库走专用有界执行器的用量/生命周期记录 |
+| 网关进程**已有**数据库写入通道（用量/生命周期） | `gateway-app/pom.xml:37` 以 compile scope（无 `<scope>`）依赖 `queue-spi`；`GatewayFeatureConfig.java:43` `@Import({…, QueueConfig.class})` 把队列装配进网关上下文；`QueueConfig.java:62` 构造 `PostgresUsageEventWriter`，后者执行 `INSERT INTO request_usage_records`（`PostgresUsageEventWriter.java:181,230`，**显式列名**写法）；另有 `PostgresMcpAccessLogWriter.java:44` 写 `mcp_access_log` |
+| 网关进程**没有**管理审计写入通道 | `gateway-app/src/main/java` 下 grep `AuditService|admin_audit_events` 无命中；`admin_audit_events` 的既有写入者在控制面（`AuditServiceImpl.java:86-137`）——逐请求写该表需新增写入器/通道，超出本提案 |
 
 ### 1.3 issue #769 提出的问题逐条回答
 
@@ -42,10 +43,10 @@
 |---|---|---|---|
 | Q1 | 配置面：Key 级开关，或服务级默认 + Key 覆盖 | 可选；**推荐 Key 级**（与 `cache_policy` 同形），不推荐服务级默认开启——默认开启会改变存量 Key 的转发语义 | `V4:17-19`、`VirtualKeyService.java:191`、`0009:18` |
 | Q2 | 网关：Anthropic 协议入站按 cc-switch 顺序注入；OpenAI 系不适用 | 可行且**必须按协议分流**——断点是 Anthropic Messages 协议字段，OpenAI 系（`/v1/chat/completions`、`/v1/responses`）无对应语义，不得注入 | 入站路径 `ProxyController.java:107,194-207`；协议语义 `docs/proxy-and-cc-switch.md:70` |
-| Q3 | 观测：注入次数指标 + 审计 | **拆成两条通道**：逐请求事实用「计数器指标 + 生命周期记录字段 + 响应头」；**审计只能记配置变更**（Key 开关本身），因为网关进程没有审计/数据库写入通道——逐请求写 `admin_audit_events` 需要新的跨进程通道，超出本提案 | 见 §1.2 表末两行；`V8:55`、`SseReplayEngine.java:22` |
-| Q4 | 对比开启前后该 Key 的 cacheRead 占比 | 数据已具备：`request_usage_records.cache_read_input_tokens` / `cache_creation_input_tokens` | `V8__request_usage_records.sql:64-65` |
+| Q3 | 观测：注入次数指标 + 审计 | **拆成两条通道**：逐请求事实用「计数器指标 + 生命周期记录字段 + 响应头」；**审计只能记配置变更**（Key 开关本身）：网关**已有** `request_usage_records` 写入通道（§1.2 表末三行），逐请求事实落该表是成本最低的选择；而 `admin_audit_events` 的既有写入者在控制面，逐请求写该表需新增写入器/通道，超出本提案 | 见 §1.2 表末三行；`V8:55`、`SseReplayEngine.java:22` |
+| Q4 | 对比开启前后该 Key 的 cacheRead 占比 | 数据已具备：`request_usage_records.cache_read_input_tokens` / `cache_creation_input_tokens` | `V8__request_usage_records.sql:58-59` |
 | Q5 | 代价与风险 | 工程量小（注入点小），**风险在「改体」行为本身**；另有两项本提案新增的风险：字符串型 `system`/`content` 的结构差异、缓存写入溢价（见 §4.5/§6） | §4 |
-| Q6 | 折中：默认关、只添加、≤4、已有标记保留、审计记注入发生、开启后不再字节等同 | **全部采纳**，并按 §2 的例外边界收紧（「审计记注入发生」按 Q3 修正为指标 + 生命周期字段） | §2、§4 |
+| Q6 | 折中：默认关、只添加、≤4、已有标记保留、审计记注入发生、开启后不再字节等同 | **建议全部采纳（待所有者拍板）**，并按 §2 的例外边界收紧（「审计记注入发生」按 Q3 修正为指标 + 生命周期字段） | §2、§4 |
 | Q7 | 若裁定维持「零改体」 | 则本 ADR 记为 `DECLINED` 并登记 `feature-backlog`（F49 现有条目即为该落点），不发生产品行为 | `docs/feature-backlog.md:112` |
 
 ---
@@ -111,6 +112,8 @@
 
 Key 级字段（建议名 `cacheInjectionPolicy ∈ {OFF, BREAKPOINTS}`，默认 `OFF`），承载与 `cache_policy` 同形：迁移（新版本号，追加不回改）→ `VirtualKey` 记录 → `RouteSnapshot.KeyRecord` → 网关快照读取。控制面创建/编辑 Key 时暴露该字段并回显；前端 Key 列表增列（同 `NextKeysView.vue:117,980-987` 的既有形态）。
 
+**项目级粒度（本 ADR 新增的待议点，不预设答案）**：ADR-0018 已确立 key×project 多绑定——一把 Key 可授权用于多个项目（`docs/decisions/0018-single-key-multi-project.md` D1），而 prompt 前缀与缓存复用率是**项目相关**的，同一把 Key 在不同项目下的最优策略可能不同。因此粒度问题实际有三档：纯 Key 级（本 ADR 推荐的最小面）、Key 级 + 项目绑定级覆盖（`key_project_binding` 行上再加一列/BREAKPOINTS 白名单）、服务级默认 + Key 覆盖（选项 C，已不推荐）。本 ADR 不替所有者选档，列入 §6；若选项目级覆盖，改动面需在 `RouteSnapshot` 的绑定行上扩展（`JdbcRouteSnapshotLoader.java:157,164` 一带），成本高于纯 Key 级。
+
 ### 4.5 失败与回退
 
 - 解析失败 / 结构不符 / budget 用尽 → **不注入，原样转发**（E5），计 `skipped`；
@@ -124,8 +127,8 @@ Key 级字段（建议名 `cacheInjectionPolicy ∈ {OFF, BREAKPOINTS}`，默认
 |---|---|
 | 逐请求「是否注入、注入几个」 | ① 计数器（形态同 `ContextLimitGuard.java:51`/`LlmCircuitBreakerRegistry.java:49`，开关关闭时恒零）；② `request_usage_records` 增列（追加迁移；该表已有 `retry_count` 先例 `V8:55`）；③ 响应头（同 `X-MiQroKey-Cache` 先例 `SseReplayEngine.java:22`），建议 `X-MiQroKey-Cache-Injection: <n>` |
 | 「这次请求被注入过」的可举证 | 上述 ②+③ 均为**逐请求**证据，且不含正文 |
-| 配置变更留痕 | 控制面 `AuditService.record(...)`（Key 开关变更走既有审计链路 `AuditService.java:36-37`）；**逐请求审计不在本提案范围**（网关无审计写入通道，见 §1.2） |
-| 收益评估 | 按 Key 对比开启前后 `cache_read_input_tokens` / `cache_creation_input_tokens`（`V8:64-65`） |
+| 配置变更留痕 | 控制面 `AuditService.record(...)`（Key 开关变更走既有审计链路 `AuditService.java:36-37`）；**逐请求审计不在本提案范围**（`admin_audit_events` 的写入者在控制面，网关侧无该通道，见 §1.2 表末三行） |
+| 收益评估 | 按 Key 对比开启前后 `cache_read_input_tokens` / `cache_creation_input_tokens`（`V8:58-59`） |
 | 不记录 | 请求/响应正文、断点所在的具体内容（只记数量与位置类别） |
 
 ### 4.7 与既有决策的关系
@@ -149,7 +152,7 @@ Key 级字段（建议名 `cacheInjectionPolicy ∈ {OFF, BREAKPOINTS}`，默认
 
 **数据面**：默认零行为变化；开启的 Key 多一次纯 CPU 注入（无 IO、无阻塞）。上游侧行为变化：断点使上游写入 prompt 缓存，后续同前缀请求可命中。
 
-**控制面**：Key 新增一个可配置字段 + 审计留痕；无新表（若逐请求字段落在 `request_usage_records`，为一次性追加迁移）。
+**控制面**：Key 新增一个可配置字段 + 审计留痕；无新表。若逐请求字段落在 `request_usage_records`，改动面不止「一次性追加迁移」：该表的写入是**显式列名 + 命名参数**写法（`PostgresUsageEventWriter.java:181,230`，同一语句出现两次），新增列必须同步改这两处的列清单与参数映射，并改域事件（`RequestStartedEvent` / `RequestCompletedEvent`）与 `ProxyController` 的发射点；迁移本身只是其中一步。若不做逐请求列而只用响应头 + 计数器，则控制面零改动。
 
 **成本影响（需所有者评估）**：缓存写入通常按高于普通输入计价，读取按折扣计价；同一上游的计价规则各异，本 ADR 不据此外推（列入 §6）。若某 Key 前缀复用率低，开启注入可能**增加**成本——这正是 §4.6 的收益对比要求存在的原因，也建议把「开启后 N 天内 cacheRead 占比未改善即可回退」写入运行手册（若采纳）。
 
@@ -163,4 +166,5 @@ Key 级字段（建议名 `cacheInjectionPolicy ∈ {OFF, BREAKPOINTS}`，默认
 4. **开关粒度**：仅 Key 级，还是允许「服务级默认 + Key 覆盖」（选项 C 的默认值部分）。
 5. **是否接受「逐请求注入」只以指标 + 生命周期字段 + 响应头举证**（而非独立审计事件）。
 6. **成本回退阈值**：开启后收益未达预期时的自动/人工回退口径。
-7. **cc-switch/AWS 的转述证据是否需要独立复核**（本 ADR 未复核其源码）。
+7. **开关粒度是否只到 Key 级**：是否需要在 ADR-0018 的 key×project 多绑定上增加项目级覆盖（§4.4 新增待议点）；答案是「只到 Key 级」还是「允许项目级覆盖」，直接决定迁移与快照的改动面。
+8. **cc-switch/AWS 的转述证据是否需要独立复核**（本 ADR 未复核其源码）。

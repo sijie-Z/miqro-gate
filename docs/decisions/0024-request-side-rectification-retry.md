@@ -25,14 +25,15 @@
 | 重试次数已持久化 | `ProxyController.java:754`；`V8__request_usage_records.sql:55`（`retry_count integer NOT NULL DEFAULT 0`） |
 | 上游业务错误**原样返回**，正是枚举注释里的承诺 | `RequestStatus.java:24`「Upstream answered with a non-2xx status (body forwarded untouched)」；`ProxyController.java:779`（仅按 HTTP 状态归类 `SUCCEEDED` / `UPSTREAM_REJECTED`） |
 | 响应状态/头立即提交，响应体直接流式转发 | `ProxyController.java:529-540`（先 `setStatusCode` + `addAll(outHeaders)` + 注入 `X-MiQroKey-Request-Id`），`:548-559`（`writeWith(observed)` 流式写回） |
-| **网关当前完全不读上游错误体** | `backend/gateway-app/src/main/java/.../proxy` 下 grep `bodyToMono` / `BodyExtractors` 无命中 |
+| 网关**逐块缓冲**上游响应体，但**不按内容分类错误** | `ProxyController.java:548` 用 `bodyToFlux(DataBuffer.class)` + `doOnNext(attempt.collector::append)` 缓冲**每一个**上游响应体（**无状态码分支**，错误体同样被缓冲），随后只交给三个消费者：`:566` `SseUsageObserver.parseUsageJson`（用量解析，非 SSE 也含错误体）、`:578` `retentionSidecar.captureOutput`、`:850` `UpstreamRequestIdExtractor.fromBodyPrefix`（取上游请求 id）；`:585` 的缓存写入仅 2xx。即：错误字节已在内存里，但**没有任何错误模式分类**——`.../proxy` 下 grep `bodyToMono` / `BodyExtractors` 无命中，`gateway-app/src/main/java` 下 grep `thinking` / `cache_control` 无命中（下一行） |
 | **网关当前完全没有 thinking / cache_control 相关处理** | `backend/gateway-app/src/main/java` 下 grep `thinking` / `cache_control` 无命中 |
 | 契约层面禁止跨凭证/产品重试 | `docs/provider-adapter-contract.md:126-128`；`docs/architecture.md:159-161`；`docs/testing-and-acceptance.md:41-42` |
 | 「参数改写」已是登记的冲突项 | `docs/feature-backlog.md:112`（F49，状态 `ADR`）；`:109`（F46 智能路由/跨供应商故障切换，已 DECLINED） |
 | 网关自产响应的种类（不得被误判为上游错误） | 配额 429 `ADR-0020`；熔断 503 `LlmCircuitBreakerRegistry.java:14-33`；鉴权/模型授权/体量预检在转发前短路（`ProxyController.java:287-289`、`ContextLimitGuard.java:16-19`） |
-| 逐请求证据的既有承载形态 | `V8:44-48`（`request_status` 枚举）、`V8:55`（`retry_count`）、`V8:64-65`（cache token 两列）；响应头先例 `SseReplayEngine.java:22,50`、`ProxyController.java:540` |
+| 逐请求证据的既有承载形态 | `V8:43-47`（`request_status` 列与其 CHECK 枚举）、`V8:55`（`retry_count`）、`V8:58-59`（cache token 两列）；响应头先例 `SseReplayEngine.java:22,50`、`ProxyController.java:540` |
 | 指标形态 | `ContextLimitGuard.java:51`、`LlmCircuitBreakerRegistry.java:49`（统一 `miqrokey*` 前缀，开关关闭时恒零） |
-| **网关进程没有数据库/审计写入通道** | `gateway-app/pom.xml` 不依赖 `persistence-postgres`；grep `AuditService` / `admin_audit_events` 在 `gateway-app/src/main/java` 无命中；审计实现在控制面（`AuditServiceImpl.java:86-137`） |
+| 网关进程**已有**数据库写入通道（用量/生命周期） | `gateway-app/pom.xml:37` 以 compile scope（无 `<scope>`）依赖 `queue-spi`；`GatewayFeatureConfig.java:43` `@Import({…, QueueConfig.class})`；`QueueConfig.java:62` 构造 `PostgresUsageEventWriter`，后者执行 `INSERT INTO request_usage_records`（`PostgresUsageEventWriter.java:181,230`，**显式列名**写法）；另 `PostgresMcpAccessLogWriter.java:44` 写 `mcp_access_log` |
+| 网关进程**没有**管理审计写入通道 | grep `AuditService` / `admin_audit_events` 在 `gateway-app/src/main/java` 无命中；`admin_audit_events` 的既有写入者在控制面（`AuditServiceImpl.java:86-137`） |
 
 ### 1.3 与 issue #544 的边界澄清（重要，避免过度承诺）
 
@@ -120,6 +121,8 @@
 
 Key 级字段（建议名 `rectificationPolicy ∈ {OFF, SIGNATURE, SIGNATURE_AND_BUDGET}`，默认 `OFF`），承载与 `cache_policy` 同形：追加迁移 → `VirtualKey` → `RouteSnapshot.KeyRecord` → 网关快照读取（`V4:17-19`、`VirtualKey.java:25`、`RouteSnapshot.java:234`、`JdbcRouteSnapshotLoader.java:157,164`）。控制面表单暴露并回显；前端 Key 列表增列。开启时 UI 必须明示「该 Key 的请求可能被网关改写后重试」。
 
+**项目级粒度（本 ADR 新增的待议点，不预设答案）**：ADR-0018 已确立 key×project 多绑定——一把 Key 可授权用于多个项目（`docs/decisions/0018-single-key-multi-project.md` D1），而「thinking 签名是否失效」取决于**该项目的会话历史与上游组合**，不是 Key 的固有属性；同一把 Key 服务两个项目时，项目 A 需要的整流可能是项目 B 的错误来源。因此粒度至少有三档：纯 Key 级（本 ADR 推荐的最小面）、Key 级 + 项目绑定级覆盖（`key_project_binding` 行上再带一列或白名单）、Key 级 + 会话/上游维度（不在首版讨论）。本 ADR 不替所有者选档，列入 §6；若选项目级覆盖，改动面从「Key 记录加一列」扩到「绑定行加一列 + 快照按绑定行下发」，成本与测试面都高于纯 Key 级。
+
 ### 4.5 失败与回退
 
 - 开关关闭 → 字节等同、零行为变化（E1，用现有契约测试锁定）；
@@ -133,7 +136,7 @@ Key 级字段（建议名 `rectificationPolicy ∈ {OFF, SIGNATURE, SIGNATURE_AN
 ### 4.6 与既有决策的关系
 
 - **ADR-0002（透明代理）**：见 §2，需要显式例外与文本修订。
-- **ADR-0009（缓存）**：缓存只存 2xx（`0009:17`）。整流后重试若成功即为 2xx，理论上可写入缓存；**但缓存键是按原始请求派生的**，写入会让后续「同样的、本会失败的请求」从缓存拿到 200——等于把整流结果永久化并掩盖真实错误。因此规则是：**发生过整流的请求不写缓存**（E9），响应头（§4.7）已说明原因。
+- **ADR-0009（缓存）**：缓存只存 2xx（`0009:17`）。整流后重试若成功即为 2xx，理论上可写入缓存；**但缓存键是按原始请求派生的**，写入会让后续「同样的、本会失败的请求」从缓存拿到 200——等于把整流结果永久化并掩盖真实错误。因此**建议的规则是**：**发生过整流的请求不写缓存**（E9，待所有者拍板），响应头（§4.7）已说明原因。
 - **ADR-0020（配额软着陆）**：配额 REJECT 的 429 由网关在转发前产生，**不得**被整流逻辑当作上游错误（E7）——这是最容易写错的一处，需专门测试。
 - **#704/#717（路由与回退）**：见 §4.8。
 - **#740（内容过滤拦截）**：同族，共用例外模板。
@@ -146,7 +149,7 @@ Key 级字段（建议名 `rectificationPolicy ∈ {OFF, SIGNATURE, SIGNATURE_AN
 | 逐请求「是否整流、哪一类错误、做了什么动作」 | ① `request_usage_records` 追加列（枚举，如 `rectification_class`；同 `retry_count` 先例 `V8:55`）；② 响应头（同 `X-MiQroKey-Cache` 先例 `SseReplayEngine.java:22`），建议 `X-MiQroKey-Rectify: <class>`；③ 计数器（形态同 `ContextLimitGuard.java:51`） |
 | 错误模式分类 | 只存**枚举类别**，不存错误正文、不存请求内容（E8） |
 | 配置变更留痕 | 控制面 `AuditService.record(...)`（`AuditService.java:36-37`） |
-| 逐请求审计事件 | **不在本提案范围**：网关进程无审计写入通道（§1.2 末行）——若所有者要求逐请求审计，需要单独决策一个跨进程通道（新 ADR） |
+| 逐请求审计事件 | **不在本提案范围**：`admin_audit_events` 的既有写入者在控制面，网关侧没有该通道（§1.2 末两行）——若所有者要求逐请求审计，需要单独决策一个跨进程通道（新 ADR）。注意与①的区别：① 走的是网关**已有**的 `request_usage_records` 写入器（`PostgresUsageEventWriter.java:181,230`），不新建通道 |
 | 观察档（选项 B） | 同①③但只计数不整流，用于 §3 的触发条件判定 |
 
 ### 4.8 与 #704/#717 的关系（本 ADR 的边界）
@@ -178,7 +181,7 @@ Key 级字段（建议名 `rectificationPolicy ∈ {OFF, SIGNATURE, SIGNATURE_AN
 
 **数据面**：默认零行为变化；开启的 Key 在上游报错时可能多一次上游调用（共享 ≤1 预算内），并可能发送一个被改写的请求体。
 
-**控制面**：Key 新增一个可配置字段 + 审计留痕；`request_usage_records` 一次性追加列（若采纳选项 B/C）。
+**控制面**：Key 新增一个可配置字段 + 审计留痕；若采纳选项 B/C 还要在 `request_usage_records` 追加列——改动面不止「一次性迁移」：该表写入是**显式列名 + 命名参数**写法且同一语句出现两处（`PostgresUsageEventWriter.java:181,230`），新增列必须同步改两处列清单与参数映射，并改域事件（`RequestStartedEvent` / `RequestCompletedEvent`）与 `ProxyController` 的发射点；迁移只是其中一步。
 
 **成本影响**：整流重试成功 = 一次额外计费调用（上游对成功调用计费）；整流失败 = 一次额外调用且客户端仍看到错误。这正是「只在确认存在稳定重复错误模式时才开启」的原因（§3 触发条件）。
 
@@ -193,6 +196,7 @@ Key 级字段（建议名 `rectificationPolicy ∈ {OFF, SIGNATURE, SIGNATURE_AN
 3. **整流是否允许重新序列化请求体**（§4.3）——决定例外面大小。
 4. **首版白名单范围**：仅签名整流，还是含预算类整流（选项 E）；issue 建议前者。
 5. **逐请求审计**：接受「生命周期列 + 响应头 + 指标」举证，还是必须新建跨进程审计通道（另立 ADR）。
-6. **真实的上游错误模式样本**：本仓目前既不读错误体也不分类，**没有任何一条真实签名错误的样本或计数**——这是选项 B（观察档）存在的直接理由；在拿到样本前，白名单的模式清单只有 issue 转述，不可作为实现依据。
+6. **真实的上游错误模式样本**：本仓目前**不按错误内容分类**（错误体虽被逐块缓冲，却只用于用量/请求 id 解析，见 §1.2），**没有任何一条真实签名错误的样本或计数**——这是选项 B（观察档）存在的直接理由；在拿到样本前，白名单的模式清单只有 issue 转述，不可作为实现依据。
 7. **与 #717 的预算叠加口径**（§4.8）。
-8. **是否复核 cc-switch 源码**（本 ADR 未复核其实现）。
+8. **开关粒度是否只到 Key 级**：是否需要在 ADR-0018 的 key×project 多绑定上增加项目级覆盖（§4.4 新增待议点）——决定迁移与快照是「Key 加一列」还是「绑定行加一列」。
+9. **是否复核 cc-switch 源码**（本 ADR 未复核其实现）。
