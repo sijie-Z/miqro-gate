@@ -135,7 +135,7 @@ class AdminUsageStatsServiceTest {
         when(usageStatsRepository.aggregateUsage(any(), any())).thenReturn(List.of(new UsageAggRow("g", "G", PRODUCT_ID,
                 MODEL, CacheLevel.UPSTREAM, 2, new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null),
                 new java.math.BigDecimal("1000"), new java.math.BigDecimal("1000"), java.math.BigDecimal.ZERO,
-                        java.math.BigDecimal.ZERO, UsageStatsAggregator.PricingGap.NONE, UsageAggRow.Outcome.NONE)));
+                java.math.BigDecimal.ZERO, UsageStatsAggregator.PricingGap.NONE, UsageAggRow.Outcome.NONE)));
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
 
         UsageSummary summary = service.summary(admin, "project", null, null, null, null, null, null, null, null, null,

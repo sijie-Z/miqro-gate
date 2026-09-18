@@ -17,9 +17,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * (#758) and the per-row cost estimate behind the records list.
  *
  * <p>
- * Rows now carry the cost their own frozen prices produce (#710), so the aggregate
- * takes no price table — the {@code *Cost} arguments below are the undivided
- * {@code tokens × unit_price} sums the SQL layer would produce.
+ * Rows now carry the cost their own frozen prices produce (#710), so the
+ * aggregate takes no price table — the {@code *Cost} arguments below are the
+ * undivided {@code tokens × unit_price} sums the SQL layer would produce.
  * </p>
  */
 @DisplayName("UsageStatsAggregator")
@@ -28,7 +28,10 @@ class UsageStatsAggregatorTest {
     private static final UUID PRODUCT = UUID.randomUUID();
     private static final String MODEL = "claude-3-7-sonnet";
 
-    /** Input priced at 1.00/M, output at 2.00/M: 1000/1e6×1 + 500/1e6×2 → 2000 undivided. */
+    /**
+     * Input priced at 1.00/M, output at 2.00/M: 1000/1e6×1 + 500/1e6×2 → 2000
+     * undivided.
+     */
     private static final BigDecimal INPUT_COST = new BigDecimal("1000");
     private static final BigDecimal OUTPUT_COST = new BigDecimal("1000");
 
@@ -68,10 +71,11 @@ class UsageStatsAggregatorTest {
         @Test
         @DisplayName("averages are null when nothing observed them, and rows without a lifecycle count as success")
         void nullAveragesWhenUnobserved() {
-            UsageStatsAggregator.UsageSummary summary = UsageStatsAggregator.aggregate("model",
-                    List.of(row(CacheLevel.UPSTREAM, 2, UsageStatsAggregator.UsageAggRow.Outcome.NONE),
-                            row(CacheLevel.COALESCED, 1, UsageStatsAggregator.UsageAggRow.Outcome.NONE)),
-                    List.of());
+            UsageStatsAggregator.UsageSummary summary = UsageStatsAggregator
+                    .aggregate("model",
+                            List.of(row(CacheLevel.UPSTREAM, 2, UsageStatsAggregator.UsageAggRow.Outcome.NONE),
+                                    row(CacheLevel.COALESCED, 1, UsageStatsAggregator.UsageAggRow.Outcome.NONE)),
+                            List.of());
 
             UsageStatsAggregator.Outcomes o = summary.totals().outcomes();
             assertThat(o.succeeded()).isEqualTo(3);
@@ -88,13 +92,13 @@ class UsageStatsAggregatorTest {
                     1_000, 1);
             UsageStatsAggregator.UsageAggRow.Outcome b = new UsageStatsAggregator.UsageAggRow.Outcome(1, 0, 4_000, 2,
                     5_000, 1);
-            UsageStatsAggregator.UsageSummary summary = UsageStatsAggregator.aggregate("model", List.of(
-                    new UsageStatsAggregator.UsageAggRow("a", "A", PRODUCT, MODEL, CacheLevel.UPSTREAM, 2, null,
+            UsageStatsAggregator.UsageSummary summary = UsageStatsAggregator.aggregate("model",
+                    List.of(new UsageStatsAggregator.UsageAggRow("a", "A", PRODUCT, MODEL, CacheLevel.UPSTREAM, 2, null,
                             INPUT_COST, OUTPUT_COST, BigDecimal.ZERO, BigDecimal.ZERO,
                             UsageStatsAggregator.PricingGap.NONE, a),
-                    new UsageStatsAggregator.UsageAggRow("b", "B", PRODUCT, MODEL, CacheLevel.UPSTREAM, 1, null,
-                            INPUT_COST, OUTPUT_COST, BigDecimal.ZERO, BigDecimal.ZERO,
-                            UsageStatsAggregator.PricingGap.NONE, b)),
+                            new UsageStatsAggregator.UsageAggRow("b", "B", PRODUCT, MODEL, CacheLevel.UPSTREAM, 1, null,
+                                    INPUT_COST, OUTPUT_COST, BigDecimal.ZERO, BigDecimal.ZERO,
+                                    UsageStatsAggregator.PricingGap.NONE, b)),
                     List.of());
 
             UsageStatsAggregator.Outcomes totals = summary.totals().outcomes();

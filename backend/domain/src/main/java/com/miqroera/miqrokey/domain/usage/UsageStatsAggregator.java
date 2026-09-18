@@ -369,9 +369,9 @@ public final class UsageStatsAggregator {
          * Lifecycle outcomes from the {@code request_usage_records} join (#758).
          *
          * <p>
-         * The success rate reads the forwarded/coalesced calls only — cache hits carry no
-         * lifecycle — and a client cancellation sits on neither side of it: walking away is
-         * not a gateway failure.
+         * The success rate reads the forwarded/coalesced calls only — cache hits carry
+         * no lifecycle — and a client cancellation sits on neither side of it: walking
+         * away is not a gateway failure.
          * </p>
          */
         private Outcomes outcomes() {
@@ -408,13 +408,14 @@ public final class UsageStatsAggregator {
      * A per-row cost estimate plus whether the row is fully priced for display.
      *
      * <p>
-     * <b>One rule, and it is token-aware:</b> a dimension gates the flag only when the row
-     * carries tokens for it. Cache rates are therefore not excluded wholesale — the earlier
-     * "input/output only" form was written to stop rows that never touched a cache
-     * dimension from being flagged, but that is already handled by the token test. Excluding
-     * cache dimensions outright also hid the genuine case (cache tokens present, no cache
-     * rate), which the summary reports as unpriced; excluding it here would have made the
-     * detail row and the aggregate disagree.
+     * <b>One rule, and it is token-aware:</b> a dimension gates the flag only when
+     * the row carries tokens for it. Cache rates are therefore not excluded
+     * wholesale — the earlier "input/output only" form was written to stop rows
+     * that never touched a cache dimension from being flagged, but that is already
+     * handled by the token test. Excluding cache dimensions outright also hid the
+     * genuine case (cache tokens present, no cache rate), which the summary reports
+     * as unpriced; excluding it here would have made the detail row and the
+     * aggregate disagree.
      * </p>
      */
     public record PricedCost(BigDecimal cost, boolean priced) {
