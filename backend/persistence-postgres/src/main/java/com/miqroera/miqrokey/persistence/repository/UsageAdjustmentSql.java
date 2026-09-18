@@ -51,16 +51,32 @@ public final class UsageAdjustmentSql {
                 SELECT COALESCE(SUM(a.input_tokens_delta), 0) AS input_delta,
                        COALESCE(SUM(a.output_tokens_delta), 0) AS output_delta,
                        COALESCE(SUM(a.cache_read_tokens_delta), 0) AS cache_read_delta,
-                       COALESCE(SUM(a.cache_creation_tokens_delta), 0) AS cache_creation_delta
+                       COALESCE(SUM(a.cache_creation_tokens_delta), 0) AS cache_creation_delta,
+                       COUNT(a.id) AS adjustment_count
                   FROM usage_adjustments a
                  WHERE a.tenant_id = ue.tenant_id AND a.usage_event_id = ue.id
             ) adj ON TRUE
             """;
 
-    /** True when the event carries any non-zero correction. */
+    /**
+     * True when the event carries <b>any</b> correction, including one that has
+     * since been reversed.
+     *
+     * <p>
+     * Judged by the number of rows, not by their sum (#774). Summing first made a
+     * correction and its reversal cancel out and read as "never adjusted" — but
+     * "corrected and put back" and "nobody ever touched this" are different facts,
+     * and the append-only ledger exists precisely to keep the first one visible.
+     * </p>
+     *
+     * <p>
+     * This is also the only reading worth a server field: a client holding both
+     * {@code *Tokens} and {@code net*Tokens} can already tell whether the numbers
+     * differ, so a flag that only repeated that would carry nothing.
+     * </p>
+     */
     public static final String ADJUSTED_FLAG = """
-            (COALESCE(adj.input_delta, 0) <> 0 OR COALESCE(adj.output_delta, 0) <> 0
-             OR COALESCE(adj.cache_read_delta, 0) <> 0 OR COALESCE(adj.cache_creation_delta, 0) <> 0)
+            (COALESCE(adj.adjustment_count, 0) > 0)
             """;
 
     /**

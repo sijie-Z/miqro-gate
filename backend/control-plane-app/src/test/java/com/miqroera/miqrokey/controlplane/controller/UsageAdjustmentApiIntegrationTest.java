@@ -182,7 +182,7 @@ class UsageAdjustmentApiIntegrationTest {
     }
 
     @Test
-    @DisplayName("reversing an adjustment returns the row to its observed totals")
+    @DisplayName("reversing an adjustment returns the totals but keeps the row flagged")
     void reversalRestoresObservedTotals() throws Exception {
         MvcResult created = append(
                 "{\"gatewayRequestId\":\"" + REQUEST_ID + "\",\"outputTokensDelta\":-200," + "\"reason\":\"上游账单修正\"}")
@@ -195,10 +195,13 @@ class UsageAdjustmentApiIntegrationTest {
         append("{\"gatewayRequestId\":\"" + REQUEST_ID + "\",\"reason\":\"撤销前次调整\",\"reversalOfId\":\""
                 + original.get("id") + "\"}").andExpect(status().isCreated());
 
-        // The deltas net back to zero, so the row is no longer flagged as adjusted and
-        // the net returns to the observed count.
+        // The deltas net back to zero, so the net returns to the observed count. The
+        // row stays flagged all the same (#774): "corrected and put back" is not the
+        // same fact as "nobody ever touched this", and the append-only ledger exists
+        // to keep the first one visible. A client holding both counts can work out for
+        // itself whether they differ — this flag carries what it cannot work out.
         mockMvc.perform(get("/api/v1/admin/usage/records").cookie(adminSession)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[0].adjusted").value(false))
+                .andExpect(jsonPath("$.items[0].adjusted").value(true))
                 .andExpect(jsonPath("$.items[0].netOutputTokens").value(500))
                 .andExpect(jsonPath("$.items[0].outputTokens").value(500));
     }
