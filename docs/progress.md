@@ -3806,3 +3806,31 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 ### 一处 tooling 假绿（本批第二次遇到同类）
 
 `-Dtest=A+B` **不是 surefire 的选择器语法**（应为逗号），会**空跑并返回 0**；又一次"构建成功"掩盖了"根本没跑测试"。加上前一批那次"调用了别的工作树的 mvnw21.sh"，这是两天内**第二次**由命令层而非代码层造成的假绿——收口前要核的是**跑了几条测试**，不是"退出码是不是 0"。
+
+## 2026-09-18 Agent 引用后凭证禁改禁删（#714 / F1 前半）——把"被引用"变成真的锁
+
+**背景**：Agent 创建时已做绑定级联，但"被引用即不可变"这半从未实现——`rotate` / `disable` 只看凭证自身状态，不看有没有 Agent 正在用它。于是可以"先建 Agent、再轮换凭证"：网关拿新密钥打上游，而 Agent 记录里"用的是哪个凭证版本"这层语义悬空。规格侧 F28（Skill 快照）仍是 SCAFFOLD，issue 明确"独立于 F27 的绑定约束可先行"，本批只做这半。
+
+**实现**（`7fac8001`）：
+
+- `AgentRepository#findActiveByCredentialId(tenantId, credentialId)`：只认 `status = 'ACTIVE'` 的绑定
+- `AdminCredentialService.rotate` / `disable`：在凭证行锁与既有状态守卫**之后**、任何写入**之前**调用引用守卫；命中抛 `409 CREDENTIAL_REFERENCED_BY_AGENT`，文案 `凭证已被 Agent「<name>」引用，不能轮换|停用；请先停用该 Agent。`
+- `AdminAgentService.create`：改为对凭证行 `findByIdForUpdate` 取锁 → 与 rotate/disable 的同一把锁互斥，堵住"校验 ACTIVE 通过 → 并发停用 → 插入 Agent"的 TOCTOU（单行先取锁，无死锁反转）
+
+**三条边界判定（已写进 `api-contract.md`）**：
+
+1. 本产品**没有凭证 DELETE 端点**，V17 的 `ON DELETE RESTRICT` 也禁止硬删 —— 所以"禁删"落在 `disable`（生命周期终止操作）上，不为对齐 issue 措辞而造一个假删除端点
+2. **已禁用的 Agent 不再钉住凭证**：历史绑定保留（用量仍归属该凭证），但守卫看不见它 —— 否则一次误绑会永久锁死凭证，且没有任何解锁路径
+3. 跨租户引用返回 **404 `CREDENTIAL_NOT_FOUND`** 而非 409：租户过滤在守卫之前（`findOwnedForUpdate`），不给出越权者探测他租户 Agent 名的能力
+
+**前端**：`frontend/src/i18n/dict.ts` 加两条 `PATTERNS`，把 409 的 `detail` 译成英文（Agent 名回填），保证英文界面下不是中文原文。
+
+**验证（真实输出）**：
+
+- 新增 `AdminCredentialAgentBindingIntegrationTest`（Testcontainers + MockMvc）：`Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 42.85 s`，`BUILD SUCCESS`（7 个模块全 SUCCESS）。用例：引用后 rotate 被拒 / 引用后 disable 被拒（两条都断言**数据库与审计零写入**：status、version、ACTIVE 版本指纹、审计动作列表均不变）/ 停用 Agent 后该凭证恢复可改可删、同时另一条仍被钉 / 已禁用 Agent 不钉 / 跨租户 404 且他租户凭证未被触碰 / 匿名 401 与 USER 角色 403
+- `AdminCredentialServiceTest` 补 3 条单测：`Tests run: 20, Failures: 0`
+- 前端：`npm run lint` 0 error / 7 warning（均为既有）、`npm run typecheck` 通过、`npm test` 63 文件 / 380 用例全绿
+
+**未做（如实记录）**：**Skill 快照语义（按引用版本固定）未实现**。理由：仓库里没有 Agent↔Skill 数据模型（无表、无迁移、无端点），F27/F28 仍是 SCAFFOLD；落地它要新表 + 新迁移 + 新的写入/读取语义，属于"需要新数据模型且风险大"，按 issue 边界**先停下报告**，不硬塞进本 PR。该项仍留在 F28 待办。
+
+**工具坑**：`npm run lint` 的脚本带 `--fix`，在 Windows 检出（CRLF）上重写了 151 个无关前端文件（其中 21 个是真实内容改动，其余只是行尾/stat 脏）。已用 `git checkout -- <paths>` 逐个回退，最终只保留 `docs/api-contract.md` 与 `frontend/src/i18n/dict.ts` 两处改动。后续在该仓库跑前端 lint 时避免整树带 `--fix`。
