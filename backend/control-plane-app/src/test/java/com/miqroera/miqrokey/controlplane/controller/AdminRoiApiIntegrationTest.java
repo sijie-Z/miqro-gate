@@ -118,6 +118,28 @@ class AdminRoiApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("a hit whose price was not yet in force is counted, so the saving reads as a lower bound (#790)")
+    void unpricedHitIsCounted() throws Exception {
+        fx.insertCatalog();
+        // The prices take effect *after* the hits but *before* the usage row: the cost
+        // can
+        // be priced and the saving cannot. Without the counter the saving silently
+        // reads 0
+        // — indistinguishable from a cache that saved nothing.
+        fx.insertPriceOneSecondAgo("INPUT", "2");
+        fx.insertPriceOneSecondAgo("OUTPUT", "8");
+        fx.insertUsage(1000L, 500L);
+        fx.insertCacheEntryAndHits(2);
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").cookie(sessionCookie)).andExpect(status().isOk())
+                // The cost is complete: a savings gap must not make it look short.
+                .andExpect(jsonPath("$.totals.pricingStatus").value("COMPLETE"))
+                // ...and yet the group is not gap-free, and says so.
+                .andExpect(jsonPath("$.totals.unpriced.unpricedHitEvents").value(2))
+                .andExpect(jsonPath("$.totals.unpriced.empty").value(false));
+    }
+
+    @Test
     @DisplayName("empty windows report zero paid and no days")
     void emptyWindow() throws Exception {
         String from = "2025-01-01T00:00:00Z";
@@ -231,6 +253,20 @@ class AdminRoiApiIntegrationTest {
                                                 effective_from, source)
                     VALUES (:id, :productId, 'model-a', :tokenType, 'CNY', :unitPrice,
                             now() - interval '1 hour', 'MANUAL')
+                    """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("productId", productId)
+                    .addValue("tokenType", tokenType).addValue("unitPrice", new java.math.BigDecimal(unitPrice)));
+        }
+
+        /**
+         * A price that takes effect one second ago: in force for an event happening
+         * now, but not for the cache hits seeded a few seconds back.
+         */
+        void insertPriceOneSecondAgo(String tokenType, String unitPrice) {
+            jdbc.update("""
+                    INSERT INTO price_snapshot (id, provider_product_id, model_id, token_type, currency, unit_price,
+                                                effective_from, source)
+                    VALUES (:id, :productId, 'model-a', :tokenType, 'CNY', :unitPrice,
+                            now() - interval '1 second', 'MANUAL')
                     """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("productId", productId)
                     .addValue("tokenType", tokenType).addValue("unitPrice", new java.math.BigDecimal(unitPrice)));
         }
