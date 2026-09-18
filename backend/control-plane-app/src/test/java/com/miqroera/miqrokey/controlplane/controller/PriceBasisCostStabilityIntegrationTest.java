@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -216,6 +217,22 @@ class PriceBasisCostStabilityIntegrationTest {
      * class left behind (that is exactly how a whole-table delete in a persistence
      * test broke the full suite once).
      */
+    /**
+     * Cleans up after itself, not only before the next test.
+     *
+     * <p>
+     * Leaving these rows behind is not harmless: a later test class deletes
+     * {@code providers} in its own setup, and a surviving {@code provider_products}
+     * row from here fails that delete — silently, where the cleanup swallows errors
+     * — which then leaves <em>its</em> provider row behind for the next class to
+     * collide with on a shared slug.
+     * </p>
+     */
+    @AfterEach
+    void tearDown() {
+        reset();
+    }
+
     private void reset() {
         for (String table : List.of("usage_adjustments", "usage_event", "cache_hit_event", "price_snapshot",
                 "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
