@@ -364,6 +364,13 @@ function lockNow() {
   locked.value = true;
 }
 
+// 使用手册（docs/user-guide）：面向用户/管理员/开发者的手册，随仓库发布。
+const HANDBOOK_URL = 'https://github.com/sijie-Z/miqro-gate/blob/develop/docs/user-guide/README.md';
+
+function openHandbook() {
+  window.open(HANDBOOK_URL, '_blank', 'noopener');
+}
+
 // ---- fullscreen toggle (Vben 全屏内容) ----
 const isFullscreen = ref(false);
 function onFullscreenChange() {
@@ -655,6 +662,12 @@ async function handleLogout() {
                   </DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
                 <DropdownMenuSeparator class="new-shell__user-menu-sep" />
+                <DropdownMenuItem
+                  class="ui-menu__item new-shell__user-menu-item"
+                  data-testid="shell-handbook"
+                  @select="openHandbook"
+                  >使用手册</DropdownMenuItem
+                >
                 <DropdownMenuItem
                   class="ui-menu__item new-shell__user-menu-item"
                   data-testid="shell-lock"
