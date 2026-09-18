@@ -57,6 +57,12 @@ sh $S verify --gateway $GW --key mqk_live_…
 
 > `.env` 解析器通常忽略 `#` 注释行，托管块标记对 dotenv 形态同样安全。
 
+## 密钥卫生
+
+写入的目标文件与其备份**都置 0600**（内容含密钥）；目标若位于 git 工作树内且未被忽略，会警告
+"可能被误提交"。Windows（NTFS）不携带 POSIX 模式、chmod 为 no-op，请依赖目录 ACL；测试对
+该平台**显式 SKIP 模式断言**（不假装验证过），Linux/CI 上强制执行。
+
 ## 与前端的一致性
 
 snippet 形态（三种 shell 的 env 块、`settings.json` 片段、Codex TOML、OpenAI 兼容提示、
