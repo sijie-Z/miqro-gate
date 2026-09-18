@@ -19,7 +19,7 @@
 
 ### 1.2 现状（可核实）
 
-- **语义缓存无任何实现**：`backend/` 主源码中不存在 embedding 调用、向量库客户端或 ANN 索引（`grep` 无 `pgvector`/`embedding` 类；唯一的 `semantic` 命中是下述键构造方法）。语义缓存只以「接口预留」登记在 `docs/decisions/0009-enable-response-cache.md:13,38`、`docs/feature-backlog.md:99`（F41）、`docs/configuration-reference.md:287`。
+- **语义缓存无任何实现**：`backend/` 主源码中不存在 embedding 调用、向量库客户端或 ANN 索引（`grep -rniE "pgvector|embedding|vector store|faiss|milvus|qdrant" backend/*/src/main` 零命中；`semantic` 在 `*/src/main` 的命中除英文单词 semantics 的普通注释外，只剩下述语义 scope 键构造）。网关同时**不代理 embeddings 端点**：`/v1/embeddings` 返回 404 并有测试固化（`GatewaySecurityHardeningTest.java:188,223`）。语义缓存只以「接口预留」登记在 `docs/decisions/0009-enable-response-cache.md:13,38`、`docs/feature-backlog.md:99`（F41）、`docs/configuration-reference.md:287`。
 - **精确缓存已启用且默认关**：总开关 `miqrokey.cache.enabled` 默认 `false`（`backend/gateway-app/src/main/resources/application.yml:88-96`）；L1/L2 子开关默认 `true`、TTL 默认 300s。启用后仍须**双重 opt-in**：Key `cachePolicy=ENABLED` **且** 请求头 `X-MiQroKey-Cacheable: 1`，且无工具字段、body 非空（`CacheEligibility.java:24,29-33`）。工具调用永不缓存。
 - **缓存键已经含「语义」成分，且完全在网关内完成**：`CacheKeyFactory.compute()`（`:68-76`）对 chat 形态请求使用 `semanticScope(body)`（`:102-142`）——取 system 消息 + **最后一条 user 消息**拼接后参与 SHA-256；无 user 消息时回落到全 body 归一化哈希。键还含 tenant/project/keyId/product/model/purpose/stream 维度。这正是 `docs/ai-gateway-comparison.md:92` 记录的「我们语义键=末条 user 消息哈希」。
 - **正文当前不出网关**：缓存条目只存响应字节、按字节重放；「缓存内容不解读、不进日志与审计」（`docs/configuration-reference.md:287`、`docs/decisions/0009-enable-response-cache.md:23`）。响应在 SSE 场景下同样字节重放（`SseReplayEngine.java:22,50`）。
