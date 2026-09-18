@@ -213,7 +213,9 @@ project_allocated_cost
 4. 聚合时间窗口。
 
 供应商不返回 request ID 时，Gateway 无法保证逐请求一一对应；文档和导出必须标记可对账等级。（2026-09-10 兑现先行部分：导出的 `reconcileLevel` = PROVIDER_ID_BACKED/PARTIAL/LOCAL_ONLY 按 provider_request_id
-覆盖度计算，文件 `local_caliber_note` 同步标注；净额/含调整等级待 F20。）
+覆盖度计算，文件 `local_caliber_note` 同步标注。）
+
+**净额/含调整**（2026-09-18，#716）：这是**另一条轴**，与上面的可对账等级**互相独立**——"能不能按请求 ID 对上账单"与"数字里含不含修正"是两个问题，合进一个枚举就得为每种组合造一个值。导出任务另带 `adjustmentLevel` = `PRESENT`（至少一行被修正过，故 `net*` 列才是应对账的那一套）/ `NONE`（没有任何行被改过，`net*` 只是重复观察值），文件内同步 `;adjustments=present|none`。它**按任务声明**而非只在行上标注，因为消费者希望在读文件之前就知道 `net*` 列要不要看。
 
 ## 12. 永久保留与手动删除
 

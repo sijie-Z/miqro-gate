@@ -3814,6 +3814,30 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **绕行（修复前已在演示站完成，数据面健康性佐证）**：手工登记（官方占位 `method=POST path="/"`）+ ENABLED 后，以消费者凭据经网关 `tools/call read_wiki_structure` → 200 返回真实内容，`mcp_access_log`：`FORWARDED | read_wiki_structure | ttfb 617ms`。
 
+## 2026-09-18 导出任务补「含调整」等级——V41 预留的那条轴（#716）
+
+**先界定缺口，别重复做**：本项的验收里"净额维度在导出中可用""含调整维度可标记"**已被 #755 逐行覆盖**（CSV/JSONL 的 `net*`×4 + 行级 `adjusted`）。真正剩下的是 V41 注释预留的那半句——"净额/含调整等级随 F20 扩展"——即**任务级**的声明；以及两处**已过期的文档**（api-contract 还写着"待扩展"、§5.6b 还写着"读取路径尚未接入"）。
+
+**为什么另起一条轴，而不是往 `reconcileLevel` 里加成员**：两者是**互相独立**的问题——"能不能按请求 ID 对上账单"与"数字里含不含修正"。合进一个枚举就得为每种组合造一个值（`PROVIDER_ID_BACKED_AND_ADJUSTED`…），读起来两边都不是。V41 的注释当初把它们写在一起，这是**把它拆开**而不是照它实现。
+
+**为什么是任务级而不只是行级**：消费者希望在**读文件之前**（或只看任务列表时）就知道 `net*` 列要不要看。所以：
+
+- `adjustmentLevel` = `PRESENT`（至少一行被修正过 → `net*` 才是应对账的那套）/ `NONE`（没有任何行被改过 → `net*` 只是重复观察值）；空窗口/历史任务为 null
+- 文件内同步：`local_caliber_note` 追加 `;adjustments=present|none`（`local-instant` 前缀与 `reconcile=` 位置都不动）
+- 它读的正是文件里那个**行级标记**（`adjusted`），所以任务级声明与文件内容**不可能不一致**
+
+**顺带修掉两处文档漂移**（本仓的老毛病，双向都会漂）：`api-contract` §5.5 的"净额/含调整等级随 F20 扩展"已兑现；§5.6b 的"读取路径尚未接入"其实早已不成立（#753/#755/#773 都上了）。
+
+**验证**：先证明会红——撤掉实现但**保留迁移**（否则退化成"列不存在"的粗红），7 跑 **3 失败、恰好是新增那三条**（`expected "PRESENT" but was null`），既有 4 条全过；恢复后 7/7 绿。三条断言分别钉住：未修正= NONE 且文件里写着 `adjustments=none`、有修正= PRESENT 且文件里写着 `present`、**冲销之后仍是 PRESENT**（数字回到观察值，只有这条声明还说得清文件来自被改过的行——与 #774 同一条规则）。
+
+**一处 UI 取舍**：只为 `PRESENT` 出 chip，`NONE` 走 `—`。给"没有修正"也挂个徽标等于几乎每行都有徽标，反而把真正要看的那行淹掉；而这张表本来就用 `—` 表示"无话可说"。
+
+**另记**：迁移号按纪律取「develop 树最高号（66）∪ open issue 登记号」之后的下一个 = **V67**；定号前也扫了 open PR 的正文。
+## 2026-09-18 WorkBuddy MCP 层接入实测样章（#742 第③片收口）
+
+**交付**：`docs/workbuddy-mcp-onboarding-sample.md`——真实封闭客户端（WorkBuddy，腾讯 CodeBuddy 系）按指南 §4 接入网关 MCP 数据面的完整样章：拓扑、五步照抄（注册服务→消费者裁 `mcp:call`→`~/.workbuddy/mcp.json`（**无点号**；带点的是应用自管文件，写错不生效）→过信任门（`mcp_approvals` 键=sha256(url origin)::name）→同步并放行工具）；证据表；两条踩坑（自管配置陷阱；`HEALTH_PATH` 对 SPA 兜底页的假 HEALTHY——应选 `JSONRPC_INITIALIZE`）。
+
+**实测证据链**：应用日志 `[MCP-Connect] ok … tools=3`；`mcp_access_log` 6 行 `TOOL_UNAVAILABLE`（放行前，toolName 完整）+ `FORWARDED | read_wiki_structure | 617ms`（放行后）。**实测暴露真缺陷 #779**（`tools/sync` Accept 缺 `text/event-stream` → 严格上游 406）——修复 PR #781 已合并（先证红两条回归）。
 
 ## 2026-09-18 MCP tools/sync 对以 SSE 应答的上游不可用——#781 只修了请求头（#786）
 
