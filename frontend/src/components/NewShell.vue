@@ -54,6 +54,7 @@ import { installPageDescToggle } from '@/utils/page-desc-toggle';
 import { language } from '@/i18n';
 import SettingsDrawer from '@/components/SettingsDrawer.vue';
 import LockScreen from '@/components/LockScreen.vue';
+import ErrorBoundary from '@/components/ErrorBoundary.vue';
 import { UiTooltip } from '@/ui';
 import { initPreferences, preferences, setPreference } from '@/preferences';
 import type { Component } from 'vue';
@@ -812,11 +813,15 @@ async function handleLogout() {
       </Teleport>
 
       <div ref="contentEl" class="new-shell__content">
-        <RouterView v-slot="{ Component }">
-          <Transition name="shell-page" mode="out-in">
-            <component :is="Component" />
-          </Transition>
-        </RouterView>
+        <!-- #833: page crashes keep the shell (nav stays usable); the card
+             offers retry/reload/overview and clears on navigation. -->
+        <ErrorBoundary>
+          <RouterView v-slot="{ Component }">
+            <Transition name="shell-page" mode="out-in">
+              <component :is="Component" />
+            </Transition>
+          </RouterView>
+        </ErrorBoundary>
       </div>
     </main>
 
