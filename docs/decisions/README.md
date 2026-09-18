@@ -16,3 +16,4 @@
 - [ADR-0018：单密钥多项目——key×project 多绑定与标签选择](0018-single-key-multi-project.md)
 - [ADR-0019：配额硬阻断（超限拒绝）— 草案（Proposed；已由 ADR-0020 采纳并落地）](0019-quota-hard-block-proposal.md)
 - [ADR-0020：配额软着陆——REJECT 规则超限拒绝请求（429）](0020-quota-soft-landing.md)
+- [ADR-0021：同产品凭证回退——多凭证切换与「每笔唯一归属」的兼容设计（草案，待所有者拍板）](0021-same-product-credential-failover.md)
