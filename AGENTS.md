@@ -2,7 +2,7 @@
 
 本仓库后续默认实施者是 Claude Code；当前规格作者不负责继续编码。所有编码 Agent 必须先完整阅读 [`CLAUDE.md`](CLAUDE.md) 和 [`docs/claude-code-execution-contract.md`](docs/claude-code-execution-contract.md)，再读取 [`docs/progress.md`](docs/progress.md) 和当前 Goal 的规格。
 
-核心约束：Java 21、WebFlux 透明代理、Vue 3、PostgreSQL；协议转换交给 CC Switch；Virtual Key 固定映射；不自动路由、不限流、不记录正文、不做首版响应缓存、不使用 LiteLLM/Bifrost 运行时。
+核心约束：Java 21、WebFlux 透明代理、Vue 3、PostgreSQL；协议转换交给 CC Switch；Virtual Key 固定映射；不自动路由、不限流、不记录正文、响应缓存已实现但默认关闭（ADR-0009）、不使用 LiteLLM/Bifrost 运行时。
 
 按 [`docs/implementation-plan.md`](docs/implementation-plan.md) 一次只执行一个 Goal。每个 Goal 必须包含测试、文档更新和 `docs/progress.md` 状态更新。不得自动进入下一个 Goal。
 
