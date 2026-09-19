@@ -649,7 +649,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 - **GC（F06）**：定时回收过窗产物（`miqrokey.cleanup.expired-sweep-ms`，默认 1h）——`SUCCEEDED` 且超过 `expires_at` 的行连同 `file_bytes` 物理删除；清理后下载返回 `404 EXPORT_NOT_FOUND`（410 语义仅在清理前可观测）。`FAILED`/`PENDING` 行保留供运维查看。
 - **审计（#1051）**：创建与下载各写一个事件——`EXPORT_CREATE`（摘要含 `format`/`from`/`to`）与
   `EXPORT_DOWNLOAD`（摘要含 `format`/`rows`/`bytes`/`sha256`，即"谁取走了哪一份明细、多少行、校验和多少"）。
-  会话面 actor=当前用户，开放管理 API 面 actor=发行管理员并附 `via: admin-api:<密钥名>`（§5.0a 机器面归属）。
+  会话面 actor=当前用户，开放管理 API 面 actor=发行管理员并附 `via: admin-api:<密钥名>`（机器面归属规则见 §5.0 的 **#324** 条目）。
   **被拒绝的下载（未完成/过期 → 410）不记事件**：产物字节没有离开控制面，该 action 的语义是"产物已交付"。
   `GET /{id}` 与列表为只读，不写审计。
 - 错误码：`TIME_RANGE_INVALID` / `TIME_RANGE_TOO_WIDE`（400）。

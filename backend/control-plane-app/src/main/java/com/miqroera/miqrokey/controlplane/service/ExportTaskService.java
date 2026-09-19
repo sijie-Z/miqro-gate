@@ -14,6 +14,9 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -69,7 +72,17 @@ public class ExportTaskService {
      * admin — on the machine surface the {@link AuditContext#machine} marker also
      * names the key that asked for it.
      * </p>
+     *
+     * <p>
+     * The row insert and its audit event share one transaction: a failed audit
+     * write must not leave a committed {@code PENDING} task behind that no one
+     * ever renders (expired-row GC only reclaims {@code SUCCEEDED} rows, so such
+     * a task would linger forever). The renderer is scheduled only once that
+     * transaction commits, so the worker cannot read a row that is not visible
+     * yet.
+     * </p>
      */
+    @Transactional
     public ExportTask create(UUID tenantId, UUID adminId, ExportFormat format, Instant from, Instant to,
             AuditContext context) {
         validateWindow(from, to);
@@ -87,8 +100,26 @@ public class ExportTaskService {
         auditService.record(tenantId, context.actorId(), "EXPORT_CREATE", "EXPORT_TASK", task.id(),
                 AuditSummaries.summary(context, "format", format.name(), "from", from.toString(), "to", to.toString()),
                 context.requestId());
-        executor.execute(() -> run(task));
+        scheduleAfterCommit(task);
         return task;
+    }
+
+    /**
+     * Queues the renderer for the moment the enclosing transaction commits (same
+     * idiom as {@code RouteRefreshPublisherAfterCommit}). Outside a transaction
+     * there is nothing to wait for, so the task starts right away.
+     */
+    private void scheduleAfterCommit(ExportTask task) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            executor.execute(() -> run(task));
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                executor.execute(() -> run(task));
+            }
+        });
     }
 
     /** Task metadata (never the artifact bytes). */
