@@ -10,6 +10,9 @@ vi.mock('@/api', () => ({
   adminListAgents: vi.fn(),
   adminCreateAgent: vi.fn(),
   adminDisableAgent: vi.fn(),
+  adminEnableAgent: vi.fn(),
+  adminUpdateAgent: vi.fn(),
+  adminDeleteAgent: vi.fn(),
   adminAgentUsage: vi.fn(),
   listCredentials: vi.fn(),
 }));
@@ -58,6 +61,7 @@ const agent = (overrides: Partial<AgentView> = {}): AgentView => ({
   providerProductId: 'pr1',
   providerProductName: 'Anthropic PAYG',
   status: 'ACTIVE',
+  version: 0,
   createdAt: '2026-09-01T00:00:00Z',
   ...overrides,
 });
@@ -87,10 +91,23 @@ describe('NextAdminAgentsView', () => {
     mockApi.listCredentials.mockResolvedValue([]);
   });
 
-  function mountView() {
+  function mountView(options: { attach?: boolean } = {}) {
     return mount(NextAdminAgentsView, {
+      attachTo: options.attach ? document.body : undefined,
       global: { plugins: [createPinia()], stubs: { UiSelect: SelectStub } },
     });
+  }
+
+  /** Open a row's 「更多」 menu — radix portals it into document.body. */
+  async function openRowMenu(wrapper: ReturnType<typeof mountView>) {
+    await wrapper.find('[data-testid="agent-actions-a1"]').trigger('click');
+    await flushPromises();
+  }
+
+  function menuItem(testid: string): HTMLElement {
+    const el = document.body.querySelector<HTMLElement>(`[data-testid="${testid}"]`);
+    if (!el) throw new Error(`menu item ${testid} missing`);
+    return el;
   }
 
   it('marks the allocated cost as partial when pricing is incomplete (#857)', async () => {
@@ -207,10 +224,12 @@ describe('NextAdminAgentsView', () => {
   it('disables an agent through the confirm gate', async () => {
     mockApi.adminListAgents.mockResolvedValue([agent()]);
     mockApi.adminDisableAgent.mockResolvedValue(agent({ status: 'DISABLED' }));
-    const wrapper = mountView();
+    const wrapper = mountView({ attach: true });
     await flushPromises();
 
-    await wrapper.find('[data-testid="agent-disable"]').trigger('click');
+    // 禁用 moved behind the row's 「更多」 menu in #824 — same gate, new path.
+    await openRowMenu(wrapper);
+    menuItem('agent-disable').click();
     await flushPromises();
     const buttons = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
     const confirm = buttons.find(
@@ -238,5 +257,72 @@ describe('NextAdminAgentsView', () => {
     expect(grid!.textContent).toContain('240,000');
     expect(grid!.textContent).toContain('120,000');
     expect(grid!.textContent).toContain('¥0.0123');
+  });
+
+  it('enables a disabled agent from the row menu (#824)', async () => {
+    mockApi.adminListAgents.mockResolvedValue([agent({ status: 'DISABLED' })]);
+    mockApi.adminEnableAgent.mockResolvedValue(agent({ status: 'ACTIVE' }));
+    const wrapper = mountView({ attach: true });
+    await flushPromises();
+
+    await openRowMenu(wrapper);
+    menuItem('agent-enable').click();
+    await flushPromises();
+
+    expect(mockApi.adminEnableAgent).toHaveBeenCalledWith('a1');
+  });
+
+  it('renames through the dialog, echoing the row version as the lock token (#824)', async () => {
+    mockApi.adminListAgents.mockResolvedValue([agent({ version: 3 })]);
+    mockApi.adminUpdateAgent.mockResolvedValue(agent({ name: 'forge-renamed', version: 4 }));
+    const wrapper = mountView({ attach: true });
+    await flushPromises();
+
+    await openRowMenu(wrapper);
+    menuItem('agent-rename').click();
+    await flushPromises();
+
+    const input = document.body.querySelector<HTMLInputElement>(
+      '[data-testid="agent-rename-name"]',
+    );
+    if (!input) throw new Error('rename input missing');
+    input.value = 'forge-renamed';
+    input.dispatchEvent(new Event('input'));
+    await flushPromises();
+
+    const submit = document.body.querySelector<HTMLElement>('[data-testid="agent-rename-submit"]');
+    if (!submit) throw new Error('rename submit missing');
+    submit.click();
+    await flushPromises();
+
+    expect(mockApi.adminUpdateAgent).toHaveBeenCalledWith('a1', {
+      name: 'forge-renamed',
+      description: 'Forge 集成出口',
+      version: 3,
+    });
+  });
+
+  it('deletes only after the confirmation, and says it is irreversible (#824)', async () => {
+    mockApi.adminListAgents.mockResolvedValue([agent()]);
+    mockApi.adminDeleteAgent.mockResolvedValue(undefined);
+    const wrapper = mountView({ attach: true });
+    await flushPromises();
+
+    await openRowMenu(wrapper);
+    menuItem('agent-delete').click();
+    await flushPromises();
+
+    // The confirm dialog states the consequence before anything is deleted.
+    expect(mockApi.adminDeleteAgent).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('删除不可恢复');
+
+    const confirm = Array.from(document.body.querySelectorAll<HTMLElement>('button')).find((b) =>
+      b.textContent?.includes('删除'),
+    );
+    if (!confirm) throw new Error('confirm button missing');
+    confirm.click();
+    await flushPromises();
+
+    expect(mockApi.adminDeleteAgent).toHaveBeenCalledWith('a1');
   });
 });

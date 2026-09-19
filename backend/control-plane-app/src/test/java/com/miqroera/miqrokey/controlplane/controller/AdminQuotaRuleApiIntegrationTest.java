@@ -177,6 +177,42 @@ class AdminQuotaRuleApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("#1002: a usage adjustment moves the reporting net but must not move the TOKENS quota watermark")
+    void adjustmentDoesNotMoveTokenWatermark() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant();
+        UUID keyId = fx.createKeyViaAdmin();
+        String gatewayRequestId = fx.insertUsage(keyId, 600L, 400L); // 1000 observed tokens today
+
+        // A REJECT rule the observed 1000 tokens already exceed.
+        putQuota(quotaBody("USER", adminUserId, "TOKENS", "DAILY", 800, 80, null, "REJECT")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.used").value(1000)).andExpect(jsonPath("$.usedPct").value(125.0))
+                .andExpect(jsonPath("$.level").value("EXCEEDED"));
+        quotaEnforcementService.evaluate();
+        assertThat(enforcementRows("USER", adminUserId)).isEqualTo(1);
+
+        // A financial correction against the observed fact: net output 400 -> 100.
+        mockMvc.perform(
+                post("/api/v1/admin/usage-adjustments")
+                        .cookie(adminSession, adminCsrf).header("X-CSRF-Token", adminCsrfToken)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"gatewayRequestId\":\"" + gatewayRequestId
+                                + "\",\"outputTokensDelta\":-300," + "\"reason\":\"上游账单修正\"}"))
+                .andExpect(status().isCreated());
+
+        // The reporting reading absorbs the correction ...
+        mockMvc.perform(get("/api/v1/admin/usage/summary").cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.tokens.output").value(100));
+
+        // ... the runtime control reading must not (V63 layer 4): the watermark stays
+        // on the observed 1000, so the scope stays blocked.
+        putQuota(quotaBody("USER", adminUserId, "TOKENS", "DAILY", 800, 80, null, "REJECT")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.used").value(1000)).andExpect(jsonPath("$.usedPct").value(125.0))
+                .andExpect(jsonPath("$.level").value("EXCEEDED"));
+        quotaEnforcementService.evaluate();
+        assertThat(enforcementRows("USER", adminUserId)).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("REQUEST metric counts upstream requests; PROJECT scope filters by project")
     void requestMetricAndProjectScope() throws Exception {
         fx.insertProviderCatalog();
@@ -534,7 +570,9 @@ class AdminQuotaRuleApiIntegrationTest {
             }
         }
 
-        void insertUsage(UUID keyId, long input, long output) {
+        /** Returns the {@code gateway_request_id}, the handle adjustments address. */
+        String insertUsage(UUID keyId, long input, long output) {
+            String gatewayRequestId = UUID.randomUUID().toString();
             MapSqlParameterSource p = new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
                     .addValue("keyId", keyId).addValue("projectId", projectId).addValue("productId", productId)
                     .addValue("modelId", "model-alpha").addValue("input", input).addValue("output", output);
@@ -545,8 +583,8 @@ class AdminQuotaRuleApiIntegrationTest {
                          gateway_request_id, occurred_at)
                     VALUES (:id, :tenantId, :requestId, :keyId, :projectId, :productId, null, :modelId, 'UPSTREAM',
                             :input, :output, TRUE, :gatewayId, now())
-                    """, p.addValue("requestId", UUID.randomUUID().toString()).addValue("gatewayId",
-                    UUID.randomUUID().toString()));
+                    """, p.addValue("requestId", UUID.randomUUID().toString()).addValue("gatewayId", gatewayRequestId));
+            return gatewayRequestId;
         }
     }
 

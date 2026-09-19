@@ -314,8 +314,41 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 cacheReadTokens, unpricedCacheCreation, cacheCreationTokens, anyUnpriced, anyUnpriced, anyPriced);
     }
 
+    /**
+     * Which token reading an aggregation returns (#1002).
+     *
+     * <p>
+     * Not a caller-supplied flag: the two readings answer two different questions,
+     * and which one a call site needs is a property of the call site, not of the
+     * request. So each reading gets its own method instead of a boolean.
+     * </p>
+     */
+    private enum TokenBasis {
+        /** Exactly what the gateway counted — the only basis a quota may enforce on. */
+        OBSERVED,
+        /** Observed facts plus the booking ledger (#709): the financial reading. */
+        ADJUSTED
+    }
+
+    /**
+     * The booking-ledger term (#709); empty for an observed-only reading (#1002).
+     */
+    private static String adjustmentDelta(String column, TokenBasis basis) {
+        return basis == TokenBasis.ADJUSTED ? " + COALESCE(SUM(adj." + column + "), 0)" : "";
+    }
+
     @Override
     public List<UsageStatsAggregator.UsageAggRow> aggregateUsage(GroupBy groupBy, UsageFilter filter) {
+        return aggregateUsage(groupBy, filter, TokenBasis.ADJUSTED);
+    }
+
+    @Override
+    public List<UsageStatsAggregator.UsageAggRow> aggregateObservedUsage(GroupBy groupBy, UsageFilter filter) {
+        return aggregateUsage(groupBy, filter, TokenBasis.OBSERVED);
+    }
+
+    private List<UsageStatsAggregator.UsageAggRow> aggregateUsage(GroupBy groupBy, UsageFilter filter,
+            TokenBasis basis) {
         GroupSpec spec = spec(groupBy);
         WhereBuilder wb = new WhereBuilder(filter, "ue").usageEventColumns();
         // Per-row price basis (#710): a group's cost is the SUM of each row valued at
@@ -337,22 +370,22 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
         String cacheCreationPrice = PriceSnapshotSql.frozenOrAsOf("ue.price_cache_creation",
                 PriceTokenType.CACHE_CREATION, "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
+        // Only the adjusted reading needs the ledger; the observed one must not read
+        // usage_adjustments at all (#1002).
+        String adjustmentJoin = basis == TokenBasis.ADJUSTED ? UsageAdjustmentSql.ADJUSTMENT_LATERAL : "";
         String sql = """
                 SELECT %s, ue.provider_product_id AS product_id, ue.model_id, ue.cache_level AS cache_level,
                        -- requests counts observed calls; an adjustment corrects a call's usage, it
                        -- does not add a call, so it must not move this number.
                        COUNT(*) AS requests,
-                       -- Net (adjusted) tokens: observed count plus the deltas booked against it
-                       -- (#709). Adjustments feed the financial/reporting reading only; quota
-                       -- enforcement keeps reading the observed columns.
-                       COALESCE(SUM(COALESCE(ue.input_tokens, ue.prompt_tokens)), 0)
-                           + COALESCE(SUM(adj.input_delta), 0) AS input_tokens,
-                       COALESCE(SUM(COALESCE(ue.output_tokens, ue.completion_tokens)), 0)
-                           + COALESCE(SUM(adj.output_delta), 0) AS output_tokens,
-                       COALESCE(SUM(ue.cache_read_input_tokens), 0)
-                           + COALESCE(SUM(adj.cache_read_delta), 0) AS cache_read_tokens,
-                       COALESCE(SUM(ue.cache_creation_input_tokens), 0)
-                           + COALESCE(SUM(adj.cache_creation_delta), 0) AS cache_creation_tokens,
+                       -- Token basis (#1002). ADJUSTED = observed count plus the deltas booked
+                       -- against it, the financial/reporting reading (#709). OBSERVED = exactly
+                       -- what the gateway counted, the only basis quota enforcement may use. The
+                       -- two readings differ by the suffix appended to each SUM below.
+                       COALESCE(SUM(COALESCE(ue.input_tokens, ue.prompt_tokens)), 0)%s AS input_tokens,
+                       COALESCE(SUM(COALESCE(ue.output_tokens, ue.completion_tokens)), 0)%s AS output_tokens,
+                       COALESCE(SUM(ue.cache_read_input_tokens), 0)%s AS cache_read_tokens,
+                       COALESCE(SUM(ue.cache_creation_input_tokens), 0)%s AS cache_creation_tokens,
                        -- Costs are returned un-divided (tokens x unit_price); the aggregator does
                        -- the /PER_MILLION with the same MathContext it always used, so this switch
                        -- does not perturb rounding.
@@ -376,12 +409,13 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 %s
                 %s
                 GROUP BY %s, ue.provider_product_id, ue.model_id, ue.cache_level
-                """.formatted(spec.select(), zeroIfUnpriced(inputPrice), zeroIfUnpriced(outputPrice),
+                """.formatted(spec.select(), adjustmentDelta("input_delta", basis),
+                adjustmentDelta("output_delta", basis), adjustmentDelta("cache_read_delta", basis),
+                adjustmentDelta("cache_creation_delta", basis), zeroIfUnpriced(inputPrice), zeroIfUnpriced(outputPrice),
                 zeroIfUnpriced(cacheReadPrice), zeroIfUnpriced(cacheCreationPrice),
                 unpricedColumns(inputTokens, inputPrice, outputTokens, outputPrice, cacheReadTokens, cacheReadPrice,
                         cacheCreationTokens, cacheCreationPrice),
-                FAILED_STATUS_SQL, spec.join(), wb.joins(), UsageAdjustmentSql.ADJUSTMENT_LATERAL, LIFECYCLE_JOIN,
-                wb.where(), spec.groupBy());
+                FAILED_STATUS_SQL, spec.join(), wb.joins(), adjustmentJoin, LIFECYCLE_JOIN, wb.where(), spec.groupBy());
         MapSqlParameterSource params = wb.params();
         List<UsageStatsAggregator.UsageAggRow> rows = new ArrayList<>();
         jdbc.query(sql, params, rs -> {

@@ -15,6 +15,27 @@ import java.util.UUID;
 public interface AuditService {
 
     /**
+     * Acquires the audit chain's transaction-scoped lock now, rather than leaving
+     * it to the first {@link #record} call.
+     *
+     * <p>
+     * The chain lock is global — every audit write in the cluster serialises on it
+     * — and the audit insert takes a foreign-key {@code KEY SHARE} on the tenant
+     * row. A transaction that will take a row lock the audit path also needs (the
+     * tenant row is the common one) must therefore settle its order first: <b>chain
+     * lock before any row lock</b>. Two transactions taking those two locks in
+     * opposite orders deadlock — PostgreSQL reports exactly that cycle (#995).
+     * </p>
+     *
+     * <p>
+     * Must be called inside a transaction: the lock is transaction-scoped, so
+     * calling it outside one would take and immediately release it, silently
+     * removing the serialisation it appears to provide.
+     * </p>
+     */
+    void acquireChainLock();
+
+    /**
      * Record an audit event.
      *
      * @param tenantId

@@ -45,23 +45,14 @@ CVE-2026-13506
 # backend/pom.xml's dependencyManagement, so develop no longer resolves the
 # vulnerable 42.7.5 and the rows were deleted rather than left to rot.)
 #
-# org.apache.kafka:kafka-clients 3.8.1 — BOM-managed; gateway-app/pom.xml:57-58
-# and control-plane-app/pom.xml:53-54 declare no <version>. Producer buffer-pool
-# race -> message corruption/misrouting (GHSA-5qcv-4rpc-jp93); the ADR-0014 R3
-# retention publisher is a producer, so the affected role DOES match. No fix
-# exists inside 3.8.x (fixes: 3.9.2 / 4.0.2 / 4.1.2).
-# Tracker: issue #980. DROP when the Boot BOM moves past 3.8.1.
-CVE-2026-35554
-#
-# spring-boot-starter-actuator 3.4.5 — BOM-managed; gateway-app/pom.xml:63-66
-# and control-plane-app/pom.xml:67 declare no <version>. Both are auth bypasses
-# whose precondition is a specific piece of configuration, and neither exists
-# here (an earlier version of this comment blamed the exposure list — that was
-# the wrong reason, even though the conclusion holds):
-#   - CVE-2026-22731 needs a secured endpoint declared under a path that is
-#     also configured as a Health Group additional path
-#     (management.endpoint.health.group.*.additional-path);
-#   - CVE-2026-22733 needs an endpoint declared under the path used by the
+# (org.apache.kafka:kafka-clients and spring-boot-starter-actuator had four rows
+# here until 2026-09-20. Their trackers landed together: #980 -> PR #1017 moved
+# spring-boot.version 3.4.5 -> 3.5.16, whose BOM resolves kafka-clients 3.9.2 (the
+# fix for CVE-2026-35554) and an actuator past the 3.5.12 fix line for
+# CVE-2026-22731/-22733 — so develop no longer resolves the vulnerable versions and
+# the rows were deleted rather than left to rot. Trivy on that PR reports
+# Total: 0 (HIGH: 0, CRITICAL: 0) for every scan, with no dependency finding left in
+# the suppressed list either.) needs an endpoint declared under the path used by the
 #     CloudFoundry Actuator endpoints.
 # `grep -rniE "additional-path|health\.group|cloudfoundry" backend/` returns
 # nothing, so neither precondition is reachable. Exposure as configured, for

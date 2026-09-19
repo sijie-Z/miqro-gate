@@ -1,6 +1,16 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
+# These two are edited on every Goal and are stored as CRLF in the object
+# store (see the markdown note below). With `* text=auto` plus a Windows
+# checkout (core.autocrlf=true), any local edit re-normalizes the WHOLE file to
+# LF on `git add` — a one-line change shows up as a 673-line diff, and every
+# session paying that cost makes review noise. `-text` pins their storage:
+# edits keep whatever line endings the file already has, no conversion either
+# way. (Whitespace gate unaffected: it already runs with `cr-at-eol`.)
+CHANGELOG.md -text
+docs/progress.md -text
+
 # Java / Maven
 *.java text diff=java
 *.xml text

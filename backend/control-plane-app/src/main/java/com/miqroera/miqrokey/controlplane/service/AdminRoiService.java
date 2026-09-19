@@ -40,7 +40,12 @@ public class AdminRoiService {
 
         long hits = totals.requests().l1Hit() + totals.requests().l2Hit();
         long served = totals.requests().upstream() + totals.requests().coalesced() + hits;
-        BigDecimal hitRatePct = pct(hits, served);
+        // 0/0 on an empty window: a hit rate needs requests to be a rate *of*.
+        // Reporting
+        // 0.00% there asserts "the cache never hit" when there was nothing to hit — the
+        // page even says "该窗口没有缓存命中数据" in the same breath (#932). Same call the
+        // discount below already makes.
+        BigDecimal hitRatePct = served == 0 ? null : pct(hits, served);
         BigDecimal paid = totals.cost().upstreamPaid();
         BigDecimal saved = totals.cost().savedByGatewayCache();
         // 0/0 when nothing was priced: the discount is undefined, not zero. Returning

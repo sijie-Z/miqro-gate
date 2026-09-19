@@ -183,13 +183,19 @@ class AdminRoiApiIntegrationTest {
     }
 
     @Test
-    @DisplayName("empty windows report zero paid and no days")
+    @DisplayName("an empty window leaves both shares undefined — 0/0 is not 0% (#932)")
     void emptyWindow() throws Exception {
         String from = "2025-01-01T00:00:00Z";
         String to = "2025-01-02T00:00:00Z";
         mockMvc.perform(get("/api/v1/admin/usage/roi").param("from", from).param("to", to).cookie(sessionCookie))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.totals.paidCost").value(0))
-                .andExpect(jsonPath("$.totals.hitRatePct").value(0.0)).andExpect(jsonPath("$.byDay.length()").value(0));
+                // Nothing was served, so there is no rate to report. "0.00%" would assert
+                // the cache never hit, when the truth is that nothing asked it to.
+                .andExpect(jsonPath("$.totals.hitRatePct").value(nullValue()))
+                // ...and the discount has said so since #858. Two shares, one rule — this
+                // test exists because only one of them followed it.
+                .andExpect(jsonPath("$.totals.savedPct").value(nullValue()))
+                .andExpect(jsonPath("$.byDay.length()").value(0));
     }
 
     @Test

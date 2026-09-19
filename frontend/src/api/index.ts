@@ -685,6 +685,23 @@ export function adminDisableAgent(id: string): Promise<AgentView> {
   return post<AgentView>(`/api/v1/admin/agents/${id}/disable`);
 }
 
+export function adminEnableAgent(id: string): Promise<AgentView> {
+  return post<AgentView>(`/api/v1/admin/agents/${id}/enable`);
+}
+
+/** Rename / edit the description; `version` is the row's optimistic-lock token. */
+export function adminUpdateAgent(
+  id: string,
+  body: { name: string; description?: string; version: number },
+): Promise<AgentView> {
+  return patch<AgentView>(`/api/v1/admin/agents/${id}`, body);
+}
+
+/** Hard delete (#824): frees the name and the one-agent-per-credential slot. */
+export function adminDeleteAgent(id: string): Promise<void> {
+  return del<void>(`/api/v1/admin/agents/${id}`);
+}
+
 export function adminAgentUsage(id: string): Promise<UsageSummary> {
   return get<UsageSummary>(`/api/v1/admin/agents/${id}/usage`);
 }
