@@ -330,7 +330,9 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
         ADJUSTED
     }
 
-    /** The booking-ledger term (#709); empty for an observed-only reading (#1002). */
+    /**
+     * The booking-ledger term (#709); empty for an observed-only reading (#1002).
+     */
     private static String adjustmentDelta(String column, TokenBasis basis) {
         return basis == TokenBasis.ADJUSTED ? " + COALESCE(SUM(adj." + column + "), 0)" : "";
     }
@@ -409,12 +411,11 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 GROUP BY %s, ue.provider_product_id, ue.model_id, ue.cache_level
                 """.formatted(spec.select(), adjustmentDelta("input_delta", basis),
                 adjustmentDelta("output_delta", basis), adjustmentDelta("cache_read_delta", basis),
-                adjustmentDelta("cache_creation_delta", basis), zeroIfUnpriced(inputPrice),
-                zeroIfUnpriced(outputPrice), zeroIfUnpriced(cacheReadPrice), zeroIfUnpriced(cacheCreationPrice),
+                adjustmentDelta("cache_creation_delta", basis), zeroIfUnpriced(inputPrice), zeroIfUnpriced(outputPrice),
+                zeroIfUnpriced(cacheReadPrice), zeroIfUnpriced(cacheCreationPrice),
                 unpricedColumns(inputTokens, inputPrice, outputTokens, outputPrice, cacheReadTokens, cacheReadPrice,
                         cacheCreationTokens, cacheCreationPrice),
-                FAILED_STATUS_SQL, spec.join(), wb.joins(), adjustmentJoin, LIFECYCLE_JOIN, wb.where(),
-                spec.groupBy());
+                FAILED_STATUS_SQL, spec.join(), wb.joins(), adjustmentJoin, LIFECYCLE_JOIN, wb.where(), spec.groupBy());
         MapSqlParameterSource params = wb.params();
         List<UsageStatsAggregator.UsageAggRow> rows = new ArrayList<>();
         jdbc.query(sql, params, rs -> {

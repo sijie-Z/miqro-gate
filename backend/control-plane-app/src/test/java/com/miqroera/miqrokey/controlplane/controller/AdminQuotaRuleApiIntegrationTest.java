@@ -192,10 +192,11 @@ class AdminQuotaRuleApiIntegrationTest {
         assertThat(enforcementRows("USER", adminUserId)).isEqualTo(1);
 
         // A financial correction against the observed fact: net output 400 -> 100.
-        mockMvc.perform(post("/api/v1/admin/usage-adjustments").cookie(adminSession, adminCsrf)
-                .header("X-CSRF-Token", adminCsrfToken).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"gatewayRequestId\":\"" + gatewayRequestId + "\",\"outputTokensDelta\":-300,"
-                        + "\"reason\":\"上游账单修正\"}"))
+        mockMvc.perform(
+                post("/api/v1/admin/usage-adjustments")
+                        .cookie(adminSession, adminCsrf).header("X-CSRF-Token", adminCsrfToken)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"gatewayRequestId\":\"" + gatewayRequestId
+                                + "\",\"outputTokensDelta\":-300," + "\"reason\":\"上游账单修正\"}"))
                 .andExpect(status().isCreated());
 
         // The reporting reading absorbs the correction ...

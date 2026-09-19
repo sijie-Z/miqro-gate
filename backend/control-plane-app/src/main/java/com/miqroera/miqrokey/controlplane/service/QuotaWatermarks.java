@@ -39,8 +39,7 @@ class QuotaWatermarks {
         // adjustment booked afterwards must not raise or lower it — the ledger
         // (#709) belongs to the reporting/billing numbers, not to this one.
         UsageSummary summary = usageStatsService.summaryObservedUncapped(tenantId, "project", window.from(),
-                window.to(),
-                rule.scopeType() == QuotaScopeType.USER ? rule.scopeId() : null,
+                window.to(), rule.scopeType() == QuotaScopeType.USER ? rule.scopeId() : null,
                 rule.scopeType() == QuotaScopeType.PROJECT ? rule.scopeId() : null);
         BigDecimal used = switch (rule.metric()) {
             case TOKENS -> BigDecimal.valueOf(summary.totals().tokens().total());
