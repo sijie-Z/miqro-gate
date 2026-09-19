@@ -405,6 +405,40 @@ describe('NextUsageView', () => {
     expect(mockApi.usageSummary).toHaveBeenLastCalledWith('project', expectedFrom, expectedTo);
   });
 
+  // PH37: the panel is labelled 用量趋势 (a *daily* trend) and it aggregates the very
+  // rows the 最近记录 table below renders through formatTime — which reads the
+  // browser's own timezone. Bucketing on the raw UTC date string splits one local
+  // day in two, so the same records get two different dates on one screen.
+  it('buckets the daily trend by the same local day the records table shows', async () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = 'Asia/Shanghai'; // UTC+8: 16:30Z and 02:00Z are one local day
+    try {
+      mockApi.usageRecords.mockResolvedValue({
+        ...records,
+        items: [
+          { ...records.items![0]!, occurredAt: '2026-09-03T16:30:00Z', gatewayRequestId: 'gw-a' },
+          { ...records.items![0]!, occurredAt: '2026-09-04T02:00:00Z', gatewayRequestId: 'gw-b' },
+        ],
+        total: 2,
+      });
+
+      const wrapper = mountView();
+      await flushPromises();
+
+      // The table says both rows happened on 2026-09-04 local time…
+      expect(cellOf(wrapper, 'records-table', 0, '时间')).toContain('2026-09-04 00:30');
+      expect(cellOf(wrapper, 'records-table', 1, '时间')).toContain('2026-09-04 10:00');
+
+      // …so the chart above it must show one bucket for 09-04 and no 09-03 bucket.
+      const chart = wrapper.find('[data-testid="usage-trend-chart"]');
+      expect(chart.text()).toContain('09-04');
+      expect(chart.text()).not.toContain('09-03');
+    } finally {
+      if (previousTz === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTz;
+    }
+  });
+
   it('keeps the previous rows while a page change is in flight (#643)', async () => {
     let release: (page: UsageRecordPage) => void = () => {};
     // total > pageSize keeps the next button enabled for the pending click
