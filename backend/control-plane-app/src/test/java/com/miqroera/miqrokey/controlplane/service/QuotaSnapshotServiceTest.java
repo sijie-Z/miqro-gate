@@ -98,6 +98,7 @@ class QuotaSnapshotServiceTest {
     private QuotaSnapshotService service;
     private final java.util.List<QuotaSnapshot> stored = new java.util.ArrayList<>();
     private final RecordingTransactionManager transactions = new RecordingTransactionManager();
+    private final io.micrometer.core.instrument.simple.SimpleMeterRegistry meterRegistry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
     private ProviderProductAdapter adapter;
 
     @BeforeEach
@@ -105,7 +106,7 @@ class QuotaSnapshotServiceTest {
         service = new QuotaSnapshotService(subscriptionRepository, productRepository, credentialRepository,
                 versionRepository, snapshotRepository, adapterRegistry, clientFactory, keyEncryptionProvider, jdbc,
                 new com.fasterxml.jackson.databind.ObjectMapper(),
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), transactions);
+                meterRegistry, transactions);
         lenient().when(snapshotRepository.insert(any())).thenAnswer(inv -> {
             stored.add(inv.getArgument(0));
             return inv.getArgument(0);
@@ -137,6 +138,49 @@ class QuotaSnapshotServiceTest {
         assertThat(row.sharedPool()).isFalse();
         // The decrypted secret was wiped after use.
         verify(clientFactory).create(any(), eq("Authorization"), eq("Bearer sk-test-secret"));
+    }
+
+    @Test
+    void refreshCountsProviderCallUnderTheRealAdapterId() {
+        when(subscriptionRepository.findById(SUBSCRIPTION_ID)).thenReturn(Optional.of(subscription()));
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(product()));
+        when(adapterRegistry.findById(PRODUCT_CODE)).thenReturn(Optional.of(adapter));
+        when(credentialRepository.findAllBySubscriptionId(SUBSCRIPTION_ID)).thenReturn(List.of(credential()));
+        when(versionRepository.findActiveByCredentialId(CREDENTIAL_ID)).thenReturn(Optional.of(version()));
+        when(keyEncryptionProvider.decrypt(any(), eq(TENANT), eq(CREDENTIAL_ID)))
+                .thenReturn("sk-test-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(clientFactory.create(any(), any(), any())).thenReturn(stubClient());
+
+        service.refresh(TENANT, SUBSCRIPTION_ID);
+
+        io.micrometer.core.instrument.Counter providerCalls = meterRegistry
+                .find("miqrokey_control_provider_calls_total").tag("adapter_id", PRODUCT_CODE).counter();
+        assertThat(providerCalls).isNotNull();
+        assertThat(providerCalls.count()).isEqualTo(1.0);
+
+        io.micrometer.core.instrument.Counter success = meterRegistry
+                .find("miqrokey_control_quota_refresh_total").tag("result", "success").counter();
+        assertThat(success).isNotNull();
+        assertThat(success.count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void refreshCountsFailedProviderCallAsFailure() {
+        when(subscriptionRepository.findById(SUBSCRIPTION_ID)).thenReturn(Optional.of(subscription()));
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(product()));
+        when(adapterRegistry.findById(PRODUCT_CODE)).thenReturn(Optional.of(new ThrowingFakeAdapter()));
+        when(credentialRepository.findAllBySubscriptionId(SUBSCRIPTION_ID)).thenReturn(List.of(credential()));
+        when(versionRepository.findActiveByCredentialId(CREDENTIAL_ID)).thenReturn(Optional.of(version()));
+        when(keyEncryptionProvider.decrypt(any(), eq(TENANT), eq(CREDENTIAL_ID)))
+                .thenReturn("sk-test-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(clientFactory.create(any(), any(), any())).thenReturn(stubClient());
+
+        service.refresh(TENANT, SUBSCRIPTION_ID);
+
+        io.micrometer.core.instrument.Counter failure = meterRegistry
+                .find("miqrokey_control_quota_refresh_total").tag("result", "failure").counter();
+        assertThat(failure).isNotNull();
+        assertThat(failure.count()).isEqualTo(1.0);
     }
 
     @Test
@@ -432,6 +476,14 @@ class QuotaSnapshotServiceTest {
 
     private UnavailableFakeAdapter unavailableAdapter() {
         return new UnavailableFakeAdapter();
+    }
+
+    private static final class ThrowingFakeAdapter extends FakeAdapter {
+        @Override
+        public reactor.core.publisher.Mono<PlanSnapshot> fetchPlanStatus(ProviderClient client,
+                SubscriptionContext subscription) {
+            return reactor.core.publisher.Mono.error(new IllegalStateException("upstream 503"));
+        }
     }
 
     /**

@@ -31,7 +31,6 @@ import com.miqroera.miqrokey.spi.SubscriptionKind;
 import com.miqroera.miqrokey.controlplane.client.ProviderClientFactory;
 import com.miqroera.miqrokey.controlplane.dto.SubscriptionQuotaView;
 import com.miqroera.miqrokey.controlplane.dto.QuotaEntryView;
-import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -90,8 +89,7 @@ public class QuotaSnapshotService {
     private final KeyEncryptionProvider keyEncryptionProvider;
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
-    private final Counter providerCalls;
-    private final Counter refreshTotal;
+    private final MeterRegistry meterRegistry;
     /**
      * Short write transaction for the collected snapshot rows (#728). Rows are
      * gathered first (the provider fetches are blocking HTTP and must never run
@@ -118,12 +116,10 @@ public class QuotaSnapshotService {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         // Low-cardinality only: adapterId is a stable product identifier; user,
-        // key and model values are never metric labels (config §8).
-        this.providerCalls = Counter.builder("miqrokey_control_provider_calls_total")
-                .description("Control-plane provider calls by adapter").tag("adapter_id", "none")
-                .register(meterRegistry);
-        this.refreshTotal = Counter.builder("miqrokey_control_quota_refresh_total")
-                .description("Quota snapshot refreshes by result").tag("result", "unknown").register(meterRegistry);
+        // key and model values are never metric labels (config §8). Counters are
+        // looked up per adapter/result at the increment site so the recorded
+        // series carries the real label value instead of a placeholder.
+        this.meterRegistry = meterRegistry;
     }
 
     /**
@@ -251,13 +247,15 @@ public class QuotaSnapshotService {
             }
             ProviderClient client = clientFactory.create(baseUrl, "Authorization",
                     "Bearer " + new String(secret, StandardCharsets.UTF_8));
-            providerCalls.increment();
+            meterRegistry.counter("miqrokey_control_provider_calls_total", "adapter_id", adapter.adapterId())
+                    .increment();
             PlanSnapshot plan = adapter
                     .fetchPlanStatus(client, new SubscriptionContext(subscription.id(), kind(subscription), null))
                     .block(FETCH_TIMEOUT);
-            refreshTotal.increment();
+            countRefresh("success");
             return fromPlan(plan, subscription, credential, now);
         } catch (Exception e) {
+            countRefresh("failure");
             LOG.warn("Quota refresh failed for credential {}; recording UNAVAILABLE", credential.id());
             return unavailable(subscription, credential.id(), credential.seatId(), now, sanitize(e.getMessage()));
         } finally {
@@ -265,6 +263,10 @@ public class QuotaSnapshotService {
                 SecretWiping.clearArray(secret);
             }
         }
+    }
+
+    private void countRefresh(String result) {
+        meterRegistry.counter("miqrokey_control_quota_refresh_total", "result", result).increment();
     }
 
     private static QuotaSnapshot fromPlan(PlanSnapshot plan, UpstreamSubscription subscription,
