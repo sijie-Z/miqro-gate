@@ -173,13 +173,31 @@ public class AlertEventDispatcher {
         Instant now = Instant.now();
         try {
             int status = endpointService.postSigned(endpoint, payload);
-            recordAttempt(eventId, endpoint, attempt, status, null, null);
-            LOG.info("Alert {} delivered to endpoint {} (HTTP {})", eventId, endpoint.id(), status);
+            if (status >= 200 && status < 300) {
+                recordAttempt(eventId, endpoint, attempt, status, null, null);
+                LOG.info("Alert {} delivered to endpoint {} (HTTP {})", eventId, endpoint.id(), status);
+                return;
+            }
+            // Any non-2xx answer means the receiver did not accept the alert, so it is
+            // a failed delivery — the operator-visible "响应码" of operations-runbook
+            // §8 — not a delivered one. Only transient server errors are armed for the
+            // exponential-backoff retry, mirroring the F12 SERVER_5XX retry vocabulary
+            // (docs/database-schema.md); a rejected request (4xx) cannot succeed on a
+            // retry, so it is recorded and left alone.
+            boolean transientFailure = status >= 500 && status < 600;
+            recordAttempt(eventId, endpoint, attempt, status, transientFailure ? nextRetryAt(attempt, now) : null,
+                    "HTTP " + status);
+            LOG.warn("Alert {} delivery attempt {} rejected by endpoint {} (HTTP {})", eventId, attempt, endpoint.id(),
+                    status);
         } catch (Exception e) {
             LOG.warn("Alert {} delivery attempt {} failed", eventId, attempt);
-            Instant nextRetry = attempt < MAX_ATTEMPTS ? now.plusSeconds((long) Math.pow(2, attempt) * 60) : null;
-            recordAttempt(eventId, endpoint, attempt, null, nextRetry, truncate(e.getMessage()));
+            recordAttempt(eventId, endpoint, attempt, null, nextRetryAt(attempt, now), truncate(e.getMessage()));
         }
+    }
+
+    /** Backoff deadline for a failed attempt: 2^attempt × 60s, or none once exhausted. */
+    private static Instant nextRetryAt(int attempt, Instant now) {
+        return attempt < MAX_ATTEMPTS ? now.plusSeconds((long) Math.pow(2, attempt) * 60) : null;
     }
 
     /** Retries deliveries whose backoff deadline passed. */
