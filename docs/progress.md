@@ -5,10 +5,9 @@
 ## 会话交接点 2026-09-20（Agent 生命周期补齐：enable/改名/硬删除，#824）
 
 - **ADR-0025 已转 Accepted**（§7 拍板记录：选项 D + §6 六条未决项的处置）；实现 issue #1012。
-- **两处事实（对 #824 原文的更正与发现）**：① 凭证侧的锁只对 **ACTIVE** Agent 生效（`AdminCredentialService.java:355-361` javadoc + `AgentRepositoryImpl` 的 `status='ACTIVE'` 查询）——issue 说的「停用态仍锁凭证」不成立；② 真实约束是 `uq_agents_tenant_credential` **不看状态**：停用的 Agent 仍占「该凭证 → 唯一 Agent」名额，僵尸 Agent 的形状是**名额占死**而非凭证锁死。
-- **实现要点**：`enable` 是**有条件的逆操作**（凭证必须存在且 ACTIVE，否则 409 `CREDENTIAL_NOT_ACTIVE`）；`PATCH` 走乐观锁（`version` 随 `AgentView` 返回、表单回传），重名 409 `AGENT_NAME_TAKEN`、版本过期 409 `CONCURRENT_MODIFICATION`；硬删除的审计 `AGENT_DELETE` 带**名称快照**（行删后按 id 反查不到名字）。
-- **连带改动**：`AgentView` 增 `version` 字段 → OpenAPI 基线重生成（新增 1 path + 1 schema，破坏性检查通过）、`frontend/src/types/generated.ts` 重生成（含 springdoc operationId 重新编号）、api-contract §5.13 同步。
-- **踩坑记录**：`npm run gen:types` 必须在基线更新后跑（幂等门禁）；前端 api 补丁脚本跑两次会插重复导出（esbuild 报 `Multiple exports with the same name`，8 个测试文件连带失败）——脚本的幂等判据要按「块是否已存在」判，别按锚点。
+- **两处事实（对 #824 原文的更正与发现）**：① 凭证侧的锁只对 **ACTIVE** Agent 生效——issue 说的「停用态仍锁凭证」不成立；② 真实约束是 `uq_agents_tenant_credential` **不看状态**：停用的 Agent 仍占「该凭证 → 唯一 Agent」名额，僵尸 Agent 的形状是**名额占死**而非凭证锁死。
+- **实现要点**：`enable` 是**有条件的逆操作**（凭证必须存在且 ACTIVE）；`PATCH` 走乐观锁（`version` 随 `AgentView` 返回）；硬删除的审计 `AGENT_DELETE` 带**名称快照**（行删后按 id 反查不到名字）。
+- **连带改动**：`AgentView` 增 `version` → OpenAPI 基线重生成 + `frontend/src/types/generated.ts` 重生成（幂等）。
 
 ## 会话交接点 2026-09-19（PH22 缓存正确性审计：多模态 part 不入键，#976）
 
