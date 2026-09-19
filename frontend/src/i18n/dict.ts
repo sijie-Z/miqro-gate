@@ -1322,6 +1322,15 @@ export const DICT: Record<string, string> = {
   '重试': 'Retry',
   '重新加载': 'Reload',
   '使用手册': 'User guide',
+  '统计': 'Statistics',
+  '配置概览': 'Configuration',
+  '总请求': 'Total requests',
+  '按虚拟密钥的缓存表现（总请求多的在前）· 当前窗口':
+    'Cache activity per Virtual Key (busiest first) · current window',
+  '去「我的密钥」管理缓存开关': 'Manage cache switches in My Keys',
+  '该窗口内没有按密钥的用量记录': 'No per-key usage in this window',
+  '缓存为按 Key 显式开启：在「我的密钥」为 Key 打开缓存开关后，客户端请求再加 X-MiqroKey-Cacheable: 1 头即生效。':
+    'Caching is opt-in per Key: enable the switch in My Keys, then clients add the X-MiqroKey-Cacheable: 1 header.',
   '返回总览': 'Back to overview',
   '页面出错了': 'This page hit an error',
   '页面渲染时遇到问题。可以先重试；若反复出现，请把下方信息反馈给管理员。':

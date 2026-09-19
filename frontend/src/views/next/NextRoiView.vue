@@ -10,9 +10,9 @@
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { UiButton, UiDonut, UiTable, UiTooltip } from '@/ui';
-import { costGapNote } from '@/lib/usage-pricing';
+import { costGapNote, savingsBoundNote } from '@/lib/usage-pricing';
 import { csvCell } from '@/utils/csv';
-import type { RoiReportView } from '@/types/generated-api';
+import type { RoiReportView, UsageGroup } from '@/types/generated-api';
 
 const report = ref<RoiReportView | null>(null);
 const loading = ref(true);
@@ -103,6 +103,13 @@ interface RoiCard {
   accent?: boolean;
   /** Set when a figure on this card is known to fall short of the whole (#801). */
   caveat?: string;
+  /**
+   * Set when the figure is a *floor* rather than a figure (#790/#863): a hit no price
+   * could value contributes nothing to the saving, so the saving understates what the
+   * cache did. A different claim from `caveat`, which says the amount is short of a
+   * total — the two can appear together.
+   */
+  bound?: string;
 }
 
 const cards = computed<RoiCard[]>(() => {
@@ -110,6 +117,9 @@ const cards = computed<RoiCard[]>(() => {
   const { upstream, coalesced, l1, l2, served } = totalsOf.value;
   // The money below is short of the whole whenever a token dimension had no price.
   const costCaveat = costGapNote(t) ?? undefined;
+  // ...and it can be a floor on top of that: the cost's status says nothing about the
+  // hits, which is where the saving comes from (#863).
+  const savingsBound = savingsBoundNote(t) ?? undefined;
   // A 0/0 discount is undefined, not zero: the API sends null for exactly this case.
   const discount = t?.savedPct == null ? '—' : pct(Number(t.savedPct));
   const rate = (n: number) => pct(served ? (n / served) * 100 : 0);
@@ -133,6 +143,7 @@ const cards = computed<RoiCard[]>(() => {
       label: '缓存节省',
       value: money(Number(t?.savedCost ?? 0)),
       caveat: costCaveat,
+      bound: savingsBound,
       sub: [
         { k: '上游实付', v: money(Number(t?.paidCost ?? 0)) },
         { k: '等效折扣', v: discount },
@@ -171,6 +182,62 @@ function asDay(row: unknown): NonNullable<RoiReportView['byDay']>[number] {
   return row as NonNullable<RoiReportView['byDay']>[number];
 }
 
+// ---- #863 配置概览 tab: per-Key cache activity (groupBy=VIRTUAL_KEY) --------
+// Tencent splits cache into 配置 + 统计 pages; we keep one page with two tabs.
+// The per-key numbers come from the existing admin usage summary — the whitelist
+// has supported VIRTUAL_KEY grouping all along, so no new endpoint is needed.
+type PageTab = 'stats' | 'config';
+
+interface KeyRow {
+  key: string;
+  label: string;
+  served: number;
+  hits: number;
+  hitRatePct: number;
+  paidCost: number;
+  savedCost: number;
+}
+
+const pageTab = ref<PageTab>('stats');
+const keyRows = ref<UsageGroup[]>([]);
+const keyError = ref('');
+
+const keyColumns = [
+  { key: 'label', title: '密钥', minWidth: '200px' },
+  { key: 'served', title: '总请求', width: '110px', align: 'right' as const, sortable: true },
+  { key: 'hits', title: '缓存命中', width: '120px', align: 'right' as const, sortable: true },
+  { key: 'hitRatePct', title: '命中率', width: '110px', align: 'right' as const },
+  { key: 'paidCost', title: '上游实付', width: '130px', align: 'right' as const, sortable: true },
+  { key: 'savedCost', title: '缓存节省', width: '130px', align: 'right' as const, sortable: true },
+];
+
+/** Flatten the grouped summary into table rows; busiest keys first. */
+const keyTableRows = computed<KeyRow[]>(() =>
+  keyRows.value
+    .map((g) => {
+      const upstream = Number(g.requests?.upstream ?? 0);
+      const coalesced = Number(g.requests?.coalesced ?? 0);
+      const l1 = Number(g.requests?.l1Hit ?? 0);
+      const l2 = Number(g.requests?.l2Hit ?? 0);
+      const served = upstream + coalesced + l1 + l2;
+      const hits = l1 + l2;
+      return {
+        key: g.groupKey ?? g.label ?? '',
+        label: g.label ?? g.groupKey ?? '—',
+        served,
+        hits,
+        hitRatePct: served ? (hits / served) * 100 : 0,
+        paidCost: Number(g.cost?.upstreamPaid ?? 0),
+        savedCost: Number(g.cost?.savedByGatewayCache ?? 0),
+      };
+    })
+    .sort((a, b) => b.served - a.served),
+);
+
+function asKeyRow(row: unknown): KeyRow {
+  return row as KeyRow;
+}
+
 // #440: request-sequence guard — a slow window load must not land after the
 // user switched windows (numbers must match the highlighted range).
 let loadRequestSeq = 0;
@@ -179,8 +246,24 @@ async function load() {
   const seq = ++loadRequestSeq;
   loading.value = true;
   loadError.value = '';
+  keyError.value = '';
+  const { from, to } = windowRange(windowKey.value);
+
+  // The per-key aggregate is auxiliary: its failure must never take the stats
+  // tab down with it (same degradation contract as the list-metadata batch).
+  void api
+    .adminUsageSummary({ groupBy: 'VIRTUAL_KEY', from: from.toISOString(), to: to.toISOString() })
+    .then((summary) => {
+      if (seq !== loadRequestSeq) return;
+      keyRows.value = summary.groups ?? [];
+    })
+    .catch((err) => {
+      if (seq === loadRequestSeq) {
+        keyError.value = err instanceof Error ? err.message : '加载密钥维度失败';
+      }
+    });
+
   try {
-    const { from, to } = windowRange(windowKey.value);
     const result = await api.getRoiReport(from.toISOString(), to.toISOString());
     if (seq !== loadRequestSeq) {
       return; // a newer window won — this response is stale
@@ -233,6 +316,7 @@ onMounted(load);
       </div>
       <div class="ui-page-actions">
         <UiButton
+          v-if="pageTab === 'stats'"
           variant="secondary"
           data-testid="roi-export"
           :disabled="!report"
@@ -242,6 +326,31 @@ onMounted(load);
         </UiButton>
       </div>
     </header>
+
+    <div class="next-roi__tabs" role="tablist" aria-label="缓存视图">
+      <button
+        type="button"
+        role="tab"
+        class="next-roi__tab"
+        :class="{ 'next-roi__tab--on': pageTab === 'stats' }"
+        :aria-selected="pageTab === 'stats'"
+        data-testid="roi-tab-stats"
+        @click="pageTab = 'stats'"
+      >
+        统计
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="next-roi__tab"
+        :class="{ 'next-roi__tab--on': pageTab === 'config' }"
+        :aria-selected="pageTab === 'config'"
+        data-testid="roi-tab-config"
+        @click="pageTab = 'config'"
+      >
+        配置概览
+      </button>
+    </div>
 
     <div class="next-roi__toolbar">
       <div class="next-roi__segmented" role="tablist" aria-label="窗口">
@@ -270,13 +379,45 @@ onMounted(load);
 
     <div v-if="loadError" class="ui-alert ui-alert--error">{{ loadError }}</div>
 
-    <div v-if="report" class="next-roi__cards" data-testid="roi-report">
+    <!-- #863 配置概览：按密钥的缓存表现（groupBy=VIRTUAL_KEY，现有端点） -->
+    <section v-if="pageTab === 'config'" class="ui-panel" data-testid="roi-config">
+      <div class="ui-panel-toolbar">
+        <span class="ui-panel-sub">按虚拟密钥的缓存表现（总请求多的在前）· 当前窗口</span>
+        <router-link class="ui-link-action" to="/app/keys">去「我的密钥」管理缓存开关</router-link>
+      </div>
+      <div v-if="keyError" class="ui-alert ui-alert--error" data-testid="roi-config-error">
+        {{ keyError }}
+      </div>
+      <UiTable
+        :columns="keyColumns"
+        :data="keyTableRows"
+        :loading="loading"
+        row-key="key"
+        empty-title="该窗口内没有按密钥的用量记录"
+        empty-description="缓存为按 Key 显式开启：在「我的密钥」为 Key 打开缓存开关后，客户端请求再加 X-MiqroKey-Cacheable: 1 头即生效。"
+        data-testid="roi-key-table"
+      >
+        <template #label="{ row }">
+          <span class="next-roi__key-label" :title="asKeyRow(row).label">{{
+            asKeyRow(row).label
+          }}</span>
+        </template>
+        <template #hits="{ row }">{{ asKeyRow(row).hits }}</template>
+        <template #hitRatePct="{ row }">{{ pct(asKeyRow(row).hitRatePct) }}</template>
+        <template #paidCost="{ row }">{{ money(asKeyRow(row).paidCost) }}</template>
+        <template #savedCost="{ row }">{{ money(asKeyRow(row).savedCost) }}</template>
+      </UiTable>
+    </section>
+
+    <div v-if="pageTab === 'stats' && report" class="next-roi__cards" data-testid="roi-report">
       <div v-for="card in cards" :key="card.label" class="ui-panel next-roi__card">
         <span class="next-roi__label">{{ card.label }}</span>
         <span class="next-roi__value ui-num" :class="{ 'next-roi__value--accent': card.accent }"
           >{{ card.value
           }}<UiTooltip v-if="card.caveat" :text="card.caveat"
             ><span class="next-roi__caveat" data-testid="roi-cost-caveat">未定价</span></UiTooltip
+          ><UiTooltip v-if="card.bound" :text="card.bound"
+            ><span class="next-roi__caveat" data-testid="roi-savings-bound">下界</span></UiTooltip
           ></span
         >
         <span class="next-roi__sub">
@@ -289,7 +430,7 @@ onMounted(load);
       </div>
     </div>
 
-    <div class="next-roi__panels">
+    <div v-if="pageTab === 'stats'" class="next-roi__panels">
       <section v-if="savingSegments.length" class="ui-panel" data-testid="roi-saving-dist">
         <div class="ui-panel-head">
           <div>
@@ -348,7 +489,7 @@ onMounted(load);
       </section>
     </div>
 
-    <section class="ui-panel">
+    <section v-if="pageTab === 'stats'" class="ui-panel">
       <div class="ui-panel-toolbar">
         <span class="ui-panel-sub">按日明细</span>
       </div>
@@ -383,6 +524,56 @@ onMounted(load);
 .ui-alert--error {
   background: var(--ui-danger-bg);
   color: var(--ui-danger-fg);
+}
+
+/* Page tabs (统计 / 配置概览) — antd underline style, mirroring the Tencent
+   cache page's 配置 / 统计 split (#863). */
+.next-roi__tabs {
+  display: flex;
+  gap: var(--ui-space-6);
+  border-bottom: 1px solid var(--ui-border);
+  margin-bottom: var(--ui-space-4);
+}
+
+.next-roi__tab {
+  position: relative;
+  padding: 0 2px 10px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--ui-font-size-base);
+  color: var(--ui-foreground-secondary);
+  cursor: pointer;
+  transition: color var(--ui-ease);
+}
+
+.next-roi__tab:hover {
+  color: var(--ui-primary-text);
+}
+
+.next-roi__tab--on {
+  color: var(--ui-primary-text);
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-roi__tab--on::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--ui-primary);
+}
+
+.next-roi__key-label {
+  display: inline-block;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .next-roi__toolbar {
