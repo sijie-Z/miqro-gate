@@ -59,6 +59,7 @@
 ## 6. 网络
 
 - 生产环境只通过 HTTPS 暴露。
+- 入口（Nginx）对所有响应下发四个安全头（`always`，含错误响应）：`Strict-Transport-Security: max-age=31536000; includeSubDomains`、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: strict-origin-when-cross-origin`。**HSTS 刻意不含 `preload`**——提交浏览器 preload 列表的撤回以月计，内网/私有化部署不值得锁死这条退路。这个头是 2026-09-20 全站验收扫出来的：仓库里此前**任何地方**都没有它（Nginx、Spring、文档全无），而响应里唯一见过它的是上游透传（DeepSeek 边缘会发 HSTS），属"看起来有"的假象——验收若只打一次推理请求就会被它骗过。
 - 容器端口仅位于 Compose 内部网络，由 Nginx、Caddy 或客户现有入口终止 TLS。
 - 本地开发允许 `localhost` HTTP。
 - 管理门户支持配置 IP 白名单（F05 已实现）：`miqrokey.control.admin-access.ip-allowlist`（CIDR 列表，空 = 不限制）。配置后门户面（会话 UI/API）仅名单内来源可访问，其余 403 `IP_NOT_ALLOWED`；`/api/v1/billing/**` 外部系统通道与 `/api/v1/auth/bootstrap` 一次性引导豁免（IP 名单语义是"人用浏览器管门户"，机器通道走自己的凭证体系）。反代部署配 `...trusted-proxies`（CIDR）：只有来自受信代理的 `X-Forwarded-For` 被采纳，直连来源无法伪造头绕过。非法 CIDR 配置导致启动失败。
