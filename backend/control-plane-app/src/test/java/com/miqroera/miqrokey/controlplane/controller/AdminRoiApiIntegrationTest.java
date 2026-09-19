@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -118,6 +119,31 @@ class AdminRoiApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("the ROI report carries the savings gap: complete cost, unpriced hits (#863)")
+    void roiTotalsReportTheSavingsLowerBound() throws Exception {
+        fx.insertCatalog();
+        // The prices take effect after the hits but before the usage row: the cost can
+        // be priced and the saving cannot.
+        fx.insertPriceOneSecondAgo("INPUT", "2");
+        fx.insertPriceOneSecondAgo("OUTPUT", "8");
+        fx.insertUsage(1000L, 500L);
+        fx.insertCacheEntryAndHits(2);
+
+        mockMvc.perform(get("/api/v1/admin/usage/roi").cookie(sessionCookie)).andExpect(status().isOk())
+                // The cost is complete: a savings gap must not make it look short, so
+                // pricingStatus alone can never reveal what happened to the saving.
+                .andExpect(jsonPath("$.totals.pricingStatus").value("COMPLETE"))
+                // ...and yet the saving is a floor, and the report has to say so. Without
+                // this field the page shows ¥0.0000 with nothing to explain it, which
+                // reads as "caching saved nothing" on the page that decides caching (#863).
+                .andExpect(jsonPath("$.totals.unpriced.unpricedHitEvents").value(2))
+                .andExpect(jsonPath("$.totals.savedCost").value(0))
+                // The basis is non-zero, so the discount is still a number — the point is
+                // that the *saving* is short, not that the share is undefined.
+                .andExpect(jsonPath("$.totals.paidCost").value(0.006));
+    }
+
+    @Test
     @DisplayName("a hit whose price was not yet in force is counted, so the saving reads as a lower bound (#790)")
     void unpricedHitIsCounted() throws Exception {
         fx.insertCatalog();
@@ -137,6 +163,23 @@ class AdminRoiApiIntegrationTest {
                 // ...and yet the group is not gap-free, and says so.
                 .andExpect(jsonPath("$.totals.unpriced.unpricedHitEvents").value(2))
                 .andExpect(jsonPath("$.totals.unpriced.empty").value(false));
+    }
+
+    @Test
+    @DisplayName("with nothing priced the discount is undefined, not zero (#858)")
+    void unpricedWindowReportsNoDiscount() throws Exception {
+        fx.insertCatalog();
+        // No price is put in force, so paid and saved are both 0 and the share is 0/0.
+        // Reporting 0.00 there reads as "caching saved nothing" on a page whose whole
+        // purpose is deciding whether caching pays; the honest answer is that it cannot
+        // be computed.
+        fx.insertUsage(1000L, 500L);
+
+        mockMvc.perform(get("/api/v1/admin/usage/roi").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.paidCost").value(0)).andExpect(jsonPath("$.totals.savedCost").value(0))
+                .andExpect(jsonPath("$.totals.savedPct").value(nullValue()))
+                .andExpect(jsonPath("$.totals.pricingStatus").value("UNAVAILABLE"))
+                .andExpect(jsonPath("$.totals.unpriced.unavailableEvents").value(1));
     }
 
     @Test

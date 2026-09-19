@@ -5,7 +5,7 @@ import { defineComponent } from 'vue';
 import NextPricesView from '@/views/next/NextPricesView.vue';
 import * as api from '@/api';
 import { toastState } from '@/ui/toast';
-import type {ProviderProductView} from '@/types/api';
+import type { ProviderProductView } from '@/types/api';
 import type { PriceSnapshotView } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({

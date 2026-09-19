@@ -61,16 +61,35 @@ const TREND_TABS: Array<{ value: TrendMetric; label: string }> = [
 
 const trendMetric = ref<TrendMetric>('tokens');
 
+interface StatCard {
+  label: string;
+  value: string;
+  icon: unknown;
+  tone: string;
+  /** Set when the displayed figure is known to fall short of the whole (#801/#877). */
+  caveat?: string;
+}
+
 /** Vben analysis overview cards: value + right icon + label footer. */
-const summaryStats = computed(() => {
+const summaryStats = computed<StatCard[]>(() => {
   const t = summary.value?.totals;
   const tokens = (t?.tokens?.input ?? 0) + (t?.tokens?.output ?? 0);
   const requests = t?.requests?.upstream ?? 0;
   const cost = Number(t?.cost?.upstreamPaid ?? 0);
+  // #877: this card is the first money a user sees on the page, and it is short of the
+  // total whenever a token dimension had no price. The 合计 row further down says so;
+  // the card did not — the same figure, two different claims about it.
+  const costCaveat = costGapNote(t) ?? undefined;
   return [
     { label: 'Token 总量', value: formatNumber(tokens), icon: LayersIcon, tone: 'cyan' },
     { label: '请求数', value: formatNumber(requests), icon: ChartBarIcon, tone: 'green' },
-    { label: '上游成本', value: `¥${cost.toFixed(2)}`, icon: MoneyIcon, tone: 'gold' },
+    {
+      label: '上游成本',
+      value: `¥${cost.toFixed(2)}`,
+      icon: MoneyIcon,
+      tone: 'gold',
+      caveat: costCaveat,
+    },
   ];
 });
 
@@ -223,6 +242,19 @@ const recordsColumns = [
   { key: 'clientIp', title: '来源 IP', width: '140px' },
   { key: 'providerRequestId', title: '供应商请求 ID', minWidth: '210px' },
 ];
+
+/**
+ * #773: the 调整 column says what the net counts were derived from, so it earns
+ * its 100px only while the rows on screen actually carry an adjustment. With
+ * none in sight the whole column is dashes, which is the extra column and the
+ * visual noise the acceptance criterion rules out — same treatment as the
+ * single-project column in NextKeysView.
+ */
+const visibleRecordsColumns = computed(() =>
+  (records.value?.items ?? []).some((row) => row.adjusted === true)
+    ? recordsColumns
+    : recordsColumns.filter((column) => column.key !== 'adjust'),
+);
 
 // #643: record rows resolve their virtual key by name for at-a-glance auditing.
 const myKeys = ref<VirtualKeyView[]>([]);
@@ -459,6 +491,18 @@ function asGroup(row: unknown): UsageGroup {
   return row as UsageGroup;
 }
 
+/**
+ * #877: a group row's cost caveat, or `''` when the group's cost is a total. The group
+ * carries its own `pricingStatus` / `unpriced` (the API has sent them since #766); only
+ * the row-level cells ignored them, while the 合计 row right below honoured them.
+ *
+ * Empty is the "nothing to say" value because `UiTooltip.text` is a plain string, and a
+ * template narrows `v-if` on a ref but not on a function's result.
+ */
+function groupCostCaveat(row: unknown): string {
+  return costGapNote(asGroup(row)) ?? '';
+}
+
 function asRecord(row: unknown): UsageRecord {
   return row as UsageRecord;
 }
@@ -502,7 +546,14 @@ function formatTime(iso?: string): string {
     <section class="next-usage__stats" data-testid="usage-stats">
       <div v-for="item in summaryStats" :key="item.label" class="ui-panel next-usage__stat">
         <div class="next-usage__stat-main">
-          <span class="next-usage__stat-value ui-num">{{ item.value }}</span>
+          <span class="next-usage__stat-value ui-num"
+            >{{ item.value
+            }}<UiTooltip v-if="item.caveat" :text="item.caveat"
+              ><span class="next-usage__unpriced" data-testid="stat-cost-unpriced"
+                >未定价</span
+              ></UiTooltip
+            ></span
+          >
           <span
             class="next-usage__stat-icon"
             :class="`next-usage__tone--${item.tone}`"
@@ -698,9 +749,14 @@ function formatTime(iso?: string): string {
         <template #upstreamCost="{ row }">{{
           formatCost(asGroup(row).cost?.upstreamPaid)
         }}</template>
-        <template #gatewayCost="{ row }">{{
-          formatCost(asGroup(row).cost?.gatewayObserved)
-        }}</template>
+        <template #gatewayCost="{ row }"
+          >{{ formatCost(asGroup(row).cost?.gatewayObserved)
+          }}<UiTooltip v-if="groupCostCaveat(row)" :text="groupCostCaveat(row)"
+            ><span class="next-usage__unpriced" data-testid="group-cost-unpriced"
+              >未定价</span
+            ></UiTooltip
+          ></template
+        >
       </UiTable>
       <div
         v-if="summary && (summary.groups?.length ?? 0) > 0"
@@ -747,7 +803,7 @@ function formatTime(iso?: string): string {
           <h2 class="ui-panel-title">最近记录</h2>
         </div>
         <UiTable
-          :columns="recordsColumns"
+          :columns="visibleRecordsColumns"
           :data="records?.items ?? []"
           :loading="recordsLoading && !records"
           row-key="gatewayRequestId"
@@ -1119,6 +1175,9 @@ function formatTime(iso?: string): string {
 .next-usage__unpriced {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-warning-fg);
+  /* Was flush against the figure, so it read as `¥0.00未定价` instead of a separate
+     claim about it (#877). Same gap the cache-ROI marker uses. */
+  margin-left: var(--ui-space-1);
 }
 
 .next-usage__custom-range {

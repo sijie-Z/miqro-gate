@@ -23,6 +23,10 @@
 /* ---- page structure ---- */
 .ui-page {
   max-width: var(--ui-content-max);
+  /* Center the capped band when 'fixed 1200' is chosen; no-op in the default
+     fluid mode (max-width 100%). Before this, a large monitor showed the whole
+     console hugging the left edge (vben v5 fills the viewport — measured). */
+  margin-inline: auto;
   padding: var(--ui-space-4) var(--ui-space-4) var(--ui-space-10);
 }
 
@@ -48,6 +52,40 @@
   font-size: var(--ui-font-size-base);
   line-height: var(--ui-line-height-base);
   color: var(--ui-foreground-secondary);
+}
+
+/* Page-description toggle: any page title collapses/expands the description
+   line below it (the shell delegates the click to the showPageDesc
+   preference, mirrored by the 界面设置 switch). The caret is the affordance. */
+.ui-page-title {
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ui-page-title::after {
+  content: '⌄';
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ui-foreground-faint);
+  opacity: 0;
+  transition: opacity var(--ui-ease);
+}
+
+.ui-page-title:hover::after,
+[data-page-desc='hide'] .ui-page-title::after {
+  opacity: 1;
+}
+
+[data-page-desc='hide'] .ui-page-title::after {
+  /* Collapsed: the caret points back down-right at the hidden line. */
+  transform: rotate(-90deg);
+}
+
+[data-page-desc='hide'] .ui-page-desc {
+  display: none;
 }
 
 .ui-page-actions {

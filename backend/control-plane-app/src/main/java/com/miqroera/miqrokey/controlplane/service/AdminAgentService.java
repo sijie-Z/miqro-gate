@@ -60,7 +60,11 @@ public class AdminAgentService {
     @Transactional
     public AgentView create(UUID tenantId, UUID adminId, String name, String description, UUID credentialId,
             String requestId) {
-        UpstreamCredential credential = credentialRepository.findById(credentialId)
+        // Row-lock the credential (#714): binding must serialize with rotate/disable,
+        // which take the same lock before checking for an ACTIVE agent — otherwise a
+        // concurrent disable could land between the ACTIVE check and the insert and
+        // leave an agent bound to a credential that is no longer routable.
+        UpstreamCredential credential = credentialRepository.findByIdForUpdate(credentialId)
                 .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "CREDENTIAL_NOT_FOUND", "凭证不存在。"));
         if (!credential.tenantId().equals(tenantId) || credential.status() != CredentialStatus.ACTIVE) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "CREDENTIAL_NOT_FOUND", "凭证不存在或未启用。");

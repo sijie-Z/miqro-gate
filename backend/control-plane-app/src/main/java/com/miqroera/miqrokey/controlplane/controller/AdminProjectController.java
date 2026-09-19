@@ -36,13 +36,13 @@ public class AdminProjectController {
     }
 
     @PostMapping
-    public Project create(@RequestBody CreateRequest body) {
+    public Project create(@RequestBody ProjectCreateRequest body) {
         var admin = userContext.getUser();
         return orgService.createProject(admin.tenantId(), admin.id(), body.code(), body.name(), body.projectTag());
     }
 
     @PatchMapping("/{projectId}")
-    public Project update(@PathVariable UUID projectId, @RequestBody UpdateRequest body) {
+    public Project update(@PathVariable UUID projectId, @RequestBody ProjectUpdateRequest body) {
         var admin = userContext.getUser();
         return orgService.updateProject(admin.tenantId(), admin.id(), projectId, body.name(), body.projectTag(),
                 body.status());
@@ -54,7 +54,7 @@ public class AdminProjectController {
     }
 
     @PostMapping("/{projectId}/members")
-    public void addMember(@PathVariable UUID projectId, @RequestBody MemberRequest body) {
+    public void addMember(@PathVariable UUID projectId, @RequestBody ProjectMemberRequest body) {
         var admin = userContext.getUser();
         orgService.addProjectMember(admin.tenantId(), admin.id(), projectId, body.userId());
     }
@@ -87,13 +87,13 @@ public class AdminProjectController {
         orgService.removeProjectRepository(admin.tenantId(), admin.id(), projectId, mappingId);
     }
 
-    public record CreateRequest(String code, String name, String projectTag) {
+    public record ProjectCreateRequest(String code, String name, String projectTag) {
     }
 
-    public record UpdateRequest(String name, String projectTag, ProjectStatus status) {
+    public record ProjectUpdateRequest(String name, String projectTag, ProjectStatus status) {
     }
 
-    public record MemberRequest(UUID userId) {
+    public record ProjectMemberRequest(UUID userId) {
     }
 
     public record RepoKeyRequest(String repoKey) {

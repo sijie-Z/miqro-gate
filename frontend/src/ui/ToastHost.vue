@@ -107,7 +107,9 @@ import { toastState, dismissToast } from './toast';
   color: var(--ui-foreground);
   font-size: var(--ui-font-size-base);
   line-height: 22px;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08), 0 3px 6px -4px rgba(0, 0, 0, 0.12),
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.08),
+    0 3px 6px -4px rgba(0, 0, 0, 0.12),
     0 9px 28px 8px rgba(0, 0, 0, 0.05);
 }
 

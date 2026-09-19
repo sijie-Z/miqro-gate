@@ -48,7 +48,7 @@ public class AdminServiceController {
     }
 
     @PostMapping
-    public InternalService create(@Valid @RequestBody CreateRequest body, HttpServletRequest httpReq) {
+    public InternalService create(@Valid @RequestBody ServiceCreateRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return serviceService.create(user.tenantId(), user.id(), body.name().trim(), body.kind(), body.description(),
                 body.baseUrl(), requestId(httpReq));
@@ -70,14 +70,14 @@ public class AdminServiceController {
     /** Health probe configuration (#326; partial update). */
     @PostMapping("/{serviceId}/health-config")
     public InternalService updateHealthConfig(@PathVariable UUID serviceId,
-            @Valid @RequestBody HealthConfigRequest body, HttpServletRequest httpReq) {
+            @Valid @RequestBody ServiceHealthConfigRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return serviceService.updateHealthConfig(user.tenantId(), user.id(), serviceId, body.checkIntervalSeconds(),
                 body.checkTimeoutSeconds(), body.failThreshold(), body.recoverThreshold(), body.checkPath(),
                 requestId(httpReq));
     }
 
-    public record HealthConfigRequest(@Min(5) @Max(3600) Integer checkIntervalSeconds,
+    public record ServiceHealthConfigRequest(@Min(5) @Max(3600) Integer checkIntervalSeconds,
             @Min(1) @Max(60) Integer checkTimeoutSeconds, @Min(1) @Max(20) Integer failThreshold,
             @Min(1) @Max(20) Integer recoverThreshold, @Size(max = 512) String checkPath) {
     }
@@ -87,7 +87,7 @@ public class AdminServiceController {
         return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
-    public record CreateRequest(@NotBlank @Size(max = 200) String name,
+    public record ServiceCreateRequest(@NotBlank @Size(max = 200) String name,
             @Pattern(regexp = "HTTP|MCP|OTHER", message = "kind must be HTTP, MCP or OTHER") String kind,
             @Size(max = 2000) String description, @NotBlank @Size(max = 2048) String baseUrl) {
     }

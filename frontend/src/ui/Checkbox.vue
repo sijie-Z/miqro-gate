@@ -89,7 +89,9 @@ function onChange(event: Event) {
         />
       </svg>
     </span>
-    <span v-if="label || $slots.default" class="ui-check__label"><slot>{{ label }}</slot></span>
+    <span v-if="label || $slots.default" class="ui-check__label"
+      ><slot>{{ label }}</slot></span
+    >
   </label>
 </template>
 

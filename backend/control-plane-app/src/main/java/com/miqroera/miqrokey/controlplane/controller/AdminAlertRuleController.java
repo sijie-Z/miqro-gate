@@ -37,7 +37,7 @@ public class AdminAlertRuleController {
     }
 
     @PostMapping
-    public AlertRule create(@RequestBody CreateRequest body, HttpServletRequest httpReq) {
+    public AlertRule create(@RequestBody AlertRuleCreateRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return ruleService.create(user.tenantId(), body.name(), body.type(), body.threshold(),
                 body.dedupeMinutes() != null ? body.dedupeMinutes() : 60, body.webhookEndpointId(), body.scopeJson(),
@@ -55,7 +55,8 @@ public class AdminAlertRuleController {
     }
 
     @PatchMapping("/{ruleId}")
-    public AlertRule update(@PathVariable UUID ruleId, @RequestBody UpdateRequest body, HttpServletRequest httpReq) {
+    public AlertRule update(@PathVariable UUID ruleId, @RequestBody AlertRuleUpdateRequest body,
+            HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return ruleService.update(user.tenantId(), ruleId, body.name(), body.threshold(), body.dedupeMinutes(),
                 body.enabled(), body.webhookEndpointId(), body.scopeJson(),
@@ -73,11 +74,11 @@ public class AdminAlertRuleController {
         return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
-    public record CreateRequest(String name, String type, BigDecimal threshold, Integer dedupeMinutes,
+    public record AlertRuleCreateRequest(String name, String type, BigDecimal threshold, Integer dedupeMinutes,
             UUID webhookEndpointId, String scopeJson) {
     }
 
-    public record UpdateRequest(String name, BigDecimal threshold, Integer dedupeMinutes, Boolean enabled,
+    public record AlertRuleUpdateRequest(String name, BigDecimal threshold, Integer dedupeMinutes, Boolean enabled,
             UUID webhookEndpointId, String scopeJson) {
     }
 }

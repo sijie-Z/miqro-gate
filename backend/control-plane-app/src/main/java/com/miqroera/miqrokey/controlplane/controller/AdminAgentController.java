@@ -48,7 +48,7 @@ public class AdminAgentController {
     }
 
     @PostMapping
-    public AgentView create(@Valid @RequestBody CreateRequest body, HttpServletRequest httpReq) {
+    public AgentView create(@Valid @RequestBody AgentCreateRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return agentService.create(user.tenantId(), user.id(), body.name().trim(), body.description(),
                 body.credentialId(), requestId(httpReq));
@@ -74,7 +74,7 @@ public class AdminAgentController {
         return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
-    public record CreateRequest(@NotBlank @Size(max = 200) String name, @Size(max = 2000) String description,
+    public record AgentCreateRequest(@NotBlank @Size(max = 200) String name, @Size(max = 2000) String description,
             @NotNull UUID credentialId) {
     }
 }

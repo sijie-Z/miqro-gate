@@ -75,6 +75,36 @@ describe('aesthetic audit', () => {
     expect(css).toMatch(/\.ui-menu\s*\{/);
   });
 
+  it('keeps every stylesheet brace-balanced (unclosed blocks silently re-scope the NEXT sheet)', () => {
+    // 2026-09-18 incident: design-tokens.css lost the `}` closing its `:root`
+    // block. The build quietly treated design-base.css as NESTED inside it and
+    // flattened every selector to `:root .x` — html-attribute rules
+    // (`[data-menu-theme='light']`, `[data-anim='off']`, …) became `:root [..]`
+    // and stopped matching, so the dark rail's ink fell back to body text
+    // color ("MiQroGate" invisible on the navy rail). Nothing failed: typecheck,
+    // tests and build were all green. Balance every sheet, comment- and
+    // string-aware, so a missing brace can never ship silently again.
+    const sheets = globSync('src/**/*.css');
+    const unbalanced: string[] = [];
+    for (const file of sheets) {
+      const source = readFileSync(file, 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
+      let depth = 0;
+      let quote: string | null = null;
+      for (let i = 0; i < source.length; i += 1) {
+        const ch = source[i];
+        if (quote) {
+          if (ch === quote && source[i - 1] !== '\\') quote = null;
+          continue;
+        }
+        if (ch === '"' || ch === "'") quote = ch;
+        else if (ch === '{') depth += 1;
+        else if (ch === '}') depth -= 1;
+      }
+      if (depth !== 0) unbalanced.push(`${file} (brace depth ${depth} at EOF)`);
+    }
+    expect(unbalanced).toEqual([]);
+  });
+
   it('keeps shadows limited to dropdown/popover/modal (cards may cast the hairline shadow)', () => {
     // TDesign (t-) and legacy (el-) names both sanctioned; the v2 teleported
     // popper surfaces (.ui-select__content / .ui-menu / .ui-tooltip) live in
