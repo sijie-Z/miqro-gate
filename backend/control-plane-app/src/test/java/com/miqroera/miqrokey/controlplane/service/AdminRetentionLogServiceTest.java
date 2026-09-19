@@ -124,8 +124,10 @@ class AdminRetentionLogServiceTest {
                 org.mockito.ArgumentMatchers.<RowMapper<AdminRetentionLogService.RawRow>>any())).thenReturn(List.of());
         AdminRetentionLogService service = new AdminRetentionLogService(jdbc, provider(new FakeCrypto()));
 
-        // Contract (docs/api-contract.md:266, :567) fixes `page` as 默认 1, ≥1; the sibling
-        // usage-records endpoints pin the same meaning (UsageStatsServiceTest.recordsScalesOffsetWithPage:
+        // Contract (docs/api-contract.md:266, :567) fixes `page` as 默认 1, ≥1; the
+        // sibling
+        // usage-records endpoints pin the same meaning
+        // (UsageStatsServiceTest.recordsScalesOffsetWithPage:
         // page=3/size=25 -> offset 50, and page=0 -> 400 PAGE_INVALID).
         service.query(TENANT, null, null, null, null, null, 1, 20);
 
@@ -134,8 +136,7 @@ class AdminRetentionLogServiceTest {
         org.mockito.Mockito.verify(jdbc).query(anyString(), params.capture(),
                 org.mockito.ArgumentMatchers.<RowMapper<AdminRetentionLogService.RawRow>>any());
         assertThat(params.getValue().getValue("offset"))
-                .as("page=1 must be the FIRST page (offset 0), not the second page")
-                .isEqualTo(0L);
+                .as("page=1 must be the FIRST page (offset 0), not the second page").isEqualTo(0L);
     }
 
     @Test
@@ -145,8 +146,7 @@ class AdminRetentionLogServiceTest {
         AdminRetentionLogService service = new AdminRetentionLogService(jdbc, provider(new FakeCrypto()));
 
         assertThatThrownBy(() -> service.query(TENANT, null, null, null, null, null, 0, 20))
-                .isInstanceOfSatisfying(ApiException.class,
-                        e -> assertThat(e.getCode()).isEqualTo("PAGE_INVALID"));
+                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("PAGE_INVALID"));
     }
 
     @Test
