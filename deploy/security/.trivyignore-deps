@@ -1,0 +1,20 @@
+# PH25 (2026-09-19): dependency-manifest scan exemptions, each with
+# rationale. Scope = Maven + npm manifests only (see the "Dependency
+# vulnerability scan" step in .github/workflows/ci.yml), NOT the container
+# image — image exemptions live in deploy/security/.trivyignore.
+#
+# Review EVERY entry when the referenced dependency is upgraded: an entry
+# that outlives its rationale is a silently disabled gate.
+#
+# org.bouncycastle:bcprov-jdk18on 1.78.1 (backend/persistence-postgres/
+# pom.xml, pulled in for Argon2PasswordEncoder). None of the three
+# advisories sits on a code path this project reaches:
+#   - CVE-2025-14813 GOSTCTR block handling — GOST ciphers are not used;
+#   - CVE-2026-8763 PKIX name-constraints bypass — no certificate-path
+#     validation is performed with BouncyCastle here;
+#   - CVE-2026-13506 lazy ASN.1 sequence DoS — no untrusted DER parsing.
+# The fixes land in 1.80.2 / 1.84 / 1.85, i.e. a version jump outside a
+# dependency-audit change; bump it in a dedicated task and DROP these rows.
+CVE-2025-14813
+CVE-2026-8763
+CVE-2026-13506
