@@ -21,7 +21,7 @@ MiQroEra 面向企业内部 AI 编程场景的凭证虚拟化与用量治理系�
 - 不限流、不因预算阻断请求；通过 Webhook 告警。
 - 不保存提示词、代码和模型回答正文。
 - 原始用量流水永久保留，直到管理员手动删除。
-- 响应缓存按 ADR-0009 已实现（L1 内存 + L2 PostgreSQL），默认关闭，需网关开关、Key `cachePolicy=ENABLED` 与客户端 `X-MiQroKey-Cacheable: 1` 三重显式开启；语义缓存不启用；完整保留供应商 Prompt Cache 语义。
+- 响应缓存按 ADR-0009 已实现（L1 内存 + L2 PostgreSQL），默认关闭：Key `cachePolicy=ENABLED` 与客户端 `X-MiQroKey-Cacheable: 1` 双重 opt-in，另需网关总开关 `MIQROKEY_CACHE_ENABLED=true`；语义缓存不启用；完整保留供应商 Prompt Cache 语义。
 - 不依赖 LiteLLM 或 Bifrost 运行时；Bifrost 只作为协议行为和测试参考。
 - 生产依赖仅允许 Apache-2.0、MIT、BSD 等宽松许可证。
 
