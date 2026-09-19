@@ -2,7 +2,7 @@
 
 - 状态：**Accepted（2026-09-05）**——所有者答复「ADR-0014 按 v3 默认 Accepted」；Kafka 首个真实场景即 ADR-0014 内容留痕事件管道（合规增强、默认关）。拓扑按 ADR-0014 §5 P4 默认：标准 Apache Kafka 协议（腾讯 CKafka/阿里云 Kafka 兼容）、单 broker（KRaft）起步、topic `content-retention` 按 user hash 分区保序、JSON 信封（at-least-once + 消费端幂等）、消费组归平台侧；queue-spi 维持「PostgreSQL 主写 + Kafka 仅扇出/旁路」边界。F32 映射骨架（`user_identity_link`）随 V31 一并落库，平台 OAuth 细节到达后接线。
 - 日期：2026-09-04（状态化：2026-09-05）
-- 关联：[feature-backlog F34](feature-backlog 见 ../feature-backlog.md)（Kafka 引入）、F32（平台用户同步）、ADR-0002（透明代理）、ADR-0006（WebFlux/MVC 边界）、[queue-spi 架构](../architecture.md)（usage 有界队列）、[platform-middleware-roadmap.md](../platform-middleware-roadmap.md)
+- 关联：[feature-backlog F34](../feature-backlog.md)（Kafka 引入）、F32（平台用户同步）、ADR-0002（透明代理）、ADR-0006（WebFlux/MVC 边界）、[queue-spi 架构](../architecture.md)（usage 有界队列）、[platform-middleware-roadmap.md](../platform-middleware-roadmap.md)
 
 ## 背景与事实
 
