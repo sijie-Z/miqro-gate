@@ -5,6 +5,13 @@ import com.miqroera.miqrokey.controlplane.service.AlertRuleService;
 import com.miqroera.miqrokey.controlplane.service.AlertRuleService.AlertRule;
 import com.miqroera.miqrokey.controlplane.service.AuditContext;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -37,7 +44,7 @@ public class AdminAlertRuleController {
     }
 
     @PostMapping
-    public AlertRule create(@RequestBody AlertRuleCreateRequest body, HttpServletRequest httpReq) {
+    public AlertRule create(@Valid @RequestBody AlertRuleCreateRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return ruleService.create(user.tenantId(), body.name(), body.type(), body.threshold(),
                 body.dedupeMinutes() != null ? body.dedupeMinutes() : 60, body.webhookEndpointId(), body.scopeJson(),
@@ -55,7 +62,7 @@ public class AdminAlertRuleController {
     }
 
     @PatchMapping("/{ruleId}")
-    public AlertRule update(@PathVariable UUID ruleId, @RequestBody AlertRuleUpdateRequest body,
+    public AlertRule update(@PathVariable UUID ruleId, @Valid @RequestBody AlertRuleUpdateRequest body,
             HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return ruleService.update(user.tenantId(), ruleId, body.name(), body.threshold(), body.dedupeMinutes(),
@@ -74,11 +81,31 @@ public class AdminAlertRuleController {
         return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
-    public record AlertRuleCreateRequest(String name, String type, BigDecimal threshold, Integer dedupeMinutes,
-            UUID webhookEndpointId, String scopeJson) {
+    /**
+     * {@code name} matches the {@code varchar(200)} column; {@code threshold}
+     * matches {@code numeric(12,6)} — deliberately without a lower bound, because
+     * api-contract §5.8 documents {@code threshold <= 0} as a degenerate-but-allowed
+     * configuration; {@code dedupeMinutes} is a window, so zero and negative values
+     * are refused (the admin UI already normalises zero to the 60 default).
+     * {@code type} stays validated in {@link AlertRuleService#create} against the
+     * rule-type catalogue.
+     */
+    public record AlertRuleCreateRequest(
+            @NotBlank @Size(max = 200) String name,
+            String type,
+            @NotNull @Digits(integer = 6, fraction = 6) BigDecimal threshold,
+            @Min(1) Integer dedupeMinutes,
+            UUID webhookEndpointId,
+            String scopeJson) {
     }
 
-    public record AlertRuleUpdateRequest(String name, BigDecimal threshold, Integer dedupeMinutes, Boolean enabled,
-            UUID webhookEndpointId, String scopeJson) {
+    /** PATCH is partial: absent fields keep their stored value, present ones are bounded. */
+    public record AlertRuleUpdateRequest(
+            @Pattern(regexp = "\\s*\\S[\\s\\S]*") @Size(max = 200) String name,
+            @Digits(integer = 6, fraction = 6) BigDecimal threshold,
+            @Min(1) Integer dedupeMinutes,
+            Boolean enabled,
+            UUID webhookEndpointId,
+            String scopeJson) {
     }
 }
