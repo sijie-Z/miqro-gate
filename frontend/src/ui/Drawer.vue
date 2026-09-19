@@ -5,7 +5,7 @@
  * Escape/overlay close; animation is a simple enter transition. The panel
  * content scrolls; footer slot stays pinned at the bottom.
  */
-import { nextTick, onBeforeUnmount, ref, useAttrs, watch, onUnmounted } from 'vue';
+import { nextTick, onUnmounted, ref, useAttrs, watch } from 'vue';
 
 const props = withDefaults(
   defineProps<{
@@ -30,6 +30,18 @@ defineOptions({ inheritAttrs: false });
 const attrs = useAttrs();
 const panel = ref<HTMLElement | null>(null);
 
+/** Focus targets inside the panel, in document order. */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** The control that had focus before the drawer opened; focus returns there. */
+let restoreFocusTo: HTMLElement | null = null;
+
+/** Focusable controls currently inside the panel, in document order. */
+function focusableItems(): HTMLElement[] {
+  return panel.value ? Array.from(panel.value.querySelectorAll<HTMLElement>(FOCUSABLE)) : [];
+}
+
 function dismiss() {
   if (!props.dismissible) return;
   emit('update:open', false);
@@ -37,22 +49,58 @@ function dismiss() {
 }
 
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && props.open) {
+  if (!props.open) return;
+  if (event.key === 'Escape') {
     dismiss();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  // The panel is teleported into <body> and there is no native dialog element
+  // behind it, so nothing stops Tab from walking into the page underneath —
+  // cycle the panel's own focus targets instead.
+  const items = focusableItems();
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (!first || !last) {
+    // Nothing focusable inside: hold focus on the panel itself rather than
+    // letting Tab walk into the page behind the overlay.
+    event.preventDefault();
+    panel.value?.focus();
+    return;
+  }
+  const index = items.indexOf(document.activeElement as HTMLElement);
+  if (index === -1) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  } else if (event.shiftKey && index === 0) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && index === items.length - 1) {
+    event.preventDefault();
+    first.focus();
   }
 }
 
 watch(
   () => props.open,
-  async (openNow) => {
+  async (openNow, wasOpen) => {
     if (openNow) {
+      const active = document.activeElement;
+      restoreFocusTo = active instanceof HTMLElement && active !== document.body ? active : null;
       await nextTick();
       panel.value?.focus();
+      return;
     }
+    if (!wasOpen) return;
+    const target = restoreFocusTo;
+    restoreFocusTo = null;
+    await nextTick();
+    // The trigger can be gone by then (row re-rendered, route changed) — a
+    // detached node silently swallows focus, so check before calling.
+    if (target?.isConnected) target.focus();
   },
+  { immediate: true },
 );
-
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 
 // See Dialog.vue: clear the modal pointer lock left behind by a close that
 // races the exit path, once no modal layer remains open.
@@ -73,6 +121,7 @@ onUnmounted(() => {
         :style="{ width }"
         tabindex="-1"
         role="dialog"
+        aria-modal="true"
         :aria-label="title"
         v-bind="attrs"
         @keydown="onKeydown"
