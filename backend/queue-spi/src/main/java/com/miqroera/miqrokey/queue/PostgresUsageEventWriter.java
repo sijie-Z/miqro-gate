@@ -19,7 +19,9 @@ import java.util.UUID;
 
 /**
  * JDBC batch writer. One transaction per batch; idempotency comes from the
- * partial unique indexes (see {@link UsageEventWriter}). Request lifecycle
+ * replayed event keeping its id plus the partial unique index on
+ * {@code (tenant_id, provider_request_id)} (see {@link UsageEventWriter}).
+ * Request lifecycle
  * records are written with a guarded upsert: starts insert {@code IN_FLIGHT}
  * rows ({@code ON CONFLICT DO NOTHING}), completions update only
  * {@code IN_FLIGHT} rows — a finalized record is never rewritten and a retried
@@ -117,6 +119,12 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
         if (params.isEmpty()) {
             return;
         }
+        // The conflict target is deliberately unqualified: a replayed event carries
+        // the same id, and for rows without an upstream request id (COALESCED hits,
+        // where provider_request_id is NULL) the partial unique index does not apply,
+        // so the id primary key is the only unique key available to absorb the
+        // replay. Naming the partial index here turned a replay into a hard
+        // usage_event_pkey violation, which failed the whole batch on every flush.
         jdbc.batchUpdate("""
                 INSERT INTO usage_event (id, tenant_id, provider_request_id, virtual_key_id, project_id,
                     provider_product_id, credential_id, model_id, cache_level,
@@ -132,7 +140,7 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                     :latencyMs, :upstreamStatusCode, :cacheKey, :isComplete, :usageMissing,
                     :gatewayRequestId, :clientIp, :occurredAt,
                     :sessionId, :activityId, :claimedProjectId, :resolutionStatus, :claimSource, :claimConfidence)
-                ON CONFLICT (tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL DO NOTHING
+                ON CONFLICT DO NOTHING
                 """, params.toArray(new MapSqlParameterSource[0]));
         writeContextEvidence(evidenceParams);
     }
