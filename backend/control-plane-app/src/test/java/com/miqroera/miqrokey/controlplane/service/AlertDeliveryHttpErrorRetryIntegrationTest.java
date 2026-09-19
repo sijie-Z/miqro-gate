@@ -32,6 +32,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -162,15 +163,52 @@ class AlertDeliveryHttpErrorRetryIntegrationTest {
         // The first backoff is 2^1 × 60s in the future; pull it into the past so a
         // single sweep sees the delivery as due (the sweep is driven explicitly, as
         // the scheduled evaluator is slowed down for the test).
-        int backdated = jdbc.update(
-                "UPDATE webhook_delivery_attempts SET next_retry_at = now() - interval '1 minute' "
-                        + "WHERE endpoint_id = :endpointId",
-                new MapSqlParameterSource("endpointId", UUID.fromString(endpointId)));
-        assertThat(backdated).as("the failed attempt must have a backoff deadline to pull back").isEqualTo(1);
+        backdateRetry(endpointId);
 
         dispatcher.retryDue();
 
         assertThat(received.get()).as("the failed delivery must be retried").isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("disabling an endpoint stops an already-armed retry instead of calling the receiver again")
+    void disabledEndpointIsNotRetriedByTheSweep() throws Exception {
+        receiverStatus.set(500);
+        String endpointId = createEndpoint();
+        createRule(endpointId);
+        fx.insertUsage(true);
+        fx.insertUsage(false);
+
+        alertEvaluator.evaluateAll();
+        assertThat(received.get()).isEqualTo(1);
+        backdateRetry(endpointId);
+
+        // The operator disables the endpoint — the kill switch for this receiver.
+        updateEndpointEnabled(endpointId, false);
+
+        dispatcher.retryDue();
+
+        assertThat(received.get()).as("a disabled endpoint must not be called by the retry sweep").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("disabling a rule stops an already-armed retry instead of calling its endpoint again")
+    void disabledRuleIsNotRetriedByTheSweep() throws Exception {
+        receiverStatus.set(500);
+        String endpointId = createEndpoint();
+        String ruleId = createRule(endpointId);
+        fx.insertUsage(true);
+        fx.insertUsage(false);
+
+        alertEvaluator.evaluateAll();
+        assertThat(received.get()).isEqualTo(1);
+        backdateRetry(endpointId);
+
+        updateRuleEnabled(ruleId, false);
+
+        dispatcher.retryDue();
+
+        assertThat(received.get()).as("a disabled rule must not keep delivering through its endpoint").isEqualTo(1);
     }
 
     @Test
@@ -211,13 +249,36 @@ class AlertDeliveryHttpErrorRetryIntegrationTest {
         return objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
     }
 
-    private void createRule(String endpointId) throws Exception {
-        mockMvc.perform(post("/api/v1/admin/alert-rules").contentType(MediaType.APPLICATION_JSON)
+    private String createRule(String endpointId) throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/alert-rules").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("name", "missing-rate-" + UUID.randomUUID().toString().substring(0, 8), "type",
+                                        "USAGE_MISSING_RATE", "threshold", 0.5, "webhookEndpointId", endpointId))))
+                .andExpect(status().isOk()).andReturn();
+        return objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
+    }
+
+    /** Pulls the armed backoff deadline into the past so one sweep sees it as due. */
+    private void backdateRetry(String endpointId) {
+        int backdated = jdbc.update(
+                "UPDATE webhook_delivery_attempts SET next_retry_at = now() - interval '1 minute' "
+                        + "WHERE endpoint_id = :endpointId",
+                new MapSqlParameterSource("endpointId", UUID.fromString(endpointId)));
+        assertThat(backdated).as("the failed attempt must have a backoff deadline to pull back").isEqualTo(1);
+    }
+
+    private void updateEndpointEnabled(String endpointId, boolean enabled) throws Exception {
+        mockMvc.perform(patch("/api/v1/admin/webhooks/" + endpointId).contentType(MediaType.APPLICATION_JSON)
                 .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                .content(objectMapper.writeValueAsString(
-                        Map.of("name", "missing-rate-" + UUID.randomUUID().toString().substring(0, 8), "type",
-                                "USAGE_MISSING_RATE", "threshold", 0.5, "webhookEndpointId", endpointId))))
-                .andExpect(status().isOk());
+                .content(objectMapper.writeValueAsString(Map.of("enabled", enabled)))).andExpect(status().isOk());
+    }
+
+    private void updateRuleEnabled(String ruleId, boolean enabled) throws Exception {
+        mockMvc.perform(patch("/api/v1/admin/alert-rules/" + ruleId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("enabled", enabled)))).andExpect(status().isOk());
     }
 
     private Map<String, Object> onlyAttempt(String endpointId) {

@@ -208,6 +208,14 @@ public class AlertEventDispatcher {
      * of a delivery is eligible: an attempt row keeps the {@code next_retry_at} it
      * was written with, so without this guard every sweep re-selects the same stale
      * rows and the {@link #MAX_ATTEMPTS} bound is never reached.
+     *
+     * <p>
+     * Both switches gate a retry exactly as they gate the first delivery
+     * ({@link #endpointOf}): disabling an endpoint or a rule stops this receiver
+     * immediately, including retries that were already armed when it was disabled.
+     * A suppressed retry keeps its backoff deadline, so re-enabling the switch makes
+     * it eligible again on the next sweep.
+     * </p>
      */
     public void retryDue() {
         List<Map<String, Object>> due = jdbc.query("""
@@ -215,8 +223,11 @@ public class AlertEventDispatcher {
                 FROM webhook_delivery_attempts a
                 JOIN alert_events e ON e.id = a.event_id
                 JOIN alert_rules r ON r.id = e.rule_id
+                JOIN webhook_endpoints w ON w.id = a.endpoint_id
                 WHERE a.next_retry_at IS NOT NULL AND a.next_retry_at <= now()
                   AND a.attempt < :maxAttempts
+                  AND r.enabled = TRUE
+                  AND w.enabled = TRUE
                   AND a.attempt = (SELECT max(b.attempt) FROM webhook_delivery_attempts b
                                    WHERE b.event_id = a.event_id AND b.endpoint_id = a.endpoint_id)
                 """, new MapSqlParameterSource("maxAttempts", MAX_ATTEMPTS),
@@ -233,7 +244,9 @@ public class AlertEventDispatcher {
                 WebhookEndpoint endpoint = endpointService.get(tenantId, endpointId);
                 AlertEvent event = event(eventId);
                 AlertRuleService.AlertRule rule = ruleFor(ruleId);
-                if (event == null || rule == null) {
+                // Second gate next to the SQL predicate: a switch flipped between the
+                // sweep's SELECT and this iteration must still stop the delivery.
+                if (event == null || rule == null || !rule.enabled() || !endpoint.enabled()) {
                     continue;
                 }
                 Map<String, Object> details = new LinkedHashMap<>();
