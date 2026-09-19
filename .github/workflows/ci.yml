@@ -419,11 +419,53 @@ jobs:
         working-directory: frontend
         # npm >= 11 audits via the bulk advisory endpoint; the legacy
         # /security/audits/quick endpoint was retired upstream (2026-09-04).
-        run: npx --yes npm@11 audit --audit-level=high
+        run: |
+          # Retry + explicit outcome (#1008): the advisory endpoint returns 503 during
+          # npm maintenance windows, and a bare `npm audit` then exits 1 with only the
+          # registry's error text — from the job summary that is indistinguishable from
+          # a real HIGH+ finding. Both stay failures (fail-closed); they must not read
+          # the same.
+          for attempt in 1 2 3; do
+            if out=$(npx --yes npm@11 audit --audit-level=high 2>&1); then
+              printf '%s\n' "$out"
+              exit 0
+            fi
+            printf '%s\n' "$out"
+            if printf '%s' "$out" | grep -qiE 'audit endpoint returned an error|503 Service Unavailable|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN'; then
+              echo "::warning::npm audit could not run (attempt $attempt/3): advisory endpoint unavailable — retrying"
+              sleep 15
+              continue
+            fi
+            echo "::error::npm audit found HIGH+ advisories — a real finding, not an endpoint outage."
+            exit 1
+          done
+          echo "::error::npm audit could not run after 3 attempts: advisory endpoint unavailable (#1008). This is NOT a clean result — the dependency audit did not execute."
+          exit 1
       # miqro-context was outside every audit before PH25 (2026-09-19).
       - name: npm audit (high+) — miqro-context
         working-directory: miqro-context
-        run: npx --yes npm@11 audit --audit-level=high
+        run: |
+          # Retry + explicit outcome (#1008): the advisory endpoint returns 503 during
+          # npm maintenance windows, and a bare `npm audit` then exits 1 with only the
+          # registry's error text — from the job summary that is indistinguishable from
+          # a real HIGH+ finding. Both stay failures (fail-closed); they must not read
+          # the same.
+          for attempt in 1 2 3; do
+            if out=$(npx --yes npm@11 audit --audit-level=high 2>&1); then
+              printf '%s\n' "$out"
+              exit 0
+            fi
+            printf '%s\n' "$out"
+            if printf '%s' "$out" | grep -qiE 'audit endpoint returned an error|503 Service Unavailable|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN'; then
+              echo "::warning::npm audit could not run (attempt $attempt/3): advisory endpoint unavailable — retrying"
+              sleep 15
+              continue
+            fi
+            echo "::error::npm audit found HIGH+ advisories — a real finding, not an endpoint outage."
+            exit 1
+          done
+          echo "::error::npm audit could not run after 3 attempts: advisory endpoint unavailable (#1008). This is NOT a clean result — the dependency audit did not execute."
+          exit 1
       # Dependency manifests (Maven poms + npm lockfiles) were outside every
       # scanner before PH25: this step is the only gate that reads them.
       # Image vulnerabilities are covered by the next step.
