@@ -210,6 +210,14 @@ class CacheKeyFactoryTest {
      * uploaded document, an audio clip — is invisible to the key. Two requests
      * that ask the same question about two different images therefore share one
      * cache entry and replay each other's answer.
+     *
+     * <p>
+     * The bail-out applies to <em>any</em> message part that is not text, at any
+     * position: the last user turn, the top-level {@code system} / {@code
+     * instructions} prompt, and the assistant history (which is where Anthropic
+     * echoes back {@code thinking} / {@code redacted_thinking} blocks). The tests
+     * below pin each of those to the full-body fallback so the widened trigger is
+     * intended behaviour rather than an accident of where the check sits.
      */
     @Nested
     @DisplayName("Multimodal content parts")
@@ -223,6 +231,24 @@ class CacheKeyFactoryTest {
         private static final String OPENAI = "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\","
                 + "\"content\":[{\"type\":\"text\",\"text\":\"describe this image\"},{\"type\":\"image_url\","
                 + "\"image_url\":{\"url\":\"%s\"}}]}]}";
+
+        /** Anthropic top-level {@code system} array carrying the image. */
+        private static final String ANTHROPIC_SYSTEM = "{\"model\":\"claude-3-7-sonnet\",\"system\":["
+                + "{\"type\":\"text\",\"text\":\"describe this image\"},{\"type\":\"image\",\"source\":"
+                + "{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"%s\"}}],"
+                + "\"messages\":[{\"role\":\"user\",\"content\":\"what is this\"}]}";
+
+        /** OpenAI Responses {@code instructions} array carrying the image. */
+        private static final String RESPONSES_INSTRUCTIONS = "{\"model\":\"gpt-5.2\",\"instructions\":["
+                + "{\"type\":\"text\",\"text\":\"describe this image\"},{\"type\":\"input_image\","
+                + "\"image_url\":\"%s\"}],\"input\":[\"what is this\"]}";
+
+        /** Non-text part in the assistant history, not in the last user turn. */
+        private static final String ASSISTANT_HISTORY = "{\"model\":\"claude-3-7-sonnet\",\"messages\":["
+                + "{\"role\":\"user\",\"content\":\"what is this\"},"
+                + "{\"role\":\"assistant\",\"content\":[{\"type\":\"image\",\"source\":{\"type\":\"base64\","
+                + "\"media_type\":\"image/png\",\"data\":\"%s\"}}]},"
+                + "{\"role\":\"user\",\"content\":\"and this\"}]}";
 
         @Test
         @DisplayName("two different images must not share one key (Anthropic messages)")
@@ -240,6 +266,35 @@ class CacheKeyFactoryTest {
             byte[] imageB = json(OPENAI.formatted("https://example.test/dog.png"));
             assertThat(factory.compute(ctx, "gpt-4o-mini", imageA))
                     .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", imageB));
+        }
+
+        @Test
+        @DisplayName("image in the Anthropic top-level system array must not share one key")
+        void anthropicTopLevelSystemImageSplits() {
+            byte[] imageA = json(ANTHROPIC_SYSTEM.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"));
+            byte[] imageB = json(ANTHROPIC_SYSTEM.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAC"));
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", imageA))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", imageB));
+        }
+
+        @Test
+        @DisplayName("image in the Responses instructions array must not share one key")
+        void responsesInstructionsImageSplits() {
+            byte[] imageA = json(RESPONSES_INSTRUCTIONS.formatted("https://example.test/cat.png"));
+            byte[] imageB = json(RESPONSES_INSTRUCTIONS.formatted("https://example.test/dog.png"));
+            assertThat(factory.compute(ctx, "gpt-5.2", imageA))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-5.2", imageB));
+        }
+
+        @Test
+        @DisplayName("non-text part in the assistant history forces the full-body key")
+        void assistantHistoryNonTextFallsBack() {
+            byte[] imageA = json(ASSISTANT_HISTORY.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"));
+            byte[] imageB = json(ASSISTANT_HISTORY.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAC"));
+            // The last user turn ("and this") is identical in both, so the scope
+            // path would collapse them; the history image must keep them apart.
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", imageA))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", imageB));
         }
     }
 
