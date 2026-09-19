@@ -333,6 +333,18 @@ class AdminOrgApiIntegrationTest {
                 .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
                 .content(objectMapper.writeValueAsString(Map.of("code", "C".repeat(64), "name", "Boundary"))))
                 .andExpect(status().isOk());
+
+        // display_name varchar(200) — the create path had no bound while its own update
+        // path already answered DISPLAY_NAME_INVALID.
+        mockMvc.perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("username", "dn_probe", "displayName", "D".repeat(5000)))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("DISPLAY_NAME_INVALID"));
+        mockMvc.perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("username", "dn_ok", "displayName", "D".repeat(200)))))
+                .andExpect(status().isOk());
     }
 
     @Test

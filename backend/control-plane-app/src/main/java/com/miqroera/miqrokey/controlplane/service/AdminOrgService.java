@@ -100,6 +100,13 @@ public class AdminOrgService {
         if (userRepository.findByTenantIdAndUsername(tenantId, username).isPresent()) {
             throw new ApiException(HttpStatus.CONFLICT, "USERNAME_TAKEN", "username already exists");
         }
+        // display_name is varchar(200): without this the first signal was a 409
+        // RESOURCE_CONFLICT from the JDBC translation ("duplicate or referenced"),
+        // which names neither the field nor the real reason. Blank stays legal here —
+        // it means "use the username" (updateUser, by contrast, rejects blank).
+        if (displayName != null && displayName.length() > 200) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "DISPLAY_NAME_INVALID", "显示名长度不超过 200 个字符。");
+        }
         String temporaryPassword = generateTemporaryPassword();
         User user = new User(UUID.randomUUID(), tenantId, username,
                 displayName != null && !displayName.isBlank() ? displayName : username,
