@@ -205,6 +205,45 @@ class CacheKeyFactoryTest {
     }
 
     /**
+     * Multimodal content (#PH22): the semantic scope flattens array content parts
+     * by keeping only the {@code text} ones, so every non-text part — an image, an
+     * uploaded document, an audio clip — is invisible to the key. Two requests
+     * that ask the same question about two different images therefore share one
+     * cache entry and replay each other's answer.
+     */
+    @Nested
+    @DisplayName("Multimodal content parts")
+    class MultimodalContent {
+
+        private static final String ANTHROPIC = "{\"model\":\"claude-3-7-sonnet\",\"messages\":[{\"role\":\"user\","
+                + "\"content\":[{\"type\":\"image\",\"source\":{\"type\":\"base64\","
+                + "\"media_type\":\"image/png\",\"data\":\"%s\"}},{\"type\":\"text\","
+                + "\"text\":\"describe this image\"}]}]}";
+
+        private static final String OPENAI = "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\","
+                + "\"content\":[{\"type\":\"text\",\"text\":\"describe this image\"},{\"type\":\"image_url\","
+                + "\"image_url\":{\"url\":\"%s\"}}]}]}";
+
+        @Test
+        @DisplayName("two different images must not share one key (Anthropic messages)")
+        void anthropicImageSplits() {
+            byte[] imageA = json(ANTHROPIC.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"));
+            byte[] imageB = json(ANTHROPIC.formatted("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAC"));
+            assertThat(factory.compute(ctx, "claude-3-7-sonnet", imageA))
+                    .isNotEqualTo(factory.compute(ctx, "claude-3-7-sonnet", imageB));
+        }
+
+        @Test
+        @DisplayName("two different image URLs must not share one key (OpenAI chat)")
+        void openAiImageSplits() {
+            byte[] imageA = json(OPENAI.formatted("https://example.test/cat.png"));
+            byte[] imageB = json(OPENAI.formatted("https://example.test/dog.png"));
+            assertThat(factory.compute(ctx, "gpt-4o-mini", imageA))
+                    .isNotEqualTo(factory.compute(ctx, "gpt-4o-mini", imageB));
+        }
+    }
+
+    /**
      * Hot-path cost: key derivation runs on the gateway request path, so the
      * buffered body must be parsed once per {@code compute} — not once per key
      * dimension.
