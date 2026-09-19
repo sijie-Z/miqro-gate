@@ -133,7 +133,7 @@ class AdminRetentionLogExportEscapeTest {
         AdminRetentionLogService service = new AdminRetentionLogService(
                 jdbcReturning(List.of(rawRow("=1+1".getBytes(StandardCharsets.UTF_8), null))),
                 provider(new FakeCrypto()));
-        List<AdminRetentionLogView> views = service.query(TENANT, null, null, null, null, null, 0, 20);
+        List<AdminRetentionLogView> views = service.query(TENANT, null, null, null, null, null, 1, 20);
         assertThat(views.get(0).text()).isEqualTo("=1+1");
     }
 }
