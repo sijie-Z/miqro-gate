@@ -498,14 +498,41 @@ else
     fi
 fi
 
-# ---- 9. leave a durable trace ------------------------------------------------
+# ---- 9. say when the live tree has drifted from this commit ------------------
+# This script renders the LIVE tree's compose file (see COMPOSE above), so every
+# site-specific value has to live in $ENV_FILE: a value hand-edited into the live
+# compose is invisible to git, survives until someone re-syncs the tree, and is
+# silently lost the moment they do. The demo box accumulated exactly that, which
+# is why its live compose had to be diffed against a commit by hand to find out
+# what it was actually running. Report it here instead — warn, never fail: an
+# operator may be mid-migration, and the deploy itself is already verified above.
+# The verdict also goes into the log line, because "could this box have been
+# reproduced from a commit?" is a question asked long after the fact.
+drift=unknown
+ctx_compose="$CONTEXT/deploy/compose.prod.yaml"
+if [ -f "$ctx_compose" ]; then
+    if cmp -s "$ctx_compose" "$COMPOSE"; then
+        drift=no
+    else
+        drift=yes
+        {
+            echo "WARNING: the live compose file differs from this commit's copy (drift)"
+            echo "         live:        $COMPOSE"
+            echo "         this commit: $ctx_compose"
+            echo "         Put site-specific values in $ENV_FILE and re-sync the tree;"
+            echo "         anything edited into the live compose is lost on the next sync."
+        } >&2
+    fi
+fi
+
+# ---- 10. leave a durable trace -----------------------------------------------
 # By the time anyone asks "what was live at 11:39", the container's image may be
 # gone from `docker image ls` — a concurrent rebuild untags it and a prune can
 # remove it. So this line, written while the answer is still knowable, is the only
 # durable record. It stores the running image identities, not just the tag.
 if [ "$DRY" = 0 ]; then
     {
-        printf '%s mode=%s commit=%s caller=%s env_file=%s smoke=%s services="%s"' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$( [ "$VERIFY_ONLY" = 1 ] && echo verify || echo deploy )" "${COMMIT:-unknown}" "$CALLER" "$ENV_FILE" "${smoke_code:-none}/${SMOKE_URL:-none}" "$SERVICES"
+        printf '%s mode=%s commit=%s caller=%s env_file=%s smoke=%s compose_drift=%s services="%s"' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$( [ "$VERIFY_ONLY" = 1 ] && echo verify || echo deploy )" "${COMMIT:-unknown}" "$CALLER" "$ENV_FILE" "${smoke_code:-none}/${SMOKE_URL:-none}" "$drift" "$SERVICES"
         # shellcheck disable=SC2086
         for svc in $SERVICES; do
             printf ' %s_running=%s' "$svc" "$(docker inspect -f '{{.Image}}' "$(container_of "$svc")" 2>/dev/null || echo unknown)"
