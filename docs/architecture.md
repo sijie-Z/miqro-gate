@@ -147,7 +147,7 @@ Client/CC Switch        Gateway                PostgreSQL snapshot    PostgreSQL
 
 **批量写入（G2.4 实现）**：`queue-spi` 提供有界阻塞队列（默认容量 10000）、阈值/定时 flush（100 条或 5s）、专用有界 writer 执行器（`miqrokey.gateway.queue.writer-threads`，默认 4，`Schedulers.newBoundedElastic`）——flush 永不占用共享调度线程，数据库变慢不影响 route-snapshot 刷新节奏；in-flight 互斥防止 flush 重叠堆积。写失败把整批**按序重入队**并记 `warn`（幂等写入保证重试不双计），队列饱和 drop 时按高优先级 `warn` 计数——都不静默。指标经 Micrometer 暴露为无标签 gauge：`miqrokey.usage.queue.queued/published.total/persisted.total/dropped.total/flush.count/flush.last.duration.seconds`，供 `/actuator/prometheus` 抓取与告警。**饱和应急（F35 实现「可切换为同步写入」）**：`miqrokey.gateway.queue.saturation-mode` 默认 `DROP`（热路径绝不等待）；置 `WRITE_THROUGH` 时饱和事件改为经 writer 执行器单条幂等直写并在发布线程**有界等待**（`...write-through-timeout`，默认 5s）——完整性优先、短暂停滞可接受，JDBC 仍只在 writer 执行器执行，超时/失败照旧计数丢弃（发布线程永不无限阻塞）。
 
-**幂等写入（G2.4 实现）**：`usage_event` 用 `ON CONFLICT (tenant_id, provider_request_id) DO NOTHING`，`cache_hit_event` 用 `(tenant_id, cache_key, level, occurred_at)`；生命周期记录 start 为 `ON CONFLICT (started_at, gateway_request_id) DO NOTHING`，completion 为带 `WHERE request_status = 'IN_FLIGHT'` 的 guarded upsert——重试 flush 绝不双计、绝不重写已 finalized 记录，start 行丢失时 completion 独立插入终态行。
+**幂等写入（G2.4 实现）**：`usage_event` 用**不带仲裁目标**的 `ON CONFLICT DO NOTHING`——两个唯一键都表达「同一逻辑事实已存在」（`id` 相同 = 同一事件被重放；`(tenant_id, provider_request_id)` 部分索引相同 = 同一上游请求已记账），不能只把后者写成仲裁目标：`provider_request_id` 为空的行（合并路径）根本不受该部分索引仲裁，重放只能撞主键并硬报错（#887 修复），`cache_hit_event` 用 `(tenant_id, cache_key, level, occurred_at)`；生命周期记录 start 为 `ON CONFLICT (started_at, gateway_request_id) DO NOTHING`，completion 为带 `WHERE request_status = 'IN_FLIGHT'` 的 guarded upsert——重试 flush 绝不双计、绝不重写已 finalized 记录，start 行丢失时 completion 独立插入终态行。
 
 ## 6. 超时与重试
 
