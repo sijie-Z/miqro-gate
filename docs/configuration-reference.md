@@ -175,7 +175,7 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_USAGE_PRICE_RECONCILE_ENABLED` | `false` | 派生列调和定时通道（#777，`miqrokey.usage.price-reconcile.enabled`）：true 时按周期把最近 48h 内已盖章行的价格标签重算、补写缺失的冻结金额——**不重查价目、不改价格列、不动既有金额**；默认关（人工通道 `POST /admin/usage-price-backfill` 与它并存，关掉只是回到"只有人工跑"）。`compose.prod.yaml` 已接线：生产在 `.env` 设值即可（**不要**改运行树的 compose 文件） |
 | `MIQROKEY_USAGE_PRICE_RECONCILE_CYCLE_MS` | `900000` | 调和周期（`miqrokey.usage.price-reconcile.cycle-ms`，fixedDelay 15 分钟——上一轮结束后计时）；首轮延迟 `MIQROKEY_USAGE_PRICE_RECONCILE_INITIAL_DELAY_MS` 默认 `120000`（2 分钟，等应用就绪再开跑） |
 | `MIQROKEY_MCP_SSE_REAP_CYCLE_MS` | `30000` | 入站 MCP SSE 会话空闲回收扫描周期（`miqrokey.mcp.sse.reap-cycle-ms`，#356）：空闲 5 分钟的会话由网关切流；容量上限 256 |
-| `MIQROKEY_CLEANUP_EXPIRED_SWEEP_MS` | `3600000` | 过期记录 GC 固定延迟（F06，`@Scheduled`）：回收下载窗口已过的导出产物与确认窗口已过的删除请求（EXECUTED 删除记录与审计链永久保留，不入 GC） |
+| `MIQROKEY_CLEANUP_EXPIRED_SWEEP_MS` | `3600000` | 过期记录 GC 固定延迟（F06，`@Scheduled`）：回收下载窗口已过的导出产物、确认窗口已过的删除请求，以及已过 `expires_at` 的登录会话（含已吊销行）；EXECUTED 删除记录与审计链永久保留，不入 GC |
 | `MIQROKEY_CONTROL_PROVIDER_CLIENT_ALLOWED_CIDRS` | 空 | 控制面 → 供应商调用的 SSRF 门控 allowlist（G4.2）：命中这些 CIDR 的目标豁免「非公网地址」与「明文 http」两道拒绝（配额刷新对接本地/内网供应商网关时配置，如 `127.0.0.0/8`）；空 = 仅接受 https + 公网地址 |
 | `MIQROKEY_APPROVAL_WHITELIST_MODELS` | 空 | 模型审批白名单（逗号分隔的精确模型 ID）：用户申请命中白名单即自动批准并立即生效（写入授权 + 快照刷新），免管理员审批；空 = 全部模型走人工审批 |
 | `MIQROKEY_CONTROL_ADMIN_IP_ALLOWLIST` | 空 | 管理门户来源 IP 白名单（F05，security §6，CIDR 逗号分隔如 `10.0.0.0/8,203.0.113.0/24`）：空 = 不限制（历史行为）；配置后门户面仅名单内来源可达（403 IP_NOT_ALLOWED），billing 通道与 bootstrap 豁免；非法 CIDR 启动失败 |
