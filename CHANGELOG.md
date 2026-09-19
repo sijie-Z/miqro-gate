@@ -5,6 +5,20 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 ### 2026-09-20
 
+- **留痕导出改为逐行流式（#1023）**：`GET /admin/retention-logs/export` 此前把最多 50 000 行一次性读进
+  内存（每行带密文）→ 全部解密 → 拼成一个字符串再整体写出；演示库 5 482 行 × 20 KB = 107 MB 密文，
+  448 MB 堆必炸——**一次导出就让控制面 OOM 重启、管理面整体 502**。改为 keyset 分页 500 行/次、
+  逐行解密写入响应，峰值内存与表大小无关；`count(*)` 先定截断头，审计仍在写体前落库。线上复验：
+  114 MB 导出成功、容器 uptime 不重置。
+- **写面形态校验补齐（#1019）**：团队/项目的创建与更新此前没有 Bean Validation——超长名称与缺失字段
+  一路走到数据库，回来时是 409 `RESOURCE_CONFLICT`（"重复或引用不允许"，真实原因是"太长"）或
+  `PROJECT_CODE_TAKEN`（把"没给"与"被占用"混为一谈）；用户创建的 `displayName` 同样缺上界，
+  而它自己的 update 路径早有 `DISPLAY_NAME_INVALID`。补齐 `@NotBlank/@Size` + `@Valid`（宽度对齐列定义，
+  OpenAPI 基线因此显式收紧三个属性为 required，前端类型随基线重生成）。
+- **按边读代码边打探针的方式扫了一遍写面与边界**：跨租户引用、SSRF 形态的 webhook/MCP 地址、生命周期
+  状态机、时间/分页/枚举边界全部为**拒绝或忽略**（无 5xx、无误收）；扫出开放管理面（`/api/v1/admin-api/`）
+  的 Webhook/告警规则孪生入口不在 #971 的修复范围内，已立 #1021。
+
 - **上游错误体分类（观察档）——只计数、不改体、不重试（#770，ADR-0024 选项 B）**：给「thinking 签名类错误是不是稳定模式」这个问题一个**数据来源**，而不先动手改请求。网关对**已缓冲**的上游非 2xx 响应体做**有界只读**分类（前 8KB 子串匹配），产出**有界枚举**计数 `miqrokey_gateway_upstream_error_class_total{class=…}`（`SIGNATURE_INVALID` / `THINKING_BLOCK_MISMATCH` / `MISSING_SIGNATURE` / `BUDGET_INVALID` / `UNCLASSIFIED`）与一行 `status=… class=…` 日志。三条自我约束写进了实现与契约测试：**请求与响应字节都不变**、**错误正文只读不存**（不进日志正文/不落库/不进事件）、**被截断的缓冲不分类**（不从不完整片段下结论）；HTTP 状态码只进日志、不作指标标签（上游可能返回任意整数码）。ADR-0024 因此转为「部分 Accepted」——**只有选项 B 被采纳**，C（Key 级整流重试）/D/E 仍待二期拍板。
 - **Agent 生命周期补齐：可重新启用、可改名、可删除（#824，ADR-0025 选项 D）**：此前 API 只有 `list/get/create/disable/usage` —— 建错回不去、停用不可逆，且**停用的 Agent 仍占着「该凭证 → 唯一 Agent」的名额**（`uq_agents_tenant_credential` 不看状态），想在同一凭证上重建就被 `AGENT_CREDENTIAL_TAKEN` 挡住（演示站上就留着一个僵尸 Agent）。现新增 `POST /{id}/enable`、`PATCH /{id}`（改名/描述，带 `version` 乐观锁）、`DELETE /{id}`（硬删除），前端行操作改为「用量 + 更多 ⌄（改名 / 启用|禁用 / 删除）」。两点值得记：① **`enable` 不是 `disable` 的镜像**——停用期间凭证可能已被停用，此时拒绝（`409 CREDENTIAL_NOT_ACTIVE`）而不是让 Agent 指向不可路由的出口（被**轮换**则无害：Agent 绑定的是凭证行，不是密文）；② **硬删除在本仓库是干净的**（没有任何表引用 `agents`、用量按绑定凭证聚合），但审计 `AGENT_DELETE` 必须带**名称快照**——行删掉后按 id 反查不到名字。
 - **速率信号告警：上游 429 计数 + 单 Key 请求峰值（#706，ADR-0026 选项 D）**：ADR-0026 拍板的第一期——**只观测、不阻断**，把该 ADR §4 的触发条件从「无据可依」变成可判定，热路径零改动。两类新规则类型（V71 扩 CHECK）：**`UPSTREAM_RATE_LIMITED`** 数近 1h 上游返回 **429 的条数**（计数而非比例——比例已在 `UPSTREAM_ERROR_RATE` 里，而「上游在限流」与「上游在故障」是两类事故；**网关自身因配额拒绝的请求不触达上游，不计入**）；**`KEY_REQUEST_RATE`** 取近 1h **单把密钥的最高请求条数**（租户级 `USAGE_SURGE` 说不出是谁在猛打），触发事件的 `payload_json` 带该密钥的 `keyId`/`keyName`/`requests`——信号只有可归因才可行动，且 payload 随事件持久化、重试投递按存储重放。per-key 维度全在 SQL 聚合里，不做指标标签（高基数红线），评估仍在控制面。
@@ -667,6 +681,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - Supply-chain gate：Secret 扫描（修复 23 处文档示例 Key）、CycloneDX SBOM + 许可证门禁、Trivy 镜像扫描（驱动 postgres 镜像 digest 升级）
 - Performance & soak：并发流浸泡测试 + 生产 soak 脚本
 - 本版本：**未标记 VERIFIED**（无真实供应商凭证契约测试，`WAITING_FOR_CREDENTIAL`）
+
 
 
 
