@@ -5043,3 +5043,42 @@ function shareOf(group) {
 **"这一页已经处理过了"是假的——被处理的是某个具体位置，不是页面的某个能力。**
 合计行会标，不等于分组行会标；记录列会标，不等于统计卡会标。
 一个页面里有几处显示同一个概念，就有几处需要被单独检查。
+
+## 2026-09-19 管理端用量报表：按组成本表补上「未定价」（#876）
+
+### 问题
+
+真机上按「渲染了 `¥`」逐处核对时读到的：**同一屏、同一次查询，上下两种口径。**
+
+| 位置 | 改动前 | 标记 |
+|---|---|---|
+| 顶部汇总卡 · 上游实付 | `¥0.0000` | ✅ `未定价` |
+| 维度分解表 · `E2E Chain` 行 · 成本 ¥ | `¥0.0000` | ❌ |
+| 供应商统计表 · `阿里云百炼 Coding Plan` 行 | `¥0.0000` | ❌ |
+| 模型统计表 · `mock-chat` 行 | `¥0.0000` | ❌ |
+
+三个 tab **共用同一张表**（表头随 tab 换维度：项目 / 供应商产品 / 模型），所以一个漏点
+在三个入口上各露一次。API 早就发了每组的 `pricingStatus` / `unpriced`
+（OpenAPI `components.schemas.GroupSummary` 可查），是 `BreakdownRow` 只取了 `cost.upstreamPaid`
+把它们丢掉了——**信号存在、页面没接**。
+
+### 改法
+
+- `BreakdownRow` 增 `costCaveat: string`，在 `breakdownRows` 里由 `costGapNote(g)` 预算好
+- 模板 `#cost` 单元格在非空时渲染 `未定价` chip（`data-testid="breakdown-cost-unpriced"`）
+- 用 `string` + `''` 表示"无话可说"：`UiTooltip.text` 是必填 `string`，而模板对函数调用结果
+  不做类型收窄（#877 踩过同一个坑），预算进行数据就绕开了这个限制
+
+### 验证
+
+- **先证明会红**：只回退 `NextAdminUsageView.vue` → 两条用例失败；其中遍历三个 tab 的那条
+  报的是 `tab breakdown lost the marker: expected false to be true`（失败信息点名是哪个入口）
+- lint（`--max-warnings 0`）/ typecheck / **463 tests** / build / **`gen:types` 幂等** —— 全 PASS
+- Playwright **59/59**
+- 真机复验：维度分解 / 供应商统计 / 模型统计 三个 tab 的行成本列均出现 `未定价`
+
+### 教训
+
+**共用一张表不等于共用一个入口。** 这个漏点由三个 tab 各自呈现给用户，但修复只需要一处——
+所以"一个 tab 上看着没问题"完全不能推出另外两个也没问题，反之亦然。
+统计口径的一致性要按**用户能看到的入口数**算，不是按代码里的实现数算。
