@@ -1,6 +1,13 @@
 # Dependabot version updates — keep npm / Maven / Actions dependencies
-# fresh with automatic PRs. Security updates are always enabled
-# regardless of this file.
+# fresh with automatic PRs.
+#
+# Scope caveat (PH25 audit, 2026-09-19): this file only drives *version*
+# updates. Dependabot *alerts* — and therefore *security* updates, which
+# depend on them — are a separate repository setting and are currently
+# DISABLED for this repo:
+#   $ gh api repos/sijie-Z/miqro-gate/dependabot/alerts
+#   {"message":"Dependabot alerts are disabled for this repository.",...}  (403)
+# Enabling it needs repo admin rights; tracked in the PH25 dependency issue.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -16,6 +23,23 @@ updates:
     open-pull-requests-limit: 10
     commit-message:
       prefix: "build(frontend)"
+    labels:
+      - dependencies
+
+  # miqro-context was missing here until PH25 (2026-09-19): its npm tree
+  # produced zero update PRs while /frontend produced 21, because only
+  # /frontend was listed.
+  - package-ecosystem: npm
+    directory: /miqro-context
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "build(miqro-context)"
     labels:
       - dependencies
 

@@ -28,9 +28,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code usage_adjustments.usage_event_id REFERENCES usage_event (id) ON DELETE
  * CASCADE}（V63）让 PostgreSQL 为 <b>每一条</b> 被删的 usage_event 行执行一次
  * {@code DELETE FROM ONLY usage_adjustments WHERE usage_event_id = $1}
- * （{@code RI_FKey_cascade_del}）。该语句只有 {@code usage_event_id} 一个条件，而
- * V63 建的索引是 {@code (tenant_id, usage_event_id)} —— 前导列不是外键列，因此索引
- * 无法被使用，PostgreSQL 只能退化为逐行全表扫描 usage_adjustments。
+ * （{@code RI_FKey_cascade_del}）。该语句只有 {@code usage_event_id} 一个等值条件，而 V63 建的索引是
+ * {@code (tenant_id, usage_event_id)} —— 前导列不是外键列，因此索引无法被使用， PostgreSQL
+ * 只能退化为逐行全表扫描 usage_adjustments。
  * </p>
  *
  * <p>
@@ -38,14 +38,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code usage_adjustments.reversal_of_id REFERENCES usage_adjustments (id) ON
  * DELETE RESTRICT} 会为 <b>每一条</b> 被删的 adjustment 行执行一次
  * {@code ... WHERE reversal_of_id = $1 FOR KEY SHARE OF x}，而 {@code
- * reversal_of_id} 上没有任何索引。因此判据用「删除路径整体的 seq_scan 增量」而不是
- * 只盯一个外键。
+ * reversal_of_id} 上没有任何索引。因此判据用「删除路径整体的 seq_scan 增量」而不是 只盯一个外键。
  * </p>
  *
  * <p>
- * 本测试用 {@code pg_stat_user_tables.seq_scan} 计数（而非耗时）判定：
- * 删除 N 行 usage_event 不允许对 usage_adjustments 触发 N 次顺序扫描。计数前先用
- * 一次刻意的全表扫描验证统计通道本身是通的，避免统计未刷新导致的假绿。
+ * 本测试用 {@code pg_stat_user_tables.seq_scan} 计数（而非耗时）判定： 删除 N 行 usage_event 不允许对
+ * usage_adjustments 触发 N 次顺序扫描。计数前先用 一次刻意的全表扫描验证统计通道本身是通的，避免统计未刷新导致的假绿。
  * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -106,19 +104,15 @@ class UsageDeletionCascadeIndexIntegrationTest {
         long probeBaseline = seqScans("usage_adjustments");
         forceSeqScanOnAdjustments();
         long probeDelta = awaitSeqScanDelta(probeBaseline, 1, Duration.ofSeconds(10));
-        assertThat(probeDelta)
-                .as("pg_stat_user_tables 统计通道必须可见，否则本测试无判定力（precondition）")
-                .isGreaterThanOrEqualTo(1);
+        assertThat(probeDelta).as("pg_stat_user_tables 统计通道必须可见，否则本测试无判定力（precondition）").isGreaterThanOrEqualTo(1);
         long baseline = probeBaseline + probeDelta;
 
         long deleted = deleteWindowEvents();
         assertThat(deleted).as("确认删除必须真的删掉窗口内的行").isEqualTo(WINDOW_EVENTS);
 
         long delta = awaitSeqScanDelta(baseline, WINDOW_EVENTS, Duration.ofSeconds(10));
-        assertThat(delta)
-                .as("删除 %d 行 usage_event：usage_adjustments 的 seq_scan 增量必须远小于删除行数"
-                        + "（usage_event_id 与 reversal_of_id 两个外键的检查查询都必须走索引）", WINDOW_EVENTS)
-                .isLessThan(WINDOW_EVENTS);
+        assertThat(delta).as("删除 %d 行 usage_event：usage_adjustments 的 seq_scan 增量必须远小于删除行数"
+                + "（usage_event_id 与 reversal_of_id 两个外键的检查查询都必须走索引）", WINDOW_EVENTS).isLessThan(WINDOW_EVENTS);
     }
 
     @Test
@@ -133,18 +127,16 @@ class UsageDeletionCascadeIndexIntegrationTest {
                    FOR KEY SHARE OF x
                 """, new MapSqlParameterSource("id", id), String.class));
 
-        assertThat(plan)
-                .as("usage_adjustments_usage_event_id_fkey 的检查语句只带 usage_event_id 这一个等值条件"
-                        + "（CASCADE 侧真实语句是 DELETE FROM ONLY usage_adjustments WHERE usage_event_id = $1，"
-                        + "本探针用同形状的锁行查询代替），它必须能走 usage_event_id 前导的索引")
-                .doesNotContain("Seq Scan");
+        assertThat(plan).as("usage_adjustments_usage_event_id_fkey 的检查语句只带 usage_event_id 这一个等值条件"
+                + "（CASCADE 侧真实语句是 DELETE FROM ONLY usage_adjustments WHERE usage_event_id = $1，"
+                + "本探针用同形状的锁行查询代替），它必须能走 usage_event_id 前导的索引").doesNotContain("Seq Scan");
     }
 
     @Test
     @DisplayName("自引用外键检查查询的实执行计划不得是 usage_adjustments 全表扫描")
     void reversalForeignKeyCheckQueryUsesIndex() {
-        String id = jdbc.queryForObject("SELECT id::text FROM usage_adjustments LIMIT 1",
-                new MapSqlParameterSource(), String.class);
+        String id = jdbc.queryForObject("SELECT id::text FROM usage_adjustments LIMIT 1", new MapSqlParameterSource(),
+                String.class);
         String plan = String.join("\n", jdbc.queryForList("""
                 EXPLAIN (COSTS OFF)
                 SELECT 1 FROM ONLY usage_adjustments x
@@ -152,10 +144,8 @@ class UsageDeletionCascadeIndexIntegrationTest {
                    FOR KEY SHARE OF x
                 """, new MapSqlParameterSource("id", id), String.class));
 
-        assertThat(plan)
-                .as("PostgreSQL 为外键 usage_adjustments_reversal_of_id_fkey（ON DELETE RESTRICT）"
-                        + "执行的正是这条查询，它必须能走 reversal_of_id 前导的索引")
-                .doesNotContain("Seq Scan");
+        assertThat(plan).as("PostgreSQL 为外键 usage_adjustments_reversal_of_id_fkey（ON DELETE RESTRICT）"
+                + "执行的正是这条查询，它必须能走 reversal_of_id 前导的索引").doesNotContain("Seq Scan");
     }
 
     // ------------------------------------------------------------------
@@ -167,7 +157,10 @@ class UsageDeletionCascadeIndexIntegrationTest {
         return deletions.confirm(TENANT, request.id(), request.confirmToken()).deletedCount();
     }
 
-    /** Deliberate scan so that the stats channel is proven live before it is used as evidence. */
+    /**
+     * Deliberate scan so that the stats channel is proven live before it is used as
+     * evidence.
+     */
     private void forceSeqScanOnAdjustments() {
         jdbc.queryForObject("SELECT count(*) FROM usage_adjustments WHERE reason = 'ph27-never-matches'",
                 new MapSqlParameterSource(), Long.class);
@@ -180,10 +173,10 @@ class UsageDeletionCascadeIndexIntegrationTest {
     }
 
     /**
-     * Polls until the cumulative seq_scan counter of {@code table} moved by at least
-     * {@code target} since {@code baseline}, or the timeout elapses. Returns the delta
-     * observed at that point — callers assert on it, so a timeout in the "already
-     * fixed" case yields the small delta we expect.
+     * Polls until the cumulative seq_scan counter of {@code table} moved by at
+     * least {@code target} since {@code baseline}, or the timeout elapses. Returns
+     * the delta observed at that point — callers assert on it, so a timeout in the
+     * "already fixed" case yields the small delta we expect.
      */
     private long awaitSeqScanDelta(long baseline, long target, Duration timeout) {
         long deadline = System.nanoTime() + timeout.toNanos();

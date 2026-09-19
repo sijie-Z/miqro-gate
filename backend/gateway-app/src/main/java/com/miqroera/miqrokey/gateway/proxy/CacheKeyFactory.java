@@ -42,7 +42,10 @@ import java.util.Set;
  * <p>
  * When the body is not a recognized chat shape (no extractable user message),
  * the scope falls back to the full normalized body — the previous behavior — so
- * non-chat payloads stay safe.
+ * non-chat payloads stay safe. The same fallback covers multimodal content: a
+ * message part that is not text (an image, a document, an audio clip, …) cannot
+ * be represented in the scope, and a key built from the surrounding text alone
+ * would be identical for two requests whose non-text payloads differ.
  * </p>
  *
  * <p>
@@ -185,6 +188,11 @@ public final class CacheKeyFactory {
                 }
                 String role = msg.path("role").asText("");
                 String content = textContent(msg.get("content"));
+                if (content == null) {
+                    // A part of this message is not text (image, document, …):
+                    // the text alone would not identify the request.
+                    return "";
+                }
                 if ("system".equals(role) && system.isEmpty() && !content.isEmpty()) {
                     system = content;
                 } else if ("user".equals(role) && !content.isEmpty()) {
@@ -196,8 +204,14 @@ public final class CacheKeyFactory {
                 // OpenAI Responses uses "instructions". Both accept a plain
                 // string or an array of content parts.
                 system = textContent(root.get("system"));
+                if (system == null) {
+                    return "";
+                }
                 if (system.isEmpty()) {
                     system = textContent(root.get("instructions"));
+                    if (system == null) {
+                        return "";
+                    }
                 }
             }
             if (lastUser.isEmpty()) {
@@ -212,6 +226,13 @@ public final class CacheKeyFactory {
     /**
      * Extracts plain text from a message content node: a string, or an array of
      * content parts ({@code {"type":"text","text":...}}), or plain strings.
+     *
+     * @return the flattened text, or {@code null} when the node carries a part that
+     *         is not text (an image, a document, an audio clip, …). Such a part
+     *         changes the answer but has no textual representation, so the caller
+     *         must fall back to the full-body key instead of keying on the
+     *         surrounding text alone. Extra fields on a text part (for example
+     *         Anthropic's {@code cache_control}) do not make it non-text.
      */
     private static String textContent(JsonNode content) {
         if (content == null || content.isNull()) {
@@ -227,6 +248,8 @@ public final class CacheKeyFactory {
                     sb.append(part.asText());
                 } else if ("text".equals(part.path("type").asText(""))) {
                     sb.append(part.path("text").asText(""));
+                } else {
+                    return null;
                 }
             }
             return sb.toString();
