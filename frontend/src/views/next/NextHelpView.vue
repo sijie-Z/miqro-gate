@@ -2,18 +2,23 @@
 /**
  * NextHelpView — /app/help: the in-console handbook (#869).
  *
- * docs/user-guide/*.md are imported as raw text at build time, so the handbook
- * ships inside the bundle and works on an air-gapped private deployment; the
- * GitHub link is a convenience, not the source of truth. Rendering: marked
- * (MIT). Relative links inside the docs are rewritten to GitHub blob URLs and
- * headings get stable ids so the side TOC can scroll to them.
+ * The markdown is imported as raw text at build time from
+ * src/content/handbook/ — a VENDORED copy of docs/user-guide/ kept
+ * byte-identical by `npm run sync:handbook` (drift guard:
+ * handbook-sync.spec.ts). Vendoring matters: the deploy build context only
+ * carries backend/ + frontend/ + deploy/, so an earlier revision that
+ * glob-imported ../../../../docs/*.md built fine locally/CI and shipped an
+ * EMPTY handbook in production (#899). The GitHub link remains a convenience,
+ * not the source of truth. Rendering: marked (MIT). Relative links inside the
+ * docs are rewritten to GitHub blob URLs and headings get stable ids so the
+ * side TOC can scroll to them.
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { marked } from 'marked';
 import { UiButton } from '@/ui';
 import { resolveDocLink } from '@/lib/handbook-links';
 
-const RAW = import.meta.glob('../../../../docs/user-guide/*.md', {
+const RAW = import.meta.glob('../../content/handbook/*.md', {
   query: '?raw',
   import: 'default',
   eager: true,
@@ -110,7 +115,20 @@ function openOnGithub() {
       </div>
     </header>
 
-    <div class="next-help__layout">
+    <div v-if="!docs.length" class="ui-panel next-help__empty" data-testid="help-empty">
+      <p class="next-help__empty-text">
+        手册内容未打包进本次构建（构建树缺少内容副本）。可直接在 GitHub 查看：
+      </p>
+      <a
+        class="ui-link-action"
+        href="https://github.com/sijie-Z/miqro-gate/tree/develop/docs/user-guide"
+        target="_blank"
+        rel="noopener"
+        >docs/user-guide</a
+      >
+    </div>
+
+    <div v-else class="next-help__layout">
       <aside class="next-help__side">
         <nav class="next-help__docs" aria-label="手册目录">
           <button
@@ -152,6 +170,20 @@ function openOnGithub() {
 </template>
 
 <style scoped>
+.next-help__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-6);
+}
+
+.next-help__empty-text {
+  margin: 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
 .next-help__layout {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
