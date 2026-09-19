@@ -129,18 +129,38 @@ public class AdminQuotaRuleService {
      * {@link AlertEvaluator#quotaRuleView} resolves it to null forever, and it
      * could never fire again. The delete is refused with the referencing rules
      * until the references are released.
+     *
+     * <p>
+     * The reference is matched by UUID <em>identity</em>, the way
+     * {@link AlertEvaluator#quotaRuleView} resolves it — not by comparing the
+     * stored text to {@code UUID.toString()}. The scope text is whatever the writer
+     * submitted ({@code scopeJson} is passed through verbatim) and
+     * {@link UUID#fromString} accepts non-canonical spellings, so a text equality
+     * test silently misses references the evaluator happily resolves (for example
+     * an upper-case spelling), leaving the very dangling rule this method exists to
+     * prevent. Malformed text resolves to nothing in both places.
+     *
+     * <p>
+     * Only {@code QUOTA_THRESHOLD} rules count: the key is meaningless on any other
+     * rule type, and {@link AlertEvaluator} never reads it there, so a stray key
+     * must not block the delete.
      */
     @Transactional
     public void delete(UUID tenantId, UUID adminId, UUID ruleId, String requestId) {
         QuotaRule rule = quotaRuleRepository.findById(tenantId, ruleId).orElseThrow(
                 () -> new ApiException(HttpStatus.NOT_FOUND, "QUOTA_RULE_NOT_FOUND", "Quota rule not found"));
-        List<ResourceDependency> dependents = jdbc.query("""
-                SELECT id, name, enabled FROM alert_rules
-                WHERE tenant_id = :tenantId AND scope_json ->> 'quotaRuleId' = :ruleId
-                ORDER BY name
-                """, new MapSqlParameterSource("tenantId", tenantId).addValue("ruleId", ruleId.toString()),
-                (rs, rowNum) -> new ResourceDependency("ALERT_RULE", (UUID) rs.getObject("id"), rs.getString("name"),
-                        rs.getBoolean("enabled") ? "已启用" : "已停用"));
+        List<ResourceDependency> dependents = jdbc
+                .query("""
+                        SELECT id, name, enabled, scope_json ->> 'quotaRuleId' AS scope_ref FROM alert_rules
+                        WHERE tenant_id = :tenantId AND type = 'QUOTA_THRESHOLD'
+                          AND scope_json ->> 'quotaRuleId' IS NOT NULL
+                        ORDER BY name
+                        """, new MapSqlParameterSource("tenantId", tenantId),
+                        (rs, rowNum) -> new ReferencingRule((UUID) rs.getObject("id"), rs.getString("name"),
+                                rs.getBoolean("enabled"), rs.getString("scope_ref")))
+                .stream().filter(ref -> resolvesTo(ref.scopeRef(), ruleId))
+                .map(ref -> new ResourceDependency("ALERT_RULE", ref.id(), ref.name(), ref.enabled() ? "已启用" : "已停用"))
+                .toList();
         if (!dependents.isEmpty()) {
             throw new ResourceInUseException("该配额规则被 " + dependents.size() + " 条告警规则引用，请先删除或改配这些告警规则。", dependents);
         }
@@ -153,6 +173,22 @@ public class AdminQuotaRuleService {
     }
 
     // -------------------------------------------------------------------
+
+    /**
+     * True when the stored scope text denotes {@code ruleId}, using the same UUID
+     * parsing the evaluator uses. Text that does not parse denotes nothing, so it
+     * never blocks a delete (and never 500s the endpoint).
+     */
+    private static boolean resolvesTo(String scopeRef, UUID ruleId) {
+        if (scopeRef == null) {
+            return false;
+        }
+        try {
+            return UUID.fromString(scopeRef).equals(ruleId);
+        } catch (IllegalArgumentException e) {
+            return false; // malformed scope — the evaluator ignores it too
+        }
+    }
 
     private void requireScope(UUID tenantId, QuotaScopeType scopeType, UUID scopeId) {
         boolean exists = switch (scopeType) {
@@ -189,6 +225,12 @@ public class AdminQuotaRuleService {
     }
 
     private record ScopeInfo(String name, String tag) {
+    }
+
+    /**
+     * A {@code QUOTA_THRESHOLD} rule carrying scope text, before identity matching.
+     */
+    private record ReferencingRule(UUID id, String name, boolean enabled, String scopeRef) {
     }
 
     /** UTC calendar slice for the period: day / week (Mon-start) / month / year. */

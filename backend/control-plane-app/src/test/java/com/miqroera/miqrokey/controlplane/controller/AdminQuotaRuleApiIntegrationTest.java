@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -418,27 +419,48 @@ class AdminQuotaRuleApiIntegrationTest {
         MvcResult put = putQuota(quotaBody("USER", adminUserId, "TOKENS", "MONTHLY", 10000, 80))
                 .andExpect(status().isOk()).andReturn();
         String ruleId = (String) objectMapper.readValue(put.getResponse().getContentAsString(), Map.class).get("id");
-        MvcResult alert = mockMvc
-                .perform(post("/api/v1/admin/alert-rules").cookie(adminSession, adminCsrf)
-                        .header("X-CSRF-Token", adminCsrfToken).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"quota-80pct\",\"type\":\"QUOTA_THRESHOLD\",\"threshold\":80,"
-                                + "\"scopeJson\":\"{\\\"quotaRuleId\\\":\\\"" + ruleId + "\\\"}\"}"))
+        MvcResult otherPut = putQuota(quotaBody("USER", adminUserId, "COST", "YEARLY", 10000, 80))
                 .andExpect(status().isOk()).andReturn();
-        String alertId = (String) objectMapper.readValue(alert.getResponse().getContentAsString(), Map.class).get("id");
+        String otherRuleId = (String) objectMapper.readValue(otherPut.getResponse().getContentAsString(), Map.class)
+                .get("id");
 
-        // Referenced by a live alert rule: the delete must not silently orphan the
-        // reference (scope_json carries no FK, so nothing else would catch this).
+        // The case-variant case below is only meaningful while the two spellings
+        // differ;
+        // assert it rather than silently losing the coverage.
+        assertThat(ruleId.toUpperCase()).as("random UUID contains a hex letter").isNotEqualTo(ruleId);
+
+        String alertId = postAlertRule("quota-80pct", "QUOTA_THRESHOLD", "{\"quotaRuleId\":\"" + ruleId + "\"}");
+        // The stored text is not necessarily the canonical spelling, and the evaluator
+        // parses it with UUID.fromString, which accepts more than the canonical form —
+        // an upper-case reference still resolves, so it must still block the delete.
+        String upperId = postAlertRule("quota-upper-ref", "QUOTA_THRESHOLD",
+                "{\"quotaRuleId\":\"" + ruleId.toUpperCase() + "\"}");
+        // Neither of these is a reference to `ruleId`: the first points at another
+        // quota
+        // rule, the second is not a QUOTA_THRESHOLD rule at all, so the evaluator never
+        // reads its key. Neither may be reported, and neither may keep blocking.
+        postAlertRule("quota-other-ref", "QUOTA_THRESHOLD", "{\"quotaRuleId\":\"" + otherRuleId + "\"}");
+        postAlertRule("surge-stray-key", "USAGE_SURGE", "{\"quotaRuleId\":\"" + ruleId + "\"}");
+
+        // scope_json carries no FK, so nothing at the database level would stop this
+        // delete; only the reference check stands between it and a live, listed,
+        // enabled rule that the evaluator can never resolve again.
         mockMvc.perform(delete("/api/v1/admin/quota-rules/" + ruleId).cookie(adminSession, adminCsrf)
                 .header("X-CSRF-Token", adminCsrfToken)).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("RESOURCE_IN_USE"))
-                .andExpect(jsonPath("$.dependencies", hasSize(1)))
-                .andExpect(jsonPath("$.dependencies[0].type").value("ALERT_RULE"))
-                .andExpect(jsonPath("$.dependencies[0].id").value(alertId))
-                .andExpect(jsonPath("$.dependencies[0].name").value("quota-80pct"));
+                .andExpect(jsonPath("$.dependencies", hasSize(2)))
+                .andExpect(jsonPath("$.dependencies[*].type", containsInAnyOrder("ALERT_RULE", "ALERT_RULE")))
+                // Names first: when this assertion fails, the message says which rules were
+                // reported, which is the whole point of the check.
+                .andExpect(jsonPath("$.dependencies[*].name", containsInAnyOrder("quota-80pct", "quota-upper-ref")))
+                .andExpect(jsonPath("$.dependencies[*].id", containsInAnyOrder(alertId, upperId)));
 
-        // Release the reference, then the delete succeeds.
-        mockMvc.perform(delete("/api/v1/admin/alert-rules/" + alertId).cookie(adminSession, adminCsrf)
-                .header("X-CSRF-Token", adminCsrfToken)).andExpect(status().isOk());
+        // Release the references, then the delete succeeds: the unrelated rules that
+        // are still around must not keep blocking it.
+        for (String id : new String[]{alertId, upperId}) {
+            mockMvc.perform(delete("/api/v1/admin/alert-rules/" + id).cookie(adminSession, adminCsrf)
+                    .header("X-CSRF-Token", adminCsrfToken)).andExpect(status().isOk());
+        }
         mockMvc.perform(delete("/api/v1/admin/quota-rules/" + ruleId).cookie(adminSession, adminCsrf)
                 .header("X-CSRF-Token", adminCsrfToken)).andExpect(status().isNoContent());
     }
@@ -455,6 +477,20 @@ class AdminQuotaRuleApiIntegrationTest {
     private ResultActions putQuota(String body) throws Exception {
         return mockMvc.perform(put("/api/v1/admin/quota-rules").cookie(adminSession, adminCsrf)
                 .header("X-CSRF-Token", adminCsrfToken).contentType(MediaType.APPLICATION_JSON).content(body));
+    }
+
+    /**
+     * Creates an alert rule with a raw {@code scopeJson} literal and returns its
+     * id.
+     */
+    private String postAlertRule(String name, String type, String scopeJson) throws Exception {
+        String body = objectMapper
+                .writeValueAsString(Map.of("name", name, "type", type, "threshold", 80, "scopeJson", scopeJson));
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/alert-rules").cookie(adminSession, adminCsrf)
+                        .header("X-CSRF-Token", adminCsrfToken).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn();
+        return (String) objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id");
     }
 
     private String quotaBody(String scopeType, UUID scopeId, String metric, String period, long limitValue,
