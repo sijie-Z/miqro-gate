@@ -22,13 +22,13 @@ const DEST = resolve(here, '../src/content/handbook');
 
 const names = readdirSync(SRC).filter((n) => n.endsWith('.md'));
 if (names.length === 0) {
-  console.error(`no markdown files found in ${SRC}`);
-  process.exit(1);
+    console.error(`no markdown files found in ${SRC}`);
+    process.exit(1);
 }
 
 rmSync(DEST, { recursive: true, force: true });
 mkdirSync(DEST, { recursive: true });
 for (const name of names) {
-  copyFileSync(join(SRC, name), join(DEST, name));
+    copyFileSync(join(SRC, name), join(DEST, name));
 }
 console.log(`synced ${names.length} handbook files -> src/content/handbook/`);
