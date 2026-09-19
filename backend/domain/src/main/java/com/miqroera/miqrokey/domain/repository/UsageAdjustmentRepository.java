@@ -77,6 +77,24 @@ public interface UsageAdjustmentRepository {
     Optional<AdjustmentTarget> findAdjustmentTarget(UUID tenantId, UUID usageEventId);
 
     /**
+     * Whether an adjustment has already been cancelled by a reversal row.
+     *
+     * <p>
+     * One original carries at most one reversal. A reversal negates the deltas of
+     * the row it points at, while every read path nets an event as
+     * {@code observed + SUM(all deltas)}: booking the same reversal a second time
+     * does not undo twice, it subtracts a correction that is already gone and
+     * leaves the net <em>above</em> the observed fact by the size of the original.
+     * </p>
+     *
+     * <p>
+     * Read-then-write, so callers must hold the per-event lock (see
+     * {@link #lockUsageEvent(UUID)}).
+     * </p>
+     */
+    boolean isReversed(UUID tenantId, UUID adjustmentId);
+
+    /**
      * Serialises concurrent writers of one usage event's ledger for the duration of
      * the current transaction.
      *
