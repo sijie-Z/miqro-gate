@@ -3441,7 +3441,7 @@ export interface components {
             createdAt?: string;
         };
         TeamCreateRequest: {
-            name?: string;
+            name: string;
             description?: string;
         };
         Team: {
@@ -3687,8 +3687,8 @@ export interface components {
             checkPath?: string;
         };
         ProjectCreateRequest: {
-            code?: string;
-            name?: string;
+            code: string;
+            name: string;
             projectTag?: string;
         };
         Project: {
