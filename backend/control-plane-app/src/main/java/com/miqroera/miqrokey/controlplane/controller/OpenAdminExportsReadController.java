@@ -2,7 +2,9 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.dto.ExportTaskView;
 import com.miqroera.miqrokey.controlplane.security.AdminApiKeyAuthFilter;
+import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.ApiException;
+import com.miqroera.miqrokey.controlplane.service.AuditContext;
 import com.miqroera.miqrokey.controlplane.service.ExportTaskService;
 import com.miqroera.miqrokey.domain.usage.ExportFormat;
 import com.miqroera.miqrokey.domain.usage.ExportTask;
@@ -33,9 +35,11 @@ import java.util.UUID;
 public class OpenAdminExportsReadController {
 
     private final ExportTaskService exportTaskService;
+    private final UserContext userContext;
 
-    public OpenAdminExportsReadController(ExportTaskService exportTaskService) {
+    public OpenAdminExportsReadController(ExportTaskService exportTaskService, UserContext userContext) {
         this.exportTaskService = exportTaskService;
+        this.userContext = userContext;
     }
 
     /**
@@ -49,7 +53,7 @@ public class OpenAdminExportsReadController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
         UUID tenantId = tenantId(request);
         UUID issuer = issuerId(request, tenantId);
-        ExportTask task = exportTaskService.create(tenantId, issuer, format, from, to);
+        ExportTask task = exportTaskService.create(tenantId, issuer, format, from, to, auditContext(request));
         return ResponseEntity.accepted().body(task);
     }
 
@@ -75,5 +79,25 @@ public class OpenAdminExportsReadController {
             throw new ApiException(HttpStatus.FORBIDDEN, "EXECUTOR_UNKNOWN", "无法确定执行委托人：该机器密钥缺少发行管理员。");
         }
         return issuer;
+    }
+
+    /**
+     * Machine key -> issuing admin + via marker; SYSTEM_ADMIN session -> the user.
+     * This is what makes the class javadoc's "audit trail stays on the machine key"
+     * claim true: the actor is the issuing admin, the {@code via} marker names the
+     * key that actually issued the call.
+     */
+    private AuditContext auditContext(HttpServletRequest request) {
+        UUID issuer = (UUID) request.getAttribute(AdminApiKeyAuthFilter.ISSUER_ATTR);
+        if (issuer != null) {
+            return AuditContext.machine(issuer, (String) request.getAttribute(AdminApiKeyAuthFilter.NAME_ATTR),
+                    requestId(request));
+        }
+        return AuditContext.human(userContext.getUser().id(), requestId(request));
+    }
+
+    private static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 }
