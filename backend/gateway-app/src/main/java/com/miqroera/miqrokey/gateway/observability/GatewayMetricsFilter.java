@@ -35,7 +35,17 @@ public class GatewayMetricsFilter implements WebFilter {
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
-        return chain.filter(exchange).doOnSuccess(v -> count(exchange));
+        // Count on commit, not on the chain's success signal: the terminal
+        // {@code ExceptionHandlingWebHandler} sits outside every WebFilter, so a
+        // request whose response is produced by an exception handler (unhandled
+        // exception -> 500, no matching handler -> 404) completes this Mono with
+        // an error and never reached the counter. The response status is final
+        // when the beforeCommit hook runs, whichever path produced it.
+        exchange.getResponse().beforeCommit(() -> {
+            count(exchange);
+            return Mono.empty();
+        });
+        return chain.filter(exchange);
     }
 
     private void count(ServerWebExchange exchange) {
