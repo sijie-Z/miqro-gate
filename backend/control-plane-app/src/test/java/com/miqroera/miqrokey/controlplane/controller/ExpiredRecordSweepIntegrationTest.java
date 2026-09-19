@@ -109,9 +109,46 @@ class ExpiredRecordSweepIntegrationTest {
                 executed);
     }
 
+    @Test
+    @DisplayName("sweep reclaims expired login sessions; keeps live ones")
+    void sweepsExpiredSessions() throws Exception {
+        UUID expired = seedSession(Instant.now().minus(2, ChronoUnit.HOURS), null);
+        UUID expiredRevoked = seedSession(Instant.now().minus(2, ChronoUnit.HOURS),
+                Instant.now().minus(1, ChronoUnit.HOURS));
+        UUID boundary = seedSession(Instant.now().minus(1, ChronoUnit.SECONDS), null);
+        UUID live = seedSession(Instant.now().plus(1, ChronoUnit.HOURS), null);
+
+        sweeper.sweep();
+
+        assertThat(sessionIds()).doesNotContain(expired, expiredRevoked, boundary).contains(live);
+    }
+
     // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
+
+    private UUID seedSession(Instant expiresAt, Instant revokedAt) {
+        UUID id = UUID.randomUUID();
+        byte[] digest = id.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        jdbc.update("""
+                INSERT INTO user_sessions (id, tenant_id, user_id, token_digest, csrf_digest,
+                    created_at, last_seen_at, expires_at, revoked_at)
+                VALUES (:id, :tenantId, :userId, :tokenDigest, :csrfDigest,
+                    :createdAt, :lastSeenAt, :expiresAt, :revokedAt)
+                """,
+                new MapSqlParameterSource("id", id).addValue("tenantId", tenantId()).addValue("userId", adminId)
+                        .addValue("tokenDigest", digest).addValue("csrfDigest", digest)
+                        .addValue("createdAt", java.sql.Timestamp.from(expiresAt.minus(1, ChronoUnit.HOURS)))
+                        .addValue("lastSeenAt", java.sql.Timestamp.from(expiresAt.minus(1, ChronoUnit.HOURS)))
+                        .addValue("expiresAt", java.sql.Timestamp.from(expiresAt))
+                        .addValue("revokedAt", revokedAt != null ? java.sql.Timestamp.from(revokedAt) : null));
+        return id;
+    }
+
+    private List<UUID> sessionIds() {
+        return jdbc.query("SELECT id FROM user_sessions", new MapSqlParameterSource(),
+                (rs, i) -> (UUID) rs.getObject(1));
+    }
 
     private UUID tenantId() {
         return UUID.fromString("00000000-0000-0000-0000-000000000001");

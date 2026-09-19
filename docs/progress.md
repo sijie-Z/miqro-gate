@@ -2,6 +2,25 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-19（PH22 缓存正确性审计：多模态 part 不入键，#976）
+
+- **确认缺陷一处**：`CacheKeyFactory.textContent()`（`CacheKeyFactory.java:216-235`，develop）遍历 content 数组时**没有 else 分支**，非文本 part（Anthropic `image`、OpenAI `image_url`、Responses `input_image`…）被静默丢弃，语义 scope 只用剩余文本算 → 两张图不同、文本相同的视觉请求得到**同一把缓存键**，后者重放前者的答案。修复：非文本 part 令 `textContent()` 返回 `null` → `semanticScope()` 返回 `""` → `compute()` 回退既有全文键 `normalize(root)`（`:95` 的安全阀）。
+- **触发面比"最后一条 user 消息"宽**：助手历史、顶层 `system` / `instructions` 数组里出现非文本 part 同样塌缩（走同一函数）。Anthropic 回显 `thinking` / `redacted_thinking` 进历史即属此类。5 个用例分别钉住三处位置。
+- **与 #859 的分工（去重结论）**：#859 补的是生成参数指纹 + 顶层 `system`/`instructions` **进 scope**，不碰 `textContent()` 提取逻辑。注意其副作用：顶层 `system` 进入 scope 后，"system 数组里带图片"这条路径从「本来就全文回退」变成「被 scope 吞掉」——本 PR 的 `anthropicTopLevelSystemImageSplits` 正是钉这一点。
+- **可复现性陷阱（记住）**：`GatewayTestKeys.java:473` 的 `keyId` 是每进程新取的 `UUID.randomUUID()`，而 keyId 是键的一个维度 → **绝对摘要不可跨进程复现**；可复现的不变量是「同一进程内两把键彼此相等（红）/ 不等（绿）」。引用摘要值时必须说明这一点。
+- **代价（诚实记录）**：改动前多模态请求能提出非空 scope，`compute()` **不调用** `normalize()`；改动后调用。即被修复的这类请求**新增一次与请求体等大的序列化 + 全树重建**，上限 `max-proxy-buffer`（默认 256KB）。命中率也下降（视觉请求不再享受"只认最后一轮"优惠）。
+- **边界**：请求体超 `miqrokey.gateway.upstream.max-proxy-buffer`（默认 256KB）在 `ProxyController.java:328-330` 直接 413 `payload_too_large`，走不到缓存 → 缺陷只在 256KB 以内成立。OpenAI 的 URL 形态图片必中；Anthropic 的 base64 形态原图 ≲190KB 才中招（上限可配，视觉场景通常会调高）。
+- **旁支发现（未立案，文档问题）**：树内 10 余处把"缓存默认关闭"记为 **ADR-0008**（`CacheEligibility.java:6`、`ProxyController.java:81`、`CacheConfig.java:15`、`GatewayResponseCache.java:14`、`.env.example:39`…），但 `docs/decisions/0008-*.md` **不存在**（目录只有 0001-0007、0009-0026）；真实文件是 `0009-enable-response-cache.md`。属文档卫生，不影响运行时行为。
+- **外部改动声明**：维护者 `sijie-Z` 于本 PR 分支直接推送 `64cbc4bd`（spotless 收敛本 PR 新增 javadoc 折行，修 CI 红项）。该提交以 **merge 保留**，未 rebase、未强推。
+
+## 2026-09-19 会话交接点（ADR-0025：Agent 生命周期补齐，#824）
+
+- **决策文档线，非实现**：新增 `docs/decisions/0025-agent-lifecycle.md`（**Proposed**），把 #824 的四条待拍板展开为「现状坐标 → 逐条分析 → 选项 A–D + 推荐 D → 落地形态 → 未决项」。零代码改动。
+- **两处事实更正/发现（对 #824 原文）**：① issue 说「停用的 Agent 仍锁住凭证」**不成立**——凭证侧的锁查询带 `status='ACTIVE'`（`AdminCredentialService.java:355-361`、`AgentRepositoryImpl.java:68-76`），**停用即释放**；② 真实约束是 `uq_agents_tenant_credential` **不看状态**（`V17:24-26`）→ 停用的 Agent 仍占着「该凭证 → 唯一 Agent」的名额，新建同凭证 Agent 被 `AGENT_CREDENTIAL_TAKEN` 挡住——**僵尸 Agent 的形状是「名额占死」而非「凭证锁死」**。
+- **硬删除可行的前提已核实**：迁移中 `git grep "REFERENCES agents"` **零命中**，且没有任何表按 Agent 维度记录用量（`agent_id` 零命中）——删除不影响任何历史统计；代价只剩「不可逆」与「审计按 id 反查不到名字」，故 ADR 要求 `AGENT_DELETE` 审计**带名称快照**。
+- **推荐 D（enable + 改名 + 硬删除）**，与 A/B/C 的对比见 ADR §3；`enable` 被写成**有条件的逆操作**（停用期间凭证可能已停用或已轮换，需前置校验）——这是本 ADR 的第二处发现。
+- **下一步**：所有者拍板；拍板前 #824 保持 OPEN。
+
 ## 会话交接点 2026-09-19（P1 阶段一：离线 probe 集评测出结论，#930）
 
 - **结论：按当前本地档位不进入 P2，维持 A（语义缓存继续不启用）**。报告 `docs/semantic-cache-probe-phase1-2026-09-19.md`，
@@ -2740,7 +2759,7 @@ All existing `SingleFile`/`MultiVersion`/`HmacKeys` tests updated with `ensureSt
 - **Origin production mode**: `OriginInterceptorProductionTest` (3 tests) — missing Origin rejected in production, allowed origin passes, unknown origin rejected.
 - **Audit chain integrity**: `AuditChainIntegrityTest` (3 tests) — chain survives restart, content tamper breaks chain, concurrent writers produce valid chain.
 - **Custom CSRF cookie name**: `CustomCsrfCookieNameTest` — CSRF returned from configured cookie name, default name not used.
-- **Production profile**: `AuthIntegrationTestProduction` — production profile starts with valid config.
+- **Production profile**: `AuthProductionProfileIntegrationTest` — production profile starts with valid config.
 - **Test admin endpoint**: `AdminTestController` (test-only) — `/api/v1/admin/test`, `/api/v1/admin/users/{userId}`.
 
 ### Targeted verification repair (2026-07-22)
@@ -2748,7 +2767,7 @@ All existing `SingleFile`/`MultiVersion`/`HmacKeys` tests updated with `ensureSt
 Addressing 8 verified blockers found in commit `ed71f42`:
 
 1. **OriginInterceptor missing-Origin production branch**: Returns `false` (not `true`) after `sendRejection`. Added `requestId` to RFC 9457 response. `OriginInterceptorProductionTest` proves handler is not reached.
-2. **cookieSecure/production binding**: `ProductionStartupValidator` validates cookieSecure and originAllowlist on production mode at `@PostConstruct`; fails fast rather than auto-enabling. `AuthIntegrationTestProduction` starts production-profile context.
+2. **cookieSecure/production binding**: `ProductionStartupValidator` validates cookieSecure and originAllowlist on production mode at `@PostConstruct`; fails fast rather than auto-enabling. `AuthProductionProfileIntegrationTest` starts production-profile context.
 3. **Bootstrap DB-level serialization**: `lockTenantForBootstrap()` uses `SELECT ... FOR UPDATE` on tenant row. `BootstrapConcurrencyTest` proves exactly one admin committed under concurrency with distinct usernames.
 4. **login() transaction removed**: `login()` no longer `@Transactional`. `recordFailedLogin` uses `findByIdForUpdate()` under row lock to compute increment from fresh row. `LOGIN_FAILED` + `ACCOUNT_LOCKED` audit events recorded. `LoginFailureConcurrencyTest` proves deterministic count under concurrency.
 5. **Audit hash content coverage**: SHA-256 over canonical encoding of all immutable fields + previous hash. DB-level lock (final: `pg_advisory_xact_lock`; initial repair used `SELECT ... FOR UPDATE`) replaces `ReentrantLock`. Temporary arrays zeroed. `AuditChainIntegrityTest` proves restart, tamper detection, concurrent writers.
@@ -2779,7 +2798,7 @@ Integration tests (PostgreSQL Testcontainers, Linux only): **100 tests, 0 failur
   - `LoginFailureConcurrencyTest`: 2/2 PASS
   - `OriginInterceptorProductionTest`: 3/3 PASS
   - `CustomCsrfCookieNameTest`: 1/1 PASS
-  - `AuthIntegrationTestProduction`: 1/1 PASS
+  - `AuthProductionProfileIntegrationTest`: 1/1 PASS
   - `CryptoIntegrationTest`: 10/10 PASS
   - Persistence integration tests: 45 tests PASS
   - Control Plane smoke: 2/2 PASS
@@ -2822,7 +2841,7 @@ Integration tests (PostgreSQL Testcontainers, Linux only): **100 tests, 0 failur
 - `OriginInterceptorProductionTest.java` — new: 3 production Origin tests
 - `AuditChainIntegrityTest.java` — new: 3 audit chain tests
 - `CustomCsrfCookieNameTest.java` — new: custom CSRF cookie name test
-- `AuthIntegrationTestProduction.java` — new: production profile startup test
+- `AuthProductionProfileIntegrationTest.java` — new: production profile startup test
 - `docs/api-contract.md` — updated: bootstrap, CSRF, Origin, production, error semantics
 - `docs/configuration-reference.md` — updated: production constraints, cookie, allowlist, CSRF cookie name
 - `docs/progress.md` — updated (this file)
@@ -3607,7 +3626,7 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 ## 2026-09-17 下午 — 模型调用链路时间线 #705（后端）+ #707（前端）+ 独立审查修复
 
 **目标与交付**
-- #705 后端：新增 `request_usage_records` 的**首个读取路径**（此前该表只有写入方，控制面无查询入口——这正是模型侧一直没有"按请求排查"能力的根因）。端点 `GET /api/v1/admin/usage/timeline?gatewayRequestId=...` 返回单次调用的阶段时间线（受理 → 上游首字节 → 完成）+ TTFB/耗时/终态/重试/部分响应/Token 四分类/归属链；**零新增采集**。V60 为 `(tenant_id, gateway_request_id)` 建索引——EXPLAIN 实测此前走 Seq Scan（表按月分区且既有索引均不以该列起头）。
+- #705 后端：新增 `request_usage_records` 的**首个读取路径**（此前该表只有写入方，控制面无查询入口——这正是模型侧一直没有"按请求排查"能力的根因）。端点 `GET /api/v1/admin/usage/timeline?gatewayRequestId=...` 返回单次调用的阶段时间线（受理 → 上游首字节 → 完成）+ TTFB/耗时/终态/重试/部分响应/Token 四分类/归属链；**零新增采集**。V61 为 `(tenant_id, gateway_request_id)` 建索引——EXPLAIN 实测此前走 Seq Scan（表设计为按月分区、当前仅建了 DEFAULT 分区，且既有索引均不以该列起头）。
 - #707 前端：用量明细「请求 ID」列改可点击 + 三层信息抽屉（终态徽章 + "卡在哪一段" / TTFB·重试·HTTP / 折叠的归属链与 Token）。未记录的阶段如实标「缺失 · 未记录」而不补零；404 呈现为说明块而非错误横幅。OpenAPI 基线重导 + `gen:types` 重生成。
 
 **独立审查（对抗性、实测驱动）发现并修复三处缺陷**
@@ -4502,7 +4521,6 @@ job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
 - **P1**：临时文件落目标目录（原子 rename）/ chmod 失败即报错 / verify 判 `200 且 models-list 体` + `--connect-timeout 5 --max-time 20` / 失败默认只打 code（`--verbose` 才打体）/ 托管块残缺或重复**拒绝**而非猜 / symlink 目标拒绝 / `${2:?}` 缺值消息 / 测试 `stat` 双写法。
 - **测试 45 → 85 条**，新增恶意输入组与转义函数直测（`MIQRO_ONBOARD_SOURCE_ONLY` seam）；**三条旗舰断言对修复前脚本先证红**（引号 key 被放行、codex 输出含 key、代理错误页 200 判成功）。
 - 暂缓：前端/脚本双实现的 golden-fixture 契约（评审同意不做）。
-
 ## 2026-09-18 冒烟在自签证书的部署上什么都证明不了（#826）
 
 做完整套端到端模拟时的**最后一个失败项**：真实生产栈起来了、`deploy.sh` 的镜像身份 / 环境变量回声 / 证书进容器三条断言全过，**只有冒烟报"够不到"**——而目标其实好好地在答。
@@ -5054,6 +5072,60 @@ typecheck（**无管道直判 rc=0**）/ vitest 423/423 / build / e2e 58/58；#7
 ### 教训
 
 **评审的基线错、结论也可能对。** 这份外评的排头主张在 develop 上早已不成立（#444 就修过），但顺着它的推理去核对"键身份到底由什么构成"时，翻出了两条更深的缺口——**"这条主张不成立"不等于"这个方向没问题"**；对着错误的主张做一次完整核对，比对着正确的主张点个头更有价值。
+## 2026-09-18 请求侧可选改造 ADR 姊妹篇（#769 / #770，均 Proposed）
+
+**背景**：两个 issue 提出请求侧改体能力——① `cache_control` 断点自动注入（对齐 cc-switch `cache_injector.rs`）；② 错误驱动的整流重试（thinking 签名/预算，对齐 `thinking_rectifier.rs`）。两者都与 `CLAUDE.md:55`「透明代理不得重排、标准化或补写推理请求 JSON」正面冲突，issue 自身要求 ADR 先行、默认关、opt-in。**本轮只写决策文档，无产品代码改动。**
+
+**产出（状态均为 `Proposed`，未替所有者拍板）**：
+
+- `docs/decisions/0023-request-side-cache-breakpoint-injection.md`（#769）：逐条回答 issue 的 Q1–Q7；红线冲突按「补写」的**字面违例**处理，给出 E1–E7 例外边界与三处必改文本（`CLAUDE.md:55`、`testing-and-acceptance.md:52`、`architecture.md:166-169`）；选项 A–D（推荐 **B：Key 级 opt-in、默认关**）；字节策略给出 B1 定点插入 / B2 重序列化两档；明确「逐请求审计（`admin_audit_events`）」在网关侧**没有既有通道**（该表的写入者在控制面 `AuditServiceImpl.java:86-137`），逐请求事实改走网关**已有**的 `request_usage_records` 写入通道（`gateway-app/pom.xml:37` → `GatewayFeatureConfig.java:43` → `QueueConfig.java:62` → `PostgresUsageEventWriter.java:181,230`），即「指标 + 生命周期列 + 响应头」举证。
+- `docs/decisions/0024-request-side-rectification-retry.md`（#770）：整流重试属「**删除/改写**」，指出现有红线枚举词（重排/标准化/补写/注入）**未字面覆盖删除**，需把红线改写成可判定断言；给出 E1–E9 边界；重试预算给出 R1（共享既有 ≤1，**推荐**）/ R2（独立预算，需二次修订红线）供拍板；澄清 **#544（HTTP 200 且 content 为空）不在错误驱动整流射程内**；选项 A / B（只检测不重试的观察档）/ C（推荐目标档）/ D / E（预算类整流，二期）。
+- `docs/decisions/README.md`：追加两行索引。
+
+**编号裁定**：任务书预分配 0023 / 0024。`git ls-tree -r --name-only origin/develop -- docs/decisions` 核对 origin/develop 现最大编号为 **0020**，0021–0024 均未被占用，**未顺延**。
+
+**现状证据**：两份 ADR 中每处「现状」断言均带 `file:line`，坐标取自 `ProxyController` / `CacheKeyFactory` / `ContextLimitGuard` / `CacheEligibility` / `SseReplayEngine` / `LlmCircuitBreakerRegistry` / `V4`·`V8` 迁移 / `RequestStatus.java` / `VirtualKey.java` / `QueueConfig.java` / `PostgresUsageEventWriter.java` / `architecture.md` / `testing-and-acceptance.md` / `provider-adapter-contract.md` / `feature-backlog.md` / `live-integration-guide.md`，写入时以 `grep -n` 或行区间读取取得；外部实现（cc-switch、AWS Bedrock）一律标注为 **issue 转述、本仓未复核**，不作论据。
+
+**独立复核与修正（第一轮）**：两份 ADR 在 push 前经独立复核，结论为 BLOCK；下列问题已逐条修正，修订后无未决分歧：
+
+- **失效的现状断言（3 处）**：① 「网关进程没有数据库/审计写入通道」不成立——`gateway-app/pom.xml:37` 以 compile scope 依赖 `queue-spi`，`GatewayFeatureConfig.java:43` 装载队列，`QueueConfig.java:62` 构造 `PostgresUsageEventWriter`（`INSERT INTO request_usage_records`，`:181`、`:230`），另有 `PostgresMcpAccessLogWriter.java:44`；正确的表述是「**已有用量/生命周期写入通道、没有 `admin_audit_events` 通道**」，两份 ADR 的 §1.2 与相关小节已按此拆分改写。② 「网关完全不读上游错误体」不成立——`ProxyController.java:548` 对**所有**上游响应（含错误）逐块缓冲，只是只用于 `:566` 用量解析 / `:578` 保留策略 / `:850` 取上游请求 id，**没有任何错误内容分类**；表述已改为「缓冲但不分类」。③ 迁移列号误引 `V8:64-65` / `V8:44-48`，已改为 `V8:58-59`（cache token 两列）与 `V8:43-47`（`request_status` 及其 CHECK 枚举）。
+- **改动面低报**：`request_usage_records` 的写入是显式列名写法且同一语句出现两处，新增列须同步改两处列清单、参数映射、域事件与发射点；两份 ADR 的「后果」段已如实展开，不再写成「一次性追加迁移」。
+- **待议点缺项**：开关粒度原先只写到 Key 级，未覆盖 ADR-0018 的 key×project 多绑定；两份 ADR 的开关粒度小节与未决项清单已补「是否允许项目级覆盖」。
+- **口径措辞**：把「全部采纳」等结论性措辞改为「建议……（待所有者拍板）」，避免代所有者拍板。
+- **本节自身的修正**：编号核对命令补 `-r --name-only`；证据清单删去两份 ADR 实际未引用的 `application.yml`；「并逐条在工作区核对」改为可复现的取证方式描述。
+
+**独立复核与修正（第二、三轮）**：第一轮修订后复核结论为 APPROVE，同时提出 3 项**非阻断**项（N1–N3），已全部采纳：① `0023` 里项目级粒度的绑定行坐标由 `JdbcRouteSnapshotLoader.java:157,164` 改为 `JdbcRouteSnapshotLoader.loadBindings()` 的 `:171-194`（该方法直接查 `key_project_binding`，先前坐标落在 Key 装载段）；② `0024` 未决项 6 的括注补齐错误体的全部消费点（`ProxyController.java:566`、`:578`、`:850`，均不按内容分类）；③ 本条目的提交登记补齐第二笔起的 sha（见下）。
+
+**提交**：`73f9efe5`（ADR-0023）、`1a694784`（ADR-0024）、`24679cc4`（`docs/decisions/README.md` 索引与本节）、`f49027dc`（`docs/progress.md` 行尾恢复）、`215943af`（依第一轮复核修正两份 ADR 的失效断言与引用坐标）、以及本次提交（依第二、三轮复核修正 N1–N3；sha 见 `git log --oneline`）。
+**交付回读**：分支 `docs/adr-request-side-transforms-769-770` 已推送，远端 sha = 本地 HEAD；PR https://github.com/sijie-Z/miqro-gate/pull/782 （base `develop`，状态 OPEN，diff 仅 4 个文档文件、纯新增无删除）；issue 评论 https://github.com/sijie-Z/miqro-gate/issues/769#issuecomment-5724478199 与 https://github.com/sijie-Z/miqro-gate/issues/770#issuecomment-5724478426 ；两个 issue 均保持 **OPEN**，PR 正文不写 `Closes`。
+
+**行尾修正**：本条目追加过程中曾多次把文件内 122 处既有 LF 行尾归一化为 CRLF、产生纯空白 diff；每次均已按 `origin/develop` 原始字节恢复（对 merge-base 的 `git diff --numstat` 为纯新增），现有内容为净新增。
+## 2026-09-18 速率限流（TPM/RPM）评估与决策留档——ADR-0025（#706）
+
+**缺口**：「不做限流」此前只存在于 ADR-0020 D6 的一行注记（`docs/decisions/0020-quota-soft-landing.md:81`），无独立评估；对外表述「避免误伤长任务」，被追问「什么条件下开启」时无据可依。**本项只做评估与选项留档，不动任何代码**，也不替 owner 定结论。
+
+**交付**：`docs/decisions/0025-rate-limiting-evaluation.md`（状态 **Proposed，待 owner 拍板**）+ `docs/decisions/README.md` 索引一行。编号取 0025：`origin/develop` 树最高 0020，未合并分支已占 0021–0024（`git log --all --diff-filter=A -- 'docs/decisions/00*.md'` 全 refs 复核），故用 0025。
+
+**内容骨架**：①现状（配额 vs 速率两轴对照，「配额 ≠ 速率」= 窗口累计量 vs 单位时间强度；已交付额度能力与 60s 快照近似语义；速率侧完全空白）②不做的理由与代价（「避免误伤长任务」拆成四条可检验机制 + 四项代价 + 与 P95 30ms 红线的张力）③四个选项（令牌桶 TPM/RPM / 并发闸 / 排队背压 / 只告警），每个按落点、P95 影响、配置粒度、**与既有 429 `quota_exceeded` 信封的错误码区分**、可回退性五维评估，另附建议 ④触发条件（五条信号 × 今天能否观测 + 建议门槛）⑤owner 五问各带推荐答案。
+
+**所有「现状」断言带 `文件:行号`**（如 `QuotaGate.java:32`、`ProxyController.java:245`、`AlertEvaluator.java:67/132-137/149-152`、`GatewayMetricsFilter.java:15-20`、`architecture.md:148`、`configuration-reference.md:179`、`V1__core_tables.sql:445`）。复核命令：`grep -rn "MIQROKEY_MAX_CONCURRENT_STREAMS" backend/ deploy/` **零命中** → #733「并发闸未实现」在代码侧复核成立。
+
+**行业对标不编造**：issue 内的厂商描述逐条与本仓既有记录比对并标核实状态——腾讯 TPM/QPM、阿里 TPM/RPM 有仓内第二手记录（`docs/ai-gateway-comparison.md:34/86`）；**腾讯「并发多维多档」、阿里「服务端排队」、AWS「令牌桶 + 日周月配额」本仓无记录且本线未独立核实**（对 base `e83d44ea` 的 docs/ 树，`git grep -n "排队" e83d44ea -- docs/` 与 `git grep -n "多档" e83d44ea -- docs/` 均零命中；当前树含本文自身措辞，属自引用，不作证据），ADR 内逐条标「未核实」，结论不依赖未核实细节。
+
+**顺带发现两处文档漂移（只登记不改，避免与在飞文档线冲突）**：`docs/operations-runbook.md:191`「429 只可能来自上游…网关卡本身不产生 429」在 #684 后已不成立；`docs/feature-backlog.md:110` F47 行末「容量 503」当前并不存在（#733）。
+## 2026-09-18 ADR-0021 草案：同产品凭证回退 ×「每笔唯一归属」的兼容设计（#717）
+
+**性质**：**文档线，不含任何产品代码**；ADR 状态 **Proposed**（决策权在 owner；#717 明示「不做也是有效产出」，故 §3 保留「维持现状」为并列选项）。交付：新增 `docs/decisions/0021-same-product-credential-failover.md` + `docs/decisions/README.md` 索引行。
+
+- **编号核查**：`git ls-tree -r --name-only origin/develop -- docs/decisions` 最高为 `0020-quota-soft-landing.md` → 本线用 **0021**，未顺延。
+- **核心发现（此前未被写下）**：唯一性不是注释里的约定，而是被三层结构分别钉死——授权 `V1__core_tables.sql:359`（grant 携带单数 `upstream_credential_id`）、快照 `RouteSnapshot.java:251`（`BindingRecord` 单 `credentialId`）、账本 `V8__request_usage_records.sql:39`（`credential_id` NOT NULL）＋`:69`（一请求一行唯一键）。热路径 `ProxyController.java:454`/`:632` 的两处 `no cross-credential failover` 注释只是这三层的实现说明，**不是被修订的决策本身**。
+- **可行性关键**：`V1__core_tables.sql:373-374` 的唯一约束是 **(project, product, credential) 三元组**，且 `upstream_credentials` 上**没有**「一产品一凭证」约束（`:309` 仅 `UNIQUE (tenant_id, id)`；订阅 `:207` 一产品可多条）——**多凭证候选集在数据模型上已经存在，不需要任何 schema 变更**。禁止切换的是**请求期的单 binding 选择规则**，不是数据结构。
+- **红线（三处并列，不是一处）**：`architecture.md:161`「禁止跨供应商或跨真实凭证故障切换」显式点名「跨真实凭证」；`architecture.md:159`「真实凭证只在第一次尝试前解析一次，重试复用同一凭证」是**常被漏看的第二条红线**；`CLAUDE.md:36`「不自动故障切换」同。三处必须同时修订——只改 `:161` 会让 `architecture.md` 内部自相矛盾。而 `product-requirements.md:27` 的限定词是「供应商**之间**」，同产品内凭证回退不在其字面范围——这条区分写进了 ADR §1.4 的关系表。
+- **先例复用与正面回应（两条 Higress 先例，坐标不同、结论不同）**：`ai-gateway-comparison.md:93` 否决 Key 池轮询的理由是「**Key 池轮询破坏审计映射**」——否决对象是**无触发条件、无固定顺序**的轮询；本 ADR 的推荐方案要求「按显式有序配置、只在首字节前按 `ProxyController.java:634-635` 既有 TTFB 判据推进」，给定请求与配置即可重建「用了哪把、为什么」。另一条 **`ai-gateway-comparison.md:94`**「Higress 模型 Fallback/降级链——刻意不采纳」**不含「轮询/均衡」限定**，是字面上最接近本议题的反对先例，已在 §3 末尾单列一段逐字回应（区分点是「换模型/换供应商」vs「同产品内换凭证」；并承认 owner 若认定 `:94` 否决一切自动切换，答案收敛到 A/E）。
+- **反向发现**：全仓 `docs/*.md` 检索 `唯一归因|唯一身份|一笔一|每笔绑定|可归因`，**除本条目自身与 ADR 正文的两处自指句（§1.2 `:27` 引述 #704 需求、§1.3 `:54` 的检索断言）之外零命中**——#704 当作一等约束的不变式，此前只存在于代码与 DDL，本 ADR 是它第一次被写成文字。
+- **本 ADR 自行补的安全边界**：**INV-3**——候选集必须限定在该 `(project, product)` 已有的 ACTIVE grant 之内。否则「换一把凭证」字面上等于「换一个授权」，回退会变成权限提升通道（其依据是既有不变量 `V57__unattributed_policy.sql:8`「归属未知永不借用具体项目的 grant/凭证」）。
+- **未决项**：6 条待 owner 拍板 + 4 条需 owner 补充的事实 + 5 条本 ADR 明确不回答（§5 编号 1–6 / 7–10 / 11–15，留待各自议题）；其中「是否存在同产品多凭证供给」是**能力是否可用的前提**——若生产不存在「同一产品、不同 subscription、两把以上 ACTIVE 凭证」，则候选集为空，应先解决凭证供给而非实现回退。§2-Q7 另记一条实操警告：**同账号内多把凭证回退不缓解账号级 429，反而可能加速封禁**。
+- **验证**：本线为纯文档改动，无代码/测试可跑。已执行的核查：编号核查（上述）、`README` 索引行与文件名一致性、以及对本 ADR **实际引用**的坐标逐条核对。**引用坐标的可复现枚举**：`grep -oE '[A-Za-z0-9_./-]+\.(java|sql|md|yml|yaml|json|ts|vue|properties):[0-9]+(-[0-9]+)?' docs/decisions/0021-same-product-credential-failover.md | sort -u` → **48 条**完整坐标；展开斜杠续引（`AdminCredentialService.java:151/284/315` → `:151`/`:284`/`:315`）后共 **50 条**、涉及 21 个文件（`ai-gateway-comparison.md:93/94/123` 三条本就以完整形式各出现一次，不重复计数）。50 条已全部按当前工作树逐行读出核对：文件均存在（无歧义 basename）、行内容与 ADR 陈述一致——完整集合：`AdminCredentialService.java:151/284/315`、`CLAUDE.md:35/36`、`HeaderFilters.java:77`、`PostgresUsageEventWriter.java:181`、`PostgresUsageEventWriterTest.java:137-147`、`ProxyController.java:95-97/445/454/471/526-530/571/632/634-635/649-661/663`、`RouteSnapshot.java:251`、`SseReplayEngine.java:21-22`、`V1__core_tables.sql:207/288-291/309/359/373-374`、`V57__unattributed_policy.sql:8`、`V6__usage_events.sql:24`、`V8__request_usage_records.sql:39/55/69`、`V9__quota_snapshots.sql:16`、`ai-gateway-comparison.md:33/93/94/123`、`api-contract.md:1014`、`architecture.md:155-157/159/160/161`、`feature-backlog.md:109/113`、`operations-runbook.md:99`、`product-requirements.md:27/33`、`provider-adapter-contract.md:125/126/127/128`、`tencent-ai-gateway-mapping.md:22`；另有不带行号的引用（`AuthContext.java`、`V64__usage_event_price_snapshot.sql`、`V66__usage_event_base_cost.sql` 及关联 ADR/文档链接），以及 `:69`、`:161` 这类**简写续引**（不单独计数：宿主同线时可随该完整坐标核对；宿主跨行时机械脚本会绑错宿主，需人工判读归属）。**三轮独立对抗评审**：首轮 CHANGES_REQUIRED——6 条 blocker（`:94` 坐标、`:127` 坐标、漏记红线 `architecture.md:159`、把 javadoc 误当入站剥离清单、自证不实＋空白 churn、Q2 逻辑）已逐条修复并复跑 grep，同批修正 `api-contract.md:1002` → `:1003`（develop 侧 #776 位移）；第二轮判定 CHANGES_REQUIRED——① §5 未决项计数 7/4/4 与正文实为 6/4/5 不符、② 「脚本抽取 56 条」不可复现且清单漏 `AdminCredentialService.java:284/315`、③ #780 把该段移到 `api-contract.md:1008`（`:1003` 已是 DELETE 表格行）——三处均已修正（坐标项于 `9af268eb`）；其后 develop #783 再次把该段位移至 `api-contract.md:1014`，本 ADR 正文与本文坐标清单已同步改为 `:1014`；第三轮在 `9af268eb` 上复核：上一轮 blocker 全关、无新 blocker，verdict **APPROVE**（另记 3 条 minor：行尾 churn 复发风险、简写续引跨行宿主、计数口径，均不阻塞；其后另有两批 post-approve delta——① 措辞精度修正（`6973020e`）、② 并入 develop `#783` 后的坐标与迁移号校正——按交付前置条件逐条送评审复核后才 push）。**本条目早期版本曾声称「未使用任何未命中的行号」、并曾把未被引用的坐标（`V4`、`V53`、`V57:20`、`PostgresUsageEventWriter:116` 等）列为已复核项，两处声称均已删除。**
 
 ## 2026-09-19 缓存收益页：让 API 能说"未知"，并停止把 0/0 报成 0.00%（#858）
 
@@ -5390,3 +5462,52 @@ interface KeyRow { key; label; served; hits; hitRatePct; paidCost; savedCost }  
 ### 教训
 
 **手改会赢一时，输在"下一次整树同步"**——而它真正的代价不是丢值，是**丢可复现性**：值一旦只活在运行树里，这台机器跑的定义就不再对应任何提交，事后只能考古。所以规则不是"别手改"，而是"**值要有家**"：`.env`（compose 用 `${VAR:-默认}` 透传）；**没有家就先给仓库补一行**——#777 的调和开关正是没有家的那一项，于是它只能以手改的形式存在。与之配套的是把不可见变成可见：漂移从此每次部署都会被说一次，并留在流水里。
+## 会话交接点 2026-09-19（PH1 持久化与迁移审计：`request_usage_records` 上的重复索引）
+
+- **缺陷（#864 / PR #865，分支 `fix/redundant-request-usage-index`）**：V61（#705 / PR #720）与
+  V65（#758 / PR #761）在 `request_usage_records` 上各建了一个**列完全相同**的索引
+  `idx_request_usage_records_gateway_request` 与 `idx_request_usage_records_tenant_gateway_request`，
+  均为 `(tenant_id, gateway_request_id)`、普通非唯一、无谓词。两者互不互补，全仓无 `DROP INDEX`，
+  两个索引名在 Java/SQL/文档/配置中都没有其他引用。这是 V60/V63 迁移头记录过的同一类
+  「两支并行合并后撞车」，只是这次撞的不是版本号而是索引定义。
+- **修复**：新增追加式 `V68__drop_redundant_request_usage_gateway_index.sql`，删除后建的
+  `..._tenant_gateway_request`，保留 V61 的（更早、注释含完整论证）。用 `IF EXISTS` 兼容只落过其一
+  或已手工清理的库。**未改动已进入共享环境的 V61/V65**（本仓规则：只能追加新迁移）。
+- **影响量级（经对抗性评审修正，务必按修正后的口径引用）**：该表实有 **9 个**索引
+  （`V8__request_usage_records.sql` L67 主键、L69 唯一约束、L75/77/79/81/83 五个 `CREATE INDEX`，
+  加 V61、V65 各一个），删掉 1 个减少约 **1/9 ≈ 11%** 的索引维护量——**不是**初稿写的「写放大接近 2 倍」。
+  且**当前只有 DEFAULT 分区**（`V8:73`），无月度分区，「随分区数线性放大」是**未来**成本而非现状。
+- **先证红**：移除 V68 后 `IndexHygieneTest` 失败于
+  `Expecting empty but was: ["request_usage_records :: {idx_request_usage_records_gateway_request,
+  idx_request_usage_records_tenant_gateway_request}"]`；加回 V68 转绿。受影响模块全量回归
+  domain 144 / persistence-postgres 124（5 个既有 skip）全绿，`SchemaMigrationTest`、
+  `V3UpgradeMigrationTest`(12) 亦全绿，迁移顺序与历史表未被破坏。
+- **两个非产品缺陷的坑（都拦住了，记在这里免得重踩）**：
+  1. **假绿**：只把 V68 从源码移走、没清 `target/classes`，Maven 资源插件**不删除已移除的资源**，
+     Flyway 仍从陈旧副本应用了它，于是「先证红」跑出 `exit=0`。必须**同时**清源码与 `target/classes`；
+     本次改用 `find . -name "V68*"` 断言运行期零副本后再跑，并把 V68 的 md5 前后校验纳入脚本。
+  2. **对抗性评审证伪了我的两处断言**：影响量级（见上）与测试分组。原 `GROUP BY` 少了
+     `indnkeyatts`/`indclass`/`indcollation`/`indoption`，会把 `text_pattern_ops` 伴随索引、
+     `DESC`/`NULLS FIRST` 变体、`INCLUDE` 载荷列判成重复——合成表实测原查询误报 5 组。
+     已收紧分组并逐项写进 Javadoc；收紧后仍能捕获真实重复（红/绿均已复跑）。
+  3. **第二轮评审又找出 `indexprs` 漏项**：第一轮的合成验证只造了「操作符类/排序/空值序」三类
+     变体，**没造表达式索引**，因此漏了 `indkey` 对表达式列一律渲染为 `0` 这个坑——
+     `lower(username)` 与 `upper(username)` 在该查询眼里同形。`users` 上已有
+     `uq_users_tenant_username ON users (tenant_id, lower(username))`（`V1__core_tables.sql:61`），
+     是活场景而非假想。已把 `pg_get_expr(i.indexprs, i.indrelid)` 并入 `GROUP BY`，
+     并把 Javadoc 从「covers every catalog attribute」这种过度声明改为逐项列举 + 显式「已知边界」
+     （`indisunique` 在分组键里故「普通索引重复唯一索引列」不报；`reloptions` 不比较；
+     仅 `public` schema 且排除分区副本）。**教训：合成验证只能证伪「我想到的那些」变体。**
+  4. **第二轮还发现 V68 自己的头注释有一句假话**：称「retention/deletion paths have to drop and
+     recreate both」，但全仓无 `DELETE FROM request_usage_records`/`TRUNCATE`/`DETACH PARTITION`，
+     且同一 PR 的 progress.md 就写着「DROP PARTITION 留存当前无法实施」——自己和自己打架。
+     已删改；并把「waste multiplies with partition count」改成准确表述：**放大的是索引对象数与
+     rebuild/DDL 工作量，单次写入的额外开销恒为 1**（一行只落一个分区）。
+     另：issue #864 的**标题**当时仍留着旧数字「写放大一倍」，与已更正的正文矛盾，已一并改名。
+- **本文件顺带修正**：第 3585 行原写「V60 为 `(tenant_id, gateway_request_id)` 建索引」，
+  实为 **V61**（V60 是 `usage_queue_saturation_alert`，与此无关），已就地更正。
+- **未提交但已确认的真实问题**（详见审计报告 `_orchestrate/reports/PH1_report.md` 第三节，供另行排期）：
+  `usage_adjustments.usage_event_id` 的 `ON DELETE CASCADE` 无前导列索引（低影响）；
+  `docs/database-schema.md` 与迁移的大面积漂移（7 张不存在的表、多处枚举/约束写错，属文档系统性重写）。
+- 工作区卫生：本次只提交 3 个文件（V68 迁移 + `IndexHygieneTest` + 本文件）；一次性诊断用
+  `ZzHygieneProofTest`、`ZzDiagnosticTest` 均已删除，未进入任何提交。

@@ -318,6 +318,24 @@ class VirtualKeyAuthContractTest {
         }
 
         @Test
+        @DisplayName("a control character in the model name still yields a parseable error body")
+        void controlCharacterInModelNameKeepsErrorBodyParseable() throws Exception {
+            // A client can smuggle any U+0000-U+001F into the echoed model name
+            // with a JSON unicode escape. The escape is spelled here as
+            // backslash + "u0008" (rather than a Java escape) so this test
+            // itself stays free of raw control characters.
+            String backspace = String.valueOf((char) 92) + "u0008";
+            byte[] body = webTestClient.post().uri("/v1/chat/completions")
+                    .bodyValue("{\"model\":\"denied" + backspace + "model\",\"messages\":[{\"role\":\"user\","
+                            + "\"content\":\"hi\"}]}")
+                    .exchange().expectStatus().isForbidden().expectBody().returnResult().getResponseBody();
+
+            JsonNode parsed = new ObjectMapper().readTree(body);
+            assertThat(parsed.path("error").path("type").asText()).isEqualTo("model_not_allowed");
+            assertThat(mockProvider.getCapturedRequests()).isEmpty();
+        }
+
+        @Test
         @DisplayName("should allow every model in the key's allowlist")
         void shouldAllowAllowedModels() {
             mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)

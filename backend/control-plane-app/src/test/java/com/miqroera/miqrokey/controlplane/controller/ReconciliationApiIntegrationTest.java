@@ -26,6 +26,9 @@ import org.springframework.test.web.servlet.MvcResult;
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -33,6 +36,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -246,6 +254,98 @@ class ReconciliationApiIntegrationTest {
         // Audit trail: created + succeeded, never content.
         assertThat(eventCount("RECONCILIATION_CREATED")).isEqualTo(2);
         assertThat(eventCount("RECONCILIATION_SUCCEEDED")).isEqualTo(2);
+    }
+
+    /**
+     * The contract promises 「同 (providerCode, window, currency, uploadSha256) 重复导入
+     * 返回既有报告（不重复执行）」 (docs/api-contract.md). A sequential re-upload honours it —
+     * {@link #fourStateReport()} covers that — but the lookup and the insert are a
+     * check-then-act pair over an autocommit connection, so two uploads that are in
+     * flight at the same time both miss the lookup and both insert.
+     *
+     * <p>
+     * The interleaving is forced, not raced for: a table-level {@code SHARE} lock
+     * suspends every INSERT (ROW EXCLUSIVE) while leaving the dedupe SELECT (ACCESS
+     * SHARE) free, so both requests are guaranteed to be inside {@code create()} at
+     * the same time before either row can land.
+     * </p>
+     */
+    @Test
+    @DisplayName("concurrent duplicate upload: one report, not two")
+    void concurrentDuplicateUploadCreatesOneReport() throws Exception {
+        byte[] body = billJsonl().getBytes(StandardCharsets.UTF_8);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        Connection lock = jdbc.getJdbcTemplate().getDataSource().getConnection();
+        try {
+            lock.setAutoCommit(false);
+            try (Statement statement = lock.createStatement()) {
+                statement.execute("LOCK TABLE reconciliation_reports IN SHARE MODE");
+            }
+            CountDownLatch go = new CountDownLatch(1);
+            List<Future<MvcResult>> uploads = new ArrayList<>();
+            for (int i = 0; i < 2; i++) {
+                uploads.add(pool.submit(() -> {
+                    go.await();
+                    return postReport(body);
+                }));
+            }
+            go.countDown();
+            boolean bothQueuedOnInsert = awaitBlockedInserts(2);
+            lock.rollback();
+
+            List<String> reportIds = new ArrayList<>();
+            for (Future<MvcResult> upload : uploads) {
+                MvcResult result = upload.get(60, TimeUnit.SECONDS);
+                assertThat(result.getResponse().getStatus())
+                        .as("create response: %s", result.getResponse().getContentAsString()).isEqualTo(202);
+                reportIds.add(objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8))
+                        .get("id").asText());
+            }
+            assertThat(bothQueuedOnInsert)
+                    .as("both uploads must still be in flight — parked on a lock — when the table lock is released")
+                    .isTrue();
+
+            int rows = jdbc.queryForObject(
+                    "SELECT count(*) FROM reconciliation_reports WHERE tenant_id = :tenantId AND upload_sha256 = :sha",
+                    new MapSqlParameterSource("tenantId", TENANT_ID).addValue("sha", sha256Hex(body)), Integer.class);
+            assertThat(reportIds.get(0))
+                    .as("both concurrent callers of one upload must see the same report (rows stored: %d)", rows)
+                    .isEqualTo(reportIds.get(1));
+            assertThat(rows).as("one upload content must produce exactly one report").isEqualTo(1);
+            assertThat(eventCount("RECONCILIATION_CREATED")).as("one report, one audit event").isEqualTo(1);
+        } finally {
+            try {
+                lock.rollback();
+            } catch (SQLException ignored) {
+                // the connection is going away anyway
+            }
+            try {
+                lock.close();
+            } catch (SQLException ignored) {
+                // the connection is going away anyway
+            }
+            pool.shutdownNow();
+        }
+    }
+
+    /**
+     * Waits until {@code expected} backends are queued on a lock; false on timeout.
+     */
+    private boolean awaitBlockedInserts(int expected) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+        while (System.nanoTime() < deadline) {
+            Integer waiting = jdbc.queryForObject("SELECT count(*) FROM pg_locks WHERE NOT granted",
+                    new MapSqlParameterSource(), Integer.class);
+            if (waiting != null && waiting >= expected) {
+                return true;
+            }
+            Thread.sleep(50);
+        }
+        return false;
+    }
+
+    private static String sha256Hex(byte[] content) throws Exception {
+        return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(content));
     }
 
     @Test

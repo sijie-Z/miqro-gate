@@ -15,7 +15,6 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -104,10 +103,16 @@ class RetentionKafkaIntegrationTest {
         REDPANDA.start();
     }
 
-    @AfterAll
-    static void stopBroker() {
-        REDPANDA.stop();
-    }
+    // The broker is deliberately NOT stopped here (#985): the Spring context —
+    // and with it the Kafka retention publisher — closes on JVM shutdown, i.e.
+    // AFTER this method runs. Verified the hard way: a @AfterAll that closed the
+    // context first made Spring's own afterTestClass fail with "The
+    // ApplicationContext loaded for ...". The publisher flushes buffered records
+    // from close(), and with the broker already gone that flush waits out
+    // delivery.timeout.ms (120s default) — past surefire's 30s exit budget, which
+    // is why a fully green suite still exited non-zero. So the broker has to
+    // outlive the context; Testcontainers reaps it through Ryuk once the JVM is
+    // gone. What production should wait for on shutdown is a separate decision.
 
     @DynamicPropertySource
     static void brokerProperties(DynamicPropertyRegistry registry) {

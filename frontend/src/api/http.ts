@@ -157,6 +157,19 @@ export function get<T>(path: string, query?: RequestOptions['query']): Promise<T
   return request<T>(path, { method: 'GET', query });
 }
 
+/**
+ * GET for endpoints whose body is a bare JSON array.
+ *
+ * `response.json() as T` is an unchecked cast, so the declared shape is only a
+ * promise, never a guarantee: a non-array body (contract drift, proxy error
+ * page, version mismatch) reaches `list.length` / `.map` and throws mid-render.
+ * Normalising here keeps the declared `Promise<T[]>` honest for every
+ * list endpoint at once (#PH20-C).
+ */
+export function getList<T>(path: string, query?: RequestOptions['query']): Promise<T[]> {
+  return get<T[] | null>(path, query).then((value) => (Array.isArray(value) ? value : []));
+}
+
 export function post<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, { method: 'POST', body });
 }
