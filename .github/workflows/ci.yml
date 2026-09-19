@@ -79,8 +79,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # `git diff --check HEAD^ HEAD` needs the parent commit. The action
+          # defaults to fetch-depth: 1, which left HEAD^ unresolvable: the
+          # command died with `fatal: ambiguous argument 'HEAD^'` (exit 128) and
+          # the `|| true` swallowed it, so this gate could never fail. Depth 2
+          # is the minimum that makes it able to (#895).
+          fetch-depth: 2
       - name: Whitespace check
-        run: git diff --check HEAD^ HEAD || true
+        run: git diff --check HEAD^ HEAD
       - name: Secret scan
         run: bash deploy/security/check-secrets.sh
 
