@@ -5,6 +5,11 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 ### 2026-09-19
 
+- **部署：运行树漂移治理（#917）**：`deploy.sh` 渲染的是**运行树**的 compose，仓库版本在构建树里——两者不同
+  时此前无人知晓，只能靠人工逐行 diff 考古。现在每次部署都比较两份文件，不同即打 WARNING（**只警告、不判死**），
+  并把 `compose_drift=yes|no` 记进 `deploy.log`；`deploy/.env.prod.example` 写明"站点取值一律进 `.env`"与可用开关清单。
+  同时补上 `MIQROKEY_USAGE_PRICE_RECONCILE_ENABLED`（派生列调和 #777）的 compose 接线与配置参考条目——
+  该旋钮此前**没有透传进容器**，`.env` 里设了也不生效，生产上只能手改运行树，正是漂移的来源之一。
 - **修复：站内手册首发上线渲染为空（#899，PR #900）**：`docs/` 被 `.dockerignore` 排除在 portal 构建上下文之外，
   构建期内联 `docs/user-guide/*.md` 得到空集合——本地与 CI 都在完整检出上构建，所以两处都不复现。
   手册改为内置 `frontend/src/content/handbook/` 的 vendored 副本（同步脚本 + 防漂移单测 + 页内空态兜底）。
@@ -645,6 +650,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - Supply-chain gate：Secret 扫描（修复 23 处文档示例 Key）、CycloneDX SBOM + 许可证门禁、Trivy 镜像扫描（驱动 postgres 镜像 digest 升级）
 - Performance & soak：并发流浸泡测试 + 生产 soak 脚本
 - 本版本：**未标记 VERIFIED**（无真实供应商凭证契约测试，`WAITING_FOR_CREDENTIAL`）
+
 
 
 
