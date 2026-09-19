@@ -149,7 +149,7 @@ class UsageLifecycleIntegrationTest {
     @Order(0)
     @DisplayName("a context-limit rejection (413) never reaches upstream and writes no lifecycle row")
     void contextLimitRejectionWritesNoLifecycleRow() throws Exception {
-        // Runs before @Order(7), which closes the mock provider for the rest of
+        // Runs before @Order(8), which closes the mock provider for the rest of
         // the class. Control request first: the same context does open a row for
         // a request that reaches upstream, so the zero-row assertion below cannot
         // pass vacuously.
@@ -228,8 +228,8 @@ class UsageLifecycleIntegrationTest {
         assertThat(row).containsEntry("request_status", "SUCCEEDED");
         assertThat(row).containsEntry("streaming", true);
         assertThat(row).containsEntry("usage_missing", false);
-        // Anthropic SSE carries input/output tokens (merged across message_start
-        // and message_delta) but no OpenAI-style total_tokens field.
+        // Anthropic SSE carries input/output tokens (the cumulative counters of
+        // message_start/message_delta) but no OpenAI-style total_tokens field.
         assertThat(row.get("input_tokens")).isNotNull();
         assertThat(row.get("output_tokens")).isNotNull();
         assertThat(row.get("total_tokens")).isNull();
@@ -238,6 +238,28 @@ class UsageLifecycleIntegrationTest {
 
     @Test
     @Order(3)
+    @DisplayName("streaming usage equals the provider's counters instead of summing them across events")
+    void streamingUsageIsNotDoubleCountedAcrossEvents() throws Exception {
+        // RESPONSE_STREAMING_SSE reports usage TWICE for the same message:
+        // message_start {"input_tokens":10,"output_tokens":0} and message_delta
+        // {"input_tokens":10,"output_tokens":8,...}. Anthropic usage counters are
+        // cumulative within one response, so the record must carry 10/8 — summing
+        // the two events would bill the same input tokens twice.
+        mockProvider.configure(
+                AnthropicMockProvider.ResponseConfig.builder().statusCode(200).contentType("text/event-stream")
+                        .body(AnthropicFixtures.RESPONSE_STREAMING_SSE).streaming(true).build());
+
+        webTestClient.post().uri("/v1/messages").bodyValue(AnthropicFixtures.REQUEST_STREAMING).exchange()
+                .expectStatus().isOk().expectBody().returnResult().getResponseBody();
+
+        Map<String, Object> row = awaitLatestLifecycleRow();
+        assertThat(row).containsEntry("request_status", "SUCCEEDED");
+        assertThat(row).containsEntry("input_tokens", 10L);
+        assertThat(row).containsEntry("output_tokens", 8L);
+    }
+
+    @Test
+    @Order(4)
     @DisplayName("prompt cache usage (cache_read / cache_creation) lands in the lifecycle row")
     void promptCacheUsageLandsInLifecycleRow() throws Exception {
         mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
@@ -257,7 +279,7 @@ class UsageLifecycleIntegrationTest {
     }
 
     @Test
-    @Order(4)
+    @Order(5)
     @DisplayName("a 200 without usage fields is explicitly flagged usage_missing")
     void successWithoutUsageIsMarkedUsageMissing() throws Exception {
         mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
@@ -273,7 +295,7 @@ class UsageLifecycleIntegrationTest {
     }
 
     @Test
-    @Order(5)
+    @Order(6)
     @DisplayName("a non-2xx upstream response finalizes UPSTREAM_REJECTED")
     void upstreamRejectionFinalizesRejectedRow() throws Exception {
         mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(429)
@@ -289,7 +311,7 @@ class UsageLifecycleIntegrationTest {
     }
 
     @Test
-    @Order(6)
+    @Order(7)
     @DisplayName("a client disconnect mid-stream finalizes CLIENT_CANCELLED")
     void clientCancellationFinalizesCancelledRow() throws Exception {
         mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
@@ -312,7 +334,7 @@ class UsageLifecycleIntegrationTest {
     }
 
     @Test
-    @Order(7)
+    @Order(8)
     @DisplayName("an unreachable upstream finalizes UPSTREAM_UNAVAILABLE (502 to the client)")
     void upstreamOutageFinalizesUnavailableRow() throws Exception {
         mockProvider.close(); // port stops listening -> connection refused

@@ -504,7 +504,7 @@ public class ProxyController {
                                     && attempt.upstreamError.get() == null);
                     TokenBucket tokens = attempt.observedTokens.get() != null
                             ? attempt.observedTokens.get()
-                            : mergeObservations(attempt.usageObserver);
+                            : latestObservation(attempt.usageObserver);
                     // #741: the single terminal point feeds the LLM breaker —
                     // one outcome per gateway request (retried attempts are not
                     // separately counted), client cancels skipped.
@@ -569,7 +569,7 @@ public class ProxyController {
 
                     return clientResponse.writeWith(observed).then(Mono.fromSupplier(() -> {
                         // The stream was fully written to the client.
-                        TokenBucket tokens = mergeObservations(attempt.usageObserver);
+                        TokenBucket tokens = latestObservation(attempt.usageObserver);
                         if (!isSse && tokens.isEmpty()) {
                             // Non-streaming JSON: usage lives in the response
                             // body, not SSE events. Only counts are extracted —
@@ -826,14 +826,20 @@ public class ProxyController {
         };
     }
 
-    private TokenBucket mergeObservations(SseUsageObserver observer) {
-        TokenBucket merged = TokenBucket.EMPTY;
+    /**
+     * Collapses the usage frames observed for one response into a single bucket.
+     * Provider counters are cumulative within a response, so each later frame
+     * supersedes the earlier values per field — never sums them
+     * ({@link TokenBucket#overlay}).
+     */
+    private TokenBucket latestObservation(SseUsageObserver observer) {
+        TokenBucket latest = TokenBucket.EMPTY;
         for (SseUsageObserver.UsageObservation obs : observer.getObservations()) {
-            merged = merged.merge(new TokenBucket(obs.inputTokens(), obs.outputTokens(), obs.cacheCreationInputTokens(),
-                    obs.cacheReadInputTokens(), obs.promptTokens(), obs.completionTokens(), obs.totalTokens(),
-                    obs.reasoningTokens()));
+            latest = latest.overlay(new TokenBucket(obs.inputTokens(), obs.outputTokens(),
+                    obs.cacheCreationInputTokens(), obs.cacheReadInputTokens(), obs.promptTokens(),
+                    obs.completionTokens(), obs.totalTokens(), obs.reasoningTokens()));
         }
-        return merged;
+        return latest;
     }
 
     /**
