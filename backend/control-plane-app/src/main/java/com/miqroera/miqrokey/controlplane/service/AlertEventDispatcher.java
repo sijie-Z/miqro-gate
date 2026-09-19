@@ -224,8 +224,8 @@ public class AlertEventDispatcher {
      * Both switches gate a retry exactly as they gate the first delivery
      * ({@link #endpointOf}): disabling an endpoint or a rule stops this receiver
      * immediately, including retries that were already armed when it was disabled.
-     * A suppressed retry keeps its backoff deadline, so re-enabling the switch makes
-     * it eligible again on the next sweep.
+     * A suppressed retry keeps its backoff deadline, so re-enabling the switch
+     * makes it eligible again on the next sweep.
      * </p>
      */
     public void retryDue() {

@@ -251,16 +251,19 @@ class AlertDeliveryHttpErrorRetryIntegrationTest {
 
     private String createRule(String endpointId) throws Exception {
         MvcResult created = mockMvc
-                .perform(post("/api/v1/admin/alert-rules").contentType(MediaType.APPLICATION_JSON)
-                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                        .content(objectMapper.writeValueAsString(
-                                Map.of("name", "missing-rate-" + UUID.randomUUID().toString().substring(0, 8), "type",
+                .perform(
+                        post("/api/v1/admin/alert-rules").contentType(MediaType.APPLICATION_JSON)
+                                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                                .content(objectMapper.writeValueAsString(Map.of("name",
+                                        "missing-rate-" + UUID.randomUUID().toString().substring(0, 8), "type",
                                         "USAGE_MISSING_RATE", "threshold", 0.5, "webhookEndpointId", endpointId))))
                 .andExpect(status().isOk()).andReturn();
         return objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
     }
 
-    /** Pulls the armed backoff deadline into the past so one sweep sees it as due. */
+    /**
+     * Pulls the armed backoff deadline into the past so one sweep sees it as due.
+     */
     private void backdateRetry(String endpointId) {
         int backdated = jdbc.update(
                 "UPDATE webhook_delivery_attempts SET next_retry_at = now() - interval '1 minute' "
