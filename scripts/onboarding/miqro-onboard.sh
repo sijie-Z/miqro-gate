@@ -274,8 +274,12 @@ harden_and_warn() {
         die "could not restrict permissions on $1 — it holds a credential; refusing to report success"
     fi
     _d=$(dirname "$1")
-    if command -v git >/dev/null 2>&1 && git -C "$_d" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        if ! git -C "$_d" check-ignore -q "$(basename "$1")" 2>/dev/null; then
+    # `git -C DIR` is not portable: on Windows the git on PATH is a native
+    # binary that cannot resolve MSYS-style absolute paths (`/tmp/...`,
+    # `/c/...`, an expanded `~`), so -C fails, the guard short-circuits and the
+    # warning below is silently skipped. Let the shell resolve the path instead.
+    if command -v git >/dev/null 2>&1 && (cd "$_d" 2>/dev/null && git rev-parse --is-inside-work-tree >/dev/null 2>&1); then
+        if ! (cd "$_d" 2>/dev/null && git check-ignore -q "$(basename "$1")" 2>/dev/null); then
             warn "$1 is inside a git work tree and not ignored — it now holds a credential; add it to .gitignore before committing"
         fi
     fi
