@@ -145,9 +145,7 @@ describe('NextAdminAgentsView', () => {
   });
 
   it('does not render a null createdAt as the epoch date (#PH20-B)', async () => {
-    mockApi.adminListAgents.mockResolvedValue([
-      agent({ createdAt: null as unknown as string }),
-    ]);
+    mockApi.adminListAgents.mockResolvedValue([agent({ createdAt: null as unknown as string })]);
     const wrapper = mountView();
     await flushPromises();
 
