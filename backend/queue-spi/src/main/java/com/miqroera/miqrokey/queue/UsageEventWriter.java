@@ -18,9 +18,8 @@ import java.util.List;
  * which by definition does not arbitrate rows that carry no upstream request id
  * (COALESCED / cache hits) — a replay of such a row can only conflict on the
  * {@code id} primary key, so naming the partial index as the arbiter turns that
- * replay into a hard error instead of a no-op (#887).
- * {@code cache_hit_event} conflicts on
- * {@code (tenant_id, cache_key, level, occurred_at)}.
+ * replay into a hard error instead of a no-op (#887). {@code cache_hit_event}
+ * conflicts on {@code (tenant_id, cache_key, level, occurred_at)}.
  * </p>
  *
  * <p>

@@ -21,11 +21,10 @@ import java.util.UUID;
  * JDBC batch writer. One transaction per batch; idempotency comes from the
  * replayed event keeping its id plus the partial unique index on
  * {@code (tenant_id, provider_request_id)} (see {@link UsageEventWriter}).
- * Request lifecycle
- * records are written with a guarded upsert: starts insert {@code IN_FLIGHT}
- * rows ({@code ON CONFLICT DO NOTHING}), completions update only
- * {@code IN_FLIGHT} rows — a finalized record is never rewritten and a retried
- * flush never double-finalizes.
+ * Request lifecycle records are written with a guarded upsert: starts insert
+ * {@code IN_FLIGHT} rows ({@code ON CONFLICT DO NOTHING}), completions update
+ * only {@code IN_FLIGHT} rows — a finalized record is never rewritten and a
+ * retried flush never double-finalizes.
  *
  * <p>
  * Never runs on the Reactor event loop — the bus flush task owns it.
