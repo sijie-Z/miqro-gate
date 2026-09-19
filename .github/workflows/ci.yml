@@ -427,6 +427,8 @@ jobs:
       # Dependency manifests (Maven poms + npm lockfiles) were outside every
       # scanner before PH25: this step is the only gate that reads them.
       # Image vulnerabilities are covered by the next step.
+      # --show-suppressed keeps every ignored row in the log: .trivyignore-deps
+      # takes advisories out of the exit code, never out of the transcript.
       - name: Dependency vulnerability scan (Maven + npm manifests)
         run: |
           docker run --rm \
@@ -435,6 +437,7 @@ jobs:
             aquasec/trivy:0.58.2 fs --scanners vuln \
             --severity HIGH,CRITICAL \
             --ignorefile /root/.trivyignore \
+            --show-suppressed \
             --ignore-unfixed --exit-code 1 --no-progress \
             --skip-dirs /src/.git \
             --skip-dirs /src/frontend/node_modules \

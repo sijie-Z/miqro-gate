@@ -1,14 +1,23 @@
-# PH25 (2026-09-19): dependency-manifest scan exemptions, each with
-# rationale. Scope = Maven + npm manifests only (see the "Dependency
-# vulnerability scan" step in .github/workflows/ci.yml), NOT the container
-# image — image exemptions live in deploy/security/.trivyignore.
+# PH25 (2026-09-19): dependency-manifest scan exemptions. Scope = Maven +
+# npm manifests only (see the "Dependency vulnerability scan" step in
+# .github/workflows/ci.yml), NOT the container image — image exemptions
+# live in deploy/security/.trivyignore.
 #
 # Review EVERY entry when the referenced dependency is upgraded: an entry
-# that outlives its rationale is a silently disabled gate.
+# that outlives its rationale is a silently disabled gate (#895).
+#
+# Suppressed findings are printed on every run via --show-suppressed, so
+# this file hides an advisory from the exit code, never from the log.
+#
+# ===========================================================================
+# SECTION 1 — NOT REACHABLE. Version is left alone on purpose; rationale is
+# expected to stay true until the dependency is next bumped.
+# ===========================================================================
 #
 # org.bouncycastle:bcprov-jdk18on 1.78.1 (backend/persistence-postgres/
-# pom.xml, pulled in for Argon2PasswordEncoder). None of the three
-# advisories sits on a code path this project reaches:
+# pom.xml:33-36, the only dependency in the repo with an explicit <version>,
+# pulled in for Argon2PasswordEncoder). None of the three advisories sits on
+# a code path this project reaches:
 #   - CVE-2025-14813 GOSTCTR block handling — GOST ciphers are not used;
 #   - CVE-2026-8763 PKIX name-constraints bypass — no certificate-path
 #     validation is performed with BouncyCastle here;
@@ -18,3 +27,38 @@
 CVE-2025-14813
 CVE-2026-8763
 CVE-2026-13506
+#
+# ===========================================================================
+# SECTION 2 — TRACKED BASELINE. These are NOT dismissals and NOT judged
+# unreachable: they are real HIGH/CRITICAL advisories against versions this
+# repo actually resolves to, recorded here so the gate can land and start
+# catching NEW ones. Each row names the live tracker that removes it.
+# DROP a row the moment its tracker lands — a row without a tracker is a bug.
+# ===========================================================================
+#
+# org.postgresql:postgresql 42.7.5 — BOM-managed; backend/persistence-postgres/
+# pom.xml:48-52 declares no <version>, value comes from
+# spring-boot-dependencies-3.4.5.pom:159. Fixes 42.7.7 / 42.7.11 / 42.7.12 are
+# all inside the 42.7.x patch line.
+# Tracker: issue #973 -> PR #975 pins 42.7.12. DROP when #975 merges.
+CVE-2025-49146
+CVE-2026-42198
+CVE-2026-54291
+#
+# org.apache.kafka:kafka-clients 3.8.1 — BOM-managed; gateway-app/pom.xml:57-58
+# and control-plane-app/pom.xml:53-54 declare no <version>. Producer buffer-pool
+# race -> message corruption/misrouting (GHSA-5qcv-4rpc-jp93); the ADR-0014 R3
+# retention publisher is a producer, so the affected role DOES match. No fix
+# exists inside 3.8.x (fixes: 3.9.2 / 4.0.2 / 4.1.2).
+# Tracker: issue #980. DROP when the Boot BOM moves past 3.8.1.
+CVE-2026-35554
+#
+# spring-boot-starter-actuator 3.4.5 — BOM-managed; gateway-app/pom.xml:63-66
+# and control-plane-app/pom.xml:67 declare no <version>. Both are auth bypasses
+# that require non-default configuration; this repo exposes only health,info
+# with show-details: when-authorized (control-plane-app/src/main/resources/
+# application.yml:112-119), so neither is reachable as configured.
+# Tracker: dependabot PR #87 (spring-boot.version 3.4.5 -> 4.1.1). DROP when
+# #87 merges, after confirming the resulting Boot line is >= 3.5.12 / 4.0.4.
+CVE-2026-22731
+CVE-2026-22733
