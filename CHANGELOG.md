@@ -5,6 +5,11 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 ### 2026-09-20
 
+- **密钥列表「允许模型」补 tooltip（#1013）**：该格 `nowrap + ellipsis` 截断后**没有任何恢复路径**
+  （无 title、无 tooltip，行内「更多」也没有入口），第 4 个模型名在页面上不可见——而它是这把 Key 的绑定事实
+  （ui-specification §5：不能隐藏关键绑定信息）。按同表格「用途」列的既有惯例包一层 `UiTooltip`（文本=完整清单）。
+  来源是 2026-09-20 的前端验收轮：32 条受控路由全走一遍 + 13 个列表页的「溢出且无恢复」截断审计，只捞出这一格。
+
 - **入口补齐 HSTS（#996）**：Nginx 此前只下发 `X-Content-Type-Options` / `X-Frame-Options` /
   `Referrer-Policy`，**没有 `Strict-Transport-Security`**——而仓库里（Nginx、Spring、文档）从未有过这个头。
   现补上 `max-age=31536000; includeSubDomains`（`always`，覆盖错误响应；**刻意不含 `preload`**：撤回周期
@@ -659,6 +664,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - Supply-chain gate：Secret 扫描（修复 23 处文档示例 Key）、CycloneDX SBOM + 许可证门禁、Trivy 镜像扫描（驱动 postgres 镜像 digest 升级）
 - Performance & soak：并发流浸泡测试 + 生产 soak 脚本
 - 本版本：**未标记 VERIFIED**（无真实供应商凭证契约测试，`WAITING_FOR_CREDENTIAL`）
+
 
 
 
