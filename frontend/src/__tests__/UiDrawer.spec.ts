@@ -5,7 +5,7 @@
  * move focus in on open, keep it inside while open, and hand it back to
  * whatever opened it on close.
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { defineComponent, ref } from 'vue';
 import {
@@ -125,6 +125,31 @@ describe('UiDrawer modal focus contract', () => {
     await flushPromises();
 
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it('detaches the focus guard even when the document global is gone', async () => {
+    vi.useFakeTimers();
+    const { wrapper } = await openDrawer();
+    const doc = document;
+    const removeListener = vi.spyOn(doc, 'removeEventListener');
+    try {
+      // Simulates a test file that never unmounts its drawer: vitest tears
+      // jsdom down with the settle timer still pending, and the callback must
+      // not reach for a global that is already gone — that throws *after* every
+      // test passed, failing the run with exit code 1 and no failing test to
+      // point at (exactly how this reached CI).
+      (globalThis as { document?: Document }).document = undefined;
+      vi.advanceTimersByTime(500);
+      expect(removeListener).toHaveBeenCalledWith('focusin', expect.any(Function), true);
+    } finally {
+      // Undo everything unconditionally: a throw above is the failure this test
+      // hunts for, and it must not become the reason later cases fail (leaked
+      // fake timers starve the next test's macrotasks into a timeout).
+      (globalThis as { document?: Document }).document = doc;
+      removeListener.mockRestore();
+      vi.useRealTimers();
+      wrapper.unmount();
+    }
   });
 });
 

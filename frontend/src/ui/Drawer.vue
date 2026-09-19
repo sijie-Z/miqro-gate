@@ -78,13 +78,21 @@ function watchForStrayFocus() {
       refocusing = false;
     }
   };
-  document.addEventListener('focusin', onFocusIn, true);
+  // Detach from the document captured at registration, not from the global:
+  // this cleanup runs from a timer that can outlive its environment (a test
+  // file that never unmounts the drawer leaves it pending while vitest tears
+  // jsdom down), and reaching for a `document` that is already gone throws
+  // *after* the suite passed — failing the run with exit code 1 and no failing
+  // test. Unregistering from the same document we registered on is also the
+  // right thing to do on principle.
+  const doc = document;
+  doc.addEventListener('focusin', onFocusIn, true);
   const timer = setTimeout(() => {
     off();
   }, SETTLE_MS);
   function off() {
     clearTimeout(timer);
-    document.removeEventListener('focusin', onFocusIn, true);
+    doc.removeEventListener('focusin', onFocusIn, true);
     if (detachSettle === off) detachSettle = null;
   }
   detachSettle = off;
