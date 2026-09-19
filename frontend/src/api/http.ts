@@ -160,10 +160,10 @@ export function get<T>(path: string, query?: RequestOptions['query']): Promise<T
 /**
  * GET for endpoints whose body is a bare JSON array.
  *
- * `response.json() as T` is an unchecked cast, and the control plane is a
- * Jackson backend: an empty collection comes back as `null`, not `[]`. Callers
- * that trust the cast then hit `list.length` / `.map` on `null` and blank the
- * page. Normalising here keeps the declared `Promise<T[]>` honest for every
+ * `response.json() as T` is an unchecked cast, so the declared shape is only a
+ * promise, never a guarantee: a non-array body (contract drift, proxy error
+ * page, version mismatch) reaches `list.length` / `.map` and throws mid-render.
+ * Normalising here keeps the declared `Promise<T[]>` honest for every
  * list endpoint at once (#PH20-C).
  */
 export function getList<T>(path: string, query?: RequestOptions['query']): Promise<T[]> {
