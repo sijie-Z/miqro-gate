@@ -257,6 +257,37 @@ class ReconciliationApiIntegrationTest {
     }
 
     /**
+     * The report window is half-open, like every other usage window in the product:
+     * {@code windowFrom} inclusive, {@code windowTo} exclusive. A usage row landing
+     * exactly on the upper bound is billed by the next report, so counting it here
+     * as well reports it twice and makes the report's local side disagree with the
+     * usage export for the same nominal window.
+     */
+    @Test
+    @DisplayName("window boundary: from inclusive, to exclusive — same as the usage export")
+    void windowBoundaryIsHalfOpen() throws Exception {
+        seedUsage("req-at-from", "m-at-from", windowFrom, 10L, 5L);
+        seedUsage("req-before", "m-before", windowFrom.minusSeconds(1), 10L, 5L);
+        seedUsage("req-at-to", "m-at-to", windowTo, 10L, 5L);
+
+        String bill = "{\"provider_request_id\":\"req-ghost\",\"occurred_at\":\"" + occurred
+                + "\",\"model_id\":\"ghost\",\"amount\":\"1.00\",\"currency\":\"USD\",\"provider_row_ref\":\"bill-1\"}\n";
+        MvcResult created = postReport(bill.getBytes(StandardCharsets.UTF_8));
+        assertThat(created.getResponse().getStatus()).isEqualTo(202);
+        String reportId = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asText();
+
+        // Only the row exactly on `windowFrom` is inside: the one before it is
+        // out, and the one on `windowTo` belongs to the next window.
+        assertThat(awaitSucceeded(reportId)).contains("\"SUCCEEDED\"").contains("\"unmatchedLocal\":1");
+        String local = mockMvc
+                .perform(get("/api/v1/admin/reconciliations/" + reportId + "/rows").param("state", "UNMATCHED_LOCAL")
+                        .cookie(sessionCookie, csrfCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.rows.length()").value(1)).andReturn().getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(local).contains("\"modelId\":\"m-at-from\"").doesNotContain("m-at-to");
+    }
+
+    /**
      * The contract promises 「同 (providerCode, window, currency, uploadSha256) 重复导入
      * 返回既有报告（不重复执行）」 (docs/api-contract.md). A sequential re-upload honours it —
      * {@link #fourStateReport()} covers that — but the lookup and the insert are a

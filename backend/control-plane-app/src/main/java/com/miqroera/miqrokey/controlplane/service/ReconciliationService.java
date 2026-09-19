@@ -547,7 +547,7 @@ public class ReconciliationService {
                        e.cache_read_input_tokens,
                        (e.upstream_status_code BETWEEN 200 AND 299) AS success
                 FROM usage_event e JOIN provider_products p ON p.id = e.provider_product_id
-                WHERE e.tenant_id = :tenantId AND e.occurred_at >= :from AND e.occurred_at <= :to
+                WHERE e.tenant_id = :tenantId AND e.occurred_at >= :from AND e.occurred_at < :to
                 """,
                 new MapSqlParameterSource("tenantId", tenantId).addValue("from", java.sql.Timestamp.from(from))
                         .addValue("to", java.sql.Timestamp.from(to)),
