@@ -14,6 +14,12 @@ public interface VirtualKeyRepository {
 
     Optional<VirtualKey> findById(UUID id);
 
+    /**
+     * Batch form of {@link #findById}: one query for the whole ID set. Used by list
+     * rendering so the query count stays constant as rows grow.
+     */
+    List<VirtualKey> findAllByIds(Collection<UUID> ids);
+
     Optional<VirtualKey> findByPublicKeyId(String publicKeyId);
 
     List<VirtualKey> findAllByUserId(UUID userId);
