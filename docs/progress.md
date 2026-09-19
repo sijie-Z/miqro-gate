@@ -4966,6 +4966,20 @@ function shareOf(group) {
      `indnkeyatts`/`indclass`/`indcollation`/`indoption`，会把 `text_pattern_ops` 伴随索引、
      `DESC`/`NULLS FIRST` 变体、`INCLUDE` 载荷列判成重复——合成表实测原查询误报 5 组。
      已收紧分组并逐项写进 Javadoc；收紧后仍能捕获真实重复（红/绿均已复跑）。
+  3. **第二轮评审又找出 `indexprs` 漏项**：第一轮的合成验证只造了「操作符类/排序/空值序」三类
+     变体，**没造表达式索引**，因此漏了 `indkey` 对表达式列一律渲染为 `0` 这个坑——
+     `lower(username)` 与 `upper(username)` 在该查询眼里同形。`users` 上已有
+     `uq_users_tenant_username ON users (tenant_id, lower(username))`（`V1__core_tables.sql:61`），
+     是活场景而非假想。已把 `pg_get_expr(i.indexprs, i.indrelid)` 并入 `GROUP BY`，
+     并把 Javadoc 从「covers every catalog attribute」这种过度声明改为逐项列举 + 显式「已知边界」
+     （`indisunique` 在分组键里故「普通索引重复唯一索引列」不报；`reloptions` 不比较；
+     仅 `public` schema 且排除分区副本）。**教训：合成验证只能证伪「我想到的那些」变体。**
+  4. **第二轮还发现 V68 自己的头注释有一句假话**：称「retention/deletion paths have to drop and
+     recreate both」，但全仓无 `DELETE FROM request_usage_records`/`TRUNCATE`/`DETACH PARTITION`，
+     且同一 PR 的 progress.md 就写着「DROP PARTITION 留存当前无法实施」——自己和自己打架。
+     已删改；并把「waste multiplies with partition count」改成准确表述：**放大的是索引对象数与
+     rebuild/DDL 工作量，单次写入的额外开销恒为 1**（一行只落一个分区）。
+     另：issue #864 的**标题**当时仍留着旧数字「写放大一倍」，与已更正的正文矛盾，已一并改名。
 - **本文件顺带修正**：第 3585 行原写「V60 为 `(tenant_id, gateway_request_id)` 建索引」，
   实为 **V61**（V60 是 `usage_queue_saturation_alert`，与此无关），已就地更正。
 - **未提交但已确认的真实问题**（详见审计报告 `_orchestrate/reports/PH1_report.md` 第三节，供另行排期）：

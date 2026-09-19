@@ -20,14 +20,21 @@
 -- identical (same indrelid, indkey, indisunique, indpred).
 --
 -- Why it is worth a migration rather than leaving it:
---   * request_usage_records is the hot write path — one IN_FLIGHT row per
---     forwarded request plus one finalizing UPDATE. Every insert and every
---     HOT-breaking update now maintains two identical b-trees.
---   * The table is RANGE-partitioned on started_at, so the duplicate is
---     inherited by every monthly partition and by the DEFAULT partition; the
---     waste multiplies with partition count.
---   * Both copies accumulate bloat and autovacuum work independently, and the
---     retention/deletion paths have to drop and recreate both.
+--   * request_usage_records is the write-hot path — one IN_FLIGHT row per
+--     forwarded request plus one finalizing UPDATE. The finalizing statement is
+--     a guarded upsert on (started_at, gateway_request_id) whose WHERE touches
+--     request_status, which idx_request_usage_records_status covers, so it
+--     cannot be HOT-pruned and does maintain every index on the table. Both
+--     writes therefore pay for two identical b-trees instead of one.
+--   * The table is RANGE-partitioned on started_at, so an index created on the
+--     parent is propagated to every partition and the duplicate exists as one
+--     redundant object per partition. Only request_usage_records_default exists
+--     today (V8:73), so this is currently one object; the object count — and the
+--     rebuild/DDL work that goes with it — grows with each partition added. The
+--     per-write cost does not: a row lands in exactly one partition, so the
+--     extra index entry is one entry per write regardless of partition count.
+--   * Both copies accumulate bloat and autovacuum work independently, and any
+--     REINDEX or index rebuild has to be done twice.
 --
 -- The survivor is V61's index. It is the earlier one, its comment carries the
 -- full rationale, and it is the name referenced from the #705 discussion.

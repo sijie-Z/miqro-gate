@@ -36,11 +36,16 @@ class IndexHygieneTest extends AbstractPostgresTest {
      * more than one index.
      * <p>
      * Two indexes are only interchangeable when they agree on the whole key
-     * definition, so the grouping covers every catalog attribute that changes
+     * definition, so the grouping covers each catalog attribute that changes
      * which queries an index can serve:
      * <ul>
      *   <li>{@code indkey} + {@code indnkeyatts} — key columns in order, kept
      *       separate from any {@code INCLUDE} payload columns;</li>
+     *   <li>{@code indexprs} — the expression trees. Column positions in
+     *       {@code indkey} are rendered as {@code 0} for an expression, so
+     *       without this an index on {@code lower(username)} and one on
+     *       {@code upper(username)} would look identical. {@code users} already
+     *       carries an expression index (V1:61), so the case is live;</li>
      *   <li>{@code indclass} — operator class, so a {@code text_pattern_ops}
      *       companion index (which serves {@code LIKE 'prefix%'}) is not treated
      *       as a duplicate of the default-opclass index;</li>
@@ -48,8 +53,23 @@ class IndexHygieneTest extends AbstractPostgresTest {
      *   <li>{@code indoption} — per-column {@code DESC} / {@code NULLS FIRST};</li>
      *   <li>{@code indisunique} and the partial-index predicate.</li>
      * </ul>
-     * Without the first four, a legitimate ordering or opclass variant would be
-     * reported as redundant and fail the build for no reason.
+     * Without these, a legitimate expression, ordering or opclass variant would
+     * be reported as redundant and fail the build for no reason.
+     * <p>
+     * Known limits, deliberately not covered:
+     * <ul>
+     *   <li>{@code indisunique} is part of the key, so a plain index whose
+     *       columns merely repeat a unique index's columns is <em>not</em>
+     *       reported. Serving equal lookups twice is wasteful too, but the
+     *       unique index is doing enforcement work the plain one is not, so
+     *       folding them together would need a judgement call per case.</li>
+     *   <li>Reloptions ({@code fillfactor}, {@code deduplicate_items}) are not
+     *       compared, so two indexes differing only in storage parameters would
+     *       be reported. No index in this schema currently sets any.</li>
+     *   <li>Only the {@code public} schema is scanned, and only at partition
+     *       parents ({@code relispartition} copies excluded), so DDL applied
+     *       out of band to an individual partition is out of scope.</li>
+     * </ul>
      */
     private static final String DUPLICATE_INDEX_SQL = """
             SELECT c.relname || ' :: ' || array_agg(ic.relname ORDER BY ic.relname)::text AS dup
@@ -63,6 +83,7 @@ class IndexHygieneTest extends AbstractPostgresTest {
             GROUP BY c.relname,
                      i.indkey::text,
                      i.indnkeyatts,
+                     COALESCE(pg_get_expr(i.indexprs, i.indrelid), ''),
                      i.indclass::text,
                      i.indcollation::text,
                      i.indoption::text,
