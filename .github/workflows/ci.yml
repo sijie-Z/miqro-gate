@@ -389,6 +389,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Secret scan
         run: bash deploy/security/check-secrets.sh
+      - name: Secret scan self-test
+        run: bash deploy/security/test-check-secrets.sh
       - name: License gate + SBOM (CycloneDX)
         run: bash deploy/security/check-sbom.sh
       - name: npm audit (high+)
