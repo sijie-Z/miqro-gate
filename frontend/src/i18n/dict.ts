@@ -1322,6 +1322,18 @@ export const DICT: Record<string, string> = {
   '重试': 'Retry',
   '重新加载': 'Reload',
   '使用手册': 'User guide',
+  '帮助': 'Help',
+  '手册目录': 'Handbook contents',
+  '本页目录': 'On this page',
+  '手册总览': 'Overview',
+  '快速上手': 'Quick start',
+  '用户手册': 'User guide',
+  '管理员手册': 'Admin guide',
+  '开发接入': 'Developer integration',
+  '常见问题': 'FAQ',
+  '在 GitHub 打开': 'Open on GitHub',
+  '随控制台内置的使用手册（离线可用）——快速上手、用户/管理员手册、开发接入与 FAQ。':
+    'The handbook ships with the console (works offline): quick start, user/admin guides, developer integration and FAQ.',
   '返回总览': 'Back to overview',
   '页面出错了': 'This page hit an error',
   '页面渲染时遇到问题。可以先重试；若反复出现，请把下方信息反馈给管理员。':

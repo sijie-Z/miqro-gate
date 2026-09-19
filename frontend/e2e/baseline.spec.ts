@@ -1569,3 +1569,22 @@ test('#830: a large viewport gets a fluid band, the fixed cap centers, and title
   await page.waitForLoadState('networkidle');
   await expect(page.locator('.ui-page-desc').first()).toBeHidden();
 });
+
+test('#869: the in-console handbook renders offline and switches documents', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/help');
+  await page.waitForLoadState('networkidle');
+
+  // The docs are bundled (no network needed): the README lands by default.
+  const content = page.getByTestId('help-content');
+  await expect(content).toContainText('MiQroGate 使用手册');
+  await expect(page.locator('.new-shell__nav-item', { hasText: '帮助' })).toBeVisible();
+
+  await page.getByTestId('help-doc-quickstart').click();
+  await expect(content).toContainText('10 分钟跑通第一条请求');
+
+  // Relative doc links are rerouted to GitHub blob URLs.
+  const href = await content.locator('a', { hasText: 'admin-guide' }).first().getAttribute('href');
+  expect(href).toContain('github.com/sijie-Z/miqro-gate/blob/develop/docs/user-guide/');
+});
