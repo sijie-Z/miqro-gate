@@ -28,13 +28,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * This is hunting zone #3 and no existing test covered it.
  * {@code AnthropicMockProvider.disconnectNextRequest()} closes the channel
  * <em>before</em> any response byte — a connection-phase failure that maps onto
- * the {@code WebClientRequestException} clause. A close <em>after</em> the status
- * line takes a different path through reactor-netty: the headers have already
- * been relayed downstream, and the body flux fails with
+ * the {@code WebClientRequestException} clause. A close <em>after</em> the
+ * status line takes a different path through reactor-netty: the headers have
+ * already been relayed downstream, and the body flux fails with
  * {@code PrematureCloseException} — an {@code IOException}, neither a
  * {@code WebClientRequestException} nor a timeout, so it matched no clause and
- * escaped to the container, which rendered its own 500 error document instead of
- * the protocol envelope.
+ * escaped to the container, which rendered its own 500 error document instead
+ * of the protocol envelope.
  * </p>
  *
  * <p>
@@ -88,7 +88,8 @@ class UpstreamTruncatedResponseIntegrationTest {
     }
 
     private static String describe(EntityExchangeResult<byte[]> result) {
-        String body = result.getResponseBody() == null ? "<empty>"
+        String body = result.getResponseBody() == null
+                ? "<empty>"
                 : new String(result.getResponseBody(), StandardCharsets.UTF_8);
         return "status=" + result.getStatus() + " content-type=" + result.getResponseHeaders().getContentType()
                 + " content-length=" + result.getResponseHeaders().getContentLength() + " body=[" + body + "]";
@@ -105,8 +106,8 @@ class UpstreamTruncatedResponseIntegrationTest {
 
         EntityExchangeResult<byte[]> result = call();
         String body = new String(result.getResponseBody(), StandardCharsets.UTF_8);
-        System.out.println("[PH31-PROBE] status-line-then-close-no-body -> " + describe(result) + " upstream-connections="
-                + (upstream.connections() - connectionsBefore));
+        System.out.println("[PH31-PROBE] status-line-then-close-no-body -> " + describe(result)
+                + " upstream-connections=" + (upstream.connections() - connectionsBefore));
 
         assertThat(result.getStatus().value()).isEqualTo(502);
         assertThat(result.getResponseHeaders().getContentType()).hasToString("application/json");

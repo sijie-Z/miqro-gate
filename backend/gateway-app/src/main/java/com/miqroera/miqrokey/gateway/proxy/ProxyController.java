@@ -322,11 +322,12 @@ public class ProxyController {
                             })
                     : forward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming);
 
-            return pipeline.onErrorResume(AuthFailureException.class, e -> writeError(exchange, e)).onErrorResume(
-                    WebClientRequestException.class,
-                    e -> writeError(exchange, new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
-                            "Upstream provider is unreachable"))).onErrorResume(PrematureCloseException.class,
-                            e -> upstreamClosedBeforeFirstByte(exchange, e));
+            return pipeline.onErrorResume(AuthFailureException.class, e -> writeError(exchange, e))
+                    .onErrorResume(WebClientRequestException.class,
+                            e -> writeError(exchange,
+                                    new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
+                                            "Upstream provider is unreachable")))
+                    .onErrorResume(PrematureCloseException.class, e -> upstreamClosedBeforeFirstByte(exchange, e));
         }).onErrorResume(DataBufferLimitException.class,
                 e -> writeError(exchange, new AuthFailureException(HttpStatus.PAYLOAD_TOO_LARGE, "payload_too_large",
                         "Request body exceeds the gateway buffer limit")));

@@ -7,7 +7,6 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -21,9 +20,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@code AnthropicMockProvider} cannot produce these — reactor-netty's HTTP
  * server refuses to complete a response whose body is shorter than its declared
  * {@code Content-Length}, and its "disconnect" modes close before the status
- * line. This stub writes the exact bytes it is given and then closes the socket,
- * so the gateway sees precisely what a dying provider (or an intermediary proxy)
- * puts on the wire.
+ * line. This stub writes the exact bytes it is given and then closes the
+ * socket, so the gateway sees precisely what a dying provider (or an
+ * intermediary proxy) puts on the wire.
  * </p>
  *
  * <p>
