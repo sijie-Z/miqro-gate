@@ -203,7 +203,12 @@ public class AlertEventDispatcher {
         return attempt < MAX_ATTEMPTS ? now.plusSeconds((long) Math.pow(2, attempt) * 60) : null;
     }
 
-    /** Retries deliveries whose backoff deadline passed. */
+    /**
+     * Retries deliveries whose backoff deadline passed. Only the newest attempt row
+     * of a delivery is eligible: an attempt row keeps the {@code next_retry_at} it
+     * was written with, so without this guard every sweep re-selects the same stale
+     * rows and the {@link #MAX_ATTEMPTS} bound is never reached.
+     */
     public void retryDue() {
         List<Map<String, Object>> due = jdbc.query("""
                 SELECT a.event_id, a.endpoint_id, a.attempt, r.id AS rule_id, r.tenant_id
@@ -211,7 +216,10 @@ public class AlertEventDispatcher {
                 JOIN alert_events e ON e.id = a.event_id
                 JOIN alert_rules r ON r.id = e.rule_id
                 WHERE a.next_retry_at IS NOT NULL AND a.next_retry_at <= now()
-                """, new MapSqlParameterSource(),
+                  AND a.attempt < :maxAttempts
+                  AND a.attempt = (SELECT max(b.attempt) FROM webhook_delivery_attempts b
+                                   WHERE b.event_id = a.event_id AND b.endpoint_id = a.endpoint_id)
+                """, new MapSqlParameterSource("maxAttempts", MAX_ATTEMPTS),
                 (rs, rowNum) -> Map.of("eventId", rs.getObject("event_id"), "endpointId", rs.getObject("endpoint_id"),
                         "attempt", rs.getInt("attempt"), "ruleId", rs.getObject("rule_id"), "tenantId",
                         rs.getObject("tenant_id")));

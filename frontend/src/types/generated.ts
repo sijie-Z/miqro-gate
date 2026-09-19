@@ -1531,7 +1531,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["adminUserDetail"];
+        get?: never;
         put?: never;
         post?: never;
         delete?: never;
@@ -1698,22 +1698,6 @@ export interface paths {
         options?: never;
         head?: never;
         patch: operations["update_8"];
-        trace?: never;
-    };
-    "/api/v1/test/ownership/{ownerUserId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["ownershipProtected"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/v1/skills": {
@@ -2092,22 +2076,6 @@ export interface paths {
             cookie?: never;
         };
         get: operations["preview"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["adminTest"];
         put?: never;
         post?: never;
         delete?: never;
@@ -8210,30 +8178,6 @@ export interface operations {
             };
         };
     };
-    adminUserDetail: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                userId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": {
-                        [key: string]: string;
-                    };
-                };
-            };
-        };
-    };
     update_1: {
         parameters: {
             query?: never;
@@ -8687,30 +8631,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["AlertRule"];
-                };
-            };
-        };
-    };
-    ownershipProtected: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                ownerUserId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
                 };
             };
         };
@@ -9281,28 +9201,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["Preview"];
-                };
-            };
-        };
-    };
-    adminTest: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": {
-                        [key: string]: string;
-                    };
                 };
             };
         };
