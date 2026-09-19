@@ -2,6 +2,18 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-19（P1 阶段一：离线 probe 集评测出结论，#930）
+
+- **结论：按当前本地档位不进入 P2，维持 A（语义缓存继续不启用）**。报告 `docs/semantic-cache-probe-phase1-2026-09-19.md`，
+  结论已回填 ADR-0022 **§11.5**；资产 `scripts/semantic-probe/`（148 对 probe 集 + 跑具），产物 `docs/semantic-cache-probe/runs-2026-09-19/`。
+- **三条读数**：①零/近零误命中下三档召回全为 0（全表最高分是一对 hard negative）；②整体 AUC 0.34–0.48（低于随机——余弦排序主要跟随字面重叠）；
+  ③按住字面重叠后（区间内 AUC）缓存会命中的近重复区仅 0.60–0.77，最小编辑对照 7 组中 4 组被三档模型全部排错序。
+- **方法学教训（记住）**：probe 集 hard negative 是「一字之差」、正例含大幅改写，两类字面重叠天然不同 → **整体 AUC 会被污染**，
+  必须同时看「同字面重叠区间内的 AUC」；字面指标用 difflib 字符级（3-gram Jaccard 在短中文串上会塌）。
+- **跑具两个陷阱**：`normalize_embeddings=True` 不保证生效（Qwen3-Embedding-0.6B 会返回 >1 的余弦），须显式归一化；
+  产物 JSON 的 `meta.command` 不能写 `sys.executable`（会把本机路径带进仓库）。
+- **未做**：云档 `text-embedding-v4`（无密钥；跑具 `--backend openai` 一条命令可补）；影子测量第二阶段未立项。
+
 ## 会话交接点 2026-09-19（ADR-0022 定稿：所有者拍板 #718 五问）
 
 - **拍板落地**：所有者回复「语义缓存按你推荐的来」→ ADR-0022 状态 Proposed→**Accepted**，新增 §11 决策记录：
