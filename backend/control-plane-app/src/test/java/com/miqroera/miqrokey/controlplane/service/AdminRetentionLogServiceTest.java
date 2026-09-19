@@ -148,7 +148,8 @@ class AdminRetentionLogServiceTest {
         assertThat(result.rows()).isEqualTo(1);
         assertThat(result.truncated()).isFalse();
         String[] lines = result.csv().split("\n");
-        assertThat(lines[0]).startsWith("event_id,occurred_at,user_id,user_name");
+        assertThat(lines[0]).startsWith("\uFEFFevent_id,occurred_at,user_id,user_name")
+                .as("UTF-8 BOM precedes the header for spreadsheet consumers");
         assertThat(lines[0]).endsWith("data_md5,content");
         assertThat(lines[1]).contains("\"报告，含\"\"引号\"\"\"");
     }

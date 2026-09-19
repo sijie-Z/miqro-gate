@@ -1,4 +1,6 @@
+/// <reference types="node" />
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { translateText } from '@/i18n';
 
 /** #657 copy coverage. The i18n layer swaps text **node by node**, so every
@@ -101,5 +103,109 @@ describe('EN dictionary covers the #714 binding-immutability copy', () => {
   it('leaves an uncovered message with a requestId suffix untranslated', () => {
     // Half-translated error copy would be worse than falling back to Chinese.
     expect(translateText('凭证已被别的什么引用（requestId: 5d1c0a）')).toBeNull();
+  });
+});
+
+/** #935 copy drift, not missing copy: the views were renamed in Chinese and the
+ *  dictionary was not. Both strings below ARE covered by a PATTERNS entry — the
+ *  entry's regex still spells the old "吊销 Virtual Key" source, so the lookup
+ *  misses and English mode falls back to Chinese. */
+describe('EN dictionary covers the #935 rotate/revoke dialog titles', () => {
+  const copies: Array<[string, string]> = [
+    ['轮换虚拟密钥「prod-key」', 'Rotate Virtual Key "prod-key"'],
+    ['吊销虚拟密钥「prod-key」', 'Revoke Virtual Key "prod-key"'],
+  ];
+
+  it.each(copies)('%s → %s', (zh, en) => {
+    expect(translateText(zh)).toBe(en);
+  });
+
+  it('matches the disable title that shares the same 「name」 template', () => {
+    // Regression anchor for the two cases above: 停用 goes through the identical
+    // DialogTitle text node and already translates, so EN mode currently shows an
+    // English body and button under a Chinese title on the same destructive dialog.
+    expect(translateText('停用虚拟密钥「prod-key」')).toBe('Disable Virtual Key "prod-key"');
+  });
+});
+
+/** #936 same rename damage, different mechanism: these DICT keys are matched by
+ *  exact equality after whitespace collapsing, and each carries a stray space
+ *  where the Latin word "Secret" used to sit. The views dropped the space in the
+ *  same commit, so the lookup misses and these render in Chinese under EN. The
+ *  inputs below are verbatim what the views set — see the render sites in the
+ *  comments. */
+describe('EN dictionary covers the #936 stray-space copy', () => {
+  const copies: Array<[string, string]> = [
+    // NextCredentialsView.vue:151 (form error) / :391 (page lede)
+    ['名称、订阅与密钥必填。', 'Name, subscription and secret are required.'],
+    [
+      '真实供应商 API 密钥的加密托管与版本管理；密钥明文仅录入时可见一次。',
+      'Encrypted custody and version management for real provider API keys; the plaintext secret is visible only once at entry.',
+    ],
+    // NextAdminWebhooksView.vue:138 (form error)
+    ['名称、URL 与签名密钥必填。', 'Name, URL and signing secret are required.'],
+    // NextAdminAgentsView.vue:125 (destructive confirm body) / :268 (empty state)
+    [
+      '禁用后该代理不再计为可用，其凭证不受影响。',
+      'Once disabled the agent no longer counts as available; its credential is unaffected.',
+    ],
+    [
+      '创建代理并绑定出口凭证后，可按代理维度观测用量。',
+      'Create an agent bound to an egress credential to observe usage per agent.',
+    ],
+    // NextAdminConsumersView.vue:283 (destructive confirm body) / :705 (dialog lede)
+    [
+      '吊销后该 API 密钥立即失效，外部系统将无法再调用计费查询接口。',
+      'Once revoked the API key stops working immediately and external systems can no longer call the billing query endpoint.',
+    ],
+    [
+      '控制这把消费者密钥能访问哪些通道；能力不足的调用会被拒绝（403 CONSUMER_SCOPE_DENIED / consumer_scope_denied）。',
+      'Controls which channels this consumer key may access; calls beyond its capability are rejected (403 CONSUMER_SCOPE_DENIED / consumer_scope_denied).',
+    ],
+    // NextAdminMcpServicesView.vue:321 (form error) / :2930 (dialog lede)
+    [
+      'API 密钥模式必须填写密钥（每次保存都需要重新填写）。',
+      'API Key mode requires the secret (re-enter it on every save).',
+    ],
+    [
+      '控制网关调用该 MCP 服务时向上游携带的凭据：访客模式不携带；API 密钥模式由网关注入 Authorization: Bearer <密钥>（密钥只写不读）。',
+      'Controls the credential the gateway presents upstream when calling this MCP service: guest mode presents none; API Key mode injects Authorization: Bearer <secret> (write-only).',
+    ],
+  ];
+
+  it.each(copies)('%s → %s', (zh, en) => {
+    expect(translateText(zh)).toBe(en);
+  });
+
+  it('leaves no CJK inside a PATTERNS replacement value', () => {
+    // Root-cause guard for #935. translateText substitutes $1 into these values
+    // verbatim, so a replacement containing Chinese makes English mode emit a
+    // half-translated string even when its regex matches. 3fbdb45b renamed the view
+    // copy to the Chinese 虚拟密钥 wording and rewrote only the replacement, leaving
+    // the sources spelling the old Latin term — so these two entries were both
+    // unreachable and half-Chinese. Sources are now Chinese, outputs English.
+    const dict = readFileSync('src/i18n/dict.ts', 'utf8').split(/\r?\n/);
+    const start = dict.findIndex((l) => l.startsWith('export const PATTERNS'));
+    expect(start).toBeGreaterThan(-1);
+
+    const offending: string[] = [];
+    for (let i = start; i < dict.length; i++) {
+      const m = /^\s{2}\[(\/.*?\/[a-z]*),\s*('(?:[^'\\]|\\.)*')/.exec(dict[i]!);
+      if (!m) continue;
+      const replacement = m[2]!.slice(1, -1).replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+      if (/[一-鿿]/.test(replacement)) offending.push(`dict.ts:${i + 1} ${replacement}`);
+    }
+    expect(offending).toEqual([]);
+  });
+});
+
+/** #946 the same #532 damage as #935, one dialog over: 3fbdb45b renamed this title
+ *  禁用 Agent「name」 → 禁用代理「name」, and the pattern source stayed Latin, so the
+ *  entry stopped matching. This is the destructive disable-agent dialog whose BODY
+ *  #936 fixes, so leaving it would put an English body and button under a Chinese
+ *  title — the exact symptom #935 is about. */
+describe('EN dictionary covers the #946 disable-agent dialog title', () => {
+  it('translates the composed confirm title', () => {
+    expect(translateText('禁用代理「prod-key」')).toBe('Disable agent "prod-key"');
   });
 });
