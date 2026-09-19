@@ -20,6 +20,7 @@
 | 凭证侧的锁**只对 ACTIVE 生效** | `AdminCredentialService.java:355-361`（javadoc「Disabling the agent releases the reference」）、`AgentRepositoryImpl.java:68-76`（`AND status = 'ACTIVE'`） |
 | 该锁的调用点＝凭证轮换与凭证停用 | `AdminCredentialService.java:266`（轮换）、`:309`（停用）；冲突码 `CREDENTIAL_REFERENCED_BY_AGENT` |
 | 凭证没有删除端点（FK `ON DELETE RESTRICT` 只在库级可达） | `AdminCredential*Controller` 下 `@DeleteMapping` 零命中；`V17:9-10` 的 FK |
+| **删除在本控制面是既有惯例，Agent 面是异类** | 控制面已有 10+ 个资源级 `@DeleteMapping`：配额规则（`AdminQuotaRuleController.java:52`）、授权（`AdminGrantController.java:56`）、告警规则（`AdminAlertRuleController.java:66`）、MCP 路由规则（`AdminMcpRouteRuleController.java:73`）、模型目录行（`AdminModelCatalogController.java:100`）、项目成员（`AdminProjectController.java:62`）、团队成员（`AdminTeamController.java:62`）等 |
 | 审计动作已有两个 | `AdminAgentService.java:83`（`AGENT_CREATE`）、`:95`（`AGENT_DISABLE`）；审计表是**append-only 哈希链**（`V3__audit_chain_position.sql` 头注） |
 | 没有表引用 `agents` | 迁移中 `git grep "REFERENCES agents"` **零命中** |
 | 没有任何表按 Agent 维度记录用量 | 迁移中 `agent_id` 零命中；`Agent.java:8-11` javadoc：用量按**绑定的凭证**聚合出每 Agent 视图 |
@@ -89,6 +90,7 @@ issue 已经写到点子上：需要**写明理由与替代路径**（例如「�
 
 **推荐：D。** 理由：
 
+0. **一致性**：控制面已经有 10+ 个资源级删除端点（配额规则、授权、告警规则、项目/团队成员……见 §1 表），Agent 面是**异类**——「没有删除」在这个控制台里不是一条设计原则，而是一处缺口；
 1. **没有任何东西引用 `agents`**（§1 末两行）——这是硬删除在本仓库可以「干净」的前提，换了别的资源（如凭证被 Agent 引用）都不成立；
 2. **软删除的唯一收益是可见性**，而本仓库的审计链（append-only 哈希链）已经在另一条通道上覆盖了「谁在何时删了什么」——前提是删除时写入名称快照（本 ADR 把它写成硬要求）；
 3. **僵尸行的根因是名额占死**，只有真删除能解；软删除还要额外改唯一索引、把 `findActiveByCredentialId` 的「最多一行」前提推翻，改动面反而更大、更危险；
