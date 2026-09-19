@@ -2,6 +2,18 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-19（P1 阶段一：离线 probe 集评测出结论，#930）
+
+- **结论：按当前本地档位不进入 P2，维持 A（语义缓存继续不启用）**。报告 `docs/semantic-cache-probe-phase1-2026-09-19.md`，
+  结论已回填 ADR-0022 **§11.5**；资产 `scripts/semantic-probe/`（148 对 probe 集 + 跑具），产物 `docs/semantic-cache-probe/runs-2026-09-19/`。
+- **三条读数**：①零/近零误命中下三档召回全为 0（全表最高分是一对 hard negative）；②整体 AUC 0.34–0.48（低于随机——余弦排序主要跟随字面重叠）；
+  ③按住字面重叠后（区间内 AUC）缓存会命中的近重复区仅 0.60–0.77，最小编辑对照 7 组中 4 组被三档模型全部排错序。
+- **方法学教训（记住）**：probe 集 hard negative 是「一字之差」、正例含大幅改写，两类字面重叠天然不同 → **整体 AUC 会被污染**，
+  必须同时看「同字面重叠区间内的 AUC」；字面指标用 difflib 字符级（3-gram Jaccard 在短中文串上会塌）。
+- **跑具两个陷阱**：`normalize_embeddings=True` 不保证生效（Qwen3-Embedding-0.6B 会返回 >1 的余弦），须显式归一化；
+  产物 JSON 的 `meta.command` 不能写 `sys.executable`（会把本机路径带进仓库）。
+- **未做**：云档 `text-embedding-v4`（无密钥；跑具 `--backend openai` 一条命令可补）；影子测量第二阶段未立项。
+
 ## 会话交接点 2026-09-19（ADR-0022 定稿：所有者拍板 #718 五问）
 
 - **拍板落地**：所有者回复「语义缓存按你推荐的来」→ ADR-0022 状态 Proposed→**Accepted**，新增 §11 决策记录：
@@ -5345,3 +5357,36 @@ interface KeyRow { key; label; served; hits; hitRatePct; paidCost; savedCost }  
 **"改了那个页面"不等于"改了那个页面上的所有地方"。** #863 在缓存收益页上加了标记，
 而同一页的另一个 tab 仍然漏——因为它们是两个独立的渲染路径，共享的是数据，不是代码。
 修一个页面时要按**该页面上有几个地方显示这个概念**清点，而不是按"这个页面修过了"结案。
+
+## 2026-09-19 运行树与提交的漂移——「这台机器跑的定义出自哪个提交」现在每次部署都答一次（#917）
+
+### 问题
+
+`deploy.sh` 渲染的是**运行树**的 compose（`$LIVE_DIR/deploy/compose.prod.yaml`），而每次发布带来的仓库版本在构建树里。演示站两者已经不同，而**没有任何东西会说出来**——对齐时只能人工逐行 diff，才复原出这台机器实际在跑什么：
+
+| 漂移项 | 性质 |
+|---|---|
+| `shared_buffers=64MB` 硬编码 | 仓库已参数化（`${POSTGRES_SHARED_BUFFERS:-64MB}`），取值相同 |
+| 留痕消费端 / 响应缓存 / Kafka 出口写死 | 仓库是 `${VAR:-默认关}`；演示值本该在 `.env`（`.env` 里其实已有） |
+| redpanda 缺 `profiles: [kafka]` 与 healthcheck | 靠 `.env` 的 `COMPOSE_PROFILES=kafka` 激活，功能没丢 |
+| gateway `depends_on` 缺 `control-plane: service_healthy` | #846 的编排等待没进运行树 |
+| **`MIQROKEY_USAGE_PRICE_RECONCILE_ENABLED: "true"`** | **仓库根本没有这一行**——见下 |
+
+最后一项是要害：派生列调和（#777）的开关在 `application.yml` 里有、在配置参考里没有、在 compose 里**没接线**——`.env` 里设了也不生效。也就是说**「把运行树对齐到仓库版本」会悄悄关掉演示站的一个功能**；对齐之前必须先把这个洞补上。
+
+### 改法（#917 / PR #918）
+
+1. `compose.prod.yaml` 补 `MIQROKEY_USAGE_PRICE_RECONCILE_ENABLED: ${…:-false}`（站点取值走 `.env`）+ 配置参考收录该旋钮（含周期 15min / 首轮延迟 2min）；
+2. `deploy.sh` 新增 §9：比较构建树与运行树的 compose，不同即 **WARNING（只警告、不判死**——运维可能正在迁移，且部署本身已在上方验证过），并把 `compose_drift=yes|no` 记进 `deploy.log`；
+3. `.env.prod.example` 写明「站点取值一律进 `.env`」与开关清单；`deployment-and-operations §8.2` 写清运行树 compose 的归属规则与手改的代价。
+
+### 服务器侧对齐与两态实测
+
+- **红**（对齐前，用本分支树当 context 跑 `--verify-only`）：`WARNING: the live compose file differs from this commit's copy (drift)`，流水 `compose_drift=yes`；其余断言与冒烟照常绿——**漂移是警告，不是判死**；
+- **对齐**：备份（`compose.prod.yaml.bak-pre-align-20260919T090550Z` / `.env.bak-pre-align-…`）→ `.env` 补 `MIQROKEY_USAGE_PRICE_RECONCILE_ENABLED=true` → 以 tar 把构建树的 `deploy/` 同步进运行树（`--exclude` 保住 `secrets/`、`.env` 与历史 `.bak`）→ `cmp` 两份 compose **IDENTICAL**；
+- **渲染等价性**（对齐的真正判据）：对齐前后各渲染一次 `docker compose config`，`diff` 只有三处**预期增量**——gateway `depends_on` 增 #846 的等待、redpanda 增 `profiles` 与 healthcheck；其余逐字相同（**含调和开关的渲染值**：前为写死的 `true`，后为 `.env` 的 `true`）。因此**在跑容器一个都没动**（uptime 核对：gateway/cp 18h、portal 39min）；
+- **绿**（对齐后同一 context 再跑 `--verify-only`）：无 WARNING，`compose_drift=no`。
+
+### 教训
+
+**手改会赢一时，输在"下一次整树同步"**——而它真正的代价不是丢值，是**丢可复现性**：值一旦只活在运行树里，这台机器跑的定义就不再对应任何提交，事后只能考古。所以规则不是"别手改"，而是"**值要有家**"：`.env`（compose 用 `${VAR:-默认}` 透传）；**没有家就先给仓库补一行**——#777 的调和开关正是没有家的那一项，于是它只能以手改的形式存在。与之配套的是把不可见变成可见：漂移从此每次部署都会被说一次，并留在流水里。
