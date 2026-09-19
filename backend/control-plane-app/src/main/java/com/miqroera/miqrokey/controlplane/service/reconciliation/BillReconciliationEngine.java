@@ -41,10 +41,17 @@ public final class BillReconciliationEngine {
     private BillReconciliationEngine() {
     }
 
+    /**
+     * Reconciles the bill rows against the local usage rows of the window. The
+     * window is half-open — {@code [windowFrom, windowTo)} — the convention every
+     * other usage window in the product uses (stats, export, retention, quota
+     * periods): a row landing exactly on {@code windowTo} also belongs to the next
+     * window, so counting it here would charge it twice.
+     */
     public static Report reconcile(List<BillLine> bills, List<LocalUsageRow> locals, Instant windowFrom,
             Instant windowTo) {
         List<LocalUsageRow> windowed = locals.stream()
-                .filter(r -> !r.occurredAt().isBefore(windowFrom) && !r.occurredAt().isAfter(windowTo)).toList();
+                .filter(r -> !r.occurredAt().isBefore(windowFrom) && r.occurredAt().isBefore(windowTo)).toList();
 
         Set<String> consumedLocal = new HashSet<>();
         List<RowResult> rows = new ArrayList<>(bills.size());

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.service.reconciliation.ReconciliationTypes.BillLine;
 import com.miqroera.miqrokey.controlplane.service.reconciliation.ReconciliationTypes.LocalUsageRow;
 import com.miqroera.miqrokey.controlplane.service.reconciliation.ReconciliationTypes.Report;
+import com.miqroera.miqrokey.controlplane.service.reconciliation.ReconciliationTypes.RowResult;
 import com.miqroera.miqrokey.controlplane.service.reconciliation.ReconciliationTypes.Verdict;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -181,6 +182,26 @@ class BillReconciliationEngineTest {
         assertThat(report.matched()).isEqualTo(1);
         assertThat(report.unmatchedProvider()).isZero();
         assertThat(report.unmatchedLocal()).isZero();
+    }
+
+    @Test
+    @DisplayName("the window is half-open [from, to): the instant at `to` belongs to the next report")
+    void windowUpperBoundIsExclusive() {
+        Instant from = T0.minusSeconds(3600);
+        Instant to = T0.plusSeconds(3600);
+        List<LocalUsageRow> locals = List.of(local("l-at-from", "req-at-from", from, "m1", "p1", 10L, 5L),
+                local("l-inside", "req-inside", to.minusSeconds(1), "m1", "p1", 10L, 5L),
+                local("l-at-to", "req-at-to", to, "m1", "p1", 10L, 5L));
+
+        Report report = BillReconciliationEngine.reconcile(List.of(), locals, from, to);
+
+        // `from` inclusive, `to` exclusive — the convention every other usage
+        // window in the product uses (stats, export, retention, quota periods).
+        // A row exactly at `to` is also inside the NEXT window, so counting it
+        // here as well charges it twice and makes this report's local side
+        // disagree with the usage export for the same nominal window.
+        assertThat(report.unmatchedLocalRows()).extracting(RowResult::localRef).containsExactlyInAnyOrder("l-at-from",
+                "l-inside");
     }
 
     @Test
