@@ -28,4 +28,20 @@ class McpProblemJsonTest {
         assertThat(parsed.path("error").path("mcp_access_denied").isMissingNode()).isTrue();
         assertThat(parsed.path("error").path("message").asText()).isEqualTo("Tool is unknown or disabled: " + hostile);
     }
+
+    @Test
+    @DisplayName("a control character in a tool name keeps the envelope valid JSON (#866)")
+    void controlCharacterInToolNameKeepsEnvelopeValidJson() throws Exception {
+        // The JSON-RPC body carries the tool name, and a JSON unicode escape
+        // decodes to a raw control character that is echoed verbatim.
+        for (int codePoint = 0x00; codePoint <= 0x1F; codePoint++) {
+            String message = "Tool is unknown or disabled: tool" + (char) codePoint + "name";
+            String body = new String(McpProxyController.problemJson("mcp_tool_unavailable", message),
+                    StandardCharsets.UTF_8);
+
+            JsonNode parsed = new ObjectMapper().readTree(body);
+            assertThat(parsed.path("error").path("message").asText()).as("message round-trip for U+%04X", codePoint)
+                    .isEqualTo(message);
+        }
+    }
 }

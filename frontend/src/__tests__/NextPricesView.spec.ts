@@ -104,6 +104,27 @@ describe('NextPricesView', () => {
     expect(wrapper.text()).toContain('人工录入');
   });
 
+  it('degrades gracefully when a snapshot has no unit price (#PH20-A)', async () => {
+    mockApi.listPrices.mockResolvedValue([price({ id: '0091', unitPrice: undefined })]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    const cell = wrapper.find('.next-prices__price');
+    expect(cell.exists()).toBe(true);
+    expect(cell.text()).not.toContain('NaN');
+    expect(cell.text()).not.toContain('undefined');
+  });
+
+  it('does not present a null unit price as a real ¥0.0000 (#PH20-A)', async () => {
+    mockApi.listPrices.mockResolvedValue([
+      price({ id: '0092', unitPrice: null as unknown as number }),
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('.next-prices__price').text()).not.toContain('0.0000');
+  });
+
   it('creates a price snapshot and reloads', async () => {
     mockApi.createPrice.mockResolvedValue(price({ id: '0042' }));
     const wrapper = mountView();

@@ -170,6 +170,20 @@ function formatTime(iso?: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/**
+ * `unitPrice` is optional in the generated type, and a Jackson backend can send
+ * it as `null` for a model that has no published price. Rendering it through
+ * `Number(...).toFixed(4)` printed `¥NaN / 1M`, or worse a confident `¥0.0000`
+ * for `null` — a fabricated free price. Show a dash instead (#PH20-A).
+ */
+function formatUnitPrice(snapshot: PriceSnapshotView): string {
+  const { currency, unitPrice } = snapshot;
+  if (unitPrice === null || unitPrice === undefined || !Number.isFinite(Number(unitPrice))) {
+    return '—';
+  }
+  return `${currency === 'USD' ? '$' : '¥'}${Number(unitPrice).toFixed(4)} / 1M`;
+}
+
 async function load() {
   loading.value = true;
   loadError.value = '';
@@ -320,10 +334,9 @@ onMounted(load);
           (row as PriceSnapshotView).tokenType
         }}</template>
         <template #unitPrice="{ row }">
-          <span class="next-prices__price ui-num"
-            >{{ (row as PriceSnapshotView).currency === 'USD' ? '$' : '¥'
-            }}{{ Number((row as PriceSnapshotView).unitPrice).toFixed(4) }} / 1M</span
-          >
+          <span class="next-prices__price ui-num">{{
+            formatUnitPrice(row as PriceSnapshotView)
+          }}</span>
         </template>
         <template #effectiveFrom="{ row }">{{
           formatTime((row as PriceSnapshotView).effectiveFrom)

@@ -195,7 +195,17 @@ interface KeyRow {
   hits: number;
   hitRatePct: number;
   paidCost: number;
+  /**
+   * #878: the key's paid cost is short of a total while this is non-empty; its saving
+   * is only a lower bound while `savedCaveat` is. Two separate claims, because the API
+   * keeps `pricingStatus` (the cost) and `unpricedHitEvents` (the saving) apart.
+   *
+   * Empty is the "nothing to say" value: `UiTooltip.text` is a plain string, and a
+   * template narrows `v-if` on a ref but not on a function's result.
+   */
+  paidCaveat: string;
   savedCost: number;
+  savedCaveat: string;
 }
 
 const pageTab = ref<PageTab>('stats');
@@ -228,7 +238,11 @@ const keyTableRows = computed<KeyRow[]>(() =>
         hits,
         hitRatePct: served ? (hits / served) * 100 : 0,
         paidCost: Number(g.cost?.upstreamPaid ?? 0),
+        // #878: each key carries its own pricing status and hit gap — the API has sent
+        // them all along; this table dropped both and printed bare amounts.
+        paidCaveat: costGapNote(g) ?? '',
         savedCost: Number(g.cost?.savedByGatewayCache ?? 0),
+        savedCaveat: savingsBoundNote(g) ?? '',
       };
     })
     .sort((a, b) => b.served - a.served),
@@ -404,8 +418,18 @@ onMounted(load);
         </template>
         <template #hits="{ row }">{{ asKeyRow(row).hits }}</template>
         <template #hitRatePct="{ row }">{{ pct(asKeyRow(row).hitRatePct) }}</template>
-        <template #paidCost="{ row }">{{ money(asKeyRow(row).paidCost) }}</template>
-        <template #savedCost="{ row }">{{ money(asKeyRow(row).savedCost) }}</template>
+        <template #paidCost="{ row }"
+          >{{ money(asKeyRow(row).paidCost)
+          }}<UiTooltip v-if="asKeyRow(row).paidCaveat" :text="asKeyRow(row).paidCaveat"
+            ><span class="next-roi__caveat" data-testid="key-cost-unpriced">未定价</span></UiTooltip
+          ></template
+        >
+        <template #savedCost="{ row }"
+          >{{ money(asKeyRow(row).savedCost)
+          }}<UiTooltip v-if="asKeyRow(row).savedCaveat" :text="asKeyRow(row).savedCaveat"
+            ><span class="next-roi__caveat" data-testid="key-savings-bound">下界</span></UiTooltip
+          ></template
+        >
       </UiTable>
     </section>
 

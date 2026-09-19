@@ -186,7 +186,7 @@ public class AlertEvaluator {
                 return null;
             }
             UUID id = UUID.fromString(quotaRuleId);
-            return quotaRuleService.list(tenantId).stream().filter(v -> v.id().equals(id)).findFirst().orElse(null);
+            return quotaRuleService.view(tenantId, id);
         } catch (Exception e) {
             return null; // malformed scope — nothing to alert
         }

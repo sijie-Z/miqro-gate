@@ -135,7 +135,7 @@ function rateTone(endpoint: WebhookEndpointView): 'success' | 'warning' | 'dange
 
 async function createWebhook() {
   if (!form.value.name.trim() || !form.value.url.trim() || !form.value.secret.trim()) {
-    formError.value = '名称、URL 与签名 Secret 必填。';
+    formError.value = '名称、URL 与签名密钥必填。';
     return;
   }
   submitting.value = true;
