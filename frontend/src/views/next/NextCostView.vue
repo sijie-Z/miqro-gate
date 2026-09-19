@@ -11,7 +11,7 @@ import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
-import { costGapNote } from '@/lib/usage-pricing';
+import { costGapNote, unpricedHitCount } from '@/lib/usage-pricing';
 import {
   UiButton,
   UiDialog,
@@ -75,9 +75,7 @@ const cacheSaved = computed(() => projectSummary.value?.totals?.cost?.savedByGat
  * any remain, the saving is a lower bound — the card says so rather than letting a
  * small number read as "the cache saved almost nothing".
  */
-const unpricedHits = computed(() =>
-  Number(projectSummary.value?.totals?.unpriced?.unpricedHitEvents ?? 0),
-);
+const unpricedHits = computed(() => unpricedHitCount(projectSummary.value?.totals));
 /**
  * #801: the cost cards are not totals while this is non-null. Same promise the API
  * has kept since #766, which the console never showed.

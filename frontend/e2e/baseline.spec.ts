@@ -344,8 +344,38 @@ async function mockApi(page: Page, admin = false) {
       ]),
     }),
   );
-  await page.route('**/api/v1/admin/usage/summary?*', (route) =>
-    route.fulfill({
+  // #863: one dispatcher — the admin usage page reads project groups, the
+  // cache config tab reads the VIRTUAL_KEY grouping (same endpoint shape).
+  const perKeyFixture = {
+    groupBy: 'VIRTUAL_KEY',
+    groups: [
+      {
+        groupKey: '0190-0000-0000-0002',
+        label: 'claude-code-main',
+        requests: { upstream: 4, coalesced: 0, l1Hit: 5, l2Hit: 1 },
+        cost: { upstreamPaid: '1.2000', savedByGatewayCache: '0.8000' },
+        pricingStatus: 'COMPLETE',
+      },
+      {
+        groupKey: '0190-0000-0000-0003',
+        label: 'codex-tools',
+        requests: { upstream: 20, coalesced: 2, l1Hit: 0, l2Hit: 0 },
+        cost: { upstreamPaid: '9.5000', savedByGatewayCache: '0.0000' },
+        pricingStatus: 'COMPLETE',
+      },
+    ],
+    totals: { groupKey: 'total', label: '合计' },
+  };
+  await page.route('**/api/v1/admin/usage/summary?*', (route) => {
+    const groupBy = new URL(route.request().url()).searchParams.get('groupBy');
+    if ((groupBy ?? '').toUpperCase() === 'VIRTUAL_KEY') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(perKeyFixture),
+      });
+    }
+    return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
@@ -389,8 +419,8 @@ async function mockApi(page: Page, admin = false) {
           },
         },
       }),
-    }),
-  );
+    });
+  });
   // Budget panel on the cost report page (G8.2): empty by default.
   await page.route('**/api/v1/admin/budgets*', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
@@ -1568,4 +1598,23 @@ test('#830: a large viewport gets a fluid band, the fixed cap centers, and title
   await page.reload();
   await page.waitForLoadState('networkidle');
   await expect(page.locator('.ui-page-desc').first()).toBeHidden();
+});
+
+test('#863: cache config tab lists per-key cache activity with the opt-in hint', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/roi');
+  await page.waitForLoadState('networkidle');
+
+  // Stats is the default tab; the config tab carries the Tencent-style
+  // per-key table fed by the VIRTUAL_KEY grouping.
+  await expect(page.getByTestId('roi-report')).toBeVisible();
+  await page.getByTestId('roi-tab-config').click();
+  const table = page.getByTestId('roi-key-table');
+  await expect(table).toBeVisible();
+  await expect(table).toContainText('codex-tools');
+  await expect(table).toContainText('claude-code-main');
+  await expect(page.getByTestId('roi-config')).toContainText('去「我的密钥」管理缓存开关');
 });
