@@ -212,6 +212,33 @@ class McpToolRevisionApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("a negative limit is clamped to one row instead of reaching PostgreSQL as LIMIT -1")
+    void negativeLimitIsClamped() throws Exception {
+        String toolId = createTool("query_order");
+        publish(toolId, "{\"description\":\"查询订单 v2\"}");
+
+        // Two revisions exist, so a negative limit must NOT return both.
+        mockMvc.perform(get("/api/v1/admin/mcp-services/" + serviceId + "/tools/" + toolId + "/revisions")
+                .cookie(sessionCookie)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
+
+        // `Math.min(limit, 50)` kept the sign, so `LIMIT -1` reached PostgreSQL. PostgreSQL
+        // rejects it with SQLSTATE 2201W ("LIMIT must not be negative"); Spring translates
+        // SQLSTATE class 22 into DataIntegrityViolationException, which
+        // GlobalExceptionHandler:156 answers as 409 RESOURCE_CONFLICT -- a bad request
+        // parameter reported as a data conflict, telling the caller to "refresh and retry".
+        // The same `limit` on /admin/mcp-access-logs is validated up front
+        // (AdminMcpAccessLogService.java:45-49, 400 SIZE_INVALID).
+        mockMvc.perform(get("/api/v1/admin/mcp-services/" + serviceId + "/tools/" + toolId + "/revisions")
+                .param("limit", "-1").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1));
+
+        // limit=0 has the same shape: it must clamp to 1, never bind a zero/negative LIMIT.
+        mockMvc.perform(get("/api/v1/admin/mcp-services/" + serviceId + "/tools/" + toolId + "/revisions")
+                .param("limit", "0").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1));
+    }
+
+    @Test
     @DisplayName("revision endpoints require a portal session")
     void requiresAuth() throws Exception {
         String toolId = createTool("query_order");
