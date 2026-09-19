@@ -221,18 +221,22 @@ class McpToolRevisionApiIntegrationTest {
         mockMvc.perform(get("/api/v1/admin/mcp-services/" + serviceId + "/tools/" + toolId + "/revisions")
                 .cookie(sessionCookie)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
 
-        // `Math.min(limit, 50)` kept the sign, so `LIMIT -1` reached PostgreSQL. PostgreSQL
-        // rejects it with SQLSTATE 2201W ("LIMIT must not be negative"); Spring translates
+        // `Math.min(limit, 50)` kept the sign, so `LIMIT -1` reached PostgreSQL.
+        // PostgreSQL
+        // rejects it with SQLSTATE 2201W ("LIMIT must not be negative"); Spring
+        // translates
         // SQLSTATE class 22 into DataIntegrityViolationException, which
         // GlobalExceptionHandler:156 answers as 409 RESOURCE_CONFLICT -- a bad request
-        // parameter reported as a data conflict, telling the caller to "refresh and retry".
+        // parameter reported as a data conflict, telling the caller to "refresh and
+        // retry".
         // The same `limit` on /admin/mcp-access-logs is validated up front
         // (AdminMcpAccessLogService.java:45-49, 400 SIZE_INVALID).
         mockMvc.perform(get("/api/v1/admin/mcp-services/" + serviceId + "/tools/" + toolId + "/revisions")
                 .param("limit", "-1").cookie(sessionCookie)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1));
 
-        // limit=0 has the same shape: it must clamp to 1, never bind a zero/negative LIMIT.
+        // limit=0 has the same shape: it must clamp to 1, never bind a zero/negative
+        // LIMIT.
         mockMvc.perform(get("/api/v1/admin/mcp-services/" + serviceId + "/tools/" + toolId + "/revisions")
                 .param("limit", "0").cookie(sessionCookie)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1));
