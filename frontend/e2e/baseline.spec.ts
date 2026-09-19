@@ -344,8 +344,38 @@ async function mockApi(page: Page, admin = false) {
       ]),
     }),
   );
-  await page.route('**/api/v1/admin/usage/summary?*', (route) =>
-    route.fulfill({
+  // #863: one dispatcher — the admin usage page reads project groups, the
+  // cache config tab reads the VIRTUAL_KEY grouping (same endpoint shape).
+  const perKeyFixture = {
+    groupBy: 'VIRTUAL_KEY',
+    groups: [
+      {
+        groupKey: '0190-0000-0000-0002',
+        label: 'claude-code-main',
+        requests: { upstream: 4, coalesced: 0, l1Hit: 5, l2Hit: 1 },
+        cost: { upstreamPaid: '1.2000', savedByGatewayCache: '0.8000' },
+        pricingStatus: 'COMPLETE',
+      },
+      {
+        groupKey: '0190-0000-0000-0003',
+        label: 'codex-tools',
+        requests: { upstream: 20, coalesced: 2, l1Hit: 0, l2Hit: 0 },
+        cost: { upstreamPaid: '9.5000', savedByGatewayCache: '0.0000' },
+        pricingStatus: 'COMPLETE',
+      },
+    ],
+    totals: { groupKey: 'total', label: '合计' },
+  };
+  await page.route('**/api/v1/admin/usage/summary?*', (route) => {
+    const groupBy = new URL(route.request().url()).searchParams.get('groupBy');
+    if ((groupBy ?? '').toUpperCase() === 'VIRTUAL_KEY') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(perKeyFixture),
+      });
+    }
+    return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
@@ -389,8 +419,8 @@ async function mockApi(page: Page, admin = false) {
           },
         },
       }),
-    }),
-  );
+    });
+  });
   // Budget panel on the cost report page (G8.2): empty by default.
   await page.route('**/api/v1/admin/budgets*', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
@@ -1435,10 +1465,18 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
     });
     const own = sheet.filter((r) => {
       const selector = (r as CSSStyleRule).selectorText ?? '';
-      // Brand icon chips (.mk-brand-chip) and the cost donut (.mk-donut) carry
-      // the only permitted gradients under the 2026-08-27 direction
-      // (frontend-design.md §4.1); surfaces stay flat.
-      if (selector.includes('.mk-brand-chip') || selector.includes('.mk-donut')) {
+      // Brand identity chips — .mk-brand-chip, the provider family
+      // (.mk-chip-<provider>) — and the cost donut (.mk-donut) carry the only
+      // permitted gradients under the 2026-08-27 direction
+      // (frontend-design.md §4.1/§9); surfaces stay flat. The provider chips
+      // shipped gradients since the palette landed, but this filter named only
+      // .mk-brand-chip — harmless until the `sanitized.join` repair below gave
+      // the audit teeth (2026-09-18).
+      if (
+        selector.includes('.mk-brand-chip') ||
+        selector.includes('.mk-chip-') ||
+        selector.includes('.mk-donut')
+      ) {
         return false;
       }
       return (
@@ -1461,7 +1499,10 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
       }
       return r.cssText;
     });
-    const text = sanitized.join;
+    // NB: `sanitized.join` (missing call) used to sit here — the regex then
+    // tested the stringified Function and both assertions below were toothless
+    // (2026-09-18, found while adding the brace-slip guard). Always invoke.
+    const text = sanitized.join('');
     return {
       gradients: /linear-gradient|radial-gradient|conic-gradient/.test(text),
       purple: /#7c3aed|#8b5cf6|#a855f7|#6d28d9|#9333ea|purple/i.test(text),
@@ -1472,4 +1513,108 @@ test('forbidden aesthetics are absent from the rendered shell', async ({ page })
   // may only appear on .mk-brand-chip and .mk-donut, never on surfaces.
   expect(violations.gradients).toBe(false);
   expect(violations.purple).toBe(false);
+});
+
+test('the built stylesheet keeps html-attribute rules at top level (brace-slip guard)', async ({
+  page,
+}) => {
+  // 2026-09-18 incident: an unclosed `:root {` in design-tokens.css made the
+  // build nest design-base.css inside it — every selector shipped as
+  // `:root .x`, and html-attribute preference rules (`[data-menu-theme=…]`,
+  // `[data-anim=off]`, …) became `:root [data-…]`, matching nothing. The rail
+  // ink token then fell back to body text color and "MiQroGate" vanished on
+  // the navy rail. Typecheck/tests/build were all green, so the guard lives
+  // here against the real bundle: no `:root :root` / `:root [data-` selectors,
+  // and the brand ink must actually resolve to white on the dark rail.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/keys');
+  await page.waitForLoadState('networkidle');
+
+  const mangles = await page.evaluate(() => {
+    const bad: string[] = [];
+    for (const sheet of [...document.styleSheets]) {
+      let rules: CSSRule[];
+      try {
+        rules = [...sheet.cssRules];
+      } catch {
+        continue;
+      }
+      for (const rule of rules) {
+        const selector = (rule as CSSStyleRule).selectorText ?? '';
+        if (selector.includes(':root :root') || selector.includes(':root [data-')) {
+          bad.push(selector);
+        }
+      }
+    }
+    return bad;
+  });
+  expect(mangles).toEqual([]);
+
+  const brandColor = await page
+    .locator('.new-shell__brand-name')
+    .evaluate((el) => getComputedStyle(el).color);
+  expect(brandColor).toBe('rgb(255, 255, 255)');
+});
+
+test('#830: a large viewport gets a fluid band, the fixed cap centers, and titles collapse the description', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1920, height: 1000 });
+  await mockApi(page, true);
+  await page.goto('/app/keys');
+  await page.waitForLoadState('networkidle');
+
+  // Default = fluid: the band spans the viewport minus the rail (vben v5
+  // fills the viewport — measured at 1920 on their workbench, 1677px cards).
+  const fluid = await page.locator('.ui-page').boundingBox();
+  expect(fluid).not.toBeNull();
+  expect(Math.round(fluid!.width)).toBeGreaterThan(1600);
+
+  // 'fixed 1200' caps AND centers the band instead of hugging the rail.
+  await page.evaluate(() => {
+    const prefs = JSON.parse(localStorage.getItem('miqrolegate.prefs') ?? '{}') as Record<
+      string,
+      unknown
+    >;
+    localStorage.setItem(
+      'miqrolegate.prefs',
+      JSON.stringify({ ...prefs, contentCompact: 'fixed' }),
+    );
+  });
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  const fixed = await page.locator('.ui-page').boundingBox();
+  expect(Math.round(fixed!.width)).toBeGreaterThan(1190);
+  expect(Math.round(fixed!.width)).toBeLessThan(1210);
+  expect(Math.round(fixed!.x)).toBeGreaterThan(300);
+
+  // Clicking the page title collapses the description line, and the choice
+  // survives a reload (showPageDesc preference).
+  const desc = page.locator('.ui-page-desc').first();
+  await expect(desc).toBeVisible();
+  await page.locator('.ui-page-title').first().click();
+  await expect(desc).toBeHidden();
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.ui-page-desc').first()).toBeHidden();
+});
+
+test('#863: cache config tab lists per-key cache activity with the opt-in hint', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page, true);
+  await page.goto('/app/roi');
+  await page.waitForLoadState('networkidle');
+
+  // Stats is the default tab; the config tab carries the Tencent-style
+  // per-key table fed by the VIRTUAL_KEY grouping.
+  await expect(page.getByTestId('roi-report')).toBeVisible();
+  await page.getByTestId('roi-tab-config').click();
+  const table = page.getByTestId('roi-key-table');
+  await expect(table).toBeVisible();
+  await expect(table).toContainText('codex-tools');
+  await expect(table).toContainText('claude-code-main');
+  await expect(page.getByTestId('roi-config')).toContainText('去「我的密钥」管理缓存开关');
 });

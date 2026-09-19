@@ -2244,6 +2244,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/reconciliations/{reportId}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["exportRowsCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/provider-products": {
         parameters: {
             query?: never;
@@ -2831,7 +2847,7 @@ export interface components {
             updatedAt?: string;
             warning?: string;
         };
-        ScopeRequest: {
+        SkillAccessScopeRequest: {
             scopeType: string;
             /** Format: uuid */
             scopeId: string;
@@ -2849,7 +2865,7 @@ export interface components {
             /** Format: date-time */
             createdAt?: string;
         };
-        UpdateRequest: {
+        RetentionConfigUpdateRequest: {
             enabled?: boolean;
             /** Format: int32 */
             maxContentBytes?: number;
@@ -3004,7 +3020,7 @@ export interface components {
             upstreamTimeoutMs?: number;
             checkMode?: string;
         };
-        RequestedPolicy: {
+        ToolRetryPolicyRequest: {
             retryEnabled?: boolean;
             /** Format: int32 */
             retryMax?: number;
@@ -3019,6 +3035,34 @@ export interface components {
             idempotencyConfirmed?: boolean;
             /** Format: int64 */
             version?: number;
+        };
+        ResiliencePolicyRequest: {
+            retryEnabled?: boolean;
+            /** Format: int32 */
+            retryMax?: number;
+            retryConditions?: string[];
+            idempotencyConfirmed?: boolean;
+            breakerEnabled?: boolean;
+            /** Format: int32 */
+            breakerWindowSeconds?: number;
+            /** Format: int32 */
+            breakerMinRequests?: number;
+            breakerErrorEnabled?: boolean;
+            /** Format: int32 */
+            breakerErrorRatio?: number;
+            breakerErrorStatusCodes?: number[];
+            breakerSlowEnabled?: boolean;
+            /** Format: int32 */
+            breakerSlowCallMs?: number;
+            /** Format: int32 */
+            breakerSlowRatio?: number;
+            /** Format: int32 */
+            breakerOpenSeconds?: number;
+            /** Format: int32 */
+            breakerProbeCount?: number;
+            /** Format: int32 */
+            breakerProbeSuccess?: number;
+            breakerSkipRetry?: boolean;
         };
         McpResiliencePolicy: {
             retryEnabled?: boolean;
@@ -3249,7 +3293,7 @@ export interface components {
             /** Format: date-time */
             sessionExpiresAt?: string;
         };
-        CreateRequest: {
+        WebhookCreateRequest: {
             name?: string;
             url?: string;
             secret?: string;
@@ -3277,6 +3321,12 @@ export interface components {
             /** Format: int32 */
             httpStatus?: number;
             errorMessage?: string;
+        };
+        UserCreateRequest: {
+            username?: string;
+            displayName?: string;
+            /** @enum {string} */
+            role?: "SYSTEM_ADMIN" | "USER";
         };
         AdminUserView: {
             /** Format: uuid */
@@ -3406,6 +3456,10 @@ export interface components {
             /** Format: date-time */
             createdAt?: string;
         };
+        TeamCreateRequest: {
+            name?: string;
+            description?: string;
+        };
         Team: {
             /** Format: uuid */
             id?: string;
@@ -3422,9 +3476,23 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
         };
-        MemberRequest: {
+        TeamMemberRequest: {
             /** Format: uuid */
             userId?: string;
+        };
+        SubscriptionCreateRequest: {
+            /** Format: uuid */
+            providerProductId?: string;
+            name?: string;
+            /** @enum {string} */
+            billingMode?: "PAYG" | "FIXED_SUBSCRIPTION" | "TOKEN_PACKAGE" | "CREDIT_POOL" | "HYBRID";
+            /** @enum {string} */
+            planScope?: "NONE" | "PERSONAL" | "TEAM" | "ENTERPRISE";
+            subscriptionPrice?: number;
+            currency?: string;
+            /** Format: int64 */
+            quotaTotal?: number;
+            quotaUnit?: string;
         };
         UpstreamSubscription: {
             /** Format: uuid */
@@ -3582,6 +3650,12 @@ export interface components {
             /** Format: date-time */
             activatedAt?: string;
         };
+        ServiceCreateRequest: {
+            name: string;
+            kind?: string;
+            description?: string;
+            baseUrl: string;
+        };
         InternalService: {
             /** Format: uuid */
             id?: string;
@@ -3617,7 +3691,7 @@ export interface components {
             recoverThreshold?: number;
             checkPath?: string;
         };
-        HealthConfigRequest: {
+        ServiceHealthConfigRequest: {
             /** Format: int32 */
             checkIntervalSeconds?: number;
             /** Format: int32 */
@@ -3627,6 +3701,11 @@ export interface components {
             /** Format: int32 */
             recoverThreshold?: number;
             checkPath?: string;
+        };
+        ProjectCreateRequest: {
+            code?: string;
+            name?: string;
+            projectTag?: string;
         };
         Project: {
             /** Format: uuid */
@@ -3660,6 +3739,19 @@ export interface components {
             /** Format: date-time */
             createdAt?: string;
         };
+        ProjectMemberRequest: {
+            /** Format: uuid */
+            userId?: string;
+        };
+        PriceCreateRequest: {
+            /** Format: uuid */
+            providerProductId: string;
+            modelId: string;
+            tokenType: string;
+            currency: string;
+            unitPrice: number;
+            source: string;
+        };
         PriceSnapshotView: {
             /** Format: uuid */
             id?: string;
@@ -3677,7 +3769,7 @@ export interface components {
             /** Format: date-time */
             createdAt?: string;
         };
-        AddRequest: {
+        ModelCatalogAddRequest: {
             /** Format: uuid */
             providerProductId: string;
             modelId: string;
@@ -3718,6 +3810,23 @@ export interface components {
         ReviewModelApprovalRequest: {
             reviewNote?: string;
         };
+        McpServiceCreateRequest: {
+            name: string;
+            description?: string;
+            endpoint: string;
+            transport?: string;
+            /** Format: int32 */
+            checkIntervalSeconds?: number;
+            /** Format: int32 */
+            checkTimeoutSeconds?: number;
+            /** Format: int32 */
+            failThreshold?: number;
+            /** Format: int32 */
+            recoverThreshold?: number;
+            checkPath?: string;
+            /** Format: int32 */
+            upstreamTimeoutMs?: number;
+        };
         McpServiceVerifyView: {
             /** Format: uuid */
             serviceId?: string;
@@ -3728,6 +3837,12 @@ export interface components {
             detail?: string;
             /** Format: date-time */
             checkedAt?: string;
+        };
+        McpToolCreateRequest: {
+            toolName: string;
+            description?: string;
+            method?: string;
+            path: string;
         };
         McpTool: {
             /** Format: uuid */
@@ -3794,7 +3909,7 @@ export interface components {
             mode?: string;
             value?: string;
         };
-        UpsertRequest: {
+        McpRouteRuleUpsertRequest: {
             name: string;
             description?: string;
             /** Format: int32 */
@@ -3839,6 +3954,27 @@ export interface components {
             updatedAt?: string;
             matchExpression?: string;
             default?: boolean;
+        };
+        McpServiceHealthConfigRequest: {
+            /** Format: int32 */
+            checkIntervalSeconds?: number;
+            /** Format: int32 */
+            checkTimeoutSeconds?: number;
+            /** Format: int32 */
+            failThreshold?: number;
+            /** Format: int32 */
+            recoverThreshold?: number;
+            checkPath?: string;
+            checkMode?: string;
+        };
+        GrantCreateRequest: {
+            /** Format: uuid */
+            projectId?: string;
+            /** Format: uuid */
+            providerProductId?: string;
+            /** Format: uuid */
+            credentialId?: string;
+            models?: string[];
         };
         ProjectProviderGrant: {
             /** Format: uuid */
@@ -3973,10 +4109,24 @@ export interface components {
             active?: boolean;
             capabilities?: string[];
         };
+        ApiConsumerCreateRequest: {
+            name: string;
+            expiresAt?: string;
+        };
         CreateApiConsumerResponse: {
             consumer?: components["schemas"]["ApiConsumerView"];
             apiKey?: string;
             shownOnce?: boolean;
+        };
+        AlertRuleCreateRequest: {
+            name?: string;
+            type?: string;
+            threshold?: number;
+            /** Format: int32 */
+            dedupeMinutes?: number;
+            /** Format: uuid */
+            webhookEndpointId?: string;
+            scopeJson?: string;
         };
         AlertRule: {
             /** Format: uuid */
@@ -3999,6 +4149,12 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
         };
+        AgentCreateRequest: {
+            name: string;
+            description?: string;
+            /** Format: uuid */
+            credentialId: string;
+        };
         AgentView: {
             /** Format: uuid */
             id?: string;
@@ -4013,6 +4169,13 @@ export interface components {
             status?: string;
             /** Format: date-time */
             createdAt?: string;
+        };
+        OpenAdminWebhookCreateRequest: {
+            name?: string;
+            url?: string;
+            secret?: string;
+            /** Format: int32 */
+            timeoutMs?: number;
         };
         DelegatedCreateRequest: {
             /** Format: uuid */
@@ -4062,13 +4225,45 @@ export interface components {
             reconcileLevel?: string;
             adjustmentLevel?: string;
         };
+        OpenAdminAlertRuleCreateRequest: {
+            name?: string;
+            type?: string;
+            threshold?: number;
+            /** Format: int32 */
+            dedupeMinutes?: number;
+            /** Format: uuid */
+            webhookEndpointId?: string;
+            scopeJson?: string;
+        };
         UpdateVirtualKeyRequest: {
             name: string;
+        };
+        WebhookUpdateRequest: {
+            name?: string;
+            enabled?: boolean;
+            /** Format: int32 */
+            timeoutMs?: number;
         };
         UpdateUserRequest: {
             displayName?: string;
             /** @enum {string} */
             status?: "ACTIVE" | "DISABLED" | "LOCKED";
+        };
+        TeamUpdateRequest: {
+            name?: string;
+            description?: string;
+            /** @enum {string} */
+            status?: "ACTIVE" | "DISABLED";
+        };
+        SubscriptionUpdateRequest: {
+            name?: string;
+            subscriptionPrice?: number;
+            currency?: string;
+            /** Format: int64 */
+            quotaTotal?: number;
+            quotaUnit?: string;
+            /** @enum {string} */
+            status?: "ACTIVE" | "EXPIRED" | "CANCELLED" | "SUSPENDED";
         };
         SeatUpdateRequest: {
             /** Format: uuid */
@@ -4076,6 +4271,44 @@ export interface components {
             /** @enum {string} */
             status?: "AVAILABLE" | "ASSIGNED" | "DISABLED" | "RELEASED";
             displayName?: string;
+        };
+        ProjectUpdateRequest: {
+            name?: string;
+            projectTag?: string;
+            /** @enum {string} */
+            status?: "ACTIVE" | "DISABLED";
+        };
+        ApiKeyScopeRequest: {
+            capabilities?: string[];
+        };
+        ApiConsumerScopeRequest: {
+            capabilities?: string[];
+        };
+        AlertRuleUpdateRequest: {
+            name?: string;
+            threshold?: number;
+            /** Format: int32 */
+            dedupeMinutes?: number;
+            enabled?: boolean;
+            /** Format: uuid */
+            webhookEndpointId?: string;
+            scopeJson?: string;
+        };
+        OpenAdminWebhookUpdateRequest: {
+            name?: string;
+            enabled?: boolean;
+            /** Format: int32 */
+            timeoutMs?: number;
+        };
+        OpenAdminAlertRuleUpdateRequest: {
+            name?: string;
+            threshold?: number;
+            /** Format: int32 */
+            dedupeMinutes?: number;
+            enabled?: boolean;
+            /** Format: uuid */
+            webhookEndpointId?: string;
+            scopeJson?: string;
         };
         Cost: {
             upstreamPaid?: number;
@@ -4380,6 +4613,9 @@ export interface components {
             paidCost?: number;
             savedCost?: number;
             savedPct?: number;
+            /** @enum {string} */
+            pricingStatus?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+            unpriced?: components["schemas"]["PricingGap"];
         };
         HourlyUsageReport: {
             date?: string;
@@ -4683,7 +4919,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ScopeRequest"][];
+                "application/json": components["schemas"]["SkillAccessScopeRequest"][];
             };
         };
         responses: {
@@ -4727,7 +4963,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateRequest"];
+                "application/json": components["schemas"]["RetentionConfigUpdateRequest"];
             };
         };
         responses: {
@@ -4963,7 +5199,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RequestedPolicy"];
+                "application/json": components["schemas"]["ToolRetryPolicyRequest"];
             };
         };
         responses: {
@@ -5011,7 +5247,7 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": components["schemas"]["RequestedPolicy"];
+                "application/json": components["schemas"]["ResiliencePolicyRequest"];
             };
         };
         responses: {
@@ -5592,7 +5828,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["WebhookCreateRequest"];
             };
         };
         responses: {
@@ -5658,7 +5894,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["UserCreateRequest"];
             };
         };
         responses: {
@@ -5884,7 +6120,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["TeamCreateRequest"];
             };
         };
         responses: {
@@ -5932,7 +6168,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["MemberRequest"];
+                "application/json": components["schemas"]["TeamMemberRequest"];
             };
         };
         responses: {
@@ -5974,7 +6210,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["SubscriptionCreateRequest"];
             };
         };
         responses: {
@@ -6207,7 +6443,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["ServiceCreateRequest"];
             };
         };
         responses: {
@@ -6233,7 +6469,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["HealthConfigRequest"];
+                "application/json": components["schemas"]["ServiceHealthConfigRequest"];
             };
         };
         responses: {
@@ -6416,7 +6652,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["ProjectCreateRequest"];
             };
         };
         responses: {
@@ -6512,7 +6748,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["MemberRequest"];
+                "application/json": components["schemas"]["ProjectMemberRequest"];
             };
         };
         responses: {
@@ -6554,7 +6790,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["PriceCreateRequest"];
             };
         };
         responses: {
@@ -6623,7 +6859,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AddRequest"];
+                "application/json": components["schemas"]["ModelCatalogAddRequest"];
             };
         };
         responses: {
@@ -6771,7 +7007,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["McpServiceCreateRequest"];
             };
         };
         responses: {
@@ -6841,7 +7077,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["McpToolCreateRequest"];
             };
         };
         responses: {
@@ -7066,7 +7302,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpsertRequest"];
+                "application/json": components["schemas"]["McpRouteRuleUpsertRequest"];
             };
         };
         responses: {
@@ -7117,7 +7353,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["HealthConfigRequest"];
+                "application/json": components["schemas"]["McpServiceHealthConfigRequest"];
             };
         };
         responses: {
@@ -7161,7 +7397,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["GrantCreateRequest"];
             };
         };
         responses: {
@@ -7509,7 +7745,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["ApiConsumerCreateRequest"];
             };
         };
         responses: {
@@ -7575,7 +7811,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["AlertRuleCreateRequest"];
             };
         };
         responses: {
@@ -7619,7 +7855,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["AgentCreateRequest"];
             };
         };
         responses: {
@@ -7685,7 +7921,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["OpenAdminWebhookCreateRequest"];
             };
         };
         responses: {
@@ -7843,7 +8079,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateRequest"];
+                "application/json": components["schemas"]["OpenAdminAlertRuleCreateRequest"];
             };
         };
         responses: {
@@ -7959,7 +8195,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateRequest"];
+                "application/json": components["schemas"]["WebhookUpdateRequest"];
             };
         };
         responses: {
@@ -8035,7 +8271,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateRequest"];
+                "application/json": components["schemas"]["TeamUpdateRequest"];
             };
         };
         responses: {
@@ -8083,7 +8319,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateRequest"];
+                "application/json": components["schemas"]["SubscriptionUpdateRequest"];
             };
         };
         responses: {
@@ -8136,7 +8372,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateRequest"];
+                "application/json": components["schemas"]["ProjectUpdateRequest"];
             };
         };
         responses: {
@@ -8184,7 +8420,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpsertRequest"];
+                "application/json": components["schemas"]["McpRouteRuleUpsertRequest"];
             };
         };
         responses: {
@@ -8210,7 +8446,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ScopeRequest"];
+                "application/json": components["schemas"]["ApiKeyScopeRequest"];
             };
         };
         responses: {
@@ -8236,7 +8472,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ScopeRequest"];
+                "application/json": components["schemas"]["ApiConsumerScopeRequest"];
             };
         };
         responses: {
@@ -8304,7 +8540,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateRequest"];
+                "application/json": components["schemas"]["AlertRuleUpdateRequest"];
             };
         };
         responses: {
@@ -8372,7 +8608,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateRequest"];
+                "application/json": components["schemas"]["OpenAdminWebhookUpdateRequest"];
             };
         };
         responses: {
@@ -8440,7 +8676,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateRequest"];
+                "application/json": components["schemas"]["OpenAdminAlertRuleUpdateRequest"];
             };
         };
         responses: {
@@ -9265,6 +9501,28 @@ export interface operations {
                         [key: string]: unknown;
                     };
                 };
+            };
+        };
+    };
+    exportRowsCsv: {
+        parameters: {
+            query?: {
+                state?: string;
+            };
+            header?: never;
+            path: {
+                reportId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

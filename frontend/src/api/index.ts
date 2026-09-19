@@ -1385,6 +1385,16 @@ export interface ReconciliationReport {
   finishedAt?: string | null;
 }
 
+/**
+ * CSV export payload: `AuditCsvExport` plus the exact data-row count the
+ * backend reports through {@code X-MiQroKey-Rows}. Bill text is
+ * provider-controlled and may contain newlines, so counting lines in the file
+ * (what the audit/retention views do) would under-report here.
+ */
+export interface ReconciliationCsvExport extends AuditCsvExport {
+  rows: number;
+}
+
 /** One four-state detail row; `detail` carries per-verdict context fields. */
 export interface ReconciliationRow {
   rowNo: number;
@@ -1420,6 +1430,48 @@ export function createReconciliation(
 ): Promise<ReconciliationReport> {
   const qs = new URLSearchParams(params).toString();
   return uploadBytes<ReconciliationReport>(`/api/v1/admin/reconciliations?${qs}`, content);
+}
+
+/**
+ * Downloads the four-state detail rows of one report as CSV (same shape as the
+ * audit and retention exports: 50k-row cap declared via
+ * {@code X-MiQroKey-Truncated}, row count via {@code X-MiQroKey-Rows}). The
+ * optional state narrows the file to the filter the page is showing.
+ */
+export async function exportReconciliationCsv(
+  id: string,
+  state?: string,
+): Promise<ReconciliationCsvExport> {
+  const params = new URLSearchParams();
+  if (state) params.set('state', state);
+  const query = params.toString();
+  const suffix = query ? `?${query}` : '';
+  const response = await fetch(`/api/v1/admin/reconciliations/${id}/export${suffix}`, {
+    headers: { Accept: 'text/csv' },
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    let details:
+      { detail?: string; code?: string; status?: number; requestId?: string } | undefined;
+    try {
+      details = (await response.json()) as typeof details;
+    } catch {
+      // Not JSON — generic error below.
+    }
+    throw new ApiError({
+      type: 'about:blank',
+      title: '导出失败',
+      status: response.status,
+      code: details?.code ?? 'HTTP_ERROR',
+      detail: details?.detail,
+      requestId: details?.requestId ?? '',
+    });
+  }
+  return {
+    csv: await response.text(),
+    truncated: response.headers.get('X-MiQroKey-Truncated') === 'true',
+    rows: Number(response.headers.get('X-MiQroKey-Rows') ?? '0'),
+  };
 }
 
 // ---------------------------------------------------------------------------

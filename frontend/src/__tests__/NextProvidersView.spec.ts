@@ -416,9 +416,42 @@ describe('NextProvidersView', () => {
       await flushPromises();
       const block = document.querySelector('[data-testid="product-models-adapter-warning"]');
       expect(block, 'DOCUMENTED product should warn in its detail dialog').toBeTruthy();
-      expect(block!.textContent).toContain('该产品未处于「已验证」状态');
+      expect(block!.textContent).toContain('当前状态');
       expect(block!.textContent).toContain('已文档化');
       expect(block!.textContent).toContain('适配器尚未完成验证');
+      // #835: the warning now also says what to do about it.
+      expect(block!.textContent).toContain('上游凭证页');
     });
+  });
+
+  it('#835: the manual-model form reports a missing model ID inline, not as a block alert', async () => {
+    mockApi.adminListModels.mockResolvedValue([]);
+    mockApi.adminModelProbeStatus.mockResolvedValue({
+      status: null,
+      error: null,
+      modelCount: null,
+      probedAt: null,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="product-models-open"]').trigger('click');
+    await flushPromises();
+
+    // Submitting an empty ID flags the FIELD; no form-level alert block.
+    (document.querySelector('[data-testid="product-models-add"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const fieldError = document.querySelector('[data-testid="field-error"]');
+    expect(fieldError?.textContent).toContain('请填写模型 ID');
+    expect(document.querySelector('.next-providers__model-form .ui-alert--error')).toBeNull();
+    expect(mockApi.adminCreateModel).not.toHaveBeenCalled();
+
+    // Typing clears the inline error.
+    const idInput = document.querySelector('[data-testid="product-models-id"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(idInput, 'deepseek-chat');
+    idInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    expect(document.querySelector('[data-testid="field-error"]')).toBeNull();
   });
 });

@@ -9,7 +9,12 @@ import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { UiButton, UiInput, UiSelect, UiTable } from '@/ui';
 import type { AuditEventView } from '@/types/generated-api';
-import { TARGET_TYPE_LABELS, actionLabel, summaryText, targetTypeLabel } from '@/utils/audit-labels';
+import {
+  TARGET_TYPE_LABELS,
+  actionLabel,
+  summaryText,
+  targetTypeLabel,
+} from '@/utils/audit-labels';
 
 const events = ref<AuditEventView[]>([]);
 
@@ -97,7 +102,10 @@ function shortId(id: string): string {
 function validActor(): boolean {
   actorError.value = '';
   const actor = actorFilter.value.trim();
-  if (actor && !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(actor)) {
+  if (
+    actor &&
+    !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(actor)
+  ) {
     actorError.value = '操作者必须是 UUID。';
     return false;
   }
@@ -245,7 +253,9 @@ onMounted(load);
           导出 CSV
         </UiButton>
       </div>
-      <p v-if="actorError" class="ui-form-error" data-testid="audit-actor-error">{{ actorError }}</p>
+      <p v-if="actorError" class="ui-form-error" data-testid="audit-actor-error">
+        {{ actorError }}
+      </p>
       <div
         v-if="exportNotice"
         class="next-audit__notice"
@@ -256,7 +266,11 @@ onMounted(load);
       </div>
     </section>
 
-    <section v-if="events.length" class="ui-panel next-audit__actions" data-testid="audit-action-dist">
+    <section
+      v-if="events.length"
+      class="ui-panel next-audit__actions"
+      data-testid="audit-action-dist"
+    >
       <div class="ui-panel-head">
         <div>
           <h2 class="ui-panel-title">动作分布</h2>
@@ -300,9 +314,12 @@ onMounted(load);
           <span v-if="(row as AuditEventView).actorName">{{
             (row as AuditEventView).actorName
           }}</span>
-          <span v-else-if="(row as AuditEventView).actorId" class="ui-mono" data-testid="audit-actor-fallback">{{
-            shortId((row as AuditEventView).actorId!)
-          }}</span>
+          <span
+            v-else-if="(row as AuditEventView).actorId"
+            class="ui-mono"
+            data-testid="audit-actor-fallback"
+            >{{ shortId((row as AuditEventView).actorId!) }}</span
+          >
           <span v-else>—</span>
         </template>
         <template #action="{ row }">
@@ -323,7 +340,9 @@ onMounted(load);
           <span v-else>—</span>
         </template>
         <template #changeSummary="{ row }">
-          <span class="next-audit__summary" :title="(row as AuditEventView).changeSummary">{{ summaryText((row as AuditEventView).changeSummary) }}</span>
+          <span class="next-audit__summary" :title="(row as AuditEventView).changeSummary">{{
+            summaryText((row as AuditEventView).changeSummary)
+          }}</span>
         </template>
       </UiTable>
     </section>

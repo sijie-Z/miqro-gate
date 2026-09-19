@@ -19,7 +19,8 @@ import {
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
-import { UiButton, UiDialog, UiInput, UiStatusBadge, toast } from '@/ui';
+import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTooltip, toast } from '@/ui';
+import { costGapNote } from '@/lib/usage-pricing';
 import type { UsageSummary, VirtualKeyView } from '@/types/generated-api';
 
 const auth = useAuthStore();
@@ -88,7 +89,18 @@ async function loadSnapshot() {
   }
 }
 
-const snapshot = computed(() => {
+interface SnapshotCard {
+  label: string;
+  value: string;
+  prefix: string;
+  chip: string;
+  icon: unknown;
+  to: string;
+  /** Set when the figure is known to fall short of the whole (#801). */
+  caveat?: string;
+}
+
+const snapshot = computed<SnapshotCard[]>(() => {
   const totals = summary.value?.totals;
   const requests =
     (totals?.requests?.upstream ?? 0) +
@@ -97,6 +109,7 @@ const snapshot = computed(() => {
     (totals?.requests?.l2Hit ?? 0);
   const tokens = (totals?.tokens?.input ?? 0) + (totals?.tokens?.output ?? 0);
   const cost = Number(totals?.cost?.upstreamPaid ?? 0);
+  const costCaveat = costGapNote(totals) ?? undefined;
   const activeKeys = keys.value?.filter((k) => k.status === 'ACTIVE').length;
   return [
     {
@@ -127,6 +140,7 @@ const snapshot = computed(() => {
       label: '本月成本',
       value: summary.value ? cost.toFixed(2) : '—',
       prefix: '¥',
+      caveat: costCaveat,
       chip: 'gold',
       icon: MoneyIcon,
       to: '/app/usage',
@@ -278,7 +292,12 @@ onMounted(async () => {
           <span class="next-profile__stat-label">{{ card.label }}</span>
           <span class="next-profile__stat-value ui-num"
             ><i v-if="card.prefix" class="next-profile__stat-currency">{{ card.prefix }}</i
-            >{{ card.value }}</span
+            >{{ card.value
+            }}<UiTooltip v-if="card.caveat" :text="card.caveat"
+              ><span class="next-profile__stat-caveat" data-testid="profile-cost-caveat"
+                >未定价</span
+              ></UiTooltip
+            ></span
           >
         </span>
       </router-link>
@@ -555,6 +574,14 @@ onMounted(async () => {
 .next-profile__stat-label {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
+  white-space: nowrap;
+}
+
+.next-profile__stat-caveat {
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-medium);
+  line-height: 1;
+  color: var(--ui-warning-fg);
   white-space: nowrap;
 }
 

@@ -44,7 +44,7 @@ public class OpenAdminWebhooksController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public WebhookEndpointView create(HttpServletRequest request, @RequestBody CreateRequest body) {
+    public WebhookEndpointView create(HttpServletRequest request, @RequestBody OpenAdminWebhookCreateRequest body) {
         return endpointService.create(tenantId(request), body.name(), body.url(), body.secret(),
                 body.timeoutMs() != null ? body.timeoutMs() : 5000, auditContext(request));
     }
@@ -61,7 +61,7 @@ public class OpenAdminWebhooksController {
 
     @PatchMapping("/{endpointId}")
     public WebhookEndpointView update(HttpServletRequest request, @PathVariable UUID endpointId,
-            @RequestBody UpdateRequest body) {
+            @RequestBody OpenAdminWebhookUpdateRequest body) {
         return endpointService.updateView(tenantId(request), endpointId, body.name(), body.enabled(), body.timeoutMs(),
                 auditContext(request));
     }
@@ -101,10 +101,10 @@ public class OpenAdminWebhooksController {
         return AuditContext.human(userContext.getUser().id(), requestId(request));
     }
 
-    public record CreateRequest(String name, String url, String secret, Integer timeoutMs) {
+    public record OpenAdminWebhookCreateRequest(String name, String url, String secret, Integer timeoutMs) {
     }
 
-    public record UpdateRequest(String name, Boolean enabled, Integer timeoutMs) {
+    public record OpenAdminWebhookUpdateRequest(String name, Boolean enabled, Integer timeoutMs) {
     }
     private static String requestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");

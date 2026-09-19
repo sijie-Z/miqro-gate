@@ -221,28 +221,19 @@ onMounted(load);
           >
         </template>
         <template #previewCount="{ row }">
-          <span class="ui-num">{{
-            (asDeletion(row).previewCount ?? 0).toLocaleString()
-          }}</span>
+          <span class="ui-num">{{ (asDeletion(row).previewCount ?? 0).toLocaleString() }}</span>
         </template>
         <template #status="{ row }">
           <UiStatusBadge
             variant="pill"
             :tone="statusTone[asDeletion(row).status ?? ''] ?? 'neutral'"
-            :label="
-              statusText[asDeletion(row).status ?? ''] ??
-              asDeletion(row).status
-            "
+            :label="statusText[asDeletion(row).status ?? ''] ?? asDeletion(row).status"
           />
         </template>
         <template #deletedCount="{ row }">
-          <span class="ui-num">{{
-            asDeletion(row).deletedCount?.toLocaleString() ?? '—'
-          }}</span>
+          <span class="ui-num">{{ asDeletion(row).deletedCount?.toLocaleString() ?? '—' }}</span>
         </template>
-        <template #createdAt="{ row }">{{
-          formatTime(asDeletion(row).createdAt)
-        }}</template>
+        <template #createdAt="{ row }">{{ formatTime(asDeletion(row).createdAt) }}</template>
       </UiTable>
     </section>
 

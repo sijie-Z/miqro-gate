@@ -3,11 +3,9 @@ package com.miqroera.miqrokey.controlplane.service;
 import com.miqroera.miqrokey.controlplane.dto.UsageRecordPage;
 import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.VirtualKey;
-import com.miqroera.miqrokey.domain.repository.PriceSnapshotRepository;
 import com.miqroera.miqrokey.domain.repository.UsageStatsRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
 import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
-import com.miqroera.miqrokey.domain.usage.PriceSnapshot;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator;
@@ -17,14 +15,11 @@ import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -48,13 +43,10 @@ public class UsageStatsService {
 
     private final VirtualKeyRepository keyRepository;
     private final UsageStatsRepository usageStatsRepository;
-    private final PriceSnapshotRepository priceSnapshotRepository;
 
-    public UsageStatsService(VirtualKeyRepository keyRepository, UsageStatsRepository usageStatsRepository,
-            PriceSnapshotRepository priceSnapshotRepository) {
+    public UsageStatsService(VirtualKeyRepository keyRepository, UsageStatsRepository usageStatsRepository) {
         this.keyRepository = keyRepository;
         this.usageStatsRepository = usageStatsRepository;
-        this.priceSnapshotRepository = priceSnapshotRepository;
     }
 
     /**
@@ -79,10 +71,6 @@ public class UsageStatsService {
         }
         UsageStatsRepository.UsageFilter filter = filter(user, keyIds, from, to);
 
-        Map<String, BigDecimal> prices = new LinkedHashMap<>();
-        for (PriceSnapshot p : priceSnapshotRepository.findAllLatestAt(Instant.now())) {
-            prices.put(p.providerProductId() + ":" + p.modelId() + ":" + p.tokenType().name(), p.unitPrice());
-        }
         List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
         List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
         return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows);
@@ -108,7 +96,7 @@ public class UsageStatsService {
         List<AdjustedUsageRow> events = usageStatsRepository.findRecords(filter, (page - 1) * size, size);
         List<UsageRecordPage.UsageRecordView> items = new ArrayList<>(events.size());
         for (AdjustedUsageRow row : events) {
-            items.add(view(row, priceMap()));
+            items.add(view(row));
         }
         return new UsageRecordPage(items, page, size, total);
     }
@@ -160,34 +148,22 @@ public class UsageStatsService {
     }
 
     /**
-     * Latest price snapshot keyed {@code productId:modelId:TOKEN_TYPE} — the same
-     * map the aggregates price with.
-     */
-    private Map<String, BigDecimal> priceMap() {
-        Map<String, BigDecimal> prices = new LinkedHashMap<>();
-        for (PriceSnapshot p : priceSnapshotRepository.findAllLatestAt(Instant.now())) {
-            prices.put(p.providerProductId() + ":" + p.modelId() + ":" + p.tokenType().name(), p.unitPrice());
-        }
-        return prices;
-    }
-
-    /**
      * Maps one row to the wire shape. The observed counts stay exactly the fact the
      * gateway recorded; the net counts and the {@code adjusted} marker ride
      * alongside so a reader can always tell a corrected row from an untouched one
-     * (#709). The per-row cost is priced with the same snapshot map as the
-     * aggregates (#758) and flagged {@code priced=false} when the model is not
-     * (fully) priced.
+     * (#709). The per-row cost is priced from the row's own price basis — the same
+     * one the aggregates price with (#710) — and flagged {@code priced=false} when
+     * that basis does not cover a dimension the row used.
      */
-    private static UsageRecordPage.UsageRecordView view(AdjustedUsageRow row, Map<String, BigDecimal> prices) {
+    private static UsageRecordPage.UsageRecordView view(AdjustedUsageRow row) {
         UsageEvent e = row.observed();
         TokenBucket t = e.tokens();
         Long input = orNull(t != null ? t.inputTokens() : null, t != null ? t.promptTokens() : null);
         Long output = orNull(t != null ? t.outputTokens() : null, t != null ? t.completionTokens() : null);
         Long cacheRead = t != null ? t.cacheReadInputTokens() : null;
         Long cacheCreation = t != null ? t.cacheCreationInputTokens() : null;
-        UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(prices, e.providerProductId(),
-                e.modelId(), input, output, cacheRead, cacheCreation);
+        UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(row.priceBasis(), input, output,
+                cacheRead, cacheCreation);
         return new UsageRecordPage.UsageRecordView(e.occurredAt(), e.modelId(), e.cacheLevel(), input, output,
                 cacheRead, cacheCreation, t != null ? t.totalTokens() : null, e.latencyMs(), e.upstreamStatusCode(),
                 e.providerRequestId(), e.gatewayRequestId(), e.isComplete(), e.usageMissing(), e.virtualKeyId(),

@@ -5,9 +5,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,12 +32,6 @@ class UsageStatsAggregatorTest {
      */
     private static final BigDecimal INPUT_COST = new BigDecimal("1000");
     private static final BigDecimal OUTPUT_COST = new BigDecimal("1000");
-
-    private static Map<String, BigDecimal> prices(String tokenType, String unitPrice) {
-        Map<String, BigDecimal> prices = new LinkedHashMap<>();
-        prices.put(PRODUCT + ":" + MODEL + ":" + tokenType, new BigDecimal(unitPrice));
-        return prices;
-    }
 
     private static UsageStatsAggregator.UsageAggRow row(CacheLevel level, long requests,
             UsageStatsAggregator.UsageAggRow.Outcome outcome) {
@@ -116,11 +108,8 @@ class UsageStatsAggregatorTest {
         @Test
         @DisplayName("sums the per-type rates and reports fully priced")
         void pricesAllTokenTypes() {
-            Map<String, BigDecimal> prices = new LinkedHashMap<>();
-            prices.put(PRODUCT + ":" + MODEL + ":INPUT", new BigDecimal("1.00"));
-            prices.put(PRODUCT + ":" + MODEL + ":OUTPUT", new BigDecimal("2.00"));
-            UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(prices, PRODUCT, MODEL, 1_000L,
-                    500L, null, null);
+            RowPriceBasis basis = new RowPriceBasis(new BigDecimal("1.00"), new BigDecimal("2.00"), null, null);
+            UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(basis, 1_000L, 500L, null, null);
 
             assertThat(priced.priced()).isTrue();
             assertThat(priced.cost()).isEqualByComparingTo("0.002");
@@ -129,9 +118,8 @@ class UsageStatsAggregatorTest {
         @Test
         @DisplayName("reports unpriced when a non-zero input/output type has no snapshot")
         void unpricedWhenAnyTypeMissing() {
-            Map<String, BigDecimal> prices = prices("INPUT", "1.00");
-            UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(prices, PRODUCT, MODEL, 1_000L,
-                    500L, null, null);
+            RowPriceBasis basis = new RowPriceBasis(new BigDecimal("1.00"), null, null, null);
+            UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(basis, 1_000L, 500L, null, null);
 
             assertThat(priced.priced()).isFalse();
             assertThat(priced.cost()).isEqualByComparingTo("0");
@@ -143,11 +131,8 @@ class UsageStatsAggregatorTest {
             // Real vendors often publish no cache-write tariff (deepseek-flash on the demo
             // station is exactly this shape). A row with NO cache-creation tokens is still
             // fully priced: that dimension never took part in the calculation.
-            Map<String, BigDecimal> prices = new LinkedHashMap<>();
-            prices.put(PRODUCT + ":" + MODEL + ":INPUT", new BigDecimal("2.00"));
-            prices.put(PRODUCT + ":" + MODEL + ":OUTPUT", new BigDecimal("8.00"));
-            UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(prices, PRODUCT, MODEL, 1_000L,
-                    500L, 0L, 0L);
+            RowPriceBasis basis = new RowPriceBasis(new BigDecimal("2.00"), new BigDecimal("8.00"), null, null);
+            UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(basis, 1_000L, 500L, 0L, 0L);
 
             assertThat(priced.priced()).isTrue();
             assertThat(priced.cost()).isEqualByComparingTo("0.006");
@@ -160,11 +145,8 @@ class UsageStatsAggregatorTest {
             // rather than "cache dimensions do not count": 37 cache-creation tokens really
             // could not be priced, so saying "priced" would report an unknown as if it were
             // free — the summary flags it, and the detail row must agree (#710 vs #765).
-            Map<String, BigDecimal> prices = new LinkedHashMap<>();
-            prices.put(PRODUCT + ":" + MODEL + ":INPUT", new BigDecimal("2.00"));
-            prices.put(PRODUCT + ":" + MODEL + ":OUTPUT", new BigDecimal("8.00"));
-            UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(prices, PRODUCT, MODEL, 1_000L,
-                    500L, 0L, 37L);
+            RowPriceBasis basis = new RowPriceBasis(new BigDecimal("2.00"), new BigDecimal("8.00"), null, null);
+            UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(basis, 1_000L, 500L, 0L, 37L);
 
             assertThat(priced.priced()).isFalse();
         }
@@ -172,8 +154,8 @@ class UsageStatsAggregatorTest {
         @Test
         @DisplayName("a row with no tokens is trivially priced at zero")
         void zeroTokensIsPricedZero() {
-            UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(Map.of(), PRODUCT, MODEL, null,
-                    null, null, null);
+            UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(RowPriceBasis.UNKNOWN, null, null,
+                    null, null);
 
             assertThat(priced.priced()).isTrue();
             assertThat(priced.cost()).isEqualByComparingTo("0");

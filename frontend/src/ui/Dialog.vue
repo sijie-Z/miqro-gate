@@ -202,5 +202,4 @@ function dismiss() {
     transform: translate(-50%, -50%) scale(0.9);
   }
 }
-
 </style>

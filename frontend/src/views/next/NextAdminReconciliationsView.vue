@@ -65,6 +65,11 @@ const nextCursor = ref<string | number>('');
 const rowsLoading = ref(false);
 const rowsError = ref('');
 
+// ---- CSV export of the selected report's detail rows (issue #715)
+const exporting = ref(false);
+const exportNotice = ref('');
+const exportIsError = ref(false);
+
 const listColumns = [
   { key: 'createdAt', title: '上传时间', width: '150px' },
   { key: 'providerCode', title: '供应商', width: '160px' },
@@ -306,6 +311,48 @@ function setFilter(value: '' | ReconciliationVerdict) {
 function closeDetail() {
   selected.value = null;
   rows.value = [];
+  exportNotice.value = '';
+  exportIsError.value = false;
+}
+
+/**
+ * Downloads the selected report's detail rows as CSV. The file carries the
+ * current verdict filter, so what the admin sees on screen is what the file
+ * holds; the row count comes from the X-MiQroKey-Rows header because bill text
+ * is provider-controlled and may contain newlines. Copy is the audit export's,
+ * so the existing zh→en patterns already cover both branches.
+ */
+async function exportCsv() {
+  const target = selected.value;
+  if (!target) {
+    return;
+  }
+  exporting.value = true;
+  exportNotice.value = '';
+  exportIsError.value = false;
+  try {
+    const {
+      csv,
+      rows: exported,
+      truncated,
+    } = await api.exportReconciliationCsv(target.id, rowsState.value || undefined);
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `reconciliation-${target.id.slice(0, 8)}-${new Date()
+      .toISOString()
+      .replace(/[:.]/g, '-')}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    exportNotice.value = truncated
+      ? `已导出前 ${exported} 行并截断（单次上限 5 万行）——请缩小时间范围或补充筛选后重试。`
+      : `已导出 ${exported} 行 CSV。`;
+  } catch (error) {
+    exportIsError.value = true;
+    exportNotice.value = error instanceof ApiError ? error.message : '导出失败，请稍后重试。';
+  } finally {
+    exporting.value = false;
+  }
 }
 
 // #440: poll intervals must die with the component.
@@ -495,11 +542,29 @@ onMounted(load);
             {{ formatTime(selected.createdAt) }}
           </p>
         </div>
-        <UiButton variant="ghost" data-testid="recon-detail-close" @click="closeDetail"
-          >关闭</UiButton
-        >
+        <div class="next-recon__detail-actions">
+          <UiButton
+            variant="secondary"
+            :loading="exporting"
+            data-testid="recon-export"
+            @click="exportCsv"
+          >
+            导出 CSV
+          </UiButton>
+          <UiButton variant="ghost" data-testid="recon-detail-close" @click="closeDetail"
+            >关闭</UiButton
+          >
+        </div>
       </div>
       <div class="ui-panel-body">
+        <div
+          v-if="exportNotice"
+          class="next-recon__notice"
+          :class="{ 'next-recon__notice--error': exportIsError }"
+          data-testid="recon-export-notice"
+        >
+          {{ exportNotice }}
+        </div>
         <div v-if="selected.errorMessage" class="ui-alert ui-alert--error">
           {{ selected.errorMessage }}
         </div>
@@ -722,6 +787,23 @@ onMounted(load);
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--ui-space-4);
+}
+
+.next-recon__detail-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  flex-shrink: 0;
+}
+
+.next-recon__notice {
+  margin-bottom: var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-recon__notice--error {
+  color: var(--ui-danger-fg);
 }
 
 .next-recon__stats {

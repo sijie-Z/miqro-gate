@@ -15,6 +15,7 @@ import com.miqroera.miqrokey.domain.service.AuditService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 
 /**
@@ -55,6 +57,38 @@ public class ReconciliationService {
     static final int MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024;
     static final int MAX_LINES = 100_000;
     static final int ROWS_PAGE_MAX = 500;
+    /** Single-download row cap, same 5 万行 bound as the other CSV exports. */
+    static final int EXPORT_MAX_ROWS = 50_000;
+
+    /**
+     * Declared export column order — header and every data row are built from this
+     * one list (#754): a misaligned export does not fail loudly, it hands consumers
+     * the wrong values under the right names.
+     *
+     * <p>
+     * {@code detail_*} columns flatten the heterogeneous per-verdict {@code detail}
+     * JSON ({@code modelId/amount/currency/occurredAt/status} for bill rows,
+     * {@code bucketKey/providerCount/localCount} for PARTIAL,
+     * {@code occurredAt/modelId} for UNMATCHED_LOCAL); cells a verdict does not
+     * carry stay empty rather than shifting columns.
+     */
+    static final List<String> EXPORT_COLUMNS = List.of("report_id", "provider_code", "row_no", "verdict", "matched_by",
+            "provider_row_ref", "local_ref", "detail_model_id", "detail_amount", "detail_currency",
+            "detail_occurred_at", "detail_status", "detail_bucket_key", "detail_provider_count", "detail_local_count");
+
+    private static final String DETAIL_PREFIX = "detail_";
+
+    /**
+     * {@code detail_*} column → the key it reads from the stored detail JSON. The
+     * header is snake_case like the other admin exports while the JSON is
+     * camelCase, so the two cannot be derived from each other: a column must be
+     * spelled out here, and {@code ReconciliationExportCsvTest} fails if the
+     * declared columns and these keys ever drift apart.
+     */
+    static final Map<String, String> DETAIL_KEYS = Map.of("detail_model_id", "modelId", "detail_amount", "amount",
+            "detail_currency", "currency", "detail_occurred_at", "occurredAt", "detail_status", "status",
+            "detail_bucket_key", "bucketKey", "detail_provider_count", "providerCount", "detail_local_count",
+            "localCount");
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -197,15 +231,7 @@ public class ReconciliationService {
     public Map<String, Object> rows(UUID tenantId, UUID reportId, String state, Long cursor, int limit) {
         get(tenantId, reportId); // existence + tenant check
         Integer effectiveLimit = Math.min(Math.max(limit, 1), ROWS_PAGE_MAX);
-        String verdict = null;
-        if (state != null && !state.isBlank()) {
-            try {
-                verdict = Verdict.valueOf(state.trim().toUpperCase()).name();
-            } catch (IllegalArgumentException e) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "RECONCILIATION_PARAM_INVALID",
-                        "state 必须是 MATCHED/PARTIAL/UNMATCHED_PROVIDER/UNMATCHED_LOCAL。");
-            }
-        }
+        String verdict = normalizeVerdict(state);
         MapSqlParameterSource params = new MapSqlParameterSource("reportId", reportId)
                 .addValue("cursor", cursor == null ? 0L : cursor).addValue("limit", effectiveLimit);
         String filter = "";
@@ -218,21 +244,169 @@ public class ReconciliationService {
                 FROM reconciliation_rows
                 WHERE report_id = :reportId AND row_no > :cursor %s
                 ORDER BY row_no LIMIT :limit
-                """.formatted(filter), params, (rs, n) -> {
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("rowNo", rs.getLong("row_no"));
-            row.put("verdict", rs.getString("verdict"));
-            row.put("matchedBy", rs.getString("matched_by"));
-            row.put("providerRowRef", rs.getString("provider_row_ref"));
-            row.put("localRef", rs.getString("local_ref"));
-            row.put("detail", readTree(rs.getString("detail")));
-            return row;
-        });
+                """.formatted(filter), params, rowMapper);
         Long nextCursor = rows.size() == effectiveLimit
                 ? ((Number) rows.get(rows.size() - 1).get("rowNo")).longValue()
                 : null;
         return Map.of("rows", rows, "nextCursor", nextCursor == null ? "" : nextCursor);
     }
+
+    /**
+     * Four-state detail rows as a downloadable CSV (api-contract §5.27).
+     *
+     * <p>
+     * Dialect: the synchronous admin-download convention of
+     * {@code AdminAuditController} / {@code AdminRetentionLogController} — UTF-8
+     * BOM, RFC 4180 quoting with the #430 formula-injection guard, one trailing
+     * {@code X-MiQroKey-Truncated} declaration at {@link #EXPORT_MAX_ROWS}. The
+     * async artifact dialect ({@code ExportTaskService}: gzip, camelCase,
+     * {@code \,} escaping) is for queued jobs, not for a bounded download derived
+     * from one report.
+     *
+     * <p>
+     * {@code state} narrows the export exactly like the console's verdict filter
+     * (same validation as {@link #rows}); an empty result is a header-only CSV,
+     * never an error.
+     */
+    public CsvExport exportCsv(UUID tenantId, UUID reportId, String state) {
+        Map<String, Object> report = get(tenantId, reportId); // existence + tenant check
+        String verdict = normalizeVerdict(state);
+        MapSqlParameterSource params = new MapSqlParameterSource("reportId", reportId).addValue("limit",
+                EXPORT_MAX_ROWS + 1);
+        String filter = "";
+        if (verdict != null) {
+            filter = " AND verdict = :verdict ";
+            params.addValue("verdict", verdict);
+        }
+        List<Map<String, Object>> rows = jdbc.query("""
+                SELECT row_no, verdict, matched_by, provider_row_ref, local_ref, detail
+                FROM reconciliation_rows
+                WHERE report_id = :reportId %s
+                ORDER BY row_no LIMIT :limit
+                """.formatted(filter), params, rowMapper);
+        boolean truncated = rows.size() > EXPORT_MAX_ROWS;
+        if (truncated) {
+            rows = rows.subList(0, EXPORT_MAX_ROWS);
+        }
+        StringBuilder csv = new StringBuilder(rows.size() * 128 + 160);
+        csv.append('﻿'); // UTF-8 BOM so spreadsheet consumers detect the encoding
+        csv.append(String.join(",", EXPORT_COLUMNS)).append('\n');
+        for (Map<String, Object> row : rows) {
+            StringBuilder line = new StringBuilder(128);
+            for (String column : EXPORT_COLUMNS) {
+                if (line.length() > 0) {
+                    line.append(',');
+                }
+                line.append(csvCell(exportCell(row, report, column)));
+            }
+            csv.append(line).append('\n');
+        }
+        return new CsvExport(csv.toString(), rows.size(), truncated);
+    }
+
+    /** CSV export payload: rendered csv, exported row count, and the cap flag. */
+    public record CsvExport(String csv, int rows, boolean truncated) {
+    }
+
+    /**
+     * Verdict filter shared by the paged view and the export (both reject junk the
+     * same way).
+     */
+    private static String normalizeVerdict(String state) {
+        if (state == null || state.isBlank()) {
+            return null;
+        }
+        try {
+            return Verdict.valueOf(state.trim().toUpperCase()).name();
+        } catch (IllegalArgumentException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "RECONCILIATION_PARAM_INVALID",
+                    "state 必须是 MATCHED/PARTIAL/UNMATCHED_PROVIDER/UNMATCHED_LOCAL。");
+        }
+    }
+
+    /**
+     * One declared column of one row. {@code detail_*} reads its declared key from
+     * the per-verdict detail JSON; a verdict that does not carry the key yields an
+     * empty cell.
+     */
+    static String exportCell(Map<String, Object> row, Map<String, Object> report, String column) {
+        if (column.startsWith(DETAIL_PREFIX)) {
+            String key = DETAIL_KEYS.get(column);
+            if (key == null) {
+                throw new IllegalStateException("未声明的导出列: " + column);
+            }
+            JsonNode detail = (JsonNode) row.get("detail");
+            JsonNode value = detail == null ? null : detail.get(key);
+            return value == null || value.isNull() ? "" : value.asText();
+        }
+        return switch (column) {
+            case "report_id" -> String.valueOf(report.get("id"));
+            case "provider_code" -> String.valueOf(report.get("providerCode"));
+            case "row_no" -> String.valueOf(row.get("rowNo"));
+            case "verdict" -> String.valueOf(row.get("verdict"));
+            case "matched_by" -> stringValue(row.get("matchedBy"));
+            case "provider_row_ref" -> stringValue(row.get("providerRowRef"));
+            case "local_ref" -> stringValue(row.get("localRef"));
+            default -> throw new IllegalStateException("未声明的导出列: " + column);
+        };
+    }
+
+    private static String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    /**
+     * A bare decimal literal — digits with at most one sign, point and exponent.
+     * Nothing else; this decides whether a cell needs the formula guard at all.
+     */
+    private static final Pattern NUMERIC_LITERAL = Pattern.compile("[+-]?\\d+(\\.\\d+)?([eE][+-]?\\d+)?");
+
+    /**
+     * RFC 4180 cell with the #430 spreadsheet formula-injection guard, mirroring
+     * {@code AuditEventReadService.quote}: a cell starting with {@code = + - @
+     * TAB CR} is prefixed with an apostrophe (execution neutralised). Bill refs and
+     * detail fields carry provider-file text, so the guard applies here too.
+     *
+     * <p>
+     * A cell that is *only* a decimal literal is exempt: {@code -12.34} is a
+     * number, not a formula, and {@code CanonicalBillParser} accepts any non-empty
+     * {@code amount}, so refund/adjustment lines legitimately carry a negative one.
+     * Prefixing those would export {@code '-12.34} where the page renders
+     * {@code -12.34}, and the amount column would reach the spreadsheet as text
+     * that {@code SUM} ignores. Anything that merely starts like a number
+     * ({@code -1+1}, {@code +cmd|' /C calc'!A0}) is still guarded. Package-private
+     * for the unit test.
+     */
+    static String csvCell(String value) {
+        if (value == null) {
+            return "";
+        }
+        String guarded = value;
+        if (!guarded.isEmpty() && !NUMERIC_LITERAL.matcher(guarded).matches()
+                && "=+-@\t\r".indexOf(guarded.charAt(0)) >= 0) {
+            guarded = "'" + guarded;
+        }
+        if (guarded.indexOf(',') < 0 && guarded.indexOf('"') < 0 && guarded.indexOf('\n') < 0
+                && guarded.indexOf('\r') < 0) {
+            return guarded;
+        }
+        return '"' + guarded.replace("\"", "\"\"") + '"';
+    }
+
+    /**
+     * Shared row projection: one SELECT column set, one mapping, so the paged view
+     * and the export cannot drift apart (both read the same keys).
+     */
+    private final RowMapper<Map<String, Object>> rowMapper = (rs, n) -> {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("rowNo", rs.getLong("row_no"));
+        row.put("verdict", rs.getString("verdict"));
+        row.put("matchedBy", rs.getString("matched_by"));
+        row.put("providerRowRef", rs.getString("provider_row_ref"));
+        row.put("localRef", rs.getString("local_ref"));
+        row.put("detail", readTree(rs.getString("detail")));
+        return row;
+    };
 
     // ------------------------------------------------------------------ run
 
