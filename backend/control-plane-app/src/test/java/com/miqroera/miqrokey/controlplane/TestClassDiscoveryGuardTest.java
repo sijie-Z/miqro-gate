@@ -32,6 +32,26 @@ class TestClassDiscoveryGuardTest {
     private static final Pattern BLOCK_COMMENT = Pattern.compile("(?s)/\\*.*?\\*/");
     private static final Pattern LINE_COMMENT = Pattern.compile("//[^\n]*");
 
+    /**
+     * String literals, so that an annotation <em>named</em> in a string is not read as usage.
+     *
+     * <p>
+     * The quantifiers are possessive on purpose. A source file may contain an odd number of
+     * {@code "} characters (a char literal such as {@code '"'} is enough), which leaves a quote
+     * that never closes; a backtracking pattern then recurses over the rest of the file and dies
+     * with {@link StackOverflowError} instead of reporting a result. Possessive quantifiers make
+     * the match linear and let it fail immediately. Newlines terminate the class so that an
+     * unterminated quote cannot swallow a whole file either.
+     * </p>
+     */
+    private static final Pattern STRING_LITERAL = Pattern.compile("\"(?:[^\"\\\\\\n]++|\\\\.)*+\"");
+
+    /**
+     * A JUnit Platform suite re-selects classes by annotation. Matched as a real annotation, after
+     * stripping comments <em>and</em> string literals — see {@link #isPlatformSuite}.
+     */
+    private static final Pattern SUITE_ANNOTATION = Pattern.compile("@(Suite|SelectClasses)\\b");
+
     /** Surefire's default {@code <includes>}; keep in sync with surefire's own defaults. */
     private static final List<String> DISCOVERABLE_NAMES = List.of("Test*", "*Test", "*Tests", "*TestCase");
 
@@ -55,7 +75,7 @@ class TestClassDiscoveryGuardTest {
             if (DISCOVERABLE_NAMES.stream().anyMatch(pattern -> matches(pattern, name))) {
                 continue;
             }
-            if (suiteFiles.stream().anyMatch(suite -> read(suite).contains(name))) {
+            if (suiteFiles.stream().anyMatch(suite -> selects(suite, name))) {
                 continue;
             }
             orphans.add(backend.relativize(source).toString().replace('\\', '/'));
@@ -76,13 +96,30 @@ class TestClassDiscoveryGuardTest {
         return Pattern.compile("\\babstract\\s+class\\b").matcher(code).find();
     }
 
+    /**
+     * Note the double stripping. This guard's own source contains the literal {@code "@Suite"} in
+     * {@link #SUITE_ANNOTATION}, so a naive {@code contains("@Suite")} over raw text makes the guard
+     * count <em>itself</em> as a suite — and {@link #selects} then matches any orphan whose name is a
+     * substring of this file ({@code Test}, {@code List}, {@code Path}, {@code Files}, {@code Stream},
+     * {@code Pattern}…), silently excusing exactly the dead tests this class exists to catch.
+     */
     private static boolean isPlatformSuite(Path source) {
-        String code = withoutComments(read(source));
-        return code.contains("@Suite") || code.contains("@SelectClasses");
+        return SUITE_ANNOTATION.matcher(withoutStrings(withoutComments(read(source)))).find();
+    }
+
+    /** True when the suite names this class as a whole identifier, not as a substring. */
+    private static boolean selects(Path suite, String name) {
+        String code = withoutStrings(withoutComments(read(suite)));
+        return Pattern.compile("\\b" + Pattern.quote(name) + "\\b").matcher(code).find();
     }
 
     private static String withoutComments(String code) {
         return LINE_COMMENT.matcher(BLOCK_COMMENT.matcher(code).replaceAll("")).replaceAll("");
+    }
+
+    /** Replaces each string literal with an empty one, keeping indices/lengths roughly aligned. */
+    private static String withoutStrings(String code) {
+        return STRING_LITERAL.matcher(code).replaceAll("\"\"");
     }
 
     private static Path backendRoot() {
