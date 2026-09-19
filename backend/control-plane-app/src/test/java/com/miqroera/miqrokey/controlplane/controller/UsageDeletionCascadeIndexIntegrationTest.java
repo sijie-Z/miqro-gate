@@ -27,10 +27,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>
  * {@code usage_adjustments.usage_event_id REFERENCES usage_event (id) ON DELETE
  * CASCADE}（V63）让 PostgreSQL 为 <b>每一条</b> 被删的 usage_event 行执行一次
- * {@code SELECT 1 FROM ONLY usage_adjustments x WHERE usage_event_id = $1 FOR KEY
- * SHARE OF x}（外加同样形状的级联删除）。该查询只有 {@code usage_event_id} 一个
- * 条件，而 V63 建的索引是 {@code (tenant_id, usage_event_id)} —— 前导列不是外键列，
- * 因此索引无法被使用，PostgreSQL 只能退化为逐行全表扫描 usage_adjustments。
+ * {@code DELETE FROM ONLY usage_adjustments WHERE usage_event_id = $1}
+ * （{@code RI_FKey_cascade_del}）。该语句只有 {@code usage_event_id} 一个条件，而
+ * V63 建的索引是 {@code (tenant_id, usage_event_id)} —— 前导列不是外键列，因此索引
+ * 无法被使用，PostgreSQL 只能退化为逐行全表扫描 usage_adjustments。
  * </p>
  *
  * <p>
@@ -134,8 +134,9 @@ class UsageDeletionCascadeIndexIntegrationTest {
                 """, new MapSqlParameterSource("id", id), String.class));
 
         assertThat(plan)
-                .as("PostgreSQL 为外键 usage_adjustments_usage_event_id_fkey 执行的正是这条查询，"
-                        + "它必须能走 usage_event_id 前导的索引")
+                .as("usage_adjustments_usage_event_id_fkey 的检查语句只带 usage_event_id 这一个等值条件"
+                        + "（CASCADE 侧真实语句是 DELETE FROM ONLY usage_adjustments WHERE usage_event_id = $1，"
+                        + "本探针用同形状的锁行查询代替），它必须能走 usage_event_id 前导的索引")
                 .doesNotContain("Seq Scan");
     }
 

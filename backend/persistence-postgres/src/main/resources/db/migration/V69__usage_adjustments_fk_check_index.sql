@@ -18,17 +18,19 @@
 -- and reversal_of_id is not indexed at all.
 --
 -- ON DELETE CASCADE makes PostgreSQL enforce the first constraint from the
--- parent side: for every deleted usage_event row it runs
---     SELECT 1 FROM ONLY usage_adjustments x
+-- parent side: for every deleted usage_event row it runs a DELETE restricted to
+-- the referencing column (RI_FKey_cascade_del, captured with
+-- pg_stat_statements.track = 'all'):
+--     DELETE FROM ONLY usage_adjustments
 --      WHERE usage_event_id = $1
---        FOR KEY SHARE OF x
--- (RowTrigger / RI_FKey_cascade_del, plus the same shape again for the cascade
--- delete itself). ON DELETE RESTRICT fires the second one as an after-row
--- trigger on every deleted adjustment row:
+-- ON DELETE RESTRICT fires the second one as an after-row trigger on every
+-- deleted adjustment row (RI_FKey_restrict_del):
 --     SELECT 1 FROM ONLY usage_adjustments x
 --      WHERE reversal_of_id = $1
 --        FOR KEY SHARE OF x
--- (RI_FKey_restrict_del).
+-- Note that the SELECT ... FOR KEY SHARE OF x shape belongs to the "does the
+-- referenced row still exist" family (RESTRICT / NO ACTION); the CASCADE check
+-- is the DELETE above.
 --
 -- Both queries carry a single equality predicate on the referencing column and
 -- no tenant_id, so the composite index cannot serve either of them: a b-tree is
@@ -48,7 +50,9 @@
 --     Execution Time: 10028.782 ms
 --
 -- The Delete node itself took 223.703 ms; 94.6% of the statement was the first
--- foreign-key trigger. The plans for the check queries alone:
+-- foreign-key trigger. The plans for the check queries alone, probed in the
+-- row-locking RESTRICT/NO ACTION form (the CASCADE check carries the same
+-- single equality predicate in its DELETE and degrades to the same scan):
 --
 --     LockRows  (cost=0.00..153.51 rows=1 width=10)
 --       ->  Seq Scan on usage_adjustments x
@@ -71,6 +75,15 @@
 -- new single-column index cannot do; the two are not redundant. #864 dropped a
 -- genuinely duplicated index pair; this is the opposite case — a missing index
 -- for a query shape that has none.
+--
+-- Note on locking: Flyway runs this inside a transaction, so CONCURRENTLY is
+-- not available (same as V61). A plain CREATE INDEX takes a SHARE lock that
+-- blocks writes to usage_adjustments (reads continue) for the duration of the
+-- build; the table is small in every environment we run today, so that is
+-- acceptable. If this ever needs to run against a large production table, build
+-- the indexes out of band with CONCURRENTLY first and mark this migration as
+-- already applied. Write cost: two single-column b-trees are now maintained on
+-- insert (reversal_of_id is mostly NULL, so its index stays narrow).
 --
 -- Idempotent on purpose: a database that already has either index (an operator
 -- applied it by hand, or a later migration re-creates it) must not fail here.
