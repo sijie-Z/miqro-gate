@@ -18,7 +18,7 @@
 | §5.5 镜像非 root/固定 digest | ✅ | #479（2026-09-14）：deploy/docker/ 四镜像构建通过（CI images job 防腐烂）；基础镜像全部 @sha256 固定；gateway/control-plane `USER 10001`、backup `USER postgres`；密钥卷只读挂载（0400/0440）；portal nginx 需容器内绑 80/443 属「可行处」例外 |
 | §6.1 告警已测试 | ✅/⏳ | 已测：Webhook 签名投递/去重/指数退避（G4.5）、备份 Webhook（G6.2）、usage 队列饱和 drop warn + 指标（G2.4）、预算水位 BUDGET_THRESHOLD（G8.3）；未实现为告警类型：usage 队列饱和/解析失败/供应商错误/Plan 同步/磁盘（G4.5 已知缺口，接入需数据源接线）→ 正式发布前按需补充 |
 | §7 交付物 | ✅/⏳/➖ | 源码/wrapper/锁文件/Compose（dev + prod）/Secret 模板/.env.prod.example/签名目录/文档全齐；OpenAPI 生成物已实现（F09，见下行）；容器镜像已交付（#479：deploy/docker/ 四镜像 + compose.prod.yaml，基础镜像 digest 固定）；离线包（暂不适用，➖）；客户侧构建/恢复演练（无客户，➖） |
-| §8 Go/No-Go | ⏳ | **0.1.0-rc.1/#202 与 0.1.0-rc.2/#221 已打标并推送（2026-09-07，rc 预发布，含中文 Release 说明）**；正式版本号与 Go/No-Go 仍由发布负责人（项目所有者）在发布节点签署 |
+| §8 Go/No-Go | ⏳ | **0.1.0-rc.1/#202 与 0.1.0-rc.2/#221 已打标并推送（2026-09-07，rc 预发布；rc.2 有中文 Release，rc.1 仅有 tag 注释、无 GitHub Release 对象）**；正式版本号与 Go/No-Go 仍由发布负责人（项目所有者）在发布节点签署 |
 | OpenAPI 3.1 生成 + CI 破坏性变更检查（api-contract §8 / document-map §3） | ✅ | F09 已实现：springdoc 生成 `GET /v3/api-docs`（3.1.0，无 swagger-ui）+ 鉴权 scheme 建模 + Info 元数据；基线 `docs/openapi/openapi-3.1.json`；CI backend-integration job 跑 `deploy/openapi/check-openapi-breaking.py`（删除 path/op/response/参数、属性变 required 即红）。遗留：前端 TS client 仍手写（codegen 列发布前候选） |
 
 ## 1. 范围与状态
