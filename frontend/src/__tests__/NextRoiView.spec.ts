@@ -102,6 +102,53 @@ describe('NextRoiView', () => {
     wrapper.unmount();
   });
 
+  it('#932: an empty window shows — for every hit rate, not 0.00%', async () => {
+    // Nothing was served, so there is no rate to report. "0.00%" there reads as "the
+    // cache never hit" on the page that decides caching — and the same card already says
+    // "—" for the discount in this exact situation (#858). Two shares, one rule.
+    mockApi.getRoiReport.mockResolvedValue({
+      ...report,
+      totals: {
+        ...report.totals,
+        upstreamRequests: 0,
+        coalescedRequests: 0,
+        l1Hits: 0,
+        l2Hits: 0,
+        hitRatePct: null,
+        paidCost: 0,
+        savedCost: 0,
+        savedPct: null,
+        pricingStatus: 'COMPLETE',
+      },
+    } as unknown as RoiReportView);
+    const wrapper = mountView();
+    await flushPromises();
+
+    const cards = wrapper.findAll('.next-roi__card');
+    const cardText = cards.map((c) => c.text()).join(' | ');
+    const card = (label: string) => {
+      const hit = cards.find((c) => c.text().includes(label));
+      return hit ? hit.text() : '';
+    };
+
+    expect(card('网关缓存命中率')).toContain('—');
+    expect(card('L1 命中')).toContain('—');
+    expect(card('L2 命中')).toContain('—');
+    // No rate anywhere on the strip is asserted — that is the whole point.
+    expect(cardText).not.toContain('%');
+
+    // ...while the *known* zeros stay numbers: 0 requests is a fact, not an unknown.
+    expect(card('总请求次数')).toContain('0');
+    expect(cardText).toContain('¥0.0000');
+
+    // The composition panel below is the same 0/0 with the same window — it must not
+    // keep the claim the cards just gave up.
+    const comp = wrapper.find('[data-testid="roi-composition"]');
+    expect(comp.text()).toContain('—');
+    expect(comp.text()).not.toContain('0.00%');
+    wrapper.unmount();
+  });
+
   it('leaves the money unmarked and keeps a real discount when everything was priced', async () => {
     const wrapper = mountView();
     await flushPromises();

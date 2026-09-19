@@ -122,7 +122,9 @@ const cards = computed<RoiCard[]>(() => {
   const savingsBound = savingsBoundNote(t) ?? undefined;
   // A 0/0 discount is undefined, not zero: the API sends null for exactly this case.
   const discount = t?.savedPct == null ? '—' : pct(Number(t.savedPct));
-  const rate = (n: number) => pct(served ? (n / served) * 100 : 0);
+  // #932: same rule for the hit rates — a window that served nothing has no rate to
+  // report, and 0.00% there claims "the cache never hit" when nothing asked it to.
+  const rate = (n: number) => (served ? pct((n / served) * 100) : '—');
   return [
     {
       label: '总请求次数',
@@ -136,7 +138,7 @@ const cards = computed<RoiCard[]>(() => {
     { label: 'L2 命中', value: String(l2), sub: [{ k: '命中率', v: rate(l2) }] },
     {
       label: '网关缓存命中率',
-      value: pct(Number(t?.hitRatePct ?? 0)),
+      value: t?.hitRatePct == null ? '—' : pct(Number(t.hitRatePct)),
       sub: [{ k: 'L1+L2 命中', v: String(l1 + l2) }],
     },
     {
@@ -157,14 +159,16 @@ const cards = computed<RoiCard[]>(() => {
  *  distribution): how every served request resolved, largest share first. */
 const composition = computed(() => {
   const { upstream, coalesced, l1, l2, served } = totalsOf.value;
-  const total = Math.max(1, served);
+  // #932: with nothing served there is no distribution to compute. A per-bucket "0.00%"
+  // would claim every outcome happened zero times, when in truth nothing resolved at all.
+  const share = (v: number) => (served ? (v / served) * 100 : null);
   return [
     { label: 'L1 命中', value: l1, color: '#389e0d' },
     { label: 'L2 命中', value: l2, color: '#0960bd' },
     { label: '合并命中', value: coalesced, color: '#d48806' },
     { label: '上游未命中', value: upstream, color: '#bfbfbf' },
   ]
-    .map((row) => ({ ...row, pct: (row.value / total) * 100 }))
+    .map((row) => ({ ...row, share: share(row.value) }))
     .sort((a, b) => b.value - a.value);
 });
 
@@ -479,11 +483,13 @@ onMounted(load);
             <span class="next-roi__comp-track" aria-hidden="true">
               <span
                 class="next-roi__comp-fill"
-                :style="{ width: `${row.pct.toFixed(2)}%`, background: row.color }"
+                :style="{ width: `${(row.share ?? 0).toFixed(2)}%`, background: row.color }"
               />
             </span>
             <span class="next-roi__comp-count ui-num">{{ row.value }}</span>
-            <span class="next-roi__comp-pct ui-num">{{ pct(row.pct) }}</span>
+            <span class="next-roi__comp-pct ui-num">{{
+              row.share == null ? '—' : pct(row.share)
+            }}</span>
           </div>
         </div>
       </section>
