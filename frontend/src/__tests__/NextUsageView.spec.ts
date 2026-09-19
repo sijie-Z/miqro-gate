@@ -177,6 +177,57 @@ describe('NextUsageView', () => {
     expect(wrapper.find('[data-testid="cost-unpriced"]').exists()).toBe(false);
   });
 
+  it('#877: marks the 上游成本 card as not-a-total, like the 合计 row below it', async () => {
+    // The card is the first money a user sees, and it sits directly above the 合计 row
+    // that already carries this marker. Same figure, so the same claim.
+    mockApi.usageSummary.mockResolvedValue({
+      ...summary,
+      totals: {
+        ...summary.totals,
+        pricingStatus: 'UNAVAILABLE',
+        unpriced: { unpricedEvents: 1, unavailableEvents: 1 },
+      },
+    } as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const card = wrapper.find('[data-testid="stat-cost-unpriced"]');
+    expect(card.exists()).toBe(true);
+    expect(card.text()).toContain('未定价');
+  });
+
+  it('#877: marks a group row whose cost is short, and only that row', async () => {
+    mockApi.usageSummary.mockResolvedValue({
+      ...summary,
+      groups: [
+        {
+          ...summary.groups![0]!,
+          pricingStatus: 'PARTIAL',
+          unpriced: { unpricedEvents: 3, unavailableEvents: 1 },
+        },
+      ],
+    } as never);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const rowMarker = wrapper.find('[data-testid="group-cost-unpriced"]');
+    expect(rowMarker.exists()).toBe(true);
+    expect(rowMarker.text()).toContain('未定价');
+    // The totals priced in full, so their marker must stay away — separate figures, and
+    // the API keeps their gaps separate too.
+    expect(wrapper.find('[data-testid="cost-unpriced"]').exists()).toBe(false);
+  });
+
+  it('#877: leaves a fully priced card and every group row unmarked', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="stat-cost-unpriced"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="group-cost-unpriced"]').exists()).toBe(false);
+  });
+
   it('renders the dimension summary table, totals row and requests math', async () => {
     const wrapper = mountView();
     await flushPromises();
