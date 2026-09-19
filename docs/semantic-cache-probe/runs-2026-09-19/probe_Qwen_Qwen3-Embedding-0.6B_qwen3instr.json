@@ -1,0 +1,1601 @@
+{
+  "meta": {
+    "timestamp_utc": "2026-09-19T09:56:06Z",
+    "backend": "st",
+    "model": "Qwen/Qwen3-Embedding-0.6B",
+    "prefix": "Instruct: Given a request sent to a coding agent, retrieve previously seen requests that mean the same thing and can safely reuse the same answer\nQuery: ",
+    "dim": 1024,
+    "pairs": 148,
+    "probes_file": "probes.jsonl",
+    "probes_sha256": "45e678c9a2de43b182851f95843a783d19faef98082efd6cdf4fd3e2689de0df",
+    "embed_seconds": 56.89,
+    "batch_size": 32,
+    "python": "3.12.14",
+    "command": "python scripts/semantic-probe/run_probe.py --backend st --model Qwen/Qwen3-Embedding-0.6B --prefix Instruct: Given a request sent to a coding agent, retrieve previously seen requests that mean the same thing and can safely reuse the same answer\nQuery:  --out-dir D:/tmp/probe-instr --tag qwen3instr"
+  },
+  "positive": {
+    "n": 80,
+    "min": 0.5593396953655498,
+    "p05": 0.6743364944519048,
+    "p25": 0.8124782434725409,
+    "median": 0.8777366411186666,
+    "mean": 0.8598863062153477,
+    "sd": 0.09471390630493633,
+    "p75": 0.9383360147306892,
+    "p95": 0.9766910744958771,
+    "max": 0.9883511041262936
+  },
+  "hard_negative": {
+    "n": 68,
+    "min": 0.28966898624522097,
+    "p05": 0.6272737356235037,
+    "p25": 0.7315340091218175,
+    "median": 0.8015430702254154,
+    "mean": 0.8085720705447293,
+    "sd": 0.12698933976304042,
+    "p75": 0.9143233820724153,
+    "p95": 0.9746519354289723,
+    "max": 0.9994373429678768
+  },
+  "auc": 0.6213235294117647,
+  "lexical": {
+    "metric": "difflib character ratio",
+    "positive": {
+      "n": 80,
+      "min": 0.0975609756097561,
+      "p05": 0.14592094196804037,
+      "p25": 0.3442028985507246,
+      "median": 0.48770726129216696,
+      "mean": 0.4860698958391674,
+      "sd": 0.21762137381454286,
+      "p75": 0.6113831089351285,
+      "p95": 0.8804444444444445,
+      "max": 0.96
+    },
+    "hard_negative": {
+      "n": 68,
+      "min": 0.25,
+      "p05": 0.5,
+      "p25": 0.64,
+      "median": 0.7777777777777778,
+      "mean": 0.7501186677365933,
+      "sd": 0.15674373495166827,
+      "p75": 0.875,
+      "p95": 0.9542528735632184,
+      "max": 0.9955947136563876
+    },
+    "auc": 0.165625,
+    "bands": [
+      {
+        "lo": 0.0,
+        "hi": 0.2,
+        "n_positive": 9,
+        "n_hard_negative": 0
+      },
+      {
+        "lo": 0.2,
+        "hi": 0.4,
+        "n_positive": 21,
+        "n_hard_negative": 2
+      },
+      {
+        "lo": 0.4,
+        "hi": 0.6,
+        "n_positive": 28,
+        "n_hard_negative": 7,
+        "auc_within_band": 0.8418367346938775
+      },
+      {
+        "lo": 0.6,
+        "hi": 0.8,
+        "n_positive": 14,
+        "n_hard_negative": 27,
+        "auc_within_band": 0.8650793650793651
+      },
+      {
+        "lo": 0.8,
+        "hi": 1.0,
+        "n_positive": 8,
+        "n_hard_negative": 32,
+        "auc_within_band": 0.80078125
+      }
+    ]
+  },
+  "operating_points": [
+    {
+      "target_fpr": 0.0,
+      "threshold": 0.9994373429678768,
+      "observed_fpr": 0.014705882352941176,
+      "recall": 0.0,
+      "precision_on_probe_set": 0.0
+    },
+    {
+      "target_fpr": 0.005,
+      "threshold": 0.9944710053862778,
+      "observed_fpr": 0.014705882352941176,
+      "recall": 0.0,
+      "precision_on_probe_set": 0.0
+    },
+    {
+      "target_fpr": 0.01,
+      "threshold": 0.9895046678046785,
+      "observed_fpr": 0.014705882352941176,
+      "recall": 0.0,
+      "precision_on_probe_set": 0.0
+    },
+    {
+      "target_fpr": 0.02,
+      "threshold": 0.9840947308182155,
+      "observed_fpr": 0.029411764705882353,
+      "recall": 0.0125,
+      "precision_on_probe_set": 0.3333333333333333
+    },
+    {
+      "target_fpr": 0.05,
+      "threshold": 0.9746519354289723,
+      "observed_fpr": 0.058823529411764705,
+      "recall": 0.0625,
+      "precision_on_probe_set": 0.5555555555555556
+    }
+  ],
+  "histogram": [
+    {
+      "lo": 0.0,
+      "hi": 0.04,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.04,
+      "hi": 0.08,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.08,
+      "hi": 0.12,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.12,
+      "hi": 0.16,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.16,
+      "hi": 0.2,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.2,
+      "hi": 0.24,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.24,
+      "hi": 0.28,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.28,
+      "hi": 0.32,
+      "positive": 0,
+      "hard_negative": 1
+    },
+    {
+      "lo": 0.32,
+      "hi": 0.36,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.36,
+      "hi": 0.4,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.4,
+      "hi": 0.44,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.44,
+      "hi": 0.48,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.48,
+      "hi": 0.52,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.52,
+      "hi": 0.56,
+      "positive": 1,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.56,
+      "hi": 0.6,
+      "positive": 1,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.6,
+      "hi": 0.64,
+      "positive": 1,
+      "hard_negative": 4
+    },
+    {
+      "lo": 0.64,
+      "hi": 0.68,
+      "positive": 2,
+      "hard_negative": 3
+    },
+    {
+      "lo": 0.68,
+      "hi": 0.72,
+      "positive": 3,
+      "hard_negative": 7
+    },
+    {
+      "lo": 0.72,
+      "hi": 0.76,
+      "positive": 2,
+      "hard_negative": 9
+    },
+    {
+      "lo": 0.76,
+      "hi": 0.8,
+      "positive": 7,
+      "hard_negative": 10
+    },
+    {
+      "lo": 0.8,
+      "hi": 0.84,
+      "positive": 11,
+      "hard_negative": 5
+    },
+    {
+      "lo": 0.84,
+      "hi": 0.88,
+      "positive": 14,
+      "hard_negative": 6
+    },
+    {
+      "lo": 0.88,
+      "hi": 0.92,
+      "positive": 11,
+      "hard_negative": 8
+    },
+    {
+      "lo": 0.92,
+      "hi": 0.96,
+      "positive": 20,
+      "hard_negative": 6
+    },
+    {
+      "lo": 0.96,
+      "hi": 1.0,
+      "positive": 7,
+      "hard_negative": 9
+    }
+  ],
+  "negative_by_dim": {
+    "direction": {
+      "n": 10,
+      "min": 0.7631206593701991,
+      "p05": 0.8035128333552224,
+      "p25": 0.9066225460374622,
+      "median": 0.9518222848518227,
+      "mean": 0.9232117985884315,
+      "sd": 0.06930306545839172,
+      "p75": 0.9696749732796726,
+      "p95": 0.9807212611023687,
+      "max": 0.9846124546645958
+    },
+    "env": {
+      "n": 12,
+      "min": 0.6903298809610963,
+      "p05": 0.7000802410052115,
+      "p25": 0.7350406553307629,
+      "median": 0.7736734595744874,
+      "mean": 0.7881638848795848,
+      "sd": 0.07363715469532056,
+      "p75": 0.8517587644918676,
+      "p95": 0.8972504939568321,
+      "max": 0.9177412801857348
+    },
+    "file": {
+      "n": 10,
+      "min": 0.6820653549714433,
+      "p05": 0.6916528225110131,
+      "p25": 0.7315933091357549,
+      "median": 0.754440939464548,
+      "mean": 0.7827718122591276,
+      "sd": 0.08604551419434385,
+      "p75": 0.83171530378482,
+      "p95": 0.9145082343695063,
+      "max": 0.9704817757185982
+    },
+    "language": {
+      "n": 8,
+      "min": 0.7987053526306879,
+      "p05": 0.8006917549469972,
+      "p25": 0.8165738269018349,
+      "median": 0.9160614819125417,
+      "mean": 0.8934201104066128,
+      "sd": 0.07391202402140135,
+      "p75": 0.9578713896221398,
+      "p95": 0.968816093323072,
+      "max": 0.9702513844672833
+    },
+    "long": {
+      "n": 4,
+      "min": 0.7821774898846896,
+      "p05": 0.7835276261446392,
+      "p25": 0.7889281711844376,
+      "median": 0.8575968865942956,
+      "mean": 0.8742021515102893,
+      "sd": 0.1057145407080489,
+      "p75": 0.9428708669201473,
+      "p95": 0.9881240477583308,
+      "max": 0.9994373429678768
+    },
+    "param": {
+      "n": 8,
+      "min": 0.7495654405418021,
+      "p05": 0.7794875783289583,
+      "p25": 0.846345428806111,
+      "median": 0.8856252707990127,
+      "mean": 0.8865221210273947,
+      "sd": 0.07619710492273116,
+      "p75": 0.9503013340373689,
+      "p95": 0.9729279589080952,
+      "max": 0.9830897374693596
+    },
+    "task": {
+      "n": 16,
+      "min": 0.28966898624522097,
+      "p05": 0.5356196048598905,
+      "p25": 0.6280717787023375,
+      "median": 0.6778992294812036,
+      "mean": 0.67054697578111,
+      "sd": 0.1230772541294387,
+      "p75": 0.7246751504939009,
+      "p95": 0.7960953654838767,
+      "max": 0.884634975491736
+    }
+  },
+  "pairs": [
+    {
+      "id": "p01",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8170615757118099,
+      "lexical": 0.125
+    },
+    {
+      "id": "p02",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7959478499619291,
+      "lexical": 0.7142857142857143
+    },
+    {
+      "id": "p03",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.884648046479387,
+      "lexical": 0.3333333333333333
+    },
+    {
+      "id": "p04",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8784656123998316,
+      "lexical": 0.631578947368421
+    },
+    {
+      "id": "p05",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9364682910919302,
+      "lexical": 0.3870967741935484
+    },
+    {
+      "id": "p06",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.912394149980122,
+      "lexical": 0.5925925925925926
+    },
+    {
+      "id": "p07",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8443832807569078,
+      "lexical": 0.38095238095238093
+    },
+    {
+      "id": "p08",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8218368801648264,
+      "lexical": 0.45161290322580644
+    },
+    {
+      "id": "p09",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8272004210232742,
+      "lexical": 0.5517241379310345
+    },
+    {
+      "id": "p10",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7320765201300432,
+      "lexical": 0.16
+    },
+    {
+      "id": "p11",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8555829369143141,
+      "lexical": 0.4444444444444444
+    },
+    {
+      "id": "p12",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8448356920184021,
+      "lexical": 0.41379310344827586
+    },
+    {
+      "id": "p13",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7688069535875808,
+      "lexical": 0.2962962962962963
+    },
+    {
+      "id": "p14",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7948256448799526,
+      "lexical": 0.48484848484848486
+    },
+    {
+      "id": "p15",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9220572588161603,
+      "lexical": 0.17391304347826086
+    },
+    {
+      "id": "p16",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9417124077309471,
+      "lexical": 0.5060240963855421
+    },
+    {
+      "id": "p17",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9525359379063599,
+      "lexical": 0.49056603773584906
+    },
+    {
+      "id": "p18",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8795242259739076,
+      "lexical": 0.3157894736842105
+    },
+    {
+      "id": "p19",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9017402510511305,
+      "lexical": 0.25
+    },
+    {
+      "id": "p20",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8949741970126419,
+      "lexical": 0.3076923076923077
+    },
+    {
+      "id": "p21",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9095053495226852,
+      "lexical": 0.36363636363636365
+    },
+    {
+      "id": "p22",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9307941768237771,
+      "lexical": 0.5882352941176471
+    },
+    {
+      "id": "p23",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8005125369141711,
+      "lexical": 0.36363636363636365
+    },
+    {
+      "id": "p24",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7100777135498275,
+      "lexical": 0.14634146341463414
+    },
+    {
+      "id": "p25",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7078944088227845,
+      "lexical": 0.2222222222222222
+    },
+    {
+      "id": "p26",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7530827057136422,
+      "lexical": 0.5789473684210527
+    },
+    {
+      "id": "p27",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.6290098904511849,
+      "lexical": 0.2702702702702703
+    },
+    {
+      "id": "p28",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.950955676273608,
+      "lexical": 0.5882352941176471
+    },
+    {
+      "id": "p29",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8127019236937311,
+      "lexical": 0.5
+    },
+    {
+      "id": "p30",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7948017888817333,
+      "lexical": 0.35714285714285715
+    },
+    {
+      "id": "p31",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8642244496840663,
+      "lexical": 0.5833333333333334
+    },
+    {
+      "id": "p32",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7686188553307071,
+      "lexical": 0.5263157894736842
+    },
+    {
+      "id": "p33",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.5593396953655498,
+      "lexical": 0.0975609756097561
+    },
+    {
+      "id": "p34",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9295292006972553,
+      "lexical": 0.5263157894736842
+    },
+    {
+      "id": "p35",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8310833810218137,
+      "lexical": 0.2
+    },
+    {
+      "id": "p36",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7868516599387649,
+      "lexical": 0.3963963963963964
+    },
+    {
+      "id": "p37",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7868996038714879,
+      "lexical": 0.5128205128205128
+    },
+    {
+      "id": "p38",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8004498452246569,
+      "lexical": 0.46153846153846156
+    },
+    {
+      "id": "p39",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8118072028089705,
+      "lexical": 0.16666666666666666
+    },
+    {
+      "id": "p40",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8891302071901723,
+      "lexical": 0.5
+    },
+    {
+      "id": "p41",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8637594879111752,
+      "lexical": 0.43478260869565216
+    },
+    {
+      "id": "p42",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8269040803190266,
+      "lexical": 0.38095238095238093
+    },
+    {
+      "id": "p43",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8901542451844854,
+      "lexical": 0.6666666666666666
+    },
+    {
+      "id": "p44",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9020731708830041,
+      "lexical": 0.19047619047619047
+    },
+    {
+      "id": "p45",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9288247396962875,
+      "lexical": 0.4
+    },
+    {
+      "id": "p46",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9424824481053382,
+      "lexical": 0.5333333333333333
+    },
+    {
+      "id": "p47",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.5660401706074832,
+      "lexical": 0.11764705882352941
+    },
+    {
+      "id": "p48",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8770076698375016,
+      "lexical": 0.4
+    },
+    {
+      "id": "p49",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8683164792410081,
+      "lexical": 0.4444444444444444
+    },
+    {
+      "id": "p50",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8197569905338233,
+      "lexical": 0.3076923076923077
+    },
+    {
+      "id": "p51",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8402919766036031,
+      "lexical": 0.2222222222222222
+    },
+    {
+      "id": "p52",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8504196822675931,
+      "lexical": 0.37037037037037035
+    },
+    {
+      "id": "p53",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8548381059459511,
+      "lexical": 0.47058823529411764
+    },
+    {
+      "id": "p54",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8666917012141512,
+      "lexical": 0.34782608695652173
+    },
+    {
+      "id": "p55",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9455384803118105,
+      "lexical": 0.5208333333333334
+    },
+    {
+      "id": "p56",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9805302990799534,
+      "lexical": 0.7586206896551724
+    },
+    {
+      "id": "p57",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.6701671036642942,
+      "lexical": 0.38095238095238093
+    },
+    {
+      "id": "p58",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9375769883444509,
+      "lexical": 0.6956521739130435
+    },
+    {
+      "id": "p59",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.705784621432223,
+      "lexical": 0.13793103448275862
+    },
+    {
+      "id": "p60",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.6745559360723054,
+      "lexical": 0.21428571428571427
+    },
+    {
+      "id": "n01",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.8381253437937913,
+      "lexical": 0.6792452830188679
+    },
+    {
+      "id": "n02",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.739620843328683,
+      "lexical": 0.9019607843137255
+    },
+    {
+      "id": "n03",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.7300808088957293,
+      "lexical": 0.7619047619047619
+    },
+    {
+      "id": "n04",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.8124851837579058,
+      "lexical": 0.6829268292682927
+    },
+    {
+      "id": "n05",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.769261035600413,
+      "lexical": 0.5789473684210527
+    },
+    {
+      "id": "n06",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.6820653549714433,
+      "lexical": 0.8275862068965517
+    },
+    {
+      "id": "n07",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.8460961282761722,
+      "lexical": 0.7777777777777778
+    },
+    {
+      "id": "n08",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.7361308098558317,
+      "lexical": 0.7428571428571429
+    },
+    {
+      "id": "n09",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.7033708383927096,
+      "lexical": 0.75
+    },
+    {
+      "id": "n10",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.9704817757185982,
+      "lexical": 0.9655172413793104
+    },
+    {
+      "id": "n11",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9759653578596466,
+      "lexical": 0.8571428571428571
+    },
+    {
+      "id": "n12",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9587875928895057,
+      "lexical": 0.9230769230769231
+    },
+    {
+      "id": "n13",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9044353671495133,
+      "lexical": 0.8888888888888888
+    },
+    {
+      "id": "n14",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9722127223434344,
+      "lexical": 0.6190476190476191
+    },
+    {
+      "id": "n15",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9846124546645958,
+      "lexical": 0.6
+    },
+    {
+      "id": "n16",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9131840827013087,
+      "lexical": 0.7777777777777778
+    },
+    {
+      "id": "n17",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.7631206593701991,
+      "lexical": 0.4
+    },
+    {
+      "id": "n18",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.8528810460035843,
+      "lexical": 0.75
+    },
+    {
+      "id": "n19",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9620617260883872,
+      "lexical": 0.5357142857142857
+    },
+    {
+      "id": "n20",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9448569768141398,
+      "lexical": 0.6
+    },
+    {
+      "id": "n21",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.7495654405418021,
+      "lexical": 0.64
+    },
+    {
+      "id": "n22",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.9490497505707667,
+      "lexical": 0.8333333333333334
+    },
+    {
+      "id": "n23",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.8350572627908198,
+      "lexical": 0.875
+    },
+    {
+      "id": "n24",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.8931351477719576,
+      "lexical": 0.9655172413793104
+    },
+    {
+      "id": "n25",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.9830897374693596,
+      "lexical": 0.9714285714285714
+    },
+    {
+      "id": "n26",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.850108150811208,
+      "lexical": 0.625
+    },
+    {
+      "id": "n27",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.8781153938260678,
+      "lexical": 0.9090909090909091
+    },
+    {
+      "id": "n28",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.9540560844371759,
+      "lexical": 0.9333333333333333
+    },
+    {
+      "id": "n29",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.9192972755851399,
+      "lexical": 0.8888888888888888
+    },
+    {
+      "id": "n30",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.7987053526306879,
+      "lexical": 0.9
+    },
+    {
+      "id": "n31",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.9551116686206267,
+      "lexical": 0.875
+    },
+    {
+      "id": "n32",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.9702513844672833,
+      "lexical": 0.8461538461538461
+    },
+    {
+      "id": "n33",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.8206381732623989,
+      "lexical": 0.9090909090909091
+    },
+    {
+      "id": "n34",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.804380787820143,
+      "lexical": 0.8771929824561403
+    },
+    {
+      "id": "n35",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.9128256882399435,
+      "lexical": 0.875
+    },
+    {
+      "id": "n36",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.9661505526266794,
+      "lexical": 0.9
+    },
+    {
+      "id": "n37",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.8672803962462304,
+      "lexical": 0.8
+    },
+    {
+      "id": "n38",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.8804853052240935,
+      "lexical": 0.8823529411764706
+    },
+    {
+      "id": "n39",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.7322608327073183,
+      "lexical": 0.5384615384615384
+    },
+    {
+      "id": "n40",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.7760240740885446,
+      "lexical": 0.6
+    },
+    {
+      "id": "n41",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.7394487989752858,
+      "lexical": 0.8333333333333334
+    },
+    {
+      "id": "n42",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.8465848872404134,
+      "lexical": 0.64
+    },
+    {
+      "id": "n43",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.9177412801857348,
+      "lexical": 0.875
+    },
+    {
+      "id": "n44",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.6903298809610963,
+      "lexical": 0.9285714285714286
+    },
+    {
+      "id": "n45",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.7924632466799255,
+      "lexical": 0.7777777777777778
+    },
+    {
+      "id": "n46",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.7359672628719112,
+      "lexical": 0.7777777777777778
+    },
+    {
+      "id": "n47",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.6431345357484692,
+      "lexical": 0.6
+    },
+    {
+      "id": "n48",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.7222273975928077,
+      "lexical": 0.5454545454545454
+    },
+    {
+      "id": "n49",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.7320184091971803,
+      "lexical": 0.75
+    },
+    {
+      "id": "n50",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.6218971411900058,
+      "lexical": 0.6666666666666666
+    },
+    {
+      "id": "n51",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.761206939030897,
+      "lexical": 0.8
+    },
+    {
+      "id": "n52",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.6679695066620832,
+      "lexical": 0.6666666666666666
+    },
+    {
+      "id": "n53",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.7131012838335077,
+      "lexical": 0.5
+    },
+    {
+      "id": "n54",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.6265754479295242,
+      "lexical": 0.25
+    },
+    {
+      "id": "n55",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.6977626684412745,
+      "lexical": 0.8571428571428571
+    },
+    {
+      "id": "n56",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.7665821621479236,
+      "lexical": 0.7142857142857143
+    },
+    {
+      "id": "n57",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.884634975491736,
+      "lexical": 0.8421052631578947
+    },
+    {
+      "id": "n58",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.6863763546613105,
+      "lexical": 0.8
+    },
+    {
+      "id": "n59",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.6176031443981136,
+      "lexical": 0.6666666666666666
+    },
+    {
+      "id": "n60",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.28966898624522097,
+      "lexical": 0.375
+    },
+    {
+      "id": "L01",
+      "label": "positive",
+      "dim": "long",
+      "score": 0.9471363769314922,
+      "lexical": 0.656934306569343
+    },
+    {
+      "id": "L02",
+      "label": "positive",
+      "dim": "long",
+      "score": 0.9766652978284087,
+      "lexical": 0.758364312267658
+    },
+    {
+      "id": "L03",
+      "label": "positive",
+      "dim": "long",
+      "score": 0.9626513715683889,
+      "lexical": 0.7247386759581882
+    },
+    {
+      "id": "L04",
+      "label": "positive",
+      "dim": "long",
+      "score": 0.9449258126743358,
+      "lexical": 0.7304347826086957
+    },
+    {
+      "id": "L05",
+      "label": "hard_negative",
+      "dim": "long",
+      "score": 0.9994373429678768,
+      "lexical": 0.9955947136563876
+    },
+    {
+      "id": "L06",
+      "label": "hard_negative",
+      "dim": "long",
+      "score": 0.7821774898846896,
+      "lexical": 0.847953216374269
+    },
+    {
+      "id": "L07",
+      "label": "hard_negative",
+      "dim": "long",
+      "score": 0.9240153749042376,
+      "lexical": 0.8132530120481928
+    },
+    {
+      "id": "L08",
+      "label": "hard_negative",
+      "dim": "long",
+      "score": 0.7911783982843535,
+      "lexical": 0.6696035242290749
+    },
+    {
+      "id": "p61",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9883511041262936,
+      "lexical": 0.9230769230769231
+    },
+    {
+      "id": "p62",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9530675320568198,
+      "lexical": 0.8888888888888888
+    },
+    {
+      "id": "p63",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9108376574684377,
+      "lexical": 0.5555555555555556
+    },
+    {
+      "id": "p64",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.954752417852549,
+      "lexical": 0.8421052631578947
+    },
+    {
+      "id": "p65",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.8162716224383982,
+      "lexical": 0.6046511627906976
+    },
+    {
+      "id": "p66",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9782982499118031,
+      "lexical": 0.88
+    },
+    {
+      "id": "p67",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9461994363295689,
+      "lexical": 0.8333333333333334
+    },
+    {
+      "id": "p68",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.8610130205044835,
+      "lexical": 0.5925925925925926
+    },
+    {
+      "id": "p69",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.8873626752640391,
+      "lexical": 0.6666666666666666
+    },
+    {
+      "id": "p70",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9406130938894037,
+      "lexical": 0.5555555555555556
+    },
+    {
+      "id": "p71",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9664660533536078,
+      "lexical": 0.7
+    },
+    {
+      "id": "p72",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9519012345773042,
+      "lexical": 0.8372093023255814
+    },
+    {
+      "id": "p73",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9771808311777759,
+      "lexical": 0.96
+    },
+    {
+      "id": "p74",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.8996053096357681,
+      "lexical": 0.6
+    },
+    {
+      "id": "p75",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9475602455806564,
+      "lexical": 0.9523809523809523
+    },
+    {
+      "id": "p76",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9339823714307549,
+      "lexical": 0.6666666666666666
+    },
+    {
+      "id": "n61",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.6694221043010967,
+      "lexical": 0.5
+    },
+    {
+      "id": "n62",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.708057808314033,
+      "lexical": 0.6
+    },
+    {
+      "id": "n63",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.6285705556266086,
+      "lexical": 0.7
+    },
+    {
+      "id": "n64",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.7713228450604301,
+      "lexical": 0.75
+    }
+  ],
+  "top_negative_hits": [
+    {
+      "id": "L05",
+      "dim": "long",
+      "a": "线上订单库的连接池配置是这样的：最大连接数 50，最小空闲 5，获取连接超时 3000 毫秒，空闲连接回收 600 秒，连接最大存活 1800 秒。高峰期经常出现获取连接超时，日志里能看到 Connection is not available, request timed out after 3000ms。业务反馈白天只是偶发，晚上八点促销期间几乎每分钟都有。请分析这组参数是否合理，并给出具体的调整建议和验证方法，包括怎么确认是连接泄漏还是并发不足。",
+      "b": "线上订单库的连接池配置是这样的：最大连接数 50，最小空闲 5，获取连接超时 300 毫秒，空闲连接回收 600 秒，连接最大存活 1800 秒。高峰期经常出现获取连接超时，日志里能看到 Connection is not available, request timed out after 300ms。业务反馈白天只是偶发，晚上八点促销期间几乎每分钟都有。请分析这组参数是否合理，并给出具体的调整建议和验证方法，包括怎么确认是连接泄漏还是并发不足。",
+      "reason": "长句中一处数值差异：3000 毫秒与 300 毫秒，同一现象下的结论与调参方向完全不同",
+      "score": 0.9994373429678768
+    },
+    {
+      "id": "n15",
+      "dim": "direction",
+      "a": "把数据从 MySQL 迁移到 PostgreSQL",
+      "b": "把数据从 PostgreSQL 迁移到 MySQL",
+      "reason": "方向相反：迁移方向不同",
+      "score": 0.9846124546645958
+    },
+    {
+      "id": "n25",
+      "dim": "param",
+      "a": "把 pool size 设成 10",
+      "b": "把 pool size 设成 100",
+      "reason": "数值不同：连接池容量差一个数量级",
+      "score": 0.9830897374693596
+    },
+    {
+      "id": "n11",
+      "dim": "direction",
+      "a": "把 80 端口改成 8080",
+      "b": "把 8080 端口改成 80",
+      "reason": "方向相反：源与目标是反的",
+      "score": 0.9759653578596466
+    },
+    {
+      "id": "n14",
+      "dim": "direction",
+      "a": "把这段代码从 Java 转成 Kotlin",
+      "b": "把这段代码从 Kotlin 转成 Java",
+      "reason": "方向相反：转换方向不同",
+      "score": 0.9722127223434344
+    },
+    {
+      "id": "n10",
+      "dim": "file",
+      "a": "把前端 Dockerfile 的基础镜像换成 alpine",
+      "b": "把后端 Dockerfile 的基础镜像换成 alpine",
+      "reason": "对象不同：两个镜像的构建方式不同",
+      "score": 0.9704817757185982
+    },
+    {
+      "id": "n32",
+      "dim": "language",
+      "a": "回答用中文，代码注释用英文",
+      "b": "回答用英文，代码注释用中文",
+      "reason": "语言分配相反",
+      "score": 0.9702513844672833
+    },
+    {
+      "id": "n36",
+      "dim": "language",
+      "a": "把报错信息翻译成中文",
+      "b": "把报错信息翻译成英文",
+      "reason": "翻译方向相反",
+      "score": 0.9661505526266794
+    },
+    {
+      "id": "n19",
+      "dim": "direction",
+      "a": "把字段从 snake_case 改成 camelCase",
+      "b": "把字段从 camelCase 改成 snake_case",
+      "reason": "方向相反：命名风格互换",
+      "score": 0.9620617260883872
+    },
+    {
+      "id": "n12",
+      "dim": "direction",
+      "a": "把超时时间调大到 30 秒",
+      "b": "把超时时间调小到 30 秒",
+      "reason": "方向相反：调大与调小",
+      "score": 0.9587875928895057
+    },
+    {
+      "id": "n31",
+      "dim": "language",
+      "a": "用中文写提交信息",
+      "b": "用英文写提交信息",
+      "reason": "输出语言不同：提交信息语言是团队约定",
+      "score": 0.9551116686206267
+    },
+    {
+      "id": "n28",
+      "dim": "param",
+      "a": "超时设成 5s",
+      "b": "超时设成 50s",
+      "reason": "数值不同：一个数量级之差",
+      "score": 0.9540560844371759
+    }
+  ],
+  "weakest_positives": [
+    {
+      "id": "p33",
+      "dim": "paraphrase",
+      "a": "k8s pod 一直 CrashLoopBackOff 怎么办",
+      "b": "容器反复重启怎么排查",
+      "score": 0.5593396953655498
+    },
+    {
+      "id": "p47",
+      "dim": "paraphrase",
+      "a": "这个 Vue 组件为什么不响应式更新",
+      "b": "数据变了但视图没更新，是什么原因",
+      "score": 0.5660401706074832
+    },
+    {
+      "id": "p27",
+      "dim": "paraphrase",
+      "a": "这个接口返回 502 怎么排查",
+      "b": "上游返回 Bad Gateway，从哪里查起",
+      "score": 0.6290098904511849
+    },
+    {
+      "id": "p57",
+      "dim": "paraphrase",
+      "a": "怎么给这个服务加健康检查",
+      "b": "健康检查接口怎么配",
+      "score": 0.6701671036642942
+    },
+    {
+      "id": "p60",
+      "dim": "paraphrase",
+      "a": "帮我看看这个方案有没有问题",
+      "b": "这个设计你觉得靠谱吗，有什么坑",
+      "score": 0.6745559360723054
+    },
+    {
+      "id": "p59",
+      "dim": "paraphrase",
+      "a": "这段代码跑不通，帮我看看哪里不对",
+      "b": "运行报了错，不确定问题在哪",
+      "score": 0.705784621432223
+    },
+    {
+      "id": "p25",
+      "dim": "paraphrase",
+      "a": "这个循环为什么死循环了",
+      "b": "这段 while 卡死是什么原因",
+      "score": 0.7078944088227845
+    },
+    {
+      "id": "p24",
+      "dim": "paraphrase",
+      "a": "git 怎么撤销上一次 commit 但保留改动",
+      "b": "上一次提交想撤掉，代码别丢，怎么做",
+      "score": 0.7100777135498275
+    },
+    {
+      "id": "p10",
+      "dim": "paraphrase",
+      "a": "为什么我的单元测试一直是红的",
+      "b": "单测一直失败是什么原因",
+      "score": 0.7320765201300432
+    },
+    {
+      "id": "p26",
+      "dim": "paraphrase",
+      "a": "把这段 Java 改成用 Stream 写",
+      "b": "这段代码能用 stream 重写吗",
+      "score": 0.7530827057136422
+    },
+    {
+      "id": "p32",
+      "dim": "paraphrase",
+      "a": "帮我给这个类写单测",
+      "b": "这个类补一下单元测试",
+      "score": 0.7686188553307071
+    },
+    {
+      "id": "p13",
+      "dim": "paraphrase",
+      "a": "把配置改成从环境变量读取",
+      "b": "这个配置能不能走 env 变量",
+      "score": 0.7688069535875808
+    }
+  ]
+}
