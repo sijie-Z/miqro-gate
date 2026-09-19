@@ -402,6 +402,56 @@ class AnthropicProxyContractTest {
     }
 
     // -------------------------------------------------------------------
+    // Prompt cache passthrough — P0 verification (ADR-0022 §11 D1)
+    // -------------------------------------------------------------------
+
+    /**
+     * The gateway forwards prompt-cache requests untouched (ADR-0002 transparency).
+     * The assertions are deliberately byte-level: if a future feature starts
+     * rewriting request bodies (e.g. the opt-in breakpoint injector of #769), this
+     * contract must be changed on purpose rather than broken silently — a rewritten
+     * body can move a client's cache breakpoints and quietly change what upstream
+     * caches and bills.
+     */
+    @Nested
+    @DisplayName("Prompt cache passthrough (P0)")
+    class PromptCachePassthrough {
+
+        @Test
+        @DisplayName("should forward a cache_control request byte-identically")
+        void shouldForwardCacheControlRequestByteIdentically() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(AnthropicFixtures.RESPONSE_CACHE_USAGE).build());
+
+            webTestClient.post().uri("/v1/messages").bodyValue(AnthropicFixtures.REQUEST_WITH_CACHE).exchange()
+                    .expectStatus().isOk().expectBody().returnResult().getResponseBody();
+
+            var captured = mockProvider.getCapturedRequests();
+            assertThat(captured).hasSize(1);
+            assertThat(captured.get(0).bodyBytes)
+                    .isEqualTo(AnthropicFixtures.REQUEST_WITH_CACHE.getBytes(StandardCharsets.UTF_8));
+        }
+
+        @Test
+        @DisplayName("should forward multi-breakpoint cache_control (system + tools + content block) byte-identically")
+        void shouldForwardMultiBreakpointCacheControlByteIdentically() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(AnthropicFixtures.RESPONSE_CACHE_USAGE).build());
+
+            byte[] responseBody = webTestClient.post().uri("/v1/messages")
+                    .bodyValue(AnthropicFixtures.REQUEST_WITH_CACHE_BREAKPOINTS).exchange().expectStatus().isOk()
+                    .expectBody().returnResult().getResponseBody();
+
+            var captured = mockProvider.getCapturedRequests();
+            assertThat(captured).hasSize(1);
+            assertThat(captured.get(0).bodyBytes)
+                    .isEqualTo(AnthropicFixtures.REQUEST_WITH_CACHE_BREAKPOINTS.getBytes(StandardCharsets.UTF_8));
+            assertThat(new String(Objects.requireNonNull(responseBody), StandardCharsets.UTF_8))
+                    .contains("\"cache_read_input_tokens\":300");
+        }
+    }
+
+    // -------------------------------------------------------------------
     // Header stripping — kernel-level guarantees shared across protocols
     // -------------------------------------------------------------------
 
