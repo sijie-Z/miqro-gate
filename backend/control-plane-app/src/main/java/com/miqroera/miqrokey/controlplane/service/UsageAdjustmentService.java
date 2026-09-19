@@ -162,6 +162,15 @@ public class UsageAdjustmentService {
             // avoids; record a fresh correction instead.
             throw new ApiException(HttpStatus.BAD_REQUEST, "REVERSAL_OF_REVERSAL", "不能撤销一笔撤销记录，请改为登记一笔新的调整。");
         }
+        if (repository.isReversed(tenantId, reversalOfId)) {
+            // A reversal negates the row it points at, and the net is
+            // observed + SUM(all deltas). Booking the same reversal twice subtracts
+            // a correction that is already gone, leaving the net above the observed
+            // fact by the size of the original (500 -> 300 -> 500 -> 700). The
+            // per-event lock above makes this read-then-write safe.
+            throw new ApiException(HttpStatus.BAD_REQUEST, "ADJUSTMENT_ALREADY_REVERSED",
+                    "该调整已被撤销，不能重复撤销。请改为登记一笔新的调整。");
+        }
         if (original.adjustmentType() != AdjustmentType.USAGE) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "REVERSAL_UNSUPPORTED", "金额维度的调整尚未开放，无可撤销内容。");
         }

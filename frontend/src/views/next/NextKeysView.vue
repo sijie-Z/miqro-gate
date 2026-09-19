@@ -967,9 +967,13 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
           </UiTooltip>
         </template>
         <template #modelIds="{ row }">
-          <div class="ui-mono next-keys__models">
-            {{ (row as VirtualKeyView).modelIds?.join(', ') ?? '' }}
-          </div>
+          <!-- 这一格是 nowrap + ellipsis（多模型必然截断），而允许模型是这把 Key 的绑定事实：
+               截掉的那几个模型在页面上没有任何别的入口能看到，所以底下的省略号必须能展开。 -->
+          <UiTooltip :text="(row as VirtualKeyView).modelIds?.join(', ') || '—'">
+            <div class="ui-mono next-keys__models">
+              {{ (row as VirtualKeyView).modelIds?.join(', ') ?? '' }}
+            </div>
+          </UiTooltip>
         </template>
         <template #projectTag="{ row }">
           <span>{{ (row as VirtualKeyView).projectTag || '—' }}</span>

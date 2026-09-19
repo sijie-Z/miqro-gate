@@ -206,6 +206,34 @@ class UsageAdjustmentApiIntegrationTest {
                 .andExpect(jsonPath("$.items[0].outputTokens").value(500));
     }
 
+    @Test
+    @DisplayName("the same adjustment cannot be reversed twice")
+    void secondReversalOfTheSameAdjustmentIsRefused() throws Exception {
+        MvcResult created = append(
+                "{\"gatewayRequestId\":\"" + REQUEST_ID + "\",\"outputTokensDelta\":-200,\"reason\":\"上游账单修正\"}")
+                .andExpect(status().isCreated()).andReturn();
+        Map<?, ?> original = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class);
+
+        String reversal = "{\"gatewayRequestId\":\"" + REQUEST_ID + "\",\"reason\":\"撤销前次错误调整\",\"reversalOfId\":\""
+                + original.get("id") + "\"}";
+        append(reversal).andExpect(status().isCreated());
+
+        // The first reversal already cancelled the correction. Negating the same
+        // original a second time does not restore anything — it pushes the net
+        // above the observed fact (500 -> 300 -> 500 -> 700) and reports the
+        // customer as having spent tokens nobody ever measured.
+        append(reversal).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("ADJUSTMENT_ALREADY_REVERSED"));
+
+        mockMvc.perform(get("/api/v1/admin/usage/records").cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].outputTokens").value(500))
+                .andExpect(jsonPath("$.items[0].netOutputTokens").value(500));
+
+        Long rows = jdbc.queryForObject("SELECT COUNT(*) FROM usage_adjustments", new MapSqlParameterSource(),
+                Long.class);
+        org.assertj.core.api.Assertions.assertThat(rows).isEqualTo(2L);
+    }
+
     private org.springframework.test.web.servlet.ResultActions append(String body) throws Exception {
         return mockMvc.perform(post("/api/v1/admin/usage-adjustments").contentType(MediaType.APPLICATION_JSON)
                 .cookie(adminSession, csrfCookie).header("X-CSRF-Token", csrfToken).content(body));
