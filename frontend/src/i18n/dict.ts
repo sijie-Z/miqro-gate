@@ -16,7 +16,7 @@ export const DICT: Record<string, string> = {
   '粘贴新的密钥': 'Paste the new key',
   'API 密钥 已复制': 'API key copied',
   'API 密钥 已生成，仅显示一次': 'API key generated — shown only once',
-  'API 密钥 模式必须填写密钥（每次保存都需要重新填写）。':
+  'API 密钥模式必须填写密钥（每次保存都需要重新填写）。':
     'API Key mode requires the secret (re-enter it on every save).',
   'API 密钥（网关注入 Bearer 凭据）': 'API Key (the gateway injects Bearer credentials)',
   'API 消费者': 'API Consumers',
@@ -366,7 +366,7 @@ export const DICT: Record<string, string> = {
   '分配席位': 'Assign seats',
   '创建': 'Create',
   '创建代理': 'Create agent',
-  '创建代理 并绑定出口凭证后，可按代理维度观测用量。':
+  '创建代理并绑定出口凭证后，可按代理维度观测用量。':
     'Create an agent bound to an egress credential to observe usage per agent.',
   '创建授权': 'Create grant',
   '创建虚拟密钥': 'Create Virtual Key',
@@ -505,7 +505,7 @@ export const DICT: Record<string, string> = {
   '可选': 'Optional',
   '合计': 'Total',
   '吊销': 'Revoke',
-  '吊销后该 API 密钥 立即失效，外部系统将无法再调用计费查询接口。':
+  '吊销后该 API 密钥立即失效，外部系统将无法再调用计费查询接口。':
     'Once revoked the API key stops working immediately and external systems can no longer call the billing query endpoint.',
   '吊销后该密钥立即失效，使用它的客户端将无法继续请求。此操作不可撤销。':
     'Once revoked the key stops working immediately and clients using it can no longer make requests. This cannot be undone.',
@@ -516,8 +516,8 @@ export const DICT: Record<string, string> = {
   '同步预览失败。': 'Sync preview failed.',
   '名单内禁止': 'Denylist',
   '名称': 'Name',
-  '名称、URL 与签名 密钥必填。': 'Name, URL and signing secret are required.',
-  '名称、订阅与 密钥必填。': 'Name, subscription and secret are required.',
+  '名称、URL 与签名密钥必填。': 'Name, URL and signing secret are required.',
+  '名称、订阅与密钥必填。': 'Name, subscription and secret are required.',
   '名称，如 X-Tenant-Id': 'Name, e.g. X-Tenant-Id',
   '后端 5xx': 'Backend 5xx',
   '后端鉴权': 'Backend auth',
@@ -730,9 +730,9 @@ export const DICT: Record<string, string> = {
   '接入地址必须为 https；健康检查默认每 30 秒探测 /health，连续失败 3 次标记不健康。':
     'The endpoint must be https; by default health checks probe /health every 30 seconds and mark the service unhealthy after 3 consecutive failures.',
   '接入地址：': 'Endpoint:',
-  '控制网关调用该 MCP 服务时向上游携带的凭据：访客模式不携带；API 密钥 模式由网关注入 Authorization: Bearer <密钥>（密钥只写不读）。':
+  '控制网关调用该 MCP 服务时向上游携带的凭据：访客模式不携带；API 密钥模式由网关注入 Authorization: Bearer <密钥>（密钥只写不读）。':
     'Controls the credential the gateway presents upstream when calling this MCP service: guest mode presents none; API Key mode injects Authorization: Bearer <secret> (write-only).',
-  '控制这把消费者密钥 能访问哪些通道；能力不足的调用会被拒绝（403 CONSUMER_SCOPE_DENIED / consumer_scope_denied）。':
+  '控制这把消费者密钥能访问哪些通道；能力不足的调用会被拒绝（403 CONSUMER_SCOPE_DENIED / consumer_scope_denied）。':
     'Controls which channels this consumer key may access; calls beyond its capability are rejected (403 CONSUMER_SCOPE_DENIED / consumer_scope_denied).',
   '控制面端口': 'Control-plane port',
   '描述': 'Description',
@@ -991,7 +991,7 @@ export const DICT: Record<string, string> = {
     'Allowlist: only listed API consumers may call this service.',
   '目标': 'Target',
   '目标类型': 'Target type',
-  '真实供应商 API 密钥 的加密托管与版本管理；密钥明文仅录入时可见一次。':
+  '真实供应商 API 密钥的加密托管与版本管理；密钥明文仅录入时可见一次。':
     'Encrypted custody and version management for real provider API keys; the plaintext secret is visible only once at entry.',
   '真实流量加载中…': 'Loading live traffic…',
   '真实流量窗口': 'Live-traffic window',
@@ -1007,7 +1007,7 @@ export const DICT: Record<string, string> = {
   '示例：{"openapi":"3.1.0","paths":{...}}': 'Example: {"openapi":"3.1.0","paths":{...}}',
   '禁用': 'Disable',
   '禁用授权': 'Disable grant',
-  '禁用后该代理 不再计为可用，其凭证不受影响。':
+  '禁用后该代理不再计为可用，其凭证不受影响。':
     'Once disabled the agent no longer counts as available; its credential is unaffected.',
   '禁用后该 Grant 不再授权任何 虚拟密钥，关联 Key 将无法通过此授权路由。':
     'Once disabled the grant authorizes no Virtual Keys and associated keys can no longer route through it.',
@@ -1331,6 +1331,18 @@ export const DICT: Record<string, string> = {
   '该窗口内没有按密钥的用量记录': 'No per-key usage in this window',
   '缓存为按 Key 显式开启：在「我的密钥」为 Key 打开缓存开关后，客户端请求再加 X-MiqroKey-Cacheable: 1 头即生效。':
     'Caching is opt-in per Key: enable the switch in My Keys, then clients add the X-MiqroKey-Cacheable: 1 header.',
+  '帮助': 'Help',
+  '手册目录': 'Handbook contents',
+  '本页目录': 'On this page',
+  '手册总览': 'Overview',
+  '快速上手': 'Quick start',
+  '用户手册': 'User guide',
+  '管理员手册': 'Admin guide',
+  '开发接入': 'Developer integration',
+  '常见问题': 'FAQ',
+  '在 GitHub 打开': 'Open on GitHub',
+  '随控制台内置的使用手册（离线可用）——快速上手、用户/管理员手册、开发接入与 FAQ。':
+    'The handbook ships with the console (works offline): quick start, user/admin guides, developer integration and FAQ.',
   '返回总览': 'Back to overview',
   '页面出错了': 'This page hit an error',
   '页面渲染时遇到问题。可以先重试；若反复出现，请把下方信息反馈给管理员。':
@@ -1884,7 +1896,7 @@ export const PATTERNS: Array<[RegExp, string]> = [
     'Delete configuration entry "$1/$2"? It is read only by the console; deleting it takes effect immediately.',
   ],
   [/^删除预算「(.+?)」$/, 'Delete budget "$1"'],
-  [/^吊销\ Virtual\ Key「(.+?)」$/, 'Revoke 虚拟密钥 "$1"'],
+  [/^吊销虚拟密钥「(.+?)」$/, 'Revoke Virtual Key "$1"'],
   [/^吊销消费者「(.+?)」$/, 'Revoke consumer "$1"'],
   [/^回滚「(.+?)」到\ r(.+?)$/, 'Roll "$1" back to r$2'],
   [/^回滚「(.+?)」到修订\ \#(.+?)$/, 'Roll "$1" back to revision #$2'],
@@ -1923,7 +1935,7 @@ export const PATTERNS: Array<[RegExp, string]> = [
   ],
   [/^测试投递失败：(.+?)$/, 'Test delivery failed: $1'],
   [/^测试投递成功（HTTP\ (.+?)）$/, 'Test delivery succeeded (HTTP $1)'],
-  [/^禁用\ Agent「(.+?)」$/, 'Disable agent "$1"'],
+  [/^禁用代理「(.+?)」$/, 'Disable agent "$1"'],
   [/^禁用凭证「(.+?)」$/, 'Disable credential "$1"'],
   [
     /^禁用后「(.+?)」立即无法登录，现有会话全部失效。$/,
@@ -1935,7 +1947,7 @@ export const PATTERNS: Array<[RegExp, string]> = [
   [/^请求失败（HTTP\ (.+?)）$/, 'Request failed (HTTP $1)'],
   [/^账单\ (.+?)\ \/\ 本地\ (.+?)$/, 'Bill $1 / local $2'],
   [/^路径\ (.+?)\ (.+?)$/, 'Path $1 $2'],
-  [/^轮换\ Virtual\ Key「(.+?)」$/, 'Rotate 虚拟密钥 "$1"'],
+  [/^轮换虚拟密钥「(.+?)」$/, 'Rotate Virtual Key "$1"'],
   [/^重新启用「(.+?)」的登录。$/, 'Re-enable sign-in for "$1".'],
   [/^(.+?)\ MCP\ 服务「(.+?)」$/, '$1 MCP service "$2"'],
   [/^(.+?)\ 已恢复为继承服务规则$/, '$1 was restored to inheriting service rules'],

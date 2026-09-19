@@ -4,6 +4,7 @@
 - 日期：2026-09-18
 - 关联：issue #770；[ADR-0002](0002-transparent-proxy.md)（透明代理）；[ADR-0009](0009-enable-response-cache.md)（缓存：整流请求不得写缓存）；[ADR-0020](0020-quota-soft-landing.md)（网关自产 429，不得被误判为上游错误）；[ADR-0005](0005-no-redis-v1.md)；姊妹篇 [ADR-0023](0023-request-side-cache-breakpoint-injection.md)（同属「opt-in 改体例外族」）；issue #704/#717（路由与回退，未决）、#742（封闭客户端接入）、#740（同族改写）、#544（已关闭，见 §1.3 的边界澄清）
 - 触发事件：issue #770——对照 cc-switch 源码（`src-tauri/src/proxy/thinking_rectifier.rs`、`thinking_budget_rectifier.rs`、`thinking_optimizer.rs`）比对后，提出「换供应商后旧会话的 thinking 签名必然失效，网关能否在上游报错后自动整流并重试一次」。
+- **独立复核补充（2026-09-19，对 develop `8e35fddb`）**：坐标复验，**1 处漂移已修**——`PostgresUsageEventWriter.java:181,230`（两处 `INSERT INTO request_usage_records` 的行号）→ `:253,302`（§5「改动面不止一次性迁移」的论证正落在这两处）；`ProxyController` / `RequestStatus` / `LlmCircuitBreakerRegistry` / `ContextLimitGuard` / 迁移文件 / `architecture.md` / `CLAUDE.md` 等其余引用均落在所引区间内。另：为 §2 的「改体」不变量提供锁定的字节级契约测试**现已存在**（`AnthropicProxyContractTest$PromptCachePassthrough`，PR #933，断言关闭态下请求体字节级原样转发）——若采纳本提案，它同样是必须同步更新的第一处。
 
 ---
 
@@ -32,7 +33,7 @@
 | 网关自产响应的种类（不得被误判为上游错误） | 配额 429 `ADR-0020`；熔断 503 `LlmCircuitBreakerRegistry.java:14-33`；鉴权/模型授权/体量预检在转发前短路（`ProxyController.java:287-289`、`ContextLimitGuard.java:16-19`） |
 | 逐请求证据的既有承载形态 | `V8:43-47`（`request_status` 列与其 CHECK 枚举）、`V8:55`（`retry_count`）、`V8:58-59`（cache token 两列）；响应头先例 `SseReplayEngine.java:22,50`、`ProxyController.java:540` |
 | 指标形态 | `ContextLimitGuard.java:51`、`LlmCircuitBreakerRegistry.java:49`（统一 `miqrokey*` 前缀，开关关闭时恒零） |
-| 网关进程**已有**数据库写入通道（用量/生命周期） | `gateway-app/pom.xml:37` 以 compile scope（无 `<scope>`）依赖 `queue-spi`；`GatewayFeatureConfig.java:43` `@Import({…, QueueConfig.class})`；`QueueConfig.java:62` 构造 `PostgresUsageEventWriter`，后者执行 `INSERT INTO request_usage_records`（`PostgresUsageEventWriter.java:181,230`，**显式列名**写法）；另 `PostgresMcpAccessLogWriter.java:44` 写 `mcp_access_log` |
+| 网关进程**已有**数据库写入通道（用量/生命周期） | `gateway-app/pom.xml:37` 以 compile scope（无 `<scope>`）依赖 `queue-spi`；`GatewayFeatureConfig.java:43` `@Import({…, QueueConfig.class})`；`QueueConfig.java:62` 构造 `PostgresUsageEventWriter`，后者执行 `INSERT INTO request_usage_records`（`PostgresUsageEventWriter.java:253,302`，**显式列名**写法）；另 `PostgresMcpAccessLogWriter.java:44` 写 `mcp_access_log` |
 | 网关进程**没有**管理审计写入通道 | grep `AuditService` / `admin_audit_events` 在 `gateway-app/src/main/java` 无命中；`admin_audit_events` 的既有写入者在控制面（`AuditServiceImpl.java:86-137`） |
 
 ### 1.3 与 issue #544 的边界澄清（重要，避免过度承诺）
@@ -149,7 +150,7 @@ Key 级字段（建议名 `rectificationPolicy ∈ {OFF, SIGNATURE, SIGNATURE_AN
 | 逐请求「是否整流、哪一类错误、做了什么动作」 | ① `request_usage_records` 追加列（枚举，如 `rectification_class`；同 `retry_count` 先例 `V8:55`）；② 响应头（同 `X-MiQroKey-Cache` 先例 `SseReplayEngine.java:22`），建议 `X-MiQroKey-Rectify: <class>`；③ 计数器（形态同 `ContextLimitGuard.java:51`） |
 | 错误模式分类 | 只存**枚举类别**，不存错误正文、不存请求内容（E8） |
 | 配置变更留痕 | 控制面 `AuditService.record(...)`（`AuditService.java:36-37`） |
-| 逐请求审计事件 | **不在本提案范围**：`admin_audit_events` 的既有写入者在控制面，网关侧没有该通道（§1.2 末两行）——若所有者要求逐请求审计，需要单独决策一个跨进程通道（新 ADR）。注意与①的区别：① 走的是网关**已有**的 `request_usage_records` 写入器（`PostgresUsageEventWriter.java:181,230`），不新建通道 |
+| 逐请求审计事件 | **不在本提案范围**：`admin_audit_events` 的既有写入者在控制面，网关侧没有该通道（§1.2 末两行）——若所有者要求逐请求审计，需要单独决策一个跨进程通道（新 ADR）。注意与①的区别：① 走的是网关**已有**的 `request_usage_records` 写入器（`PostgresUsageEventWriter.java:253,302`），不新建通道 |
 | 观察档（选项 B） | 同①③但只计数不整流，用于 §3 的触发条件判定 |
 
 ### 4.8 与 #704/#717 的关系（本 ADR 的边界）
@@ -181,7 +182,7 @@ Key 级字段（建议名 `rectificationPolicy ∈ {OFF, SIGNATURE, SIGNATURE_AN
 
 **数据面**：默认零行为变化；开启的 Key 在上游报错时可能多一次上游调用（共享 ≤1 预算内），并可能发送一个被改写的请求体。
 
-**控制面**：Key 新增一个可配置字段 + 审计留痕；若采纳选项 B/C 还要在 `request_usage_records` 追加列——改动面不止「一次性迁移」：该表写入是**显式列名 + 命名参数**写法且同一语句出现两处（`PostgresUsageEventWriter.java:181,230`），新增列必须同步改两处列清单与参数映射，并改域事件（`RequestStartedEvent` / `RequestCompletedEvent`）与 `ProxyController` 的发射点；迁移只是其中一步。
+**控制面**：Key 新增一个可配置字段 + 审计留痕；若采纳选项 B/C 还要在 `request_usage_records` 追加列——改动面不止「一次性迁移」：该表写入是**显式列名 + 命名参数**写法且同一语句出现两处（`PostgresUsageEventWriter.java:253,302`），新增列必须同步改两处列清单与参数映射，并改域事件（`RequestStartedEvent` / `RequestCompletedEvent`）与 `ProxyController` 的发射点；迁移只是其中一步。
 
 **成本影响**：整流重试成功 = 一次额外计费调用（上游对成功调用计费）；整流失败 = 一次额外调用且客户端仍看到错误。这正是「只在确认存在稳定重复错误模式时才开启」的原因（§3 触发条件）。
 

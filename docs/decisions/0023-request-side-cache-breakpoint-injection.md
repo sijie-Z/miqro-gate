@@ -4,6 +4,7 @@
 - 日期：2026-09-18
 - 关联：issue #769；[ADR-0002](0002-transparent-proxy.md)（透明代理）；[ADR-0009](0009-enable-response-cache.md)（缓存双重 opt-in 先例）；[ADR-0005](0005-no-redis-v1.md)（不引外部状态）；[ADR-0020](0020-quota-soft-landing.md)（opt-in 判定的落地形态先例）；姊妹篇 [ADR-0024](0024-request-side-rectification-retry.md)；issue #740（同属「默认关的改写族」决策批次）、#742（封闭客户端接入，本提案的价值场景）、#704/#717（模型路由与回退，未决）
 - 触发事件：issue #769——对照 cc-switch 源码（`src-tauri/src/proxy/cache_injector.rs`）逐模块比对后，提出「不带断点的客户端在 Anthropic 系上游拿不到 prompt 缓存收益」；该能力与 CLAUDE.md 的透明代理红线正面冲突，故先行 ADR。
+- **独立复核补充（2026-09-19，对 develop `8e35fddb`）**：全文约 30 处坐标逐条复验，**2 处漂移已修**——① `CacheKeyFactory.java:42-43` → `:49-50`；② `PostgresUsageEventWriter.java:181,230`（两处 `INSERT INTO request_usage_records` 的行号）→ `:253,302`（§5 与 §1.2 的论证正落在这两处，故必须修正）。其余坐标均落在所引区间内。两条此后落地的事实并入本 ADR：① §2 的 E1 提到「可用字节级契约测试锁定」——**该契约测试现已存在**：`AnthropicProxyContractTest$PromptCachePassthrough`（PR #933），对单断点与「system + tools + 内容块」多断点的 `cache_control` 请求断言**字节级原样转发**，用例注释写明「将来引入请求改写（如 #769 注入器）必须显式修改该契约」——即若采纳选项 B，这份测试就是必须同步更新的第一处；② 姊妹议题 [ADR-0022](0022-semantic-cache-evaluation.md)（语义缓存）已转 **Accepted**，其 P1 阶段一实测结论为「按当前本地档位不支持进入 P2」——**本提案因而是当前唯一不触碰合规红线的成本杠杆**（前提是 §6-1 的上游支持被实测确认）。
 
 ---
 
@@ -24,7 +25,7 @@
 | 请求体在网关内被完整缓冲后原样转发 | `ProxyController.java:333-334`（`DataBufferUtils.join` → `byte[]`）、`:527-528`（用同一 `byte[]` 构造上游 body） |
 | 转发路径的只读承诺 | `ProxyController.java:295-296`「Read-only: the accepted body is forwarded byte-identically.」 |
 | 既有只读解析（模型/工具/流式标志） | `ProxyController.java:258` `parseQuietly(body)`，用于模型授权与缓存资格判定 |
-| 缓存键归一化永不回写 | `CacheKeyFactory.java:42-43`「The gateway NEVER re-emits the normalized JSON upstream: the raw request bytes are forwarded untouched.」 |
+| 缓存键归一化永不回写 | `CacheKeyFactory.java:49-50`「The gateway NEVER re-emits the normalized JSON upstream: the raw request bytes are forwarded untouched.」 |
 | 体量预检同样只读 | `ContextLimitGuard.java:16-19`「never parses, re-serializes, reorders or truncates the request」 |
 | 验收口径目前是**零注入** | `docs/testing-and-acceptance.md:52`「请求体不被格式化、排序或注入内容；」，`:51`「`cache_control` 和缓存相关头不丢失」，`:27`「Anthropic beta、cache_control、thinking、tool use/result 保留」 |
 | Prompt Cache 依赖字段必须原样保留 | `docs/architecture.md:166-169`（请求体顺序和内容、`cache_control` 等协议字段、Anthropic beta 头、Responses API 会话字段） |
@@ -34,7 +35,7 @@
 | 逐请求证据的既有承载形态 | `V8__request_usage_records.sql:55`（`retry_count integer NOT NULL DEFAULT 0`）；响应头先例 `SseReplayEngine.java:22,50`、`ProxyController.java:540`（`X-MiQroKey-Cache`） |
 | 指标形态 | `GatewayMetricsFilter.java:30`、`GatewayTtfbMetrics.java:24`、`ContextLimitGuard.java:51`、`LlmCircuitBreakerRegistry.java:49`（统一 `miqrokey*` 前缀，开关关闭时计数恒零） |
 | 上游错误/成功判定只看状态码，不读响应体 | `ProxyController.java:779`；错误体在响应发出前不被读取：`:529-540`（先 `setStatusCode` + 复制响应头，再流式写 body） |
-| 网关进程**已有**数据库写入通道（用量/生命周期） | `gateway-app/pom.xml:37` 以 compile scope（无 `<scope>`）依赖 `queue-spi`；`GatewayFeatureConfig.java:43` `@Import({…, QueueConfig.class})` 把队列装配进网关上下文；`QueueConfig.java:62` 构造 `PostgresUsageEventWriter`，后者执行 `INSERT INTO request_usage_records`（`PostgresUsageEventWriter.java:181,230`，**显式列名**写法）；另有 `PostgresMcpAccessLogWriter.java:44` 写 `mcp_access_log` |
+| 网关进程**已有**数据库写入通道（用量/生命周期） | `gateway-app/pom.xml:37` 以 compile scope（无 `<scope>`）依赖 `queue-spi`；`GatewayFeatureConfig.java:43` `@Import({…, QueueConfig.class})` 把队列装配进网关上下文；`QueueConfig.java:62` 构造 `PostgresUsageEventWriter`，后者执行 `INSERT INTO request_usage_records`（`PostgresUsageEventWriter.java:253,302`，**显式列名**写法）；另有 `PostgresMcpAccessLogWriter.java:44` 写 `mcp_access_log` |
 | 网关进程**没有**管理审计写入通道 | `gateway-app/src/main/java` 下 grep `AuditService|admin_audit_events` 无命中；`admin_audit_events` 的既有写入者在控制面（`AuditServiceImpl.java:86-137`）——逐请求写该表需新增写入器/通道，超出本提案 |
 
 ### 1.3 issue #769 提出的问题逐条回答
@@ -152,7 +153,7 @@ Key 级字段（建议名 `cacheInjectionPolicy ∈ {OFF, BREAKPOINTS}`，默认
 
 **数据面**：默认零行为变化；开启的 Key 多一次纯 CPU 注入（无 IO、无阻塞）。上游侧行为变化：断点使上游写入 prompt 缓存，后续同前缀请求可命中。
 
-**控制面**：Key 新增一个可配置字段 + 审计留痕；无新表。若逐请求字段落在 `request_usage_records`，改动面不止「一次性追加迁移」：该表的写入是**显式列名 + 命名参数**写法（`PostgresUsageEventWriter.java:181,230`，同一语句出现两次），新增列必须同步改这两处的列清单与参数映射，并改域事件（`RequestStartedEvent` / `RequestCompletedEvent`）与 `ProxyController` 的发射点；迁移本身只是其中一步。若不做逐请求列而只用响应头 + 计数器，则控制面零改动。
+**控制面**：Key 新增一个可配置字段 + 审计留痕；无新表。若逐请求字段落在 `request_usage_records`，改动面不止「一次性追加迁移」：该表的写入是**显式列名 + 命名参数**写法（`PostgresUsageEventWriter.java:253,302`，同一语句出现两次），新增列必须同步改这两处的列清单与参数映射，并改域事件（`RequestStartedEvent` / `RequestCompletedEvent`）与 `ProxyController` 的发射点；迁移本身只是其中一步。若不做逐请求列而只用响应头 + 计数器，则控制面零改动。
 
 **成本影响（需所有者评估）**：缓存写入通常按高于普通输入计价，读取按折扣计价；同一上游的计价规则各异，本 ADR 不据此外推（列入 §6）。若某 Key 前缀复用率低，开启注入可能**增加**成本——这正是 §4.6 的收益对比要求存在的原因，也建议把「开启后 N 天内 cacheRead 占比未改善即可回退」写入运行手册（若采纳）。
 
