@@ -875,13 +875,18 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/agents` / `/{id}` | 列表/详情（含派生的凭证名与产品名） |
 | `POST /api/v1/admin/agents` | 创建：`{ "name", "description"?, "credentialId" }`；凭证必须存在且 ACTIVE（`400 CREDENTIAL_NOT_FOUND`）、重名 `409 AGENT_NAME_TAKEN`、**凭证已被其他 Agent 绑定 `409 AGENT_CREDENTIAL_TAKEN`**（1:1 规则：一个凭证只支持一个 Agent，保证按 Agent 用量可区分） |
 | `POST /api/v1/admin/agents/{id}/disable` | 禁用（`409 AGENT_ALREADY_DISABLED` 重复禁用） |
+| `POST /api/v1/admin/agents/{id}/enable` | 重新启用（#824；`409 AGENT_ALREADY_ENABLED` 重复启用；审计 `AGENT_ENABLE`）。**不是 `disable` 的镜像**：停用期间凭证可能已被停用，此时拒绝并返回 `409 CREDENTIAL_NOT_ACTIVE`，要求先启用凭证（凭证被**轮换**无害——Agent 绑定的是凭证行而非密文，可直接启用） |
+| `PATCH /api/v1/admin/agents/{id}` | 改名/改描述（#824）：`{ "name", "description", "version" }`——**整份可编辑状态 + 乐观锁版本**（非稀疏 patch），`version` 来自上次读取；重名 `409 AGENT_NAME_TAKEN`、版本过期 `409 CONCURRENT_MODIFICATION`；审计 `AGENT_UPDATE` 记 before→after（改名后按 id 反查不到旧名） |
+| `DELETE /api/v1/admin/agents/{id}` | **硬删除**（#824，不可恢复）：204。删除同时释放租户内名称与「该凭证 → 唯一 Agent」的名额（`uq_agents_tenant_credential` 不分状态，停用的 Agent 仍占位）。用量与对账**不受影响**——没有任何表引用 `agents`，用量按凭证聚合；审计 `AGENT_DELETE` 的 detail **带名称快照**（行已不存在，仅凭 id 无法还原） |
 | `GET /api/v1/admin/agents/{id}/usage?from&to` | 按绑定凭证的用量汇总（请求/Token/成本，默认近 93 天） |
 
 **响应 `AgentView`**：`name`/`description`/`credentialId`/`credentialName`/`providerProductId`/`providerProductName`（派生）/`status`/`createdAt`。
 
 **反向绑定约束（#714）**：创建时对凭证行加锁（`SELECT ... FOR UPDATE`），与 `rotate`/`disable` 的凭证行锁互斥，避免「校验 ACTIVE 通过 → 并发停用」竞态留下绑定到不可路由凭证的 Agent。绑定期间该凭证不可轮换、不可停用（`409 CREDENTIAL_REFERENCED_BY_AGENT`，见 §5）；因此 `disable` 同时是**解除引用**操作，禁用后该凭证恢复可改写。1:1 唯一索引 `uq_agents_tenant_credential` 在任意状态下都生效。
 
-**错误码**：`AGENT_NOT_FOUND`（404）、`AGENT_NAME_TAKEN`（409）、`AGENT_CREDENTIAL_TAKEN`（409）、`AGENT_ALREADY_DISABLED`（409）、`CREDENTIAL_NOT_FOUND`（400）。
+**错误码**：`AGENT_NOT_FOUND`（404）、`AGENT_NAME_TAKEN`（409）、`AGENT_CREDENTIAL_TAKEN`（409）、`AGENT_ALREADY_DISABLED`（409）、`AGENT_ALREADY_ENABLED`（409）、`CONCURRENT_MODIFICATION`（409，改名时版本过期）、`CREDENTIAL_NOT_FOUND`（400）、`CREDENTIAL_NOT_ACTIVE`（409，启用时凭证不可用）。
+
+**生命周期决策（#824 / ADR-0025）**：四条路径选项 A–D 由所有者选定 **D**（`enable` + 改名 + 硬删除）。`list` 仍不做状态过滤（停用与启用同列，前端以状态徽章区分）；「改绑凭证」不在本批范围内（单独议题）。
 
 ### 5.14 内部服务注册表（P3.2）
 

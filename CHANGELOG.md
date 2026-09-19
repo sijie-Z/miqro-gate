@@ -5,6 +5,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 ### 2026-09-20
 
+- **Agent 生命周期补齐：可重新启用、可改名、可删除（#824，ADR-0025 选项 D）**：此前 API 只有 `list/get/create/disable/usage` —— 建错回不去、停用不可逆，且**停用的 Agent 仍占着「该凭证 → 唯一 Agent」的名额**（`uq_agents_tenant_credential` 不看状态），想在同一凭证上重建就被 `AGENT_CREDENTIAL_TAKEN` 挡住（演示站上就留着一个僵尸 Agent）。现新增 `POST /{id}/enable`、`PATCH /{id}`（改名/描述，带 `version` 乐观锁）、`DELETE /{id}`（硬删除），前端行操作改为「用量 + 更多 ⌄（改名 / 启用|禁用 / 删除）」。两点值得记：① **`enable` 不是 `disable` 的镜像**——停用期间凭证可能已被停用，此时拒绝（`409 CREDENTIAL_NOT_ACTIVE`）而不是让 Agent 指向不可路由的出口（被**轮换**则无害：Agent 绑定的是凭证行，不是密文）；② **硬删除在本仓库是干净的**（没有任何表引用 `agents`、用量按绑定凭证聚合），但审计 `AGENT_DELETE` 必须带**名称快照**——行删掉后按 id 反查不到名字。
 - **入口补齐 HSTS（#996）**：Nginx 此前只下发 `X-Content-Type-Options` / `X-Frame-Options` /
   `Referrer-Policy`，**没有 `Strict-Transport-Security`**——而仓库里（Nginx、Spring、文档）从未有过这个头。
   现补上 `max-age=31536000; includeSubDomains`（`always`，覆盖错误响应；**刻意不含 `preload`**：撤回周期
