@@ -2,8 +2,10 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminMcpRouteRuleService;
+import com.miqroera.miqrokey.controlplane.service.AuditContext;
 import com.miqroera.miqrokey.domain.model.McpHeaderCondition;
 import com.miqroera.miqrokey.domain.model.McpRouteRule;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -46,33 +48,44 @@ public class AdminMcpRouteRuleController {
     }
 
     @PostMapping
-    public McpRouteRule create(@PathVariable UUID serviceId, @Valid @RequestBody McpRouteRuleUpsertRequest body) {
+    public McpRouteRule create(HttpServletRequest request, @PathVariable UUID serviceId,
+            @Valid @RequestBody McpRouteRuleUpsertRequest body) {
         var user = userContext.getUser();
         return routeRules.create(user.tenantId(), user.id(), serviceId, body.name(), body.description(),
                 body.priority(), body.pathMode(), body.pathValue(), body.hostMode(), body.hostValue(), body.methods(),
-                body.conditions());
+                body.conditions(), auditContext(request));
     }
 
     /** Full replace of the editable fields (see service javadoc for semantics). */
     @PatchMapping("/{ruleId}")
-    public McpRouteRule update(@PathVariable UUID serviceId, @PathVariable UUID ruleId,
+    public McpRouteRule update(HttpServletRequest request, @PathVariable UUID serviceId, @PathVariable UUID ruleId,
             @Valid @RequestBody McpRouteRuleUpsertRequest body) {
         var user = userContext.getUser();
         return routeRules.update(user.tenantId(), user.id(), serviceId, ruleId, body.name(), body.description(),
                 body.priority(), body.pathMode(), body.pathValue(), body.hostMode(), body.hostValue(), body.methods(),
-                body.conditions());
+                body.conditions(), auditContext(request));
     }
 
     /** Enable/disable; idempotent per the upstream doc (same state is a no-op). */
     @PostMapping("/{ruleId}/status")
-    public McpRouteRule setStatus(@PathVariable UUID serviceId, @PathVariable UUID ruleId,
-            @RequestParam("status") String status) {
-        return routeRules.setStatus(userContext.getUser().tenantId(), ruleId, status);
+    public McpRouteRule setStatus(HttpServletRequest request, @PathVariable UUID serviceId,
+            @PathVariable UUID ruleId, @RequestParam("status") String status) {
+        return routeRules.setStatus(userContext.getUser().tenantId(), ruleId, status, auditContext(request));
     }
 
     @DeleteMapping("/{ruleId}")
-    public void delete(@PathVariable UUID serviceId, @PathVariable UUID ruleId) {
-        routeRules.delete(userContext.getUser().tenantId(), ruleId);
+    public void delete(HttpServletRequest request, @PathVariable UUID serviceId, @PathVariable UUID ruleId) {
+        routeRules.delete(userContext.getUser().tenantId(), ruleId, auditContext(request));
+    }
+
+    /** Route rules are a session-only surface: the actor is always the session user. */
+    private AuditContext auditContext(HttpServletRequest request) {
+        return AuditContext.human(userContext.getUser().id(), requestId(request));
+    }
+
+    private static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
     public record HeaderConditionRequest(@NotBlank @Size(max = 64) String name, String mode,
