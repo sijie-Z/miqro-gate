@@ -15,5 +15,19 @@
 -- guarantee behind that check: a path that writes the ledger without going
 -- through the service cannot corrupt the reading either. It mirrors the
 -- idempotency index introduced with the ledger in V63.
+--
+-- DEPLOYMENT: on a database that already carries two reversals of one original,
+-- this statement fails (`could not create unique index ... is duplicated`) and
+-- Flyway aborts the whole migration run. There is no append-only way out of
+-- that state: the duplicate pair is already in the ledger, and appending a new
+-- adjustment — with or without reversal_of_id — removes neither row, so it does
+-- not make the index buildable. Resolving it needs an explicit owner decision
+-- about mutating those two rows, taken BEFORE this migration ships. Pre-flight:
+--
+--   SELECT tenant_id, reversal_of_id, count(*)
+--     FROM usage_adjustments
+--    WHERE reversal_of_id IS NOT NULL
+--    GROUP BY tenant_id, reversal_of_id
+--   HAVING count(*) > 1;
 CREATE UNIQUE INDEX uq_usage_adjustments_reversal_of ON usage_adjustments (tenant_id, reversal_of_id)
     WHERE reversal_of_id IS NOT NULL;
