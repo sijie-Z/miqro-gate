@@ -481,7 +481,17 @@ class AnthropicProxyContractTest {
                     .expectBody().returnResult().getResponseBody();
 
             assertThat(responseBody).isEqualTo(body.getBytes(StandardCharsets.UTF_8));
-            assertThat(counter("SIGNATURE_INVALID")).isEqualTo(before + 1);
+            // The observation runs in the post-write completion supplier, i.e. the
+            // client can hold the last byte before the counter moves — poll briefly
+            // instead of assuming ordering (a bare assert flaked on the Windows CI
+            // runner and passed everywhere else).
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            double observed = counter("SIGNATURE_INVALID");
+            while (observed < before + 1 && System.nanoTime() < deadline) {
+                Thread.sleep(20);
+                observed = counter("SIGNATURE_INVALID");
+            }
+            assertThat(observed).isEqualTo(before + 1);
         }
 
         /** Meters are created on first observation — absent means zero so far. */
