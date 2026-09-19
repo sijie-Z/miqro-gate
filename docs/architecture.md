@@ -49,7 +49,7 @@ miqro-key-gateway/
 │   ├── persistence-postgres/   # JPA/JDBC、Flyway、分区管理
 │   ├── route-snapshot/         # 版本化只读路由快照（当前实现）
 │   ├── queue-spi/              # 有界用量写入队列 SPI（当前实现）
-│   ├── cache-spi/              # 响应缓存 SPI + NoOp 实现（当前实现）
+│   ├── cache-spi/              # 响应缓存 SPI + L1/L2 实现（默认关闭）
 │   └── test-support/           # Mock Provider 与契约测试工具
 ├── frontend/                   # Vue 3 + TypeScript
 ├── deploy/                     # Docker Compose、反向代理、备份

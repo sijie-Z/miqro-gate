@@ -38,7 +38,7 @@
 - 不限流、不因预算阻断，只做 Webhook 告警。
 - 不保存 prompt、代码、工具正文和模型回答。
 - 原始用量永久保留，直到管理员手动删除。
-- 第一版不做模型响应缓存、不部署 Redis，但保留缓存 SPI。
+- 响应缓存已实现但默认关闭（ADR-0009，需三重显式开启）；语义缓存不启用；不部署 Redis（ADR-0005）。
 - `/v1/models` 必须按 Virtual Key 权限返回模型。
 - 支持 PAYG、个人 Plan、团队 Plan、企业 Plan；团队 Plan 不能简化为单一共享 Key。
 - 不依赖 LiteLLM/Bifrost 运行时。
