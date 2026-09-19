@@ -149,7 +149,7 @@ class UsageLifecycleIntegrationTest {
     @Order(0)
     @DisplayName("a context-limit rejection (413) never reaches upstream and writes no lifecycle row")
     void contextLimitRejectionWritesNoLifecycleRow() throws Exception {
-        // Runs before @Order(6), which closes the mock provider for the rest of
+        // Runs before @Order(7), which closes the mock provider for the rest of
         // the class. Control request first: the same context does open a row for
         // a request that reaches upstream, so the zero-row assertion below cannot
         // pass vacuously.
@@ -238,6 +238,26 @@ class UsageLifecycleIntegrationTest {
 
     @Test
     @Order(3)
+    @DisplayName("prompt cache usage (cache_read / cache_creation) lands in the lifecycle row")
+    void promptCacheUsageLandsInLifecycleRow() throws Exception {
+        mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                .contentType("application/json").body(AnthropicFixtures.RESPONSE_CACHE_USAGE).build());
+
+        webTestClient.post().uri("/v1/messages").bodyValue(AnthropicFixtures.REQUEST_WITH_CACHE).exchange()
+                .expectStatus().isOk().expectBody().returnResult().getResponseBody();
+
+        Map<String, Object> row = awaitLatestLifecycleRow();
+        assertThat(row).containsEntry("request_status", "SUCCEEDED");
+        assertThat(row).containsEntry("input_tokens", 5L);
+        assertThat(row).containsEntry("output_tokens", 12L);
+        // Prompt-cache accounting (ADR-0022 §11 D1 / P0): clients are billed on
+        // these two counts, so they must survive the whole pipeline.
+        assertThat(row).containsEntry("cache_creation_input_tokens", 150L);
+        assertThat(row).containsEntry("cache_read_input_tokens", 300L);
+    }
+
+    @Test
+    @Order(4)
     @DisplayName("a 200 without usage fields is explicitly flagged usage_missing")
     void successWithoutUsageIsMarkedUsageMissing() throws Exception {
         mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
@@ -253,7 +273,7 @@ class UsageLifecycleIntegrationTest {
     }
 
     @Test
-    @Order(4)
+    @Order(5)
     @DisplayName("a non-2xx upstream response finalizes UPSTREAM_REJECTED")
     void upstreamRejectionFinalizesRejectedRow() throws Exception {
         mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(429)
@@ -269,7 +289,7 @@ class UsageLifecycleIntegrationTest {
     }
 
     @Test
-    @Order(5)
+    @Order(6)
     @DisplayName("a client disconnect mid-stream finalizes CLIENT_CANCELLED")
     void clientCancellationFinalizesCancelledRow() throws Exception {
         mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
@@ -292,7 +312,7 @@ class UsageLifecycleIntegrationTest {
     }
 
     @Test
-    @Order(6)
+    @Order(7)
     @DisplayName("an unreachable upstream finalizes UPSTREAM_UNAVAILABLE (502 to the client)")
     void upstreamOutageFinalizesUnavailableRow() throws Exception {
         mockProvider.close(); // port stops listening -> connection refused
