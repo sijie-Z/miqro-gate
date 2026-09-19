@@ -93,6 +93,64 @@ describe('NextRoiView', () => {
     wrapper.unmount();
   });
 
+  it('marks the saving as a lower bound when hits went unpriced, cost complete (#863)', async () => {
+    // The shape the API really sends for this case (pinned by the ROI integration
+    // test): the usage row priced fine, the hits did not. The cost is COMPLETE, so
+    // nothing warns about the amount — and the saving reads ¥0.0000, i.e. "caching
+    // saved nothing", on the page whose copy says the data decides the strategy.
+    mockApi.getRoiReport.mockResolvedValue({
+      ...report,
+      totals: {
+        ...report.totals,
+        savedCost: 0,
+        paidCost: 0.006,
+        savedPct: 0,
+        pricingStatus: 'COMPLETE',
+        unpriced: { unpricedHitEvents: 2 },
+      },
+    } as unknown as RoiReportView);
+    const wrapper = mountView();
+    await flushPromises();
+
+    const marker = wrapper.find('[data-testid="roi-savings-bound"]');
+    expect(marker.exists()).toBe(true);
+    expect(marker.text()).toBe('下界');
+    // ...and the number it qualifies is still the definite-looking zero.
+    expect(wrapper.text()).toContain('¥0.0000');
+    // The cost priced in full, so the other marker must stay away.
+    expect(wrapper.find('[data-testid="roi-cost-caveat"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('leaves the saving unmarked when every hit could be valued', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="roi-savings-bound"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('shows both markers without saying the same thing twice (#863)', async () => {
+    mockApi.getRoiReport.mockResolvedValue({
+      ...report,
+      totals: {
+        ...report.totals,
+        pricingStatus: 'PARTIAL',
+        unpriced: { unpricedEvents: 3, unavailableEvents: 1, unpricedHitEvents: 4 },
+      },
+    } as unknown as RoiReportView);
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Two different assertions, so both stand: the amount is not a total, and the
+    // saving is a floor.
+    expect(wrapper.find('[data-testid="roi-cost-caveat"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="roi-savings-bound"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('未定价');
+    expect(wrapper.text()).toContain('下界');
+    wrapper.unmount();
+  });
+
   it('renders the stat strip (value + sub-metric) and per-day rows', async () => {
     const wrapper = mountView();
     await flushPromises();
