@@ -599,18 +599,11 @@ public class McpProxyController {
     /** Gateway error body shared by the direct and SSE transports. */
     static byte[] problemJson(String type, String message) {
         // #447: the message may embed client-supplied tool names — escape so a
-        // crafted name cannot forge members inside the envelope.
-        return ("{\"error\":{\"type\":\"" + escapeJson(type) + "\",\"message\":\"" + escapeJson(message) + "\"}}")
-                .getBytes(StandardCharsets.UTF_8);
-    }
-
-    /** JSON-string escaping for envelope values (#447). */
-    private static String escapeJson(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t",
-                "\\t");
+        // crafted name can neither forge envelope members nor smuggle a raw
+        // control character in. Shared with the proxy error envelope so both
+        // writers cannot drift apart again.
+        return ("{\"error\":{\"type\":\"" + ErrorEnvelopes.escape(type) + "\",\"message\":\""
+                + ErrorEnvelopes.escape(message) + "\"}}").getBytes(StandardCharsets.UTF_8);
     }
 
     private static byte[] join(List<byte[]> chunks) {
