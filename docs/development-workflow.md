@@ -87,7 +87,7 @@ npm --prefix frontend run lint
 npm --prefix frontend run typecheck
 npm --prefix frontend run test
 npm --prefix frontend run build
-docker compose config
+docker compose -f deploy/compose.yaml config
 ```
 
 命令在 G0.1 建立后生效；不存在时应按 Goal 说明创建，而不是在 progress 中伪报通过。Linux/CI 使用对应的 `./mvnw`。

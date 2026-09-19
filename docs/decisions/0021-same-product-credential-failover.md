@@ -104,7 +104,7 @@
 **现状（必须分成两种失败分别陈述，二者今天的行为并不相同）**：`usage_event`（`V6`）是计费事实表，金额来自响应中解析出的 token 与价目快照（`V64__usage_event_price_snapshot.sql` 存在）。
 
 - **连接阶段失败**：没有响应体，解析不出 token，且这类失败走的是 `Retry` 的错误通道，从不进入响应管线。今天的**唯一发布点在响应管线内**（`ProxyController.java:571`，由 `:559` 的 `writeWith(...).then(...)` 触发），错误路径不调用它——因此连接阶段的失败尝试今天确实不产生 `usage_event`，**在本系统内零计费**。
-- **响应阶段的失败（429 / 401 / 403 / 5xx）**：这些是 `exchangeToMono` 的**正常返回**（`ProxyController.java:526-530` 对所有状态码统一进入该分支，无 `onStatus` 过滤），**今天会照常走到 `:571` 并写出一行 `usage_event`**（`upstream_status_code` = 429 等、token 为空）。`request_usage_records` 同样落行（写入器 `PostgresUsageEventWriter.java:181` 的 guarded upsert；测试 `PostgresUsageEventWriterTest.java:137-147` 用 `UPSTREAM_REJECTED / 429` 明确覆盖这一形态）。**发布点唯一的门槛是 `modelName != null`（`ProxyController.java:649-661`），与状态码无关。**
+- **响应阶段的失败（429 / 401 / 403 / 5xx）**：这些是 `exchangeToMono` 的**正常返回**（`ProxyController.java:526-530` 对所有状态码统一进入该分支，无 `onStatus` 过滤），**今天会照常走到 `:571` 并写出一行 `usage_event`**（`upstream_status_code` = 429 等、token 为空）。`request_usage_records` 同样落行（写入器 `PostgresUsageEventWriter.java:253,302` 的 guarded upsert（两处 `INSERT INTO request_usage_records`，显式列名）；测试 `PostgresUsageEventWriterTest.java:137-147` 用 `UPSTREAM_REJECTED / 429` 明确覆盖这一形态）。**发布点唯一的门槛是 `modelName != null`（`ProxyController.java:649-661`），与状态码无关。**
 
 **这两类失败恰好都出现在 Q7 的回退触发表里**——所以「失败尝试的计费语义」**不是沿用现状就能满足的**。
 

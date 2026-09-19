@@ -136,6 +136,22 @@ describe('NextAdminAgentsView', () => {
     expect(wrapper.text()).toContain('已禁用');
   });
 
+  it('degrades gracefully when an agent has no createdAt (#PH20-B)', async () => {
+    mockApi.adminListAgents.mockResolvedValue([agent({ createdAt: undefined })]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="agents-table"]').text()).not.toContain('NaN');
+  });
+
+  it('does not render a null createdAt as the epoch date (#PH20-B)', async () => {
+    mockApi.adminListAgents.mockResolvedValue([agent({ createdAt: null as unknown as string })]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="agents-table"]').text()).not.toContain('1970-01-01');
+  });
+
   it('creates an agent bound to an ACTIVE credential', async () => {
     mockApi.adminListAgents.mockResolvedValue([agent()]);
     mockApi.listCredentials.mockResolvedValue([

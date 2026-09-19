@@ -1,10 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { describe, expect, it, vi } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
 import { defineComponent, h, nextTick } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import ErrorBoundary from '@/components/ErrorBoundary.vue';
-
-enableAutoUnmount(afterEach);
 
 /** Child that throws during render while `state.boom` is set. */
 const state = { boom: true };

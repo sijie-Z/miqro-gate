@@ -5,7 +5,7 @@
  * each route's loader is invoked at most once per mount by the prefetch path.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { mount } from '@vue/test-utils';
 import { defineComponent, nextTick } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { createPinia, setActivePinia } from 'pinia';
@@ -13,12 +13,10 @@ import NewShell from '@/components/NewShell.vue';
 import { initPreferences, setPreference } from '@/preferences';
 import { useAuthStore } from '@/stores/auth';
 
-enableAutoUnmount(afterEach);
-
 const StubView = defineComponent({ name: 'StubView', template: '<div />' });
 
 /** Regular-nav route names, in the order the shell renders them. */
-const NAV = ['overview', 'keys', 'usage', 'skills', 'model-approvals', 'profile'] as const;
+const NAV = ['overview', 'keys', 'usage', 'skills', 'model-approvals', 'profile', 'help'] as const;
 type NavName = (typeof NAV)[number];
 
 function makeLoaders(): Record<NavName, ReturnType<typeof vi.fn>> {

@@ -3,17 +3,14 @@
  * item answers hover/focus with the styled UiTooltip bubble carrying the
  * label; while the rail is expanded the tooltip is inert (labels visible).
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
 import { defineComponent } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { createPinia, setActivePinia } from 'pinia';
 import NewShell from '@/components/NewShell.vue';
 import { initPreferences, setPreference } from '@/preferences';
 import { useAuthStore } from '@/stores/auth';
-
-// Teleported tooltip layers live on document.body; leave none behind.
-enableAutoUnmount(afterEach);
 
 /** jsdom boots with a 1024px viewport (< the narrow threshold). */
 function setViewportWidth(width: number) {
@@ -23,7 +20,7 @@ function setViewportWidth(width: number) {
 const StubView = defineComponent({ name: 'StubView', template: '<div />' });
 
 /** Every regular-nav route the shell renders a <router-link> for (role USER). */
-const REGULAR_NAV = ['overview', 'keys', 'usage', 'skills', 'model-approvals', 'profile'];
+const REGULAR_NAV = ['overview', 'keys', 'usage', 'skills', 'model-approvals', 'profile', 'help'];
 
 async function mountShell() {
   const pinia = createPinia();

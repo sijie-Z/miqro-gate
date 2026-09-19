@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.domain.repository;
 
 import com.miqroera.miqrokey.domain.model.User;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -11,6 +12,12 @@ import java.util.UUID;
 public interface UserRepository {
 
     Optional<User> findById(UUID id);
+
+    /**
+     * Batch form of {@link #findById}: one query for the whole ID set. Used by list
+     * rendering so the query count stays constant as rows grow.
+     */
+    List<User> findAllByIds(Collection<UUID> ids);
 
     Optional<User> findByTenantIdAndUsername(UUID tenantId, String username);
 

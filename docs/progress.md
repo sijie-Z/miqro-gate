@@ -2,6 +2,62 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 2026-09-19 会话交接点（ADR-0025：Agent 生命周期补齐，#824）
+
+- **决策文档线，非实现**：新增 `docs/decisions/0025-agent-lifecycle.md`（**Proposed**），把 #824 的四条待拍板展开为「现状坐标 → 逐条分析 → 选项 A–D + 推荐 D → 落地形态 → 未决项」。零代码改动。
+- **两处事实更正/发现（对 #824 原文）**：① issue 说「停用的 Agent 仍锁住凭证」**不成立**——凭证侧的锁查询带 `status='ACTIVE'`（`AdminCredentialService.java:355-361`、`AgentRepositoryImpl.java:68-76`），**停用即释放**；② 真实约束是 `uq_agents_tenant_credential` **不看状态**（`V17:24-26`）→ 停用的 Agent 仍占着「该凭证 → 唯一 Agent」的名额，新建同凭证 Agent 被 `AGENT_CREDENTIAL_TAKEN` 挡住——**僵尸 Agent 的形状是「名额占死」而非「凭证锁死」**。
+- **硬删除可行的前提已核实**：迁移中 `git grep "REFERENCES agents"` **零命中**，且没有任何表按 Agent 维度记录用量（`agent_id` 零命中）——删除不影响任何历史统计；代价只剩「不可逆」与「审计按 id 反查不到名字」，故 ADR 要求 `AGENT_DELETE` 审计**带名称快照**。
+- **推荐 D（enable + 改名 + 硬删除）**，与 A/B/C 的对比见 ADR §3；`enable` 被写成**有条件的逆操作**（停用期间凭证可能已停用或已轮换，需前置校验）——这是本 ADR 的第二处发现。
+- **下一步**：所有者拍板；拍板前 #824 保持 OPEN。
+
+## 会话交接点 2026-09-19（P1 阶段一：离线 probe 集评测出结论，#930）
+
+- **结论：按当前本地档位不进入 P2，维持 A（语义缓存继续不启用）**。报告 `docs/semantic-cache-probe-phase1-2026-09-19.md`，
+  结论已回填 ADR-0022 **§11.5**；资产 `scripts/semantic-probe/`（148 对 probe 集 + 跑具），产物 `docs/semantic-cache-probe/runs-2026-09-19/`。
+- **三条读数**：①零/近零误命中下三档召回全为 0（全表最高分是一对 hard negative）；②整体 AUC 0.34–0.48（低于随机——余弦排序主要跟随字面重叠）；
+  ③按住字面重叠后（区间内 AUC）缓存会命中的近重复区仅 0.60–0.77，最小编辑对照 7 组中 4 组被三档模型全部排错序。
+- **方法学教训（记住）**：probe 集 hard negative 是「一字之差」、正例含大幅改写，两类字面重叠天然不同 → **整体 AUC 会被污染**，
+  必须同时看「同字面重叠区间内的 AUC」；字面指标用 difflib 字符级（3-gram Jaccard 在短中文串上会塌）。
+- **跑具两个陷阱**：`normalize_embeddings=True` 不保证生效（Qwen3-Embedding-0.6B 会返回 >1 的余弦），须显式归一化；
+  产物 JSON 的 `meta.command` 不能写 `sys.executable`（会把本机路径带进仓库）。
+- **未做**：云档 `text-embedding-v4`（无密钥；跑具 `--backend openai` 一条命令可补）；影子测量第二阶段未立项。
+
+## 会话交接点 2026-09-19（ADR-0022 定稿：所有者拍板 #718 五问）
+
+- **拍板落地**：所有者回复「语义缓存按你推荐的来」→ ADR-0022 状态 Proposed→**Accepted**，新增 §11 决策记录：
+  **D1** 维持默认不启用 + 批准 P0（prompt caching 透传验证）与 P1（两阶段影子测量）；**D2** 评测三档（本地 base 级 + 现代本地模型 + 云 `text-embedding-v4`）；
+  **D3** 若 P1 显示高置信候选密度显著则 **B2 优先**（客户私有环境 embedding 服务）、B 为退化档；**D4** 三层隐私口径采纳；**D5** 与 #706 合并决策会。
+  §10 八条未决项逐条落地（4/5/7 保留：对外口径原话、流式兼容复核、范围粒度）。`docs/decisions/README.md` 索引行同步去掉「草案」。
+- **运行时行为零变化**：语义缓存继续不启用（承 ADR-0009:38）；本文件不授权任何行为变更，启用须按 §11.3 另行审议。
+- **§11.4 新教训**：外部评审按 `main`（发布快照，落后 `develop` 400+ 提交）取事实，头号技术主张对主干不成立——后续外部评审一律指明 `develop`。
+- **后续**：P0 回归固化、P1 阶段一（离线 probe 集评测）各自独立 issue/PR，均零合规面。
+
+## 会话交接点 2026-09-18（语义缓存启用评估 ADR-0022：#718）
+
+- **决策文档线，非实现**：新增 `docs/decisions/0022-semantic-cache-evaluation.md`，状态 **Proposed（待所有者拍板）**，
+  逐条回答 #718 六问；`docs/decisions/README.md` 追加索引行。**零代码改动、零配置改动、零效果**：
+  语义缓存维持不启用（同 ADR-0009:38），本文件只提供决策信息与选项。
+- **编号**：实际用 **0022**，未顺延。原因：`origin/develop` 现存 `0001–0020` + `README.md`，**0021 已预留给同期进行的
+  模型路由/故障切换评估**，故取 0022。
+- **术语校准（本线新发现，须记住）**：`L2` 在库内指两件事——**代码**里 L1=Caffeine 内存、L2=PostgreSQL `cache_entry`
+  精确缓存（`cache-spi/.../PostgresCacheProvider.java:69` 返回 `L2_HIT`）；**文档**里 ADR-0009:13 把 PostgreSQL 表记作「L1」，
+  而 `configuration-reference.md:287` 用「语义缓存（L2 向量）」。本 ADR 一律改用「语义缓存/向量召回」避免歧义；
+  既有文件不在本线改写，不一致项登记在 ADR-0022 §10-8 待独立文档订正批处理。
+- **关键事实（影响结论，与早前认知不同）**：`CacheKeyFactory.semanticScope` 是**已接线的活代码**，不是预留助手——
+  `:69` 调用它、`:70` 仅在其为空时回落全 body 归一化哈希。即 chat 形态请求的缓存键**当前已经在用
+  「system + 末条 user 消息」语义 scope**（`:102-142`）。因此语义缓存最常被引用的那部分收益本系统已用
+  「不出网关」的方式拿到，剩余的近似召回增量才是唯一需要正文出网关的部分。
+- **结论与推荐**：推荐 **A（维持不启用）+ 零合规面的测量前置**；另列 B（网关内向量化，正文不出进程）、
+  C（允许正文出网关，须改写对外承诺 + 补偿措施）、D（范围折中）三条，均含改动面/风险/代价与「什么条件下应该做」。
+  决策权留给 owner；ADR §10 列 8 条未决项（含收益无法测量的鸡生蛋问题、ADR-0005 对 pgvector 的解释边界、
+  流式兼容性原始出处复核、以及 #718 转述的对外口径在库内无逐字来源需 owner 补事实）。
+- **对外文本脱敏核对**：ADR 与后续 PR/评论只引用厂商公开文档（Azure APIM 语义缓存 policy、阿里 ai-cache）
+  与库内坐标，不含本机路径、用户名或内部流程词汇。
+- **未完成（下一步）**：ADR、索引行与本条目均已本地提交，尚未 push、未开 PR、未在 #718 发评论。
+  下一步 = push 分支并按 PR 模板开 PR（引用 #718，**不写 `Closes`**，本线不关单）→ 在 #718 发评论给 owner 拍板选项。
+- **引文口径**：ADR-0022 的每条厂商事实都带具名来源（页面 slug + 拉取日期）并已逐条复现，库内断言均带 `文件:行号`；
+  未在具名来源中出现的说法一律不作断言（见 §5）。流式兼容性一条只有次要来源支撑，已按此定级并列入 §10 未决项。
+
 ## 会话交接点 2026-09-18（#715 缺口②：对账差异报告导出）
 
 - **#715 缺口②（分支 `feat/reconciliation-export-715`，基于 c931e8df，HEAD 再提交本次收尾）**：
@@ -972,29 +1028,6 @@
 - 登录凭据与 key 见 Current State；miqro-local 含旧 drill 数据与截图（ui-login-v1..v4、ui-keys-posthog.png 等，可作 UI 对比）。vision_review.py = 标准化评审器（SCORE x/10 + 中文问题 + NIT1-3；python stdout 已设 utf-8、max_tokens 8000 防 reasoning 占满）。
 - 另一个 Claude 会话的 dev server 可能在跑（5173/8080/8081）——探活勿杀；e2e/截图需自起 preview 时避开 4173 占用。
 - Windows shell 中文 curl 需 UTF-8 文件体重发；python 路径需 `D:/` 盘符格式；cwd 易漂移（命令前显式 cd 仓库根）；github.com 直连断网时用 `HTTPS_PROXY=http://127.0.0.1:7897` 单条命令代理。
-
-## F-REG 账号自助注册 + 登录页重做 — 用户现场需求（2026-09-03，DONE）
-
-- **背景**：用户试跑后明确要求：① 账号要能自助注册（企业内测/未来客户部署都不可接受"管理员手工建号"，虽 50 账号容量/邀请制是早期产品决策，注册能力应为可配置项而非缺项）；② 登录页 UI 不满意（"差劲/没品味/没有注册"）。处置：用真实 DeepSeek key（用户提供，本地 miqro-local 不入库；已提示用后轮换）跑通全链路 + 以 `deepseek-v4-flash-vision-exp` 视觉模型对截图做客观评审作为"眼睛"（会话图片通道不可用），据此整改。
-- **视觉评审摘录（已采纳）**：布局左右失衡/大片留白、登录卡与背景对比不足、输入控件偏小且 focus 不明确、额度条与文案排版粗糙、品牌蓝缺乏呼应。
-- **后端**：`POST /api/v1/auth/register`（公开端点——SessionFilter PUBLIC_PATHS + CSRF 豁免集已扩；租户行锁序列化并发重名；`validatePasswordPolicy`/`isCommonPassword` 复用；注册即建会话同 /login；审计 `REGISTER`）；开关 `miqrokey.registration-enabled`（AuthProperties，默认 true，yml 显式行 + `MIQROKEY_REGISTRATION_ENABLED`）；错误码 USERNAME_INVALID/USERNAME_TAKEN/PASSWORD_INVALID/REGISTRATION_DISABLED。
-- **前端**：LoginView 重做——登录/注册双模式分段页签（账号/昵称/密码/确认密码；注册即进入）；布局整改按评审意见（对称双栏 grid、左栏内容留白平衡、卡片浮起阴影、控件 40px+focus 环、额度条入浅色卡、品牌强调色）；术语统一（"账号"与"昵称"）。
-- **验证（全部真实 PASS）**：集成 `RegistrationApiIntegrationTest` 3/3（注册即登入 + /me 立即可用 + DB 断言；重名 409/弱密码 400；无会话无 CSRF 可注册）+ `RegistrationDisabledApiIntegrationTest` 1/1（开关关 → 403 REGISTRATION_DISABLED）；前端 vitest LoginView.spec 3/3（模式切换/注册提交带昵称/密码不一致拦截）+ auth.spec +1（store register）；**本地真实链路**：演示账号 demo2_user 经 UI 注册→自动登录→进入系统（浏览器 pane DOM 验证）；control-plane 模块级 BUILD SUCCESS。
-- **排障记录**：Windows shell 中文 curl 请求体乱码 → UTF-8 文件体重发；TDesign t-button submit 在 jsdom 不派发原生 submit → 测试触发 `form` submit 事件；Vitest 对 t-form @submit 需要原生事件。
-- **文档**：api-contract §3.1b（注册语义/校验/开关/审计/防滥用注记）+ §3.1 表行；configuration-reference `MIQROKEY_REGISTRATION_ENABLED`；CHANGELOG；feature-backlog F32 备注自助注册已交付（平台映射仍 BLOCKED）；progress。
-- **gitflow**：分支 `goal/self-registration`。
-
-## F05 管理门户 IP 白名单 — security §6（2026-09-03，DONE）
-
-- **背景与方向**：#129（OpenAPI）合并后按候选顺序做 F05（TBD → 核对后立项）。核对发现：全后端**无任何** IP 过滤/转发头基建（`MIQROKEY_TRUSTED_PROXY_CIDRS` 仅为文档行、无实现——已顺手标注"预留未实现"防误用）。security §6 规格"管理门户支持配置 IP 白名单"需全新实现。
-- **设计决策（记录）**：白名单 opt-in（默认空 = 不限制，防运维锁死）；**豁免** `/api/v1/billing/**`（外部系统 API Key/JWT 通道——白名单语义是"人用浏览器管门户"，机器通道走自己的凭证）与 `/api/v1/auth/bootstrap`（一次性引导）；反代场景必须可信 XFF——只有直连对端 ∈ `trusted-proxies` 时才采纳 `X-Forwarded-For` 最左地址（直连攻击者无法伪造头绕过）；非法 CIDR 启动失败（fail-fast）。
-- **后端**：`IpCidrMatcher`（security 包纯函数：v4/v6 网络位比较、族不匹配拒、解析失败抛 IllegalArgument）；`AdminIpAllowlistFilter`（OncePerRequestFilter：空名单放行 → 豁免路径 → XFF 可信解析 → allowlist 匹配 → 403 ProblemDetails `IP_NOT_ALLOWED`+requestId，与 ORIGIN_REJECTED 同形）；`AdminAccessProperties`（`miqrokey.control.admin-access` ip-allowlist/trusted-proxies，@DefaultValue 空）；SecurityConfig 装配：matcher 解析在 bean（启动期校验）+ FilterRegistrationBean order -110（SessionFilter -100 之前 fail-fast，注册 /api/*）。
-- **验证（全部真实 PASS）**：`IpCidrMatcherTest` 5/5（/24 成员、/32 与 /0、IPv6 /64 与压缩、解析校验矩阵、非法候选）；`AdminIpAllowlistApiIntegrationTest` 3/3（名单内 127.0.0.1 与 198.51.100.9 放行 / 名单外 203.0.113.5 → 403 IP_NOT_ALLOWED；bootstrap 与 billing 豁免——重复 bootstrap 由**业务层** 401 而非 IP 403；可信代理 XFF 采纳 / 非可信直连伪造 XFF 仍 403 / 可信代理转发名单外客户 403）；空名单行为由全量既有测试回归（默认不启用）；后端全量 `verify -P integration` **BUILD SUCCESS 0 failures**（control-plane 389 = 381+8）。
-- **排障记录**：① 集成测试首轮全 401——setUp 漏了 bootstrap 后改密步骤（must_change_password 会话被拒），补 PasswordChangeRequest 后通过；② exemptions 里"异地重复 bootstrap"断言 201 → 实际业务层拒绝 401（该 401 恰证明豁免生效），断言改为 isUnauthorized 并注释。
-- **文档**：security §6（实现语义/豁免/防伪造）；configuration-reference 两新行 + `MIQROKEY_TRUSTED_PROXY_CIDRS` 标注预留未实现；api-contract §4.8 错误码表 + `IP_NOT_ALLOWED`；CHANGELOG；feature-backlog F05 → DONE（F40 推理 API IP 限制仍远期）；progress。
-- **gitflow**：分支 `goal/admin-ip-allowlist`（基于 develop 1f454d5）。
-
-## F35 usage 队列饱和应急直写 — architecture §5（2026-09-03，DONE）
 
 ## F-REG 账号自助注册 + 登录页重做 — 用户现场需求（2026-09-03，DONE）
 
@@ -2715,7 +2748,7 @@ All existing `SingleFile`/`MultiVersion`/`HmacKeys` tests updated with `ensureSt
 - **Origin production mode**: `OriginInterceptorProductionTest` (3 tests) — missing Origin rejected in production, allowed origin passes, unknown origin rejected.
 - **Audit chain integrity**: `AuditChainIntegrityTest` (3 tests) — chain survives restart, content tamper breaks chain, concurrent writers produce valid chain.
 - **Custom CSRF cookie name**: `CustomCsrfCookieNameTest` — CSRF returned from configured cookie name, default name not used.
-- **Production profile**: `AuthIntegrationTestProduction` — production profile starts with valid config.
+- **Production profile**: `AuthProductionProfileIntegrationTest` — production profile starts with valid config.
 - **Test admin endpoint**: `AdminTestController` (test-only) — `/api/v1/admin/test`, `/api/v1/admin/users/{userId}`.
 
 ### Targeted verification repair (2026-07-22)
@@ -2723,7 +2756,7 @@ All existing `SingleFile`/`MultiVersion`/`HmacKeys` tests updated with `ensureSt
 Addressing 8 verified blockers found in commit `ed71f42`:
 
 1. **OriginInterceptor missing-Origin production branch**: Returns `false` (not `true`) after `sendRejection`. Added `requestId` to RFC 9457 response. `OriginInterceptorProductionTest` proves handler is not reached.
-2. **cookieSecure/production binding**: `ProductionStartupValidator` validates cookieSecure and originAllowlist on production mode at `@PostConstruct`; fails fast rather than auto-enabling. `AuthIntegrationTestProduction` starts production-profile context.
+2. **cookieSecure/production binding**: `ProductionStartupValidator` validates cookieSecure and originAllowlist on production mode at `@PostConstruct`; fails fast rather than auto-enabling. `AuthProductionProfileIntegrationTest` starts production-profile context.
 3. **Bootstrap DB-level serialization**: `lockTenantForBootstrap()` uses `SELECT ... FOR UPDATE` on tenant row. `BootstrapConcurrencyTest` proves exactly one admin committed under concurrency with distinct usernames.
 4. **login() transaction removed**: `login()` no longer `@Transactional`. `recordFailedLogin` uses `findByIdForUpdate()` under row lock to compute increment from fresh row. `LOGIN_FAILED` + `ACCOUNT_LOCKED` audit events recorded. `LoginFailureConcurrencyTest` proves deterministic count under concurrency.
 5. **Audit hash content coverage**: SHA-256 over canonical encoding of all immutable fields + previous hash. DB-level lock (final: `pg_advisory_xact_lock`; initial repair used `SELECT ... FOR UPDATE`) replaces `ReentrantLock`. Temporary arrays zeroed. `AuditChainIntegrityTest` proves restart, tamper detection, concurrent writers.
@@ -2754,7 +2787,7 @@ Integration tests (PostgreSQL Testcontainers, Linux only): **100 tests, 0 failur
   - `LoginFailureConcurrencyTest`: 2/2 PASS
   - `OriginInterceptorProductionTest`: 3/3 PASS
   - `CustomCsrfCookieNameTest`: 1/1 PASS
-  - `AuthIntegrationTestProduction`: 1/1 PASS
+  - `AuthProductionProfileIntegrationTest`: 1/1 PASS
   - `CryptoIntegrationTest`: 10/10 PASS
   - Persistence integration tests: 45 tests PASS
   - Control Plane smoke: 2/2 PASS
@@ -2797,7 +2830,7 @@ Integration tests (PostgreSQL Testcontainers, Linux only): **100 tests, 0 failur
 - `OriginInterceptorProductionTest.java` — new: 3 production Origin tests
 - `AuditChainIntegrityTest.java` — new: 3 audit chain tests
 - `CustomCsrfCookieNameTest.java` — new: custom CSRF cookie name test
-- `AuthIntegrationTestProduction.java` — new: production profile startup test
+- `AuthProductionProfileIntegrationTest.java` — new: production profile startup test
 - `docs/api-contract.md` — updated: bootstrap, CSRF, Origin, production, error semantics
 - `docs/configuration-reference.md` — updated: production constraints, cookie, allowlist, CSRF cookie name
 - `docs/progress.md` — updated (this file)
@@ -4021,21 +4054,6 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 
 **部署教训（本轮踩到，含一次自我纠正）**：compose.prod.yaml 的 cp 服务带 `build:` 段（context=`..`=演示树 `/opt/miqrokey`，与真正构建用的 `/opt/miqrokey-dev` 不同）——漏 `--no-build` 有**用旧树产出镜像**的风险（触发条件：该 tag 本地无镜像时 `up` 才会构建）。本轮曾观测"容器镜像 ID ≠ tag 镜像 ID 但 compose 显示 Running"，最初归因为"compose 按镜像引用名判等"——**该归因已被直接观测否定**：同 tag 下 `up` 不加 `--force-recreate` 亦会 `Recreate/Recreated`，compose 按解析出的镜像 ID 判等；更可能的成因是**多会话并发构建同一 tag 的竞态**（本轮时间线：自建镜像 11:11:03 完成，容器 11:11:07 从另一镜像创建）。**落为收尾断言**：部署后必须核 `container.Image == tag.Id`（"Up N seconds + healthy"不算数）——它正是抓这类竞态的检查；**跨会话纪律：同一 tag 不并发构建、部署串行**。
 
-## 2026-09-18 WorkBuddy MCP 层接入实测样章（#742 第③片收口）
-
-**交付**：`docs/workbuddy-mcp-onboarding-sample.md`——真实封闭客户端（WorkBuddy，腾讯 CodeBuddy 系）按指南 §4 接入网关 MCP 数据面的完整样章：拓扑、五步照抄（注册服务→消费者裁 `mcp:call`→`~/.workbuddy/mcp.json`（**无点号**；带点的是应用自管文件，写错不生效）→过信任门（`mcp_approvals` 键=sha256(url origin)::name）→同步并放行工具）；证据表；两条踩坑（自管配置陷阱；`HEALTH_PATH` 对 SPA 兜底页的假 HEALTHY——应选 `JSONRPC_INITIALIZE`）。
-
-**实测证据链**：应用日志 `[MCP-Connect] ok … tools=3`；`mcp_access_log` 6 行 `TOOL_UNAVAILABLE`（放行前，toolName 完整）+ `FORWARDED | read_wiki_structure | 617ms`（放行后）。**实测暴露真缺陷 #779**（`tools/sync` Accept 缺 `text/event-stream` → 严格上游 406）——修复 PR #781 已合并（先证红两条回归）。
-## 2026-09-18 MCP tools/sync 修复之二：SSE 响应体解帧（#779 收口）
-
-**背景**：PR #781（Accept 兼发双媒体类型）上线后，对严格上游的失败**只前进了一步**——406 消失，但上游按规范合法改发 **SSE 帧**（`event: message` + `data: {...}`），同步客户端仍按裸 JSON 解析 → `502 TOOLS_SYNC_UPSTREAM_FAILED / Unrecognized token 'event'`。真机（演示站 deepwiki 服务）复现，错误逐字同型。
-
-**修复**：`McpToolsListClient` 判 `Content-Type: text/event-stream` 时按 SSE 规范取 `data:` 行（多行按换行拼接）再解析；无 data 载荷 fail-closed（"上游 SSE 响应中没有 data 载荷"）。
-
-**测试**：两条新用例**先证红**（SSE 解帧 / 无 data 拒绝），修复后 `McpToolsListClientTest` **11/11 绿**。
-
-**部署教训（本轮踩到，含一次自我纠正）**：compose.prod.yaml 的 cp 服务带 `build:` 段（context=`..`=演示树 `/opt/miqrokey`，与真正构建用的 `/opt/miqrokey-dev` 不同）——漏 `--no-build` 有**用旧树产出镜像**的风险（触发条件：该 tag 本地无镜像时 `up` 才会构建）。本轮曾观测"容器镜像 ID ≠ tag 镜像 ID 但 compose 显示 Running"，最初归因为"compose 按镜像引用名判等"——**该归因已被直接观测否定**：同 tag 下 `up` 不加 `--force-recreate` 亦会 `Recreate/Recreated`，compose 按解析出的镜像 ID 判等；更可能的成因是**多会话并发构建同一 tag 的竞态**（本轮时间线：自建镜像 11:11:03 完成，容器 11:11:07 从另一镜像创建）。**落为收尾断言**：部署后必须核 `container.Image == tag.Id`（"Up N seconds + healthy"不算数）——它正是抓这类竞态的检查；**跨会话纪律：同一 tag 不并发构建、部署串行**。
-
 ## 2026-09-18 缓存节省是没有标记的下界——补上最后一个"未知被当成 0"的洞（#790）
 
 **我先前的判断是错的，被一次实测推翻。** 我在 #766 的 PR 里把"命中路径无 gap 计数器"列为 follow-up，但随后自己评价它"**收益低**"（理由：演示站的节省额只有 ¥0.001 量级）。动手前顺手查了一下可达性，用的是与代码**同一套 as-of 规则**：
@@ -4467,88 +4485,6 @@ job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
 - **绿**：同一命令恢复实现后 **31/31 通过**
 - `npm --prefix frontend run typecheck` 退出 0；`run lint` 退出 0（0 error / 7 warning，**全部落在本轮未触碰的文件**）；`run test` **63 文件 384/384 通过**；`run build` 退出 0（24.96s）
 
-## 2026-09-18 缓存节省是没有标记的下界——补上最后一个"未知被当成 0"的洞（#790）
-
-**我先前的判断是错的，被一次实测推翻。** 我在 #766 的 PR 里把"命中路径无 gap 计数器"列为 follow-up，但随后自己评价它"**收益低**"（理由：演示站的节省额只有 ¥0.001 量级）。动手前顺手查了一下可达性，用的是与代码**同一套 as-of 规则**：
-
-```
-hit_groups | groups_without_input_price_at_hit_time | first_hit | last_hit
-         5 |                                      3 | 09-14     | 09-16
-```
-
-**5 个命中组里 3 个**在命中时刻没有任何生效的 input 价。也就是说这台站上的缓存节省数字**对 60% 的命中组静默偏低**——不是理论情形，是正在发生。**"收益低"是只看演示站的金额量级得出的，而缺陷的类别才是量尺**：`savedByGatewayCache` 是控制台首屏的招牌数字，而"未知被当成 0"正是 B+ 分层要消灭的那一类。
-
-**缺陷的原文**（`UsageStatsRepositoryImpl`）：
-
-```java
-/**
- * {@code tokens x hits x unitPrice}, undivided; a null price contributes nothing.
- */
-private static BigDecimal weighted(long tokens, long hits, BigDecimal unitPrice) {
-    return unitPrice == null ? BigDecimal.ZERO : BigDecimal.valueOf(tokens * hits).multiply(unitPrice);
-}
-```
-
-注释把这件事写得像无害的默认值。而 `addHit` 当时**完全不碰** `unpriced`。
-
-### 一处设计取舍：把两个问题分成两个名字
-
-给 `PricingGap` 加 `unpricedHitEvents` 时，`isEmpty()` 原本**驱动 `pricingStatus`**——直接加字段会让"节省侧有缺口"把**成本**判成 PARTIAL，即"让一个从没被它碰过的数字显得不可信"。所以拆成两个名字：
-
-- `hasCostGap()`（= `unpricedEvents > 0`）驱动成本状态：**成本完不完整与节省完不完整是两个问题**
-- `isEmpty()` 表示"**完全没有缺口**"（成本 ∪ 节省），名字与含义一致
-
-这两条各有一条测试钉住（域测试 144/144）。
-
-### 前端：不标注就等于没修
-
-两个展示节省额的地方同时加标记，否则 UI 层重复同一个缺陷：管理端概览的「网关缓存节省」加「下界」徽标（复用既有未定价样式 + UiTooltip 说明次数），成本页的「缓存节省」卡片在提示行里追加「下界：N 次命中在发生时无生效价目」。
-
-### 验证
-
-- **先证明会红**：只关掉仓库侧的计数（域侧保持，否则退化成编译错而非行为红）→ `AdminRoiApiIntegrationTest` **4 跑 1 失败、恰好是新增那一条**（`expected 2 but was 0`），其余 3 条照常通过；恢复后 4/4 绿
-- 新增 IT 用的是**能分辨的那个 fixture**：价目生效时间设在"命中之后、用量行之前"（`now() - interval '1 second'`）——于是同一次运行里**成本 COMPLETE 而节省是下界**，正是要钉住的那条不变式
-- 前端 25/25（含 4 条新增）＋ typecheck；OpenAPI/前端类型差异仅 `unpricedHitEvents`
-
-**教训（与本会话其他几次同族）**：我凭**金额量级**判定一件事"不值得做"，而判据应该是**缺陷的类别**；一次五分钟的实测就把它推翻了。与"自验只覆盖自己以为的范围"是同一种盲区——只是这次盲在**优先级**上，而不是盲在正确性上。
-
-## 2026-09-18 部署序列化与归因——单入口脚本（#793）
-
-**起因**：演示栈由多条会话共用，而部署是各写各的命令。两天里两次同类事故：① 10:5x 两次构建交错，**事后再怎么查都无法从机器状态回答"当时跑的是哪一份"**；② 中午 `--no-build --force-recreate` 双保险之下，容器镜像 ID 仍不等于 tag 的 ID，且容器那张镜像在本地列表里已不存在。
-
-**②一度被读成"至少还有第三条会话在动部署"——该结论被推翻**：容器跑的**就是该会话自建的镜像**（它自己的构建日志为证），tag 是被另一个**并发构建**改指的。所以问题不是"多了谁"，而是**并发构建无人拦** + **"谁上的线"没有持久记录**（等有人问起，镜像可能已经不在了）。
-
-**交付**：`deploy/deploy.sh` —— 单入口，一次做三件事：
-
-1. **`flock` 序列化**（构建与 `up` 都在锁内）：交错真正伤人的地方是**构建**，不是 `up`
-2. **收尾断言"正在跑的就是刚构建的"**：逐个比 `docker inspect <容器>.Image` 与 `docker image inspect <tag>.Id`。`Up N seconds (healthy)` **不是证据**——容器没换过去时机器显示的状态一模一样
-3. **每次追加一行 `deploy.log`**：时间/模式/提交/调用方/**运行中的镜像 ID 与当时的 tag ID**
-
-三条既有教训也编进流程：`up` 带 `--no-build`（compose 的 cp 服务 `build:` 段 context 指向**线上树**）、后端容器换掉后自动 `restart portal`（nginx upstream 启动时解析）、**显式钉住 compose 项目名**。
-
-### 干跑抓出我自己三个 bug
-
-写完先跑 `--dry-run`，立刻暴露三处：
-
-1. **干跑声称了它没做过的验证**——断言步没被 `--dry-run` 罩住，真跑了 `docker inspect` 并对我本机镜像打印 "verified"。**干跑最不能做的就是断言它没验证过的东西。**
-2. **硬编码容器名 `miqrokey-<svc>-1`**——隐含假设 compose 项目名=miqrokey。改成向 compose 问（`compose ps -q`）。
-3. **最要紧**：**compose 的项目名取决于调用时的目录**（服务器上靠 `cd /opt/miqrokey` 才得到 `miqrokey-*` 容器名）。换个目录跑，脚本会**另起一套容器**而不是更新线上那套。已 `-p` 钉住。
-
-### 真跑一遍，并证明断言会红
-
-用一次性夹具（**独立 tag 与独立项目名——避免覆盖本机既有的 `miqrokey-*:local`，那是别的会话的本地栈**）：构建→换容器→断言→restart portal→写流水，exit 0。
-
-再**故意把 tag 指向另一张镜像**，跑 `--verify-only`：
-
-```
-ASSERT FAILED control-plane: running image 'sha256:97ff…' != tag image 'sha256:974b…'
-verified portal: sha256:ff21…            ← 未动的服务仍通过
-EXIT=2
-```
-
-顺带加了 `--verify-only`：**部署线明确说要"部署前后各查一次"，而一个不能单独跑的检查不会被跑**。流水里两个身份都记，是为了事后能分辨"tag 被人重建了"与"当初就没换过去"。
-
-**分工**：脚本+文档进仓库（可评审），**装到服务器由部署线负责**。锁选**机器层**而不是"打卡制"——打卡依赖自觉，而我们已经知道至少有一个动作方不打招呼，荣誉制只会让守规矩的人排队。
 ## 2026-09-18 接入器参考实现（#742 第②片）——配置注入可执行化：打印 / 写入 / 验证
 
 **范围**：把指南矩阵（第①片）的三类接入姿势做成可执行工具 `scripts/onboarding/miqro-onboard.sh`（POSIX sh）：`print` 六种形态（env×3 shell / claude-settings / codex / openai / curl / mcp）、`apply` 三种配置文件形态（env 与 dotenv 走**托管块**替换、claude-settings 走 jq JSON 合并）、`verify` 对 `/v1/models` 按 200/404/401 归因。
@@ -4891,6 +4827,269 @@ function shareOf(group) {
 
 **"还有没有别的页面"这个问题，问一次不够，得扫一遍。** #849 修的是"我看见的那一页"；这次扫出另外两页，并发现第三页连字段都没有。**同一个承诺在 9 个渲染金额的视图里只落实了 4 个**——靠一页一页撞，永远撞不完。
 
+## 2026-09-18 一个丢失的 `}` 静默毁掉五项偏好开关——构建与测试都在看别处（#828）
+
+「深色侧栏的品牌名看不清」这个主诉，最后追到的是一行半角符号。
+
+### 问题
+
+`design-tokens.css` 的收尾 `}` 在 09-15 深夜的手感动效批（784b0f05，PR #612）里被静默吞掉。后果不是"少一条样式"，而是**它之后引入的整份 `design-base.css` 被 CSS 解析器当成嵌套规则**：
+
+- 产物里出现 `:root :root{ … }`——`<html>` 不可能同时匹配两个 `:root`，这条规则永远不生效；
+- 更隐蔽的是 `[data-menu-theme='light']`、`[data-anim='off']`、`[data-gray='on']`、`[data-color-weak='on']`、`[data-compact='wide']` 全部变成 `:root [data-…]`——**五项偏好开关静默失效**；
+- 用户看得见的那一层：深色侧栏品牌名「MiQroGate」与导航悬停文字的计算色回退成 `rgb(38,38,38)`，与 `#001529` 背景融成一片。
+
+**构建零告警、418 个前端单测全绿、e2e 57/57 全绿**——因为正确性的判据不在 JS 行为里，而在 CSS 的解析语义里。
+
+### 改法
+
+补回 `}`。然后补两层"下次能抓到"的守门（这一条比修复本身重要）：
+
+1. **单测 `aesthetic.spec`**：对 `src/**/*.css` 做**括号配平校验**（注释与字符串感知）；
+2. **e2e `baseline`**：对**真实构建产物**断言——不得出现 `:root :root` / `:root [data-` 选择器，且深色侧栏品牌名的计算色必须是 `rgb(255,255,255)`。
+
+顺带修掉一处**空转断言**：`sanitized.join` 漏了调用，导致「forbidden aesthetics」检查其实从未生效；恢复后把渐变豁免面从 `.mk-brand-chip` 扩到品牌章全族 `.mk-chip-<provider>`（规范 §4.1/§9 的本意，供应商品牌章自带渐变是既有允许项）。
+
+### 验证
+
+- **先证明会红**：把 `}` 去掉重建 → 括号守卫**必红**（捕获 279 处 `:root ` 前缀里的 `:root [data-` 族）；补回后**必绿**——两态实测；
+- 产物核验：修复后 dist CSS `:root :root`=0、`:root [data-`=0、`[data-menu-theme=light]{` 以平铺形态存在；
+- typecheck / vitest 418/418 / build / Playwright 57/57 全过。
+
+### 教训
+
+**"看不见"分两种：一种是没人看，另一种是看着的东西不看这一层。** 这行 `}` 丢了三天，期间的每一次构建、每一轮 CI 都在跑、都是绿的——因为被检查的是 JS 的行为和几处像素，而"CSS 规则到底生不生效"从来不在判据里。修复花一分钟、守门花其余全部时间，比例是对的。
+
+## 2026-09-18 Codex 片段不再接受凭据参数——把「今天没泄漏」变成「结构上不可能」（#821）
+
+外部评审提的"Codex 配置片段里可能带真实密钥"，核实后的结论是**今天没有泄漏路径**：`codexTomlSnippet()` 的两个调用点传的都是占位符 `'<粘贴你保存的密钥>'`。但**函数签名**在邀请未来的调用者传真值——而真值一旦传进来，就会落进"配置文件注释"，被 grep、被索引、被备份、被贴进工单。
+
+所以这条不是修 bug，是**结构性加固**：把 `secret` 参数从签名里删掉，注释固定为占位符（与 `scripts/onboarding/miqro-onboard.sh` 的输出口径对齐）。
+
+**验证**：`ccswitch.spec` 8/8，含新增的负断言——输出中不得出现 `MIQROKEY_API_KEY=mqk_`；调用点签名变更后 `NextKeysView.spec` 12/12；typecheck 通过。**用户可见输出逐字不变**（原先经调用点已是同一占位符）。
+
+### 教训
+
+**"没有发生"和"不可能发生"是两种安全性，只有后者能扛住下一次改动。** 一个可选参数在评审里看起来无害（"反正没人传真值"），但它把一条红线寄托在"未来的调用者会记得"上——而签名是唯一能让记忆力变得不必要的东西。
+
+## 2026-09-18 大屏适配：内容区从「固定 1200 左贴」改为流式铺满（#830）
+
+1920 的屏幕上，内容区此前固定 1200px 且**左贴侧栏**，右侧留下近 300px 空白。
+
+### 改法
+
+- `contentCompact` 默认值 `fixed` → `wide`：内容区**流式铺满**视口（口径取自 vben v5 实测：1920 下其内容 1709px、卡片 1677px，无宽度上限）；
+- 「固定 1200」保留为偏好选项，并把胶囊**水平居中**（`.ui-page { margin-inline: auto }`），不再左贴；
+- 新增 `showPageDesc` 偏好（默认显示）：**点页面标题**收起/展开标题下的说明行（悬停出现 ⌄ 提示），界面设置抽屉同步开关；
+- 抽屉里的标签「固定」顺带改成「固定 1200」（两种模式并存后，旧标签失去了含义）。
+
+### 一处实现模式（初版踩了坑）
+
+说明行收起的监听**初版注册在组件 `onMounted`**——测试里多次挂载 shell 后，同一次点击命中多个监听、互相抵消。改为 install-once 模块（`src/utils/page-desc-toggle.ts`），与仓库既有的 `installDomI18n` / `installChunkReload` 同模式。
+
+### 验证
+
+- typecheck / vitest 419/419 / build / Playwright 58/58；
+- 新增 e2e：1920 下 `.ui-page` >1600px（流式）；切「固定 1200」时宽 ≈1200 且左缘 >300（居中）；点标题后说明行隐藏、**刷新保持**；
+- 单测：preferences 默认值与 dataset（compact=wide、pageDesc=show/hide）、标题点击往返、抽屉开关。
+
+### 教训
+
+**全局委托（document 级监听）的安装次数是一个语义问题，不是性能问题。** 同一个点击被两个监听各翻转一次，净效果是"没反应"——而它在真实页面里几乎不可复现（组件只挂载一次），只有测试的多次挂载会暴露。仓库里已有 install-once 的现成模式，这次是没照着做。
+
+## 2026-09-18 错误边界：页面渲染崩溃不再白屏（#833）
+
+`/app/providers` 白屏事故（#663）暴露的是**懒加载 chunk 404** 那条路径；但**渲染期异常**这条路径始终没有任何兜底——页面组件抛错，内容区就整块变白，用户只能刷新。
+
+### 改法（三层）
+
+1. `ErrorBoundary.vue`：`onErrorCaptured` + 导航自动复位 + 错误卡（**重试 / 重新加载 / 返回总览**）；
+2. **NewShell 内容区**包一层：页面崩了侧栏还在、还能切走；**App 根部**再包一层：壳自身崩了也有可恢复的整页；
+3. `main.ts` 的 `router.onError` 非 chunk 分支：初始路由未解析（首次动态导入抛错、守卫崩溃等）→ 改道 `/unavailable` 重试页，而不是留下空的 RouterView。
+
+词典补 5 条；错误卡只展示 `Error.message`（不含请求体与凭据）。
+
+### 验证
+
+- 新增 `ErrorBoundary.spec.ts` 3 例：崩溃子树 → 卡片；重试后恢复；导航复位；
+- typecheck / vitest 422/422 / build / Playwright 58/58；
+- **现场核查**：线上 33 条路由爬行，零 JS 错误、零白屏——作为"当前非复现态"的证据记录在 issue 里。
+
+### 教训
+
+**兜底层的验证只能靠"制造崩溃"，不能靠"没崩溃"。** 这条修复没有线上症状作判据，所以判据只能是单测里那几个**必然抛错**的子树——以及把"线上目前没有崩溃"写成一条可复核的记录，免得下一个读的人把它当成"没人验证过"。
+
+## 2026-09-18 术语收口：Secret 全站改称「密钥」+ 模型目录弹窗可操作化（#835）
+
+两条都来自同一个源头：**界面用词与用户脑子里的词不一致**。
+
+### 一、Secret → 密钥
+
+上游凭证 label「API 密钥」（补来源提示：从供应商控制台复制、加密保存不回显、长度约束）；「测试 Secret」→「测试密钥」（菜单 + 弹窗标题）；placeholder「粘贴要测试的密钥 / 粘贴新的密钥」；Webhook「签名 Secret」→「签名密钥」；一次性密钥弹窗「密钥已生成，仅显示一次 / 我已保存该密钥」；PageGuide 文案同步；词典条目改名并去重（含一处同名键）。
+
+### 二、模型目录弹窗
+
+- **警告块**从三段压成一行标题「当前状态『已文档化』：适配器尚未完成验证」+ **行动指引**（用于生产流量前，先在上游凭证页用真实凭证完成验证）；
+- **空态**写明「探测 / 手工补录」两条路径；
+- **手工补录**的「模型 ID 必填」由块级 alert 改成**字段级 inline error**（输入即清除、切换产品即复位）；placeholder 从 `manual-fallback-model` 换成真实示例 `deepseek-chat`；两字段补 example 式 hint。
+
+### 验证
+
+typecheck（**无管道直判 rc=0**）/ vitest 423/423 / build / e2e 58/58；#735 警告块用例按新文案更新并加「行动指引」断言；新增字段级错误 + 输入清除用例。
+
+### 教训
+
+**`npm run typecheck | tail` 会掩蔽退出码**——本轮又踩了一次。与仓库既有的 `git push | tail` 是同一条：**用管道接管一个命令的输出，就等于接管了它的报警器**。改为落盘后判 rc。
+
+## 2026-09-18 面向使用者的手册五件套 + 控制台入口（#840）
+
+规格文档一直是"给实现者看的"：组件怎么设计、契约怎么算。**使用者视角的路径**（我怎么建一把 Key、怎么接 Claude Code、额度超了会怎样）此前只散落在各规格的脚注里。
+
+新增 `docs/user-guide/`：README（索引与阅读路径）、quickstart（10 分钟上手：管理员预备 + 三种接入示例）、user-guide（普通用户逐功能）、admin-guide（七组导航逐组 + 巡检清单 + 合规实践）、developer-guide（端点矩阵 / 四语言示例 / 错误语义 / MCP / 归属与避坑）、faq（按症状查）。控制台用户菜单新增「使用手册」直达；`document-map` 收录手册索引行并写明"规格 ↔ 手册"的分工。
+
+风格按用户要求对齐腾讯云/阿里云/AWS 文档：每节 **操作路径 → 关键字段 → 例子 → 注意**，示例可照抄（curl / PowerShell / Node / Python / MCP 配置全给）。
+
+### 事实不是抄的，是核过的
+
+手册里每一条都逐条对过代码与契约：会话 TTL（空闲 30 分钟 / 绝对 12 小时）、配额两态（ALERT 仅预警 / REJECT 超限 429）、留痕默认关闭、密钥 404 反枚举语义、MCP 端点与错误码（`401 invalid_api_key` / `403 consumer_scope_denied` / `504 mcp_upstream_timeout`）、`max_tokens` 思考预算坑。
+
+### 验证
+
+相对链接全检 `broken links: none`（脚本校验 `docs/user-guide/*.md` 的全部相对链接）；「七组导航」与 `NewShell` 代码逐组核对一致；typecheck / vitest 423/423 / build / e2e 58/58。手册不含任何真实凭据或内部地址（示例统一 `mqk_live_…` / `https://<网关地址>` / `deepseek-flash`）。
+
+### 教训
+
+**"文档写完了"不等于"用户能照着做"。** 对照大厂文档格式不是形式主义——**操作路径 → 关键字段 → 例子 → 注意**这个顺序恰好是使用者提问的顺序；而规格文档的结构（背景 → 设计 → 契约）是评审者的顺序。
+
+## 2026-09-18 CC Switch 一键导入：可选目标应用 + 反馈闭环 + 接入指引面板重构（#839）
+
+用户实测反馈的原话是两句：「我试了几下，没什么变化，还以为失败了，结果退出后发现成功了」和「这界面太糙了」。前者是**单向协议下的反馈缺失**，后者是**接入指引的组织方式**。
+
+### 一、导入不再「点了没反应」
+
+新增 `CcSwitchImport` 组件（创建成功弹窗与行级对话框共用）——点导入后**立即进入反馈状态**：
+
+- **唤起检测**：2.5s 内窗口失焦 ⇒「已唤起 CC Switch ✓」+ 三步指引（确认窗点确认 → 到对应应用分组找「MiQroKey · <名称>」→ 列表没出现就完全退出重开 CC Switch）；
+- **未检测到** ⇒「可能未安装，或浏览器拦截了 `ccswitch://`」+ 复制导入链接 / 手动配置两条兜底；
+- **4 秒冷却**防连点（每次确认都会新增一条供应商记录）。
+
+**深链是单向协议**（CC Switch 不回执），所以文案只说「已唤起 / 未检测到」，**不承诺导入结果**——这是该协议下能给的最大反馈。
+
+### 二、目标应用可选（Claude Code / Codex）
+
+默认按密钥用途推断（CODEX→Codex）。Codex 深链的 endpoint 必须带 `/v1`——因为 CC Switch 生成模板固定 `wire_api="responses"` 且 `base_url=endpoint` 原样，Codex 会自己 append `/responses`；UI 同时标注「上游需支持 OpenAI Responses，Chat-only 产品请用手动片段」。深链带 `notes` 记录网关口径。
+
+### 三、「使用密钥」面板重构
+
+按用户贴的中转站样本对位：上半区一键导入（目标应用段选 + 导入 + 复制链接 + 反馈卡），下半区手动配置——客户端 × 平台段选，**每个配置文件独立成块**（路径标题 + 复制按钮 + 片段）：Claude Code（终端环境变量 / `~/.claude/settings.json`，Windows `%USERPROFILE%` 变体）、Codex CLI（`config.toml` + 认证方式二选一 `auth.json`（含明文警告）/ 环境变量）、通用 OpenAI 兼容；**模型 chips** 取该密钥已授权模型，联动片段与导入参数，并写明「未授权模型会被网关直接拒绝、不会静默降级」。
+
+### 验证
+
+`CcSwitchImport.spec` 9 例（状态机 / 冷却重发 / 复制 / 无密钥禁用 / 双目标深链）+ `ccswitch.spec` 15 例；e2e 42/42；四态截图核对（Claude 默认 / Codex 手动配置 / Codex 导入 / 反馈卡）。文档事实修正：`product-requirements` / `proxy-and-cc-switch` / `ui-specification` 三处「不做一键导入 / 不提供 Deeplink」的过时声明改为深链预填现状。
+
+### 教训
+
+**"操作成功了但用户不知道"和"操作失败了"在体验上等价。** 单向协议下拿不到回执，但**反馈的设计空间不是零**：把"我发出去之后会发生什么"讲清楚（三步指引 + 两条兜底），比一个沉默的按钮更接近"导入成功"这四个字。
+
+## 2026-09-18 17 个端点的请求体在 OpenAPI 里共用同一份错 schema——同名嵌套 DTO 被 springdoc 合并（#838）
+
+一份基线里的怪事：`POST /admin/projects`、`/admin/grants`、`/admin/subscriptions` 等 17 个端点，请求体指向**同一个** `CreateRequest` 组件——字段是若干个端点形状的**并集**。真因：springdoc 按**简单类名**命名 schema，各控制器里那些恰好同名的嵌套 `record`（15 个 `CreateRequest`、8 个 `UpdateRequest`…）被合并成一份。
+
+### 改法
+
+- **31 处同名嵌套 DTO 全部唯一化**（纯标识符替换、零语义变更）：`ProjectCreateRequest` / `GrantCreateRequest` / `SubscriptionCreateRequest` / …；
+- 源码全量重名扫描又抓出 **4 处 issue 正文没列到的漏网**：`ScopeRequest`×3（其中 `SkillService` 那份形状 `{scopeType,scopeId}` 把两个 PATCH scope 端点 `{capabilities}` 的文档整个带偏）、`MemberRequest`×2、`HealthConfigRequest`×2、`RequestedPolicy`×2；
+- **基线与前端类型重生成**：三链抽查各归其形；`generated.ts` 里 `components['schemas']['CreateRequest']` 彻底消失；手写别名 `UpsertMcpRouteRuleRequest` 的旧指向被 `vue-tsc` 首跑抓到并修正。
+
+### 守门（先证明会红）
+
+`deploy/openapi/check-openapi-schema-names.py` 两条检查：
+
+1. **源码重名扫描**：control-plane main 下同名 `record` 出现在 ≥2 个文件即红——但只报**能外溢到 schema** 的名字（控制器内声明，或已出现在 spec 组件里）；服务内部同名（`HealthState` / `Parsed` 等 4 例）不打扰，避免"没牙的检查被无视"的反向训练；
+2. **spec 裸名黑名单**（兜底）：`CreateRequest` / `ScopeRequest` / … 不得出现。
+
+挂在 CI 的 backend job 里（断崖 diff 之后）。
+
+**红证明做了两道**：① 修前对源码跑扫描**实红**——具名列出 `HealthConfigRequest` / `MemberRequest` / `RequestedPolicy` / `ScopeRequest` 与裸名两项（exit 1）；② 把 `ProjectCreateRequest` 临时改回裸名、重生成 spec → 守卫**实红指名 `CreateRequest`**；还原后 171 个组件全绿。
+
+### 验证
+
+受影响 IT 两批 31/31（AdminOrg 14、AdminMcpService 8、AdminApiKeyScope 4、AdminMcpResilience 6、ConsumerScope 2、Skill 5）；`OpenApiSpecIntegrationTest` 重跑绿；`vue-tsc` 三工程过；spotless 收敛模拟两轮 5 个文件因换名超长被换行修正（保留）。
+
+### 教训
+
+**一个"看起来没问题"的契约缺陷，往往因为两侧都不读对方。** 前端从 `generated.ts` 取类型（有自己的形状），后端只保证 `@RequestBody` 能反序列化（多出来的字段被忽略），而**规格基线里那份并集 schema 谁也不看**——它错了多久，取决于下一个读规格的人什么时候出现。守门的价值在这里：**把"只有读规格的人才会发现"变成"CI 每次都会发现"**。
+
+## 2026-09-18 全新部署时网关必然抢跑迁移——编排等待 + 「schema 未就绪」分类（#846）
+
+**先证明会红**：全新 `down -v` + `up`，网关与控制面同毫秒启动——13:33:43.211 网关首刷报 `ERROR … relation "virtual_keys" does not exist`，而迁移 13:33:44.906 才跑完（**晚 1.7 秒**）。`depends_on` 只等了 postgres healthy，没有人在等 Flyway。
+
+### 改法（正门 + 腰带）
+
+- **正门（编排）**：`gateway.depends_on` 增 `control-plane: condition: service_healthy`——迁移完成的信号，且无环（cp 不依赖 gateway）。全新部署顺序变为 postgres healthy → cp healthy → gateway 启动；
+- **腰带（分类 + 快速重试）**：快照刷新失败时沿 cause 链找 PostgreSQL `42P01`（`undefined_table`）→ 判为「schema 尚未就绪」：**WARN** 指明真实原因（migrations still running）、说明保持旧快照与重试时间；新增 `miqrokey.gateway.route-snapshot.retry-check-interval`（默认 2s）滴答，按 **2→4→8→16→30s 退避**重试，恢复时打 INFO「recovered after N deferred attempt(s)」。其它 SQL/连接错误保持原 ERROR 路径、**不**调度快重试（单测钉住）。
+
+文档：configuration-reference §5.1 增旋钮行，写明「编排治全新部署、旋钮兜旁路」的分工。
+
+### 验证（三场景真机实测）
+
+- **绿（顺序编排）**：启动序 `postgres Healthy → control-plane Healthy → gateway Starting`；网关日志 `does not exist|refresh failed` **计数 0**；网关在迁移完成后 4.3s 才启动；
+- **绿（强制抢跑）**：用 override 摘掉编排等待、人为复现竞态 → `WARN … deferred: database schema not initialised yet (… attempt 1); retrying in ~2s` → **4 秒后** `INFO … recovered after 1 deferred attempt(s)`；全程 **ERROR=0**；数据面 `/v1/models` 401（快照已载入，走正常鉴权而非 503）；
+- **滚动升级不受影响**：库已在时 `restart gateway`，`ERROR|deferred` 计数 0；
+- 单测新增 5 例（route-snapshot 模块 10/10）：42P01 分类（含多层包装）/ 退避表 / 延迟-恢复-复位 / 连续失败退避递增 / 真错误不调度。
+
+### 教训
+
+**"偶尔报一次错然后自己好了"是最容易被放过的缺陷形态**——它不影响使用（旧快照还在），只是每次全新部署都在日志里留一行 ERROR。而这行 ERROR 会训练运维忽略它；等到它真的意味着别的东西时，没人会再看。修法上「**正门 + 腰带**」的分工要写进文档：编排治的是全新部署这一种情况，旋钮兜的是"网关指向了未迁移的库"这类旁路——两者不是冗余，是不同失败面。
+
+## 2026-09-18 缓存键身份加固：生成参数与顶层 system 进键（#718 外评引出）
+
+一份外部评审（基线是 **main**，落后 develop 439 个提交）的头号主张——"stream 被剥出 key、SSE 与 JSON 同键重放"——**在 develop 上不成立**（#444 起 `stream=1/0` 就是独立维度且有专测）；但它带出的两条**是真缺口**：
+
+1. **生成参数不在键身份里**：同一段对话在 `temperature` / `top_p` / `max_tokens` 等参数不同时命中同一条缓存——"同问不同参"会拿到别人的参数下的答案；
+2. **Anthropic 顶层 `system` 与 Responses 的 `instructions` 不在语义 scope 里**：系统提示词不同、键相同。
+
+### 改法
+
+- `CacheKeyFactory.compute()` 新增 `gen` 维度：对 `GENERATION_FIELDS`（temperature / top_p / top_k / max_tokens / max_output_tokens / n / seed / stop / penalties / logit_bias / response_format / reasoning_effort / thinking / verbosity）做**固定序确定性指纹**；字段缺省时键形态与旧版一致（不改变既有请求的分键）；
+- `semanticScope` 的 system 提取补入 Anthropic 顶层 `system`（字符串与 content parts 数组）与 OpenAI Responses `instructions`；
+- 类 javadoc 同步键构成。
+
+### 验证与影响
+
+`CacheKeyFactoryTest` 20/20（新增 IdentityHardening 5 例）；gateway-app 全量 **376/376**（含 #444 stream 回归）。行为影响：既有缓存条目在 TTL（默认 300s）内自然过期；命中率在"同问不同参"场景**更严格**——这是修复意图。
+
+### 教训
+
+**评审的基线错、结论也可能对。** 这份外评的排头主张在 develop 上早已不成立（#444 就修过），但顺着它的推理去核对"键身份到底由什么构成"时，翻出了两条更深的缺口——**"这条主张不成立"不等于"这个方向没问题"**；对着错误的主张做一次完整核对，比对着正确的主张点个头更有价值。
+## 2026-09-18 请求侧可选改造 ADR 姊妹篇（#769 / #770，均 Proposed）
+
+**背景**：两个 issue 提出请求侧改体能力——① `cache_control` 断点自动注入（对齐 cc-switch `cache_injector.rs`）；② 错误驱动的整流重试（thinking 签名/预算，对齐 `thinking_rectifier.rs`）。两者都与 `CLAUDE.md:55`「透明代理不得重排、标准化或补写推理请求 JSON」正面冲突，issue 自身要求 ADR 先行、默认关、opt-in。**本轮只写决策文档，无产品代码改动。**
+
+**产出（状态均为 `Proposed`，未替所有者拍板）**：
+
+- `docs/decisions/0023-request-side-cache-breakpoint-injection.md`（#769）：逐条回答 issue 的 Q1–Q7；红线冲突按「补写」的**字面违例**处理，给出 E1–E7 例外边界与三处必改文本（`CLAUDE.md:55`、`testing-and-acceptance.md:52`、`architecture.md:166-169`）；选项 A–D（推荐 **B：Key 级 opt-in、默认关**）；字节策略给出 B1 定点插入 / B2 重序列化两档；明确「逐请求审计（`admin_audit_events`）」在网关侧**没有既有通道**（该表的写入者在控制面 `AuditServiceImpl.java:86-137`），逐请求事实改走网关**已有**的 `request_usage_records` 写入通道（`gateway-app/pom.xml:37` → `GatewayFeatureConfig.java:43` → `QueueConfig.java:62` → `PostgresUsageEventWriter.java:181,230`），即「指标 + 生命周期列 + 响应头」举证。
+- `docs/decisions/0024-request-side-rectification-retry.md`（#770）：整流重试属「**删除/改写**」，指出现有红线枚举词（重排/标准化/补写/注入）**未字面覆盖删除**，需把红线改写成可判定断言；给出 E1–E9 边界；重试预算给出 R1（共享既有 ≤1，**推荐**）/ R2（独立预算，需二次修订红线）供拍板；澄清 **#544（HTTP 200 且 content 为空）不在错误驱动整流射程内**；选项 A / B（只检测不重试的观察档）/ C（推荐目标档）/ D / E（预算类整流，二期）。
+- `docs/decisions/README.md`：追加两行索引。
+
+**编号裁定**：任务书预分配 0023 / 0024。`git ls-tree -r --name-only origin/develop -- docs/decisions` 核对 origin/develop 现最大编号为 **0020**，0021–0024 均未被占用，**未顺延**。
+
+**现状证据**：两份 ADR 中每处「现状」断言均带 `file:line`，坐标取自 `ProxyController` / `CacheKeyFactory` / `ContextLimitGuard` / `CacheEligibility` / `SseReplayEngine` / `LlmCircuitBreakerRegistry` / `V4`·`V8` 迁移 / `RequestStatus.java` / `VirtualKey.java` / `QueueConfig.java` / `PostgresUsageEventWriter.java` / `architecture.md` / `testing-and-acceptance.md` / `provider-adapter-contract.md` / `feature-backlog.md` / `live-integration-guide.md`，写入时以 `grep -n` 或行区间读取取得；外部实现（cc-switch、AWS Bedrock）一律标注为 **issue 转述、本仓未复核**，不作论据。
+
+**独立复核与修正（第一轮）**：两份 ADR 在 push 前经独立复核，结论为 BLOCK；下列问题已逐条修正，修订后无未决分歧：
+
+- **失效的现状断言（3 处）**：① 「网关进程没有数据库/审计写入通道」不成立——`gateway-app/pom.xml:37` 以 compile scope 依赖 `queue-spi`，`GatewayFeatureConfig.java:43` 装载队列，`QueueConfig.java:62` 构造 `PostgresUsageEventWriter`（`INSERT INTO request_usage_records`，`:181`、`:230`），另有 `PostgresMcpAccessLogWriter.java:44`；正确的表述是「**已有用量/生命周期写入通道、没有 `admin_audit_events` 通道**」，两份 ADR 的 §1.2 与相关小节已按此拆分改写。② 「网关完全不读上游错误体」不成立——`ProxyController.java:548` 对**所有**上游响应（含错误）逐块缓冲，只是只用于 `:566` 用量解析 / `:578` 保留策略 / `:850` 取上游请求 id，**没有任何错误内容分类**；表述已改为「缓冲但不分类」。③ 迁移列号误引 `V8:64-65` / `V8:44-48`，已改为 `V8:58-59`（cache token 两列）与 `V8:43-47`（`request_status` 及其 CHECK 枚举）。
+- **改动面低报**：`request_usage_records` 的写入是显式列名写法且同一语句出现两处，新增列须同步改两处列清单、参数映射、域事件与发射点；两份 ADR 的「后果」段已如实展开，不再写成「一次性追加迁移」。
+- **待议点缺项**：开关粒度原先只写到 Key 级，未覆盖 ADR-0018 的 key×project 多绑定；两份 ADR 的开关粒度小节与未决项清单已补「是否允许项目级覆盖」。
+- **口径措辞**：把「全部采纳」等结论性措辞改为「建议……（待所有者拍板）」，避免代所有者拍板。
+- **本节自身的修正**：编号核对命令补 `-r --name-only`；证据清单删去两份 ADR 实际未引用的 `application.yml`；「并逐条在工作区核对」改为可复现的取证方式描述。
+
+**独立复核与修正（第二、三轮）**：第一轮修订后复核结论为 APPROVE，同时提出 3 项**非阻断**项（N1–N3），已全部采纳：① `0023` 里项目级粒度的绑定行坐标由 `JdbcRouteSnapshotLoader.java:157,164` 改为 `JdbcRouteSnapshotLoader.loadBindings()` 的 `:171-194`（该方法直接查 `key_project_binding`，先前坐标落在 Key 装载段）；② `0024` 未决项 6 的括注补齐错误体的全部消费点（`ProxyController.java:566`、`:578`、`:850`，均不按内容分类）；③ 本条目的提交登记补齐第二笔起的 sha（见下）。
+
+**提交**：`73f9efe5`（ADR-0023）、`1a694784`（ADR-0024）、`24679cc4`（`docs/decisions/README.md` 索引与本节）、`f49027dc`（`docs/progress.md` 行尾恢复）、`215943af`（依第一轮复核修正两份 ADR 的失效断言与引用坐标）、以及本次提交（依第二、三轮复核修正 N1–N3；sha 见 `git log --oneline`）。
+**交付回读**：分支 `docs/adr-request-side-transforms-769-770` 已推送，远端 sha = 本地 HEAD；PR https://github.com/sijie-Z/miqro-gate/pull/782 （base `develop`，状态 OPEN，diff 仅 4 个文档文件、纯新增无删除）；issue 评论 https://github.com/sijie-Z/miqro-gate/issues/769#issuecomment-5724478199 与 https://github.com/sijie-Z/miqro-gate/issues/770#issuecomment-5724478426 ；两个 issue 均保持 **OPEN**，PR 正文不写 `Closes`。
+
+**行尾修正**：本条目追加过程中曾多次把文件内 122 处既有 LF 行尾归一化为 CRLF、产生纯空白 diff；每次均已按 `origin/develop` 原始字节恢复（对 merge-base 的 `git diff --numstat` 为纯新增），现有内容为净新增。
 ## 2026-09-18 ADR-0021 草案：同产品凭证回退 ×「每笔唯一归属」的兼容设计（#717）
 
 **性质**：**文档线，不含任何产品代码**；ADR 状态 **Proposed**（决策权在 owner；#717 明示「不做也是有效产出」，故 §3 保留「维持现状」为并列选项）。交付：新增 `docs/decisions/0021-same-product-credential-failover.md` + `docs/decisions/README.md` 索引行。
@@ -5057,3 +5256,186 @@ function shareOf(group) {
 **"这一页已经处理过了"是假的——被处理的是某个具体位置，不是页面的某个能力。**
 合计行会标，不等于分组行会标；记录列会标，不等于统计卡会标。
 一个页面里有几处显示同一个概念，就有几处需要被单独检查。
+
+## 2026-09-19 缓存收益页「配置概览」tab——按密钥看缓存表现，零新端点（#863 续）
+
+对位腾讯 AI 网关「缓存配置」的视图面。缓存收益页新增页内 tab「统计 | 配置概览」（窗口与刷新共用，导出只在统计 tab）。
+
+配置概览 = **按虚拟密钥的缓存表**：密钥 / 总请求 / 缓存命中 / 命中率 / 上游实付 / 缓存节省（总请求降序、数值列可排序）。数据取**既有**的 `GET /admin/usage/summary?groupBy=VIRTUAL_KEY`——分组白名单早已支持这个维度，**一个后端字段都没加**。
+
+空态带开启指引（「我的密钥」里的缓存开关 + `X-MiqroKey-Cacheable: 1`）与直达链接；每密钥聚合失败只让本 tab 报错，统计 tab 不受影响（与列表元数据批次的降级口径一致）。
+
+**验证**：typecheck rc=0 / vitest 451/451（`NextRoiView.spec` 新增 4 例）/ build / e2e 59/59（summary mock 改为按 `groupBy` 分流的 dispatcher，`/app/admin-usage` 既有基线不破）。
+
+**已知缺口（如实记录）**：「开关状态」列暂缺——管理员侧没有"列出全部 Key 且含 cachePolicy"的端点（核过 `/me/virtual-keys` 与 open-admin API 都不含此形态），如需补列须单开一个小后端项；当前以空态指引替代。
+
+### 教训
+
+**"这个维度早就有"值得先查一次再动手。** 这张表原本预估要一个新聚合端点，实际是复用既有分组白名单——**加字段之前先问一遍"它是不是已经在返回里了"**，比事后砍掉一个多余的端点便宜。
+
+## 2026-09-19 使用手册站内化：`/app/help` 离线手册（#872）
+
+手册五件套（#840）是仓库里的 markdown——用户要读它得离开控制台。新路由 `/app/help` 把它变成**站内、离线可用**的页面：左侧目录 6 篇 + 本页 h2/h3 目录，右侧正文；侧栏新增常驻「帮助」，用户菜单的「使用手册」改为站内跳转。
+
+实现要点：`docs/user-guide/*.md` 以 `import.meta.glob(..., { query: '?raw' })` 在**构建期内联**（离线可用），「在 GitHub 打开」保留为便捷出口；链接改写（`lib/handbook-links.ts`）把相对链接按 `docs/` 树解析成 GitHub blob URL、hash 链接走页内滚动——含 `../client-onboarding.md` 这类**出目录**的相对路径。新增依赖 **marked**（MIT，仅本页 chunk 运行时）。
+
+**验证**：vitest 454/454（handbook-links 4 例 + NextHelpView 3 例，四个 shell 测试的导航夹具补 `help` 路由）；typecheck rc=0 / build rc=0；e2e 59/59（内置渲染 + 切篇 + 相对链接改写断言）。
+
+**维护语义（要写进发布检查单）**：手册随文档更新需**重新构建 portal**；若未来手册引入外部来源内容，需给 marked 加 sanitize 层（已登记在 issue）。
+
+**收口时的一处更正**：PR #874 的正文写「Goal: #869」，但 #869 是另一条（UiDrawer `aria-modal` 的缺陷跟踪号）；手册站内化的 issue 是 **#872**。以 #872 为准。
+
+### 教训
+
+**"文档在哪"是文档可用性的一部分。** 五件套交付时入口放在用户菜单（一次点击就离开产品），站内化之后它才真正成为产品的一部分——**离线可用**还顺带解决了一个真实场景：客户内网部署里 `github.com` 根本打不开。
+
+## 2026-09-19 演示站 portal 刷新至 develop@e92dc4a5——站内手册与配置概览上线
+
+> **同日更正**：本轮上线时 `/app/help` 实际渲染为空（构建上下文不含 `docs/`）——见本日更晚的条目「站内手册首发上线为空页——「构建期读取的东西」没进构建上下文（#899）」，标题里的"上线"以那条为准。
+
+应设计线请求做的 portal-only 重建（`deploy/deploy.sh --services portal`，四条断言全过：镜像身份 / 证书进容器 / `.env` 逐变量 / 功能冒烟 `POST /api/v1/auth/login → 400`）。
+
+- 镜像：`miqrokey-portal:local` = `sha256:906a35a4…`；
+- 产物：`index-DibwGIj5.js`；站内手册 chunk `NextHelpView-CM1xENhx.js` 在位（本轮新增面）；
+- 本轮带上 #868（配置概览 tab）与 #874（站内手册）及其它前端增量；无新 Flyway 迁移；
+- **gateway 未重建**：#860（缓存键加固）要等下一次 gateway 重建才会上线——演示栈当前 gateway 镜像是 `18085632` 那一轮的产物，portal 与 gateway 现在处于两个提交点。
+
+### 教训
+
+**"刷新了 portal"要说清它带上了什么、没带上什么。** 三镜像里只动一个时，另外两个的版本就成了**隐含状态**——`deploy.log` 里的 `services=` 与镜像 ID 是事后唯一能回答"当时跑的是哪一份"的东西（这正是 #793 把流水写进日志的原因）。
+
+## 2026-09-19 站内手册首发上线为空页——「构建期读取的东西」没进构建上下文（#899）
+
+上一条「演示站 portal 刷新至 e92dc4a5」里写着站内手册上线——**那句话在当时是错的**：`/app/help` 线上渲染为空，是设计线的线上复查抓到的（我的四条断言全过，因为它们验的是栈、不是功能）。
+
+### 真因
+
+`deploy/docker/portal.Dockerfile` 的构建上下文是**仓库根**，而 `.dockerignore` **排除了 `docs/`**。站内化那版（#874）用 `import.meta.glob('docs/user-guide/*.md', { query: '?raw' })` 在**构建期内联**——容器里没有 `docs/`，于是内联集合为空、页面白页。本地 `npm run dev` / `build` 因为磁盘上就有 `docs/`，一路看不出来；CI 的前端 job 同理（它也在完整检出上跑）。
+
+### 改法（#899，PR #900）
+
+- 手册**内置为 frontend 的 vendored 副本** `frontend/src/content/handbook/`（`frontend/scripts/sync-handbook.mjs` 从 `docs/user-guide/` 同步）；
+- **防漂移单测**：副本与 `docs/user-guide/` 逐字一致，不一致即红（同步靠脚本，守卫靠测试）；
+- 页面加**空态兜底**：内联集合为空时给出可行动提示，而不是白屏。
+
+### 复刷与这次补上的那一层验证
+
+portal-only 重建至 `eedfb0f9`：镜像 `sha256:69a36b82…`、bundle `index-DK1l9PdR.js`、help chunk `NextHelpView-CI28CcTQ.js`。四条断言照旧全过——但这次**额外加了一条功能级冒烟**：直接从线上拉 chunk 断言内容非空（200 / 76,585 字节；grep「快速上手」×2、「管理员准备」×1 命中），上一轮缺的正是这一条。
+
+### 教训
+
+**"本地能用"与"镜像里能用"的分界线是构建上下文，不是代码。** 任何**构建期读取**的东西（`docs/`、前端根之外的资源、生成的产物）都要先问一句 `.dockerignore` 放不放行——而这类缺陷在**开发机与 CI 上都不复现**，因为两处都在完整检出里构建。与之配套的是冒烟的分层：**断言镜像身份与登录 400 证明不了"新功能有内容"**，带新功能的批次要加一条**打在该功能上**的断言（拉它的 chunk/路由，断言内容存在）。两条都是同一族的：**验的是栈，就别声称验了功能。**
+
+## 2026-09-19 管理端用量报表：按组成本表补上「未定价」（#876）
+
+### 问题
+
+真机上按「渲染了 `¥`」逐处核对时读到的：**同一屏、同一次查询，上下两种口径。**
+
+| 位置 | 改动前 | 标记 |
+|---|---|---|
+| 顶部汇总卡 · 上游实付 | `¥0.0000` | ✅ `未定价` |
+| 维度分解表 · `E2E Chain` 行 · 成本 ¥ | `¥0.0000` | ❌ |
+| 供应商统计表 · `阿里云百炼 Coding Plan` 行 | `¥0.0000` | ❌ |
+| 模型统计表 · `mock-chat` 行 | `¥0.0000` | ❌ |
+
+三个 tab **共用同一张表**（表头随 tab 换维度：项目 / 供应商产品 / 模型），所以一个漏点
+在三个入口上各露一次。API 早就发了每组的 `pricingStatus` / `unpriced`
+（OpenAPI `components.schemas.GroupSummary` 可查），是 `BreakdownRow` 只取了 `cost.upstreamPaid`
+把它们丢掉了——**信号存在、页面没接**。
+
+### 改法
+
+- `BreakdownRow` 增 `costCaveat: string`，在 `breakdownRows` 里由 `costGapNote(g)` 预算好
+- 模板 `#cost` 单元格在非空时渲染 `未定价` chip（`data-testid="breakdown-cost-unpriced"`）
+- 用 `string` + `''` 表示"无话可说"：`UiTooltip.text` 是必填 `string`，而模板对函数调用结果
+  不做类型收窄（#877 踩过同一个坑），预算进行数据就绕开了这个限制
+
+### 验证
+
+- **先证明会红**：只回退 `NextAdminUsageView.vue` → 两条用例失败；其中遍历三个 tab 的那条
+  报的是 `tab breakdown lost the marker: expected false to be true`（失败信息点名是哪个入口）
+- lint（`--max-warnings 0`）/ typecheck / **463 tests** / build / **`gen:types` 幂等** —— 全 PASS
+- Playwright **59/59**
+- 真机复验：维度分解 / 供应商统计 / 模型统计 三个 tab 的行成本列均出现 `未定价`
+
+### 教训
+
+**共用一张表不等于共用一个入口。** 这个漏点由三个 tab 各自呈现给用户，但修复只需要一处——
+所以"一个 tab 上看着没问题"完全不能推出另外两个也没问题，反之亦然。
+统计口径的一致性要按**用户能看到的入口数**算，不是按代码里的实现数算。
+
+## 2026-09-19 缓存收益页「配置概览」tab：按密钥的两列补上「未定价」与「下界」（#878）
+
+### 问题
+
+缓存收益页新增的「配置概览」tab（按密钥的缓存表现）里，每行的「上游实付 / 缓存节省」两列
+**无条件打印金额**：
+
+```ts
+interface KeyRow { key; label; served; hits; hitRatePct; paidCost; savedCost }   // 丢掉了 pricingStatus / unpriced
+```
+
+数据源是按密钥分组的用量汇总（`UsageGroup`），每行**本来就有** `pricingStatus` 与 `unpriced`。
+于是某个密钥的命中在发生时没有生效价目时，`缓存节省` 显示 `¥0.0000`——
+读作"这个密钥的缓存没省下钱"，而真相是"算不出来"。
+
+**这条的特别之处：它是在 #863 的修复进行中，由另一次合并引入的。**
+#863 的正文写着"否则下一个显示节省额的页面还会漏"——这是那句话的实证，
+而且是**同一页面上**的第三个漏点（卡片已由 #863 修好，密钥表漏了）。
+
+### 改法
+
+- `KeyRow` 增 `paidCaveat` / `savedCaveat`，在 `keyTableRows` 里由 `costGapNote(g)` 与
+  `savingsBoundNote(g)` 预算好——**两个信号各自一个字段**，因为它们断言不同的事
+  （"金额不是总额" vs "节省额是下界"），且 API 刻意让它们独立
+- 两列各自渲染标记：`上游实付` → `未定价`，`缓存节省` → `下界`
+  （复用既有 `.next-roi__caveat`，它已带 `margin-left`）
+- 仍用 `string` + `''` 表示"无话可说"：`UiTooltip.text` 必填 `string`，模板不对
+  函数调用结果做类型收窄（#877/#876 同一个坑，这里预算进行数据）
+
+### 验证
+
+- **先证明会红**：只回退 `NextRoiView.vue` → 两条用例失败（`expected false to be true`）
+- lint（`--max-warnings 0`）/ typecheck / **463 tests** / build / **`gen:types` 幂等** —— 全 PASS
+- Playwright **59/59**
+- 纯前端改动，无后端与契约变化
+
+### 教训
+
+**"改了那个页面"不等于"改了那个页面上的所有地方"。** #863 在缓存收益页上加了标记，
+而同一页的另一个 tab 仍然漏——因为它们是两个独立的渲染路径，共享的是数据，不是代码。
+修一个页面时要按**该页面上有几个地方显示这个概念**清点，而不是按"这个页面修过了"结案。
+
+## 2026-09-19 运行树与提交的漂移——「这台机器跑的定义出自哪个提交」现在每次部署都答一次（#917）
+
+### 问题
+
+`deploy.sh` 渲染的是**运行树**的 compose（`$LIVE_DIR/deploy/compose.prod.yaml`），而每次发布带来的仓库版本在构建树里。演示站两者已经不同，而**没有任何东西会说出来**——对齐时只能人工逐行 diff，才复原出这台机器实际在跑什么：
+
+| 漂移项 | 性质 |
+|---|---|
+| `shared_buffers=64MB` 硬编码 | 仓库已参数化（`${POSTGRES_SHARED_BUFFERS:-64MB}`），取值相同 |
+| 留痕消费端 / 响应缓存 / Kafka 出口写死 | 仓库是 `${VAR:-默认关}`；演示值本该在 `.env`（`.env` 里其实已有） |
+| redpanda 缺 `profiles: [kafka]` 与 healthcheck | 靠 `.env` 的 `COMPOSE_PROFILES=kafka` 激活，功能没丢 |
+| gateway `depends_on` 缺 `control-plane: service_healthy` | #846 的编排等待没进运行树 |
+| **`MIQROKEY_USAGE_PRICE_RECONCILE_ENABLED: "true"`** | **仓库根本没有这一行**——见下 |
+
+最后一项是要害：派生列调和（#777）的开关在 `application.yml` 里有、在配置参考里没有、在 compose 里**没接线**——`.env` 里设了也不生效。也就是说**「把运行树对齐到仓库版本」会悄悄关掉演示站的一个功能**；对齐之前必须先把这个洞补上。
+
+### 改法（#917 / PR #918）
+
+1. `compose.prod.yaml` 补 `MIQROKEY_USAGE_PRICE_RECONCILE_ENABLED: ${…:-false}`（站点取值走 `.env`）+ 配置参考收录该旋钮（含周期 15min / 首轮延迟 2min）；
+2. `deploy.sh` 新增 §9：比较构建树与运行树的 compose，不同即 **WARNING（只警告、不判死**——运维可能正在迁移，且部署本身已在上方验证过），并把 `compose_drift=yes|no` 记进 `deploy.log`；
+3. `.env.prod.example` 写明「站点取值一律进 `.env`」与开关清单；`deployment-and-operations §8.2` 写清运行树 compose 的归属规则与手改的代价。
+
+### 服务器侧对齐与两态实测
+
+- **红**（对齐前，用本分支树当 context 跑 `--verify-only`）：`WARNING: the live compose file differs from this commit's copy (drift)`，流水 `compose_drift=yes`；其余断言与冒烟照常绿——**漂移是警告，不是判死**；
+- **对齐**：备份（`compose.prod.yaml.bak-pre-align-20260919T090550Z` / `.env.bak-pre-align-…`）→ `.env` 补 `MIQROKEY_USAGE_PRICE_RECONCILE_ENABLED=true` → 以 tar 把构建树的 `deploy/` 同步进运行树（`--exclude` 保住 `secrets/`、`.env` 与历史 `.bak`）→ `cmp` 两份 compose **IDENTICAL**；
+- **渲染等价性**（对齐的真正判据）：对齐前后各渲染一次 `docker compose config`，`diff` 只有三处**预期增量**——gateway `depends_on` 增 #846 的等待、redpanda 增 `profiles` 与 healthcheck；其余逐字相同（**含调和开关的渲染值**：前为写死的 `true`，后为 `.env` 的 `true`）。因此**在跑容器一个都没动**（uptime 核对：gateway/cp 18h、portal 39min）；
+- **绿**（对齐后同一 context 再跑 `--verify-only`）：无 WARNING，`compose_drift=no`。
+
+### 教训
+
+**手改会赢一时，输在"下一次整树同步"**——而它真正的代价不是丢值，是**丢可复现性**：值一旦只活在运行树里，这台机器跑的定义就不再对应任何提交，事后只能考古。所以规则不是"别手改"，而是"**值要有家**"：`.env`（compose 用 `${VAR:-默认}` 透传）；**没有家就先给仓库补一行**——#777 的调和开关正是没有家的那一项，于是它只能以手改的形式存在。与之配套的是把不可见变成可见：漂移从此每次部署都会被说一次，并留在流水里。
