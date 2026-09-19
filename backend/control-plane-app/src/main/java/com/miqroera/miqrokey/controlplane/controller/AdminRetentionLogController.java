@@ -41,7 +41,7 @@ public class AdminRetentionLogController {
     public List<AdminRetentionLogView> listRetentionLogs(@RequestParam(required = false) UUID userId,
             @RequestParam(required = false) String direction, @RequestParam(required = false) String protocol,
             @RequestParam(required = false) String from, @RequestParam(required = false) String to,
-            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int size) {
         var admin = userContext.getUser();
         List<AdminRetentionLogView> views = retentionLogs.query(admin.tenantId(), userId, direction, protocol,
                 AdminAuditController.parseInstant(from, "from"), AdminAuditController.parseInstant(to, "to"), page,
