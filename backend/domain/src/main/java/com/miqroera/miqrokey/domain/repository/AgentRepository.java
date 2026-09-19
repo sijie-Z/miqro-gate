@@ -29,4 +29,12 @@ public interface AgentRepository {
 
     /** Status update with optimistic version bump; returns the stored row. */
     Agent updateStatus(UUID tenantId, UUID agentId, String status, long expectedVersion);
+
+    /**
+     * Name/description update with optimistic version bump; returns the stored row.
+     */
+    Agent update(UUID tenantId, UUID agentId, String name, String description, long expectedVersion);
+
+    /** Hard delete (#824). Returns whether a row was removed. */
+    boolean delete(UUID tenantId, UUID agentId);
 }

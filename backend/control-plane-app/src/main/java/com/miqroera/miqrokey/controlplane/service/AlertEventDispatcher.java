@@ -133,12 +133,23 @@ public class AlertEventDispatcher {
      */
     public void deliverEvent(UUID tenantId, UUID eventId, AlertRuleService.AlertRule rule, BigDecimal value,
             Instant occurredAt) {
+        deliverEvent(tenantId, eventId, rule, value, occurredAt, Map.of());
+    }
+
+    /**
+     * Same, with attribution: the details are merged into the webhook envelope
+     * (they must already be stored on the event's {@code payload_json} by the
+     * caller — {@code retryDue()} rebuilds the body from the stored payload, so
+     * details passed here but not stored would vanish on the first retry).
+     */
+    public void deliverEvent(UUID tenantId, UUID eventId, AlertRuleService.AlertRule rule, BigDecimal value,
+            Instant occurredAt, Map<String, Object> details) {
         WebhookEndpoint endpoint = endpointOf(rule);
         if (endpoint == null) {
             LOG.info("Alert rule {} fired (value {}) — no webhook endpoint configured", rule.name(), value);
             return;
         }
-        deliver(eventId, rule, endpoint, value, occurredAt, Map.of());
+        deliver(eventId, rule, endpoint, value, occurredAt, details);
     }
 
     private WebhookEndpoint endpointOf(AlertRuleService.AlertRule rule) {

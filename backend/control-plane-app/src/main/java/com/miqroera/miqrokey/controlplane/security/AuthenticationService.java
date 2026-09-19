@@ -258,6 +258,12 @@ public class AuthenticationService {
     @Transactional
     public BootstrapResult bootstrap(String bootstrapSecret, String username, String displayName, String requestId) {
         // Lock the tenant row to serialize bootstrap attempts
+        // #995 lock order: the audit chain lock comes before this row lock. Both this
+        // method and the audit write path touch the tenant row, and the audit path
+        // takes
+        // the chain lock first — so this transaction must too, or the two orders form a
+        // cycle PostgreSQL resolves by aborting one of us.
+        auditService.acquireChainLock();
         userRepository.lockTenantForBootstrap(SEED_TENANT_ID);
 
         // Now re-check under the lock
@@ -320,6 +326,12 @@ public class AuthenticationService {
             throw new ApiException(org.springframework.http.HttpStatus.BAD_REQUEST, "PASSWORD_INVALID", e.getMessage());
         }
 
+        // #995 lock order: the audit chain lock comes before this row lock. Both this
+        // method and the audit write path touch the tenant row, and the audit path
+        // takes
+        // the chain lock first — so this transaction must too, or the two orders form a
+        // cycle PostgreSQL resolves by aborting one of us.
+        auditService.acquireChainLock();
         userRepository.lockTenantForBootstrap(SEED_TENANT_ID);
         if (userRepository.findByTenantIdAndUsername(SEED_TENANT_ID, username).isPresent()) {
             throw new ApiException(org.springframework.http.HttpStatus.CONFLICT, "USERNAME_TAKEN", "用户名已存在。");

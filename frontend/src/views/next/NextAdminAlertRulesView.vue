@@ -42,6 +42,8 @@ const typeOptions = [
   { value: 'ADMIN_API_KEY_EXPIRING', label: '管理密钥 · 即将到期' },
   { value: 'CONSUMER_KEY_EXPIRING', label: '消费者密钥 · 即将到期' },
   { value: 'USAGE_QUEUE_SATURATION', label: '队列饱和' },
+  { value: 'UPSTREAM_RATE_LIMITED', label: '上游限流' },
+  { value: 'KEY_REQUEST_RATE', label: '单 Key 请求峰值' },
 ];
 
 const creating = ref(false);
@@ -70,6 +72,22 @@ const isQuotaType = computed(() => form.value.type === 'QUOTA_THRESHOLD');
 const isWatermarkType = computed(() => isBudgetType.value || isQuotaType.value);
 /** F07 (#245): the metric is a COUNT of lost usage events, not a ratio. */
 const isQueueSaturationType = computed(() => form.value.type === 'USAGE_QUEUE_SATURATION');
+/** Count-threshold metrics (#706): the threshold is a COUNT per hour, not a ratio. */
+const COUNT_METRIC_TYPES = ['USAGE_QUEUE_SATURATION', 'UPSTREAM_RATE_LIMITED', 'KEY_REQUEST_RATE'];
+const isCountMetricType = computed(() => COUNT_METRIC_TYPES.includes(form.value.type));
+/** Threshold semantics per metric — a bare number is ambiguous without it. */
+const thresholdHint = computed(() => {
+  switch (form.value.type) {
+    case 'USAGE_QUEUE_SATURATION':
+      return '网关用量队列写满时丢弃的事件条数（近 1 小时），非比例；网关侧零丢弃时不写任何数据。';
+    case 'UPSTREAM_RATE_LIMITED':
+      return '近 1 小时上游返回 429 的条数（计数，非比例）。只统计上游真的答了 429 的请求——网关自身因配额拒绝的请求不会触达上游，不计入。';
+    case 'KEY_REQUEST_RATE':
+      return '近 1 小时单把密钥的最高请求条数（取峰值那把）。事件附带该密钥的 id 与名称，便于直接定位。';
+    default:
+      return '';
+  }
+});
 /** Event-driven rule types (F03): fired by the workflow itself, no threshold. */
 const isApprovalType = computed(
   () =>
@@ -328,7 +346,7 @@ onMounted(() => {
                       ? '阈值（丢弃条数）'
                       : '阈值'
                 "
-                :placeholder="isQueueSaturationType ? '例如 1' : '例如 0.5'"
+                :placeholder="isCountMetricType ? '例如 1' : '例如 0.5'"
                 data-testid="rule-create-threshold"
               />
               <UiInput
@@ -339,11 +357,11 @@ onMounted(() => {
               />
             </div>
             <p
-              v-if="isQueueSaturationType"
+              v-if="thresholdHint"
               class="next-alert-rules__approval-hint"
-              data-testid="rule-saturation-hint"
+              data-testid="rule-threshold-hint"
             >
-              网关用量队列写满时丢弃的事件条数（近 1 小时），非比例；网关侧为零丢弃时不写任何数据。
+              {{ thresholdHint }}
             </p>
           </template>
           <p v-else class="next-alert-rules__approval-hint" data-testid="rule-approval-hint">

@@ -197,4 +197,51 @@ class AdminApiKeyAuthFilterTest {
         assertThat(response.getContentAsString()).contains("ADMIN_API_FORBIDDEN");
         verify(chain, never()).doFilter(any(), any());
     }
+
+    @Test
+    @DisplayName("every rejection carries the §2 requestId correlation token (PH16)")
+    void rejectionsCarryRequestId() throws Exception {
+        // 401 ADMIN_API_KEY_INVALID — no credential at all.
+        request.setRequestURI(OPEN_PATH);
+        request.addHeader("X-Request-Id", "ph16-open-401");
+        filter.doFilter(request, response, chain);
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString()).contains("ADMIN_API_KEY_INVALID")
+                .contains("\"requestId\":\"ph16-open-401\"");
+
+        // 403 ADMIN_API_SCOPE_DENIED — key outside its capability group.
+        when(repository.findActiveByDigest(any()))
+                .thenReturn(Optional.of(new AdminApiKey(keyId, tenant, "usage-only", new byte[32], "mqk_admin_", null,
+                        null, null, Instant.now(), List.of(AdminApiKeyCapabilities.USAGE_READ))));
+        MockHttpServletRequest scopeRequest = new MockHttpServletRequest();
+        scopeRequest.setRequestURI("/api/v1/admin-api/alert-rules");
+        scopeRequest.addHeader("Authorization", "Bearer mqk_admin_usage-only-token");
+        scopeRequest.addHeader("X-Request-Id", "ph16-open-scope");
+        MockHttpServletResponse scopeResponse = new MockHttpServletResponse();
+        filter.doFilter(scopeRequest, scopeResponse, chain);
+        assertThat(scopeResponse.getStatus()).isEqualTo(403);
+        assertThat(scopeResponse.getContentAsString()).contains("ADMIN_API_SCOPE_DENIED")
+                .contains("\"requestId\":\"ph16-open-scope\"");
+
+        // 403 ADMIN_API_FORBIDDEN — portal session that is not SYSTEM_ADMIN.
+        MockHttpServletRequest sessionRequest = new MockHttpServletRequest();
+        sessionRequest.setRequestURI(OPEN_PATH);
+        sessionRequest.addHeader("X-Request-Id", "ph16-open-403");
+        MockHttpServletResponse sessionResponse = new MockHttpServletResponse();
+        userContext.setUser(user(tenant, UserRole.USER));
+        filter.doFilter(sessionRequest, sessionResponse, chain);
+        assertThat(sessionResponse.getStatus()).isEqualTo(403);
+        assertThat(sessionResponse.getContentAsString()).contains("ADMIN_API_FORBIDDEN")
+                .contains("\"requestId\":\"ph16-open-403\"");
+    }
+
+    @Test
+    @DisplayName("rejections are UTF-8 encoded so the Chinese detail is not mangled (#630)")
+    void rejectionsAreUtf8Encoded() throws Exception {
+        request.setRequestURI(OPEN_PATH);
+        filter.doFilter(request, response, chain);
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getCharacterEncoding()).isEqualToIgnoringCase("UTF-8");
+        assertThat(response.getContentAsString()).contains("管理密钥缺失或无效");
+    }
 }

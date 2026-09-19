@@ -26,7 +26,9 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -196,7 +198,83 @@ class AdminAgentApiIntegrationTest {
                 .andExpect(jsonPath("$.totals.tokens.output").value(50));
     }
 
+    @Test
+    @DisplayName("re-enabling refuses while the bound credential is not ACTIVE (#824)")
+    void agentEnableRequiresActiveCredential() throws Exception {
+        UUID credentialId = seedCredential("Reenable Cred", "ACTIVE");
+        String agentId = createAgent("reenable", credentialId);
+
+        mockMvc.perform(post("/api/v1/admin/agents/" + agentId + "/disable").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+
+        // Disabling the agent released the credential (#714), so the credential may be
+        // disabled too — and re-enabling the agent must refuse rather than point the
+        // agent at an unroutable egress (ADR-0025 §2-Q2). Note this is NOT the mirror
+        // of disable.
+        jdbc.update("UPDATE upstream_credentials SET status = 'DISABLED' WHERE id = :id",
+                new MapSqlParameterSource("id", credentialId));
+        mockMvc.perform(post("/api/v1/admin/agents/" + agentId + "/enable").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CREDENTIAL_NOT_ACTIVE"));
+
+        // Fix the credential, then the same call succeeds — and repeating it conflicts.
+        jdbc.update("UPDATE upstream_credentials SET status = 'ACTIVE' WHERE id = :id",
+                new MapSqlParameterSource("id", credentialId));
+        mockMvc.perform(post("/api/v1/admin/agents/" + agentId + "/enable").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+        mockMvc.perform(post("/api/v1/admin/agents/" + agentId + "/enable").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("AGENT_ALREADY_ENABLED"));
+    }
+
+    @Test
+    @DisplayName("rename is version-guarded; delete frees both the name and the credential slot (#824)")
+    void agentRenameAndDelete() throws Exception {
+        UUID credentialId = seedCredential("Lifecycle Cred", "ACTIVE");
+        UUID otherCredentialId = seedCredential("Other Cred", "ACTIVE");
+        String agentId = createAgent("lifecycle", credentialId);
+        createAgent("other", otherCredentialId);
+
+        // Rename with the version the client last read.
+        mockMvc.perform(patch("/api/v1/admin/agents/" + agentId).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"lifecycle-2\",\"description\":\"renamed\",\"version\":0}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("lifecycle-2"));
+
+        // A stale version loses the optimistic lock instead of silently overwriting.
+        mockMvc.perform(patch("/api/v1/admin/agents/" + agentId).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"lifecycle-3\",\"version\":0}")).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CONCURRENT_MODIFICATION"));
+
+        // Renaming onto another agent's name is a conflict, not a silent overwrite.
+        mockMvc.perform(patch("/api/v1/admin/agents/" + agentId).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"other\",\"version\":1}")).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("AGENT_NAME_TAKEN"));
+
+        // Hard delete: the row goes, and both slots it occupied come back.
+        mockMvc.perform(delete("/api/v1/admin/agents/" + agentId).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/v1/admin/agents/" + agentId).cookie(sessionCookie)).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("AGENT_NOT_FOUND"));
+        mockMvc.perform(post("/api/v1/admin/agents").cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"lifecycle-2\",\"credentialId\":\"" + credentialId + "\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("lifecycle-2"));
+    }
+
     // ------------------------------------------------------------------
+
+    private String createAgent(String name, UUID credentialId) throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/agents").cookie(sessionCookie, csrfCookie)
+                        .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"" + name + "\",\"credentialId\":\"" + credentialId + "\"}"))
+                .andExpect(status().isOk()).andReturn();
+        return objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
+    }
 
     private UUID seedCredential(String name, String status) {
         UUID productId = jdbc.queryForObject("SELECT id FROM provider_products ORDER BY display_name LIMIT 1",
