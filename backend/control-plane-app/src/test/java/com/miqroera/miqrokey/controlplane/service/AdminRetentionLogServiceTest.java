@@ -6,10 +6,10 @@ import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -85,7 +85,7 @@ class AdminRetentionLogServiceTest {
         AdminRetentionLogService service = new AdminRetentionLogService(jdbcReturning(List.of(rawRow(plain, "演示用户"))),
                 provider(new FakeCrypto()));
 
-        List<AdminRetentionLogView> views = service.query(TENANT, null, null, null, null, null, 0, 20);
+        List<AdminRetentionLogView> views = service.query(TENANT, null, null, null, null, null, 1, 20);
 
         assertThat(views).hasSize(1);
         AdminRetentionLogView view = views.get(0);
@@ -108,7 +108,7 @@ class AdminRetentionLogServiceTest {
         AdminRetentionLogService service = new AdminRetentionLogService(
                 jdbcReturning(List.of(rawRow("x".getBytes(StandardCharsets.UTF_8), null))), provider(throwing));
 
-        List<AdminRetentionLogView> views = service.query(TENANT, null, null, null, null, null, 0, 20);
+        List<AdminRetentionLogView> views = service.query(TENANT, null, null, null, null, null, 1, 20);
 
         assertThat(views).hasSize(1);
         assertThat(views.get(0).text()).isNull();
@@ -117,13 +117,53 @@ class AdminRetentionLogServiceTest {
     }
 
     @Test
-    @DisplayName("an invalid direction filter is rejected before touching the database")
+    @DisplayName("page is 1-based like every other paginated list endpoint: page=1 binds offset 0")
+    void pageIsOneBasedLikeSiblingEndpoints() {
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        when(jdbc.query(anyString(), any(SqlParameterSource.class),
+                org.mockito.ArgumentMatchers.<RowMapper<AdminRetentionLogService.RawRow>>any())).thenReturn(List.of());
+        AdminRetentionLogService service = new AdminRetentionLogService(jdbc, provider(new FakeCrypto()));
+
+        // Contract (docs/api-contract.md:266, :567) fixes `page` as 默认 1, ≥1; the
+        // sibling
+        // usage-records endpoints pin the same meaning
+        // (UsageStatsServiceTest.recordsScalesOffsetWithPage:
+        // page=3/size=25 -> offset 50, and page=0 -> 400 PAGE_INVALID).
+        service.query(TENANT, null, null, null, null, null, 1, 20);
+
+        org.mockito.ArgumentCaptor<SqlParameterSource> params = org.mockito.ArgumentCaptor
+                .forClass(SqlParameterSource.class);
+        org.mockito.Mockito.verify(jdbc).query(anyString(), params.capture(),
+                org.mockito.ArgumentMatchers.<RowMapper<AdminRetentionLogService.RawRow>>any());
+        assertThat(params.getValue().getValue("offset"))
+                .as("page=1 must be the FIRST page (offset 0), not the second page").isEqualTo(0L);
+    }
+
+    @Test
+    @DisplayName("page below 1 is rejected with PAGE_INVALID instead of silently clamping to the first page")
+    void pageBelowOneIsRejected() {
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        AdminRetentionLogService service = new AdminRetentionLogService(jdbc, provider(new FakeCrypto()));
+
+        assertThatThrownBy(() -> service.query(TENANT, null, null, null, null, null, 0, 20))
+                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("PAGE_INVALID"));
+    }
+
+    @Test
+    @DisplayName("an invalid direction filter is rejected as 400 PARAM_INVALID before touching the database")
     void invalidDirectionRejected() {
         NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
         AdminRetentionLogService service = new AdminRetentionLogService(jdbc, provider(new FakeCrypto()));
 
-        assertThatThrownBy(() -> service.query(TENANT, null, "SIDEWAYS", null, null, null, 0, 20))
-                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("INPUT or OUTPUT");
+        // The sibling filter on the same endpoint (`from=not-a-timestamp`) answers
+        // 400 PARAM_INVALID; a misspelled direction has to answer the same way.
+        // A bare ResponseStatusException would be swallowed by the advice's
+        // catch-all and leak out as 500 INTERNAL_ERROR.
+        assertThatThrownBy(() -> service.query(TENANT, null, "SIDEWAYS", null, null, null, 1, 20))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(e.getCode()).isEqualTo("PARAM_INVALID");
+                });
     }
 
     @Test
