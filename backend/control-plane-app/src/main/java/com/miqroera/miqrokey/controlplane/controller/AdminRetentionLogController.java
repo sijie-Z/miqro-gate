@@ -64,9 +64,9 @@ public class AdminRetentionLogController {
         long total = retentionLogs.countForExport(admin.tenantId(), userId, direction, protocol, fromInstant,
                 toInstant);
         boolean truncated = total > AdminRetentionLogService.EXPORT_LIMIT;
-        auditService.record(admin.tenantId(), admin.id(), "RETENTION_LOG_EXPORT", "RETENTION_LOG", null,
-                "{\"rows\":" + Math.min(total, AdminRetentionLogService.EXPORT_LIMIT) + ",\"truncated\":" + truncated
-                        + "}",
+        auditService.record(
+                admin.tenantId(), admin.id(), "RETENTION_LOG_EXPORT", "RETENTION_LOG", null, "{\"rows\":"
+                        + Math.min(total, AdminRetentionLogService.EXPORT_LIMIT) + ",\"truncated\":" + truncated + "}",
                 null);
 
         response.setContentType("text/csv");

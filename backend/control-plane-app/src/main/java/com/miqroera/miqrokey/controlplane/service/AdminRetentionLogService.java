@@ -35,7 +35,10 @@ public class AdminRetentionLogService {
     /** Same cap as the audit export (api-contract §8). */
     public static final int EXPORT_LIMIT = 50_000;
     public static final int MAX_PAGE_SIZE = 100;
-    /** Rows read per query while streaming the export (#1023): the only thing bounding memory. */
+    /**
+     * Rows read per query while streaming the export (#1023): the only thing
+     * bounding memory.
+     */
     public static final int EXPORT_CHUNK = 500;
 
     private final NamedParameterJdbcTemplate jdbc;
@@ -72,15 +75,16 @@ public class AdminRetentionLogService {
     }
 
     /**
-     * How many rows the export would cover (same filters). Answered by {@code count(*)}
-     * so the caller can set the truncation header before any row is written — the
-     * response is streamed, so headers are committed with the first byte.
+     * How many rows the export would cover (same filters). Answered by
+     * {@code count(*)} so the caller can set the truncation header before any row
+     * is written — the response is streamed, so headers are committed with the
+     * first byte.
      */
     public long countForExport(UUID tenantId, UUID userId, String direction, String protocol, Instant from,
             Instant to) {
         FilterSql filter = filter(tenantId, userId, direction, protocol, from, to);
-        Long count = jdbc.queryForObject(
-                "SELECT count(*) FROM retention_log r" + filter.where, filter.params, Long.class);
+        Long count = jdbc.queryForObject("SELECT count(*) FROM retention_log r" + filter.where, filter.params,
+                Long.class);
         return count == null ? 0L : count;
     }
 
@@ -88,9 +92,10 @@ public class AdminRetentionLogService {
      * CSV export (same filters), written row by row into {@code out} and capped at
      * {@link #EXPORT_LIMIT} rows.
      *
-     * <p>Streaming is not an optimisation here, it is the fix (#1023): the previous
-     * shape read up to EXPORT_LIMIT rows into a {@code List}, decrypted every one of
-     * them and concatenated the whole document into a {@code StringBuilder} — at
+     * <p>
+     * Streaming is not an optimisation here, it is the fix (#1023): the previous
+     * shape read up to EXPORT_LIMIT rows into a {@code List}, decrypted every one
+     * of them and concatenated the whole document into a {@code StringBuilder} — at
      * 20 KB of ciphertext per row (this deployment's average) that is hundreds of
      * megabytes of live objects before the first byte reaches the client, and the
      * control plane died of heap exhaustion instead of exporting. The cap is a row
@@ -99,8 +104,7 @@ public class AdminRetentionLogService {
      */
     public ExportSummary streamCsv(UUID tenantId, UUID userId, String direction, String protocol, Instant from,
             Instant to, java.io.OutputStream out) throws java.io.IOException {
-        java.io.Writer w = new java.io.BufferedWriter(
-                new java.io.OutputStreamWriter(out, StandardCharsets.UTF_8));
+        java.io.Writer w = new java.io.BufferedWriter(new java.io.OutputStreamWriter(out, StandardCharsets.UTF_8));
         // UTF-8 BOM so spreadsheet consumers detect the encoding: api-contract §5.0
         // requires the audit/retention downloads to share this dialect.
         w.write('\uFEFF');
@@ -132,14 +136,17 @@ public class AdminRetentionLogService {
         return new ExportSummary(written, written == EXPORT_LIMIT);
     }
 
-    /** CSV export payload: how many rows were written, and whether the cap was hit. */
+    /**
+     * CSV export payload: how many rows were written, and whether the cap was hit.
+     */
     public record ExportSummary(int rows, boolean truncated) {
     }
 
     /**
-     * One page of the export, ordered the way the document is: {@code occurred_at DESC,
-     * event_id ASC}. Keyset pagination (rather than OFFSET) so the work is linear and a
-     * page never depends on rows already written.
+     * One page of the export, ordered the way the document is:
+     * {@code occurred_at DESC,
+     * event_id ASC}. Keyset pagination (rather than OFFSET) so the work is linear
+     * and a page never depends on rows already written.
      */
     private List<RawRow> exportChunk(UUID tenantId, UUID userId, String direction, String protocol, Instant from,
             Instant to, Instant cursorAt, UUID cursorId, int pageSize) {
