@@ -2,6 +2,21 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-20（Agent 生命周期补齐：enable/改名/硬删除，#824）
+
+- **ADR-0025 已转 Accepted**（§7 拍板记录：选项 D + §6 六条未决项的处置）；实现 issue #1012。
+- **两处事实（对 #824 原文的更正与发现）**：① 凭证侧的锁只对 **ACTIVE** Agent 生效——issue 说的「停用态仍锁凭证」不成立；② 真实约束是 `uq_agents_tenant_credential` **不看状态**：停用的 Agent 仍占「该凭证 → 唯一 Agent」名额，僵尸 Agent 的形状是**名额占死**而非凭证锁死。
+- **实现要点**：`enable` 是**有条件的逆操作**（凭证必须存在且 ACTIVE）；`PATCH` 走乐观锁（`version` 随 `AgentView` 返回）；硬删除的审计 `AGENT_DELETE` 带**名称快照**（行删后按 id 反查不到名字）。
+- **连带改动**：`AgentView` 增 `version` → OpenAPI 基线重生成 + `frontend/src/types/generated.ts` 重生成（幂等）。
+
+## 会话交接点 2026-09-20（速率信号告警：#706 / ADR-0026 选项 D）
+
+- **两类新告警规则类型**（V71 扩 `alert_rules_type_check`）：`UPSTREAM_RATE_LIMITED`（近 1h 上游 429 **计数**）、`KEY_REQUEST_RATE`（近 1h **单 Key 峰值请求数**）。
+- **两个语义要点**：① 429 只计**上游真的答了 429** 的行（`upstream_status_code = 429`）——网关配额拒绝的请求不触达上游、无该列值，天然不计入；② 单 Key 信号**必须可归因**，触发事件在 `payload_json` 里带 keyId/keyName/requests，且 payload 随事件持久化（`retryDue()` 按存储重放，不重新查询）。
+- **约束遵守（ADR-0026 §6）**：per-key 维度只在 SQL 聚合里，**不做指标标签**（高基数红线）；评估仍在控制面，热路径零改动、零延迟。
+- **踩坑**：`alert_rules.type` 是 CHECK 约束且**服务端另有一份白名单**（`AlertRuleService.RULE_TYPES`）——加类型两处都要改，漏了后者 API 直接 400；迁移定号前查「树 ∪ 已登记号」（本次 V71）。
+- **测试**：`RateSignalAlertIntegrationTest` 4 例 + 既有队列饱和 9 例 + webhook 9 例回归。
+
 ## 会话交接点 2026-09-19（PH22 缓存正确性审计：多模态 part 不入键，#976）
 
 - **确认缺陷一处**：`CacheKeyFactory.textContent()`（`CacheKeyFactory.java:216-235`，develop）遍历 content 数组时**没有 else 分支**，非文本 part（Anthropic `image`、OpenAI `image_url`、Responses `input_image`…）被静默丢弃，语义 scope 只用剩余文本算 → 两张图不同、文本相同的视觉请求得到**同一把缓存键**，后者重放前者的答案。修复：非文本 part 令 `textContent()` 返回 `null` → `semanticScope()` 返回 `""` → `compute()` 回退既有全文键 `normalize(root)`（`:95` 的安全阀）。
@@ -308,7 +323,7 @@
 - 验证：`mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration
   -Dtest=AdminRetentionLogAuditIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` →
   `Tests run: 8, Failures: 0, Errors: 0` / BUILD SUCCESS。
-- **附带发现（未修，属产品缺陷，超出本 Goal 范围）**：`GET /api/v1/admin/retention-logs?direction=<非法值>`
+- **附带发现（已于 2026-09-20 修复，PR #1006：`direction` 非法值改回 400 `PARAM_INVALID`、`page` 对齐为 1-based；修复当时它属产品缺陷、超出该 Goal 范围）**：`GET /api/v1/admin/retention-logs?direction=<非法值>`
   返回 **500 `INTERNAL_ERROR`** 而非 400。成因：`AdminRetentionLogService` 抛 `ResponseStatusException`，
   而 `GlobalExceptionHandler` 无该类型 handler，被兜底 `Exception` 分支吞成 500 + ERROR 级日志；同族
   `MethodArgumentTypeMismatchException` 的 javadoc 明确要求「invalid filter values are rejected, never treated as
@@ -5553,3 +5568,119 @@ interface KeyRow { key; label; served; hits; hitRatePct; paidCost; savedCost }  
 ### 教训
 
 **"页面能打开"和"页面上的字看得全"是两件事。** 32 条路由全绿只证明没有崩；真正值钱的是那条截断审计——它把缺陷定义成"溢出**且没有恢复路径**"，于是一把捞出唯一一格。这与既有的「按来源断言，不要按存在断言」同族：**看见"有省略号"不等于看见了被省略掉的东西**；也同"检查必须与被测系统校准"——测量前先确认视口真的存在。
+
+## 2026-09-19 空窗口的命中率：0/0 不是 0%，而且同一张卡片里已经有一个老实人（#932）
+
+审「首次运行 / 空部署」这个此前没碰过的面时发现的。
+
+### 问题
+
+空窗口（窗口内一条请求都没有）真机上读到的：
+
+| 卡片 | 改动前 | 真相 |
+|---|---|---|
+| 总请求次数 | `0　上游 0 · 合并 0` | ✅ 0 是真的 |
+| L1 命中 | `0　命中率 0.00%` | ❌ 0/0 |
+| L2 命中 | `0　命中率 0.00%` | ❌ 0/0 |
+| 网关缓存命中率 | **`0.00%`** | ❌ 0/0 |
+| 缓存节省 · 等效折扣 | **`—`** | ✅ #858 已修 |
+| 缓存命中构成（面板） | 四桶各 `0.00%` | ❌ 0/0（第 4 处） |
+
+**同一张卡片里，`等效折扣` 老实显示 `—`，紧挨着的 `命中率` 却断言 `0.00%`。**
+而页面下方自己就写着「该窗口没有缓存命中数据」。
+
+API 侧同一个响应把矛盾摆得更明白：
+
+```
+"hitRatePct":0.00,  ...  "savedPct":null
+```
+
+两个比例，一个按新口径改了（#858），一个没有。
+
+### 改法
+
+- **后端**：`AdminRoiService` 在 `served == 0` 时 `hitRatePct` 返回 `null`（与 `savedPct` 同一行规则）
+- **前端**：`网关缓存命中率` 卡片与 `L1/L2 命中` 副指标渲染 `—`
+- **第 4 处也一起修**：构成面板原本用 `Math.max(1, served)` 兜底，四桶各显示 `0.00%`；
+  改为 `share: number | null`，空窗口渲染 `—`（进度条宽度取 0）
+- **明确不改**：`总请求次数 0` 与 `¥0.0000` **保持为数字**——0 次请求是**已知的 0**，不是未知
+
+### 验证
+
+- **后端先证明会红**：临时回退 service → `emptyWindow` 失败于
+  `$.totals.hitRatePct Expected: null`，且响应体自证 `"hitRatePct":0.00` 与 `"savedPct":null` 并排
+- **前端先证明会红**：回退视图 → 新用例失败于
+  `expected '网关缓存命中率0.00%…' to contain '—'`
+- **构成面板单独证明有牙**：把那一处改回旧行为 → 失败于
+  `expected '缓存命中构成…L1 命中00.00%…' to contain '—'`
+- 后端 `verify -Pintegration` 全绿；前端 lint / typecheck / **473 tests** / build /
+  **`gen:types` 幂等** / Playwright **60/60**
+- **真机复验**（重建 control-plane + portal，镜像 id 已核对）：三处命中率与构成面板四桶全部 `—`，
+  而 `总请求次数 0` 与 `¥0.0000` 仍是数字
+
+### 一个既有测试把错误行为写进了断言
+
+`emptyWindow` 原本断言 `$.totals.hitRatePct == 0.0`——**它保护的是 bug**。
+改成 `nullValue()` 并把 DisplayName 改成"两个比例都未定义"，让它从此保护正确的那句承诺。
+
+### 教训
+
+**"同一个页面修过了"与"同一张卡片修过了"都不是判据——要按"同一个 0/0 出现了几次"数。**
+这一条里同一个 0/0 在页面上出现了**四处**（三张卡 + 一个面板），而 #858 当年只改了其中一处
+（等效折扣），于是矛盾就在同一张卡片内部可见。**修同类缺陷时，先把"这类判断在这页出现几次"清点完，
+再动手。**
+
+## 2026-09-20 维护批次：必过检查上的三类假红 + 依赖 CVE 一个次版本清三条 + 审计链锁序死锁
+
+### 背景
+
+`develop` 于 09-19 启用分支保护（15 项必过检查），随即暴露三类**与任何 PR 内容无关**却会
+随机冻住合并的假红；另有一条真死锁混在同样的症状里（都是"测试全过、退出码 1"）。
+
+### 改动（均已合入 develop）
+
+- **#924 / #925**：矩阵 job 被跳过时 GitHub 上报的是**未展开的名字模板**
+  （`Backend unit (Java 21 / ${{ matrix.os }})`），与必过检查里写的具体名永不相等 → 纯文档
+  PR 永久 BLOCKED。拆成两个字面名 job（被跳过时同样以字面名上报；skipped 在必过检查里
+  视为通过）。
+- **#985 / #986**：`RetentionKafkaIntegrationTest` 在 `@AfterAll` 先停 broker，而 Spring 上下文
+  要到 JVM 退出才关；publisher 的 `close()` 却含无界 `producer.flush()`（受
+  `delivery.timeout.ms`，默认 120s）→ 击穿 surefire 的 30s 退出预算。改为让 broker 活过
+  上下文关停（Ryuk 在 JVM 退出后回收）。
+- **#985 / #992**：surefire 的退出预算 30s 落在该套件**固有收尾**的波动区间内——实测成功运行
+  68/69 次 `Commencing graceful shutdown`、被强杀那次 73 次，三者同为 431 个测试。是**阈值
+  与被测对象错配**，不是死锁；校准为 120s（保留"真卡死仍会被杀"）。
+- **#995 / #1022**：**审计链全局咨询锁**（`CHAIN_LOCK_KEY`）与外键隐式 `KEY SHARE tenants`
+  的**顺序镜像**死锁——审计写入是"先链锁、后插带外键的行"，而 `bootstrap` / `register` 是
+  "先锁租户行（FOR UPDATE）、后写审计"。修法：`AuditService.acquireChainLock()`（javadoc 写明
+  必须事务内调用，否则即取即释、静默失效）+ 那两处先取链锁。回归测试用一条裸连接确定性复现：
+  撤掉修复 → `ERROR: deadlock detected`；带上修复 → `BUILD SUCCESS`。
+- **#1008 / #1010**：npm registry 维护窗口会让 `npm audit` 以 503 退出，而在 job 摘要上与
+  "真查出高危漏洞"无法区分，窗口期内全仓 PR 无法合并（实测 #999 / #990 / #1006 / #1007 / #1009
+  的**唯一**红项都是它，同时 Trivy 四次扫描均为 `Total: 0`）。改为：端点类错误重试 3 次并打
+  `::warning::`，措辞区分"查不了"与"查出问题"，**仍是 fail-closed**。
+- **#980 / #1017**：Spring Boot 3.4.5 → **3.5.16**（3.5.x 最新补丁）。该 BOM 解析
+  kafka-clients **3.9.2**（`CVE-2026-35554`，留痕出口生产者消息损坏/错投的修复版本）与越过
+  3.5.12 修复线的 actuator（`CVE-2026-22731` / `CVE-2026-22733`）——**一个次版本升级清掉三条
+  HIGH**，而非等 dependabot #87 的 4.x 大跳。本地 `verify -Pintegration` 全绿；CI 的 Security
+  gate 四次 Trivy 扫描全部 `Total: 0 (HIGH: 0, CRITICAL: 0)`。
+- **#974 / #1027**：按 `.trivyignore-deps` 自身的纪律（"a row whose tracker has landed is a bug,
+  not a baseline"）删掉上述三条**已落地**的基线行，并留一段"为何删"的记录。
+
+### 验证
+
+- 死锁修复走的是**确定性红→绿**（撤/带修复各一次实测），不是"重跑即过"；
+- 其余每一条都以对应 CI job 的**具体异常**定性（Surefire 强杀 / NetworkClient 重试段 /
+  `ERROR: deadlock detected` / `audit endpoint returned an error` / spotless），不靠症状归类。
+- 伴生提交：四类偶发与两条新缺陷已分别登记（#934 收集档、#1008 npm 口径、#1028 OIDC 那处
+  "锁没锁住"）。
+
+### 教训
+
+1. **"全绿却退出码 1"至少四类成因**，默认当 flake 重跑是错的——先读日志拿具体异常再定性。
+   本轮我因此把一条真死锁误拖了两轮。
+2. **锁的归属要拿常量去对，不要靠症状猜**：我最初把死锁归因于对账导入锁，直到把 PostgreSQL
+   报的锁 key `[16384,287445236,2112454933,1]` 还原成 int64 = `1234567890123456789`、对上
+   `CHAIN_LOCK_KEY` 才定性，并在议题里公开更正。
+3. **豁免基线的"摘除条件"要够得着**：三条 CVE 的 tracker 被绑在一次 4.x 大版本跳跃上，
+   而最小修复版本其实在 3.5.x 线内——**先量最小修复版本，再决定升级幅度**。

@@ -5,6 +5,8 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 ### 2026-09-20
 
+- **Agent 生命周期补齐：可重新启用、可改名、可删除（#824，ADR-0025 选项 D）**：此前 API 只有 `list/get/create/disable/usage` —— 建错回不去、停用不可逆，且**停用的 Agent 仍占着「该凭证 → 唯一 Agent」的名额**（`uq_agents_tenant_credential` 不看状态），想在同一凭证上重建就被 `AGENT_CREDENTIAL_TAKEN` 挡住（演示站上就留着一个僵尸 Agent）。现新增 `POST /{id}/enable`、`PATCH /{id}`（改名/描述，带 `version` 乐观锁）、`DELETE /{id}`（硬删除），前端行操作改为「用量 + 更多 ⌄（改名 / 启用|禁用 / 删除）」。两点值得记：① **`enable` 不是 `disable` 的镜像**——停用期间凭证可能已被停用，此时拒绝（`409 CREDENTIAL_NOT_ACTIVE`）而不是让 Agent 指向不可路由的出口（被**轮换**则无害：Agent 绑定的是凭证行，不是密文）；② **硬删除在本仓库是干净的**（没有任何表引用 `agents`、用量按绑定凭证聚合），但审计 `AGENT_DELETE` 必须带**名称快照**——行删掉后按 id 反查不到名字。
+- **速率信号告警：上游 429 计数 + 单 Key 请求峰值（#706，ADR-0026 选项 D）**：ADR-0026 拍板的第一期——**只观测、不阻断**，把该 ADR §4 的触发条件从「无据可依」变成可判定，热路径零改动。两类新规则类型（V71 扩 CHECK）：**`UPSTREAM_RATE_LIMITED`** 数近 1h 上游返回 **429 的条数**（计数而非比例——比例已在 `UPSTREAM_ERROR_RATE` 里，而「上游在限流」与「上游在故障」是两类事故；**网关自身因配额拒绝的请求不触达上游，不计入**）；**`KEY_REQUEST_RATE`** 取近 1h **单把密钥的最高请求条数**（租户级 `USAGE_SURGE` 说不出是谁在猛打），触发事件的 `payload_json` 带该密钥的 `keyId`/`keyName`/`requests`——信号只有可归因才可行动，且 payload 随事件持久化、重试投递按存储重放。per-key 维度全在 SQL 聚合里，不做指标标签（高基数红线），评估仍在控制面。
 - **密钥列表「允许模型」补 tooltip（#1013）**：该格 `nowrap + ellipsis` 截断后**没有任何恢复路径**
   （无 title、无 tooltip，行内「更多」也没有入口），第 4 个模型名在页面上不可见——而它是这把 Key 的绑定事实
   （ui-specification §5：不能隐藏关键绑定信息）。按同表格「用途」列的既有惯例包一层 `UiTooltip`（文本=完整清单）。
