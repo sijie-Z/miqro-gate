@@ -16,7 +16,9 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -41,6 +43,15 @@ import java.util.UUID;
  * to a saturated bounded queue in the hour — written by the gateway as
  * {@code gateway_queue_signal} fact rows under the platform tenant, never
  * queried from the gateway hot path.</li>
+ * <li>{@code UPSTREAM_RATE_LIMITED} (ADR-0026 option D, #706): COUNT of
+ * upstream 429 answers in the hour. A count on purpose — the share already
+ * lives in {@code UPSTREAM_ERROR_RATE}, which mixes throttling with failure,
+ * and the two call for different responses. The gateway's own quota 429s never
+ * reach upstream and carry no upstream status, so they are not counted.</li>
+ * <li>{@code KEY_REQUEST_RATE} (ADR-0026 option D, #706): the BUSIEST key's
+ * request count in the hour — the tenant-wide {@code USAGE_SURGE} cannot say
+ * who is surging. The fired event's {@code payload_json} carries that key's id
+ * and name, because the signal is only actionable with attribution.</li>
  * </ul>
  * </p>
  */
@@ -95,19 +106,59 @@ public class AlertEvaluator {
         }
         UUID eventId = UUID.randomUUID();
         Instant now = Instant.now();
+        // Attribution rides on the event's payload_json so a retry replays it:
+        // AlertEventDispatcher.retryDue() rebuilds the webhook body from the
+        // stored payload, not from a re-query.
+        Map<String, Object> details = detailsFor(rule);
+        String payloadJson = details.isEmpty() ? null : toJson(details);
         int inserted = jdbc.update("""
-                INSERT INTO alert_events (id, tenant_id, rule_id, dedupe_key, occurred_at, value, status, created_at)
-                VALUES (:id, :tenantId, :ruleId, :dedupeKey, :occurredAt, :value, 'FIRED', :createdAt)
+                INSERT INTO alert_events (id, tenant_id, rule_id, dedupe_key, occurred_at, value, status,
+                    payload_json, created_at)
+                VALUES (:id, :tenantId, :ruleId, :dedupeKey, :occurredAt, :value, 'FIRED',
+                    :payloadJson::jsonb, :createdAt)
                 ON CONFLICT (tenant_id, rule_id, dedupe_key) DO NOTHING
                 """,
                 new MapSqlParameterSource("id", eventId).addValue("tenantId", rule.tenantId())
                         .addValue("ruleId", rule.id()).addValue("dedupeKey", dedupeKey)
                         .addValue("occurredAt", Timestamp.from(now)).addValue("value", value)
-                        .addValue("createdAt", Timestamp.from(now)));
+                        .addValue("payloadJson", payloadJson).addValue("createdAt", Timestamp.from(now)));
         if (inserted == 0) {
             return; // deduplicated within the window — no new event, no delivery
         }
-        dispatcher.deliverEvent(rule.tenantId(), eventId, rule, value, now);
+        dispatcher.deliverEvent(rule.tenantId(), eventId, rule, value, now, details);
+    }
+
+    /**
+     * Attribution for the metrics that need it, computed only when a rule actually
+     * fires. A metric whose signal is "somebody is doing this a lot" is not
+     * actionable without naming the somebody.
+     */
+    private Map<String, Object> detailsFor(AlertRuleService.AlertRule rule) {
+        if (!"KEY_REQUEST_RATE".equals(rule.type())) {
+            return Map.of();
+        }
+        TopKey top = topKeyOfHour(rule.tenantId());
+        if (top == null) {
+            return Map.of();
+        }
+        Map<String, Object> details = new LinkedHashMap<>();
+        if (top.keyId() != null) {
+            details.put("keyId", top.keyId().toString());
+        }
+        if (top.keyName() != null) {
+            details.put("keyName", top.keyName());
+        }
+        details.put("requests", top.requests());
+        return details;
+    }
+
+    private String toJson(Map<String, Object> details) {
+        try {
+            return objectMapper.writeValueAsString(details);
+        } catch (Exception e) {
+            LOG.warn("Alert attribution serialization failed", e);
+            return null;
+        }
     }
 
     /**
@@ -150,6 +201,21 @@ public class AlertEvaluator {
                     SELECT COALESCE(SUM(dropped), 0) FROM gateway_queue_signal
                     WHERE tenant_id = :tenantId AND occurred_at >= now() - interval '1 hour'
                     """, tenant);
+            // ADR-0026 option D (#706): upstream throttling as its own COUNT. Only
+            // rows the upstream actually answered count — a gateway-rejected quota
+            // request never reaches upstream and carries no upstream status.
+            case "UPSTREAM_RATE_LIMITED" -> count("""
+                    SELECT COUNT(*) FROM usage_event
+                    WHERE tenant_id = :tenantId AND occurred_at >= now() - interval '1 hour'
+                            AND upstream_status_code = 429
+                    """, tenant);
+            // ADR-0026 option D (#706): peak per-key request count, i.e. "is one
+            // key hogging the upstream". Grouped in SQL, never a metric label
+            // (high-cardinality red line, GatewayMetricsFilter).
+            case "KEY_REQUEST_RATE" -> {
+                TopKey top = topKeyOfHour(tenantId);
+                yield top != null ? BigDecimal.valueOf(top.requests()) : BigDecimal.ZERO;
+            }
             case "BUDGET_THRESHOLD" -> budgetWatermark(tenantId, scopeJson);
             case "QUOTA_THRESHOLD" -> quotaWatermark(tenantId, scopeJson);
             default -> null; // event-driven notification types fire outside the scheduler
@@ -210,6 +276,32 @@ public class AlertEvaluator {
         } catch (Exception e) {
             return null; // malformed scope or no budget yet — nothing to alert
         }
+    }
+
+    /**
+     * The busiest key of the rolling hour, for KEY_REQUEST_RATE and its
+     * attribution.
+     */
+    private record TopKey(UUID keyId, String keyName, long requests) {
+    }
+
+    /**
+     * Highest request count over one key in the rolling hour; null when the hour
+     * has no events. Ties break on the key id so the metric is deterministic (two
+     * keys with the same count must not make the alert flap between names).
+     */
+    private TopKey topKeyOfHour(UUID tenantId) {
+        List<TopKey> rows = jdbc.query("""
+                SELECT ue.virtual_key_id AS key_id, vk.name AS key_name, COUNT(*) AS requests
+                FROM usage_event ue
+                LEFT JOIN virtual_keys vk ON vk.id = ue.virtual_key_id
+                WHERE ue.tenant_id = :tenantId AND ue.occurred_at >= now() - interval '1 hour'
+                GROUP BY ue.virtual_key_id, vk.name
+                ORDER BY requests DESC, ue.virtual_key_id
+                LIMIT 1
+                """, new MapSqlParameterSource("tenantId", tenantId), (rs,
+                rowNum) -> new TopKey((UUID) rs.getObject("key_id"), rs.getString("key_name"), rs.getLong("requests")));
+        return rows.isEmpty() ? null : rows.get(0);
     }
 
     private BigDecimal ratio(String sql, MapSqlParameterSource params) {

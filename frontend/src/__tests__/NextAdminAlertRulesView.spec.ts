@@ -227,7 +227,7 @@ describe('NextAdminAlertRulesView', () => {
     await saturationOption!.trigger('click');
     await flushPromises();
 
-    expect(wrapper.find('[data-testid="rule-saturation-hint"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="rule-threshold-hint"]').exists()).toBe(true);
     expect(wrapper.text()).toContain('阈值（丢弃条数）');
     await wrapper.find('[data-testid="rule-create-name"]').setValue('queue-saturation');
     await wrapper.find('[data-testid="rule-create-threshold"]').setValue('1');
