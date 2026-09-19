@@ -105,8 +105,7 @@ class QuotaSnapshotServiceTest {
     void setUp() {
         service = new QuotaSnapshotService(subscriptionRepository, productRepository, credentialRepository,
                 versionRepository, snapshotRepository, adapterRegistry, clientFactory, keyEncryptionProvider, jdbc,
-                new com.fasterxml.jackson.databind.ObjectMapper(),
-                meterRegistry, transactions);
+                new com.fasterxml.jackson.databind.ObjectMapper(), meterRegistry, transactions);
         lenient().when(snapshotRepository.insert(any())).thenAnswer(inv -> {
             stored.add(inv.getArgument(0));
             return inv.getArgument(0);
@@ -158,8 +157,8 @@ class QuotaSnapshotServiceTest {
         assertThat(providerCalls).isNotNull();
         assertThat(providerCalls.count()).isEqualTo(1.0);
 
-        io.micrometer.core.instrument.Counter success = meterRegistry
-                .find("miqrokey_control_quota_refresh_total").tag("result", "success").counter();
+        io.micrometer.core.instrument.Counter success = meterRegistry.find("miqrokey_control_quota_refresh_total")
+                .tag("result", "success").counter();
         assertThat(success).isNotNull();
         assertThat(success.count()).isEqualTo(1.0);
     }
@@ -177,8 +176,8 @@ class QuotaSnapshotServiceTest {
 
         service.refresh(TENANT, SUBSCRIPTION_ID);
 
-        io.micrometer.core.instrument.Counter failure = meterRegistry
-                .find("miqrokey_control_quota_refresh_total").tag("result", "failure").counter();
+        io.micrometer.core.instrument.Counter failure = meterRegistry.find("miqrokey_control_quota_refresh_total")
+                .tag("result", "failure").counter();
         assertThat(failure).isNotNull();
         assertThat(failure.count()).isEqualTo(1.0);
     }

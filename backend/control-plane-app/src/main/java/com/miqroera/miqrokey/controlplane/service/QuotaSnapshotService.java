@@ -134,16 +134,12 @@ public class QuotaSnapshotService {
         // labels are the real ids, never a placeholder. The increment site looks the
         // counter up again, which returns this same series.
         for (String adapterId : adapterRegistry.adapterIds()) {
-            Counter.builder(PROVIDER_CALLS_METRIC)
-                    .description("Control-plane provider calls by adapter")
-                    .tag("adapter_id", adapterId)
-                    .register(meterRegistry);
+            Counter.builder(PROVIDER_CALLS_METRIC).description("Control-plane provider calls by adapter")
+                    .tag("adapter_id", adapterId).register(meterRegistry);
         }
         for (String result : REFRESH_RESULTS) {
-            Counter.builder(QUOTA_REFRESH_METRIC)
-                    .description("Quota snapshot refreshes by result")
-                    .tag("result", result)
-                    .register(meterRegistry);
+            Counter.builder(QUOTA_REFRESH_METRIC).description("Quota snapshot refreshes by result")
+                    .tag("result", result).register(meterRegistry);
         }
     }
 
