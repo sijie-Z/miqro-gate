@@ -21,3 +21,4 @@
 - [ADR-0023：请求侧可选改造①——prompt 缓存断点自动注入（草案，待所有者拍板）](0023-request-side-cache-breakpoint-injection.md)
 - [ADR-0024：请求侧可选改造②——错误驱动的整流重试（草案，待所有者拍板）](0024-request-side-rectification-retry.md)
 - [ADR-0025：Agent 生命周期补齐——删除 / 重新启用 / 改名（草案，待所有者拍板）](0025-agent-lifecycle.md)
+- [ADR-0026：速率限流（TPM/RPM）评估与决策留档（草案，待所有者拍板）](0026-rate-limiting-evaluation.md)
