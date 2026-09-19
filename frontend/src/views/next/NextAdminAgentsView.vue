@@ -6,6 +6,15 @@
  * view per-agent usage (93-day window) and gated disable.
  */
 import { computed, onMounted, ref } from 'vue';
+import {
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuItemIndicator,
+  DropdownMenuPortal,
+  DropdownMenuRoot,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from 'radix-vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import {
@@ -117,6 +126,76 @@ async function createAgent() {
   } finally {
     submitting.value = false;
   }
+}
+
+// Rename dialog (#824): the row's `version` rides along so a stale form loses to
+// 409 CONCURRENT_MODIFICATION instead of overwriting someone else's edit.
+const renaming = ref<AgentView | null>(null);
+const renameVisible = ref(false);
+const renameForm = ref({ name: '', description: '' });
+const renameError = ref('');
+const renameSubmitting = ref(false);
+
+function openRename(agent: AgentView) {
+  renaming.value = agent;
+  renameForm.value = { name: agent.name ?? '', description: agent.description ?? '' };
+  renameError.value = '';
+  renameVisible.value = true;
+}
+
+async function submitRename() {
+  const agent = renaming.value;
+  if (!agent) return;
+  if (!renameForm.value.name.trim()) {
+    renameError.value = '请填写名称。';
+    return;
+  }
+  renameSubmitting.value = true;
+  renameError.value = '';
+  try {
+    await api.adminUpdateAgent(agent.id!, {
+      name: renameForm.value.name.trim(),
+      description: renameForm.value.description.trim() || undefined,
+      version: agent.version ?? 0,
+    });
+    renameVisible.value = false;
+    toast.success('代理已更新');
+    await load();
+  } catch (error) {
+    renameError.value = error instanceof ApiError ? error.message : '更新失败，请稍后重试。';
+  } finally {
+    renameSubmitting.value = false;
+  }
+}
+
+async function enableAgent(agent: AgentView) {
+  try {
+    await api.adminEnableAgent(agent.id!);
+    toast.success('代理已启用');
+    await load();
+  } catch (error) {
+    toast.error(error instanceof ApiError ? error.message : '启用失败，请稍后重试。');
+  }
+}
+
+function requestDelete(agent: AgentView) {
+  confirmState.value = {
+    title: `删除代理「${agent.name}」`,
+    body: '删除不可恢复：该代理会被移除，占用的名称与凭证名额随之释放；用量与对账记录不受影响。',
+    confirmLabel: '删除',
+    tone: 'danger',
+    run: async () => {
+      try {
+        await api.adminDeleteAgent(agent.id!);
+        toast.success('代理已删除');
+        await load();
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(error.message);
+        }
+      }
+    },
+  };
 }
 
 function requestDisable(agent: AgentView) {
@@ -293,14 +372,59 @@ onMounted(load);
               @click="showUsage(row as AgentView)"
               >用量</UiButton
             >
-            <UiButton
-              v-if="(row as AgentView).status === 'ACTIVE'"
-              variant="link-danger"
-              size="sm"
-              data-testid="agent-disable"
-              @click="requestDisable(row as AgentView)"
-              >禁用</UiButton
-            >
+            <DropdownMenuRoot>
+              <DropdownMenuTrigger
+                class="next-agents__kebab ui-link-action"
+                aria-label="操作"
+                :data-testid="`agent-actions-${(row as AgentView).id}`"
+              >
+                更多
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path
+                    d="m4 6 4 4 4-4"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </DropdownMenuTrigger>
+              <DropdownMenuPortal>
+                <DropdownMenuContent class="ui-menu" :side-offset="4" :align="'end'">
+                  <DropdownMenuItem
+                    class="ui-menu__item next-agents__menu-item"
+                    @select="openRename(row as AgentView)"
+                  >
+                    <DropdownMenuItemIndicator class="next-agents__menu-ind" />
+                    <span data-testid="agent-rename">改名</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    v-if="(row as AgentView).status === 'ACTIVE'"
+                    class="ui-menu__item next-agents__menu-item"
+                    @select="requestDisable(row as AgentView)"
+                  >
+                    <DropdownMenuItemIndicator class="next-agents__menu-ind" />
+                    <span data-testid="agent-disable">禁用</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    v-else
+                    class="ui-menu__item next-agents__menu-item"
+                    @select="enableAgent(row as AgentView)"
+                  >
+                    <DropdownMenuItemIndicator class="next-agents__menu-ind" />
+                    <span data-testid="agent-enable">启用</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator class="next-agents__menu-sep" />
+                  <DropdownMenuItem
+                    class="ui-menu__item next-agents__menu-item next-agents__menu-item--danger"
+                    @select="requestDelete(row as AgentView)"
+                  >
+                    <DropdownMenuItemIndicator class="next-agents__menu-ind" />
+                    <span data-testid="agent-delete">删除</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenuPortal>
+            </DropdownMenuRoot>
           </div>
         </template>
       </UiTable>
@@ -357,6 +481,48 @@ onMounted(load);
       <p v-else class="next-agents__usage-empty">近 93 天无用量数据。</p>
       <template #footer>
         <UiButton variant="secondary" @click="usageVisible = false">关闭</UiButton>
+      </template>
+    </UiDialog>
+
+    <!-- Rename: name + description with the row's version as the lock token (#824) -->
+    <UiDialog
+      :open="renameVisible"
+      :title="renaming ? `改名 · ${renaming.name}` : '改名'"
+      width="480px"
+      data-testid="agent-rename-dialog"
+      @update:open="renameVisible = false"
+    >
+      <div class="next-agents__form">
+        <UiInput
+          v-model="renameForm.name"
+          label="名称"
+          required
+          placeholder="例如 miqro-forge"
+          data-testid="agent-rename-name"
+        />
+        <div class="ui-field">
+          <span class="ui-field__label">描述</span>
+          <textarea
+            v-model="renameForm.description"
+            class="ui-textarea"
+            rows="2"
+            maxlength="2000"
+            placeholder="用途说明（可选）"
+            data-testid="agent-rename-desc"
+          />
+        </div>
+        <p v-if="renameError" class="ui-form-error">{{ renameError }}</p>
+      </div>
+      <template #footer>
+        <UiButton variant="secondary" @click="renameVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :disabled="!renameForm.name.trim()"
+          :loading="renameSubmitting"
+          data-testid="agent-rename-submit"
+          @click="submitRename"
+          >保存</UiButton
+        >
       </template>
     </UiDialog>
 
@@ -444,6 +610,35 @@ onMounted(load);
   flex-direction: column;
   gap: var(--ui-space-4);
   max-width: 520px;
+}
+
+.next-agents__kebab {
+  /* Layout only — ink and hover come from the shared .ui-link-action row
+     action link style (#651). */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* .ui-menu panel chrome lives in styles/design-base.css (the radix popper root
+   drops the scoped data-v); only the danger variant stays scoped. */
+.next-agents__menu-item--danger {
+  color: var(--ui-danger-fg);
+}
+
+.next-agents__menu-ind {
+  display: none;
+}
+
+.next-agents__menu-sep {
+  height: 1px;
+  margin: var(--ui-space-1) 0;
+  background: var(--ui-border-muted);
 }
 
 .next-agents__actions {

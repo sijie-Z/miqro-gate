@@ -98,4 +98,27 @@ public class AgentRepositoryImpl implements AgentRepository {
         }
         return findByIdAndTenantId(agentId, tenantId).orElseThrow();
     }
+
+    @Override
+    @Transactional
+    public Agent update(UUID tenantId, UUID agentId, String name, String description, long expectedVersion) {
+        int rows = jdbc.update("""
+                UPDATE agents SET name = :name, description = :description, version = version + 1, updated_at = now()
+                WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
+                """, new MapSqlParameterSource("name", name).addValue("description", description)
+                .addValue("id", agentId).addValue("tenantId", tenantId).addValue("expectedVersion", expectedVersion));
+        if (rows != 1) {
+            throw new OptimisticLockingFailureException("Optimistic lock failure: agent " + agentId);
+        }
+        return findByIdAndTenantId(agentId, tenantId).orElseThrow();
+    }
+
+    @Override
+    @Transactional
+    public boolean delete(UUID tenantId, UUID agentId) {
+        // No FK points at agents and nothing stores an agent id (#824), so the row
+        // goes without cascade concerns; usage attribution lives on the credential.
+        return jdbc.update("DELETE FROM agents WHERE id = :id AND tenant_id = :tenantId",
+                new MapSqlParameterSource("id", agentId).addValue("tenantId", tenantId)) == 1;
+    }
 }
