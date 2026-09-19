@@ -216,14 +216,23 @@ class CacheKeyFactoryTest {
         @Test
         @DisplayName("derives the key with a single parse of the request body")
         void singleBodyParse() {
-            CountingObjectMapper counting = new CountingObjectMapper();
-            CacheKeyFactory countingFactory = new CacheKeyFactory(counting);
-            byte[] body = json("{\"model\":\"gpt-4o-mini\",\"temperature\":0.9,\"max_tokens\":256,"
+            // Chat shape: scope is extractable, so the fallback normalize() is
+            // not reached — this is the 3-parse case.
+            byte[] chat = json("{\"model\":\"gpt-4o-mini\",\"temperature\":0.9,\"max_tokens\":256,"
                     + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            // Non-chat shape: no extractable user message, so the key falls back
+            // to the normalized body — the worst case, one parse more than chat.
+            byte[] fallback = json("{\"model\":\"text-embedding-3-small\",\"input\":\"hello world\"}");
 
-            countingFactory.compute(ctx, "gpt-4o-mini", body);
+            assertThat(parsesFor(chat)).isEqualTo(1);
+            assertThat(parsesFor(fallback)).isEqualTo(1);
+        }
 
-            assertThat(counting.bodyParses()).isEqualTo(1);
+        /** Full-body parses performed by one {@code compute} of the given body. */
+        private int parsesFor(byte[] body) {
+            CountingObjectMapper counting = new CountingObjectMapper();
+            new CacheKeyFactory(counting).compute(ctx, "gpt-4o-mini", body);
+            return counting.bodyParses();
         }
     }
 
