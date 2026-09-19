@@ -493,6 +493,72 @@ describe('NextAdminUsageView', () => {
     expect(summaryCalls()).toContainEqual(expect.objectContaining({ groupBy: 'month' }));
   });
 
+  it('#876: marks a short group cost in the breakdown table', async () => {
+    // The hero card above this table already carried the marker for the same figure;
+    // the 维度分解 table printed a bare ¥0.0000 for it.
+    mockApi.adminUsageSummary.mockImplementation(async (query) => {
+      const s = summaryFor(String(query?.groupBy ?? 'project'));
+      return {
+        ...s,
+        groups: [
+          {
+            ...s.groups![0]!,
+            pricingStatus: 'UNAVAILABLE',
+            unpriced: { unpricedEvents: 1, unavailableEvents: 1 },
+          },
+        ],
+      } as never;
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="usage-tab-breakdown"]').trigger('click');
+    await flushPromises();
+
+    const marker = wrapper.find('[data-testid="breakdown-cost-unpriced"]');
+    expect(marker.exists()).toBe(true);
+    expect(marker.text()).toContain('未定价');
+  });
+
+  it('#876: the marker follows the same table into 供应商统计 and 模型统计', async () => {
+    // One table serves three tab entries; each entry has to keep the marker, or the next
+    // one re-introduces the gap.
+    mockApi.adminUsageSummary.mockImplementation(async (query) => {
+      const s = summaryFor(String(query?.groupBy ?? 'project'));
+      return {
+        ...s,
+        groups: [
+          {
+            ...s.groups![0]!,
+            pricingStatus: 'PARTIAL',
+            unpriced: { unpricedEvents: 3, unavailableEvents: 1 },
+          },
+        ],
+      } as never;
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    for (const tab of ['breakdown', 'provider', 'model']) {
+      await wrapper.find(`[data-testid="usage-tab-${tab}"]`).trigger('click');
+      await flushPromises();
+      expect(
+        wrapper.find('[data-testid="breakdown-cost-unpriced"]').exists(),
+        `tab ${tab} lost the marker`,
+      ).toBe(true);
+    }
+  });
+
+  it('#876: leaves a fully priced breakdown row unmarked', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="usage-tab-breakdown"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="breakdown-cost-unpriced"]').exists()).toBe(false);
+  });
+
   it('paginates to the next page and disables prev on the first page', async () => {
     const wrapper = mountView();
     await flushPromises();
