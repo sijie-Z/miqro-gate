@@ -2,6 +2,14 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-20（上游错误体分类·观察档：#770 / ADR-0024 选项 B）
+
+- **只观测**：`UpstreamErrorClassifier`（gateway-app）对**已缓冲**的上游非 2xx 体做前 8KB 子串分类 → 有界枚举计数 + 一行日志；**不重试、不改写、不改响应**，错误正文只读不存，截断缓冲不分类。
+- **落点**：`ProxyController` 的非 2xx 完成路径（响应体本就在 `attempt.collector` 里，故无需新增缓冲）；计数器 `miqrokey_gateway_upstream_error_class_total{class=…}`（有界枚举标签，状态码只进日志）。
+- **ADR-0024 转「部分 Accepted」**：只采纳 B；C/D/E 仍是 Proposed，不得据此实现（§7 拍板记录）。
+- **与 peer 的接口约定**：`ProxyController` 的异常映射链与分类链口径不一致是已知问题，本次**没有触碰**那条链（分类走的是响应体，不是异常类型），不与其 #1009 的注释工作冲突。
+- **行尾纪律（本批踩到两次）**：`CHANGELOG.md` 与 `docs/progress.md` 以 CRLF 存储，本机 autocrlf=true + `* text=auto` 会把整文件归一化成 LF（一条条目显示成 673 行 diff）；已给这两个文件加 `-text`，并用「develop 原始字节 + 字节级插入」的方式改写。
+
 ## 会话交接点 2026-09-19（PH22 缓存正确性审计：多模态 part 不入键，#976）
 
 - **确认缺陷一处**：`CacheKeyFactory.textContent()`（`CacheKeyFactory.java:216-235`，develop）遍历 content 数组时**没有 else 分支**，非文本 part（Anthropic `image`、OpenAI `image_url`、Responses `input_image`…）被静默丢弃，语义 scope 只用剩余文本算 → 两张图不同、文本相同的视觉请求得到**同一把缓存键**，后者重放前者的答案。修复：非文本 part 令 `textContent()` 返回 `null` → `semanticScope()` 返回 `""` → `compute()` 回退既有全文键 `normalize(root)`（`:95` 的安全阀）。

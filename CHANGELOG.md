@@ -5,6 +5,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 ### 2026-09-20
 
+- **上游错误体分类（观察档）——只计数、不改体、不重试（#770，ADR-0024 选项 B）**：给「thinking 签名类错误是不是稳定模式」这个问题一个**数据来源**，而不先动手改请求。网关对**已缓冲**的上游非 2xx 响应体做**有界只读**分类（前 8KB 子串匹配），产出**有界枚举**计数 `miqrokey_gateway_upstream_error_class_total{class=…}`（`SIGNATURE_INVALID` / `THINKING_BLOCK_MISMATCH` / `MISSING_SIGNATURE` / `BUDGET_INVALID` / `UNCLASSIFIED`）与一行 `status=… class=…` 日志。三条自我约束写进了实现与契约测试：**请求与响应字节都不变**、**错误正文只读不存**（不进日志正文/不落库/不进事件）、**被截断的缓冲不分类**（不从不完整片段下结论）；HTTP 状态码只进日志、不作指标标签（上游可能返回任意整数码）。ADR-0024 因此转为「部分 Accepted」——**只有选项 B 被采纳**，C（Key 级整流重试）/D/E 仍待二期拍板。
 - **密钥列表「允许模型」补 tooltip（#1013）**：该格 `nowrap + ellipsis` 截断后**没有任何恢复路径**
   （无 title、无 tooltip，行内「更多」也没有入口），第 4 个模型名在页面上不可见——而它是这把 Key 的绑定事实
   （ui-specification §5：不能隐藏关键绑定信息）。按同表格「用途」列的既有惯例包一层 `UiTooltip`（文本=完整清单）。
