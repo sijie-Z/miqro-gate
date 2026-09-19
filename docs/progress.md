@@ -2,6 +2,17 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-19（PH22 缓存正确性审计：多模态 part 不入键，#976）
+
+- **确认缺陷一处**：`CacheKeyFactory.textContent()`（`CacheKeyFactory.java:216-235`，develop）遍历 content 数组时**没有 else 分支**，非文本 part（Anthropic `image`、OpenAI `image_url`、Responses `input_image`…）被静默丢弃，语义 scope 只用剩余文本算 → 两张图不同、文本相同的视觉请求得到**同一把缓存键**，后者重放前者的答案。修复：非文本 part 令 `textContent()` 返回 `null` → `semanticScope()` 返回 `""` → `compute()` 回退既有全文键 `normalize(root)`（`:95` 的安全阀）。
+- **触发面比"最后一条 user 消息"宽**：助手历史、顶层 `system` / `instructions` 数组里出现非文本 part 同样塌缩（走同一函数）。Anthropic 回显 `thinking` / `redacted_thinking` 进历史即属此类。5 个用例分别钉住三处位置。
+- **与 #859 的分工（去重结论）**：#859 补的是生成参数指纹 + 顶层 `system`/`instructions` **进 scope**，不碰 `textContent()` 提取逻辑。注意其副作用：顶层 `system` 进入 scope 后，"system 数组里带图片"这条路径从「本来就全文回退」变成「被 scope 吞掉」——本 PR 的 `anthropicTopLevelSystemImageSplits` 正是钉这一点。
+- **可复现性陷阱（记住）**：`GatewayTestKeys.java:473` 的 `keyId` 是每进程新取的 `UUID.randomUUID()`，而 keyId 是键的一个维度 → **绝对摘要不可跨进程复现**；可复现的不变量是「同一进程内两把键彼此相等（红）/ 不等（绿）」。引用摘要值时必须说明这一点。
+- **代价（诚实记录）**：改动前多模态请求能提出非空 scope，`compute()` **不调用** `normalize()`；改动后调用。即被修复的这类请求**新增一次与请求体等大的序列化 + 全树重建**，上限 `max-proxy-buffer`（默认 256KB）。命中率也下降（视觉请求不再享受"只认最后一轮"优惠）。
+- **边界**：请求体超 `miqrokey.gateway.upstream.max-proxy-buffer`（默认 256KB）在 `ProxyController.java:328-330` 直接 413 `payload_too_large`，走不到缓存 → 缺陷只在 256KB 以内成立。OpenAI 的 URL 形态图片必中；Anthropic 的 base64 形态原图 ≲190KB 才中招（上限可配，视觉场景通常会调高）。
+- **旁支发现（未立案，文档问题）**：树内 10 余处把"缓存默认关闭"记为 **ADR-0008**（`CacheEligibility.java:6`、`ProxyController.java:81`、`CacheConfig.java:15`、`GatewayResponseCache.java:14`、`.env.example:39`…），但 `docs/decisions/0008-*.md` **不存在**（目录只有 0001-0007、0009-0026）；真实文件是 `0009-enable-response-cache.md`。属文档卫生，不影响运行时行为。
+- **外部改动声明**：维护者 `sijie-Z` 于本 PR 分支直接推送 `64cbc4bd`（spotless 收敛本 PR 新增 javadoc 折行，修 CI 红项）。该提交以 **merge 保留**，未 rebase、未强推。
+
 ## 2026-09-19 会话交接点（ADR-0025：Agent 生命周期补齐，#824）
 
 - **决策文档线，非实现**：新增 `docs/decisions/0025-agent-lifecycle.md`（**Proposed**），把 #824 的四条待拍板展开为「现状坐标 → 逐条分析 → 选项 A–D + 推荐 D → 落地形态 → 未决项」。零代码改动。
@@ -961,7 +972,7 @@
 - **F60 开放管理 API 全链交付**：#200 批1 → #204 批1b 读面 → #251 写面 v1（ADR-0016
   Accepted A+C：告警/Webhook 机器 CRUD + 导出委托=发行管理员）→ 批 2 契约与示例
   （scripts/open-api-examples/，curl+Python+最小权限 README）→ OpenAPI 基线/前端类型
-  同步 → rc.1..rc.4（各带中文 Release）。
+  同步 → rc.1..rc.4（各带中文 Release；**#988 更正**：rc.1 仅有 tag，无 GitHub Release 对象）。
 - **控制台打磨**：视觉轮基线 keys 8.5/usage 7.5/overview 7.6→7.5 区；#254 总览收口
   （货币层级/空态居中/空格规范）；usage 横幅与卡片 padding NIT 属设计 token 决策，记档。
 - **盘点封存**：#246 codegen 全量迁移→DEFERRED（109 schema 中 25 个手写类型 0 覆盖，
