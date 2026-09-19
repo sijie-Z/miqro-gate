@@ -1,6 +1,6 @@
 # ADR-0024：请求侧可选改造②——错误驱动的整流重试（thinking 签名/预算，默认关）
 
-- 状态：**Proposed（待所有者拍板；拍板前不实现，选项见 §3）**
+- 状态：**Accepted（部分）——选项 B（观察档）已采纳为一期**（2026-09-19 所有者拍板「按推荐」；推荐原文为「先 B → 数据支持再上 C」，见 §3）；**C / D / E 仍待二期拍板**。B = 有界错误体分类 + 计数 + 日志，**零改体、零重试**，实现见 issue #770。
 - 日期：2026-09-18
 - 关联：issue #770；[ADR-0002](0002-transparent-proxy.md)（透明代理）；[ADR-0009](0009-enable-response-cache.md)（缓存：整流请求不得写缓存）；[ADR-0020](0020-quota-soft-landing.md)（网关自产 429，不得被误判为上游错误）；[ADR-0005](0005-no-redis-v1.md)；姊妹篇 [ADR-0023](0023-request-side-cache-breakpoint-injection.md)（同属「opt-in 改体例外族」）；issue #704/#717（路由与回退，未决）、#742（封闭客户端接入）、#740（同族改写）、#544（已关闭，见 §1.3 的边界澄清）
 - 触发事件：issue #770——对照 cc-switch 源码（`src-tauri/src/proxy/thinking_rectifier.rs`、`thinking_budget_rectifier.rs`、`thinking_optimizer.rs`）比对后，提出「换供应商后旧会话的 thinking 签名必然失效，网关能否在上游报错后自动整流并重试一次」。
@@ -201,3 +201,15 @@ Key 级字段（建议名 `rectificationPolicy ∈ {OFF, SIGNATURE, SIGNATURE_AN
 7. **与 #717 的预算叠加口径**（§4.8）。
 8. **开关粒度是否只到 Key 级**：是否需要在 ADR-0018 的 key×project 多绑定上增加项目级覆盖（§4.4 新增待议点）——决定迁移与快照是「Key 加一列」还是「绑定行加一列」。
 9. **是否复核 cc-switch 源码**（本 ADR 未复核其实现）。
+
+---
+
+## 7. 拍板记录（2026-09-19 部分采纳）
+
+- **采纳：选项 B（观察档）为一期**。所有者答复「可以，做吧」（对评估线推荐的整体确认），推荐即 §3 的「先 B（观察档）→ 数据支持再上 C」。
+- **B 的边界（实现即契约）**：对**已缓冲**的上游非 2xx 响应体做**有界**（前 8KB）子串分类，产出**有界枚举**类别
+  （`SIGNATURE_INVALID` / `THINKING_BLOCK_MISMATCH` / `MISSING_SIGNATURE` / `BUDGET_INVALID` / `UNCLASSIFIED`）的计数与一行日志；
+  **不重试、不改写请求、不改变响应**；错误正文只读不存；被截断的缓冲不分类。
+- **未采纳（仍为 Proposed 状态、不得据此实现）**：C（Key 级 opt-in 整流重试）、D（独立重试预算）、E（预算类整流）。
+  它们各自需要 §2 的例外边界与红线文本修订，按 §3 的触发条件在 B 的数据支持下再议。
+- **§4 中仅与 C 相关的设计**（整流语义、字节策略、整流后不写缓存、响应头声明等）**保持为提案**，本批不落实现。

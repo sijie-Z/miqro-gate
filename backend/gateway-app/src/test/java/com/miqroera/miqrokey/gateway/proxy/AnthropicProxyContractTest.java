@@ -49,6 +49,9 @@ class AnthropicProxyContractTest {
     @LocalServerPort
     private int gatewayPort;
 
+    @Autowired
+    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
+
     @DynamicPropertySource
     static void configureUpstream(DynamicPropertyRegistry registry) {
         registry.add("miqrokey.gateway.upstream.url", mockProvider::getBaseUrl);
@@ -448,6 +451,54 @@ class AnthropicProxyContractTest {
                     .isEqualTo(AnthropicFixtures.REQUEST_WITH_CACHE_BREAKPOINTS.getBytes(StandardCharsets.UTF_8));
             assertThat(new String(Objects.requireNonNull(responseBody), StandardCharsets.UTF_8))
                     .contains("\"cache_read_input_tokens\":300");
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Upstream error observation — ADR-0024 option B (#770)
+    // -------------------------------------------------------------------
+
+    /**
+     * The observation tier counts the SHAPE of an upstream rejection and nothing
+     * else: no retry, no rewrite, and the client still receives the upstream bytes
+     * exactly as they arrived.
+     */
+    @Nested
+    @DisplayName("Upstream error observation (ADR-0024 B)")
+    class UpstreamErrorObservation {
+
+        @Test
+        @DisplayName("counts a signature-shaped rejection and forwards the body byte-identically")
+        void countsSignatureShapeAndForwardsVerbatim() throws InterruptedException {
+            String body = "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\","
+                    + "\"message\":\"messages.1.content.0.type: Invalid `signature` in `thinking` block\"}}";
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(400)
+                    .contentType("application/json").body(body).build());
+
+            double before = counter("SIGNATURE_INVALID");
+            byte[] responseBody = webTestClient.post().uri("/v1/messages")
+                    .bodyValue(AnthropicFixtures.REQUEST_WITH_TOOL_RESULT).exchange().expectStatus().isEqualTo(400)
+                    .expectBody().returnResult().getResponseBody();
+
+            assertThat(responseBody).isEqualTo(body.getBytes(StandardCharsets.UTF_8));
+            // The observation runs in the post-write completion supplier, i.e. the
+            // client can hold the last byte before the counter moves — poll briefly
+            // instead of assuming ordering (a bare assert flaked on the Windows CI
+            // runner and passed everywhere else).
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            double observed = counter("SIGNATURE_INVALID");
+            while (observed < before + 1 && System.nanoTime() < deadline) {
+                Thread.sleep(20);
+                observed = counter("SIGNATURE_INVALID");
+            }
+            assertThat(observed).isEqualTo(before + 1);
+        }
+
+        /** Meters are created on first observation — absent means zero so far. */
+        private double counter(String errorClass) {
+            var counter = meterRegistry.find("miqrokey_gateway_upstream_error_class_total").tag("class", errorClass)
+                    .counter();
+            return counter != null ? counter.count() : 0.0;
         }
     }
 

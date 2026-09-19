@@ -154,6 +154,7 @@ public class ProxyController {
      * fast-fail while an upstream keeps failing.
      */
     private final LlmCircuitBreakerRegistry circuitBreaker;
+    private final UpstreamErrorClassifier upstreamErrorClassifier;
 
     public ProxyController(VirtualKeyResolver keyResolver, CredentialInjector credentialInjector,
             GatewayResponseCache responseCache, ObjectProvider<RequestCoalescer> coalescerProvider,
@@ -163,12 +164,14 @@ public class ProxyController {
             UpstreamTargetValidator upstreamTargetValidator, Scheduler credentialDecryptScheduler,
             BuiltInAdapterRegistry adapterRegistry, ProviderCatalog providerCatalog, RetentionSidecar retentionSidecar,
             GatewayTtfbMetrics ttfbMetrics, ClientAddressResolver clientAddressResolver,
-            ContextLimitGuard contextLimitGuard, LlmCircuitBreakerRegistry circuitBreaker) {
+            ContextLimitGuard contextLimitGuard, LlmCircuitBreakerRegistry circuitBreaker,
+            UpstreamErrorClassifier upstreamErrorClassifier) {
         this.retentionSidecar = retentionSidecar;
         this.clientAddressResolver = clientAddressResolver;
         this.ttfbMetrics = ttfbMetrics;
         this.contextLimitGuard = contextLimitGuard;
         this.circuitBreaker = circuitBreaker;
+        this.upstreamErrorClassifier = upstreamErrorClassifier;
         this.keyResolver = keyResolver;
         this.credentialInjector = credentialInjector;
         this.responseCache = responseCache;
@@ -575,6 +578,14 @@ public class ProxyController {
                         }
                         attempt.observedTokens.set(tokens);
                         boolean successful = status >= 200 && status < 300;
+                        if (!successful) {
+                            // ADR-0024 option B (#770): observation only — count the
+                            // SHAPE of the upstream failure and log the class. The
+                            // request was not retried, not rewritten, and the response
+                            // reaches the client byte-for-byte as received.
+                            upstreamErrorClassifier.observe(status, attempt.collector.bytes(),
+                                    attempt.collector.overflow());
+                        }
                         long latencyMs = clock.millis() - startMillis;
                         publishUsageEvent(ctx, modelName, cacheKey, tokens, status, effectiveProviderRequestId(attempt),
                                 requestId, latencyMs, true, successful && tokens.isEmpty(),
