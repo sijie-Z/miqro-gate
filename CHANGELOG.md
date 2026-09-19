@@ -5,6 +5,9 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 ### 2026-09-19
 
+- **修复：站内手册首发上线渲染为空（#899，PR #900）**：`docs/` 被 `.dockerignore` 排除在 portal 构建上下文之外，
+  构建期内联 `docs/user-guide/*.md` 得到空集合——本地与 CI 都在完整检出上构建，所以两处都不复现。
+  手册改为内置 `frontend/src/content/handbook/` 的 vendored 副本（同步脚本 + 防漂移单测 + 页内空态兜底）。
 - **使用手册站内化：`/app/help` 离线手册（#872）**：`docs/user-guide` 六篇以构建期内联（`import.meta.glob ?raw`）
   随 portal 包发布——左目录 + 本页目录 + 全文检索式导航；相对链接改写为 GitHub blob URL、hash 链接走页内滚动
   （含 `../client-onboarding.md` 这类出目录路径）；侧栏新增常驻「帮助」，用户菜单「使用手册」改站内跳转。
@@ -642,5 +645,6 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - Supply-chain gate：Secret 扫描（修复 23 处文档示例 Key）、CycloneDX SBOM + 许可证门禁、Trivy 镜像扫描（驱动 postgres 镜像 digest 升级）
 - Performance & soak：并发流浸泡测试 + 生产 soak 脚本
 - 本版本：**未标记 VERIFIED**（无真实供应商凭证契约测试，`WAITING_FOR_CREDENTIAL`）
+
 
 
