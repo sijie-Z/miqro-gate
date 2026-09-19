@@ -139,11 +139,13 @@ function openOnGithub() {
         </nav>
       </aside>
 
+      <!-- v-html renders the repository's own docs/user-guide markdown,
+           inlined at build time (trusted input; see the eslint override). -->
       <article
         ref="contentEl"
         class="ui-panel next-help__body markdown"
-        v-html="html"
         data-testid="help-content"
+        v-html="html"
       />
     </div>
   </div>
