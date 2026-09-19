@@ -1,0 +1,1601 @@
+{
+  "meta": {
+    "timestamp_utc": "2026-09-19T09:50:48Z",
+    "backend": "st",
+    "model": "Qwen/Qwen3-Embedding-0.6B",
+    "prefix": "",
+    "dim": 1024,
+    "pairs": 148,
+    "probes_file": "probes.jsonl",
+    "probes_sha256": "99e75d5d6a121d400ccf745da4b8c25b4220cd9fc5ef243ac90088ba9b99e24f",
+    "embed_seconds": 75.83,
+    "batch_size": 32,
+    "python": "3.12.14",
+    "command": "python scripts/semantic-probe/run_probe.py --backend st --model Qwen/Qwen3-Embedding-0.6B --out-dir D:/tmp/probe-fit --tag qwen3"
+  },
+  "positive": {
+    "n": 80,
+    "min": 0.5342745220387629,
+    "p05": 0.67591349445524,
+    "p25": 0.790192648055376,
+    "median": 0.85385001769568,
+    "mean": 0.8381027224602822,
+    "sd": 0.09309517295231566,
+    "p75": 0.9063485297146813,
+    "p95": 0.9592852968774852,
+    "max": 0.9815801275557701
+  },
+  "hard_negative": {
+    "n": 68,
+    "min": 0.42550755789352807,
+    "p05": 0.6927682464951311,
+    "p25": 0.7685270243385818,
+    "median": 0.8474961666926897,
+    "mean": 0.8423691608503723,
+    "sd": 0.11223377769790027,
+    "p75": 0.9358340890097122,
+    "p95": 0.9826564010308905,
+    "max": 0.9996221953476387
+  },
+  "auc": 0.4764705882352941,
+  "lexical": {
+    "metric": "difflib character ratio",
+    "positive": {
+      "n": 80,
+      "min": 0.0975609756097561,
+      "p05": 0.14592094196804037,
+      "p25": 0.3442028985507246,
+      "median": 0.48770726129216696,
+      "mean": 0.4860698958391674,
+      "sd": 0.21762137381454286,
+      "p75": 0.6113831089351285,
+      "p95": 0.8804444444444445,
+      "max": 0.96
+    },
+    "hard_negative": {
+      "n": 68,
+      "min": 0.25,
+      "p05": 0.5,
+      "p25": 0.64,
+      "median": 0.7777777777777778,
+      "mean": 0.7501186677365933,
+      "sd": 0.15674373495166827,
+      "p75": 0.875,
+      "p95": 0.9542528735632184,
+      "max": 0.9955947136563876
+    },
+    "auc": 0.165625,
+    "bands": [
+      {
+        "lo": 0.0,
+        "hi": 0.2,
+        "n_positive": 9,
+        "n_hard_negative": 0
+      },
+      {
+        "lo": 0.2,
+        "hi": 0.4,
+        "n_positive": 21,
+        "n_hard_negative": 2
+      },
+      {
+        "lo": 0.4,
+        "hi": 0.6,
+        "n_positive": 28,
+        "n_hard_negative": 7,
+        "auc_within_band": 0.673469387755102
+      },
+      {
+        "lo": 0.6,
+        "hi": 0.8,
+        "n_positive": 14,
+        "n_hard_negative": 27,
+        "auc_within_band": 0.753968253968254
+      },
+      {
+        "lo": 0.8,
+        "hi": 1.0,
+        "n_positive": 8,
+        "n_hard_negative": 32,
+        "auc_within_band": 0.6015625
+      }
+    ]
+  },
+  "operating_points": [
+    {
+      "target_fpr": 0.0,
+      "threshold": 0.9996221953476387,
+      "observed_fpr": 0.014705882352941176,
+      "recall": 0.0,
+      "precision_on_probe_set": 0.0
+    },
+    {
+      "target_fpr": 0.005,
+      "threshold": 0.9963214234621258,
+      "observed_fpr": 0.014705882352941176,
+      "recall": 0.0,
+      "precision_on_probe_set": 0.0
+    },
+    {
+      "target_fpr": 0.01,
+      "threshold": 0.9930206515766128,
+      "observed_fpr": 0.014705882352941176,
+      "recall": 0.0,
+      "precision_on_probe_set": 0.0
+    },
+    {
+      "target_fpr": 0.02,
+      "threshold": 0.9887847755313878,
+      "observed_fpr": 0.029411764705882353,
+      "recall": 0.0,
+      "precision_on_probe_set": 0.0
+    },
+    {
+      "target_fpr": 0.05,
+      "threshold": 0.9826564010308905,
+      "observed_fpr": 0.058823529411764705,
+      "recall": 0.0,
+      "precision_on_probe_set": 0.0
+    }
+  ],
+  "histogram": [
+    {
+      "lo": 0.0,
+      "hi": 0.04,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.04,
+      "hi": 0.08,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.08,
+      "hi": 0.12,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.12,
+      "hi": 0.16,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.16,
+      "hi": 0.2,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.2,
+      "hi": 0.24,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.24,
+      "hi": 0.28,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.28,
+      "hi": 0.32,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.32,
+      "hi": 0.36,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.36,
+      "hi": 0.4,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.4,
+      "hi": 0.44,
+      "positive": 0,
+      "hard_negative": 1
+    },
+    {
+      "lo": 0.44,
+      "hi": 0.48,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.48,
+      "hi": 0.52,
+      "positive": 0,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.52,
+      "hi": 0.56,
+      "positive": 1,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.56,
+      "hi": 0.6,
+      "positive": 0,
+      "hard_negative": 1
+    },
+    {
+      "lo": 0.6,
+      "hi": 0.64,
+      "positive": 2,
+      "hard_negative": 0
+    },
+    {
+      "lo": 0.64,
+      "hi": 0.68,
+      "positive": 2,
+      "hard_negative": 1
+    },
+    {
+      "lo": 0.68,
+      "hi": 0.72,
+      "positive": 4,
+      "hard_negative": 8
+    },
+    {
+      "lo": 0.72,
+      "hi": 0.76,
+      "positive": 7,
+      "hard_negative": 6
+    },
+    {
+      "lo": 0.76,
+      "hi": 0.8,
+      "positive": 7,
+      "hard_negative": 7
+    },
+    {
+      "lo": 0.8,
+      "hi": 0.84,
+      "positive": 12,
+      "hard_negative": 7
+    },
+    {
+      "lo": 0.84,
+      "hi": 0.88,
+      "positive": 17,
+      "hard_negative": 9
+    },
+    {
+      "lo": 0.88,
+      "hi": 0.92,
+      "positive": 11,
+      "hard_negative": 6
+    },
+    {
+      "lo": 0.92,
+      "hi": 0.96,
+      "positive": 13,
+      "hard_negative": 12
+    },
+    {
+      "lo": 0.96,
+      "hi": 1.0,
+      "positive": 4,
+      "hard_negative": 10
+    }
+  ],
+  "negative_by_dim": {
+    "direction": {
+      "n": 10,
+      "min": 0.873370486339589,
+      "p05": 0.8754999481423017,
+      "p25": 0.9227068544937067,
+      "median": 0.9406659671036023,
+      "mean": 0.9389323422096414,
+      "sd": 0.03975114686548756,
+      "p75": 0.9685834416462241,
+      "p95": 0.9847040816734607,
+      "max": 0.9897691449431224
+    },
+    "env": {
+      "n": 12,
+      "min": 0.5705506067260173,
+      "p05": 0.6638807467490122,
+      "p25": 0.7685270243385818,
+      "median": 0.7957943396955289,
+      "mean": 0.8006473504643457,
+      "sd": 0.09559201525353629,
+      "p75": 0.8445384682142202,
+      "p95": 0.9266703735185859,
+      "max": 0.9517220832748283
+    },
+    "file": {
+      "n": 10,
+      "min": 0.7160447707417703,
+      "p05": 0.730491791181391,
+      "p25": 0.7751897618723955,
+      "median": 0.7855716150677889,
+      "mean": 0.8106783371998091,
+      "sd": 0.07254973521393358,
+      "p75": 0.8478726098469204,
+      "p95": 0.9187422054452161,
+      "max": 0.971940914060131
+    },
+    "language": {
+      "n": 8,
+      "min": 0.8300278940912946,
+      "p05": 0.8341081198953499,
+      "p25": 0.9032187395389443,
+      "median": 0.934998717133237,
+      "mean": 0.9206706501572123,
+      "sd": 0.05602015120658289,
+      "p75": 0.9521980208678381,
+      "p95": 0.9790326149353565,
+      "max": 0.9848872214691984
+    },
+    "long": {
+      "n": 4,
+      "min": 0.867407617192901,
+      "p05": 0.8740257469677507,
+      "p25": 0.9004982660671492,
+      "median": 0.9233587174791378,
+      "mean": 0.928436811874704,
+      "sd": 0.05514648503484393,
+      "p75": 0.9512972632866925,
+      "p95": 0.9899572089354495,
+      "max": 0.9996221953476387
+    },
+    "param": {
+      "n": 8,
+      "min": 0.8060395017860862,
+      "p05": 0.8370535404821435,
+      "p25": 0.9078701841533277,
+      "median": 0.9396579769464128,
+      "mean": 0.9251844546800709,
+      "sd": 0.0564645680127157,
+      "p75": 0.9580339593877418,
+      "p95": 0.980061573223803,
+      "max": 0.9868739407909619
+    },
+    "task": {
+      "n": 16,
+      "min": 0.42550755789352807,
+      "p05": 0.6134988666322637,
+      "p25": 0.6944456109786881,
+      "median": 0.7182542537727723,
+      "mean": 0.7310399907475995,
+      "sd": 0.107211000346316,
+      "p75": 0.7703101939516016,
+      "p95": 0.8628294082387469,
+      "max": 0.9185723748929229
+    }
+  },
+  "pairs": [
+    {
+      "id": "p01",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7191929777478683,
+      "lexical": 0.125
+    },
+    {
+      "id": "p02",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8200368087869419,
+      "lexical": 0.7142857142857143
+    },
+    {
+      "id": "p03",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.842329894336654,
+      "lexical": 0.3333333333333333
+    },
+    {
+      "id": "p04",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8730991978044877,
+      "lexical": 0.631578947368421
+    },
+    {
+      "id": "p05",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9358224310456797,
+      "lexical": 0.3870967741935484
+    },
+    {
+      "id": "p06",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.901109375034526,
+      "lexical": 0.5925925925925926
+    },
+    {
+      "id": "p07",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8529071446989501,
+      "lexical": 0.38095238095238093
+    },
+    {
+      "id": "p08",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8220659144533504,
+      "lexical": 0.45161290322580644
+    },
+    {
+      "id": "p09",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.81680725217237,
+      "lexical": 0.5517241379310345
+    },
+    {
+      "id": "p10",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.6901863336945573,
+      "lexical": 0.16
+    },
+    {
+      "id": "p11",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8985652585685316,
+      "lexical": 0.4444444444444444
+    },
+    {
+      "id": "p12",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8378769303885024,
+      "lexical": 0.41379310344827586
+    },
+    {
+      "id": "p13",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7365648316499818,
+      "lexical": 0.2962962962962963
+    },
+    {
+      "id": "p14",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7382809418011698,
+      "lexical": 0.48484848484848486
+    },
+    {
+      "id": "p15",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7763354212276017,
+      "lexical": 0.17391304347826086
+    },
+    {
+      "id": "p16",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9542053437323443,
+      "lexical": 0.5060240963855421
+    },
+    {
+      "id": "p17",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9355390721056772,
+      "lexical": 0.49056603773584906
+    },
+    {
+      "id": "p18",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8590975405617219,
+      "lexical": 0.3157894736842105
+    },
+    {
+      "id": "p19",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8638369857968891,
+      "lexical": 0.25
+    },
+    {
+      "id": "p20",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8722224554203606,
+      "lexical": 0.3076923076923077
+    },
+    {
+      "id": "p21",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8895615605329572,
+      "lexical": 0.36363636363636365
+    },
+    {
+      "id": "p22",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9384738556232045,
+      "lexical": 0.5882352941176471
+    },
+    {
+      "id": "p23",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7070786815419785,
+      "lexical": 0.36363636363636365
+    },
+    {
+      "id": "p24",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.6989804995113612,
+      "lexical": 0.14634146341463414
+    },
+    {
+      "id": "p25",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.6014283229753097,
+      "lexical": 0.2222222222222222
+    },
+    {
+      "id": "p26",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7712788293651491,
+      "lexical": 0.5789473684210527
+    },
+    {
+      "id": "p27",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7208637681306891,
+      "lexical": 0.2702702702702703
+    },
+    {
+      "id": "p28",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.855205782354596,
+      "lexical": 0.5882352941176471
+    },
+    {
+      "id": "p29",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8512528576033711,
+      "lexical": 0.5
+    },
+    {
+      "id": "p30",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8090684724946431,
+      "lexical": 0.35714285714285715
+    },
+    {
+      "id": "p31",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8551791061671727,
+      "lexical": 0.5833333333333334
+    },
+    {
+      "id": "p32",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7484796987083258,
+      "lexical": 0.5263157894736842
+    },
+    {
+      "id": "p33",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.5342745220387629,
+      "lexical": 0.0975609756097561
+    },
+    {
+      "id": "p34",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8640086227699897,
+      "lexical": 0.5263157894736842
+    },
+    {
+      "id": "p35",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7931962901923716,
+      "lexical": 0.2
+    },
+    {
+      "id": "p36",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.817174907083757,
+      "lexical": 0.3963963963963964
+    },
+    {
+      "id": "p37",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8165026493786425,
+      "lexical": 0.5128205128205128
+    },
+    {
+      "id": "p38",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7811817216443893,
+      "lexical": 0.46153846153846156
+    },
+    {
+      "id": "p39",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7938035520176605,
+      "lexical": 0.16666666666666666
+    },
+    {
+      "id": "p40",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.884670056036341,
+      "lexical": 0.5
+    },
+    {
+      "id": "p41",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.887565475591709,
+      "lexical": 0.43478260869565216
+    },
+    {
+      "id": "p42",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8462542388163661,
+      "lexical": 0.38095238095238093
+    },
+    {
+      "id": "p43",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8919174842845501,
+      "lexical": 0.6666666666666666
+    },
+    {
+      "id": "p44",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8595615389846083,
+      "lexical": 0.19047619047619047
+    },
+    {
+      "id": "p45",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9635834102226626,
+      "lexical": 0.4
+    },
+    {
+      "id": "p46",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8702086900973759,
+      "lexical": 0.5333333333333333
+    },
+    {
+      "id": "p47",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.6207213278796906,
+      "lexical": 0.11764705882352941
+    },
+    {
+      "id": "p48",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.86402005436996,
+      "lexical": 0.4
+    },
+    {
+      "id": "p49",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8150291721380306,
+      "lexical": 0.4444444444444444
+    },
+    {
+      "id": "p50",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7398506312564759,
+      "lexical": 0.3076923076923077
+    },
+    {
+      "id": "p51",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8406274379820244,
+      "lexical": 0.2222222222222222
+    },
+    {
+      "id": "p52",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8141365785168752,
+      "lexical": 0.37037037037037035
+    },
+    {
+      "id": "p53",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7984538648408144,
+      "lexical": 0.47058823529411764
+    },
+    {
+      "id": "p54",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8313067191343766,
+      "lexical": 0.34782608695652173
+    },
+    {
+      "id": "p55",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9446349515998121,
+      "lexical": 0.5208333333333334
+    },
+    {
+      "id": "p56",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.9248543641598366,
+      "lexical": 0.7586206896551724
+    },
+    {
+      "id": "p57",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.7520395229817598,
+      "lexical": 0.38095238095238093
+    },
+    {
+      "id": "p58",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.8353929074767636,
+      "lexical": 0.6956521739130435
+    },
+    {
+      "id": "p59",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.6684029059317684,
+      "lexical": 0.13793103448275862
+    },
+    {
+      "id": "p60",
+      "label": "positive",
+      "dim": "paraphrase",
+      "score": 0.6763087885880542,
+      "lexical": 0.21428571428571427
+    },
+    {
+      "id": "n01",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.8467432803842283,
+      "lexical": 0.6792452830188679
+    },
+    {
+      "id": "n02",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.7759686811066768,
+      "lexical": 0.9019607843137255
+    },
+    {
+      "id": "n03",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.7481492606075939,
+      "lexical": 0.7619047619047619
+    },
+    {
+      "id": "n04",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.8537215615825426,
+      "lexical": 0.6829268292682927
+    },
+    {
+      "id": "n05",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.795174549028901,
+      "lexical": 0.5789473684210527
+    },
+    {
+      "id": "n06",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.7160447707417703,
+      "lexical": 0.8275862068965517
+    },
+    {
+      "id": "n07",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.848249053001151,
+      "lexical": 0.7777777777777778
+    },
+    {
+      "id": "n08",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.775807428482852,
+      "lexical": 0.7428571428571429
+    },
+    {
+      "id": "n09",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.7749838730022434,
+      "lexical": 0.75
+    },
+    {
+      "id": "n10",
+      "label": "hard_negative",
+      "dim": "file",
+      "score": 0.971940914060131,
+      "lexical": 0.9655172413793104
+    },
+    {
+      "id": "n11",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9374551488214191,
+      "lexical": 0.8571428571428571
+    },
+    {
+      "id": "n12",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9699514727983526,
+      "lexical": 0.9230769230769231
+    },
+    {
+      "id": "n13",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9185112274118945,
+      "lexical": 0.8888888888888888
+    },
+    {
+      "id": "n14",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9785134487883187,
+      "lexical": 0.6190476190476191
+    },
+    {
+      "id": "n15",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9897691449431224,
+      "lexical": 0.6
+    },
+    {
+      "id": "n16",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9352937357391432,
+      "lexical": 0.7777777777777778
+    },
+    {
+      "id": "n17",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.8781026236789505,
+      "lexical": 0.4
+    },
+    {
+      "id": "n18",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.873370486339589,
+      "lexical": 0.75
+    },
+    {
+      "id": "n19",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9644793481898386,
+      "lexical": 0.5357142857142857
+    },
+    {
+      "id": "n20",
+      "label": "hard_negative",
+      "dim": "direction",
+      "score": 0.9438767853857855,
+      "lexical": 0.6
+    },
+    {
+      "id": "n21",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.8060395017860862,
+      "lexical": 0.64
+    },
+    {
+      "id": "n22",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.9549086013649151,
+      "lexical": 0.8333333333333334
+    },
+    {
+      "id": "n23",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.8946510409176787,
+      "lexical": 0.875
+    },
+    {
+      "id": "n24",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.9315269705327328,
+      "lexical": 0.9655172413793104
+    },
+    {
+      "id": "n25",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.9868739407909619,
+      "lexical": 0.9714285714285714
+    },
+    {
+      "id": "n26",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.9122765652318774,
+      "lexical": 0.625
+    },
+    {
+      "id": "n27",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.947788983360093,
+      "lexical": 0.9090909090909091
+    },
+    {
+      "id": "n28",
+      "label": "hard_negative",
+      "dim": "param",
+      "score": 0.9674100334562222,
+      "lexical": 0.9333333333333333
+    },
+    {
+      "id": "n29",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.9468774364139008,
+      "lexical": 0.8888888888888888
+    },
+    {
+      "id": "n30",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.8300278940912946,
+      "lexical": 0.9
+    },
+    {
+      "id": "n31",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.9386960978974912,
+      "lexical": 0.875
+    },
+    {
+      "id": "n32",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.9848872214691984,
+      "lexical": 0.8461538461538461
+    },
+    {
+      "id": "n33",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.9313013363689828,
+      "lexical": 0.9090909090909091
+    },
+    {
+      "id": "n34",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.8416856821028811,
+      "lexical": 0.8771929824561403
+    },
+    {
+      "id": "n35",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.9237297586842986,
+      "lexical": 0.875
+    },
+    {
+      "id": "n36",
+      "label": "hard_negative",
+      "dim": "language",
+      "score": 0.9681597742296502,
+      "lexical": 0.9
+    },
+    {
+      "id": "n37",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.8671654187396041,
+      "lexical": 0.8
+    },
+    {
+      "id": "n38",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.9061735200816605,
+      "lexical": 0.8823529411764706
+    },
+    {
+      "id": "n39",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.7514866451358426,
+      "lexical": 0.5384615384615384
+    },
+    {
+      "id": "n40",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.7881781972393496,
+      "lexical": 0.6
+    },
+    {
+      "id": "n41",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.8016718673760798,
+      "lexical": 0.8333333333333334
+    },
+    {
+      "id": "n42",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.8369961513724256,
+      "lexical": 0.64
+    },
+    {
+      "id": "n43",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.9517220832748283,
+      "lexical": 0.875
+    },
+    {
+      "id": "n44",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.7899168120149781,
+      "lexical": 0.9285714285714286
+    },
+    {
+      "id": "n45",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.7742071507394948,
+      "lexical": 0.7777777777777778
+    },
+    {
+      "id": "n46",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.7402417704041899,
+      "lexical": 0.7777777777777778
+    },
+    {
+      "id": "n47",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.7169036809880892,
+      "lexical": 0.6
+    },
+    {
+      "id": "n48",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.7041370181476836,
+      "lexical": 0.5454545454545454
+    },
+    {
+      "id": "n49",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.7196048265574555,
+      "lexical": 0.75
+    },
+    {
+      "id": "n50",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.6949577955668312,
+      "lexical": 0.6666666666666666
+    },
+    {
+      "id": "n51",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.8360567119380748,
+      "lexical": 0.8
+    },
+    {
+      "id": "n52",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.7120168351177163,
+      "lexical": 0.6666666666666666
+    },
+    {
+      "id": "n53",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.735348609970653,
+      "lexical": 0.5
+    },
+    {
+      "id": "n54",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.6929090572142587,
+      "lexical": 0.25
+    },
+    {
+      "id": "n55",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.7485733692550682,
+      "lexical": 0.8571428571428571
+    },
+    {
+      "id": "n56",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.8355206680412017,
+      "lexical": 0.7142857142857143
+    },
+    {
+      "id": "n57",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.9185723748929229,
+      "lexical": 0.8421052631578947
+    },
+    {
+      "id": "n58",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.743427865473567,
+      "lexical": 0.8
+    },
+    {
+      "id": "n59",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.6761626362118422,
+      "lexical": 0.6666666666666666
+    },
+    {
+      "id": "n60",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.42550755789352807,
+      "lexical": 0.375
+    },
+    {
+      "id": "L01",
+      "label": "positive",
+      "dim": "long",
+      "score": 0.9167548511082065,
+      "lexical": 0.656934306569343
+    },
+    {
+      "id": "L02",
+      "label": "positive",
+      "dim": "long",
+      "score": 0.9782518306133425,
+      "lexical": 0.758364312267658
+    },
+    {
+      "id": "L03",
+      "label": "positive",
+      "dim": "long",
+      "score": 0.9553842545142373,
+      "lexical": 0.7247386759581882
+    },
+    {
+      "id": "L04",
+      "label": "positive",
+      "dim": "long",
+      "score": 0.9517820613446741,
+      "lexical": 0.7304347826086957
+    },
+    {
+      "id": "L05",
+      "label": "hard_negative",
+      "dim": "long",
+      "score": 0.9996221953476387,
+      "lexical": 0.9955947136563876
+    },
+    {
+      "id": "L06",
+      "label": "hard_negative",
+      "dim": "long",
+      "score": 0.9115284823585652,
+      "lexical": 0.847953216374269
+    },
+    {
+      "id": "L07",
+      "label": "hard_negative",
+      "dim": "long",
+      "score": 0.9351889525997104,
+      "lexical": 0.8132530120481928
+    },
+    {
+      "id": "L08",
+      "label": "hard_negative",
+      "dim": "long",
+      "score": 0.867407617192901,
+      "lexical": 0.6696035242290749
+    },
+    {
+      "id": "p61",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9815801275557701,
+      "lexical": 0.9230769230769231
+    },
+    {
+      "id": "p62",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9189577677300843,
+      "lexical": 0.8888888888888888
+    },
+    {
+      "id": "p63",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.8827867269225723,
+      "lexical": 0.5555555555555556
+    },
+    {
+      "id": "p64",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9387097104296886,
+      "lexical": 0.8421052631578947
+    },
+    {
+      "id": "p65",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.7407433741126226,
+      "lexical": 0.6046511627906976
+    },
+    {
+      "id": "p66",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9146779767008661,
+      "lexical": 0.88
+    },
+    {
+      "id": "p67",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9386241229313527,
+      "lexical": 0.8333333333333334
+    },
+    {
+      "id": "p68",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.8547928906924098,
+      "lexical": 0.5925925925925926
+    },
+    {
+      "id": "p69",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.8060990177927965,
+      "lexical": 0.6666666666666666
+    },
+    {
+      "id": "p70",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.7733238695402824,
+      "lexical": 0.5555555555555556
+    },
+    {
+      "id": "p71",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9590590803856338,
+      "lexical": 0.7
+    },
+    {
+      "id": "p72",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.8741792009599121,
+      "lexical": 0.8372093023255814
+    },
+    {
+      "id": "p73",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9777285604423813,
+      "lexical": 0.96
+    },
+    {
+      "id": "p74",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.903572047385953,
+      "lexical": 0.6
+    },
+    {
+      "id": "p75",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.931395278755353,
+      "lexical": 0.9523809523809523
+    },
+    {
+      "id": "p76",
+      "label": "positive",
+      "dim": "minimal_edit",
+      "score": 0.9271991148520714,
+      "lexical": 0.6666666666666666
+    },
+    {
+      "id": "n61",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.8442484193540216,
+      "lexical": 0.5
+    },
+    {
+      "id": "n62",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.5705506067260173,
+      "lexical": 0.6
+    },
+    {
+      "id": "n63",
+      "label": "hard_negative",
+      "dim": "task",
+      "score": 0.6926924253386779,
+      "lexical": 0.7
+    },
+    {
+      "id": "n64",
+      "label": "hard_negative",
+      "dim": "env",
+      "score": 0.829457982467676,
+      "lexical": 0.75
+    }
+  ],
+  "top_negative_hits": [
+    {
+      "id": "L05",
+      "dim": "long",
+      "a": "线上订单库的连接池配置是这样的：最大连接数 50，最小空闲 5，获取连接超时 3000 毫秒，空闲连接回收 600 秒，连接最大存活 1800 秒。高峰期经常出现获取连接超时，日志里能看到 Connection is not available, request timed out after 3000ms。业务反馈白天只是偶发，晚上八点促销期间几乎每分钟都有。请分析这组参数是否合理，并给出具体的调整建议和验证方法，包括怎么确认是连接泄漏还是并发不足。",
+      "b": "线上订单库的连接池配置是这样的：最大连接数 50，最小空闲 5，获取连接超时 300 毫秒，空闲连接回收 600 秒，连接最大存活 1800 秒。高峰期经常出现获取连接超时，日志里能看到 Connection is not available, request timed out after 300ms。业务反馈白天只是偶发，晚上八点促销期间几乎每分钟都有。请分析这组参数是否合理，并给出具体的调整建议和验证方法，包括怎么确认是连接泄漏还是并发不足。",
+      "reason": "长句中一处数值差异：3000 毫秒与 300 毫秒，同一现象下的结论与调参方向完全不同",
+      "score": 0.9996221953476387
+    },
+    {
+      "id": "n15",
+      "dim": "direction",
+      "a": "把数据从 MySQL 迁移到 PostgreSQL",
+      "b": "把数据从 PostgreSQL 迁移到 MySQL",
+      "reason": "方向相反：迁移方向不同",
+      "score": 0.9897691449431224
+    },
+    {
+      "id": "n25",
+      "dim": "param",
+      "a": "把 pool size 设成 10",
+      "b": "把 pool size 设成 100",
+      "reason": "数值不同：连接池容量差一个数量级",
+      "score": 0.9868739407909619
+    },
+    {
+      "id": "n32",
+      "dim": "language",
+      "a": "回答用中文，代码注释用英文",
+      "b": "回答用英文，代码注释用中文",
+      "reason": "语言分配相反",
+      "score": 0.9848872214691984
+    },
+    {
+      "id": "n14",
+      "dim": "direction",
+      "a": "把这段代码从 Java 转成 Kotlin",
+      "b": "把这段代码从 Kotlin 转成 Java",
+      "reason": "方向相反：转换方向不同",
+      "score": 0.9785134487883187
+    },
+    {
+      "id": "n10",
+      "dim": "file",
+      "a": "把前端 Dockerfile 的基础镜像换成 alpine",
+      "b": "把后端 Dockerfile 的基础镜像换成 alpine",
+      "reason": "对象不同：两个镜像的构建方式不同",
+      "score": 0.971940914060131
+    },
+    {
+      "id": "n12",
+      "dim": "direction",
+      "a": "把超时时间调大到 30 秒",
+      "b": "把超时时间调小到 30 秒",
+      "reason": "方向相反：调大与调小",
+      "score": 0.9699514727983526
+    },
+    {
+      "id": "n36",
+      "dim": "language",
+      "a": "把报错信息翻译成中文",
+      "b": "把报错信息翻译成英文",
+      "reason": "翻译方向相反",
+      "score": 0.9681597742296502
+    },
+    {
+      "id": "n28",
+      "dim": "param",
+      "a": "超时设成 5s",
+      "b": "超时设成 50s",
+      "reason": "数值不同：一个数量级之差",
+      "score": 0.9674100334562222
+    },
+    {
+      "id": "n19",
+      "dim": "direction",
+      "a": "把字段从 snake_case 改成 camelCase",
+      "b": "把字段从 camelCase 改成 snake_case",
+      "reason": "方向相反：命名风格互换",
+      "score": 0.9644793481898386
+    },
+    {
+      "id": "n22",
+      "dim": "param",
+      "a": "把缓存时间设为 5 分钟",
+      "b": "把缓存时间设为 5 小时",
+      "reason": "量级不同：300 秒与 18000 秒",
+      "score": 0.9549086013649151
+    },
+    {
+      "id": "n43",
+      "dim": "env",
+      "a": "开发分支怎么发版",
+      "b": "发布分支怎么发版",
+      "reason": "分支不同：流程与权限不同",
+      "score": 0.9517220832748283
+    }
+  ],
+  "weakest_positives": [
+    {
+      "id": "p33",
+      "dim": "paraphrase",
+      "a": "k8s pod 一直 CrashLoopBackOff 怎么办",
+      "b": "容器反复重启怎么排查",
+      "score": 0.5342745220387629
+    },
+    {
+      "id": "p25",
+      "dim": "paraphrase",
+      "a": "这个循环为什么死循环了",
+      "b": "这段 while 卡死是什么原因",
+      "score": 0.6014283229753097
+    },
+    {
+      "id": "p47",
+      "dim": "paraphrase",
+      "a": "这个 Vue 组件为什么不响应式更新",
+      "b": "数据变了但视图没更新，是什么原因",
+      "score": 0.6207213278796906
+    },
+    {
+      "id": "p59",
+      "dim": "paraphrase",
+      "a": "这段代码跑不通，帮我看看哪里不对",
+      "b": "运行报了错，不确定问题在哪",
+      "score": 0.6684029059317684
+    },
+    {
+      "id": "p60",
+      "dim": "paraphrase",
+      "a": "帮我看看这个方案有没有问题",
+      "b": "这个设计你觉得靠谱吗，有什么坑",
+      "score": 0.6763087885880542
+    },
+    {
+      "id": "p10",
+      "dim": "paraphrase",
+      "a": "为什么我的单元测试一直是红的",
+      "b": "单测一直失败是什么原因",
+      "score": 0.6901863336945573
+    },
+    {
+      "id": "p24",
+      "dim": "paraphrase",
+      "a": "git 怎么撤销上一次 commit 但保留改动",
+      "b": "上一次提交想撤掉，代码别丢，怎么做",
+      "score": 0.6989804995113612
+    },
+    {
+      "id": "p23",
+      "dim": "paraphrase",
+      "a": "帮我 review 一下这段 TS 类型",
+      "b": "看看我这个 TypeScript 类型写得对不对",
+      "score": 0.7070786815419785
+    },
+    {
+      "id": "p01",
+      "dim": "paraphrase",
+      "a": "帮我修复登录时的空指针异常",
+      "b": "登录这里为什么抛 NullPointerException，帮我修一下",
+      "score": 0.7191929777478683
+    },
+    {
+      "id": "p27",
+      "dim": "paraphrase",
+      "a": "这个接口返回 502 怎么排查",
+      "b": "上游返回 Bad Gateway，从哪里查起",
+      "score": 0.7208637681306891
+    },
+    {
+      "id": "p13",
+      "dim": "paraphrase",
+      "a": "把配置改成从环境变量读取",
+      "b": "这个配置能不能走 env 变量",
+      "score": 0.7365648316499818
+    },
+    {
+      "id": "p14",
+      "dim": "paraphrase",
+      "a": "这个 Docker 镜像为什么这么大",
+      "b": "镜像体积为什么这么大，怎么瘦身",
+      "score": 0.7382809418011698
+    }
+  ]
+}
