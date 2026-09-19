@@ -1,0 +1,74 @@
+# PH25 (2026-09-19): dependency-manifest scan exemptions. Scope = Maven +
+# npm manifests only (see the "Dependency vulnerability scan" step in
+# .github/workflows/ci.yml), NOT the container image — image exemptions
+# live in deploy/security/.trivyignore.
+#
+# Review EVERY entry when the referenced dependency is upgraded: an entry
+# that outlives its rationale is a silently disabled gate (#895).
+#
+# Suppressed findings are printed on every run via --show-suppressed, so
+# this file hides an advisory from the exit code, never from the log.
+#
+# ===========================================================================
+# SECTION 1 — NOT REACHABLE. Version is left alone on purpose; rationale is
+# expected to stay true until the dependency is next bumped.
+# ===========================================================================
+#
+# org.bouncycastle:bcprov-jdk18on 1.78.1 (backend/persistence-postgres/
+# pom.xml:33-36, pulled in for Argon2PasswordEncoder; it carries an explicit
+# <version> there instead of inheriting the Boot BOM, which is why it is
+# resolvable even when the BOM chain is not). None of the three advisories
+# sits on a code path this project reaches:
+#   - CVE-2025-14813 GOSTCTR block handling — GOST ciphers are not used;
+#   - CVE-2026-8763 PKIX name-constraints bypass — no certificate-path
+#     validation is performed with BouncyCastle here;
+#   - CVE-2026-13506 lazy ASN.1 sequence DoS — no untrusted DER parsing.
+# The fixes land in 1.80.2 / 1.84 / 1.85, i.e. a version jump outside a
+# dependency-audit change; bump it in a dedicated task and DROP these rows.
+CVE-2025-14813
+CVE-2026-8763
+CVE-2026-13506
+#
+# ===========================================================================
+# SECTION 2 — TRACKED BASELINE. Real HIGH/CRITICAL advisories against
+# versions this repo actually resolves to, recorded so the gate can land and
+# start catching NEW ones. Each row names the live tracker that removes it —
+# a row whose tracker has landed is a bug, not a baseline.
+#
+# Reachability is judged per row below and is NOT what puts a row here; the
+# tracker is. (Section 1 rows, by contrast, are here because they are
+# unreachable and no bump is planned.)
+# ===========================================================================
+#
+# (org.postgresql:postgresql had three rows here until 2026-09-19. Its
+# tracker landed: #973 -> PR #975 pinned the driver to 42.7.12 in
+# backend/pom.xml's dependencyManagement, so develop no longer resolves the
+# vulnerable 42.7.5 and the rows were deleted rather than left to rot.)
+#
+# org.apache.kafka:kafka-clients 3.8.1 — BOM-managed; gateway-app/pom.xml:57-58
+# and control-plane-app/pom.xml:53-54 declare no <version>. Producer buffer-pool
+# race -> message corruption/misrouting (GHSA-5qcv-4rpc-jp93); the ADR-0014 R3
+# retention publisher is a producer, so the affected role DOES match. No fix
+# exists inside 3.8.x (fixes: 3.9.2 / 4.0.2 / 4.1.2).
+# Tracker: issue #980. DROP when the Boot BOM moves past 3.8.1.
+CVE-2026-35554
+#
+# spring-boot-starter-actuator 3.4.5 — BOM-managed; gateway-app/pom.xml:63-66
+# and control-plane-app/pom.xml:67 declare no <version>. Both are auth bypasses
+# whose precondition is a specific piece of configuration, and neither exists
+# here (an earlier version of this comment blamed the exposure list — that was
+# the wrong reason, even though the conclusion holds):
+#   - CVE-2026-22731 needs a secured endpoint declared under a path that is
+#     also configured as a Health Group additional path
+#     (management.endpoint.health.group.*.additional-path);
+#   - CVE-2026-22733 needs an endpoint declared under the path used by the
+#     CloudFoundry Actuator endpoints.
+# `grep -rniE "additional-path|health\.group|cloudfoundry" backend/` returns
+# nothing, so neither precondition is reachable. Exposure as configured, for
+# the record: control-plane-app application.yml:112-119 and gateway-app
+# application.yml:104-111 expose health,info; the application-monitoring.yml
+# profile in each app adds prometheus.
+# Tracker: dependabot PR #87 (spring-boot.version 3.4.5 -> 4.1.1). DROP when
+# #87 merges, after confirming the resulting Boot line is >= 3.5.12 / 4.0.4.
+CVE-2026-22731
+CVE-2026-22733
