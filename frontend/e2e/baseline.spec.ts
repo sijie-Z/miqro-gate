@@ -1633,7 +1633,10 @@ test('#869: the in-console handbook renders offline and switches documents', asy
   await page.getByTestId('help-doc-quickstart').click();
   await expect(content).toContainText('10 分钟跑通第一条请求');
 
-  // Relative doc links are rerouted to GitHub blob URLs.
+  // Relative doc links are rerouted to GitHub blob URLs (exact match: a
+  // substring check is a CodeQL "incomplete URL sanitization" anti-pattern).
   const href = await content.locator('a', { hasText: 'admin-guide' }).first().getAttribute('href');
-  expect(href).toContain('github.com/sijie-Z/miqro-gate/blob/develop/docs/user-guide/');
+  expect(href).toBe(
+    'https://github.com/sijie-Z/miqro-gate/blob/develop/docs/user-guide/admin-guide.md',
+  );
 });

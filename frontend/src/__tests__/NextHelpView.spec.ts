@@ -42,8 +42,12 @@ describe('NextHelpView (#869)', () => {
     const wrapper = await mountHelp();
     const links = wrapper.findAll('[data-testid="help-content"] a');
     expect(links.length).toBeGreaterThan(0);
-    const docLink = links.find((a) => a.attributes('href')?.includes('github.com'));
-    expect(docLink, 'a doc link should be rewritten to GitHub').toBeTruthy();
+    // Exact-value assertion (a substring check is both weaker and a CodeQL
+    // "incomplete URL sanitization" anti-pattern).
+    const expected =
+      'https://github.com/sijie-Z/miqro-gate/blob/develop/docs/user-guide/quickstart.md';
+    const docLink = links.find((a) => a.attributes('href') === expected);
+    expect(docLink, 'quickstart.md should be rewritten to its GitHub blob URL').toBeTruthy();
     expect(docLink!.attributes('target')).toBe('_blank');
     expect(docLink!.attributes('rel')).toBe('noopener');
   });
