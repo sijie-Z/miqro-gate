@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -409,6 +410,37 @@ class AdminQuotaRuleApiIntegrationTest {
                 .content("{\"name\":\"ok-scope\",\"type\":\"QUOTA_THRESHOLD\",\"threshold\":80,"
                         + "\"scopeJson\":\"{\\\"quotaRuleId\\\":\\\"" + ruleId + "\\\"}\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.scopeJson").isNotEmpty());
+    }
+
+    @Test
+    @DisplayName("deleting a quota rule referenced by a QUOTA_THRESHOLD rule is refused (I21)")
+    void deleteBlockedByQuotaThresholdRuleReference() throws Exception {
+        MvcResult put = putQuota(quotaBody("USER", adminUserId, "TOKENS", "MONTHLY", 10000, 80))
+                .andExpect(status().isOk()).andReturn();
+        String ruleId = (String) objectMapper.readValue(put.getResponse().getContentAsString(), Map.class).get("id");
+        MvcResult alert = mockMvc
+                .perform(post("/api/v1/admin/alert-rules").cookie(adminSession, adminCsrf)
+                        .header("X-CSRF-Token", adminCsrfToken).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"quota-80pct\",\"type\":\"QUOTA_THRESHOLD\",\"threshold\":80,"
+                                + "\"scopeJson\":\"{\\\"quotaRuleId\\\":\\\"" + ruleId + "\\\"}\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String alertId = (String) objectMapper.readValue(alert.getResponse().getContentAsString(), Map.class).get("id");
+
+        // Referenced by a live alert rule: the delete must not silently orphan the
+        // reference (scope_json carries no FK, so nothing else would catch this).
+        mockMvc.perform(delete("/api/v1/admin/quota-rules/" + ruleId).cookie(adminSession, adminCsrf)
+                .header("X-CSRF-Token", adminCsrfToken)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RESOURCE_IN_USE"))
+                .andExpect(jsonPath("$.dependencies", hasSize(1)))
+                .andExpect(jsonPath("$.dependencies[0].type").value("ALERT_RULE"))
+                .andExpect(jsonPath("$.dependencies[0].id").value(alertId))
+                .andExpect(jsonPath("$.dependencies[0].name").value("quota-80pct"));
+
+        // Release the reference, then the delete succeeds.
+        mockMvc.perform(delete("/api/v1/admin/alert-rules/" + alertId).cookie(adminSession, adminCsrf)
+                .header("X-CSRF-Token", adminCsrfToken)).andExpect(status().isOk());
+        mockMvc.perform(delete("/api/v1/admin/quota-rules/" + ruleId).cookie(adminSession, adminCsrf)
+                .header("X-CSRF-Token", adminCsrfToken)).andExpect(status().isNoContent());
     }
 
     private long eventCount() {
