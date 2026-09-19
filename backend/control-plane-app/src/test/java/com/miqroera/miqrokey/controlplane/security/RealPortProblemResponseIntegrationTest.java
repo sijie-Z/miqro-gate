@@ -23,11 +23,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code MockHttpServletResponse}. (1) Mock responses default to UTF-8, so the
  * writer mangles nothing even when the writer never sets a charset — Tomcat
  * falls back to ISO-8859-1 for a {@code Content-Type} without charset, turning
- * the Chinese {@code detail} into {@code ?} (the #630 class of bug).
- * {@code miqrokey.control.admin-access.ip-allowlist} has no
- * {@code server.servlet.encoding.force-response} override, so nothing forces
- * UTF-8 for these raw writers. (2) The requestId correlation token is the only
- * handle an external caller has — a machine client gets no session cookie.
+ * the Chinese {@code detail} into {@code ?} (the #630 class of bug). The app
+ * declares no {@code server.servlet.encoding.*} property, so
+ * {@code force-response} stays at its default {@code false} and nothing
+ * normalises the charset behind these raw writers. (2) The requestId
+ * correlation token is the only handle an external caller has — a machine
+ * client gets no session cookie.
  * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)

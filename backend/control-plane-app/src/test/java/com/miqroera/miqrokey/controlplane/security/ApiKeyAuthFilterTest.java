@@ -1,5 +1,7 @@
 package com.miqroera.miqrokey.controlplane.security;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.crypto.ConsumerJwtVerifier;
 import com.miqroera.miqrokey.domain.model.ApiConsumer;
 import com.miqroera.miqrokey.domain.repository.ApiConsumerRepository;
@@ -108,8 +110,7 @@ class ApiKeyAuthFilterTest {
         MockHttpServletResponse response = new MockHttpServletResponse();
         filter.doFilter(request, response, chain);
         assertThat(response.getStatus()).isEqualTo(403);
-        com.fasterxml.jackson.databind.JsonNode body = new com.fasterxml.jackson.databind.ObjectMapper()
-                .readTree(response.getContentAsString());
+        JsonNode body = new ObjectMapper().readTree(response.getContentAsString());
         return body.path("requestId").asText();
     }
 }
