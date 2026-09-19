@@ -50,7 +50,7 @@ public class AdminPriceController {
     }
 
     @PostMapping
-    public ResponseEntity<PriceSnapshotView> create(@Valid @RequestBody CreateRequest body) {
+    public ResponseEntity<PriceSnapshotView> create(@Valid @RequestBody PriceCreateRequest body) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(priceService.create(userContext.getUser().tenantId(), body.providerProductId(), body.modelId(),
                         body.tokenType(), body.currency(), body.unitPrice(), body.source(),
@@ -73,7 +73,7 @@ public class AdminPriceController {
         return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
-    public record CreateRequest(@NotNull UUID providerProductId, @NotBlank @Size(max = 200) String modelId,
+    public record PriceCreateRequest(@NotNull UUID providerProductId, @NotBlank @Size(max = 200) String modelId,
             @NotBlank String tokenType, @NotBlank @Size(max = 8) String currency,
             @NotNull @DecimalMin(value = "0", inclusive = false) BigDecimal unitPrice,
             @NotBlank @Size(max = 32) String source) {

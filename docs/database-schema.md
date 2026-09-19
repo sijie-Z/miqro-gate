@@ -233,7 +233,8 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
     **查这一列前先确认重算跑过**——陈旧标签不含判据版本，读起来与新鲜标签无法区分
   - **`UNAVAILABLE` 不等于单价 0**：查不到价格时价格列保持 NULL。"价格未知"与"免费"是不同的审计事实，静默写 0 会低估历史支出
   - 取值口径：`price_snapshot` 中 `effective_from <= 本行 occurred_at` 的最新一行（同 `effective_from` 由 `id DESC` 做确定性 tie-break）；回填按 `occurred_at`，**不是按回填时刻**。动机：成本原先是查询时按**当前**价目现算的，所以改一次价目，历史报表金额跟着变
-  - **读取方**：明细/汇总/计费/配额水位（`UsageStatsAggregator` 链路）已改读此基座（#710 F21-A 第二刀）；成本分摊 `cost_allocations` 仍用"分配时刻最新快照"，未切换
+  - **读取方**：汇总/计费/配额水位（`UsageStatsAggregator` 链路）读冻结基座；**明细行也读同一个表达式**（同 `PriceSnapshotSql.frozenOrAsOf`，经 `RowPriceBasis` 随行带出，不再自查价目表）——两处口径一致是**被断言的**，不是约定：一次改价若只动其中一处即为缺陷（`PriceBasisCostStabilityIntegrationTest`）
+  - **仍未切换**：成本分摊 `cost_allocations` 用"分配时刻最新快照"（`CostAllocationService`）；网关写事件时**不写任何价格列**，四列与 `base_cost_amount` 都由控制面回填通道盖章——即"冻结"落在事后回填而非写入时刻。两者都要口径决策，见 #710 待办
   - `base_cost_amount numeric(24,10)`（V66，可空）——事件时刻依据当时价目算出的**基础成本**，与 `price_currency` 配对。**NOW 就冻**的理由：`单价 × 数量` 只在费率平坦时成立，引入阶梯价/免费额度后不成立（AWS CUR 因此同时给出 rate 与 line-item cost）。`COMPLETE` 时有值（可为 0，即确实免费）；`PARTIAL` 时只含已定价维度；`UNAVAILABLE` 时 **NULL——不是 0**
   - 不变式：**一旦有值即不再改写**（"可空"是暂态，不是可变）。V66 之前盖章的历史行金额为 NULL，而盖章通道只选 `price_status IS NULL`，永不重选它们——由回填端点的**补写通道**（#771）从该行已冻结的 `price_*` 列派生填入；它不查价目、不改 `price_status`
   - **读取方**：`UsageStatsAggregator` 链路同时给出 `pricingStatus` 与 `unpriced.*`：已知金额与未计价用量**分开披露**，`pricingStatus != COMPLETE` 时已知金额**不是总额**。口径见 usage-accounting §6
@@ -282,7 +283,9 @@ CAA Project Registry（Spec v1.1 §7.4）：`id`、`tenant_id`、`project_id`（
 
 ### `request_context_evidence` (V55，#633)
 
-CAA 逐请求上下文证据审计（append-only）：`id`、`tenant_id`、`request_id`（gateway request id）、`source`、`value`、`confidence`、`scope`（`turn|session`）、`observed_at`。索引 `(tenant_id, request_id)`、`(tenant_id, observed_at)`。与 `usage_event` 的归属列互为佐证：usage 行回答"记到谁头上"，本表回答"凭什么这么记"。声明内容永不构成授权（Spec v1.1 §4）。
+CAA 逐请求上下文证据审计（append-only）：`id`、`tenant_id`、`request_id`（gateway request id）、`source`（`prompt_url|tool_path|bash_cwd|system_cwd|git_remote|header|suffix`）、`value`（规范化证据值：repo key/绝对路径/tag）、`confidence`、`scope`（`turn|session`，默认 `turn`）、`observed_at`（默认 `now()`）。索引 `(tenant_id, request_id)`、`(observed_at DESC)`。与 `usage_event` 的归属列互为佐证：usage 行回答"记到谁头上"，本表回答"凭什么这么记"。声明内容永不构成授权（Spec v1.1 §4）。
+
+**写入方（`V55` 建表时缺、#629 补齐）**：网关用量写入器 `PostgresUsageEventWriter` 与 `usage_event` 同批同事务写入；行 `id` = 该笔 usage 事件的 `id`，插入为 `ON CONFLICT (id) DO NOTHING`——本表主键即幂等键，同批重放不产生重复证据行，两表可按 `id` join。该幂等只覆盖本表：`usage_event` 的冲突目标是部分唯一索引 `(tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL`，`provider_request_id` 为空的事件（合并路径）重放会撞 `usage_event_pkey`，属既有边界，非本次引入。只对使用了外部选择器的裁定写行：`RESOLVED_HEADER` → `source='header'`、`value=` 客户端声明的 project id；`RESOLVED_SUFFIX` → `source='suffix'`、`value=` Key 中呈现的 tag。`SOLE_BINDING`/`POLICY_ROUTED` 未使用任何外部线索（`source` 值域无诚实取值），其解释即 `usage_event.resolution_status`，故不写行。`scope`/`observed_at` 保持默认（网关观察不到客户端侧作用域）。**读取方（查询 API）尚未交付**。注：`V55__request_context_evidence.sql` 头部注释写"网关在 Context 解析时写入"，实际写入时机是随用量落库（同批同事务）；迁移已冻结不改，以本节与实际实现为准。
 
 ### `request_usage_records` (V8，当前实现子集)
 

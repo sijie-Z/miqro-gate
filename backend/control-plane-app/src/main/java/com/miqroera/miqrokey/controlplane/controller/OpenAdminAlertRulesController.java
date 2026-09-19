@@ -43,7 +43,7 @@ public class OpenAdminAlertRulesController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public AlertRule create(HttpServletRequest request, @RequestBody CreateRequest body) {
+    public AlertRule create(HttpServletRequest request, @RequestBody OpenAdminAlertRuleCreateRequest body) {
         return ruleService.create(tenantId(request), body.name(), body.type(), body.threshold(),
                 body.dedupeMinutes() != null ? body.dedupeMinutes() : 60, body.webhookEndpointId(), body.scopeJson(),
                 auditContext(request));
@@ -60,7 +60,8 @@ public class OpenAdminAlertRulesController {
     }
 
     @PatchMapping("/{ruleId}")
-    public AlertRule update(HttpServletRequest request, @PathVariable UUID ruleId, @RequestBody UpdateRequest body) {
+    public AlertRule update(HttpServletRequest request, @PathVariable UUID ruleId,
+            @RequestBody OpenAdminAlertRuleUpdateRequest body) {
         return ruleService.update(tenantId(request), ruleId, body.name(), body.threshold(), body.dedupeMinutes(),
                 body.enabled(), body.webhookEndpointId(), body.scopeJson(), auditContext(request));
     }
@@ -92,11 +93,11 @@ public class OpenAdminAlertRulesController {
         return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
-    public record CreateRequest(String name, String type, BigDecimal threshold, Integer dedupeMinutes,
+    public record OpenAdminAlertRuleCreateRequest(String name, String type, BigDecimal threshold, Integer dedupeMinutes,
             UUID webhookEndpointId, String scopeJson) {
     }
 
-    public record UpdateRequest(String name, BigDecimal threshold, Integer dedupeMinutes, Boolean enabled,
-            UUID webhookEndpointId, String scopeJson) {
+    public record OpenAdminAlertRuleUpdateRequest(String name, BigDecimal threshold, Integer dedupeMinutes,
+            Boolean enabled, UUID webhookEndpointId, String scopeJson) {
     }
 }

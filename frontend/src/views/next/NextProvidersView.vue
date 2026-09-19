@@ -5,7 +5,7 @@
  * product instances with protocol / base host / implementation / balance
  * source columns.
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import {
@@ -20,7 +20,12 @@ import {
 } from '@/ui';
 import ProviderBrandChip from '@/components/ProviderBrandChip.vue';
 import type { ProviderProductView } from '@/types/api';
-import type { CredentialView, Grant, ModelCatalogRow, SubscriptionView } from '@/types/generated-api';
+import type {
+  CredentialView,
+  Grant,
+  ModelCatalogRow,
+  SubscriptionView,
+} from '@/types/generated-api';
 import { PROVIDERS_GUIDE } from '@/content/pageGuides';
 
 const products = ref<ProviderProductView[]>([]);
@@ -90,6 +95,19 @@ function implHintOf(status: string): string {
   return implHint[status] ?? '实现状态含义见接入文档。';
 }
 
+// Adapter-status persistent warning (#735). docs/provider-adapter-contract.md
+// promises "生产默认目录只启用 VERIFIED 产品 … 页面必须持续警告": a badge plus
+// a hover tooltip is not persistent, so every product whose status is not
+// VERIFIED carries a visible warning in the list and in its detail surface.
+// Display only — this never changes which products are enabled or usable.
+function isUnverified(status: string): boolean {
+  return status !== 'VERIFIED';
+}
+
+const unverifiedCount = computed(
+  () => products.value.filter((product) => isUnverified(product.implementationStatus)).length,
+);
+
 // Per-provider docs deep links (#651): docs/provider-catalog.md §3.1–3.8 each
 // cover one provider's endpoints, auth and reference materials. Anchor slugs
 // follow GitHub's heading ids for the Chinese headings; an unknown provider
@@ -133,6 +151,13 @@ const modelsError = ref('');
 const modelForm = ref({ modelId: '', displayName: '' });
 const modelSaving = ref(false);
 const modelError = ref('');
+const modelIdError = ref('');
+watch(
+  () => modelForm.value.modelId,
+  () => {
+    if (modelIdError.value) modelIdError.value = '';
+  },
+);
 // Model probe (#346, I4): admin-triggered official catalog fetch
 const probeStatus = ref<api.ModelProbeStatus | null>(null);
 const probing = ref(false);
@@ -187,6 +212,7 @@ async function openModels(product: ProviderProductView) {
   modelsError.value = '';
   modelForm.value = { modelId: '', displayName: '' };
   modelError.value = '';
+  modelIdError.value = '';
   modelsVisible.value = true;
   modelsLoading.value = true;
   probeError.value = '';
@@ -253,11 +279,12 @@ async function addManualModel() {
   }
   const modelId = modelForm.value.modelId.trim();
   if (!modelId) {
-    modelError.value = '模型 ID 必填。';
+    modelIdError.value = '请填写模型 ID——与上游 API 的 model 名完全一致。';
     return;
   }
   modelSaving.value = true;
   modelError.value = '';
+  modelIdError.value = '';
   try {
     await api.adminCreateModel(target.id, {
       modelId,
@@ -389,6 +416,20 @@ onMounted(load);
       }}<span v-if="loadRequestId" class="ui-request-id"> requestId: {{ loadRequestId }}</span>
     </div>
 
+    <!-- #735 adapter-status persistent warning: stays on the page for as long
+         as any listed product is not VERIFIED (hover tooltips can be missed). -->
+    <div
+      v-if="unverifiedCount"
+      class="ui-alert ui-alert--warning"
+      data-testid="adapter-warning-banner"
+    >
+      <div class="next-providers__warning-title">目录中存在未处于「已验证」状态的产品</div>
+      <div>共 {{ unverifiedCount }} 个产品实例当前不是 VERIFIED。</div>
+      <div>
+        未处于「已验证」状态的产品仍按当前配置可用（已停用的除外），但不应承载生产流量；本提示不改变产品的启用与可用行为。
+      </div>
+    </div>
+
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
         <span class="ui-panel-sub">共 {{ products.length }} 个产品实例</span>
@@ -443,6 +484,12 @@ onMounted(load);
               "
             />
           </UiTooltip>
+          <span
+            v-if="isUnverified(productOf(row).implementationStatus)"
+            class="next-providers__warning-inline"
+            data-testid="adapter-warning-row"
+            >⚠ 非已验证</span
+          >
         </template>
         <template #balanceAuthority="{ row }">
           <span class="next-providers__balance">{{
@@ -505,6 +552,23 @@ onMounted(load);
       data-testid="product-models-dialog"
       @update:open="modelsVisible = false"
     >
+      <!-- #735: the per-product detail surface repeats the persistent warning,
+           so the state is visible without hovering the row badge. -->
+      <div
+        v-if="modelsProduct && isUnverified(modelsProduct.implementationStatus)"
+        class="ui-alert ui-alert--warning"
+        data-testid="product-models-adapter-warning"
+      >
+        <div class="next-providers__warning-title">
+          当前状态「{{
+            implLabel[modelsProduct.implementationStatus] ?? modelsProduct.implementationStatus
+          }}」：适配器尚未完成验证
+        </div>
+        <div>
+          {{ implHintOf(modelsProduct.implementationStatus) }}
+          模型目录仍可查看与补录；用于生产流量前，请先在上游凭证页用真实凭证完成验证。
+        </div>
+      </div>
       <div v-if="modelsError" class="ui-alert ui-alert--error">{{ modelsError }}</div>
       <div class="next-providers__probe">
         <UiButton
@@ -563,7 +627,8 @@ onMounted(load);
           >
         </div>
         <p v-if="!models.length" class="next-providers__empty">
-          暂无目录模型。探测失败时可在此手工补录。
+          暂无目录模型。点上方「探测模型」可从供应商官方拉取全部模型；若该产品没有公开的模型列表接口（探测失败），
+          可在下方按上游真实的模型名手工补录。
         </p>
       </div>
       <div class="next-providers__model-form" data-testid="product-models-form">
@@ -572,12 +637,15 @@ onMounted(load);
           <UiInput
             v-model="modelForm.modelId"
             label="模型 ID"
-            placeholder="manual-fallback-model"
+            placeholder="deepseek-chat"
+            hint="必须与上游 API 的 model 名完全一致（客户端请求按此名路由）。"
+            :error="modelIdError"
             data-testid="product-models-id"
           />
           <UiInput
             v-model="modelForm.displayName"
             label="显示名（可选）"
+            hint="仅控制台展示用；留空则显示模型 ID。"
             data-testid="product-models-name"
           />
           <UiButton
@@ -655,6 +723,27 @@ onMounted(load);
 .ui-alert--error {
   background: var(--ui-danger-bg);
   color: var(--ui-danger-fg);
+}
+
+.ui-alert--warning {
+  background: var(--ui-warning-bg);
+  color: var(--ui-warning-fg);
+}
+
+.next-providers__warning-title {
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-providers__warning-status {
+  font-weight: var(--ui-weight-medium);
+}
+
+/* Row-level marker (#735): persistent, not a hover affordance. */
+.next-providers__warning-inline {
+  display: block;
+  margin-top: var(--ui-space-1);
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-warning-fg);
 }
 
 .next-providers__muted {

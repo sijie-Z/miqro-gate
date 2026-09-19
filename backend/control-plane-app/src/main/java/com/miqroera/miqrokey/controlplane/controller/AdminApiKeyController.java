@@ -66,7 +66,7 @@ public class AdminApiKeyController {
      * omitted scope field = full access). SYSTEM_ADMIN-only, audited.
      */
     @PatchMapping("/{keyId}/scope")
-    public AdminApiKeyView updateScope(@PathVariable UUID keyId, @Valid @RequestBody ScopeRequest body) {
+    public AdminApiKeyView updateScope(@PathVariable UUID keyId, @Valid @RequestBody ApiKeyScopeRequest body) {
         var user = userContext.getUser();
         return service.updateScope(user.tenantId(), user.id(), keyId, body.capabilities());
     }
@@ -74,6 +74,6 @@ public class AdminApiKeyController {
     public record IssueRequest(@NotBlank @Size(max = 200) String name) {
     }
 
-    public record ScopeRequest(List<String> capabilities) {
+    public record ApiKeyScopeRequest(List<String> capabilities) {
     }
 }

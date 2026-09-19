@@ -22,14 +22,21 @@ import java.util.Set;
  *
  * <p>
  * Key = SHA-256 of
- * {@code tenantId|projectId|virtualKeyId|productId|model|purpose|format|scope}
+ * {@code tenantId|projectId|virtualKeyId|productId|model|purpose|format|gen|scope}
  * where {@code format} is {@code stream=1/0} (a streamed SSE response must
- * never replay into a buffered JSON request, or vice versa — #444) and
- * {@code scope} is the <em>semantic scope</em> of the conversation: the system
- * prompt plus the <b>last user message</b> (aligned with Tencent's "latest user
- * message" and Higress's GJSON content extraction — see
- * docs/ai-gateway-comparison.md). Earlier conversation turns do not change the
- * key, so a repeated question inside different histories still hits the cache.
+ * never replay into a buffered JSON request, or vice versa — #444), {@code gen}
+ * is a fingerprint of the output-shaping generation parameters present in the
+ * body (temperature / top_p / top_k / max_tokens / penalties / reasoning effort
+ * / thinking budget / … — chat bodies keep only the conversation scope below,
+ * so these must be an explicit key dimension or two requests that differ only
+ * in sampling configuration would share one entry), and {@code scope} is the
+ * <em>semantic scope</em> of the conversation: the system prompt plus the
+ * <b>last user message</b> (aligned with Tencent's "latest user message" and
+ * Higress's GJSON content extraction — see docs/ai-gateway-comparison.md). The
+ * system part covers chat {@code system} messages, the Anthropic top-level
+ * {@code system} field, and the OpenAI Responses {@code instructions} field;
+ * earlier conversation turns do not change the key, so a repeated question
+ * inside different histories still hits the cache.
  * </p>
  *
  * <p>
@@ -55,6 +62,16 @@ public final class CacheKeyFactory {
      */
     private static final Set<String> STRIP_FIELDS = Set.of("stream", "stream_options", "metadata", "user");
 
+    /**
+     * Body fields that shape the generated output without changing the
+     * conversation. Captured as the {@code gen} key dimension so sampling
+     * differences (temperature, token budgets, thinking budget, …) can never replay
+     * each other's responses.
+     */
+    private static final List<String> GENERATION_FIELDS = List.of("temperature", "top_p", "top_k", "max_tokens",
+            "max_output_tokens", "n", "seed", "stop", "frequency_penalty", "presence_penalty", "logit_bias",
+            "response_format", "reasoning_effort", "thinking", "verbosity");
+
     private final ObjectMapper objectMapper;
 
     public CacheKeyFactory(ObjectMapper objectMapper) {
@@ -71,8 +88,36 @@ public final class CacheKeyFactory {
         String canonical = ctx.tenantId() + "|" + ctx.projectId() + "|" + ctx.key().keyId() + "|" + ctx.productId()
                 + "|" + (modelName == null ? "" : modelName) + "|"
                 + (ctx.key().purpose() == null ? "" : ctx.key().purpose()) + "|"
-                + (streamFlag(body) ? "stream=1" : "stream=0") + "|" + normalized;
+                + (streamFlag(body) ? "stream=1" : "stream=0") + "|" + generationFingerprint(body) + "|" + normalized;
         return CacheKey.from(sha256(canonical.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    /**
+     * Fingerprint of the output-shaping generation parameters present in the body,
+     * in a fixed field order so the serialization is deterministic. Returns the
+     * empty string when the body carries none (or is not JSON), keeping the
+     * pre-existing key shape for such requests.
+     */
+    private String generationFingerprint(byte[] body) {
+        if (body == null || body.length == 0) {
+            return "";
+        }
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            if (root == null || !root.isObject()) {
+                return "";
+            }
+            ObjectNode picked = objectMapper.createObjectNode();
+            for (String field : GENERATION_FIELDS) {
+                JsonNode value = root.get(field);
+                if (value != null && !value.isNull()) {
+                    picked.set(field, sortKeysRecursively(value));
+                }
+            }
+            return picked.isEmpty() ? "" : "gen=" + objectMapper.writeValueAsString(picked);
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     /**
@@ -95,7 +140,11 @@ public final class CacheKeyFactory {
     /**
      * Extracts the semantic scope of a chat request: {@code "<system>|<last
      * user message>"}. Handles OpenAI chat, Anthropic messages, and OpenAI
-     * Responses ({@code input}) shapes, including array-form content parts. Returns
+     * Responses ({@code input}) shapes, including array-form content parts. The
+     * system part is taken from a {@code system} message when present, else from
+     * the Anthropic top-level {@code system} field and the OpenAI Responses
+     * {@code instructions} field — ignoring those would let two requests with
+     * different system prompts but the same last user message share a key. Returns
      * the empty string when no user message is extractable, which makes the caller
      * fall back to the full-body key.
      */
@@ -130,6 +179,15 @@ public final class CacheKeyFactory {
                     system = content;
                 } else if ("user".equals(role) && !content.isEmpty()) {
                     lastUser = content;
+                }
+            }
+            if (system.isEmpty()) {
+                // Anthropic carries the system prompt as a top-level field;
+                // OpenAI Responses uses "instructions". Both accept a plain
+                // string or an array of content parts.
+                system = textContent(root.get("system"));
+                if (system.isEmpty()) {
+                    system = textContent(root.get("instructions"));
                 }
             }
             if (lastUser.isEmpty()) {

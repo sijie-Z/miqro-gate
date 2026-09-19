@@ -104,18 +104,45 @@ public final class UsageStatsAggregator {
      * </p>
      */
     public record PricingGap(long inputTokens, long outputTokens, long cacheReadTokens, long cacheCreationTokens,
-            long unpricedEvents, long unavailableEvents) {
+            long unpricedEvents, long unavailableEvents, long unpricedHitEvents) {
 
-        public static final PricingGap NONE = new PricingGap(0, 0, 0, 0, 0, 0);
+        public static final PricingGap NONE = new PricingGap(0, 0, 0, 0, 0, 0, 0);
 
         public PricingGap plus(PricingGap other) {
             return new PricingGap(inputTokens + other.inputTokens, outputTokens + other.outputTokens,
                     cacheReadTokens + other.cacheReadTokens, cacheCreationTokens + other.cacheCreationTokens,
-                    unpricedEvents + other.unpricedEvents, unavailableEvents + other.unavailableEvents);
+                    unpricedEvents + other.unpricedEvents, unavailableEvents + other.unavailableEvents,
+                    unpricedHitEvents + other.unpricedHitEvents);
         }
 
+        /**
+         * True when the group's <b>cost</b> could not be fully priced — the condition
+         * {@link PricingStatus} describes (#766).
+         *
+         * <p>
+         * Named separately from {@link #isEmpty()} because the two answer different
+         * questions: a group whose usage is fully priced but whose <em>cache hits</em>
+         * were not still has a complete cost. Folding the hit gap into the cost's
+         * status would report a cost figure as incomplete for a reason that never
+         * touched it.
+         * </p>
+         */
+        public boolean hasCostGap() {
+            return unpricedEvents > 0;
+        }
+
+        /**
+         * True when nothing in the group could be priced — cost {@code or} savings.
+         *
+         * <p>
+         * {@code unpricedHitEvents} counts the hits that {@code savedByGatewayCache}
+         * could not value (#790): a hit whose tokens are real but whose price was not
+         * in force when it happened contributes 0 to the saving. The saving is then a
+         * <b>lower bound</b>, and this is the count that says so.
+         * </p>
+         */
         public boolean isEmpty() {
-            return unpricedEvents == 0;
+            return unpricedEvents == 0 && unpricedHitEvents == 0;
         }
     }
 
@@ -164,7 +191,7 @@ public final class UsageStatsAggregator {
      */
     public record HitAggRow(String groupKey, String label, UUID productId, String modelId, long hitCountL1,
             long hitCountL2, TokenBucket cachedTokens, BigDecimal inputCost, BigDecimal outputCost,
-            BigDecimal cacheReadCost, BigDecimal cacheCreationCost) {
+            BigDecimal cacheReadCost, BigDecimal cacheCreationCost, long unpricedHits) {
     }
 
     /** Group-level aggregate. */
@@ -328,6 +355,10 @@ public final class UsageStatsAggregator {
             }
             savedByGatewayCache = savedByGatewayCache.add(toCost(row.inputCost())).add(toCost(row.outputCost()))
                     .add(toCost(row.cacheReadCost())).add(toCost(row.cacheCreationCost()));
+            // A hit we could not price contributes nothing above, so the saving is a
+            // lower bound. Count it, or the reader cannot tell "the cache saved almost
+            // nothing" from "we had no price to say what it saved" (#790).
+            unpriced = unpriced.plus(new PricingGap(0, 0, 0, 0, 0, 0, row.unpricedHits()));
         }
 
         /**
@@ -356,7 +387,9 @@ public final class UsageStatsAggregator {
          * </p>
          */
         private PricingStatus pricingStatus() {
-            if (unpriced.isEmpty()) {
+            // The cost's status, and only the cost's: an unpriced *hit* leaves this
+            // figure complete and makes the saving a lower bound instead (#790).
+            if (!unpriced.hasCostGap()) {
                 return PricingStatus.COMPLETE;
             }
             long counted = upstream + coalesced;
@@ -422,46 +455,42 @@ public final class UsageStatsAggregator {
     }
 
     /**
-     * Prices one usage row with the same table and math as the aggregates:
+     * Prices one usage row with the same math as the aggregates:
      * {@code tokens × unitPrice / 1e6} per token type, summed. {@code priced} is
-     * false when a non-zero input/output count has no snapshot — the caller shows
+     * false when a dimension the row actually used has no price — the caller shows
      * 未定价 rather than a misleading 0 (#758).
+     *
+     * <p>
+     * The prices come from the row's own {@link RowPriceBasis}, never from a table
+     * looked up now: that is what keeps a detail row's cost from moving when the
+     * price list changes (#710).
+     * </p>
      */
-    public static PricedCost pricedCost(Map<String, BigDecimal> prices, UUID productId, String modelId, Long input,
-            Long output, Long cacheRead, Long cacheCreation) {
+    public static PricedCost pricedCost(RowPriceBasis basis, Long input, Long output, Long cacheRead,
+            Long cacheCreation) {
         long in = orZero(input);
         long out = orZero(output);
         long read = orZero(cacheRead);
         long creation = orZero(cacheCreation);
-        boolean priced = (in == 0 || hasPrice(prices, productId, modelId, PriceTokenType.INPUT))
-                && (out == 0 || hasPrice(prices, productId, modelId, PriceTokenType.OUTPUT))
-                && (read == 0 || hasPrice(prices, productId, modelId, PriceTokenType.CACHE_READ))
-                && (creation == 0 || hasPrice(prices, productId, modelId, PriceTokenType.CACHE_CREATION));
+        boolean priced = (in == 0 || basis.unitPrice(PriceTokenType.INPUT) != null)
+                && (out == 0 || basis.unitPrice(PriceTokenType.OUTPUT) != null)
+                && (read == 0 || basis.unitPrice(PriceTokenType.CACHE_READ) != null)
+                && (creation == 0 || basis.unitPrice(PriceTokenType.CACHE_CREATION) != null);
         if (!priced) {
             return new PricedCost(BigDecimal.ZERO, false);
         }
-        BigDecimal cost = pricedOrZero(prices, productId, modelId, PriceTokenType.INPUT, in)
-                .add(pricedOrZero(prices, productId, modelId, PriceTokenType.OUTPUT, out))
-                .add(pricedOrZero(prices, productId, modelId, PriceTokenType.CACHE_READ, read))
-                .add(pricedOrZero(prices, productId, modelId, PriceTokenType.CACHE_CREATION, creation));
+        BigDecimal cost = pricedOrZero(basis, PriceTokenType.INPUT, in)
+                .add(pricedOrZero(basis, PriceTokenType.OUTPUT, out))
+                .add(pricedOrZero(basis, PriceTokenType.CACHE_READ, read))
+                .add(pricedOrZero(basis, PriceTokenType.CACHE_CREATION, creation));
         return new PricedCost(cost, true);
     }
 
-    private static String priceKey(UUID productId, String modelId, PriceTokenType type) {
-        return productId + ":" + modelId + ":" + type.name();
-    }
-
-    private static boolean hasPrice(Map<String, BigDecimal> prices, UUID productId, String modelId,
-            PriceTokenType type) {
-        return prices.containsKey(priceKey(productId, modelId, type));
-    }
-
-    private static BigDecimal pricedOrZero(Map<String, BigDecimal> prices, UUID productId, String modelId,
-            PriceTokenType type, long tokens) {
+    private static BigDecimal pricedOrZero(RowPriceBasis basis, PriceTokenType type, long tokens) {
         if (tokens == 0) {
             return BigDecimal.ZERO;
         }
-        BigDecimal unitPrice = prices.get(priceKey(productId, modelId, type));
+        BigDecimal unitPrice = basis.unitPrice(type);
         if (unitPrice == null) {
             return BigDecimal.ZERO;
         }

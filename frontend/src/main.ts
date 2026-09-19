@@ -18,7 +18,18 @@ app.use(router);
 // (preload failures plus the router's own dynamic-import error path).
 installChunkReload();
 router.onError((error) => {
-  if (isChunkLoadError(error)) reloadForChunkError();
+  if (isChunkLoadError(error)) {
+    reloadForChunkError();
+    return;
+  }
+  // #833: any other navigation failure while nothing has rendered yet (the
+  // initial route's import threw, a guard crashed, …) used to leave the
+  // router-view empty — a full white page. Route to the retry screen instead;
+  // mid-session failures keep the current page and only log.
+  console.error('[router]', error);
+  if (router.currentRoute.value.matched.length === 0) {
+    void router.replace({ name: 'unavailable' });
+  }
 });
 
 app.mount('#app');

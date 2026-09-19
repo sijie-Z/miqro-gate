@@ -8,7 +8,7 @@ import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { UiButton, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
-import type {ModelApprovalStatus} from '@/types/api';
+import type { ModelApprovalStatus } from '@/types/api';
 import type { VirtualKeyView, ModelApprovalView } from '@/types/generated-api';
 
 const keys = ref<VirtualKeyView[]>([]);
@@ -222,7 +222,8 @@ onMounted(load);
             variant="pill"
             :tone="statusTone((row as ModelApprovalView).status)"
             :label="
-              statusText[(row as ModelApprovalView).status ?? ''] ?? (row as ModelApprovalView).status
+              statusText[(row as ModelApprovalView).status ?? ''] ??
+              (row as ModelApprovalView).status
             "
           />
         </template>

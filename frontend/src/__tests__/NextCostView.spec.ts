@@ -101,20 +101,21 @@ const summary = (project: boolean): UsageSummary => ({
   },
 });
 
-const budget = (overrides: Partial<BudgetView> = {}): BudgetView => ({
-  projectId: 'p1',
-  projectCode: 'CORE',
-  projectName: 'Core AI',
-  month: '2026-09',
-  amount: '1000',
-  currency: 'CNY',
-  alertThresholdPct: '80',
-  status: 'ACTIVE',
-  spent: '900',
-  spentPct: '90',
-  level: 'WARNING',
-  ...overrides,
-} as unknown as BudgetView);
+const budget = (overrides: Partial<BudgetView> = {}): BudgetView =>
+  ({
+    projectId: 'p1',
+    projectCode: 'CORE',
+    projectName: 'Core AI',
+    month: '2026-09',
+    amount: '1000',
+    currency: 'CNY',
+    alertThresholdPct: '80',
+    status: 'ACTIVE',
+    spent: '900',
+    spentPct: '90',
+    level: 'WARNING',
+    ...overrides,
+  }) as unknown as BudgetView;
 
 describe('NextCostView', () => {
   beforeEach(() => {
@@ -123,9 +124,7 @@ describe('NextCostView', () => {
     toastState.items.splice(0);
     document.body.innerHTML = '';
     mockApi.adminUsageSummary.mockImplementation(async (q: { groupBy?: string }) =>
-      q.groupBy === 'day'
-        ? summary(false)
-        : { ...summary(true), groupBy: q.groupBy ?? 'project' },
+      q.groupBy === 'day' ? summary(false) : { ...summary(true), groupBy: q.groupBy ?? 'project' },
     );
     mockApi.adminBudgets.mockResolvedValue([budget()]);
     mockApi.listProjects.mockResolvedValue([
@@ -165,6 +164,113 @@ describe('NextCostView', () => {
     expect(wrapper.text()).toContain('83.3%'); // 1.5 / 1.8
     expect(wrapper.find('[data-testid="budget-summary"]').text()).toContain('¥1000.0000');
     expect(wrapper.find('[data-testid="budget-row"]').text()).toContain('预警');
+  });
+
+  it('shows a dash, not 0.0%, when there is no total to take a share of (#853)', async () => {
+    // Every row unpriced: the total is 0, so 0/0 — the share cannot be computed.
+    // Printing 0.0% would read as "this project accounts for none of the spend",
+    // and the column would sum to 0% instead of 100%.
+    const unpriced = summary(true);
+    unpriced.groups = unpriced.groups!.map((g) => ({
+      ...g,
+      cost: {
+        upstreamPaid: '0',
+        projectAllocated: '0',
+        gatewayObserved: '0',
+      } as unknown as UsageCost,
+    }));
+    unpriced.totals!.cost = {
+      upstreamPaid: '0',
+      projectAllocated: '0',
+      gatewayObserved: '0',
+    } as unknown as UsageCost;
+    mockApi.adminUsageSummary.mockImplementation(async (q: { groupBy?: string }) => ({
+      ...unpriced,
+      groupBy: q.groupBy ?? 'project',
+    }));
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="cost-table"]').text()).not.toContain('0.0%');
+    const dashes = wrapper.findAll('[data-testid="cost-share-undefined"]');
+    expect(dashes.length).toBe(2);
+    expect(dashes[0]?.text()).toBe('—');
+  });
+
+  it('still reports a genuine zero share when the total is non-zero', async () => {
+    // The guard must not swallow a real zero: QA 回归 costs nothing while the
+    // total is 1.5, and that is a true 0%, not an unknown.
+    const mixed = summary(true);
+    mixed.groups![1]!.cost = {
+      upstreamPaid: '0',
+      projectAllocated: '0',
+      gatewayObserved: '0',
+    } as unknown as UsageCost;
+    mockApi.adminUsageSummary.mockImplementation(async (q: { groupBy?: string }) => ({
+      ...mixed,
+      groupBy: q.groupBy ?? 'project',
+    }));
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="cost-table"]').text()).toContain('0.0%');
+    expect(wrapper.findAll('[data-testid="cost-share-undefined"]').length).toBe(0);
+  });
+
+  it('#801: marks both cost cards as not-a-total when a gap exists', async () => {
+    mockApi.adminUsageSummary.mockImplementation(async (q: { groupBy?: string }) => {
+      const base = q.groupBy === 'day' ? summary(false) : summary(true);
+      return {
+        ...base,
+        groupBy: q.groupBy ?? 'project',
+        totals: {
+          ...base.totals,
+          pricingStatus: 'PARTIAL',
+          unpriced: { unpricedEvents: 617, unavailableEvents: 565 },
+        },
+      } as never;
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="cost-unpriced-total"]').text()).toContain('未定价');
+    expect(wrapper.find('[data-testid="cost-unpriced-upstream"]').text()).toContain('未定价');
+  });
+
+  it('#801: leaves fully priced costs unmarked', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="cost-unpriced-total"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="cost-unpriced-upstream"]').exists()).toBe(false);
+  });
+
+  it('#790: says the saving is a lower bound when hits could not be priced', async () => {
+    mockApi.adminUsageSummary.mockImplementation(async (q: { groupBy?: string }) => {
+      const base = q.groupBy === 'day' ? summary(false) : summary(true);
+      return {
+        ...base,
+        groupBy: q.groupBy ?? 'project',
+        totals: { ...base.totals, unpriced: { unpricedHitEvents: 4 } },
+      } as never;
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const card = wrapper.find('[data-testid="cost-stat-cache-saved"]');
+    expect(card.text()).toContain('下界');
+    expect(card.text()).toContain('4');
+  });
+
+  it('#790: leaves a fully priced saving without the lower-bound note', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="cost-stat-cache-saved"]').text()).not.toContain('下界');
   });
 
   it('switches to the day table', async () => {

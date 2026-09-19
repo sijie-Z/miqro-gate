@@ -28,6 +28,72 @@
 - **引文口径**：ADR-0022 的每条厂商事实都带具名来源（页面 slug + 拉取日期）并已逐条复现，库内断言均带 `文件:行号`；
   未在具名来源中出现的说法一律不作断言（见 §5）。流式兼容性一条只有次要来源支撑，已按此定级并列入 §10 未决项。
 
+## 会话交接点 2026-09-18（#715 缺口②：对账差异报告导出）
+
+- **#715 缺口②（分支 `feat/reconciliation-export-715`，基于 c931e8df，HEAD 再提交本次收尾）**：
+  对账报告的四态明细行支持 CSV 合规导出 `GET /api/v1/admin/reconciliations/{id}/export?state=`。
+  SYSTEM_ADMIN-only，沿用 `AdminReconciliationController` 与 `/api/v1/admin/**` 默认拒绝拦截器，
+  未新开鉴权面。
+  - **方言按「同步管理端下载」惯例**（与 `AdminAuditController` / `AdminRetentionLogController`
+    的审计/留痕导出同形）：UTF-8 BOM、RFC 4180 引用、`= + - @ TAB CR` 公式注入防护（前置单引号）、
+    snake_case 表头、5 万行上限、`Content-Disposition: attachment`。**故意不混用**
+    `ExportTaskService` 的异步产物方言（gzip + `\,` 转义 + 可选 JSONL）——两者是不同的下载约定，
+    本端点不产生排队任务、不入 `export_tasks`。
+  - **列与页面明细同源**：单一声明列清单 `EXPORT_COLUMNS` + `DETAIL_KEYS`（snake_case 表头 ↔ 存储的
+    camelCase JSON 键）；页面 `rows()` 与导出共用同一 `rowMapper` 投影与同一 `LIMIT` 语义，
+    两处不会各自漂移。未声明的 detail 列直接抛 `IllegalStateException`，宁可失败也不错位。
+  - **租户隔离与审计**：导出前先走 `get(tenantId, reportId)`（SQL 带 `AND tenant_id = :tenantId`），
+    他人报告一律 404 `RECONCILIATION_NOT_FOUND`（不泄漏存在性）；`state` 非法 400
+    `RECONCILIATION_PARAM_INVALID`，且与报告不存在一样在写审计**之前**失败，不留孤儿审计行。
+    成功导出记 `RECONCILIATION_EXPORT`（`targetType=RECONCILIATION`，摘要 `{rows, truncated}`）。
+  - `state` 语义与 `/rows` 完全一致（同一校验函数、同一 400）；**空结果是仅表头的 CSV，不是错误**。
+  - `X-MiQroKey-Rows` 返回精确数据行数：单元格内的换行是合法 CSV，按物理行计数会少报。
+- 验证（真实命令与结果，Windows + JDK 21 + Testcontainers PostgreSQL）：
+  - 后端 `.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=ReconciliationApiIntegrationTest,ReconciliationExportCsvTest
+    -Dsurefire.failIfNoSpecifiedTests=false` →
+    `Tests run: 9, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`，`Total time: 57.323 s`。
+  - 前端 `npm ci`（0 vulnerabilities）、`npm run typecheck` exit 0、`npm run test` →
+    63 test files / 384 tests 全绿、`npm run lint` → `0 errors, 7 warnings`（7 条均为既有告警，
+    不含本次改动文件）。
+- 覆盖的边界（真实用例，非空跑）：空报表（仅表头 + `X-MiQroKey-Rows: 0`，无截断头）、未知 state
+  （400 且不新增审计行）、跨租户（404，租户 try/finally 自建自删）、5 万行上限（插入 50010 行 →
+  返回 50000 行 + `X-MiQroKey-Truncated: true`）、公式注入各前导字符与 RFC 4180 引用、
+  声明列唯一性/顺序、detail 键与声明列不漂移、导出与页面逐格一致、`state` 收窄与页面筛选一致。
+- i18n：`frontend/src/i18n/dict.ts` 已有 `导出 CSV` / `导出失败` / `已导出 N 行 CSV。` /
+  截断提示的中英映射（与审计导出一致），本次**无需新增词条**。
+- **缺口①（供应商私有账单解析器）不在本次范围**：仍需真实账单样本，本分支不含。
+- 工作区卫生：本次只提交上述 6 个改动文件 + 1 个新增单测 + 本文件；工作区另存的 21 个与本议题
+  无关的改动文件（`types/generated.ts` 重生成、若干 `ui/*` 与视图改动）保持原样未提交。
+- **内部对抗评审轮（同日追加）**：评审提出阻断项 —— `csvCell` 的公式注入防护对所有列一视同仁，
+  于是 `detail_amount` 的合法负值（退款/调整行）被导出为 `'-12.34`，既与页面显示的 `-12.34`
+  不一致，又让金额列在表格中退化为文本。可达性已复核：`CanonicalBillParser` 只校验 `amount` 非空，
+  `BillReconciliationEngine` 的 `new BigDecimal` 接受负值。
+  - **修复落在导出层**（未触碰解析器/匹配逻辑，即缺口① 范围）：整格匹配裸十进制字面量
+    `[+-]?\d+(\.\d+)?([eE][+-]?\d+)?` 时豁免防护单引号；`-1+1`、`+cmd|' /C calc'!A0` 这类
+    仅「形似数字」的串仍按公式处理。`= + @ TAB CR` 前导一律不变。
+  - **回归测试**：`ReconciliationExportCsvTest` 新增 `signedDecimalsAreNotGuarded`，并把 `+1` /
+    `-1.50` 从「应加引号」用例移入该用例；`ReconciliationApiIntegrationTest` 新增
+    `exportCsvSignedAmount`（`-12.34` 与 `+3.00` 两条账单行的独立 fixture，逐格比对页面明细
+    并断言单元格 `BigDecimal` 等值）。
+  - 复跑：`.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration
+    -Dtest=ReconciliationApiIntegrationTest,ReconciliationExportCsvTest
+    -Dsurefire.failIfNoSpecifiedTests=false` →
+    `Tests run: 11, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`，`Total time: 48.105 s`。
+  - 格式（`mvn test` 不跑 spotless，`verify` 才跑，所以裸测绿不代表 CI 绿）：`spotless:check`
+    在整改前报 `.../AdminReconciliationController.java`、`.../ReconciliationService.java`、
+    `.../ReconciliationApiIntegrationTest.java`、`.../ReconciliationExportCsvTest.java` 违规，
+    已用 `.\mvnw.cmd -B -f backend -pl control-plane-app -am spotless:apply` 修好（纯 javadoc/换行
+    重排；`AdminReconciliationController.java` 因此从「已提交」变为「本次再提交一次注释重排」），
+    随后 `spotless:check` → `BUILD SUCCESS`。
+  - 格式修复后复跑（分别执行）：`ReconciliationApiIntegrationTest` →
+    `Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`，`Total time: 51.523 s`；
+    `ReconciliationExportCsvTest` → `Tests run: 5, Failures: 0, Errors: 0, Skipped: 0`，
+    `BUILD SUCCESS`，`Total time: 4.386 s`。前端 `npm run typecheck` exit 0、`npm run test` →
+    63 files / 384 tests 全绿、`npm run lint` → `0 errors, 7 warnings`。
+  - 文档：`docs/api-contract.md` 补「裸十进制字面量原样输出、不加防护单引号」与「审计 `rows`
+    为截断后实际行数」两处口径。
+
 ## 会话交接点 2026-09-16（自助注册关闭态前置体现 #550）
 
 - **#550（PR 待开，分支 `fix/registration-disabled-gating`，基于 50a9b24）**：部署关闭自助注册时，
@@ -3832,6 +3898,65 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 ### 一处 tooling 假绿（本批第二次遇到同类）
 
 `-Dtest=A+B` **不是 surefire 的选择器语法**（应为逗号），会**空跑并返回 0**；又一次"构建成功"掩盖了"根本没跑测试"。加上前一批那次"调用了别的工作树的 mvnw21.sh"，这是两天内**第二次**由命令层而非代码层造成的假绿——收口前要核的是**跑了几条测试**，不是"退出码是不是 0"。
+## 2026-09-18 Agent 引用后凭证禁改禁删（#714 / F1 前半）——把"被引用"变成真的锁
+
+**背景**：Agent 创建时已做绑定级联，但"被引用即不可变"这半从未实现——`rotate` / `disable` 只看凭证自身状态，不看有没有 Agent 正在用它。于是可以"先建 Agent、再轮换凭证"：网关拿新密钥打上游，而 Agent 记录里"用的是哪个凭证版本"这层语义悬空。规格侧 F28（Skill 快照）仍是 SCAFFOLD，issue 明确"独立于 F27 的绑定约束可先行"，本批只做这半。
+
+**实现**（`7fac8001`）：
+
+- `AgentRepository#findActiveByCredentialId(tenantId, credentialId)`：只认 `status = 'ACTIVE'` 的绑定
+- `AdminCredentialService.rotate` / `disable`：在凭证行锁与既有状态守卫**之后**、任何写入**之前**调用引用守卫；命中抛 `409 CREDENTIAL_REFERENCED_BY_AGENT`，文案 `凭证已被 Agent「<name>」引用，不能轮换|停用；请先停用该 Agent。`
+- `AdminAgentService.create`：改为对凭证行 `findByIdForUpdate` 取锁 → 与 rotate/disable 的同一把锁互斥，堵住"校验 ACTIVE 通过 → 并发停用 → 插入 Agent"的 TOCTOU（单行先取锁，无死锁反转）
+
+**三条边界判定（已写进 `api-contract.md`）**：
+
+1. 本产品**没有凭证 DELETE 端点**，V17 的 `ON DELETE RESTRICT` 也禁止硬删 —— 所以"禁删"落在 `disable`（生命周期终止操作）上，不为对齐 issue 措辞而造一个假删除端点
+2. **已禁用的 Agent 不再钉住凭证**：历史绑定保留（用量仍归属该凭证），但守卫看不见它 —— 否则一次误绑会永久锁死凭证，且没有任何解锁路径
+3. 跨租户引用返回 **404 `CREDENTIAL_NOT_FOUND`** 而非 409：租户过滤在守卫之前（`findOwnedForUpdate`），不给出越权者探测他租户 Agent 名的能力
+
+**前端**：`frontend/src/i18n/dict.ts` 加两条 `PATTERNS`，把 409 的 `detail` 译成英文（Agent 名回填），保证英文界面下不是中文原文。
+
+**验证（真实输出）**：
+
+- 新增 `AdminCredentialAgentBindingIntegrationTest`（Testcontainers + MockMvc）：`Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 42.85 s`，`BUILD SUCCESS`（7 个模块全 SUCCESS）。用例：引用后 rotate 被拒 / 引用后 disable 被拒（两条都断言**数据库与审计零写入**：status、version、ACTIVE 版本指纹、审计动作列表均不变）/ 停用 Agent 后该凭证恢复可改可删、同时另一条仍被钉 / 已禁用 Agent 不钉 / 跨租户 404 且他租户凭证未被触碰 / 匿名 401 与 USER 角色 403
+- `AdminCredentialServiceTest` 补 3 条单测：`Tests run: 20, Failures: 0`
+- 全量受影响模块：`.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration` → `Tests run: 779, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`（7 模块全 SUCCESS，13:54 min）；其中本项新增类 6/6、`AdminCredentialServiceTest` 20/20
+- 前端：`npm --prefix frontend run typecheck` 通过；`npm test` 63 文件 / 380 用例全绿；`npm run build` 通过（24.33 s）；`npx eslint . --ext .vue,.ts,.tsx`（**不带 `--fix`**）0 error —— 62k 条 `Delete ␍` 告警是 Windows 检出 CRLF 的固有噪声（CI 为 LF），非本次引入
+- 评审后定向复跑：`.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration -Dtest=AdminCredentialServiceTest,AdminCredentialAgentBindingIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 26, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`（IT 6/6 42.45 s、单测 20/20 1.271 s）；前端 `npm test` 63 文件 / 384 用例全绿、`typecheck` 通过、`eslint`（不带 `--fix`）0 error
+
+**对抗评审后修复（4 条，均在本 Goal 范围内）**：
+- M1（唯一被证伪的对外声明）"停用 409 文案英文界面仍为中文"：`NextCredentialsView.vue` 把 message 与 requestId 拼成单节点 `…（requestId: xxx）`，全仓 20 处同样写法，均不匹配 `PATTERNS`。修在引擎层：`translateOne` 先剥离 `（requestId: …）` 后缀 → 翻译消息头 → 原样拼回；`i18n-copy.spec.ts` 加 3 组断言（两条真实文案 + 带后缀的轮换/停用串 + 未覆盖文案保持中文不半翻译）
+- M2 `disableProceedsWhenTheBindingAgentIsDisabled` 无判别力：补 `verify(agentRepository).findActiveByCredentialId(TENANT, credential.id())`，证明守卫被调用而非被跳过
+- M3 `i18n-copy.spec.ts` 未收录 #714 文案：已收录（含 Agent 名插值 `客服助手`）
+- M4 跨租户用例未锁定"响应体不含他租户 Agent 名"：已断言 rotate 的 404 body 不含 `foreign-agent` / `foreign-key`；收口轮补上 **disable 响应体**同样断言（此前只覆盖 rotate，而停用恰是 M1 暴露问题的路径）
+
+**未修复（2 条，理由如下）**：
+- M5 `docs/progress.md` 提交含 122 行纯行尾改写：该文件索引本身即 CRLF（`git ls-files --eol` → `i/crlf w/crlf`），提交把 122 行历史 LF 行归一为文件既有 CRLF；`git diff --numstat --ignore-cr-at-eol 7fac8001^..b5f31a5b -- docs/progress.md` 为 `28 0`（实质新增 28 行），`docs/api-contract.md` 为 `4 0`（无行尾改动）。不单独造 EOL 提交
+- M6（pre-existing）`findByIdForUpdate` 先加行锁、后做租户过滤，外租户 id 会短暂持有他租户凭证行锁；本批让 `AdminAgentService.create` 也走这条路径。影响仅为统一 404、不泄露存在性、无锁序环（评审 A4 已核）；修正需要改领域仓库锁 API 语义（`UpstreamCredentialRepository#findByIdForUpdate`），超出本 Goal 边界，留作后续独立变更
+
+**未做（如实记录）**：**Skill 快照语义（按引用版本固定）未实现**。理由：仓库里没有 Agent↔Skill 数据模型（无表、无迁移、无端点），F27/F28 仍是 SCAFFOLD；落地它要新表 + 新迁移 + 新的写入/读取语义，属于"需要新数据模型且风险大"，按 issue 边界**先停下报告**，不硬塞进本 PR。该项仍留在 F28 待办。
+
+**工具坑**：`npm run lint` 的脚本带 `--fix`，在 Windows 检出（CRLF）上重写了 151 个无关前端文件（其中 21 个是真实内容改动，其余只是行尾/stat 脏）。已用 `git checkout -- <paths>` 逐个回退，最终只保留 `docs/api-contract.md` 与 `frontend/src/i18n/dict.ts` 两处改动。后续在该仓库跑前端 lint 时避免整树带 `--fix`。
+
+### 收口轮（F1b）：M2–M6 逐条处置 + 定向复跑
+
+开轮核对：worktree 干净（`git status --short` 空输出，**上一轮评审提到的 `docs/progress.md` 残留改动已在 `566d5a86` 落盘**，无夹带文件）；远端无该分支、无 PR。
+
+| 项 | 处置 | 依据 |
+| --- | --- | --- |
+| M1 | 已修（`7a55eaf7`） | 引擎层剥离 `（requestId: …）` 后缀后翻译消息头再拼回 |
+| M2 | 已修（`abd2b5fb`） | `verify(agentRepository).findActiveByCredentialId(TENANT, credential.id())` 钉"守卫被调用"；SQL 层判别力由 `anAlreadyDisabledAgentDoesNotPinTheCredential` 集成用例承担 |
+| M3 | 已修（`7a55eaf7`） | `i18n-copy.spec.ts` 新增 `#714` describe：两条真实文案 + 带后缀的轮换/停用串 + 未覆盖文案不半翻译 |
+| M4 | 本轮补齐 | 原只断言 rotate 响应体，现 disable 响应体一并断言 |
+| M5 | 不改（理由见上） | 回退需重写已推送历史，属禁止操作；文件现已统一 CRLF，后续 diff 不再放大 |
+| M6 | 不改，建议另开 issue | pre-existing 锁语义问题，修正要改领域仓库锁 API，超出本批边界 |
+
+定向复跑（收口轮改 M4 断言后）：
+
+- `.\mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration -Dtest=AdminCredentialAgentBindingIntegrationTest,AdminCredentialServiceTest -Dsurefire.failIfNoSpecifiedTests=false` → `Tests run: 26, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`（IT 6/6 34.42 s、单测 20/20 1.512 s；7 模块全 SUCCESS，50.7 s）
+- 前端 `npm --prefix frontend run typecheck` 通过（无输出即无错）；`npm --prefix frontend run test` → `Test Files 63 passed (63)` / `Tests 384 passed (384)`，24.22 s
+
+
 ## 2026-09-18 MCP tools/sync 兼容性修复（#779）——真实封闭客户端实测暴露
 
 **来源**：#742 第③片（WorkBuddy → 网关 MCP 数据面 → 公开 DeepWiki MCP）真机实测中，工具同步对严格 Streamable HTTP 上游 502（上游 406）——`McpToolsListClient` 只发 `Accept: application/json`，缺规范要求的 `text/event-stream`（同文件注释还自述"无 initialize 握手"，有状态上游为后续项）。触发面：一切严格校验 Accept 的上游 tools/sync 不可用 → 工具只能手工登记。
@@ -3859,6 +3984,54 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **一处 UI 取舍**：只为 `PRESENT` 出 chip，`NONE` 走 `—`。给"没有修正"也挂个徽标等于几乎每行都有徽标，反而把真正要看的那行淹掉；而这张表本来就用 `—` 表示"无话可说"。
 
 **另记**：迁移号按纪律取「develop 树最高号（66）∪ open issue 登记号」之后的下一个 = **V67**；定号前也扫了 open PR 的正文。
+## 2026-09-18 适配器状态「持续警告」前端实现（#735 前端部分）——准入门控刻意不动
+
+**先复核现状**：`docs/provider-adapter-contract.md:120` 承诺「生产默认目录只启用 `VERIFIED` 产品；管理员可以显式启用 `IMPLEMENTED`，**页面必须持续警告**」。实现侧对得上「持续警告」的只有「徽标 + hover 提示」这一层：
+
+- `AdapterStatus` 的唯一生产使用点是 `CatalogManifestValidator.java:123` 的**解析**（`requireEnum(product, "status", …)`），解析完不做任何准入判断
+- `ImplementationStatus` 没有任何准入分支
+- `CatalogSeedService.java:101` 把种子一律写成 `'DOCUMENTED'`
+- 目录量化：`provider-catalog.json` 共 **23** 个产品，状态计数 `{"DOCUMENTED":23}`——**0 个 IMPLEMENTED、0 个 VERIFIED**
+
+**因此只实现承诺里可验证的那半句——「页面必须持续警告」，准入行为一个字不改。** 照字面实现「只启用 VERIFIED」会让当前 23 个产品全部不可用，属产品决策，只出决策材料（已发 #735 评论），不在本批动代码。
+
+**改动**（`frontend/src/views/next/NextProvidersView.vue`，另 `frontend/src/i18n/dict.ts` 补双语文案）：
+
+- 页级常驻警示条 `data-testid="adapter-warning-banner"`：只要有任一产品状态不是 `VERIFIED` 就一直在页上（hover 提示会被漏看）
+- 行级常驻标记 `data-testid="adapter-warning-row"`（`⚠ 未验证`）：刻意用纯 `<span>`，因为既有断言把 `.ui-tooltip__anchor` 钉成 2 个，再加 Tooltip 会破既有测试
+- 产品详情面（模型目录对话框）内重复一次 `data-testid="product-models-adapter-warning"`，带该状态的解释文案
+- 判据就是状态字段本身：`status !== 'VERIFIED'`，`VERIFIED` 不出任何警告；DRAFT/DOCUMENTED/IMPLEMENTED/DEGRADED/DISABLED 全覆盖
+- 文案进 EN 词典：4 条 DICT + 1 条 PATTERN（计数行被 Vue 合并成单个文本节点，只能走 PATTERN）
+
+**一处实现取舍**：仓库没有独立的「供应商详情页」，唯一的产品详情面是模型目录对话框，所以「详情页警示块」落在它顶部。
+
+**验证（先证明断言有区分力）**：把 `isUnverified` 打成两个变异体——`return false` 与 `return true`——各挂 3 条测试（`3 failed | 8 passed`），恢复后全绿，并用 grep 确认无变异体残留。之后：
+
+- `npm --prefix frontend run test -- --run` → **63 files / 390 tests passed**
+- `npm --prefix frontend run typecheck` → exit 0
+- `npm --prefix frontend run build` → exit 0（built in 23.96s）
+- `npx eslint <4 个改动文件>`（不带 `--fix`）→ 0 errors（1 条 prettier 警告落在既有 import 行，非本批引入）
+
+**一处 tooling 陷阱（本批实录）**：本仓 `npm run lint` 的脚本是 `eslint . --ext .vue,.ts,.tsx --fix`——**它会改写整个前端**。本次跑完 lint 后 `git status` 出现 148 个与本改动无关的文件（含 `types/generated.ts` 整体重排），已逐个 `git checkout --` 还原，只留 4 个改动文件；随后改用不带 `--fix` 的 `npx eslint` 复核。后续批次别把 `npm run lint` 当成只读检查。
+
+## 2026-09-18 评审响应对（#735 前端部分）——只收敛 minor，不动准入门控
+
+**评审结论**：0 blocker。准入红线被独立复核确认为「未触碰」：`git show --numstat bdc4b9e4` 5 文件、**0 删除行**；`grep -rn "\.status()" backend/provider-adapters/src/main backend/provider-spi/src/main` **0 命中**（目录里的 status 解析后从不被读取）；路由快照 SQL 无任何状态过滤。5 条 minor 的逐条处置：
+
+- **M2（`已停用` 无 EN 词条）→ 已修**：`frontend/src/i18n/dict.ts` 补 `'已停用': 'Disabled'`——六个状态标签里唯一缺词条的一条（独立词条；`规则已停用` 这类带前缀的串另有条目）。新详情弹窗警告块会把该标签渲染进英文界面，属本次新增的暴露面。
+- **M3（文案只覆盖「未验证/已降级」）→ 已修**：警示条第三行改为「未处于「已验证」状态的产品仍按当前配置可用（已停用的除外），但不应承载生产流量；本提示不改变产品的启用与可用行为。」，行内标记 `⚠ 未验证` → `⚠ 非已验证`。措辞与判据 `status !== 'VERIFIED'` 对齐，并顺带消掉 M1 的用户可见症状（警告不再指向一个不存在的「启用」开关）。
+- **M1（`docs/provider-adapter-contract.md:120` 仍承诺门控）→ 不改，转决策材料**：该句正是 #735 待 owner 拍板的争点，本批改文档等于替 owner 预设定论；M3 的改写已让页面不再宣称存在启用开关。拍板后按选定口径一并更新文档与种子状态。
+- **M4（banner 无 `role="status"` / `aria-live`）→ 不改**：同文件既有 `ui-alert--error`（400 行）同样没有，只给新 banner 加会让同类告警行为不一致；评审人也已自降为 nit。若要统一，应作为独立 a11y 批覆盖全部 `ui-alert`。
+- **M5（视觉基线 `admin-providers-1440x900.png` 陈旧）→ 本批不重生成**：基线是捕获式、无像素断言（`docs/progress.md` 有先例），重生成需起 Playwright + `preview` 并重建产物，不改变 CI 结论。已在 PR「Remaining risks」登记。
+
+**评审响应改动的验证（真实输出）**：
+
+- `npm --prefix frontend run typecheck` → exit 0
+- `npm --prefix frontend run test` → **63 files / 392 tests passed**（基线 390：新增 1 条 DISABLED 用例 + 更新既有断言）
+- `npx eslint . --ext .vue,.ts,.tsx`（在 `frontend/` 下、**不带 `--fix`**）→ **0 errors**；62337 warnings 全为工作区既有的 CRLF `Delete ␍`，非本批引入
+- `npm --prefix frontend run build` → exit 0（`✓ built in 24.02s`）
+
+**首跑失败与最小修复（如实记录）**：新加的 DISABLED 用例第一次跑是**失败**的——它在 `document.body` 里收集 `.ui-tooltip` 文本，拿到的是同文件早先用例遗留的「已用真实供应商凭证完成契约测试。」（tooltip 只在锚点聚焦后才挂载，且从不卸载）。修复只加两行：`await wrapper.find('.ui-tooltip__anchor').trigger('focus');` + `await flushPromises();`，断言口径不变；修后该文件 12/12 通过。
 ## 2026-09-18 WorkBuddy MCP 层接入实测样章（#742 第③片收口）
 
 **交付**：`docs/workbuddy-mcp-onboarding-sample.md`——真实封闭客户端（WorkBuddy，腾讯 CodeBuddy 系）按指南 §4 接入网关 MCP 数据面的完整样章：拓扑、五步照抄（注册服务→消费者裁 `mcp:call`→`~/.workbuddy/mcp.json`（**无点号**；带点的是应用自管文件，写错不生效）→过信任门（`mcp_approvals` 键=sha256(url origin)::name）→同步并放行工具）；证据表；两条踩坑（自管配置陷阱；`HEALTH_PATH` 对 SPA 兜底页的假 HEALTHY——应选 `JSONRPC_INITIALIZE`）。
@@ -3873,3 +4046,920 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 **测试**：两条新用例**先证红**（SSE 解帧 / 无 data 拒绝），修复后 `McpToolsListClientTest` **11/11 绿**。
 
 **部署教训（本轮踩到，含一次自我纠正）**：compose.prod.yaml 的 cp 服务带 `build:` 段（context=`..`=演示树 `/opt/miqrokey`，与真正构建用的 `/opt/miqrokey-dev` 不同）——漏 `--no-build` 有**用旧树产出镜像**的风险（触发条件：该 tag 本地无镜像时 `up` 才会构建）。本轮曾观测"容器镜像 ID ≠ tag 镜像 ID 但 compose 显示 Running"，最初归因为"compose 按镜像引用名判等"——**该归因已被直接观测否定**：同 tag 下 `up` 不加 `--force-recreate` 亦会 `Recreate/Recreated`，compose 按解析出的镜像 ID 判等；更可能的成因是**多会话并发构建同一 tag 的竞态**（本轮时间线：自建镜像 11:11:03 完成，容器 11:11:07 从另一镜像创建）。**落为收尾断言**：部署后必须核 `container.Image == tag.Id`（"Up N seconds + healthy"不算数）——它正是抓这类竞态的检查；**跨会话纪律：同一 tag 不并发构建、部署串行**。
+
+## 2026-09-18 WorkBuddy MCP 层接入实测样章（#742 第③片收口）
+
+**交付**：`docs/workbuddy-mcp-onboarding-sample.md`——真实封闭客户端（WorkBuddy，腾讯 CodeBuddy 系）按指南 §4 接入网关 MCP 数据面的完整样章：拓扑、五步照抄（注册服务→消费者裁 `mcp:call`→`~/.workbuddy/mcp.json`（**无点号**；带点的是应用自管文件，写错不生效）→过信任门（`mcp_approvals` 键=sha256(url origin)::name）→同步并放行工具）；证据表；两条踩坑（自管配置陷阱；`HEALTH_PATH` 对 SPA 兜底页的假 HEALTHY——应选 `JSONRPC_INITIALIZE`）。
+
+**实测证据链**：应用日志 `[MCP-Connect] ok … tools=3`；`mcp_access_log` 6 行 `TOOL_UNAVAILABLE`（放行前，toolName 完整）+ `FORWARDED | read_wiki_structure | 617ms`（放行后）。**实测暴露真缺陷 #779**（`tools/sync` Accept 缺 `text/event-stream` → 严格上游 406）——修复 PR #781 已合并（先证红两条回归）。
+## 2026-09-18 MCP tools/sync 修复之二：SSE 响应体解帧（#779 收口）
+
+**背景**：PR #781（Accept 兼发双媒体类型）上线后，对严格上游的失败**只前进了一步**——406 消失，但上游按规范合法改发 **SSE 帧**（`event: message` + `data: {...}`），同步客户端仍按裸 JSON 解析 → `502 TOOLS_SYNC_UPSTREAM_FAILED / Unrecognized token 'event'`。真机（演示站 deepwiki 服务）复现，错误逐字同型。
+
+**修复**：`McpToolsListClient` 判 `Content-Type: text/event-stream` 时按 SSE 规范取 `data:` 行（多行按换行拼接）再解析；无 data 载荷 fail-closed（"上游 SSE 响应中没有 data 载荷"）。
+
+**测试**：两条新用例**先证红**（SSE 解帧 / 无 data 拒绝），修复后 `McpToolsListClientTest` **11/11 绿**。
+
+**部署教训（本轮踩到，含一次自我纠正）**：compose.prod.yaml 的 cp 服务带 `build:` 段（context=`..`=演示树 `/opt/miqrokey`，与真正构建用的 `/opt/miqrokey-dev` 不同）——漏 `--no-build` 有**用旧树产出镜像**的风险（触发条件：该 tag 本地无镜像时 `up` 才会构建）。本轮曾观测"容器镜像 ID ≠ tag 镜像 ID 但 compose 显示 Running"，最初归因为"compose 按镜像引用名判等"——**该归因已被直接观测否定**：同 tag 下 `up` 不加 `--force-recreate` 亦会 `Recreate/Recreated`，compose 按解析出的镜像 ID 判等；更可能的成因是**多会话并发构建同一 tag 的竞态**（本轮时间线：自建镜像 11:11:03 完成，容器 11:11:07 从另一镜像创建）。**落为收尾断言**：部署后必须核 `container.Image == tag.Id`（"Up N seconds + healthy"不算数）——它正是抓这类竞态的检查；**跨会话纪律：同一 tag 不并发构建、部署串行**。
+
+## 2026-09-18 缓存节省是没有标记的下界——补上最后一个"未知被当成 0"的洞（#790）
+
+**我先前的判断是错的，被一次实测推翻。** 我在 #766 的 PR 里把"命中路径无 gap 计数器"列为 follow-up，但随后自己评价它"**收益低**"（理由：演示站的节省额只有 ¥0.001 量级）。动手前顺手查了一下可达性，用的是与代码**同一套 as-of 规则**：
+
+```
+hit_groups | groups_without_input_price_at_hit_time | first_hit | last_hit
+         5 |                                      3 | 09-14     | 09-16
+```
+
+**5 个命中组里 3 个**在命中时刻没有任何生效的 input 价。也就是说这台站上的缓存节省数字**对 60% 的命中组静默偏低**——不是理论情形，是正在发生。**"收益低"是只看演示站的金额量级得出的，而缺陷的类别才是量尺**：`savedByGatewayCache` 是控制台首屏的招牌数字，而"未知被当成 0"正是 B+ 分层要消灭的那一类。
+
+**缺陷的原文**（`UsageStatsRepositoryImpl`）：
+
+```java
+/**
+ * {@code tokens x hits x unitPrice}, undivided; a null price contributes nothing.
+ */
+private static BigDecimal weighted(long tokens, long hits, BigDecimal unitPrice) {
+    return unitPrice == null ? BigDecimal.ZERO : BigDecimal.valueOf(tokens * hits).multiply(unitPrice);
+}
+```
+
+注释把这件事写得像无害的默认值。而 `addHit` 当时**完全不碰** `unpriced`。
+
+### 一处设计取舍：把两个问题分成两个名字
+
+给 `PricingGap` 加 `unpricedHitEvents` 时，`isEmpty()` 原本**驱动 `pricingStatus`**——直接加字段会让"节省侧有缺口"把**成本**判成 PARTIAL，即"让一个从没被它碰过的数字显得不可信"。所以拆成两个名字：
+
+- `hasCostGap()`（= `unpricedEvents > 0`）驱动成本状态：**成本完不完整与节省完不完整是两个问题**
+- `isEmpty()` 表示"**完全没有缺口**"（成本 ∪ 节省），名字与含义一致
+
+这两条各有一条测试钉住（域测试 144/144）。
+
+### 前端：不标注就等于没修
+
+两个展示节省额的地方同时加标记，否则 UI 层重复同一个缺陷：管理端概览的「网关缓存节省」加「下界」徽标（复用既有未定价样式 + UiTooltip 说明次数），成本页的「缓存节省」卡片在提示行里追加「下界：N 次命中在发生时无生效价目」。
+
+### 验证
+
+- **先证明会红**：只关掉仓库侧的计数（域侧保持，否则退化成编译错而非行为红）→ `AdminRoiApiIntegrationTest` **4 跑 1 失败、恰好是新增那一条**（`expected 2 but was 0`），其余 3 条照常通过；恢复后 4/4 绿
+- 新增 IT 用的是**能分辨的那个 fixture**：价目生效时间设在"命中之后、用量行之前"（`now() - interval '1 second'`）——于是同一次运行里**成本 COMPLETE 而节省是下界**，正是要钉住的那条不变式
+- 前端 25/25（含 4 条新增）＋ typecheck；OpenAPI/前端类型差异仅 `unpricedHitEvents`
+
+**教训（与本会话其他几次同族）**：我凭**金额量级**判定一件事"不值得做"，而判据应该是**缺陷的类别**；一次五分钟的实测就把它推翻了。与"自验只覆盖自己以为的范围"是同一种盲区——只是这次盲在**优先级**上，而不是盲在正确性上。
+
+## 2026-09-18 部署序列化与归因——单入口脚本（#793）
+
+**起因**：演示栈由多条会话共用，而部署是各写各的命令。两天里两次同类事故：① 10:5x 两次构建交错，**事后再怎么查都无法从机器状态回答"当时跑的是哪一份"**；② 中午 `--no-build --force-recreate` 双保险之下，容器镜像 ID 仍不等于 tag 的 ID，且容器那张镜像在本地列表里已不存在。
+
+**②一度被读成"至少还有第三条会话在动部署"——该结论被推翻**：容器跑的**就是该会话自建的镜像**（它自己的构建日志为证），tag 是被另一个**并发构建**改指的。所以问题不是"多了谁"，而是**并发构建无人拦** + **"谁上的线"没有持久记录**（等有人问起，镜像可能已经不在了）。
+
+**交付**：`deploy/deploy.sh` —— 单入口，一次做三件事：
+
+1. **`flock` 序列化**（构建与 `up` 都在锁内）：交错真正伤人的地方是**构建**，不是 `up`
+2. **收尾断言"正在跑的就是刚构建的"**：逐个比 `docker inspect <容器>.Image` 与 `docker image inspect <tag>.Id`。`Up N seconds (healthy)` **不是证据**——容器没换过去时机器显示的状态一模一样
+3. **每次追加一行 `deploy.log`**：时间/模式/提交/调用方/**运行中的镜像 ID 与当时的 tag ID**
+
+三条既有教训也编进流程：`up` 带 `--no-build`（compose 的 cp 服务 `build:` 段 context 指向**线上树**）、后端容器换掉后自动 `restart portal`（nginx upstream 启动时解析）、**显式钉住 compose 项目名**。
+
+### 干跑抓出我自己三个 bug
+
+写完先跑 `--dry-run`，立刻暴露三处：
+
+1. **干跑声称了它没做过的验证**——断言步没被 `--dry-run` 罩住，真跑了 `docker inspect` 并对我本机镜像打印 "verified"。**干跑最不能做的就是断言它没验证过的东西。**
+2. **硬编码容器名 `miqrokey-<svc>-1`**——隐含假设 compose 项目名=miqrokey。改成向 compose 问（`compose ps -q`）。
+3. **最要紧**：**compose 的项目名取决于调用时的目录**（服务器上靠 `cd /opt/miqrokey` 才得到 `miqrokey-*` 容器名）。换个目录跑，脚本会**另起一套容器**而不是更新线上那套。已 `-p` 钉住。
+
+### 真跑一遍，并证明断言会红
+
+用一次性夹具（**独立 tag 与独立项目名——避免覆盖本机既有的 `miqrokey-*:local`，那是别的会话的本地栈**）：构建→换容器→断言→restart portal→写流水，exit 0。
+
+再**故意把 tag 指向另一张镜像**，跑 `--verify-only`：
+
+```
+ASSERT FAILED control-plane: running image 'sha256:97ff…' != tag image 'sha256:974b…'
+verified portal: sha256:ff21…            ← 未动的服务仍通过
+EXIT=2
+```
+
+顺带加了 `--verify-only`：**部署线明确说要"部署前后各查一次"，而一个不能单独跑的检查不会被跑**。流水里两个身份都记，是为了事后能分辨"tag 被人重建了"与"当初就没换过去"。
+
+**分工**：脚本+文档进仓库（可评审），**装到服务器由部署线负责**。锁选**机器层**而不是"打卡制"——打卡依赖自觉，而我们已经知道至少有一个动作方不打招呼，荣誉制只会让守规矩的人排队。
+
+## 2026-09-18 计价状态在控制台不可见——汇总层的成本被当成总额（#801）
+
+**发现方式**：修完 #790（节省侧的下界标记）后我想确认自己有没有踩到消费方，于是查了 `pricingStatus` 与 `unpriced` 的**消费方**。结果是：
+
+```
+frontend/src 中除 generated.ts 外，对 pricingStatus 的引用：0 处
+frontend/src 中除 generated.ts 外，对 unpriced 的引用：仅 #790 新增的 unpricedHits
+```
+
+也就是说 **#766 建立的 B+ 状态在控制台一处都没渲染**。控制台里唯一的「未定价」在**记录行**级（由 `row.priced` 驱动）；**分组/汇总级**——那个被当作**总额**展示的成本——没有任何标注。
+
+而 `usage-accounting` §6 早就写下了对外承诺：**`pricingStatus != COMPLETE` 时已知金额不是总额**。演示站当前就是这个状态（汇总 `PARTIAL`、`unpricedEvents=617`、`unavailableEvents=565`）：页面上那个 ¥89.9 明确不是总额，而没有任何东西说明这一点。
+
+**这与 #790 是同一类，而且更重**——成本是主要财务数字，节省是次要的。我一个小时前刚在节省侧修过同一件事，成本侧却还开着。
+
+### 实现
+
+- 新增 `frontend/src/lib/usage-pricing.ts` 的 `costGapNote()`：只为**明确知道**的缺口出声——`PARTIAL` / `UNAVAILABLE` 给文案，其余（含字段缺失）一律返回 null。**给不确定的情形加标注，等于给没有问题的数字也挂上警告。**
+- 三个视图各加一个「未定价」标记 + 气泡：管理端用量概览（总成本）、自助用量页（合计行）、成本页（两张成本卡）。**`COMPLETE` 时不加任何标记**，与 #790 同一取舍。
+- 记录行级的 `priced` 标注本就有，本次补的是**它上面那一层**。
+
+### 顺带查出一处**我自己留下的过期文案**
+
+成本页「上游已付成本」的提示写着"**按最新单价**估算"——而读侧从 #766 起就改成"**事件发生时**的冻结价"了。即我在后端改了口径，界面上那句话没跟着改。已改为「按事件发生时的价目估算」。**这类漂移不报错、只是静静地说错话**，和本会话反复遇到的"存了但没人看"是同一个家族。
+
+### 验证
+
+- **先证明会红**：把 `costGapNote` 改成恒返回 null → **恰好 5 条失败**（3 个视图 + 2 个 lib 文案断言），其余 42 条（含三条"`COMPLETE` 时无标记"）照常通过
+- 前端 47/47（相关 4 个 spec）+ typecheck；全套与 build 结果见 PR
+
+### 一条贯穿今天三次改动的观察
+
+`#766`（成本状态）、`#790`（节省下界）、`#801`（界面呈现）是**同一个缺口的三次显形**：**API 暴露了的事，界面不显示就等于没交付**。前两次我都是先在后端把事实建好，然后（这次才）发现控制台看不到。往后凡是"把某个事实提升为一等公民"的改动，**验收标准里应该直接写出界面上的形态**，否则很容易停在 API 层就以为完成了。
+
+## 2026-09-18 我写的部署脚本在演示站引入了一次真回归——并把"verified"这个词管住（#802）
+
+**症状**（部署线报的）：脚本部署后，演示站自己 origin 的登录全 403 `ORIGIN_REJECTED`，cp 日志 `Origin not in allowlist: https://124.220.165.175`。
+
+**根因是我**：#793 里我把 compose 的 `--project-directory` 钉到 `$LIVE_DIR`（`/opt/miqrokey`），而 **compose 从*项目目录*读 `.env`**，演示站的 `.env` 实际在 **`/opt/miqrokey/deploy/.env`**。目录错位 → `.env` 没被加载 → `${MIQROKEY_ORIGIN_ALLOWLIST:-https://miqrokey.example.com}` 回落默认值 → 登录被拦。**丢的不止 ORIGIN 一个变量**，`.env` 里那一组全没了。
+
+**两条会话同时中招**，相隔 13 秒（流水正好记下：`05:11:39` 与 `05:11:54`）。**"流水"上线第一天就派上用场**——没有那两行，这事又要归因半天。
+
+### 修法
+
+1. `--project-directory` 改为 **compose 文件所在目录**（`$LIVE_DIR/deploy`）✓
+2. `.env` 改为 **显式 `--env-file`** 指定，且**缺失即失败**（`1`）——留一个"没找到就静默回落默认值"的口子，等于把这次的故障留在原处
+3. **加一步功能冒烟**：`--smoke-url` / `--smoke-origin` / `--smoke-expect`（默认 `2??`，可给 `case` 模式），状态码不符即 `2`
+
+### 更要紧的是第三条背后的那句话（部署线提的，我认）
+
+> "verified" 只证**镜像身份**。这次它把配置全丢的容器标了 `deployed and verified`——**`Up healthy` 不是证据，`镜像ID相等` 也只是"发的是刚构建的"，不是"发对了"。**
+
+即：我写的断言覆盖的是**我想到的那个失败模式**（没换过去），而回归来自**另一个**（换过去了、配置没跟上）。这是本会话反复出现的同一件事——**自验只覆盖自己以为的范围**——这次发生在**验证工具本身**里。
+
+所以除了冒烟，还改了两处**措辞**：不传 `--smoke-url` 时脚本**明说"什么都没查"**，收尾语从 `deployed and verified` 改成 `deployed; image identity verified`。**"verified" 这个词曾经盖过了它实际没查的东西——一个会过度声称的通过语，比没有通过语更危险。**
+
+### 本机回归测试（先证明会红）
+
+用带 `.env` 的夹具，探针变量在 compose 里配 `"${PROBE_VAR:-fellback}"`、在 `.env` 里给 `from-env`：
+
+| 用例 | 结果 |
+|---|---|
+| 修好的脚本 + 有 `.env` | exit **0**、容器 `PROBE=from-env`、`smoke ok -> 200` |
+| 冒烟打到 403 | exit **2** + `SMOKE FAILED: … -> 403 (expected 2??)` |
+| **旧调用（复现 bug）** | 容器 `PROBE=fellback`，**而脚本 exit 0** |
+
+第三行正是那次事故的形状：**它高高兴兴报成功，同时发的是配置全丢的容器**。流水现在也带上 `env_file=` 与 `smoke=<code>/<url>`。
+
+### 两条我自己的操作教训
+
+- **我又违反了本会话自己记过的规矩**：补丁写成内联 heredoc → 续行符被吃掉（`sh -n` 查不出来，因为合成长行仍合法）。**补丁一律写成 `D:/tmp/*.py` 文件**——这条记忆是我自己写的，写的时候还热着
+- 测试脚本里用了 MSYS 风格的 `/d/tmp/...` 给 **Windows python** 用 → 夹具被写到 `D:\d\tmp\...`。python 侧一律用 `D:/tmp/...`（MSYS 两种都认，Windows python 只认后者）
+
+## 2026-09-18 回声断言比 compose 更严——真机第一次跑就假阳性（#807）
+
+**触发**：部署线第一次 `--verify-only` 就报出来（我正是请它"有误报直接说"）：
+
+```
+ASSERT FAILED control-plane: MIQROKEY_REGISTRATION_ENABLED='false' but …/.env says 'false'
+ASSERT FAILED control-plane: MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES='172.28.0.0/24' but …/.env says '172.28.0.0/24'
+```
+
+**报错里两边一模一样**——不查字节看不出差异。
+
+**根因**：演示站 `.env` 是**混合行尾**（`file` 实测 CRLF+LF），那两行以 CRLF 结尾。我用 `cut -d= -f2-` 取的是**文件原始字节**，拿到 `false\r`；容器里是 compose 解析后的 `false`。**compose 的 dotenv 容忍 CR、trim 空白、剥一层引号，而我的断言不容。**
+
+### 这是同一个错误的另一半
+
+在**同一个 PR** 里我先犯了一次"过度声称"（`deployed and verified` 盖过了它没查的东西），紧接着又犯了一次"过度严格"（把文件行尾报告成部署故障）。**一个检查必须与它检查的系统校准**：松了会把问题放过去（那次），紧了会一直误报——**而误报的检查最终会被所有人无视，等于没有检查**。这次它报的是"文件的行尾是否干净"，不是"部署对不对"。
+
+### 修法
+
+1. **判前按 compose 的 dotenv 语义归一化**（CR、首尾空白、一层引号）——"文件脏但部署对"是正常形态，不是故障
+2. **报错要能自证差异**：先给两侧的长度；长度相同时**打印字节转储**（`od -c`），让"看起来一样"的差异自己说清楚
+
+### 验证（先证明会红）
+
+同一夹具（一行 CRLF、一行 LF 的 `.env`）跑三次：
+
+| 用例 | 结果 |
+|---|---|
+| **修复前的脚本（develop）+ `--verify-only`** | exit **2** + 复现那条假阳性 |
+| 修复后 + `--verify-only` | exit **0**（CR 被容忍） |
+| 长度相同但字节不同 | exit **2** + `container: 'false' (len 5)` / `env file : 'FALSE' (len 5)` + 字节转储 |
+
+**这条我本机不可能发现**：我的夹具一直是 LF，只有它**真的在真机上跑**才暴露。与今天其余几次同源——**自验只覆盖自己造的场景**。
+
+另：部署线现场处置得当（先备份 `.env.bak-<UTC>` 再归一化，语义不变——compose 本就容忍 CR），随后 `--verify-only` 全绿、默认冒烟 200、收尾语如实。
+
+## 2026-09-18 功能冒烟：设计要覆盖的那一层是空的（#809）
+
+部署线按四条路径实测后报出三处缺陷。我**逐条在代码里复核确认**，不是只采信结论。
+
+### ① `case` 里展开出来的 `|` 是字面字符
+
+```sh
+case "$smoke_code" in ${SMOKE_EXPECT})   # SMOKE_EXPECT='200|405'
+```
+
+选择支的 `|` **只在源码里**才是语法；经展开到达的只是一个普通字符。所以文档里的示例 `'200|401'` **永远匹配不上**。本机 `sh` 实测：405 在 `'200|405'` 下不匹配；`grep -E` 才匹配。
+
+**那行还挂着 `# shellcheck disable=SC2254`**——为消一个告警而写的 disable，遮住的正是这一类的真 bug。
+
+修法：自己按 `|` 拆开逐个匹配，**保住 `2??` 的 glob 语义**——所以不能用 `grep -E`：那里 `?` 是量词，`2??` 会退化成"匹配 `2`"。
+
+### ② 默认目标在结构上测不到 origin 层
+
+默认目标是 `${origin}/`，即**门户根的裸 GET**。而
+
+```java
+if (!STATE_CHANGING_METHODS.contains(method)) return true;   // GET 直接放行
+```
+
+**GET 在设计上就不经过 origin 检查**；又由于 `OriginInterceptor` 是 `HandlerInterceptor`（在 handler mapping 之后），GET 打到只收 POST 的路由会被 mapping 先回 405，检查根本跑不到。实测：错 origin 打 `GET $origin/` 也是 **200**。
+
+**红证明**（桩：登录端点对**正确** origin 也回 403，`/` 回 200）：
+
+| 用例 | 修复前 | 修复后 |
+|---|---|---|
+| 坏 origin 检查 + 默认目标 | **exit 0（假阴性）** | **exit 2** |
+| 健康栈 + 默认目标 | — | exit 0，`POST .../auth/login -> 400` |
+| `'200|405'` 打 405 路由 | exit 2（缺陷①） | exit 0 |
+| 运维给的 `--smoke-url` | — | 仍发 GET（不新增严格性假阳性） |
+| 目标不可达（000） | — | WARNING + exit 0 |
+
+修法：默认目标改 `POST <origin>/api/v1/auth/login` + `{}` + `'2??|400|401'`。选它的理由：**正是 #794 打坏的端点**（登录全 403）、**CSRF 豁免**（否则"少 CSRF 的 403"与"错 origin 的 403"不可区分）、空体校验回 400——**400 证明请求到达了处理器，即 origin 被接受**。403 判死。
+
+### 教训：注释声称的性质，恰恰是代码结构上不成立的那个
+
+那段注释原本写着默认目标 "exercises *config* rather than liveness"。这已是同一形态的第三次：
+
+- **断言"存在"≠断言"正确"**（#754 表头错位近一年没被发现）
+- **检查比被测系统更严**（#807 把文件行尾报成部署故障）
+- **检查比被测系统更松，且松在它自称覆盖的那一层**（本次）
+
+**补一句准确性**：#794 那次回归本身**会**被同一 PR 的环境变量回声断言抓到（#807 修的就是它），所以不能说"会放过事故"。问题是**功能网在它自称覆盖的那一层是空的**，而那个"自称"写在注释和文档里——**一个没牙的检查比没有检查更坏，因为它会被当成有牙的**。
+
+另：`--smoke-expect` 的文档原本说"可给 `case` 模式"，那句既是错的（不匹配）又已过时（实现自己拆），一并改正。
+
+## 2026-09-18 证书没进容器 = 「部署成功」：#794 的第二层补上断言（#812）
+
+部署线两次提出的既有残余（#805 评论第二次）。第一次我以「#804 的 `assert_mount_landed` 是撞车 PR 的独有增量、不折入 #806」为由**有意留出**——理由是尊重撞车处理的边界。**那个理由现在不成立了**：#804 已关闭，而这一层现场真的发生过。**留一个已知的、有事故先例的洞，比折入一条断言糟得多。**
+
+### 为什么三层现成检查都看不见它
+
+#794 的第二层不是 `.env`：相对挂载 `./secrets/certs` 锚到了错误的项目目录 → Docker 在错误路径**现建一个空目录** → nginx 证书缺失 → **崩溃重启循环**。而 `up` 零报错。
+
+| 检查 | 为什么看不见 |
+|---|---|
+| 镜像身份（§4） | 镜像是**对的**——坏的是挂载 |
+| 环境变量回声（§7） | 证书**不是环境变量**，不在比对集合里 |
+| 功能冒烟（§8） | portal 崩溃 → 冒烟拿到 `000` → 按设计**只判 WARNING**（"够不到"是天气） |
+
+**唯一的症状恰好落在脚本有意不判死的那一类里**，于是收尾语替它宣称了安全。
+
+### 修法与红证明
+
+新增 §5：宿主有证书 ⇒ 容器必须看得见**同样的字节**（sha256 对比），且挂载源解析后必须等于宿主 certs 目录（`pwd -P` 两侧归一化，软链也对）。容器内路径从 `docker inspect .Mounts` 读，不硬编码。
+
+| 用例 | 修复前 | 修复后 |
+|---|---|---|
+| 挂载锚到别处（`./elsewhere/certs`，Docker 现建空目录） | **exit 0（静默接受）** | **exit 2**，报出两侧路径 |
+| 挂载正确 | — | exit 0，`certificates present inside the container` |
+| **portal 崩溃循环**（`restarting=true`） | — | **exit 2**（镜像身份**通过**，是本条断言抓到的） |
+| 宿主无证书 | — | 提示，不判死 |
+| portal 已停 | — | exit 2（但**是 §4 抓的**：运行镜像为空——本条断言并非唯一防线，如实记下） |
+
+崩溃循环那一行是关键：**只有这条断言能看见它**。
+
+### 顺带修掉一个我自己的假阳性
+
+第一次跑，**挂载正确**的用例也报了 `cannot read … inside the container`。真因是 **MSYS 路径改写**：Git Bash 会把看起来像绝对路径的参数改写成 `C:\...` 再交给 docker，于是容器内路径 `/etc/nginx/certs/fullchain.pem` 变成了宿主路径。拿 `MSYS_NO_PATHCONV=1` 对照后哈希逐字相同——**脚本在 Linux 上本来就是对的，是我的测试环境在撒谎**。
+
+仍加了 2 行守卫（`MSYS_NO_PATHCONV=1; export`）并在注释里写明理由：Linux 上是空操作，而 Windows 开发机上省下的是一次**恰好属于本脚本要消灭的那一类**的假报警。**又一次是同族**：不是检查写错，是检查与它所运行的环境没对齐。
+
+另：顺手把三个都编号为「6」的小节改成 5–9（本就在我要插入的位置）。
+## 2026-09-18 部署脚本补上静态检查：shellcheck 进 CI（#814）
+
+仓库 17 个 shell 脚本，`deploy/deploy.sh` 是**单机部署的唯一入口**，却**完全没有 lint**——CI 里 `deploy/` 只受 `compose` job 的 `docker compose config` 覆盖，而那只看 compose 文件、不看脚本。
+
+### 为什么这条特别值
+
+#809 那条 `case "$smoke_code" in ${SMOKE_EXPECT})`——**经展开到达 case 的 `|` 是字面字符**，文档示例 `'200|401'` 因此永远匹配不上。**SC2254 讲的正是这一行**，而它原本就挂着：
+
+```sh
+# shellcheck disable=SC2254
+case "$smoke_code" in ${SMOKE_EXPECT})
+```
+
+**为消一个告警而写的 disable，遮住的恰是真 bug。** 而这条链的前提是**先有检查**——没有 shellcheck 的仓库里，这行连告警都不会有，bug 会一直安静地待着。
+
+同一文件同一天还犯了另外两处（#807 断言比 compose 更严、#812 的 MSYS 路径改写导致挂载正确也报缺失）：**部署脚本是本项目事故密度最高的一块，却也是唯一没有任何静态检查的一块。**
+
+### 现状几乎干净，所以没开豁免清单
+
+`koalaman/shellcheck:stable -S warning` 对全部 17 个脚本**只报 1 条**（`deploy/backup/test-restore.sh` 的未用循环变量），改成 `i`→`_` 即可；`deploy.sh` 在修掉我自己那行 dry-run 拼接（SC2140）之后 **exit 0**。**零豁免清单**——不给自己留"下次再说"的地方。
+
+### 红证明
+
+把 #809 那个形状（`case "$code" in ${PAT})`）放回一个脚本：
+
+```
+red.sh:7: SC2254 (warning): Quote expansions in case patterns to match literally…
+=== exit 1 ===
+```
+
+**但它给的修法是"加引号"，而这里加引号是错的方向**——`2??` 需要 glob 语义，加了引号就变成匹配字面 `2??`。**SC2254 的价值是把这一行拎出来让人看，不是照它说的改**；实际修法是拆开 `|`、各分支仍走 glob。**照抄 linter 的建议会把默认模式静默改松**——同一种"检查与主语没对齐"的陷阱，只是这次检查自己也会说错话。
+
+### 口径
+
+选 `-S warning` 而非默认：`info` 级会报 SC2016（单引号不展开）这类**有时是有意为之**的写法（我 dry-run 那行就是故意打印字面引号）。一上来全开只会逼出更多 disable——**而 disable 正是这次要治的东西**。先卡 warning，需要再收紧。
+
+job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
+## 2026-09-18 用量导出 CSV 转义收口（#816）——补上三写入器里唯一漏掉的公式防护
+
+**发现**（独立审计）：仓库三个 CSV 写入器中，审计导出（#430）与在建的对账导出（#798）都带 **RFC 4180 引号 + 公式注入前缀防护**，唯独**用量导出** `ExportTaskService.join()` 只做 `replace(",", "\,")`（非标准引号）。该导出的 `providerRequestId` **直接来自上游响应**（半可信来源），与 #798 注释里"provider-file text 需要防护"的判据完全同类；`clientIp`/`modelId` 亦为外部/管理输入。附带：引号与换行未处理（值内换行可劈断行、损坏列结构），且全树测试**未固化**任何旧转义行为。
+
+**修复**：`ExportTaskService` 新增包内可见 `quote(Object)`，语义与两个兄弟路径一致（RFC 4180 + `= + - @ TAB CR` 前缀 `'`；`Number` 原样输出——负数金额不被加上 `'`，与 #798 的数值豁免同理）。`join()` 改走 `quote()`。**不做**三份 `quote()` 的合并（#798 在飞，避免与其文件冲突；合并后可另行收口）。
+
+**先证红**：新增 `UsageExportCsvEscapeTest` 3 例（公式前缀/结构字符/数值与 null）；把 `quote()` 临时换回旧行为 → **2/3 红**（公式防护与结构引号），恢复后 **3/3 绿** + 兄弟 `AuditExportQuoteTest` 2/2 绿。
+
+## 2026-09-18 三条行为断言进 CI——这条链只「机器化了一半」的更正（#818）
+
+对方在收档时写「从事故到机器化防住最完整的一条」。**这个说法我核了，是错的**：`ShellCheck`（#814）机器守住的是**语法那一类**；**回声 / 冒烟 / 证书三条行为断言的 CI 覆盖是零**——它们的红证明全在 `D:/tmp` 的一次性脚本里，仓库里没有。
+
+**具体后果**：明天有人把冒烟默认目标改回 `GET $origin/`，shellcheck 全绿、部署照常、**而 #794 的那颗牙又没了**。语法没病不代表行为还对。已向对方更正，并把正确的收档写法给了它。
+
+### 做了什么
+
+`deploy/tests/deploy_script_regression.py`：**每个场景造一个「只有那一个缺陷」的栈**，再问脚本有没有发现它。**在健康栈上通过不算证据，要在坏栈上失败才算**——这是本链反复用到的那条纪律，这次用在了 harness 自己身上。
+
+12 项检查覆盖：CRLF 行尾不误报 / 同长度不同字节仍失败且能自证 / 坏 origin 必红 / 健康栈通过 / **派生目标确实是带 Origin 的 POST** / `'a|b'` 选择支生效 / 运维 URL 仍发 GET / 不可达只是 WARNING / 挂载锚错必红 / 正确挂载被验证 / 宿主无证书只提示。
+
+### 反向验证（这条是 harness 存在的前提）
+
+把三条修复分别改回去，harness **必须红**：
+
+| 变异 | 结果 |
+|---|---|
+| 冒烟默认目标改回门户根 GET | **10/12**，2 项失败 ✓ |
+| 去掉回声归一化 | **11/12**，1 项失败 ✓ |
+| 去掉证书断言 | **10/12**，2 项失败 ✓ |
+
+**只见过绿的闸门不是证据。**
+
+### 过程中修掉的三处
+
+1. **夹具基础镜像按 digest 写进 `FROM` 会让每次构建花 1m26s**（BuildKit 每次都回源解析 digest），本机标记只需 1.4s——十余次构建就是十几分钟加一个硬网络依赖，**正是我自己给这条闸门划的「先去风险再进 CI」红线**。改为 harness 里 pull 一次再打本地标签，pin 保留、回源消失。
+2. **`sha256sum <文件>` 的解析在路径含反斜杠时会错**：coreutils 会把整行转义（行首一个 `\`、分隔符翻倍），`cut -d' ' -f1` 取出的哈希就是错的。**这是我写的断言里的一处真脆弱性**，改成 `sha256sum < "$file"`（不给文件名）——顺带让 harness 在 Windows 上也能跑。
+3. 合并 `progress.md` 时我把**冲突标记提交了进去**：解析脚本对「新增块以 CRLF 开头」下的断言是错的（那个 CRLF 是本文件各条目之间本来就有的空行），脚本在写盘前中止，而我把命令里的分隔符从 `&&` 换成了 `;`，于是 `git add` 把**仍然冲突的文件**暂存了。已后续提交修正。**教训：解析脚本失败不能靠 `;` 继续往下走——失败要停。**
+
+### 顺带更正一个「缺口」判断
+
+对方提议把 `deploy/backup/test-*.sh` 从未被 workflow 引用一事单列为「文档承诺了测试但没接线」。**核了 `docs/operations-runbook.md`：它把这几个写成季度人工演练**（"每季度至少一次 `test-restore.sh`"），**没有承诺自动化**——所以那不是失约。真正的瑕疵只是措辞容易让人误读，已在 runbook 里补一句写明「人工演练、未接 CI，别把『已验证 PASS』读成『每次提交都跑』」。
+## 2026-09-18 明细成本改读冻结基座——#710 的可实现剩余部分
+
+**先重核，再动手**：在 develop（`e83d44ea`）上逐条复核 #710 的 8 条验收，结论 **5 条已达成、3 条未达成**（旧结论 6/2 已过期：develop 期间合并了 #766/#772/#780/#783 等价目相关系列）。未达成的三条里，**两条同源**——明细读取路径仍在按查询时刻的**当前**价目给每一行定价（`UsageStatsService`/`AdminUsageStatsService` 各自注入 `PriceSnapshotRepository` 调 `findAllLatestAt(Instant.now())`）。这属于"照既有口径补齐"，可直接实现；另两条（`gateway-app` 事件生成时冻结价格；`CostAllocationService` 切冻结基座）属**口径决策**，不在本轮自行拍板（见 #710 决策材料评论）。
+
+**改动**：新增 `RowPriceBasis`（`domain/usage`）承载"这一行该用哪四个单价"，由 `AdjustedUsageRow` 随行带出；`UsageStatsRepositoryImpl.findRecords` 的投影里加上与汇总**同一表达式** `PriceSnapshotSql.frozenOrAsOf(...)`（别名 `basis_price_*`，与 `ue.price_*` 原始列区分开；`COALESCE` 短路，未回填行才走 as-of 子查询）；两个 Service 改用行内基座定价，删除各自注入的 `PriceSnapshotRepository` 与 `priceMap()`。口径不变：某维度**用到**却没有价 → `priced=false` / 未定价，**不写 0**（usage-accounting §6.2）。
+
+**关键取舍**：明细与汇总现在读**同一个 SQL 表达式**，所以两者不可能各自漂移；这条一致性在集成测试里**被直接断言**，而不是靠约定。
+
+**验证**：`mvnw.cmd -B -f backend -pl control-plane-app,persistence-postgres -am test -Pintegration -Dtest=UsageStatsAggregatorTest,UsageStatsServiceTest,AdminUsageStatsServiceTest,PriceBasisCostStabilityIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` → **BUILD SUCCESS**，`Tests run: 8`（domain）+ `Tests run: 32`（control-plane），0 失败。集成侧 6 条含三条新增：改价后明细行不动、**改写历史价目行**后明细行不动、明细与汇总金额一致。（首跑曾红一条：我自己测试夹具把 `RowPriceBasis` 的 cacheRead/cacheCreation 两位写反 → `expected 0.0021 but was 0`，改夹具后复跑全绿。）
+
+**顺带修文档漂移**：`database-schema.md` 的原句"明细/汇总/计费/配额水位已改读此基座"在当时对**明细**并不成立（这正是本轮补上的那部分）；改成分别陈述读取方，并把"网关写事件时不写任何价格列、四列全由控制面回填通道盖章"写明。
+
+## 2026-09-18 分支收口：把 develop 并回 #710 分支并复核
+
+**合并**：本分支停在 `06252299`，develop 已到 `e29715ba`（单入口部署脚本 #793），二者 merge-base 为 `e83d44ea`。执行 `git merge origin/develop`，**唯一冲突 `docs/progress.md`**。两侧对该文件都是**文件末尾纯追加**（对 merge-base 的 `git diff --numstat` 分别为 `12 0` 与 `83 0`，`-U0` hunk 都落在第 3849 行之后），所以按"develop 段在前、本线段在后"拼接即可两段都不丢。做法是先由 stage blob（`:1:`/`:2:`/`:3:`）重建文件再 `git add`，**不手改带标记的工作区副本**——工作区那份的 `<<<<<<<` 行已被上一轮删掉，按行号硬改正是会出错的地方。
+
+**两个共同修改的 Java 文件走的是自动合并，已逐一核对没丢东西**：`UsageStatsAggregator.java` 「合并结果相对本线 `06252299`」的差异，与 develop 自 merge-base `e83d44ea` 起的差异**逐字节相同**（剔除 `index` 行后 `cmp` 一致）；`UsageStatsRepositoryImpl.java` 的两份差异**只有 3 处 hunk 行号偏移**，内容 hunk 完全一致——develop 的 `unpricedHits`（命中路径未定价计数）与本线的 `RowPriceBasis`（明细行冻结基座）各自在列，互不覆盖。develop 单独带来的文件（`deploy/deploy.sh`、`docs/deployment-and-operations.md`、`docs/openapi/openapi-3.1.json`、`docs/usage-accounting.md`、`AdminRoiApiIntegrationTest.java`、`UsageStatsPricingStatusTest.java`、前端 6 个）用 blob 哈希确认与 `MERGE_HEAD` **完全相同**，一个字没动。
+
+**合并后验证**（均在合并提交 `8fa34296` 上）：
+- develop 侧用例：`mvnw.cmd -B -f backend -pl control-plane-app,persistence-postgres,domain -am test -Pintegration -Dtest=UsageStatsPricingStatusTest,AdminRoiApiIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` → **BUILD SUCCESS**，`Tests run: 6, Failures: 0, Errors: 0`（domain）+ `Tests run: 4, Failures: 0, Errors: 0`（control-plane，22.49 s）。
+- 本线用例：同形命令换 `-Dtest=PriceBasisCostStabilityIntegrationTest,UsageStatsAggregatorTest,UsageStatsServiceTest,AdminUsageStatsServiceTest` → **BUILD SUCCESS**，`Tests run: 8, Failures: 0, Errors: 0`（domain）+ `Tests run: 32, Failures: 0, Errors: 0`（control-plane）。
+
+**未做**：本线实现未重写、未 `stash`；"事件生成时携带价格快照"（标准 1）与 `CostAllocationService` 取价口径属**口径决策**，已交 owner（2026-09-18 04:00 的 #710 决策材料评论），本轮不动。
+## 2026-09-18 Runbook §15 定稿：两层结构（运维速查 + 工程陷阱），owner 已裁定收录
+
+**外部评审（owner 转来）结论：收录，但改成两层。** 已按此重排（commit 见下）：
+
+- **`operations-runbook.md` §15**：只留运维侧——总原则一行（"先问这个观察到底证明了什么"）+ 15.1 状态码语义 / 15.2 泛化兜底（仅 SQL→500 行）/ 15.3 未验证输入 / 15.4「命令返回了≠服务就绪了」/ 15.5 不可见字符 / 15.6 宽容失败语；**新增核实基线**（`verified-against: develop@…` + last-verified + re-check triggers）；15.4 的 nginx 措辞**降级为"本部署模板的事实"**（不再写成 nginx 普遍规律）；全文**无行号**。
+- **新增 `docs/debugging-traps.md`**：工程侧——CI JDT 速挂 / Maven 静默卡死（含"卡死持有部署锁"真机补充）/ 「全绿≠验过」（测试隔离 + 空基线 + #819 行为闸门的反向验证）/ 读已合并 revision / 「缺口判断先查权威表述」/ 「没牙的检查 vs 误报的检查」/ 完整事故证据引用链（#802→#819、#754、#816/#817、#710/#780）。§15 顶部互相指路，document-map 已登记。
+- 评审指出的"四族"描述过时：重排后按**两类形状**陈述（症状指向错误的层 / 证据强度被高估），工程侧（执行上下文族）随文档拆分另述。
+
+**来源**：owner 2026-09-18 转来的外部评审（原 PR #759 为"提案·待 owner 认可"，本条即该认可与改后的落地记录）。
+## 2026-09-18 CAA 证据审计链路补写入方（#629）——V55 建了表，没有任何人写
+
+**起因**：#629 指出 `request_context_evidence`（V55）在 Java/Kotlin/XML/YAML 中零命中——表建好了，既无写入方也无读取方，Spec v1.1 §7.2 的"为什么这么判"审计链路是断的。复核 `git grep -n "request_context_evidence" -- "*.java" "*.kt" "*.xml" "*.yml" "*.yaml"` 无输出（rc=1），与判断一致。
+
+**先判该不该有**：Spec v1.1 §7.2 把 V55 列为交付物（无"预留/未启用"字样）、§9 C13 是验收项、§11 P5 与 `database-schema.md`/`api-contract.md` 都按"已存在"描述；V55 表注释自带的 `source` 值域 `prompt_url|tool_path|bash_cwd|system_cwd|git_remote|header|suffix` 正是"外部选择器类别"。结论：**该层应当存在，本次补写入方**。读取方（查询 API）在 `api-contract.md` 无契约、Spec §11 把 §8 的增量排到后续批次 → 明确不在本次范围（不改前端：没有契约可展示）。
+
+**交付**：
+
+- `PostgresUsageEventWriter`：证据行随 `usage_event` **同批同事务**写入，行 `id` = 该笔 usage 事件 id，`ON CONFLICT (id) DO NOTHING`（重放不重复，两表可直接 join）。只对使用了外部选择器的裁定写行：`RESOLVED_HEADER` → `source='header'`、`value=` 客户端声明的 project id；`RESOLVED_SUFFIX` → `source='suffix'`、`value=` Key 中呈现的 tag。
+- `SOLE_BINDING`/`POLICY_ROUTED` **刻意不写行**：V55 的 `source` 值域没有对应"线索类别"的诚实取值，而 `value` 是 `NOT NULL` 且承载全部审计值——硬编一个值等于伪造证据。这两种裁定的解释本来就是 `usage_event.resolution_status`（C13 的 "+" 是"证据表**加**裁定列"，不是"每一行都必须有证据行"）。
+- 唯一缺的数据是"Key 后缀里呈现的 tag"：绑定索引本就按 projectTag 建（`JdbcRouteSnapshotLoader` 的 `bindings...put(binding.projectTag(), binding)`），故 `ContextAttribution` 增第 7 个分量 `bindingTag` 承载它。**未动阶梯与未归属策略的行为**——`RequestContextResolver`/`ResolvedContext` 一行未改。
+- 无新迁移：V55 的 PK 就是幂等键。
+
+**验证**（真实命令与输出）：
+
+- 先证明断言有判题力：把 `writeContextEvidence(...)` 调用临时关掉跑同一份测试，新用例红、红的正是"证据行数 0 而不是 1"——
+  `Tests run: 9, Failures: 2, Errors: 0` / `contextEvidenceRecordsObservedSelector:244 Expected size: 1 but was: 0 in: []` /
+  `droppedUsageEventLeavesNoEvidenceRow:284 Expected size: 1 but was: 0`；恢复该行后同一份测试 `Tests run: 9, Failures: 0, Errors: 0` + `BUILD SUCCESS`。
+- 四类对照：有 claim 头 / 有后缀 / 唯一绑定 / 未归属策略各一条请求，断言证据行数 **1/1/0/0**，且四条 `usage_event` 都在（证明"无证据行"是裁定，不是整批丢掉）；重放同一批 → 行数不变（幂等）。
+- 另测孤儿行：`model_id` 为空而被丢弃的 usage 事件不得留下证据行，同批健康事件照常落行 + 落证据。
+- 命令（Windows，JDK 21）：`mvnw.cmd -B -f backend -pl gateway-app -am test -Pintegration -Dtest=PostgresUsageEventWriterTest -Dsurefire.failIfNoSpecifiedTests=false`。
+
+### 一个测试暴露的既有边界（未改）
+
+重放一批 `provider_request_id` 为空的 `usage_event` 会撞 `usage_event_pkey`——写入器的幂等只覆盖 `(tenant_id, provider_request_id)` 那条部分唯一索引，这是**既有**行为（与本次改动无关，证据表的 `ON CONFLICT (id)` 没有再添失败面）；Bus 失败重投同一条无上游 id 的事件才会走到。测试夹具因此用带上游请求 id 的事件（真实 UPSTREAM 路径即如此）。是否要为 `COALESCED`（`provider_request_id` 为空）补一条以 `id` 为冲突目标的路径，属独立问题，未在本 PR 夹带。
+
+**文档**：`database-schema.md`（补写入方/幂等键/不写行的理由，并修正 `(tenant_id, observed_at)` 这个与实际索引 `(observed_at DESC)` 不符的描述）、`api-contract.md` §7.1 归属条、`activity-context-design.md` 的"无写入方"表述。
+
+**边界与遗留**：① 读取方（查询 API）未交付，Spec §7.2 只完成写入侧；② `V55__request_context_evidence.sql:5` 注释"网关在 Context 解析时写入"与实现时机（随用量批量写）不符——迁移本轮禁改，建议 follow-up；③ issue #629 正文的列名表述与 V55 实际 DDL 不一致（原文未在本次核对范围内），措辞更新属 owner 侧事项。
+## 2026-09-18 「调整」列在无调整行时隐藏——补 #773 验收第 3 条（#773）
+
+**起因**：#773 的验收第 3 条写的是"**无调整时表格呈现与现在一致（不引入视觉噪音与额外列宽）**"，当时**没做到**。`NextUsageView.vue` / `NextAdminUsageView.vue` 把 `{ key: 'adjust', title: '调整', width: '100px' }` 写成普通 `const` 数组里的固定成员，`Table.vue` 又无条件遍历 `columns`（`UiTableColumn` 没有可见性字段）——于是**任何时刻**都多出这一列、多占这 100px，未调整的行**逐行渲染 `—`**。第 3 条描述的正是这种"一列破折号"的噪音。
+
+**修法**：照抄本仓**已有的范式**——`NextKeysView.vue` 在"所有密钥同属一个项目"时用 `columns.filter(...)` 把 `projectTag` 列摘掉。两页各自加一个 `computed`，`rows.some((row) => row.adjusted === true)` 为真才保留「调整」列；**不动** `usage-net.ts`、`UsageAdjustChip.vue`、后端，**不动**其它列，**不扩展** `UiTableColumn`、**不改** `Table.vue`（无需要扩展的字段，就不扩）。
+
+**口径：本页，不是全表**。判据取自**当前页渲染出来的行**，而不是整个结果集。理由是**全表口径没有可用的信号**：`UsageSummary.tokens` 只暴露一套（净额）计数，没有"观测 vs 净额"配对，服务端也没有"结果集里是否含调整"的字段——要判全表就得**新增 API/聚合**，这超出本项范围也超出红线。反过来，"**正在渲染的这张表里有没有一行是调整过的**"完全由行数据决定，而"一列破折号"的噪音恰恰是它造成的：**去掉这一列的条件，就是这一列在这一屏上没有任何一行在说事**。翻页后若出现调整行，列**当页即刻回来**，行级标记与气泡**一字未改**。
+
+**验证**（先在旧实现上证明断言有判别力）：
+- **红**：把两个视图文件还原到 `origin/develop`（用 `git checkout origin/develop -- <file>`，随后 `git checkout HEAD -- <file>` 还原；**没用** `git stash` 系列），跑两条 spec——**31 跑 2 失败**，恰好是两条"无调整时应隐藏"的断言（`expected [ '时间', '模型', … ] to not include '调整'`）。**判别力的边界要说清**：同一批里"有调整时应保留"的两条在旧实现上**也是绿的**（旧实现永远显示该列）——它们钉的不是旧缺陷，而是**反向**回归（防止修成"永远隐藏"或顺手删掉行级标记），两条断言合起来才是完整的约束。
+- **绿**：同一命令恢复实现后 **31/31 通过**
+- `npm --prefix frontend run typecheck` 退出 0；`run lint` 退出 0（0 error / 7 warning，**全部落在本轮未触碰的文件**）；`run test` **63 文件 384/384 通过**；`run build` 退出 0（24.96s）
+
+## 2026-09-18 缓存节省是没有标记的下界——补上最后一个"未知被当成 0"的洞（#790）
+
+**我先前的判断是错的，被一次实测推翻。** 我在 #766 的 PR 里把"命中路径无 gap 计数器"列为 follow-up，但随后自己评价它"**收益低**"（理由：演示站的节省额只有 ¥0.001 量级）。动手前顺手查了一下可达性，用的是与代码**同一套 as-of 规则**：
+
+```
+hit_groups | groups_without_input_price_at_hit_time | first_hit | last_hit
+         5 |                                      3 | 09-14     | 09-16
+```
+
+**5 个命中组里 3 个**在命中时刻没有任何生效的 input 价。也就是说这台站上的缓存节省数字**对 60% 的命中组静默偏低**——不是理论情形，是正在发生。**"收益低"是只看演示站的金额量级得出的，而缺陷的类别才是量尺**：`savedByGatewayCache` 是控制台首屏的招牌数字，而"未知被当成 0"正是 B+ 分层要消灭的那一类。
+
+**缺陷的原文**（`UsageStatsRepositoryImpl`）：
+
+```java
+/**
+ * {@code tokens x hits x unitPrice}, undivided; a null price contributes nothing.
+ */
+private static BigDecimal weighted(long tokens, long hits, BigDecimal unitPrice) {
+    return unitPrice == null ? BigDecimal.ZERO : BigDecimal.valueOf(tokens * hits).multiply(unitPrice);
+}
+```
+
+注释把这件事写得像无害的默认值。而 `addHit` 当时**完全不碰** `unpriced`。
+
+### 一处设计取舍：把两个问题分成两个名字
+
+给 `PricingGap` 加 `unpricedHitEvents` 时，`isEmpty()` 原本**驱动 `pricingStatus`**——直接加字段会让"节省侧有缺口"把**成本**判成 PARTIAL，即"让一个从没被它碰过的数字显得不可信"。所以拆成两个名字：
+
+- `hasCostGap()`（= `unpricedEvents > 0`）驱动成本状态：**成本完不完整与节省完不完整是两个问题**
+- `isEmpty()` 表示"**完全没有缺口**"（成本 ∪ 节省），名字与含义一致
+
+这两条各有一条测试钉住（域测试 144/144）。
+
+### 前端：不标注就等于没修
+
+两个展示节省额的地方同时加标记，否则 UI 层重复同一个缺陷：管理端概览的「网关缓存节省」加「下界」徽标（复用既有未定价样式 + UiTooltip 说明次数），成本页的「缓存节省」卡片在提示行里追加「下界：N 次命中在发生时无生效价目」。
+
+### 验证
+
+- **先证明会红**：只关掉仓库侧的计数（域侧保持，否则退化成编译错而非行为红）→ `AdminRoiApiIntegrationTest` **4 跑 1 失败、恰好是新增那一条**（`expected 2 but was 0`），其余 3 条照常通过；恢复后 4/4 绿
+- 新增 IT 用的是**能分辨的那个 fixture**：价目生效时间设在"命中之后、用量行之前"（`now() - interval '1 second'`）——于是同一次运行里**成本 COMPLETE 而节省是下界**，正是要钉住的那条不变式
+- 前端 25/25（含 4 条新增）＋ typecheck；OpenAPI/前端类型差异仅 `unpricedHitEvents`
+
+**教训（与本会话其他几次同族）**：我凭**金额量级**判定一件事"不值得做"，而判据应该是**缺陷的类别**；一次五分钟的实测就把它推翻了。与"自验只覆盖自己以为的范围"是同一种盲区——只是这次盲在**优先级**上，而不是盲在正确性上。
+
+## 2026-09-18 部署序列化与归因——单入口脚本（#793）
+
+**起因**：演示栈由多条会话共用，而部署是各写各的命令。两天里两次同类事故：① 10:5x 两次构建交错，**事后再怎么查都无法从机器状态回答"当时跑的是哪一份"**；② 中午 `--no-build --force-recreate` 双保险之下，容器镜像 ID 仍不等于 tag 的 ID，且容器那张镜像在本地列表里已不存在。
+
+**②一度被读成"至少还有第三条会话在动部署"——该结论被推翻**：容器跑的**就是该会话自建的镜像**（它自己的构建日志为证），tag 是被另一个**并发构建**改指的。所以问题不是"多了谁"，而是**并发构建无人拦** + **"谁上的线"没有持久记录**（等有人问起，镜像可能已经不在了）。
+
+**交付**：`deploy/deploy.sh` —— 单入口，一次做三件事：
+
+1. **`flock` 序列化**（构建与 `up` 都在锁内）：交错真正伤人的地方是**构建**，不是 `up`
+2. **收尾断言"正在跑的就是刚构建的"**：逐个比 `docker inspect <容器>.Image` 与 `docker image inspect <tag>.Id`。`Up N seconds (healthy)` **不是证据**——容器没换过去时机器显示的状态一模一样
+3. **每次追加一行 `deploy.log`**：时间/模式/提交/调用方/**运行中的镜像 ID 与当时的 tag ID**
+
+三条既有教训也编进流程：`up` 带 `--no-build`（compose 的 cp 服务 `build:` 段 context 指向**线上树**）、后端容器换掉后自动 `restart portal`（nginx upstream 启动时解析）、**显式钉住 compose 项目名**。
+
+### 干跑抓出我自己三个 bug
+
+写完先跑 `--dry-run`，立刻暴露三处：
+
+1. **干跑声称了它没做过的验证**——断言步没被 `--dry-run` 罩住，真跑了 `docker inspect` 并对我本机镜像打印 "verified"。**干跑最不能做的就是断言它没验证过的东西。**
+2. **硬编码容器名 `miqrokey-<svc>-1`**——隐含假设 compose 项目名=miqrokey。改成向 compose 问（`compose ps -q`）。
+3. **最要紧**：**compose 的项目名取决于调用时的目录**（服务器上靠 `cd /opt/miqrokey` 才得到 `miqrokey-*` 容器名）。换个目录跑，脚本会**另起一套容器**而不是更新线上那套。已 `-p` 钉住。
+
+### 真跑一遍，并证明断言会红
+
+用一次性夹具（**独立 tag 与独立项目名——避免覆盖本机既有的 `miqrokey-*:local`，那是别的会话的本地栈**）：构建→换容器→断言→restart portal→写流水，exit 0。
+
+再**故意把 tag 指向另一张镜像**，跑 `--verify-only`：
+
+```
+ASSERT FAILED control-plane: running image 'sha256:97ff…' != tag image 'sha256:974b…'
+verified portal: sha256:ff21…            ← 未动的服务仍通过
+EXIT=2
+```
+
+顺带加了 `--verify-only`：**部署线明确说要"部署前后各查一次"，而一个不能单独跑的检查不会被跑**。流水里两个身份都记，是为了事后能分辨"tag 被人重建了"与"当初就没换过去"。
+
+**分工**：脚本+文档进仓库（可评审），**装到服务器由部署线负责**。锁选**机器层**而不是"打卡制"——打卡依赖自觉，而我们已经知道至少有一个动作方不打招呼，荣誉制只会让守规矩的人排队。
+## 2026-09-18 接入器参考实现（#742 第②片）——配置注入可执行化：打印 / 写入 / 验证
+
+**范围**：把指南矩阵（第①片）的三类接入姿势做成可执行工具 `scripts/onboarding/miqro-onboard.sh`（POSIX sh）：`print` 六种形态（env×3 shell / claude-settings / codex / openai / curl / mcp）、`apply` 三种配置文件形态（env 与 dotenv 走**托管块**替换、claude-settings 走 jq JSON 合并）、`verify` 对 `/v1/models` 按 200/404/401 归因。
+
+**校验前置=把事故写进工具**：凭据平面不通用（用错统一 401）、虚拟密钥必须带 `.label`（裸 `mqk_live_` 语法上不成立即统一 404 `virtual_key_invalid`）、网关地址须为 origin（尾随 `/v1` 带提示剥离）——三条全部照抄运维 Runbook §14.1，不是发明。
+
+**幂等语义**：托管块（`# >>> miqro-onboard (managed) >>>`）只替换块内；内容无变化**不写盘、不产生备份**；改动前 `\<file\>.bak-\<UTC 时间戳\>`。`--dry-run` 只打印结果。
+
+**测试先于收工再获一例**：45 条断言、纯 sh、无网络（`verify` 用 PATH 假 curl 打桩）。开发中**测试抓到两个真 bug**：① 托管块追加路径不带标记 → 二次执行不幂等、键行翻倍；② `--dry-run` 参数没接线 → 照样写盘。两条都已修，且各留一条断言钉住（同族先例 #754：收工前先证明它会红）。
+
+**边界**：CC Switch 深链维持控制台既有实现（不在本工具）；网络层劫持明确不做；`claude-settings` 合并依赖 jq，无 jq 时拒写并提示改用 `print` 粘贴。snippet 形态以控制台「使用密钥」面板为准（源头 `frontend/src/lib/ccswitch.ts`），双侧改动需同步。
+
+**CI**：`scripts/**` 新增路径过滤器 + `scripts-check` 作业（跑 test-onboard.sh，5 分钟超时）。
+
+**待补**：第③片（封闭客户端 MCP 层实测）需要真实封闭工具环境，形态确认后另起。
+
+## 2026-09-18 接入器按外部评审收紧（#763）——转义/密钥处理/verify 全面加固
+
+**评审（owner 转来）判定"改后合"**，两条 P0 + 六条 P1 全部修复：
+
+- **P0 输出未按格式转义** → 每个落值过**字符集白名单**（key/model/gateway/mcp-url）+ **按语法转义**（POSIX 单引号 / PowerShell 反引号 / JSON·TOML）；**cmd.exe 无法可靠转义 ⇒ 含元字符拒绝输出**（宁拒不发）。
+- **P0 密钥暴露** → Codex 片段**不再含 key**（注释也去掉，改 `env_key` 指路）；新增 `--key -` 从 stdin 读凭据；前端同源问题另立 #821。
+- **P1**：临时文件落目标目录（原子 rename）/ chmod 失败即报错 / verify 判 `200 且 models-list 体` + `--connect-timeout 5 --max-time 20` / 失败默认只打 code（`--verbose` 才打体）/ 托管块残缺或重复**拒绝**而非猜 / symlink 目标拒绝 / `${2:?}` 缺值消息 / 测试 `stat` 双写法。
+- **测试 45 → 85 条**，新增恶意输入组与转义函数直测（`MIQRO_ONBOARD_SOURCE_ONLY` seam）；**三条旗舰断言对修复前脚本先证红**（引号 key 被放行、codex 输出含 key、代理错误页 200 判成功）。
+- 暂缓：前端/脚本双实现的 golden-fixture 契约（评审同意不做）。
+
+## 2026-09-18 冒烟在自签证书的部署上什么都证明不了（#826）
+
+做完整套端到端模拟时的**最后一个失败项**：真实生产栈起来了、`deploy.sh` 的镜像身份 / 环境变量回声 / 证书进容器三条断言全过，**只有冒烟报"够不到"**——而目标其实好好地在答。
+
+查下来：冒烟的 curl **不传 `-k`**，自签证书在 TLS 阶段就被拒 → `000` → 按设计只判 WARNING。
+
+```
+$ curl -sS -o /dev/null -w '%{http_code}' -X POST … https://127.0.0.1:9443/api/v1/auth/login
+000                                   # 证书校验失败
+$ curl -sk -o /dev/null -w '%{http_code}' -X POST …   # 同一个请求
+403                                   # 真的答了
+```
+
+### 为什么值得修（而不是"生产有真证书"）
+
+1. **仓库自己就把自签当正常形态**：`secrets/README.md` 与 `compose.prod.yaml` 都写"本机冒烟可用自签"，`deployment-and-operations.md` 的验收示例也用 `curl -k`。**文档用 `-k`、脚本不用**——同一套流程两种默认。
+2. **每台 staging / 内网自建部署都在这个集合里**，而那些恰好最需要"部署完验一下"。
+3. 症状是**假绿**：不报错、不红，而是"WARNING + 部署成功"。与本项目反复治的形态同族——**检查在它自称覆盖的那一层没有牙**。
+
+### 修法
+
+- 新增 `--smoke-insecure`（env `MIQROKEY_DEPLOY_SMOKE_INSECURE`）：打开时给 curl 加 `-k`。**默认关**——生产不该默认跳过证书校验
+- 打开后 `000` 的措辞跟着变：不再"证书可能有问题"，而是**"够不到就是够不到"**（`-k was in effect: this is connectivity, not certificate trust`）
+- `--dry-run` 打印里能看出用没用 `-k`
+- shellcheck 仍 exit 0
+
+### 顺带修掉一个既有的 `--help` 截断
+
+`usage()` 原本是 `sed -n '2,25p'`——**硬编码行号**。它在我插入 6 行选项说明之前就已经不覆盖选项列表了：`--help` 只打印说明与用法行，**一条选项说明都不打印**。改成 `sed -n '2,/^set -eu$/p' | sed '$d'`，跟着文件走，不再会漂。
+
+**教训**：`--help` 从来没人跑，所以它坏了也没人知道——**与 #823 同源：一条没人走过的路径**。这次是"自己做完整套模拟"顺手撞上的。
+
+## 2026-09-18 默认生产部署下网关起不来：空串被当成「已配置」（#823）
+
+**这是我自己做完整套端到端模拟时跑出来的**——不是 CI，也不是演示站。按 `deploy/compose.prod.yaml` 起真实生产栈（不带 `--profile kafka`），网关进入**重启循环**，`/v1/*` 全 502：
+
+```
+BeanInstantiationException: Failed to instantiate [RetentionPublisher]:
+  Factory method 'kafkaRetentionPublisher' threw exception with message:
+  miqrokey.retention.kafka.bootstrap-servers must be set
+Caused by: java.lang.IllegalArgumentException: ... must be set
+```
+
+### 根因
+
+`KafkaRetentionConfig` 用的是
+
+```java
+@ConditionalOnProperty(prefix = "miqrokey.retention.kafka", name = "bootstrap-servers")
+```
+
+**不带 `havingValue` 时它的语义是「属性存在且 ≠ "false"」——空串算"存在"**。而 compose 恰恰把它设成空串：
+
+```yaml
+# deploy/compose.prod.yaml:140
+MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS: ${MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS:-}
+```
+
+容器内实测 `MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS=`（存在、为空）→ 条件成立 → 建 bean → 构造函数对 blank 抛异常 → **进程死循环**。注释写着"留痕默认关"，实际是"网关根本起不来"。
+
+### 为什么一直没被发现（两个覆盖缺口叠加）
+
+1. **演示站恰好不踩**：`.env` 里设了真实值 + `COMPOSE_PROFILES=kafka` → 条件成立但值非空 → 正常。
+2. **CI 只构建镜像、从不启动整套**：`images` job 做 `docker build` + 非 root 断言，`compose` job 只做 `config`。**「默认生产栈能否启动」从来没有被执行过。**
+
+被文档推荐的那条部署路径，是**唯一一条没人跑过**的路径。
+
+### 修法
+
+新增 `KafkaRetentionConfigured`（`Condition`）：**去空白后非空**才算配置。换掉 `@ConditionalOnProperty`——它表达不了"非空白"。空白/缺失/纯空格 → 不装配 → 侧车用既有的 fail-closed no-op publisher。
+
+### 红证明
+
+`KafkaRetentionConfiguredTest`（`ApplicationContextRunner`，4 例）：
+
+| 场景 | 修复前 | 修复后 |
+|---|---|---|
+| 属性缺失 | 不装配 ✓ | 不装配 ✓ |
+| **属性存在但为空**（= 默认 compose 传的） | **上下文创建失败**，抛 `... must be set` ✗ | 不装配 ✓ |
+| 属性为纯空格 | **同上失败** ✗ | 不装配 ✓ |
+| 属性为真实地址 | 装配 Kafka publisher ✓ | 装配 Kafka publisher ✓ |
+
+把注解回退成 `@ConditionalOnProperty` 实跑：**4 例中 2 例失败，异常与线上崩溃逐字相同**。修复后 4/4 绿。
+
+### 教训
+
+- **"变量存在但为空"是部署里极常见的形态，应用必须把它当成"未配置"**。`@ConditionalOnProperty` 的默认语义在这点上与直觉相反（空串 ≠ 关闭）。
+- **只构建镜像的 CI 会被读成"部署能起来"。** `images` job 证明的是"镜像可构建"，而它被当成了更强的东西——又一次"检查与它检查的东西没对齐"。
+- 我此前所有部署验证都走演示站或脚本断言，**没有一次真的把默认栈拉起来过**。这次是"自己做完整套模拟"的直接产物。
+
+## 2026-09-18 lint 门禁从来不会红：它带 --fix，且 CI 不看结果（#822）
+
+在做完整套模拟时发现：干净检出上跑 CI 的那条 lint 命令，**重写了 21 个已提交文件**（内容真变了；另有 132 个只是 stat-dirty）——而 CI 看不出来，因为它跑的是 `eslint . --ext .vue,.ts,.tsx --fix`，**带 `--fix` 且跑完不检查**。于是它区分不了「本来就干净」和「我刚替你改干净」。
+
+最大的受害者是 `src/types/generated.ts`：被整份从 4 空格重排成 2 空格（diff 20,809 行）。而 CI 里另一步是
+
+```yaml
+run: npm run gen:types && git diff --exit-code -- src/types/generated.ts
+```
+
+**它跑在 lint 之前**，此刻文件还是提交时的形态、重生成本一致 → 通过；紧接着 lint 把它改掉，**没人再看**。也就是说「生成物必须与基线一致」和「代码必须符合 lint」这两个要求，对**同一份文件**给出两种互斥答案，CI 对两者都说 OK。
+
+### 修法
+
+1. **`lint` 改成检查模式**（不带 `--fix`），新增 `lint:fix` 供本地改写
+2. **`--max-warnings 0`**：这一步是必需的——今天所有违规（prettier、vue 风格集）**都是 warning**，而 eslint 只有 warning 时仍然 exit 0。**只改检查模式不加这个标志，门禁照样不会红**，是我第一版做完差点收工的地方
+3. **`generated.ts` 加进 eslint ignores**：它是机器产物（文件头写着"不要直接改"），形态由 openapi-typescript 决定。让 lint 对它有意见，就是把上面那对矛盾焊死
+4. 把既有 22 个手写文件的格式漂移**一次性**修掉（否则第 1 条落地当天就红）
+
+### 零告警不是靠关规则凑的
+
+`--max-warnings 0` 要求先把既有 7 条告警正当处理掉，两条都不是靠"关掉规则"了事：
+
+- **6 条 `vue/one-component-per-file` 全在测试文件里**（`src/__tests__/**`、`e2e/**`）——内联桩组件正是那些测试的写法，规则的意图是"一个*交付*文件一个组件"，所以**只在这两个 scope 关掉**
+- **1 条 `vue/no-template-shadow` 是误报**：`<RouterView v-slot="{ Component }"><component :is="Component"/></RouterView>` 是 Vue 官方的规范写法，`Component` 就是那个 slot 绑定，没有遮蔽任何东西。给了**单行、带理由的豁免**，而不是全局关规则
+
+### 红证明
+
+| 场景 | 结果 |
+|---|---|
+| 干净树上 `npm run lint` | **exit 0** |
+| 注入一处格式偏差（`const   badlyFormatted =    1`） | **exit 1**（`prettier/prettier` warning → `--max-warnings 0` 拦下）|
+| `npm run gen:types` 之后紧跟 lint | **两者同时通过**（矛盾解除）|
+
+改完回归：typecheck exit 0、**419 tests / 64 files 全绿**、build exit 0——22 个文件重排没有破坏任何东西。
+
+### 教训
+
+- **"带 --fix 的检查"不是检查**。它把"发现问题"和"掩盖问题"合成一步，还顺手给出一个绿信号。同类形态在本仓已经出现过三次（#807 过严、#809 过松、#812 没有），这次是 **"会自己动手的检查"**。
+- **改检查模式不等于检查会红**——还要问一句"违规是 error 还是 warning"。我第一版只做了前者，跑红证明时才发现仍然 exit 0。
+- 顺带记一条旧账：progress.md 里早有记录说 `npm run lint` 会把 CRLF 文件整批重写成 LF（EOL-only M）。那是 `--fix` 的副作用；检查模式不再有，`lint:fix` 仍有——所以本地跑 `lint:fix` 后仍要区分内容 diff 与 EOL diff。
+
+### 补记：`--max-warnings 0` 一加上，Windows 检出就红了 47,968 条——以及那桩旧账的真相
+
+加完 `--max-warnings 0`、合并 develop 之后再跑，lint 报 **47,968 条**，形态统一：`Delete ␍`。
+
+根因：`.prettierrc.json` 写的是 **`endOfLine: "lf"`**，而 autocrlf 让工作区是 CRLF——**prettier 对每一行都报行尾不对**。不先处理这个，新门禁在任何 Windows 检出上**永远红**。我此前那次"干净树 exit 0"是假象：我自己的 `lint:fix` 早已把工作区写成了 LF，我拿被改过的树当了干净树。
+
+**顺带把一桩旧账对上了**：本仓长期记着"`npm run lint` 会 `--fix` 重写 80+ 个历史漂移文件"。真成因就是这个——`--fix` 一直在把 CRLF 归一成 LF，那批 EOL-only 的 ` M`（`git diff` 为空）全由它而来。**那不是"代码漂移"，是被工具逼出来的行尾改写**；于是记忆里那条"只对本轮改动文件跑 eslint"的规避建议，其实是在绕开一个配置问题。
+
+修法：`endOfLine: "auto"`（跟随文件自身行尾）。**提交形态仍是 LF**（`text=auto` 在 add 时归一化），格式仍照样强制（缩进/引号/宽度/逗号），只是不再把"检出的平台"当成格式问题。
+
+### 教训追加
+
+- **"干净树"要问是谁把它弄干净的**。我上一轮跑红的证明前，`lint:fix` 已经把工作区整成 LF，于是"检查模式 exit 0"测的是**被静默改写过的树**——正是这条 issue 要治的东西，我自己先踩了一次。
+- **一个只在某个平台成立的绿，不是绿**。CI 在 Linux（LF）上一直是绿的，所以这个问题在 CI 里永远看不见；它是 Windows 检出的产物。与 #807/#809/#812 同族：**检查与它运行的环境没对齐**，只不过这次"环境"是操作系统。
+
+## 2026-09-18 首页把「未定价」的用量显示成平静的 ¥0.00（#849）
+
+**这一条是"代入用户视角"跑出来的**——不再读代码猜，而是起真栈、真登录、真看首页。
+
+### 实测（本机真实生产栈）
+
+走完整业务链（建项目→订阅→凭证→模型→授权→签发虚拟密钥→真实推理）后登录门户：
+
+- 首页显示 **`18 本月 Token`** 与 **`¥0.00 本月成本`**，成本卡上**没有任何提示**
+- 同一时刻问 API：
+
+```json
+totals.pricingStatus = "UNAVAILABLE"
+totals.unpriced = { "inputTokens": 11, "outputTokens": 7, "unpricedEvents": 1, "unavailableEvents": 1 }
+```
+
+**服务端明确说了"这些用量在发生时都没有生效价目、金额无从得知"，首页把它显示成一个平静的 ¥0.00。**
+
+### 根因：同一个承诺在四个 surface 上只落实了三个
+
+`costGapNote`（#801/#803 加的标记）只被 `NextUsageView` / `NextAdminUsageView` / `NextCostView` 使用，**漏了 `NextOverviewView`——用户登录后第一眼看到的那一页**。
+
+顺带发现这张卡还在**客户端自行求和**：
+
+```js
+const totalCost = usageGroups.value.reduce((sum, g) => sum + Number(g.cost?.upstreamPaid ?? 0), 0);
+```
+
+既拿不到 `totals` 携带的 `pricingStatus`，显示的也不是服务端权威合计而是分组重算值（`?? 0` 把缺失当 0）。改为直接取 `totals`。
+
+### 我自己引入又自己抓到的回归
+
+第一版把「未定价」chip 放成 value 的**兄弟节点**，而这个卡片是 `flex-direction: column`——于是成本卡变成 **72px 高**（其余三张 48px），数字还被顶高了 **12px**：
+
+```
+三张无标记卡: height 48, value y=212
+成本卡      : height 72, value y=200
+```
+
+**这是在真机上看出来的，不是想出来的。** 改成与数字同行（`inline-flex` + `baseline`）后：48 vs 50，数字差 1px。残余 2px 未再追（1px 基线差在 20px 字号下不可感知），已在 PR 的 Remaining risks 写明。
+
+### 验证
+
+- 单元：**先证明会红**——回退组件后新增 3 例中 **2 例失败**（第 3 例是"COMPLETE 时不得出现标记"的过度标注守卫，两个状态下都该过，如实说明）
+- 三例覆盖：UNAVAILABLE 有标记 / COMPLETE 无标记 / **分组和 ≠ 合计时取合计**（fixture 故意让两者不等：分组 3.60、合计 9.99）
+- 真机：重建 portal 镜像后首页读作 `18 本月 Token | ¥ 0.00 未定价 | 本月成本`，chip 几何 36×20、amber、在数字右侧同行
+- 全量：lint 0（含 `--max-warnings 0`）、**439 tests / 66 files**、build 0
+
+### 教训
+
+**前三个我怀疑的点逐一被证伪**：`MIQROKEY_UPSTREAM_ALLOWED_CIDRS` 其实有文档（configuration-reference §150）、「忘记密码」点击有 toast 且 `/admin/users/{id}/reset-password` 确实存在、网关的上游门控是**按设计的 SSRF 防护**且有文档化逃生口。**只有"用户第一眼看到的那个数字"站住了。** 读代码猜问题，命中率比我以为的低；起栈真看，命中率立刻不一样。
+
+## 2026-09-18 成本报表的「占比」把 0/0 显示成 0.0%（#853）
+
+同一条路子的第二条：起真栈、真登录、逐页把界面数字与服务端对照。
+
+### 实测
+
+```
+按项目分摊
+项目        请求  Token 数  分摊成本    占比
+E2E Chain   1     18       ¥0.0000    0.0%
+```
+
+**同一时刻、同一个项目**，用量页的「用量分布」显示 **100%**（那是按 Token 算的份额）——两个页面就"这个项目占多少"给出相反印象。
+
+### 根因
+
+```js
+function shareOf(group) {
+  const total = costNumber(totalCost.value);
+  if (!total) return 0;                 // ← 0/0 → 报成确定的 0
+  return (costOf(group) / total) * 100;
+}
+```
+
+`if (!total) return 0` 是为了躲除零，但把**"算不出"**显示成了**"算出来是 0"**：所有行加起来是 0% 而不是 100%，读起来是"这个项目不占任何开销"，而事实是**还没有可分摊的金额**（本轮全部用量未定价，即 #849 那条）。
+
+**与本仓一直在治的形态同族**：B+ 计价语义（NULL ≠ 0）、`pricingStatus`、`未定价` 标记，说的都是"不知道 ≠ 是零"。这里同一个陷阱落在了一个比例上。
+
+### 修法
+
+- 总成本为 0 时占比返回 `null`，显示 **`—`**，而不是 `0.0%`
+- **`—` 必须自证**：包 `UiTooltip`「总成本为 0，没有可分摊的基数——占比无从计算」；否则只是把迷惑从"0.0%"换成"一个孤零零的横杠"
+- **总成本 > 0 时行为完全不变**——某行成本确实是 0 时仍显示 `0.0%`（那是**真零**）
+
+### 验证
+
+- **先证明会红**：回退组件后 12 例中 **1 例失败**（占位显示用例）；另一例「总成本非零时真零仍显示 0.0%」在修复前后都通过——它是**过度标注的守卫**，如实说明它不是本次缺陷的回归测试
+- 真机复验（重建 portal 后）：表格该行读作 `E2E Chain | 1 | 18 | ¥0.0000 | —`；悬停 `—` 弹出「总成本为 0，没有可分摊的基数——占比无从计算」
+- 全量：lint 0（含 `--max-warnings 0`）、**441 tests / 66 files**、typecheck 0、build 0
+- CSV 不受影响（导出表头是 `分组/请求/Token 数/分摊成本(CNY)`，本就不含占比）
+
+### 教训
+
+**这一条来自"把同一类问题在不同页面上逐个对照"**：#849 是"未定价的量被当成总额"，这条是"未定义的比例被当成零"——**换了页面，同一个陷阱换了一件衣服**。只在改动面附近看，两次都发现不了。
+
+## 2026-09-18 对账上传的 `providerCode` 实际取 product_code——只有 UI 标签说清了（#855）
+
+用户视角审计的第三条，也是**最小的一条**。
+
+照 `docs/api-contract.md` §5.27 写上传请求，传 `providerCode=tencent`（provider slug），得到：
+
+```json
+{"status":400,"code":"RECONCILIATION_PROVIDER_UNKNOWN",
+ "detail":"供应商目录中不存在该 product_code。"}
+```
+
+改传 `tencent-coding-plan` 即成功——**它要的是 `provider_products.product_code`（供应商*产品*码）**，不是 `providers.slug`。
+
+### 哪一层说清了、哪一层没说
+
+| 层 | 取值域 |
+|---|---|
+| 前端上传对话框标签 | ✅ 「**供应商 product_code \***」 |
+| 400 报错 detail | ⚠️ 说了 `product_code`，但**要先错一次**才看得到 |
+| `docs/api-contract.md` | ❌ 只说"须在供应商目录"——读起来就是 `providers` 表 |
+| `docs/bill-reconciliation-contract.md` | ❌ 未提该参数 |
+
+**唯一写清取值域的地方是 UI 的表单标签**，走 API 的接入方没有等价说明。两处文档各补一句（不改接口、不动 OpenAPI 基线）。
+
+### 同一次审计里，这个 surface 本身是好的
+
+顺带把账单对账**真跑了一遍**（这是本轮的额外收获，不只是读代码）：
+
+- 造了一份两行的 canonical 账单（一行对得上本地事件、一行只存在于账单），上传成功
+- 报告：`totalRows 2 / matched 1 / unmatchedProvider 1 / unmatchedLocal 0 / lineErrorCount 0 / amountDiff 0.00050000`——**金额差恰为账单独有那行的 0.000500**，逐项正确
+- 明细页：`匹配级别` 列给出 **`REQUEST_ID`**，并列出「账单行/本地记录」双向 id（`row-1/1374a37f-…`），差异行匹配级别为 `—`
+- UI 数字与 API 逐项一致；四态筛选页签、导出 CSV 俱在
+
+**这套东西是能用的。** 本条只关于"那个参数该怎么填"。
+
+### 一条自我校准
+
+本轮我读代码提出过 **6 个**"怀疑是这样"，**全部被证伪**（
+`MIQROKEY_UPSTREAM_ALLOWED_CIDRS` 有文档、忘记密码有 toast、管理员能重置密码、网关上游门控是按设计、
+`input_tokens` NULL 是刻意的 `COALESCE` 双列设计、对账匹配器也用了同一个 coalesce）。
+**真问题全部来自"把产品跑起来、逐页对照服务端"**（#849/#853），以及这次"照文档真发一个请求"。
+
+**读代码猜问题的命中率，比我以为的低得多。** 与"检查必须与它的主语对齐"同族：**我的判断主语是"代码看起来对不对"，而用户的问题域是"用起来对不对"。**
+
+## 2026-09-18 把「未定价」标记的全量审计做了，并补上剩下两页（#857）
+
+修完 #849（首页）之后我问了一句"**还有没有别的页面**"，这次把答案查出来了：**扫了 `frontend/src` 下所有渲染 `¥` 的视图**。
+
+| 视图 | 标记 | 判断 |
+|---|---|---|
+| `NextUsageView` / `NextAdminUsageView` / `NextCostView` | ✅ | 已覆盖 |
+| `NextOverviewView` | ✅ | **#849 刚补** |
+| **`NextProfileView`** | ❌ | **缺**（个人月度成本） |
+| **`NextAdminAgentsView`** | ❌ | **缺**（智能体分摊成本） |
+| `NextPricesView` | ❌ | 不适用（那是**目录价**不是用量金额） |
+| `NextQuotaRulesView` | ❌ | 不适用（限额不是金额） |
+
+**显示"用量金额"的 6 个 surface 里 2 个没有这层标记——而它们要用的 `totals` 里本来就有 `pricingStatus`。** 两处各接 `costGapNote`，与其余页面同源同文案。
+
+真机复验（重建 portal 后）：个人页快照读作 `本月请求 1 | 本月 Token 18 | 本月成本 ¥0.00 | 未定价`。
+
+**另一页问题更重，另行立案（#858）**：缓存收益页的 `RoiTotals` **连 `pricingStatus` 字段都没有**，所以它"说不出未知"；且 `等效折扣 = saved/(saved+paid)` 在两者为 0 时是 `0/0` → 显示 `0.00%`（与 #853 逐字同型）。那一页尤其要紧：它写着「数据决定缓存策略」，而用户从 `缓存节省 ¥0.0000 · 等效折扣 0.00%` 会读出**相反的结论**（"缓存没用"），实际可能是"还没配价、算不出来"。
+
+### 顺带记两个测试陷阱（本仓可复用）
+
+1. **`beforeEach` 里 `document.body.innerHTML = ''` + 未卸载的 wrapper = 崩溃**。我给个人页加的两例测完没 `unmount()`，组件还有一个未落地的异步 load；下一次 `beforeEach` 清空 body 后它再 patch，就报 `Cannot read properties of null (reading 'nextSibling')`——**而且炸的是别的用例**（`shows the forced password banner...`），看起来像我的生产改动弄坏了它。**定位法**：把 spec 还原、只留组件改动跑一遍（7/7 通过）→ 立刻分清是"产品的锅"还是"测试的锅"。修法就是那两行 `wrapper.unmount()`。
+2. 既有用例之所以没踩到，只是因为**它们的组件在测试结束后不再更新**。这是个"没踩到≠不存在"的坑。
+
+### 教训
+
+**"还有没有别的页面"这个问题，问一次不够，得扫一遍。** #849 修的是"我看见的那一页"；这次扫出另外两页，并发现第三页连字段都没有。**同一个承诺在 9 个渲染金额的视图里只落实了 4 个**——靠一页一页撞，永远撞不完。
+
+## 2026-09-19 缓存收益页：让 API 能说"未知"，并停止把 0/0 报成 0.00%（#858）
+
+本轮用户视角审计里**最重的一条**，也是唯一要动后端契约的一条。
+
+### 问题
+
+页面自己写着「**数据决定缓存策略**」，而实测（真机、用量全部未定价）它显示：
+
+```
+缓存节省   ¥0.0000
+上游实付   ¥0.0000   ·   等效折扣   0.00%
+```
+
+两件事被当成确定的：
+
+1. **`RoiTotals` 里没有 `pricingStatus`**——同一个产品里用量汇总能说"这个金额不是总额"，缓存收益页**说不出**，所以前端就算想标也无从标起
+2. **`等效折扣 = saved/(saved+paid)`**，两者为 0 时是 `0/0`，而 `pct()` 返回 `BigDecimal.ZERO` → 显示 `0.00%`——与 #853 逐字同型
+
+**为什么最重**：用户从这里读出的会是**相反的结论**——不是"还没配价、算不出来"，而是"**缓存没用**"，进而可能关掉一个其实有效的功能。
+
+### 改法
+
+**后端**
+- `RoiTotals` 增 `pricingStatus` + `unpriced`（`AdminRoiService` 手里本来就有 `GroupSummary`，只是一直丢掉）
+- **`savedPct` 在无成本基数时返回 `null`**：`0.00` 是在断言一个算不出来的数
+
+**前端**
+- 两处金额按 `costGapNote` 渲染「未定价」
+- `等效折扣` 为 null 时显示 **`—`**（不是 `0.00%`）
+
+### 验证
+
+- **后端先证明会红**：回退 DTO/service 后新增的 IT 用例失败于 `$.totals.savedPct`（当时是 `0.00` 而非 null）；修复后 **5/5 绿**
+- **前端先证明会红**：回退视图后新增用例失败；修复后 **7/7 绿**
+- 全量：lint 0（`--max-warnings 0`）/ **443 tests** / typecheck / build / **gen:types 幂等**
+- OpenAPI 基线重生成，`check-openapi-breaking.py` **no breaking changes**（纯加字段；`savedPct` 的 Java 侧可空不改变 schema 的 required）
+- **真机复验**：API 返回 `savedPct: null` + `pricingStatus: "UNAVAILABLE"`；页面读作 `缓存节省 ¥0.0000 未定价` / `等效折扣 —`
+
+### 两处我自己造的麻烦（都拦住了）
+
+1. **差点拿旧镜像宣布"已验证"**。构建命令我用 `| tail -3` 截了输出，**构建其实失败了**，而后续 `up` 照跑，容器仍是 8 小时前的镜像 —— 页面上什么都没变。**是"页面没变"这一点让我回头查**，而不是我的流程。仓里早有「构建缓存快≠代码新」的告诫，这次是它的近亲：**截断输出 = 关掉自己的报警器**。
+2. **那次构建失败本身是我自己造的**：我给测试树只拷了 `generated.ts`、没拷 `generated-api.ts`，而 develop 的 #838 修复把 schema 改名了（`UpsertRequest` → `McpRouteRuleUpsertRequest`），两个文件因此不配套。**又一次"先怀疑产品、后确认是自己的环境"**——同一模式本轮第七次。
+
+### 教训
+
+**"有字段"和"能用来说真话"是两件事。** 用量汇总有 `pricingStatus`，缓存收益页没有——于是同一句承诺（"不完整的金额不是总额"）在六个 surface 上落实程度不同。**这一条把 #849/#853/#857/#858 串成了一句：这个承诺此前只在半数页面上成立。**

@@ -11,7 +11,17 @@ import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
-import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
+import { costGapNote } from '@/lib/usage-pricing';
+import {
+  UiButton,
+  UiDialog,
+  UiInput,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  UiTooltip,
+  toast,
+} from '@/ui';
 import type { UiSelectOption } from '@/ui';
 import type { BudgetView, Project, UsageGroup, UsageSummary } from '@/types/generated-api';
 
@@ -60,6 +70,19 @@ const totalTokens = computed(
     (projectSummary.value?.totals?.tokens?.output ?? 0),
 );
 const cacheSaved = computed(() => projectSummary.value?.totals?.cost?.savedByGatewayCache ?? 0);
+/**
+ * #790: hits that happened before any price was in force for their model. While
+ * any remain, the saving is a lower bound — the card says so rather than letting a
+ * small number read as "the cache saved almost nothing".
+ */
+const unpricedHits = computed(() =>
+  Number(projectSummary.value?.totals?.unpriced?.unpricedHitEvents ?? 0),
+);
+/**
+ * #801: the cost cards are not totals while this is non-null. Same promise the API
+ * has kept since #766, which the console never showed.
+ */
+const costCaveat = computed(() => costGapNote(projectSummary.value?.totals));
 const cacheHits = computed(() => {
   const t = projectSummary.value?.totals;
   return t ? (t.requests?.l1Hit ?? 0) + (t.requests?.l2Hit ?? 0) : 0;
@@ -101,10 +124,28 @@ function asGroup(row: unknown): UsageGroup {
   return row as UsageGroup;
 }
 
-function shareOf(group: UsageGroup): number {
+/**
+ * Share of the total cost, or null when there is no total to take a share of.
+ *
+ * A zero total makes every share 0/0 — undefined. Reporting 0.0% reads as "this
+ * group accounts for none of the spend" and makes the column sum to 0% instead of
+ * 100%; the honest answer is that the share cannot be computed yet (which happens
+ * whenever no usage has been priced, the same case the unpriced markers cover).
+ */
+function shareOf(group: UsageGroup): number | null {
   const total = costNumber(totalCost.value);
-  if (!total) return 0;
+  if (!total) return null;
   return (costOf(group) / total) * 100;
+}
+
+function shareWidth(group: UsageGroup): number {
+  const share = shareOf(group);
+  return share === null ? 0 : Math.min(100, share);
+}
+
+function shareLabel(group: UsageGroup): string {
+  const share = shareOf(group);
+  return share === null ? '—' : `${share.toFixed(1)}%`;
 }
 
 function formatCost(value: string | number): string {
@@ -192,9 +233,7 @@ function exportCsv() {
       costOf(row).toFixed(4),
     ];
   });
-  const csv = [header, ...rows]
-    .map((row) => row.map(csvCell).join(','))
-    .join('\n');
+  const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -414,15 +453,23 @@ onMounted(async () => {
     </div>
 
     <div class="next-cost__stats" data-testid="cost-stats">
-      <div class="ui-panel next-cost__stat">
+      <div class="ui-panel next-cost__stat" data-testid="cost-stat-total">
         <span class="next-cost__stat-label">分摊总成本</span>
         <span class="next-cost__stat-value ui-num">{{ formatCost(totalCost) }}</span>
         <span class="next-cost__stat-hint">按项目分摊口径</span>
+        <UiTooltip v-if="costCaveat" :text="costCaveat">
+          <span class="next-cost__stat-caveat" data-testid="cost-unpriced-total">未定价</span>
+        </UiTooltip>
       </div>
-      <div class="ui-panel next-cost__stat">
+      <div class="ui-panel next-cost__stat" data-testid="cost-stat-upstream">
         <span class="next-cost__stat-label">上游已付成本</span>
         <span class="next-cost__stat-value ui-num">{{ formatCost(upstreamCost) }}</span>
-        <span class="next-cost__stat-hint">按最新单价估算</span>
+        <!-- #801: this said "按最新单价估算" long after the read path stopped using
+             the latest price (#766): the cost is each event's own frozen price. -->
+        <span class="next-cost__stat-hint">按事件发生时的价目估算</span>
+        <UiTooltip v-if="costCaveat" :text="costCaveat">
+          <span class="next-cost__stat-caveat" data-testid="cost-unpriced-upstream">未定价</span>
+        </UiTooltip>
       </div>
       <div class="ui-panel next-cost__stat">
         <span class="next-cost__stat-label">请求</span>
@@ -434,12 +481,16 @@ onMounted(async () => {
         <span class="next-cost__stat-value ui-num">{{ formatCount(totalTokens) }}</span>
         <span class="next-cost__stat-hint">输入 + 输出</span>
       </div>
-      <div class="ui-panel next-cost__stat">
+      <div class="ui-panel next-cost__stat" data-testid="cost-stat-cache-saved">
         <span class="next-cost__stat-label">缓存节省</span>
         <span class="next-cost__stat-value next-cost__stat-value--accent ui-num">{{
           formatCost(cacheSaved)
         }}</span>
-        <span class="next-cost__stat-hint">命中 {{ formatCount(cacheHits) }} 次 · 未调用上游</span>
+        <span class="next-cost__stat-hint"
+          >命中 {{ formatCount(cacheHits) }} 次 · 未调用上游<template v-if="unpricedHits > 0"
+            >（下界：{{ unpricedHits }} 次命中在发生时无生效价目）</template
+          ></span
+        >
       </div>
       <div class="ui-panel next-cost__stat" data-testid="cost-stat-cache-tokens">
         <span class="next-cost__stat-label">缓存命中 Token</span>
@@ -508,7 +559,9 @@ onMounted(async () => {
             <span class="ui-mono next-cost__budget-code">{{ b.projectCode }}</span>
           </div>
           <div class="next-cost__budget-figures">
-            <span class="ui-num">{{ formatCost(b.spent ?? 0) }} / {{ formatCost(b.amount ?? 0) }}</span>
+            <span class="ui-num"
+              >{{ formatCost(b.spent ?? 0) }} / {{ formatCost(b.amount ?? 0) }}</span
+            >
             <UiStatusBadge
               variant="pill"
               :tone="budgetLevelTone[b.level ?? ''] ?? 'neutral'"
@@ -583,10 +636,20 @@ onMounted(async () => {
             <div class="next-cost__share-track">
               <div
                 class="next-cost__share-fill"
-                :style="{ width: `${Math.min(100, shareOf(asGroup(row)))}%` }"
+                :style="{ width: `${shareWidth(asGroup(row))}%` }"
               />
             </div>
-            <span class="ui-num">{{ shareOf(asGroup(row)).toFixed(1) }}%</span>
+            <!-- A dash has to explain itself, or it just replaces one puzzle with
+                 another: say why no share can be taken. -->
+            <UiTooltip
+              v-if="shareOf(asGroup(row)) === null"
+              text="总成本为 0，没有可分摊的基数——占比无从计算"
+            >
+              <span class="ui-num next-cost__share-undefined" data-testid="cost-share-undefined">{{
+                shareLabel(asGroup(row))
+              }}</span>
+            </UiTooltip>
+            <span v-else class="ui-num">{{ shareLabel(asGroup(row)) }}</span>
           </div>
         </template>
       </UiTable>
@@ -729,6 +792,11 @@ onMounted(async () => {
   padding: var(--ui-space-4);
 }
 
+.next-cost__stat-caveat {
+  color: var(--ui-color-warning, #8a4b00);
+  font-size: 12px;
+}
+
 .next-cost__stat-label {
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
@@ -860,6 +928,10 @@ onMounted(async () => {
   border-radius: var(--ui-radius-pill);
   background: var(--ui-muted);
   overflow: hidden;
+}
+
+.next-cost__share-undefined {
+  color: var(--ui-foreground-secondary);
 }
 
 .next-cost__share-fill {

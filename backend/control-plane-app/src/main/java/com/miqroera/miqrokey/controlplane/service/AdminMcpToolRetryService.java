@@ -47,7 +47,7 @@ public class AdminMcpToolRetryService {
 
     @Transactional
     public McpToolRetryPolicy configure(UUID tenantId, UUID adminId, UUID serviceId, UUID toolId,
-            RequestedPolicy requested, String requestId) {
+            ToolRetryPolicyRequest requested, String requestId) {
         McpTool tool = requireTool(tenantId, serviceId, toolId);
         McpToolRetryPolicy policy = build(requested);
         McpToolRetryPolicy stored = retryRepository.upsert(tenantId, toolId, policy, adminId);
@@ -61,11 +61,11 @@ public class AdminMcpToolRetryService {
     }
 
     /** Raw request shape (all defaults = the disabled override). */
-    public record RequestedPolicy(Boolean retryEnabled, Integer retryMax, Set<String> retryConditions,
+    public record ToolRetryPolicyRequest(Boolean retryEnabled, Integer retryMax, Set<String> retryConditions,
             Boolean idempotencyConfirmed) {
     }
 
-    private McpToolRetryPolicy build(RequestedPolicy r) {
+    private McpToolRetryPolicy build(ToolRetryPolicyRequest r) {
         McpToolRetryPolicy defaults = McpToolRetryPolicy.disabled();
         boolean retryEnabled = r.retryEnabled() != null ? r.retryEnabled() : defaults.retryEnabled();
         Set<RetryCondition> conditions = new LinkedHashSet<>();

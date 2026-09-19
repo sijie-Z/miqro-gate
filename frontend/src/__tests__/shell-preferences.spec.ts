@@ -97,6 +97,31 @@ describe('shell preferences wiring', () => {
     expect(wrapper.find('.new-shell__rail--icons').exists()).toBe(false);
   });
 
+  it('#830: clicking a page title collapses and restores the description line', async () => {
+    setPreference('showPageDesc', true);
+    const wrapper = await mountShell();
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div class="ui-page-header"><h1 class="ui-page-title">标题</h1>' +
+        '<p class="ui-page-desc">说明行</p></div>',
+    );
+    try {
+      const title = document.body.querySelector<HTMLElement>('.ui-page-title');
+      if (!title) throw new Error('title fixture missing');
+
+      title.click();
+      expect(preferences.showPageDesc).toBe(false);
+      expect(document.documentElement.dataset.pageDesc).toBe('hide');
+
+      title.click();
+      expect(preferences.showPageDesc).toBe(true);
+      expect(document.documentElement.dataset.pageDesc).toBe('show');
+    } finally {
+      document.body.querySelector('.ui-page-header')?.remove();
+      wrapper.unmount();
+    }
+  });
+
   it('collapses the rail from the drawer switch and keeps it across a reload', async () => {
     const wrapper = await mountShell();
     await wrapper.find('[data-testid="shell-settings-open"]').trigger('click');

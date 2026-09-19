@@ -49,7 +49,7 @@ public class AdminUserController {
     }
 
     @PostMapping
-    public UserCreated create(@RequestBody CreateRequest body) {
+    public UserCreated create(@RequestBody UserCreateRequest body) {
         var admin = userContext.getUser();
         return orgService.createUser(admin.tenantId(), admin.id(), body.username(), body.displayName(), body.role());
     }
@@ -77,7 +77,7 @@ public class AdminUserController {
         orgService.revokeSessions(admin.tenantId(), admin.id(), userId);
     }
 
-    public record CreateRequest(String username, String displayName, UserRole role) {
+    public record UserCreateRequest(String username, String displayName, UserRole role) {
     }
 
     /**

@@ -56,7 +56,7 @@ public class AdminMcpServiceController {
     }
 
     @PostMapping
-    public McpService create(@Valid @RequestBody CreateRequest body, HttpServletRequest httpReq) {
+    public McpService create(@Valid @RequestBody McpServiceCreateRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return mcpService.create(user.tenantId(), user.id(), body.name().trim(), body.description(), body.endpoint(),
                 body.transport(), body.checkIntervalSeconds(), body.checkTimeoutSeconds(), body.failThreshold(),
@@ -73,7 +73,7 @@ public class AdminMcpServiceController {
 
     /** Updates the health check configuration. */
     @PostMapping("/{serviceId}/health-config")
-    public McpService updateHealthConfig(@PathVariable UUID serviceId, @RequestBody HealthConfigRequest body,
+    public McpService updateHealthConfig(@PathVariable UUID serviceId, @RequestBody McpServiceHealthConfigRequest body,
             HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return mcpService.updateHealthConfig(user.tenantId(), user.id(), serviceId, body.checkIntervalSeconds(),
@@ -143,7 +143,7 @@ public class AdminMcpServiceController {
         return onboardingService.verify(userContext.getUser().tenantId(), serviceId);
     }
 
-    public record CreateRequest(@NotBlank @Size(max = 200) String name, @Size(max = 2000) String description,
+    public record McpServiceCreateRequest(@NotBlank @Size(max = 200) String name, @Size(max = 2000) String description,
             @NotBlank @Size(max = 2048) String endpoint, String transport,
             @Min(5) @Max(3600) Integer checkIntervalSeconds, @Min(1) @Max(60) Integer checkTimeoutSeconds,
             @Min(1) @Max(20) Integer failThreshold, @Min(1) @Max(20) Integer recoverThreshold,
@@ -153,7 +153,7 @@ public class AdminMcpServiceController {
     public record UpstreamTimeoutRequest(Integer upstreamTimeoutMs) {
     }
 
-    public record HealthConfigRequest(@Min(5) @Max(3600) Integer checkIntervalSeconds,
+    public record McpServiceHealthConfigRequest(@Min(5) @Max(3600) Integer checkIntervalSeconds,
             @Min(1) @Max(60) Integer checkTimeoutSeconds, @Min(1) @Max(20) Integer failThreshold,
             @Min(1) @Max(20) Integer recoverThreshold, @Size(max = 512) String checkPath,
             /** #387: HEALTH_PATH (default) | JSONRPC_INITIALIZE. */

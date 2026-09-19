@@ -12,6 +12,8 @@ export const DICT: Record<string, string> = {
   '8080（管理 API）': '8080 (Management API)',
   '8081（推理流量）': '8081 (Inference traffic)',
   'AI 凭证控制平台': 'AI Credential Control Plane',
+  'API 密钥': 'API key',
+  '粘贴新的密钥': 'Paste the new key',
   'API 密钥 已复制': 'API key copied',
   'API 密钥 已生成，仅显示一次': 'API key generated — shown only once',
   'API 密钥 模式必须填写密钥（每次保存都需要重新填写）。':
@@ -33,6 +35,7 @@ export const DICT: Record<string, string> = {
   '调整': 'Adjustment',
   '已调整': 'Adjusted',
   '含调整': 'Adjustments',
+  '下界': 'Lower bound',
   '模型统计': 'Model stats',
   '用时 / 首字': 'Duration / first byte',
   '真实消耗 Tokens': 'Tokens consumed (actual)',
@@ -91,7 +94,7 @@ export const DICT: Record<string, string> = {
   '套餐形态': 'Plan type',
   'PostgreSQL 17（AES-256-GCM 加密凭证存储）':
     'PostgreSQL 17 (AES-256-GCM encrypted credential storage)',
-  'Secret 已生成，仅显示一次': 'Secret generated — shown only once',
+  '密钥已生成，仅显示一次': 'Key generated — shown only once',
   'Token 用量': 'Token usage',
   'Token 类型': 'Token type',
   'Tokens 输入 + 输出 · Top 8': 'Tokens (input + output) · Top 8',
@@ -675,7 +678,6 @@ export const DICT: Record<string, string> = {
   '成本报表': 'Cost Reports',
   '成本明细': 'Cost details',
   '我已保存': 'I have saved it',
-  '我已保存该 Secret': 'I have saved this secret',
   '我的密钥': 'My Keys',
   '我的申请': 'My requests',
   '我的配额': 'My quota',
@@ -921,7 +923,7 @@ export const DICT: Record<string, string> = {
   '注册并进入': 'Create account',
   '注册服务': 'Register service',
   '测试': 'Test',
-  '测试 Secret': 'Test secret',
+  '测试密钥': 'Test secret',
   '消费者': 'Consumers',
   '消费者名': 'Consumer name',
   '消费者密钥 · 即将到期': 'Consumer key · expiring soon',
@@ -1027,7 +1029,7 @@ export const DICT: Record<string, string> = {
   '端点创建后的投递尝试会出现在这里。': 'Delivery attempts appear here once an endpoint exists.',
   '等待管理员开通': 'Waiting for administrator provisioning',
   '等效折扣（节省 / 实付+节省）': 'Effective discount (saved / paid + saved)',
-  '签名 Secret': 'Signing secret',
+  '签名密钥': 'Signing secret',
   '签名目录': 'Signed catalog',
   '简介': 'Summary',
   '简体中文': '简体中文',
@@ -1227,7 +1229,7 @@ export const DICT: Record<string, string> = {
   '输入+输出': 'Input + output',
   '输入侧命中缓存 · 未计上游费用': 'Served from cache · no upstream cost',
   '输入密码': 'Enter your password',
-  '输入待测试的密钥': 'Enter the secret to test',
+  '粘贴要测试的密钥': 'Paste the key to test',
   '输入新的密钥': 'Enter the new secret',
   '输入账号或邮箱': 'Enter your email or username',
   '输出': 'Output',
@@ -1318,6 +1320,21 @@ export const DICT: Record<string, string> = {
   '重置失败': 'Reset failed',
   '重置密码': 'Reset password',
   '重试': 'Retry',
+  '重新加载': 'Reload',
+  '使用手册': 'User guide',
+  '统计': 'Statistics',
+  '配置概览': 'Configuration',
+  '总请求': 'Total requests',
+  '按虚拟密钥的缓存表现（总请求多的在前）· 当前窗口':
+    'Cache activity per Virtual Key (busiest first) · current window',
+  '去「我的密钥」管理缓存开关': 'Manage cache switches in My Keys',
+  '该窗口内没有按密钥的用量记录': 'No per-key usage in this window',
+  '缓存为按 Key 显式开启：在「我的密钥」为 Key 打开缓存开关后，客户端请求再加 X-MiqroKey-Cacheable: 1 头即生效。':
+    'Caching is opt-in per Key: enable the switch in My Keys, then clients add the X-MiqroKey-Cacheable: 1 header.',
+  '返回总览': 'Back to overview',
+  '页面出错了': 'This page hit an error',
+  '页面渲染时遇到问题。可以先重试；若反复出现，请把下方信息反馈给管理员。':
+    'Something went wrong while rendering this page. Try again first; if it keeps happening, report the details below to your administrator.',
   '重试条件（至少一项）': 'Retry conditions (at least one)',
   '重试次数（1–5）': 'Retry attempts (1–5)',
   '重试（F12 · 默认关闭）': 'Retry (F12 · off by default)',
@@ -1449,6 +1466,18 @@ export const DICT: Record<string, string> = {
     'Some capabilities are estimate-only or checked manually — see the API docs.',
   '该产品实例已停用，不再用于新建凭证。':
     'This product instance is disabled and no longer used for new credentials.',
+  // #735: the DISABLED status label had no dictionary entry (the other five
+  // states do), and the persistent-warning block now renders it inside an
+  // otherwise-English dialog. Standalone only — prefixed variants such as
+  // 规则已停用 have their own entries.
+  '已停用': 'Disabled',
+  // #735 adapter-status persistent warning (non-VERIFIED products).
+  '⚠ 非已验证': '⚠ Not validated',
+  '目录中存在未处于「已验证」状态的产品':
+    'Some catalogue products are not in the "VERIFIED" state',
+  '该产品未处于「已验证」状态': 'This product is not in the "VERIFIED" state',
+  '未处于「已验证」状态的产品仍按当前配置可用（已停用的除外），但不应承载生产流量；本提示不改变产品的启用与可用行为。':
+    'Products that are not in the "VERIFIED" state stay usable under their current configuration — except disabled ones — but must not carry production traffic. This notice does not change which products are enabled or usable.',
   '草稿': 'Draft',
   '管理 API 密钥': 'Admin API key',
   '删除任务': 'Deletion task',
@@ -1626,7 +1655,7 @@ export const DICT: Record<string, string> = {
     'Use “Model catalog → Probe models” on this page to pull the official model list, or enter models manually.',
   '在「授权」圈定模型范围后，成员即可创建虚拟密钥；保存后数秒内生效，无需同步。':
     'Scope the models under Grants and members can create Virtual Keys; changes go live within seconds — no sync needed.',
-  '从供应商控制台获取 API Key 并录入；「测试 Secret」可先不落库做指纹比对验证。':
+  '从供应商控制台获取 API Key 并录入；「测试密钥」可先不落库做指纹比对验证。':
     'Add the API Key from the provider console; “Test secret” verifies it against the stored fingerprint without writing anything.',
   '在「授权」中被引用后开始服务项目；轮换后所有引用方自动使用新版本，无需逐处修改。':
     'Once referenced by a grant it serves that project; after rotation every referrer uses the new version automatically — nothing to edit in place.',
@@ -1700,12 +1729,81 @@ export const DICT: Record<string, string> = {
   '总成本': 'Total cost',
   '按官方价目估算': 'est. at official list prices',
   '该窗口没有用量': 'No usage in this window',
+  '接入指引':
+    'Access guide',
+  '或 · 手动配置':
+    'or · manual setup',
+  '导入目标应用':
+    'Import target app',
+  '导入到 CC Switch':
+    'Import to CC Switch',
+  '复制导入链接':
+    'Copy import link',
+  '已发送…':
+    'Sent…',
+  '重新发送导入请求':
+    'Resend the import request',
+  '正在唤起 CC Switch…':
+    'Opening CC Switch…',
+  '已唤起 CC Switch ✓':
+    'CC Switch opened ✓',
+  '未检测到 CC Switch 被唤起':
+    'CC Switch was not detected opening',
+  '在 CC Switch 弹出的「导入确认」窗中点确认（密钥显示为掩码属正常）。':
+    'Confirm in the CC Switch “import” dialog (a masked key is normal).',
+  '若列表没出现，完全退出并重开 CC Switch 再看。':
+    'If the entry is missing, fully quit and reopen CC Switch.',
+  '可能未安装 CC Switch，或浏览器拦截了 ccswitch:// 跳转。':
+    'CC Switch may not be installed, or the browser blocked the ccswitch:// jump.',
+  '可点「复制导入链接」，粘贴到浏览器地址栏手动触发。':
+    'Use “Copy import link” and paste it into the browser address bar to trigger manually.',
+  '或直接使用下方「手动配置」，把片段贴进对应客户端配置文件。':
+    'Or use the manual setup below and paste the snippet into the client config file.',
+  '每确认一次导入会在 CC Switch 中新增一条供应商记录，请勿重复点击。':
+    'Every confirmed import adds one provider entry in CC Switch — avoid repeated clicks.',
+  '将导入为 CC Switch 的「Claude Code」供应商，网关地址与密钥自动填入，无需手抄。':
+    'Imports a CC Switch “Claude Code” provider with the gateway URL and key filled in.',
+  '将导入为 CC Switch 的「Codex」供应商（CC Switch 固定生成 wire_api = "responses" 形态）——适用于上游产品支持 OpenAI Responses 的场景；若你的产品仅支持 Chat Completions，请改用下方手动配置的 Codex 片段。':
+    'Imports a CC Switch “Codex” provider (CC Switch always generates wire_api = "responses") — use it when the upstream product supports OpenAI Responses; for Chat-Completions-only products use the manual Codex snippet below.',
+  '明文密钥':
+    'Plaintext key',
+  '模型（用于片段与导入的默认模型）':
+    'Model (used in snippets and as the import default)',
+  '默认模型':
+    'Default model',
+  '只能调用该密钥已授权的模型；未授权模型会被网关直接拒绝（不会静默降级）。':
+    'Only models granted to this key are callable; anything else is rejected by the gateway (no silent downgrade).',
+  '终端环境变量（当前终端生效）':
+    'Terminal environment variables (this terminal only)',
+  'VSCode / JetBrains 插件（Claude Code 扩展）读取此文件。':
+    'The VSCode / JetBrains plugin (Claude Code extension) reads this file.',
+  'auth.json 方式':
+    'auth.json mode',
+  '环境变量方式':
+    'Environment-variable mode',
+  'auth.json 含明文密钥，请勿提交到版本库、分享或粘贴到公开工单。':
+    'auth.json holds the plaintext key — never commit, share, or paste it into a public ticket.',
+  '环境变量方式：密钥不写进配置文件，按上方 config.toml 注释设置 MIQROKEY_API_KEY 即可（Windows CMD 用 set，PowerShell 用 $env:）。':
+    'Environment-variable mode: the key stays out of the config file — set MIQROKEY_API_KEY as the config.toml comment shows (set on Windows CMD, $env: on PowerShell).',
+  'Base URL / API Key（含连通性自测）':
+    'Base URL / API key (with a connectivity smoke test)',
+  '导入目标可选 Claude Code / Codex，自动填入网关地址与密钥、不会改动你当前启用的供应商； CC Switch 弹出确认窗、点击确认后即完成。':
+    'Choose Claude Code or Codex as the target: the gateway URL and key are filled in, and your currently active CC Switch provider is left untouched; confirm in the CC Switch dialog to finish.',
 };
 
 export const PATTERNS: Array<[RegExp, string]> = [
   [/^基于当前 (.+?) 条记录$/, 'Based on the current $1 records'],
   [/^修改「(.+?)」的显示名。$/, 'Change the display name for "$1".'],
   [/^凭证当前状态为 (.+?)，无需停用。$/, 'The credential is already $1 — nothing to disable.'],
+  // #714：被 Agent 引用的凭证不可轮换/停用（409 CREDENTIAL_REFERENCED_BY_AGENT）。
+  [
+    /^凭证已被 Agent「(.+?)」引用，不能轮换；请先停用该 Agent。$/,
+    'The credential is referenced by agent "$1" and cannot be rotated — disable that agent first.',
+  ],
+  [
+    /^凭证已被 Agent「(.+?)」引用，不能停用；请先停用该 Agent。$/,
+    'The credential is referenced by agent "$1" and cannot be disabled — disable that agent first.',
+  ],
   [/^修改「(.+?)」的名称与路由标签。$/, 'Change the name and routing tag for "$1".'],
   [/^(.+?)\ 个可用$/, '$1 active'],
   [/^(.+?)\ 轮换中$/, '$1 rotating'],
@@ -1878,4 +1976,10 @@ export const PATTERNS: Array<[RegExp, string]> = [
   // #657 依赖/目录动态单元格。
   [/^(\d+) 个模型$/, '$1 models'],
   [/^凭证 (\d+) · 授权 (\d+)$/, 'Credentials $1 · Grants $2'],
+  // #735 adapter-status warning count.
+  [
+    /^共\ (\d+)\ 个产品实例当前不是\ VERIFIED。$/,
+    '$1 product instances are not currently VERIFIED.',
+  ],
+  [/^打开 CC Switch 的「(.+?)」分组，即可看到新增的「MiQroKey · (.+?)」。$/, 'Open the “$1” group in CC Switch — the new “MiQroKey · $2” entry is right there.'],
 ];

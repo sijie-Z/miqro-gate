@@ -690,7 +690,7 @@ public class ProxyController {
         return c == null
                 ? null
                 : new UsageEvent.ContextAttribution(c.sessionId(), c.activityId(), c.claimedProjectId(),
-                        c.resolutionStatus(), c.claimSource(), c.claimConfidence());
+                        c.resolutionStatus(), c.claimSource(), c.claimConfidence(), ctx.binding().projectTag());
     }
 
     private void publishCacheHit(GatewayResponseCache.LookupLevel level, AuthContext ctx, CacheKey cacheKey,

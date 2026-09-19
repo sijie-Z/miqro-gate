@@ -32,7 +32,9 @@ describe('codegen consistency (openapi schema vs handwritten core types)', () =>
   };
 
   const PAIRS: Array<[apiName: string, schemaName: string]> = [...exportedInterfaces]
-    .filter((n) => EXCEPTIONS[n] || schemas.has(n) || (n.endsWith('View') && schemas.has(n.slice(0, -4))))
+    .filter(
+      (n) => EXCEPTIONS[n] || schemas.has(n) || (n.endsWith('View') && schemas.has(n.slice(0, -4))),
+    )
     .map((n) => {
       if (EXCEPTIONS[n]) return [n, EXCEPTIONS[n]];
       return schemas.has(n) ? [n, n] : [n, n.slice(0, -4)];

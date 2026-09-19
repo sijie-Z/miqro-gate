@@ -18,6 +18,7 @@ import { ApiError } from '@/api/http';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import UsageAdjustChip from '@/components/UsageAdjustChip.vue';
 import { netTokens } from '@/lib/usage-net';
+import { costGapNote } from '@/lib/usage-pricing';
 import {
   UiButton,
   UiDrawer,
@@ -201,6 +202,20 @@ const tokenHitRate = computed<number | null>(() => {
 const tokenHitRatePct = computed(() =>
   tokenHitRate.value === null ? '—' : tokenHitRate.value.toFixed(1) + '%',
 );
+/**
+ * #790: hits the gateway could not value, because no price was in force when they
+ * happened. While any remain, the saving above is a lower bound — without this the
+ * number reads as "the cache saved almost nothing" rather than "we cannot say".
+ */
+const unpricedHits = computed(() => Number(totals.value?.unpriced?.unpricedHitEvents ?? 0));
+
+/**
+ * #801: the cost figure above is not a total while this is non-null. The API has
+ * said so since #766 (`pricingStatus` + `unpriced`); the console just never showed
+ * it, so an incomplete amount read as a complete one.
+ */
+const costCaveat = computed(() => costGapNote(totals.value));
+
 const heroSub = computed(() => {
   const t = totals.value?.tokens;
   return [
@@ -544,6 +559,19 @@ const columns = [
   { key: 'clientIp', title: '来源 IP', width: '140px' },
   { key: 'gatewayRequestId', title: '请求 ID', minWidth: '230px' },
 ];
+
+/**
+ * #773: the 调整 column says what the net counts were derived from, so it earns
+ * its 100px only while the rows on screen actually carry an adjustment. With
+ * none in sight the whole column is dashes, which is the extra column and the
+ * visual noise the acceptance criterion rules out — same treatment as the
+ * single-project column in NextKeysView.
+ */
+const visibleColumns = computed(() =>
+  (records.value?.items ?? []).some((row) => row.adjusted === true)
+    ? columns
+    : columns.filter((column) => column.key !== 'adjust'),
+);
 
 /** 用时/首字 cell: "4.9s / 2.1s"; sub-second values stay in ms. */
 function fmtDuration(ms?: number | null): string {
@@ -1049,6 +1077,9 @@ onMounted(() => {
               >¥{{ fmtMoney(totals?.cost?.upstreamPaid) }}</span
             >
             <span class="next-admin-usage__hero-mini-sub">按官方价目估算</span>
+            <UiTooltip v-if="costCaveat" :text="costCaveat">
+              <span class="next-admin-usage__unpriced" data-testid="cost-unpriced">未定价</span>
+            </UiTooltip>
           </div>
         </div>
       </div>
@@ -1076,6 +1107,12 @@ onMounted(() => {
           <span class="next-admin-usage__hero-sub-value ui-num"
             >¥{{ fmtMoney(totals?.cost?.savedByGatewayCache) }}</span
           >
+          <UiTooltip
+            v-if="unpricedHits > 0"
+            :text="`${unpricedHits} 次命中在发生时没有生效价目，无法计价——节省额只是下界，不是全部`"
+          >
+            <span class="next-admin-usage__unpriced" data-testid="savings-unpriced">下界</span>
+          </UiTooltip>
         </div>
       </div>
     </section>
@@ -1156,7 +1193,7 @@ onMounted(() => {
       <!-- 请求日志 -->
       <UiTable
         v-if="activeTab === 'records'"
-        :columns="columns"
+        :columns="visibleColumns"
         :data="records?.items ?? []"
         :loading="recordsLoading"
         row-key="gatewayRequestId"

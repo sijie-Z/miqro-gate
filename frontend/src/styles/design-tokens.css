@@ -113,7 +113,7 @@
   --ui-table-row-height: 48px;
   --ui-header-height: 48px; /* Vben v2 @header-height */
   --ui-sidebar-width: 210px; /* Vben v2 menuWidth 210 */
-  --ui-content-max: 1200px; /* Vben v2 contentWidth default ('fixed' mode; 'wide' overrides to 100%) */
+  --ui-content-max: 1200px; /* fixed-mode cap — default mode is fluid (vben v5 fills the viewport; 'wide' → 100%) */
 
   /* shadows — popper / dialog / focus affordance + hairline card lift */
   --ui-shadow-card: none; /* antd bordered cards carry no shadow */
@@ -127,3 +127,4 @@
   --ui-ease: 200ms cubic-bezier(0.645, 0.045, 0.355, 1); /* antd motionEaseInOut */
   --ui-ease-enter: cubic-bezier(0.23, 1, 0.32, 1); /* antd slide-up enter */
   --ui-ease-zoom: cubic-bezier(0.08, 0.82, 0.17, 1); /* antd zoom enter */
+}

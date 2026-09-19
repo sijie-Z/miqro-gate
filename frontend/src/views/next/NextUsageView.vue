@@ -10,10 +10,20 @@ import * as api from '@/api';
 import { ChartBarIcon, LayersIcon, MoneyIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
-import { UiButton, UiDonut, UiSelect, UiStatusBadge, UiTable, UiTrendChart, toast } from '@/ui';
+import {
+  UiButton,
+  UiDonut,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  UiTooltip,
+  UiTrendChart,
+  toast,
+} from '@/ui';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import UsageAdjustChip from '@/components/UsageAdjustChip.vue';
 import { netTokens } from '@/lib/usage-net';
+import { costGapNote } from '@/lib/usage-pricing';
 import type { UiSelectOption } from '@/ui';
 import type { QuotaMetric, QuotaPeriod, UsageGroupBy } from '@/types/api';
 import type {
@@ -27,6 +37,13 @@ import type {
 
 const groupBy = ref<UsageGroupBy>('project');
 const summary = ref<UsageSummary | null>(null);
+
+/**
+ * #801: the totals' cost is not a total while this is non-null — some of the
+ * period's usage had no price in force when it happened. The API has said so since
+ * #766; the page just never showed it.
+ */
+const costCaveat = computed(() => costGapNote(summary.value?.totals));
 const summaryLoading = ref(true);
 const summaryError = ref('');
 
@@ -206,6 +223,19 @@ const recordsColumns = [
   { key: 'clientIp', title: '来源 IP', width: '140px' },
   { key: 'providerRequestId', title: '供应商请求 ID', minWidth: '210px' },
 ];
+
+/**
+ * #773: the 调整 column says what the net counts were derived from, so it earns
+ * its 100px only while the rows on screen actually carry an adjustment. With
+ * none in sight the whole column is dashes, which is the extra column and the
+ * visual noise the acceptance criterion rules out — same treatment as the
+ * single-project column in NextKeysView.
+ */
+const visibleRecordsColumns = computed(() =>
+  (records.value?.items ?? []).some((row) => row.adjusted === true)
+    ? recordsColumns
+    : recordsColumns.filter((column) => column.key !== 'adjust'),
+);
 
 // #643: record rows resolve their virtual key by name for at-a-glance auditing.
 const myKeys = ref<VirtualKeyView[]>([]);
@@ -714,6 +744,9 @@ function formatTime(iso?: string): string {
         <span class="ui-num next-usage__totals-col">{{
           formatCost(summary.totals?.cost?.gatewayObserved)
         }}</span>
+        <UiTooltip v-if="costCaveat" :text="costCaveat">
+          <span class="next-usage__unpriced" data-testid="cost-unpriced">未定价</span>
+        </UiTooltip>
       </div>
     </section>
 
@@ -727,7 +760,7 @@ function formatTime(iso?: string): string {
           <h2 class="ui-panel-title">最近记录</h2>
         </div>
         <UiTable
-          :columns="recordsColumns"
+          :columns="visibleRecordsColumns"
           :data="records?.items ?? []"
           :loading="recordsLoading && !records"
           row-key="gatewayRequestId"

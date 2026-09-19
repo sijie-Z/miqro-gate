@@ -7,6 +7,7 @@ import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
 import com.miqroera.miqrokey.domain.usage.CacheLevel;
 import com.miqroera.miqrokey.domain.usage.PriceTokenType;
 import com.miqroera.miqrokey.domain.usage.LifecycleInfo;
+import com.miqroera.miqrokey.domain.usage.RowPriceBasis;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator;
@@ -395,7 +396,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             var gap = new UsageStatsAggregator.PricingGap(rs.getLong("unpriced_input_tokens"),
                     rs.getLong("unpriced_output_tokens"), rs.getLong("unpriced_cache_read_tokens"),
                     rs.getLong("unpriced_cache_creation_tokens"), rs.getLong("unpriced_events"),
-                    rs.getLong("unavailable_events"));
+                    rs.getLong("unavailable_events"), 0L);
             UsageStatsAggregator.UsageAggRow.Outcome outcome = new UsageStatsAggregator.UsageAggRow.Outcome(
                     rs.getLong("failed_requests"), rs.getLong("cancelled_requests"), rs.getLong("duration_sum_ms"),
                     rs.getLong("duration_count"), rs.getLong("ttfb_sum_ms"), rs.getLong("ttfb_count"));
@@ -586,7 +587,9 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             EVENT_ROW_MAPPER.mapRow(rs, rowNum), rs.getObject("net_input_tokens", Long.class),
             rs.getObject("net_output_tokens", Long.class), rs.getObject("net_cache_read_tokens", Long.class),
             rs.getObject("net_cache_creation_tokens", Long.class), rs.getBoolean("adjusted"),
-            rs.getString("provider_product_name"), lifecycleOf(rs));
+            rs.getString("provider_product_name"), lifecycleOf(rs),
+            new RowPriceBasis(rs.getBigDecimal("basis_price_input"), rs.getBigDecimal("basis_price_output"),
+                    rs.getBigDecimal("basis_price_cache_read"), rs.getBigDecimal("basis_price_cache_creation")));
 
     /** Lifecycle columns (#758); all null when the call has no lifecycle row. */
     private static LifecycleInfo lifecycleOf(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -611,8 +614,10 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 && claimSource == null && claimConfidence == null) {
             return null;
         }
+        // bindingTag has no usage_event column (it feeds the evidence table, V55);
+        // rows read back from here never carry it.
         return new UsageEvent.ContextAttribution(sessionId, (UUID) activityId, (UUID) claimedProjectId,
-                resolutionStatus, claimSource, claimConfidence);
+                resolutionStatus, claimSource, claimConfidence, null);
     }
 
     @Override
@@ -623,28 +628,47 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
         String netOutput = UsageAdjustmentSql.netOutput();
         String netCacheRead = UsageAdjustmentSql.netCacheRead();
         String netCacheCreation = UsageAdjustmentSql.netCacheCreation();
-        return jdbc.query("""
-                SELECT ue.*,
-                       %s AS net_input_tokens,
-                       %s AS net_output_tokens,
-                       %s AS net_cache_read_tokens,
-                       %s AS net_cache_creation_tokens,
-                       %s AS adjusted,
-                       -- Enrichment (#758): the provider product's display name for the
-                       -- 供应商 column, plus the lifecycle trail for 首字/协议/终态.
-                       COALESCE(pp.display_name, pp.product_code) AS provider_product_name,
-                       rur.wire_protocol,
-                       rur.time_to_first_byte_ms,
-                       rur.request_status
-                  FROM usage_event ue
-                  LEFT JOIN provider_products pp ON pp.id = ue.provider_product_id%s%s
-                %s
-                %s
-                ORDER BY ue.occurred_at DESC
-                LIMIT :limit OFFSET :offset
-                """.formatted(netInput, netOutput, netCacheRead, netCacheCreation, UsageAdjustmentSql.ADJUSTED_FLAG,
-                wb.joins(), UsageAdjustmentSql.ADJUSTMENT_LATERAL, LIFECYCLE_JOIN, wb.where()), params,
-                ADJUSTED_ROW_MAPPER);
+        // Per-row price basis (#710): the same expression the aggregates price with,
+        // so a detail row and the group it belongs to cannot disagree. Aliased apart
+        // from ue.* — the raw ue.price_* columns are already in the projection and a
+        // duplicate name would silently win. COALESCE short-circuits, so the as-of
+        // subquery only runs for rows the backfill has not stamped yet.
+        String basisInput = PriceSnapshotSql.frozenOrAsOf("ue.price_input", PriceTokenType.INPUT,
+                "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
+        String basisOutput = PriceSnapshotSql.frozenOrAsOf("ue.price_output", PriceTokenType.OUTPUT,
+                "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
+        String basisCacheRead = PriceSnapshotSql.frozenOrAsOf("ue.price_cache_read", PriceTokenType.CACHE_READ,
+                "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
+        String basisCacheCreation = PriceSnapshotSql.frozenOrAsOf("ue.price_cache_creation",
+                PriceTokenType.CACHE_CREATION, "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
+        return jdbc.query(
+                """
+                        SELECT ue.*,
+                               %s AS net_input_tokens,
+                               %s AS net_output_tokens,
+                               %s AS net_cache_read_tokens,
+                               %s AS net_cache_creation_tokens,
+                               %s AS adjusted,
+                               %s AS basis_price_input,
+                               %s AS basis_price_output,
+                               %s AS basis_price_cache_read,
+                               %s AS basis_price_cache_creation,
+                               -- Enrichment (#758): the provider product's display name for the
+                               -- 供应商 column, plus the lifecycle trail for 首字/协议/终态.
+                               COALESCE(pp.display_name, pp.product_code) AS provider_product_name,
+                               rur.wire_protocol,
+                               rur.time_to_first_byte_ms,
+                               rur.request_status
+                          FROM usage_event ue
+                          LEFT JOIN provider_products pp ON pp.id = ue.provider_product_id%s%s
+                        %s
+                        %s
+                        ORDER BY ue.occurred_at DESC
+                        LIMIT :limit OFFSET :offset
+                        """.formatted(netInput, netOutput, netCacheRead, netCacheCreation,
+                        UsageAdjustmentSql.ADJUSTED_FLAG, basisInput, basisOutput, basisCacheRead, basisCacheCreation,
+                        wb.joins(), UsageAdjustmentSql.ADJUSTMENT_LATERAL, LIFECYCLE_JOIN, wb.where()),
+                params, ADJUSTED_ROW_MAPPER);
     }
 
     private TokenBucket parseUsage(String metaJson) {
@@ -690,6 +714,11 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
         private long weightedCacheRead;
         private long weightedCacheCreation;
         private long totalHits;
+        /**
+         * Hits whose tokens carried no price in force — the saving is a lower bound
+         * (#790).
+         */
+        private long unpricedHits;
         // Undivided sums of (cached tokens x hit count x unit price). Kept undivided so
         // the
         // only rounding happens in the aggregator, with the same MathContext as before.
@@ -733,14 +762,30 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             outputCost = outputCost.add(weighted(output, hits, priceOutput));
             cacheReadCost = cacheReadCost.add(weighted(cacheRead, hits, priceCacheRead));
             cacheCreationCost = cacheCreationCost.add(weighted(cacheCreation, hits, priceCacheCreation));
+            if (unpriced(input, hits, priceInput) || unpriced(output, hits, priceOutput)
+                    || unpriced(cacheRead, hits, priceCacheRead) || unpriced(cacheCreation, hits, priceCacheCreation)) {
+                unpricedHits += hits;
+            }
         }
 
         /**
          * {@code tokens x hits x unitPrice}, undivided; a null price contributes
          * nothing.
+         *
+         * <p>
+         * "Nothing" is the honest answer for this sum and the wrong answer for the
+         * report: the tokens are real and only the price is missing, so the caller also
+         * counts the hit as unpriced (#790). Otherwise a hit we could not value is
+         * indistinguishable from a hit that saved nothing.
+         * </p>
          */
         private static BigDecimal weighted(long tokens, long hits, BigDecimal unitPrice) {
             return unitPrice == null ? BigDecimal.ZERO : BigDecimal.valueOf(tokens * hits).multiply(unitPrice);
+        }
+
+        /** A dimension that carried tokens while no price was in force for it. */
+        private static boolean unpriced(long tokens, long hits, BigDecimal unitPrice) {
+            return tokens > 0 && hits > 0 && unitPrice == null;
         }
 
         UsageStatsAggregator.HitAggRow toRow() {
@@ -748,7 +793,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             TokenBucket mean = new TokenBucket(weightedInput / hits, weightedOutput / hits,
                     weightedCacheCreation / hits, weightedCacheRead / hits, null, null, null, null);
             return new UsageStatsAggregator.HitAggRow(groupKey, label, productId, modelId, l1, l2, mean, inputCost,
-                    outputCost, cacheReadCost, cacheCreationCost);
+                    outputCost, cacheReadCost, cacheCreationCost, unpricedHits);
         }
     }
 }
