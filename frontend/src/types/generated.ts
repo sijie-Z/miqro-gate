@@ -3262,9 +3262,9 @@ export interface components {
             sessionExpiresAt?: string;
         };
         WebhookCreateRequest: {
-            name?: string;
-            url?: string;
-            secret?: string;
+            name: string;
+            url: string;
+            secret: string;
             /** Format: int32 */
             timeoutMs?: number;
         };
@@ -4087,9 +4087,9 @@ export interface components {
             shownOnce?: boolean;
         };
         AlertRuleCreateRequest: {
-            name?: string;
+            name: string;
             type?: string;
-            threshold?: number;
+            threshold: number;
             /** Format: int32 */
             dedupeMinutes?: number;
             /** Format: uuid */
