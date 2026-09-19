@@ -73,6 +73,17 @@ public class AdminQuotaRuleService {
     }
 
     /**
+     * One rule with its live watermark, or {@code null} when the tenant has no such
+     * rule — the targeted lookup for callers that already know the rule id. Reading
+     * a single rule must not render the tenant's other rules: every rendered rule
+     * costs a live watermark over its own window (PH8b, mirrors
+     * {@code AdminBudgetService.view}).
+     */
+    public QuotaRuleView view(UUID tenantId, UUID ruleId) {
+        return quotaRuleRepository.findById(tenantId, ruleId).map(rule -> view(tenantId, rule)).orElse(null);
+    }
+
+    /**
      * Inserts or updates the plan keyed on (tenant, scope, metric, period). An
      * existing rule keeps its id, version bumps and created_at stays.
      */

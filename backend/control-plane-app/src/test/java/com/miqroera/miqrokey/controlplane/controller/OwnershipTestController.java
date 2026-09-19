@@ -3,6 +3,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 import com.miqroera.miqrokey.controlplane.security.OwnershipService;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.domain.model.User;
+import io.swagger.v3.oas.annotations.Hidden;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,9 +25,12 @@ import java.util.UUID;
  *
  * <p>
  * Only available in the test classpath; not compiled into the production
- * artifact.
+ * artifact. {@link Hidden} keeps it out of the committed OpenAPI baseline,
+ * which is generated on the test classpath (see
+ * {@code OpenApiBaselineTestControllerLeakTest}).
  * </p>
  */
+@Hidden
 @RestController
 @RequestMapping("/api/v1/test")
 public class OwnershipTestController {

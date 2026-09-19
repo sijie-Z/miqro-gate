@@ -25,7 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Tag("integration")
 @ActiveProfiles("production")
 @DisplayName("Production profile context validation")
-class AuthIntegrationTestProduction {
+class AuthProductionProfileIntegrationTest {
 
     static {
         AbstractControlPlaneIntegrationTest.POSTGRES.getJdbcUrl();

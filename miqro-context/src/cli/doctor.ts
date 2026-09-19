@@ -72,7 +72,11 @@ export async function doctorCommand(): Promise<void> {
         headers: key ? { authorization: `Bearer ${key}` } : {},
         signal: AbortSignal.timeout(5_000),
       });
-      const reachable = res.status !== 0;
+      // fetch() rejects on a transport failure (handled by the catch below), so
+      // any HTTP status here means the request was answered; only a 5xx means
+      // the gateway itself is broken. 4xx is the virtual-key check's business —
+      // a keyless install must not be reported as an unreachable gateway.
+      const reachable = res.status < 500;
       const keyOk = key ? res.status === 200 : "warn";
       checks.push({
         name: "gateway",
