@@ -227,11 +227,25 @@ git branch -d goal/g0.1-repository-bootstrap
 
 ## 9. Tag 与版本
 
-普通 Goal 不创建 tag。G6.5 发布候选通过发布清单后，由用户明确授权：
+普通 Goal 不创建 tag。发布 tag 由用户明确授权后创建，分两档：
+
+**预发布（rc）**：发布候选通过发布清单后，在 `develop` 的收口 commit 上打 tag，并与
+`progress.md` 的发布记录一一对应（`N` 为下一个序号）：
 
 ```powershell
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
+git switch develop
+git pull --ff-only origin develop
+git tag -a 0.1.0-rc.N -m "0.1.0-rc.N"
+git push origin 0.1.0-rc.N
 ```
 
-Tag 必须指向已合并的 `main` commit，版本遵循 SemVer。禁止移动或覆盖已发布 tag。
+**正式版本**：`develop` 合入 `main` 之后再打，tag 必须指向已合并的 `main` commit：
+
+```powershell
+git switch main
+git pull --ff-only origin main
+git tag -a 0.1.0 -m "0.1.0"
+git push origin 0.1.0
+```
+
+`main` 是发布快照、平时落后 `develop`（见 [`decisions/0022-semantic-cache-evaluation.md`](decisions/0022-semantic-cache-evaluation.md) §11.4 与 [`progress.md`](progress.md) §11.4 教训），因此 rc tag 只指向 `develop` 的收口范围，不代表 `main` 上已有对应代码；「必须指向已合并的 `main` commit」只约束正式版本 tag。版本号遵循 SemVer，tag 名不带 `v` 前缀（与既有 `0.1.0-rc.N` 一致）。禁止移动或覆盖已发布 tag。

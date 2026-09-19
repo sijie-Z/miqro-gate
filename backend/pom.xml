@@ -122,6 +122,21 @@
                 <version>3.48.3</version>
             </dependency>
 
+            <!--
+                Patch pin (PH25, 2026-09-19): the Spring Boot 3.4.5 BOM
+                manages the driver at 42.7.5, which carries three HIGH
+                advisories — channel-binding fallback CVE-2025-49146,
+                silent channel-binding downgrade CVE-2026-54291 (both fixed
+                within 42.7.x) and the SCRAM PBKDF2-iteration client DoS
+                CVE-2026-42198. Stay on the 42.7.x patch line: no API change.
+                Drop this pin once the Boot BOM manages >= 42.7.12.
+            -->
+            <dependency>
+                <groupId>org.postgresql</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>42.7.12</version>
+            </dependency>
+
             <!-- External test dependencies not managed by Spring Boot BOM -->
             <dependency>
                 <groupId>com.tngtech.archunit</groupId>
