@@ -172,6 +172,18 @@ public class UsageAdjustmentRepositoryImpl implements UsageAdjustmentRepository 
     }
 
     @Override
+    public boolean isReversed(UUID tenantId, UUID adjustmentId) {
+        if (tenantId == null || adjustmentId == null) {
+            return false;
+        }
+        Boolean reversed = jdbc.queryForObject(
+                "SELECT EXISTS (SELECT 1 FROM usage_adjustments"
+                        + " WHERE tenant_id = :tenantId AND reversal_of_id = :adjustmentId)",
+                Map.of("tenantId", tenantId, "adjustmentId", adjustmentId), Boolean.class);
+        return Boolean.TRUE.equals(reversed);
+    }
+
+    @Override
     @Transactional
     public void lockUsageEvent(UUID usageEventId) {
         // A transaction-scoped advisory lock, the same mechanism the audit chain uses.

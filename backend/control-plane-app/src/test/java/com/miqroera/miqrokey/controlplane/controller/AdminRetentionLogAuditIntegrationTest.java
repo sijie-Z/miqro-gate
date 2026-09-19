@@ -255,6 +255,20 @@ class AdminRetentionLogAuditIntegrationTest {
         assertThat(countEvents("RETENTION_LOG_VIEW")).isZero();
     }
 
+    @Test
+    @DisplayName("an unknown direction is a client error like every other rejected filter value")
+    void invalidDirectionIsABadRequest() throws Exception {
+        seedRetentionRow(TENANT_ID, adminUserId, "RETENTION-BODY-" + UUID.randomUUID(), "OUTPUT");
+
+        // Same endpoint, same class of bad filter input as `from=not-a-timestamp`
+        // above, which answers 400 PARAM_INVALID. A misspelled direction has to land
+        // in the same bucket: it is a caller mistake, not a server fault.
+        mockMvc.perform(get("/api/v1/admin/retention-logs").param("direction", "SIDEWAYS").cookie(sessionCookie))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("PARAM_INVALID"));
+
+        assertThat(countEvents("RETENTION_LOG_VIEW")).isZero();
+    }
+
     // ------------------------------------------------------------------
     // ② authorized export → RETENTION_LOG_EXPORT
     // ------------------------------------------------------------------
