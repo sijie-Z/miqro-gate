@@ -141,7 +141,7 @@
 5. **流式兼容性复核**：§5 的流式不兼容说法来自次要来源，请 owner 确认原始出处；若确认不兼容，A 的推荐强度进一步提高。
 6. **是否与 #706（限流评估）合并一次决策会**：#718 备注建议合并；两条都是「反转既有裁决」类提案。
 7. **范围粒度**：若将来选 D，「按租户」在本产品单客户私有化形态下无实际粒度（§7），是否改为 per-Key 或 per-端点/协议？
-8. **命名不一致（非本议题，仅登记）**：ADR-0009:13 把 PostgreSQL `cache_entry` 记作「L1」、而代码记为 L2；`docs/decisions/0009` 写的配置键 `miqrokey.cache.l1-ttl` 与实际键 `miqrokey.cache.l1.ttl` 不一致（`application.yml:88-96`）；`docs/decisions/README.md` 的 ADR-0014 索引行仍标「（草案）」而文件内为 Accepted。**本 ADR 不改写这些既有文件**，登记待一次独立的文档订正批处理。
+8. **命名不一致（非本议题，仅登记）**：ADR-0009:13 把 PostgreSQL `cache_entry` 记作「L1」、而代码记为 L2；`docs/decisions/0009` 写的配置键 `miqrokey.cache.l1-ttl` 与实际键 `miqrokey.cache.l1.ttl` 不一致（`application.yml:88-96`）；`docs/decisions/README.md` 的 ADR-0014 索引行仍标「（草案）」而文件内为 Accepted。**本 ADR 不改写这些既有文件**，登记待一次独立的文档订正批处理。→ **已于 2026-09-19 订正**（issue #993）：ADR-0009 的配置键改为 `miqrokey.cache.l1.ttl` 并加命名订正节、`configuration-reference.md` 的「L2 向量」措辞与 `docs/decisions/README.md` 的 ADR-0014 索引行一并修正。
 
 ## 11. 所有者拍板记录（2026-09-19，状态由 Proposed 转为 Accepted）
 
