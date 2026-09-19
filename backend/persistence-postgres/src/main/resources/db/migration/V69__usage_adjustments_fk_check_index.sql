@@ -1,0 +1,83 @@
+-- ============================================================================
+-- V69: index the two foreign-key columns of usage_adjustments that the usage
+--      deletion path checks, so that deleting usage_event rows stops scanning
+--      the whole table once per deleted row.
+--
+-- V63 (#709) declared two foreign keys whose check queries have a single
+-- equality predicate on the referencing column and no other qualifier:
+--
+--     usage_adjustments.usage_event_id
+--         REFERENCES usage_event (id) ON DELETE CASCADE
+--     usage_adjustments.reversal_of_id
+--         REFERENCES usage_adjustments (id) ON DELETE RESTRICT
+--
+-- Neither column is indexed as a leading column. usage_event_id appears only as
+-- the second column of a composite:
+--     idx_usage_adjustments_usage_event
+--         ON usage_adjustments (tenant_id, usage_event_id)
+-- and reversal_of_id is not indexed at all.
+--
+-- ON DELETE CASCADE makes PostgreSQL enforce the first constraint from the
+-- parent side: for every deleted usage_event row it runs
+--     SELECT 1 FROM ONLY usage_adjustments x
+--      WHERE usage_event_id = $1
+--        FOR KEY SHARE OF x
+-- (RowTrigger / RI_FKey_cascade_del, plus the same shape again for the cascade
+-- delete itself). ON DELETE RESTRICT fires the second one as an after-row
+-- trigger on every deleted adjustment row:
+--     SELECT 1 FROM ONLY usage_adjustments x
+--      WHERE reversal_of_id = $1
+--        FOR KEY SHARE OF x
+-- (RI_FKey_restrict_del).
+--
+-- Both queries carry a single equality predicate on the referencing column and
+-- no tenant_id, so the composite index cannot serve either of them: a b-tree is
+-- only usable when the leading column is constrained, and here the leading
+-- column is absent from the predicate entirely. The planner therefore falls
+-- back to a sequential scan of usage_adjustments — once per deleted parent row
+-- and once per deleted adjustment respectively.
+--
+-- Measured on PostgreSQL 17 with 100 000 usage_event rows and 5 000
+-- usage_adjustments rows (synthetic dataset), running the exact statement
+-- UsageDeletionService.confirm() issues:
+--
+--     Trigger for constraint usage_adjustments_usage_event_id_fkey
+--         on usage_event: time=9486.561 calls=100000
+--     Trigger for constraint usage_adjustments_reversal_of_id_fkey
+--         on usage_adjustments: time=276.320 calls=5000
+--     Execution Time: 10028.782 ms
+--
+-- The Delete node itself took 223.703 ms; 94.6% of the statement was the first
+-- foreign-key trigger. The plans for the check queries alone:
+--
+--     LockRows  (cost=0.00..153.51 rows=1 width=10)
+--       ->  Seq Scan on usage_adjustments x
+--             Filter: (usage_event_id = '...'::uuid)
+--             Rows Removed by Filter: 4999
+--
+--     LockRows  (cost=0.00..153.51 rows=1 width=10)
+--       ->  Seq Scan on usage_adjustments x
+--             Filter: (reversal_of_id = '...'::uuid)
+--             Rows Removed by Filter: 4999
+--
+-- Cost scales as O(deleted rows x usage_adjustments size). The whole delete
+-- runs inside one @Transactional (UsageDeletionService.confirm) that also holds
+-- usage_event row locks and writes the audit event, and it is reached
+-- synchronously from POST /api/v1/admin/usage-deletions/{id}/confirm — see
+-- #987.
+--
+-- The composite index is kept. It answers the tenant-scoped reads ("all
+-- adjustments of this tenant / of this event, filtered by tenant"), which the
+-- new single-column index cannot do; the two are not redundant. #864 dropped a
+-- genuinely duplicated index pair; this is the opposite case — a missing index
+-- for a query shape that has none.
+--
+-- Idempotent on purpose: a database that already has either index (an operator
+-- applied it by hand, or a later migration re-creates it) must not fail here.
+-- ============================================================================
+
+CREATE INDEX IF NOT EXISTS idx_usage_adjustments_usage_event_fk
+    ON usage_adjustments (usage_event_id);
+
+CREATE INDEX IF NOT EXISTS idx_usage_adjustments_reversal_of_fk
+    ON usage_adjustments (reversal_of_id);
