@@ -5512,6 +5512,28 @@ interface KeyRow { key; label; served; hits; hitRatePct; paidCost; savedCost }  
 - 工作区卫生：本次只提交 3 个文件（V68 迁移 + `IndexHygieneTest` + 本文件）；一次性诊断用
   `ZzHygieneProofTest`、`ZzDiagnosticTest` 均已删除，未进入任何提交。
 
+## 2026-09-20 全站验收 56 项：55 过，唯一一条失败是「HSTS 从来没被下发过」（#996）
+
+### 怎么扫的
+
+对线上栈（三镜像齐刷至 `develop@65496844` 之后）跑了一遍 56 项验收：边缘/TLS 与安全头、认证与 CSRF、数据面（反枚举 404、模型门控 403、SSE 流、控制字符、多模态）、缓存身份（#860 的三态）、管理面 18 个 GET、越权面（非管理员 403 / 匿名 401）、用户面 5 个 GET、前端三个懒加载 chunk 的内容。脚本 `D:/tmp/sweep-0920.py`，路径全部取自 `docs/openapi/openapi-3.1.json`，不靠猜。
+
+结果 **55/56**；另两条初判失败是我自己写错了路径/方法（`/api/v1/me` 实为 `/api/v1/auth/me`；tools/sync 是 POST 且要 CSRF），改正即过——顺带反向证明了两件事：**CSRF 门禁真的在拦**、**方法路由真的在判**。
+
+### 唯一真失败：HSTS
+
+三类响应（门户静态 / 管理 API / 网关）都没有 `Strict-Transport-Security`；`git grep` 全仓（Nginx、Spring、文档）**零命中**。
+
+**最值得记的是它怎么骗人的**：当天早些时候给 #860 做冒烟时导出的响应头里**明明有 HSTS**（`includeSubDomains; preload`）——那是**上游透传**：DeepSeek 边缘给自己域名发的头被网关原样转发。**"只打一次推理请求"的验收，会得出"我们有 HSTS"的结论。**
+
+### 改法（#996）
+
+`deploy/docker/nginx/default.conf` 增 `Strict-Transport-Security: max-age=31536000; includeSubDomains`（`always`，与既有三个头同处；**不含 `preload`**——撤回以月计，私有化/内网部署不值得锁死退路）；`docs/security.md` §6 记录这套头与上面那条透传陷阱。
+
+### 教训
+
+**验收要覆盖"这个头是谁发的"，而不是"有没有这个头"**：同名头可能来自被代理方（上游、CDN），而自己的入口一个都没发。与「按名/按列取值、不要按子串」同族——**按来源断言，而不是按存在断言**。另外：**56 项里 55 项绿，价值恰恰在那一条红的**——若只跑"部署四断言 + 一条冒烟"，这次上线就是全绿收场。
+
 ## 2026-09-19 空窗口的命中率：0/0 不是 0%，而且同一张卡片里已经有一个老实人（#932）
 
 审「首次运行 / 空部署」这个此前没碰过的面时发现的。
