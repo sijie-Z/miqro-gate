@@ -29,12 +29,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Input-validation consistency for {@code POST /api/v1/admin/alert-rules} (PH23).
+ * Input-validation consistency for {@code POST /api/v1/admin/alert-rules}
+ * (PH23).
  *
- * <p>The admin UI refuses a blank rule name ({@code NextAdminAlertRulesView.createRule}
- * line 134: "规则名称必填。") and normalises a zero dedupe window to 60, so the API
- * must answer {@code 400} for these values — not store them and not leak a
- * {@code varchar(200)}/ {@code numeric(12,6)} breach as a generic 409.
+ * <p>
+ * The admin UI refuses a blank rule name
+ * ({@code NextAdminAlertRulesView.createRule} line 134: "规则名称必填。") and
+ * normalises a zero dedupe window to 60, so the API must answer {@code 400} for
+ * these values — not store them and not leak a {@code varchar(200)}/
+ * {@code numeric(12,6)} breach as a generic 409.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc

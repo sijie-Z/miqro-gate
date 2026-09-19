@@ -35,9 +35,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Input-validation consistency for {@code POST /api/v1/admin/webhooks} (PH23).
  *
- * <p>Every value sent here is refused by the admin UI
- * ({@code NextAdminWebhooksView.createWebhook} line 137: "名称、URL 与签名密钥必填。")
- * or falls outside the storage/consumer domain of the column it lands in, so the
+ * <p>
+ * Every value sent here is refused by the admin UI
+ * ({@code NextAdminWebhooksView.createWebhook} line 137: "名称、URL 与签名密钥必填。") or
+ * falls outside the storage/consumer domain of the column it lands in, so the
  * API must answer {@code 400} — the boundary must not depend on which client
  * (browser vs. curl) sent the request.
  */
@@ -136,9 +137,9 @@ class WebhookEndpointInputValidationTest {
     }
 
     private org.springframework.test.web.servlet.ResultActions create(Map<String, Object> body) throws Exception {
-        return mockMvc.perform(post("/api/v1/admin/webhooks").contentType(MediaType.APPLICATION_JSON)
-                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                .content(objectMapper.writeValueAsString(body)));
+        return mockMvc.perform(
+                post("/api/v1/admin/webhooks").contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                        .header("X-CSRF-Token", csrfToken).content(objectMapper.writeValueAsString(body)));
     }
 
     private Map<String, Object> validBody() {

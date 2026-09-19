@@ -89,17 +89,14 @@ public class AdminWebhookController {
     }
 
     /**
-     * Bounds mirror the storage columns ({@code varchar(200)} / {@code varchar(500)})
-     * and the timeout domain already used for MCP upstream budgets
-     * (1000..600000 ms, api-contract §5.11): a value outside them is a client error
-     * the admin UI never sends, so it must be a 400 rather than a NOT NULL or
-     * length breach surfacing as a generic 409.
+     * Bounds mirror the storage columns ({@code varchar(200)} /
+     * {@code varchar(500)}) and the timeout domain already used for MCP upstream
+     * budgets (1000..600000 ms, api-contract §5.11): a value outside them is a
+     * client error the admin UI never sends, so it must be a 400 rather than a NOT
+     * NULL or length breach surfacing as a generic 409.
      */
-    public record WebhookCreateRequest(
-            @NotBlank @Size(max = 200) String name,
-            @NotBlank @Size(max = 500) String url,
-            @NotBlank String secret,
-            @Min(1000) @Max(600000) Integer timeoutMs) {
+    public record WebhookCreateRequest(@NotBlank @Size(max = 200) String name, @NotBlank @Size(max = 500) String url,
+            @NotBlank String secret, @Min(1000) @Max(600000) Integer timeoutMs) {
     }
 
     /**
@@ -107,10 +104,8 @@ public class AdminWebhookController {
      * values are constrained. {@code name} rejects blank-but-present
      * ({@code "   "}) without forbidding newlines or other content.
      */
-    public record WebhookUpdateRequest(
-            @Pattern(regexp = "\\s*\\S[\\s\\S]*") @Size(max = 200) String name,
-            Boolean enabled,
-            @Min(1000) @Max(600000) Integer timeoutMs) {
+    public record WebhookUpdateRequest(@Pattern(regexp = "\\s*\\S[\\s\\S]*") @Size(max = 200) String name,
+            Boolean enabled, @Min(1000) @Max(600000) Integer timeoutMs) {
     }
     private static String requestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");

@@ -84,28 +84,23 @@ public class AdminAlertRuleController {
     /**
      * {@code name} matches the {@code varchar(200)} column; {@code threshold}
      * matches {@code numeric(12,6)} — deliberately without a lower bound, because
-     * api-contract §5.8 documents {@code threshold <= 0} as a degenerate-but-allowed
-     * configuration; {@code dedupeMinutes} is a window, so zero and negative values
-     * are refused (the admin UI already normalises zero to the 60 default).
-     * {@code type} stays validated in {@link AlertRuleService#create} against the
-     * rule-type catalogue.
+     * api-contract §5.8 documents {@code threshold <= 0} as a
+     * degenerate-but-allowed configuration; {@code dedupeMinutes} is a window, so
+     * zero and negative values are refused (the admin UI already normalises zero to
+     * the 60 default). {@code type} stays validated in
+     * {@link AlertRuleService#create} against the rule-type catalogue.
      */
-    public record AlertRuleCreateRequest(
-            @NotBlank @Size(max = 200) String name,
-            String type,
-            @NotNull @Digits(integer = 6, fraction = 6) BigDecimal threshold,
-            @Min(1) Integer dedupeMinutes,
-            UUID webhookEndpointId,
-            String scopeJson) {
+    public record AlertRuleCreateRequest(@NotBlank @Size(max = 200) String name, String type,
+            @NotNull @Digits(integer = 6, fraction = 6) BigDecimal threshold, @Min(1) Integer dedupeMinutes,
+            UUID webhookEndpointId, String scopeJson) {
     }
 
-    /** PATCH is partial: absent fields keep their stored value, present ones are bounded. */
-    public record AlertRuleUpdateRequest(
-            @Pattern(regexp = "\\s*\\S[\\s\\S]*") @Size(max = 200) String name,
-            @Digits(integer = 6, fraction = 6) BigDecimal threshold,
-            @Min(1) Integer dedupeMinutes,
-            Boolean enabled,
-            UUID webhookEndpointId,
-            String scopeJson) {
+    /**
+     * PATCH is partial: absent fields keep their stored value, present ones are
+     * bounded.
+     */
+    public record AlertRuleUpdateRequest(@Pattern(regexp = "\\s*\\S[\\s\\S]*") @Size(max = 200) String name,
+            @Digits(integer = 6, fraction = 6) BigDecimal threshold, @Min(1) Integer dedupeMinutes, Boolean enabled,
+            UUID webhookEndpointId, String scopeJson) {
     }
 }
