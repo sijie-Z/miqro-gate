@@ -18,7 +18,7 @@ import { ApiError } from '@/api/http';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import UsageAdjustChip from '@/components/UsageAdjustChip.vue';
 import { netTokens } from '@/lib/usage-net';
-import { costGapNote } from '@/lib/usage-pricing';
+import { costGapNote, savingsBoundNote } from '@/lib/usage-pricing';
 import {
   UiButton,
   UiDrawer,
@@ -207,7 +207,7 @@ const tokenHitRatePct = computed(() =>
  * happened. While any remain, the saving above is a lower bound — without this the
  * number reads as "the cache saved almost nothing" rather than "we cannot say".
  */
-const unpricedHits = computed(() => Number(totals.value?.unpriced?.unpricedHitEvents ?? 0));
+const savingsBound = computed(() => savingsBoundNote(totals.value));
 
 /**
  * #801: the cost figure above is not a total while this is non-null. The API has
@@ -1107,10 +1107,7 @@ onMounted(() => {
           <span class="next-admin-usage__hero-sub-value ui-num"
             >¥{{ fmtMoney(totals?.cost?.savedByGatewayCache) }}</span
           >
-          <UiTooltip
-            v-if="unpricedHits > 0"
-            :text="`${unpricedHits} 次命中在发生时没有生效价目，无法计价——节省额只是下界，不是全部`"
-          >
+          <UiTooltip v-if="savingsBound" :text="savingsBound">
             <span class="next-admin-usage__unpriced" data-testid="savings-unpriced">下界</span>
           </UiTooltip>
         </div>
