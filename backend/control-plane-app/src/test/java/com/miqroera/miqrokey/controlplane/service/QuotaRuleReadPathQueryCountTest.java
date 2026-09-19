@@ -94,7 +94,8 @@ class QuotaRuleReadPathQueryCountTest {
         QuotaRuleRepository rules = mock(QuotaRuleRepository.class);
         when(rules.findAllByTenant(TENANT)).thenReturn(tenantRules(otherRules));
         AdminQuotaRuleService service = new AdminQuotaRuleService(rules, mock(UserRepository.class),
-                mock(ProjectRepository.class), watermarks, mock(AuditService.class));
+                mock(ProjectRepository.class), watermarks, mock(AuditService.class),
+                mock(NamedParameterJdbcTemplate.class));
 
         long before = Mockito.mockingDetails(watermarks).getInvocations().size();
         List<QuotaRuleView> views = service.listForUser(TENANT, CALLER);
@@ -118,7 +119,8 @@ class QuotaRuleReadPathQueryCountTest {
         when(rules.findById(TENANT, targetId)).thenReturn(target(targetId));
         QuotaWatermarks watermarks = watermarksMock();
         AdminQuotaRuleService quotaRules = new AdminQuotaRuleService(rules, mock(UserRepository.class),
-                mock(ProjectRepository.class), watermarks, mock(AuditService.class));
+                mock(ProjectRepository.class), watermarks, mock(AuditService.class),
+                mock(NamedParameterJdbcTemplate.class));
 
         NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
         AlertRuleService.AlertRule alert = new AlertRuleService.AlertRule(UUID.randomUUID(), TENANT, "quota",

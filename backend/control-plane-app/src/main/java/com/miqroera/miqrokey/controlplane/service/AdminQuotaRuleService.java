@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.controlplane.service;
 
 import com.miqroera.miqrokey.controlplane.dto.QuotaRuleView;
+import com.miqroera.miqrokey.controlplane.dto.ResourceDependency;
 import com.miqroera.miqrokey.controlplane.dto.UpsertQuotaRuleRequest;
 import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.model.QuotaAction;
@@ -14,6 +15,8 @@ import com.miqroera.miqrokey.domain.repository.QuotaRuleRepository;
 import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,14 +49,17 @@ public class AdminQuotaRuleService {
     private final ProjectRepository projectRepository;
     private final QuotaWatermarks watermarks;
     private final AuditService auditService;
+    private final NamedParameterJdbcTemplate jdbc;
 
     public AdminQuotaRuleService(QuotaRuleRepository quotaRuleRepository, UserRepository userRepository,
-            ProjectRepository projectRepository, QuotaWatermarks watermarks, AuditService auditService) {
+            ProjectRepository projectRepository, QuotaWatermarks watermarks, AuditService auditService,
+            NamedParameterJdbcTemplate jdbc) {
         this.quotaRuleRepository = quotaRuleRepository;
         this.userRepository = userRepository;
         this.projectRepository = projectRepository;
         this.watermarks = watermarks;
         this.auditService = auditService;
+        this.jdbc = jdbc;
     }
 
     /** All quota rules with live watermarks for their current windows. */
@@ -113,10 +119,31 @@ public class AdminQuotaRuleService {
         return view(tenantId, stored);
     }
 
+    /**
+     * Deletes the rule. I21 (Tencent model-API delete semantics), mirroring
+     * {@link WebhookEndpointService#delete}: a rule still referenced by a
+     * {@code QUOTA_THRESHOLD} alert rule is NOT silently orphaned. The reference
+     * lives in {@code alert_rules.scope_json->>'quotaRuleId'} — a jsonb field with
+     * no foreign key — so nothing at the database level would stop the delete; the
+     * alert rule would stay enabled and visible with its threshold while
+     * {@link AlertEvaluator#quotaRuleView} resolves it to null forever, and it
+     * could never fire again. The delete is refused with the referencing rules
+     * until the references are released.
+     */
     @Transactional
     public void delete(UUID tenantId, UUID adminId, UUID ruleId, String requestId) {
         QuotaRule rule = quotaRuleRepository.findById(tenantId, ruleId).orElseThrow(
                 () -> new ApiException(HttpStatus.NOT_FOUND, "QUOTA_RULE_NOT_FOUND", "Quota rule not found"));
+        List<ResourceDependency> dependents = jdbc.query("""
+                SELECT id, name, enabled FROM alert_rules
+                WHERE tenant_id = :tenantId AND scope_json ->> 'quotaRuleId' = :ruleId
+                ORDER BY name
+                """, new MapSqlParameterSource("tenantId", tenantId).addValue("ruleId", ruleId.toString()),
+                (rs, rowNum) -> new ResourceDependency("ALERT_RULE", (UUID) rs.getObject("id"), rs.getString("name"),
+                        rs.getBoolean("enabled") ? "已启用" : "已停用"));
+        if (!dependents.isEmpty()) {
+            throw new ResourceInUseException("该配额规则被 " + dependents.size() + " 条告警规则引用，请先删除或改配这些告警规则。", dependents);
+        }
         quotaRuleRepository.delete(tenantId, ruleId);
         auditService
                 .record(tenantId, adminId, "QUOTA_RULE_DELETE", "QUOTA_RULE", ruleId,

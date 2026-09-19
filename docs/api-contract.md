@@ -1019,7 +1019,7 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 |---|---|
 | `GET /api/v1/admin/quota-rules` | 全部规则 + 当前窗口水位（读时计算） |
 | `PUT /api/v1/admin/quota-rules` | 新增/更新规则（`(scopeType, scopeId, metric, period)` 为自然键，重复 PUT 原地编辑） |
-| `DELETE /api/v1/admin/quota-rules/{id}` | 删除规则（`404 QUOTA_RULE_NOT_FOUND`） |
+| `DELETE /api/v1/admin/quota-rules/{id}` | 删除规则（`404 QUOTA_RULE_NOT_FOUND`）。**I21 删除前置依赖检查**：仍被 `QUOTA_THRESHOLD` 告警规则引用的规则返回 `409 RESOURCE_IN_USE` + problem 体附 `dependencies: [{type:"ALERT_RULE", id, name, detail:"已启用\|已停用"}]`；先删除或改配这些规则后再删。该引用藏在 `alert_rules.scope_json->>'quotaRuleId'`（jsonb，无外键），原有「经 FK 梳理无引用面」的结论对它不适用 |
 
 - 请求体 `{ "scopeType": USER\|PROJECT, "scopeId", "metric": TOKENS\|REQUESTS\|COST, "period": DAILY\|WEEKLY\|MONTHLY\|YEARLY, "limitValue"（正整数；COST 口径为整数 CNY）, "warnPercent"?（1–99，默认 80）, "status"?（默认 ACTIVE）, "action"?（ALERT\|REJECT，默认 ALERT）}`；scope 不存在 → `404 SCOPE_NOT_FOUND`（防枚举）。COST 指标与 YEARLY 周期为 #683 增（对标腾讯配额管理）；`action` 为 #684 增（ADR-0020）。
 - **水位口径（读时计算，非预聚合）**：TOKENS = 当期窗口 usage 事件全部 token（input+output+cacheRead+cacheCreation，与个人用量 TotalTokens 同口径）；REQUESTS = 当期到达上游的请求数（缓存命中不达上游、不计入，与腾讯「不计入缓存命中」档语义一致）；COST = 当期窗口按价格快照估算的上游实付（与成本报表同口径，缺价记 0）。窗口为 UTC 切片：DAILY=当日 / WEEKLY=周一起 / MONTHLY=当月（与月度预算同约定）/ YEARLY=自然年（1 月 1 日起）。水位计算走内部无上限窗口路径，不受公开查询 93 天窗口约束。
