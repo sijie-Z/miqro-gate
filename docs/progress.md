@@ -5614,3 +5614,45 @@ API 侧同一个响应把矛盾摆得更明白：
 这一条里同一个 0/0 在页面上出现了**四处**（三张卡 + 一个面板），而 #858 当年只改了其中一处
 （等效折扣），于是矛盾就在同一张卡片内部可见。**修同类缺陷时，先把"这类判断在这页出现几次"清点完，
 再动手。**
+
+## 2026-09-20 配额水位改读观测值——登记一笔调整不再能改写客户的 token 配额（#1002）
+
+### 问题
+
+`metric=TOKENS` 的配额水位读的是**净额**（观测 + 调整），而规约明写配额**只读 `usage_event`**。
+
+真机端到端（本条由第三方会话补上——issue 作者自己标注过"端到端 HTTP 断言没跑"）：
+
+```
+一笔调用 600/400（观测 1000） + 登记一笔 output 调整 -400
+  → PUT /admin/quota-rules {metric:TOKENS, limit:1000}
+  → 改动前 $.used = 600、level = NORMAL
+  → 期望   $.used = 1000、level = EXCEEDED
+```
+
+**后果**：`action=REJECT` 的 token 配额**拦不拦得住，取决于"有没有人登记过调整"，而不是网关真实测到多少**。而"登记一笔调整"正是财务更正的动作——**一次财务更正会追溯改写一个已经运行过的运行时控制的结论**。
+
+### 两条独立证据指向同一个口径
+
+- `docs/api-contract.md:677`：「调整计入**财务/报告口径**……**配额判定仍只读 `usage_event`**——财务更正不得追溯改写运行时控制的历史结果。」
+- `UsageStatsRepositoryImpl` 那条聚合 SQL 的注释——**就写在它构造的那几列上方**：「Adjustments feed the financial/reporting reading only; **quota enforcement keeps reading the observed columns**」——而这条 SQL **只产出一个净额列**。同一句语句内自相矛盾。
+
+### 改法
+
+- `UsageStatsRepository.UsageFilter` 增末位 `includeAdjustments`（**读取模式**，不是行过滤），并保留旧签名委托构造器 → 4 个既有调用点**零改动**；另加 `observed()` 取另一种读取。
+- 聚合 SQL 的四个 token 列改为按该标志构造：报告口径拼接 delta 项，观测口径不拼。**两种读取共用同一次扫描**——另写一份 SQL 才是两种口径开始分叉的方式。
+- `AdminUsageStatsService.summaryUncapped` 改用 `.observed()`。它**唯一的调用方就是 `QuotaWatermarks`**，而它的 javadoc 本来就写着"Quota-watermark read path"——所以不需要加重载，这个方法存在的全部意义就是给配额用，而配额必须读观测值。
+
+### 验证
+
+- **先证明会红**：去掉 `.observed()` 后新用例失败于
+  `JSON path "$.used" expected:<1000> but was:<600>`——失败值正是 issue 描述的那个数。
+- 相关 IT 全绿：`AdminQuotaRuleApiIntegrationTest` 12/12、`UsageAdjustmentApiIntegrationTest` 8/8、
+  `QuotaSnapshotApiIntegrationTest` 3/3、`MeQuotaApiIntegrationTest` 2/2。
+- 后端全量 `verify -Pintegration` 全绿。
+
+### 教训
+
+**"同一个数，两种读者，两种含义"必须写在类型的名字上，不能只写在注释里。**
+这条缺陷的规约、注释都写对了，唯独**实现只提供了一个数**——于是"谁该读哪个"就变成了读者各自去猜。
+本条目把读取模式变成 `UsageFilter` 的一个具名维度（`observed()`），让"这个数是给谁看的"变成**调用点上的显式选择**，而不是注释里的嘱咐。

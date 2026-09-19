@@ -177,6 +177,33 @@ class AdminQuotaRuleApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("TOKENS watermark reads the observed columns, not the adjusted ones (#1002)")
+    void tokenWatermarkIgnoresAdjustments() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant();
+        UUID keyId = fx.createKeyViaAdmin();
+        fx.insertUsage(keyId, 600L, 400L); // 1000 tokens observed
+        fx.bookOutputAdjustment(keyId, -400L); // the upstream bill says 400 fewer output tokens
+
+        // A quota is a runtime control, so it keeps reading what the gateway measured:
+        // the
+        // later correction must not move the verdict (api-contract §5.6b — the
+        // aggregate SQL
+        // says the same thing next to the columns it builds). Registering an adjustment
+        // is
+        // not a way to raise a customer's limit.
+        putQuota(quotaBody("USER", adminUserId, "TOKENS", "DAILY", 1000, 80)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.used").value(1000)).andExpect(jsonPath("$.usedPct").value(100.0))
+                .andExpect(jsonPath("$.level").value("EXCEEDED"));
+
+        // ...while the reporting reading of the same window does follow it: output 400
+        // - 400.
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "project").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totals.tokens.input").value(600))
+                .andExpect(jsonPath("$.totals.tokens.output").value(0));
+    }
+
+    @Test
     @DisplayName("REQUEST metric counts upstream requests; PROJECT scope filters by project")
     void requestMetricAndProjectScope() throws Exception {
         fx.insertProviderCatalog();
@@ -547,6 +574,22 @@ class AdminQuotaRuleApiIntegrationTest {
                             :input, :output, TRUE, :gatewayId, now())
                     """, p.addValue("requestId", UUID.randomUUID().toString()).addValue("gatewayId",
                     UUID.randomUUID().toString()));
+        }
+
+        /**
+         * Books an output-token correction against this key's single usage event, the
+         * way the reconciliation flow does. Idempotency and reversal rules do not apply
+         * here: the quota only cares that a correction exists.
+         */
+        void bookOutputAdjustment(UUID keyId, long delta) {
+            jdbc.update("""
+                    INSERT INTO usage_adjustments (id, tenant_id, usage_event_id, adjustment_type,
+                        output_tokens_delta, reason, created_at)
+                    SELECT :id, :tenantId, ue.id, 'USAGE', :delta, 'test correction', now()
+                      FROM usage_event ue
+                     WHERE ue.tenant_id = :tenantId AND ue.virtual_key_id = :keyId
+                    """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                    .addValue("keyId", keyId).addValue("delta", delta));
         }
     }
 

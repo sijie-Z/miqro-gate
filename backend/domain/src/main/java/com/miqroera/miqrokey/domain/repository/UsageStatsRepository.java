@@ -85,14 +85,38 @@ public interface UsageStatsRepository {
      * {@code subscriptionId} / {@code providerProductId} / {@code modelId}. The
      * filter always carries {@code tenantId}; there is deliberately no tenant-less
      * query shape.
+     *
+     * <p>
+     * {@code includeAdjustments} is a <b>reading mode</b>, not a row filter: the
+     * token columns of the aggregate mean different things under the two readings
+     * (api-contract §5.6b). Adjustments are booked against the financial/reporting
+     * reading, so that is the default ({@code true}) and the shape every existing
+     * caller uses. Runtime controls — quota enforcement — must read what the
+     * gateway actually observed, because a later financial correction must not
+     * retroactively rewrite the outcome of a control that already ran.
+     * </p>
      */
     record UsageFilter(UUID tenantId, Set<UUID> virtualKeyIds, UUID userId, UUID projectId, UUID credentialId,
             UUID subscriptionId, UUID providerProductId, String modelId, String clientIp, UUID teamId, Instant from,
-            Instant to) {
+            Instant to, boolean includeAdjustments) {
+
+        /** The reporting reading: adjustments are added to the token columns (#709). */
+        public UsageFilter(UUID tenantId, Set<UUID> virtualKeyIds, UUID userId, UUID projectId, UUID credentialId,
+                UUID subscriptionId, UUID providerProductId, String modelId, String clientIp, UUID teamId, Instant from,
+                Instant to) {
+            this(tenantId, virtualKeyIds, userId, projectId, credentialId, subscriptionId, providerProductId, modelId,
+                    clientIp, teamId, from, to, true);
+        }
 
         /** Self-service shape: caller-scoped key set, no extra dimensions. */
         public UsageFilter(UUID tenantId, Set<UUID> virtualKeyIds, Instant from, Instant to) {
-            this(tenantId, virtualKeyIds, null, null, null, null, null, null, null, null, from, to);
+            this(tenantId, virtualKeyIds, null, null, null, null, null, null, null, null, from, to, true);
+        }
+
+        /** The same scope under the other reading — what the gateway measured. */
+        public UsageFilter observed() {
+            return new UsageFilter(tenantId, virtualKeyIds, userId, projectId, credentialId, subscriptionId,
+                    providerProductId, modelId, clientIp, teamId, from, to, false);
         }
     }
 

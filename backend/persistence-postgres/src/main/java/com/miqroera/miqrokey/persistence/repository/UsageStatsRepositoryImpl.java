@@ -337,22 +337,38 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
         String cacheCreationPrice = PriceSnapshotSql.frozenOrAsOf("ue.price_cache_creation",
                 PriceTokenType.CACHE_CREATION, "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
+        // The token columns have two readings (api-contract §5.6b). The reporting one
+        // adds
+        // the deltas booked against each event (#709); the observed one is what the
+        // gateway
+        // measured. Both come off the same scan, so the reading is a term here rather
+        // than a
+        // second query — a second query is how the two readings start disagreeing about
+        // scope. Runtime controls take the observed reading: a financial correction
+        // must not
+        // retroactively rewrite the outcome of a control that already ran.
+        String deltaInput = filter.includeAdjustments() ? " + COALESCE(SUM(adj.input_delta), 0)" : "";
+        String deltaOutput = filter.includeAdjustments() ? " + COALESCE(SUM(adj.output_delta), 0)" : "";
+        String deltaCacheRead = filter.includeAdjustments() ? " + COALESCE(SUM(adj.cache_read_delta), 0)" : "";
+        String deltaCacheCreation = filter.includeAdjustments() ? " + COALESCE(SUM(adj.cache_creation_delta), 0)" : "";
+        String sumInputTokens = "COALESCE(SUM(" + inputTokens + "), 0)" + deltaInput + " AS input_tokens";
+        String sumOutputTokens = "COALESCE(SUM(" + outputTokens + "), 0)" + deltaOutput + " AS output_tokens";
+        String sumCacheReadTokens = "COALESCE(SUM(" + cacheReadTokens + "), 0)" + deltaCacheRead
+                + " AS cache_read_tokens";
+        String sumCacheCreationTokens = "COALESCE(SUM(" + cacheCreationTokens + "), 0)" + deltaCacheCreation
+                + " AS cache_creation_tokens";
         String sql = """
                 SELECT %s, ue.provider_product_id AS product_id, ue.model_id, ue.cache_level AS cache_level,
                        -- requests counts observed calls; an adjustment corrects a call's usage, it
                        -- does not add a call, so it must not move this number.
                        COUNT(*) AS requests,
-                       -- Net (adjusted) tokens: observed count plus the deltas booked against it
-                       -- (#709). Adjustments feed the financial/reporting reading only; quota
-                       -- enforcement keeps reading the observed columns.
-                       COALESCE(SUM(COALESCE(ue.input_tokens, ue.prompt_tokens)), 0)
-                           + COALESCE(SUM(adj.input_delta), 0) AS input_tokens,
-                       COALESCE(SUM(COALESCE(ue.output_tokens, ue.completion_tokens)), 0)
-                           + COALESCE(SUM(adj.output_delta), 0) AS output_tokens,
-                       COALESCE(SUM(ue.cache_read_input_tokens), 0)
-                           + COALESCE(SUM(adj.cache_read_delta), 0) AS cache_read_tokens,
-                       COALESCE(SUM(ue.cache_creation_input_tokens), 0)
-                           + COALESCE(SUM(adj.cache_creation_delta), 0) AS cache_creation_tokens,
+                       -- Token columns, built above per the filter's reading
+                       -- (api-contract §5.6b): reporting adds the booked deltas, observed
+                       -- is what the gateway measured. Quota enforcement takes observed.
+                       %s,
+                       %s,
+                       %s,
+                       %s,
                        -- Costs are returned un-divided (tokens x unit_price); the aggregator does
                        -- the /PER_MILLION with the same MathContext it always used, so this switch
                        -- does not perturb rounding.
@@ -376,7 +392,8 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 %s
                 %s
                 GROUP BY %s, ue.provider_product_id, ue.model_id, ue.cache_level
-                """.formatted(spec.select(), zeroIfUnpriced(inputPrice), zeroIfUnpriced(outputPrice),
+                """.formatted(spec.select(), sumInputTokens, sumOutputTokens, sumCacheReadTokens,
+                sumCacheCreationTokens, zeroIfUnpriced(inputPrice), zeroIfUnpriced(outputPrice),
                 zeroIfUnpriced(cacheReadPrice), zeroIfUnpriced(cacheCreationPrice),
                 unpricedColumns(inputTokens, inputPrice, outputTokens, outputPrice, cacheReadTokens, cacheReadPrice,
                         cacheCreationTokens, cacheCreationPrice),
