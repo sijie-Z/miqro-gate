@@ -91,4 +91,35 @@ describe('NextAdminExportsView', () => {
     await flushPromises();
     expect(mockApi.exportStatus).toHaveBeenCalledWith('e9');
   });
+
+  it('#PH35: a second click while the create request is in flight does not queue a second export', async () => {
+    // ExportTaskService.create mints a fresh task id, INSERTs a row and hands
+    // the task to the worker; nothing dedupes the (tenant, window, format)
+    // triple, so two POSTs = two full exports over the same data.
+    let releaseCreate: (value: unknown) => void = () => {};
+    mockApi.createExport.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseCreate = resolve;
+        }) as never,
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="export-create-open"]').trigger('click');
+    await wrapper.find('[data-testid="export-from"]').setValue('2026-09-01T00:00:00Z');
+    await wrapper.find('[data-testid="export-to"]').setValue('2026-09-02T00:00:00Z');
+
+    const submit = wrapper.find('[data-testid="export-create-submit"]');
+    await submit.trigger('click');
+    await flushPromises();
+    // Second click lands while the first POST is still unanswered.
+    await submit.trigger('click');
+    await flushPromises();
+
+    expect(mockApi.createExport).toHaveBeenCalledTimes(1);
+
+    releaseCreate(task({ id: 'e9', status: 'PENDING' }));
+    await flushPromises();
+  });
 });

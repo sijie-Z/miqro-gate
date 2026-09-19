@@ -19,6 +19,7 @@ const format = ref<'CSV' | 'JSONL'>('CSV');
 const from = ref('2026-08-01T00:00:00Z');
 const to = ref('2026-08-31T00:00:00Z');
 const creating = ref(false);
+const exportSubmitting = ref(false);
 const formError = ref('');
 
 const columns = [
@@ -127,11 +128,18 @@ async function load() {
 }
 
 async function createExport() {
+  // #PH35: the server mints a task per POST (no dedupe on tenant+window+format)
+  // and the form stays open until the response lands, so a double click used to
+  // queue two full exports over the same data.
+  if (exportSubmitting.value) {
+    return;
+  }
   if (!from.value || !to.value || new Date(from.value) >= new Date(to.value)) {
     formError.value = '时间窗口无效：开始时间必须早于结束时间。';
     return;
   }
   formError.value = '';
+  exportSubmitting.value = true;
   try {
     const created = await api.createExport(format.value, from.value, to.value);
     creating.value = false;
@@ -141,6 +149,8 @@ async function createExport() {
     poll(created.id!);
   } catch (error) {
     formError.value = error instanceof ApiError ? error.message : '创建失败';
+  } finally {
+    exportSubmitting.value = false;
   }
 }
 
@@ -246,7 +256,11 @@ onMounted(load);
           <UiInput v-model="to" label="结束时间" required data-testid="export-to" />
           <p v-if="formError" class="ui-form-error">{{ formError }}</p>
           <div class="next-exports__actions">
-            <UiButton variant="primary" data-testid="export-create-submit" @click="createExport"
+            <UiButton
+              variant="primary"
+              :loading="exportSubmitting"
+              data-testid="export-create-submit"
+              @click="createExport"
               >创建任务</UiButton
             >
             <UiButton variant="ghost" @click="creating = false">取消</UiButton>
