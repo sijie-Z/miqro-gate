@@ -5,6 +5,9 @@ import com.miqroera.miqrokey.controlplane.service.AdminOrgService;
 import com.miqroera.miqrokey.controlplane.service.AdminOrgService.TeamMemberView;
 import com.miqroera.miqrokey.domain.model.Team;
 import com.miqroera.miqrokey.domain.model.TeamStatus;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -36,13 +39,13 @@ public class AdminTeamController {
     }
 
     @PostMapping
-    public Team create(@RequestBody TeamCreateRequest body) {
+    public Team create(@Valid @RequestBody TeamCreateRequest body) {
         var admin = userContext.getUser();
         return orgService.createTeam(admin.tenantId(), admin.id(), body.name(), body.description());
     }
 
     @PatchMapping("/{teamId}")
-    public Team update(@PathVariable UUID teamId, @RequestBody TeamUpdateRequest body) {
+    public Team update(@PathVariable UUID teamId, @Valid @RequestBody TeamUpdateRequest body) {
         var admin = userContext.getUser();
         return orgService.updateTeam(admin.tenantId(), admin.id(), teamId, body.name(), body.description(),
                 body.status());
@@ -65,10 +68,11 @@ public class AdminTeamController {
         orgService.removeTeamMember(admin.tenantId(), admin.id(), teamId, userId);
     }
 
-    public record TeamCreateRequest(String name, String description) {
+    /** Width mirrors teams.name varchar(200); see ProjectCreateRequest for why. */
+    public record TeamCreateRequest(@NotBlank @Size(max = 200) String name, String description) {
     }
 
-    public record TeamUpdateRequest(String name, String description, TeamStatus status) {
+    public record TeamUpdateRequest(@Size(max = 200) String name, String description, TeamStatus status) {
     }
 
     public record TeamMemberRequest(UUID userId) {
