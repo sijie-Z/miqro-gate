@@ -2,6 +2,14 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-20（速率信号告警：#706 / ADR-0026 选项 D）
+
+- **两类新告警规则类型**（V71 扩 `alert_rules_type_check`）：`UPSTREAM_RATE_LIMITED`（近 1h 上游 429 **计数**）、`KEY_REQUEST_RATE`（近 1h **单 Key 峰值请求数**）。
+- **两个语义要点**：① 429 只计**上游真的答了 429** 的行（`upstream_status_code = 429`）——网关配额拒绝的请求不触达上游、无该列值，天然不计入；② 单 Key 信号**必须可归因**，触发事件在 `payload_json` 里带 keyId/keyName/requests，且 payload 随事件持久化（`retryDue()` 按存储重放，不重新查询）。
+- **约束遵守（ADR-0026 §6）**：per-key 维度只在 SQL 聚合里，**不做指标标签**（高基数红线）；评估仍在控制面，热路径零改动、零延迟。
+- **踩坑**：`alert_rules.type` 是 CHECK 约束且**服务端另有一份白名单**（`AlertRuleService.RULE_TYPES`）——加类型两处都要改，漏了后者 API 直接 400；迁移定号前查「树 ∪ 已登记号」（本次 V71）。
+- **测试**：`RateSignalAlertIntegrationTest` 4 例 + 既有队列饱和 9 例 + webhook 9 例回归。
+
 ## 会话交接点 2026-09-19（PH22 缓存正确性审计：多模态 part 不入键，#976）
 
 - **确认缺陷一处**：`CacheKeyFactory.textContent()`（`CacheKeyFactory.java:216-235`，develop）遍历 content 数组时**没有 else 分支**，非文本 part（Anthropic `image`、OpenAI `image_url`、Responses `input_image`…）被静默丢弃，语义 scope 只用剩余文本算 → 两张图不同、文本相同的视觉请求得到**同一把缓存键**，后者重放前者的答案。修复：非文本 part 令 `textContent()` 返回 `null` → `semanticScope()` 返回 `""` → `compute()` 回退既有全文键 `normalize(root)`（`:95` 的安全阀）。
