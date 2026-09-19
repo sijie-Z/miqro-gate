@@ -338,9 +338,9 @@ class AdminOrgApiIntegrationTest {
         // path already answered DISPLAY_NAME_INVALID.
         mockMvc.perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
                 .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                .content(objectMapper.writeValueAsString(Map.of("username", "dn_probe", "displayName", "D".repeat(5000)))))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("DISPLAY_NAME_INVALID"));
+                .content(objectMapper
+                        .writeValueAsString(Map.of("username", "dn_probe", "displayName", "D".repeat(5000)))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("DISPLAY_NAME_INVALID"));
         mockMvc.perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
                 .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
                 .content(objectMapper.writeValueAsString(Map.of("username", "dn_ok", "displayName", "D".repeat(200)))))
