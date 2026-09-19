@@ -55,9 +55,19 @@ CVE-2026-35554
 #
 # spring-boot-starter-actuator 3.4.5 — BOM-managed; gateway-app/pom.xml:63-66
 # and control-plane-app/pom.xml:67 declare no <version>. Both are auth bypasses
-# that require non-default configuration; this repo exposes only health,info
-# with show-details: when-authorized (control-plane-app/src/main/resources/
-# application.yml:112-119), so neither is reachable as configured.
+# whose precondition is a specific piece of configuration, and neither exists
+# here (an earlier version of this comment blamed the exposure list — that was
+# the wrong reason, even though the conclusion holds):
+#   - CVE-2026-22731 needs a secured endpoint declared under a path that is
+#     also configured as a Health Group additional path
+#     (management.endpoint.health.group.*.additional-path);
+#   - CVE-2026-22733 needs an endpoint declared under the path used by the
+#     CloudFoundry Actuator endpoints.
+# `grep -rniE "additional-path|health\.group|cloudfoundry" backend/` returns
+# nothing, so neither precondition is reachable. Exposure as configured, for
+# the record: control-plane-app application.yml:112-119 and gateway-app
+# application.yml:104-111 expose health,info; the application-monitoring.yml
+# profile in each app adds prometheus.
 # Tracker: dependabot PR #87 (spring-boot.version 3.4.5 -> 4.1.1). DROP when
 # #87 merges, after confirming the resulting Boot line is >= 3.5.12 / 4.0.4.
 CVE-2026-22731

@@ -444,6 +444,10 @@ jobs:
             --skip-dirs /src/miqro-context/node_modules \
             --skip-dirs /src/backend/target \
             /src
+      # if: always() — this step predates the manifest scan above and must not
+      # be suppressed by it. Without this, a red manifest scan skips the image
+      # scan entirely: two independent scanners, one run, only one verdict.
       - name: Trivy scan of the pinned Postgres image
+        if: always()
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock             -v "${{ github.workspace }}/deploy/security/.trivyignore:/root/.trivyignore:ro"             aquasec/trivy:0.58.2 image --severity HIGH,CRITICAL            --ignorefile /root/.trivyignore             --ignore-unfixed --exit-code 1 --no-progress             postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock             -v "${{ github.workspace }}/deploy/security/.trivyignore:/root/.trivyignore:ro"             aquasec/trivy:0.58.2 image --severity HIGH,CRITICAL            --ignorefile /root/.trivyignore             --ignore-unfixed --exit-code 1 --no-progress --show-suppressed             postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
