@@ -20,11 +20,11 @@ trap cleanup EXIT
 echo "== starting source and target postgres =="
 docker run -d --name miqrokey-backup-src -e POSTGRES_PASSWORD="$PASS" -e POSTGRES_DB=miqrokey "$IMAGE" >/dev/null
 docker run -d --name miqrokey-backup-dst -e POSTGRES_PASSWORD="$PASS" -e POSTGRES_DB=miqrokey "$IMAGE" >/dev/null
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
   docker exec miqrokey-backup-src pg_isready -U postgres >/dev/null 2>&1 && break
   sleep 1
 done
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
   docker exec miqrokey-backup-dst pg_isready -U postgres >/dev/null 2>&1 && break
   sleep 1
 done

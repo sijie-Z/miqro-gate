@@ -49,7 +49,7 @@ public class AdminSubscriptionController {
     }
 
     @PostMapping
-    public UpstreamSubscription create(@RequestBody CreateRequest body) {
+    public UpstreamSubscription create(@RequestBody SubscriptionCreateRequest body) {
         var admin = userContext.getUser();
         return providerService.createSubscription(admin.tenantId(), admin.id(), body.providerProductId(), body.name(),
                 body.billingMode(), body.planScope(), body.subscriptionPrice(), body.currency(), body.quotaTotal(),
@@ -57,7 +57,7 @@ public class AdminSubscriptionController {
     }
 
     @PatchMapping("/{subscriptionId}")
-    public UpstreamSubscription update(@PathVariable UUID subscriptionId, @RequestBody UpdateRequest body) {
+    public UpstreamSubscription update(@PathVariable UUID subscriptionId, @RequestBody SubscriptionUpdateRequest body) {
         var admin = userContext.getUser();
         return providerService.updateSubscription(admin.tenantId(), admin.id(), subscriptionId, body.name(),
                 body.subscriptionPrice(), body.currency(), body.quotaTotal(), body.quotaUnit(), body.status());
@@ -83,11 +83,11 @@ public class AdminSubscriptionController {
                 body.status(), body.displayName());
     }
 
-    public record CreateRequest(UUID providerProductId, String name, BillingMode billingMode, PlanScope planScope,
-            BigDecimal subscriptionPrice, String currency, Long quotaTotal, String quotaUnit) {
+    public record SubscriptionCreateRequest(UUID providerProductId, String name, BillingMode billingMode,
+            PlanScope planScope, BigDecimal subscriptionPrice, String currency, Long quotaTotal, String quotaUnit) {
     }
 
-    public record UpdateRequest(String name, BigDecimal subscriptionPrice, String currency, Long quotaTotal,
+    public record SubscriptionUpdateRequest(String name, BigDecimal subscriptionPrice, String currency, Long quotaTotal,
             String quotaUnit, SubscriptionStatus status) {
     }
 

@@ -31,6 +31,9 @@
 
 上传文件 = UTF-8 JSONL（逐行一个对象）；`.gz` 可选。首行不允许 BOM/元数据行（元数据放请求参数）。
 
+请求参数里的 `providerCode` 取 `provider_products.product_code`（供应商*产品*码，如 `tencent-coding-plan`），
+**不是 `providers.slug`**；同请求另有 `currency`（ISO-4217）与 `windowFrom` / `windowTo`（UTC RFC3339）。
+
 ## 匹配规则（usage-accounting §11，落实到引擎）
 对每行账单记录，按优先级取本地 `usage_event`（同租户）：
 1. **request ID 精确**：`provider_request_id` 等值（usage_event 有唯一 (tenant, provider_request_id)

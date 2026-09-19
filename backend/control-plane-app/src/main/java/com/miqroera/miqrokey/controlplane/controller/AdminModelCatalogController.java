@@ -61,7 +61,7 @@ public class AdminModelCatalogController {
     /** Manual model entry (probe-failure fallback). */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public ModelCatalogView add(@Valid @RequestBody AddRequest body, HttpServletRequest httpReq) {
+    public ModelCatalogView add(@Valid @RequestBody ModelCatalogAddRequest body, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return catalogService.addManual(user.tenantId(), user.id(), body.providerProductId(), body.modelId(),
                 body.displayName(), body.contextWindow(), body.maxOutputTokens(),
@@ -105,7 +105,7 @@ public class AdminModelCatalogController {
                 AuditContext.human(user.id(), requestId(httpReq)));
     }
 
-    public record AddRequest(@NotNull UUID providerProductId, @NotBlank @Size(max = 128) String modelId,
+    public record ModelCatalogAddRequest(@NotNull UUID providerProductId, @NotBlank @Size(max = 128) String modelId,
             @Size(max = 200) String displayName, @Positive Integer contextWindow, @Positive Integer maxOutputTokens) {
     }
 

@@ -3,6 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextAdminReconciliationsView from '@/views/next/NextAdminReconciliationsView.vue';
 import * as api from '@/api';
+import { ApiError } from '@/api/http';
+import type { ProblemDetails } from '@/types/api';
 import type { ReconciliationReport, ReconciliationRow } from '@/api';
 
 vi.mock('@/api', () => ({
@@ -10,6 +12,7 @@ vi.mock('@/api', () => ({
   reconciliationReport: vi.fn(),
   reconciliationRows: vi.fn(),
   createReconciliation: vi.fn(),
+  exportReconciliationCsv: vi.fn(),
 }));
 
 const mockApi = vi.mocked(api);
@@ -51,6 +54,12 @@ describe('NextAdminReconciliationsView', () => {
     mockApi.listReconciliations.mockResolvedValue({ reports: [report()] });
     mockApi.reconciliationReport.mockResolvedValue(report());
     mockApi.reconciliationRows.mockResolvedValue({ rows: [row()], nextCursor: '' });
+    mockApi.exportReconciliationCsv.mockResolvedValue({
+      csv: 'report_id\nr1\n',
+      rows: 1,
+      truncated: false,
+    });
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() });
     vi.useFakeTimers();
   });
 
@@ -158,5 +167,75 @@ describe('NextAdminReconciliationsView', () => {
     vi.advanceTimersByTime(2500);
     await flushPromises();
     expect(mockApi.reconciliationReport).toHaveBeenCalledWith('r9');
+  });
+
+  it('exports the open report without a filter and reports the row count', async () => {
+    mockApi.exportReconciliationCsv.mockResolvedValue({
+      csv: 'report_id,verdict\nr1,MATCHED\n',
+      rows: 6,
+      truncated: false,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="recon-open"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="recon-export"]').exists()).toBe(true);
+
+    await wrapper.find('[data-testid="recon-export"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.exportReconciliationCsv).toHaveBeenCalledWith('r1', undefined);
+    expect(wrapper.find('[data-testid="recon-export-notice"]').text()).toContain(
+      '已导出 6 行 CSV。',
+    );
+  });
+
+  it('sends the active verdict filter and flags a truncated file', async () => {
+    mockApi.exportReconciliationCsv.mockResolvedValue({
+      csv: 'report_id,verdict\nr1,PARTIAL\n',
+      rows: 50000,
+      truncated: true,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="recon-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="recon-filter-PARTIAL"]').trigger('click');
+    await flushPromises();
+
+    await wrapper.find('[data-testid="recon-export"]').trigger('click');
+    await flushPromises();
+
+    expect(mockApi.exportReconciliationCsv).toHaveBeenCalledWith('r1', 'PARTIAL');
+    const notice = wrapper.find('[data-testid="recon-export-notice"]');
+    expect(notice.text()).toContain('已导出前 50000 行并截断');
+    expect(notice.classes()).not.toContain('next-recon__notice--error');
+  });
+
+  it('surfaces an export failure as an error notice and keeps the detail open', async () => {
+    mockApi.exportReconciliationCsv.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        title: '导出失败',
+        status: 500,
+        code: 'INTERNAL_ERROR',
+        detail: '数据库连接失败。',
+        requestId: 'test',
+      } as ProblemDetails),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="recon-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="recon-export"]').trigger('click');
+    await flushPromises();
+
+    const notice = wrapper.find('[data-testid="recon-export-notice"]');
+    expect(notice.text()).toContain('数据库连接失败。');
+    expect(notice.classes()).toContain('next-recon__notice--error');
+    expect(wrapper.find('[data-testid="recon-detail"]').exists()).toBe(true);
   });
 });

@@ -22,6 +22,7 @@ import com.miqroera.miqrokey.domain.model.UpstreamCredential;
 import com.miqroera.miqrokey.domain.model.UpstreamCredentialVersion;
 import com.miqroera.miqrokey.domain.model.UpstreamSubscription;
 import com.miqroera.miqrokey.domain.model.User;
+import com.miqroera.miqrokey.domain.repository.AgentRepository;
 import com.miqroera.miqrokey.domain.repository.UpstreamCredentialRepository;
 import com.miqroera.miqrokey.domain.model.UpstreamCredential;
 import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
@@ -89,13 +90,17 @@ public class AdminCredentialService {
      */
     private final NamedParameterJdbcTemplate jdbc;
 
+    /** Agent bindings pin a credential against mutation (#714). */
+    private final AgentRepository agentRepository;
+
     public AdminCredentialService(UpstreamCredentialRepository credentialRepository,
             UpstreamCredentialVersionRepository versionRepository,
             UpstreamSubscriptionRepository subscriptionRepository, KeyEncryptionProvider keyEncryptionProvider,
             CredentialSecretValidator secretValidator, AuditService auditService, AuthProperties authProperties,
             RouteRefreshPublisher routeRefreshPublisher, AdapterRegistry adapterRegistry,
             ProviderClientFactory clientFactory, ProviderProductRepository productRepository,
-            NamedParameterJdbcTemplate jdbc) {
+            NamedParameterJdbcTemplate jdbc, AgentRepository agentRepository) {
+        this.agentRepository = agentRepository;
         this.credentialRepository = credentialRepository;
         this.versionRepository = versionRepository;
         this.subscriptionRepository = subscriptionRepository;
@@ -258,6 +263,7 @@ public class AdminCredentialService {
         if (credential.status() != CredentialStatus.ACTIVE) {
             throw new ApiException(HttpStatus.CONFLICT, "CREDENTIAL_NOT_ROTATABLE", "只有 ACTIVE 状态的凭证可以轮换。");
         }
+        requireNotReferencedByAgent(tenantId, credentialId, "轮换");
         requireValidSecret(request.secret());
 
         Instant now = Instant.now();
@@ -300,6 +306,7 @@ public class AdminCredentialService {
             throw new ApiException(HttpStatus.CONFLICT, "CREDENTIAL_NOT_DISABLEABLE",
                     "凭证当前状态为 " + credential.status() + "，无需停用。");
         }
+        requireNotReferencedByAgent(tenantId, credentialId, "停用");
         Instant now = Instant.now();
         retireExpiredVersions(credentialId, now);
         versionRepository.findActiveByCredentialId(credentialId).ifPresent(
@@ -344,6 +351,19 @@ public class AdminCredentialService {
         return credentialRepository.findByIdForUpdate(credentialId).filter(c -> c.tenantId().equals(tenantId))
                 .orElseThrow(
                         () -> new ApiException(HttpStatus.NOT_FOUND, "CREDENTIAL_NOT_FOUND", "Credential not found"));
+    }
+
+    /**
+     * #714: while an ACTIVE agent binds the credential, the credential is an
+     * immutable identity — its secret cannot be rotated and it cannot be disabled
+     * (which would drop it from the routing snapshot under the agent's feet).
+     * Disabling the agent releases the reference.
+     */
+    private void requireNotReferencedByAgent(UUID tenantId, UUID credentialId, String action) {
+        agentRepository.findActiveByCredentialId(tenantId, credentialId).ifPresent(agent -> {
+            throw new ApiException(HttpStatus.CONFLICT, "CREDENTIAL_REFERENCED_BY_AGENT",
+                    "凭证已被 Agent「" + agent.name() + "」引用，不能" + action + "；请先停用该 Agent。");
+        });
     }
 
     private void requireValidSecret(String secret) {

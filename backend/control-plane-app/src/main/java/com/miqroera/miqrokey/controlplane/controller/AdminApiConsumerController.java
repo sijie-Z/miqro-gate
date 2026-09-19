@@ -51,7 +51,7 @@ public class AdminApiConsumerController {
     }
 
     @PostMapping
-    public ResponseEntity<CreateApiConsumerResponse> create(@Valid @RequestBody CreateRequest body,
+    public ResponseEntity<CreateApiConsumerResponse> create(@Valid @RequestBody ApiConsumerCreateRequest body,
             HttpServletRequest httpReq) {
         var user = userContext.getUser();
         ApiConsumerService.CreatedConsumer created = consumerService.create(user.tenantId(), user.id(),
@@ -117,17 +117,17 @@ public class AdminApiConsumerController {
      * CONSUMER_SCOPE_UPDATE with the previous and next scope.
      */
     @PatchMapping("/{consumerId}/scope")
-    public ApiConsumerView updateScope(@PathVariable UUID consumerId, @Valid @RequestBody ScopeRequest body,
+    public ApiConsumerView updateScope(@PathVariable UUID consumerId, @Valid @RequestBody ApiConsumerScopeRequest body,
             HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return consumerService.updateScope(user.tenantId(), user.id(), consumerId, body.capabilities(),
                 requestId(httpReq));
     }
 
-    public record CreateRequest(@NotBlank @Size(max = 200) String name, String expiresAt) {
+    public record ApiConsumerCreateRequest(@NotBlank @Size(max = 200) String name, String expiresAt) {
     }
 
-    public record ScopeRequest(List<String> capabilities) {
+    public record ApiConsumerScopeRequest(List<String> capabilities) {
     }
 
     /** Creation response (201): consumer view + one-time api key. */

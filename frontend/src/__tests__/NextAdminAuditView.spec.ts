@@ -129,7 +129,9 @@ describe('NextAdminAuditView', () => {
     await wrapper.find('[data-testid="audit-actor-filter"]').setValue(actor);
     await wrapper.find('[data-testid="audit-refresh"]').trigger('click');
     await flushPromises();
-    expect(mockApi.auditEvents).toHaveBeenLastCalledWith(expect.objectContaining({ actorId: actor }));
+    expect(mockApi.auditEvents).toHaveBeenLastCalledWith(
+      expect.objectContaining({ actorId: actor }),
+    );
   });
 
   it('fills the trailing window from the quick range buttons', async () => {

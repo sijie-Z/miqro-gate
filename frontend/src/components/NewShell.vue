@@ -50,9 +50,11 @@ import {
   UsergroupCircleIcon,
 } from 'tdesign-icons-vue-next';
 import { useAuthStore } from '@/stores/auth';
+import { installPageDescToggle } from '@/utils/page-desc-toggle';
 import { language } from '@/i18n';
 import SettingsDrawer from '@/components/SettingsDrawer.vue';
 import LockScreen from '@/components/LockScreen.vue';
+import ErrorBoundary from '@/components/ErrorBoundary.vue';
 import { UiTooltip } from '@/ui';
 import { initPreferences, preferences, setPreference } from '@/preferences';
 import type { Component } from 'vue';
@@ -240,6 +242,11 @@ function updateNarrow() {
 // #440: initialize from the CURRENT width and clean the listener up on unmount
 // (the old top-level addEventListener never fired before the first resize and
 // leaked one listener per login).
+// #830: clicking any page title collapses/expands the description line under
+// it (delegated, installed once — headers are hand-rolled across 30+ views,
+// and the 界面设置 drawer carries the same preference for discoverability).
+installPageDescToggle();
+
 onMounted(() => {
   updateNarrow();
   window.addEventListener('resize', updateNarrow);
@@ -355,6 +362,13 @@ function noteActivity() {
 
 function lockNow() {
   locked.value = true;
+}
+
+// 使用手册（docs/user-guide）：面向用户/管理员/开发者的手册，随仓库发布。
+const HANDBOOK_URL = 'https://github.com/sijie-Z/miqro-gate/blob/develop/docs/user-guide/README.md';
+
+function openHandbook() {
+  window.open(HANDBOOK_URL, '_blank', 'noopener');
 }
 
 // ---- fullscreen toggle (Vben 全屏内容) ----
@@ -650,6 +664,12 @@ async function handleLogout() {
                 <DropdownMenuSeparator class="new-shell__user-menu-sep" />
                 <DropdownMenuItem
                   class="ui-menu__item new-shell__user-menu-item"
+                  data-testid="shell-handbook"
+                  @select="openHandbook"
+                  >使用手册</DropdownMenuItem
+                >
+                <DropdownMenuItem
+                  class="ui-menu__item new-shell__user-menu-item"
                   data-testid="shell-lock"
                   @select="lockNow"
                   >锁定屏幕</DropdownMenuItem
@@ -806,11 +826,18 @@ async function handleLogout() {
       </Teleport>
 
       <div ref="contentEl" class="new-shell__content">
-        <RouterView v-slot="{ Component }">
-          <Transition name="shell-page" mode="out-in">
-            <component :is="Component" />
-          </Transition>
-        </RouterView>
+        <!-- #833: page crashes keep the shell (nav stays usable); the card
+             offers retry/reload/overview and clears on navigation. -->
+        <ErrorBoundary>
+          <!-- The canonical RouterView + Transition pattern: `Component` here IS
+               the slot binding, not a shadow of anything in this component's scope. -->
+          <!-- eslint-disable-next-line vue/no-template-shadow -->
+          <RouterView v-slot="{ Component }">
+            <Transition name="shell-page" mode="out-in">
+              <component :is="Component" />
+            </Transition>
+          </RouterView>
+        </ErrorBoundary>
       </div>
     </main>
 

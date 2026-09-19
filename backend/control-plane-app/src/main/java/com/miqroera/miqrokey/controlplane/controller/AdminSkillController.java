@@ -88,8 +88,8 @@ public class AdminSkillController {
 
     /** Replaces the download grants; empty list = public skill. */
     @PutMapping("/{skillId}/access")
-    public List<SkillAccess> setAccess(@PathVariable UUID skillId, @RequestBody List<SkillService.ScopeRequest> scopes,
-            HttpServletRequest httpReq) {
+    public List<SkillAccess> setAccess(@PathVariable UUID skillId,
+            @RequestBody List<SkillService.SkillAccessScopeRequest> scopes, HttpServletRequest httpReq) {
         var user = userContext.getUser();
         return skillService.setAccess(user.tenantId(), user.id(), skillId, scopes, requestId(httpReq));
     }

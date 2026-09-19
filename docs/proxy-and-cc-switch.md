@@ -18,7 +18,7 @@
 CC Switch 配置 Claude Code / Claude Desktop / Codex
 ```
 
-门户不生成 CC Switch 配置，不提供 Deeplink 或一键导入。
+门户不生成 CC Switch 配置文件；一键导入通过 CC Switch 深链协议（ccswitch://v1/import）预填其导入确认框，由用户在 CC Switch 内确认，门户不直接读写 CC Switch 配置文件。
 
 ## 2. Gateway 与 CC Switch 的职责
 

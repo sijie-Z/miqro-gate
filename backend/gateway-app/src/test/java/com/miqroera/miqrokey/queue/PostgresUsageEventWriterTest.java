@@ -212,8 +212,108 @@ class PostgresUsageEventWriterTest {
     }
 
     // -------------------------------------------------------------------
+    // CAA evidence rows (Spec v1.1 §7.2, #629)
+    // -------------------------------------------------------------------
+
+    @Test
+    @DisplayName("evidence rows record the observed selector — and exist only where one was used (#629)")
+    void contextEvidenceRecordsObservedSelector() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        UUID claimedProjectId = UUID.randomUUID();
+        // 1) Agent-declared project id: the header claim is the evidence.
+        UsageEvent claimed = caaEvent("gw-evi-header-" + suffix, new UsageEvent.ContextAttribution("sess-1",
+                UUID.randomUUID(), claimedProjectId, "RESOLVED_HEADER", "git_remote", "HIGH", "miqro-web"));
+        // 2) legacy suffix selector: the tag in the key is the evidence, no declared
+        // confidence.
+        UsageEvent bySuffix = caaEvent("gw-evi-suffix-" + suffix,
+                new UsageEvent.ContextAttribution(null, null, null, "RESOLVED_SUFFIX", null, null, "miqro-web"));
+        // 3) sole binding / 4) unattributed policy: resolved without any external
+        // signal.
+        UsageEvent sole = caaEvent("gw-evi-sole-" + suffix,
+                new UsageEvent.ContextAttribution(null, null, null, "SOLE_BINDING", null, "MEDIUM", "miqro-web"));
+        UsageEvent policy = caaEvent("gw-evi-policy-" + suffix,
+                new UsageEvent.ContextAttribution(null, null, null, "POLICY_ROUTED", null, "NONE", null));
+
+        writer.writeBatch(List.of(claimed, bySuffix, sole, policy), List.of(), List.of(), List.of());
+
+        // All four requests are recorded as usage — evidence absence below is a
+        // decision, not a dropped batch.
+        for (UsageEvent e : List.of(claimed, bySuffix, sole, policy)) {
+            assertThat(usageRows(e.gatewayRequestId())).isEqualTo(1);
+        }
+
+        var claimedRows = evidenceRows(claimed.id());
+        assertThat(claimedRows).hasSize(1);
+        assertThat(claimedRows.get(0)).containsEntry("source", "header")
+                .containsEntry("value", claimedProjectId.toString()).containsEntry("confidence", "HIGH")
+                .containsEntry("scope", "turn").containsEntry("request_id", claimed.gatewayRequestId())
+                .containsEntry("tenant_id", TENANT_ID);
+
+        var suffixRows = evidenceRows(bySuffix.id());
+        assertThat(suffixRows).hasSize(1);
+        assertThat(suffixRows.get(0)).containsEntry("source", "suffix").containsEntry("value", "miqro-web")
+                .containsEntry("confidence", "NONE").containsEntry("scope", "turn");
+
+        assertThat(evidenceRows(sole.id())).isEmpty();
+        assertThat(evidenceRows(policy.id())).isEmpty();
+
+        // A retried flush (bus replay) neither duplicates nor rewrites evidence.
+        writer.writeBatch(List.of(claimed, bySuffix, sole, policy), List.of(), List.of(), List.of());
+        assertThat(evidenceRows(claimed.id())).hasSize(1);
+        assertThat(evidenceRows(bySuffix.id())).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("an unrepresentable usage event leaves no orphan evidence row (#629)")
+    void droppedUsageEventLeavesNoEvidenceRow() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        UsageEvent dropped = new UsageEvent(UUID.randomUUID(), TENANT_ID, null, UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), UUID.randomUUID(), null, CacheLevel.UPSTREAM,
+                new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), 42L, 200, null, true, false,
+                "gw-evi-drop-" + suffix, CLOCK.instant(), CLIENT_IP, new UsageEvent.ContextAttribution(null, null,
+                        UUID.randomUUID(), "RESOLVED_HEADER", null, "LOW", "miqro-web"));
+        UsageEvent healthy = caaEvent("gw-evi-mate-" + suffix,
+                new UsageEvent.ContextAttribution(null, null, null, "RESOLVED_SUFFIX", null, null, "miqro-web"));
+
+        writer.writeBatch(List.of(dropped, healthy), List.of(), List.of(), List.of());
+
+        // usage_event.model_id is NOT NULL: the unrepresentable event is dropped,
+        // and its evidence must not survive it.
+        assertThat(usageRows(dropped.gatewayRequestId())).isZero();
+        assertThat(evidenceRows(dropped.id())).isEmpty();
+        // ... while the same batch still lands the healthy event and its evidence.
+        assertThat(usageRows(healthy.gatewayRequestId())).isEqualTo(1);
+        assertThat(evidenceRows(healthy.id())).hasSize(1);
+    }
+
+    // -------------------------------------------------------------------
     // Fixtures + helpers
     // -------------------------------------------------------------------
+
+    /**
+     * CAA event with an upstream request id: the gateway only writes attribution
+     * for requests it actually sent, and it makes a replayed flush a real no-op on
+     * both tables (usage dedupes on {@code provider_request_id}, evidence on
+     * {@code id}).
+     */
+    private static UsageEvent caaEvent(String gatewayRequestId, UsageEvent.ContextAttribution attribution) {
+        return new UsageEvent(UUID.randomUUID(), TENANT_ID, UUID.randomUUID().toString(), UUID.randomUUID(),
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "model-x", CacheLevel.UPSTREAM,
+                new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), 42L, 200, null, true, false, gatewayRequestId,
+                CLOCK.instant(), CLIENT_IP, attribution);
+    }
+
+    private static Integer usageRows(String gatewayRequestId) {
+        return jdbc.queryForObject("SELECT count(*) FROM usage_event WHERE gateway_request_id = :gid",
+                new MapSqlParameterSource().addValue("gid", gatewayRequestId), Integer.class);
+    }
+
+    private static List<java.util.Map<String, Object>> evidenceRows(UUID usageId) {
+        return jdbc.queryForList("""
+                SELECT source, value, confidence, scope, request_id, tenant_id, observed_at
+                FROM request_context_evidence WHERE id = :id
+                """, new MapSqlParameterSource().addValue("id", usageId));
+    }
 
     private static RequestStartedEvent startEvent(Instant startedAt, String gatewayRequestId) {
         return new RequestStartedEvent(UUID.randomUUID(), startedAt, gatewayRequestId, TENANT_ID, UUID.randomUUID(),
@@ -241,7 +341,7 @@ class PostgresUsageEventWriterTest {
                 UUID.randomUUID(), UUID.randomUUID(), "model-x", CacheLevel.UPSTREAM,
                 new TokenBucket(10L, 5L, 0L, 0L, 10L, 5L, 15L, 0L), 42L, 200, null, true, false, gatewayRequestId,
                 occurredAt, CLIENT_IP, new UsageEvent.ContextAttribution("sess-1", activityId, claimedProjectId,
-                        "RESOLVED_HEADER", "tool_path", "HIGH"));
+                        "RESOLVED_HEADER", "tool_path", "HIGH", "miqro-web"));
 
         writer.writeBatch(List.of(event), List.of(), List.of(), List.of());
 

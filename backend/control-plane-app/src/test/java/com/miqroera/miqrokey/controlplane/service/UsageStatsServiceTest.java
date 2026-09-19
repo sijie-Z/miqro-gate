@@ -7,13 +7,11 @@ import com.miqroera.miqrokey.domain.model.UserStatus;
 import com.miqroera.miqrokey.domain.model.VirtualKey;
 import com.miqroera.miqrokey.domain.model.VirtualKeyPurpose;
 import com.miqroera.miqrokey.domain.model.VirtualKeyStatus;
-import com.miqroera.miqrokey.domain.repository.PriceSnapshotRepository;
 import com.miqroera.miqrokey.domain.repository.UsageStatsRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
 import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
 import com.miqroera.miqrokey.domain.usage.CacheLevel;
-import com.miqroera.miqrokey.domain.usage.PriceSnapshot;
-import com.miqroera.miqrokey.domain.usage.PriceTokenType;
+import com.miqroera.miqrokey.domain.usage.RowPriceBasis;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator;
@@ -58,25 +56,23 @@ class UsageStatsServiceTest {
     private VirtualKeyRepository keyRepository;
     @Mock
     private UsageStatsRepository usageStatsRepository;
-    @Mock
-    private PriceSnapshotRepository priceSnapshotRepository;
 
     private UsageStatsService service;
     private User user;
 
     @BeforeEach
     void setUp() {
-        service = new UsageStatsService(keyRepository, usageStatsRepository, priceSnapshotRepository);
+        service = new UsageStatsService(keyRepository, usageStatsRepository);
         user = new User(USER_ID, TENANT, "u", "U", new byte[32], UserRole.USER, UserStatus.ACTIVE, false, 0, null, null,
                 0L, Instant.now(), Instant.now());
     }
 
     @Test
-    void summaryComputesCostFromPriceSnapshot() {
+    void summaryAggregatesTheCostEachRowAlreadyCarries() {
+        // The aggregates arrive already priced — each row carries the undivided
+        // tokens × unit_price sums its own frozen prices produced (#710). The service
+        // does not price them again, and must not consult any price table to do so.
         when(keyRepository.findAllByUserId(USER_ID)).thenReturn(List.of(key(KEY_A), key(KEY_B)));
-        when(priceSnapshotRepository.findAllLatestAt(any(Instant.class)))
-                .thenReturn(List.of(price(PriceTokenType.INPUT, new BigDecimal("1.00")),
-                        price(PriceTokenType.OUTPUT, new BigDecimal("2.00"))));
         when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.VIRTUAL_KEY), any()))
                 .thenReturn(List.of(new UsageAggRow("key-" + KEY_A, "k-a", PRODUCT, MODEL, CacheLevel.UPSTREAM, 2L,
                         new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null),
@@ -113,7 +109,6 @@ class UsageStatsServiceTest {
     @Test
     void summaryDefaultsGroupByToProject() {
         when(keyRepository.findAllByUserId(USER_ID)).thenReturn(List.of(key(KEY_A)));
-        when(priceSnapshotRepository.findAllLatestAt(any(Instant.class))).thenReturn(List.of());
         when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.PROJECT), any()))
                 .thenReturn(List.of());
         when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
@@ -184,6 +179,44 @@ class UsageStatsServiceTest {
     }
 
     @Test
+    void recordCostComesFromTheRowsOwnPriceBasis() {
+        // The prices travel with the row (#710): the detail list is priced from what
+        // the repository already resolved, so nothing here looks a price up and a
+        // price published later cannot move this row's cost.
+        when(keyRepository.findAllByUserId(USER_ID)).thenReturn(List.of(key(KEY_A)));
+        when(usageStatsRepository.countRecords(any())).thenReturn(1L);
+        // Cache-read is the third component, cache-creation the fourth — the shared
+        // event() fixture above uses 200 cache-read tokens and no cache-creation ones.
+        RowPriceBasis basis = new RowPriceBasis(new BigDecimal("1.00"), new BigDecimal("2.00"), new BigDecimal("0.50"),
+                null);
+        when(usageStatsRepository.findRecords(any(), eq(0L), eq(50))).thenReturn(List.of(unadjusted(event(), basis)));
+
+        UsageRecordPage page = service.records(user, null, null, 1, 50);
+
+        // input 1000 × 1.00/1e6 + output 500 × 2.00/1e6 + cache-read 200 × 0.50/1e6
+        UsageRecordPage.UsageRecordView view = page.items().get(0);
+        assertThat(view.cost()).isEqualByComparingTo("0.0021");
+        assertThat(view.priced()).isTrue();
+    }
+
+    @Test
+    void recordWithoutPriceForAUsedDimensionIsUnpricedNotZero() {
+        // Same rule as the aggregates: no price for a dimension the row used reads as
+        // 未定价, never as a cost of 0 (docs/usage-accounting.md §6.2).
+        when(keyRepository.findAllByUserId(USER_ID)).thenReturn(List.of(key(KEY_A)));
+        when(usageStatsRepository.countRecords(any())).thenReturn(1L);
+        when(usageStatsRepository.findRecords(any(), eq(0L), eq(50)))
+                .thenReturn(List.of(unadjusted(event(), RowPriceBasis.UNKNOWN)));
+
+        UsageRecordPage page = service.records(user, null, null, 1, 50);
+
+        UsageRecordPage.UsageRecordView view = page.items().get(0);
+        assertThat(view.inputTokens()).isEqualTo(1_000L);
+        assertThat(view.priced()).isFalse();
+        assertThat(view.cost()).isEqualByComparingTo("0");
+    }
+
+    @Test
     void recordsRejectsPageBelowOne() {
         assertThatThrownBy(() -> service.records(user, null, null, 0, 50)).isInstanceOfSatisfying(ApiException.class,
                 e -> assertThat(e.getCode()).isEqualTo("PAGE_INVALID"));
@@ -213,11 +246,6 @@ class UsageStatsServiceTest {
                 VirtualKeyStatus.ACTIVE, Instant.now(), null, null, null, 0L);
     }
 
-    private static PriceSnapshot price(PriceTokenType type, BigDecimal unitPrice) {
-        return new PriceSnapshot(UUID.randomUUID(), PRODUCT, MODEL, type, "USD", unitPrice, Instant.now(), "TEST",
-                UUID.randomUUID(), Instant.now());
-    }
-
     private static UsageEvent event() {
         return new UsageEvent(UUID.randomUUID(), TENANT, "chatcmpl-123", KEY_A, UUID.randomUUID(), PRODUCT,
                 UUID.randomUUID(), MODEL, CacheLevel.UPSTREAM,
@@ -231,9 +259,13 @@ class UsageStatsServiceTest {
      * guard for the net wiring (#709).
      */
     private static AdjustedUsageRow unadjusted(UsageEvent e) {
+        return unadjusted(e, RowPriceBasis.UNKNOWN);
+    }
+
+    private static AdjustedUsageRow unadjusted(UsageEvent e, RowPriceBasis basis) {
         TokenBucket t = e.tokens();
         return new AdjustedUsageRow(e, t.inputTokens(), t.outputTokens(), t.cacheReadInputTokens(),
-                t.cacheCreationInputTokens(), false, null, null);
+                t.cacheCreationInputTokens(), false, null, null, basis);
     }
 
 }

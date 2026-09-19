@@ -43,7 +43,10 @@ public class AdminRoiService {
         BigDecimal hitRatePct = pct(hits, served);
         BigDecimal paid = totals.cost().upstreamPaid();
         BigDecimal saved = totals.cost().savedByGatewayCache();
-        BigDecimal savedPct = pct(saved, paid.add(saved));
+        // 0/0 when nothing was priced: the discount is undefined, not zero. Returning
+        // 0.00 here read as "caching saved you nothing" on a page whose whole point is
+        // deciding whether caching pays (#858).
+        BigDecimal savedPct = paid.add(saved).signum() == 0 ? null : pct(saved, paid.add(saved));
 
         List<RoiDay> days = summary.groups().stream()
                 .map(g -> new RoiDay(g.label(), g.requests().upstream() + g.requests().coalesced(),
@@ -55,7 +58,8 @@ public class AdminRoiService {
                 .toList();
 
         RoiTotals roiTotals = new RoiTotals(totals.requests().upstream(), totals.requests().coalesced(),
-                totals.requests().l1Hit(), totals.requests().l2Hit(), hitRatePct, paid, saved, savedPct);
+                totals.requests().l1Hit(), totals.requests().l2Hit(), hitRatePct, paid, saved, savedPct,
+                totals.pricingStatus(), totals.unpriced());
         return new RoiReportView(from, to, roiTotals, days);
     }
 

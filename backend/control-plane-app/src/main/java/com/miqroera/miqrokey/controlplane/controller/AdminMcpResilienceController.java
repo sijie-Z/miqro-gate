@@ -2,7 +2,7 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminMcpResilienceService;
-import com.miqroera.miqrokey.controlplane.service.AdminMcpResilienceService.RequestedPolicy;
+import com.miqroera.miqrokey.controlplane.service.AdminMcpResilienceService.ResiliencePolicyRequest;
 import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -38,12 +38,12 @@ public class AdminMcpResilienceController {
 
     @PutMapping
     public McpResiliencePolicy put(@PathVariable UUID serviceId, HttpServletRequest httpReq,
-            @RequestBody(required = false) RequestedPolicy body) {
+            @RequestBody(required = false) ResiliencePolicyRequest body) {
         var user = userContext.getUser();
-        RequestedPolicy requested = body != null
+        ResiliencePolicyRequest requested = body != null
                 ? body
-                : new RequestedPolicy(null, null, null, null, null, null, null, null, null, null, null, null, null,
-                        null, null, null, null);
+                : new ResiliencePolicyRequest(null, null, null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, null, null);
         return service.configure(user.tenantId(), user.id(), serviceId, requested, requestId(httpReq));
     }
 
