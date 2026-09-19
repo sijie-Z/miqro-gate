@@ -39,14 +39,10 @@ CVE-2026-13506
 # unreachable and no bump is planned.)
 # ===========================================================================
 #
-# org.postgresql:postgresql 42.7.5 — BOM-managed; backend/persistence-postgres/
-# pom.xml:48-52 declares no <version>, value comes from
-# spring-boot-dependencies-3.4.5.pom:159. Fixes 42.7.7 / 42.7.11 / 42.7.12 are
-# all inside the 42.7.x patch line.
-# Tracker: issue #973 -> PR #975 pins 42.7.12. DROP when #975 merges.
-CVE-2025-49146
-CVE-2026-42198
-CVE-2026-54291
+# (org.postgresql:postgresql had three rows here until 2026-09-19. Its
+# tracker landed: #973 -> PR #975 pinned the driver to 42.7.12 in
+# backend/pom.xml's dependencyManagement, so develop no longer resolves the
+# vulnerable 42.7.5 and the rows were deleted rather than left to rot.)
 #
 # org.apache.kafka:kafka-clients 3.8.1 — BOM-managed; gateway-app/pom.xml:57-58
 # and control-plane-app/pom.xml:53-54 declare no <version>. Producer buffer-pool
