@@ -10,7 +10,7 @@
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { UiButton, UiDonut, UiTable, UiTooltip } from '@/ui';
-import { costGapNote } from '@/lib/usage-pricing';
+import { costGapNote, savingsBoundNote } from '@/lib/usage-pricing';
 import { csvCell } from '@/utils/csv';
 import type { RoiReportView, UsageGroup } from '@/types/generated-api';
 
@@ -103,6 +103,13 @@ interface RoiCard {
   accent?: boolean;
   /** Set when a figure on this card is known to fall short of the whole (#801). */
   caveat?: string;
+  /**
+   * Set when the figure is a *floor* rather than a figure (#790/#863): a hit no price
+   * could value contributes nothing to the saving, so the saving understates what the
+   * cache did. A different claim from `caveat`, which says the amount is short of a
+   * total — the two can appear together.
+   */
+  bound?: string;
 }
 
 const cards = computed<RoiCard[]>(() => {
@@ -110,6 +117,9 @@ const cards = computed<RoiCard[]>(() => {
   const { upstream, coalesced, l1, l2, served } = totalsOf.value;
   // The money below is short of the whole whenever a token dimension had no price.
   const costCaveat = costGapNote(t) ?? undefined;
+  // ...and it can be a floor on top of that: the cost's status says nothing about the
+  // hits, which is where the saving comes from (#863).
+  const savingsBound = savingsBoundNote(t) ?? undefined;
   // A 0/0 discount is undefined, not zero: the API sends null for exactly this case.
   const discount = t?.savedPct == null ? '—' : pct(Number(t.savedPct));
   const rate = (n: number) => pct(served ? (n / served) * 100 : 0);
@@ -133,6 +143,7 @@ const cards = computed<RoiCard[]>(() => {
       label: '缓存节省',
       value: money(Number(t?.savedCost ?? 0)),
       caveat: costCaveat,
+      bound: savingsBound,
       sub: [
         { k: '上游实付', v: money(Number(t?.paidCost ?? 0)) },
         { k: '等效折扣', v: discount },
@@ -405,6 +416,8 @@ onMounted(load);
           >{{ card.value
           }}<UiTooltip v-if="card.caveat" :text="card.caveat"
             ><span class="next-roi__caveat" data-testid="roi-cost-caveat">未定价</span></UiTooltip
+          ><UiTooltip v-if="card.bound" :text="card.bound"
+            ><span class="next-roi__caveat" data-testid="roi-savings-bound">下界</span></UiTooltip
           ></span
         >
         <span class="next-roi__sub">
