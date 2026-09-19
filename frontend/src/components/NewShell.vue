@@ -21,6 +21,7 @@ import {
 } from 'radix-vue';
 import {
   AppIcon,
+  BookOpenIcon,
   ChartBarIcon,
   CheckCircleIcon,
   DashboardIcon,
@@ -87,6 +88,7 @@ const regularNav: NavItem[] = [
   { name: 'skills', label: '技能库', icon: AppIcon },
   { name: 'model-approvals', label: '模型申请', icon: EditIcon },
   { name: 'profile', label: '资料', icon: UserIcon },
+  { name: 'help', label: '帮助', icon: BookOpenIcon },
 ];
 
 // Admin navigation mirrors the Tencent AI-gateway instance-level structure
