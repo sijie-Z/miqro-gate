@@ -3,6 +3,81 @@
 MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；版本号语义化（MAJOR.MINOR.PATCH）。
 
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
+### 2026-09-19
+
+- **使用手册站内化：`/app/help` 离线手册（#872）**：`docs/user-guide` 六篇以构建期内联（`import.meta.glob ?raw`）
+  随 portal 包发布——左目录 + 本页目录 + 全文检索式导航；相对链接改写为 GitHub blob URL、hash 链接走页内滚动
+  （含 `../client-onboarding.md` 这类出目录路径）；侧栏新增常驻「帮助」，用户菜单「使用手册」改站内跳转。
+  新增依赖 marked（MIT，仅本页 chunk）。测试 454/454 + e2e 59/59。**手册更新需重新构建 portal**（发布检查单已记）。
+- **缓存收益页：让 API 能说「未知」，并给「节省额只是下界」补公共入口（#858 / #863，PR #862 / #875）**：
+  `RoiTotals` 增 `pricingStatus`/`unpriced`，`savedPct` 在无成本基数时返回 `null`——`0.00` 是在断言一个算不出来的数；
+  「节省额是下界」信号（`unpricedHitEvents`）抽为 `usage-pricing.ts` 公共入口并补上缓存收益页（此前靠每页自觉，
+  漏了一页）。「配置概览」tab（PR #868）：按虚拟密钥的缓存表现表，复用既有 `groupBy=VIRTUAL_KEY` 分组——**零新端点**。
+- **「用量」页四处成本展示口径统一（#877，PR #884）**：统计卡 / 分组行 / 合计行 / 记录列此前两种口径，
+  现全部走同一 caveat 入口并带「未定价」标记；普通用户第一眼看到的 `¥0.00` 不再是唯一没有解释的那个数。
+
+### 2026-09-18
+
+- **成本冻结价格基座（#710 / F21-A，V64–V67）**：价格快照 + 行内冻结单价 + as-of 回退——「改一次价目表、
+  历史金额跟着变」终止；`pricingStatus`/`unpriced` 成为正式计价状态；`base_cost_amount` 回填通道（只补全不修订）
+  与派生列重算 + 定时收敛（默认关，可开）。演示站实测：`upstreamPaid` 101.51 → 89.91（峰谷价差纠正）、
+  `Σ base_cost_amount` 与汇总逐位一致、回填与重算幂等。
+- **「未定价」不再被当成总额——跨页面收口（#764 / #801 / #849 / #853 / #857）**：未定价语义收紧
+  （仅输入/输出缺价触发，缓存维度缺价按 0）；汇总卡、首页统计卡、成本报表占比（`0/0` 显示 `—` 而非 `0.0%`）、
+  个人页与智能体成本页全部标注缺口；`unpriced` 计数进 API。
+- **用量统计对齐 cc-switch（#758 / #761 / #767）**：Hero 总览卡 + 请求日志富列（providerProductName / ttfbMs /
+  wireProtocol / requestStatus / cost）+ 供应商与模型统计；网关侧缓存字段解析三级兜底（OpenAI 嵌套）、
+  miss 不计入写桶、输入 token 归一化。
+- **用量调整三段 + 导出（#709 / F20，V63）+ 对账差异导出（#715）+ CSV 修复（#754 / #816）**：调整以**追加台账**
+  表达（修正不覆盖原始事实）；明细与汇总读净额；导出带净额列与「含调整」等级（V67）；CSV 按 RFC 4180 引号
+  并保留 #430 公式防护；修复 `client_ip`（V52）引入时漏改表头的**近一年列错位**（断言只 contains 不按列造成的盲区）。
+- **部署链：单入口脚本 + 断言体系（#793 / #802 / #805–#818）**：`deploy/deploy.sh` 以 flock 串行构建与 `up`、
+  收尾断言「正在跑的就是刚构建的」（`Up (healthy)` 不是证据）、每次追加 `deploy.log` 流水（提交 / 调用方 /
+  运行镜像 ID 与当时 tag ID）。此后陆续补齐：project dir 指 compose 所在目录 + 显式 `--env-file`（一次真实
+  事故：变量全落默认值 → 登录 403 + 证书挂载错位）、证书进容器断言、冒烟改打能观测 origin 层的目标且 `'a|b'`
+  选择支真正生效、回声断言按 dotenv 语义归一化、000/5xx 有界重试、全 shell 脚本 shellcheck、三条行为断言进 CI。
+- **契约修正：同名嵌套 DTO 唯一化 + 重名守卫（#838，PR #850）**：springdoc 按简单类名命名 schema，
+  17 个 POST 端点的请求体被合并成一份「并集」错 schema；31 处同名嵌套 DTO 唯一化（纯标识符替换）+
+  源码扫描抓出 4 处 issue 未列的漏网；新增 `check-openapi-schema-names.py`（源码重名 + spec 裸名黑名单）
+  进 CI，红→绿两态实测。
+- **全新部署时网关必然抢跑迁移（#846，PR #851）**：`gateway.depends_on` 增 `control-plane: service_healthy`
+  （迁移完成信号）；网关快照刷新对 PostgreSQL `42P01` 分类为「schema 未就绪」→ WARN + 2→4→8→16→30s 退避重试
+  （新旋钮 `MIQROKEY_GATEWAY_ROUTE_RETRY_CHECK_INTERVAL`，默认 2s）。三场景真机实测：全新部署报错 0、
+  强制抢跑 4 秒自愈、滚动重启不受影响。
+- **缓存键身份加固（#718，PR #860）**：外部评审（基线落后 439 提交）带出的两条真缺口——生成参数
+  （temperature/top_p/max_tokens/…）与 Anthropic 顶层 `system` / Responses `instructions` 不在缓存键身份里；
+  新增固定序确定性指纹维度（字段缺省时键形态不变），`CacheKeyFactoryTest` 20/20、gateway-app 376/376。
+- **MCP tools/sync 兼容修复（#779 / #781 / #788）**：Accept 兼发两种 Streamable HTTP 媒体类型；上游合法改发
+  SSE 帧时按 `data:` 解帧（无 data 载荷 fail-closed）。
+- **控制台 UX 批（#828 / #821 / #830 / #833 / #835 / #839 / #840）**：① 补回 `design-tokens.css` 丢失的 `}`
+  ——整份 `design-base.css` 曾被解析为嵌套规则，深色侧栏文字与五项偏好开关静默失效；补括号配平单测 +
+  产物选择器守卫；② Codex 配置片段不再接受凭据参数（结构性消除，签名强制）；③ 大屏内容区默认流式铺满、
+  「固定 1200」居中、页面说明可点标题收起（新偏好）；④ 三层错误边界（页面/内容区/根）+ `router.onError` 改道
+  `/unavailable`；⑤ 术语收口 Secret→「密钥」+ 模型目录弹窗字段级错误与行动指引；⑥ CC Switch 一键导入：
+  目标应用（Claude Code / Codex）+ 唤起检测与冷却的反馈闭环 + 接入指引面板按「每个文件一块」重构；
+  ⑦ 面向使用者手册五件套 `docs/user-guide/`（对齐腾讯云/阿里云/AWS 文档结构）。
+- **Agent 引用后凭证禁改禁删（#714）**、**请求上下文证据审计链路（#629，V55 建表后补写入方）**、
+  **网关空串 Kafka bootstrap 被当「已配置」（#823）**、**非 VERIFIED 适配器持续警告（#735 前端）**。
+
+### 2026-09-17
+
+- **安全审计两批闭环（#723–#733）**：① P0——管理员路径门禁被分号绕过（改按路由语义路径判定）、billing 通道
+  收紧为仅 SYSTEM_ADMIN 会话、context-registry 的 JDBC 移出事件环并加超时；② 中危——OIDC 登录竞态与账号
+  状态校验、配额判定行收集移出事务后单次写入、MCP SSE 聚合与熔断桶集加上界、`usage_event`
+  复合索引（`virtual_key_id, occurred_at DESC`）、配置参考与实现逐行对账、孤儿事实清理。
+- **模型调用链路时间线（#705 后端 / #707 前端）**：按 `gatewayRequestId` 回放调用阶段；用量报表请求 ID 可点，
+  三层信息抽屉。
+- **官方价格 24h 自动同步（#708 / F08）**：定时增量写 `source=OFFICIAL`，MANUAL 冲突保留。
+- **用量调整开端（#709 / F20，V63）**：追加型台账，修正不覆盖原始事实（后续三段于 09-18 收口）。
+- **熔断与韧性（#741，默认关）**：模型侧熔断 + `503 circuit_open` 契约与配置参考（#762）。
+- **接入件三片（#742）**：客户端与遗留系统接入指南（姿态矩阵）、接入器参考实现（print/apply/verify）、
+  WorkBuddy（腾讯 CodeBuddy 系闭源客户端）MCP 层接入实测样章。
+- **网关前置预检 context-limit（#553）**：超限不触上游，21 万字符 → 413 仅 237ms；**队列饱和告警（#245 / F07，
+  V60）**；**注册关闭态闸门（#550）**：状态端点 + 登录页入口。
+- **前端批**：偏好抽屉补缺（#579）、列表信息架构收口（#657）、控制台导航七组（#675）、留痕查看/导出审计断言（#699）。
+- **运维与文档**：`SnapshotRefreshListenerTest` 零余量 flake 修复（#738）；运行手册诊断陷阱速查 §15
+  （提案·待 owner 认可，#759）；`Idempotency-Key` / `If-Match` 保留语义与真实冲突语义说明（#734 / #751）。
+
 
 ### 2026-09-16
 - **配额软着陆：REJECT 规则超限拒绝请求（429）（#684，ADR-0020）**：把配额从"只算不管"变成真闸门——
@@ -567,4 +642,5 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - Supply-chain gate：Secret 扫描（修复 23 处文档示例 Key）、CycloneDX SBOM + 许可证门禁、Trivy 镜像扫描（驱动 postgres 镜像 digest 升级）
 - Performance & soak：并发流浸泡测试 + 生产 soak 脚本
 - 本版本：**未标记 VERIFIED**（无真实供应商凭证契约测试，`WAITING_FOR_CREDENTIAL`）
+
 
