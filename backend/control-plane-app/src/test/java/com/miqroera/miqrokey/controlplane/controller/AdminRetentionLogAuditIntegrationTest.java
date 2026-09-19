@@ -6,6 +6,7 @@ import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.config.TestCryptoConfig;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
+import com.miqroera.miqrokey.controlplane.service.AdminRetentionLogService;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
 import com.miqroera.miqrokey.domain.model.RetentionEnvelope;
@@ -385,5 +386,37 @@ class AdminRetentionLogAuditIntegrationTest {
         static String secret() {
             return SECRET;
         }
+    }
+
+    @Test
+    @DisplayName("#1023: the export streams across page boundaries without losing rows")
+    void exportStreamsAcrossPageBoundaries() throws Exception {
+        // One full page plus a partial one: the reader has to ask for a second page with
+        // the keyset cursor, not just serve whatever one query happened to return.
+        int rows = AdminRetentionLogService.EXPORT_CHUNK + 30;
+        EncryptedSecret secret = crypto.encrypt("bulk".getBytes(StandardCharsets.UTF_8), TENANT_ID,
+                RetentionEnvelope.AAD_ID);
+        jdbc.update("""
+                INSERT INTO retention_log (event_id, tenant_id, user_id, virtual_key_id, wire_protocol, direction,
+                                           gateway_request_id, occurred_at, key_version, ciphertext, nonce,
+                                           text_char_count, truncated)
+                SELECT gen_random_uuid(), :tenantId, :userId, gen_random_uuid(), 'OPENAI_CHAT', 'OUTPUT',
+                       'bulk-' || g, now() - (g || ' seconds')::interval, :keyVersion, :ciphertext, :nonce,
+                       4, FALSE
+                FROM generate_series(1, :n) AS g
+                """,
+                new MapSqlParameterSource().addValue("tenantId", TENANT_ID).addValue("userId", adminUserId)
+                        .addValue("keyVersion", secret.keyVersion()).addValue("ciphertext", secret.ciphertext())
+                        .addValue("nonce", secret.nonce()).addValue("n", rows));
+
+        MvcResult result = mockMvc.perform(get("/api/v1/admin/retention-logs/export").cookie(sessionCookie))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, containsString("text/csv")))
+                .andReturn();
+
+        String csv = result.getResponse().getContentAsString();
+        assertThat(csv.lines().count()).as("header plus every seeded row").isEqualTo(rows + 1L);
+        assertThat(csv).contains("bulk-" + rows + ",");
+        assertThat(countEvents("RETENTION_LOG_EXPORT")).isEqualTo(1);
     }
 }

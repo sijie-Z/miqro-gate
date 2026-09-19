@@ -56,19 +56,30 @@ public class AdminRetentionLogController {
             @RequestParam(required = false) String direction, @RequestParam(required = false) String protocol,
             @RequestParam(required = false) String from, @RequestParam(required = false) String to) throws IOException {
         var admin = userContext.getUser();
-        AdminRetentionLogService.ExportResult result = retentionLogs.exportCsv(admin.tenantId(), userId, direction,
-                protocol, AdminAuditController.parseInstant(from, "from"), AdminAuditController.parseInstant(to, "to"));
+        Instant fromInstant = AdminAuditController.parseInstant(from, "from");
+        Instant toInstant = AdminAuditController.parseInstant(to, "to");
+
+        // The row count is read first because the response is streamed: once the body
+        // starts, headers are committed and X-MiQroKey-Truncated can no longer be set.
+        long total = retentionLogs.countForExport(admin.tenantId(), userId, direction, protocol, fromInstant,
+                toInstant);
+        boolean truncated = total > AdminRetentionLogService.EXPORT_LIMIT;
         auditService.record(admin.tenantId(), admin.id(), "RETENTION_LOG_EXPORT", "RETENTION_LOG", null,
-                "{\"rows\":" + result.rows() + ",\"truncated\":" + result.truncated() + "}", null);
+                "{\"rows\":" + Math.min(total, AdminRetentionLogService.EXPORT_LIMIT) + ",\"truncated\":" + truncated
+                        + "}",
+                null);
 
         response.setContentType("text/csv");
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         String stamp = Instant.now().toString().replace(":", "-").replace(".", "-");
         response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
                 "attachment; filename=\"retention-logs-" + stamp + ".csv\"");
-        if (result.truncated()) {
+        if (truncated) {
             response.setHeader("X-MiQroKey-Truncated", "true");
         }
-        response.getWriter().write(result.csv());
+        // #1023: rows are decrypted and written one at a time. Nothing accumulates in
+        // the heap, so the export's memory does not grow with the table.
+        retentionLogs.streamCsv(admin.tenantId(), userId, direction, protocol, fromInstant, toInstant,
+                response.getOutputStream());
     }
 }
