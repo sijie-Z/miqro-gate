@@ -3,6 +3,7 @@
   del,
   downloadBlob,
   get,
+  getList,
   patch,
   post,
   put,
@@ -105,7 +106,7 @@ export function registrationStatus(): Promise<RegistrationStatusResponse> {
 }
 
 export function publicOauthProviders(): Promise<OAuthProviderInfo[]> {
-  return get<OAuthProviderInfo[]>('/api/v1/auth/oauth/providers');
+  return getList<OAuthProviderInfo>('/api/v1/auth/oauth/providers');
 }
 
 export function login(username: string, password: string): Promise<LoginResponse> {
@@ -143,7 +144,7 @@ export function logoutOtherSessions(): Promise<{ message: string }> {
 // ---- self-service Virtual Keys ----
 
 export function listVirtualKeys(): Promise<VirtualKeyView[]> {
-  return get<VirtualKeyView[]>('/api/v1/me/virtual-keys');
+  return getList<VirtualKeyView>('/api/v1/me/virtual-keys');
 }
 
 export function createVirtualKey(
@@ -188,13 +189,13 @@ export function submitModelApproval(
 }
 
 export function listMyModelApprovals(): Promise<ModelApprovalView[]> {
-  return get<ModelApprovalView[]>('/api/v1/me/model-approvals');
+  return getList<ModelApprovalView>('/api/v1/me/model-approvals');
 }
 
 // ---- self-service quota visibility (F04) ----
 
 export function listMyQuotaRules(): Promise<QuotaRuleView[]> {
-  return get<QuotaRuleView[]>('/api/v1/me/quota-rules');
+  return getList<QuotaRuleView>('/api/v1/me/quota-rules');
 }
 
 // ---- usage ----
@@ -221,7 +222,7 @@ export function usageRecords(
 // ---- admin organization (G5.2) ----
 
 export function listUsers(): Promise<AdminUser[]> {
-  return get<AdminUser[]>('/api/v1/admin/users');
+  return getList<AdminUser>('/api/v1/admin/users');
 }
 
 export function createUser(body: {
@@ -253,7 +254,7 @@ export function revokeUserSessions(id: string): Promise<void> {
 }
 
 export function listTeams(): Promise<Team[]> {
-  return get<Team[]>('/api/v1/admin/teams');
+  return getList<Team>('/api/v1/admin/teams');
 }
 
 export function createTeam(body: { name: string; description?: string }): Promise<Team> {
@@ -261,7 +262,7 @@ export function createTeam(body: { name: string; description?: string }): Promis
 }
 
 export function listTeamMembers(teamId: string): Promise<MemberView[]> {
-  return get<MemberView[]>(`/api/v1/admin/teams/${teamId}/members`);
+  return getList<MemberView>(`/api/v1/admin/teams/${teamId}/members`);
 }
 
 export function addTeamMember(teamId: string, userId: string): Promise<void> {
@@ -273,7 +274,7 @@ export function removeTeamMember(teamId: string, userId: string): Promise<void> 
 }
 
 export function listProjects(): Promise<Project[]> {
-  return get<Project[]>('/api/v1/admin/projects');
+  return getList<Project>('/api/v1/admin/projects');
 }
 
 export function createProject(body: {
@@ -293,7 +294,7 @@ export function updateProject(
 }
 
 export function listProjectMembers(projectId: string): Promise<MemberView[]> {
-  return get<MemberView[]>(`/api/v1/admin/projects/${projectId}/members`);
+  return getList<MemberView>(`/api/v1/admin/projects/${projectId}/members`);
 }
 
 export function addProjectMember(projectId: string, userId: string): Promise<void> {
@@ -305,11 +306,11 @@ export function removeProjectMember(projectId: string, userId: string): Promise<
 }
 
 export function adminUserProjectMemberships(userId: string): Promise<UserProjectMembership[]> {
-  return get<UserProjectMembership[]>(`/api/v1/admin/users/${userId}/project-memberships`);
+  return getList<UserProjectMembership>(`/api/v1/admin/users/${userId}/project-memberships`);
 }
 
 export function listGrants(): Promise<Grant[]> {
-  return get<Grant[]>('/api/v1/admin/grants');
+  return getList<Grant>('/api/v1/admin/grants');
 }
 
 export function createGrant(body: {
@@ -322,7 +323,7 @@ export function createGrant(body: {
 }
 
 export function grantModels(grantId: string): Promise<string[]> {
-  return get<string[]>(`/api/v1/admin/grants/${grantId}/models`);
+  return getList<string>(`/api/v1/admin/grants/${grantId}/models`);
 }
 
 export function updateGrantModels(grantId: string, models: string[]): Promise<Grant> {
@@ -362,7 +363,7 @@ export function rejectModelApproval(id: string, reviewNote?: string): Promise<Mo
 // ---- admin quota rules (usage quota plans, alerting-only) ----
 
 export function listQuotaRules(): Promise<QuotaRuleView[]> {
-  return get<QuotaRuleView[]>('/api/v1/admin/quota-rules');
+  return getList<QuotaRuleView>('/api/v1/admin/quota-rules');
 }
 
 export function putQuotaRule(request: UpsertQuotaRuleRequest): Promise<QuotaRuleView> {
@@ -414,7 +415,7 @@ export function listMcpAccessLogs(params?: {
   if (params?.from) query.from = params.from;
   if (params?.to) query.to = params.to;
   if (params?.limit != null) query.limit = String(params.limit);
-  return get<McpAccessLogEntry[]>('/api/v1/admin/mcp-access-logs', query);
+  return getList<McpAccessLogEntry>('/api/v1/admin/mcp-access-logs', query);
 }
 
 export function getMcpServiceAccess(serviceId: string): Promise<McpAccessView> {
@@ -438,7 +439,7 @@ export function clearMcpAccessGrants(serviceId: string, toolId?: string): Promis
 }
 
 export function listCredentials(): Promise<CredentialView[]> {
-  return get<CredentialView[]>('/api/v1/admin/credentials');
+  return getList<CredentialView>('/api/v1/admin/credentials');
 }
 
 // #647: tenant unattributed-request policy (settings page).
@@ -486,7 +487,7 @@ export function disableCredential(id: string): Promise<{ message: string }> {
 }
 
 export function listPrices(): Promise<PriceSnapshotView[]> {
-  return get<PriceSnapshotView[]>('/api/v1/admin/prices');
+  return getList<PriceSnapshotView>('/api/v1/admin/prices');
 }
 
 export function createPrice(body: {
@@ -516,7 +517,7 @@ export function syncPrices(): Promise<PriceSyncReport> {
 }
 
 export function listApiConsumers(): Promise<ApiConsumerView[]> {
-  return get<ApiConsumerView[]>('/api/v1/admin/api-consumers');
+  return getList<ApiConsumerView>('/api/v1/admin/api-consumers');
 }
 
 export function createApiConsumer(
@@ -568,11 +569,11 @@ export function updateApiConsumerScope(
 // ---- admin provider/Plan (G5.3) ----
 
 export function listProviderProducts(): Promise<ProviderProductView[]> {
-  return get<ProviderProductView[]>('/api/v1/admin/provider-products');
+  return getList<ProviderProductView>('/api/v1/admin/provider-products');
 }
 
 export function listSubscriptions(): Promise<SubscriptionView[]> {
-  return get<SubscriptionView[]>('/api/v1/admin/subscriptions');
+  return getList<SubscriptionView>('/api/v1/admin/subscriptions');
 }
 
 export function createSubscription(body: {
@@ -589,7 +590,7 @@ export function createSubscription(body: {
 }
 
 export function listSeats(subscriptionId: string): Promise<SeatView[]> {
-  return get<SeatView[]>(`/api/v1/admin/subscriptions/${subscriptionId}/seats`);
+  return getList<SeatView>(`/api/v1/admin/subscriptions/${subscriptionId}/seats`);
 }
 
 export function createSeat(
@@ -610,7 +611,7 @@ export function updateSeat(
 // ---- SkillHub (P2.4) ----
 
 export function listSkills(q?: string, tags?: string[]): Promise<SkillView[]> {
-  return get<SkillView[]>(`/api/v1/skills${skillQuery(q, tags)}`);
+  return getList<SkillView>(`/api/v1/skills${skillQuery(q, tags)}`);
 }
 
 /** Keyword (name/description/ID) + tag filters shared by the market and admin lists. */
@@ -635,7 +636,7 @@ export async function downloadSkill(id: string, filename: string): Promise<void>
 }
 
 export function adminListSkills(q?: string, tags?: string[]): Promise<SkillView[]> {
-  return get<SkillView[]>(`/api/v1/admin/skills${skillQuery(q, tags)}`);
+  return getList<SkillView>(`/api/v1/admin/skills${skillQuery(q, tags)}`);
 }
 
 export function adminUploadSkill(version: string, zip: Blob): Promise<SkillView> {
@@ -649,7 +650,7 @@ export function adminArchiveSkill(id: string): Promise<SkillView> {
 // ---- skill revisions (I14) ----
 
 export function adminListSkillRevisions(id: string, limit = 20): Promise<SkillRevisionView[]> {
-  return get<SkillRevisionView[]>(`/api/v1/admin/skills/${id}/revisions?limit=${limit}`);
+  return getList<SkillRevisionView>(`/api/v1/admin/skills/${id}/revisions?limit=${limit}`);
 }
 
 export function adminActivateSkillRevision(
@@ -669,7 +670,7 @@ export function adminSetSkillAccess(
 // ---- agents (P3.1) ----
 
 export function adminListAgents(): Promise<AgentView[]> {
-  return get<AgentView[]>('/api/v1/admin/agents');
+  return getList<AgentView>('/api/v1/admin/agents');
 }
 
 export function adminCreateAgent(body: {
@@ -691,7 +692,7 @@ export function adminAgentUsage(id: string): Promise<UsageSummary> {
 // ---- internal services (P3.2) ----
 
 export function adminListServices(): Promise<InternalServiceView[]> {
-  return get<InternalServiceView[]>('/api/v1/admin/services');
+  return getList<InternalServiceView>('/api/v1/admin/services');
 }
 
 export function adminCreateService(body: {
@@ -730,7 +731,7 @@ export function adminUpdateServiceHealthConfig(
 
 export function adminListConfigs(group?: string): Promise<ConfigEntryView[]> {
   const params = group ? `?group=${encodeURIComponent(group)}` : '';
-  return get<ConfigEntryView[]>(`/api/v1/admin/configs${params}`);
+  return getList<ConfigEntryView>(`/api/v1/admin/configs${params}`);
 }
 
 export function adminPutConfig(body: {
@@ -749,7 +750,7 @@ export function adminDeleteConfig(group: string, key: string): Promise<void> {
 // ---- MCP services (P3.4) ----
 
 export function adminListMcpServices(): Promise<McpServiceView[]> {
-  return get<McpServiceView[]>('/api/v1/admin/mcp-services');
+  return getList<McpServiceView>('/api/v1/admin/mcp-services');
 }
 
 export function adminCreateMcpService(body: {
@@ -869,7 +870,7 @@ export function adminSetMcpBackendAuth(
 }
 
 export function adminListMcpTools(serviceId: string): Promise<McpToolView[]> {
-  return get<McpToolView[]>(`/api/v1/admin/mcp-services/${serviceId}/tools`);
+  return getList<McpToolView>(`/api/v1/admin/mcp-services/${serviceId}/tools`);
 }
 
 /** Tools/list sync report (#344, doc 03): per-item diff, previewed or applied. */
@@ -946,7 +947,7 @@ export function adminListToolRevisions(
   serviceId: string,
   toolId: string,
 ): Promise<McpToolRevisionRow[]> {
-  return get<McpToolRevisionRow[]>(
+  return getList<McpToolRevisionRow>(
     `/api/v1/admin/mcp-services/${serviceId}/tools/${toolId}/revisions`,
   );
 }
@@ -983,7 +984,7 @@ export function adminListModels(productId?: string, source?: string): Promise<Mo
   if (productId) params.set('providerProductId', productId);
   if (source) params.set('source', source);
   const qs = params.toString();
-  return get<ModelCatalogRow[]>(`/api/v1/admin/models${qs ? `?${qs}` : ''}`);
+  return getList<ModelCatalogRow>(`/api/v1/admin/models${qs ? `?${qs}` : ''}`);
 }
 
 export function adminCreateModel(
@@ -1055,7 +1056,7 @@ export function adminTestRunModel(
 // ---- MCP route rules (F11, Tencent doc 135482) ----
 
 export function adminListMcpRouteRules(serviceId: string): Promise<McpRouteRule[]> {
-  return get<McpRouteRule[]>(`/api/v1/admin/mcp-services/${serviceId}/route-rules`);
+  return getList<McpRouteRule>(`/api/v1/admin/mcp-services/${serviceId}/route-rules`);
 }
 
 export function adminCreateMcpRouteRule(
@@ -1093,7 +1094,7 @@ export function adminDeleteMcpRouteRule(serviceId: string, ruleId: string): Prom
 
 export function adminBudgets(month?: string): Promise<BudgetView[]> {
   const params = month ? `?month=${encodeURIComponent(month)}` : '';
-  return get<BudgetView[]>(`/api/v1/admin/budgets${params}`);
+  return getList<BudgetView>(`/api/v1/admin/budgets${params}`);
 }
 
 export function putProjectBudget(
@@ -1189,7 +1190,7 @@ export function exportStatus(id: string): Promise<ExportTask> {
 }
 
 export function exportRecent(): Promise<ExportTask[]> {
-  return get<ExportTask[]>('/api/v1/admin/exports?limit=20');
+  return getList<ExportTask>('/api/v1/admin/exports?limit=20');
 }
 
 export function deletionPreview(from: string, to: string): Promise<{ count: number }> {
@@ -1219,11 +1220,11 @@ export function confirmDeletion(id: string, confirmToken: string): Promise<Usage
 }
 
 export function deletionRecent(): Promise<UsageDeletionRequest[]> {
-  return get<UsageDeletionRequest[]>('/api/v1/admin/usage-deletions?limit=20');
+  return getList<UsageDeletionRequest>('/api/v1/admin/usage-deletions?limit=20');
 }
 
 export function listWebhooks(): Promise<WebhookEndpointView[]> {
-  return get<WebhookEndpointView[]>('/api/v1/admin/webhooks');
+  return getList<WebhookEndpointView>('/api/v1/admin/webhooks');
 }
 
 export function createWebhook(body: {
@@ -1251,11 +1252,11 @@ export function testWebhook(id: string): Promise<{ httpStatus?: number; errorMes
 }
 
 export function webhookDeliveries(id: string): Promise<WebhookDelivery[]> {
-  return get<WebhookDelivery[]>(`/api/v1/admin/webhooks/${id}/deliveries?limit=20`);
+  return getList<WebhookDelivery>(`/api/v1/admin/webhooks/${id}/deliveries?limit=20`);
 }
 
 export function listAlertRules(): Promise<AlertRule[]> {
-  return get<AlertRule[]>('/api/v1/admin/alert-rules');
+  return getList<AlertRule>('/api/v1/admin/alert-rules');
 }
 
 export function createAlertRule(body: {
@@ -1306,7 +1307,7 @@ export function auditEvents(query: AuditQuery): Promise<AuditEventView[]> {
   if (query.actorId) params.set('actorId', query.actorId);
   if (query.from) params.set('from', query.from);
   if (query.to) params.set('to', query.to);
-  return get<AuditEventView[]>(`/api/v1/admin/audit-events?${params.toString()}`);
+  return getList<AuditEventView>(`/api/v1/admin/audit-events?${params.toString()}`);
 }
 
 export interface AuditCsvExport {
@@ -1510,7 +1511,7 @@ export function retentionLogs(
   if (query.to) params.set('to', query.to);
   if (query.page !== undefined) params.set('page', String(query.page));
   if (query.size !== undefined) params.set('size', String(query.size));
-  return get<AdminRetentionLogView[]>(`/api/v1/admin/retention-logs?${params.toString()}`);
+  return getList<AdminRetentionLogView>(`/api/v1/admin/retention-logs?${params.toString()}`);
 }
 
 /**

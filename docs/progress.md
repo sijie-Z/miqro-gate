@@ -2,6 +2,17 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-19（PH22 缓存正确性审计：多模态 part 不入键，#976）
+
+- **确认缺陷一处**：`CacheKeyFactory.textContent()`（`CacheKeyFactory.java:216-235`，develop）遍历 content 数组时**没有 else 分支**，非文本 part（Anthropic `image`、OpenAI `image_url`、Responses `input_image`…）被静默丢弃，语义 scope 只用剩余文本算 → 两张图不同、文本相同的视觉请求得到**同一把缓存键**，后者重放前者的答案。修复：非文本 part 令 `textContent()` 返回 `null` → `semanticScope()` 返回 `""` → `compute()` 回退既有全文键 `normalize(root)`（`:95` 的安全阀）。
+- **触发面比"最后一条 user 消息"宽**：助手历史、顶层 `system` / `instructions` 数组里出现非文本 part 同样塌缩（走同一函数）。Anthropic 回显 `thinking` / `redacted_thinking` 进历史即属此类。5 个用例分别钉住三处位置。
+- **与 #859 的分工（去重结论）**：#859 补的是生成参数指纹 + 顶层 `system`/`instructions` **进 scope**，不碰 `textContent()` 提取逻辑。注意其副作用：顶层 `system` 进入 scope 后，"system 数组里带图片"这条路径从「本来就全文回退」变成「被 scope 吞掉」——本 PR 的 `anthropicTopLevelSystemImageSplits` 正是钉这一点。
+- **可复现性陷阱（记住）**：`GatewayTestKeys.java:473` 的 `keyId` 是每进程新取的 `UUID.randomUUID()`，而 keyId 是键的一个维度 → **绝对摘要不可跨进程复现**；可复现的不变量是「同一进程内两把键彼此相等（红）/ 不等（绿）」。引用摘要值时必须说明这一点。
+- **代价（诚实记录）**：改动前多模态请求能提出非空 scope，`compute()` **不调用** `normalize()`；改动后调用。即被修复的这类请求**新增一次与请求体等大的序列化 + 全树重建**，上限 `max-proxy-buffer`（默认 256KB）。命中率也下降（视觉请求不再享受"只认最后一轮"优惠）。
+- **边界**：请求体超 `miqrokey.gateway.upstream.max-proxy-buffer`（默认 256KB）在 `ProxyController.java:328-330` 直接 413 `payload_too_large`，走不到缓存 → 缺陷只在 256KB 以内成立。OpenAI 的 URL 形态图片必中；Anthropic 的 base64 形态原图 ≲190KB 才中招（上限可配，视觉场景通常会调高）。
+- **旁支发现（未立案，文档问题）**：树内 10 余处把"缓存默认关闭"记为 **ADR-0008**（`CacheEligibility.java:6`、`ProxyController.java:81`、`CacheConfig.java:15`、`GatewayResponseCache.java:14`、`.env.example:39`…），但 `docs/decisions/0008-*.md` **不存在**（目录只有 0001-0007、0009-0026）；真实文件是 `0009-enable-response-cache.md`。属文档卫生，不影响运行时行为。
+- **外部改动声明**：维护者 `sijie-Z` 于本 PR 分支直接推送 `64cbc4bd`（spotless 收敛本 PR 新增 javadoc 折行，修 CI 红项）。该提交以 **merge 保留**，未 rebase、未强推。
+
 ## 2026-09-19 会话交接点（ADR-0025：Agent 生命周期补齐，#824）
 
 - **决策文档线，非实现**：新增 `docs/decisions/0025-agent-lifecycle.md`（**Proposed**），把 #824 的四条待拍板展开为「现状坐标 → 逐条分析 → 选项 A–D + 推荐 D → 落地形态 → 未决项」。零代码改动。
@@ -3615,7 +3626,7 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 ## 2026-09-17 下午 — 模型调用链路时间线 #705（后端）+ #707（前端）+ 独立审查修复
 
 **目标与交付**
-- #705 后端：新增 `request_usage_records` 的**首个读取路径**（此前该表只有写入方，控制面无查询入口——这正是模型侧一直没有"按请求排查"能力的根因）。端点 `GET /api/v1/admin/usage/timeline?gatewayRequestId=...` 返回单次调用的阶段时间线（受理 → 上游首字节 → 完成）+ TTFB/耗时/终态/重试/部分响应/Token 四分类/归属链；**零新增采集**。V60 为 `(tenant_id, gateway_request_id)` 建索引——EXPLAIN 实测此前走 Seq Scan（表按月分区且既有索引均不以该列起头）。
+- #705 后端：新增 `request_usage_records` 的**首个读取路径**（此前该表只有写入方，控制面无查询入口——这正是模型侧一直没有"按请求排查"能力的根因）。端点 `GET /api/v1/admin/usage/timeline?gatewayRequestId=...` 返回单次调用的阶段时间线（受理 → 上游首字节 → 完成）+ TTFB/耗时/终态/重试/部分响应/Token 四分类/归属链；**零新增采集**。V61 为 `(tenant_id, gateway_request_id)` 建索引——EXPLAIN 实测此前走 Seq Scan（表设计为按月分区、当前仅建了 DEFAULT 分区，且既有索引均不以该列起头）。
 - #707 前端：用量明细「请求 ID」列改可点击 + 三层信息抽屉（终态徽章 + "卡在哪一段" / TTFB·重试·HTTP / 折叠的归属链与 Token）。未记录的阶段如实标「缺失 · 未记录」而不补零；404 呈现为说明块而非错误横幅。OpenAPI 基线重导 + `gen:types` 重生成。
 
 **独立审查（对抗性、实测驱动）发现并修复三处缺陷**
@@ -4510,7 +4521,6 @@ job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
 - **P1**：临时文件落目标目录（原子 rename）/ chmod 失败即报错 / verify 判 `200 且 models-list 体` + `--connect-timeout 5 --max-time 20` / 失败默认只打 code（`--verbose` 才打体）/ 托管块残缺或重复**拒绝**而非猜 / symlink 目标拒绝 / `${2:?}` 缺值消息 / 测试 `stat` 双写法。
 - **测试 45 → 85 条**，新增恶意输入组与转义函数直测（`MIQRO_ONBOARD_SOURCE_ONLY` seam）；**三条旗舰断言对修复前脚本先证红**（引号 key 被放行、codex 输出含 key、代理错误页 200 判成功）。
 - 暂缓：前端/脚本双实现的 golden-fixture 契约（评审同意不做）。
-
 ## 2026-09-18 冒烟在自签证书的部署上什么都证明不了（#826）
 
 做完整套端到端模拟时的**最后一个失败项**：真实生产栈起来了、`deploy.sh` 的镜像身份 / 环境变量回声 / 证书进容器三条断言全过，**只有冒烟报"够不到"**——而目标其实好好地在答。
@@ -5103,6 +5113,19 @@ typecheck（**无管道直判 rc=0**）/ vitest 423/423 / build / e2e 58/58；#7
 **行业对标不编造**：issue 内的厂商描述逐条与本仓既有记录比对并标核实状态——腾讯 TPM/QPM、阿里 TPM/RPM 有仓内第二手记录（`docs/ai-gateway-comparison.md:34/86`）；**腾讯「并发多维多档」、阿里「服务端排队」、AWS「令牌桶 + 日周月配额」本仓无记录且本线未独立核实**（对 base `e83d44ea` 的 docs/ 树，`git grep -n "排队" e83d44ea -- docs/` 与 `git grep -n "多档" e83d44ea -- docs/` 均零命中；当前树含本文自身措辞，属自引用，不作证据），ADR 内逐条标「未核实」，结论不依赖未核实细节。
 
 **顺带发现两处文档漂移（只登记不改，避免与在飞文档线冲突）**：`docs/operations-runbook.md:191`「429 只可能来自上游…网关卡本身不产生 429」在 #684 后已不成立；`docs/feature-backlog.md:110` F47 行末「容量 503」当前并不存在（#733）。
+## 2026-09-18 ADR-0021 草案：同产品凭证回退 ×「每笔唯一归属」的兼容设计（#717）
+
+**性质**：**文档线，不含任何产品代码**；ADR 状态 **Proposed**（决策权在 owner；#717 明示「不做也是有效产出」，故 §3 保留「维持现状」为并列选项）。交付：新增 `docs/decisions/0021-same-product-credential-failover.md` + `docs/decisions/README.md` 索引行。
+
+- **编号核查**：`git ls-tree -r --name-only origin/develop -- docs/decisions` 最高为 `0020-quota-soft-landing.md` → 本线用 **0021**，未顺延。
+- **核心发现（此前未被写下）**：唯一性不是注释里的约定，而是被三层结构分别钉死——授权 `V1__core_tables.sql:359`（grant 携带单数 `upstream_credential_id`）、快照 `RouteSnapshot.java:251`（`BindingRecord` 单 `credentialId`）、账本 `V8__request_usage_records.sql:39`（`credential_id` NOT NULL）＋`:69`（一请求一行唯一键）。热路径 `ProxyController.java:454`/`:632` 的两处 `no cross-credential failover` 注释只是这三层的实现说明，**不是被修订的决策本身**。
+- **可行性关键**：`V1__core_tables.sql:373-374` 的唯一约束是 **(project, product, credential) 三元组**，且 `upstream_credentials` 上**没有**「一产品一凭证」约束（`:309` 仅 `UNIQUE (tenant_id, id)`；订阅 `:207` 一产品可多条）——**多凭证候选集在数据模型上已经存在，不需要任何 schema 变更**。禁止切换的是**请求期的单 binding 选择规则**，不是数据结构。
+- **红线（三处并列，不是一处）**：`architecture.md:161`「禁止跨供应商或跨真实凭证故障切换」显式点名「跨真实凭证」；`architecture.md:159`「真实凭证只在第一次尝试前解析一次，重试复用同一凭证」是**常被漏看的第二条红线**；`CLAUDE.md:36`「不自动故障切换」同。三处必须同时修订——只改 `:161` 会让 `architecture.md` 内部自相矛盾。而 `product-requirements.md:27` 的限定词是「供应商**之间**」，同产品内凭证回退不在其字面范围——这条区分写进了 ADR §1.4 的关系表。
+- **先例复用与正面回应（两条 Higress 先例，坐标不同、结论不同）**：`ai-gateway-comparison.md:93` 否决 Key 池轮询的理由是「**Key 池轮询破坏审计映射**」——否决对象是**无触发条件、无固定顺序**的轮询；本 ADR 的推荐方案要求「按显式有序配置、只在首字节前按 `ProxyController.java:634-635` 既有 TTFB 判据推进」，给定请求与配置即可重建「用了哪把、为什么」。另一条 **`ai-gateway-comparison.md:94`**「Higress 模型 Fallback/降级链——刻意不采纳」**不含「轮询/均衡」限定**，是字面上最接近本议题的反对先例，已在 §3 末尾单列一段逐字回应（区分点是「换模型/换供应商」vs「同产品内换凭证」；并承认 owner 若认定 `:94` 否决一切自动切换，答案收敛到 A/E）。
+- **反向发现**：全仓 `docs/*.md` 检索 `唯一归因|唯一身份|一笔一|每笔绑定|可归因`，**除本条目自身与 ADR 正文的两处自指句（§1.2 `:27` 引述 #704 需求、§1.3 `:54` 的检索断言）之外零命中**——#704 当作一等约束的不变式，此前只存在于代码与 DDL，本 ADR 是它第一次被写成文字。
+- **本 ADR 自行补的安全边界**：**INV-3**——候选集必须限定在该 `(project, product)` 已有的 ACTIVE grant 之内。否则「换一把凭证」字面上等于「换一个授权」，回退会变成权限提升通道（其依据是既有不变量 `V57__unattributed_policy.sql:8`「归属未知永不借用具体项目的 grant/凭证」）。
+- **未决项**：6 条待 owner 拍板 + 4 条需 owner 补充的事实 + 5 条本 ADR 明确不回答（§5 编号 1–6 / 7–10 / 11–15，留待各自议题）；其中「是否存在同产品多凭证供给」是**能力是否可用的前提**——若生产不存在「同一产品、不同 subscription、两把以上 ACTIVE 凭证」，则候选集为空，应先解决凭证供给而非实现回退。§2-Q7 另记一条实操警告：**同账号内多把凭证回退不缓解账号级 429，反而可能加速封禁**。
+- **验证**：本线为纯文档改动，无代码/测试可跑。已执行的核查：编号核查（上述）、`README` 索引行与文件名一致性、以及对本 ADR **实际引用**的坐标逐条核对。**引用坐标的可复现枚举**：`grep -oE '[A-Za-z0-9_./-]+\.(java|sql|md|yml|yaml|json|ts|vue|properties):[0-9]+(-[0-9]+)?' docs/decisions/0021-same-product-credential-failover.md | sort -u` → **48 条**完整坐标；展开斜杠续引（`AdminCredentialService.java:151/284/315` → `:151`/`:284`/`:315`）后共 **50 条**、涉及 21 个文件（`ai-gateway-comparison.md:93/94/123` 三条本就以完整形式各出现一次，不重复计数）。50 条已全部按当前工作树逐行读出核对：文件均存在（无歧义 basename）、行内容与 ADR 陈述一致——完整集合：`AdminCredentialService.java:151/284/315`、`CLAUDE.md:35/36`、`HeaderFilters.java:77`、`PostgresUsageEventWriter.java:181`、`PostgresUsageEventWriterTest.java:137-147`、`ProxyController.java:95-97/445/454/471/526-530/571/632/634-635/649-661/663`、`RouteSnapshot.java:251`、`SseReplayEngine.java:21-22`、`V1__core_tables.sql:207/288-291/309/359/373-374`、`V57__unattributed_policy.sql:8`、`V6__usage_events.sql:24`、`V8__request_usage_records.sql:39/55/69`、`V9__quota_snapshots.sql:16`、`ai-gateway-comparison.md:33/93/94/123`、`api-contract.md:1014`、`architecture.md:155-157/159/160/161`、`feature-backlog.md:109/113`、`operations-runbook.md:99`、`product-requirements.md:27/33`、`provider-adapter-contract.md:125/126/127/128`、`tencent-ai-gateway-mapping.md:22`；另有不带行号的引用（`AuthContext.java`、`V64__usage_event_price_snapshot.sql`、`V66__usage_event_base_cost.sql` 及关联 ADR/文档链接），以及 `:69`、`:161` 这类**简写续引**（不单独计数：宿主同线时可随该完整坐标核对；宿主跨行时机械脚本会绑错宿主，需人工判读归属）。**三轮独立对抗评审**：首轮 CHANGES_REQUIRED——6 条 blocker（`:94` 坐标、`:127` 坐标、漏记红线 `architecture.md:159`、把 javadoc 误当入站剥离清单、自证不实＋空白 churn、Q2 逻辑）已逐条修复并复跑 grep，同批修正 `api-contract.md:1002` → `:1003`（develop 侧 #776 位移）；第二轮判定 CHANGES_REQUIRED——① §5 未决项计数 7/4/4 与正文实为 6/4/5 不符、② 「脚本抽取 56 条」不可复现且清单漏 `AdminCredentialService.java:284/315`、③ #780 把该段移到 `api-contract.md:1008`（`:1003` 已是 DELETE 表格行）——三处均已修正（坐标项于 `9af268eb`）；其后 develop #783 再次把该段位移至 `api-contract.md:1014`，本 ADR 正文与本文坐标清单已同步改为 `:1014`；第三轮在 `9af268eb` 上复核：上一轮 blocker 全关、无新 blocker，verdict **APPROVE**（另记 3 条 minor：行尾 churn 复发风险、简写续引跨行宿主、计数口径，均不阻塞；其后另有两批 post-approve delta——① 措辞精度修正（`6973020e`）、② 并入 develop `#783` 后的坐标与迁移号校正——按交付前置条件逐条送评审复核后才 push）。**本条目早期版本曾声称「未使用任何未命中的行号」、并曾把未被引用的坐标（`V4`、`V53`、`V57:20`、`PostgresUsageEventWriter:116` 等）列为已复核项，两处声称均已删除。**
 
 ## 2026-09-19 缓存收益页：让 API 能说"未知"，并停止把 0/0 报成 0.00%（#858）
 
@@ -5439,3 +5462,52 @@ interface KeyRow { key; label; served; hits; hitRatePct; paidCost; savedCost }  
 ### 教训
 
 **手改会赢一时，输在"下一次整树同步"**——而它真正的代价不是丢值，是**丢可复现性**：值一旦只活在运行树里，这台机器跑的定义就不再对应任何提交，事后只能考古。所以规则不是"别手改"，而是"**值要有家**"：`.env`（compose 用 `${VAR:-默认}` 透传）；**没有家就先给仓库补一行**——#777 的调和开关正是没有家的那一项，于是它只能以手改的形式存在。与之配套的是把不可见变成可见：漂移从此每次部署都会被说一次，并留在流水里。
+## 会话交接点 2026-09-19（PH1 持久化与迁移审计：`request_usage_records` 上的重复索引）
+
+- **缺陷（#864 / PR #865，分支 `fix/redundant-request-usage-index`）**：V61（#705 / PR #720）与
+  V65（#758 / PR #761）在 `request_usage_records` 上各建了一个**列完全相同**的索引
+  `idx_request_usage_records_gateway_request` 与 `idx_request_usage_records_tenant_gateway_request`，
+  均为 `(tenant_id, gateway_request_id)`、普通非唯一、无谓词。两者互不互补，全仓无 `DROP INDEX`，
+  两个索引名在 Java/SQL/文档/配置中都没有其他引用。这是 V60/V63 迁移头记录过的同一类
+  「两支并行合并后撞车」，只是这次撞的不是版本号而是索引定义。
+- **修复**：新增追加式 `V68__drop_redundant_request_usage_gateway_index.sql`，删除后建的
+  `..._tenant_gateway_request`，保留 V61 的（更早、注释含完整论证）。用 `IF EXISTS` 兼容只落过其一
+  或已手工清理的库。**未改动已进入共享环境的 V61/V65**（本仓规则：只能追加新迁移）。
+- **影响量级（经对抗性评审修正，务必按修正后的口径引用）**：该表实有 **9 个**索引
+  （`V8__request_usage_records.sql` L67 主键、L69 唯一约束、L75/77/79/81/83 五个 `CREATE INDEX`，
+  加 V61、V65 各一个），删掉 1 个减少约 **1/9 ≈ 11%** 的索引维护量——**不是**初稿写的「写放大接近 2 倍」。
+  且**当前只有 DEFAULT 分区**（`V8:73`），无月度分区，「随分区数线性放大」是**未来**成本而非现状。
+- **先证红**：移除 V68 后 `IndexHygieneTest` 失败于
+  `Expecting empty but was: ["request_usage_records :: {idx_request_usage_records_gateway_request,
+  idx_request_usage_records_tenant_gateway_request}"]`；加回 V68 转绿。受影响模块全量回归
+  domain 144 / persistence-postgres 124（5 个既有 skip）全绿，`SchemaMigrationTest`、
+  `V3UpgradeMigrationTest`(12) 亦全绿，迁移顺序与历史表未被破坏。
+- **两个非产品缺陷的坑（都拦住了，记在这里免得重踩）**：
+  1. **假绿**：只把 V68 从源码移走、没清 `target/classes`，Maven 资源插件**不删除已移除的资源**，
+     Flyway 仍从陈旧副本应用了它，于是「先证红」跑出 `exit=0`。必须**同时**清源码与 `target/classes`；
+     本次改用 `find . -name "V68*"` 断言运行期零副本后再跑，并把 V68 的 md5 前后校验纳入脚本。
+  2. **对抗性评审证伪了我的两处断言**：影响量级（见上）与测试分组。原 `GROUP BY` 少了
+     `indnkeyatts`/`indclass`/`indcollation`/`indoption`，会把 `text_pattern_ops` 伴随索引、
+     `DESC`/`NULLS FIRST` 变体、`INCLUDE` 载荷列判成重复——合成表实测原查询误报 5 组。
+     已收紧分组并逐项写进 Javadoc；收紧后仍能捕获真实重复（红/绿均已复跑）。
+  3. **第二轮评审又找出 `indexprs` 漏项**：第一轮的合成验证只造了「操作符类/排序/空值序」三类
+     变体，**没造表达式索引**，因此漏了 `indkey` 对表达式列一律渲染为 `0` 这个坑——
+     `lower(username)` 与 `upper(username)` 在该查询眼里同形。`users` 上已有
+     `uq_users_tenant_username ON users (tenant_id, lower(username))`（`V1__core_tables.sql:61`），
+     是活场景而非假想。已把 `pg_get_expr(i.indexprs, i.indrelid)` 并入 `GROUP BY`，
+     并把 Javadoc 从「covers every catalog attribute」这种过度声明改为逐项列举 + 显式「已知边界」
+     （`indisunique` 在分组键里故「普通索引重复唯一索引列」不报；`reloptions` 不比较；
+     仅 `public` schema 且排除分区副本）。**教训：合成验证只能证伪「我想到的那些」变体。**
+  4. **第二轮还发现 V68 自己的头注释有一句假话**：称「retention/deletion paths have to drop and
+     recreate both」，但全仓无 `DELETE FROM request_usage_records`/`TRUNCATE`/`DETACH PARTITION`，
+     且同一 PR 的 progress.md 就写着「DROP PARTITION 留存当前无法实施」——自己和自己打架。
+     已删改；并把「waste multiplies with partition count」改成准确表述：**放大的是索引对象数与
+     rebuild/DDL 工作量，单次写入的额外开销恒为 1**（一行只落一个分区）。
+     另：issue #864 的**标题**当时仍留着旧数字「写放大一倍」，与已更正的正文矛盾，已一并改名。
+- **本文件顺带修正**：第 3585 行原写「V60 为 `(tenant_id, gateway_request_id)` 建索引」，
+  实为 **V61**（V60 是 `usage_queue_saturation_alert`，与此无关），已就地更正。
+- **未提交但已确认的真实问题**（详见审计报告 `_orchestrate/reports/PH1_report.md` 第三节，供另行排期）：
+  `usage_adjustments.usage_event_id` 的 `ON DELETE CASCADE` 无前导列索引（低影响）；
+  `docs/database-schema.md` 与迁移的大面积漂移（7 张不存在的表、多处枚举/约束写错，属文档系统性重写）。
+- 工作区卫生：本次只提交 3 个文件（V68 迁移 + `IndexHygieneTest` + 本文件）；一次性诊断用
+  `ZzHygieneProofTest`、`ZzDiagnosticTest` 均已删除，未进入任何提交。

@@ -12,9 +12,14 @@ import java.util.List;
  *
  * <p>
  * Implementations must use {@code INSERT ... ON CONFLICT DO NOTHING} so that a
- * retried flush never double-counts: usage_event conflicts on
- * {@code (tenant_id, provider_request_id)} (partial, non-null rows only),
- * cache_hit_event on {@code (tenant_id, cache_key, level, occurred_at)}.
+ * retried flush never double-counts. {@code usage_event} deliberately names no
+ * conflict target: its rows are deduplicated by the partial index
+ * {@code (tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL},
+ * which by definition does not arbitrate rows that carry no upstream request id
+ * (COALESCED / cache hits) — a replay of such a row can only conflict on the
+ * {@code id} primary key, so naming the partial index as the arbiter turns that
+ * replay into a hard error instead of a no-op (#887). {@code cache_hit_event}
+ * conflicts on {@code (tenant_id, cache_key, level, occurred_at)}.
  * </p>
  *
  * <p>

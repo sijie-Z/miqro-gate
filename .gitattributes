@@ -31,6 +31,23 @@ mvnw text eol=lf
 *.yml text
 *.svg text
 
+# Markdown may legitimately sit in the object store as CRLF: `docs/progress.md`
+# is (5020 CR bytes at 3385e4dd, appended to on every Goal). Without this,
+# `git diff --check` counts the CR of every added line as trailing whitespace,
+# so a docs-only PR that appends to progress.md reports ~92 violations and the
+# CI gate (#895) looks broken the moment it is armed. `cr-at-eol` exempts only
+# the CR: a real trailing space and a leftover conflict marker still fail
+# (verified — see _orchestrate/reports/PH10_report.md §4).
+#
+# `-blank-at-eof` additionally: the release flow appends to CHANGELOG.md, and
+# two of the most recent docs commits (51da4666, 38134bf7) end with a blank
+# line at EOF. With the default rule armed, the gate's first real runs would
+# fail on the repo's own legitimate commits and invite `|| true` back. A
+# trailing blank at EOF is cosmetic for these docs; real trailing spaces and
+# conflict markers still fail (verified on 51da4666^..51da4666 after the
+# change: exit 0, while a synthetic trailing space / conflict marker: exit 2).
+*.md whitespace=cr-at-eol,-blank-at-eof
+
 # Binary
 *.jar binary
 *.png binary
