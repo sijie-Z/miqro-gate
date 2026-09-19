@@ -10,6 +10,11 @@
 *.sh text eol=lf
 # Maven wrapper：容器内直接执行，Windows 检出必须保持 LF（#479）
 mvnw text eol=lf
+# mvnw 用 `while IFS= read -r` 逐行读取这两个文件并拼进 MAVEN_OPTS；read -r 只去掉
+# \n 不去掉 \r，CRLF 检出会把 `-Xmx2g\r` 原样传给 java（Invalid maximum heap size）。
+# 与 mvnw 同理，必须锁定 LF。
+.mvn/jvm.config text eol=lf
+.mvn/maven.config text eol=lf
 
 # Windows batch
 *.bat text eol=crlf
