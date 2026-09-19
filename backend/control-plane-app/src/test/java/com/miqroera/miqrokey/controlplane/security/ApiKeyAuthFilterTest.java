@@ -103,6 +103,26 @@ class ApiKeyAuthFilterTest {
         assertThat(first).isNotBlank().isNotEqualTo(second);
     }
 
+    @Test
+    @DisplayName("§2: a control char in the client-controlled X-Request-Id cannot corrupt the envelope (PH16)")
+    void reflectedRequestIdStaysParseableJson() throws Exception {
+        when(repository.findByKeyDigest(any())).thenReturn(Optional.of(consumer(List.of("mcp:call"))));
+
+        // A literal TAB survives Tomcat's header parser and reaches getHeader()
+        // verbatim, so escaping only '"' and '\' would splice a raw control
+        // character into the JSON string and make the whole envelope unparseable.
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI(BILLING_PATH);
+        request.addHeader("X-API-Key", "mqk_api_tab-probe");
+        request.addHeader("X-Request-Id", "ph16-tab-\t-end");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(403);
+        JsonNode body = new ObjectMapper().readTree(response.getContentAsString());
+        assertThat(body.path("requestId").asText()).isEqualTo("ph16-tab-\t-end");
+    }
+
     private String rejectAndReadRequestId(String apiKey) throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setRequestURI(BILLING_PATH);
