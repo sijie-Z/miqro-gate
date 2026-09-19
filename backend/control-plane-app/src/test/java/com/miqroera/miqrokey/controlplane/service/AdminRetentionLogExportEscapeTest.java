@@ -79,7 +79,13 @@ class AdminRetentionLogExportEscapeTest {
     private static String exportOf(byte[] plain, String displayName) {
         AdminRetentionLogService service = new AdminRetentionLogService(
                 jdbcReturning(List.of(rawRow(plain, displayName))), provider(new FakeCrypto()));
-        return service.exportCsv(TENANT, null, null, null, null, null).csv();
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        try {
+            service.streamCsv(TENANT, null, null, null, null, null, out);
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+        return out.toString(StandardCharsets.UTF_8);
     }
 
     @Test
