@@ -8,7 +8,15 @@
 - **落点**：`ProxyController` 的非 2xx 完成路径（响应体本就在 `attempt.collector` 里，故无需新增缓冲）；计数器 `miqrokey_gateway_upstream_error_class_total{class=…}`（有界枚举标签，状态码只进日志）。
 - **ADR-0024 转「部分 Accepted」**：只采纳 B；C/D/E 仍是 Proposed，不得据此实现（§7 拍板记录）。
 - **与 peer 的接口约定**：`ProxyController` 的异常映射链与分类链口径不一致是已知问题，本次**没有触碰**那条链（分类走的是响应体，不是异常类型），不与其 #1009 的注释工作冲突。
-- **行尾纪律（本批踩到两次）**：`CHANGELOG.md` 与 `docs/progress.md` 以 CRLF 存储，本机 autocrlf=true + `* text=auto` 会把整文件归一化成 LF（一条条目显示成 673 行 diff）；已给这两个文件加 `-text`，并用「develop 原始字节 + 字节级插入」的方式改写。
+- **行尾纪律（本批踩到两次）**：`CHANGELOG.md` 与 `docs/progress.md` 以 CRLF 存储，本机 autocrlf=true + `* text=auto` 会把整文件归一化成 LF（一条条目显示成 673 行 diff）；本批已给这两个文件加 `-text`（.gitattributes），并一律用「develop 原始字节 + 字节级插入」改写。
+
+## 会话交接点 2026-09-20（速率信号告警：#706 / ADR-0026 选项 D）
+
+- **两类新告警规则类型**（V71 扩 `alert_rules_type_check`）：`UPSTREAM_RATE_LIMITED`（近 1h 上游 429 **计数**）、`KEY_REQUEST_RATE`（近 1h **单 Key 峰值请求数**）。
+- **两个语义要点**：① 429 只计**上游真的答了 429** 的行（`upstream_status_code = 429`）——网关配额拒绝的请求不触达上游、无该列值，天然不计入；② 单 Key 信号**必须可归因**，触发事件在 `payload_json` 里带 keyId/keyName/requests，且 payload 随事件持久化（`retryDue()` 按存储重放，不重新查询）。
+- **约束遵守（ADR-0026 §6）**：per-key 维度只在 SQL 聚合里，**不做指标标签**（高基数红线）；评估仍在控制面，热路径零改动、零延迟。
+- **踩坑**：`alert_rules.type` 是 CHECK 约束且**服务端另有一份白名单**（`AlertRuleService.RULE_TYPES`）——加类型两处都要改，漏了后者 API 直接 400；迁移定号前查「树 ∪ 已登记号」（本次 V71）。
+- **测试**：`RateSignalAlertIntegrationTest` 4 例 + 既有队列饱和 9 例 + webhook 9 例回归。
 
 ## 会话交接点 2026-09-19（PH22 缓存正确性审计：多模态 part 不入键，#976）
 
