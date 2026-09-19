@@ -1,9 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { describe, expect, it } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
 import { nextTick } from 'vue';
 import NextHelpView from '@/views/next/NextHelpView.vue';
-
-enableAutoUnmount(afterEach);
 
 async function mountHelp() {
   const wrapper = mount(NextHelpView);

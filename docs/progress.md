@@ -2,6 +2,14 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 2026-09-19 会话交接点（ADR-0025：Agent 生命周期补齐，#824）
+
+- **决策文档线，非实现**：新增 `docs/decisions/0025-agent-lifecycle.md`（**Proposed**），把 #824 的四条待拍板展开为「现状坐标 → 逐条分析 → 选项 A–D + 推荐 D → 落地形态 → 未决项」。零代码改动。
+- **两处事实更正/发现（对 #824 原文）**：① issue 说「停用的 Agent 仍锁住凭证」**不成立**——凭证侧的锁查询带 `status='ACTIVE'`（`AdminCredentialService.java:355-361`、`AgentRepositoryImpl.java:68-76`），**停用即释放**；② 真实约束是 `uq_agents_tenant_credential` **不看状态**（`V17:24-26`）→ 停用的 Agent 仍占着「该凭证 → 唯一 Agent」的名额，新建同凭证 Agent 被 `AGENT_CREDENTIAL_TAKEN` 挡住——**僵尸 Agent 的形状是「名额占死」而非「凭证锁死」**。
+- **硬删除可行的前提已核实**：迁移中 `git grep "REFERENCES agents"` **零命中**，且没有任何表按 Agent 维度记录用量（`agent_id` 零命中）——删除不影响任何历史统计；代价只剩「不可逆」与「审计按 id 反查不到名字」，故 ADR 要求 `AGENT_DELETE` 审计**带名称快照**。
+- **推荐 D（enable + 改名 + 硬删除）**，与 A/B/C 的对比见 ADR §3；`enable` 被写成**有条件的逆操作**（停用期间凭证可能已停用或已轮换，需前置校验）——这是本 ADR 的第二处发现。
+- **下一步**：所有者拍板；拍板前 #824 保持 OPEN。
+
 ## 会话交接点 2026-09-19（P1 阶段一：离线 probe 集评测出结论，#930）
 
 - **结论：按当前本地档位不进入 P2，维持 A（语义缓存继续不启用）**。报告 `docs/semantic-cache-probe-phase1-2026-09-19.md`，
@@ -2740,7 +2748,7 @@ All existing `SingleFile`/`MultiVersion`/`HmacKeys` tests updated with `ensureSt
 - **Origin production mode**: `OriginInterceptorProductionTest` (3 tests) — missing Origin rejected in production, allowed origin passes, unknown origin rejected.
 - **Audit chain integrity**: `AuditChainIntegrityTest` (3 tests) — chain survives restart, content tamper breaks chain, concurrent writers produce valid chain.
 - **Custom CSRF cookie name**: `CustomCsrfCookieNameTest` — CSRF returned from configured cookie name, default name not used.
-- **Production profile**: `AuthIntegrationTestProduction` — production profile starts with valid config.
+- **Production profile**: `AuthProductionProfileIntegrationTest` — production profile starts with valid config.
 - **Test admin endpoint**: `AdminTestController` (test-only) — `/api/v1/admin/test`, `/api/v1/admin/users/{userId}`.
 
 ### Targeted verification repair (2026-07-22)
@@ -2748,7 +2756,7 @@ All existing `SingleFile`/`MultiVersion`/`HmacKeys` tests updated with `ensureSt
 Addressing 8 verified blockers found in commit `ed71f42`:
 
 1. **OriginInterceptor missing-Origin production branch**: Returns `false` (not `true`) after `sendRejection`. Added `requestId` to RFC 9457 response. `OriginInterceptorProductionTest` proves handler is not reached.
-2. **cookieSecure/production binding**: `ProductionStartupValidator` validates cookieSecure and originAllowlist on production mode at `@PostConstruct`; fails fast rather than auto-enabling. `AuthIntegrationTestProduction` starts production-profile context.
+2. **cookieSecure/production binding**: `ProductionStartupValidator` validates cookieSecure and originAllowlist on production mode at `@PostConstruct`; fails fast rather than auto-enabling. `AuthProductionProfileIntegrationTest` starts production-profile context.
 3. **Bootstrap DB-level serialization**: `lockTenantForBootstrap()` uses `SELECT ... FOR UPDATE` on tenant row. `BootstrapConcurrencyTest` proves exactly one admin committed under concurrency with distinct usernames.
 4. **login() transaction removed**: `login()` no longer `@Transactional`. `recordFailedLogin` uses `findByIdForUpdate()` under row lock to compute increment from fresh row. `LOGIN_FAILED` + `ACCOUNT_LOCKED` audit events recorded. `LoginFailureConcurrencyTest` proves deterministic count under concurrency.
 5. **Audit hash content coverage**: SHA-256 over canonical encoding of all immutable fields + previous hash. DB-level lock (final: `pg_advisory_xact_lock`; initial repair used `SELECT ... FOR UPDATE`) replaces `ReentrantLock`. Temporary arrays zeroed. `AuditChainIntegrityTest` proves restart, tamper detection, concurrent writers.
@@ -2779,7 +2787,7 @@ Integration tests (PostgreSQL Testcontainers, Linux only): **100 tests, 0 failur
   - `LoginFailureConcurrencyTest`: 2/2 PASS
   - `OriginInterceptorProductionTest`: 3/3 PASS
   - `CustomCsrfCookieNameTest`: 1/1 PASS
-  - `AuthIntegrationTestProduction`: 1/1 PASS
+  - `AuthProductionProfileIntegrationTest`: 1/1 PASS
   - `CryptoIntegrationTest`: 10/10 PASS
   - Persistence integration tests: 45 tests PASS
   - Control Plane smoke: 2/2 PASS
@@ -2822,7 +2830,7 @@ Integration tests (PostgreSQL Testcontainers, Linux only): **100 tests, 0 failur
 - `OriginInterceptorProductionTest.java` — new: 3 production Origin tests
 - `AuditChainIntegrityTest.java` — new: 3 audit chain tests
 - `CustomCsrfCookieNameTest.java` — new: custom CSRF cookie name test
-- `AuthIntegrationTestProduction.java` — new: production profile startup test
+- `AuthProductionProfileIntegrationTest.java` — new: production profile startup test
 - `docs/api-contract.md` — updated: bootstrap, CSRF, Origin, production, error semantics
 - `docs/configuration-reference.md` — updated: production constraints, cookie, allowlist, CSRF cookie name
 - `docs/progress.md` — updated (this file)
@@ -5054,6 +5062,34 @@ typecheck（**无管道直判 rc=0**）/ vitest 423/423 / build / e2e 58/58；#7
 ### 教训
 
 **评审的基线错、结论也可能对。** 这份外评的排头主张在 develop 上早已不成立（#444 就修过），但顺着它的推理去核对"键身份到底由什么构成"时，翻出了两条更深的缺口——**"这条主张不成立"不等于"这个方向没问题"**；对着错误的主张做一次完整核对，比对着正确的主张点个头更有价值。
+## 2026-09-18 请求侧可选改造 ADR 姊妹篇（#769 / #770，均 Proposed）
+
+**背景**：两个 issue 提出请求侧改体能力——① `cache_control` 断点自动注入（对齐 cc-switch `cache_injector.rs`）；② 错误驱动的整流重试（thinking 签名/预算，对齐 `thinking_rectifier.rs`）。两者都与 `CLAUDE.md:55`「透明代理不得重排、标准化或补写推理请求 JSON」正面冲突，issue 自身要求 ADR 先行、默认关、opt-in。**本轮只写决策文档，无产品代码改动。**
+
+**产出（状态均为 `Proposed`，未替所有者拍板）**：
+
+- `docs/decisions/0023-request-side-cache-breakpoint-injection.md`（#769）：逐条回答 issue 的 Q1–Q7；红线冲突按「补写」的**字面违例**处理，给出 E1–E7 例外边界与三处必改文本（`CLAUDE.md:55`、`testing-and-acceptance.md:52`、`architecture.md:166-169`）；选项 A–D（推荐 **B：Key 级 opt-in、默认关**）；字节策略给出 B1 定点插入 / B2 重序列化两档；明确「逐请求审计（`admin_audit_events`）」在网关侧**没有既有通道**（该表的写入者在控制面 `AuditServiceImpl.java:86-137`），逐请求事实改走网关**已有**的 `request_usage_records` 写入通道（`gateway-app/pom.xml:37` → `GatewayFeatureConfig.java:43` → `QueueConfig.java:62` → `PostgresUsageEventWriter.java:181,230`），即「指标 + 生命周期列 + 响应头」举证。
+- `docs/decisions/0024-request-side-rectification-retry.md`（#770）：整流重试属「**删除/改写**」，指出现有红线枚举词（重排/标准化/补写/注入）**未字面覆盖删除**，需把红线改写成可判定断言；给出 E1–E9 边界；重试预算给出 R1（共享既有 ≤1，**推荐**）/ R2（独立预算，需二次修订红线）供拍板；澄清 **#544（HTTP 200 且 content 为空）不在错误驱动整流射程内**；选项 A / B（只检测不重试的观察档）/ C（推荐目标档）/ D / E（预算类整流，二期）。
+- `docs/decisions/README.md`：追加两行索引。
+
+**编号裁定**：任务书预分配 0023 / 0024。`git ls-tree -r --name-only origin/develop -- docs/decisions` 核对 origin/develop 现最大编号为 **0020**，0021–0024 均未被占用，**未顺延**。
+
+**现状证据**：两份 ADR 中每处「现状」断言均带 `file:line`，坐标取自 `ProxyController` / `CacheKeyFactory` / `ContextLimitGuard` / `CacheEligibility` / `SseReplayEngine` / `LlmCircuitBreakerRegistry` / `V4`·`V8` 迁移 / `RequestStatus.java` / `VirtualKey.java` / `QueueConfig.java` / `PostgresUsageEventWriter.java` / `architecture.md` / `testing-and-acceptance.md` / `provider-adapter-contract.md` / `feature-backlog.md` / `live-integration-guide.md`，写入时以 `grep -n` 或行区间读取取得；外部实现（cc-switch、AWS Bedrock）一律标注为 **issue 转述、本仓未复核**，不作论据。
+
+**独立复核与修正（第一轮）**：两份 ADR 在 push 前经独立复核，结论为 BLOCK；下列问题已逐条修正，修订后无未决分歧：
+
+- **失效的现状断言（3 处）**：① 「网关进程没有数据库/审计写入通道」不成立——`gateway-app/pom.xml:37` 以 compile scope 依赖 `queue-spi`，`GatewayFeatureConfig.java:43` 装载队列，`QueueConfig.java:62` 构造 `PostgresUsageEventWriter`（`INSERT INTO request_usage_records`，`:181`、`:230`），另有 `PostgresMcpAccessLogWriter.java:44`；正确的表述是「**已有用量/生命周期写入通道、没有 `admin_audit_events` 通道**」，两份 ADR 的 §1.2 与相关小节已按此拆分改写。② 「网关完全不读上游错误体」不成立——`ProxyController.java:548` 对**所有**上游响应（含错误）逐块缓冲，只是只用于 `:566` 用量解析 / `:578` 保留策略 / `:850` 取上游请求 id，**没有任何错误内容分类**；表述已改为「缓冲但不分类」。③ 迁移列号误引 `V8:64-65` / `V8:44-48`，已改为 `V8:58-59`（cache token 两列）与 `V8:43-47`（`request_status` 及其 CHECK 枚举）。
+- **改动面低报**：`request_usage_records` 的写入是显式列名写法且同一语句出现两处，新增列须同步改两处列清单、参数映射、域事件与发射点；两份 ADR 的「后果」段已如实展开，不再写成「一次性追加迁移」。
+- **待议点缺项**：开关粒度原先只写到 Key 级，未覆盖 ADR-0018 的 key×project 多绑定；两份 ADR 的开关粒度小节与未决项清单已补「是否允许项目级覆盖」。
+- **口径措辞**：把「全部采纳」等结论性措辞改为「建议……（待所有者拍板）」，避免代所有者拍板。
+- **本节自身的修正**：编号核对命令补 `-r --name-only`；证据清单删去两份 ADR 实际未引用的 `application.yml`；「并逐条在工作区核对」改为可复现的取证方式描述。
+
+**独立复核与修正（第二、三轮）**：第一轮修订后复核结论为 APPROVE，同时提出 3 项**非阻断**项（N1–N3），已全部采纳：① `0023` 里项目级粒度的绑定行坐标由 `JdbcRouteSnapshotLoader.java:157,164` 改为 `JdbcRouteSnapshotLoader.loadBindings()` 的 `:171-194`（该方法直接查 `key_project_binding`，先前坐标落在 Key 装载段）；② `0024` 未决项 6 的括注补齐错误体的全部消费点（`ProxyController.java:566`、`:578`、`:850`，均不按内容分类）；③ 本条目的提交登记补齐第二笔起的 sha（见下）。
+
+**提交**：`73f9efe5`（ADR-0023）、`1a694784`（ADR-0024）、`24679cc4`（`docs/decisions/README.md` 索引与本节）、`f49027dc`（`docs/progress.md` 行尾恢复）、`215943af`（依第一轮复核修正两份 ADR 的失效断言与引用坐标）、以及本次提交（依第二、三轮复核修正 N1–N3；sha 见 `git log --oneline`）。
+**交付回读**：分支 `docs/adr-request-side-transforms-769-770` 已推送，远端 sha = 本地 HEAD；PR https://github.com/sijie-Z/miqro-gate/pull/782 （base `develop`，状态 OPEN，diff 仅 4 个文档文件、纯新增无删除）；issue 评论 https://github.com/sijie-Z/miqro-gate/issues/769#issuecomment-5724478199 与 https://github.com/sijie-Z/miqro-gate/issues/770#issuecomment-5724478426 ；两个 issue 均保持 **OPEN**，PR 正文不写 `Closes`。
+
+**行尾修正**：本条目追加过程中曾多次把文件内 122 处既有 LF 行尾归一化为 CRLF、产生纯空白 diff；每次均已按 `origin/develop` 原始字节恢复（对 merge-base 的 `git diff --numstat` 为纯新增），现有内容为净新增。
 
 ## 2026-09-19 缓存收益页：让 API 能说"未知"，并停止把 0/0 报成 0.00%（#858）
 
