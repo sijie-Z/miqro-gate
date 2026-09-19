@@ -73,7 +73,7 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
             // Portal sessions need SYSTEM_ADMIN on the open surface (parity with
             // /api/v1/admin/**); their tenant seeds the same attribute contract.
             if (userContext.getUser().role() != UserRole.SYSTEM_ADMIN) {
-                forbidden(response);
+                forbidden(request, response);
                 return;
             }
             request.setAttribute(TENANT_ATTR, userContext.getUser().tenantId());
@@ -87,14 +87,14 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
             if (token.startsWith(KEY_PREFIX) && authenticate(token, request)) {
                 if (!scopeAllows(request)) {
                     auditDenied(request);
-                    forbiddenScope(response);
+                    forbiddenScope(request, response);
                     return;
                 }
                 chain.doFilter(request, response);
                 return;
             }
         }
-        unauthorized(response);
+        unauthorized(request, response);
     }
 
     private boolean authenticate(String token, HttpServletRequest request) {
@@ -168,25 +168,41 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
         }
     }
 
-    private static void unauthorized(HttpServletResponse response) throws IOException {
-        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+    /**
+     * Contract §2 requires every error response — filter rejections included — to
+     * carry a unique {@code requestId} so a machine caller can correlate the
+     * failure with the server-side log line. The envelope is serialized by
+     * {@link ProblemJson} rather than spliced, because it carries the echoed
+     * client-controlled {@code X-Request-Id}.
+     */
+    private static void writeProblem(HttpServletResponse response, HttpServletRequest request, int status, String title,
+            String code, String detail) throws IOException {
+        response.setStatus(status);
         response.setContentType("application/problem+json");
-        response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"Unauthorized\",\"status\":401,"
-                + "\"code\":\"ADMIN_API_KEY_INVALID\",\"detail\":\"管理密钥缺失或无效\"}");
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.getWriter().write(ProblemJson.of(status, title, code, detail, requestId(request)));
     }
 
-    private static void forbidden(HttpServletResponse response) throws IOException {
-        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-        response.setContentType("application/problem+json");
-        response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"Forbidden\",\"status\":403,"
-                + "\"code\":\"ADMIN_API_FORBIDDEN\",\"detail\":\"开放管理面需机器密钥或 SYSTEM_ADMIN 会话\"}");
+    private static void unauthorized(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        writeProblem(response, request, HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized", "ADMIN_API_KEY_INVALID",
+                "管理密钥缺失或无效");
     }
 
-    private static void forbiddenScope(HttpServletResponse response) throws IOException {
-        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-        response.setContentType("application/problem+json");
-        response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"Forbidden\",\"status\":403,"
-                + "\"code\":\"ADMIN_API_SCOPE_DENIED\",\"detail\":\"该管理密钥的能力组不含此端点所需权限\"}");
+    private static void forbidden(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        writeProblem(response, request, HttpServletResponse.SC_FORBIDDEN, "Forbidden", "ADMIN_API_FORBIDDEN",
+                "开放管理面需机器密钥或 SYSTEM_ADMIN 会话");
+    }
+
+    private static void forbiddenScope(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        writeProblem(response, request, HttpServletResponse.SC_FORBIDDEN, "Forbidden", "ADMIN_API_SCOPE_DENIED",
+                "该管理密钥的能力组不含此端点所需权限");
+    }
+
+    static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        // #445: this header is client-controlled. It reaches the response only through
+        // ProblemJson.of, which serializes the envelope instead of splicing it.
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
     static UUID asUuid(Object value) {
