@@ -972,7 +972,7 @@
 - **F60 开放管理 API 全链交付**：#200 批1 → #204 批1b 读面 → #251 写面 v1（ADR-0016
   Accepted A+C：告警/Webhook 机器 CRUD + 导出委托=发行管理员）→ 批 2 契约与示例
   （scripts/open-api-examples/，curl+Python+最小权限 README）→ OpenAPI 基线/前端类型
-  同步 → rc.1..rc.4（各带中文 Release）。
+  同步 → rc.1..rc.4（各带中文 Release；**#988 更正**：rc.1 仅有 tag，无 GitHub Release 对象）。
 - **控制台打磨**：视觉轮基线 keys 8.5/usage 7.5/overview 7.6→7.5 区；#254 总览收口
   （货币层级/空态居中/空格规范）；usage 横幅与卡片 padding NIT 属设计 token 决策，记档。
 - **盘点封存**：#246 codegen 全量迁移→DEFERRED（109 schema 中 25 个手写类型 0 覆盖，
