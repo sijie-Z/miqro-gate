@@ -97,13 +97,19 @@ public class AdminUsageStatsService {
      * 93-day window cap — an annual quota window legitimately spans the full
      * calendar year. Internal callers only; the cap still guards every public usage
      * endpoint.
+     *
+     * <p>
+     * Reads the <b>observed</b> token columns (#1002): a watermark is a runtime
+     * verdict on what the gateway actually counted, so the booking ledger (#709)
+     * must not move it. Reporting stays on the adjusted reading.
+     * </p>
      */
-    public UsageSummary summaryUncapped(UUID tenantId, String groupBy, Instant from, Instant to, UUID userId,
+    public UsageSummary summaryObservedUncapped(UUID tenantId, String groupBy, Instant from, Instant to, UUID userId,
             UUID projectId) {
         UsageStatsRepository.GroupBy dimension = UsageStatsService.parseGroupBy(groupBy);
         UsageStatsRepository.UsageFilter filter = new UsageStatsRepository.UsageFilter(tenantId, null, userId,
                 projectId, null, null, null, null, null, null, from, to);
-        List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
+        List<UsageAggRow> usageRows = usageStatsRepository.aggregateObservedUsage(dimension, filter);
         List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
         return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows);
     }
