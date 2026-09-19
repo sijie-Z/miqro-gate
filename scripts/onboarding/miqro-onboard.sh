@@ -279,10 +279,12 @@ harden_and_warn() {
     # git then receives an unconverted `/tmp/...` or `/c/...`, exits 128, and the
     # `&&` below short-circuits, so the warning is silently skipped instead of
     # firing. A stock Git Bash converts the path and is unaffected. Let the shell
-    # resolve it instead: correct under either setting. `CDPATH=` and `--` keep a
+    # resolve it instead: correct under either setting. `CDPATH=''` and `--` keep a
     # bare relative `_d` or a `-`-prefixed name from misdirecting `cd`.
-    if command -v git >/dev/null 2>&1 && (CDPATH= cd -- "$_d" 2>/dev/null && git rev-parse --is-inside-work-tree >/dev/null 2>&1); then
-        if ! (CDPATH= cd -- "$_d" 2>/dev/null && git check-ignore -q -- "$(basename "$1")" 2>/dev/null); then
+    # `CDPATH=''` (not `CDPATH=`) because ShellCheck reads the spaced empty form as
+    # SC1007, which fails the repo's `shellcheck -S warning` job.
+    if command -v git >/dev/null 2>&1 && (CDPATH='' cd -- "$_d" 2>/dev/null && git rev-parse --is-inside-work-tree >/dev/null 2>&1); then
+        if ! (CDPATH='' cd -- "$_d" 2>/dev/null && git check-ignore -q -- "$(basename "$1")" 2>/dev/null); then
             warn "$1 is inside a git work tree and not ignored — it now holds a credential; add it to .gitignore before committing"
         fi
     fi
