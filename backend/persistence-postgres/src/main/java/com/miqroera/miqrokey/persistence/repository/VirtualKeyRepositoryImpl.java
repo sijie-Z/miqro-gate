@@ -67,6 +67,15 @@ public class VirtualKeyRepositoryImpl implements VirtualKeyRepository {
     }
 
     @Override
+    public List<VirtualKey> findAllByIds(Collection<UUID> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.query(SELECT_WITH_LAST_USED + " WHERE vk.id IN (:ids)", new MapSqlParameterSource("ids", ids),
+                ROW_MAPPER);
+    }
+
+    @Override
     public Optional<VirtualKey> findByPublicKeyId(String publicKeyId) {
         try {
             return Optional

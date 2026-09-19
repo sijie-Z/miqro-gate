@@ -33,7 +33,7 @@ import { ApiError } from '@/api/http';
 import { useAuthStore } from '@/stores/auth';
 import { toast } from '@/ui';
 import { language } from '@/i18n';
-import heroArt from '@/assets/login/hero-full.png';
+import heroArt from '@/assets/login/hero-full.webp';
 
 const route = useRoute();
 const router = useRouter();

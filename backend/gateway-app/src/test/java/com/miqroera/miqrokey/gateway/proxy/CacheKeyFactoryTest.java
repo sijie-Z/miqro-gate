@@ -205,6 +205,58 @@ class CacheKeyFactoryTest {
     }
 
     /**
+     * Hot-path cost: key derivation runs on the gateway request path, so the
+     * buffered body must be parsed once per {@code compute} — not once per key
+     * dimension.
+     */
+    @Nested
+    @DisplayName("Hot-path parse cost")
+    class HotPathParseCost {
+
+        @Test
+        @DisplayName("derives the key with a single parse of the request body")
+        void singleBodyParse() {
+            // Chat shape: scope is extractable, so the fallback normalize() is
+            // not reached — this is the 3-parse case.
+            byte[] chat = json("{\"model\":\"gpt-4o-mini\",\"temperature\":0.9,\"max_tokens\":256,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            // Non-chat shape: no extractable user message, so the key falls back
+            // to the normalized body — the worst case, one parse more than chat.
+            byte[] fallback = json("{\"model\":\"text-embedding-3-small\",\"input\":\"hello world\"}");
+
+            assertThat(parsesFor(chat)).isEqualTo(1);
+            assertThat(parsesFor(fallback)).isEqualTo(1);
+        }
+
+        /** Full-body parses performed by one {@code compute} of the given body. */
+        private int parsesFor(byte[] body) {
+            CountingObjectMapper counting = new CountingObjectMapper();
+            new CacheKeyFactory(counting).compute(ctx, "gpt-4o-mini", body);
+            return counting.bodyParses();
+        }
+    }
+
+    /** Counts full-body JSON parses; the helpers must share one parsed tree. */
+    private static final class CountingObjectMapper extends ObjectMapper {
+
+        private static final long serialVersionUID = 1L;
+
+        private final java.util.concurrent.atomic.AtomicInteger bodyParses = new java.util.concurrent.atomic.AtomicInteger();
+
+        @Override
+        public com.fasterxml.jackson.databind.JsonNode readTree(byte[] content) throws java.io.IOException {
+            if (content != null && content.length > 0) {
+                bodyParses.incrementAndGet();
+            }
+            return super.readTree(content);
+        }
+
+        int bodyParses() {
+            return bodyParses.get();
+        }
+    }
+
+    /**
      * Key-identity hardening (2026-09-18, external review of the semantic-cache
      * evaluation): the chat path keeps only the conversation scope, so
      * output-shaping generation parameters and the Anthropic/Responses top-level
