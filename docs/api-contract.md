@@ -714,6 +714,8 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 
 投递签名：`X-MiQroKey-Signature: sha256=<HMAC-SHA256(secret, payload) hex>`，payload 为事件 JSON（eventId/ruleId/type/value/occurredAt）。错误码：`WEBHOOK_URL_REJECTED`（400，SSRF 门控）、`WEBHOOK_NOT_FOUND`（404）。
 
+**字段约束（PH23）**：创建时 `name` 必填且非空白、`≤200`（列宽 `varchar(200)`）；`url` 必填且非空白、`≤500`（列宽 `varchar(500)`）；`secret` 必填且非空白；`timeoutMs` 缺省 `5000`，给定时须落在 `1000..600000` ms（与 MCP 上游超时同域，§5.11）。PATCH 为部分更新：缺省字段保持原值，`name` 出现即不得为空白、`≤200`，`timeoutMs` 出现即须落在同一区间。违反者一律 `400 VALIDATION_FAILED`（含 `fieldErrors`），不再以 `409 RESOURCE_CONFLICT`（NOT NULL/长度违约）或 `500` 的形式漏出。
+
 ### 5.8 告警规则（G4.5/G8.3）
 
 | 方法与路径 | 用途 |
@@ -724,6 +726,8 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `DELETE /api/v1/admin/alert-rules/{id}` | 删除 |
 
 规则类型：`USAGE_MISSING_RATE`（1h 内 usage_missing 占比）、`UPSTREAM_ERROR_RATE`（1h 内非 2xx 占比）、`BALANCE_UNAVAILABLE`（1h 内 UNAVAILABLE 配额快照数）、`USAGE_SURGE`（当前 1h 事件数 / 前一 1h 比率）、**`USAGE_QUEUE_SATURATION`**（F07/#245，V60：网关用量队列近 1h **丢失的事件条数**——绝对值计数，不是比例。事实由网关在队列饱和丢弃时按窗口写 `gateway_queue_signal`（仅 `dropped > 0` 才写行，零丢弃不写行也不触发）；队列是全进程唯一的，故事实固定承载于默认 seed 租户，**只有该租户的规则能评估到**：其他租户的规则聚合到零行，`COALESCE(SUM(dropped), 0)` 恒为 `0`，而评估为「`value >= threshold` 才触发」，故其他租户的规则在**正阈值**下恒不触发，也读不到任何其他租户的数字；阈值 `<= 0`（服务端目前不校验）会在每个去重窗口以 `value = 0` 触发一次，属退化配置，与其余计数型指标行为一致。阈值示例：`1` = 1 小时内丢 1 条即告警）、**`UPSTREAM_RATE_LIMITED`**（ADR-0026 选项 D/#706，V71：近 1h **上游返回 429 的条数**，计数而非比例——比例已在 `UPSTREAM_ERROR_RATE` 里，而「上游在限流」与「上游在故障」是两类事故、处置不同；只统计上游真的答了 429 的请求，**网关自身因配额拒绝的请求不触达上游、无上游状态码，不计入**。阈值示例：`20` = 1 小时内被上游限流 20 次即告警）、**`KEY_REQUEST_RATE`**（ADR-0026 选项 D/#706，V71：近 1h **单把密钥的最高请求条数**（`GROUP BY virtual_key_id` 取最大，平手按键 id 定序以保证确定性）——租户级 `USAGE_SURGE` 说不出「是谁在猛打」，而这条信号只有在**可归因**时才可行动：触发事件在 `payload_json` 里带该密钥的 `keyId`/`keyName`/`requests`（随事件持久化，重试投递时按存储的 payload 重放）。阈值示例：`1000` = 任意单把密钥 1 小时内超 1000 次即告警。两者的 per-key 维度都在 **SQL 聚合**里，不做指标标签（高基数红线，`GatewayMetricsFilter`），评估仍在控制面、热路径零改动（ADR-0026 §6 的约束）、**`BUDGET_THRESHOLD`**（项目当月预算水位 %，`scopeJson: {"projectId": "…"}` 必填且项目需存在，否则 `400 SCOPE_INVALID`）、**`QUOTA_THRESHOLD`**（配额规则当前窗口水位 %，`scopeJson: {"quotaRuleId": "…"}` 必填且配额规则需存在，否则 `400 SCOPE_INVALID`；规则停用即不评估）。评估周期 `miqrokey.alerts.evaluation-interval-ms`（默认 5min）；密钥到期事件型 `ADMIN_API_KEY_EXPIRING`（默认关——需管理员建规则；按 key + 日期去重；检查周期 `miqrokey.alerts.admin-key-expiry-interval-ms` 默认 6h）；`BUDGET_THRESHOLD` 按（规则 × 月份）、`QUOTA_THRESHOLD` 按（规则 × 配额重置窗口，日/周/月随规则周期）去重（同窗口仅告警一次），其余按（规则 × 小时桶）去重；仅首个事件触发投递；投递失败指数退避重试最多 3 次。错误码：`ALERT_RULE_NOT_FOUND`（404）、`ALERT_TYPE_INVALID`（400）、`SCOPE_INVALID`（400）。
+
+**字段约束（PH23）**：创建时 `name` 必填且非空白、`≤200`（列宽 `varchar(200)`）；`threshold` 必填，整数位 `≤6`、小数位 `≤6`（列宽 `numeric(12,6)`）——**故意不设下界**，`threshold <= 0` 仍是文档允许的退化配置（见上）；`dedupeMinutes` 缺省 `60`，给定时须 `≥1`（0 与负数被拒；管理页本身已把 0 归一为默认值）。PATCH 为部分更新：缺省字段保持原值，`name` 出现即不得为空白、`≤200`，`threshold` 出现即须符合同一精度域，`dedupeMinutes` 出现即须 `≥1`。违反者一律 `400 VALIDATION_FAILED`（含 `fieldErrors`），不再以 `409 RESOURCE_CONFLICT` 的形式漏出。`type` 仍按规则类型目录在服务端校验。
 
 **事件驱动类型（F03，V27）**：`MODEL_APPROVAL_SUBMITTED` / `MODEL_APPROVAL_APPROVED` / `MODEL_APPROVAL_REJECTED` ——模型审批流的即时通知（提交→订阅方、通过/驳回→申请人侧），**不参与周期评估**：审批工作流在状态迁移瞬间直接触发（`AlertEventDispatcher` 复用同一投递/签名/退避重试机制）。语义：
 - 阈值/scope 不适用（创建阈值恒发送 `1`，服务端事件 value 固定为 1 = 一次发生；无需 scopeJson）。

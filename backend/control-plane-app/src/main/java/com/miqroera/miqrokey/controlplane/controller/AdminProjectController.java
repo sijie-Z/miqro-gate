@@ -5,6 +5,9 @@ import com.miqroera.miqrokey.controlplane.service.AdminOrgService;
 import com.miqroera.miqrokey.controlplane.service.AdminOrgService.ProjectMemberView;
 import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.model.ProjectStatus;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -36,13 +39,13 @@ public class AdminProjectController {
     }
 
     @PostMapping
-    public Project create(@RequestBody ProjectCreateRequest body) {
+    public Project create(@Valid @RequestBody ProjectCreateRequest body) {
         var admin = userContext.getUser();
         return orgService.createProject(admin.tenantId(), admin.id(), body.code(), body.name(), body.projectTag());
     }
 
     @PatchMapping("/{projectId}")
-    public Project update(@PathVariable UUID projectId, @RequestBody ProjectUpdateRequest body) {
+    public Project update(@PathVariable UUID projectId, @Valid @RequestBody ProjectUpdateRequest body) {
         var admin = userContext.getUser();
         return orgService.updateProject(admin.tenantId(), admin.id(), projectId, body.name(), body.projectTag(),
                 body.status());
@@ -87,10 +90,20 @@ public class AdminProjectController {
         orgService.removeProjectRepository(admin.tenantId(), admin.id(), projectId, mappingId);
     }
 
-    public record ProjectCreateRequest(String code, String name, String projectTag) {
+    /**
+     * Widths mirror the columns (projects.code varchar(64), name varchar(200), and
+     * the project_tag CHECK ^[A-Za-z0-9_-]{1,64}$ enforced in the service). Without
+     * these the first signal an over-long value produced was a 409
+     * RESOURCE_CONFLICT from the JDBC translation — a "duplicate or referenced"
+     * message for what is really "too long". A missing code was likewise reported
+     * as PROJECT_CODE_TAKEN, conflating "you sent nothing" with "someone else has
+     * it".
+     */
+    public record ProjectCreateRequest(@NotBlank @Size(max = 64) String code, @NotBlank @Size(max = 200) String name,
+            String projectTag) {
     }
 
-    public record ProjectUpdateRequest(String name, String projectTag, ProjectStatus status) {
+    public record ProjectUpdateRequest(@Size(max = 200) String name, String projectTag, ProjectStatus status) {
     }
 
     public record ProjectMemberRequest(UUID userId) {

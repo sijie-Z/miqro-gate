@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
+import com.miqroera.miqrokey.controlplane.service.UsageDeletionService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,13 +22,23 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import javax.sql.DataSource;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -65,6 +76,10 @@ class ExportDeletionApiIntegrationTest {
     ObjectMapper objectMapper;
     @Autowired
     NamedParameterJdbcTemplate jdbc;
+    @Autowired
+    DataSource dataSource;
+    @Autowired
+    UsageDeletionService usageDeletionService;
 
     private Cookie sessionCookie;
     private Cookie csrfCookie;
@@ -183,6 +198,69 @@ class ExportDeletionApiIntegrationTest {
                         .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
                         .content(objectMapper.writeValueAsString(Map.of("confirmToken", token))))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("DELETION_NOT_CONFIRMABLE"));
+    }
+
+    @Test
+    @DisplayName("the one-time token executes the deletion exactly once under concurrent confirmation")
+    void concurrentConfirmExecutesOnce() throws Exception {
+        fx.insertUsage("req-1", 1_000L, 500L);
+        fx.insertUsage("req-2", 200L, 100L);
+
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/usage-deletions").param("from", "2026-08-01T00:00:00Z")
+                .param("to", "2026-08-31T00:00:00Z").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk()).andReturn();
+        Map<?, ?> deletion = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class);
+        UUID deletionId = UUID.fromString(deletion.get("id").toString());
+        String token = deletion.get("confirmToken").toString();
+
+        // Hold the request row so both confirmations get past the status read before
+        // either of them writes. Without a status-guarded write both of them proceed,
+        // which is exactly the "one-time token" promise this test pins down.
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<String>> results = new ArrayList<>();
+        List<String> outcomes = new ArrayList<>();
+        try (Connection blocker = dataSource.getConnection()) {
+            blocker.setAutoCommit(false);
+            try (PreparedStatement lock = blocker
+                    .prepareStatement("SELECT id FROM usage_deletions WHERE id = ? FOR UPDATE")) {
+                lock.setObject(1, deletionId);
+                lock.executeQuery().close();
+            }
+            for (int i = 0; i < 2; i++) {
+                results.add(pool.submit(() -> {
+                    start.await();
+                    try {
+                        usageDeletionService.confirm(fx.tenantId, deletionId, token);
+                        return "OK";
+                    } catch (Exception e) {
+                        return e.getClass().getSimpleName();
+                    }
+                }));
+            }
+            start.countDown();
+            Thread.sleep(1_000); // both threads are inside confirm(), past their status read
+            blocker.commit();
+        }
+        for (Future<String> result : results) {
+            outcomes.add(result.get(60, TimeUnit.SECONDS));
+        }
+        pool.shutdownNow();
+
+        Long audits = jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_events WHERE action = 'USAGE_DELETE'",
+                new MapSqlParameterSource(), Long.class);
+        Long recorded = jdbc.queryForObject("SELECT deleted_count FROM usage_deletions WHERE id = :id",
+                new MapSqlParameterSource("id", deletionId), Long.class);
+        Long remaining = jdbc.queryForObject("SELECT COUNT(*) FROM usage_event WHERE tenant_id = :tenantId",
+                new MapSqlParameterSource("tenantId", fx.tenantId), Long.class);
+
+        org.assertj.core.api.Assertions.assertThat(outcomes.stream().filter("OK"::equals).count())
+                .as("the one-time token must execute the deletion exactly once, outcomes=" + outcomes).isEqualTo(1L);
+        org.assertj.core.api.Assertions.assertThat(audits)
+                .as("a second confirmation must not append a second permanent deletion record").isEqualTo(1L);
+        org.assertj.core.api.Assertions.assertThat(recorded)
+                .as("the recorded deleted_count must match what was actually removed").isEqualTo(2L);
+        org.assertj.core.api.Assertions.assertThat(remaining).isZero();
     }
 
     @Test

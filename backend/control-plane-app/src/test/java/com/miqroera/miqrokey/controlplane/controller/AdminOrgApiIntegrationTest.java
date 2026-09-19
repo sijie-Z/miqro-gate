@@ -286,6 +286,67 @@ class AdminOrgApiIntegrationTest {
                 .andExpect(status().isOk());
     }
 
+    /**
+     * #1019: shape limits are answered by validation, not by the database. Before
+     * the DTO constraints existed, an over-long team name reached Postgres and came
+     * back as 409 RESOURCE_CONFLICT ("duplicate or referenced") and a missing
+     * project code as PROJECT_CODE_TAKEN — both telling the caller the wrong thing.
+     * The boundary value still has to work, or the fix would just be a different
+     * wrong answer.
+     */
+    @Test
+    @DisplayName("over-long and missing fields answer 400 with the field named")
+    void inputLimitsAreValidationErrors() throws Exception {
+        String longName = "T".repeat(201);
+
+        mockMvc.perform(post("/api/v1/admin/teams").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("name", longName)))).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fieldErrors[?(@.field=='name')]").exists());
+
+        MvcResult team = mockMvc
+                .perform(post("/api/v1/admin/teams").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("name", "T".repeat(200)))))
+                .andExpect(status().isOk()).andReturn();
+        String teamId = objectMapper.readValue(team.getResponse().getContentAsString(), Map.class).get("id").toString();
+
+        mockMvc.perform(patch("/api/v1/admin/teams/" + teamId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("name", longName)))).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field=='name')]").exists());
+
+        // Absent code is a required-field problem, not a uniqueness conflict.
+        mockMvc.perform(post("/api/v1/admin/projects").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("name", "No Code")))).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fieldErrors[?(@.field=='code')]").exists());
+
+        // One past varchar(64) is rejected; exactly 64 is accepted.
+        mockMvc.perform(post("/api/v1/admin/projects").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("code", "C".repeat(65), "name", "Too Long"))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors[?(@.field=='code')]").exists());
+        mockMvc.perform(post("/api/v1/admin/projects").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("code", "C".repeat(64), "name", "Boundary"))))
+                .andExpect(status().isOk());
+
+        // display_name varchar(200) — the create path had no bound while its own update
+        // path already answered DISPLAY_NAME_INVALID.
+        mockMvc.perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper
+                        .writeValueAsString(Map.of("username", "dn_probe", "displayName", "D".repeat(5000)))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("DISPLAY_NAME_INVALID"));
+        mockMvc.perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("username", "dn_ok", "displayName", "D".repeat(200)))))
+                .andExpect(status().isOk());
+    }
+
     @Test
     @DisplayName("teams and projects manage members; duplicate project codes are rejected")
     void teamsAndProjects() throws Exception {
