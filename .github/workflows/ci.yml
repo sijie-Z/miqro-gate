@@ -70,16 +70,11 @@ jobs:
               - '**/*.sh'
               - '.github/workflows/ci.yml'
 
-  # Cheap gate — whitespace + secret scan — on every PR. It runs unconditionally
-  # on purpose: "Docs check" is a REQUIRED status check on develop, and a required
-  # check whose job skips never reports a success conclusion, which blocks the PR
-  # forever. The old condition (docs && !backend && !frontend && !compose) could
-  # never be true for a PR that changed docs *and* compose — 2026-09-19 hit exactly
-  # that on a docs+deploy PR, with every other required check green. Skipping is
-  # only safe for checks nobody requires.
+  # Cheap gate for docs-only PRs: no code job needs to run.
   docs:
     name: Docs check
     needs: [changes]
+    if: ${{ needs.changes.outputs.docs == 'true' && needs.changes.outputs.backend == 'false' && needs.changes.outputs.frontend == 'false' && needs.changes.outputs.compose == 'false' }}
     timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
