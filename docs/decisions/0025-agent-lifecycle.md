@@ -1,6 +1,6 @@
 # ADR-0025：Agent 生命周期补齐——删除 / 重新启用 / 改名
 
-- 状态：**Proposed（待所有者拍板；拍板前不实现，选项见 §3）**
+- 状态：**Accepted（2026-09-19 所有者拍板，记录见 §7）**——采纳**选项 D**（`enable` + 改名/描述 + 硬删除）；实现跟踪见 issue [#1012](https://github.com/sijie-Z/miqro-gate/issues/1012)。
 - 日期：2026-09-19
 - 关联：issue [#824](https://github.com/sijie-Z/miqro-gate/issues/824)（四问出处）；[#714](https://github.com/sijie-Z/miqro-gate/issues/714)（凭证—Agent 绑定的不可变约束，本提案的关键交互方）；[#795](https://github.com/sijie-Z/miqro-gate/issues/795)（真机验收时发现演示站留下僵尸 Agent）；[ADR-0018](0018-single-key-multi-project.md)（资源命名与唯一性的先例）；feature-backlog（无对应条目——本提案不新增能力面，只补齐既有资源的生命周期）
 - 触发事件：部署线在 #795 真机验收时需要一个临时 Agent，验证完只能把它永久留在演示站（停用态）——因为 API 面没有删除。同日核对该面时确认：**建错回不去、停用不可逆、被停用的 Agent 仍占着凭证名额**。
@@ -137,3 +137,34 @@ issue 已经写到点子上：需要**写明理由与替代路径**（例如「�
 - 本仓坐标：`V17__agents.sql`、`Agent.java`、`AdminAgentController.java`、`AdminAgentService.java`、`AdminCredentialService.java`、`AgentRepositoryImpl.java`、`V3__audit_chain_position.sql`、`frontend/src/api/index.ts`、`frontend/src/views/next/NextAdminAgentsView.vue`（均取自 develop，逐条 `git show` 读取）
 - issue：[#824](https://github.com/sijie-Z/miqro-gate/issues/824)（四问）、[#714](https://github.com/sijie-Z/miqro-gate/issues/714)（凭证锁）、[#795](https://github.com/sijie-Z/miqro-gate/issues/795)（僵尸 Agent 现场）
 - 行业形态（**未复核，仅作参照、不作论据**）：AWS Bedrock Agents 支持 create/update/delete 与版本别名；阿里云百炼的智能体应用同样支持删除。若拍板时需要，另附来源。
+
+---
+
+## 7. 所有者拍板记录（2026-09-19，状态由 Proposed 转为 Accepted）
+
+- 答复形式：所有者对评估线推荐的选项整体确认（「可以，做吧」）→ 采纳 **D**。
+- 本记录不改变 §1 的现状描述；实现跟踪见 issue [#1012](https://github.com/sijie-Z/miqro-gate/issues/1012)。
+
+| # | 决策 | 结论 |
+|---|---|---|
+| D1 | 四条路径 | **D**：`enable` + 改名/描述 + **硬删除**（二次确认 + `AGENT_DELETE` 审计带名称快照） |
+| D2 | Q1 可删除 | 可（硬删除）。数据层无任何引用，用量按绑定凭证聚合、不受影响 |
+| D3 | Q2 可重新启用 | 可，但为**有条件的逆操作**：凭证必须存在且 ACTIVE，否则 `409 CREDENTIAL_NOT_ACTIVE` |
+| D4 | Q3 改名/改描述 | 可。乐观锁（`version` 随行返回、表单回传）+ 重名 409；审计记 before→after |
+| D5 | Q4 若「有意不可删」 | N/A（未采纳该路径） |
+
+### 7.1 §6 未决项的处置
+
+| §6 项 | 处置 |
+|---|---|
+| 1 改绑凭证是否允许 | **不在本批**：与 #714 的不可变约束正面相关，作为单独议题（§6-1 原样保留） |
+| 2 `enable` 时凭证已停用 | 采纳 §2-Q2 的推荐：**拒绝**并提示先启用凭证 |
+| 3 删除的权限粒度 | 与 create/disable 同级（控制面 admin 面统一权限），不新增细粒度 |
+| 4 二次确认形态 | 普通确认弹窗 + 文案说明「不可恢复、用量与对账不受影响」；「输入名称确认」的更重门槛留待 UI 评审 |
+| 5 列表默认过滤 | **保持现状不过滤**（`list()` 全量返回 + 状态徽章），避免改变既有行为；删除落地后僵尸行问题本身消失 |
+| 6 审计快照展示 | `AGENT_DELETE` 的 detail 带名称快照（硬要求）；前端审计视图对「已删除资源」的呈现留待后续 |
+
+### 7.2 效力
+
+- 本文件状态为 **Accepted**；§3 的选项 D 与 §7.1 的处置即为生效决策，实现按 §4 的落地形态执行。
+- 未采纳的选项 A/B/C 保留在 §3 作为记录；若将来要偏离 D（软删除、放开改绑等），按新 ADR 或本文件修订处理。

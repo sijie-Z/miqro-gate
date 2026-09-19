@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -81,6 +82,16 @@ public class AuditServiceImpl implements AuditService {
     public AuditServiceImpl(AdminAuditEventRepository repository, Clock clock) {
         this.repository = repository;
         this.clock = clock;
+    }
+
+    @Override
+    public void acquireChainLock() {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("acquireChainLock() must run inside a transaction: outside one the "
+                    + "advisory lock is released as soon as the call returns, which would silently drop the "
+                    + "serialisation this call exists to establish");
+        }
+        repository.acquireChainLock();
     }
 
     @Override

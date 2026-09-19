@@ -121,7 +121,7 @@ public class AlertRuleService {
     private static final List<String> RULE_TYPES = List.of("USAGE_MISSING_RATE", "UPSTREAM_ERROR_RATE",
             "BALANCE_UNAVAILABLE", "USAGE_SURGE", "BUDGET_THRESHOLD", "QUOTA_THRESHOLD", "MODEL_APPROVAL_SUBMITTED",
             "MODEL_APPROVAL_APPROVED", "MODEL_APPROVAL_REJECTED", "ADMIN_API_KEY_EXPIRING", "CONSUMER_KEY_EXPIRING",
-            "USAGE_QUEUE_SATURATION");
+            "USAGE_QUEUE_SATURATION", "UPSTREAM_RATE_LIMITED", "KEY_REQUEST_RATE");
 
     private static void validateType(String type) {
         if (!RULE_TYPES.contains(type)) {
