@@ -214,9 +214,12 @@ class PostgresUsageEventWriterTest {
     @Test
     @DisplayName("a replayed COALESCED usage row (null upstream id) is a no-op, not a primary-key violation")
     void replayedCoalescedUsageIsNoop() {
-        // A COALESCED row carries no upstream request id (ProxyController#publishCoalescedUsage
-        // publishes providerRequestId = null), so the partial unique index does not apply and the
-        // id primary key is the only unique key it can hit. The bus re-enqueues the very same
+        // A COALESCED row carries no upstream request id
+        // (ProxyController#publishCoalescedUsage
+        // publishes providerRequestId = null), so the partial unique index does not
+        // apply and the
+        // id primary key is the only unique key it can hit. The bus re-enqueues the
+        // very same
         // event objects after a failed flush, so the retry replays this exact id.
         UsageEvent coalesced = coalescedEvent("gw-coalesced-" + UUID.randomUUID().toString().substring(0, 6));
 
@@ -381,7 +384,10 @@ class PostgresUsageEventWriterTest {
                 CLOCK.instant(), CLIENT_IP, null);
     }
 
-    /** COALESCED usage: merged into an in-flight identical request, so no upstream request id. */
+    /**
+     * COALESCED usage: merged into an in-flight identical request, so no upstream
+     * request id.
+     */
     private static UsageEvent coalescedEvent(String gatewayRequestId) {
         return new UsageEvent(UUID.randomUUID(), TENANT_ID, null, UUID.randomUUID(), UUID.randomUUID(),
                 UUID.randomUUID(), UUID.randomUUID(), "model-x", CacheLevel.COALESCED,
