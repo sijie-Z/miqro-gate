@@ -88,12 +88,12 @@ public class UsageDeletionService {
      * writes a permanent audit event (the audit chain itself is never deleted).
      *
      * <p>
-     * The request row is locked for the whole confirmation, so the "one-time
-     * token" is a single transition even when two confirmations arrive together:
-     * the second one waits on the lock, re-reads the row the first one committed
-     * as {@code EXECUTED} and is rejected as not confirmable. The status
-     * predicate on the update is the same invariant enforced at the write site,
-     * so no path can turn an executed request back into a confirmable one.
+     * The request row is locked for the whole confirmation, so the "one-time token"
+     * is a single transition even when two confirmations arrive together: the
+     * second one waits on the lock, re-reads the row the first one committed as
+     * {@code EXECUTED} and is rejected as not confirmable. The status predicate on
+     * the update is the same invariant enforced at the write site, so no path can
+     * turn an executed request back into a confirmable one.
      * </p>
      */
     @Transactional
