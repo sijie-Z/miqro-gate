@@ -3615,7 +3615,7 @@ Commit `a096dd7`'s V3 migration calls `setval('admin_audit_events_chain_seq', CO
 ## 2026-09-17 下午 — 模型调用链路时间线 #705（后端）+ #707（前端）+ 独立审查修复
 
 **目标与交付**
-- #705 后端：新增 `request_usage_records` 的**首个读取路径**（此前该表只有写入方，控制面无查询入口——这正是模型侧一直没有"按请求排查"能力的根因）。端点 `GET /api/v1/admin/usage/timeline?gatewayRequestId=...` 返回单次调用的阶段时间线（受理 → 上游首字节 → 完成）+ TTFB/耗时/终态/重试/部分响应/Token 四分类/归属链；**零新增采集**。V60 为 `(tenant_id, gateway_request_id)` 建索引——EXPLAIN 实测此前走 Seq Scan（表按月分区且既有索引均不以该列起头）。
+- #705 后端：新增 `request_usage_records` 的**首个读取路径**（此前该表只有写入方，控制面无查询入口——这正是模型侧一直没有"按请求排查"能力的根因）。端点 `GET /api/v1/admin/usage/timeline?gatewayRequestId=...` 返回单次调用的阶段时间线（受理 → 上游首字节 → 完成）+ TTFB/耗时/终态/重试/部分响应/Token 四分类/归属链；**零新增采集**。V61 为 `(tenant_id, gateway_request_id)` 建索引——EXPLAIN 实测此前走 Seq Scan（表设计为按月分区、当前仅建了 DEFAULT 分区，且既有索引均不以该列起头）。
 - #707 前端：用量明细「请求 ID」列改可点击 + 三层信息抽屉（终态徽章 + "卡在哪一段" / TTFB·重试·HTTP / 折叠的归属链与 Token）。未记录的阶段如实标「缺失 · 未记录」而不补零；404 呈现为说明块而非错误横幅。OpenAPI 基线重导 + `gen:types` 重生成。
 
 **独立审查（对抗性、实测驱动）发现并修复三处缺陷**
@@ -4510,7 +4510,6 @@ job 用路径过滤（`'**/*.sh'`），纯前端/纯后端 PR 不触发。
 - **P1**：临时文件落目标目录（原子 rename）/ chmod 失败即报错 / verify 判 `200 且 models-list 体` + `--connect-timeout 5 --max-time 20` / 失败默认只打 code（`--verbose` 才打体）/ 托管块残缺或重复**拒绝**而非猜 / symlink 目标拒绝 / `${2:?}` 缺值消息 / 测试 `stat` 双写法。
 - **测试 45 → 85 条**，新增恶意输入组与转义函数直测（`MIQRO_ONBOARD_SOURCE_ONLY` seam）；**三条旗舰断言对修复前脚本先证红**（引号 key 被放行、codex 输出含 key、代理错误页 200 判成功）。
 - 暂缓：前端/脚本双实现的 golden-fixture 契约（评审同意不做）。
-
 ## 2026-09-18 冒烟在自签证书的部署上什么都证明不了（#826）
 
 做完整套端到端模拟时的**最后一个失败项**：真实生产栈起来了、`deploy.sh` 的镜像身份 / 环境变量回声 / 证书进容器三条断言全过，**只有冒烟报"够不到"**——而目标其实好好地在答。
@@ -5452,3 +5451,52 @@ interface KeyRow { key; label; served; hits; hitRatePct; paidCost; savedCost }  
 ### 教训
 
 **手改会赢一时，输在"下一次整树同步"**——而它真正的代价不是丢值，是**丢可复现性**：值一旦只活在运行树里，这台机器跑的定义就不再对应任何提交，事后只能考古。所以规则不是"别手改"，而是"**值要有家**"：`.env`（compose 用 `${VAR:-默认}` 透传）；**没有家就先给仓库补一行**——#777 的调和开关正是没有家的那一项，于是它只能以手改的形式存在。与之配套的是把不可见变成可见：漂移从此每次部署都会被说一次，并留在流水里。
+## 会话交接点 2026-09-19（PH1 持久化与迁移审计：`request_usage_records` 上的重复索引）
+
+- **缺陷（#864 / PR #865，分支 `fix/redundant-request-usage-index`）**：V61（#705 / PR #720）与
+  V65（#758 / PR #761）在 `request_usage_records` 上各建了一个**列完全相同**的索引
+  `idx_request_usage_records_gateway_request` 与 `idx_request_usage_records_tenant_gateway_request`，
+  均为 `(tenant_id, gateway_request_id)`、普通非唯一、无谓词。两者互不互补，全仓无 `DROP INDEX`，
+  两个索引名在 Java/SQL/文档/配置中都没有其他引用。这是 V60/V63 迁移头记录过的同一类
+  「两支并行合并后撞车」，只是这次撞的不是版本号而是索引定义。
+- **修复**：新增追加式 `V68__drop_redundant_request_usage_gateway_index.sql`，删除后建的
+  `..._tenant_gateway_request`，保留 V61 的（更早、注释含完整论证）。用 `IF EXISTS` 兼容只落过其一
+  或已手工清理的库。**未改动已进入共享环境的 V61/V65**（本仓规则：只能追加新迁移）。
+- **影响量级（经对抗性评审修正，务必按修正后的口径引用）**：该表实有 **9 个**索引
+  （`V8__request_usage_records.sql` L67 主键、L69 唯一约束、L75/77/79/81/83 五个 `CREATE INDEX`，
+  加 V61、V65 各一个），删掉 1 个减少约 **1/9 ≈ 11%** 的索引维护量——**不是**初稿写的「写放大接近 2 倍」。
+  且**当前只有 DEFAULT 分区**（`V8:73`），无月度分区，「随分区数线性放大」是**未来**成本而非现状。
+- **先证红**：移除 V68 后 `IndexHygieneTest` 失败于
+  `Expecting empty but was: ["request_usage_records :: {idx_request_usage_records_gateway_request,
+  idx_request_usage_records_tenant_gateway_request}"]`；加回 V68 转绿。受影响模块全量回归
+  domain 144 / persistence-postgres 124（5 个既有 skip）全绿，`SchemaMigrationTest`、
+  `V3UpgradeMigrationTest`(12) 亦全绿，迁移顺序与历史表未被破坏。
+- **两个非产品缺陷的坑（都拦住了，记在这里免得重踩）**：
+  1. **假绿**：只把 V68 从源码移走、没清 `target/classes`，Maven 资源插件**不删除已移除的资源**，
+     Flyway 仍从陈旧副本应用了它，于是「先证红」跑出 `exit=0`。必须**同时**清源码与 `target/classes`；
+     本次改用 `find . -name "V68*"` 断言运行期零副本后再跑，并把 V68 的 md5 前后校验纳入脚本。
+  2. **对抗性评审证伪了我的两处断言**：影响量级（见上）与测试分组。原 `GROUP BY` 少了
+     `indnkeyatts`/`indclass`/`indcollation`/`indoption`，会把 `text_pattern_ops` 伴随索引、
+     `DESC`/`NULLS FIRST` 变体、`INCLUDE` 载荷列判成重复——合成表实测原查询误报 5 组。
+     已收紧分组并逐项写进 Javadoc；收紧后仍能捕获真实重复（红/绿均已复跑）。
+  3. **第二轮评审又找出 `indexprs` 漏项**：第一轮的合成验证只造了「操作符类/排序/空值序」三类
+     变体，**没造表达式索引**，因此漏了 `indkey` 对表达式列一律渲染为 `0` 这个坑——
+     `lower(username)` 与 `upper(username)` 在该查询眼里同形。`users` 上已有
+     `uq_users_tenant_username ON users (tenant_id, lower(username))`（`V1__core_tables.sql:61`），
+     是活场景而非假想。已把 `pg_get_expr(i.indexprs, i.indrelid)` 并入 `GROUP BY`，
+     并把 Javadoc 从「covers every catalog attribute」这种过度声明改为逐项列举 + 显式「已知边界」
+     （`indisunique` 在分组键里故「普通索引重复唯一索引列」不报；`reloptions` 不比较；
+     仅 `public` schema 且排除分区副本）。**教训：合成验证只能证伪「我想到的那些」变体。**
+  4. **第二轮还发现 V68 自己的头注释有一句假话**：称「retention/deletion paths have to drop and
+     recreate both」，但全仓无 `DELETE FROM request_usage_records`/`TRUNCATE`/`DETACH PARTITION`，
+     且同一 PR 的 progress.md 就写着「DROP PARTITION 留存当前无法实施」——自己和自己打架。
+     已删改；并把「waste multiplies with partition count」改成准确表述：**放大的是索引对象数与
+     rebuild/DDL 工作量，单次写入的额外开销恒为 1**（一行只落一个分区）。
+     另：issue #864 的**标题**当时仍留着旧数字「写放大一倍」，与已更正的正文矛盾，已一并改名。
+- **本文件顺带修正**：第 3585 行原写「V60 为 `(tenant_id, gateway_request_id)` 建索引」，
+  实为 **V61**（V60 是 `usage_queue_saturation_alert`，与此无关），已就地更正。
+- **未提交但已确认的真实问题**（详见审计报告 `_orchestrate/reports/PH1_report.md` 第三节，供另行排期）：
+  `usage_adjustments.usage_event_id` 的 `ON DELETE CASCADE` 无前导列索引（低影响）；
+  `docs/database-schema.md` 与迁移的大面积漂移（7 张不存在的表、多处枚举/约束写错，属文档系统性重写）。
+- 工作区卫生：本次只提交 3 个文件（V68 迁移 + `IndexHygieneTest` + 本文件）；一次性诊断用
+  `ZzHygieneProofTest`、`ZzDiagnosticTest` 均已删除，未进入任何提交。
