@@ -15,20 +15,20 @@ import reactor.core.publisher.Mono;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The counter is wired into the real {@code WebHttpHandlerBuilder} topology: the
- * {@code ExceptionHandlingWebHandler} sits <em>outside</em> the filter chain, so
- * a request whose response is produced by an exception handler completes the
- * inner {@code Mono} with an error signal — {@code doOnSuccess} never runs.
+ * The counter is wired into the real {@code WebHttpHandlerBuilder} topology:
+ * the {@code ExceptionHandlingWebHandler} sits <em>outside</em> the filter
+ * chain, so a request whose response is produced by an exception handler
+ * completes the inner {@code Mono} with an error signal — {@code doOnSuccess}
+ * never runs.
  */
 class GatewayMetricsFilterErrorPathTest {
 
     private static HttpHandler handlerWith(GatewayMetricsFilter filter) {
         WebHandler terminal = exchange -> Mono.error(new IllegalStateException("handler exploded"));
-        return WebHttpHandlerBuilder.webHandler(terminal).filter(filter)
-                .exceptionHandler((exchange, ex) -> {
-                    exchange.getResponse().setStatusCode(HttpStatus.INTERNAL_SERVER_ERROR);
-                    return exchange.getResponse().setComplete();
-                }).build();
+        return WebHttpHandlerBuilder.webHandler(terminal).filter(filter).exceptionHandler((exchange, ex) -> {
+            exchange.getResponse().setStatusCode(HttpStatus.INTERNAL_SERVER_ERROR);
+            return exchange.getResponse().setComplete();
+        }).build();
     }
 
     @Test
@@ -38,9 +38,7 @@ class GatewayMetricsFilterErrorPathTest {
         GatewayMetricsFilter filter = new GatewayMetricsFilter(registry);
         MockServerHttpResponse response = new MockServerHttpResponse();
 
-        handlerWith(filter)
-                .handle(MockServerHttpRequest.get("/v1/chat/completions").build(), response)
-                .block();
+        handlerWith(filter).handle(MockServerHttpRequest.get("/v1/chat/completions").build(), response).block();
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         Counter counter = registry.find("miqrokey_gateway_requests_total").tag("status_class", "server_error")
