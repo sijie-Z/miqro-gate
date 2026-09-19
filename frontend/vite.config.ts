@@ -37,12 +37,6 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // The in-console handbook imports docs/user-guide/*.md as raw text
-    // (repo root, one level above the frontend root) — allow the dev server
-    // to serve from there.
-    fs: {
-      allow: ['..'],
-    },
     // Warm the entry transforms so the first page load never races Vite's
     // cold-start module graph (Playwright sees "预加载桥接不可用" otherwise).
     warmup: {
