@@ -8,21 +8,27 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import org.mockito.ArgumentCaptor;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -183,14 +189,56 @@ class AdminRetentionLogServiceTest {
         AdminRetentionLogService service = new AdminRetentionLogService(jdbcReturning(List.of(rawRow(plain, null))),
                 provider(new FakeCrypto()));
 
-        AdminRetentionLogService.ExportResult result = service.exportCsv(TENANT, null, null, null, null, null);
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        AdminRetentionLogService.ExportSummary result;
+        try {
+            result = service.streamCsv(TENANT, null, null, null, null, null, out);
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
 
         assertThat(result.rows()).isEqualTo(1);
         assertThat(result.truncated()).isFalse();
-        String[] lines = result.csv().split("\n");
+        String[] lines = out.toString(java.nio.charset.StandardCharsets.UTF_8).split("\n");
         assertThat(lines[0]).startsWith("\uFEFFevent_id,occurred_at,user_id,user_name")
                 .as("UTF-8 BOM precedes the header for spreadsheet consumers");
         assertThat(lines[0]).endsWith("data_md5,content");
         assertThat(lines[1]).contains("\"报告，含\"\"引号\"\"\"");
+    }
+
+    @Test
+    @DisplayName("#1023: the export reads bounded pages instead of materialising the table")
+    void exportReadsInBoundedChunks() {
+        // What this pins: the export used to ask for EXPORT_LIMIT + 1 rows in a single
+        // query and build the whole document in memory before writing a byte. Memory is
+        // bounded by the page size now — the stub answers one full page and then an empty
+        // page, and the recorded LIMIT proves no read ever asks for more than a chunk.
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        List<AdminRetentionLogService.RawRow> fullPage = new ArrayList<>();
+        for (int i = 0; i < AdminRetentionLogService.EXPORT_CHUNK; i++) {
+            fullPage.add(rawRow("row".getBytes(StandardCharsets.UTF_8), null));
+        }
+        when(jdbc.query(anyString(), any(SqlParameterSource.class),
+                org.mockito.ArgumentMatchers.<RowMapper<AdminRetentionLogService.RawRow>>any()))
+                .thenReturn(fullPage, List.of());
+        AdminRetentionLogService service = new AdminRetentionLogService(jdbc, provider(new FakeCrypto()));
+
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        AdminRetentionLogService.ExportSummary summary;
+        try {
+            summary = service.streamCsv(TENANT, null, null, null, null, null, out);
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+
+        assertThat(summary.rows()).isEqualTo(AdminRetentionLogService.EXPORT_CHUNK);
+        ArgumentCaptor<SqlParameterSource> params = ArgumentCaptor.forClass(SqlParameterSource.class);
+        verify(jdbc, times(2)).query(anyString(), params.capture(),
+                org.mockito.ArgumentMatchers.<RowMapper<AdminRetentionLogService.RawRow>>any());
+        for (SqlParameterSource captured : params.getAllValues()) {
+            assertThat(((MapSqlParameterSource) captured).getValue("limit"))
+                    .as("every read is one page, never the whole export")
+                    .isEqualTo(AdminRetentionLogService.EXPORT_CHUNK);
+        }
     }
 }

@@ -35,6 +35,8 @@ public class AdminRetentionLogService {
     /** Same cap as the audit export (api-contract §8). */
     public static final int EXPORT_LIMIT = 50_000;
     public static final int MAX_PAGE_SIZE = 100;
+    /** Rows read per query while streaming the export (#1023): the only thing bounding memory. */
+    public static final int EXPORT_CHUNK = 500;
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectProvider<KeyEncryptionProvider> cryptoProvider;
@@ -69,43 +71,120 @@ public class AdminRetentionLogService {
         return views;
     }
 
-    /** CSV export (same filters); capped at {@link #EXPORT_LIMIT} rows. */
-    public ExportResult exportCsv(UUID tenantId, UUID userId, String direction, String protocol, Instant from,
+    /**
+     * How many rows the export would cover (same filters). Answered by {@code count(*)}
+     * so the caller can set the truncation header before any row is written — the
+     * response is streamed, so headers are committed with the first byte.
+     */
+    public long countForExport(UUID tenantId, UUID userId, String direction, String protocol, Instant from,
             Instant to) {
         FilterSql filter = filter(tenantId, userId, direction, protocol, from, to);
-        filter.params.addValue("limit", EXPORT_LIMIT + 1);
-        List<RawRow> rows = jdbc.query("""
+        Long count = jdbc.queryForObject(
+                "SELECT count(*) FROM retention_log r" + filter.where, filter.params, Long.class);
+        return count == null ? 0L : count;
+    }
+
+    /**
+     * CSV export (same filters), written row by row into {@code out} and capped at
+     * {@link #EXPORT_LIMIT} rows.
+     *
+     * <p>Streaming is not an optimisation here, it is the fix (#1023): the previous
+     * shape read up to EXPORT_LIMIT rows into a {@code List}, decrypted every one of
+     * them and concatenated the whole document into a {@code StringBuilder} — at
+     * 20 KB of ciphertext per row (this deployment's average) that is hundreds of
+     * megabytes of live objects before the first byte reaches the client, and the
+     * control plane died of heap exhaustion instead of exporting. The cap is a row
+     * count, which says nothing about memory; what bounds memory here is reading a
+     * page at a time and writing each row out before asking for the next.
+     */
+    public ExportSummary streamCsv(UUID tenantId, UUID userId, String direction, String protocol, Instant from,
+            Instant to, java.io.OutputStream out) throws java.io.IOException {
+        java.io.Writer w = new java.io.BufferedWriter(
+                new java.io.OutputStreamWriter(out, StandardCharsets.UTF_8));
+        // UTF-8 BOM so spreadsheet consumers detect the encoding: api-contract §5.0
+        // requires the audit/retention downloads to share this dialect.
+        w.write('\uFEFF');
+        w.write("event_id,occurred_at,user_id,user_name,direction,wire_protocol,gateway_request_id,"
+                + "virtual_key_id,text_char_count,truncated,data_md5,content\n");
+
+        int written = 0;
+        Instant cursorAt = null;
+        UUID cursorId = null;
+        while (written < EXPORT_LIMIT) {
+            int pageSize = Math.min(EXPORT_CHUNK, EXPORT_LIMIT - written);
+            List<RawRow> rows = exportChunk(tenantId, userId, direction, protocol, from, to, cursorAt, cursorId,
+                    pageSize);
+            if (rows.isEmpty()) {
+                break;
+            }
+            for (RawRow row : rows) {
+                writeCsvRow(w, toView(tenantId, row));
+            }
+            written += rows.size();
+            RawRow last = rows.get(rows.size() - 1);
+            cursorAt = last.occurredAt();
+            cursorId = last.eventId();
+            if (rows.size() < pageSize) {
+                break;
+            }
+        }
+        w.flush();
+        return new ExportSummary(written, written == EXPORT_LIMIT);
+    }
+
+    /** CSV export payload: how many rows were written, and whether the cap was hit. */
+    public record ExportSummary(int rows, boolean truncated) {
+    }
+
+    /**
+     * One page of the export, ordered the way the document is: {@code occurred_at DESC,
+     * event_id ASC}. Keyset pagination (rather than OFFSET) so the work is linear and a
+     * page never depends on rows already written.
+     */
+    private List<RawRow> exportChunk(UUID tenantId, UUID userId, String direction, String protocol, Instant from,
+            Instant to, Instant cursorAt, UUID cursorId, int pageSize) {
+        FilterSql filter = filter(tenantId, userId, direction, protocol, from, to);
+        String cursor = "";
+        if (cursorAt != null) {
+            cursor = " AND (r.occurred_at < :cursorAt OR (r.occurred_at = :cursorAt AND r.event_id > :cursorId))";
+            filter.params.addValue("cursorAt", Timestamp.from(cursorAt)).addValue("cursorId", cursorId);
+        }
+        filter.params.addValue("limit", pageSize);
+        return jdbc.query("""
                 SELECT r.event_id, r.user_id, u.username, u.display_name, r.virtual_key_id, r.wire_protocol,
                        r.direction, r.gateway_request_id, r.occurred_at, r.key_version, r.ciphertext, r.nonce,
                        r.text_char_count, r.truncated
                 FROM retention_log r
                 LEFT JOIN users u ON u.tenant_id = r.tenant_id AND u.id = r.user_id
-                """ + filter.where + " ORDER BY r.occurred_at DESC, r.event_id LIMIT :limit", filter.params,
+                """ + filter.where + cursor + " ORDER BY r.occurred_at DESC, r.event_id LIMIT :limit", filter.params,
                 ROW_MAPPER);
-        boolean truncated = rows.size() > EXPORT_LIMIT;
-        if (truncated) {
-            rows = rows.subList(0, EXPORT_LIMIT);
-        }
-        StringBuilder csv = new StringBuilder(
-                "event_id,occurred_at,user_id,user_name,direction,wire_protocol,gateway_request_id,"
-                        + "virtual_key_id,text_char_count,truncated,data_md5,content\n");
-        // UTF-8 BOM so spreadsheet consumers detect the encoding: api-contract §5.0
-        // requires the audit/retention downloads to share this dialect.
-        csv.insert(0, '\uFEFF');
-        for (RawRow row : rows) {
-            AdminRetentionLogView view = toView(tenantId, row);
-            csv.append(view.eventId()).append(',').append(view.occurredAt()).append(',').append(view.userId())
-                    .append(',').append(csvCell(view.userName())).append(',').append(view.direction()).append(',')
-                    .append(view.wireProtocol()).append(',').append(view.gatewayRequestId()).append(',')
-                    .append(view.virtualKeyId()).append(',').append(view.textCharCount()).append(',')
-                    .append(view.truncated()).append(',').append(view.dataMd5() == null ? "" : view.dataMd5())
-                    .append(',').append(csvCell(view.text())).append('\n');
-        }
-        return new ExportResult(csv.toString(), rows.size(), truncated);
     }
 
-    /** CSV export payload: rendered rows, the row count, and the cap flag. */
-    public record ExportResult(String csv, int rows, boolean truncated) {
+    private static void writeCsvRow(java.io.Writer w, AdminRetentionLogView view) throws java.io.IOException {
+        w.write(String.valueOf(view.eventId()));
+        w.write(',');
+        w.write(String.valueOf(view.occurredAt()));
+        w.write(',');
+        w.write(String.valueOf(view.userId()));
+        w.write(',');
+        w.write(csvCell(view.userName()));
+        w.write(',');
+        w.write(String.valueOf(view.direction()));
+        w.write(',');
+        w.write(String.valueOf(view.wireProtocol()));
+        w.write(',');
+        w.write(String.valueOf(view.gatewayRequestId()));
+        w.write(',');
+        w.write(String.valueOf(view.virtualKeyId()));
+        w.write(',');
+        w.write(String.valueOf(view.textCharCount()));
+        w.write(',');
+        w.write(String.valueOf(view.truncated()));
+        w.write(',');
+        w.write(view.dataMd5() == null ? "" : view.dataMd5());
+        w.write(',');
+        w.write(csvCell(view.text()));
+        w.write('\n');
     }
 
     // ------------------------------------------------------------------
