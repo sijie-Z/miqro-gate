@@ -12,7 +12,7 @@
 |---|---|---|
 | 存储 | L1 用 Redis；L2 用向量库 VDB | **L1 用 PostgreSQL `cache_entry` 表**（V5 已建）；L2 语义缓存**不启用**（依赖向量库，违反 ADR-0005 约束，接口预留） |
 | 缓存键 | 单轮问答「最新用户消息」/多轮「历史对话模式」 | 归一化请求 SHA-256（`CacheKeyFactory` 既有实现）；腾讯的键策略差异记录为后续优化项 |
-| TTL | 60–604800 秒，默认 3600 | `miqrokey.cache.l1-ttl`，默认 300s |
+| TTL | 60–604800 秒，默认 3600 | `miqrokey.cache.l1.ttl`，默认 300s（2026-09-19 订正：原文写的 `l1-ttl` 与 `application.yml` 的 `cache.l1.ttl` 不符） |
 | 命中标识 | `X-Cache: HIT/MISS`（高级配置，默认关） | 复用响应头 `X-MiQroKey-Cache`（取值 `L1`/`L2`/`miss`；#736 更正头名，既有实现） |
 | 仅缓存成功 | 仅缓存 200 | 仅缓存 2xx（既有 `CacheEligibility`） |
 | 开关 | 每模型 API 配置 | **双重 opt-in**（比腾讯更严）：Key `cachePolicy=ENABLED` **且** 客户端显式头 `X-MiQroKey-Cacheable: 1`；默认全关 |
@@ -36,3 +36,9 @@
 - `miqrokey.cache.enabled=true` 时网关装配真实缓存 Provider；默认仍关闭（生产默认零行为变化）。
 - KeysView 创建/展示 cachePolicy；成本报表页展示缓存节省。
 - 语义缓存（L2）维持禁用；未来若启用需新 ADR（向量库依赖）。
+
+## 订正（2026-09-19，命名与配置键；不修订本 ADR 的结论）
+
+- **层级命名按代码口径**：代码里 **L1 = Caffeine 进程内缓存**、**L2 = PostgreSQL `cache_entry` 精确缓存**（`LookupLevel.L2_HIT`）；本 ADR 上表的「L1 用 PostgreSQL `cache_entry` 表」是历史措辞。响应头 `X-MiQroKey-Cache` 的 `L2` 取值即指 PostgreSQL 精确缓存命中。
+- **语义缓存不要用「L2」指代**：本 ADR 说的「L2 语义缓存」与代码的 L2（精确缓存）撞名；后续文档统一写「**语义缓存 / 向量召回**」（登记与处置见 ADR-0022 §10-8）。
+- 结论不变：L1/L2 精确缓存已启用且默认关；语义缓存不启用。

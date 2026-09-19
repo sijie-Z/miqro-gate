@@ -53,6 +53,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SignalType;
 import reactor.core.scheduler.Scheduler;
+import reactor.netty.http.client.PrematureCloseException;
 import reactor.util.retry.Retry;
 
 import java.io.ByteArrayOutputStream;
@@ -321,10 +322,12 @@ public class ProxyController {
                             })
                     : forward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming);
 
-            return pipeline.onErrorResume(AuthFailureException.class, e -> writeError(exchange, e)).onErrorResume(
-                    WebClientRequestException.class,
-                    e -> writeError(exchange, new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
-                            "Upstream provider is unreachable")));
+            return pipeline.onErrorResume(AuthFailureException.class, e -> writeError(exchange, e))
+                    .onErrorResume(WebClientRequestException.class,
+                            e -> writeError(exchange,
+                                    new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
+                                            "Upstream provider is unreachable")))
+                    .onErrorResume(PrematureCloseException.class, e -> upstreamClosedBeforeFirstByte(exchange, e));
         }).onErrorResume(DataBufferLimitException.class,
                 e -> writeError(exchange, new AuthFailureException(HttpStatus.PAYLOAD_TOO_LARGE, "payload_too_large",
                         "Request body exceeds the gateway buffer limit")));
@@ -864,6 +867,35 @@ public class ProxyController {
     // -------------------------------------------------------------------
     // Error envelopes (protocol-compatible)
     // -------------------------------------------------------------------
+
+    /**
+     * Maps an upstream that closed the connection before delivering a complete
+     * response onto the same {@code upstream_unavailable} envelope as an
+     * unreachable provider.
+     *
+     * <p>
+     * reactor-netty reports a close after the upstream status line — but before any
+     * body byte — as {@link PrematureCloseException}, which extends
+     * {@link java.io.IOException} and is therefore neither a
+     * {@link WebClientRequestException} (the mapping above) nor a timeout: without
+     * this clause it escapes the controller and the container renders its own 500
+     * error document, which is not the protocol envelope clients parse. Nothing has
+     * been relayed downstream at that point, so the envelope can still be written.
+     * </p>
+     *
+     * <p>
+     * Once a body byte has been relayed the response is committed and no error
+     * document can follow it — the truncated framing is then the client's only
+     * signal, so the failure is propagated unchanged.
+     * </p>
+     */
+    private Mono<Void> upstreamClosedBeforeFirstByte(ServerWebExchange exchange, PrematureCloseException error) {
+        if (exchange.getResponse().isCommitted()) {
+            return Mono.error(error);
+        }
+        return writeError(exchange, new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
+                "Upstream provider closed the connection before sending a response body"));
+    }
 
     private Mono<Void> writeError(ServerWebExchange exchange, AuthFailureException e) {
         ServerHttpResponse response = exchange.getResponse();

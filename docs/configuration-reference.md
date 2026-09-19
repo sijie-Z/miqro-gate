@@ -290,7 +290,7 @@ F15 MCP 访问日志队列（网关数据面）：`miqrokey.gateway.mcp-log.capa
 - 客户端显式声明 `X-MiQroKey-Cacheable: 1`；
 - 请求满足缓存资格（无工具字段、非空 body，由 `CacheEligibility` 判定；工具调用永不缓存）。
 
-缓存响应按字节重放（SSE 支持）；命中计数与节省成本在成本报表页展示（`savedByGatewayCache`）。缓存内容不解读、不进日志与审计。语义缓存（L2 向量）不启用。
+缓存响应按字节重放（SSE 支持）；命中计数与节省成本在成本报表页展示（`savedByGatewayCache`）。缓存内容不解读、不进日志与审计。语义缓存（向量召回；本文旧称「L2 向量」，与代码的 L2=精确缓存撞名，见 ADR-0022 §10-8）不启用。
 
 Gateway 必须透明保留供应商自己的 Prompt Cache Header/字段，并单独统计 cache token；这与本系统响应缓存无关。
 
