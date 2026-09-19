@@ -1,0 +1,47 @@
+-- ============================================================================
+-- V68: drop the redundant duplicate of the gateway-request lookup index.
+--
+-- V61 (#705) created
+--     idx_request_usage_records_gateway_request
+--         ON request_usage_records (tenant_id, gateway_request_id)
+-- so that the model-call timeline can resolve one call by
+-- (tenant_id, gateway_request_id) with an index probe instead of a per-partition
+-- sequential scan.
+--
+-- V65 (#758) then created the byte-for-byte same index under a second name:
+--     idx_request_usage_records_tenant_gateway_request
+--         ON request_usage_records (tenant_id, gateway_request_id)
+--
+-- Same table, same key columns in the same order, both plain (non-unique), both
+-- without a predicate — so neither can answer anything the other cannot.
+-- Nothing in the codebase references either index by name, and no migration
+-- drops one, so a fresh database ends up with both. Verified against a clean
+-- PostgreSQL 17.6 with every migration applied: pg_index reports the pair as
+-- identical (same indrelid, indkey, indisunique, indpred).
+--
+-- Why it is worth a migration rather than leaving it:
+--   * request_usage_records is the write-hot path — one IN_FLIGHT row per
+--     forwarded request plus one finalizing UPDATE. The finalizing statement is
+--     a guarded upsert on (started_at, gateway_request_id) whose WHERE touches
+--     request_status, which idx_request_usage_records_status covers, so it
+--     cannot be HOT-pruned and does maintain every index on the table. Both
+--     writes therefore pay for two identical b-trees instead of one.
+--   * The table is RANGE-partitioned on started_at, so an index created on the
+--     parent is propagated to every partition and the duplicate exists as one
+--     redundant object per partition. Only request_usage_records_default exists
+--     today (V8:73), so this is currently one object; the object count — and the
+--     rebuild/DDL work that goes with it — grows with each partition added. The
+--     per-write cost does not: a row lands in exactly one partition, so the
+--     extra index entry is one entry per write regardless of partition count.
+--   * Both copies accumulate bloat and autovacuum work independently, and any
+--     REINDEX or index rebuild has to be done twice.
+--
+-- The survivor is V61's index. It is the earlier one, its comment carries the
+-- full rationale, and it is the name referenced from the #705 discussion.
+--
+-- Idempotent on purpose: a database that was provisioned from a tree where only
+-- one of the two migrations ever landed (or where an operator already removed
+-- the duplicate by hand) must not fail here.
+-- ============================================================================
+
+DROP INDEX IF EXISTS idx_request_usage_records_tenant_gateway_request;

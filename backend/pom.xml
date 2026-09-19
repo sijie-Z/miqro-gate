@@ -122,6 +122,21 @@
                 <version>3.48.3</version>
             </dependency>
 
+            <!--
+                Patch pin (PH25, 2026-09-19): the Spring Boot 3.4.5 BOM
+                manages the driver at 42.7.5, which carries three HIGH
+                advisories — channel-binding fallback CVE-2025-49146,
+                silent channel-binding downgrade CVE-2026-54291 (both fixed
+                within 42.7.x) and the SCRAM PBKDF2-iteration client DoS
+                CVE-2026-42198. Stay on the 42.7.x patch line: no API change.
+                Drop this pin once the Boot BOM manages >= 42.7.12.
+            -->
+            <dependency>
+                <groupId>org.postgresql</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>42.7.12</version>
+            </dependency>
+
             <!-- External test dependencies not managed by Spring Boot BOM -->
             <dependency>
                 <groupId>com.tngtech.archunit</groupId>
@@ -169,6 +184,16 @@
                     <version>${maven-surefire-plugin.version}</version>
                     <configuration>
                         <useModulePath>false</useModulePath>
+                        <!-- The integration suite legitimately needs ~70 Spring contexts
+                             to wind down at JVM exit (each with its own netty graceful
+                             shutdown + Hikari close). Measured on CI: 68-69 of those
+                             shutdowns in passing runs and 73 in the one that got killed
+                             — same order, so the default 30s exit budget sits inside the
+                             suite's normal variance and turns a slow runner into a red
+                             build with every test green (#985). 120s keeps the guard
+                             against a genuinely hung JVM while giving the wind-down the
+                             room it actually needs. -->
+                        <forkedProcessExitTimeoutInSeconds>120</forkedProcessExitTimeoutInSeconds>
                     </configuration>
                 </plugin>
                 <plugin>

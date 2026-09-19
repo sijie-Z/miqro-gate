@@ -7,15 +7,35 @@
  * on Spring Framework or any web/HTTP library.
  * </p>
  *
- * <h2>Core SPIs</h2>
+ * <h2>Core SPI</h2>
  * <ul>
- * <li>{@code ProviderProductAdapter} — entry point for a vendor product</li>
- * <li>{@code CredentialInjector} — injects real upstream credentials</li>
- * <li>{@code PathPolicy} — validates and rewrites request paths</li>
- * <li>{@code ModelCatalogProvider} — provides available models</li>
- * <li>{@code UsageParser} — extracts token usage from responses</li>
- * <li>{@code PlanStatusProvider} — queries plan/balance status</li>
- * <li>{@code CredentialValidator} — validates upstream credentials</li>
+ * <li>{@link ProviderProductAdapter} — the entry-point contract a vendor
+ * adapter implements</li>
+ * <li>{@link AdapterRegistry} — compile-time registry adapters are looked up
+ * through</li>
+ * </ul>
+ *
+ * <h2>Contract value types</h2>
+ * <p>
+ * The rest of this package is the immutable request/response surface of that
+ * contract plus the catalog metadata a product declares, so an adapter never
+ * needs Gateway or control-plane internals:
+ * </p>
+ * <ul>
+ * <li>{@link RouteContext} / {@link InboundRequest} → {@link TargetRequest} —
+ * route resolution</li>
+ * <li>{@link CredentialMaterial} → {@link CredentialInjection} — credential
+ * injection</li>
+ * <li>{@link ProviderClient} → {@link CredentialCheck},
+ * {@link ModelCatalogSnapshot}, {@link PlanSnapshot} — credential validation,
+ * model catalog, plan/balance status</li>
+ * <li>{@link UsageContext} → {@link UsageObserver} — per-request usage
+ * extraction</li>
+ * <li>{@link AdapterCapabilities}, {@link ProtocolFamily} — declared
+ * capabilities</li>
+ * <li>{@link ProviderProductDefinition}, {@link ModelDefinition},
+ * {@link AdapterStatus}, {@link ModelCatalogMode} — catalog metadata a product
+ * declares</li>
  * </ul>
  */
 package com.miqroera.miqrokey.spi;

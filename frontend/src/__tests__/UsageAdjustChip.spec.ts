@@ -1,12 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { describe, expect, it } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
 import { nextTick } from 'vue';
 import UsageAdjustChip from '@/components/UsageAdjustChip.vue';
 import type { UsageNetFields } from '@/lib/usage-net';
 
-// Teleported popper layers live on document.body; leave no layer behind for the
 // next test's negative assertions.
-enableAutoUnmount(afterEach);
 
 describe('UsageAdjustChip', () => {
   function mountChip(record: UsageNetFields) {

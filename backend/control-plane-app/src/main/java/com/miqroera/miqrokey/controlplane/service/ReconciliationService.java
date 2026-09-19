@@ -19,10 +19,13 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
@@ -90,10 +93,29 @@ public class ReconciliationService {
             "detail_bucket_key", "bucketKey", "detail_provider_count", "providerCount", "detail_local_count",
             "localCount");
 
+    /**
+     * Import identity → the live report already stored for it, if any.
+     * {@code FAILED} runs are excluded so a failed bill stays re-runnable (#451).
+     */
+    private static final String SELECT_LIVE_REPORT = """
+            SELECT id FROM reconciliation_reports
+            WHERE tenant_id = :tenantId AND provider_code = :code AND currency = :currency
+              AND window_from = :from AND window_to = :to AND upload_sha256 = :sha
+              AND status <> 'FAILED'
+            ORDER BY created_at DESC LIMIT 1
+            """;
+
+    private static final String INSERT_REPORT = """
+            INSERT INTO reconciliation_reports (id, tenant_id, created_by, provider_code, currency, window_from,
+                window_to, status, upload_sha256, upload_bytes, created_at)
+            VALUES (:id, :tenantId, :createdBy, :code, :currency, :from, :to, 'PENDING', :sha, :bytes, now())
+            """;
+
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final AuditService auditService;
     private final CanonicalBillParser parser;
+    private final TransactionTemplate transactionTemplate;
     private final ExecutorService executor = Executors.newFixedThreadPool(2, r -> {
         Thread t = new Thread(r, "reconciliation");
         t.setDaemon(true);
@@ -124,12 +146,13 @@ public class ReconciliationService {
         }
     }
 
-    public ReconciliationService(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper,
-            AuditService auditService) {
+    public ReconciliationService(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper, AuditService auditService,
+            PlatformTransactionManager transactionManager) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.auditService = auditService;
         this.parser = new CanonicalBillParser(objectMapper);
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     // ------------------------------------------------------------------ API
@@ -162,39 +185,78 @@ public class ReconciliationService {
         String sha256 = HexFormat.of().formatHex(sha256(upload));
 
         // Idempotent re-upload: the same provider + window + currency + content
-        // resolves to the existing (non-failed) report without re-running.
-        List<UUID> existing = jdbc.queryForList("""
-                SELECT id FROM reconciliation_reports
-                WHERE tenant_id = :tenantId AND provider_code = :code AND currency = :currency
-                  AND window_from = :from AND window_to = :to AND upload_sha256 = :sha
-                  AND status <> 'FAILED'
-                ORDER BY created_at DESC LIMIT 1
-                """,
-                new MapSqlParameterSource("tenantId", tenantId).addValue("code", code)
-                        .addValue("currency", currency.trim().toUpperCase())
-                        .addValue("from", java.sql.Timestamp.from(windowFrom))
-                        .addValue("to", java.sql.Timestamp.from(windowTo)).addValue("sha", sha256),
-                UUID.class);
-        if (!existing.isEmpty()) {
-            return get(tenantId, existing.get(0));
+        // resolves to the existing (non-failed) report without re-running. Lookup and
+        // insert are one critical section — see findOrCreateReport.
+        ImportOutcome outcome = findOrCreateReport(tenantId, context.actorId(), code, currency.trim().toUpperCase(),
+                windowFrom, windowTo, sha256, upload.length);
+        if (outcome.created()) {
+            // Audit and parse only for the call that actually created the report: the
+            // deduped caller must not append a second RECONCILIATION_CREATED nor start
+            // a second parse of the same bill.
+            auditService.record(tenantId, context.actorId(), "RECONCILIATION_CREATED", "RECONCILIATION",
+                    outcome.reportId(),
+                    AuditSummaries.summary(context, "providerCode", code, "windowFrom", windowFrom.toString(),
+                            "windowTo", windowTo.toString(), "uploadSha256", sha256, "uploadBytes",
+                            String.valueOf(upload.length)),
+                    context.requestId());
+            executor.execute(() -> run(tenantId, outcome.reportId(), content));
         }
+        return get(tenantId, outcome.reportId());
+    }
 
-        UUID reportId = UUID.randomUUID();
-        jdbc.update("""
-                INSERT INTO reconciliation_reports (id, tenant_id, created_by, provider_code, currency, window_from,
-                    window_to, status, upload_sha256, upload_bytes, created_at)
-                VALUES (:id, :tenantId, :createdBy, :code, :currency, :from, :to, 'PENDING', :sha, :bytes, now())
-                """, new MapSqlParameterSource("id", reportId).addValue("tenantId", tenantId)
-                .addValue("createdBy", context.actorId()).addValue("code", code)
-                .addValue("currency", currency.trim().toUpperCase())
-                .addValue("from", java.sql.Timestamp.from(windowFrom)).addValue("to", java.sql.Timestamp.from(windowTo))
-                .addValue("sha", sha256).addValue("bytes", (long) upload.length));
-        auditService.record(tenantId, context.actorId(), "RECONCILIATION_CREATED", "RECONCILIATION", reportId,
-                AuditSummaries.summary(context, "providerCode", code, "windowFrom", windowFrom.toString(), "windowTo",
-                        windowTo.toString(), "uploadSha256", sha256, "uploadBytes", String.valueOf(upload.length)),
-                context.requestId());
-        executor.execute(() -> run(tenantId, reportId, content));
-        return get(tenantId, reportId);
+    /**
+     * Find-or-create for one reconciliation import identity, in a single critical
+     * section.
+     *
+     * <p>
+     * The dedupe lookup and the insert are a check-then-act pair, and the index
+     * behind them ({@code idx_reconciliation_reports_dedupe}, V42) is not unique:
+     * two uploads of the same bill that are in flight at once both miss the lookup
+     * and both insert, so the contract's 「重复导入返回既有报告（不重复执行）」 is broken and the bill
+     * is parsed twice. A transaction-scoped advisory lock over the identity
+     * serialises the pair across the cluster — the same mechanism the audit chain
+     * ({@code AdminAuditEventRepositoryImpl}) and the adjustment ledger
+     * ({@code UsageAdjustmentRepositoryImpl#lockUsageEvent}) already use. Unlike a
+     * unique index it needs no migration, so it cannot fail to start on a database
+     * that already holds duplicates.
+     * </p>
+     */
+    private ImportOutcome findOrCreateReport(UUID tenantId, UUID createdBy, String code, String currency,
+            Instant windowFrom, Instant windowTo, String sha256, long uploadBytes) {
+        MapSqlParameterSource params = new MapSqlParameterSource("tenantId", tenantId).addValue("code", code)
+                .addValue("currency", currency).addValue("from", java.sql.Timestamp.from(windowFrom))
+                .addValue("to", java.sql.Timestamp.from(windowTo)).addValue("sha", sha256);
+        return transactionTemplate.execute(status -> {
+            jdbc.getJdbcTemplate().query("SELECT pg_advisory_xact_lock(?)", rs -> {
+            }, importLockKey(tenantId, code, currency, windowFrom, windowTo, sha256));
+            List<UUID> existing = jdbc.queryForList(SELECT_LIVE_REPORT, params, UUID.class);
+            if (!existing.isEmpty()) {
+                return new ImportOutcome(existing.get(0), false);
+            }
+            UUID reportId = UUID.randomUUID();
+            jdbc.update(INSERT_REPORT,
+                    params.addValue("id", reportId).addValue("createdBy", createdBy).addValue("bytes", uploadBytes));
+            return new ImportOutcome(reportId, true);
+        });
+    }
+
+    /**
+     * 64-bit advisory-lock key for one import identity. Hashing keeps the key in
+     * range; a collision between unrelated identities only queues two uploads that
+     * were never going to dedupe, it can never merge two reports.
+     */
+    static long importLockKey(UUID tenantId, String code, String currency, Instant windowFrom, Instant windowTo,
+            String sha256) {
+        String identity = String.join("|", String.valueOf(tenantId), code, currency, String.valueOf(windowFrom),
+                String.valueOf(windowTo), sha256);
+        return ByteBuffer.wrap(sha256(identity.getBytes(StandardCharsets.UTF_8))).getLong();
+    }
+
+    /**
+     * The report an upload resolved to, and whether this call is the one that
+     * created it.
+     */
+    private record ImportOutcome(UUID reportId, boolean created) {
     }
 
     /**

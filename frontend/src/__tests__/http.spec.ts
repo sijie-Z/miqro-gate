@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, get, post } from '@/api/http';
+import { ApiError, get, getList, post } from '@/api/http';
 import type { ProblemDetails } from '@/types/api';
 
 const CSRF = 'csrf-token-value';
@@ -125,5 +125,33 @@ describe('http client', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('getList', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // 正向对照：真数组必须原样透传 —— 只喂坏数据的测试无法发现「无条件返回 []」这种回归
+  it('passes a real array through untouched', async () => {
+    stubFetch(async () => jsonResponse(200, [{ id: 'a' }, { id: 'b' }]));
+    await expect(getList<{ id: string }>('/api/v1/me/virtual-keys')).resolves.toEqual([
+      { id: 'a' },
+      { id: 'b' },
+    ]);
+  });
+
+  it('normalises a null body to an empty array', async () => {
+    stubFetch(
+      async () =>
+        new Response('null', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    await expect(getList('/api/v1/me/virtual-keys')).resolves.toEqual([]);
+  });
+
+  it('normalises a 204 / empty body to an empty array', async () => {
+    stubFetch(async () => new Response(null, { status: 204 }));
+    await expect(getList('/api/v1/me/virtual-keys')).resolves.toEqual([]);
   });
 });

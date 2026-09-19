@@ -28,10 +28,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * Model-approval workflow (原始设计文档 §8.2 / §5.6): a user asks for an additional
@@ -152,12 +154,7 @@ public class ModelApprovalService {
 
     /** The caller's own requests, newest first. */
     public List<ModelApprovalView> listMine(User user) {
-        List<ModelApproval> approvals = approvalRepository.findAllByRequestedBy(user.id());
-        List<ModelApprovalView> views = new ArrayList<>(approvals.size());
-        for (ModelApproval approval : approvals) {
-            views.add(view(approval, user.tenantId()));
-        }
-        return views;
+        return views(approvalRepository.findAllByRequestedBy(user.id()), user.tenantId());
     }
 
     /**
@@ -166,12 +163,48 @@ public class ModelApprovalService {
      */
     public List<ModelApprovalView> listQueue(User admin, ModelApprovalStatus status, int limit, Instant beforeCreatedAt,
             UUID beforeId) {
-        List<ModelApproval> approvals = approvalRepository.findPage(status, limit, beforeCreatedAt, beforeId);
+        return views(approvalRepository.findPage(status, limit, beforeCreatedAt, beforeId), admin.tenantId());
+    }
+
+    /**
+     * Renders a list of approvals with a constant number of lookups: at most one
+     * batch query per referenced entity type, independent of the row count. Per-row
+     * lookups made {@code listMine} — the caller's entire request history, with no
+     * page size — cost more as the account accumulated approvals.
+     */
+    private List<ModelApprovalView> views(List<ModelApproval> approvals, UUID tenantId) {
+        if (approvals.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> keyIds = new LinkedHashSet<>();
+        Set<UUID> userIds = new LinkedHashSet<>();
+        for (ModelApproval approval : approvals) {
+            keyIds.add(approval.virtualKeyId());
+            userIds.add(approval.requestedBy());
+            if (approval.reviewedBy() != null) {
+                userIds.add(approval.reviewedBy());
+            }
+        }
+        Map<UUID, VirtualKey> keys = index(keyRepository.findAllByIds(keyIds), VirtualKey::id);
+        Set<UUID> projectIds = new LinkedHashSet<>();
+        for (VirtualKey key : keys.values()) {
+            projectIds.add(key.projectId());
+        }
+        Map<UUID, Project> projects = index(projectRepository.findAllByIds(projectIds), Project::id);
+        Map<UUID, User> users = index(userRepository.findAllByIds(userIds), User::id);
         List<ModelApprovalView> views = new ArrayList<>(approvals.size());
         for (ModelApproval approval : approvals) {
-            views.add(view(approval, admin.tenantId()));
+            views.add(view(approval, tenantId, keys.get(approval.virtualKeyId()), projects, users));
         }
         return views;
+    }
+
+    private static <T> Map<UUID, T> index(List<T> rows, Function<T, UUID> id) {
+        Map<UUID, T> indexed = new LinkedHashMap<>(rows.size());
+        for (T row : rows) {
+            indexed.put(id.apply(row), row);
+        }
+        return indexed;
     }
 
     /** Approves a PENDING request: grants the model and refreshes the snapshot. */
@@ -366,24 +399,44 @@ public class ModelApprovalService {
         return value == null ? null : value.trim();
     }
 
+    /**
+     * Single-approval render (submit/review responses); list paths use
+     * {@link #views}.
+     */
     private ModelApprovalView view(ModelApproval approval, UUID tenantId) {
         VirtualKey key = keyRepository.findById(approval.virtualKeyId()).orElse(null);
-        String keyName = key == null ? null : key.name();
-        String keyDisplay = key == null ? null : key.displayPrefix() + "…" + key.lastFour();
-        String projectTag = null;
+        Map<UUID, Project> projects = new LinkedHashMap<>();
         if (key != null) {
-            projectTag = projectRepository.findById(key.projectId()).map(Project::projectTag).orElse(null);
+            projectRepository.findById(key.projectId()).ifPresent(project -> projects.put(project.id(), project));
         }
-        User requester = userRepository.findById(approval.requestedBy()).filter(u -> u.tenantId().equals(tenantId))
-                .orElse(null);
-        User reviewer = approval.reviewedBy() == null
-                ? null
-                : userRepository.findById(approval.reviewedBy()).filter(u -> u.tenantId().equals(tenantId))
-                        .orElse(null);
-        return new ModelApprovalView(approval.id(), approval.virtualKeyId(), keyName, keyDisplay, projectTag,
-                approval.modelId(), approval.reason(), approval.status(), approval.requestedBy(),
-                requester == null ? "deleted user" : requester.displayName(), approval.reviewNote(),
-                reviewer == null ? null : reviewer.displayName(), approval.createdAt(), approval.updatedAt());
+        Map<UUID, User> users = new LinkedHashMap<>();
+        userRepository.findById(approval.requestedBy()).ifPresent(user -> users.put(user.id(), user));
+        if (approval.reviewedBy() != null) {
+            userRepository.findById(approval.reviewedBy()).ifPresent(user -> users.put(user.id(), user));
+        }
+        return view(approval, tenantId, key, projects, users);
+    }
+
+    /**
+     * Renders one approval from pre-resolved entities. A user of another tenant is
+     * reported as "deleted user" exactly as a missing one, so a cross-tenant
+     * display name can never leak through a shared key or grant.
+     */
+    private static ModelApprovalView view(ModelApproval approval, UUID tenantId, VirtualKey key,
+            Map<UUID, Project> projects, Map<UUID, User> users) {
+        Project project = key == null ? null : projects.get(key.projectId());
+        User requester = visible(users.get(approval.requestedBy()), tenantId);
+        User reviewer = approval.reviewedBy() == null ? null : visible(users.get(approval.reviewedBy()), tenantId);
+        return new ModelApprovalView(approval.id(), approval.virtualKeyId(), key == null ? null : key.name(),
+                key == null ? null : key.displayPrefix() + "…" + key.lastFour(),
+                project == null ? null : project.projectTag(), approval.modelId(), approval.reason(), approval.status(),
+                approval.requestedBy(), requester == null ? "deleted user" : requester.displayName(),
+                approval.reviewNote(), reviewer == null ? null : reviewer.displayName(), approval.createdAt(),
+                approval.updatedAt());
+    }
+
+    private static User visible(User user, UUID tenantId) {
+        return user != null && user.tenantId().equals(tenantId) ? user : null;
     }
 
     private static String auditSummary(Object... kv) {
