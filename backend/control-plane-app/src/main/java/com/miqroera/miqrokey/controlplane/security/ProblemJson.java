@@ -5,16 +5,16 @@ package com.miqroera.miqrokey.controlplane.security;
  * this package (issue #445, extended by PH16).
  *
  * <p>
- * Every writer here splices values into a JSON string with {@link String#format}
- * rather than going through Jackson, so any client-controlled value — notably
- * the echoed {@code X-Request-Id} header — must be escaped before it is
- * concatenated. Quoting only {@code "} and {@code \} is <em>not</em> enough: a
- * literal HTAB (0x09) survives Tomcat's header parser and reaches
- * {@code getHeader} verbatim, so it is reflected raw into the body and the
- * whole envelope stops being parseable — Jackson rejects it with
- * {@code Illegal unquoted character ((CTRL-CHAR, code 9))}. Control characters
- * below 0x20 are therefore escaped too, which is what the controller-side
- * {@code escapeJson} copies already did.
+ * Every writer here splices values into a JSON string with
+ * {@link String#format} rather than going through Jackson, so any
+ * client-controlled value — notably the echoed {@code X-Request-Id} header —
+ * must be escaped before it is concatenated. Quoting only {@code "} and
+ * {@code \} is <em>not</em> enough: a literal HTAB (0x09) survives Tomcat's
+ * header parser and reaches {@code getHeader} verbatim, so it is reflected raw
+ * into the body and the whole envelope stops being parseable — Jackson rejects
+ * it with {@code Illegal unquoted character ((CTRL-CHAR, code 9))}. Control
+ * characters below 0x20 are therefore escaped too, which is what the
+ * controller-side {@code escapeJson} copies already did.
  * </p>
  */
 final class ProblemJson {

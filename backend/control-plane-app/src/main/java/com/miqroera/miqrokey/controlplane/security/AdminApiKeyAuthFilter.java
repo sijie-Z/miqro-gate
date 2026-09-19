@@ -202,7 +202,8 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
     static String requestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");
         String value = header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
-        // #445: the header is client-controlled and must not break out of the JSON string.
+        // #445: the header is client-controlled and must not break out of the JSON
+        // string.
         return ProblemJson.escape(value);
     }
 

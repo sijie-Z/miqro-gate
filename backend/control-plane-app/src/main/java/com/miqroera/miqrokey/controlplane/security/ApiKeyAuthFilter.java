@@ -154,11 +154,11 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
 
     /**
      * Contract §2 requires every error response — filter rejections included — to
-     * carry a unique {@code requestId}. Billing consumers have no session cookie
-     * to fall back on, so this token is their only correlation handle.
+     * carry a unique {@code requestId}. Billing consumers have no session cookie to
+     * fall back on, so this token is their only correlation handle.
      */
-    private static void writeProblem(HttpServletRequest request, HttpServletResponse response, int status,
-            String title, String code, String detail) throws IOException {
+    private static void writeProblem(HttpServletRequest request, HttpServletResponse response, int status, String title,
+            String code, String detail) throws IOException {
         response.setStatus(status);
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
@@ -171,7 +171,8 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     static String requestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");
         String value = header != null && !header.isBlank() ? header : java.util.UUID.randomUUID().toString();
-        // #445: the header is client-controlled and must not break out of the JSON string.
+        // #445: the header is client-controlled and must not break out of the JSON
+        // string.
         return ProblemJson.escape(value);
     }
 }
