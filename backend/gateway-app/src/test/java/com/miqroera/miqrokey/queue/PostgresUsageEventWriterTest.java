@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * {@link PostgresUsageEventWriter} guarded-upsert contract against a real
@@ -270,15 +271,19 @@ class PostgresUsageEventWriterTest {
     }
 
     @Test
-    @DisplayName("a retried hit flush (bus re-enqueue) never double-counts cache_entry hit counters")
+    @DisplayName("a hit delivered twice never double-counts cache_entry hit counters")
     void retriedHitFlushDoesNotDoubleCountCounters() {
         String cacheKey = "cache-key-retry-" + UUID.randomUUID();
         insertCacheEntry(cacheKey);
         CacheHitEvent hit = hitEvent(cacheKey, CLOCK.instant());
 
-        // The bus drains a batch and re-enqueues the SAME event objects when the
-        // write fails (PostgresUsageEventBus: "the drained events are re-enqueued
-        // in order for the next flush"), so the writer sees the same hit twice.
+        // A duplicate delivery of the SAME event — the commit-outcome-unknown
+        // window: the server committed the batch but the client saw an I/O error,
+        // so the bus re-enqueues the drained batch (PostgresUsageEventBus:
+        // "the drained events are re-enqueued in order for the next flush") and
+        // the next flush replays events that are already in the table.
+        // An ORDINARY failure rolls the batch back instead — see
+        // failedFlushRollsBackAndReplayCountsOnce below.
         writer.writeBatch(List.of(), List.of(hit), List.of(), List.of());
         writer.writeBatch(List.of(), List.of(hit), List.of(), List.of());
 
@@ -290,6 +295,33 @@ class PostgresUsageEventWriterTest {
         assertThat(hitCounter(cacheKey, "hit_count_l1"))
                 .as("hit_count_l1 after replaying the same hit event").isEqualTo(1L);
         assertThat(hitCounter(cacheKey, "hit_count_l2")).isEqualTo(0L);
+    }
+
+    @Test
+    @DisplayName("an ordinary failed flush rolls the whole batch back — the replay starts from a clean slate")
+    void failedFlushRollsBackAndReplayCountsOnce() {
+        String cacheKey = "cache-key-rollback-" + UUID.randomUUID();
+        insertCacheEntry(cacheKey);
+        Instant hitAt = CLOCK.instant().plusMillis(7);
+        CacheHitEvent hit = hitEvent(cacheKey, hitAt);
+        // Poison pill: request_usage_records' PK columns are NOT NULL, so this
+        // throws INSIDE the batch transaction, after the hit insert has run.
+        RequestStartedEvent poison = new RequestStartedEvent(UUID.randomUUID(), null, "gw-poison", TENANT_ID,
+                USER_ID, PROJECT_ID, VIRTUAL_KEY_ID, PROVIDER_ID, PRODUCT_ID, CREDENTIAL_ID, "anthropic", "model-x",
+                false);
+
+        assertThatThrownBy(() -> writer.writeBatch(List.of(), List.of(hit), List.of(poison), List.of()))
+                .isInstanceOf(Exception.class);
+
+        // Everything the transaction touched is gone — including the counter the
+        // unconditional (pre-fix) UPDATE had already incremented.
+        assertThat(hitEventRows(cacheKey)).as("hit rows after the rollback").isZero();
+        assertThat(hitCounter(cacheKey, "hit_count_l1")).as("hit_count_l1 after the rollback").isZero();
+
+        // The bus re-enqueues the drained batch and the next flush replays it.
+        writer.writeBatch(List.of(), List.of(hit), List.of(), List.of());
+        assertThat(hitEventRows(cacheKey)).isEqualTo(1);
+        assertThat(hitCounter(cacheKey, "hit_count_l1")).as("hit_count_l1 after the replay").isEqualTo(1L);
     }
 
     // -------------------------------------------------------------------
