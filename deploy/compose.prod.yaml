@@ -96,6 +96,10 @@ services:
       MIQROKEY_CRYPTO_HMAC_ACTIVE_VERSION: v1
       MIQROKEY_CRYPTO_HMAC_VERSIONS_V1: /run/secrets/vk_hmac_key
       MIQROKEY_BOOTSTRAP_SECRET_FILE: /run/secrets/bootstrap_secret
+      # 派生列调和定时通道（#777）：按周期把最近 48h 内已盖章行的价格标签重算、补写缺失的
+      # 冻结金额——不重查价目、不改价格列、不动既有金额；默认关。要开请在 **.env** 里设
+      # true（本行只是把值透传进来）——手改这份文件的值会在整树同步时丢失，见 deploy.sh §9。
+      MIQROKEY_USAGE_PRICE_RECONCILE_ENABLED: ${MIQROKEY_USAGE_PRICE_RECONCILE_ENABLED:-false}
       # 显式限堆（同 gateway 注释）；管理面无高并发。2G 演示机 GC 实测堆存活 ~69MB，
       # 448m 余量充足；SerialGC 小堆更省内存，GC 日志 2×5MB 循环可查。
       JAVA_TOOL_OPTIONS: "${CONTROL_PLANE_JAVA_OPTS:--Xmx448m -XX:MaxMetaspaceSize=192m -XX:+UseSerialGC -Xlog:gc*:file=/tmp/gc.log:time,uptime:filecount=2,filesize=5m -XX:+ExitOnOutOfMemoryError}"
