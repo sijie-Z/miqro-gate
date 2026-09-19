@@ -9,12 +9,16 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
@@ -22,7 +26,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Managed smart agents (P3.1, api-contract §5.13): CRUD plus per-agent usage
+ * Managed smart agents (P3.1, api-contract §5.13): full lifecycle — create,
+ * list/get, enable/disable, rename, hard delete — plus per-agent usage
  * aggregated over the bound credential. SYSTEM_ADMIN-only via RoleInterceptor.
  */
 @RestController
@@ -60,6 +65,29 @@ public class AdminAgentController {
         return agentService.disable(user.tenantId(), user.id(), agentId, requestId(httpReq));
     }
 
+    @PostMapping("/{agentId}/enable")
+    public AgentView enable(@PathVariable UUID agentId, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return agentService.enable(user.tenantId(), user.id(), agentId, requestId(httpReq));
+    }
+
+    /** Rename / edit the description; {@code version} drives optimistic locking. */
+    @PatchMapping("/{agentId}")
+    public AgentView update(@PathVariable UUID agentId, @Valid @RequestBody AgentUpdateRequest body,
+            HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return agentService.update(user.tenantId(), user.id(), agentId, body.name(), body.description(), body.version(),
+                requestId(httpReq));
+    }
+
+    /** Hard delete (irreversible): frees the name and the credential slot. */
+    @DeleteMapping("/{agentId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable UUID agentId, HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        agentService.delete(user.tenantId(), user.id(), agentId, requestId(httpReq));
+    }
+
     /** Per-agent usage over the bound credential; from/to optional ISO-8601. */
     @GetMapping("/{agentId}/usage")
     public UsageSummary usage(@PathVariable UUID agentId, @RequestParam(required = false) String from,
@@ -76,5 +104,13 @@ public class AdminAgentController {
 
     public record AgentCreateRequest(@NotBlank @Size(max = 200) String name, @Size(max = 2000) String description,
             @NotNull UUID credentialId) {
+    }
+
+    /**
+     * The full editable state, not a sparse patch: {@code version} is required so a
+     * stale form cannot silently overwrite someone else's edit (409).
+     */
+    public record AgentUpdateRequest(@NotBlank @Size(max = 200) String name, @Size(max = 2000) String description,
+            @NotNull Long version) {
     }
 }
