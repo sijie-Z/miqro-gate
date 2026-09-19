@@ -61,6 +61,12 @@ const router = createRouter({
           meta: { title: '资料' },
         },
         {
+          path: 'help',
+          name: 'help',
+          component: () => import('@/views/next/NextHelpView.vue'),
+          meta: { title: '帮助' },
+        },
+        {
           path: 'skills',
           name: 'skills',
           component: () => import('@/views/next/NextSkillsView.vue'),
