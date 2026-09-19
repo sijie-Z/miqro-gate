@@ -15,9 +15,10 @@
 # ===========================================================================
 #
 # org.bouncycastle:bcprov-jdk18on 1.78.1 (backend/persistence-postgres/
-# pom.xml:33-36, the only dependency in the repo with an explicit <version>,
-# pulled in for Argon2PasswordEncoder). None of the three advisories sits on
-# a code path this project reaches:
+# pom.xml:33-36, pulled in for Argon2PasswordEncoder; it carries an explicit
+# <version> there instead of inheriting the Boot BOM, which is why it is
+# resolvable even when the BOM chain is not). None of the three advisories
+# sits on a code path this project reaches:
 #   - CVE-2025-14813 GOSTCTR block handling — GOST ciphers are not used;
 #   - CVE-2026-8763 PKIX name-constraints bypass — no certificate-path
 #     validation is performed with BouncyCastle here;
