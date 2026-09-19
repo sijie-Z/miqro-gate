@@ -183,10 +183,10 @@ public class AlertEventDispatcher {
     }
 
     /**
-     * Retries deliveries whose backoff deadline passed. Only the newest attempt row of a
-     * delivery is eligible: an attempt row keeps the {@code next_retry_at} it was written
-     * with, so without this guard every sweep re-selects the same stale rows and the
-     * {@link #MAX_ATTEMPTS} bound is never reached.
+     * Retries deliveries whose backoff deadline passed. Only the newest attempt row
+     * of a delivery is eligible: an attempt row keeps the {@code next_retry_at} it
+     * was written with, so without this guard every sweep re-selects the same stale
+     * rows and the {@link #MAX_ATTEMPTS} bound is never reached.
      */
     public void retryDue() {
         List<Map<String, Object>> due = jdbc.query("""
