@@ -76,7 +76,7 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
                 // Issue #316 channel scope: the billing channel requires
                 // billing:read (null scope = full access). Fail closed.
                 if (!consumer.allows("billing:read")) {
-                    forbidden(response);
+                    forbidden(request, response);
                     return;
                 }
                 request.setAttribute(CONSUMER_ATTR, consumer.id());
@@ -89,10 +89,10 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         // is forbidden (not unauthenticated) — and never falls back to the
         // session's tenant.
         if (userContext.isAuthenticated()) {
-            forbidden(response);
+            forbidden(request, response);
             return;
         }
-        unauthorized(response);
+        unauthorized(request, response);
     }
 
     private ApiConsumer authenticateApiKey(String key) {
@@ -142,25 +142,36 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         }
     }
 
-    private static void forbidden(HttpServletResponse response) throws IOException {
-        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-        response.getWriter()
-                .write("""
-                        {"type":"about:blank","title":"Scope denied","status":403,"code":"CONSUMER_SCOPE_DENIED","detail":"该消费者未被授予 billing:read 能力。"}
-                        """
-                        .trim());
+    private static void forbidden(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        writeProblem(request, response, HttpServletResponse.SC_FORBIDDEN, "Scope denied", "CONSUMER_SCOPE_DENIED",
+                "该消费者未被授予 billing:read 能力。");
     }
 
-    private static void unauthorized(HttpServletResponse response) throws IOException {
-        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+    private static void unauthorized(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        writeProblem(request, response, HttpServletResponse.SC_UNAUTHORIZED, "Authentication required", "UNAUTHORIZED",
+                "A valid API key or portal session is required.");
+    }
+
+    /**
+     * Contract §2 requires every error response — filter rejections included — to
+     * carry a unique {@code requestId}. Billing consumers have no session cookie
+     * to fall back on, so this token is their only correlation handle.
+     */
+    private static void writeProblem(HttpServletRequest request, HttpServletResponse response, int status,
+            String title, String code, String detail) throws IOException {
+        response.setStatus(status);
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-        response.getWriter()
-                .write("""
-                        {"type":"about:blank","title":"Authentication required","status":401,"code":"UNAUTHORIZED","detail":"A valid API key or portal session is required."}
-                        """
-                        .trim());
+        String requestId = requestId(request);
+        response.getWriter().write(String.format(
+                "{\"type\":\"about:blank\",\"title\":\"%s\",\"status\":%d,\"code\":\"%s\",\"detail\":\"%s\",\"requestId\":\"%s\"}",
+                title, status, code, detail, requestId));
+    }
+
+    static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        String value = header != null && !header.isBlank() ? header : java.util.UUID.randomUUID().toString();
+        // #445: the header is client-controlled and must not break out of the JSON string.
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }
