@@ -5533,3 +5533,27 @@ interface KeyRow { key; label; served; hits; hitRatePct; paidCost; savedCost }  
 ### 教训
 
 **验收要覆盖"这个头是谁发的"，而不是"有没有这个头"**：同名头可能来自被代理方（上游、CDN），而自己的入口一个都没发。与「按名/按列取值、不要按子串」同族——**按来源断言，而不是按存在断言**。另外：**56 项里 55 项绿，价值恰恰在那一条红的**——若只跑"部署四断言 + 一条冒烟"，这次上线就是全绿收场。
+
+## 2026-09-20 PH32b：TOKENS 配额水位读的是净额而非观测事实（#1002）
+
+### 复核结论：PH32 成立，未被推翻
+
+`QuotaWatermarks.evaluate()`（`QuotaWatermarks.java:41`）走 `AdminUsageStatsService.summaryUncapped()`（`:107`）→ `UsageStatsRepositoryImpl.aggregateUsage()`（当时 `:347`）→ SQL 在 token 列上 `+ COALESCE(SUM(adj.*_delta), 0)`（`UsageAdjustmentSql.ADJUSTMENT_LATERAL`）。**这条链路在整仓里是水位读数的唯一入口**：管理端配额列表（`AdminQuotaRuleService.java:147`）、软着陆判定器（`QuotaEnforcementService.java:57`）、告警（`AlertEvaluator.java:168` 读同一个 `view.usedPct()`）全部经过它；`QuotaGate` 只读网关内存快照、不查库；`AdminBudgetService.java:118` 是成本预算，COST 列从不带调整量（调整只写 token 列）。
+
+三条规格都写明水位该读**观测事实**：`V63:17`、`V63:113`（迁移注释：水位是"对网关实测结果的判定"）、`UsageStatsRepositoryImpl.java:347`（聚合注释）。同一 `switch` 里 REQUESTS = `COUNT(*)`、COST = 观测 token × 价格，**只有 TOKENS 被调整改变了**——这是自相矛盾，不是设计取舍。
+
+### 缺陷与修法
+
+booking 一笔 `outputTokensDelta=-300`：观测 1000 tokens（600 in / 400 out）、限额 800 的规则水位从 `used=1000 / 125.0% / EXCEEDED` **变成** `used=700 / 87.5% / NORMAL`——客户用一句"上游账单修正"就能静默抬高自己的配额（反向亦然）。
+
+修法：`UsageStatsRepository` 增 `aggregateObservedUsage(groupBy, filter)`；`UsageStatsRepositoryImpl` 用私有枚举 `TokenBasis { OBSERVED, ADJUSTED }` 把差异收在一处（刻意不做 caller 传 boolean 的形态，见 issue #1002 的建议），`aggregateUsage()` 语义不变（= ADJUSTED，报表/账单/导出照旧读净额）。`summaryUncapped` 更名 `summaryObservedUncapped`，命名即语义。
+
+### 验证（真实输出）
+
+- 红：`AdminQuotaRuleApiIntegrationTest.adjustmentDoesNotMoveTokenWatermark:208`，`JSON path "$.used" expected:<1000> but was:<700>`；绿：同文件 `Tests run: 12, Failures: 0`。
+- 回归：`mvn -o -pl persistence-postgres,control-plane-app -am -Pintegration test` → `Tests run: 827, Failures: 0, Errors: 0, Skipped: 0`，`BUILD SUCCESS`（10:09 min）。
+- 一次性真库（PG 17.6 / 端口 15441）：调整前 `used 1000 / 125.0 / EXCEEDED`，`usage-adjustments` 201 后**报表** `output 400→100`（净额生效）、**水位**仍 `1000 / 125.0 / EXCEEDED`、`quota_enforcement` 行仍在。
+
+### 教训
+
+**同一个 cell 上的两个读者会要两个不同的数**：报表要"最终该收多少钱"（净额），水位要"当时网关看见了什么"（观测）。把它们都塞进一条聚合路径，缺陷不在算术而在**语义被默认值吃掉**——`aggregateUsage()` 的默认含义没人写下来，于是水位"顺手"继承了调整。修法上，枚举比 boolean 值钱：调用点读起来就是 `Observed` / `Adjusted`，而不是 `aggregateUsage(x, y, false)`。
