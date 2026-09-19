@@ -469,7 +469,7 @@ class AnthropicProxyContractTest {
 
         @Test
         @DisplayName("counts a signature-shaped rejection and forwards the body byte-identically")
-        void countsSignatureShapeAndForwardsVerbatim() {
+        void countsSignatureShapeAndForwardsVerbatim() throws InterruptedException {
             String body = "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\","
                     + "\"message\":\"messages.1.content.0.type: Invalid `signature` in `thinking` block\"}}";
             mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(400)
