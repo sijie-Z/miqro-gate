@@ -133,7 +133,8 @@ public class UsageDeletionService {
         return jdbc.query("""
                 SELECT * FROM usage_deletions WHERE tenant_id = :tenantId
                 ORDER BY created_at DESC LIMIT :limit
-                """, new MapSqlParameterSource("tenantId", tenantId).addValue("limit", Math.min(limit, 50)),
+                """,
+                new MapSqlParameterSource("tenantId", tenantId).addValue("limit", Math.max(1, Math.min(limit, 50))),
                 ROW_MAPPER);
     }
 
