@@ -36,9 +36,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Delivery outcome classification for alert webhooks against real PostgreSQL:
- * a receiver that answers with an HTTP error status has <em>not</em> accepted
- * the alert, so the attempt must be recorded as a failure ("failed" not
+ * Delivery outcome classification for alert webhooks against real PostgreSQL: a
+ * receiver that answers with an HTTP error status has <em>not</em> accepted the
+ * alert, so the attempt must be recorded as a failure ("failed" not
  * "delivered") and a transient (5xx) receiver must be armed for the documented
  * exponential-backoff retry ({@code docs/api-contract.md}: "投递失败指数退避重试最多 3 次").
  *
@@ -204,9 +204,9 @@ class AlertDeliveryHttpErrorRetryIntegrationTest {
         MvcResult created = mockMvc
                 .perform(post("/api/v1/admin/webhooks").contentType(MediaType.APPLICATION_JSON)
                         .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                        .content(objectMapper.writeValueAsString(Map.of("name",
-                                "receiver-" + UUID.randomUUID().toString().substring(0, 8), "url", mockBaseUrl,
-                                "secret", "whsec-retry-test-value"))))
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("name", "receiver-" + UUID.randomUUID().toString().substring(0, 8), "url",
+                                        mockBaseUrl, "secret", "whsec-retry-test-value"))))
                 .andExpect(status().isOk()).andReturn();
         return objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
     }
@@ -214,9 +214,9 @@ class AlertDeliveryHttpErrorRetryIntegrationTest {
     private void createRule(String endpointId) throws Exception {
         mockMvc.perform(post("/api/v1/admin/alert-rules").contentType(MediaType.APPLICATION_JSON)
                 .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                .content(objectMapper.writeValueAsString(Map.of("name",
-                        "missing-rate-" + UUID.randomUUID().toString().substring(0, 8), "type", "USAGE_MISSING_RATE",
-                        "threshold", 0.5, "webhookEndpointId", endpointId))))
+                .content(objectMapper.writeValueAsString(
+                        Map.of("name", "missing-rate-" + UUID.randomUUID().toString().substring(0, 8), "type",
+                                "USAGE_MISSING_RATE", "threshold", 0.5, "webhookEndpointId", endpointId))))
                 .andExpect(status().isOk());
     }
 
@@ -224,8 +224,7 @@ class AlertDeliveryHttpErrorRetryIntegrationTest {
         List<Map<String, Object>> rows = jdbc.query(
                 "SELECT attempt, http_status, next_retry_at, error_message FROM webhook_delivery_attempts "
                         + "WHERE endpoint_id = :endpointId ORDER BY attempt",
-                new MapSqlParameterSource("endpointId", UUID.fromString(endpointId)),
-                (rs, rowNum) -> {
+                new MapSqlParameterSource("endpointId", UUID.fromString(endpointId)), (rs, rowNum) -> {
                     Map<String, Object> row = new java.util.LinkedHashMap<>();
                     row.put("attempt", rs.getInt("attempt"));
                     row.put("http_status", rs.getObject("http_status"));

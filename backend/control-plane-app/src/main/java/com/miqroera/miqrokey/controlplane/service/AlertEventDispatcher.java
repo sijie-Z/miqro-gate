@@ -195,7 +195,10 @@ public class AlertEventDispatcher {
         }
     }
 
-    /** Backoff deadline for a failed attempt: 2^attempt × 60s, or none once exhausted. */
+    /**
+     * Backoff deadline for a failed attempt: 2^attempt × 60s, or none once
+     * exhausted.
+     */
     private static Instant nextRetryAt(int attempt, Instant now) {
         return attempt < MAX_ATTEMPTS ? now.plusSeconds((long) Math.pow(2, attempt) * 60) : null;
     }
