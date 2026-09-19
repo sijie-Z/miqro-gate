@@ -22,6 +22,11 @@ import java.util.List;
 public record RoiReportView(Instant from, Instant to, RoiTotals totals, List<RoiDay> byDay) {
 
     /**
+     * @param hitRatePct
+     *            cached requests as a share of every served request; <b>null</b>
+     *            when the window served nothing at all, because a hit rate over no
+     *            requests is undefined rather than zero. The same rule
+     *            {@code savedPct} follows, and for the same reason (#932).
      * @param pricingStatus
      *            whether every token dimension that took part had a price; anything
      *            but {@code COMPLETE} means {@code paidCost} / {@code savedCost}
