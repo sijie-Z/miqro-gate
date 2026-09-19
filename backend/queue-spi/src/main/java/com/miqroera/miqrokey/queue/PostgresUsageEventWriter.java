@@ -210,33 +210,46 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                 .addValue("confidence", attr.claimConfidence() != null ? attr.claimConfidence() : "NONE");
     }
 
+    /**
+     * Records hit events and bumps the per-entry counters <b>in one statement</b>.
+     *
+     * <p>
+     * The counter update is guarded by the row that the insert actually produced
+     * (data-modifying CTE + {@code RETURNING}): a hit folded away by the dedup
+     * index must not increment {@code cache_entry.hit_count_l1/l2}. A retried flush
+     * replays the very same events (the bus re-enqueues a drained batch when the
+     * write fails), so an unconditional increment would double-count the counters
+     * while the rows stay deduplicated — the two accounting surfaces must agree.
+     * See {@code docs/architecture.md} "重试 flush 绝不双计".
+     */
     private void writeHits(List<CacheHitEvent> events) {
-        List<MapSqlParameterSource> insertParams = new ArrayList<>(events.size());
-        List<MapSqlParameterSource> counterParams = new ArrayList<>(events.size());
+        if (events.isEmpty()) {
+            return;
+        }
+        List<MapSqlParameterSource> params = new ArrayList<>(events.size());
         for (CacheHitEvent e : events) {
-            insertParams.add(
-                    new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", e.tenantId())
-                            .addValue("cacheKey", e.cacheKey()).addValue("virtualKeyId", e.virtualKeyId())
-                            .addValue("projectId", e.projectId()).addValue("productId", e.providerProductId())
-                            .addValue("level", e.level().name()).addValue("gatewayRequestId", e.gatewayRequestId())
-                            .addValue("occurredAt", Timestamp.from(e.occurredAt())));
             boolean l1 = e.level() == com.miqroera.miqrokey.domain.usage.CacheLevel.L1_HIT;
-            counterParams.add(new MapSqlParameterSource().addValue("tenantId", e.tenantId())
-                    .addValue("cacheKey", e.cacheKey()).addValue("l1", l1).addValue("l2", !l1));
+            params.add(new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", e.tenantId())
+                    .addValue("cacheKey", e.cacheKey()).addValue("virtualKeyId", e.virtualKeyId())
+                    .addValue("projectId", e.projectId()).addValue("productId", e.providerProductId())
+                    .addValue("level", e.level().name()).addValue("gatewayRequestId", e.gatewayRequestId())
+                    .addValue("occurredAt", Timestamp.from(e.occurredAt())).addValue("l1", l1).addValue("l2", !l1));
         }
         jdbc.batchUpdate("""
-                INSERT INTO cache_hit_event (id, tenant_id, cache_key, virtual_key_id, project_id,
-                    provider_product_id, level, occurred_at, gateway_request_id)
-                VALUES (:id, :tenantId, :cacheKey, :virtualKeyId, :projectId, :productId, :level, :occurredAt,
-                    :gatewayRequestId)
-                ON CONFLICT (tenant_id, cache_key, level, occurred_at) DO NOTHING
-                """, insertParams.toArray(new MapSqlParameterSource[0]));
-        jdbc.batchUpdate("""
+                WITH inserted AS (
+                    INSERT INTO cache_hit_event (id, tenant_id, cache_key, virtual_key_id, project_id,
+                        provider_product_id, level, occurred_at, gateway_request_id)
+                    VALUES (:id, :tenantId, :cacheKey, :virtualKeyId, :projectId, :productId, :level, :occurredAt,
+                        :gatewayRequestId)
+                    ON CONFLICT (tenant_id, cache_key, level, occurred_at) DO NOTHING
+                    RETURNING tenant_id, cache_key
+                )
                 UPDATE cache_entry SET
                     hit_count_l1 = hit_count_l1 + CASE WHEN :l1 THEN 1 ELSE 0 END,
                     hit_count_l2 = hit_count_l2 + CASE WHEN :l2 THEN 1 ELSE 0 END
                 WHERE tenant_id = :tenantId AND cache_key = :cacheKey
-                """, counterParams.toArray(new MapSqlParameterSource[0]));
+                  AND EXISTS (SELECT 1 FROM inserted)
+                """, params.toArray(new MapSqlParameterSource[0]));
     }
 
     /**

@@ -49,7 +49,7 @@ miqro-key-gateway/
 │   ├── persistence-postgres/   # JPA/JDBC、Flyway、分区管理
 │   ├── route-snapshot/         # 版本化只读路由快照（当前实现）
 │   ├── queue-spi/              # 有界用量写入队列 SPI（当前实现）
-│   ├── cache-spi/              # 响应缓存 SPI + NoOp 实现（当前实现）
+│   ├── cache-spi/              # 响应缓存 SPI + L1/L2 实现（默认关闭）
 │   └── test-support/           # Mock Provider 与契约测试工具
 ├── frontend/                   # Vue 3 + TypeScript
 ├── deploy/                     # Docker Compose、反向代理、备份
@@ -122,7 +122,7 @@ PostgreSQL 是唯一首版状态存储：
 - 告警状态、定时任务锁、导出任务；
 - 审计日志。
 
-第一版不部署 Redis。未来缓存实现通过 SPI 加入，不影响核心模型。
+不部署 Redis（ADR-0005）。响应缓存经 `cache-spi` 实现（L1 内存 + L2 PostgreSQL），默认关闭（ADR-0009），不影响核心模型。
 
 ## 5. 请求时序
 
@@ -163,7 +163,7 @@ Client/CC Switch        Gateway                PostgreSQL snapshot    PostgreSQL
 
 ## 7. 缓存策略
 
-首版不缓存模型响应。Gateway 必须原样保留供应商 Prompt Cache 所依赖的：
+响应缓存默认关闭（ADR-0009 双重 opt-in，另需网关总开关），语义缓存不启用。Gateway 必须原样保留供应商 Prompt Cache 所依赖的：
 
 - 请求体顺序和内容；
 - `cache_control` 等协议字段；
@@ -171,7 +171,7 @@ Client/CC Switch        Gateway                PostgreSQL snapshot    PostgreSQL
 - Responses API 的缓存与会话字段；
 - 上游返回的 cache read/write Token。
 
-后续通过 `GatewayResponseCache` SPI 增加精确缓存或其他实现。Claude Code、Claude Desktop、Codex 和工具调用默认禁用 Gateway 响应缓存。
+精确缓存已通过 `GatewayResponseCache`/`cache-spi` 实现（L1/L2，默认关闭，ADR-0009）。Claude Code、Claude Desktop、Codex 和工具调用默认禁用 Gateway 响应缓存。
 
 ## 8. 可扩展接口
 

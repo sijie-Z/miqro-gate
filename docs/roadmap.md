@@ -74,7 +74,6 @@
 
 ## 后续版本
 
-- `GatewayResponseCache` 的精确响应缓存实现，Coding Agent 默认关闭。
 - OIDC/LDAP。
 - Kubernetes Helm Chart 与多副本事件分发。
 - SiliconFlow、StepFun、小米 MiMo 及更多聚合平台。
