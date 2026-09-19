@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import com.miqroera.miqrokey.controlplane.service.AlertEvaluator;
+import com.miqroera.miqrokey.controlplane.service.AlertEventDispatcher;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import jakarta.servlet.http.Cookie;
@@ -80,6 +81,8 @@ class WebhookAlertApiIntegrationTest {
     NamedParameterJdbcTemplate jdbc;
     @Autowired
     AlertEvaluator alertEvaluator;
+    @Autowired
+    AlertEventDispatcher alertEventDispatcher;
 
     private Cookie sessionCookie;
     private Cookie csrfCookie;
@@ -252,6 +255,133 @@ class WebhookAlertApiIntegrationTest {
                 new MapSqlParameterSource("ruleId", UUID.fromString(ruleId)), Long.class);
         org.assertj.core.api.Assertions.assertThat(eventsAfter).isEqualTo(1L);
         org.assertj.core.api.Assertions.assertThat(received.get()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("retry sweep converges instead of re-delivering stale attempts forever (#911)")
+    void retryStopsAfterTheNewestAttemptIsNoLongerDue() throws Exception {
+        // The endpoint starts on a dead loopback port: the first delivery fails at the
+        // transport level, which is the only path that arms next_retry_at.
+        HttpServer probe = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        int deadPort = probe.getAddress().getPort();
+        probe.stop(0);
+
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/webhooks").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("name", "flaky", "url",
+                                "http://127.0.0.1:" + deadPort + "/hook", "secret", "whsec-retry-cap"))))
+                .andExpect(status().isOk()).andReturn();
+        String endpointId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        MvcResult ruleResult = mockMvc
+                .perform(post("/api/v1/admin/alert-rules").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("name", "missing-rate", "type",
+                                "USAGE_MISSING_RATE", "threshold", 0.5, "webhookEndpointId", endpointId))))
+                .andExpect(status().isOk()).andReturn();
+        String ruleId = objectMapper.readValue(ruleResult.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        fx.insertUsage(true);
+        fx.insertUsage(false);
+        alertEvaluator.evaluateAll();
+
+        // The first delivery really failed at the transport level and armed a retry.
+        Long armed = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM webhook_delivery_attempts WHERE next_retry_at IS NOT NULL",
+                new MapSqlParameterSource(), Long.class);
+        org.assertj.core.api.Assertions.assertThat(armed).as("first delivery must arm a retry").isEqualTo(1L);
+
+        // Same endpoint row, now reachable: the retry succeeds.
+        jdbc.update("UPDATE webhook_endpoints SET url = :url WHERE id = :id",
+                new MapSqlParameterSource("url", mockBaseUrl).addValue("id", UUID.fromString(endpointId)));
+        // The backoff deadline has already passed, so every sweep would see it as due.
+        jdbc.update("UPDATE webhook_delivery_attempts SET next_retry_at = now() - interval '1 hour' "
+                + "WHERE next_retry_at IS NOT NULL", new MapSqlParameterSource());
+
+        int before = received.get();
+        for (int i = 0; i < 4; i++) {
+            alertEventDispatcher.retryDue();
+        }
+
+        // Attempt 1 is no longer the newest attempt once attempt 2 exists, so exactly
+        // one
+        // retry goes out. Re-selecting the stale attempt-1 row would deliver on every
+        // sweep.
+        org.assertj.core.api.Assertions.assertThat(received.get() - before)
+                .as("retry sweeps after the newest attempt must converge").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("a permanently dead endpoint stops at MAX_ATTEMPTS instead of retrying forever (#911)")
+    void deadEndpointConvergesAtMaxAttempts() throws Exception {
+        // The defect is observable in outbound requests, not in row counts: a dead port
+        // cannot tell us how often it was called, and the row count settles at 3 either
+        // way (attempt 3 is terminal, so it is never re-armed, while each sweep keeps
+        // re-writing attempts 2 and 3 through the UPSERT). So the endpoint is a server
+        // that counts every request and then closes without a response: the caller sees
+        // a transport failure (which is what arms next_retry_at) and we see the hit.
+        AtomicInteger hits = new AtomicInteger();
+        HttpServer blackHole = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        blackHole.createContext("/hook", exchange -> {
+            hits.incrementAndGet();
+            exchange.getRequestBody().readAllBytes();
+            exchange.close();
+        });
+        blackHole.start();
+        int port = blackHole.getAddress().getPort();
+        try {
+            MvcResult created = mockMvc
+                    .perform(post("/api/v1/admin/webhooks").contentType(MediaType.APPLICATION_JSON)
+                            .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                            .content(objectMapper.writeValueAsString(Map.of("name", "dead", "url",
+                                    "http://127.0.0.1:" + port + "/hook", "secret", "whsec-dead-cap"))))
+                    .andExpect(status().isOk()).andReturn();
+            String endpointId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                    .toString();
+
+            mockMvc.perform(post("/api/v1/admin/alert-rules").contentType(MediaType.APPLICATION_JSON)
+                    .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                    .content(objectMapper.writeValueAsString(Map.of("name", "missing-rate", "type",
+                            "USAGE_MISSING_RATE", "threshold", 0.5, "webhookEndpointId", endpointId))))
+                    .andExpect(status().isOk());
+
+            fx.insertUsage(true);
+            fx.insertUsage(false);
+            alertEvaluator.evaluateAll();
+
+            // Each sweep back-dates every armed deadline first, so a sweep that re-selects
+            // stale rows delivers again immediately instead of waiting out the backoff.
+            for (int i = 0; i < 8; i++) {
+                jdbc.update("UPDATE webhook_delivery_attempts SET next_retry_at = now() - interval '1 hour' "
+                        + "WHERE next_retry_at IS NOT NULL", new MapSqlParameterSource());
+                alertEventDispatcher.retryDue();
+            }
+
+            // Converged: enough sweeps that the cap must have been reached (attempt 1 at
+            // dispatch plus 2 retries). Anything beyond this is the defect.
+            int settled = hits.get();
+            org.assertj.core.api.Assertions.assertThat(settled)
+                    .as("exactly MAX_ATTEMPTS deliveries: the initial one plus 2 retries").isEqualTo(3);
+
+            for (int i = 0; i < 4; i++) {
+                jdbc.update("UPDATE webhook_delivery_attempts SET next_retry_at = now() - interval '1 hour' "
+                        + "WHERE next_retry_at IS NOT NULL", new MapSqlParameterSource());
+                alertEventDispatcher.retryDue();
+            }
+
+            org.assertj.core.api.Assertions.assertThat(hits.get())
+                    .as("sweeps past MAX_ATTEMPTS must not deliver to a dead endpoint again").isEqualTo(settled);
+
+            Long rows = jdbc.queryForObject("SELECT COUNT(*) FROM webhook_delivery_attempts",
+                    new MapSqlParameterSource(), Long.class);
+            org.assertj.core.api.Assertions.assertThat(rows).as("a converged delivery must not grow a row per sweep")
+                    .isEqualTo(3L);
+        } finally {
+            blackHole.stop(0);
+        }
     }
 
     // ------------------------------------------------------------------
