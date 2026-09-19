@@ -184,6 +184,16 @@
                     <version>${maven-surefire-plugin.version}</version>
                     <configuration>
                         <useModulePath>false</useModulePath>
+                        <!-- The integration suite legitimately needs ~70 Spring contexts
+                             to wind down at JVM exit (each with its own netty graceful
+                             shutdown + Hikari close). Measured on CI: 68-69 of those
+                             shutdowns in passing runs and 73 in the one that got killed
+                             — same order, so the default 30s exit budget sits inside the
+                             suite's normal variance and turns a slow runner into a red
+                             build with every test green (#985). 120s keeps the guard
+                             against a genuinely hung JVM while giving the wind-down the
+                             room it actually needs. -->
+                        <forkedProcessExitTimeoutInSeconds>120</forkedProcessExitTimeoutInSeconds>
                     </configuration>
                 </plugin>
                 <plugin>
