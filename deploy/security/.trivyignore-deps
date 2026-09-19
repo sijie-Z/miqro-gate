@@ -29,11 +29,14 @@ CVE-2026-8763
 CVE-2026-13506
 #
 # ===========================================================================
-# SECTION 2 — TRACKED BASELINE. These are NOT dismissals and NOT judged
-# unreachable: they are real HIGH/CRITICAL advisories against versions this
-# repo actually resolves to, recorded here so the gate can land and start
-# catching NEW ones. Each row names the live tracker that removes it.
-# DROP a row the moment its tracker lands — a row without a tracker is a bug.
+# SECTION 2 — TRACKED BASELINE. Real HIGH/CRITICAL advisories against
+# versions this repo actually resolves to, recorded so the gate can land and
+# start catching NEW ones. Each row names the live tracker that removes it —
+# a row whose tracker has landed is a bug, not a baseline.
+#
+# Reachability is judged per row below and is NOT what puts a row here; the
+# tracker is. (Section 1 rows, by contrast, are here because they are
+# unreachable and no bump is planned.)
 # ===========================================================================
 #
 # org.postgresql:postgresql 42.7.5 — BOM-managed; backend/persistence-postgres/
