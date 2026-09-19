@@ -86,10 +86,19 @@ public class UsageDeletionService {
      * Confirms and executes the deletion. The token must match the stored hash;
      * expired or already executed requests are rejected. Deletes the window and
      * writes a permanent audit event (the audit chain itself is never deleted).
+     *
+     * <p>
+     * The request row is locked for the whole confirmation, so the "one-time token"
+     * is a single transition even when two confirmations arrive together: the
+     * second one waits on the lock, re-reads the row the first one committed as
+     * {@code EXECUTED} and is rejected as not confirmable. The status predicate on
+     * the update is the same invariant enforced at the write site, so no path can
+     * turn an executed request back into a confirmable one.
+     * </p>
      */
     @Transactional
     public UsageDeletion confirm(UUID tenantId, UUID deletionId, String confirmToken) {
-        UsageDeletion deletion = find(tenantId, deletionId);
+        UsageDeletion deletion = findForUpdate(tenantId, deletionId);
         if (deletion.status() != UsageDeletionStatus.PENDING_CONFIRMATION) {
             throw new ApiException(HttpStatus.CONFLICT, "DELETION_NOT_CONFIRMABLE",
                     "The deletion request is not awaiting confirmation");
@@ -113,12 +122,16 @@ public class UsageDeletionService {
                         .addValue("to", java.sql.Timestamp.from(deletion.periodTo())),
                 Long.class);
         Instant now = Instant.now();
-        jdbc.update("""
+        int executed = jdbc.update("""
                 UPDATE usage_deletions
                 SET status = 'EXECUTED', deleted_count = :deleted, executed_at = :executedAt
-                WHERE id = :id
+                WHERE id = :id AND status = 'PENDING_CONFIRMATION'
                 """, new MapSqlParameterSource("deleted", deleted).addValue("executedAt", java.sql.Timestamp.from(now))
                 .addValue("id", deletionId));
+        if (executed != 1) {
+            throw new ApiException(HttpStatus.CONFLICT, "DELETION_NOT_CONFIRMABLE",
+                    "The deletion request is not awaiting confirmation");
+        }
         auditService.record(tenantId, deletion.requestedBy(), "USAGE_DELETE", "DELETION", deletionId,
                 "{\"deletionId\":\"" + deletionId + "\",\"from\":\"" + deletion.periodFrom() + "\",\"to\":\""
                         + deletion.periodTo() + "\",\"deletedCount\":" + deleted + "}",
@@ -147,6 +160,21 @@ public class UsageDeletionService {
     private UsageDeletion find(UUID tenantId, UUID deletionId) {
         List<UsageDeletion> found = jdbc.query("""
                 SELECT * FROM usage_deletions WHERE id = :id AND tenant_id = :tenantId
+                """, new MapSqlParameterSource("id", deletionId).addValue("tenantId", tenantId), ROW_MAPPER);
+        if (found.isEmpty()) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "DELETION_NOT_FOUND",
+                    "Deletion request not found or not visible");
+        }
+        return found.get(0);
+    }
+
+    /**
+     * Same lookup as {@link #find}, but takes the row lock that serialises
+     * concurrent confirmations of the same request.
+     */
+    private UsageDeletion findForUpdate(UUID tenantId, UUID deletionId) {
+        List<UsageDeletion> found = jdbc.query("""
+                SELECT * FROM usage_deletions WHERE id = :id AND tenant_id = :tenantId FOR UPDATE
                 """, new MapSqlParameterSource("id", deletionId).addValue("tenantId", tenantId), ROW_MAPPER);
         if (found.isEmpty()) {
             throw new ApiException(HttpStatus.NOT_FOUND, "DELETION_NOT_FOUND",
