@@ -22,3 +22,4 @@
 =======
 - [ADR-0022：语义缓存启用评估——正文向量化出网关的合规边界（Accepted：维持不启用 + 批准 P0/P1 测量，P2 若做则 B2 优先）](0022-semantic-cache-evaluation.md)
 >>>>>>> origin/develop
+- [ADR-0025：Agent 生命周期补齐——删除 / 重新启用 / 改名（草案，待所有者拍板）](0025-agent-lifecycle.md)

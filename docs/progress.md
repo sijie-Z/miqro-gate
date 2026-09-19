@@ -2,6 +2,14 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 2026-09-19 会话交接点（ADR-0025：Agent 生命周期补齐，#824）
+
+- **决策文档线，非实现**：新增 `docs/decisions/0025-agent-lifecycle.md`（**Proposed**），把 #824 的四条待拍板展开为「现状坐标 → 逐条分析 → 选项 A–D + 推荐 D → 落地形态 → 未决项」。零代码改动。
+- **两处事实更正/发现（对 #824 原文）**：① issue 说「停用的 Agent 仍锁住凭证」**不成立**——凭证侧的锁查询带 `status='ACTIVE'`（`AdminCredentialService.java:355-361`、`AgentRepositoryImpl.java:68-76`），**停用即释放**；② 真实约束是 `uq_agents_tenant_credential` **不看状态**（`V17:24-26`）→ 停用的 Agent 仍占着「该凭证 → 唯一 Agent」的名额，新建同凭证 Agent 被 `AGENT_CREDENTIAL_TAKEN` 挡住——**僵尸 Agent 的形状是「名额占死」而非「凭证锁死」**。
+- **硬删除可行的前提已核实**：迁移中 `git grep "REFERENCES agents"` **零命中**，且没有任何表按 Agent 维度记录用量（`agent_id` 零命中）——删除不影响任何历史统计；代价只剩「不可逆」与「审计按 id 反查不到名字」，故 ADR 要求 `AGENT_DELETE` 审计**带名称快照**。
+- **推荐 D（enable + 改名 + 硬删除）**，与 A/B/C 的对比见 ADR §3；`enable` 被写成**有条件的逆操作**（停用期间凭证可能已停用或已轮换，需前置校验）——这是本 ADR 的第二处发现。
+- **下一步**：所有者拍板；拍板前 #824 保持 OPEN。
+
 ## 会话交接点 2026-09-19（P1 阶段一：离线 probe 集评测出结论，#930）
 
 - **结论：按当前本地档位不进入 P2，维持 A（语义缓存继续不启用）**。报告 `docs/semantic-cache-probe-phase1-2026-09-19.md`，
