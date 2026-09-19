@@ -2740,7 +2740,7 @@ All existing `SingleFile`/`MultiVersion`/`HmacKeys` tests updated with `ensureSt
 - **Origin production mode**: `OriginInterceptorProductionTest` (3 tests) — missing Origin rejected in production, allowed origin passes, unknown origin rejected.
 - **Audit chain integrity**: `AuditChainIntegrityTest` (3 tests) — chain survives restart, content tamper breaks chain, concurrent writers produce valid chain.
 - **Custom CSRF cookie name**: `CustomCsrfCookieNameTest` — CSRF returned from configured cookie name, default name not used.
-- **Production profile**: `AuthIntegrationTestProduction` — production profile starts with valid config.
+- **Production profile**: `AuthProductionProfileIntegrationTest` — production profile starts with valid config.
 - **Test admin endpoint**: `AdminTestController` (test-only) — `/api/v1/admin/test`, `/api/v1/admin/users/{userId}`.
 
 ### Targeted verification repair (2026-07-22)
@@ -2748,7 +2748,7 @@ All existing `SingleFile`/`MultiVersion`/`HmacKeys` tests updated with `ensureSt
 Addressing 8 verified blockers found in commit `ed71f42`:
 
 1. **OriginInterceptor missing-Origin production branch**: Returns `false` (not `true`) after `sendRejection`. Added `requestId` to RFC 9457 response. `OriginInterceptorProductionTest` proves handler is not reached.
-2. **cookieSecure/production binding**: `ProductionStartupValidator` validates cookieSecure and originAllowlist on production mode at `@PostConstruct`; fails fast rather than auto-enabling. `AuthIntegrationTestProduction` starts production-profile context.
+2. **cookieSecure/production binding**: `ProductionStartupValidator` validates cookieSecure and originAllowlist on production mode at `@PostConstruct`; fails fast rather than auto-enabling. `AuthProductionProfileIntegrationTest` starts production-profile context.
 3. **Bootstrap DB-level serialization**: `lockTenantForBootstrap()` uses `SELECT ... FOR UPDATE` on tenant row. `BootstrapConcurrencyTest` proves exactly one admin committed under concurrency with distinct usernames.
 4. **login() transaction removed**: `login()` no longer `@Transactional`. `recordFailedLogin` uses `findByIdForUpdate()` under row lock to compute increment from fresh row. `LOGIN_FAILED` + `ACCOUNT_LOCKED` audit events recorded. `LoginFailureConcurrencyTest` proves deterministic count under concurrency.
 5. **Audit hash content coverage**: SHA-256 over canonical encoding of all immutable fields + previous hash. DB-level lock (final: `pg_advisory_xact_lock`; initial repair used `SELECT ... FOR UPDATE`) replaces `ReentrantLock`. Temporary arrays zeroed. `AuditChainIntegrityTest` proves restart, tamper detection, concurrent writers.
@@ -2779,7 +2779,7 @@ Integration tests (PostgreSQL Testcontainers, Linux only): **100 tests, 0 failur
   - `LoginFailureConcurrencyTest`: 2/2 PASS
   - `OriginInterceptorProductionTest`: 3/3 PASS
   - `CustomCsrfCookieNameTest`: 1/1 PASS
-  - `AuthIntegrationTestProduction`: 1/1 PASS
+  - `AuthProductionProfileIntegrationTest`: 1/1 PASS
   - `CryptoIntegrationTest`: 10/10 PASS
   - Persistence integration tests: 45 tests PASS
   - Control Plane smoke: 2/2 PASS
@@ -2822,7 +2822,7 @@ Integration tests (PostgreSQL Testcontainers, Linux only): **100 tests, 0 failur
 - `OriginInterceptorProductionTest.java` — new: 3 production Origin tests
 - `AuditChainIntegrityTest.java` — new: 3 audit chain tests
 - `CustomCsrfCookieNameTest.java` — new: custom CSRF cookie name test
-- `AuthIntegrationTestProduction.java` — new: production profile startup test
+- `AuthProductionProfileIntegrationTest.java` — new: production profile startup test
 - `docs/api-contract.md` — updated: bootstrap, CSRF, Origin, production, error semantics
 - `docs/configuration-reference.md` — updated: production constraints, cookie, allowlist, CSRF cookie name
 - `docs/progress.md` — updated (this file)
