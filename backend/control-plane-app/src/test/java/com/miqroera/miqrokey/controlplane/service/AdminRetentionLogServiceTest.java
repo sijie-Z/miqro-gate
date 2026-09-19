@@ -211,7 +211,8 @@ class AdminRetentionLogServiceTest {
     void exportReadsInBoundedChunks() {
         // What this pins: the export used to ask for EXPORT_LIMIT + 1 rows in a single
         // query and build the whole document in memory before writing a byte. Memory is
-        // bounded by the page size now — the stub answers one full page and then an empty
+        // bounded by the page size now — the stub answers one full page and then an
+        // empty
         // page, and the recorded LIMIT proves no read ever asks for more than a chunk.
         NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
         List<AdminRetentionLogService.RawRow> fullPage = new ArrayList<>();

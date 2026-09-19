@@ -391,7 +391,8 @@ class AdminRetentionLogAuditIntegrationTest {
     @Test
     @DisplayName("#1023: the export streams across page boundaries without losing rows")
     void exportStreamsAcrossPageBoundaries() throws Exception {
-        // One full page plus a partial one: the reader has to ask for a second page with
+        // One full page plus a partial one: the reader has to ask for a second page
+        // with
         // the keyset cursor, not just serve whatever one query happened to return.
         int rows = AdminRetentionLogService.EXPORT_CHUNK + 30;
         EncryptedSecret secret = crypto.encrypt("bulk".getBytes(StandardCharsets.UTF_8), TENANT_ID,
@@ -411,8 +412,7 @@ class AdminRetentionLogAuditIntegrationTest {
 
         MvcResult result = mockMvc.perform(get("/api/v1/admin/retention-logs/export").cookie(sessionCookie))
                 .andExpect(status().isOk())
-                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, containsString("text/csv")))
-                .andReturn();
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, containsString("text/csv"))).andReturn();
 
         String csv = result.getResponse().getContentAsString();
         assertThat(csv.lines().count()).as("header plus every seeded row").isEqualTo(rows + 1L);
