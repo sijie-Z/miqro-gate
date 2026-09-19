@@ -31,11 +31,25 @@ class IndexHygieneTest extends AbstractPostgresTest {
     private NamedParameterJdbcTemplate jdbc;
 
     /**
-     * Groups every non-primary index of the public schema by the exact thing
-     * that makes it redundant — table, key columns (in order), uniqueness and
-     * partial-index predicate — and returns the groups that hold more than one
-     * index. No index in this schema uses INCLUDE, so {@code indkey} is the
-     * full key column list.
+     * Groups every non-primary index of the public schema by everything that
+     * makes one index redundant with another, and returns the groups holding
+     * more than one index.
+     * <p>
+     * Two indexes are only interchangeable when they agree on the whole key
+     * definition, so the grouping covers every catalog attribute that changes
+     * which queries an index can serve:
+     * <ul>
+     *   <li>{@code indkey} + {@code indnkeyatts} — key columns in order, kept
+     *       separate from any {@code INCLUDE} payload columns;</li>
+     *   <li>{@code indclass} — operator class, so a {@code text_pattern_ops}
+     *       companion index (which serves {@code LIKE 'prefix%'}) is not treated
+     *       as a duplicate of the default-opclass index;</li>
+     *   <li>{@code indcollation} — collation;</li>
+     *   <li>{@code indoption} — per-column {@code DESC} / {@code NULLS FIRST};</li>
+     *   <li>{@code indisunique} and the partial-index predicate.</li>
+     * </ul>
+     * Without the first four, a legitimate ordering or opclass variant would be
+     * reported as redundant and fail the build for no reason.
      */
     private static final String DUPLICATE_INDEX_SQL = """
             SELECT c.relname || ' :: ' || array_agg(ic.relname ORDER BY ic.relname)::text AS dup
@@ -48,6 +62,10 @@ class IndexHygieneTest extends AbstractPostgresTest {
               AND NOT i.indisprimary
             GROUP BY c.relname,
                      i.indkey::text,
+                     i.indnkeyatts,
+                     i.indclass::text,
+                     i.indcollation::text,
+                     i.indoption::text,
                      COALESCE(pg_get_expr(i.indpred, i.indrelid), ''),
                      i.indisunique
             HAVING count(*) > 1
@@ -60,8 +78,8 @@ class IndexHygieneTest extends AbstractPostgresTest {
         List<String> duplicates = jdbc.queryForList(DUPLICATE_INDEX_SQL, Map.of(), String.class);
 
         assertThat(duplicates)
-                .as("Redundant indexes (identical table + key columns + predicate). "
-                        + "Each duplicate doubles index write cost and bloat on every INSERT.")
+                .as("Redundant indexes (identical key definition, uniqueness and predicate). "
+                        + "Every duplicate is a b-tree maintained for nothing on each write.")
                 .isEmpty();
     }
 }
