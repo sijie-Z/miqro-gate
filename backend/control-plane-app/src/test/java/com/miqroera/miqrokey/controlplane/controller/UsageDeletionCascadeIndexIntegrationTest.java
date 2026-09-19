@@ -256,14 +256,29 @@ class UsageDeletionCascadeIndexIntegrationTest {
         jdbc.getJdbcTemplate().execute("ANALYZE usage_event");
     }
 
+    /**
+     * Removes only the rows this test owns, in child-first order.
+     *
+     * <p>
+     * The container is a static singleton shared by every control-plane integration
+     * test in the JVM ({@link AbstractControlPlaneIntegrationTest}) and Flyway
+     * migrates it exactly once, so the tenant seeded by {@code V1__core_tables.sql}
+     * ({@code 00000000-0000-0000-0000-000000000001}) can never come back once it is
+     * deleted. The bootstrap endpoint locks precisely that row and requires it to
+     * exist ({@code UserRepositoryImpl.lockTenantForBootstrap}:
+     * {@code SELECT id FROM tenants WHERE id
+     * = :id FOR UPDATE}, exactly one row expected), so an unscoped
+     * {@code DELETE FROM tenants} turns the {@code POST /api/v1/auth/bootstrap} of
+     * <b>every</b> test class that runs after this one into a 500. Every statement
+     * below is therefore scoped to {@link #TENANT}.
+     * </p>
+     */
     private void reset() {
+        MapSqlParameterSource tenant = new MapSqlParameterSource("tenantId", TENANT);
         for (String table : List.of("usage_adjustments", "usage_deletions", "export_tasks", "usage_event",
-                "admin_audit_events", "users", "tenants")) {
-            try {
-                jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
-            } catch (Exception ignored) {
-                // child-first order above is the canonical one for these tables
-            }
+                "admin_audit_events", "users")) {
+            jdbc.update("DELETE FROM " + table + " WHERE tenant_id = :tenantId", tenant);
         }
+        jdbc.update("DELETE FROM tenants WHERE id = :tenantId", tenant);
     }
 }
