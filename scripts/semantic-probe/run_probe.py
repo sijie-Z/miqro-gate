@@ -77,7 +77,12 @@ def embed_st(texts: list[str], model_name: str, batch_size: int) -> np.ndarray:
     vecs = model.encode(
         texts, batch_size=batch_size, normalize_embeddings=True, convert_to_numpy=True
     )
-    return np.asarray(vecs, dtype=np.float64)
+    vecs = np.asarray(vecs, dtype=np.float64)
+    # Normalize again here: `normalize_embeddings=True` is not honoured by every
+    # model configuration (Qwen3-Embedding-0.6B returned cosines above 1.0), and
+    # the whole calibration assumes unit vectors so that dot == cosine.
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    return vecs / np.where(norms == 0, 1.0, norms)
 
 
 def embed_openai(
@@ -383,7 +388,9 @@ def main() -> None:
             "embed_seconds": round(elapsed, 2),
             "batch_size": args.batch_size,
             "python": platform.python_version(),
-            "command": " ".join([sys.executable, "run_probe.py"] + sys.argv[1:]),
+            # Portable form on purpose: the artifacts are committed, and the
+            # interpreter's absolute path would leak the operator's machine.
+            "command": "python scripts/semantic-probe/run_probe.py " + " ".join(sys.argv[1:]),
         },
         "positive": describe(pos_scores),
         "hard_negative": describe(neg_scores),
@@ -398,6 +405,16 @@ def main() -> None:
         "operating_points": operating_points(pos_scores, neg_scores),
         "histogram": histogram(pos_scores, neg_scores),
         "negative_by_dim": negative_by_dim,
+        "pairs": [
+            {
+                "id": row["id"],
+                "label": row["label"],
+                "dim": row["dim"],
+                "score": float(score),
+                "lexical": float(lex),
+            }
+            for row, score, lex in zip(rows, scores, lexical)
+        ],
         "top_negative_hits": [
             {**{k: neg_rows[i][k] for k in ("id", "dim", "a", "b", "reason")}, "score": float(neg_scores[i])}
             for i in order_neg
