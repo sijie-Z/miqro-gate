@@ -1,0 +1,148 @@
+{"id":"p01","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"帮我修复登录时的空指针异常","b":"登录这里为什么抛 NullPointerException，帮我修一下","reason":"口语↔书面互换，术语等值"}
+{"id":"p02","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"把这段代码里的魔法数字改成常量","b":"这段代码的魔法值提成常量吧","reason":"同义改写"}
+{"id":"p03","label":"positive","dim":"paraphrase","lang":"zh","domain":"general","a":"解释一下这个报错是什么意思","b":"这个错误信息怎么理解？","reason":"同义"}
+{"id":"p04","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"给这个函数加一行注释","b":"帮这个函数补个注释","reason":"同义"}
+{"id":"p05","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"这段正则为什么匹配不到邮箱","b":"我的正则匹配不到 email，为什么","reason":"换词（术语↔英文）"}
+{"id":"p06","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"把这个 SQL 改成分页查询","b":"这条 SQL 帮我加上分页","reason":"同义"}
+{"id":"p07","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"帮我写一个 Vue3 的防抖 hook","b":"用 Vue3 写个 useDebounce 吧","reason":"同义（表述具体化）"}
+{"id":"p08","label":"positive","dim":"paraphrase","lang":"zh","domain":"ops","a":"这个接口的 QPS 上限是多少","b":"这个 API 每秒最多能调多少次","reason":"术语↔白话"}
+{"id":"p09","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"帮我把这个 JSON 格式化一下","b":"这段 JSON 排版整理下","reason":"同义"}
+{"id":"p10","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"为什么我的单元测试一直是红的","b":"单测一直失败是什么原因","reason":"同义"}
+{"id":"p11","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"帮我看看这个内存泄漏在哪里","b":"这个内存泄露（泄漏）怎么排查","reason":"错别字变体"}
+{"id":"p12","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"给这段逻辑补一个边界条件判断","b":"这里是不是少了个边界情况的判断","reason":"同义"}
+{"id":"p13","label":"positive","dim":"paraphrase","lang":"mixed","domain":"ops","a":"把配置改成从环境变量读取","b":"这个配置能不能走 env 变量","reason":"术语等值"}
+{"id":"p14","label":"positive","dim":"paraphrase","lang":"zh","domain":"ops","a":"这个 Docker 镜像为什么这么大","b":"镜像体积为什么这么大，怎么瘦身","reason":"同义（补充疑问）"}
+{"id":"p15","label":"positive","dim":"paraphrase","lang":"zh","domain":"general","a":"帮我解释一下什么是幂等","b":"幂等是什么意思，举个例子","reason":"同义"}
+{"id":"p16","label":"positive","dim":"paraphrase","lang":"en","domain":"ops","a":"How do I enable gzip compression on nginx?","b":"What is the way to turn on gzip in nginx?","reason":"纯英同义"}
+{"id":"p17","label":"positive","dim":"paraphrase","lang":"mixed","domain":"code","a":"帮我写一段把 CSV 转成 JSON 的 Python","b":"Python 里 CSV 转 JSON 的脚本写一个","reason":"中英混排同义"}
+{"id":"p18","label":"positive","dim":"paraphrase","lang":"mixed","domain":"code","a":"这个报错 stack trace 的第一行怎么看","b":"怎么读懂这个异常堆栈的第一行","reason":"同义"}
+{"id":"p19","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"帮我把这个长函数拆小","b":"这个函数太长了，帮我拆分一下","reason":"同义"}
+{"id":"p20","label":"positive","dim":"paraphrase","lang":"mixed","domain":"ops","a":"Redis 缓存穿透是什么意思","b":"解释下缓存穿透这个概念","reason":"同义"}
+{"id":"p21","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"给我一个正则匹配手机号","b":"写个手机号的正则表达式","reason":"同义"}
+{"id":"p22","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"这个表要不要加索引","b":"这张表需要索引吗","reason":"同义"}
+{"id":"p23","label":"positive","dim":"paraphrase","lang":"mixed","domain":"code","a":"帮我 review 一下这段 TS 类型","b":"看看我这个 TypeScript 类型写得对不对","reason":"同义"}
+{"id":"p24","label":"positive","dim":"paraphrase","lang":"zh","domain":"ops","a":"git 怎么撤销上一次 commit 但保留改动","b":"上一次提交想撤掉，代码别丢，怎么做","reason":"同义"}
+{"id":"p25","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"这个循环为什么死循环了","b":"这段 while 卡死是什么原因","reason":"同义（换现象描述）"}
+{"id":"p26","label":"positive","dim":"paraphrase","lang":"mixed","domain":"code","a":"把这段 Java 改成用 Stream 写","b":"这段代码能用 stream 重写吗","reason":"同义"}
+{"id":"p27","label":"positive","dim":"paraphrase","lang":"mixed","domain":"ops","a":"这个接口返回 502 怎么排查","b":"上游返回 Bad Gateway，从哪里查起","reason":"术语等值"}
+{"id":"p28","label":"positive","dim":"paraphrase","lang":"zh","domain":"general","a":"什么是最终一致性","b":"最终一致性怎么理解","reason":"同义"}
+{"id":"p29","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"帮我写一个统计每天新增用户的 SQL","b":"按天统计注册用户数的 SQL 怎么写","reason":"同义"}
+{"id":"p30","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"这个异常是空指针还是数组越界","b":"报的是 NPE 还是下标越界","reason":"术语等值"}
+{"id":"p31","label":"positive","dim":"paraphrase","lang":"zh","domain":"ops","a":"服务重启后日志在哪里看","b":"重启之后日志文件在哪个目录","reason":"同义"}
+{"id":"p32","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"帮我给这个类写单测","b":"这个类补一下单元测试","reason":"同义"}
+{"id":"p33","label":"positive","dim":"paraphrase","lang":"mixed","domain":"ops","a":"k8s pod 一直 CrashLoopBackOff 怎么办","b":"容器反复重启怎么排查","reason":"稳定现象↔术语"}
+{"id":"p34","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"这个前端表格的分页怎么做","b":"表格怎么做分页","reason":"同义（限定词省略）"}
+{"id":"p35","label":"positive","dim":"paraphrase","lang":"zh","domain":"general","a":"解释一下什么是蓝绿发布","b":"蓝绿部署是什么意思","reason":"同义"}
+{"id":"p36","label":"positive","dim":"paraphrase","lang":"en","domain":"code","a":"How do I revert a git commit without losing changes?","b":"What is the way to undo the last commit but keep the edits?","reason":"纯英同义"}
+{"id":"p37","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"帮我把这个 if-else 改成 switch","b":"这段分支能改成 switch 吗","reason":"同义"}
+{"id":"p38","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"这段代码会不会有并发问题","b":"这里线程安全吗，会不会出问题","reason":"同义（换提问角度）"}
+{"id":"p39","label":"positive","dim":"paraphrase","lang":"mixed","domain":"code","a":"帮我看看这个 npm 依赖冲突","b":"node_modules 解析冲突怎么解决","reason":"同义"}
+{"id":"p40","label":"positive","dim":"paraphrase","lang":"mixed","domain":"code","a":"给我一个把时间戳转成日期的 JS 函数","b":"写个时间戳转日期格式的方法","reason":"同义"}
+{"id":"p41","label":"positive","dim":"paraphrase","lang":"zh","domain":"general","a":"什么是死锁，怎么避免","b":"死锁是怎么产生的，怎么预防","reason":"同义"}
+{"id":"p42","label":"positive","dim":"paraphrase","lang":"zh","domain":"ops","a":"服务器磁盘满了怎么查","b":"磁盘空间满了，先看哪里","reason":"同义"}
+{"id":"p43","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"帮我优化这条 SQL 的执行计划","b":"这条 SQL 很慢，执行计划怎么调","reason":"同义"}
+{"id":"p44","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"这个正则能不能匹配多行","b":"多行文本的正则怎么写","reason":"同义"}
+{"id":"p45","label":"positive","dim":"paraphrase","lang":"zh","domain":"general","a":"解释一下什么是灰度发布","b":"灰度发布是什么意思","reason":"同义"}
+{"id":"p46","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"帮我把这个数组去重","b":"数组怎么去重","reason":"同义"}
+{"id":"p47","label":"positive","dim":"paraphrase","lang":"mixed","domain":"code","a":"这个 Vue 组件为什么不响应式更新","b":"数据变了但视图没更新，是什么原因","reason":"现象↔术语"}
+{"id":"p48","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"帮我写一个接口限流的中间件","b":"怎么做接口限流","reason":"同义（具体↔一般）"}
+{"id":"p49","label":"positive","dim":"paraphrase","lang":"zh","domain":"general","a":"什么是事件驱动架构","b":"事件驱动该怎么理解","reason":"同义"}
+{"id":"p50","label":"positive","dim":"paraphrase","lang":"zh","domain":"ops","a":"这个 git merge 冲突怎么解","b":"合并冲突怎么处理","reason":"同义"}
+{"id":"p51","label":"positive","dim":"paraphrase","lang":"zh","domain":"ops","a":"怎么查看当前的数据库连接数","b":"现在有多少个连接在用，怎么看","reason":"同义"}
+{"id":"p52","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"帮我把这个接口加上参数校验","b":"这个 API 怎么做入参校验","reason":"同义"}
+{"id":"p53","label":"positive","dim":"paraphrase","lang":"zh","domain":"general","a":"什么是分布式锁","b":"分布式锁一般怎么实现","reason":"同义"}
+{"id":"p54","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"这段代码的时间复杂度是多少","b":"这个算法复杂度怎么算","reason":"同义"}
+{"id":"p55","label":"positive","dim":"paraphrase","lang":"en","domain":"code","a":"How do I mock a static method in Java tests?","b":"What is the way to mock static methods with Mockito?","reason":"纯英同义"}
+{"id":"p56","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"帮我把这个 XML 解析成对象","b":"这段 XML 怎么解析成对象","reason":"同义"}
+{"id":"p57","label":"positive","dim":"paraphrase","lang":"zh","domain":"ops","a":"怎么给这个服务加健康检查","b":"健康检查接口怎么配","reason":"同义"}
+{"id":"p58","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"帮我写一个把 Markdown 转 HTML 的函数","b":"Markdown 转 HTML 怎么实现","reason":"同义"}
+{"id":"p59","label":"positive","dim":"paraphrase","lang":"zh","domain":"code","a":"这段代码跑不通，帮我看看哪里不对","b":"运行报了错，不确定问题在哪","reason":"较大改写的模糊求助（较难正例）"}
+{"id":"p60","label":"positive","dim":"paraphrase","lang":"zh","domain":"general","a":"帮我看看这个方案有没有问题","b":"这个设计你觉得靠谱吗，有什么坑","reason":"较大改写的口语化（较难正例）"}
+{"id":"n01","label":"hard_negative","dim":"file","lang":"zh","domain":"ops","a":"把 build.gradle 的 Java 版本升到 21","b":"把 pom.xml 的 Java 版本升到 21","reason":"文件不同：Gradle 与 Maven 的改法不同，复用会改错构建文件"}
+{"id":"n02","label":"hard_negative","dim":"file","lang":"zh","domain":"code","a":"修复 UserService.java 的 bug","b":"修复 OrderService.java 的 bug","reason":"文件不同：两个类的问题完全不同"}
+{"id":"n03","label":"hard_negative","dim":"file","lang":"zh","domain":"code","a":"帮我删掉这个测试用例","b":"帮我删掉这个测试数据库","reason":"对象不同：删代码与删数据不可互换"}
+{"id":"n04","label":"hard_negative","dim":"file","lang":"zh","domain":"code","a":"把 UserController 的日志补上","b":"把 UserService 的日志补上","reason":"文件不同：注入的 logger 与位置都不同"}
+{"id":"n05","label":"hard_negative","dim":"file","lang":"zh","domain":"general","a":"改一下 README 的安装说明","b":"改一下 CONTRIBUTING 的安装说明","reason":"文件不同：目标文档不同"}
+{"id":"n06","label":"hard_negative","dim":"file","lang":"zh","domain":"code","a":"在 users 表加一个字段","b":"在 orders 表加一个字段","reason":"对象不同：表不同，DDL 与影响面都不同"}
+{"id":"n07","label":"hard_negative","dim":"file","lang":"zh","domain":"code","a":"给商品接口加个缓存","b":"给订单接口加个缓存","reason":"对象不同：缓存键与失效策略不同"}
+{"id":"n08","label":"hard_negative","dim":"file","lang":"mixed","domain":"code","a":"把 index.ts 改成具名导出","b":"把 router.ts 改成具名导出","reason":"文件不同：改错文件会破坏入口"}
+{"id":"n09","label":"hard_negative","dim":"file","lang":"mixed","domain":"code","a":"给 api.ts 补上类型定义","b":"给 store.ts 补上类型定义","reason":"文件不同：类型来源不同"}
+{"id":"n10","label":"hard_negative","dim":"file","lang":"zh","domain":"ops","a":"把前端 Dockerfile 的基础镜像换成 alpine","b":"把后端 Dockerfile 的基础镜像换成 alpine","reason":"对象不同：两个镜像的构建方式不同"}
+{"id":"n11","label":"hard_negative","dim":"direction","lang":"zh","domain":"ops","a":"把 80 端口改成 8080","b":"把 8080 端口改成 80","reason":"方向相反：源与目标是反的"}
+{"id":"n12","label":"hard_negative","dim":"direction","lang":"zh","domain":"ops","a":"把超时时间调大到 30 秒","b":"把超时时间调小到 30 秒","reason":"方向相反：调大与调小"}
+{"id":"n13","label":"hard_negative","dim":"direction","lang":"zh","domain":"code","a":"删除这个文件的最后 10 行","b":"删除这个文件的前 10 行","reason":"位置相反：首与尾"}
+{"id":"n14","label":"hard_negative","dim":"direction","lang":"zh","domain":"code","a":"把这段代码从 Java 转成 Kotlin","b":"把这段代码从 Kotlin 转成 Java","reason":"方向相反：转换方向不同"}
+{"id":"n15","label":"hard_negative","dim":"direction","lang":"zh","domain":"ops","a":"把数据从 MySQL 迁移到 PostgreSQL","b":"把数据从 PostgreSQL 迁移到 MySQL","reason":"方向相反：迁移方向不同"}
+{"id":"n16","label":"hard_negative","dim":"direction","lang":"zh","domain":"code","a":"把同步调用改成异步","b":"把异步调用改成同步","reason":"方向相反：改法互逆"}
+{"id":"n17","label":"hard_negative","dim":"direction","lang":"zh","domain":"code","a":"把大表拆成小表","b":"把小表合并成大表","reason":"方向相反：拆与合"}
+{"id":"n18","label":"hard_negative","dim":"direction","lang":"zh","domain":"ops","a":"把副本数从 2 扩到 4","b":"把副本数从 4 缩到 2","reason":"方向相反：扩与缩"}
+{"id":"n19","label":"hard_negative","dim":"direction","lang":"mixed","domain":"code","a":"把字段从 snake_case 改成 camelCase","b":"把字段从 camelCase 改成 snake_case","reason":"方向相反：命名风格互换"}
+{"id":"n20","label":"hard_negative","dim":"direction","lang":"zh","domain":"ops","a":"把日志从文件输出改成控制台输出","b":"把日志从控制台输出改成文件输出","reason":"方向相反：输出目标互换"}
+{"id":"n21","label":"hard_negative","dim":"param","lang":"zh","domain":"ops","a":"把日志级别改成 DEBUG","b":"把日志级别改成 WARN","reason":"目标值不同：日志级别不同，输出量级差很多"}
+{"id":"n22","label":"hard_negative","dim":"param","lang":"zh","domain":"ops","a":"把缓存时间设为 5 分钟","b":"把缓存时间设为 5 小时","reason":"量级不同：300 秒与 18000 秒"}
+{"id":"n23","label":"hard_negative","dim":"param","lang":"zh","domain":"code","a":"用 2 空格缩进","b":"用 4 空格缩进","reason":"参数值不同：格式化配置不同"}
+{"id":"n24","label":"hard_negative","dim":"param","lang":"en","domain":"code","a":"Rename this field to userName","b":"Rename this field to username","reason":"大小写敏感：目标标识符不同"}
+{"id":"n25","label":"hard_negative","dim":"param","lang":"mixed","domain":"ops","a":"把 pool size 设成 10","b":"把 pool size 设成 100","reason":"数值不同：连接池容量差一个数量级"}
+{"id":"n26","label":"hard_negative","dim":"param","lang":"zh","domain":"ops","a":"端口用 5432","b":"端口用 3306","reason":"目标值不同：PostgreSQL 与 MySQL 的默认端口"}
+{"id":"n27","label":"hard_negative","dim":"param","lang":"zh","domain":"code","a":"把重试次数设成 3 次","b":"把重试次数设成 5 次","reason":"数值不同：重试策略不同"}
+{"id":"n28","label":"hard_negative","dim":"param","lang":"mixed","domain":"ops","a":"超时设成 5s","b":"超时设成 50s","reason":"数值不同：一个数量级之差"}
+{"id":"n29","label":"hard_negative","dim":"language","lang":"zh","domain":"code","a":"用中文解释这个函数","b":"用英文解释这个函数","reason":"输出语言要求不同：答案语言不可互换"}
+{"id":"n30","label":"hard_negative","dim":"language","lang":"zh","domain":"code","a":"把这段注释翻译成日语","b":"把这段注释翻译成德语","reason":"目标语言不同"}
+{"id":"n31","label":"hard_negative","dim":"language","lang":"zh","domain":"ops","a":"用中文写提交信息","b":"用英文写提交信息","reason":"输出语言不同：提交信息语言是团队约定"}
+{"id":"n32","label":"hard_negative","dim":"language","lang":"zh","domain":"code","a":"回答用中文，代码注释用英文","b":"回答用英文，代码注释用中文","reason":"语言分配相反"}
+{"id":"n33","label":"hard_negative","dim":"language","lang":"zh","domain":"general","a":"把这份文档译成简体中文","b":"把这份文档译成繁体中文","reason":"目标语种变体不同：用词与字形都不同"}
+{"id":"n34","label":"hard_negative","dim":"language","lang":"en","domain":"code","a":"Explain this code in Chinese","b":"Explain this code in Japanese","reason":"输出语言不同"}
+{"id":"n35","label":"hard_negative","dim":"language","lang":"zh","domain":"code","a":"把变量名改成英文","b":"把变量名改成中文","reason":"目标语言相反：标识符语言直接影响可读性与工具链"}
+{"id":"n36","label":"hard_negative","dim":"language","lang":"zh","domain":"ops","a":"把报错信息翻译成中文","b":"把报错信息翻译成英文","reason":"翻译方向相反"}
+{"id":"n37","label":"hard_negative","dim":"env","lang":"zh","domain":"ops","a":"生产环境的配置怎么改","b":"测试环境的配置怎么改","reason":"环境不同：改错环境是生产事故"}
+{"id":"n38","label":"hard_negative","dim":"env","lang":"zh","domain":"code","a":"这个 bug 在 v1.2 修了吗","b":"这个 bug 在 v2.0 修了吗","reason":"版本不同"}
+{"id":"n39","label":"hard_negative","dim":"env","lang":"zh","domain":"ops","a":"在 Windows 上怎么装","b":"在 macOS 上怎么装","reason":"平台不同：安装方式完全不同"}
+{"id":"n40","label":"hard_negative","dim":"env","lang":"zh","domain":"ops","a":"本地跑不通","b":"线上跑不通","reason":"环境不同：排查方向完全不同"}
+{"id":"n41","label":"hard_negative","dim":"env","lang":"mixed","domain":"code","a":"Node 18 下的写法","b":"Node 20 下的写法","reason":"运行时版本不同：API 可用性不同"}
+{"id":"n42","label":"hard_negative","dim":"env","lang":"mixed","domain":"ops","a":"Docker 里的时区怎么设","b":"K8s 里的时区怎么设","reason":"运行环境不同：配置位置不同"}
+{"id":"n43","label":"hard_negative","dim":"env","lang":"zh","domain":"ops","a":"开发分支怎么发版","b":"发布分支怎么发版","reason":"分支不同：流程与权限不同"}
+{"id":"n44","label":"hard_negative","dim":"env","lang":"zh","domain":"code","a":"Java 17 的语法怎么写","b":"Java 21 的语法怎么写","reason":"语言版本不同：可用语法不同"}
+{"id":"n45","label":"hard_negative","dim":"env","lang":"zh","domain":"ops","a":"测试库的数据怎么清","b":"生产库的数据怎么清","reason":"环境不同：后果天差地别"}
+{"id":"n46","label":"hard_negative","dim":"env","lang":"zh","domain":"ops","a":"灰度环境的开关在哪","b":"预发环境的开关在哪","reason":"环境不同：灰度与预发的用途、开关位置与放量策略都不同"}
+{"id":"n47","label":"hard_negative","dim":"task","lang":"zh","domain":"code","a":"帮我写测试","b":"帮我写文档","reason":"任务不同：产出物不同"}
+{"id":"n48","label":"hard_negative","dim":"task","lang":"zh","domain":"code","a":"帮我 review 这段代码","b":"帮我重构这段代码","reason":"任务不同：只读评审与改代码"}
+{"id":"n49","label":"hard_negative","dim":"task","lang":"zh","domain":"code","a":"帮我解释这段代码","b":"帮我优化这段代码","reason":"任务不同：解释与改造"}
+{"id":"n50","label":"hard_negative","dim":"task","lang":"zh","domain":"code","a":"帮我写个函数","b":"帮我写个测试","reason":"任务不同：实现与验证"}
+{"id":"n51","label":"hard_negative","dim":"task","lang":"zh","domain":"code","a":"这个报错怎么修","b":"这个报错怎么复现","reason":"任务不同：修复与复现的步骤不同"}
+{"id":"n52","label":"hard_negative","dim":"task","lang":"zh","domain":"code","a":"帮我加个日志","b":"帮我加个埋点","reason":"任务不同：日志与指标是两套设施"}
+{"id":"n53","label":"hard_negative","dim":"task","lang":"zh","domain":"ops","a":"帮我改 bug","b":"帮我改需求","reason":"任务不同：缺陷修复与需求变更"}
+{"id":"n54","label":"hard_negative","dim":"task","lang":"mixed","domain":"code","a":"帮我做 code review","b":"帮我做技术方案评审","reason":"任务不同：代码评审与方案评审"}
+{"id":"n55","label":"hard_negative","dim":"task","lang":"zh","domain":"code","a":"帮我把这个功能实现一下","b":"帮我把这个功能测一下","reason":"任务不同：实现与测试"}
+{"id":"n56","label":"hard_negative","dim":"task","lang":"zh","domain":"code","a":"帮我写接口文档","b":"帮我写接口测试","reason":"任务不同：文档与用例"}
+{"id":"n57","label":"hard_negative","dim":"task","lang":"zh","domain":"code","a":"帮我删掉这段死代码","b":"帮我注释掉这段死代码","reason":"任务不同：删除与保留但禁用"}
+{"id":"n58","label":"hard_negative","dim":"task","lang":"zh","domain":"code","a":"帮我查一下这个函数的调用方","b":"帮我查一下这个函数的定义","reason":"任务不同：反向依赖与定义位置"}
+{"id":"n59","label":"hard_negative","dim":"task","lang":"zh","domain":"code","a":"帮我写这个接口的示例代码","b":"帮我写这个接口的压测脚本","reason":"任务不同：示例与压测"}
+{"id":"n60","label":"hard_negative","dim":"task","lang":"zh","domain":"ops","a":"帮我写上线检查清单","b":"帮我写回滚方案","reason":"任务不同：上线与回滚是两套流程"}
+{"id":"L01","label":"positive","dim":"long","lang":"zh","domain":"ops","a":"我们微服务拆分之后，订单服务调用库存服务偶发 504，链路里看到是库存侧数据库连接池被打满了。白天流量高峰时平均十几分钟出现一次，每次持续两三分钟，重启库存服务能临时缓解。想请你给一份排查清单：怎么确认是连接池泄漏还是慢查询占满，怎么定位是哪条 SQL，以及短期内可以做的止血手段有哪些。","b":"订单服务调用库存服务偶尔报 504，追踪链路发现是库存那边的数据库连接池满了。高峰期大概每十几分钟一次，每次两三分钟，重启库存服务可以暂时恢复。请给一份排查步骤：如何判断是连接泄漏还是慢 SQL 占满，怎么找到具体是哪条 SQL，以及可以先做哪些临时止血操作。","reason":"长句同义改写（>200 字，验证长请求是否被长度护栏挡掉）"}
+{"id":"L02","label":"positive","dim":"long","lang":"zh","domain":"code","a":"这段导出任务最近经常失败，日志里写着 OutOfMemoryError，堆栈指向我们把整张表读进内存再写 Excel 的那段。数据量从年初的几十万涨到现在三百多万行。想让你评估一下改成流式导出要动哪些地方，包括分页读取、SXSSF 写盘、以及失败重试怎么补，另外帮我估一下改动范围和工作量。","b":"我们的导出任务老是失败，报 OutOfMemoryError，堆栈在把全表读进内存再写 Excel 的那段代码上。数据量从年初几十万行涨到现在三百多万行。请评估改成流式导出需要改哪些模块，包括分页查询、SXSSF 落盘和失败重试，并估一下改动范围。","reason":"长句同义改写（>200 字）"}
+{"id":"L03","label":"positive","dim":"long","lang":"mixed","domain":"code","a":"我在做前端埋点上报的改造，现在用的是 sendBeacon，但页面关闭时有一部分事件丢失，怀疑是请求体太大被浏览器丢弃。我们的埋点会有 batch 合并，单次最多几十 KB。想请你给一个方案：怎么在不引入第三方 SDK 的前提下，既保证关页时的送达率，又不影响 FCP，最好能给一段可用的 TypeScript 代码。","b":"前端埋点上报想改造一下，现在是 sendBeacon，页面关闭时偶尔丢事件，怀疑 body 太大被浏览器丢了。埋点是批量合并上报的，单次几十 KB。请给方案：不引第三方 SDK 的前提下，兼顾关页送达率和 FCP，附一段能用的 TypeScript 代码。","reason":"长句同义改写（中英混排，>200 字）"}
+{"id":"L04","label":"positive","dim":"long","lang":"zh","domain":"general","a":"下个月要给团队做一次内部技术分享，主题是「从单体到模块化单体」，听众是有两三年经验的开发。希望内容能落到我们自己的代码库上，讲清楚模块边界怎么划、跨模块调用怎么约束、以及什么时候才真的需要拆服务。请帮我列一个大纲，并标出哪些部分需要现场演示。","b":"下个月想给团队做个内部分享，题目是单体到模块化单体的演进，听众是两三年经验的开发同学。希望结合我们自己的代码库，讲清模块边界划分、跨模块调用的约束，以及什么阶段才需要拆成服务。请给一个大纲，标注哪些环节需要 demo。","reason":"长句同义改写（>200 字）"}
+{"id":"L05","label":"hard_negative","dim":"long","lang":"zh","domain":"ops","a":"线上订单库的连接池配置是这样的：最大连接数 50，最小空闲 5，获取连接超时 3000 毫秒，空闲连接回收 600 秒，连接最大存活 1800 秒。高峰期经常出现获取连接超时，日志里能看到 Connection is not available, request timed out after 3000ms。业务反馈白天只是偶发，晚上八点促销期间几乎每分钟都有。请分析这组参数是否合理，并给出具体的调整建议和验证方法，包括怎么确认是连接泄漏还是并发不足。","b":"线上订单库的连接池配置是这样的：最大连接数 50，最小空闲 5，获取连接超时 300 毫秒，空闲连接回收 600 秒，连接最大存活 1800 秒。高峰期经常出现获取连接超时，日志里能看到 Connection is not available, request timed out after 300ms。业务反馈白天只是偶发，晚上八点促销期间几乎每分钟都有。请分析这组参数是否合理，并给出具体的调整建议和验证方法，包括怎么确认是连接泄漏还是并发不足。","reason":"长句中一处数值差异：3000 毫秒与 300 毫秒，同一现象下的结论与调参方向完全不同"}
+{"id":"L06","label":"hard_negative","dim":"long","lang":"zh","domain":"code","a":"下面是我们网关限流的伪代码：先用 GET 取当前计数，判断是否超过阈值，没超过就加一之后 SET 回去，超过阈值就拒绝请求。阈值要求是单实例每秒不超过 200 次。代码在预发环境压测时偶发超限放行，我怀疑是多线程并发读改写造成的。请重点看看有没有并发缺陷，指出具体的竞态点与复现条件，并给出用原子操作改造的方案，最好附一段可直接替换的伪代码。","b":"下面是我们网关限流的伪代码：先用 GET 取当前计数，判断是否超过阈值，没超过就加一之后 SET 回去，超过阈值就拒绝请求。阈值要求是单实例每秒不超过 200 次。代码在预发环境压测时偶发超限放行，我怀疑是网络往返太多造成的。请重点看看有没有性能瓶颈，指出热点路径与耗时分布，并给出本地计数加批量上报的改造方案，最好附一段可直接替换的伪代码。","reason":"任务不同：找并发缺陷与找性能瓶颈，排查方向与改造方案完全不同"}
+{"id":"L07","label":"hard_negative","dim":"long","lang":"zh","domain":"ops","a":"这是一段大约五百字的网关错误日志，包含若干条 upstream connect timeout、upstream response timeout，以及夹在中间的几行 Java 堆栈，时间跨度大约十分钟。日志里同一个上游出现两种超时交替，还有少量 502。请帮我分析这段日志，指出最可能的根因、需要补充哪些观测数据，以及下一步的排查动作清单。","b":"这是一段大约五百字的网关错误日志，包含若干条 upstream connect timeout、upstream response timeout，以及夹在中间的几行 Java 堆栈，时间跨度大约十分钟。日志里同一个上游出现两种超时交替，还有少量 502。请帮我把它整理成一份给同事看的简报，突出时间线、影响面和对外话术。","reason":"任务不同：根因分析与整理汇报，产出物完全不同"}
+{"id":"L08","label":"hard_negative","dim":"long","lang":"zh","domain":"general","a":"我们准备把内部工具链从自研脚手架迁到开源方案，团队二十人，现有脚本三百多个，覆盖构建、发布、环境初始化与巡检四类。请给一份迁移方案，重点讲风险控制和回滚路径：哪些脚本必须先迁、哪些可以长期双轨，以及迁移过程中如何保证随时能退回自研脚手架。","b":"我们准备把内部工具链从自研脚手架迁到开源方案，团队二十人，现有脚本三百多个，覆盖构建、发布、环境初始化与巡检四类。请给一份迁移方案，重点讲人力投入和排期：需要几个人几个月、按什么顺序推进，以及每阶段的验收标准怎么定。","reason":"侧重不同：风险与回滚 对比 人力与排期，两问的产出物不同"}
+{"id":"p61","label":"positive","dim":"minimal_edit","lang":"zh","domain":"ops","a":"把日志级别改成 DEBUG","b":"把日志级别调成 DEBUG","reason":"一处动词替换，取值相同；与 n21（取值不同）构成最小对照"}
+{"id":"p62","label":"positive","dim":"minimal_edit","lang":"zh","domain":"ops","a":"超时设成 30 秒","b":"超时调成 30 秒","reason":"一处动词替换，数值相同；与 n12（方向相反）构成最小对照"}
+{"id":"p63","label":"positive","dim":"minimal_edit","lang":"zh","domain":"code","a":"用 4 空格缩进","b":"缩进改成 4 个空格","reason":"同义重组，参数相同；与 n23（2/4 空格）构成最小对照"}
+{"id":"p64","label":"positive","dim":"minimal_edit","lang":"zh","domain":"ops","a":"把端口改成 8080","b":"端口调成 8080","reason":"一处动词替换，目标值相同；与 n11（方向相反）构成最小对照"}
+{"id":"p65","label":"positive","dim":"minimal_edit","lang":"zh","domain":"code","a":"修复 UserService 的空指针","b":"UserService 里的 NPE 帮忙修一下","reason":"同义改写，对象相同；与 n02（换类名）构成最小对照"}
+{"id":"p66","label":"positive","dim":"minimal_edit","lang":"zh","domain":"code","a":"给 users 表加个索引","b":"users 表加个索引吧","reason":"语序调整，对象相同；与 n06（换表名）构成最小对照"}
+{"id":"p67","label":"positive","dim":"minimal_edit","lang":"zh","domain":"ops","a":"把缓存时间设为 5 分钟","b":"缓存时间设成 5 分钟吧","reason":"一处动词替换，数值相同；与 n22（5 分钟/5 小时）构成最小对照"}
+{"id":"p68","label":"positive","dim":"minimal_edit","lang":"zh","domain":"code","a":"用 SHA-256 做摘要","b":"摘要算法换成 SHA-256","reason":"同义重组，算法相同；与 n30（MD5）构成最小对照"}
+{"id":"p69","label":"positive","dim":"minimal_edit","lang":"zh","domain":"ops","a":"把副本数扩到 4","b":"副本数增加到 4 个","reason":"一处动词替换，数值相同；与 n18（扩/缩方向相反）构成最小对照"}
+{"id":"p70","label":"positive","dim":"minimal_edit","lang":"zh","domain":"code","a":"删除最后 10 行","b":"末尾 10 行删掉","reason":"语序调整，位置相同；与 n13（前 10 行）构成最小对照"}
+{"id":"p71","label":"positive","dim":"minimal_edit","lang":"zh","domain":"code","a":"用中文解释这个函数","b":"用中文说明一下这个函数","reason":"一处动词替换，语言要求相同；与 n29（中/英）构成最小对照"}
+{"id":"p72","label":"positive","dim":"minimal_edit","lang":"zh","domain":"code","a":"修复 OrderService 的 bug","b":"OrderService 的 bug 修一下","reason":"语序调整，对象相同；与 n02（换类名）构成最小对照"}
+{"id":"p73","label":"positive","dim":"minimal_edit","lang":"zh","domain":"ops","a":"Java 版本升到 21","b":"Java 版本升级到 21","reason":"一词之差同义，目标版本相同；与 n01（换构建文件）构成最小对照"}
+{"id":"p74","label":"positive","dim":"minimal_edit","lang":"zh","domain":"ops","a":"把日志从文件改成控制台","b":"日志输出改到控制台","reason":"同义重组，目标相同；与 n20（方向相反）构成最小对照"}
+{"id":"p75","label":"positive","dim":"minimal_edit","lang":"mixed","domain":"ops","a":"版本锁定到 1.2.0","b":"版本锁到 1.2.0","reason":"一词之差同义，版本相同"}
+{"id":"p76","label":"positive","dim":"minimal_edit","lang":"mixed","domain":"ops","a":"连接池设成 10","b":"连接池大小调到 10","reason":"同义重组，数值相同；与 n25（10/100）构成最小对照"}
+{"id":"n61","label":"hard_negative","dim":"task","lang":"zh","domain":"code","a":"这段逻辑有问题吗","b":"这段逻辑怎么优化","reason":"任务不同：找缺陷与做优化，结论与产出都不同"}
+{"id":"n62","label":"hard_negative","dim":"env","lang":"zh","domain":"ops","a":"接口超时了怎么办","b":"接口报 500 了怎么办","reason":"现象不同：超时与报错的排查路径不同"}
+{"id":"n63","label":"hard_negative","dim":"task","lang":"zh","domain":"code","a":"把这段代码加上异常处理","b":"把这段代码加上日志","reason":"任务不同：异常处理与日志是两件事"}
+{"id":"n64","label":"hard_negative","dim":"env","lang":"zh","domain":"ops","a":"为什么构建这么慢","b":"为什么启动这么慢","reason":"现象不同：构建与启动是两条链路"}
