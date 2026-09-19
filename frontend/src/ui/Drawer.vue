@@ -37,6 +37,59 @@ const FOCUSABLE =
 /** The control that had focus before the drawer opened; focus returns there. */
 let restoreFocusTo: HTMLElement | null = null;
 
+/** The element holding focus, unless that is just the document body. */
+function currentFocus(): HTMLElement | null {
+  const active = document.activeElement;
+  return active instanceof HTMLElement && active !== document.body ? active : null;
+}
+
+/** Matches the panel's enter animation; see watchForStrayFocus(). */
+const SETTLE_MS = 250;
+let detachSettle: (() => void) | null = null;
+
+/**
+ * Pull focus back into the panel while the drawer is settling. The opener is
+ * usually a radix menu item, and radix's close path moves focus back to its
+ * own trigger on macrotask timers that can land after the drawer focused the
+ * panel — once to the item, once to the trigger — so a single focus-in on open
+ * loses the race. Bounded by SETTLE_MS rather than standing, so a dialog the
+ * user opens on top of the drawer later is not fought.
+ */
+function watchForStrayFocus() {
+  detachSettle?.();
+  // Re-focusing the panel is itself a focus-in, and radix answers one that
+  // lands outside its own layer by claiming focus back — synchronously. Let
+  // that answer re-enter this handler and the two trade focus inside a single
+  // call until the stack overflows, so stand down for events this handler
+  // caused. It also gives the right priority: a layer that claims focus in
+  // response to us is a layer above the drawer, and keeps it.
+  let refocusing = false;
+  const onFocusIn = (event: FocusEvent) => {
+    if (refocusing || !props.open || !panel.value) return;
+    const target = event.target as Node | null;
+    if (target && panel.value.contains(target)) return;
+    // Whatever just took focus is the real opener, and unlike the menu item it
+    // is still in the document when the drawer closes.
+    restoreFocusTo = currentFocus() ?? restoreFocusTo;
+    refocusing = true;
+    try {
+      panel.value.focus();
+    } finally {
+      refocusing = false;
+    }
+  };
+  document.addEventListener('focusin', onFocusIn, true);
+  const timer = setTimeout(() => {
+    off();
+  }, SETTLE_MS);
+  function off() {
+    clearTimeout(timer);
+    document.removeEventListener('focusin', onFocusIn, true);
+    if (detachSettle === off) detachSettle = null;
+  }
+  detachSettle = off;
+}
+
 /** Focusable controls currently inside the panel, in document order. */
 function focusableItems(): HTMLElement[] {
   return panel.value ? Array.from(panel.value.querySelectorAll<HTMLElement>(FOCUSABLE)) : [];
@@ -85,13 +138,20 @@ watch(
   () => props.open,
   async (openNow, wasOpen) => {
     if (openNow) {
-      const active = document.activeElement;
-      restoreFocusTo = active instanceof HTMLElement && active !== document.body ? active : null;
+      restoreFocusTo = currentFocus();
       await nextTick();
       panel.value?.focus();
+      // The opener is usually a radix menu item (NextUsersView.vue:595), and
+      // radix's menu close path hands focus back to its own trigger from
+      // macrotask timers — more than one of them, the last landing after the
+      // focus-in above, which would leave focus on the trigger behind the
+      // overlay. Pull strays back for the settle window; the guard detaches
+      // itself, so layers the user opens later are left alone.
+      watchForStrayFocus();
       return;
     }
     if (!wasOpen) return;
+    detachSettle?.();
     const target = restoreFocusTo;
     restoreFocusTo = null;
     await nextTick();
@@ -105,6 +165,7 @@ watch(
 // See Dialog.vue: clear the modal pointer lock left behind by a close that
 // races the exit path, once no modal layer remains open.
 onUnmounted(() => {
+  detachSettle?.();
   if (!document.querySelector('[role="dialog"][data-state="open"]')) {
     document.body.style.pointerEvents = '';
   }
