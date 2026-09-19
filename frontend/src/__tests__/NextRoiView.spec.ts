@@ -325,6 +325,56 @@ describe('NextRoiView', () => {
     expect(panel.text()).toContain('去「我的密钥」管理缓存开关');
   });
 
+  it('#878: marks a key whose hits went unpriced, its cost complete', async () => {
+    // The row dropped the hit gap and printed ¥0.0000 for a key whose hits no price
+    // could value — the misreading the stats tab's card already learned to avoid, on
+    // the page whose copy says the data decides the caching strategy.
+    mockApi.adminUsageSummary.mockResolvedValue({
+      groupBy: 'VIRTUAL_KEY',
+      groups: [
+        {
+          ...keyGroups[0]!,
+          pricingStatus: 'COMPLETE',
+          unpriced: { unpricedHitEvents: 2 },
+          cost: { upstreamPaid: 1.2, savedByGatewayCache: 0 },
+        },
+      ],
+    } as never);
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="roi-tab-config"]').trigger('click');
+
+    const marker = wrapper.find('[data-testid="key-savings-bound"]');
+    expect(marker.exists()).toBe(true);
+    expect(marker.text()).toContain('下界');
+    // The cost priced in full, so the other marker must stay away — separate claims.
+    expect(wrapper.find('[data-testid="key-cost-unpriced"]').exists()).toBe(false);
+  });
+
+  it('#878: marks a key whose cost is short of a total', async () => {
+    mockApi.adminUsageSummary.mockResolvedValue({
+      groupBy: 'VIRTUAL_KEY',
+      groups: [
+        { ...keyGroups[0]!, pricingStatus: 'UNAVAILABLE', unpriced: { unavailableEvents: 1 } },
+      ],
+    } as never);
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="roi-tab-config"]').trigger('click');
+
+    expect(wrapper.find('[data-testid="key-cost-unpriced"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="key-savings-bound"]').exists()).toBe(false);
+  });
+
+  it('#878: leaves a fully priced key unmarked on both columns', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="roi-tab-config"]').trigger('click');
+
+    expect(wrapper.find('[data-testid="key-cost-unpriced"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="key-savings-bound"]').exists()).toBe(false);
+  });
+
   it('#863: config tab explains the opt-in path when the window has no keys', async () => {
     mockApi.adminUsageSummary.mockResolvedValue({ groupBy: 'VIRTUAL_KEY', groups: [] });
     const wrapper = mountView();
