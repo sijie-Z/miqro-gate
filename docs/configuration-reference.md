@@ -88,8 +88,11 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_BOOTSTRAP_SECRET_FILE` | 无 | 仅首个管理员创建时使用，完成后移除 |
 | `MIQROKEY_REGISTRATION_ENABLED` | `true` | 自助注册开关（F-REG，api-contract §3.1b）：`false` 时 `/api/v1/auth/register` 返回 403 REGISTRATION_DISABLED（邀请制部署）；公网部署建议另配网络层速率限制 |
 | `MIQROKEY_PLATFORM_OIDC_ENABLED` | `false` | 平台 OIDC 登录总开关（P0a，ADR-0017）：`true` 后登录页出现「平台账号登录」 |
+| `MIQROKEY_PLATFORM_OIDC_IDP_CODE` | `forge` | 身份源标识；作为 `user_identity_link.idp` 的写入值与绑定查询条件（`PlatformOidcAuthService#insertLink/findLinkedUser`）。**已投入使用后修改会使既有绑定的查询落空**：`AUTO_PROVISION=true` 时按新 idp 再建一次账号，`false` 时原用户登录被拒（ACCOUNT_UNLINKED）；改值需同步迁移 `user_identity_link.idp` |
+| `MIQROKEY_PLATFORM_OIDC_NAME` | `平台账号登录` | 登录页平台登录入口的显示名（`PlatformOidcAuthService` 构造的 `ProviderInfo`），仅影响展示 |
 | `MIQROKEY_PLATFORM_OIDC_CLIENT_ID` / `_SECRET` | 空 | 平台侧注册的 OAuth2 client（test.forge 环境向平台申请） |
 | `MIQROKEY_PLATFORM_OIDC_AUTHORIZE_URI` / `_TOKEN_URI` / `_USERINFO_URI` | 空 | 平台 OAuth2 端点；test 环境形如 `https://test.forge.miqroera.com/api/oauth2/authorize`（token/userinfo 同基址） |
+| `MIQROKEY_PLATFORM_OIDC_SCOPE` | `openid profile` | 授权请求携带的 OAuth2 `scope` 查询参数（`PlatformOidcAuthService` 拼 authorize URL）。平台新增必填 scope 时必须在此追加，否则授权被平台拒绝 |
 | `MIQROKEY_PLATFORM_OIDC_REDIRECT_URI` | 空 | 本系统回调地址（需在平台 client 白名单登记） |
 | `MIQROKEY_PLATFORM_OIDC_AUTO_PROVISION` | `true` | 首登自动建号并写 `user_identity_link`；`false` 时未绑定平台账号的登录被拒（ACCOUNT_UNLINKED） |
 | `MIQROKEY_SESSION_COOKIE_NAME` | `MIQROKEY_SESSION` | Secure/HttpOnly/SameSite cookie |
