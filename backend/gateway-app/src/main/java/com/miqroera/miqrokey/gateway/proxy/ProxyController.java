@@ -322,11 +322,17 @@ public class ProxyController {
                             })
                     : forward(exchange, ctx, body, modelName, cacheKey, requestId, startMillis, streaming);
 
-            return pipeline.onErrorResume(AuthFailureException.class, e -> writeError(exchange, e)).onErrorResume(
-                    WebClientRequestException.class,
-                    e -> writeError(exchange, new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
-                            "Upstream provider is unreachable"))).onErrorResume(PrematureCloseException.class,
-                            e -> upstreamClosedBeforeFirstByte(exchange, e));
+            // #1000: every upstream failure has to end in an envelope here instead
+            // of escaping to the container's default 500 document. The clauses stay
+            // deliberately typed (no catch-all) so that control-plane errors keep
+            // their own mapping; a premature close after the status line matched
+            // none of them and leaked as a 500.
+            return pipeline.onErrorResume(AuthFailureException.class, e -> writeError(exchange, e))
+                    .onErrorResume(WebClientRequestException.class,
+                            e -> writeError(exchange,
+                                    new AuthFailureException(HttpStatus.BAD_GATEWAY, "upstream_unavailable",
+                                            "Upstream provider is unreachable")))
+                    .onErrorResume(PrematureCloseException.class, e -> upstreamClosedBeforeFirstByte(exchange, e));
         }).onErrorResume(DataBufferLimitException.class,
                 e -> writeError(exchange, new AuthFailureException(HttpStatus.PAYLOAD_TOO_LARGE, "payload_too_large",
                         "Request body exceeds the gateway buffer limit")));
