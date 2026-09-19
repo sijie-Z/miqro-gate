@@ -88,6 +88,9 @@ public class AdminRetentionLogService {
         StringBuilder csv = new StringBuilder(
                 "event_id,occurred_at,user_id,user_name,direction,wire_protocol,gateway_request_id,"
                         + "virtual_key_id,text_char_count,truncated,data_md5,content\n");
+        // UTF-8 BOM so spreadsheet consumers detect the encoding: api-contract §5.0
+        // requires the audit/retention downloads to share this dialect.
+        csv.insert(0, '\uFEFF');
         for (RawRow row : rows) {
             AdminRetentionLogView view = toView(tenantId, row);
             csv.append(view.eventId()).append(',').append(view.occurredAt()).append(',').append(view.userId())
@@ -183,14 +186,27 @@ public class AdminRetentionLogService {
         }
     }
 
-    /** RFC 4180 cell: quote when it contains comma/quote/newline; double quotes. */
+    /**
+     * RFC 4180 cell: quote when it contains comma/quote/newline; double quotes.
+     * Spreadsheet formula-injection guard (#430) on top, as required of the
+     * "synchronous admin download" dialect (api-contract §5.0 前段): a cell starting
+     * with {@code = + - @ TAB CR} is executed as a formula by Excel/LibreOffice, so
+     * it gains an apostrophe prefix (displayed text unchanged, execution
+     * neutralized). Both guarded columns — {@code user_name} and the decrypted
+     * {@code content} — carry caller-controlled text.
+     */
     static String csvCell(String value) {
         if (value == null) {
             return "";
         }
-        if (value.indexOf(',') < 0 && value.indexOf('"') < 0 && value.indexOf('\n') < 0 && value.indexOf('\r') < 0) {
-            return value;
+        String guarded = value;
+        if (!guarded.isEmpty() && "=+-@\t\r".indexOf(guarded.charAt(0)) >= 0) {
+            guarded = "'" + guarded;
         }
-        return '"' + value.replace("\"", "\"\"") + '"';
+        if (guarded.indexOf(',') < 0 && guarded.indexOf('"') < 0 && guarded.indexOf('\n') < 0
+                && guarded.indexOf('\r') < 0) {
+            return guarded;
+        }
+        return '"' + guarded.replace("\"", "\"\"") + '"';
     }
 }
