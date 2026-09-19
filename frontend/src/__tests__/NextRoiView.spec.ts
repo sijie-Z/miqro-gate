@@ -3,9 +3,9 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextRoiView from '@/views/next/NextRoiView.vue';
 import * as api from '@/api';
-import type { RoiReportView } from '@/types/generated-api';
+import type { RoiReportView, UsageGroup } from '@/types/generated-api';
 
-vi.mock('@/api', () => ({ getRoiReport: vi.fn() }));
+vi.mock('@/api', () => ({ getRoiReport: vi.fn(), adminUsageSummary: vi.fn() }));
 
 const mockApi = vi.mocked(api);
 
@@ -49,10 +49,28 @@ function lastCall(): [string, string] {
 }
 
 describe('NextRoiView', () => {
+  const keyGroups: UsageGroup[] = [
+    {
+      groupKey: 'k1',
+      label: 'claude-code-main',
+      requests: { upstream: 4, coalesced: 0, l1Hit: 5, l2Hit: 1 },
+      cost: { upstreamPaid: 1.2, savedByGatewayCache: 0.8 },
+      pricingStatus: 'COMPLETE',
+    },
+    {
+      groupKey: 'k2',
+      label: 'codex-tools',
+      requests: { upstream: 20, coalesced: 2, l1Hit: 0, l2Hit: 0 },
+      cost: { upstreamPaid: 9.5, savedByGatewayCache: 0 },
+      pricingStatus: 'COMPLETE',
+    },
+  ];
+
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.resetAllMocks();
     mockApi.getRoiReport.mockResolvedValue(report);
+    mockApi.adminUsageSummary.mockResolvedValue({ groupBy: 'VIRTUAL_KEY', groups: keyGroups });
   });
 
   function mountView() {
@@ -90,6 +108,64 @@ describe('NextRoiView', () => {
 
     expect(wrapper.find('[data-testid="roi-cost-caveat"]').exists()).toBe(false);
     expect(wrapper.text()).toContain('33.05%');
+    wrapper.unmount();
+  });
+
+  it('marks the saving as a lower bound when hits went unpriced, cost complete (#863)', async () => {
+    // The shape the API really sends for this case (pinned by the ROI integration
+    // test): the usage row priced fine, the hits did not. The cost is COMPLETE, so
+    // nothing warns about the amount — and the saving reads ¥0.0000, i.e. "caching
+    // saved nothing", on the page whose copy says the data decides the strategy.
+    mockApi.getRoiReport.mockResolvedValue({
+      ...report,
+      totals: {
+        ...report.totals,
+        savedCost: 0,
+        paidCost: 0.006,
+        savedPct: 0,
+        pricingStatus: 'COMPLETE',
+        unpriced: { unpricedHitEvents: 2 },
+      },
+    } as unknown as RoiReportView);
+    const wrapper = mountView();
+    await flushPromises();
+
+    const marker = wrapper.find('[data-testid="roi-savings-bound"]');
+    expect(marker.exists()).toBe(true);
+    expect(marker.text()).toBe('下界');
+    // ...and the number it qualifies is still the definite-looking zero.
+    expect(wrapper.text()).toContain('¥0.0000');
+    // The cost priced in full, so the other marker must stay away.
+    expect(wrapper.find('[data-testid="roi-cost-caveat"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('leaves the saving unmarked when every hit could be valued', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="roi-savings-bound"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('shows both markers without saying the same thing twice (#863)', async () => {
+    mockApi.getRoiReport.mockResolvedValue({
+      ...report,
+      totals: {
+        ...report.totals,
+        pricingStatus: 'PARTIAL',
+        unpriced: { unpricedEvents: 3, unavailableEvents: 1, unpricedHitEvents: 4 },
+      },
+    } as unknown as RoiReportView);
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Two different assertions, so both stand: the amount is not a total, and the
+    // saving is a floor.
+    expect(wrapper.find('[data-testid="roi-cost-caveat"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="roi-savings-bound"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('未定价');
+    expect(wrapper.text()).toContain('下界');
     wrapper.unmount();
   });
 
@@ -170,5 +246,60 @@ describe('NextRoiView', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('上游不可达');
+  });
+
+  it('#863: the stats tab is the default and the toolbar window drives both tabs', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="roi-report"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="roi-config"]').exists()).toBe(false);
+    expect(mockApi.adminUsageSummary).toHaveBeenCalledWith(
+      expect.objectContaining({ groupBy: 'VIRTUAL_KEY' }),
+    );
+  });
+
+  it('#863: the config tab lists per-key cache activity, busiest first', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="roi-tab-config"]').trigger('click');
+    const panel = wrapper.find('[data-testid="roi-config"]');
+    expect(panel.exists()).toBe(true);
+
+    const rows = panel.findAll('tbody tr');
+    expect(rows).toHaveLength(2);
+    // codex-tools has 22 served requests vs 10 — it ranks first.
+    expect(rows[0]!.text()).toContain('codex-tools');
+    expect(rows[0]!.text()).toContain('¥9.5000');
+    expect(rows[1]!.text()).toContain('claude-code-main');
+    expect(rows[1]!.text()).toContain('60.00%'); // 6 of 10 served
+    expect(rows[1]!.text()).toContain('¥0.8000');
+    expect(panel.text()).toContain('去「我的密钥」管理缓存开关');
+  });
+
+  it('#863: config tab explains the opt-in path when the window has no keys', async () => {
+    mockApi.adminUsageSummary.mockResolvedValue({ groupBy: 'VIRTUAL_KEY', groups: [] });
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="roi-tab-config"]').trigger('click');
+    const panel = wrapper.find('[data-testid="roi-config"]');
+    expect(panel.text()).toContain('该窗口内没有按密钥的用量记录');
+    expect(panel.text()).toContain('X-MiqroKey-Cacheable');
+  });
+
+  it('#863: a per-key aggregation failure never takes the stats tab down', async () => {
+    mockApi.adminUsageSummary.mockRejectedValue(new Error('聚合超时'));
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Stats still render…
+    expect(wrapper.find('[data-testid="roi-report"]').exists()).toBe(true);
+    expect(wrapper.text()).not.toContain('聚合超时');
+
+    // …and the config tab surfaces the degradation instead of pretending zero.
+    await wrapper.find('[data-testid="roi-tab-config"]').trigger('click');
+    expect(wrapper.find('[data-testid="roi-config-error"]').text()).toContain('聚合超时');
   });
 });
