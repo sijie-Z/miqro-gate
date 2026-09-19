@@ -271,6 +271,12 @@ interface BreakdownRow {
   requests: number;
   tokens: number;
   cost: number;
+  /**
+   * #876: the group's cost is short of a total while this is non-empty. Empty is the
+   * "nothing to say" value because `UiTooltip.text` is a plain string, and a template
+   * narrows `v-if` on a ref but not on a function's result.
+   */
+  costCaveat: string;
   /** Percent (0–100) over decided calls; null when nothing was decided yet. */
   successRate: number | null;
   avgLatencyMs: number | null;
@@ -296,6 +302,10 @@ const breakdownRows = computed<BreakdownRow[]>(() => {
         requests: Number(g.requests?.upstream ?? 0),
         tokens,
         cost,
+        // #876: the group carries its own pricingStatus / unpriced (the API has sent
+        // them since #766); only this table dropped them, while the hero card above —
+        // the same figure — honoured them.
+        costCaveat: costGapNote(g) ?? '',
         successRate: decided > 0 ? (succeeded / decided) * 100 : null,
         avgLatencyMs: g.outcomes?.avgDurationMs ?? null,
         share: shareBase > 0 ? ((useCost ? cost : tokens) / shareBase) * 100 : 0,
@@ -1306,6 +1316,14 @@ onMounted(() => {
         </template>
         <template #cost="{ row }">
           <span class="ui-num">¥{{ fmtMoney((row as unknown as BreakdownRow).cost) }}</span>
+          <UiTooltip
+            v-if="(row as unknown as BreakdownRow).costCaveat"
+            :text="(row as unknown as BreakdownRow).costCaveat"
+          >
+            <span class="next-admin-usage__unpriced" data-testid="breakdown-cost-unpriced"
+              >未定价</span
+            >
+          </UiTooltip>
         </template>
         <template #successRate="{ row }">
           <span class="ui-num">{{ rateText(row as unknown as BreakdownRow) }}</span>
