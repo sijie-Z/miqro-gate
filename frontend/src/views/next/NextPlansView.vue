@@ -103,6 +103,7 @@ const seatLoading = ref(false);
 const seatAssignUser = ref('');
 const seatDisplay = ref('');
 const seatError = ref('');
+const seatSubmitting = ref(false);
 
 const confirmState = ref<{
   title: string;
@@ -224,11 +225,18 @@ async function refreshSeats() {
 }
 
 async function addSeat() {
+  // #PH35: POST /seats is not idempotent server-side (fresh id per call, and the
+  // only unique index on plan_seats is partial on external_seat_ref, which this
+  // form never sends), so a double click used to leave two seat rows behind.
+  if (seatSubmitting.value) {
+    return;
+  }
   if (!seatSubscription.value || !seatAssignUser.value.trim()) {
     seatError.value = '请输入用户名（成员 Key 请到上游凭证页关联）。';
     return;
   }
   seatError.value = '';
+  seatSubmitting.value = true;
   try {
     await api.createSeat(seatSubscription.value.id!, {
       displayName: seatDisplay.value.trim() || undefined,
@@ -240,6 +248,8 @@ async function addSeat() {
     await refreshSeats();
   } catch (error) {
     seatError.value = error instanceof ApiError ? error.message : '分配失败';
+  } finally {
+    seatSubmitting.value = false;
   }
 }
 
@@ -466,7 +476,14 @@ onMounted(load);
           placeholder="显示名（可选）"
           data-testid="seat-assign-display"
         />
-        <UiButton variant="primary" data-testid="seat-create" @click="addSeat">分配席位</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="seatSubmitting"
+          data-testid="seat-create"
+          @click="addSeat"
+        >
+          分配席位
+        </UiButton>
       </div>
       <p v-if="seatError" class="ui-form-error">{{ seatError }}</p>
       <UiTable

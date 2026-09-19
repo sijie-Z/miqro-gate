@@ -5759,3 +5759,39 @@ booking 一笔 `outputTokensDelta=-300`：观测 1000 tokens（600 in / 400 out�
 ### 教训
 
 **"扫一遍"和"读一遍"是两件事，合起来才有这一轮。** 探针负责指出"这里回了一个不该回的码"，读代码负责回答"为什么"；只扫不读会停在现象（这次的 502 会被写成"导出很慢"），只读不扫会漏掉"根本没人调用"的路径（导出按钮就在页面上）。另外：**修复只补入口会在下一个入口重演**——这正是 #1021 的由来，也是这条线的通用形状。
+## 2026-09-20 PH35：席位分配与导出创建的在途提交守卫（#1039 / #1040）
+
+### 缺陷
+
+两个写面在前端都没有 in-flight 守卫，而**后端都是非幂等的**（新主键 + INSERT）：`/app/plans` 的
+`addSeat` 与 `/app/exports` 的 `createExport`，按钮在请求在途期间仍可点击 → 双击两次写库。库上
+也拦不住：`plan_seats` 的唯一索引是 `WHERE external_seat_ref IS NOT NULL` 的**部分**索引，而表单
+只下发 `displayName`/`assignedUserId`，NULL 不参与索引。
+
+### 改动
+
+- `NextPlansView.vue`：新增 `seatSubmitting`，`addSeat` 入口 `if (seatSubmitting.value) return;` +
+  `finally` 复位；按钮接 `:loading`。
+- `NextAdminExportsView.vue`：同形（`exportSubmitting`）。
+
+### 三个容易做错的地方（都已核）
+
+1. **守卫要在 await 之前同步置位**——只靠 DOM `disabled` 不够：Vue 的 DOM patch 是异步的，同一 tick
+   内的重入在 DOM 还没禁用时就到了 handler；
+2. **`finally` 复位**——否则请求抛错会把按钮永久禁用；
+3. **`UiButton` 的 `:loading` 必须真的 disable 原生按钮**——只转圈不禁用的话守卫是装饰品；实测
+   `ui/Button.vue` 的 `disabledState = disabled || loading` 会落到 `:disabled`，且默认 `nativeType: 'button'`。
+
+另核：两视图**都没有 `<form>`、全仓 views 无 `@enter` 用法**，不存在"只挂 click 会漏掉回车提交"的旁路。
+
+### 测试
+
+- `NextAdminExportsView.spec.ts` 用 `trigger('click')`（@vue/test-utils 走 `dispatchEvent`，**能绕过**
+  原生 disabled）→ 真正钉住了 JS 入口守卫；
+- `NextPlansView.spec.ts` 用 `button.click()`（jsdom 对 disabled 按钮会**抑制**监听器）→ 它钉的是用户
+  可见行为，但**若日后只删掉 JS 守卫而保留 `:loading`，这条不会红**——建议后续改成 `trigger('click')`。
+- 两条在修复前都必红。
+
+### 未做
+
+服务端幂等（`plan_seats` 的业务唯一约束、`export_tasks` 的在途去重）不在本 PR 范围，建议保持跟踪。

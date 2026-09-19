@@ -198,4 +198,42 @@ describe('NextPlansView', () => {
       status: 'AVAILABLE',
     });
   });
+
+  it('#PH35: a second click while the assign request is in flight does not create a second seat', async () => {
+    // The server mints a fresh seat id per call and the only unique index on
+    // plan_seats is partial on external_seat_ref (which this form never sends),
+    // so two POSTs = two permanent seat rows.
+    let releaseCreate: (value: unknown) => void = () => {};
+    mockApi.createSeat.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseCreate = resolve;
+        }) as never,
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="subscription-seats-open"]').trigger('click');
+    await flushPromises();
+
+    const assignInput = document.querySelector(
+      '[data-testid="seat-assign-user"]',
+    ) as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(assignInput, 'bob');
+    assignInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+
+    const assignButton = document.querySelector('[data-testid="seat-create"]') as HTMLButtonElement;
+    assignButton.click();
+    await flushPromises();
+    // Second click lands while the first POST is still unanswered.
+    assignButton.click();
+    await flushPromises();
+
+    expect(mockApi.createSeat).toHaveBeenCalledTimes(1);
+
+    releaseCreate({});
+    await flushPromises();
+  });
 });

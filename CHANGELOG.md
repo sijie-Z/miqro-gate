@@ -18,6 +18,11 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - **按边读代码边打探针的方式扫了一遍写面与边界**：跨租户引用、SSRF 形态的 webhook/MCP 地址、生命周期
   状态机、时间/分页/枚举边界全部为**拒绝或忽略**（无 5xx、无误收）；扫出开放管理面（`/api/v1/admin-api/`）
   的 Webhook/告警规则孪生入口不在 #971 的修复范围内，已立 #1021。
+- **前端非幂等写面的在途守卫（#1039 / #1040）**：`/app/plans` 的席位分配与管理端导出创建都是非幂等
+  POST，按钮在请求在途期间仍可点——双击即两次写库；库上也拦不住（`plan_seats` 的唯一索引带
+  `WHERE external_seat_ref IS NOT NULL`，而表单只下发 `displayName`/`assignedUserId`，NULL 不参与索引）。
+  两处补入口守卫（await 前同步置位、`finally` 复位）并接上 `UiButton` 的 `:loading`（其 `disabledState`
+  落到原生按钮，不只是转圈）；已核两视图无 `<form>`/回车旁路。服务端幂等仍待单独评估。
 
 - **上游错误体分类（观察档）——只计数、不改体、不重试（#770，ADR-0024 选项 B）**：给「thinking 签名类错误是不是稳定模式」这个问题一个**数据来源**，而不先动手改请求。网关对**已缓冲**的上游非 2xx 响应体做**有界只读**分类（前 8KB 子串匹配），产出**有界枚举**计数 `miqrokey_gateway_upstream_error_class_total{class=…}`（`SIGNATURE_INVALID` / `THINKING_BLOCK_MISMATCH` / `MISSING_SIGNATURE` / `BUDGET_INVALID` / `UNCLASSIFIED`）与一行 `status=… class=…` 日志。三条自我约束写进了实现与契约测试：**请求与响应字节都不变**、**错误正文只读不存**（不进日志正文/不落库/不进事件）、**被截断的缓冲不分类**（不从不完整片段下结论）；HTTP 状态码只进日志、不作指标标签（上游可能返回任意整数码）。ADR-0024 因此转为「部分 Accepted」——**只有选项 B 被采纳**，C（Key 级整流重试）/D/E 仍待二期拍板。
 - **Agent 生命周期补齐：可重新启用、可改名、可删除（#824，ADR-0025 选项 D）**：此前 API 只有 `list/get/create/disable/usage` —— 建错回不去、停用不可逆，且**停用的 Agent 仍占着「该凭证 → 唯一 Agent」的名额**（`uq_agents_tenant_credential` 不看状态），想在同一凭证上重建就被 `AGENT_CREDENTIAL_TAKEN` 挡住（演示站上就留着一个僵尸 Agent）。现新增 `POST /{id}/enable`、`PATCH /{id}`（改名/描述，带 `version` 乐观锁）、`DELETE /{id}`（硬删除），前端行操作改为「用量 + 更多 ⌄（改名 / 启用|禁用 / 删除）」。两点值得记：① **`enable` 不是 `disable` 的镜像**——停用期间凭证可能已被停用，此时拒绝（`409 CREDENTIAL_NOT_ACTIVE`）而不是让 Agent 指向不可路由的出口（被**轮换**则无害：Agent 绑定的是凭证行，不是密文）；② **硬删除在本仓库是干净的**（没有任何表引用 `agents`、用量按绑定凭证聚合），但审计 `AGENT_DELETE` 必须带**名称快照**——行删掉后按 id 反查不到名字。
