@@ -157,6 +157,19 @@ export function get<T>(path: string, query?: RequestOptions['query']): Promise<T
   return request<T>(path, { method: 'GET', query });
 }
 
+/**
+ * GET for endpoints whose body is a bare JSON array.
+ *
+ * `response.json() as T` is an unchecked cast, and the control plane is a
+ * Jackson backend: an empty collection comes back as `null`, not `[]`. Callers
+ * that trust the cast then hit `list.length` / `.map` on `null` and blank the
+ * page. Normalising here keeps the declared `Promise<T[]>` honest for every
+ * list endpoint at once (#PH20-C).
+ */
+export function getList<T>(path: string, query?: RequestOptions['query']): Promise<T[]> {
+  return get<T[] | null>(path, query).then((value) => (Array.isArray(value) ? value : []));
+}
+
 export function post<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, { method: 'POST', body });
 }
