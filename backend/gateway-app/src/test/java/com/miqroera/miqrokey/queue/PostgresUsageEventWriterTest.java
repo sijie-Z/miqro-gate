@@ -82,8 +82,8 @@ class PostgresUsageEventWriterTest {
         // cache_entry carries the hit counters and has FK constraints; seed the
         // chain so a hit write has a counter row to bump.
         MapSqlParameterSource p = new MapSqlParameterSource().addValue("tenantId", TENANT_ID)
-                .addValue("providerId", PROVIDER_ID).addValue("productId", PRODUCT_ID)
-                .addValue("projectId", PROJECT_ID).addValue("userId", USER_ID).addValue("keyId", VIRTUAL_KEY_ID);
+                .addValue("providerId", PROVIDER_ID).addValue("productId", PRODUCT_ID).addValue("projectId", PROJECT_ID)
+                .addValue("userId", USER_ID).addValue("keyId", VIRTUAL_KEY_ID);
         jdbc.update("""
                 INSERT INTO providers (id, slug, display_name, status, version)
                 VALUES (:providerId, 'writer-test-provider', 'Writer Test Provider', 'ACTIVE', 0)
@@ -103,8 +103,8 @@ class PostgresUsageEventWriterTest {
                 INSERT INTO projects (id, tenant_id, code, name, status, project_tag, version)
                 VALUES (:projectId, :tenantId, 'WT', 'Writer Test Project', 'ACTIVE', 'writer-test', 0)
                 """, p);
-        p.addValue("subscriptionId", SUBSCRIPTION_ID).addValue("credentialId", CREDENTIAL_ID)
-                .addValue("grantId", GRANT_ID);
+        p.addValue("subscriptionId", SUBSCRIPTION_ID).addValue("credentialId", CREDENTIAL_ID).addValue("grantId",
+                GRANT_ID);
         jdbc.update("""
                 INSERT INTO upstream_subscriptions
                     (id, tenant_id, provider_product_id, name, billing_mode, status, version)
@@ -292,8 +292,8 @@ class PostgresUsageEventWriterTest {
         assertThat(hitEventRows(cacheKey)).isEqualTo(1);
         // The counters must survive the replay: architecture.md pledges "重试 flush
         // 绝不双计" (a retried flush never double-counts).
-        assertThat(hitCounter(cacheKey, "hit_count_l1"))
-                .as("hit_count_l1 after replaying the same hit event").isEqualTo(1L);
+        assertThat(hitCounter(cacheKey, "hit_count_l1")).as("hit_count_l1 after replaying the same hit event")
+                .isEqualTo(1L);
         assertThat(hitCounter(cacheKey, "hit_count_l2")).isEqualTo(0L);
     }
 
@@ -306,9 +306,8 @@ class PostgresUsageEventWriterTest {
         CacheHitEvent hit = hitEvent(cacheKey, hitAt);
         // Poison pill: request_usage_records' PK columns are NOT NULL, so this
         // throws INSIDE the batch transaction, after the hit insert has run.
-        RequestStartedEvent poison = new RequestStartedEvent(UUID.randomUUID(), null, "gw-poison", TENANT_ID,
-                USER_ID, PROJECT_ID, VIRTUAL_KEY_ID, PROVIDER_ID, PRODUCT_ID, CREDENTIAL_ID, "anthropic", "model-x",
-                false);
+        RequestStartedEvent poison = new RequestStartedEvent(UUID.randomUUID(), null, "gw-poison", TENANT_ID, USER_ID,
+                PROJECT_ID, VIRTUAL_KEY_ID, PROVIDER_ID, PRODUCT_ID, CREDENTIAL_ID, "anthropic", "model-x", false);
 
         assertThatThrownBy(() -> writer.writeBatch(List.of(), List.of(hit), List.of(poison), List.of()))
                 .isInstanceOf(Exception.class);
@@ -485,23 +484,26 @@ class PostgresUsageEventWriterTest {
                 INSERT INTO cache_entry (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id,
                     model_id, status_code, body)
                 VALUES (:id, :tenantId, :cacheKey, :keyId, :projectId, :productId, 'model-x', 200, :body)
-                """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", TENANT_ID)
-                .addValue("cacheKey", cacheKey.getBytes(java.nio.charset.StandardCharsets.UTF_8))
-                .addValue("keyId", VIRTUAL_KEY_ID).addValue("projectId", PROJECT_ID).addValue("productId", PRODUCT_ID)
-                .addValue("body", new byte[] { 1, 2, 3 }));
+                """,
+                new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", TENANT_ID)
+                        .addValue("cacheKey", cacheKey.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                        .addValue("keyId", VIRTUAL_KEY_ID).addValue("projectId", PROJECT_ID)
+                        .addValue("productId", PRODUCT_ID).addValue("body", new byte[]{1, 2, 3}));
     }
 
     private static Integer hitEventRows(String cacheKey) {
         return jdbc.queryForObject("""
                 SELECT count(*) FROM cache_hit_event WHERE tenant_id = :tenantId AND cache_key = :cacheKey
-                """, new MapSqlParameterSource().addValue("tenantId", TENANT_ID)
-                .addValue("cacheKey", cacheKey.getBytes(java.nio.charset.StandardCharsets.UTF_8)), Integer.class);
+                """, new MapSqlParameterSource().addValue("tenantId", TENANT_ID).addValue("cacheKey",
+                cacheKey.getBytes(java.nio.charset.StandardCharsets.UTF_8)), Integer.class);
     }
 
     private static Long hitCounter(String cacheKey, String column) {
-        return jdbc.queryForObject("SELECT " + column + " FROM cache_entry WHERE tenant_id = :tenantId"
-                + " AND cache_key = :cacheKey", new MapSqlParameterSource().addValue("tenantId", TENANT_ID)
-                .addValue("cacheKey", cacheKey.getBytes(java.nio.charset.StandardCharsets.UTF_8)), Long.class);
+        return jdbc.queryForObject(
+                "SELECT " + column + " FROM cache_entry WHERE tenant_id = :tenantId" + " AND cache_key = :cacheKey",
+                new MapSqlParameterSource().addValue("tenantId", TENANT_ID).addValue("cacheKey",
+                        cacheKey.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                Long.class);
     }
 
     private static CacheHitEvent hitEvent(String cacheKey, Instant occurredAt) {

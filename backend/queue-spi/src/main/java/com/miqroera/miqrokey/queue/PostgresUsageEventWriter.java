@@ -209,11 +209,11 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
      * <p>
      * The counter update is guarded by the row that the insert actually produced
      * (data-modifying CTE + {@code RETURNING}): a hit folded away by the dedup
-     * index must not increment {@code cache_entry.hit_count_l1/l2}. A retried
-     * flush replays the very same events (the bus re-enqueues a drained batch when
-     * the write fails), so an unconditional increment would double-count the
-     * counters while the rows stay deduplicated — the two accounting surfaces must
-     * agree. See {@code docs/architecture.md} "重试 flush 绝不双计".
+     * index must not increment {@code cache_entry.hit_count_l1/l2}. A retried flush
+     * replays the very same events (the bus re-enqueues a drained batch when the
+     * write fails), so an unconditional increment would double-count the counters
+     * while the rows stay deduplicated — the two accounting surfaces must agree.
+     * See {@code docs/architecture.md} "重试 flush 绝不双计".
      */
     private void writeHits(List<CacheHitEvent> events) {
         if (events.isEmpty()) {
@@ -222,13 +222,11 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
         List<MapSqlParameterSource> params = new ArrayList<>(events.size());
         for (CacheHitEvent e : events) {
             boolean l1 = e.level() == com.miqroera.miqrokey.domain.usage.CacheLevel.L1_HIT;
-            params.add(new MapSqlParameterSource().addValue("id", UUID.randomUUID())
-                    .addValue("tenantId", e.tenantId()).addValue("cacheKey", e.cacheKey())
-                    .addValue("virtualKeyId", e.virtualKeyId()).addValue("projectId", e.projectId())
-                    .addValue("productId", e.providerProductId()).addValue("level", e.level().name())
-                    .addValue("gatewayRequestId", e.gatewayRequestId()).addValue("occurredAt",
-                            Timestamp.from(e.occurredAt()))
-                    .addValue("l1", l1).addValue("l2", !l1));
+            params.add(new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", e.tenantId())
+                    .addValue("cacheKey", e.cacheKey()).addValue("virtualKeyId", e.virtualKeyId())
+                    .addValue("projectId", e.projectId()).addValue("productId", e.providerProductId())
+                    .addValue("level", e.level().name()).addValue("gatewayRequestId", e.gatewayRequestId())
+                    .addValue("occurredAt", Timestamp.from(e.occurredAt())).addValue("l1", l1).addValue("l2", !l1));
         }
         jdbc.batchUpdate("""
                 WITH inserted AS (
