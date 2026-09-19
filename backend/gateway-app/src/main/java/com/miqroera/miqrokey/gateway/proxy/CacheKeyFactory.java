@@ -83,13 +83,34 @@ public final class CacheKeyFactory {
      * last user message); anything else falls back to the full normalized body.
      */
     public CacheKey compute(AuthContext ctx, String modelName, byte[] body) {
-        String scope = semanticScope(body);
-        String normalized = scope.isEmpty() ? normalize(body) : scope;
+        // Hot path: the body is already buffered by the caller and is never
+        // mutated here, so it is parsed exactly once and the tree is shared by
+        // every key dimension. Parsing per dimension made this method the most
+        // expensive step of a cacheable request.
+        JsonNode root = parse(body);
+        String scope = semanticScope(root);
+        String normalized = scope.isEmpty() ? normalize(root) : scope;
         String canonical = ctx.tenantId() + "|" + ctx.projectId() + "|" + ctx.key().keyId() + "|" + ctx.productId()
                 + "|" + (modelName == null ? "" : modelName) + "|"
                 + (ctx.key().purpose() == null ? "" : ctx.key().purpose()) + "|"
-                + (streamFlag(body) ? "stream=1" : "stream=0") + "|" + generationFingerprint(body) + "|" + normalized;
+                + (streamFlag(root) ? "stream=1" : "stream=0") + "|" + generationFingerprint(root) + "|" + normalized;
         return CacheKey.from(sha256(canonical.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    /**
+     * Parses the buffered body once. Returns {@code null} for an empty body or
+     * anything that is not valid JSON; every caller treats a null tree as "this
+     * dimension is absent", which is exactly what a failed parse used to yield.
+     */
+    private JsonNode parse(byte[] body) {
+        if (body == null || body.length == 0) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(body);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
@@ -98,15 +119,11 @@ public final class CacheKeyFactory {
      * empty string when the body carries none (or is not JSON), keeping the
      * pre-existing key shape for such requests.
      */
-    private String generationFingerprint(byte[] body) {
-        if (body == null || body.length == 0) {
+    private String generationFingerprint(JsonNode root) {
+        if (root == null || !root.isObject()) {
             return "";
         }
         try {
-            JsonNode root = objectMapper.readTree(body);
-            if (root == null || !root.isObject()) {
-                return "";
-            }
             ObjectNode picked = objectMapper.createObjectNode();
             for (String field : GENERATION_FIELDS) {
                 JsonNode value = root.get(field);
@@ -125,16 +142,8 @@ public final class CacheKeyFactory {
      * different key than {@code stream:false} ones for the same conversation
      * (#444).
      */
-    private boolean streamFlag(byte[] body) {
-        if (body == null || body.length == 0) {
-            return false;
-        }
-        try {
-            JsonNode root = objectMapper.readTree(body);
-            return root != null && root.path("stream").asBoolean(false);
-        } catch (Exception e) {
-            return false;
-        }
+    private boolean streamFlag(JsonNode root) {
+        return root != null && root.path("stream").asBoolean(false);
     }
 
     /**
@@ -149,14 +158,15 @@ public final class CacheKeyFactory {
      * fall back to the full-body key.
      */
     public String semanticScope(byte[] body) {
-        if (body == null || body.length == 0) {
+        return semanticScope(parse(body));
+    }
+
+    /** Node-taking overload: the caller already parsed the body once. */
+    private String semanticScope(JsonNode root) {
+        if (root == null || !root.isObject()) {
             return "";
         }
         try {
-            JsonNode root = objectMapper.readTree(body);
-            if (root == null || !root.isObject()) {
-                return "";
-            }
             JsonNode messages = root.has("messages") ? root.get("messages") : root.get("input");
             if (messages == null || !messages.isArray()) {
                 return "";
@@ -230,14 +240,17 @@ public final class CacheKeyFactory {
      * empty string when the body is not valid JSON.
      */
     public String normalize(byte[] body) {
-        if (body == null || body.length == 0) {
+        return normalize(parse(body));
+    }
+
+    /** Node-taking overload: the caller already parsed the body once. */
+    private String normalize(JsonNode root) {
+        if (root == null || root.isNull()) {
             return "";
         }
         try {
-            JsonNode root = objectMapper.readTree(body);
-            if (root == null || root.isNull()) {
-                return "";
-            }
+            // deepCopy() so the shared tree handed in by compute() is never
+            // touched by the strip/sort below.
             JsonNode stripped = root.deepCopy();
             if (stripped.isObject()) {
                 ObjectNode clean = objectMapper.createObjectNode();
