@@ -229,8 +229,8 @@ git branch -d goal/g0.1-repository-bootstrap
 
 普通 Goal 不创建 tag。发布 tag 由用户明确授权后创建，分两档：
 
-**预发布（rc）**：发布候选通过发布清单后，在 `develop` 的收口 commit 上打 tag，并与
-`progress.md` 的发布记录一一对应（`N` 为下一个序号）：
+**预发布（rc）**：发布候选通过发布清单后，在 `develop` 的收口 commit 上打 tag，并在
+`progress.md` 补一条对应 `0.1.0-rc.N` 的发布记录（`N` 为下一个序号）：
 
 ```powershell
 git switch develop
@@ -248,4 +248,4 @@ git tag -a 0.1.0 -m "0.1.0"
 git push origin 0.1.0
 ```
 
-`main` 是发布快照、平时落后 `develop`（见 [`decisions/0022-semantic-cache-evaluation.md`](decisions/0022-semantic-cache-evaluation.md) §11.4 与 [`progress.md`](progress.md) §11.4 教训），因此 rc tag 只指向 `develop` 的收口范围，不代表 `main` 上已有对应代码；「必须指向已合并的 `main` commit」只约束正式版本 tag。版本号遵循 SemVer，tag 名不带 `v` 前缀（与既有 `0.1.0-rc.N` 一致）。禁止移动或覆盖已发布 tag。
+`main` 是发布快照、平时落后 `develop`（见 [`decisions/0022-semantic-cache-evaluation.md`](decisions/0022-semantic-cache-evaluation.md) §11.4 与 [`progress.md`](progress.md) 的“§11.4 新教训”条目），因此 rc tag 只指向 `develop` 的收口范围，不代表 `main` 上已有对应代码；「必须指向已合并的 `main` commit」只约束正式版本 tag。版本号遵循 SemVer，tag 名不带 `v` 前缀（与既有 `0.1.0-rc.N` 一致）。禁止移动或覆盖已发布 tag。
