@@ -205,6 +205,49 @@ class CacheKeyFactoryTest {
     }
 
     /**
+     * Hot-path cost: key derivation runs on the gateway request path, so the
+     * buffered body must be parsed once per {@code compute} — not once per key
+     * dimension.
+     */
+    @Nested
+    @DisplayName("Hot-path parse cost")
+    class HotPathParseCost {
+
+        @Test
+        @DisplayName("derives the key with a single parse of the request body")
+        void singleBodyParse() {
+            CountingObjectMapper counting = new CountingObjectMapper();
+            CacheKeyFactory countingFactory = new CacheKeyFactory(counting);
+            byte[] body = json("{\"model\":\"gpt-4o-mini\",\"temperature\":0.9,\"max_tokens\":256,"
+                    + "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+
+            countingFactory.compute(ctx, "gpt-4o-mini", body);
+
+            assertThat(counting.bodyParses()).isEqualTo(1);
+        }
+    }
+
+    /** Counts full-body JSON parses; the helpers must share one parsed tree. */
+    private static final class CountingObjectMapper extends ObjectMapper {
+
+        private static final long serialVersionUID = 1L;
+
+        private final java.util.concurrent.atomic.AtomicInteger bodyParses = new java.util.concurrent.atomic.AtomicInteger();
+
+        @Override
+        public com.fasterxml.jackson.databind.JsonNode readTree(byte[] content) throws java.io.IOException {
+            if (content != null && content.length > 0) {
+                bodyParses.incrementAndGet();
+            }
+            return super.readTree(content);
+        }
+
+        int bodyParses() {
+            return bodyParses.get();
+        }
+    }
+
+    /**
      * Key-identity hardening (2026-09-18, external review of the semantic-cache
      * evaluation): the chat path keeps only the conversation scope, so
      * output-shaping generation parameters and the Anthropic/Responses top-level
