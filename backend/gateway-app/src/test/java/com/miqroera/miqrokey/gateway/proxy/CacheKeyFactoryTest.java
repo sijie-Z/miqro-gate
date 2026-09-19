@@ -207,9 +207,9 @@ class CacheKeyFactoryTest {
     /**
      * Multimodal content (#PH22): the semantic scope flattens array content parts
      * by keeping only the {@code text} ones, so every non-text part — an image, an
-     * uploaded document, an audio clip — is invisible to the key. Two requests
-     * that ask the same question about two different images therefore share one
-     * cache entry and replay each other's answer.
+     * uploaded document, an audio clip — is invisible to the key. Two requests that
+     * ask the same question about two different images therefore share one cache
+     * entry and replay each other's answer.
      */
     @Nested
     @DisplayName("Multimodal content parts")
