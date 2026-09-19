@@ -316,7 +316,7 @@
 - 验证：`mvnw.cmd -B -f backend -pl control-plane-app -am test -Pintegration
   -Dtest=AdminRetentionLogAuditIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` →
   `Tests run: 8, Failures: 0, Errors: 0` / BUILD SUCCESS。
-- **附带发现（未修，属产品缺陷，超出本 Goal 范围）**：`GET /api/v1/admin/retention-logs?direction=<非法值>`
+- **附带发现（已于 2026-09-20 修复，PR #1006：`direction` 非法值改回 400 `PARAM_INVALID`、`page` 对齐为 1-based；修复当时它属产品缺陷、超出该 Goal 范围）**：`GET /api/v1/admin/retention-logs?direction=<非法值>`
   返回 **500 `INTERNAL_ERROR`** 而非 400。成因：`AdminRetentionLogService` 抛 `ResponseStatusException`，
   而 `GlobalExceptionHandler` 无该类型 handler，被兜底 `Exception` 分支吞成 500 + ERROR 级日志；同族
   `MethodArgumentTypeMismatchException` 的 javadoc 明确要求「invalid filter values are rejected, never treated as
