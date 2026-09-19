@@ -104,6 +104,22 @@ public interface UsageStatsRepository {
     List<UsageStatsAggregator.UsageAggRow> aggregateUsage(GroupBy groupBy, UsageFilter filter);
 
     /**
+     * The same aggregation on the <b>observed</b> token columns only (#1002): what
+     * the gateway actually counted, without the deltas booked in the adjustment
+     * ledger (#709).
+     *
+     * <p>
+     * A quota watermark is a runtime verdict on observed usage, so it must read
+     * this variant: booking a financial correction against a call changes what the
+     * customer is billed, not what the gateway already measured, and letting the
+     * correction move the watermark would silently raise or lower the scope's
+     * quota. Requests, cost and pricing-gap columns are identical in both variants
+     * — an adjustment never booked a call and never carried a price.
+     * </p>
+     */
+    List<UsageStatsAggregator.UsageAggRow> aggregateObservedUsage(GroupBy groupBy, UsageFilter filter);
+
+    /**
      * Aggregated cache-hit rows for the filter, one row per (group, product,
      * model). {@code cachedTokens} carries the usage of the cached response
      * (weighted mean across the group's cache entries), so the aggregator can value

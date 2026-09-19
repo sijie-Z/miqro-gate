@@ -34,9 +34,12 @@ class QuotaWatermarks {
     Watermark evaluate(UUID tenantId, QuotaRule rule) {
         AdminQuotaRuleService.Window window = AdminQuotaRuleService.window(rule.period());
         // Uncapped variant (#683): a YEARLY window spans 365 days, beyond the
-        // 93-day guard on the public usage API.
-        UsageSummary summary = usageStatsService.summaryUncapped(tenantId, "project", window.from(), window.to(),
-                rule.scopeType() == QuotaScopeType.USER ? rule.scopeId() : null,
+        // 93-day guard on the public usage API. Observed reading (#1002): a
+        // watermark is a verdict on what the gateway measured, so a usage
+        // adjustment booked afterwards must not raise or lower it — the ledger
+        // (#709) belongs to the reporting/billing numbers, not to this one.
+        UsageSummary summary = usageStatsService.summaryObservedUncapped(tenantId, "project", window.from(),
+                window.to(), rule.scopeType() == QuotaScopeType.USER ? rule.scopeId() : null,
                 rule.scopeType() == QuotaScopeType.PROJECT ? rule.scopeId() : null);
         BigDecimal used = switch (rule.metric()) {
             case TOKENS -> BigDecimal.valueOf(summary.totals().tokens().total());
