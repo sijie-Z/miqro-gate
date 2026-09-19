@@ -29,12 +29,14 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code AnthropicMockProvider.disconnectNextRequest()} closes the channel
  * <em>before</em> any response byte — a connection-phase failure that maps onto
  * the {@code WebClientRequestException} clause. A close <em>after</em> the
- * status line takes a different path through reactor-netty: the headers have
- * already been relayed downstream, and the body flux fails with
- * {@code PrematureCloseException} — an {@code IOException}, neither a
- * {@code WebClientRequestException} nor a timeout, so it matched no clause and
- * escaped to the container, which rendered its own 500 error document instead
- * of the protocol envelope.
+ * status line takes a different path through reactor-netty: the response head
+ * has been decoded but <em>nothing has been relayed downstream yet</em> — the
+ * server response is still uncommitted and Spring rolls back the copied
+ * upstream headers on the error path — and the body flux fails with
+ * {@code PrematureCloseException}, an {@code IOException}, neither a
+ * {@code WebClientRequestException} nor a timeout. It therefore matched no
+ * clause and escaped to the container, which rendered its own 500 error
+ * document instead of the protocol envelope.
  * </p>
  *
  * <p>

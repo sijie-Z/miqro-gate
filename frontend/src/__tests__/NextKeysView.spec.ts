@@ -164,6 +164,28 @@ describe('NextKeysView', () => {
     expect(wrapper.text()).toContain('core-ai');
   });
 
+  it('#1013: the truncated allowed-models cell is reachable as a tooltip', async () => {
+    // 多模型必然被 nowrap+ellipsis 截断，而截掉的部分在页面上没有第二个入口
+    // （行内「更多」只有接入/轮换/重命名/停用/吊销）——所以这一格必须带 tooltip 触发器。
+    mockApi.listVirtualKeys.mockResolvedValue([
+      key({
+        modelIds: [
+          'deepseek-flash',
+          'deepseek-v4-pro',
+          'deepseek-v4-flash',
+          'deepseek-v4-flash-vision-exp',
+        ],
+      }),
+    ]);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const cell = wrapper.find('.next-keys__models');
+    expect(cell.exists()).toBe(true);
+    expect(cell.element.closest('.ui-tooltip__anchor')).not.toBeNull();
+  });
+
   it('copies the masked key id from the row action', async () => {
     mockApi.listVirtualKeys.mockResolvedValue([key({ id: 'k-copy-1', display: 'mqk_live_…8f2a' })]);
     const wrapper = mountView();

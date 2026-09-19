@@ -10,7 +10,6 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -49,10 +48,12 @@ public class AdminRetentionLogService {
     /** One decrypted page of retention rows (newest first). */
     public List<AdminRetentionLogView> query(UUID tenantId, UUID userId, String direction, String protocol,
             Instant from, Instant to, int page, int size) {
+        if (page < 1) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "PAGE_INVALID", "page must be >= 1");
+        }
         int safeSize = Math.max(1, Math.min(size, MAX_PAGE_SIZE));
-        int safePage = Math.max(0, page);
         FilterSql filter = filter(tenantId, userId, direction, protocol, from, to);
-        filter.params.addValue("limit", safeSize).addValue("offset", (long) safePage * safeSize);
+        filter.params.addValue("limit", safeSize).addValue("offset", (long) (page - 1) * safeSize);
         List<RawRow> rows = jdbc.query("""
                 SELECT r.event_id, r.user_id, u.username, u.display_name, r.virtual_key_id, r.wire_protocol,
                        r.direction, r.gateway_request_id, r.occurred_at, r.key_version, r.ciphertext, r.nonce,
@@ -135,7 +136,11 @@ public class AdminRetentionLogService {
         if (direction != null && !direction.isBlank()) {
             String normalized = direction.trim().toUpperCase(Locale.ROOT);
             if (!"INPUT".equals(normalized) && !"OUTPUT".equals(normalized)) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "direction must be INPUT or OUTPUT");
+                // ApiException, not ResponseStatusException: the advice's catch-all
+                // @ExceptionHandler(Exception.class) wins over the resolver that would
+                // otherwise honour a ResponseStatusException's own status, so throwing
+                // one here surfaces as 500 INTERNAL_ERROR instead of a client error.
+                throw new ApiException(HttpStatus.BAD_REQUEST, "PARAM_INVALID", "direction must be INPUT or OUTPUT");
             }
             where.append(" AND r.direction = :direction");
             params.addValue("direction", normalized);

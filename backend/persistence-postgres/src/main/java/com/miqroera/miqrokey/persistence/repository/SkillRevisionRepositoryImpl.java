@@ -99,7 +99,7 @@ public class SkillRevisionRepositoryImpl implements SkillRevisionRepository {
                 ORDER BY revision DESC
                 LIMIT :limit
                 """, new MapSqlParameterSource("tenantId", tenantId).addValue("skillId", skillId).addValue("limit",
-                Math.min(limit, 50)), ROW_MAPPER);
+                Math.max(1, Math.min(limit, 50))), ROW_MAPPER);
     }
 
     @Override
