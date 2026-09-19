@@ -171,17 +171,16 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
     /**
      * Contract §2 requires every error response — filter rejections included — to
      * carry a unique {@code requestId} so a machine caller can correlate the
-     * failure with the server-side log line. Mirror of
-     * {@link AdminIpAllowlistFilter}'s writer (same header echo + escaping).
+     * failure with the server-side log line. The envelope is serialized by
+     * {@link ProblemJson} rather than spliced, because it carries the echoed
+     * client-controlled {@code X-Request-Id}.
      */
     private static void writeProblem(HttpServletResponse response, HttpServletRequest request, int status, String title,
             String code, String detail) throws IOException {
         response.setStatus(status);
         response.setContentType("application/problem+json");
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-        response.getWriter().write(String.format(
-                "{\"type\":\"about:blank\",\"title\":\"%s\",\"status\":%d,\"code\":\"%s\",\"detail\":\"%s\",\"requestId\":\"%s\"}",
-                title, status, code, detail, requestId(request)));
+        response.getWriter().write(ProblemJson.of(status, title, code, detail, requestId(request)));
     }
 
     private static void unauthorized(HttpServletRequest request, HttpServletResponse response) throws IOException {
@@ -201,10 +200,9 @@ public class AdminApiKeyAuthFilter extends OncePerRequestFilter {
 
     static String requestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");
-        String value = header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
-        // #445: the header is client-controlled and must not break out of the JSON
-        // string.
-        return ProblemJson.escape(value);
+        // #445: this header is client-controlled. It reaches the response only through
+        // ProblemJson.of, which serializes the envelope instead of splicing it.
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
     static UUID asUuid(Object value) {

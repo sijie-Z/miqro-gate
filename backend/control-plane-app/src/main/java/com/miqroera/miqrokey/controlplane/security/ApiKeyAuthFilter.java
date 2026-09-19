@@ -162,17 +162,13 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         response.setStatus(status);
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-        String requestId = requestId(request);
-        response.getWriter().write(String.format(
-                "{\"type\":\"about:blank\",\"title\":\"%s\",\"status\":%d,\"code\":\"%s\",\"detail\":\"%s\",\"requestId\":\"%s\"}",
-                title, status, code, detail, requestId));
+        response.getWriter().write(ProblemJson.of(status, title, code, detail, requestId(request)));
     }
 
     static String requestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");
-        String value = header != null && !header.isBlank() ? header : java.util.UUID.randomUUID().toString();
-        // #445: the header is client-controlled and must not break out of the JSON
-        // string.
-        return ProblemJson.escape(value);
+        // #445: this header is client-controlled. It reaches the response only through
+        // ProblemJson.of, which serializes the envelope instead of splicing it.
+        return header != null && !header.isBlank() ? header : java.util.UUID.randomUUID().toString();
     }
 }
