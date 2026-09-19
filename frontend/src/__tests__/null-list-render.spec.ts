@@ -1,11 +1,14 @@
 /**
- * #PH20-C — list endpoints that answer `null` must not blank the page.
+ * #PH20-C — a non-array body from a list endpoint must not throw during render.
  *
  * The generated types declare every list endpoint as `Promise<X[]>`, but the
- * cast in `src/api/http.ts` is unsound: a Jackson backend serialises an empty
- * collection as `null`, so `list.value = await api.listX()` stored `null` and
- * the very first `list.length` in the render function threw — the whole route
- * went blank instead of showing the empty state.
+ * cast in `src/api/http.ts` is unsound: whatever the body was, it was stored
+ * as-is, so the first `list.length` / `.map` in a render function threw. This
+ * backend does not emit such a body for list endpoints today (it serialises an
+ * empty collection as `[]`), so the guard is hardening against the shape
+ * drifting later. A throw no longer blanks the page either — since #833 the
+ * router wraps views in an ErrorBoundary, so the user gets a recoverable error
+ * card. That is still a broken route, which is what these tests pin down.
  *
  * Only `fetch` is stubbed here; the real api layer runs, which is what makes
  * this a regression test for the boundary guard rather than for a mock.
@@ -14,7 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia } from 'pinia';
 
-/** Every GET answers JSON `null` — the worst case a Jackson backend can send. */
+/** Every GET answers JSON `null` — a shape no list endpoint of this backend emits (see header). */
 function stubNullFetch() {
   return vi.spyOn(globalThis, 'fetch').mockImplementation(
     async () =>
