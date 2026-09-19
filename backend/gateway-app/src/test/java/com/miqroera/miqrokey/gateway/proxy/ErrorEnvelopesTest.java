@@ -31,7 +31,7 @@ class ErrorEnvelopesTest {
     }
 
     @Test
-    @DisplayName("every control character in a message keeps the envelope valid JSON (#447)")
+    @DisplayName("every control character in a message keeps the envelope valid JSON (#866)")
     void allControlCharactersAreEscaped() throws Exception {
         // RFC 8259 §7: U+0000–U+001F MUST be escaped inside a JSON string. The
         // model name is client-supplied, and a JSON unicode escape such as the
@@ -40,11 +40,12 @@ class ErrorEnvelopesTest {
         for (int codePoint = 0x00; codePoint <= 0x1F; codePoint++) {
             String message = "Model 'denied" + (char) codePoint + "model' is not allowed";
             String body = ErrorEnvelopes.body(
-                    new AuthFailureException(HttpStatus.FORBIDDEN, "model_not_allowed", message), "/v1/chat/completions");
+                    new AuthFailureException(HttpStatus.FORBIDDEN, "model_not_allowed", message),
+                    "/v1/chat/completions");
 
             JsonNode parsed = objectMapper.readTree(body);
-            assertThat(parsed.path("error").path("message").asText())
-                    .as("message round-trip for U+%04X", codePoint).isEqualTo(message);
+            assertThat(parsed.path("error").path("message").asText()).as("message round-trip for U+%04X", codePoint)
+                    .isEqualTo(message);
         }
     }
 }

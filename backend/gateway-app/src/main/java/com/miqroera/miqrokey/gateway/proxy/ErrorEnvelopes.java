@@ -18,7 +18,7 @@ final class ErrorEnvelopes {
     static String body(AuthFailureException e, String path) {
         // The message may embed client-supplied model names: escape quotes,
         // backslashes and control characters so the envelope stays valid JSON
-        // (G6 audit fix, completed for all of U+0000-U+001F in #447).
+        // (G6 audit fix; the C0 completion landed in #866).
         String message = escape(e.getMessage());
         String type = escape(e.code());
         boolean isAnthropic = "/v1/messages".equals(path);
@@ -28,13 +28,13 @@ final class ErrorEnvelopes {
     }
 
     /**
-     * JSON-string escaping for envelope values (#447). RFC 8259 section 7
-     * requires <em>every</em> character in U+0000-U+001F to be escaped inside a
-     * JSON string; a client can smuggle any of them into an echoed model or
-     * tool name with a unicode escape, so the short forms for newline, carriage
-     * return and tab are not enough — the rest are emitted as six-character
-     * unicode escapes. Without this the whole envelope is unparseable at the
-     * client.
+     * JSON-string escaping for envelope values (#866, following #447/#449 for the
+     * control-plane twin). RFC 8259 section 7 requires <em>every</em> character in
+     * U+0000-U+001F to be escaped inside a JSON string; a client can smuggle any of
+     * them into an echoed model or tool name with a unicode escape, so the short
+     * forms for newline, carriage return and tab are not enough — the rest are
+     * emitted as six-character unicode escapes. Without this the whole envelope is
+     * unparseable at the client.
      */
     static String escape(String value) {
         if (value == null) {

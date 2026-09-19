@@ -30,7 +30,7 @@ class McpProblemJsonTest {
     }
 
     @Test
-    @DisplayName("a control character in a tool name keeps the envelope valid JSON (#447)")
+    @DisplayName("a control character in a tool name keeps the envelope valid JSON (#866)")
     void controlCharacterInToolNameKeepsEnvelopeValidJson() throws Exception {
         // The JSON-RPC body carries the tool name, and a JSON unicode escape
         // decodes to a raw control character that is echoed verbatim.
@@ -40,8 +40,8 @@ class McpProblemJsonTest {
                     StandardCharsets.UTF_8);
 
             JsonNode parsed = new ObjectMapper().readTree(body);
-            assertThat(parsed.path("error").path("message").asText())
-                    .as("message round-trip for U+%04X", codePoint).isEqualTo(message);
+            assertThat(parsed.path("error").path("message").asText()).as("message round-trip for U+%04X", codePoint)
+                    .isEqualTo(message);
         }
     }
 }
