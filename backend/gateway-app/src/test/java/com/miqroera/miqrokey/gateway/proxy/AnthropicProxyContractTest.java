@@ -486,8 +486,8 @@ class AnthropicProxyContractTest {
 
         /** Meters are created on first observation — absent means zero so far. */
         private double counter(String errorClass) {
-            var counter = meterRegistry.find("miqrokey_gateway_upstream_error_class_total")
-                    .tag("class", errorClass).counter();
+            var counter = meterRegistry.find("miqrokey_gateway_upstream_error_class_total").tag("class", errorClass)
+                    .counter();
             return counter != null ? counter.count() : 0.0;
         }
     }
