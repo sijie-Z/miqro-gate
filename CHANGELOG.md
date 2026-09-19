@@ -5,6 +5,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 ### 2026-09-20
 
+- **速率信号告警：上游 429 计数 + 单 Key 请求峰值（#706，ADR-0026 选项 D）**：ADR-0026 拍板的第一期——**只观测、不阻断**，把该 ADR §4 的触发条件从「无据可依」变成可判定，热路径零改动。两类新规则类型（V71 扩 CHECK）：**`UPSTREAM_RATE_LIMITED`** 数近 1h 上游返回 **429 的条数**（计数而非比例——比例已在 `UPSTREAM_ERROR_RATE` 里，而「上游在限流」与「上游在故障」是两类事故；**网关自身因配额拒绝的请求不触达上游，不计入**）；**`KEY_REQUEST_RATE`** 取近 1h **单把密钥的最高请求条数**（租户级 `USAGE_SURGE` 说不出是谁在猛打），触发事件的 `payload_json` 带该密钥的 `keyId`/`keyName`/`requests`——信号只有可归因才可行动，且 payload 随事件持久化、重试投递按存储重放。per-key 维度全在 SQL 聚合里，不做指标标签（高基数红线），评估仍在控制面。
 - **入口补齐 HSTS（#996）**：Nginx 此前只下发 `X-Content-Type-Options` / `X-Frame-Options` /
   `Referrer-Policy`，**没有 `Strict-Transport-Security`**——而仓库里（Nginx、Spring、文档）从未有过这个头。
   现补上 `max-age=31536000; includeSubDomains`（`always`，覆盖错误响应；**刻意不含 `preload`**：撤回周期

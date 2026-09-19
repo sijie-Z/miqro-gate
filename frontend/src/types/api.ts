@@ -72,7 +72,9 @@ export type AlertRuleType =
   | 'MODEL_APPROVAL_REJECTED'
   | 'ADMIN_API_KEY_EXPIRING'
   | 'CONSUMER_KEY_EXPIRING'
-  | 'USAGE_QUEUE_SATURATION';
+  | 'USAGE_QUEUE_SATURATION'
+  | 'UPSTREAM_RATE_LIMITED'
+  | 'KEY_REQUEST_RATE';
 
 /** #647 未归属请求策略（设置页）。 */
 export type UnattributedPolicyView = {
