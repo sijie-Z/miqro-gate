@@ -29,6 +29,12 @@ class AdminApiKeyServiceTest {
                 String changeSummary, String requestId) {
             recorded.add(action);
         }
+
+        @Override
+        public void acquireChainLock() {
+            // AdminApiKeyService only records; it never orders the chain lock against
+            // another row lock, so this stub has nothing to do here.
+        }
     });
     private final List<String> recorded = new ArrayList<>();
 
