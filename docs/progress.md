@@ -2,6 +2,14 @@
 
 > 此文件是跨 Claude Code/Goal 会话的最小交接状态。每个 Goal 开始和结束时必须更新。不要在这里复制完整设计；链接到事实来源。
 
+## 会话交接点 2026-09-20（配额水位的定价口径：#943）
+
+- **问题形态**：COST 配额水位取 `upstreamPaid`（只含已定价部分），未定价用量计 0 → 一条 `action=REJECT` 的成本封顶对这类用量**完全不起作用**，而水位一直显示 `NORMAL / 0%`。这是「未知被当成零」的运维后果，不是显示层瑕疵。
+- **本批只做「不再读成确定数字」**：`QuotaWatermarks` 给 COST 规则带上 `summary.totals().pricingStatus()` 与 `unpriced()`（与用量 API 同字段名、同口径），`QuotaRuleView` 透出，管理端配额页与「我的配额」复用 `costGapNote` 标「未定价」；TOKENS/REQUESTS 为 `null`（无成本主张）。
+- **刻意未动**：`level` / `exceeded()` 判定不变——「未定价窗口该不该拒绝 REJECT 规则」「是否引入 UNKNOWN 第三态」是 #943 的待决问题①②，属执法语义，留待所有者拍板（本批只在 issue 里把②列为待决）。
+- **校准**：新集成用例 `costWatermarkReportsPricingGap` 在改前红（`No value at JSON path "$.pricingStatus"`），改后绿；前端两条用例对改前视图同样红（临时还原两个 .vue 跑一遍，2 failed / 27 passed），改后 39 passed。
+- **接口副作用**：`QuotaRuleView` 增两字段 → OpenAPI 基线重生成（纯增量，无 required 收紧）+ `gen:types` 重生成；`QuotaRuleReadPathQueryCountTest` 的 mock 构造器同步更新。
+
 ## 会话交接点 2026-09-20（上游错误体分类·观察档：#770 / ADR-0024 选项 B）
 
 - **只观测**：`UpstreamErrorClassifier`（gateway-app）对**已缓冲**的上游非 2xx 体做前 8KB 子串分类 → 有界枚举计数 + 一行日志；**不重试、不改写、不改响应**，错误正文只读不存，截断缓冲不分类。

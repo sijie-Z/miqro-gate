@@ -250,6 +250,50 @@ class AdminQuotaRuleApiIntegrationTest {
                 .andExpect(jsonPath("$.level").value("WARNING"));
     }
 
+    /**
+     * #943: the COST reading is a *priced* sum, and nothing in the response said
+     * so. A window whose usage has no price snapshot read as a definite CNY 0.00 /
+     * NORMAL — the same shape as "this scope spent nothing" — while the usage page
+     * called the same events unpriced. The watermark now carries the pricing status
+     * the usage API has sent since #766, so both pages can render the number as the
+     * lower bound it is.
+     *
+     * <p>
+     * The enforcement reading (level / exceeded) is deliberately untouched: what an
+     * unpriceable window should do to a REJECT rule is #943 question 2, the owner's
+     * call, not a side effect of teaching the page to say "lower bound".
+     */
+    @Test
+    @DisplayName("#943: a COST watermark over unpriceable usage reports the gap, not a definite zero")
+    void costWatermarkReportsPricingGap() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant();
+        UUID keyId = fx.createKeyViaAdmin();
+        fx.insertUsage(keyId, 1_000_000L, 500_000L); // no price snapshot: nothing here can be valued
+
+        // The unpriceable reading: the number is 0 and the level says NORMAL — that
+        // half is unchanged; what is new is that the response admits the gap.
+        putQuota(quotaBody("USER", adminUserId, "COST", "MONTHLY", 1, 80, null, "REJECT")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.used").value(0)).andExpect(jsonPath("$.level").value("NORMAL"))
+                .andExpect(jsonPath("$.pricingStatus").value("UNAVAILABLE"))
+                .andExpect(jsonPath("$.unpriced.unpricedEvents").value(1));
+
+        // A TOKENS rule makes no cost claim, so it carries no cost caveat: the same
+        // 1.5M tokens are counted in full however the window happens to be priced.
+        putQuota(quotaBody("USER", adminUserId, "TOKENS", "MONTHLY", 2_000_000, 80)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.used").value(1_500_000)).andExpect(jsonPath("$.pricingStatus").doesNotExist());
+
+        // Price the model, then add an event for a model that has none: the window is
+        // now PARTIAL, and the 2.00 it shows is a floor — the usage page and this page
+        // finally describe the same window the same way.
+        fx.insertPrices(new BigDecimal("1.00"), new BigDecimal("2.00")); // => CNY 1.00 + 1.00
+        fx.insertUsage(keyId, "model-beta", 11L, 7L);
+
+        putQuota(quotaBody("USER", adminUserId, "COST", "MONTHLY", 1, 80, null, "REJECT")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.used").value(2.00)).andExpect(jsonPath("$.pricingStatus").value("PARTIAL"))
+                .andExpect(jsonPath("$.unpriced.unpricedEvents").value(1));
+    }
+
     @Test
     @DisplayName("YEARLY period watermarks against the UTC calendar year (#683)")
     void yearlyPeriodWatermark() throws Exception {
@@ -604,10 +648,18 @@ class AdminQuotaRuleApiIntegrationTest {
 
         /** Returns the {@code gateway_request_id}, the handle adjustments address. */
         String insertUsage(UUID keyId, long input, long output) {
+            return insertUsage(keyId, "model-alpha", input, output);
+        }
+
+        /**
+         * Same, for a model other than the one {@link #insertPrices} covers — the way a
+         * window ends up priced in part (#943).
+         */
+        String insertUsage(UUID keyId, String modelId, long input, long output) {
             String gatewayRequestId = UUID.randomUUID().toString();
             MapSqlParameterSource p = new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
                     .addValue("keyId", keyId).addValue("projectId", projectId).addValue("productId", productId)
-                    .addValue("modelId", "model-alpha").addValue("input", input).addValue("output", output);
+                    .addValue("modelId", modelId).addValue("input", input).addValue("output", output);
             jdbc.update("""
                     INSERT INTO usage_event
                         (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,

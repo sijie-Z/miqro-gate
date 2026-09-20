@@ -8,7 +8,17 @@
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
-import { UiButton, UiDialog, UiInput, UiSelect, UiStatusBadge, UiTable, toast } from '@/ui';
+import { costGapNote } from '@/lib/usage-pricing';
+import {
+  UiButton,
+  UiDialog,
+  UiInput,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  UiTooltip,
+  toast,
+} from '@/ui';
 import type { UiSelectOption } from '@/ui';
 import type { QuotaAction, QuotaLevel, QuotaMetric, QuotaPeriod } from '@/types/api';
 import type {
@@ -101,6 +111,21 @@ function levelToneFor(level: string | undefined): 'success' | 'warning' | 'dange
 
 function levelLabel(level: string | undefined): string {
   return level ? (levelText[level as QuotaLevel] ?? '') : '';
+}
+
+/**
+ * #943: the COST watermark is the sum of what could be *priced*. When the window
+ * also holds usage that no price snapshot covers, the row showed a definite
+ * amount at NORMAL — the same shape as "nothing was spent" — while the usage page
+ * called those same events unpriced. The API now sends the pricing status with
+ * the watermark, and this is the shared helper that turns it into the same
+ * caveat the usage page shows, so one window is described one way on both pages.
+ *
+ * Empty — not null — when there is nothing to say: `UiTooltip.text` is a plain
+ * string, and a template narrows `v-if` on a ref but not on a function's result.
+ */
+function costGap(row: QuotaRuleView): string {
+  return costGapNote(row) ?? '';
 }
 
 const scopeOptions = computed<UiSelectOption[]>(() =>
@@ -599,6 +624,11 @@ onMounted(load);
               {{ (row as QuotaRuleView).metric === 'COST' ? '¥' : ''
               }}{{ numText((row as QuotaRuleView).limitValue) }}</span
             >
+            <!-- #943: a COST figure over a window that could not be fully priced is a
+                 lower bound; say so where the number is, never in a footnote. -->
+            <UiTooltip v-if="costGap(row as QuotaRuleView)" :text="costGap(row as QuotaRuleView)">
+              <span class="next-quota__unpriced" data-testid="quota-cost-unpriced">未定价</span>
+            </UiTooltip>
             <div class="next-quota__bar-track">
               <div
                 class="next-quota__bar-fill"
@@ -740,6 +770,15 @@ onMounted(load);
   flex-shrink: 0;
   font-size: var(--ui-font-size-xs);
   color: var(--ui-foreground-secondary);
+}
+
+/* The cost caveat (#943) — same treatment as the usage page's marker, and
+   `flex-shrink: 0` because this row's other child is a growing bar. */
+.next-quota__unpriced {
+  flex-shrink: 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-warning-fg);
+  margin-left: var(--ui-space-1);
 }
 
 .next-quota__bar-track {

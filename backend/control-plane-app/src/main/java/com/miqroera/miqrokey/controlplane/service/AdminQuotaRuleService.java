@@ -175,8 +175,8 @@ public class AdminQuotaRuleService {
         ScopeInfo scope = scopeInfo(tenantId, rule.scopeType(), rule.scopeId());
         return new QuotaRuleView(rule.id(), rule.scopeType(), rule.scopeId(), scope.name(), scope.tag(), rule.metric(),
                 rule.period(), rule.action(), rule.limitValue(), rule.warnPercent(), rule.status(), watermark.used(),
-                watermark.usedPct(), watermark.level(), watermark.from(), watermark.to(), rule.createdAt(),
-                rule.updatedAt(), rule.version());
+                watermark.usedPct(), watermark.level(), watermark.pricingStatus(), watermark.unpriced(),
+                watermark.from(), watermark.to(), rule.createdAt(), rule.updatedAt(), rule.version());
     }
 
     private ScopeInfo scopeInfo(UUID tenantId, QuotaScopeType scopeType, UUID scopeId) {

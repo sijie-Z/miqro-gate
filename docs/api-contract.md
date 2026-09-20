@@ -336,7 +336,7 @@
 
 用户自助配额可见性：调用者名下的 **USER 作用域**配额规则 + 当前窗口实时水位（只读）。管理员设置的规则（含默认配额模板自动复制）对用户透明展示；停用规则仍可见。
 
-- 响应 = `QuotaRuleView[]`（同 `5.19` 管理端视图字段：metric/period/limitValue/warnPercent/status/used/usedPct/level/windowFrom/windowTo 等）——仅含 `scopeId == 当前用户` 的行，其他人/项目规则绝不出现。
+- 响应 = `QuotaRuleView[]`（同 `5.19` 管理端视图字段：metric/period/limitValue/warnPercent/status/used/usedPct/level/windowFrom/windowTo 等；COST 规则同样带 `pricingStatus`/`unpriced`——见 `5.19` 的定价口径）——仅含 `scopeId == 当前用户` 的行，其他人/项目规则绝不出现。
 - 口径与审计同 `5.19`（水位读时计算、NORMAL/WARNING/EXCEEDED）；本端点不触发审计（只读）。
 - 会话鉴权（任意角色，含普通用户）；匿名 `401`。无规则时返回空数组。
 
@@ -1029,6 +1029,7 @@ MCP Server 注册、手动上下线与健康检查（对齐腾讯「MCP 上下�
 - 请求体 `{ "scopeType": USER\|PROJECT, "scopeId", "metric": TOKENS\|REQUESTS\|COST, "period": DAILY\|WEEKLY\|MONTHLY\|YEARLY, "limitValue"（正整数；COST 口径为整数 CNY）, "warnPercent"?（1–99，默认 80）, "status"?（默认 ACTIVE）, "action"?（ALERT\|REJECT，默认 ALERT）}`；scope 不存在 → `404 SCOPE_NOT_FOUND`（防枚举）。COST 指标与 YEARLY 周期为 #683 增（对标腾讯配额管理）；`action` 为 #684 增（ADR-0020）。
 - **水位口径（读时计算，非预聚合）**：TOKENS = 当期窗口 usage 事件全部 token（input+output+cacheRead+cacheCreation，与个人用量 TotalTokens 同口径）；REQUESTS = 当期到达上游的请求数（缓存命中不达上游、不计入，与腾讯「不计入缓存命中」档语义一致）；COST = 当期窗口按价格快照估算的上游实付（与成本报表同口径，缺价记 0）。窗口为 UTC 切片：DAILY=当日 / WEEKLY=周一起 / MONTHLY=当月（与月度预算同约定）/ YEARLY=自然年（1 月 1 日起）。水位计算走内部无上限窗口路径，不受公开查询 93 天窗口约束。
 - `level`：`NORMAL` → `WARNING`（≥ warnPercent）→ `NEAR_LIMIT`（≥ 90%，固定提示档，对标腾讯「即将超限」）→ `EXCEEDED`（≥ 100%），按严重度判定。
+- **COST 水位的定价口径（#943）**：`used` 是**已定价部分之和**——窗口内若有用量在发生时没有生效价目，它对 `used` 的贡献是 0。为免「未定价的窗口」与「确实没花钱」读成同一个数，**COST 规则**的响应额外带 `pricingStatus`（`COMPLETE`/`PARTIAL`/`UNAVAILABLE`）与 `unpriced`（同 `usage/summary` 的 `PricingGap`：`unpricedEvents`/`unavailableEvents`/`unpricedHitEvents` 及各维度 token 数）——字段名与口径都取自用量 API（#766），两页对同一个窗口的说法因此一致；`pricingStatus != COMPLETE` 时 `used` 是**下界**，管理端配额页与「我的配额」都在数字旁标「未定价」（hover 说明缺口）。TOKENS/REQUESTS 规则的这两个字段为 `null`：token 与请求数与定价无关。**执法语义不变**——`level`/`EXCEEDED` 仍只按 `used` 判定，「未定价窗口该不该拒绝 `REJECT` 规则」属 #943 待决问题②，本版未动。
 - **超限动作（#684，ADR-0020）**：`ALERT`（默认）只体现水位、永不阻断；`REJECT` 由控制面评估器（`QuotaEnforcementService`，默认 60s 固定延迟）把超限作用域写入 `quota_enforcement` → 随路由快照下发 → 网关在准入处（Key 解析后、读 body 前）查内存集合，命中即 `429` + 标准错误信封（`type=quota_exceeded`，文案含恢复路径）+ **`Retry-After`**（秒：该作用域最早可自愈的窗口结束时刻；多规则拦同一作用域取最早），`/v1/models` 同受此门。**软着陆语义**：Key 不失效、不自动禁用；**跨入新窗口**或**提高限额/停用规则**后判定自然消失、流量自动恢复。
 - **近似语义（必须知道）**：判定按周期刷新，不含评估间隔内新产生的用量——额度可能被超出一个评估周期内的量；页面水位与网关判定在一个周期内可能不一致。不承诺"恰好卡在 100%"，不做限流（速率语义另议）。
 - DISABLED 规则保留计划并展示水位，页面按停用渲染。
