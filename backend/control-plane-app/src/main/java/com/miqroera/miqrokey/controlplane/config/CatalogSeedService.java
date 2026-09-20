@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.controlplane.config;
 
 import com.miqroera.miqrokey.adapters.catalog.ProviderCatalog;
+import com.miqroera.miqrokey.spi.AdapterRegistry;
 import com.miqroera.miqrokey.spi.ProtocolFamily;
 import com.miqroera.miqrokey.spi.ProviderProductDefinition;
 import org.slf4j.Logger;
@@ -21,7 +22,9 @@ import java.util.stream.Collectors;
  * catalog at startup. The catalog is the only trusted source for upstream URLs
  * (CLAUDE.md: all upstream URLs come from compiled adapters or the signed
  * catalog), so products are never hand-entered — the tables are a read-mostly
- * mirror. Idempotent: existing product codes are left untouched.
+ * mirror. Idempotent: an existing product code keeps its row and all of its
+ * columns except {@code implementation_status}, which is re-derived from the
+ * adapter registry on every startup (#735).
  */
 @Component
 public class CatalogSeedService implements ApplicationRunner {
@@ -30,10 +33,13 @@ public class CatalogSeedService implements ApplicationRunner {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final javax.sql.DataSource dataSource;
+    private final AdapterRegistry adapterRegistry;
 
-    public CatalogSeedService(NamedParameterJdbcTemplate jdbc, javax.sql.DataSource dataSource) {
+    public CatalogSeedService(NamedParameterJdbcTemplate jdbc, javax.sql.DataSource dataSource,
+            AdapterRegistry adapterRegistry) {
         this.jdbc = jdbc;
         this.dataSource = dataSource;
+        this.adapterRegistry = adapterRegistry;
     }
 
     @Override
@@ -85,11 +91,36 @@ public class CatalogSeedService implements ApplicationRunner {
         return id != null ? UUID.fromString(id) : providerId(slug);
     }
 
+    /**
+     * Seeds one catalog product.
+     *
+     * <p>
+     * #735: {@code implementation_status} is <em>derived from the registry</em>
+     * rather than declared. The manifest's own {@code status} field is only parsed
+     * by {@code CatalogManifestValidator} and never consumed, and the manifest is
+     * Ed25519-signed, so a hand-written value there would be a claim nobody
+     * maintains. The registry is the fact: {@code provider-adapter-contract.md} §7
+     * defines {@code IMPLEMENTED} as "fixture and mock contract tests pass", and an
+     * adapter is only registered after exactly those tests exist — one adapter per
+     * product, see {@code AdapterRegistryFactory}. {@code VERIFIED} requires
+     * real-credential evidence (#211) and is therefore never set here; the
+     * admission gate and the "持续警告" the contract promises are still **not
+     * implemented** (#735), so this column has no runtime effect today — it is what
+     * the console shows.
+     * </p>
+     *
+     * <p>
+     * The conflict clause converges the status of rows seeded before this change
+     * (nothing else writes the column). If an admin-facing status edit is ever
+     * added, revisit it — a startup runner must not clobber an operator's decision.
+     * </p>
+     */
     private boolean upsertProduct(UUID providerId, ProviderProductDefinition product) {
         String code = product.adapterId();
         String protocols = product.protocols().stream().map(ProtocolFamily::name)
                 .collect(Collectors.joining("\",\"", "[\"", "\"]"));
         String baseUrlTemplates = "[{\"url\":\"" + escapeJson(product.baseUrlTemplate().toString()) + "\"}]";
+        String implementationStatus = adapterRegistry.findById(code).isPresent() ? "IMPLEMENTED" : "DOCUMENTED";
         return jdbc.update("""
                 INSERT INTO provider_products
                     (id, provider_id, product_code, display_name, billing_mode, credential_topology,
@@ -98,15 +129,17 @@ public class CatalogSeedService implements ApplicationRunner {
                      created_at, updated_at)
                 VALUES (:id, :providerId, :code, :displayName, 'PAYG', 'SINGLE_SHARED', 'NONE',
                         :protocols::jsonb, :baseUrlTemplates::jsonb, :authScheme::jsonb,
-                        :modelCatalogStrategy, 'DOCUMENTED', 'UNAVAILABLE', 0, now(), now())
-                ON CONFLICT (provider_id, product_code) DO NOTHING
+                        :modelCatalogStrategy, :implementationStatus, 'UNAVAILABLE', 0, now(), now())
+                ON CONFLICT (provider_id, product_code)
+                    DO UPDATE SET implementation_status = EXCLUDED.implementation_status
                 """,
                 new MapSqlParameterSource("id",
                         UUID.nameUUIDFromBytes(("product:" + code).getBytes(StandardCharsets.UTF_8)))
                         .addValue("providerId", providerId).addValue("code", code)
                         .addValue("displayName", product.displayName()).addValue("protocols", protocols)
                         .addValue("baseUrlTemplates", baseUrlTemplates).addValue("authScheme", "{\"type\":\"bearer\"}")
-                        .addValue("modelCatalogStrategy", product.modelCatalogMode().name())) == 1;
+                        .addValue("modelCatalogStrategy", product.modelCatalogMode().name())
+                        .addValue("implementationStatus", implementationStatus)) == 1;
     }
 
     private boolean isH2() {

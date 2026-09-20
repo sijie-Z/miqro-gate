@@ -62,6 +62,9 @@ public class AdminUsageController {
      * @param groupBy
      *            PROJECT | VIRTUAL_KEY | CACHE_LEVEL | DAY | USER | MODEL | MONTH
      *            (default PROJECT)
+     * @param tzOffsetMinutes
+     *            offset from UTC in minutes for {@code DAY}/{@code MONTH} buckets
+     *            (#1050); null = UTC. Same parameter the hourly report takes.
      */
     @GetMapping("/summary")
     public UsageSummary summary(@RequestParam(required = false) String groupBy,
@@ -70,9 +73,10 @@ public class AdminUsageController {
             @RequestParam(required = false) UUID userId, @RequestParam(required = false) UUID projectId,
             @RequestParam(required = false) UUID virtualKeyId, @RequestParam(required = false) UUID credentialId,
             @RequestParam(required = false) UUID subscriptionId, @RequestParam(required = false) UUID providerProductId,
-            @RequestParam(required = false) String modelId, @RequestParam(required = false) UUID teamId) {
+            @RequestParam(required = false) String modelId, @RequestParam(required = false) UUID teamId,
+            @RequestParam(required = false) Integer tzOffsetMinutes) {
         return usageStatsService.summary(userContext.getUser(), groupBy, from, to, userId, projectId, virtualKeyId,
-                credentialId, subscriptionId, providerProductId, modelId, teamId);
+                credentialId, subscriptionId, providerProductId, modelId, teamId, tzOffsetMinutes);
     }
 
     /**

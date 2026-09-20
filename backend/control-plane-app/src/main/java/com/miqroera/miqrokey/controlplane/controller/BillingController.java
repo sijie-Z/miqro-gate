@@ -41,9 +41,9 @@ public class BillingController {
     @GetMapping("/summary")
     public UsageSummary summary(@RequestParam(required = false) String groupBy,
             @RequestParam(required = false) String from, @RequestParam(required = false) String to,
-            HttpServletRequest request) {
+            @RequestParam(required = false) Integer tzOffsetMinutes, HttpServletRequest request) {
         UUID tenantId = tenant(request);
-        return usageStatsService.summary(tenantId, groupBy, iso(from), iso(to));
+        return usageStatsService.summary(tenantId, groupBy, iso(from), iso(to), tzOffsetMinutes);
     }
 
     @GetMapping("/records")
