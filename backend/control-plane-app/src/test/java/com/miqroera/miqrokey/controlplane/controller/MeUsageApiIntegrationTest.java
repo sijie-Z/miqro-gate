@@ -162,6 +162,23 @@ class MeUsageApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("#1128: the self-service records carry the same attribution fields as the admin ones")
+    void recordsCarryAttribution() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID keyId = fx.createOwnKey();
+        fx.insertPrices();
+        fx.insertAttributedUsage(keyId, "chatcmpl-attr", 10L, 5L, "RESOLVED_SUFFIX", "git_remote", "MEDIUM");
+        fx.insertUsage(keyId, "chatcmpl-plain", 10L, 5L);
+
+        mockMvc.perform(get("/api/v1/me/usage/records").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].providerRequestId").value("chatcmpl-plain"))
+                .andExpect(jsonPath("$.items[0].resolutionStatus").doesNotExist())
+                .andExpect(jsonPath("$.items[1].resolutionStatus").value("RESOLVED_SUFFIX"))
+                .andExpect(jsonPath("$.items[1].claimSource").value("git_remote"))
+                .andExpect(jsonPath("$.items[1].claimConfidence").value("MEDIUM"));
+    }
+
+    @Test
     @DisplayName("records reject invalid pagination and oversized windows")
     void recordsValidation() throws Exception {
         mockMvc.perform(get("/api/v1/me/usage/records").param("page", "0").cookie(sessionCookie))
@@ -326,6 +343,32 @@ class MeUsageApiIntegrationTest {
                             .addValue("credentialId", credentialId).addValue("model", MODEL)
                             .addValue("cacheLevel", cacheLevel).addValue("input", input).addValue("output", output)
                             .addValue("total", input + output).addValue("occurredAt", Timestamp.from(Instant.now())));
+        }
+
+        /**
+         * With the CAA attribution the gateway records for a resolved request (#1128) —
+         * the self-service mapper has to carry the same three fields as the admin one.
+         */
+        void insertAttributedUsage(UUID keyId, String providerRequestId, long input, long output,
+                String resolutionStatus, String claimSource, String claimConfidence) {
+            jdbc.update("""
+                    INSERT INTO usage_event
+                        (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
+                         credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
+                         upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at,
+                         resolution_status, claim_source, claim_confidence)
+                    VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :productId, :credentialId, :model,
+                            'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, 'greq-attr', :occurredAt,
+                            :resolutionStatus, :claimSource, :claimConfidence)
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("providerRequestId", providerRequestId).addValue("keyId", keyId)
+                            .addValue("projectId", projectId).addValue("productId", productId)
+                            .addValue("credentialId", credentialId).addValue("model", MODEL).addValue("input", input)
+                            .addValue("output", output).addValue("total", input + output)
+                            .addValue("occurredAt", Timestamp.from(Instant.now()))
+                            .addValue("resolutionStatus", resolutionStatus).addValue("claimSource", claimSource)
+                            .addValue("claimConfidence", claimConfidence));
         }
     }
 

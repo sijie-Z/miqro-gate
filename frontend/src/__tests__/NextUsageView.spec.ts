@@ -191,6 +191,27 @@ describe('NextUsageView', () => {
     );
   });
 
+  it('#1128: the record log shows how a row was attributed', async () => {
+    mockApi.usageRecords.mockResolvedValue({
+      ...records,
+      items: [
+        {
+          ...records.items![0]!,
+          resolutionStatus: 'POLICY_ROUTED',
+          claimSource: 'git_remote',
+          claimConfidence: 'MEDIUM',
+        },
+      ],
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const chip = wrapper.find('[data-testid="usage-attribution-chip"]');
+    expect(chip.exists()).toBe(true);
+    expect(chip.text()).toContain('未归属策略路由');
+  });
+
   it('#1097: the 上游成本 cell carries its own composition bar', async () => {
     mockApi.usageSummary.mockResolvedValue({
       ...summary,

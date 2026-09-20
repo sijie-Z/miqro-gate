@@ -433,6 +433,30 @@ describe('NextAdminUsageView', () => {
     expect(table).toContain('Anthropic');
   });
 
+  it('#1128: the request log shows how a row was attributed, and stays quiet on the default route', async () => {
+    mockApi.adminUsageRecords.mockResolvedValue({
+      items: [
+        recordRow(0, {
+          resolutionStatus: 'RESOLVED_HEADER',
+          claimSource: 'prompt_url',
+          claimConfidence: 'HIGH',
+        }),
+        recordRow(1, { resolutionStatus: 'SOLE_BINDING' }),
+      ],
+      page: 1,
+      size: 20,
+      total: 2,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Every authenticated request walks the ladder, so the chip is a filter, not a
+    // decoration: the single-binding default gets a dash, the decided row gets a chip.
+    const chips = wrapper.findAll('[data-testid="usage-attribution-chip"]');
+    expect(chips).toHaveLength(1);
+    expect(chips[0]!.text()).toContain('按请求头声明');
+  });
+
   /** Column headers of a rendered UiTable, in column order. */
   function headerTitles(wrapper: ReturnType<typeof mount>, testid: string): string[] {
     return wrapper.findAll(`[data-testid="${testid}"] thead th`).map((th) => th.text());

@@ -41,15 +41,18 @@ public record UsageRecordPage(List<UsageRecordView> items, long page, long size,
      *
      * <p>
      * Attribution (#1128, CAA V54): {@code resolutionStatus} is the server's
-     * verdict on which project the request belonged to — {@code RESOLVED_HEADER} /
-     * {@code RESOLVED_SUFFIX} / {@code SOLE_BINDING} / {@code POLICY_ROUTED} /
-     * {@code UNATTRIBUTED} / {@code AMBIGUOUS} — while {@code claimSource} /
-     * {@code claimConfidence} are what the client <em>claimed</em>
-     * ({@code prompt_url}, {@code tool_path}, … at HIGH/MEDIUM/LOW). The two are
-     * kept apart on purpose: the claim is unverified input, the status is the
-     * ruling, and a reader comparing them is looking at exactly the case worth
-     * looking at. All three are null for rows that never went through the
-     * resolution ladder (a single-binding key) and for rows older than the feature.
+     * verdict on which project the request belonged to — four values are produced
+     * today ({@code RESOLVED_HEADER} / {@code RESOLVED_SUFFIX} /
+     * {@code SOLE_BINDING} / {@code POLICY_ROUTED}); {@code UNATTRIBUTED} /
+     * {@code AMBIGUOUS} are reserved by the shared vocabulary — while
+     * {@code claimSource} / {@code claimConfidence} are what the client
+     * <em>claimed</em> ({@code prompt_url}, {@code tool_path}, … at
+     * HIGH/MEDIUM/LOW). The two are kept apart on purpose: the claim is unverified
+     * input, the status is the ruling. Every authenticated proxy request walks the
+     * ladder, so {@code null} means a row written before V54 (or outside the proxy
+     * path) — a single-binding key's rows carry {@code SOLE_BINDING}, not null. The
+     * claim fields are null both when the client sent nothing and when it sent
+     * something the resolver dropped, so they do not mean "no claim was made".
      * </p>
      */
     public record UsageRecordView(Instant occurredAt, String modelId, CacheLevel cacheLevel, Long inputTokens,

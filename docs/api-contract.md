@@ -268,7 +268,17 @@
 
 参数：`from`、`to`（ISO-8601）、`page`（默认 1，≥1）、`size`（默认 50，1–200）。按时间倒序。
 
-**归属（#1128，CAA V54）**：每行带三个**可空**字段——`resolutionStatus`（服务端裁定：`RESOLVED_HEADER` / `RESOLVED_SUFFIX` / `SOLE_BINDING` / `POLICY_ROUTED` / `UNATTRIBUTED` / `AMBIGUOUS`）、`claimSource`（客户端**声明**的来源：`prompt_url` / `tool_path` / `bash_cwd` / `system_cwd` / `suffix` / `none`）、`claimConfidence`（`HIGH` / `MEDIUM` / `LOW` / `NONE`）。两者**刻意分开**：声明是未验证输入，裁定才是结论，控制台把两者并排显示，故「声明与裁定不一致」这件事在界面上可直接看见。**从未进入归属阶梯的行**（单绑定密钥）与功能上线前的历史行三者为 `null`（不是空串）。管理端点（§5）同口径；`session_id` / `activity_id` / `claimed_project_id` 与 V55 证据表**不在本契约内**（CAA Spec 的 session_id 隐私口径仍未决，见 #1128）。
+**归属（#1128，CAA V54）**：每行带三个**可空**字段——
+
+- `resolutionStatus`——服务端裁定。**现产四个值**：`RESOLVED_HEADER`（按请求头声明的项目）/ `RESOLVED_SUFFIX`（按密钥后缀）/ `SOLE_BINDING`（该密钥只有一个绑定，无需上下文）/ `POLICY_ROUTED`（多绑定且无法解析，走租户的未归属策略）。词表另保留 `UNATTRIBUTED` / `AMBIGUOUS`（它们是**客户端**可声明的 claim-status 取值，当前 resolver 不产出），消费方见到未知取值应按原样展示而非丢弃。
+- `claimSource`——客户端**声明**的来源，7 个允许值：`prompt_url` / `tool_path` / `bash_cwd` / `system_cwd` / `git_remote` / `suffix` / `none`（与 §7.1 同一份清单）。
+- `claimConfidence`——`HIGH` / `MEDIUM` / `LOW` / `NONE`。
+
+三者**刻意分开**：声明是未验证输入，裁定才是结论。控制台并排展示**裁定与声明来源**（但不展示声明的项目 id，见下），因此「声明存在、却被别的方式裁定」这类行是可辨认的；「声明指向哪个项目」不在此契约内。
+
+`claimSource` / `claimConfidence` 为 `null` 有两种情形且**无法区分**：客户端没发对应请求头，或发了但未通过校验（超 64 字符、去空白后为空、或不在允许集合内）——所以它们不承载「客户端一定没声明」的语义。`resolutionStatus` 为 `null` 只出现在 **V54 之前写入的行**（或不经代理路径写入的行）：每个已认证的代理请求都会走归属阶梯，单绑定密钥的行记的是 `SOLE_BINDING` 而不是 null。
+
+**刻意不外露**：`session_id` / `activity_id`（CAA Spec 的 session_id 隐私口径未决，且这两列的语义是「纯观测、不参与路由授权」）与 `claimed_project_id`（未验证输入，且只有 id 没有名字）以及 V55 的 `request_context_evidence` 证据表。管理端点（§5）与对外只读通道同口径。
 
 ```json
 {
