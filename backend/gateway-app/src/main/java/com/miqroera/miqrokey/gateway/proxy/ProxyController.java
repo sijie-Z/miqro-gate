@@ -601,8 +601,8 @@ public class ProxyController {
                                 && !attempt.collector.containsToolCall();
                         if (cacheableResponse) {
                             String contentType = outHeaders.getFirst(HttpHeaders.CONTENT_TYPE);
-                            cached = new CachedResponse(status, contentType, outHeaders, attempt.collector.bytes(),
-                                    tokens, true);
+                            cached = new CachedResponse(status, contentType, outHeaders.asMultiValueMap(),
+                                    attempt.collector.bytes(), tokens, true);
                             // #444: the fill is best-effort and blocking I/O — run it
                             // on the bounded scheduler, never on the response-writing
                             // event loop; a failed fill only logs (the client already
@@ -615,8 +615,8 @@ public class ProxyController {
                         }
                         return cached != null
                                 ? cached
-                                : new CachedResponse(status, null, new HttpHeaders(), new byte[0], TokenBucket.EMPTY,
-                                        false);
+                                : new CachedResponse(status, null, new HttpHeaders().asMultiValueMap(), new byte[0],
+                                        TokenBucket.EMPTY, false);
                     }));
                 });
     }
@@ -957,7 +957,7 @@ public class ProxyController {
                                 ctx.binding().projectId(), family, baseUrl);
                         InboundRequest inbound = new InboundRequest(request.getMethod().name(),
                                 request.getURI().getPath(), decodeQuery(request.getURI().getRawQuery()),
-                                request.getHeaders());
+                                request.getHeaders().asMultiValueMap());
                         TargetRequest target = adapter.resolve(route, inbound);
                         StringBuilder sb = new StringBuilder(target.origin().toString());
                         sb.append(target.path());

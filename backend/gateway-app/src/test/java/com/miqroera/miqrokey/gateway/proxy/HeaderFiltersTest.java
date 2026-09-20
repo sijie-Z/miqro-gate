@@ -18,7 +18,7 @@ class HeaderFiltersTest {
 
         HttpHeaders filtered = HeaderFilters.filterInboundHeaders(headers);
 
-        assertThat(filtered.containsKey("Authorization")).isFalse();
+        assertThat(filtered.containsHeader("Authorization")).isFalse();
         assertThat(filtered.getFirst("Content-Type")).isEqualTo("application/json");
     }
 
@@ -31,7 +31,7 @@ class HeaderFiltersTest {
 
         HttpHeaders filtered = HeaderFilters.filterInboundHeaders(headers);
 
-        assertThat(filtered.containsKey("x-api-key")).isFalse();
+        assertThat(filtered.containsHeader("x-api-key")).isFalse();
         assertThat(filtered.getFirst("anthropic-version")).isEqualTo("2023-06-01");
     }
 
@@ -43,7 +43,7 @@ class HeaderFiltersTest {
 
         HttpHeaders filtered = HeaderFilters.filterInboundHeaders(headers);
 
-        assertThat(filtered.containsKey("api-key")).isFalse();
+        assertThat(filtered.containsHeader("api-key")).isFalse();
     }
 
     @Test
@@ -56,8 +56,8 @@ class HeaderFiltersTest {
 
         HttpHeaders filtered = HeaderFilters.filterInboundHeaders(headers);
 
-        assertThat(filtered.containsKey("Connection")).isFalse();
-        assertThat(filtered.containsKey("Transfer-Encoding")).isFalse();
+        assertThat(filtered.containsHeader("Connection")).isFalse();
+        assertThat(filtered.containsHeader("Transfer-Encoding")).isFalse();
         assertThat(filtered.getFirst("anthropic-version")).isEqualTo("2023-06-01");
     }
 
@@ -73,7 +73,7 @@ class HeaderFiltersTest {
 
         assertThat(filtered.getFirst("anthropic-version")).isEqualTo("2023-06-01");
         assertThat(filtered.getFirst("anthropic-beta")).isEqualTo("prompt-caching-2024-07-31");
-        assertThat(filtered.containsKey("Authorization")).isFalse();
+        assertThat(filtered.containsHeader("Authorization")).isFalse();
     }
 
     @Test
@@ -85,7 +85,7 @@ class HeaderFiltersTest {
 
         HttpHeaders filtered = HeaderFilters.filterInboundHeaders(headers);
 
-        assertThat(filtered.containsKey("Host")).isFalse();
+        assertThat(filtered.containsHeader("Host")).isFalse();
         assertThat(filtered.getFirst("Content-Type")).isEqualTo("application/json");
     }
 
@@ -112,7 +112,7 @@ class HeaderFiltersTest {
 
         HttpHeaders filtered = HeaderFilters.filterInboundHeaders(headers);
 
-        assertThat(filtered).doesNotContainKeys("Connection", "X-Remove-Me", "X-MiQroKey-Request-Id");
+        assertThat(filtered.asMultiValueMap()).doesNotContainKeys("Connection", "X-Remove-Me", "X-MiQroKey-Request-Id");
         assertThat(filtered.getFirst("X-Custom-Trace-Id")).isEqualTo("allowed-id");
     }
 
@@ -127,7 +127,7 @@ class HeaderFiltersTest {
 
         HttpHeaders filtered = HeaderFilters.filterResponseHeaders(headers);
 
-        assertThat(filtered).doesNotContainKeys("Connection", "X-Upstream-Hop", "Transfer-Encoding");
+        assertThat(filtered.asMultiValueMap()).doesNotContainKeys("Connection", "X-Upstream-Hop", "Transfer-Encoding");
         assertThat(filtered.getFirst("X-Request-Id")).isEqualTo("preserve");
     }
 
@@ -143,9 +143,9 @@ class HeaderFiltersTest {
 
         HttpHeaders filtered = HeaderFilters.filterInboundHeaders(headers);
 
-        assertThat(filtered.containsKey("X-Miqro-Project-Id")).isFalse();
-        assertThat(filtered.containsKey("X-Miqro-Claim-Source")).isFalse();
-        assertThat(filtered.containsKey("X-Miqro-Activity")).isFalse();
+        assertThat(filtered.containsHeader("X-Miqro-Project-Id")).isFalse();
+        assertThat(filtered.containsHeader("X-Miqro-Claim-Source")).isFalse();
+        assertThat(filtered.containsHeader("X-Miqro-Activity")).isFalse();
         assertThat(filtered.getFirst("X-Claude-Code-Session-Id")).isEqualTo("sess-1");
         assertThat(filtered.getFirst("anthropic-version")).isEqualTo("2023-06-01");
     }
