@@ -228,7 +228,7 @@
 
 `PATCH /api/v1/me/virtual-keys/{id}`（#582）重命名：body `{ "name": "..." }`（必填，≤200 字符）；仅改展示名，绑定、模型与密钥本身不变，审计记录 from/to；已吊销（`REVOKED`）的密钥不可重命名（`409 KEY_NOT_RENAMEABLE`），且不触发路由快照刷新（路由不依赖名称）。
 
-`POST /api/v1/me/virtual-keys/{id}/disable` 与 `.../enable`（#582）为可逆软停用：停用后该 Key 在下一次路由快照刷新时被移除，请求得到与未知密钥一致的 404（反枚举口径不变）；启用后恢复路由，绑定与授权原样保留。停用仅允许 `ACTIVE`（`409 KEY_NOT_DISABLEABLE`，含 `ROTATING` 拒绝），启用仅允许 `DISABLED`（`409 KEY_NOT_ENABLEABLE`）。两者写审计（`VIRTUAL_KEY_DISABLE` / `VIRTUAL_KEY_ENABLE`）并发布路由快照刷新。
+`POST /api/v1/me/virtual-keys/{id}/disable` 与 `.../enable`（#582）为可逆软停用：停用后该 Key 在下一次路由快照刷新时被移除，请求得到与未知密钥一致的 404（反枚举口径不变）；启用后恢复路由，绑定与授权原样保留（**#1117**：该"原样保留"只描述密钥自身状态切换——若停用期间管理员已把 Key 属主移出某项目，该项目绑定已被置为 `DISABLED`，启用**不会**把它恢复，且该 Key 保持 `DISABLED` 而不会被级联吊销）。停用仅允许 `ACTIVE`（`409 KEY_NOT_DISABLEABLE`，含 `ROTATING` 拒绝），启用仅允许 `DISABLED`（`409 KEY_NOT_ENABLEABLE`）。两者写审计（`VIRTUAL_KEY_DISABLE` / `VIRTUAL_KEY_ENABLE`）并发布路由快照刷新。
 
 ### 4.4 用量汇总 `GET /api/v1/me/usage/summary`
 
