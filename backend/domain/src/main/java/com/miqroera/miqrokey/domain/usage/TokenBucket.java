@@ -40,16 +40,16 @@ public record TokenBucket(Long inputTokens, Long outputTokens, Long cacheCreatio
 
     /**
      * Overlays a later observation of the <em>same</em> response on top of this
-     * one: every non-null field of {@code other} supersedes the field on the
-     * left, nulls leave it untouched.
+     * one: every non-null field of {@code other} supersedes the field on the left,
+     * nulls leave it untouched.
      *
      * <p>
-     * Successive provider usage frames must never be summed. Provider counters
-     * are cumulative within one response: Anthropic repeats the same
+     * Successive provider usage frames must never be summed. Provider counters are
+     * cumulative within one response: Anthropic repeats the same
      * {@code input_tokens} (and cache counters) in {@code message_start} and
      * {@code message_delta}, and OpenAI-family final chunks restate the running
-     * totals. Adding them double-counts every field the provider reports more
-     * than once — the last frame is the authoritative total.
+     * totals. Adding them double-counts every field the provider reports more than
+     * once — the last frame is the authoritative total.
      * </p>
      */
     public TokenBucket overlay(TokenBucket other) {
@@ -63,7 +63,10 @@ public record TokenBucket(Long inputTokens, Long outputTokens, Long cacheCreatio
                 coalesce(reasoningTokens, other.reasoningTokens));
     }
 
-    /** Later non-null value wins; {@code earlier} is kept when {@code later} is null. */
+    /**
+     * Later non-null value wins; {@code earlier} is kept when {@code later} is
+     * null.
+     */
     private static Long coalesce(Long earlier, Long later) {
         return later != null ? later : earlier;
     }
