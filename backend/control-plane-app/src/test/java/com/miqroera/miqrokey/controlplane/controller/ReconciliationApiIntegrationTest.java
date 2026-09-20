@@ -254,9 +254,13 @@ class ReconciliationApiIntegrationTest {
         assertThat(gzId).isNotEqualTo(reportId);
         assertThat(awaitSucceeded(gzId)).contains("\"SUCCEEDED\"");
 
-        // Audit trail: created + succeeded, never content.
-        assertThat(eventCount("RECONCILIATION_CREATED")).isEqualTo(2);
-        assertThat(eventCount("RECONCILIATION_SUCCEEDED")).isEqualTo(2);
+        // Audit trail: created + succeeded, never content. Note what is awaited above
+        // and what is asserted here: `awaitSucceeded` is a barrier for "the report
+        // finished", not for "its audit row landed" — the run commits the status first
+        // and records the audit in a second statement (#1061), so counting straight
+        // after a status poll is the race CI caught. Wait on the count itself.
+        assertThat(awaitCount("RECONCILIATION_CREATED", 2)).as("RECONCILIATION_CREATED events").isTrue();
+        assertThat(awaitCount("RECONCILIATION_SUCCEEDED", 2)).as("RECONCILIATION_SUCCEEDED events").isTrue();
     }
 
     /**
@@ -770,7 +774,22 @@ class ReconciliationApiIntegrationTest {
         return lines;
     }
 
-    /** Poll an audit count (async run writes status and audit separately). */
+    /**
+     * Poll an audit count (async run writes status and audit separately).
+     *
+     * <p>
+     * Use this whenever the assertion is *about an audit count* and what was
+     * awaited before it is the report status: the status and the audit row are
+     * written in separate statements, status first, so the status poll is not a
+     * barrier for the row. #1061 is the case in the wild — `fourStateReport`
+     * counted one `RECONCILIATION_SUCCEEDED` where two were expected, on a loaded
+     * runner, with every other assertion in the file green.
+     *
+     * <p>
+     * Calls whose audit write is synchronous with the request that produced it —
+     * the export downloads, the `CREATED` row inside the uploading request — need
+     * no poll; they are asserted directly on purpose.
+     */
     private boolean awaitCount(String action, long expected) throws Exception {
         for (int i = 0; i < 25; i++) {
             if (eventCount(action) == expected) {
