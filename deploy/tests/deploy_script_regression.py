@@ -19,6 +19,9 @@ asked to fail on a broken one. A run that passes where it should fail is reporte
 as a failure in its own right.
 
 Run: python3 deploy/tests/deploy_script_regression.py [--keep]
+Run it ALONE: the fixtures share the compose project name and image tags, so two
+copies running at once report each other's containers as missing and the
+failures say nothing about the script (hit once, 2026-09-20).
 Needs: docker, python3, curl. Binds 127.0.0.1 only; the sole network use is pulling
 the pinned base image.
 """
@@ -72,6 +75,10 @@ class Stub:
 
     def __init__(self) -> None:
         self.login_status = 400
+        # #1038: a replaced backend answers 5xx until it is up. A non-empty sequence
+        # is consumed one code per login request before login_status applies, which is
+        # what lets a scenario say "not ready yet, then ready".
+        self.login_sequence: list[int] = []
         self.requests: list[tuple[str, str, str | None, str | None]] = []
         stub = self
 
@@ -91,7 +98,12 @@ class Stub:
 
             def do_POST(self) -> None:
                 self._record()
-                code = stub.login_status if self.path == "/api/v1/auth/login" else 404
+                if self.path != "/api/v1/auth/login":
+                    code = 404
+                elif stub.login_sequence:
+                    code = stub.login_sequence.pop(0)
+                else:
+                    code = stub.login_status
                 self.send_response(code)
                 self.end_headers()
                 self.wfile.write(b"x")
@@ -320,6 +332,27 @@ def main() -> int:
         check("a stack rejecting its own origin fails the deploy",
               proc.returncode == 2 and "SMOKE FAILED" in fx.output(proc),
               "exit %d:\n%s" % (proc.returncode, fx.output(proc)[-600:]))
+
+        # -- #1038: the backend is not up yet --------------------------------
+        print("\n== a 5xx from a backend that is still starting (#1038) ==")
+        os.environ["MIQROKEY_DEPLOY_SMOKE_RETRY_SECONDS"] = "100"  # keep the run short
+        stub.login_status = 400
+        stub.login_sequence = [502, 502]  # cold start, then ready
+        proc = fx.run("--verify-only")
+        body = fx.output(proc)
+        retry_detail = "exit %d:\n%s" % (proc.returncode, body[-600:])
+        check("a 502 that clears within the retry window is not a failed deploy",
+              proc.returncode == 0 and "answered after 2 retries" in body, retry_detail)
+        check("and the wait is visible, so a slow start is not silent",
+              "not ready yet (502)" in body, body[-400:])
+
+        # 403 is an answer, not a delay: it must be classified at once.
+        stub.login_sequence = [403, 400]
+        proc = fx.run("--verify-only")
+        forbidden_detail = "exit %d:\n%s" % (proc.returncode, fx.output(proc)[-600:])
+        check("a 403 is never retried into a pass",
+              proc.returncode == 2 and "SMOKE FAILED" in fx.output(proc), forbidden_detail)
+        del os.environ["MIQROKEY_DEPLOY_SMOKE_RETRY_SECONDS"]
 
         stub.login_status = 400
         stub.requests.clear()
