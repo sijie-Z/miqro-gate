@@ -60,19 +60,20 @@ function navItem(wrapper: ReturnType<typeof mount>, label: string) {
   return found;
 }
 
+// Applies to every block below: the shell reads both storages on setup.
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+  initPreferences();
+  setPreference('collapsed', false);
+  setPreference('showTabs', true);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe('shell tab bar keeps URL view state (PH41)', () => {
-  beforeEach(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-    initPreferences();
-    setPreference('collapsed', false);
-    setPreference('showTabs', true);
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it('keeps the query string when re-activating the current tab', async () => {
     const { wrapper, router } = await mountShell();
     expect(router.currentRoute.value.query.credentialId).toBe('c1');
@@ -102,18 +103,6 @@ describe('shell tab bar keeps URL view state (PH41)', () => {
 });
 
 describe('shell sidebar keeps URL view state (PH41)', () => {
-  beforeEach(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-    initPreferences();
-    setPreference('collapsed', false);
-    setPreference('showTabs', true);
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it('does not clear the query when clicking the sidebar item you are already on', async () => {
     const { wrapper, router } = await mountShell();
     expect(router.currentRoute.value.query.credentialId).toBe('c1');
@@ -123,5 +112,76 @@ describe('shell sidebar keeps URL view state (PH41)', () => {
     await flushPromises();
 
     expect(router.currentRoute.value.query.credentialId).toBe('c1');
+  });
+
+  /**
+   * Pins the rule the fix chose, so a future refactor cannot flip it silently:
+   * the sidebar navigates to a *section*, never to that section's remembered
+   * filter. The URL stays the single source of truth — including the fact that
+   * a bare arrival (this sidebar click, or `查看全部` in NextGrantsView) means
+   * "no filter", which is why the tab cannot keep advertising the old one.
+   */
+  it('goes to the bare section from the sidebar, and remembers that', async () => {
+    const { wrapper, router } = await mountShell();
+
+    await navItem(wrapper, '用量').trigger('click');
+    await nextTick();
+    await flushPromises();
+    expect(router.currentRoute.value.fullPath).toBe('/app/usage');
+
+    await navItem(wrapper, '我的密钥').trigger('click');
+    await nextTick();
+    await flushPromises();
+    expect(router.currentRoute.value.fullPath).toBe('/app/keys');
+
+    // ...and the tab now advertises that bare URL, so re-activating it is a
+    // no-op instead of a jump back to a filter the URL no longer mentions.
+    await tab(wrapper, '我的密钥').trigger('click');
+    await nextTick();
+    await flushPromises();
+    expect(router.currentRoute.value.fullPath).toBe('/app/keys');
+  });
+});
+
+describe('shell tab state across reload and logout (PH41)', () => {
+  it('re-registers the current route from the URL when the tab came from sessionStorage', async () => {
+    // A tab written by an older build has no remembered path. Mounting while
+    // the URL carries the filter must repair it before any click.
+    sessionStorage.setItem(
+      'miqrogate.shell-tabs',
+      JSON.stringify([{ name: 'keys', label: '我的密钥' }]),
+    );
+
+    const { wrapper, router } = await mountShell();
+    expect(router.currentRoute.value.query.credentialId).toBe('c1');
+
+    await tab(wrapper, '我的密钥').trigger('click');
+    await nextTick();
+    await flushPromises();
+
+    expect(router.currentRoute.value.query.credentialId).toBe('c1');
+  });
+
+  it('never writes the query string into sessionStorage', async () => {
+    // sessionStorage outlives a logout in the same browser tab, so a persisted
+    // query would be inherited by whoever logs in next.
+    const { router } = await mountShell();
+    expect(router.currentRoute.value.query.credentialId).toBe('c1');
+    await nextTick();
+
+    const raw = sessionStorage.getItem('miqrogate.shell-tabs') ?? '';
+    expect(raw).toContain('keys');
+    expect(raw).not.toContain('credentialId');
+
+    // ...and again once a second, differently-shaped tab exists: the payload
+    // must stay query-free for tabs the user is *not* currently on too.
+    await router.push('/app/usage?tab=token');
+    await nextTick();
+    await flushPromises();
+
+    const after = sessionStorage.getItem('miqrogate.shell-tabs') ?? '';
+    expect(after).toContain('usage');
+    expect(after).not.toContain('credentialId');
+    expect(after).not.toContain('tab=token');
   });
 });

@@ -5809,3 +5809,53 @@ booking 一笔 `outputTokensDelta=-300`：观测 1000 tokens（600 in / 400 out�
 修法落在组件层：`UiTable` 增 `error` 属性（非空时以「加载失败 + 原因 + 重试」取代空态；`#empty` 插槽在无错误时仍完全权威，页面自定义空态不受影响）、`TrendChart` 增 `emptyText`；26 个视图把各自的错误状态接到表格，计数器在失败时显示「—」。回归：组件 2 例 + users/keys 各 1 例，**反向验证撤掉修复后三例全红**（`'共 0 个账号，0 个正常' to be '—'`），其余 32 例不受影响。
 
 另记一条验收台陷阱：内置浏览器**窗口最小化时 rAF 冻结**（`document.hidden=true`、rAF 零回调），此时点侧栏只改 URL 不换视图——`<Transition mode="out-in">` 等不到过渡结束。这是验收环境的假象而非产品缺陷（已用 rAF 探针证实），UI 验收要么固定视口，要么用整页导航。
+
+## 2026-09-20 PH41：shell 导航按 route.name 跳转，把 URL 里的筛选清掉（#1067 / PR #1068）
+
+### 缺陷
+
+`NewShell.vue` 的四处 `router.push` + 一处 `<router-link>` 只认 `route.name`，标签与导航项的身份也只有 name。
+而授权页有意把筛选镜像进 URL（`/app/grants?credentialId=c1`，来自 #657 / PR #700），于是点标签栏或左侧导航
+——**包括点自己已经所在、且已高亮的那一项**——URL 上写着的筛选被静默清空，页面回到全量列表，且没有任何提示。
+只影响管理员（`grants` 路由带 `adminMeta`）。同族的 #960/#961/#1065 都是「读到的与声称的不一致」，这条是
+「导航把地址栏的承诺抹掉」。
+
+### 改动（`frontend/src/components/NewShell.vue`）
+
+- 标签记住 `fullPath`；watch 源从 `route.name` 换成 `route.fullPath`（query-only 变化也会同步进当前标签）；
+  新增 `tabTarget()`，标签点击 / `closeTab()` 的邻居跳转 / 右键菜单 `goTo()` 统一走它。
+- 侧边栏新增 `navTarget()`：当前项返回 `route.fullPath`（同址导航被 vue-router 当重复导航忽略，query 保住），
+  其他项仍走裸路由——侧边栏语义是「去某个分区」，不是「复活该分区上次的筛选」。这条规则用测试钉住了。
+- **持久化只存 `{name,label}`**：sessionStorage 在同一浏览器标签页里跨登出存活，存 fullPath 等于把上一个用户的
+  `?credentialId=` 交给下一个登录者；`restoreTabs()` 也只读这两个字段，于是「旧版本存下的载荷 / 被手改的字符串」
+  结构上不可能再进 `router.push`。
+
+### 测试
+
+`shell-tab-query.spec.ts`：真实 router（memory history）挂载真实 `NewShell`，从 `/app/keys?credentialId=c1` 出发，6 例。
+
+- **修复前必红的 3 例**：标签原地点击 / 标签来回切换 / 侧边栏原地点击——`query.credentialId` 由 `c1` 变 `undefined`。
+- 另 3 例：侧边栏「去裸分区并如此记忆」的规则钉；标签来自 sessionStorage 时由 URL 自愈（`{immediate:true}` 的
+  watch 在任何点击之前就用 URL 修好它，这条同时否掉了评审里「旧载荷仍会触发原缺陷」的猜测）；持久化载荷不含 query。
+  最后一条在硬化前必红（载荷里实打实出现 `"fullPath":"/app/keys?credentialId=c1"`），且用独立临时用例验证过
+  「非当前标签」那半边同样会红（`{"name":"usage",...,"fullPath":"/app/usage?tab=token"}`）——加进去的断言不是空转。
+
+全量 74 文件 542 例通过；`npm run typecheck` 与 `eslint --max-warnings 0` 退出码 0（首次跑 lint 时 prettier 报了
+一处换行，已 `--fix` 后复跑为 0）。
+
+### 未做（都不是本缺陷造成的，本 PR 未修）
+
+- 标签身份仍是 `route.name`：同一路由同时保留两份不同筛选（两个标签两个凭证）做不到，行为与修复前一致。
+- `closeAll` / 关掉最后一个标签后标签栏可能为空且不自动补回：预先存在（那些行不在本 diff 里，修复前的 name 源
+  watch 同样不会触发），任何一次导航或刷新都会自愈。
+- 角色变化后 sessionStorage 里遗留的高权限标签仍会渲染成点不动的死按钮：预先存在，与 query 无关。
+
+### 被否候选（走查记录，均带实测）
+
+- 「未认证深链接登录后回到原目标会丢 query」：`/app-new` 退役前缀的 redirect 是**返回字符串的函数**
+  （`router/index.ts:254`），而 vue-router 的 `handleRedirectRecord` 以 `{query: to.query, hash: to.hash}` 为底再覆盖，
+  实测 `push('/app-new/grants?credentialId=c1')` 得到 `/app/grants?credentialId=c1`——query 没丢，不成立。
+- 「`closeAll` 该走 `tabTarget`」：它是「回到某个分区」而非「回到某个分区上次的筛选」，与侧边栏规则一致；
+  今天 `NextOverviewView` 不读 query，可见损失为零。
+- 「记忆路径里的 `credentialId` 可能已不存在 → 空表」：`NextGrantsView` 已有「查看全部/清除筛选」出口，
+  属优雅降级；且硬化后记忆路径不再落盘，来源只剩用户本次会话真的访问过的 URL。

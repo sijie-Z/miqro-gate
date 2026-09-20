@@ -191,7 +191,7 @@ interface ShellTab {
   label: string;
   /** PH41: last full path (path + query) seen for this tab. Tabs are switched
    *  by path, not by name, so URL-backed view state (`?credentialId=…`) is not
-   *  dropped on the way back. */
+   *  dropped on the way back. Never persisted -- see the persist watcher. */
   fullPath?: string;
 }
 
@@ -205,17 +205,39 @@ function labelOf(name: string): string | undefined {
   return undefined;
 }
 
-const tabs = ref<ShellTab[]>([]);
-try {
-  const saved = JSON.parse(sessionStorage.getItem(TABS_KEY) ?? '[]') as ShellTab[];
-  if (Array.isArray(saved)) tabs.value = saved.filter((t) => t && typeof t.name === 'string');
-} catch {
-  tabs.value = [];
+/** Rebuild the tab list from storage, keeping only the two persisted fields --
+ *  anything else in there (a `fullPath` written by an older build, or garbage)
+ *  never reaches `router.push`. */
+function restoreTabs(): ShellTab[] {
+  try {
+    const saved: unknown = JSON.parse(sessionStorage.getItem(TABS_KEY) ?? '[]');
+    if (!Array.isArray(saved)) return [];
+    return saved
+      .filter((t): t is ShellTab => {
+        const tab = t as Partial<ShellTab> | null;
+        return !!tab && typeof tab.name === 'string' && typeof tab.label === 'string';
+      })
+      .map(({ name, label }) => ({ name, label }));
+  } catch {
+    return [];
+  }
 }
 
-watch(tabs, (value) => sessionStorage.setItem(TABS_KEY, JSON.stringify(value.slice(-24))), {
-  deep: true,
-});
+const tabs = ref<ShellTab[]>(restoreTabs());
+
+// Only `name`/`label` are persisted. A remembered path can carry user-chosen
+// query state (`?credentialId=…`) and sessionStorage outlives a logout in the
+// same browser tab, so persisting it would hand the next user this one's
+// filters (PH41 review). Reloading only costs the memories of sections you are
+// not currently on -- the route you *are* on re-registers itself from the URL.
+watch(
+  tabs,
+  (value) => {
+    const persisted = value.slice(-24).map(({ name, label }) => ({ name, label }));
+    sessionStorage.setItem(TABS_KEY, JSON.stringify(persisted));
+  },
+  { deep: true },
+);
 
 // PH41: watch the fullPath, not just the name — a query-only change (the
 // grants filter writing `?credentialId=…`) must update the tab's target too.
@@ -237,16 +259,21 @@ watch(
   { immediate: true },
 );
 
-/** Where a tab click should land: its remembered path when there is one
- *  (tabs saved by an older build carry no fullPath), else the bare route. */
+/** Where a tab click should land: its remembered path when there is one, else
+ *  the bare route. Restored tabs never carry one (the persisted payload is
+ *  deliberately query-free) -- the current route re-registers itself from the
+ *  URL on mount, so clicking *its* tab is still a no-op. */
 function tabTarget(tab: ShellTab): string | { name: string } {
   return tab.fullPath ?? { name: tab.name };
 }
 
+/** Re-activating the current tab needs no guard: pushing the location you are
+ *  already on is a duplicated navigation, which vue-router drops without
+ *  touching history. An early return here would instead swallow a click made
+ *  while another navigation is still in flight -- the user's last click has to
+ *  win (PH41 review). */
 function activateTab(tab: ShellTab) {
-  const target = tabTarget(tab);
-  if (typeof target === 'string' && target === route.fullPath) return;
-  void router.push(target);
+  void router.push(tabTarget(tab));
 }
 
 /** Where a sidebar click should land. Clicking the entry you are already on
