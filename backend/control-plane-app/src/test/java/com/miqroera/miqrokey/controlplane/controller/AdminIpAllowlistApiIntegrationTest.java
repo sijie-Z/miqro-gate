@@ -191,6 +191,32 @@ class AdminIpAllowlistApiIntegrationTest {
         assertThat(parsed.get("code").asText()).isEqualTo("IP_NOT_ALLOWED");
     }
 
+    @Test
+    @DisplayName("the 403 body survives a control character in X-Request-Id (#1011)")
+    void forbiddenBodyEscapesControlCharacterInRequestId() throws Exception {
+        // The sibling case above uses quotes and a backslash — the two characters
+        // this writer's inline escape chain DID cover, which is why it passed while
+        // the envelope could still be broken. A HTAB is the missing branch: it was
+        // interpolated raw, so the body was not JSON at all and any strict parser
+        // refused it. #1011 replaced the chain with the shared serializer.
+        String hostile = "a\tb";
+        String body = mockMvc
+                .perform(get("/api/v1/me/virtual-keys").with(remote("203.0.113.5")).header("X-Request-Id", hostile)
+                        .cookie(sessionCookie))
+                .andExpect(status().isForbidden()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+
+        JsonNode parsed = objectMapper.readTree(body);
+        // Round-trip: the caller gets its own correlation token back, unaltered.
+        assertThat(parsed.get("requestId").asText()).isEqualTo(hostile);
+        // The convergence must not have moved the envelope's stated fields.
+        assertThat(parsed.get("code").asText()).isEqualTo("IP_NOT_ALLOWED");
+        assertThat(parsed.get("status").asInt()).isEqualTo(403);
+        assertThat(parsed.get("type").asText()).isEqualTo("about:blank");
+        // Absent, not JSON null: this envelope never carried a detail, and the
+        // convergence must not have added one.
+        assertThat(parsed.has("detail")).isFalse();
+    }
+
     private void resetDb() {
         for (String table : List.of("webhook_delivery_attempts", "alert_events", "alert_rules", "webhook_endpoints",
                 "usage_event", "price_snapshot", "quota_rules", "quota_default_template", "virtual_key_models",

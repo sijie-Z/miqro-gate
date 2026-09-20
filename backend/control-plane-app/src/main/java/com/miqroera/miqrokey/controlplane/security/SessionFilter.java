@@ -166,9 +166,7 @@ public class SessionFilter implements Filter {
         try {
             httpRes.setStatus(401);
             httpRes.setContentType("application/problem+json");
-            httpRes.getWriter().write(String.format(
-                    "{\"type\":\"about:blank\",\"title\":\"%s\",\"status\":401,\"code\":\"%s\",\"requestId\":\"%s\"}",
-                    escapeJson(title), escapeJson(code), escapeJson(requestId)));
+            httpRes.getWriter().write(ProblemJson.of(401, title, code, null, requestId));
         } catch (Exception e) {
             LOG.error("Failed to write unauthorized response", e);
         }
@@ -180,37 +178,6 @@ public class SessionFilter implements Filter {
                 return true;
         }
         return false;
-    }
-
-    private static String escapeJson(String s) {
-        if (s == null)
-            return "null";
-        StringBuilder sb = new StringBuilder(s.length() + 8);
-        for (char c : s.toCharArray()) {
-            switch (c) {
-                case '"':
-                    sb.append("\\\"");
-                    break;
-                case '\\':
-                    sb.append("\\\\");
-                    break;
-                case '\n':
-                    sb.append("\\n");
-                    break;
-                case '\r':
-                    sb.append("\\r");
-                    break;
-                case '\t':
-                    sb.append("\\t");
-                    break;
-                default:
-                    if (c < 0x20)
-                        sb.append(String.format("\\u%04x", (int) c));
-                    else
-                        sb.append(c);
-            }
-        }
-        return sb.toString();
     }
 
     @Override

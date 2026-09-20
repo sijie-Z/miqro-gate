@@ -4,8 +4,16 @@ package com.miqroera.miqrokey.controlplane.service;
  * Shared change-summary builders for audit events (jsonb-safe, secret-free).
  * Free-form names are user input: control characters are dropped and JSON
  * specials escaped so a crafted name cannot corrupt the summary document.
+ *
+ * <p>
+ * Public (with {@link #summary}) since #1011: {@code AuthenticationService}
+ * lives in the {@code security} package and was carrying the fifth
+ * byte-identical copy of {@code escapeJson} to build the same
+ * {@code {"username": "…"}} summary. The escape rule belongs in one place, and
+ * this is that place for audit summaries.
+ * </p>
  */
-final class AuditSummaries {
+public final class AuditSummaries {
 
     private AuditSummaries() {
     }
@@ -15,7 +23,7 @@ final class AuditSummaries {
     }
 
     /** Renders alternating key/value pairs as one flat JSON object. */
-    static String summary(Object... kv) {
+    public static String summary(Object... kv) {
         StringBuilder sb = new StringBuilder("{");
         for (int i = 0; i < kv.length; i += 2) {
             if (i > 0) {

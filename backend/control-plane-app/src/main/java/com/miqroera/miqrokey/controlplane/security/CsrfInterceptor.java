@@ -87,9 +87,7 @@ public class CsrfInterceptor implements HandlerInterceptor {
         try {
             response.setStatus(status);
             response.setContentType("application/problem+json");
-            response.getWriter().write(String.format(
-                    "{\"type\":\"about:blank\",\"title\":\"%s\",\"status\":%d,\"code\":\"%s\",\"requestId\":\"%s\"}",
-                    escapeJson(title), status, escapeJson(code), escapeJson(requestId)));
+            response.getWriter().write(ProblemJson.of(status, title, code, null, requestId));
         } catch (Exception e) {
             LOG.error("Failed to write CSRF problem response", e);
         }
@@ -98,36 +96,5 @@ public class CsrfInterceptor implements HandlerInterceptor {
     private static String resolveRequestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");
         return (header != null && !header.isBlank()) ? header : UUID.randomUUID().toString();
-    }
-
-    private static String escapeJson(String s) {
-        if (s == null)
-            return "null";
-        StringBuilder sb = new StringBuilder(s.length() + 8);
-        for (char c : s.toCharArray()) {
-            switch (c) {
-                case '"':
-                    sb.append("\\\"");
-                    break;
-                case '\\':
-                    sb.append("\\\\");
-                    break;
-                case '\n':
-                    sb.append("\\n");
-                    break;
-                case '\r':
-                    sb.append("\\r");
-                    break;
-                case '\t':
-                    sb.append("\\t");
-                    break;
-                default:
-                    if (c < 0x20)
-                        sb.append(String.format("\\u%04x", (int) c));
-                    else
-                        sb.append(c);
-            }
-        }
-        return sb.toString();
     }
 }

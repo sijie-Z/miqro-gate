@@ -54,8 +54,7 @@ public class AdminIpAllowlistFilter extends OncePerRequestFilter {
         response.setStatus(403);
         response.setContentType("application/problem+json");
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-        response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"Forbidden\",\"status\":403,"
-                + "\"code\":\"IP_NOT_ALLOWED\",\"requestId\":\"" + requestId(request) + "\"}");
+        response.getWriter().write(ProblemJson.of(403, "Forbidden", "IP_NOT_ALLOWED", null, requestId(request)));
     }
 
     /** Billing channel and the guarded one-time bootstrap stay reachable. */

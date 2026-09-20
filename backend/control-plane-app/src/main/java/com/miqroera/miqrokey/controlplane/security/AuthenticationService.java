@@ -8,6 +8,7 @@ import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import com.miqroera.miqrokey.domain.service.PasswordHasher;
 import com.miqroera.miqrokey.controlplane.service.ApiException;
+import com.miqroera.miqrokey.controlplane.service.AuditSummaries;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
@@ -496,38 +497,9 @@ public class AuthenticationService {
     }
 
     private static String buildSummary(String username) {
-        return String.format("{\"username\":\"%s\"}", escapeJson(username));
-    }
-
-    private static String escapeJson(String s) {
-        if (s == null)
-            return "null";
-        StringBuilder sb = new StringBuilder(s.length() + 8);
-        for (char c : s.toCharArray()) {
-            switch (c) {
-                case '"':
-                    sb.append("\\\"");
-                    break;
-                case '\\':
-                    sb.append("\\\\");
-                    break;
-                case '\n':
-                    sb.append("\\n");
-                    break;
-                case '\r':
-                    sb.append("\\r");
-                    break;
-                case '\t':
-                    sb.append("\\t");
-                    break;
-                default:
-                    if (c < 0x20)
-                        sb.append(String.format("\\u%04x", (int) c));
-                    else
-                        sb.append(c);
-            }
-        }
-        return sb.toString();
+        // jsonb-safe by construction, and the same builder the rest of the audit
+        // trail uses — this was the fifth byte-identical copy of escapeJson (#1011).
+        return AuditSummaries.summary("username", username);
     }
 
     private static UserView enrichWithView(User u, UserStatus effectiveStatus) {
