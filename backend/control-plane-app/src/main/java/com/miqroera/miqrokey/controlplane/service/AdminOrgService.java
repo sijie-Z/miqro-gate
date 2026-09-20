@@ -259,6 +259,17 @@ public class AdminOrgService {
 
     @Transactional
     public Project createProject(UUID tenantId, UUID adminId, String code, String name, String projectTag) {
+        // #1166: the UNATTRIBUTED code is reserved for the per-tenant bucket
+        // project (system=true, lazily created by UnattributedPolicyService on
+        // configuration). A regular project claiming it first used to be silently
+        // adopted as the bucket — with system=false, defeating the
+        // PROJECT_NOT_SELECTABLE guard — so the claim is refused up front. Exact
+        // match only: adoption matches the code verbatim too, and lower-case codes
+        // stay untouched.
+        if (UnattributedPolicyService.BUCKET_CODE.equals(code)) {
+            throw new ApiException(HttpStatus.CONFLICT, "PROJECT_CODE_RESERVED",
+                    "「" + code + "」是未归属桶项目（系统项目）的保留 code，不能用于普通项目；请改用其它 code（桶项目会在首次配置未归属策略时自动建立）。");
+        }
         requireValidProjectTag(projectTag);
         if (code == null || code.isBlank() || projectRepository.existsByTenantIdAndCode(tenantId, code)) {
             throw new ApiException(HttpStatus.CONFLICT, "PROJECT_CODE_TAKEN",

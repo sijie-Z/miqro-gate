@@ -24,6 +24,12 @@ import java.util.UUID;
  * is also referenced by an active project grant the response carries a warning
  * (plan Q1 — advisory, not blocking).
  * </p>
+ *
+ * <p>
+ * The bucket code {@link #BUCKET_CODE} is reserved (#1166): project creation
+ * refuses it, and configuration reports a conflict instead of adopting an
+ * already-existing same-code non-system row.
+ * </p>
  */
 @Service
 public class UnattributedPolicyService {
@@ -134,12 +140,27 @@ public class UnattributedPolicyService {
     // ------------------------------------------------------------------
 
     private UUID ensureBucketProject(UUID tenantId) {
-        UUID existing = jdbc.query("""
-                SELECT id FROM projects WHERE tenant_id = :tenantId AND code = :code
-                """, new MapSqlParameterSource("tenantId", tenantId).addValue("code", BUCKET_CODE),
-                rs -> rs.next() ? (UUID) rs.getObject("id") : null);
+        record BucketRow(UUID id, String name, boolean system) {
+        }
+        BucketRow existing = jdbc.query("""
+                SELECT id, name, system FROM projects WHERE tenant_id = :tenantId AND code = :code
+                """, new MapSqlParameterSource("tenantId", tenantId).addValue("code", BUCKET_CODE), rs -> {
+            if (!rs.next()) {
+                return null;
+            }
+            return new BucketRow((UUID) rs.getObject("id"), rs.getString("name"), rs.getBoolean("system"));
+        });
         if (existing != null) {
-            return existing;
+            if (!existing.system()) {
+                // #1166: a regular project claimed the reserved code before this
+                // policy existed. Adopting it silently would leave the bucket with
+                // system=false and disable the PROJECT_NOT_SELECTABLE guard for it —
+                // report the conflict and leave the row untouched instead.
+                throw new ApiException(HttpStatus.CONFLICT, "BUCKET_PROJECT_CONFLICT",
+                        "已存在一个占用未归属桶保留 code「" + BUCKET_CODE + "」的普通项目（id=" + existing.id() + "，名称「" + existing.name()
+                                + "」）。未归属桶必须是系统项目，不能静默收养该行；" + "请先将该项目改名或删除，再配置未归属策略。");
+            }
+            return existing.id();
         }
         UUID id = UUID.randomUUID();
         jdbc.update("""
