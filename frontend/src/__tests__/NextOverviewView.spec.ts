@@ -138,6 +138,50 @@ describe('NextOverviewView', () => {
     expect(wrapper.find('[data-testid="overview-stats"]').text()).toContain('¥9.99');
   });
 
+  /** PH43: ten projects at ¥10 each, so the ring can only name five of them and the
+   *  drawn bars are a strict subset of the window. */
+  function tenProjects() {
+    return Array.from({ length: 10 }, (_, i) => ({
+      groupKey: `p${i}`,
+      label: `项目 ${i}`,
+      requests: { upstream: 1, coalesced: 0, l1Hit: 0, l2Hit: 0 },
+      tokens: { input: 1_000, output: 500, cacheRead: 0, cacheCreation: 0 },
+      cost: { upstreamPaid: '10.000000', gatewayObserved: '0.000000' } as unknown as UsageCost,
+    }));
+  }
+  const tenProjectSummary = (): UsageSummary =>
+    ({
+      groupBy: 'project',
+      groups: tenProjects(),
+      totals: { ...summary.totals, cost: { upstreamPaid: '100.000000' } },
+    }) as unknown as UsageSummary;
+
+  // PH43: 成本分布's 合计 sits three cards below 本月成本 and claims to be a total too.
+  // It was summed from the bars it draws (top 8 after dropping sub-cent rows), so from
+  // a 9th project on, the same window reported two different costs on one screen.
+  it('reports 成本分布 合计 from the server total, not the drawn bars (#PH43)', async () => {
+    mockApi.usageSummary.mockResolvedValue(tenProjectSummary());
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="overview-stats"]').text()).toContain('¥100.00');
+    expect(wrapper.find('[data-testid="overview-cost"]').text()).toContain('合计 ¥100.00');
+  });
+
+  // PH43: same root cause, visible in the legend: 其他 stopped at the 8th project, so
+  // the shares described a ¥80 ring while the page's cost was ¥100.
+  it('gives 成本分布 a 其他 slice that covers every unnamed project (#PH43)', async () => {
+    mockApi.usageSummary.mockResolvedValue(tenProjectSummary());
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const panel = wrapper.find('[data-testid="overview-cost"]').text();
+    expect(panel).toContain('¥50.00'); // 100 − 5 named × 10, not 6th..8th only (30)
+    expect(panel).not.toContain('¥30.00');
+  });
+
   it('renders usage bars and the recent keys panel with Chinese statuses', async () => {
     const wrapper = mountView();
     await flushPromises();

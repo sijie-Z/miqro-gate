@@ -140,7 +140,13 @@ const costGroups = computed(() =>
     .slice(0, 8),
 );
 
-const costTotal = computed(() => costGroups.value.reduce((sum, g) => sum + g.cost, 0));
+/**
+ * PH43: the window's cost, from the server's totals — the same figure the 本月成本
+ * card three panels up shows. `costGroups` above is a *drawing* truncation (top 8
+ * after dropping sub-cent rows), so summing it redefined the total the moment a 9th
+ * cost-bearing project existed: the same window reported ¥80 here and ¥100 there.
+ */
+const costTotal = computed(() => Number(totals.value?.cost?.upstreamPaid ?? 0));
 
 /** Donut palette (frontend-design §4: blue/cyan/orange/gray — no rainbow). */
 const DONUT_COLORS = ['#0960bd', '#69c0ff', '#13c2c2', '#fa8c16', '#8c8c8c', '#d9d9d9'];
@@ -149,8 +155,10 @@ const donutSegments = computed(() => {
   const total = costTotal.value;
   if (total <= 0) return [];
   const top = costGroups.value.slice(0, 5);
-  const rest = costGroups.value.slice(5);
-  const restCost = rest.reduce((sum, g) => sum + g.cost, 0);
+  // PH43: everything the ring does not name — ranks 6+, the sub-cent rows the legend
+  // hides, and any gap between the drawn groups and the server's total. Deriving it by
+  // subtracting keeps the slices summing to the total instead of to the drawing.
+  const restCost = Math.max(0, total - top.reduce((sum, g) => sum + g.cost, 0));
   const rows = top.map((g, i) => ({
     label: g.label ?? '—',
     cost: g.cost,
