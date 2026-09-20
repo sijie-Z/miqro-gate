@@ -169,6 +169,45 @@ describe('NextAdminReconciliationsView', () => {
     expect(mockApi.reconciliationReport).toHaveBeenCalledWith('r9');
   });
 
+  it('#PH53: one failed status poll must not stop polling for good', async () => {
+    // Same failure shape as the export list: the catch branch kills the interval
+    // instead of retrying, so a single transient error freezes the report on a
+    // status that is already wrong until the page is reloaded by hand.
+    mockApi.createReconciliation.mockResolvedValue(report({ id: 'r9', status: 'PENDING' }));
+    mockApi.reconciliationReport
+      .mockRejectedValueOnce(new Error('transient'))
+      .mockResolvedValue(report({ id: 'r9', status: 'SUCCEEDED' }));
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="recon-upload-open"]').trigger('click');
+    await wrapper.find('[data-testid="recon-provider"]').setValue('anthropic-claude');
+    await wrapper.find('[data-testid="recon-window-from"]').setValue('2026-09-09T00:00:00Z');
+    await wrapper.find('[data-testid="recon-window-to"]').setValue('2026-09-10T00:00:00Z');
+    const input = wrapper.find('[data-testid="recon-file"]');
+    const file = new File(['{"provider_request_id":"req-1"}'], 'bill.jsonl', {
+      type: 'application/json',
+    });
+    Object.defineProperty(input.element, 'files', { value: [file] });
+    await input.trigger('change');
+    await flushPromises();
+    await wrapper.find('[data-testid="recon-submit"]').trigger('click');
+    await flushPromises();
+
+    // Arm the failure only now, so it lands on the poll tick and not on the
+    // detail refresh the create flow issues on the way in.
+    const before = mockApi.reconciliationReport.mock.calls.length;
+    mockApi.reconciliationReport.mockRejectedValueOnce(new Error('transient'));
+
+    vi.advanceTimersByTime(2500);
+    await flushPromises();
+    expect(mockApi.reconciliationReport).toHaveBeenCalledTimes(before + 1);
+
+    vi.advanceTimersByTime(2500);
+    await flushPromises();
+    expect(mockApi.reconciliationReport).toHaveBeenCalledTimes(before + 2);
+  });
+
   it('exports the open report without a filter and reports the row count', async () => {
     mockApi.exportReconciliationCsv.mockResolvedValue({
       csv: 'report_id,verdict\nr1,MATCHED\n',
