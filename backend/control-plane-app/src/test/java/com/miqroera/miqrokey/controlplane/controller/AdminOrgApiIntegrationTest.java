@@ -585,6 +585,69 @@ class AdminOrgApiIntegrationTest {
         assertThat(keyStatus).isEqualTo("REVOKED");
     }
 
+    @Test
+    @DisplayName("removing a member severs the project route even while their key is DISABLED")
+    void memberRemovalSeversRouteWhileKeyDisabled() throws Exception {
+        fx.insertProviderAndProductAndCredential();
+        String projectId = createProject("QAOFF");
+        String grantId = createGrant(projectId, List.of("model-a"));
+
+        // bob joins the project.
+        MvcResult invited = mockMvc
+                .perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("username", "bob"))))
+                .andExpect(status().isOk()).andReturn();
+        Map<?, ?> inviteBody = objectMapper.readValue(invited.getResponse().getContentAsString(), Map.class);
+        String bobId = ((Map<?, ?>) inviteBody.get("user")).get("id").toString();
+        String bobTemp = (String) inviteBody.get("temporaryPassword");
+        mockMvc.perform(post("/api/v1/admin/projects/" + projectId + "/members").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("userId", bobId)))).andExpect(status().isOk());
+
+        MvcResult bobLogin = mockMvc
+                .perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("bob", bobTemp))))
+                .andExpect(status().isOk()).andReturn();
+        Cookie bobSession = cookie(bobLogin, "MIQROKEY_SESSION");
+        Cookie bobCsrf = cookie(bobLogin, "MIQROKEY_CSRF");
+        mockMvc.perform(post("/api/v1/auth/password").contentType(MediaType.APPLICATION_JSON)
+                .cookie(bobSession, bobCsrf).header("X-CSRF-Token", bobCsrf.getValue())
+                .content(objectMapper.writeValueAsString(new PasswordChangeRequest(bobTemp, "BobSecurePass1!"))))
+                .andExpect(status().isOk());
+
+        MvcResult bobKey = mockMvc
+                .perform(post("/api/v1/me/virtual-keys").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(bobSession, bobCsrf).header("X-CSRF-Token", bobCsrf.getValue())
+                        .content(objectMapper.writeValueAsString(Map.of("name", "bob-off", "projectId", projectId,
+                                "providerProductId", fx.productId.toString(), "credentialGrantId", grantId, "purpose",
+                                "CLAUDE_CODE"))))
+                .andExpect(status().isCreated()).andReturn();
+        String keyId = objectMapper.readValue(bobKey.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        // bob parks his own key first (self-service disable), then the admin
+        // removes him from the project.
+        mockMvc.perform(post("/api/v1/me/virtual-keys/" + keyId + "/disable").cookie(bobSession, bobCsrf)
+                .header("X-CSRF-Token", bobCsrf.getValue())).andExpect(status().isOk());
+        mockMvc.perform(delete("/api/v1/admin/projects/" + projectId + "/members/" + bobId)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+
+        // Membership removal is the authority for the project route (ADR-0018):
+        // a key that was merely parked must not keep an ACTIVE binding.
+        String bindingStatus = jdbc.queryForObject("SELECT status FROM key_project_binding WHERE virtual_key_id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(keyId)), String.class);
+        assertThat(bindingStatus).isEqualTo("DISABLED");
+
+        // …and flipping the key back on must not resurrect the route either.
+        mockMvc.perform(post("/api/v1/me/virtual-keys/" + keyId + "/enable").cookie(bobSession, bobCsrf)
+                .header("X-CSRF-Token", bobCsrf.getValue())).andExpect(status().isOk());
+        String bindingAfterEnable = jdbc.queryForObject(
+                "SELECT status FROM key_project_binding WHERE virtual_key_id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(keyId)), String.class);
+        assertThat(bindingAfterEnable).isEqualTo("DISABLED");
+    }
+
     private final class Fixture {
         final UUID tenantId = UUID.fromString("00000000-0000-0000-0000-000000000001");
         final UUID providerId = UUID.randomUUID();
