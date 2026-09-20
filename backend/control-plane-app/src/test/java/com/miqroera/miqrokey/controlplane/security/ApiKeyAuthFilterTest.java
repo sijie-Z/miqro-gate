@@ -1,18 +1,26 @@
 package com.miqroera.miqrokey.controlplane.security;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.crypto.ConsumerJwtVerifier;
 import com.miqroera.miqrokey.domain.model.ApiConsumer;
 import com.miqroera.miqrokey.domain.repository.ApiConsumerRepository;
 import jakarta.servlet.FilterChain;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -41,10 +49,23 @@ class ApiKeyAuthFilterTest {
     private final ApiKeyAuthFilter filter = new ApiKeyAuthFilter(repository, new ConsumerJwtVerifier(), userContext);
 
     private final UUID tenant = UUID.randomUUID();
+    private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
 
     @BeforeEach
     void setUp() {
         when(repository.findByKeyDigest(any())).thenReturn(Optional.empty());
+        appender.start();
+        ((Logger) LoggerFactory.getLogger(ApiKeyAuthFilter.class)).addAppender(appender);
+    }
+
+    @AfterEach
+    void tearDown() {
+        ((Logger) LoggerFactory.getLogger(ApiKeyAuthFilter.class)).detachAppender(appender);
+    }
+
+    private List<String> messages(Level level) {
+        return appender.list.stream().filter(event -> event.getLevel() == level).map(ILoggingEvent::getFormattedMessage)
+                .toList();
     }
 
     private ApiConsumer consumer(List<String> capabilities) {
@@ -121,6 +142,61 @@ class ApiKeyAuthFilterTest {
         assertThat(response.getStatus()).isEqualTo(403);
         JsonNode body = new ObjectMapper().readTree(response.getContentAsString());
         assertThat(body.path("requestId").asText()).isEqualTo("ph16-tab-\t-end");
+    }
+
+    @Test
+    @DisplayName("PH45: a rejection is traced server-side by requestId, never by the credential")
+    void rejectionsAreLoggedWithoutTheSecret() throws Exception {
+        // 401 — the presented key matches no consumer.
+        MockHttpServletRequest unknown = new MockHttpServletRequest();
+        unknown.setRequestURI(BILLING_PATH);
+        unknown.addHeader("X-API-Key", "mqk_api_ph45-secret-material");
+        unknown.addHeader("X-Request-Id", "ph45-c2-unknown");
+        MockHttpServletResponse unknownResponse = new MockHttpServletResponse();
+        filter.doFilter(unknown, unknownResponse, chain);
+
+        assertThat(unknownResponse.getStatus()).isEqualTo(401);
+        assertThat(messages(Level.WARN))
+                .anySatisfy(line -> assertThat(line).contains("ph45-c2-unknown", "UNKNOWN_API_KEY"));
+        // Axis 5: the rejected material itself must not reach the log.
+        assertThat(messages(Level.WARN)).allSatisfy(line -> assertThat(line).doesNotContain("secret-material"));
+
+        // 403 — a known consumer whose key lacks billing:read.
+        UUID consumerId = UUID.randomUUID();
+        Instant now = Instant.now();
+        when(repository.findByKeyDigest(any())).thenReturn(Optional.of(new ApiConsumer(consumerId, tenant, "platform",
+                new byte[32], "abcd1234", "ACTIVE", null, null, null, 1L, now, now, List.of("mcp:call"), null)));
+        MockHttpServletRequest scoped = new MockHttpServletRequest();
+        scoped.setRequestURI(BILLING_PATH);
+        scoped.addHeader("X-API-Key", "mqk_api_ph45-scope-probe");
+        scoped.addHeader("X-Request-Id", "ph45-c2-scope");
+        MockHttpServletResponse scopedResponse = new MockHttpServletResponse();
+        filter.doFilter(scoped, scopedResponse, chain);
+
+        assertThat(scopedResponse.getStatus()).isEqualTo(403);
+        assertThat(messages(Level.WARN)).anySatisfy(
+                line -> assertThat(line).contains("ph45-c2-scope", consumerId.toString(), tenant.toString()));
+    }
+
+    @Test
+    @DisplayName("PH45: an unverified JWT sub cannot forge extra log lines")
+    void unverifiedJwtSubjectIsFlattened() throws Exception {
+        // extractSubject() runs before the signature check, so the claim is
+        // attacker-controlled text by the time it reaches the log line.
+        String claims = "{\"sub\":\"acme\\n2026-09-20 00:00:00 ERROR forged line\"}";
+        String payload = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(claims.getBytes(StandardCharsets.UTF_8));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI(BILLING_PATH);
+        request.addHeader("Authorization", "Bearer header." + payload + ".signature");
+        request.addHeader("X-Request-Id", "ph45-c2-jwt");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(messages(Level.WARN))
+                .anySatisfy(line -> assertThat(line).contains("ph45-c2-jwt", "UNKNOWN_CONSUMER", "acme?2026-09-20"));
+        assertThat(appender.list).noneSatisfy(event -> assertThat(event.getFormattedMessage()).contains("\n"));
     }
 
     private String rejectAndReadRequestId(String apiKey) throws Exception {

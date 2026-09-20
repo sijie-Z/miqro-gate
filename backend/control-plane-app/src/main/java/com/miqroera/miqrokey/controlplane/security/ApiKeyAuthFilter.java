@@ -8,6 +8,8 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -25,6 +27,8 @@ import java.security.MessageDigest;
  */
 public class ApiKeyAuthFilter extends OncePerRequestFilter {
 
+    private static final Logger LOG = LoggerFactory.getLogger(ApiKeyAuthFilter.class);
+
     /** Request attribute holding the authenticated consumer id. */
     public static final String CONSUMER_ATTR = "apiConsumerId";
     /** Request attribute holding the consumer's tenant id. */
@@ -33,6 +37,9 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     /** Path prefix of the external-system channel. */
     public static final String BILLING_PATH = "/api/v1/billing";
     private static final String KEY_PREFIX = "mqk_api_";
+
+    /** Upper bound for a client-supplied identifier echoed into a log line. */
+    private static final int LOG_VALUE_MAX = 64;
 
     private final ApiConsumerRepository consumerRepository;
     private final ConsumerJwtVerifier jwtVerifier;
@@ -66,17 +73,17 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
             // The X-API-Key header is API-key-only; Authorization: Bearer splits
             // by prefix (mqk_api_… = API key, otherwise an RS256 JWT).
             if (credential.origin() == Origin.API_KEY_HEADER) {
-                consumer = authenticateApiKey(credential.value());
+                consumer = authenticateApiKey(credential.value(), request);
             } else if (credential.value().startsWith(KEY_PREFIX)) {
-                consumer = authenticateApiKey(credential.value());
+                consumer = authenticateApiKey(credential.value(), request);
             } else {
-                consumer = authenticateJwt(credential.value());
+                consumer = authenticateJwt(credential.value(), request);
             }
             if (consumer != null) {
                 // Issue #316 channel scope: the billing channel requires
                 // billing:read (null scope = full access). Fail closed.
                 if (!consumer.allows("billing:read")) {
-                    forbidden(request, response);
+                    forbidden(request, response, "CONSUMER_SCOPE_DENIED", consumer);
                     return;
                 }
                 request.setAttribute(CONSUMER_ATTR, consumer.id());
@@ -89,29 +96,71 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         // is forbidden (not unauthenticated) — and never falls back to the
         // session's tenant.
         if (userContext.isAuthenticated()) {
-            forbidden(request, response);
+            forbidden(request, response, "SESSION_WITHOUT_CONSUMER_CREDENTIAL", null);
             return;
+        }
+        // A credential that was presented has already been recorded with its own
+        // reason by the authenticator; only a credential-less call needs a line
+        // here, otherwise every rejection would be logged twice.
+        if (credential == null) {
+            LOG.warn("Billing channel unauthorized [requestId={}, reason=NO_CREDENTIAL]", requestId(request));
         }
         unauthorized(request, response);
     }
 
-    private ApiConsumer authenticateApiKey(String key) {
-        return consumerRepository.findByKeyDigest(sha256(key)).orElse(null);
+    /**
+     * The rejection is recorded with the correlation id only: the presented
+     * credential is never logged (a rejected key can still be a live secret
+     * mistyped at the wrong endpoint), and the consumer id is logged only once the
+     * credential has been accepted.
+     */
+    private ApiConsumer authenticateApiKey(String key, HttpServletRequest request) {
+        ApiConsumer consumer = consumerRepository.findByKeyDigest(sha256(key)).orElse(null);
+        if (consumer == null) {
+            LOG.warn("Billing channel rejected [requestId={}, reason=UNKNOWN_API_KEY]", requestId(request));
+        }
+        return consumer;
     }
 
-    private ApiConsumer authenticateJwt(String token) {
+    private ApiConsumer authenticateJwt(String token, HttpServletRequest request) {
         String subject = ConsumerJwtVerifier.extractSubject(token);
         if (subject == null) {
+            LOG.warn("Billing channel rejected [requestId={}, reason=JWT_SUBJECT_MISSING]", requestId(request));
             return null;
         }
         ApiConsumer consumer = consumerRepository.findByName(subject).orElse(null);
-        if (consumer == null || !"ACTIVE".equals(consumer.status()) || !consumer.hasJwtKey()) {
+        if (consumer == null) {
+            LOG.warn("Billing channel rejected [requestId={}, reason=UNKNOWN_CONSUMER, consumer={}]",
+                    requestId(request), forLog(subject));
+            return null;
+        }
+        if (!"ACTIVE".equals(consumer.status())) {
+            LOG.warn("Billing channel rejected [requestId={}, reason=CONSUMER_NOT_ACTIVE, consumerId={}]",
+                    requestId(request), consumer.id());
+            return null;
+        }
+        if (!consumer.hasJwtKey()) {
+            LOG.warn("Billing channel rejected [requestId={}, reason=NO_JWT_KEY, consumerId={}]", requestId(request),
+                    consumer.id());
             return null;
         }
         if (!jwtVerifier.verify(token, consumer.jwtPublicKeyPem(), subject)) {
+            LOG.warn("Billing channel rejected [requestId={}, reason=JWT_SIGNATURE_INVALID, consumerId={}]",
+                    requestId(request), consumer.id());
             return null;
         }
         return consumer;
+    }
+
+    /**
+     * The {@code sub} claim is client-supplied and still unverified at this point:
+     * line and control characters are flattened so a crafted claim cannot forge
+     * extra log lines, and the value is bounded so an oversized claim cannot turn
+     * every rejection into a log-amplification vector.
+     */
+    private static String forLog(String value) {
+        String flat = value.replaceAll("[\\p{C}\\p{Zl}\\p{Zp}]", "?");
+        return flat.length() <= LOG_VALUE_MAX ? flat : flat.substring(0, LOG_VALUE_MAX) + "…";
     }
 
     /** Where the presented credential came from. */
@@ -142,7 +191,19 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         }
     }
 
-    private static void forbidden(HttpServletRequest request, HttpServletResponse response) throws IOException {
+    /**
+     * The reason token and the consumer identity (known only after a credential was
+     * accepted) go to the log; the envelope stays as generic as before, so a caller
+     * still cannot enumerate which capability it is missing.
+     */
+    private static void forbidden(HttpServletRequest request, HttpServletResponse response, String reason,
+            ApiConsumer consumer) throws IOException {
+        if (consumer == null) {
+            LOG.warn("Billing channel forbidden [requestId={}, reason={}]", requestId(request), reason);
+        } else {
+            LOG.warn("Billing channel forbidden [requestId={}, reason={}, consumerId={}, tenantId={}]",
+                    requestId(request), reason, consumer.id(), consumer.tenantId());
+        }
         writeProblem(request, response, HttpServletResponse.SC_FORBIDDEN, "Scope denied", "CONSUMER_SCOPE_DENIED",
                 "该消费者未被授予 billing:read 能力。");
     }
