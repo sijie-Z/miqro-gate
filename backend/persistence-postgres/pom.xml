@@ -51,6 +51,13 @@
             <artifactId>postgresql</artifactId>
         </dependency>
 
+        <!-- Boot 4 模块化（#1088 Stage A）：Flyway 自动配置搬进 spring-boot-flyway，
+             光有 flyway-core 已不再触发迁移（迁移指南：改用 spring-boot-starter-flyway） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+
         <!-- Spring Boot JDBC starter (HikariCP, spring-jdbc, spring-tx, autoconfigure) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -79,6 +86,12 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-engine</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Boot 4 测试面拆分（#1088 Stage A）：AutoConfigureTestDatabase 迁到 spring-boot-jdbc-test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc-test</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

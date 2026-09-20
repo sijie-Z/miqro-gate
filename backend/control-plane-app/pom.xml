@@ -61,6 +61,13 @@
             <version>${springdoc.version}</version>
         </dependency>
 
+        <!-- Boot 4 分期（#1088 Stage A）：官方 Jackson 2 过渡模块（deprecated stop-gap）。
+             本 app 多处注入 com.fasterxml 的 ObjectMapper bean；Stage B 迁 Jackson 3 后移除。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-jackson2</artifactId>
+        </dependency>
+
         <!-- Spring Boot Actuator -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -103,9 +110,29 @@
         </dependency>
 
         <!-- Testing -->
+        <!-- Boot 4 测试面拆分（#1088 Stage A）：@AutoConfigureTestRestTemplate 需要
+             spring-boot-resttestclient + spring-boot-restclient（迁移指南明列） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-restclient</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Boot 4 测试面拆分（#1088 Stage A）：AutoConfigureTestDatabase 迁到 spring-boot-jdbc-test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Boot 4 测试面拆分（#1088 Stage A）：@AutoConfigureMockMvc / TestRestTemplate 迁到
+             spring-boot-webmvc-test（含 spring-boot-resttestclient） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
             <scope>test</scope>
         </dependency>
 
