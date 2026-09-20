@@ -9,6 +9,8 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -378,12 +380,18 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
         @Test
         @DisplayName("should leave the probe columns to their own writer")
         void shouldLeaveProbeColumnsAlone() {
+            // All four probe columns, with distinctive values. They are compared against
+            // what
+            // the database stored a moment earlier rather than against "not null": an
+            // equality check also catches a non-null clobber, which isNotNull() would wave
+            // through.
             jdbc.update("""
                     UPDATE provider_products
-                    SET model_catalog_probe_status = 'SUCCEEDED', model_catalog_model_count = 7,
-                        model_catalog_probed_at = now()
+                    SET model_catalog_probe_status = 'SUCCEEDED', model_catalog_probe_error = 'upstream timeout',
+                        model_catalog_model_count = 7, model_catalog_probed_at = now()
                     WHERE id = :id
                     """, new MapSqlParameterSource("id", product.id()));
+            var seeded = productRow();
 
             var current = productRepo.findById(product.id()).orElseThrow();
             productRepo.update(new ProviderProduct(current.id(), current.providerId(), current.productCode(),
@@ -393,18 +401,24 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
                     current.balanceAuthority(), current.implementationStatus(), current.catalogVersion(),
                     current.version() + 1, current.createdAt(), NOW));
 
-            var row = jdbc.queryForMap("""
-                    SELECT display_name, model_catalog_probe_status, model_catalog_model_count,
-                           model_catalog_probed_at
-                    FROM provider_products WHERE id = :id
-                    """, new MapSqlParameterSource("id", product.id()));
+            var after = productRow();
 
             // The update landed…
-            assertThat(String.valueOf(row.get("display_name"))).isEqualTo("Renamed Again");
+            assertThat(String.valueOf(after.get("display_name"))).isEqualTo("Renamed Again");
             // …and took nothing else with it.
-            assertThat(String.valueOf(row.get("model_catalog_probe_status"))).isEqualTo("SUCCEEDED");
-            assertThat(((Number) row.get("model_catalog_model_count")).intValue()).isEqualTo(7);
-            assertThat(row.get("model_catalog_probed_at")).isNotNull();
+            for (String column : PROBE_COLUMNS) {
+                assertThat(String.valueOf(after.get(column))).as(column).isEqualTo(String.valueOf(seeded.get(column)));
+            }
+            assertThat(String.valueOf(after.get("model_catalog_probe_status"))).isEqualTo("SUCCEEDED");
+        }
+
+        private static final List<String> PROBE_COLUMNS = List.of("model_catalog_probe_status",
+                "model_catalog_probe_error", "model_catalog_model_count", "model_catalog_probed_at");
+
+        private Map<String, Object> productRow() {
+            return jdbc.queryForMap("SELECT display_name, model_catalog_probe_status, model_catalog_probe_error, "
+                    + "model_catalog_model_count, model_catalog_probed_at FROM provider_products WHERE id = :id",
+                    new MapSqlParameterSource("id", product.id()));
         }
     }
 
