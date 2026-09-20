@@ -134,14 +134,21 @@ class AdminProviderApiIntegrationTest {
                                 .writeValueAsString(Map.of("assignedUserId", userId, "displayName", "Alice"))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.seatStatus").value("ASSIGNED"))
                 .andExpect(jsonPath("$.username").value("seat-user")).andReturn();
-        String seatId = objectMapper.readValue(seat.getResponse().getContentAsString(), Map.class).get("id").toString();
+        Map<?, ?> seatBody = objectMapper.readValue(seat.getResponse().getContentAsString(), Map.class);
+        String seatId = seatBody.get("id").toString();
+        long seatVersion = ((Number) seatBody.get("version")).longValue();
 
-        // Release the seat.
+        // Release the seat (#1133): the PATCH is partial and carries the version it was
+        // read at — the release clears the assignee but keeps display_name.
+        Map<String, Object> release = new java.util.HashMap<>();
+        release.put("status", "AVAILABLE");
+        release.put("version", seatVersion);
         mockMvc.perform(patch("/api/v1/admin/subscriptions/" + subscriptionId + "/seats/" + seatId)
                 .contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
-                .header("X-CSRF-Token", csrfToken)
-                .content(objectMapper.writeValueAsString(new java.util.HashMap<>(Map.of("status", "AVAILABLE")))))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.seatStatus").value("AVAILABLE"));
+                .header("X-CSRF-Token", csrfToken).content(objectMapper.writeValueAsString(release)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.seatStatus").value("AVAILABLE"))
+                .andExpect(jsonPath("$.displayName").value("Alice"))
+                .andExpect(jsonPath("$.assignedUserId").doesNotExist());
 
         mockMvc.perform(get("/api/v1/admin/subscriptions").cookie(sessionCookie)).andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].productName").value("Test Product"));
@@ -192,6 +199,191 @@ class AdminProviderApiIntegrationTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("Team Plan v2"))
                 .andExpect(jsonPath("$.subscriptionPrice").value(299.50)).andExpect(jsonPath("$.currency").value("CNY"))
                 .andExpect(jsonPath("$.quotaTotal").value(12345)).andExpect(jsonPath("$.quotaUnit").value("tokens"));
+    }
+
+    // ------------------------------------------------------------------
+    // seat PATCH semantics (#1133)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("#1133: a PATCH carrying only displayName keeps the assignee and the status")
+    void seatPatchWithOnlyDisplayNameKeepsTheRest() throws Exception {
+        SeatFixture seat = givenAssignedSeat();
+
+        mockMvc.perform(seatPatch(seat, Map.of("displayName", "Alice Zhang"))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("Alice Zhang"))
+                // The request never mentioned these, so they must survive untouched. The
+                // pre-fix code wrote every column it knew about, nulling whatever the
+                // request omitted — and it dereferenced the missing status first, so this
+                // path answered 500.
+                .andExpect(jsonPath("$.seatStatus").value("ASSIGNED"))
+                .andExpect(jsonPath("$.assignedUserId").value(seat.assignedUserId()));
+    }
+
+    @Test
+    @DisplayName("#1133: releasing clears the assignee but keeps the seat's display name")
+    void seatReleaseKeepsDisplayName() throws Exception {
+        SeatFixture seat = givenAssignedSeat();
+
+        mockMvc.perform(seatPatch(seat, Map.of("status", "AVAILABLE"))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.seatStatus").value("AVAILABLE"))
+                .andExpect(jsonPath("$.assignedUserId").doesNotExist())
+                // The label is the operator's own note about that seat; releasing the seat
+                // is not a reason to throw it away.
+                .andExpect(jsonPath("$.displayName").value("Alice"));
+    }
+
+    @Test
+    @DisplayName("#1133: assigning carries over to another user without touching the name")
+    void seatPatchWithOnlyAssigneeMovesTheSeat() throws Exception {
+        SeatFixture seat = givenAssignedSeat();
+        MvcResult user = mockMvc
+                .perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("username", "seat-user-2"))))
+                .andExpect(status().isOk()).andReturn();
+        String secondUserId = ((Map<?, ?>) objectMapper.readValue(user.getResponse().getContentAsString(), Map.class)
+                .get("user")).get("id").toString();
+
+        mockMvc.perform(seatPatch(seat, Map.of("assignedUserId", secondUserId))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignedUserId").value(secondUserId))
+                .andExpect(jsonPath("$.seatStatus").value("ASSIGNED"))
+                .andExpect(jsonPath("$.displayName").value("Alice"));
+    }
+
+    @Test
+    @DisplayName("#1133: a stale version is a 409 and leaves the row alone")
+    void seatPatchWithStaleVersionIsAConflict() throws Exception {
+        SeatFixture seat = givenAssignedSeat();
+
+        mockMvc.perform(seatPatch(seat, Map.of("status", "DISABLED", "version", seat.version() + 99)))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CONCURRENT_MODIFICATION"));
+
+        // The conflict must be a refusal, not a half-applied write.
+        mockMvc.perform(get("/api/v1/admin/subscriptions/" + seat.subscriptionId() + "/seats").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].seatStatus").value("ASSIGNED"))
+                .andExpect(jsonPath("$[0].displayName").value("Alice"));
+    }
+
+    @Test
+    @DisplayName("#1133: a PATCH without version is refused as a bad request, not a 500")
+    void seatPatchWithoutVersionIsABadRequest() throws Exception {
+        SeatFixture seat = givenAssignedSeat();
+
+        // `version` is declared required in the OpenAPI schema, so it has to be
+        // rejected —
+        // and rejected as a 400. @NotNull on the record is inert unless the controller
+        // marks the body @Valid, which is how this used to answer 500 instead.
+        mockMvc.perform(patch("/api/v1/admin/subscriptions/" + seat.subscriptionId() + "/seats/" + seat.seatId())
+                .contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("status", "DISABLED"))))
+                .andExpect(status().isBadRequest());
+
+        // …and nothing was written on the way out.
+        mockMvc.perform(get("/api/v1/admin/subscriptions/" + seat.subscriptionId() + "/seats").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].seatStatus").value("ASSIGNED"));
+    }
+
+    @Test
+    @DisplayName("#1133: an ASSIGNED seat with nobody on it is refused, not written")
+    void seatPatchCannotLandOnAnAssignedSeatWithNoMember() throws Exception {
+        SeatFixture seat = givenAssignedSeat();
+        // Release first, so the seat is AVAILABLE with no assignee.
+        mockMvc.perform(seatPatch(seat, Map.of("status", "AVAILABLE"))).andExpect(status().isOk());
+
+        SeatFixture released = withCurrentVersion(seat);
+        // Asking for ASSIGNED without naming anyone used to write a row that is
+        // ASSIGNED
+        // and unassigned at once — the state the biconditional exists to forbid.
+        mockMvc.perform(seatPatch(released, Map.of("status", "ASSIGNED"))).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("SEAT_ASSIGNEE_MISMATCH"));
+    }
+
+    @Test
+    @DisplayName("#1133: naming a member on a seat that will not be ASSIGNED is refused")
+    void seatPatchCannotNameAMemberWithoutAssigningTheSeat() throws Exception {
+        SeatFixture seat = givenAssignedSeat();
+        mockMvc.perform(seatPatch(seat, Map.of("status", "AVAILABLE"))).andExpect(status().isOk());
+        SeatFixture released = withCurrentVersion(seat);
+
+        // Both shapes used to answer 200 and drop the member: the guard could only ever
+        // fire from the other end, and the assignee is nulled whenever the seat is not
+        // ASSIGNED.
+        mockMvc.perform(seatPatch(released, Map.of("assignedUserId", seat.assignedUserId())))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("SEAT_ASSIGNEE_MISMATCH"));
+        mockMvc.perform(seatPatch(released, Map.of("assignedUserId", seat.assignedUserId(), "status", "AVAILABLE")))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("SEAT_ASSIGNEE_MISMATCH"));
+
+        // Neither refusal wrote anything, and a plain release still works.
+        mockMvc.perform(get("/api/v1/admin/subscriptions/" + seat.subscriptionId() + "/seats").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].seatStatus").value("AVAILABLE"))
+                .andExpect(jsonPath("$[0].assignedUserId").doesNotExist());
+    }
+
+    /**
+     * A subscription holding one ASSIGNED seat labelled "Alice" — the fixture every
+     * seat patch test starts from.
+     */
+    private SeatFixture givenAssignedSeat() throws Exception {
+        fx.insertProviderAndProduct();
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("providerProductId", fx.productId.toString(), "name",
+                        "Seat Plan", "billingMode", "FIXED_SUBSCRIPTION", "planScope", "TEAM", "subscriptionPrice", 199,
+                        "currency", "USD"))))
+                .andExpect(status().isOk()).andReturn();
+        String subscriptionId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        MvcResult user = mockMvc
+                .perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("username", "seat-user"))))
+                .andExpect(status().isOk()).andReturn();
+        String userId = ((Map<?, ?>) objectMapper.readValue(user.getResponse().getContentAsString(), Map.class)
+                .get("user")).get("id").toString();
+
+        MvcResult seat = mockMvc
+                .perform(post("/api/v1/admin/subscriptions/" + subscriptionId + "/seats")
+                        .contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                        .header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper
+                                .writeValueAsString(Map.of("assignedUserId", userId, "displayName", "Alice"))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.seatStatus").value("ASSIGNED")).andReturn();
+        Map<?, ?> seatBody = objectMapper.readValue(seat.getResponse().getContentAsString(), Map.class);
+        return new SeatFixture(subscriptionId, seatBody.get("id").toString(),
+                ((Number) seatBody.get("version")).longValue(), userId);
+    }
+
+    /**
+     * A PATCH to that seat with {@code version} added — the body shape the API
+     * requires. A caller that supplies its own {@code version} keeps it: the
+     * stale-version test sends one this fixture did not read.
+     */
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder seatPatch(SeatFixture seat,
+            Map<String, Object> fields) throws Exception {
+        Map<String, Object> body = new java.util.HashMap<>(fields);
+        body.putIfAbsent("version", seat.version());
+        return patch("/api/v1/admin/subscriptions/" + seat.subscriptionId() + "/seats/" + seat.seatId())
+                .contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).content(objectMapper.writeValueAsString(body));
+    }
+
+    private record SeatFixture(String subscriptionId, String seatId, long version, String assignedUserId) {
+    }
+
+    /**
+     * The same seat, re-read: a write bumps the version, so a later patch needs the
+     * new one.
+     */
+    private SeatFixture withCurrentVersion(SeatFixture seat) throws Exception {
+        MvcResult seats = mockMvc
+                .perform(get("/api/v1/admin/subscriptions/" + seat.subscriptionId() + "/seats").cookie(sessionCookie))
+                .andExpect(status().isOk()).andReturn();
+        List<?> rows = objectMapper.readValue(seats.getResponse().getContentAsString(), List.class);
+        Map<?, ?> row = (Map<?, ?>) rows.get(0);
+        return new SeatFixture(seat.subscriptionId(), seat.seatId(), ((Number) row.get("version")).longValue(), null);
     }
 
     // ------------------------------------------------------------------

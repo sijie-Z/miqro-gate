@@ -86,6 +86,9 @@ const seat = (overrides: Partial<SeatView> = {}): SeatView => ({
   displayName: 'Alice',
   seatStatus: 'ASSIGNED',
   createdAt: '2026-08-01T00:00:00Z',
+  // Deliberately not 0: the release call has to forward *this* seat's version, and a
+  // fixture value that matches a hardcoded default would not tell the two apart (#1133).
+  version: 3,
   ...overrides,
 });
 
@@ -196,6 +199,7 @@ describe('NextPlansView', () => {
     await flushPromises();
     expect(mockApi.updateSeat).toHaveBeenCalledWith('0190-0000-0000-0031', '0190-0000-0000-0041', {
       status: 'AVAILABLE',
+      version: 3,
     });
   });
 
