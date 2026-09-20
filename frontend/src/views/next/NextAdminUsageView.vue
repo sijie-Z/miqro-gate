@@ -1151,7 +1151,11 @@ onMounted(() => {
         </div>
       </div>
       <div class="ui-panel-body">
-        <UiTrendChart :series="trendSeries" data-testid="usage-trend-chart" />
+        <UiTrendChart
+          :series="trendSeries"
+          :empty-text="summaryError ? '趋势加载失败' : undefined"
+          data-testid="usage-trend-chart"
+        />
       </div>
     </section>
 
@@ -1205,7 +1209,9 @@ onMounted(() => {
         :loading="recordsLoading"
         row-key="gatewayRequestId"
         empty-title="没有用量记录"
+        :error="summaryError"
         data-testid="usage-records-table"
+        @retry="load"
       >
         <template #occurredAt="{ row }">{{ formatTime((row as UsageRecord).occurredAt) }}</template>
         <template #providerProductName="{ row }">
@@ -1300,8 +1306,10 @@ onMounted(() => {
         row-key="key"
         :loading="summaryLoading"
         empty-title="该窗口没有用量"
+        :error="summaryError"
         data-testid="usage-breakdown-table"
         @row-click="onBreakdownRow"
+        @retry="loadBreakdown"
       >
         <template #label="{ row }">
           <span class="next-admin-usage__breakdown-label">{{
@@ -1351,7 +1359,9 @@ onMounted(() => {
       </UiTable>
 
       <div v-if="activeTab === 'records'" class="next-admin-usage__pager" data-testid="usage-pager">
-        <span class="next-admin-usage__pager-text">共 {{ records?.total ?? 0 }} 条</span>
+        <span class="next-admin-usage__pager-text"
+          >共 {{ summaryError ? '—' : (records?.total ?? 0) }} 条</span
+        >
         <div class="next-admin-usage__pager-jump">
           <span>跳至</span>
           <input
@@ -1429,7 +1439,9 @@ onMounted(() => {
         row-key="key"
         :loading="hourlyLoading"
         empty-title="该窗口没有按小时数据"
+        :error="hourlyError"
         data-testid="usage-hourly-table"
+        @retry="loadHourly"
       >
         <template #hourStart="{ row }">{{
           formatHour((row as HourlyUsageRow).hourStart)

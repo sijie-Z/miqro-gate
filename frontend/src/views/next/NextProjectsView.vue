@@ -400,6 +400,8 @@ onMounted(load);
         empty-title="还没有项目"
         empty-description="创建项目并添加成员后，成员即可在「我的密钥」创建虚拟密钥。"
         data-testid="projects-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #projectTag="{ row }">
           <span v-if="(row as Project).projectTag" class="ui-mono">{{

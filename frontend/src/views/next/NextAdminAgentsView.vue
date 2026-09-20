@@ -347,6 +347,8 @@ onMounted(load);
         empty-title="还没有代理"
         empty-description="创建代理并绑定出口凭证后，可按代理维度观测用量。"
         data-testid="agents-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #name="{ row }">
           <span class="next-agents__name">{{ (row as AgentView).name }}</span>

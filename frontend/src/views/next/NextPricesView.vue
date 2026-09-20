@@ -322,6 +322,8 @@ onMounted(load);
         row-key="id"
         empty-title="还没有单价快照"
         data-testid="prices-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #product="{ row }">{{
           productName((row as PriceSnapshotView).providerProductId)

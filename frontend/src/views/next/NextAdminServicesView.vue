@@ -300,6 +300,8 @@ onMounted(load);
         empty-title="还没有注册的内部服务"
         empty-description="平台组件、MCP 端点等接入网关前先在此注册。"
         data-testid="services-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #name="{ row }">
           <span class="next-services__name">{{ (row as InternalServiceView).name }}</span>

@@ -416,6 +416,8 @@ onMounted(load);
         empty-title="还没有 Webhook 端点"
         empty-description="创建端点后，告警与审批通知将经其签名投递。"
         data-testid="webhooks-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #name="{ row }">
           <span class="next-webhooks__name">{{ (row as WebhookEndpointView).name }}</span>

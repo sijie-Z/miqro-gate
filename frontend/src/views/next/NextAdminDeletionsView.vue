@@ -213,6 +213,8 @@ onMounted(load);
         row-key="id"
         empty-title="还没有删除请求"
         data-testid="deletions-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #period="{ row }">
           <span class="ui-mono"

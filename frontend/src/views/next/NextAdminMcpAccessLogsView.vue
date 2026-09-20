@@ -295,7 +295,9 @@ onMounted(load);
         row-key="gatewayRequestId"
         empty-title="暂无 MCP 调用日志"
         data-testid="mcp-logs-table"
+        :error="loadError"
         @row-click="openDetail"
+        @retry="load"
       >
         <template #occurredAt="{ row }">{{
           formatTime((row as McpAccessLogEntry).occurredAt)

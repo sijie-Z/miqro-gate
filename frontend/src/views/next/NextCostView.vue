@@ -619,6 +619,8 @@ onMounted(async () => {
         row-key="groupKey"
         empty-title="该时间窗口内没有成本数据"
         :data-testid="mode === 'day' ? 'cost-day-table' : 'cost-table'"
+        :error="loadError"
+        @retry="load"
       >
         <template #requests="{ row }">
           <span class="ui-num">{{ formatCount(asGroup(row).requests?.upstream ?? 0) }}</span>

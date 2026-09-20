@@ -21,6 +21,7 @@ import { computed, ref, useAttrs } from 'vue';
 // without a RouterLink stub logs "Failed to resolve component" even when no
 // CTA is rendered.
 import { RouterLink, type RouteLocationRaw } from 'vue-router';
+import UiButton from './Button.vue';
 
 export interface UiTableColumn {
   key: string;
@@ -49,6 +50,13 @@ const props = withDefaults(
     /** Empty-state link CTA; rendered only when both label and target are set. */
     emptyActionLabel?: string;
     emptyActionTo?: RouteLocationRaw;
+    /**
+     * #1065: a non-empty message means the last load failed. The table then
+     * shows that message with a retry instead of the empty state — a failed
+     * read must not be presented as "no rows", which is what the empty state
+     * asserts. Pages pass their `loadError` here.
+     */
+    error?: string;
     skeletonRows?: number;
     /** Striped zebra for wide reference lists; hover stays on both. */
     striped?: boolean;
@@ -60,6 +68,7 @@ const props = withDefaults(
     emptyDescription: '',
     emptyActionLabel: '',
     emptyActionTo: '',
+    error: '',
     skeletonRows: 5,
     striped: false,
   },
@@ -67,7 +76,7 @@ const props = withDefaults(
 
 const attrs = useAttrs();
 
-const emit = defineEmits<{ (e: 'rowClick', row: unknown): void }>();
+const emit = defineEmits<{ (e: 'rowClick', row: unknown): void; (e: 'retry'): void }>();
 
 const sortKey = ref<string | null>(null);
 const sortOrder = ref<SortOrder>('asc');
@@ -208,7 +217,26 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
           </template>
           <tr v-else>
             <td :colspan="columns.length" class="ui-table__empty">
-              <slot name="empty" :title="emptyTitle" :description="emptyDescription">
+              <div v-if="error" class="ui-table__empty-body" data-testid="table-load-failed">
+                <span class="ui-table__empty-mark ui-table__empty-mark--error" aria-hidden="true">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.6" />
+                    <path
+                      d="M12 7.8v5.4"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                    />
+                    <circle cx="12" cy="16.4" r="1" fill="currentColor" />
+                  </svg>
+                </span>
+                <p class="ui-table__empty-title">加载失败</p>
+                <p class="ui-table__empty-desc">{{ error }}</p>
+                <UiButton variant="secondary" data-testid="table-load-retry" @click="emit('retry')">
+                  重试
+                </UiButton>
+              </div>
+              <slot v-else name="empty" :title="emptyTitle" :description="emptyDescription">
                 <div class="ui-table__empty-body">
                   <span class="ui-table__empty-mark" aria-hidden="true">
                     <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
@@ -381,6 +409,12 @@ function cellValue(column: UiTableColumn, row: Record<string, unknown>): unknown
   border-radius: var(--ui-radius-panel);
   background: var(--ui-muted);
   color: var(--ui-foreground-faint);
+}
+
+/* #1065: the failed-load mark reads as a problem, not as "nothing here". */
+.ui-table__empty-mark--error {
+  background: var(--ui-danger-bg);
+  color: var(--ui-danger-fg);
 }
 
 .ui-table__empty-title {

@@ -442,6 +442,8 @@ onMounted(load);
         empty-title="暂无产品实例"
         empty-description="产品目录由签名目录播种；接入从「上游凭证」录入第一把真实密钥开始。"
         data-testid="products-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #provider="{ row }">
           <span class="next-providers__provider">

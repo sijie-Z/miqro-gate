@@ -400,6 +400,8 @@ onMounted(() => {
         empty-title="还没有告警规则"
         empty-description="创建阈值或事件型规则后，命中即经 Webhook 签名投递。"
         data-testid="rules-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #name="{ row }">
           <span class="next-alert-rules__name">{{ (row as AlertRule).name }}</span>

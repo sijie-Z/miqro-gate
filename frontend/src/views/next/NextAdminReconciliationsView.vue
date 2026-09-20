@@ -625,6 +625,8 @@ onMounted(load);
           row-key="rowNo"
           empty-title="没有符合条件的明细行"
           data-testid="recon-rows-table"
+          :error="rowsError"
+          @retry="loadRows(true)"
         >
           <template #verdict="{ row }">
             <UiStatusBadge
@@ -695,6 +697,8 @@ onMounted(load);
         row-key="id"
         empty-title="还没有对账报告"
         data-testid="recon-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #createdAt="{ row }">{{ formatTime(asReport(row).createdAt) }}</template>
         <template #providerCode="{ row }">

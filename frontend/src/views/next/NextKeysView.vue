@@ -166,6 +166,9 @@ const filteredKeys = computed(() => {
 
 const keySummary = computed<{ text: string; tone: 'plain' | 'success' | 'warning' | 'danger' }[]>(
   () => {
+    // #1065: counts come from a successful read only — after a failed load
+    // "共 0 个" would describe the failure, not the user's keys.
+    if (loadError.value) return [{ text: '—', tone: 'plain' as const }];
     const active = keys.value.filter((k) => k.status === 'ACTIVE').length;
     const rotating = keys.value.filter((k) => k.status === 'ROTATING').length;
     const disabled = keys.value.filter((k) => k.status === 'DISABLED').length;
@@ -926,7 +929,9 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
         :loading="loading"
         row-key="id"
         empty-title="还没有虚拟密钥"
+        :error="loadError"
         data-testid="keys-table"
+        @retry="load"
       >
         <template #name="{ row }">
           <div class="next-keys__name-line">

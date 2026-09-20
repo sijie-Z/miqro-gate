@@ -310,6 +310,8 @@ onMounted(load);
         row-key="id"
         empty-title="还没有导出任务"
         data-testid="exports-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #period="{ row }">
           <span class="ui-mono"

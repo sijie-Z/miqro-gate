@@ -198,6 +198,8 @@ onMounted(load);
         row-key="id"
         empty-title="还没有配置项"
         data-testid="configs-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #value="{ row }">
           <span class="ui-mono">{{ (row as ConfigEntryView).value }}</span>
