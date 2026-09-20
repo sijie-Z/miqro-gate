@@ -118,6 +118,16 @@ describe('AttributionChip', () => {
     expect(wrapper.findComponent(UiTooltip).props('text')).toContain('命令的工作目录');
   });
 
+  it('names the suffix ruling on the rows where it does speak at all', () => {
+    // #1128 review: `RESOLVED_SUFFIX` alone is silent, so its wording is only
+    // reachable with a claim beside it — which is exactly the row a reader then has
+    // to be able to read. Dropping it from the wording table would otherwise be
+    // invisible to this suite.
+    const wrapper = render({ resolutionStatus: 'RESOLVED_SUFFIX', claimSource: 'suffix' });
+
+    expect(wrapper.find('[data-testid="usage-attribution-chip"]').text()).toContain('按密钥后缀');
+  });
+
   it('renders a dash, not a chip, for a row written before the columns existed', () => {
     const wrapper = render({ resolutionStatus: null });
 

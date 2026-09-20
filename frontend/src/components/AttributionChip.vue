@@ -9,8 +9,9 @@
  * unverified input, the ruling is the verdict.
  *
  * See {@link informative} for when the chip speaks: the two ordinary routes are
- * silent, a claim or a "we could not place this" ruling is not. Rows written before
- * V54 (all three columns null) render a dash.
+ * silent, while a header-resolved request, a recorded claim, or a "we could not place
+ * this" ruling is not. Rows written before V54 (all three columns null) render a
+ * dash.
  */
 import { computed } from 'vue';
 import { UiStatusBadge, UiTooltip } from '@/ui';
