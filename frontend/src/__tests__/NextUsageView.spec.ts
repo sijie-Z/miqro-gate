@@ -100,6 +100,27 @@ describe('NextUsageView', () => {
     return mount(NextUsageView, { global: { plugins: [createPinia()] } });
   }
 
+  /** PH43: a records endpoint that really paginates — 40 rows over two local days,
+   *  so page 1 (size 20) covers 09-03 only and page 2 covers 09-02 only. */
+  function twoDayWindow() {
+    const rows = Array.from({ length: 40 }, (_, i) => ({
+      ...records.items![0]!,
+      occurredAt: i < 20 ? '2026-09-03T08:00:00Z' : '2026-09-02T08:00:00Z',
+      totalTokens: 10,
+      gatewayRequestId: `gw-${i}`,
+    }));
+    return async (opts?: { page?: number; size?: number }): Promise<UsageRecordPage> => {
+      const page = opts?.page ?? 1;
+      const size = opts?.size ?? 20;
+      return {
+        items: rows.slice((page - 1) * size, page * size),
+        page,
+        size,
+        total: rows.length,
+      };
+    };
+  }
+
   it('shows the dismissible usage-caliber tip and hides it on dismiss', async () => {
     localStorage.clear();
     const wrapper = mountView();
@@ -437,6 +458,64 @@ describe('NextUsageView', () => {
       if (previousTz === undefined) delete process.env.TZ;
       else process.env.TZ = previousTz;
     }
+  });
+
+  // PH43: 用量趋势 answers "what did the selected window do, day by day". It was fed
+  // the *table page* instead (records.items — 20 rows), so a day whose rows fell past
+  // page 1 vanished from the trend.
+  it('builds the daily trend from the whole window, not the current table page (#PH43)', async () => {
+    mockApi.usageRecords.mockImplementation(twoDayWindow());
+    const wrapper = mountView();
+    await flushPromises();
+
+    // The window holds 40 rows over two local days; the first table page holds 20 of
+    // them, all on 09-03.
+    expect(wrapper.text()).toContain('共 40 条');
+    const chart = wrapper.find('[data-testid="usage-trend-chart"]');
+    expect(wrapper.findAll('[data-testid="records-table"] tbody tr')).toHaveLength(20);
+    expect(chart.text()).toContain('09-03');
+    expect(chart.text()).toContain('09-02');
+    // The whole window fits in one read, so the trend makes no partial claim.
+    expect(wrapper.find('[data-testid="usage-trend-partial"]').exists()).toBe(false);
+  });
+
+  it('declares the trend partial when the window is larger than one read (#PH43)', async () => {
+    // 300 rows in the window; one records read returns at most 200 (the API cap), so
+    // the older days cannot be in the chart — and the panel has to say so.
+    const rows = Array.from({ length: 300 }, (_, i) => ({
+      ...records.items![0]!,
+      occurredAt: '2026-09-03T08:00:00Z',
+      totalTokens: 10,
+      gatewayRequestId: `gw-${i}`,
+    }));
+    mockApi.usageRecords.mockImplementation(async (opts) => {
+      const size = Math.min(opts?.size ?? 20, 200);
+      return { items: rows.slice(0, size), page: 1, size, total: rows.length };
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const note = wrapper.find('[data-testid="usage-trend-partial"]');
+    expect(note.exists()).toBe(true);
+    expect(note.text()).toContain('200');
+    expect(note.text()).toContain('300');
+  });
+
+  it('keeps the daily trend stable while the records table is paged (#PH43)', async () => {
+    mockApi.usageRecords.mockImplementation(twoDayWindow());
+    const wrapper = mountView();
+    await flushPromises();
+
+    const before = wrapper.find('[data-testid="usage-trend-chart"]').text();
+
+    await wrapper.find('[data-testid="records-next"]').trigger('click');
+    await flushPromises();
+
+    // Paging is a view choice on the table half of the panel; it must not rewrite the
+    // trend above it. (Today the chart flips from 09-03 to 09-02.)
+    expect(wrapper.text()).toContain('第 2 / 2 页');
+    expect(wrapper.find('[data-testid="usage-trend-chart"]').text()).toBe(before);
   });
 
   it('keeps the previous rows while a page change is in flight (#643)', async () => {
