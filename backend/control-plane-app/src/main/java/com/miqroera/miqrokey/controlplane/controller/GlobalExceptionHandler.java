@@ -64,16 +64,16 @@ public class GlobalExceptionHandler {
 
     /**
      * Business-rule violations raised by the services. Unlike the auth/ownership
-     * handlers below, an {@code ApiException} can carry a server-side failure
-     * (502 upstream failure, 500 internal), so the trace has to survive in the
-     * log as well as in the response: the caller only sees the {@code requestId},
-     * which is worth nothing if no line ever recorded it.
+     * handlers below, an {@code ApiException} can carry a server-side failure (502
+     * upstream failure, 500 internal), so the trace has to survive in the log as
+     * well as in the response: the caller only sees the {@code requestId}, which is
+     * worth nothing if no line ever recorded it.
      *
      * <p>
      * The level follows the status class — 5xx is an incident and gets ERROR with
      * the cause chain, 4xx is a rejected request and stays at DEBUG so that the
-     * warn/error stream keeps matching "something is wrong" (a per-request 4xx
-     * line here would drown the channel: quota and scope denials are routine).
+     * warn/error stream keeps matching "something is wrong" (a per-request 4xx line
+     * here would drown the channel: quota and scope denials are routine).
      * </p>
      */
     @ExceptionHandler(ApiException.class)

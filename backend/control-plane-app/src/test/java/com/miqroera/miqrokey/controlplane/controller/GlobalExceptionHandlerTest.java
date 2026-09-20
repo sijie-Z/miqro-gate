@@ -58,8 +58,8 @@ class GlobalExceptionHandlerTest {
     }
 
     private List<String> messages(Level level) {
-        return appender.list.stream().filter(event -> event.getLevel() == level)
-                .map(ILoggingEvent::getFormattedMessage).toList();
+        return appender.list.stream().filter(event -> event.getLevel() == level).map(ILoggingEvent::getFormattedMessage)
+                .toList();
     }
 
     private static Map<String, Object> body(ResponseEntity<Map<String, Object>> response) {
@@ -117,8 +117,8 @@ class GlobalExceptionHandlerTest {
     void serverErrorsAreLoggedWithRequestId() {
         request.addHeader("X-Request-Id", "ph45-c1-5xx");
 
-        ResponseEntity<Map<String, Object>> response = handler.handleApi(
-                new ApiException(HttpStatus.BAD_GATEWAY, "PRICE_SYNC_FAILED", "价格源返回非 200。"), request);
+        ResponseEntity<Map<String, Object>> response = handler
+                .handleApi(new ApiException(HttpStatus.BAD_GATEWAY, "PRICE_SYNC_FAILED", "价格源返回非 200。"), request);
 
         assertThat(response.getStatusCode().value()).isEqualTo(502);
         assertThat(messages(Level.ERROR))
@@ -132,8 +132,7 @@ class GlobalExceptionHandlerTest {
 
         handler.handleApi(new ApiException(HttpStatus.BAD_REQUEST, "PARAM_INVALID", "参数无效。"), request);
 
-        assertThat(messages(Level.DEBUG))
-                .anySatisfy(line -> assertThat(line).contains("ph45-c1-4xx", "PARAM_INVALID"));
+        assertThat(messages(Level.DEBUG)).anySatisfy(line -> assertThat(line).contains("ph45-c1-4xx", "PARAM_INVALID"));
         assertThat(messages(Level.WARN)).isEmpty();
         assertThat(messages(Level.ERROR)).isEmpty();
     }
