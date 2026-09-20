@@ -129,14 +129,17 @@ function colourLiterals(
   for (const match of line.matchAll(/#([0-9a-fA-F]{3,8})\b/g)) {
     let hex = match[1]!;
     // `#758` in prose is an issue reference, not a colour, so a numeric-only 3/4-digit
-    // token is only read as hex where a ticket cannot be: inside a string literal, or
-    // anywhere in a `.css` file (whose comments are already stripped). `#639` — the
-    // shorthand for rebeccapurple — is therefore caught when written as `'#639'` or in
-    // CSS, and skipped when it appears bare in TS/Vue code, which is where issue
-    // references live.
+    // token is only read as hex where a ticket cannot be: inside a string literal,
+    // after a CSS declaration prefix (`color: #639`, `--c: #639` — how a colour is
+    // written inside a `.vue` `<style>` block or an inline `style="…"`), or anywhere
+    // in a `.css` file (whose comments are already stripped). `#639` — the shorthand
+    // for rebeccapurple — is therefore caught in every position a designer pastes it,
+    // while `<!-- … #758 … -->` and `(issue #316)` stay clean.
     if (hex.length <= 4 && !/[a-fA-F]/.test(hex)) {
+      const before = line.slice(0, match.index);
       const quoted = ["'", '"', '`'].includes(line[match.index - 1] ?? '');
-      if (!quoted && !file.endsWith('.css')) continue;
+      const valuePosition = /[a-z-]+\s*:\s*$/i.test(before);
+      if (!quoted && !valuePosition && !file.endsWith('.css')) continue;
     }
     if (hex.length === 3 || hex.length === 4) hex = hex.slice(0, 3).replace(/./g, (c) => c + c);
     if (hex.length !== 6) hex = hex.slice(0, 6); // 8 digits: #rrggbbaa, hue is in the first six
