@@ -59,22 +59,27 @@ export const CHART_OTHER_COLOR = '#8c8c8c';
  * `--ui-success-fg` token the status badges and toasts already draw with, so "green"
  * reads the same in status chrome and in a chart.
  *
- * It replaces the ad-hoc `#389e0d` that had been copied into five views. That hex
- * measures **ΔE 0.4 protan** against the warning gold `#d48806` — the same colour to
- * a red-green colourblind reader — and the pair lands edge to edge in the two places
- * that matter: the ROI page sorts its hit buckets by value, so any two can become
- * neighbours, and the reconciliation ring is fixed-order MATCHED → PARTIAL.
+ * It replaces the ad-hoc `#389e0d`, which had been copied into five places across four
+ * views. That hex measures **ΔE 0.4 protan** against the warning gold `#d48806` — the
+ * same colour to a red-green colourblind reader. The two meet in two places, in
+ * different ways: the reconciliation ring is fixed-order `MATCHED → PARTIAL` drawn
+ * gap-less, so the bands genuinely touch; the ROI page sorts its hit buckets by value,
+ * so the two can become neighbouring rows of a list whose whole job is comparing a row
+ * against its neighbours — 16px apart in separate labelled tracks, which is why this
+ * is the weaker of the two cases but still a case.
  *
  * Re-measured with the design-system checker (light, surface `#ffffff`):
  *
  *   ROI hit trio (this green, slot 1, the gold) — worst all-pairs ΔE **17.2 protan**
  *     at the gold ↔ green pair (was 0.4), 21.6 normal vision.
  *   Reconciliation ring (this green, gold, `#cf1322`, `#ff7875`) — worst adjacent
- *     ΔE 14.3 deutan, 19.4 normal.
+ *     ΔE 14.3 deutan, 19.4 normal. The wrap-around pair (light red ↔ this green) is
+ *     16.4 protan.
  *   Success ↔ failure (this green, `#cf1322`) — ΔE 6.4 protan, inside the checker's
- *     6–8 band. That band is legal only with a second channel, and every caller here
- *     prints a per-row label, which is that channel. The hex it replaced failed this
- *     same pair outright (5.8 deutan).
+ *     6–8 band. That band asks for a second channel; these callers supply one by
+ *     naming every segment in a legend beside the mark rather than on it, and the hex
+ *     it replaced failed this same pair outright (5.8 deutan), so this narrows the gap
+ *     rather than closing it.
  *
  * Contrast 6.67:1 on the card surface, against 3.46:1 for the old green. That is also
  * why this green and not the brighter `--miqrokey-success` (`#00b96b`): both clear the

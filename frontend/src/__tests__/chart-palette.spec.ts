@@ -34,10 +34,10 @@ describe('chart palette', () => {
   });
 
   it('draws the success fill with the design system token, not an ad-hoc green', () => {
-    // #1126: the green that had been copied into five views measured ΔE 0.4 protan
-    // against the warning gold — identical to a red-green colourblind reader. Pinned
-    // to the `--ui-success-fg` value so the chart green and the badge green cannot
-    // drift apart again; the module docstring carries the measurements.
+    // #1126: the green that had been copied into five places across four views measured
+    // ΔE 0.4 protan against the warning gold — identical to a red-green colourblind
+    // reader. Pinned to the `--ui-success-fg` value so the chart green and the badge
+    // green cannot drift apart again; the module docstring carries the measurements.
     expect(CHART_SUCCESS_COLOR).toBe('#0d6a3d');
   });
 
@@ -58,6 +58,9 @@ describe('chart palette', () => {
     // itself is excluded because that is where the retirement is documented, in prose;
     // the exclusion is separator-safe because globSync hands back backslashes on Windows
     // and a plain `endsWith('lib/chart-palette.ts')` silently matched nothing.
+    // The `types/generated` pattern is deliberately unanchored, so it also drops the
+    // sibling `src/types/generated-api.ts`: both are generated, and the aesthetic audit
+    // grew two 285 KB generated files the last time this filter was got wrong.
     const sources = globSync('src/**/*.{css,vue,ts}').filter(
       (file) =>
         !file.includes('__tests__') &&
