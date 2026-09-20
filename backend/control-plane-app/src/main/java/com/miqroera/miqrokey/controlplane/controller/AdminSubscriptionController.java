@@ -9,6 +9,7 @@ import com.miqroera.miqrokey.domain.model.PlanScope;
 import com.miqroera.miqrokey.domain.model.SeatStatus;
 import com.miqroera.miqrokey.domain.model.SubscriptionStatus;
 import com.miqroera.miqrokey.domain.model.UpstreamSubscription;
+import jakarta.validation.constraints.NotNull;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -80,7 +81,7 @@ public class AdminSubscriptionController {
             @RequestBody SeatUpdateRequest body) {
         var admin = userContext.getUser();
         return providerService.updateSeat(admin.tenantId(), admin.id(), subscriptionId, seatId, body.assignedUserId(),
-                body.status(), body.displayName());
+                body.status(), body.displayName(), body.version());
     }
 
     public record SubscriptionCreateRequest(UUID providerProductId, String name, BillingMode billingMode,
@@ -94,6 +95,6 @@ public class AdminSubscriptionController {
     public record SeatRequest(String externalSeatRef, String displayName, UUID assignedUserId) {
     }
 
-    public record SeatUpdateRequest(UUID assignedUserId, SeatStatus status, String displayName) {
+    public record SeatUpdateRequest(UUID assignedUserId, SeatStatus status, String displayName, @NotNull Long version) {
     }
 }

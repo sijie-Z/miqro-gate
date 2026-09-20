@@ -11,6 +11,8 @@ import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
 import com.miqroera.miqrokey.domain.repository.ProviderRepository;
 import com.miqroera.miqrokey.domain.repository.UpstreamSubscriptionRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
+import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -21,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -168,19 +171,47 @@ public class AdminProviderService {
     }
 
     /**
-     * Assigns or releases a seat (member keys keep working via their credential).
+     * Edits a seat: a <em>partial</em> patch, not a full-row replace. A field the
+     * request does not carry keeps its stored value, and {@code assigned_user_id}
+     * is non-null exactly while the seat is {@code ASSIGNED} — so releasing clears
+     * the assignee but keeps {@code display_name}. {@code expectedVersion} is the
+     * row's current version; a stale one is a 409 rather than a silent overwrite
+     * (api-contract §1).
      */
     @Transactional
     public SeatView updateSeat(UUID tenantId, UUID adminId, UUID subscriptionId, UUID seatId, UUID assignedUserId,
-            SeatStatus status, String displayName) {
+            SeatStatus status, String displayName, long expectedVersion) {
         requireSubscription(tenantId, subscriptionId);
-        jdbc.update("""
+        Map<String, Object> current;
+        try {
+            current = jdbc.queryForMap(
+                    "SELECT assigned_user_id, seat_status, display_name FROM plan_seats "
+                            + "WHERE id = :seatId AND tenant_id = :tenantId",
+                    new MapSqlParameterSource("seatId", seatId).addValue("tenantId", tenantId));
+        } catch (EmptyResultDataAccessException e) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "SEAT_NOT_FOUND", "Seat not found");
+        }
+        SeatStatus effectiveStatus = status != null ? status : SeatStatus.valueOf((String) current.get("seat_status"));
+        UUID effectiveAssignee = effectiveStatus == SeatStatus.ASSIGNED
+                ? (assignedUserId != null ? assignedUserId : (UUID) current.get("assigned_user_id"))
+                : null;
+        String effectiveDisplayName = displayName != null ? displayName : (String) current.get("display_name");
+
+        int rows = jdbc.update("""
                 UPDATE plan_seats
                 SET assigned_user_id = :assignedUserId, seat_status = :status, display_name = :displayName,
-                    version = version + 1
-                WHERE id = :seatId AND tenant_id = :tenantId
-                """, new MapSqlParameterSource("assignedUserId", assignedUserId).addValue("status", status.name())
-                .addValue("displayName", displayName).addValue("seatId", seatId).addValue("tenantId", tenantId));
+                    version = version + 1, updated_at = now()
+                WHERE id = :seatId AND tenant_id = :tenantId AND version = :expectedVersion
+                """,
+                new MapSqlParameterSource("assignedUserId", effectiveAssignee)
+                        .addValue("status", effectiveStatus.name()).addValue("displayName", effectiveDisplayName)
+                        .addValue("seatId", seatId).addValue("tenantId", tenantId)
+                        .addValue("expectedVersion", expectedVersion));
+        if (rows != 1) {
+            // The row was read a moment ago, so a miss here is the version predicate rather
+            // than a missing seat.
+            throw new OptimisticLockingFailureException("Optimistic lock failure: seat " + seatId);
+        }
         auditService.record(tenantId, adminId, "SEAT_UPDATE", "SEAT", seatId, "{}", null);
         return seats(tenantId, subscriptionId).stream().filter(s -> s.id().equals(seatId)).findFirst()
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "SEAT_NOT_FOUND", "Seat not found"));
@@ -212,7 +243,7 @@ public class AdminProviderService {
     }
 
     public record SeatView(UUID id, UUID subscriptionId, String externalSeatRef, UUID assignedUserId, String username,
-            String userDisplay, String displayName, String seatStatus, Instant createdAt) {
+            String userDisplay, String displayName, String seatStatus, Instant createdAt, long version) {
     }
 
     private static final RowMapper<ProductView> PRODUCT_ROW_MAPPER = (rs, rowNum) -> {
@@ -242,5 +273,6 @@ public class AdminProviderService {
     private static final RowMapper<SeatView> SEAT_ROW_MAPPER = (rs, rowNum) -> new SeatView((UUID) rs.getObject("id"),
             (UUID) rs.getObject("upstream_subscription_id"), rs.getString("external_seat_ref"),
             (UUID) rs.getObject("assigned_user_id"), rs.getString("username"), rs.getString("user_display"),
-            rs.getString("display_name"), rs.getString("seat_status"), rs.getTimestamp("created_at").toInstant());
+            rs.getString("display_name"), rs.getString("seat_status"), rs.getTimestamp("created_at").toInstant(),
+            rs.getLong("version"));
 }

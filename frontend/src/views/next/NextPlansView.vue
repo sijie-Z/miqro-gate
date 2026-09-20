@@ -264,7 +264,13 @@ function requestRelease(seat: SeatView) {
     tone: 'danger',
     run: async () => {
       try {
-        await api.updateSeat(subscription.id!, seat.id!, { status: 'AVAILABLE' });
+        await api.updateSeat(subscription.id!, seat.id!, {
+          status: 'AVAILABLE',
+          // The read path hands us the row's version; the server refuses a stale one.
+          // Same non-null style as the ids above — every SeatView field is optional in
+          // the generated types, though this one is NOT NULL in the schema.
+          version: seat.version!,
+        });
         toast.success('席位已释放');
         await refreshSeats();
       } catch (error) {

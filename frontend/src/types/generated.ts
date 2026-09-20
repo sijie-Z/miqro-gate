@@ -3553,6 +3553,8 @@ export interface components {
             seatStatus?: string;
             /** Format: date-time */
             createdAt?: string;
+            /** Format: int64 */
+            version?: number;
         };
         QuotaSnapshot: {
             /** Format: uuid */
@@ -4275,6 +4277,8 @@ export interface components {
             /** @enum {string} */
             status?: "AVAILABLE" | "ASSIGNED" | "DISABLED" | "RELEASED";
             displayName?: string;
+            /** Format: int64 */
+            version: number;
         };
         ProjectUpdateRequest: {
             name?: string;

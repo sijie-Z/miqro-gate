@@ -608,7 +608,7 @@ export function createSeat(
 export function updateSeat(
   subscriptionId: string,
   seatId: string,
-  body: { assignedUserId?: string; status?: string; displayName?: string },
+  body: { assignedUserId?: string; status?: string; displayName?: string; version: number },
 ): Promise<SeatView> {
   return patch<SeatView>(`/api/v1/admin/subscriptions/${subscriptionId}/seats/${seatId}`, body);
 }
