@@ -31,41 +31,44 @@ class TokenBucketTest {
     }
 
     @Nested
-    @DisplayName("Merging")
-    class Merging {
+    @DisplayName("Overlaying")
+    class Overlaying {
 
         @Test
-        @DisplayName("should sum all non-null fields")
-        void shouldSumNonNullFields() {
-            TokenBucket a = new TokenBucket(10L, 5L, 2L, 3L, 10L, 5L, 15L, 1L);
-            TokenBucket b = new TokenBucket(20L, 1L, 1L, 1L, 20L, 1L, 21L, 2L);
-            TokenBucket merged = a.merge(b);
-            assertThat(merged.inputTokens()).isEqualTo(30L);
-            assertThat(merged.outputTokens()).isEqualTo(6L);
-            assertThat(merged.cacheCreationInputTokens()).isEqualTo(3L);
-            assertThat(merged.cacheReadInputTokens()).isEqualTo(4L);
-            assertThat(merged.promptTokens()).isEqualTo(30L);
-            assertThat(merged.completionTokens()).isEqualTo(6L);
-            assertThat(merged.totalTokens()).isEqualTo(36L);
-            assertThat(merged.reasoningTokens()).isEqualTo(3L);
+        @DisplayName("should let the later observation supersede every non-null field")
+        void shouldSupersedeWithLaterValues() {
+            // Provider counters are cumulative within one response (Anthropic
+            // repeats input_tokens in message_start and message_delta); the last
+            // frame is the total, so the two must never be added together.
+            TokenBucket start = new TokenBucket(10L, 0L, 0L, 0L, 10L, 0L, 10L, 0L);
+            TokenBucket delta = new TokenBucket(10L, 8L, 150L, 300L, 10L, 8L, 18L, 4L);
+            TokenBucket latest = start.overlay(delta);
+            assertThat(latest.inputTokens()).isEqualTo(10L);
+            assertThat(latest.outputTokens()).isEqualTo(8L);
+            assertThat(latest.cacheCreationInputTokens()).isEqualTo(150L);
+            assertThat(latest.cacheReadInputTokens()).isEqualTo(300L);
+            assertThat(latest.promptTokens()).isEqualTo(10L);
+            assertThat(latest.completionTokens()).isEqualTo(8L);
+            assertThat(latest.totalTokens()).isEqualTo(18L);
+            assertThat(latest.reasoningTokens()).isEqualTo(4L);
         }
 
         @Test
-        @DisplayName("should fill nulls from the other side")
-        void shouldFillNulls() {
+        @DisplayName("should keep earlier fields the later observation does not carry")
+        void shouldKeepFieldsAbsentFromLaterObservation() {
             TokenBucket partial = new TokenBucket(10L, null, null, null, null, null, null, null);
             TokenBucket other = new TokenBucket(null, 7L, null, null, null, null, null, null);
-            TokenBucket merged = partial.merge(other);
-            assertThat(merged.inputTokens()).isEqualTo(10L);
-            assertThat(merged.outputTokens()).isEqualTo(7L);
+            TokenBucket latest = partial.overlay(other);
+            assertThat(latest.inputTokens()).isEqualTo(10L);
+            assertThat(latest.outputTokens()).isEqualTo(7L);
         }
 
         @Test
         @DisplayName("should be the identity for an empty other bucket")
         void shouldBeIdentityForEmpty() {
             TokenBucket a = new TokenBucket(10L, 5L, null, null, null, null, null, null);
-            assertThat(a.merge(TokenBucket.EMPTY)).isSameAs(a);
-            assertThat(a.merge(null)).isSameAs(a);
+            assertThat(a.overlay(TokenBucket.EMPTY)).isSameAs(a);
+            assertThat(a.overlay(null)).isSameAs(a);
         }
 
         @Test
@@ -73,7 +76,7 @@ class TokenBucketTest {
         void shouldNotMutateOperands() {
             TokenBucket a = new TokenBucket(1L, null, null, null, null, null, null, null);
             TokenBucket b = new TokenBucket(2L, null, null, null, null, null, null, null);
-            a.merge(b);
+            a.overlay(b);
             assertThat(a.inputTokens()).isEqualTo(1L);
             assertThat(b.inputTokens()).isEqualTo(2L);
         }
