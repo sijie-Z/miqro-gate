@@ -5815,10 +5815,12 @@ booking 一笔 `outputTokensDelta=-300`：观测 1000 tokens（600 in / 400 out�
 ### 缺陷
 
 `NewShell.vue` 的四处 `router.push` + 一处 `<router-link>` 只认 `route.name`，标签与导航项的身份也只有 name。
-而授权页有意把筛选镜像进 URL（`/app/grants?credentialId=c1`，来自 #657 / PR #700），于是点标签栏或左侧导航
+而「上游凭证」列表会把 `?credentialId=` 深链进授权页（`NextCredentialsView.vue:546-553`，来自 #657 / PR #700），
+授权页的筛选完全从 URL 推导（`NextGrantsView.vue:174-180`，该文件只 `import { useRoute }`，从不回写 URL），
+于是点标签栏或左侧导航
 ——**包括点自己已经所在、且已高亮的那一项**——URL 上写着的筛选被静默清空，页面回到全量列表，且没有任何提示。
-只影响管理员（`grants` 路由带 `adminMeta`）。同族的 #960/#961/#1065 都是「读到的与声称的不一致」，这条是
-「导航把地址栏的承诺抹掉」。
+只影响管理员（`grants` 路由带 `adminMeta`，且入口在上游凭证列表里）。同族的 #960/#961/#1065 都是「读到的与声称的
+不一致」，这条是「导航把地址栏的承诺抹掉」。
 
 ### 改动（`frontend/src/components/NewShell.vue`）
 
@@ -5829,18 +5831,26 @@ booking 一笔 `outputTokensDelta=-300`：观测 1000 tokens（600 in / 400 out�
 - **持久化只存 `{name,label}`**：sessionStorage 在同一浏览器标签页里跨登出存活，存 fullPath 等于把上一个用户的
   `?credentialId=` 交给下一个登录者；`restoreTabs()` 也只读这两个字段，于是「旧版本存下的载荷 / 被手改的字符串」
   结构上不可能再进 `router.push`。
+- `restoreTabs()` 再补两项校验：用 `router.hasRoute(name)` 滤掉**路由表里已经解析不出的名字**——这样的标签渲染出来
+  和普通标签一模一样，点下去却在 vue-router 里同步抛 `MATCHER_NOT_FOUND`，`void push()` 接不住（实测
+  `SYNC_THROW=No match for`、`RETURNED_PROMISE=no`、`ERROR_HANDLER=No match for`、URL 不动，即「死按钮」）；
+  并按写入时的同一个上限 `slice(-24)` 截断，手改出来的超长载荷不能决定渲染多少个标签。
 
 ### 测试
 
-`shell-tab-query.spec.ts`：真实 router（memory history）挂载真实 `NewShell`，从 `/app/keys?credentialId=c1` 出发，6 例。
+`shell-tab-query.spec.ts`：真实 router（memory history）挂载真实 `NewShell`，从 `/app/keys?credentialId=c1` 出发，7 例。
 
 - **修复前必红的 3 例**：标签原地点击 / 标签来回切换 / 侧边栏原地点击——`query.credentialId` 由 `c1` 变 `undefined`。
-- 另 3 例：侧边栏「去裸分区并如此记忆」的规则钉；标签来自 sessionStorage 时由 URL 自愈（`{immediate:true}` 的
-  watch 在任何点击之前就用 URL 修好它，这条同时否掉了评审里「旧载荷仍会触发原缺陷」的猜测）；持久化载荷不含 query。
-  最后一条在硬化前必红（载荷里实打实出现 `"fullPath":"/app/keys?credentialId=c1"`），且用独立临时用例验证过
-  「非当前标签」那半边同样会红（`{"name":"usage",...,"fullPath":"/app/usage?tab=token"}`）——加进去的断言不是空转。
+- 另 4 例：侧边栏「去裸分区并如此记忆」的规则钉；标签来自 sessionStorage 时由 URL 自愈（`{immediate:true}` 的
+  watch 在任何点击之前就用 URL 修好它，这条同时否掉了评审里「旧载荷仍会触发原缺陷」的猜测）；持久化载荷不含 query；
+  解析不出的标签名不进标签栏。持久化那条在硬化前必红（载荷里实打实出现 `"fullPath":"/app/keys?credentialId=c1"`），
+  且用独立临时用例验证过「非当前标签」那半边同样会红；`hasRoute` 那条在加过滤前必红
+  （`expected [ '幽灵页', '我的密钥' ] to deeply equal [ '我的密钥' ]`）。
+  另外两处测试自身的问题一并修掉：标签/导航项改为**按标签节点精确匹配**（`用量` 是 `用量报表` 的前缀，
+  原来的 `text().includes` 有可能选错元素、让测试因为错误的原因变绿），原先那句 `expect(tab(...)).toBeTruthy()`
+  是恒真的空断言，换成标签栏内容断言。
 
-全量 74 文件 542 例通过；`npm run typecheck` 与 `eslint --max-warnings 0` 退出码 0（首次跑 lint 时 prettier 报了
+全量 74 文件 543 例通过；`npm run typecheck` 与 `eslint --max-warnings 0` 退出码 0（首次跑 lint 时 prettier 报了
 一处换行，已 `--fix` 后复跑为 0）。
 
 ### 未做（都不是本缺陷造成的，本 PR 未修）
@@ -5848,7 +5858,10 @@ booking 一笔 `outputTokensDelta=-300`：观测 1000 tokens（600 in / 400 out�
 - 标签身份仍是 `route.name`：同一路由同时保留两份不同筛选（两个标签两个凭证）做不到，行为与修复前一致。
 - `closeAll` / 关掉最后一个标签后标签栏可能为空且不自动补回：预先存在（那些行不在本 diff 里，修复前的 name 源
   watch 同样不会触发），任何一次导航或刷新都会自愈。
-- 角色变化后 sessionStorage 里遗留的高权限标签仍会渲染成点不动的死按钮：预先存在，与 query 无关。
+- 角色变化后遗留的高权限标签仍会渲染成点不动的死按钮：预先存在，与 query 无关。（「路由表里解析不出的名字」
+  这一类已在本次滤掉；这里说的是「路由还在、当前角色没权限」的另一类。）
+- 标签列表本身仍跨登出保留（现在只剩 `{name,label}`）：同浏览器标签页里下一位登录者会看到上一位用户访问过的
+  分区名。本 PR 已把 `?credentialId=` 从载荷里摘掉，但「登出时清标签」要动 store↔组件共享常量，未做。
 
 ### 被否候选（走查记录，均带实测）
 
