@@ -1,7 +1,10 @@
 package com.miqroera.miqrokey.controlplane.service;
 
+import com.miqroera.miqrokey.domain.model.QuotaMetric;
 import com.miqroera.miqrokey.domain.model.QuotaRule;
 import com.miqroera.miqrokey.domain.model.QuotaScopeType;
+import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.PricingGap;
+import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.PricingStatus;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
 import org.springframework.stereotype.Component;
 
@@ -16,6 +19,14 @@ import java.util.UUID;
  * derive the same level from the same numbers, so both go through this
  * component instead of each aggregating usage on their own. COST watermarks the
  * priced upstream cost of the window in CNY (#683).
+ *
+ * <p>
+ * "Priced" is a real qualifier, so the reading carries its own provenance
+ * (#943): a COST watermark whose window holds usage that no price snapshot
+ * covers is a <b>lower bound</b>, and it now says so instead of reading as a
+ * definite zero. {@code level} is deliberately unchanged by that gap — what an
+ * unpriceable window should do to a REJECT rule is a product decision (#943
+ * question 2), not something a display fix settles.
  */
 @Component
 class QuotaWatermarks {
@@ -54,10 +65,16 @@ class QuotaWatermarks {
                 : usedPct.compareTo(BigDecimal.valueOf(NEAR_LIMIT_PERCENT)) >= 0
                         ? "NEAR_LIMIT"
                         : usedPct.compareTo(BigDecimal.valueOf(rule.warnPercent())) >= 0 ? "WARNING" : "NORMAL";
-        return new Watermark(used, usedPct, level, window.from(), window.to());
+        // #943: only a COST rule claims anything about money, so only it carries the
+        // pricing status — a TOKENS rule counts its tokens in full however the same
+        // window happens to be priced, and a caveat there would be noise.
+        boolean cost = rule.metric() == QuotaMetric.COST;
+        return new Watermark(used, usedPct, level, cost ? summary.totals().pricingStatus() : null,
+                cost ? summary.totals().unpriced() : null, window.from(), window.to());
     }
 
-    record Watermark(BigDecimal used, BigDecimal usedPct, String level, Instant from, Instant to) {
+    record Watermark(BigDecimal used, BigDecimal usedPct, String level, PricingStatus pricingStatus,
+            PricingGap unpriced, Instant from, Instant to) {
 
         /** The enforcement verdict: usage reached 100% of the limit (#684). */
         boolean exceeded() {

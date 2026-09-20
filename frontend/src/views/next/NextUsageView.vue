@@ -489,6 +489,16 @@ function quotaBarFill(rule: QuotaRuleView): string {
   return 'var(--ui-primary)';
 }
 
+/**
+ * #943: the caveat for a COST quota row, or `''` when its amount is the whole
+ * story. Same shared helper as the admin quota page and the usage summary, so one
+ * window is described one way wherever it is shown. `''` rather than null because
+ * `UiTooltip.text` is a plain string.
+ */
+function quotaCostGap(rule: QuotaRuleView): string {
+  return costGapNote(rule) ?? '';
+}
+
 /** Typed row accessors keep template expressions free of TS casts (prettier
  *  cannot parse `<` type syntax inside SFC interpolation). */
 function asGroup(row: unknown): UsageGroup {
@@ -608,6 +618,12 @@ function formatTime(iso?: string): string {
                 rule.usedPct
               }}%）</span
             >
+            <!-- #943: same caveat as the admin page — a COST watermark over a window
+                 that could not be fully priced is a lower bound, and this panel used to
+                 present it as the figure. -->
+            <UiTooltip v-if="quotaCostGap(rule)" :text="quotaCostGap(rule)">
+              <span class="next-usage__unpriced" data-testid="my-quota-cost-unpriced">未定价</span>
+            </UiTooltip>
             <div
               class="next-usage__quota-bar"
               role="progressbar"

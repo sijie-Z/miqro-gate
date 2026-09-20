@@ -139,6 +139,34 @@ describe('NextUsageView', () => {
     // #683: NEAR_LIMIT label and the COST unit render on the self-service panel.
     expect(rows[2]!.text()).toContain('即将超限');
     expect(rows[2]!.text()).toContain('限额 ¥100');
+    // #943: none of these rows carries a pricing gap, so none carries the caveat.
+    expect(wrapper.find('[data-testid="my-quota-cost-unpriced"]').exists()).toBe(false);
+  });
+
+  it('#943: marks a COST quota row as a lower bound when its window could not be fully priced', async () => {
+    mockApi.listMyQuotaRules.mockResolvedValue([
+      quotaRule({
+        id: 'qr-1',
+        metric: 'COST',
+        limitValue: 1,
+        used: 0,
+        usedPct: 0,
+        level: 'NORMAL',
+        pricingStatus: 'UNAVAILABLE',
+        unpriced: { unpricedEvents: 2, unavailableEvents: 2 },
+      }),
+    ]);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // The row says ¥0（0%） — the caveat is what separates "spent nothing" from
+    // "could not be valued", which is exactly how this panel used to mislead.
+    const marks = wrapper.findAll('[data-testid="my-quota-cost-unpriced"]');
+    expect(marks).toHaveLength(1);
+    expect(marks[0]!.element.closest('.next-usage__quota-body')?.textContent).toContain(
+      '本期用量 ¥0（0%）',
+    );
   });
 
   it('shows the empty quota hint when no rules exist', async () => {

@@ -162,6 +162,40 @@ describe('NextQuotaRulesView', () => {
     expect(wrapper.text()).toContain('1,100,000');
   });
 
+  it('#943: leaves a COST watermark unmarked while its window is fully priced', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    // The fixture's COST row carries no pricingStatus (the API omits it for a
+    // COMPLETE window), so the marker must not cry wolf on a figure that is whole.
+    expect(wrapper.find('[data-testid="quota-cost-unpriced"]').exists()).toBe(false);
+  });
+
+  it('#943: marks a COST watermark as a lower bound when its window could not be fully priced', async () => {
+    mockApi.listQuotaRules.mockResolvedValue([
+      rule({
+        id: 'r1',
+        metric: 'COST',
+        limitValue: 1,
+        used: 0,
+        usedPct: 0,
+        level: 'NORMAL',
+        pricingStatus: 'UNAVAILABLE',
+        unpriced: { unpricedEvents: 1, unavailableEvents: 1 },
+      }),
+      rule({ id: 'r2', metric: 'TOKENS' }),
+    ]);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const marks = wrapper.findAll('[data-testid="quota-cost-unpriced"]');
+    // Exactly the COST row: the tokens row counts its tokens in full however the
+    // window happens to be priced, so a cost caveat there would be noise.
+    expect(marks).toHaveLength(1);
+    expect(marks[0]!.element.closest('.next-quota__bar-row')?.textContent).toContain('¥0 / ¥1');
+  });
+
   it('creates a quota rule for a user through the inline form', async () => {
     mockApi.putQuotaRule.mockResolvedValue(rule({ id: 'r9', scopeName: 'alice' }));
     const wrapper = mountView();

@@ -2881,6 +2881,23 @@ export interface components {
             /** @enum {string} */
             action?: "ALERT" | "REJECT";
         };
+        PricingGap: {
+            /** Format: int64 */
+            inputTokens?: number;
+            /** Format: int64 */
+            outputTokens?: number;
+            /** Format: int64 */
+            cacheReadTokens?: number;
+            /** Format: int64 */
+            cacheCreationTokens?: number;
+            /** Format: int64 */
+            unpricedEvents?: number;
+            /** Format: int64 */
+            unavailableEvents?: number;
+            /** Format: int64 */
+            unpricedHitEvents?: number;
+            empty?: boolean;
+        };
         QuotaRuleView: {
             /** Format: uuid */
             id?: string;
@@ -2905,6 +2922,9 @@ export interface components {
             used?: number;
             usedPct?: number;
             level?: string;
+            /** @enum {string} */
+            pricingStatus?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+            unpriced?: components["schemas"]["PricingGap"];
             /** Format: date-time */
             windowFrom?: string;
             /** Format: date-time */
@@ -4330,23 +4350,6 @@ export interface components {
             avgDurationMs?: number;
             /** Format: int64 */
             avgTtfbMs?: number;
-        };
-        PricingGap: {
-            /** Format: int64 */
-            inputTokens?: number;
-            /** Format: int64 */
-            outputTokens?: number;
-            /** Format: int64 */
-            cacheReadTokens?: number;
-            /** Format: int64 */
-            cacheCreationTokens?: number;
-            /** Format: int64 */
-            unpricedEvents?: number;
-            /** Format: int64 */
-            unavailableEvents?: number;
-            /** Format: int64 */
-            unpricedHitEvents?: number;
-            empty?: boolean;
         };
         Requests: {
             /** Format: int64 */

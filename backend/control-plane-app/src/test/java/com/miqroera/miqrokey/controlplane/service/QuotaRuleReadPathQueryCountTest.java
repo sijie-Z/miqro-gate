@@ -12,6 +12,8 @@ import com.miqroera.miqrokey.domain.repository.ProjectRepository;
 import com.miqroera.miqrokey.domain.repository.QuotaRuleRepository;
 import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
+import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.PricingGap;
+import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.PricingStatus;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.jdbc.core.RowMapper;
@@ -137,8 +139,9 @@ class QuotaRuleReadPathQueryCountTest {
 
     private static QuotaWatermarks watermarksMock() {
         QuotaWatermarks watermarks = mock(QuotaWatermarks.class);
-        when(watermarks.evaluate(any(UUID.class), any(QuotaRule.class))).thenReturn(
-                new QuotaWatermarks.Watermark(BigDecimal.TEN, BigDecimal.TEN, "NORMAL", Instant.now(), Instant.now()));
+        when(watermarks.evaluate(any(UUID.class), any(QuotaRule.class)))
+                .thenReturn(new QuotaWatermarks.Watermark(BigDecimal.TEN, BigDecimal.TEN, "NORMAL",
+                        PricingStatus.COMPLETE, PricingGap.NONE, Instant.now(), Instant.now()));
         return watermarks;
     }
 
