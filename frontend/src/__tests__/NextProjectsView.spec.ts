@@ -260,4 +260,43 @@ describe('NextProjectsView', () => {
       callsBefore,
     );
   });
+
+  it('#1160: a failed user read in the member drawer is visible, not silent', async () => {
+    mockApi.listProjectMembers.mockResolvedValue([]);
+    mockApi.listUsers.mockRejectedValue(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-users',
+        title: 'Error',
+      }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="project-members-open"]').trigger('click');
+    await flushPromises();
+
+    const drawer = document.querySelector('[data-testid="project-members-drawer"]');
+    expect(drawer, 'member drawer should render').toBeTruthy();
+    // Before the fix the drawer said nothing at all when this read failed — the
+    // picker was simply empty and 没有可加入… was suppressed by `usersLoaded`.
+    const error = document.querySelector('[data-testid="project-users-error"]');
+    expect(error, 'the failed user read must be visible').toBeTruthy();
+    expect(error!.textContent).toContain('数据库不可用');
+    const retry = document.querySelector(
+      '[data-testid="project-users-retry"]',
+    ) as HTMLButtonElement;
+    expect(retry, 'a retry entry must exist').toBeTruthy();
+
+    // Retry goes through the same loader.
+    mockApi.listUsers.mockResolvedValue([user({ id: 'u2', username: 'bob' })]);
+    retry.click();
+    await flushPromises();
+
+    expect(mockApi.listUsers).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('[data-testid="project-users-error"]')).toBeNull();
+  });
 });

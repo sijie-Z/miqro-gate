@@ -197,4 +197,50 @@ describe('NextAdminSkillsView', () => {
 
     expect(mockApi.adminActivateSkillRevision).toHaveBeenCalledWith('s1', 1);
   });
+
+  it('#1160: a failed project/team read is not dressed up as 暂无项目/暂无团队', async () => {
+    mockApi.adminListSkills.mockResolvedValue([skill()]);
+    mockApi.listProjects.mockRejectedValue(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-500',
+        title: 'Error',
+      }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="skill-access"]').trigger('click');
+    await flushPromises();
+
+    // The dialog teleports to body. A failed read must not claim the tenant has
+    // no projects or teams — that is a statement about the data, not this request.
+    expect(document.body.textContent).not.toContain('暂无项目');
+    expect(document.body.textContent).not.toContain('暂无团队');
+    const error = document.querySelector('[data-testid="skill-refs-error"]');
+    expect(error, 'the failed read must be visible').toBeTruthy();
+    expect(error!.textContent).toContain('数据库不可用');
+    const retry = document.querySelector('[data-testid="skill-refs-retry"]') as HTMLButtonElement;
+    expect(retry, 'a retry entry must exist').toBeTruthy();
+
+    // Retry goes through the same loader — no reload required.
+    mockApi.listProjects.mockResolvedValue([
+      {
+        id: 'p1',
+        code: 'CORE',
+        name: 'Core AI',
+        status: 'ACTIVE',
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    retry.click();
+    await flushPromises();
+
+    expect(mockApi.listProjects).toHaveBeenCalledTimes(2);
+    expect(document.body.textContent).toContain('Core AI');
+    expect(document.querySelector('[data-testid="skill-refs-error"]')).toBeNull();
+  });
 });
