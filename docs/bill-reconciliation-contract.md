@@ -54,7 +54,8 @@
 
 ## 端点契约（形态对齐 api-contract §6 异步任务）
 - `POST /api/v1/admin/reconciliations`（SYSTEM_ADMIN，multipart 或 JSONL body）
-  params：`provider_code`（目录内枚举）、`windowFrom/windowTo`（校验 ≤31 天且覆盖账单范围）、
+  params：`provider_code`（目录内枚举）、`windowFrom/windowTo`（校验 ≤31 天且覆盖账单范围；窗口为**半开区间
+  `[windowFrom, windowTo)`**——`windowFrom` 含、`windowTo` 不含，边界行只归一份报告，与用量统计/导出同一约定）、
   `currency`；→ 202 `{id, status: PENDING}`；异步执行：解析→匹配→报告落盘（不落 usage）。
 - `GET /api/v1/admin/reconciliations/{id}` → 元数据 + 汇总
   `{total, matched, partial, unmatchedProvider, unmatchedLocal, amountDiffMicros}`。

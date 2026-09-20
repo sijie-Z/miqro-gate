@@ -201,6 +201,37 @@ class ExportDeletionApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("deletion responses never echo the confirmation token hash (api-contract §5.6)")
+    void deletionResponsesNeverEchoTokenHash() throws Exception {
+        fx.insertUsage("req-1", 1_000L, 500L);
+
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/usage-deletions").param("from", "2026-08-01T00:00:00Z")
+                .param("to", "2026-08-31T00:00:00Z").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk()).andReturn();
+        String createdBody = created.getResponse().getContentAsString();
+        Map<?, ?> deletion = objectMapper.readValue(createdBody, Map.class);
+        String deletionId = deletion.get("id").toString();
+        String token = deletion.get("confirmToken").toString();
+
+        // Positive control: this is the one response the token is allowed in.
+        org.assertj.core.api.Assertions.assertThat(createdBody).contains("\"confirmToken\"");
+
+        // api-contract §5.6: the confirm response and the list must not carry the
+        // persisted SHA-256 of the token either ("永不返回 token").
+        mockMvc.perform(
+                post("/api/v1/admin/usage-deletions/" + deletionId + "/confirm").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("confirmToken", token))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("EXECUTED"))
+                .andExpect(jsonPath("$.confirmTokenHash").doesNotExist());
+
+        mockMvc.perform(get("/api/v1/admin/usage-deletions").param("limit", "20").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].status").value("EXECUTED"))
+                .andExpect(jsonPath("$[0].confirmTokenHash").doesNotExist());
+    }
+
+    @Test
     @DisplayName("the one-time token executes the deletion exactly once under concurrent confirmation")
     void concurrentConfirmExecutesOnce() throws Exception {
         fx.insertUsage("req-1", 1_000L, 500L);

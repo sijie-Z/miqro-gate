@@ -27,12 +27,18 @@ public interface UsageStatsRepository {
 
     /** Aggregation dimension for usage statistics. */
     enum GroupBy {
-        PROJECT, VIRTUAL_KEY, CACHE_LEVEL, DAY,
+        PROJECT, VIRTUAL_KEY, CACHE_LEVEL,
+        /**
+         * UTC calendar day (label = {@code YYYY-MM-DD}), independent of the database
+         * session's {@code TimeZone} (#1050). Callers that want the viewer's local day
+         * must convert; the buckets are data, not display.
+         */
+        DAY,
         /** I15 (doc 134892): per-consumer dimension (label = username). */
         USER,
         /** I15: per-model dimension (label = model id). */
         MODEL,
-        /** I15: calendar-month granularity (label = {@code YYYY-MM}). */
+        /** I15: UTC calendar-month granularity (label = {@code YYYY-MM}, #1050). */
         MONTH,
         /**
          * Per-team dimension (label = team name, joined through the member's virtual

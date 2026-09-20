@@ -8,7 +8,7 @@ import java.util.Map;
 
 /**
  * Builds the {@code application/problem+json} envelopes written by the filters
- * in this package (issue #445, extended by PH16).
+ * in this package (issue #445, extended by PH16, single writer since #1011).
  *
  * <p>
  * These writers live in servlet filters, i.e. outside MVC, so they cannot
@@ -29,6 +29,16 @@ import java.util.Map;
  * ((CTRL-CHAR, code 9))}. Serializing removes the class of defect rather than
  * the instance that happened to be noticed.
  * </p>
+ *
+ * <p>
+ * #1011 converged the six writers that were still splicing their own copy of
+ * this body, each with its own private {@code escapeJson} (or, in
+ * {@code AdminIpAllowlistFilter}, an inline two-{@code replace} chain that had
+ * lost the control-character branch). They keep their historical field set:
+ * {@code detail} stays <em>absent</em> rather than becoming {@code null}, which
+ * is why {@link #of} omits it. Six copies of one escape rule is how the
+ * half-escaped one survived; there is now one place to get it wrong.
+ * </p>
  */
 final class ProblemJson {
 
@@ -41,6 +51,13 @@ final class ProblemJson {
      * The RFC 9457 body for these fields, with the fixed {@code type}. Field order
      * is the order below, so the wire form stays byte-stable for callers that read
      * it as text rather than parsing it.
+     *
+     * <p>
+     * {@code detail} is optional in RFC 9457 and omitted when {@code null} — not
+     * written as JSON {@code null}. The filters that predate this class never
+     * carried a {@code detail}, and dropping in a serializer must not quietly add a
+     * member to their responses.
+     * </p>
      */
     static String of(int status, String title, String code, String detail, String requestId) {
         Map<String, Object> body = new LinkedHashMap<>();
@@ -48,7 +65,9 @@ final class ProblemJson {
         body.put("title", title);
         body.put("status", status);
         body.put("code", code);
-        body.put("detail", detail);
+        if (detail != null) {
+            body.put("detail", detail);
+        }
         body.put("requestId", requestId);
         try {
             return MAPPER.writeValueAsString(body);

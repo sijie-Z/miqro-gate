@@ -3391,7 +3391,7 @@ export interface components {
         ConfirmRequest: {
             confirmToken?: string;
         };
-        UsageDeletion: {
+        UsageDeletionView: {
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
@@ -3404,8 +3404,6 @@ export interface components {
             periodTo?: string;
             /** Format: int64 */
             previewCount?: number;
-            /** Format: byte */
-            confirmTokenHash?: string;
             /** @enum {string} */
             status?: "PENDING_CONFIRMATION" | "CONFIRMED" | "EXECUTED" | "EXPIRED";
             /** Format: int64 */
@@ -5986,7 +5984,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["UsageDeletion"][];
+                    "*/*": components["schemas"]["UsageDeletionView"][];
                 };
             };
         };
@@ -6035,7 +6033,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["UsageDeletion"];
+                    "*/*": components["schemas"]["UsageDeletionView"];
                 };
             };
         };

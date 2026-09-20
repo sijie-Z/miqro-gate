@@ -232,7 +232,7 @@
 
 ### 4.4 用量汇总 `GET /api/v1/me/usage/summary`
 
-参数：`groupBy`（`project | virtual_key | cache_level | day | user | team | model | month | product`，默认 `project`；**I15**：`user`=调用方（label=用户名）、`model`=模型、`month`=自然月 `YYYY-MM`；**2026-09-15**：`team`=团队成员归属（label=团队名，经成员的 Virtual Key 归集；同一用户属多团队时在各团队分别计入——归属视图非分割口径）；**#758**：`product`=供应商产品（label=产品显示名））、`from`、`to`（ISO-8601，默认最近 93 天窗口；`from` 必须在 `to` 之前，窗口超过 93 天拒绝）。
+参数：`groupBy`（`project | virtual_key | cache_level | day | user | team | model | month | product`，默认 `project`；**I15**：`user`=调用方（label=用户名）、`model`=模型、`month`=自然月 `YYYY-MM`；**#1050**：`day`/`month` 一律按 **UTC** 分桶（label `YYYY-MM-DD` / `YYYY-MM`），与会话或服务器 TimeZone 无关——本地日历日需调用方自行换算，小时报表的 `tzOffsetMinutes` 是另一条路径）；**2026-09-15**：`team`=团队成员归属（label=团队名，经成员的 Virtual Key 归集；同一用户属多团队时在各团队分别计入——归属视图非分割口径）；**#758**：`product`=供应商产品（label=产品显示名））、`from`、`to`（ISO-8601，默认最近 93 天窗口；`from` 必须在 `to` 之前，窗口超过 93 天拒绝）。
 
 ```json
 {
@@ -562,7 +562,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/usage/records` | 全租户分页明细，时间倒序 |
 | `GET /api/v1/admin/usage/hourly` | 逐小时 Token 表（#634）：小时 × 项目 ×（用户/团队） |
 
-`summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day` | `user` | `team` | `model` | `month` | `product`，默认 `project`；I15 新增后三者；2026-09-15 增 `team`，同用户多团队按团队分别计入；#758 增 `product`=供应商产品，label=产品显示名）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。明细与汇总的响应结构、`outcomes`（成功率/平均延迟/平均首字）与富集列口径同 §4.4/§4.5（#758）。
+`summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day` | `user` | `team` | `model` | `month` | `product`，默认 `project`；I15 新增后三者；2026-09-15 增 `team`，同用户多团队按团队分别计入；#758 增 `product`=供应商产品，label=产品显示名；**#1050**：`day`/`month` 一律按 **UTC** 分桶，与会话/服务器 TimeZone 无关）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。明细与汇总的响应结构、`outcomes`（成功率/平均延迟/平均首字）与富集列口径同 §4.4/§4.5（#758）。
 
 `records` 参数：`from`、`to`、`page`（默认 1）、`size`（默认 50，1–200）及与 `summary` 相同的可选过滤，另支持 `clientIp`（#605，精确匹配调用方地址，用于盗用排查「这个来源都调了什么」）。
 
@@ -1185,7 +1185,10 @@ detail_currency, detail_occurred_at, detail_status, detail_bucket_key, detail_pr
 
 - **幂等**：同 (providerCode, window, currency, uploadSha256) 重复导入返回既有报告（不重复执行）；`FAILED` 除外（可重试）。
 - 上传上限：16MB（解压 64MB / 100,000 行）；超限或 gzip 损坏 `400 RECONCILIATION_UPLOAD_INVALID`。
-- 校验：窗口 ≤31 天且 from<to（`RECONCILIATION_WINDOW_INVALID`）；**`providerCode` 取的是
+- 校验：窗口 ≤31 天且 from<to（`RECONCILIATION_WINDOW_INVALID`）；**窗口是半开区间 `[windowFrom, windowTo)`
+  ——`windowFrom` 含、`windowTo` 不含**（#1045 的实现口径，本行补记）：对账与用量统计/导出共享同一条全局窗口约定，
+  边界行因此只归一份报告；按闭区间切分账单文件的调用方会让边界行从 MATCHED 翻成 UNMATCHED，而报告不会解释原因。
+  **`providerCode` 取的是
   `provider_products.product_code`（供应商*产品*码，如 `tencent-coding-plan`），不是 `providers.slug`**
   ——传成 slug 会得到 `RECONCILIATION_PROVIDER_UNKNOWN`，而报错正文说的是 `product_code`；
   currency ISO-4217（`RECONCILIATION_PARAM_INVALID`）；报告不存在 `RECONCILIATION_NOT_FOUND`（404）。
