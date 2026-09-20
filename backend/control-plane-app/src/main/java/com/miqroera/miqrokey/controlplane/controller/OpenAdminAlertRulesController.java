@@ -6,6 +6,13 @@ import com.miqroera.miqrokey.controlplane.service.AlertRuleService;
 import com.miqroera.miqrokey.controlplane.service.AlertRuleService.AlertRule;
 import com.miqroera.miqrokey.controlplane.service.AuditContext;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -43,7 +50,7 @@ public class OpenAdminAlertRulesController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public AlertRule create(HttpServletRequest request, @RequestBody OpenAdminAlertRuleCreateRequest body) {
+    public AlertRule create(HttpServletRequest request, @Valid @RequestBody OpenAdminAlertRuleCreateRequest body) {
         return ruleService.create(tenantId(request), body.name(), body.type(), body.threshold(),
                 body.dedupeMinutes() != null ? body.dedupeMinutes() : 60, body.webhookEndpointId(), body.scopeJson(),
                 auditContext(request));
@@ -61,7 +68,7 @@ public class OpenAdminAlertRulesController {
 
     @PatchMapping("/{ruleId}")
     public AlertRule update(HttpServletRequest request, @PathVariable UUID ruleId,
-            @RequestBody OpenAdminAlertRuleUpdateRequest body) {
+            @Valid @RequestBody OpenAdminAlertRuleUpdateRequest body) {
         return ruleService.update(tenantId(request), ruleId, body.name(), body.threshold(), body.dedupeMinutes(),
                 body.enabled(), body.webhookEndpointId(), body.scopeJson(), auditContext(request));
     }
@@ -93,11 +100,21 @@ public class OpenAdminAlertRulesController {
         return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
-    public record OpenAdminAlertRuleCreateRequest(String name, String type, BigDecimal threshold, Integer dedupeMinutes,
+    /**
+     * Machine-key twin of {@code AdminAlertRuleController.AlertRuleCreateRequest}:
+     * same constraints on both faces, so one payload cannot be answered two ways
+     * depending on whether it arrived through the console or a script (#1073).
+     * {@code threshold} deliberately has no lower bound — {@code <= 0} stays a
+     * documented degenerate configuration.
+     */
+    public record OpenAdminAlertRuleCreateRequest(@NotBlank @Size(max = 200) String name, String type,
+            @NotNull @Digits(integer = 6, fraction = 6) BigDecimal threshold, @Min(1) Integer dedupeMinutes,
             UUID webhookEndpointId, String scopeJson) {
     }
 
-    public record OpenAdminAlertRuleUpdateRequest(String name, BigDecimal threshold, Integer dedupeMinutes,
-            Boolean enabled, UUID webhookEndpointId, String scopeJson) {
+    /** PATCH is partial: only present values are constrained. */
+    public record OpenAdminAlertRuleUpdateRequest(@Pattern(regexp = "\\s*\\S[\\s\\S]*") @Size(max = 200) String name,
+            @Digits(integer = 6, fraction = 6) BigDecimal threshold, @Min(1) Integer dedupeMinutes, Boolean enabled,
+            UUID webhookEndpointId, String scopeJson) {
     }
 }
