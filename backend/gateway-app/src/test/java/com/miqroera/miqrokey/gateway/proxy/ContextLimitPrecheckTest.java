@@ -10,6 +10,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -37,6 +38,19 @@ import static org.assertj.core.api.Assertions.assertThat;
  * are evaluated first, so an oversized body can never turn an auth error into a
  * size oracle.
  * </p>
+ *
+ * <p>
+ * #1032: the client's response budget is stated explicitly. Spring Boot's
+ * default is 5 seconds and this module never configured it, so under CI CPU
+ * contention a 2KB body through an in-process mock provider occasionally missed
+ * the budget and surfaced as
+ * {@code Timeout on blocking read for 5000000000 NANOSECONDS} on a run that was
+ * otherwise correct. These tests assert behaviour, never latency — a genuine
+ * hang still fails here, just later. (The budget comes from this annotation,
+ * not from {@code spring.test.webtestclient.timeout}: the property is ignored
+ * unless the annotation is present, which is why the module-wide default was
+ * invisible.)
+ * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,"
@@ -45,6 +59,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "miqrokey.gateway.persistence.enabled=false", "miqrokey.crypto.enabled=false",
         "spring.main.web-application-type=reactive", "miqrokey.gateway.context-limit.enabled=true",
         "miqrokey.gateway.context-limit.threshold-chars=2000"})
+@AutoConfigureWebTestClient(timeout = "30s")
 @Import(GatewayAuthTestConfig.class)
 @DisplayName("Gateway context-limit pre-check (#553)")
 class ContextLimitPrecheckTest {
