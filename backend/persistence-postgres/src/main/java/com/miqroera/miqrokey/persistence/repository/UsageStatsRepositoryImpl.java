@@ -114,8 +114,8 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
     }
 
     /**
-     * Lifecycle enrichment join (#758): fact rows carry the gateway request id;
-     * the lifecycle trail ({@code request_usage_records}) is unique per
+     * Lifecycle enrichment join (#758): fact rows carry the gateway request id; the
+     * lifecycle trail ({@code request_usage_records}) is unique per
      * {@code (started_at, gateway_request_id)}. The lookup is keyed on
      * {@code (tenant_id, gateway_request_id)} — V61's
      * {@code idx_request_usage_records_gateway_request} exists precisely for a
