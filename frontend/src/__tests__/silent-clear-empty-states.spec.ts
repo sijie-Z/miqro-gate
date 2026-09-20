@@ -383,6 +383,22 @@ function collectCatchHandlers(file: string, src: string): CatchHandler[] {
 }
 
 /**
+ * The `<script>` block of a `.vue` source. This guard parses its own views — it
+ * is not an HTML sanitizer — but the regex still follows HTML semantics on
+ * purpose, because tag names are case-insensitive there and an end tag may
+ * carry whitespace/attributes (`</script >`, `</script foo="bar">`).
+ *
+ * The narrower form `/<script[^>]*>([\s\S]*?)<\/script>/` tripped CodeQL's
+ * `js/bad-tag-filter` heuristic twice (#1160 CI, lines 404/471). Adding only
+ * the `i` flag is NOT enough: the query reports the shortest applicable
+ * message, so it would then fall through to "does not match script end tags
+ * like </script >" for the same regexp. Both widenings are required.
+ */
+function scriptOf(src: string): string {
+  return /<script[^>]*>([\s\S]*?)<\/script[^>]*>/i.exec(src)?.[1] ?? src;
+}
+
+/**
  * Rule 3 (#1160 supervisor review, the ninth site): a `try` block that awaits an
  * `api.*` read and has NO `catch` lets the rejection escape unhandled — the
  * caller draws its empty state and nothing on screen says the read failed.
@@ -401,7 +417,7 @@ function collectCatchHandlers(file: string, src: string): CatchHandler[] {
  * it the way tables 1 and 2 do — with a reason and a rot test.
  */
 function collectUncaughtApiReads(src: string): number[] {
-  const script = /<script[^>]*>([\s\S]*?)<\/script>/.exec(src)?.[1] ?? src;
+  const script = scriptOf(src);
   const lines: number[] = [];
   for (const m of script.matchAll(/(?<![.\w])try\s*\{/g)) {
     const bstart = m.index + m[0].length - 1;
@@ -468,7 +484,7 @@ describe('#1160 empty states and silent clears', () => {
     const offenders: string[] = [];
     for (const file of files) {
       const src = readFileSync(join(dir, file), 'utf8');
-      const script = /<script[^>]*>([\s\S]*?)<\/script>/.exec(src)?.[1] ?? src;
+      const script = scriptOf(src);
       tryBlocks += [...script.matchAll(/(?<![.\w])try\s*\{/g)].length;
       for (const line of collectUncaughtApiReads(src)) {
         offenders.push(`${file}:${line}`);
