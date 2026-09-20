@@ -103,7 +103,7 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         // reason by the authenticator; only a credential-less call needs a line
         // here, otherwise every rejection would be logged twice.
         if (credential == null) {
-            LOG.warn("Billing channel unauthorized [requestId={}, reason=NO_CREDENTIAL]", requestId(request));
+            LOG.warn("Billing channel unauthorized [requestId={}, reason=NO_CREDENTIAL]", forLog(requestId(request)));
         }
         unauthorized(request, response);
     }
@@ -117,7 +117,7 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     private ApiConsumer authenticateApiKey(String key, HttpServletRequest request) {
         ApiConsumer consumer = consumerRepository.findByKeyDigest(sha256(key)).orElse(null);
         if (consumer == null) {
-            LOG.warn("Billing channel rejected [requestId={}, reason=UNKNOWN_API_KEY]", requestId(request));
+            LOG.warn("Billing channel rejected [requestId={}, reason=UNKNOWN_API_KEY]", forLog(requestId(request)));
         }
         return consumer;
     }
@@ -125,41 +125,47 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     private ApiConsumer authenticateJwt(String token, HttpServletRequest request) {
         String subject = ConsumerJwtVerifier.extractSubject(token);
         if (subject == null) {
-            LOG.warn("Billing channel rejected [requestId={}, reason=JWT_SUBJECT_MISSING]", requestId(request));
+            LOG.warn("Billing channel rejected [requestId={}, reason=JWT_SUBJECT_MISSING]", forLog(requestId(request)));
             return null;
         }
         ApiConsumer consumer = consumerRepository.findByName(subject).orElse(null);
         if (consumer == null) {
             LOG.warn("Billing channel rejected [requestId={}, reason=UNKNOWN_CONSUMER, consumer={}]",
-                    requestId(request), forLog(subject));
+                    forLog(requestId(request)), forLog(subject));
             return null;
         }
         if (!"ACTIVE".equals(consumer.status())) {
             LOG.warn("Billing channel rejected [requestId={}, reason=CONSUMER_NOT_ACTIVE, consumerId={}]",
-                    requestId(request), consumer.id());
+                    forLog(requestId(request)), consumer.id());
             return null;
         }
         if (!consumer.hasJwtKey()) {
-            LOG.warn("Billing channel rejected [requestId={}, reason=NO_JWT_KEY, consumerId={}]", requestId(request),
-                    consumer.id());
+            LOG.warn("Billing channel rejected [requestId={}, reason=NO_JWT_KEY, consumerId={}]",
+                    forLog(requestId(request)), consumer.id());
             return null;
         }
         if (!jwtVerifier.verify(token, consumer.jwtPublicKeyPem(), subject)) {
             LOG.warn("Billing channel rejected [requestId={}, reason=JWT_SIGNATURE_INVALID, consumerId={}]",
-                    requestId(request), consumer.id());
+                    forLog(requestId(request)), consumer.id());
             return null;
         }
         return consumer;
     }
 
     /**
-     * The {@code sub} claim is client-supplied and still unverified at this point:
-     * line and control characters are flattened so a crafted claim cannot forge
-     * extra log lines, and the value is bounded so an oversized claim cannot turn
-     * every rejection into a log-amplification vector.
+     * Every client-supplied value that reaches a structured log line goes through
+     * this — the {@code sub} claim, which is still unverified at that point, and
+     * the {@code X-Request-Id} header, which is unverified by definition. Control
+     * characters are flattened so a crafted value cannot forge extra log lines; the
+     * delimiters of the surrounding {@code [key=value, …]} structure are
+     * neutralized so it cannot close that structure early and read as a second
+     * event; and the value is bounded so an oversized one cannot turn every
+     * rejection into a log-amplification vector. This applies to the log only — the
+     * envelope echoes the caller's token verbatim (contract §2), via
+     * {@link #requestId}.
      */
     private static String forLog(String value) {
-        String flat = value.replaceAll("[\\p{C}\\p{Zl}\\p{Zp}]", "?");
+        String flat = value.replaceAll("[\\p{C}\\p{Zl}\\p{Zp}]", "?").replaceAll("[\\[\\],=]", "?");
         return flat.length() <= LOG_VALUE_MAX ? flat : flat.substring(0, LOG_VALUE_MAX) + "…";
     }
 
@@ -199,10 +205,10 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     private static void forbidden(HttpServletRequest request, HttpServletResponse response, String reason,
             ApiConsumer consumer) throws IOException {
         if (consumer == null) {
-            LOG.warn("Billing channel forbidden [requestId={}, reason={}]", requestId(request), reason);
+            LOG.warn("Billing channel forbidden [requestId={}, reason={}]", forLog(requestId(request)), reason);
         } else {
             LOG.warn("Billing channel forbidden [requestId={}, reason={}, consumerId={}, tenantId={}]",
-                    requestId(request), reason, consumer.id(), consumer.tenantId());
+                    forLog(requestId(request)), reason, consumer.id(), consumer.tenantId());
         }
         writeProblem(request, response, HttpServletResponse.SC_FORBIDDEN, "Scope denied", "CONSUMER_SCOPE_DENIED",
                 "该消费者未被授予 billing:read 能力。");
