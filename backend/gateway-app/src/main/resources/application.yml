@@ -112,5 +112,5 @@ management:
 
 logging:
   level:
-    com.miqroera.miqrokey: INFO
+    com.miqroera.miqrokey: ${MIQROKEY_LOG_LEVEL:INFO}
     reactor.netty: WARN
