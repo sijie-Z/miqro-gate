@@ -62,10 +62,29 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
     }
 
+    /**
+     * Business-rule violations raised by the services. Unlike the auth/ownership
+     * handlers below, an {@code ApiException} can carry a server-side failure
+     * (502 upstream failure, 500 internal), so the trace has to survive in the
+     * log as well as in the response: the caller only sees the {@code requestId},
+     * which is worth nothing if no line ever recorded it.
+     *
+     * <p>
+     * The level follows the status class — 5xx is an incident and gets ERROR with
+     * the cause chain, 4xx is a rejected request and stays at DEBUG so that the
+     * warn/error stream keeps matching "something is wrong" (a per-request 4xx
+     * line here would drown the channel: quota and scope denials are routine).
+     * </p>
+     */
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<Map<String, Object>> handleApi(ApiException e, HttpServletRequest request) {
         String requestId = resolveRequestId(request);
         int status = e.getStatus().value();
+        if (e.getStatus().is5xxServerError()) {
+            LOG.error("API request failed [requestId={}, status={}, code={}]", requestId, status, e.getCode(), e);
+        } else {
+            LOG.debug("API request rejected [requestId={}, status={}, code={}]", requestId, status, e.getCode());
+        }
         Map<String, Object> body = problemDetail(status, e.getCode(), e.getCode().replace('_', ' ').toLowerCase(),
                 e.getMessage(), requestId);
         return ResponseEntity.status(e.getStatus()).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
