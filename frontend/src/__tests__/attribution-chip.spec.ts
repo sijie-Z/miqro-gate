@@ -17,10 +17,9 @@ describe('AttributionChip', () => {
     return mount(AttributionChip, { props });
   }
 
-  it('names each ruling in the product’s words', () => {
+  it('names the rulings it shows in the product’s words', () => {
     const labels: Record<string, string> = {
       RESOLVED_HEADER: '按请求头声明',
-      RESOLVED_SUFFIX: '按密钥后缀',
       POLICY_ROUTED: '未归属策略路由',
       UNATTRIBUTED: '未归属',
       AMBIGUOUS: '无从判定',
@@ -93,15 +92,26 @@ describe('AttributionChip', () => {
     expect(render({ resolutionStatus: 'RESOLVED_FUTURE' }).text()).toContain('RESOLVED_FUTURE');
   });
 
-  it('stays quiet on the default route: a single binding is not worth a chip on every row', () => {
-    const wrapper = render({ resolutionStatus: 'SOLE_BINDING' });
-
-    expect(wrapper.find('[data-testid="usage-attribution-chip"]').exists()).toBe(false);
-    expect(wrapper.text()).toBe('—');
+  it('stays quiet on the ordinary routes', () => {
+    // Both are ordinary: a key is minted with its project's tag as the suffix, so the
+    // suffix step matches first — a single-binding key's rows read RESOLVED_SUFFIX.
+    // Chipping those would print 「按密钥后缀」 down the whole table.
+    for (const status of ['RESOLVED_SUFFIX', 'SOLE_BINDING']) {
+      const wrapper = render({ resolutionStatus: status });
+      expect(wrapper.find('[data-testid="usage-attribution-chip"]').exists()).toBe(false);
+      expect(wrapper.text()).toBe('—');
+    }
   });
 
-  it('speaks up when a single-binding key arrived with a claim anyway', () => {
-    // The claim did not decide anything here — which is exactly what the bubble says.
+  it('speaks up for a routing that could not place the request', () => {
+    // The rows a troubleshooter is hunting: no claim, and the ladder fell through to a
+    // policy route or nothing at all.
+    expect(render({ resolutionStatus: 'POLICY_ROUTED' }).text()).toContain('未归属策略路由');
+    expect(render({ resolutionStatus: 'UNATTRIBUTED' }).text()).toContain('未归属');
+  });
+
+  it('speaks up whenever a claim was recorded, whatever ruled', () => {
+    // The claim is the signal: someone is using the context mechanism on this path.
     const wrapper = render({ resolutionStatus: 'SOLE_BINDING', claimSource: 'bash_cwd' });
 
     expect(wrapper.find('[data-testid="usage-attribution-chip"]').text()).toContain('唯一绑定');

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { UiTooltip } from '@/ui';
 import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextAdminUsageView from '@/views/next/NextAdminUsageView.vue';
@@ -455,6 +456,13 @@ describe('NextAdminUsageView', () => {
     const chips = wrapper.findAll('[data-testid="usage-attribution-chip"]');
     expect(chips).toHaveLength(1);
     expect(chips[0]!.text()).toContain('按请求头声明');
+    // Value-level too: claimSource and claimConfidence are both strings, so a swapped
+    // wiring type-checks and would ship silently. (The badge sits *inside* the tooltip's
+    // slot, so the note is read off the tooltip list, not by searching downwards.)
+    const notes = wrapper.findAllComponents(UiTooltip).map((t) => t.props('text'));
+    expect(notes.some((note) => note.includes('客户端声明来源：提示中的链接，置信度 HIGH'))).toBe(
+      true,
+    );
   });
 
   /** Column headers of a rendered UiTable, in column order. */

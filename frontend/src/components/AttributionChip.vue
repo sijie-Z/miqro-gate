@@ -8,12 +8,9 @@
  * `claimConfidence`). They stay apart in the bubble on purpose — the claim is
  * unverified input, the ruling is the verdict.
  *
- * The chip appears when the attribution was **decided** rather than defaulted. Every
- * authenticated request walks the ladder — a key with a single binding resolves as
- * `SOLE_BINDING` — so chipping every row would print 「唯一绑定」 down the whole table.
- * What a reader scans for is the rows something *else* decided (a header claim, a
- * suffix, a policy route) or where a claim was made at all. Everything else renders a
- * dash, which is also what pre-V54 rows get when the columns are null.
+ * See {@link informative} for when the chip speaks: the two ordinary routes are
+ * silent, a claim or a "we could not place this" ruling is not. Rows written before
+ * V54 (all three columns null) render a dash.
  */
 import { computed } from 'vue';
 import { UiStatusBadge, UiTooltip } from '@/ui';
@@ -65,11 +62,29 @@ const CLAIM_SOURCE_TEXT: Record<string, string> = {
   none: '无',
 };
 
-/** See the header comment: the default route is not worth a chip on every row. */
+/**
+ * The two routes that record no explicit intent, and the only ones the chip stays
+ * quiet on:
+ *
+ * - `SOLE_BINDING` — the key has one binding, so nothing had to be decided;
+ * - `RESOLVED_SUFFIX` — and this one is the *norm*, not the exception: a key is minted
+ *   with its project's tag as its suffix, so the suffix step matches before the
+ *   sole-binding fallback and an ordinary single-binding key's rows are recorded as
+ *   `RESOLVED_SUFFIX`. Chipping those would print 「按密钥后缀」 down the whole table,
+ *   and the console cannot tell "the suffix decided" from "there was only one binding"
+ *   — no binding count is exposed (#1139 tracks that discriminator).
+ *
+ * Everything else speaks: a recorded claim (someone is using the context mechanism), a
+ * header-resolved request (a client *asked* for a project), a policy route (the
+ * unattributed bucket), and any value nobody has words for yet — a new ruling
+ * reaching the console should be visible on day one, not silently dashed.
+ */
+const QUIET_RULINGS = new Set(['RESOLVED_SUFFIX', 'SOLE_BINDING']);
+
 const informative = computed(
   () =>
     Boolean(props.resolutionStatus) &&
-    (props.resolutionStatus !== 'SOLE_BINDING' || Boolean(props.claimSource)),
+    (Boolean(props.claimSource) || !QUIET_RULINGS.has(props.resolutionStatus ?? '')),
 );
 
 /** The bubble: the ruling, then what the client claimed — and which of the two is verified. */

@@ -268,9 +268,10 @@ class AdminUsageApiIntegrationTest {
         fx.insertPrices();
         Instant attributedAt = Instant.now().minusSeconds(120);
         Instant plainAt = Instant.now().minusSeconds(60);
-        // The gateway writes the ruling and the claim side by side; a single-binding
-        // key
-        // never enters the ladder, so its row carries neither.
+        // The gateway writes the ruling and the claim side by side. A row with neither
+        // is one written before V54 (or outside the proxy path) — every authenticated
+        // proxy request walks the ladder, so this fixture is that older shape, not a
+        // single-binding key.
         fx.insertAttributedUsage(ownKey, "chatcmpl-attr", 10L, 5L, attributedAt, "RESOLVED_HEADER", "prompt_url",
                 "HIGH");
         fx.insertUsage(ownKey, "chatcmpl-plain", 10L, 5L, MODEL, plainAt);
@@ -284,7 +285,9 @@ class AdminUsageApiIntegrationTest {
         Assertions.assertThat(attributed.path("resolutionStatus").asText()).isEqualTo("RESOLVED_HEADER");
         Assertions.assertThat(attributed.path("claimSource").asText()).isEqualTo("prompt_url");
         Assertions.assertThat(attributed.path("claimConfidence").asText()).isEqualTo("HIGH");
-        // Null, not "": a row the ladder never saw must not read as an empty verdict.
+        // Null, not "" — and present rather than omitted: a reader has to be able to
+        // tell
+        // "no attribution recorded" from "the field is not in this response".
         Assertions.assertThat(plain.path("resolutionStatus").isNull()).isTrue();
         Assertions.assertThat(plain.path("claimSource").isNull()).isTrue();
         Assertions.assertThat(plain.path("claimConfidence").isNull()).isTrue();
