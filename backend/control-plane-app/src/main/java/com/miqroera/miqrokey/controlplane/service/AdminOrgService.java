@@ -292,10 +292,17 @@ public class AdminOrgService {
                         "该项目路由标签已被 " + bound + " 条密钥绑定引用；历史绑定不随密钥轮换解除，" + "因此标签不可修改。如确需更换标签，请评估密钥迁移方案，或保留当前标签。");
             }
         }
+        // Carry `system` through from the row we just read (#1150). The 11-arg
+        // convenience constructor means "an ordinary project", so rebuilding with it
+        // turned a bucket project into system=false on the way out: the update
+        // response contradicted both the row and the list endpoint. The column
+        // itself is not writable through this path (ProjectRepositoryImpl.update
+        // never sets it), and it must not become writable here — this only stops the
+        // copy from losing it.
         Project updated = new Project(project.id(), project.tenantId(), project.code(),
                 name != null ? name : project.name(), project.description(), project.costCenter(),
                 status != null ? status : project.status(), projectTag != null ? projectTag : project.projectTag(),
-                project.version() + 1, project.createdAt(), Instant.now());
+                project.version() + 1, project.createdAt(), Instant.now(), project.system());
         projectRepository.update(updated);
         auditService.record(tenantId, adminId, "PROJECT_UPDATE", "PROJECT", projectId, "{}", null);
         return updated;
