@@ -262,6 +262,7 @@ interface FeedItem {
 
 const feed = ref<FeedItem[]>([]);
 const feedError = ref('');
+const feedLoading = ref(false);
 
 const APPROVAL_STATUS_LABELS: Record<string, string> = {
   PENDING: '待审批',
@@ -298,13 +299,14 @@ function relativeTime(iso?: string): string {
  * asks for exactly this degradation).
  *
  * #1160 加载次序不变量：加载中 → 失败 → 空 → 有数据。「还没有动态记录。」只有在
- * 这次读取**成功且确实为空**时才允许出现；失败时面板必须显示错误与重试
- * （`feedError`），而不是画空态或一声不响。
+ * 这次读取**成功且确实为空**时才允许出现；失败时面板显示错误与重试（`feedError`），
+ * 重试请求在途时显示加载中（`feedLoading`）——清掉错误不等于已经读到空数据。
  */
 async function loadFeed(
   keyList: VirtualKeyView[],
   approvalsPromise: Promise<ModelApprovalView[]> | null,
 ) {
+  feedLoading.value = true;
   feedError.value = '';
   try {
     if (isAdmin.value) {
@@ -341,6 +343,8 @@ async function loadFeed(
   } catch (error) {
     feed.value = [];
     feedError.value = error instanceof ApiError ? error.message : '加载最新动态失败，请稍后重试。';
+  } finally {
+    feedLoading.value = false;
   }
 }
 
@@ -578,6 +582,9 @@ onMounted(load);
                 >重试</UiButton
               >
             </div>
+            <p v-else-if="feedLoading" class="next-overview__empty" style="padding: 0 24px 16px">
+              加载中…
+            </p>
             <p v-else class="next-overview__empty" style="padding: 0 24px 16px">还没有动态记录。</p>
           </section>
 
