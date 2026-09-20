@@ -269,6 +269,70 @@ class AdminBudgetApiIntegrationTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.scopeJson").isNotEmpty());
     }
 
+    @Test
+    @DisplayName("deleting the month a BUDGET_THRESHOLD rule reads is refused; other months stay deletable (#1046)")
+    void deleteBlockedByBudgetThresholdRuleReference() throws Exception {
+        UUID projectId = seedProject("BUD", "Budget Project");
+        String pastMonth = YearMonth.now().minusMonths(1).toString();
+        for (String m : new String[]{month, pastMonth}) {
+            mockMvc.perform(put("/api/v1/admin/projects/" + projectId + "/budget").cookie(sessionCookie, csrfCookie)
+                    .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"month\":\"" + m + "\",\"amount\":100,\"alertThresholdPct\":80}"))
+                    .andExpect(status().isOk());
+        }
+        MvcResult rule = mockMvc
+                .perform(post("/api/v1/admin/alert-rules").cookie(sessionCookie, csrfCookie)
+                        .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"budget-80pct\",\"type\":\"BUDGET_THRESHOLD\",\"threshold\":80,"
+                                + "\"scopeJson\":\"{\\\"projectId\\\":\\\"" + projectId + "\\\"}\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String ruleId = objectMapper.readValue(rule.getResponse().getContentAsString(), Map.class).get("id").toString();
+
+        // The rule reads this month's budget (AlertEvaluator resolves YearMonth.now())
+        // and scope_json carries no FK — nothing else would stop the delete.
+        mockMvc.perform(delete("/api/v1/admin/projects/" + projectId + "/budget?month=" + month)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RESOURCE_IN_USE"))
+                .andExpect(jsonPath("$.dependencies", hasSize(1)))
+                .andExpect(jsonPath("$.dependencies[0].type").value("ALERT_RULE"))
+                .andExpect(jsonPath("$.dependencies[0].id").value(ruleId))
+                .andExpect(jsonPath("$.dependencies[0].name").value("budget-80pct"));
+
+        // A month no rule reads stays deletable: blocking it would make history
+        // unclearable while any rule exists.
+        mockMvc.perform(delete("/api/v1/admin/projects/" + projectId + "/budget?month=" + pastMonth)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isNoContent());
+
+        // Release the reference, then this month's budget goes too.
+        mockMvc.perform(delete("/api/v1/admin/alert-rules/" + ruleId).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+        mockMvc.perform(delete("/api/v1/admin/projects/" + projectId + "/budget?month=" + month)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("a scope stored with a non-canonical UUID spelling still blocks the delete (#1046)")
+    void deleteMatchesNonCanonicalScopeSpelling() throws Exception {
+        UUID projectId = seedProject("BUD", "Budget Project");
+        mockMvc.perform(put("/api/v1/admin/projects/" + projectId + "/budget").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"month\":\"" + month + "\",\"amount\":100,\"alertThresholdPct\":80}"))
+                .andExpect(status().isOk());
+        // requireProjectScope accepts the upper-case form through UUID.fromString and
+        // the write side stores scopeJson verbatim, so the row really does hold a
+        // spelling an equality match would miss.
+        mockMvc.perform(post("/api/v1/admin/alert-rules").cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"upper-case-scope\",\"type\":\"BUDGET_THRESHOLD\",\"threshold\":80,"
+                        + "\"scopeJson\":\"{\\\"projectId\\\":\\\"" + projectId.toString().toUpperCase() + "\\\"}\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(delete("/api/v1/admin/projects/" + projectId + "/budget?month=" + month)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RESOURCE_IN_USE"))
+                .andExpect(jsonPath("$.dependencies[0].name").value("upper-case-scope"));
+    }
+
     private long eventCount() {
         Long count = jdbc.queryForObject("SELECT COUNT(*) FROM alert_events", new MapSqlParameterSource(), Long.class);
         return count != null ? count : 0;
