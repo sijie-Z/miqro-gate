@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextOverviewView from '@/views/next/NextOverviewView.vue';
+import { ApiError } from '@/api/http';
 import { CHART_PALETTE } from '@/lib/chart-palette';
 import * as api from '@/api';
 import type { UsageCost, UsageSummary, VirtualKeyView } from '@/types/generated-api';
@@ -312,13 +313,34 @@ describe('NextOverviewView', () => {
     // panel. Awaiting it in the page's Promise.all instead — the first draft of this fix
     // — blanked the stat cards, the key grid and the cost donut along with it, which the
     // Playwright baseline caught.
-    mockApi.listMyModelApprovals.mockRejectedValue(new Error('approvals down'));
+    //
+    // #1153: the rejection has to be an ApiError, which is what the real client throws.
+    // The page only records loadError for one — `if (error instanceof ApiError)` in
+    // load()'s catch — so a plain Error made loadError unreachable and left the two
+    // assertions below with nothing to bite on.
+    mockApi.listMyModelApprovals.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '审批读取失败',
+        requestId: 'req-approvals',
+        title: 'Error',
+      }),
+    );
 
     const wrapper = mountView();
     await flushPromises();
 
-    // The page still rendered its own data…
-    expect(wrapper.find('[data-testid="overview-stats"]').text()).not.toContain('加载失败');
+    // The page still rendered its own data. The card hint is the `title` *attribute*
+    // (`:title="card.hint"` in the template), not text — an assertion on `.text()` here
+    // could never fail, which is how it read as coverage for as long as it existed.
+    const cardHints = wrapper
+      .findAll('[data-testid="overview-stats"] .next-overview__stat-chip-label')
+      .map((el) => el.attributes('title'));
+    expect(cardHints).not.toContain('加载失败');
+    // …no page-level banner appeared (the same fact, stated directly)…
+    expect(wrapper.find('[data-testid="overview-load-error"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="overview-keys"]').text()).toContain('claude-code-main');
     // …and only the activity panel went empty.
     expect(wrapper.find('[data-testid="overview-feed"]').text()).toContain('还没有动态记录');
