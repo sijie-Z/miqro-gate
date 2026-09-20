@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextOverviewView from '@/views/next/NextOverviewView.vue';
+import { CHART_PALETTE } from '@/lib/chart-palette';
 import * as api from '@/api';
 import type { UsageCost, UsageSummary, VirtualKeyView } from '@/types/generated-api';
 
@@ -161,8 +162,8 @@ describe('NextOverviewView', () => {
     expect(wrapper.find('[data-testid="overview-stats"]').text()).toContain('¥9.99');
   });
 
-  /** PH43: ten projects at ¥10 each, so the ring can only name five of them and the
-   *  drawn bars are a strict subset of the window. */
+  /** PH43: ten projects at ¥10 each, so the ring can only name as many as the palette
+   *  has slots and the drawn bars are a strict subset of the window. */
   function tenProjects() {
     return Array.from({ length: 10 }, (_, i) => ({
       groupKey: `p${i}`,
@@ -201,7 +202,10 @@ describe('NextOverviewView', () => {
     await flushPromises();
 
     const panel = wrapper.find('[data-testid="overview-cost"]').text();
-    expect(panel).toContain('¥50.00'); // 100 − 5 named × 10, not 6th..8th only (30)
+    // 100 − one ¥10 project per palette slot, not just the ranks past the first few:
+    // the number follows the palette (#1112) instead of a literal, so a slot added or
+    // removed cannot leave 其他 describing the wrong remainder.
+    expect(panel).toContain(`¥${(100 - CHART_PALETTE.length * 10).toFixed(2)}`);
     expect(panel).not.toContain('¥30.00');
   });
 

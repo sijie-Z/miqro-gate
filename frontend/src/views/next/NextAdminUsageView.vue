@@ -12,6 +12,7 @@
  * - 每小时 Token 表（#634）沿用。
  */
 import { computed, onMounted, ref } from 'vue';
+import { CHART_OTHER_COLOR, COST_SPLIT_COLORS } from '@/lib/chart-palette';
 import * as api from '@/api';
 import { ChartBarIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
@@ -110,16 +111,18 @@ function tokenTotal(g: UsageGroup | undefined): number {
 }
 
 /**
- * Trend palette (frontend-design §4: blue / cyan / orange / gray only).
- * Cache series ride the grays — they are the secondary reading; IO keeps the
- * brand blues and cost keeps the established orange.
+ * Trend colours, taken from the shared palette (#1112) rather than re-spelled here:
+ * the four token dimensions keep the colours they have in the cost split and the
+ * composition rings, so 「缓存写」 is the same colour in every chart instead of grey
+ * here and green there. The cost line is not a token dimension — it is derived money
+ * — so it rides the neutral, which is what the neutral is for.
  */
 const TREND_COLORS = {
-  input: '#0960bd',
-  output: '#13c2c2',
-  cacheRead: '#8c8c8c',
-  cacheCreation: '#bfbfbf',
-  cost: '#fa8c16',
+  input: COST_SPLIT_COLORS.input,
+  output: COST_SPLIT_COLORS.output,
+  cacheRead: COST_SPLIT_COLORS.cacheRead,
+  cacheCreation: COST_SPLIT_COLORS.cacheCreation,
+  cost: CHART_OTHER_COLOR,
 };
 
 // #758: the token series splits into the four billed dimensions (input /

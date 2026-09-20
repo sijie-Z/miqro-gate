@@ -1031,7 +1031,7 @@ function formatTime(iso?: string): string {
         <div class="ui-panel-head">
           <div>
             <h2 class="ui-panel-title">用量分布</h2>
-            <span class="ui-panel-sub">Tokens 输入 + 输出 · Top 8</span>
+            <span class="ui-panel-sub">Tokens 输入 + 输出 · Top 4 + 其他</span>
           </div>
         </div>
         <div class="ui-panel-body next-usage__composition">

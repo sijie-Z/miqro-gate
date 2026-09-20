@@ -125,7 +125,7 @@ GitHub Primer 强调让页面干净、平静、减少注意力摩擦，并使用
 }
 ```
 
-状态不能只靠颜色；同时使用文字和图标。图表序列避免彩虹色，优先蓝、青、橙、灰，不使用紫色作为品牌主色。
+状态不能只靠颜色；同时使用文字和图标。图表序列避免彩虹色，取色一律来自 `frontend/src/lib/chart-palette.ts`（**唯一事实源**：四槽 `#0960bd / #fa8c16 / #13c2c2 / #2f9e44`，按顺序使用、不循环；超出槽数的类别并入 `CHART_OTHER_COLOR` 中性灰，而不是回头复用第一槽）。槽序经调色板校验器实测（最差相邻 ΔE 17.2 正常视觉 / 16.6 deutan；环图另测首尾相邻 ΔE 29.2）；青与橙对白底对比度低于 3:1，故用它们的图元必须同时把数值写成文字。不使用紫色作为品牌主色——紫色仅限供应商 chip（§4.1）。
 
 ### 字体
 
@@ -229,7 +229,7 @@ Key、request ID、token 数字和代码使用系统等宽字体栈。正文 14p
 
 - 在 1440×900、1280×800、768×1024、390×844 四个 viewport 生成 Playwright screenshot。
 - 为登录、普通用户 Key 列表/创建成功、管理员 Provider、团队 Plan、Usage 对账、空/错误/加载态建立 visual baseline。
-- 自动检查页面 CSS 不出现 `linear-gradient`、`radial-gradient`、大于 8px 的常规容器 radius，以及未批准的紫色 tokens。
+- 自动检查不出现 `linear-gradient`、`radial-gradient`、大于 8px 的常规容器 radius，以及未批准的紫色。紫色检查（`frontend/src/__tests__/aesthetic.spec.ts`）**按色相判断**并覆盖 `src/**/*.{css,vue,ts}` 的普通写法（hex 3/4/6/8 位、`rgb()`/`hsl()`/`oklch()`、紫色系颜色名）——它曾只扫 CSS 且只比对固定色值黑名单，让一个 `.ts` 里的紫色色板溜过（2026-09-20，见 `chart-palette.ts` 注释）；供应商 chip 与注释里提到的色值不触发。
 - 页面在 100% 和 125% Windows 缩放下无关键内容截断。
 - 表格使用 50、500、5000 条 Mock 数据验证密度、分页和固定列。
 - 最终视觉 review 单独进行，不能只凭 E2E 功能通过视为设计完成。
