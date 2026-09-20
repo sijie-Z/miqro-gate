@@ -639,6 +639,13 @@ class AdminOrgApiIntegrationTest {
                 new MapSqlParameterSource("id", UUID.fromString(keyId)), String.class);
         assertThat(bindingStatus).isEqualTo("DISABLED");
 
+        // …and the parked key itself must survive as DISABLED (still restorable by
+        // its owner), not be swept into the REVOKED fallback, which stays reserved
+        // for ACTIVE/ROTATING keys (ADR-0018 D7, amended by #1117).
+        String keyStatusAfterRemoval = jdbc.queryForObject("SELECT status FROM virtual_keys WHERE id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(keyId)), String.class);
+        assertThat(keyStatusAfterRemoval).isEqualTo("DISABLED");
+
         // …and flipping the key back on must not resurrect the route either.
         mockMvc.perform(post("/api/v1/me/virtual-keys/" + keyId + "/enable").cookie(bobSession, bobCsrf)
                 .header("X-CSRF-Token", bobCsrf.getValue())).andExpect(status().isOk());
