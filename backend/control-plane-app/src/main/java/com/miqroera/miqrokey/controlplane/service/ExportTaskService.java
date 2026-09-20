@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.controlplane.dto.ExportTaskView;
 import com.miqroera.miqrokey.domain.usage.ExportFormat;
 import com.miqroera.miqrokey.domain.usage.ExportStatus;
 import com.miqroera.miqrokey.domain.usage.ExportTask;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import com.miqroera.miqrokey.persistence.repository.UsageAdjustmentSql;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,6 +14,9 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -46,19 +50,40 @@ public class ExportTaskService {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
+    private final AuditService auditService;
     private final ExecutorService executor = Executors.newFixedThreadPool(2, r -> {
         Thread t = new Thread(r, "usage-export");
         t.setDaemon(true);
         return t;
     });
 
-    public ExportTaskService(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
+    public ExportTaskService(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper, AuditService auditService) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
+        this.auditService = auditService;
     }
 
-    /** Creates an export task and schedules its execution. */
-    public ExportTask create(UUID tenantId, UUID adminId, ExportFormat format, Instant from, Instant to) {
+    /**
+     * Creates an export task and schedules its execution.
+     *
+     * <p>
+     * The task extracts the tenant's raw usage rows into a downloadable artifact,
+     * so creating one is audited ({@code EXPORT_CREATE}) against the requesting
+     * admin — on the machine surface the {@link AuditContext#machine} marker also
+     * names the key that asked for it.
+     * </p>
+     *
+     * <p>
+     * The row insert and its audit event share one transaction: a failed audit
+     * write must not leave a committed {@code PENDING} task behind that no one ever
+     * renders (expired-row GC only reclaims {@code SUCCEEDED} rows, so such a task
+     * would linger forever). The renderer is scheduled only once that transaction
+     * commits, so the worker cannot read a row that is not visible yet.
+     * </p>
+     */
+    @Transactional
+    public ExportTask create(UUID tenantId, UUID adminId, ExportFormat format, Instant from, Instant to,
+            AuditContext context) {
         validateWindow(from, to);
         ExportTask task = new ExportTask(UUID.randomUUID(), tenantId, adminId, format, from, to, ExportStatus.PENDING,
                 null, null, null, null, null, Instant.now(), null, null);
@@ -71,8 +96,29 @@ public class ExportTaskService {
                         .addValue("format", format.name()).addValue("periodFrom", java.sql.Timestamp.from(from))
                         .addValue("periodTo", java.sql.Timestamp.from(to))
                         .addValue("createdAt", java.sql.Timestamp.from(task.createdAt())));
-        executor.execute(() -> run(task));
+        auditService.record(tenantId, context.actorId(), "EXPORT_CREATE", "EXPORT_TASK", task.id(),
+                AuditSummaries.summary(context, "format", format.name(), "from", from.toString(), "to", to.toString()),
+                context.requestId());
+        scheduleAfterCommit(task);
         return task;
+    }
+
+    /**
+     * Queues the renderer for the moment the enclosing transaction commits (same
+     * idiom as {@code RouteRefreshPublisherAfterCommit}). Outside a transaction
+     * there is nothing to wait for, so the task starts right away.
+     */
+    private void scheduleAfterCommit(ExportTask task) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            executor.execute(() -> run(task));
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                executor.execute(() -> run(task));
+            }
+        });
     }
 
     /** Task metadata (never the artifact bytes). */
@@ -82,14 +128,27 @@ public class ExportTaskService {
 
     /**
      * The finished artifact for download; EXPIRED or unfinished tasks are rejected.
+     *
+     * <p>
+     * This is the only call through which the artifact bytes leave the control
+     * plane, so a served download is audited ({@code EXPORT_DOWNLOAD}) against the
+     * admin that fetched it — domain-model §7 lists the ExportJob's download among
+     * the permanently recorded actions.
+     * </p>
      */
-    public ExportTask download(UUID tenantId, UUID taskId) {
+    public ExportTask download(UUID tenantId, UUID taskId, AuditContext context) {
         ExportTask task = find(tenantId, taskId);
         if (task.status() != ExportStatus.SUCCEEDED || task.expiresAt() == null
                 || task.expiresAt().isBefore(Instant.now())) {
             throw new ApiException(HttpStatus.GONE, "EXPORT_EXPIRED",
                     "The export is not available for download (unfinished or expired)");
         }
+        // After the expiry check: a rejected download never touched the bytes, so
+        // it leaves no event (and the audit action means "artifact was served").
+        auditService.record(tenantId, context.actorId(), "EXPORT_DOWNLOAD", "EXPORT_TASK", task.id(),
+                AuditSummaries.summary(context, "format", task.format().name(), "rows", task.rowCount(), "bytes",
+                        task.byteCount(), "sha256", task.sha256()),
+                context.requestId());
         return task;
     }
 
