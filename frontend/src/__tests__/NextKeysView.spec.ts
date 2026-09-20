@@ -562,6 +562,101 @@ describe('NextKeysView', () => {
     expect(payload.projectIds).toEqual(['p1']);
   });
 
+  it('#1157: explicitly checking a non-bindable project still submits it', async () => {
+    // The deliberate half of the design: the list stays complete, and a user who
+    // insists gets the server's actionable refusal rather than a silent no-op. Pin
+    // it, so a later "let's just filter the list" edit has to argue with a test.
+    mockApi.myGrants.mockResolvedValue(grantsWithForeignProduct);
+    mockApi.createVirtualKey.mockResolvedValue(created);
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="create-name"]').setValue('insist');
+
+    const pick = async (label: string) => {
+      const option = wrapper.findAll('.stub-option').find((el) => el.text().includes(label));
+      await option!.trigger('click');
+      await flushPromises();
+    };
+    await pick('Claude API');
+    await wrapper.find('[data-testid="create-extra-project-p3"]').setValue(true);
+    await flushPromises();
+
+    await wrapper.find('[data-testid="create-submit"]').trigger('click');
+    await flushPromises();
+
+    const sent = mockApi.createVirtualKey.mock.calls[0]![0] as { projectIds?: string[] };
+    expect(sent.projectIds).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  it('#1157: promoting a checked extra to primary does not submit it twice', async () => {
+    mockApi.myGrants.mockResolvedValue(grantsWithForeignProduct);
+    mockApi.createVirtualKey.mockResolvedValue(created);
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="create-name"]').setValue('promote');
+
+    const pick = async (label: string) => {
+      const option = wrapper.findAll('.stub-option').find((el) => el.text().includes(label));
+      await option!.trigger('click');
+      await flushPromises();
+    };
+    await pick('Claude API');
+    await wrapper.find('[data-testid="create-extra-project-p3"]').setValue(true);
+    await flushPromises();
+    await pick('Other Vendor'); // p3 becomes the primary
+    await pick('OpenAI API'); // …and its own grant
+
+    await wrapper.find('[data-testid="create-submit"]').trigger('click');
+    await flushPromises();
+
+    const sent = mockApi.createVirtualKey.mock.calls[0]![0] as { projectIds?: string[] };
+    expect(sent.projectIds).toEqual(['p3']);
+  });
+
+  it('#1157: a second form session starts from the default again', async () => {
+    mockApi.myGrants.mockResolvedValue(grantsAcrossProducts);
+    mockApi.createVirtualKey.mockResolvedValue(created);
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="create-name"]').setValue('first');
+
+    const pick = async (label: string) => {
+      const option = wrapper.findAll('.stub-option').find((el) => el.text().includes(label));
+      await option!.trigger('click');
+      await flushPromises();
+    };
+    await pick('Claude API');
+    await wrapper.find('[data-testid="create-extra-project-p2"]').setValue(false);
+    await flushPromises();
+    await wrapper.find('[data-testid="create-submit"]').trigger('click');
+    await flushPromises();
+    expect(
+      (mockApi.createVirtualKey.mock.calls[0]![0] as { projectIds?: string[] }).projectIds,
+    ).toEqual(['p1', 'p3']);
+
+    // Reopen: the uncheck belonged to the previous session, not to the form.
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="create-name"]').setValue('second');
+    await pick('Claude API');
+    await wrapper.find('[data-testid="create-submit"]').trigger('click');
+    await flushPromises();
+
+    const second = mockApi.createVirtualKey.mock.calls[1]![0] as { projectIds?: string[] };
+    expect(second.projectIds).toEqual(['p1', 'p2', 'p3']);
+  });
+
   it('#646: switching the primary keeps the previous project as an extra (no silent drop)', async () => {
     mockApi.myGrants.mockResolvedValue(grants);
     mockApi.createVirtualKey.mockResolvedValue(created);

@@ -263,7 +263,11 @@ const createExtraProjectIds = computed<string[]>(() => {
       selection.delete(id);
     }
   }
-  return [...selection];
+  // The primary is never an extra. Checking a project and *then* promoting it to
+  // primary is reachable, and the override would otherwise add it back — the id
+  // would reach the server twice (harmless there, deduped by a LinkedHashSet, but
+  // not what this form means).
+  return [...selection].filter((id) => id !== createProjectId.value);
 });
 
 /** Turn the checkbox group's new value into whatever it deviates from the default by. */
