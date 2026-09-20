@@ -36,6 +36,18 @@ public class WebhookEndpointService {
 
     private static final String HMAC_ALGORITHM = "HmacSHA256";
 
+    // Column/shape bounds, enforced here rather than only on the console DTOs
+    // (#1021):
+    // every write path goes through this service, and the second one — the
+    // machine-key
+    // surface (/api/v1/admin-api/**) — has no DTO constraints of its own. Before
+    // this,
+    // a null secret reached secret.getBytes(...) and left as a 500 INTERNAL_ERROR.
+    private static final int NAME_MAX = 200;
+    private static final int URL_MAX = 500;
+    private static final int TIMEOUT_MIN_MS = 1000;
+    private static final int TIMEOUT_MAX_MS = 600000;
+
     private final NamedParameterJdbcTemplate jdbc;
     private final KeyEncryptionProvider keyEncryptionProvider;
     private final UpstreamTargetValidator targetValidator;
@@ -52,7 +64,11 @@ public class WebhookEndpointService {
 
     public WebhookEndpointView create(UUID tenantId, String name, String url, String secret, int timeoutMs,
             AuditContext context) {
+        validateName(name);
         validateUrl(url);
+        validateUrlLength(url);
+        validateSecret(secret);
+        validateTimeout(timeoutMs);
         UUID id = UUID.randomUUID();
         // AAD binds the ciphertext to (tenant, endpoint) — the same ids used
         // for decryption at delivery time.
@@ -97,6 +113,12 @@ public class WebhookEndpointService {
     @Transactional
     public WebhookEndpoint update(UUID tenantId, UUID endpointId, String name, Boolean enabled, Integer timeoutMs,
             AuditContext context) {
+        if (name != null) {
+            validateName(name);
+        }
+        if (timeoutMs != null) {
+            validateTimeout(timeoutMs);
+        }
         WebhookEndpoint existing = get(tenantId, endpointId);
         // #475: compare-and-set on the version read above — two concurrent PATCHes
         // used to both commit, the later one re-writing a stale snapshot over the
@@ -308,4 +330,28 @@ public class WebhookEndpointService {
             (UUID) rs.getObject("endpoint_id"), rs.getInt("attempt"), rs.getObject("http_status", Integer.class),
             rs.getTimestamp("next_retry_at") != null ? rs.getTimestamp("next_retry_at").toInstant() : null,
             rs.getString("error_message"), rs.getTimestamp("created_at").toInstant());
+
+    private static void validateName(String name) {
+        if (name == null || name.isBlank() || name.length() > NAME_MAX) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "WEBHOOK_NAME_INVALID", "name 不能为空白，且长度不超过 200 个字符。");
+        }
+    }
+
+    private static void validateUrlLength(String url) {
+        if (url != null && url.length() > URL_MAX) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "WEBHOOK_URL_REJECTED", "url 长度不超过 500 个字符。");
+        }
+    }
+
+    private static void validateSecret(String secret) {
+        if (secret == null || secret.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "WEBHOOK_SECRET_INVALID", "secret 不能为空。");
+        }
+    }
+
+    private static void validateTimeout(int timeoutMs) {
+        if (timeoutMs < TIMEOUT_MIN_MS || timeoutMs > TIMEOUT_MAX_MS) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "WEBHOOK_TIMEOUT_INVALID", "timeoutMs 必须在 1000..600000 之间。");
+        }
+    }
 }
