@@ -346,12 +346,17 @@ public class AdminOrgService {
         // (other bound projects keep working). A key left without any ACTIVE
         // binding is revoked — the documented "member removed -> the project's
         // keys stop working" contract, now actually implemented.
+        //
+        // The key's own status must NOT narrow this: a DISABLED key is only
+        // parked (#582), and re-enabling it is self-service, so skipping it here
+        // would leave its binding ACTIVE and let the removed member restore the
+        // project route with one POST /me/virtual-keys/{id}/enable.
         List<UUID> affectedKeyIds = jdbc.queryForList("""
                 SELECT DISTINCT b.virtual_key_id
                 FROM key_project_binding b
                 JOIN virtual_keys vk ON vk.id = b.virtual_key_id AND vk.tenant_id = b.tenant_id
                 WHERE b.tenant_id = :tenantId AND b.project_id = :projectId AND vk.user_id = :userId
-                  AND b.status = 'ACTIVE' AND vk.status IN ('ACTIVE', 'ROTATING')
+                  AND b.status = 'ACTIVE'
                 """, new MapSqlParameterSource("tenantId", tenantId).addValue("projectId", projectId).addValue("userId",
                 userId), UUID.class);
         int disabled = 0;
