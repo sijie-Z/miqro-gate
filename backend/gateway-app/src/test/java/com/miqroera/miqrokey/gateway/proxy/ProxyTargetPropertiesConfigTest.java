@@ -23,9 +23,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code application.yml} 里有一个键。
  *
  * <p>
- * 一个绑定了前缀、却既没有 yml 键、也没有任何读取点的记录分量，是「幽灵配置项」：
- * 运维按文档设了环境变量以为生效了，实际连绑定都到不了（relaxed 绑定要求环境变量名
- * 展开后正好等于「前缀 + 分量」）。
+ * 一个绑定了前缀、却既没有 yml 键、也没有任何读取点的记录分量，是「幽灵配置项」： 运维按文档设了环境变量以为生效了，实际连绑定都到不了（relaxed
+ * 绑定要求环境变量名 展开后正好等于「前缀 + 分量」）。
  * </p>
  */
 class ProxyTargetPropertiesConfigTest {
@@ -40,25 +39,22 @@ class ProxyTargetPropertiesConfigTest {
                 missing.add(key);
             }
         }
-        assertThat(missing)
-                .as("ProxyTargetProperties 声明了、但 application.yml 的 miqrokey.gateway.upstream 下没有对应键的配置项")
+        assertThat(missing).as("ProxyTargetProperties 声明了、但 application.yml 的 miqrokey.gateway.upstream 下没有对应键的配置项")
                 .isEmpty();
     }
 
     /** {@code miqrokey.gateway.upstream} 下 {@code application.yml} 实际声明的键。 */
     private static Set<String> declaredUpstreamKeys() throws Exception {
         MutablePropertySources sources = new MutablePropertySources();
-        for (PropertySource<?> source : new YamlPropertySourceLoader()
-                .load("application", new ClassPathResource("application.yml"))) {
+        for (PropertySource<?> source : new YamlPropertySourceLoader().load("application",
+                new ClassPathResource("application.yml"))) {
             sources.addLast(source);
         }
         Binder binder = new Binder(ConfigurationPropertySources.from(sources),
                 new PropertySourcesPlaceholdersResolver(sources));
         Map<String, Object> declared = binder
-                .bind("miqrokey.gateway.upstream", Bindable.mapOf(String.class, Object.class))
-                .orElse(Map.of());
-        return declared.keySet().stream()
-                .map(key -> key.contains(".") ? key.substring(0, key.indexOf('.')) : key)
+                .bind("miqrokey.gateway.upstream", Bindable.mapOf(String.class, Object.class)).orElse(Map.of());
+        return declared.keySet().stream().map(key -> key.contains(".") ? key.substring(0, key.indexOf('.')) : key)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 

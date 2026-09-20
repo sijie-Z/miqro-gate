@@ -18,8 +18,8 @@ import java.util.List;
  * </p>
  */
 @ConfigurationProperties(prefix = "miqrokey.gateway.upstream")
-public record ProxyTargetProperties(Duration connectTimeout, Duration firstByteTimeout,
-        Duration streamIdleTimeout, Duration responseTimeout, DataSize maxProxyBuffer, List<String> allowedCidrs) {
+public record ProxyTargetProperties(Duration connectTimeout, Duration firstByteTimeout, Duration streamIdleTimeout,
+        Duration responseTimeout, DataSize maxProxyBuffer, List<String> allowedCidrs) {
 
     public ProxyTargetProperties {
         connectTimeout = connectTimeout == null ? Duration.ofSeconds(10) : connectTimeout;
