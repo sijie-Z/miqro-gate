@@ -458,7 +458,15 @@ public final class UsageStatsAggregator {
      * Prices one usage row with the same math as the aggregates:
      * {@code tokens × unitPrice / 1e6} per token type, summed. {@code priced} is
      * false when a dimension the row actually used has no price — the caller shows
-     * 未定价 rather than a misleading 0 (#758).
+     * 未定价 rather than passing the sum off as a total (#758).
+     *
+     * <p>
+     * {@code cost} is the sum of the dimensions that <em>could</em> be priced, so an
+     * incomplete row still carries the known part of its amount and agrees with the
+     * group sum that contains it; it is a lower bound, not a total. Returning zero
+     * for such a row made the detail endpoint report 0 for usage the report valued
+     * at 0.002 (#710).
+     * </p>
      *
      * <p>
      * The prices come from the row's own {@link RowPriceBasis}, never from a table
@@ -476,14 +484,16 @@ public final class UsageStatsAggregator {
                 && (out == 0 || basis.unitPrice(PriceTokenType.OUTPUT) != null)
                 && (read == 0 || basis.unitPrice(PriceTokenType.CACHE_READ) != null)
                 && (creation == 0 || basis.unitPrice(PriceTokenType.CACHE_CREATION) != null);
-        if (!priced) {
-            return new PricedCost(BigDecimal.ZERO, false);
-        }
+        // The priced dimensions are summed even when the row is incomplete: that sum is
+        // the known part of the amount (docs/usage-accounting.md §6.1, PARTIAL), and it
+        // is what the group sums book for this same row through
+        // GroupAccumulator.addUsage. Returning zero here instead made a row's detail cost
+        // disagree with the report that contains it.
         BigDecimal cost = pricedOrZero(basis, PriceTokenType.INPUT, in)
                 .add(pricedOrZero(basis, PriceTokenType.OUTPUT, out))
                 .add(pricedOrZero(basis, PriceTokenType.CACHE_READ, read))
                 .add(pricedOrZero(basis, PriceTokenType.CACHE_CREATION, creation));
-        return new PricedCost(cost, true);
+        return new PricedCost(cost, priced);
     }
 
     private static BigDecimal pricedOrZero(RowPriceBasis basis, PriceTokenType type, long tokens) {

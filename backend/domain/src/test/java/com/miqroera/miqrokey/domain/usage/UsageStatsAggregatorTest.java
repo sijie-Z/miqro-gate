@@ -116,13 +116,42 @@ class UsageStatsAggregatorTest {
         }
 
         @Test
-        @DisplayName("reports unpriced when a non-zero input/output type has no snapshot")
+        @DisplayName("reports the priced part and flags unpriced when a non-zero input/output type has no snapshot")
         void unpricedWhenAnyTypeMissing() {
             RowPriceBasis basis = new RowPriceBasis(new BigDecimal("1.00"), null, null, null);
             UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(basis, 1_000L, 500L, null, null);
 
+            // Flagged, because 500 output tokens really could not be priced — but the
+            // amount that IS known (1000 input at 1.00/M) is reported, not discarded:
+            // the report books the same 0.001 for this row (docs/usage-accounting.md §6.1).
             assertThat(priced.priced()).isFalse();
-            assertThat(priced.cost()).isEqualByComparingTo("0");
+            assertThat(priced.cost()).isEqualByComparingTo("0.001");
+        }
+
+        @Test
+        @DisplayName("a partially priced row reports the same cost as the aggregate that summed it (#710)")
+        void partiallyPricedRowAgreesWithTheAggregate() {
+            // One row, one price basis: input priced at 2.00/M (1000 tokens → 2000
+            // undivided), output unpriced (500 tokens). The SQL layer prices each SUM
+            // through COALESCE(price, 0), so this row reaches GroupAccumulator.addUsage
+            // as inputCost=2000, outputCost=0 and the group books 2000/1e6 = 0.002 —
+            // the priced part, as docs/usage-accounting.md §6.1 requires.
+            BigDecimal inputCost = new BigDecimal("2000");
+            UsageStatsAggregator.UsageAggRow aggRow = new UsageStatsAggregator.UsageAggRow("g", "G", PRODUCT, MODEL,
+                    CacheLevel.UPSTREAM, 1,
+                    new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null), inputCost, BigDecimal.ZERO,
+                    BigDecimal.ZERO, BigDecimal.ZERO, new UsageStatsAggregator.PricingGap(0, 500, 0, 0, 1, 0, 0),
+                    UsageStatsAggregator.UsageAggRow.Outcome.NONE);
+            BigDecimal grouped = UsageStatsAggregator.aggregate("model", List.of(aggRow), List.of()).totals().cost()
+                    .upstreamPaid();
+
+            // The very same row as the detail endpoint prices it, from the same basis.
+            UsageStatsAggregator.PricedCost detail = UsageStatsAggregator
+                    .pricedCost(new RowPriceBasis(new BigDecimal("2.00"), null, null, null), 1_000L, 500L, 0L, 0L);
+
+            assertThat(detail.priced()).isFalse();
+            assertThat(grouped).isEqualByComparingTo("0.002");
+            assertThat(detail.cost()).isEqualByComparingTo(grouped);
         }
 
         @Test
