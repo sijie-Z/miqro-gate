@@ -1184,7 +1184,10 @@ detail_currency, detail_occurred_at, detail_status, detail_bucket_key, detail_pr
 
 - **幂等**：同 (providerCode, window, currency, uploadSha256) 重复导入返回既有报告（不重复执行）；`FAILED` 除外（可重试）。
 - 上传上限：16MB（解压 64MB / 100,000 行）；超限或 gzip 损坏 `400 RECONCILIATION_UPLOAD_INVALID`。
-- 校验：窗口 ≤31 天且 from<to（`RECONCILIATION_WINDOW_INVALID`）；**`providerCode` 取的是
+- 校验：窗口 ≤31 天且 from<to（`RECONCILIATION_WINDOW_INVALID`）；**窗口是半开区间 `[windowFrom, windowTo)`
+  ——`windowFrom` 含、`windowTo` 不含**（#1045 的实现口径，本行补记）：对账与用量统计/导出共享同一条全局窗口约定，
+  边界行因此只归一份报告；按闭区间切分账单文件的调用方会让边界行从 MATCHED 翻成 UNMATCHED，而报告不会解释原因。
+  **`providerCode` 取的是
   `provider_products.product_code`（供应商*产品*码，如 `tencent-coding-plan`），不是 `providers.slug`**
   ——传成 slug 会得到 `RECONCILIATION_PROVIDER_UNKNOWN`，而报错正文说的是 `product_code`；
   currency ISO-4217（`RECONCILIATION_PARAM_INVALID`）；报告不存在 `RECONCILIATION_NOT_FOUND`（404）。
