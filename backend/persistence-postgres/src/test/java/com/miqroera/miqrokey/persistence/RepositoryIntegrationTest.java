@@ -5,8 +5,12 @@ import com.miqroera.miqrokey.domain.repository.*;
 import org.junit.jupiter.api.*;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,6 +45,8 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
     private VirtualKeyRepository vkRepo;
     @Autowired
     private AdminAuditEventRepository auditRepo;
+    @Autowired
+    private NamedParameterJdbcTemplate jdbc;
 
     // Use seed tenant from V1 migration
     private static final UUID TENANT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
@@ -313,6 +319,106 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
             var results = auditRepo.findByTargetTypeAndTargetId("User", user.id());
             assertThat(results).isNotEmpty();
             assertThat(results.get(0).action()).isEqualTo("user.create");
+        }
+    }
+
+    @Nested
+    @DisplayName("Provider product full-replace update")
+    class ProviderProductUpdate {
+
+        /**
+         * #1151: update() replaces the whole entity, so every mutable column has to be
+         * written. The assertion reads the columns back through raw SQL on purpose —
+         * update() returns the very entity it was handed, so asserting on that return
+         * value would pass even for a column the SQL never wrote.
+         */
+        @Test
+        @DisplayName("should persist every mutable column")
+        void shouldPersistEveryMutableColumn() {
+            var current = productRepo.findById(product.id()).orElseThrow();
+            var updated = new ProviderProduct(current.id(), current.providerId(), current.productCode(),
+                    "Renamed Product", BillingMode.FIXED_SUBSCRIPTION, PlanScope.TEAM, CredentialTopology.PER_SEAT_KEY,
+                    QuotaTopology.KEY_CAPPED, "[\"anthropic\"]", "[\"https://api.example.com\"]",
+                    "{\"kind\":\"bearer\"}", "STATIC", "FROM_PLAN", BalanceAuthority.LOCAL_ESTIMATE,
+                    ImplementationStatus.IMPLEMENTED, "2026-09-20", current.version() + 1, current.createdAt(), NOW);
+            productRepo.update(updated);
+
+            var row = jdbc.queryForMap("""
+                    SELECT product_code, display_name, billing_mode, plan_scope, credential_topology, quota_topology,
+                           supported_wire_protocols, base_url_templates, auth_scheme, model_catalog_strategy,
+                           plan_status_strategy, balance_authority, implementation_status, catalog_version, version
+                    FROM provider_products WHERE id = :id
+                    """, new MapSqlParameterSource("id", product.id()));
+
+            assertThat(String.valueOf(row.get("display_name"))).isEqualTo("Renamed Product");
+            assertThat(String.valueOf(row.get("billing_mode"))).isEqualTo("FIXED_SUBSCRIPTION");
+            assertThat(String.valueOf(row.get("plan_scope"))).isEqualTo("TEAM");
+            assertThat(String.valueOf(row.get("credential_topology"))).isEqualTo("PER_SEAT_KEY");
+            assertThat(String.valueOf(row.get("quota_topology"))).isEqualTo("KEY_CAPPED");
+            assertThat(String.valueOf(row.get("supported_wire_protocols"))).isEqualTo("[\"anthropic\"]");
+            assertThat(String.valueOf(row.get("base_url_templates"))).isEqualTo("[\"https://api.example.com\"]");
+            // jsonb, not text: PostgreSQL normalises the stored form, so the read-back has
+            // a
+            // space after the colon. That space is itself part of the evidence — a text
+            // column would have handed the literal back unchanged (#1151).
+            assertThat(String.valueOf(row.get("auth_scheme"))).isEqualTo("{\"kind\": \"bearer\"}");
+            assertThat(String.valueOf(row.get("model_catalog_strategy"))).isEqualTo("STATIC");
+            assertThat(String.valueOf(row.get("plan_status_strategy"))).isEqualTo("FROM_PLAN");
+            assertThat(String.valueOf(row.get("balance_authority"))).isEqualTo("LOCAL_ESTIMATE");
+            assertThat(String.valueOf(row.get("implementation_status"))).isEqualTo("IMPLEMENTED");
+            assertThat(String.valueOf(row.get("catalog_version"))).isEqualTo("2026-09-20");
+            assertThat(((Number) row.get("version")).longValue()).isEqualTo(current.version() + 1);
+        }
+
+        /**
+         * #1151, the other direction: the schema has four probe columns that the entity
+         * does NOT carry, written by {@code ModelCatalogProbeService.recordProbe}.
+         * Widening the SET is exactly the edit this PR makes, so a future widening that
+         * reaches for these would wipe a probe result on every unrelated save —
+         * silently, since the probe columns are not part of any entity round-trip.
+         */
+        @Test
+        @DisplayName("should leave the probe columns to their own writer")
+        void shouldLeaveProbeColumnsAlone() {
+            // All four probe columns, with distinctive values. They are compared against
+            // what
+            // the database stored a moment earlier rather than against "not null": an
+            // equality check also catches a non-null clobber, which isNotNull() would wave
+            // through.
+            jdbc.update("""
+                    UPDATE provider_products
+                    SET model_catalog_probe_status = 'SUCCEEDED', model_catalog_probe_error = 'upstream timeout',
+                        model_catalog_model_count = 7, model_catalog_probed_at = now()
+                    WHERE id = :id
+                    """, new MapSqlParameterSource("id", product.id()));
+            var seeded = productRow();
+
+            var current = productRepo.findById(product.id()).orElseThrow();
+            productRepo.update(new ProviderProduct(current.id(), current.providerId(), current.productCode(),
+                    "Renamed Again", BillingMode.HYBRID, current.planScope(), current.credentialTopology(),
+                    current.quotaTopology(), current.supportedWireProtocols(), current.baseUrlTemplates(),
+                    current.authScheme(), current.modelCatalogStrategy(), current.planStatusStrategy(),
+                    current.balanceAuthority(), current.implementationStatus(), current.catalogVersion(),
+                    current.version() + 1, current.createdAt(), NOW));
+
+            var after = productRow();
+
+            // The update landed…
+            assertThat(String.valueOf(after.get("display_name"))).isEqualTo("Renamed Again");
+            // …and took nothing else with it.
+            for (String column : PROBE_COLUMNS) {
+                assertThat(String.valueOf(after.get(column))).as(column).isEqualTo(String.valueOf(seeded.get(column)));
+            }
+            assertThat(String.valueOf(after.get("model_catalog_probe_status"))).isEqualTo("SUCCEEDED");
+        }
+
+        private static final List<String> PROBE_COLUMNS = List.of("model_catalog_probe_status",
+                "model_catalog_probe_error", "model_catalog_model_count", "model_catalog_probed_at");
+
+        private Map<String, Object> productRow() {
+            return jdbc.queryForMap("SELECT display_name, model_catalog_probe_status, model_catalog_probe_error, "
+                    + "model_catalog_model_count, model_catalog_probed_at FROM provider_products WHERE id = :id",
+                    new MapSqlParameterSource("id", product.id()));
         }
     }
 
