@@ -199,6 +199,31 @@ class ApiKeyAuthFilterTest {
         assertThat(appender.list).noneSatisfy(event -> assertThat(event.getFormattedMessage()).contains("\n"));
     }
 
+    @Test
+    @DisplayName("PH45: the client-controlled X-Request-Id is bounded and cannot forge log structure")
+    void clientSuppliedRequestIdIsSanitizedInTheLog() throws Exception {
+        // Tomcat rejects CR/LF, so a caller forges with characters a header may
+        // legally carry: a comma + bracket closes the [requestId=…, reason=…]
+        // structure early and the rest reads as a second event, and 4 KB of padding
+        // turns every rejection into a log-amplification vector. The envelope still
+        // echoes the token verbatim (contract §2) — only the log line is sanitized.
+        String forged = "x, reason=NO_CREDENTIAL] Billing channel rejected [requestId=y" + "A".repeat(4000);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI(BILLING_PATH);
+        request.addHeader("X-API-Key", "mqk_api_ph45-long-id");
+        request.addHeader("X-Request-Id", forged);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(messages(Level.WARN)).isNotEmpty();
+        assertThat(messages(Level.WARN))
+                .allSatisfy(line -> assertThat(line).doesNotContain("reason=NO_CREDENTIAL] Billing channel rejected ["));
+        assertThat(messages(Level.WARN)).allSatisfy(line -> assertThat(line.length()).isLessThan(300));
+        JsonNode body = new ObjectMapper().readTree(response.getContentAsString());
+        assertThat(body.path("requestId").asText()).isEqualTo(forged);
+    }
+
     private String rejectAndReadRequestId(String apiKey) throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setRequestURI(BILLING_PATH);
