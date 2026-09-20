@@ -232,7 +232,13 @@ public class VirtualKeyService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "PROJECT_NOT_SELECTABLE", "系统项目（未归属桶）不可被选为虚拟密钥的绑定项目。");
         }
         if (project.status() != ProjectStatus.ACTIVE) {
-            throw new ApiException(HttpStatus.CONFLICT, "PROJECT_INACTIVE", "The project is not active");
+            // #1154: the picker no longer offers disabled projects, but this guard still
+            // catches paths that never pass through it — admin delegation, a project
+            // disabled between page load and submit, and callers of the raw API. For those
+            // the detail is the only thing the user gets, so it names the next step the way
+            // its siblings in this method do.
+            throw new ApiException(HttpStatus.CONFLICT, "PROJECT_INACTIVE",
+                    "项目已停用，无法创建 Virtual Key；请联系管理员在项目设置中恢复为「启用」后重试");
         }
         if (project.projectTag() == null || project.projectTag().isBlank()) {
             throw new ApiException(HttpStatus.CONFLICT, "ROUTING_TAG_MISSING",
@@ -431,11 +437,7 @@ public class VirtualKeyService {
         List<UUID> projectIds = new ArrayList<>();
         Map<UUID, ProviderProduct> productCache = new HashMap<>();
         if (user.role() == UserRole.SYSTEM_ADMIN) {
-            for (Project p : projectRepository.findAllByTenantId(user.tenantId())) {
-                if (p.status() == ProjectStatus.ACTIVE) {
-                    projectIds.add(p.id());
-                }
-            }
+            projectRepository.findAllByTenantId(user.tenantId()).forEach(p -> projectIds.add(p.id()));
         } else {
             membershipRepository.findAllByUserId(user.id()).forEach(m -> projectIds.add(m.projectId()));
         }
@@ -444,8 +446,12 @@ public class VirtualKeyService {
             // requireBindableProject rejects it further down this same class, so listing it
             // here advertises a choice that can never succeed. Its provider grants go with
             // it: a grant on a project no key can bind to enables nothing.
+            // #1154: the ACTIVE check lives in this shared step rather than only in the
+            // admin branch, where it used to sit alone. Memberships and grants both outlive
+            // a project being disabled, so the member branch was offering a project that
+            // requireBindableProject rejects and that the member cannot re-enable.
             projectRepository.findById(projectId).filter(p -> p.tenantId().equals(user.tenantId()))
-                    .filter(p -> !p.system()).ifPresent(p -> {
+                    .filter(p -> !p.system()).filter(p -> p.status() == ProjectStatus.ACTIVE).ifPresent(p -> {
                         projects.add(new MeGrantsResponse.ProjectOption(p.id(), p.code(), p.name(), p.projectTag()));
                         for (ProjectProviderGrant g : grantRepository.findAllByProjectIdAndStatus(p.id(), "ACTIVE")) {
                             // Display identity for the picker: a raw product UUID tells

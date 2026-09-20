@@ -49,6 +49,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -181,7 +182,14 @@ class VirtualKeyServiceTest {
         when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(project));
 
         assertThatThrownBy(() -> service.create(user, request("k", null), "req"))
-                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("PROJECT_INACTIVE"));
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo("PROJECT_INACTIVE");
+                    // #1154: the picker no longer offers a disabled project, but delegation,
+                    // a project disabled mid-form, and raw API callers still land here — for
+                    // them the detail is the only signal, so it has to name who can undo it,
+                    // the way this method's other rejections do.
+                    assertThat(e.getMessage()).contains("管理员");
+                });
         verify(keyRepository, never()).insert(any());
     }
 
@@ -475,6 +483,60 @@ class VirtualKeyServiceTest {
         assertThat(resp.projects()).hasSize(2);
     }
 
+    @Test
+    void grantOptionsForRegularUserSkipsDisabledProjects() {
+        // #1154: membership rows and provider grants both outlive a project being
+        // disabled (AdminOrgService.updateProject rewrites the projects row and nothing
+        // else), so a member keeps reaching this branch with a project that
+        // requireBindableProject answers 409 PROJECT_INACTIVE for — and that the member
+        // cannot re-enable. The admin branch filtered on ACTIVE from the start; this
+        // one
+        // never did.
+        ProjectMembership membership = new ProjectMembership(TENANT, PROJECT_ID, USER_ID, USER_ID, Instant.now());
+        when(membershipRepository.findAllByUserId(USER_ID)).thenReturn(List.of(membership));
+        when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(disabledProject(TENANT, TAG)));
+
+        MeGrantsResponse resp = service.grantOptions(user);
+
+        assertThat(resp.projects()).isEmpty();
+        // Nothing can bind the disabled project, so offering its grants would advertise
+        // a
+        // choice that can only come back 409.
+        assertThat(resp.grants()).isEmpty();
+        verify(grantRepository, never()).findAllByProjectIdAndStatus(PROJECT_ID, "ACTIVE");
+    }
+
+    @Test
+    void grantOptionsForAdminSkipsDisabledProjects() {
+        // The ACTIVE check used to sit in the admin branch alone and now lives in the
+        // shared step both branches pass through; this pins that the move changed
+        // nothing
+        // for admins: the disabled project is skipped either way.
+        //
+        // The second findById is lenient on purpose. Where the check sits decides
+        // whether
+        // that lookup happens at all — up in the admin loop it never runs, down in the
+        // shared step it does. A strict stub would fail the version that skips the
+        // lookup,
+        // i.e. would be asserting the implementation rather than the behaviour.
+        // Stubbing it
+        // loosely is what gives this test teeth: with the ACTIVE filter gone the
+        // disabled
+        // project comes back from this stub and shows up in projects().
+        UUID disabledId = UUID.randomUUID();
+        Project active = activeProject(TENANT, TAG);
+        Project disabled = new Project(disabledId, TENANT, "D", "d", null, null, ProjectStatus.DISABLED, "other", 0L,
+                Instant.now(), Instant.now());
+        when(projectRepository.findAllByTenantId(TENANT)).thenReturn(List.of(active, disabled));
+        when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(active));
+        lenient().when(projectRepository.findById(disabledId)).thenReturn(Optional.of(disabled));
+
+        MeGrantsResponse resp = service.grantOptions(admin);
+
+        assertThat(resp.projects()).hasSize(1);
+        assertThat(resp.projects().get(0).id()).isEqualTo(PROJECT_ID);
+    }
+
     // ------------------------------------------------------------------
 
     private static VirtualKeyMaterial material() {
@@ -488,6 +550,11 @@ class VirtualKeyServiceTest {
 
     private static Project activeProject(UUID tenant, String tag) {
         return new Project(PROJECT_ID, tenant, "P", "p", null, null, ProjectStatus.ACTIVE, tag, 0L, Instant.now(),
+                Instant.now());
+    }
+
+    private static Project disabledProject(UUID tenant, String tag) {
+        return new Project(PROJECT_ID, tenant, "P", "p", null, null, ProjectStatus.DISABLED, tag, 0L, Instant.now(),
                 Instant.now());
     }
 
