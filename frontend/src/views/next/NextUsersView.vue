@@ -219,21 +219,32 @@ async function addMembership() {
   }
 }
 
-async function removeMembership(membership: UserProjectMembership) {
+function removeMembership(membership: UserProjectMembership) {
   // #440: capture the drawer target — the user must not change mid-flight and
   // turn this removal into an action on the wrong account.
   const target = membershipUser.value;
   if (!target) return;
-  membershipError.value = '';
-  try {
-    await api.removeProjectMember(membership.projectId!, target.id!);
-    toast.success('已从「' + membership.projectName + '」移除');
-    await refreshMemberships();
-  } catch (error) {
-    if (error instanceof ApiError) {
-      toast.error(error.message);
-    }
-  }
+  // #PH47: this used to fire straight from the row's 移除 button. The drawer
+  // lists one row per project, so a stray click silently dropped a membership;
+  // gate it like every other removal on this page, and name the object.
+  confirmState.value = {
+    title: '移出项目',
+    body: `将「${target.username}」移出项目「${membership.projectName}」。`,
+    confirmLabel: '移除',
+    tone: 'danger',
+    run: async () => {
+      membershipError.value = '';
+      try {
+        await api.removeProjectMember(membership.projectId!, target.id!);
+        toast.success('已从「' + membership.projectName + '」移除');
+        await refreshMemberships();
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(error.message);
+        }
+      }
+    },
+  };
 }
 
 async function createUser() {

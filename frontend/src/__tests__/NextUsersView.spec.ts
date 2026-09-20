@@ -63,6 +63,16 @@ const SelectStub = defineComponent({
   `,
 });
 
+/**
+ * The membership drawer is itself `role="dialog"` and is teleported before the
+ * confirm gate, so pick the gate out by its 取消 button rather than DOM order.
+ */
+function findConfirmDialog() {
+  return Array.from(document.querySelectorAll('[role="dialog"]')).find((d) =>
+    Array.from(d.querySelectorAll('button')).some((b) => b.textContent?.trim() === '取消'),
+  );
+}
+
 describe('NextUsersView', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -292,7 +302,7 @@ describe('NextUsersView', () => {
     expect(mockApi.addProjectMember).toHaveBeenCalledWith('p2', 'u1');
   });
 
-  it('lists current memberships and removes one', async () => {
+  it('lists current memberships for a user', async () => {
     mockApi.adminUserProjectMemberships.mockResolvedValue([
       {
         projectId: 'p1',
@@ -329,8 +339,58 @@ describe('NextUsersView', () => {
     // Already-joined projects drop out of the join options.
     const labels = Array.from(document.querySelectorAll('.stub-option')).map((o) => o.textContent);
     expect(labels).toEqual(['P2 · Tools']);
+    // Removal itself goes through the confirm gate — covered by the #PH47 test.
+  });
+
+  it('#PH47: removing a project membership asks for confirmation and names the project', async () => {
+    mockApi.adminUserProjectMemberships.mockResolvedValue([
+      {
+        projectId: 'p1',
+        projectCode: 'P1',
+        projectName: 'Core AI',
+        projectStatus: 'ACTIVE',
+        joinedAt: '2026-09-01T00:00:00Z',
+      },
+    ]);
+    mockApi.listProjects.mockResolvedValue([]);
+    mockApi.removeProjectMember.mockResolvedValue(undefined);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="user-actions-u1"]').trigger('click');
+    await flushPromises();
+    (document.querySelector('[data-testid="user-project-members"]') as HTMLElement).click();
+    await flushPromises();
 
     (document.querySelector('[data-testid="user-project-remove"]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    // The row button is a small ghost button inside a list; one click must not
+    // drop the membership outright. The very same action (removing a user from
+    // a container) confirms in NextProjectsView and NextTeamsView.
+    expect(mockApi.removeProjectMember).not.toHaveBeenCalled();
+
+    const dialog = findConfirmDialog();
+    expect(dialog, 'removing a membership should ask for confirmation').toBeTruthy();
+    // And it must say WHICH membership: the drawer lists one row per project, so
+    // a generic "确认移除？" leaves the admin guessing which row they hit.
+    expect(dialog!.textContent).toContain('Core AI');
+
+    // Cancelling leaves the membership untouched.
+    const cancel = Array.from(dialog!.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === '取消',
+    );
+    cancel!.click();
+    await flushPromises();
+    expect(mockApi.removeProjectMember).not.toHaveBeenCalled();
+
+    // Re-opening and confirming performs the removal.
+    (document.querySelector('[data-testid="user-project-remove"]') as HTMLButtonElement).click();
+    await flushPromises();
+    const confirmButton = Array.from(findConfirmDialog()!.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === '移除',
+    );
+    confirmButton!.click();
     await flushPromises();
     expect(mockApi.removeProjectMember).toHaveBeenCalledWith('p1', 'u1');
   });
