@@ -18,3 +18,14 @@ export function localDayKey(iso?: string | null): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
+
+/**
+ * The viewer's fixed offset from UTC, in minutes (#1050) — the value the
+ * reporting endpoints take so `groupBy=day|month` buckets land on the local
+ * calendar day the console prints beside each row, the same shape the hourly
+ * report already uses. A fixed offset, not an IANA zone: a window spanning a
+ * DST change is approximated, which is the documented contract trade-off.
+ */
+export function localTzOffsetMinutes(date: Date = new Date()): number {
+  return -date.getTimezoneOffset();
+}

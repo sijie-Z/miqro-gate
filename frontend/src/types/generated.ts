@@ -8823,6 +8823,7 @@ export interface operations {
                 groupBy?: string;
                 from?: string;
                 to?: string;
+                tzOffsetMinutes?: number;
             };
             header?: never;
             path?: never;
@@ -8912,6 +8913,7 @@ export interface operations {
                 groupBy?: string;
                 from?: string;
                 to?: string;
+                tzOffsetMinutes?: number;
             };
             header?: never;
             path?: never;
@@ -9194,6 +9196,7 @@ export interface operations {
                 providerProductId?: string;
                 modelId?: string;
                 teamId?: string;
+                tzOffsetMinutes?: number;
             };
             header?: never;
             path?: never;
@@ -9217,6 +9220,7 @@ export interface operations {
             query?: {
                 from?: string;
                 to?: string;
+                tzOffsetMinutes?: number;
             };
             header?: never;
             path?: never;
@@ -9988,6 +9992,7 @@ export interface operations {
                 groupBy?: string;
                 from?: string;
                 to?: string;
+                tzOffsetMinutes?: number;
             };
             header?: never;
             path?: never;

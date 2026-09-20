@@ -11,6 +11,7 @@ import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
+import { localTzOffsetMinutes } from '@/utils/datetime';
 import { costGapNote, unpricedHitCount } from '@/lib/usage-pricing';
 import {
   UiButton,
@@ -185,7 +186,14 @@ async function load() {
     const to = new Date().toISOString();
     const needed = Array.from(new Set<CostMode>(['project', 'user', mode.value]));
     const results = await Promise.all(
-      needed.map((dimension) => api.adminUsageSummary({ groupBy: dimension, from, to })),
+      needed.map((dimension) =>
+        api.adminUsageSummary({
+          groupBy: dimension,
+          from,
+          to,
+          tzOffsetMinutes: localTzOffsetMinutes(),
+        }),
+      ),
     );
     if (seq !== loadRequestSeq) {
       return; // a newer window won — this response is stale

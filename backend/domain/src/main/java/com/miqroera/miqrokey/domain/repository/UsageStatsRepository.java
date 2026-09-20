@@ -29,16 +29,20 @@ public interface UsageStatsRepository {
     enum GroupBy {
         PROJECT, VIRTUAL_KEY, CACHE_LEVEL,
         /**
-         * UTC calendar day (label = {@code YYYY-MM-DD}), independent of the database
-         * session's {@code TimeZone} (#1050). Callers that want the viewer's local day
-         * must convert; the buckets are data, not display.
+         * Calendar day (label = {@code YYYY-MM-DD}) in the caller's offset (#1050):
+         * {@link #aggregateUsage(GroupBy, UsageFilter, int)} takes the fixed offset
+         * from UTC and moves the bucket with it, while the database session's
+         * {@code TimeZone} never moves it. Offset 0 is the UTC day.
          */
         DAY,
         /** I15 (doc 134892): per-consumer dimension (label = username). */
         USER,
         /** I15: per-model dimension (label = model id). */
         MODEL,
-        /** I15: UTC calendar-month granularity (label = {@code YYYY-MM}, #1050). */
+        /**
+         * I15: calendar-month granularity (label = {@code YYYY-MM}), same offset rule
+         * as {@link #DAY} (#1050).
+         */
         MONTH,
         /**
          * Per-team dimension (label = team name, joined through the member's virtual
@@ -105,9 +109,23 @@ public interface UsageStatsRepository {
     /**
      * Aggregated usage-event rows for the filter, one row per (group, product,
      * model, cache level) — exactly the input shape of
-     * {@link UsageStatsAggregator#aggregate}.
+     * {@link UsageStatsAggregator#aggregate}. {@code day}/{@code month} buckets are
+     * UTC; {@link #aggregateUsage(GroupBy, UsageFilter, int)} is the same query in
+     * the caller's local day/month (#1050).
      */
-    List<UsageStatsAggregator.UsageAggRow> aggregateUsage(GroupBy groupBy, UsageFilter filter);
+    default List<UsageStatsAggregator.UsageAggRow> aggregateUsage(GroupBy groupBy, UsageFilter filter) {
+        return aggregateUsage(groupBy, filter, 0);
+    }
+
+    /**
+     * The same aggregation, with {@code day}/{@code month} buckets aligned to
+     * {@code tzOffsetMinutes} from UTC (#1050): the caller's fixed offset, the same
+     * shape the hourly report takes (and, like it, the only thing that moves the
+     * boundary — the database session's timezone never does). Callers that want the
+     * day the console prints beside a row must pass their own offset; 0 keeps the
+     * UTC reading.
+     */
+    List<UsageStatsAggregator.UsageAggRow> aggregateUsage(GroupBy groupBy, UsageFilter filter, int tzOffsetMinutes);
 
     /**
      * The same aggregation on the <b>observed</b> token columns only (#1002): what
@@ -129,9 +147,15 @@ public interface UsageStatsRepository {
      * Aggregated cache-hit rows for the filter, one row per (group, product,
      * model). {@code cachedTokens} carries the usage of the cached response
      * (weighted mean across the group's cache entries), so the aggregator can value
-     * the tokens the gateway saved.
+     * the tokens the gateway saved. Bucket rules match
+     * {@link #aggregateUsage(GroupBy, UsageFilter)}.
      */
-    List<UsageStatsAggregator.HitAggRow> aggregateHits(GroupBy groupBy, UsageFilter filter);
+    default List<UsageStatsAggregator.HitAggRow> aggregateHits(GroupBy groupBy, UsageFilter filter) {
+        return aggregateHits(groupBy, filter, 0);
+    }
+
+    /** The same cache-hit aggregation in the caller's local day/month (#1050). */
+    List<UsageStatsAggregator.HitAggRow> aggregateHits(GroupBy groupBy, UsageFilter filter, int tzOffsetMinutes);
 
     /**
      * Hourly usage buckets for the filter (#634): one row per (hour bucket,
