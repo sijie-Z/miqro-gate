@@ -92,8 +92,10 @@ export type McpToolRevisionRow = components['schemas']['McpToolRevision'];
 export type ModelCatalogRow = components['schemas']['ModelCatalogView'];
 // step 3 (issue #284): FE display names alias backend-named schemas.
 export type Grant = components['schemas']['ProjectProviderGrant'];
-// legacy FE name describes the deletion *task* entity the endpoints return
-export type UsageDeletionRequest = components['schemas']['UsageDeletion'];
+// legacy FE name describes the deletion *task* entity the endpoints return; the
+// schema behind it is the metadata-only view — the confirmation token and its
+// SHA-256 never leave the server (api-contract §5.6, #1079)
+export type UsageDeletionRequest = components['schemas']['UsageDeletionView'];
 export type ToolImportSkip = components['schemas']['ImportSkip'];
 export type ToolImportResult = components['schemas']['ImportResult'];
 // step 4 (issue #286): usage summary nested shapes + consumer create response.

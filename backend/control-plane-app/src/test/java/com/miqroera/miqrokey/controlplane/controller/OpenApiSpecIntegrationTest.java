@@ -111,6 +111,11 @@ class OpenApiSpecIntegrationTest {
         // schema anywhere may mention it.
         assertThat(objectMapper.writeValueAsString(spec)).doesNotContain("passwordHash");
 
+        // Same rule for the usage-deletion one-time token (api-contract §5.6):
+        // only the create response may carry it, so neither the plaintext field
+        // nor its persisted SHA-256 may be advertised in the machine-readable spec.
+        assertThat(objectMapper.writeValueAsString(spec)).doesNotContain("confirmTokenHash");
+
         // Export for the CI breaking-change diff against the committed baseline.
         Path out = Path.of("target", "openapi-spec.json");
         Files.createDirectories(out.getParent());
