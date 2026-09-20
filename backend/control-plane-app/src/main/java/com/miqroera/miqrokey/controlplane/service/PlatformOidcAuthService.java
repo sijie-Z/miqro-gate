@@ -136,8 +136,12 @@ public class PlatformOidcAuthService {
             if (!authProperties.isPlatformOidcAutoProvision()) {
                 throw new OAuthFlowException("ACCOUNT_UNLINKED");
             }
-            internalUserId = provisionUser(tenantId, identity);
-            provisioned = true;
+            Provisioned result = provisionUser(tenantId, identity);
+            internalUserId = result.userId();
+            // #1028 (owner ruling C): only a real INSERT is a provisioning. Adopting
+            // the link a concurrent first login just committed is a plain login — one
+            // account created must not be recorded as two provisionings.
+            provisioned = result.created();
         }
         User user = userRepository.findById(internalUserId)
                 .orElseThrow(() -> new OAuthFlowException("ACCOUNT_UNLINKED"));
@@ -267,15 +271,18 @@ public class PlatformOidcAuthService {
      * The link is re-read once the lock is held: a concurrent winner is adopted
      * there, which also keeps this request from leaving an unlinked user row behind
      * (#730).
+     *
+     * @return the user this login belongs to plus whether <em>this request</em>
+     *         created it — the audit action depends on that difference (#1028)
      */
-    private UUID provisionUser(UUID tenantId, OidcIdentity identity) {
+    private Provisioned provisionUser(UUID tenantId, OidcIdentity identity) {
         try {
             return transactionTemplate.execute(status -> {
                 String base = sanitizeUsername(identity.username() != null ? identity.username() : identity.sub());
                 userRepository.lockTenantForBootstrap(tenantId);
                 Optional<UUID> linked = findLinkedUser(tenantId, identity.sub());
                 if (linked.isPresent()) {
-                    return linked.get();
+                    return new Provisioned(linked.get(), false);
                 }
                 String username = base;
                 int attempt = 0;
@@ -307,12 +314,19 @@ public class PlatformOidcAuthService {
                     // the winner's link.
                     throw new LinkRacedException();
                 }
-                return user.id();
+                return new Provisioned(user.id(), true);
             });
         } catch (LinkRacedException e) {
-            return findLinkedUser(tenantId, identity.sub())
-                    .orElseThrow(() -> new OAuthFlowException("ACCOUNT_UNLINKED"));
+            return new Provisioned(findLinkedUser(tenantId, identity.sub())
+                    .orElseThrow(() -> new OAuthFlowException("ACCOUNT_UNLINKED")), false);
         }
+    }
+
+    /**
+     * Which user the login belongs to, and whether this request created that user
+     * ({@code created == false} means it adopted a link that already existed).
+     */
+    private record Provisioned(UUID userId, boolean created) {
     }
 
     /**
