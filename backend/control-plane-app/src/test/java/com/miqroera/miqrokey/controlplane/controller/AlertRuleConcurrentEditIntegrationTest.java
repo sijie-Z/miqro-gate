@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import jakarta.servlet.http.Cookie;
+import org.assertj.core.api.SoftAssertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -148,7 +149,11 @@ class AlertRuleConcurrentEditIntegrationTest {
                             .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
                             .content("{\"threshold\":0.9}"))
                     .andReturn().getResponse().getStatus());
-            Thread.sleep(700);
+            // Positive evidence for the interleave, not merely "B has not finished":
+            // wait until B's UPDATE is parked on A's row lock. Without this the test
+            // could pass without any race at all — B could still be in the filter
+            // chain, read the row after A's commit and legitimately win with a 200.
+            awaitBackendBlockedOnAlertRulesUpdate();
             assertThat(pending.isDone()).as("B's PATCH must wait for A's row lock, not read past it").isFalse();
 
             conn.commit();
@@ -160,19 +165,19 @@ class AlertRuleConcurrentEditIntegrationTest {
         Map<String, Object> row = jdbc.queryForMap(
                 "SELECT name, threshold, version FROM alert_rules WHERE id = :id",
                 new MapSqlParameterSource("id", ruleUuid));
-        assertThat(row.get("name")).as("admin A's committed rename must survive B's unrelated PATCH")
+        // Soft assertions so one run reports every way the #475 contract is broken,
+        // instead of stopping at the first one.
+        SoftAssertions softly = new SoftAssertions();
+        // The #475 contract: B read the row before A committed and wrote after it,
+        // so B must be told to refresh rather than handed a 200.
+        softly.assertThat(status).as("a lost update must be a 409 CONCURRENT_MODIFICATION, never a silent 200")
+                .isEqualTo(409);
+        softly.assertThat(row.get("name")).as("admin A's committed rename must survive B's unrelated PATCH")
                 .isEqualTo("renamed-by-A");
-        if (status == 200) {
-            // Accepted without a conflict signal: then B's own field must be the
-            // only thing that changed.
-            assertThat((BigDecimal) row.get("threshold")).isEqualByComparingTo("0.9");
-        } else {
-            // Conflict signal (the #475 contract): B is told to refresh and its
-            // change is not applied at all.
-            assertThat(status).as("a lost update must be a 409 CONCURRENT_MODIFICATION, never a silent 200")
-                    .isEqualTo(409);
-            assertThat((BigDecimal) row.get("threshold")).isEqualByComparingTo("0.5");
-        }
+        softly.assertThat((BigDecimal) row.get("threshold"))
+                .as("B's own field must not land either — the conflicting statement is rolled back")
+                .isEqualByComparingTo("0.5");
+        softly.assertAll();
     }
 
     /**
@@ -224,6 +229,30 @@ class AlertRuleConcurrentEditIntegrationTest {
     }
 
     // ------------------------------------------------------------------
+
+    /**
+     * Waits until PostgreSQL reports a backend parked on the {@code alert_rules}
+     * row lock, i.e. B's {@code UPDATE} has already been issued and is waiting for
+     * A to commit. This is the evidence that the interleave is the intended one —
+     * the earlier {@code Thread.sleep} only showed that B had not finished yet,
+     * which a slow-but-race-free run would also satisfy.
+     */
+    private void awaitBackendBlockedOnAlertRulesUpdate() throws Exception {
+        long deadline = System.currentTimeMillis() + 15_000;
+        Integer blocked = 0;
+        do {
+            blocked = jdbc.queryForObject("""
+                    SELECT count(*)::int FROM pg_stat_activity
+                    WHERE datname = current_database() AND state = 'active' AND wait_event_type = 'Lock'
+                      AND pid <> pg_backend_pid() AND query ILIKE '%UPDATE alert_rules%'
+                    """, new MapSqlParameterSource(), Integer.class);
+            if (blocked != null && blocked > 0) {
+                return;
+            }
+            Thread.sleep(100);
+        } while (System.currentTimeMillis() < deadline);
+        throw new AssertionError("no backend was ever blocked on the alert_rules row lock (count=" + blocked + ")");
+    }
 
     private String createRule(String name, String threshold) throws Exception {
         MvcResult created = mockMvc
