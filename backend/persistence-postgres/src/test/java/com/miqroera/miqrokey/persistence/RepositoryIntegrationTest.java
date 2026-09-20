@@ -367,6 +367,45 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
             assertThat(String.valueOf(row.get("catalog_version"))).isEqualTo("2026-09-20");
             assertThat(((Number) row.get("version")).longValue()).isEqualTo(current.version() + 1);
         }
+
+        /**
+         * #1151, the other direction: the schema has four probe columns that the entity
+         * does NOT carry, written by {@code ModelCatalogProbeService.recordProbe}.
+         * Widening the SET is exactly the edit this PR makes, so a future widening that
+         * reaches for these would wipe a probe result on every unrelated save —
+         * silently, since the probe columns are not part of any entity round-trip.
+         */
+        @Test
+        @DisplayName("should leave the probe columns to their own writer")
+        void shouldLeaveProbeColumnsAlone() {
+            jdbc.update("""
+                    UPDATE provider_products
+                    SET model_catalog_probe_status = 'SUCCEEDED', model_catalog_model_count = 7,
+                        model_catalog_probed_at = now()
+                    WHERE id = :id
+                    """, new MapSqlParameterSource("id", product.id()));
+
+            var current = productRepo.findById(product.id()).orElseThrow();
+            productRepo.update(new ProviderProduct(current.id(), current.providerId(), current.productCode(),
+                    "Renamed Again", BillingMode.HYBRID, current.planScope(), current.credentialTopology(),
+                    current.quotaTopology(), current.supportedWireProtocols(), current.baseUrlTemplates(),
+                    current.authScheme(), current.modelCatalogStrategy(), current.planStatusStrategy(),
+                    current.balanceAuthority(), current.implementationStatus(), current.catalogVersion(),
+                    current.version() + 1, current.createdAt(), NOW));
+
+            var row = jdbc.queryForMap("""
+                    SELECT display_name, model_catalog_probe_status, model_catalog_model_count,
+                           model_catalog_probed_at
+                    FROM provider_products WHERE id = :id
+                    """, new MapSqlParameterSource("id", product.id()));
+
+            // The update landed…
+            assertThat(String.valueOf(row.get("display_name"))).isEqualTo("Renamed Again");
+            // …and took nothing else with it.
+            assertThat(String.valueOf(row.get("model_catalog_probe_status"))).isEqualTo("SUCCEEDED");
+            assertThat(((Number) row.get("model_catalog_model_count")).intValue()).isEqualTo(7);
+            assertThat(row.get("model_catalog_probed_at")).isNotNull();
+        }
     }
 
     @Nested
