@@ -117,7 +117,7 @@ Adapter/产品验证状态：
 - `DEGRADED`：原已验证能力因供应商变化失败。
 - `DISABLED`：管理员或目录发布禁用。
 
-状态变化需要审计。生产默认目录只启用 `VERIFIED` 产品；管理员可以显式启用 `IMPLEMENTED`，页面必须持续警告。
+状态变化需要审计（**尚未实现**）。生产默认目录只启用 `VERIFIED` 产品、管理员可显式启用 `IMPLEMENTED` 且页面**持续警告** —— 这条准入与警告门控**目前没有落地**（#735）：`provider_products.implementation_status` 由 `CatalogSeedService` 从**适配器注册表**推导（一个产品在 `AdapterRegistryFactory` 里有注册的适配器即为 `IMPLEMENTED`，当前 23 个 P0 产品各有一个），**没有任何分支会因它拒绝或启用产品**，控制台只做展示；`ADAPTER_STATUS` 的这一列因此是"事实陈列"而非门禁。`VERIFIED` 需要真实凭证证据（#211），所以**当前没有任何产品是 `VERIFIED`**。目录清单自身的 `status` 字段只被 `CatalogManifestValidator` 解析、不参与该推导（清单是 Ed25519 签名件，手写状态等于没人维护的声明）。
 
 ## 8. 失败隔离
 
