@@ -70,6 +70,18 @@ const totals = ref<OverviewTotals | null>(null);
 
 const stats = computed<StatCard[]>(() => {
   const active = keys.value.filter((k) => k.status === 'ACTIVE').length;
+  // #1104: a failed load knows no counts. "0 本月请求 / ¥0.00 本月成本" would be a
+  // claim about the tenant, not about this request — and a money figure is the
+  // one a reader believes first. The tables have answered "—" since #1065; the
+  // cards answer the same.
+  if (loadError.value) {
+    return [
+      { label: '虚拟密钥', value: '—', hint: '加载失败', icon: LockOnIcon, tone: 'blue' },
+      { label: '本月请求', value: '—', hint: '加载失败', icon: ChartBarIcon, tone: 'green' },
+      { label: '本月 Token', value: '—', hint: '加载失败', icon: LayersIcon, tone: 'cyan' },
+      { label: '本月成本', value: '—', hint: '加载失败', icon: MoneyIcon, tone: 'gold' },
+    ];
+  }
   const totalTokens = usageGroups.value.reduce(
     (sum, g) => sum + (g.tokens?.input ?? 0) + (g.tokens?.output ?? 0),
     0,

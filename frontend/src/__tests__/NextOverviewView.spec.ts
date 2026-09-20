@@ -97,6 +97,29 @@ describe('NextOverviewView', () => {
     expect(stats.text()).toContain('¥3.60');
   });
 
+  it('#1104: a failed load shows unknown on the stat band, not a confident zero', async () => {
+    mockApi.listVirtualKeys.mockRejectedValue(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-500',
+        title: 'Error',
+      }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const stats = wrapper.find('[data-testid="overview-stats"]');
+    // "¥0.00 本月成本" would be a claim about the tenant, not about this request.
+    expect(stats.text()).not.toContain('¥0.00');
+    expect(stats.text()).toContain('—');
+    // The chip's label carries the reason as its title (the hint is not printed text).
+    expect(stats.find('[title="加载失败"]').exists()).toBe(true);
+  });
+
   it('marks the cost as short of a total when unpriced usage is reported (#849)', async () => {
     mockApi.usageSummary.mockResolvedValue({
       ...summary,
