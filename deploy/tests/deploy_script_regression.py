@@ -19,6 +19,9 @@ asked to fail on a broken one. A run that passes where it should fail is reporte
 as a failure in its own right.
 
 Run: python3 deploy/tests/deploy_script_regression.py [--keep]
+Run it ALONE: the fixtures share the compose project name and image tags, so two
+copies running at once report each other's containers as missing and the
+failures say nothing about the script (hit once, 2026-09-20).
 Needs: docker, python3, curl. Binds 127.0.0.1 only; the sole network use is pulling
 the pinned base image.
 """
