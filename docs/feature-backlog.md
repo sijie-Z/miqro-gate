@@ -130,7 +130,7 @@
 
 | ID | 缺口 | 说明 |
 |---|---|---|
-| D01 | ADR-0008 文件缺失（architecture/mapping 引用「缓存默认关闭/coalescer 默认关闭」） | decisions/ 仅有 0001-0007、0009-0011；decisions/README 停在 0007 未列 0009-0011——需补 0008 或修正引用 |
+| D01 | ADR-0008 文件缺失（architecture/mapping 引用「缓存默认关闭/coalescer 默认关闭」） | decisions/ 仅有 0001-0007、0009-0011、0012-0026。**索引半已修**（2026-09-20，#1062）：`decisions/README.md` 现完整列出全部 ADR（三节：已拍板/已被取代/待拍板），并由 CI `ADR index` 闸门看守。**文件半仍开放**：0008 仍不存在，真实文件是 `0009-enable-response-cache.md`，全仓 22 个文件引用前者——需补 0008 或逐处修正引用 |
 | D02 | future-kafka-and-reporting-users.md 已被引用但不存在 | middleware 关联段引用；内容已并入本表 F32/F34 |
 | D03 | 「429 信号量」出处待核对（architecture 风险清单提到的 P1 实测项在原始设计包，仓库文档无信号量表述） | 若实现需回到原始设计包核证 |
 | D04 | 生产启动校验「开启响应缓存拒绝」表述与 ADR-0009 opt-in 并存需复核 | configuration-reference §10 |
