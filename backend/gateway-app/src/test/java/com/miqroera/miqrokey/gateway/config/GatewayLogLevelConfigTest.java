@@ -20,9 +20,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>
  * {@code docs/configuration-reference.md} 把 {@code MIQROKEY_LOG_LEVEL} 记为全局
- * 日志级别开关，本模块的 {@code logback-spring.xml} 也确实用它设置
- * {@code <root>}。但 Spring Boot 在 logback 初始化**之后**才应用
- * {@code logging.level.*} 映射：只要 {@code application.yml} 把
+ * 日志级别开关，本模块的 {@code logback-spring.xml} 也确实用它设置 {@code <root>}。但 Spring Boot 在
+ * logback 初始化**之后**才应用 {@code logging.level.*} 映射：只要 {@code application.yml} 把
  * {@code logging.level.com.miqroera.miqrokey} 写成字面量，root 级别就被静默压住。
  * </p>
  *
@@ -50,14 +49,13 @@ class GatewayLogLevelConfigTest {
             sources.addFirst(new SystemEnvironmentPropertySource("test-environment",
                     Map.of("MIQROKEY_LOG_LEVEL", miqrokeyLogLevel)));
         }
-        for (PropertySource<?> source : new YamlPropertySourceLoader()
-                .load("application", new ClassPathResource("application.yml"))) {
+        for (PropertySource<?> source : new YamlPropertySourceLoader().load("application",
+                new ClassPathResource("application.yml"))) {
             sources.addLast(source);
         }
         Binder binder = new Binder(ConfigurationPropertySources.from(sources),
                 new PropertySourcesPlaceholdersResolver(sources));
-        Map<String, String> levels = binder
-                .bind("logging.level", Bindable.mapOf(String.class, String.class))
+        Map<String, String> levels = binder.bind("logging.level", Bindable.mapOf(String.class, String.class))
                 .orElse(Map.of());
         return levels.get("com.miqroera.miqrokey");
     }
