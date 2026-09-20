@@ -192,6 +192,27 @@ describe('NextCostView', () => {
     expect(bars[1]!.attributes('aria-label')).toContain('暂无可用明细');
   });
 
+  it('#1104: a failed load shows unknown on the cost cards, not ¥0.0000', async () => {
+    mockApi.adminUsageSummary.mockRejectedValue(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-500',
+        title: 'Error',
+      }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const stats = wrapper.find('[data-testid="cost-stats"]');
+    expect(stats.text()).not.toContain('¥0.0000');
+    expect(stats.text()).toContain('—');
+    expect(stats.text()).toContain('加载失败');
+  });
+
   it('shows a dash, not 0.0%, when there is no total to take a share of (#853)', async () => {
     // Every row unpriced: the total is 0, so 0/0 — the share cannot be computed.
     // Printing 0.0% would read as "this project accounts for none of the spend",

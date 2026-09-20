@@ -10,7 +10,7 @@ import * as api from '@/api';
 import { ChartBarIcon, LayersIcon, MoneyIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
-import { localDayKey } from '@/utils/datetime';
+import { localDayKey, localTzOffsetMinutes } from '@/utils/datetime';
 import {
   UiButton,
   UiDonut,
@@ -380,7 +380,7 @@ async function loadSummary() {
     const w = windowFromTo();
     const result =
       w.from && w.to
-        ? await api.usageSummary(groupBy.value, w.from, w.to)
+        ? await api.usageSummary(groupBy.value, w.from, w.to, localTzOffsetMinutes())
         : await api.usageSummary(groupBy.value);
     if (seq !== summaryRequestSeq) {
       return; // a newer request won — this response is stale

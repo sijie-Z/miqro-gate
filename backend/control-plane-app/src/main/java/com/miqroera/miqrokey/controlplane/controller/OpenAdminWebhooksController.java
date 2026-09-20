@@ -8,6 +8,12 @@ import com.miqroera.miqrokey.controlplane.service.WebhookEndpointService.Deliver
 import com.miqroera.miqrokey.controlplane.service.WebhookEndpointService.TestResult;
 import com.miqroera.miqrokey.controlplane.service.WebhookEndpointService.WebhookEndpointView;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -44,7 +50,8 @@ public class OpenAdminWebhooksController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public WebhookEndpointView create(HttpServletRequest request, @RequestBody OpenAdminWebhookCreateRequest body) {
+    public WebhookEndpointView create(HttpServletRequest request,
+            @Valid @RequestBody OpenAdminWebhookCreateRequest body) {
         return endpointService.create(tenantId(request), body.name(), body.url(), body.secret(),
                 body.timeoutMs() != null ? body.timeoutMs() : 5000, auditContext(request));
     }
@@ -61,7 +68,7 @@ public class OpenAdminWebhooksController {
 
     @PatchMapping("/{endpointId}")
     public WebhookEndpointView update(HttpServletRequest request, @PathVariable UUID endpointId,
-            @RequestBody OpenAdminWebhookUpdateRequest body) {
+            @Valid @RequestBody OpenAdminWebhookUpdateRequest body) {
         return endpointService.updateView(tenantId(request), endpointId, body.name(), body.enabled(), body.timeoutMs(),
                 auditContext(request));
     }
@@ -101,10 +108,24 @@ public class OpenAdminWebhooksController {
         return AuditContext.human(userContext.getUser().id(), requestId(request));
     }
 
-    public record OpenAdminWebhookCreateRequest(String name, String url, String secret, Integer timeoutMs) {
+    /**
+     * Machine-key twin of the console's
+     * {@code AdminWebhookController.WebhookCreateRequest}. The two faces must carry
+     * the same constraints: they write through the same service, and the contract
+     * documents one answer for both ({@code docs/api-contract.md} §5.5, "违反者一律 400
+     * VALIDATION_FAILED").
+     */
+    public record OpenAdminWebhookCreateRequest(@NotBlank @Size(max = 200) String name,
+            @NotBlank @Size(max = 500) String url, @NotBlank String secret, @Min(1000) @Max(600000) Integer timeoutMs) {
     }
 
-    public record OpenAdminWebhookUpdateRequest(String name, Boolean enabled, Integer timeoutMs) {
+    /**
+     * PATCH is partial, so only present values are constrained — same shape as the
+     * console record: {@code name} rejects blank-but-present without forbidding
+     * newlines.
+     */
+    public record OpenAdminWebhookUpdateRequest(@Pattern(regexp = "\\s*\\S[\\s\\S]*") @Size(max = 200) String name,
+            Boolean enabled, @Min(1000) @Max(600000) Integer timeoutMs) {
     }
     private static String requestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");

@@ -80,15 +80,17 @@ class AdminUsageStatsServiceTest {
 
     @Test
     void summaryPassesEveryOptionalDimensionAsFilter() {
-        when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.DAY), any())).thenReturn(List.of());
-        when(usageStatsRepository.aggregateHits(eq(UsageStatsRepository.GroupBy.DAY), any())).thenReturn(List.of());
+        when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.DAY), any(), eq(0)))
+                .thenReturn(List.of());
+        when(usageStatsRepository.aggregateHits(eq(UsageStatsRepository.GroupBy.DAY), any(), eq(0)))
+                .thenReturn(List.of());
 
         service.summary(admin, "day", Instant.now().minus(1, ChronoUnit.DAYS), Instant.now(), USER_ID, PROJECT_ID,
                 KEY_ID, CREDENTIAL_ID, SUBSCRIPTION_ID, PRODUCT_ID, MODEL, TEAM_ID);
 
         ArgumentCaptor<UsageStatsRepository.UsageFilter> captor = ArgumentCaptor
                 .forClass(UsageStatsRepository.UsageFilter.class);
-        verify(usageStatsRepository).aggregateUsage(eq(UsageStatsRepository.GroupBy.DAY), captor.capture());
+        verify(usageStatsRepository).aggregateUsage(eq(UsageStatsRepository.GroupBy.DAY), captor.capture(), eq(0));
         UsageStatsRepository.UsageFilter filter = captor.getValue();
         assertThat(filter.tenantId()).isEqualTo(TENANT);
         // Admin scope: no caller-scoped key set.
@@ -104,14 +106,14 @@ class AdminUsageStatsServiceTest {
 
     @Test
     void summaryWithoutFiltersScopesToTenantOnly() {
-        when(usageStatsRepository.aggregateUsage(any(), any())).thenReturn(List.of());
-        when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
+        when(usageStatsRepository.aggregateUsage(any(), any(), eq(0))).thenReturn(List.of());
+        when(usageStatsRepository.aggregateHits(any(), any(), eq(0))).thenReturn(List.of());
 
         service.summary(admin, null, null, null, null, null, null, null, null, null, null, null);
 
         ArgumentCaptor<UsageStatsRepository.UsageFilter> captor = ArgumentCaptor
                 .forClass(UsageStatsRepository.UsageFilter.class);
-        verify(usageStatsRepository).aggregateUsage(any(), captor.capture());
+        verify(usageStatsRepository).aggregateUsage(any(), captor.capture(), eq(0));
         UsageStatsRepository.UsageFilter filter = captor.getValue();
         assertThat(filter.tenantId()).isEqualTo(TENANT);
         assertThat(filter.virtualKeyIds()).isNull();
@@ -128,11 +130,12 @@ class AdminUsageStatsServiceTest {
 
     @Test
     void summaryCostComesFromTheRowsFrozenPrices() {
-        when(usageStatsRepository.aggregateUsage(any(), any())).thenReturn(List.of(new UsageAggRow("g", "G", PRODUCT_ID,
-                MODEL, CacheLevel.UPSTREAM, 2, new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null),
-                new java.math.BigDecimal("1000"), new java.math.BigDecimal("1000"), java.math.BigDecimal.ZERO,
-                java.math.BigDecimal.ZERO, UsageStatsAggregator.PricingGap.NONE, UsageAggRow.Outcome.NONE)));
-        when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
+        when(usageStatsRepository.aggregateUsage(any(), any(), eq(0)))
+                .thenReturn(List.of(new UsageAggRow("g", "G", PRODUCT_ID, MODEL, CacheLevel.UPSTREAM, 2,
+                        new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null),
+                        new java.math.BigDecimal("1000"), new java.math.BigDecimal("1000"), java.math.BigDecimal.ZERO,
+                        java.math.BigDecimal.ZERO, UsageStatsAggregator.PricingGap.NONE, UsageAggRow.Outcome.NONE)));
+        when(usageStatsRepository.aggregateHits(any(), any(), eq(0))).thenReturn(List.of());
 
         UsageSummary summary = service.summary(admin, "project", null, null, null, null, null, null, null, null, null,
                 null);
