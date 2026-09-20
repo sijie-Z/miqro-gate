@@ -168,8 +168,8 @@ describe('NextCostView', () => {
 
   it('#1097: draws each row a composition bar for the figure it prints, from the same basis', async () => {
     const withSplit = summary(true);
-    // Only the first group carries a split: the second must say so rather than draw
-    // four zeroes that read as "spent nothing on anything".
+    // Only the first group carries a split: the second has none to draw, and the bar
+    // renders nothing there rather than a rail that claims something it cannot say.
     withSplit.groups![0]!.cost = {
       ...withSplit.groups![0]!.cost,
       gatewayObservedParts: { input: 0.9, output: 0.4, cacheRead: 0.1, cacheCreation: 0.1 },
