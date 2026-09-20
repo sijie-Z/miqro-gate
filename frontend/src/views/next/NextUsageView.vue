@@ -51,7 +51,7 @@ const summaryError = ref('');
 const records = ref<UsageRecordPage | null>(null);
 const recordsLoading = ref(true);
 
-// ---- daily trend (aggregated from the loaded records page) ----
+// ---- daily trend (aggregated over the selected window) ----
 type TrendMetric = 'tokens' | 'requests' | 'latency';
 
 const TREND_TABS: Array<{ value: TrendMetric; label: string }> = [
@@ -94,8 +94,18 @@ const summaryStats = computed<StatCard[]>(() => {
   ];
 });
 
+// PH43: the trend describes the selected window, so it reads that window itself at the
+// records API's page cap — never the table page, which is a view choice *and* a strict
+// subset of the window. Paging used to rewrite the chart; days past page 1 vanished.
+const TREND_PAGE_SIZE = 200; // records API upper bound (UsageStatsService.MAX_PAGE_SIZE)
+const trendRecords = ref<UsageRecord[]>([]);
+const trendTotal = ref(0);
+const trendFailed = ref(false);
+/** True while the window holds more rows than a single trend read can cover. */
+const trendPartial = computed(() => trendTotal.value > trendRecords.value.length);
+
 const trendPoints = computed(() => {
-  const items = records.value?.items ?? [];
+  const items = trendRecords.value;
   const byDay = new Map<string, { sum: number; count: number }>();
   for (const r of items) {
     // PH37: bucket by the local calendar day, i.e. the day formatTime prints for the
@@ -162,6 +172,7 @@ function applyRange(value: number) {
   customActive.value = false; // a preset wins; the custom window is parked
   page.value = 1;
   void loadSummary();
+  void loadTrend();
   void loadRecords();
 }
 
@@ -180,6 +191,7 @@ function applyCustomRange() {
   rangeDays.value = -1; // nothing in the preset strip stays highlighted
   page.value = 1;
   void loadSummary();
+  void loadTrend();
   void loadRecords();
 }
 
@@ -336,6 +348,7 @@ const totalPages = computed(() => {
 
 onMounted(() => {
   void loadSummary();
+  void loadTrend();
   void loadRecords();
   void loadQuota();
   void loadKeys();
@@ -356,6 +369,7 @@ async function loadQuota() {
 // must not let an older response land after a newer one.
 let summaryRequestSeq = 0;
 let recordsRequestSeq = 0;
+let trendRequestSeq = 0;
 
 async function loadSummary() {
   const seq = ++summaryRequestSeq;
@@ -383,6 +397,36 @@ async function loadSummary() {
     if (seq === summaryRequestSeq) {
       summaryLoading.value = false;
     }
+  }
+}
+
+/**
+ * PH43: the trend's own read of the selected window. Deliberately separate from
+ * loadRecords(): the table page is a view choice, the window is the fact. The API
+ * returns newest-first, so a short read keeps the recent days and drops the older
+ * ones — `trendPartial` says so on screen instead of pretending the trend is whole.
+ */
+async function loadTrend() {
+  const seq = ++trendRequestSeq;
+  trendFailed.value = false;
+  try {
+    const result = await api.usageRecords({
+      page: 1,
+      size: TREND_PAGE_SIZE,
+      ...windowFromTo(),
+    });
+    if (seq !== trendRequestSeq) {
+      return; // a newer request won — this response is stale
+    }
+    trendRecords.value = result.items ?? [];
+    trendTotal.value = result.total ?? 0;
+  } catch {
+    if (seq !== trendRequestSeq) {
+      return;
+    }
+    trendRecords.value = [];
+    trendTotal.value = 0;
+    trendFailed.value = true; // #1065: a failed read says "failed", not "no data"
   }
 }
 
@@ -654,8 +698,15 @@ function formatTime(iso?: string): string {
         <UiTrendChart
           :points="trendPoints"
           :value-formatter="formatNumber"
+          :empty-text="trendFailed ? '趋势数据加载失败' : '暂无趋势数据'"
           data-testid="usage-trend-chart"
         />
+        <!-- PH43: a window bigger than one read says so, rather than passing off the
+             most recent slice as the whole trend. -->
+        <p v-if="trendPartial" class="next-usage__trend-note" data-testid="usage-trend-partial">
+          仅统计窗口内最近 {{ TREND_PAGE_SIZE }} 条记录（共
+          {{ trendTotal }} 条），更早的日期未计入。
+        </p>
       </div>
     </section>
 
@@ -1280,6 +1331,12 @@ function formatTime(iso?: string): string {
   background: var(--ui-card);
   color: var(--ui-primary-text);
   box-shadow: var(--ui-shadow-card);
+}
+
+.next-usage__trend-note {
+  margin: var(--ui-space-2) 0 0;
+  color: var(--ui-foreground-faint);
+  font-size: var(--ui-font-size-xs);
 }
 
 /* ---- analysis overview cards (Vben: value + icon, label under) ---- */
