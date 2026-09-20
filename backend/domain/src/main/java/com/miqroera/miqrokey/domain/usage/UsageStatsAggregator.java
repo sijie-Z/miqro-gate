@@ -461,11 +461,11 @@ public final class UsageStatsAggregator {
      * 未定价 rather than passing the sum off as a total (#758).
      *
      * <p>
-     * {@code cost} is the sum of the dimensions that <em>could</em> be priced, so an
-     * incomplete row still carries the known part of its amount and agrees with the
-     * group sum that contains it; it is a lower bound, not a total. Returning zero
-     * for such a row made the detail endpoint report 0 for usage the report valued
-     * at 0.002 (#710).
+     * {@code cost} is the sum of the dimensions that <em>could</em> be priced, so
+     * an incomplete row still carries the known part of its amount and agrees with
+     * the group sum that contains it; it is a lower bound, not a total. Returning
+     * zero for such a row made the detail endpoint report 0 for usage the report
+     * valued at 0.002 (#710).
      * </p>
      *
      * <p>
@@ -487,7 +487,8 @@ public final class UsageStatsAggregator {
         // The priced dimensions are summed even when the row is incomplete: that sum is
         // the known part of the amount (docs/usage-accounting.md §6.1, PARTIAL), and it
         // is what the group sums book for this same row through
-        // GroupAccumulator.addUsage. Returning zero here instead made a row's detail cost
+        // GroupAccumulator.addUsage. Returning zero here instead made a row's detail
+        // cost
         // disagree with the report that contains it.
         BigDecimal cost = pricedOrZero(basis, PriceTokenType.INPUT, in)
                 .add(pricedOrZero(basis, PriceTokenType.OUTPUT, out))

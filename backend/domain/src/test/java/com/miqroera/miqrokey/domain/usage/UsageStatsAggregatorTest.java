@@ -138,9 +138,9 @@ class UsageStatsAggregatorTest {
             // the priced part, as docs/usage-accounting.md §6.1 requires.
             BigDecimal inputCost = new BigDecimal("2000");
             UsageStatsAggregator.UsageAggRow aggRow = new UsageStatsAggregator.UsageAggRow("g", "G", PRODUCT, MODEL,
-                    CacheLevel.UPSTREAM, 1,
-                    new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null), inputCost, BigDecimal.ZERO,
-                    BigDecimal.ZERO, BigDecimal.ZERO, new UsageStatsAggregator.PricingGap(0, 500, 0, 0, 1, 0, 0),
+                    CacheLevel.UPSTREAM, 1, new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null),
+                    inputCost, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                    new UsageStatsAggregator.PricingGap(0, 500, 0, 0, 1, 0, 0),
                     UsageStatsAggregator.UsageAggRow.Outcome.NONE);
             BigDecimal grouped = UsageStatsAggregator.aggregate("model", List.of(aggRow), List.of()).totals().cost()
                     .upstreamPaid();
