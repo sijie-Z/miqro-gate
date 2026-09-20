@@ -299,10 +299,11 @@ public class PlatformOidcAuthService {
                 try {
                     insertLink(tenantId, user.id(), identity.sub());
                 } catch (DuplicateKeyException e) {
-                    // A link that appeared outside this lock (another instance, or an
-                    // operator action): the failed statement aborted the transaction,
-                    // so the winner cannot be looked up in here. Roll this attempt back
-                    // — the just-inserted user row included — and let the caller adopt
+                    // The link was written by a path that does not take this lock (the
+                    // row lock is database-wide, so a second instance is covered — this
+                    // is defensive). The failed statement aborted the transaction, so
+                    // the winner cannot be looked up in here. Roll this attempt back —
+                    // the just-inserted user row included — and let the caller adopt
                     // the winner's link.
                     throw new LinkRacedException();
                 }

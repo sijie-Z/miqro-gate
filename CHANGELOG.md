@@ -7,8 +7,10 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 
 - **OIDC 自动建号真正串行化（#1028）**：`PlatformOidcAuthService.provisionUser` 取的租户行锁此前是**装饰性的**
   ——「加锁 → 用户名存在性检查 → 插入」整段跑在自动提交下，`SELECT … FOR UPDATE` 在语句结束时就释放，两个并发的
-  首次登录可以同时看到一个空闲用户名并先后插入，撞上 `uq_users_tenant_username` 后以 500 收场（而不是预期里的
-  `USERNAME_CONFLICT`）。现在整段读-改-写落在一个事务里（`TransactionTemplate`，与 `AdminPriceSyncService` /
+  首次登录可以同时看到一个空闲用户名并先后插入，后插入者撞上 `uq_users_tenant_username`：这次请求发生在**浏览器
+  重定向流程**中，`DuplicateKeyException` 被 `DataIntegrityViolationException` 处理器接走，用户拿到的是一段
+  409 `RESOURCE_CONFLICT` 的 problem+json，而不是会话或带错误码的回跳（预期口径是 `USERNAME_CONFLICT`）。
+  现在整段读-改-写落在一个事务里（`TransactionTemplate`，与 `AdminPriceSyncService` /
   `QuotaSnapshotService` 同款写法），锁覆盖检查与插入；持有锁后**先重读身份链接**，并发的赢家被直接采纳，本请求
   不再留下一条没有链接、无法使用的孤儿用户行（#730 注释里记的那一种）。回归用例用 `users` 上的 BEFORE INSERT
   触发器把插入停在 `pg_sleep` 里，再用第二条连接以 `FOR UPDATE NOWAIT`（SQLSTATE `55P03`）判定锁是否真的还在。

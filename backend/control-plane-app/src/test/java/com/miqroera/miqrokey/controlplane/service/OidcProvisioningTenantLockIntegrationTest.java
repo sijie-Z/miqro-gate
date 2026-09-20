@@ -137,6 +137,9 @@ class OidcProvisioningTenantLockIntegrationTest {
                 + "BEGIN\n" + "    IF NEW.username = '" + PAUSE_USERNAME + "' THEN\n" + "        PERFORM pg_sleep(2);\n"
                 + "    END IF;\n" + "    RETURN NEW;\n" + "END;\n" + "$$ LANGUAGE plpgsql";
         jdbc.update(slowInsert, new MapSqlParameterSource());
+        // DROP first: a run that died before @AfterEach would otherwise leave the
+        // trigger behind and make every later run fail on CREATE TRIGGER.
+        jdbc.update("DROP TRIGGER IF EXISTS " + TRIGGER + " ON users", new MapSqlParameterSource());
         jdbc.update("CREATE TRIGGER " + TRIGGER + " BEFORE INSERT ON users FOR EACH ROW "
                 + "EXECUTE FUNCTION miqro_test_slow_user_insert()", new MapSqlParameterSource());
     }
