@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { UiTooltip } from '@/ui';
 import { createPinia, setActivePinia } from 'pinia';
 import NextUsageView from '@/views/next/NextUsageView.vue';
 import * as api from '@/api';
@@ -188,6 +189,31 @@ describe('NextUsageView', () => {
     expect(marks).toHaveLength(1);
     expect(marks[0]!.element.closest('.next-usage__quota-body')?.textContent).toContain(
       '本期用量 ¥0（0%）',
+    );
+  });
+
+  it('#1128: the record log shows how a row was attributed', async () => {
+    mockApi.usageRecords.mockResolvedValue({
+      ...records,
+      items: [
+        {
+          ...records.items![0]!,
+          resolutionStatus: 'POLICY_ROUTED',
+          claimSource: 'git_remote',
+          claimConfidence: 'MEDIUM',
+        },
+      ],
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const chip = wrapper.find('[data-testid="usage-attribution-chip"]');
+    expect(chip.exists()).toBe(true);
+    expect(chip.text()).toContain('未归属策略路由');
+    const notes = wrapper.findAllComponents(UiTooltip).map((t) => t.props('text'));
+    expect(notes.some((note) => note.includes('客户端声明来源：仓库远端，置信度 MEDIUM'))).toBe(
+      true,
     );
   });
 

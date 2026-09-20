@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { UiTooltip } from '@/ui';
 import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import NextAdminUsageView from '@/views/next/NextAdminUsageView.vue';
@@ -431,6 +432,37 @@ describe('NextAdminUsageView', () => {
     expect(table).toContain('未定价');
     expect(table).toContain('120ms / 210ms'); // 用时 / 首字
     expect(table).toContain('Anthropic');
+  });
+
+  it('#1128: the request log shows how a row was attributed, and stays quiet on the default route', async () => {
+    mockApi.adminUsageRecords.mockResolvedValue({
+      items: [
+        recordRow(0, {
+          resolutionStatus: 'RESOLVED_HEADER',
+          claimSource: 'prompt_url',
+          claimConfidence: 'HIGH',
+        }),
+        recordRow(1, { resolutionStatus: 'SOLE_BINDING' }),
+      ],
+      page: 1,
+      size: 20,
+      total: 2,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Every authenticated request walks the ladder, so the chip is a filter, not a
+    // decoration: the single-binding default gets a dash, the decided row gets a chip.
+    const chips = wrapper.findAll('[data-testid="usage-attribution-chip"]');
+    expect(chips).toHaveLength(1);
+    expect(chips[0]!.text()).toContain('按请求头声明');
+    // Value-level too: claimSource and claimConfidence are both strings, so a swapped
+    // wiring type-checks and would ship silently. (The badge sits *inside* the tooltip's
+    // slot, so the note is read off the tooltip list, not by searching downwards.)
+    const notes = wrapper.findAllComponents(UiTooltip).map((t) => t.props('text'));
+    expect(notes.some((note) => note.includes('客户端声明来源：提示中的链接，置信度 HIGH'))).toBe(
+      true,
+    );
   });
 
   /** Column headers of a rendered UiTable, in column order. */

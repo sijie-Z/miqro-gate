@@ -38,6 +38,27 @@ public record UsageRecordPage(List<UsageRecordView> items, long page, long size,
      * bound rather than a total. It is the amount the report books for this row;
      * the flag is what says not to present it as the full amount.
      * </p>
+     *
+     * <p>
+     * Attribution (#1128, CAA V54): {@code resolutionStatus} is the server's
+     * verdict on which project the request belonged to — four values are produced
+     * today ({@code RESOLVED_HEADER} / {@code RESOLVED_SUFFIX} /
+     * {@code SOLE_BINDING} / {@code POLICY_ROUTED}); {@code UNATTRIBUTED} /
+     * {@code AMBIGUOUS} are reserved by the shared vocabulary — while
+     * {@code claimSource} / {@code claimConfidence} are what the client
+     * <em>claimed</em> ({@code prompt_url}, {@code tool_path}, … at
+     * HIGH/MEDIUM/LOW). The two are kept apart on purpose: the claim is unverified
+     * input, the status is the ruling. Every authenticated proxy request walks the
+     * ladder, so {@code null} means a row written before V54 (or outside the proxy
+     * path). A single-binding key's rows are never null: an ordinary one records
+     * {@code RESOLVED_SUFFIX}, because a key is minted with its project's tag as
+     * its suffix and the suffix step matching leaves the sole-binding fallback
+     * untried. {@code SOLE_BINDING} is what such a key records when the presented
+     * suffix does not match its binding — a non-matching suffix is cosmetic
+     * (ADR-0018 keys may carry arbitrary labels) and the ladder falls through. The
+     * claim fields are null both when the client sent nothing and when it sent
+     * something the resolver dropped, so they do not mean "no claim was made".
+     * </p>
      */
     public record UsageRecordView(Instant occurredAt, String modelId, CacheLevel cacheLevel, Long inputTokens,
             Long outputTokens, Long cacheReadInputTokens, Long cacheCreationInputTokens, Long totalTokens,
@@ -45,6 +66,6 @@ public record UsageRecordPage(List<UsageRecordView> items, long page, long size,
             boolean isComplete, boolean usageMissing, UUID virtualKeyId, String clientIp, Long netInputTokens,
             Long netOutputTokens, Long netCacheReadInputTokens, Long netCacheCreationInputTokens, boolean adjusted,
             String providerProductName, Long ttfbMs, String wireProtocol, String requestStatus, BigDecimal cost,
-            boolean priced) {
+            boolean priced, String resolutionStatus, String claimSource, String claimConfidence) {
     }
 }

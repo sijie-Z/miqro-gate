@@ -1,10 +1,12 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import jakarta.servlet.http.Cookie;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -159,6 +161,39 @@ class MeUsageApiIntegrationTest {
                 .andExpect(jsonPath("$.items[0].upstreamStatusCode").value(200))
                 .andExpect(jsonPath("$.items[0].isComplete").value(true))
                 .andExpect(jsonPath("$.items[0].usageMissing").value(false));
+    }
+
+    @Test
+    @DisplayName("#1128: the self-service records carry the same attribution fields as the admin ones")
+    void recordsCarryAttribution() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID keyId = fx.createOwnKey();
+        fx.insertPrices();
+        // Distinct instants: the ordering asserted below must not rest on a tie between
+        // two rows inserted in the same second.
+        fx.insertAttributedUsage(keyId, "chatcmpl-attr", 10L, 5L, Instant.now().minusSeconds(120), "RESOLVED_SUFFIX",
+                "git_remote", "MEDIUM");
+        // Fresh row (the me-side fixture timestamps it at now), so it sorts above the
+        // attributed one without relying on a tie-break.
+        fx.insertUsage(keyId, "chatcmpl-plain", 10L, 5L);
+
+        MvcResult r = mockMvc.perform(get("/api/v1/me/usage/records").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(2)).andReturn();
+        JsonNode items = objectMapper.readTree(r.getResponse().getContentAsString()).path("items");
+        JsonNode plain = items.get(0); // newest first
+        JsonNode attributed = items.get(1);
+
+        // The self-service mapper is a second, separately written mapper — a swap there
+        // is invisible to the admin test, so it has to be asserted here too.
+        Assertions.assertThat(attributed.path("resolutionStatus").asText()).isEqualTo("RESOLVED_SUFFIX");
+        Assertions.assertThat(attributed.path("claimSource").asText()).isEqualTo("git_remote");
+        Assertions.assertThat(attributed.path("claimConfidence").asText()).isEqualTo("MEDIUM");
+        // Present-and-null, not absent: doesNotExist() would also accept a field the
+        // API
+        // stopped sending, which is a different contract.
+        Assertions.assertThat(plain.path("resolutionStatus").isNull()).isTrue();
+        Assertions.assertThat(plain.path("claimSource").isNull()).isTrue();
+        Assertions.assertThat(plain.path("claimConfidence").isNull()).isTrue();
     }
 
     @Test
@@ -326,6 +361,30 @@ class MeUsageApiIntegrationTest {
                             .addValue("credentialId", credentialId).addValue("model", MODEL)
                             .addValue("cacheLevel", cacheLevel).addValue("input", input).addValue("output", output)
                             .addValue("total", input + output).addValue("occurredAt", Timestamp.from(Instant.now())));
+        }
+
+        /**
+         * With the CAA attribution the gateway records for a resolved request (#1128) —
+         * the self-service mapper has to carry the same three fields as the admin one.
+         */
+        void insertAttributedUsage(UUID keyId, String providerRequestId, long input, long output, Instant occurredAt,
+                String resolutionStatus, String claimSource, String claimConfidence) {
+            jdbc.update("""
+                    INSERT INTO usage_event
+                        (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
+                         credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
+                         upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at,
+                         resolution_status, claim_source, claim_confidence)
+                    VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :productId, :credentialId, :model,
+                            'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, 'greq-attr', :occurredAt,
+                            :resolutionStatus, :claimSource, :claimConfidence)
+                    """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                    .addValue("providerRequestId", providerRequestId).addValue("keyId", keyId)
+                    .addValue("projectId", projectId).addValue("productId", productId)
+                    .addValue("credentialId", credentialId).addValue("model", MODEL).addValue("input", input)
+                    .addValue("output", output).addValue("total", input + output)
+                    .addValue("occurredAt", Timestamp.from(occurredAt)).addValue("resolutionStatus", resolutionStatus)
+                    .addValue("claimSource", claimSource).addValue("claimConfidence", claimConfidence));
         }
     }
 

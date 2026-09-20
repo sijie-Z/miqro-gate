@@ -261,6 +261,39 @@ class AdminUsageApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("#1128: records carry the attribution ruling and the claim it judged, and stay null when there was none")
+    void recordsCarryAttribution() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertPrices();
+        Instant attributedAt = Instant.now().minusSeconds(120);
+        Instant plainAt = Instant.now().minusSeconds(60);
+        // The gateway writes the ruling and the claim side by side. A row with neither
+        // is one written before V54 (or outside the proxy path) — every authenticated
+        // proxy request walks the ladder, so this fixture is that older shape, not a
+        // single-binding key.
+        fx.insertAttributedUsage(ownKey, "chatcmpl-attr", 10L, 5L, attributedAt, "RESOLVED_HEADER", "prompt_url",
+                "HIGH");
+        fx.insertUsage(ownKey, "chatcmpl-plain", 10L, 5L, MODEL, plainAt);
+
+        MvcResult r = mockMvc.perform(get("/api/v1/admin/usage/records").cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(2)).andReturn();
+        JsonNode items = objectMapper.readTree(r.getResponse().getContentAsString()).path("items");
+        JsonNode plain = items.get(0); // newest first
+        JsonNode attributed = items.get(1);
+
+        Assertions.assertThat(attributed.path("resolutionStatus").asText()).isEqualTo("RESOLVED_HEADER");
+        Assertions.assertThat(attributed.path("claimSource").asText()).isEqualTo("prompt_url");
+        Assertions.assertThat(attributed.path("claimConfidence").asText()).isEqualTo("HIGH");
+        // Null, not "" — and present rather than omitted: a reader has to be able to
+        // tell
+        // "no attribution recorded" from "the field is not in this response".
+        Assertions.assertThat(plain.path("resolutionStatus").isNull()).isTrue();
+        Assertions.assertThat(plain.path("claimSource").isNull()).isTrue();
+        Assertions.assertThat(plain.path("claimConfidence").isNull()).isTrue();
+    }
+
+    @Test
     @DisplayName("records survive a product missing from the catalog (LEFT JOIN, never inner) (#758)")
     void recordsSurviveMissingCatalogProduct() throws Exception {
         fx.insertCatalogAndGrant();
@@ -554,6 +587,31 @@ class AdminUsageApiIntegrationTest {
                             .addValue("credentialId", credentialId).addValue("model", model).addValue("input", input)
                             .addValue("output", output).addValue("total", input + output)
                             .addValue("occurredAt", Timestamp.from(occurredAt)));
+        }
+
+        /**
+         * A row shaped the way the gateway writes one after the CAA ladder ruled
+         * (#1128): the server's resolution plus the client's claim, which is unverified
+         * input.
+         */
+        void insertAttributedUsage(UUID keyId, String providerRequestId, long input, long output, Instant occurredAt,
+                String resolutionStatus, String claimSource, String claimConfidence) {
+            jdbc.update("""
+                    INSERT INTO usage_event
+                        (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
+                         credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
+                         upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at,
+                         resolution_status, claim_source, claim_confidence)
+                    VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :productId, :credentialId, :model,
+                            'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, 'greq-attr', :occurredAt,
+                            :resolutionStatus, :claimSource, :claimConfidence)
+                    """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                    .addValue("providerRequestId", providerRequestId).addValue("keyId", keyId)
+                    .addValue("projectId", projectId).addValue("productId", productId)
+                    .addValue("credentialId", credentialId).addValue("model", MODEL).addValue("input", input)
+                    .addValue("output", output).addValue("total", input + output)
+                    .addValue("occurredAt", Timestamp.from(occurredAt)).addValue("resolutionStatus", resolutionStatus)
+                    .addValue("claimSource", claimSource).addValue("claimConfidence", claimConfidence));
         }
 
         /**
