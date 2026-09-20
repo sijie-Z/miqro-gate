@@ -249,6 +249,15 @@ function activateTab(tab: ShellTab) {
   void router.push(target);
 }
 
+/** Where a sidebar click should land. Clicking the entry you are already on
+ *  must not navigate at all: a name-only push drops `route.query` and would
+ *  silently clear URL-backed view state while the user only meant to "stay
+ *  here" (PH41). Other entries go to the bare route -- the sidebar navigates
+ *  to a section, it does not resurrect that section's last filter. */
+function navTarget(item: NavItem): string | { name: string } {
+  return isActive(item.name) ? route.fullPath : { name: item.name };
+}
+
 function closeTab(name: string) {
   const index = tabs.value.findIndex((t) => t.name === name);
   if (index === -1) return;
@@ -573,7 +582,7 @@ async function handleLogout() {
             :disabled="!iconOnly"
           >
             <router-link
-              :to="{ name: item.name }"
+              :to="navTarget(item)"
               class="new-shell__nav-item"
               :class="{ 'new-shell__nav-item--active': isActive(item.name) }"
               @mouseenter="prefetchRoute(item.name)"
