@@ -835,7 +835,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/budgets?month` | 全部项目当月预算 + 水位（`month` 缺省为当月） |
 | `GET /api/v1/admin/projects/{projectId}/budget?month` | 单项目预算 + 水位 |
 | `PUT /api/v1/admin/projects/{projectId}/budget` | 创建/更新（按 `(project, month)` upsert）：`{ "month", "amount", "currency"?, "alertThresholdPct"? }` |
-| `DELETE /api/v1/admin/projects/{projectId}/budget?month` | 删除（`204`） |
+| `DELETE /api/v1/admin/projects/{projectId}/budget?month` | 删除（`204`）。**I21 删除前置依赖检查（#1046）**：删除**当月**预算时，若仍有 `BUDGET_THRESHOLD` 告警规则指向该项目，返回 `409 RESOURCE_IN_USE` + `dependencies: [{type:"ALERT_RULE", id, name, detail:"已启用\|已停用"}]`。**依赖是月度的**——`AlertEvaluator.budgetWatermark` 只解析 `YearMonth.now()` 那一个月，所以删过去/将来月份不受影响、照常 `204`（否则历史将永远无法清理）。引用藏在 `alert_rules.scope_json->>'projectId'`（jsonb，无外键），且匹配时对存储值取 `LOWER(...)`：写入侧经 `UUID.fromString` 接受非规范拼写并原样入库，等值匹配会漏 |
 
 **响应 `BudgetView`**：
 

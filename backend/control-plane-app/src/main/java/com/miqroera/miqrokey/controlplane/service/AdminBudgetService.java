@@ -1,6 +1,7 @@
 package com.miqroera.miqrokey.controlplane.service;
 
 import com.miqroera.miqrokey.controlplane.dto.BudgetView;
+import com.miqroera.miqrokey.controlplane.dto.ResourceDependency;
 import com.miqroera.miqrokey.domain.model.Budget;
 import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.repository.BudgetRepository;
@@ -8,6 +9,8 @@ import com.miqroera.miqrokey.domain.repository.ProjectRepository;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,13 +36,15 @@ public class AdminBudgetService {
     private final ProjectRepository projectRepository;
     private final AdminUsageStatsService usageStatsService;
     private final AuditService auditService;
+    private final NamedParameterJdbcTemplate jdbc;
 
     public AdminBudgetService(BudgetRepository budgetRepository, ProjectRepository projectRepository,
-            AdminUsageStatsService usageStatsService, AuditService auditService) {
+            AdminUsageStatsService usageStatsService, AuditService auditService, NamedParameterJdbcTemplate jdbc) {
         this.budgetRepository = budgetRepository;
         this.projectRepository = projectRepository;
         this.usageStatsService = usageStatsService;
         this.auditService = auditService;
+        this.jdbc = jdbc;
     }
 
     public List<BudgetView> monthlyView(UUID tenantId, String month) {
@@ -77,9 +82,50 @@ public class AdminBudgetService {
         return view;
     }
 
+    /**
+     * Deletes the (project, month) budget. Mirrors
+     * {@link AdminQuotaRuleService#delete} and
+     * {@link WebhookEndpointService#delete}: a budget a live
+     * {@code BUDGET_THRESHOLD} alert rule is currently reading is not silently
+     * orphaned (#1046).
+     *
+     * <p>
+     * The dependency is <em>month-scoped</em>, unlike the quota-rule one.
+     * {@code AlertEvaluator.budgetWatermark} resolves the project's budget for
+     * {@code YearMonth.now()} only, so what breaks a rule is the disappearance of
+     * <em>this</em> month's budget: the rule stays enabled and listed, its
+     * threshold still rendered, while {@code view()} throws BUDGET_NOT_FOUND into
+     * the evaluator's catch and every evaluation returns null — it can never fire
+     * again for the rest of the month. Deleting a past or future month breaks
+     * nothing (no rule reads it) and stays allowed, so history stays cleanable.
+     * </p>
+     *
+     * <p>
+     * The reference lives in {@code alert_rules.scope_json->>'projectId'} — a jsonb
+     * field with no foreign key — so nothing at the database level would catch it.
+     * The match lower-cases the stored value rather than casting the parameter to
+     * uuid: the write side accepts non-canonical spellings via
+     * {@code UUID.fromString} and stores them verbatim, and a cast would turn an
+     * existing dirty row into a 500 instead of a dependency.
+     * </p>
+     */
     @Transactional
     public void delete(UUID tenantId, UUID projectId, String month, AuditContext context) {
         validateMonth(month);
+        if (month.equals(YearMonth.now().toString())) {
+            List<ResourceDependency> dependents = jdbc.query("""
+                    SELECT id, name, enabled FROM alert_rules
+                    WHERE tenant_id = :tenantId AND type = 'BUDGET_THRESHOLD'
+                      AND LOWER(scope_json ->> 'projectId') = :projectId
+                    ORDER BY name
+                    """, new MapSqlParameterSource("tenantId", tenantId).addValue("projectId", projectId.toString()),
+                    (rs, rowNum) -> new ResourceDependency("ALERT_RULE", (UUID) rs.getObject("id"),
+                            rs.getString("name"), rs.getBoolean("enabled") ? "已启用" : "已停用"));
+            if (!dependents.isEmpty()) {
+                throw new ResourceInUseException("本月预算被 " + dependents.size() + " 条告警规则引用，删除后这些规则将不再触发；请先删除或改配它们。",
+                        dependents);
+            }
+        }
         if (!budgetRepository.delete(tenantId, projectId, month)) {
             throw new ApiException(HttpStatus.NOT_FOUND, "BUDGET_NOT_FOUND", "该月份未设置预算。");
         }
