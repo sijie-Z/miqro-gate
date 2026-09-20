@@ -217,8 +217,8 @@ class ApiKeyAuthFilterTest {
 
         assertThat(response.getStatus()).isEqualTo(401);
         assertThat(messages(Level.WARN)).isNotEmpty();
-        assertThat(messages(Level.WARN))
-                .allSatisfy(line -> assertThat(line).doesNotContain("reason=NO_CREDENTIAL] Billing channel rejected ["));
+        assertThat(messages(Level.WARN)).allSatisfy(
+                line -> assertThat(line).doesNotContain("reason=NO_CREDENTIAL] Billing channel rejected ["));
         assertThat(messages(Level.WARN)).allSatisfy(line -> assertThat(line.length()).isLessThan(300));
         JsonNode body = new ObjectMapper().readTree(response.getContentAsString());
         assertThat(body.path("requestId").asText()).isEqualTo(forged);

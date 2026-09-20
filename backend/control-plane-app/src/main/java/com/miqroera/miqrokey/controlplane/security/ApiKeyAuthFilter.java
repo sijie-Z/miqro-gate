@@ -154,14 +154,15 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
 
     /**
      * Every client-supplied value that reaches a structured log line goes through
-     * this — the {@code sub} claim, which is still unverified at that point, and the
-     * {@code X-Request-Id} header, which is unverified by definition. Control
+     * this — the {@code sub} claim, which is still unverified at that point, and
+     * the {@code X-Request-Id} header, which is unverified by definition. Control
      * characters are flattened so a crafted value cannot forge extra log lines; the
-     * delimiters of the surrounding {@code [key=value, …]} structure are neutralized
-     * so it cannot close that structure early and read as a second event; and the
-     * value is bounded so an oversized one cannot turn every rejection into a
-     * log-amplification vector. This applies to the log only — the envelope echoes
-     * the caller's token verbatim (contract §2), via {@link #requestId}.
+     * delimiters of the surrounding {@code [key=value, …]} structure are
+     * neutralized so it cannot close that structure early and read as a second
+     * event; and the value is bounded so an oversized one cannot turn every
+     * rejection into a log-amplification vector. This applies to the log only — the
+     * envelope echoes the caller's token verbatim (contract §2), via
+     * {@link #requestId}.
      */
     private static String forLog(String value) {
         String flat = value.replaceAll("[\\p{C}\\p{Zl}\\p{Zp}]", "?").replaceAll("[\\[\\],=]", "?");
