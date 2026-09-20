@@ -26,7 +26,12 @@ import {
 import { UiButton, UiDonut, UiStatusBadge, UiTooltip } from '@/ui';
 import { CHART_OTHER_COLOR, CHART_PALETTE } from '@/lib/chart-palette';
 import { costGapNote, type PricingGapFields } from '@/lib/usage-pricing';
-import type { SubscriptionView, UsageGroup, VirtualKeyView } from '@/types/generated-api';
+import type {
+  ModelApprovalView,
+  SubscriptionView,
+  UsageGroup,
+  VirtualKeyView,
+} from '@/types/generated-api';
 import { actionLabel } from '@/utils/audit-labels';
 import { localDayKey } from '@/utils/datetime';
 
@@ -278,8 +283,23 @@ function relativeTime(iso?: string): string {
   return localDayKey(iso);
 }
 
-/** Admin: recent audit events; regular users: own keys + model requests. */
-async function loadFeed() {
+/**
+ * Admin: recent audit events; regular users: own keys + model requests.
+ *
+ * Both inputs are handed in rather than fetched here (#1138). The cards already read
+ * the key list, so asking for it again was a second request for one page's worth of
+ * data.
+ *
+ * `approvalsPromise` arrives already started — that is what un-chains it from the
+ * summary — but it is *awaited* here, inside this try/catch, on purpose: an approval
+ * read that fails must empty this panel and nothing else. Awaiting it in `load()`'s
+ * Promise.all instead would make it fatal to the whole page (#1138 review; the issue
+ * asks for exactly this degradation).
+ */
+async function loadFeed(
+  keyList: VirtualKeyView[],
+  approvalsPromise: Promise<ModelApprovalView[]> | null,
+) {
   try {
     if (isAdmin.value) {
       const events = await api.auditEvents({});
@@ -291,10 +311,7 @@ async function loadFeed() {
         tone: 'info' as const,
       }));
     } else {
-      const [keyList, approvals] = await Promise.all([
-        api.listVirtualKeys(),
-        api.listMyModelApprovals(),
-      ]);
+      const approvals = approvalsPromise ? await approvalsPromise : [];
       const items = [
         ...keyList.slice(0, 4).map((k) => ({
           ts: k.createdAt ?? '',
@@ -387,6 +404,15 @@ async function load() {
     const summaryPromise = isAdmin.value
       ? api.adminUsageSummary({ groupBy: 'project' })
       : api.usageSummary('project');
+    // #1138: started here so it rides the same wave as the summary instead of waiting
+    // behind it — but awaited in loadFeed, not in the Promise.all below: an approval
+    // read that fails may empty that panel and nothing else. Admins do not read
+    // approvals at all.
+    const approvalsPromise = isAdmin.value ? null : api.listMyModelApprovals();
+    // On the paths where load() throws before loadFeed runs, nothing would await this;
+    // mark it handled so a doomed request cannot surface as an unhandled rejection.
+    // (Awaiting it later still sees the rejection — this only attaches a handler.)
+    approvalsPromise?.catch(() => undefined);
     const [keyList, summary] = await Promise.all([api.listVirtualKeys(), summaryPromise]);
     keys.value = keyList;
     // adminUsageSummary groups are the optional-field hub GroupSummary rows;
@@ -396,7 +422,7 @@ async function load() {
     if (isAdmin.value) {
       subscriptions.value = await api.listSubscriptions();
     }
-    await loadFeed();
+    await loadFeed(keyList, approvalsPromise);
   } catch (error) {
     if (error instanceof ApiError) {
       loadError.value = error.message;

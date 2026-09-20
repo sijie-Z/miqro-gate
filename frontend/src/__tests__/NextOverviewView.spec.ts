@@ -281,4 +281,46 @@ describe('NextOverviewView', () => {
     expect(wrapper.text()).toContain('还没有用量记录');
     expect(wrapper.find('[data-testid="overview-ledger"]').exists()).toBe(false); // non-admin
   });
+
+  it('#1138: one mount must not fetch the same key list twice', async () => {
+    // The cards read the key list and the feed read it again for the same mount — two
+    // requests for one page's worth of data. The call count *is* the assertion: the
+    // rendered output is identical either way, which is why this went unnoticed.
+    mountView();
+    await flushPromises();
+
+    expect(mockApi.listVirtualKeys).toHaveBeenCalledTimes(1);
+  });
+
+  it('#1138: the model-approval read must not wait behind the usage summary', async () => {
+    // Pin the summary wave in the air: the approval read shares nothing with it, so it
+    // has to be in flight regardless. Asserting on the *call* rather than on rendered
+    // text is what tells a real serial chain apart from render ordering — a text
+    // assertion would pass either way once the promise resolves.
+    mockApi.usageSummary.mockReturnValue(new Promise(() => {}));
+
+    mountView();
+    await flushPromises();
+
+    expect(mockApi.listMyModelApprovals).toHaveBeenCalled();
+  });
+
+  it('#1138: a failed approval read empties the feed, not the page', async () => {
+    // The issue's own requirement: the approval read may fail on its own without taking
+    // the dashboard down with it. It starts on the summary's wave (so it does not wait
+    // behind it) but is awaited *inside* the feed, where a failure can only empty that
+    // panel. Awaiting it in the page's Promise.all instead — the first draft of this fix
+    // — blanked the stat cards, the key grid and the cost donut along with it, which the
+    // Playwright baseline caught.
+    mockApi.listMyModelApprovals.mockRejectedValue(new Error('approvals down'));
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // The page still rendered its own data…
+    expect(wrapper.find('[data-testid="overview-stats"]').text()).not.toContain('加载失败');
+    expect(wrapper.find('[data-testid="overview-keys"]').text()).toContain('claude-code-main');
+    // …and only the activity panel went empty.
+    expect(wrapper.find('[data-testid="overview-feed"]').text()).toContain('还没有动态记录');
+  });
 });
