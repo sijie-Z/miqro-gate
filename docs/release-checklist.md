@@ -91,7 +91,7 @@
 
 - [x] readiness/liveness、结构化日志、Prometheus 指标和 request ID 可用。
 - [ ] usage 队列、解析失败、供应商错误、Plan 同步、Webhook、磁盘和备份告警已测试。
-- [x] Webhook 签名、重试、dead-letter 和人工重放测试通过。
+- [x] Webhook 签名、指数退避重试（最多 3 次）与**耗尽后静默终止**语义验证通过；dead-letter 与人工重放**不在本仓能力内**（见 operations-runbook §8；2026-09-20 #245 拍板 Q4A）。
 - [x] Provider 故障不自动切换，通知模板和 CC Switch 用户自选流程已准备。
 - [x] `operations-runbook.md` 的凭证轮换、吊销、数据库故障、备份恢复和 key 丢失流程已演练。
 

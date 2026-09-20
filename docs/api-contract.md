@@ -734,7 +734,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `POST /api/v1/admin/webhooks/{id}/test` | 发送 HMAC 签名测试载荷，返回上游 HTTP 状态或脱敏错误 |
 | `GET /api/v1/admin/webhooks/{id}/deliveries` | 投递历史 |
 
-投递签名：`X-MiQroKey-Signature: sha256=<HMAC-SHA256(secret, payload) hex>`，payload 为事件 JSON（eventId/ruleId/type/value/occurredAt）。错误码：`WEBHOOK_URL_REJECTED`（400，SSRF 门控）、`WEBHOOK_NOT_FOUND`（404）。
+投递签名：`X-MiQroKey-Signature: sha256=<HMAC-SHA256(secret, payload) hex>`，payload 为事件 JSON（eventId/ruleId/type/value/occurredAt）。错误码：`WEBHOOK_URL_REJECTED`（400，SSRF 门控）、`WEBHOOK_NOT_FOUND`（404）。**投递语义为 at-least-once**：同 `eventId` 可能重复到达，接收方应按 `eventId` 幂等去重。
 
 **字段约束（PH23）**：创建时 `name` 必填且非空白、`≤200`（列宽 `varchar(200)`）；`url` 必填且非空白、`≤500`（列宽 `varchar(500)`）；`secret` 必填且非空白；`timeoutMs` 缺省 `5000`，给定时须落在 `1000..600000` ms（与 MCP 上游超时同域，§5.11）。PATCH 为部分更新：缺省字段保持原值，`name` 出现即不得为空白、`≤200`，`timeoutMs` 出现即须落在同一区间。违反者一律 `400 VALIDATION_FAILED`（含 `fieldErrors`），不再以 `409 RESOURCE_CONFLICT`（NOT NULL/长度违约）或 `500` 的形式漏出。
 
