@@ -16,7 +16,7 @@ function control(wrapper: ReturnType<typeof mount>): HTMLInputElement {
 describe('UiInput labelling', () => {
   it('associates the visible label with the input', () => {
     const wrapper = mount(UiInput, { props: { label: '回调地址', modelValue: '' } });
-    const labels = [...control(wrapper).labels];
+    const labels = [...(control(wrapper).labels ?? [])];
     expect(labels.map((label) => label.textContent?.trim())).toEqual(['回调地址']);
   });
 

@@ -18,7 +18,7 @@ function control(wrapper: ReturnType<typeof mount>): HTMLButtonElement {
 describe('UiSelect labelling', () => {
   it('associates the visible label with the trigger', () => {
     const wrapper = mount(UiSelect, { props: { label: '供应商产品', options: OPTIONS } });
-    const labels = [...control(wrapper).labels];
+    const labels = [...(control(wrapper).labels ?? [])];
     expect(labels.map((label) => label.textContent?.trim())).toEqual(['供应商产品']);
   });
 
@@ -26,7 +26,7 @@ describe('UiSelect labelling', () => {
     const wrapper = mount(UiSelect, {
       props: { label: '项目', required: true, options: OPTIONS },
     });
-    const labels = [...control(wrapper).labels];
+    const labels = [...(control(wrapper).labels ?? [])];
     expect(labels.map((label) => label.textContent?.trim())).toEqual(['项目 *']);
   });
 
