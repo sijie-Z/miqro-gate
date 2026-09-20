@@ -46,24 +46,36 @@ describe('list views survive a null payload from the API (#PH20-C)', () => {
     vi.restoreAllMocks();
   });
 
-  for (const [name, load] of VIEWS) {
-    it(`${name} renders instead of throwing during render`, async () => {
-      stubNullFetch();
-      const mod = (await load()) as { default: Parameters<typeof mount>[0] };
-      const errors: unknown[] = [];
-      const wrapper = mount(mod.default, {
-        global: {
-          plugins: [createPinia()],
-          config: { errorHandler: (e) => errors.push(e) },
-        },
-      });
-      await flushPromises();
+  // The budget covers a cold module graph, not the assertion: every case awaits its own
+  // view's dynamic import, and in a full parallel run that load alone measured 5040ms
+  // against vitest's zero-margin 5s default — a required check went red on a boundary
+  // that has nothing to do with what is being asserted (#1127). Raising the *global*
+  // default was rejected: it would also delay the failure of a genuinely hung test.
+  // Each graph loads once per file, so this is a ceiling rather than a cost.
+  const COLD_LOAD_TIMEOUT_MS = 20_000;
 
-      expect(
-        errors.map((e) => String((e as Error)?.message ?? e)),
-        `${name} must not throw while rendering a null list`,
-      ).toEqual([]);
-      wrapper.unmount();
-    });
+  for (const [name, load] of VIEWS) {
+    it(
+      `${name} renders instead of throwing during render`,
+      { timeout: COLD_LOAD_TIMEOUT_MS },
+      async () => {
+        stubNullFetch();
+        const mod = (await load()) as { default: Parameters<typeof mount>[0] };
+        const errors: unknown[] = [];
+        const wrapper = mount(mod.default, {
+          global: {
+            plugins: [createPinia()],
+            config: { errorHandler: (e) => errors.push(e) },
+          },
+        });
+        await flushPromises();
+
+        expect(
+          errors.map((e) => String((e as Error)?.message ?? e)),
+          `${name} must not throw while rendering a null list`,
+        ).toEqual([]);
+        wrapper.unmount();
+      },
+    );
   }
 });
