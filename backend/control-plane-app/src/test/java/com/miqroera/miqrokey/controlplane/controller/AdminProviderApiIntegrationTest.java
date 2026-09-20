@@ -294,11 +294,31 @@ class AdminProviderApiIntegrationTest {
 
         SeatFixture released = withCurrentVersion(seat);
         // Asking for ASSIGNED without naming anyone used to write a row that is
-        // ASSIGNED and
-        // unassigned at once — the state the assignee/status biconditional exists to
-        // forbid.
+        // ASSIGNED
+        // and unassigned at once — the state the biconditional exists to forbid.
         mockMvc.perform(seatPatch(released, Map.of("status", "ASSIGNED"))).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("SEAT_ASSIGNEE_MISMATCH"));
+    }
+
+    @Test
+    @DisplayName("#1133: naming a member on a seat that will not be ASSIGNED is refused")
+    void seatPatchCannotNameAMemberWithoutAssigningTheSeat() throws Exception {
+        SeatFixture seat = givenAssignedSeat();
+        mockMvc.perform(seatPatch(seat, Map.of("status", "AVAILABLE"))).andExpect(status().isOk());
+        SeatFixture released = withCurrentVersion(seat);
+
+        // Both shapes used to answer 200 and drop the member: the guard could only ever
+        // fire from the other end, and the assignee is nulled whenever the seat is not
+        // ASSIGNED.
+        mockMvc.perform(seatPatch(released, Map.of("assignedUserId", seat.assignedUserId())))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("SEAT_ASSIGNEE_MISMATCH"));
+        mockMvc.perform(seatPatch(released, Map.of("assignedUserId", seat.assignedUserId(), "status", "AVAILABLE")))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("SEAT_ASSIGNEE_MISMATCH"));
+
+        // Neither refusal wrote anything, and a plain release still works.
+        mockMvc.perform(get("/api/v1/admin/subscriptions/" + seat.subscriptionId() + "/seats").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].seatStatus").value("AVAILABLE"))
+                .andExpect(jsonPath("$[0].assignedUserId").doesNotExist());
     }
 
     /**

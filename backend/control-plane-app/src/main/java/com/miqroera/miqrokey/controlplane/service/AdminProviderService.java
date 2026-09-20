@@ -197,15 +197,22 @@ public class AdminProviderService {
                 ? (assignedUserId != null ? assignedUserId : (UUID) current.get("assigned_user_id"))
                 : null;
         String effectiveDisplayName = displayName != null ? displayName : (String) current.get("display_name");
-        if ((effectiveStatus == SeatStatus.ASSIGNED) != (effectiveAssignee != null)) {
-            // Both halves are refusals, not write-backs: an ASSIGNED seat with nobody on
-            // it,
-            // and an assignee on a seat that is not ASSIGNED, are states the read view and
-            // the release path would each contradict.
+        // Both ends of the biconditional are refusals, not write-backs. They are
+        // written as
+        // two checks rather than one XOR because effectiveAssignee is nulled above
+        // whenever
+        // the seat is not ASSIGNED — under an XOR the second end could never fire, and
+        // the
+        // caller naming a member on a seat that will not be ASSIGNED would get a 200
+        // that
+        // silently drops that member.
+        if (effectiveStatus == SeatStatus.ASSIGNED && effectiveAssignee == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "SEAT_ASSIGNEE_MISMATCH",
-                    effectiveStatus == SeatStatus.ASSIGNED
-                            ? "席位状态为「已分配」时必须指定成员；请提交 assignedUserId，或改用其他状态。"
-                            : "指定了成员但席位状态不是「已分配」；请同时提交 status=ASSIGNED。");
+                    "席位状态为「已分配」时必须指定成员；请提交 assignedUserId，或改用其他状态。");
+        }
+        if (effectiveStatus != SeatStatus.ASSIGNED && assignedUserId != null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "SEAT_ASSIGNEE_MISMATCH",
+                    "指定了成员但席位状态不是「已分配」；请同时提交 status=ASSIGNED。");
         }
 
         int rows = jdbc.update("""
