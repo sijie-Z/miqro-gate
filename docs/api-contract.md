@@ -1109,6 +1109,10 @@ Server 级（谁能调用整个服务）+ Tool 级（谁可调用某工具）ACL
 
 - 名称：1–64 字符、同一服务唯一（`409 ROUTE_NAME_TAKEN`）、`default` 保留（`400 ROUTE_NAME_RESERVED`）；描述 ≤200。
 - 错误码：`ROUTE_NOT_FOUND`（404）、`ROUTE_NAME_TAKEN`（409）、`ROUTE_NAME_RESERVED`（400）、`ROUTE_NAME_INVALID`（400）、`ROUTE_DESCRIPTION_INVALID`（400）、`ROUTE_PRIORITY_INVALID`（400）、`ROUTE_PATH_INVALID`（400）、`ROUTE_MATCHER_INVALID`（400）、`ROUTE_PATTERN_INVALID`（400）、`ROUTE_METHOD_INVALID`（400）、`ROUTE_HEADERS_TOO_MANY`（400）、`ROUTE_HEADER_INVALID`（400）、`ROUTE_MATCH_CONFLICT`（409）、`ROUTE_DEFAULT_IMMUTABLE`（409）、`ROUTE_STATUS_INVALID`（400）；服务不存在 `404 MCP_SERVICE_NOT_FOUND`。
+- **审计（#1052）**：创建/更新/启停/删除分别写 `MCP_ROUTE_RULE_CREATE` / `_UPDATE` / `_STATUS` / `_DELETE`
+  （`targetType=MCP_ROUTE_RULE`，`targetId=`规则 id；摘要含 `serviceId`、`name`、`priority`，更新与启停另带
+  `previousName` / `previousPriority` / `previousStatus` 作为改前值）。启停的**幂等 no-op**（状态未变）不记事件；
+  随服务创建落地的系统 `default` 路由不单独记事件（由 `MCP_SERVICE_CREATE` 覆盖，避免重复行）。actor 取会话用户。
 
 ### 5.24 MCP 访问日志查询 `GET /api/v1/admin/mcp-access-logs`（F15，V29）
 

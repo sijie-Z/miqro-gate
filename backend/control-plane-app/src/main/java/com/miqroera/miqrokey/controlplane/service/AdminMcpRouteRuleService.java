@@ -5,6 +5,7 @@ import com.miqroera.miqrokey.domain.model.McpRouteRule;
 import com.miqroera.miqrokey.domain.model.McpRouteRules;
 import com.miqroera.miqrokey.domain.repository.McpRouteRuleRepository;
 import com.miqroera.miqrokey.domain.repository.McpServiceRepository;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -37,10 +38,13 @@ public class AdminMcpRouteRuleService {
 
     private final McpRouteRuleRepository routeRepository;
     private final McpServiceRepository serviceRepository;
+    private final AuditService auditService;
 
-    public AdminMcpRouteRuleService(McpRouteRuleRepository routeRepository, McpServiceRepository serviceRepository) {
+    public AdminMcpRouteRuleService(McpRouteRuleRepository routeRepository, McpServiceRepository serviceRepository,
+            AuditService auditService) {
         this.routeRepository = routeRepository;
         this.serviceRepository = serviceRepository;
+        this.auditService = auditService;
     }
 
     public List<McpRouteRule> list(UUID tenantId, UUID mcpServiceId) {
@@ -51,18 +55,22 @@ public class AdminMcpRouteRuleService {
     @Transactional
     public McpRouteRule create(UUID tenantId, UUID adminId, UUID mcpServiceId, String name, String description,
             Integer priority, String pathMode, String pathValue, String hostMode, String hostValue,
-            List<String> methods, List<McpHeaderCondition> headers) {
+            List<String> methods, List<McpHeaderCondition> headers, AuditContext context) {
         requireService(tenantId, mcpServiceId);
         McpRouteRule rule = build(tenantId, adminId, mcpServiceId, null, name, description,
                 priority != null ? priority : McpRouteRule.DEFAULT_CUSTOM_PRIORITY, pathMode, pathValue, hostMode,
                 hostValue, methods, headers, "ENABLED");
         rejectReservedName(rule.name());
         rejectConflicts(rule, routeRepository.findAllByService(tenantId, mcpServiceId));
+        McpRouteRule created;
         try {
-            return routeRepository.insert(rule);
+            created = routeRepository.insert(rule);
         } catch (DuplicateKeyException e) {
             throw new ApiException(HttpStatus.CONFLICT, "ROUTE_NAME_TAKEN", "该服务下已存在同名路由。");
         }
+        record(tenantId, context, "MCP_ROUTE_RULE_CREATE", created, "name", created.name(), "priority",
+                created.priority());
+        return created;
     }
 
     /**
@@ -74,7 +82,7 @@ public class AdminMcpRouteRuleService {
     @Transactional
     public McpRouteRule update(UUID tenantId, UUID adminId, UUID serviceId, UUID ruleId, String name,
             String description, Integer priority, String pathMode, String pathValue, String hostMode, String hostValue,
-            List<String> methods, List<McpHeaderCondition> headers) {
+            List<String> methods, List<McpHeaderCondition> headers, AuditContext context) {
         McpRouteRule current = find(tenantId, ruleId);
         if (!current.mcpServiceId().equals(serviceId)) {
             throw new ApiException(HttpStatus.NOT_FOUND, "ROUTE_NOT_FOUND", "路由不存在。");
@@ -85,36 +93,63 @@ public class AdminMcpRouteRuleService {
                 headers, current.status());
         rejectReservedName(updated.name());
         rejectConflicts(updated, routeRepository.findAllByService(tenantId, serviceId));
+        McpRouteRule saved;
         try {
-            return routeRepository.update(updated, current.version());
+            saved = routeRepository.update(updated, current.version());
         } catch (DuplicateKeyException e) {
             throw new ApiException(HttpStatus.CONFLICT, "ROUTE_NAME_TAKEN", "该服务下已存在同名路由。");
         }
+        // before/after on the two fields that decide which traffic a rule captures.
+        record(tenantId, context, "MCP_ROUTE_RULE_UPDATE", saved, "name", saved.name(), "priority", saved.priority(),
+                "previousName", current.name(), "previousPriority", current.priority());
+        return saved;
     }
 
     /** Enable/disable; idempotent (same state is a no-op success). */
     @Transactional
-    public McpRouteRule setStatus(UUID tenantId, UUID ruleId, String status) {
+    public McpRouteRule setStatus(UUID tenantId, UUID ruleId, String status, AuditContext context) {
         McpRouteRule current = find(tenantId, ruleId);
         rejectDefault(current);
         if (!(status.equals("ENABLED") || status.equals("DISABLED"))) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "ROUTE_STATUS_INVALID", "状态必须是 ENABLED 或 DISABLED。");
         }
         if (current.status().equals(status)) {
+            // Idempotent no-op: nothing changed, so there is nothing to audit.
             return current;
         }
         if (status.equals("ENABLED")) {
             McpRouteRule rearmed = copyWithStatus(current, "ENABLED");
             rejectConflicts(rearmed, routeRepository.findAllByService(tenantId, current.mcpServiceId()));
         }
-        return routeRepository.updateStatus(tenantId, ruleId, status, current.version());
+        McpRouteRule saved = routeRepository.updateStatus(tenantId, ruleId, status, current.version());
+        record(tenantId, context, "MCP_ROUTE_RULE_STATUS", saved, "name", saved.name(), "status", saved.status(),
+                "previousStatus", current.status());
+        return saved;
     }
 
     @Transactional
-    public void delete(UUID tenantId, UUID ruleId) {
+    public void delete(UUID tenantId, UUID ruleId, AuditContext context) {
         McpRouteRule current = find(tenantId, ruleId);
         rejectDefault(current);
         routeRepository.deleteById(tenantId, ruleId);
+        // After the delete: targetId is the rule that no longer exists, so the
+        // summary has to carry the identity the row used to have.
+        record(tenantId, context, "MCP_ROUTE_RULE_DELETE", current, "name", current.name(), "priority",
+                current.priority());
+    }
+
+    /**
+     * Writes one audit event for a route-rule mutation. Actor and request
+     * correlation come from the caller's {@link AuditContext}; the summary is
+     * key/value pairs so the JSON stays queryable.
+     */
+    private void record(UUID tenantId, AuditContext context, String action, McpRouteRule rule, Object... kv) {
+        Object[] pairs = new Object[kv.length + 2];
+        pairs[0] = "serviceId";
+        pairs[1] = rule.mcpServiceId();
+        System.arraycopy(kv, 0, pairs, 2, kv.length);
+        auditService.record(tenantId, context.actorId(), action, "MCP_ROUTE_RULE", rule.id(),
+                AuditSummaries.summary(context, pairs), context.requestId());
     }
 
     /**
