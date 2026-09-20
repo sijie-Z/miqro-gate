@@ -61,8 +61,18 @@ public class UsageStatsService {
      *            exclusive end, null defaults to now
      */
     public UsageSummary summary(User user, String groupBy, Instant from, Instant to) {
+        return summary(user, groupBy, from, to, null);
+    }
+
+    /**
+     * Same summary, with {@code day}/{@code month} buckets in the caller's local
+     * day (#1050): {@code tzOffsetMinutes} is the caller's fixed offset from UTC
+     * (null = UTC), mirroring the hourly report's parameter.
+     */
+    public UsageSummary summary(User user, String groupBy, Instant from, Instant to, Integer tzOffsetMinutes) {
         UsageStatsRepository.GroupBy dimension = parseGroupBy(groupBy);
         validateTimeRange(from, to);
+        int tz = AdminUsageStatsService.tzOffset(tzOffsetMinutes);
         Set<UUID> keyIds = ownKeyIds(user);
         if (keyIds.isEmpty()) {
             // No keys to aggregate — return a zeroed summary without touching the
@@ -71,8 +81,8 @@ public class UsageStatsService {
         }
         UsageStatsRepository.UsageFilter filter = filter(user, keyIds, from, to);
 
-        List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
-        List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
+        List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter, tz);
+        List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter, tz);
         return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows);
     }
 

@@ -36,12 +36,16 @@ public class MeUsageController {
      * @param groupBy
      *            PROJECT | VIRTUAL_KEY | CACHE_LEVEL | DAY | USER | MODEL | MONTH
      *            (default PROJECT)
+     * @param tzOffsetMinutes
+     *            offset from UTC in minutes for {@code DAY}/{@code MONTH} buckets
+     *            (#1050); null = UTC
      */
     @GetMapping("/summary")
     public UsageSummary summary(@RequestParam(required = false) String groupBy,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
-        return usageStatsService.summary(userContext.getUser(), groupBy, from, to);
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(required = false) Integer tzOffsetMinutes) {
+        return usageStatsService.summary(userContext.getUser(), groupBy, from, to, tzOffsetMinutes);
     }
 
     /**

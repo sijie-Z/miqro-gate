@@ -67,21 +67,52 @@ public class AdminUsageStatsService {
         return summary(tenantId, groupBy, from, to, null, null, null, null, null, null, null);
     }
 
+    /** Same with the caller's local day (#1050). */
+    public UsageSummary summary(UUID tenantId, String groupBy, Instant from, Instant to, Integer tzOffsetMinutes) {
+        return summary(tenantId, groupBy, from, to, null, null, null, null, null, null, null, null, tzOffsetMinutes);
+    }
+
     public UsageSummary summary(UUID tenantId, String groupBy, Instant from, Instant to, UUID userId, UUID projectId,
             UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId, String modelId) {
+        // (UUID) cast: the tail null is now ambiguous between the team id and the
+        // tz offset overloads (#1050).
         return summary(tenantId, groupBy, from, to, userId, projectId, virtualKeyId, credentialId, subscriptionId,
-                providerProductId, modelId, null);
+                providerProductId, modelId, (UUID) null);
+    }
+
+    /** Same with the caller's local day (#1050). */
+    public UsageSummary summary(UUID tenantId, String groupBy, Instant from, Instant to, UUID userId, UUID projectId,
+            UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId, String modelId,
+            Integer tzOffsetMinutes) {
+        return summary(tenantId, groupBy, from, to, userId, projectId, virtualKeyId, credentialId, subscriptionId,
+                providerProductId, modelId, null, tzOffsetMinutes);
     }
 
     public UsageSummary summary(UUID tenantId, String groupBy, Instant from, Instant to, UUID userId, UUID projectId,
             UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId, String modelId,
             UUID teamId) {
+        return summary(tenantId, groupBy, from, to, userId, projectId, virtualKeyId, credentialId, subscriptionId,
+                providerProductId, modelId, teamId, null);
+    }
+
+    /**
+     * Same summary, with {@code day}/{@code month} buckets aligned to the caller's
+     * local day (#1050): {@code tzOffsetMinutes} is the caller's fixed offset from
+     * UTC (null = UTC) — the same parameter the hourly report takes. Without it the
+     * console's trend axis (UTC days) disagreed with the request log beside it
+     * (local timestamps), so local 00:00–08:00 traffic was drawn on the previous
+     * bar.
+     */
+    public UsageSummary summary(UUID tenantId, String groupBy, Instant from, Instant to, UUID userId, UUID projectId,
+            UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId, String modelId,
+            UUID teamId, Integer tzOffsetMinutes) {
         UsageStatsRepository.GroupBy dimension = UsageStatsService.parseGroupBy(groupBy);
         UsageStatsService.validateTimeRange(from, to);
+        int tz = tzOffset(tzOffsetMinutes);
         UsageStatsRepository.UsageFilter filter = adminFilter(tenantId, from, to, userId, projectId, virtualKeyId,
                 credentialId, subscriptionId, providerProductId, modelId, null, teamId);
-        List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
-        List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
+        List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter, tz);
+        List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter, tz);
         return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows);
     }
 
@@ -90,6 +121,31 @@ public class AdminUsageStatsService {
             UUID teamId) {
         return summary(admin.tenantId(), groupBy, from, to, userId, projectId, virtualKeyId, credentialId,
                 subscriptionId, providerProductId, modelId, teamId);
+    }
+
+    /**
+     * Same as above with the caller's local day (#1050); see the tenant-scoped
+     * variant.
+     */
+    public UsageSummary summary(User admin, String groupBy, Instant from, Instant to, UUID userId, UUID projectId,
+            UUID virtualKeyId, UUID credentialId, UUID subscriptionId, UUID providerProductId, String modelId,
+            UUID teamId, Integer tzOffsetMinutes) {
+        return summary(admin.tenantId(), groupBy, from, to, userId, projectId, virtualKeyId, credentialId,
+                subscriptionId, providerProductId, modelId, teamId, tzOffsetMinutes);
+    }
+
+    /**
+     * The one offset parser for the reporting endpoints (#1050), mirroring the
+     * hourly report's rule: null = UTC, and anything outside ±18h is a client bug,
+     * not a timezone.
+     */
+    static int tzOffset(Integer tzOffsetMinutes) {
+        int tz = tzOffsetMinutes == null ? 0 : tzOffsetMinutes;
+        if (tz < -18 * 60 || tz > 18 * 60) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "TZ_OFFSET_INVALID",
+                    "tzOffsetMinutes must be between -1080 and 1080");
+        }
+        return tz;
     }
 
     /**

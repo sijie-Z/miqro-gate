@@ -73,12 +73,12 @@ class UsageStatsServiceTest {
         // tokens × unit_price sums its own frozen prices produced (#710). The service
         // does not price them again, and must not consult any price table to do so.
         when(keyRepository.findAllByUserId(USER_ID)).thenReturn(List.of(key(KEY_A), key(KEY_B)));
-        when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.VIRTUAL_KEY), any()))
+        when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.VIRTUAL_KEY), any(), eq(0)))
                 .thenReturn(List.of(new UsageAggRow("key-" + KEY_A, "k-a", PRODUCT, MODEL, CacheLevel.UPSTREAM, 2L,
                         new TokenBucket(1_000L, 500L, null, null, null, null, 1_500L, null),
                         new java.math.BigDecimal("1000"), new java.math.BigDecimal("1000"), java.math.BigDecimal.ZERO,
                         java.math.BigDecimal.ZERO, UsageStatsAggregator.PricingGap.NONE, UsageAggRow.Outcome.NONE)));
-        when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
+        when(usageStatsRepository.aggregateHits(any(), any(), eq(0))).thenReturn(List.of());
 
         UsageSummary summary = service.summary(user, "virtual_key", null, null);
 
@@ -103,15 +103,15 @@ class UsageStatsServiceTest {
         assertThat(summary.groups()).isEmpty();
         assertThat(summary.totals().requests().total()).isZero();
         assertThat(summary.totals().cost().upstreamPaid()).isEqualByComparingTo("0");
-        verify(usageStatsRepository, never()).aggregateUsage(any(), any());
+        verify(usageStatsRepository, never()).aggregateUsage(any(), any(), eq(0));
     }
 
     @Test
     void summaryDefaultsGroupByToProject() {
         when(keyRepository.findAllByUserId(USER_ID)).thenReturn(List.of(key(KEY_A)));
-        when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.PROJECT), any()))
+        when(usageStatsRepository.aggregateUsage(eq(UsageStatsRepository.GroupBy.PROJECT), any(), eq(0)))
                 .thenReturn(List.of());
-        when(usageStatsRepository.aggregateHits(any(), any())).thenReturn(List.of());
+        when(usageStatsRepository.aggregateHits(any(), any(), eq(0))).thenReturn(List.of());
 
         UsageSummary summary = service.summary(user, null, null, null);
 
