@@ -91,7 +91,14 @@ const TEXT_EXEMPT: Array<[string, string, string]> = [
   // #1065 表族：子表本身没有 `:error`，但失败信号在紧邻处可见（红条或 toast）。
   ['NextAdminSkillsView.vue', '暂无版本记录', '同对话框有 revisionsError 红条'],
   ['NextAdminWebhooksView.vue', '暂无投递记录', '同抽屉有 deliveriesError 红条'],
-  ['NextPlansView.vue', '还没有席位', '同表单有 seatError 红条'],
+  // 读取路径无 catch、失败没有任何屏幕信号：疑似同族第 9 处（本轮范围外，未修），
+  // 豁免只为把这条已核实的事实显式记在此处，随交付报告交 owner 拍板——不是「信号在
+  // 别处可见」那一类，别把它当 A9 既有豁免读。
+  [
+    'NextPlansView.vue',
+    '还没有席位',
+    '读取路径 refreshSeats 无 catch ⇒ 失败无信号：同族第 9 处候选，交 owner（未修）',
+  ],
   ['NextProjectsView.vue', '还没有成员', '失败经 toast.error(加载成员失败) 可见'],
   ['NextTeamsView.vue', '还没有成员', '失败经 toast.error(加载成员失败) 可见'],
   // #657 既定决定：目录/依赖元数据降级为空（决策台账 A9）。
@@ -267,7 +274,10 @@ function collectMarkSites(file: string, source: string): MarkSite[] | null {
   }
 
   const root = descriptor.template.ast as unknown as AnyNode;
-  for (const c of childrenOf(root)) walk(c, root, []);
+  // `root` rides along as the outermost ancestor so a chain sitting directly
+  // under the template root is still visible to `gated()` (its parent is the
+  // root node, which the ancestor loop cannot reach otherwise).
+  for (const c of childrenOf(root)) walk(c, root, [root]);
   return sites;
 }
 
@@ -409,7 +419,8 @@ describe('#1160 empty states and silent clears', () => {
     for (const file of files) {
       handlers.push(...collectCatchHandlers(file, readFileSync(join(dir, file), 'utf8')));
     }
-    // Anti-vacuous: the tree has ~205 catch handlers, ~17 of which clear a list.
+    // Anti-vacuous: the tree has ~205 catch handlers, 19 of which clear a list
+    // (7 of them exempted).
     expect(handlers.length, '扫不到任何清空列表的 catch——守卫可能已失效').toBeGreaterThanOrEqual(8);
 
     const offenders: string[] = [];

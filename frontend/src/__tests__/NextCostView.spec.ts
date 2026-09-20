@@ -451,8 +451,22 @@ describe('NextCostView', () => {
     ) as HTMLButtonElement;
     expect(retry, 'a retry entry must exist').toBeTruthy();
 
-    // Retry goes through the same loader and offers the projects.
-    mockApi.listProjects.mockResolvedValue([
+    // Retry goes through the same loader and offers the projects. While the
+    // re-read is in flight the button must say so (disabled/spinner) — the
+    // dialog otherwise shows a bare empty picker and no sign of progress.
+    let release: ((value: unknown) => void) | null = null;
+    mockApi.listProjects.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve as (value: unknown) => void;
+        }),
+    );
+    retry.click();
+    await flushPromises();
+
+    expect(retry.disabled, 'retry must disable while the re-read is in flight').toBe(true);
+
+    release!([
       {
         id: 'p1',
         code: 'CORE',
@@ -470,7 +484,6 @@ describe('NextCostView', () => {
         createdAt: '2026-08-01T00:00:00Z',
       },
     ]);
-    retry.click();
     await flushPromises();
 
     expect(mockApi.listProjects).toHaveBeenCalledTimes(2);

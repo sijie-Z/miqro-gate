@@ -412,4 +412,42 @@ describe('NextOverviewView', () => {
     expect(feed.find('[data-testid="overview-feed-error"]').exists()).toBe(false);
     expect(feed.findAll('.next-overview__feed-row')).toHaveLength(1);
   });
+
+  it('#1160: the retry window does not re-draw the empty-state claim', async () => {
+    // Clearing the error is not "loaded": between the retry click and its
+    // response the panel used to fall through to 「还没有动态记录。」 again —
+    // the same claim about the data the issue is about, this time for the
+    // duration of a slow (or hung) re-read.
+    authState.role = 'SYSTEM_ADMIN';
+    mockApi.adminUsageSummary.mockResolvedValue({
+      groupBy: 'project',
+      groups: [],
+      totals: summary.totals,
+    } as unknown as UsageSummary);
+    mockApi.listSubscriptions.mockResolvedValue([]);
+    mockApi.auditEvents.mockRejectedValueOnce(
+      new ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '审计读取失败',
+        requestId: 'req-feed',
+        title: 'Error',
+      }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const feed = wrapper.find('[data-testid="overview-feed"]');
+    expect(feed.find('[data-testid="overview-feed-error"]').exists()).toBe(true);
+
+    // The re-read hangs: pin it in the air and inspect the panel.
+    mockApi.auditEvents.mockImplementation(() => new Promise(() => {}));
+    await feed.find('[data-testid="overview-feed-retry"]').trigger('click');
+    await flushPromises();
+
+    expect(feed.text()).not.toContain('还没有动态记录');
+    expect(feed.text()).toContain('加载中');
+  });
 });
