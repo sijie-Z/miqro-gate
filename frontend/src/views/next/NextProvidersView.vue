@@ -7,6 +7,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
 import { ApiError } from '@/api/http';
 import {
   UiButton,
@@ -419,7 +420,7 @@ onMounted(load);
     <!-- #735 adapter-status persistent warning: stays on the page for as long
          as any listed product is not VERIFIED (hover tooltips can be missed). -->
     <div
-      v-if="unverifiedCount"
+      v-if="!loadError && unverifiedCount"
       class="ui-alert ui-alert--warning"
       data-testid="adapter-warning-banner"
     >
@@ -432,7 +433,9 @@ onMounted(load);
 
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
-        <span class="ui-panel-sub">共 {{ products.length }} 个产品实例</span>
+        <span class="ui-panel-sub"
+          >共 {{ countWhenLoaded(loadError, products.length) }} 个产品实例</span
+        >
       </div>
       <UiTable
         :columns="columns"

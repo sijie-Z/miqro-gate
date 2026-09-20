@@ -18,6 +18,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
 import { ApiError } from '@/api/http';
 import {
   UiButton,
@@ -442,8 +443,9 @@ onMounted(async () => {
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
         <span class="ui-panel-sub">
-          共 {{ filteredGrants.length }} 条授权<template v-if="credentialFilter"
-            >（全部 {{ grants.length }} 条）</template
+          共 {{ countWhenLoaded(loadError, filteredGrants.length) }} 条授权<template
+            v-if="credentialFilter"
+            >（全部 {{ countWhenLoaded(loadError, grants.length) }} 条）</template
           >
         </span>
         <span v-if="credentialFilter" class="next-grants__filter" data-testid="grants-filter">

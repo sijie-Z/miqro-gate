@@ -8,6 +8,7 @@
  */
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDialog, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { UsageDeletionRequest } from '@/types/generated-api';
@@ -204,7 +205,9 @@ onMounted(load);
 
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
-        <span class="ui-panel-sub">共 {{ deletions.length }} 个删除请求</span>
+        <span class="ui-panel-sub"
+          >共 {{ countWhenLoaded(loadError, deletions.length) }} 个删除请求</span
+        >
       </div>
       <UiTable
         :columns="columns"

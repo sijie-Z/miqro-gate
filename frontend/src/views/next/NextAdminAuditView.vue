@@ -6,6 +6,7 @@
  */
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
 import { ApiError } from '@/api/http';
 import { UiButton, UiInput, UiSelect, UiTable } from '@/ui';
 import type { AuditEventView } from '@/types/generated-api';
@@ -274,7 +275,9 @@ onMounted(load);
       <div class="ui-panel-head">
         <div>
           <h2 class="ui-panel-title">动作分布</h2>
-          <span class="ui-panel-sub">基于当前 {{ events.length }} 条记录</span>
+          <span class="ui-panel-sub"
+            >基于当前 {{ countWhenLoaded(loadError, events.length) }} 条记录</span
+          >
         </div>
       </div>
       <div class="ui-panel-body next-audit__action-body">

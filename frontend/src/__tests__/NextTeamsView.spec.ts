@@ -61,6 +61,26 @@ describe('NextTeamsView', () => {
     return mount(NextTeamsView, { global: { plugins: [createPinia()] } });
   }
 
+  it('#1120: a failed load shows — in the counter, not "共 0 个团队"', async () => {
+    mockApi.listTeams.mockRejectedValue(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-500',
+        title: 'Error',
+      }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // The count is a conclusion about the tenant, not about this request.
+    expect(wrapper.text()).toContain('共 — 个团队');
+    expect(wrapper.text()).not.toContain('共 0 个团队');
+  });
+
   /** Hint under a UiInput — the testid falls through to the <input> itself. */
   function hintOf(wrapper: ReturnType<typeof mountView>, testid: string): string {
     const field = wrapper.find(`[data-testid="${testid}"]`).element.closest('.ui-field');

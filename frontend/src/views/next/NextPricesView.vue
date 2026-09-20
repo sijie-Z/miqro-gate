@@ -6,6 +6,7 @@
  */
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
 import { ApiError } from '@/api/http';
 import { UiButton, UiInput, UiSelect, UiTable, toast } from '@/ui';
 import type { UiSelectOption } from '@/ui';
@@ -313,7 +314,9 @@ onMounted(load);
 
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
-        <span class="ui-panel-sub">共 {{ prices.length }} 条生效单价</span>
+        <span class="ui-panel-sub"
+          >共 {{ countWhenLoaded(loadError, prices.length) }} 条生效单价</span
+        >
       </div>
       <UiTable
         :columns="columns"

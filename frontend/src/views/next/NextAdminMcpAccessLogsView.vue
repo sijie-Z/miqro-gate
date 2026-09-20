@@ -6,6 +6,7 @@
  */
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDrawer, UiInput, UiSelect, UiStatusBadge, UiTable } from '@/ui';
 import type { McpAccessLogEntry } from '@/types/generated-api';
@@ -286,7 +287,7 @@ onMounted(load);
         </div>
       </div>
       <div class="ui-panel-toolbar">
-        <span class="ui-panel-sub">共 {{ entries.length }} 条</span>
+        <span class="ui-panel-sub">共 {{ countWhenLoaded(loadError, entries.length) }} 条</span>
       </div>
       <UiTable
         :columns="columns"
