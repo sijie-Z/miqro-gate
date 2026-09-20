@@ -109,6 +109,30 @@ const grants: MeGrantsResponse = {
   purposes: ['CLAUDE_CODE', 'CLAUDE_DESKTOP', 'CODEX', 'CUSTOM'],
 };
 
+/**
+ * #1157: p3's only grant is for a **different** provider product, so no key whose
+ * product is `claude-api` can bind it — the server matches each extra to that
+ * project's own grant of the same product (409 PROJECT_GRANT_MISSING).
+ */
+const grantsWithForeignProduct: MeGrantsResponse = {
+  ...grants,
+  projects: [
+    ...(grants.projects ?? []),
+    { id: 'p3', code: 'P3', name: 'Other Vendor', projectTag: 'other' },
+  ],
+  grants: [
+    ...(grants.grants ?? []),
+    {
+      id: 'g3',
+      projectId: 'p3',
+      providerProductId: '0190-other-product',
+      providerProductCode: 'openai-api',
+      providerProductName: 'OpenAI API',
+      models: ['gpt-4o-mini'],
+    },
+  ],
+};
+
 const created: CreateVirtualKeyResponse = {
   id: '0190-0002',
   secret: 'mqk_live_newkey',
@@ -334,6 +358,36 @@ describe('NextKeysView', () => {
       projectIds?: string[];
     };
     expect(payload.projectId).toBe('p1');
+    expect(payload.projectIds).toEqual(['p1', 'p2']);
+  });
+
+  it('#1157: an extra project granted another product is listed but not pre-selected', async () => {
+    mockApi.myGrants.mockResolvedValue(grantsWithForeignProduct);
+    mockApi.createVirtualKey.mockResolvedValue(created);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="create-name"]').setValue('mixed-products');
+
+    const grantButton = wrapper
+      .findAll('.stub-option')
+      .find((el) => el.text().includes('Claude API'));
+    await grantButton!.trigger('click');
+    await flushPromises();
+
+    // Still offered: hiding it would leave the user guessing why a project they can
+    // see elsewhere is missing here. What must not happen is the form pre-selecting
+    // a combination the server refuses — that 409 arrives without the user doing
+    // anything, which is the opposite of what Default-All is for.
+    expect(wrapper.find('[data-testid="create-extra-project-p3"]').exists()).toBe(true);
+
+    await wrapper.find('[data-testid="create-submit"]').trigger('click');
+    await flushPromises();
+
+    const payload = mockApi.createVirtualKey.mock.calls[0]![0] as { projectIds?: string[] };
     expect(payload.projectIds).toEqual(['p1', 'p2']);
   });
 

@@ -219,13 +219,39 @@ const extraProjectOptions = computed(() =>
   projectsForGrant.value.filter((p) => p.id && p.id !== createProjectId.value),
 );
 
+/**
+ * Of those, the ones this key can actually bind: the server matches each extra to
+ * that project's own grant **of the same provider product** (ADR-0018), which is
+ * the constraint the field hint already states. #1157: the defaults ignored it and
+ * pre-selected every project with any grant at all, so a form the user had not
+ * touched came back `409 PROJECT_GRANT_MISSING`. Nothing is bindable until the
+ * primary's grant — and therefore its product — is chosen.
+ */
+const bindableExtraProjectIds = computed(() => {
+  const productId = selectedGrant.value?.providerProductId;
+  if (!productId) {
+    return [];
+  }
+  const projectsWithThisProduct = new Set(
+    (grants.value?.grants ?? [])
+      .filter((g) => g.providerProductId === productId)
+      .map((g) => g.projectId),
+  );
+  return extraProjectOptions.value
+    .filter((p) => p.id && projectsWithThisProduct.has(p.id))
+    .map((p) => p.id)
+    .filter((id): id is string => Boolean(id));
+});
+
 // #646 Default-All: "one key for every project" is the default path — the
-// primary project defaults to the first option and every other project is
-// pre-selected (the user can uncheck). Deselecting is remembered for the
-// current form session; switching the primary backfills the previous primary
+// primary project defaults to the first option and every other **bindable**
+// project is pre-selected (the user can uncheck). Deselecting is remembered for
+// the current form session; switching the primary backfills the previous primary
 // as an extra so no project is silently dropped.
 const extraDefaultsApplied = ref(false);
 let previousPrimary = '';
+/** The product the extras were last defaulted for — a new product is a new question. */
+let defaultsProductId = '';
 
 function applyProjectDefaults(): void {
   if (projectsForGrant.value.length === 0) {
@@ -235,11 +261,13 @@ function applyProjectDefaults(): void {
     createProjectId.value = projectsForGrant.value[0].id;
   }
   previousPrimary = createProjectId.value;
-  if (!extraDefaultsApplied.value) {
-    createExtraProjectIds.value = extraProjectOptions.value
-      .map((p) => p.id)
-      .filter((id): id is string => Boolean(id));
+  const productId = selectedGrant.value?.providerProductId ?? '';
+  // Only once the product is known: before that nothing can be judged bindable, and
+  // re-applying on an unknown product would wipe whatever the user had chosen.
+  if (productId && (!extraDefaultsApplied.value || defaultsProductId !== productId)) {
+    createExtraProjectIds.value = bindableExtraProjectIds.value;
     extraDefaultsApplied.value = true;
+    defaultsProductId = productId;
   }
 }
 
@@ -356,6 +384,9 @@ function onProjectChange() {
 function onGrantChange() {
   // Default to all models authorized for the grant.
   createModels.value = [...(selectedGrant.value?.models ?? [])];
+  // #1157: which extras are bindable depends on this grant's product, so the
+  // defaults have to be applied (or re-applied) the moment the product is known.
+  applyProjectDefaults();
 }
 
 function resetForm() {
@@ -364,6 +395,7 @@ function resetForm() {
   createExtraProjectIds.value = [];
   extraDefaultsApplied.value = false;
   previousPrimary = '';
+  defaultsProductId = '';
   createGrantId.value = '';
   createPurpose.value = 'CLAUDE_CODE';
   createModels.value = [];
@@ -751,10 +783,10 @@ function statusTone(status?: string): 'success' | 'warning' | 'danger' | 'neutra
             class="next-keys__field"
             data-testid="create-extra-projects"
           >
-            <span class="next-keys__field-label">同时绑定到其他项目（默认全部已选）</span>
+            <span class="next-keys__field-label">同时绑定到其他项目</span>
             <p class="next-keys__field-hint">
               一把 Key
-              全项目可用——默认已勾选全部项目，只需部分项目时可取消勾选；附加项目需已具备同一供应商产品的授权。
+              全项目可用——选定授权后默认勾选全部可绑定的项目，只需部分项目时可取消勾选。附加项目需已具备同一供应商产品的授权：未具备的会一并列出，但默认不勾选。
             </p>
             <div class="next-keys__extra-projects">
               <UiCheckbox
