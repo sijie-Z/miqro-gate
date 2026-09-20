@@ -405,8 +405,11 @@ class MeVirtualKeyApiIntegrationTest {
         // What feeds the key-creation picker has to agree with what creation accepts:
         // requireBindableProject rejects a system project (#647), so listing it here
         // offers a choice that can only come back 400 PROJECT_NOT_SELECTABLE. An admin
-        // sees every ACTIVE project, so this needs no grant to be reachable — the
-        // fixture above proves it with none.
+        // sees every ACTIVE project, so the endpoint serves it with no grant at all —
+        // the fixture above has none. (The dropdown narrows this list to the projects a
+        // grant covers, so the option became *visible* once an admin granted the
+        // bucket;
+        // the response was wrong either way.)
         mockMvc.perform(get("/api/v1/me/grants").cookie(sessionCookie)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.projects.length()").value(1))
                 .andExpect(jsonPath("$.projects[0].id").value(fx.projectId.toString()));
