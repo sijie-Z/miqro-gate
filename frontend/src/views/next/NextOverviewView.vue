@@ -261,6 +261,7 @@ interface FeedItem {
 }
 
 const feed = ref<FeedItem[]>([]);
+const feedError = ref('');
 
 const APPROVAL_STATUS_LABELS: Record<string, string> = {
   PENDING: '待审批',
@@ -292,14 +293,19 @@ function relativeTime(iso?: string): string {
  *
  * `approvalsPromise` arrives already started — that is what un-chains it from the
  * summary — but it is *awaited* here, inside this try/catch, on purpose: an approval
- * read that fails must empty this panel and nothing else. Awaiting it in `load()`'s
+ * read that fails must fail this panel and nothing else. Awaiting it in `load()`'s
  * Promise.all instead would make it fatal to the whole page (#1138 review; the issue
  * asks for exactly this degradation).
+ *
+ * #1160 加载次序不变量：加载中 → 失败 → 空 → 有数据。「还没有动态记录。」只有在
+ * 这次读取**成功且确实为空**时才允许出现；失败时面板必须显示错误与重试
+ * （`feedError`），而不是画空态或一声不响。
  */
 async function loadFeed(
   keyList: VirtualKeyView[],
   approvalsPromise: Promise<ModelApprovalView[]> | null,
 ) {
+  feedError.value = '';
   try {
     if (isAdmin.value) {
       const events = await api.auditEvents({});
@@ -332,9 +338,18 @@ async function loadFeed(
         .slice(0, 6);
       feed.value = items.map((it) => ({ text: it.text, time: relativeTime(it.ts), tone: it.tone }));
     }
-  } catch {
+  } catch (error) {
     feed.value = [];
+    feedError.value = error instanceof ApiError ? error.message : '加载最新动态失败，请稍后重试。';
   }
+}
+
+/**
+ * #1160: 重试入口复用同一个 loadFeed（admin 重读 auditEvents，普通用户重读自己的
+ * 审批）；不重跑主加载——动态面板的失败不牵连已经渲染好的页面。
+ */
+function retryFeed() {
+  return loadFeed(keys.value, isAdmin.value ? null : api.listMyModelApprovals());
 }
 
 function purposeLabel(purpose?: string): string {
@@ -548,6 +563,20 @@ onMounted(load);
                 <span class="next-overview__feed-text">{{ item.text }}</span>
                 <span class="next-overview__feed-time">{{ item.time }}</span>
               </div>
+            </div>
+            <div
+              v-else-if="feedError"
+              style="padding: 0 24px 16px"
+              data-testid="overview-feed-error"
+            >
+              <p class="ui-form-error">{{ feedError }}</p>
+              <UiButton
+                variant="ghost"
+                size="sm"
+                data-testid="overview-feed-retry"
+                @click="retryFeed"
+                >重试</UiButton
+              >
             </div>
             <p v-else class="next-overview__empty" style="padding: 0 24px 16px">还没有动态记录。</p>
           </section>

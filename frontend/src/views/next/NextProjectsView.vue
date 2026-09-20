@@ -46,6 +46,8 @@ const memberLoading = ref(false);
 // #556: add-member picker (mirrors the teams page and users-page quick-join)
 const allUsers = ref<AdminUser[]>([]);
 const usersLoaded = ref(false);
+const usersLoading = ref(false);
+const usersError = ref('');
 const pickUserId = ref('');
 const addingMember = ref(false);
 
@@ -166,6 +168,26 @@ async function createProject() {
 // impersonate an empty roster for the current project.
 let membersRequestSeq = 0;
 
+/**
+ * #1160 加载次序不变量：加载中 → 失败 → 空 → 有数据。
+ * 用户列表失败时「没有可加入的 ACTIVE 用户」本来就会被 `usersLoaded` 压住，
+ * 但那让抽屉**一声不响**（静默空）；这里把失败画出来并给重试。
+ * 保持既有语义：失败不置 `usersLoaded`，下次打开抽屉自会重试。
+ */
+async function loadUsers() {
+  usersLoading.value = true;
+  usersError.value = '';
+  try {
+    allUsers.value = await api.listUsers();
+    usersLoaded.value = true;
+  } catch (error) {
+    allUsers.value = [];
+    usersError.value = error instanceof ApiError ? error.message : '加载用户列表失败。';
+  } finally {
+    usersLoading.value = false;
+  }
+}
+
 async function openMembers(project: Project) {
   const seq = ++membersRequestSeq;
   memberProject.value = project;
@@ -173,15 +195,7 @@ async function openMembers(project: Project) {
   memberLoading.value = true;
   pickUserId.value = '';
   if (!usersLoaded.value) {
-    api
-      .listUsers()
-      .then((list) => {
-        allUsers.value = list;
-        usersLoaded.value = true;
-      })
-      .catch(() => {
-        allUsers.value = [];
-      });
+    void loadUsers();
   }
   try {
     const rows = await api.listProjectMembers(project.id!); // list rows always carry ids
@@ -477,7 +491,15 @@ onMounted(load);
           >加入</UiButton
         >
       </div>
-      <p v-if="usersLoaded && !joinableUsers.length" class="next-projects__join-hint">
+      <!-- #1160: 加载中 → 失败 → 空 → 有数据；失败不再一声不响。 -->
+      <p v-if="usersLoading" class="next-projects__join-hint">加载用户列表…</p>
+      <p v-else-if="usersError" class="ui-form-error" data-testid="project-users-error">
+        {{ usersError }}
+        <UiButton variant="ghost" size="sm" data-testid="project-users-retry" @click="loadUsers"
+          >重试</UiButton
+        >
+      </p>
+      <p v-else-if="usersLoaded && !joinableUsers.length" class="next-projects__join-hint">
         没有可加入的 ACTIVE 用户。
       </p>
 

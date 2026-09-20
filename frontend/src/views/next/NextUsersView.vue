@@ -143,6 +143,8 @@ const membershipDrawer = ref(false);
 const memberships = ref<UserProjectMembership[]>([]);
 const projects = ref<Project[]>([]);
 const projectsLoaded = ref(false);
+const projectsLoading = ref(false);
+const projectsLoadError = ref('');
 const membershipLoading = ref(false);
 const membershipError = ref('');
 const pickProjectId = ref('');
@@ -153,6 +155,26 @@ const joinableProjects = computed(() => {
   return projects.value.filter((p) => p.status === 'ACTIVE' && !memberIds.has(p.id));
 });
 
+/**
+ * #1160 加载次序不变量：加载中 → 失败 → 空 → 有数据。
+ * 「没有更多可加入的 ACTIVE 项目」只有在列表**成功加载且确实没有可加入项**时才能
+ * 出现；读取失败还画这句，就是替管理员回答「你已加入全部项目」。
+ * 失败不置 `projectsLoaded`（保持既有语义：下次打开抽屉会自动重试）。
+ */
+async function loadProjects() {
+  projectsLoading.value = true;
+  projectsLoadError.value = '';
+  try {
+    projects.value = await api.listProjects();
+    projectsLoaded.value = true;
+  } catch (error) {
+    projects.value = [];
+    projectsLoadError.value = error instanceof ApiError ? error.message : '加载项目列表失败。';
+  } finally {
+    projectsLoading.value = false;
+  }
+}
+
 function openProjectMembership(user: AdminUser) {
   membershipUser.value = user;
   memberships.value = [];
@@ -161,15 +183,7 @@ function openProjectMembership(user: AdminUser) {
   membershipDrawer.value = true;
   void refreshMemberships();
   if (!projectsLoaded.value) {
-    api
-      .listProjects()
-      .then((list) => {
-        projects.value = list;
-        projectsLoaded.value = true;
-      })
-      .catch(() => {
-        projects.value = [];
-      });
+    void loadProjects();
   }
 }
 
@@ -710,7 +724,16 @@ function formatDate(iso?: string): string {
           >加入</UiButton
         >
       </div>
-      <p v-if="!joinableProjects.length" class="next-users__member-hint">
+      <!-- #1160: 加载中 → 失败 → 空 → 有数据。「没有更多可加入…」由成功加载门控，
+           读取失败时在这里报错并原地重试（不重开抽屉）。 -->
+      <p v-if="projectsLoading" class="next-users__member-hint">加载项目列表…</p>
+      <p v-else-if="projectsLoadError" class="ui-form-error" data-testid="user-projects-error">
+        {{ projectsLoadError }}
+        <UiButton variant="ghost" size="sm" data-testid="user-projects-retry" @click="loadProjects"
+          >重试</UiButton
+        >
+      </p>
+      <p v-else-if="projectsLoaded && !joinableProjects.length" class="next-users__member-hint">
         没有更多可加入的 ACTIVE 项目。
       </p>
     </UiDrawer>

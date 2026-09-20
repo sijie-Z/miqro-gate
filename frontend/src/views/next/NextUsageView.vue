@@ -202,6 +202,7 @@ function applyCustomRange() {
 
 const myQuotaRules = ref<QuotaRuleView[]>([]);
 const quotaLoading = ref(true);
+const quotaError = ref('');
 
 const quotaMetricText: Record<QuotaMetric, string> = {
   TOKENS: 'Token 用量',
@@ -359,12 +360,20 @@ onMounted(() => {
   void loadKeys();
 });
 
+/**
+ * #1160 加载次序不变量：加载中 → 失败 → 空 → 有数据。
+ * 「暂无配额规则——管理员未为你设置用量限额」是对**管理员配置**的断言，只有在这次
+ * 读取成功且确实为空时才能出现；失败时显示错误与重试（quotaError），且失败态先于
+ * 加载态判定，不会被 quotaLoading 盖住（catch 后 finally 才落 loading=false）。
+ */
 async function loadQuota() {
   quotaLoading.value = true;
+  quotaError.value = '';
   try {
     myQuotaRules.value = await api.listMyQuotaRules();
-  } catch {
-    myQuotaRules.value = []; // panel degrades silently — usage views stay usable
+  } catch (error) {
+    myQuotaRules.value = [];
+    quotaError.value = error instanceof ApiError ? error.message : '加载配额规则失败，请稍后重试。';
   } finally {
     quotaLoading.value = false;
   }
@@ -660,8 +669,19 @@ function formatTime(iso?: string): string {
         </div>
       </div>
       <div class="ui-panel-body">
-        <div v-if="!quotaLoading && myQuotaRules.length === 0" class="next-usage__quota-empty">
+        <!-- #1160: 加载中 → 失败 → 空 → 有数据。「暂无配额规则…」由成功加载门控，
+             失败显示错误与重试；失败态不会被加载态盖住。 -->
+        <div
+          v-if="!quotaLoading && !quotaError && myQuotaRules.length === 0"
+          class="next-usage__quota-empty"
+        >
           暂无配额规则——管理员未为你设置用量限额。
+        </div>
+        <div v-if="quotaError" class="ui-form-error" data-testid="my-quota-error">
+          {{ quotaError }}
+          <UiButton variant="ghost" size="sm" data-testid="my-quota-retry" @click="loadQuota"
+            >重试</UiButton
+          >
         </div>
         <div
           v-for="rule in myQuotaRules"

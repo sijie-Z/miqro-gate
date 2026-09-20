@@ -15,6 +15,8 @@ import type { AlertRule, Project, QuotaRuleView, WebhookEndpointView } from '@/t
 const rules = ref<AlertRule[]>([]);
 const webhooks = ref<WebhookEndpointView[]>([]);
 const projects = ref<Project[]>([]);
+const projectsLoading = ref(false);
+const projectsError = ref('');
 const quotaRules = ref<QuotaRuleView[]>([]);
 const loading = ref(true);
 const loadError = ref('');
@@ -266,16 +268,28 @@ function formatTime(iso?: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/**
+ * #1160 加载次序不变量：加载中 → 失败 → 空 → 有数据。
+ * 预算水位规则的项目下拉来自这次读取；失败时不能只留一个空选择器——保存会被
+ * 「预算水位规则必须选择项目。」挡住，用户却不知道原因。
+ */
+async function loadProjects() {
+  projectsLoading.value = true;
+  projectsError.value = '';
+  try {
+    projects.value = await api.listProjects();
+  } catch (error) {
+    projects.value = [];
+    projectsError.value =
+      error instanceof ApiError ? error.message : '加载项目列表失败，请稍后重试。';
+  } finally {
+    projectsLoading.value = false;
+  }
+}
+
 onMounted(() => {
   void load();
-  api
-    .listProjects()
-    .then((list) => {
-      projects.value = list;
-    })
-    .catch(() => {
-      projects.value = [];
-    });
+  void loadProjects();
 });
 </script>
 
@@ -336,6 +350,22 @@ onMounted(() => {
             placeholder="选择配额规则"
             data-testid="rule-quota-select"
           />
+          <!-- #1160: 项目下拉为空必须区分「加载中 / 加载失败 / 真的没有项目」。 -->
+          <p v-if="isBudgetType && projectsLoading" class="ui-field__hint">加载项目列表…</p>
+          <p
+            v-else-if="isBudgetType && projectsError"
+            class="ui-form-error"
+            data-testid="rule-projects-error"
+          >
+            {{ projectsError }}
+            <UiButton
+              variant="ghost"
+              size="sm"
+              data-testid="rule-projects-retry"
+              @click="loadProjects"
+              >重试</UiButton
+            >
+          </p>
           <template v-if="!isApprovalType">
             <div class="next-alert-rules__row">
               <UiInput

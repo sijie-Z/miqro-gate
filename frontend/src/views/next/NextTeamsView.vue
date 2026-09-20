@@ -41,6 +41,8 @@ const memberLoading = ref(false);
 // #551: add-member picker (mirrors the users-page quick-join pattern)
 const allUsers = ref<AdminUser[]>([]);
 const usersLoaded = ref(false);
+const usersLoading = ref(false);
+const usersError = ref('');
 const pickUserId = ref('');
 const addingMember = ref(false);
 
@@ -113,6 +115,26 @@ async function createTeam() {
 // empty roster for the current team.
 let membersRequestSeq = 0;
 
+/**
+ * #1160 加载次序不变量：加载中 → 失败 → 空 → 有数据。
+ * 用户列表失败时「没有可加入的 ACTIVE 用户」本来就会被 `usersLoaded` 压住，
+ * 但那让抽屉**一声不响**（静默空）；这里把失败画出来并给重试。
+ * 保持既有语义：失败不置 `usersLoaded`，下次打开抽屉自会重试。
+ */
+async function loadUsers() {
+  usersLoading.value = true;
+  usersError.value = '';
+  try {
+    allUsers.value = await api.listUsers();
+    usersLoaded.value = true;
+  } catch (error) {
+    allUsers.value = [];
+    usersError.value = error instanceof ApiError ? error.message : '加载用户列表失败。';
+  } finally {
+    usersLoading.value = false;
+  }
+}
+
 async function openMembers(team: Team) {
   const seq = ++membersRequestSeq;
   memberTeam.value = team;
@@ -120,15 +142,7 @@ async function openMembers(team: Team) {
   memberLoading.value = true;
   pickUserId.value = '';
   if (!usersLoaded.value) {
-    api
-      .listUsers()
-      .then((list) => {
-        allUsers.value = list;
-        usersLoaded.value = true;
-      })
-      .catch(() => {
-        allUsers.value = [];
-      });
+    void loadUsers();
   }
   try {
     const rows = await api.listTeamMembers(team.id!); // list rows always carry ids
@@ -336,7 +350,15 @@ onMounted(load);
           >加入</UiButton
         >
       </div>
-      <p v-if="usersLoaded && !joinableUsers.length" class="next-teams__member-hint">
+      <!-- #1160: 加载中 → 失败 → 空 → 有数据；失败不再一声不响。 -->
+      <p v-if="usersLoading" class="next-teams__member-hint">加载用户列表…</p>
+      <p v-else-if="usersError" class="ui-form-error" data-testid="team-users-error">
+        {{ usersError }}
+        <UiButton variant="ghost" size="sm" data-testid="team-users-retry" @click="loadUsers"
+          >重试</UiButton
+        >
+      </p>
+      <p v-else-if="usersLoaded && !joinableUsers.length" class="next-teams__member-hint">
         没有可加入的 ACTIVE 用户。
       </p>
 
