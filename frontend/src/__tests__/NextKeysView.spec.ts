@@ -133,6 +133,92 @@ const grantsWithForeignProduct: MeGrantsResponse = {
   ],
 };
 
+/**
+ * #1157: p1 and p2 each hold grants for **two** products, p3 only for the first.
+ * Enough to check that the bound set follows the *selected* product, and that an
+ * explicit uncheck is not resurrected when that product changes.
+ */
+const grantsAcrossProducts: MeGrantsResponse = {
+  projects: [
+    { id: 'p1', code: 'P1', name: 'Core AI', projectTag: 'core-ai' },
+    { id: 'p2', code: 'P2', name: 'QA Team', projectTag: 'qa-team' },
+    { id: 'p3', code: 'P3', name: 'Agent Lab', projectTag: 'agent-lab' },
+  ],
+  grants: [
+    {
+      id: 'g1',
+      projectId: 'p1',
+      providerProductId: '0190-product',
+      providerProductCode: 'claude-api',
+      providerProductName: 'Claude API',
+      models: ['claude-3-7-sonnet'],
+    },
+    {
+      id: 'g1b',
+      projectId: 'p1',
+      providerProductId: '0190-other-product',
+      providerProductCode: 'openai-api',
+      providerProductName: 'OpenAI API',
+      models: ['gpt-4o-mini'],
+    },
+    {
+      id: 'g2',
+      projectId: 'p2',
+      providerProductId: '0190-product',
+      providerProductCode: 'claude-api',
+      providerProductName: 'Claude API',
+      models: ['claude-3-7-sonnet'],
+    },
+    {
+      id: 'g2b',
+      projectId: 'p2',
+      providerProductId: '0190-other-product',
+      providerProductCode: 'openai-api',
+      providerProductName: 'OpenAI API',
+      models: ['gpt-4o-mini'],
+    },
+    {
+      id: 'g3',
+      projectId: 'p3',
+      providerProductId: '0190-product',
+      providerProductCode: 'claude-api',
+      providerProductName: 'Claude API',
+      models: ['claude-3-7-sonnet'],
+    },
+  ],
+  purposes: ['CLAUDE_CODE'],
+};
+
+/**
+ * #1157: disjoint products — neither project is bindable while the other is primary.
+ * This is the shape that used to leave a stale id checked after bouncing the primary.
+ */
+const grantsDisjointProducts: MeGrantsResponse = {
+  projects: [
+    { id: 'p1', code: 'P1', name: 'Core AI', projectTag: 'core-ai' },
+    { id: 'p2', code: 'P2', name: 'QA Team', projectTag: 'qa-team' },
+  ],
+  grants: [
+    {
+      id: 'g1',
+      projectId: 'p1',
+      providerProductId: '0190-product',
+      providerProductCode: 'claude-api',
+      providerProductName: 'Claude API',
+      models: ['claude-3-7-sonnet'],
+    },
+    {
+      id: 'g2',
+      projectId: 'p2',
+      providerProductId: '0190-other-product',
+      providerProductCode: 'openai-api',
+      providerProductName: 'OpenAI API',
+      models: ['gpt-4o-mini'],
+    },
+  ],
+  purposes: ['CLAUDE_CODE'],
+};
+
 const created: CreateVirtualKeyResponse = {
   id: '0190-0002',
   secret: 'mqk_live_newkey',
@@ -389,6 +475,91 @@ describe('NextKeysView', () => {
 
     const payload = mockApi.createVirtualKey.mock.calls[0]![0] as { projectIds?: string[] };
     expect(payload.projectIds).toEqual(['p1', 'p2']);
+  });
+
+  it('#1157: bouncing the primary across products leaves no non-bindable project checked', async () => {
+    // Disjoint products: neither project is bindable while the other is primary, so
+    // every step here leaves the bindable set empty. Storing the selection used to
+    // backfill p2 on the way past and keep it checked even after the Claude grant was
+    // re-picked — an untouched form then submitted a pair the server refuses.
+    mockApi.myGrants.mockResolvedValue(grantsDisjointProducts);
+    mockApi.createVirtualKey.mockResolvedValue(created);
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="create-name"]').setValue('bounce');
+
+    const pick = async (label: string) => {
+      const option = wrapper.findAll('.stub-option').find((el) => el.text().includes(label));
+      await option!.trigger('click');
+      await flushPromises();
+    };
+    await pick('Claude API');
+    await pick('QA Team');
+    await pick('Core AI');
+    await pick('Claude API');
+
+    await wrapper.find('[data-testid="create-submit"]').trigger('click');
+    await flushPromises();
+
+    const payload = mockApi.createVirtualKey.mock.calls[0]![0] as { projectIds?: string[] };
+    expect(payload.projectIds).toEqual(['p1']);
+  });
+
+  it('#1157: switching the grant to another product re-binds the extras that match it', async () => {
+    mockApi.myGrants.mockResolvedValue(grantsAcrossProducts);
+    mockApi.createVirtualKey.mockResolvedValue(created);
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="create-name"]').setValue('switch-grant');
+
+    const pick = async (label: string) => {
+      const option = wrapper.findAll('.stub-option').find((el) => el.text().includes(label));
+      await option!.trigger('click');
+      await flushPromises();
+    };
+    await pick('Claude API'); // p2 and p3 both hold Claude grants
+    await pick('OpenAI API'); // only p2 holds one
+
+    await wrapper.find('[data-testid="create-submit"]').trigger('click');
+    await flushPromises();
+
+    const payload = mockApi.createVirtualKey.mock.calls[0]![0] as { projectIds?: string[] };
+    expect(payload.projectIds).toEqual(['p1', 'p2']);
+  });
+
+  it('#1157: an explicit uncheck survives a change of product', async () => {
+    mockApi.myGrants.mockResolvedValue(grantsAcrossProducts);
+    mockApi.createVirtualKey.mockResolvedValue(created);
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="create-key-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="create-name"]').setValue('keep-uncheck');
+
+    const pick = async (label: string) => {
+      const option = wrapper.findAll('.stub-option').find((el) => el.text().includes(label));
+      await option!.trigger('click');
+      await flushPromises();
+    };
+    await pick('Claude API');
+    await wrapper.find('[data-testid="create-extra-project-p2"]').setValue(false);
+    await flushPromises();
+    // p2 is bindable for OpenAI too — re-deriving the selection must not undo the
+    // user's explicit removal (that would silently bind a project they dropped).
+    await pick('OpenAI API');
+
+    await wrapper.find('[data-testid="create-submit"]').trigger('click');
+    await flushPromises();
+
+    const payload = mockApi.createVirtualKey.mock.calls[0]![0] as { projectIds?: string[] };
+    expect(payload.projectIds).toEqual(['p1']);
   });
 
   it('#646: switching the primary keeps the previous project as an extra (no silent drop)', async () => {

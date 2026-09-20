@@ -213,8 +213,6 @@ const selectedGrant = computed(() => grantOptions.value.find((g) => g.id === cre
 // ADR-0018: one key may serve several projects. The picker above stays the
 // PRIMARY project (its grant is chosen explicitly); these are extra bindings —
 // the server matches each one to that project's own grant of the same product.
-const createExtraProjectIds = ref<string[]>([]);
-
 const extraProjectOptions = computed(() =>
   projectsForGrant.value.filter((p) => p.id && p.id !== createProjectId.value),
 );
@@ -243,15 +241,46 @@ const bindableExtraProjectIds = computed(() => {
     .filter((id): id is string => Boolean(id));
 });
 
-// #646 Default-All: "one key for every project" is the default path — the
-// primary project defaults to the first option and every other **bindable**
-// project is pre-selected (the user can uncheck). Deselecting is remembered for
-// the current form session; switching the primary backfills the previous primary
-// as an extra so no project is silently dropped.
-const extraDefaultsApplied = ref(false);
-let previousPrimary = '';
-/** The product the extras were last defaulted for — a new product is a new question. */
-let defaultsProductId = '';
+/**
+ * #646 Default-All: "one key for every project" is the default path, so the
+ * selection is **derived** — every bindable project is in it unless the user said
+ * otherwise — rather than stored. Only the user's own deviations are kept.
+ *
+ * Storing the selection instead is what broke twice, and both ways were reachable
+ * from the form: re-deriving it on an unspecified trigger resurrected an explicit
+ * uncheck (silently binding a project the user had removed), while *not*
+ * re-deriving it left a stale, non-bindable id in place for the server to reject
+ * with the very 409 this scoping exists to prevent.
+ */
+const extraOverrides = ref<Record<string, boolean>>({});
+
+const createExtraProjectIds = computed<string[]>(() => {
+  const selection = new Set(bindableExtraProjectIds.value);
+  for (const [id, chosen] of Object.entries(extraOverrides.value)) {
+    if (chosen) {
+      selection.add(id);
+    } else {
+      selection.delete(id);
+    }
+  }
+  return [...selection];
+});
+
+/** Turn the checkbox group's new value into whatever it deviates from the default by. */
+function onExtraProjects(next: boolean | string[] | Set<string>) {
+  if (!Array.isArray(next)) {
+    return;
+  }
+  const chosen = new Set(next);
+  const bindable = new Set(bindableExtraProjectIds.value);
+  const overrides: Record<string, boolean> = {};
+  for (const id of new Set([...bindable, ...chosen, ...Object.keys(extraOverrides.value)])) {
+    if (chosen.has(id) !== bindable.has(id)) {
+      overrides[id] = chosen.has(id);
+    }
+  }
+  extraOverrides.value = overrides;
+}
 
 function applyProjectDefaults(): void {
   if (projectsForGrant.value.length === 0) {
@@ -259,15 +288,6 @@ function applyProjectDefaults(): void {
   }
   if (!createProjectId.value && projectsForGrant.value[0]?.id) {
     createProjectId.value = projectsForGrant.value[0].id;
-  }
-  previousPrimary = createProjectId.value;
-  const productId = selectedGrant.value?.providerProductId ?? '';
-  // Only once the product is known: before that nothing can be judged bindable, and
-  // re-applying on an unknown product would wipe whatever the user had chosen.
-  if (productId && (!extraDefaultsApplied.value || defaultsProductId !== productId)) {
-    createExtraProjectIds.value = bindableExtraProjectIds.value;
-    extraDefaultsApplied.value = true;
-    defaultsProductId = productId;
   }
 }
 
@@ -278,12 +298,6 @@ watch(creating, (open) => {
     applyProjectDefaults();
   }
 });
-
-function onExtraProjects(next: boolean | string[] | Set<string>) {
-  if (Array.isArray(next)) {
-    createExtraProjectIds.value = next;
-  }
-}
 
 type GrantOption = NonNullable<MeGrantsResponse['grants']>[number];
 
@@ -367,35 +381,25 @@ async function load() {
 // ---- create ----
 
 function onProjectChange() {
-  const newPrimary = createProjectId.value;
-  // Default-All (#646): switching the primary must not silently drop the old
-  // one — it stays bound as an extra unless already selected.
-  if (previousPrimary && previousPrimary !== newPrimary) {
-    if (!createExtraProjectIds.value.includes(previousPrimary)) {
-      createExtraProjectIds.value = [...createExtraProjectIds.value, previousPrimary];
-    }
-  }
-  previousPrimary = newPrimary;
+  // The selection is derived (#646 Default-All), so there is nothing to backfill:
+  // the new primary simply leaves the extras list (`extraProjectOptions` excludes
+  // it), and a previous primary this product can still bind is already in it. A
+  // previous primary that *cannot* bind is deliberately not kept — binding it is
+  // exactly the 409 the product scoping exists to prevent.
   createGrantId.value = '';
   createModels.value = [];
-  createExtraProjectIds.value = createExtraProjectIds.value.filter((id) => id !== newPrimary);
 }
 
 function onGrantChange() {
-  // Default to all models authorized for the grant.
+  // Default to all models authorized for the grant. The extras need no hook: which
+  // projects are bindable is derived from this grant's product.
   createModels.value = [...(selectedGrant.value?.models ?? [])];
-  // #1157: which extras are bindable depends on this grant's product, so the
-  // defaults have to be applied (or re-applied) the moment the product is known.
-  applyProjectDefaults();
 }
 
 function resetForm() {
   createName.value = '';
   createProjectId.value = '';
-  createExtraProjectIds.value = [];
-  extraDefaultsApplied.value = false;
-  previousPrimary = '';
-  defaultsProductId = '';
+  extraOverrides.value = {};
   createGrantId.value = '';
   createPurpose.value = 'CLAUDE_CODE';
   createModels.value = [];
