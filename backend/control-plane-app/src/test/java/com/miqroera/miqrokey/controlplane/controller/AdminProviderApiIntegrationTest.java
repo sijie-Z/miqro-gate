@@ -21,10 +21,12 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -143,6 +145,53 @@ class AdminProviderApiIntegrationTest {
 
         mockMvc.perform(get("/api/v1/admin/subscriptions").cookie(sessionCookie)).andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].productName").value("Test Product"));
+    }
+
+    @Test
+    @DisplayName("#1134: a PATCH must persist every field its 200 answers with")
+    void subscriptionPatchPersistsEveryFieldItAnswers() throws Exception {
+        fx.insertProviderAndProduct();
+
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("providerProductId", fx.productId.toString(), "name",
+                        "Team Plan", "billingMode", "FIXED_SUBSCRIPTION", "planScope", "TEAM", "subscriptionPrice", 199,
+                        "currency", "USD"))))
+                .andExpect(status().isOk()).andReturn();
+        String subscriptionId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        mockMvc.perform(
+                patch("/api/v1/admin/subscriptions/" + subscriptionId).contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("name", "Team Plan v2", "subscriptionPrice",
+                                299.50, "currency", "CNY", "quotaTotal", 12345, "quotaUnit", "tokens"))))
+                .andExpect(status().isOk());
+
+        // The row is the truth, not the response body: four of the request's six fields
+        // were
+        // missing from the UPDATE's SET list, so the 200 echoed values the table never
+        // took.
+        // Asserting the response alone would have passed on the broken build — which is
+        // what
+        // the operator saw too ("改了没保存", with nothing to grep for).
+        Map<String, Object> row = jdbc.queryForMap(
+                "SELECT name, subscription_price, currency, quota_total, quota_unit FROM upstream_subscriptions"
+                        + " WHERE id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(subscriptionId)));
+        assertThat(row.get("name")).isEqualTo("Team Plan v2");
+        // numeric(20,10): compare by value, not by scale — 299.50 and 299.5 are one
+        // row.
+        assertThat((BigDecimal) row.get("subscription_price")).isEqualByComparingTo("299.50");
+        assertThat(row.get("currency")).isEqualTo("CNY");
+        assertThat(((Number) row.get("quota_total")).longValue()).isEqualTo(12345L);
+        assertThat(row.get("quota_unit")).isEqualTo("tokens");
+
+        // …and the read path the operator actually looks at has to agree with that row.
+        mockMvc.perform(get("/api/v1/admin/subscriptions/" + subscriptionId).cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("Team Plan v2"))
+                .andExpect(jsonPath("$.subscriptionPrice").value(299.50)).andExpect(jsonPath("$.currency").value("CNY"))
+                .andExpect(jsonPath("$.quotaTotal").value(12345)).andExpect(jsonPath("$.quotaUnit").value("tokens"));
     }
 
     // ------------------------------------------------------------------
