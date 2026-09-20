@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextAdminExportsView from '@/views/next/NextAdminExportsView.vue';
 import * as api from '@/api';
+import { toastState } from '@/ui/toast';
 import type { ExportTask } from '@/types/generated-api';
 
 vi.mock('@/api', () => ({
@@ -31,6 +32,7 @@ describe('NextAdminExportsView', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.resetAllMocks();
+    toastState.items.splice(0);
     mockApi.exportRecent.mockResolvedValue([
       task(),
       task({ id: 'e2', status: 'PENDING', format: 'JSONL', rowCount: undefined }),
@@ -121,5 +123,63 @@ describe('NextAdminExportsView', () => {
 
     releaseCreate(task({ id: 'e9', status: 'PENDING' }));
     await flushPromises();
+  });
+
+  it('#PH53: one failed status poll must not stop polling for good', async () => {
+    // A transient failure (proxy 502, server restart, laptop sleep) must not be
+    // treated as terminal: killing the interval leaves the row showing a status
+    // that is already wrong, with no message and no way back but a page reload.
+    mockApi.exportRecent.mockResolvedValue([task({ id: 'e9', status: 'RUNNING' })]);
+    mockApi.createExport.mockResolvedValue(task({ id: 'e9', status: 'RUNNING' }));
+    mockApi.exportStatus
+      .mockRejectedValueOnce(new Error('transient'))
+      .mockResolvedValue(task({ id: 'e9', status: 'SUCCEEDED', rowCount: 5 }));
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="export-create-open"]').trigger('click');
+    await wrapper.find('[data-testid="export-from"]').setValue('2026-09-01T00:00:00Z');
+    await wrapper.find('[data-testid="export-to"]').setValue('2026-09-02T00:00:00Z');
+    await wrapper.find('[data-testid="export-create-submit"]').trigger('click');
+    await flushPromises();
+
+    vi.advanceTimersByTime(2500);
+    await flushPromises();
+    expect(mockApi.exportStatus).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain('生成中');
+
+    vi.advanceTimersByTime(2500);
+    await flushPromises();
+    expect(mockApi.exportStatus).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).toContain('已完成');
+  });
+
+  it('#PH53: retrying is bounded, and giving up is announced', async () => {
+    // The other half of the contract: retrying must not become an infinite 2 s
+    // poll against a backend that is simply down, and stopping must not be silent.
+    mockApi.exportRecent.mockResolvedValue([task({ id: 'e9', status: 'RUNNING' })]);
+    mockApi.createExport.mockResolvedValue(task({ id: 'e9', status: 'RUNNING' }));
+    mockApi.exportStatus.mockRejectedValue(new Error('down'));
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find('[data-testid="export-create-open"]').trigger('click');
+    await wrapper.find('[data-testid="export-from"]').setValue('2026-09-01T00:00:00Z');
+    await wrapper.find('[data-testid="export-to"]').setValue('2026-09-02T00:00:00Z');
+    await wrapper.find('[data-testid="export-create-submit"]').trigger('click');
+    await flushPromises();
+
+    // Advance exactly one interval per iteration so the tick count stays 1:1
+    // (2 500 ms steps would drift against the 2 000 ms interval).
+    for (let tick = 1; tick <= 5; tick += 1) {
+      vi.advanceTimersByTime(2000);
+      await flushPromises();
+      expect(mockApi.exportStatus).toHaveBeenCalledTimes(tick);
+    }
+    expect(toastState.items.some((t) => t.message.includes('已停止自动刷新'))).toBe(true);
+
+    vi.advanceTimersByTime(20000);
+    await flushPromises();
+    expect(mockApi.exportStatus).toHaveBeenCalledTimes(5);
   });
 });

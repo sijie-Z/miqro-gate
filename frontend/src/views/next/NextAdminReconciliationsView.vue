@@ -366,13 +366,19 @@ onUnmounted(() => {
   pollTimers.clear();
 });
 
+// #1129: same shape as the export list — a transient failure used to clear the
+// interval for good, freezing the report (and its detail rows) on a stale status.
+const MAX_POLL_ERRORS = 5;
+
 function poll(id: string) {
+  let errorStreak = 0;
   const timer = setInterval(async () => {
     try {
       const report = await api.reconciliationReport(id);
       if (!pollTimers.has(timer)) {
         return; // cleared on unmount — the response is irrelevant
       }
+      errorStreak = 0;
       const index = reports.value.findIndex((r) => r.id === id);
       if (index >= 0) {
         reports.value[index] = report;
@@ -391,8 +397,15 @@ function poll(id: string) {
         }
       }
     } catch {
-      clearInterval(timer);
-      pollTimers.delete(timer);
+      if (!pollTimers.has(timer)) {
+        return; // cleared on unmount — stop quietly, no UI side effects
+      }
+      errorStreak += 1;
+      if (errorStreak >= MAX_POLL_ERRORS) {
+        clearInterval(timer);
+        pollTimers.delete(timer);
+        toast.error('状态查询连续失败，已停止自动刷新，请刷新页面查看最新状态。');
+      }
     }
   }, 2000);
   pollTimers.add(timer);

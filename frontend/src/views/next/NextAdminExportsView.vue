@@ -157,13 +157,21 @@ onUnmounted(() => {
   pollTimers.clear();
 });
 
+// #1129: a failed status request is not a terminal state. Clearing the interval
+// on the first error froze the row on a status that was already wrong — silently,
+// and with no way back but a manual reload. Retry instead, but give up after a
+// bounded streak so a permanently broken backend cannot be polled forever.
+const MAX_POLL_ERRORS = 5;
+
 function poll(id: string) {
+  let errorStreak = 0;
   const timer = setInterval(async () => {
     try {
       const task = await api.exportStatus(id);
       if (!pollTimers.has(timer)) {
         return; // cleared on unmount — the response is irrelevant
       }
+      errorStreak = 0;
       const index = tasks.value.findIndex((t) => t.id === id);
       if (index >= 0) {
         tasks.value[index] = task;
@@ -176,8 +184,15 @@ function poll(id: string) {
         }
       }
     } catch {
-      clearInterval(timer);
-      pollTimers.delete(timer);
+      if (!pollTimers.has(timer)) {
+        return; // cleared on unmount — stop quietly, no UI side effects
+      }
+      errorStreak += 1;
+      if (errorStreak >= MAX_POLL_ERRORS) {
+        clearInterval(timer);
+        pollTimers.delete(timer);
+        toast.error('状态查询连续失败，已停止自动刷新，请刷新页面查看最新状态。');
+      }
     }
   }, 2000);
   pollTimers.add(timer);
