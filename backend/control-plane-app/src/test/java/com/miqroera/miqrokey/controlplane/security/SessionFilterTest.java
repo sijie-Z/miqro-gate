@@ -34,8 +34,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * A 401 that also has to change state — disabling or locking an account revokes
- * the live session so it cannot be replayed — is the one path where a failure of
- * the state change matters as much as the rejection itself.
+ * the live session so it cannot be replayed — is the one path where a failure
+ * of the state change matters as much as the rejection itself.
  */
 @DisplayName("SessionFilter (control-plane portal)")
 class SessionFilterTest {
@@ -69,8 +69,8 @@ class SessionFilterTest {
     }
 
     private List<String> messages(Level level) {
-        return appender.list.stream().filter(event -> event.getLevel() == level)
-                .map(ILoggingEvent::getFormattedMessage).toList();
+        return appender.list.stream().filter(event -> event.getLevel() == level).map(ILoggingEvent::getFormattedMessage)
+                .toList();
     }
 
     private MockHttpServletRequest request() {
@@ -109,8 +109,8 @@ class SessionFilterTest {
 
         // ... but the failed revocation must leave a trace: the session is still
         // usable even though the account is disabled.
-        assertThat(messages(Level.ERROR)).anySatisfy(line -> assertThat(line)
-                .contains(sessionId.toString(), userId.toString(), "DISABLED"));
+        assertThat(messages(Level.ERROR))
+                .anySatisfy(line -> assertThat(line).contains(sessionId.toString(), userId.toString(), "DISABLED"));
     }
 
     @Test
@@ -125,8 +125,8 @@ class SessionFilterTest {
         filter.doFilter(request(), response, chain);
 
         assertThat(response.getStatus()).isEqualTo(401);
-        assertThat(messages(Level.ERROR)).anySatisfy(line -> assertThat(line)
-                .contains(sessionId.toString(), userId.toString(), "LOCKED"));
+        assertThat(messages(Level.ERROR))
+                .anySatisfy(line -> assertThat(line).contains(sessionId.toString(), userId.toString(), "LOCKED"));
     }
 
     @Test
