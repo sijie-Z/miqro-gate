@@ -64,8 +64,8 @@ class ApiKeyAuthFilterTest {
     }
 
     private List<String> messages(Level level) {
-        return appender.list.stream().filter(event -> event.getLevel() == level)
-                .map(ILoggingEvent::getFormattedMessage).toList();
+        return appender.list.stream().filter(event -> event.getLevel() == level).map(ILoggingEvent::getFormattedMessage)
+                .toList();
     }
 
     private ApiConsumer consumer(List<String> capabilities) {
@@ -174,8 +174,8 @@ class ApiKeyAuthFilterTest {
         filter.doFilter(scoped, scopedResponse, chain);
 
         assertThat(scopedResponse.getStatus()).isEqualTo(403);
-        assertThat(messages(Level.WARN))
-                .anySatisfy(line -> assertThat(line).contains("ph45-c2-scope", consumerId.toString(), tenant.toString()));
+        assertThat(messages(Level.WARN)).anySatisfy(
+                line -> assertThat(line).contains("ph45-c2-scope", consumerId.toString(), tenant.toString()));
     }
 
     @Test
@@ -194,8 +194,8 @@ class ApiKeyAuthFilterTest {
         filter.doFilter(request, response, chain);
 
         assertThat(response.getStatus()).isEqualTo(401);
-        assertThat(messages(Level.WARN)).anySatisfy(
-                line -> assertThat(line).contains("ph45-c2-jwt", "UNKNOWN_CONSUMER", "acme?2026-09-20"));
+        assertThat(messages(Level.WARN))
+                .anySatisfy(line -> assertThat(line).contains("ph45-c2-jwt", "UNKNOWN_CONSUMER", "acme?2026-09-20"));
         assertThat(appender.list).noneSatisfy(event -> assertThat(event.getFormattedMessage()).contains("\n"));
     }
 

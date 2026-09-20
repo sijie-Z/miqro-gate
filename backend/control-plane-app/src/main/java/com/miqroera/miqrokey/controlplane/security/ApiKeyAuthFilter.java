@@ -111,8 +111,8 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     /**
      * The rejection is recorded with the correlation id only: the presented
      * credential is never logged (a rejected key can still be a live secret
-     * mistyped at the wrong endpoint), and the consumer id is logged only once
-     * the credential has been accepted.
+     * mistyped at the wrong endpoint), and the consumer id is logged only once the
+     * credential has been accepted.
      */
     private ApiConsumer authenticateApiKey(String key, HttpServletRequest request) {
         ApiConsumer consumer = consumerRepository.findByKeyDigest(sha256(key)).orElse(null);
@@ -130,8 +130,8 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         }
         ApiConsumer consumer = consumerRepository.findByName(subject).orElse(null);
         if (consumer == null) {
-            LOG.warn("Billing channel rejected [requestId={}, reason=UNKNOWN_CONSUMER, consumer={}]", requestId(request),
-                    forLog(subject));
+            LOG.warn("Billing channel rejected [requestId={}, reason=UNKNOWN_CONSUMER, consumer={}]",
+                    requestId(request), forLog(subject));
             return null;
         }
         if (!"ACTIVE".equals(consumer.status())) {
@@ -192,9 +192,9 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     }
 
     /**
-     * The reason token and the consumer identity (known only after a credential
-     * was accepted) go to the log; the envelope stays as generic as before, so a
-     * caller still cannot enumerate which capability it is missing.
+     * The reason token and the consumer identity (known only after a credential was
+     * accepted) go to the log; the envelope stays as generic as before, so a caller
+     * still cannot enumerate which capability it is missing.
      */
     private static void forbidden(HttpServletRequest request, HttpServletResponse response, String reason,
             ApiConsumer consumer) throws IOException {
