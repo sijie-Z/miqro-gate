@@ -5,7 +5,7 @@
  * Visual styling is entirely ours (hairline trigger, popper panel).
  * Options come from props; value is the option's `value`.
  */
-import { computed, ref, useAttrs } from 'vue';
+import { computed, ref, useAttrs, useId } from 'vue';
 import {
   SelectContent,
   SelectItem,
@@ -82,6 +82,16 @@ function pick(value: string) {
   emit('change', emitted);
 }
 
+/**
+ * The label sits next to (not around) the trigger, so it needs an explicit
+ * `for`/`id` pairing; the error paragraph needs an id too so the trigger can
+ * point at it with `aria-describedby`. `required` is forwarded to SelectRoot
+ * so radix emits `aria-required` on the combobox.
+ */
+const uid = useId();
+const controlId = `ui-select-${uid}`;
+const errorId = `${controlId}-error`;
+
 const triggerClasses = computed(() => ({
   'ui-select__trigger': true,
   'ui-select__trigger--open': open.value,
@@ -91,16 +101,24 @@ const triggerClasses = computed(() => ({
 
 <template>
   <div class="ui-select">
-    <label v-if="label" class="ui-select__label">
+    <label v-if="label" class="ui-select__label" :for="controlId">
       {{ label }}<span v-if="required" class="ui-select__required" aria-hidden="true"> *</span>
     </label>
     <SelectRoot
       :model-value="radixValue"
       :disabled="disabled || loading"
+      :required="required"
       @update:model-value="pick"
       @update:open="open = $event"
     >
-      <SelectTrigger :class="triggerClasses" :style="width ? { width } : {}" v-bind="attrs">
+      <SelectTrigger
+        :id="controlId"
+        :class="triggerClasses"
+        :style="width ? { width } : {}"
+        :aria-invalid="error ? true : undefined"
+        :aria-describedby="error ? errorId : undefined"
+        v-bind="attrs"
+      >
         <span class="ui-select__value">
           <span v-if="loading" class="ui-select__loading-hint">加载中…</span>
           <SelectValue v-else :placeholder="placeholder" />
@@ -158,7 +176,7 @@ const triggerClasses = computed(() => ({
         </SelectContent>
       </SelectPortal>
     </SelectRoot>
-    <p v-if="error" class="ui-select__error">{{ error }}</p>
+    <p v-if="error" :id="errorId" class="ui-select__error">{{ error }}</p>
   </div>
 </template>
 

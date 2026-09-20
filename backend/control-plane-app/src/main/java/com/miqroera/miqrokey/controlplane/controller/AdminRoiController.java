@@ -32,11 +32,11 @@ public class AdminRoiController {
     }
 
     @GetMapping
-    public RoiReportView report(@RequestParam(required = false) String from,
-            @RequestParam(required = false) String to) {
+    public RoiReportView report(@RequestParam(required = false) String from, @RequestParam(required = false) String to,
+            @RequestParam(required = false) Integer tzOffsetMinutes) {
         Instant fromInstant = from == null || from.isBlank() ? AdminRoiService.defaultFrom() : parseInstant(from);
         Instant toInstant = to == null || to.isBlank() ? Instant.now() : parseInstant(to);
-        return roiService.report(userContext.getUser().tenantId(), fromInstant, toInstant);
+        return roiService.report(userContext.getUser().tenantId(), fromInstant, toInstant, tzOffsetMinutes);
     }
 
     private static Instant parseInstant(String value) {

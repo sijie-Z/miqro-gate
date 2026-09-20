@@ -204,8 +204,9 @@ export function usageSummary(
   groupBy?: UsageGroupBy,
   from?: string,
   to?: string,
+  tzOffsetMinutes?: number,
 ): Promise<UsageSummary> {
-  return get<UsageSummary>('/api/v1/me/usage/summary', { groupBy, from, to });
+  return get<UsageSummary>('/api/v1/me/usage/summary', { groupBy, from, to, tzOffsetMinutes });
 }
 
 export function usageRecords(
@@ -396,8 +397,12 @@ export function disableQuotaDefaultTemplate(): Promise<QuotaDefaultTemplateView>
 
 // ---- admin cache-ROI report (P5.4) ----
 
-export function getRoiReport(from?: string, to?: string): Promise<RoiReportView> {
-  return get<RoiReportView>('/api/v1/admin/usage/roi', { from, to });
+export function getRoiReport(
+  from?: string,
+  to?: string,
+  tzOffsetMinutes?: number,
+): Promise<RoiReportView> {
+  return get<RoiReportView>('/api/v1/admin/usage/roi', { from, to, tzOffsetMinutes });
 }
 
 // ---- MCP two-level access control (Tencent doc 134890) ----
@@ -1138,10 +1143,14 @@ export function adminUsageSummary(query: {
   providerProductId?: string;
   modelId?: string;
   teamId?: string;
+  /** Local day/month buckets (#1050); omit for the UTC reading. */
+  tzOffsetMinutes?: number;
 }): Promise<UsageSummary> {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
-    if (value) params.set(key, value);
+    // A numeric 0 (tzOffsetMinutes = UTC) is dropped here on purpose: the
+    // parameter's default is already 0, so omitting it says the same thing.
+    if (value) params.set(key, String(value));
   }
   return get<UsageSummary>(`/api/v1/admin/usage/summary?${params.toString()}`);
 }

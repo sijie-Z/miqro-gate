@@ -34,8 +34,9 @@ public class OpenAdminUsageReadController {
     @GetMapping("/summary")
     public UsageSummary summary(HttpServletRequest request, @RequestParam(required = false) String groupBy,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
-        return usageStatsService.summary(tenantId(request), groupBy, from, to);
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(required = false) Integer tzOffsetMinutes) {
+        return usageStatsService.summary(tenantId(request), groupBy, from, to, tzOffsetMinutes);
     }
 
     @GetMapping("/records")

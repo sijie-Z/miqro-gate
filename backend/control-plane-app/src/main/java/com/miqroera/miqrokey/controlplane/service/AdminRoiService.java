@@ -34,8 +34,17 @@ public class AdminRoiService {
     }
 
     public RoiReportView report(UUID tenantId, Instant from, Instant to) {
+        return report(tenantId, from, to, null);
+    }
+
+    /**
+     * Same report with the daily series in the caller's local day (#1050): the ROI
+     * page prints local timestamps beside the day rows, so its buckets have to be
+     * the local days those timestamps belong to.
+     */
+    public RoiReportView report(UUID tenantId, Instant from, Instant to, Integer tzOffsetMinutes) {
         UsageSummary summary = usageStatsService.summary(tenantId, "day", from, to, null, null, null, null, null, null,
-                null);
+                null, tzOffsetMinutes);
         GroupSummary totals = summary.totals();
 
         long hits = totals.requests().l1Hit() + totals.requests().l2Hit();

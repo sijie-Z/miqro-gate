@@ -1,10 +1,19 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.miqroera.miqrokey.controlplane.service.ApiException;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -12,6 +21,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,6 +36,31 @@ class GlobalExceptionHandlerTest {
 
     private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
     private final MockHttpServletRequest request = new MockHttpServletRequest();
+    private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
+
+    @BeforeEach
+    void attachAppender() {
+        appender.start();
+        logger().addAppender(appender);
+    }
+
+    @AfterEach
+    void detachAppender() {
+        logger().detachAppender(appender);
+    }
+
+    private static Logger logger() {
+        // An explicit level: the assertion below reaches for a DEBUG record, which
+        // the effective (INFO) level would silently drop.
+        Logger logger = (Logger) LoggerFactory.getLogger(GlobalExceptionHandler.class);
+        logger.setLevel(Level.DEBUG);
+        return logger;
+    }
+
+    private List<String> messages(Level level) {
+        return appender.list.stream().filter(event -> event.getLevel() == level).map(ILoggingEvent::getFormattedMessage)
+                .toList();
+    }
 
     private static Map<String, Object> body(ResponseEntity<Map<String, Object>> response) {
         assertThat(response.getBody()).isNotNull();
@@ -75,5 +110,30 @@ class GlobalExceptionHandlerTest {
                 .handleNoResource(new NoResourceFoundException(HttpMethod.GET, "/api/v1/nope"), request);
         assertThat(noResource.getStatusCode().value()).isEqualTo(404);
         assertThat(body(noResource).get("code")).isEqualTo("NOT_FOUND");
+    }
+
+    @Test
+    @DisplayName("PH45: a 5xx ApiException leaves a server-side trace carrying its requestId")
+    void serverErrorsAreLoggedWithRequestId() {
+        request.addHeader("X-Request-Id", "ph45-c1-5xx");
+
+        ResponseEntity<Map<String, Object>> response = handler
+                .handleApi(new ApiException(HttpStatus.BAD_GATEWAY, "PRICE_SYNC_FAILED", "价格源返回非 200。"), request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(502);
+        assertThat(messages(Level.ERROR))
+                .anySatisfy(line -> assertThat(line).contains("ph45-c1-5xx", "PRICE_SYNC_FAILED"));
+    }
+
+    @Test
+    @DisplayName("PH45: a 4xx ApiException is traceable at DEBUG without polluting warn/error")
+    void clientErrorsAreTraceableWithoutNoise() {
+        request.addHeader("X-Request-Id", "ph45-c1-4xx");
+
+        handler.handleApi(new ApiException(HttpStatus.BAD_REQUEST, "PARAM_INVALID", "参数无效。"), request);
+
+        assertThat(messages(Level.DEBUG)).anySatisfy(line -> assertThat(line).contains("ph45-c1-4xx", "PARAM_INVALID"));
+        assertThat(messages(Level.WARN)).isEmpty();
+        assertThat(messages(Level.ERROR)).isEmpty();
     }
 }
