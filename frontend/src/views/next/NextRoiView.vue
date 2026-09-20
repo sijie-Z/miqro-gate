@@ -12,6 +12,7 @@ import * as api from '@/api';
 import { UiButton, UiDonut, UiTable, UiTooltip } from '@/ui';
 import { costGapNote, savingsBoundNote } from '@/lib/usage-pricing';
 import { csvCell } from '@/utils/csv';
+import { localTzOffsetMinutes } from '@/utils/datetime';
 import type { RoiReportView, UsageGroup } from '@/types/generated-api';
 
 const report = ref<RoiReportView | null>(null);
@@ -282,7 +283,11 @@ async function load() {
     });
 
   try {
-    const result = await api.getRoiReport(from.toISOString(), to.toISOString());
+    const result = await api.getRoiReport(
+      from.toISOString(),
+      to.toISOString(),
+      localTzOffsetMinutes(),
+    );
     if (seq !== loadRequestSeq) {
       return; // a newer window won — this response is stale
     }

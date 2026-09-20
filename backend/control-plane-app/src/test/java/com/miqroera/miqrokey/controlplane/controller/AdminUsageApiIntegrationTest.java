@@ -717,4 +717,31 @@ class AdminUsageApiIntegrationTest {
                 .andExpect(jsonPath("$.groups[0].tokens.input").value(1_000))
                 .andExpect(jsonPath("$.groups[1].tokens.input").value(2_000));
     }
+
+    @Test
+    @DisplayName("day buckets follow tzOffsetMinutes, and an out-of-range offset is rejected (#1050)")
+    void dayBucketsFollowTheCallersOffset() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertPrices();
+        // 2026-09-03 in UTC; 2026-09-04 00:30 at +08 — the row the console used to draw
+        // a day early,
+        // because the request log beside the chart prints local timestamps.
+        fx.insertUsage(ownKey, "chatcmpl-tz-1", 1_000L, 500L, MODEL, Instant.parse("2026-09-03T16:30:00Z"));
+
+        String from = "2026-09-01T00:00:00Z";
+        String to = "2026-09-10T00:00:00Z";
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "DAY").param("from", from).param("to", to)
+                .cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups[*].label", contains("2026-09-03")));
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "DAY").param("tzOffsetMinutes", "480")
+                .param("from", from).param("to", to).cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups[*].label", contains("2026-09-04")));
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "DAY").param("tzOffsetMinutes", "1081")
+                .param("from", from).param("to", to).cookie(adminSession)).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("TZ_OFFSET_INVALID"));
+    }
 }

@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import NextUsageView from '@/views/next/NextUsageView.vue';
 import * as api from '@/api';
+import { localTzOffsetMinutes } from '@/utils/datetime';
 import type {
   QuotaRuleView,
   UsageCost,
@@ -320,6 +321,9 @@ describe('NextUsageView', () => {
       'project',
       expect.any(String),
       expect.any(String),
+      // #1050: the reporting endpoints bucket day/month rows by the viewer's
+      // local day; the view must forward its own offset, not a fixed one.
+      localTzOffsetMinutes(),
     );
     expect(mockApi.usageRecords).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -451,7 +455,12 @@ describe('NextUsageView', () => {
     expect(mockApi.usageRecords).toHaveBeenLastCalledWith(
       expect.objectContaining({ from: expectedFrom, to: expectedTo, page: 1 }),
     );
-    expect(mockApi.usageSummary).toHaveBeenLastCalledWith('project', expectedFrom, expectedTo);
+    expect(mockApi.usageSummary).toHaveBeenLastCalledWith(
+      'project',
+      expectedFrom,
+      expectedTo,
+      localTzOffsetMinutes(),
+    );
   });
 
   // PH37: the panel is labelled 用量趋势 (a *daily* trend) and it aggregates the very

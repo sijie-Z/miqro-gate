@@ -18,6 +18,7 @@ import { ApiError } from '@/api/http';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import UsageAdjustChip from '@/components/UsageAdjustChip.vue';
 import { netTokens } from '@/lib/usage-net';
+import { localTzOffsetMinutes } from '@/utils/datetime';
 import { costGapNote, savingsBoundNote } from '@/lib/usage-pricing';
 import {
   UiButton,
@@ -649,7 +650,12 @@ async function load() {
   try {
     const [summaryResult, seriesResult, recordsResult] = await Promise.all([
       api.adminUsageSummary({ groupBy: breakdownGroupBy.value, ...summaryFiltersNow, ...range }),
-      api.adminUsageSummary({ groupBy: seriesDim.value, ...summaryFiltersNow, ...range }),
+      api.adminUsageSummary({
+        groupBy: seriesDim.value,
+        ...summaryFiltersNow,
+        ...range,
+        tzOffsetMinutes: localTzOffsetMinutes(),
+      }),
       api.adminUsageRecords({
         ...summaryFiltersNow,
         clientIp: clientIp.value.trim() || undefined,
@@ -684,6 +690,7 @@ async function loadSeries() {
       groupBy: seriesDim.value,
       ...summaryFilters(),
       ...rangeParams(),
+      tzOffsetMinutes: localTzOffsetMinutes(),
     });
     if (seq === loadRequestSeq) {
       series.value = result;

@@ -6,7 +6,7 @@
  * Use .passive="true" to skip the error text styling for plain inputs
  * without labels.
  */
-import { computed, useAttrs } from 'vue';
+import { computed, useAttrs, useId } from 'vue';
 
 const props = withDefaults(
   defineProps<{
@@ -47,6 +47,21 @@ defineOptions({ inheritAttrs: false });
 
 const attrs = useAttrs();
 
+/**
+ * The label is a sibling of the control, so it needs an explicit `for`/`id`
+ * pairing to give the input its accessible name; the error/hint paragraphs
+ * need ids too so the control can point at them with `aria-describedby`.
+ */
+const uid = useId();
+const controlId = `ui-field-${uid}`;
+const errorId = `${controlId}-error`;
+const hintId = `${controlId}-hint`;
+const describedBy = computed(() => {
+  if (props.error) return errorId;
+  if (props.hint) return hintId;
+  return undefined;
+});
+
 const rootClasses = computed(() => ({
   'ui-field': true,
   'ui-field--error': Boolean(props.error),
@@ -69,7 +84,7 @@ function onKeydown(event: KeyboardEvent) {
 
 <template>
   <div :class="rootClasses" :style="width ? { width } : {}">
-    <label v-if="label" class="ui-field__label">
+    <label v-if="label" class="ui-field__label" :for="controlId">
       {{ label }}<span v-if="required" class="ui-field__required" aria-hidden="true"> *</span>
     </label>
     <span class="ui-field__control">
@@ -77,6 +92,7 @@ function onKeydown(event: KeyboardEvent) {
         <slot name="prefix" />
       </span>
       <input
+        :id="controlId"
         class="ui-field__input"
         :class="{
           'ui-field__input--prefix': $slots.prefix,
@@ -87,6 +103,8 @@ function onKeydown(event: KeyboardEvent) {
         :placeholder="placeholder"
         :disabled="disabled"
         :aria-invalid="error ? true : undefined"
+        :aria-required="required ? 'true' : undefined"
+        :aria-describedby="describedBy"
         v-bind="attrs"
         @input="onInput"
         @keydown="onKeydown"
@@ -95,8 +113,10 @@ function onKeydown(event: KeyboardEvent) {
         <slot name="suffix" />
       </span>
     </span>
-    <p v-if="error" class="ui-field__error" data-testid="field-error">{{ error }}</p>
-    <p v-else-if="hint" class="ui-field__hint">{{ hint }}</p>
+    <p v-if="error" :id="errorId" class="ui-field__error" data-testid="field-error">
+      {{ error }}
+    </p>
+    <p v-else-if="hint" :id="hintId" class="ui-field__hint">{{ hint }}</p>
   </div>
 </template>
 

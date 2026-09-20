@@ -232,7 +232,7 @@
 
 ### 4.4 用量汇总 `GET /api/v1/me/usage/summary`
 
-参数：`groupBy`（`project | virtual_key | cache_level | day | user | team | model | month | product`，默认 `project`；**I15**：`user`=调用方（label=用户名）、`model`=模型、`month`=自然月 `YYYY-MM`；**#1050**：`day`/`month` 一律按 **UTC** 分桶（label `YYYY-MM-DD` / `YYYY-MM`），与会话或服务器 TimeZone 无关——本地日历日需调用方自行换算，小时报表的 `tzOffsetMinutes` 是另一条路径）；**2026-09-15**：`team`=团队成员归属（label=团队名，经成员的 Virtual Key 归集；同一用户属多团队时在各团队分别计入——归属视图非分割口径）；**#758**：`product`=供应商产品（label=产品显示名））、`from`、`to`（ISO-8601，默认最近 93 天窗口；`from` 必须在 `to` 之前，窗口超过 93 天拒绝）。
+参数：`groupBy`（`project | virtual_key | cache_level | day | user | team | model | month | product`，默认 `project`；**I15**：`user`=调用方（label=用户名）、`model`=模型、`month`=自然月 `YYYY-MM`；**#1050**：`day`/`month` 按**调用方给定的固定偏移**分桶（label `YYYY-MM-DD` / `YYYY-MM`），偏移由 `tzOffsetMinutes` 传入（分钟，范围 [-1080, 1080]，缺省 0=UTC；与小时报表同一参数、同一校验，越界返回 400 `TZ_OFFSET_INVALID`）。分桶**与会话/服务器 TimeZone 无关**：同一批数据在任何服务器、任何会话下结果一致；此偏移是「固定偏移」而非 IANA 时区，跨 DST 的历史窗口如需精确本地日应等待后续按 ZoneId 的增强）；**2026-09-15**：`team`=团队成员归属（label=团队名，经成员的 Virtual Key 归集；同一用户属多团队时在各团队分别计入——归属视图非分割口径）；**#758**：`product`=供应商产品（label=产品显示名））、`from`、`to`（ISO-8601，默认最近 93 天窗口；`from` 必须在 `to` 之前，窗口超过 93 天拒绝）。
 
 ```json
 {
@@ -387,7 +387,9 @@
   `(targetType, targetId)` 批量子查询解析的资源名（租户内、未知类型或引用已不存在为 null——前端回退短 ID；
   链上数据与导出**不变**）；`GET /api/v1/admin/audit-events/export`：
   CSV 合规导出（对齐腾讯 AI 网关操作记录下载；上限 5 万行、截断以 `X-MiQroKey-Truncated` 声明，
-  参数/形状同 §9 机器端点）。
+  参数/形状同 §9 机器端点）。**5 万行是行数上限，不是响应字节上限**：导出是流式的，响应一旦开始吐字节，
+  `X-MiQroKey-Truncated` 就只是应用层声明，HTTP 层没有"先算大小再决定"的机会——单次导出的传输量由行宽决定
+  （留痕行的密文尤其大）。要硬字节预算须走异步导出任务（生成文件、算完大小再下载），而不是中途截断流。
 - `/api/v1/admin/usage-deletions`：双确认后人工删除用量范围。
 - `/api/v1/admin/retention-logs`：内容留痕日志（ADR-0014 §8）——分页解密查看（`userId`/`direction`/
   `protocol`/`from`/`to` 筛选、`page`/`size`；返回信封元数据 + 解密文本 + `dataMd5`）与
@@ -562,7 +564,7 @@ name 与 url host，**secret 永不入摘要**）、`BUDGET_PUT/DELETE`（projec
 | `GET /api/v1/admin/usage/records` | 全租户分页明细，时间倒序 |
 | `GET /api/v1/admin/usage/hourly` | 逐小时 Token 表（#634）：小时 × 项目 ×（用户/团队） |
 
-`summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day` | `user` | `team` | `model` | `month` | `product`，默认 `project`；I15 新增后三者；2026-09-15 增 `team`，同用户多团队按团队分别计入；#758 增 `product`=供应商产品，label=产品显示名；**#1050**：`day`/`month` 一律按 **UTC** 分桶，与会话/服务器 TimeZone 无关）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。明细与汇总的响应结构、`outcomes`（成功率/平均延迟/平均首字）与富集列口径同 §4.4/§4.5（#758）。
+`summary` 参数：`groupBy`（`project` | `virtual_key` | `cache_level` | `day` | `user` | `team` | `model` | `month` | `product`，默认 `project`；I15 新增后三者；2026-09-15 增 `team`，同用户多团队按团队分别计入；#758 增 `product`=供应商产品，label=产品显示名；**#1050**：`day`/`month` 按调用方给定的固定偏移分桶——`tzOffsetMinutes`（分钟，[-1080, 1080]，缺省 0=UTC；与小时报表同一参数与校验，越界 400 `TZ_OFFSET_INVALID`），与会话/服务器 TimeZone 无关）、`from`、`to`（同个人端 93 天窗口规则）、可选过滤 `userId`、`projectId`、`virtualKeyId`、`credentialId`、`subscriptionId`（Plan）、`providerProductId`（供应商产品）、`modelId`。明细与汇总的响应结构、`outcomes`（成功率/平均延迟/平均首字）与富集列口径同 §4.4/§4.5（#758）。
 
 `records` 参数：`from`、`to`、`page`（默认 1）、`size`（默认 50，1–200）及与 `summary` 相同的可选过滤，另支持 `clientIp`（#605，精确匹配调用方地址，用于盗用排查「这个来源都调了什么」）。
 

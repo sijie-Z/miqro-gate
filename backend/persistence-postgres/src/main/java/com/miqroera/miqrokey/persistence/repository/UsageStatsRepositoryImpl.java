@@ -56,40 +56,61 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
     }
 
     /**
-     * Day bucket ({@code YYYY-MM-DD}) for a {@code timestamptz} column, pinned to
-     * UTC (#1050). The unqualified form — {@code CAST(occurred_at AS DATE)} —
-     * resolves through the PostgreSQL session's {@code TimeZone}, so the same row
-     * landed in a different bucket after an operator changed the server's timezone:
-     * no code change, no warning, no audit trail, and every tenant's daily series
-     * shifted at once. A bucket boundary is a property of the data, not of whoever
-     * happens to be connected — the same rule the hourly path below states and
-     * implements.
+     * Day bucket ({@code YYYY-MM-DD}) for a {@code timestamptz} column, in the
+     * caller's local day (#1050).
+     *
+     * <p>
+     * The bucket is computed from the instant plus the caller's fixed offset from
+     * UTC ({@code tzOffsetMinutes}) and never from the session's {@code TimeZone}.
+     * The unqualified form, {@code CAST(occurred_at AS DATE)}, resolved through the
+     * session, so the same row landed in a different bucket after an operator
+     * changed the server's timezone: no code change, no warning, no audit trail,
+     * and every tenant's daily series shifted at once. A bucket boundary is a
+     * property of the data and the requested offset, not of whoever happens to be
+     * connected — the same rule the hourly path below states. The offset form also
+     * keeps the API honest to the console: the request log prints local timestamps,
+     * so the day bucket has to be the local day those timestamps belong to.
+     * </p>
      *
      * <p>
      * Package-private so the timezone regression test can run the production
      * expression itself instead of a copy that could drift from it.
      * </p>
      */
-    static String utcDayBucket(String column) {
-        return "CAST((" + column + " AT TIME ZONE 'UTC') AS DATE)";
+    static String dayBucket(String column, int tzOffsetMinutes) {
+        return "to_char((" + column + " AT TIME ZONE 'UTC') + interval '" + tzOffsetMinutes + " minute', 'YYYY-MM-DD')";
     }
 
     /**
-     * Month bucket ({@code YYYY-MM}) for a {@code timestamptz} column, pinned to
-     * UTC (#1050).
+     * Month bucket ({@code YYYY-MM}) for a {@code timestamptz} column, in the
+     * caller's local month (#1050). Same rules as {@link #dayBucket(String, int)}.
      */
-    static String utcMonthBucket(String column) {
-        return "to_char(date_trunc('month', " + column + " AT TIME ZONE 'UTC'), 'YYYY-MM')";
+    static String monthBucket(String column, int tzOffsetMinutes) {
+        return "to_char((" + column + " AT TIME ZONE 'UTC') + interval '" + tzOffsetMinutes + " minute', 'YYYY-MM')";
     }
 
-    private static GroupSpec daySpec(String column) {
-        String bucket = utcDayBucket(column);
+    private static GroupSpec daySpec(String column, int tzOffsetMinutes) {
+        String bucket = dayBucket(column, tzOffsetMinutes);
         return new GroupSpec(bucket + " AS group_key, " + bucket + " AS label", "", bucket);
     }
 
-    private static GroupSpec monthSpec(String column) {
-        String bucket = utcMonthBucket(column);
+    private static GroupSpec monthSpec(String column, int tzOffsetMinutes) {
+        String bucket = monthBucket(column, tzOffsetMinutes);
         return new GroupSpec(bucket + " AS group_key, " + bucket + " AS label", "", bucket);
+    }
+
+    /**
+     * The offset is interpolated into the bucket expression, not bound: it sits
+     * inside GROUP BY, and PostgreSQL treats two bind placeholders as different
+     * expression nodes even when they carry the same value — grouping by the
+     * expression would fail with "column must appear in the GROUP BY clause". An
+     * {@code int} cannot carry SQL; the range check keeps the value a timezone.
+     */
+    private static int checkedOffset(int tzOffsetMinutes) {
+        if (tzOffsetMinutes < -18 * 60 || tzOffsetMinutes > 18 * 60) {
+            throw new IllegalArgumentException("tzOffsetMinutes must be between -1080 and 1080");
+        }
+        return tzOffsetMinutes;
     }
 
     /**
@@ -115,7 +136,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             + " 'TIMEOUT_BEFORE_FIRST_BYTE', 'STREAM_INTERRUPTED', 'AUTH_REJECTED', 'MODEL_NOT_ALLOWED',"
             + " 'USAGE_PARSE_FAILED'";
 
-    private GroupSpec spec(GroupBy groupBy) {
+    private GroupSpec spec(GroupBy groupBy, int tzOffsetMinutes) {
         return switch (groupBy) {
             case PROJECT -> new GroupSpec("ue.project_id AS group_key, p.name AS label",
                     "JOIN projects p ON p.id = ue.project_id AND p.tenant_id = ue.tenant_id", "ue.project_id, p.name");
@@ -125,7 +146,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                         "ue.virtual_key_id, COALESCE(vk.name, vk.last_four)");
             case CACHE_LEVEL ->
                 new GroupSpec("ue.cache_level AS group_key, ue.cache_level AS label", "", "ue.cache_level");
-            case DAY -> daySpec("ue.occurred_at");
+            case DAY -> daySpec("ue.occurred_at", tzOffsetMinutes);
             case USER -> new GroupSpec("vk.user_id AS group_key, u.username AS label",
                     "JOIN virtual_keys vk ON vk.id = ue.virtual_key_id AND vk.tenant_id = ue.tenant_id"
                             + " JOIN users u ON u.id = vk.user_id AND u.tenant_id = ue.tenant_id",
@@ -141,7 +162,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                             + " COALESCE(pp.display_name, pp.product_code, ue.provider_product_id::text) AS label",
                     "LEFT JOIN provider_products pp ON pp.id = ue.provider_product_id", "ue.provider_product_id,"
                             + " COALESCE(pp.display_name, pp.product_code, ue.provider_product_id::text)");
-            case MONTH -> monthSpec("ue.occurred_at");
+            case MONTH -> monthSpec("ue.occurred_at", tzOffsetMinutes);
         };
     }
 
@@ -150,7 +171,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
      * The CACHE_LEVEL split (L1_HIT / L2_HIT) is done in Java, so the SQL groups
      * everything under a constant key.
      */
-    private GroupSpec hitsSpec(GroupBy groupBy) {
+    private GroupSpec hitsSpec(GroupBy groupBy, int tzOffsetMinutes) {
         return switch (groupBy) {
             case PROJECT -> new GroupSpec("h.project_id AS group_key, p.name AS label",
                     "JOIN projects p ON p.id = h.project_id AND p.tenant_id = h.tenant_id", "h.project_id, p.name");
@@ -158,7 +179,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                     "JOIN virtual_keys vk ON vk.id = h.virtual_key_id AND vk.tenant_id = h.tenant_id",
                     "h.virtual_key_id, COALESCE(vk.name, vk.last_four)");
             case CACHE_LEVEL -> new GroupSpec("'HIT' AS group_key, 'HIT' AS label", "", "'HIT'");
-            case DAY -> daySpec("h.occurred_at");
+            case DAY -> daySpec("h.occurred_at", tzOffsetMinutes);
             case USER -> new GroupSpec("vk.user_id AS group_key, u.username AS label",
                     "JOIN virtual_keys vk ON vk.id = h.virtual_key_id AND vk.tenant_id = h.tenant_id"
                             + " JOIN users u ON u.id = vk.user_id AND u.tenant_id = h.tenant_id",
@@ -174,7 +195,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                             + " COALESCE(pp.display_name, pp.product_code, e.provider_product_id::text) AS label",
                     "LEFT JOIN provider_products pp ON pp.id = e.provider_product_id", "e.provider_product_id,"
                             + " COALESCE(pp.display_name, pp.product_code, e.provider_product_id::text)");
-            case MONTH -> monthSpec("h.occurred_at");
+            case MONTH -> monthSpec("h.occurred_at", tzOffsetMinutes);
         };
     }
 
@@ -367,17 +388,23 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
 
     @Override
     public List<UsageStatsAggregator.UsageAggRow> aggregateUsage(GroupBy groupBy, UsageFilter filter) {
-        return aggregateUsage(groupBy, filter, TokenBasis.ADJUSTED);
+        return aggregateUsage(groupBy, filter, 0);
+    }
+
+    @Override
+    public List<UsageStatsAggregator.UsageAggRow> aggregateUsage(GroupBy groupBy, UsageFilter filter,
+            int tzOffsetMinutes) {
+        return aggregateUsage(groupBy, filter, TokenBasis.ADJUSTED, tzOffsetMinutes);
     }
 
     @Override
     public List<UsageStatsAggregator.UsageAggRow> aggregateObservedUsage(GroupBy groupBy, UsageFilter filter) {
-        return aggregateUsage(groupBy, filter, TokenBasis.OBSERVED);
+        return aggregateUsage(groupBy, filter, TokenBasis.OBSERVED, 0);
     }
 
-    private List<UsageStatsAggregator.UsageAggRow> aggregateUsage(GroupBy groupBy, UsageFilter filter,
-            TokenBasis basis) {
-        GroupSpec spec = spec(groupBy);
+    private List<UsageStatsAggregator.UsageAggRow> aggregateUsage(GroupBy groupBy, UsageFilter filter, TokenBasis basis,
+            int tzOffsetMinutes) {
+        GroupSpec spec = spec(groupBy, checkedOffset(tzOffsetMinutes));
         WhereBuilder wb = new WhereBuilder(filter, "ue").usageEventColumns();
         // Per-row price basis (#710): a group's cost is the SUM of each row valued at
         // its own
@@ -471,7 +498,13 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
 
     @Override
     public List<UsageStatsAggregator.HitAggRow> aggregateHits(GroupBy groupBy, UsageFilter filter) {
-        GroupSpec spec = hitsSpec(groupBy);
+        return aggregateHits(groupBy, filter, 0);
+    }
+
+    @Override
+    public List<UsageStatsAggregator.HitAggRow> aggregateHits(GroupBy groupBy, UsageFilter filter,
+            int tzOffsetMinutes) {
+        GroupSpec spec = hitsSpec(groupBy, checkedOffset(tzOffsetMinutes));
         WhereBuilder wb = new WhereBuilder(filter, "h").cacheHitColumns();
         // Hits are valued from the price in force at the hit (#710), not the current
         // price —
