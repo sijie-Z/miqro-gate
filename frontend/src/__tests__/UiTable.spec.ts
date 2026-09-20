@@ -66,6 +66,30 @@ describe('UiTable', () => {
     expect(wrapper.text()).toContain('还没有 Virtual Key');
   });
 
+  it('#1065: a failed load shows the failure, not the empty state, and retry re-reads', async () => {
+    const wrapper = mount(UiTable, {
+      props: { columns, data: [], emptyTitle: '还没有 Virtual Key', error: '数据库不可用' },
+    });
+
+    // The empty state claims "there is nothing"; that claim is only true of a
+    // successful read, so it must not be what a failure wears.
+    expect(wrapper.text()).not.toContain('还没有 Virtual Key');
+    expect(wrapper.text()).toContain('加载失败');
+    expect(wrapper.text()).toContain('数据库不可用');
+
+    await wrapper.find('[data-testid="table-load-retry"]').trigger('click');
+    expect(wrapper.emitted('retry')).toHaveLength(1);
+  });
+
+  it('#1065: the #empty slot stays authoritative when there is no error', () => {
+    const wrapper = mount(UiTable, {
+      props: { columns, data: [], error: '' },
+      slots: { empty: '<p data-testid="own-empty">自家空态</p>' },
+    });
+    expect(wrapper.find('[data-testid="own-empty"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="table-load-failed"]').exists()).toBe(false);
+  });
+
   it('renders skeleton rows while loading', () => {
     const wrapper = mount(UiTable, {
       props: { columns, data: rows, loading: true, skeletonRows: 3 },

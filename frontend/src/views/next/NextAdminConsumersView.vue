@@ -392,6 +392,8 @@ onMounted(load);
         empty-title="还没有 API 消费者"
         empty-description="外部系统（平台）对接时再创建；机器身份与人类用户分开管理。"
         data-testid="consumers-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #name="{ row }">
           <span class="next-consumers__name">{{ (row as ApiConsumerView).name }}</span>

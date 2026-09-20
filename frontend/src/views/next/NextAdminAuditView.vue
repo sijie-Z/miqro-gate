@@ -303,6 +303,8 @@ onMounted(load);
         row-key="id"
         empty-title="没有匹配的审计事件"
         data-testid="audit-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #chainPosition="{ row }">
           <span class="ui-num">{{ (row as AuditEventView).chainPosition }}</span>

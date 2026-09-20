@@ -352,6 +352,8 @@ onMounted(() => {
         empty-title="还没有技能"
         empty-description="点击「上传技能」发布第一个技能包。"
         data-testid="admin-skills-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #name="{ row }">
           <span class="next-skills__name">{{ (row as SkillView).name }}</span>

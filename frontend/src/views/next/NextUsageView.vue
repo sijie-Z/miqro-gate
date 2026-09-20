@@ -732,7 +732,9 @@ function formatTime(iso?: string): string {
         :loading="summaryLoading && !summary"
         row-key="groupKey"
         empty-title="当前时间范围内没有用量记录"
+        :error="summaryError"
         data-testid="summary-table"
+        @retry="loadSummary"
       >
         <template #group="{ row }">{{ asGroup(row).label || asGroup(row).groupKey }}</template>
         <template #requests="{ row }">{{
@@ -812,7 +814,9 @@ function formatTime(iso?: string): string {
           :loading="recordsLoading && !records"
           row-key="gatewayRequestId"
           empty-title="没有用量记录"
+          :error="recordsError"
           data-testid="records-table"
+          @retry="loadRecords"
         >
           <template #occurredAt="{ row }">{{ formatTime(asRecord(row).occurredAt) }}</template>
           <template #modelId="{ row }">

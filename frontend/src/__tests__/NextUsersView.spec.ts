@@ -160,6 +160,34 @@ describe('NextUsersView', () => {
     expect(alert.text()).toContain('req-500');
   });
 
+  it('#1065: a failed load is not dressed up as zero accounts and an empty list', async () => {
+    mockApi.listUsers.mockRejectedValue(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-500',
+        title: 'Error',
+      }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // "共 0 个账号" would be a statement about the data, not about this request.
+    expect(wrapper.find('[data-testid="users-summary"]').text()).toBe('—');
+    expect(wrapper.text()).not.toContain('还没有用户');
+    expect(wrapper.find('[data-testid="table-load-failed"]').exists()).toBe(true);
+
+    // Retry goes through the same load() the page uses on mount.
+    mockApi.listUsers.mockResolvedValue([user()]);
+    await wrapper.find('[data-testid="table-load-retry"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="users-summary"]').text()).toContain('共 1 个账号');
+    expect(wrapper.text()).toContain('alice');
+  });
+
   it('validates username on create and blocks submission', async () => {
     const wrapper = mountView();
     await flushPromises();

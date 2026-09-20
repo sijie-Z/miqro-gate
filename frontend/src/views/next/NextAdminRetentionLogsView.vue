@@ -333,6 +333,8 @@ onMounted(() => {
         row-key="eventId"
         empty-title="没有匹配的留痕记录"
         data-testid="retention-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #occurredAt="{ row }">{{
           formatTime((row as AdminRetentionLogView).occurredAt)

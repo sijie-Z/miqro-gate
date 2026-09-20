@@ -529,6 +529,8 @@ onMounted(load);
         empty-title="还没有上游凭证"
         empty-description="点击右上角「录入凭证」添加第一家供应商的真实 API 密钥。"
         data-testid="credentials-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #name="{ row }">
           <div class="next-credentials__name">{{ (row as CredentialView).name }}</div>

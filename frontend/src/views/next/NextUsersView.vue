@@ -444,9 +444,12 @@ function formatDate(iso?: string): string {
         <p class="ui-page-desc">管理门户账号与登录权限。</p>
       </div>
       <div class="ui-page-actions">
-        <span class="next-users__summary" data-testid="users-summary"
-          >共 {{ users.length }} 个账号，{{ activeCount }} 个正常</span
-        >
+        <span class="next-users__summary" data-testid="users-summary">
+          <!-- #1065: a failed load knows no counts — "0 accounts" would be a
+               claim about the data, not about this request. -->
+          <template v-if="loadError">—</template>
+          <template v-else>共 {{ users.length }} 个账号，{{ activeCount }} 个正常</template>
+        </span>
         <UiButton variant="primary" data-testid="user-create-open" @click="creating = !creating">
           {{ creating ? '收起表单' : '创建用户' }}
         </UiButton>
@@ -539,7 +542,9 @@ function formatDate(iso?: string): string {
         :loading="loading"
         row-key="id"
         :empty-title="listEmptyTitle"
+        :error="loadError"
         data-testid="users-table"
+        @retry="load"
       >
         <template #username="{ row }">
           <span class="next-users__name">{{ (row as AdminUser).username }}</span>

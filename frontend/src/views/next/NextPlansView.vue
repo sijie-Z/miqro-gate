@@ -409,6 +409,8 @@ onMounted(load);
         row-key="id"
         empty-title="还没有订阅"
         data-testid="subscriptions-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #planScope="{ row }">{{
           planLabel((row as SubscriptionView).planScope)

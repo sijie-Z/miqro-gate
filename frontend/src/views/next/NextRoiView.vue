@@ -414,6 +414,8 @@ onMounted(load);
         empty-title="该窗口内没有按密钥的用量记录"
         empty-description="缓存为按 Key 显式开启：在「我的密钥」为 Key 打开缓存开关后，客户端请求再加 X-MiqroKey-Cacheable: 1 头即生效。"
         data-testid="roi-key-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #label="{ row }">
           <span class="next-roi__key-label" :title="asKeyRow(row).label">{{
@@ -530,6 +532,8 @@ onMounted(load);
         row-key="date"
         empty-title="该窗口没有缓存命中数据"
         data-testid="roi-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #requests="{ row }">
           {{ asDay(row).upstreamRequests }} /

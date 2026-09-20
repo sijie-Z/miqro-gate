@@ -209,6 +209,8 @@ onMounted(load);
         empty-title="暂无申请记录"
         empty-description="需要更多模型时点击右上角「申请新模型」。"
         data-testid="model-approvals-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #keyDisplay="{ row }">
           <span class="ui-mono">{{ (row as ModelApprovalView).keyDisplay }}</span>

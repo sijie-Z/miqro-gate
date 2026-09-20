@@ -207,6 +207,30 @@ describe('NextKeysView', () => {
     expect(wrapper.text()).toContain('等待管理员开通');
   });
 
+  it('#1065: a failed load is not diagnosed as "not in any project"', async () => {
+    mockApi.myGrants.mockResolvedValue({ projects: [], grants: [], purposes: [] });
+    mockApi.listVirtualKeys.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-500',
+        title: 'Error',
+      }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // The request failed — that says nothing about project membership, so the
+    // onboarding (and its "ask your admin" steps) must not be what the user sees.
+    expect(wrapper.find('[data-testid="onboard-no-project"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('还没有被加入任何项目');
+    expect(wrapper.find('[data-testid="table-load-failed"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="keys-summary"]').text()).toBe('—');
+  });
+
   it('keeps the plain empty invite once the account has a project', async () => {
     mockApi.myGrants.mockResolvedValue(grants);
 

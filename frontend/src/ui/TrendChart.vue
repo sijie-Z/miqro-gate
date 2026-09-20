@@ -38,6 +38,11 @@ const props = withDefaults(
     valueFormatter?: (value: number) => string;
     /** How many x labels to show below the plot. */
     xLabelCount?: number;
+    /**
+     * #1065: text for the no-data slot. Pages whose read failed pass a
+     * "failed" wording so the chart does not claim the window is empty.
+     */
+    emptyText?: string;
   }>(),
   {
     points: () => [],
@@ -46,6 +51,7 @@ const props = withDefaults(
     height: 180,
     valueFormatter: (value: number) => String(Math.round(value * 100) / 100),
     xLabelCount: 4,
+    emptyText: '暂无趋势数据',
   },
 );
 
@@ -181,7 +187,7 @@ const ariaLabel = computed(() => {
         }}</span>
       </div>
     </template>
-    <div v-else class="ui-trend__empty" :style="{ height: `${height}px` }">暂无趋势数据</div>
+    <div v-else class="ui-trend__empty" :style="{ height: `${height}px` }">{{ emptyText }}</div>
   </div>
 </template>
 

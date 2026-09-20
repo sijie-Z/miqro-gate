@@ -1606,6 +1606,8 @@ async function saveResilience() {
         empty-title="还没有注册的 MCP 服务"
         empty-description="注册后网关定期探测健康状态，代理可经网关调用其工具。"
         data-testid="mcp-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #name="{ row }">
           <span class="next-mcp__name">{{ (row as McpServiceView).name }}</span>

@@ -466,6 +466,8 @@ onMounted(async () => {
         :empty-action-label="scopedFilter ? '查看全部授权' : ''"
         :empty-action-to="{ name: 'grants' }"
         data-testid="grants-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #project="{ row }">
           <span class="next-grants__name">{{

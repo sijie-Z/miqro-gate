@@ -283,6 +283,8 @@ onMounted(load);
         row-key="id"
         empty-title="还没有团队"
         data-testid="teams-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #description="{ row }">{{ (row as Team).description ?? '—' }}</template>
         <template #status="{ row }">

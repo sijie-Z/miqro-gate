@@ -246,6 +246,8 @@ onMounted(load);
         row-key="id"
         :empty-title="filter === 'PENDING' ? '暂无待审批申请' : '暂无申请记录'"
         data-testid="approvals-queue-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #keyInfo="{ row }">
           <div class="next-approvals-center__key">

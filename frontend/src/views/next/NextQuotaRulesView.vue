@@ -568,6 +568,8 @@ onMounted(load);
         empty-title="暂无配额规则"
         empty-description="先为用户或项目设置用量限额；「超限拒绝」规则达到 100% 后自动拒绝请求。"
         data-testid="quota-rules-table"
+        :error="loadError"
+        @retry="load"
       >
         <template #scope="{ row }">
           <div class="next-quota__scope-name">{{ (row as QuotaRuleView).scopeName ?? '—' }}</div>
