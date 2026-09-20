@@ -6,6 +6,7 @@
  */
 import { onMounted, ref } from 'vue';
 import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
 import { ApiError } from '@/api/http';
 import {
   UiButton,
@@ -382,7 +383,9 @@ onMounted(load);
 
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
-        <span class="ui-panel-sub">共 {{ consumers.length }} 个消费者</span>
+        <span class="ui-panel-sub"
+          >共 {{ countWhenLoaded(loadError, consumers.length) }} 个消费者</span
+        >
       </div>
       <UiTable
         :columns="columns"

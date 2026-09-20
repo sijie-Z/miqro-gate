@@ -6,6 +6,7 @@
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDonut, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { ExportTask } from '@/types/generated-api';
@@ -277,7 +278,9 @@ onMounted(load);
       <div class="ui-panel-head">
         <div>
           <h2 class="ui-panel-title">任务状态分布</h2>
-          <span class="ui-panel-sub">基于当前 {{ tasks.length }} 个任务</span>
+          <span class="ui-panel-sub"
+            >基于当前 {{ countWhenLoaded(loadError, tasks.length) }} 个任务</span
+          >
         </div>
       </div>
       <div class="ui-panel-body next-exports__summary-body">
@@ -301,7 +304,7 @@ onMounted(load);
 
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
-        <span class="ui-panel-sub">共 {{ tasks.length }} 个任务</span>
+        <span class="ui-panel-sub">共 {{ countWhenLoaded(loadError, tasks.length) }} 个任务</span>
       </div>
       <UiTable
         :columns="columns"

@@ -9,6 +9,7 @@
  */
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
 import { ApiError } from '@/api/http';
 import { UiButton, UiCheckbox, UiDialog, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { Project, SkillRevisionView, SkillView, Team } from '@/types/generated-api';
@@ -342,7 +343,7 @@ onMounted(() => {
 
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
-        <span class="ui-panel-sub">共 {{ skills.length }} 个技能</span>
+        <span class="ui-panel-sub">共 {{ countWhenLoaded(loadError, skills.length) }} 个技能</span>
       </div>
       <UiTable
         :columns="columns"

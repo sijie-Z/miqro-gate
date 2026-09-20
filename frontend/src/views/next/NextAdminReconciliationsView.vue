@@ -7,6 +7,7 @@
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDonut, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
 import type { ReconciliationReport, ReconciliationRow, ReconciliationVerdict } from '@/api';
@@ -660,7 +661,8 @@ onMounted(load);
         <div>
           <h2 class="ui-panel-title">对账结论分布</h2>
           <span class="ui-panel-sub"
-            >基于当前 {{ reports.length }} 份报告 · {{ verdictTotal }} 行</span
+            >基于当前 {{ countWhenLoaded(loadError, reports.length) }} 份报告 ·
+            {{ verdictTotal }} 行</span
           >
         </div>
       </div>
@@ -685,7 +687,7 @@ onMounted(load);
 
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
-        <span class="ui-panel-sub">共 {{ reports.length }} 份报告</span>
+        <span class="ui-panel-sub">共 {{ countWhenLoaded(loadError, reports.length) }} 份报告</span>
         <UiButton variant="ghost" size="sm" data-testid="recon-refresh" @click="load"
           >刷新</UiButton
         >

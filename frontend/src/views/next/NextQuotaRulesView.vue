@@ -7,6 +7,7 @@
  */
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
 import { ApiError } from '@/api/http';
 import { costGapNote } from '@/lib/usage-pricing';
 import {
@@ -583,7 +584,7 @@ onMounted(load);
 
     <section class="ui-panel">
       <div class="ui-panel-toolbar">
-        <span class="ui-panel-sub">共 {{ rules.length }} 条规则</span>
+        <span class="ui-panel-sub">共 {{ countWhenLoaded(loadError, rules.length) }} 条规则</span>
       </div>
       <UiTable
         :columns="columns"
