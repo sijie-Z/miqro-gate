@@ -34,6 +34,14 @@ const WINDOWS = [
 const windowDays = ref(30);
 const loading = ref(true);
 const loadError = ref('');
+
+/**
+ * #1104: a failed load knows no numbers. "分摊总成本 ¥0.0000 / 请求 0" would be a
+ * claim about the window, not about this request — and a money figure is the one
+ * a reader believes first. Same rule the tables answer with since #1065.
+ */
+const statValue = (text: string) => (loadError.value ? '—' : text);
+const statHint = (text: string) => (loadError.value ? '加载失败' : text);
 const loadRequestId = ref('');
 
 type CostMode = 'project' | 'day' | 'user' | 'model' | 'month';
@@ -453,55 +461,62 @@ onMounted(async () => {
     <div class="next-cost__stats" data-testid="cost-stats">
       <div class="ui-panel next-cost__stat" data-testid="cost-stat-total">
         <span class="next-cost__stat-label">分摊总成本</span>
-        <span class="next-cost__stat-value ui-num">{{ formatCost(totalCost) }}</span>
-        <span class="next-cost__stat-hint">按项目分摊口径</span>
+        <span class="next-cost__stat-value ui-num">{{ statValue(formatCost(totalCost)) }}</span>
+        <span class="next-cost__stat-hint">{{ statHint('按项目分摊口径') }}</span>
         <UiTooltip v-if="costCaveat" :text="costCaveat">
           <span class="next-cost__stat-caveat" data-testid="cost-unpriced-total">未定价</span>
         </UiTooltip>
       </div>
       <div class="ui-panel next-cost__stat" data-testid="cost-stat-upstream">
         <span class="next-cost__stat-label">上游已付成本</span>
-        <span class="next-cost__stat-value ui-num">{{ formatCost(upstreamCost) }}</span>
+        <span class="next-cost__stat-value ui-num">{{ statValue(formatCost(upstreamCost)) }}</span>
         <!-- #801: this said "按最新单价估算" long after the read path stopped using
              the latest price (#766): the cost is each event's own frozen price. -->
-        <span class="next-cost__stat-hint">按事件发生时的价目估算</span>
+        <span class="next-cost__stat-hint">{{ statHint('按事件发生时的价目估算') }}</span>
         <UiTooltip v-if="costCaveat" :text="costCaveat">
           <span class="next-cost__stat-caveat" data-testid="cost-unpriced-upstream">未定价</span>
         </UiTooltip>
       </div>
       <div class="ui-panel next-cost__stat">
         <span class="next-cost__stat-label">请求</span>
-        <span class="next-cost__stat-value ui-num">{{ formatCount(totalRequests) }}</span>
-        <span class="next-cost__stat-hint">到达上游的请求数</span>
+        <span class="next-cost__stat-value ui-num">{{
+          statValue(formatCount(totalRequests))
+        }}</span>
+        <span class="next-cost__stat-hint">{{ statHint('到达上游的请求数') }}</span>
       </div>
       <div class="ui-panel next-cost__stat">
         <span class="next-cost__stat-label">Token</span>
-        <span class="next-cost__stat-value ui-num">{{ formatCount(totalTokens) }}</span>
-        <span class="next-cost__stat-hint">输入 + 输出</span>
+        <span class="next-cost__stat-value ui-num">{{ statValue(formatCount(totalTokens)) }}</span>
+        <span class="next-cost__stat-hint">{{ statHint('输入 + 输出') }}</span>
       </div>
       <div class="ui-panel next-cost__stat" data-testid="cost-stat-cache-saved">
         <span class="next-cost__stat-label">缓存节省</span>
         <span class="next-cost__stat-value next-cost__stat-value--accent ui-num">{{
-          formatCost(cacheSaved)
+          statValue(formatCost(cacheSaved))
         }}</span>
         <span class="next-cost__stat-hint"
-          >命中 {{ formatCount(cacheHits) }} 次 · 未调用上游<template v-if="unpricedHits > 0"
+          >{{ statHint('命中 ' + formatCount(cacheHits) + ' 次 · 未调用上游')
+          }}<template v-if="unpricedHits > 0 && !loadError"
             >（下界：{{ unpricedHits }} 次命中在发生时无生效价目）</template
           ></span
         >
       </div>
       <div class="ui-panel next-cost__stat" data-testid="cost-stat-cache-tokens">
         <span class="next-cost__stat-label">缓存命中 Token</span>
-        <span class="next-cost__stat-value ui-num">{{ formatCount(cacheHitTokens) }}</span>
-        <span class="next-cost__stat-hint">输入侧命中缓存 · 未计上游费用</span>
+        <span class="next-cost__stat-value ui-num">{{
+          statValue(formatCount(cacheHitTokens))
+        }}</span>
+        <span class="next-cost__stat-hint">{{ statHint('输入侧命中缓存 · 未计上游费用') }}</span>
       </div>
       <div class="ui-panel next-cost__stat" data-testid="cost-stat-top-consumer">
         <span class="next-cost__stat-label">最高消费者</span>
-        <span class="next-cost__stat-value ui-num">{{ topConsumer?.label ?? '—' }}</span>
+        <span class="next-cost__stat-value ui-num">{{ statValue(topConsumer?.label ?? '—') }}</span>
         <span class="next-cost__stat-hint">{{
-          topConsumer
-            ? `${formatCount(tokensOf(topConsumer))} Tokens · ${formatCost(costOf(topConsumer))}`
-            : '窗口内暂无调用'
+          statHint(
+            topConsumer
+              ? `${formatCount(tokensOf(topConsumer))} Tokens · ${formatCost(costOf(topConsumer))}`
+              : '窗口内暂无调用',
+          )
         }}</span>
       </div>
     </div>
