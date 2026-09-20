@@ -12,6 +12,7 @@
  * - 每小时 Token 表（#634）沿用。
  */
 import { computed, onMounted, ref } from 'vue';
+import AttributionChip from '@/components/AttributionChip.vue';
 import { CHART_OTHER_COLOR, COST_SPLIT_COLORS } from '@/lib/chart-palette';
 import * as api from '@/api';
 import { ChartBarIcon } from 'tdesign-icons-vue-next';
@@ -567,6 +568,7 @@ const columns = [
   { key: 'occurredAt', title: '时间', width: '150px' },
   { key: 'providerProductName', title: '供应商', minWidth: '150px' },
   { key: 'modelId', title: '模型', minWidth: '170px' },
+  { key: 'attribution', title: '归属', width: '150px' },
   { key: 'inputTokens', title: '输入', minWidth: '150px', align: 'right' as const },
   { key: 'outputTokens', title: '输出', width: '100px', align: 'right' as const },
   { key: 'adjust', title: '调整', width: '100px' },
@@ -1254,6 +1256,13 @@ onMounted(() => {
         </template>
         <template #adjust="{ row }">
           <UsageAdjustChip :record="row as UsageRecord" />
+        </template>
+        <template #attribution="{ row }">
+          <AttributionChip
+            :resolution-status="(row as UsageRecord).resolutionStatus"
+            :claim-source="(row as UsageRecord).claimSource"
+            :claim-confidence="(row as UsageRecord).claimConfidence"
+          />
         </template>
         <template #cost="{ row }">
           <span v-if="(row as UsageRecord).priced !== false" class="ui-num"

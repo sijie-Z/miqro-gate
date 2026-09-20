@@ -268,6 +268,8 @@
 
 参数：`from`、`to`（ISO-8601）、`page`（默认 1，≥1）、`size`（默认 50，1–200）。按时间倒序。
 
+**归属（#1128，CAA V54）**：每行带三个**可空**字段——`resolutionStatus`（服务端裁定：`RESOLVED_HEADER` / `RESOLVED_SUFFIX` / `SOLE_BINDING` / `POLICY_ROUTED` / `UNATTRIBUTED` / `AMBIGUOUS`）、`claimSource`（客户端**声明**的来源：`prompt_url` / `tool_path` / `bash_cwd` / `system_cwd` / `suffix` / `none`）、`claimConfidence`（`HIGH` / `MEDIUM` / `LOW` / `NONE`）。两者**刻意分开**：声明是未验证输入，裁定才是结论，控制台把两者并排显示，故「声明与裁定不一致」这件事在界面上可直接看见。**从未进入归属阶梯的行**（单绑定密钥）与功能上线前的历史行三者为 `null`（不是空串）。管理端点（§5）同口径；`session_id` / `activity_id` / `claimed_project_id` 与 V55 证据表**不在本契约内**（CAA Spec 的 session_id 隐私口径仍未决，见 #1128）。
+
 ```json
 {
   "items": [

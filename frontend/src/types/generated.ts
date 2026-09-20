@@ -4434,6 +4434,9 @@ export interface components {
             requestStatus?: string;
             cost?: number;
             priced?: boolean;
+            resolutionStatus?: string;
+            claimSource?: string;
+            claimConfidence?: string;
         };
         GrantOption: {
             /** Format: uuid */

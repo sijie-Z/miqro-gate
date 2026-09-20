@@ -38,6 +38,19 @@ public record UsageRecordPage(List<UsageRecordView> items, long page, long size,
      * bound rather than a total. It is the amount the report books for this row;
      * the flag is what says not to present it as the full amount.
      * </p>
+     *
+     * <p>
+     * Attribution (#1128, CAA V54): {@code resolutionStatus} is the server's
+     * verdict on which project the request belonged to — {@code RESOLVED_HEADER} /
+     * {@code RESOLVED_SUFFIX} / {@code SOLE_BINDING} / {@code POLICY_ROUTED} /
+     * {@code UNATTRIBUTED} / {@code AMBIGUOUS} — while {@code claimSource} /
+     * {@code claimConfidence} are what the client <em>claimed</em>
+     * ({@code prompt_url}, {@code tool_path}, … at HIGH/MEDIUM/LOW). The two are
+     * kept apart on purpose: the claim is unverified input, the status is the
+     * ruling, and a reader comparing them is looking at exactly the case worth
+     * looking at. All three are null for rows that never went through the
+     * resolution ladder (a single-binding key) and for rows older than the feature.
+     * </p>
      */
     public record UsageRecordView(Instant occurredAt, String modelId, CacheLevel cacheLevel, Long inputTokens,
             Long outputTokens, Long cacheReadInputTokens, Long cacheCreationInputTokens, Long totalTokens,
@@ -45,6 +58,6 @@ public record UsageRecordPage(List<UsageRecordView> items, long page, long size,
             boolean isComplete, boolean usageMissing, UUID virtualKeyId, String clientIp, Long netInputTokens,
             Long netOutputTokens, Long netCacheReadInputTokens, Long netCacheCreationInputTokens, boolean adjusted,
             String providerProductName, Long ttfbMs, String wireProtocol, String requestStatus, BigDecimal cost,
-            boolean priced) {
+            boolean priced, String resolutionStatus, String claimSource, String claimConfidence) {
     }
 }

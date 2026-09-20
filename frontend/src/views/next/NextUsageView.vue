@@ -23,6 +23,7 @@ import {
 } from '@/ui';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import UsageAdjustChip from '@/components/UsageAdjustChip.vue';
+import AttributionChip from '@/components/AttributionChip.vue';
 import CostSplitBar from '@/components/CostSplitBar.vue';
 import { netTokens } from '@/lib/usage-net';
 import { CHART_OTHER_COLOR, CHART_PALETTE } from '@/lib/chart-palette';
@@ -249,6 +250,7 @@ const recordsColumns = [
   { key: 'modelId', title: '模型', minWidth: '170px' },
   { key: 'provider', title: '供应商', minWidth: '150px' },
   { key: 'virtualKey', title: '密钥', minWidth: '150px' },
+  { key: 'attribution', title: '归属', width: '150px' },
   { key: 'cacheLevel', title: '级别', width: '100px' },
   { key: 'input', title: '输入', width: '90px', align: 'right' as const },
   { key: 'output', title: '输出', width: '90px', align: 'right' as const },
@@ -927,6 +929,13 @@ function formatTime(iso?: string): string {
           </template>
           <template #virtualKey="{ row }">
             <span class="next-usage__keyname">{{ keyName(asRecord(row).virtualKeyId) }}</span>
+          </template>
+          <template #attribution="{ row }">
+            <AttributionChip
+              :resolution-status="asRecord(row).resolutionStatus"
+              :claim-source="asRecord(row).claimSource"
+              :claim-confidence="asRecord(row).claimConfidence"
+            />
           </template>
           <template #cacheLevel="{ row }">
             <UiStatusBadge

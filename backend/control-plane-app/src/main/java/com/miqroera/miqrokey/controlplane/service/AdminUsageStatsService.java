@@ -317,6 +317,11 @@ public class AdminUsageStatsService {
         Long cacheCreation = t != null ? t.cacheCreationInputTokens() : null;
         UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(row.priceBasis(), input, output,
                 cacheRead, cacheCreation);
+        // #1128: the ruling travels with the claim it judged — the console shows both,
+        // so a
+        // row whose client claimed one project and was ruled to another is visible as
+        // such.
+        UsageEvent.ContextAttribution attribution = e.attribution();
         return new UsageRecordPage.UsageRecordView(e.occurredAt(), e.modelId(), e.cacheLevel(), input, output,
                 cacheRead, cacheCreation, t != null ? t.totalTokens() : null, e.latencyMs(), e.upstreamStatusCode(),
                 e.providerRequestId(), e.gatewayRequestId(), e.isComplete(), e.usageMissing(), e.virtualKeyId(),
@@ -324,7 +329,10 @@ public class AdminUsageStatsService {
                 row.netCacheCreationInputTokens(), row.adjusted(), row.providerProductName(),
                 row.lifecycle() != null ? row.lifecycle().timeToFirstByteMs() : null,
                 row.lifecycle() != null ? row.lifecycle().wireProtocol() : null,
-                row.lifecycle() != null ? row.lifecycle().requestStatus() : null, priced.cost(), priced.priced());
+                row.lifecycle() != null ? row.lifecycle().requestStatus() : null, priced.cost(), priced.priced(),
+                attribution != null ? attribution.resolutionStatus() : null,
+                attribution != null ? attribution.claimSource() : null,
+                attribution != null ? attribution.claimConfidence() : null);
     }
 
     /** Primary input/output token, preferring the protocol-specific column. */
