@@ -149,6 +149,54 @@ describe('NextOverviewView', () => {
     expect(wrapper.find('[data-testid="overview-keys"]').text()).toContain('轮换中');
   });
 
+  // PH37: the dates on this page are calendar days. The 虚拟密钥 tile shows when a key
+  // was created; slicing the UTC string dated anything created in the first hours of a
+  // local day yesterday.
+  it('dates a key in 虚拟密钥 by the local calendar day, not the UTC one', async () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = 'Asia/Shanghai'; // UTC+8: 16:30Z is 00:30 the *next* local day
+    try {
+      mockApi.listVirtualKeys.mockResolvedValue([
+        key({ createdAt: '2026-08-01T16:30:00Z' }), // → 2026-08-02 00:30 local
+      ]);
+
+      const wrapper = mountView();
+      await flushPromises();
+
+      const tile = wrapper.find('[data-testid="overview-keys"]').text();
+      expect(tile).toContain('2026-08-02');
+      expect(tile).not.toContain('2026-08-01');
+    } finally {
+      if (previousTz === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTz;
+    }
+  });
+
+  // PH37: 最新动态 mixes "N 天前" with an absolute day once an entry is 30 days old.
+  // Both forms have to read the viewer's clock, not UTC.
+  it('prints the absolute 最新动态 day on the local calendar', async () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = 'Asia/Shanghai';
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-20T00:00:00Z'));
+    try {
+      mockApi.listVirtualKeys.mockResolvedValue([
+        // 66 days before the frozen now — past the relative forms.
+        key({ createdAt: '2026-07-15T16:30:00Z' }), // → 2026-07-16 00:30 local
+      ]);
+
+      const wrapper = mountView();
+      await flushPromises();
+
+      const feed = wrapper.find('[data-testid="overview-feed"]').text();
+      expect(feed).toContain('2026-07-16');
+      expect(feed).not.toContain('2026-07-15');
+    } finally {
+      now.mockRestore();
+      if (previousTz === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTz;
+    }
+  });
+
   it('shows the empty hint when there is no usage yet', async () => {
     mockApi.usageSummary.mockResolvedValue({
       groupBy: 'project',

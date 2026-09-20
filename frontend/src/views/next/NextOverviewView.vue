@@ -27,6 +27,7 @@ import { UiButton, UiDonut, UiStatusBadge, UiTooltip } from '@/ui';
 import { costGapNote, type PricingGapFields } from '@/lib/usage-pricing';
 import type { SubscriptionView, UsageGroup, VirtualKeyView } from '@/types/generated-api';
 import { actionLabel } from '@/utils/audit-labels';
+import { localDayKey } from '@/utils/datetime';
 
 const auth = useAuthStore();
 
@@ -251,7 +252,9 @@ function relativeTime(iso?: string): string {
   if (hours < 24) return `${hours} 小时前`;
   const days = Math.floor(hours / 24);
   if (days < 30) return `${days} 天前`;
-  return String(iso).slice(0, 10);
+  // PH37: the absolute fallback has to read the same clock as the relative forms
+  // above it — a UTC-sliced day dated evening entries a day early.
+  return localDayKey(iso);
 }
 
 /** Admin: recent audit events; regular users: own keys + model requests. */
@@ -301,7 +304,8 @@ function purposeLabel(purpose?: string): string {
 }
 
 function createdLabel(iso?: string): string {
-  return iso ? String(iso).slice(0, 10) : '—';
+  // PH37: a key created 00:30 local time was labelled with the previous UTC day.
+  return localDayKey(iso) || '—';
 }
 
 const PLAN_SCOPE_LABELS: Record<string, string> = {

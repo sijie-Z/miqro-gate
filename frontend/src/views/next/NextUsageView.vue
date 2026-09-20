@@ -10,6 +10,7 @@ import * as api from '@/api';
 import { ChartBarIcon, LayersIcon, MoneyIcon } from 'tdesign-icons-vue-next';
 import { ApiError } from '@/api/http';
 import { csvCell } from '@/utils/csv';
+import { localDayKey } from '@/utils/datetime';
 import {
   UiButton,
   UiDonut,
@@ -97,7 +98,10 @@ const trendPoints = computed(() => {
   const items = records.value?.items ?? [];
   const byDay = new Map<string, { sum: number; count: number }>();
   for (const r of items) {
-    const day = String(r.occurredAt ?? '').slice(0, 10);
+    // PH37: bucket by the local calendar day, i.e. the day formatTime prints for the
+    // same row in the table below. Slicing the UTC string split one local day into
+    // two points and dated the newest usage "yesterday" for the first hours of a day.
+    const day = localDayKey(r.occurredAt);
     if (!day) continue;
     const entry = byDay.get(day) ?? { sum: 0, count: 0 };
     if (trendMetric.value === 'tokens') {

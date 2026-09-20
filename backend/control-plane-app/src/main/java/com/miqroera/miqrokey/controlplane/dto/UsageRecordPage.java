@@ -33,8 +33,10 @@ public record UsageRecordPage(List<UsageRecordView> items, long page, long size,
      * lifecycle trail and are null for rows without one (coalesced requests);
      * {@code cost} is the per-row figure priced from that row's own price basis
      * (#710) — the same expression the aggregates use — and {@code priced=false}
-     * means "未定价" — at least one non-zero token type has no price, so the cost
-     * number must not be trusted as 0.
+     * means the row, not the whole number, is 未定价: at least one non-zero token type
+     * has no price, so {@code cost} holds only the priced dimensions and is a lower
+     * bound rather than a total. It is the amount the report books for this row;
+     * the flag is what says not to present it as the full amount.
      * </p>
      */
     public record UsageRecordView(Instant occurredAt, String modelId, CacheLevel cacheLevel, Long inputTokens,
