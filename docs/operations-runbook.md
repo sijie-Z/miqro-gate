@@ -120,6 +120,8 @@
 
 **告警规则**（F07/#245）：在默认（seed）租户下建 `USAGE_QUEUE_SATURATION` 规则，阈值 = 近 1 小时可接受的丢弃条数——填 `1` 表示「丢 1 条即告警」，不要按比例理解。网关每个 flush 周期（`MIQROKEY_GATEWAY_QUEUE_FLUSH_INTERVAL`，默认 1s）把新增丢弃数写一行 `gateway_queue_signal`；零丢弃的网关不写任何行，规则安静。该事实是**平台级**的（队列全进程唯一），只有 seed 租户的规则能评估到；其他租户的规则读到的是空窗口（`SUM = 0`），在正阈值下恒不触发、也看不到任何别的租户的数字。阈值填 `0` 或负数会让这类规则每个去重窗口都以 `value = 0` 触发一次（服务端不校验，属误配），排查时先看规则的 `threshold`。
 
+**评估盲区（已知并接受，2026-09-20 #245 拍板 Q3A）**：平台事实按滚动 1 小时窗口评估、评估周期 5 分钟；控制面**连续宕机超过 1 小时**时，窗口内事实滚出，**期间的平台告警不会补发**（宕机不足 1 小时则恢复后下个周期照常命中）。怀疑漏告警时先核对控制面在该时段的可用性。
+
 **定位与补偿**：
 
 1. 查事实行：`SELECT occurred_at, dropped, queued_high_water, capacity, saturation_mode FROM gateway_queue_signal WHERE tenant_id = '<seed 租户 id>' AND occurred_at >= now() - interval '1 hour' ORDER BY occurred_at DESC;`——`queued_high_water` 是**进程生命周期内**的单调高水位（只在丢弃发生的那一刻采样，不随窗口重置），因此要按进程启动以来的**最大值**解读：贴近 `capacity` 说明该进程确实打满过队列，远低于容量则优先怀疑写端停顿（数据库锁/慢查询/连接池耗尽）；同一进程后续行的该值不会回落，不要拿相邻两行的差值当「本窗口峰值」。
@@ -134,7 +136,7 @@
 
 ## 8. Webhook 故障
 
-检查 DNS/TLS、SSRF 拒绝原因、响应码和签名时钟偏差。系统按指数退避重试；超过窗口转 dead-letter 并在门户告警。测试投递使用独立事件，不重放真实 Secret 或用量明细。恢复后可人工重放选定事件，必须幂等。
+检查 DNS/TLS、SSRF 拒绝原因、响应码和签名时钟偏差。系统按指数退避重试（2^attempt × 60s），最多 3 次尝试；**耗尽后静默终止**——没有自动 dead-letter、没有门户告警、也没有重放 API。失败证据是 `webhook_delivery_attempts` 行（`GET /admin/webhooks/{id}/deliveries` 可查最近 20 条），需要人工巡检发现。测试投递使用独立事件，不重放真实 Secret 或用量明细。投递语义为 at-least-once：同 `eventId` 可能重复到达，接收方应按 `eventId` 幂等去重（信封带 `eventId` 与 HMAC 签名）。
 
 ## 9. 数据库故障
 
