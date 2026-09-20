@@ -10,6 +10,7 @@ import * as api from '@/api';
 import { countWhenLoaded } from '@/utils/load-state';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDonut, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
+import { CHART_TONE_COLORS } from '@/lib/chart-palette';
 import type { ReconciliationReport, ReconciliationRow, ReconciliationVerdict } from '@/api';
 
 const MAX_UPLOAD_BYTES = 16 * 1024 * 1024;
@@ -19,9 +20,11 @@ const reports = ref<ReconciliationReport[]>([]);
 
 /** Four-state distribution aggregated from each report's row counts. */
 const VERDICT_COLORS: Record<string, string> = {
-  MATCHED: '#389e0d',
-  PARTIAL: '#d48806',
-  UNMATCHED_PROVIDER: '#cf1322',
+  MATCHED: CHART_TONE_COLORS.success,
+  PARTIAL: CHART_TONE_COLORS.warning,
+  UNMATCHED_PROVIDER: CHART_TONE_COLORS.danger,
+  // A lighter red of the same family rather than a fourth hue: both unmatched kinds
+  // are the same verdict pointing in opposite directions.
   UNMATCHED_LOCAL: '#ff7875',
 };
 

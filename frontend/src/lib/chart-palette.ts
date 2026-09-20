@@ -20,10 +20,11 @@
  * pinned second the remaining two hues only separate if teal and green are adjacent
  * (orange next to green measures ΔE 4.5 protan — a hard fail).
  *
- * Green is also the product's success/savings hue (`#389e0d`, ΔE 3.6 from slot 4)
- * and one of the theme presets, so it carries a second meaning outside these charts.
- * It is the only hue left in the product's family that clears the adjacency floors
- * (gold measures ΔE 2.8 protan against green; purple is banned below), and every
+ * The product has a second green for savings — {@link CHART_SUCCESS_COLOR}, ΔE 16.2
+ * from slot 4 — and slot 4 is itself the theme's 绿 preset (`preferences/index.ts`),
+ * so green carries meaning outside these charts and the two had better stay visibly
+ * apart. Green is the only hue left in the product's family that clears the adjacency
+ * floors (gold measures ΔE 2.8 protan against green; purple is banned below), and every
  * caller prints the amounts as text, so identity never rests on the colour alone.
  *
  * No purple: `frontend-design.md` §4.1 allows it only in the supplier chip palette,
@@ -52,6 +53,51 @@ export const CHART_PALETTE = ['#0960bd', '#fa8c16', '#13c2c2', '#2f9e44'] as con
  * as one band.
  */
 export const CHART_OTHER_COLOR = '#8c8c8c';
+
+/**
+ * The success/savings green, as a chart **fill** — the same value as the
+ * `--ui-success-fg` token the status badges and toasts already draw with, so "green"
+ * reads the same in status chrome and in a chart.
+ *
+ * It replaces the ad-hoc `#389e0d` that had been copied into five views. That hex
+ * measures **ΔE 0.4 protan** against the warning gold `#d48806` — the same colour to
+ * a red-green colourblind reader — and the pair lands edge to edge in the two places
+ * that matter: the ROI page sorts its hit buckets by value, so any two can become
+ * neighbours, and the reconciliation ring is fixed-order MATCHED → PARTIAL.
+ *
+ * Re-measured with the design-system checker (light, surface `#ffffff`):
+ *
+ *   ROI hit trio (this green, slot 1, the gold) — worst all-pairs ΔE **17.2 protan**
+ *     at the gold ↔ green pair (was 0.4), 21.6 normal vision.
+ *   Reconciliation ring (this green, gold, `#cf1322`, `#ff7875`) — worst adjacent
+ *     ΔE 14.3 deutan, 19.4 normal.
+ *   Success ↔ failure (this green, `#cf1322`) — ΔE 6.4 protan, inside the checker's
+ *     6–8 band. That band is legal only with a second channel, and every caller here
+ *     prints a per-row label, which is that channel. The hex it replaced failed this
+ *     same pair outright (5.8 deutan).
+ *
+ * Contrast 6.67:1 on the card surface, against 3.46:1 for the old green. That is also
+ * why this green and not the brighter `--miqrokey-success` (`#00b96b`): both clear the
+ * CVD floors, but that one measures 2.58:1 and would need relief it does not get.
+ */
+export const CHART_SUCCESS_COLOR = '#0d6a3d';
+
+/**
+ * Fill colours for **status/verdict** segments — what a segment *means* rather than
+ * which series it is. Three views had each written this map out by hand (the exports
+ * page had exactly these five keys), which is how one unsafe green survived in five
+ * copies; the success slot is the one that had to be corrected.
+ *
+ * `warning` is also a theme preset (`preferences/index.ts`), so it is pinned to the
+ * same hex the preset uses rather than re-tuned here.
+ */
+export const CHART_TONE_COLORS = {
+  success: CHART_SUCCESS_COLOR,
+  warning: '#d48806',
+  danger: '#cf1322',
+  info: CHART_PALETTE[0],
+  neutral: CHART_OTHER_COLOR,
+} as const;
 
 /** The four token dimensions a cost figure is split into, in fixed order. */
 export const COST_SPLIT_COLORS = {

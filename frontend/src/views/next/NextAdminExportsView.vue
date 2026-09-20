@@ -9,6 +9,7 @@ import * as api from '@/api';
 import { countWhenLoaded } from '@/utils/load-state';
 import { ApiError } from '@/api/http';
 import { UiButton, UiDonut, UiInput, UiStatusBadge, UiTable, toast } from '@/ui';
+import { CHART_TONE_COLORS } from '@/lib/chart-palette';
 import type { ExportTask } from '@/types/generated-api';
 
 const tasks = ref<ExportTask[]>([]);
@@ -53,20 +54,12 @@ const statusText: Record<NonNullable<ExportTask['status']>, string> = {
   EXPIRED: '已过期',
 };
 
-const TONE_COLORS: Record<string, string> = {
-  success: '#389e0d',
-  warning: '#d48806',
-  danger: '#cf1322',
-  info: '#0960bd',
-  neutral: '#8c8c8c',
-};
-
 /** Task status distribution over the loaded list. */
 const statusSegments = computed(() => {
   const byLabel = new Map<string, { value: number; color: string }>();
   for (const t of tasks.value) {
     const label = statusLabelFor(t.status) || '—';
-    const color = TONE_COLORS[statusToneFor(t.status)] ?? '#8c8c8c';
+    const color = CHART_TONE_COLORS[statusToneFor(t.status)];
     const cur = byLabel.get(label);
     if (cur) cur.value += 1;
     else byLabel.set(label, { value: 1, color });
