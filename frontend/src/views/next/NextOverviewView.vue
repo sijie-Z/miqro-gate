@@ -24,6 +24,7 @@ import {
   UserIcon,
 } from 'tdesign-icons-vue-next';
 import { UiButton, UiDonut, UiStatusBadge, UiTooltip } from '@/ui';
+import { CHART_OTHER_COLOR, CHART_PALETTE } from '@/lib/chart-palette';
 import { costGapNote, type PricingGapFields } from '@/lib/usage-pricing';
 import type { SubscriptionView, UsageGroup, VirtualKeyView } from '@/types/generated-api';
 import { actionLabel } from '@/utils/audit-labels';
@@ -160,14 +161,14 @@ const costGroups = computed(() =>
  */
 const costTotal = computed(() => Number(totals.value?.cost?.upstreamPaid ?? 0));
 
-/** Donut palette (frontend-design §4: blue/cyan/orange/gray — no rainbow). */
-const DONUT_COLORS = ['#0960bd', '#69c0ff', '#13c2c2', '#fa8c16', '#8c8c8c', '#d9d9d9'];
+// Palette comes from the shared categorical set (#1112): this file used to carry a
+// fourth copy of the old list, which still had the unseparated #69c0ff slot.
 
 const donutSegments = computed(() => {
   const total = costTotal.value;
   if (total <= 0) return [];
-  const top = costGroups.value.slice(0, 5);
-  // PH43: everything the ring does not name — ranks 6+, the sub-cent rows the legend
+  const top = costGroups.value.slice(0, CHART_PALETTE.length);
+  // PH43: everything the ring does not name — the ranks past the palette, the sub-cent rows the legend
   // hides, and any gap between the drawn groups and the server's total. Deriving it by
   // subtracting keeps the slices summing to the total instead of to the drawing.
   const restCost = Math.max(0, total - top.reduce((sum, g) => sum + g.cost, 0));
@@ -175,14 +176,14 @@ const donutSegments = computed(() => {
     label: g.label ?? '—',
     cost: g.cost,
     pct: (g.cost / total) * 100,
-    color: DONUT_COLORS[i]!,
+    color: CHART_PALETTE[i] ?? CHART_OTHER_COLOR,
   }));
   if (restCost > 0)
     rows.push({
       label: '其他',
       cost: restCost,
       pct: (restCost / total) * 100,
-      color: DONUT_COLORS[5]!,
+      color: CHART_OTHER_COLOR,
     });
   return rows;
 });

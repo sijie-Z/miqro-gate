@@ -5,31 +5,51 @@
  * order is fixed and never cycled: a series past the last slot folds into 「其他」
  * (see {@link CHART_OTHER_COLOR}), never back to slot 1.
  *
- * These four are the ones validated against the light chart surface (`#ffffff`)
- * with the design-system palette checker (#1097):
+ * Validated against the **card surface** (`#ffffff`, `--ui-card`) with the
+ * design-system palette checker:
  *
- *   worst adjacent pair ΔE 27.6 normal vision / 18.7 protan — both well clear of the
- *   checker's 15 / 8 floors; all four inside the lightness band and above the chroma
- *   floor.
+ *   worst adjacent pair ΔE 17.2 normal vision / 16.6 deutan / 13.9 tritan — clear of
+ *   the 15 / 8 floors; all four inside the lightness band and above the chroma floor.
+ *   The checker measures `[i, i+1]` pairs only, so the ring's wrap-around pair was
+ *   measured separately: slot 4 ↔ slot 1 is green ↔ blue, ΔE 29.2.
+ *   Contrast: teal 2.21 and orange 2.38 against white — under 3:1, so any mark using
+ *   them must carry visible labels; every caller here prints the amounts as text.
  *
- * The teal and orange measure under 3:1 contrast against white (2.15 / 2.32), so any
- * mark using them must carry visible labels; every caller here prints the amounts as
- * text as well.
+ * Order matters (adjacency is what the checker measures). Blue stays first because
+ * the cost bar's natural reading order is input → output → cache, and with orange
+ * pinned second the remaining two hues only separate if teal and green are adjacent
+ * (orange next to green measures ΔE 4.5 protan — a hard fail).
  *
- * The list this replaced was inlined in the donut and the usage page and did **not**
- * pass for four slots: its second colour (`#69c0ff`) sat at ΔE 10.7 from the teal
- * beside it — two touching segments that full-colour readers struggle to tell apart —
- * and outside the lightness band. Consolidating those two copies onto this module is
- * tracked in #1112; this PR only adds the new mark.
+ * Green is also the product's success/savings hue (`#389e0d`, ΔE 3.6 from slot 4)
+ * and one of the theme presets, so it carries a second meaning outside these charts.
+ * It is the only hue left in the product's family that clears the adjacency floors
+ * (gold measures ΔE 2.8 protan against green; purple is banned below), and every
+ * caller prints the amounts as text, so identity never rests on the colour alone.
+ *
+ * No purple: `frontend-design.md` §4.1 allows it only in the supplier chip palette,
+ * and `aesthetic.spec.ts` enforces that. The first version of this module shipped
+ * `#722ed1` in slot 4 — the old guard scanned CSS only and matched a fixed hex list,
+ * so it read as compliant. The guard now scans component sources and judges the hue
+ * of every ordinary colour spelling, which is what caught it.
+ *
+ * The palette this replaced was inlined in four places (the overview page, the usage
+ * page, the donut and one trend chart) and did not pass for four slots: its second
+ * colour (`#69c0ff`) sat at ΔE 10.7 from the teal beside it — two touching segments
+ * that full-colour readers struggle to tell apart — and outside the lightness band.
  */
-export const CHART_PALETTE = ['#0960bd', '#13c2c2', '#fa8c16', '#722ed1'] as const;
+export const CHART_PALETTE = ['#0960bd', '#fa8c16', '#13c2c2', '#2f9e44'] as const;
 
 /**
  * The neutral for 「其他」/「unknown」 buckets, deliberately **outside** the
  * categorical set: a grey carries no identity, which is exactly what a residual
- * bucket should say. It is not a palette slot — the checker rejects it as one (zero
- * chroma, and `#d9d9d9` additionally sits outside the lightness band), and reusing a
- * hue for "everything else" would imply the bucket means something specific.
+ * bucket should say. It is not a palette slot — the checker rejects zero-chroma
+ * entries as categorical colours — and reusing a hue for "everything else" would
+ * imply the bucket means something specific.
+ *
+ * It is also what a caller gets for any segment past the last slot, so a chart taking
+ * more categories than there are hues must either fold them into one 「其他」 or pass
+ * explicit colours: two uncoloured segments would otherwise share this grey and read
+ * as one band.
  */
 export const CHART_OTHER_COLOR = '#8c8c8c';
 

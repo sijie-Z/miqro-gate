@@ -97,7 +97,7 @@ export const DICT: Record<string, string> = {
   '密钥已生成，仅显示一次': 'Key generated — shown only once',
   'Token 用量': 'Token usage',
   'Token 类型': 'Token type',
-  'Tokens 输入 + 输出 · Top 8': 'Tokens (input + output) · Top 8',
+  'Tokens 输入 + 输出 · Top 4 + 其他': 'Tokens (input + output) · Top 4 + other',
   'Top 工具': 'Top tools',
   'Top 服务': 'Top services',
   'UTF-8 JSONL 账单': 'UTF-8 JSONL bill',

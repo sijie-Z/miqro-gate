@@ -17,8 +17,8 @@ describe('UiDonut', () => {
     const el = wrapper.get('.ui-donut');
     const bg = (el.element as HTMLElement).style.background;
     expect(bg).toContain('conic-gradient');
-    expect(bg).toContain('#0960bd'); // palette[0]
-    expect(bg).toContain('#69c0ff'); // palette[1]
+    expect(bg).toContain('#0960bd'); // CHART_PALETTE[0]
+    expect(bg).toContain('#fa8c16'); // CHART_PALETTE[1]
     expect(bg).toContain('#123456'); // explicit colour wins
     expect(bg).toContain('60.00%');
     expect(wrapper.get('.ui-donut__center').text()).toBe('¥20.90');
