@@ -45,15 +45,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * The scenario is the one an operator actually hits: admin A and admin B both
  * have the edit form open. A saves a change to one field, B saves a change to a
  * different field. Neither request may erase the other admin's committed field,
- * and the later writer must be told about the conflict instead of being handed a
- * {@code 200} for a write that silently dropped A's work.
+ * and the later writer must be told about the conflict instead of being handed
+ * a {@code 200} for a write that silently dropped A's work.
  *
  * <p>
  * The interleave is made deterministic with a row lock held on a second
  * connection (the same barrier the repo already uses in
  * {@code WebhookAlertApiIntegrationTest.deleteWaitsForConcurrentRuleInsert}):
- * A's write is committed while B's UPDATE is already blocked on the row, so B is
- * guaranteed to be working from the snapshot it read before A committed.
+ * A's write is committed while B's UPDATE is already blocked on the row, so B
+ * is guaranteed to be working from the snapshot it read before A committed.
  *
  * <p>
  * The webhook-endpoint case is the control: the identical interleave against
@@ -144,11 +144,12 @@ class AlertRuleConcurrentEditIntegrationTest {
             }
 
             // B: PATCH {"threshold": 0.9} — must block on A's row lock.
-            Future<Integer> pending = io.submit(() -> mockMvc
-                    .perform(patch("/api/v1/admin/alert-rules/" + ruleId).contentType(MediaType.APPLICATION_JSON)
-                            .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                            .content("{\"threshold\":0.9}"))
-                    .andReturn().getResponse().getStatus());
+            Future<Integer> pending = io
+                    .submit(() -> mockMvc
+                            .perform(patch("/api/v1/admin/alert-rules/" + ruleId)
+                                    .contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                                    .header("X-CSRF-Token", csrfToken).content("{\"threshold\":0.9}"))
+                            .andReturn().getResponse().getStatus());
             // Positive evidence for the interleave, not merely "B has not finished":
             // wait until B's UPDATE is parked on A's row lock. Without this the test
             // could pass without any race at all — B could still be in the filter
@@ -162,8 +163,7 @@ class AlertRuleConcurrentEditIntegrationTest {
             conn.close();
         }
 
-        Map<String, Object> row = jdbc.queryForMap(
-                "SELECT name, threshold, version FROM alert_rules WHERE id = :id",
+        Map<String, Object> row = jdbc.queryForMap("SELECT name, threshold, version FROM alert_rules WHERE id = :id",
                 new MapSqlParameterSource("id", ruleUuid));
         // Soft assertions so one run reports every way the #475 contract is broken,
         // instead of stopping at the first one.
@@ -182,8 +182,8 @@ class AlertRuleConcurrentEditIntegrationTest {
 
     /**
      * Control: the identical interleave against the resource whose update is
-     * already a compare-and-set (#475). Same harness, same timing — the conflict
-     * is surfaced.
+     * already a compare-and-set (#475). Same harness, same timing — the conflict is
+     * surfaced.
      */
     @Test
     @DisplayName("control: the same race on a webhook endpoint is a 409, not a silent overwrite (#475)")
@@ -209,11 +209,12 @@ class AlertRuleConcurrentEditIntegrationTest {
                 assertThat(ps.executeUpdate()).isEqualTo(1);
             }
 
-            Future<Integer> pending = io.submit(() -> mockMvc
-                    .perform(patch("/api/v1/admin/webhooks/" + endpointId).contentType(MediaType.APPLICATION_JSON)
-                            .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                            .content("{\"timeoutMs\":5000}"))
-                    .andReturn().getResponse().getStatus());
+            Future<Integer> pending = io
+                    .submit(() -> mockMvc
+                            .perform(patch("/api/v1/admin/webhooks/" + endpointId)
+                                    .contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                                    .header("X-CSRF-Token", csrfToken).content("{\"timeoutMs\":5000}"))
+                            .andReturn().getResponse().getStatus());
             Thread.sleep(700);
             assertThat(pending.isDone()).as("the PATCH must wait for the row lock").isFalse();
 
@@ -258,9 +259,8 @@ class AlertRuleConcurrentEditIntegrationTest {
         MvcResult created = mockMvc
                 .perform(post("/api/v1/admin/alert-rules").contentType(MediaType.APPLICATION_JSON)
                         .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                        .content(objectMapper.writeValueAsString(
-                                Map.of("name", name, "type", "USAGE_MISSING_RATE", "threshold",
-                                        new BigDecimal(threshold), "dedupeMinutes", 60))))
+                        .content(objectMapper.writeValueAsString(Map.of("name", name, "type", "USAGE_MISSING_RATE",
+                                "threshold", new BigDecimal(threshold), "dedupeMinutes", 60))))
                 .andExpect(status().isOk()).andReturn();
         return objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
     }
