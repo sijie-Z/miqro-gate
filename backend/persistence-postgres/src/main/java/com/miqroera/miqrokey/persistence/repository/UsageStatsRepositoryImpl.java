@@ -56,6 +56,43 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
     }
 
     /**
+     * Day bucket ({@code YYYY-MM-DD}) for a {@code timestamptz} column, pinned to
+     * UTC (#1050). The unqualified form — {@code CAST(occurred_at AS DATE)} —
+     * resolves through the PostgreSQL session's {@code TimeZone}, so the same row
+     * landed in a different bucket after an operator changed the server's timezone:
+     * no code change, no warning, no audit trail, and every tenant's daily series
+     * shifted at once. A bucket boundary is a property of the data, not of whoever
+     * happens to be connected — the same rule the hourly path below states and
+     * implements.
+     *
+     * <p>
+     * Package-private so the timezone regression test can run the production
+     * expression itself instead of a copy that could drift from it.
+     * </p>
+     */
+    static String utcDayBucket(String column) {
+        return "CAST((" + column + " AT TIME ZONE 'UTC') AS DATE)";
+    }
+
+    /**
+     * Month bucket ({@code YYYY-MM}) for a {@code timestamptz} column, pinned to
+     * UTC (#1050).
+     */
+    static String utcMonthBucket(String column) {
+        return "to_char(date_trunc('month', " + column + " AT TIME ZONE 'UTC'), 'YYYY-MM')";
+    }
+
+    private static GroupSpec daySpec(String column) {
+        String bucket = utcDayBucket(column);
+        return new GroupSpec(bucket + " AS group_key, " + bucket + " AS label", "", bucket);
+    }
+
+    private static GroupSpec monthSpec(String column) {
+        String bucket = utcMonthBucket(column);
+        return new GroupSpec(bucket + " AS group_key, " + bucket + " AS label", "", bucket);
+    }
+
+    /**
      * Lifecycle enrichment join (#758): fact rows carry the gateway request id; the
      * lifecycle trail ({@code request_usage_records}) is unique per
      * {@code (started_at, gateway_request_id)}. The window condition on
@@ -88,9 +125,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                         "ue.virtual_key_id, COALESCE(vk.name, vk.last_four)");
             case CACHE_LEVEL ->
                 new GroupSpec("ue.cache_level AS group_key, ue.cache_level AS label", "", "ue.cache_level");
-            case DAY ->
-                new GroupSpec("CAST(ue.occurred_at AS DATE) AS group_key, CAST(ue.occurred_at AS DATE) AS label", "",
-                        "CAST(ue.occurred_at AS DATE)");
+            case DAY -> daySpec("ue.occurred_at");
             case USER -> new GroupSpec("vk.user_id AS group_key, u.username AS label",
                     "JOIN virtual_keys vk ON vk.id = ue.virtual_key_id AND vk.tenant_id = ue.tenant_id"
                             + " JOIN users u ON u.id = vk.user_id AND u.tenant_id = ue.tenant_id",
@@ -106,10 +141,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                             + " COALESCE(pp.display_name, pp.product_code, ue.provider_product_id::text) AS label",
                     "LEFT JOIN provider_products pp ON pp.id = ue.provider_product_id", "ue.provider_product_id,"
                             + " COALESCE(pp.display_name, pp.product_code, ue.provider_product_id::text)");
-            case MONTH -> new GroupSpec(
-                    "to_char(date_trunc('month', ue.occurred_at), 'YYYY-MM') AS group_key,"
-                            + " to_char(date_trunc('month', ue.occurred_at), 'YYYY-MM') AS label",
-                    "", "to_char(date_trunc('month', ue.occurred_at), 'YYYY-MM')");
+            case MONTH -> monthSpec("ue.occurred_at");
         };
     }
 
@@ -126,8 +158,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                     "JOIN virtual_keys vk ON vk.id = h.virtual_key_id AND vk.tenant_id = h.tenant_id",
                     "h.virtual_key_id, COALESCE(vk.name, vk.last_four)");
             case CACHE_LEVEL -> new GroupSpec("'HIT' AS group_key, 'HIT' AS label", "", "'HIT'");
-            case DAY -> new GroupSpec("CAST(h.occurred_at AS DATE) AS group_key, CAST(h.occurred_at AS DATE) AS label",
-                    "", "CAST(h.occurred_at AS DATE)");
+            case DAY -> daySpec("h.occurred_at");
             case USER -> new GroupSpec("vk.user_id AS group_key, u.username AS label",
                     "JOIN virtual_keys vk ON vk.id = h.virtual_key_id AND vk.tenant_id = h.tenant_id"
                             + " JOIN users u ON u.id = vk.user_id AND u.tenant_id = h.tenant_id",
@@ -143,10 +174,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                             + " COALESCE(pp.display_name, pp.product_code, e.provider_product_id::text) AS label",
                     "LEFT JOIN provider_products pp ON pp.id = e.provider_product_id", "e.provider_product_id,"
                             + " COALESCE(pp.display_name, pp.product_code, e.provider_product_id::text)");
-            case MONTH -> new GroupSpec(
-                    "to_char(date_trunc('month', h.occurred_at), 'YYYY-MM') AS group_key,"
-                            + " to_char(date_trunc('month', h.occurred_at), 'YYYY-MM') AS label",
-                    "", "to_char(date_trunc('month', h.occurred_at), 'YYYY-MM')");
+            case MONTH -> monthSpec("h.occurred_at");
         };
     }
 
