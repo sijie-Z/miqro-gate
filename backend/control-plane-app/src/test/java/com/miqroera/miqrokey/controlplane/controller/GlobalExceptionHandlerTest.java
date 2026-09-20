@@ -106,8 +106,8 @@ class GlobalExceptionHandlerTest {
         assertThat(media.getStatusCode().value()).isEqualTo(415);
         assertThat(body(media).get("code")).isEqualTo("UNSUPPORTED_MEDIA_TYPE");
 
-        ResponseEntity<Map<String, Object>> noResource = handler
-                .handleNoResource(new NoResourceFoundException(HttpMethod.GET, "/api/v1/nope"), request);
+        ResponseEntity<Map<String, Object>> noResource = handler.handleNoResource(
+                new NoResourceFoundException(HttpMethod.GET, "/api/v1/nope", "/api/v1/nope"), request);
         assertThat(noResource.getStatusCode().value()).isEqualTo(404);
         assertThat(body(noResource).get("code")).isEqualTo("NOT_FOUND");
     }
