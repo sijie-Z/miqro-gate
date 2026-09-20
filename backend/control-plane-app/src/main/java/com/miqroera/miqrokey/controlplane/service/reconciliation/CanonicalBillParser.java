@@ -6,6 +6,7 @@ import com.miqroera.miqrokey.controlplane.service.reconciliation.ReconciliationT
 import com.miqroera.miqrokey.controlplane.service.reconciliation.ReconciliationTypes.LineError;
 import com.miqroera.miqrokey.controlplane.service.reconciliation.ReconciliationTypes.Parsed;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -63,15 +64,15 @@ public final class CanonicalBillParser {
         Instant occurredAt = time(node, "occurred_at", lineNumber, errors);
         String modelId = text(node, "model_id");
         String productCode = text(node, "provider_product_code");
-        Long input = longValue(node, "input_tokens");
-        Long output = longValue(node, "output_tokens");
-        Long cacheRead = longValue(node, "cache_read_tokens");
-        String amount = text(node, "amount");
+        Long input = longValue(node, "input_tokens", lineNumber, errors);
+        Long output = longValue(node, "output_tokens", lineNumber, errors);
+        Long cacheRead = longValue(node, "cache_read_tokens", lineNumber, errors);
+        String amount = decimal(node, "amount", lineNumber, errors);
         String currency = text(node, "currency");
         String status = text(node, "status");
         String rowRef = text(node, "provider_row_ref");
 
-        if (amount == null) {
+        if (absent(node, "amount")) {
             errors.add(new LineError(lineNumber, REQUIRED, "amount 必填"));
         }
         if (currency == null) {
@@ -93,6 +94,46 @@ public final class CanonicalBillParser {
         return value == null || value.isNull() ? null : value.asText();
     }
 
+    private static boolean absent(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull();
+    }
+
+    /**
+     * The contract declares {@code amount} as a decimal string
+     * (docs/bill-reconciliation-contract.md) and the engine turns anything it
+     * cannot parse into {@link BigDecimal#ZERO} while still counting the row as
+     * {@code UNMATCHED_PROVIDER}. A value that is not a decimal is therefore a line
+     * error here - it must never be silently dropped out of the amount gap. JSON
+     * numbers keep their value (no precision is invented by stringifying them);
+     * strings must be readable as a decimal; every other type is an error.
+     */
+    private static String decimal(JsonNode node, String field, int lineNumber, List<LineError> errors) {
+        JsonNode value = node.get(field);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (value.isNumber()) {
+            return value.asText();
+        }
+        if (value.isTextual()) {
+            try {
+                new BigDecimal(value.asText());
+                // kept verbatim: the operator's literal is what the report echoes
+                return value.asText();
+            } catch (NumberFormatException ignored) {
+                // reported below - not a decimal literal
+            }
+        }
+        errors.add(new LineError(lineNumber, BAD_TYPE, field + " 不是 decimal string: " + rawValue(value)));
+        return null;
+    }
+
+    private static String rawValue(JsonNode value) {
+        String raw = value.toString();
+        return raw.length() > 40 ? raw.substring(0, 40) + "..." : raw;
+    }
+
     private static Instant time(JsonNode node, String field, int lineNumber, List<LineError> errors) {
         String value = text(node, field);
         if (value == null) {
@@ -106,11 +147,21 @@ public final class CanonicalBillParser {
         }
     }
 
-    private static Long longValue(JsonNode node, String field) {
+    /**
+     * The contract declares the token counts as {@code int}. A value of another
+     * type used to become a silent {@code null}, which quietly removed a match
+     * anchor from the row (and made the third matching level unreachable for it)
+     * without a single line error - it is reported instead.
+     */
+    private static Long longValue(JsonNode node, String field, int lineNumber, List<LineError> errors) {
         JsonNode value = node.get(field);
         if (value == null || value.isNull()) {
             return null;
         }
-        return value.isIntegralNumber() ? value.asLong() : null;
+        if (value.isIntegralNumber() && value.canConvertToLong()) {
+            return value.asLong();
+        }
+        errors.add(new LineError(lineNumber, BAD_TYPE, field + " 不是整数: " + rawValue(value)));
+        return null;
     }
 }
