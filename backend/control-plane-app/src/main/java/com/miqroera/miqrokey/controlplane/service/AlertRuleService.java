@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -81,6 +82,7 @@ public class AlertRuleService {
         return found.get(0);
     }
 
+    @Transactional
     public AlertRule update(UUID tenantId, UUID ruleId, String name, BigDecimal threshold, Integer dedupeMinutes,
             Boolean enabled, UUID webhookEndpointId, String scopeJson, AuditContext context) {
         if (name != null) {
@@ -95,12 +97,18 @@ public class AlertRuleService {
         AlertRule existing = get(tenantId, ruleId);
         String newScope = scopeJson != null ? scopeJson : existing.scopeJson();
         validateScope(tenantId, existing.type(), newScope);
-        jdbc.update("""
+        // #475 sibling: compare-and-set on the version read above. The snapshot is
+        // re-written field by field (absent fields keep their stored value), so
+        // without the version predicate a concurrent commit between the read and
+        // the write is silently reverted — the other admin's committed field is
+        // overwritten with the value this request happened to read (lost update),
+        // and the caller still gets a 200.
+        int rows = jdbc.update("""
                 UPDATE alert_rules
                 SET name = :name, threshold = :threshold, dedupe_minutes = :dedupeMinutes, enabled = :enabled,
                     webhook_endpoint_id = :webhookEndpointId, scope_json = :scopeJson::jsonb,
                     version = version + 1, updated_at = now()
-                WHERE id = :id AND tenant_id = :tenantId
+                WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """,
                 new MapSqlParameterSource("name", name != null ? name : existing.name())
                         .addValue("threshold", threshold != null ? threshold : existing.threshold())
@@ -108,7 +116,12 @@ public class AlertRuleService {
                         .addValue("enabled", enabled != null ? enabled : existing.enabled())
                         .addValue("webhookEndpointId",
                                 webhookEndpointId != null ? webhookEndpointId : existing.webhookEndpointId())
-                        .addValue("scopeJson", newScope).addValue("id", ruleId).addValue("tenantId", tenantId));
+                        .addValue("scopeJson", newScope).addValue("id", ruleId).addValue("tenantId", tenantId)
+                        .addValue("expectedVersion", existing.version()));
+        if (rows != 1) {
+            throw new org.springframework.dao.OptimisticLockingFailureException(
+                    "Optimistic lock failure: alert rule " + ruleId);
+        }
         AlertRule updated = get(tenantId, ruleId);
         auditService.record(tenantId, context.actorId(), "ALERT_RULE_UPDATE", "ALERT_RULE", ruleId, AuditSummaries
                 .summary(context, "name", AuditSummaries.sanitize(updated.name()), "type", updated.type()),
