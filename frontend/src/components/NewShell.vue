@@ -189,6 +189,10 @@ const isActive = (name: string) => route.name === name;
 interface ShellTab {
   name: string;
   label: string;
+  /** PH41: last full path (path + query) seen for this tab. Tabs are switched
+   *  by path, not by name, so URL-backed view state (`?credentialId=…`) is not
+   *  dropped on the way back. */
+  fullPath?: string;
 }
 
 const TABS_KEY = 'miqrogate.shell-tabs';
@@ -213,18 +217,37 @@ watch(tabs, (value) => sessionStorage.setItem(TABS_KEY, JSON.stringify(value.sli
   deep: true,
 });
 
+// PH41: watch the fullPath, not just the name — a query-only change (the
+// grants filter writing `?credentialId=…`) must update the tab's target too.
 watch(
-  () => route.name as string | undefined,
-  (name) => {
+  () => route.fullPath,
+  () => {
+    const name = route.name as string | undefined;
     if (!name) return;
     const label = labelOf(name);
     if (!label) return;
-    if (!tabs.value.some((t) => t.name === name)) {
-      tabs.value = [...tabs.value, { name, label }];
+    const fullPath = route.fullPath;
+    const existing = tabs.value.find((t) => t.name === name);
+    if (!existing) {
+      tabs.value = [...tabs.value, { name, label, fullPath }];
+    } else if (existing.fullPath !== fullPath) {
+      tabs.value = tabs.value.map((t) => (t.name === name ? { ...t, label, fullPath } : t));
     }
   },
   { immediate: true },
 );
+
+/** Where a tab click should land: its remembered path when there is one
+ *  (tabs saved by an older build carry no fullPath), else the bare route. */
+function tabTarget(tab: ShellTab): string | { name: string } {
+  return tab.fullPath ?? { name: tab.name };
+}
+
+function activateTab(tab: ShellTab) {
+  const target = tabTarget(tab);
+  if (typeof target === 'string' && target === route.fullPath) return;
+  void router.push(target);
+}
 
 function closeTab(name: string) {
   const index = tabs.value.findIndex((t) => t.name === name);
@@ -232,7 +255,7 @@ function closeTab(name: string) {
   tabs.value = tabs.value.filter((t) => t.name !== name);
   if (route.name === name) {
     const next = tabs.value[Math.min(index, tabs.value.length - 1)];
-    if (next) void router.push({ name: next.name });
+    if (next) void router.push(tabTarget(next));
   }
 }
 
@@ -305,7 +328,10 @@ function tabMenuAction(
   closeTabMenu();
 
   const goTo = (target: string) => {
-    if (route.name !== target) void router.push({ name: target });
+    if (route.name !== target) {
+      const tab = tabs.value.find((t) => t.name === target);
+      void router.push(tab ? tabTarget(tab) : { name: target });
+    }
   };
 
   if (action === 'closeAll') {
@@ -735,7 +761,7 @@ async function handleLogout() {
           :key="tab.name"
           class="new-shell__tab"
           :class="{ 'new-shell__tab--active': isActive(tab.name) }"
-          @click="router.push({ name: tab.name })"
+          @click="activateTab(tab)"
           @contextmenu.prevent="openTabMenu($event, tab.name)"
         >
           <span class="new-shell__tab-label">{{ tab.label }}</span>
