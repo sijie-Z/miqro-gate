@@ -19,6 +19,8 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
@@ -58,11 +60,12 @@ public class PlatformOidcAuthService {
     private final AuditService auditService;
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
+    private final TransactionTemplate transactionTemplate;
     private final RestClient http;
 
     public PlatformOidcAuthService(AuthProperties authProperties, UserRepository userRepository,
             PasswordHasher passwordHasher, SessionService sessionService, AuditService auditService,
-            NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
+            NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper, PlatformTransactionManager transactionManager) {
         this.authProperties = authProperties;
         this.userRepository = userRepository;
         this.passwordHasher = passwordHasher;
@@ -70,6 +73,7 @@ public class PlatformOidcAuthService {
         this.auditService = auditService;
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.http = RestClient.create();
     }
 
@@ -248,41 +252,75 @@ public class PlatformOidcAuthService {
                         .addValue("idp", authProperties.getPlatformOidcIdpCode()).addValue("sub", sub));
     }
 
+    /**
+     * Auto-provisions the internal user for a platform identity on first login.
+     *
+     * <p>
+     * #1028: the tenant lock is only worth taking while the check and the insert
+     * are still inside it, so the read-modify-write runs in one transaction. Under
+     * autocommit {@code FOR UPDATE} is released at the end of its own statement,
+     * and two concurrent first logins could both see the same username free and
+     * collide on {@code uq_users_tenant_username} — surfacing as a 500 rather than
+     * as the intended {@code USERNAME_CONFLICT}.
+     *
+     * <p>
+     * The link is re-read once the lock is held: a concurrent winner is adopted
+     * there, which also keeps this request from leaving an unlinked user row behind
+     * (#730).
+     */
     private UUID provisionUser(UUID tenantId, OidcIdentity identity) {
-        String base = sanitizeUsername(identity.username() != null ? identity.username() : identity.sub());
-        userRepository.lockTenantForBootstrap(tenantId);
-        String username = base;
-        int attempt = 0;
-        while (attempt++ < 6) {
-            if (!userRepository.existsByTenantIdAndUsername(tenantId, username)) {
-                break;
-            }
-            username = base + "_" + attempt;
-        }
-        if (userRepository.existsByTenantIdAndUsername(tenantId, username)) {
-            throw new OAuthFlowException("USERNAME_CONFLICT");
-        }
-        String displayName = identity.nickname() != null ? identity.nickname() : username;
-        byte[] randomPassword = HexFormat.of().formatHex(randomBytes(24))
-                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        byte[] hash = passwordHasher.hash(new String(randomPassword, java.nio.charset.StandardCharsets.UTF_8));
-        Instant now = Instant.now();
-        User user = new User(UUID.randomUUID(), tenantId, username, displayName, hash, UserRole.USER, UserStatus.ACTIVE,
-                false, 0, null, null, 0, now, now);
-        userRepository.insert(user);
         try {
-            insertLink(tenantId, user.id(), identity.sub());
-        } catch (DuplicateKeyException e) {
-            // Concurrent first login for the same sub: reuse the winner's link —
-            // #730: the session must go to the link's owner, not to this request's
-            // (unlinked, unusable) just-inserted row.
-            UUID existing = findLinkedUser(tenantId, identity.sub()).orElse(null);
-            if (existing == null) {
-                throw e;
-            }
-            return existing;
+            return transactionTemplate.execute(status -> {
+                String base = sanitizeUsername(identity.username() != null ? identity.username() : identity.sub());
+                userRepository.lockTenantForBootstrap(tenantId);
+                Optional<UUID> linked = findLinkedUser(tenantId, identity.sub());
+                if (linked.isPresent()) {
+                    return linked.get();
+                }
+                String username = base;
+                int attempt = 0;
+                while (attempt++ < 6) {
+                    if (!userRepository.existsByTenantIdAndUsername(tenantId, username)) {
+                        break;
+                    }
+                    username = base + "_" + attempt;
+                }
+                if (userRepository.existsByTenantIdAndUsername(tenantId, username)) {
+                    throw new OAuthFlowException("USERNAME_CONFLICT");
+                }
+                String displayName = identity.nickname() != null ? identity.nickname() : username;
+                byte[] randomPassword = HexFormat.of().formatHex(randomBytes(24))
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                byte[] hash = passwordHasher.hash(new String(randomPassword, java.nio.charset.StandardCharsets.UTF_8));
+                Instant now = Instant.now();
+                User user = new User(UUID.randomUUID(), tenantId, username, displayName, hash, UserRole.USER,
+                        UserStatus.ACTIVE, false, 0, null, null, 0, now, now);
+                userRepository.insert(user);
+                try {
+                    insertLink(tenantId, user.id(), identity.sub());
+                } catch (DuplicateKeyException e) {
+                    // The link was written by a path that does not take this lock (the
+                    // row lock is database-wide, so a second instance is covered — this
+                    // is defensive). The failed statement aborted the transaction, so
+                    // the winner cannot be looked up in here. Roll this attempt back —
+                    // the just-inserted user row included — and let the caller adopt
+                    // the winner's link.
+                    throw new LinkRacedException();
+                }
+                return user.id();
+            });
+        } catch (LinkRacedException e) {
+            return findLinkedUser(tenantId, identity.sub())
+                    .orElseThrow(() -> new OAuthFlowException("ACCOUNT_UNLINKED"));
         }
-        return user.id();
+    }
+
+    /**
+     * Signals that a concurrent writer won the identity link; see
+     * {@link #provisionUser}.
+     */
+    private static final class LinkRacedException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
     }
 
     private static String sanitizeUsername(String raw) {
