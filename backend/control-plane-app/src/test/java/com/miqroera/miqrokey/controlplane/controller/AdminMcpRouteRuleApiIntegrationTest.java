@@ -130,37 +130,33 @@ class AdminMcpRouteRuleApiIntegrationTest {
     @Test
     @DisplayName("route rule create/update/status/delete each leave an attributable audit event")
     void routeRuleMutationsAudited() throws Exception {
-        UUID adminId = jdbc.queryForObject("SELECT id FROM users WHERE username = 'root'",
-                new MapSqlParameterSource(), UUID.class);
+        UUID adminId = jdbc.queryForObject("SELECT id FROM users WHERE username = 'root'", new MapSqlParameterSource(),
+                UUID.class);
 
         String ruleId = objectMapper
-                .readValue(
-                        mockMvc
-                                .perform(post(rulesUrl()).cookie(sessionCookie, csrfCookie)
-                                        .header("X-CSRF-Token", csrfToken).header("X-Request-Id", "req-rr-create")
-                                        .contentType(MediaType.APPLICATION_JSON)
-                                        .content(rule("audited-route",
-                                                "\"priority\":900,\"pathMode\":\"PREFIX\",\"pathValue\":\"/erp\"")))
-                                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(),
-                        Map.class)
+                .readValue(mockMvc
+                        .perform(post(rulesUrl()).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                                .header("X-Request-Id", "req-rr-create").contentType(MediaType.APPLICATION_JSON)
+                                .content(rule("audited-route",
+                                        "\"priority\":900,\"pathMode\":\"PREFIX\",\"pathValue\":\"/erp\"")))
+                        .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(), Map.class)
                 .get("id").toString();
         assertAudited("MCP_ROUTE_RULE_CREATE", adminId, "req-rr-create", "audited-route");
 
-        mockMvc.perform(patch(rulesUrl() + "/" + ruleId).cookie(sessionCookie, csrfCookie)
-                .header("X-CSRF-Token", csrfToken).header("X-Request-Id", "req-rr-update")
-                .contentType(MediaType.APPLICATION_JSON).content(rule("audited-route",
-                        "\"priority\":901,\"pathMode\":\"PREFIX\",\"pathValue\":\"/erp2\"")))
+        mockMvc.perform(
+                patch(rulesUrl() + "/" + ruleId).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .header("X-Request-Id", "req-rr-update").contentType(MediaType.APPLICATION_JSON)
+                        .content(rule("audited-route",
+                                "\"priority\":901,\"pathMode\":\"PREFIX\",\"pathValue\":\"/erp2\"")))
                 .andExpect(status().isOk());
         assertAudited("MCP_ROUTE_RULE_UPDATE", adminId, "req-rr-update", "audited-route");
 
         mockMvc.perform(post(rulesUrl() + "/" + ruleId + "/status?status=DISABLED").cookie(sessionCookie, csrfCookie)
-                .header("X-CSRF-Token", csrfToken).header("X-Request-Id", "req-rr-status"))
-                .andExpect(status().isOk());
+                .header("X-CSRF-Token", csrfToken).header("X-Request-Id", "req-rr-status")).andExpect(status().isOk());
         assertAudited("MCP_ROUTE_RULE_STATUS", adminId, "req-rr-status", "DISABLED");
 
         mockMvc.perform(delete(rulesUrl() + "/" + ruleId).cookie(sessionCookie, csrfCookie)
-                .header("X-CSRF-Token", csrfToken).header("X-Request-Id", "req-rr-delete"))
-                .andExpect(status().isOk());
+                .header("X-CSRF-Token", csrfToken).header("X-Request-Id", "req-rr-delete")).andExpect(status().isOk());
         assertAudited("MCP_ROUTE_RULE_DELETE", adminId, "req-rr-delete", "audited-route");
     }
 

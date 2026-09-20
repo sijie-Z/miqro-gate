@@ -68,8 +68,8 @@ public class AdminMcpRouteRuleController {
 
     /** Enable/disable; idempotent per the upstream doc (same state is a no-op). */
     @PostMapping("/{ruleId}/status")
-    public McpRouteRule setStatus(HttpServletRequest request, @PathVariable UUID serviceId,
-            @PathVariable UUID ruleId, @RequestParam("status") String status) {
+    public McpRouteRule setStatus(HttpServletRequest request, @PathVariable UUID serviceId, @PathVariable UUID ruleId,
+            @RequestParam("status") String status) {
         return routeRules.setStatus(userContext.getUser().tenantId(), ruleId, status, auditContext(request));
     }
 
@@ -78,7 +78,9 @@ public class AdminMcpRouteRuleController {
         routeRules.delete(userContext.getUser().tenantId(), ruleId, auditContext(request));
     }
 
-    /** Route rules are a session-only surface: the actor is always the session user. */
+    /**
+     * Route rules are a session-only surface: the actor is always the session user.
+     */
     private AuditContext auditContext(HttpServletRequest request) {
         return AuditContext.human(userContext.getUser().id(), requestId(request));
     }

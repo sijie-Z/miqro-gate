@@ -100,8 +100,8 @@ public class AdminMcpRouteRuleService {
             throw new ApiException(HttpStatus.CONFLICT, "ROUTE_NAME_TAKEN", "该服务下已存在同名路由。");
         }
         // before/after on the two fields that decide which traffic a rule captures.
-        record(tenantId, context, "MCP_ROUTE_RULE_UPDATE", saved, "name", saved.name(), "priority",
-                saved.priority(), "previousName", current.name(), "previousPriority", current.priority());
+        record(tenantId, context, "MCP_ROUTE_RULE_UPDATE", saved, "name", saved.name(), "priority", saved.priority(),
+                "previousName", current.name(), "previousPriority", current.priority());
         return saved;
     }
 
