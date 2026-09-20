@@ -5,6 +5,8 @@ import com.miqroera.miqrokey.domain.repository.*;
 import org.junit.jupiter.api.*;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -41,6 +43,8 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
     private VirtualKeyRepository vkRepo;
     @Autowired
     private AdminAuditEventRepository auditRepo;
+    @Autowired
+    private NamedParameterJdbcTemplate jdbc;
 
     // Use seed tenant from V1 migration
     private static final UUID TENANT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
@@ -313,6 +317,55 @@ class RepositoryIntegrationTest extends AbstractPostgresTest {
             var results = auditRepo.findByTargetTypeAndTargetId("User", user.id());
             assertThat(results).isNotEmpty();
             assertThat(results.get(0).action()).isEqualTo("user.create");
+        }
+    }
+
+    @Nested
+    @DisplayName("Provider product full-replace update")
+    class ProviderProductUpdate {
+
+        /**
+         * #1151: update() replaces the whole entity, so every mutable column has to be
+         * written. The assertion reads the columns back through raw SQL on purpose —
+         * update() returns the very entity it was handed, so asserting on that return
+         * value would pass even for a column the SQL never wrote.
+         */
+        @Test
+        @DisplayName("should persist every mutable column")
+        void shouldPersistEveryMutableColumn() {
+            var current = productRepo.findById(product.id()).orElseThrow();
+            var updated = new ProviderProduct(current.id(), current.providerId(), current.productCode(),
+                    "Renamed Product", BillingMode.FIXED_SUBSCRIPTION, PlanScope.TEAM, CredentialTopology.PER_SEAT_KEY,
+                    QuotaTopology.KEY_CAPPED, "[\"anthropic\"]", "[\"https://api.example.com\"]",
+                    "{\"kind\":\"bearer\"}", "STATIC", "FROM_PLAN", BalanceAuthority.LOCAL_ESTIMATE,
+                    ImplementationStatus.IMPLEMENTED, "2026-09-20", current.version() + 1, current.createdAt(), NOW);
+            productRepo.update(updated);
+
+            var row = jdbc.queryForMap("""
+                    SELECT product_code, display_name, billing_mode, plan_scope, credential_topology, quota_topology,
+                           supported_wire_protocols, base_url_templates, auth_scheme, model_catalog_strategy,
+                           plan_status_strategy, balance_authority, implementation_status, catalog_version, version
+                    FROM provider_products WHERE id = :id
+                    """, new MapSqlParameterSource("id", product.id()));
+
+            assertThat(String.valueOf(row.get("display_name"))).isEqualTo("Renamed Product");
+            assertThat(String.valueOf(row.get("billing_mode"))).isEqualTo("FIXED_SUBSCRIPTION");
+            assertThat(String.valueOf(row.get("plan_scope"))).isEqualTo("TEAM");
+            assertThat(String.valueOf(row.get("credential_topology"))).isEqualTo("PER_SEAT_KEY");
+            assertThat(String.valueOf(row.get("quota_topology"))).isEqualTo("KEY_CAPPED");
+            assertThat(String.valueOf(row.get("supported_wire_protocols"))).isEqualTo("[\"anthropic\"]");
+            assertThat(String.valueOf(row.get("base_url_templates"))).isEqualTo("[\"https://api.example.com\"]");
+            // jsonb, not text: PostgreSQL normalises the stored form, so the read-back has
+            // a
+            // space after the colon. That space is itself part of the evidence — a text
+            // column would have handed the literal back unchanged (#1151).
+            assertThat(String.valueOf(row.get("auth_scheme"))).isEqualTo("{\"kind\": \"bearer\"}");
+            assertThat(String.valueOf(row.get("model_catalog_strategy"))).isEqualTo("STATIC");
+            assertThat(String.valueOf(row.get("plan_status_strategy"))).isEqualTo("FROM_PLAN");
+            assertThat(String.valueOf(row.get("balance_authority"))).isEqualTo("LOCAL_ESTIMATE");
+            assertThat(String.valueOf(row.get("implementation_status"))).isEqualTo("IMPLEMENTED");
+            assertThat(String.valueOf(row.get("catalog_version"))).isEqualTo("2026-09-20");
+            assertThat(((Number) row.get("version")).longValue()).isEqualTo(current.version() + 1);
         }
     }
 
