@@ -251,6 +251,42 @@ describe('NextAdminUsageView', () => {
     });
   }
 
+  it('#1114: the breakdown CSV quotes cells and neutralizes formula starts', async () => {
+    // jsdom's Blob has no .text(); capture the source string at construction.
+    const parts: string[] = [];
+    const RealBlob = globalThis.Blob;
+    class CapturingBlob extends RealBlob {
+      constructor(partList: BlobPart[], options?: BlobPropertyBag) {
+        super(partList, options);
+        parts.push(partList.join(''));
+      }
+    }
+    vi.stubGlobal('Blob', CapturingBlob);
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() });
+    mockApi.adminUsageSummary.mockImplementation(async (query) => ({
+      ...summaryFor(String(query?.groupBy ?? 'project')),
+      groups: [group('g1', 'A,"B', 3, 10, 5, 0.5), group('g2', '=cmd|calc', 1, 10, 5, 0.5)],
+    }));
+
+    const wrapper = mountView();
+    await flushPromises();
+    // The export lives on the breakdown tab (the default tab is the request log).
+    await wrapper.find('[data-testid="usage-tab-breakdown"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="usage-breakdown-export"]').trigger('click');
+    await flushPromises();
+    vi.unstubAllGlobals();
+
+    expect(parts).toHaveLength(1);
+    const text = parts[0]!.replace(/^﻿/, '');
+    // Every cell quoted (RFC 4180): a comma or a quote in a project/user name
+    // must not shift columns …
+    expect(text).toContain('"A,""B"');
+    // … and a label that starts a formula is neutralized (#430).
+    expect(text).toContain('"\'=cmd|calc"');
+    expect(text.split('\r\n')[0]).toBe('"分组","请求","Token","成本(CNY)","占比(%)"');
+  });
+
   it('#790: marks the saving as a lower bound when hits could not be priced', async () => {
     mockApi.adminUsageSummary.mockImplementation(async (query) => {
       const summary = summaryFor(String(query?.groupBy ?? 'project'));
