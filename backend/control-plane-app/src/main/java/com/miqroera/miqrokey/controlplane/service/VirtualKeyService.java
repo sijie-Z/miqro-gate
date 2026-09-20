@@ -440,21 +440,26 @@ public class VirtualKeyService {
             membershipRepository.findAllByUserId(user.id()).forEach(m -> projectIds.add(m.projectId()));
         }
         for (UUID projectId : projectIds) {
-            projectRepository.findById(projectId).filter(p -> p.tenantId().equals(user.tenantId())).ifPresent(p -> {
-                projects.add(new MeGrantsResponse.ProjectOption(p.id(), p.code(), p.name(), p.projectTag()));
-                for (ProjectProviderGrant g : grantRepository.findAllByProjectIdAndStatus(p.id(), "ACTIVE")) {
-                    // Display identity for the picker: a raw product UUID tells
-                    // the user nothing (#528). Null when the product row is gone.
-                    ProviderProduct product = productCache.computeIfAbsent(g.providerProductId(),
-                            id -> productRepository.findById(id).orElse(null));
-                    // Deterministic model list (lexicographic) — the underlying
-                    // repository returns an unordered Set.
-                    grants.add(new MeGrantsResponse.GrantOption(g.id(), g.projectId(), g.providerProductId(),
-                            new TreeSet<>(grantRepository.findModelIds(g.id())),
-                            product != null ? product.productCode() : null,
-                            product != null ? product.displayName() : null));
-                }
-            });
+            // #1145: the UNATTRIBUTED bucket is an accounting sink, never a key binding —
+            // requireBindableProject rejects it further down this same class, so listing it
+            // here advertises a choice that can never succeed. Its provider grants go with
+            // it: a grant on a project no key can bind to enables nothing.
+            projectRepository.findById(projectId).filter(p -> p.tenantId().equals(user.tenantId()))
+                    .filter(p -> !p.system()).ifPresent(p -> {
+                        projects.add(new MeGrantsResponse.ProjectOption(p.id(), p.code(), p.name(), p.projectTag()));
+                        for (ProjectProviderGrant g : grantRepository.findAllByProjectIdAndStatus(p.id(), "ACTIVE")) {
+                            // Display identity for the picker: a raw product UUID tells
+                            // the user nothing (#528). Null when the product row is gone.
+                            ProviderProduct product = productCache.computeIfAbsent(g.providerProductId(),
+                                    id -> productRepository.findById(id).orElse(null));
+                            // Deterministic model list (lexicographic) — the underlying
+                            // repository returns an unordered Set.
+                            grants.add(new MeGrantsResponse.GrantOption(g.id(), g.projectId(), g.providerProductId(),
+                                    new TreeSet<>(grantRepository.findModelIds(g.id())),
+                                    product != null ? product.productCode() : null,
+                                    product != null ? product.displayName() : null));
+                        }
+                    });
         }
         List<String> purposes = new ArrayList<>();
         for (VirtualKeyPurpose purpose : VirtualKeyPurpose.values()) {

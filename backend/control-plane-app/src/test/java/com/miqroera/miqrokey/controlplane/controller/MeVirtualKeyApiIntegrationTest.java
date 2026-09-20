@@ -395,6 +395,26 @@ class MeVirtualKeyApiIntegrationTest {
                 .andExpect(jsonPath("$.purposes[0]").isNotEmpty());
     }
 
+    @Test
+    @DisplayName("#1145: the unattributed bucket is not offered as a bindable project")
+    void grantsEndpointOmitsUnattributedBucket() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        fx.insertSystemProject();
+
+        // What feeds the key-creation picker has to agree with what creation accepts:
+        // requireBindableProject rejects a system project (#647), so listing it here
+        // offers a choice that can only come back 400 PROJECT_NOT_SELECTABLE. An admin
+        // sees every ACTIVE project, so the endpoint serves it with no grant at all —
+        // the fixture above has none. (The dropdown narrows this list to the projects a
+        // grant covers, so the option became *visible* once an admin granted the
+        // bucket;
+        // the response was wrong either way.)
+        mockMvc.perform(get("/api/v1/me/grants").cookie(sessionCookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.projects.length()").value(1))
+                .andExpect(jsonPath("$.projects[0].id").value(fx.projectId.toString()));
+    }
+
     // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
@@ -540,6 +560,7 @@ class MeVirtualKeyApiIntegrationTest {
         final UUID secondSubscriptionId = UUID.randomUUID();
         final UUID secondCredentialId = UUID.randomUUID();
         final UUID secondGrantId = UUID.randomUUID();
+        final UUID systemProjectId = UUID.randomUUID();
 
         void reset() {
             // Child-first FK order: virtual keys reference grants, credentials,
@@ -605,6 +626,18 @@ class MeVirtualKeyApiIntegrationTest {
                         """, new MapSqlParameterSource("tenantId", tenantId).addValue("grantId", grantId)
                         .addValue("model", model));
             }
+        }
+
+        /**
+         * The UNATTRIBUTED bucket shape the policy service creates (#647): ACTIVE, no
+         * routing tag, {@code system = true}. An admin's project options come from
+         * every ACTIVE project in the tenant, so this one needs no grant to show up.
+         */
+        void insertSystemProject() {
+            jdbc.update("""
+                    INSERT INTO projects (id, tenant_id, code, name, description, status, project_tag, system, version)
+                    VALUES (:id, :tenantId, 'UNATTRIBUTED', '未归属（系统）', 'CAA 未归属桶', 'ACTIVE', NULL, TRUE, 0)
+                    """, new MapSqlParameterSource("id", systemProjectId).addValue("tenantId", tenantId));
         }
 
         void insertSecondProjectWithGrant(String tag, String code) {
