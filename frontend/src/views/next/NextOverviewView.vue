@@ -26,7 +26,12 @@ import {
 import { UiButton, UiDonut, UiStatusBadge, UiTooltip } from '@/ui';
 import { CHART_OTHER_COLOR, CHART_PALETTE } from '@/lib/chart-palette';
 import { costGapNote, type PricingGapFields } from '@/lib/usage-pricing';
-import type { SubscriptionView, UsageGroup, VirtualKeyView } from '@/types/generated-api';
+import type {
+  ModelApprovalView,
+  SubscriptionView,
+  UsageGroup,
+  VirtualKeyView,
+} from '@/types/generated-api';
 import { actionLabel } from '@/utils/audit-labels';
 import { localDayKey } from '@/utils/datetime';
 
@@ -278,8 +283,15 @@ function relativeTime(iso?: string): string {
   return localDayKey(iso);
 }
 
-/** Admin: recent audit events; regular users: own keys + model requests. */
-async function loadFeed() {
+/**
+ * Admin: recent audit events; regular users: own keys + model requests.
+ *
+ * Both inputs are handed in rather than fetched here (#1138). The cards already read
+ * the key list, so asking for it again was a second request for one page's worth of
+ * data; and the approval read shares nothing with the usage summary, so it starts
+ * alongside it instead of waiting behind it.
+ */
+async function loadFeed(keyList: VirtualKeyView[], approvals: ModelApprovalView[]) {
   try {
     if (isAdmin.value) {
       const events = await api.auditEvents({});
@@ -291,10 +303,6 @@ async function loadFeed() {
         tone: 'info' as const,
       }));
     } else {
-      const [keyList, approvals] = await Promise.all([
-        api.listVirtualKeys(),
-        api.listMyModelApprovals(),
-      ]);
       const items = [
         ...keyList.slice(0, 4).map((k) => ({
           ts: k.createdAt ?? '',
@@ -387,7 +395,13 @@ async function load() {
     const summaryPromise = isAdmin.value
       ? api.adminUsageSummary({ groupBy: 'project' })
       : api.usageSummary('project');
-    const [keyList, summary] = await Promise.all([api.listVirtualKeys(), summaryPromise]);
+    const [keyList, summary, approvals] = await Promise.all([
+      api.listVirtualKeys(),
+      summaryPromise,
+      // #1138: starts with the summary, not after it — nothing here depends on it.
+      // Admins do not read approvals at all, so they contribute an empty list.
+      isAdmin.value ? Promise.resolve<ModelApprovalView[]>([]) : api.listMyModelApprovals(),
+    ]);
     keys.value = keyList;
     // adminUsageSummary groups are the optional-field hub GroupSummary rows;
     // the stats helpers below read the legacy UsageGroup shape — narrow here.
@@ -396,7 +410,7 @@ async function load() {
     if (isAdmin.value) {
       subscriptions.value = await api.listSubscriptions();
     }
-    await loadFeed();
+    await loadFeed(keyList, approvals);
   } catch (error) {
     if (error instanceof ApiError) {
       loadError.value = error.message;
