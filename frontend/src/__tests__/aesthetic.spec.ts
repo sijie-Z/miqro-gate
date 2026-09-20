@@ -34,6 +34,47 @@ describe('aesthetic audit', () => {
     );
   });
 
+  it('contains no purple literal anywhere in the sources, judged by hue (#1112)', () => {
+    // The list above is a denylist, and it only ever saw `src/styles/*.css`. Both
+    // halves of that failed on 2026-09-20: a new shared palette shipped `#722ed1`
+    // (Ant's purple — the spelling this codebase's palette family would actually
+    // reach for) in `src/lib/chart-palette.ts`, and nothing looked at component
+    // sources at all. The rule is about the colour, so judge the colour: hue in the
+    // violet band with enough saturation to read as intentional (greys and the light
+    // tints carry no hue and are not the thing §4.1 forbids).
+    const purple: string[] = [];
+    for (const file of globSync('src/**/*.{css,vue,ts}')) {
+      if (file.includes('__tests__') || file.includes('types/generated')) continue;
+      // Comments and docstrings are stripped first: a comment that *mentions* a purple
+      // (this very palette's docstring explains which one it replaced) ships nothing,
+      // and flagging it would train the next reader to reword the comment instead of
+      // keeping the check.
+      readFileSync(file, 'utf-8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '')
+        .split('\n')
+        .forEach((line, index) => {
+          // Supplier brand colours are the sanctioned exception (frontend-design §4.1).
+          if (line.includes('--miqrokey-chip-')) return;
+          for (const match of line.matchAll(/#([0-9a-fA-F]{6})\b/g)) {
+            const [r, g, b] = [0, 2, 4].map((o) => parseInt(match[1]!.slice(o, o + 2), 16) / 255);
+            const max = Math.max(r!, g!, b!);
+            const delta = max - Math.min(r!, g!, b!);
+            if (delta === 0 || max === 0) continue; // a grey has no hue to judge
+            let hue = 0;
+            if (max === r) hue = 60 * (((g! - b!) / delta) % 6);
+            else if (max === g) hue = 60 * ((b! - r!) / delta + 2);
+            else hue = 60 * ((r! - g!) / delta + 4);
+            if (hue < 0) hue += 360;
+            if (hue >= 255 && hue <= 320 && delta / max >= 0.25) {
+              purple.push(`${file}:${index + 1} ${match[0]}`);
+            }
+          }
+        });
+    }
+    expect(purple).toEqual([]);
+  });
+
   it('never exceeds 8px radius on regular controls (panels/dialogs/pills are the sanctioned exceptions)', () => {
     // Split into rule blocks so the sanctioned .mk-status pill radius (spec
     // §3: pill only for short status labels) is not treated as a container.

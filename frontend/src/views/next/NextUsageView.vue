@@ -25,6 +25,7 @@ import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import UsageAdjustChip from '@/components/UsageAdjustChip.vue';
 import CostSplitBar from '@/components/CostSplitBar.vue';
 import { netTokens } from '@/lib/usage-net';
+import { CHART_OTHER_COLOR, CHART_PALETTE } from '@/lib/chart-palette';
 import { costGapNote } from '@/lib/usage-pricing';
 import type { UiSelectOption } from '@/ui';
 import type { QuotaMetric, QuotaPeriod, UsageGroupBy } from '@/types/api';
@@ -315,8 +316,6 @@ const cacheLevelLabel: Record<string, string> = {
   L2_HIT: 'L2 命中',
 };
 
-const PALETTE = ['#0960bd', '#69c0ff', '#13c2c2', '#fa8c16', '#8c8c8c', '#d9d9d9'];
-
 const compositionSegments = computed(() => {
   const ranked = (summary.value?.groups ?? [])
     .map((g) => ({
@@ -325,16 +324,19 @@ const compositionSegments = computed(() => {
     }))
     .filter((g) => g.value > 0)
     .sort((a, b) => b.value - a.value);
-  const top = ranked.slice(0, 5);
-  const restValue = ranked.slice(5).reduce((sum, g) => sum + g.value, 0);
+  // One ring segment per palette slot, in order; everything past the last slot is the
+  // neutral 「其他」 bucket. The count follows CHART_PALETTE rather than a literal so a
+  // slot added or removed there cannot silently desynchronise the legend.
+  const top = ranked.slice(0, CHART_PALETTE.length);
+  const restValue = ranked.slice(CHART_PALETTE.length).reduce((sum, g) => sum + g.value, 0);
   const rows: { label: string; value: number; color: string; pct: number }[] = top.map((g, i) => ({
     label: g.label ?? '—',
     value: g.value,
-    color: PALETTE[i]!,
+    color: CHART_PALETTE[i] ?? CHART_OTHER_COLOR,
     pct: 0,
   }));
   if (restValue > 0) {
-    rows.push({ label: '其他', value: restValue, color: PALETTE[5]!, pct: 0 });
+    rows.push({ label: '其他', value: restValue, color: CHART_OTHER_COLOR, pct: 0 });
   }
   const total = rows.reduce((sum, r) => sum + r.value, 0) || 1;
   return { rows: rows.map((r) => ({ ...r, pct: (r.value / total) * 100 })), total };
