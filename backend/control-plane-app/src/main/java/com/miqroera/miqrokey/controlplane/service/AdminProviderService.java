@@ -172,11 +172,12 @@ public class AdminProviderService {
 
     /**
      * Edits a seat: a <em>partial</em> patch, not a full-row replace. A field the
-     * request does not carry keeps its stored value, and {@code assigned_user_id}
-     * is non-null exactly while the seat is {@code ASSIGNED} — so releasing clears
-     * the assignee but keeps {@code display_name}. {@code expectedVersion} is the
-     * row's current version; a stale one is a 409 rather than a silent overwrite
-     * (api-contract §1).
+     * request does not carry keeps its stored value. {@code assigned_user_id} is
+     * non-null exactly while the seat is {@code ASSIGNED} — releasing clears the
+     * assignee but keeps {@code display_name} — and a request that would land on
+     * the other side of that biconditional is refused rather than written.
+     * {@code expectedVersion} is the row's current version; a stale one is a 409
+     * rather than a silent overwrite (api-contract §1).
      */
     @Transactional
     public SeatView updateSeat(UUID tenantId, UUID adminId, UUID subscriptionId, UUID seatId, UUID assignedUserId,
@@ -196,6 +197,16 @@ public class AdminProviderService {
                 ? (assignedUserId != null ? assignedUserId : (UUID) current.get("assigned_user_id"))
                 : null;
         String effectiveDisplayName = displayName != null ? displayName : (String) current.get("display_name");
+        if ((effectiveStatus == SeatStatus.ASSIGNED) != (effectiveAssignee != null)) {
+            // Both halves are refusals, not write-backs: an ASSIGNED seat with nobody on
+            // it,
+            // and an assignee on a seat that is not ASSIGNED, are states the read view and
+            // the release path would each contradict.
+            throw new ApiException(HttpStatus.BAD_REQUEST, "SEAT_ASSIGNEE_MISMATCH",
+                    effectiveStatus == SeatStatus.ASSIGNED
+                            ? "席位状态为「已分配」时必须指定成员；请提交 assignedUserId，或改用其他状态。"
+                            : "指定了成员但席位状态不是「已分配」；请同时提交 status=ASSIGNED。");
+        }
 
         int rows = jdbc.update("""
                 UPDATE plan_seats

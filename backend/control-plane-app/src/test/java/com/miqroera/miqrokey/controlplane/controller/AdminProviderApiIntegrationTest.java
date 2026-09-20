@@ -265,6 +265,42 @@ class AdminProviderApiIntegrationTest {
                 .andExpect(jsonPath("$[0].displayName").value("Alice"));
     }
 
+    @Test
+    @DisplayName("#1133: a PATCH without version is refused as a bad request, not a 500")
+    void seatPatchWithoutVersionIsABadRequest() throws Exception {
+        SeatFixture seat = givenAssignedSeat();
+
+        // `version` is declared required in the OpenAPI schema, so it has to be
+        // rejected —
+        // and rejected as a 400. @NotNull on the record is inert unless the controller
+        // marks the body @Valid, which is how this used to answer 500 instead.
+        mockMvc.perform(patch("/api/v1/admin/subscriptions/" + seat.subscriptionId() + "/seats/" + seat.seatId())
+                .contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("status", "DISABLED"))))
+                .andExpect(status().isBadRequest());
+
+        // …and nothing was written on the way out.
+        mockMvc.perform(get("/api/v1/admin/subscriptions/" + seat.subscriptionId() + "/seats").cookie(sessionCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].seatStatus").value("ASSIGNED"));
+    }
+
+    @Test
+    @DisplayName("#1133: an ASSIGNED seat with nobody on it is refused, not written")
+    void seatPatchCannotLandOnAnAssignedSeatWithNoMember() throws Exception {
+        SeatFixture seat = givenAssignedSeat();
+        // Release first, so the seat is AVAILABLE with no assignee.
+        mockMvc.perform(seatPatch(seat, Map.of("status", "AVAILABLE"))).andExpect(status().isOk());
+
+        SeatFixture released = withCurrentVersion(seat);
+        // Asking for ASSIGNED without naming anyone used to write a row that is
+        // ASSIGNED and
+        // unassigned at once — the state the assignee/status biconditional exists to
+        // forbid.
+        mockMvc.perform(seatPatch(released, Map.of("status", "ASSIGNED"))).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("SEAT_ASSIGNEE_MISMATCH"));
+    }
+
     /**
      * A subscription holding one ASSIGNED seat labelled "Alice" — the fixture every
      * seat patch test starts from.
@@ -315,6 +351,19 @@ class AdminProviderApiIntegrationTest {
     }
 
     private record SeatFixture(String subscriptionId, String seatId, long version, String assignedUserId) {
+    }
+
+    /**
+     * The same seat, re-read: a write bumps the version, so a later patch needs the
+     * new one.
+     */
+    private SeatFixture withCurrentVersion(SeatFixture seat) throws Exception {
+        MvcResult seats = mockMvc
+                .perform(get("/api/v1/admin/subscriptions/" + seat.subscriptionId() + "/seats").cookie(sessionCookie))
+                .andExpect(status().isOk()).andReturn();
+        List<?> rows = objectMapper.readValue(seats.getResponse().getContentAsString(), List.class);
+        Map<?, ?> row = (Map<?, ?>) rows.get(0);
+        return new SeatFixture(seat.subscriptionId(), seat.seatId(), ((Number) row.get("version")).longValue(), null);
     }
 
     // ------------------------------------------------------------------
