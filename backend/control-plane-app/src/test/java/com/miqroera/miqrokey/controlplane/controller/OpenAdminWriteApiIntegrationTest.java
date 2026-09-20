@@ -203,4 +203,64 @@ class OpenAdminWriteApiIntegrationTest {
                 .content("{\"name\":\"x\",\"url\":\"https://example.com/h\",\"secret\":\"s\"}"))
                 .andExpect(status().isUnauthorized());
     }
+
+    @Test
+    @DisplayName("#1021: the machine-key surface answers 400 for what the console DTO rejects")
+    void machineSurfaceGuardsWritePayloads() throws Exception {
+        // Before the service-level bounds, these reached the INSERT: a null secret
+        // NPE'd
+        // into a 500, a blank name went in as-is, and an out-of-range timeout came back
+        // as a 409 from the column. The console path was fixed in #971; this surface —
+        // which has no DTO constraints — was the one still open.
+        mockMvc.perform(post("/api/v1/admin-api/webhooks").header("Authorization", "Bearer " + machineSecret)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("name", "no-secret", "url", "https://example.com/h"))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("WEBHOOK_SECRET_INVALID"));
+
+        mockMvc.perform(post("/api/v1/admin-api/webhooks").header("Authorization", "Bearer " + machineSecret)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(
+                        Map.of("name", "   ", "url", "https://example.com/h", "secret", "whsec-x"))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("WEBHOOK_NAME_INVALID"));
+
+        mockMvc.perform(post("/api/v1/admin-api/webhooks").header("Authorization", "Bearer " + machineSecret)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("name", "bad-timeout", "url", "https://example.com/h",
+                        "secret", "whsec-x", "timeoutMs", 999))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("WEBHOOK_TIMEOUT_INVALID"));
+
+        mockMvc.perform(post("/api/v1/admin-api/alert-rules").header("Authorization", "Bearer " + machineSecret)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(
+                        Map.of("name", "  ", "type", "USAGE_MISSING_RATE", "threshold", 0.05, "dedupeMinutes", 30))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("ALERT_NAME_INVALID"));
+
+        mockMvc.perform(post("/api/v1/admin-api/alert-rules").header("Authorization", "Bearer " + machineSecret)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("name", "big-threshold", "type", "USAGE_MISSING_RATE",
+                        "threshold", new java.math.BigDecimal("1234567890.12"), "dedupeMinutes", 30))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("ALERT_THRESHOLD_INVALID"));
+
+        // The update path has the same floor: create one endpoint, then send it two
+        // payloads the console rejects.
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin-api/webhooks").header("Authorization", "Bearer " + machineSecret)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("name", "guard-probe", "url",
+                                "https://example.com/h", "secret", "whsec-x", "timeoutMs", 5000))))
+                .andExpect(status().isCreated()).andReturn();
+        String endpointId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+        mockMvc.perform(
+                patch("/api/v1/admin-api/webhooks/" + endpointId).header("Authorization", "Bearer " + machineSecret)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"timeoutMs\":700000}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("WEBHOOK_TIMEOUT_INVALID"));
+        mockMvc.perform(
+                patch("/api/v1/admin-api/webhooks/" + endpointId).header("Authorization", "Bearer " + machineSecret)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"   \"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("WEBHOOK_NAME_INVALID"));
+        mockMvc.perform(
+                delete("/api/v1/admin-api/webhooks/" + endpointId).header("Authorization", "Bearer " + machineSecret))
+                .andExpect(status().isNoContent());
+    }
 }

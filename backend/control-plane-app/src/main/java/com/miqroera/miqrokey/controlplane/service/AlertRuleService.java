@@ -44,6 +44,9 @@ public class AlertRuleService {
 
     public AlertRule create(UUID tenantId, String name, String type, BigDecimal threshold, int dedupeMinutes,
             UUID webhookEndpointId, String scopeJson, AuditContext context) {
+        validateName(name);
+        validateThreshold(threshold);
+        validateDedupe(dedupeMinutes);
         validateType(type);
         validateScope(tenantId, type, scopeJson);
         UUID id = UUID.randomUUID();
@@ -80,6 +83,15 @@ public class AlertRuleService {
 
     public AlertRule update(UUID tenantId, UUID ruleId, String name, BigDecimal threshold, Integer dedupeMinutes,
             Boolean enabled, UUID webhookEndpointId, String scopeJson, AuditContext context) {
+        if (name != null) {
+            validateName(name);
+        }
+        if (threshold != null) {
+            validateThreshold(threshold);
+        }
+        if (dedupeMinutes != null) {
+            validateDedupe(dedupeMinutes);
+        }
         AlertRule existing = get(tenantId, ruleId);
         String newScope = scopeJson != null ? scopeJson : existing.scopeJson();
         validateScope(tenantId, existing.type(), newScope);
@@ -193,4 +205,31 @@ public class AlertRuleService {
             (UUID) rs.getObject("webhook_endpoint_id"), rs.getLong("version"),
             rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("updated_at") != null ? rs.getTimestamp("updated_at").toInstant() : null);
+
+    // Shape bounds live here, not only on the console DTOs (#1021): the machine-key
+    // surface (/api/v1/admin-api/alert-rules) reaches the same INSERT without any
+    // DTO
+    // constraint of its own, so a blank name or an out-of-range threshold used to
+    // be
+    // written (or surfaced as a 409 from the column) instead of being rejected.
+    private static void validateName(String name) {
+        if (name == null || name.isBlank() || name.length() > 200) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "ALERT_NAME_INVALID", "name 不能为空白，且长度不超过 200 个字符。");
+        }
+    }
+
+    private static void validateThreshold(BigDecimal threshold) {
+        boolean fitsColumn = threshold != null && threshold.scale() <= 6
+                && threshold.precision() - threshold.scale() <= 6;
+        if (!fitsColumn) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "ALERT_THRESHOLD_INVALID",
+                    "threshold 必填，整数部分不超过 6 位、小数不超过 6 位。");
+        }
+    }
+
+    private static void validateDedupe(int dedupeMinutes) {
+        if (dedupeMinutes < 1) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "ALERT_DEDUPE_INVALID", "dedupeMinutes 必须不小于 1。");
+        }
+    }
 }
