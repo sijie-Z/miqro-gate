@@ -387,7 +387,9 @@
   `(targetType, targetId)` 批量子查询解析的资源名（租户内、未知类型或引用已不存在为 null——前端回退短 ID；
   链上数据与导出**不变**）；`GET /api/v1/admin/audit-events/export`：
   CSV 合规导出（对齐腾讯 AI 网关操作记录下载；上限 5 万行、截断以 `X-MiQroKey-Truncated` 声明，
-  参数/形状同 §9 机器端点）。
+  参数/形状同 §9 机器端点）。**5 万行是行数上限，不是响应字节上限**：导出是流式的，响应一旦开始吐字节，
+  `X-MiQroKey-Truncated` 就只是应用层声明，HTTP 层没有"先算大小再决定"的机会——单次导出的传输量由行宽决定
+  （留痕行的密文尤其大）。要硬字节预算须走异步导出任务（生成文件、算完大小再下载），而不是中途截断流。
 - `/api/v1/admin/usage-deletions`：双确认后人工删除用量范围。
 - `/api/v1/admin/retention-logs`：内容留痕日志（ADR-0014 §8）——分页解密查看（`userId`/`direction`/
   `protocol`/`from`/`to` 筛选、`page`/`size`；返回信封元数据 + 解密文本 + `dataMd5`）与

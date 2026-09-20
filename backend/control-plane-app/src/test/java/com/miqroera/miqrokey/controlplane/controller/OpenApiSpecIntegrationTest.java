@@ -22,7 +22,12 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -136,6 +141,71 @@ class OpenApiSpecIntegrationTest {
                 // Child-first order above covers the canonical FK set.
             }
         }
+    }
+
+    /**
+     * #1073: the console face and the machine-key face are twins of the same
+     * resources writing through the same services, so the machine-readable contract
+     * has to describe them identically. Endpoint tests cannot catch drift here —
+     * each face compiles and validates on its own — while a client generated from
+     * the spec would inherit the looser of the two.
+     */
+    @Test
+    @DisplayName("#1073: twin schemas declare the same fields and constraints")
+    void twinSchemasDeclareTheSameConstraints() throws Exception {
+        MvcResult result = mockMvc.perform(get("/v3/api-docs").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk()).andReturn();
+        JsonNode schemas = objectMapper.readTree(result.getResponse().getContentAsByteArray()).path("components")
+                .path("schemas");
+        assertTwinsAgree(schemas, "WebhookCreateRequest", "OpenAdminWebhookCreateRequest");
+        assertTwinsAgree(schemas, "WebhookUpdateRequest", "OpenAdminWebhookUpdateRequest");
+        assertTwinsAgree(schemas, "AlertRuleCreateRequest", "OpenAdminAlertRuleCreateRequest");
+        assertTwinsAgree(schemas, "AlertRuleUpdateRequest", "OpenAdminAlertRuleUpdateRequest");
+    }
+
+    /**
+     * Compares required-fields and, per property, the constraint keywords — by
+     * name, so a keyword present on one face and absent on the other fails rather
+     * than passing a substring check.
+     */
+    private static void assertTwinsAgree(JsonNode schemas, String console, String machine) {
+        JsonNode consoleSchema = schemas.path(console);
+        JsonNode machineSchema = schemas.path(machine);
+        assertThat(consoleSchema.isMissingNode()).as("console schema %s", console).isFalse();
+        assertThat(machineSchema.isMissingNode()).as("machine schema %s", machine).isFalse();
+
+        assertThat(sortedNames(machineSchema.path("required"))).as("%s vs %s: required", machine, console)
+                .isEqualTo(sortedNames(consoleSchema.path("required")));
+
+        Set<String> fields = new TreeSet<>();
+        consoleSchema.path("properties").fieldNames().forEachRemaining(fields::add);
+        Set<String> machineFields = new TreeSet<>();
+        machineSchema.path("properties").fieldNames().forEachRemaining(machineFields::add);
+        assertThat(machineFields).as("%s vs %s: field names", machine, console).isEqualTo(fields);
+
+        for (String field : fields) {
+            assertThat(constraintsOf(machineSchema.path("properties").path(field)))
+                    .as("%s.%s constraints", machine, field)
+                    .isEqualTo(constraintsOf(consoleSchema.path("properties").path(field)));
+        }
+    }
+
+    private static List<String> sortedNames(JsonNode array) {
+        List<String> names = new ArrayList<>();
+        array.forEach(node -> names.add(node.asText()));
+        names.sort(String::compareTo);
+        return names;
+    }
+
+    private static Map<String, String> constraintsOf(JsonNode property) {
+        Map<String, String> constraints = new TreeMap<>();
+        for (String keyword : List.of("type", "minLength", "maxLength", "minimum", "maximum", "pattern")) {
+            JsonNode value = property.path(keyword);
+            if (!value.isMissingNode()) {
+                constraints.put(keyword, value.asText());
+            }
+        }
+        return constraints;
     }
 
     static class BootstrapHelper {

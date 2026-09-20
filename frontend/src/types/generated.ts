@@ -4175,9 +4175,9 @@ export interface components {
             createdAt?: string;
         };
         OpenAdminWebhookCreateRequest: {
-            name?: string;
-            url?: string;
-            secret?: string;
+            name: string;
+            url: string;
+            secret: string;
             /** Format: int32 */
             timeoutMs?: number;
         };
@@ -4230,9 +4230,9 @@ export interface components {
             adjustmentLevel?: string;
         };
         OpenAdminAlertRuleCreateRequest: {
-            name?: string;
+            name: string;
             type?: string;
-            threshold?: number;
+            threshold: number;
             /** Format: int32 */
             dedupeMinutes?: number;
             /** Format: uuid */
