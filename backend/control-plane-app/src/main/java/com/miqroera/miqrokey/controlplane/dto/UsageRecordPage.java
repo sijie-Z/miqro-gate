@@ -50,15 +50,14 @@ public record UsageRecordPage(List<UsageRecordView> items, long page, long size,
      * HIGH/MEDIUM/LOW). The two are kept apart on purpose: the claim is unverified
      * input, the status is the ruling. Every authenticated proxy request walks the
      * ladder, so {@code null} means a row written before V54 (or outside the proxy
-     * path). A single-binding key's rows are <em>not</em> null, and not
-     * {@code SOLE_BINDING} either: a key is minted with its project's tag as its
-     * suffix, so the suffix step matches before the sole-binding fallback and an
-     * ordinary such row records {@code RESOLVED_SUFFIX}. {@code SOLE_BINDING}
-     * appears when the presented suffix does not match its binding — a non-matching
-     * suffix is cosmetic (ADR-0018 keys may carry arbitrary labels) and falls
-     * through. The claim fields are null both when the client sent nothing and when
-     * it sent something the resolver dropped, so they do not mean "no claim was
-     * made".
+     * path). A single-binding key's rows are never null: an ordinary one records
+     * {@code RESOLVED_SUFFIX}, because a key is minted with its project's tag as
+     * its suffix and the suffix step matching leaves the sole-binding fallback
+     * untried. {@code SOLE_BINDING} is what such a key records when the presented
+     * suffix does not match its binding — a non-matching suffix is cosmetic
+     * (ADR-0018 keys may carry arbitrary labels) and the ladder falls through. The
+     * claim fields are null both when the client sent nothing and when it sent
+     * something the resolver dropped, so they do not mean "no claim was made".
      * </p>
      */
     public record UsageRecordView(Instant occurredAt, String modelId, CacheLevel cacheLevel, Long inputTokens,
