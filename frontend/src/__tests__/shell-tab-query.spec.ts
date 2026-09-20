@@ -1,12 +1,15 @@
 /**
  * PH41: the shell's own navigation must not destroy URL-backed view state.
  *
- * `NextGrantsView` deliberately mirrors its credential filter into the URL
- * (`/app/grants?credentialId=c1`, made deep-linkable in #657). The shell
- * navigates by `route.name` alone in two places — the tab bar and the sidebar
- * nav — so both drop `route.query` and silently clear the filter the URL was
- * advertising. Clicking the entry you are *already on* is the sharpest case:
- * no navigation is intended, yet the state is destroyed.
+ * The credentials list deep-links into the grants page (`#657`,
+ * `NextCredentialsView.vue:546` -> `/app/grants?credentialId=c1`) and
+ * `NextGrantsView` derives its filter from that query param alone — it imports
+ * `useRoute` and nothing writes the URL back (`NextGrantsView.vue:174`). So the
+ * URL is the *only* source of that filter state. The shell navigates by
+ * `route.name` alone in two places — the tab bar and the sidebar nav — so both
+ * drop `route.query` and silently clear the filter the URL was advertising.
+ * Clicking the entry you are *already on* is the sharpest case: no navigation is
+ * intended, yet the state is destroyed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
@@ -48,14 +51,26 @@ async function mountShell() {
   return { wrapper, router };
 }
 
+/** Labels of the tabs currently in the bar, in render order. */
+function tabLabels(wrapper: ReturnType<typeof mount>) {
+  return wrapper.findAll('.new-shell__tab-label').map((t) => t.text().trim());
+}
+
+// Match the label node itself rather than `element.text()`: `用量` is a prefix of
+// `用量报表` (NewShell.vue:87 vs :114), so a substring search can pick the wrong
+// element and leave a test green for a reason it did not intend.
 function tab(wrapper: ReturnType<typeof mount>, label: string) {
-  const found = wrapper.findAll('.new-shell__tab').find((t) => t.text().includes(label));
+  const found = wrapper
+    .findAll('.new-shell__tab')
+    .find((t) => t.find('.new-shell__tab-label').text().trim() === label);
   if (!found) throw new Error(`tab not rendered: ${label}`);
   return found;
 }
 
 function navItem(wrapper: ReturnType<typeof mount>, label: string) {
-  const found = wrapper.findAll('.new-shell__nav-item').find((t) => t.text().includes(label));
+  const found = wrapper
+    .findAll('.new-shell__nav-item')
+    .find((t) => t.find('.new-shell__nav-label').text().trim() === label);
   if (!found) throw new Error(`nav item not rendered: ${label}`);
   return found;
 }
@@ -91,7 +106,8 @@ describe('shell tab bar keeps URL view state (PH41)', () => {
     // Visit a second page so its tab exists (tabs are added on first visit).
     await router.push('/app/usage');
     await nextTick();
-    expect(tab(wrapper, '用量')).toBeTruthy();
+    // The bar has to actually grow the second tab, in visit order.
+    expect(tabLabels(wrapper)).toEqual(['我的密钥', '用量']);
 
     await tab(wrapper, '我的密钥').trigger('click');
     await nextTick();
@@ -183,5 +199,24 @@ describe('shell tab state across reload and logout (PH41)', () => {
     expect(after).toContain('usage');
     expect(after).not.toContain('credentialId');
     expect(after).not.toContain('tab=token');
+  });
+
+  it('drops a restored tab whose route no longer resolves', async () => {
+    // A payload written by an older build — or edited by hand — can name a route
+    // that no longer exists. Such a tab renders like any other but is dead on
+    // click: `router.push({ name })` throws *synchronously* inside the handler
+    // (`MATCHER_NOT_FOUND`), so no navigation happens and only the console says
+    // so. Anything the router cannot resolve must not reach the bar.
+    sessionStorage.setItem(
+      'miqrogate.shell-tabs',
+      JSON.stringify([
+        { name: 'ghost', label: '幽灵页' },
+        { name: 'keys', label: '我的密钥' },
+      ]),
+    );
+
+    const { wrapper } = await mountShell();
+
+    expect(tabLabels(wrapper)).toEqual(['我的密钥']);
   });
 });

@@ -207,7 +207,10 @@ function labelOf(name: string): string | undefined {
 
 /** Rebuild the tab list from storage, keeping only the two persisted fields --
  *  anything else in there (a `fullPath` written by an older build, or garbage)
- *  never reaches `router.push`. */
+ *  never reaches `router.push`. Names the router cannot resolve go too: such a
+ *  tab renders like any other but is dead on click, because `router.push({ name })`
+ *  throws synchronously (`MATCHER_NOT_FOUND`). The length cap mirrors the write
+ *  below -- a hand-edited payload must not decide how many tabs to render. */
 function restoreTabs(): ShellTab[] {
   try {
     const saved: unknown = JSON.parse(sessionStorage.getItem(TABS_KEY) ?? '[]');
@@ -217,7 +220,9 @@ function restoreTabs(): ShellTab[] {
         const tab = t as Partial<ShellTab> | null;
         return !!tab && typeof tab.name === 'string' && typeof tab.label === 'string';
       })
-      .map(({ name, label }) => ({ name, label }));
+      .map(({ name, label }) => ({ name, label }))
+      .filter((tab) => router.hasRoute(tab.name))
+      .slice(-24);
   } catch {
     return [];
   }
@@ -239,8 +244,10 @@ watch(
   { deep: true },
 );
 
-// PH41: watch the fullPath, not just the name — a query-only change (the
-// grants filter writing `?credentialId=…`) must update the tab's target too.
+// PH41: watch the fullPath, not just the name — a query-only change must update
+// the tab's target too. (The grants page derives its filter from
+// `?credentialId=…` and never writes it: the credentials list builds that deep
+// link — NextCredentialsView.vue:546, NextGrantsView.vue:174.)
 watch(
   () => route.fullPath,
   () => {
