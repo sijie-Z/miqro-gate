@@ -14,7 +14,9 @@ import { join } from 'node:path';
  * 「暂无项目」/「还没有动态记录。」/… — an empty-state *claim about the data*, drawn
  * from a request that never got an answer.
  *
- * Two rules, one test each:
+ * Three rules, one test each — the third added in review, once the ninth site
+ * (`NextPlansView`) showed the first two could not see a read that was never
+ * given a catch at all:
  *  1. Every 暂无 / 还没有 / 没有更多 string the template can render must sit under a
  *     gate that admits a failed or not-yet-loaded read (an error/loaded predicate on
  *     the line, in its v-if chain, on an ancestor, or an ancestor's `:error` binding
@@ -23,6 +25,8 @@ import { join } from 'node:path';
  *     an empty array (`.catch(() => [])`) must leave a visible failure signal in the
  *     handler body (assignment to an Error-named or Failed-named ref, `toast.error`,
  *     a rethrow), or carry a written exemption.
+ *  3. A `try` that awaits an `api.*` read must have a `catch` — a rejection may not
+ *     escape unhandled while the table below quietly draws its empty state.
  *
  * Rule 2 exists because the silent half of this face renders no text at all: the
  * picker is simply empty (Teams/Projects/AlertRules/Cost in #1160), so rule 1 alone
@@ -91,14 +95,6 @@ const TEXT_EXEMPT: Array<[string, string, string]> = [
   // #1065 表族：子表本身没有 `:error`，但失败信号在紧邻处可见（红条或 toast）。
   ['NextAdminSkillsView.vue', '暂无版本记录', '同对话框有 revisionsError 红条'],
   ['NextAdminWebhooksView.vue', '暂无投递记录', '同抽屉有 deliveriesError 红条'],
-  // 读取路径无 catch、失败没有任何屏幕信号：疑似同族第 9 处（本轮范围外，未修），
-  // 豁免只为把这条已核实的事实显式记在此处，随交付报告交 owner 拍板——不是「信号在
-  // 别处可见」那一类，别把它当 A9 既有豁免读。
-  [
-    'NextPlansView.vue',
-    '还没有席位',
-    '读取路径 refreshSeats 无 catch ⇒ 失败无信号：同族第 9 处候选，交 owner（未修）',
-  ],
   ['NextProjectsView.vue', '还没有成员', '失败经 toast.error(加载成员失败) 可见'],
   ['NextTeamsView.vue', '还没有成员', '失败经 toast.error(加载成员失败) 可见'],
   // #657 既定决定：目录/依赖元数据降级为空（决策台账 A9）。
@@ -386,6 +382,41 @@ function collectCatchHandlers(file: string, src: string): CatchHandler[] {
   return out;
 }
 
+/**
+ * Rule 3 (#1160 supervisor review, the ninth site): a `try` block that awaits an
+ * `api.*` read and has NO `catch` lets the rejection escape unhandled — the
+ * caller draws its empty state and nothing on screen says the read failed.
+ * `NextPlansView.refreshSeats` was exactly this shape (`try { … } finally { … }`),
+ * which rules 1 and 2 both miss: rule 2 needs a catch to inspect, and rule 1
+ * only sees the claim, not the missing error path.
+ *
+ * Scope note: the target is the console's `api.*` reads — the family's evidence
+ * surface. Store actions own their error semantics (`auth.fetchMe` normalizes
+ * every failure into `serviceUnavailable` and never rejects, which is why
+ * `NextUnavailableView`'s try/finally is not a violation).
+ *
+ * This rule has NO exemption table on purpose: an instance is either fixed
+ * (wrap in try/catch and record a visible error) or the read belongs to a
+ * different, self-handling layer. If an exemption is ever genuinely needed, add
+ * it the way tables 1 and 2 do — with a reason and a rot test.
+ */
+function collectUncaughtApiReads(src: string): number[] {
+  const script = /<script[^>]*>([\s\S]*?)<\/script>/.exec(src)?.[1] ?? src;
+  const lines: number[] = [];
+  for (const m of script.matchAll(/(?<![.\w])try\s*\{/g)) {
+    const bstart = m.index + m[0].length - 1;
+    const bend = matchDelim(script, bstart, '{', '}');
+    if (bend < 0) continue;
+    const body = script.slice(bstart + 1, bend);
+    if (!/\bawait\b/.test(body) || !body.includes('api.')) continue;
+    let p = bend + 1;
+    while (p < script.length && /\s/.test(script[p]!)) p++;
+    if (script.slice(p, p + 5) === 'catch') continue;
+    lines.push(script.slice(0, m.index).split('\n').length);
+  }
+  return lines;
+}
+
 // ---------------------------------------------------------------------------
 
 describe('#1160 empty states and silent clears', () => {
@@ -429,6 +460,23 @@ describe('#1160 empty states and silent clears', () => {
       const exempt = CLEAR_EXEMPT.some(([key]) => key === h.key);
       if (!exempt) offenders.push(`${h.key} (line ${h.line})`);
     }
+    expect(offenders).toEqual([]);
+  });
+
+  it('an awaited api read is never left without a catch (rule 3, no exemptions)', () => {
+    let tryBlocks = 0;
+    const offenders: string[] = [];
+    for (const file of files) {
+      const src = readFileSync(join(dir, file), 'utf8');
+      const script = /<script[^>]*>([\s\S]*?)<\/script>/.exec(src)?.[1] ?? src;
+      tryBlocks += [...script.matchAll(/(?<![.\w])try\s*\{/g)].length;
+      for (const line of collectUncaughtApiReads(src)) {
+        offenders.push(`${file}:${line}`);
+      }
+    }
+    // Anti-vacuous: the tree currently holds ~194 try blocks, ~150 of them
+    // awaiting an api call. A scan that finds nothing would be silently green.
+    expect(tryBlocks, '扫不到任何 try 块——守卫可能已失效').toBeGreaterThanOrEqual(120);
     expect(offenders).toEqual([]);
   });
 
