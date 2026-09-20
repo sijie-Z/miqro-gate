@@ -9,7 +9,7 @@
  */
 import { onErrorCaptured, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { UiButton } from '@/ui';
+import UiButton from '@/ui/Button.vue';
 
 const error = ref<Error | null>(null);
 const route = useRoute();
