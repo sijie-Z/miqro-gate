@@ -189,6 +189,10 @@ const isActive = (name: string) => route.name === name;
 interface ShellTab {
   name: string;
   label: string;
+  /** PH41: last full path (path + query) seen for this tab. Tabs are switched
+   *  by path, not by name, so URL-backed view state (`?credentialId=…`) is not
+   *  dropped on the way back. Never persisted -- see the persist watcher. */
+  fullPath?: string;
 }
 
 const TABS_KEY = 'miqrogate.shell-tabs';
@@ -201,30 +205,85 @@ function labelOf(name: string): string | undefined {
   return undefined;
 }
 
-const tabs = ref<ShellTab[]>([]);
-try {
-  const saved = JSON.parse(sessionStorage.getItem(TABS_KEY) ?? '[]') as ShellTab[];
-  if (Array.isArray(saved)) tabs.value = saved.filter((t) => t && typeof t.name === 'string');
-} catch {
-  tabs.value = [];
+/** Rebuild the tab list from storage, keeping only the two persisted fields --
+ *  anything else in there (a `fullPath` written by an older build, or garbage)
+ *  never reaches `router.push`. */
+function restoreTabs(): ShellTab[] {
+  try {
+    const saved: unknown = JSON.parse(sessionStorage.getItem(TABS_KEY) ?? '[]');
+    if (!Array.isArray(saved)) return [];
+    return saved
+      .filter((t): t is ShellTab => {
+        const tab = t as Partial<ShellTab> | null;
+        return !!tab && typeof tab.name === 'string' && typeof tab.label === 'string';
+      })
+      .map(({ name, label }) => ({ name, label }));
+  } catch {
+    return [];
+  }
 }
 
-watch(tabs, (value) => sessionStorage.setItem(TABS_KEY, JSON.stringify(value.slice(-24))), {
-  deep: true,
-});
+const tabs = ref<ShellTab[]>(restoreTabs());
 
+// Only `name`/`label` are persisted. A remembered path can carry user-chosen
+// query state (`?credentialId=…`) and sessionStorage outlives a logout in the
+// same browser tab, so persisting it would hand the next user this one's
+// filters (PH41 review). Reloading only costs the memories of sections you are
+// not currently on -- the route you *are* on re-registers itself from the URL.
 watch(
-  () => route.name as string | undefined,
-  (name) => {
+  tabs,
+  (value) => {
+    const persisted = value.slice(-24).map(({ name, label }) => ({ name, label }));
+    sessionStorage.setItem(TABS_KEY, JSON.stringify(persisted));
+  },
+  { deep: true },
+);
+
+// PH41: watch the fullPath, not just the name — a query-only change (the
+// grants filter writing `?credentialId=…`) must update the tab's target too.
+watch(
+  () => route.fullPath,
+  () => {
+    const name = route.name as string | undefined;
     if (!name) return;
     const label = labelOf(name);
     if (!label) return;
-    if (!tabs.value.some((t) => t.name === name)) {
-      tabs.value = [...tabs.value, { name, label }];
+    const fullPath = route.fullPath;
+    const existing = tabs.value.find((t) => t.name === name);
+    if (!existing) {
+      tabs.value = [...tabs.value, { name, label, fullPath }];
+    } else if (existing.fullPath !== fullPath) {
+      tabs.value = tabs.value.map((t) => (t.name === name ? { ...t, label, fullPath } : t));
     }
   },
   { immediate: true },
 );
+
+/** Where a tab click should land: its remembered path when there is one, else
+ *  the bare route. Restored tabs never carry one (the persisted payload is
+ *  deliberately query-free) -- the current route re-registers itself from the
+ *  URL on mount, so clicking *its* tab is still a no-op. */
+function tabTarget(tab: ShellTab): string | { name: string } {
+  return tab.fullPath ?? { name: tab.name };
+}
+
+/** Re-activating the current tab needs no guard: pushing the location you are
+ *  already on is a duplicated navigation, which vue-router drops without
+ *  touching history. An early return here would instead swallow a click made
+ *  while another navigation is still in flight -- the user's last click has to
+ *  win (PH41 review). */
+function activateTab(tab: ShellTab) {
+  void router.push(tabTarget(tab));
+}
+
+/** Where a sidebar click should land. Clicking the entry you are already on
+ *  must not navigate at all: a name-only push drops `route.query` and would
+ *  silently clear URL-backed view state while the user only meant to "stay
+ *  here" (PH41). Other entries go to the bare route -- the sidebar navigates
+ *  to a section, it does not resurrect that section's last filter. */
+function navTarget(item: NavItem): string | { name: string } {
+  return isActive(item.name) ? route.fullPath : { name: item.name };
+}
 
 function closeTab(name: string) {
   const index = tabs.value.findIndex((t) => t.name === name);
@@ -232,7 +291,7 @@ function closeTab(name: string) {
   tabs.value = tabs.value.filter((t) => t.name !== name);
   if (route.name === name) {
     const next = tabs.value[Math.min(index, tabs.value.length - 1)];
-    if (next) void router.push({ name: next.name });
+    if (next) void router.push(tabTarget(next));
   }
 }
 
@@ -305,7 +364,10 @@ function tabMenuAction(
   closeTabMenu();
 
   const goTo = (target: string) => {
-    if (route.name !== target) void router.push({ name: target });
+    if (route.name !== target) {
+      const tab = tabs.value.find((t) => t.name === target);
+      void router.push(tab ? tabTarget(tab) : { name: target });
+    }
   };
 
   if (action === 'closeAll') {
@@ -547,7 +609,7 @@ async function handleLogout() {
             :disabled="!iconOnly"
           >
             <router-link
-              :to="{ name: item.name }"
+              :to="navTarget(item)"
               class="new-shell__nav-item"
               :class="{ 'new-shell__nav-item--active': isActive(item.name) }"
               @mouseenter="prefetchRoute(item.name)"
@@ -735,7 +797,7 @@ async function handleLogout() {
           :key="tab.name"
           class="new-shell__tab"
           :class="{ 'new-shell__tab--active': isActive(tab.name) }"
-          @click="router.push({ name: tab.name })"
+          @click="activateTab(tab)"
           @contextmenu.prevent="openTabMenu($event, tab.name)"
         >
           <span class="new-shell__tab-label">{{ tab.label }}</span>
