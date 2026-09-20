@@ -69,6 +69,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
         </dependency>
+        <!-- Boot 4 分期（#1088 Stage A）：官方 Jackson 2 过渡模块（deprecated stop-gap）。
+             网关多处注入 com.fasterxml 的 ObjectMapper bean；Stage B 迁 Jackson 3 后移除。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-jackson2</artifactId>
+        </dependency>
         <dependency>
             <groupId>net.logstash.logback</groupId>
             <artifactId>logstash-logback-encoder</artifactId>
