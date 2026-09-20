@@ -10,16 +10,18 @@ import java.util.List;
  * Configuration for the transparent proxy's upstream target.
  *
  * <p>
- * In G0.2, this is a single fixed in-memory URL (no database routing). Future
- * Goals will replace this with versioned route snapshots.
+ * Upstream base URLs come from the versioned route snapshot, never from
+ * configuration (a user-supplied proxy target would defeat the SSRF guard).
+ * What is configured here are only the transport-level knobs shared by every
+ * route: timeouts, the parse buffer ceiling, and the non-public CIDRs the SSRF
+ * guard may allow.
  * </p>
  */
 @ConfigurationProperties(prefix = "miqrokey.gateway.upstream")
-public record ProxyTargetProperties(String url, Duration connectTimeout, Duration firstByteTimeout,
+public record ProxyTargetProperties(Duration connectTimeout, Duration firstByteTimeout,
         Duration streamIdleTimeout, Duration responseTimeout, DataSize maxProxyBuffer, List<String> allowedCidrs) {
 
     public ProxyTargetProperties {
-        url = url == null || url.isBlank() ? null : url;
         connectTimeout = connectTimeout == null ? Duration.ofSeconds(10) : connectTimeout;
         firstByteTimeout = firstByteTimeout == null ? Duration.ofSeconds(120) : firstByteTimeout;
         streamIdleTimeout = streamIdleTimeout == null ? Duration.ofMinutes(5) : streamIdleTimeout;

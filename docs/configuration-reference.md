@@ -127,7 +127,7 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 |---|---:|---|
 | `MIQROKEY_GATEWAY_PORT` | `8081` | 数据面端口 |
 | `MIQROKEY_CONTROL_PORT` | `8080` | 管理面端口 |
-| `MIQROKEY_UPSTREAM_URL` | 空 | 仅 Phase 0 固定路由 PoC 使用；后续由 Virtual Key 路由快照提供 |
+| `MIQROKEY_UPSTREAM_URL` | 空 | **预留：当前版本未读取**。Phase 0 固定路由 PoC 的遗留项，自 PR #570（按协议基址中继）起上游基址一律来自 Virtual Key 路由快照，配置层不再提供代理目标；设置该变量**对网关没有任何影响**（转发出错时请查快照/Key 状态，不要查这里）。配套的 `scripts/cc-switch-compatibility/` 亦为同期 PoC 遗留，不作为当前验收路径 |
 | `MIQROKEY_UPSTREAM_CONNECT_TIMEOUT` | `PT10S` | 建立上游连接超时 |
 | `MIQROKEY_UPSTREAM_FIRST_BYTE_TIMEOUT` | `PT120S` | 等待首个响应字节（含头）超时；超时永不重试 |
 | `MIQROKEY_UPSTREAM_STREAM_IDLE_TIMEOUT` | `PT5M` | SSE 无数据超时（每个 chunk 重置）；已出首字节后超时 → `STREAM_INTERRUPTED` |
