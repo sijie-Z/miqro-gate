@@ -171,11 +171,14 @@ class ReconciliationApiIntegrationTest {
     }
 
     private MvcResult postReport(byte[] body) throws Exception {
+        return postReport(body, windowFrom, windowTo);
+    }
+
+    private MvcResult postReport(byte[] body, Instant from, Instant to) throws Exception {
         return mockMvc.perform(post("/api/v1/admin/reconciliations").param("providerCode", productCode)
-                .param("currency", "USD").param("windowFrom", windowFrom.toString())
-                .param("windowTo", windowTo.toString()).cookie(sessionCookie, csrfCookie)
-                .header("X-CSRF-Token", csrfToken).contentType(MediaType.APPLICATION_OCTET_STREAM).content(body))
-                .andReturn();
+                .param("currency", "USD").param("windowFrom", from.toString()).param("windowTo", to.toString())
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_OCTET_STREAM).content(body)).andReturn();
     }
 
     private String awaitSucceeded(String reportId) throws Exception {
@@ -285,6 +288,39 @@ class ReconciliationApiIntegrationTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.rows.length()").value(1)).andReturn().getResponse()
                 .getContentAsString(StandardCharsets.UTF_8);
         assertThat(local).contains("\"modelId\":\"m-at-from\"").doesNotContain("m-at-to");
+    }
+
+    /**
+     * The other half of {@link #windowBoundaryIsHalfOpen()}: that test proves the
+     * row on {@code windowTo} is *not* counted by this window, this one proves the
+     * next window does count it. Together they pin "once, not never" — an exclusive
+     * upper bound that silently drops the row would satisfy the first assertion
+     * alone.
+     *
+     * <p>
+     * The bill line carries a provider_request_id on purpose: an id-less line could
+     * reach the same local row through the 5-minute bucket level and report PARTIAL
+     * instead, which would make this test pass for the wrong reason.
+     */
+    @Test
+    @DisplayName("window boundary: the row on windowTo is billed by the next window")
+    void rowOnWindowToBelongsToTheNextReport() throws Exception {
+        seedUsage("req-at-to", "m-at-to", windowTo, 10L, 5L);
+        String bill = "{\"provider_request_id\":\"req-ghost\",\"occurred_at\":\"" + occurred
+                + "\",\"model_id\":\"ghost\",\"amount\":\"1.00\",\"currency\":\"USD\",\"provider_row_ref\":\"bill-1\"}\n";
+
+        MvcResult created = postReport(bill.getBytes(StandardCharsets.UTF_8), windowTo,
+                windowTo.plus(1, ChronoUnit.HOURS));
+        assertThat(created.getResponse().getStatus()).isEqualTo(202);
+        String reportId = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asText();
+
+        assertThat(awaitSucceeded(reportId)).contains("\"SUCCEEDED\"").contains("\"unmatchedLocal\":1");
+        String local = mockMvc
+                .perform(get("/api/v1/admin/reconciliations/" + reportId + "/rows").param("state", "UNMATCHED_LOCAL")
+                        .cookie(sessionCookie, csrfCookie))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.rows.length()").value(1)).andReturn().getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(local).contains("\"modelId\":\"m-at-to\"");
     }
 
     /**
