@@ -9,14 +9,18 @@
  * amounts the total was summed from, in fixed colour order — so the bar lands
  * exactly on the number it sits under rather than beside it.
  *
- * Identity is never carried by colour alone: the bubble spells the four amounts
- * out, and every caller prints the figure itself as text next to the bar. The two
- * middle colours measure under 3:1 against the card surface, which makes those
- * labels required rather than decorative.
+ * Identity is never carried by colour alone: the bubble spells the four amounts out,
+ * and every caller prints the figure itself as text next to the bar. The two middle
+ * colours measure under 3:1 against the card surface, which makes those labels
+ * required rather than decorative.
  *
- * Zero segments are dropped from the drawing (a 2px gap around nothing reads as a
- * missing category) but kept in the bubble, where they answer "did we spend nothing
- * on cache reads?".
+ * When there is no split to draw — an older payload, or usage nothing could price —
+ * the component renders **nothing**. An empty rail would be a mark that claims
+ * something it cannot say, and on a white card a grey rail is invisible anyway; the
+ * caller's figure stands on its own.
+ *
+ * Widths are shares of the split's own sum, which is what keeps a partial split
+ * filling the rail instead of trailing off at a share of a total it does not know.
  */
 import { computed } from 'vue';
 import { COST_SPLIT_COLORS } from '@/lib/chart-palette';
@@ -34,19 +38,30 @@ const props = defineProps<{
 
 const money = (value: number) => `¥${value.toFixed(4)}`;
 
+/**
+ * Money that is not a finite, non-negative number is treated as "not stated": the
+ * amounts come from summed cents and cannot legitimately be negative, so drawing one
+ * would put a segment on the bar that contradicts the bubble above it.
+ */
+const amount = (value: number) => (Number.isFinite(value) && value > 0 ? value : 0);
+
 const parts = computed(() => [
-  { key: 'input', name: '输入', value: props.input, color: COST_SPLIT_COLORS.input },
-  { key: 'output', name: '输出', value: props.output, color: COST_SPLIT_COLORS.output },
-  { key: 'cacheRead', name: '缓存读', value: props.cacheRead, color: COST_SPLIT_COLORS.cacheRead },
+  { key: 'input', name: '输入', value: amount(props.input), color: COST_SPLIT_COLORS.input },
+  { key: 'output', name: '输出', value: amount(props.output), color: COST_SPLIT_COLORS.output },
+  {
+    key: 'cacheRead',
+    name: '缓存读',
+    value: amount(props.cacheRead),
+    color: COST_SPLIT_COLORS.cacheRead,
+  },
   {
     key: 'cacheCreation',
     name: '缓存写',
-    value: props.cacheCreation,
+    value: amount(props.cacheCreation),
     color: COST_SPLIT_COLORS.cacheCreation,
   },
 ]);
 
-/** Widths are shares of the split itself, which the backend guarantees equals the total. */
 const drawn = computed(() => {
   const sum = parts.value.reduce((acc, p) => acc + p.value, 0);
   if (sum <= 0) return [];
@@ -55,24 +70,16 @@ const drawn = computed(() => {
     .map((p) => ({ ...p, width: (p.value / sum) * 100 }));
 });
 
-const note = computed(() => {
-  const sum = drawn.value.reduce((acc, p) => acc + p.value, 0);
-  // An all-zero split next to a non-zero figure is not the same statement as "we
-  // spent nothing on any dimension": say the split is missing rather than print four
-  // zeroes the reader would believe.
-  if (sum <= 0) {
-    return `${props.label}构成：暂无可用明细（合计 ${money(props.total)}）`;
-  }
-  return (
+const note = computed(
+  () =>
     `${props.label}构成：` +
     parts.value.map((p) => `${p.name} ${money(p.value)}`).join(' · ') +
-    `（合计 ${money(props.total)}）`
-  );
-});
+    `（合计 ${money(amount(props.total))}）`,
+);
 </script>
 
 <template>
-  <UiTooltip :text="note">
+  <UiTooltip v-if="drawn.length" :text="note">
     <span class="cost-split" role="img" :aria-label="note" data-testid="cost-split-bar">
       <span
         v-for="(part, index) in drawn"
@@ -85,7 +92,6 @@ const note = computed(() => {
         :style="{ width: `${part.width}%`, background: part.color }"
         :data-testid="`cost-split-${part.key}`"
       />
-      <span v-if="!drawn.length" class="cost-split__empty" />
     </span>
   </UiTooltip>
 </template>
@@ -93,7 +99,7 @@ const note = computed(() => {
 <style scoped>
 .cost-split {
   display: flex;
-  gap: 2px; /* the checker's stacking gap: adjacent fills must not touch */
+  gap: 2px; /* the stacking gap: adjacent fills must not touch */
   align-items: stretch;
   width: 100%;
   min-width: 80px;
@@ -113,11 +119,5 @@ const note = computed(() => {
 .cost-split__seg--last {
   border-top-right-radius: 4px;
   border-bottom-right-radius: 4px;
-}
-
-.cost-split__empty {
-  flex: 1;
-  background: var(--ui-muted);
-  border-radius: 4px;
 }
 </style>

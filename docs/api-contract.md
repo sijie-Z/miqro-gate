@@ -254,14 +254,14 @@
       "outcomes": { "succeeded": 11, "failed": 1, "cancelled": 0, "avgDurationMs": 4200, "avgTtfbMs": 1800 }
     }
   ],
-  "totals": { "requests": { "upstream": 12, "coalesced": 0, "l1Hit": 0, "l2Hit": 0 }, "tokens": { "input": 1200, "output": 800, "cacheRead": 0, "cacheCreation": 0 }, "cost": { "upstreamPaid": 0.0128, "gatewayObserved": 0.0128, "projectAllocated": 0.0128, "savedByGatewayCache": 0.0 }, "outcomes": { "succeeded": 11, "failed": 1, "cancelled": 0, "avgDurationMs": 4200, "avgTtfbMs": 1800 } }
+  "totals": { "requests": { "upstream": 12, "coalesced": 0, "l1Hit": 0, "l2Hit": 0 }, "tokens": { "input": 1200, "output": 800, "cacheRead": 0, "cacheCreation": 0 }, "cost": { "upstreamPaid": 0.0128, "gatewayObserved": 0.0128, "projectAllocated": 0.0128, "savedByGatewayCache": 0.0, "upstreamPaidParts": { "input": 0.0064, "output": 0.0064, "cacheRead": 0.0, "cacheCreation": 0.0 }, "gatewayObservedParts": { "input": 0.0064, "output": 0.0064, "cacheRead": 0.0, "cacheCreation": 0.0 } }, "outcomes": { "succeeded": 11, "failed": 1, "cancelled": 0, "avgDurationMs": 4200, "avgTtfbMs": 1800 } }
 }
 ```
 
 - 用量明细只包含自己的 Key 产生的记录；他人的 Key 不出现也不可区分（统一 404）。
 - `upstreamPaid` 按 `price_snapshot`（每百万 token 单价，来源 `MANUAL|OFFICIAL|ESTIMATED`）计算；无价格快照的模型按 `0` 计。
 - 缓存命中产生的成本节省记入 `savedByGatewayCache`，不计入 `projectAllocated`。
-- **成本构成（#1097）**：`upstreamPaidParts` / `gatewayObservedParts` 把相应合计按 token 维度拆开——`input` / `output` / `cacheRead` / `cacheCreation`，**四者之和精确等于对应的合计**（分项与合计累加的是同一批已除过 100 万的逐行金额，不是各算一遍）。**为什么是两组**：两个合计覆盖的行集不同（合并请求与缓存命中只进 `gatewayObserved`），拿一组分项去配另一个合计会对不上账。未定价用量对分项与合计同样计 `0`，缺口由 `pricingStatus` / `unpriced` 表达（同 #943）。管理与自助两个 summary 端点同口径。
+- **成本构成（#1097）**：`upstreamPaidParts` / `gatewayObservedParts` 把相应合计按 token 维度拆开——`input` / `output` / `cacheRead` / `cacheCreation`，**四者之和精确等于对应的合计**（分项与合计累加的是同一批已除过 100 万的逐行金额，不是各算一遍）。**为什么是两组**：两个合计覆盖的行集不同——合并请求（`COALESCED`）进 `gatewayObserved` 而不进 `upstreamPaid`，缓存命中的节省则两边都不进（只记 `savedByGatewayCache`）；拿一组分项去配另一个合计会对不上账。未定价用量对分项与合计同样计 `0`，缺口由 `pricingStatus` / `unpriced` 表达（同 #943）。管理与自助两个 summary 端点同口径。
 - `outcomes`（#758）：生命周期终态来自 `request_usage_records`（按 gateway request id 一对一对齐）；`succeeded = 转发+合并 − failed − cancelled`——**客户端取消不计入成功率两侧**（`CLIENT_CANCELLED` 既不算成功也不算失败），无生命周期行的合并请求计成功侧；`avgDurationMs` / `avgTtfbMs` 仅在实际观测到取值的行上平均，无观测为 `null`。缓存命中（`cache_hit_event`）不参与成功率。
 
 ### 4.5 用量明细 `GET /api/v1/me/usage/records`

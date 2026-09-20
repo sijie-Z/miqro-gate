@@ -843,9 +843,12 @@ function formatTime(iso?: string): string {
         <template #upstreamCost="{ row }">
           <div class="next-usage__cost-cell">
             <span class="ui-num">{{ formatCost(asGroup(row).cost?.upstreamPaid) }}</span>
+            <!-- Only when the figure exists: the cell prints '—' for a missing one, and a
+                 bar claiming 合计 ¥0.0000 beside that dash would be a different claim. -->
             <CostSplitBar
+              v-if="asGroup(row).cost?.upstreamPaid != null"
               label="上游成本"
-              :total="Number(asGroup(row).cost?.upstreamPaid ?? 0)"
+              :total="Number(asGroup(row).cost?.upstreamPaid)"
               v-bind="upstreamCostParts(asGroup(row))"
             />
           </div>

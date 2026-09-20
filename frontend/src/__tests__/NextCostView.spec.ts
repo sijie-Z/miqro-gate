@@ -183,13 +183,14 @@ describe('NextCostView', () => {
     await flushPromises();
 
     const bars = wrapper.findAll('[data-testid="cost-split-bar"]');
-    expect(bars).toHaveLength(2);
+    // Only the row that has a split gets a bar: a rail under a figure we cannot break
+    // down would be a mark claiming something it cannot say.
+    expect(bars).toHaveLength(1);
     // The column prints projectAllocated (1.50), so the bar has to be the observed
     // split — the paid split covers different rows and would explain another number.
     expect(bars[0]!.attributes('aria-label')).toBe(
       '分摊成本构成：输入 ¥0.9000 · 输出 ¥0.4000 · 缓存读 ¥0.1000 · 缓存写 ¥0.1000（合计 ¥1.5000）',
     );
-    expect(bars[1]!.attributes('aria-label')).toContain('暂无可用明细');
   });
 
   it('#1104: a failed load shows unknown on the cost cards, not ¥0.0000', async () => {

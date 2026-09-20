@@ -72,22 +72,50 @@ describe('CostSplitBar', () => {
     );
   });
 
-  it('says the split is unavailable rather than claiming four zeroes', async () => {
+  it('renders nothing at all when there is no split to draw', async () => {
+    // A rail with nothing in it is a mark that claims something it cannot say — and on
+    // a white card a grey rail is invisible anyway. The caller's figure stands alone.
     const wrapper = render({ total: 1.5 });
 
+    expect(wrapper.find('[data-testid="cost-split-bar"]').exists()).toBe(false);
     expect(wrapper.findAll('.cost-split__seg')).toHaveLength(0);
-    expect(wrapper.find('.cost-split__empty').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="cost-split-bar"]').attributes('aria-label')).toBe(
-      '分摊成本构成：暂无可用明细（合计 ¥1.5000）',
-    );
   });
 
-  it('treats a zero dimension split (nothing priced) as nothing to draw', async () => {
+  it('treats an all-zero split (nothing priced) as nothing to draw', async () => {
     const wrapper = render({ total: 0 });
 
-    expect(wrapper.findAll('.cost-split__seg')).toHaveLength(0);
+    expect(wrapper.find('[data-testid="cost-split-bar"]').exists()).toBe(false);
+  });
+
+  it("fills the rail from the split's own sum, not from the figure", async () => {
+    // A partial split (version skew: the parts are present but one dimension is all the
+    // API could value) must still fill the rail. Dividing by the figure would leave the
+    // bar trailing at a share of a total it cannot account for, which is a bar that
+    // contradicts its own bubble.
+    const wrapper = render({ total: 3, input: 1, output: 0, cacheRead: 0, cacheCreation: 0 });
+
+    const segments = wrapper.findAll('.cost-split__seg');
+    expect(segments).toHaveLength(1);
+    expect(widthOf(segments[0]!.attributes('style'))).toBeCloseTo(100, 5);
+  });
+
+  it('treats a negative or non-finite amount as not stated', async () => {
+    // The amounts are summed cents and cannot legitimately be negative; drawing one
+    // would put a segment on the bar that contradicts the bubble.
+    const wrapper = render({
+      total: 1,
+      input: -0.5,
+      output: Number.NaN,
+      cacheRead: 1,
+      cacheCreation: 0,
+    });
+
+    const segments = wrapper.findAll('.cost-split__seg');
+    expect(segments).toHaveLength(1);
+    expect(segments[0]!.attributes('data-testid')).toBe('cost-split-cacheRead');
+    expect(widthOf(segments[0]!.attributes('style'))).toBeCloseTo(100, 5);
     expect(wrapper.find('[data-testid="cost-split-bar"]').attributes('aria-label')).toContain(
-      '暂无可用明细',
+      '输入 ¥0.0000',
     );
   });
 });
