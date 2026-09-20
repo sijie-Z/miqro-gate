@@ -5,6 +5,15 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 ## [Unreleased] — 截至 2026-09-03（发布候选基线）
 ### 2026-09-20
 
+- **部署冒烟不再把「后端冷启动」当成失败（#1038）**：`up` 之后脚本按纪律 `restart portal`，而被替换的
+  control-plane/gateway 仍在冷启动（2G 演示机 Boot 约 9 秒）——冒烟落在窗口内读到 nginx 的 502，于是
+  一次完全正常的部署以 `SMOKE FAILED` + exit 2 收场。现在 `5xx`/`000` 在 `MIQROKEY_DEPLOY_SMOKE_RETRY_SECONDS`
+  （默认 90 秒）内每 2 秒重试并打印等待与恢复，**4xx 仍立即分类**（403 是答错了，不许重试成通过）；
+  行为回归里补了"502 两次后恢复"与"403 不被重试"两条场景。
+- **写面边界下沉到服务层（#1021）**：Webhook 与告警规则的形态校验此前只在会话面的 DTO 上（#971），
+  机器密钥面（`/api/v1/admin-api/**`）调用同一批服务却零约束——缺 secret 以 NPE 漏成 500、空白 name
+  直接入库。现在两个入口共用同一层边界（name/url/secret/timeoutMs、告警 name/threshold/dedupe），
+  非法输入一律 400。
 - **留痕导出改为逐行流式（#1023）**：`GET /admin/retention-logs/export` 此前把最多 50 000 行一次性读进
   内存（每行带密文）→ 全部解密 → 拼成一个字符串再整体写出；演示库 5 482 行 × 20 KB = 107 MB 密文，
   448 MB 堆必炸——**一次导出就让控制面 OOM 重启、管理面整体 502**。改为 keyset 分页 500 行/次、
@@ -686,6 +695,7 @@ MiQroKey Gateway — 内部凭证治理网关。所有改动按 Goal 汇总；�
 - Supply-chain gate：Secret 扫描（修复 23 处文档示例 Key）、CycloneDX SBOM + 许可证门禁、Trivy 镜像扫描（驱动 postgres 镜像 digest 升级）
 - Performance & soak：并发流浸泡测试 + 生产 soak 脚本
 - 本版本：**未标记 VERIFIED**（无真实供应商凭证契约测试，`WAITING_FOR_CREDENTIAL`）
+
 
 
 

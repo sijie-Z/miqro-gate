@@ -470,13 +470,39 @@ elif [ "$DRY" = 1 ]; then
     fi
     echo "DRY  curl $smoke_desc $SMOKE_URL  (expect $SMOKE_EXPECT)"
 else
-    smoke_code="$(smoke_curl)"
-    # curl prints the code even when it fails, and a hard failure can leave it
-    # empty: anything that is not a three-digit code means "it did not answer".
-    case "$smoke_code" in
-        [0-9][0-9][0-9]) : ;;
-        *) smoke_code=000 ;;
-    esac
+    # A 5xx right after `up` is usually the stack not being ready yet, not a wrong
+    # deployment: replacing control-plane restarts it (Boot cold start measured at
+    # ~9s on the demo box) and this script then restarts portal, so the first smoke
+    # can land inside that window and read 502 — a false "SMOKE FAILED" for a deploy
+    # that is fine (#1038). Only the not-ready classes retry: 5xx and 000. Anything
+    # 4xx is a real answer from a serving stack and is classified at once — a 403
+    # must never be retried into a pass.
+    smoke_retry_seconds="${MIQROKEY_DEPLOY_SMOKE_RETRY_SECONDS:-90}"
+    smoke_deadline=$(( $(date +%s) + smoke_retry_seconds ))
+    smoke_retries=0
+    while :; do
+        smoke_code="$(smoke_curl)"
+        # curl prints the code even when it fails, and a hard failure can leave it
+        # empty: anything that is not a three-digit code means "it did not answer".
+        case "$smoke_code" in
+            [0-9][0-9][0-9]) : ;;
+            *) smoke_code=000 ;;
+        esac
+        if smoke_code_matches "$SMOKE_EXPECT" "$smoke_code"; then
+            break
+        fi
+        case "$smoke_code" in
+            5??|000) : ;;
+            *) break ;;
+        esac
+        [ "$(date +%s)" -lt "$smoke_deadline" ] || break
+        smoke_retries=$((smoke_retries + 1))
+        if [ "$smoke_retries" = 1 ]; then
+            echo "smoke: not ready yet ($smoke_code) — retrying for up to ${smoke_retry_seconds}s"                 "(a replaced backend is still starting)" >&2
+        fi
+        sleep 2
+    done
+    [ "$smoke_retries" = 0 ] || echo "smoke: answered after $smoke_retries retr$([ "$smoke_retries" = 1 ] && echo y || echo ies)"
 
     # "Answered the wrong thing" and "could not be reached" are different findings
     # and are kept apart: the first is the incident #794 caused (a stack rejecting

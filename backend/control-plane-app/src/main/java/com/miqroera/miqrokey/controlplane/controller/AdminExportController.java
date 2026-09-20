@@ -2,9 +2,11 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.dto.ExportTaskView;
+import com.miqroera.miqrokey.controlplane.service.AuditContext;
 import com.miqroera.miqrokey.controlplane.service.ExportTaskService;
 import com.miqroera.miqrokey.domain.usage.ExportFormat;
 import com.miqroera.miqrokey.domain.usage.ExportTask;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -42,11 +44,12 @@ public class AdminExportController {
 
     /** Creates an export task; the artifact is produced asynchronously. */
     @PostMapping
-    public ResponseEntity<ExportTaskView> create(@RequestParam ExportFormat format,
+    public ResponseEntity<ExportTaskView> create(HttpServletRequest httpReq, @RequestParam ExportFormat format,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
         var user = userContext.getUser();
-        ExportTask task = exportTaskService.create(user.tenantId(), user.id(), format, from, to);
+        ExportTask task = exportTaskService.create(user.tenantId(), user.id(), format, from, to,
+                AuditContext.human(user.id(), requestId(httpReq)));
         // #475: metadata view — the entity's byte[] fileBytes must never be
         // base64-serialized into responses (downloads are the bytes channel).
         return ResponseEntity.accepted().body(toView(task));
@@ -60,8 +63,10 @@ public class AdminExportController {
 
     /** Downloads the finished gzip artifact with its SHA-256 in the header. */
     @GetMapping("/{taskId}/download")
-    public ResponseEntity<byte[]> download(@PathVariable UUID taskId) {
-        ExportTask task = exportTaskService.download(userContext.getUser().tenantId(), taskId);
+    public ResponseEntity<byte[]> download(HttpServletRequest httpReq, @PathVariable UUID taskId) {
+        var user = userContext.getUser();
+        ExportTask task = exportTaskService.download(user.tenantId(), taskId,
+                AuditContext.human(user.id(), requestId(httpReq)));
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_TYPE, "application/gzip")
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
                         .filename("miqrokey-usage-" + task.id() + "." + task.format().name().toLowerCase() + ".gz",
@@ -75,6 +80,11 @@ public class AdminExportController {
     @GetMapping
     public List<ExportTaskView> recent(@RequestParam(defaultValue = "20") int limit) {
         return exportTaskService.recentMeta(userContext.getUser().tenantId(), limit);
+    }
+
+    private static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
     }
 
     private static ExportTaskView toView(ExportTask task) {
