@@ -24,6 +24,7 @@ jobs:
       client: ${{ steps.force.outputs.client || steps.filter.outputs.client }}
       compose: ${{ steps.force.outputs.compose || steps.filter.outputs.compose }}
       docs: ${{ steps.force.outputs.docs || steps.filter.outputs.docs }}
+      decisions: ${{ steps.force.outputs.decisions || steps.filter.outputs.decisions }}
       scripts: ${{ steps.force.outputs.scripts || steps.filter.outputs.scripts }}
       shell: ${{ steps.force.outputs.shell || steps.filter.outputs.shell }}
     steps:
@@ -36,6 +37,7 @@ jobs:
           echo "client=true" >> "$GITHUB_OUTPUT"
           echo "compose=true" >> "$GITHUB_OUTPUT"
           echo "docs=true" >> "$GITHUB_OUTPUT"
+          echo "decisions=true" >> "$GITHUB_OUTPUT"
           echo "scripts=true" >> "$GITHUB_OUTPUT"
           echo "shell=true" >> "$GITHUB_OUTPUT"
       - if: github.event_name != 'workflow_dispatch'
@@ -66,6 +68,10 @@ jobs:
               - 'AGENTS.md'
               - 'CONTRIBUTING.md'
               - '.github/**'
+            decisions:
+              - 'docs/decisions/**'
+              - 'deploy/docs/**'
+              - '.github/workflows/ci.yml'
             shell:
               - '**/*.sh'
               - '.github/workflows/ci.yml'
@@ -90,6 +96,23 @@ jobs:
         run: git diff --check HEAD^ HEAD
       - name: Secret scan
         run: bash deploy/security/check-secrets.sh
+
+  # The decisions index is how a reader (and the owner) learns which ADRs are
+  # settled and which still wait for a word. Nothing checked it, so it drifted
+  # three ways at once (#1062): ADR-0012/0013 stayed labelled drafts for a
+  # fortnight after being accepted, ADR-0024's flip to "Accepted（部分）" left its
+  # index line behind, and ADR-0009–0011 were never indexed. Each of those PRs
+  # was fine on its own — the index just was never re-read.
+  decisions:
+    name: ADR index
+    needs: [changes]
+    if: ${{ needs.changes.outputs.decisions == 'true' }}
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Index matches files
+        run: python3 deploy/docs/check-adr-index.py
 
   # Onboarding injector reference implementation (issue #742, slice 2):
   # pure POSIX sh tests, no network (verify runs against a PATH-stubbed curl).
