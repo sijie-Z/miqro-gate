@@ -116,15 +116,34 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
     /**
      * Lifecycle enrichment join (#758): fact rows carry the gateway request id; the
      * lifecycle trail ({@code request_usage_records}) is unique per
-     * {@code (started_at, gateway_request_id)}. The window condition on
-     * {@code started_at} keeps PostgreSQL partition pruning effective — without it
-     * every partition would be probed for each fact row.
+     * {@code (started_at, gateway_request_id)}. The lookup is keyed on
+     * {@code (tenant_id, gateway_request_id)} — V61's
+     * {@code idx_request_usage_records_gateway_request} exists precisely for a
+     * single-call lookup that does not know {@code started_at}.
+     *
+     * <p>
+     * The remaining window condition is an <b>upper</b> bound, and it is implied:
+     * {@code started_at} is stamped before the upstream call and
+     * {@code occurred_at} when the response completes, so
+     * {@code started_at <= occurred_at < :to} holds for every row this query reads.
+     * It can therefore never drop the row belonging to a fact row; it keeps
+     * partition pruning effective once the lifecycle trail spans monthly
+     * partitions.
+     *
+     * <p>
+     * Do <b>not</b> reintroduce a lower bound ({@code started_at >= :from}). The
+     * fact row is selected on {@code occurred_at} while the lifecycle row carries
+     * {@code started_at}, so for a call in flight across the left edge of the
+     * window — it started before :from and completed inside it — the two rows
+     * disagree and the guard silently dropped the terminal status: the call was
+     * reported as a success by {@code aggregateUsage} and lost its
+     * status/protocol/first-byte in {@code findRecords} (#1132).
      */
     private static final String LIFECYCLE_JOIN = """
             LEFT JOIN request_usage_records rur
                    ON rur.tenant_id = ue.tenant_id
                   AND rur.gateway_request_id = ue.gateway_request_id
-                  AND rur.started_at >= :from AND rur.started_at < :to""";
+                  AND rur.started_at < :to""";
 
     /**
      * Terminal statuses that count as a gateway-side failure for the success rate

@@ -340,6 +340,43 @@ class AdminUsageApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("a call that started before the window but finished inside it keeps its outcome (#1132)")
+    void lifecycleSurvivesLeftEdgeOfWindow() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        // The window a report asks for: one hour. The fact row is selected on
+        // occurred_at, which ProxyController stamps when the response completes;
+        // the lifecycle row carries started_at, stamped before the upstream call.
+        Instant from = Instant.parse("2026-09-15T10:00:00Z");
+        Instant to = from.plusSeconds(3_600);
+        Instant completedAt = from.plusSeconds(5);
+        // One forwarded call: started 10s before the window, completed 5s inside it,
+        // rejected upstream (no first byte) after 15s.
+        fx.insertUsageWithGatewayId(ownKey, "chatcmpl-bd-1", "greq-bd-1", 100L, 10L, MODEL, completedAt);
+        fx.insertLifecycle(ownKey, "greq-bd-1", "UPSTREAM_REJECTED", null, 15_000L, completedAt.minusSeconds(15));
+
+        // The report for that window: one forwarded request, and it failed.
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", "PRODUCT").param("from", from.toString())
+                .param("to", to.toString()).cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups.length()").value(1))
+                .andExpect(jsonPath("$.groups[0].requests.upstream").value(1))
+                .andExpect(jsonPath("$.groups[0].outcomes.failed").value(1))
+                .andExpect(jsonPath("$.groups[0].outcomes.succeeded").value(0))
+                // The dropped lifecycle row also left the duration average: its one
+                // sample is the only one in the window.
+                .andExpect(jsonPath("$.groups[0].outcomes.avgDurationMs").value(15_000));
+
+        // The detail list of the same window must describe the same call the same way.
+        MvcResult r = mockMvc
+                .perform(get("/api/v1/admin/usage/records").param("from", from.toString()).param("to", to.toString())
+                        .cookie(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1)).andReturn();
+        JsonNode item = objectMapper.readTree(r.getResponse().getContentAsString()).path("items").get(0);
+        Assertions.assertThat(item.path("requestStatus").asText()).isEqualTo("UPSTREAM_REJECTED");
+        Assertions.assertThat(item.path("wireProtocol").asText()).isEqualTo("ANTHROPIC_MESSAGES");
+    }
+
+    @Test
     @DisplayName("regular users are forbidden from admin usage endpoints")
     void nonAdminForbidden() throws Exception {
         mockMvc.perform(get("/api/v1/admin/usage/summary").cookie(userSession)).andExpect(status().isForbidden());
