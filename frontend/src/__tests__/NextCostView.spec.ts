@@ -166,6 +166,32 @@ describe('NextCostView', () => {
     expect(wrapper.find('[data-testid="budget-row"]').text()).toContain('预警');
   });
 
+  it('#1097: draws each row a composition bar for the figure it prints, from the same basis', async () => {
+    const withSplit = summary(true);
+    // Only the first group carries a split: the second must say so rather than draw
+    // four zeroes that read as "spent nothing on anything".
+    withSplit.groups![0]!.cost = {
+      ...withSplit.groups![0]!.cost,
+      gatewayObservedParts: { input: 0.9, output: 0.4, cacheRead: 0.1, cacheCreation: 0.1 },
+    } as unknown as UsageCost;
+    mockApi.adminUsageSummary.mockImplementation(async (q: { groupBy?: string }) => ({
+      ...withSplit,
+      groupBy: q.groupBy ?? 'project',
+    }));
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const bars = wrapper.findAll('[data-testid="cost-split-bar"]');
+    expect(bars).toHaveLength(2);
+    // The column prints projectAllocated (1.50), so the bar has to be the observed
+    // split — the paid split covers different rows and would explain another number.
+    expect(bars[0]!.attributes('aria-label')).toBe(
+      '分摊成本构成：输入 ¥0.9000 · 输出 ¥0.4000 · 缓存读 ¥0.1000 · 缓存写 ¥0.1000（合计 ¥1.5000）',
+    );
+    expect(bars[1]!.attributes('aria-label')).toContain('暂无可用明细');
+  });
+
   it('shows a dash, not 0.0%, when there is no total to take a share of (#853)', async () => {
     // Every row unpriced: the total is 0, so 0/0 — the share cannot be computed.
     // Printing 0.0% would read as "this project accounts for none of the spend",

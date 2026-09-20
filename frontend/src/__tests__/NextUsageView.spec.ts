@@ -190,6 +190,32 @@ describe('NextUsageView', () => {
     );
   });
 
+  it('#1097: the 上游成本 cell carries its own composition bar', async () => {
+    mockApi.usageSummary.mockResolvedValue({
+      ...summary,
+      groups: [
+        {
+          ...summary.groups![0]!,
+          cost: {
+            ...summary.groups![0]!.cost,
+            upstreamPaidParts: { input: 0.0015, output: 0.0005 },
+          } as never,
+        },
+      ],
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const bar = wrapper.find('[data-testid="cost-split-bar"]');
+    expect(bar.exists()).toBe(true);
+    // The bar explains 上游成本 — the figure in the cell it sits under, not the
+    // observed one (which covers coalesced and cached rows the customer never paid).
+    expect(bar.attributes('aria-label')).toBe(
+      '上游成本构成：输入 ¥0.0015 · 输出 ¥0.0005 · 缓存读 ¥0.0000 · 缓存写 ¥0.0000（合计 ¥0.0020）',
+    );
+  });
+
   it('shows the empty quota hint when no rules exist', async () => {
     mockApi.listMyQuotaRules.mockResolvedValue([]);
 

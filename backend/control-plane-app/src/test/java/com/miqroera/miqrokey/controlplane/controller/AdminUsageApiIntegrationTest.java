@@ -25,6 +25,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -124,6 +126,47 @@ class AdminUsageApiIntegrationTest {
                 .andExpect(jsonPath("$.totals.requests.upstream").value(2))
                 .andExpect(jsonPath("$.totals.tokens.input").value(10_000))
                 .andExpect(jsonPath("$.totals.tokens.output").value(9_500));
+    }
+
+    @Test
+    @DisplayName("#1097: each cost split lands exactly on its own total, and the two splits cover different rows")
+    void costSplitReconcilesWithItsTotals() throws Exception {
+        fx.insertCatalogAndGrant();
+        fx.insertPrices(); // INPUT 1.00 / OUTPUT 2.00 per 1M tokens
+        UUID key = fx.createOwnKey();
+        fx.insertUsage(key, "chatcmpl-split-up", 1_000_000L, 0L); // 1.00 reached the provider
+        fx.insertUsageOnProject(key, fx.projectId, "chatcmpl-split-co", 0L, 500_000L, MODEL, Instant.now(),
+                "COALESCED");
+
+        String body = mockMvc.perform(get("/api/v1/admin/usage/summary").cookie(adminSession))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        JsonNode cost = objectMapper.readTree(body).path("totals").path("cost");
+
+        // The console draws a bar under these figures; if the segments do not add up to
+        // the number they sit under, the reader cannot tell a rounding artefact from a
+        // discrepancy in the data. Exact compare — the parts are summed from the same
+        // per-row amounts as the total.
+        Assertions.assertThat(sumParts(cost.path("upstreamPaidParts")))
+                .as("upstreamPaidParts must add up to upstreamPaid")
+                .isEqualByComparingTo(cost.path("upstreamPaid").decimalValue());
+        Assertions.assertThat(sumParts(cost.path("gatewayObservedParts")))
+                .as("gatewayObservedParts must add up to gatewayObserved")
+                .isEqualByComparingTo(cost.path("gatewayObserved").decimalValue());
+
+        // The coalesced row was served by the gateway, never paid upstream: it belongs
+        // to
+        // the observed split only. One split could not describe both totals.
+        Assertions.assertThat(cost.path("upstreamPaid").decimalValue()).isEqualByComparingTo("1");
+        Assertions.assertThat(cost.path("gatewayObserved").decimalValue()).isEqualByComparingTo("2");
+        Assertions.assertThat(cost.path("gatewayObservedParts").path("output").decimalValue())
+                .isEqualByComparingTo("1");
+        Assertions.assertThat(cost.path("upstreamPaidParts").path("output").decimalValue()).isEqualByComparingTo("0");
+        Assertions.assertThat(cost.path("upstreamPaidParts").path("input").decimalValue()).isEqualByComparingTo("1");
+    }
+
+    private static BigDecimal sumParts(JsonNode parts) {
+        return parts.path("input").decimalValue().add(parts.path("output").decimalValue())
+                .add(parts.path("cacheRead").decimalValue()).add(parts.path("cacheCreation").decimalValue());
     }
 
     @Test
@@ -457,20 +500,30 @@ class AdminUsageApiIntegrationTest {
 
         void insertUsageOnProject(UUID keyId, UUID onProjectId, String providerRequestId, long input, long output,
                 String model, Instant occurredAt) {
+            insertUsageOnProject(keyId, onProjectId, providerRequestId, input, output, model, occurredAt, "UPSTREAM");
+        }
+
+        /**
+         * Same, with the row's cache level spelled out: a COALESCED row never reached
+         * the provider, which is exactly the difference between the two cost splits
+         * (#1097).
+         */
+        void insertUsageOnProject(UUID keyId, UUID onProjectId, String providerRequestId, long input, long output,
+                String model, Instant occurredAt, String cacheLevel) {
             jdbc.update("""
                     INSERT INTO usage_event
                         (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
                          credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
                          upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at)
                     VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :productId, :credentialId, :model,
-                            'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, 'greq', :occurredAt)
+                            :cacheLevel, :input, :output, :total, 42, 200, TRUE, FALSE, 'greq', :occurredAt)
                     """,
                     new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
                             .addValue("providerRequestId", providerRequestId).addValue("keyId", keyId)
                             .addValue("projectId", onProjectId).addValue("productId", productId)
                             .addValue("credentialId", credentialId).addValue("model", model).addValue("input", input)
                             .addValue("output", output).addValue("total", input + output)
-                            .addValue("occurredAt", Timestamp.from(occurredAt)));
+                            .addValue("cacheLevel", cacheLevel).addValue("occurredAt", Timestamp.from(occurredAt)));
         }
 
         /** A second project so the hour x project grouping is observable (#634). */
