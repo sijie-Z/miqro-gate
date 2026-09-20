@@ -431,11 +431,11 @@ public class ReconciliationService {
      *
      * <p>
      * A cell that is *only* a decimal literal is exempt: {@code -12.34} is a
-     * number, not a formula, and {@code CanonicalBillParser} accepts any non-empty
-     * {@code amount}, so refund/adjustment lines legitimately carry a negative one.
-     * Prefixing those would export {@code '-12.34} where the page renders
-     * {@code -12.34}, and the amount column would reach the spreadsheet as text
-     * that {@code SUM} ignores. Anything that merely starts like a number
+     * number, not a formula, and {@code CanonicalBillParser} accepts any amount
+     * that is a decimal literal, so refund/adjustment lines legitimately carry a
+     * negative one. Prefixing those would export {@code '-12.34} where the page
+     * renders {@code -12.34}, and the amount column would reach the spreadsheet as
+     * text that {@code SUM} ignores. Anything that merely starts like a number
      * ({@code -1+1}, {@code +cmd|' /C calc'!A0}) is still guarded. Package-private
      * for the unit test.
      */

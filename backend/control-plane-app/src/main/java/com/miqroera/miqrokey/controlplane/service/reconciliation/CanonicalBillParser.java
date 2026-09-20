@@ -104,23 +104,26 @@ public final class CanonicalBillParser {
      * (docs/bill-reconciliation-contract.md) and the engine turns anything it
      * cannot parse into {@link BigDecimal#ZERO} while still counting the row as
      * {@code UNMATCHED_PROVIDER}. A value that is not a decimal is therefore a line
-     * error here - it must never be silently dropped out of the amount gap. JSON
-     * numbers keep their value (no precision is invented by stringifying them);
-     * strings must be readable as a decimal; every other type is an error.
+     * error here - it must never be silently dropped out of the amount gap.
+     *
+     * <p>
+     * The value is validated through the same literal the report will echo back, so
+     * the operator's spelling survives ({@code "+3.00"} stays {@code "+3.00"})
+     * while a number too large for a double - which Jackson renders as
+     * {@code Infinity} - is rejected like any other non-decimal literal instead of
+     * being handed to the engine, where it would become a silent zero.
      */
     private static String decimal(JsonNode node, String field, int lineNumber, List<LineError> errors) {
         JsonNode value = node.get(field);
         if (value == null || value.isNull()) {
             return null;
         }
-        if (value.isNumber()) {
-            return value.asText();
-        }
-        if (value.isTextual()) {
+        if (value.isNumber() || value.isTextual()) {
+            String literal = value.asText();
             try {
-                new BigDecimal(value.asText());
+                new BigDecimal(literal);
                 // kept verbatim: the operator's literal is what the report echoes
-                return value.asText();
+                return literal;
             } catch (NumberFormatException ignored) {
                 // reported below - not a decimal literal
             }

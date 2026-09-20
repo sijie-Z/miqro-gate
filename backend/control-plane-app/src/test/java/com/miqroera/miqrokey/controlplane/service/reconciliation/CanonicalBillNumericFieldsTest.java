@@ -79,6 +79,20 @@ class CanonicalBillNumericFieldsTest {
     }
 
     @Test
+    @DisplayName("a number too large for a double is a line error, not the literal Infinity")
+    void nonFiniteNumberIsReported() {
+        Parsed parsed = parser.parse("""
+                {"provider_request_id":"r1","occurred_at":"%s","amount":1e400,"currency":"USD"}
+                {"provider_request_id":"r2","occurred_at":"%s","amount":-1e400,"currency":"USD"}
+                """.formatted(T, T));
+
+        assertThat(parsed.errors()).as("line errors, raw=%s", parsed.errors()).hasSize(2);
+        assertThat(parsed.errors()).extracting(LineError::lineNumber).containsExactly(1, 2);
+        assertThat(parsed.errors()).extracting(LineError::code).containsExactly("FIELD_TYPE", "FIELD_TYPE");
+        assertThat(parsed.lines()).extracting(BillLine::amount).containsOnlyNulls();
+    }
+
+    @Test
     @DisplayName("an unparsable amount contributes 0 to the bill-only gap, so the gap is silent without the line error")
     void unparsableAmountIsCountedAsZeroInTheGap() {
         Report report = run(List.of(
