@@ -104,6 +104,8 @@ const seatLoading = ref(false);
 const seatAssignUser = ref('');
 const seatDisplay = ref('');
 const seatError = ref('');
+/** #1160: 席位**读取**失败（与保存/校验槽 seatError 分开）。 */
+const seatsLoadError = ref('');
 const seatSubmitting = ref(false);
 
 const confirmState = ref<{
@@ -211,6 +213,10 @@ async function refreshSeats() {
   // Hub View schemas mark every field optional (springdoc omits `required`);
   // subscription rows and the drawer target always carry their ids — the `!`
   // restore the pre-hub required-field contract.
+  // #1160 加载次序不变量：加载中 → 失败 → 空 → 有数据。「还没有席位」只有在这次读取
+  // 成功且确实为空时才允许出现（UiTable 的 :error 契约会用它替换空态）；读取失败在此
+  // 记录到 seatsLoadError。与保存错误 seatError 分开：那是分配/校验失败槽。
+  seatsLoadError.value = '';
   seatLoading.value = true;
   try {
     const rows = await api.listSeats(target.id!);
@@ -218,6 +224,12 @@ async function refreshSeats() {
       return; // a newer drawer target won — this response is stale
     }
     seats.value = rows;
+  } catch (error) {
+    if (seq !== seatsRequestSeq) {
+      return;
+    }
+    seats.value = [];
+    seatsLoadError.value = error instanceof ApiError ? error.message : '加载席位失败。';
   } finally {
     if (seq === seatsRequestSeq) {
       seatLoading.value = false;
@@ -495,9 +507,11 @@ onMounted(load);
         :columns="seatColumns"
         :data="seats"
         :loading="seatLoading"
+        :error="seatsLoadError"
         row-key="id"
         empty-title="还没有席位"
         data-testid="seats-table"
+        @retry="refreshSeats"
       >
         <template #user="{ row }">{{ seatLabel(row as SeatView) }}</template>
         <template #seatStatus="{ row }">
