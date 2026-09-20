@@ -2789,181 +2789,185 @@ async function saveResilience() {
         </UiButton>
       </template>
     </UiDialog>
-  </div>
 
-  <!-- F12/F13 resilience configuration -->
-  <UiDrawer
-    :open="resilienceOpen"
-    :title="resilienceService ? `韧性配置 · ${resilienceService.name}` : '韧性配置'"
-    width="640px"
-    data-testid="mcp-resilience-drawer"
-    @update:open="resilienceOpen = false"
-  >
-    <div v-if="resilienceError" class="ui-alert ui-alert--error" data-testid="mcp-resilience-error">
-      {{ resilienceError }}
-    </div>
-    <div v-if="resilienceLoading" class="next-mcp__tools-loading">
-      <div v-for="n in 3" :key="n" class="ui-skeleton">&nbsp;</div>
-    </div>
-    <template v-else-if="resilience">
-      <div class="next-mcp__dialog-form">
-        <div class="next-mcp__resilience-group">
-          <h3 class="next-mcp__resilience-title">重试（F12 · 默认关闭）</h3>
-          <UiCheckbox v-model="rForm.retryEnabled" data-testid="mcp-res-retry-enabled">
-            启用重试（仅首字节前；默认关闭）
-          </UiCheckbox>
-          <template v-if="rForm.retryEnabled">
-            <div class="next-mcp__row">
-              <UiInput
-                v-model="rForm.retryMax"
-                label="重试次数（1–5）"
-                data-testid="mcp-res-retry-max"
-              />
-            </div>
-            <div class="next-mcp__resilience-checks">
-              <span class="next-mcp__resilience-label">重试条件（至少一项）</span>
-              <UiCheckbox
-                v-for="(label, condition) in RETRY_CONDITION_LABELS"
-                :key="condition"
-                :checked="rForm.retryConditions.includes(condition)"
-                :data-testid="`mcp-res-retry-${condition.toLowerCase()}`"
-                @update:model-value="toggleRetryCondition(condition)"
-              >
-                {{ label }}
-              </UiCheckbox>
-            </div>
-            <UiCheckbox v-model="rForm.idempotencyConfirmed" data-testid="mcp-res-idempotent">
-              已确认后端接口幂等（POST/PUT/PATCH 工具可重试）
-            </UiCheckbox>
-          </template>
-        </div>
-
-        <div class="next-mcp__resilience-group">
-          <h3 class="next-mcp__resilience-title">熔断（F13 · 默认关闭）</h3>
-          <UiCheckbox v-model="rForm.breakerEnabled" data-testid="mcp-res-breaker-enabled">
-            启用熔断（三态状态机；429 需加入下方状态码）
-          </UiCheckbox>
-          <template v-if="rForm.breakerEnabled">
-            <div class="next-mcp__row">
-              <UiInput
-                v-model="rForm.breakerWindowSeconds"
-                label="统计窗口（秒 1–60）"
-                data-testid="mcp-res-window"
-              />
-              <UiInput
-                v-model="rForm.breakerMinRequests"
-                label="最小请求数（1–100）"
-                data-testid="mcp-res-minreq"
-              />
-            </div>
-            <UiCheckbox v-model="rForm.breakerErrorEnabled" data-testid="mcp-res-error-enabled">
-              错误比例触发
-            </UiCheckbox>
-            <div class="next-mcp__row">
-              <UiInput
-                v-model="rForm.breakerErrorRatio"
-                label="错误比例阈值 %（1–100）"
-                data-testid="mcp-res-error-ratio"
-              />
-              <UiInput
-                v-model="rForm.breakerErrorStatusCodes"
-                label="计入错误的状态码（CSV，≤32）"
-                data-testid="mcp-res-codes"
-              />
-            </div>
-            <UiCheckbox v-model="rForm.breakerSlowEnabled" data-testid="mcp-res-slow-enabled">
-              慢调用触发
-            </UiCheckbox>
-            <div v-if="rForm.breakerSlowEnabled" class="next-mcp__row">
-              <UiInput
-                v-model="rForm.breakerSlowCallMs"
-                label="慢调用阈值 ms（须小于服务超时）"
-                data-testid="mcp-res-slow-ms"
-              />
-              <UiInput
-                v-model="rForm.breakerSlowRatio"
-                label="慢调用比例 %（1–100）"
-                data-testid="mcp-res-slow-ratio"
-              />
-            </div>
-            <div class="next-mcp__row">
-              <UiInput
-                v-model="rForm.breakerOpenSeconds"
-                label="熔断时长（秒 5–600）"
-                data-testid="mcp-res-open"
-              />
-            </div>
-            <div class="next-mcp__row">
-              <UiInput
-                v-model="rForm.breakerProbeCount"
-                label="半开探测数（1–10）"
-                data-testid="mcp-res-probes"
-              />
-              <UiInput
-                v-model="rForm.breakerProbeSuccess"
-                label="恢复成功数"
-                data-testid="mcp-res-probe-ok"
-              />
-            </div>
-            <UiCheckbox v-model="rForm.breakerSkipRetry" data-testid="mcp-res-skip-retry">
-              熔断期跳过重试
-            </UiCheckbox>
-          </template>
-        </div>
-        <p class="next-mcp__resilience-hint">
-          修改经路由快照下发，约一个刷新周期（默认
-          30s）内生效。慢调用阈值校验、状态码范围等错误会在保存时提示。
-        </p>
+    <!-- F12/F13 resilience configuration -->
+    <UiDrawer
+      :open="resilienceOpen"
+      :title="resilienceService ? `韧性配置 · ${resilienceService.name}` : '韧性配置'"
+      width="640px"
+      data-testid="mcp-resilience-drawer"
+      @update:open="resilienceOpen = false"
+    >
+      <div
+        v-if="resilienceError"
+        class="ui-alert ui-alert--error"
+        data-testid="mcp-resilience-error"
+      >
+        {{ resilienceError }}
       </div>
-    </template>
-    <template #footer>
-      <UiButton variant="ghost" @click="resilienceOpen = false">取消</UiButton>
-      <UiButton
-        variant="primary"
-        :loading="resilienceSaving"
-        data-testid="mcp-resilience-save"
-        @click="saveResilience"
-        >保存</UiButton
-      >
-    </template>
-  </UiDrawer>
-  <!-- #320 upstream backend auth -->
-  <UiDialog
-    v-if="backendAuthService"
-    :open="backendAuthVisible"
-    :title="`后端鉴权 — ${backendAuthService.name}`"
-    description="控制网关调用该 MCP 服务时向上游携带的凭据：访客模式不携带；API 密钥模式由网关注入 Authorization: Bearer <密钥>（密钥只写不读）。"
-    width="540px"
-    @update:open="backendAuthVisible = false"
-  >
-    <div class="next-mcp__auth-mode">
-      <UiRadio v-model="backendAuthMode" value="VISITOR" data-testid="mcp-auth-visitor">
-        访客（不向上游携带凭据）
-      </UiRadio>
-      <UiRadio v-model="backendAuthMode" value="API_KEY" data-testid="mcp-auth-apikey">
-        API 密钥（网关注入 Bearer 凭据）
-      </UiRadio>
-    </div>
-    <UiInput
-      v-if="backendAuthMode === 'API_KEY'"
-      v-model="backendAuthSecret"
-      type="password"
-      label="上游密钥（写入后不可查看）"
-      data-testid="mcp-auth-secret"
-    />
-    <p v-if="backendAuthError" class="ui-form-error">{{ backendAuthError }}</p>
-    <template #footer>
-      <UiButton variant="ghost" @click="backendAuthVisible = false">取消</UiButton>
-      <UiButton
-        variant="primary"
-        :loading="backendAuthSaving"
-        data-testid="mcp-auth-save"
-        @click="saveBackendAuth"
-      >
-        保存
-      </UiButton>
-    </template>
-  </UiDialog>
+      <div v-if="resilienceLoading" class="next-mcp__tools-loading">
+        <div v-for="n in 3" :key="n" class="ui-skeleton">&nbsp;</div>
+      </div>
+      <template v-else-if="resilience">
+        <div class="next-mcp__dialog-form">
+          <div class="next-mcp__resilience-group">
+            <h3 class="next-mcp__resilience-title">重试（F12 · 默认关闭）</h3>
+            <UiCheckbox v-model="rForm.retryEnabled" data-testid="mcp-res-retry-enabled">
+              启用重试（仅首字节前；默认关闭）
+            </UiCheckbox>
+            <template v-if="rForm.retryEnabled">
+              <div class="next-mcp__row">
+                <UiInput
+                  v-model="rForm.retryMax"
+                  label="重试次数（1–5）"
+                  data-testid="mcp-res-retry-max"
+                />
+              </div>
+              <div class="next-mcp__resilience-checks">
+                <span class="next-mcp__resilience-label">重试条件（至少一项）</span>
+                <UiCheckbox
+                  v-for="(label, condition) in RETRY_CONDITION_LABELS"
+                  :key="condition"
+                  :checked="rForm.retryConditions.includes(condition)"
+                  :data-testid="`mcp-res-retry-${condition.toLowerCase()}`"
+                  @update:model-value="toggleRetryCondition(condition)"
+                >
+                  {{ label }}
+                </UiCheckbox>
+              </div>
+              <UiCheckbox v-model="rForm.idempotencyConfirmed" data-testid="mcp-res-idempotent">
+                已确认后端接口幂等（POST/PUT/PATCH 工具可重试）
+              </UiCheckbox>
+            </template>
+          </div>
+
+          <div class="next-mcp__resilience-group">
+            <h3 class="next-mcp__resilience-title">熔断（F13 · 默认关闭）</h3>
+            <UiCheckbox v-model="rForm.breakerEnabled" data-testid="mcp-res-breaker-enabled">
+              启用熔断（三态状态机；429 需加入下方状态码）
+            </UiCheckbox>
+            <template v-if="rForm.breakerEnabled">
+              <div class="next-mcp__row">
+                <UiInput
+                  v-model="rForm.breakerWindowSeconds"
+                  label="统计窗口（秒 1–60）"
+                  data-testid="mcp-res-window"
+                />
+                <UiInput
+                  v-model="rForm.breakerMinRequests"
+                  label="最小请求数（1–100）"
+                  data-testid="mcp-res-minreq"
+                />
+              </div>
+              <UiCheckbox v-model="rForm.breakerErrorEnabled" data-testid="mcp-res-error-enabled">
+                错误比例触发
+              </UiCheckbox>
+              <div class="next-mcp__row">
+                <UiInput
+                  v-model="rForm.breakerErrorRatio"
+                  label="错误比例阈值 %（1–100）"
+                  data-testid="mcp-res-error-ratio"
+                />
+                <UiInput
+                  v-model="rForm.breakerErrorStatusCodes"
+                  label="计入错误的状态码（CSV，≤32）"
+                  data-testid="mcp-res-codes"
+                />
+              </div>
+              <UiCheckbox v-model="rForm.breakerSlowEnabled" data-testid="mcp-res-slow-enabled">
+                慢调用触发
+              </UiCheckbox>
+              <div v-if="rForm.breakerSlowEnabled" class="next-mcp__row">
+                <UiInput
+                  v-model="rForm.breakerSlowCallMs"
+                  label="慢调用阈值 ms（须小于服务超时）"
+                  data-testid="mcp-res-slow-ms"
+                />
+                <UiInput
+                  v-model="rForm.breakerSlowRatio"
+                  label="慢调用比例 %（1–100）"
+                  data-testid="mcp-res-slow-ratio"
+                />
+              </div>
+              <div class="next-mcp__row">
+                <UiInput
+                  v-model="rForm.breakerOpenSeconds"
+                  label="熔断时长（秒 5–600）"
+                  data-testid="mcp-res-open"
+                />
+              </div>
+              <div class="next-mcp__row">
+                <UiInput
+                  v-model="rForm.breakerProbeCount"
+                  label="半开探测数（1–10）"
+                  data-testid="mcp-res-probes"
+                />
+                <UiInput
+                  v-model="rForm.breakerProbeSuccess"
+                  label="恢复成功数"
+                  data-testid="mcp-res-probe-ok"
+                />
+              </div>
+              <UiCheckbox v-model="rForm.breakerSkipRetry" data-testid="mcp-res-skip-retry">
+                熔断期跳过重试
+              </UiCheckbox>
+            </template>
+          </div>
+          <p class="next-mcp__resilience-hint">
+            修改经路由快照下发，约一个刷新周期（默认
+            30s）内生效。慢调用阈值校验、状态码范围等错误会在保存时提示。
+          </p>
+        </div>
+      </template>
+      <template #footer>
+        <UiButton variant="ghost" @click="resilienceOpen = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="resilienceSaving"
+          data-testid="mcp-resilience-save"
+          @click="saveResilience"
+          >保存</UiButton
+        >
+      </template>
+    </UiDrawer>
+    <!-- #320 upstream backend auth -->
+    <UiDialog
+      v-if="backendAuthService"
+      :open="backendAuthVisible"
+      :title="`后端鉴权 — ${backendAuthService.name}`"
+      description="控制网关调用该 MCP 服务时向上游携带的凭据：访客模式不携带；API 密钥模式由网关注入 Authorization: Bearer <密钥>（密钥只写不读）。"
+      width="540px"
+      @update:open="backendAuthVisible = false"
+    >
+      <div class="next-mcp__auth-mode">
+        <UiRadio v-model="backendAuthMode" value="VISITOR" data-testid="mcp-auth-visitor">
+          访客（不向上游携带凭据）
+        </UiRadio>
+        <UiRadio v-model="backendAuthMode" value="API_KEY" data-testid="mcp-auth-apikey">
+          API 密钥（网关注入 Bearer 凭据）
+        </UiRadio>
+      </div>
+      <UiInput
+        v-if="backendAuthMode === 'API_KEY'"
+        v-model="backendAuthSecret"
+        type="password"
+        label="上游密钥（写入后不可查看）"
+        data-testid="mcp-auth-secret"
+      />
+      <p v-if="backendAuthError" class="ui-form-error">{{ backendAuthError }}</p>
+      <template #footer>
+        <UiButton variant="ghost" @click="backendAuthVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="backendAuthSaving"
+          data-testid="mcp-auth-save"
+          @click="saveBackendAuth"
+        >
+          保存
+        </UiButton>
+      </template>
+    </UiDialog>
+  </div>
 </template>
 
 <style scoped>
