@@ -75,11 +75,10 @@ public class ExportTaskService {
      *
      * <p>
      * The row insert and its audit event share one transaction: a failed audit
-     * write must not leave a committed {@code PENDING} task behind that no one
-     * ever renders (expired-row GC only reclaims {@code SUCCEEDED} rows, so such
-     * a task would linger forever). The renderer is scheduled only once that
-     * transaction commits, so the worker cannot read a row that is not visible
-     * yet.
+     * write must not leave a committed {@code PENDING} task behind that no one ever
+     * renders (expired-row GC only reclaims {@code SUCCEEDED} rows, so such a task
+     * would linger forever). The renderer is scheduled only once that transaction
+     * commits, so the worker cannot read a row that is not visible yet.
      * </p>
      */
     @Transactional

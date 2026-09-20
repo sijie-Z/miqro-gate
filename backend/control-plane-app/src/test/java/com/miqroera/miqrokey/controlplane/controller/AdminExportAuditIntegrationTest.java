@@ -112,9 +112,8 @@ class AdminExportAuditIntegrationTest {
     @Test
     @DisplayName("session surface: creating an export task leaves an attributable audit event")
     void sessionExportCreationAudited() throws Exception {
-        mockMvc.perform(post("/api/v1/admin/exports").param("format", "CSV")
-                .param("from", "2026-09-01T00:00:00Z").param("to", "2026-09-02T00:00:00Z")
-                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+        mockMvc.perform(post("/api/v1/admin/exports").param("format", "CSV").param("from", "2026-09-01T00:00:00Z")
+                .param("to", "2026-09-02T00:00:00Z").cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
                 .header("X-Request-Id", SESSION_REQUEST_ID)).andExpect(status().isAccepted());
 
         assertThat(countEvents("EXPORT_CREATE")).as("audit rows for EXPORT_CREATE").isEqualTo(1);
@@ -161,14 +160,18 @@ class AdminExportAuditIntegrationTest {
         assertThat((String) event.get("summary")).contains("CSV");
     }
 
-    /** Creates an export through the session surface and waits for its async render to land. */
+    /**
+     * Creates an export through the session surface and waits for its async render
+     * to land.
+     */
     private UUID createExportAndAwait() throws Exception {
-        MvcResult created = mockMvc.perform(post("/api/v1/admin/exports").param("format", "CSV")
-                .param("from", "2026-09-01T00:00:00Z").param("to", "2026-09-02T00:00:00Z")
-                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
-                .header("X-Request-Id", SESSION_REQUEST_ID)).andExpect(status().isAccepted()).andReturn();
-        UUID taskId = UUID.fromString((String) objectMapper
-                .readValue(created.getResponse().getContentAsString(), Map.class).get("id"));
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/exports").param("format", "CSV").param("from", "2026-09-01T00:00:00Z")
+                        .param("to", "2026-09-02T00:00:00Z").cookie(sessionCookie, csrfCookie)
+                        .header("X-CSRF-Token", csrfToken).header("X-Request-Id", SESSION_REQUEST_ID))
+                .andExpect(status().isAccepted()).andReturn();
+        UUID taskId = UUID.fromString(
+                (String) objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id"));
         for (int i = 0; i < 100; i++) {
             String status = jdbc.queryForObject("SELECT status FROM export_tasks WHERE id = :id",
                     new MapSqlParameterSource("id", taskId), String.class);
