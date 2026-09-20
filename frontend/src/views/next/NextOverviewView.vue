@@ -168,7 +168,7 @@ const donutSegments = computed(() => {
   const total = costTotal.value;
   if (total <= 0) return [];
   const top = costGroups.value.slice(0, CHART_PALETTE.length);
-  // PH43: everything the ring does not name — ranks 6+, the sub-cent rows the legend
+  // PH43: everything the ring does not name — the ranks past the palette, the sub-cent rows the legend
   // hides, and any gap between the drawn groups and the server's total. Deriving it by
   // subtracting keeps the slices summing to the total instead of to the drawing.
   const restCost = Math.max(0, total - top.reduce((sum, g) => sum + g.cost, 0));

@@ -229,7 +229,7 @@ Key、request ID、token 数字和代码使用系统等宽字体栈。正文 14p
 
 - 在 1440×900、1280×800、768×1024、390×844 四个 viewport 生成 Playwright screenshot。
 - 为登录、普通用户 Key 列表/创建成功、管理员 Provider、团队 Plan、Usage 对账、空/错误/加载态建立 visual baseline。
-- 自动检查不出现 `linear-gradient`、`radial-gradient`、大于 8px 的常规容器 radius，以及未批准的紫色。紫色检查（`frontend/src/__tests__/aesthetic.spec.ts`）**按色相判断**并覆盖 `src/**/*.{css,vue,ts}` 的普通写法（hex 3/4/6/8 位、`rgb()`/`hsl()`/`oklch()`、紫色系颜色名）——它曾只扫 CSS 且只比对固定色值黑名单，让一个 `.ts` 里的紫色色板溜过（2026-09-20，见 `chart-palette.ts` 注释）；供应商 chip 与注释里提到的色值不触发。
+- 自动检查不出现 `linear-gradient`、`radial-gradient`、大于 8px 的常规容器 radius，以及未批准的紫色。紫色检查（`frontend/src/__tests__/aesthetic.spec.ts`）**按色相判断**并覆盖 `src/**/*.{css,vue,ts}` 的普通写法（hex 3/4/6/8 位、`rgb()`/`hsl()`/`oklch()`、紫色系颜色名）——它曾只扫 CSS 且只比对固定色值黑名单，让一个 `.ts` 里的紫色色板溜过（2026-09-20，见 `chart-palette.ts` 注释）；供应商 chip 与注释里提到的色值不触发；**已知盲区**：3/4 位纯数字十六进制在 `.ts`/`.vue` 里按票号跳过（所以 `#639` 这种缩写不在覆盖内，写 `'#639'` 或在 `.css` 里仍会被抓）、运行时拼出来的颜色、`oklab()` 与 `color-mix()`。
 - 页面在 100% 和 125% Windows 缩放下无关键内容截断。
 - 表格使用 50、500、5000 条 Mock 数据验证密度、分页和固定列。
 - 最终视觉 review 单独进行，不能只凭 E2E 功能通过视为设计完成。

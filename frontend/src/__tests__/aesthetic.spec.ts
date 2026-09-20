@@ -66,10 +66,10 @@ const PURPLE_NAMES: Record<string, string> = {
   mediumpurple: '#9370db',
   mediumorchid: '#ba55d3',
   darkorchid: '#9932cc',
+  darkmagenta: '#8b008b',
   violet: '#ee82ee',
   orchid: '#da70d6',
   plum: '#dda0dd',
-  slateblue: '#6a5acd',
   indigo: '#4b0082',
   fuchsia: '#ff00ff',
   magenta: '#ff00ff',
@@ -116,7 +116,10 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
  * `oklch()`, and the violet-family colour names — because "judged by hue" has to
  * mean the ways a colour is actually written, not just `#rrggbb`.
  */
-function colourLiterals(line: string): Array<{ text: string; hue: number; saturation: number }> {
+function colourLiterals(
+  line: string,
+  file: string,
+): Array<{ text: string; hue: number; saturation: number }> {
   const found: Array<{ text: string; hue: number; saturation: number }> = [];
   const add = (text: string, r: number, g: number, b: number) => {
     const { hue, saturation } = hsv(r, g, b);
@@ -125,10 +128,16 @@ function colourLiterals(line: string): Array<{ text: string; hue: number; satura
 
   for (const match of line.matchAll(/#([0-9a-fA-F]{3,8})\b/g)) {
     let hex = match[1]!;
-    // `#758` in a comment-free line is an issue reference, not a colour: three- and
-    // four-digit forms are only read as hex when they carry a hex letter. (`#fff`,
-    // `#abc` are colours; `#316`, `#617` are tickets.)
-    if (hex.length <= 4 && !/[a-fA-F]/.test(hex)) continue;
+    // `#758` in prose is an issue reference, not a colour, so a numeric-only 3/4-digit
+    // token is only read as hex where a ticket cannot be: inside a string literal, or
+    // anywhere in a `.css` file (whose comments are already stripped). `#639` — the
+    // shorthand for rebeccapurple — is therefore caught when written as `'#639'` or in
+    // CSS, and skipped when it appears bare in TS/Vue code, which is where issue
+    // references live.
+    if (hex.length <= 4 && !/[a-fA-F]/.test(hex)) {
+      const quoted = ["'", '"', '`'].includes(line[match.index - 1] ?? '');
+      if (!quoted && !file.endsWith('.css')) continue;
+    }
     if (hex.length === 3 || hex.length === 4) hex = hex.slice(0, 3).replace(/./g, (c) => c + c);
     if (hex.length !== 6) hex = hex.slice(0, 6); // 8 digits: #rrggbbaa, hue is in the first six
     add(
@@ -139,8 +148,13 @@ function colourLiterals(line: string): Array<{ text: string; hue: number; satura
   for (const match of line.matchAll(/rgba?\(\s*([\d.]+%?)[,\s]+([\d.]+%?)[,\s]+([\d.]+%?)/g)) {
     add(match[0], to255(match[1]!), to255(match[2]!), to255(match[3]!));
   }
-  for (const match of line.matchAll(/hsla?\(\s*([\d.]+)(?:deg)?[,\s]+([\d.]+)%[,\s]+([\d.]+)%/g)) {
-    add(match[0], ...hslToRgb(Number(match[1]), Number(match[2]) / 100, Number(match[3]) / 100));
+  for (const match of line.matchAll(
+    /hsla?\(\s*(-?[\d.]+)(deg|grad|rad|turn)?[,\s]+([\d.]+)%[,\s]+([\d.]+)%/g,
+  )) {
+    // Angles wrap in CSS (`hsl(619deg …)` is 259deg) and other units are legal.
+    const factor = { deg: 1, grad: 0.9, rad: 180 / Math.PI, turn: 360 }[match[2] as string] ?? 1;
+    const wrapped = (((Number(match[1]) * factor) % 360) + 360) % 360;
+    add(match[0], ...hslToRgb(wrapped, Number(match[3]) / 100, Number(match[4]) / 100));
   }
   for (const match of line.matchAll(/oklch\(\s*[\d.]+%?\s+[\d.]+\s+([\d.]+)/g)) {
     add(match[0], ...hslToRgb(Number(match[1]), 1, 0.5));
@@ -206,8 +220,11 @@ describe('aesthetic audit', () => {
     // (its a/b axes are not a hue), and `color-mix()`. Those would have to be caught
     // by reading the code, not by a scanner — this check exists to keep the ordinary
     // mistake from shipping, not to be a proof.
+    // `types[\\/]generated`: globSync hands back backslashes on Windows, so a plain
+    // `includes('types/generated')` matched nothing there and the audit silently grew
+    // two 285 KB generated files (harmless only because they hold no colour).
     const sources = globSync('src/**/*.{css,vue,ts}').filter(
-      (file) => !file.includes('__tests__') && !file.includes('types/generated'),
+      (file) => !file.includes('__tests__') && !/types[\\/]generated/.test(file),
     );
     expect(sources.length).toBeGreaterThan(0);
 
@@ -218,7 +235,7 @@ describe('aesthetic audit', () => {
         .forEach((line, index) => {
           // Supplier brand colours are the sanctioned exception (frontend-design §4.1).
           if (line.includes('--miqrokey-chip-')) return;
-          for (const { text, hue, saturation } of colourLiterals(line)) {
+          for (const { text, hue, saturation } of colourLiterals(line, file)) {
             if (hue >= 255 && hue <= 320 && saturation >= 0.25) {
               purple.push(`${file}:${index + 1} ${text}`);
             }

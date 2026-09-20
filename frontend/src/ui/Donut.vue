@@ -3,9 +3,15 @@
  * UiDonut — pure-CSS share chart (Vben analysis “成交占比” pattern).
  * Renders a conic-gradient ring with a centred total; consumers render their
  * own legend. Colours come from the shared categorical palette
- * (`@/lib/chart-palette`): named slots in fixed order, and anything past the
- * last slot is the neutral 「其他」 colour rather than a cycled hue — the donut
- * is one of the two sanctioned gradient surfaces.
+ * (`@/lib/chart-palette`): named slots in fixed order, and anything past the last
+ * slot is the neutral 「其他」 colour rather than a cycled hue — the donut is one of
+ * the two sanctioned gradient surfaces.
+ *
+ * A caller with more categories than the palette has slots must therefore either
+ * fold the extras into one 「其他」 segment itself or pass explicit colours. The
+ * component will not merge them: the legend is the caller's (it renders the list it
+ * passed in), so a ring that silently coalesced two segments would disagree with the
+ * legend right beside it.
  */
 import { computed } from 'vue';
 import { CHART_OTHER_COLOR, CHART_PALETTE } from '@/lib/chart-palette';
