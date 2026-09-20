@@ -23,6 +23,7 @@ import {
 } from '@/ui';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import UsageAdjustChip from '@/components/UsageAdjustChip.vue';
+import CostSplitBar from '@/components/CostSplitBar.vue';
 import { netTokens } from '@/lib/usage-net';
 import { costGapNote } from '@/lib/usage-pricing';
 import type { UiSelectOption } from '@/ui';
@@ -543,6 +544,26 @@ function quotaCostGap(rule: QuotaRuleView): string {
   return costGapNote(rule) ?? '';
 }
 
+/**
+ * The split of the 上游成本 figure (#1097): the four token amounts it was summed
+ * from, drawn under the number so a reader can see whether the spend is output-heavy
+ * or cache-read-heavy without opening the records table.
+ */
+function upstreamCostParts(group: UsageGroup): {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+} {
+  const parts = group.cost?.upstreamPaidParts;
+  return {
+    input: Number(parts?.input ?? 0),
+    output: Number(parts?.output ?? 0),
+    cacheRead: Number(parts?.cacheRead ?? 0),
+    cacheCreation: Number(parts?.cacheCreation ?? 0),
+  };
+}
+
 /** Typed row accessors keep template expressions free of TS casts (prettier
  *  cannot parse `<` type syntax inside SFC interpolation). */
 function asGroup(row: unknown): UsageGroup {
@@ -819,9 +840,19 @@ function formatTime(iso?: string): string {
         <template #cacheRead="{ row }">{{
           formatNumber(asGroup(row).tokens?.cacheRead ?? 0)
         }}</template>
-        <template #upstreamCost="{ row }">{{
-          formatCost(asGroup(row).cost?.upstreamPaid)
-        }}</template>
+        <template #upstreamCost="{ row }">
+          <div class="next-usage__cost-cell">
+            <span class="ui-num">{{ formatCost(asGroup(row).cost?.upstreamPaid) }}</span>
+            <!-- Only when the figure exists: the cell prints '—' for a missing one, and a
+                 bar claiming 合计 ¥0.0000 beside that dash would be a different claim. -->
+            <CostSplitBar
+              v-if="asGroup(row).cost?.upstreamPaid != null"
+              label="上游成本"
+              :total="Number(asGroup(row).cost?.upstreamPaid)"
+              v-bind="upstreamCostParts(asGroup(row))"
+            />
+          </div>
+        </template>
         <template #gatewayCost="{ row }"
           >{{ formatCost(asGroup(row).cost?.gatewayObserved)
           }}<UiTooltip v-if="groupCostCaveat(row)" :text="groupCostCaveat(row)"
@@ -1253,6 +1284,16 @@ function formatTime(iso?: string): string {
   /* Was flush against the figure, so it read as `¥0.00未定价` instead of a separate
      claim about it (#877). Same gap the cache-ROI marker uses. */
   margin-left: var(--ui-space-1);
+}
+
+/* #1097: the money cell carries its own composition bar under the figure — the
+   column is right-aligned, so the bar follows it. */
+.next-usage__cost-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--ui-space-1);
+  min-width: 96px;
 }
 
 .next-usage__custom-range {

@@ -166,6 +166,33 @@ describe('NextCostView', () => {
     expect(wrapper.find('[data-testid="budget-row"]').text()).toContain('预警');
   });
 
+  it('#1097: draws each row a composition bar for the figure it prints, from the same basis', async () => {
+    const withSplit = summary(true);
+    // Only the first group carries a split: the second has none to draw, and the bar
+    // renders nothing there rather than a rail that claims something it cannot say.
+    withSplit.groups![0]!.cost = {
+      ...withSplit.groups![0]!.cost,
+      gatewayObservedParts: { input: 0.9, output: 0.4, cacheRead: 0.1, cacheCreation: 0.1 },
+    } as unknown as UsageCost;
+    mockApi.adminUsageSummary.mockImplementation(async (q: { groupBy?: string }) => ({
+      ...withSplit,
+      groupBy: q.groupBy ?? 'project',
+    }));
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const bars = wrapper.findAll('[data-testid="cost-split-bar"]');
+    // Only the row that has a split gets a bar: a rail under a figure we cannot break
+    // down would be a mark claiming something it cannot say.
+    expect(bars).toHaveLength(1);
+    // The column prints projectAllocated (1.50), so the bar has to be the observed
+    // split — the paid split covers different rows and would explain another number.
+    expect(bars[0]!.attributes('aria-label')).toBe(
+      '分摊成本构成：输入 ¥0.9000 · 输出 ¥0.4000 · 缓存读 ¥0.1000 · 缓存写 ¥0.1000（合计 ¥1.5000）',
+    );
+  });
+
   it('#1104: a failed load shows unknown on the cost cards, not ¥0.0000', async () => {
     mockApi.adminUsageSummary.mockRejectedValue(
       new (await import('@/api/http')).ApiError({

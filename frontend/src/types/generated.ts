@@ -4325,6 +4325,14 @@ export interface components {
             gatewayObserved?: number;
             projectAllocated?: number;
             savedByGatewayCache?: number;
+            upstreamPaidParts?: components["schemas"]["CostParts"];
+            gatewayObservedParts?: components["schemas"]["CostParts"];
+        };
+        CostParts: {
+            input?: number;
+            output?: number;
+            cacheRead?: number;
+            cacheCreation?: number;
         };
         GroupSummary: {
             groupKey?: string;

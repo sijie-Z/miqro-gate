@@ -24,6 +24,7 @@ import {
   toast,
 } from '@/ui';
 import type { UiSelectOption } from '@/ui';
+import CostSplitBar from '@/components/CostSplitBar.vue';
 import type { BudgetView, Project, UsageGroup, UsageSummary } from '@/types/generated-api';
 
 const WINDOWS = [
@@ -111,6 +112,7 @@ const activeColumns = computed(() => [
   { key: 'requests', title: '请求', width: '100px', align: 'right' as const },
   { key: 'tokens', title: 'Token 数', width: '140px', align: 'right' as const },
   { key: 'cost', title: '分摊成本', width: '150px', align: 'right' as const },
+  { key: 'split', title: '成本构成', minWidth: '160px' },
   { key: 'share', title: '占比', minWidth: '220px' },
 ]);
 
@@ -120,6 +122,32 @@ function costNumber(value: string | number | undefined): number {
 
 function costOf(group: UsageGroup): number {
   return costNumber(group.cost?.projectAllocated ?? group.cost?.upstreamPaid);
+}
+
+/**
+ * The split of the very figure {@link costOf} prints (#1097).
+ *
+ * The two bases cover different rows — `projectAllocated` counts coalesced traffic,
+ * `upstreamPaid` does not — so the split has to be chosen by the same rule as the
+ * number above it. Picking "whichever split is non-empty" would draw a bar that
+ * explains a different figure than the one the reader is looking at.
+ */
+function costPartsOf(group: UsageGroup): {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+} {
+  const parts =
+    group.cost?.projectAllocated != null
+      ? group.cost?.gatewayObservedParts
+      : group.cost?.upstreamPaidParts;
+  return {
+    input: costNumber(parts?.input),
+    output: costNumber(parts?.output),
+    cacheRead: costNumber(parts?.cacheRead),
+    cacheCreation: costNumber(parts?.cacheCreation),
+  };
 }
 
 function tokensOf(group: UsageGroup): number {
@@ -653,6 +681,13 @@ onMounted(async () => {
         </template>
         <template #cost="{ row }">
           <span class="ui-num">{{ formatCost(costOf(asGroup(row))) }}</span>
+        </template>
+        <template #split="{ row }">
+          <CostSplitBar
+            label="分摊成本"
+            :total="costOf(asGroup(row))"
+            v-bind="costPartsOf(asGroup(row))"
+          />
         </template>
         <template #share="{ row }">
           <div class="next-cost__share">

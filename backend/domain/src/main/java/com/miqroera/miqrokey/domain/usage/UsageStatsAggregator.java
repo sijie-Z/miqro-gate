@@ -38,6 +38,13 @@ import java.util.UUID;
  * <li>{@code savedByGatewayCache} — tokens served from cache (hit count × the
  * cached response's original usage), valued at the price in force when those
  * hits happened.</li>
+ * <li>{@code upstreamPaidParts} / {@code gatewayObservedParts} — what each of
+ * those two totals was spent on, by token dimension (#1097). The row-level
+ * amounts have always existed ({@code tokens × unit_price} per dimension); the
+ * group used to add them into one number and drop the split, which is why the
+ * console could not say whether a bill was output-heavy or cache-read-heavy.
+ * Two sets rather than one because the two totals cover different rows: the
+ * parts of a total must add up to <em>that</em> total.</li>
  * </ul>
  *
  * <h2>Token mapping</h2> Protocol-agnostic: input = primary input tokens
@@ -222,7 +229,38 @@ public final class UsageStatsAggregator {
     }
 
     public record Cost(BigDecimal upstreamPaid, BigDecimal gatewayObserved, BigDecimal projectAllocated,
-            BigDecimal savedByGatewayCache) {
+            BigDecimal savedByGatewayCache, CostParts upstreamPaidParts, CostParts gatewayObservedParts) {
+    }
+
+    /**
+     * One cost figure split by what it was spent on (#1097): the four token
+     * dimensions the price snapshot prices separately.
+     *
+     * <p>
+     * Each part is the sum of the same per-row amounts the total was summed from —
+     * already divided by {@link #PER_MILLION}, so the parts add up to their total
+     * <b>exactly</b>, not approximately. A view can therefore draw a stacked bar
+     * under a figure without ever disagreeing with it.
+     * </p>
+     *
+     * <p>
+     * Unpriceable usage contributes zero to every part, exactly as it does to the
+     * totals; {@link PricingStatus} and {@link PricingGap} stay the way to say so.
+     * </p>
+     */
+    public record CostParts(BigDecimal input, BigDecimal output, BigDecimal cacheRead, BigDecimal cacheCreation) {
+
+        public static final CostParts ZERO = new CostParts(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO);
+
+        public CostParts plus(CostParts other) {
+            return new CostParts(input.add(other.input), output.add(other.output), cacheRead.add(other.cacheRead),
+                    cacheCreation.add(other.cacheCreation));
+        }
+
+        public BigDecimal total() {
+            return input.add(output).add(cacheRead).add(cacheCreation);
+        }
     }
 
     public record UsageSummary(String groupBy, List<GroupSummary> groups, GroupSummary totals) {
@@ -277,6 +315,8 @@ public final class UsageStatsAggregator {
         private BigDecimal upstreamPaid = BigDecimal.ZERO;
         private BigDecimal gatewayObserved = BigDecimal.ZERO;
         private BigDecimal savedByGatewayCache = BigDecimal.ZERO;
+        private CostParts upstreamParts = CostParts.ZERO;
+        private CostParts observedParts = CostParts.ZERO;
         private PricingGap unpriced = PricingGap.NONE;
         private long failedRequests;
         private long cancelledRequests;
@@ -329,11 +369,17 @@ public final class UsageStatsAggregator {
             cacheCreationTokens += cacheCreation;
 
             unpriced = unpriced.plus(row.pricingGap());
-            BigDecimal rowCost = toCost(row.inputCost()).add(toCost(row.outputCost())).add(toCost(row.cacheReadCost()))
-                    .add(toCost(row.cacheCreationCost()));
+            // The row's cost IS the sum of its parts (#1097): building it from
+            // CostParts.total() is what makes "the split adds up to the figure" true by
+            // construction rather than by convention.
+            CostParts rowParts = new CostParts(toCost(row.inputCost()), toCost(row.outputCost()),
+                    toCost(row.cacheReadCost()), toCost(row.cacheCreationCost()));
+            BigDecimal rowCost = rowParts.total();
             gatewayObserved = gatewayObserved.add(rowCost);
+            observedParts = observedParts.plus(rowParts);
             if (row.cacheLevel() == CacheLevel.UPSTREAM) {
                 upstreamPaid = upstreamPaid.add(rowCost);
+                upstreamParts = upstreamParts.plus(rowParts);
             }
         }
 
@@ -372,9 +418,9 @@ public final class UsageStatsAggregator {
 
         GroupSummary toSummary() {
             return new GroupSummary(groupKey, label, new Requests(upstream, coalesced, l1Hit, l2Hit),
-                    new Tokens(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens),
-                    new Cost(upstreamPaid, gatewayObserved, gatewayObserved, savedByGatewayCache), pricingStatus(),
-                    unpriced, outcomes());
+                    new Tokens(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens), new Cost(upstreamPaid,
+                            gatewayObserved, gatewayObserved, savedByGatewayCache, upstreamParts, observedParts),
+                    pricingStatus(), unpriced, outcomes());
         }
 
         /**
@@ -427,6 +473,8 @@ public final class UsageStatsAggregator {
             upstreamPaid = upstreamPaid.add(other.upstreamPaid);
             gatewayObserved = gatewayObserved.add(other.gatewayObserved);
             savedByGatewayCache = savedByGatewayCache.add(other.savedByGatewayCache);
+            upstreamParts = upstreamParts.plus(other.upstreamParts);
+            observedParts = observedParts.plus(other.observedParts);
             unpriced = unpriced.plus(other.unpriced);
             failedRequests += other.failedRequests;
             cancelledRequests += other.cancelledRequests;
