@@ -236,4 +236,44 @@ describe('NextPlansView', () => {
     releaseCreate({});
     await flushPromises();
   });
+
+  it('#1160: a failed seat read is visible with retry, not 「还没有席位」', async () => {
+    // The seat read had no catch at all: a rejection escaped as an unhandled
+    // rejection, the table kept drawing its empty state, and nothing on screen
+    // said the plan's seats could not be read.
+    mockApi.listSeats.mockRejectedValue(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-seats',
+        title: 'Error',
+      }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="subscription-seats-open"]').trigger('click');
+    await flushPromises();
+
+    const drawer = document.querySelector('[data-testid="seats-drawer"]');
+    expect(drawer, 'seats drawer should render').toBeTruthy();
+    // 「还没有席位」 is a claim about the plan — the read that would know failed.
+    expect(drawer!.textContent).not.toContain('还没有席位');
+    const failed = document.querySelector('[data-testid="table-load-failed"]');
+    expect(failed, 'the failed read must be visible').toBeTruthy();
+    expect(failed!.textContent).toContain('数据库不可用');
+    const retry = document.querySelector('[data-testid="table-load-retry"]') as HTMLButtonElement;
+    expect(retry, 'a retry entry must exist').toBeTruthy();
+
+    // Retry goes through the same loader and renders the seats.
+    mockApi.listSeats.mockResolvedValue([seat()]);
+    retry.click();
+    await flushPromises();
+
+    expect(mockApi.listSeats).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('[data-testid="table-load-failed"]')).toBeNull();
+    expect(document.querySelector('[data-testid="seats-table"]')!.textContent).toContain('已分配');
+  });
 });

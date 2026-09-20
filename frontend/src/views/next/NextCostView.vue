@@ -292,6 +292,8 @@ const budgetLoading = ref(false);
 // could re-create or overwrite real plans based on the empty state.
 const budgetError = ref('');
 const projects = ref<Project[]>([]);
+const budgetProjectsError = ref('');
+const budgetProjectsLoading = ref(false);
 const budgetDialogVisible = ref(false);
 const budgetSaving = ref(false);
 const budgetFormError = ref('');
@@ -350,6 +352,28 @@ async function loadBudgets() {
   }
 }
 
+/**
+ * #1160 加载次序不变量：加载中 → 失败 → 空 → 有数据。
+ * 预算弹窗的项目下拉来自这次读取；失败时不能只留一个空选择器——保存会被
+ * 「请选择项目。」挡住，用户却不知道是列表根本没加载出来。
+ * 与保存错误 `budgetFormError` 分开：那是本表单的校验/保存失败槽。
+ */
+async function loadBudgetProjects() {
+  // 失败信息只在**读到结果之后**更新：重试在途期间保留上一条错误（按钮带 loading），
+  // 否则错误条随清空而卸载，弹窗里只剩一个空下拉——一次失败先变成一次静默。
+  budgetProjectsLoading.value = true;
+  try {
+    projects.value = await api.listProjects();
+    budgetProjectsError.value = '';
+  } catch (error) {
+    projects.value = [];
+    budgetProjectsError.value =
+      error instanceof ApiError ? error.message : '加载项目列表失败，请稍后重试。';
+  } finally {
+    budgetProjectsLoading.value = false;
+  }
+}
+
 async function openBudgetDialog(budget: BudgetView | null) {
   editingBudget.value = budget;
   budgetFormError.value = '';
@@ -361,11 +385,7 @@ async function openBudgetDialog(budget: BudgetView | null) {
     };
   } else {
     if (!projects.value.length) {
-      try {
-        projects.value = await api.listProjects();
-      } catch {
-        projects.value = [];
-      }
+      await loadBudgetProjects();
     }
     budgetForm.value = { projectId: '', amount: '', alertThresholdPct: '80' };
   }
@@ -731,6 +751,19 @@ onMounted(async () => {
           width="100%"
           data-testid="budget-project"
         />
+        <!-- #1160: 项目下拉为空必须区分「加载失败 / 真的没有项目」；失败给出重试，
+             重试在途期间按钮进入 loading（错误条保留，避免「什么都没有」的空窗）。 -->
+        <p v-if="budgetProjectsError" class="ui-form-error" data-testid="budget-projects-error">
+          {{ budgetProjectsError }}
+          <UiButton
+            variant="ghost"
+            size="sm"
+            :loading="budgetProjectsLoading"
+            data-testid="budget-projects-retry"
+            @click="loadBudgetProjects"
+            >重试</UiButton
+          >
+        </p>
         <UiInput
           v-model="budgetForm.amount"
           label="预算金额（CNY）"

@@ -17,6 +17,8 @@ import type { Project, SkillRevisionView, SkillView, Team } from '@/types/genera
 const skills = ref<SkillView[]>([]);
 const projects = ref<Project[]>([]);
 const teams = ref<Team[]>([]);
+const refsLoading = ref(true);
+const refsError = ref('');
 const loading = ref(true);
 const loadError = ref('');
 const loadRequestId = ref('');
@@ -248,17 +250,32 @@ function formatTime(iso?: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/**
+ * #1160 加载次序不变量：加载中 → 失败 → 空 → 有数据。
+ * 「暂无项目 / 暂无团队」只有在这一次读取**成功且确实为空**时才能出现；
+ * 读取失败还画空态，就是替租户回答「没有项目/团队」，而这次请求根本没有得到答案。
+ * 失败状态与保存用的 `accessError` 分开：那是保存失败槽，混用会让用户分不清
+ * 「列表没读出来」和「刚才那份授权没存进去」。
+ */
+async function loadRefs() {
+  refsLoading.value = true;
+  refsError.value = '';
+  try {
+    const [projectList, teamList] = await Promise.all([api.listProjects(), api.listTeams()]);
+    projects.value = projectList;
+    teams.value = teamList;
+  } catch (error) {
+    projects.value = [];
+    teams.value = [];
+    refsError.value = error instanceof ApiError ? error.message : '加载项目/团队列表失败。';
+  } finally {
+    refsLoading.value = false;
+  }
+}
+
 onMounted(() => {
   void load();
-  Promise.all([api.listProjects(), api.listTeams()])
-    .then(([projectList, teamList]) => {
-      projects.value = projectList;
-      teams.value = teamList;
-    })
-    .catch(() => {
-      projects.value = [];
-      teams.value = [];
-    });
+  void loadRefs();
 });
 </script>
 
@@ -423,6 +440,14 @@ onMounted(() => {
       <p class="next-skills__hint">
         不选任何范围 = 公开（全员可下载）。授权后仅所选团队/项目成员可下载。
       </p>
+      <!-- #1160: 两个引用列表失败时在这里报错并原地重试；下面的「暂无*」由
+           refsError 门控，失败绝不再画空态。 -->
+      <p v-if="refsError" class="ui-form-error" data-testid="skill-refs-error">
+        {{ refsError }}
+        <UiButton variant="ghost" size="sm" data-testid="skill-refs-retry" @click="loadRefs"
+          >重试</UiButton
+        >
+      </p>
       <div class="next-skills__scope">
         <div class="ui-field">
           <span class="ui-field__label">授权项目</span>
@@ -441,7 +466,8 @@ onMounted(() => {
               {{ p.name }}（{{ p.code }}）
             </UiCheckbox>
           </div>
-          <p v-else class="ui-field__hint">暂无项目</p>
+          <p v-else-if="refsLoading" class="ui-field__hint">加载中…</p>
+          <p v-else-if="!refsError" class="ui-field__hint">暂无项目</p>
         </div>
         <div class="ui-field">
           <span class="ui-field__label">授权团队</span>
@@ -456,7 +482,8 @@ onMounted(() => {
               {{ t.name }}
             </UiCheckbox>
           </div>
-          <p v-else class="ui-field__hint">暂无团队</p>
+          <p v-else-if="refsLoading" class="ui-field__hint">加载中…</p>
+          <p v-else-if="!refsError" class="ui-field__hint">暂无团队</p>
         </div>
         <p v-if="accessError" class="ui-form-error">{{ accessError }}</p>
       </div>

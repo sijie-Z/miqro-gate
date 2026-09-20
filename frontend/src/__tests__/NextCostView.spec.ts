@@ -423,4 +423,71 @@ describe('NextCostView', () => {
     expect(wrapper.text()).toContain('月份');
     expect(wrapper.find('[data-testid="cost-table"]').exists()).toBe(true);
   });
+
+  it('#1160: a failed project read in the budget dialog is visible, with retry', async () => {
+    mockApi.listProjects.mockRejectedValue(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-projects',
+        title: 'Error',
+      }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="budget-create-open"]').trigger('click');
+    await flushPromises();
+
+    // Before the fix the picker was simply empty and the save gate said
+    // 「请选择项目。」 — nothing told the user the list itself had failed to load.
+    const error = document.querySelector('[data-testid="budget-projects-error"]');
+    expect(error, 'the failed project read must be visible').toBeTruthy();
+    expect(error!.textContent).toContain('数据库不可用');
+    const retry = document.querySelector(
+      '[data-testid="budget-projects-retry"]',
+    ) as HTMLButtonElement;
+    expect(retry, 'a retry entry must exist').toBeTruthy();
+
+    // Retry goes through the same loader and offers the projects. While the
+    // re-read is in flight the button must say so (disabled/spinner) — the
+    // dialog otherwise shows a bare empty picker and no sign of progress.
+    let release: ((value: unknown) => void) | null = null;
+    mockApi.listProjects.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve as (value: unknown) => void;
+        }),
+    );
+    retry.click();
+    await flushPromises();
+
+    expect(retry.disabled, 'retry must disable while the re-read is in flight').toBe(true);
+
+    release!([
+      {
+        id: 'p1',
+        code: 'CORE',
+        name: 'Core AI',
+        status: 'ACTIVE',
+        projectTag: 'core-ai',
+        createdAt: '2026-08-01T00:00:00Z',
+      },
+      {
+        id: 'p2',
+        code: 'QA',
+        name: 'QA 回归',
+        status: 'ACTIVE',
+        projectTag: 'qa',
+        createdAt: '2026-08-01T00:00:00Z',
+      },
+    ]);
+    await flushPromises();
+
+    expect(mockApi.listProjects).toHaveBeenCalledTimes(2);
+    const options = Array.from(document.querySelectorAll('.stub-option')).map((o) => o.textContent);
+    expect(options.some((o) => o?.includes('QA 回归'))).toBe(true);
+  });
 });

@@ -435,4 +435,55 @@ describe('NextUsersView', () => {
       callsBefore,
     );
   });
+
+  it('#1160: a failed project read in the join picker is visible, not 「没有更多可加入」', async () => {
+    mockApi.listProjects.mockRejectedValue(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-500',
+        title: 'Error',
+      }),
+    );
+    mockApi.adminUserProjectMemberships.mockResolvedValue([]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="user-actions-u1"]').trigger('click');
+    await flushPromises();
+    (document.querySelector('[data-testid="user-project-members"]') as HTMLElement).click();
+    await flushPromises();
+
+    const drawer = document.querySelector('[data-testid="user-membership-drawer"]');
+    expect(drawer, 'membership drawer should render').toBeTruthy();
+    // 「没有更多可加入的 ACTIVE 项目」 says the admin has joined every project —
+    // the read that would know failed, so the claim must not be drawn.
+    expect(drawer!.textContent).not.toContain('没有更多可加入');
+    const error = document.querySelector('[data-testid="user-projects-error"]');
+    expect(error, 'the failed project read must be visible').toBeTruthy();
+    expect(error!.textContent).toContain('数据库不可用');
+    const retry = document.querySelector(
+      '[data-testid="user-projects-retry"]',
+    ) as HTMLButtonElement;
+    expect(retry, 'a retry entry must exist').toBeTruthy();
+
+    // Retry goes through the same loader and offers the projects again.
+    mockApi.listProjects.mockResolvedValue([
+      {
+        id: 'p1',
+        code: 'P1',
+        name: 'Core AI',
+        status: 'ACTIVE',
+        createdAt: '2026-08-01T00:00:00Z',
+      },
+    ]);
+    retry.click();
+    await flushPromises();
+
+    expect(mockApi.listProjects).toHaveBeenCalledTimes(2);
+    const options = Array.from(document.querySelectorAll('.stub-option')).map((o) => o.textContent);
+    expect(options).toContain('P1 · Core AI');
+  });
 });

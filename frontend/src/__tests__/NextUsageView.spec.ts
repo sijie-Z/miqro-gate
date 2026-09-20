@@ -631,4 +631,43 @@ describe('NextUsageView', () => {
     await flushPromises();
     expect(wrapper.find('[data-testid="records-busy"]').exists()).toBe(false);
   });
+
+  it('#1160: a failed quota read never claims 管理员未为你设置用量限额', async () => {
+    mockApi.listMyQuotaRules.mockRejectedValue(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-quota',
+        title: 'Error',
+      }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // 「管理员未为你设置用量限额」 is an assertion about the admin's configuration;
+    // a failed read cannot draw it.
+    expect(wrapper.text()).not.toContain('管理员未为你设置用量限额');
+    const panel = wrapper.find('[data-testid="my-quota-panel"]');
+    expect(panel.exists()).toBe(true);
+    // The failure must not be hidden behind the loading state: quotaLoading=false
+    // and error set must render the error, not 正在加载.
+    expect(panel.text()).not.toContain('正在加载配额规则');
+    const error = panel.find('[data-testid="my-quota-error"]');
+    expect(error.exists()).toBe(true);
+    expect(error.text()).toContain('数据库不可用');
+    const retry = panel.find('[data-testid="my-quota-retry"]');
+    expect(retry.exists()).toBe(true);
+
+    // Retry goes through the same loader.
+    mockApi.listMyQuotaRules.mockResolvedValue([quotaRule()]);
+    await retry.trigger('click');
+    await flushPromises();
+
+    expect(mockApi.listMyQuotaRules).toHaveBeenCalledTimes(2);
+    expect(wrapper.findAll('[data-testid="my-quota-row"]')).toHaveLength(1);
+    expect(panel.find('[data-testid="my-quota-error"]').exists()).toBe(false);
+  });
 });

@@ -18,11 +18,18 @@ vi.mock('@/api', () => ({
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
-    user: { username: 'demo2_user', displayName: 'Demo 用户', role: 'USER' },
+    user: { username: 'demo2_user', displayName: 'Demo 用户', role: authState.role },
   }),
 }));
 
 const mockApi = vi.mocked(api);
+
+/**
+ * The role the mocked auth store reports. `vi.hoisted` keeps the state object
+ * reachable from the hoisted `vi.mock` factory above; tests flip it before
+ * mounting to exercise the admin branch (auditEvents) of the feed loader.
+ */
+const authState = vi.hoisted(() => ({ role: 'USER' }));
 
 const key = (overrides: Partial<VirtualKeyView> = {}): VirtualKeyView => ({
   id: '0190-0001',
@@ -72,6 +79,7 @@ describe('NextOverviewView', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.resetAllMocks();
+    authState.role = 'USER';
     mockApi.listVirtualKeys.mockResolvedValue([
       key(),
       key({ id: '0190-0009', name: 'codex-extra', status: 'ROTATING' }),
@@ -306,10 +314,10 @@ describe('NextOverviewView', () => {
     expect(mockApi.listMyModelApprovals).toHaveBeenCalled();
   });
 
-  it('#1138: a failed approval read empties the feed, not the page', async () => {
+  it('#1138: a failed approval read fails the feed panel only, not the page', async () => {
     // The issue's own requirement: the approval read may fail on its own without taking
     // the dashboard down with it. It starts on the summary's wave (so it does not wait
-    // behind it) but is awaited *inside* the feed, where a failure can only empty that
+    // behind it) but is awaited *inside* the feed, where a failure can only affect that
     // panel. Awaiting it in the page's Promise.all instead — the first draft of this fix
     // — blanked the stat cards, the key grid and the cost donut along with it, which the
     // Playwright baseline caught.
@@ -318,6 +326,10 @@ describe('NextOverviewView', () => {
     // The page only records loadError for one — `if (error instanceof ApiError)` in
     // load()'s catch — so a plain Error made loadError unreachable and left the two
     // assertions below with nothing to bite on.
+    //
+    // #1160: "affects only that panel" used to mean the panel went *empty* and said
+    // 「还没有动态记录。」 — a claim about the data drawn from a read that failed. The
+    // isolation is the contract; the empty-state claim was the bug.
     mockApi.listMyModelApprovals.mockRejectedValue(
       new ApiError({
         type: 'about:blank',
@@ -342,7 +354,100 @@ describe('NextOverviewView', () => {
     // …no page-level banner appeared (the same fact, stated directly)…
     expect(wrapper.find('[data-testid="overview-load-error"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="overview-keys"]').text()).toContain('claude-code-main');
-    // …and only the activity panel went empty.
-    expect(wrapper.find('[data-testid="overview-feed"]').text()).toContain('还没有动态记录');
+    // …and only the activity panel reports the failure, without claiming emptiness.
+    const feed = wrapper.find('[data-testid="overview-feed"]');
+    expect(feed.text()).not.toContain('还没有动态记录');
+    expect(feed.find('[data-testid="overview-feed-error"]').exists()).toBe(true);
+  });
+
+  it('#1160: an admin feed read failure is visible with retry, the page intact', async () => {
+    // The admin branch reads the feed through `api.auditEvents` — a request whose
+    // failure the page-level banner could never show, because `loadFeed` swallowed it.
+    authState.role = 'SYSTEM_ADMIN';
+    mockApi.adminUsageSummary.mockResolvedValue({
+      groupBy: 'project',
+      groups: [],
+      totals: summary.totals,
+    } as unknown as UsageSummary);
+    mockApi.listSubscriptions.mockResolvedValue([]);
+    mockApi.auditEvents.mockRejectedValue(
+      new ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '审计读取失败',
+        requestId: 'req-feed',
+        title: 'Error',
+      }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // The main load succeeded and stayed that way (#1138's isolation preserved).
+    expect(wrapper.find('[data-testid="overview-load-error"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="overview-stats"]').exists()).toBe(true);
+
+    // The feed failure is stated where the data would have been drawn.
+    const feed = wrapper.find('[data-testid="overview-feed"]');
+    expect(feed.text()).not.toContain('还没有动态记录');
+    const error = feed.find('[data-testid="overview-feed-error"]');
+    expect(error.exists()).toBe(true);
+    expect(error.text()).toContain('审计读取失败');
+    const retry = feed.find('[data-testid="overview-feed-retry"]');
+    expect(retry.exists()).toBe(true);
+
+    // Retry re-reads through the same loader and the panel recovers.
+    mockApi.auditEvents.mockResolvedValue([
+      {
+        id: 'a1',
+        action: 'KEY_CREATED',
+        createdAt: '2026-09-01T00:00:00Z',
+      },
+    ] as never);
+    await retry.trigger('click');
+    await flushPromises();
+
+    expect(mockApi.auditEvents).toHaveBeenCalledTimes(2);
+    expect(feed.find('[data-testid="overview-feed-error"]').exists()).toBe(false);
+    expect(feed.findAll('.next-overview__feed-row')).toHaveLength(1);
+  });
+
+  it('#1160: the retry window does not re-draw the empty-state claim', async () => {
+    // Clearing the error is not "loaded": between the retry click and its
+    // response the panel used to fall through to 「还没有动态记录。」 again —
+    // the same claim about the data the issue is about, this time for the
+    // duration of a slow (or hung) re-read.
+    authState.role = 'SYSTEM_ADMIN';
+    mockApi.adminUsageSummary.mockResolvedValue({
+      groupBy: 'project',
+      groups: [],
+      totals: summary.totals,
+    } as unknown as UsageSummary);
+    mockApi.listSubscriptions.mockResolvedValue([]);
+    mockApi.auditEvents.mockRejectedValueOnce(
+      new ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '审计读取失败',
+        requestId: 'req-feed',
+        title: 'Error',
+      }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const feed = wrapper.find('[data-testid="overview-feed"]');
+    expect(feed.find('[data-testid="overview-feed-error"]').exists()).toBe(true);
+
+    // The re-read hangs: pin it in the air and inspect the panel.
+    mockApi.auditEvents.mockImplementation(() => new Promise(() => {}));
+    await feed.find('[data-testid="overview-feed-retry"]').trigger('click');
+    await flushPromises();
+
+    expect(feed.text()).not.toContain('还没有动态记录');
+    expect(feed.text()).toContain('加载中');
   });
 });

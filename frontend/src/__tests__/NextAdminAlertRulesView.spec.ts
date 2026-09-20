@@ -257,4 +257,53 @@ describe('NextAdminAlertRulesView', () => {
 
     expect(mockApi.deleteAlertRule).toHaveBeenCalledWith('r1');
   });
+
+  it('#1160: a failed project read is visible in the budget rule form, with retry', async () => {
+    mockApi.listProjects.mockRejectedValue(
+      new (await import('@/api/http')).ApiError({
+        type: 'about:blank',
+        status: 500,
+        code: 'INTERNAL',
+        detail: '数据库不可用',
+        requestId: 'req-projects',
+        title: 'Error',
+      }),
+    );
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="rule-create-open"]').trigger('click');
+    await flushPromises();
+    // 预算水位 (BUDGET_THRESHOLD) is the type whose form needs the project list.
+    await wrapper
+      .findAll('.ui-select-stub')[0]!
+      .findAll('.stub-option')
+      .find((o) => o.text() === '预算水位')!
+      .trigger('click');
+    await flushPromises();
+
+    // Before the fix the picker was simply empty and the save gate said
+    // 「请选择项目」 — nothing told the user the list itself had failed to load.
+    const error = wrapper.find('[data-testid="rule-projects-error"]');
+    expect(error.exists(), 'the failed project read must be visible').toBe(true);
+    expect(error.text()).toContain('数据库不可用');
+    const retry = wrapper.find('[data-testid="rule-projects-retry"]');
+    expect(retry.exists(), 'a retry entry must exist').toBe(true);
+
+    // Retry goes through the same loader and offers the projects.
+    mockApi.listProjects.mockResolvedValue([
+      {
+        id: 'p1',
+        code: 'CORE',
+        name: 'Core AI',
+        status: 'ACTIVE',
+        createdAt: '2026-08-01T00:00:00Z',
+      },
+    ]);
+    await retry.trigger('click');
+    await flushPromises();
+
+    expect(mockApi.listProjects).toHaveBeenCalledTimes(2);
+    expect(wrapper.findAll('.ui-select-stub').some((s) => s.text().includes('Core AI'))).toBe(true);
+  });
 });
