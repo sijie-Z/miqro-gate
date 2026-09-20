@@ -18,6 +18,7 @@ import { ApiError } from '@/api/http';
 import UsageCaliberTip from '@/components/UsageCaliberTip.vue';
 import UsageAdjustChip from '@/components/UsageAdjustChip.vue';
 import { netTokens } from '@/lib/usage-net';
+import { csvCell } from '@/utils/csv';
 import { localTzOffsetMinutes } from '@/utils/datetime';
 import { costGapNote, savingsBoundNote } from '@/lib/usage-pricing';
 import {
@@ -404,9 +405,14 @@ function clearAllDrill() {
 function exportBreakdownCsv() {
   const rows = breakdownRows.value;
   if (!rows.length) return;
-  const header = '分组,请求,Token,成本(CNY),占比(%)';
+  // #1114: every other export in the console goes through csvCell (RFC 4180
+  // quoting + the #430 formula-injection guard). This one was the last plain
+  // join(',') — and its first column is a label people type (project names,
+  // usernames, model ids), so a comma shifted columns and a leading '=' executed
+  // in the reader's spreadsheet.
+  const header = ['分组', '请求', 'Token', '成本(CNY)', '占比(%)'].map(csvCell).join(',');
   const body = rows.map((r) =>
-    [r.label, r.requests, r.tokens, r.cost.toFixed(4), r.share.toFixed(2)].join(','),
+    [r.label, r.requests, r.tokens, r.cost.toFixed(4), r.share.toFixed(2)].map(csvCell).join(','),
   );
   const csv = '﻿' + [header, ...body].join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
