@@ -8,24 +8,25 @@ export default defineConfig({
   plugins: [vue()],
   build: {
     // Split the framework and the icon set so the entry chunk stays small
-    // and the browser can cache vendor code independently. Function form:
-    // Rolldown (Vite 8+) requires it, Rollup (Vite 6) accepts both.
+    // and the browser can cache vendor code independently.
+    // Rolldown (Vite 8+) code splitting: `manualChunks` is deprecated there and
+    // its function form silently changed semantics, so use `codeSplitting` groups.
     chunkSizeWarningLimit: 1300,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks(id: string) {
-          if (
-            id.includes('node_modules/vue/') ||
-            id.includes('node_modules/vue-router/') ||
-            id.includes('node_modules/pinia/') ||
-            id.includes('node_modules/@vue/')
-          ) {
-            return 'vue';
-          }
-          if (id.includes('node_modules/tdesign-icons-vue-next/')) {
-            return 'tdesign-icons';
-          }
-          return undefined;
+        codeSplitting: {
+          groups: [
+            {
+              name: 'vue',
+              test: /node_modules[\\/](vue|vue-router|pinia|@vue)[\\/]/,
+              priority: 20,
+            },
+            {
+              name: 'tdesign-icons',
+              test: /node_modules[\\/]tdesign-icons-vue-next[\\/]/,
+              priority: 10,
+            },
+          ],
         },
       },
     },

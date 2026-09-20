@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue';
 import { RouterView } from 'vue-router';
-import { UiToastHost } from '@/ui';
+import UiToastHost from '@/ui/ToastHost.vue';
 import { installDomI18n } from '@/i18n';
 import ErrorBoundary from '@/components/ErrorBoundary.vue';
 
