@@ -10,6 +10,12 @@
 import { computed, onMounted, ref } from 'vue';
 import * as api from '@/api';
 import { UiButton, UiDonut, UiTable, UiTooltip } from '@/ui';
+import {
+  CHART_OTHER_COLOR,
+  CHART_PALETTE,
+  CHART_SUCCESS_COLOR,
+  CHART_TONE_COLORS,
+} from '@/lib/chart-palette';
 import { costGapNote, savingsBoundNote } from '@/lib/usage-pricing';
 import { csvCell } from '@/utils/csv';
 import { localTzOffsetMinutes } from '@/utils/datetime';
@@ -163,11 +169,16 @@ const composition = computed(() => {
   // #932: with nothing served there is no distribution to compute. A per-bucket "0.00%"
   // would claim every outcome happened zero times, when in truth nothing resolved at all.
   const share = (v: number) => (served ? (v / served) * 100 : null);
+  // #1126: this list is sorted by value below, so any two colours can end up as
+  // neighbouring rows — the set has to separate at *every* pair, not just the ones
+  // written in order. Every colour comes from the shared palette so none of them can
+  // drift back to the ad-hoc hex that measured ΔE 0.4 against the amber; the amber is
+  // the tone map's `warning`, which is also the theme's orange preset.
   return [
-    { label: 'L1 命中', value: l1, color: '#389e0d' },
-    { label: 'L2 命中', value: l2, color: '#0960bd' },
-    { label: '合并命中', value: coalesced, color: '#d48806' },
-    { label: '上游未命中', value: upstream, color: '#bfbfbf' },
+    { label: 'L1 命中', value: l1, color: CHART_SUCCESS_COLOR },
+    { label: 'L2 命中', value: l2, color: CHART_PALETTE[0] },
+    { label: '合并命中', value: coalesced, color: CHART_TONE_COLORS.warning },
+    { label: '上游未命中', value: upstream, color: CHART_OTHER_COLOR },
   ]
     .map((row) => ({ ...row, share: share(row.value) }))
     .sort((a, b) => b.value - a.value);
@@ -178,8 +189,8 @@ const savingSegments = computed(() => {
   const saved = Number(report.value?.totals?.savedCost ?? 0);
   const paid = Number(report.value?.totals?.paidCost ?? 0);
   const rows = [];
-  if (saved > 0) rows.push({ label: '缓存节省', value: saved, color: '#389e0d' });
-  if (paid > 0) rows.push({ label: '上游实付', value: paid, color: '#0960bd' });
+  if (saved > 0) rows.push({ label: '缓存节省', value: saved, color: CHART_SUCCESS_COLOR });
+  if (paid > 0) rows.push({ label: '上游实付', value: paid, color: CHART_PALETTE[0] });
   return rows;
 });
 

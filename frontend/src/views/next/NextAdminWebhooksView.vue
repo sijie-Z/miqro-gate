@@ -19,6 +19,7 @@ import {
   UiTable,
   toast,
 } from '@/ui';
+import { CHART_TONE_COLORS } from '@/lib/chart-palette';
 import type { WebhookEndpointView, WebhookDelivery } from '@/types/generated-api';
 
 const webhooks = ref<WebhookEndpointView[]>([]);
@@ -112,8 +113,8 @@ const deliverySummary = computed(() => {
 const deliverySegments = computed(() => {
   const { ok, fail } = deliverySummary.value;
   const rows = [];
-  if (ok > 0) rows.push({ label: '成功', value: ok, color: '#389e0d' });
-  if (fail > 0) rows.push({ label: '失败', value: fail, color: '#cf1322' });
+  if (ok > 0) rows.push({ label: '成功', value: ok, color: CHART_TONE_COLORS.success });
+  if (fail > 0) rows.push({ label: '失败', value: fail, color: CHART_TONE_COLORS.danger });
   return rows;
 });
 
