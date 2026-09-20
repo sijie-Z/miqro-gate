@@ -114,7 +114,12 @@ public class SessionFilter implements Filter {
             // Revoke the session so it cannot be replayed
             try {
                 sessionService.revokeSession(session.id());
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                // PH45: the 401 is still the right answer to this request, but a
+                // revocation that failed leaves the session usable although the
+                // account is disabled — that must not happen silently.
+                LOG.error("Session revocation failed for a DISABLED account [userId={}, sessionId={}]", user.id(),
+                        session.id(), e);
             }
             sendUnauthorized(httpRes, "Account disabled", "UNAUTHORIZED");
             return;
@@ -125,7 +130,11 @@ public class SessionFilter implements Filter {
         if (user.status() == UserStatus.LOCKED && (user.lockedUntil() == null || now.isBefore(user.lockedUntil()))) {
             try {
                 sessionService.revokeSession(session.id());
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                // PH45: same as the DISABLED branch — an unrevoked session of a
+                // locked account stays replayable, so the failure is recorded.
+                LOG.error("Session revocation failed for a LOCKED account [userId={}, sessionId={}]", user.id(),
+                        session.id(), e);
             }
             sendUnauthorized(httpRes, "Account locked", "UNAUTHORIZED");
             return;
