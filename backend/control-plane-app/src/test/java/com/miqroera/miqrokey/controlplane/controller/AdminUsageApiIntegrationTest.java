@@ -782,15 +782,16 @@ class AdminUsageApiIntegrationTest {
                          status_code, body, meta_json)
                     VALUES (:id, :tenantId, decode(:keyHex, 'hex'), :keyId, :projectId, :productId, :model,
                             200, decode('00', 'hex'), CAST(:meta AS jsonb))
-                    """,
-                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
-                            .addValue("keyHex", keyHex).addValue("keyId", keyId).addValue("projectId", projectId)
-                            .addValue("productId", productId).addValue("model", MODEL)
-                            .addValue("meta", "{\"usage\":{\"inputTokens\":" + inputTokens + ",\"outputTokens\":"
-                                    + outputTokens + "}}"));
+                    """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                    .addValue("keyHex", keyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                    .addValue("productId", productId).addValue("model", MODEL).addValue("meta",
+                            "{\"usage\":{\"inputTokens\":" + inputTokens + ",\"outputTokens\":" + outputTokens + "}}"));
         }
 
-        /** One served-from-cache event at {@code level}, deduplicated per (key, level, second). */
+        /**
+         * One served-from-cache event at {@code level}, deduplicated per (key, level,
+         * second).
+         */
         void insertCacheHit(UUID keyId, String keyHex, String level, Instant occurredAt, String greq) {
             jdbc.update("""
                     INSERT INTO cache_hit_event
@@ -1054,8 +1055,7 @@ class AdminUsageApiIntegrationTest {
         fx.insertCacheHit(ownKey, keyHex, "L1_HIT", t.plusSeconds(1), "greq-l1-2");
         fx.insertCacheHit(ownKey, keyHex, "L2_HIT", t, "greq-l2-1");
 
-        JsonNode cacheLevel =
-                objectMapper.readTree(summaryBody("cache_level")).path("totals");
+        JsonNode cacheLevel = objectMapper.readTree(summaryBody("cache_level")).path("totals");
         JsonNode project = objectMapper.readTree(summaryBody("PROJECT")).path("totals");
 
         // 3 hits x (1000 x 1.00 + 500 x 2.00) / 1e6 = 0.006. The two L1 rows are worth
@@ -1063,8 +1063,7 @@ class AdminUsageApiIntegrationTest {
         // key's three hits and the totals came to 0.012 — double the same three facts
         // cut by PROJECT.
         Assertions.assertThat(project.path("cost").path("savedByGatewayCache").decimalValue())
-                .as("the PROJECT cut is the reference reading of these three hits")
-                .isEqualByComparingTo("0.006");
+                .as("the PROJECT cut is the reference reading of these three hits").isEqualByComparingTo("0.006");
         Assertions.assertThat(cacheLevel.path("cost").path("savedByGatewayCache").decimalValue())
                 .as("CACHE_LEVEL totals disagree with PROJECT totals for the same hits")
                 .isEqualByComparingTo(project.path("cost").path("savedByGatewayCache").decimalValue());
@@ -1073,10 +1072,10 @@ class AdminUsageApiIntegrationTest {
         JsonNode groups = objectMapper.readTree(summaryBody("cache_level")).path("groups");
         Assertions.assertThat(savedByGatewayCache(groups, "L1_HIT")).isEqualByComparingTo("0.004");
         Assertions.assertThat(savedByGatewayCache(groups, "L2_HIT")).isEqualByComparingTo("0.002");
-        Assertions.assertThat(cacheLevel.path("requests").path("l1Hit").asLong()
-                + cacheLevel.path("requests").path("l2Hit").asLong())
-                .as("the per-level rows must add up to the same hits")
-                .isEqualTo(3L);
+        Assertions
+                .assertThat(cacheLevel.path("requests").path("l1Hit").asLong()
+                        + cacheLevel.path("requests").path("l2Hit").asLong())
+                .as("the per-level rows must add up to the same hits").isEqualTo(3L);
     }
 
     private String summaryBody(String groupBy) throws Exception {
