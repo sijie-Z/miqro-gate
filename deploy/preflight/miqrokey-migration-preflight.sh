@@ -35,9 +35,8 @@ read -r -d '' PREFLIGHT_SQL <<'SQL' || true
 \a
 \set ON_ERROR_STOP on
 
-SET client_min_messages = warning;   -- hide the "does not exist, skipping" notice
-DROP TABLE IF EXISTS preflight_blockers;
-SET client_min_messages = notice;    -- back on for the [info] lines below
+-- Temp table only: nothing outside this session is created, dropped or written,
+-- so the script is safe to run against a live database.
 CREATE TEMP TABLE preflight_blockers (check_name text, detail text);
 
 DO $preflight$
@@ -80,6 +79,13 @@ BEGIN
     -- (B) The data V70 refuses to accept: two reversals of one original row.
     -- #999 stopped the service from creating new ones; rows written before it
     -- are still there and are exactly what makes the CREATE UNIQUE INDEX fail.
+    --
+    -- Only a blocker while V70 is still pending. Once V70 is recorded as
+    -- applied Flyway never executes it again, so the duplicates cannot fail the
+    -- upgrade; they are the expected residue of the §9b.3(二) "mark V70 as
+    -- applied" escape, where the index was skipped on purpose (that choice is
+    -- recorded in the change log, not re-litigated here). Reporting it as a
+    -- blocker there would block every future upgrade forever.
     IF has_ledger THEN
         FOR r IN
             SELECT tenant_id, reversal_of_id, count(*) AS dup_count
@@ -89,10 +95,15 @@ BEGIN
             HAVING count(*) > 1
              ORDER BY tenant_id, reversal_of_id
         LOOP
-            INSERT INTO preflight_blockers
-            VALUES ('duplicate-reversal',
-                    'tenant ' || r.tenant_id || ', reversal_of ' || r.reversal_of_id
-                    || ': ' || r.dup_count || ' reversal rows (V70 allows exactly 1)');
+            IF v70_applied THEN
+                RAISE NOTICE '[info] duplicate reversal kept: tenant %, reversal_of %, % rows — V70 is already applied, so this does not block an upgrade; the unique index is absent by decision (section 9b.3)',
+                    r.tenant_id, r.reversal_of_id, r.dup_count;
+            ELSE
+                INSERT INTO preflight_blockers
+                VALUES ('duplicate-reversal',
+                        'tenant ' || r.tenant_id || ', reversal_of ' || r.reversal_of_id
+                        || ': ' || r.dup_count || ' reversal rows (V70 allows exactly 1)');
+            END IF;
         END LOOP;
     ELSE
         RAISE NOTICE '[info] usage_adjustments absent (pre-V63 schema): duplicate-reversal check skipped';
