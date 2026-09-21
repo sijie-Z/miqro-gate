@@ -71,6 +71,7 @@
 ## 4. 数据与迁移
 
 - [ ] Flyway 校验通过；从上一正式版本升级和回滚策略已演练。
+- [ ] 升级前已在目标库跑 `deploy/preflight/miqrokey-migration-preflight.sh` 且无 `PREFLIGHT VERDICT=BLOCKED`（拦截 V70 的两种不可恢复状态：重复冲销行、唯一索引已带外存在；处置见 operations-runbook §9b / #1249）。
 - [ ] 大表/分区 migration 在生产数据量副本评估锁和时长。
 - [x] 原始 usage、adjustment、导出和对账 schema 版本已固定。（adjustment = V63，`usage_adjustments`，#709/F20）
 - [x] 发布前备份成功且完成隔离恢复验证。
