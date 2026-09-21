@@ -122,6 +122,100 @@ class AdminMcpServiceApiIntegrationTest {
         org.assertj.core.api.Assertions.assertThat(row.get("consecutive_failures")).isEqualTo(3);
     }
 
+    /**
+     * Health-config update is the same write as registration, one endpoint over: it
+     * lands in the same four integer columns and the same
+     * {@code check_path varchar(512)}. {@code McpServiceHealthConfigRequest}
+     * declares the same ranges as {@code McpServiceCreateRequest}, but
+     * {@code AdminMcpServiceController.updateHealthConfig} never asks for them to
+     * be checked (#1348), and no column carries a CHECK — so every one of those
+     * ranges is advisory on update and absent at the database.
+     */
+    @Test
+    @DisplayName("health-config cannot undercut the documented interval floor (#1348)")
+    void healthConfigRejectsIntervalBelowFloor() throws Exception {
+        String serviceId = createService("health-floor");
+
+        // Control: registration carries @Valid, so 2 is already refused there.
+        postService("health-floor-control", "\"checkIntervalSeconds\":2").andExpect(status().isBadRequest());
+
+        // The update must not be the way around that same floor. 2 is below the
+        // @Min(5) that McpHealthChecker sizes its timer from.
+        postHealthConfig(serviceId, "{\"checkIntervalSeconds\":2}").andExpect(status().isBadRequest());
+
+        org.assertj.core.api.Assertions.assertThat(healthConfig(serviceId, "check_interval_seconds")).isEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("health-config cannot exceed the documented interval ceiling (#1348)")
+    void healthConfigRejectsIntervalAboveCeiling() throws Exception {
+        String serviceId = createService("health-ceiling");
+
+        // @Max(3600) is the ceiling the create path enforces. Without it on the
+        // update path an interval of 999999 s persists, and McpHealthChecker skips
+        // any service whose healthCheckedAt() + checkIntervalSeconds() is still in
+        // the future -- an 11.6-day probation blackout with no alarm.
+        postHealthConfig(serviceId, "{\"checkIntervalSeconds\":999999}").andExpect(status().isBadRequest());
+
+        org.assertj.core.api.Assertions.assertThat(healthConfig(serviceId, "check_interval_seconds")).isEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("an overlong check_path is a readable 400, not a generic 409 (#1348)")
+    void healthConfigRejectsOverlongCheckPath() throws Exception {
+        String serviceId = createService("health-path");
+
+        // 901 chars cannot fit check_path varchar(512). Unchecked by the DTO the
+        // string reaches PostgreSQL, whose 22001 is translated to 409
+        // RESOURCE_CONFLICT -- a status that names no field and sends the caller
+        // looking for a concurrent-modification conflict that never happened.
+        String tooLong = "/" + "a".repeat(900);
+        postHealthConfig(serviceId, "{\"checkPath\":\"" + tooLong + "\"}").andExpect(status().isBadRequest());
+
+        org.assertj.core.api.Assertions.assertThat(healthConfig(serviceId, "check_path")).isEqualTo("/health");
+    }
+
+    @Test
+    @DisplayName("a zero threshold is reported as 400, not as a 500 (#1348)")
+    void healthConfigRejectsZeroThreshold() throws Exception {
+        String serviceId = createService("health-zero");
+
+        // 0 slips past the request DTO and is only stopped by the McpService record
+        // constructor: IllegalArgumentException -> the catch-all handler -> 500,
+        // telling the caller the server broke on the value they sent.
+        postHealthConfig(serviceId, "{\"failThreshold\":0}").andExpect(status().isBadRequest());
+
+        org.assertj.core.api.Assertions.assertThat(healthConfig(serviceId, "fail_threshold")).isEqualTo(3);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions postService(String name, String extraJson)
+            throws Exception {
+        return mockMvc.perform(post("/api/v1/admin/mcp-services").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken).content(
+                        "{\"name\":\"" + name + "\",\"endpoint\":\"https://mcp.example.test/mcp\"," + extraJson + "}"));
+    }
+
+    private org.springframework.test.web.servlet.ResultActions postHealthConfig(String serviceId, String body)
+            throws Exception {
+        return mockMvc.perform(post("/api/v1/admin/mcp-services/" + serviceId + "/health-config")
+                .contentType(MediaType.APPLICATION_JSON).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken).content(body));
+    }
+
+    private String createService(String name) throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/mcp-services").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content("{\"name\":\"" + name + "\",\"endpoint\":\"https://mcp.example.test/mcp\"}"))
+                .andExpect(status().isOk()).andReturn();
+        return objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id").toString();
+    }
+
+    private Object healthConfig(String serviceId, String column) {
+        return jdbc.queryForObject("SELECT " + column + " FROM mcp_services WHERE id = :id",
+                new MapSqlParameterSource("id", UUID.fromString(serviceId)), Object.class);
+    }
+
     @Test
     @DisplayName("literal loopback/private endpoints are rejected at registration (#477)")
     void literalPrivateEndpointsAreRejected() throws Exception {
