@@ -144,7 +144,7 @@ MiQroGate 现有告警链只认识一种事件：「某个租户的事实行，�
 1. 网关侧事实产生与上报（§2.1–2.2 形状）；
 2. 新事实表迁移 + `(tenant_id, occurred_at DESC)` 索引（V60:63-66 形状）；
 3. `AlertEvaluator` 的评估分支（返回计数或占比要显式区分，:213-221 的注释与分支是范本）；
-4. **类型注册面——至少 8 处**（本轮逐一定位）：`AlertRuleService.java:146-149`（服务层校验，连同 open-admin 面一起覆盖）、`AlertEvaluator.java:195-240`、迁移 CHECK（模式样本 V60:39-46；现行最新一次为 V71:33-41）、`frontend/src/types/api.ts:75`、`NextAdminAlertRulesView.vue:45` 与 `:77`、`frontend/src/i18n/dict.ts:973`、`docs/api-contract.md:750` 与 `docs/database-schema.md:330,338`。这是目前接一个新信号的真实成本，也是 §8 Q2 的决策背景。
+4. **类型注册面——至少 8 处**（本轮逐一定位）：`AlertRuleService.java:146-149`（服务层校验，连同 open-admin 面一起覆盖）、`AlertEvaluator.java:195-240`、迁移 CHECK（模式样本 V60:39-46；现行最新一次为 V71:33-41）、`frontend/src/types/api.ts:75`、`NextAdminAlertRulesView.vue:47` 与 `:79`、`frontend/src/i18n/dict.ts:973`、`docs/api-contract.md:750` 与 `docs/database-schema.md:330,338`。这是目前接一个新信号的真实成本，也是 §8 Q2 的决策背景。
 5. 测试：至少覆盖「命中并签名投递」「阈值是计数不是比例」「非 seed 租户不触发」「跨窗去重」四类（样本：`UsageQueueSaturationAlertIntegrationTest.java:138-290`）。
 
 **与 `AlertEvaluator` 的对齐要求**：新分支必须保持 (i) 按 `:tenantId` 过滤（不变量，:186-190）；(ii) 阈值语义在注释和文档里说清「计数还是占比」（:213-221 是正面样本）；(iii) 去重沿用默认小时桶即可，不需要自定义。
