@@ -8,6 +8,7 @@ import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
 import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -217,6 +218,14 @@ class UserSerializationLeakIntegrationTest {
                 .content(objectMapper.writeValueAsString(Map.of("userId", userId)))).andExpect(status().isOk());
 
         return (String) createdBody.get("temporaryPassword");
+    }
+
+    @AfterEach
+    void tearDown() {
+        // Same convention as AdminOrgApiIntegrationTest: the container is shared
+        // across classes, and a class that leaves its users behind turns the next
+        // class's bootstrap into a 401 ("already bootstrapped").
+        resetTenantData();
     }
 
     /** Same child-first reset list as {@code AdminOrgApiIntegrationTest.Fixture#reset}. */
