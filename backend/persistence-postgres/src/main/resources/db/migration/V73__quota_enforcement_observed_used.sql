@@ -1,0 +1,17 @@
+-- #1316: the soft-landing verdict needs to remember *the reading it was reached under*.
+--
+-- quota_enforcement drives the gateway's 429 (JdbcRouteSnapshotLoader -> QuotaGate), and
+-- QuotaEnforcementService re-derives it from live usage every 60s. Without a recorded
+-- reading the service can only ask "did the admin touch the rule since the verdict?", which
+-- arms the recovery path on a bare UPDATE to quota_rules.updated_at: the order
+-- "admin saves the rule -> retention deletes usage -> next cycle" then lifts a block that
+-- never recovered, because the save is newer than the verdict and the live reading is gone.
+--
+-- observed_used is the reading the verdict was established on (same numeric shape as the
+-- aggregated usage it comes from). The stored verdict is held while it stays above the
+-- rule's current limit, and released when the limit is raised above it.
+--
+-- Nullable on purpose: rows written before this migration carry no reading, and the service
+-- falls back to the previous updated_at comparison for them. Defaulting to 0 would instead
+-- read as "under every limit" and silently drop live blocks on upgrade.
+ALTER TABLE quota_enforcement ADD COLUMN observed_used numeric(24, 10);
