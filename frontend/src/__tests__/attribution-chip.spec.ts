@@ -134,4 +134,61 @@ describe('AttributionChip', () => {
     expect(wrapper.find('[data-testid="usage-attribution-chip"]').exists()).toBe(false);
     expect(wrapper.text()).toBe('—');
   });
+
+  describe('#1139 — the suffix ruling says whether there was a choice', () => {
+    it('speaks when the suffix picked among several bindings: that is a real decision', () => {
+      const wrapper = render({ resolutionStatus: 'RESOLVED_SUFFIX', resolutionCandidates: 2 });
+
+      expect(wrapper.find('[data-testid="usage-attribution-chip"]').text()).toContain('按密钥后缀');
+      const note = wrapper.findComponent(UiTooltip).props('text');
+      expect(note).toContain('2 个候选绑定');
+      expect(note).toContain('从中选定');
+      expect(note).not.toContain('恰好命中');
+    });
+
+    it('stays quiet when the suffix merely matched the only binding — no candidate existed', () => {
+      // RESOLVED_SUFFIX with a single binding describes the same fact as SOLE_BINDING;
+      // chipping it would repaint the whole table with 「按密钥后缀」.
+      for (const props of [
+        { resolutionStatus: 'RESOLVED_SUFFIX', resolutionCandidates: 1 },
+        { resolutionStatus: 'RESOLVED_SUFFIX', resolutionCandidates: null },
+        { resolutionStatus: 'SOLE_BINDING', resolutionCandidates: 1 },
+      ]) {
+        const wrapper = render(props);
+        expect(wrapper.find('[data-testid="usage-attribution-chip"]').exists()).toBe(false);
+        expect(wrapper.text()).toBe('—');
+      }
+    });
+
+    it('does not guess a candidate count the column never recorded (pre-V72 rows)', () => {
+      // A claim forces the chip open even on a quiet ruling — and then the note must
+      // say "unknown" rather than pick a story.
+      const note = render({
+        resolutionStatus: 'RESOLVED_SUFFIX',
+        resolutionCandidates: null,
+        claimSource: 'suffix',
+      })
+        .findComponent(UiTooltip)
+        .props('text');
+
+      expect(note).toContain('候选绑定数未记录');
+      expect(note).toContain('无法区分');
+    });
+
+    it('separates "the suffix chose" from "the suffix just matched" in words', () => {
+      // The chip only speaks for the 1-candidate case when a claim forces it open —
+      // and this wording is exactly what #1139 asked the bubble to say.
+      const note = render({
+        resolutionStatus: 'RESOLVED_SUFFIX',
+        resolutionCandidates: 1,
+        claimSource: 'suffix',
+      })
+        .findComponent(UiTooltip)
+        .props('text');
+
+      expect(note).toContain('仅 1 个候选绑定');
+      expect(note).toContain('恰好命中');
+      expect(note).not.toContain('从中选定');
+    });
+  });
 });

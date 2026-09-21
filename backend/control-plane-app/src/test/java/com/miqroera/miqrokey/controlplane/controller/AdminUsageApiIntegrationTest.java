@@ -261,18 +261,18 @@ class AdminUsageApiIntegrationTest {
     }
 
     @Test
-    @DisplayName("#1128: records carry the attribution ruling and the claim it judged, and stay null when there was none")
+    @DisplayName("#1128/#1139: records carry the attribution ruling, its candidate cardinality and the claim it judged")
     void recordsCarryAttribution() throws Exception {
         fx.insertCatalogAndGrant();
         UUID ownKey = fx.createOwnKey();
         fx.insertPrices();
         Instant attributedAt = Instant.now().minusSeconds(120);
         Instant plainAt = Instant.now().minusSeconds(60);
-        // The gateway writes the ruling and the claim side by side. A row with neither
-        // is one written before V54 (or outside the proxy path) — every authenticated
-        // proxy request walks the ladder, so this fixture is that older shape, not a
-        // single-binding key.
-        fx.insertAttributedUsage(ownKey, "chatcmpl-attr", 10L, 5L, attributedAt, "RESOLVED_HEADER", "prompt_url",
+        // The gateway writes the ruling, the candidate cardinality and the claim side
+        // by side. A row with none of them is one written before V54 (or outside the
+        // proxy path) — every authenticated proxy request walks the ladder, so this
+        // fixture is that older shape, not a single-binding key.
+        fx.insertAttributedUsage(ownKey, "chatcmpl-attr", 10L, 5L, attributedAt, "RESOLVED_HEADER", 2, "prompt_url",
                 "HIGH");
         fx.insertUsage(ownKey, "chatcmpl-plain", 10L, 5L, MODEL, plainAt);
 
@@ -283,12 +283,20 @@ class AdminUsageApiIntegrationTest {
         JsonNode attributed = items.get(1);
 
         Assertions.assertThat(attributed.path("resolutionStatus").asText()).isEqualTo("RESOLVED_HEADER");
+        Assertions.assertThat(attributed.path("resolutionCandidates").asInt()).isEqualTo(2);
         Assertions.assertThat(attributed.path("claimSource").asText()).isEqualTo("prompt_url");
         Assertions.assertThat(attributed.path("claimConfidence").asText()).isEqualTo("HIGH");
+        // #1139: the wire value is the stored value — read the column back and compare,
+        // so a mapper that hardcodes or swaps the field cannot pass this.
+        Integer stored = jdbc.queryForObject(
+                "SELECT resolution_candidates FROM usage_event WHERE provider_request_id = 'chatcmpl-attr'",
+                new MapSqlParameterSource(), Integer.class);
+        Assertions.assertThat(stored).isEqualTo(attributed.path("resolutionCandidates").asInt());
         // Null, not "" — and present rather than omitted: a reader has to be able to
         // tell
         // "no attribution recorded" from "the field is not in this response".
         Assertions.assertThat(plain.path("resolutionStatus").isNull()).isTrue();
+        Assertions.assertThat(plain.path("resolutionCandidates").isNull()).isTrue();
         Assertions.assertThat(plain.path("claimSource").isNull()).isTrue();
         Assertions.assertThat(plain.path("claimConfidence").isNull()).isTrue();
     }
@@ -632,23 +640,24 @@ class AdminUsageApiIntegrationTest {
          * input.
          */
         void insertAttributedUsage(UUID keyId, String providerRequestId, long input, long output, Instant occurredAt,
-                String resolutionStatus, String claimSource, String claimConfidence) {
+                String resolutionStatus, Integer resolutionCandidates, String claimSource, String claimConfidence) {
             jdbc.update("""
                     INSERT INTO usage_event
                         (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
                          credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
                          upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at,
-                         resolution_status, claim_source, claim_confidence)
+                         resolution_status, resolution_candidates, claim_source, claim_confidence)
                     VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :productId, :credentialId, :model,
                             'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, 'greq-attr', :occurredAt,
-                            :resolutionStatus, :claimSource, :claimConfidence)
+                            :resolutionStatus, :resolutionCandidates, :claimSource, :claimConfidence)
                     """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
                     .addValue("providerRequestId", providerRequestId).addValue("keyId", keyId)
                     .addValue("projectId", projectId).addValue("productId", productId)
                     .addValue("credentialId", credentialId).addValue("model", MODEL).addValue("input", input)
                     .addValue("output", output).addValue("total", input + output)
                     .addValue("occurredAt", Timestamp.from(occurredAt)).addValue("resolutionStatus", resolutionStatus)
-                    .addValue("claimSource", claimSource).addValue("claimConfidence", claimConfidence));
+                    .addValue("resolutionCandidates", resolutionCandidates).addValue("claimSource", claimSource)
+                    .addValue("claimConfidence", claimConfidence));
         }
 
         /**

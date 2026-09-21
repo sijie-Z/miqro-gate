@@ -465,6 +465,31 @@ describe('NextAdminUsageView', () => {
     );
   });
 
+  it('#1139: a suffix ruling with several candidates speaks; the single-binding one stays a dash', async () => {
+    // The wiring is the weak point: the chip's own spec cannot catch a view that
+    // forgets to pass resolutionCandidates down — every field is optional in the
+    // generated type and the chip would silently fall back to "unknown".
+    mockApi.adminUsageRecords.mockResolvedValue({
+      items: [
+        recordRow(0, { resolutionStatus: 'RESOLVED_SUFFIX', resolutionCandidates: 2 }),
+        recordRow(1, { resolutionStatus: 'RESOLVED_SUFFIX', resolutionCandidates: 1 }),
+      ],
+      page: 1,
+      size: 20,
+      total: 2,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    const chips = wrapper.findAll('[data-testid="usage-attribution-chip"]');
+    expect(chips).toHaveLength(1);
+    expect(chips[0]!.text()).toContain('按密钥后缀');
+    const notes = wrapper.findAllComponents(UiTooltip).map((t) => t.props('text'));
+    expect(notes.some((note) => note.includes('2 个候选绑定') && note.includes('从中选定'))).toBe(
+      true,
+    );
+  });
+
   /** Column headers of a rendered UiTable, in column order. */
   function headerTitles(wrapper: ReturnType<typeof mount>, testid: string): string[] {
     return wrapper.findAll(`[data-testid="${testid}"] thead th`).map((th) => th.text());
