@@ -49,7 +49,7 @@ miqro-key-gateway/
 │   ├── persistence-postgres/   # JPA/JDBC、Flyway、分区管理
 │   ├── route-snapshot/         # 版本化只读路由快照（当前实现）
 │   ├── queue-spi/              # 有界用量写入队列 SPI（当前实现）
-│   ├── cache-spi/              # 响应缓存 SPI + NoOp 实现（当前实现）
+│   ├── cache-spi/              # 响应缓存 SPI + L1/L2 实现（默认关闭）
 │   └── test-support/           # Mock Provider 与契约测试工具
 ├── frontend/                   # Vue 3 + TypeScript
 ├── deploy/                     # Docker Compose、反向代理、备份
@@ -63,7 +63,7 @@ miqro-key-gateway/
 - `provider-spi`：`com.miqroera.miqrokey.spi`——`ProviderProductAdapter` 契约及其值对象（`ProtocolFamily`、`ProviderProductDefinition`、`RouteContext`/`TargetRequest`、`CredentialMaterial`/`CredentialInjection`、`ProviderClient`、`UsageObserver`/`UsageObservation`、`PlanSnapshot`、`AdapterCapabilities`、`AdapterRegistry`）。核心 Gateway 只依赖此 SPI，禁止出现 `if (vendor == ...)` 分支。
 - `provider-adapters`：`com.miqroera.miqrokey.adapters`——内置签名目录（Ed25519 校验 + 严格 schema 校验 + classpath 加载，`catalog/` 子包）与编译期适配器注册表（`registry/BuiltInAdapterRegistry`，重复 `adapterId` 启动失败）。目录是纯数据：任何未知字段（含代码类名字段）被 schema 拒绝，适配器解析只按 `adapterId` 走注册表，远程目录不可能加载代码。具体供应商适配器在 G3.x 加入 `providers/` 子包。
 
-- `route-snapshot`：版本化只读快照——Gateway 在启动、定时刷新（默认 30s，失败保留 last-good）和 `miqrokey_route_refresh` NOTIFY 事件（见 §4.1）时把 Virtual Key 摘要（含 `grant_id`）、Key→项目绑定、Key 模型（`virtual_key_models`）、Grant 模型（`project_provider_grant_models`，仅 ACTIVE grant）、上游模型（`model_catalog`，仅 ACTIVE 行）、产品代码（`provider_products.product_code`）、项目标签、上游凭证密文（含 `EncryptedSecret` 密文与 keyVersion，永不含明文）加载为不可变快照；热路径零数据库访问，只做内存查询 + AES-256-GCM 解密。凭证解密后内存用完即清零。
+- `route-snapshot`：版本化只读快照——Gateway 在启动、定时刷新（默认 30s，失败保留 last-good）和 `miqrokey_route_refresh` NOTIFY 事件（见 §4.1）时把 Virtual Key 摘要（含 `grant_id`）、Key×项目绑定（ADR-0018：一把 Key 可绑多个项目，每行自带 `grant_id`；按 (Key, 标签) 索引）、Key 模型（`virtual_key_models`）、Grant 模型（`project_provider_grant_models`，仅 ACTIVE grant）、上游模型（`model_catalog`，仅 ACTIVE 行）、产品代码（`provider_products.product_code`）、项目标签、上游凭证密文（含 `EncryptedSecret` 密文与 keyVersion，永不含明文）加载为不可变快照；热路径零数据库访问，只做内存查询 + AES-256-GCM 解密。凭证解密后内存用完即清零。
 - `queue-spi`：有界用量写入队列契约 + 内存实现（容量默认 10000）。Gateway 观察器只产生不可变事件（含幂等键 `provider_request_id`），专用调度器批量写 PostgreSQL；队列满不静默丢弃，写失败保留重试，`INSERT ... ON CONFLICT DO NOTHING` 防双计。
 - `cache-spi`：`ResponseCache` 契约 + `NoOpResponseCache`。L1（Caffeine 风格内存）与 L2（PostgreSQL `cache_entry`）实现已存在但总开关默认关闭（ADR-0008）；只缓存 `cache_policy=ENABLED` 的 Key 且满足资格条件的响应，SSE 通过 `SseReplayEngine` 按字节重放。
 
@@ -88,7 +88,7 @@ Gateway 使用 Spring WebFlux 与 Reactor Netty，热路径禁止阻塞式数据
 
 **刷新事件（G2.2 实现）**：控制面与 Gateway 是两个独立进程，共享同一 PostgreSQL。控制面的 Virtual Key 与凭证变更服务在事务提交后（AFTER_COMMIT，回滚绝不发布）执行 `pg_notify`；Gateway 运行一个专用连接（`DriverManager`，不在 Hikari 池内）的 `LISTEN miqrokey_route_refresh` 守护线程，收到通知立即重载快照——无需等待 30s 定时刷新。通道名 `miqrokey_route_refresh` 是双方约定契约（配置项 `miqrokey.gateway.route-snapshot.notify-channel`）。快照持有加密密文，热路径只做内存查询 + AES-256-GCM 解密，解密后内存用完即清零。通知丢失由 30s 定时刷新自愈（保留 last-good 快照）。
 
-**`/v1/models` 四路交集（G2.3 实现）**：列表端点对 Key 返回「目录 × 上游模型 × Grant × Key 快照」的交集，四路输入均来自同一版本路由快照：目录是已签名 provider catalog（classpath，Ed25519 校验；Key 绑定产品的 `product_code` 不在目录中 → 空列表）；上游模型是 `model_catalog` 的 ACTIVE 行；Grant 是 ACTIVE grant 的 `project_provider_grant_models`；Key 快照是 `virtual_key_models`。交集外的模型不出现（未授权不泄漏）。代理热路径的请求级模型预校验只按 Key 快照判断（G2.2 行为不变）。
+**`/v1/models` 四路交集（G2.3 实现）**：列表端点对 Key 返回「目录 × 上游模型 × Grant × Key 快照」的交集，四路输入均来自同一版本路由快照：目录是已签名 provider catalog（classpath，Ed25519 校验；Key 绑定产品的 `product_code` 不在目录中 → 空列表）；上游模型是 `model_catalog` 的 ACTIVE 行；Grant 是**请求标签所解析绑定**的 ACTIVE grant 的 `project_provider_grant_models`（ADR-0018：多项目 Key 各项目各自收窄）；Key 快照是 `virtual_key_models`。交集外的模型不出现（未授权不泄漏）。代理热路径的请求级模型预校验只按 Key 快照判断（G2.2 行为不变）。
 
 **上游模型生产者（G2.3 实现）**：`ModelCatalogService`（控制面）只把**成功**的官方 API 抓取结果写入 `model_catalog`——事务内替换该产品全部行，提交后（AFTER_COMMIT）发布 route-refresh NOTIFY；任何抓取失败都保留上次成功目录（"上游失败可回退最后成功目录"）。适配器从 G3.x 起注册（`refreshProduct(adapter, client)` 接缝已就绪）；在此之前 `model_catalog` 为空，严格交集的结果是空列表——这是刻意的行为，不是缺陷。
 
@@ -122,7 +122,7 @@ PostgreSQL 是唯一首版状态存储：
 - 告警状态、定时任务锁、导出任务；
 - 审计日志。
 
-第一版不部署 Redis。未来缓存实现通过 SPI 加入，不影响核心模型。
+不部署 Redis（ADR-0005）。响应缓存经 `cache-spi` 实现（L1 内存 + L2 PostgreSQL），默认关闭（ADR-0009），不影响核心模型。
 
 ## 5. 请求时序
 
@@ -145,9 +145,9 @@ Client/CC Switch        Gateway                PostgreSQL snapshot    PostgreSQL
 
 **请求生命周期记录（G2.4 实现）**：每个到达上游的请求在发出前发布 `RequestStartedEvent`（`request_usage_records` 的 `IN_FLIGHT` 行），并在**任何**终态信号（完成、上游错误、超时、客户端取消）上恰好 finalize 一次（`RequestCompletedEvent`）。状态映射：上游返回状态码 → `SUCCEEDED` / `UPSTREAM_REJECTED`；客户端取消优先于已观测状态 → `CLIENT_CANCELLED`；超时未出首字节 → `TIMEOUT_BEFORE_FIRST_BYTE`（已出首字节 → `STREAM_INTERRUPTED`）；其余连接失败 → `UPSTREAM_UNAVAILABLE`。鉴权失败与缓存命中不打开记录。usage 从 SSE 事件或非流式 JSON 正文（仅提取计数，正文不保留）解析；SUCCEEDED 且无 usage 时 `usage_missing=true` 显式标记，绝不静默当作零。
 
-**批量写入（G2.4 实现）**：`queue-spi` 提供有界阻塞队列（默认容量 10000）、阈值/定时 flush（100 条或 5s）、专用有界 writer 执行器（`miqrokey.gateway.queue.writer-threads`，默认 4，`Schedulers.newBoundedElastic`）——flush 永不占用共享调度线程，数据库变慢不影响 route-snapshot 刷新节奏；in-flight 互斥防止 flush 重叠堆积。写失败把整批**按序重入队**并记 `warn`（幂等写入保证重试不双计），队列饱和 drop 时按高优先级 `warn` 计数——都不静默。指标经 Micrometer 暴露为无标签 gauge：`miqrokey.usage.queue.queued/published.total/persisted.total/dropped.total/flush.count/flush.last.duration.seconds`，供 `/actuator/prometheus` 抓取与告警。
+**批量写入（G2.4 实现）**：`queue-spi` 提供有界阻塞队列（默认容量 10000）、阈值/定时 flush（100 条或 5s）、专用有界 writer 执行器（`miqrokey.gateway.queue.writer-threads`，默认 4，`Schedulers.newBoundedElastic`）——flush 永不占用共享调度线程，数据库变慢不影响 route-snapshot 刷新节奏；in-flight 互斥防止 flush 重叠堆积。写失败把整批**按序重入队**并记 `warn`（幂等写入保证重试不双计），队列饱和 drop 时按高优先级 `warn` 计数——都不静默。指标经 Micrometer 暴露为无标签 gauge：`miqrokey.usage.queue.queued/published.total/persisted.total/dropped.total/flush.count/flush.last.duration.seconds`，供 `/actuator/prometheus` 抓取与告警。**饱和应急（F35 实现「可切换为同步写入」）**：`miqrokey.gateway.queue.saturation-mode` 默认 `DROP`（热路径绝不等待）；置 `WRITE_THROUGH` 时饱和事件改为经 writer 执行器单条幂等直写并在发布线程**有界等待**（`...write-through-timeout`，默认 5s）——完整性优先、短暂停滞可接受，JDBC 仍只在 writer 执行器执行，超时/失败照旧计数丢弃（发布线程永不无限阻塞）。
 
-**幂等写入（G2.4 实现）**：`usage_event` 用 `ON CONFLICT (tenant_id, provider_request_id) DO NOTHING`，`cache_hit_event` 用 `(tenant_id, cache_key, level, occurred_at)`；生命周期记录 start 为 `ON CONFLICT (started_at, gateway_request_id) DO NOTHING`，completion 为带 `WHERE request_status = 'IN_FLIGHT'` 的 guarded upsert——重试 flush 绝不双计、绝不重写已 finalized 记录，start 行丢失时 completion 独立插入终态行。
+**幂等写入（G2.4 实现）**：`usage_event` 用**不带仲裁目标**的 `ON CONFLICT DO NOTHING`——两个唯一键都表达「同一逻辑事实已存在」（`id` 相同 = 同一事件被重放；`(tenant_id, provider_request_id)` 部分索引相同 = 同一上游请求已记账），不能只把后者写成仲裁目标：`provider_request_id` 为空的行（合并路径）根本不受该部分索引仲裁，重放只能撞主键并硬报错（#887 修复），`cache_hit_event` 用 `(tenant_id, cache_key, level, occurred_at)`；生命周期记录 start 为 `ON CONFLICT (started_at, gateway_request_id) DO NOTHING`，completion 为带 `WHERE request_status = 'IN_FLIGHT'` 的 guarded upsert——重试 flush 绝不双计、绝不重写已 finalized 记录，start 行丢失时 completion 独立插入终态行。
 
 ## 6. 超时与重试
 
@@ -163,7 +163,7 @@ Client/CC Switch        Gateway                PostgreSQL snapshot    PostgreSQL
 
 ## 7. 缓存策略
 
-首版不缓存模型响应。Gateway 必须原样保留供应商 Prompt Cache 所依赖的：
+响应缓存默认关闭（ADR-0009 双重 opt-in，另需网关总开关），语义缓存不启用。Gateway 必须原样保留供应商 Prompt Cache 所依赖的：
 
 - 请求体顺序和内容；
 - `cache_control` 等协议字段；
@@ -171,7 +171,7 @@ Client/CC Switch        Gateway                PostgreSQL snapshot    PostgreSQL
 - Responses API 的缓存与会话字段；
 - 上游返回的 cache read/write Token。
 
-后续通过 `GatewayResponseCache` SPI 增加精确缓存或其他实现。Claude Code、Claude Desktop、Codex 和工具调用默认禁用 Gateway 响应缓存。
+精确缓存已通过 `GatewayResponseCache`/`cache-spi` 实现（L1/L2，默认关闭，ADR-0009）。Claude Code、Claude Desktop、Codex 和工具调用默认禁用 Gateway 响应缓存。
 
 ## 8. 可扩展接口
 
@@ -192,6 +192,22 @@ public interface GatewayResponseCache {
 ```
 
 接口表达职责即可，具体签名在实现阶段通过 ADR 固化。
+
+## 10. 近期数据面增补（2026-09-07 核对，细节以 api-contract/ADR 为准）
+
+- **MCP 调用代理（F01，V25/V28-V30）**：gateway `McpProxyController`——
+  `POST /mcpservers/{serviceName}/mcp`，消费者 Bearer 摘要鉴权（route snapshot）→ 两级 ACL
+  （McpAccessPolicy：服务级 + tools/call 工具级）→ 上游 JSON-RPC 原样流转发；F12/F13 韧性
+  （首字节前重试 + 熔断 503）同管线；F15 元数据日志（V29）。另提供入站 SSE 双端点（#356，I11）：
+  `GET /mcpservers/{name}/sse`（单节点内存会话，endpoint 事件 + 保活）+ `POST …/message`（202 后同一流水线
+  分发、结果以 message/error 事件回流）。MCP 属网关应用内，协议转换仍属
+  CC Switch 边界。
+- **开放管理面（ADR-0015，V32）**：control-plane 过滤链次序——SessionFilter(-100) →
+  AdminApiKeyAuthFilter(-95，`/api/v1/admin-api/**`，机器 Bearer 或 SYSTEM_ADMIN 会话)
+  → RoleInterceptor（`/api/v1/admin/**` deny-by-default 不变）。
+- **内容留痕旁路（ADR-0014，V31，默认关）**：网关密文信封侧信道 → Kafka producer →
+  消费端持久化（参考实现见 docs/retention-consumer.md）；明文只在抽取与加密之间短暂存在。
+- **导出/删除任务 GC（F06）**：`@Scheduled` 回收过窗导出产物与过期删除请求；EXECUTED 与审计永久保留。
 
 ## 9. 技术栈
 

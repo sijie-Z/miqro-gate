@@ -2,7 +2,7 @@ package com.miqroera.miqrokey.controlplane.config;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.miqroera.miqrokey.domain.model.User;
-import org.springframework.boot.autoconfigure.jackson.Jackson2ObjectMapperBuilderCustomizer;
+import org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -15,8 +15,8 @@ import org.springframework.context.annotation.Configuration;
 public class JacksonConfig {
 
     @Bean
-    public Jackson2ObjectMapperBuilderCustomizer userHashMixin() {
-        return builder -> builder.mixIn(User.class, UserMixin.class);
+    public JsonMapperBuilderCustomizer userHashMixin() {
+        return builder -> builder.addMixIn(User.class, UserMixin.class);
     }
 
     abstract static class UserMixin {

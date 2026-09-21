@@ -3,10 +3,9 @@ package com.miqroera.miqrokey.controlplane.service;
 import com.miqroera.miqrokey.controlplane.dto.UsageRecordPage;
 import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.VirtualKey;
-import com.miqroera.miqrokey.domain.repository.PriceSnapshotRepository;
 import com.miqroera.miqrokey.domain.repository.UsageStatsRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
-import com.miqroera.miqrokey.domain.usage.PriceSnapshot;
+import com.miqroera.miqrokey.domain.usage.AdjustedUsageRow;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import com.miqroera.miqrokey.domain.usage.UsageEvent;
 import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator;
@@ -16,14 +15,11 @@ import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -47,13 +43,10 @@ public class UsageStatsService {
 
     private final VirtualKeyRepository keyRepository;
     private final UsageStatsRepository usageStatsRepository;
-    private final PriceSnapshotRepository priceSnapshotRepository;
 
-    public UsageStatsService(VirtualKeyRepository keyRepository, UsageStatsRepository usageStatsRepository,
-            PriceSnapshotRepository priceSnapshotRepository) {
+    public UsageStatsService(VirtualKeyRepository keyRepository, UsageStatsRepository usageStatsRepository) {
         this.keyRepository = keyRepository;
         this.usageStatsRepository = usageStatsRepository;
-        this.priceSnapshotRepository = priceSnapshotRepository;
     }
 
     /**
@@ -68,24 +61,29 @@ public class UsageStatsService {
      *            exclusive end, null defaults to now
      */
     public UsageSummary summary(User user, String groupBy, Instant from, Instant to) {
+        return summary(user, groupBy, from, to, null);
+    }
+
+    /**
+     * Same summary, with {@code day}/{@code month} buckets in the caller's local
+     * day (#1050): {@code tzOffsetMinutes} is the caller's fixed offset from UTC
+     * (null = UTC), mirroring the hourly report's parameter.
+     */
+    public UsageSummary summary(User user, String groupBy, Instant from, Instant to, Integer tzOffsetMinutes) {
         UsageStatsRepository.GroupBy dimension = parseGroupBy(groupBy);
         validateTimeRange(from, to);
+        int tz = AdminUsageStatsService.tzOffset(tzOffsetMinutes);
         Set<UUID> keyIds = ownKeyIds(user);
         if (keyIds.isEmpty()) {
             // No keys to aggregate — return a zeroed summary without touching the
             // usage tables.
-            return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), List.of(), List.of(),
-                    new LinkedHashMap<>());
+            return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), List.of(), List.of());
         }
         UsageStatsRepository.UsageFilter filter = filter(user, keyIds, from, to);
 
-        Map<String, BigDecimal> prices = new LinkedHashMap<>();
-        for (PriceSnapshot p : priceSnapshotRepository.findAllLatestAt(Instant.now())) {
-            prices.put(p.providerProductId() + ":" + p.modelId() + ":" + p.tokenType().name(), p.unitPrice());
-        }
-        List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter);
-        List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter);
-        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows, prices);
+        List<UsageAggRow> usageRows = usageStatsRepository.aggregateUsage(dimension, filter, tz);
+        List<HitAggRow> hitRows = usageStatsRepository.aggregateHits(dimension, filter, tz);
+        return UsageStatsAggregator.aggregate(dimension.name().toLowerCase(), usageRows, hitRows);
     }
 
     /** Paged raw usage records for the caller's own keys, newest first. */
@@ -105,10 +103,10 @@ public class UsageStatsService {
         UsageStatsRepository.UsageFilter filter = filter(user, keyIds, from, to);
 
         long total = usageStatsRepository.countRecords(filter);
-        List<UsageEvent> events = usageStatsRepository.findRecords(filter, (page - 1) * size, size);
+        List<AdjustedUsageRow> events = usageStatsRepository.findRecords(filter, (page - 1) * size, size);
         List<UsageRecordPage.UsageRecordView> items = new ArrayList<>(events.size());
-        for (UsageEvent e : events) {
-            items.add(view(e));
+        for (AdjustedUsageRow row : events) {
+            items.add(view(row));
         }
         return new UsageRecordPage(items, page, size, total);
     }
@@ -155,18 +153,44 @@ public class UsageStatsService {
             return UsageStatsRepository.GroupBy.valueOf(value.trim().toUpperCase());
         } catch (IllegalArgumentException e) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "GROUP_BY_INVALID",
-                    "groupBy must be one of PROJECT, VIRTUAL_KEY, CACHE_LEVEL, DAY");
+                    "groupBy must be one of PROJECT, VIRTUAL_KEY, CACHE_LEVEL, DAY, USER, TEAM, MODEL, MONTH, PRODUCT");
         }
     }
 
-    private static UsageRecordPage.UsageRecordView view(UsageEvent e) {
+    /**
+     * Maps one row to the wire shape. The observed counts stay exactly the fact the
+     * gateway recorded; the net counts and the {@code adjusted} marker ride
+     * alongside so a reader can always tell a corrected row from an untouched one
+     * (#709). The per-row cost is priced from the row's own price basis — the same
+     * one the aggregates price with (#710) — and flagged {@code priced=false} when
+     * that basis does not cover a dimension the row used.
+     */
+    private static UsageRecordPage.UsageRecordView view(AdjustedUsageRow row) {
+        UsageEvent e = row.observed();
         TokenBucket t = e.tokens();
         Long input = orNull(t != null ? t.inputTokens() : null, t != null ? t.promptTokens() : null);
         Long output = orNull(t != null ? t.outputTokens() : null, t != null ? t.completionTokens() : null);
+        Long cacheRead = t != null ? t.cacheReadInputTokens() : null;
+        Long cacheCreation = t != null ? t.cacheCreationInputTokens() : null;
+        UsageStatsAggregator.PricedCost priced = UsageStatsAggregator.pricedCost(row.priceBasis(), input, output,
+                cacheRead, cacheCreation);
+        // #1128: the ruling travels with the claim it judged — the console shows both,
+        // so a
+        // row whose client claimed one project and was ruled to another is visible as
+        // such.
+        UsageEvent.ContextAttribution attribution = e.attribution();
         return new UsageRecordPage.UsageRecordView(e.occurredAt(), e.modelId(), e.cacheLevel(), input, output,
-                t != null ? t.cacheReadInputTokens() : null, t != null ? t.cacheCreationInputTokens() : null,
-                t != null ? t.totalTokens() : null, e.latencyMs(), e.upstreamStatusCode(), e.providerRequestId(),
-                e.gatewayRequestId(), e.isComplete(), e.usageMissing(), e.virtualKeyId());
+                cacheRead, cacheCreation, t != null ? t.totalTokens() : null, e.latencyMs(), e.upstreamStatusCode(),
+                e.providerRequestId(), e.gatewayRequestId(), e.isComplete(), e.usageMissing(), e.virtualKeyId(),
+                e.clientIp(), row.netInputTokens(), row.netOutputTokens(), row.netCacheReadInputTokens(),
+                row.netCacheCreationInputTokens(), row.adjusted(), row.providerProductName(),
+                row.lifecycle() != null ? row.lifecycle().timeToFirstByteMs() : null,
+                row.lifecycle() != null ? row.lifecycle().wireProtocol() : null,
+                row.lifecycle() != null ? row.lifecycle().requestStatus() : null, priced.cost(), priced.priced(),
+                attribution != null ? attribution.resolutionStatus() : null,
+                attribution != null ? attribution.resolutionCandidates() : null,
+                attribution != null ? attribution.claimSource() : null,
+                attribution != null ? attribution.claimConfidence() : null);
     }
 
     /** Primary input/output token, preferring the protocol-specific column. */

@@ -7,17 +7,26 @@ import vue from '@vitejs/plugin-vue';
 export default defineConfig({
   plugins: [vue()],
   build: {
-    // tdesign-vue-next is a large library; it is its own cacheable chunk,
-    // so the warning threshold targets the entry bundle only.
+    // Split the framework and the icon set so the entry chunk stays small
+    // and the browser can cache vendor code independently.
+    // Rolldown (Vite 8+) code splitting: `manualChunks` is deprecated there and
+    // its function form silently changed semantics, so use `codeSplitting` groups.
     chunkSizeWarningLimit: 1300,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        // Split the framework and component libraries so the entry chunk
-        // stays small and the browser can cache vendor code independently.
-        manualChunks: {
-          vue: ['vue', 'vue-router', 'pinia'],
-          tdesign: ['tdesign-vue-next'],
-          'tdesign-icons': ['tdesign-icons-vue-next'],
+        codeSplitting: {
+          groups: [
+            {
+              name: 'vue',
+              test: /node_modules[\\/](vue|vue-router|pinia|@vue)[\\/]/,
+              priority: 20,
+            },
+            {
+              name: 'tdesign-icons',
+              test: /node_modules[\\/]tdesign-icons-vue-next[\\/]/,
+              priority: 10,
+            },
+          ],
         },
       },
     },
@@ -42,6 +51,14 @@ export default defineConfig({
     proxy: {
       // Management API lives on the Control Plane (8080); the Gateway
       // data plane (8081) is not proxied by the dev server.
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+    },
+  },
+  preview: {
+    proxy: {
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,

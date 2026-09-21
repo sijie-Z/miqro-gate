@@ -1,0 +1,168 @@
+package com.miqroera.miqrokey.controlplane.service;
+
+import com.miqroera.miqrokey.controlplane.dto.BudgetView;
+import com.miqroera.miqrokey.controlplane.dto.ResourceDependency;
+import com.miqroera.miqrokey.domain.model.Budget;
+import com.miqroera.miqrokey.domain.model.Project;
+import com.miqroera.miqrokey.domain.repository.BudgetRepository;
+import com.miqroera.miqrokey.domain.repository.ProjectRepository;
+import com.miqroera.miqrokey.domain.usage.UsageStatsAggregator.UsageSummary;
+import com.miqroera.miqrokey.domain.service.AuditService;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
+import java.time.YearMonth;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Monthly per-project budgets (G8.2, {@code budget} V7): the alerting-only
+ * quota plan — a budget never blocks traffic. The spend watermark is computed
+ * at read time from the per-project cost allocation of the budget month, and
+ * the alert level (NORMAL / WARNING / EXCEEDED) derives from the configured
+ * threshold percentage, mirroring the Tencent consumer-quota alert states.
+ */
+@Service
+public class AdminBudgetService {
+
+    private final BudgetRepository budgetRepository;
+    private final ProjectRepository projectRepository;
+    private final AdminUsageStatsService usageStatsService;
+    private final AuditService auditService;
+    private final NamedParameterJdbcTemplate jdbc;
+
+    public AdminBudgetService(BudgetRepository budgetRepository, ProjectRepository projectRepository,
+            AdminUsageStatsService usageStatsService, AuditService auditService, NamedParameterJdbcTemplate jdbc) {
+        this.budgetRepository = budgetRepository;
+        this.projectRepository = projectRepository;
+        this.usageStatsService = usageStatsService;
+        this.auditService = auditService;
+        this.jdbc = jdbc;
+    }
+
+    public List<BudgetView> monthlyView(UUID tenantId, String month) {
+        validateMonth(month);
+        return budgetRepository.findAllByTenantAndMonth(tenantId, month).stream().map(b -> toView(tenantId, b))
+                .toList();
+    }
+
+    public BudgetView view(UUID tenantId, UUID projectId, String month) {
+        validateMonth(month);
+        Budget budget = budgetRepository.findByProjectAndMonth(tenantId, projectId, month)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "BUDGET_NOT_FOUND", "该月份未设置预算。"));
+        return toView(tenantId, budget);
+    }
+
+    /** Creates or updates the (project, month) budget in place (upsert). */
+    @Transactional
+    public BudgetView put(UUID tenantId, UUID projectId, String month, BigDecimal amount, String currency,
+            BigDecimal alertThresholdPct, AuditContext context) {
+        validateMonth(month);
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "PROJECT_NOT_FOUND", "项目不存在。"));
+        if (!project.tenantId().equals(tenantId)) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "PROJECT_NOT_FOUND", "项目不存在。");
+        }
+        Budget budget = new Budget(UUID.randomUUID(), tenantId, projectId, month, amount,
+                currency == null || currency.isBlank() ? "CNY" : currency.trim().toUpperCase(),
+                alertThresholdPct != null ? alertThresholdPct : new BigDecimal("80"), "ACTIVE", 0, Instant.now(),
+                Instant.now());
+        BudgetView view = toView(tenantId, budgetRepository.upsert(budget));
+        auditService.record(
+                tenantId, context.actorId(), "BUDGET_PUT", "BUDGET", budget.id(), AuditSummaries.summary(context,
+                        "projectId", projectId.toString(), "month", month, "amount", amount.toPlainString()),
+                context.requestId());
+        return view;
+    }
+
+    /**
+     * Deletes the (project, month) budget. Mirrors
+     * {@link AdminQuotaRuleService#delete} and
+     * {@link WebhookEndpointService#delete}: a budget a live
+     * {@code BUDGET_THRESHOLD} alert rule is currently reading is not silently
+     * orphaned (#1046).
+     *
+     * <p>
+     * The dependency is <em>month-scoped</em>, unlike the quota-rule one.
+     * {@code AlertEvaluator.budgetWatermark} resolves the project's budget for
+     * {@code YearMonth.now()} only, so what breaks a rule is the disappearance of
+     * <em>this</em> month's budget: the rule stays enabled and listed, its
+     * threshold still rendered, while {@code view()} throws BUDGET_NOT_FOUND into
+     * the evaluator's catch and every evaluation returns null — it can never fire
+     * again for the rest of the month. Deleting a past or future month breaks
+     * nothing (no rule reads it) and stays allowed, so history stays cleanable.
+     * </p>
+     *
+     * <p>
+     * The reference lives in {@code alert_rules.scope_json->>'projectId'} — a jsonb
+     * field with no foreign key — so nothing at the database level would catch it.
+     * The match lower-cases the stored value rather than casting the parameter to
+     * uuid: the write side accepts non-canonical spellings via
+     * {@code UUID.fromString} and stores them verbatim, and a cast would turn an
+     * existing dirty row into a 500 instead of a dependency.
+     * </p>
+     */
+    @Transactional
+    public void delete(UUID tenantId, UUID projectId, String month, AuditContext context) {
+        validateMonth(month);
+        if (month.equals(YearMonth.now().toString())) {
+            List<ResourceDependency> dependents = jdbc.query("""
+                    SELECT id, name, enabled FROM alert_rules
+                    WHERE tenant_id = :tenantId AND type = 'BUDGET_THRESHOLD'
+                      AND LOWER(scope_json ->> 'projectId') = :projectId
+                    ORDER BY name
+                    """, new MapSqlParameterSource("tenantId", tenantId).addValue("projectId", projectId.toString()),
+                    (rs, rowNum) -> new ResourceDependency("ALERT_RULE", (UUID) rs.getObject("id"),
+                            rs.getString("name"), rs.getBoolean("enabled") ? "已启用" : "已停用"));
+            if (!dependents.isEmpty()) {
+                throw new ResourceInUseException("本月预算被 " + dependents.size() + " 条告警规则引用，删除后这些规则将不再触发；请先删除或改配它们。",
+                        dependents);
+            }
+        }
+        if (!budgetRepository.delete(tenantId, projectId, month)) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "BUDGET_NOT_FOUND", "该月份未设置预算。");
+        }
+        auditService.record(tenantId, context.actorId(), "BUDGET_DELETE", "BUDGET", projectId,
+                AuditSummaries.summary(context, "projectId", projectId.toString(), "month", month),
+                context.requestId());
+    }
+
+    static void validateMonth(String month) {
+        if (month == null || !month.matches("\\d{4}-(0[1-9]|1[0-2])")) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "MONTH_INVALID", "月份必须是 YYYY-MM 格式。");
+        }
+    }
+
+    private BudgetView toView(UUID tenantId, Budget budget) {
+        Project project = projectRepository.findById(budget.projectId()).orElse(null);
+        BigDecimal spent = spend(tenantId, budget);
+        BigDecimal spentPct = budget.amount().signum() > 0
+                ? spent.multiply(BigDecimal.valueOf(100)).divide(budget.amount(), 2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+        String level = spentPct.compareTo(BigDecimal.valueOf(100)) >= 0
+                ? "EXCEEDED"
+                : spentPct.compareTo(budget.alertThresholdPct()) >= 0 ? "WARNING" : "NORMAL";
+        return new BudgetView(budget.projectId(), project != null ? project.code() : null,
+                project != null ? project.name() : null, budget.periodMonth(), budget.amount(), budget.currency(),
+                budget.alertThresholdPct(), budget.status(), spent, spentPct, level);
+    }
+
+    /**
+     * Allocated cost of the budget month for the project (usage + price snapshots).
+     */
+    private BigDecimal spend(UUID tenantId, Budget budget) {
+        YearMonth month = YearMonth.parse(budget.periodMonth());
+        Instant from = month.atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant to = month.plusMonths(1).atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        UsageSummary summary = usageStatsService.summary(tenantId, "project", from, to, null, budget.projectId(), null,
+                null, null, null, null);
+        return summary.totals().cost().projectAllocated();
+    }
+}

@@ -13,14 +13,16 @@
 .mk-page-title {
   margin: 0;
   font-size: var(--miqrokey-font-size-title);
-  font-weight: 600;
-  line-height: 28px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
   color: var(--miqrokey-text-primary);
 }
 
 .mk-page-description {
-  margin: 4px 0 0;
+  margin: 5px 0 0;
   font-size: var(--miqrokey-font-size-body);
+  line-height: 1.6;
   color: var(--miqrokey-text-secondary);
 }
 
@@ -363,6 +365,20 @@ td.mk-col-num {
 .mk-chip-baidu { background: linear-gradient(135deg, var(--miqrokey-chip-baidu-a), var(--miqrokey-chip-baidu-b)); }
 .mk-chip-volcengine { background: linear-gradient(135deg, var(--miqrokey-chip-volc-a), var(--miqrokey-chip-volc-b)); }
 .mk-chip-aliyun { background: linear-gradient(135deg, var(--miqrokey-chip-aliyun-a), var(--miqrokey-chip-aliyun-b)); }
+/* Neutral fallback for providers without a brand palette (still a brand chip). */
+.mk-brand-chip--unknown { background: linear-gradient(135deg, var(--miqrokey-chip-unknown-a), var(--miqrokey-chip-unknown-b)); }
+
+/* Provider glyph inside the chip: official mark (currentColor → white) or 单字. */
+.mk-brand-chip__glyph {
+  display: inline-flex;
+  width: 62%;
+  height: 62%;
+}
+
+.mk-brand-chip__glyph svg {
+  width: 100%;
+  height: 100%;
+}
 
 /* Stat card with icon chip (Tencent console metric card). */
 .mk-stat-card {
@@ -442,4 +458,75 @@ td.mk-col-num {
   display: flex;
   align-items: center;
   gap: var(--miqrokey-space-2);
+}
+
+/* ============================================================================
+   Component language — PostHog / Vben-admin derived (2026-09-03 owner brief).
+   Tables carry the data; keep them quiet, dense and precise: hairline rules,
+   no fills on headers, subtle row hover, right-aligned numerics.
+   ============================================================================ */
+
+/* ---- tables ---- */
+/* Table chrome lives in src/ui/Table.vue (custom ui-table markup); the old
+   TDesign .t-table overrides were removed as dead code in the #502 polish. */
+
+/* numeric cells: right aligned tabular by utility class .mk-num */
+.mk-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* ---- buttons: quiet primary, light hover states ---- */
+.t-button {
+  font-weight: 500;
+}
+.t-button--variant-base.t-button--theme-primary {
+  box-shadow: none;
+}
+.t-button--variant-base.t-button--theme-primary:hover {
+  background: var(--miqrokey-accent-hover);
+}
+.t-button--variant-text,
+.t-button--variant-outline {
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+/* ---- inputs: taller hit area, hairline border, calm focus ---- */
+.t-input {
+  border-color: var(--miqrokey-border-default);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.t-input--focused,
+.t-input:focus-within {
+  border-color: var(--miqrokey-accent);
+  box-shadow: 0 0 0 2px var(--miqrokey-accent-soft);
+}
+.t-select .t-input,
+.t-textarea .t-textarea__inner {
+  border-color: var(--miqrokey-border-default);
+}
+
+/* ---- tags / status chips: compact, no border bleed ---- */
+.t-tag {
+  border-radius: 6px;
+  font-weight: 500;
+}
+.mk-status {
+  border-radius: 999px;
+}
+
+/* ---- pagination: reduce chrome ---- */
+.t-pagination__btn,
+.t-pagination .t-pagination__number {
+  border-radius: 6px;
+}
+.t-pagination .t-pagination__number--active {
+  background: var(--miqrokey-accent-soft);
+  color: var(--miqrokey-accent);
+}
+
+/* ---- dialogs: calmer radius + surface ---- */
+.t-dialog {
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06), 0 16px 48px rgba(15, 23, 42, 0.12);
 }

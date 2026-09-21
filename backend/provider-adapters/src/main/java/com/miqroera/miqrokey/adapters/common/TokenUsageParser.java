@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.adapters.common;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.spi.UsageObservation;
 import com.miqroera.miqrokey.spi.UsageSource;
 
@@ -14,10 +14,11 @@ import java.util.Optional;
  *
  * <ul>
  * <li>OpenAI-compatible (root {@code usage}): {@code prompt_tokens} /
- * {@code completion_tokens}, plus the cache fields
- * {@code prompt_cache_hit_tokens} (read) / {@code prompt_cache_miss_tokens}
- * (write) and the OpenAI-standard/Zhipu GLM
- * {@code prompt_tokens_details.cached_tokens} (read) (G3.3).</li>
+ * {@code completion_tokens}, plus the cache fields — standard
+ * {@code input_tokens_details.cached_tokens} (Responses) /
+ * {@code prompt_tokens_details.cached_tokens} (Chat & Zhipu GLM, G3.3) /
+ * {@code prompt_cache_hit_tokens} (DeepSeek flat, G3.2) for reads, and the
+ * {@code *_tokens_details.cache_write_tokens} counterparts for writes.</li>
  * <li>Anthropic Messages (root or {@code message.usage}): {@code input_tokens}
  * / {@code output_tokens} / {@code cache_creation_input_tokens} /
  * {@code cache_read_input_tokens}.</li>
@@ -26,7 +27,17 @@ import java.util.Optional;
  * <p>
  * {@link #parse} is a pure function: unknown and missing fields are tolerated,
  * parse failures yield an empty {@link Optional} and never affect the proxied
- * request. Cache mapping: hit → cacheRead, miss/creation → cacheCreation.
+ * request.
+ * </p>
+ *
+ * <p>
+ * <b>Cache mapping (#767):</b> hit → {@code cacheRead}; {@code miss} is NOT a
+ * write — DeepSeek bills misses at the plain input rate, so they stay inside
+ * the input count (mapping them to {@code cacheCreation} priced them by the
+ * wrong rate). OpenAI-family counters include the cached tokens in the primary
+ * prompt count, so the parse normalises input to exclude them: every token is
+ * billed by exactly one rate bucket. Only {@code cache_write_tokens} /
+ * {@code cache_creation_input_tokens} map to {@code cacheCreation}.
  * </p>
  */
 public final class TokenUsageParser {
@@ -62,18 +73,42 @@ public final class TokenUsageParser {
         Long cacheCreation = longValue(usage, "cache_creation_input_tokens");
         Long prompt = longValue(usage, "prompt_tokens");
         Long completion = longValue(usage, "completion_tokens");
-        // OpenAI-compatible cache fields.
+        // OpenAI-family cache reads (#767), Anthropic-standard names first:
+        // Responses' input_tokens_details, Chat/GLM's prompt_tokens_details, then
+        // DeepSeek's flat prompt_cache_hit_tokens.
+        boolean openAiInclusiveCounters = false;
         if (cacheRead == null) {
-            cacheRead = longValue(usage, "prompt_cache_hit_tokens");
+            JsonNode inputDetails = usage.path("input_tokens_details");
+            cacheRead = longValue(inputDetails, "cached_tokens");
+            if (cacheRead == null) {
+                JsonNode promptDetails = usage.path("prompt_tokens_details");
+                cacheRead = longValue(promptDetails, "cached_tokens");
+            }
+            if (cacheRead == null) {
+                cacheRead = longValue(usage, "prompt_cache_hit_tokens");
+            }
+            openAiInclusiveCounters = cacheRead != null;
+        }
+        // Cache writes: the nested *_tokens_details.cache_write_tokens counterparts.
+        // prompt_cache_miss_tokens is deliberately NOT mapped — a miss is billed at
+        // the plain input rate and stays inside the input count (#767).
+        if (cacheCreation == null) {
+            JsonNode inputDetails = usage.path("input_tokens_details");
+            cacheCreation = longValue(inputDetails, "cache_write_tokens");
         }
         if (cacheCreation == null) {
-            cacheCreation = longValue(usage, "prompt_cache_miss_tokens");
+            JsonNode promptDetails = usage.path("prompt_tokens_details");
+            cacheCreation = longValue(promptDetails, "cache_write_tokens");
         }
-        // OpenAI-standard and Zhipu GLM shape: cache read is reported as
-        // prompt_tokens_details.cached_tokens (G3.3 official docs).
-        if (cacheRead == null) {
-            JsonNode details = usage.path("prompt_tokens_details");
-            cacheRead = longValue(details, "cached_tokens");
+        if (openAiInclusiveCounters) {
+            // OpenAI-family counts include the cached tokens in the primary prompt
+            // count; normalise to "input excludes cache" so `input × inputPrice +
+            // cacheRead × readPrice` bills each token exactly once (#767).
+            if (prompt != null) {
+                prompt = Math.max(0, prompt - cacheRead);
+            } else if (input != null) {
+                input = Math.max(0, input - cacheRead);
+            }
         }
         if (input == null && output == null && prompt == null && completion == null && cacheRead == null
                 && cacheCreation == null) {

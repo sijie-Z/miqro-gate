@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.persistence;
 
 import org.junit.jupiter.api.Tag;
-import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
+import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -30,7 +30,7 @@ public abstract class AbstractPostgresTest {
 
     static {
         POSTGRES = new PostgreSQLContainer<>(DockerImageName
-                .parse("postgres:17.6-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73")
+                .parse("postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94")
                 .asCompatibleSubstituteFor("postgres")).withDatabaseName("miqrokey_test").withUsername("miqrokey_test")
                 .withPassword("miqrokey_test");
         POSTGRES.start();

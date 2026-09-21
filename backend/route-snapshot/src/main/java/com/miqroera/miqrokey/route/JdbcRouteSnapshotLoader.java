@@ -1,17 +1,22 @@
 package com.miqroera.miqrokey.route;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
+import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
+import com.miqroera.miqrokey.domain.model.RetentionConfig;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.net.URI;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -64,14 +69,83 @@ public final class JdbcRouteSnapshotLoader {
      */
     public RouteSnapshot load(long version, Instant loadedAt) {
         Map<String, RouteSnapshot.KeyRecord> keys = loadKeys();
-        Map<UUID, RouteSnapshot.BindingRecord> bindings = loadBindings();
+        Map<UUID, Map<String, RouteSnapshot.BindingRecord>> bindings = loadBindings();
         Map<UUID, RouteSnapshot.CredentialRecord> credentials = loadCredentials();
         Map<UUID, Set<String>> models = loadModels();
         Map<UUID, Set<String>> grantModels = loadGrantModels();
         Map<UUID, Set<String>> upstreamModels = loadUpstreamModels();
         ProductIds productIds = loadProductIds();
+        Map<String, RouteSnapshot.ConsumerRecord> consumers = loadConsumers();
+        Map<String, RouteSnapshot.McpServerRecord> mcpServices = loadMcpServices();
+        Map<UUID, RetentionConfig> retention = loadRetention();
+        Map<UUID, RouteSnapshot.UnattributedPolicyRecord> unattributedPolicies = loadUnattributedPolicies();
+        QuotaEnforcement enforcement = loadQuotaEnforcement();
         return new RouteSnapshot(version, loadedAt, keys, bindings, credentials, models, grantModels, upstreamModels,
-                productIds.productCodes(), productIds.providerIds());
+                productIds.productCodes(), productIds.providerIds(), consumers, mcpServices, retention,
+                unattributedPolicies, enforcement.users(), enforcement.projects());
+    }
+
+    /**
+     * Exceeded REJECT quota-rule verdicts per scope (#684, {@code
+     * quota_enforcement}): the control-plane evaluator replaces the rows each
+     * cycle, so the snapshot only ever carries the current block list — mapped to
+     * the earliest window end among the rules blocking that scope (the moment the
+     * verdict can lift on its own; feeds the 429's Retry-After).
+     */
+    private QuotaEnforcement loadQuotaEnforcement() {
+        Map<UUID, Instant> users = new java.util.HashMap<>();
+        Map<UUID, Instant> projects = new java.util.HashMap<>();
+        jdbc.query("SELECT scope_type, scope_id, window_end FROM quota_enforcement", rs -> {
+            UUID scopeId = (UUID) rs.getObject("scope_id");
+            Instant until = rs.getObject("window_end", java.time.OffsetDateTime.class).toInstant();
+            Map<UUID, Instant> target = "USER".equals(rs.getString("scope_type")) ? users : projects;
+            target.merge(scopeId, until, (a, b) -> a.isBefore(b) ? a : b);
+        });
+        return new QuotaEnforcement(Map.copyOf(users), Map.copyOf(projects));
+    }
+
+    private record QuotaEnforcement(Map<UUID, Instant> users, Map<UUID, Instant> projects) {
+    }
+
+    /**
+     * Unattributed-request policies per tenant (V57, Spec v1.1 §7.3, #647).
+     * {@code model_scope} is a JSON array; empty means the product's full ACTIVE
+     * upstream catalog at request time.
+     */
+    private Map<UUID, RouteSnapshot.UnattributedPolicyRecord> loadUnattributedPolicies() {
+        Map<UUID, RouteSnapshot.UnattributedPolicyRecord> byTenant = new LinkedHashMap<>();
+        jdbc.query("SELECT tenant_id, project_id, credential_id, provider_product_id, model_scope"
+                + " FROM unattributed_policy", rs -> {
+                    Set<String> models = new java.util.LinkedHashSet<>();
+                    try {
+                        for (JsonNode node : objectMapper.readTree(rs.getString("model_scope"))) {
+                            models.add(node.asText());
+                        }
+                    } catch (Exception e) {
+                        log.warn("unattributed_policy for tenant {} has unreadable model_scope; treating as empty",
+                                rs.getObject("tenant_id"));
+                    }
+                    UUID tenantId = (UUID) rs.getObject("tenant_id");
+                    byTenant.put(tenantId,
+                            new RouteSnapshot.UnattributedPolicyRecord(tenantId, (UUID) rs.getObject("project_id"),
+                                    (UUID) rs.getObject("credential_id"), (UUID) rs.getObject("provider_product_id"),
+                                    models));
+                });
+        return byTenant;
+    }
+
+    /** Configured retention switches per tenant (V31, ADR-0014). */
+    private Map<UUID, RetentionConfig> loadRetention() {
+        Map<UUID, RetentionConfig> byTenant = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT tenant_id, enabled, content_scope, key_version, max_content_bytes
+                FROM retention_config
+                """, rs -> {
+            RetentionConfig config = new RetentionConfig(rs.getBoolean("enabled"), rs.getString("content_scope"),
+                    rs.getString("key_version"), 0, rs.getInt("max_content_bytes"));
+            byTenant.putIfAbsent((UUID) rs.getObject("tenant_id"), config);
+        });
+        return byTenant;
     }
 
     private Map<String, RouteSnapshot.KeyRecord> loadKeys() {
@@ -94,30 +168,28 @@ public final class JdbcRouteSnapshotLoader {
         return keys;
     }
 
-    private Map<UUID, RouteSnapshot.BindingRecord> loadBindings() {
-        Map<UUID, RouteSnapshot.BindingRecord> bindings = new HashMap<>();
+    private Map<UUID, Map<String, RouteSnapshot.BindingRecord>> loadBindings() {
+        Map<UUID, Map<String, RouteSnapshot.BindingRecord>> bindings = new HashMap<>();
         jdbc.query("""
-                SELECT DISTINCT ON (b.virtual_key_id)
-                       b.virtual_key_id, b.project_id, p.project_tag, g.upstream_credential_id, g.provider_product_id
+                SELECT b.virtual_key_id, b.project_id, p.project_tag, g.upstream_credential_id, g.provider_product_id,
+                       b.grant_id
                 FROM key_project_binding b
                 JOIN projects p ON p.id = b.project_id AND p.tenant_id = b.tenant_id
-                -- The binding's grant is authoritative: a project may hold
-                -- several ACTIVE grants (different products/credentials), and
-                -- the key must route only to the grant it was authorized for,
-                -- never to a sibling grant of the same project.
-                JOIN virtual_keys vk ON vk.id = b.virtual_key_id AND vk.tenant_id = b.tenant_id
-                JOIN project_provider_grants g ON g.id = vk.grant_id
+                -- The binding's grant is authoritative (ADR-0018): each binding
+                -- row carries its own grant, so one key may route to several
+                -- projects — each through the credential/product it was bound to.
+                JOIN project_provider_grants g ON g.id = b.grant_id
                                               AND g.project_id = b.project_id
                                               AND g.tenant_id = b.tenant_id
                                               AND g.status = 'ACTIVE'
                 WHERE b.status = 'ACTIVE' AND p.status = 'ACTIVE'
-                ORDER BY b.virtual_key_id, b.created_at
                 """, rs -> {
             UUID keyId = (UUID) rs.getObject("virtual_key_id");
             RouteSnapshot.BindingRecord binding = new RouteSnapshot.BindingRecord(keyId,
                     (UUID) rs.getObject("project_id"), rs.getString("project_tag"),
-                    (UUID) rs.getObject("upstream_credential_id"), (UUID) rs.getObject("provider_product_id"));
-            bindings.put(keyId, binding);
+                    (UUID) rs.getObject("upstream_credential_id"), (UUID) rs.getObject("provider_product_id"),
+                    (UUID) rs.getObject("grant_id"));
+            bindings.computeIfAbsent(keyId, k -> new HashMap<>()).put(binding.projectTag(), binding);
         });
         return bindings;
     }
@@ -128,36 +200,39 @@ public final class JdbcRouteSnapshotLoader {
         // path decrypts in memory and never queries the database. The partial
         // unique index uq_credential_versions_one_active guarantees at most one
         // ACTIVE version per credential, so the join cannot duplicate rows.
-        jdbc.query("""
-                SELECT c.id AS credential_id, c.tenant_id, pp.id AS product_id,
-                       pp.base_url_templates, pp.auth_scheme,
-                       v.encrypted_secret, v.nonce, v.encryption_key_version
-                FROM upstream_credentials c
-                JOIN upstream_subscriptions s ON s.tenant_id = c.tenant_id AND s.id = c.subscription_id
-                JOIN provider_products pp ON pp.id = s.provider_product_id
-                LEFT JOIN upstream_credential_versions v
-                       ON v.tenant_id = c.tenant_id AND v.id = c.active_version_id AND v.status = 'ACTIVE'
-                WHERE c.status = 'ACTIVE'
-                  AND c.id IN (SELECT g.upstream_credential_id FROM project_provider_grants g WHERE g.status = 'ACTIVE')
-                """, rs -> {
-            UUID credentialId = (UUID) rs.getObject("credential_id");
-            BaseUrlSet baseUrls = parseBaseUrls(rs.getString("base_url_templates"));
-            if (baseUrls.single() == null && baseUrls.byProtocolUris().isEmpty()) {
-                log.warn("Credential {} has no usable base_url_templates entry; excluded from routing snapshot",
-                        credentialId);
-                return;
-            }
-            EncryptedSecret encryptedSecret = null;
-            byte[] ciphertext = rs.getBytes("encrypted_secret");
-            if (ciphertext != null) {
-                encryptedSecret = new EncryptedSecret(ciphertext, rs.getBytes("nonce"),
-                        rs.getString("encryption_key_version"));
-            }
-            RouteSnapshot.CredentialRecord credential = new RouteSnapshot.CredentialRecord(credentialId,
-                    (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("product_id"), baseUrls.single(),
-                    rs.getString("auth_scheme"), encryptedSecret, baseUrls.byProtocolUris());
-            credentials.put(credentialId, credential);
-        });
+        jdbc.query(
+                """
+                        SELECT c.id AS credential_id, c.tenant_id, pp.id AS product_id,
+                               pp.base_url_templates, pp.auth_scheme,
+                               v.encrypted_secret, v.nonce, v.encryption_key_version
+                        FROM upstream_credentials c
+                        JOIN upstream_subscriptions s ON s.tenant_id = c.tenant_id AND s.id = c.subscription_id
+                        JOIN provider_products pp ON pp.id = s.provider_product_id
+                        LEFT JOIN upstream_credential_versions v
+                               ON v.tenant_id = c.tenant_id AND v.id = c.active_version_id AND v.status = 'ACTIVE'
+                        WHERE c.status = 'ACTIVE'
+                          AND (c.id IN (SELECT g.upstream_credential_id FROM project_provider_grants g WHERE g.status = 'ACTIVE')
+                               OR c.id IN (SELECT p.credential_id FROM unattributed_policy p WHERE p.tenant_id = c.tenant_id))
+                        """,
+                rs -> {
+                    UUID credentialId = (UUID) rs.getObject("credential_id");
+                    BaseUrlSet baseUrls = parseBaseUrls(rs.getString("base_url_templates"));
+                    if (baseUrls.single() == null && baseUrls.byProtocolUris().isEmpty()) {
+                        log.warn("Credential {} has no usable base_url_templates entry; excluded from routing snapshot",
+                                credentialId);
+                        return;
+                    }
+                    EncryptedSecret encryptedSecret = null;
+                    byte[] ciphertext = rs.getBytes("encrypted_secret");
+                    if (ciphertext != null) {
+                        encryptedSecret = new EncryptedSecret(ciphertext, rs.getBytes("nonce"),
+                                rs.getString("encryption_key_version"));
+                    }
+                    RouteSnapshot.CredentialRecord credential = new RouteSnapshot.CredentialRecord(credentialId,
+                            (UUID) rs.getObject("tenant_id"), (UUID) rs.getObject("product_id"), baseUrls.single(),
+                            rs.getString("auth_scheme"), encryptedSecret, baseUrls.byProtocolUris());
+                    credentials.put(credentialId, credential);
+                });
         return credentials;
     }
 
@@ -229,6 +304,217 @@ public final class JdbcRouteSnapshotLoader {
             providerIds.put(productId, (UUID) rs.getObject("provider_id"));
         });
         return new ProductIds(productCodes, providerIds);
+    }
+
+    /**
+     * ACTIVE external-system consumers by API-key digest (MCP caller auth, Tencent
+     * doc 134890).
+     */
+    private Map<String, RouteSnapshot.ConsumerRecord> loadConsumers() {
+        Map<String, RouteSnapshot.ConsumerRecord> byDigest = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT id, tenant_id, name, key_digest, capabilities, expires_at, jwt_public_key_pem
+                FROM api_consumers
+                WHERE status = 'ACTIVE'
+                """, (rs, rowNum) -> {
+            UUID id = (UUID) rs.getObject("id");
+            byDigest.putIfAbsent(id.toString(),
+                    new RouteSnapshot.ConsumerRecord(id, (UUID) rs.getObject("tenant_id"), rs.getString("name"),
+                            rs.getBytes("key_digest"), capabilities(rs),
+                            rs.getTimestamp("expires_at") != null ? rs.getTimestamp("expires_at").toInstant() : null,
+                            rs.getString("jwt_public_key_pem")));
+            return null;
+        });
+        return byDigest;
+    }
+
+    /**
+     * Reads the nullable jsonb capabilities column as a list (null = full). The
+     * codes are application-validated to a fixed word set, so a character-level
+     * parse is safe here.
+     */
+    private static List<String> capabilities(java.sql.ResultSet rs) throws java.sql.SQLException {
+        String raw = rs.getString("capabilities");
+        if (raw == null) {
+            return null;
+        }
+        String inner = raw.trim();
+        if (inner.length() < 2 || !inner.startsWith("[")) {
+            throw new IllegalStateException("Unreadable api_consumers.capabilities json for row");
+        }
+        inner = inner.substring(1, inner.length() - 1);
+        if (inner.isBlank()) {
+            return List.of();
+        }
+        List<String> codes = new ArrayList<>();
+        for (String part : inner.split(",")) {
+            String code = part.trim();
+            if (code.length() >= 2 && code.startsWith("\"") && code.endsWith("\"")) {
+                codes.add(code.substring(1, code.length() - 1));
+            } else {
+                throw new IllegalStateException("Unreadable api_consumers.capabilities json for row");
+            }
+        }
+        return codes;
+    }
+
+    /**
+     * ONLINE MCP services by service name (Tencent docs 135906 / 134890) with their
+     * two-level access control. Three read passes merged in memory: service+mode,
+     * server-list grants, tools joined with optional override grants (a tool row
+     * repeats once per override consumer).
+     */
+    private Map<String, RouteSnapshot.McpServerRecord> loadMcpServices() {
+        Map<String, RouteSnapshot.McpServerRecord> services = new LinkedHashMap<>();
+        Map<UUID, Set<UUID>> serverLists = new LinkedHashMap<>();
+        // serviceId -> toolId -> {toolName, status, overrideMode|null, method,
+        // consumerIds}
+        Map<UUID, Map<UUID, Object[]>> toolsByService = new LinkedHashMap<>();
+        Map<UUID, McpResiliencePolicy> resilienceById = new LinkedHashMap<>();
+
+        jdbc.query("""
+                SELECT s.id, s.tenant_id, s.name, s.endpoint, s.transport, s.status, a.mode AS acl_mode,
+                       s.backend_auth_mode, s.backend_secret_ciphertext, s.backend_secret_nonce,
+                       s.backend_secret_key_version, s.upstream_timeout_ms,
+                       p.retry_enabled, p.retry_max, p.retry_conditions, p.retry_idempotency_confirmed,
+                       p.breaker_enabled, p.breaker_window_seconds, p.breaker_min_requests,
+                       p.breaker_error_enabled, p.breaker_error_ratio, p.breaker_error_status_codes,
+                       p.breaker_slow_enabled, p.breaker_slow_call_ms, p.breaker_slow_ratio,
+                       p.breaker_open_seconds, p.breaker_probe_count, p.breaker_probe_success,
+                       p.breaker_skip_retry, p.version
+                FROM mcp_services s
+                LEFT JOIN mcp_service_access a ON a.mcp_service_id = s.id
+                LEFT JOIN mcp_resilience_policy p ON p.mcp_service_id = s.id
+                WHERE s.status = 'ONLINE'
+                """, (rs, rowNum) -> {
+            UUID id = (UUID) rs.getObject("id");
+            byte[] ciphertext = rs.getBytes("backend_secret_ciphertext");
+            com.miqroera.miqrokey.domain.crypto.EncryptedSecret backendSecret = ciphertext == null
+                    ? null
+                    : new com.miqroera.miqrokey.domain.crypto.EncryptedSecret(ciphertext,
+                            rs.getBytes("backend_secret_nonce"), rs.getString("backend_secret_key_version"));
+            services.put(rs.getString("name"),
+                    new RouteSnapshot.McpServerRecord(id, (UUID) rs.getObject("tenant_id"), rs.getString("name"),
+                            rs.getString("endpoint"), rs.getString("transport"), rs.getString("status"),
+                            rs.getString("acl_mode"), Set.of(), List.of(), null, rs.getString("backend_auth_mode"),
+                            backendSecret, rs.getInt("upstream_timeout_ms")));
+            serverLists.put(id, new LinkedHashSet<>());
+            toolsByService.put(id, new LinkedHashMap<>());
+            if (rs.getObject("retry_enabled") != null) {
+                resilienceById.put(id, mapPolicy(rs));
+            }
+            return null;
+        });
+
+        jdbc.query("""
+                SELECT sa.mcp_service_id AS service_id, g.consumer_id
+                FROM mcp_access_grants g
+                JOIN mcp_service_access sa ON sa.id = g.service_access_id
+                WHERE g.tool_id IS NULL
+                """, (rs, rowNum) -> {
+            UUID serviceId = (UUID) rs.getObject("service_id");
+            Set<UUID> list = serverLists.get(serviceId);
+            if (list != null) {
+                list.add((UUID) rs.getObject("consumer_id"));
+            }
+            return null;
+        });
+
+        jdbc.query("""
+                SELECT t.mcp_service_id AS service_id, t.id AS tool_id, t.tool_name, t.status, t.method,
+                       g.mode AS override_mode, g.consumer_id AS override_consumer,
+                       rp.retry_enabled, rp.retry_max, rp.retry_conditions, rp.retry_idempotency_confirmed,
+                       rp.version AS retry_version
+                FROM mcp_tools t
+                LEFT JOIN mcp_access_grants g ON g.tool_id = t.id
+                LEFT JOIN mcp_tool_retry_policy rp ON rp.mcp_tool_id = t.id
+                """, (rs, rowNum) -> {
+            UUID serviceId = (UUID) rs.getObject("service_id");
+            UUID toolId = (UUID) rs.getObject("tool_id");
+            Map<UUID, Object[]> byId = toolsByService.get(serviceId);
+            if (byId == null) {
+                return null;
+            }
+            Object[] state = byId.get(toolId);
+            if (state == null) {
+                state = new Object[]{rs.getString("tool_name"), rs.getString("status"), rs.getString("override_mode"),
+                        rs.getString("method"), new LinkedHashSet<UUID>(), mapToolRetry(rs)};
+                byId.put(toolId, state);
+            }
+            UUID consumer = (UUID) rs.getObject("override_consumer");
+            if (consumer != null) {
+                state[2] = rs.getString("override_mode");
+                @SuppressWarnings("unchecked")
+                Set<UUID> ids = (Set<UUID>) state[4];
+                ids.add(consumer);
+            }
+            return null;
+        });
+
+        Map<String, RouteSnapshot.McpServerRecord> result = new LinkedHashMap<>();
+        for (RouteSnapshot.McpServerRecord service : services.values()) {
+            List<RouteSnapshot.McpToolRecord> tools = new ArrayList<>();
+            for (Object[] state : toolsByService.getOrDefault(service.id(), Map.of()).values()) {
+                @SuppressWarnings("unchecked")
+                Set<UUID> ids = (Set<UUID>) state[4];
+                tools.add(new RouteSnapshot.McpToolRecord((String) state[0], (String) state[1], (String) state[2], ids,
+                        (String) state[3], (com.miqroera.miqrokey.domain.model.McpToolRetryPolicy) state[5]));
+            }
+            result.put(service.name(),
+                    new RouteSnapshot.McpServerRecord(service.id(), service.tenantId(), service.name(),
+                            service.endpoint(), service.transport(), service.status(), service.aclMode(),
+                            serverLists.getOrDefault(service.id(), Set.of()), tools, resilienceById.get(service.id()),
+                            service.backendAuthMode(), service.encryptedBackendSecret(), service.upstreamTimeoutMs()));
+        }
+        return result;
+    }
+
+    /** Null when the tool has no retry override row (V46, issue #360). */
+    private static com.miqroera.miqrokey.domain.model.McpToolRetryPolicy mapToolRetry(java.sql.ResultSet rs)
+            throws java.sql.SQLException {
+        if (rs.getObject("retry_enabled") == null) {
+            return null;
+        }
+        Set<McpResiliencePolicy.RetryCondition> conditions = new LinkedHashSet<>();
+        for (String part : splitCsv(rs.getString("retry_conditions"))) {
+            conditions.add(McpResiliencePolicy.RetryCondition.valueOf(part));
+        }
+        return new com.miqroera.miqrokey.domain.model.McpToolRetryPolicy(rs.getBoolean("retry_enabled"),
+                rs.getInt("retry_max"), conditions, rs.getBoolean("retry_idempotency_confirmed"),
+                rs.getLong("retry_version"));
+    }
+
+    private static McpResiliencePolicy mapPolicy(java.sql.ResultSet rs) throws java.sql.SQLException {
+        Set<McpResiliencePolicy.RetryCondition> conditions = new LinkedHashSet<>();
+        for (String part : splitCsv(rs.getString("retry_conditions"))) {
+            conditions.add(McpResiliencePolicy.RetryCondition.valueOf(part));
+        }
+        Set<Integer> codes = new LinkedHashSet<>();
+        for (String part : splitCsv(rs.getString("breaker_error_status_codes"))) {
+            codes.add(Integer.valueOf(part));
+        }
+        return new McpResiliencePolicy(rs.getBoolean("retry_enabled"), rs.getInt("retry_max"), conditions,
+                rs.getBoolean("retry_idempotency_confirmed"), rs.getBoolean("breaker_enabled"),
+                rs.getInt("breaker_window_seconds"), rs.getInt("breaker_min_requests"),
+                rs.getBoolean("breaker_error_enabled"), rs.getInt("breaker_error_ratio"), codes,
+                rs.getBoolean("breaker_slow_enabled"), rs.getInt("breaker_slow_call_ms"),
+                rs.getInt("breaker_slow_ratio"), rs.getInt("breaker_open_seconds"), rs.getInt("breaker_probe_count"),
+                rs.getInt("breaker_probe_success"), rs.getBoolean("breaker_skip_retry"),
+                rs.getLong("version") /* loader ignores the row version */);
+    }
+
+    private static List<String> splitCsv(String value) {
+        List<String> parts = new ArrayList<>();
+        if (value == null || value.isBlank()) {
+            return parts;
+        }
+        for (String part : value.split(",")) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) {
+                parts.add(trimmed);
+            }
+        }
+        return parts;
     }
 
     private record ProductIds(Map<UUID, String> productCodes, Map<UUID, UUID> providerIds) {

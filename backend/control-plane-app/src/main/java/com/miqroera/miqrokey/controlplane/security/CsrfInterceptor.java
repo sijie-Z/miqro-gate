@@ -27,7 +27,8 @@ public class CsrfInterceptor implements HandlerInterceptor {
     private static final Set<String> STATE_CHANGING_METHODS = Set.of("POST", "PUT", "PATCH", "DELETE");
 
     /** Public paths exempt from CSRF (login, bootstrap). */
-    private static final Set<String> CSRF_EXEMPT = Set.of("/api/v1/auth/login", "/api/v1/auth/bootstrap");
+    private static final Set<String> CSRF_EXEMPT = Set.of("/api/v1/auth/login", "/api/v1/auth/bootstrap",
+            "/api/v1/auth/register");
 
     private final SessionService sessionService;
     private final UserContext userContext;
@@ -40,7 +41,7 @@ public class CsrfInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
             throws Exception {
-        String path = request.getRequestURI();
+        String path = RequestPaths.lookupPath(request);
         String method = request.getMethod();
 
         // Only check state-changing methods on API paths
@@ -50,6 +51,15 @@ public class CsrfInterceptor implements HandlerInterceptor {
 
         // Exempt public endpoints
         if (CSRF_EXEMPT.contains(path)) {
+            return true;
+        }
+
+        // Open admin surface (ADR-0015/0016): machine-key calls carry no
+        // cookie, so CSRF is meaningless there - the bearer digest already
+        // authenticated the caller. SYSTEM_ADMIN browser sessions still go
+        // through the token check below.
+        if (path.startsWith(AdminApiKeyAuthFilter.OPEN_PATH)
+                && request.getAttribute(AdminApiKeyAuthFilter.KEY_ATTR) != null) {
             return true;
         }
 
@@ -77,9 +87,7 @@ public class CsrfInterceptor implements HandlerInterceptor {
         try {
             response.setStatus(status);
             response.setContentType("application/problem+json");
-            response.getWriter().write(String.format(
-                    "{\"type\":\"about:blank\",\"title\":\"%s\",\"status\":%d,\"code\":\"%s\",\"requestId\":\"%s\"}",
-                    escapeJson(title), status, escapeJson(code), escapeJson(requestId)));
+            response.getWriter().write(ProblemJson.of(status, title, code, null, requestId));
         } catch (Exception e) {
             LOG.error("Failed to write CSRF problem response", e);
         }
@@ -88,36 +96,5 @@ public class CsrfInterceptor implements HandlerInterceptor {
     private static String resolveRequestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");
         return (header != null && !header.isBlank()) ? header : UUID.randomUUID().toString();
-    }
-
-    private static String escapeJson(String s) {
-        if (s == null)
-            return "null";
-        StringBuilder sb = new StringBuilder(s.length() + 8);
-        for (char c : s.toCharArray()) {
-            switch (c) {
-                case '"':
-                    sb.append("\\\"");
-                    break;
-                case '\\':
-                    sb.append("\\\\");
-                    break;
-                case '\n':
-                    sb.append("\\n");
-                    break;
-                case '\r':
-                    sb.append("\\r");
-                    break;
-                case '\t':
-                    sb.append("\\t");
-                    break;
-                default:
-                    if (c < 0x20)
-                        sb.append(String.format("\\u%04x", (int) c));
-                    else
-                        sb.append(c);
-            }
-        }
-        return sb.toString();
     }
 }

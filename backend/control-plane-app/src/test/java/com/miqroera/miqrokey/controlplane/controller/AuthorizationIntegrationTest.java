@@ -1,10 +1,11 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.LoginRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
+import com.miqroera.miqrokey.controlplane.security.OwnershipService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,7 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -102,7 +103,10 @@ class AuthorizationIntegrationTest {
         jdbc.update("UPDATE users SET role = 'USER' WHERE id = :id", new MapSqlParameterSource("id", ps.userId));
 
         mockMvc.perform(get("/api/v1/admin/test").cookie(ps.session)).andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("FORBIDDEN")).andExpect(jsonPath("$.status").value(403));
+                .andExpect(jsonPath("$.code").value("FORBIDDEN")).andExpect(jsonPath("$.status").value(403))
+                // #630: the raw writer must declare UTF-8 — the Chinese title
+                // used to be lossily rewritten to '?' on the wire.
+                .andExpect(jsonPath("$.title").value("该操作需要系统管理员（SYSTEM_ADMIN）权限。"));
     }
 
     @Test
@@ -139,7 +143,8 @@ class AuthorizationIntegrationTest {
         UUID otherUserId = UUID.randomUUID();
         mockMvc.perform(get("/api/v1/test/ownership/{ownerUserId}", otherUserId).cookie(ps.session))
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("NOT_FOUND"))
-                .andExpect(jsonPath("$.status").value(404)).andExpect(jsonPath("$.detail").value("Resource not found."))
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.detail").value(OwnershipService.RESOURCE_NOT_FOUND))
                 .andExpect(jsonPath("$.requestId").value(notNullValue()));
     }
 

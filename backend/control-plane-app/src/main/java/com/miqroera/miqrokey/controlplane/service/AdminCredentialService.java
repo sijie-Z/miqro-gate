@@ -1,5 +1,7 @@
 package com.miqroera.miqrokey.controlplane.service;
 
+import com.miqroera.miqrokey.spi.AdapterRegistry;
+import com.miqroera.miqrokey.controlplane.client.ProviderClientFactory;
 import com.miqroera.miqrokey.controlplane.config.AuthProperties;
 import com.miqroera.miqrokey.controlplane.dto.AdminCredentialCreateRequest;
 import com.miqroera.miqrokey.controlplane.dto.CredentialDetailView;
@@ -9,6 +11,8 @@ import com.miqroera.miqrokey.controlplane.dto.RotateCredentialRequest;
 import com.miqroera.miqrokey.controlplane.dto.ValidateCredentialRequest;
 import com.miqroera.miqrokey.controlplane.dto.ValidateCredentialResponse;
 import com.miqroera.miqrokey.domain.credential.CredentialSecretValidator;
+import com.miqroera.miqrokey.domain.model.ProviderProduct;
+import com.miqroera.miqrokey.domain.model.UpstreamSubscription;
 import com.miqroera.miqrokey.domain.crypto.CredentialFingerprint;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
@@ -18,16 +22,23 @@ import com.miqroera.miqrokey.domain.model.UpstreamCredential;
 import com.miqroera.miqrokey.domain.model.UpstreamCredentialVersion;
 import com.miqroera.miqrokey.domain.model.UpstreamSubscription;
 import com.miqroera.miqrokey.domain.model.User;
+import com.miqroera.miqrokey.domain.repository.AgentRepository;
 import com.miqroera.miqrokey.domain.repository.UpstreamCredentialRepository;
+import com.miqroera.miqrokey.domain.model.UpstreamCredential;
+import com.miqroera.miqrokey.domain.repository.ProviderProductRepository;
 import com.miqroera.miqrokey.domain.repository.UpstreamCredentialVersionRepository;
 import com.miqroera.miqrokey.domain.repository.UpstreamSubscriptionRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -70,11 +81,26 @@ public class AdminCredentialService {
     private final AuthProperties authProperties;
     private final RouteRefreshPublisher routeRefreshPublisher;
 
+    private final AdapterRegistry adapterRegistry;
+    private final ProviderClientFactory clientFactory;
+    private final ProviderProductRepository productRepository;
+    /**
+     * Seat-subscription lookups for per-seat credentials (#492); seats have no
+     * repository.
+     */
+    private final NamedParameterJdbcTemplate jdbc;
+
+    /** Agent bindings pin a credential against mutation (#714). */
+    private final AgentRepository agentRepository;
+
     public AdminCredentialService(UpstreamCredentialRepository credentialRepository,
             UpstreamCredentialVersionRepository versionRepository,
             UpstreamSubscriptionRepository subscriptionRepository, KeyEncryptionProvider keyEncryptionProvider,
             CredentialSecretValidator secretValidator, AuditService auditService, AuthProperties authProperties,
-            RouteRefreshPublisher routeRefreshPublisher) {
+            RouteRefreshPublisher routeRefreshPublisher, AdapterRegistry adapterRegistry,
+            ProviderClientFactory clientFactory, ProviderProductRepository productRepository,
+            NamedParameterJdbcTemplate jdbc, AgentRepository agentRepository) {
+        this.agentRepository = agentRepository;
         this.credentialRepository = credentialRepository;
         this.versionRepository = versionRepository;
         this.subscriptionRepository = subscriptionRepository;
@@ -83,6 +109,10 @@ public class AdminCredentialService {
         this.auditService = auditService;
         this.authProperties = authProperties;
         this.routeRefreshPublisher = routeRefreshPublisher;
+        this.adapterRegistry = adapterRegistry;
+        this.clientFactory = clientFactory;
+        this.productRepository = productRepository;
+        this.jdbc = jdbc;
     }
 
     /**
@@ -96,6 +126,10 @@ public class AdminCredentialService {
                 .filter(s -> s.tenantId().equals(tenantId)).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND,
                         "SUBSCRIPTION_NOT_FOUND", "Subscription not found"));
         requireValidSecret(request.secret());
+        UUID seatId = request.seatId();
+        if (seatId != null && !seatExists(tenantId, subscription.id(), seatId)) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "SEAT_NOT_FOUND", "Seat not found on this subscription");
+        }
 
         Instant now = Instant.now();
         UUID credentialId = UUID.randomUUID();
@@ -109,18 +143,22 @@ public class AdminCredentialService {
         // credential_id), so creation is three steps: insert the credential
         // without an active version, insert the version, then point the
         // credential at it via the optimistic-locked update (version 0 -> 1).
-        UpstreamCredential credential = new UpstreamCredential(credentialId, tenantId, subscription.id(), null,
+        UpstreamCredential credential = new UpstreamCredential(credentialId, tenantId, subscription.id(), seatId,
                 request.name(), fingerprint, CredentialStatus.ACTIVE, null, now, null, 0L, now, now);
         credentialRepository.insert(credential);
         versionRepository.insert(new UpstreamCredentialVersion(versionId, tenantId, credentialId,
                 encrypted.ciphertext(), encrypted.nonce(), encrypted.keyVersion(), fingerprint,
                 CredentialVersionStatus.ACTIVE, now, null, now));
-        UpstreamCredential pointed = new UpstreamCredential(credentialId, tenantId, subscription.id(), null,
+        UpstreamCredential pointed = new UpstreamCredential(credentialId, tenantId, subscription.id(), seatId,
                 request.name(), fingerprint, CredentialStatus.ACTIVE, versionId, now, null, 1L, now, now);
         credentialRepository.update(pointed);
 
         auditService.record(tenantId, admin.id(), "CREDENTIAL_CREATE", "UPSTREAM_CREDENTIAL", credentialId,
-                auditSummary("name", sanitize(request.name()), "subscriptionId", subscription.id()), requestId);
+                seatId == null
+                        ? auditSummary("name", sanitize(request.name()), "subscriptionId", subscription.id())
+                        : auditSummary("name", sanitize(request.name()), "subscriptionId", subscription.id(), "seatId",
+                                seatId),
+                requestId);
         routeRefreshPublisher.publishChanged();
         return toView(pointed);
     }
@@ -129,8 +167,14 @@ public class AdminCredentialService {
      * Validates a candidate secret against an existing credential without writing
      * anything. A well-formed secret is compared by SHA-256 fingerprint with the
      * currently active version (no decryption, no plaintext exposure).
+     *
+     * <p>
+     * Deliberately <em>not</em> transactional (#728): the final step probes the
+     * real provider (blocking HTTP, up to 10s) and a transaction would pin a pooled
+     * connection for its duration. Every step is a point read over unchanging
+     * inputs, so no consistency window is lost.
+     * </p>
      */
-    @Transactional(readOnly = true)
     public ValidateCredentialResponse validate(User admin, UUID credentialId, ValidateCredentialRequest request,
             String requestId) {
         findOwned(credentialId, admin.tenantId());
@@ -141,10 +185,69 @@ public class AdminCredentialService {
         byte[] fingerprint = CredentialFingerprint.sha256(request.secret());
         UpstreamCredentialVersion active = versionRepository.findActiveByCredentialId(credentialId).orElse(null);
         boolean matchesActive = active != null && MessageDigest.isEqual(active.secretFingerprint(), fingerprint);
-        if (matchesActive) {
-            return new ValidateCredentialResponse(true, null);
+        if (!matchesActive) {
+            return new ValidateCredentialResponse(false, "与当前生效版本不一致。");
         }
-        return new ValidateCredentialResponse(false, "The secret does not match the active version");
+        // The candidate matches the active version; probe the real provider
+        // (G4.x wiring: adapter validateCredential over a credential-scoped
+        // client). Failures map to UNREACHABLE, never block the check.
+        return probeProvider(credentialId, admin.tenantId(), request.secret());
+    }
+
+    /**
+     * Probes the provider with the candidate secret (the active version's key
+     * material). Requires the credential's subscription to resolve a product with a
+     * registered adapter and a base URL; anything missing yields
+     * {@code NOT_CHECKED}.
+     */
+    private ValidateCredentialResponse probeProvider(UUID credentialId, UUID tenantId, String secret) {
+        try {
+            UpstreamCredential credential = credentialRepository.findById(credentialId).orElse(null);
+            if (credential == null) {
+                return new ValidateCredentialResponse(true, null, "NOT_CHECKED", null, null);
+            }
+            UpstreamSubscription subscription = subscriptionRepository.findById(credential.subscriptionId())
+                    .filter(s -> s.tenantId().equals(tenantId)).orElse(null);
+            if (subscription == null) {
+                return new ValidateCredentialResponse(true, null, "NOT_CHECKED", null, null);
+            }
+            ProviderProduct product = productRepository.findById(subscription.providerProductId()).orElse(null);
+            if (product == null) {
+                return new ValidateCredentialResponse(true, null, "NOT_CHECKED", null, null);
+            }
+            var adapter = adapterRegistry.findById(product.productCode()).orElse(null);
+            URI baseUrl = firstBaseUrl(product.baseUrlTemplates());
+            if (adapter == null || baseUrl == null) {
+                return new ValidateCredentialResponse(true, null, "NOT_CHECKED", null, null);
+            }
+            var client = clientFactory.create(baseUrl, "Authorization", "Bearer " + secret);
+            var check = adapter.validateCredential(client).block(Duration.ofSeconds(10));
+            if (check == null) {
+                return new ValidateCredentialResponse(true, null, "UNREACHABLE", "上游探测超时", Instant.now());
+            }
+            if (check.valid()) {
+                return new ValidateCredentialResponse(true, null, "VALID", null, check.checkedAt());
+            }
+            return new ValidateCredentialResponse(true, null, "REJECTED", check.message(), check.checkedAt());
+        } catch (Exception e) {
+            return new ValidateCredentialResponse(true, null, "UNREACHABLE", "上游调用失败", Instant.now());
+        }
+    }
+
+    private static URI firstBaseUrl(String baseUrlTemplates) {
+        if (baseUrlTemplates == null || baseUrlTemplates.isBlank()) {
+            return null;
+        }
+        try {
+            var node = new tools.jackson.databind.ObjectMapper().readTree(baseUrlTemplates);
+            if (node.isArray() && !node.isEmpty()) {
+                String url = node.get(0).path("url").asText(null);
+                return url != null ? URI.create(url) : null;
+            }
+        } catch (Exception ignored) {
+            return null;
+        }
+        return null;
     }
 
     /**
@@ -158,9 +261,9 @@ public class AdminCredentialService {
         UUID tenantId = admin.tenantId();
         UpstreamCredential credential = findOwnedForUpdate(credentialId, tenantId);
         if (credential.status() != CredentialStatus.ACTIVE) {
-            throw new ApiException(HttpStatus.CONFLICT, "CREDENTIAL_NOT_ROTATABLE",
-                    "Only ACTIVE credentials can be rotated");
+            throw new ApiException(HttpStatus.CONFLICT, "CREDENTIAL_NOT_ROTATABLE", "只有 ACTIVE 状态的凭证可以轮换。");
         }
+        requireNotReferencedByAgent(tenantId, credentialId, "轮换");
         requireValidSecret(request.secret());
 
         Instant now = Instant.now();
@@ -201,8 +304,9 @@ public class AdminCredentialService {
         UpstreamCredential credential = findOwnedForUpdate(credentialId, tenantId);
         if (credential.status() == CredentialStatus.DISABLED || credential.status() == CredentialStatus.INVALID) {
             throw new ApiException(HttpStatus.CONFLICT, "CREDENTIAL_NOT_DISABLEABLE",
-                    "Credential is already " + credential.status());
+                    "凭证当前状态为 " + credential.status() + "，无需停用。");
         }
+        requireNotReferencedByAgent(tenantId, credentialId, "停用");
         Instant now = Instant.now();
         retireExpiredVersions(credentialId, now);
         versionRepository.findActiveByCredentialId(credentialId).ifPresent(
@@ -249,6 +353,19 @@ public class AdminCredentialService {
                         () -> new ApiException(HttpStatus.NOT_FOUND, "CREDENTIAL_NOT_FOUND", "Credential not found"));
     }
 
+    /**
+     * #714: while an ACTIVE agent binds the credential, the credential is an
+     * immutable identity — its secret cannot be rotated and it cannot be disabled
+     * (which would drop it from the routing snapshot under the agent's feet).
+     * Disabling the agent releases the reference.
+     */
+    private void requireNotReferencedByAgent(UUID tenantId, UUID credentialId, String action) {
+        agentRepository.findActiveByCredentialId(tenantId, credentialId).ifPresent(agent -> {
+            throw new ApiException(HttpStatus.CONFLICT, "CREDENTIAL_REFERENCED_BY_AGENT",
+                    "凭证已被 Agent「" + agent.name() + "」引用，不能" + action + "；请先停用该 Agent。");
+        });
+    }
+
     private void requireValidSecret(String secret) {
         CredentialSecretValidator.ValidationResult result = secretValidator.validate(secret);
         if (!result.valid()) {
@@ -275,9 +392,18 @@ public class AdminCredentialService {
     }
 
     private CredentialView toView(UpstreamCredential c) {
-        return new CredentialView(c.id(), c.credentialName(), c.subscriptionId(), c.status().name(),
+        return new CredentialView(c.id(), c.credentialName(), c.subscriptionId(), c.seatId(), c.status().name(),
                 c.activeVersionId(), CredentialFingerprint.hexPrefix(c.secretFingerprint(), FINGERPRINT_PREFIX_BYTES),
                 c.lastValidatedAt(), c.lastValidationError(), c.version(), c.createdAt(), c.updatedAt());
+    }
+
+    private boolean seatExists(UUID tenantId, UUID subscriptionId, UUID seatId) {
+        Integer matches = jdbc.queryForObject("""
+                SELECT count(*) FROM plan_seats
+                WHERE tenant_id = :tenantId AND upstream_subscription_id = :subscriptionId AND id = :seatId
+                """, new MapSqlParameterSource("tenantId", tenantId).addValue("subscriptionId", subscriptionId)
+                .addValue("seatId", seatId), Integer.class);
+        return matches != null && matches > 0;
     }
 
     private CredentialVersionView toVersionView(UpstreamCredentialVersion v) {

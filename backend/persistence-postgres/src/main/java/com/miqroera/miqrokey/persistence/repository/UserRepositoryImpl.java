@@ -4,6 +4,7 @@ import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.model.UserStatus;
 import com.miqroera.miqrokey.domain.repository.UserRepository;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -44,6 +46,14 @@ public class UserRepositoryImpl implements UserRepository {
         } catch (EmptyResultDataAccessException e) {
             return Optional.empty();
         }
+    }
+
+    @Override
+    public List<User> findAllByIds(Collection<UUID> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.query("SELECT * FROM users WHERE id IN (:ids)", new MapSqlParameterSource("ids", ids), ROW_MAPPER);
     }
 
     @Override
@@ -97,7 +107,7 @@ public class UserRepositoryImpl implements UserRepository {
                 WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
                 """, params);
         if (rows != 1)
-            throw new IllegalStateException("Optimistic lock failure: user " + user.id());
+            throw new OptimisticLockingFailureException("Optimistic lock failure: user " + user.id());
         return user;
     }
 

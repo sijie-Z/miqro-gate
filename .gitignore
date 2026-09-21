@@ -62,6 +62,13 @@ test-output/
 # Docker volumes
 deploy/data/
 
+# 生产部署态：密钥/证书/环境文件（保留模板）
+deploy/secrets/*
+!deploy/secrets/README.md
+!deploy/secrets/*.example
+deploy/.env
+deploy/.env.prod
+
 # Maven flatten plugin artifacts
 **/.flattened-pom.xml
 
@@ -71,3 +78,9 @@ deploy/data/
 # Local UI review screenshots (session artifacts)
 frontend/*-final.png
 frontend/*-fresh.png
+
+# Local editor launch configs
+.claude/launch.json
+
+# Local-only working files (secrets, review assets, dev helpers)
+/miqro-local/

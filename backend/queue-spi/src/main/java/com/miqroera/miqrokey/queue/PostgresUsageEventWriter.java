@@ -19,11 +19,12 @@ import java.util.UUID;
 
 /**
  * JDBC batch writer. One transaction per batch; idempotency comes from the
- * partial unique indexes (see {@link UsageEventWriter}). Request lifecycle
- * records are written with a guarded upsert: starts insert {@code IN_FLIGHT}
- * rows ({@code ON CONFLICT DO NOTHING}), completions update only
- * {@code IN_FLIGHT} rows — a finalized record is never rewritten and a retried
- * flush never double-finalizes.
+ * replayed event keeping its id plus the partial unique index on
+ * {@code (tenant_id, provider_request_id)} (see {@link UsageEventWriter}).
+ * Request lifecycle records are written with a guarded upsert: starts insert
+ * {@code IN_FLIGHT} rows ({@code ON CONFLICT DO NOTHING}), completions update
+ * only {@code IN_FLIGHT} rows — a finalized record is never rewritten and a
+ * retried flush never double-finalizes.
  *
  * <p>
  * Never runs on the Reactor event loop — the bus flush task owns it.
@@ -65,15 +66,27 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
         } catch (Exception e) {
             // Idempotent writes: a failed batch can be retried safely.
             log.warn(
-                    "Usage batch write failed (usage={}, hits={}, starts={}, completions={}); will be retried on next flush: {}",
-                    usageEvents.size(), hitEvents.size(), startedEvents.size(), completedEvents.size(), e.getMessage());
+                    "Usage batch write failed (usage={}, hits={}, starts={}, completions={}); will be retried on next flush",
+                    usageEvents.size(), hitEvents.size(), startedEvents.size(), completedEvents.size(), e);
             throw e;
         }
     }
 
     private void writeUsage(List<UsageEvent> events) {
         List<MapSqlParameterSource> params = new ArrayList<>(events.size());
+        List<MapSqlParameterSource> evidenceParams = new ArrayList<>();
         for (UsageEvent e : events) {
+            if (e.modelId() == null) {
+                // usage_event.model_id is NOT NULL. A single unrepresentable
+                // event used to fail the whole batch, which the bus re-enqueues
+                // forever — stalling every later usage row behind it. Drop the
+                // one event loudly instead; the gateway never emits it for a
+                // request that names a model.
+                log.warn("Dropping usage event without model_id (id={}, gatewayRequestId={})", e.id(),
+                        e.gatewayRequestId());
+                continue;
+            }
+            UsageEvent.ContextAttribution attr = e.attribution();
             params.add(new MapSqlParameterSource().addValue("id", e.id()).addValue("tenantId", e.tenantId())
                     .addValue("providerRequestId", e.providerRequestId()).addValue("virtualKeyId", e.virtualKeyId())
                     .addValue("projectId", e.projectId()).addValue("productId", e.providerProductId())
@@ -90,52 +103,156 @@ public final class PostgresUsageEventWriter implements UsageEventWriter {
                     .addValue("latencyMs", e.latencyMs()).addValue("upstreamStatusCode", e.upstreamStatusCode())
                     .addValue("cacheKey", e.cacheKey()).addValue("isComplete", e.isComplete())
                     .addValue("usageMissing", e.usageMissing()).addValue("gatewayRequestId", e.gatewayRequestId())
-                    .addValue("occurredAt", Timestamp.from(e.occurredAt())));
+                    .addValue("clientIp", e.clientIp()).addValue("occurredAt", Timestamp.from(e.occurredAt()))
+                    .addValue("sessionId", attr != null ? attr.sessionId() : null)
+                    .addValue("activityId", attr != null ? attr.activityId() : null)
+                    .addValue("claimedProjectId", attr != null ? attr.claimedProjectId() : null)
+                    .addValue("resolutionStatus", attr != null ? attr.resolutionStatus() : null)
+                    .addValue("resolutionCandidates", attr != null ? attr.resolutionCandidates() : null)
+                    .addValue("claimSource", attr != null ? attr.claimSource() : null)
+                    .addValue("claimConfidence", attr != null ? attr.claimConfidence() : null));
+            MapSqlParameterSource evidence = evidenceOf(e);
+            if (evidence != null) {
+                evidenceParams.add(evidence);
+            }
         }
+        if (params.isEmpty()) {
+            return;
+        }
+        // The conflict target is deliberately unqualified: a replayed event carries
+        // the same id, and for rows without an upstream request id (COALESCED hits,
+        // where provider_request_id is NULL) the partial unique index does not apply,
+        // so the id primary key is the only unique key available to absorb the
+        // replay. Naming the partial index here turned a replay into a hard
+        // usage_event_pkey violation, which failed the whole batch on every flush.
         jdbc.batchUpdate("""
                 INSERT INTO usage_event (id, tenant_id, provider_request_id, virtual_key_id, project_id,
                     provider_product_id, credential_id, model_id, cache_level,
                     input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
                     prompt_tokens, completion_tokens, total_tokens, reasoning_tokens,
                     latency_ms, upstream_status_code, cache_key, is_complete, usage_missing,
-                    gateway_request_id, occurred_at)
+                    gateway_request_id, client_ip, occurred_at,
+                    session_id, activity_id, claimed_project_id, resolution_status, resolution_candidates,
+                    claim_source, claim_confidence)
                 VALUES (:id, :tenantId, :providerRequestId, :virtualKeyId, :projectId, :productId, :credentialId,
                     :modelId, :cacheLevel,
                     :inputTokens, :outputTokens, :cacheCreation, :cacheRead,
                     :promptTokens, :completionTokens, :totalTokens, :reasoningTokens,
                     :latencyMs, :upstreamStatusCode, :cacheKey, :isComplete, :usageMissing,
-                    :gatewayRequestId, :occurredAt)
-                ON CONFLICT (tenant_id, provider_request_id) WHERE provider_request_id IS NOT NULL DO NOTHING
+                    :gatewayRequestId, :clientIp, :occurredAt,
+                    :sessionId, :activityId, :claimedProjectId, :resolutionStatus, :resolutionCandidates,
+                    :claimSource, :claimConfidence)
+                ON CONFLICT DO NOTHING
+                """, params.toArray(new MapSqlParameterSource[0]));
+        writeContextEvidence(evidenceParams);
+    }
+
+    /**
+     * CAA evidence rows (Spec v1.1 §7.2, {@code request_context_evidence}): "why
+     * was it attributed this way". Written in the usage transaction, keyed by the
+     * usage event id, so a retried flush is a no-op
+     * ({@code ON CONFLICT (id) DO NOTHING}) and the rows join.
+     *
+     * <p>
+     * Metadata only — the selector class and its normalized value, never a prompt,
+     * path, or body. {@code scope} / {@code observed_at} keep the V55 defaults
+     * ({@code turn} / {@code now()}): the gateway cannot observe the client-side
+     * scope of an inference.
+     * </p>
+     */
+    private void writeContextEvidence(List<MapSqlParameterSource> params) {
+        if (params.isEmpty()) {
+            return;
+        }
+        jdbc.batchUpdate("""
+                INSERT INTO request_context_evidence (id, tenant_id, request_id, source, value, confidence)
+                VALUES (:id, :tenantId, :requestId, :source, :value, :confidence)
+                ON CONFLICT (id) DO NOTHING
                 """, params.toArray(new MapSqlParameterSource[0]));
     }
 
+    /**
+     * Evidence row for one usage event, or null when the ladder used no external
+     * selector. {@code source} is the selector class the gateway actually observed,
+     * not the client's declared {@code X-Miqro-Claim-Source} (that claim is already
+     * kept in {@code usage_event.claim_source}):
+     * <ul>
+     * <li>{@code RESOLVED_HEADER} → {@code header}, value = the claimed project id
+     * the request was validated against;</li>
+     * <li>{@code RESOLVED_SUFFIX} → {@code suffix}, value = the tag presented in
+     * the key (the binding index is keyed by project tag).</li>
+     * </ul>
+     * {@code SOLE_BINDING} / {@code POLICY_ROUTED} resolve without any external
+     * signal — V55's source vocabulary has no honest value for them, and their
+     * explanation is {@code usage_event.resolution_status} itself (Spec §9 C13).
+     */
+    private static MapSqlParameterSource evidenceOf(UsageEvent e) {
+        UsageEvent.ContextAttribution attr = e.attribution();
+        if (attr == null) {
+            return null;
+        }
+        String source;
+        String value;
+        if ("RESOLVED_HEADER".equals(attr.resolutionStatus())) {
+            source = "header";
+            value = attr.claimedProjectId() != null ? attr.claimedProjectId().toString() : null;
+        } else if ("RESOLVED_SUFFIX".equals(attr.resolutionStatus())) {
+            source = "suffix";
+            value = attr.bindingTag();
+        } else {
+            return null;
+        }
+        if (value == null) {
+            // value is NOT NULL and carries the whole audit value: never write a
+            // half row — and never abort (and endlessly retry) the batch for it.
+            log.warn("Dropping context evidence without a value (id={}, status={})", e.id(), attr.resolutionStatus());
+            return null;
+        }
+        return new MapSqlParameterSource().addValue("id", e.id()).addValue("tenantId", e.tenantId())
+                .addValue("requestId", e.gatewayRequestId()).addValue("source", source).addValue("value", value)
+                .addValue("confidence", attr.claimConfidence() != null ? attr.claimConfidence() : "NONE");
+    }
+
+    /**
+     * Records hit events and bumps the per-entry counters <b>in one statement</b>.
+     *
+     * <p>
+     * The counter update is guarded by the row that the insert actually produced
+     * (data-modifying CTE + {@code RETURNING}): a hit folded away by the dedup
+     * index must not increment {@code cache_entry.hit_count_l1/l2}. A retried flush
+     * replays the very same events (the bus re-enqueues a drained batch when the
+     * write fails), so an unconditional increment would double-count the counters
+     * while the rows stay deduplicated — the two accounting surfaces must agree.
+     * See {@code docs/architecture.md} "重试 flush 绝不双计".
+     */
     private void writeHits(List<CacheHitEvent> events) {
-        List<MapSqlParameterSource> insertParams = new ArrayList<>(events.size());
-        List<MapSqlParameterSource> counterParams = new ArrayList<>(events.size());
+        if (events.isEmpty()) {
+            return;
+        }
+        List<MapSqlParameterSource> params = new ArrayList<>(events.size());
         for (CacheHitEvent e : events) {
-            insertParams.add(
-                    new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", e.tenantId())
-                            .addValue("cacheKey", e.cacheKey()).addValue("virtualKeyId", e.virtualKeyId())
-                            .addValue("projectId", e.projectId()).addValue("productId", e.providerProductId())
-                            .addValue("level", e.level().name()).addValue("gatewayRequestId", e.gatewayRequestId())
-                            .addValue("occurredAt", Timestamp.from(e.occurredAt())));
             boolean l1 = e.level() == com.miqroera.miqrokey.domain.usage.CacheLevel.L1_HIT;
-            counterParams.add(new MapSqlParameterSource().addValue("tenantId", e.tenantId())
-                    .addValue("cacheKey", e.cacheKey()).addValue("l1", l1).addValue("l2", !l1));
+            params.add(new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", e.tenantId())
+                    .addValue("cacheKey", e.cacheKey()).addValue("virtualKeyId", e.virtualKeyId())
+                    .addValue("projectId", e.projectId()).addValue("productId", e.providerProductId())
+                    .addValue("level", e.level().name()).addValue("gatewayRequestId", e.gatewayRequestId())
+                    .addValue("occurredAt", Timestamp.from(e.occurredAt())).addValue("l1", l1).addValue("l2", !l1));
         }
         jdbc.batchUpdate("""
-                INSERT INTO cache_hit_event (id, tenant_id, cache_key, virtual_key_id, project_id,
-                    provider_product_id, level, occurred_at, gateway_request_id)
-                VALUES (:id, :tenantId, :cacheKey, :virtualKeyId, :projectId, :productId, :level, :occurredAt,
-                    :gatewayRequestId)
-                ON CONFLICT (tenant_id, cache_key, level, occurred_at) DO NOTHING
-                """, insertParams.toArray(new MapSqlParameterSource[0]));
-        jdbc.batchUpdate("""
+                WITH inserted AS (
+                    INSERT INTO cache_hit_event (id, tenant_id, cache_key, virtual_key_id, project_id,
+                        provider_product_id, level, occurred_at, gateway_request_id)
+                    VALUES (:id, :tenantId, :cacheKey, :virtualKeyId, :projectId, :productId, :level, :occurredAt,
+                        :gatewayRequestId)
+                    ON CONFLICT (tenant_id, cache_key, level, occurred_at) DO NOTHING
+                    RETURNING tenant_id, cache_key
+                )
                 UPDATE cache_entry SET
                     hit_count_l1 = hit_count_l1 + CASE WHEN :l1 THEN 1 ELSE 0 END,
                     hit_count_l2 = hit_count_l2 + CASE WHEN :l2 THEN 1 ELSE 0 END
                 WHERE tenant_id = :tenantId AND cache_key = :cacheKey
-                """, counterParams.toArray(new MapSqlParameterSource[0]));
+                  AND EXISTS (SELECT 1 FROM inserted)
+                """, params.toArray(new MapSqlParameterSource[0]));
     }
 
     /**

@@ -1,17 +1,30 @@
 <script setup lang="ts">
+import { onMounted } from 'vue';
 import { RouterView } from 'vue-router';
+import UiToastHost from '@/ui/ToastHost.vue';
+import { installDomI18n } from '@/i18n';
+import ErrorBoundary from '@/components/ErrorBoundary.vue';
+
+// App-wide zh⇄en layer (translates the rendered DOM while English is chosen).
+onMounted(installDomI18n);
 </script>
 
 <template>
-  <RouterView />
+  <!-- #833: last line of defence — a crash in any route (including the shell
+       itself) renders a recoverable card instead of a blank page. -->
+  <ErrorBoundary>
+    <RouterView />
+  </ErrorBoundary>
+  <UiToastHost />
 </template>
 
 <style>
+html {
+  font-family: var(--ui-font);
+}
+
 body {
   margin: 0;
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans',
-    'PingFang SC', 'Microsoft YaHei', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.gateway.proxy;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -183,11 +183,16 @@ public final class SseUsageObserver {
      *
      * <p>
      * Reasoning tokens are extracted from {@code output_tokens_details} (OpenAI
-     * Responses) or {@code completion_tokens_details} (OpenAI Chat). DeepSeek's
-     * OpenAI-compatible cache fields ({@code prompt_cache_hit_tokens} /
-     * {@code prompt_cache_miss_tokens}) are mapped to cache read / cache creation
-     * when the standard names are absent. Returns {@link TokenBucket#EMPTY} when no
-     * usage object is present or the body is not parseable.
+     * Responses) or {@code completion_tokens_details} (OpenAI Chat). Cache counters
+     * fall back through the OpenAI standard nested paths
+     * ({@code input_tokens_details.cached_tokens} /
+     * {@code prompt_tokens_details.cached_tokens} / the write counterparts) and
+     * DeepSeek's flat {@code prompt_cache_hit_tokens} when the Anthropic-standard
+     * names are absent (#767). OpenAI-family counters include the cached tokens in
+     * the primary prompt count, so the parse normalises input to exclude them —
+     * every token is billed by exactly one rate bucket. Returns
+     * {@link TokenBucket#EMPTY} when no usage object is present or the body is not
+     * parseable.
      * </p>
      */
     public static TokenBucket parseUsageJson(ObjectMapper objectMapper, byte[] jsonBytes) {
@@ -213,21 +218,52 @@ public final class SseUsageObserver {
                 reasoningTokens = longValue(usage.path("completion_tokens_details"), "reasoning_tokens");
             }
 
-            // DeepSeek-specific cache fields on the OpenAI-compatible entry:
-            // prompt_cache_hit_tokens (cache read) / prompt_cache_miss_tokens
-            // (cache creation). Prefer the standard names when present.
+            // Cache reads, in precedence order (#767): the Anthropic-standard
+            // name, the OpenAI *standard nested* paths (Responses'
+            // input_tokens_details / Chat's prompt_tokens_details — cc-switch's
+            // fallback chain), then DeepSeek's flat prompt_cache_hit_tokens.
             Long cacheRead = longValue(usage, "cache_read_input_tokens");
+            boolean openAiInclusiveCounters = false;
             if (cacheRead == null) {
-                cacheRead = longValue(usage, "prompt_cache_hit_tokens");
+                cacheRead = nestedLong(usage, "input_tokens_details", "cached_tokens");
+                if (cacheRead == null) {
+                    cacheRead = nestedLong(usage, "prompt_tokens_details", "cached_tokens");
+                }
+                if (cacheRead == null) {
+                    cacheRead = longValue(usage, "prompt_cache_hit_tokens");
+                }
+                openAiInclusiveCounters = cacheRead != null;
             }
+            // Cache writes: Anthropic name, then the OpenAI nested write counters.
+            // prompt_cache_miss_tokens is NOT a write: DeepSeek bills misses at
+            // the plain input rate, so it must stay inside the input count
+            // (mapping it to cache-creation priced it at the wrong rate — #767).
             Long cacheCreation = longValue(usage, "cache_creation_input_tokens");
             if (cacheCreation == null) {
-                cacheCreation = longValue(usage, "prompt_cache_miss_tokens");
+                cacheCreation = nestedLong(usage, "input_tokens_details", "cache_write_tokens");
+            }
+            if (cacheCreation == null) {
+                cacheCreation = nestedLong(usage, "prompt_tokens_details", "cache_write_tokens");
             }
 
-            return new TokenBucket(longValue(usage, "input_tokens"), longValue(usage, "output_tokens"), cacheCreation,
-                    cacheRead, longValue(usage, "prompt_tokens"), longValue(usage, "completion_tokens"),
-                    longValue(usage, "total_tokens"), reasoningTokens);
+            Long inputTokens = longValue(usage, "input_tokens");
+            Long promptTokens = longValue(usage, "prompt_tokens");
+            if (openAiInclusiveCounters) {
+                // OpenAI-family counters INCLUDE the cached tokens in the primary
+                // prompt count, while the Anthropic-standard form excludes them.
+                // Normalise to "input excludes cache" so every token is billed by
+                // exactly one rate bucket (input × inputPrice + read × readPrice)
+                // instead of counting the cached part twice (#767).
+                if (inputTokens != null) {
+                    inputTokens = Math.max(0, inputTokens - cacheRead);
+                } else if (promptTokens != null) {
+                    promptTokens = Math.max(0, promptTokens - cacheRead);
+                }
+            }
+
+            return new TokenBucket(inputTokens, longValue(usage, "output_tokens"), cacheCreation, cacheRead,
+                    promptTokens, longValue(usage, "completion_tokens"), longValue(usage, "total_tokens"),
+                    reasoningTokens);
         } catch (Exception ignored) {
             // Observation must never affect or expose the proxied response.
             log.debug("Usage metadata could not be parsed");
@@ -238,6 +274,12 @@ public final class SseUsageObserver {
     private static Long longValue(JsonNode usage, String fieldName) {
         JsonNode value = usage.get(fieldName);
         return value != null && value.canConvertToLong() ? value.longValue() : null;
+    }
+
+    /** A numeric field inside a nested usage object ({@code *_tokens_details}). */
+    private static Long nestedLong(JsonNode usage, String container, String field) {
+        JsonNode inner = usage.get(container);
+        return inner != null && inner.isObject() ? longValue(inner, field) : null;
     }
 
     /**

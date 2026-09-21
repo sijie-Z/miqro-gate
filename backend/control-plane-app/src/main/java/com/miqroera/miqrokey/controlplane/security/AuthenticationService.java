@@ -7,6 +7,8 @@ import com.miqroera.miqrokey.domain.model.UserStatus;
 import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
 import com.miqroera.miqrokey.domain.service.PasswordHasher;
+import com.miqroera.miqrokey.controlplane.service.ApiException;
+import com.miqroera.miqrokey.controlplane.service.AuditSummaries;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
@@ -60,6 +62,8 @@ import java.util.UUID;
  * atomic.</li>
  * <li>{@link #logout(User, UUID, String)} — no outer transaction; session
  * revocation and LOGOUT audit each start their own transaction.</li>
+ * <li>{@link #logoutOthers(User, UUID, String)} — no outer transaction; session
+ * revocation and LOGOUT_OTHERS audit each start their own transaction.</li>
  * </ul>
  */
 @Service
@@ -68,7 +72,18 @@ public class AuthenticationService {
     private static final Logger LOG = LoggerFactory.getLogger(AuthenticationService.class);
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
-    static final String LOGIN_FAILED = "Invalid username or password.";
+    /**
+     * User-facing auth messages are Simplified Chinese — the console language
+     * (frontend-design.md). Keep 401 login failures to ONE generic message so the
+     * response never reveals which credential was wrong.
+     */
+    static final String LOGIN_FAILED = "账号或密码不正确。";
+
+    static final String PASSWORD_TOO_COMMON = "该密码过于常见，请更换其他密码。";
+    static final String CURRENT_PASSWORD_INCORRECT = "当前密码不正确。";
+    static final String PASSWORD_TOO_SHORT = "密码长度不能少于 8 个字符。";
+    static final String PASSWORD_TOO_LONG = "密码长度不能超过 128 个字符。";
+    static final String PASSWORD_COMPLEXITY = "密码必须包含至少一个大写字母、一个小写字母和一个数字。";
 
     /** Allowed endpoints when mustChangePassword is true. */
     static final Set<String> PASSWORD_CHANGE_ALLOWED = Set.of("/api/v1/auth/password", "/api/v1/auth/logout",
@@ -125,8 +140,9 @@ public class AuthenticationService {
         Instant now = Instant.now();
 
         boolean rejectDisabled = user != null && user.status() == UserStatus.DISABLED;
-        boolean rejectLocked = user != null && user.status() == UserStatus.LOCKED && user.lockedUntil() != null
-                && now.isBefore(user.lockedUntil());
+        // #445: null deadline = indefinite admin lock (see SessionFilter).
+        boolean rejectLocked = user != null && user.status() == UserStatus.LOCKED
+                && (user.lockedUntil() == null || now.isBefore(user.lockedUntil()));
 
         // Always perform Argon2 work — timing indistinguishable.
         boolean passwordValid;
@@ -243,6 +259,12 @@ public class AuthenticationService {
     @Transactional
     public BootstrapResult bootstrap(String bootstrapSecret, String username, String displayName, String requestId) {
         // Lock the tenant row to serialize bootstrap attempts
+        // #995 lock order: the audit chain lock comes before this row lock. Both this
+        // method and the audit write path touch the tenant row, and the audit path
+        // takes
+        // the chain lock first — so this transaction must too, or the two orders form a
+        // cycle PostgreSQL resolves by aborting one of us.
+        auditService.acquireChainLock();
         userRepository.lockTenantForBootstrap(SEED_TENANT_ID);
 
         // Now re-check under the lock
@@ -279,18 +301,66 @@ public class AuthenticationService {
         return new BootstrapResult(sanitizeUser(admin), temporaryPassword, tokens, sessionExpires);
     }
 
+    /**
+     * Open self-registration (F-REG): anyone may create a USER account when
+     * registration is enabled. The tenant row lock serializes concurrent
+     * registrations so duplicate usernames resolve deterministically. The caller is
+     * authenticated immediately — same cookies as a login.
+     */
+    @Transactional
+    public RegisterResult register(String username, String displayName, String password, String requestId) {
+        if (!authProperties.isRegistrationEnabled()) {
+            throw new ApiException(org.springframework.http.HttpStatus.FORBIDDEN, "REGISTRATION_DISABLED",
+                    "自助注册已被配置关闭。");
+        }
+        if (username == null || username.isBlank() || username.length() > 128) {
+            throw new ApiException(org.springframework.http.HttpStatus.BAD_REQUEST, "USERNAME_INVALID",
+                    "用户名必填，且不超过 128 个字符。");
+        }
+        String normalizedName = displayName == null || displayName.isBlank() ? username : displayName;
+        try {
+            validatePasswordPolicy(password);
+            if (isCommonPassword(password)) {
+                throw new AuthenticationException(PASSWORD_TOO_COMMON);
+            }
+        } catch (AuthenticationException e) {
+            throw new ApiException(org.springframework.http.HttpStatus.BAD_REQUEST, "PASSWORD_INVALID", e.getMessage());
+        }
+
+        // #995 lock order: the audit chain lock comes before this row lock. Both this
+        // method and the audit write path touch the tenant row, and the audit path
+        // takes
+        // the chain lock first — so this transaction must too, or the two orders form a
+        // cycle PostgreSQL resolves by aborting one of us.
+        auditService.acquireChainLock();
+        userRepository.lockTenantForBootstrap(SEED_TENANT_ID);
+        if (userRepository.findByTenantIdAndUsername(SEED_TENANT_ID, username).isPresent()) {
+            throw new ApiException(org.springframework.http.HttpStatus.CONFLICT, "USERNAME_TAKEN", "用户名已存在。");
+        }
+        Instant now = Instant.now();
+        User user = new User(UUID.randomUUID(), SEED_TENANT_ID, username, normalizedName, passwordHasher.hash(password),
+                UserRole.USER, UserStatus.ACTIVE, false, 0, null, null, 0, now, now);
+        userRepository.insert(user);
+        SessionToken tokens = sessionService.createSession(user);
+        Instant sessionExpires = now.plus(authProperties.getSessionAbsoluteTimeout());
+        auditService.record(SEED_TENANT_ID, user.id(), "REGISTER", "USER", user.id(), buildSummary(username),
+                requestId);
+        LOG.info("User {} self-registered", username);
+        return new RegisterResult(user, tokens, sessionExpires);
+    }
+
     @Transactional
     public void changePassword(User currentUser, UUID currentSessionId, String currentPassword, String newPassword,
             String requestId) {
         if (!passwordHasher.verify(currentPassword, currentUser.passwordHash())) {
             progressiveDelay(3);
-            throw new AuthenticationException("Current password is incorrect.");
+            throw new AuthenticationException(CURRENT_PASSWORD_INCORRECT);
         }
 
         validatePasswordPolicy(newPassword);
 
         if (isCommonPassword(newPassword)) {
-            throw new AuthenticationException("That password is too common. Please choose a different one.");
+            throw new AuthenticationException(PASSWORD_TOO_COMMON);
         }
 
         byte[] newHash = passwordHasher.hash(newPassword);
@@ -316,6 +386,19 @@ public class AuthenticationService {
         LOG.info("User {} logged out", user.username());
     }
 
+    /**
+     * Self-service "sign out of other sessions": revoke every session of the
+     * current user except the calling one (the same revocation the change-password
+     * flow performs internally). The current session stays valid, so the caller
+     * keeps working without re-authenticating.
+     */
+    public void logoutOthers(User currentUser, UUID currentSessionId, String requestId) {
+        sessionService.revokeOtherSessions(currentUser.id(), currentSessionId);
+        auditService.record(currentUser.tenantId(), currentUser.id(), "LOGOUT_OTHERS", "USER", currentUser.id(),
+                buildSummary(currentUser.username()), requestId);
+        LOG.info("User {} revoked other sessions", currentUser.username());
+    }
+
     // -----------------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------------
@@ -333,10 +416,10 @@ public class AuthenticationService {
 
     void validatePasswordPolicy(String password) {
         if (password == null || password.length() < 8) {
-            throw new AuthenticationException("Password must be at least 8 characters.");
+            throw new AuthenticationException(PASSWORD_TOO_SHORT);
         }
         if (password.length() > 128) {
-            throw new AuthenticationException("Password must not exceed 128 characters.");
+            throw new AuthenticationException(PASSWORD_TOO_LONG);
         }
         boolean hasUpper = false, hasLower = false, hasDigit = false;
         for (char c : password.toCharArray()) {
@@ -348,8 +431,7 @@ public class AuthenticationService {
                 hasDigit = true;
         }
         if (!hasUpper || !hasLower || !hasDigit) {
-            throw new AuthenticationException(
-                    "Password must contain at least one uppercase letter, one lowercase letter, and one digit.");
+            throw new AuthenticationException(PASSWORD_COMPLEXITY);
         }
     }
 
@@ -415,38 +497,9 @@ public class AuthenticationService {
     }
 
     private static String buildSummary(String username) {
-        return String.format("{\"username\":\"%s\"}", escapeJson(username));
-    }
-
-    private static String escapeJson(String s) {
-        if (s == null)
-            return "null";
-        StringBuilder sb = new StringBuilder(s.length() + 8);
-        for (char c : s.toCharArray()) {
-            switch (c) {
-                case '"':
-                    sb.append("\\\"");
-                    break;
-                case '\\':
-                    sb.append("\\\\");
-                    break;
-                case '\n':
-                    sb.append("\\n");
-                    break;
-                case '\r':
-                    sb.append("\\r");
-                    break;
-                case '\t':
-                    sb.append("\\t");
-                    break;
-                default:
-                    if (c < 0x20)
-                        sb.append(String.format("\\u%04x", (int) c));
-                    else
-                        sb.append(c);
-            }
-        }
-        return sb.toString();
+        // jsonb-safe by construction, and the same builder the rest of the audit
+        // trail uses — this was the fifth byte-identical copy of escapeJson (#1011).
+        return AuditSummaries.summary("username", username);
     }
 
     private static UserView enrichWithView(User u, UserStatus effectiveStatus) {
@@ -473,5 +526,9 @@ public class AuthenticationService {
     public record LoginResult(UserView user, SessionToken tokens, Instant sessionExpires) {
     }
     public record BootstrapResult(User user, String temporaryPassword, SessionToken tokens, Instant sessionExpires) {
+    }
+
+    /** Result of a successful self-registration: the new user plus live cookies. */
+    public record RegisterResult(User user, SessionToken tokens, Instant sessionExpires) {
     }
 }

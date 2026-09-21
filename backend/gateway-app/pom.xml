@@ -51,6 +51,13 @@
             <artifactId>reactor-netty-http</artifactId>
         </dependency>
 
+        <!-- Kafka client for the ADR-0014 R3 retention publisher (standard
+             protocol; version managed by the Spring Boot BOM) -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+        </dependency>
+
         <!-- Actuator for health checks and metrics -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -65,7 +72,7 @@
         <dependency>
             <groupId>net.logstash.logback</groupId>
             <artifactId>logstash-logback-encoder</artifactId>
-            <version>9.0</version>
+            <version>8.1</version>
             <scope>runtime</scope>
         </dependency>
 
@@ -106,6 +113,13 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Boot 4 测试面拆分（#1088 Stage A）：@AutoConfigureWebTestClient /
+             WebTestClientBuilderCustomizer 迁到 spring-boot-webtestclient 测试模块 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux-test</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <!-- Testcontainers for the route-refresh NOTIFY integration test -->
         <dependency>
@@ -117,6 +131,13 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>postgresql</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Redpanda container for the retention Kafka integration test -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>redpanda</artifactId>
             <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
@@ -158,7 +179,7 @@
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
                         <configuration>
-                            <excludedGroups combine.self="override"/>
+                            <excludedGroups combine.self="override"></excludedGroups>
                         </configuration>
                     </plugin>
                 </plugins>

@@ -1,7 +1,7 @@
 package com.miqroera.miqrokey.adapters.catalog;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.spi.AdapterStatus;
 import com.miqroera.miqrokey.spi.CredentialKind;
 import com.miqroera.miqrokey.spi.ModelCatalogMode;
@@ -140,7 +140,7 @@ public final class CatalogManifestValidator {
     }
 
     private static void rejectUnknownFields(JsonNode node, Set<String> allowed, String loc, List<String> errors) {
-        Iterator<String> names = node.fieldNames();
+        Iterator<String> names = node.propertyNames().iterator();
         while (names.hasNext()) {
             String name = names.next();
             if (!allowed.contains(name)) {

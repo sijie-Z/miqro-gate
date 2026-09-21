@@ -4,7 +4,7 @@ import com.miqroera.miqrokey.adapters.registry.AdapterRegistryFactory;
 import com.miqroera.miqrokey.adapters.registry.BuiltInAdapterRegistry;
 import com.miqroera.miqrokey.controlplane.client.ProviderClientFactory;
 import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

@@ -31,7 +31,9 @@ public class RoleInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
             throws Exception {
-        String path = request.getRequestURI();
+        // #723: decide on the same normalized path the handler matcher routed on —
+        // the raw URI keeps semicolon content and would skip this gate.
+        String path = RequestPaths.lookupPath(request);
 
         // Deny-by-default: all /api/v1/admin/** require SYSTEM_ADMIN
         if (path.startsWith("/api/v1/admin/")) {
@@ -40,8 +42,7 @@ public class RoleInterceptor implements HandlerInterceptor {
                 return false;
             }
             if (userContext.getUser().role() != UserRole.SYSTEM_ADMIN) {
-                sendProblem(response, 403, "FORBIDDEN", "Admin access requires SYSTEM_ADMIN role",
-                        resolveRequestId(request));
+                sendProblem(response, 403, "FORBIDDEN", "该操作需要系统管理员（SYSTEM_ADMIN）权限。", resolveRequestId(request));
                 return false;
             }
             return true;
@@ -87,9 +88,12 @@ public class RoleInterceptor implements HandlerInterceptor {
         try {
             response.setStatus(status);
             response.setContentType("application/problem+json");
-            response.getWriter().write(String.format(
-                    "{\"type\":\"about:blank\",\"title\":\"%s\",\"status\":%d,\"code\":\"%s\",\"requestId\":\"%s\"}",
-                    escapeJson(title), status, escapeJson(code), escapeJson(requestId)));
+            // #630: without an explicit charset the servlet writer defaults to
+            // ISO-8859-1 and Chinese titles turn into '?' — the problem+json
+            // main path (GlobalExceptionHandler) already sets UTF-8; this raw
+            // writer is the only bypass.
+            response.setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8.name());
+            response.getWriter().write(ProblemJson.of(status, title, code, null, requestId));
         } catch (Exception e) {
             LOG.error("Failed to write role problem response", e);
         }
@@ -98,36 +102,5 @@ public class RoleInterceptor implements HandlerInterceptor {
     private static String resolveRequestId(HttpServletRequest request) {
         String header = request.getHeader("X-Request-Id");
         return (header != null && !header.isBlank()) ? header : UUID.randomUUID().toString();
-    }
-
-    private static String escapeJson(String s) {
-        if (s == null)
-            return "null";
-        StringBuilder sb = new StringBuilder(s.length() + 8);
-        for (char c : s.toCharArray()) {
-            switch (c) {
-                case '"':
-                    sb.append("\\\"");
-                    break;
-                case '\\':
-                    sb.append("\\\\");
-                    break;
-                case '\n':
-                    sb.append("\\n");
-                    break;
-                case '\r':
-                    sb.append("\\r");
-                    break;
-                case '\t':
-                    sb.append("\\t");
-                    break;
-                default:
-                    if (c < 0x20)
-                        sb.append(String.format("\\u%04x", (int) c));
-                    else
-                        sb.append(c);
-            }
-        }
-        return sb.toString();
     }
 }

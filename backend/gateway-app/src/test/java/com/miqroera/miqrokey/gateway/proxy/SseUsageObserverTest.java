@@ -81,7 +81,7 @@ class SseUsageObserverTest {
     void boundsMalformedEvents() {
         byte[] oversized = ("data: " + "x".repeat(65) + "\n\n").getBytes(StandardCharsets.UTF_8);
         var buffer = new DefaultDataBufferFactory().wrap(oversized);
-        SseUsageObserver observer = new SseUsageObserver(new com.fasterxml.jackson.databind.ObjectMapper(), 32);
+        SseUsageObserver observer = new SseUsageObserver(new tools.jackson.databind.ObjectMapper(), 32);
 
         var observed = observer.wrap(Flux.just(buffer)).blockFirst();
 
@@ -145,7 +145,7 @@ class SseUsageObserverTest {
     @DisplayName("bounds retained observations to the configured maximum")
     void boundsObservationsToMaximum() {
         String event = "data: {\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}\r\n\r\n";
-        SseUsageObserver observer = new SseUsageObserver(new com.fasterxml.jackson.databind.ObjectMapper(),
+        SseUsageObserver observer = new SseUsageObserver(new tools.jackson.databind.ObjectMapper(),
                 SseUsageObserver.DEFAULT_MAX_EVENT_BYTES, 3);
         var buffer = new DefaultDataBufferFactory()
                 .wrap((event + event + event + event + event).getBytes(StandardCharsets.UTF_8));
@@ -170,7 +170,7 @@ class SseUsageObserverTest {
     }
 
     @Test
-    @DisplayName("maps DeepSeek prompt_cache_hit/miss tokens to cache read/creation")
+    @DisplayName("maps DeepSeek flat cache-hit tokens to read and normalises prompt to the miss remainder (#767)")
     void mapsDeepSeekCacheFields() {
         String sse = "data: {\"id\":\"chatcmpl-ds01\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],"
                 + "\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120,"
@@ -179,8 +179,63 @@ class SseUsageObserverTest {
         var buffer = new DefaultDataBufferFactory().wrap(sse.getBytes(StandardCharsets.UTF_8));
         observer.wrap(Flux.just(buffer)).blockLast();
 
+        // miss stays inside the (normalised) prompt count: it is billed at the
+        // plain input rate, NOT as a cache write (#767).
         assertThat(observer.getObservations())
-                .containsExactly(new SseUsageObserver.UsageObservation(null, null, 20L, 80L, 100L, 20L, 120L, null));
+                .containsExactly(new SseUsageObserver.UsageObservation(null, null, null, 80L, 20L, 20L, 120L, null));
+    }
+
+    @Test
+    @DisplayName("maps the OpenAI Chat nested cached_tokens path and normalises the prompt (#767)")
+    void mapsOpenAiChatNestedCachedTokens() {
+        String sse = "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],"
+                + "\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120,"
+                + "\"prompt_tokens_details\":{\"cached_tokens\":80}}}\r\n\r\n";
+        SseUsageObserver observer = new SseUsageObserver();
+        var buffer = new DefaultDataBufferFactory().wrap(sse.getBytes(StandardCharsets.UTF_8));
+        observer.wrap(Flux.just(buffer)).blockLast();
+
+        assertThat(observer.getObservations())
+                .containsExactly(new SseUsageObserver.UsageObservation(null, null, null, 80L, 20L, 20L, 120L, null));
+    }
+
+    @Test
+    @DisplayName("maps the OpenAI Responses nested cached_tokens path against input_tokens (#767)")
+    void mapsOpenAiResponsesNestedCachedTokens() {
+        String sse = "data: {\"usage\":{\"input_tokens\":100,\"output_tokens\":20,"
+                + "\"input_tokens_details\":{\"cached_tokens\":80}}}\r\n\r\n";
+        SseUsageObserver observer = new SseUsageObserver();
+        var buffer = new DefaultDataBufferFactory().wrap(sse.getBytes(StandardCharsets.UTF_8));
+        observer.wrap(Flux.just(buffer)).blockLast();
+
+        assertThat(observer.getObservations())
+                .containsExactly(new SseUsageObserver.UsageObservation(20L, 20L, null, 80L, null, null, null, null));
+    }
+
+    @Test
+    @DisplayName("maps nested cache_write_tokens to cache creation (#767)")
+    void mapsNestedCacheWriteTokens() {
+        String sse = "data: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,"
+                + "\"prompt_tokens_details\":{\"cache_write_tokens\":7}}}\r\n\r\n";
+        SseUsageObserver observer = new SseUsageObserver();
+        var buffer = new DefaultDataBufferFactory().wrap(sse.getBytes(StandardCharsets.UTF_8));
+        observer.wrap(Flux.just(buffer)).blockLast();
+
+        assertThat(observer.getObservations())
+                .containsExactly(new SseUsageObserver.UsageObservation(null, null, 7L, null, 100L, 20L, null, null));
+    }
+
+    @Test
+    @DisplayName("a miss-only report keeps the prompt count and maps no cache counters (#767)")
+    void missWithoutHitStaysPlainInput() {
+        String sse = "data: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,"
+                + "\"prompt_cache_miss_tokens\":20}}\r\n\r\n";
+        SseUsageObserver observer = new SseUsageObserver();
+        var buffer = new DefaultDataBufferFactory().wrap(sse.getBytes(StandardCharsets.UTF_8));
+        observer.wrap(Flux.just(buffer)).blockLast();
+
+        assertThat(observer.getObservations())
+                .containsExactly(new SseUsageObserver.UsageObservation(null, null, null, null, 100L, 20L, null, null));
     }
 
     @Test

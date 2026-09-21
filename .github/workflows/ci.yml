@@ -4,7 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
+  # Manual full run (used when the pull_request event misbehaves on a base
+  # branch, e.g. GitHub-side dispatch gaps: gh workflow run CI --ref <branch>).
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,21 +17,31 @@ jobs:
   # Path filter: each test job runs only when its area changed.
   changes:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 2
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-      compose: ${{ steps.filter.outputs.compose }}
-      docs: ${{ steps.filter.outputs.docs }}
+      backend: ${{ steps.force.outputs.backend || steps.filter.outputs.backend }}
+      frontend: ${{ steps.force.outputs.frontend || steps.filter.outputs.frontend }}
+      client: ${{ steps.force.outputs.client || steps.filter.outputs.client }}
+      compose: ${{ steps.force.outputs.compose || steps.filter.outputs.compose }}
+      docs: ${{ steps.force.outputs.docs || steps.filter.outputs.docs }}
+      decisions: ${{ steps.force.outputs.decisions || steps.filter.outputs.decisions }}
+      scripts: ${{ steps.force.outputs.scripts || steps.filter.outputs.scripts }}
+      shell: ${{ steps.force.outputs.shell || steps.filter.outputs.shell }}
     steps:
-      # paths-filter compares against the parent commit on push events and its
-      # checkout-less self-init fails there ("not a git repository"), so give it
-      # a real clone; depth 2 is enough for the parent, PR base refs are fetched
-      # by the action itself.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 2
-      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+      # Manual dispatches always run every job (no path filtering).
+      - id: force
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "backend=true" >> "$GITHUB_OUTPUT"
+          echo "frontend=true" >> "$GITHUB_OUTPUT"
+          echo "client=true" >> "$GITHUB_OUTPUT"
+          echo "compose=true" >> "$GITHUB_OUTPUT"
+          echo "docs=true" >> "$GITHUB_OUTPUT"
+          echo "decisions=true" >> "$GITHUB_OUTPUT"
+          echo "scripts=true" >> "$GITHUB_OUTPUT"
+          echo "shell=true" >> "$GITHUB_OUTPUT"
+      - if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
         id: filter
         with:
           filters: |
@@ -39,8 +52,14 @@ jobs:
             frontend:
               - 'frontend/**'
               - '.github/workflows/ci.yml'
+            client:
+              - 'miqro-context/**'
+              - '.github/workflows/ci.yml'
             compose:
               - 'deploy/**'
+              - '.github/workflows/ci.yml'
+            scripts:
+              - 'scripts/onboarding/**'
               - '.github/workflows/ci.yml'
             docs:
               - 'docs/**'
@@ -49,6 +68,13 @@ jobs:
               - 'AGENTS.md'
               - 'CONTRIBUTING.md'
               - '.github/**'
+            decisions:
+              - 'docs/decisions/**'
+              - 'deploy/docs/**'
+              - '.github/workflows/ci.yml'
+            shell:
+              - '**/*.sh'
+              - '.github/workflows/ci.yml'
 
   # Cheap gate for docs-only PRs: no code job needs to run.
   docs:
@@ -58,41 +84,191 @@ jobs:
     timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # `git diff --check HEAD^ HEAD` needs the parent commit. The action
+          # defaults to fetch-depth: 1, which left HEAD^ unresolvable: the
+          # command died with `fatal: ambiguous argument 'HEAD^'` (exit 128) and
+          # the `|| true` swallowed it, so this gate could never fail. Depth 2
+          # is the minimum that makes it able to (#895).
+          fetch-depth: 2
       - name: Whitespace check
-        run: git diff --check HEAD^ HEAD || true
+        run: git diff --check HEAD^ HEAD
       - name: Secret scan
         run: bash deploy/security/check-secrets.sh
+
+  # The decisions index is how a reader (and the owner) learns which ADRs are
+  # settled and which still wait for a word. Nothing checked it, so it drifted
+  # three ways at once (#1062): ADR-0012/0013 stayed labelled drafts for a
+  # fortnight after being accepted, ADR-0024's flip to "Accepted（部分）" left its
+  # index line behind, and ADR-0009–0011 were never indexed. Each of those PRs
+  # was fine on its own — the index just was never re-read.
+  decisions:
+    name: ADR index
+    needs: [changes]
+    if: ${{ needs.changes.outputs.decisions == 'true' }}
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Index matches files
+        run: python3 deploy/docs/check-adr-index.py
+
+  # Onboarding injector reference implementation (issue #742, slice 2):
+  # pure POSIX sh tests, no network (verify runs against a PATH-stubbed curl).
+  scripts-check:
+    name: Onboarding scripts
+    needs: [changes]
+    if: ${{ needs.changes.outputs.scripts == 'true' }}
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Run injector tests
+        run: sh scripts/onboarding/test-onboard.sh
+
+  # Static analysis for the shell entry points. `deploy/deploy.sh` is the only path
+  # to a single-machine deploy, and every incident it has had is of the class
+  # ShellCheck reports: an expansion in a `case` pattern whose `|` was literal
+  # (SC2254), sitting behind a `# shellcheck disable`, silently broke the documented
+  # '200|401' syntax for as long as it existed (#809). Deploy scripts are the
+  # densest source of incidents in this repo and the only ones with no static check.
+  shellcheck:
+    name: ShellCheck
+    needs: [changes]
+    if: ${{ needs.changes.outputs.shell == 'true' }}
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # -S warning, not the default: the info level reports SC2016 (single quotes do
+      # not expand), which is sometimes deliberate — printing a literal quoted flag,
+      # for instance. Enabling it first would mostly generate more `disable`
+      # comments, and a `disable` is exactly what hid the bug this job exists for.
+      - name: ShellCheck
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq shellcheck
+          fi
+          shellcheck --version
+          git ls-files -z '*.sh' | xargs -0 shellcheck -S warning
+
+  # Whether what the deploy script CONCLUDES is right — the question ShellCheck
+  # cannot ask. Each scenario builds a stack whose only defect is the one under
+  # test, so passing on a healthy stack proves nothing; the harness is built to
+  # fail on the broken one. Reverse-verified: reverting any of the three fixes
+  # makes it exit non-zero.
+  deploy-script:
+    name: Deploy script (behavioural)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.compose == 'true' }}
+    timeout-minutes: 12
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Regression scenarios
+        run: python3 deploy/tests/deploy_script_regression.py
+  # Formatting, as its own fast job (#1198). It used to surface only through
+  # `verify`, i.e. after a full unit+integration round, and the reactor then
+  # stopped at the first violating module — so the second one waited for the next
+  # push. Measured on 2026-09-21 with a violation in `domain` (the second of 11
+  # modules): `spotless:check` reported it and left the other 9 modules SKIPPED,
+  # and `--fail-at-end` behaved identically — every module depends on `domain`,
+  # so one violation there skips the whole tail.
+  #
+  # `spotless:apply` has no such problem: it rewrites files instead of failing,
+  # so a single plain run covers all 11 modules (measured — it fixed violations
+  # in both `domain` and `control-plane-app` at once). It is deliberately NOT run
+  # with `--fail-never`: -fn would also swallow a *real* failure — a formatter
+  # that cannot be downloaded, a file it cannot write — and this job would then
+  # report green over a tree nothing had actually inspected. Without it the step
+  # fails loudly, which is what a broken format check should do.
+  #
+  # The verdict is therefore `git diff`, not the step's exit code (apply returns
+  # 0 whether or not the tree had violations — it rewrites rather than fails) and
+  # not the log text (a wording change in spotless would rot the gate into a
+  # silent pass). Applying to a clean checkout changes nothing; applying to a
+  # violating one changes exactly the offending files, and this job names them
+  # instead of making the author re-run Maven to find the next module.
+  #
+  # `verify` still runs `spotless:check` with a real exit code in the unit and
+  # integration jobs, so this job breaking degrades to the previous behaviour
+  # instead of losing format enforcement.
+  backend-format:
+    name: Backend format (spotless)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Set up JDK 21
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          java-version: 21
+          distribution: temurin
+          cache: maven
+      - name: Apply formatting to every module
+        run: ./mvnw spotless:apply --batch-mode
+        env:
+          MAVEN_PROJECTBASEDIR: ${{ github.workspace }}/backend
+      - name: Fail when formatting would change anything
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Every module is spotless-clean."
+            exit 0
+          fi
+          echo "::error title=Format::spotless would reformat the files below. From the repository root run ./mvnw spotless:apply, then push the result."
+          git diff --stat
+          exit 1
+
   # Fast unit-only backend verification on both OSes (no Docker).
-  backend-unit:
-    name: Backend unit (Java 21 / ${{ matrix.os }})
-    # Runs only when backend code or workflow definitions change.
+  #
+  # Two literal-named jobs instead of one matrix job on purpose: a SKIPPED
+  # matrix job reports its un-expanded name template ("Backend unit (Java 21 /
+  # ${{ matrix.os }})"), which can never satisfy the concrete required status
+  # checks on develop — a docs-only PR would then wait forever on a check that
+  # never reports. Literal names are reported (as skipped) either way.
+  #
+  # Runs only when backend code or workflow definitions change.
+  backend-unit-linux:
+    name: Backend unit (Java 21 / ubuntu-latest)
     needs: [changes]
     if: ${{ needs.changes.outputs.backend == 'true' }}
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Set up JDK 21
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           java-version: 21
           distribution: temurin
           cache: maven
       - name: Verify (Linux)
-        if: runner.os == 'Linux'
         run: ./mvnw verify --batch-mode
         env:
           MAVEN_PROJECTBASEDIR: ${{ github.workspace }}/backend
+
+  backend-unit-windows:
+    name: Backend unit (Java 21 / windows-latest)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    timeout-minutes: 15
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Set up JDK 21
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          java-version: 21
+          distribution: temurin
+          cache: maven
       - name: Verify (Windows)
-        if: runner.os == 'Windows'
         run: .\mvnw.cmd verify --batch-mode
       - name: Verify Windows wrapper propagates failures
-        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $PSNativeCommandUseErrorActionPreference = $false
@@ -112,9 +288,9 @@ jobs:
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Set up JDK 21
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           java-version: 21
           distribution: temurin
@@ -123,8 +299,45 @@ jobs:
         run: ./mvnw verify -Pintegration --batch-mode
         env:
           MAVEN_PROJECTBASEDIR: ${{ github.workspace }}/backend
+      # F09 (api-contract §8): the generated spec (OpenApiSpecIntegrationTest
+      # writes backend/control-plane-app/target/openapi-spec.json) must not
+      # remove or tighten anything the committed baseline promises.
+      - name: OpenAPI breaking-change diff vs committed baseline
+        run: python3 deploy/openapi/check-openapi-breaking.py docs/openapi/openapi-3.1.json backend/control-plane-app/target/openapi-spec.json
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+      # #838: no bare-name component schemas. springdoc merges same-simple-name
+      # nested DTOs (`record CreateRequest` in fifteen controllers) into one
+      # schema, which documents every endpoint but one with the wrong body; the
+      # guard fails the moment such a name comes back.
+      - name: OpenAPI bare-name schema guard
+        run: python3 deploy/openapi/check-openapi-schema-names.py backend/control-plane-app/target/openapi-spec.json
+        if: ${{ needs.changes.outputs.backend == 'true' }}
 
   # Frontend static checks + unit tests + production build.
+  client:
+    name: Client (miqro-context typecheck / test)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.client == 'true' }}
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: miqro-context
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: miqro-context/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+
   frontend:
     name: Frontend (lint / typecheck / test / build)
     needs: [changes]
@@ -135,16 +348,25 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Install
         run: npm ci
+      - name: Codegen drift check
+        working-directory: frontend
+        # Regenerate from the committed OpenAPI baseline and fail when the
+        # checked-in generated types differ (feature backlog 功能 4 stage 1).
+        run: npm run gen:types && git diff --exit-code -- src/types/generated.ts
       - name: Lint
+        # `lint` is check-only and runs with --max-warnings 0: every rule that can
+        # rewrite a file (prettier, the vue stylistic set) reports as a warning, so
+        # without the flag this step was green over trees it would have rewritten
+        # (#822). Use `npm run lint:fix` locally to apply the changes.
         run: npm run lint
       - name: Typecheck
         run: npm run typecheck
@@ -165,9 +387,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -175,7 +397,7 @@ jobs:
       - name: Install
         run: npm ci
       - name: Cache Playwright browsers
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
@@ -193,32 +415,159 @@ jobs:
     timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Validate compose file
-        run: docker compose -f deploy/compose.yaml config --quiet
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Validate compose files
+        run: |
+          docker compose -f deploy/compose.yaml config --quiet
+          # prod compose 引用 secrets 文件（Docker secrets uid/mode，compose v2.23+）；
+          # 用占位文件满足解析，无真实 Secret。
+          mkdir -p deploy/secrets/certs
+          for f in db_password master_key vk_hmac_key bootstrap_secret backup_key; do
+            printf 'ci-placeholder' > "deploy/secrets/$f"
+          done
+          printf 'ci-placeholder' > deploy/secrets/certs/fullchain.pem
+          printf 'ci-placeholder' > deploy/secrets/certs/privkey.pem
+          cp deploy/.env.prod.example deploy/.env
+          docker compose -f deploy/compose.prod.yaml config --quiet
       - name: Require digest-pinned images
         shell: bash
         run: |
-          while IFS= read -r image; do
-            case "$image" in
-              *@sha256:*) ;;
-              *) echo "Image is not pinned by digest: $image" >&2; exit 1 ;;
-            esac
-          done < <(docker compose -f deploy/compose.yaml config --images)
+          for file in deploy/compose.yaml deploy/compose.prod.yaml; do
+            while IFS= read -r image; do
+              case "$image" in
+                # 本地构建的应用镜像以仓库源码为构建源，无上游 digest 概念。
+                miqrokey-*) continue ;;
+                *@sha256:*) ;;
+                *) echo "Image is not pinned by digest: $image ($file)" >&2; exit 1 ;;
+              esac
+            done < <(docker compose -f "$file" config --images)
+          done
+
+  images:
+    name: Build deployment images
+    needs: [changes]
+    if: ${{ needs.changes.outputs.compose == 'true' }}
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - name: Build gateway image
+        run: |
+          docker buildx build --load \
+            --cache-from type=gha,scope=gateway --cache-to type=gha,scope=gateway,mode=max \
+            -f deploy/docker/gateway.Dockerfile -t miqrokey-gateway:ci .
+      - name: Build control-plane image
+        run: |
+          docker buildx build --load \
+            --cache-from type=gha,scope=control-plane --cache-to type=gha,scope=control-plane,mode=max \
+            -f deploy/docker/control-plane.Dockerfile -t miqrokey-control-plane:ci .
+      - name: Build portal image
+        run: |
+          docker buildx build --load \
+            --cache-from type=gha,scope=portal --cache-to type=gha,scope=portal,mode=max \
+            -f deploy/docker/portal.Dockerfile -t miqrokey-portal:ci .
+      - name: Build backup image
+        run: |
+          docker buildx build --load \
+            --cache-from type=gha,scope=backup --cache-to type=gha,scope=backup,mode=max \
+            -f deploy/docker/backup.Dockerfile -t miqrokey-backup:ci .
+      - name: Verify non-root runtime user
+        run: |
+          for image in miqrokey-gateway:ci miqrokey-control-plane:ci miqrokey-backup:ci; do
+            user=$(docker image inspect --format '{{.Config.User}}' "$image")
+            if [ "$user" = "" ] || [ "$user" = "root" ] || [ "$user" = "0" ]; then
+              echo "$image runs as root ($user)" >&2; exit 1
+            fi
+          done
 
   security:
     name: Security gate
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Secret scan
         run: bash deploy/security/check-secrets.sh
+      - name: Secret scan self-test
+        run: bash deploy/security/test-check-secrets.sh
       - name: License gate + SBOM (CycloneDX)
         run: bash deploy/security/check-sbom.sh
-      - name: npm audit (high+)
+      - name: npm audit (high+) — frontend
         working-directory: frontend
-        run: npm audit --audit-level=high
-      - name: Trivy scan of the pinned Postgres image
+        # npm >= 11 audits via the bulk advisory endpoint; the legacy
+        # /security/audits/quick endpoint was retired upstream (2026-09-04).
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock             -v "${{ github.workspace }}/deploy/security/.trivyignore.yaml:/root/.trivyignore.yaml:ro"             aquasec/trivy:0.58.2 image --severity HIGH,CRITICAL            --ignorefile /root/.trivyignore.yaml             --ignore-unfixed --exit-code 1 --no-progress             postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+          # Retry + explicit outcome (#1008): the advisory endpoint returns 503 during
+          # npm maintenance windows, and a bare `npm audit` then exits 1 with only the
+          # registry's error text — from the job summary that is indistinguishable from
+          # a real HIGH+ finding. Both stay failures (fail-closed); they must not read
+          # the same.
+          for attempt in 1 2 3; do
+            if out=$(npx --yes npm@11 audit --audit-level=high 2>&1); then
+              printf '%s\n' "$out"
+              exit 0
+            fi
+            printf '%s\n' "$out"
+            if printf '%s' "$out" | grep -qiE 'audit endpoint returned an error|503 Service Unavailable|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN'; then
+              echo "::warning::npm audit could not run (attempt $attempt/3): advisory endpoint unavailable — retrying"
+              sleep 15
+              continue
+            fi
+            echo "::error::npm audit found HIGH+ advisories — a real finding, not an endpoint outage."
+            exit 1
+          done
+          echo "::error::npm audit could not run after 3 attempts: advisory endpoint unavailable (#1008). This is NOT a clean result — the dependency audit did not execute."
+          exit 1
+      # miqro-context was outside every audit before PH25 (2026-09-19).
+      - name: npm audit (high+) — miqro-context
+        working-directory: miqro-context
+        run: |
+          # Retry + explicit outcome (#1008): the advisory endpoint returns 503 during
+          # npm maintenance windows, and a bare `npm audit` then exits 1 with only the
+          # registry's error text — from the job summary that is indistinguishable from
+          # a real HIGH+ finding. Both stay failures (fail-closed); they must not read
+          # the same.
+          for attempt in 1 2 3; do
+            if out=$(npx --yes npm@11 audit --audit-level=high 2>&1); then
+              printf '%s\n' "$out"
+              exit 0
+            fi
+            printf '%s\n' "$out"
+            if printf '%s' "$out" | grep -qiE 'audit endpoint returned an error|503 Service Unavailable|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN'; then
+              echo "::warning::npm audit could not run (attempt $attempt/3): advisory endpoint unavailable — retrying"
+              sleep 15
+              continue
+            fi
+            echo "::error::npm audit found HIGH+ advisories — a real finding, not an endpoint outage."
+            exit 1
+          done
+          echo "::error::npm audit could not run after 3 attempts: advisory endpoint unavailable (#1008). This is NOT a clean result — the dependency audit did not execute."
+          exit 1
+      # Dependency manifests (Maven poms + npm lockfiles) were outside every
+      # scanner before PH25: this step is the only gate that reads them.
+      # Image vulnerabilities are covered by the next step.
+      # --show-suppressed keeps every ignored row in the log: .trivyignore-deps
+      # takes advisories out of the exit code, never out of the transcript.
+      - name: Dependency vulnerability scan (Maven + npm manifests)
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/src" \
+            -v "${{ github.workspace }}/deploy/security/.trivyignore-deps:/root/.trivyignore:ro" \
+            aquasec/trivy:0.58.2 fs --scanners vuln \
+            --severity HIGH,CRITICAL \
+            --ignorefile /root/.trivyignore \
+            --show-suppressed \
+            --ignore-unfixed --exit-code 1 --no-progress \
+            --skip-dirs /src/.git \
+            --skip-dirs /src/frontend/node_modules \
+            --skip-dirs /src/miqro-context/node_modules \
+            --skip-dirs /src/backend/target \
+            /src
+      # if: always() — this step predates the manifest scan above and must not
+      # be suppressed by it. Without this, a red manifest scan skips the image
+      # scan entirely: two independent scanners, one run, only one verdict.
+      - name: Trivy scan of the pinned Postgres image
+        if: always()
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock             -v "${{ github.workspace }}/deploy/security/.trivyignore:/root/.trivyignore:ro"             aquasec/trivy:0.58.2 image --severity HIGH,CRITICAL            --ignorefile /root/.trivyignore             --ignore-unfixed --exit-code 1 --no-progress --show-suppressed             postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94

@@ -1,7 +1,17 @@
 // jsdom lacks several browser APIs that TDesign (and friends) use at
 // mount time. Without these, e.g. the select popup never binds its
 // trigger listeners and option clicks silently do nothing.
-import { vi } from 'vitest';
+import { afterEach, vi } from 'vitest';
+import { enableAutoUnmount } from '@vue/test-utils';
+
+// Unmount every wrapper once its test ends (#963). A spec that forgets to
+// unmount otherwise leaves the component's timers and listeners pending past
+// the end of the file, and vitest tears jsdom down underneath them: the
+// callback then throws from a global that is gone *after* every test passed —
+// exit code 1 with no failing test to point at. `auto-unmount.spec.ts` is the
+// guard; the components themselves still capture their host in timer cleanup
+// (Drawer.vue), because the same race exists wherever a timer outlives a page.
+enableAutoUnmount(afterEach);
 
 class ResizeObserverMock {
   private readonly callback: ResizeObserverCallback;

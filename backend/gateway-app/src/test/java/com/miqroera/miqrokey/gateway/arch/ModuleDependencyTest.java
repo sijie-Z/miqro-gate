@@ -63,7 +63,7 @@ class ModuleDependencyTest {
     @DisplayName("domain must not depend on Jackson")
     void domainMustNotDependOnJackson() {
         ArchRule rule = noClasses().that().resideInAPackage("com.miqroera.miqrokey.domain..").should()
-                .dependOnClassesThat().resideInAPackage("com.fasterxml.jackson..")
+                .dependOnClassesThat().resideInAnyPackage("com.fasterxml.jackson..", "tools.jackson..")
                 .because("domain module must not depend on serialization libraries");
         rule.check(allClasses);
     }
@@ -92,7 +92,7 @@ class ModuleDependencyTest {
     @DisplayName("provider-spi must not depend on Jackson")
     void providerSpiMustNotDependOnJackson() {
         ArchRule rule = noClasses().that().resideInAPackage("com.miqroera.miqrokey.spi..").should()
-                .dependOnClassesThat().resideInAPackage("com.fasterxml.jackson..").because(
+                .dependOnClassesThat().resideInAnyPackage("com.fasterxml.jackson..", "tools.jackson..").because(
                         "provider-spi must not carry serialization concerns; catalog parsing lives in provider-adapters");
         rule.check(allClasses);
     }

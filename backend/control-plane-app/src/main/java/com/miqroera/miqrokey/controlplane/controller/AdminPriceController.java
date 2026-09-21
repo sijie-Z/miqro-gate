@@ -3,6 +3,9 @@ package com.miqroera.miqrokey.controlplane.controller;
 import com.miqroera.miqrokey.controlplane.dto.PriceSnapshotView;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminPriceService;
+import com.miqroera.miqrokey.controlplane.service.AdminPriceSyncService;
+import com.miqroera.miqrokey.controlplane.service.AuditContext;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
@@ -18,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -30,10 +34,13 @@ import java.util.UUID;
 public class AdminPriceController {
 
     private final AdminPriceService priceService;
+    private final AdminPriceSyncService priceSyncService;
     private final UserContext userContext;
 
-    public AdminPriceController(AdminPriceService priceService, UserContext userContext) {
+    public AdminPriceController(AdminPriceService priceService, AdminPriceSyncService priceSyncService,
+            UserContext userContext) {
         this.priceService = priceService;
+        this.priceSyncService = priceSyncService;
         this.userContext = userContext;
     }
 
@@ -43,14 +50,30 @@ public class AdminPriceController {
     }
 
     @PostMapping
-    public ResponseEntity<PriceSnapshotView> create(@Valid @RequestBody CreateRequest body) {
+    public ResponseEntity<PriceSnapshotView> create(@Valid @RequestBody PriceCreateRequest body) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(priceService.create(userContext.getUser().tenantId(), body.providerProductId(), body.modelId(),
                         body.tokenType(), body.currency(), body.unitPrice(), body.source(),
                         userContext.getUser().id()));
     }
 
-    public record CreateRequest(@NotNull UUID providerProductId, @NotBlank @Size(max = 200) String modelId,
+    /**
+     * Pulls the current public price index and upserts snapshots for the catalog
+     * models of every mapped PAYG product (issue #585). A fetch failure writes
+     * nothing and answers 502 {@code PRICE_SYNC_FAILED}.
+     */
+    @PostMapping("/sync")
+    public Map<String, Object> sync(HttpServletRequest httpReq) {
+        var user = userContext.getUser();
+        return priceSyncService.sync(user.tenantId(), user.id(), AuditContext.human(user.id(), requestId(httpReq)));
+    }
+
+    private static String requestId(HttpServletRequest request) {
+        String header = request.getHeader("X-Request-Id");
+        return header != null && !header.isBlank() ? header : UUID.randomUUID().toString();
+    }
+
+    public record PriceCreateRequest(@NotNull UUID providerProductId, @NotBlank @Size(max = 200) String modelId,
             @NotBlank String tokenType, @NotBlank @Size(max = 8) String currency,
             @NotNull @DecimalMin(value = "0", inclusive = false) BigDecimal unitPrice,
             @NotBlank @Size(max = 32) String source) {

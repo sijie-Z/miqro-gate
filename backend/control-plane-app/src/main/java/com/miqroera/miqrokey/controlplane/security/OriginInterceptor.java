@@ -50,7 +50,7 @@ public class OriginInterceptor implements HandlerInterceptor {
         if (!STATE_CHANGING_METHODS.contains(method)) {
             return true;
         }
-        String path = request.getRequestURI();
+        String path = RequestPaths.lookupPath(request);
         if (!path.startsWith("/api/")) {
             return true;
         }
@@ -122,9 +122,7 @@ public class OriginInterceptor implements HandlerInterceptor {
         try {
             response.setStatus(403);
             response.setContentType("application/problem+json");
-            response.getWriter().write(String.format(
-                    "{\"type\":\"about:blank\",\"title\":\"%s\",\"status\":403,\"code\":\"ORIGIN_REJECTED\",\"requestId\":\"%s\"}",
-                    escapeJson(title), escapeJson(requestId)));
+            response.getWriter().write(ProblemJson.of(403, title, "ORIGIN_REJECTED", null, requestId));
         } catch (Exception e) {
             LOG.warn("Failed to write Origin rejection response", e);
         }
@@ -135,36 +133,5 @@ public class OriginInterceptor implements HandlerInterceptor {
         if (header != null && !header.isBlank())
             return header;
         return UUID.randomUUID().toString();
-    }
-
-    private static String escapeJson(String s) {
-        if (s == null)
-            return "null";
-        StringBuilder sb = new StringBuilder(s.length() + 8);
-        for (char c : s.toCharArray()) {
-            switch (c) {
-                case '"':
-                    sb.append("\\\"");
-                    break;
-                case '\\':
-                    sb.append("\\\\");
-                    break;
-                case '\n':
-                    sb.append("\\n");
-                    break;
-                case '\r':
-                    sb.append("\\r");
-                    break;
-                case '\t':
-                    sb.append("\\t");
-                    break;
-                default:
-                    if (c < 0x20)
-                        sb.append(String.format("\\u%04x", (int) c));
-                    else
-                        sb.append(c);
-            }
-        }
-        return sb.toString();
     }
 }

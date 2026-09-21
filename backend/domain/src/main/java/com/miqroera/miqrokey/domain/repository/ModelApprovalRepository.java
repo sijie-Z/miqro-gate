@@ -2,6 +2,7 @@ package com.miqroera.miqrokey.domain.repository;
 
 import com.miqroera.miqrokey.domain.model.ModelApproval;
 import com.miqroera.miqrokey.domain.model.ModelApprovalStatus;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,6 +20,20 @@ public interface ModelApprovalRepository {
     Optional<ModelApproval> findById(UUID id);
 
     List<ModelApproval> findAllByVirtualKeyId(UUID virtualKeyId);
+
+    /**
+     * Approvals requested by one user (oldest first is NOT guaranteed; newest
+     * first).
+     */
+    List<ModelApproval> findAllByRequestedBy(UUID requestedBy);
+
+    /**
+     * Page of approvals ordered newest-first ({@code created_at DESC, id DESC}),
+     * filtered by {@code status} when non-null. Keyset pagination: pass the
+     * {@code created_at}/{@code id} of the last item as {@code beforeCreatedAt}/
+     * {@code beforeId} (both null = first page). The caller clamps {@code limit}.
+     */
+    List<ModelApproval> findPage(ModelApprovalStatus status, int limit, Instant beforeCreatedAt, UUID beforeId);
 
     List<ModelApproval> findAllByStatus(ModelApprovalStatus status);
 

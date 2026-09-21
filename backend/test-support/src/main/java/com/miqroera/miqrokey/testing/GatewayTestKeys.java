@@ -5,10 +5,17 @@ import com.miqroera.miqrokey.domain.crypto.KeyRing;
 import com.miqroera.miqrokey.domain.crypto.VirtualKeyCrypto;
 import com.miqroera.miqrokey.domain.crypto.VirtualKeyMaterial;
 import com.miqroera.miqrokey.domain.crypto.impl.HmacVirtualKeyProvider;
+import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
+import com.miqroera.miqrokey.domain.model.McpService;
+import com.miqroera.miqrokey.domain.model.McpToolRetryPolicy;
+import com.miqroera.miqrokey.domain.model.RetentionConfig;
 import com.miqroera.miqrokey.domain.route.RouteSnapshot;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -93,6 +100,16 @@ public final class GatewayTestKeys {
     public static final KeyFixture OTHER_KEY = KeyFixture.create(OTHER_PROJECT_TAG, OTHER_PROJECT_ID, PRODUCT_ID,
             OTHER_CREDENTIAL_ID, MODELS_ALLOWED);
 
+    /**
+     * #633 CAA: one key core with TWO project bindings (resolution-ladder tests).
+     */
+    public static final KeyFixture MULTI_BOUND_KEY = KeyFixture.create("demo-multi", PROJECT_ID, PRODUCT_ID,
+            CREDENTIAL_ID, MODELS_ALLOWED);
+
+    /** Second binding of {@link #MULTI_BOUND_KEY}: same core, another project. */
+    public static final KeyFixture MULTI_BOUND_KEY_SECOND = MULTI_BOUND_KEY.rebound("demo-multi-2", OTHER_PROJECT_ID,
+            OTHER_CREDENTIAL_ID, UUID.randomUUID());
+
     /** Well-formed key that does NOT exist in the fixture snapshot. */
     public static final KeyFixture UNKNOWN_KEY = KeyFixture.create("ghost-proj", UUID.randomUUID(), PRODUCT_ID,
             UUID.randomUUID(), MODELS_ALLOWED);
@@ -144,10 +161,70 @@ public final class GatewayTestKeys {
      * binding, credential, model allowlist, grant models, upstream models and
      * product code. {@code baseUrl} is the upstream base URL of every credential
      * (the mock provider in tests).
+     * <p>
+     * Every snapshot also carries the MCP proxy fixtures (consumers by digest + the
+     * open/gated services under {@code baseUrl}/mcp); they are inert unless a test
+     * calls {@code /mcpservers/<name>/mcp}.
+     * </p>
      */
     public static RouteSnapshot snapshot(String baseUrl, KeyFixture... keys) {
+        return snapshotWithResilience(baseUrl, Map.of(), keys);
+    }
+
+    /**
+     * Fixture snapshot with per-service resilience policies (F12/F13, V30)
+     * overrides keyed by service name; absent services stay fully disabled.
+     */
+    public static RouteSnapshot snapshotWithResilience(String baseUrl, Map<String, McpResiliencePolicy> policies,
+            KeyFixture... keys) {
+        return snapshotWithRetention(baseUrl, policies, Map.of(), keys);
+    }
+
+    /**
+     * Fixture snapshot with exceeded-quota verdicts injected (#684 gateway contract
+     * tests): the user/project ids land in the snapshot's block maps, each blocked
+     * scope carrying the window end that feeds the 429's Retry-After.
+     */
+    public static RouteSnapshot snapshotWithQuotaBlocks(String baseUrl, Set<UUID> blockedUserIds,
+            Set<UUID> blockedProjectIds, KeyFixture... keys) {
+        return snapshotWithQuotaBlocks(baseUrl, untilByScope(blockedUserIds), untilByScope(blockedProjectIds), keys);
+    }
+
+    /** Same fixture with explicit window ends ("until" per blocked scope). */
+    public static RouteSnapshot snapshotWithQuotaBlocks(String baseUrl, Map<UUID, Instant> blockedUsers,
+            Map<UUID, Instant> blockedProjects, KeyFixture... keys) {
+        return snapshotFull(baseUrl, Map.of(), Map.of(), Map.of(), blockedUsers, blockedProjects, keys);
+    }
+
+    /** Default fixture window end: one hour out, i.e. a plausible Retry-After. */
+    public static Map<UUID, Instant> untilByScope(Set<UUID> scopeIds) {
+        Map<UUID, Instant> until = new LinkedHashMap<>();
+        for (UUID id : scopeIds) {
+            until.put(id, Instant.now().plusSeconds(3600));
+        }
+        return until;
+    }
+
+    /**
+     * Fixture snapshot with per-service upstream budgets (I20, doc 135906 "超时时间")
+     * keyed by service name; absent services keep the 60s default.
+     */
+    public static RouteSnapshot snapshotWithTimeouts(String baseUrl, Map<String, McpResiliencePolicy> policies,
+            Map<String, Integer> upstreamTimeoutsMs, KeyFixture... keys) {
+        return snapshotFull(baseUrl, policies, upstreamTimeoutsMs, Map.of(), Map.of(), Map.of(), keys);
+    }
+
+    /** Fixture snapshot with a retention switch (ADR-0014) keyed by tenant. */
+    public static RouteSnapshot snapshotWithRetention(String baseUrl, Map<String, McpResiliencePolicy> policies,
+            Map<UUID, RetentionConfig> retentionByTenant, KeyFixture... keys) {
+        return snapshotFull(baseUrl, policies, Map.of(), retentionByTenant, Map.of(), Map.of(), keys);
+    }
+
+    private static RouteSnapshot snapshotFull(String baseUrl, Map<String, McpResiliencePolicy> policies,
+            Map<String, Integer> upstreamTimeoutsMs, Map<UUID, RetentionConfig> retentionByTenant,
+            Map<UUID, Instant> quotaBlockedUsers, Map<UUID, Instant> quotaBlockedProjects, KeyFixture... keys) {
         Map<String, RouteSnapshot.KeyRecord> keyMap = new LinkedHashMap<>();
-        Map<UUID, RouteSnapshot.BindingRecord> bindingMap = new LinkedHashMap<>();
+        Map<UUID, Map<String, RouteSnapshot.BindingRecord>> bindingMap = new LinkedHashMap<>();
         Map<UUID, RouteSnapshot.CredentialRecord> credentialMap = new LinkedHashMap<>();
         Map<UUID, Set<String>> modelsMap = new LinkedHashMap<>();
         Map<UUID, Set<String>> grantModelsMap = new LinkedHashMap<>();
@@ -156,7 +233,8 @@ public final class GatewayTestKeys {
         Map<UUID, UUID> providerIdsMap = new LinkedHashMap<>();
         for (KeyFixture key : keys) {
             keyMap.put(key.publicKeyId(), key.keyRecord(TENANT_ID));
-            bindingMap.put(key.keyId(), key.bindingRecord());
+            bindingMap.computeIfAbsent(key.keyId(), k -> new LinkedHashMap<>()).put(key.projectTag(),
+                    key.bindingRecord());
             credentialMap.put(key.credentialId(), key.credentialRecord(baseUrl));
             modelsMap.put(key.keyId(), key.models());
             grantModelsMap.put(key.grantId(), key.grantModels());
@@ -168,7 +246,185 @@ public final class GatewayTestKeys {
             providerIdsMap.putIfAbsent(key.productId(), key.providerId());
         }
         return new RouteSnapshot(1, Instant.EPOCH, keyMap, bindingMap, credentialMap, modelsMap, grantModelsMap,
-                upstreamModelsMap, productCodesMap, providerIdsMap);
+                upstreamModelsMap, productCodesMap, providerIdsMap, mcpConsumers(),
+                mcpServices(baseUrl, policies, upstreamTimeoutsMs), retentionByTenant, Map.of(), quotaBlockedUsers,
+                quotaBlockedProjects);
+    }
+
+    // ------------------------------------------------------------------
+    // MCP proxy fixtures (F01 contract tests; see McpProxyContractTest)
+    // ------------------------------------------------------------------
+
+    /** Service with server ACL mode NONE — any consumer may call it. */
+    public static final String MCP_OPEN_SERVICE = "open-demo";
+    /** Service with server ACL mode ALLOW (MCP_ALLOWED + MCP_SERVER_ONLY). */
+    public static final String MCP_GATED_SERVICE = "gated-demo";
+    /** Enabled tool on {@link #MCP_OPEN_SERVICE} (inherits server rule). */
+    public static final String MCP_TOOL_ECHO = "echo-tool";
+    /** Disabled tool on {@link #MCP_OPEN_SERVICE}. */
+    public static final String MCP_TOOL_LEGACY = "legacy-tool";
+    /** Enabled tool on {@link #MCP_GATED_SERVICE} (inherits server rule). */
+    public static final String MCP_TOOL_SHARED = "shared-tool";
+    /** Enabled tool on {@link #MCP_GATED_SERVICE} with an ALLOW override. */
+    public static final String MCP_TOOL_RESTRICTED = "restricted-tool";
+    /** Disabled tool on {@link #MCP_GATED_SERVICE}. */
+    public static final String MCP_TOOL_QUIET = "quiet-tool";
+    /** GET tool carrying a tool-level retry override (#360, I13). */
+    public static final String MCP_TOOL_RETRY = "retry-tool";
+    /** POST tool carrying a retry override without the idempotency confirmation. */
+    public static final String MCP_TOOL_RETRY_POST = "retry-post-tool";
+    /** #320: API_KEY upstream auth with a test-decryptable ciphertext. */
+    public static final String MCP_SECURED_SERVICE = "secured-demo";
+    /** #320: API_KEY upstream auth whose ciphertext the test decryptor rejects. */
+    public static final String MCP_BROKEN_SERVICE = "secured-broken";
+    /** Plaintext the test decryptor yields for the secured fixture's ciphertext. */
+    public static final String MCP_SECURED_BACKEND_KEY = "test-mcp-backend-key";
+
+    /** One API-consumer fixture: self-consistent presented key + digest. */
+    public record ConsumerFixture(UUID id, String name, String presentedKey, java.util.List<String> capabilities,
+            java.time.Instant expiresAt, String jwtPublicKeyPem) {
+
+        /** Legacy constructor: no scope, never expires, no JWT key. */
+        public ConsumerFixture(UUID id, String name, String presentedKey) {
+            this(id, name, presentedKey, null, null, null);
+        }
+
+        /** Legacy constructor: never expires, no JWT key. */
+        public ConsumerFixture(UUID id, String name, String presentedKey, java.util.List<String> capabilities) {
+            this(id, name, presentedKey, capabilities, null, null);
+        }
+
+        /** Legacy constructor: no JWT key (#340 added the PEM for the data plane). */
+        public ConsumerFixture(UUID id, String name, String presentedKey, java.util.List<String> capabilities,
+                java.time.Instant expiresAt) {
+            this(id, name, presentedKey, capabilities, expiresAt, null);
+        }
+
+        public byte[] digest() {
+            return sha256(presentedKey);
+        }
+    }
+
+    private static final java.security.KeyPair JWT_KEYPAIR = generateRsaKeyPair();
+    private static final java.security.KeyPair OTHER_JWT_KEYPAIR = generateRsaKeyPair();
+
+    /** On the gated service's server list and restricted-tool ALLOW list. */
+    public static final ConsumerFixture MCP_ALLOWED = consumer("allowed");
+    /** On the gated service's server list only (tool override must deny). */
+    public static final ConsumerFixture MCP_SERVER_ONLY = consumer("server-only");
+    /** On no list at all. */
+    public static final ConsumerFixture MCP_OUTSIDER = consumer("outsider");
+    /** Issue #316: scoped to zero channels — the MCP data plane must refuse. */
+    public static final ConsumerFixture MCP_NO_CHANNELS = scopedConsumer("no-channels");
+    /** Issue #322: expires at the epoch — the MCP data plane must refuse. */
+    public static final ConsumerFixture MCP_EXPIRED = expiredConsumer("expired");
+    /** Issue #340: JWT-only consumer (no scope/expiry on top of the JWT path). */
+    public static final ConsumerFixture MCP_JWT = jwtConsumer("jwt");
+
+    private static ConsumerFixture jwtConsumer(String label) {
+        ConsumerFixture fixture = consumer(label);
+        return new ConsumerFixture(fixture.id(), fixture.name(), fixture.presentedKey(), null, null, jwtPublicKeyPem());
+    }
+
+    private static ConsumerFixture consumer(String label) {
+        String name = "drill-" + label;
+        return new ConsumerFixture(UUID.nameUUIDFromBytes(("mqk-consumer-" + name).getBytes(StandardCharsets.UTF_8)),
+                name, "mqk_api_drill_" + label + "_" + UUID.randomUUID());
+    }
+
+    private static ConsumerFixture scopedConsumer(String label) {
+        ConsumerFixture fixture = consumer(label);
+        // #340: JWT-capable too, so the scope-denial path is testable via JWT.
+        return new ConsumerFixture(fixture.id(), fixture.name(), fixture.presentedKey(), java.util.List.of(), null,
+                jwtPublicKeyPem());
+    }
+
+    private static ConsumerFixture expiredConsumer(String label) {
+        ConsumerFixture fixture = consumer(label);
+        // #340: JWT-capable too, so the expiry path is testable via JWT.
+        return new ConsumerFixture(fixture.id(), fixture.name(), fixture.presentedKey(), null,
+                java.time.Instant.parse("2000-01-01T00:00:00Z"), jwtPublicKeyPem());
+    }
+
+    private static Map<String, RouteSnapshot.ConsumerRecord> mcpConsumers() {
+        Map<String, RouteSnapshot.ConsumerRecord> consumers = new LinkedHashMap<>();
+        for (ConsumerFixture fixture : List.of(MCP_ALLOWED, MCP_SERVER_ONLY, MCP_OUTSIDER, MCP_NO_CHANNELS, MCP_EXPIRED,
+                MCP_JWT)) {
+            consumers.putIfAbsent(fixture.id().toString(),
+                    new RouteSnapshot.ConsumerRecord(fixture.id(), TENANT_ID, fixture.name(), fixture.digest(),
+                            fixture.capabilities(), fixture.expiresAt(), fixture.jwtPublicKeyPem()));
+        }
+        return consumers;
+    }
+
+    private static Map<String, RouteSnapshot.McpServerRecord> mcpServices(String baseUrl,
+            Map<String, McpResiliencePolicy> policies, Map<String, Integer> upstreamTimeoutsMs) {
+        String endpoint = baseUrl + "/mcp";
+        RouteSnapshot.McpServerRecord open = new RouteSnapshot.McpServerRecord(serviceId(MCP_OPEN_SERVICE), TENANT_ID,
+                MCP_OPEN_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE", "NONE", Set.of(),
+                List.of(tool(MCP_TOOL_ECHO, "ENABLED", null, Set.of(), "GET"),
+                        tool(MCP_TOOL_LEGACY, "DISABLED", null, Set.of(), "GET")),
+                policies.get(MCP_OPEN_SERVICE),
+                upstreamTimeoutsMs.getOrDefault(MCP_OPEN_SERVICE, McpService.DEFAULT_UPSTREAM_TIMEOUT_MS));
+        RouteSnapshot.McpServerRecord gated = new RouteSnapshot.McpServerRecord(serviceId(MCP_GATED_SERVICE), TENANT_ID,
+                MCP_GATED_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE", "ALLOW",
+                Set.of(MCP_ALLOWED.id(), MCP_SERVER_ONLY.id()),
+                List.of(tool(MCP_TOOL_SHARED, "ENABLED", null, Set.of(), "GET"),
+                        tool(MCP_TOOL_RESTRICTED, "ENABLED", "ALLOW", Set.of(MCP_ALLOWED.id()), "POST"),
+                        tool(MCP_TOOL_QUIET, "DISABLED", null, Set.of(), "GET"),
+                        tool(MCP_TOOL_RETRY, "ENABLED", null, Set.of(), "GET", retryOverride(false)),
+                        tool(MCP_TOOL_RETRY_POST, "ENABLED", null, Set.of(), "POST", retryOverride(false))),
+                policies.get(MCP_GATED_SERVICE),
+                upstreamTimeoutsMs.getOrDefault(MCP_GATED_SERVICE, McpService.DEFAULT_UPSTREAM_TIMEOUT_MS));
+        // #320 upstream backend auth: a decryptable API_KEY service and one whose
+        // ciphertext the test decryptor deliberately rejects (fail-closed probe).
+        RouteSnapshot.McpServerRecord secured = new RouteSnapshot.McpServerRecord(serviceId(MCP_SECURED_SERVICE),
+                TENANT_ID, MCP_SECURED_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE", "NONE", Set.of(), List.of(),
+                policies.get(MCP_SECURED_SERVICE), "API_KEY",
+                new EncryptedSecret(new byte[]{7, 7, 7}, new byte[]{8, 8}, "v1"),
+                upstreamTimeoutsMs.getOrDefault(MCP_SECURED_SERVICE, McpService.DEFAULT_UPSTREAM_TIMEOUT_MS));
+        RouteSnapshot.McpServerRecord broken = new RouteSnapshot.McpServerRecord(serviceId(MCP_BROKEN_SERVICE),
+                TENANT_ID, MCP_BROKEN_SERVICE, endpoint, "STREAMABLE_HTTP", "ONLINE", "NONE", Set.of(), List.of(),
+                policies.get(MCP_BROKEN_SERVICE), "API_KEY",
+                new EncryptedSecret(new byte[]{0, 0, 0}, new byte[]{0, 0}, "v1"),
+                upstreamTimeoutsMs.getOrDefault(MCP_BROKEN_SERVICE, McpService.DEFAULT_UPSTREAM_TIMEOUT_MS));
+        Map<String, RouteSnapshot.McpServerRecord> services = new LinkedHashMap<>();
+        services.put(MCP_OPEN_SERVICE, open);
+        services.put(MCP_GATED_SERVICE, gated);
+        services.put(MCP_SECURED_SERVICE, secured);
+        services.put(MCP_BROKEN_SERVICE, broken);
+        return services;
+    }
+
+    private static UUID serviceId(String name) {
+        return UUID.nameUUIDFromBytes(("mqk-mcp-service-" + name).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static RouteSnapshot.McpToolRecord tool(String name, String status, String overrideMode, Set<UUID> allowed,
+            String method) {
+        return new RouteSnapshot.McpToolRecord(name, status, overrideMode, allowed, method);
+    }
+
+    /** Tool with a tool-level retry override (issue #360, I13). */
+    private static RouteSnapshot.McpToolRecord tool(String name, String status, String overrideMode, Set<UUID> allowed,
+            String method, McpToolRetryPolicy retry) {
+        return new RouteSnapshot.McpToolRecord(name, status, overrideMode, allowed, method, retry);
+    }
+
+    /**
+     * Server-5xx single-retry override; the idempotency gate stays caller-driven.
+     */
+    private static McpToolRetryPolicy retryOverride(boolean idempotencyConfirmed) {
+        return new McpToolRetryPolicy(true, 1, Set.of(McpResiliencePolicy.RetryCondition.SERVER_5XX),
+                idempotencyConfirmed, 0);
+    }
+
+    private static byte[] sha256(String value) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
     }
 
     /**
@@ -209,7 +465,14 @@ public final class GatewayTestKeys {
         }
 
         public RouteSnapshot.BindingRecord bindingRecord() {
-            return new RouteSnapshot.BindingRecord(keyId, projectId, projectTag, credentialId, productId);
+            return new RouteSnapshot.BindingRecord(keyId, projectId, projectTag, credentialId, productId, grantId);
+        }
+
+        /** The same key core re-bound to another project (CAA multi-binding, #633). */
+        public KeyFixture rebound(String tag, UUID reboundProjectId, UUID reboundCredentialId, UUID reboundGrantId) {
+            return new KeyFixture(presented, publicKeyId, rawSecret, digest, keyId, tag, reboundProjectId, productId,
+                    reboundCredentialId, models, reboundGrantId, productCode, grantModels, upstreamModels, userId,
+                    providerId);
         }
 
         public RouteSnapshot.CredentialRecord credentialRecord(String baseUrl) {
@@ -218,5 +481,58 @@ public final class GatewayTestKeys {
             return new RouteSnapshot.CredentialRecord(credentialId, TENANT_ID, productId, baseUrl, AUTH_SCHEME,
                     new EncryptedSecret(new byte[]{1, 2, 3}, new byte[]{4, 5, 6}, "v1"), java.util.Map.of());
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Consumer JWT fixtures (#340): one shared RSA keypair signs valid tokens;
+    // a second keypair produces wrong-key signatures.
+    // ------------------------------------------------------------------
+
+    private static java.security.KeyPair generateRsaKeyPair() {
+        try {
+            java.security.KeyPairGenerator generator = java.security.KeyPairGenerator.getInstance("RSA");
+            generator.initialize(2048);
+            return generator.generateKeyPair();
+        } catch (Exception e) {
+            throw new IllegalStateException("RSA keypair unavailable", e);
+        }
+    }
+
+    /** PEM (SubjectPublicKeyInfo) of the shared fixture public key. */
+    public static String jwtPublicKeyPem() {
+        return pem(JWT_KEYPAIR.getPublic());
+    }
+
+    private static String pem(java.security.PublicKey key) {
+        return "-----BEGIN PUBLIC KEY-----\n" + java.util.Base64.getEncoder().encodeToString(key.getEncoded())
+                + "\n-----END PUBLIC KEY-----";
+    }
+
+    /** RS256 JWT signed by the shared fixture key (sub + required exp). */
+    public static String signJwt(String subject, java.time.Instant expiresAt) {
+        return signJwt(JWT_KEYPAIR, subject, expiresAt);
+    }
+
+    /** RS256 JWT signed by a different key - the signature check must fail. */
+    public static String signJwtWithOtherKey(String subject, java.time.Instant expiresAt) {
+        return signJwt(OTHER_JWT_KEYPAIR, subject, expiresAt);
+    }
+
+    private static String signJwt(java.security.KeyPair keyPair, String subject, java.time.Instant expiresAt) {
+        try {
+            String header = b64url("{\"alg\":\"RS256\",\"typ\":\"JWT\"}".getBytes(StandardCharsets.UTF_8));
+            String payload = b64url(("{\"sub\":\"" + subject + "\",\"exp\":" + expiresAt.getEpochSecond() + "}")
+                    .getBytes(StandardCharsets.UTF_8));
+            java.security.Signature signer = java.security.Signature.getInstance("SHA256withRSA");
+            signer.initSign(keyPair.getPrivate());
+            signer.update((header + "." + payload).getBytes(StandardCharsets.US_ASCII));
+            return header + "." + payload + "." + b64url(signer.sign());
+        } catch (Exception e) {
+            throw new IllegalStateException("JWT signing failed", e);
+        }
+    }
+
+    private static String b64url(byte[] bytes) {
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 }

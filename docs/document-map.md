@@ -25,10 +25,18 @@
 | `decisions/*.md` | 已接受架构决策 | 关键决策新增/替换 |
 | `ai-gateway-comparison.md` | 与腾讯/阿里 AI 网关的定位与能力对比 | 三家能力变化 |
 | `tencent-ai-gateway-mapping.md` | 腾讯/阿里文档吸收记录与能力映射 | 吸收新文档 |
+| `live-integration-guide.md` | 真实供应商联调环境搭建、流程与踩坑记录 | 新供应商联调/环境变化 |
+| `platform-middleware-roadmap.md` | 平台中间件演进蓝图（用户同步/OAuth/计费 API/SkillHub）与分阶段建议 | leader 蓝图变化 |
 | `domain-model.md` | 领域概念和关系 | 领域语义变化 |
 | `database-schema.md` | 物理表、约束、索引和迁移 | 数据库变化 |
 | `api-contract.md` | 管理 API 与推理入口契约 | API 变化 |
 | `proxy-and-cc-switch.md` | 透明代理、协议和 CC Switch 边界 | 数据面行为变化 |
+| `user-guide/` | **面向使用者的手册**（README 索引 · quickstart 快速上手 · user-guide 普通用户 · admin-guide 管理员 · developer-guide 开发接入 · faq 症状速查）；控制台用户菜单「使用手册」直达 README | 控制台功能/操作路径/接入方式变化时同步（与规格文档分工：规格讲「是什么」，手册讲「怎么用」） |
+| `client-onboarding.md` | 客户端与存量系统接入指南（#742）：三类接入姿势矩阵、可复制示例、MCP 层接入、接入器（参考实现，`scripts/onboarding/`）、明确不做的边界 | 接入方式/边界变化 |
+| `workbuddy-mcp-onboarding-sample.md` | 样章：封闭客户端（WorkBuddy）MCP 层接入实测（#742 第③片）——拓扑、照抄步骤、证据、踩坑（配置路径/信任门/工具放行） | 封闭客户端接入实践变化 |
+| `context-attribution-implementation-spec.md` | 请求级归属（CAA）的**权威实现契约**：头名、裁定/声明模型、分阶段实施、Spec v1.1 R1–R8（`usage_event` 上下文列的**取值域与物理形态**以 `database-schema.md`/`api-contract.md` 为准——Spec §7.1 的 `claim_source` 清单滞后于实现） | 归属实现契约变化 |
+| `activity-context-design.md` | 请求级归属的**历史设计稿**——设计推演与 2026-09-16 真机实验证据；头名/列名及部分现状陈述**不具契约效力**（状态行、Q0、Q 表、§8 计划处已加「历史注记」） | 仅补实验证据与历史注记；命名与契约一律以 `context-attribution-implementation-spec.md` 为准 |
+| `protocol-agents.md` | Agent/模型协议全景（入站协议、客户端矩阵、上游协议声明、红线） | 协议面变化 |
 | `provider-catalog.md` | 支持的供应商产品及证据 | 产品目录变化 |
 | `provider-adapter-contract.md` | Java SPI 与适配器验收 | SPI/fixture 变化 |
 | `usage-accounting.md` | Token、成本、导出与对账 | 计量变化 |
@@ -40,8 +48,14 @@
 | `testing-and-acceptance.md` | 总体验收策略 | 验收变化 |
 | `test-fixtures.md` | Mock/fixture 格式和覆盖 | 测试协议变化 |
 | `deployment-and-operations.md` | 部署拓扑和基础运维 | 部署变化 |
-| `operations-runbook.md` | 日常故障和恢复步骤 | 运维流程变化 |
+| `operations-runbook.md` | 日常故障和恢复步骤（§15 诊断陷阱速查：运维侧归因方法） | 运维流程变化 |
+| `debugging-traps.md` | 工程调试陷阱（§15 的工程侧姊妹篇：CI/构建/测试方法/源码 revision） | 工程排障方法变化 |
 | `implementation-plan.md` | 可执行 Goal 及依赖 | Goal 调整 |
+| `open-admin-api-plan.md` | 管理开放 API（F60）三批拆解与状态 | 该专项计划变化 |
+| `feature-expansion-candidates.md` | 大厂文档→功能候选池与核对记录 | 研究出新候选/裁决 |
+| `retention-consumer.md` | 留痕消费端契约与参考实现（ADR-0014） | 消费端契约变化 |
+| `NEXT_SESSION_PLAN.md` | 跨会话启动计划（2026-09-07 起以 progress Current State 为准） | 每轮结束 |
+| `feature-backlog.md` | 跨文档功能总登记（未做与候选：PLANNED/SCAFFOLD/BLOCKED/ADR/DECLINED + 出处与前置） | 文档提及新功能/能力时登记；条目状态变化时更新 |
 | `git-workflow.md` | 分支、commit、push、PR 和发布权限 | Git 流程变化 |
 | `progress.md` | 当前真实进度 | 每个 Goal |
 | `release-checklist.md` | 发布门禁 | 发布流程变化 |
@@ -50,8 +64,8 @@
 
 实现后以下文件由代码生成，并与手写规格共同校验：
 
-- OpenAPI JSON/YAML：由 Control Plane controller 生成。
-- 前端 API 类型：由 OpenAPI 生成。
+- OpenAPI JSON/YAML：由 Control Plane 生成（springdoc，`GET /v3/api-docs`，OpenAPI 3.1）；机器可读基线提交于 `docs/openapi/openapi-3.1.json`，CI 跑破坏性 diff（F09，deploy/openapi/check-openapi-breaking.py）。
+- 前端 API 类型：**手写维护中**（`frontend/src/api` + `types/api`；OpenAPI codegen 迁移为发布前候选，未实现前 API 变更需人工同步两处并跑 frontend typecheck）。
 - Flyway schema：migration 是数据库执行事实，`database-schema.md` 是可读规格。
 - SBOM 和许可证清单：由构建生成。
 - Provider catalog 签名包：由发布任务生成。

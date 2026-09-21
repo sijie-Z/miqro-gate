@@ -1,0 +1,22 @@
+/** v2 design-system barrel — pages import from '@/ui' (not '@/ui/Button'). */
+export { default as UiButton } from './Button.vue';
+export { default as UiInput } from './Input.vue';
+export { default as UiSelect } from './Select.vue';
+export type { UiSelectOption } from './Select.vue';
+export { default as UiCheckbox } from './Checkbox.vue';
+export { default as UiRadio } from './Radio.vue';
+export { default as UiSwitch } from './Switch.vue';
+export { default as UiTable } from './Table.vue';
+export type { UiTableColumn } from './Table.vue';
+export { default as UiDialog } from './Dialog.vue';
+export { default as UiDrawer } from './Drawer.vue';
+export { default as UiDonut } from './Donut.vue';
+export type { UiDonutSegment } from './Donut.vue';
+export { default as UiTrendChart } from './TrendChart.vue';
+export type { UiTrendPoint, UiTrendSeries } from './TrendChart.vue';
+export { default as UiStatusBadge } from './StatusBadge.vue';
+export { default as UiTooltip } from './Tooltip.vue';
+export { default as UiEmptyState } from './EmptyState.vue';
+export { default as UiPageGuide } from './PageGuide.vue';
+export { default as UiToastHost } from './ToastHost.vue';
+export { toast } from './toast';

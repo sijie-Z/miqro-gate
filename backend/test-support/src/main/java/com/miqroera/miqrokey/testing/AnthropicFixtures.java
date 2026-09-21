@@ -36,6 +36,13 @@ public final class AnthropicFixtures {
     public static final String REQUEST_WITH_CACHE = """
             {"model":"claude-sonnet-5-20250915","max_tokens":1024,"system":[{"type":"text","text":"You are a helpful assistant.","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"Hello!"}]}""";
 
+    /**
+     * A request with cache_control breakpoints the way agent clients (Claude Code)
+     * place them.
+     */
+    public static final String REQUEST_WITH_CACHE_BREAKPOINTS = """
+            {"model":"claude-sonnet-5-20250915","max_tokens":2048,"system":[{"type":"text","text":"You are a coding assistant.","cache_control":{"type":"ephemeral"}}],"tools":[{"name":"read_file","description":"Read a file","input_schema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]},"cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"Refactor the parser.","cache_control":{"type":"ephemeral"}}]}]}""";
+
     /** A request containing multi-byte UTF-8 characters. */
     public static final String REQUEST_WITH_UTF8 = """
             {"model":"claude-sonnet-5-20250915","max_tokens":1024,"messages":[{"role":"user","content":"你好世界 🌍 — Unicode test"}]}""";

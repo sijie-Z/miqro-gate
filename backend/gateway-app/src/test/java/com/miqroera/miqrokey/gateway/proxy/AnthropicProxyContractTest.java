@@ -17,6 +17,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
@@ -32,11 +33,12 @@ import java.util.Objects;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-        "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,"
-                + "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration,"
-                + "org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration",
+        "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
+                + "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration,"
+                + "org.springframework.boot.jdbc.autoconfigure.DataSourceTransactionManagerAutoConfiguration",
         "miqrokey.gateway.persistence.enabled=false", "miqrokey.crypto.enabled=false",
         "spring.main.web-application-type=reactive", "logging.level.com.miqroera.miqrokey.gateway.proxy=DEBUG"})
+@AutoConfigureWebTestClient
 @Import(GatewayAuthTestConfig.class)
 @DisplayName("Anthropic transparent proxy contract")
 class AnthropicProxyContractTest {
@@ -48,6 +50,9 @@ class AnthropicProxyContractTest {
 
     @LocalServerPort
     private int gatewayPort;
+
+    @Autowired
+    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     @DynamicPropertySource
     static void configureUpstream(DynamicPropertyRegistry registry) {
@@ -398,6 +403,104 @@ class AnthropicProxyContractTest {
             String text = new String(Objects.requireNonNull(body), StandardCharsets.UTF_8);
             assertThat(text).contains("\"cache_creation_input_tokens\":150");
             assertThat(text).contains("\"cache_read_input_tokens\":300");
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Prompt cache passthrough — P0 verification (ADR-0022 §11 D1)
+    // -------------------------------------------------------------------
+
+    /**
+     * The gateway forwards prompt-cache requests untouched (ADR-0002 transparency).
+     * The assertions are deliberately byte-level: if a future feature starts
+     * rewriting request bodies (e.g. the opt-in breakpoint injector of #769), this
+     * contract must be changed on purpose rather than broken silently — a rewritten
+     * body can move a client's cache breakpoints and quietly change what upstream
+     * caches and bills.
+     */
+    @Nested
+    @DisplayName("Prompt cache passthrough (P0)")
+    class PromptCachePassthrough {
+
+        @Test
+        @DisplayName("should forward a cache_control request byte-identically")
+        void shouldForwardCacheControlRequestByteIdentically() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(AnthropicFixtures.RESPONSE_CACHE_USAGE).build());
+
+            webTestClient.post().uri("/v1/messages").bodyValue(AnthropicFixtures.REQUEST_WITH_CACHE).exchange()
+                    .expectStatus().isOk().expectBody().returnResult().getResponseBody();
+
+            var captured = mockProvider.getCapturedRequests();
+            assertThat(captured).hasSize(1);
+            assertThat(captured.get(0).bodyBytes)
+                    .isEqualTo(AnthropicFixtures.REQUEST_WITH_CACHE.getBytes(StandardCharsets.UTF_8));
+        }
+
+        @Test
+        @DisplayName("should forward multi-breakpoint cache_control (system + tools + content block) byte-identically")
+        void shouldForwardMultiBreakpointCacheControlByteIdentically() {
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(200)
+                    .contentType("application/json").body(AnthropicFixtures.RESPONSE_CACHE_USAGE).build());
+
+            byte[] responseBody = webTestClient.post().uri("/v1/messages")
+                    .bodyValue(AnthropicFixtures.REQUEST_WITH_CACHE_BREAKPOINTS).exchange().expectStatus().isOk()
+                    .expectBody().returnResult().getResponseBody();
+
+            var captured = mockProvider.getCapturedRequests();
+            assertThat(captured).hasSize(1);
+            assertThat(captured.get(0).bodyBytes)
+                    .isEqualTo(AnthropicFixtures.REQUEST_WITH_CACHE_BREAKPOINTS.getBytes(StandardCharsets.UTF_8));
+            assertThat(new String(Objects.requireNonNull(responseBody), StandardCharsets.UTF_8))
+                    .contains("\"cache_read_input_tokens\":300");
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Upstream error observation — ADR-0024 option B (#770)
+    // -------------------------------------------------------------------
+
+    /**
+     * The observation tier counts the SHAPE of an upstream rejection and nothing
+     * else: no retry, no rewrite, and the client still receives the upstream bytes
+     * exactly as they arrived.
+     */
+    @Nested
+    @DisplayName("Upstream error observation (ADR-0024 B)")
+    class UpstreamErrorObservation {
+
+        @Test
+        @DisplayName("counts a signature-shaped rejection and forwards the body byte-identically")
+        void countsSignatureShapeAndForwardsVerbatim() throws InterruptedException {
+            String body = "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\","
+                    + "\"message\":\"messages.1.content.0.type: Invalid `signature` in `thinking` block\"}}";
+            mockProvider.configure(AnthropicMockProvider.ResponseConfig.builder().statusCode(400)
+                    .contentType("application/json").body(body).build());
+
+            double before = counter("SIGNATURE_INVALID");
+            byte[] responseBody = webTestClient.post().uri("/v1/messages")
+                    .bodyValue(AnthropicFixtures.REQUEST_WITH_TOOL_RESULT).exchange().expectStatus().isEqualTo(400)
+                    .expectBody().returnResult().getResponseBody();
+
+            assertThat(responseBody).isEqualTo(body.getBytes(StandardCharsets.UTF_8));
+            // The observation runs in the post-write completion supplier, i.e. the
+            // client can hold the last byte before the counter moves — poll briefly
+            // instead of assuming ordering (a bare assert flaked on the Windows CI
+            // runner and passed everywhere else).
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            double observed = counter("SIGNATURE_INVALID");
+            while (observed < before + 1 && System.nanoTime() < deadline) {
+                Thread.sleep(20);
+                observed = counter("SIGNATURE_INVALID");
+            }
+            assertThat(observed).isEqualTo(before + 1);
+        }
+
+        /** Meters are created on first observation — absent means zero so far. */
+        private double counter(String errorClass) {
+            var counter = meterRegistry.find("miqrokey_gateway_upstream_error_class_total").tag("class", errorClass)
+                    .counter();
+            return counter != null ? counter.count() : 0.0;
         }
     }
 

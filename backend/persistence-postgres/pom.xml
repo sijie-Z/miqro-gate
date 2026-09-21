@@ -16,6 +16,7 @@
     <description>JDBC repositories, Flyway migrations, and PostgreSQL integration — no JPA/R2DBC</description>
 
     <dependencies>
+
         <dependency>
             <groupId>com.miqroera.miqrokey</groupId>
             <artifactId>domain</artifactId>
@@ -25,7 +26,7 @@
         <dependency>
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcprov-jdk18on</artifactId>
-            <version>1.86</version>
+            <version>1.78.1</version>
         </dependency>
 
         <!-- Flyway -->
@@ -44,6 +45,13 @@
             <artifactId>postgresql</artifactId>
         </dependency>
 
+        <!-- Boot 4 模块化（#1088 Stage A）：Flyway 自动配置搬进 spring-boot-flyway，
+             光有 flyway-core 已不再触发迁移（迁移指南：改用 spring-boot-starter-flyway） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+
         <!-- Spring Boot JDBC starter (HikariCP, spring-jdbc, spring-tx, autoconfigure) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -54,6 +62,13 @@
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+
+        <!-- Jackson for jsonb columns (route header_conditions) - version
+             managed by the Spring Boot BOM -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
 
         <!-- AssertJ -->
@@ -72,6 +87,12 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-engine</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Boot 4 测试面拆分（#1088 Stage A）：AutoConfigureTestDatabase 迁到 spring-boot-jdbc-test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc-test</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -122,7 +143,7 @@
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
                         <configuration>
-                            <excludedGroups combine.self="override"/>
+                            <excludedGroups combine.self="override"></excludedGroups>
                         </configuration>
                     </plugin>
                 </plugins>

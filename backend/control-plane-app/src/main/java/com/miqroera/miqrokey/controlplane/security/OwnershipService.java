@@ -31,6 +31,12 @@ import java.util.UUID;
 public class OwnershipService {
 
     /**
+     * User-facing 404 detail (console language: Simplified Chinese). One generic
+     * message for both "missing" and "not yours" — prevents enumeration.
+     */
+    public static final String RESOURCE_NOT_FOUND = "资源不存在或无权访问。";
+
+    /**
      * Assert that the current user is either the resource owner or a SYSTEM_ADMIN.
      * Throws with a generic "not found" message to prevent enumeration.
      *
@@ -43,7 +49,7 @@ public class OwnershipService {
      */
     public void assertSelfOrAdmin(UUID resourceOwnerId, User currentUser) {
         if (currentUser == null) {
-            throw new ResourceOwnershipException("Resource not found.");
+            throw new ResourceOwnershipException(RESOURCE_NOT_FOUND);
         }
         if (currentUser.role() == UserRole.SYSTEM_ADMIN) {
             return;
@@ -51,6 +57,6 @@ public class OwnershipService {
         if (currentUser.id().equals(resourceOwnerId)) {
             return;
         }
-        throw new ResourceOwnershipException("Resource not found.");
+        throw new ResourceOwnershipException(RESOURCE_NOT_FOUND);
     }
 }

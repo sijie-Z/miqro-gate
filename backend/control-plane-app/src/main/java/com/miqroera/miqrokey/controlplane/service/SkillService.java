@@ -1,0 +1,223 @@
+package com.miqroera.miqrokey.controlplane.service;
+
+import com.miqroera.miqrokey.controlplane.dto.SkillView;
+import com.miqroera.miqrokey.domain.model.Project;
+import com.miqroera.miqrokey.domain.model.Skill;
+import com.miqroera.miqrokey.domain.model.SkillRevision;
+import com.miqroera.miqrokey.domain.model.SkillAccess;
+import com.miqroera.miqrokey.domain.model.Team;
+import com.miqroera.miqrokey.domain.repository.ProjectRepository;
+import com.miqroera.miqrokey.domain.repository.SkillRepository;
+import com.miqroera.miqrokey.domain.repository.TeamRepository;
+import com.miqroera.miqrokey.domain.repository.UserRepository;
+import com.miqroera.miqrokey.domain.service.AuditService;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * SkillHub catalog (P2.2/P2.3, {@code skills} / {@code skill_access} V16):
+ * admin uploads validated skill packages (Anthropic Agent Skills format, parsed
+ * by {@link SkillZipValidator}); every ACTIVE skill is visible to all signed-in
+ * users; downloads are gated by TEAM/PROJECT grants (no grants = public).
+ * Re-uploading the same name upserts the entry; archiving hides it. Every
+ * mutation records an audit event (SKILL_UPLOAD/SKILL_ARCHIVE/SKILL_ACCESS);
+ * summaries carry names and counts only — never package bytes.
+ */
+@Service
+public class SkillService {
+
+    private final SkillRepository skillRepository;
+    private final SkillRevisionService skillRevisionService;
+    private final TeamRepository teamRepository;
+    private final ProjectRepository projectRepository;
+    private final UserRepository userRepository;
+    private final AuditService auditService;
+
+    public SkillService(SkillRepository skillRepository, SkillRevisionService skillRevisionService,
+            TeamRepository teamRepository, ProjectRepository projectRepository, UserRepository userRepository,
+            AuditService auditService) {
+        this.skillRepository = skillRepository;
+        this.skillRevisionService = skillRevisionService;
+        this.teamRepository = teamRepository;
+        this.projectRepository = projectRepository;
+        this.userRepository = userRepository;
+        this.auditService = auditService;
+    }
+
+    /**
+     * Validates and stores a skill package. I14 (raw 20 版本管理): a same-name package
+     * publishes the next immutable revision (history kept, old zips preserved,
+     * rollback available) instead of overwriting the entry; a new name creates the
+     * skill and its baseline revision 1.
+     */
+    @Transactional
+    public SkillView upload(UUID tenantId, UUID adminId, byte[] zipBytes, String version, String requestId) {
+        if (version == null || !version.matches("\\d+\\.\\d+\\.\\d+")) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "VERSION_INVALID", "版本必须是语义化版本号（如 1.0.0）。");
+        }
+        SkillZipValidator.SkillMetadata meta;
+        try {
+            meta = SkillZipValidator.validate(zipBytes);
+        } catch (SkillZipValidator.SkillValidationException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, e.code(), e.getMessage());
+        }
+        if (skillRepository.findByName(tenantId, meta.name()).isPresent()) {
+            SkillRevision revision = skillRevisionService.publishValidated(tenantId, adminId, meta, version, zipBytes,
+                    requestId);
+            return toViews(List.of(find(tenantId, revision.skillId()))).get(0);
+        }
+        Instant now = Instant.now();
+        Skill skill = new Skill(UUID.randomUUID(), tenantId, meta.name(), meta.description(), version, meta.author(),
+                meta.license(), meta.tags(), meta.examples(), zipBytes, sha256Hex(zipBytes), zipBytes.length, "ACTIVE",
+                adminId, 0, now, now);
+        Skill stored = skillRepository.upsert(skill);
+        skillRevisionService.recordBaseline(tenantId, adminId, stored, now);
+        auditService.record(tenantId, adminId, "SKILL_UPLOAD", "SKILL", stored.id(),
+                AuditSummaries.summary("name", AuditSummaries.sanitize(stored.name()), "version", stored.version()),
+                requestId);
+        return toViews(List.of(stored)).get(0);
+    }
+
+    /**
+     * Catalog for signed-in users: every ACTIVE skill, optionally narrowed by a
+     * keyword (name/description substring or exact ID, case-insensitive) and by
+     * holding ALL of the given tags (raw docs 20/28).
+     */
+    public List<SkillView> list(UUID tenantId, String q, List<String> tags) {
+        if (q != null && q.trim().length() > 60) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "SKILL_QUERY_INVALID", "关键字最长 60 字符。");
+        }
+        List<String> normalizedTags = tags == null
+                ? List.of()
+                : tags.stream().filter(tag -> tag != null && !tag.isBlank()).map(String::trim).distinct().toList();
+        List<Skill> skills = (q == null || q.isBlank()) && normalizedTags.isEmpty()
+                ? skillRepository.findAllActive(tenantId)
+                : skillRepository.searchActive(tenantId, q, normalizedTags);
+        return toViews(skills);
+    }
+
+    public SkillView get(UUID tenantId, UUID skillId) {
+        return toViews(List.of(findActive(tenantId, skillId))).get(0);
+    }
+
+    /** Package bytes for download; 403 when the user holds no grant. */
+    public DownloadResult download(UUID tenantId, UUID skillId, UUID userId, boolean admin) {
+        Skill skill = findActive(tenantId, skillId);
+        if (!skillRepository.canDownload(tenantId, skillId, userId, admin)) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "SKILL_DOWNLOAD_FORBIDDEN", "当前账号无该技能的下载授权。");
+        }
+        return new DownloadResult(skill.name(), skill.contentZip());
+    }
+
+    public record DownloadResult(String name, byte[] zip) {
+    }
+
+    /** Archives the skill: removed from the catalog, grants kept for restore. */
+    @Transactional
+    public SkillView archive(UUID tenantId, UUID adminId, UUID skillId, String requestId) {
+        Skill skill = find(tenantId, skillId);
+        SkillView view = toViews(List.of(skillRepository.archive(tenantId, skillId))).get(0);
+        auditService.record(tenantId, adminId, "SKILL_ARCHIVE", "SKILL", skillId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(skill.name())), requestId);
+        return view;
+    }
+
+    /**
+     * Replaces the download grants (admin): each scope is validated against the
+     * teams/projects tables. Empty list = public.
+     */
+    @Transactional
+    public List<SkillAccess> setAccess(UUID tenantId, UUID adminId, UUID skillId, List<SkillAccessScopeRequest> scopes,
+            String requestId) {
+        Skill skill = find(tenantId, skillId);
+        List<SkillAccess> existing = skillRepository.findAccess(tenantId, skillId);
+        for (SkillAccess access : existing) {
+            skillRepository.deleteAccess(tenantId, skillId, access.scopeType(), access.scopeId());
+        }
+        for (SkillAccessScopeRequest scope : scopes) {
+            validateScope(tenantId, scope);
+            skillRepository.insertAccess(new SkillAccess(UUID.randomUUID(), tenantId, skill.id(), scope.scopeType(),
+                    scope.scopeId(), Instant.now()));
+        }
+        List<SkillAccess> access = skillRepository.findAccess(tenantId, skillId);
+        auditService.record(tenantId, adminId, "SKILL_ACCESS", "SKILL", skillId,
+                AuditSummaries.summary("name", AuditSummaries.sanitize(skill.name()), "scopeCount", access.size()),
+                requestId);
+        return access;
+    }
+
+    private void validateScope(UUID tenantId, SkillAccessScopeRequest scope) {
+        if (scope.scopeId() == null || scope.scopeType() == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "SCOPE_INVALID", "授权范围格式无效。");
+        }
+        if (scope.scopeType().equals("TEAM")) {
+            Team team = teamRepository.findById(scope.scopeId())
+                    .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "SCOPE_INVALID", "授权团队不存在。"));
+            if (!team.tenantId().equals(tenantId)) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "SCOPE_INVALID", "授权团队不存在。");
+            }
+        } else if (scope.scopeType().equals("PROJECT")) {
+            Project project = projectRepository.findById(scope.scopeId())
+                    .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "SCOPE_INVALID", "授权项目不存在。"));
+            if (!project.tenantId().equals(tenantId)) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "SCOPE_INVALID", "授权项目不存在。");
+            }
+        } else {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "SCOPE_INVALID", "scopeType 必须是 TEAM 或 PROJECT。");
+        }
+    }
+
+    private Skill find(UUID tenantId, UUID skillId) {
+        return skillRepository.findByIdAndTenantId(skillId, tenantId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "SKILL_NOT_FOUND", "技能不存在。"));
+    }
+
+    /** Catalog access only ever exposes ACTIVE skills (archived = hidden). */
+    private Skill findActive(UUID tenantId, UUID skillId) {
+        Skill skill = find(tenantId, skillId);
+        if (!"ACTIVE".equals(skill.status())) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "SKILL_NOT_FOUND", "技能不存在。");
+        }
+        return skill;
+    }
+
+    private List<SkillView> toViews(List<Skill> skills) {
+        java.util.Map<UUID, String> creatorNames = new java.util.HashMap<>();
+        for (Skill skill : skills) {
+            if (skill.createdBy() != null) {
+                creatorNames.computeIfAbsent(skill.createdBy(),
+                        id -> userRepository.findById(id)
+                                .map(user -> user.displayName() != null && !user.displayName().isBlank()
+                                        ? user.displayName()
+                                        : user.username())
+                                .orElse(null));
+            }
+        }
+        return skills.stream()
+                .map(skill -> new SkillView(skill.id(), skill.name(), skill.description(), skill.version(),
+                        skill.author(), skill.license(), skill.tags(), skill.contentSha256(), skill.contentBytes(),
+                        skill.status(), skill.createdAt(), skill.examples(), skill.createdBy(),
+                        creatorNames.get(skill.createdBy())))
+                .toList();
+    }
+
+    /** Shared with {@link SkillRevisionService} (same package). */
+    static String sha256Hex(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
+    }
+
+    public record SkillAccessScopeRequest(@jakarta.validation.constraints.NotBlank String scopeType,
+            @jakarta.validation.constraints.NotNull UUID scopeId) {
+    }
+}

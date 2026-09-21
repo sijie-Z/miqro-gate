@@ -1,0 +1,506 @@
+<script setup lang="ts">
+/**
+ * NextTeamsView — /app/teams v2 admin page (U2 org batch, PostHog language).
+ * Behaviour parity with the legacy teams page: create team, member drawer
+ * with confirmed removal; #551 adds the missing member-add picker (mirrors
+ * the users-page quick-join pattern).
+ */
+import { computed, onMounted, ref } from 'vue';
+import * as api from '@/api';
+import { countWhenLoaded } from '@/utils/load-state';
+import { ApiError } from '@/api/http';
+import {
+  UiButton,
+  UiDialog,
+  UiDrawer,
+  UiInput,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  toast,
+} from '@/ui';
+import type { AdminUser, MemberView, Team } from '@/types/generated-api';
+
+const teams = ref<Team[]>([]);
+const loading = ref(true);
+const loadError = ref('');
+const loadRequestId = ref('');
+
+const creating = ref(false);
+const createName = ref('');
+const createDescription = ref('');
+const formError = ref('');
+const submitting = ref(false);
+
+// Member drawer
+const memberOpen = ref(false);
+const memberTeam = ref<Team | null>(null);
+const memberUsers = ref<MemberView[]>([]);
+const memberLoading = ref(false);
+
+// #551: add-member picker (mirrors the users-page quick-join pattern)
+const allUsers = ref<AdminUser[]>([]);
+const usersLoaded = ref(false);
+const usersLoading = ref(false);
+const usersError = ref('');
+const pickUserId = ref('');
+const addingMember = ref(false);
+
+const joinableUsers = computed(() => {
+  const memberIds = new Set(memberUsers.value.map((m) => m.userId));
+  return allUsers.value.filter((u) => u.status === 'ACTIVE' && u.id && !memberIds.has(u.id));
+});
+
+// Confirm gate for member removal
+const confirmState = ref<{
+  title: string;
+  body: string;
+  confirmLabel: string;
+  tone: 'danger' | 'primary';
+  run: () => Promise<void>;
+} | null>(null);
+
+const columns = [
+  { key: 'name', title: '名称', minWidth: '180px' },
+  { key: 'description', title: '描述', minWidth: '260px' },
+  { key: 'status', title: '状态', width: '110px' },
+  { key: 'actions', title: '操作', width: '100px', align: 'center' as const },
+];
+
+const memberColumns = [
+  { key: 'username', title: '成员', minWidth: '200px' },
+  { key: 'joinedAt', title: '加入时间', width: '170px' },
+  { key: 'actions', title: '', width: '80px', align: 'center' as const },
+];
+
+async function load() {
+  loading.value = true;
+  try {
+    teams.value = await api.listTeams();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      loadError.value = error.message;
+      loadRequestId.value = error.requestId ?? '';
+    }
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function createTeam() {
+  if (!createName.value.trim()) {
+    formError.value = '请输入团队名称。';
+    return;
+  }
+  submitting.value = true;
+  try {
+    await api.createTeam({
+      name: createName.value.trim(),
+      description: createDescription.value.trim() || undefined,
+    });
+    creating.value = false;
+    createName.value = '';
+    createDescription.value = '';
+    toast.success('团队已创建');
+    await load();
+  } catch (error) {
+    formError.value = error instanceof ApiError ? error.message : '创建失败，请稍后重试。';
+  } finally {
+    submitting.value = false;
+  }
+}
+
+// #440: request-sequence guard — a slow member list for team A must not land
+// after the drawer re-targets team B, and a failure must not impersonate an
+// empty roster for the current team.
+let membersRequestSeq = 0;
+
+/**
+ * #1160 加载次序不变量：加载中 → 失败 → 空 → 有数据。
+ * 用户列表失败时「没有可加入的 ACTIVE 用户」本来就会被 `usersLoaded` 压住，
+ * 但那让抽屉**一声不响**（静默空）；这里把失败画出来并给重试。
+ * 保持既有语义：失败不置 `usersLoaded`，下次打开抽屉自会重试。
+ */
+async function loadUsers() {
+  usersLoading.value = true;
+  usersError.value = '';
+  try {
+    allUsers.value = await api.listUsers();
+    usersLoaded.value = true;
+  } catch (error) {
+    allUsers.value = [];
+    usersError.value = error instanceof ApiError ? error.message : '加载用户列表失败。';
+  } finally {
+    usersLoading.value = false;
+  }
+}
+
+async function openMembers(team: Team) {
+  const seq = ++membersRequestSeq;
+  memberTeam.value = team;
+  memberOpen.value = true;
+  memberLoading.value = true;
+  pickUserId.value = '';
+  if (!usersLoaded.value) {
+    void loadUsers();
+  }
+  try {
+    const rows = await api.listTeamMembers(team.id!); // list rows always carry ids
+    if (seq !== membersRequestSeq) {
+      return; // a newer drawer target won — this response is stale
+    }
+    memberUsers.value = rows;
+  } catch {
+    if (seq === membersRequestSeq) {
+      memberUsers.value = [];
+      toast.error('加载成员失败');
+    }
+  } finally {
+    if (seq === membersRequestSeq) {
+      memberLoading.value = false;
+    }
+  }
+}
+
+async function addMember() {
+  const team = memberTeam.value;
+  if (!team || !pickUserId.value) return;
+  addingMember.value = true;
+  try {
+    await api.addTeamMember(team.id!, pickUserId.value);
+    pickUserId.value = '';
+    toast.success('成员已添加');
+    const seq = ++membersRequestSeq;
+    const rows = await api.listTeamMembers(team.id!); // list rows always carry ids
+    if (seq === membersRequestSeq) {
+      memberUsers.value = rows;
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      toast.error(error.message);
+    }
+  } finally {
+    addingMember.value = false;
+  }
+}
+
+function requestRemove(user: MemberView) {
+  if (!memberTeam.value) return;
+  const team = memberTeam.value;
+  confirmState.value = {
+    title: '移除成员',
+    body: `将「${user.username!}」移出团队「${team.name!}」。`,
+    confirmLabel: '移除',
+    tone: 'danger',
+    run: async () => {
+      try {
+        await api.removeTeamMember(team.id!, user.userId!);
+        toast.success('成员已移除');
+        const seq = ++membersRequestSeq;
+        const rows = await api.listTeamMembers(team.id!); // list rows always carry ids
+        if (seq === membersRequestSeq) {
+          memberUsers.value = rows;
+        }
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+        }
+      }
+    },
+  };
+}
+
+async function confirmAndRun() {
+  const state = confirmState.value;
+  if (!state) return;
+  confirmState.value = null;
+  await state.run();
+}
+
+function formatDate(iso?: string): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+onMounted(load);
+</script>
+
+<template>
+  <div class="ui-page next-teams">
+    <header class="ui-page-header">
+      <div>
+        <h1 class="ui-page-title">团队</h1>
+        <p class="ui-page-desc">组织团队与成员归属。</p>
+      </div>
+      <div class="ui-page-actions">
+        <UiButton variant="primary" data-testid="team-create-open" @click="creating = !creating">
+          {{ creating ? '收起表单' : '创建团队' }}
+        </UiButton>
+      </div>
+    </header>
+
+    <div v-if="loadError" class="ui-alert ui-alert--error">
+      {{ loadError
+      }}<span v-if="loadRequestId" class="ui-request-id"> requestId: {{ loadRequestId }}</span>
+    </div>
+
+    <section v-if="creating" class="ui-panel next-teams__create" data-testid="team-create-form">
+      <div class="ui-panel-head">
+        <h2 class="ui-panel-title">创建团队</h2>
+      </div>
+      <div class="ui-panel-body">
+        <div class="next-teams__form">
+          <!-- #657: the name field states its rule up front (teams.name width). -->
+          <UiInput
+            v-model="createName"
+            label="名称"
+            required
+            placeholder="例如 platform-sre"
+            hint="必填，最长 200 个字符。"
+            data-testid="team-create-name"
+          />
+          <div class="ui-field">
+            <span class="ui-field__label">描述</span>
+            <textarea
+              v-model="createDescription"
+              class="ui-textarea"
+              rows="3"
+              placeholder="团队职责（可选）"
+              data-testid="team-create-description"
+            />
+          </div>
+          <p v-if="formError" class="ui-form-error">{{ formError }}</p>
+          <div class="next-teams__actions">
+            <UiButton
+              variant="primary"
+              :loading="submitting"
+              data-testid="team-create-submit"
+              @click="createTeam"
+            >
+              创建团队
+            </UiButton>
+            <UiButton variant="ghost" @click="creating = false">取消</UiButton>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="ui-panel">
+      <div class="ui-panel-toolbar">
+        <span class="ui-panel-sub">共 {{ countWhenLoaded(loadError, teams.length) }} 个团队</span>
+      </div>
+      <UiTable
+        :columns="columns"
+        :data="teams"
+        :loading="loading"
+        row-key="id"
+        empty-title="还没有团队"
+        data-testid="teams-table"
+        :error="loadError"
+        @retry="load"
+      >
+        <template #description="{ row }">{{ (row as Team).description ?? '—' }}</template>
+        <template #status="{ row }">
+          <UiStatusBadge
+            :tone="(row as Team).status === 'ACTIVE' ? 'success' : 'neutral'"
+            :label="(row as Team).status === 'ACTIVE' ? '正常' : '停用'"
+          />
+        </template>
+        <template #actions="{ row }">
+          <UiButton
+            variant="link"
+            size="sm"
+            data-testid="team-members-open"
+            @click="openMembers(row as Team)"
+          >
+            成员
+          </UiButton>
+        </template>
+      </UiTable>
+    </section>
+
+    <!-- Member drawer -->
+    <UiDrawer
+      :open="memberOpen"
+      :title="`团队成员：${memberTeam?.name ?? ''}`"
+      data-testid="team-members-drawer"
+      @close="memberOpen = false"
+    >
+      <h3 class="next-teams__drawer-title">添加成员</h3>
+      <div class="next-teams__join-row">
+        <UiSelect
+          v-model="pickUserId"
+          :options="
+            joinableUsers.map((u) => ({
+              value: u.id ?? '',
+              label: u.username + ((u.displayName ?? '') ? ' · ' + u.displayName : ''),
+            }))
+          "
+          placeholder="选择用户"
+          data-testid="team-member-pick"
+        />
+        <UiButton
+          variant="primary"
+          :disabled="!pickUserId"
+          :loading="addingMember"
+          data-testid="team-member-add"
+          @click="addMember"
+          >加入</UiButton
+        >
+      </div>
+      <!-- #1160: 加载中 → 失败 → 空 → 有数据；失败不再一声不响。 -->
+      <p v-if="usersLoading" class="next-teams__member-hint">加载用户列表…</p>
+      <p v-else-if="usersError" class="ui-form-error" data-testid="team-users-error">
+        {{ usersError }}
+        <UiButton variant="ghost" size="sm" data-testid="team-users-retry" @click="loadUsers"
+          >重试</UiButton
+        >
+      </p>
+      <p v-else-if="usersLoaded && !joinableUsers.length" class="next-teams__member-hint">
+        没有可加入的 ACTIVE 用户。
+      </p>
+
+      <UiTable
+        :columns="memberColumns"
+        :data="memberUsers"
+        :loading="memberLoading"
+        row-key="userId"
+        empty-title="还没有成员"
+        data-testid="team-members-table"
+      >
+        <template #username="{ row }">
+          <div class="next-teams__member-name">{{ (row as MemberView).username }}</div>
+          <div v-if="(row as MemberView).displayName" class="next-teams__member-sub">
+            {{ (row as MemberView).displayName }}
+          </div>
+        </template>
+        <template #joinedAt="{ row }">{{ formatDate((row as MemberView).createdAt) }}</template>
+        <template #actions="{ row }">
+          <UiButton
+            variant="link-danger"
+            size="sm"
+            data-testid="team-member-remove"
+            @click="requestRemove(row as MemberView)"
+          >
+            移除
+          </UiButton>
+        </template>
+      </UiTable>
+    </UiDrawer>
+
+    <UiDialog
+      v-if="confirmState"
+      :open="true"
+      :title="confirmState.title"
+      :description="confirmState.body"
+      width="440px"
+      @update:open="confirmState = null"
+    >
+      <template #footer>
+        <UiButton variant="ghost" @click="confirmState = null">取消</UiButton>
+        <UiButton
+          :variant="confirmState.tone === 'danger' ? 'danger' : 'primary'"
+          @click="confirmAndRun"
+        >
+          {{ confirmState.confirmLabel }}
+        </UiButton>
+      </template>
+    </UiDialog>
+  </div>
+</template>
+
+<style scoped>
+.ui-alert {
+  padding: var(--ui-space-3) var(--ui-space-4);
+  margin-bottom: var(--ui-space-4);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-sm);
+}
+
+.ui-alert--error {
+  background: var(--ui-danger-bg);
+  color: var(--ui-danger-fg);
+}
+
+.next-teams__create {
+  margin-bottom: var(--ui-space-5);
+  max-width: 720px;
+}
+
+.next-teams__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+  max-width: 520px;
+}
+
+.next-teams__drawer-title {
+  margin: var(--ui-space-1) 0 var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+  font-weight: 600;
+  color: var(--ui-foreground-muted, #5b6472);
+}
+
+.next-teams__join-row {
+  display: flex;
+  gap: var(--ui-space-3);
+  align-items: center;
+  max-width: 440px;
+  margin-bottom: var(--ui-space-3);
+}
+
+.next-teams__member-hint {
+  margin: 0 0 var(--ui-space-3);
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-faint);
+}
+
+.ui-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+}
+
+.ui-field__label {
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-medium);
+  color: var(--ui-foreground);
+  line-height: var(--ui-line-height-sm);
+}
+
+.ui-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border: 1px solid var(--ui-input-border);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-card);
+  color: var(--ui-foreground);
+  font-family: inherit;
+  font-size: var(--ui-font-size-sm);
+  line-height: var(--ui-line-height-base);
+  resize: vertical;
+}
+
+.ui-textarea:focus {
+  outline: none;
+  border-color: var(--ui-primary);
+  box-shadow: var(--ui-shadow-focus);
+}
+
+.next-teams__actions {
+  display: flex;
+  gap: var(--ui-space-2);
+}
+
+.next-teams__member-name {
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-teams__member-sub {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+</style>

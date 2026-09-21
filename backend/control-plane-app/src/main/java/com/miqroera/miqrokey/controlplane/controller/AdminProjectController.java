@@ -5,6 +5,9 @@ import com.miqroera.miqrokey.controlplane.service.AdminOrgService;
 import com.miqroera.miqrokey.controlplane.service.AdminOrgService.ProjectMemberView;
 import com.miqroera.miqrokey.domain.model.Project;
 import com.miqroera.miqrokey.domain.model.ProjectStatus;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -36,13 +39,13 @@ public class AdminProjectController {
     }
 
     @PostMapping
-    public Project create(@RequestBody CreateRequest body) {
+    public Project create(@Valid @RequestBody ProjectCreateRequest body) {
         var admin = userContext.getUser();
         return orgService.createProject(admin.tenantId(), admin.id(), body.code(), body.name(), body.projectTag());
     }
 
     @PatchMapping("/{projectId}")
-    public Project update(@PathVariable UUID projectId, @RequestBody UpdateRequest body) {
+    public Project update(@PathVariable UUID projectId, @Valid @RequestBody ProjectUpdateRequest body) {
         var admin = userContext.getUser();
         return orgService.updateProject(admin.tenantId(), admin.id(), projectId, body.name(), body.projectTag(),
                 body.status());
@@ -54,7 +57,7 @@ public class AdminProjectController {
     }
 
     @PostMapping("/{projectId}/members")
-    public void addMember(@PathVariable UUID projectId, @RequestBody MemberRequest body) {
+    public void addMember(@PathVariable UUID projectId, @RequestBody ProjectMemberRequest body) {
         var admin = userContext.getUser();
         orgService.addProjectMember(admin.tenantId(), admin.id(), projectId, body.userId());
     }
@@ -65,12 +68,47 @@ public class AdminProjectController {
         orgService.removeProjectMember(admin.tenantId(), admin.id(), projectId, userId);
     }
 
-    public record CreateRequest(String code, String name, String projectTag) {
+    // -------------------------------------------------------------------
+    // CAA Project Registry (V56, Spec v1.1 §7.4)
+    // -------------------------------------------------------------------
+
+    @GetMapping("/{projectId}/repositories")
+    public List<AdminOrgService.ProjectRepoMappingView> repositories(@PathVariable UUID projectId) {
+        return orgService.projectRepositories(userContext.getUser().tenantId(), projectId);
     }
 
-    public record UpdateRequest(String name, String projectTag, ProjectStatus status) {
+    @PostMapping("/{projectId}/repositories")
+    public AdminOrgService.ProjectRepoMappingView addRepository(@PathVariable UUID projectId,
+            @RequestBody RepoKeyRequest body) {
+        var admin = userContext.getUser();
+        return orgService.addProjectRepository(admin.tenantId(), admin.id(), projectId, body.repoKey());
     }
 
-    public record MemberRequest(UUID userId) {
+    @DeleteMapping("/{projectId}/repositories/{mappingId}")
+    public void removeRepository(@PathVariable UUID projectId, @PathVariable UUID mappingId) {
+        var admin = userContext.getUser();
+        orgService.removeProjectRepository(admin.tenantId(), admin.id(), projectId, mappingId);
+    }
+
+    /**
+     * Widths mirror the columns (projects.code varchar(64), name varchar(200), and
+     * the project_tag CHECK ^[A-Za-z0-9_-]{1,64}$ enforced in the service). Without
+     * these the first signal an over-long value produced was a 409
+     * RESOURCE_CONFLICT from the JDBC translation — a "duplicate or referenced"
+     * message for what is really "too long". A missing code was likewise reported
+     * as PROJECT_CODE_TAKEN, conflating "you sent nothing" with "someone else has
+     * it".
+     */
+    public record ProjectCreateRequest(@NotBlank @Size(max = 64) String code, @NotBlank @Size(max = 200) String name,
+            String projectTag) {
+    }
+
+    public record ProjectUpdateRequest(@Size(max = 200) String name, String projectTag, ProjectStatus status) {
+    }
+
+    public record ProjectMemberRequest(UUID userId) {
+    }
+
+    public record RepoKeyRequest(String repoKey) {
     }
 }

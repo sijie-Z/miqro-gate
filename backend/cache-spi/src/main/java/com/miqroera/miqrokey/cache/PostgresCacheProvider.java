@@ -1,8 +1,8 @@
 package com.miqroera.miqrokey.cache;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.domain.cache.CacheKey;
 import com.miqroera.miqrokey.domain.usage.TokenBucket;
 import org.slf4j.Logger;
@@ -89,23 +89,33 @@ public final class PostgresCacheProvider implements GatewayResponseCache {
                     .addValue("responseHeaders", objectMapper.writeValueAsString(response.headers()))
                     .addValue("body", response.body()).addValue("meta", objectMapper.writeValueAsString(meta))
                     .addValue("expiresAt", java.sql.Timestamp.from(java.time.Instant.now().plus(ttl)));
-            jdbc.update("""
-                    INSERT INTO cache_entry (id, tenant_id, cache_key, virtual_key_id, project_id,
-                        provider_product_id, model_id, status_code, content_type, response_headers,
-                        body, meta_json, expires_at, created_at, updated_at)
-                    VALUES (:id, :tenantId, :cacheKey, :virtualKeyId, :projectId, :productId, :modelId,
-                        :statusCode, :contentType, :responseHeaders, :body, :meta, :expiresAt, now(), now())
-                    ON CONFLICT (tenant_id, cache_key) DO UPDATE SET
-                        status_code = EXCLUDED.status_code,
-                        content_type = EXCLUDED.content_type,
-                        response_headers = EXCLUDED.response_headers,
-                        body = EXCLUDED.body,
-                        meta_json = EXCLUDED.meta_json,
-                        expires_at = EXCLUDED.expires_at,
-                        updated_at = now()
-                    """, params); // hit_count is NOT reset on overwrite
+            jdbc.update(
+                    """
+                            INSERT INTO cache_entry (id, tenant_id, cache_key, virtual_key_id, project_id,
+                                provider_product_id, model_id, status_code, content_type, response_headers,
+                                body, meta_json, expires_at, created_at, updated_at)
+                            VALUES (:id, :tenantId, :cacheKey, :virtualKeyId, :projectId, :productId, :modelId,
+                                :statusCode, :contentType, :responseHeaders::jsonb, :body, :meta::jsonb, :expiresAt, now(), now())
+                            ON CONFLICT (tenant_id, cache_key) DO UPDATE SET
+                                status_code = EXCLUDED.status_code,
+                                content_type = EXCLUDED.content_type,
+                                response_headers = EXCLUDED.response_headers,
+                                body = EXCLUDED.body,
+                                meta_json = EXCLUDED.meta_json,
+                                expires_at = EXCLUDED.expires_at,
+                                updated_at = now()
+                            """,
+                    params); // hit_count is NOT reset on overwrite
         } catch (Exception e) {
-            log.warn("Cache write failed for key {}: {}", key.hex(), e.getMessage());
+            // #508: include the root cause — Spring wraps SQLSTATE-class-42 failures as
+            // BadSqlGrammarException whose message alone hid the real PG error
+            // (jsonb 列赋 varchar 参数缺显式转换).
+            Throwable root = e;
+            while (root.getCause() != null && root.getCause() != root) {
+                root = root.getCause();
+            }
+            log.warn("Cache write failed for key {}: {} (root cause: {})", key.hex(), e.getMessage(),
+                    root.getMessage());
         }
     }
 

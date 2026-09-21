@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
 import com.miqroera.miqrokey.controlplane.dto.PasswordChangeRequest;
@@ -14,7 +14,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -30,10 +30,19 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -123,6 +132,50 @@ class WebhookAlertApiIntegrationTest {
         exchange.sendResponseHeaders(200, body.length);
         exchange.getResponseBody().write(body);
         exchange.close();
+    }
+
+    @Test
+    @DisplayName("a negative deliveries limit is clamped, not a 500 (#475)")
+    void negativeDeliveriesLimitIsClamped() throws Exception {
+        MvcResult created = mockMvc
+                .perform(
+                        post("/api/v1/admin/webhooks").contentType(MediaType.APPLICATION_JSON)
+                                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                                .content(objectMapper.writeValueAsString(Map.of("name",
+                                        "limit-clamp-" + java.util.UUID.randomUUID().toString().substring(0, 8), "url",
+                                        mockBaseUrl, "secret", "whsec-clamp-value"))))
+                .andExpect(status().isOk()).andReturn();
+        String endpointId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        mockMvc.perform(
+                get("/api/v1/admin/webhooks/" + endpointId + "/deliveries").param("limit", "-5").cookie(sessionCookie))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("PATCH keeps working after a foreign commit (re-read semantics, #475)")
+    void patchAfterForeignCommitStillWorks() throws Exception {
+        MvcResult created = mockMvc
+                .perform(
+                        post("/api/v1/admin/webhooks").contentType(MediaType.APPLICATION_JSON)
+                                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                                .content(objectMapper.writeValueAsString(Map.of("name",
+                                        "cas-ok-" + java.util.UUID.randomUUID().toString().substring(0, 8), "url",
+                                        mockBaseUrl, "secret", "whsec-cas-ok-value"))))
+                .andExpect(status().isOk()).andReturn();
+        String endpointId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+
+        // A foreign commit moves the row version; the service must re-read and
+        // still land cleanly (version predicate comes from the fresh read).
+        jdbc.update("UPDATE webhook_endpoints SET version = version + 1 WHERE id = :id",
+                new MapSqlParameterSource("id", java.util.UUID.fromString(endpointId)));
+
+        mockMvc.perform(patch("/api/v1/admin/webhooks/" + endpointId).contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content("{\"name\":\"renamed-after\"}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("renamed-after"));
     }
 
     @Test
@@ -221,9 +274,10 @@ class WebhookAlertApiIntegrationTest {
             for (String table : List.of("webhook_delivery_attempts", "alert_events", "alert_rules", "webhook_endpoints",
                     "export_tasks", "usage_deletions", "usage_event", "cache_hit_event", "price_snapshot",
                     "virtual_key_models", "key_project_binding", "model_approval", "virtual_keys",
-                    "project_provider_grant_models", "project_provider_grants", "upstream_credential_versions",
-                    "upstream_credentials", "plan_seats", "upstream_subscriptions", "project_memberships", "projects",
-                    "provider_products", "providers", "admin_audit_events", "user_sessions", "users")) {
+                    "project_provider_grant_models", "project_provider_grants", "unattributed_policy",
+                    "upstream_credential_versions", "upstream_credentials", "plan_seats", "upstream_subscriptions",
+                    "project_memberships", "project_repositories", "projects", "provider_products", "providers",
+                    "admin_audit_events", "user_sessions", "users")) {
                 try {
                     jdbc.update("DELETE FROM " + table, new MapSqlParameterSource());
                 } catch (Exception ignored) {
@@ -263,5 +317,94 @@ class WebhookAlertApiIntegrationTest {
         static String secret() {
             return SECRET;
         }
+    }
+
+    @Test
+    @DisplayName("deleting an endpoint referenced by alert rules is refused with the dependency list (I21)")
+    void deleteBlockedByRuleReferences() throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/webhooks").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("name", "guarded", "url", mockBaseUrl, "secret", "whsec-test-value"))))
+                .andExpect(status().isOk()).andReturn();
+        String endpointId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+        MvcResult rule = mockMvc
+                .perform(post("/api/v1/admin/alert-rules").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("name", "引用方规则", "type", "USAGE_MISSING_RATE",
+                                "threshold", 0.5, "webhookEndpointId", endpointId))))
+                .andExpect(status().isOk()).andReturn();
+        String ruleId = objectMapper.readValue(rule.getResponse().getContentAsString(), Map.class).get("id").toString();
+
+        // Referenced: the delete is refused with the dependency list; nothing is
+        // touched (no silent SET NULL detach).
+        mockMvc.perform(delete("/api/v1/admin/webhooks/" + endpointId).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RESOURCE_IN_USE"))
+                .andExpect(jsonPath("$.dependencies", hasSize(1)))
+                .andExpect(jsonPath("$.dependencies[0].type").value("ALERT_RULE"))
+                .andExpect(jsonPath("$.dependencies[0].id").value(ruleId))
+                .andExpect(jsonPath("$.dependencies[0].name").value("引用方规则"));
+        mockMvc.perform(get("/api/v1/admin/webhooks/" + endpointId).cookie(sessionCookie)).andExpect(status().isOk());
+
+        // Release the reference, then the delete succeeds (no new endpoint needed).
+        mockMvc.perform(delete("/api/v1/admin/alert-rules/" + ruleId).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+        mockMvc.perform(delete("/api/v1/admin/webhooks/" + endpointId).cookie(sessionCookie, csrfCookie)
+                .header("X-CSRF-Token", csrfToken)).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("delete serializes against a concurrent rule insert — no silent SET NULL detach (#403)")
+    void deleteWaitsForConcurrentRuleInsert() throws Exception {
+        MvcResult created = mockMvc
+                .perform(post("/api/v1/admin/webhooks").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("name", "racing", "url", mockBaseUrl, "secret", "whsec-test-value"))))
+                .andExpect(status().isOk()).andReturn();
+        String endpointId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+        UUID endpointUuid = UUID.fromString(endpointId);
+        UUID ruleId = UUID.randomUUID();
+
+        var dataSource = jdbc.getJdbcTemplate().getDataSource();
+        ExecutorService io = Executors.newSingleThreadExecutor();
+        try (Connection conn = dataSource.getConnection()) {
+            // T2: an uncommitted rule INSERT referencing the endpoint — its FK
+            // check holds FOR KEY SHARE on the endpoint row.
+            conn.setAutoCommit(false);
+            try (PreparedStatement ps = conn.prepareStatement("""
+                    INSERT INTO alert_rules (id, tenant_id, name, type, threshold, webhook_endpoint_id)
+                    VALUES (?, ?, '并发规则', 'USAGE_MISSING_RATE', 0.5, ?)
+                    """)) {
+                ps.setObject(1, ruleId);
+                ps.setObject(2, fx.tenantId);
+                ps.setObject(3, endpointUuid);
+                ps.executeUpdate();
+            }
+            // T1: the delete must block on the row lock instead of proceeding.
+            Future<Integer> deleteStatus = io
+                    .submit(() -> mockMvc.perform(delete("/api/v1/admin/webhooks/" + endpointId)
+                            .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)).andReturn()
+                            .getResponse().getStatus());
+            Thread.sleep(700);
+            org.assertj.core.api.Assertions.assertThat(deleteStatus.isDone())
+                    .as("delete must wait on the endpoint row lock").isFalse();
+
+            conn.commit();
+            // Once the insert is visible, the guard sees the reference and
+            // refuses with 409 — and the rule keeps its endpoint (no SET NULL).
+            org.assertj.core.api.Assertions.assertThat(deleteStatus.get(15, TimeUnit.SECONDS)).isEqualTo(409);
+        } finally {
+            io.shutdownNow();
+        }
+        Integer stillReferenced = jdbc.queryForObject(
+                "SELECT count(*) FROM alert_rules WHERE id = :id AND webhook_endpoint_id = :endpointId",
+                new MapSqlParameterSource("id", ruleId).addValue("endpointId", endpointUuid), Integer.class);
+        org.assertj.core.api.Assertions.assertThat(stillReferenced).isEqualTo(1);
+        mockMvc.perform(get("/api/v1/admin/webhooks/" + endpointId).cookie(sessionCookie)).andExpect(status().isOk());
     }
 }

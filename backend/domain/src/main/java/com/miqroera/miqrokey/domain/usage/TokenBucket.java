@@ -39,26 +39,36 @@ public record TokenBucket(Long inputTokens, Long outputTokens, Long cacheCreatio
     }
 
     /**
-     * Merges two observations (e.g. multiple SSE frames) by summing non-null
-     * fields.
+     * Overlays a later observation of the <em>same</em> response on top of this
+     * one: every non-null field of {@code other} supersedes the field on the left,
+     * nulls leave it untouched.
+     *
+     * <p>
+     * Successive provider usage frames must never be summed. Provider counters are
+     * cumulative within one response: Anthropic repeats the same
+     * {@code input_tokens} (and cache counters) in {@code message_start} and
+     * {@code message_delta}, and OpenAI-family final chunks restate the running
+     * totals. Adding them double-counts every field the provider reports more than
+     * once — the last frame is the authoritative total.
+     * </p>
      */
-    public TokenBucket merge(TokenBucket other) {
+    public TokenBucket overlay(TokenBucket other) {
         if (other == null || other.isEmpty()) {
             return this;
         }
-        return new TokenBucket(sum(inputTokens, other.inputTokens), sum(outputTokens, other.outputTokens),
-                sum(cacheCreationInputTokens, other.cacheCreationInputTokens),
-                sum(cacheReadInputTokens, other.cacheReadInputTokens), sum(promptTokens, other.promptTokens),
-                sum(completionTokens, other.completionTokens), sum(totalTokens, other.totalTokens),
-                sum(reasoningTokens, other.reasoningTokens));
+        return new TokenBucket(coalesce(inputTokens, other.inputTokens), coalesce(outputTokens, other.outputTokens),
+                coalesce(cacheCreationInputTokens, other.cacheCreationInputTokens),
+                coalesce(cacheReadInputTokens, other.cacheReadInputTokens), coalesce(promptTokens, other.promptTokens),
+                coalesce(completionTokens, other.completionTokens), coalesce(totalTokens, other.totalTokens),
+                coalesce(reasoningTokens, other.reasoningTokens));
     }
 
-    private static Long sum(Long a, Long b) {
-        if (a == null)
-            return b;
-        if (b == null)
-            return a;
-        return a + b;
+    /**
+     * Later non-null value wins; {@code earlier} is kept when {@code later} is
+     * null.
+     */
+    private static Long coalesce(Long earlier, Long later) {
+        return later != null ? later : earlier;
     }
 
     @Override

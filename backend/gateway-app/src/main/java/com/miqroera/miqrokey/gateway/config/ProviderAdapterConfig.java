@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.gateway.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.adapters.registry.AdapterRegistryFactory;
 import com.miqroera.miqrokey.adapters.registry.BuiltInAdapterRegistry;
 import org.springframework.context.annotation.Bean;

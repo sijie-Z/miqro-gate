@@ -2,9 +2,9 @@ package com.miqroera.miqrokey.controlplane.controller;
 
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.AdminOrgService;
+import com.miqroera.miqrokey.controlplane.service.AdminOrgService.AdminUserView;
 import com.miqroera.miqrokey.controlplane.service.AdminOrgService.UserCreated;
 import com.miqroera.miqrokey.controlplane.service.AdminOrgService.UserPasswordReset;
-import com.miqroera.miqrokey.domain.model.User;
 import com.miqroera.miqrokey.domain.model.UserRole;
 import com.miqroera.miqrokey.domain.model.UserStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,20 +36,33 @@ public class AdminUserController {
     }
 
     @GetMapping
-    public List<User> list() {
+    public List<AdminUserView> list() {
         return orgService.listUsers(userContext.getUser().tenantId());
     }
 
+    /** Projects the user belongs to (admin quick-join entry, F-REG loop). */
+    @GetMapping("/{userId}/project-memberships")
+    public List<com.miqroera.miqrokey.controlplane.service.AdminOrgService.UserProjectMembershipView> userProjectMemberships(
+            @PathVariable UUID userId) {
+        var admin = userContext.getUser();
+        return orgService.userProjectMemberships(admin.tenantId(), userId);
+    }
+
     @PostMapping
-    public UserCreated create(@RequestBody CreateRequest body) {
+    public UserCreated create(@RequestBody UserCreateRequest body) {
         var admin = userContext.getUser();
         return orgService.createUser(admin.tenantId(), admin.id(), body.username(), body.displayName(), body.role());
     }
 
+    /**
+     * Updates display name and/or status (#614). An empty update (both fields null)
+     * is a 400 — before #614 an unknown field such as {@code displayName} was
+     * silently dropped and the resulting null status surfaced as a 500.
+     */
     @PatchMapping("/{userId}")
-    public User updateStatus(@PathVariable UUID userId, @RequestBody StatusRequest body) {
+    public AdminUserView update(@PathVariable UUID userId, @RequestBody UpdateUserRequest body) {
         var admin = userContext.getUser();
-        return orgService.updateUserStatus(admin.tenantId(), admin.id(), userId, body.status());
+        return orgService.updateUser(admin.tenantId(), admin.id(), userId, body.displayName(), body.status());
     }
 
     @PostMapping("/{userId}/reset-password")
@@ -64,9 +77,12 @@ public class AdminUserController {
         orgService.revokeSessions(admin.tenantId(), admin.id(), userId);
     }
 
-    public record CreateRequest(String username, String displayName, UserRole role) {
+    public record UserCreateRequest(String username, String displayName, UserRole role) {
     }
 
-    public record StatusRequest(UserStatus status) {
+    /**
+     * displayName and/or status; at least one non-null (validated in the service).
+     */
+    public record UpdateUserRequest(String displayName, UserStatus status) {
     }
 }

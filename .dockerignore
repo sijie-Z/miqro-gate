@@ -1,0 +1,36 @@
+# Docker 构建上下文收敛（构建上下文 = 仓库根；见 deploy/compose.prod.yaml）。
+# 注意：.git 不排除——BuildKit 生成的 .dockerignore 需与之共存即可；排除项只影响构建上下文拷贝。
+
+# Maven / Java 产物
+backend/**/target/
+backend/target/
+*.jar
+*.war
+
+# 前端依赖与产物（dist 需要保留：Dockerfile.portal 直接 COPY frontend/dist）
+frontend/node_modules/
+frontend/e2e/
+frontend/test-results/
+frontend/playwright-report/
+frontend/.vite/
+
+# 文档与研究资料
+docs/
+worknotes/
+reference/
+other/
+MiQroKey-Gateway-开发设计文档-详细设计/
+
+# 部署态敏感与运行时目录（绝不进构建上下文）
+deploy/secrets/
+deploy/.env
+deploy/.env.prod
+
+# VCS 与本地环境
+.git/
+.gitattributes
+.gitignore
+.node-version
+*.local
+.idea/
+.vscode/

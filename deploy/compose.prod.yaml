@@ -1,0 +1,280 @@
+# MiQroKey Gateway — production single-host stack (#479).
+#
+#   cd deploy
+#   cp .env.prod.example .env      # edit: domain, allowlist…
+#   mkdir -p secrets/certs && 生成密钥/证书（见 secrets/README.md）
+#   docker compose -f compose.prod.yaml up -d --build
+#
+# 密钥注入：`secrets-init` 一次性把 deploy/secrets/ 同步进命名卷 secrets-store 并设定属主/权限，
+# 应用容器只读挂载该卷。不用 compose `secrets:`/宿主 bind：Docker Desktop（Windows）对宿主文件
+# 呈现合成权限且忽略 secrets 的 uid/gid/mode（实测 0777），无法得到确定的 0400；卷内权限由
+# Linux 侧 chmod，本机开发与 Linux 生产行为一致。
+# 仅 portal 发布 80/443；TLS 证书：deploy/secrets/certs/{fullchain,privkey}.pem（bind 挂载，root 读取）。
+
+name: miqrokey
+
+services:
+  # 一次性密钥同步：master/vk-hmac/bootstrap 严格 0400（FileSecretProvider 强制）；db_password/
+  # backup_key 0440 属主 10001:70（应用 uid 10001 与备份容器 postgres uid 70 均可读）。
+  secrets-init:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        cp /src/master_key /src/vk_hmac_key /src/bootstrap_secret /src/db_password /src/backup_key /dst/
+        chown 10001:10001 /dst/master_key /dst/vk_hmac_key /dst/bootstrap_secret
+        chmod 400 /dst/master_key /dst/vk_hmac_key /dst/bootstrap_secret
+        chown 10001:70 /dst/db_password /dst/backup_key
+        chmod 440 /dst/db_password /dst/backup_key
+        echo "secrets-init: $(ls -l /dst | tail -n +2)"
+    volumes:
+      - ./secrets:/src:ro
+      - secrets-store:/dst
+    networks: [internal]
+
+  postgres:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    restart: unless-stopped
+    # 小规格宿主实测（2026-09-16 2G 演示机）：库小（~135MB）时 64M 足够；共享内存不可回收，
+    # 调小后余量转为可回收内核页缓存。大库用 POSTGRES_SHARED_BUFFERS 放大。
+    command: ["postgres", "-c", "shared_buffers=${POSTGRES_SHARED_BUFFERS:-64MB}"]
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-miqrokey}
+      POSTGRES_USER: ${POSTGRES_USER:-miqrokey}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - secrets-store:/run/secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-miqrokey} -d ${POSTGRES_DB:-miqrokey}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    networks: [internal]
+
+  control-plane:
+    image: miqrokey-control-plane:${MIQROKEY_IMAGE_TAG:-local}
+    build:
+      context: ..
+      dockerfile: deploy/docker/control-plane.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      MIQROKEY_PRODUCTION: "true"
+      # ProductionStartupValidator 硬性要求（不满足即拒绝启动）；不会自动启用。
+      MIQROKEY_COOKIE_SECURE: "true"
+      MIQROKEY_PUBLIC_BASE_URL: ${MIQROKEY_PUBLIC_BASE_URL:-https://localhost}
+      MIQROKEY_GATEWAY_BASE_URL: ${MIQROKEY_GATEWAY_BASE_URL:-https://localhost}
+      MIQROKEY_ORIGIN_ALLOWLIST: ${MIQROKEY_ORIGIN_ALLOWLIST:-https://miqrokey.example.com}
+      MIQROKEY_REGISTRATION_ENABLED: ${MIQROKEY_REGISTRATION_ENABLED:-true}
+      # 留痕查看器（ADR-0014 §8）：控制面内置消费端接入 Kafka/Redpanda，把留痕信封
+      # 密文落库供「内容留痕」页查看/导出。默认关；启用需同时设 broker 地址
+      # （自托管走 --profile kafka → redpanda:9092，或填 CKafka 接入地址）。
+      MIQROKEY_RETENTION_CONSUMER_ENABLED: ${MIQROKEY_RETENTION_CONSUMER_ENABLED:-false}
+      MIQROKEY_RETENTION_CONSUMER_BOOTSTRAP_SERVERS: ${MIQROKEY_RETENTION_CONSUMER_BOOTSTRAP_SERVERS:-}
+      MIQROKEY_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-miqrokey}
+      MIQROKEY_DB_USERNAME: ${POSTGRES_USER:-miqrokey}
+      MIQROKEY_DB_PASSWORD_FILE: /run/secrets/db_password
+      MIQROKEY_CRYPTO_ENABLED: "true"
+      MIQROKEY_CRYPTO_ENCRYPTION_ACTIVE_VERSION: v1
+      MIQROKEY_CRYPTO_ENCRYPTION_VERSIONS_V1: /run/secrets/master_key
+      MIQROKEY_CRYPTO_HMAC_ACTIVE_VERSION: v1
+      MIQROKEY_CRYPTO_HMAC_VERSIONS_V1: /run/secrets/vk_hmac_key
+      MIQROKEY_BOOTSTRAP_SECRET_FILE: /run/secrets/bootstrap_secret
+      # 派生列调和定时通道（#777）：按周期把最近 48h 内已盖章行的价格标签重算、补写缺失的
+      # 冻结金额——不重查价目、不改价格列、不动既有金额；默认关。要开请在 **.env** 里设
+      # true（本行只是把值透传进来）——手改这份文件的值会在整树同步时丢失，见 deploy.sh §9。
+      MIQROKEY_USAGE_PRICE_RECONCILE_ENABLED: ${MIQROKEY_USAGE_PRICE_RECONCILE_ENABLED:-false}
+      # 显式限堆（同 gateway 注释）；管理面无高并发。2G 演示机 GC 实测堆存活 ~69MB，
+      # 448m 余量充足；SerialGC 小堆更省内存，GC 日志 2×5MB 循环可查。
+      JAVA_TOOL_OPTIONS: "${CONTROL_PLANE_JAVA_OPTS:--Xmx448m -XX:MaxMetaspaceSize=192m -XX:+UseSerialGC -Xlog:gc*:file=/tmp/gc.log:time,uptime:filecount=2,filesize=5m -XX:+ExitOnOutOfMemoryError}"
+      MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES: ${MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES:-172.28.0.0/24}
+      MIQROKEY_CONTROL_ADMIN_IP_ALLOWLIST: ${MIQROKEY_CONTROL_ADMIN_IP_ALLOWLIST:-}
+    volumes:
+      - secrets-store:/run/secrets:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    networks: [internal]
+
+  gateway:
+    image: miqrokey-gateway:${MIQROKEY_IMAGE_TAG:-local}
+    build:
+      context: ..
+      dockerfile: deploy/docker/gateway.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      # #846: the gateway's first snapshot refresh must not race the control
+      # plane's Flyway run. Postgres is "healthy" on an empty database too, so
+      # without this the gateway booted, refreshed, and logged
+      # `relation "virtual_keys" does not exist` ~1.7s BEFORE migrations
+      # finished — a corrupt-looking error on every fresh deployment. Waiting
+      # for control-plane health means migrations are done; no cycle is added
+      # (control-plane does not depend on the gateway).
+      control-plane:
+        condition: service_healthy
+    environment:
+      MIQROKEY_GATEWAY_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-miqrokey}
+      MIQROKEY_GATEWAY_DB_USERNAME: ${POSTGRES_USER:-miqrokey}
+      MIQROKEY_GATEWAY_DB_PASSWORD_FILE: /run/secrets/db_password
+      MIQROKEY_CRYPTO_ENABLED: "true"
+      MIQROKEY_CRYPTO_ENC_KEY_FILE: /run/secrets/master_key
+      MIQROKEY_CRYPTO_HMAC_KEY_FILE: /run/secrets/vk_hmac_key
+      # 响应缓存（L1 进程内 + L2 Postgres；#509 全链路实测）：默认关，按需开启。
+      MIQROKEY_CACHE_ENABLED: ${MIQROKEY_CACHE_ENABLED:-false}
+      # 留痕 Kafka 出口（ADR-0014 R3，默认关）：空值=no-op publisher。自托管 broker 启用后
+      # 设为 redpanda:9092（需 --profile kafka）；腾讯云 CKafka 直接填其接入地址，无需 profile。
+      MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS: ${MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS:-}
+      # 调用方 IP 记录（#605）：默认信任本编排内网段（portal nginx 反代），据此消费
+      # X-Forwarded-For 并把真实访客地址记入用量记录；直连场景置空 = 只记对端地址。
+      MIQROKEY_TRUSTED_PROXY_CIDRS: ${MIQROKEY_TRUSTED_PROXY_CIDRS:-172.28.0.0/24}
+      # 显式限堆：%-of-limit 在小规格宿主（2G 演示机）上会超卖；大机可用 GATEWAY_JAVA_OPTS 覆盖。
+      # 2G 演示机 GC 实测堆存活 ~24MB（原 640m 严重超配，2026-09-16 调低）；SerialGC + GC 日志同控制面。
+      # 注：镜像 ENTRYPOINT 的 -XX:MaxRAMPercentage=75 仅在未设 JAVA_TOOL_OPTIONS 时兜底（-Xmx 优先）。
+      JAVA_TOOL_OPTIONS: "${GATEWAY_JAVA_OPTS:--Xmx384m -XX:MaxMetaspaceSize=192m -XX:+UseSerialGC -Xlog:gc*:file=/tmp/gc.log:time,uptime:filecount=2,filesize=5m -XX:+ExitOnOutOfMemoryError}"
+    volumes:
+      - secrets-store:/run/secrets:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    networks: [internal]
+
+  portal:
+    image: miqrokey-portal:${MIQROKEY_IMAGE_TAG:-local}
+    build:
+      context: ..
+      dockerfile: deploy/docker/portal.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      control-plane:
+        condition: service_healthy
+      gateway:
+        condition: service_started
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./secrets/certs:/etc/nginx/certs:ro
+    healthcheck:
+      # 显式 127.0.0.1：busybox wget 对 localhost 优先 ::1，而 nginx 默认只监听 IPv4。
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [internal]
+
+  backup:
+    image: miqrokey-backup:${MIQROKEY_IMAGE_TAG:-local}
+    build:
+      context: ..
+      dockerfile: deploy/docker/backup.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      MIQROKEY_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-miqrokey}
+      MIQROKEY_DB_USERNAME: ${POSTGRES_USER:-miqrokey}
+      MIQROKEY_DB_PASSWORD_FILE: /run/secrets/db_password
+      MIQROKEY_BACKUP_PATH: /var/backups/miqrokey
+      MIQROKEY_BACKUP_KEY_FILE: /run/secrets/backup_key
+      MIQROKEY_BACKUP_WEBHOOK_URL: ${MIQROKEY_BACKUP_WEBHOOK_URL:-}
+      MIQROKEY_BACKUP_WEBHOOK_SECRET: ${MIQROKEY_BACKUP_WEBHOOK_SECRET:-}
+    volumes:
+      - backups:/var/backups/miqrokey
+      - secrets-store:/run/secrets:ro
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    networks: [internal]
+
+  # 可选：自托管单节点 Redpanda（Kafka 协议兼容）——留痕出口（ADR-0014 R3）的 broker（#534）。
+  # 启用：docker compose -f compose.prod.yaml --profile kafka up -d，并在 .env 设
+  #   MIQROKEY_RETENTION_KAFKA_BOOTSTRAP_SERVERS=redpanda:9092（否则留痕保持默认关）。
+  # 不启用该 profile：服务不启动、零资源占用、行为与不带 Kafka 完全一致。
+  # 腾讯云 CKafka 为等价替代：不用本服务，直接把同一变量设为 CKafka 接入地址。
+  # 坑位：官方 docker.redpanda.com 在中国大陆不可达——经 Docker Hub 镜像名（digest 固定）拉取（2026-09-15 实测）。
+  redpanda:
+    image: redpandadata/redpanda:latest@sha256:468bd13a9f2bd24794cb7fddc867c767fb1008b9a07b297b89fde48c564d7d96
+    profiles: ["kafka"]
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 800m
+    networks: [internal]
+
+networks:
+  internal:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+volumes:
+  pgdata:
+  backups:
+  secrets-store:
+  redpanda-data:

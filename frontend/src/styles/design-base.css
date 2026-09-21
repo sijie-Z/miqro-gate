@@ -1,0 +1,560 @@
+/* MiQroGate UI v2 base — page primitives shared by pilot pages & ui components.
+ *
+ * Deliberately class-scoped (.ui-*): the legacy TDesign-era pages share this
+ * stylesheet load, so no element/global rules live here. Both layers run the
+ * aesthetic audit gates (no gradients, no violet accents outside the brand
+ * chip palette, radius caps, shadow policy).
+ */
+
+/* ---- global box model ----------------------------------------------------
+   The v2 components size fields as "width X includes its border and padding"
+   (.ui-field__input = width:100% + 1px border + 24px padding). The UA default
+   is content-box, so every such control rendered 26px wider than its wrapper
+   and bled into its flex-row neighbours. One reset fixes the whole family;
+   nothing in the codebase relies on content-box sizing (the only previous
+   box-sizing declaration was a border-box opt-in). */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+
+/* ---- page structure ---- */
+.ui-page {
+  max-width: var(--ui-content-max);
+  /* Center the capped band when 'fixed 1200' is chosen; no-op in the default
+     fluid mode (max-width 100%). Before this, a large monitor showed the whole
+     console hugging the left edge (vben v5 fills the viewport — measured). */
+  margin-inline: auto;
+  padding: var(--ui-space-4) var(--ui-space-4) var(--ui-space-10);
+}
+
+.ui-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-4);
+  margin-bottom: var(--ui-space-6);
+}
+
+.ui-page-title {
+  margin: 0;
+  font-size: var(--ui-font-size-2xl);
+  font-weight: var(--ui-weight-semibold);
+  line-height: 28px;
+  color: var(--ui-foreground);
+  letter-spacing: -0.01em;
+}
+
+.ui-page-desc {
+  margin: var(--ui-space-1) 0 0;
+  font-size: var(--ui-font-size-base);
+  line-height: var(--ui-line-height-base);
+  color: var(--ui-foreground-secondary);
+}
+
+/* Page-description toggle: any page title collapses/expands the description
+   line below it (the shell delegates the click to the showPageDesc
+   preference, mirrored by the 界面设置 switch). The caret is the affordance. */
+.ui-page-title {
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ui-page-title::after {
+  content: '⌄';
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ui-foreground-faint);
+  opacity: 0;
+  transition: opacity var(--ui-ease);
+}
+
+.ui-page-title:hover::after,
+[data-page-desc='hide'] .ui-page-title::after {
+  opacity: 1;
+}
+
+[data-page-desc='hide'] .ui-page-title::after {
+  /* Collapsed: the caret points back down-right at the hidden line. */
+  transform: rotate(-90deg);
+}
+
+[data-page-desc='hide'] .ui-page-desc {
+  display: none;
+}
+
+.ui-page-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  flex-shrink: 0;
+}
+
+/* ---- panels (white card, hairline lift, generous Vben corners) ---- */
+.ui-panel {
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-panel);
+  box-shadow: var(--ui-shadow-card);
+}
+
+.ui-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  min-height: 56px;
+  padding: 0 var(--ui-space-6);
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.ui-panel-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: var(--ui-weight-semibold);
+  color: var(--ui-foreground);
+}
+
+.ui-panel-sub {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.ui-panel-body {
+  padding: var(--ui-space-6);
+}
+
+.ui-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+}
+
+/* ---- filter / toolbar rows ---- */
+.ui-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  margin-bottom: var(--ui-space-4);
+}
+
+.ui-toolbar-spacer {
+  flex: 1;
+}
+
+/* slim list toolbar between panel edge and the table band */
+.ui-panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-3) var(--ui-space-6);
+  border-bottom: 1px solid var(--ui-border);
+}
+
+/* ---- chart legend rows (shared by donut panels) ---- */
+.ui-legend {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+}
+
+.ui-legend-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) 44px 80px;
+  align-items: center;
+  gap: var(--ui-space-2);
+  font-size: var(--ui-font-size-xs);
+}
+
+.ui-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.ui-legend-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-foreground-secondary);
+}
+
+.ui-legend-pct {
+  text-align: right;
+  color: var(--ui-foreground-secondary);
+}
+
+.ui-legend-value {
+  text-align: right;
+  color: var(--ui-foreground);
+}
+
+/* ---- numbers & code ---- */
+.ui-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-mono {
+  font-family: var(--ui-font-mono);
+  font-size: 12px;
+}
+
+/* ---- error / notice text ---- */
+.ui-form-error {
+  margin: var(--ui-space-2) 0 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-danger-fg);
+  line-height: var(--ui-line-height-sm);
+}
+
+.ui-request-id {
+  font-family: var(--ui-font-mono);
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+/* ---- skeleton shimmer (loading rows) — flat, no gradient ---- */
+@keyframes ui-skeleton-pulse {
+  0% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.55;
+  }
+}
+
+.ui-skeleton {
+  background: var(--ui-muted);
+  border-radius: var(--ui-radius-control);
+  animation: ui-skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+/* ---- scrollbars — slim, quiet (WebKit/Blink) ---- */
+.new-shell__content,
+.new-shell__nav,
+.ui-table__scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(31, 35, 40, 0.22) transparent;
+}
+
+.new-shell__content::-webkit-scrollbar,
+.new-shell__nav::-webkit-scrollbar,
+.ui-table__scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.new-shell__content::-webkit-scrollbar-thumb,
+.new-shell__nav::-webkit-scrollbar-thumb,
+.ui-table__scroll::-webkit-scrollbar-thumb {
+  background: rgba(31, 35, 40, 0.2);
+  border-radius: var(--ui-radius-pill);
+}
+
+.new-shell__content::-webkit-scrollbar-thumb:hover,
+.new-shell__nav::-webkit-scrollbar-thumb:hover,
+.ui-table__scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(31, 35, 40, 0.32);
+}
+
+.new-shell__content::-webkit-scrollbar-track,
+.new-shell__nav::-webkit-scrollbar-track,
+.ui-table__scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---- keyboard focus ---- */
+/* Plain links and tile anchors (router-links) get a visible focus ring;
+   buttons/inputs/selects carry their own component-level focus styles. */
+a:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: 2px;
+  border-radius: var(--ui-radius-control);
+}
+
+/* ---- motion (antd v5 parity, measured from v2.vben.pro) ----------------
+   Popovers animate in like antd's slide-up motion: 0.2s, scaleY(0.8) from
+   the trigger-anchored origin (radix exposes it as a custom property),
+   easing cubic-bezier(0.23, 1, 0.32, 1). Radix waits for the close animation
+   because a [data-state='closed'] animation is defined. The animations-off
+   preference kills these through the global [data-anim='off'] rule. */
+@keyframes ui-slide-up-in {
+  0% {
+    transform: scaleY(0.8);
+    opacity: 0;
+  }
+  100% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+@keyframes ui-zoom-in {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes ui-zoom-out {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+}
+
+/* Open animation only: an exit animation keeps the closing layer mounted
+   for its duration, and rapid interactions (open the next dialog while the
+   menu is still animating out) then hit the stale layer — bisected against
+   the kebab e2e flow. Radix unmounts closed popovers immediately instead. */
+.ui-select__content[data-state='open'],
+.ui-menu[data-state='open'] {
+  animation: ui-slide-up-in 200ms cubic-bezier(0.23, 1, 0.32, 1);
+  transform-origin: var(
+    --radix-select-content-transform-origin,
+    var(--radix-dropdown-menu-content-transform-origin, center)
+  );
+}
+
+/* ---- misc ---- */
+.ui-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-gap-2 {
+  gap: var(--ui-space-2);
+}
+
+/* ---- teleported popover surfaces -----------------------------------------
+   Popper-based radix roots (Select content, DropdownMenu content) render
+   through the library's PopperContent chain, which drops the parent scope's
+   data-v attribute — so component-scoped rules for the bare container never
+   match and the popover shows up as a transparent, uncontained list floating
+   over the page. Their chrome lives here in the global sheet instead; slot
+   children (items, separators) keep their scoped styles as usual. */
+.ui-select__content {
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-panel);
+  box-shadow: var(--ui-shadow-popper);
+  padding: var(--ui-space-1);
+  z-index: 2000;
+  min-width: var(--radix-select-trigger-width);
+  max-height: 320px;
+  overflow: hidden;
+}
+
+.ui-select__viewport {
+  overflow-y: auto;
+  padding: 0;
+}
+
+/* Shared dropdown menu panel + item chrome (shell user menu + per-view
+   row/kebab menus). The panel is a teleported radix root (no scoped data-v);
+   items are slot children rendered by several different components, so both
+   live here instead of duplicating the same geometry per view. */
+
+.ui-menu {
+  min-width: 160px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-panel);
+  box-shadow: var(--ui-shadow-popper);
+  padding: var(--ui-space-1);
+  z-index: 2000;
+}
+
+/* antd v5 menu item metrics (v2.pro live): 32px row, 5px 12px padding,
+   4px radius, 14px/22px text, rgba(0,0,0,.04) hover fill. Hover/active get
+   the 0.2s background ease + pressed fill (#655). */
+.ui-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  min-height: 32px;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: var(--ui-font-size-base);
+  line-height: 22px;
+  color: var(--ui-foreground);
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+  transition:
+    background-color var(--ui-ease),
+    color var(--ui-ease);
+}
+
+.ui-menu__item[data-highlighted] {
+  background: var(--ui-fill-hover);
+}
+
+.ui-menu__item:active {
+  background: var(--ui-fill-selected);
+}
+
+.ui-menu__item[data-disabled] {
+  color: var(--ui-foreground-faint);
+  cursor: not-allowed;
+}
+
+.ui-menu__item--danger {
+  color: var(--ui-danger-fg);
+}
+
+.ui-menu__item:focus-visible {
+  box-shadow: var(--ui-shadow-focus);
+}
+
+/* ---- row action links (cloud-console convention) -------------------------
+   Row operations stay visible as brand-blue text links — Tencent Cloud and
+   Aliyun console tables put every row action in the blue ink, and a
+   chrome-less ghost button instead reads as body copy (#651). UiButton
+   variant="link"/"link-danger" and plain anchors (dropdown triggers, doc
+   links) share this class. Append-only block. */
+.ui-link-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 7px;
+  border: none;
+  background: none;
+  font: inherit;
+  line-height: 22px;
+  color: var(--ui-primary-text);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--ui-ease);
+}
+
+.ui-link-action:hover:not(:disabled) {
+  color: var(--ui-primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.ui-link-action:active:not(:disabled) {
+  color: var(--ui-primary-active);
+}
+
+.ui-link-action:focus-visible {
+  outline: none;
+  border-radius: var(--ui-radius-control);
+  box-shadow: var(--ui-shadow-focus);
+}
+
+.ui-link-action:disabled {
+  color: var(--ui-foreground-faint);
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+.ui-link-action--danger {
+  color: var(--ui-danger-fg);
+}
+
+.ui-link-action--danger:hover:not(:disabled) {
+  color: #9e0f1f;
+}
+
+/* ---- tooltip bubble (status explainers) — dark antd-style bubble ---- */
+.ui-tooltip {
+  z-index: 2200;
+  max-width: 300px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  font-size: var(--ui-font-size-xs);
+  line-height: 20px;
+  box-shadow: var(--ui-shadow-popper);
+}
+
+/* Enter-only, keyed on the open states (same radix close-wait gotcha as the
+   popover motion above). */
+.ui-tooltip[data-state='delayed-open'],
+.ui-tooltip[data-state='instant-open'] {
+  animation: ui-zoom-in 120ms var(--ui-ease-zoom);
+  transform-origin: var(--radix-tooltip-content-transform-origin, center);
+}
+
+/* ---- preference modes ----------------------------------------------------
+   The preferences core (src/preferences) applies dataset attributes on <html>;
+   these rules give each mode its chrome. Append-only block. */
+
+/* Rail ink that follows the rail SURFACE (brand name, hovered nav rows) —
+   unlike --ui-foreground-inverse (always white, kept for the white-on-primary
+   active item). Defaults to the inverse foreground; the light menu theme below
+   re-points it to the light palette. */
+:root {
+  --ui-rail-text-strong: var(--ui-foreground-inverse);
+}
+
+/* Light navigation rail: the shell rail consumes the --ui-rail* tokens, so the
+   token re-point is enough — no layout rules change. Active nav items stay
+   white-on-solid-primary; non-active text flips to #595959. */
+[data-menu-theme='light'] {
+  --ui-rail: #ffffff;
+  --ui-rail-text: #595959;
+  --ui-rail-text-muted: #8c959f;
+  --ui-rail-hover: rgba(0, 0, 0, 0.04);
+  --ui-rail-line: #f0f0f0;
+  --ui-rail-text-strong: #595959;
+}
+
+/* Animations off: no transitions or keyframes anywhere in the console. */
+[data-anim='off'] *,
+[data-anim='off'] *::before,
+[data-anim='off'] *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* System reduced motion gets the same blunt kill switch (#655). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* Color modes — the dataset lands on <html>, so the whole console filters. */
+[data-gray='on'] {
+  filter: grayscale(100%);
+}
+
+[data-color-weak='on'] {
+  filter: invert(80%);
+}
+
+/* Wide content: page bands fill the viewport instead of the 1200px cap
+   ('fixed' keeps the existing --ui-content-max token). */
+[data-compact='wide'] {
+  --ui-content-max: 100%;
+}

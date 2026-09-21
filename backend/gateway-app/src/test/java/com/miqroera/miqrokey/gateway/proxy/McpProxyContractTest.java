@@ -1,0 +1,744 @@
+package com.miqroera.miqrokey.gateway.proxy;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import com.miqroera.miqrokey.gateway.GatewayAuthTestConfig;
+import com.miqroera.miqrokey.testing.GatewayTestKeys;
+import com.miqroera.miqrokey.testing.McpMockServer;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
+import org.springframework.test.web.reactive.server.WebTestClient;
+import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Contract of the MCP invocation proxy (F01, Tencent doc 135906 shape):
+ * consumer credential authentication against the snapshot digest, service
+ * resolution, two-level access control ({@code McpAccessPolicy}: server mode
+ * for every method, per-tool override and tool enablement for
+ * {@code tools/call}), and verbatim passthrough (headers/status/body) of the
+ * JSON-RPC envelope to the upstream.
+ *
+ * <p>
+ * Fixtures live in {@link GatewayTestKeys}: every snapshot carries the open
+ * ({@code NONE} mode) and gated ({@code ALLOW} mode) services under
+ * {@code baseUrl}/mcp, plus the allowed / server-only / outsider consumers.
+ * </p>
+ */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+        "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
+                + "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration,"
+                + "org.springframework.boot.jdbc.autoconfigure.DataSourceTransactionManagerAutoConfiguration",
+        "miqrokey.gateway.persistence.enabled=false", "miqrokey.crypto.enabled=false",
+        "spring.main.web-application-type=reactive"})
+@AutoConfigureWebTestClient
+@Import(GatewayAuthTestConfig.class)
+@DisplayName("MCP invocation proxy contract")
+class McpProxyContractTest {
+
+    private static final McpMockServer mockServer = new McpMockServer();
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    @Autowired
+    private WebTestClient webTestClient;
+
+    @DynamicPropertySource
+    static void configureUpstream(DynamicPropertyRegistry registry) {
+        registry.add("miqrokey.gateway.upstream.url", mockServer::getBaseUrl);
+    }
+
+    @AfterAll
+    static void stopMockServer() {
+        mockServer.close();
+    }
+
+    @AfterEach
+    void resetMockServer() {
+        mockServer.reset();
+    }
+
+    private static String errorType(byte[] body) {
+        try {
+            JsonNode root = OBJECT_MAPPER.readTree(body);
+            return root.path("error").path("type").asText();
+        } catch (Exception e) {
+            throw new IllegalStateException("unparseable error body", e);
+        }
+    }
+
+    /** A JSON-RPC envelope for the given method (optionally a tools/call name). */
+    private static String envelope(String method, String toolName) {
+        if (toolName == null) {
+            return "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"" + method + "\"}";
+        }
+        return "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"" + method + "\",\"params\":{\"name\":\"" + toolName
+                + "\",\"arguments\":{}}}";
+    }
+
+    private String bearer(GatewayTestKeys.ConsumerFixture consumer) {
+        return "Bearer " + consumer.presentedKey();
+    }
+
+    // -------------------------------------------------------------------
+    // 401/404/400 — credential, service and envelope failures
+    // -------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("401/404/400 failure semantics")
+    class FailureSemantics {
+
+        @Test
+        @DisplayName("should reject a request with no credential")
+        void shouldRejectMissingCredential() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .headers(h -> h.set(HttpHeaders.AUTHORIZATION, "")).bodyValue(envelope("tools/list", null))
+                    .exchange().expectStatus().isUnauthorized().expectBody().returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("invalid_api_key");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should reject an unknown consumer key")
+        void shouldRejectUnknownKey() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer mqk_api_drill_ghost_secret")
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized().expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("invalid_api_key");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should accept a consumer key in the x-api-key header")
+        void shouldAcceptXApiKeyHeader() {
+            // The shared test client default Authorization header would win the
+            // precedence check — drop it so only x-api-key is presented.
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .headers(h -> h.set(HttpHeaders.AUTHORIZATION, ""))
+                    .header("x-api-key", GatewayTestKeys.MCP_OUTSIDER.presentedKey())
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+            // The consumer credential is consumed at the gateway and never
+            // forwarded upstream (same hygiene as the bearer path).
+            assertThat(mockServer.capturedRequests().get(0).xApiKey()).isNull();
+        }
+
+        @Test
+        @DisplayName("an oversized body is rejected with 413, never buffered unbounded (#477)")
+        void oversizedBodyIsRejected() {
+            String padding = "x".repeat(300 * 1024); // > the 256KB default proxy buffer
+            String big = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{\"pad\":\"" + padding
+                    + "\"}}";
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_ALLOWED)).bodyValue(big).exchange()
+                    .expectStatus().isEqualTo(413).expectBody().returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("payload_too_large");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should forward a body inside the LLM context-limit band verbatim (#553)")
+        void shouldForwardBodyInsideTheLlmContextLimitBand() {
+            // 200001 characters is over the default LLM context-limit threshold
+            // but well inside the 256KB proxy buffer: rejected as
+            // context_limit_exceeded on /v1/messages, forwarded byte-for-byte
+            // here — the pre-check is an LLM data-plane rule only.
+            int target = 200_001;
+            String prefix = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{\"pad\":\"";
+            String suffix = "\"}}";
+            String big = prefix + "x".repeat(target - prefix.length() - suffix.length()) + suffix;
+
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_ALLOWED)).bodyValue(big).exchange()
+                    .expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+            assertThat(mockServer.capturedRequests().get(0).body()).isEqualTo(big.getBytes(StandardCharsets.UTF_8));
+        }
+
+        @Test
+        @DisplayName("should reject an unknown MCP service name")
+        void shouldRejectUnknownService() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", "no-such-service")
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_ALLOWED))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isNotFound().expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("mcp_service_not_found");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should reject a consumer scoped to no channels (issue #316)")
+        void shouldRejectConsumerWithoutMcpCallScope() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_NO_CHANNELS))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isForbidden().expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("consumer_scope_denied");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should reject an expired consumer (issue #322)")
+        void shouldRejectExpiredConsumer() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_EXPIRED))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized().expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("invalid_api_key");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should reject a body that is not a JSON envelope")
+        void shouldRejectMalformedEnvelope() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_ALLOWED))
+                    .bodyValue("this is not json").exchange().expectStatus().isBadRequest().expectBody().returnResult()
+                    .getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("invalid_jsonrpc");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Server mode NONE — open service
+    // -------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("open service (server ACL NONE)")
+    class OpenService {
+
+        @Test
+        @DisplayName("should let an unlisted consumer call tools/list")
+        void shouldAllowUnlistedConsumerToolsList() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+            McpMockServer.Request upstream = mockServer.capturedRequests().get(0);
+            assertThat(upstream.path()).isEqualTo("/mcp");
+            assertThat(upstream.method()).isEqualTo("POST");
+        }
+
+        @Test
+        @DisplayName("should forward an enabled tool call under NONE mode")
+        void shouldForwardEnabledToolCall() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER))
+                    .bodyValue(envelope("tools/call", GatewayTestKeys.MCP_TOOL_ECHO)).exchange().expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("should deny a disabled tool call even under NONE mode")
+        void shouldDenyDisabledToolUnderNone() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER))
+                    .bodyValue(envelope("tools/call", GatewayTestKeys.MCP_TOOL_LEGACY)).exchange().expectStatus()
+                    .isForbidden().expectBody().returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("mcp_tool_unavailable");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Server mode ALLOW — gated service
+    // -------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("gated service (server ACL ALLOW)")
+    class GatedService {
+
+        @Test
+        @DisplayName("should deny tools/list to a consumer outside the server list")
+        void shouldDenyOutsiderServerList() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_GATED_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isForbidden().expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("mcp_access_denied");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should allow tools/list to a listed consumer")
+        void shouldAllowListedConsumerToolsList() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_GATED_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_SERVER_ONLY))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("should inherit the server rule for a tool without an override")
+        void shouldInheritServerRule() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_GATED_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_SERVER_ONLY))
+                    .bodyValue(envelope("tools/call", GatewayTestKeys.MCP_TOOL_SHARED)).exchange().expectStatus()
+                    .isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("should allow a tools/call when the consumer is on the tool ALLOW list")
+        void shouldAllowToolOverrideListedConsumer() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_GATED_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_ALLOWED))
+                    .bodyValue(envelope("tools/call", GatewayTestKeys.MCP_TOOL_RESTRICTED)).exchange().expectStatus()
+                    .isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("should deny tools/call when the tool override excludes a listed consumer")
+        void shouldDenyToolOverrideExcludedConsumer() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_GATED_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_SERVER_ONLY))
+                    .bodyValue(envelope("tools/call", GatewayTestKeys.MCP_TOOL_RESTRICTED)).exchange().expectStatus()
+                    .isForbidden().expectBody().returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("mcp_access_denied");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should deny a disabled tool call to a fully allowed consumer")
+        void shouldDenyDisabledTool() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_GATED_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_ALLOWED))
+                    .bodyValue(envelope("tools/call", GatewayTestKeys.MCP_TOOL_QUIET)).exchange().expectStatus()
+                    .isForbidden().expectBody().returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("mcp_tool_unavailable");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should deny a tools/call naming a tool that is not registered")
+        void shouldDenyUnknownTool() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_GATED_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_ALLOWED))
+                    .bodyValue(envelope("tools/call", "not-a-real-tool")).exchange().expectStatus().isForbidden()
+                    .expectBody().returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("mcp_tool_unavailable");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should ignore the tool table for non tools/call methods")
+        void shouldIgnoreToolTableForOtherMethods() {
+            // initialize on a service that carries a disabled and a restricted
+            // tool — neither may affect non tools/call methods.
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_GATED_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_SERVER_ONLY))
+                    .bodyValue(envelope("initialize", null)).exchange().expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Passthrough hygiene — headers, status and byte-identical bodies
+    // -------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("verbatim passthrough")
+    class Passthrough {
+
+        @Test
+        @DisplayName("should forward Session-Id and drop the caller credential upstream")
+        void shouldForwardSessionIdNotCredential() {
+            String requestBody = envelope("tools/call", GatewayTestKeys.MCP_TOOL_SHARED);
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_GATED_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_ALLOWED))
+                    .header("Session-Id", "sess-contract-42").bodyValue(requestBody).exchange().expectStatus().isOk();
+
+            McpMockServer.Request upstream = mockServer.capturedRequests().get(0);
+            assertThat(upstream.sessionId()).isEqualTo("sess-contract-42");
+            assertThat(upstream.authorization()).isNull();
+            assertThat(upstream.xApiKey()).isNull();
+            assertThat(new String(upstream.body(), StandardCharsets.UTF_8)).isEqualTo(requestBody);
+        }
+
+        @Test
+        @DisplayName("should return the upstream response body byte-identical")
+        void shouldEchoUpstreamBodyBytes() {
+            String upstreamBody = "{\"jsonrpc\":\"2.0\",\"result\":{\"tools\":[{\"name\":\"echo-tool\"}]},\"id\":1}";
+            mockServer.setResponse(upstreamBody, 200);
+
+            byte[] received = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isOk().expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(new String(received, StandardCharsets.UTF_8)).isEqualTo(upstreamBody);
+        }
+
+        @Test
+        @DisplayName("should copy the upstream status and body for an error response")
+        void shouldCopyUpstreamErrorResponse() {
+            String upstreamBody = "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32001,\"message\":\"upstream boom\"},\"id\":1}";
+            mockServer.setResponse(upstreamBody, 503);
+
+            byte[] received = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isEqualTo(503).expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(new String(received, StandardCharsets.UTF_8)).isEqualTo(upstreamBody);
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Upstream backend auth (#320, Tencent raw 03): Visitor vs API Key
+    // -------------------------------------------------------------------
+
+    // -------------------------------------------------------------------
+    // Consumer JWT authentication (#340): same identity model as the key
+    // channel, sub -> snapshot consumer, RS256 against the snapshot PEM.
+    // -------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("Consumer JWT authentication")
+    class ConsumerJwtAuth {
+
+        private static final java.time.Instant FUTURE = java.time.Instant.now().plusSeconds(3600);
+        private static final java.time.Instant PAST = java.time.Instant.now().minusSeconds(3600);
+
+        private String withJwt(String jwt) {
+            return "Bearer " + jwt;
+        }
+
+        @Test
+        @DisplayName("should accept a valid JWT and never forward it upstream")
+        void validJwtAccepted() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, withJwt(GatewayTestKeys.signJwt("drill-jwt", FUTURE)))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+            assertThat(mockServer.capturedRequests().get(0).authorization()).isNull();
+        }
+
+        @Test
+        @DisplayName("should reject an expired JWT")
+        void expiredJwtRejected() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, withJwt(GatewayTestKeys.signJwt("drill-jwt", PAST)))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized().expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("invalid_api_key");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should reject a JWT signed by a different key")
+        void wrongKeyRejected() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION,
+                            withJwt(GatewayTestKeys.signJwtWithOtherKey("drill-jwt", FUTURE)))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized();
+
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should reject an unknown subject and a consumer without a JWT key")
+        void unknownSubjectAndKeylessConsumerRejected() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, withJwt(GatewayTestKeys.signJwt("ghost", FUTURE)))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized();
+            // MCP_ALLOWED exists but carries no JWT PEM in the snapshot.
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, withJwt(GatewayTestKeys.signJwt("drill-allowed", FUTURE)))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized();
+
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should enforce scope and expiry on the JWT path too")
+        void scopeAndExpiryApplyToJwt() {
+            byte[] denied = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, withJwt(GatewayTestKeys.signJwt("drill-no-channels", FUTURE)))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isForbidden().expectBody()
+                    .returnResult().getResponseBody();
+            assertThat(errorType(denied)).isEqualTo("consumer_scope_denied");
+
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, withJwt(GatewayTestKeys.signJwt("drill-expired", FUTURE)))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized();
+
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should treat the x-api-key header as key-only (a JWT there is rejected)")
+        void jwtInApiKeyHeaderRejected() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .headers(h -> h.set(HttpHeaders.AUTHORIZATION, ""))
+                    .header("x-api-key", GatewayTestKeys.signJwt("drill-jwt", FUTURE))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isUnauthorized();
+
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("Upstream backend authentication")
+    class BackendAuth {
+
+        @Test
+        @DisplayName("should inject Authorization: Bearer <secret> for an API_KEY service")
+        void shouldInjectBackendBearer() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_SECURED_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+            assertThat(mockServer.capturedRequests().get(0).authorization())
+                    .isEqualTo("Bearer " + GatewayTestKeys.MCP_SECURED_BACKEND_KEY);
+            // The consumer credential is consumed at the gateway, never forwarded.
+            assertThat(mockServer.capturedRequests().get(0).xApiKey()).isNull();
+        }
+
+        @Test
+        @DisplayName("should not inject anything for a VISITOR service")
+        void shouldNotInjectForVisitor() {
+            webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isOk();
+
+            assertThat(mockServer.capturedRequests()).hasSize(1);
+            assertThat(mockServer.capturedRequests().get(0).authorization()).isNull();
+        }
+
+        @Test
+        @DisplayName("should fail closed with backend_auth_unavailable when decryption fails")
+        void shouldFailClosedWhenUndecryptable() {
+            byte[] body = webTestClient.post().uri("/mcpservers/{service}/mcp", GatewayTestKeys.MCP_BROKEN_SERVICE)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER))
+                    .bodyValue(envelope("tools/list", null)).exchange().expectStatus().isEqualTo(502).expectBody()
+                    .returnResult().getResponseBody();
+
+            assertThat(errorType(body)).isEqualTo("backend_auth_unavailable");
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Inbound SSE transport (#356, I11): GET /sse + POST /message
+    // -------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("inbound SSE transport")
+    class SseTransport {
+
+        private Flux<ServerSentEvent<String>> openStream(String service, GatewayTestKeys.ConsumerFixture consumer) {
+            return webTestClient.get().uri("/mcpservers/{service}/sse", service)
+                    .header(HttpHeaders.AUTHORIZATION, bearer(consumer)).exchange().expectStatus().isOk()
+                    .returnResult(new ParameterizedTypeReference<ServerSentEvent<String>>() {
+                    }).getResponseBody();
+        }
+
+        private ServerSentEvent<String> poll(BlockingQueue<ServerSentEvent<String>> events, Duration timeout)
+                throws InterruptedException {
+            return events.poll(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        }
+
+        private String sessionIdOf(ServerSentEvent<String> endpointEvent) {
+            assertThat(endpointEvent).isNotNull();
+            assertThat(endpointEvent.event()).isEqualTo("endpoint");
+            String data = endpointEvent.data();
+            int index = data == null ? -1 : data.indexOf("sessionId=");
+            assertThat(index).isGreaterThan(-1);
+            return data.substring(index + "sessionId=".length());
+        }
+
+        private WebTestClient.ResponseSpec postMessage(String service, String sessionId,
+                GatewayTestKeys.ConsumerFixture consumer, String body) {
+            return webTestClient.post()
+                    .uri(builder -> builder.path("/mcpservers/{service}/message").queryParam("sessionId", sessionId)
+                            .build(service))
+                    .header(HttpHeaders.AUTHORIZATION, bearer(consumer)).bodyValue(body).exchange();
+        }
+
+        @Test
+        @DisplayName("should require a credential on both halves")
+        void shouldRequireCredential() {
+            webTestClient.get().uri("/mcpservers/{service}/sse", GatewayTestKeys.MCP_OPEN_SERVICE)
+                    .headers(h -> h.set(HttpHeaders.AUTHORIZATION, "")).exchange().expectStatus().isUnauthorized();
+            webTestClient.post()
+                    .uri(builder -> builder.path("/mcpservers/{service}/message")
+                            .queryParam("sessionId", UUID.randomUUID().toString())
+                            .build(GatewayTestKeys.MCP_OPEN_SERVICE))
+                    .headers(h -> h.set(HttpHeaders.AUTHORIZATION, "")).bodyValue(envelope("tools/list", null))
+                    .exchange().expectStatus().isUnauthorized();
+            assertThat(mockServer.capturedRequests()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should 404 an unknown service on both halves")
+        void shouldRejectUnknownService() {
+            webTestClient.get().uri("/mcpservers/{service}/sse", "ghost-service")
+                    .header(HttpHeaders.AUTHORIZATION, bearer(GatewayTestKeys.MCP_OUTSIDER)).exchange().expectStatus()
+                    .isNotFound();
+            postMessage("ghost-service", UUID.randomUUID().toString(), GatewayTestKeys.MCP_OUTSIDER,
+                    envelope("tools/list", null)).expectStatus().isNotFound();
+        }
+
+        @Test
+        @DisplayName("should announce an endpoint, accept a message and relay the upstream body verbatim")
+        void shouldRelayOverTheStream() throws Exception {
+            String upstreamBody = "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"result\": {}\n}";
+            mockServer.setResponse(upstreamBody, 200);
+            BlockingQueue<ServerSentEvent<String>> events = new LinkedBlockingQueue<>();
+            Disposable subscription = openStream(GatewayTestKeys.MCP_OPEN_SERVICE, GatewayTestKeys.MCP_OUTSIDER)
+                    .subscribe(events::add);
+            try {
+                String sessionId = sessionIdOf(poll(events, Duration.ofSeconds(5)));
+
+                postMessage(GatewayTestKeys.MCP_OPEN_SERVICE, sessionId, GatewayTestKeys.MCP_OUTSIDER,
+                        envelope("tools/list", null)).expectStatus().isAccepted();
+
+                ServerSentEvent<String> message = poll(events, Duration.ofSeconds(5));
+                assertThat(message).isNotNull();
+                assertThat(message.event()).isEqualTo("message");
+                // Multi-line upstream bodies survive the data-frame split.
+                assertThat(message.data()).isEqualTo(upstreamBody);
+
+                assertThat(mockServer.capturedRequests()).hasSize(1);
+                assertThat(mockServer.capturedRequests().get(0).path()).isEqualTo("/mcp");
+            } finally {
+                subscription.dispose();
+            }
+        }
+
+        @Test
+        @DisplayName("#727: an upstream body beyond the aggregation limit becomes an error event, never an unbounded message")
+        void oversizedUpstreamBodyYieldsErrorEvent() throws Exception {
+            // 300KB > the 256KB max-proxy-buffer the aggregation is capped at.
+            String huge = "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"blob\":\"" + "x".repeat(300_000) + "\"}}";
+            mockServer.setResponse(huge, 200);
+            BlockingQueue<ServerSentEvent<String>> events = new LinkedBlockingQueue<>();
+            Disposable subscription = openStream(GatewayTestKeys.MCP_OPEN_SERVICE, GatewayTestKeys.MCP_OUTSIDER)
+                    .subscribe(events::add);
+            try {
+                String sessionId = sessionIdOf(poll(events, Duration.ofSeconds(5)));
+
+                postMessage(GatewayTestKeys.MCP_OPEN_SERVICE, sessionId, GatewayTestKeys.MCP_OUTSIDER,
+                        envelope("tools/list", null)).expectStatus().isAccepted();
+
+                ServerSentEvent<String> event = poll(events, Duration.ofSeconds(5));
+                assertThat(event).isNotNull();
+                assertThat(event.event()).isEqualTo("error");
+                assertThat(event.data()).contains("mcp_sse_response_too_large");
+            } finally {
+                subscription.dispose();
+            }
+        }
+
+        @Test
+        @DisplayName("should deliver ACL denials as error events, with no upstream call")
+        void shouldDeliverDenialsAsErrorEvents() throws Exception {
+            BlockingQueue<ServerSentEvent<String>> events = new LinkedBlockingQueue<>();
+            Disposable subscription = openStream(GatewayTestKeys.MCP_GATED_SERVICE, GatewayTestKeys.MCP_OUTSIDER)
+                    .subscribe(events::add);
+            try {
+                String sessionId = sessionIdOf(poll(events, Duration.ofSeconds(5)));
+
+                postMessage(GatewayTestKeys.MCP_GATED_SERVICE, sessionId, GatewayTestKeys.MCP_OUTSIDER,
+                        envelope("tools/call", GatewayTestKeys.MCP_TOOL_SHARED)).expectStatus().isAccepted();
+
+                ServerSentEvent<String> error = poll(events, Duration.ofSeconds(5));
+                assertThat(error).isNotNull();
+                assertThat(error.event()).isEqualTo("error");
+                assertThat(error.data()).contains("mcp_access_denied");
+                assertThat(mockServer.capturedRequests()).isEmpty();
+            } finally {
+                subscription.dispose();
+            }
+        }
+
+        @Test
+        @DisplayName("should 404 an unknown session")
+        void should404UnknownSession() {
+            postMessage(GatewayTestKeys.MCP_OPEN_SERVICE, UUID.randomUUID().toString(), GatewayTestKeys.MCP_OUTSIDER,
+                    envelope("tools/list", null)).expectStatus().isNotFound().expectBody().jsonPath("$.error.type")
+                    .isEqualTo("unknown_session");
+        }
+
+        @Test
+        @DisplayName("should reject a session presented with another consumer credential")
+        void shouldRejectForeignCredential() throws Exception {
+            BlockingQueue<ServerSentEvent<String>> events = new LinkedBlockingQueue<>();
+            Disposable subscription = openStream(GatewayTestKeys.MCP_OPEN_SERVICE, GatewayTestKeys.MCP_OUTSIDER)
+                    .subscribe(events::add);
+            try {
+                String sessionId = sessionIdOf(poll(events, Duration.ofSeconds(5)));
+
+                postMessage(GatewayTestKeys.MCP_OPEN_SERVICE, sessionId, GatewayTestKeys.MCP_ALLOWED,
+                        envelope("tools/list", null)).expectStatus().isForbidden().expectBody().jsonPath("$.error.type")
+                        .isEqualTo("session_credential_mismatch");
+            } finally {
+                subscription.dispose();
+            }
+        }
+
+        @Test
+        @DisplayName("should drop the session once the stream disconnects")
+        void shouldDropSessionAfterDisconnect() throws Exception {
+            BlockingQueue<ServerSentEvent<String>> events = new LinkedBlockingQueue<>();
+            Disposable subscription = openStream(GatewayTestKeys.MCP_OPEN_SERVICE, GatewayTestKeys.MCP_OUTSIDER)
+                    .subscribe(events::add);
+            String sessionId = sessionIdOf(poll(events, Duration.ofSeconds(5)));
+
+            subscription.dispose();
+            // The doFinally hook closes the session; give it a beat to run.
+            Thread.sleep(200);
+
+            postMessage(GatewayTestKeys.MCP_OPEN_SERVICE, sessionId, GatewayTestKeys.MCP_OUTSIDER,
+                    envelope("tools/list", null)).expectStatus().isNotFound();
+        }
+    }
+}

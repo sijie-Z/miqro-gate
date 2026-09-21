@@ -1,0 +1,3 @@
+# Reference file consumer for the ADR-0014 retention topic (platform side).
+# kafka-python is a pure-python client — see docs/retention-consumer.md.
+kafka-python>=2.0.2

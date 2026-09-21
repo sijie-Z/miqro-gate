@@ -1,9 +1,11 @@
 package com.miqroera.miqrokey.controlplane.service;
 
 import com.miqroera.miqrokey.controlplane.client.UpstreamTargetPin;
+import com.miqroera.miqrokey.controlplane.dto.ResourceDependency;
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
 import com.miqroera.miqrokey.domain.crypto.KeyEncryptionProvider;
 import com.miqroera.miqrokey.domain.security.UpstreamTargetValidator;
+import com.miqroera.miqrokey.domain.service.AuditService;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -34,19 +36,39 @@ public class WebhookEndpointService {
 
     private static final String HMAC_ALGORITHM = "HmacSHA256";
 
+    // Column/shape bounds, enforced here rather than only on the console DTOs
+    // (#1021):
+    // every write path goes through this service, and the second one — the
+    // machine-key
+    // surface (/api/v1/admin-api/**) — has no DTO constraints of its own. Before
+    // this,
+    // a null secret reached secret.getBytes(...) and left as a 500 INTERNAL_ERROR.
+    private static final int NAME_MAX = 200;
+    private static final int URL_MAX = 500;
+    private static final int TIMEOUT_MIN_MS = 1000;
+    private static final int TIMEOUT_MAX_MS = 600000;
+
     private final NamedParameterJdbcTemplate jdbc;
     private final KeyEncryptionProvider keyEncryptionProvider;
     private final UpstreamTargetValidator targetValidator;
 
+    private final AuditService auditService;
+
     public WebhookEndpointService(NamedParameterJdbcTemplate jdbc, KeyEncryptionProvider keyEncryptionProvider,
-            UpstreamTargetValidator controlPlaneTargetValidator) {
+            UpstreamTargetValidator controlPlaneTargetValidator, AuditService auditService) {
         this.jdbc = jdbc;
         this.keyEncryptionProvider = keyEncryptionProvider;
         this.targetValidator = controlPlaneTargetValidator;
+        this.auditService = auditService;
     }
 
-    public WebhookEndpointView create(UUID tenantId, String name, String url, String secret, int timeoutMs) {
+    public WebhookEndpointView create(UUID tenantId, String name, String url, String secret, int timeoutMs,
+            AuditContext context) {
+        validateName(name);
         validateUrl(url);
+        validateUrlLength(url);
+        validateSecret(secret);
+        validateTimeout(timeoutMs);
         UUID id = UUID.randomUUID();
         // AAD binds the ciphertext to (tenant, endpoint) — the same ids used
         // for decryption at delivery time.
@@ -60,6 +82,9 @@ public class WebhookEndpointService {
                 """, new MapSqlParameterSource("id", id).addValue("tenantId", tenantId).addValue("name", name)
                 .addValue("url", url).addValue("encrypted", encrypted.ciphertext()).addValue("nonce", encrypted.nonce())
                 .addValue("keyVersion", encrypted.keyVersion()).addValue("timeoutMs", timeoutMs));
+        auditService.record(tenantId, context.actorId(), "WEBHOOK_CREATE", "WEBHOOK", id,
+                AuditSummaries.summary(context, "name", AuditSummaries.sanitize(name), "host", hostOf(url)),
+                context.requestId());
         return view(get(tenantId, id));
     }
 
@@ -86,33 +111,99 @@ public class WebhookEndpointService {
     }
 
     @Transactional
-    public WebhookEndpoint update(UUID tenantId, UUID endpointId, String name, Boolean enabled, Integer timeoutMs) {
+    public WebhookEndpoint update(UUID tenantId, UUID endpointId, String name, Boolean enabled, Integer timeoutMs,
+            AuditContext context) {
+        if (name != null) {
+            validateName(name);
+        }
+        if (timeoutMs != null) {
+            validateTimeout(timeoutMs);
+        }
         WebhookEndpoint existing = get(tenantId, endpointId);
-        jdbc.update("""
+        // #475: compare-and-set on the version read above — two concurrent PATCHes
+        // used to both commit, the later one re-writing a stale snapshot over the
+        // other's committed fields (silent lost update).
+        int rows = jdbc.update("""
                 UPDATE webhook_endpoints
                 SET name = :name, enabled = :enabled, timeout_ms = :timeoutMs, version = version + 1,
                     updated_at = now()
-                WHERE id = :id AND tenant_id = :tenantId
-                """,
-                new MapSqlParameterSource("name", name != null ? name : existing.name())
-                        .addValue("enabled", enabled != null ? enabled : existing.enabled())
-                        .addValue("timeoutMs", timeoutMs != null ? timeoutMs : existing.timeoutMs())
-                        .addValue("id", endpointId).addValue("tenantId", tenantId));
-        return get(tenantId, endpointId);
+                WHERE id = :id AND tenant_id = :tenantId AND version = :expectedVersion
+                """, new MapSqlParameterSource("name", name != null ? name : existing.name())
+                .addValue("enabled", enabled != null ? enabled : existing.enabled())
+                .addValue("timeoutMs", timeoutMs != null ? timeoutMs : existing.timeoutMs()).addValue("id", endpointId)
+                .addValue("tenantId", tenantId).addValue("expectedVersion", existing.version()));
+        if (rows != 1) {
+            throw new org.springframework.dao.OptimisticLockingFailureException(
+                    "Optimistic lock failure: webhook endpoint " + endpointId);
+        }
+        WebhookEndpoint updated = get(tenantId, endpointId);
+        auditService.record(
+                tenantId, context.actorId(), "WEBHOOK_UPDATE", "WEBHOOK", endpointId, AuditSummaries.summary(context,
+                        "name", AuditSummaries.sanitize(updated.name()), "host", hostOf(updated.url())),
+                context.requestId());
+        return updated;
     }
 
     /** Update returning the safe view. */
     @Transactional
     public WebhookEndpointView updateView(UUID tenantId, UUID endpointId, String name, Boolean enabled,
-            Integer timeoutMs) {
-        return view(update(tenantId, endpointId, name, enabled, timeoutMs));
+            Integer timeoutMs, AuditContext context) {
+        return view(update(tenantId, endpointId, name, enabled, timeoutMs, context));
     }
 
+    /**
+     * Deletes the endpoint. I21 (Tencent model-API delete semantics): endpoints
+     * still referenced by alert rules are NOT silently detached
+     * ({@code webhook_endpoint_id} would go null and the rule silently loses its
+     * delivery target) — the delete is refused with the rule list until the
+     * references are released.
+     */
     @Transactional
-    public void delete(UUID tenantId, UUID endpointId) {
-        get(tenantId, endpointId);
+    public void delete(UUID tenantId, UUID endpointId, AuditContext context) {
+        WebhookEndpoint existing = get(tenantId, endpointId);
+        // #403: take the row lock before the dependency check. A concurrent
+        // alert-rule INSERT holds FOR KEY SHARE (FK) on this row; FOR UPDATE
+        // serializes against it, so under READ COMMITTED the check below sees
+        // any just-committed reference (409) — or the racing INSERT lands after
+        // the delete and fails cleanly on the FK. Without the lock a committed
+        // insert could slip past the check into the silent ON DELETE SET NULL
+        // detach this method exists to prevent. (A concurrent double delete
+        // finds the row gone here and reports 404.)
+        List<UUID> locked = jdbc.query(
+                "SELECT id FROM webhook_endpoints WHERE id = :id AND tenant_id = :tenantId FOR UPDATE",
+                new MapSqlParameterSource("id", endpointId).addValue("tenantId", tenantId),
+                (rs, rowNum) -> (UUID) rs.getObject("id"));
+        if (locked.isEmpty()) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "WEBHOOK_NOT_FOUND", "Webhook endpoint not found");
+        }
+        List<ResourceDependency> dependents = jdbc.query("""
+                SELECT id, name, enabled FROM alert_rules
+                WHERE tenant_id = :tenantId AND webhook_endpoint_id = :id
+                ORDER BY name
+                """, new MapSqlParameterSource("tenantId", tenantId).addValue("id", endpointId),
+                (rs, rowNum) -> new ResourceDependency("ALERT_RULE", (UUID) rs.getObject("id"), rs.getString("name"),
+                        rs.getBoolean("enabled") ? "已启用" : "已停用"));
+        if (!dependents.isEmpty()) {
+            throw new ResourceInUseException("该 Webhook 端点被 " + dependents.size() + " 条告警规则引用，请先删除或改配这些规则。",
+                    dependents);
+        }
         jdbc.update("DELETE FROM webhook_endpoints WHERE id = :id AND tenant_id = :tenantId",
                 new MapSqlParameterSource("id", endpointId).addValue("tenantId", tenantId));
+        auditService.record(
+                tenantId, context.actorId(), "WEBHOOK_DELETE", "WEBHOOK", endpointId, AuditSummaries.summary(context,
+                        "name", AuditSummaries.sanitize(existing.name()), "host", hostOf(existing.url())),
+                context.requestId());
+    }
+
+    /**
+     * Host-only extraction: the summary must never carry userinfo or query parts.
+     */
+    private static String hostOf(String url) {
+        try {
+            return java.net.URI.create(url).getHost();
+        } catch (Exception e) {
+            return "invalid";
+        }
     }
 
     /** Sends a signed test payload and reports the upstream HTTP status. */
@@ -135,7 +226,7 @@ public class WebhookEndpointService {
                 WHERE tenant_id = :tenantId AND endpoint_id = :endpointId
                 ORDER BY created_at DESC LIMIT :limit
                 """, new MapSqlParameterSource("tenantId", tenantId).addValue("endpointId", endpointId)
-                .addValue("limit", Math.min(limit, 100)), DELIVERY_ROW_MAPPER);
+                .addValue("limit", Math.max(1, Math.min(limit, 100))), DELIVERY_ROW_MAPPER);
     }
 
     // -------------------------------------------------------------------
@@ -188,10 +279,50 @@ public class WebhookEndpointService {
                     .header("X-MiQroKey-Signature", "sha256=" + signature)
                     .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(payload))
                     .timeout(java.time.Duration.ofMillis(endpoint.timeoutMs())).build();
-            var response = clientBuilder.build().send(request, java.net.http.HttpResponse.BodyHandlers.discarding());
-            return response.statusCode();
+            return statusOf(clientBuilder.build(), request, endpoint.timeoutMs());
         } finally {
             java.util.Arrays.fill(secret, (byte) 0);
+        }
+    }
+
+    /**
+     * Sends the request and returns its status, bounding the <em>whole</em> call —
+     * reading the response body included — by the endpoint's configured timeout.
+     *
+     * <p>
+     * {@code HttpRequest.timeout(..)} alone bounds only the wait for the response
+     * <em>headers</em>: a receiver that answers {@code 200} with a
+     * {@code Content-Length} and then stops writing leaves {@code send(..)} blocked
+     * on the body, however small the configured timeout is. That is not merely a
+     * lost alert — {@link AlertEventDispatcher#attempt} calls this synchronously
+     * from {@code @Scheduled} evaluation/retry work on Spring Boot's
+     * single-threaded default scheduler, so one stalled receiver would stall every
+     * periodic job in the control plane, and because the call never returns the
+     * attempt is never recorded and no backoff is armed either. The wait is
+     * therefore bounded here, and a stall surfaces as a recorded timeout failure.
+     * </p>
+     */
+    private static int statusOf(java.net.http.HttpClient client, java.net.http.HttpRequest request, int timeoutMs)
+            throws Exception {
+        var future = client.sendAsync(request, java.net.http.HttpResponse.BodyHandlers.discarding());
+        try {
+            return future.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS).statusCode();
+        } catch (java.util.concurrent.TimeoutException e) {
+            future.cancel(true);
+            throw new java.net.http.HttpTimeoutException("Webhook request timed out after " + timeoutMs
+                    + " ms: the receiver did not finish its response body");
+        } catch (java.util.concurrent.ExecutionException e) {
+            // Unwrap, so a header-phase timeout still arrives as the JDK's own
+            // HttpTimeoutException and any transport failure as its IOException.
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception exception) {
+                throw exception;
+            }
+            throw new IllegalStateException(cause);
+        } catch (InterruptedException e) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new java.io.IOException("Interrupted while awaiting the webhook response", e);
         }
     }
 
@@ -239,4 +370,28 @@ public class WebhookEndpointService {
             (UUID) rs.getObject("endpoint_id"), rs.getInt("attempt"), rs.getObject("http_status", Integer.class),
             rs.getTimestamp("next_retry_at") != null ? rs.getTimestamp("next_retry_at").toInstant() : null,
             rs.getString("error_message"), rs.getTimestamp("created_at").toInstant());
+
+    private static void validateName(String name) {
+        if (name == null || name.isBlank() || name.length() > NAME_MAX) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "WEBHOOK_NAME_INVALID", "name 不能为空白，且长度不超过 200 个字符。");
+        }
+    }
+
+    private static void validateUrlLength(String url) {
+        if (url != null && url.length() > URL_MAX) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "WEBHOOK_URL_REJECTED", "url 长度不超过 500 个字符。");
+        }
+    }
+
+    private static void validateSecret(String secret) {
+        if (secret == null || secret.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "WEBHOOK_SECRET_INVALID", "secret 不能为空。");
+        }
+    }
+
+    private static void validateTimeout(int timeoutMs) {
+        if (timeoutMs < TIMEOUT_MIN_MS || timeoutMs > TIMEOUT_MAX_MS) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "WEBHOOK_TIMEOUT_INVALID", "timeoutMs 必须在 1000..600000 之间。");
+        }
+    }
 }

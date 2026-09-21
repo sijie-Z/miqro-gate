@@ -1,0 +1,331 @@
+<script setup lang="ts">
+/**
+ * UiSelect — v2 design-system select built on radix-vue's headless Select
+ * (a11y: listbox semantics, keyboard nav, focus management, portals).
+ * Visual styling is entirely ours (hairline trigger, popper panel).
+ * Options come from props; value is the option's `value`.
+ */
+import { computed, ref, useAttrs, useId } from 'vue';
+import {
+  SelectContent,
+  SelectItem,
+  SelectItemIndicator,
+  SelectItemText,
+  SelectPortal,
+  SelectRoot,
+  SelectTrigger,
+  SelectValue,
+  SelectViewport,
+} from 'radix-vue';
+
+export interface UiSelectOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+  hint?: string;
+}
+
+const props = withDefaults(
+  defineProps<{
+    modelValue?: string;
+    options: UiSelectOption[];
+    placeholder?: string;
+    disabled?: boolean;
+    error?: string;
+    label?: string;
+    /** Fixed trigger width in px/rem; default fills its inline container. */
+    width?: string;
+    loading?: boolean;
+    required?: boolean;
+  }>(),
+  {
+    modelValue: '',
+    placeholder: '请选择',
+    disabled: false,
+    error: '',
+    label: '',
+    width: '',
+    loading: false,
+    required: false,
+  },
+);
+
+const emit = defineEmits<{
+  'update:modelValue': [value: string];
+  change: [value: string];
+}>();
+
+defineOptions({ name: 'UiSelect', inheritAttrs: false });
+
+const attrs = useAttrs();
+const open = ref(false);
+
+/**
+ * radix-vue's SelectItem throws on an empty-string value ('' is reserved for
+ * "no selection"), so filter-style options like `{ value: '', label: '全部' }`
+ * crashed the popper and the dropdown never rendered. Map '' to a sentinel
+ * on the way into radix and back to '' on the way out.
+ */
+const EMPTY_VALUE = '__ui-select-none__';
+const hasEmptyOption = computed(() => props.options.some((o) => o.value === ''));
+const radixOptions = computed(() =>
+  props.options.map((o) => (o.value === '' ? { ...o, value: EMPTY_VALUE } : o)),
+);
+const radixValue = computed(() => {
+  if (props.modelValue === '') return hasEmptyOption.value ? EMPTY_VALUE : undefined;
+  return props.modelValue || undefined;
+});
+
+function pick(value: string) {
+  const emitted = value === EMPTY_VALUE ? '' : value;
+  emit('update:modelValue', emitted);
+  emit('change', emitted);
+}
+
+/**
+ * The label sits next to (not around) the trigger, so it needs an explicit
+ * `for`/`id` pairing; the error paragraph needs an id too so the trigger can
+ * point at it with `aria-describedby`. `required` is forwarded to SelectRoot
+ * so radix emits `aria-required` on the combobox.
+ */
+const uid = useId();
+const controlId = `ui-select-${uid}`;
+const errorId = `${controlId}-error`;
+
+const triggerClasses = computed(() => ({
+  'ui-select__trigger': true,
+  'ui-select__trigger--open': open.value,
+  'ui-select__trigger--error': Boolean(props.error),
+}));
+</script>
+
+<template>
+  <div class="ui-select">
+    <label v-if="label" class="ui-select__label" :for="controlId">
+      {{ label }}<span v-if="required" class="ui-select__required" aria-hidden="true"> *</span>
+    </label>
+    <SelectRoot
+      :model-value="radixValue"
+      :disabled="disabled || loading"
+      :required="required"
+      @update:model-value="pick"
+      @update:open="open = $event"
+    >
+      <SelectTrigger
+        :id="controlId"
+        :class="triggerClasses"
+        :style="width ? { width } : {}"
+        :aria-invalid="error ? true : undefined"
+        :aria-describedby="error ? errorId : undefined"
+        v-bind="attrs"
+      >
+        <span class="ui-select__value">
+          <span v-if="loading" class="ui-select__loading-hint">加载中…</span>
+          <SelectValue v-else :placeholder="placeholder" />
+        </span>
+        <svg
+          class="ui-select__chevron"
+          :class="{ 'ui-select__chevron--up': open }"
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M4 6.5 8 10.5 12 6.5"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </SelectTrigger>
+      <SelectPortal>
+        <SelectContent
+          class="ui-select__content"
+          :side-offset="4"
+          :align="'start'"
+          position="popper"
+        >
+          <SelectViewport class="ui-select__viewport">
+            <SelectItem
+              v-for="option in radixOptions"
+              :key="option.value"
+              :value="option.value"
+              :disabled="option.disabled"
+              class="ui-select__item"
+            >
+              <span class="ui-select__item-label">
+                <SelectItemText>{{ option.label }}</SelectItemText>
+                <span v-if="option.hint" class="ui-select__item-hint">{{ option.hint }}</span>
+              </span>
+              <SelectItemIndicator class="ui-select__item-check">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path
+                    d="M3.5 8.5 6.5 11.5 12.5 4.5"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </SelectItemIndicator>
+            </SelectItem>
+          </SelectViewport>
+        </SelectContent>
+      </SelectPortal>
+    </SelectRoot>
+    <p v-if="error" :id="errorId" class="ui-select__error">{{ error }}</p>
+  </div>
+</template>
+
+<style scoped>
+.ui-select {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+}
+
+.ui-select__label {
+  font-size: var(--ui-font-size-xs);
+  font-weight: var(--ui-weight-medium);
+  color: var(--ui-foreground);
+  line-height: var(--ui-line-height-sm);
+}
+
+.ui-select__required {
+  color: var(--ui-danger-fg);
+}
+
+.ui-select__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  height: var(--ui-control-height);
+  padding: 0 var(--ui-space-3);
+  min-width: 160px;
+  border: 1px solid var(--ui-input-border);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-card);
+  color: var(--ui-foreground);
+  font-family: inherit;
+  font-size: var(--ui-font-size-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--ui-ease),
+    box-shadow var(--ui-ease);
+}
+
+.ui-select__trigger:hover:not(:disabled):not(:focus-visible) {
+  border-color: var(--ui-control-border-hover);
+}
+
+.ui-select__trigger:focus-visible,
+.ui-select__trigger--open {
+  outline: none;
+  border-color: var(--ui-primary);
+  box-shadow: var(--ui-shadow-focus);
+}
+
+.ui-select__trigger:disabled {
+  background: var(--ui-muted);
+  color: var(--ui-foreground-faint);
+  cursor: not-allowed;
+}
+
+.ui-select__trigger--error {
+  border-color: var(--ui-danger-fg);
+}
+
+.ui-select__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
+}
+
+.ui-select__value :deep([data-placeholder]) {
+  color: var(--ui-foreground-faint);
+  font-weight: var(--ui-weight-regular);
+}
+
+.ui-select__loading-hint {
+  color: var(--ui-foreground-faint);
+}
+
+.ui-select__chevron {
+  flex-shrink: 0;
+  color: var(--ui-foreground-faint);
+  transition: transform var(--ui-ease);
+}
+
+.ui-select__chevron--up {
+  transform: rotate(180deg);
+}
+
+/* .ui-select__content and .ui-select__viewport chrome lives in the global
+   sheet (styles/design-base.css) — radix's PopperContent chain drops the
+   scoped data-v attribute on those two elements, so scoped rules would
+   never match. Items below are slot children and keep scoped styling. */
+
+/* antd v5 option metrics (v2.pro live): 32px row, 5px 12px padding, 4px
+   radius, 14px/22px text. Hover/active get the 0.2s background ease +
+   pressed fill (#655). */
+.ui-select__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  min-height: 32px;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: var(--ui-font-size-base);
+  line-height: 22px;
+  color: var(--ui-foreground);
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+  transition:
+    background-color var(--ui-ease),
+    color var(--ui-ease);
+}
+
+.ui-select__item[data-highlighted] {
+  background: var(--ui-fill-hover);
+}
+
+.ui-select__item:active {
+  background: var(--ui-fill-selected);
+}
+
+.ui-select__item[data-disabled] {
+  color: var(--ui-foreground-faint);
+  cursor: not-allowed;
+}
+
+.ui-select__item-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+.ui-select__item-hint {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.ui-select__item-check {
+  color: var(--ui-primary-text);
+  flex-shrink: 0;
+}
+
+.ui-select__error {
+  margin: 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-danger-fg);
+  line-height: var(--ui-line-height-sm);
+}
+</style>

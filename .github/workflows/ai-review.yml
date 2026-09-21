@@ -1,0 +1,65 @@
+# PR 自动 AI 审查（claude-code-action，key 版，#410）
+#
+# 默认惰性：仓库未配置 ANTHROPIC_API_KEY（Settings → Secrets and variables →
+# Actions → New repository secret）时，全部步骤跳过，不影响任何 PR。
+# 配置后：每个非草稿 PR（opened / synchronize / ready_for_review / reopened）
+# 自动获得一次中文审查——仓库红线核对 + 缺陷/安全/边界视角 + 行内批注；
+# 同一 PR 并发去重，20 分钟超时上限。
+# 停用：删除 secret（立即回到惰性）或在 Actions 页禁用本 workflow。
+name: AI review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Checkout
+        if: env.ANTHROPIC_API_KEY != ''
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 1
+      - name: Claude review
+        if: env.ANTHROPIC_API_KEY != ''
+        uses: anthropics/claude-code-action@56cf60fde42f7b19c3abfd5c9c48b69a1288461f # v1.0.222
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            请对本 PR 做一次**中文**代码审查。本仓库是内部凭证治理网关（Java 21：WebFlux 数据面 +
+            Spring MVC 控制面；Vue 3 管理面；PostgreSQL）。按以下重点审查，发现的问题按严重度
+            排序；**没有问题就明确写 LGTM**，不要为凑数制造意见：
+
+            1. 红线核对（违反必须指出）：
+               - 不得记录 / 测试快照出现完整 Secret 或请求应答正文；
+               - Virtual Key 必须 1:1 绑定（不跨供应商路由、不负载均衡、不自动故障切换）；
+               - 限流 / 配额只告警不阻断（alert-not-block）；
+               - Flyway 迁移只追加（不得修改已进入共享环境的 V*.sql 旧文件）；
+               - 密码 / 密钥字段绝不出现在任何读响应。
+            2. 缺陷视角：并发 / 幂等（约束冲突应映射 4xx 而非裸 500）、边界（空集 / 越界 / 时区 /
+               锁）、资源泄漏、SQL 注入面、前端异步加载的过期响应守卫（本仓库请求序号模式）。
+            3. 测试与流程：新行为是否有测试（本仓库偏好「先红灯复现、修复后转绿」）；schema 或响应
+               变化是否再生了 OpenAPI 基线与前端类型；CHANGELOG / docs/progress.md 是否随批更新。
+
+            用 `gh pr comment` 发顶层总结；用 mcp__github_inline_comment__create_inline_comment
+            （confirmed: true）给具体代码行内批注。只通过 GitHub 评论输出。
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"

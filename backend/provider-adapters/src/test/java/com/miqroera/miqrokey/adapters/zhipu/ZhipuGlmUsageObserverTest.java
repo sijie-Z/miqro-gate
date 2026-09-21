@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.adapters.zhipu;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.spi.ProtocolFamily;
 import com.miqroera.miqrokey.spi.UsageContext;
 import com.miqroera.miqrokey.spi.UsageObservation;
@@ -29,10 +29,12 @@ class ZhipuGlmUsageObserverTest {
                 .parseResponse(MAPPER, json.getBytes(StandardCharsets.UTF_8)).orElseThrow();
 
         assertThat(observation.modelId()).isEqualTo("glm-5");
-        assertThat(observation.inputTokens()).isEqualTo(1200);
+        // #767: prompt_tokens includes the hit; input normalises to the miss
+        // remainder and a miss is NOT a cache write.
+        assertThat(observation.inputTokens()).isEqualTo(700);
         assertThat(observation.outputTokens()).isEqualTo(800);
         assertThat(observation.cacheReadInputTokens()).isEqualTo(500);
-        assertThat(observation.cacheCreationInputTokens()).isEqualTo(700);
+        assertThat(observation.cacheCreationInputTokens()).isNull();
         assertThat(observation.source()).isEqualTo(UsageSource.PROVIDER_RESPONSE);
     }
 
@@ -48,7 +50,8 @@ class ZhipuGlmUsageObserverTest {
                 .parseResponse(MAPPER, json.getBytes(StandardCharsets.UTF_8)).orElseThrow();
 
         assertThat(observation.modelId()).isEqualTo("glm-5.3");
-        assertThat(observation.inputTokens()).isEqualTo(900);
+        // #767: prompt_tokens includes the cached part.
+        assertThat(observation.inputTokens()).isEqualTo(650);
         assertThat(observation.outputTokens()).isEqualTo(300);
         assertThat(observation.cacheReadInputTokens()).isEqualTo(250);
         assertThat(observation.cacheCreationInputTokens()).isNull();

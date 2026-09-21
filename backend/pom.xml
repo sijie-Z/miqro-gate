@@ -30,20 +30,22 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
         <!-- Framework versions managed by Spring Boot BOM -->
-        <spring-boot.version>3.4.5</spring-boot.version>
+        <spring-boot.version>4.1.1</spring-boot.version>
+        <!-- OpenAPI 3.1 generation (F09, api-contract §8) -->
+        <springdoc.version>3.1.1</springdoc.version>
 
         <!-- Test dependency versions -->
-        <archunit.version>1.5.0</archunit.version>
+        <archunit.version>1.3.0</archunit.version>
         <testcontainers.version>1.21.4</testcontainers.version>
 
         <!-- Plugin versions (locked for reproducible builds) -->
-        <maven-compiler-plugin.version>3.16.0</maven-compiler-plugin.version>
-        <maven-jar-plugin.version>3.5.1</maven-jar-plugin.version>
+        <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+        <maven-jar-plugin.version>3.4.2</maven-jar-plugin.version>
         <maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
-        <maven-enforcer.version>3.6.3</maven-enforcer.version>
-        <spotless.version>3.10.2</spotless.version>
-        <flatten.version>1.8.0</flatten.version>
-        <maven-shade-plugin.version>3.6.2</maven-shade-plugin.version>
+        <maven-enforcer.version>3.5.0</maven-enforcer.version>
+        <spotless.version>2.44.1</spotless.version>
+        <flatten.version>1.6.0</flatten.version>
+        <maven-shade-plugin.version>3.6.0</maven-shade-plugin.version>
     </properties>
 
     <dependencyManagement>
@@ -117,7 +119,22 @@
             <dependency>
                 <groupId>org.checkerframework</groupId>
                 <artifactId>checker-qual</artifactId>
-                <version>4.2.3</version>
+                <version>3.48.3</version>
+            </dependency>
+
+            <!--
+                Patch pin (PH25, 2026-09-19): the Spring Boot 3.4.5 BOM
+                manages the driver at 42.7.5, which carries three HIGH
+                advisories — channel-binding fallback CVE-2025-49146,
+                silent channel-binding downgrade CVE-2026-54291 (both fixed
+                within 42.7.x) and the SCRAM PBKDF2-iteration client DoS
+                CVE-2026-42198. Stay on the 42.7.x patch line: no API change.
+                Drop this pin once the Boot BOM manages >= 42.7.12.
+            -->
+            <dependency>
+                <groupId>org.postgresql</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>42.7.12</version>
             </dependency>
 
             <!-- External test dependencies not managed by Spring Boot BOM -->
@@ -167,12 +184,38 @@
                     <version>${maven-surefire-plugin.version}</version>
                     <configuration>
                         <useModulePath>false</useModulePath>
+                        <!-- The integration suite legitimately needs ~70 Spring contexts
+                             to wind down at JVM exit (each with its own netty graceful
+                             shutdown + Hikari close). Measured on CI: 68-69 of those
+                             shutdowns in passing runs and 73 in the one that got killed
+                             — same order, so the default 30s exit budget sits inside the
+                             suite's normal variance and turns a slow runner into a red
+                             build with every test green (#985). 120s keeps the guard
+                             against a genuinely hung JVM while giving the wind-down the
+                             room it actually needs. -->
+                        <forkedProcessExitTimeoutInSeconds>120</forkedProcessExitTimeoutInSeconds>
                     </configuration>
                 </plugin>
                 <plugin>
                     <groupId>org.springframework.boot</groupId>
                     <artifactId>spring-boot-maven-plugin</artifactId>
                     <version>${spring-boot.version}</version>
+                    <configuration>
+                        <!-- 瘦 jar 保留为主制品：gateway 以 test 依赖消费 control-plane-app 的模块产物
+                             （ArchUnit/契约测试）。fat jar 是 BOOT-INF 布局，会让 sibling 类在测试类路径上
+                             不可加载（spring.factories 仍可见→ClassNotFoundException）。可执行 jar 输出为
+                             *-exec.jar，供 deploy/docker/*.Dockerfile 使用。 -->
+                        <classifier>exec</classifier>
+                    </configuration>
+                    <executions>
+                        <!-- Executable fat jars for the two deployable apps (#479):
+                             declared here once; only the app modules declare this plugin. -->
+                        <execution>
+                            <goals>
+                                <goal>repackage</goal>
+                            </goals>
+                        </execution>
+                    </executions>
                 </plugin>
             </plugins>
         </pluginManagement>
@@ -189,9 +232,9 @@
                         <eclipse>
                             <file>${maven.multiModuleProjectDirectory}/spotless.xml</file>
                         </eclipse>
-                        <removeUnusedImports/>
-                        <trimTrailingWhitespace/>
-                        <endWithNewline/>
+                        <removeUnusedImports></removeUnusedImports>
+                        <trimTrailingWhitespace></trimTrailingWhitespace>
+                        <endWithNewline></endWithNewline>
                     </java>
                     <pom>
                         <sortPom>
@@ -228,8 +271,8 @@
                                 <requireMavenVersion>
                                     <version>[3.9,4)</version>
                                 </requireMavenVersion>
-                                <dependencyConvergence/>
-                                <banDuplicatePomDependencyVersions/>
+                                <dependencyConvergence></dependencyConvergence>
+                                <banDuplicatePomDependencyVersions></banDuplicatePomDependencyVersions>
                             </rules>
                         </configuration>
                     </execution>

@@ -45,7 +45,7 @@ Mock Provider 捕获 Gateway 上游请求并断言：
 
 ## 5. 缓存保护测试
 
-虽然首版不做响应缓存，仍需验证：
+虽然响应缓存默认关闭（ADR-0009 双重 opt-in，另需网关总开关），仍需验证：
 
 - 同一 Virtual Key 总是使用同一真实凭证版本；
 - `cache_control` 和缓存相关头不丢失；
@@ -112,6 +112,11 @@ Mock Provider 捕获 Gateway 上游请求并断言：
 - 内存有界且连接释放正常；
 - 用量写入不丢失；
 - 导出任务不显著影响推理延迟。
+
+执行入口：**CI 档** `SoakIntegrationTest`（50 并发 × 10s 真窗口：#414 起断言零错误 / 网关侧首包开销
+P95 ≤ 30ms / 事件循环探针最坏延迟 ≤ 500ms / 用量行数 == 请求数）；**长时档**
+`MQK_CONCURRENCY=50 MQK_DURATION=180 bash deploy/loadtest/soak.sh`（吞吐、总延迟与 TTFB 百分位、
+用量队列丢弃计数——#417 起默认配置下应保持 0）。
 
 ## 11. 备份恢复验收
 

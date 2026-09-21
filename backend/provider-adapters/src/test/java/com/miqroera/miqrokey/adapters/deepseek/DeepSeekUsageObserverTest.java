@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.adapters.deepseek;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.spi.ProtocolFamily;
 import com.miqroera.miqrokey.spi.UsageContext;
 import com.miqroera.miqrokey.spi.UsageObservation;
@@ -31,10 +31,11 @@ class DeepSeekUsageObserverTest {
 
         assertThat(observation).isPresent();
         UsageObservation o = observation.get();
-        assertThat(o.inputTokens()).isEqualTo(100L);
+        // #767: input normalises to prompt − hit (the miss remainder).
+        assertThat(o.inputTokens()).isEqualTo(20L);
         assertThat(o.outputTokens()).isEqualTo(20L);
         assertThat(o.cacheReadInputTokens()).isEqualTo(80L);
-        assertThat(o.cacheCreationInputTokens()).isEqualTo(20L);
+        assertThat(o.cacheCreationInputTokens()).isNull();
         assertThat(o.source()).isEqualTo(UsageSource.PROVIDER_RESPONSE);
         assertThat(o.confidence()).isEqualTo(1.0);
         assertThat(o.modelId()).isEqualTo("unknown");

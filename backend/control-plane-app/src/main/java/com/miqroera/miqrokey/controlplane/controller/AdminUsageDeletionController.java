@@ -1,9 +1,9 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
+import com.miqroera.miqrokey.controlplane.dto.UsageDeletionView;
 import com.miqroera.miqrokey.controlplane.security.UserContext;
 import com.miqroera.miqrokey.controlplane.service.UsageDeletionService;
 import com.miqroera.miqrokey.controlplane.service.UsageDeletionService.DeletionRequest;
-import com.miqroera.miqrokey.domain.usage.UsageDeletion;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -54,14 +54,16 @@ public class AdminUsageDeletionController {
 
     /** Confirms with the one-time token and executes the permanent deletion. */
     @PostMapping("/{deletionId}/confirm")
-    public UsageDeletion confirm(@PathVariable UUID deletionId, @RequestBody ConfirmRequest body) {
-        return deletionService.confirm(userContext.getUser().tenantId(), deletionId, body.confirmToken());
+    public UsageDeletionView confirm(@PathVariable UUID deletionId, @RequestBody ConfirmRequest body) {
+        return UsageDeletionView
+                .from(deletionService.confirm(userContext.getUser().tenantId(), deletionId, body.confirmToken()));
     }
 
     /** Recent deletion requests (metadata only; never the token). */
     @GetMapping
-    public List<UsageDeletion> recent(@RequestParam(defaultValue = "20") int limit) {
-        return deletionService.recent(userContext.getUser().tenantId(), limit);
+    public List<UsageDeletionView> recent(@RequestParam(defaultValue = "20") int limit) {
+        return deletionService.recent(userContext.getUser().tenantId(), limit).stream().map(UsageDeletionView::from)
+                .toList();
     }
 
     public record Preview(long count) {

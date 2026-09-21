@@ -18,13 +18,95 @@ spring:
     locations: classpath:db/migration
 
 miqrokey:
+  # 自助注册开关（F-REG）：默认开启便于内测/试用；需要邀请制时置 false。
+  registration-enabled: ${MIQROKEY_REGISTRATION_ENABLED:true}
+  # 平台 OIDC 登录（P0a，ADR-0017）：授权码 RP。开关默认关；平台侧注册
+  # client 后填入（test.forge.miqroera.com 契约见 docs/open-admin 蓝图层）。
+  platform-oidc-enabled: ${MIQROKEY_PLATFORM_OIDC_ENABLED:false}
+  platform-oidc-idp-code: ${MIQROKEY_PLATFORM_OIDC_IDP_CODE:forge}
+  platform-oidc-name: ${MIQROKEY_PLATFORM_OIDC_NAME:平台账号登录}
+  platform-oidc-client-id: ${MIQROKEY_PLATFORM_OIDC_CLIENT_ID:}
+  platform-oidc-client-secret: ${MIQROKEY_PLATFORM_OIDC_CLIENT_SECRET:}
+  platform-oidc-authorize-uri: ${MIQROKEY_PLATFORM_OIDC_AUTHORIZE_URI:}
+  platform-oidc-token-uri: ${MIQROKEY_PLATFORM_OIDC_TOKEN_URI:}
+  platform-oidc-userinfo-uri: ${MIQROKEY_PLATFORM_OIDC_USERINFO_URI:}
+  platform-oidc-redirect-uri: ${MIQROKEY_PLATFORM_OIDC_REDIRECT_URI:}
+  platform-oidc-scope: ${MIQROKEY_PLATFORM_OIDC_SCOPE:openid profile}
+  platform-oidc-auto-provision: ${MIQROKEY_PLATFORM_OIDC_AUTO_PROVISION:true}
   control:
+    admin-access:
+      # 管理门户来源 IP 白名单（F05，security §6）：空 = 不限制（历史行为）。
+      # 配置后仅名单内地址可访问门户面（/api/v1/billing/** 外部通道与
+      # /api/v1/auth/bootstrap 引导豁免）。反代部署时 trusted-proxies 列出
+      # 受信代理 CIDR，只有来自它们的 X-Forwarded-For 才被采纳。
+      ip-allowlist: ${MIQROKEY_CONTROL_ADMIN_IP_ALLOWLIST:}
+      trusted-proxies: ${MIQROKEY_CONTROL_ADMIN_TRUSTED_PROXIES:}
     provider-client:
       # Bounds for control-plane provider calls (G3.1): connect timeout,
       # overall request deadline, single-response body cap.
       connect-timeout: ${MIQROKEY_CONTROL_PROVIDER_CLIENT_CONNECT_TIMEOUT:10s}
       request-timeout: ${MIQROKEY_CONTROL_PROVIDER_CLIENT_REQUEST_TIMEOUT:30s}
       max-response-bytes: ${MIQROKEY_CONTROL_PROVIDER_CLIENT_MAX_RESPONSE_BYTES:1048576}
+  approval:
+    # Model IDs that skip the review cycle (exact, case-sensitive). A request
+    # for a whitelisted model is auto-approved and takes effect immediately.
+    whitelist-models: ${MIQROKEY_APPROVAL_WHITELIST_MODELS:}
+  # 定价目录动态同步（#585）：从公开价格源（默认 OpenRouter 模型索引，USD/token）
+  # 拉取并换算为 CNY/1M tokens 写入价格快照。URL 是编译期适配器默认值，仅允许
+  # 运维用环境变量覆盖；汇率在同步时应用。
+  price-sync:
+    url: ${MIQROKEY_PRICE_SYNC_URL:https://openrouter.ai/api/v1/models}
+    usd-cny-rate: ${MIQROKEY_PRICE_SYNC_USD_CNY_RATE:7.2}
+    connect-timeout: ${MIQROKEY_PRICE_SYNC_CONNECT_TIMEOUT:10s}
+    request-timeout: ${MIQROKEY_PRICE_SYNC_REQUEST_TIMEOUT:30s}
+    max-bytes: ${MIQROKEY_PRICE_SYNC_MAX_BYTES:10485760}
+    # 官方价格 24h 自动同步（#708，F08）。默认关：官方价源波动会直接改变成本
+    # 口径，先由运维显式开启。周期用 fixedDelay——上一轮结束后计时，慢价源不
+    # 叠加；冲突策略=保留 MANUAL（写入前另有人工价则跳过并在报告/审计里报
+    # conflicts，绝不静默覆盖）。
+    auto:
+      enabled: ${MIQROKEY_PRICE_SYNC_AUTO_ENABLED:false}
+      cycle-ms: ${MIQROKEY_PRICE_SYNC_AUTO_CYCLE_MS:86400000}
+      initial-delay-ms: ${MIQROKEY_PRICE_SYNC_AUTO_INITIAL_DELAY_MS:60000}
+  # 用量价格基座派生列的调和（#777）：盖章通道只往前看——未评估的行会被盖章，已盖章
+  # 的行永不重访。于是新事件的 price_status 会一直停在 NULL（除非人工跑端点），而判据
+  # 变更后旧章也留在行上（某次部署有 4027 行仍写着 PARTIAL）。
+  # 本周期用同一个服务扫最近 48 小时的已盖章行，把派生列收敛到与读取一致：只重算标签
+  # 与补缺失金额，不重查价目、不改价格列、不动金额。默认关：扫描有成本，且读取侧本就
+  # 有 as-of 兜底、不受其影响。
+  usage-price-reconcile:
+    enabled: ${MIQROKEY_USAGE_PRICE_RECONCILE_ENABLED:false}
+    cycle-ms: ${MIQROKEY_USAGE_PRICE_RECONCILE_CYCLE_MS:900000}
+    initial-delay-ms: ${MIQROKEY_USAGE_PRICE_RECONCILE_INITIAL_DELAY_MS:120000}
+  # 配额软着陆（#684，ADR-0020）：REJECT 规则超限判定周期（fixedDelay——上一轮
+  # 结束后计时）；判定变化时发布路由刷新，网关在一个快照周期内开始 429。
+  quota:
+    enforcement-interval-ms: ${MIQROKEY_QUOTA_ENFORCEMENT_INTERVAL_MS:60000}
+    enforcement-initial-delay-ms: ${MIQROKEY_QUOTA_ENFORCEMENT_INITIAL_DELAY_MS:45000}
+
+  retention:
+    consumer:
+      # Built-in OPTIONAL Kafka consumer feeding the admin console's retention
+      # log viewer (ADR-0014 §8). Disabled by default; enable together with the
+      # broker address (self-hosted profile or a CKafka-compatible endpoint).
+      # Consumes the same content-retention topic the gateway produces to;
+      # rows stay encrypted at rest.
+      enabled: ${MIQROKEY_RETENTION_CONSUMER_ENABLED:false}
+      bootstrap-servers: ${MIQROKEY_RETENTION_CONSUMER_BOOTSTRAP_SERVERS:}
+      topic: ${MIQROKEY_RETENTION_CONSUMER_TOPIC:content-retention}
+      group-id: ${MIQROKEY_RETENTION_CONSUMER_GROUP_ID:miqrokey-retention-console}
+      poll-millis: ${MIQROKEY_RETENTION_CONSUMER_POLL_MILLIS:500}
+
+# OpenAPI 3.1 generation (F09, api-contract §8): the machine-readable contract
+# served at /v3/api-docs. UI bundle is intentionally not included; the spec is
+# the artifact CI diffs against the committed baseline. Info and security
+# scheme docs are applied by OpenApiSecuritySchemes (config package).
+springdoc:
+  api-docs:
+    version: OPENAPI_3_1
+    enabled: true
+  swagger-ui:
+    enabled: false
 
 # Actuator
 management:

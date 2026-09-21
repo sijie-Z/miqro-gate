@@ -1,0 +1,1040 @@
+<script setup lang="ts">
+/**
+ * NextCostView — /app/cost v2 admin page (U2 platform batch).
+ * Behaviour parity with the legacy cost report, extended by I15 (raw 23):
+ * project/day/consumer/model/month cost tables with a share column, seven stat
+ * cards (incl. top consumer + cache-hit tokens), the monthly budget panel
+ * (summary water band + per-project rows with edit/delete gates) and CSV
+ * export. Rendering only; APIs untouched.
+ */
+import { computed, onMounted, ref } from 'vue';
+import * as api from '@/api';
+import { ApiError } from '@/api/http';
+import { csvCell } from '@/utils/csv';
+import { localTzOffsetMinutes } from '@/utils/datetime';
+import { costGapNote, unpricedHitCount } from '@/lib/usage-pricing';
+import {
+  UiButton,
+  UiDialog,
+  UiInput,
+  UiSelect,
+  UiStatusBadge,
+  UiTable,
+  UiTooltip,
+  toast,
+} from '@/ui';
+import type { UiSelectOption } from '@/ui';
+import CostSplitBar from '@/components/CostSplitBar.vue';
+import type { BudgetView, Project, UsageGroup, UsageSummary } from '@/types/generated-api';
+
+const WINDOWS = [
+  { label: '近 7 天', days: 7 },
+  { label: '近 30 天', days: 30 },
+  { label: '近 93 天', days: 93 },
+];
+
+const windowDays = ref(30);
+const loading = ref(true);
+const loadError = ref('');
+
+/**
+ * #1104: a failed load knows no numbers. "分摊总成本 ¥0.0000 / 请求 0" would be a
+ * claim about the window, not about this request — and a money figure is the one
+ * a reader believes first. Same rule the tables answer with since #1065.
+ */
+const statValue = (text: string) => (loadError.value ? '—' : text);
+const statHint = (text: string) => (loadError.value ? '加载失败' : text);
+const loadRequestId = ref('');
+
+type CostMode = 'project' | 'day' | 'user' | 'model' | 'month';
+
+/** I15 (raw 23): dimension tabs — consumer / model / calendar month added. */
+const COST_MODES: { value: CostMode; label: string; panel: string; columnTitle: string }[] = [
+  { value: 'project', label: '按项目', panel: '按项目分摊', columnTitle: '项目' },
+  { value: 'day', label: '按天', panel: '按天成本', columnTitle: '日期' },
+  { value: 'user', label: '按调用方', panel: '按调用方成本', columnTitle: '调用方' },
+  { value: 'model', label: '按模型', panel: '按模型成本', columnTitle: '模型' },
+  { value: 'month', label: '按月', panel: '按月成本', columnTitle: '月份' },
+];
+
+const mode = ref<CostMode>('project');
+// Per-window summary cache: the cards read the project + user dimensions; the
+// active table dimension loads lazily and is reused until the window changes.
+const summaries = ref<Partial<Record<CostMode, UsageSummary>>>({});
+const projectSummary = computed(() => summaries.value.project ?? null);
+const userSummary = computed(() => summaries.value.user ?? null);
+const activeGroups = computed(() => summaries.value[mode.value]?.groups ?? []);
+const activePanel = computed(
+  () => COST_MODES.find((m) => m.value === mode.value)?.panel ?? '成本明细',
+);
+const activeLabelTitle = computed(
+  () => COST_MODES.find((m) => m.value === mode.value)?.columnTitle ?? '分组',
+);
+
+const totalCost = computed(() => projectSummary.value?.totals?.cost?.projectAllocated ?? 0);
+const upstreamCost = computed(() => projectSummary.value?.totals?.cost?.upstreamPaid ?? 0);
+const totalRequests = computed(() => projectSummary.value?.totals?.requests?.upstream ?? 0);
+const totalTokens = computed(
+  () =>
+    (projectSummary.value?.totals?.tokens?.input ?? 0) +
+    (projectSummary.value?.totals?.tokens?.output ?? 0),
+);
+const cacheSaved = computed(() => projectSummary.value?.totals?.cost?.savedByGatewayCache ?? 0);
+/**
+ * #790: hits that happened before any price was in force for their model. While
+ * any remain, the saving is a lower bound — the card says so rather than letting a
+ * small number read as "the cache saved almost nothing".
+ */
+const unpricedHits = computed(() => unpricedHitCount(projectSummary.value?.totals));
+/**
+ * #801: the cost cards are not totals while this is non-null. Same promise the API
+ * has kept since #766, which the console never showed.
+ */
+const costCaveat = computed(() => costGapNote(projectSummary.value?.totals));
+const cacheHits = computed(() => {
+  const t = projectSummary.value?.totals;
+  return t ? (t.requests?.l1Hit ?? 0) + (t.requests?.l2Hit ?? 0) : 0;
+});
+/** Doc 134892 token card: cache-hit input tokens (never billed upstream). */
+const cacheHitTokens = computed(() => projectSummary.value?.totals?.tokens?.cacheRead ?? 0);
+/** Doc 134892 token card: the consumer with the highest token volume. */
+const topConsumer = computed<UsageGroup | null>(() => {
+  let best: UsageGroup | null = null;
+  for (const group of userSummary.value?.groups ?? []) {
+    const candidate = group as unknown as UsageGroup;
+    if (!best || tokensOf(candidate) > tokensOf(best)) best = candidate;
+  }
+  return best;
+});
+
+const activeColumns = computed(() => [
+  { key: 'label', title: activeLabelTitle.value, minWidth: '200px' },
+  { key: 'requests', title: '请求', width: '100px', align: 'right' as const },
+  { key: 'tokens', title: 'Token 数', width: '140px', align: 'right' as const },
+  { key: 'cost', title: '分摊成本', width: '150px', align: 'right' as const },
+  { key: 'split', title: '成本构成', minWidth: '160px' },
+  { key: 'share', title: '占比', minWidth: '220px' },
+]);
+
+function costNumber(value: string | number | undefined): number {
+  return Number(value ?? 0);
+}
+
+function costOf(group: UsageGroup): number {
+  return costNumber(group.cost?.projectAllocated ?? group.cost?.upstreamPaid);
+}
+
+/**
+ * The split of the very figure {@link costOf} prints (#1097).
+ *
+ * The two bases cover different rows — `projectAllocated` counts coalesced traffic,
+ * `upstreamPaid` does not — so the split has to be chosen by the same rule as the
+ * number above it. Picking "whichever split is non-empty" would draw a bar that
+ * explains a different figure than the one the reader is looking at.
+ */
+function costPartsOf(group: UsageGroup): {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+} {
+  const parts =
+    group.cost?.projectAllocated != null
+      ? group.cost?.gatewayObservedParts
+      : group.cost?.upstreamPaidParts;
+  return {
+    input: costNumber(parts?.input),
+    output: costNumber(parts?.output),
+    cacheRead: costNumber(parts?.cacheRead),
+    cacheCreation: costNumber(parts?.cacheCreation),
+  };
+}
+
+function tokensOf(group: UsageGroup): number {
+  return (group.tokens?.input ?? 0) + (group.tokens?.output ?? 0);
+}
+
+/** UiTable row slots are generic records; narrow to the legacy group shape. */
+function asGroup(row: unknown): UsageGroup {
+  return row as UsageGroup;
+}
+
+/**
+ * Share of the total cost, or null when there is no total to take a share of.
+ *
+ * A zero total makes every share 0/0 — undefined. Reporting 0.0% reads as "this
+ * group accounts for none of the spend" and makes the column sum to 0% instead of
+ * 100%; the honest answer is that the share cannot be computed yet (which happens
+ * whenever no usage has been priced, the same case the unpriced markers cover).
+ */
+function shareOf(group: UsageGroup): number | null {
+  const total = costNumber(totalCost.value);
+  if (!total) return null;
+  return (costOf(group) / total) * 100;
+}
+
+function shareWidth(group: UsageGroup): number {
+  const share = shareOf(group);
+  return share === null ? 0 : Math.min(100, share);
+}
+
+function shareLabel(group: UsageGroup): string {
+  const share = shareOf(group);
+  return share === null ? '—' : `${share.toFixed(1)}%`;
+}
+
+function formatCost(value: string | number): string {
+  return `¥${Number(value).toFixed(4)}`;
+}
+
+function formatCount(value: number): string {
+  return value >= 1_000_000
+    ? `${(value / 1_000_000).toFixed(1)}M`
+    : value >= 1_000
+      ? `${(value / 1_000).toFixed(1)}k`
+      : String(value);
+}
+
+function fromIso(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString();
+}
+
+// #440: request-sequence guard — a slow window load must not land after the
+// user switched windows (numbers must match the highlighted range).
+let loadRequestSeq = 0;
+
+async function load() {
+  const seq = ++loadRequestSeq;
+  loading.value = true;
+  loadError.value = '';
+  try {
+    const from = fromIso(windowDays.value);
+    const to = new Date().toISOString();
+    const needed = Array.from(new Set<CostMode>(['project', 'user', mode.value]));
+    const results = await Promise.all(
+      needed.map((dimension) =>
+        api.adminUsageSummary({
+          groupBy: dimension,
+          from,
+          to,
+          tzOffsetMinutes: localTzOffsetMinutes(),
+        }),
+      ),
+    );
+    if (seq !== loadRequestSeq) {
+      return; // a newer window won — this response is stale
+    }
+    const next = { ...summaries.value };
+    needed.forEach((dimension, index) => {
+      next[dimension] = results[index];
+    });
+    summaries.value = next;
+  } catch (error) {
+    if (seq === loadRequestSeq && error instanceof ApiError) {
+      loadError.value = error.message;
+      loadRequestId.value = error.requestId ?? '';
+    }
+  } finally {
+    if (seq === loadRequestSeq) {
+      loading.value = false;
+    }
+  }
+}
+
+function switchWindow(days: number) {
+  windowDays.value = days;
+  summaries.value = {};
+  void load();
+}
+
+function setMode(next: CostMode) {
+  if (mode.value === next) return;
+  mode.value = next;
+  // Cached for this window already (project/user load with the cards)?
+  if (summaries.value[next]) return;
+  void load();
+}
+
+function exportCsv() {
+  const groups = activeGroups.value;
+  if (!groups.length) {
+    toast.info('当前筛选下没有可导出的数据');
+    return;
+  }
+  const header = ['分组', '请求', 'Token 数', '分摊成本(CNY)'];
+  const rows = groups.map((g) => {
+    // adminUsageSummary groups are GroupSummary; the group helpers below use
+    // the (non-optional) legacy UsageGroup shape — narrow the row here.
+    const row = g as unknown as UsageGroup;
+    return [
+      row.label,
+      String(row.requests?.upstream ?? 0),
+      String(tokensOf(row)),
+      costOf(row).toFixed(4),
+    ];
+  });
+  const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `cost-${mode.value}-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ---- budgets (G8.2) ----
+const budgets = ref<BudgetView[]>([]);
+const budgetLoading = ref(false);
+// #440: a failed budget load must not masquerade as "no budgets" — the admin
+// could re-create or overwrite real plans based on the empty state.
+const budgetError = ref('');
+const projects = ref<Project[]>([]);
+const budgetProjectsError = ref('');
+const budgetProjectsLoading = ref(false);
+const budgetDialogVisible = ref(false);
+const budgetSaving = ref(false);
+const budgetFormError = ref('');
+const budgetForm = ref({ projectId: '', amount: '', alertThresholdPct: '80' });
+const editingBudget = ref<BudgetView | null>(null);
+
+const budgetMonth = computed(() => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+});
+
+const budgetTotalAmount = computed(() =>
+  budgets.value.reduce((sum, b) => sum + costNumber(b.amount), 0),
+);
+const budgetTotalSpent = computed(() =>
+  budgets.value.reduce((sum, b) => sum + costNumber(b.spent), 0),
+);
+const budgetOverallPct = computed(() =>
+  budgetTotalAmount.value ? (budgetTotalSpent.value / budgetTotalAmount.value) * 100 : 0,
+);
+
+const budgetLevelLabel: Record<string, string> = {
+  NORMAL: '正常',
+  WARNING: '预警',
+  EXCEEDED: '超限',
+};
+
+const budgetLevelTone: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
+  NORMAL: 'success',
+  WARNING: 'warning',
+  EXCEEDED: 'danger',
+};
+
+const budgetProjectOptions = computed<UiSelectOption[]>(() =>
+  projects.value.map((p) => ({
+    value: p.id ?? '',
+    label: `${p.code} · ${p.name}`,
+  })),
+);
+
+function levelFill(level: string): string {
+  if (level === 'EXCEEDED') return 'var(--ui-danger-fg)';
+  if (level === 'WARNING') return 'var(--ui-warning-fg)';
+  return 'var(--ui-primary)';
+}
+
+async function loadBudgets() {
+  budgetLoading.value = true;
+  budgetError.value = '';
+  try {
+    budgets.value = await api.adminBudgets(budgetMonth.value);
+  } catch (error) {
+    budgetError.value = error instanceof ApiError ? error.message : '预算加载失败，请重试。';
+  } finally {
+    budgetLoading.value = false;
+  }
+}
+
+/**
+ * #1160 加载次序不变量：加载中 → 失败 → 空 → 有数据。
+ * 预算弹窗的项目下拉来自这次读取；失败时不能只留一个空选择器——保存会被
+ * 「请选择项目。」挡住，用户却不知道是列表根本没加载出来。
+ * 与保存错误 `budgetFormError` 分开：那是本表单的校验/保存失败槽。
+ */
+async function loadBudgetProjects() {
+  // 失败信息只在**读到结果之后**更新：重试在途期间保留上一条错误（按钮带 loading），
+  // 否则错误条随清空而卸载，弹窗里只剩一个空下拉——一次失败先变成一次静默。
+  budgetProjectsLoading.value = true;
+  try {
+    projects.value = await api.listProjects();
+    budgetProjectsError.value = '';
+  } catch (error) {
+    projects.value = [];
+    budgetProjectsError.value =
+      error instanceof ApiError ? error.message : '加载项目列表失败，请稍后重试。';
+  } finally {
+    budgetProjectsLoading.value = false;
+  }
+}
+
+async function openBudgetDialog(budget: BudgetView | null) {
+  editingBudget.value = budget;
+  budgetFormError.value = '';
+  if (budget) {
+    budgetForm.value = {
+      projectId: budget.projectId ?? '',
+      amount: String(budget.amount ?? ''),
+      alertThresholdPct: String(budget.alertThresholdPct ?? ''),
+    };
+  } else {
+    if (!projects.value.length) {
+      await loadBudgetProjects();
+    }
+    budgetForm.value = { projectId: '', amount: '', alertThresholdPct: '80' };
+  }
+  budgetDialogVisible.value = true;
+}
+
+async function saveBudget() {
+  budgetFormError.value = '';
+  const amount = Number(budgetForm.value.amount);
+  const threshold = Number(budgetForm.value.alertThresholdPct);
+  if (!budgetForm.value.projectId) {
+    budgetFormError.value = '请选择项目。';
+    return;
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    budgetFormError.value = '预算金额必须大于 0。';
+    return;
+  }
+  if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 100) {
+    budgetFormError.value = '预警阈值必须在 0–100 之间。';
+    return;
+  }
+  budgetSaving.value = true;
+  try {
+    await api.putProjectBudget(budgetForm.value.projectId, {
+      month: budgetMonth.value,
+      amount,
+      alertThresholdPct: threshold,
+    });
+    budgetDialogVisible.value = false;
+    toast.success('预算已保存');
+    await loadBudgets();
+  } catch (error) {
+    budgetFormError.value = error instanceof ApiError ? error.message : '保存失败，请稍后重试。';
+  } finally {
+    budgetSaving.value = false;
+  }
+}
+
+const confirmState = ref<{
+  title: string;
+  body: string;
+  confirmLabel: string;
+  tone: 'danger' | 'primary';
+  run: () => Promise<void>;
+} | null>(null);
+
+function requestRemoveBudget(budget: BudgetView) {
+  confirmState.value = {
+    title: `删除预算「${budget.projectName}」`,
+    body: `删除后 ${budget.month} 的预算计划将被移除，用量与成本数据不受影响。`,
+    confirmLabel: '删除',
+    tone: 'danger',
+    run: async () => {
+      try {
+        // budget rows come from the server budget list, so projectId is always set
+        await api.deleteProjectBudget(budget.projectId!, budget.month);
+        toast.success('预算已删除');
+        await loadBudgets();
+      } catch (error) {
+        if (error instanceof ApiError) {
+          toast.error(`${error.message}（requestId: ${error.requestId ?? '-'}）`);
+        }
+      }
+    },
+  };
+}
+
+async function confirmAndRun() {
+  const state = confirmState.value;
+  if (!state) return;
+  confirmState.value = null;
+  await state.run();
+}
+
+onMounted(async () => {
+  await load();
+  await loadBudgets();
+});
+</script>
+
+<template>
+  <div class="ui-page next-cost">
+    <header class="ui-page-header">
+      <div>
+        <h1 class="ui-page-title">成本报表</h1>
+        <p class="ui-page-desc">成本分摊与月度预算水位；金额按价格快照估算。</p>
+      </div>
+      <div class="ui-page-actions">
+        <UiButton variant="secondary" data-testid="cost-export" @click="exportCsv"
+          >导出 CSV</UiButton
+        >
+      </div>
+    </header>
+
+    <div v-if="loadError" class="ui-alert ui-alert--error" data-testid="cost-load-error">
+      {{ loadError
+      }}<span v-if="loadRequestId" class="ui-request-id"> requestId: {{ loadRequestId }}</span>
+    </div>
+
+    <div class="next-cost__toolbar">
+      <div class="next-cost__segmented" data-testid="cost-mode">
+        <button
+          v-for="m in COST_MODES"
+          :key="m.value"
+          type="button"
+          class="next-cost__seg"
+          :class="{ 'next-cost__seg--on': mode === m.value }"
+          :data-testid="`cost-mode-${m.value}`"
+          @click="setMode(m.value)"
+        >
+          {{ m.label }}
+        </button>
+      </div>
+      <div class="next-cost__segmented" data-testid="cost-window">
+        <button
+          v-for="w in WINDOWS"
+          :key="w.days"
+          type="button"
+          class="next-cost__seg"
+          :class="{ 'next-cost__seg--on': windowDays === w.days }"
+          @click="switchWindow(w.days)"
+        >
+          {{ w.label }}
+        </button>
+      </div>
+    </div>
+
+    <div class="next-cost__stats" data-testid="cost-stats">
+      <div class="ui-panel next-cost__stat" data-testid="cost-stat-total">
+        <span class="next-cost__stat-label">分摊总成本</span>
+        <span class="next-cost__stat-value ui-num">{{ statValue(formatCost(totalCost)) }}</span>
+        <span class="next-cost__stat-hint">{{ statHint('按项目分摊口径') }}</span>
+        <UiTooltip v-if="costCaveat" :text="costCaveat">
+          <span class="next-cost__stat-caveat" data-testid="cost-unpriced-total">未定价</span>
+        </UiTooltip>
+      </div>
+      <div class="ui-panel next-cost__stat" data-testid="cost-stat-upstream">
+        <span class="next-cost__stat-label">上游已付成本</span>
+        <span class="next-cost__stat-value ui-num">{{ statValue(formatCost(upstreamCost)) }}</span>
+        <!-- #801: this said "按最新单价估算" long after the read path stopped using
+             the latest price (#766): the cost is each event's own frozen price. -->
+        <span class="next-cost__stat-hint">{{ statHint('按事件发生时的价目估算') }}</span>
+        <UiTooltip v-if="costCaveat" :text="costCaveat">
+          <span class="next-cost__stat-caveat" data-testid="cost-unpriced-upstream">未定价</span>
+        </UiTooltip>
+      </div>
+      <div class="ui-panel next-cost__stat">
+        <span class="next-cost__stat-label">请求</span>
+        <span class="next-cost__stat-value ui-num">{{
+          statValue(formatCount(totalRequests))
+        }}</span>
+        <span class="next-cost__stat-hint">{{ statHint('到达上游的请求数') }}</span>
+      </div>
+      <div class="ui-panel next-cost__stat">
+        <span class="next-cost__stat-label">Token</span>
+        <span class="next-cost__stat-value ui-num">{{ statValue(formatCount(totalTokens)) }}</span>
+        <span class="next-cost__stat-hint">{{ statHint('输入 + 输出') }}</span>
+      </div>
+      <div class="ui-panel next-cost__stat" data-testid="cost-stat-cache-saved">
+        <span class="next-cost__stat-label">缓存节省</span>
+        <span class="next-cost__stat-value next-cost__stat-value--accent ui-num">{{
+          statValue(formatCost(cacheSaved))
+        }}</span>
+        <span class="next-cost__stat-hint"
+          >{{ statHint('命中 ' + formatCount(cacheHits) + ' 次 · 未调用上游')
+          }}<template v-if="unpricedHits > 0 && !loadError"
+            >（下界：{{ unpricedHits }} 次命中在发生时无生效价目）</template
+          ></span
+        >
+      </div>
+      <div class="ui-panel next-cost__stat" data-testid="cost-stat-cache-tokens">
+        <span class="next-cost__stat-label">缓存命中 Token</span>
+        <span class="next-cost__stat-value ui-num">{{
+          statValue(formatCount(cacheHitTokens))
+        }}</span>
+        <span class="next-cost__stat-hint">{{ statHint('输入侧命中缓存 · 未计上游费用') }}</span>
+      </div>
+      <div class="ui-panel next-cost__stat" data-testid="cost-stat-top-consumer">
+        <span class="next-cost__stat-label">最高消费者</span>
+        <span class="next-cost__stat-value ui-num">{{ statValue(topConsumer?.label ?? '—') }}</span>
+        <span class="next-cost__stat-hint">{{
+          statHint(
+            topConsumer
+              ? `${formatCount(tokensOf(topConsumer))} Tokens · ${formatCost(costOf(topConsumer))}`
+              : '窗口内暂无调用',
+          )
+        }}</span>
+      </div>
+    </div>
+
+    <!-- Monthly budgets -->
+    <section class="ui-panel next-cost__budget" data-testid="cost-budget-panel">
+      <div class="ui-panel-head">
+        <div>
+          <h2 class="ui-panel-title">月度预算 · {{ budgetMonth }}</h2>
+          <span class="ui-panel-sub">只告警不阻断；超限不影响请求。</span>
+        </div>
+        <UiButton
+          variant="primary"
+          size="sm"
+          data-testid="budget-create-open"
+          @click="openBudgetDialog(null)"
+        >
+          设置预算
+        </UiButton>
+      </div>
+      <div class="ui-panel-body">
+        <div v-if="budgets.length" class="next-cost__budget-summary" data-testid="budget-summary">
+          <span class="next-cost__budget-sum-label"
+            >月度总预算 <b class="ui-num">{{ formatCost(budgetTotalAmount) }}</b></span
+          >
+          <div class="next-cost__budget-track">
+            <div
+              class="next-cost__budget-fill"
+              :style="{
+                width: `${Math.min(100, budgetOverallPct)}%`,
+                background: levelFill(
+                  budgetOverallPct >= 100
+                    ? 'EXCEEDED'
+                    : budgetOverallPct >= 80
+                      ? 'WARNING'
+                      : 'NORMAL',
+                ),
+              }"
+            />
+          </div>
+          <span class="next-cost__budget-sum-label ui-num"
+            >已用 {{ formatCost(budgetTotalSpent) }}（{{ budgetOverallPct.toFixed(1) }}%）</span
+          >
+        </div>
+        <div
+          v-for="b in budgets"
+          :key="b.projectId"
+          class="next-cost__budget-row"
+          data-testid="budget-row"
+        >
+          <div class="next-cost__budget-project">
+            <span class="next-cost__budget-name">{{ b.projectName }}</span>
+            <span class="ui-mono next-cost__budget-code">{{ b.projectCode }}</span>
+          </div>
+          <div class="next-cost__budget-figures">
+            <span class="ui-num"
+              >{{ formatCost(b.spent ?? 0) }} / {{ formatCost(b.amount ?? 0) }}</span
+            >
+            <UiStatusBadge
+              variant="pill"
+              :tone="budgetLevelTone[b.level ?? ''] ?? 'neutral'"
+              :label="budgetLevelLabel[b.level ?? ''] ?? b.level"
+              :data-testid="`budget-level-${b.projectCode}`"
+            />
+          </div>
+          <div class="next-cost__budget-track">
+            <div
+              class="next-cost__budget-fill"
+              :style="{
+                width: `${Math.min(100, Number(b.spentPct))}%`,
+                background: levelFill(b.level ?? ''),
+              }"
+            />
+          </div>
+          <span class="next-cost__budget-pct ui-num">{{ b.spentPct }}%</span>
+          <div class="next-cost__budget-actions">
+            <UiButton
+              variant="ghost"
+              size="sm"
+              data-testid="budget-edit"
+              @click="openBudgetDialog(b)"
+              >编辑</UiButton
+            >
+            <UiButton
+              variant="ghost"
+              size="sm"
+              class="next-cost__danger"
+              data-testid="budget-delete"
+              @click="requestRemoveBudget(b)"
+              >删除</UiButton
+            >
+          </div>
+        </div>
+        <div v-if="budgetError" class="ui-alert ui-alert--error" data-testid="budget-error">
+          {{ budgetError }}
+        </div>
+        <p
+          v-if="!budgets.length && !budgetError"
+          class="next-cost__budget-empty"
+          data-testid="budget-empty"
+        >
+          本月还没有预算计划。
+        </p>
+      </div>
+    </section>
+
+    <section class="ui-panel">
+      <div class="ui-panel-toolbar">
+        <span class="ui-panel-sub">{{ activePanel }}</span>
+      </div>
+      <UiTable
+        :columns="activeColumns"
+        :data="activeGroups"
+        :loading="loading"
+        row-key="groupKey"
+        empty-title="该时间窗口内没有成本数据"
+        :data-testid="mode === 'day' ? 'cost-day-table' : 'cost-table'"
+        :error="loadError"
+        @retry="load"
+      >
+        <template #requests="{ row }">
+          <span class="ui-num">{{ formatCount(asGroup(row).requests?.upstream ?? 0) }}</span>
+        </template>
+        <template #tokens="{ row }">
+          <span class="ui-num">{{ formatCount(tokensOf(asGroup(row))) }}</span>
+        </template>
+        <template #cost="{ row }">
+          <span class="ui-num">{{ formatCost(costOf(asGroup(row))) }}</span>
+        </template>
+        <template #split="{ row }">
+          <CostSplitBar
+            label="分摊成本"
+            :total="costOf(asGroup(row))"
+            v-bind="costPartsOf(asGroup(row))"
+          />
+        </template>
+        <template #share="{ row }">
+          <div class="next-cost__share">
+            <div class="next-cost__share-track">
+              <div
+                class="next-cost__share-fill"
+                :style="{ width: `${shareWidth(asGroup(row))}%` }"
+              />
+            </div>
+            <!-- A dash has to explain itself, or it just replaces one puzzle with
+                 another: say why no share can be taken. -->
+            <UiTooltip
+              v-if="shareOf(asGroup(row)) === null"
+              text="总成本为 0，没有可分摊的基数——占比无从计算"
+            >
+              <span class="ui-num next-cost__share-undefined" data-testid="cost-share-undefined">{{
+                shareLabel(asGroup(row))
+              }}</span>
+            </UiTooltip>
+            <span v-else class="ui-num">{{ shareLabel(asGroup(row)) }}</span>
+          </div>
+        </template>
+      </UiTable>
+    </section>
+
+    <!-- Budget dialog -->
+    <UiDialog
+      :open="budgetDialogVisible"
+      :title="editingBudget ? `编辑预算「${editingBudget.projectName}」` : '设置预算'"
+      width="440px"
+      @update:open="budgetDialogVisible = false"
+    >
+      <div class="next-cost__dialog-form">
+        <UiSelect
+          v-if="!editingBudget"
+          v-model="budgetForm.projectId"
+          label="项目"
+          required
+          placeholder="选择项目"
+          :options="budgetProjectOptions"
+          width="100%"
+          data-testid="budget-project"
+        />
+        <!-- #1160: 项目下拉为空必须区分「加载失败 / 真的没有项目」；失败给出重试，
+             重试在途期间按钮进入 loading（错误条保留，避免「什么都没有」的空窗）。 -->
+        <p v-if="budgetProjectsError" class="ui-form-error" data-testid="budget-projects-error">
+          {{ budgetProjectsError }}
+          <UiButton
+            variant="ghost"
+            size="sm"
+            :loading="budgetProjectsLoading"
+            data-testid="budget-projects-retry"
+            @click="loadBudgetProjects"
+            >重试</UiButton
+          >
+        </p>
+        <UiInput
+          v-model="budgetForm.amount"
+          label="预算金额（CNY）"
+          required
+          type="number"
+          data-testid="budget-amount"
+        />
+        <UiInput
+          v-model="budgetForm.alertThresholdPct"
+          label="预警阈值（%）"
+          type="number"
+          data-testid="budget-threshold"
+        />
+        <p v-if="budgetFormError" class="ui-form-error" data-testid="budget-form-error">
+          {{ budgetFormError }}
+        </p>
+      </div>
+      <template #footer>
+        <UiButton variant="ghost" @click="budgetDialogVisible = false">取消</UiButton>
+        <UiButton
+          variant="primary"
+          :loading="budgetSaving"
+          data-testid="budget-save"
+          @click="saveBudget"
+        >
+          保存
+        </UiButton>
+      </template>
+    </UiDialog>
+
+    <UiDialog
+      v-if="confirmState"
+      :open="true"
+      :title="confirmState.title"
+      :description="confirmState.body"
+      width="440px"
+      @update:open="confirmState = null"
+    >
+      <template #footer>
+        <UiButton variant="ghost" @click="confirmState = null">取消</UiButton>
+        <UiButton
+          :variant="confirmState.tone === 'danger' ? 'danger' : 'primary'"
+          @click="confirmAndRun"
+        >
+          {{ confirmState.confirmLabel }}
+        </UiButton>
+      </template>
+    </UiDialog>
+  </div>
+</template>
+
+<style scoped>
+.ui-alert {
+  padding: var(--ui-space-3) var(--ui-space-4);
+  margin-bottom: var(--ui-space-4);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-size-sm);
+}
+
+.ui-alert--error {
+  background: var(--ui-danger-bg);
+  color: var(--ui-danger-fg);
+}
+
+.next-cost__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-cost__segmented {
+  display: inline-flex;
+  gap: var(--ui-space-1);
+  padding: var(--ui-space-1);
+  background: var(--ui-muted);
+  border: 1px solid var(--ui-border-muted);
+  border-radius: var(--ui-radius-control);
+}
+
+.next-cost__seg {
+  height: 30px;
+  padding: 0 var(--ui-space-3);
+  border: 0;
+  border-radius: calc(var(--ui-radius-control) - 2px);
+  background: transparent;
+  color: var(--ui-foreground-secondary);
+  font-size: var(--ui-font-size-sm);
+  font-weight: var(--ui-weight-medium);
+  cursor: pointer;
+}
+
+.next-cost__seg--on {
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-primary-text);
+  font-weight: var(--ui-weight-semibold);
+}
+
+.next-cost__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--ui-space-4);
+  margin-bottom: var(--ui-space-5);
+}
+
+@media (max-width: 1200px) {
+  .next-cost__stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.next-cost__stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-1);
+  padding: var(--ui-space-4);
+}
+
+.next-cost__stat-caveat {
+  color: var(--ui-color-warning, #8a4b00);
+  font-size: 12px;
+}
+
+.next-cost__stat-label {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-cost__stat-value {
+  font-size: 20px;
+  font-weight: var(--ui-weight-semibold);
+  letter-spacing: -0.01em;
+}
+
+.next-cost__stat-value--accent {
+  color: var(--ui-success-fg);
+}
+
+.next-cost__stat-hint {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.next-cost__budget {
+  margin-bottom: var(--ui-space-5);
+}
+
+.next-cost__budget-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-4);
+  margin-bottom: var(--ui-space-4);
+}
+
+.next-cost__budget-sum-label {
+  flex-shrink: 0;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  white-space: nowrap;
+}
+
+.next-cost__budget-sum-label b {
+  color: var(--ui-foreground);
+}
+
+.next-cost__budget-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-3) 0;
+  border-bottom: 1px solid var(--ui-border-muted);
+}
+
+.next-cost__budget-row:last-child {
+  border-bottom: none;
+}
+
+.next-cost__budget-project {
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+}
+
+.next-cost__budget-name {
+  font-weight: var(--ui-weight-medium);
+}
+
+.next-cost__budget-code {
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-faint);
+}
+
+.next-cost__budget-figures {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  width: 260px;
+  flex-shrink: 0;
+  font-size: var(--ui-font-size-xs);
+}
+
+.next-cost__budget-track {
+  flex: 1;
+  height: 8px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-muted);
+  overflow: hidden;
+}
+
+.next-cost__budget-fill {
+  height: 100%;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-primary);
+}
+
+.next-cost__budget-pct {
+  width: 64px;
+  text-align: right;
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+  flex-shrink: 0;
+}
+
+.next-cost__budget-actions {
+  display: flex;
+  gap: var(--ui-space-1);
+  flex-shrink: 0;
+}
+
+.next-cost__danger {
+  color: var(--ui-danger-fg);
+}
+
+.next-cost__budget-empty {
+  margin: 0;
+  font-size: var(--ui-font-size-sm);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-cost__share {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  font-size: var(--ui-font-size-xs);
+  color: var(--ui-foreground-secondary);
+}
+
+.next-cost__share-track {
+  flex: 1;
+  max-width: 160px;
+  height: 6px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-muted);
+  overflow: hidden;
+}
+
+.next-cost__share-undefined {
+  color: var(--ui-foreground-secondary);
+}
+
+.next-cost__share-fill {
+  height: 100%;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-primary);
+  opacity: 0.7;
+}
+
+.next-cost__dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-4);
+}
+</style>

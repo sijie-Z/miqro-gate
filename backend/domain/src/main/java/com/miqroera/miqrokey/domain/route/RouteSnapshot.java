@@ -1,10 +1,15 @@
 package com.miqroera.miqrokey.domain.route;
 
 import com.miqroera.miqrokey.domain.crypto.EncryptedSecret;
+import com.miqroera.miqrokey.domain.model.McpResiliencePolicy;
+import com.miqroera.miqrokey.domain.model.McpService;
+import com.miqroera.miqrokey.domain.model.McpToolRetryPolicy;
+import com.miqroera.miqrokey.domain.model.RetentionConfig;
 
 import java.time.Instant;
 import java.util.Collections;
 import java.net.URI;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -24,7 +29,9 @@ import java.util.UUID;
  * <h2>Lookup semantics</h2>
  * <ul>
  * <li>Keys are indexed by {@code publicKeyId} for O(1) lookup.</li>
- * <li>Each key has at most one ACTIVE binding; the loader resolves it.</li>
+ * <li>A key may hold several ACTIVE label bindings (ADR-0018: one per bound
+ * project); bindings are indexed by {@code (keyId, projectTag)} and the
+ * presented label selects which binding the request routes under.</li>
  * <li>Credentials are indexed by id and carry the upstream base URL, the
  * product's auth scheme, and the ACTIVE version's ciphertext.</li>
  * <li>Model authorization data for {@code /v1/models}: per-key
@@ -42,20 +49,41 @@ import java.util.UUID;
  * and zero-fills the plaintext after use.
  */
 public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecord> keys,
-        Map<UUID, BindingRecord> bindings, Map<UUID, CredentialRecord> credentials,
+        Map<UUID, Map<String, BindingRecord>> bindings, Map<UUID, CredentialRecord> credentials,
         Map<UUID, Set<String>> modelsByKeyId, Map<UUID, Set<String>> grantModelsByGrantId,
         Map<UUID, Set<String>> upstreamModelsByProductId, Map<UUID, String> productCodesByProductId,
-        Map<UUID, UUID> providerIdsByProductId) {
+        Map<UUID, UUID> providerIdsByProductId, Map<String, ConsumerRecord> consumersByDigest,
+        Map<String, McpServerRecord> mcpServicesByName, Map<UUID, RetentionConfig> retentionByTenant,
+        Map<UUID, UnattributedPolicyRecord> unattributedPoliciesByTenant, Map<UUID, Instant> quotaBlockedUsers,
+        Map<UUID, Instant> quotaBlockedProjects) {
+
+    /**
+     * Tenant-level fallback for requests that cannot be attributed (Spec v1.1 §7.3,
+     * #647): route with this credential/product/model scope and account to
+     * {@code projectId} (the per-tenant UNATTRIBUTED bucket, a system project). An
+     * empty {@code models} set means "every ACTIVE model of the product's upstream
+     * catalog".
+     */
+    public record UnattributedPolicyRecord(UUID tenantId, UUID projectId, UUID credentialId, UUID productId,
+            Set<String> models) {
+    }
 
     public RouteSnapshot {
         keys = Map.copyOf(keys);
-        bindings = Map.copyOf(bindings);
+        bindings = bindings.entrySet().stream().collect(
+                java.util.stream.Collectors.toUnmodifiableMap(Map.Entry::getKey, e -> Map.copyOf(e.getValue())));
         credentials = Map.copyOf(credentials);
         modelsByKeyId = immutableSets(modelsByKeyId);
         grantModelsByGrantId = immutableSets(grantModelsByGrantId);
         upstreamModelsByProductId = immutableSets(upstreamModelsByProductId);
+        quotaBlockedUsers = Map.copyOf(quotaBlockedUsers);
+        quotaBlockedProjects = Map.copyOf(quotaBlockedProjects);
         productCodesByProductId = Map.copyOf(productCodesByProductId);
         providerIdsByProductId = Map.copyOf(providerIdsByProductId);
+        consumersByDigest = Map.copyOf(consumersByDigest);
+        mcpServicesByName = Map.copyOf(mcpServicesByName);
+        retentionByTenant = Map.copyOf(retentionByTenant);
+        unattributedPoliciesByTenant = Map.copyOf(unattributedPoliciesByTenant);
     }
 
     private static Map<UUID, Set<String>> immutableSets(Map<UUID, Set<String>> map) {
@@ -65,15 +93,93 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
 
     public static RouteSnapshot empty(long version, Instant loadedAt) {
         return new RouteSnapshot(version, loadedAt, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
-                Map.of(), Map.of());
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+    }
+
+    /**
+     * True when an exceeded REJECT quota rule blocks this user (#684): the
+     * control-plane evaluator computed the verdict; the gateway only reads it.
+     */
+    public boolean quotaBlockedUser(UUID userId) {
+        return userId != null && quotaBlockedUsers.containsKey(userId);
+    }
+
+    /**
+     * When the user's block lifts: the earliest current-window end among the
+     * blocking rules (the 429's Retry-After), or null when not blocked.
+     */
+    public Instant quotaBlockedUserUntil(UUID userId) {
+        return userId == null ? null : quotaBlockedUsers.get(userId);
+    }
+
+    /** Same as {@link #quotaBlockedUser(UUID)} for PROJECT-scope rules. */
+    public boolean quotaBlockedProject(UUID projectId) {
+        return projectId != null && quotaBlockedProjects.containsKey(projectId);
+    }
+
+    /** Same as {@link #quotaBlockedUserUntil(UUID)} for PROJECT-scope rules. */
+    public Instant quotaBlockedProjectUntil(UUID projectId) {
+        return projectId == null ? null : quotaBlockedProjects.get(projectId);
+    }
+
+    /** The tenant's unattributed-request policy, or null when unconfigured. */
+    public UnattributedPolicyRecord unattributedPolicy(UUID tenantId) {
+        return unattributedPoliciesByTenant.get(tenantId);
     }
 
     public KeyRecord key(String publicKeyId) {
         return keys.get(publicKeyId);
     }
 
-    public BindingRecord binding(UUID keyId) {
-        return bindings.get(keyId);
+    /**
+     * The binding a presented label selects, or null when the key has no ACTIVE
+     * binding for that label (the caller rejects — uniform 404, no enumeration).
+     */
+    public BindingRecord binding(UUID keyId, String projectTag) {
+        Map<String, BindingRecord> byTag = bindings.get(keyId);
+        return byTag == null || projectTag == null ? null : byTag.get(projectTag);
+    }
+
+    /**
+     * The key's binding for a claimed project id (CAA, Spec v1.1 §4), or null when
+     * the key holds no ACTIVE binding for that project. Bindings per key are few;
+     * the tag map is scanned linearly.
+     */
+    public BindingRecord bindingByProject(UUID keyId, UUID projectId) {
+        Map<String, BindingRecord> byTag = bindings.get(keyId);
+        if (byTag == null || projectId == null) {
+            return null;
+        }
+        for (BindingRecord binding : byTag.values()) {
+            if (projectId.equals(binding.projectId())) {
+                return binding;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The key's only ACTIVE binding when it has exactly one — the SOLE_BINDING
+     * fallback of the CAA resolution ladder; null when none or several exist.
+     */
+    public BindingRecord soleBinding(UUID keyId) {
+        Map<String, BindingRecord> byTag = bindings.get(keyId);
+        return byTag != null && byTag.size() == 1 ? byTag.values().iterator().next() : null;
+    }
+
+    /** Number of ACTIVE bindings of a key (0 when unknown). */
+    public int bindingCount(UUID keyId) {
+        Map<String, BindingRecord> byTag = bindings.get(keyId);
+        return byTag == null ? 0 : byTag.size();
+    }
+
+    /**
+     * All ACTIVE bindings of a key (empty when unknown). Used by the CAA
+     * context-registry endpoint to scope repo mappings to the key's projects.
+     */
+    public java.util.Collection<BindingRecord> bindingsOf(UUID keyId) {
+        Map<String, BindingRecord> byTag = bindings.get(keyId);
+        return byTag == null ? java.util.List.of() : byTag.values();
     }
 
     public CredentialRecord credential(UUID credentialId) {
@@ -138,10 +244,12 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
     }
 
     /**
-     * The single ACTIVE label binding of a key. Resolved by the loader (DISTINCT ON
-     * virtual_key_id).
+     * One ACTIVE label binding of a key (ADR-0018: a key may hold one per bound
+     * project). Resolved by the loader; {@code grantId} is the binding's own grant
+     * — credential, product and granted-model scope all derive from it.
      */
-    public record BindingRecord(UUID keyId, UUID projectId, String projectTag, UUID credentialId, UUID productId) {
+    public record BindingRecord(UUID keyId, UUID projectId, String projectTag, UUID credentialId, UUID productId,
+            UUID grantId) {
     }
 
     /**
@@ -217,12 +325,170 @@ public record RouteSnapshot(long version, Instant loadedAt, Map<String, KeyRecor
                 && modelsByKeyId.equals(that.modelsByKeyId) && grantModelsByGrantId.equals(that.grantModelsByGrantId)
                 && upstreamModelsByProductId.equals(that.upstreamModelsByProductId)
                 && productCodesByProductId.equals(that.productCodesByProductId)
-                && providerIdsByProductId.equals(that.providerIdsByProductId);
+                && providerIdsByProductId.equals(that.providerIdsByProductId)
+                && retentionByTenant.equals(that.retentionByTenant);
     }
 
     @Override
     public int hashCode() {
         return java.util.Objects.hash(version, loadedAt, keys, bindings, credentials, modelsByKeyId,
-                grantModelsByGrantId, upstreamModelsByProductId, productCodesByProductId, providerIdsByProductId);
+                grantModelsByGrantId, upstreamModelsByProductId, productCodesByProductId, providerIdsByProductId,
+                retentionByTenant);
     }
+
+    /** Finds an ACTIVE consumer by its API-key digest (small set, linear scan). */
+    /**
+     * Consumer by name (#340): the JWT {@code sub} maps here before verification.
+     */
+    public ConsumerRecord consumerByName(String name) {
+        if (name == null) {
+            return null;
+        }
+        for (ConsumerRecord consumer : consumersByDigest.values()) {
+            if (name.equals(consumer.name())) {
+                return consumer;
+            }
+        }
+        return null;
+    }
+
+    public ConsumerRecord consumerByDigest(byte[] digestBytes) {
+        for (ConsumerRecord consumer : consumersByDigest.values()) {
+            if (java.security.MessageDigest.isEqual(consumer.digest(), digestBytes)) {
+                return consumer;
+            }
+        }
+        return null;
+    }
+
+    public McpServerRecord mcpService(String name) {
+        return mcpServicesByName.get(name);
+    }
+
+    /** Compliance-retention switch of the tenant; null/absent = fully off. */
+    public RetentionConfig retention(UUID tenantId) {
+        return retentionByTenant.get(tenantId);
+    }
+
+    /**
+     * One external-system consumer (Tencent doc 134890 semantics) — indexed by the
+     * SHA-256 hex digest of its API key so the gateway can authenticate MCP callers
+     * without storing or decrypting any secret. The capability scope (#316) is null
+     * when full; the MCP channel requires {@code mcp:call}.
+     */
+    public record ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest,
+            java.util.List<String> capabilities, java.time.Instant expiresAt, String jwtPublicKeyPem) {
+
+        /** Legacy constructor: no scope, never expires, no JWT key. */
+        public ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest) {
+            this(id, tenantId, name, digest, null, null, null);
+        }
+
+        /** Legacy constructor: no expiry, no JWT key. */
+        public ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest, java.util.List<String> capabilities) {
+            this(id, tenantId, name, digest, capabilities, null, null);
+        }
+
+        /** Legacy constructor: no JWT key (#340 added the PEM for the data plane). */
+        public ConsumerRecord(UUID id, UUID tenantId, String name, byte[] digest, java.util.List<String> capabilities,
+                java.time.Instant expiresAt) {
+            this(id, tenantId, name, digest, capabilities, expiresAt, null);
+        }
+
+        public ConsumerRecord {
+            digest = digest.clone();
+        }
+
+        public byte[] digest() {
+            return digest.clone();
+        }
+
+        /** Fail-closed channel check. */
+        public boolean allows(String capability) {
+            return capabilities == null || capabilities.contains(capability);
+        }
+
+        /** #322: at/after the expiry the credential is silently rejected. */
+        public boolean expiredAt(java.time.Instant now) {
+            return expiresAt != null && !now.isBefore(expiresAt);
+        }
+    }
+
+    /**
+     * An MCP service exposed at {@code /mcpservers/<name>/mcp} (Tencent doc
+     * 135906): endpoint/transport/status plus its two-level access control (server
+     * mode + per-tool overrides, Tencent doc 134890). Only rows that match the
+     * loader's ACTIVE filter appear. {@code resilience} is the F12/F13 policy (V30)
+     * or null when no policy row exists (everything disabled).
+     * {@code upstreamTimeoutMs} is the per-service data-plane attempt budget (I20,
+     * doc 135906 "超时时间", default 60000 ms).
+     */
+    public record McpServerRecord(UUID id, UUID tenantId, String name, String endpoint, String transport, String status,
+            String aclMode, Set<UUID> serverConsumerIds, List<McpToolRecord> tools, McpResiliencePolicy resilience,
+            String backendAuthMode, com.miqroera.miqrokey.domain.crypto.EncryptedSecret encryptedBackendSecret,
+            int upstreamTimeoutMs) {
+
+        /** Legacy constructor: no upstream backend credential, default budget. */
+        public McpServerRecord(UUID id, UUID tenantId, String name, String endpoint, String transport, String status,
+                String aclMode, Set<UUID> serverConsumerIds, List<McpToolRecord> tools,
+                McpResiliencePolicy resilience) {
+            this(id, tenantId, name, endpoint, transport, status, aclMode, serverConsumerIds, tools, resilience,
+                    "VISITOR", null, McpService.DEFAULT_UPSTREAM_TIMEOUT_MS);
+        }
+
+        /** Legacy constructor: per-service upstream budget, no backend credential. */
+        public McpServerRecord(UUID id, UUID tenantId, String name, String endpoint, String transport, String status,
+                String aclMode, Set<UUID> serverConsumerIds, List<McpToolRecord> tools, McpResiliencePolicy resilience,
+                int upstreamTimeoutMs) {
+            this(id, tenantId, name, endpoint, transport, status, aclMode, serverConsumerIds, tools, resilience,
+                    "VISITOR", null, upstreamTimeoutMs);
+        }
+
+        /** Legacy constructor: backend credential, default budget. */
+        public McpServerRecord(UUID id, UUID tenantId, String name, String endpoint, String transport, String status,
+                String aclMode, Set<UUID> serverConsumerIds, List<McpToolRecord> tools, McpResiliencePolicy resilience,
+                String backendAuthMode, com.miqroera.miqrokey.domain.crypto.EncryptedSecret encryptedBackendSecret) {
+            this(id, tenantId, name, endpoint, transport, status, aclMode, serverConsumerIds, tools, resilience,
+                    backendAuthMode, encryptedBackendSecret, McpService.DEFAULT_UPSTREAM_TIMEOUT_MS);
+        }
+
+        public McpServerRecord {
+            serverConsumerIds = Set.copyOf(serverConsumerIds);
+            tools = List.copyOf(tools);
+            if (upstreamTimeoutMs < McpService.MIN_UPSTREAM_TIMEOUT_MS
+                    || upstreamTimeoutMs > McpService.MAX_UPSTREAM_TIMEOUT_MS) {
+                throw new IllegalArgumentException("upstreamTimeoutMs must be " + McpService.MIN_UPSTREAM_TIMEOUT_MS
+                        + ".." + McpService.MAX_UPSTREAM_TIMEOUT_MS);
+            }
+        }
+
+        public McpToolRecord tool(String toolName) {
+            for (McpToolRecord tool : tools) {
+                if (tool.toolName().equals(toolName)) {
+                    return tool;
+                }
+            }
+            return null;
+        }
+    }
+
+    /**
+     * One tool of an MCP service; overrideMode null means inherit the server rule.
+     * {@code method} is the tool's registered HTTP method (V21, default GET) used
+     * by the F12 retry idempotency gate.
+     */
+    public record McpToolRecord(String toolName, String status, String overrideMode, Set<UUID> toolConsumerIds,
+            String method, McpToolRetryPolicy retry) {
+
+        /** Compatibility constructor: no tool-level retry override (#360). */
+        public McpToolRecord(String toolName, String status, String overrideMode, Set<UUID> toolConsumerIds,
+                String method) {
+            this(toolName, status, overrideMode, toolConsumerIds, method, null);
+        }
+
+        public McpToolRecord {
+            toolConsumerIds = Set.copyOf(toolConsumerIds);
+        }
+    }
+
 }
