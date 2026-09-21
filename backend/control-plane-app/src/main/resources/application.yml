@@ -33,6 +33,10 @@ miqrokey:
   platform-oidc-redirect-uri: ${MIQROKEY_PLATFORM_OIDC_REDIRECT_URI:}
   platform-oidc-scope: ${MIQROKEY_PLATFORM_OIDC_SCOPE:openid profile}
   platform-oidc-auto-provision: ${MIQROKEY_PLATFORM_OIDC_AUTO_PROVISION:true}
+  # 每次出站调用（token 交换、userinfo）的整操作墙钟预算（#1294）：连接、写、
+  # 读头、读体合计。传输层自身没有这个上界——日志里看到的 10 s 只是「读空闲」
+  # 判定，对端持续滴字节即可绕过。
+  platform-oidc-http-timeout: ${MIQROKEY_PLATFORM_OIDC_HTTP_TIMEOUT:PT10S}
   control:
     admin-access:
       # 管理门户来源 IP 白名单（F05，security §6）：空 = 不限制（历史行为）。

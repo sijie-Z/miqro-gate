@@ -59,6 +59,16 @@ public class AuthProperties {
     private boolean platformOidcAutoProvision = true;
 
     /**
+     * Wall-clock budget for <em>each</em> platform OIDC outbound call (token
+     * exchange, then userinfo) — connect, request, headers and body together
+     * (#1294). The transport has no such bound of its own: what looks like one is a
+     * per-read <em>idle</em> timeout, so an IdP that keeps a stalled response alive
+     * one byte at a time would hold the callback's request thread for as long as it
+     * liked.
+     */
+    private Duration platformOidcHttpTimeout = Duration.ofSeconds(10);
+
+    /**
      * Whether to set the {@code Secure} flag on cookies. Derived from
      * {@code miqrokey.production} and the active Spring profiles at startup.
      * Manually setting this to {@code false} when production mode is active will
@@ -274,5 +284,13 @@ public class AuthProperties {
 
     public void setPlatformOidcAutoProvision(boolean v) {
         this.platformOidcAutoProvision = v;
+    }
+
+    public Duration getPlatformOidcHttpTimeout() {
+        return platformOidcHttpTimeout;
+    }
+
+    public void setPlatformOidcHttpTimeout(Duration v) {
+        this.platformOidcHttpTimeout = v;
     }
 }

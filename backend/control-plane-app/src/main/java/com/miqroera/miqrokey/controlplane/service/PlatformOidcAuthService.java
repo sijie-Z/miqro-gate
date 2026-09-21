@@ -28,10 +28,18 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * Platform OIDC login (P0a, ADR-0017): an authorization-code Relying Party
@@ -52,6 +60,16 @@ public class PlatformOidcAuthService {
     private static final int STATE_MAX_AGE_SECONDS = 600;
     private static final int USERNAME_MAX = 128;
     private static final SecureRandom RANDOM = new SecureRandom();
+
+    /**
+     * Runs the OIDC outbound calls off the request thread so a budget can be
+     * enforced from outside (#1294). Virtual threads: the callback is rare and each
+     * task is almost entirely blocked on network IO, so there is nothing to be
+     * gained by pooling — what matters is that {@code cancel(true)} can interrupt a
+     * reader holding a stalled connection.
+     */
+    private static final ExecutorService OUTBOUND = Executors
+            .newThreadPerTaskExecutor(Thread.ofVirtual().name("oidc-outbound-", 0).factory());
 
     private final AuthProperties authProperties;
     private final UserRepository userRepository;
@@ -190,6 +208,47 @@ public class PlatformOidcAuthService {
         }
     }
 
+    /**
+     * Runs one outbound OIDC call under a wall-clock budget (#1294).
+     *
+     * <p>
+     * The transport offers no whole-operation bound: what looks like a timeout in
+     * the logs is a per-read <em>idle</em> deadline, so a peer that keeps a stalled
+     * response alive one byte at a time is never idle long enough to trip it, and
+     * the callback's Tomcat thread is held for as long as the peer likes. The
+     * budget here covers connect, request, headers and body together.
+     *
+     * <p>
+     * An overrunning call is abandoned and reported as {@code failureCode} — the
+     * same ASCII code the caller already uses when the exchange itself fails — so
+     * the login page sees an ordinary flow failure rather than a hung request.
+     */
+    private String withinBudget(String failureCode, Supplier<String> call) {
+        Duration budget = authProperties.getPlatformOidcHttpTimeout();
+        Future<String> task = OUTBOUND.submit(call::get);
+        try {
+            return task.get(budget.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            // Interrupt the reader so the abandoned connection is dropped instead
+            // of being held open by this thread's own socket.
+            task.cancel(true);
+            throw new OAuthFlowException(failureCode);
+        } catch (InterruptedException e) {
+            task.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new OAuthFlowException(failureCode);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException runtime) {
+                throw runtime; // unchanged: a non-2xx is still a transport exception today
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new OAuthFlowException(failureCode);
+        }
+    }
+
     private String exchangeCode(String code) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "authorization_code");
@@ -197,8 +256,9 @@ public class PlatformOidcAuthService {
         form.add("redirect_uri", authProperties.getPlatformOidcRedirectUri());
         form.add("client_id", authProperties.getPlatformOidcClientId());
         form.add("client_secret", authProperties.getPlatformOidcClientSecret());
-        String body = http.post().uri(URI.create(authProperties.getPlatformOidcTokenUri()))
-                .contentType(MediaType.APPLICATION_FORM_URLENCODED).body(form).retrieve().body(String.class);
+        String body = withinBudget("AUTH_ERROR",
+                () -> http.post().uri(URI.create(authProperties.getPlatformOidcTokenUri()))
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED).body(form).retrieve().body(String.class));
         try {
             JsonNode node = objectMapper.readTree(body == null ? "" : body);
             String token = text(node.get("access_token"));
@@ -214,8 +274,9 @@ public class PlatformOidcAuthService {
     }
 
     private OidcIdentity fetchUserinfo(String accessToken) {
-        String body = http.get().uri(URI.create(authProperties.getPlatformOidcUserinfoUri()))
-                .header("Authorization", "Bearer " + accessToken).retrieve().body(String.class);
+        String body = withinBudget("USERINFO_INVALID",
+                () -> http.get().uri(URI.create(authProperties.getPlatformOidcUserinfoUri()))
+                        .header("Authorization", "Bearer " + accessToken).retrieve().body(String.class));
         try {
             JsonNode node = objectMapper.readTree(body == null ? "" : body);
             String sub = text(node.get("sub"));

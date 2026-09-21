@@ -95,6 +95,7 @@ miqrokey.crypto.hmac.versions[v2]: /etc/miqrokey/keys/vk-hmac-v2.key
 | `MIQROKEY_PLATFORM_OIDC_REDIRECT_URI` | 空 | 本系统回调地址（需在平台 client 白名单登记） |
 | `MIQROKEY_PLATFORM_OIDC_SCOPE` | `openid profile` | 授权请求携带的 OAuth2 `scope` 查询参数（`PlatformOidcAuthService` 拼 authorize URL）；取值应与平台侧 client 登记的 scope 一致 |
 | `MIQROKEY_PLATFORM_OIDC_AUTO_PROVISION` | `true` | 首登自动建号并写 `user_identity_link`；`false` 时未绑定平台账号的登录被拒（ACCOUNT_UNLINKED） |
+| `MIQROKEY_PLATFORM_OIDC_HTTP_TIMEOUT` | `PT10S` | **每次**出站调用（token 交换、userinfo）的整操作墙钟预算（#1294）：连接 + 请求 + 响应头 + 响应体合计，超时抛 `OAuthFlowException`（AUTH_ERROR / USERINFO_INVALID）走登录页重定向。这是**总时长**上界，不是读空闲——传输层自带的 10 s 只在「两次读之间」计时，对端持续滴字节即可让回调请求永远不返回并占用 Tomcat 工作线程。对端确实慢但合法的 IdP 可调大 |
 | `MIQROKEY_SESSION_COOKIE_NAME` | `MIQROKEY_SESSION` | Secure/HttpOnly/SameSite cookie |
 | `MIQROKEY_CSRF_COOKIE_NAME` | `MIQROKEY_CSRF` | non-HttpOnly/SameSite cookie（JavaScript 可读） |
 | `MIQROKEY_SESSION_IDLE_TIMEOUT` | `PT30M` | 空闲失效 |
