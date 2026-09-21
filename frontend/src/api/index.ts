@@ -36,6 +36,7 @@ import type {
   McpToolView,
   MeGrantsResponse,
   ModelApprovalPage,
+  MePlazaView,
   ModelApprovalView,
   PriceSnapshotView,
   Project,
@@ -190,6 +191,13 @@ export function submitModelApproval(
 
 export function listMyModelApprovals(): Promise<ModelApprovalView[]> {
   return getList<ModelApprovalView>('/api/v1/me/model-approvals');
+}
+
+// ---- model plaza (#1201, 腾讯「AI 能力市场」对位) ----
+
+/** #1201: the caller's usable models (with prices) + catalog models still approvable. */
+export function getPlazaModels(): Promise<MePlazaView> {
+  return get<MePlazaView>('/api/v1/me/plaza/models');
 }
 
 // ---- self-service quota visibility (F04) ----

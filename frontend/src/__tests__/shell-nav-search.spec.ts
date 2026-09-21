@@ -15,7 +15,17 @@ function setViewportWidth(width: number) {
 }
 
 const StubView = defineComponent({ name: 'StubView', template: '<div />' });
-const REGULAR_NAV = ['overview', 'keys', 'usage', 'skills', 'model-approvals', 'profile', 'help'];
+const REGULAR_NAV = [
+  'overview',
+  'keys',
+  'plaza',
+  'playground',
+  'usage',
+  'skills',
+  'model-approvals',
+  'profile',
+  'help',
+];
 
 async function mountShell() {
   const pinia = createPinia();

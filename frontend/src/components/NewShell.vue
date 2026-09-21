@@ -84,6 +84,8 @@ interface NavItem {
 const regularNav: NavItem[] = [
   { name: 'overview', label: '总览', icon: DashboardIcon },
   { name: 'keys', label: '我的密钥', icon: LockOnIcon },
+  { name: 'plaza', label: '模型广场', icon: ShopIcon },
+  { name: 'playground', label: '试调台', icon: ToolsIcon },
   { name: 'usage', label: '用量', icon: ChartBarIcon },
   { name: 'skills', label: '技能库', icon: AppIcon },
   { name: 'model-approvals', label: '模型申请', icon: EditIcon },

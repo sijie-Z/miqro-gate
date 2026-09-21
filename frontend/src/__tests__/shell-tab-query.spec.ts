@@ -23,7 +23,17 @@ import { useAuthStore } from '@/stores/auth';
 const StubView = defineComponent({ name: 'StubView', template: '<div />' });
 
 /** Every route name the shell renders a nav link for must exist in the table. */
-const NAV = ['overview', 'keys', 'usage', 'skills', 'model-approvals', 'profile', 'help'] as const;
+const NAV = [
+  'overview',
+  'keys',
+  'plaza',
+  'playground',
+  'usage',
+  'skills',
+  'model-approvals',
+  'profile',
+  'help',
+] as const;
 
 async function mountShell() {
   const pinia = createPinia();

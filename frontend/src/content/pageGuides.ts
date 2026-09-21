@@ -176,3 +176,49 @@ export const PROJECTS_GUIDE: PageGuideContent = {
     },
   ],
 };
+
+export const PLAZA_GUIDE: PageGuideContent = {
+  title: '找到你能用的模型',
+  steps: [
+    {
+      title: '看可用模型',
+      desc: '这里汇总你名下「可用」密钥能调用的全部模型，含输入/输出单价（与成本报表同价）。',
+    },
+    {
+      title: '不写代码试一发',
+      desc: '在「试调台」粘贴你的 Virtual Key，选模型直接发起真实调用。',
+      to: '/app/playground',
+      toText: '前往「试调台」',
+    },
+    {
+      title: '缺模型就申请',
+      desc: '「可申请模型」里的模型可一键提交申请；管理员审批通过后数秒内生效。',
+      to: '/app/model-approvals',
+      toText: '前往「模型申请」',
+    },
+    {
+      title: '接进你的工具',
+      desc: '把密钥与模型 ID 填进 Claude Code / Codex 等客户端即可；用量、审计、配额与试调台完全一致。',
+    },
+  ],
+};
+
+export const PLAYGROUND_GUIDE: PageGuideContent = {
+  title: '三步试调一次模型',
+  steps: [
+    {
+      title: '粘贴密钥',
+      desc: '填入「我的密钥」创建时展示的 Virtual Key；它只在这个页面内使用，不会被保存。',
+      to: '/app/keys',
+      toText: '前往「我的密钥」',
+    },
+    {
+      title: '读取可用模型',
+      desc: '点「读取可用模型」，网关返回这把 Key 真正能调用的模型清单。',
+    },
+    {
+      title: '发送',
+      desc: '选模型、写一句话、点发送——调用与正常流量同规计费、审计并计入配额。',
+    },
+  ],
+};

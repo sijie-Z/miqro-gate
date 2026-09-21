@@ -49,6 +49,18 @@ const router = createRouter({
           meta: { title: '我的 Key' },
         },
         {
+          path: 'plaza',
+          name: 'plaza',
+          component: () => import('@/views/next/NextPlazaView.vue'),
+          meta: { title: '模型广场' },
+        },
+        {
+          path: 'playground',
+          name: 'playground',
+          component: () => import('@/views/next/NextPlaygroundView.vue'),
+          meta: { title: '试调台' },
+        },
+        {
           path: 'usage',
           name: 'usage',
           component: () => import('@/views/next/NextUsageView.vue'),
