@@ -16,12 +16,6 @@
     <description>Bounded usage event bus with idempotent batch persistence and in-process request coalescing</description>
 
     <dependencies>
-        <!-- Jackson for jsonb serialization -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
-
         <!-- cache-spi supplies CachedResponse, the coalescer's shared payload -->
         <dependency>
             <groupId>com.miqroera.miqrokey</groupId>
@@ -43,6 +37,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+
+        <!-- Jackson for jsonb serialization -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
 
         <!-- Testing only -->
