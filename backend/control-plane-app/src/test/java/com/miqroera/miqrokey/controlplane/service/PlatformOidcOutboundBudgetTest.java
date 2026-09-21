@@ -13,15 +13,21 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.transaction.PlatformTransactionManager;
 import tools.jackson.databind.ObjectMapper;
 
+import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,10 +58,12 @@ import static org.mockito.Mockito.mock;
  * </p>
  *
  * <p>
- * The budget under test is deliberately far below the transport's per-read idle
- * deadline (observed at ~10 s with reactor-netty), and the deadline each test
- * allows is below that idle value too: a call that only ended because the
- * transport eventually went idle would still fail here.
+ * Nothing below the service bounds these calls: measured while the defect was
+ * live (#1294), a peer dripping one byte every three seconds was never idle
+ * long enough to trip what looked like a ~10 s transport timeout, so a call
+ * that only ended because the transport eventually gave up cannot pass
+ * {@link #CALL_DEADLINE_MS here}. The upper bound has to come from the budget
+ * under test.
  * </p>
  */
 @DisplayName("PH57 platform OIDC outbound call budgets")
@@ -66,10 +74,18 @@ class PlatformOidcOutboundBudgetTest {
 
     /**
      * Hard deadline for a bounded call. Above {@link #BUDGET} to leave room for
-     * scheduling, below the ~10 s read-idle deadline so that a call which only
-     * ended by going idle cannot pass.
+     * scheduling, far below anything a transport would do on its own, so a call
+     * that ended for any reason other than the budget cannot pass.
      */
     private static final long CALL_DEADLINE_MS = 6_000;
+
+    /**
+     * The client secret the service is built with: the characters {@code + / =} are
+     * the base64 alphabet real IdPs issue, and all three have to survive form
+     * encoding — an unencoded {@code +} decodes as a space, and an unencoded
+     * {@code &} or {@code =} splits or truncates the field.
+     */
+    private static final String CLIENT_SECRET = "ph57 s+cr&et=%/";
 
     /** How long a handler holds its response open when nothing releases it. */
     private static final Duration STALL_HOLD = Duration.ofMinutes(10);
@@ -77,14 +93,35 @@ class PlatformOidcOutboundBudgetTest {
     /** Gap between drip bytes; far below any per-read idle window. */
     private static final Duration DRIP_INTERVAL = Duration.ofSeconds(3);
 
+    /**
+     * How long the peer is given to notice that the client released the socket
+     * after an abandoned call. The client either closes at the budget or not at
+     * all, so waiting longer than the budget cannot turn a leak into a release.
+     */
+    private static final long TEARDOWN_GRACE_MS = 5_000;
+
+    /** Cadence of the drip used to observe whether the client hung up. */
+    private static final long TEARDOWN_DRIP_INTERVAL_MS = 100;
+
     private volatile boolean peerReleased;
     private long dripDeadline;
+
+    /**
+     * Set by the peer the first time a write into a response body fails, i.e. the
+     * only way it can learn that the client's socket is gone. The stall handlers
+     * used elsewhere in this class block without ever writing again, so they are
+     * structurally unable to observe a teardown — this flag is.
+     */
+    private final AtomicBoolean clientHungUp = new AtomicBoolean();
+
+    /** What the peer last received on {@code /token-form}, null before any call. */
+    private final AtomicReference<FormPost> tokenForm = new AtomicReference<>();
     private HttpServer peer;
     private String peerBaseUrl;
 
     /**
-     * Pays the one-time costs — Mockito's agent attach and reactor-netty's global
-     * resource init — before the first measurement, so that a cold JVM cannot be
+     * Pays the one-time costs — Mockito's agent attach and the HTTP client's first
+     * connection setup — before the first measurement, so that a cold JVM cannot be
      * read as a call outrunning its budget.
      */
     @BeforeAll
@@ -106,6 +143,8 @@ class PlatformOidcOutboundBudgetTest {
     @BeforeEach
     void startPeer() throws Exception {
         peerReleased = false;
+        clientHungUp.set(false);
+        tokenForm.set(null);
         dripDeadline = System.nanoTime() + STALL_HOLD.toNanos();
         peer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         peer.createContext("/token-ok", exchange -> respond(exchange, "{\"access_token\":\"ph57-token\"}"));
@@ -138,6 +177,39 @@ class PlatformOidcOutboundBudgetTest {
         // Answers promptly, but with a userinfo body carrying no sub claim: the
         // ordinary failure path, which must not be turned into a timeout.
         peer.createContext("/userinfo-no-sub", exchange -> respond(exchange, "{}"));
+        // Answers promptly and records what arrived on the wire, so the token
+        // request's form encoding can be checked after the transport swap (#1300).
+        peer.createContext("/token-form", exchange -> {
+            String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            tokenForm.set(new FormPost(contentType, body));
+            respond(exchange, "{\"access_token\":\"ph57-form-token\"}");
+        });
+        // Same trickle as /drip, but fast enough to observe the *teardown*: the
+        // handler keeps writing until a write fails, which is the only moment the
+        // peer can tell that the client is no longer holding the connection.
+        peer.createContext("/drip-fast", exchange -> {
+            exchange.sendResponseHeaders(200, 1000);
+            OutputStream body = exchange.getResponseBody();
+            try {
+                while (!peerReleased && System.nanoTime() < dripDeadline) {
+                    body.write('x');
+                    body.flush();
+                    Thread.sleep(TEARDOWN_DRIP_INTERVAL_MS);
+                }
+            } catch (IOException e) {
+                // The client hung up: the write hit a closed socket.
+                clientHungUp.set(true);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                try {
+                    body.close();
+                } catch (IOException ignored) {
+                    // The client is gone either way; this is the peer's own cleanup.
+                }
+            }
+        });
         peer.start();
         peerBaseUrl = "http://127.0.0.1:" + peer.getAddress().getPort();
     }
@@ -223,6 +295,60 @@ class PlatformOidcOutboundBudgetTest {
     }
 
     // -----------------------------------------------------------------
+    // Eviction: the budget must free the connection, not just stop waiting
+    // -----------------------------------------------------------------
+
+    /**
+     * Returning on time is only half of a timeout. If the abandoned exchange still
+     * holds the socket, the peer keeps writing into a connection that no one will
+     * ever read — and every expired budget strands one more of them for the life of
+     * the JVM. The peer here writes until a write fails, so this asserts the
+     * teardown side that the measured-timing cases above cannot see.
+     */
+    @Test
+    @DisplayName("an abandoned call gives the upstream connection back instead of holding it")
+    void abandonedCallReleasesItsConnection() throws Exception {
+        Outcome outcome = measure("exchangeCode (drip, teardown)",
+                () -> service(peerBaseUrl, "/drip-fast", "/drip-fast"));
+
+        assertTimedOut(outcome, "AUTH_ERROR");
+
+        long deadline = System.nanoTime() + TEARDOWN_GRACE_MS * 1_000_000L;
+        while (!clientHungUp.get() && System.nanoTime() < deadline) {
+            Thread.sleep(25);
+        }
+        System.out.printf("[ph57] %-40s peer saw the client hang up: %s%n", "teardown (drip-fast)", clientHungUp.get());
+        assertThat(clientHungUp.get()).as("within %d ms of the budget expiring, the peer's next write must fail — "
+                + "otherwise the abandoned connection is still open", TEARDOWN_GRACE_MS).isTrue();
+    }
+
+    // -----------------------------------------------------------------
+    // The wire format has to survive the transport swap
+    // -----------------------------------------------------------------
+
+    /**
+     * The teardown fix replaced the transport, and with it the form converter that
+     * encoded the token request. This pins the bytes on the wire instead of
+     * trusting the new encoder: every field arrives under its own name, and the
+     * client secret — which carries the characters a hand-rolled builder drops —
+     * decodes back to exactly what was configured.
+     */
+    @Test
+    @DisplayName("the token exchange still posts a form the IdP can decode")
+    void tokenExchangePostsAnEncodedForm() throws Exception {
+        measure("exchangeCode (form)", () -> service(peerBaseUrl, "/token-form", "/userinfo-no-sub"));
+
+        FormPost post = tokenForm.get();
+        assertThat(post).as("the peer must receive the token exchange as a form post").isNotNull();
+        assertThat(post.contentType()).as("the IdP is told how to parse the body")
+                .startsWith("application/x-www-form-urlencoded");
+        assertThat(decodeForm(post.body())).as("the exchange must arrive as these fields, decoded")
+                .containsEntry("grant_type", "authorization_code").containsEntry("code", "auth-code")
+                .containsEntry("redirect_uri", "http://127.0.0.1:18690/api/auth/oauth2/callback")
+                .containsEntry("client_id", "ph57-client").containsEntry("client_secret", CLIENT_SECRET);
+    }
+
+    // -----------------------------------------------------------------
     // The budget must not touch calls that answer
     // -----------------------------------------------------------------
 
@@ -255,7 +381,7 @@ class PlatformOidcOutboundBudgetTest {
         properties.setPlatformOidcEnabled(true);
         properties.setPlatformOidcIdpCode("ph57");
         properties.setPlatformOidcClientId("ph57-client");
-        properties.setPlatformOidcClientSecret("ph57-secret");
+        properties.setPlatformOidcClientSecret(CLIENT_SECRET);
         properties.setPlatformOidcAuthorizeUri(baseUrl + "/authorize");
         properties.setPlatformOidcTokenUri(baseUrl + tokenPath);
         properties.setPlatformOidcUserinfoUri(baseUrl + userinfoPath);
@@ -285,6 +411,25 @@ class PlatformOidcOutboundBudgetTest {
         String errorCode() {
             return failure instanceof PlatformOidcAuthService.OAuthFlowException e ? e.code() : null;
         }
+    }
+
+    /** A request body as it reached the peer. */
+    private record FormPost(String contentType, String body) {
+    }
+
+    /**
+     * Splits a form body and URL-decodes every field: the check is what the IdP
+     * would read, not what happens to be printed.
+     */
+    private static Map<String, String> decodeForm(String body) {
+        Map<String, String> fields = new LinkedHashMap<>();
+        for (String pair : body.split("&")) {
+            int eq = pair.indexOf('=');
+            assertThat(eq).as("every form field has a name and a value: %s", pair).isPositive();
+            fields.put(URLDecoder.decode(pair.substring(0, eq), StandardCharsets.UTF_8),
+                    URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8));
+        }
+        return fields;
     }
 
     /**

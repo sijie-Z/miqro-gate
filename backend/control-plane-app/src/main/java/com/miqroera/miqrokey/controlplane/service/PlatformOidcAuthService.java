@@ -21,25 +21,24 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
-import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Supplier;
 
 /**
  * Platform OIDC login (P0a, ADR-0017): an authorization-code Relying Party
@@ -62,14 +61,24 @@ public class PlatformOidcAuthService {
     private static final SecureRandom RANDOM = new SecureRandom();
 
     /**
-     * Runs the OIDC outbound calls off the request thread so a budget can be
-     * enforced from outside (#1294). Virtual threads: the callback is rare and each
-     * task is almost entirely blocked on network IO, so there is nothing to be
-     * gained by pooling — what matters is that {@code cancel(true)} can interrupt a
-     * reader holding a stalled connection.
+     * The OIDC transport, shared for the life of the process so its connections are
+     * pooled and reused.
+     *
+     * <p>
+     * {@code java.net.http} rather than {@code RestClient} because the teardown is
+     * observable there (#1300): {@code cancel(true)} on the future returned by
+     * {@code sendAsync} closes the socket, while interrupting a virtual thread
+     * parked on a {@code RestClient} read does not — measured against a peer that
+     * drips a body, the interrupted reader held its connection for the full 46 s of
+     * the run, until the JVM exited.
+     *
+     * <p>
+     * Redirects are not followed: the token and userinfo URIs are configured per
+     * deployment, so a redirect from them is a misconfiguration, and following one
+     * would forward the form body (client secret included) wherever it points.
      */
-    private static final ExecutorService OUTBOUND = Executors
-            .newThreadPerTaskExecutor(Thread.ofVirtual().name("oidc-outbound-", 0).factory());
+    private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
+            .followRedirects(HttpClient.Redirect.NEVER).build();
 
     private final AuthProperties authProperties;
     private final UserRepository userRepository;
@@ -79,7 +88,6 @@ public class PlatformOidcAuthService {
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
-    private final RestClient http;
 
     public PlatformOidcAuthService(AuthProperties authProperties, UserRepository userRepository,
             PasswordHasher passwordHasher, SessionService sessionService, AuditService auditService,
@@ -92,7 +100,6 @@ public class PlatformOidcAuthService {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
-        this.http = RestClient.create();
     }
 
     /** Whether the feature is switched on. */
@@ -209,56 +216,90 @@ public class PlatformOidcAuthService {
     }
 
     /**
-     * Runs one outbound OIDC call under a wall-clock budget (#1294).
+     * Runs one outbound OIDC call under a wall-clock budget (#1294) and gives the
+     * connection back when the budget expires (#1300).
      *
      * <p>
-     * The transport offers no whole-operation bound: what looks like a timeout in
-     * the logs is a per-read <em>idle</em> deadline, so a peer that keeps a stalled
-     * response alive one byte at a time is never idle long enough to trip it, and
-     * the callback's Tomcat thread is held for as long as the peer likes. The
-     * budget here covers connect, request, headers and body together.
+     * The budget has to be enforced from outside the request: neither transport
+     * offers a whole-operation bound — what looks like one in the logs is a
+     * per-read <em>idle</em> deadline, so a peer that keeps a stalled response
+     * alive one byte at a time is never idle long enough to trip it, and the
+     * callback's Tomcat thread is held for as long as the peer likes. The request
+     * therefore carries no {@code timeout()} of its own either: on both transports
+     * that one stops at the response headers, and the body read afterwards would
+     * again be unbounded.
      *
      * <p>
-     * An overrunning call is abandoned and reported as {@code failureCode} — the
-     * same ASCII code the caller already uses when the exchange itself fails — so
-     * the login page sees an ordinary flow failure rather than a hung request.
+     * Abandoning the call must also release the socket, or every expired budget
+     * leaves one upstream connection and its reader behind for the life of the JVM.
+     * Measured: {@code cancel(true)} on the future from {@code sendAsync} closes
+     * the connection about a second after the budget expires, while the previous
+     * shape (a virtual thread parked on a blocking read, interrupted) left it open
+     * for the whole 46 s of the measurement, until the JVM exited.
+     *
+     * <p>
+     * An overrunning call is reported as {@code failureCode} — the same ASCII code
+     * the caller already uses when the exchange itself fails — so the login page
+     * sees an ordinary flow failure rather than a hung request.
      */
-    private String withinBudget(String failureCode, Supplier<String> call) {
+    private String withinBudget(String failureCode, HttpRequest request) {
         Duration budget = authProperties.getPlatformOidcHttpTimeout();
-        Future<String> task = OUTBOUND.submit(call::get);
+        CompletableFuture<HttpResponse<String>> call = HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString());
         try {
-            return task.get(budget.toMillis(), TimeUnit.MILLISECONDS);
+            HttpResponse<String> response = call.get(budget.toMillis(), TimeUnit.MILLISECONDS);
+            if (response.statusCode() / 100 != 2) {
+                throw new OidcUpstreamException("OIDC endpoint answered with status " + response.statusCode());
+            }
+            return response.body();
         } catch (TimeoutException e) {
-            // Interrupt the reader so the abandoned connection is dropped instead
-            // of being held open by this thread's own socket.
-            task.cancel(true);
+            call.cancel(true);
             throw new OAuthFlowException(failureCode);
         } catch (InterruptedException e) {
-            task.cancel(true);
+            call.cancel(true);
             Thread.currentThread().interrupt();
             throw new OAuthFlowException(failureCode);
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof RuntimeException runtime) {
-                throw runtime; // unchanged: a non-2xx is still a transport exception today
+                throw runtime;
             }
             if (cause instanceof Error error) {
                 throw error;
             }
-            throw new OAuthFlowException(failureCode);
+            // Connect refused, TLS failure, reset: java.net.http reports these as
+            // checked IOExceptions, where RestClient raised an unchecked
+            // ResourceAccessException. Kept unchecked so an unreachable IdP still
+            // fails the callback the way it did before — see OidcUpstreamException.
+            throw new OidcUpstreamException("OIDC call failed: " + cause);
+        }
+    }
+
+    /**
+     * An upstream failure that is not a flow outcome: the IdP answered something
+     * other than 2xx, or the call could not be made at all.
+     *
+     * <p>
+     * Unchecked on purpose, and deliberately not an {@link OAuthFlowException}:
+     * that is how this path behaved before (#1294 kept it: "a non-2xx is still a
+     * transport exception today"), and {@code AuthOAuthController} turns it into a
+     * 500 rather than a redirect to the login page. Whether an IdP error should
+     * instead land on the login page as a flow code is a product decision, not part
+     * of bounding the call (#1300) — this class keeps the old answer while making
+     * the reason visible.
+     */
+    private static final class OidcUpstreamException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        OidcUpstreamException(String message) {
+            super(message);
         }
     }
 
     private String exchangeCode(String code) {
-        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
-        form.add("grant_type", "authorization_code");
-        form.add("code", code);
-        form.add("redirect_uri", authProperties.getPlatformOidcRedirectUri());
-        form.add("client_id", authProperties.getPlatformOidcClientId());
-        form.add("client_secret", authProperties.getPlatformOidcClientSecret());
-        String body = withinBudget("AUTH_ERROR",
-                () -> http.post().uri(URI.create(authProperties.getPlatformOidcTokenUri()))
-                        .contentType(MediaType.APPLICATION_FORM_URLENCODED).body(form).retrieve().body(String.class));
+        HttpRequest request = HttpRequest.newBuilder(URI.create(authProperties.getPlatformOidcTokenUri()))
+                .header("Content-Type", MediaType.APPLICATION_FORM_URLENCODED_VALUE)
+                .POST(HttpRequest.BodyPublishers.ofString(tokenFormBody(code), StandardCharsets.UTF_8)).build();
+        String body = withinBudget("AUTH_ERROR", request);
         try {
             JsonNode node = objectMapper.readTree(body == null ? "" : body);
             String token = text(node.get("access_token"));
@@ -273,10 +314,27 @@ public class PlatformOidcAuthService {
         }
     }
 
+    /**
+     * The token-endpoint body, encoded by hand now that no form converter sits in
+     * the transport: every value goes through {@link URLEncoder}, so a client
+     * secret containing {@code +}, {@code /} or {@code =} (the base64 alphabet, and
+     * what most IdPs issue) survives the wire intact.
+     */
+    private String tokenFormBody(String code) {
+        return "grant_type=authorization_code" + "&code=" + encode(code) + "&redirect_uri="
+                + encode(authProperties.getPlatformOidcRedirectUri()) + "&client_id="
+                + encode(authProperties.getPlatformOidcClientId()) + "&client_secret="
+                + encode(authProperties.getPlatformOidcClientSecret());
+    }
+
+    private static String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
     private OidcIdentity fetchUserinfo(String accessToken) {
-        String body = withinBudget("USERINFO_INVALID",
-                () -> http.get().uri(URI.create(authProperties.getPlatformOidcUserinfoUri()))
-                        .header("Authorization", "Bearer " + accessToken).retrieve().body(String.class));
+        HttpRequest request = HttpRequest.newBuilder(URI.create(authProperties.getPlatformOidcUserinfoUri()))
+                .header("Authorization", "Bearer " + accessToken).GET().build();
+        String body = withinBudget("USERINFO_INVALID", request);
         try {
             JsonNode node = objectMapper.readTree(body == null ? "" : body);
             String sub = text(node.get("sub"));
