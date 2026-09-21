@@ -115,7 +115,7 @@ public class AdminProviderService {
                 com.miqroera.miqrokey.domain.model.StatusSource.MANUAL_UNKNOWN, 0, Instant.now(), Instant.now());
         subscriptionRepository.insert(subscription);
         auditService.record(tenantId, adminId, "SUBSCRIPTION_CREATE", "SUBSCRIPTION", subscription.id(),
-                "{\"name\":\"" + name + "\"}", null);
+                AuditSummaries.summary("name", name), null);
         return subscription;
     }
 
@@ -166,7 +166,7 @@ public class AdminProviderService {
                         .addValue("subscriptionId", subscriptionId).addValue("externalRef", externalSeatRef)
                         .addValue("assignedUserId", assignedUserId).addValue("displayName", displayName));
         auditService.record(tenantId, adminId, "SEAT_CREATE", "SEAT", seatId,
-                displayName != null ? "{\"displayName\":\"" + displayName + "\"}" : "{}", null);
+                displayName != null ? AuditSummaries.summary("displayName", displayName) : "{}", null);
         return seats(tenantId, subscriptionId).stream().filter(s -> s.id().equals(seatId)).findFirst().orElseThrow();
     }
 

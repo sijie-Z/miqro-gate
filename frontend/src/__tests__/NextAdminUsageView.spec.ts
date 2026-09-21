@@ -171,6 +171,15 @@ const hourlyReport: HourlyUsageReport = {
   ],
 };
 
+/** The hourly report with its one row relabelled, so two answers in flight at
+ * once can be told apart in the rendered table. */
+function hourlyReportFor(dimensionLabel: string): HourlyUsageReport {
+  return {
+    ...hourlyReport,
+    rows: [{ ...hourlyReport.rows![0]!, dimensionLabel }],
+  };
+}
+
 function summaryCalls() {
   return mockApi.adminUsageSummary.mock.calls.map(([query]) => query);
 }
@@ -840,6 +849,40 @@ describe('NextAdminUsageView', () => {
     expect(mockApi.adminUsageHourly).toHaveBeenLastCalledWith(expect.objectContaining({ days: 7 }));
   });
 
+  // #1224: loadHourly had no response-sequence guard, so a slow answer could
+  // still land after a newer one and repaint the table with stale rows. The
+  // day-range buttons are not disabled while a request is in flight, so two
+  // answers really can be outstanding at once.
+  it('drops an hourly response that a newer request has already superseded', async () => {
+    const pending: Array<(report: HourlyUsageReport) => void> = [];
+    mockApi.adminUsageHourly.mockImplementation(
+      () =>
+        new Promise<HourlyUsageReport>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+    expect(pending).toHaveLength(1); // the mount request is still open
+
+    // the user asks for another window while the first request is in flight
+    await wrapper.find('[data-testid="hourly-days-7"]').trigger('click');
+    expect(pending).toHaveLength(2);
+
+    // the newer request answers first …
+    pending[1]!(hourlyReportFor('新窗口'));
+    await flushPromises();
+    expect(wrapper.find('[data-testid="usage-hourly-table"]').text()).toContain('新窗口');
+
+    // … then the abandoned one dribbles in and must not win
+    pending[0]!(hourlyReportFor('旧窗口'));
+    await flushPromises();
+    const table = wrapper.find('[data-testid="usage-hourly-table"]').text();
+    expect(table).toContain('新窗口');
+    expect(table).not.toContain('旧窗口');
+  });
+
   it('opens the call timeline drawer from the request ID column (#707)', async () => {
     mockApi.adminUsageTimeline.mockResolvedValue(timelineFor('SUCCEEDED'));
     const wrapper = mountView();
@@ -956,6 +999,64 @@ describe('NextAdminUsageView', () => {
     // a missing lifecycle row is an explanation, never an error banner
     expect(drawerEl('usage-timeline-error')).toBeNull();
     expect(drawerEl('usage-timeline-hero')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('drops a stale timeline response for a request the user left behind (#1231)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const pending: Array<{ id: string; resolve: (v: ModelCallTimeline) => void }> = [];
+    mockApi.adminUsageTimeline.mockImplementation(
+      (id) =>
+        new Promise<ModelCallTimeline>((resolve) => {
+          pending.push({ id, resolve });
+        }),
+    );
+
+    // gw-1's timeline is requested first…
+    await wrapper.find('[data-testid="usage-timeline-gw-1"]').trigger('click');
+    await flushPromises();
+
+    // …but the user closes the drawer before it answers, and opens gw-2's.
+    const panel = drawerEl('usage-timeline-drawer') as HTMLElement | null;
+    expect(panel, 'timeline drawer should render').toBeTruthy();
+    panel!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await flushPromises();
+    expect(drawerEl('usage-timeline-drawer')).toBeNull();
+
+    await wrapper.find('[data-testid="usage-timeline-gw-2"]').trigger('click');
+    await flushPromises();
+    expect(pending.map((p) => p.id)).toEqual(['gw-1', 'gw-2']);
+
+    // gw-2 answers first and paints.
+    pending[1]!.resolve(
+      timelineFor('SUCCEEDED', {
+        gatewayRequestId: 'gw-2',
+        upstreamRequestId: 'up-B',
+        modelId: 'model-from-gw2',
+      }),
+    );
+    await flushPromises();
+    expect(drawerEl('usage-timeline-reqid')!.textContent).toContain('gw-2');
+
+    // The stale gw-1 answer lands second and must NOT repaint the body under
+    // the gw-2 header.
+    pending[0]!.resolve(
+      timelineFor('SUCCEEDED', {
+        gatewayRequestId: 'gw-1',
+        upstreamRequestId: 'up-A',
+        modelId: 'model-from-gw1',
+      }),
+    );
+    await flushPromises();
+    const drawer = drawerEl('usage-timeline-drawer')!;
+    expect(drawer.textContent).toContain('up-B');
+    expect(drawer.textContent, 'stale gw-1 timeline repainted under the gw-2 header').toContain(
+      'model-from-gw2',
+    );
+    expect(drawer.textContent).not.toContain('up-A');
 
     wrapper.unmount();
   });

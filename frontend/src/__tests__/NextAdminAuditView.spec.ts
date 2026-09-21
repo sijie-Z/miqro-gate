@@ -154,4 +154,41 @@ describe('NextAdminAuditView', () => {
       vi.useRealTimers();
     }
   });
+
+  it('keeps the newer quick window when a slower older one answers last (#1231)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Second phase: two quick ranges in flight at once — 近 30 天 is issued
+    // first, 近 7 天 (the user's final pick) answers first.
+    type AuditEvents = Awaited<ReturnType<typeof api.auditEvents>>;
+    const pending: Array<{ resolve: (v: AuditEvents) => void }> = [];
+    mockApi.auditEvents.mockImplementation(
+      () =>
+        new Promise<AuditEvents>((resolve) => {
+          pending.push({ resolve });
+        }),
+    );
+
+    await wrapper.find('[data-testid="audit-range-30"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="audit-range-7"]').trigger('click');
+    await flushPromises();
+    expect(pending).toHaveLength(2);
+
+    const row = (marker: string) => ({ ...event, changeSummary: marker });
+
+    // The 近7天 answer lands first — it is the window the user selected last.
+    pending[1]!.resolve([row('SEVEN-DAY-MARKER')]);
+    await flushPromises();
+    expect(wrapper.text()).toContain('SEVEN-DAY-MARKER');
+
+    // The stale 近30天 answer lands second and must NOT overwrite the table.
+    pending[0]!.resolve([row('THIRTY-DAY-MARKER')]);
+    await flushPromises();
+    expect(wrapper.text(), 'stale 30-day rows overwrote the newer 7-day window').toContain(
+      'SEVEN-DAY-MARKER',
+    );
+    expect(wrapper.text()).not.toContain('THIRTY-DAY-MARKER');
+  });
 });

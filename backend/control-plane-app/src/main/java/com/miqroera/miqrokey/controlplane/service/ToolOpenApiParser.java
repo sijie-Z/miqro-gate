@@ -1,6 +1,6 @@
 package com.miqroera.miqrokey.controlplane.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import org.springframework.http.HttpStatus;
 
 import java.util.ArrayList;
@@ -44,12 +44,12 @@ public final class ToolOpenApiParser {
         List<ToolSpec> tools = new ArrayList<>();
         List<SkipNote> skipped = new ArrayList<>();
         JsonNode paths = spec.get("paths");
-        paths.fieldNames().forEachRemaining(path -> {
+        paths.propertyNames().forEach(path -> {
             JsonNode pathNode = paths.get(path);
             if (!pathNode.isObject()) {
                 return;
             }
-            pathNode.fieldNames().forEachRemaining(method -> {
+            pathNode.propertyNames().forEach(method -> {
                 String lower = method.toLowerCase(Locale.ROOT);
                 JsonNode op = pathNode.get(method);
                 if (!op.isObject()) {

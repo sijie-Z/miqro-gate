@@ -1,6 +1,8 @@
 package com.miqroera.miqrokey.controlplane.service;
 
+import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -15,8 +17,12 @@ import java.util.zip.ZipInputStream;
  * the zip must hold exactly one skill directory whose name matches the
  * {@code SKILL.md} frontmatter {@code name} (kebab-case), with a non-blank
  * {@code description}. Optional frontmatter fields ({@code author},
- * {@code license}, {@code tags}) become catalog metadata. Bounds guard
- * oversized packages and zip bombs (we only read SKILL.md, never extract).
+ * {@code license}, {@code tags}) become catalog metadata. Entry names are
+ * normalized and must stay inside that directory: {@code ..} segments, absolute
+ * paths and drive letters are rejected (#1233, zip-slip). Bounds guard
+ * oversized packages and zip bombs — nothing is ever extracted to disk;
+ * SKILL.md is the only content read into memory, the rest is inflated and
+ * discarded to charge the decompressed-volume cap.
  */
 public final class SkillZipValidator {
 
@@ -26,6 +32,12 @@ public final class SkillZipValidator {
     public static final int MAX_SKILL_MD_BYTES = 512 * 1024;
     /** Upper bound for zip entries (bomb guard). */
     public static final int MAX_ENTRIES = 200;
+    /**
+     * Upper bound for the total decompressed volume of an uploaded package (bomb
+     * guard, #1233): a 638 KB package can hold ~640 MB of deflated data, which
+     * downstream users would write to disk in full when extracting.
+     */
+    public static final long MAX_TOTAL_DECOMPRESSED_BYTES = 64L * 1024 * 1024;
     /** Catalog bounds from the SkillHub spec (raw docs 20/28). */
     public static final int MAX_TAGS = 5;
     public static final int MAX_TAG_CHARS = 20;
@@ -50,13 +62,14 @@ public final class SkillZipValidator {
         String rootDir = null;
         String skillMdText = null;
         int entries = 0;
+        long decompressedBytes = 0;
         try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(zip))) {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
                 if (++entries > MAX_ENTRIES) {
                     throw invalid("SKILL_TOO_MANY_ENTRIES", "技能包条目数超过上限。");
                 }
-                String path = entry.getName();
+                String path = normalizedEntryPath(entry.getName());
                 int slash = path.indexOf('/');
                 String top = slash > 0 ? path.substring(0, slash) : path;
                 if (rootDir == null) {
@@ -77,6 +90,20 @@ public final class SkillZipValidator {
                         throw invalid("SKILL_MD_TOO_LARGE", "SKILL.md 超过大小上限。");
                     }
                     skillMdText = new String(skillMd, StandardCharsets.UTF_8);
+                    decompressedBytes += skillMd.length;
+                } else {
+                    // #1233: a declared size is never trusted for the cap — it is -1
+                    // on streamed (data-descriptor) zips, which must not read as "0",
+                    // and a crafted zip can declare any small number over a deflate
+                    // stream that inflates to gigabytes. The declared value may only
+                    // fail fast; the cap is charged with the bytes actually inflated.
+                    if (entry.getSize() > MAX_TOTAL_DECOMPRESSED_BYTES - decompressedBytes) {
+                        throw decompressedTooLarge();
+                    }
+                    decompressedBytes = countDecompressedBytes(zis, decompressedBytes);
+                }
+                if (decompressedBytes > MAX_TOTAL_DECOMPRESSED_BYTES) {
+                    throw decompressedTooLarge();
                 }
             }
         } catch (java.io.IOException e) {
@@ -94,6 +121,71 @@ public final class SkillZipValidator {
         return parseFrontmatter(rootDir, skillMdText);
     }
 
+    /**
+     * Normalizes a zip entry name to a '/'-separated relative path, rejecting
+     * anything that could escape the skill root when the package is extracted
+     * downstream (#1233, zip-slip): absolute paths, drive letters, and any
+     * {@code ..} segment — however the separator is spelled, since extractors on
+     * Windows split on '\' too. Empty and '.' segments are dropped; nothing else is
+     * rewritten, so accepted entries reach extractors unchanged.
+     */
+    private static String normalizedEntryPath(String name) {
+        if (name == null) {
+            throw invalidEntryPath();
+        }
+        String unified = name.replace('\\', '/');
+        boolean driveLetter = unified.length() > 1 && unified.charAt(1) == ':' && Character.isLetter(unified.charAt(0));
+        if (unified.startsWith("/") || driveLetter) {
+            throw invalidEntryPath();
+        }
+        StringBuilder normalized = new StringBuilder();
+        for (String segment : unified.split("/", -1)) {
+            if (segment.isEmpty() || segment.equals(".")) {
+                continue;
+            }
+            if (segment.equals("..")) {
+                throw invalidEntryPath();
+            }
+            if (normalized.length() > 0) {
+                normalized.append('/');
+            }
+            normalized.append(segment);
+        }
+        if (normalized.length() == 0) {
+            throw invalidEntryPath();
+        }
+        return normalized.toString();
+    }
+
+    private static SkillValidationException invalidEntryPath() {
+        return invalid("SKILL_ENTRY_PATH_INVALID", "技能包内存在不安全的条目路径：条目名不允许 .. 段、绝对路径，或规范化后越出技能根目录。");
+    }
+
+    /**
+     * Reads the current entry through the inflater and returns the new running
+     * total of decompressed bytes, rejecting as soon as the cap is passed. The true
+     * size comes from the inflater, never from the declared
+     * {@link ZipEntry#getSize()}: counting costs nothing extra here because
+     * skipping ahead to the next entry already inflates this same data.
+     */
+    private static long countDecompressedBytes(ZipInputStream zis, long alreadyCounted) throws java.io.IOException {
+        byte[] buffer = new byte[8192];
+        long total = alreadyCounted;
+        int read;
+        while ((read = zis.read(buffer)) != -1) {
+            total += read;
+            if (total > MAX_TOTAL_DECOMPRESSED_BYTES) {
+                throw decompressedTooLarge();
+            }
+        }
+        return total;
+    }
+
+    private static SkillValidationException decompressedTooLarge() {
+        return invalid("SKILL_DECOMPRESSED_TOO_LARGE",
+                "技能包解压后总体积超过 %d MB 上限。".formatted(MAX_TOTAL_DECOMPRESSED_BYTES / 1024 / 1024));
+    }
+
     private static SkillMetadata parseFrontmatter(String rootDir, String skillMd) {
         String body = skillMd;
         if (body.startsWith("﻿")) {
@@ -106,7 +198,7 @@ public final class SkillZipValidator {
         String yamlText = yamlEnd > 0 ? body.substring(3, yamlEnd) : body.substring(3);
         Map<String, Object> meta;
         try {
-            Object loaded = new Yaml().load(yamlText);
+            Object loaded = yamlReader().load(yamlText);
             if (!(loaded instanceof Map)) {
                 throw invalid("SKILL_FRONTMATTER_INVALID", "SKILL.md frontmatter 必须是 YAML 映射。");
             }
@@ -163,6 +255,11 @@ public final class SkillZipValidator {
 
     private static String str(Object value) {
         return value == null ? null : String.valueOf(value).trim();
+    }
+
+    /** YAML reader for untrusted uploads: refuses class-instantiation tags. */
+    private static Yaml yamlReader() {
+        return new Yaml(new SafeConstructor(new LoaderOptions()));
     }
 
     private static SkillValidationException invalid(String code, String detail) {

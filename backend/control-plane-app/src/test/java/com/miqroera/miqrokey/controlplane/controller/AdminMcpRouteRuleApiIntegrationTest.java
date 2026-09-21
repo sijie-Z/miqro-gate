@@ -217,7 +217,7 @@ class AdminMcpRouteRuleApiIntegrationTest {
                         + "\"pathMode\":\"REGEX\",\"pathValue\":\"^/api/v[0-9]+$\","
                         + "\"hostMode\":\"PREFIX\",\"hostValue\":\"mcp-\",\"methods\":[\"GET\",\"POST\"],"
                         + "\"headers\":[{\"name\":\"X-Tenant-Id\",\"mode\":\"EXACT\",\"value\":\"acme\"},"
-                        + "{\"name\":\"X-Canary\",\"mode\":\"EXACT\",\"value\":\"true\"}]}");
+                        + "{\"name\":\"X-Canary\",\"mode\":\"EXACT\",\"value\":\"true\"}]");
         MvcResult created = mockMvc
                 .perform(post(rulesUrl()).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
                         .contentType(MediaType.APPLICATION_JSON).content(body))
@@ -277,6 +277,25 @@ class AdminMcpRouteRuleApiIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(rule("dup", "\"pathMode\":\"PREFIX\",\"pathValue\":\"/api2\"")))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ROUTE_NAME_TAKEN"));
+    }
+
+    @Test
+    @DisplayName("a type-mismatched field is a 400 that names the offending field (parse-error path)")
+    void parseErrorNamesTheOffendingField() throws Exception {
+        // #1088 Stage B guard: the body is read by the Jackson 3 converter, which
+        // throws
+        // tools.jackson InvalidFormatException — the only shape
+        // GlobalExceptionHandler#fieldOf
+        // extracts the field name from (with the Jackson 2 pin the exception was a J2
+        // type,
+        // was not matched, and the parse-error 400 lost the name). The existing
+        // fieldErrors
+        // assertions only ever exercise the Bean Validation branch.
+        mockMvc.perform(post(rulesUrl()).cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .contentType(MediaType.APPLICATION_JSON).content(rule("type-probe", "\"priority\":\"not-a-number\"")))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("PARAM_INVALID"))
+                .andExpect(jsonPath("$.detail")
+                        .value(org.hamcrest.Matchers.containsString("Field 'priority' has an invalid value.")));
     }
 
     @Test

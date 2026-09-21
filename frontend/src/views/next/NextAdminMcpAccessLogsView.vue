@@ -114,24 +114,35 @@ const detailFirstByteAt = computed(() => {
   return new Date(new Date(base).getTime() + ttfb);
 });
 
+// #1231: request-sequence guard — rapid 近 7 天/近 30 天 clicks must not let a
+// slower older window land after a newer one (rows must match the inputs).
+let loadRequestSeq = 0;
+
 async function load() {
+  const seq = ++loadRequestSeq;
   loading.value = true;
   loadError.value = '';
   try {
-    entries.value = await api.listMcpAccessLogs({
+    const list = await api.listMcpAccessLogs({
       service: serviceFilter.value.trim() || undefined,
       consumer: consumerFilter.value.trim() || undefined,
       from: toIsoInstant(fromFilter.value),
       to: toIsoInstant(toFilter.value),
       limit: Number(limitFilter.value),
     });
+    if (seq !== loadRequestSeq) {
+      return; // a newer window won — this response is stale
+    }
+    entries.value = list;
   } catch (error) {
-    if (error instanceof ApiError) {
+    if (seq === loadRequestSeq && error instanceof ApiError) {
       loadError.value = error.message;
       loadRequestId.value = error.requestId ?? '';
     }
   } finally {
-    loading.value = false;
+    if (seq === loadRequestSeq) {
+      loading.value = false;
+    }
   }
 }
 

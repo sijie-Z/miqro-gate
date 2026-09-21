@@ -54,7 +54,7 @@ public class AdminApiKeyService {
             throw new ApiException(HttpStatus.CONFLICT, "ADMIN_API_KEY_NAME_TAKEN", "同名管理密钥已存在。");
         }
         auditService.record(tenantId, actorId, "ADMIN_API_KEY_ISSUE", "ADMIN_API_KEY", key.id(),
-                "{\"name\":\"" + safeJson(name) + "\"}", null);
+                "{\"name\":\"" + AuditSummaries.escapeJson(name) + "\"}", null);
         return new Issued(key.id(), generated.plaintext());
     }
 
@@ -74,8 +74,8 @@ public class AdminApiKeyService {
         }
         repository.updateScope(keyId, tenantId, capabilities);
         auditService.record(tenantId, actorId, "ADMIN_API_KEY_SCOPE_UPDATE", "ADMIN_API_KEY", keyId,
-                "{\"name\":\"" + safeJson(key.name()) + "\",\"from\":" + scopeJson(key.capabilities()) + ",\"to\":"
-                        + scopeJson(capabilities) + "}",
+                "{\"name\":\"" + AuditSummaries.escapeJson(key.name()) + "\",\"from\":" + scopeJson(key.capabilities())
+                        + ",\"to\":" + scopeJson(capabilities) + "}",
                 null);
         return AdminApiKeyView.from(repository.findByIdAndTenantId(keyId, tenantId).orElseThrow());
     }
@@ -89,12 +89,8 @@ public class AdminApiKeyService {
         }
         repository.revoke(keyId, tenantId, Instant.now());
         auditService.record(tenantId, actorId, "ADMIN_API_KEY_REVOKE", "ADMIN_API_KEY", keyId,
-                "{\"name\":\"" + safeJson(key.name()) + "\"}", null);
+                "{\"name\":\"" + AuditSummaries.escapeJson(key.name()) + "\"}", null);
         return AdminApiKeyView.from(repository.findByIdAndTenantId(keyId, tenantId).orElseThrow());
-    }
-
-    private static String safeJson(String value) {
-        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     /** Compact JSON array for the audit summary (codes are fixed ASCII). */

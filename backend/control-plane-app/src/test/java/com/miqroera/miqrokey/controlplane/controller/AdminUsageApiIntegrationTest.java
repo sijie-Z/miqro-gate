@@ -207,6 +207,36 @@ class AdminUsageApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("#1234: subscriptionId narrows to one subscription through its keys' credentials — and the numbers differ per subscription")
+    void adminSummaryFiltersBySubscription() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertSecondSubscriptionWithKey();
+        fx.insertPrices();
+        // Two subscriptions, two keys, deliberately different figures: a filter that
+        // never narrows would return the same (summed) numbers for both calls.
+        fx.insertUsage(ownKey, "chatcmpl-sub-a", 1_000L, 500L);
+        fx.insertUsageForSecondSubscription("chatcmpl-sub-b", 9_000L, 9_000L);
+
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("subscriptionId", fx.subscriptionId.toString())
+                .cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.requests.upstream").value(1))
+                .andExpect(jsonPath("$.totals.tokens.input").value(1_000))
+                .andExpect(jsonPath("$.totals.tokens.output").value(500));
+        mockMvc.perform(get("/api/v1/admin/usage/summary").param("subscriptionId", fx.secondSubscriptionId.toString())
+                .cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.requests.upstream").value(1))
+                .andExpect(jsonPath("$.totals.tokens.input").value(9_000))
+                .andExpect(jsonPath("$.totals.tokens.output").value(9_000));
+        // The counter-check: without the filter the same events aggregate to their sum,
+        // so the two calls above are measuring the filter and not an empty window.
+        mockMvc.perform(get("/api/v1/admin/usage/summary").cookie(adminSession)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.requests.upstream").value(2))
+                .andExpect(jsonPath("$.totals.tokens.input").value(10_000))
+                .andExpect(jsonPath("$.totals.tokens.output").value(9_500));
+    }
+
+    @Test
     @DisplayName("admin records filter and paginate over the whole tenant")
     void adminRecordsFilterAndPaginate() throws Exception {
         fx.insertCatalogAndGrant();
@@ -433,6 +463,10 @@ class AdminUsageApiIntegrationTest {
         final UUID otherUserId = UUID.randomUUID();
         final UUID otherKeyId = UUID.randomUUID();
         final UUID secondProjectId = UUID.randomUUID();
+        final UUID secondSubscriptionId = UUID.randomUUID();
+        final UUID secondCredentialId = UUID.randomUUID();
+        final UUID secondGrantId = UUID.randomUUID();
+        final UUID secondKeyId = UUID.randomUUID();
 
         void reset() {
             for (String table : List.of("usage_event", "cache_hit_event", "cache_entry", "request_usage_records",
@@ -604,6 +638,69 @@ class AdminUsageApiIntegrationTest {
                             .addValue("cacheLevel", cacheLevel).addValue("occurredAt", Timestamp.from(occurredAt)));
         }
 
+        /**
+         * A second subscription on the same product, with its own credential, grant and
+         * a key bound to that credential — the #1234 shape: usage reaches a
+         * subscription through {@code virtual_keys.upstream_credential_id}, and the V1
+         * consistency trigger requires the key's grant to name the same credential.
+         */
+        void insertSecondSubscriptionWithKey() {
+            jdbc.update("""
+                    INSERT INTO upstream_subscriptions
+                        (id, tenant_id, provider_product_id, name, billing_mode, status, version)
+                    VALUES (:id, :tenantId, :productId, 'Sub B', 'PAYG', 'ACTIVE', 0)
+                    """, new MapSqlParameterSource("id", secondSubscriptionId).addValue("tenantId", tenantId)
+                    .addValue("productId", productId));
+            jdbc.update("""
+                    INSERT INTO upstream_credentials (id, tenant_id, subscription_id, credential_name, status, version)
+                    VALUES (:id, :tenantId, :subscriptionId, 'Cred B', 'ACTIVE', 0)
+                    """, new MapSqlParameterSource("id", secondCredentialId).addValue("tenantId", tenantId)
+                    .addValue("subscriptionId", secondSubscriptionId));
+            jdbc.update("""
+                    INSERT INTO project_provider_grants
+                        (id, tenant_id, project_id, provider_product_id, upstream_credential_id, status, created_by,
+                         version)
+                    VALUES (:grantId, :tenantId, :projectId, :productId, :credentialId, 'ACTIVE',
+                            '00000000-0000-0000-0000-000000000000', 0)
+                    """,
+                    new MapSqlParameterSource("grantId", secondGrantId).addValue("tenantId", tenantId)
+                            .addValue("projectId", projectId).addValue("productId", productId)
+                            .addValue("credentialId", secondCredentialId));
+            jdbc.update("""
+                    INSERT INTO project_provider_grant_models (tenant_id, grant_id, model_id)
+                    VALUES (:tenantId, :grantId, :model)
+                    """, new MapSqlParameterSource("tenantId", tenantId).addValue("grantId", secondGrantId)
+                    .addValue("model", MODEL));
+            jdbc.update("""
+                    INSERT INTO virtual_keys
+                        (id, tenant_id, public_key_id, secret_digest, display_prefix, last_four, user_id, project_id,
+                         grant_id, upstream_credential_id, purpose, name, cache_policy, status, version)
+                    VALUES (:keyId, :tenantId, 'pk-sub-b', decode('00', 'hex'), 'pre', '0002', :userId,
+                            :projectId, :grantId, :credentialId, 'CLAUDE_CODE', 'sub-b', 'DISABLED', 'ACTIVE', 0)
+                    """,
+                    new MapSqlParameterSource("keyId", secondKeyId).addValue("tenantId", tenantId)
+                            .addValue("userId", userId).addValue("projectId", projectId)
+                            .addValue("grantId", secondGrantId).addValue("credentialId", secondCredentialId));
+        }
+
+        /** A usage row from the second subscription's key — its key, its credential. */
+        void insertUsageForSecondSubscription(String providerRequestId, long input, long output) {
+            jdbc.update("""
+                    INSERT INTO usage_event
+                        (id, tenant_id, provider_request_id, virtual_key_id, project_id, provider_product_id,
+                         credential_id, model_id, cache_level, input_tokens, output_tokens, total_tokens, latency_ms,
+                         upstream_status_code, is_complete, usage_missing, gateway_request_id, occurred_at)
+                    VALUES (:id, :tenantId, :providerRequestId, :keyId, :projectId, :productId, :credentialId, :model,
+                            'UPSTREAM', :input, :output, :total, 42, 200, TRUE, FALSE, 'greq-sub-b', :occurredAt)
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("providerRequestId", providerRequestId).addValue("keyId", secondKeyId)
+                            .addValue("projectId", projectId).addValue("productId", productId)
+                            .addValue("credentialId", secondCredentialId).addValue("model", MODEL)
+                            .addValue("input", input).addValue("output", output).addValue("total", input + output)
+                            .addValue("occurredAt", Timestamp.from(Instant.now())));
+        }
+
         /** A second project so the hour x project grouping is observable (#634). */
         void insertSecondProject() {
             jdbc.update("""
@@ -766,6 +863,44 @@ class AdminUsageApiIntegrationTest {
                                 .addValue("productId", productId).addValue("level", level).addValue("offset", 2 + i)
                                 .addValue("greq", UUID.randomUUID().toString()));
             }
+        }
+
+        /**
+         * A cached response under a caller-chosen cache key (#1206). Unlike
+         * {@link #insertCacheHits}, the key is not random, so a later call can hang
+         * further hits off the same entry — which is what makes a key hit at both
+         * levels expressible. {@code meta_json} carries the token usage each hit is
+         * valued against; the level lives on the events, never on the entry.
+         */
+        void insertCacheEntry(UUID keyId, String keyHex, long inputTokens, long outputTokens) {
+            jdbc.update("""
+                    INSERT INTO cache_entry
+                        (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id, model_id,
+                         status_code, body, meta_json)
+                    VALUES (:id, :tenantId, decode(:keyHex, 'hex'), :keyId, :projectId, :productId, :model,
+                            200, decode('00', 'hex'), CAST(:meta AS jsonb))
+                    """, new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                    .addValue("keyHex", keyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                    .addValue("productId", productId).addValue("model", MODEL).addValue("meta",
+                            "{\"usage\":{\"inputTokens\":" + inputTokens + ",\"outputTokens\":" + outputTokens + "}}"));
+        }
+
+        /**
+         * One served-from-cache event at {@code level}, deduplicated per (key, level,
+         * second).
+         */
+        void insertCacheHit(UUID keyId, String keyHex, String level, Instant occurredAt, String greq) {
+            jdbc.update("""
+                    INSERT INTO cache_hit_event
+                        (id, tenant_id, cache_key, virtual_key_id, project_id, provider_product_id, level,
+                         occurred_at, gateway_request_id, created_at)
+                    VALUES (:id, :tenantId, decode(:keyHex, 'hex'), :keyId, :projectId, :productId, :level,
+                            :occurredAt, :greq, now())
+                    """,
+                    new MapSqlParameterSource("id", UUID.randomUUID()).addValue("tenantId", tenantId)
+                            .addValue("keyHex", keyHex).addValue("keyId", keyId).addValue("projectId", projectId)
+                            .addValue("productId", productId).addValue("level", level)
+                            .addValue("occurredAt", Timestamp.from(occurredAt)).addValue("greq", greq));
         }
     }
 
@@ -995,6 +1130,54 @@ class AdminUsageApiIntegrationTest {
                 .andExpect(jsonPath("$.groups[?(@.label=='UPSTREAM')].requests.upstream").value(contains(1)))
                 .andExpect(jsonPath("$.groups[?(@.label=='UPSTREAM')].tokens.input").value(contains(1_000)))
                 .andExpect(jsonPath("$.groups[?(@.label=='L1_HIT')].requests.l1Hit").value(contains(1)));
+    }
+
+    @Test
+    @DisplayName("#1206: one cache key hit at both levels is valued once, not once per level")
+    void cacheLevelGroupingDoesNotDoubleCountAKeyHitAtBothLevels() throws Exception {
+        fx.insertCatalogAndGrant();
+        UUID ownKey = fx.createOwnKey();
+        fx.insertPrices();
+        // A single cache key hit three times — twice from L1, once from L2 — which is
+        // the ordinary shape: an L2 hit re-fills L1 on the way out, and
+        // uq_cache_hit_event_dedup keys on (tenant, cache_key, level, occurred_at), so
+        // both levels coexisting under one key is normal traffic rather than a corner
+        // case. The #1200 fixture above cannot reach this: it mints a fresh cache key
+        // per call, so no key there is ever hit at both levels and l1+l2 collapses to
+        // whichever single level is present.
+        String keyHex = "0102030405060708";
+        Instant t = Instant.now().minusSeconds(60);
+        fx.insertCacheEntry(ownKey, keyHex, 1_000L, 500L);
+        fx.insertCacheHit(ownKey, keyHex, "L1_HIT", t, "greq-l1-1");
+        fx.insertCacheHit(ownKey, keyHex, "L1_HIT", t.plusSeconds(1), "greq-l1-2");
+        fx.insertCacheHit(ownKey, keyHex, "L2_HIT", t, "greq-l2-1");
+
+        JsonNode cacheLevel = objectMapper.readTree(summaryBody("cache_level")).path("totals");
+        JsonNode project = objectMapper.readTree(summaryBody("PROJECT")).path("totals");
+
+        // 3 hits x (1000 x 1.00 + 500 x 2.00) / 1e6 = 0.006. The two L1 rows are worth
+        // 0.004 and the single L2 row 0.002; before #1206 both rows replayed the whole
+        // key's three hits and the totals came to 0.012 — double the same three facts
+        // cut by PROJECT.
+        Assertions.assertThat(project.path("cost").path("savedByGatewayCache").decimalValue())
+                .as("the PROJECT cut is the reference reading of these three hits").isEqualByComparingTo("0.006");
+        Assertions.assertThat(cacheLevel.path("cost").path("savedByGatewayCache").decimalValue())
+                .as("CACHE_LEVEL totals disagree with PROJECT totals for the same hits")
+                .isEqualByComparingTo(project.path("cost").path("savedByGatewayCache").decimalValue());
+        // The per-level rows have to carry the level's own hit counts too, so the two
+        // rows sum to the same three hits the PROJECT cut reports.
+        JsonNode groups = objectMapper.readTree(summaryBody("cache_level")).path("groups");
+        Assertions.assertThat(savedByGatewayCache(groups, "L1_HIT")).isEqualByComparingTo("0.004");
+        Assertions.assertThat(savedByGatewayCache(groups, "L2_HIT")).isEqualByComparingTo("0.002");
+        Assertions
+                .assertThat(cacheLevel.path("requests").path("l1Hit").asLong()
+                        + cacheLevel.path("requests").path("l2Hit").asLong())
+                .as("the per-level rows must add up to the same hits").isEqualTo(3L);
+    }
+
+    private String summaryBody(String groupBy) throws Exception {
+        return mockMvc.perform(get("/api/v1/admin/usage/summary").param("groupBy", groupBy).cookie(adminSession))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
     }
 
     /**

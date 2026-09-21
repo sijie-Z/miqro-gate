@@ -1,5 +1,6 @@
 package com.miqroera.miqrokey.controlplane.controller;
 
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import com.miqroera.miqrokey.controlplane.AbstractControlPlaneIntegrationTest;
 import com.miqroera.miqrokey.controlplane.dto.BootstrapRequest;
@@ -199,6 +200,90 @@ class AdminProviderApiIntegrationTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("Team Plan v2"))
                 .andExpect(jsonPath("$.subscriptionPrice").value(299.50)).andExpect(jsonPath("$.currency").value("CNY"))
                 .andExpect(jsonPath("$.quotaTotal").value(12345)).andExpect(jsonPath("$.quotaUnit").value("tokens"));
+    }
+
+    // ------------------------------------------------------------------
+    // audit summary escaping (#1230, rc.20 prepatch)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("#1230: a quoted subscription name is accepted and round-trips through the audit summary")
+    void subscriptionNameWithQuoteIsAcceptedAndAudited() throws Exception {
+        fx.insertProviderAndProduct();
+        String name = "VIP \"Gold\"";
+
+        // The name lands verbatim in the change_summary jsonb cast; a raw quote used
+        // to make PostgreSQL reject it (22P02, surfaced as 409 RESOURCE_CONFLICT),
+        // failing the request.
+        mockMvc.perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("providerProductId", fx.productId.toString(), "name",
+                        name, "billingMode", "FIXED_SUBSCRIPTION", "planScope", "TEAM", "subscriptionPrice", 199,
+                        "currency", "USD"))))
+                .andExpect(status().isOk());
+
+        JsonNode summary = objectMapper.readTree(latestSummary("SUBSCRIPTION_CREATE"));
+        assertThat(summary.get("name").asText()).isEqualTo(name);
+        assertThat(summary.size()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("#1230: a crafted subscription name cannot forge audit summary members")
+    void craftedSubscriptionNameCannotForgeMembers() throws Exception {
+        fx.insertProviderAndProduct();
+        String crafted = "x\",\"forged\":\"y";
+
+        mockMvc.perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("providerProductId", fx.productId.toString(), "name",
+                        crafted, "billingMode", "FIXED_SUBSCRIPTION", "planScope", "TEAM", "subscriptionPrice", 199,
+                        "currency", "USD"))))
+                .andExpect(status().isOk());
+
+        JsonNode summary = objectMapper.readTree(latestSummary("SUBSCRIPTION_CREATE"));
+        assertThat(summary.get("forged")).isNull();
+        assertThat(summary.get("name").asText()).isEqualTo(crafted);
+    }
+
+    @Test
+    @DisplayName("#1230: a quoted seat displayName is accepted and round-trips through the audit summary")
+    void seatDisplayNameWithQuoteIsAcceptedAndAudited() throws Exception {
+        fx.insertProviderAndProduct();
+        MvcResult created = mockMvc.perform(post("/api/v1/admin/subscriptions").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("providerProductId", fx.productId.toString(), "name",
+                        "Seat Plan", "billingMode", "FIXED_SUBSCRIPTION", "planScope", "TEAM", "subscriptionPrice", 199,
+                        "currency", "USD"))))
+                .andExpect(status().isOk()).andReturn();
+        String subscriptionId = objectMapper.readValue(created.getResponse().getContentAsString(), Map.class).get("id")
+                .toString();
+        MvcResult user = mockMvc
+                .perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper.writeValueAsString(Map.of("username", "seat-user"))))
+                .andExpect(status().isOk()).andReturn();
+        String userId = ((Map<?, ?>) objectMapper.readValue(user.getResponse().getContentAsString(), Map.class)
+                .get("user")).get("id").toString();
+
+        String displayName = "Alice \"Ace\"";
+        // The SEAT_CREATE summary carries the display name; the raw quote used to
+        // make the jsonb cast fail (22P02, surfaced as 409 RESOURCE_CONFLICT).
+        mockMvc.perform(
+                post("/api/v1/admin/subscriptions/" + subscriptionId + "/seats").contentType(MediaType.APPLICATION_JSON)
+                        .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                        .content(objectMapper
+                                .writeValueAsString(Map.of("assignedUserId", userId, "displayName", displayName))))
+                .andExpect(status().isOk());
+
+        assertThat(objectMapper.readTree(latestSummary("SEAT_CREATE")).get("displayName").asText())
+                .isEqualTo(displayName);
+    }
+
+    private String latestSummary(String action) {
+        return jdbc.queryForObject(
+                "SELECT change_summary::text FROM admin_audit_events WHERE action = :action "
+                        + "ORDER BY chain_position DESC LIMIT 1",
+                new MapSqlParameterSource("action", action), String.class);
     }
 
     // ------------------------------------------------------------------

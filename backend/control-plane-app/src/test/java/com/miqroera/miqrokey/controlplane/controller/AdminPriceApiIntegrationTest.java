@@ -21,12 +21,14 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -151,6 +153,49 @@ class AdminPriceApiIntegrationTest {
                 .content(objectMapper.writeValueAsString(Map.of("providerProductId", fx.productId.toString(), "modelId",
                         "m", "tokenType", "REASONING", "currency", "CNY", "unitPrice", "1", "source", "MANUAL"))))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("PARAM_INVALID"));
+    }
+
+    @Test
+    @DisplayName("#1230: a quoted modelId is accepted and round-trips through the audit summary")
+    void quotedModelIdIsAcceptedAndAudited() throws Exception {
+        fx.insertProviderAndProduct();
+        String modelId = "weird \"model\"";
+
+        // The model id lands verbatim in the change_summary jsonb cast; a raw quote
+        // used to make PostgreSQL reject it (22P02, surfaced as 409 RESOURCE_CONFLICT),
+        // failing the request.
+        mockMvc.perform(post("/api/v1/admin/prices").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("providerProductId", fx.productId.toString(), "modelId",
+                        modelId, "tokenType", "INPUT", "currency", "CNY", "unitPrice", "2.0000", "source", "MANUAL"))))
+                .andExpect(status().isCreated());
+
+        assertThat(objectMapper.readTree(latestSummary("PRICE_CREATE")).get("model").asText()).isEqualTo(modelId);
+    }
+
+    @Test
+    @DisplayName("#1230: a crafted modelId cannot forge audit summary members")
+    void craftedModelIdCannotForgeMembers() throws Exception {
+        fx.insertProviderAndProduct();
+        String modelId = "m\",\"forged\":\"z";
+
+        mockMvc.perform(post("/api/v1/admin/prices").contentType(MediaType.APPLICATION_JSON)
+                .cookie(sessionCookie, csrfCookie).header("X-CSRF-Token", csrfToken)
+                .content(objectMapper.writeValueAsString(Map.of("providerProductId", fx.productId.toString(), "modelId",
+                        modelId, "tokenType", "INPUT", "currency", "CNY", "unitPrice", "2.0000", "source", "MANUAL"))))
+                .andExpect(status().isCreated());
+
+        JsonNode summary = objectMapper.readTree(latestSummary("PRICE_CREATE"));
+        assertThat(summary.get("forged")).isNull();
+        assertThat(summary.get("model").asText()).isEqualTo(modelId);
+        assertThat(summary.size()).isEqualTo(3);
+    }
+
+    private String latestSummary(String action) {
+        return jdbc.queryForObject(
+                "SELECT change_summary::text FROM admin_audit_events WHERE action = :action "
+                        + "ORDER BY chain_position DESC LIMIT 1",
+                new MapSqlParameterSource("action", action), String.class);
     }
 
     private static Cookie cookie(MvcResult result, String name) {

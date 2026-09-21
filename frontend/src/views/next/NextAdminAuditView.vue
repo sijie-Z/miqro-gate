@@ -113,27 +113,38 @@ function validActor(): boolean {
   return true;
 }
 
+// #1231: request-sequence guard — rapid 近 7 天/近 30 天 clicks must not let a
+// slower older window land after a newer one (rows must match the inputs).
+let loadRequestSeq = 0;
+
 async function load() {
   if (!validActor()) {
     return;
   }
+  const seq = ++loadRequestSeq;
   loading.value = true;
   loadError.value = '';
   try {
-    events.value = await api.auditEvents({
+    const list = await api.auditEvents({
       action: actionFilter.value.trim() || undefined,
       targetType: targetTypeFilter.value.trim() || undefined,
       actorId: actorFilter.value.trim() || undefined,
       from: toIso(fromFilter.value),
       to: toIso(toFilter.value),
     });
+    if (seq !== loadRequestSeq) {
+      return; // a newer window won — this response is stale
+    }
+    events.value = list;
   } catch (error) {
-    if (error instanceof ApiError) {
+    if (seq === loadRequestSeq && error instanceof ApiError) {
       loadError.value = error.message;
       loadRequestId.value = error.requestId ?? '';
     }
   } finally {
-    loading.value = false;
+    if (seq === loadRequestSeq) {
+      loading.value = false;
+    }
   }
 }
 
