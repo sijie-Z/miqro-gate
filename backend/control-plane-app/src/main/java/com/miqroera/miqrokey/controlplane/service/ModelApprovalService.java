@@ -158,12 +158,14 @@ public class ModelApprovalService {
     }
 
     /**
-     * Admin queue page. {@code status} null returns every status; ordering is
-     * newest-first with a keyset cursor handled by the controller.
+     * Admin queue page: the tenant's own requests only. {@code status} null returns
+     * every status; ordering is newest-first with a keyset cursor handled by the
+     * controller.
      */
     public List<ModelApprovalView> listQueue(User admin, ModelApprovalStatus status, int limit, Instant beforeCreatedAt,
             UUID beforeId) {
-        return views(approvalRepository.findPage(status, limit, beforeCreatedAt, beforeId), admin.tenantId());
+        return views(approvalRepository.findPage(admin.tenantId(), status, limit, beforeCreatedAt, beforeId),
+                admin.tenantId());
     }
 
     /**

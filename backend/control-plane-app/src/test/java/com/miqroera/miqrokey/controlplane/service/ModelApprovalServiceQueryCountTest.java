@@ -170,10 +170,11 @@ class ModelApprovalServiceQueryCountTest {
         when(userRepository.findAllByIds(any())).thenReturn(List.of(USER));
         if (rows == 1) {
             when(approvalRepository.findAllByRequestedBy(CALLER)).thenReturn(List.of(approvals.get(0)));
-            when(approvalRepository.findPage(any(), anyInt(), any(), any())).thenReturn(List.of(approvals.get(0)));
+            when(approvalRepository.findPage(any(), any(), anyInt(), any(), any()))
+                    .thenReturn(List.of(approvals.get(0)));
         } else {
             when(approvalRepository.findAllByRequestedBy(CALLER)).thenReturn(approvals);
-            when(approvalRepository.findPage(any(), anyInt(), any(), any())).thenReturn(approvals);
+            when(approvalRepository.findPage(any(), any(), anyInt(), any(), any())).thenReturn(approvals);
         }
 
         ModelApprovalService service = new ModelApprovalService(approvalRepository, keyRepository,

@@ -56,6 +56,8 @@ class ModelApprovalApiIntegrationTest {
     static final String MODEL_B = "model-beta";
     static final String MODEL_NEW = "model-gamma";
     static final String MODEL_AUTO = "model-auto";
+    /** Marker model id: unique to the foreign-tenant fixture, never catalogued. */
+    static final String FOREIGN_MODEL = "foreign-model-ph62";
 
     static {
         AbstractControlPlaneIntegrationTest.POSTGRES.getJdbcUrl();
@@ -456,6 +458,41 @@ class ModelApprovalApiIntegrationTest {
     }
 
     // ------------------------------------------------------------------
+    // tenant isolation
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("admin queue shows only its own tenant's requests (#1250)")
+    void queueIsTenantScoped() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(MODEL_A);
+
+        // Tenant A's own pending request — the row that must be the only page item.
+        MvcResult submit = postJson("/api/v1/me/model-approvals",
+                Map.of("virtualKeyId", keyId.toString(), "modelId", MODEL_NEW)).andExpect(status().isCreated())
+                .andReturn();
+        UUID ownId = UUID.fromString(
+                (String) objectMapper.readValue(submit.getResponse().getContentAsString(), Map.class).get("id"));
+
+        // A PENDING request owned by a foreign tenant. It is written straight to
+        // the table because no principal can authenticate outside the seed tenant
+        // (AuthenticationService pins it), and the composite (tenant_id, id)
+        // foreign keys force the whole parent chain to carry that tenant too.
+        UUID foreignId = insertForeignPendingApproval();
+
+        Map<?, ?> page = page("/api/v1/admin/model-approvals?status=PENDING");
+        List<?> items = (List<?>) page.get("items");
+        assertThat(items).hasSize(1);
+        assertThat(((Map<?, ?>) items.get(0)).get("id")).isEqualTo(ownId.toString());
+        assertThat(page.toString()).doesNotContain(foreignId.toString()).doesNotContain(FOREIGN_MODEL);
+
+        // Both rows are really in the table — the page is short because the query
+        // filters, not because there was nothing to leak.
+        assertThat(approvalCount()).isEqualTo(2);
+    }
+
+    // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
 
@@ -481,6 +518,67 @@ class ModelApprovalApiIntegrationTest {
 
     private Long approvalCount() {
         return jdbc.queryForObject("SELECT count(*) FROM model_approval", new MapSqlParameterSource(), Long.class);
+    }
+
+    /**
+     * A PENDING approval belonging to a brand-new tenant, inserted row by row
+     * because the {@code (tenant_id, id)} foreign keys require a same-tenant parent
+     * chain. Returns the approval id.
+     */
+    private UUID insertForeignPendingApproval() {
+        UUID tenant = UUID.randomUUID();
+        UUID user = UUID.randomUUID();
+        UUID project = UUID.randomUUID();
+        UUID subscription = UUID.randomUUID();
+        UUID credential = UUID.randomUUID();
+        UUID grant = UUID.randomUUID();
+        UUID key = UUID.randomUUID();
+        UUID approval = UUID.randomUUID();
+        MapSqlParameterSource p = new MapSqlParameterSource("tenant", tenant).addValue("user", user)
+                .addValue("project", project).addValue("subscription", subscription).addValue("credential", credential)
+                .addValue("grant", grant).addValue("key", key).addValue("approval", approval)
+                .addValue("product", fx.productId).addValue("hash", passwordHasher.hash("NotARealPassword1!"))
+                .addValue("publicKeyId", "pk_" + key.toString().replace("-", ""));
+        jdbc.update("""
+                INSERT INTO tenants (id, code, name, status, version, created_at, updated_at)
+                VALUES (:tenant, :code, 'Foreign Tenant', 'ACTIVE', 0, now(), now())
+                """, p.addValue("code", "foreign-" + tenant.toString().substring(0, 8)));
+        jdbc.update("""
+                INSERT INTO users (id, tenant_id, username, display_name, password_hash, role, status,
+                                   must_change_password, version)
+                VALUES (:user, :tenant, 'foreign_user', 'Foreign', :hash, 'USER', 'ACTIVE', FALSE, 0)
+                """, p);
+        jdbc.update("""
+                INSERT INTO projects (id, tenant_id, code, name, status, project_tag, version)
+                VALUES (:project, :tenant, 'FOREIGN', 'Foreign Project', 'ACTIVE', 'foreign-tag', 0)
+                """, p);
+        jdbc.update("""
+                INSERT INTO upstream_subscriptions
+                    (id, tenant_id, provider_product_id, name, billing_mode, status, version)
+                VALUES (:subscription, :tenant, :product, 'Foreign Sub', 'PAYG', 'ACTIVE', 0)
+                """, p);
+        jdbc.update("""
+                INSERT INTO upstream_credentials (id, tenant_id, subscription_id, credential_name, status, version)
+                VALUES (:credential, :tenant, :subscription, 'Foreign Cred', 'ACTIVE', 0)
+                """, p);
+        jdbc.update("""
+                INSERT INTO project_provider_grants
+                    (id, tenant_id, project_id, provider_product_id, upstream_credential_id, status, created_by,
+                     version)
+                VALUES (:grant, :tenant, :project, :product, :credential, 'ACTIVE', :user, 0)
+                """, p);
+        jdbc.update("""
+                INSERT INTO virtual_keys (id, tenant_id, public_key_id, secret_digest, display_prefix, last_four,
+                                          user_id, project_id, grant_id, upstream_credential_id, purpose, name,
+                                          status, version)
+                VALUES (:key, :tenant, :publicKeyId, :hash, 'fk_foreig', 'e1gn', :user, :project, :grant, :credential,
+                        'CUSTOM', 'Foreign Key', 'ACTIVE', 0)
+                """, p);
+        jdbc.update("""
+                INSERT INTO model_approval (id, tenant_id, virtual_key_id, model_id, requested_by, status, version)
+                VALUES (:approval, :tenant, :key, :model, :user, 'PENDING', 0)
+                """, p.addValue("model", FOREIGN_MODEL));
+        return approval;
     }
 
     private List<String> keyModelIds(UUID keyId) {
