@@ -5948,3 +5948,37 @@ booking 一笔 `outputTokensDelta=-300`：观测 1000 tokens（600 in / 400 out�
   **15/15 绿**（新增 `concurrentDuplicateSubmitsCollapse`：8 线程 barrier 同步同一请求，断言恰好一个 201、
   其余 409，且库内 PENDING 行 = 1、审计 = 1）；同一条测试在 `origin/develop` 上必红（见上）。
 - spotless 已过（`spotless:apply` 后无残留 diff）。
+
+### 追加缺陷 #1333：白名单直批分支绕开同一个索引（V73 之后的第二个红证据）
+
+V73 的索引用 `WHERE status = 'PENDING'` 作部分谓词，而白名单分支在**同一个事务内**把刚落库的行翻成
+`APPROVED`——行随即离开谓词、**索引槽位被释放**。并发输家在等赢家 xid 之后重新求值，看到的是已提交的
+`APPROVED` 行，于是照插不误。换言之 V73 只对「留在 PENDING」的路径有效，对直批路径是结构性盲区。
+
+该缺口最早由本线自己的对抗评审以「非阻塞观察」提出（报告 `_orchestrate/reports/ph65_review.md` 观察 1，
+原文未改动），随后用真实 API + 真库 A/B 对照坐实并转正为独立 issue #1333。
+
+- **红证据（真实 API + 真 PG，A/B 只差「模型是否在白名单」）**：白名单模型并发 6 发 → `{"201": 6}`、
+  `APPROVED=6`、`MODEL_APPROVAL_APPROVED=6` + `MODEL_APPROVAL_SUBMITTED=6`、6 条告警事件；非白名单对照模型
+  同参数并发 6 发 → `{"201": 1, "409": 5}`、`PENDING=1`。窗口只在并发内：已存在 6 条 APPROVED 后串行再发
+  两次，两次都是 `400 MODEL_ALREADY_AVAILABLE`，`APPROVED` 不增。
+- **影响如实收窄**：**不产生重复授权**——`project_provider_grant_models` 实测仍只有 1 行（写授权走
+  `ON CONFLICT (grant_id, model_id) DO NOTHING`）。重复的是记录 / 审计 / 告警投递，不是越权或重复计费。
+- **改动**：`ModelApprovalService.java:139` 在 check-then-act 的第一处读**之前**取事务级
+  `pg_advisory_xact_lock(SHA-256(virtualKeyId + "|" + modelId) 前 8 字节)`（`#lockSubmit` `:511-514`、
+  `#submitLockKey` `:521-531`）。`submit` 本身 `@Transactional`，锁随事务提交/回滚自动释放。输家等赢家提交后
+  重新过预检，经 `DUPLICATE_PENDING`(409) / `MODEL_ALREADY_AVAILABLE`(400) 离场，对外与顺序重试不可区分。
+  同款写法仓库内已有先例（`ReconciliationService#findOrCreateReport`、审计链）。V73 索引**保留**作纵深防御。
+  **不需要新 migration**（纯服务层串行化，不动表结构）。
+- **验证**：新增 `concurrentWhitelistSubmitsAutoApproveOnce`（8 线程 barrier；断言状态只能是 `201`/`400`、
+  `201` 恰好一次、`APPROVED` 行数 1、`MODEL_APPROVAL_SUBMITTED` 1、`MODEL_APPROVAL_APPROVED` 1）。
+  未修复的树上该用例必红：`Expecting actual: [400, 400, 400, 201, 201, 400, 201, 400] to contain only once:
+  [201]`（`ModelApprovalApiIntegrationTest.java:405`）；修复后
+  `Tests run: 16, Failures: 0, Errors: 0, Skipped: 0` + `BUILD SUCCESS`。原始日志
+  `_orchestrate/_logs/ph65_probe/redcheck/{red_no_fix.log,green_with_fix.log}`。
+- 提交：`6605ad64`（修复）、`3c019c64`（V73 注释更正，见下）。issue #1333，PR #1314。
+- **V73 注释更正（`3c019c64`）**：原注释称「同 (Key, 模型) 的 PENDING 不可能来自不同的人」，被 `ownedKey`
+  的角色分支证伪（`SYSTEM_ADMIN` 可对他人名下的密钥提交，`ModelApprovalService#ownedKey`）。只改注释、
+  **不动一行 SQL**：删除仍安全（同一诉求的重复提交、两份审计都独立留在 append-only 的 `admin_audit_events`），
+  但结论收窄为「不要用本表行数或行内容反推谁申请过」。该迁移从未进入共享环境（`git branch -a --contains
+  acecdda0` 只有本分支；`origin/develop` 最新为 V72），故不属于「禁止修改已进入共享环境的迁移」。
