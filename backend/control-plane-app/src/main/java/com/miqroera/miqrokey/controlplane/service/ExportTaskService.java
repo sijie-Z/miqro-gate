@@ -250,7 +250,7 @@ public class ExportTaskService {
                 ORDER BY ue.occurred_at
                 """.formatted(UsageAdjustmentSql.netInput(), UsageAdjustmentSql.netOutput(),
                 UsageAdjustmentSql.netCacheRead(), UsageAdjustmentSql.netCacheCreation(),
-                UsageAdjustmentSql.ADJUSTED_FLAG, UsageAdjustmentSql.ADJUSTMENT_LATERAL),
+                UsageAdjustmentSql.ADJUSTED_FLAG, UsageAdjustmentSql.ADJUSTMENT_TOTALS),
                 new MapSqlParameterSource("tenantId", task.tenantId())
                         .addValue("from", java.sql.Timestamp.from(task.periodFrom()))
                         .addValue("to", java.sql.Timestamp.from(task.periodTo())),

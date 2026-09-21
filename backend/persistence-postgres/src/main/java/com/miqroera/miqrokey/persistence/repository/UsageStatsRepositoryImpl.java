@@ -458,7 +458,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 PriceTokenType.CACHE_CREATION, "ue.provider_product_id", "ue.model_id", "ue.occurred_at");
         // Only the adjusted reading needs the ledger; the observed one must not read
         // usage_adjustments at all (#1002).
-        String adjustmentJoin = basis == TokenBasis.ADJUSTED ? UsageAdjustmentSql.ADJUSTMENT_LATERAL : "";
+        String adjustmentJoin = basis == TokenBasis.ADJUSTED ? UsageAdjustmentSql.ADJUSTMENT_TOTALS : "";
         String sql = """
                 SELECT %s, ue.provider_product_id AS product_id, ue.model_id, ue.cache_level AS cache_level,
                        -- requests counts observed calls; an adjustment corrects a call's usage, it
@@ -810,7 +810,7 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                         LIMIT :limit OFFSET :offset
                         """.formatted(netInput, netOutput, netCacheRead, netCacheCreation,
                         UsageAdjustmentSql.ADJUSTED_FLAG, basisInput, basisOutput, basisCacheRead, basisCacheCreation,
-                        wb.joins(), UsageAdjustmentSql.ADJUSTMENT_LATERAL, LIFECYCLE_JOIN, wb.where()),
+                        wb.joins(), UsageAdjustmentSql.ADJUSTMENT_TOTALS, LIFECYCLE_JOIN, wb.where()),
                 params, ADJUSTED_ROW_MAPPER);
     }
 
