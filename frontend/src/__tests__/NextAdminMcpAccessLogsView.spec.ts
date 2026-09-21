@@ -164,6 +164,46 @@ describe('NextAdminMcpAccessLogsView', () => {
     expect(from.value).toBe('');
   });
 
+  it('keeps the newer quick window when a slower older one answers last (#1231)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Second phase: two quick ranges in flight at once — 近 30 天 is issued
+    // first, 近 7 天 (the user's final pick) answers first.
+    const pending: Array<{ resolve: (v: McpAccessLogEntry[]) => void }> = [];
+    mockApi.listMcpAccessLogs.mockImplementation(
+      () =>
+        new Promise<McpAccessLogEntry[]>((resolve) => {
+          pending.push({ resolve });
+        }),
+    );
+
+    await wrapper.find('[data-testid="mcp-logs-range-30"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="mcp-logs-range-7"]').trigger('click');
+    await flushPromises();
+    expect(pending).toHaveLength(2);
+
+    const row = (marker: string): McpAccessLogEntry => ({
+      ...rows[0]!,
+      consumerName: marker,
+      gatewayRequestId: `req-${marker}`,
+    });
+
+    // The 近7天 answer lands first — it is the window the user selected last.
+    pending[1]!.resolve([row('SEVEN-DAY-MARKER')]);
+    await flushPromises();
+    expect(wrapper.text()).toContain('SEVEN-DAY-MARKER');
+
+    // The stale 近30天 answer lands second and must NOT overwrite the table.
+    pending[0]!.resolve([row('THIRTY-DAY-MARKER')]);
+    await flushPromises();
+    expect(wrapper.text(), 'stale 30-day rows overwrote the newer 7-day window').toContain(
+      'SEVEN-DAY-MARKER',
+    );
+    expect(wrapper.text()).not.toContain('THIRTY-DAY-MARKER');
+  });
+
   it('aggregates the window into the KPI band (#554)', async () => {
     mockApi.listMcpAccessLogs.mockResolvedValue(rows);
     const wrapper = mount(NextAdminMcpAccessLogsView, {

@@ -200,4 +200,29 @@ describe('NextPlaygroundView', () => {
 
     vi.unstubAllGlobals();
   });
+
+  it('gives the prompt textarea the accessible name 内容 (#1231)', async () => {
+    const wrapper = await mountView();
+    const textarea = wrapper.get('[data-testid="playground-prompt"]')
+      .element as HTMLTextAreaElement;
+
+    // Accessible name, in the order assistive tech computes it:
+    // aria-labelledby → aria-label → the control's <label>(s).
+    const labelledby = textarea.getAttribute('aria-labelledby');
+    const referenced = labelledby
+      ? labelledby
+          .split(/\s+/)
+          .map((id) => document.getElementById(id)?.textContent?.trim() ?? '')
+          .join(' ')
+      : '';
+    const name =
+      referenced ||
+      textarea.getAttribute('aria-label')?.trim() ||
+      [...(textarea.labels ?? [])].map((label) => label.textContent?.trim() ?? '').join(' ') ||
+      '';
+    expect(name).toBe('内容');
+    // The placeholder is a hint, not a name — a placeholder must not be what
+    // supplies it (HTML-AAM does not use it as the accessible name).
+    expect(textarea.getAttribute('placeholder')).not.toBe('内容');
+  });
 });
