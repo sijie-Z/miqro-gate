@@ -236,10 +236,17 @@ public class PlatformOidcAuthService {
      * peer: {@code cancel(true)} on the future from {@code sendAsync} closes the
      * connection about a second after the budget expires (1.05 s), while the
      * previous shape (a virtual thread parked on a blocking read, interrupted) left
-     * it open ≈45.5 s past the budget, until the JVM exited. Only the socket is
-     * measured — the peer cannot see threads; that the interrupted reader outlives
-     * the budget along with it follows from the same mechanism, it was not
-     * observed.
+     * it open ≈45.5 s past the budget, until the JVM exited.
+     *
+     * <p>
+     * The socket is the whole of the leak, measured rather than inferred: a
+     * {@code jcmd Thread.dump_to_file} dump (which lists virtual threads) taken
+     * after eight abandoned calls in the previous shape shows eight connections
+     * still open on the peer and <em>no</em> {@code oidc-outbound-*} reader thread
+     * left — {@code cancel(true)} had interrupted every reader. What accumulates
+     * is the connection, and one peer-side handler thread pinned per leaked
+     * connection. With this transport the same eight abandons leave none open; see
+     * {@code PlatformOidcAbandonedConnectionAccumulationTest}.
      *
      * <p>
      * An overrunning call is reported as {@code failureCode} — the same ASCII code
