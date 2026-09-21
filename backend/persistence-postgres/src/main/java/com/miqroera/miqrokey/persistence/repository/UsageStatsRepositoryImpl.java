@@ -187,8 +187,10 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
 
     /**
      * Group spec over {@code cache_hit_event h} joined to {@code cache_entry e}.
-     * The CACHE_LEVEL split (L1_HIT / L2_HIT) is done in Java, so the SQL groups
-     * everything under a constant key.
+     * The CACHE_LEVEL split (L1_HIT / L2_HIT) is done in Java, so the SQL needs no
+     * fragment there at all — its group-by is empty (#1200). It used to carry a
+     * constant {@code 'HIT'} key, which PostgreSQL rejects as a bare literal in
+     * GROUP BY.
      */
     private GroupSpec hitsSpec(GroupBy groupBy, int tzOffsetMinutes) {
         return switch (groupBy) {
@@ -197,7 +199,17 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
             case VIRTUAL_KEY -> new GroupSpec("h.virtual_key_id AS group_key, COALESCE(vk.name, vk.last_four) AS label",
                     "JOIN virtual_keys vk ON vk.id = h.virtual_key_id AND vk.tenant_id = h.tenant_id",
                     "h.virtual_key_id, COALESCE(vk.name, vk.last_four)");
-            case CACHE_LEVEL -> new GroupSpec("'HIT' AS group_key, 'HIT' AS label", "", "'HIT'");
+            // #1200: this fragment used to be "'HIT'", spliced straight into the
+            // hits template's "GROUP BY %s, ..." — i.e. GROUP BY 'HIT', ...
+            // PostgreSQL reads a bare literal in GROUP BY as a positional
+            // reference and rejects it (non-integer constant in GROUP BY), so
+            // every groupBy=cache_level request was a 500. Emptying the fragment
+            // loses nothing: the Java fold below keys the accumulation on the
+            // hard-coded "L1_HIT"/"L2_HIT" and never reads the SELECT's 'HIT'
+            // literal, so the constant contributed no grouping semantics —
+            // grouping by (const, a, b, c) partitions rows exactly like
+            // (a, b, c).
+            case CACHE_LEVEL -> new GroupSpec("'HIT' AS group_key, 'HIT' AS label", "", "");
             case DAY -> daySpec("h.occurred_at", tzOffsetMinutes);
             case USER -> new GroupSpec("vk.user_id AS group_key, u.username AS label",
                     "JOIN virtual_keys vk ON vk.id = h.virtual_key_id AND vk.tenant_id = h.tenant_id"
@@ -545,6 +557,12 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                 "x.price_at");
         String priceCacheCreation = PriceSnapshotSql.asOfUnitPrice(PriceTokenType.CACHE_CREATION, "x.product_id",
                 "x.model_id", "x.price_at");
+        // #1200: the group-by fragment may be empty (CACHE_LEVEL — see hitsSpec).
+        // It carries its own ", " separator (the template leaves no space around
+        // the placeholder), so an empty fragment cannot splice a stray one in
+        // front of the key columns; a non-empty fragment produces the same text as
+        // before, byte for byte.
+        String groupByPrefix = spec.groupBy().isEmpty() ? "" : spec.groupBy() + ", ";
         String sql = """
                 SELECT x.*,
                        %s AS price_input,
@@ -560,10 +578,10 @@ public class UsageStatsRepositoryImpl implements UsageStatsRepository {
                     JOIN cache_entry e ON e.tenant_id = h.tenant_id AND e.cache_key = h.cache_key
                     %s%s
                     %s
-                    GROUP BY %s, e.provider_product_id, e.model_id, e.cache_key, e.meta_json
+                    GROUP BY %se.provider_product_id, e.model_id, e.cache_key, e.meta_json
                   ) x
                 """.formatted(priceInput, priceOutput, priceCacheRead, priceCacheCreation, spec.select(), spec.join(),
-                wb.joins(), wb.where(), spec.groupBy());
+                wb.joins(), wb.where(), groupByPrefix);
         MapSqlParameterSource params = wb.params();
 
         // Fold per-cache-key rows into per (group, product, model) rows.
