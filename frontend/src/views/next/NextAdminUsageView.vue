@@ -642,6 +642,15 @@ function statusHintOf(row: UsageRecord): string {
 // let an older summary+records pair land after a newer one.
 let loadRequestSeq = 0;
 
+// #PH55: the trend chart has two writers — load() fetches it alongside the
+// summary and records, loadSeries() re-fetches it alone when the bucket
+// dimension changes — so it carries a sequence of its own. Guarding it with
+// loadRequestSeq instead is not equivalent: a 按日/按月 click would then
+// abandon an in-flight 查询 or page turn (summary, records and all, since
+// load() returns early on a stale seq) and leave summaryLoading/recordsLoading
+// stuck true, because load()'s finally clears them under the same condition.
+let seriesRequestSeq = 0;
+
 function summaryFilters() {
   return {
     userId: userId.value || undefined,
@@ -653,6 +662,7 @@ function summaryFilters() {
 
 async function load() {
   const seq = ++loadRequestSeq;
+  const seriesSeq = ++seriesRequestSeq;
   summaryLoading.value = true;
   recordsLoading.value = true;
   summaryError.value = '';
@@ -679,8 +689,12 @@ async function load() {
       return; // a newer request won — this response is stale
     }
     summary.value = summaryResult;
-    series.value = seriesResult;
     records.value = recordsResult;
+    // The series is dropped on its own if a 按日/按月 click overtook this load;
+    // summary and records still belong to the user's own request.
+    if (seriesSeq === seriesRequestSeq) {
+      series.value = seriesResult;
+    }
   } catch (error) {
     if (seq === loadRequestSeq && error instanceof ApiError) {
       summaryError.value = error.message;
@@ -695,7 +709,7 @@ async function load() {
 }
 
 async function loadSeries() {
-  const seq = loadRequestSeq;
+  const seq = ++seriesRequestSeq;
   try {
     const result = await api.adminUsageSummary({
       groupBy: seriesDim.value,
@@ -703,7 +717,7 @@ async function loadSeries() {
       ...rangeParams(),
       tzOffsetMinutes: localTzOffsetMinutes(),
     });
-    if (seq === loadRequestSeq) {
+    if (seq === seriesRequestSeq) {
       series.value = result;
     }
   } catch {

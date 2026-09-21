@@ -561,6 +561,99 @@ describe('NextAdminUsageView', () => {
     expect(summaryCalls()).toContainEqual(expect.objectContaining({ groupBy: 'month' }));
   });
 
+  it('trend labels follow the bucket the user picked last when two loadSeries calls overlap', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Second phase: capture the trend requests so their resolution order can be
+    // inverted — the 按月 request is issued first but answers last.
+    const pending: { groupBy: string; resolve: (v: UsageSummary) => void }[] = [];
+    mockApi.adminUsageSummary.mockImplementation(
+      (query) =>
+        new Promise<UsageSummary>((resolve) => {
+          pending.push({ groupBy: String(query?.groupBy ?? ''), resolve });
+        }),
+    );
+
+    await wrapper.find('[data-testid="trend-dim-month"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-testid="trend-dim-day"]').trigger('click');
+    await flushPromises();
+
+    // Both requests are in flight: the guard in loadSeries() is meant to drop
+    // whichever one is no longer the current dimension.
+    expect(pending.map((p) => p.groupBy)).toEqual(['month', 'day']);
+
+    const monthBucket = (key: string, label: string) => ({
+      ...group(key, label, 4, 5_000, 1_000, 0.01),
+    });
+    // The 按日 answer lands first — it is the dimension the user selected last.
+    pending[1]!.resolve({
+      groupBy: 'day',
+      groups: [group('2026-09-15', '2026-09-15', 9, 12_000, 3_000, 0.02)],
+      totals: group('__totals__', '合计', 9, 12_000, 3_000, 0.02),
+    });
+    await flushPromises();
+    // The stale 按月 answer lands second and must NOT win.
+    pending[0]!.resolve({
+      groupBy: 'month',
+      groups: [monthBucket('2026-03', '2026-03')],
+      totals: group('__totals__', '合计', 4, 5_000, 1_000, 0.01),
+    });
+    await flushPromises();
+
+    const chart = wrapper.find('[data-testid="usage-trend-chart"]').text();
+    // Under groupBy=day the bucket 2026-09-15 is labelled "09-15"; a month
+    // bucket rendered through the day formatter would read "03".
+    expect(chart).toContain('09-15');
+  });
+
+  it('a 按日/按月 click supersedes only the trend, not an in-flight 查询', async () => {
+    // The trap a shared sequence would set: loadSeries() bumping loadRequestSeq
+    // would make the bucket click abandon the 查询's own summary + records, and
+    // load()'s finally — cleared under the same condition — would leave the
+    // request log stuck on its skeleton rows forever. The two writers therefore
+    // get a sequence each; this pins that split.
+    const wrapper = mountView();
+    await flushPromises();
+
+    const pending: { groupBy: string; resolve: (v: UsageSummary) => void }[] = [];
+    mockApi.adminUsageSummary.mockImplementation(
+      (query) =>
+        new Promise<UsageSummary>((resolve) => {
+          pending.push({ groupBy: String(query?.groupBy ?? ''), resolve });
+        }),
+    );
+
+    await wrapper.find('[data-testid="usage-query"]').trigger('click');
+    await flushPromises();
+    // 查询 issues the breakdown + trend pair; the bucket click adds one more
+    // trend request on top of the still-unanswered pair.
+    await wrapper.find('[data-testid="trend-dim-month"]').trigger('click');
+    await flushPromises();
+    expect(pending.map((p) => p.groupBy)).toEqual(['project', 'day', 'month']);
+
+    pending[0]!.resolve(summaryFor('project'));
+    pending[1]!.resolve(summaryFor('day'));
+    // 按月 was the user's last pick, so it wins the trend…
+    pending[2]!.resolve({
+      groupBy: 'month',
+      groups: [group('2026-03', '2026-03', 4, 5_000, 1_000, 0.01)],
+      totals: group('__totals__', '合计', 4, 5_000, 1_000, 0.01),
+    });
+    await flushPromises();
+
+    // …and the month bucket renders month-formatted, not sliced to "03".
+    expect(wrapper.find('[data-testid="usage-trend-chart"]').text()).toContain('2026-03');
+    // …while the 查询 the user actually paid for is not thrown away with it.
+    // This is the assertion that separates the two designs: had loadSeries()
+    // bumped loadRequestSeq, load()'s finally would have skipped clearing these
+    // flags and the request log would sit on its skeleton rows for good.
+    expect(
+      wrapper.find('[data-testid="usage-records-table"]').findAll('.ui-skeleton'),
+    ).toHaveLength(0);
+  });
+
   it('#876: marks a short group cost in the breakdown table', async () => {
     // The hero card above this table already carried the marker for the same figure;
     // the 维度分解 table printed a bare ¥0.0000 for it.
