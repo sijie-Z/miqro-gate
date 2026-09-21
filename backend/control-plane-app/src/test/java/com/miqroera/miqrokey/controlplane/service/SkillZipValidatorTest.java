@@ -221,6 +221,107 @@ class SkillZipValidatorTest {
                 .isInstanceOf(SkillValidationException.class);
     }
 
+    @Test
+    @DisplayName("entry names escaping the skill root (.. segments, absolute paths) are rejected (#1233)")
+    void traversalEntryNamesAreRejected() throws Exception {
+        // The single-root check only looks at the first path segment, so
+        // `web-scraper/../../escape.txt` keeps the root "web-scraper" and was
+        // accepted — yet extractors resolve it outside the skill directory.
+        assertEntryPathRejected("web-scraper/../../escape.txt");
+        assertEntryPathRejected("web-scraper/../escape.txt"); // normalizes outside the root
+        assertEntryPathRejected("web-scraper/docs/../notes.md"); // '..' rejected even when it stays inside
+        assertEntryPathRejected("web-scraper/scripts/../../../escape.txt");
+        assertEntryPathRejected("/etc/escape.txt");
+        assertEntryPathRejected("web-scraper\\..\\..\\escape.txt");
+        assertEntryPathRejected("..\\escape.txt");
+    }
+
+    private static void assertEntryPathRejected(String evilPath) throws Exception {
+        byte[] pkg = zipOf(entry("web-scraper/SKILL.md", SKILL_MD), entry(evilPath, "evil"));
+
+        assertThatThrownBy(() -> SkillZipValidator.validate(pkg)).as("entry name %s", evilPath)
+                .isInstanceOf(SkillValidationException.class)
+                .satisfies(thrown -> assertThat(((SkillValidationException) thrown).code())
+                        .isEqualTo("SKILL_ENTRY_PATH_INVALID"));
+    }
+
+    @Test
+    @DisplayName("counter-control: a legal package with nested directories is accepted (#1233)")
+    void legalNestedDirectoriesAreAccepted() throws Exception {
+        byte[] pkg = zipOf(entry("web-scraper/SKILL.md", SKILL_MD), entry("web-scraper/scripts/run.py", "print('hi')"),
+                entry("web-scraper/reference/notes/guide.md", "# guide"));
+
+        assertThat(SkillZipValidator.validate(pkg).name()).isEqualTo("web-scraper");
+    }
+
+    @Test
+    @DisplayName("a decompressed-volume bomb (638 KB -> ~640 MB) is rejected (#1233)")
+    void decompressedVolumeBombIsRejected() throws Exception {
+        // Ten entries inflating to 64 MB each: ~640 MB decompressed from well
+        // under MAX_ZIP_BYTES, 11 entries, small SKILL.md — every pre-#1233
+        // bound is blind to it. The declared ZipEntry.getSize() is -1 for these
+        // data-descriptor entries (the JDK streaming writer never back-patches
+        // sizes), so it must not be read as "0 bytes".
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] chunk = new byte[1024 * 1024];
+        try (ZipOutputStream zos = new ZipOutputStream(out)) {
+            zos.putNextEntry(new ZipEntry("web-scraper/SKILL.md"));
+            zos.write(SKILL_MD.getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+            for (int i = 0; i < 10; i++) {
+                zos.putNextEntry(new ZipEntry("web-scraper/blob-" + i + ".bin"));
+                for (int j = 0; j < 64; j++) {
+                    zos.write(chunk);
+                }
+                zos.closeEntry();
+            }
+        }
+        byte[] bomb = out.toByteArray();
+        assertThat(bomb.length).as("wire bytes").isLessThan(SkillZipValidator.MAX_ZIP_BYTES);
+
+        assertThatThrownBy(() -> SkillZipValidator.validate(bomb)).isInstanceOf(SkillValidationException.class)
+                .satisfies(thrown -> assertThat(((SkillValidationException) thrown).code())
+                        .isEqualTo("SKILL_DECOMPRESSED_TOO_LARGE"));
+    }
+
+    @Test
+    @DisplayName("counter-control: a normal package with a small asset is accepted (#1233)")
+    void legalPackageWithAssetsIsAccepted() throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] chunk = new byte[1024 * 1024];
+        try (ZipOutputStream zos = new ZipOutputStream(out)) {
+            zos.putNextEntry(new ZipEntry("web-scraper/SKILL.md"));
+            zos.write(SKILL_MD.getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+            zos.putNextEntry(new ZipEntry("web-scraper/assets/data.bin"));
+            for (int j = 0; j < 4; j++) {
+                zos.write(chunk); // 4 MB decompressed — far below the cap
+            }
+            zos.closeEntry();
+        }
+
+        assertThat(SkillZipValidator.validate(out.toByteArray()).name()).isEqualTo("web-scraper");
+    }
+
+    private static byte[] zipOf(TestEntry... entries) throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (ZipOutputStream zos = new ZipOutputStream(out)) {
+            for (TestEntry entry : entries) {
+                zos.putNextEntry(new ZipEntry(entry.path()));
+                zos.write(entry.content());
+                zos.closeEntry();
+            }
+        }
+        return out.toByteArray();
+    }
+
+    private static TestEntry entry(String path, String content) {
+        return new TestEntry(path, content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private record TestEntry(String path, byte[] content) {
+    }
+
     private static byte[] zip(String path, String content) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (ZipOutputStream zos = new ZipOutputStream(out)) {
