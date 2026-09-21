@@ -1,6 +1,8 @@
 package com.miqroera.miqrokey.controlplane.service;
 
+import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -106,7 +108,7 @@ public final class SkillZipValidator {
         String yamlText = yamlEnd > 0 ? body.substring(3, yamlEnd) : body.substring(3);
         Map<String, Object> meta;
         try {
-            Object loaded = new Yaml().load(yamlText);
+            Object loaded = yamlReader().load(yamlText);
             if (!(loaded instanceof Map)) {
                 throw invalid("SKILL_FRONTMATTER_INVALID", "SKILL.md frontmatter 必须是 YAML 映射。");
             }
@@ -163,6 +165,11 @@ public final class SkillZipValidator {
 
     private static String str(Object value) {
         return value == null ? null : String.valueOf(value).trim();
+    }
+
+    /** YAML reader for untrusted uploads: refuses class-instantiation tags. */
+    private static Yaml yamlReader() {
+        return new Yaml(new SafeConstructor(new LoaderOptions()));
     }
 
     private static SkillValidationException invalid(String code, String detail) {
