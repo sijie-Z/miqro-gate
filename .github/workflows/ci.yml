@@ -179,10 +179,11 @@ jobs:
   #
   # `spotless:apply` has no such problem: it rewrites files instead of failing,
   # so a single plain run covers all 11 modules (measured — it fixed violations
-  # in both `domain` and `control-plane-app` at once). `--fail-never` is
-  # insurance on top of that: if apply ever *errors* on a module rather than
-  # merely disagreeing with it, the reactor would stop there and the modules
-  # after it would go uninspected.
+  # in both `domain` and `control-plane-app` at once). It is deliberately NOT run
+  # with `--fail-never`: -fn would also swallow a *real* failure — a formatter
+  # that cannot be downloaded, a file it cannot write — and this job would then
+  # report green over a tree nothing had actually inspected. Without it the step
+  # fails loudly, which is what a broken format check should do.
   #
   # The verdict is therefore `git diff`, not a command exit code (-fn always
   # returns 0) and not the log text (a wording change in spotless would rot the
@@ -207,8 +208,8 @@ jobs:
           java-version: 21
           distribution: temurin
           cache: maven
-      - name: Apply formatting to every module (no reactor fail-fast)
-        run: ./mvnw spotless:apply --batch-mode --fail-never
+      - name: Apply formatting to every module
+        run: ./mvnw spotless:apply --batch-mode
         env:
           MAVEN_PROJECTBASEDIR: ${{ github.workspace }}/backend
       - name: Fail when formatting would change anything
