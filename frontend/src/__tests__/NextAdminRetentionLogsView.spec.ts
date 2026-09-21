@@ -159,4 +159,42 @@ describe('NextAdminRetentionLogsView', () => {
     expect(mockApi.putRetentionConfig).not.toHaveBeenCalled();
     expect(wrapper.find('[data-testid="retention-config-error"]').text()).toContain('1024');
   });
+
+  // PH58: load() had no response-sequence guard, so a slower answer for an older
+  // filter set could land after a newer one and repaint the table with rows that
+  // no longer match the controls above it. The direction select and the 查询
+  // button both stay enabled while a request is in flight, so two different
+  // payloads really can be outstanding at once.
+  it('drops a retention response that a newer filter set has already superseded', async () => {
+    const pending: Array<{ direction: string; resolve: (v: unknown[]) => void }> = [];
+    mockApi.retentionLogs.mockImplementation(
+      (query) =>
+        new Promise((resolve) => {
+          pending.push({ direction: String(query?.direction ?? ''), resolve });
+        }) as never,
+    );
+
+    const wrapper = mountView();
+    await flushPromises();
+    expect(pending).toHaveLength(1); // the mount request is still open
+
+    // the user narrows the direction and queries again while the first is in flight
+    const directionSelect = wrapper.findAll('.ui-select-stub')[0]!;
+    await directionSelect.findAll('.stub-option')[1]!.trigger('click'); // 输入
+    await wrapper.find('[data-testid="retention-refresh"]').trigger('click');
+    expect(pending).toHaveLength(2);
+    expect(pending.map((p) => p.direction)).toEqual(['', 'INPUT']);
+
+    // the newer request answers first …
+    pending[1]!.resolve([{ ...row, eventId: 'new', direction: 'INPUT', text: '新窗口输入行' }]);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="retention-table"]').text()).toContain('新窗口输入行');
+
+    // … then the abandoned one dribbles in and must not win
+    pending[0]!.resolve([{ ...row, eventId: 'old', direction: 'OUTPUT', text: '旧窗口输出行' }]);
+    await flushPromises();
+    const table = wrapper.find('[data-testid="retention-table"]').text();
+    expect(table).toContain('新窗口输入行');
+    expect(table, 'the abandoned first query repainted the table').not.toContain('旧窗口输出行');
+  });
 });

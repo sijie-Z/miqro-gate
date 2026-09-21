@@ -131,21 +131,32 @@ function queryFilters() {
   };
 }
 
+// #1245: request-sequence guard — 改方向/协议筛选或连点「查询」时，让慢的旧响应
+// 落在新响应之后会把表格重新画成上一次筛选的行（行必须与上方控件一致）。
+let loadRequestSeq = 0;
+
 async function load() {
   if (!validUserId()) {
     return;
   }
+  const seq = ++loadRequestSeq;
   loading.value = true;
   loadError.value = '';
   try {
-    rows.value = await api.retentionLogs({ ...queryFilters(), size: 50 });
+    const list = await api.retentionLogs({ ...queryFilters(), size: 50 });
+    if (seq !== loadRequestSeq) {
+      return; // a newer filter set won — this response is stale
+    }
+    rows.value = list;
   } catch (error) {
-    if (error instanceof ApiError) {
+    if (seq === loadRequestSeq && error instanceof ApiError) {
       loadError.value = error.message;
       loadRequestId.value = error.requestId ?? '';
     }
   } finally {
-    loading.value = false;
+    if (seq === loadRequestSeq) {
+      loading.value = false;
+    }
   }
 }
 
