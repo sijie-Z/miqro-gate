@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -200,8 +201,8 @@ public class GlobalExceptionHandler {
     /**
      * Framework-level client errors would otherwise be swallowed by the
      * {@code Exception} catch-all into 500s (#412): a missing required query
-     * parameter is 400, a wrong method 405, an unsupported media type 415 and an
-     * unknown path 404.
+     * parameter is 400, a wrong method 405, an unsupported media type 415, an
+     * unacceptable Accept 406 (#1253) and an unknown path 404.
      */
     @ExceptionHandler(MissingServletRequestParameterException.class)
     public ResponseEntity<Map<String, Object>> handleMissingParam(MissingServletRequestParameterException e,
@@ -229,6 +230,24 @@ public class GlobalExceptionHandler {
         Map<String, Object> body = problemDetail(415, "UNSUPPORTED_MEDIA_TYPE", "Unsupported media type",
                 "请求 Content-Type 不受支持。", requestId);
         return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(body);
+    }
+
+    /**
+     * The response-side mirror of the 415 above (#1253). The CSV export endpoints
+     * declare {@code produces = "text/csv"} but the baseline declares no media type
+     * for their 200, so a contract-generated client defaults to
+     * {@code Accept: application/json} — that is a 406 for the caller to fix, not a
+     * 500. Framework noise: WARN without a stack, the caller's request is at fault.
+     */
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+    public ResponseEntity<Map<String, Object>> handleNotAcceptable(HttpMediaTypeNotAcceptableException e,
+            HttpServletRequest request) {
+        String requestId = resolveRequestId(request);
+        LOG.warn("Not acceptable [requestId={}] mediaTypes={}", requestId, e.getSupportedMediaTypes());
+        Map<String, Object> body = problemDetail(406, "UNSUPPORTED_ACCEPT", "Not acceptable", "请求的 Accept 无法由该端点满足。",
+                requestId);
+        return ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE).contentType(MediaType.APPLICATION_PROBLEM_JSON)
                 .body(body);
     }
 
