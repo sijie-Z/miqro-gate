@@ -28,6 +28,19 @@ import java.util.stream.Collectors;
  * snapshot cycle and never evaluates quotas itself. Per-rule failures are
  * isolated: one broken rule keeps its previous verdict instead of clearing the
  * whole block set.
+ *
+ * <p>
+ * A verdict is sticky until its window ends (#1316). The live watermark alone
+ * cannot be the last word, because it is a function of {@code usage_event} rows
+ * that can disappear underneath it — a retention {@code USAGE_DELETE} of the
+ * current window zeroes the reading and would otherwise resume traffic, which is
+ * an unlock path ADR-0020 explicitly rejected. So a rule that is no longer
+ * EXCEEDED carries its recorded block forward while
+ * {@code window_end} is still in the future and the rule itself has not been
+ * touched since the block was recorded. Both documented recovery paths survive:
+ * rolling into a new window drops the stale verdict, and any admin write to the
+ * rule (raise the limit, disable it, delete it) lifts the block immediately.
+ * </p>
  */
 @Service
 public class QuotaEnforcementService {
@@ -51,16 +64,32 @@ public class QuotaEnforcementService {
     @Transactional
     public void evaluate() {
         List<QuotaRule> rules = quotaRuleRepository.findAllActiveReject();
+        Instant now = Instant.now();
+        Map<UUID, RecordedBlock> recorded = recordedBlocks();
         List<BlockedRule> exceeded = new ArrayList<>();
         for (QuotaRule rule : rules) {
             try {
                 QuotaWatermarks.Watermark watermark = watermarks.evaluate(rule.tenantId(), rule);
                 if (watermark.exceeded()) {
-                    exceeded.add(new BlockedRule(rule, watermark.to()));
+                    exceeded.add(new BlockedRule(rule, watermark.to(), now));
+                    continue;
                 }
             } catch (RuntimeException e) {
                 LOG.warn("Quota watermark failed for rule {} ({}); keeping the previous verdict", rule.id(),
                         e.getMessage());
+            }
+            // No longer EXCEEDED — or not computable at all. Keep the recorded
+            // verdict for the rest of its window unless the admin has touched the
+            // rule since it was recorded (#1316): deleting the usage rows a live
+            // watermark is derived from is not one of the two documented recovery
+            // paths, and a failed watermark derivation must not resume traffic
+            // either (ADR-0020 §4).
+            RecordedBlock previous = recorded.get(rule.id());
+            if (previous != null && previous.windowEnd().isAfter(now)
+                    && !rule.updatedAt().isAfter(previous.blockedAt())) {
+                exceeded.add(new BlockedRule(rule, previous.windowEnd(), previous.blockedAt()));
+                LOG.info("Quota block for rule {} held until {} (recorded {}, live watermark no longer exceeded)",
+                        rule.id(), previous.windowEnd(), previous.blockedAt());
             }
         }
 
@@ -73,20 +102,39 @@ public class QuotaEnforcementService {
         for (BlockedRule blocked : exceeded) {
             QuotaRule rule = blocked.rule();
             jdbc.update("""
-                    INSERT INTO quota_enforcement (rule_id, tenant_id, scope_type, scope_id, metric, period, window_end)
-                    VALUES (:ruleId, :tenantId, :scopeType, :scopeId, :metric, :period, :windowEnd)
+                    INSERT INTO quota_enforcement (rule_id, tenant_id, scope_type, scope_id, metric, period, window_end,
+                        blocked_at)
+                    VALUES (:ruleId, :tenantId, :scopeType, :scopeId, :metric, :period, :windowEnd, :blockedAt)
                     """,
                     new MapSqlParameterSource("ruleId", rule.id()).addValue("tenantId", rule.tenantId())
                             .addValue("scopeType", rule.scopeType().name()).addValue("scopeId", rule.scopeId())
                             .addValue("metric", rule.metric().name()).addValue("period", rule.period().name())
-                            .addValue("windowEnd", Timestamp.from(blocked.windowEnd())));
+                            .addValue("windowEnd", Timestamp.from(blocked.windowEnd()))
+                            .addValue("blockedAt", Timestamp.from(blocked.blockedAt())));
         }
         routeRefreshPublisher.publishChanged();
         LOG.info("Quota soft-landing verdict changed: {} blocking rule(s) (was {}); route refresh published",
                 after.size(), before.size());
     }
 
-    /** A rule whose current window is EXCEEDED, with that window's end. */
-    private record BlockedRule(QuotaRule rule, Instant windowEnd) {
+    /**
+     * The verdicts the previous cycle recorded, keyed by rule. {@code blockedAt} is
+     * the decision time the admin-edit escape is measured against; carrying it over
+     * unchanged keeps that comparison stable across rewrites of the table.
+     */
+    private Map<UUID, RecordedBlock> recordedBlocks() {
+        return jdbc
+                .query("SELECT rule_id, window_end, blocked_at FROM quota_enforcement", Map.of(),
+                        (rs, rowNum) -> new RecordedBlock((UUID) rs.getObject("rule_id"),
+                                rs.getTimestamp("window_end").toInstant(), rs.getTimestamp("blocked_at").toInstant()))
+                .stream().collect(Collectors.toMap(RecordedBlock::ruleId, block -> block));
+    }
+
+    /** A blocking rule with the end of the window it was blocked in. */
+    private record BlockedRule(QuotaRule rule, Instant windowEnd, Instant blockedAt) {
+    }
+
+    /** A verdict as recorded in {@code quota_enforcement}. */
+    private record RecordedBlock(UUID ruleId, Instant windowEnd, Instant blockedAt) {
     }
 }
