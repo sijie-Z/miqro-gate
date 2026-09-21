@@ -176,16 +176,27 @@ public class WebhookEndpointService {
         if (locked.isEmpty()) {
             throw new ApiException(HttpStatus.NOT_FOUND, "WEBHOOK_NOT_FOUND", "Webhook endpoint not found");
         }
-        List<ResourceDependency> dependents = jdbc.query("""
-                SELECT id, name, enabled FROM alert_rules
-                WHERE tenant_id = :tenantId AND webhook_endpoint_id = :id
+        // #1335: the blocking check deliberately carries no tenant filter. A rule
+        // references an endpoint by id, and before V74 a rule of another tenant
+        // could hold that reference: with the filter, exactly that rule fell
+        // outside this guard's field of view, and deleting the endpoint silently
+        // nulled its webhook_endpoint_id — the silent detach this method exists to
+        // prevent. The reported list stays tenant-scoped so the 409 never hands out
+        // another tenant's rule names; when every referrer is foreign the response
+        // says how many rules block the delete without naming any of them.
+        List<AlertRuleReferrer> referrers = jdbc.query("""
+                SELECT id, name, enabled, tenant_id FROM alert_rules
+                WHERE webhook_endpoint_id = :id
                 ORDER BY name
-                """, new MapSqlParameterSource("tenantId", tenantId).addValue("id", endpointId),
-                (rs, rowNum) -> new ResourceDependency("ALERT_RULE", (UUID) rs.getObject("id"), rs.getString("name"),
-                        rs.getBoolean("enabled") ? "已启用" : "已停用"));
-        if (!dependents.isEmpty()) {
-            throw new ResourceInUseException("该 Webhook 端点被 " + dependents.size() + " 条告警规则引用，请先删除或改配这些规则。",
-                    dependents);
+                """, new MapSqlParameterSource("id", endpointId),
+                (rs, rowNum) -> new AlertRuleReferrer((UUID) rs.getObject("tenant_id"),
+                        new ResourceDependency("ALERT_RULE", (UUID) rs.getObject("id"), rs.getString("name"),
+                                rs.getBoolean("enabled") ? "已启用" : "已停用")));
+        if (!referrers.isEmpty()) {
+            List<ResourceDependency> ownDependents = referrers.stream().filter(r -> r.tenantId().equals(tenantId))
+                    .map(AlertRuleReferrer::dependency).toList();
+            throw new ResourceInUseException(
+                    "该 Webhook 端点被 " + referrers.size() + " 条告警规则引用，请先删除或改配这些规则。", ownDependents);
         }
         jdbc.update("DELETE FROM webhook_endpoints WHERE id = :id AND tenant_id = :tenantId",
                 new MapSqlParameterSource("id", endpointId).addValue("tenantId", tenantId));
@@ -193,6 +204,14 @@ public class WebhookEndpointService {
                 tenantId, context.actorId(), "WEBHOOK_DELETE", "WEBHOOK", endpointId, AuditSummaries.summary(context,
                         "name", AuditSummaries.sanitize(existing.name()), "host", hostOf(existing.url())),
                 context.requestId());
+    }
+
+    /**
+     * One alert rule holding a reference to an endpoint. The tenant rides along
+     * only to decide whether the rule's name may be reported back (#1335) — a
+     * referring rule of another tenant blocks the delete but is not named.
+     */
+    private record AlertRuleReferrer(UUID tenantId, ResourceDependency dependency) {
     }
 
     /**

@@ -50,6 +50,7 @@ public class AlertRuleService {
         validateDedupe(dedupeMinutes);
         validateType(type);
         validateScope(tenantId, type, scopeJson);
+        validateWebhookEndpoint(tenantId, webhookEndpointId);
         UUID id = UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO alert_rules
@@ -97,6 +98,10 @@ public class AlertRuleService {
         AlertRule existing = get(tenantId, ruleId);
         String newScope = scopeJson != null ? scopeJson : existing.scopeJson();
         validateScope(tenantId, existing.type(), newScope);
+        // Only a newly supplied endpoint is validated: null means "keep the stored
+        // one", and a rule created before V74 may still carry a reference this
+        // check would now reject — renaming such a rule must not fail.
+        validateWebhookEndpoint(tenantId, webhookEndpointId);
         // #475 sibling: compare-and-set on the version read above. The snapshot is
         // re-written field by field (absent fields keep their stored value), so
         // without the version predicate a concurrent commit between the read and
@@ -158,6 +163,33 @@ public class AlertRuleService {
             // told their valid input was invalid.
             throw new ApiException(HttpStatus.BAD_REQUEST, "ALERT_TYPE_INVALID",
                     "type must be one of " + String.join(", ", RULE_TYPES));
+        }
+    }
+
+    /**
+     * An optional {@code webhookEndpointId} must name an endpoint of this rule's own
+     * tenant (#1335).
+     *
+     * <p>
+     * The column's foreign key used to be single-column, so any endpoint id was
+     * accepted and a rule could deliver into (and pin a delete guard onto) another
+     * tenant's endpoint. Rejected here as a client error with a readable code
+     * instead of letting the composite foreign key surface as a 409/500, and here
+     * rather than on the console DTO because the machine-key surface
+     * ({@code /api/v1/admin-api/alert-rules}) reaches the same INSERT with no DTO
+     * constraints of its own (#1021). The migration's FK remains the backstop.
+     * </p>
+     */
+    private void validateWebhookEndpoint(UUID tenantId, UUID webhookEndpointId) {
+        if (webhookEndpointId == null) {
+            return;
+        }
+        Integer owned = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM webhook_endpoints WHERE id = :id AND tenant_id = :tenantId",
+                new MapSqlParameterSource("id", webhookEndpointId).addValue("tenantId", tenantId), Integer.class);
+        if (owned == null || owned == 0) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "WEBHOOK_ENDPOINT_INVALID",
+                    "webhookEndpointId 必须指向本租户已存在的 Webhook 端点。");
         }
     }
 
