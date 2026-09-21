@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -59,13 +60,23 @@ class OutboundCallWallClockBoundTest {
      */
     private static final long OBSERVATION_WINDOW_MS = 12_000;
 
+    /** How long a handler holds its response open when nothing releases it. */
+    private static final Duration STALL_HOLD = Duration.ofMinutes(10);
+
     private final AtomicLong stallLatch = new AtomicLong();
+
+    /**
+     * Set by cleanup so a holding handler lets go of the server's dispatcher
+     * thread; see {@link #holdResponseOpen()}.
+     */
+    private volatile boolean peerReleased;
 
     private HttpServer stalledPeer;
     private String stalledBaseUrl;
 
     @BeforeEach
     void startStalledPeer() throws Exception {
+        peerReleased = false;
         String external = System.getProperty("ph57.peer.url");
         if (external != null && !external.isBlank()) {
             stalledBaseUrl = external;
@@ -80,18 +91,12 @@ class OutboundCallWallClockBoundTest {
                 body.write("0123456789".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
                 body.flush();
                 stallLatch.incrementAndGet();
-                Thread.sleep(600_000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                holdResponseOpen();
             }
         });
         stalledPeer.createContext("/no-headers", exchange -> {
             stallLatch.incrementAndGet();
-            try {
-                Thread.sleep(600_000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+            holdResponseOpen();
         });
         stalledPeer.start();
         stalledBaseUrl = "http://127.0.0.1:" + stalledPeer.getAddress().getPort();
@@ -99,8 +104,28 @@ class OutboundCallWallClockBoundTest {
 
     @AfterEach
     void stopStalledPeer() {
+        peerReleased = true; // release the handler first: stop() joins the dispatcher thread
         if (stalledPeer != null) {
             stalledPeer.stop(0);
+        }
+    }
+
+    /**
+     * Holds the exchange open until cleanup releases it. The peer runs handlers
+     * on the server's own dispatcher thread, and {@code HttpServer.stop()} joins
+     * that thread — a flat {@code Thread.sleep} here would make every test wait
+     * out the whole stall at cleanup instead of the few seconds the bound under
+     * test allows.
+     */
+    private void holdResponseOpen() {
+        long deadline = System.nanoTime() + STALL_HOLD.toNanos();
+        while (!peerReleased && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
         }
     }
 
@@ -259,6 +284,14 @@ class OutboundCallWallClockBoundTest {
             long elapsed = (System.nanoTime() - start) / 1_000_000;
             System.out.printf("[ph57] %-42s returned after %6d ms (configured %d s)%n", label, elapsed,
                     CONFIGURED_TIMEOUT_SECONDS);
+            return elapsed;
+        } catch (ExecutionException e) {
+            // Ending by failing is still ending: the call stopped waiting, which
+            // is exactly what the bound under test promises. Name the failure so
+            // the recorded number cannot be mistaken for a clean completion.
+            long elapsed = (System.nanoTime() - start) / 1_000_000;
+            System.out.printf("[ph57] %-42s returned after %6d ms (configured %d s), failing with %s%n", label,
+                    elapsed, CONFIGURED_TIMEOUT_SECONDS, e.getCause().getClass().getSimpleName());
             return elapsed;
         } catch (java.util.concurrent.TimeoutException e) {
             long elapsed = (System.nanoTime() - start) / 1_000_000;
