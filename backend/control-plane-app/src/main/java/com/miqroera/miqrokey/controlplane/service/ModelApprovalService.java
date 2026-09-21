@@ -18,6 +18,7 @@ import com.miqroera.miqrokey.domain.repository.ProjectRepository;
 import com.miqroera.miqrokey.domain.repository.UserRepository;
 import com.miqroera.miqrokey.domain.repository.VirtualKeyRepository;
 import com.miqroera.miqrokey.domain.service.AuditService;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -60,6 +61,9 @@ import java.util.function.Function;
  * generic 404 (no enumeration).</li>
  * <li>Only PENDING requests can be reviewed (409 ALREADY_REVIEWED); the
  * optimistic {@code version} column makes the transition race-safe.</li>
+ * <li>One (key, model) pair carries at most one PENDING request — enforced by
+ * the partial unique index {@code uq_model_approval_pending}, not by the
+ * pre-insert SELECT alone, which cannot see concurrent writers (#1305).</li>
  * <li>Review summaries never contain key material.</li>
  * </ul>
  */
@@ -67,6 +71,14 @@ import java.util.function.Function;
 public class ModelApprovalService {
 
     private static final String AUTO_APPROVE_NOTE = "Auto-approved: model on the approval whitelist";
+
+    /**
+     * One (key, model) pair carries at most one request awaiting review — the
+     * message is shared by the two paths that can observe the violation, so a retry
+     * that overlaps another in-flight submit reads exactly like the sequential
+     * retry (#1305).
+     */
+    private static final String DUPLICATE_PENDING_MESSAGE = "该模型在此密钥上已有待审批的申请，请等待管理员处理，无需重复提交";
 
     private final ModelApprovalRepository approvalRepository;
     private final VirtualKeyRepository keyRepository;
@@ -113,7 +125,7 @@ public class ModelApprovalService {
         boolean pendingDuplicate = approvalRepository.findAllByVirtualKeyId(key.id()).stream()
                 .anyMatch(a -> a.status() == ModelApprovalStatus.PENDING && a.modelId().equals(modelId));
         if (pendingDuplicate) {
-            throw new ApiException(HttpStatus.CONFLICT, "DUPLICATE_PENDING", "该模型在此密钥上已有待审批的申请，请等待管理员处理，无需重复提交");
+            throw new ApiException(HttpStatus.CONFLICT, "DUPLICATE_PENDING", DUPLICATE_PENDING_MESSAGE);
         }
         // #506: the /v1/models gate requires the model to be ACTIVE in the
         // provider's model_catalog — without it an approval could never take
@@ -129,7 +141,16 @@ public class ModelApprovalService {
         Instant now = Instant.now();
         ModelApproval approval = new ModelApproval(UUID.randomUUID(), tenantId, key.id(), modelId, user.id(),
                 ModelApprovalStatus.PENDING, null, trimmed(request.reason()), null, 0L, now, now);
-        approvalRepository.insert(approval);
+        try {
+            approvalRepository.insert(approval);
+        } catch (DuplicateKeyException e) {
+            // #1305: the check above reads a snapshot, and READ COMMITTED lets two
+            // overlapping submits both pass it. uq_model_approval_pending (V73) is
+            // the structural guard; the loser of that race lands here and gets the
+            // same 409 as a sequential retry — instead of stacking a second pending
+            // row, a second audit record and a second alert event.
+            throw new ApiException(HttpStatus.CONFLICT, "DUPLICATE_PENDING", DUPLICATE_PENDING_MESSAGE);
+        }
         auditService.record(tenantId, user.id(), "MODEL_APPROVAL_SUBMITTED", "MODEL_APPROVAL", approval.id(),
                 auditSummary("virtualKeyId", key.id(), "modelId", modelId, "autoApproved",
                         approvalProperties.getWhitelistModels().contains(modelId)),

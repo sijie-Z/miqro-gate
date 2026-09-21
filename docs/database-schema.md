@@ -194,13 +194,13 @@ Key × 项目绑定（标签路由的鉴权权威），与 `virtual_keys.project
 - 成员移出项目 / Key 轮换的行为见 ADR-0018 D4/D7（轮换复制全部绑定；成员移除禁用该项目的绑定行，无剩余绑定的 Key 置 REVOKED）
 - 唯一 `(virtual_key_id, project_id)`；`project_id`、`tenant_id` 索引
 
-### `model_approval` (V4 + V22)
+### `model_approval` (V4 + V22 + V73)
 
 为 Key 追加模型的审批工作流（接线于模型申请审批 Goal；`reviewed_by IS NULL` = 白名单自动批准）：
 
 - `virtual_key_id`、`model_id`、`requested_by`、`status`（`PENDING|APPROVED|REJECTED`）、`reviewed_by`、`reason varchar(500)`（V22 新增，申请理由）、`review_note varchar(500)`（审核意见）、`version`（乐观锁，PENDING → 终态唯一一次）
 - 复合 FK 到 Key 和 `users(tenant_id, id)`；`virtual_key_id`、`status`、`tenant_id` 索引
-- **无重复申请的数据库约束**：同 Key 同模型重复 PENDING 由服务层检查（`409 DUPLICATE_PENDING`）
+- **同 Key 同模型至多一条 PENDING（V73）**：部分唯一索引 `uq_model_approval_pending (virtual_key_id, model_id) WHERE status = 'PENDING'`。服务层那句 `409 DUPLICATE_PENDING`（`ModelApprovalService.submit`）是**先 SELECT 后 INSERT**，READ COMMITTED 下并发双方都能通过检查（#1305）；索引是结构保证，服务把 `DuplicateKeyException` 翻译成**同一个** 409，顺序与并发两条路径返回一致。只约束 PENDING：终态行不参与，「申请 → 驳回 → 再申请」不受影响。V73 先收敛存量重复 PENDING 再建索引（避免 #1249 那种建索引失败卡死启动）
 - **审批生效**：`APPROVED` 行的 `model_id` 写入 `virtual_key_models`（申请 Key）+ `project_provider_grant_models`（如缺失）并触发路由快照即时刷新——两表分别对应网关放行的 Key 层与 Grant 层
 
 ## 6. 请求与用量

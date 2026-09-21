@@ -5907,3 +5907,44 @@ booking 一笔 `outputTokensDelta=-300`：观测 1000 tokens（600 in / 400 out�
 - 前端：vitest **642/642**（新增 8 条）、typecheck、lint（改动文件）、build、e2e **66/66**（新增 4 条：
   广场渲染/空态/试调全链含「密钥不落 storage」断言/拒绝信封）。
 - OpenAPI 基线随测试重生成（`/me/plaza/models` 入 spec），`gen:types` 同步，前端类型切 `generated-api`。
+
+## 2026-09-22 PH65：模型审批提交的重复提交防护只是「一次 SELECT 的运气」（#1305）
+
+### 缺陷
+
+`POST /api/v1/me/model-approvals` 的「同 Key 同模型只能有一条待审」防护，是**先 SELECT 再无条件 INSERT**
+（`ModelApprovalService.submit`），`model_approval` 表从建库起只有主键。隔离级别是 PG 默认的 READ COMMITTED，
+读到的快照约束不了并发写入 —— 并发到达的 N 个相同申请全部通过检查、全部落库。
+
+服务自己那句 409 文案「…请等待管理员处理，**无需重复提交**」说明代码意图就是「至多一条」，所以这是实现没跟上
+意图，不是设计留白。
+
+### 红证据（本地隔离环境：真控制面 + 真 PG，非生产）
+
+- 顺序两次相同请求 → 第 1 次 `201`、第 2 次 `409 DUPLICATE_PENDING`（顺序路径本来就对，缺陷只在并发窗口）；
+- `threading.Barrier(6)` 同时发 6 个相同请求 → **6/6 HTTP 201**，6 个不同 id；库内 `model_approval` 6 条
+  `PENDING`、`MODEL_APPROVAL_SUBMITTED` 审计 6 条、`alert_events` 6 条（配了 webhook 即 6 次对外投递）；
+  管理端队列里 6 条一模一样的待办，需逐条拒绝。
+- 回归测试在**未修复**的 `origin/develop` 上同样红（独立 worktree 跑新测试，`--force` 后 `worktree remove` 回收）：
+  `Expecting actual: [409, 409, 201, 201, 201, 201, 409, 409] to contain only once: [201]`。
+
+影响是**多**不是**少**：`approve`/`reject` 的单行状态迁移有 `version` CAS 兜底（`OptimisticLockingFailureException`
+→ 409 `ALREADY_REVIEWED`），缺陷只在 submit 这条路径上。
+
+### 改动
+
+- **V73**（新增迁移）：先收敛存量重复 PENDING（保留 `(created_at, id)` 最小的一条），再建部分唯一索引
+  `uq_model_approval_pending (virtual_key_id, model_id) WHERE status = 'PENDING'`。先删后建是**刻意**的：
+  存量环境里重复行正是本缺陷造出来的，直接建索引会以 `could not create unique index ... is duplicated`
+  中止整轮迁移、卡死控制面启动且不留迁移记录——正是 #1249 的形状，不再重演。只约束 PENDING，终态行不参与，
+  「申请 → 驳回 → 再申请」不受影响。
+- `ModelApprovalService`：插入包 `try/catch (DuplicateKeyException)`，翻译成与顺序路径**同一个** 409
+  `DUPLICATE_PENDING`（文案提为常量，两条路径共用），并发输家与顺序重试对客户端完全同形。
+- `docs/database-schema.md` 的「无重复申请的数据库约束」一句改为索引描述。
+
+### 验证
+
+- `./mvnw -f backend/pom.xml -Pintegration -pl control-plane-app -am test -Dtest=ModelApprovalApiIntegrationTest`
+  **15/15 绿**（新增 `concurrentDuplicateSubmitsCollapse`：8 线程 barrier 同步同一请求，断言恰好一个 201、
+  其余 409，且库内 PENDING 行 = 1、审计 = 1）；同一条测试在 `origin/develop` 上必红（见上）。
+- spotless 已过（`spotless:apply` 后无残留 diff）。

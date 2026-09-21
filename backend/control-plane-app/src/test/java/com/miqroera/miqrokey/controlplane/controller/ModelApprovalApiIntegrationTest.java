@@ -27,9 +27,15 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -307,6 +313,52 @@ class ModelApprovalApiIntegrationTest {
                 .andExpect(jsonPath("$.detail", containsString("等待管理员处理")));
     }
 
+    /**
+     * The double-click / client-retry shape of the same case (#1305): the guard in
+     * {@code submit} is a SELECT that a concurrent writer cannot see, so before
+     * {@code uq_model_approval_pending} every overlapping request both passed it
+     * and inserted. The assertion that matters is the one on the database — one
+     * pending row, one audit record, one notification — not just the status codes.
+     */
+    @Test
+    @DisplayName("concurrent submits of one model collapse to a single pending request")
+    void concurrentDuplicateSubmitsCollapse() throws Exception {
+        fx.insertProviderCatalog();
+        fx.insertProjectWithGrant(TAG);
+        UUID keyId = createKey(MODEL_A);
+        String payload = objectMapper
+                .writeValueAsString(Map.of("virtualKeyId", keyId.toString(), "modelId", MODEL_NEW));
+
+        int attempts = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(attempts);
+        List<Integer> statuses = new ArrayList<>();
+        try {
+            CyclicBarrier barrier = new CyclicBarrier(attempts);
+            List<Future<Integer>> pending = new ArrayList<>();
+            for (int i = 0; i < attempts; i++) {
+                pending.add(pool.submit(() -> {
+                    barrier.await(30, TimeUnit.SECONDS);
+                    return mockMvc.perform(post("/api/v1/me/model-approvals").contentType(MediaType.APPLICATION_JSON)
+                            .cookie(adminSession, adminCsrf).header("X-CSRF-Token", adminCsrfToken).content(payload))
+                            .andReturn().getResponse().getStatus();
+                }));
+            }
+            for (Future<Integer> f : pending) {
+                statuses.add(f.get(60, TimeUnit.SECONDS));
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        assertThat(statuses).containsOnly(201, 409);
+        assertThat(statuses).containsOnlyOnce(201);
+        assertThat(countBy("SELECT count(*) FROM model_approval WHERE virtual_key_id = :key AND model_id = :model"
+                + " AND status = 'PENDING'", keyId, MODEL_NEW)).as("pending rows for one logical submit").isEqualTo(1);
+        assertThat(countBy("SELECT count(*) FROM admin_audit_events WHERE action = 'MODEL_APPROVAL_SUBMITTED'"
+                + " AND target_id IN (SELECT id FROM model_approval WHERE virtual_key_id = :key"
+                + " AND model_id = :model)", keyId, MODEL_NEW)).as("submit audits").isEqualTo(1);
+    }
+
     @Test
     @DisplayName("approve refuses when the key or the grant is no longer active")
     void approveRefusesInactiveTargets() throws Exception {
@@ -518,6 +570,13 @@ class ModelApprovalApiIntegrationTest {
 
     private Long approvalCount() {
         return jdbc.queryForObject("SELECT count(*) FROM model_approval", new MapSqlParameterSource(), Long.class);
+    }
+
+    /** Row count for a statement parameterised on the key/model pair under test. */
+    private int countBy(String sql, UUID keyId, String modelId) {
+        Integer n = jdbc.queryForObject(sql, new MapSqlParameterSource("key", keyId).addValue("model", modelId),
+                Integer.class);
+        return n == null ? 0 : n;
     }
 
     /**
